@@ -6,6 +6,7 @@ import {
   getCoreRowModel,
   useReactTable,
 } from '@tanstack/react-table'
+import { Link } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
@@ -59,6 +60,16 @@ export function ProductsPage() {
 
   const seasons = useMemo(() => seasonsQuery.data ?? [], [seasonsQuery.data])
   const allStyles = useMemo(() => stylesQuery.data ?? [], [stylesQuery.data])
+
+  // 가져오기에서 매핑되지 않은 컬럼: 브랜드 전체 상품에서 쓰인 원본 헤더 이름을 모은다.
+  const customFieldKeys = useMemo(() => {
+    const keys = new Set<string>()
+    for (const style of allStyles) {
+      if (!style.customFields) continue
+      for (const key of Object.keys(style.customFields)) keys.add(key)
+    }
+    return Array.from(keys)
+  }, [allStyles])
 
   const seasonMap = useMemo(
     () => new Map(seasons.map((s) => [s.id, s])),
@@ -118,8 +129,15 @@ export function ProductsPage() {
           </Badge>
         ),
       }),
+      // 가져오기에서 매핑되지 않은 컬럼: 업로드 파일의 원본 헤더 이름을 그대로 컬럼명으로 쓴다.
+      ...customFieldKeys.map((key) =>
+        columnHelper.accessor((row) => row.customFields?.[key] ?? '—', {
+          id: `custom:${key}`,
+          header: key,
+        }),
+      ),
     ],
-    [seasonMap],
+    [seasonMap, customFieldKeys],
   )
 
   const table = useReactTable({
@@ -134,9 +152,9 @@ export function ProductsPage() {
         title="전체 상품"
         description={`${brand.name} 브랜드의 상품 마스터입니다. 부서별 정보는 이 상품을 기준으로 연결됩니다.`}
         actions={
-          <Button type="button" disabled>
-            + 상품 등록
-          </Button>
+          <Link to={`/b/${brand.slug}/upload?mode=single`}>
+            <Button type="button">+ 상품 등록</Button>
+          </Link>
         }
       />
 
@@ -334,6 +352,20 @@ export function ProductsPage() {
                   <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">
                     {selected.description}
                   </p>
+                ) : null}
+
+                {selected.customFields &&
+                Object.keys(selected.customFields).length > 0 ? (
+                  <section className="space-y-2 text-sm">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                      업로드 원본 컬럼
+                    </h3>
+                    {Object.entries(selected.customFields).map(
+                      ([key, value]) => (
+                        <DetailRow key={key} label={key} value={value} />
+                      ),
+                    )}
+                  </section>
                 ) : null}
               </div>
             )}

@@ -1,35 +1,29 @@
 import { useRef, useState } from 'react'
 import { FileSpreadsheet, Upload } from 'lucide-react'
+import type { BrandField } from '@/lib/types'
+import { parseFile, parseText, type ParsedSheet } from '@/lib/import/parse'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Select, Textarea } from '@/components/ui/input'
-import { OWNER_LABEL, OWNER_ORDER, type FieldOwner } from '@/lib/import/fields'
-import { parseFile, parseText, type ParsedSheet } from '@/lib/import/parse'
+import { Textarea } from '@/components/ui/input'
 import { cn, formatNumber } from '@/lib/utils'
 
-type UploadStepProps = {
+type BulkUploadStepProps = {
+  fields: BrandField[]
   sheets: ParsedSheet[]
   activeSheetIndex: number
   onSheetsLoaded: (sheets: ParsedSheet[]) => void
   onSelectSheet: (index: number) => void
-  hasHeader: boolean
-  onHasHeaderChange: (value: boolean) => void
-  sourceOwner: FieldOwner
-  onSourceOwnerChange: (value: FieldOwner) => void
   onNext: () => void
 }
 
-export function UploadStep({
+export function BulkUploadStep({
+  fields,
   sheets,
   activeSheetIndex,
   onSheetsLoaded,
   onSelectSheet,
-  hasHeader,
-  onHasHeaderChange,
-  sourceOwner,
-  onSourceOwnerChange,
   onNext,
-}: UploadStepProps) {
+}: BulkUploadStepProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [pasted, setPasted] = useState('')
   const [dragging, setDragging] = useState(false)
@@ -64,9 +58,15 @@ export function UploadStep({
   }
 
   const activeSheet = sheets[activeSheetIndex]
+  const dataRowCount = Math.max((activeSheet?.rows.length ?? 0) - 1, 0)
 
   return (
     <div className="space-y-6">
+      <p className="text-sm text-muted-foreground">
+        사이트에서 내려받은 양식의 첫 줄 헤더를 그대로 사용하세요. 헤더 이름으로
+        자동 인식합니다. (현재 등록 항목 {fields.length}개)
+      </p>
+
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
@@ -120,7 +120,9 @@ export function UploadStep({
           <CardContent className="space-y-3">
             <Textarea
               rows={6}
-              placeholder={'시트에서 범위를 복사해 그대로 붙여넣으세요.\n첫 줄은 보통 헤더입니다.'}
+              placeholder={
+                '시트에서 범위를 복사해 그대로 붙여넣으세요.\n첫 줄은 헤더여야 합니다.'
+              }
               value={pasted}
               onChange={(e) => setPasted(e.target.value)}
             />
@@ -169,64 +171,24 @@ export function UploadStep({
               </div>
             ) : null}
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-              <label className="flex flex-col gap-1.5 text-sm">
-                <span className="text-muted-foreground">이 시트의 담당 부서</span>
-                <Select
-                  value={sourceOwner}
-                  onChange={(e) =>
-                    onSourceOwnerChange(e.target.value as FieldOwner)
-                  }
-                >
-                  {OWNER_ORDER.filter((owner) => owner !== 'common').map(
-                    (owner) => (
-                      <option key={owner} value={owner}>
-                        {OWNER_LABEL[owner]}
-                      </option>
-                    ),
-                  )}
-                </Select>
-              </label>
-
-              <label className="flex items-center gap-2 pb-2 text-sm">
-                <input
-                  type="checkbox"
-                  className="size-4"
-                  checked={hasHeader}
-                  onChange={(e) => onHasHeaderChange(e.target.checked)}
-                />
-                첫 줄은 헤더입니다
-              </label>
-
-              <div className="pb-2 text-sm text-muted-foreground sm:ml-auto">
-                {formatNumber(
-                  Math.max((activeSheet?.rows.length ?? 0) - (hasHeader ? 1 : 0), 0),
-                )}
-                행 · {activeSheet?.rows[0]?.length ?? 0}열
-              </div>
+            <div className="text-sm text-muted-foreground">
+              {formatNumber(dataRowCount)}행 ·{' '}
+              {activeSheet?.rows[0]?.length ?? 0}열 (첫 줄 = 헤더)
             </div>
-
-            <p className="rounded-md bg-muted p-3 text-xs text-muted-foreground">
-              담당 부서는 값이 충돌할 때 누구를 믿을지 정하는 기준입니다. 예를
-              들어 MD 시트에서는 판매가와 발주수량이 반영되고, 원단이나 컬러는
-              디자인 소유라 참고만 하고 덮어쓰지 않습니다.
-            </p>
 
             {activeSheet ? (
               <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full text-left text-xs">
                   <tbody>
-                    {activeSheet.rows.slice(0, 4).map((row, rowIndex) => (
+                    {activeSheet.rows.slice(0, 5).map((row, rowIndex) => (
                       <tr
                         key={rowIndex}
                         className={cn(
                           'border-b border-border last:border-0',
-                          hasHeader && rowIndex === 0
-                            ? 'bg-muted/60 font-medium'
-                            : '',
+                          rowIndex === 0 ? 'bg-muted/60 font-medium' : '',
                         )}
                       >
-                        {row.slice(0, 8).map((cell, cellIndex) => (
+                        {row.slice(0, 10).map((cell, cellIndex) => (
                           <td
                             key={cellIndex}
                             className="max-w-40 truncate px-3 py-2"
@@ -242,8 +204,12 @@ export function UploadStep({
             ) : null}
 
             <div className="flex justify-end">
-              <Button type="button" onClick={onNext}>
-                컬럼 매핑으로
+              <Button
+                type="button"
+                onClick={onNext}
+                disabled={!activeSheet || dataRowCount === 0}
+              >
+                검증 결과 보기
               </Button>
             </div>
           </CardContent>

@@ -145,6 +145,13 @@ export const IMPORT_FIELDS: ImportField[] = [
     aliases: ['재고', '재고수량', '보유재고', 'onhand', 'stock', 'inventory'],
   },
   {
+    key: 'weightG',
+    label: '단품무게(g)',
+    owner: 'logistics',
+    type: 'number',
+    aliases: ['무게', '중량', '실중량', '단품무게', 'weight', 'weightg', 'netweight'],
+  },
+  {
     key: 'description',
     label: '비고',
     owner: 'common',
@@ -155,7 +162,7 @@ export const IMPORT_FIELDS: ImportField[] = [
 
 export const FIELD_MAP = new Map(IMPORT_FIELDS.map((f) => [f.key, f]))
 
-function normalizeHeader(value: string) {
+export function normalizeHeader(value: string) {
   return value
     .toLowerCase()
     .replace(/[\s_\-/().]/g, '')

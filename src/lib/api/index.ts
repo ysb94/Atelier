@@ -1,57 +1,36 @@
 import type {
   Brand,
+  BrandInput,
+  BrandField,
+  BrandFieldInput,
+  CodeUsageAssignment,
+  CodeUsageAssignmentInput,
+  CodeUsageStatus,
+  CodeUsageTarget,
+  CodeUsageTargetInput,
   DesignSpec,
   InventoryItem,
   MdSummary,
+  ProductCode,
+  ProductCodeInput,
+  ProductCodeKind,
   Season,
   StockMovement,
   Style,
 } from '@/lib/types'
+import * as brandStore from '@/lib/db/brands'
+import * as brandFieldStore from '@/lib/db/brand-fields'
+import * as codeUsageTargetStore from '@/lib/db/code-usage-targets'
+import * as codeUsageAssignmentStore from '@/lib/db/code-usage-assignments'
+import * as productCodeStore from '@/lib/db/product-codes'
 
 const delay = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms))
 
-export const brands: Brand[] = [
-  {
-    id: 'brand-atelier',
-    slug: 'atelier',
-    name: 'ATELIER',
-    nameKo: '아틀리에',
-    description: '시티 모던 여성복',
-    color: '#2C3E50',
-    styleCount: 24,
-    seasonLabel: '26SS',
-  },
-  {
-    id: 'brand-noir',
-    slug: 'noir',
-    name: 'NOIR',
-    nameKo: '느와르',
-    description: '미니멀 블랙 라인',
-    color: '#1A1A1A',
-    styleCount: 18,
-    seasonLabel: '26SS',
-  },
-  {
-    id: 'brand-lumen',
-    slug: 'lumen',
-    name: 'LUMEN',
-    nameKo: '루멘',
-    description: '라이트 캐주얼',
-    color: '#6B7C6E',
-    styleCount: 31,
-    seasonLabel: '25FW',
-  },
-  {
-    id: 'brand-form',
-    slug: 'form',
-    name: 'FORM',
-    nameKo: '폼',
-    description: '유틸리티 워크웨어',
-    color: '#4A5568',
-    styleCount: 15,
-    seasonLabel: '26SS',
-  },
-]
+export { BrandStoreError } from '@/lib/db/brands'
+export { BrandFieldStoreError } from '@/lib/db/brand-fields'
+export { CodeUsageTargetStoreError } from '@/lib/db/code-usage-targets'
+export { CodeUsageAssignmentStoreError } from '@/lib/db/code-usage-assignments'
+export { ProductCodeStoreError } from '@/lib/db/product-codes'
 
 export const seasons: Season[] = [
   {
@@ -536,14 +515,193 @@ const movements: StockMovement[] = [
   },
 ]
 
+/**
+ * 브랜드 API.
+ * 현재는 IndexedDB 구현체를 호출한다. Supabase 합류 시 brandStore 교체만 하면 된다.
+ */
 export async function getBrands(): Promise<Brand[]> {
   await delay()
-  return brands
+  const brands = await brandStore.listBrands()
+  return brands.map((brand) => ({
+    ...brand,
+    styleCount: styles.filter((s) => s.brandId === brand.id).length,
+  }))
 }
 
 export async function getBrandBySlug(slug: string): Promise<Brand | undefined> {
   await delay()
-  return brands.find((b) => b.slug === slug)
+  const brand = await brandStore.getBrandBySlug(slug)
+  if (!brand) return undefined
+  return {
+    ...brand,
+    styleCount: styles.filter((s) => s.brandId === brand.id).length,
+  }
+}
+
+export async function createBrand(input: BrandInput): Promise<Brand> {
+  await delay()
+  return brandStore.createBrand(input)
+}
+
+export async function updateBrand(
+  id: string,
+  input: BrandInput,
+): Promise<Brand> {
+  await delay()
+  return brandStore.updateBrand(id, input)
+}
+
+export async function deleteBrand(id: string): Promise<void> {
+  await delay()
+  return brandStore.deleteBrand(id)
+}
+
+export async function getBrandFields(brandId: string): Promise<BrandField[]> {
+  await delay()
+  return brandFieldStore.listBrandFields(brandId)
+}
+
+export async function createBrandField(
+  brandId: string,
+  input: BrandFieldInput,
+): Promise<BrandField> {
+  await delay()
+  return brandFieldStore.createBrandField(brandId, input)
+}
+
+export async function updateBrandField(
+  id: string,
+  patch: Partial<Pick<BrandField, 'label' | 'required' | 'type' | 'owner'>>,
+): Promise<BrandField> {
+  await delay()
+  return brandFieldStore.updateBrandField(id, patch)
+}
+
+export async function deleteBrandField(id: string): Promise<void> {
+  await delay()
+  return brandFieldStore.deleteBrandField(id)
+}
+
+/**
+ * 출고 거래 단위 코드 API.
+ * 자사 바코드(88코드)와 거래처 코드가 같은 스토어를 kind로 구분해 쓴다.
+ */
+export async function getProductCodes(
+  brandId: string,
+  kind?: ProductCodeKind,
+): Promise<ProductCode[]> {
+  await delay()
+  return productCodeStore.listProductCodes(brandId, kind)
+}
+
+export async function createProductCode(
+  brandId: string,
+  input: ProductCodeInput,
+): Promise<ProductCode> {
+  await delay()
+  return productCodeStore.createProductCode(brandId, input)
+}
+
+export async function updateProductCode(
+  id: string,
+  input: ProductCodeInput,
+): Promise<ProductCode> {
+  await delay()
+  return productCodeStore.updateProductCode(id, input)
+}
+
+export async function deleteProductCode(id: string): Promise<void> {
+  await delay()
+  return productCodeStore.deleteProductCode(id)
+}
+
+export async function getCodeUsageTargets(
+  brandId: string,
+): Promise<CodeUsageTarget[]> {
+  await delay()
+  return codeUsageTargetStore.listCodeUsageTargets(brandId)
+}
+
+export async function createCodeUsageTarget(
+  brandId: string,
+  input: CodeUsageTargetInput,
+): Promise<CodeUsageTarget> {
+  await delay()
+  return codeUsageTargetStore.createCodeUsageTarget(brandId, input)
+}
+
+export async function updateCodeUsageTarget(
+  id: string,
+  patch: Partial<Pick<CodeUsageTarget, 'name' | 'active'>>,
+): Promise<CodeUsageTarget> {
+  await delay()
+  return codeUsageTargetStore.updateCodeUsageTarget(id, patch)
+}
+
+export async function getCodeUsageAssignments(
+  brandId: string,
+  options?: {
+    usageTargetId?: string
+    productCodeId?: string
+    status?: CodeUsageStatus
+  },
+): Promise<CodeUsageAssignment[]> {
+  await delay()
+  return codeUsageAssignmentStore.listCodeUsageAssignments(brandId, options)
+}
+
+export async function createCodeUsageAssignment(
+  brandId: string,
+  input: CodeUsageAssignmentInput,
+): Promise<CodeUsageAssignment> {
+  await delay()
+  return codeUsageAssignmentStore.createCodeUsageAssignment(brandId, input)
+}
+
+export async function createCodeUsageAssignments(
+  brandId: string,
+  productCodeIds: string[],
+  usageTargetId: string,
+  status: CodeUsageStatus = 'active',
+): Promise<CodeUsageAssignment[]> {
+  await delay()
+  const results: CodeUsageAssignment[] = []
+  for (const productCodeId of productCodeIds) {
+    results.push(
+      await codeUsageAssignmentStore.createCodeUsageAssignment(brandId, {
+        productCodeId,
+        usageTargetId,
+        status,
+      }),
+    )
+  }
+  return results
+}
+
+export async function updateCodeUsageAssignmentStatus(
+  id: string,
+  status: CodeUsageStatus,
+): Promise<CodeUsageAssignment> {
+  await delay()
+  return codeUsageAssignmentStore.updateCodeUsageAssignmentStatus(id, status)
+}
+
+export type BulkUsageApplyRow = {
+  productCodeId: string
+  status: CodeUsageStatus
+}
+
+export async function applyBulkUsageAssignments(
+  brandId: string,
+  usageTargetId: string,
+  rows: BulkUsageApplyRow[],
+): Promise<{ created: number; updated: number; skipped: number }> {
+  await delay(200)
+  return codeUsageAssignmentStore.applyBulkUsageAssignments(
+    brandId,
+    usageTargetId,
+    rows,
+  )
 }
 
 export async function getSeasonsByBrand(brandId: string): Promise<Season[]> {
@@ -634,6 +792,7 @@ export type ImportApplyRow = {
   matchKey: string
   targetStyleId?: string
   applied: Record<string, unknown>
+  customFields: Record<string, string>
 }
 
 function asString(value: unknown) {
@@ -678,6 +837,9 @@ function applyStyleFields(style: Style, applied: Record<string, unknown>) {
 
   const description = asString(applied.description)
   if (description) style.description = description
+
+  const weightG = asNumber(applied.weightG)
+  if (weightG !== undefined) style.weightG = weightG > 0 ? weightG : null
 }
 
 function applyDesignFields(styleId: string, applied: Record<string, unknown>) {
@@ -721,6 +883,12 @@ function applyMdFields(styleId: string, applied: Record<string, unknown>) {
     reorderFlag: false,
     channel: channel ?? '미정',
   })
+}
+
+/** 시스템 필드로 매핑되지 않은 업로드 컬럼을 원본 헤더 이름으로 상품에 붙인다. */
+function applyCustomFields(style: Style, customFields: Record<string, string>) {
+  if (Object.keys(customFields).length === 0) return
+  style.customFields = { ...(style.customFields ?? {}), ...customFields }
 }
 
 function applyLogisticsFields(
@@ -801,12 +969,11 @@ export async function applyProductImport(
     applyDesignFields(target.id, row.applied)
     applyMdFields(target.id, row.applied)
     applyLogisticsFields(target.id, row.applied)
+    applyCustomFields(target, row.customFields)
   }
 
-  for (const brand of brands) {
-    if (brand.id !== brandId) continue
-    brand.styleCount = styles.filter((s) => s.brandId === brandId).length
-  }
+  const styleCount = styles.filter((s) => s.brandId === brandId).length
+  await brandStore.setBrandStyleCount(brandId, styleCount)
 
   return { created, updated }
 }

@@ -138,11 +138,6 @@ export function PreviewStep({
                               {warning}
                             </div>
                           ))}
-                          {row.ignoredFields.length > 0 ? (
-                            <div className="text-xs text-muted-foreground">
-                              참고만 함: {row.ignoredFields.join(', ')}
-                            </div>
-                          ) : null}
                         </div>
                       )}
                     </td>
@@ -170,8 +165,8 @@ export function PreviewStep({
             disabled={applicable === 0 || isApplying}
           >
             {isApplying
-              ? '가져오는 중...'
-              : `${formatNumber(applicable)}건 가져오기`}
+              ? '등록 중...'
+              : `${formatNumber(applicable)}건 등록`}
           </Button>
         </div>
       </div>
@@ -183,8 +178,13 @@ function describeApplied(row: PreparedRow) {
   const labels = Object.keys(row.applied)
     .map((key) => (key === 'seasonId' ? '시즌' : FIELD_MAP.get(key)?.label))
     .filter(Boolean)
-  if (labels.length === 0) return '변경할 값이 없습니다'
-  return labels.join(', ')
+  const customCount = Object.keys(row.customFields).length
+
+  if (labels.length === 0 && customCount === 0) return '변경할 값이 없습니다'
+
+  const parts = [...labels]
+  if (customCount > 0) parts.push(`추가 컬럼 ${customCount}개`)
+  return parts.join(', ')
 }
 
 function SummaryCard({
