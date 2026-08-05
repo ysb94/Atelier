@@ -24,7 +24,15 @@ function seedFieldsForBrand(brandId: string): BrandField[] {
     owner: field.owner,
     required: Boolean(field.requiredForNew),
     order: index,
+    level: 'style' as const,
   }))
+}
+
+function normalizeField(field: BrandField): BrandField {
+  return {
+    ...field,
+    level: field.level ?? 'style',
+  }
 }
 
 async function putFields(fields: BrandField[]) {
@@ -86,7 +94,7 @@ export class BrandFieldStoreError extends Error {
 
 export async function listBrandFields(brandId: string): Promise<BrandField[]> {
   const rows = await ensureSeeded(brandId)
-  return [...rows].sort((a, b) => a.order - b.order)
+  return [...rows].map(normalizeField).sort((a, b) => a.order - b.order)
 }
 
 export async function createBrandField(
@@ -112,6 +120,7 @@ export async function createBrandField(
     owner: input.owner,
     required: Boolean(input.required),
     order: maxOrder + 1,
+    level: input.level ?? 'style',
   }
 
   await withStore(BRAND_FIELDS_STORE, 'readwrite', (store) => {

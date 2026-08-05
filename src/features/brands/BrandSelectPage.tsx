@@ -182,7 +182,7 @@ export function BrandSelectPage() {
                   </Button>
                 </div>
 
-                <Link to={`/b/${brand.slug}/products`} className="block">
+                <Link to={`/b/${brand.slug}`} className="block">
                   <CardHeader className="flex flex-row items-start gap-4 pr-20">
                     <BrandAvatar brand={brand} className="size-12" />
                     <div className="min-w-0 flex-1">

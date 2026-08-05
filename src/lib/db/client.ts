@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'atelier'
-const DB_VERSION = 5
+const DB_VERSION = 7
 
 export const BRANDS_STORE = 'brands'
 export const META_STORE = 'meta'
@@ -12,6 +12,9 @@ export const BRAND_FIELDS_STORE = 'brandFields'
 export const PRODUCT_CODES_STORE = 'productCodes'
 export const CODE_USAGE_TARGETS_STORE = 'codeUsageTargets'
 export const CODE_USAGE_ASSIGNMENTS_STORE = 'codeUsageAssignments'
+export const STYLES_STORE = 'styles'
+export const SEASONS_STORE = 'seasons'
+export const PRODUCT_DRAFTS_STORE = 'productDrafts'
 
 let dbPromise: Promise<IDBDatabase> | null = null
 
@@ -47,6 +50,21 @@ function upgrade(db: IDBDatabase) {
     assignments.createIndex('productCodeId', 'productCodeId', { unique: false })
     assignments.createIndex('usageTargetId', 'usageTargetId', { unique: false })
     // brandId + productCodeId + usageTargetId 유일성은 저장 로직에서 검사한다.
+  }
+  if (!db.objectStoreNames.contains(SEASONS_STORE)) {
+    const seasons = db.createObjectStore(SEASONS_STORE, { keyPath: 'id' })
+    seasons.createIndex('brandId', 'brandId', { unique: false })
+  }
+  if (!db.objectStoreNames.contains(STYLES_STORE)) {
+    const styles = db.createObjectStore(STYLES_STORE, { keyPath: 'id' })
+    styles.createIndex('brandId', 'brandId', { unique: false })
+    styles.createIndex('styleNo', 'styleNo', { unique: false })
+    styles.createIndex('seasonId', 'seasonId', { unique: false })
+  }
+  if (!db.objectStoreNames.contains(PRODUCT_DRAFTS_STORE)) {
+    const drafts = db.createObjectStore(PRODUCT_DRAFTS_STORE, { keyPath: 'id' })
+    drafts.createIndex('brandId', 'brandId', { unique: false })
+    drafts.createIndex('draftNo', 'draftNo', { unique: false })
   }
 }
 

@@ -1,13 +1,15 @@
 import { useRef, useState } from 'react'
-import { FileSpreadsheet, Upload } from 'lucide-react'
+import { Download, FileSpreadsheet, Upload } from 'lucide-react'
 import type { BrandField } from '@/lib/types'
 import { parseFile, parseText, type ParsedSheet } from '@/lib/import/parse'
+import { downloadUploadTemplate } from '@/lib/import/template'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/input'
 import { cn, formatNumber } from '@/lib/utils'
 
 type BulkUploadStepProps = {
+  brandName: string
   fields: BrandField[]
   sheets: ParsedSheet[]
   activeSheetIndex: number
@@ -17,6 +19,7 @@ type BulkUploadStepProps = {
 }
 
 export function BulkUploadStep({
+  brandName,
   fields,
   sheets,
   activeSheetIndex,
@@ -28,6 +31,25 @@ export function BulkUploadStep({
   const [pasted, setPasted] = useState('')
   const [dragging, setDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [downloading, setDownloading] = useState(false)
+
+  async function handleDownloadTemplate() {
+    setDownloading(true)
+    setError(null)
+    try {
+      await downloadUploadTemplate({
+        brandName,
+        fields,
+        ownerFilter: 'all',
+      })
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : '양식을 다운로드하지 못했습니다.',
+      )
+    } finally {
+      setDownloading(false)
+    }
+  }
 
   async function handleFiles(files: FileList | null) {
     const file = files?.[0]
@@ -62,10 +84,22 @@ export function BulkUploadStep({
 
   return (
     <div className="space-y-6">
-      <p className="text-sm text-muted-foreground">
-        사이트에서 내려받은 양식의 첫 줄 헤더를 그대로 사용하세요. 헤더 이름으로
-        자동 인식합니다. (현재 등록 항목 {fields.length}개)
-      </p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-muted-foreground">
+          사이트에서 내려받은 양식의 첫 줄 헤더를 그대로 사용하세요. 헤더 이름으로
+          자동 인식합니다. (현재 등록 항목 {fields.length}개)
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={() => void handleDownloadTemplate()}
+          disabled={downloading || fields.length === 0}
+          className="shrink-0"
+        >
+          <Download className="size-4" />
+          {downloading ? '준비 중...' : '양식 다운로드'}
+        </Button>
+      </div>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

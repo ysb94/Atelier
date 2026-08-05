@@ -47,6 +47,7 @@ export function SingleEntryForm({
         throw new Error(prepared.errors.join(' / ') || '입력값을 확인하세요.')
       }
       const row: ImportApplyRow = {
+        lineNo: prepared.lineNo,
         styleNo: prepared.styleNo,
         matchKey: prepared.matchKey,
         targetStyleId: prepared.targetStyleId,
@@ -54,6 +55,8 @@ export function SingleEntryForm({
         customFields: prepared.customFields,
       }
       const applied = await applyProductImport(brandId, [row])
+      const failure = applied.failures[0]
+      if (failure) throw new Error(failure.message)
       return { applied, prepared }
     },
     onSuccess: async ({ applied }) => {

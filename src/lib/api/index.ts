@@ -8,21 +8,24 @@ import type {
   CodeUsageStatus,
   CodeUsageTarget,
   CodeUsageTargetInput,
-  DesignSpec,
-  InventoryItem,
-  MdSummary,
   ProductCode,
   ProductCodeInput,
   ProductCodeKind,
+  ProductDraft,
+  ProductDraftInput,
   Season,
-  StockMovement,
+  SeasonInput,
   Style,
+  StyleInput,
 } from '@/lib/types'
 import * as brandStore from '@/lib/db/brands'
 import * as brandFieldStore from '@/lib/db/brand-fields'
 import * as codeUsageTargetStore from '@/lib/db/code-usage-targets'
 import * as codeUsageAssignmentStore from '@/lib/db/code-usage-assignments'
 import * as productCodeStore from '@/lib/db/product-codes'
+import * as productDraftStore from '@/lib/db/product-drafts'
+import * as seasonStore from '@/lib/db/seasons'
+import * as styleStore from '@/lib/db/styles'
 
 const delay = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -31,489 +34,15 @@ export { BrandFieldStoreError } from '@/lib/db/brand-fields'
 export { CodeUsageTargetStoreError } from '@/lib/db/code-usage-targets'
 export { CodeUsageAssignmentStoreError } from '@/lib/db/code-usage-assignments'
 export { ProductCodeStoreError } from '@/lib/db/product-codes'
-
-export const seasons: Season[] = [
-  {
-    id: 'season-atelier-26ss',
-    brandId: 'brand-atelier',
-    code: '26SS',
-    name: '2026 Spring/Summer',
-    year: 2026,
-    status: 'planning',
-  },
-  {
-    id: 'season-atelier-25fw',
-    brandId: 'brand-atelier',
-    code: '25FW',
-    name: '2025 Fall/Winter',
-    year: 2025,
-    status: 'selling',
-  },
-  {
-    id: 'season-noir-26ss',
-    brandId: 'brand-noir',
-    code: '26SS',
-    name: '2026 Spring/Summer',
-    year: 2026,
-    status: 'planning',
-  },
-  {
-    id: 'season-noir-25fw',
-    brandId: 'brand-noir',
-    code: '25FW',
-    name: '2025 Fall/Winter',
-    year: 2025,
-    status: 'in_production',
-  },
-  {
-    id: 'season-lumen-25fw',
-    brandId: 'brand-lumen',
-    code: '25FW',
-    name: '2025 Fall/Winter',
-    year: 2025,
-    status: 'selling',
-  },
-  {
-    id: 'season-lumen-26ss',
-    brandId: 'brand-lumen',
-    code: '26SS',
-    name: '2026 Spring/Summer',
-    year: 2026,
-    status: 'planning',
-  },
-  {
-    id: 'season-form-26ss',
-    brandId: 'brand-form',
-    code: '26SS',
-    name: '2026 Spring/Summer',
-    year: 2026,
-    status: 'planning',
-  },
-]
-
-export const styles: Style[] = [
-  {
-    id: 'style-a1',
-    brandId: 'brand-atelier',
-    seasonId: 'season-atelier-26ss',
-    styleNo: 'AT-26SS-001',
-    name: '오버사이즈 트렌치',
-    category: '아우터',
-    gender: 'W',
-    colors: ['Ivory', 'Black'],
-    targetCost: 89000,
-    plannedQty: 400,
-    retailPrice: 289000,
-    status: 'design',
-    designer: '김서연',
-    planner: '박민지',
-    thumbnailColor: '#E8E0D5',
-    description: '코튼 혼방 오버사이즈 트렌치. 벨트 디테일.',
-  },
-  {
-    id: 'style-a2',
-    brandId: 'brand-atelier',
-    seasonId: 'season-atelier-26ss',
-    styleNo: 'AT-26SS-002',
-    name: '실크 블라우스',
-    category: '상의',
-    gender: 'W',
-    colors: ['Cream', 'Sage'],
-    targetCost: 42000,
-    plannedQty: 600,
-    retailPrice: 149000,
-    status: 'sampling',
-    designer: '김서연',
-    planner: '박민지',
-    thumbnailColor: '#D4C5B0',
-    description: '실크 블렌드 블라우스. 히든 플acket.',
-  },
-  {
-    id: 'style-a3',
-    brandId: 'brand-atelier',
-    seasonId: 'season-atelier-26ss',
-    styleNo: 'AT-26SS-003',
-    name: '와이드 슬랙스',
-    category: '하의',
-    gender: 'W',
-    colors: ['Charcoal', 'Stone'],
-    targetCost: 38000,
-    plannedQty: 800,
-    retailPrice: 129000,
-    status: 'confirmed',
-    designer: '이하늘',
-    planner: '박민지',
-    thumbnailColor: '#6B6B6B',
-  },
-  {
-    id: 'style-a4',
-    brandId: 'brand-atelier',
-    seasonId: 'season-atelier-25fw',
-    styleNo: 'AT-25FW-014',
-    name: '울 블렌드 코트',
-    category: '아우터',
-    gender: 'W',
-    colors: ['Camel', 'Navy'],
-    targetCost: 120000,
-    plannedQty: 280,
-    retailPrice: 420000,
-    status: 'received',
-    designer: '김서연',
-    planner: '박민지',
-    thumbnailColor: '#C4A484',
-  },
-  {
-    id: 'style-a5',
-    brandId: 'brand-atelier',
-    seasonId: 'season-atelier-26ss',
-    styleNo: 'AT-26SS-004',
-    name: '니트 카디건',
-    category: '니트',
-    gender: 'W',
-    colors: ['Oatmeal', 'Navy'],
-    targetCost: 35000,
-    plannedQty: 500,
-    retailPrice: 119000,
-    status: 'draft',
-    designer: '이하늘',
-    planner: '박민지',
-    thumbnailColor: '#E5D5C0',
-  },
-  {
-    id: 'style-n1',
-    brandId: 'brand-noir',
-    seasonId: 'season-noir-26ss',
-    styleNo: 'NR-26SS-001',
-    name: '블랙 테일러드 자켓',
-    category: '아우터',
-    gender: 'U',
-    colors: ['Black'],
-    targetCost: 95000,
-    plannedQty: 320,
-    retailPrice: 320000,
-    status: 'design',
-    designer: '최유진',
-    planner: '정호준',
-    thumbnailColor: '#222222',
-  },
-  {
-    id: 'style-n2',
-    brandId: 'brand-noir',
-    seasonId: 'season-noir-26ss',
-    styleNo: 'NR-26SS-002',
-    name: '스트레이트 팬츠',
-    category: '하의',
-    gender: 'U',
-    colors: ['Black', 'Ink'],
-    targetCost: 40000,
-    plannedQty: 500,
-    retailPrice: 145000,
-    status: 'confirmed',
-    designer: '최유진',
-    planner: '정호준',
-    thumbnailColor: '#111111',
-  },
-  {
-    id: 'style-n3',
-    brandId: 'brand-noir',
-    seasonId: 'season-noir-25fw',
-    styleNo: 'NR-25FW-008',
-    name: '롱 울 코트',
-    category: '아우터',
-    gender: 'U',
-    colors: ['Black', 'Graphite'],
-    targetCost: 140000,
-    plannedQty: 200,
-    retailPrice: 480000,
-    status: 'ordered',
-    designer: '최유진',
-    planner: '정호준',
-    thumbnailColor: '#2B2B2B',
-  },
-  {
-    id: 'style-l1',
-    brandId: 'brand-lumen',
-    seasonId: 'season-lumen-26ss',
-    styleNo: 'LM-26SS-001',
-    name: '라이트 코튼 셔츠',
-    category: '상의',
-    gender: 'U',
-    colors: ['White', 'Sky'],
-    targetCost: 22000,
-    plannedQty: 1200,
-    retailPrice: 79000,
-    status: 'design',
-    designer: '한소희',
-    planner: '오세훈',
-    thumbnailColor: '#E8F0F5',
-  },
-  {
-    id: 'style-l2',
-    brandId: 'brand-lumen',
-    seasonId: 'season-lumen-25fw',
-    styleNo: 'LM-25FW-012',
-    name: '플리스 후디',
-    category: '상의',
-    gender: 'U',
-    colors: ['Grey', 'Olive'],
-    targetCost: 28000,
-    plannedQty: 900,
-    retailPrice: 99000,
-    status: 'received',
-    designer: '한소희',
-    planner: '오세훈',
-    thumbnailColor: '#A8B0A0',
-  },
-  {
-    id: 'style-f1',
-    brandId: 'brand-form',
-    seasonId: 'season-form-26ss',
-    styleNo: 'FM-26SS-001',
-    name: '카고 팬츠',
-    category: '하의',
-    gender: 'U',
-    colors: ['Olive', 'Sand'],
-    targetCost: 36000,
-    plannedQty: 700,
-    retailPrice: 135000,
-    status: 'sampling',
-    designer: '배수진',
-    planner: '윤재민',
-    thumbnailColor: '#6B705C',
-  },
-  {
-    id: 'style-f2',
-    brandId: 'brand-form',
-    seasonId: 'season-form-26ss',
-    styleNo: 'FM-26SS-002',
-    name: '유틸 필드 자켓',
-    category: '아우터',
-    gender: 'U',
-    colors: ['Khaki', 'Black'],
-    targetCost: 72000,
-    plannedQty: 350,
-    retailPrice: 248000,
-    status: 'design',
-    designer: '배수진',
-    planner: '윤재민',
-    thumbnailColor: '#8B7E66',
-  },
-]
-
-const designSpecs: DesignSpec[] = [
-  {
-    styleId: 'style-a1',
-    fabric: 'Cotton-nylon blend 180g',
-    lining: 'Cupro',
-    trimNotes: '메탈 버튼 / 코튼 벨트',
-    sizeRange: 'XS–L',
-    sampleRound: 1,
-    sampleStatus: 'in_review',
-    workOrderNotes: '카라 각 라인 보정 필요. 소매 기장 +1cm 검토.',
-    measurements: [
-      { part: '가슴둘레', size: 'M', value: '108' },
-      { part: '총기장', size: 'M', value: '112' },
-      { part: '소매기장', size: 'M', value: '58' },
-    ],
-  },
-  {
-    styleId: 'style-a2',
-    fabric: 'Silk blend georgette',
-    trimNotes: '히든 플acket / 진주 버튼',
-    sizeRange: 'XS–L',
-    sampleRound: 2,
-    sampleStatus: 'approved',
-    workOrderNotes: '2차 샘플 승인. 본생산 패턴 반영 완료.',
-    measurements: [
-      { part: '가슴둘레', size: 'M', value: '96' },
-      { part: '총기장', size: 'M', value: '64' },
-    ],
-  },
-  {
-    styleId: 'style-n1',
-    fabric: 'Wool blend 240g',
-    lining: 'Cupro',
-    trimNotes: '블랙 호른 버튼',
-    sizeRange: 'S–XL',
-    sampleRound: 1,
-    sampleStatus: 'pending',
-    workOrderNotes: '1차 샘플 진행 중.',
-    measurements: [
-      { part: '가슴둘레', size: 'M', value: '104' },
-      { part: '총기장', size: 'M', value: '72' },
-    ],
-  },
-  {
-    styleId: 'style-f1',
-    fabric: 'Ripstop cotton',
-    trimNotes: '벨크로 포켓 / YKK 지퍼',
-    sizeRange: 'S–XXL',
-    sampleRound: 1,
-    sampleStatus: 'in_review',
-    workOrderNotes: '포켓 위치 조정 요청.',
-    measurements: [
-      { part: '허리', size: 'M', value: '80' },
-      { part: '총기장', size: 'M', value: '102' },
-    ],
-  },
-]
-
-const mdSummaries: MdSummary[] = [
-  {
-    styleId: 'style-a3',
-    orderQty: 800,
-    soldQty: 0,
-    sellThrough: 0,
-    marginRate: 0.58,
-    reorderFlag: false,
-    channel: '온라인',
-  },
-  {
-    styleId: 'style-a4',
-    orderQty: 280,
-    soldQty: 196,
-    sellThrough: 0.7,
-    marginRate: 0.52,
-    reorderFlag: true,
-    channel: '자사몰/편집샵',
-  },
-  {
-    styleId: 'style-n2',
-    orderQty: 500,
-    soldQty: 0,
-    sellThrough: 0,
-    marginRate: 0.55,
-    reorderFlag: false,
-    channel: '온라인',
-  },
-  {
-    styleId: 'style-n3',
-    orderQty: 200,
-    soldQty: 0,
-    sellThrough: 0,
-    marginRate: 0.48,
-    reorderFlag: false,
-    channel: '편집샵',
-  },
-  {
-    styleId: 'style-l2',
-    orderQty: 900,
-    soldQty: 720,
-    sellThrough: 0.8,
-    marginRate: 0.6,
-    reorderFlag: true,
-    channel: '전 채널',
-  },
-  {
-    styleId: 'style-f1',
-    orderQty: 0,
-    soldQty: 0,
-    sellThrough: 0,
-    marginRate: 0.54,
-    reorderFlag: false,
-    channel: '미정',
-  },
-]
-
-const inventory: InventoryItem[] = [
-  {
-    id: 'inv-1',
-    styleId: 'style-a4',
-    warehouse: '김포 물류센터',
-    onHand: 84,
-    reserved: 12,
-    available: 72,
-  },
-  {
-    id: 'inv-2',
-    styleId: 'style-a4',
-    warehouse: '강남 플래그십',
-    onHand: 18,
-    reserved: 3,
-    available: 15,
-  },
-  {
-    id: 'inv-3',
-    styleId: 'style-l2',
-    warehouse: '김포 물류센터',
-    onHand: 180,
-    reserved: 40,
-    available: 140,
-  },
-  {
-    id: 'inv-4',
-    styleId: 'style-n3',
-    warehouse: '김포 물류센터',
-    onHand: 0,
-    reserved: 0,
-    available: 0,
-  },
-  {
-    id: 'inv-5',
-    styleId: 'style-a3',
-    warehouse: '김포 물류센터',
-    onHand: 0,
-    reserved: 0,
-    available: 0,
-  },
-]
-
-const movements: StockMovement[] = [
-  {
-    id: 'mv-1',
-    styleId: 'style-a4',
-    date: '2026-03-12',
-    type: 'in',
-    qty: 280,
-    warehouse: '김포 물류센터',
-    note: '본생산 1차 입고',
-  },
-  {
-    id: 'mv-2',
-    styleId: 'style-a4',
-    date: '2026-03-15',
-    type: 'transfer',
-    qty: 30,
-    warehouse: '강남 플래그십',
-    note: '매장 이동',
-  },
-  {
-    id: 'mv-3',
-    styleId: 'style-a4',
-    date: '2026-03-20',
-    type: 'out',
-    qty: 12,
-    warehouse: '강남 플래그십',
-    note: '판매 출고',
-  },
-  {
-    id: 'mv-4',
-    styleId: 'style-l2',
-    date: '2025-11-02',
-    type: 'in',
-    qty: 900,
-    warehouse: '김포 물류센터',
-    note: '본생산 입고',
-  },
-  {
-    id: 'mv-5',
-    styleId: 'style-l2',
-    date: '2026-01-18',
-    type: 'out',
-    qty: 720,
-    warehouse: '김포 물류센터',
-    note: '채널 출고 합산',
-  },
-  {
-    id: 'mv-6',
-    styleId: 'style-l2',
-    date: '2026-02-01',
-    type: 'return',
-    qty: 18,
-    warehouse: '김포 물류센터',
-    note: '고객 반품',
-  },
-]
+export {
+  ProductDraftStoreError,
+  emptyDraftInput,
+  newColorRow,
+  newOptionRow,
+  MAX_DRAFT_COLORS,
+} from '@/lib/db/product-drafts'
+export { SeasonStoreError } from '@/lib/db/seasons'
+export { StyleStoreError } from '@/lib/db/styles'
 
 /**
  * 브랜드 API.
@@ -521,21 +50,12 @@ const movements: StockMovement[] = [
  */
 export async function getBrands(): Promise<Brand[]> {
   await delay()
-  const brands = await brandStore.listBrands()
-  return brands.map((brand) => ({
-    ...brand,
-    styleCount: styles.filter((s) => s.brandId === brand.id).length,
-  }))
+  return brandStore.listBrands()
 }
 
 export async function getBrandBySlug(slug: string): Promise<Brand | undefined> {
   await delay()
-  const brand = await brandStore.getBrandBySlug(slug)
-  if (!brand) return undefined
-  return {
-    ...brand,
-    styleCount: styles.filter((s) => s.brandId === brand.id).length,
-  }
+  return brandStore.getBrandBySlug(slug)
 }
 
 export async function createBrand(input: BrandInput): Promise<Brand> {
@@ -704,9 +224,67 @@ export async function applyBulkUsageAssignments(
   )
 }
 
+export async function getProductDrafts(
+  brandId: string,
+): Promise<ProductDraft[]> {
+  await delay()
+  return productDraftStore.listProductDrafts(brandId)
+}
+
+export async function getProductDraftById(
+  id: string,
+): Promise<ProductDraft | undefined> {
+  await delay()
+  return productDraftStore.getProductDraftById(id)
+}
+
+export async function createProductDraft(
+  brandId: string,
+  input: ProductDraftInput,
+): Promise<ProductDraft> {
+  await delay()
+  return productDraftStore.createProductDraft(brandId, input)
+}
+
+export async function updateProductDraft(
+  id: string,
+  input: ProductDraftInput,
+): Promise<ProductDraft> {
+  await delay()
+  return productDraftStore.updateProductDraft(id, input)
+}
+
+export async function deleteProductDraft(id: string): Promise<void> {
+  await delay()
+  return productDraftStore.deleteProductDraft(id)
+}
+
 export async function getSeasonsByBrand(brandId: string): Promise<Season[]> {
   await delay()
-  return seasons.filter((s) => s.brandId === brandId)
+  return seasonStore.listSeasons(brandId)
+}
+
+export async function createSeason(
+  brandId: string,
+  input: SeasonInput,
+): Promise<Season> {
+  await delay()
+  return seasonStore.createSeason(brandId, input)
+}
+
+export async function updateSeason(
+  id: string,
+  input: SeasonInput,
+): Promise<Season> {
+  await delay()
+  return seasonStore.updateSeason(id, input)
+}
+
+export async function deleteSeason(id: string): Promise<void> {
+  await delay()
+  const styleCount = await styleStore.countStylesBySeason(id)
+  const draftCount = await productDraftStore.countProductDraftsBySeason(id)
+  return seasonStore.deleteSeason(id, { styleCount, draftCount })
 }
 
 export async function getStylesByBrand(
@@ -714,85 +292,123 @@ export async function getStylesByBrand(
   seasonId?: string,
 ): Promise<Style[]> {
   await delay()
-  return styles.filter(
-    (s) => s.brandId === brandId && (!seasonId || s.seasonId === seasonId),
-  )
+  return styleStore.listStyles(brandId, seasonId)
 }
 
 export async function getStyleById(styleId: string): Promise<Style | undefined> {
   await delay()
-  return styles.find((s) => s.id === styleId)
+  return styleStore.getStyleById(styleId)
 }
 
-export async function getDesignSpec(
-  styleId: string,
-): Promise<DesignSpec | undefined> {
-  await delay()
-  return designSpecs.find((d) => d.styleId === styleId)
-}
-
-export async function getMdSummariesByBrand(
+export async function getStyleByStyleNo(
   brandId: string,
-): Promise<(MdSummary & { style: Style })[]> {
+  styleNo: string,
+): Promise<Style | undefined> {
   await delay()
-  const brandStyles = styles.filter((s) => s.brandId === brandId)
-  return brandStyles
-    .map((style) => {
-      const summary = mdSummaries.find((m) => m.styleId === style.id)
-      if (!summary) return null
-      return { ...summary, style }
-    })
-    .filter((x): x is MdSummary & { style: Style } => x !== null)
+  return styleStore.getStyleByStyleNo(brandId, styleNo)
 }
 
-export async function getInventoryByBrand(
+export async function createStyle(
   brandId: string,
-): Promise<(InventoryItem & { style: Style })[]> {
+  input: StyleInput,
+): Promise<Style> {
   await delay()
-  const brandStyles = styles.filter((s) => s.brandId === brandId)
-  const styleMap = new Map(brandStyles.map((s) => [s.id, s]))
-  return inventory
-    .filter((i) => styleMap.has(i.styleId))
-    .map((i) => ({ ...i, style: styleMap.get(i.styleId)! }))
+  return styleStore.createStyle(brandId, input)
 }
 
-export async function getMovementsByBrand(
-  brandId: string,
-): Promise<(StockMovement & { style: Style })[]> {
+export async function updateStyle(
+  id: string,
+  input: Partial<StyleInput>,
+): Promise<Style> {
   await delay()
-  const brandStyles = styles.filter((s) => s.brandId === brandId)
-  const styleMap = new Map(brandStyles.map((s) => [s.id, s]))
-  return movements
-    .filter((m) => styleMap.has(m.styleId))
-    .map((m) => ({ ...m, style: styleMap.get(m.styleId)! }))
-    .sort((a, b) => b.date.localeCompare(a.date))
+  return styleStore.updateStyle(id, input)
 }
 
-const THUMBNAIL_PALETTE = [
-  '#D8CFC0',
-  '#B9C2B0',
-  '#C7B8A6',
-  '#A9B4C0',
-  '#CBBEB4',
-  '#9FA9A0',
-]
-
-function pickThumbnailColor(seed: string) {
-  let hash = 0
-  for (let i = 0; i < seed.length; i += 1) {
-    hash = (hash * 31 + seed.charCodeAt(i)) % 100000
+export async function updateStyleFields(
+  id: string,
+  patch: Record<string, string>,
+): Promise<Style> {
+  await delay()
+  const existing = await styleStore.getStyleById(id)
+  if (!existing) {
+    throw new styleStore.StyleStoreError(
+      '상품을 찾을 수 없습니다.',
+      'not_found',
+    )
   }
-  return THUMBNAIL_PALETTE[hash % THUMBNAIL_PALETTE.length]
+  const seasons = await seasonStore.listSeasons(existing.brandId)
+  const seasonIdByCode = new Map(
+    seasons.map((season) => [season.code.toUpperCase(), season.id]),
+  )
+  return styleStore.updateStyleFields(id, patch, { seasonIdByCode })
 }
 
-let importCounter = 0
+export type StyleFieldBulkEdit = {
+  styleId: string
+  patch: Record<string, string>
+}
+
+export type StyleFieldBulkFailure = {
+  styleId: string
+  message: string
+}
+
+/**
+ * 붙여넣기용 일괄 저장. 시즌 맵을 한 번만 만들고 행별 성공·실패를 모은다.
+ */
+export async function updateStyleFieldsBulk(
+  brandId: string,
+  edits: StyleFieldBulkEdit[],
+): Promise<{
+  updated: number
+  failures: StyleFieldBulkFailure[]
+}> {
+  if (edits.length === 0) return { updated: 0, failures: [] }
+
+  const seasons = await seasonStore.listSeasons(brandId)
+  const seasonIdByCode = new Map(
+    seasons.map((season) => [season.code.toUpperCase(), season.id]),
+  )
+
+  let updated = 0
+  const failures: StyleFieldBulkFailure[] = []
+
+  for (const edit of edits) {
+    try {
+      await styleStore.updateStyleFields(edit.styleId, edit.patch, {
+        seasonIdByCode,
+      })
+      updated += 1
+    } catch (error) {
+      failures.push({
+        styleId: edit.styleId,
+        message:
+          error instanceof Error ? error.message : '저장에 실패했습니다.',
+      })
+    }
+  }
+
+  return { updated, failures }
+}
+
+export async function deleteStyle(id: string): Promise<void> {
+  await delay()
+  return styleStore.deleteStyle(id)
+}
 
 export type ImportApplyRow = {
+  lineNo: number
   styleNo: string
   matchKey: string
   targetStyleId?: string
   applied: Record<string, unknown>
   customFields: Record<string, string>
+}
+
+export type ImportFailure = {
+  lineNo: number
+  styleNo: string
+  message: string
 }
 
 function asString(value: unknown) {
@@ -803,177 +419,148 @@ function asNumber(value: unknown) {
   return typeof value === 'number' ? value : undefined
 }
 
-function applyStyleFields(style: Style, applied: Record<string, unknown>) {
+/** applied Record → updateStyleFields용 문자열 패치 */
+function appliedToFieldPatch(
+  applied: Record<string, unknown>,
+): Record<string, string> {
+  const patch: Record<string, string> = {}
+
   const name = asString(applied.name)
-  if (name) style.name = name
+  if (name !== undefined) patch.name = name
 
   const category = asString(applied.category)
-  if (category) style.category = category
+  if (category !== undefined) patch.category = category
+
+  const planner = asString(applied.planner)
+  if (planner !== undefined) patch.planner = planner
+
+  const designer = asString(applied.designer)
+  if (designer !== undefined) patch.designer = designer
+
+  const description = asString(applied.description)
+  if (description !== undefined) patch.description = description
 
   const seasonId = asString(applied.seasonId)
-  if (seasonId) style.seasonId = seasonId
+  if (seasonId !== undefined) patch.seasonId = seasonId
 
   const gender = asString(applied.gender)
-  if (gender === 'W' || gender === 'M' || gender === 'U') style.gender = gender
+  if (gender !== undefined) patch.gender = gender
 
-  if (Array.isArray(applied.colors) && applied.colors.length > 0) {
-    style.colors = applied.colors as string[]
+  if (Array.isArray(applied.colors)) {
+    patch.colors = (applied.colors as string[]).join(', ')
   }
 
   const plannedQty = asNumber(applied.plannedQty)
-  if (plannedQty !== undefined) style.plannedQty = plannedQty
+  if (plannedQty !== undefined) patch.plannedQty = String(plannedQty)
 
   const targetCost = asNumber(applied.targetCost)
-  if (targetCost !== undefined) style.targetCost = targetCost
+  if (targetCost !== undefined) patch.targetCost = String(targetCost)
 
   const retailPrice = asNumber(applied.retailPrice)
-  if (retailPrice !== undefined) style.retailPrice = retailPrice
-
-  const planner = asString(applied.planner)
-  if (planner) style.planner = planner
-
-  const designer = asString(applied.designer)
-  if (designer) style.designer = designer
-
-  const description = asString(applied.description)
-  if (description) style.description = description
+  if (retailPrice !== undefined) patch.retailPrice = String(retailPrice)
 
   const weightG = asNumber(applied.weightG)
-  if (weightG !== undefined) style.weightG = weightG > 0 ? weightG : null
-}
+  if (weightG !== undefined) patch.weightG = String(weightG)
 
-function applyDesignFields(styleId: string, applied: Record<string, unknown>) {
   const fabric = asString(applied.fabric)
-  if (!fabric) return
+  if (fabric !== undefined) patch.fabric = fabric
 
-  const spec = designSpecs.find((d) => d.styleId === styleId)
-  if (spec) {
-    spec.fabric = fabric
-    return
-  }
-  designSpecs.push({
-    styleId,
-    fabric,
-    trimNotes: '',
-    sizeRange: '',
-    sampleRound: 1,
-    sampleStatus: 'pending',
-    workOrderNotes: '',
-    measurements: [],
-  })
-}
-
-function applyMdFields(styleId: string, applied: Record<string, unknown>) {
   const orderQty = asNumber(applied.orderQty)
+  if (orderQty !== undefined) patch.orderQty = String(orderQty)
+
   const channel = asString(applied.channel)
-  if (orderQty === undefined && !channel) return
+  if (channel !== undefined) patch.channel = channel
 
-  const summary = mdSummaries.find((m) => m.styleId === styleId)
-  if (summary) {
-    if (orderQty !== undefined) summary.orderQty = orderQty
-    if (channel) summary.channel = channel
-    return
-  }
-  mdSummaries.push({
-    styleId,
-    orderQty: orderQty ?? 0,
-    soldQty: 0,
-    sellThrough: 0,
-    marginRate: 0,
-    reorderFlag: false,
-    channel: channel ?? '미정',
-  })
-}
-
-/** 시스템 필드로 매핑되지 않은 업로드 컬럼을 원본 헤더 이름으로 상품에 붙인다. */
-function applyCustomFields(style: Style, customFields: Record<string, string>) {
-  if (Object.keys(customFields).length === 0) return
-  style.customFields = { ...(style.customFields ?? {}), ...customFields }
-}
-
-function applyLogisticsFields(
-  styleId: string,
-  applied: Record<string, unknown>,
-) {
-  const onHand = asNumber(applied.onHand)
   const warehouse = asString(applied.warehouse)
-  if (onHand === undefined && !warehouse) return
+  if (warehouse !== undefined) patch.warehouse = warehouse
 
-  const location = warehouse ?? '미지정'
-  const item = inventory.find(
-    (i) => i.styleId === styleId && i.warehouse === location,
-  )
-  if (item) {
-    if (onHand !== undefined) {
-      item.onHand = onHand
-      item.available = Math.max(onHand - item.reserved, 0)
-    }
-    return
-  }
-  inventory.push({
-    id: `inv-import-${(importCounter += 1)}`,
-    styleId,
-    warehouse: location,
-    onHand: onHand ?? 0,
-    reserved: 0,
-    available: onHand ?? 0,
-  })
+  const onHand = asNumber(applied.onHand)
+  if (onHand !== undefined) patch.onHand = String(onHand)
+
+  return patch
 }
 
 /**
  * 품번으로 기존 상품을 찾아 병합하고, 없으면 새로 만든다.
- * 목업 단계라 메모리 배열을 직접 갱신한다. Supabase 합류 시 이 함수만 교체하면 된다.
+ * 한 행이 실패해도 나머지는 계속 반영하고, 실패한 행은 목록으로 돌려준다.
  */
 export async function applyProductImport(
   brandId: string,
   rows: ImportApplyRow[],
-): Promise<{ created: number; updated: number }> {
+): Promise<{
+  created: number
+  updated: number
+  failures: ImportFailure[]
+}> {
   await delay(200)
 
   let created = 0
   let updated = 0
+  const failures: ImportFailure[] = []
+
+  const seasons = await seasonStore.listSeasons(brandId)
+  const seasonIdByCode = new Map(
+    seasons.map((season) => [season.code.toUpperCase(), season.id]),
+  )
+  const defaultSeasonId = seasons[0]?.id
 
   for (const row of rows) {
-    let target = row.targetStyleId
-      ? styles.find((s) => s.id === row.targetStyleId)
-      : undefined
+    try {
+      let style = row.targetStyleId
+        ? await styleStore.getStyleById(row.targetStyleId)
+        : undefined
 
-    if (!target) {
-      const seasonId =
-        asString(row.applied.seasonId) ??
-        seasons.find((s) => s.brandId === brandId)?.id
-      if (!seasonId) continue
-
-      target = {
-        id: `style-import-${(importCounter += 1)}`,
-        brandId,
-        seasonId,
-        styleNo: row.styleNo.trim(),
-        name: asString(row.applied.name) ?? row.styleNo.trim(),
-        category: '미분류',
-        gender: 'U',
-        colors: [],
-        targetCost: 0,
-        plannedQty: 0,
-        retailPrice: 0,
-        status: 'draft',
-        thumbnailColor: pickThumbnailColor(row.matchKey),
+      if (!style) {
+        style = await styleStore.getStyleByStyleNo(brandId, row.styleNo)
       }
-      styles.push(target)
-      created += 1
-    } else {
-      updated += 1
-    }
 
-    applyStyleFields(target, row.applied)
-    applyDesignFields(target.id, row.applied)
-    applyMdFields(target.id, row.applied)
-    applyLogisticsFields(target.id, row.applied)
-    applyCustomFields(target, row.customFields)
+      let isNew = false
+      if (!style) {
+        const seasonId = asString(row.applied.seasonId) ?? defaultSeasonId
+        if (!seasonId) {
+          throw new Error('시즌이 없어 새 상품을 만들 수 없습니다.')
+        }
+
+        style = await styleStore.createStyle(brandId, {
+          seasonId,
+          styleNo: row.styleNo.trim(),
+          name: asString(row.applied.name) ?? row.styleNo.trim(),
+        })
+        isNew = true
+      }
+
+      const patch = appliedToFieldPatch(row.applied)
+      if (Object.keys(patch).length > 0) {
+        // 시트의 빈 칸이 이미 입력된 값을 지우지 않도록 한다.
+        await styleStore.updateStyleFields(style.id, patch, {
+          seasonIdByCode,
+          emptyMeans: 'keep',
+        })
+      }
+
+      if (Object.keys(row.customFields).length > 0) {
+        const current = await styleStore.getStyleById(style.id)
+        await styleStore.updateStyle(style.id, {
+          customFields: {
+            ...(current?.customFields ?? {}),
+            ...row.customFields,
+          },
+        })
+      }
+
+      if (isNew) created += 1
+      else updated += 1
+    } catch (error) {
+      failures.push({
+        lineNo: row.lineNo,
+        styleNo: row.styleNo,
+        message:
+          error instanceof Error
+            ? error.message
+            : '알 수 없는 오류로 반영하지 못했습니다.',
+      })
+    }
   }
 
-  const styleCount = styles.filter((s) => s.brandId === brandId).length
-  await brandStore.setBrandStyleCount(brandId, styleCount)
-
-  return { created, updated }
+  return { created, updated, failures }
 }
