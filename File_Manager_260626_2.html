@@ -1,0 +1,5187 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>파일 업로드 + 덮어쓰기 + RESET + URL 복사</title>
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      :root {
+        --accent: #b01818;
+        --line: #ededed;
+        --muted: #777;
+        --soft: #f7f7f7;
+        --panel: #fff;
+        --text: #222;
+        --preview-width: 430px;
+        --tag-panel-height: 160px;
+      }
+      html,
+      body {
+        height: 100%;
+        overflow: hidden;
+      }
+      body {
+        margin: 0;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 13px;
+        color: var(--text);
+        background: #fff;
+      }
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+      button {
+        border: 1px solid #d8d8d8;
+        background: #fff;
+        cursor: pointer;
+      }
+      button:hover {
+        background: #f2f2f2;
+      }
+      .app-layout {
+        display: grid;
+        grid-template-columns: 210px minmax(520px, 1fr) var(--preview-width);
+        height: 100vh;
+        overflow: hidden;
+      }
+      .sidebar {
+        border-right: 1px solid var(--line);
+        background: #fff;
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+        height: 100vh;
+        overflow: hidden;
+      }
+      .sidebar-brand {
+        width: 100%;
+        height: 56px;
+        border: none;
+        border-bottom: 1px solid var(--line);
+        background: #fff;
+        padding: 0 14px;
+        text-align: left;
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        color: var(--accent);
+        cursor: pointer;
+        flex-shrink: 0;
+        display: flex;
+        align-items: center;
+      }
+      .sidebar-brand:hover:not(:disabled) {
+        background: #fafafa;
+      }
+      .sidebar-brand:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .sidebar-status {
+        padding: 9px 14px;
+        color: var(--muted);
+        font-size: 12px;
+        border-bottom: 1px solid var(--line);
+        flex-shrink: 0;
+      }
+      .sidebar-status.error {
+        color: #9d1111;
+        background: #fff3f3;
+      }
+      .sidebar-status.loading {
+        color: #555;
+        font-style: italic;
+      }
+      .search-box input,
+      .upload-toolbar select,
+      .upload-toolbar input[type='file'] {
+        width: 100%;
+        min-width: 0;
+        border: 1px solid #ddd;
+        padding: 7px 8px;
+        background: #fff;
+      }
+      .toolbar-button,
+      .grid-tool-btn,
+      .preview-actions button,
+      .upload-button {
+        padding: 7px 10px;
+        border-radius: 0;
+        font-size: 12px;
+      }
+      .server-file-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 10px 8px 18px;
+      }
+      .tree-root {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .tree-item {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        border: none;
+        background: transparent;
+        padding: 5px 6px;
+        text-align: left;
+        color: #333;
+      }
+      .tree-item:hover,
+      .tree-item.active {
+        background: #f1f1f1;
+      }
+      .tree-children {
+        margin-left: 16px;
+        border-left: 1px solid #eee;
+        padding-left: 5px;
+      }
+      .tree-icon {
+        width: 14px;
+        color: #555;
+        flex-shrink: 0;
+      }
+      .tree-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .main-content {
+        min-width: 0;
+        height: 100vh;
+        overflow: hidden;
+        display: flex;
+        flex-direction: column;
+        background: #fff;
+      }
+      .topbar {
+        min-height: 56px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 18px;
+        padding: 0 18px;
+        border-bottom: 1px solid var(--line);
+      }
+      .breadcrumb {
+        color: #555;
+        font-size: 12px;
+      }
+      .breadcrumb strong {
+        color: #222;
+      }
+      .search-box {
+        width: 260px;
+      }
+      .search-controls {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .global-search-toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        color: #444;
+        white-space: nowrap;
+        user-select: none;
+      }
+      .global-search-toggle input {
+        margin: 0;
+      }
+      .topbar-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .history-modal {
+        position: fixed;
+        inset: 0;
+        z-index: 21000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.35);
+        padding: 24px;
+      }
+      .history-modal.open {
+        display: flex;
+      }
+      .history-panel {
+        width: min(920px, 100%);
+        max-height: min(86vh, 760px);
+        background: #fff;
+        border: 1px solid var(--line);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .history-header {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 18px;
+        border-bottom: 1px solid var(--line);
+        flex-wrap: wrap;
+      }
+      .history-header h2 {
+        margin: 0;
+        font-size: 16px;
+        flex: 1;
+        min-width: 80px;
+      }
+      .history-search {
+        width: 220px;
+        min-width: 140px;
+        border: 1px solid #ddd;
+        padding: 7px 8px;
+        background: #fff;
+      }
+      .history-hint {
+        margin: 0;
+        padding: 8px 18px;
+        font-size: 12px;
+        color: var(--muted);
+        border-bottom: 1px solid #f2f2f2;
+        background: #fafafa;
+      }
+      .history-list {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 8px 0;
+      }
+      .history-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 16px;
+        padding: 10px 18px;
+        border-bottom: 1px solid #f3f3f3;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      .history-row:hover {
+        background: #fafafa;
+      }
+      .history-row-icon {
+        color: #4a90d9;
+        flex-shrink: 0;
+        width: 18px;
+        text-align: center;
+        margin-top: 1px;
+      }
+      .history-row-text {
+        flex: 1;
+        min-width: 0;
+        word-break: break-all;
+      }
+      .history-row-text em {
+        font-style: normal;
+        color: #2a6ea8;
+      }
+      .history-row-time {
+        flex-shrink: 0;
+        color: var(--muted);
+        font-size: 12px;
+        white-space: nowrap;
+      }
+      .history-empty {
+        padding: 32px 18px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 13px;
+      }
+      .history-footer {
+        padding: 12px 18px;
+        border-top: 1px solid var(--line);
+        text-align: center;
+        background: #fafafa;
+      }
+      .workspace-area {
+        flex: 1;
+        min-height: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        position: relative;
+      }
+      .workspace-area.drop-active {
+        outline: 2px dashed #6baee8;
+        outline-offset: -4px;
+        background: #f7fbff;
+      }
+      .workspace-area.drop-active::after {
+        content: '여기에 파일을 놓으면 업로드 대기열에 추가됩니다';
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: rgba(247, 251, 255, 0.92);
+        color: #2a6ea8;
+        font-size: 14px;
+        font-weight: bold;
+        pointer-events: none;
+        z-index: 20;
+      }
+      .upload-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 18px;
+        border-bottom: 1px solid var(--line);
+        flex-wrap: wrap;
+      }
+      .upload-hint {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .grid-toolbar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 18px;
+        border-bottom: 1px solid var(--line);
+        background: #fafafa;
+        flex-wrap: wrap;
+      }
+      .grid-tool-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 10px;
+        border: 1px solid #ccc;
+        background: #fff;
+        color: #333;
+        font-size: 12px;
+        line-height: 1.2;
+      }
+      .grid-tool-btn:hover:not(:disabled) {
+        background: #f3f3f3;
+      }
+      .grid-tool-btn:disabled {
+        opacity: 0.45;
+        cursor: not-allowed;
+      }
+      .grid-tool-btn.danger {
+        color: #b01818;
+        border-color: #d4a0a0;
+        background: #fff5f5;
+      }
+      .grid-tool-btn.danger:hover:not(:disabled) {
+        background: #ffe8e8;
+        border-color: #c06060;
+      }
+      .grid-tool-btn.active {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .grid-tool-btn.active:hover:not(:disabled) {
+        background: var(--accent);
+      }
+      .grid-toolbar-spacer {
+        flex: 1;
+        min-width: 8px;
+      }
+      .grid-tool-select {
+        padding: 5px 8px;
+        border: 1px solid #ccc;
+        background: #fff;
+        font-size: 12px;
+        color: #333;
+      }
+      .upload-toolbar select,
+      .upload-toolbar input[type='file'] {
+        border: 1px solid #ddd;
+        padding: 7px 8px;
+        background: #fff;
+      }
+      .upload-button.completed {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .upload-button:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+      .folder-grid {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        padding: 18px 20px 24px;
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+        align-content: start;
+        gap: 18px 22px;
+      }
+      .grid-card {
+        border: none;
+        background: transparent;
+        padding: 0;
+        min-width: 0;
+        width: 100%;
+        max-width: 110px;
+        text-align: center;
+        cursor: pointer;
+        justify-self: center;
+      }
+      .folder-grid.view-large {
+        grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+      }
+      .folder-grid.view-large .grid-card {
+        max-width: 190px;
+      }
+      .folder-grid.view-list {
+        display: block;
+        padding: 8px 16px 24px;
+      }
+      .folder-grid.view-list .grid-card {
+        max-width: none;
+        width: 100%;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        text-align: left;
+        padding: 7px 8px;
+        border-bottom: 1px solid #eee;
+        justify-self: stretch;
+      }
+      .folder-grid.view-list .grid-thumb {
+        display: none;
+      }
+      .folder-grid.view-list .grid-name {
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1;
+        min-width: 0;
+      }
+      .grid-list-type-icon {
+        flex-shrink: 0;
+        width: 26px;
+        text-align: center;
+        font-size: 16px;
+        line-height: 1;
+      }
+      .grid-card:hover .grid-thumb {
+        border-color: #b8d4f0;
+        background: #f7fbff;
+      }
+      .grid-card.active .grid-thumb {
+        border-color: #6baee8;
+        background: #e3f1fc;
+        box-shadow: inset 0 0 0 1px #6baee8;
+      }
+      .grid-card.selected .grid-thumb {
+        border-color: #4a90d9;
+        background: #eef6fd;
+        box-shadow: inset 0 0 0 2px #4a90d9;
+      }
+      .grid-card.marquee-candidate .grid-thumb {
+        border-color: #9ecbf0;
+        background: #f0f8ff;
+      }
+      .marquee-select {
+        position: fixed;
+        border: 1px solid #4a90d9;
+        background: rgba(74, 144, 217, 0.12);
+        pointer-events: none;
+        z-index: 9999;
+      }
+      .load-more-card {
+        border: 1px dashed #ccc;
+        color: #555;
+        min-height: 100px;
+        max-width: 110px;
+        padding: 10px 6px;
+        background: #fff;
+      }
+      .load-more-card strong {
+        display: block;
+        margin-bottom: 6px;
+        color: #222;
+        font-size: 12px;
+      }
+      .grid-thumb {
+        width: 100%;
+        aspect-ratio: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #fff;
+        border: 1px solid #d5d5d5;
+        overflow: hidden;
+      }
+      .grid-thumb img,
+      .grid-thumb video {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+        padding: 4px;
+        -webkit-user-drag: none;
+        user-select: none;
+      }
+      .grid-thumb.video-thumb {
+        position: relative;
+        background: #f7f7f7;
+      }
+      .grid-thumb.video-thumb.loading-video::after {
+        content: '▶';
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #aaa;
+        font-size: 22px;
+        pointer-events: none;
+      }
+      .grid-icon-folder {
+        width: 46px;
+        height: 38px;
+        background: linear-gradient(180deg, #ffd54f 0%, #f4b400 100%);
+        border-radius: 3px 6px 4px 4px;
+        position: relative;
+        box-shadow: inset 0 -2px 0 rgba(0, 0, 0, 0.08);
+      }
+      .grid-icon-folder::before {
+        content: '';
+        position: absolute;
+        top: -7px;
+        left: 0;
+        width: 20px;
+        height: 8px;
+        background: #ffdf6b;
+        border-radius: 3px 3px 0 0;
+      }
+      .grid-icon-parent {
+        font-size: 28px;
+        color: #666;
+        line-height: 1;
+      }
+      .grid-icon-file {
+        font-size: 28px;
+        color: #888;
+        line-height: 1;
+      }
+      .grid-name {
+        margin-top: 7px;
+        overflow: hidden;
+        color: #333;
+        font-size: 11px;
+        line-height: 1.35;
+        word-break: break-all;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+      .grid-name-wrap .grid-name {
+        margin-top: 0;
+      }
+      .grid-path {
+        margin-top: 4px;
+        overflow: hidden;
+        color: #888;
+        font-size: 10px;
+        line-height: 1.35;
+        word-break: break-all;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        -webkit-box-orient: vertical;
+      }
+      .upload-queue {
+        padding: 0 18px 10px;
+        max-height: 150px;
+        overflow-y: auto;
+      }
+      .upload-queue-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        padding: 10px 18px;
+        border-top: 1px solid var(--line);
+        background: #fafafa;
+      }
+      .url-output .upload-queue-header {
+        padding: 8px 0;
+        border-top: none;
+        border-bottom: 1px solid var(--line);
+        background: transparent;
+        margin-bottom: 6px;
+      }
+      .upload-queue-status {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .upload-row {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 6px;
+      }
+      .upload-row span {
+        min-width: 160px;
+      }
+      .url-output {
+        padding: 0 18px 18px;
+        border-top: 1px solid var(--line);
+        flex-shrink: 0;
+        height: var(--tag-panel-height);
+        min-height: 80px;
+        max-height: min(480px, 60vh);
+        display: flex;
+        flex-direction: column;
+      }
+      .tag-panel-resizer {
+        height: 8px;
+        margin: 0 -18px 8px;
+        cursor: row-resize;
+        background: transparent;
+        border-top: 1px solid var(--line);
+        touch-action: none;
+        flex-shrink: 0;
+      }
+      .tag-panel-resizer:hover,
+      .tag-panel-resizer.dragging {
+        background: #e8e8e8;
+      }
+      .tag-list-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 12px;
+        color: var(--muted);
+        margin-bottom: 6px;
+        flex-shrink: 0;
+      }
+      .tag-list-header-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .tag-list {
+        flex: 1;
+        min-height: 0;
+        overflow-y: auto;
+        border: 1px solid #ddd;
+        background: #fafafa;
+      }
+      .tag-list-empty {
+        padding: 14px 12px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .tag-row {
+        display: flex;
+        align-items: stretch;
+        gap: 0;
+        border-bottom: 1px solid #ececec;
+        background: #fff;
+      }
+      .tag-row:last-child {
+        border-bottom: none;
+      }
+      .tag-row.active {
+        background: #eef6fd;
+      }
+      .tag-row.drag-over {
+        border-top: 2px solid #4a90d9;
+      }
+      .tag-drag-handle {
+        flex-shrink: 0;
+        width: 28px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: #999;
+        cursor: grab;
+        user-select: none;
+        border-right: 1px solid #ececec;
+        background: #f7f7f7;
+      }
+      .tag-drag-handle:active {
+        cursor: grabbing;
+      }
+      .tag-body {
+        flex: 1;
+        min-width: 0;
+        border: none;
+        background: transparent;
+        text-align: left;
+        padding: 8px 10px;
+        font-family: Consolas, monospace;
+        font-size: 11px;
+        color: #333;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .tag-body:hover {
+        background: #f3f8fd;
+      }
+      .tag-delete {
+        flex-shrink: 0;
+        width: 32px;
+        border: none;
+        border-left: 1px solid #ececec;
+        background: #fff;
+        color: #b01818;
+        font-size: 16px;
+        line-height: 1;
+      }
+      .tag-delete:hover {
+        background: #fff3f3;
+      }
+      .preview-shell {
+        display: flex;
+        height: 100vh;
+        min-width: 0;
+        overflow: hidden;
+      }
+      .preview-resizer {
+        width: 6px;
+        flex-shrink: 0;
+        cursor: col-resize;
+        background: transparent;
+        border-left: 1px solid var(--line);
+        touch-action: none;
+      }
+      .preview-resizer:hover,
+      .preview-resizer.dragging {
+        background: #e8e8e8;
+      }
+      .preview-panel {
+        flex: 1;
+        min-width: 0;
+        background: #fff;
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        overflow: hidden;
+      }
+      .preview-top {
+        flex-shrink: 0;
+        height: 56px;
+        display: flex;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 0 16px;
+        border-bottom: 1px solid var(--line);
+      }
+      .preview-top button {
+        min-width: 38px;
+        height: 32px;
+        background: #111;
+        color: #fff;
+        border: none;
+      }
+      .preview-stage {
+        flex: 1;
+        min-height: 0;
+        padding: 12px;
+        background: #fff;
+        overflow: auto;
+        overscroll-behavior: contain;
+      }
+      .preview-stage img,
+      .preview-stage video {
+        display: block;
+        max-width: 100%;
+        width: auto;
+        height: auto;
+        margin: 0 auto;
+        object-fit: contain;
+      }
+      .preview-placeholder {
+        max-width: 250px;
+        color: var(--muted);
+        text-align: center;
+        line-height: 1.6;
+      }
+      .preview-info {
+        flex-shrink: 0;
+        padding: 16px;
+        border-top: 1px solid var(--line);
+        max-height: 180px;
+        overflow-y: auto;
+      }
+      .preview-info h2 {
+        margin: 0 0 8px;
+        font-size: 16px;
+        line-height: 1.35;
+        word-break: break-all;
+      }
+      .preview-info p {
+        margin: 0 0 12px;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.5;
+      }
+      .preview-actions {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .hidden {
+        display: none;
+      }
+      .ctx-menu {
+        position: fixed;
+        z-index: 10000;
+        min-width: 160px;
+        background: #fff;
+        border: 1px solid #ccc;
+        box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+        padding: 4px 0;
+        display: none;
+      }
+      .ctx-menu.open {
+        display: block;
+      }
+      .ctx-menu-item {
+        width: 100%;
+        border: none;
+        background: transparent;
+        text-align: left;
+        padding: 8px 14px;
+        font-size: 12px;
+        color: #222;
+      }
+      .ctx-menu-item:hover {
+        background: #f2f2f2;
+      }
+      .ctx-menu-item.danger {
+        color: #b01818;
+      }
+      .ctx-menu-separator {
+        height: 1px;
+        background: #ececec;
+        margin: 4px 0;
+      }
+      body.app-busy {
+        overflow: hidden;
+      }
+      .app-loading-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 20000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(255, 255, 255, 0.74);
+        backdrop-filter: blur(1px);
+        pointer-events: all;
+      }
+      .app-loading-overlay.open {
+        display: flex;
+      }
+      .app-loading-panel {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 14px;
+        padding: 24px 28px;
+        background: #fff;
+        border: 1px solid var(--line);
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+        min-width: 220px;
+        max-width: min(90vw, 360px);
+      }
+      .app-loading-spinner {
+        width: 36px;
+        height: 36px;
+        border: 3px solid #e8e8e8;
+        border-top-color: var(--accent);
+        border-radius: 50%;
+        animation: app-spin 0.8s linear infinite;
+        flex-shrink: 0;
+      }
+      @keyframes app-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      .app-loading-message {
+        font-size: 13px;
+        color: #444;
+        text-align: center;
+        line-height: 1.45;
+        word-break: keep-all;
+      }
+      .ui-dialog-overlay {
+        position: fixed;
+        inset: 0;
+        z-index: 22000;
+        display: none;
+        align-items: center;
+        justify-content: center;
+        background: rgba(0, 0, 0, 0.35);
+        padding: 24px;
+      }
+      .ui-dialog-overlay.open {
+        display: flex;
+      }
+      .ui-dialog-panel {
+        width: min(480px, 100%);
+        max-height: min(86vh, 560px);
+        background: #fff;
+        border: 1px solid var(--line);
+        box-shadow: 0 12px 40px rgba(0, 0, 0, 0.15);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+      }
+      .ui-dialog-title {
+        margin: 0;
+        padding: 16px 18px 0;
+        font-size: 15px;
+        font-weight: 600;
+        color: #222;
+      }
+      .ui-dialog-message {
+        margin: 0;
+        padding: 12px 18px 0;
+        font-size: 13px;
+        color: #444;
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: keep-all;
+        overflow-y: auto;
+        max-height: min(50vh, 360px);
+      }
+      .ui-dialog-input {
+        margin: 12px 18px 0;
+        width: calc(100% - 36px);
+        border: 1px solid #ddd;
+        padding: 8px 10px;
+        font-size: 13px;
+        background: #fff;
+      }
+      .ui-dialog-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding: 16px 18px 18px;
+        margin-top: auto;
+      }
+      .ui-dialog-btn {
+        padding: 7px 14px;
+        border: 1px solid #ccc;
+        background: #fff;
+        font-size: 12px;
+        color: #222;
+        cursor: pointer;
+      }
+      .ui-dialog-btn:hover {
+        background: #f2f2f2;
+      }
+      .ui-dialog-btn.primary {
+        border-color: var(--accent);
+        background: var(--accent);
+        color: #fff;
+      }
+      .ui-dialog-btn.primary:hover {
+        background: #1a6fd4;
+      }
+      .ui-dialog-btn.danger {
+        border-color: #b01818;
+        background: #b01818;
+        color: #fff;
+      }
+      .ui-dialog-btn.danger:hover {
+        background: #961414;
+      }
+      @media (max-width: 1100px) {
+        .app-layout {
+          grid-template-columns: 190px minmax(420px, 1fr);
+        }
+        .preview-shell {
+          display: none;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app-layout">
+      <aside class="sidebar" aria-label="서버 파일 탐색기">
+        <button
+          type="button"
+          id="sidebarBrand"
+          class="sidebar-brand"
+          onclick="refreshServerFiles(true)"
+          title="새로고침"
+        >
+          masmarulez
+        </button>
+        <div id="sidebarStatus" class="sidebar-status">폴더를 선택하세요.</div>
+        <div id="serverFileList" class="server-file-list" role="list"></div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div id="breadcrumb" class="breadcrumb">masmarulez</div>
+          <div class="topbar-actions">
+            <button
+              type="button"
+              id="btnHistory"
+              class="toolbar-button"
+              onclick="openHistory()"
+            >
+              히스토리
+            </button>
+            <div class="search-controls">
+              <div class="search-box">
+                <input
+                  id="fileSearch"
+                  type="search"
+                  placeholder="파일 검색"
+                  aria-label="파일 검색"
+                />
+              </div>
+              <label class="global-search-toggle" for="globalSearchToggle">
+                <input
+                  id="globalSearchToggle"
+                  type="checkbox"
+                  aria-label="전체 검색"
+                />
+                전체 검색
+              </label>
+            </div>
+          </div>
+        </header>
+
+        <div class="workspace-area">
+          <div class="upload-toolbar">
+            <span class="upload-hint"
+              >파일을 이 영역에 드래그하면 현재 폴더로 업로드 대기열에
+              추가됩니다.</span
+            >
+          </div>
+
+          <div class="grid-toolbar">
+            <button
+              type="button"
+              id="btnAddTags"
+              class="grid-tool-btn"
+              onclick="addSelectedToTags()"
+              disabled
+            >
+              태그 넣기
+            </button>
+            <button
+              type="button"
+              id="btnDeleteSelected"
+              class="grid-tool-btn danger"
+              onclick="deleteSelectedFiles()"
+              disabled
+            >
+              선택 삭제
+            </button>
+            <button
+              type="button"
+              id="btnNewFolder"
+              class="grid-tool-btn"
+              onclick="promptCreateFolder()"
+            >
+              새 폴더
+            </button>
+            <button
+              type="button"
+              id="btnOpenFile"
+              class="grid-tool-btn"
+              onclick="openSelectedPreview()"
+              disabled
+            >
+              열기
+            </button>
+            <button
+              type="button"
+              id="btnSelectAll"
+              class="grid-tool-btn"
+              onclick="selectAllVisibleItems()"
+              disabled
+            >
+              전체 선택
+            </button>
+            <div class="grid-toolbar-spacer"></div>
+            <select
+              id="gridSortSelect"
+              class="grid-tool-select"
+              aria-label="파일 정렬"
+              onchange="setGridSort(this.value)"
+            >
+              <option value="name">이름 오름차순</option>
+              <option value="name-desc">이름 내림차순</option>
+              <option value="date">최신순</option>
+              <option value="date-desc">오래된순</option>
+            </select>
+            <button
+              type="button"
+              id="btnViewNormal"
+              class="grid-tool-btn"
+              onclick="setGridView('normal')"
+            >
+              보통
+            </button>
+            <button
+              type="button"
+              id="btnViewLarge"
+              class="grid-tool-btn"
+              onclick="setGridView('large')"
+            >
+              크게보기
+            </button>
+            <button
+              type="button"
+              id="btnViewList"
+              class="grid-tool-btn"
+              onclick="setGridView('list')"
+            >
+              간략히
+            </button>
+          </div>
+
+          <div
+            id="folderGrid"
+            class="folder-grid"
+            aria-label="서버 파일 그리드"
+          ></div>
+
+          <div id="fileList" class="upload-queue"></div>
+
+          <div class="url-output" id="urlOutput">
+            <div
+              id="tagPanelResizer"
+              class="tag-panel-resizer"
+              aria-label="누적 태그 영역 높이 조절"
+              title="드래그하여 높이 조절"
+            ></div>
+            <div class="upload-queue-header">
+              <span id="uploadQueueStatus" class="upload-queue-status"
+                >업로드 대기열 없음</span
+              >
+              <button
+                type="button"
+                id="btnUploadAll"
+                class="toolbar-button"
+                onclick="uploadAllPending()"
+                disabled
+              >
+                일괄 업로드
+              </button>
+            </div>
+            <div class="tag-list-header">
+              <span>누적 태그</span>
+              <div class="tag-list-header-actions">
+                <button
+                  type="button"
+                  id="btnCopyAllTags"
+                  class="grid-tool-btn"
+                  onclick="copyAllAccumulatedTags()"
+                >
+                  일괄 복사
+                </button>
+                <button
+                  type="button"
+                  id="btnClearAllTags"
+                  class="grid-tool-btn danger"
+                  onclick="clearAllAccumulatedTags()"
+                >
+                  일괄 삭제
+                </button>
+              </div>
+            </div>
+            <div id="tagList" class="tag-list" aria-label="누적 태그 목록">
+              <div class="tag-list-empty">
+                태그 넣기 버튼으로 태그를 추가하세요.
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <div class="preview-shell">
+        <div
+          id="previewResizer"
+          class="preview-resizer"
+          aria-label="미리보기 패널 너비 조절"
+          title="드래그하여 너비 조절"
+        ></div>
+        <aside class="preview-panel" aria-label="파일 미리보기">
+          <div class="preview-top">
+            <button type="button" onclick="openSelectedPreview()">선택</button>
+          </div>
+          <div id="previewStage" class="preview-stage">
+            <div class="preview-placeholder">
+              파일을 선택하면 이 영역에 미리보기가 표시됩니다.
+            </div>
+          </div>
+          <div class="preview-info">
+            <h2 id="previewTitle">선택된 파일 없음</h2>
+            <p id="previewMeta">
+              왼쪽 폴더 또는 가운데 파일 카드를 선택하세요.
+            </p>
+            <div id="previewActions" class="preview-actions hidden">
+              <button type="button" onclick="copySelectedTag()">
+                태그 복사
+              </button>
+              <button type="button" onclick="copySelectedUrl()">
+                URL 복사
+              </button>
+              <button type="button" onclick="openSelectedPreview()">
+                열기
+              </button>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <div id="ctxMenu" class="ctx-menu" role="menu" aria-hidden="true"></div>
+
+    <div
+      id="appLoadingOverlay"
+      class="app-loading-overlay"
+      aria-hidden="true"
+      aria-live="polite"
+      aria-busy="false"
+    >
+      <div class="app-loading-panel" role="status">
+        <div class="app-loading-spinner" aria-hidden="true"></div>
+        <div id="appLoadingMessage" class="app-loading-message">
+          작업 처리 중...
+        </div>
+      </div>
+    </div>
+
+    <div
+      id="uiDialogOverlay"
+      class="ui-dialog-overlay"
+      aria-hidden="true"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="uiDialogTitle"
+    >
+      <div class="ui-dialog-panel">
+        <h2 id="uiDialogTitle" class="ui-dialog-title"></h2>
+        <p id="uiDialogMessage" class="ui-dialog-message"></p>
+        <input
+          id="uiDialogInput"
+          class="ui-dialog-input hidden"
+          type="text"
+          aria-label="입력"
+        />
+        <div class="ui-dialog-actions">
+          <button
+            type="button"
+            id="uiDialogCancel"
+            class="ui-dialog-btn"
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            id="uiDialogOk"
+            class="ui-dialog-btn primary"
+          >
+            확인
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div
+      id="historyModal"
+      class="history-modal"
+      aria-hidden="true"
+      role="dialog"
+      aria-labelledby="historyTitle"
+    >
+      <div class="history-panel">
+        <header class="history-header">
+          <h2 id="historyTitle">히스토리</h2>
+          <input
+            id="historySearch"
+            class="history-search"
+            type="search"
+            placeholder="검색"
+            aria-label="히스토리 검색"
+          />
+          <button type="button" class="toolbar-button" onclick="closeHistory()">
+            닫기
+          </button>
+        </header>
+        <p class="history-hint">
+          모든 작업 기록을 영구 보존합니다. 이전 달 기록은 아래 더 보기로 불러올
+          수 있습니다.
+        </p>
+        <div id="historyList" class="history-list" aria-live="polite">
+          <div class="history-empty">기록을 불러오세요.</div>
+        </div>
+        <footer class="history-footer">
+          <button
+            type="button"
+            id="btnHistoryMore"
+            class="toolbar-button"
+            onclick="loadMoreHistory()"
+          >
+            더 보기
+          </button>
+        </footer>
+      </div>
+    </div>
+
+    <script>
+      const UPLOAD_WORKER_BASE =
+        'https://r2-worker.masmarulez-upload.workers.dev'
+      const DEFAULT_LIST_WORKER_BASE =
+        'https://r2-worker.masmarulez-upload.workers.dev'
+      const LIST_WORKER_STORAGE_KEY = 'masmarulezListWorkerBase'
+      const CDN_BASE = 'https://cdn2.auchee.com'
+      const ROOT_FOLDER = '루트 파일'
+      const R2_BRAND_ROOT = 'masmarulez'
+      const DEFAULT_BROWSE_TYPES = ['embed', 'image', 'spin360', 'video']
+      const HIDDEN_BROWSE_TYPES = new Set(['logs'])
+      let BROWSE_TYPES = [...DEFAULT_BROWSE_TYPES]
+      const GRID_BATCH_SIZE = 60
+      const MARQUEE_THRESHOLD = 5
+      const PREVIEW_WIDTH_KEY = 'masmarulezPreviewWidth'
+      const PREVIEW_MIN_WIDTH = 280
+      const PREVIEW_MAX_WIDTH = 900
+      const TAG_PANEL_HEIGHT_KEY = 'masmarulezTagPanelHeight'
+      const TAG_PANEL_MIN_HEIGHT = 80
+      const TAG_PANEL_MAX_HEIGHT = 480
+      const GRID_SORT_KEY = 'masmarulezGridSort'
+      const GRID_VIEW_KEY = 'masmarulezGridView'
+      const GLOBAL_SEARCH_KEY = 'masmarulezGlobalSearch'
+
+      const sidebarStatus = document.getElementById('sidebarStatus')
+      const sidebarBrand = document.getElementById('sidebarBrand')
+      const serverFileList = document.getElementById('serverFileList')
+      const appLoadingOverlay = document.getElementById('appLoadingOverlay')
+      const appLoadingMessage = document.getElementById('appLoadingMessage')
+      const historyModal = document.getElementById('historyModal')
+      const historyListEl = document.getElementById('historyList')
+      const historySearchInput = document.getElementById('historySearch')
+      const btnHistory = document.getElementById('btnHistory')
+      const btnHistoryMore = document.getElementById('btnHistoryMore')
+      const folderGrid = document.getElementById('folderGrid')
+      const breadcrumb = document.getElementById('breadcrumb')
+      const fileSearchInput = document.getElementById('fileSearch')
+      const globalSearchToggle = document.getElementById('globalSearchToggle')
+      const previewStage = document.getElementById('previewStage')
+      const previewTitle = document.getElementById('previewTitle')
+      const previewMeta = document.getElementById('previewMeta')
+      const previewActions = document.getElementById('previewActions')
+      const previewResizer = document.getElementById('previewResizer')
+      const btnOpenFile = document.getElementById('btnOpenFile')
+      const btnAddTags = document.getElementById('btnAddTags')
+      const btnDeleteSelected = document.getElementById('btnDeleteSelected')
+      const btnNewFolder = document.getElementById('btnNewFolder')
+      const btnSelectAll = document.getElementById('btnSelectAll')
+      const gridSortSelect = document.getElementById('gridSortSelect')
+      const btnViewNormal = document.getElementById('btnViewNormal')
+      const btnViewLarge = document.getElementById('btnViewLarge')
+      const btnViewList = document.getElementById('btnViewList')
+      const tagListEl = document.getElementById('tagList')
+      const tagPanelResizer = document.getElementById('tagPanelResizer')
+      const workspaceArea = document.querySelector('.workspace-area')
+      const fileListDiv = document.getElementById('fileList')
+      const btnUploadAll = document.getElementById('btnUploadAll')
+      const uploadQueueStatus = document.getElementById('uploadQueueStatus')
+      const ctxMenuEl = document.getElementById('ctxMenu')
+      const uiDialogOverlay = document.getElementById('uiDialogOverlay')
+      const uiDialogTitle = document.getElementById('uiDialogTitle')
+      const uiDialogMessage = document.getElementById('uiDialogMessage')
+      const uiDialogInput = document.getElementById('uiDialogInput')
+      const uiDialogOk = document.getElementById('uiDialogOk')
+      const uiDialogCancel = document.getElementById('uiDialogCancel')
+
+      let currentServerType = null
+      let activeBrowseType = null
+      let currentGroups = []
+      let activeFolder = null
+      let selectedPreview = null
+      let selectedItems = new Map()
+      let accumulatedTags = []
+      let activeTagUid = null
+      let tagUidCounter = 0
+      let lastSelectedKey = null
+      let gridVisibleLimit = GRID_BATCH_SIZE
+      let gridSortMode = localStorage.getItem(GRID_SORT_KEY) || 'name'
+      let gridViewMode = localStorage.getItem(GRID_VIEW_KEY) || 'normal'
+      let searchRenderTimer = null
+      let globalSearchEnabled =
+        localStorage.getItem(GLOBAL_SEARCH_KEY) === 'true'
+      let globalSearchRequestId = 0
+      let activeCardEl = null
+      let currentPreviewWidth = PREVIEW_MAX_WIDTH
+      let currentTagPanelHeight = 160
+      let suppressExternalDrop = false
+      const serverListCache = new Map()
+      let busyCount = 0
+      let busyMessage = '작업 처리 중...'
+      let historyMonths = []
+      let historyLoadedMonths = new Set()
+      let historyEntries = []
+      let historyMonthIndex = 0
+      let historyLoading = false
+      let videoThumbObserver = null
+
+      function isAppBusy() {
+        return busyCount > 0
+      }
+
+      function setBusyMessage(message) {
+        busyMessage = message
+        if (busyCount > 0 && appLoadingMessage) {
+          appLoadingMessage.textContent = message
+        }
+      }
+
+      function updateBusyUi() {
+        const busy = busyCount > 0
+        document.body.classList.toggle('app-busy', busy)
+        appLoadingOverlay.classList.toggle('open', busy)
+        appLoadingOverlay.setAttribute('aria-hidden', busy ? 'false' : 'true')
+        appLoadingOverlay.setAttribute('aria-busy', busy ? 'true' : 'false')
+        if (busy && appLoadingMessage) {
+          appLoadingMessage.textContent = busyMessage
+        }
+        if (busy) hideContextMenu()
+        if (sidebarBrand) sidebarBrand.disabled = busy
+        if (btnHistory) btnHistory.disabled = busy
+        if (fileSearchInput) fileSearchInput.disabled = busy
+        if (globalSearchToggle) globalSearchToggle.disabled = busy
+        updateGridToolbar()
+        updateUploadQueueStatus()
+      }
+
+      function setAppBusy(message) {
+        const wasIdle = busyCount === 0
+        busyCount += 1
+        if (message && wasIdle) busyMessage = message
+        updateBusyUi()
+      }
+
+      function clearAppBusy() {
+        busyCount = Math.max(0, busyCount - 1)
+        if (busyCount === 0) busyMessage = '작업 처리 중...'
+        updateBusyUi()
+      }
+
+      async function withAppBusy(message, task) {
+        setAppBusy(message)
+        try {
+          return await task()
+        } finally {
+          clearAppBusy()
+        }
+      }
+
+      let uiDialogQueue = []
+      let uiDialogResolve = null
+      let currentUiDialogConfig = null
+
+      function openNextUiDialog() {
+        if (uiDialogQueue.length === 0) return
+
+        const { config, resolve } = uiDialogQueue[0]
+        currentUiDialogConfig = config
+        uiDialogResolve = resolve
+
+        uiDialogTitle.textContent = config.title || '알림'
+        uiDialogMessage.textContent = config.message || ''
+        uiDialogOk.textContent = config.okText || '확인'
+        uiDialogCancel.textContent = config.cancelText || '취소'
+
+        uiDialogOk.className = config.danger
+          ? 'ui-dialog-btn danger'
+          : 'ui-dialog-btn primary'
+
+        if (config.mode === 'prompt') {
+          uiDialogInput.classList.remove('hidden')
+          uiDialogInput.value = config.defaultValue || ''
+        } else {
+          uiDialogInput.classList.add('hidden')
+          uiDialogInput.value = ''
+        }
+
+        if (config.mode === 'alert') {
+          uiDialogCancel.classList.add('hidden')
+        } else {
+          uiDialogCancel.classList.remove('hidden')
+        }
+
+        uiDialogOverlay.classList.add('open')
+        uiDialogOverlay.setAttribute('aria-hidden', 'false')
+        hideContextMenu()
+
+        requestAnimationFrame(() => {
+          if (config.mode === 'prompt') {
+            uiDialogInput.focus()
+            uiDialogInput.select()
+          } else {
+            uiDialogOk.focus()
+          }
+        })
+      }
+
+      function closeUiDialog(result) {
+        uiDialogOverlay.classList.remove('open')
+        uiDialogOverlay.setAttribute('aria-hidden', 'true')
+
+        const resolve = uiDialogResolve
+        uiDialogResolve = null
+        currentUiDialogConfig = null
+        uiDialogQueue.shift()
+
+        if (resolve) resolve(result)
+        if (uiDialogQueue.length > 0) {
+          openNextUiDialog()
+        }
+      }
+
+      function showUiDialog(config) {
+        return new Promise((resolve) => {
+          uiDialogQueue.push({ config, resolve })
+          if (uiDialogQueue.length === 1) {
+            openNextUiDialog()
+          }
+        })
+      }
+
+      function uiAlert(message, { title = '알림', okText = '확인' } = {}) {
+        return showUiDialog({ mode: 'alert', message, title, okText })
+      }
+
+      function uiConfirm(
+        message,
+        {
+          title = '확인',
+          okText = '확인',
+          cancelText = '취소',
+          danger = false,
+        } = {},
+      ) {
+        return showUiDialog({
+          mode: 'confirm',
+          message,
+          title,
+          okText,
+          cancelText,
+          danger,
+        }).then((value) => !!value)
+      }
+
+      function uiPrompt(
+        message,
+        defaultValue = '',
+        { title = '입력', okText = '확인', cancelText = '취소' } = {},
+      ) {
+        return showUiDialog({
+          mode: 'prompt',
+          message,
+          title,
+          okText,
+          cancelText,
+          defaultValue,
+        })
+      }
+
+      function initUiDialog() {
+        uiDialogOk.addEventListener('click', () => {
+          if (!currentUiDialogConfig) return
+
+          if (currentUiDialogConfig.mode === 'prompt') {
+            closeUiDialog(uiDialogInput.value)
+            return
+          }
+
+          if (currentUiDialogConfig.mode === 'confirm') {
+            closeUiDialog(true)
+            return
+          }
+
+          closeUiDialog(undefined)
+        })
+
+        uiDialogCancel.addEventListener('click', () => {
+          if (!currentUiDialogConfig) return
+
+          if (currentUiDialogConfig.mode === 'prompt') {
+            closeUiDialog(null)
+            return
+          }
+
+          closeUiDialog(false)
+        })
+
+        uiDialogOverlay.addEventListener('click', (event) => {
+          if (event.target !== uiDialogOverlay || !currentUiDialogConfig) return
+
+          if (currentUiDialogConfig.mode === 'alert') {
+            closeUiDialog(undefined)
+            return
+          }
+
+          if (currentUiDialogConfig.mode === 'prompt') {
+            closeUiDialog(null)
+            return
+          }
+
+          closeUiDialog(false)
+        })
+
+        uiDialogOverlay
+          .querySelector('.ui-dialog-panel')
+          .addEventListener('click', (event) => {
+            event.stopPropagation()
+          })
+
+        uiDialogInput.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault()
+            uiDialogOk.click()
+          }
+        })
+
+        document.addEventListener('keydown', (event) => {
+          if (!currentUiDialogConfig) return
+
+          if (event.key === 'Escape') {
+            event.preventDefault()
+            if (currentUiDialogConfig.mode === 'alert') {
+              closeUiDialog(undefined)
+            } else {
+              uiDialogCancel.click()
+            }
+            return
+          }
+
+          if (event.key === 'Enter' && currentUiDialogConfig.mode !== 'prompt') {
+            event.preventDefault()
+            uiDialogOk.click()
+          }
+        })
+      }
+
+      initPreviewResizer()
+      initTagPanelResizer()
+      initExternalDropZone()
+      initInternalDragGuard()
+      initMarqueeSelection()
+      initContextMenu()
+      initUiDialog()
+      initGridContextMenu()
+      initHistoryModal()
+      renderTagList()
+
+      function setPreviewWidth(width, persist = false) {
+        currentPreviewWidth = Math.min(
+          PREVIEW_MAX_WIDTH,
+          Math.max(PREVIEW_MIN_WIDTH, width),
+        )
+        document.documentElement.style.setProperty(
+          '--preview-width',
+          `${currentPreviewWidth}px`,
+        )
+        if (persist) {
+          localStorage.setItem(PREVIEW_WIDTH_KEY, String(currentPreviewWidth))
+        }
+      }
+
+      function initPreviewResizer() {
+        const savedWidth = Number(localStorage.getItem(PREVIEW_WIDTH_KEY))
+        if (!Number.isNaN(savedWidth) && savedWidth > 0) {
+          setPreviewWidth(savedWidth)
+        }
+
+        let resizing = false
+        let rafId = null
+        let pendingX = 0
+
+        const applyPending = () => {
+          rafId = null
+          setPreviewWidth(window.innerWidth - pendingX)
+        }
+
+        const stopResize = () => {
+          if (!resizing) return
+          resizing = false
+          if (rafId) {
+            cancelAnimationFrame(rafId)
+            rafId = null
+          }
+          previewResizer.classList.remove('dragging')
+          document.body.style.cursor = ''
+          document.body.style.userSelect = ''
+          localStorage.setItem(PREVIEW_WIDTH_KEY, String(currentPreviewWidth))
+        }
+
+        previewResizer.addEventListener('mousedown', (event) => {
+          resizing = true
+          previewResizer.classList.add('dragging')
+          document.body.style.cursor = 'col-resize'
+          document.body.style.userSelect = 'none'
+          event.preventDefault()
+        })
+
+        document.addEventListener('mousemove', (event) => {
+          if (!resizing) return
+          pendingX = event.clientX
+          if (!rafId) {
+            rafId = requestAnimationFrame(applyPending)
+          }
+        })
+
+        document.addEventListener('mouseup', stopResize)
+        window.addEventListener('blur', stopResize)
+      }
+
+      function setTagPanelHeight(height, persist = false) {
+        const maxHeight = Math.min(
+          TAG_PANEL_MAX_HEIGHT,
+          Math.floor(window.innerHeight * 0.6),
+        )
+        currentTagPanelHeight = Math.min(
+          maxHeight,
+          Math.max(TAG_PANEL_MIN_HEIGHT, height),
+        )
+        document.documentElement.style.setProperty(
+          '--tag-panel-height',
+          `${currentTagPanelHeight}px`,
+        )
+        if (persist) {
+          localStorage.setItem(
+            TAG_PANEL_HEIGHT_KEY,
+            String(currentTagPanelHeight),
+          )
+        }
+      }
+
+      function initTagPanelResizer() {
+        const savedHeight = Number(localStorage.getItem(TAG_PANEL_HEIGHT_KEY))
+        if (!Number.isNaN(savedHeight) && savedHeight > 0) {
+          setTagPanelHeight(savedHeight)
+        }
+
+        let resizing = false
+        let startY = 0
+        let startHeight = 0
+
+        const stopResize = () => {
+          if (!resizing) return
+          resizing = false
+          tagPanelResizer.classList.remove('dragging')
+          document.body.style.cursor = ''
+          document.body.style.userSelect = ''
+          localStorage.setItem(
+            TAG_PANEL_HEIGHT_KEY,
+            String(currentTagPanelHeight),
+          )
+        }
+
+        tagPanelResizer.addEventListener('mousedown', (event) => {
+          resizing = true
+          startY = event.clientY
+          startHeight = currentTagPanelHeight
+          tagPanelResizer.classList.add('dragging')
+          document.body.style.cursor = 'row-resize'
+          document.body.style.userSelect = 'none'
+          event.preventDefault()
+        })
+
+        document.addEventListener('mousemove', (event) => {
+          if (!resizing) return
+          const delta = startY - event.clientY
+          setTagPanelHeight(startHeight + delta)
+        })
+
+        document.addEventListener('mouseup', stopResize)
+        window.addEventListener('blur', stopResize)
+      }
+
+      fileSearchInput.addEventListener('input', () => {
+        clearTimeout(searchRenderTimer)
+        searchRenderTimer = setTimeout(() => {
+          gridVisibleLimit = GRID_BATCH_SIZE
+          renderExplorerGrid()
+        }, 150)
+      })
+
+      if (globalSearchToggle) {
+        globalSearchToggle.checked = globalSearchEnabled
+        globalSearchToggle.addEventListener('change', () => {
+          globalSearchEnabled = globalSearchToggle.checked
+          localStorage.setItem(
+            GLOBAL_SEARCH_KEY,
+            globalSearchEnabled ? 'true' : 'false',
+          )
+          gridVisibleLimit = GRID_BATCH_SIZE
+          renderExplorerGrid()
+        })
+      }
+
+      function getSearchQuery() {
+        return fileSearchInput.value.trim()
+      }
+
+      function isGlobalSearchActive() {
+        return globalSearchEnabled && getSearchQuery().length > 0
+      }
+
+      async function ensureBrowseTypesForSearch() {
+        try {
+          const folders = await fetchTopLevelFolders()
+          const merged = [...DEFAULT_BROWSE_TYPES]
+          for (const folder of folders) {
+            if (
+              folder &&
+              !HIDDEN_BROWSE_TYPES.has(folder) &&
+              !merged.includes(folder)
+            ) {
+              merged.push(folder)
+            }
+          }
+          BROWSE_TYPES = merged
+        } catch {
+          BROWSE_TYPES = [...DEFAULT_BROWSE_TYPES]
+        }
+      }
+
+      async function ensureTypeItemsCached(type) {
+        const cacheKey = `${getListWorkerBase()}::${type}`
+        if (serverListCache.has(cacheKey)) {
+          return serverListCache.get(cacheKey)
+        }
+
+        const items = await fetchServerFiles(type)
+        serverListCache.set(cacheKey, items)
+        return items
+      }
+
+      async function collectGlobalSearchMatches(query) {
+        await ensureBrowseTypesForSearch()
+
+        const normalizedQuery = query.trim().toLowerCase()
+        const matches = []
+
+        await Promise.all(
+          BROWSE_TYPES.map(async (type) => {
+            try {
+              const items = await ensureTypeItemsCached(type)
+              const groups = groupItemsByFolder(items, type)
+
+              for (const group of groups) {
+                for (const item of group.items) {
+                  const locationLabel = `${type}/${item.relativePath || item.name || ''}`
+                  const target =
+                    `${locationLabel} ${item.displayName || ''} ${item.name || ''}`.toLowerCase()
+
+                  if (target.includes(normalizedQuery)) {
+                    matches.push({ item, type, locationLabel })
+                  }
+                }
+              }
+            } catch {
+              // 일부 타입 목록 조회 실패 시 나머지 타입은 계속 검색
+            }
+          }),
+        )
+
+        return matches
+      }
+
+      function sortGlobalSearchMatches(matches) {
+        const list = [...matches]
+
+        switch (gridSortMode) {
+          case 'name-desc':
+            return list.sort((a, b) =>
+              (b.item.displayName || '').localeCompare(
+                a.item.displayName || '',
+                'ko',
+              ),
+            )
+          case 'date':
+            return list.sort(
+              (a, b) =>
+                new Date(b.item.uploaded || 0) - new Date(a.item.uploaded || 0),
+            )
+          case 'date-desc':
+            return list.sort(
+              (a, b) =>
+                new Date(a.item.uploaded || 0) - new Date(b.item.uploaded || 0),
+            )
+          case 'name':
+          default:
+            return list.sort((a, b) =>
+              (a.item.displayName || '').localeCompare(
+                a.item.displayName || '',
+                'ko',
+              ),
+            )
+        }
+      }
+
+      async function renderGlobalSearchResults() {
+        const requestId = ++globalSearchRequestId
+        const query = getSearchQuery()
+
+        breadcrumb.innerHTML = `${R2_BRAND_ROOT} / <strong>전체 검색</strong> / <strong>${escapeHtml(query)}</strong>`
+        activeCardEl = null
+        disconnectVideoThumbObserver()
+
+        folderGrid.replaceChildren()
+        const loading = document.createElement('div')
+        loading.className = 'preview-placeholder'
+        loading.textContent = '전체 검색 중...'
+        folderGrid.appendChild(loading)
+
+        try {
+          const matches = await collectGlobalSearchMatches(query)
+          if (requestId !== globalSearchRequestId) return
+
+          const sorted = sortGlobalSearchMatches(matches)
+          const visibleMatches = sorted.slice(0, gridVisibleLimit)
+          const fragment = document.createDocumentFragment()
+
+          for (const entry of visibleMatches) {
+            fragment.appendChild(
+              createFileCard(entry.item, entry.type, {
+                locationLabel: entry.locationLabel,
+              }),
+            )
+          }
+
+          if (sorted.length > visibleMatches.length) {
+            fragment.appendChild(
+              createLoadMoreCard(sorted.length - visibleMatches.length),
+            )
+          }
+
+          if (sorted.length === 0) {
+            const empty = document.createElement('div')
+            empty.className = 'preview-placeholder'
+            empty.textContent = `"${query}"에 해당하는 파일이 없습니다.`
+            fragment.appendChild(empty)
+          }
+
+          folderGrid.replaceChildren(fragment)
+          syncSelectionAfterRender()
+          setSidebarStatus(`전체 검색 결과 ${sorted.length}개`)
+        } catch {
+          if (requestId !== globalSearchRequestId) return
+
+          folderGrid.replaceChildren()
+          const error = document.createElement('div')
+          error.className = 'preview-placeholder'
+          error.textContent = '전체 검색 중 오류가 발생했습니다.'
+          folderGrid.appendChild(error)
+        }
+
+        renderTree()
+      }
+
+      function getItemKey(item, type) {
+        return item.key || `${type}/${item.relativePath || item.name || ''}`
+      }
+
+      function getFolderSelectionKey(folder, type) {
+        return `folder::${type}::${folder}`
+      }
+
+      function parseFolderSelectionKey(key) {
+        if (!key.startsWith('folder::')) return null
+        const body = key.slice(8)
+        const splitAt = body.indexOf('::')
+        if (splitAt === -1) return null
+        return {
+          type: body.slice(0, splitAt),
+          folder: body.slice(splitAt + 2),
+        }
+      }
+
+      function getBrowseTypeSelectionKey(browseType) {
+        return `browse::${browseType}`
+      }
+
+      function getImmediateChildFolders(parentFolder) {
+        const children = new Set()
+
+        for (const group of currentGroups) {
+          if (group.folder === ROOT_FOLDER) continue
+
+          if (!parentFolder) {
+            const slashIndex = group.folder.indexOf('/')
+            children.add(
+              slashIndex === -1
+                ? group.folder
+                : group.folder.slice(0, slashIndex),
+            )
+            continue
+          }
+
+          if (group.folder === parentFolder) continue
+
+          const prefix = `${parentFolder}/`
+          if (!group.folder.startsWith(prefix)) continue
+
+          const remainder = group.folder.slice(prefix.length)
+          if (!remainder) continue
+          const childName = remainder.split('/')[0]
+          children.add(`${parentFolder}/${childName}`)
+        }
+
+        return [...children].sort((a, b) => a.localeCompare(b, 'ko'))
+      }
+
+      function getFolderGroupItems(folder) {
+        const group = currentGroups.find((entry) => entry.folder === folder)
+        return group?.items || []
+      }
+
+      function getSelectableCards() {
+        return [
+          ...document.querySelectorAll('.file-card, .folder-card.selectable'),
+        ]
+      }
+
+      function getCurrentUploadPath() {
+        if (activeBrowseType) {
+          return activeFolder
+            ? `${activeBrowseType}/${activeFolder}`
+            : activeBrowseType
+        }
+        return null
+      }
+
+      function isViewingUploadPath(targetPath) {
+        return getCurrentUploadPath() === targetPath
+      }
+
+      function sanitizeNameInput(value) {
+        return String(value || '')
+          .trim()
+          .replace(/[/\\]/g, '')
+      }
+
+      function buildFolderPrefix(type, folder) {
+        if (folder === ROOT_FOLDER) return `${type}/`
+        return `${type}/${folder}/`
+      }
+
+      function invalidateListCache(type = activeBrowseType) {
+        if (!type) return
+        serverListCache.delete(`${getListWorkerBase()}::${type}`)
+      }
+
+      async function refreshAfterCrud(options = {}) {
+        const { reloadBrowseTypes = false, keepFolder = activeFolder } = options
+
+        invalidateListCache(activeBrowseType)
+        clearSelection()
+        selectedPreview = null
+
+        if (reloadBrowseTypes) {
+          await loadBrowseTypes()
+        }
+
+        if (activeBrowseType) {
+          await refreshServerFiles(true)
+          if (keepFolder) {
+            activeFolder = keepFolder
+            renderExplorerGrid()
+          }
+        } else {
+          renderExplorerGrid()
+        }
+      }
+
+      async function apiRequest(path, options = {}) {
+        const res = await fetch(`${UPLOAD_WORKER_BASE}${path}`, {
+          headers: { 'Content-Type': 'application/json' },
+          ...options,
+        })
+
+        let data = null
+        try {
+          data = await res.json()
+        } catch {}
+
+        if (!res.ok) {
+          const message = data?.error || `HTTP ${res.status}`
+          throw new Error(message)
+        }
+
+        return data
+      }
+
+      async function apiDelete(key) {
+        const encodedKey = String(key)
+          .split('/')
+          .map(encodeURIComponent)
+          .join('/')
+        return apiRequest(`/${encodedKey}`, { method: 'DELETE' })
+      }
+
+      async function apiMove(from, to) {
+        return apiRequest('/move', {
+          method: 'POST',
+          body: JSON.stringify({ from, to }),
+        })
+      }
+
+      async function apiMkdir(path) {
+        return apiRequest('/mkdir', {
+          method: 'POST',
+          body: JSON.stringify({ path }),
+        })
+      }
+
+      async function apiRmdir(prefix) {
+        return apiRequest('/rmdir', {
+          method: 'POST',
+          body: JSON.stringify({ prefix }),
+        })
+      }
+
+      async function apiMvdir(from, to) {
+        return apiRequest('/mvdir', {
+          method: 'POST',
+          body: JSON.stringify({ from, to }),
+        })
+      }
+
+      function hideContextMenu() {
+        ctxMenuEl.classList.remove('open')
+        ctxMenuEl.setAttribute('aria-hidden', 'true')
+        ctxMenuEl.replaceChildren()
+      }
+
+      function showContextMenu(x, y, items) {
+        hideContextMenu()
+        if (!items.length) return
+
+        for (const item of items) {
+          if (item.separator) {
+            const separator = document.createElement('div')
+            separator.className = 'ctx-menu-separator'
+            ctxMenuEl.appendChild(separator)
+            continue
+          }
+
+          const button = document.createElement('button')
+          button.type = 'button'
+          button.className = item.danger
+            ? 'ctx-menu-item danger'
+            : 'ctx-menu-item'
+          button.textContent = item.label
+          button.onclick = async (event) => {
+            event.stopPropagation()
+            hideContextMenu()
+            await item.action()
+          }
+          ctxMenuEl.appendChild(button)
+        }
+
+        ctxMenuEl.classList.add('open')
+        ctxMenuEl.setAttribute('aria-hidden', 'false')
+        ctxMenuEl.style.visibility = 'hidden'
+
+        const rect = ctxMenuEl.getBoundingClientRect()
+        const maxLeft = window.innerWidth - rect.width - 8
+        const maxTop = window.innerHeight - rect.height - 8
+        ctxMenuEl.style.left = `${Math.max(8, Math.min(x, maxLeft))}px`
+        ctxMenuEl.style.top = `${Math.max(8, Math.min(y, maxTop))}px`
+        ctxMenuEl.style.visibility = 'visible'
+      }
+
+      function initContextMenu() {
+        document.addEventListener('click', hideContextMenu)
+        document.addEventListener('contextmenu', (event) => {
+          if (!ctxMenuEl.contains(event.target)) {
+            hideContextMenu()
+          }
+        })
+        document.addEventListener('keydown', (event) => {
+          if (event.key === 'Escape') hideContextMenu()
+        })
+        window.addEventListener('scroll', hideContextMenu, true)
+        window.addEventListener('blur', hideContextMenu)
+      }
+
+      function initGridContextMenu() {
+        folderGrid.addEventListener('contextmenu', (event) => {
+          if (event.target.closest('.file-card')) return
+          if (event.target.closest('.folder-card')) return
+          if (event.target.closest('.load-more-card')) return
+
+          event.preventDefault()
+          showContextMenu(event.clientX, event.clientY, [
+            {
+              label: '새 폴더',
+              action: () => promptCreateFolder(),
+            },
+          ])
+        })
+      }
+
+      async function promptCreateFolder() {
+        if (isAppBusy()) return
+
+        const name = sanitizeNameInput(
+          await uiPrompt('새 폴더 이름을 입력하세요.'),
+        )
+        if (!name) return
+
+        let parentPath = getCurrentUploadPath()
+        let createdFolderPath = null
+        if (!parentPath && !activeBrowseType) {
+          parentPath = name
+        } else if (!parentPath) {
+          await uiAlert('폴더를 만들 위치를 먼저 선택하세요.')
+          return
+        } else {
+          parentPath = `${parentPath}/${name}`
+          if (activeBrowseType) {
+            createdFolderPath = activeFolder
+              ? `${activeFolder}/${name}`
+              : name
+          }
+        }
+
+        try {
+          await withAppBusy('폴더 생성 중...', async () => {
+            await apiMkdir(`${parentPath}/`)
+            await refreshAfterCrud({
+              reloadBrowseTypes: !activeBrowseType,
+              keepFolder: createdFolderPath,
+            })
+          })
+          setSidebarStatus(`폴더 "${name}"을(를) 만들었습니다.`)
+        } catch (err) {
+          await uiAlert(`폴더 생성 실패: ${err.message}`)
+        }
+      }
+
+      async function renameFileItem(item, type) {
+        if (isAppBusy()) return
+
+        const oldKey = getItemStorageKey(item, type)
+        const currentName =
+          item.displayName || item.name || oldKey.split('/').pop()
+        const newName = sanitizeNameInput(
+          await uiPrompt('새 파일 이름을 입력하세요.', currentName),
+        )
+        if (!newName || newName === currentName) return
+
+        const parent = oldKey.includes('/')
+          ? oldKey.slice(0, oldKey.lastIndexOf('/') + 1)
+          : ''
+        const newKey = `${parent}${newName}`
+
+        try {
+          await withAppBusy('파일 이름 변경 중...', async () => {
+            await apiMove(oldKey, newKey)
+            await refreshAfterCrud()
+          })
+          setSidebarStatus(`파일 이름을 "${newName}"(으)로 변경했습니다.`)
+        } catch (err) {
+          await uiAlert(`이름 변경 실패: ${err.message}`)
+        }
+      }
+
+      async function deleteFileItem(item, type) {
+        if (isAppBusy()) return
+
+        const key = getItemStorageKey(item, type)
+        const name = item.displayName || item.name || key.split('/').pop()
+        if (
+          !(await uiConfirm(`"${name}" 파일을 삭제할까요?`, {
+            title: '파일 삭제',
+            danger: true,
+          }))
+        )
+          return
+
+        try {
+          await withAppBusy('파일 삭제 중...', async () => {
+            await apiDelete(key)
+            await refreshAfterCrud()
+          })
+          setSidebarStatus(`파일 "${name}"을(를) 삭제했습니다.`)
+        } catch (err) {
+          await uiAlert(`삭제 실패: ${err.message}`)
+        }
+      }
+
+      async function deleteSelectedFiles() {
+        if (isAppBusy()) return
+
+        const selections = [...selectedItems.values()]
+        if (selections.length === 0) return
+
+        const fileEntries = selections.filter(
+          (entry) => entry.kind === 'file' || entry.item,
+        )
+        const folderEntries = selections.filter(
+          (entry) => entry.kind === 'folder',
+        )
+        const browseEntries = selections.filter(
+          (entry) => entry.kind === 'browse',
+        )
+
+        const labelForEntry = (entry) => {
+          if (entry.kind === 'browse') return entry.browseType
+          if (entry.kind === 'folder') return getFolderDisplayName(entry.folder)
+          return entry.item.displayName || entry.item.name || '파일'
+        }
+
+        const names = selections.map(labelForEntry)
+        const preview = names.slice(0, 10).join('\n')
+        const extra = names.length > 10 ? `\n... 외 ${names.length - 10}개` : ''
+        const message = `선택한 ${selections.length}개 항목을 삭제할까요?\n\n${preview}${extra}\n\n이 작업은 되돌릴 수 없습니다.`
+        if (
+          !(await uiConfirm(message, {
+            title: '선택 항목 삭제',
+            danger: true,
+          }))
+        )
+          return
+
+        const selectedFolderPaths = new Set(
+          folderEntries.map((entry) => entry.folder),
+        )
+        const foldersToDelete = folderEntries
+          .filter((entry) => {
+            const parts = entry.folder.split('/')
+            for (let index = 1; index < parts.length; index += 1) {
+              if (selectedFolderPaths.has(parts.slice(0, index).join('/'))) {
+                return false
+              }
+            }
+            return true
+          })
+          .sort(
+            (a, b) => b.folder.split('/').length - a.folder.split('/').length,
+          )
+
+        let success = 0
+        let failed = []
+        let needsBrowseReload = browseEntries.length > 0
+
+        try {
+          await withAppBusy(
+            `선택 항목 ${selections.length}개 삭제 중...`,
+            async () => {
+              const fileResults = await mapWithConcurrency(
+                fileEntries,
+                20,
+                async (entry) => {
+                  const key = getItemStorageKey(entry.item, entry.type)
+                  const name =
+                    entry.item.displayName ||
+                    entry.item.name ||
+                    key.split('/').pop()
+                  try {
+                    await apiDelete(key)
+                    return { ok: true }
+                  } catch (err) {
+                    return { ok: false, name, message: err.message }
+                  }
+                },
+              )
+
+              success += fileResults.filter((result) => result.ok).length
+              failed.push(...fileResults.filter((result) => !result.ok))
+
+              for (const entry of foldersToDelete) {
+                const displayName = getFolderDisplayName(entry.folder)
+                try {
+                  await apiRmdir(buildFolderPrefix(entry.type, entry.folder))
+                  if (
+                    activeFolder === entry.folder ||
+                    activeFolder?.startsWith(`${entry.folder}/`)
+                  ) {
+                    activeFolder = null
+                  }
+                  success += 1
+                } catch (err) {
+                  failed.push({ name: displayName, message: err.message })
+                }
+              }
+
+              for (const entry of browseEntries) {
+                try {
+                  await apiRmdir(`${entry.browseType}/`)
+                  if (activeBrowseType === entry.browseType) {
+                    activeBrowseType = null
+                    activeFolder = null
+                  }
+                  success += 1
+                } catch (err) {
+                  failed.push({ name: entry.browseType, message: err.message })
+                }
+              }
+
+              await refreshAfterCrud({ reloadBrowseTypes: needsBrowseReload })
+            },
+          )
+        } catch (err) {
+          await uiAlert(`삭제 실패: ${err.message}`)
+          return
+        }
+
+        setSidebarStatus(
+          `${success}개 항목 삭제 완료${failed.length ? `, ${failed.length}개 실패` : ''}`,
+        )
+
+        if (failed.length > 0) {
+          const failedNames = failed
+            .slice(0, 5)
+            .map((result) => `${result.name}: ${result.message}`)
+            .join('\n')
+          await uiAlert(
+            `${failed.length}개 항목 삭제에 실패했습니다.\n\n${failedNames}`,
+          )
+        }
+
+        updateGridToolbar()
+      }
+
+      async function renameFolderItem(type, folder) {
+        if (isAppBusy()) return
+
+        if (folder === ROOT_FOLDER) {
+          await uiAlert('루트 폴더 이름은 변경할 수 없습니다.')
+          return
+        }
+
+        const currentName = getFolderDisplayName(folder)
+        const newName = sanitizeNameInput(
+          await uiPrompt('새 폴더 이름을 입력하세요.', currentName),
+        )
+        if (!newName || newName === currentName) return
+
+        const parent = folder.includes('/')
+          ? folder.slice(0, folder.lastIndexOf('/') + 1)
+          : ''
+        const oldPrefix = buildFolderPrefix(type, folder)
+        const newFolder = `${parent}${newName}`
+        const newPrefix = buildFolderPrefix(type, newFolder)
+
+        try {
+          await withAppBusy('폴더 이름 변경 중...', async () => {
+            await apiMvdir(oldPrefix, newPrefix)
+            if (activeFolder === folder) {
+              activeFolder = newFolder
+            }
+            await refreshAfterCrud({ keepFolder: activeFolder })
+          })
+          setSidebarStatus(`폴더 이름을 "${newName}"(으)로 변경했습니다.`)
+        } catch (err) {
+          await uiAlert(`폴더 이름 변경 실패: ${err.message}`)
+        }
+      }
+
+      async function deleteFolderItem(type, folder) {
+        if (isAppBusy()) return
+
+        if (folder === ROOT_FOLDER) {
+          await uiAlert('루트 폴더는 삭제할 수 없습니다.')
+          return
+        }
+
+        const displayName = getFolderDisplayName(folder)
+        if (
+          !(await uiConfirm(
+            `"${displayName}" 폴더와 안의 모든 파일을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`,
+            { title: '폴더 삭제', danger: true },
+          ))
+        )
+          return
+
+        const prefix = buildFolderPrefix(type, folder)
+
+        try {
+          await withAppBusy('폴더 삭제 중...', async () => {
+            await apiRmdir(prefix)
+            if (
+              activeFolder === folder ||
+              activeFolder?.startsWith(`${folder}/`)
+            ) {
+              activeFolder = null
+            }
+            await refreshAfterCrud()
+          })
+          setSidebarStatus(`폴더 "${displayName}"을(를) 삭제했습니다.`)
+        } catch (err) {
+          await uiAlert(`폴더 삭제 실패: ${err.message}`)
+        }
+      }
+
+      async function renameBrowseTypeItem(browseType) {
+        if (isAppBusy()) return
+
+        const newName = sanitizeNameInput(
+          await uiPrompt('새 폴더 이름을 입력하세요.', browseType),
+        )
+        if (!newName || newName === browseType) return
+
+        try {
+          await withAppBusy('폴더 이름 변경 중...', async () => {
+            await apiMvdir(`${browseType}/`, `${newName}/`)
+            if (activeBrowseType === browseType) {
+              activeBrowseType = newName
+            }
+            await refreshAfterCrud({ reloadBrowseTypes: true })
+          })
+          setSidebarStatus(`폴더 이름을 "${newName}"(으)로 변경했습니다.`)
+        } catch (err) {
+          await uiAlert(`폴더 이름 변경 실패: ${err.message}`)
+        }
+      }
+
+      async function deleteBrowseTypeItem(browseType) {
+        if (isAppBusy()) return
+
+        if (
+          !(await uiConfirm(
+            `"${browseType}" 폴더와 안의 모든 파일을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`,
+            { title: '폴더 삭제', danger: true },
+          ))
+        )
+          return
+
+        try {
+          await withAppBusy('폴더 삭제 중...', async () => {
+            await apiRmdir(`${browseType}/`)
+            if (activeBrowseType === browseType) {
+              activeBrowseType = null
+              activeFolder = null
+            }
+            await refreshAfterCrud({ reloadBrowseTypes: true })
+          })
+          setSidebarStatus(`폴더 "${browseType}"을(를) 삭제했습니다.`)
+        } catch (err) {
+          await uiAlert(`폴더 삭제 실패: ${err.message}`)
+        }
+      }
+
+      function attachBrowseTypeContextMenu(element, browseType) {
+        element.oncontextmenu = (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          showContextMenu(event.clientX, event.clientY, [
+            {
+              label: '이름 변경',
+              action: () => renameBrowseTypeItem(browseType),
+            },
+            { separator: true },
+            {
+              label: '삭제',
+              danger: true,
+              action: () => deleteBrowseTypeItem(browseType),
+            },
+          ])
+        }
+      }
+
+      function attachFileContextMenu(card, item, type) {
+        card.oncontextmenu = (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          showContextMenu(event.clientX, event.clientY, [
+            {
+              label: '이름 변경',
+              action: () => renameFileItem(item, type),
+            },
+            { separator: true },
+            {
+              label: '삭제',
+              danger: true,
+              action: () => deleteFileItem(item, type),
+            },
+          ])
+        }
+      }
+
+      function attachFolderContextMenu(element, type, folder) {
+        element.oncontextmenu = (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          showContextMenu(event.clientX, event.clientY, [
+            {
+              label: '이름 변경',
+              action: () => renameFolderItem(type, folder),
+            },
+            { separator: true },
+            {
+              label: '삭제',
+              danger: true,
+              action: () => deleteFolderItem(type, folder),
+            },
+          ])
+        }
+      }
+
+      function updateUploadQueueStatus() {
+        const pendingRows = getPendingUploadRows()
+        const totalRows = fileListDiv.querySelectorAll('.upload-row').length
+        const busy = isAppBusy()
+
+        if (totalRows === 0) {
+          uploadQueueStatus.textContent = '업로드 대기열 없음'
+          btnUploadAll.disabled = true
+          return
+        }
+
+        uploadQueueStatus.textContent = `대기 ${pendingRows.length}개 / 전체 ${totalRows}개`
+        btnUploadAll.disabled = pendingRows.length === 0 || busy
+      }
+
+      function getPendingUploadRows() {
+        return [...fileListDiv.querySelectorAll('.upload-row')].filter(
+          (row) => {
+            const uploadButton = row.querySelector('.upload-button')
+            return uploadButton && !uploadButton.classList.contains('completed')
+          },
+        )
+      }
+
+      function getPendingUploadJobs() {
+        return getPendingUploadRows()
+          .map((row) => ({
+            row,
+            file: row.__uploadFile,
+            targetPath: row.__uploadPath,
+            uploadButton: row.querySelector('.upload-button'),
+          }))
+          .filter((job) => job.file && job.targetPath && job.uploadButton)
+      }
+
+      function getUploadJobKey(job) {
+        return `${job.targetPath}/${job.file.name}`
+      }
+
+      function buildUploadUrl(targetPath, fileName, forceOverwrite = false) {
+        const encodedPath = String(targetPath)
+          .split('/')
+          .map((part) => encodeURIComponent(part))
+          .join('/')
+        const encodedName = encodeURIComponent(fileName)
+        let url = `${UPLOAD_WORKER_BASE}/${encodedPath}/${encodedName}`
+        if (forceOverwrite) {
+          url += '?overwrite=true'
+        }
+        return url
+      }
+
+      const VIDEO_UPLOAD_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.m4v'])
+
+      function isVideoFileName(name) {
+        const dot = String(name).lastIndexOf('.')
+        if (dot === -1) return false
+        return VIDEO_UPLOAD_EXTENSIONS.has(
+          String(name).slice(dot).toLowerCase(),
+        )
+      }
+
+      function buildEmbedKeyForUpload(targetPath, fileName) {
+        if (!fileName) return null
+
+        const dot = fileName.lastIndexOf('.')
+        if (dot === -1) return null
+
+        const base = fileName.slice(0, dot)
+        return `embed/${base}.html`
+      }
+
+      function buildEmbedHeadUrl(embedKey) {
+        const encodedKey = String(embedKey)
+          .split('/')
+          .map((part) => encodeURIComponent(part))
+          .join('/')
+        return `${UPLOAD_WORKER_BASE}/${encodedKey}`
+      }
+
+      function lookupEmbedExistsInCache(embedKey) {
+        const cacheKey = `${getListWorkerBase()}::embed`
+        if (!serverListCache.has(cacheKey)) return null
+
+        const embedName = embedKey.startsWith('embed/')
+          ? embedKey.slice('embed/'.length)
+          : embedKey
+        const items = serverListCache.get(cacheKey) || []
+        return items.some((item) => {
+          const itemKey = item.key || `embed/${item.name || ''}`
+          return itemKey === embedKey || item.name === embedName
+        })
+      }
+
+      async function checkEmbedExists(embedKey) {
+        const cached = lookupEmbedExistsInCache(embedKey)
+        if (cached === true) return true
+
+        try {
+          const res = await fetch(buildEmbedHeadUrl(embedKey), {
+            method: 'HEAD',
+          })
+          return res.ok
+        } catch {
+          return false
+        }
+      }
+
+      function lookupExistsInListCache(targetPath, fileName) {
+        const type = String(targetPath).split('/')[0]
+        if (!type) return null
+        const cacheKey = `${getListWorkerBase()}::${type}`
+        if (!serverListCache.has(cacheKey)) return null
+
+        const storageKey = `${targetPath}/${fileName}`
+        const items = serverListCache.get(cacheKey) || []
+        return items.some(
+          (item) => getItemStorageKey(item, type) === storageKey,
+        )
+      }
+
+      async function checkUploadExists(targetPath, fileName) {
+        // 목록 캐시가 있으면 HEAD 요청 없이 판정해 Worker 요청을 아낀다.
+        const cached = lookupExistsInListCache(targetPath, fileName)
+        if (cached === true) return true
+
+        try {
+          const res = await fetch(buildUploadUrl(targetPath, fileName), {
+            method: 'HEAD',
+          })
+          return res.ok
+        } catch {
+          return false
+        }
+      }
+
+      async function mapWithConcurrency(items, limit, mapper) {
+        const results = new Array(items.length)
+        let nextIndex = 0
+
+        async function worker() {
+          while (nextIndex < items.length) {
+            const currentIndex = nextIndex
+            nextIndex += 1
+            results[currentIndex] = await mapper(
+              items[currentIndex],
+              currentIndex,
+            )
+          }
+        }
+
+        const workerCount = Math.min(limit, items.length)
+        await Promise.all(Array.from({ length: workerCount }, worker))
+        return results
+      }
+
+      async function classifyUploadConflict(job) {
+        const fileExists = await checkUploadExists(
+          job.targetPath,
+          job.file.name,
+        )
+        if (fileExists) return 'file'
+
+        if (isVideoFileName(job.file.name)) {
+          const embedKey = buildEmbedKeyForUpload(job.targetPath, job.file.name)
+          if (embedKey && (await checkEmbedExists(embedKey))) {
+            return 'embed'
+          }
+        }
+
+        return 'none'
+      }
+
+      async function findUploadConflicts(jobs) {
+        const DUPLICATE_CHECK_CONCURRENCY = 20
+        const conflictTypes = await mapWithConcurrency(
+          jobs,
+          DUPLICATE_CHECK_CONCURRENCY,
+          classifyUploadConflict,
+        )
+
+        const fileDuplicates = jobs.filter(
+          (_, index) => conflictTypes[index] === 'file',
+        )
+        const embedDuplicates = jobs.filter(
+          (_, index) => conflictTypes[index] === 'embed',
+        )
+        const duplicateKeys = new Set(
+          jobs
+            .filter((_, index) => conflictTypes[index] !== 'none')
+            .map((job) => getUploadJobKey(job)),
+        )
+
+        return { fileDuplicates, embedDuplicates, duplicateKeys }
+      }
+
+      async function findDuplicateUploadJobs(jobs) {
+        const DUPLICATE_CHECK_CONCURRENCY = 20
+        const existsFlags = await mapWithConcurrency(
+          jobs,
+          DUPLICATE_CHECK_CONCURRENCY,
+          async (job) => checkUploadExists(job.targetPath, job.file.name),
+        )
+        return jobs.filter((_, index) => existsFlags[index])
+      }
+
+      function findQueueInternalDuplicateKeys(jobs) {
+        const seen = new Set()
+        const duplicates = new Set()
+
+        for (const job of jobs) {
+          const key = getUploadJobKey(job)
+          if (seen.has(key)) {
+            duplicates.add(key)
+          } else {
+            seen.add(key)
+          }
+        }
+
+        return [...duplicates]
+      }
+
+      function findQueueInternalEmbedDuplicateKeys(jobs) {
+        const seen = new Map()
+        const duplicates = new Set()
+
+        for (const job of jobs) {
+          if (!isVideoFileName(job.file.name)) continue
+
+          const embedKey = buildEmbedKeyForUpload(job.targetPath, job.file.name)
+          if (!embedKey) continue
+
+          const uploadKey = getUploadJobKey(job)
+          const previousUploadKey = seen.get(embedKey)
+          if (previousUploadKey && previousUploadKey !== uploadKey) {
+            duplicates.add(`${previousUploadKey}\n${uploadKey}\n→ ${embedKey}`)
+          } else {
+            seen.set(embedKey, uploadKey)
+          }
+        }
+
+        return [...duplicates]
+      }
+
+      async function confirmBatchOverwrite(duplicateJobs) {
+        const names = duplicateJobs.map((job) => getUploadJobKey(job))
+        const preview = names.slice(0, 10).join('\n')
+        const extra = names.length > 10 ? `\n... 외 ${names.length - 10}개` : ''
+        return uiConfirm(
+          `중복 파일 ${names.length}개가 있습니다.\n\n${preview}${extra}\n\n모두 덮어쓸까요?`,
+          { title: '덮어쓰기 확인' },
+        )
+      }
+
+      async function confirmBatchUploadOverwrite(fileDuplicates, embedDuplicates) {
+        const parts = []
+
+        if (fileDuplicates.length > 0) {
+          const names = fileDuplicates.map((job) => getUploadJobKey(job))
+          const preview = names.slice(0, 10).join('\n')
+          const extra =
+            names.length > 10 ? `\n... 외 ${names.length - 10}개` : ''
+          parts.push(
+            `[원본 파일 중복]\n업로드하려는 현재 폴더 안에 같은 파일명이 이미 있습니다.\n덮어쓰면 해당 폴더의 기존 파일이 교체됩니다.\n\n중복 ${names.length}개:\n${preview}${extra}`,
+          )
+        }
+
+        if (embedDuplicates.length > 0) {
+          const names = embedDuplicates.map((job) => {
+            const embedKey = buildEmbedKeyForUpload(
+              job.targetPath,
+              job.file.name,
+            )
+            return `${getUploadJobKey(job)} → ${embedKey}`
+          })
+          const preview = names.slice(0, 10).join('\n')
+          const extra =
+            names.length > 10 ? `\n... 외 ${names.length - 10}개` : ''
+          parts.push(
+            `[태그(embed HTML) 중복]\n원본 파일명은 중복이 아니지만, iframe용 HTML을 embed 폴더에 만들 때 같은 태그 파일명이 이미 있습니다.\n덮어쓰면 기존 iframe 태그 HTML이 교체됩니다. 파일명을 바꿔 넣으면 피할 수 있습니다.\n\n중복 ${names.length}개:\n${preview}${extra}`,
+          )
+        }
+
+        if (parts.length === 0) return true
+
+        return uiConfirm(`${parts.join('\n\n')}\n\n모두 덮어쓸까요?`, {
+          title: '업로드 덮어쓰기 확인',
+        })
+      }
+
+      async function enqueueFiles(files, targetPath) {
+        if (!files || !files.length) return
+
+        if (!targetPath) {
+          await uiAlert(
+            '업로드할 폴더를 먼저 선택하세요. (왼쪽 사이드바에서 폴더를 열어주세요)',
+          )
+          return
+        }
+
+        for (const file of files) {
+          const fileRow = document.createElement('div')
+          fileRow.className = 'upload-row'
+
+          const fileLabel = document.createElement('span')
+          fileLabel.innerText = `${targetPath}/${file.name}`
+
+          const uploadButton = document.createElement('button')
+          uploadButton.className = 'upload-button'
+          uploadButton.innerText = '업로드'
+          uploadButton.onclick = () =>
+            uploadSingleFile(file, targetPath, uploadButton, fileRow)
+
+          const resetButton = document.createElement('button')
+          resetButton.className = 'upload-button'
+          resetButton.innerText = '삭제'
+          resetButton.onclick = () => {
+            fileRow.remove()
+            updateUploadQueueStatus()
+          }
+
+          fileRow.__uploadFile = file
+          fileRow.__uploadPath = targetPath
+
+          fileRow.appendChild(fileLabel)
+          fileRow.appendChild(uploadButton)
+          fileRow.appendChild(resetButton)
+          fileListDiv.appendChild(fileRow)
+        }
+
+        updateUploadQueueStatus()
+      }
+
+      function isOsFileDrop(event) {
+        if (suppressExternalDrop) return false
+        const dt = event.dataTransfer
+        if (!dt) return false
+
+        const types = Array.from(dt.types)
+        if (!types.includes('Files')) return false
+
+        // 페이지 안 이미지/파일 카드 드래그는 text/html 또는 text/uri-list가 함께 옴
+        if (types.includes('text/html') || types.includes('text/uri-list')) {
+          return false
+        }
+
+        return (dt.files?.length || 0) > 0
+      }
+
+      function hasExternalFiles(event) {
+        if (suppressExternalDrop) return false
+        if (!event.dataTransfer) return false
+
+        const types = Array.from(event.dataTransfer.types)
+        if (!types.includes('Files')) return false
+
+        // 탐색기에서 온 파일은 보통 Files만 포함. 그리드 썸네일 드래그는 html/uri-list도 포함
+        if (types.includes('text/html') || types.includes('text/uri-list')) {
+          return false
+        }
+
+        return true
+      }
+
+      function initInternalDragGuard() {
+        folderGrid.addEventListener(
+          'dragstart',
+          (event) => {
+            if (!event.target.closest('.file-card')) return
+            suppressExternalDrop = true
+            event.preventDefault()
+            event.stopPropagation()
+          },
+          true,
+        )
+
+        folderGrid.addEventListener('mousedown', (event) => {
+          if (!event.target.closest('.file-card')) return
+          suppressExternalDrop = false
+        })
+
+        document.addEventListener('dragend', () => {
+          suppressExternalDrop = false
+        })
+      }
+
+      function initExternalDropZone() {
+        let dragDepth = 0
+
+        const showDropState = () => workspaceArea.classList.add('drop-active')
+        const hideDropState = () =>
+          workspaceArea.classList.remove('drop-active')
+
+        workspaceArea.addEventListener('dragenter', (event) => {
+          if (!hasExternalFiles(event)) return
+          event.preventDefault()
+          dragDepth += 1
+          showDropState()
+        })
+
+        workspaceArea.addEventListener('dragover', (event) => {
+          if (!hasExternalFiles(event)) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = 'copy'
+          showDropState()
+        })
+
+        workspaceArea.addEventListener('dragleave', (event) => {
+          if (!hasExternalFiles(event)) return
+          dragDepth -= 1
+          if (dragDepth <= 0) {
+            dragDepth = 0
+            hideDropState()
+          }
+        })
+
+        workspaceArea.addEventListener('drop', (event) => {
+          if (!isOsFileDrop(event)) return
+          event.preventDefault()
+          dragDepth = 0
+          hideDropState()
+          enqueueFiles(event.dataTransfer.files, getCurrentUploadPath())
+        })
+      }
+
+      function clearSelection() {
+        selectedItems.clear()
+        lastSelectedKey = null
+        document
+          .querySelectorAll('.grid-card.selected, .grid-card.active')
+          .forEach((el) => {
+            el.classList.remove('selected', 'active')
+          })
+        activeCardEl = null
+      }
+
+      function syncSelectionAfterRender() {
+        const nextSelection = new Map()
+
+        document
+          .querySelectorAll('.file-card, .folder-card.selectable')
+          .forEach((card) => {
+            const key = card.dataset.selectionKey
+            if (!key || !selectedItems.has(key)) return
+
+            const prev = selectedItems.get(key)
+            card.classList.add('selected')
+            nextSelection.set(key, { ...prev, el: card })
+
+            if (
+              prev.kind === 'file' &&
+              selectedPreview &&
+              getItemKey(selectedPreview.item, selectedPreview.type) === key
+            ) {
+              card.classList.add('active')
+              activeCardEl = card
+            }
+          })
+
+        selectedItems = nextSelection
+        updateGridToolbar()
+      }
+
+      function addCardToSelection(cardEl, options = {}) {
+        const key = cardEl.dataset.selectionKey
+        if (!key) return
+
+        if (key.startsWith('browse::')) {
+          addBrowseTypeToSelection(key.slice(8), cardEl, options)
+          return
+        }
+
+        const folderInfo = parseFolderSelectionKey(key)
+        if (folderInfo) {
+          addFolderToSelection(
+            folderInfo.folder,
+            folderInfo.type,
+            cardEl,
+            options,
+          )
+          return
+        }
+
+        const found = findItemByKey(key)
+        if (found) {
+          addToSelection(found.item, found.type, cardEl, options)
+        }
+      }
+
+      function addToSelection(item, type, cardEl, options = {}) {
+        const { toggle = false, append = false } = options
+        const key = getItemKey(item, type)
+
+        if (toggle && selectedItems.has(key)) {
+          selectedItems.delete(key)
+          cardEl?.classList.remove('selected', 'active')
+          if (
+            selectedPreview &&
+            getItemKey(selectedPreview.item, selectedPreview.type) === key
+          ) {
+            const remaining = [...selectedItems.values()].filter(
+              (entry) => entry.kind === 'file' || entry.item,
+            )
+            selectedPreview = remaining.length
+              ? {
+                  item: remaining[remaining.length - 1].item,
+                  type: remaining[remaining.length - 1].type,
+                }
+              : null
+            renderPreview(selectedPreview)
+          }
+          updateGridToolbar()
+          return
+        }
+
+        if (!append && !toggle) {
+          clearSelection()
+        }
+
+        selectedItems.set(key, { kind: 'file', item, type, el: cardEl })
+        cardEl?.classList.add('selected')
+        lastSelectedKey = key
+        selectedPreview = { item, type }
+
+        document
+          .querySelectorAll('.file-card.active')
+          .forEach((el) => el.classList.remove('active'))
+        cardEl?.classList.add('active')
+        activeCardEl = cardEl
+        renderPreview(selectedPreview)
+        updateGridToolbar()
+      }
+
+      function addFolderToSelection(folder, type, cardEl, options = {}) {
+        const { toggle = false, append = false } = options
+        const key = getFolderSelectionKey(folder, type)
+
+        if (toggle && selectedItems.has(key)) {
+          selectedItems.delete(key)
+          cardEl?.classList.remove('selected', 'active')
+          updateGridToolbar()
+          return
+        }
+
+        if (!append && !toggle) {
+          clearSelection()
+        }
+
+        selectedItems.set(key, { kind: 'folder', folder, type, el: cardEl })
+        cardEl?.classList.add('selected')
+        lastSelectedKey = key
+        updateGridToolbar()
+      }
+
+      function addBrowseTypeToSelection(browseType, cardEl, options = {}) {
+        const { toggle = false, append = false } = options
+        const key = getBrowseTypeSelectionKey(browseType)
+
+        if (toggle && selectedItems.has(key)) {
+          selectedItems.delete(key)
+          cardEl?.classList.remove('selected', 'active')
+          updateGridToolbar()
+          return
+        }
+
+        if (!append && !toggle) {
+          clearSelection()
+        }
+
+        selectedItems.set(key, { kind: 'browse', browseType, el: cardEl })
+        cardEl?.classList.add('selected')
+        lastSelectedKey = key
+        updateGridToolbar()
+      }
+
+      function selectAllVisibleItems() {
+        if (isAppBusy()) return
+
+        const cards = getSelectableCards()
+        if (cards.length === 0) return
+
+        clearSelection()
+        cards.forEach((card, index) => {
+          addCardToSelection(card, { append: index !== 0 })
+        })
+      }
+
+      function selectRangeToCard(targetCard) {
+        const cards = getSelectableCards()
+        const targetKey = targetCard.dataset.selectionKey
+        const anchorKey = lastSelectedKey || targetKey
+        const startIndex = cards.findIndex(
+          (card) => card.dataset.selectionKey === anchorKey,
+        )
+        const endIndex = cards.findIndex(
+          (card) => card.dataset.selectionKey === targetKey,
+        )
+
+        if (startIndex === -1 || endIndex === -1) {
+          addCardToSelection(targetCard)
+          return
+        }
+
+        const [from, to] =
+          startIndex < endIndex
+            ? [startIndex, endIndex]
+            : [endIndex, startIndex]
+        clearSelection()
+
+        for (let index = from; index <= to; index += 1) {
+          addCardToSelection(cards[index], { append: index !== from })
+        }
+      }
+
+      function findItemByKey(key) {
+        for (const group of currentGroups) {
+          for (const item of group.items) {
+            if (getItemKey(item, currentServerType) === key) {
+              return { item, type: currentServerType }
+            }
+          }
+        }
+        return null
+      }
+
+      function handleFileCardClick(event, item, type, cardEl) {
+        if (isAppBusy()) return
+
+        event.stopPropagation()
+
+        if (event.shiftKey) {
+          selectRangeToCard(cardEl)
+          return
+        }
+
+        if (event.ctrlKey || event.metaKey) {
+          addToSelection(item, type, cardEl, { toggle: true, append: true })
+          return
+        }
+
+        addToSelection(item, type, cardEl)
+      }
+
+      function handleFolderCardClick(event, folder, type, cardEl) {
+        if (isAppBusy()) return
+
+        event.preventDefault()
+        event.stopPropagation()
+
+        if (event.shiftKey) {
+          selectRangeToCard(cardEl)
+          return
+        }
+
+        if (event.ctrlKey || event.metaKey) {
+          addFolderToSelection(folder, type, cardEl, {
+            toggle: true,
+            append: true,
+          })
+          return
+        }
+
+        addFolderToSelection(folder, type, cardEl)
+      }
+
+      function handleBrowseTypeCardClick(event, browseType, cardEl) {
+        if (isAppBusy()) return
+
+        event.preventDefault()
+        event.stopPropagation()
+
+        if (event.shiftKey) {
+          selectRangeToCard(cardEl)
+          return
+        }
+
+        if (event.ctrlKey || event.metaKey) {
+          addBrowseTypeToSelection(browseType, cardEl, {
+            toggle: true,
+            append: true,
+          })
+          return
+        }
+
+        addBrowseTypeToSelection(browseType, cardEl)
+      }
+
+      function initMarqueeSelection() {
+        let marqueeState = null
+
+        const cleanupMarquee = () => {
+          if (marqueeState?.rect) {
+            marqueeState.rect.remove()
+          }
+          document
+            .querySelectorAll(
+              '.file-card.marquee-candidate, .folder-card.marquee-candidate',
+            )
+            .forEach((card) => {
+              card.classList.remove('marquee-candidate')
+            })
+          marqueeState = null
+        }
+
+        const getMarqueeRect = (event) => {
+          const left = Math.min(marqueeState.startX, event.clientX)
+          const top = Math.min(marqueeState.startY, event.clientY)
+          const width = Math.abs(event.clientX - marqueeState.startX)
+          const height = Math.abs(event.clientY - marqueeState.startY)
+          return {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+            width,
+            height,
+          }
+        }
+
+        const highlightMarqueeIntersect = (event) => {
+          const marqueeRect = getMarqueeRect(event)
+          document
+            .querySelectorAll('.file-card, .folder-card.selectable')
+            .forEach((card) => {
+              const cardRect = card.getBoundingClientRect()
+              const intersects = !(
+                cardRect.left > marqueeRect.right ||
+                cardRect.right < marqueeRect.left ||
+                cardRect.top > marqueeRect.bottom ||
+                cardRect.bottom < marqueeRect.top
+              )
+              card.classList.toggle('marquee-candidate', intersects)
+            })
+        }
+
+        const finalizeMarqueeSelection = (event) => {
+          if (!event.ctrlKey && !event.metaKey) {
+            clearSelection()
+          }
+
+          document
+            .querySelectorAll(
+              '.file-card.marquee-candidate, .folder-card.marquee-candidate',
+            )
+            .forEach((card) => {
+              addCardToSelection(card, { append: true })
+            })
+        }
+
+        folderGrid.addEventListener('mousedown', (event) => {
+          if (event.button !== 0) return
+          if (event.target.closest('.file-card')) return
+          if (event.target.closest('.folder-card')) return
+          if (event.target.closest('.load-more-card')) return
+
+          marqueeState = {
+            startX: event.clientX,
+            startY: event.clientY,
+            active: false,
+            rect: null,
+          }
+
+          const onMove = (moveEvent) => {
+            if (!marqueeState) return
+            const dx = Math.abs(moveEvent.clientX - marqueeState.startX)
+            const dy = Math.abs(moveEvent.clientY - marqueeState.startY)
+
+            if (!marqueeState.active) {
+              if (dx < MARQUEE_THRESHOLD && dy < MARQUEE_THRESHOLD) return
+              marqueeState.active = true
+              marqueeState.rect = document.createElement('div')
+              marqueeState.rect.className = 'marquee-select'
+              document.body.appendChild(marqueeState.rect)
+            }
+
+            const marqueeRect = getMarqueeRect(moveEvent)
+            Object.assign(marqueeState.rect.style, {
+              left: `${marqueeRect.left}px`,
+              top: `${marqueeRect.top}px`,
+              width: `${marqueeRect.width}px`,
+              height: `${marqueeRect.height}px`,
+            })
+            highlightMarqueeIntersect(moveEvent)
+          }
+
+          const onUp = (upEvent) => {
+            if (marqueeState?.active) {
+              finalizeMarqueeSelection(upEvent)
+            }
+            cleanupMarquee()
+            document.removeEventListener('mousemove', onMove)
+            document.removeEventListener('mouseup', onUp)
+          }
+
+          document.addEventListener('mousemove', onMove)
+          document.addEventListener('mouseup', onUp)
+        })
+      }
+
+      function ensureTagBreak(tag) {
+        const trimmed = String(tag || '').trim()
+        if (!trimmed) return '<br>'
+        return /<br\s*\/?>$/i.test(trimmed) ? trimmed : `${trimmed}<br>`
+      }
+
+      function addTagEntry(item, type) {
+        const url = getItemPublicUrl(item, type)
+        const tag = ensureTagBreak(buildMediaTag(type, url, item))
+        accumulatedTags.push({
+          uid: ++tagUidCounter,
+          item,
+          type,
+          url,
+          tag,
+        })
+        renderTagList()
+      }
+
+      function refreshAccumulatedTagEntry(entry) {
+        if (!entry?.item || !entry?.type) {
+          return ensureTagBreak(entry?.tag || '')
+        }
+
+        const url = getItemPublicUrl(entry.item, entry.type)
+        const tag = ensureTagBreak(buildMediaTag(entry.type, url, entry.item))
+        entry.url = url
+        entry.tag = tag
+        return tag
+      }
+
+      function addSelectedToTags() {
+        const fileSelections = [...selectedItems.values()].filter(
+          (entry) => entry.kind === 'file' || entry.item,
+        )
+        if (fileSelections.length === 0) return
+
+        for (const { item, type } of fileSelections) {
+          addTagEntry(item, type)
+        }
+      }
+
+      function renderTagList() {
+        tagListEl.replaceChildren()
+
+        if (accumulatedTags.length === 0) {
+          const empty = document.createElement('div')
+          empty.className = 'tag-list-empty'
+          empty.textContent = '태그 넣기 버튼으로 태그를 추가하세요.'
+          tagListEl.appendChild(empty)
+          return
+        }
+
+        let dragSourceUid = null
+
+        accumulatedTags.forEach((entry) => {
+          const row = document.createElement('div')
+          row.className = 'tag-row'
+          if (activeTagUid === entry.uid) row.classList.add('active')
+          row.dataset.uid = String(entry.uid)
+
+          const handle = document.createElement('span')
+          handle.className = 'tag-drag-handle'
+          handle.textContent = '≡'
+          handle.title = '드래그하여 순서 변경'
+
+          const body = document.createElement('button')
+          body.type = 'button'
+          body.className = 'tag-body'
+          const displayTag = refreshAccumulatedTagEntry(entry)
+          body.textContent = displayTag
+          body.title = displayTag.replace(/<br\s*\/?>$/i, '')
+          body.onclick = () => {
+            activeTagUid = entry.uid
+            renderTagList()
+            renderPreview({ item: entry.item, type: entry.type })
+          }
+
+          const deleteBtn = document.createElement('button')
+          deleteBtn.type = 'button'
+          deleteBtn.className = 'tag-delete'
+          deleteBtn.textContent = '×'
+          deleteBtn.title = '태그 삭제'
+          deleteBtn.onclick = (event) => {
+            event.stopPropagation()
+            accumulatedTags = accumulatedTags.filter(
+              (tagEntry) => tagEntry.uid !== entry.uid,
+            )
+            if (activeTagUid === entry.uid) activeTagUid = null
+            renderTagList()
+          }
+
+          row.addEventListener('dragstart', (event) => {
+            dragSourceUid = entry.uid
+            row.classList.add('dragging')
+            event.dataTransfer.effectAllowed = 'move'
+            event.dataTransfer.setData('text/plain', String(entry.uid))
+          })
+
+          row.addEventListener('dragend', () => {
+            dragSourceUid = null
+            row.classList.remove('dragging')
+            tagListEl
+              .querySelectorAll('.tag-row.drag-over')
+              .forEach((el) => el.classList.remove('drag-over'))
+          })
+
+          row.addEventListener('dragover', (event) => {
+            event.preventDefault()
+            event.dataTransfer.dropEffect = 'move'
+            tagListEl
+              .querySelectorAll('.tag-row.drag-over')
+              .forEach((el) => el.classList.remove('drag-over'))
+            if (dragSourceUid !== entry.uid) {
+              row.classList.add('drag-over')
+            }
+          })
+
+          row.addEventListener('dragleave', () => {
+            row.classList.remove('drag-over')
+          })
+
+          row.addEventListener('drop', (event) => {
+            event.preventDefault()
+            row.classList.remove('drag-over')
+            const sourceUid = Number(
+              event.dataTransfer.getData('text/plain') || dragSourceUid,
+            )
+            const targetUid = entry.uid
+            if (!sourceUid || sourceUid === targetUid) return
+
+            const fromIndex = accumulatedTags.findIndex(
+              (tagEntry) => tagEntry.uid === sourceUid,
+            )
+            const toIndex = accumulatedTags.findIndex(
+              (tagEntry) => tagEntry.uid === targetUid,
+            )
+            if (fromIndex === -1 || toIndex === -1) return
+
+            const [moved] = accumulatedTags.splice(fromIndex, 1)
+            accumulatedTags.splice(toIndex, 0, moved)
+            renderTagList()
+          })
+
+          handle.draggable = true
+          handle.addEventListener('mousedown', (event) =>
+            event.stopPropagation(),
+          )
+          handle.addEventListener('dragstart', (event) => {
+            dragSourceUid = entry.uid
+            row.classList.add('dragging')
+            event.dataTransfer.effectAllowed = 'move'
+            event.dataTransfer.setData('text/plain', String(entry.uid))
+          })
+
+          row.appendChild(handle)
+          row.appendChild(body)
+          row.appendChild(deleteBtn)
+          tagListEl.appendChild(row)
+        })
+      }
+
+      function formatFileSize(bytes) {
+        if (bytes == null || Number.isNaN(bytes)) return '-'
+        if (bytes < 1024) return `${bytes} B`
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+        return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+      }
+
+      function formatUploadedDate(value) {
+        if (!value) return ''
+        const date = new Date(value)
+        if (Number.isNaN(date.getTime())) return ''
+        return date.toLocaleString('ko-KR')
+      }
+
+      function buildPublicUrl(storageKey) {
+        const encodedKey = String(storageKey)
+          .split('/')
+          .map((part) => encodeURIComponent(part))
+          .join('/')
+        return `${CDN_BASE}/${encodedKey}`
+      }
+
+      function buildWorkerAssetUrl(storageKey) {
+        const encodedKey = String(storageKey)
+          .split('/')
+          .map((part) => encodeURIComponent(part))
+          .join('/')
+        return `${UPLOAD_WORKER_BASE}/${encodedKey}`
+      }
+
+      function getItemStorageKey(item, type) {
+        if (item.key) return item.key
+
+        const relative =
+          item.relativePath || item.name || item.displayName || ''
+        if (relative.includes('/')) {
+          return `${type}/${relative}`
+        }
+
+        if (activeFolder && activeBrowseType === type) {
+          return `${type}/${activeFolder}/${relative}`
+        }
+
+        return `${type}/${relative}`
+      }
+
+      function getItemPublicUrl(item, type) {
+        const storageKey = getItemStorageKey(item, type)
+        return buildPublicUrl(storageKey)
+      }
+
+      function getItemDisplayUrl(item, type) {
+        const storageKey = getItemStorageKey(item, type)
+        if (isVideoItem(item, type)) {
+          return buildWorkerAssetUrl(storageKey)
+        }
+        return buildPublicUrl(storageKey)
+      }
+
+      function getItemUrl(item, type) {
+        return getItemPublicUrl(item, type)
+      }
+
+      function buildMediaTag(type, url, item = null) {
+        if (item && isVideoItem(item, type)) {
+          return `<video src="${url}" controls></video>`
+        }
+        if (type === 'video') {
+          return `<video src="${url}" controls></video>`
+        }
+        return `<img src="${url}">`
+      }
+
+      function setSidebarStatus(message, kind = 'info') {
+        sidebarStatus.textContent = message
+        sidebarStatus.className = 'sidebar-status'
+        if (kind === 'error') sidebarStatus.classList.add('error')
+        if (kind === 'loading') sidebarStatus.classList.add('loading')
+      }
+
+      function normalizeWorkerBase(value) {
+        return value.trim().replace(/\/+$/, '')
+      }
+
+      function getListWorkerBase() {
+        const saved = localStorage.getItem(LIST_WORKER_STORAGE_KEY)
+        return normalizeWorkerBase(saved || DEFAULT_LIST_WORKER_BASE)
+      }
+
+      async function copyText(text) {
+        if (navigator.clipboard && window.isSecureContext) {
+          try {
+            await navigator.clipboard.writeText(text)
+            return true
+          } catch {}
+        }
+
+        try {
+          const textarea = document.createElement('textarea')
+          textarea.value = text
+          textarea.style.position = 'fixed'
+          textarea.style.left = '-9999px'
+          document.body.appendChild(textarea)
+          textarea.focus()
+          textarea.select()
+          const ok = document.execCommand('copy')
+          document.body.removeChild(textarea)
+          return ok
+        } catch {
+          return false
+        }
+      }
+
+      async function fetchTopLevelFolders() {
+        const listWorkerBase = getListWorkerBase()
+        const res = await fetch(`${listWorkerBase}/folders`)
+        if (res.status === 404 || res.status === 405) {
+          throw new Error('FOLDERS_API_NOT_READY')
+        }
+        if (!res.ok) {
+          throw new Error(`HTTP_${res.status}`)
+        }
+        const data = await res.json()
+        if (!data || !Array.isArray(data.folders)) {
+          throw new Error('INVALID_RESPONSE')
+        }
+        return data.folders
+      }
+
+      async function loadBrowseTypes() {
+        try {
+          const folders = await fetchTopLevelFolders()
+          const merged = [...DEFAULT_BROWSE_TYPES]
+          for (const folder of folders) {
+            if (
+              folder &&
+              !HIDDEN_BROWSE_TYPES.has(folder) &&
+              !merged.includes(folder)
+            ) {
+              merged.push(folder)
+            }
+          }
+          BROWSE_TYPES = merged
+        } catch {
+          BROWSE_TYPES = [...DEFAULT_BROWSE_TYPES]
+        }
+
+        if (!activeBrowseType) {
+          renderExplorerGrid()
+        } else {
+          renderTree()
+        }
+      }
+
+      async function fetchServerFiles(type) {
+        const listWorkerBase = getListWorkerBase()
+        const res = await fetch(
+          `${listWorkerBase}/list?type=${encodeURIComponent(type)}`,
+        )
+        if (res.status === 404 || res.status === 405) {
+          throw new Error('LIST_API_NOT_READY')
+        }
+        if (!res.ok) {
+          throw new Error(`HTTP_${res.status}`)
+        }
+        const data = await res.json()
+        if (!data || !Array.isArray(data.items)) {
+          throw new Error('INVALID_RESPONSE')
+        }
+        return data.items
+      }
+
+      function getRelativePath(item, type) {
+        const source = item.key || `${type}/${item.name || ''}`
+        const prefixes = [`${R2_BRAND_ROOT}/${type}/`, `${type}/`]
+
+        for (const prefix of prefixes) {
+          if (source.startsWith(prefix)) {
+            return source.slice(prefix.length)
+          }
+        }
+
+        return item.name || source
+      }
+
+      function splitFolderAndFile(relativePath) {
+        const lastSlash = relativePath.lastIndexOf('/')
+
+        if (lastSlash === -1) {
+          return { folder: ROOT_FOLDER, fileName: relativePath }
+        }
+
+        return {
+          folder: relativePath.slice(0, lastSlash),
+          fileName: relativePath.slice(lastSlash + 1),
+        }
+      }
+
+      function groupItemsByFolder(items, type) {
+        const groups = new Map()
+        const ensureGroup = (folder) => {
+          if (!groups.has(folder)) {
+            groups.set(folder, [])
+          }
+        }
+
+        for (const item of items) {
+          const relativePath = getRelativePath(item, type)
+
+          // R2 폴더 마커(키가 '/'로 끝나는 0바이트 객체)는 파일이 아니라 빈 폴더로 취급
+          if (relativePath.endsWith('/')) {
+            const folderName = relativePath.replace(/\/+$/, '')
+            if (folderName) ensureGroup(folderName)
+            continue
+          }
+
+          const { folder, fileName } = splitFolderAndFile(relativePath)
+          ensureGroup(folder)
+
+          groups.get(folder).push({
+            ...item,
+            displayName: fileName,
+            relativePath,
+          })
+        }
+
+        const folders = Array.from(groups.keys()).sort((a, b) => {
+          if (a === ROOT_FOLDER) return 1
+          if (b === ROOT_FOLDER) return -1
+          return a.localeCompare(b, 'ko')
+        })
+
+        return folders.map((folder) => ({
+          folder,
+          items: groups
+            .get(folder)
+            .sort((a, b) => a.displayName.localeCompare(b.displayName, 'ko')),
+        }))
+      }
+
+      function itemMatchesSearch(item) {
+        const query = fileSearchInput.value.trim().toLowerCase()
+        if (!query) return true
+
+        const target =
+          `${item.displayName || ''} ${item.relativePath || ''} ${item.name || ''}`.toLowerCase()
+        return target.includes(query)
+      }
+
+      function getVisibleItems(items) {
+        return items.filter(itemMatchesSearch)
+      }
+
+      function sortItemsForGrid(items) {
+        const list = [...items]
+
+        switch (gridSortMode) {
+          case 'name-desc':
+            return list.sort((a, b) =>
+              (b.displayName || '').localeCompare(a.displayName || '', 'ko'),
+            )
+          case 'date':
+            return list.sort(
+              (a, b) => new Date(b.uploaded || 0) - new Date(a.uploaded || 0),
+            )
+          case 'date-desc':
+            return list.sort(
+              (a, b) => new Date(a.uploaded || 0) - new Date(b.uploaded || 0),
+            )
+          case 'name':
+          default:
+            return list.sort((a, b) =>
+              (a.displayName || '').localeCompare(b.displayName || '', 'ko'),
+            )
+        }
+      }
+
+      function applyGridViewClass() {
+        folderGrid.classList.remove('view-large', 'view-list')
+        if (gridViewMode === 'large') folderGrid.classList.add('view-large')
+        if (gridViewMode === 'list') folderGrid.classList.add('view-list')
+      }
+
+      function syncGridViewControls() {
+        if (gridSortSelect) gridSortSelect.value = gridSortMode
+        ;[btnViewNormal, btnViewLarge, btnViewList].forEach((btn) => {
+          if (btn) btn.classList.remove('active')
+        })
+
+        const activeBtn =
+          gridViewMode === 'large'
+            ? btnViewLarge
+            : gridViewMode === 'list'
+              ? btnViewList
+              : btnViewNormal
+
+        if (activeBtn) activeBtn.classList.add('active')
+      }
+
+      function setGridSort(mode) {
+        gridSortMode = mode
+        localStorage.setItem(GRID_SORT_KEY, mode)
+        renderExplorerGrid()
+      }
+
+      function setGridView(mode) {
+        gridViewMode = mode
+        localStorage.setItem(GRID_VIEW_KEY, mode)
+        applyGridViewClass()
+        syncGridViewControls()
+        renderExplorerGrid()
+      }
+
+      function setBreadcrumb(folder = activeFolder) {
+        let path = R2_BRAND_ROOT
+        if (activeBrowseType) {
+          path += ` / <strong>${activeBrowseType}</strong>`
+        }
+        if (folder) {
+          path += ` / <strong>${folder}</strong>`
+        }
+        breadcrumb.innerHTML = path
+      }
+
+      function selectBrowseType(type) {
+        if (isAppBusy()) return
+
+        activeBrowseType = type
+        activeFolder = null
+        clearSelection()
+        selectedPreview = null
+        gridVisibleLimit = GRID_BATCH_SIZE
+        updateGridToolbar()
+
+        if (!type) {
+          currentGroups = []
+          setSidebarStatus('타입을 선택하세요.')
+          renderExplorerGrid()
+          renderPreview(null)
+          return
+        }
+
+        refreshServerFiles()
+      }
+
+      function selectFolder(folder) {
+        if (isAppBusy()) return
+
+        activeFolder = folder
+        clearSelection()
+        selectedPreview = null
+        gridVisibleLimit = GRID_BATCH_SIZE
+        updateGridToolbar()
+        renderExplorerGrid()
+        renderPreview(null)
+      }
+
+      function createTreeButton(label, icon, onClick, active = false) {
+        const button = document.createElement('button')
+        button.type = 'button'
+        button.className = active ? 'tree-item active' : 'tree-item'
+
+        const iconEl = document.createElement('span')
+        iconEl.className = 'tree-icon'
+        iconEl.textContent = icon
+
+        const nameEl = document.createElement('span')
+        nameEl.className = 'tree-name'
+        nameEl.textContent = label
+
+        button.appendChild(iconEl)
+        button.appendChild(nameEl)
+        button.onclick = onClick
+        return button
+      }
+
+      function appendFolderTreeNodes(parentFolder, container) {
+        for (const folder of getImmediateChildFolders(parentFolder)) {
+          const items = getFolderGroupItems(folder)
+          const folderButton = createTreeButton(
+            `${getFolderDisplayName(folder)} (${items.length})`,
+            '·',
+            () => selectFolder(folder),
+            activeFolder === folder,
+          )
+          attachFolderContextMenu(folderButton, activeBrowseType, folder)
+          container.appendChild(folderButton)
+
+          const childFolders = getImmediateChildFolders(folder)
+          if (childFolders.length > 0) {
+            const childContainer = document.createElement('div')
+            childContainer.className = 'tree-children'
+            appendFolderTreeNodes(folder, childContainer)
+            container.appendChild(childContainer)
+          }
+        }
+      }
+
+      function renderTree() {
+        const root = document.createElement('div')
+        root.className = 'tree-root'
+        root.appendChild(
+          createTreeButton(
+            R2_BRAND_ROOT,
+            '▾',
+            () => selectBrowseType(null),
+            !activeBrowseType,
+          ),
+        )
+
+        const typeChildren = document.createElement('div')
+        typeChildren.className = 'tree-children'
+
+        for (const browseType of BROWSE_TYPES) {
+          const isActiveType = activeBrowseType === browseType
+          const typeButton = createTreeButton(
+            browseType,
+            isActiveType ? '▾' : '▸',
+            () => selectBrowseType(browseType),
+            isActiveType && !activeFolder,
+          )
+          attachBrowseTypeContextMenu(typeButton, browseType)
+          typeChildren.appendChild(typeButton)
+
+          if (isActiveType) {
+            const subChildren = document.createElement('div')
+            subChildren.className = 'tree-children'
+            appendFolderTreeNodes(null, subChildren)
+            typeChildren.appendChild(subChildren)
+          }
+        }
+
+        root.appendChild(typeChildren)
+        serverFileList.replaceChildren(root)
+      }
+
+      function getFolderDisplayName(folder) {
+        if (folder === ROOT_FOLDER) return '루트'
+        const lastSlash = folder.lastIndexOf('/')
+        return lastSlash === -1 ? folder : folder.slice(lastSlash + 1)
+      }
+
+      function getParentFolderPath(folder) {
+        if (!folder) return null
+        const lastSlash = folder.lastIndexOf('/')
+        if (lastSlash === -1) return null
+        return folder.slice(0, lastSlash)
+      }
+
+      function updateGridToolbar() {
+        const busy = isAppBusy()
+        const fileSelectionCount = [...selectedItems.values()].filter(
+          (entry) => entry.kind === 'file' || entry.item,
+        ).length
+        const selectedCount = selectedItems.size
+        const enabled = !!selectedPreview && !busy
+
+        btnAddTags.disabled = fileSelectionCount === 0 || busy
+        btnAddTags.textContent =
+          fileSelectionCount > 0
+            ? `태그 넣기 (${fileSelectionCount})`
+            : '태그 넣기'
+        btnDeleteSelected.disabled = selectedCount === 0 || busy
+        btnDeleteSelected.textContent =
+          selectedCount > 0 ? `선택 삭제 (${selectedCount})` : '선택 삭제'
+        if (btnNewFolder) btnNewFolder.disabled = busy
+        btnOpenFile.disabled = !enabled
+        if (btnSelectAll) {
+          btnSelectAll.disabled =
+            getSelectableCards().length === 0 || busy
+        }
+      }
+
+      function createParentFolderCard() {
+        const card = document.createElement('button')
+        card.type = 'button'
+        card.className = 'grid-card'
+        card.title = '상위 폴더'
+        card.onclick = () => {
+          if (activeFolder) {
+            selectFolder(getParentFolderPath(activeFolder))
+            return
+          }
+          selectBrowseType(null)
+        }
+
+        const thumb = document.createElement('div')
+        thumb.className = 'grid-thumb'
+
+        const icon = document.createElement('div')
+        icon.className = 'grid-icon-parent'
+        icon.textContent = '↩'
+        thumb.appendChild(icon)
+
+        const name = document.createElement('div')
+        name.className = 'grid-name'
+        name.textContent = '..'
+
+        const isListView = gridViewMode === 'list'
+        if (isListView) {
+          card.appendChild(
+            createListTypeIcon(getListTypeIconMeta(null, null, 'parent')),
+          )
+        } else {
+          card.appendChild(thumb)
+        }
+        card.appendChild(name)
+        return card
+      }
+
+      function createFolderCard(folder, items) {
+        const type = currentServerType
+        const selectionKey = getFolderSelectionKey(folder, type)
+        const isSelected = selectedItems.has(selectionKey)
+        const card = document.createElement('div')
+        card.className = 'grid-card folder-card selectable'
+        if (isSelected) card.classList.add('selected')
+        card.dataset.selectionKey = selectionKey
+        card.title = folder
+        card.onclick = (event) =>
+          handleFolderCardClick(event, folder, type, card)
+        card.ondblclick = (event) => {
+          event.preventDefault()
+          selectFolder(folder)
+        }
+        attachFolderContextMenu(card, type, folder)
+
+        const thumb = document.createElement('div')
+        thumb.className = 'grid-thumb'
+
+        const icon = document.createElement('div')
+        icon.className = 'grid-icon-folder'
+        thumb.appendChild(icon)
+
+        const name = document.createElement('div')
+        name.className = 'grid-name'
+        name.textContent = getFolderDisplayName(folder)
+
+        const isListView = gridViewMode === 'list'
+        if (isListView) {
+          card.appendChild(
+            createListTypeIcon(getListTypeIconMeta(null, null, 'folder')),
+          )
+        } else {
+          card.appendChild(thumb)
+        }
+        card.appendChild(name)
+        return card
+      }
+
+      function isVideoItem(item, type) {
+        return (
+          type === 'video' ||
+          /\.(mp4|webm|mov)$/i.test(item.displayName || item.name || '')
+        )
+      }
+
+      function isImageItem(item, type) {
+        return (
+          type === 'image' ||
+          type === 'spin360' ||
+          /\.(jpg|jpeg|png|gif|webp)$/i.test(
+            item.displayName || item.name || '',
+          )
+        )
+      }
+
+      function isGifItem(item) {
+        return /\.gif$/i.test(item.displayName || item.name || '')
+      }
+
+      const FILE_TYPE_ICON_META = {
+        mp4: { icon: '🎬', title: '동영상' },
+        webm: { icon: '🎬', title: '동영상' },
+        mov: { icon: '🎬', title: '동영상' },
+        m4v: { icon: '🎬', title: '동영상' },
+        gif: { icon: '🎞️', title: 'GIF' },
+        jpg: { icon: '🖼️', title: '이미지' },
+        jpeg: { icon: '🖼️', title: '이미지' },
+        png: { icon: '🖼️', title: '이미지' },
+        webp: { icon: '🖼️', title: '이미지' },
+        avif: { icon: '🖼️', title: '이미지' },
+        svg: { icon: '🖼️', title: '이미지' },
+        html: { icon: '📄', title: 'HTML' },
+        htm: { icon: '📄', title: 'HTML' },
+        zip: { icon: '🗜️', title: '압축 파일' },
+        rar: { icon: '🗜️', title: '압축 파일' },
+        '7z': { icon: '🗜️', title: '압축 파일' },
+        pdf: { icon: '📕', title: 'PDF' },
+      }
+
+      const DEFAULT_FILE_ICON_META = { icon: '📎', title: '파일' }
+
+      function getItemFileName(item) {
+        if (!item) return ''
+        for (const field of ['displayName', 'name', 'relativePath', 'key']) {
+          const value = item[field]
+          if (typeof value === 'string' && value.trim()) {
+            const base = value.split('/').pop() || value
+            if (base && !base.endsWith('/')) return base
+          }
+        }
+        return ''
+      }
+
+      function getItemExtension(item) {
+        const fileName = getItemFileName(item)
+        const dot = fileName.lastIndexOf('.')
+        if (dot <= 0 || dot === fileName.length - 1) return ''
+        return fileName.slice(dot + 1).toLowerCase()
+      }
+
+      function getFileTypeIconMetaByExtension(ext) {
+        if (!ext) return DEFAULT_FILE_ICON_META
+        return FILE_TYPE_ICON_META[ext] || DEFAULT_FILE_ICON_META
+      }
+
+      function getListTypeIconMeta(item, type, kind = 'file') {
+        if (kind === 'parent') return { icon: '↩', title: '상위 폴더' }
+        if (kind === 'folder') return { icon: '📁', title: '폴더' }
+        if (kind === 'browse') {
+          return { icon: '📁', title: `${type || '타입'} 폴더` }
+        }
+
+        return getFileTypeIconMetaByExtension(getItemExtension(item))
+      }
+
+      function createListTypeIcon(meta) {
+        const el = document.createElement('span')
+        el.className = 'grid-list-type-icon'
+        el.textContent = meta.icon
+        el.title = meta.title
+        el.setAttribute('aria-hidden', 'true')
+        return el
+      }
+
+      function getVideoThumbObserver() {
+        if (videoThumbObserver) return videoThumbObserver
+        if (!folderGrid || typeof IntersectionObserver === 'undefined')
+          return null
+
+        videoThumbObserver = new IntersectionObserver(
+          (entries, observer) => {
+            for (const entry of entries) {
+              if (!entry.isIntersecting) continue
+
+              const video = entry.target
+              if (!(video instanceof HTMLVideoElement)) continue
+              if (video.dataset.thumbLoaded === 'true') {
+                observer.unobserve(video)
+                continue
+              }
+
+              const thumbEl = video.parentElement
+              video.dataset.thumbLoaded = 'true'
+              prepareVideoThumbnail(video, thumbEl)
+              observer.unobserve(video)
+            }
+          },
+          {
+            root: folderGrid,
+            rootMargin: '200px',
+          },
+        )
+
+        return videoThumbObserver
+      }
+
+      function disconnectVideoThumbObserver() {
+        if (videoThumbObserver) {
+          videoThumbObserver.disconnect()
+        }
+      }
+
+      function prepareVideoThumbnail(video, thumbEl) {
+        const pendingSrc = video.dataset.src
+        if (pendingSrc && !video.getAttribute('src')) {
+          video.src = pendingSrc
+        }
+
+        video.muted = true
+        video.playsInline = true
+        video.preload = 'metadata'
+        video.draggable = false
+
+        if (thumbEl) {
+          thumbEl.classList.add('video-thumb', 'loading-video')
+        }
+
+        const markReady = () => {
+          if (thumbEl) thumbEl.classList.remove('loading-video')
+        }
+
+        const seekToFirstFrame = () => {
+          const duration = video.duration
+          if (Number.isFinite(duration) && duration > 0) {
+            video.currentTime = Math.min(0.1, duration * 0.01)
+          } else {
+            video.currentTime = 0.1
+          }
+        }
+
+        video.addEventListener(
+          'loadedmetadata',
+          () => {
+            try {
+              seekToFirstFrame()
+            } catch {
+              markReady()
+            }
+          },
+          { once: true },
+        )
+
+        video.addEventListener('seeked', markReady, { once: true })
+        video.addEventListener('loadeddata', markReady, { once: true })
+        video.addEventListener('error', markReady, { once: true })
+      }
+
+      function createFileCard(item, type, options = {}) {
+        const url = getItemDisplayUrl(item, type)
+        const itemKey = getItemKey(item, type)
+        const card = document.createElement('div')
+        const isActive =
+          selectedPreview &&
+          getItemKey(selectedPreview.item, selectedPreview.type) === itemKey
+        const isSelected = selectedItems.has(itemKey)
+        card.className = 'grid-card file-card'
+        if (isActive) card.classList.add('active')
+        if (isSelected) card.classList.add('selected')
+        card.dataset.fileKey = itemKey
+        card.dataset.selectionKey = itemKey
+        card.draggable = false
+        if (isActive) activeCardEl = card
+        card.title = options.locationLabel
+          ? `${options.locationLabel}\n${item.displayName || item.name || 'unknown'}`
+          : item.displayName || item.name || 'unknown'
+        card.onclick = (event) => handleFileCardClick(event, item, type, card)
+        card.ondblclick = (event) => {
+          event.preventDefault()
+          window.open(url, '_blank', 'noopener')
+        }
+        attachFileContextMenu(card, item, type)
+
+        const isListView = gridViewMode === 'list'
+        const thumb = document.createElement('div')
+        thumb.className = 'grid-thumb'
+
+        if (!isListView) {
+          if (isVideoItem(item, type)) {
+            const video = document.createElement('video')
+            video.dataset.src = url
+            video.muted = true
+            video.playsInline = true
+            video.preload = 'metadata'
+            video.draggable = false
+            thumb.classList.add('video-thumb', 'loading-video')
+            thumb.appendChild(video)
+
+            const observer = getVideoThumbObserver()
+            if (observer) {
+              observer.observe(video)
+            } else {
+              video.dataset.thumbLoaded = 'true'
+              prepareVideoThumbnail(video, thumb)
+            }
+          } else if (isImageItem(item, type)) {
+            const img = document.createElement('img')
+            img.src = url
+            img.alt = item.displayName
+            img.loading = 'lazy'
+            img.decoding = 'async'
+            img.draggable = false
+            thumb.appendChild(img)
+          } else {
+            const icon = document.createElement('div')
+            icon.className = 'grid-icon-file'
+            icon.textContent = '▣'
+            thumb.appendChild(icon)
+          }
+        }
+
+        const nameWrap = document.createElement('div')
+        nameWrap.className = 'grid-name-wrap'
+
+        const name = document.createElement('div')
+        name.className = 'grid-name'
+        name.textContent = item.displayName || item.name || 'unknown'
+        nameWrap.appendChild(name)
+
+        if (options.locationLabel) {
+          const path = document.createElement('div')
+          path.className = 'grid-path'
+          path.textContent = options.locationLabel
+          nameWrap.appendChild(path)
+        }
+
+        if (isListView) {
+          card.appendChild(
+            createListTypeIcon(getListTypeIconMeta(item, type, 'file')),
+          )
+        } else {
+          card.appendChild(thumb)
+        }
+        card.appendChild(nameWrap)
+        return card
+      }
+
+      function createLoadMoreCard(hiddenCount) {
+        const card = document.createElement('button')
+        card.type = 'button'
+        card.className = 'grid-card load-more-card'
+        card.innerHTML = `<strong>더 보기</strong>${hiddenCount}개 파일 더 있음`
+        card.onclick = () => {
+          gridVisibleLimit += GRID_BATCH_SIZE
+          renderExplorerGrid()
+        }
+        return card
+      }
+
+      function createBrowseTypeCard(browseType) {
+        const selectionKey = getBrowseTypeSelectionKey(browseType)
+        const isSelected = selectedItems.has(selectionKey)
+        const card = document.createElement('div')
+        card.className = 'grid-card folder-card selectable browse-type-card'
+        if (isSelected) card.classList.add('selected')
+        card.dataset.selectionKey = selectionKey
+        card.title = `${R2_BRAND_ROOT}/${browseType}`
+        card.onclick = (event) =>
+          handleBrowseTypeCardClick(event, browseType, card)
+        card.ondblclick = (event) => {
+          event.preventDefault()
+          selectBrowseType(browseType)
+        }
+        attachBrowseTypeContextMenu(card, browseType)
+
+        const thumb = document.createElement('div')
+        thumb.className = 'grid-thumb'
+
+        const icon = document.createElement('div')
+        icon.className = 'grid-icon-folder'
+        thumb.appendChild(icon)
+
+        const name = document.createElement('div')
+        name.className = 'grid-name'
+        name.textContent = browseType
+
+        const isListView = gridViewMode === 'list'
+        if (isListView) {
+          card.appendChild(
+            createListTypeIcon(getListTypeIconMeta(null, browseType, 'browse')),
+          )
+        } else {
+          card.appendChild(thumb)
+        }
+        card.appendChild(name)
+        return card
+      }
+
+      function renderExplorerGrid() {
+        if (isGlobalSearchActive()) {
+          renderGlobalSearchResults()
+          return
+        }
+
+        setBreadcrumb()
+        activeCardEl = null
+        disconnectVideoThumbObserver()
+        const fragment = document.createDocumentFragment()
+
+        if (!activeBrowseType) {
+          for (const browseType of BROWSE_TYPES) {
+            fragment.appendChild(createBrowseTypeCard(browseType))
+          }
+          folderGrid.replaceChildren(fragment)
+          syncSelectionAfterRender()
+          renderTree()
+          return
+        }
+
+        const groups = activeFolder
+          ? currentGroups.filter((group) => group.folder === activeFolder)
+          : currentGroups
+
+        fragment.appendChild(createParentFolderCard())
+
+        const hasQuery = fileSearchInput.value.trim().length > 0
+
+        if (activeFolder) {
+          for (const folder of getImmediateChildFolders(activeFolder)) {
+            if (
+              hasQuery &&
+              getVisibleItems(getFolderGroupItems(folder)).length === 0
+            )
+              continue
+            fragment.appendChild(
+              createFolderCard(folder, getFolderGroupItems(folder)),
+            )
+          }
+        } else {
+          for (const folder of getImmediateChildFolders(null)) {
+            if (
+              hasQuery &&
+              getVisibleItems(getFolderGroupItems(folder)).length === 0
+            )
+              continue
+            fragment.appendChild(
+              createFolderCard(folder, getFolderGroupItems(folder)),
+            )
+          }
+        }
+
+        const files = sortItemsForGrid(
+          activeFolder
+            ? getVisibleItems(groups[0]?.items || [])
+            : getVisibleItems(
+                currentGroups.find((group) => group.folder === ROOT_FOLDER)
+                  ?.items || [],
+              ),
+        )
+        const visibleFiles = files.slice(0, gridVisibleLimit)
+
+        for (const item of visibleFiles) {
+          fragment.appendChild(createFileCard(item, currentServerType))
+        }
+
+        if (files.length > visibleFiles.length) {
+          fragment.appendChild(
+            createLoadMoreCard(files.length - visibleFiles.length),
+          )
+        }
+
+        if (!fragment.childNodes.length) {
+          const empty = document.createElement('div')
+          empty.className = 'preview-placeholder'
+          empty.textContent = '표시할 파일이 없습니다.'
+          fragment.appendChild(empty)
+        }
+
+        folderGrid.replaceChildren(fragment)
+        syncSelectionAfterRender()
+        renderTree()
+      }
+
+      function selectPreviewItem(item, type, cardEl = null) {
+        addToSelection(item, type, cardEl)
+      }
+
+      function renderPreview(selection) {
+        previewStage.innerHTML = ''
+        previewStage.scrollTop = 0
+
+        if (!selection) {
+          previewTitle.textContent = '선택된 파일 없음'
+          previewMeta.textContent =
+            '파일을 클릭하면 미리보기와 정보가 표시됩니다.'
+          previewActions.classList.add('hidden')
+          updateGridToolbar()
+
+          const placeholder = document.createElement('div')
+          placeholder.className = 'preview-placeholder'
+          placeholder.textContent =
+            '파일을 선택하면 이 영역에 미리보기가 표시됩니다.'
+          previewStage.appendChild(placeholder)
+          return
+        }
+
+        const { item, type } = selection
+        const url = getItemDisplayUrl(item, type)
+        const uploadedText = formatUploadedDate(item.uploaded)
+
+        previewTitle.textContent = item.displayName || item.name || 'unknown'
+        previewMeta.textContent = `${item.relativePath || item.name || ''} · ${formatFileSize(item.size)}${uploadedText ? ` · ${uploadedText}` : ''}`
+        previewActions.classList.remove('hidden')
+        updateGridToolbar()
+
+        if (isVideoItem(item, type)) {
+          const video = document.createElement('video')
+          video.src = url
+          video.controls = true
+          video.autoplay = true
+          video.muted = true
+          video.loop = true
+          previewStage.appendChild(video)
+          return
+        }
+
+        if (isImageItem(item, type)) {
+          const img = document.createElement('img')
+          img.src = url
+          img.alt = item.displayName || item.name || ''
+          previewStage.appendChild(img)
+          return
+        }
+
+        const placeholder = document.createElement('div')
+        placeholder.className = 'preview-placeholder'
+        placeholder.textContent = '이 파일 형식은 미리보기를 지원하지 않습니다.'
+        previewStage.appendChild(placeholder)
+      }
+
+      async function copySelectedTag() {
+        if (!selectedPreview) return
+        const tag = ensureTagBreak(
+          buildMediaTag(
+            selectedPreview.type,
+            getItemPublicUrl(selectedPreview.item, selectedPreview.type),
+            selectedPreview.item,
+          ),
+        )
+        const ok = await copyText(tag)
+        await uiAlert(
+          ok
+            ? '태그가 복사되었습니다.'
+            : '복사에 실패했습니다. 브라우저 권한을 확인해주세요.',
+        )
+      }
+
+      async function copySelectedUrl() {
+        if (!selectedPreview) return
+        const ok = await copyText(
+          getItemPublicUrl(selectedPreview.item, selectedPreview.type),
+        )
+        await uiAlert(
+          ok
+            ? 'URL이 복사되었습니다.'
+            : '복사에 실패했습니다. 브라우저 권한을 확인해주세요.',
+        )
+      }
+
+      function openSelectedPreview() {
+        if (!selectedPreview) return
+        window.open(
+          getItemPublicUrl(selectedPreview.item, selectedPreview.type),
+          '_blank',
+          'noopener',
+        )
+      }
+
+      function renderServerFiles(items, type) {
+        currentServerType = type
+        activeBrowseType = type
+        currentGroups = groupItemsByFolder(items, type)
+        clearSelection()
+        selectedPreview = null
+        gridVisibleLimit = GRID_BATCH_SIZE
+
+        const fileCount = currentGroups.reduce(
+          (sum, group) => sum + group.items.length,
+          0,
+        )
+        const folderCount = currentGroups.filter(
+          (group) => group.folder !== ROOT_FOLDER,
+        ).length
+
+        if (currentGroups.length === 0) {
+          setSidebarStatus(`${R2_BRAND_ROOT}/${type}에 파일이 없습니다.`)
+          renderExplorerGrid()
+          renderPreview(null)
+          return
+        }
+
+        setSidebarStatus(`${fileCount}개 파일 · ${folderCount}개 폴더`)
+        renderExplorerGrid()
+        renderPreview(null)
+      }
+
+      async function refreshServerFiles(force = false) {
+        const type = activeBrowseType
+        if (!type) {
+          renderTree()
+          return
+        }
+
+        const cacheKey = `${getListWorkerBase()}::${type}`
+
+        if (!force && serverListCache.has(cacheKey)) {
+          renderServerFiles(serverListCache.get(cacheKey), type)
+          return
+        }
+
+        const loadFiles = async () => {
+          serverFileList.innerHTML = ''
+          folderGrid.innerHTML = ''
+          setSidebarStatus('서버 파일 목록을 불러오는 중...', 'loading')
+
+          try {
+            const items = await fetchServerFiles(type)
+            serverListCache.set(cacheKey, items)
+            renderServerFiles(items, type)
+          } catch (err) {
+            if (err.message === 'LIST_API_NOT_READY') {
+              setSidebarStatus(
+                '목록 API가 아직 준비되지 않았습니다. Worker에 GET /list?type=... 를 추가해주세요.',
+                'error',
+              )
+            } else if (err.message.startsWith('HTTP_')) {
+              setSidebarStatus(
+                `목록 조회 실패 (상태코드: ${err.message.replace('HTTP_', '')})`,
+                'error',
+              )
+            } else if (err.message === 'INVALID_RESPONSE') {
+              setSidebarStatus(
+                '목록 API 응답 형식이 올바르지 않습니다.',
+                'error',
+              )
+            } else {
+              setSidebarStatus(
+                '목록을 불러오지 못했습니다. 네트워크 또는 CORS를 확인해주세요.',
+                'error',
+              )
+            }
+          }
+        }
+
+        if (isAppBusy()) {
+          await loadFiles()
+          return
+        }
+
+        await withAppBusy('서버 파일 목록을 불러오는 중...', loadFiles)
+      }
+
+      async function uploadSingleFile(
+        file,
+        targetPath,
+        uploadButton,
+        fileRow,
+        forceOverwrite = false,
+        options = {},
+      ) {
+        const {
+          skipRefresh = false,
+          suppressConfirm = false,
+          skipBusy = false,
+        } = options
+
+        const runUpload = async () => {
+          const url = buildUploadUrl(targetPath, file.name, forceOverwrite)
+          uploadButton.disabled = true
+
+          try {
+            const res = await fetch(url, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': file.type || 'application/octet-stream',
+              },
+              body: file,
+            })
+
+            if (res.ok) {
+              uploadButton.className = 'upload-button completed'
+              uploadButton.innerText = '업로드 완료'
+
+              if (!skipRefresh && isViewingUploadPath(targetPath)) {
+                await refreshServerFiles(true)
+              }
+              updateUploadQueueStatus()
+              return 'success'
+            }
+
+            if (res.status === 409 && !forceOverwrite) {
+              const conflictBody = await res.text()
+              const isEmbedConflict = conflictBody.includes('Embed')
+
+              if (suppressConfirm) {
+                uploadButton.disabled = false
+                updateUploadQueueStatus()
+                return 'failed'
+              }
+
+              let overwrite
+              if (isEmbedConflict) {
+                const embedKey = buildEmbedKeyForUpload(targetPath, file.name)
+                overwrite = await uiConfirm(
+                  `[태그(embed HTML) 중복]\n\n"${file.name}" 원본 파일명은 현재 업로드 폴더에서 중복이 아닐 수 있지만,\niframe용 HTML을 embed 폴더에 만들 때 같은 태그 파일명이 이미 있습니다.\n\n생성 예정 태그 파일:\n${embedKey}\n\n덮어쓰면 기존 iframe 태그 HTML이 교체됩니다.\n취소 후 파일명을 바꿔 다시 넣을 수 있습니다.\n\n덮어쓸까요?`,
+                  { title: '태그 중복' },
+                )
+              } else {
+                overwrite = await uiConfirm(
+                  `[원본 파일 중복]\n\n업로드하려는 현재 폴더 안에 같은 파일명이 이미 있습니다.\n\n기존 파일:\n${targetPath}/${file.name}\n\n덮어쓰면 해당 폴더의 기존 파일이 교체됩니다.\n\n덮어쓸까요?`,
+                  { title: '파일 중복' },
+                )
+              }
+
+              if (overwrite) {
+                return uploadSingleFile(
+                  file,
+                  targetPath,
+                  uploadButton,
+                  fileRow,
+                  true,
+                  options,
+                )
+              }
+              uploadButton.disabled = false
+              updateUploadQueueStatus()
+              return 'skipped'
+            }
+
+            await uiAlert(`업로드 실패: ${file.name} (상태코드: ${res.status})`)
+            uploadButton.disabled = false
+            updateUploadQueueStatus()
+            return 'failed'
+          } catch {
+            await uiAlert(`업로드 중 오류 발생: ${file.name}`)
+            uploadButton.disabled = false
+            updateUploadQueueStatus()
+            return 'failed'
+          }
+        }
+
+        if (skipBusy || isAppBusy()) {
+          return runUpload()
+        }
+
+        return withAppBusy(`"${file.name}" 업로드 중...`, runUpload)
+      }
+
+      async function uploadAllPending() {
+        if (isAppBusy()) return
+
+        const jobs = getPendingUploadJobs()
+
+        if (jobs.length === 0) {
+          await uiAlert('업로드할 파일이 없습니다.')
+          return
+        }
+
+        const internalDuplicates = findQueueInternalDuplicateKeys(jobs)
+        if (internalDuplicates.length > 0) {
+          const preview = internalDuplicates.slice(0, 10).join('\n')
+          const extra =
+            internalDuplicates.length > 10
+              ? `\n... 외 ${internalDuplicates.length - 10}개`
+              : ''
+          await uiAlert(
+            `[대기열 내부 중복]\n\n아직 서버와 비교하기 전 단계에서, 업로드 대기열 안에 같은 업로드 경로와 파일명이 중복되어 있습니다.\n같은 파일이 두 번 올라가지 않도록 중복 항목을 정리한 뒤 다시 시도해주세요.\n\n중복 경로:\n${preview}${extra}`,
+          )
+          return
+        }
+
+        const internalEmbedDuplicates =
+          findQueueInternalEmbedDuplicateKeys(jobs)
+        if (internalEmbedDuplicates.length > 0) {
+          const preview = internalEmbedDuplicates.slice(0, 5).join('\n\n')
+          const extra =
+            internalEmbedDuplicates.length > 5
+              ? `\n\n... 외 ${internalEmbedDuplicates.length - 5}개`
+              : ''
+          await uiAlert(
+            `[대기열 내부 태그(embed HTML) 중복]\n\n서로 다른 업로드 경로의 비디오가 같은 embed HTML 태그 파일을 만들려고 합니다.\n이 상태로 올리면 iframe용 태그 파일이 서로 덮어써질 수 있으니, 파일명을 바꾸거나 중복 항목을 정리한 뒤 다시 시도해주세요.\n\n중복 항목:\n${preview}${extra}`,
+          )
+          return
+        }
+
+        const { fileDuplicates, embedDuplicates, duplicateKeys } =
+          await withAppBusy('중복 검사 중...', () => findUploadConflicts(jobs))
+
+        if (fileDuplicates.length > 0 || embedDuplicates.length > 0) {
+          const overwriteAll = await confirmBatchUploadOverwrite(
+            fileDuplicates,
+            embedDuplicates,
+          )
+          if (!overwriteAll) return
+        }
+
+        await withAppBusy('업로드 중...', async () => {
+          let success = 0
+          let failed = 0
+          let lastTargetPath = null
+          const successfulRows = []
+
+          for (let index = 0; index < jobs.length; index += 1) {
+            const job = jobs[index]
+            lastTargetPath = job.targetPath
+            setBusyMessage(`업로드 중... (${index + 1}/${jobs.length})`)
+            uploadQueueStatus.textContent = `업로드 중... (${index + 1}/${jobs.length})`
+
+            const forceOverwrite = duplicateKeys.has(getUploadJobKey(job))
+            const result = await uploadSingleFile(
+              job.file,
+              job.targetPath,
+              job.uploadButton,
+              job.row,
+              forceOverwrite,
+              { skipRefresh: true, suppressConfirm: true, skipBusy: true },
+            )
+
+            if (result === 'success') {
+              success += 1
+              successfulRows.push(job.row)
+            } else {
+              failed += 1
+            }
+          }
+
+          for (const row of successfulRows) {
+            row.remove()
+          }
+
+          if (lastTargetPath && isViewingUploadPath(lastTargetPath)) {
+            await refreshServerFiles(true)
+          }
+
+          updateUploadQueueStatus()
+          await uiAlert(`일괄 업로드 완료\n성공: ${success}개\n실패: ${failed}개`)
+        })
+      }
+
+      async function copyAllAccumulatedTags() {
+        if (accumulatedTags.length === 0) {
+          await uiAlert('복사할 태그가 없습니다.')
+          return
+        }
+
+        const tagsText = accumulatedTags
+          .map(refreshAccumulatedTagEntry)
+          .join('\n')
+        const ok = await copyText(tagsText)
+        await uiAlert(
+          ok
+            ? '누적 태그가 복사되었습니다!'
+            : '복사에 실패했습니다. 브라우저 권한을 확인해주세요.',
+        )
+      }
+
+      async function clearAllAccumulatedTags() {
+        if (accumulatedTags.length === 0) {
+          await uiAlert('삭제할 태그가 없습니다.')
+          return
+        }
+        if (
+          !(await uiConfirm(
+            `누적 태그 ${accumulatedTags.length}개를 모두 삭제하시겠습니까?`,
+            { title: '태그 일괄 삭제', danger: true },
+          ))
+        )
+          return
+
+        accumulatedTags = []
+        activeTagUid = null
+        renderTagList()
+      }
+
+      function escapeHtml(text) {
+        return String(text)
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/"/g, '&quot;')
+      }
+
+      function quoteHtml(value) {
+        return `<em>"${escapeHtml(value)}"</em>`
+      }
+
+      function stripTrailingSlash(path) {
+        return String(path || '').replace(/\/+$/, '')
+      }
+
+      function getPathFolder(path) {
+        const slash = path.lastIndexOf('/')
+        return slash === -1 ? '' : path.slice(0, slash)
+      }
+
+      function getPathBaseName(path) {
+        const clean = stripTrailingSlash(path)
+        const slash = clean.lastIndexOf('/')
+        return slash === -1 ? clean : clean.slice(slash + 1)
+      }
+
+      function formatLogTimestamp(ts) {
+        try {
+          return new Date(ts)
+            .toLocaleString('sv-SE', { timeZone: 'Asia/Seoul' })
+            .replace('T', ' ')
+        } catch {
+          return ts || ''
+        }
+      }
+
+      function formatLogSentenceHtml(entry) {
+        switch (entry.action) {
+          case 'upload':
+            return `${quoteHtml(getPathFolder(entry.path))} 폴더에 ${quoteHtml(getPathBaseName(entry.path))} 파일을 추가했습니다.`
+          case 'delete':
+            return `${quoteHtml(getPathFolder(entry.path))} 폴더에서 ${quoteHtml(getPathBaseName(entry.path))} 파일을 삭제했습니다.`
+          case 'rename':
+            return `${quoteHtml(entry.from)} 파일 이름을 ${quoteHtml(entry.to)}(으)로 변경했습니다.`
+          case 'mkdir':
+            return `${quoteHtml(stripTrailingSlash(entry.path))} 폴더를 생성했습니다.`
+          case 'rmdir':
+            return `${quoteHtml(stripTrailingSlash(entry.path))} 폴더와 안의 항목 ${entry.count || 0}개를 삭제했습니다.`
+          case 'mvdir':
+            return `${quoteHtml(stripTrailingSlash(entry.from))} 폴더를 ${quoteHtml(stripTrailingSlash(entry.to))}(으)로 이동했습니다. (${entry.count || 0}개)`
+          default:
+            return escapeHtml(JSON.stringify(entry))
+        }
+      }
+
+      function formatLogPlainText(entry) {
+        return formatLogSentenceHtml(entry)
+          .replace(/<[^>]+>/g, '')
+          .replace(/&quot;/g, '"')
+          .replace(/&amp;/g, '&')
+          .replace(/&lt;/g, '<')
+          .replace(/&gt;/g, '>')
+      }
+
+      function getCurrentMonthKey() {
+        const now = new Date()
+        const year = now.getUTCFullYear()
+        const month = String(now.getUTCMonth() + 1).padStart(2, '0')
+        return `${year}-${month}`
+      }
+
+      async function fetchLogMonths() {
+        const res = await fetch(`${UPLOAD_WORKER_BASE}/logs/months`)
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        return Array.isArray(data.months) ? data.months : []
+      }
+
+      async function fetchLogMonth(month) {
+        const res = await fetch(
+          `${UPLOAD_WORKER_BASE}/logs?month=${encodeURIComponent(month)}`,
+        )
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        return Array.isArray(data.entries) ? data.entries : []
+      }
+
+      function sortHistoryEntries() {
+        historyEntries.sort((a, b) => new Date(b.ts) - new Date(a.ts))
+      }
+
+      function renderHistoryRows() {
+        const query = historySearchInput.value.trim().toLowerCase()
+        const filtered = historyEntries.filter((entry) => {
+          if (!query) return true
+          const haystack =
+            `${formatLogPlainText(entry)} ${entry.path || ''} ${entry.from || ''} ${entry.to || ''}`.toLowerCase()
+          return haystack.includes(query)
+        })
+
+        if (filtered.length === 0) {
+          historyListEl.innerHTML =
+            '<div class="history-empty">표시할 기록이 없습니다.</div>'
+          return
+        }
+
+        const fragment = document.createDocumentFragment()
+        for (const entry of filtered) {
+          const row = document.createElement('div')
+          row.className = 'history-row'
+
+          const icon = document.createElement('span')
+          icon.className = 'history-row-icon'
+          icon.textContent = '▣'
+          icon.setAttribute('aria-hidden', 'true')
+
+          const text = document.createElement('span')
+          text.className = 'history-row-text'
+          text.innerHTML = formatLogSentenceHtml(entry)
+
+          const time = document.createElement('time')
+          time.className = 'history-row-time'
+          time.dateTime = entry.ts || ''
+          time.textContent = formatLogTimestamp(entry.ts)
+
+          row.appendChild(icon)
+          row.appendChild(text)
+          row.appendChild(time)
+          fragment.appendChild(row)
+        }
+
+        historyListEl.replaceChildren(fragment)
+      }
+
+      function updateHistoryMoreButton() {
+        const noMore = historyMonthIndex >= historyMonths.length
+        btnHistoryMore.disabled = historyLoading || noMore
+        btnHistoryMore.textContent = noMore ? '더 이상 없음' : '더 보기'
+      }
+
+      async function loadMoreHistory() {
+        if (historyLoading || historyMonthIndex >= historyMonths.length) {
+          updateHistoryMoreButton()
+          return
+        }
+
+        historyLoading = true
+        updateHistoryMoreButton()
+
+        const month = historyMonths[historyMonthIndex]
+        historyMonthIndex += 1
+
+        try {
+          if (!historyLoadedMonths.has(month)) {
+            const entries = await fetchLogMonth(month)
+            historyLoadedMonths.add(month)
+            historyEntries.push(...entries)
+            sortHistoryEntries()
+          }
+          renderHistoryRows()
+        } catch {
+          historyListEl.innerHTML =
+            '<div class="history-empty">히스토리를 불러오지 못했습니다.</div>'
+        } finally {
+          historyLoading = false
+          updateHistoryMoreButton()
+        }
+      }
+
+      async function openHistory() {
+        if (isAppBusy()) return
+
+        historyModal.classList.add('open')
+        historyModal.setAttribute('aria-hidden', 'false')
+        historySearchInput.value = ''
+        historyEntries = []
+        historyLoadedMonths = new Set()
+        historyMonthIndex = 0
+        historyListEl.innerHTML =
+          '<div class="history-empty">불러오는 중...</div>'
+        btnHistoryMore.disabled = true
+        btnHistoryMore.textContent = '불러오는 중...'
+
+        try {
+          historyMonths = await fetchLogMonths()
+          if (historyMonths.length === 0) {
+            historyMonths = [getCurrentMonthKey()]
+          }
+          await loadMoreHistory()
+        } catch {
+          historyListEl.innerHTML =
+            '<div class="history-empty">히스토리를 불러오지 못했습니다. Worker 배포 후 다시 시도해주세요.</div>'
+          btnHistoryMore.disabled = true
+          btnHistoryMore.textContent = '더 이상 없음'
+        }
+      }
+
+      function closeHistory() {
+        historyModal.classList.remove('open')
+        historyModal.setAttribute('aria-hidden', 'true')
+      }
+
+      function initHistoryModal() {
+        historySearchInput.addEventListener('input', () => {
+          renderHistoryRows()
+        })
+
+        historyModal.addEventListener('click', (event) => {
+          if (event.target === historyModal) {
+            closeHistory()
+          }
+        })
+
+        document.addEventListener('keydown', (event) => {
+          if (
+            event.key === 'Escape' &&
+            historyModal.classList.contains('open')
+          ) {
+            closeHistory()
+          }
+        })
+      }
+
+      loadBrowseTypes()
+      applyGridViewClass()
+      syncGridViewControls()
+      refreshServerFiles()
+      setSidebarStatus('타입을 선택하세요.')
+      updateGridToolbar()
+    </script>
+  </body>
+</html>
