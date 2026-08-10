@@ -85,10 +85,17 @@ export function BulkUploadStep({
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <p className="text-sm text-muted-foreground">
-          사이트에서 내려받은 양식의 첫 줄 헤더를 그대로 사용하세요. 헤더 이름으로
-          자동 인식합니다. (현재 등록 항목 {fields.length}개)
-        </p>
+        <div className="space-y-1">
+          <p className="text-sm text-muted-foreground">
+            사이트에서 내려받은 양식의 첫 줄 헤더를 그대로 사용하세요. 헤더
+            이름으로 자동 인식합니다. (현재 등록 항목 {fields.length}개)
+          </p>
+          <p className="text-xs text-muted-foreground">
+            이미 등록된 상품을 고칠 때는 전체 상품 화면에서 내보낸 파일을 쓰세요.
+            그 파일의 <code>_id</code>·<code>_작업</code> 열로 수정과 삭제를 함께
+            반영할 수 있습니다.
+          </p>
+        </div>
         <Button
           type="button"
           variant="outline"

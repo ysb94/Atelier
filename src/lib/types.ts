@@ -93,7 +93,14 @@ export type StyleStatus =
 
 export type FieldOwner = 'common' | 'planning' | 'design' | 'md' | 'logistics'
 
-export type FieldType = 'text' | 'number' | 'list' | 'gender' | 'season'
+export type FieldType =
+  | 'text'
+  | 'number'
+  | 'list'
+  | 'gender'
+  | 'season'
+  /** 이미지 주소를 담는 항목. 값은 공개 URL 문자열이다. */
+  | 'image'
 
 /** 브랜드별 업로드 양식 항목(헤더) 정의 */
 export type BrandField = {

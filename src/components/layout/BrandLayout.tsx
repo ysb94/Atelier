@@ -17,6 +17,7 @@ import {
   LayoutGrid,
   Lightbulb,
   ListChecks,
+  LogOut,
   Package,
   Palette,
   PanelLeftClose,
@@ -29,8 +30,10 @@ import {
   Store,
   Table2,
   Upload,
+  Users,
 } from 'lucide-react'
 import { getBrandBySlug, getBrands } from '@/lib/api'
+import { useAuth } from '@/lib/supabase/auth'
 import { cn } from '@/lib/utils'
 import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { BrandContext } from './brand-context'
@@ -74,16 +77,8 @@ const navGroups: { title: string; items: NavItem[] }[] = [
   {
     title: '데이터',
     items: [
-      { to: 'data/planning', label: '기획', icon: Table2 },
-      { to: 'data/design', label: '디자인', icon: Table2 },
-      { to: 'data/md', label: 'MD', icon: Table2 },
-      { to: 'data/logistics', label: '물류', icon: Table2 },
-      { to: 'data/all', label: '취합', icon: Table2 },
-    ],
-  },
-  {
-    title: '코드',
-    items: [
+      { to: 'data/all', label: '전체 상품', icon: Table2 },
+      { to: 'data/upload', label: '일괄 업로드', icon: Upload },
       { to: 'barcodes', label: '자사 바코드', icon: ScanBarcode },
       { to: 'usage-codes', label: '사용처별 바코드', icon: Store },
       { to: 'partner-codes', label: '거래처 코드', icon: Building2 },
@@ -95,7 +90,7 @@ const navGroups: { title: string; items: NavItem[] }[] = [
       { to: 'settings/fields', label: '업로드 항목', icon: ListChecks },
       { to: 'settings/seasons', label: '출시 기획', icon: CalendarRange },
       { to: 'settings/usage-targets', label: '사용처', icon: Store },
-      { to: 'settings/import', label: '가져오기', icon: Upload },
+      { to: 'settings/members', label: '멤버', icon: Users },
       { to: 'settings/brand', label: '브랜드 정보', icon: Settings },
     ],
   },
@@ -154,6 +149,7 @@ export function BrandLayout() {
   // 기본은 전부 접힘. 현재 경로가 속한 그룹만 자동으로 연다.
   const [openTitles, setOpenTitles] = useState<Set<string>>(() => new Set())
   const [collapsed, setCollapsed] = useState(readCollapsed)
+  const { email, profile, signOut } = useAuth()
   const brandQuery = useQuery({
     queryKey: ['brand', brandSlug],
     queryFn: () => getBrandBySlug(brandSlug),
@@ -291,7 +287,7 @@ export function BrandLayout() {
             </div>
           </div>
 
-          {!collapsed ? (
+          {!collapsed && brands.length > 1 ? (
             <div className="border-b border-white/10 px-3 py-3">
               <label className="mb-1.5 block px-1 text-[10px] font-medium uppercase tracking-wider text-white/40">
                 브랜드 전환
@@ -407,12 +403,36 @@ export function BrandLayout() {
                 <Package className="size-3.5" />
                 Atelier Workspace
               </div>
+              {profile?.displayName || email ? (
+                <div
+                  className="mt-2 truncate text-white/50"
+                  title={email ?? undefined}
+                >
+                  {profile?.displayName || email}
+                  {profile?.position ? ` · ${profile.position}` : ''}
+                </div>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="mt-2 flex items-center gap-2 rounded-md px-1 py-1 text-white/50 transition-colors hover:bg-sidebar-muted hover:text-white"
+              >
+                <LogOut className="size-3.5" />
+                로그아웃
+              </button>
             </div>
           ) : (
-            <div className="border-t border-white/10 py-3 text-white/40">
-              <div className="flex justify-center">
-                <Package className="size-3.5" />
-              </div>
+            <div className="flex flex-col items-center gap-3 border-t border-white/10 py-3 text-white/40">
+              <Package className="size-3.5" />
+              <button
+                type="button"
+                onClick={() => void signOut()}
+                className="rounded-md p-1.5 text-white/50 transition-colors hover:bg-sidebar-muted hover:text-white"
+                aria-label="로그아웃"
+                title="로그아웃"
+              >
+                <LogOut className="size-3.5" />
+              </button>
             </div>
           )}
         </aside>

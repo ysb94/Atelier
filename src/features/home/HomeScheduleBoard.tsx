@@ -41,7 +41,26 @@ type PanelTab = 'selected' | 'ongoing' | 'upcoming'
 
 type HomeScheduleBoardProps = {
   events: HomeEvent[]
-  sampleNotice?: boolean
+}
+
+function SchedulePlaceholder() {
+  return (
+    <section className="mb-8">
+      <h3 className="mb-3 flex items-center gap-2 text-sm font-medium">
+        <CalendarDays className="size-4 text-muted-foreground" />
+        일정
+      </h3>
+      <Card>
+        <CardContent className="px-6 py-10 text-center">
+          <p className="text-sm font-medium">일정 기능 준비 중</p>
+          <p className="mx-auto mt-2 max-w-md text-xs text-muted-foreground">
+            부서별 마감·회의·입고 일정을 한곳에서 볼 수 있도록 준비하고 있습니다.
+            출시 기획과 상품을 등록한 뒤 이 영역에서 팀 일정을 확인할 수 있습니다.
+          </p>
+        </CardContent>
+      </Card>
+    </section>
+  )
 }
 
 function EventRow({
@@ -164,10 +183,14 @@ function CalendarEventBar({
   )
 }
 
-export function HomeScheduleBoard({
-  events,
-  sampleNotice = false,
-}: HomeScheduleBoardProps) {
+export function HomeScheduleBoard({ events }: HomeScheduleBoardProps) {
+  if (events.length === 0) {
+    return <SchedulePlaceholder />
+  }
+  return <HomeScheduleBoardContent events={events} />
+}
+
+function HomeScheduleBoardContent({ events }: { events: HomeEvent[] }) {
   const today = useMemo(() => new Date(), [])
   const todayKey = toDateKey(today)
 
@@ -268,9 +291,6 @@ export function HomeScheduleBoard({
             저장되지 않습니다.
           </p>
         </div>
-        {sampleNotice ? (
-          <Badge variant="outline">예시 데이터 · 회의 후 항목 확정 예정</Badge>
-        ) : null}
       </div>
 
       <div className="flex flex-wrap items-center gap-1.5">

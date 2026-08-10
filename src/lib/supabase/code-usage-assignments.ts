@@ -3,19 +3,21 @@ import type {
   CodeUsageAssignmentInput,
   CodeUsageStatus,
 } from '@/lib/types'
-import {
-  CODE_USAGE_ASSIGNMENTS_STORE,
-  META_STORE,
-  idbRequest,
-  openDb,
-  withStore,
-} from '@/lib/db/client'
-import {
-  listLegacyUsageLinks,
-  stripLegacyUsageTargetIds,
-} from '@/lib/db/product-codes'
+import { getSupabase } from '@/lib/supabase/client'
+import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 
-const MIGRATE_FLAG_KEY = 'usage_assignments_v1'
+const COLUMNS =
+  'id, brand_id, product_code_id, usage_target_id, status, created_at, updated_at'
+
+type AssignmentRow = {
+  id: string
+  brand_id: string
+  product_code_id: string
+  usage_target_id: string
+  status: CodeUsageStatus
+  created_at: string
+  updated_at: string
+}
 
 export class CodeUsageAssignmentStoreError extends Error {
   readonly code: 'duplicate' | 'not_found' | 'invalid'
@@ -30,84 +32,36 @@ export class CodeUsageAssignmentStoreError extends Error {
   }
 }
 
-function newAssignmentId() {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return `assign-${crypto.randomUUID()}`
-  }
-  return `assign-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-}
-
-function nowIso() {
-  return new Date().toISOString()
-}
-
 function normalizeStatus(status?: CodeUsageStatus): CodeUsageStatus {
   return status === 'paused' ? 'paused' : 'active'
 }
 
-let migratePromise: Promise<void> | null = null
-
-/**
- * 구 ProductCode.usageTargetIds → CodeUsageAssignment 이전.
- * 한 번만 실행한다.
- */
-export async function ensureUsageAssignmentMigrated() {
-  if (!migratePromise) {
-    migratePromise = (async () => {
-      const meta = await withStore(META_STORE, 'readonly', (store) =>
-        idbRequest<{ key: string; value: boolean } | undefined>(
-          store.get(MIGRATE_FLAG_KEY),
-        ),
-      )
-      if (meta?.value) return
-
-      const links = await listLegacyUsageLinks()
-      if (links.length > 0) {
-        const db = await openDb()
-        await new Promise<void>((resolve, reject) => {
-          const tx = db.transaction(CODE_USAGE_ASSIGNMENTS_STORE, 'readwrite')
-          const store = tx.objectStore(CODE_USAGE_ASSIGNMENTS_STORE)
-          const timestamp = nowIso()
-
-          for (const link of links) {
-            for (const usageTargetId of link.usageTargetIds) {
-              const record: CodeUsageAssignment = {
-                id: newAssignmentId(),
-                brandId: link.brandId,
-                productCodeId: link.productCodeId,
-                usageTargetId,
-                status: 'active',
-                createdAt: timestamp,
-                updatedAt: timestamp,
-              }
-              store.put(record)
-            }
-          }
-
-          tx.oncomplete = () => resolve()
-          tx.onerror = () =>
-            reject(tx.error ?? new Error('Usage assignment migrate failed'))
-        })
-      }
-
-      await stripLegacyUsageTargetIds()
-      await withStore(META_STORE, 'readwrite', (store) => {
-        store.put({ key: MIGRATE_FLAG_KEY, value: true })
-      })
-    })().catch((error) => {
-      migratePromise = null
-      throw error
-    })
+function toAssignment(row: AssignmentRow): CodeUsageAssignment {
+  return {
+    id: row.id,
+    brandId: row.brand_id,
+    productCodeId: row.product_code_id,
+    usageTargetId: row.usage_target_id,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   }
-  return migratePromise
 }
 
 async function readAll(brandId: string): Promise<CodeUsageAssignment[]> {
-  await ensureUsageAssignmentMigrated()
-  return withStore(CODE_USAGE_ASSIGNMENTS_STORE, 'readonly', (store) => {
-    const index = store.index('brandId')
-    return idbRequest<CodeUsageAssignment[]>(index.getAll(brandId))
-  })
+  const { data, error } = await getSupabase()
+    .from('code_usage_assignments')
+    .select(COLUMNS)
+    .eq('brand_id', brandId)
+
+  if (error) {
+    throw new CodeUsageAssignmentStoreError(
+      errorMessage(error, '사용처 연결을 불러오지 못했습니다.'),
+      'invalid',
+    )
+  }
+
+  return ((data as AssignmentRow[]) ?? []).map(toAssignment)
 }
 
 export async function listCodeUsageAssignments(
@@ -139,10 +93,19 @@ export async function listCodeUsageAssignments(
 export async function getCodeUsageAssignment(
   id: string,
 ): Promise<CodeUsageAssignment | undefined> {
-  await ensureUsageAssignmentMigrated()
-  return withStore(CODE_USAGE_ASSIGNMENTS_STORE, 'readonly', (store) =>
-    idbRequest<CodeUsageAssignment | undefined>(store.get(id)),
-  )
+  const { data, error } = await getSupabase()
+    .from('code_usage_assignments')
+    .select(COLUMNS)
+    .eq('id', id)
+    .maybeSingle()
+
+  if (error) {
+    throw new CodeUsageAssignmentStoreError(
+      errorMessage(error, '사용처 연결을 불러오지 못했습니다.'),
+      'invalid',
+    )
+  }
+  return data ? toAssignment(data as AssignmentRow) : undefined
 }
 
 async function findExisting(
@@ -173,29 +136,33 @@ export async function createCodeUsageAssignment(
 
   const existing = await findExisting(brandId, productCodeId, usageTargetId)
   if (existing) {
-    // 이미 있으면 상태만 갱신 (중복 생성 금지)
     if (input.status && input.status !== existing.status) {
       return updateCodeUsageAssignmentStatus(existing.id, input.status)
     }
     return existing
   }
 
-  const timestamp = nowIso()
-  const record: CodeUsageAssignment = {
-    id: newAssignmentId(),
-    brandId,
-    productCodeId,
-    usageTargetId,
-    status: normalizeStatus(input.status),
-    createdAt: timestamp,
-    updatedAt: timestamp,
+  const { data, error } = await getSupabase()
+    .from('code_usage_assignments')
+    .insert({
+      brand_id: brandId,
+      product_code_id: productCodeId,
+      usage_target_id: usageTargetId,
+      status: normalizeStatus(input.status),
+    })
+    .select(COLUMNS)
+    .single()
+
+  if (error) {
+    throw new CodeUsageAssignmentStoreError(
+      isUniqueViolation(error)
+        ? '이미 등록된 연결입니다.'
+        : errorMessage(error, '사용처 연결을 만들지 못했습니다.'),
+      isUniqueViolation(error) ? 'duplicate' : 'invalid',
+    )
   }
 
-  await withStore(CODE_USAGE_ASSIGNMENTS_STORE, 'readwrite', (store) => {
-    store.add(record)
-    return record
-  })
-  return record
+  return toAssignment(data as AssignmentRow)
 }
 
 export async function updateCodeUsageAssignmentStatus(
@@ -210,17 +177,21 @@ export async function updateCodeUsageAssignmentStatus(
     )
   }
 
-  const next: CodeUsageAssignment = {
-    ...existing,
-    status: normalizeStatus(status),
-    updatedAt: nowIso(),
+  const { data, error } = await getSupabase()
+    .from('code_usage_assignments')
+    .update({ status: normalizeStatus(status) })
+    .eq('id', id)
+    .select(COLUMNS)
+    .single()
+
+  if (error) {
+    throw new CodeUsageAssignmentStoreError(
+      errorMessage(error, '상태를 저장하지 못했습니다.'),
+      'invalid',
+    )
   }
 
-  await withStore(CODE_USAGE_ASSIGNMENTS_STORE, 'readwrite', (store) => {
-    store.put(next)
-    return next
-  })
-  return next
+  return toAssignment(data as AssignmentRow)
 }
 
 export type BulkUsageApplyRow = {
@@ -234,13 +205,11 @@ export type BulkUsageApplyResult = {
   skipped: number
 }
 
-/** 한 사용처에 여러 바코드를 일괄 등록·상태 반영 */
 export async function applyBulkUsageAssignments(
   brandId: string,
   usageTargetId: string,
   rows: BulkUsageApplyRow[],
 ): Promise<BulkUsageApplyResult> {
-  await ensureUsageAssignmentMigrated()
   let created = 0
   let updated = 0
   let skipped = 0

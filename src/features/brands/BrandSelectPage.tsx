@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { LogOut, Pencil, Plus, Trash2 } from 'lucide-react'
 import {
   BrandStoreError,
   createBrand,
@@ -24,9 +24,12 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { BrandAvatar } from '@/components/brand/BrandAvatar'
+import { isBrandLead, useAuth } from '@/lib/supabase/auth'
 
 export function BrandSelectPage() {
   const queryClient = useQueryClient()
+  const { email, profile, signOut } = useAuth()
+  const isAdmin = Boolean(profile?.isAdmin)
   const {
     data: brands = [],
     isLoading,
@@ -123,10 +126,24 @@ export function BrandSelectPage() {
               선택하면 해당 브랜드 데이터만 보입니다.
             </p>
           </div>
-          <Button onClick={openCreate} className="shrink-0">
-            <Plus className="size-4" />
-            새 브랜드
-          </Button>
+          <div className="flex shrink-0 items-center gap-2">
+            {profile?.displayName || email ? (
+              <span className="hidden text-sm text-muted-foreground sm:inline">
+                {profile?.displayName || email}
+                {profile?.position ? ` · ${profile.position}` : ''}
+              </span>
+            ) : null}
+            <Button variant="outline" onClick={() => void signOut()}>
+              <LogOut className="size-4" />
+              로그아웃
+            </Button>
+            {isAdmin ? (
+              <Button onClick={openCreate}>
+                <Plus className="size-4" />
+                새 브랜드
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         {isLoading ? (
@@ -139,26 +156,34 @@ export function BrandSelectPage() {
         ) : brands.length === 0 ? (
           <Card>
             <CardHeader>
-              <CardTitle>등록된 브랜드가 없습니다</CardTitle>
+              <CardTitle>볼 수 있는 브랜드가 없습니다</CardTitle>
               <CardDescription>
-                새 브랜드를 만들어 작업장을 시작해 보세요.
+                {isAdmin
+                  ? '새 브랜드를 만들어 작업장을 시작해 보세요.'
+                  : '담당 브랜드가 아직 없거나 승인이 필요합니다. 운영진에게 문의해 주세요.'}
               </CardDescription>
             </CardHeader>
-            <CardContent>
-              <Button onClick={openCreate}>
-                <Plus className="size-4" />
-                첫 브랜드 만들기
-              </Button>
-            </CardContent>
+            {isAdmin ? (
+              <CardContent>
+                <Button onClick={openCreate}>
+                  <Plus className="size-4" />
+                  첫 브랜드 만들기
+                </Button>
+              </CardContent>
+            ) : null}
           </Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
-            {brands.map((brand) => (
+            {brands.map((brand) => {
+              const canEdit = isAdmin || isBrandLead(profile, brand.id)
+              return (
               <Card
                 key={brand.id}
                 className="group relative h-full transition-all hover:border-foreground/20 hover:shadow-md"
               >
+                {canEdit || isAdmin ? (
                 <div className="absolute right-3 top-3 z-10 flex gap-1">
+                  {canEdit ? (
                   <Button
                     type="button"
                     variant="ghost"
@@ -169,6 +194,8 @@ export function BrandSelectPage() {
                   >
                     <Pencil className="size-3.5" />
                   </Button>
+                  ) : null}
+                  {isAdmin ? (
                   <Button
                     type="button"
                     variant="ghost"
@@ -180,7 +207,9 @@ export function BrandSelectPage() {
                   >
                     <Trash2 className="size-3.5" />
                   </Button>
+                  ) : null}
                 </div>
+                ) : null}
 
                 <Link to={`/b/${brand.slug}`} className="block">
                   <CardHeader className="flex flex-row items-start gap-4 pr-20">
@@ -203,7 +232,8 @@ export function BrandSelectPage() {
                   </CardContent>
                 </Link>
               </Card>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

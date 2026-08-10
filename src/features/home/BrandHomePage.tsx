@@ -1,8 +1,8 @@
-import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
   Boxes,
+  CalendarRange,
   LayoutGrid,
   Lightbulb,
   Palette,
@@ -14,6 +14,8 @@ import {
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { BrandAvatar } from '@/components/brand/BrandAvatar'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
 import {
   getProductDrafts,
   getSeasonsByBrand,
@@ -21,7 +23,6 @@ import {
 } from '@/lib/api'
 import { formatNumber } from '@/lib/utils'
 import { HomeScheduleBoard } from './HomeScheduleBoard'
-import { createSampleHomeEvents } from './home-events'
 
 const shortcuts = [
   {
@@ -76,7 +77,6 @@ const shortcuts = [
 
 export function BrandHomePage() {
   const { brand } = useBrand()
-  const sampleEvents = useMemo(() => createSampleHomeEvents(), [])
 
   const stylesQuery = useQuery({
     queryKey: ['styles', brand.id, 'products'],
@@ -91,9 +91,12 @@ export function BrandHomePage() {
     queryFn: () => getSeasonsByBrand(brand.id),
   })
 
-  const styleCount = stylesQuery.data?.length ?? brand.styleCount
+  const loading =
+    stylesQuery.isLoading || draftsQuery.isLoading || seasonsQuery.isLoading
+  const styleCount = stylesQuery.data?.length ?? 0
   const draftCount = draftsQuery.data?.length ?? 0
   const seasonCount = seasonsQuery.data?.length ?? 0
+  const needsSeason = !loading && seasonCount === 0
 
   return (
     <div>
@@ -128,24 +131,46 @@ export function BrandHomePage() {
         <div className="rounded-lg border border-border px-4 py-3">
           <div className="text-xs text-muted-foreground">상품</div>
           <div className="mt-1 text-2xl font-semibold tabular-nums">
-            {formatNumber(styleCount)}
+            {loading ? '—' : formatNumber(styleCount)}
           </div>
         </div>
         <div className="rounded-lg border border-border px-4 py-3">
           <div className="text-xs text-muted-foreground">기획안</div>
           <div className="mt-1 text-2xl font-semibold tabular-nums">
-            {formatNumber(draftCount)}
+            {loading ? '—' : formatNumber(draftCount)}
           </div>
         </div>
         <div className="rounded-lg border border-border px-4 py-3">
           <div className="text-xs text-muted-foreground">출시 기획</div>
           <div className="mt-1 text-2xl font-semibold tabular-nums">
-            {formatNumber(seasonCount)}
+            {loading ? '—' : formatNumber(seasonCount)}
           </div>
         </div>
       </div>
 
-      <HomeScheduleBoard events={sampleEvents} sampleNotice />
+      {needsSeason ? (
+        <Card className="mb-8 border-accent">
+          <CardContent className="flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-start gap-3">
+              <span className="mt-0.5 rounded-md bg-muted p-2 text-muted-foreground">
+                <CalendarRange className="size-5" />
+              </span>
+              <div>
+                <h3 className="text-sm font-semibold">출시 기획부터 시작하세요</h3>
+                <p className="mt-1 max-w-xl text-sm text-muted-foreground">
+                  상품·기획안·가져오기는 출시 기획이 있어야 합니다. SS, 홀리데이
+                  등 출시 묶음을 먼저 만든 뒤 기획안과 상품을 등록하세요.
+                </p>
+              </div>
+            </div>
+            <Link to={`/b/${brand.slug}/settings/seasons`} className="shrink-0">
+              <Button type="button">출시 기획 만들기</Button>
+            </Link>
+          </CardContent>
+        </Card>
+      ) : null}
+
+      <HomeScheduleBoard events={[]} />
 
       <h3 className="mb-3 text-sm font-medium text-muted-foreground">바로가기</h3>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">

@@ -23,6 +23,7 @@ import {
 } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -34,6 +35,11 @@ import {
   updateStyleFields,
 } from '@/lib/api'
 import { OWNER_LABEL } from '@/lib/import/fields'
+import {
+  isImageField,
+  pickImageSources,
+  resolveProductImageSources,
+} from '@/lib/products/product-image'
 import {
   fieldValueKey,
   getStyleFieldDisplay,
@@ -186,7 +192,20 @@ function EditableFieldCell({
           begin()
         }}
       >
-        {filled ? display : (
+        {isImageField(field) ? (
+          <span className="flex items-center gap-2">
+            <ProductThumb
+              sources={pickImageSources(raw, style.styleNo, key)}
+              alt={style.styleNo}
+              size={28}
+            />
+            <span className="truncate text-xs text-muted-foreground">
+              {display}
+            </span>
+          </span>
+        ) : filled ? (
+          display
+        ) : (
           <Badge variant="muted">{OWNER_LABEL[field.owner]}</Badge>
         )}
       </button>
@@ -237,7 +256,7 @@ function EditableFieldCell({
       >
         <option value="W">W · 여성</option>
         <option value="M">M · 남성</option>
-        <option value="U">U · 유니섹스</option>
+        <option value="U">U · 공용</option>
       </Select>
     )
   }
@@ -387,6 +406,8 @@ export function ProductsPage({
   const fields = useMemo(() => fieldsQuery.data ?? [], [fieldsQuery.data])
   const seasons = useMemo(() => seasonsQuery.data ?? [], [seasonsQuery.data])
   const allStyles = useMemo(() => stylesQuery.data ?? [], [stylesQuery.data])
+  const listLoading =
+    stylesQuery.isLoading || fieldsQuery.isLoading || seasonsQuery.isLoading
 
   const seasonMap = useMemo(
     () => new Map(seasons.map((s) => [s.id, s])),
@@ -539,16 +560,38 @@ export function ProductsPage({
     [saveMutation],
   )
 
+  const styleNoLabel =
+    fields.find((field) => field.systemKey === 'styleNo')?.label || '품번'
+  const nameLabel =
+    fields.find((field) => field.systemKey === 'name')?.label || '상품명'
+
+  const hasImageField = fields.some(isImageField)
+
   const columns = useMemo(() => {
     const base = [
+      ...(hasImageField
+        ? [
+            columnHelper.display({
+              id: 'thumb',
+              header: '',
+              cell: ({ row }) => (
+                <ProductThumb
+                  sources={resolveProductImageSources(row.original)}
+                  alt={row.original.styleNo}
+                  size={36}
+                />
+              ),
+            }),
+          ]
+        : []),
       columnHelper.accessor('styleNo', {
-        header: '품번',
+        header: styleNoLabel,
         cell: (info) => (
           <span className="font-medium tabular-nums">{info.getValue()}</span>
         ),
       }),
       columnHelper.accessor('name', {
-        header: '상품명',
+        header: nameLabel,
       }),
     ]
 
@@ -605,11 +648,14 @@ export function ProductsPage({
   }, [
     columnPreset,
     fields,
+    hasImageField,
     ownerFields,
     seasonMap,
     seasons,
     saveMutation.isPending,
     handleSaveField,
+    styleNoLabel,
+    nameLabel,
   ])
 
   const table = useReactTable({
@@ -634,7 +680,7 @@ export function ProductsPage({
         }
         actions={
           lockedOwner ? undefined : (
-            <Link to={`/b/${brand.slug}/settings/import?mode=single`}>
+            <Link to={`/b/${brand.slug}/data/upload?mode=single`}>
               <Button type="button">+ 상품 등록</Button>
             </Link>
           )
@@ -788,13 +834,40 @@ export function ProductsPage({
               ))}
             </thead>
             <tbody>
-              {stylesQuery.isLoading || fieldsQuery.isLoading ? (
+              {listLoading ? (
                 <tr>
                   <td
                     colSpan={columns.length}
                     className="px-4 py-10 text-center text-muted-foreground"
                   >
                     불러오는 중...
+                  </td>
+                </tr>
+              ) : allStyles.length === 0 && !hasActiveFilters ? (
+                <tr>
+                  <td colSpan={columns.length} className="px-4 py-12">
+                    <div className="mx-auto max-w-md space-y-3 text-center">
+                      <p className="text-sm font-medium">
+                        등록된 상품이 없습니다
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        가져오기에서 양식으로 일괄 등록하거나, 한건 등록으로
+                        첫 상품을 추가하세요. 기획안에서 확정한 뒤 상품으로
+                        올리는 흐름도 사용할 수 있습니다.
+                      </p>
+                      <div className="flex flex-wrap items-center justify-center gap-2">
+                        <Link to={`/b/${brand.slug}/data/upload?mode=single`}>
+                          <Button type="button" size="sm">
+                            한건 등록
+                          </Button>
+                        </Link>
+                        <Link to={`/b/${brand.slug}/data/upload`}>
+                          <Button type="button" size="sm" variant="outline">
+                            일괄 가져오기
+                          </Button>
+                        </Link>
+                      </div>
+                    </div>
                   </td>
                 </tr>
               ) : pageStyles.length === 0 ? (

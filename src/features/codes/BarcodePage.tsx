@@ -1,6 +1,7 @@
 import { Fragment, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Copy, Pencil, Trash2 } from 'lucide-react'
+import { ChevronDown, Copy, Pencil, Trash2, Upload } from 'lucide-react'
+import { Link } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
@@ -25,6 +26,7 @@ import type {
   ProductCodeInput,
 } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
+import { BarcodeBulkUploadPanel } from './BarcodeBulkUploadPanel'
 import {
   ProductCodeDialog,
   type ProductCodeDialogMode,
@@ -42,10 +44,16 @@ export function BarcodePage() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [showBulk, setShowBulk] = useState(false)
 
   const codesQuery = useQuery({
     queryKey: ['productCodes', brand.id, 'own'],
     queryFn: () => getProductCodes(brand.id, 'own'),
+  })
+  const allCodesQuery = useQuery({
+    queryKey: ['productCodes', brand.id, 'all'],
+    queryFn: () => getProductCodes(brand.id),
+    enabled: showBulk,
   })
   const stylesQuery = useQuery({
     queryKey: ['styles', brand.id, 'codes'],
@@ -62,6 +70,7 @@ export function BarcodePage() {
 
   const codes = useMemo(() => codesQuery.data ?? [], [codesQuery.data])
   const styles = useMemo(() => stylesQuery.data ?? [], [stylesQuery.data])
+  const hasStyles = styles.length > 0
   const targets = useMemo(() => targetsQuery.data ?? [], [targetsQuery.data])
   const assignments = useMemo(
     () => assignmentsQuery.data ?? [],
@@ -157,11 +166,47 @@ export function BarcodePage() {
         title="자사 바코드"
         description={`${brand.name}이 직접 발급하는 88코드 마스터입니다. 업체 프리픽스는 ${barcodePrefix(brand.id)}입니다. 사용처 등록은 사용처별 바코드 메뉴에서 합니다.`}
         actions={
-          <Button type="button" onClick={openCreate}>
-            + 바코드 등록
-          </Button>
+          hasStyles ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setShowBulk((prev) => !prev)}
+              >
+                <Upload className="size-3.5" />
+                {showBulk ? '일괄 등록 닫기' : '일괄 등록'}
+              </Button>
+              <Button type="button" onClick={openCreate}>
+                + 바코드 등록
+              </Button>
+            </>
+          ) : (
+            <Link to={`/b/${brand.slug}/data/upload?mode=single`}>
+              <Button type="button" variant="outline">
+                상품 먼저 등록
+              </Button>
+            </Link>
+          )
         }
       />
+
+      {showBulk && hasStyles ? (
+        <div className="mb-4">
+          <BarcodeBulkUploadPanel
+            brandName={brand.name}
+            brandId={brand.id}
+            styles={styles}
+            existingCodes={allCodesQuery.data ?? codes}
+            onApplied={async () => {
+              await invalidate()
+              await queryClient.invalidateQueries({
+                queryKey: ['productCodes', brand.id, 'all'],
+              })
+            }}
+            onClose={() => setShowBulk(false)}
+          />
+        </div>
+      ) : null}
 
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
         <Input
@@ -206,9 +251,33 @@ export function BarcodePage() {
                     colSpan={8}
                     className="px-4 py-12 text-center text-muted-foreground"
                   >
-                    {codes.length === 0
-                      ? '등록된 바코드가 없습니다. 오른쪽 위에서 첫 코드를 만들어 보세요.'
-                      : '조건에 맞는 코드가 없습니다.'}
+                    {codes.length === 0 ? (
+                      <div className="mx-auto max-w-md space-y-3">
+                        <p className="text-sm font-medium text-foreground">
+                          {hasStyles
+                            ? '등록된 바코드가 없습니다'
+                            : '상품이 없어 바코드를 만들 수 없습니다'}
+                        </p>
+                        <p className="text-sm text-muted-foreground">
+                          {hasStyles
+                            ? '자사 바코드는 확정된 단품·세트 구성으로 등록합니다. 첫 코드를 만들어 보세요.'
+                            : '바코드 구성품은 품번이 부여된 상품에서 고릅니다. 가져오기나 상품 등록으로 단품을 먼저 추가하세요.'}
+                        </p>
+                        {hasStyles ? (
+                          <Button type="button" size="sm" onClick={openCreate}>
+                            + 바코드 등록
+                          </Button>
+                        ) : (
+                          <Link to={`/b/${brand.slug}/data/upload?mode=single`}>
+                            <Button type="button" size="sm">
+                              상품 등록
+                            </Button>
+                          </Link>
+                        )}
+                      </div>
+                    ) : (
+                      '조건에 맞는 코드가 없습니다.'
+                    )}
                   </td>
                 </tr>
               ) : (

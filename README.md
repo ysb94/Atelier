@@ -1,5 +1,11 @@
 # React + TypeScript + Vite
 
+## Project architecture
+
+Before any Supabase, PostgreSQL, Auth, Storage, RLS or database migration work,
+read [`docs/architecture/SUPABASE.md`](docs/architecture/SUPABASE.md).
+AI assistants must also follow [`AGENTS.md`](AGENTS.md).
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:

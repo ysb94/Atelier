@@ -54,7 +54,7 @@ export function getStyleFieldDisplay(
         : style.gender === 'M'
           ? '남성'
           : style.gender === 'U'
-            ? '유니섹스'
+            ? '공용'
             : ''
     case 'colors':
       return style.colors.join(', ')

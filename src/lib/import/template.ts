@@ -1,21 +1,23 @@
 import type { BrandField, FieldOwner } from '@/lib/types'
 import { OWNER_LABEL } from '@/lib/import/fields'
-import { filterFieldsForTemplate } from '@/lib/db/brand-fields'
+import { filterFieldsForTemplate } from '@/lib/import/brand-field-template'
 
 const TYPE_LABEL: Record<BrandField['type'], string> = {
   text: '텍스트',
   number: '숫자',
   list: '목록(쉼표 구분)',
-  gender: '성별(W/M/U)',
+  gender: '성별(남성/여성/공용)',
   season: '시즌 코드',
+  image: '이미지 주소',
 }
 
 const EXAMPLE: Record<string, string> = {
   styleNo: 'AT-26SS-001',
+  imageUrl: '',
   name: '오버사이즈 트렌치',
   seasonCode: '26SS',
   category: '아우터',
-  gender: 'W',
+  gender: '여성',
   plannedQty: '400',
   targetCost: '89000',
   planner: '박민지',

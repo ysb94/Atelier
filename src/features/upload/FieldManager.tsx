@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Check, Download, Pencil, Plus, Trash2, X } from 'lucide-react'
 import {
@@ -21,6 +21,7 @@ const TYPE_OPTIONS: { value: FieldType; label: string }[] = [
   { value: 'list', label: '목록' },
   { value: 'gender', label: '성별' },
   { value: 'season', label: '시즌' },
+  { value: 'image', label: '이미지' },
 ]
 
 type Draft = {
@@ -40,8 +41,13 @@ function typeLabel(type: FieldType) {
   return TYPE_OPTIONS.find((t) => t.value === type)?.label ?? type
 }
 
-function isLocked(field: BrandField) {
+/** 품번(styleNo)은 삭제 불가. 표시 이름만 수정 가능 */
+function isStyleNoField(field: BrandField) {
   return field.systemKey === 'styleNo'
+}
+
+function isDeletable(field: BrandField) {
+  return !isStyleNoField(field)
 }
 
 export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) {
@@ -55,9 +61,36 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
   const [downloading, setDownloading] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
 
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ['brandFields', brandId] })
+  const deletableIds = useMemo(
+    () => fields.filter(isDeletable).map((field) => field.id),
+    [fields],
+  )
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      const allowed = new Set(deletableIds)
+      let changed = false
+      const next = new Set<string>()
+      for (const id of prev) {
+        if (allowed.has(id)) next.add(id)
+        else changed = true
+      }
+      return changed || next.size !== prev.size ? next : prev
+    })
+  }, [deletableIds])
+
+  const selectedCount = selectedIds.size
+  const allDeletableSelected =
+    deletableIds.length > 0 && deletableIds.every((id) => selectedIds.has(id))
+
+  const invalidate = async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['brandFields', brandId] }),
+      queryClient.invalidateQueries({ queryKey: ['brand-fields', brandId] }),
+    ])
+  }
 
   const createMutation = useMutation({
     mutationFn: () =>
@@ -96,26 +129,68 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
   })
 
   const deleteMutation = useMutation({
-    mutationFn: (id: string) => deleteBrandField(id),
+    mutationFn: async (ids: string[]) => {
+      const failures: string[] = []
+      for (const id of ids) {
+        try {
+          await deleteBrandField(id)
+        } catch (err) {
+          failures.push(
+            err instanceof Error ? err.message : '삭제에 실패했습니다.',
+          )
+        }
+      }
+      if (failures.length > 0) {
+        throw new Error(
+          failures.length === ids.length
+            ? failures[0]
+            : `${ids.length - failures.length}개 삭제, ${failures.length}개 실패`,
+        )
+      }
+    },
     onSuccess: async () => {
       if (editingId) {
         setEditingId(null)
         setDraft(null)
       }
+      setSelectedIds(new Set())
       setError(null)
       await invalidate()
     },
     onError: (err) => {
       setError(
-        err instanceof BrandFieldStoreError
-          ? err.message
-          : '항목을 삭제하지 못했습니다.',
+        err instanceof Error ? err.message : '항목을 삭제하지 못했습니다.',
       )
+      void invalidate()
     },
   })
 
+  function toggleSelected(id: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (checked) next.add(id)
+      else next.delete(id)
+      return next
+    })
+  }
+
+  function toggleSelectAll(checked: boolean) {
+    setSelectedIds(checked ? new Set(deletableIds) : new Set())
+  }
+
+  function confirmDelete(ids: string[], labels: string[]) {
+    if (ids.length === 0) return
+    const message =
+      ids.length === 1
+        ? `"${labels[0]}" 항목을 삭제할까요?`
+        : `선택한 ${ids.length}개 항목을 삭제할까요?\n${labels.slice(0, 5).join(', ')}${
+            labels.length > 5 ? ' …' : ''
+          }`
+    if (!window.confirm(message)) return
+    deleteMutation.mutate(ids)
+  }
+
   function startEdit(field: BrandField) {
-    if (isLocked(field)) return
     setError(null)
     setEditingId(field.id)
     setDraft({
@@ -176,9 +251,9 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
           <div>
             <CardTitle>업로드 항목 (헤더)</CardTitle>
             <p className="mt-1 text-sm text-muted-foreground">
-              이 목록이 양식 헤더와 상품 표 컬럼의 기준입니다. 항목을
-              추가·수정·삭제할 수 있고, 품번은 고정입니다. 기본 항목은 유형과
-              삭제만 제한됩니다.
+              이 목록이 양식 헤더와 상품 표 컬럼의 기준입니다. 체크해 여러 항목을
+              한 번에 삭제할 수 있습니다. 식별 항목(기본 품번)은 표시 이름만
+              바꿀 수 있고 삭제할 수 없습니다.
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -207,10 +282,56 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {selectedCount > 0 ? (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
+              <span className="text-sm tabular-nums">
+                {selectedCount}개 선택
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="text-danger hover:bg-danger/10"
+                disabled={pending}
+                onClick={() => {
+                  const targets = fields.filter((field) =>
+                    selectedIds.has(field.id),
+                  )
+                  confirmDelete(
+                    targets.map((field) => field.id),
+                    targets.map((field) => field.label),
+                  )
+                }}
+              >
+                <Trash2 className="size-3.5" />
+                선택 삭제
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={pending}
+                onClick={() => setSelectedIds(new Set())}
+              >
+                선택 해제
+              </Button>
+            </div>
+          ) : null}
+
           <div className="overflow-x-auto rounded-lg border border-border">
-            <table className="w-full min-w-[720px] text-left text-sm">
+            <table className="w-full min-w-[760px] text-left text-sm">
               <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
                 <tr>
+                  <th className="w-10 px-3 py-2 font-medium">
+                    <input
+                      type="checkbox"
+                      className="size-4"
+                      aria-label="삭제 가능한 항목 전체 선택"
+                      checked={allDeletableSelected}
+                      disabled={deletableIds.length === 0 || pending}
+                      onChange={(e) => toggleSelectAll(e.target.checked)}
+                    />
+                  </th>
                   <th className="px-3 py-2 font-medium">항목명</th>
                   <th className="px-3 py-2 font-medium">유형</th>
                   <th className="px-3 py-2 font-medium">부서</th>
@@ -222,8 +343,10 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
               <tbody>
                 {fields.map((field) => {
                   const editing = editingId === field.id && draft
-                  const locked = isLocked(field)
+                  const styleNo = isStyleNoField(field)
+                  const deletable = isDeletable(field)
                   const system = Boolean(field.systemKey)
+                  const checked = selectedIds.has(field.id)
 
                   if (editing) {
                     return (
@@ -232,6 +355,18 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
                         className="border-b border-border bg-accent/30 last:border-0"
                       >
                         <td className="px-3 py-2">
+                          <input
+                            type="checkbox"
+                            className="size-4"
+                            checked={checked}
+                            disabled={!deletable || pending}
+                            aria-label={`${field.label} 선택`}
+                            onChange={(e) =>
+                              toggleSelected(field.id, e.target.checked)
+                            }
+                          />
+                        </td>
+                        <td className="px-3 py-2">
                           <Input
                             value={draft.label}
                             onChange={(e) =>
@@ -239,6 +374,7 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
                             }
                             className="h-8"
                             autoFocus
+                            placeholder={styleNo ? '예: M번호' : undefined}
                           />
                         </td>
                         <td className="px-3 py-2">
@@ -266,38 +402,52 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          <Select
-                            value={draft.owner}
-                            onChange={(e) =>
-                              setDraft({
-                                ...draft,
-                                owner: e.target.value as FieldOwner,
-                              })
-                            }
-                            className="h-8 w-full"
-                          >
-                            {OWNER_ORDER.map((o) => (
-                              <option key={o} value={o}>
-                                {OWNER_LABEL[o]}
-                              </option>
-                            ))}
-                          </Select>
-                        </td>
-                        <td className="px-3 py-2">
-                          <label className="flex items-center gap-2 text-xs">
-                            <input
-                              type="checkbox"
-                              className="size-4"
-                              checked={draft.required}
+                          {styleNo ? (
+                            <span className="text-muted-foreground">
+                              {OWNER_LABEL[field.owner]}
+                            </span>
+                          ) : (
+                            <Select
+                              value={draft.owner}
                               onChange={(e) =>
                                 setDraft({
                                   ...draft,
-                                  required: e.target.checked,
+                                  owner: e.target.value as FieldOwner,
                                 })
                               }
-                            />
-                            필수
-                          </label>
+                              className="h-8 w-full"
+                            >
+                              {OWNER_ORDER.map((o) => (
+                                <option key={o} value={o}>
+                                  {OWNER_LABEL[o]}
+                                </option>
+                              ))}
+                            </Select>
+                          )}
+                        </td>
+                        <td className="px-3 py-2">
+                          {styleNo ? (
+                            field.required ? (
+                              <Badge variant="success">필수</Badge>
+                            ) : (
+                              <Badge variant="outline">선택</Badge>
+                            )
+                          ) : (
+                            <label className="flex items-center gap-2 text-xs">
+                              <input
+                                type="checkbox"
+                                className="size-4"
+                                checked={draft.required}
+                                onChange={(e) =>
+                                  setDraft({
+                                    ...draft,
+                                    required: e.target.checked,
+                                  })
+                                }
+                              />
+                              필수
+                            </label>
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           {system ? (
@@ -339,6 +489,23 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
                       key={field.id}
                       className="border-b border-border last:border-0"
                     >
+                      <td className="px-3 py-2">
+                        <input
+                          type="checkbox"
+                          className="size-4"
+                          checked={checked}
+                          disabled={!deletable || pending}
+                          title={
+                            styleNo
+                              ? '식별 항목은 삭제할 수 없습니다.'
+                              : undefined
+                          }
+                          aria-label={`${field.label} 선택`}
+                          onChange={(e) =>
+                            toggleSelected(field.id, e.target.checked)
+                          }
+                        />
+                      </td>
                       <td className="px-3 py-2 font-medium">{field.label}</td>
                       <td className="px-3 py-2 text-muted-foreground">
                         {typeLabel(field.type)}
@@ -362,19 +529,17 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center justify-end gap-1">
-                          {!locked ? (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              aria-label={`${field.label} 수정`}
-                              disabled={pending || Boolean(editingId)}
-                              onClick={() => startEdit(field)}
-                            >
-                              <Pencil className="size-3.5" />
-                            </Button>
-                          ) : null}
-                          {!system ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`${field.label} 수정`}
+                            disabled={pending || Boolean(editingId)}
+                            onClick={() => startEdit(field)}
+                          >
+                            <Pencil className="size-3.5" />
+                          </Button>
+                          {deletable ? (
                             <Button
                               type="button"
                               variant="ghost"
@@ -382,15 +547,9 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
                               className="text-danger hover:bg-danger/10"
                               aria-label={`${field.label} 삭제`}
                               disabled={pending || Boolean(editingId)}
-                              onClick={() => {
-                                if (
-                                  window.confirm(
-                                    `"${field.label}" 항목을 삭제할까요?`,
-                                  )
-                                ) {
-                                  deleteMutation.mutate(field.id)
-                                }
-                              }}
+                              onClick={() =>
+                                confirmDelete([field.id], [field.label])
+                              }
                             >
                               <Trash2 className="size-3.5" />
                             </Button>

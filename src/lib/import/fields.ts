@@ -1,6 +1,12 @@
 export type FieldOwner = 'common' | 'planning' | 'design' | 'md' | 'logistics'
 
-export type FieldType = 'text' | 'number' | 'list' | 'gender' | 'season'
+export type FieldType =
+  | 'text'
+  | 'number'
+  | 'list'
+  | 'gender'
+  | 'season'
+  | 'image'
 
 export type ImportField = {
   key: string
@@ -36,6 +42,24 @@ export const IMPORT_FIELDS: ImportField[] = [
     type: 'text',
     requiredForNew: true,
     aliases: ['품번', '스타일번호', '스타일넘버', '품목코드', '상품코드', 'styleno', 'style', 'sku', 'code'],
+  },
+  {
+    key: 'imageUrl',
+    label: '대표이미지',
+    owner: 'common',
+    type: 'image',
+    aliases: [
+      '대표이미지',
+      '이미지',
+      '이미지주소',
+      '이미지링크',
+      '사진',
+      '썸네일',
+      'image',
+      'imageurl',
+      'thumbnail',
+      'photo',
+    ],
   },
   {
     key: 'name',
@@ -150,6 +174,20 @@ export const IMPORT_FIELDS: ImportField[] = [
     owner: 'logistics',
     type: 'number',
     aliases: ['무게', '중량', '실중량', '단품무게', 'weight', 'weightg', 'netweight'],
+  },
+  {
+    key: 'logisticsImageUrl',
+    label: '물류이미지',
+    owner: 'logistics',
+    type: 'image',
+    aliases: [
+      '물류이미지',
+      '물류사진',
+      '물류이미지주소',
+      '창고이미지',
+      'logisticsimage',
+      'logisticsimageurl',
+    ],
   },
   {
     key: 'description',

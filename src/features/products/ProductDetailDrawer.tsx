@@ -445,7 +445,7 @@ export function ProductDetailDrawer() {
                                   </option>
                                   <option value="W">여성 (W)</option>
                                   <option value="M">남성 (M)</option>
-                                  <option value="U">유니섹스 (U)</option>
+                                  <option value="U">공용 (U)</option>
                                 </Select>
                               ) : field.systemKey === 'status' ? (
                                 <Select

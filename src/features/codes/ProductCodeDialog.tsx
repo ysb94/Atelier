@@ -269,6 +269,8 @@ export function ProductCodeDialog({
 
   if (!open) return null
 
+  const hasStyles = styles.length > 0
+
   const title =
     mode === 'edit'
       ? '코드 수정'
@@ -373,6 +375,16 @@ export function ProductCodeDialog({
               ) : null}
             </SectionTitle>
 
+            {!hasStyles ? (
+              <div className="rounded-lg border border-dashed border-border bg-muted/30 px-4 py-6 text-center text-sm">
+                <p className="font-medium">등록된 상품이 없습니다</p>
+                <p className="mt-1 text-muted-foreground">
+                  바코드 구성품은 품번이 부여된 상품에서만 고를 수 있습니다.
+                  가져오기나 상품 등록으로 단품을 먼저 추가하세요.
+                </p>
+              </div>
+            ) : (
+              <>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -503,6 +515,8 @@ export function ProductCodeDialog({
                   .join(', ')}
               </p>
             ) : null}
+              </>
+            )}
           </section>
 
           <section className="space-y-3">
@@ -606,7 +620,7 @@ export function ProductCodeDialog({
             <Button
               type="button"
               onClick={handleSubmit}
-              disabled={isSubmitting}
+              disabled={isSubmitting || !hasStyles}
             >
               {isSubmitting ? '저장 중...' : mode === 'edit' ? '저장' : '등록'}
             </Button>

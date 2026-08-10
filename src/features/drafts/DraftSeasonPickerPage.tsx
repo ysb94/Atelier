@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import {
@@ -215,19 +215,53 @@ export function DraftSeasonPickerPage() {
   }
 
   const loading = seasonsQuery.isLoading || draftsQuery.isLoading
+  const hasSeasons = seasons.length > 0
+
+  useEffect(() => {
+    if (!loading && !hasSeasons) {
+      setCreating(true)
+    }
+  }, [loading, hasSeasons])
 
   return (
     <div>
       <PageHeader
         title="기획안"
-        description="출시 기획을 선택하세요. 아직 묶지 않은 기획은 미정에서 엽니다."
+        description={
+          hasSeasons
+            ? '출시 기획을 선택하세요. 아직 묶지 않은 기획은 미정에서 엽니다.'
+            : '출시 기획을 먼저 만든 뒤, 기획안을 출시 묶음별로 정리할 수 있습니다.'
+        }
         actions={
-          <Button type="button" onClick={startCreate} disabled={creating}>
-            <Plus className="size-4" />
-            새 출시 기획
-          </Button>
+          hasSeasons ? (
+            <Button type="button" onClick={startCreate} disabled={creating}>
+              <Plus className="size-4" />
+              새 출시 기획
+            </Button>
+          ) : null
         }
       />
+
+      {!loading && !hasSeasons ? (
+        <Card className="mb-6 border-accent">
+          <CardContent className="space-y-4 p-6">
+            <div>
+              <h2 className="text-sm font-semibold">기획안을 시작하려면</h2>
+              <p className="mt-1 text-sm text-muted-foreground">
+                출시 기획은 SS, 홀리데이처럼 상품을 묶는 단위입니다. 출시
+                기획을 만든 뒤 기획안을 작성하거나, 출시 시기가 정해지지 않은
+                아이디어는 &quot;출시 기획 미정&quot;에 둘 수 있습니다.
+              </p>
+            </div>
+            {!creating ? (
+              <Button type="button" onClick={startCreate}>
+                <Plus className="size-4" />
+                첫 출시 기획 만들기
+              </Button>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
 
       {error ? (
         <p className="mb-4 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -348,6 +382,8 @@ export function DraftSeasonPickerPage() {
         </p>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {hasSeasons ? (
+            <>
           <Link
             to={`/b/${brand.slug}/drafts/all`}
             className="group rounded-xl border border-border bg-card p-4 shadow-sm transition-colors hover:border-foreground/20 hover:bg-muted/30"
@@ -602,6 +638,8 @@ export function DraftSeasonPickerPage() {
               </div>
             )
           })}
+            </>
+          ) : null}
         </div>
       )}
     </div>

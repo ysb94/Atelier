@@ -34,12 +34,13 @@ const NAV_LABELS: {
   },
   { match: /^\/drafts\/[^/]+/, label: '기획안 편집' },
   { match: /^\/drafts(?:\/|$)/, label: '기획안' },
+  { match: /^\/data\/upload(?:\/|$)/, label: '데이터 · 일괄 업로드' },
   { match: /^\/data\/planning(?:\/|$)/, label: '데이터 · 기획' },
   { match: /^\/data\/design(?:\/|$)/, label: '데이터 · 디자인' },
   { match: /^\/data\/md(?:\/|$)/, label: '데이터 · MD' },
   { match: /^\/data\/logistics(?:\/|$)/, label: '데이터 · 물류' },
-  { match: /^\/data\/all(?:\/|$)/, label: '데이터 · 취합' },
-  { match: /^\/data(?:\/|$)/, label: '데이터' },
+  { match: /^\/data\/all(?:\/|$)/, label: '데이터 · 전체 상품' },
+  { match: /^\/data(?:\/|$)/, label: '데이터 · 전체 상품' },
   { match: /^\/work\/planning(?:\/|$)/, label: '기획 · 상품 정보' },
   { match: /^\/work\/design(?:\/|$)/, label: '디자인 · 상품 정보' },
   { match: /^\/work\/md(?:\/|$)/, label: 'MD · 상품 정보' },
@@ -51,6 +52,7 @@ const NAV_LABELS: {
   { match: /^\/settings\/seasons(?:\/|$)/, label: '출시 기획' },
   { match: /^\/settings\/usage-targets(?:\/|$)/, label: '사용처' },
   { match: /^\/settings\/import(?:\/|$)/, label: '가져오기' },
+  { match: /^\/settings\/members(?:\/|$)/, label: '멤버' },
   { match: /^\/settings\/brand(?:\/|$)/, label: '브랜드 정보' },
 ]
 

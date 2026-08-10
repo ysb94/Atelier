@@ -328,98 +328,10 @@ export function withLiveStatus(
   }))
 }
 
-function offsetKey(base: Date, days: number): string {
-  return toDateKey(addDays(base, days))
-}
-
 /**
- * 오늘 기준으로 상대 날짜를 쓰는 예시 일정.
- * 회의 후 실제 저장소로 바꿀 때 이 배열만 교체하면 된다.
+ * 오늘 기준으로 상대 날짜를 쓰는 예시 일정은 제거했다.
+ * 실제 일정 저장소가 연결되면 events 배열만 교체하면 된다.
  */
-export function createSampleHomeEvents(today = new Date()): HomeEvent[] {
-  const todayKey = toDateKey(today)
-  const raw: Omit<HomeEvent, 'status'>[] = [
-    {
-      id: 'sample-1',
-      title: '26SS 기획 리뷰',
-      dept: 'planning',
-      owner: '김기획',
-      kind: 'meeting',
-      startDate: offsetKey(today, -2),
-      endDate: offsetKey(today, 1),
-      note: '시즌 라인업 1차 확정',
-    },
-    {
-      id: 'sample-2',
-      title: '원단 샘플 입고',
-      dept: 'design',
-      owner: '이디자인',
-      kind: 'sample',
-      startDate: todayKey,
-      endDate: todayKey,
-      note: '트렌치 원단 3종',
-    },
-    {
-      id: 'sample-3',
-      title: 'MD 판매가 조율',
-      dept: 'md',
-      owner: '박MD',
-      kind: 'deadline',
-      startDate: offsetKey(today, 2),
-      endDate: offsetKey(today, 4),
-    },
-    {
-      id: 'sample-4',
-      title: '중국 공장 1차 입고',
-      dept: 'logistics',
-      owner: '최물류',
-      kind: 'shipment',
-      startDate: offsetKey(today, 5),
-      endDate: offsetKey(today, 7),
-    },
-    {
-      id: 'sample-5',
-      title: '브랜드 주간 회의',
-      dept: 'common',
-      owner: '전팀',
-      kind: 'meeting',
-      startDate: offsetKey(today, 3),
-      endDate: offsetKey(today, 3),
-    },
-    {
-      id: 'sample-6',
-      title: '출시 확정 후보 검토',
-      dept: 'planning',
-      owner: '김기획',
-      kind: 'launch',
-      startDate: offsetKey(today, -5),
-      endDate: offsetKey(today, -1),
-    },
-    {
-      id: 'sample-7',
-      title: '룩북 촬영 준비',
-      dept: 'design',
-      owner: '정스타일',
-      kind: 'other',
-      startDate: offsetKey(today, 8),
-      endDate: offsetKey(today, 10),
-    },
-    {
-      id: 'sample-8',
-      title: '온라인몰 런칭 마감',
-      dept: 'md',
-      owner: '박MD',
-      kind: 'deadline',
-      startDate: offsetKey(today, 12),
-      endDate: offsetKey(today, 12),
-    },
-  ]
-
-  return withLiveStatus(
-    raw.map((event) => ({ ...event, status: 'upcoming' })),
-    todayKey,
-  )
-}
 
 export function listOwners(events: HomeEvent[]): string[] {
   return Array.from(new Set(events.map((e) => e.owner))).sort((a, b) =>
