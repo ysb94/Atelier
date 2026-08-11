@@ -383,6 +383,8 @@ export function ProductsPage({
   const page = parsePage(searchParams.get('page'))
   const queryClient = useQueryClient()
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [searchDraft, setSearchDraft] = useState(search)
+  const [isSearchComposing, setIsSearchComposing] = useState(false)
 
   const listBasePath = lockedOwner
     ? `/b/${brand.slug}/work/${lockedOwner}`
@@ -507,27 +509,49 @@ export function ProductsPage({
     setSearchParams(next, { replace: true })
   }, [page, safePage, searchParams, setSearchParams])
 
-  function patchParams(
-    patch: Record<string, string | null>,
-    options?: { resetPage?: boolean },
-  ) {
-    const next = new URLSearchParams(searchParams)
-    for (const [key, value] of Object.entries(patch)) {
-      // 기본값은 주소에서 빼서 링크를 짧게 유지한다.
-      const isDefault =
-        value == null ||
-        value === '' ||
-        value === 'all' ||
-        (key === 'size' && Number(value) === DEFAULT_PAGE_SIZE) ||
-        (key === 'page' && value === '1')
-      if (isDefault) next.delete(key)
-      else next.set(key, value)
-    }
-    if (options?.resetPage !== false && patch.page === undefined) {
-      next.delete('page')
-    }
-    setSearchParams(next, { replace: true })
-  }
+  const patchParams = useCallback(
+    (
+      patch: Record<string, string | null>,
+      options?: { resetPage?: boolean },
+    ) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          for (const [key, value] of Object.entries(patch)) {
+            // 기본값은 주소에서 빼서 링크를 짧게 유지한다.
+            const isDefault =
+              value == null ||
+              value === '' ||
+              value === 'all' ||
+              (key === 'size' && Number(value) === DEFAULT_PAGE_SIZE) ||
+              (key === 'page' && value === '1')
+            if (isDefault) next.delete(key)
+            else next.set(key, value)
+          }
+          if (options?.resetPage !== false && patch.page === undefined) {
+            next.delete('page')
+          }
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
+  // 뒤로가기·탭 복원으로 URL 검색어가 바뀌면 입력 초안도 맞춘다.
+  useEffect(() => {
+    setSearchDraft((current) => (current === search ? current : search))
+  }, [search])
+
+  // IME 조합 중에는 URL/라우팅 갱신을 멈춘 뒤 조합 완료 후 검색한다.
+  useEffect(() => {
+    if (isSearchComposing || searchDraft === search) return
+    const timer = window.setTimeout(() => {
+      patchParams({ q: searchDraft || null })
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [isSearchComposing, patchParams, search, searchDraft])
 
   function resetFilters() {
     setSearchParams({}, { replace: true })
@@ -691,8 +715,13 @@ export function ProductsPage({
         <Input
           className="sm:max-w-xs"
           placeholder="품번, 상품명, 담당, 항목값 검색..."
-          value={search}
-          onChange={(e) => patchParams({ q: e.target.value || null })}
+          value={searchDraft}
+          onChange={(event) => setSearchDraft(event.target.value)}
+          onCompositionStart={() => setIsSearchComposing(true)}
+          onCompositionEnd={(event) => {
+            setSearchDraft(event.currentTarget.value)
+            setIsSearchComposing(false)
+          }}
         />
         <Select
           value={seasonId}

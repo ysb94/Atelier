@@ -232,7 +232,10 @@ export function ProductDetailDrawer() {
     },
     onSuccess: async (updated) => {
       setSaveError(null)
-      await queryClient.invalidateQueries({ queryKey: ['styles', brand.id] })
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['styles', brand.id] }),
+        queryClient.invalidateQueries({ queryKey: ['styles-page', brand.id] }),
+      ])
       if (updated.styleNo !== decodedParam) {
         navigate(
           `${listPath}/${encodeURIComponent(updated.styleNo)}${listQuery}`,

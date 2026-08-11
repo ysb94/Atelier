@@ -10,6 +10,7 @@ import { BarcodeBulkUploadPanel } from '@/features/codes/BarcodeBulkUploadPanel'
 import { UsageBulkUploadPanel } from '@/features/codes/UsageBulkUploadPanel'
 import { ProductImportWorkspace } from '@/features/upload/ProductImportWorkspace'
 import {
+  getBarcodeFields,
   getCodeUsageAssignments,
   getCodeUsageTargets,
   getProductCodes,
@@ -36,7 +37,7 @@ const KINDS: { id: UploadKind; label: string; description: string }[] = [
     id: 'barcodes',
     label: '자사 바코드',
     description:
-      '회사에서 발급한 88코드·바코드 상품명·M번호를 파일로 일괄 등록합니다. 이미 있는 바코드는 덮어쓰지 않습니다.',
+      '회사에서 발급한 88코드·바코드 상품명·M번호를 파일로 일괄 등록합니다. M번호는 비워도 되고, 미지정 바코드는 자사 바코드 화면의 미지정 탭에서 채웁니다. 이미 있는 바코드는 덮어쓰지 않습니다.',
   },
   {
     id: 'partner',
@@ -75,6 +76,11 @@ export function DataUploadPage() {
   const stylesQuery = useQuery({
     queryKey: ['styles', brand.id, 'codes'],
     queryFn: () => getStylesByBrand(brand.id),
+    enabled: kind === 'barcodes',
+  })
+  const fieldsQuery = useQuery({
+    queryKey: ['barcodeFields', brand.id],
+    queryFn: () => getBarcodeFields(brand.id),
     enabled: kind === 'barcodes',
   })
   const assignmentsQuery = useQuery({
@@ -220,7 +226,9 @@ export function DataUploadPage() {
 
       {kind === 'barcodes' ? (
         <div className="space-y-4">
-          {stylesQuery.isLoading || allCodesQuery.isLoading ? (
+          {stylesQuery.isLoading ||
+          allCodesQuery.isLoading ||
+          fieldsQuery.isLoading ? (
             <p className="text-sm text-muted-foreground">불러오는 중...</p>
           ) : (stylesQuery.data ?? []).length === 0 ? (
             <Card>
@@ -237,17 +245,37 @@ export function DataUploadPage() {
               </CardContent>
             </Card>
           ) : (
-            <BarcodeBulkUploadPanel
-              brandName={brand.name}
-              brandId={brand.id}
-              styles={stylesQuery.data ?? []}
-              existingCodes={allCodesQuery.data ?? []}
-              onApplied={async () => {
-                await queryClient.invalidateQueries({
-                  queryKey: ['productCodes', brand.id],
-                })
-              }}
-            />
+            <div className="space-y-3">
+              <BarcodeBulkUploadPanel
+                brandName={brand.name}
+                brandId={brand.id}
+                styles={stylesQuery.data ?? []}
+                fields={fieldsQuery.data ?? []}
+                existingCodes={allCodesQuery.data ?? []}
+                onApplied={async () => {
+                  await queryClient.invalidateQueries({
+                    queryKey: ['productCodes', brand.id],
+                  })
+                }}
+              />
+              <p className="text-sm text-muted-foreground">
+                M번호 없이 올린 바코드는{' '}
+                <Link
+                  to={`/b/${brand.slug}/barcodes`}
+                  className="underline underline-offset-2"
+                >
+                  자사 바코드 · M번호 미지정
+                </Link>
+                탭에서 채울 수 있습니다. 엑셀 헤더는 자사 바코드 화면의{' '}
+                <Link
+                  to={`/b/${brand.slug}/barcodes`}
+                  className="underline underline-offset-2"
+                >
+                  항목 관리
+                </Link>
+                에서 바꿉니다.
+              </p>
+            </div>
           )}
         </div>
       ) : null}

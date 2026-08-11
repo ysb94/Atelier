@@ -22,6 +22,7 @@ import { BrandSettingsPage } from '@/features/settings/BrandSettingsPage'
 import { MembersPage } from '@/features/settings/MembersPage'
 import { DataSheetPage } from '@/features/data/DataSheetPage'
 import { DataUploadPage } from '@/features/data/DataUploadPage'
+import { InvoiceWorkPage } from '@/features/logistics/InvoiceWorkPage'
 
 function RedirectTo({ to }: { to: string }) {
   const { brandSlug } = useParams()
@@ -48,9 +49,12 @@ export function BrandWorkspaceRouteTree() {
       <Route path="work/:owner" element={<DepartmentProductsPage />}>
         <Route path=":styleNo" element={<ProductDetailDrawer />} />
       </Route>
+      <Route path="logistics/invoices" element={<InvoiceWorkPage />} />
       <Route path="data" element={<RedirectTo to="data/all" />} />
       <Route path="data/upload" element={<DataUploadPage />} />
-      <Route path="data/:owner" element={<DataSheetPage />} />
+      <Route path="data/:owner" element={<DataSheetPage />}>
+        <Route path=":styleNo" element={<ProductDetailDrawer />} />
+      </Route>
       <Route path="barcodes" element={<BarcodePage />} />
       <Route path="usage-codes" element={<UsageCodePage />} />
       <Route path="partner-codes" element={<PartnerCodePage />} />

@@ -1,6 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
+import {
+  Link,
+  Navigate,
+  Outlet,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom'
 import { Download, Settings2, Upload } from 'lucide-react'
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -9,6 +16,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input, Select } from '@/components/ui/input'
 import {
   getBrandFields,
+  getProductCodes,
   getSeasonsByBrand,
   getStylesFiltered,
   getStylesPage,
@@ -28,6 +36,7 @@ import {
   STYLE_STATUS_LABEL,
   formatSeasonLabel,
   type BrandField,
+  type ProductCode,
   type Style,
   type StyleStatus,
 } from '@/lib/types'
@@ -43,6 +52,53 @@ const DATA_OWNERS: DataSheetOwner[] = [
 ]
 
 const PAGE_SIZES = [50, 100, 200] as const
+
+/** 시트 표시 전용. 항목 관리·엑셀 내보내기 대상이 아니다. */
+const OWN_BARCODE_COLUMN: BrandField = {
+  id: '_ownBarcode',
+  brandId: '',
+  label: '88바코드',
+  systemKey: 'ownBarcode',
+  type: 'text',
+  owner: 'common',
+  required: false,
+  order: -1.5,
+  level: 'style',
+}
+
+function withOwnBarcodeColumn(columns: BrandField[]): BrandField[] {
+  if (columns.some((column) => column.systemKey === 'ownBarcode')) {
+    return columns
+  }
+  const nameIndex = columns.findIndex((column) => column.systemKey === 'name')
+  const insertAt = nameIndex >= 0 ? nameIndex + 1 : Math.min(2, columns.length)
+  return [
+    ...columns.slice(0, insertAt),
+    OWN_BARCODE_COLUMN,
+    ...columns.slice(insertAt),
+  ]
+}
+
+/** 구성품이 정확히 1개인 자사 바코드만 품번(스타일)에 붙인다. */
+function buildOneToOneBarcodeByStyleId(
+  codes: ProductCode[],
+): Map<string, string> {
+  const grouped = new Map<string, string[]>()
+  for (const code of codes) {
+    if (code.kind !== 'own' || code.components.length !== 1) continue
+    const styleId = code.components[0]?.styleId
+    if (!styleId) continue
+    const list = grouped.get(styleId) ?? []
+    list.push(code.code)
+    grouped.set(styleId, list)
+  }
+
+  const result = new Map<string, string>()
+  for (const [styleId, barcodes] of grouped) {
+    result.set(styleId, barcodes.join(', '))
+  }
+  return result
+}
 
 function parseOwner(raw: string | undefined): DataSheetOwner | null {
   if (!raw) return null
@@ -67,13 +123,20 @@ function parsePage(raw: string | null): number {
 function styleToRow(
   style: Style,
   columns: BrandField[],
-  seasonLabel?: string,
+  options?: {
+    seasonLabel?: string
+    ownBarcode?: string
+  },
 ): SheetRow {
   const values: Record<string, string> = {}
   for (const column of columns) {
+    if (column.systemKey === 'ownBarcode') {
+      values[fieldValueKey(column)] = options?.ownBarcode ?? ''
+      continue
+    }
     values[fieldValueKey(column)] = getStyleFieldDisplay(style, column, {
       // 읽기 전용 표라서 코드보다 사람이 읽는 이름을 보여준다.
-      seasonCode: seasonLabel,
+      seasonCode: options?.seasonLabel,
     })
   }
   return { id: style.id, styleNo: style.styleNo, values }
@@ -81,6 +144,7 @@ function styleToRow(
 
 export function DataSheetPage() {
   const { brand } = useBrand()
+  const navigate = useNavigate()
   const { owner: ownerParam } = useParams()
   const owner = parseOwner(ownerParam)
   const [searchParams, setSearchParams] = useSearchParams()
@@ -93,22 +157,57 @@ export function DataSheetPage() {
 
   const [banner, setBanner] = useState<string | null>(null)
   const [exporting, setExporting] = useState(false)
+  const [searchDraft, setSearchDraft] = useState(search)
+  const [isSearchComposing, setIsSearchComposing] = useState(false)
 
-  // 입력할 때마다 요청이 나가지 않게 잠깐 기다린다.
-  const [debouncedSearch, setDebouncedSearch] = useState(search)
+  const patchParams = useCallback(
+    (patch: Record<string, string | null>) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev)
+          for (const [key, value] of Object.entries(patch)) {
+            if (value == null || value === '' || value === 'all') {
+              next.delete(key)
+            } else if (key === 'size' && value === '100') {
+              next.delete(key)
+            } else if (key === 'page' && value === '1') {
+              next.delete(key)
+            } else {
+              next.set(key, value)
+            }
+          }
+          // 조건이 바뀌면 1페이지부터 다시 본다.
+          if (!('page' in patch)) next.delete('page')
+          return next
+        },
+        { replace: true },
+      )
+    },
+    [setSearchParams],
+  )
+
+  // 뒤로가기·탭 복원처럼 URL이 바뀐 경우에만 입력 초안을 맞춘다.
   useEffect(() => {
-    const timer = window.setTimeout(() => setDebouncedSearch(search), 250)
-    return () => window.clearTimeout(timer)
+    setSearchDraft((current) => (current === search ? current : search))
   }, [search])
+
+  // 한글 IME 조합 중에는 URL을 갱신하지 않아 조합이 끊기지 않게 한다.
+  useEffect(() => {
+    if (isSearchComposing || searchDraft === search) return
+    const timer = window.setTimeout(() => {
+      patchParams({ q: searchDraft || null })
+    }, 250)
+    return () => window.clearTimeout(timer)
+  }, [isSearchComposing, patchParams, search, searchDraft])
 
   const filter = useMemo<StyleFilter>(
     () => ({
       seasonId: seasonId === 'all' ? undefined : seasonId,
       status:
         statusFilter === 'all' ? undefined : (statusFilter as StyleStatus),
-      search: debouncedSearch.trim() || undefined,
+      search: search.trim() || undefined,
     }),
-    [seasonId, statusFilter, debouncedSearch],
+    [seasonId, statusFilter, search],
   )
 
   const fieldsQuery = useQuery({
@@ -118,6 +217,10 @@ export function DataSheetPage() {
   const seasonsQuery = useQuery({
     queryKey: ['seasons', brand.id],
     queryFn: () => getSeasonsByBrand(brand.id),
+  })
+  const codesQuery = useQuery({
+    queryKey: ['productCodes', brand.id, 'own'],
+    queryFn: () => getProductCodes(brand.id, 'own'),
   })
   const pageQuery = useQuery({
     queryKey: ['styles-page', brand.id, filter, page, pageSize],
@@ -131,13 +234,17 @@ export function DataSheetPage() {
   const hasSeasons = seasons.length > 0
 
   const columns = useMemo(
-    () => (owner ? columnsForSheet(fields, owner) : []),
+    () => (owner ? withOwnBarcodeColumn(columnsForSheet(fields, owner)) : []),
     [fields, owner],
   )
 
   const seasonById = useMemo(
     () => new Map(seasons.map((s) => [s.id, s])),
     [seasons],
+  )
+  const ownBarcodeByStyleId = useMemo(
+    () => buildOneToOneBarcodeByStyleId(codesQuery.data ?? []),
+    [codesQuery.data],
   )
 
   const total = pageQuery.data?.total ?? 0
@@ -147,13 +254,12 @@ export function DataSheetPage() {
     () =>
       (pageQuery.data?.rows ?? []).map((style) => {
         const season = seasonById.get(style.seasonId)
-        return styleToRow(
-          style,
-          columns,
-          season ? formatSeasonLabel(season) : undefined,
-        )
+        return styleToRow(style, columns, {
+          seasonLabel: season ? formatSeasonLabel(season) : undefined,
+          ownBarcode: ownBarcodeByStyleId.get(style.id) ?? '',
+        })
       }),
-    [pageQuery.data, columns, seasonById],
+    [pageQuery.data, columns, seasonById, ownBarcodeByStyleId],
   )
 
   useEffect(() => {
@@ -168,21 +274,6 @@ export function DataSheetPage() {
       )
     }
   }, [page, totalPages, setSearchParams])
-
-  function patchParams(patch: Record<string, string | null>) {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      for (const [key, value] of Object.entries(patch)) {
-        if (value == null || value === '' || value === 'all') next.delete(key)
-        else if (key === 'size' && value === '100') next.delete(key)
-        else if (key === 'page' && value === '1') next.delete(key)
-        else next.set(key, value)
-      }
-      // 조건이 바뀌면 1페이지부터 다시 본다.
-      if (!('page' in patch)) next.delete('page')
-      return next
-    })
-  }
 
   async function handleExport() {
     if (!owner) return
@@ -219,8 +310,11 @@ export function DataSheetPage() {
     owner === 'all' ? '전체 상품' : `${sheetOwnerLabel(owner)} 시트`
   const pageDescription =
     owner === 'all'
-      ? '상품 데이터를 엑셀처럼 한눈에 보는 표입니다. 열 범위로 부서를 좁히고, 값은 내보내기·일괄 업로드로 고칩니다.'
-      : `${sheetOwnerLabel(owner)} 항목만 모아 봅니다. 값은 내보내기로 받아 엑셀에서 고친 뒤 일괄 업로드로 되돌립니다.`
+      ? '상품 데이터를 엑셀처럼 한눈에 보는 표입니다. 행을 눌러 한 건씩 고치거나, 내보내기·일괄 업로드로 여러 건을 고칩니다.'
+      : `${sheetOwnerLabel(owner)} 항목만 모아 봅니다. 행을 눌러 한 건씩 고치거나, 내보내기로 받아 엑셀에서 고친 뒤 일괄 업로드로 되돌립니다.`
+
+  const querySuffix = searchParams.toString()
+  const detailQuery = querySuffix ? `?${querySuffix}` : ''
 
   return (
     <div className="-mx-1">
@@ -280,8 +374,13 @@ export function DataSheetPage() {
           <Input
             className="h-8 max-w-[14rem] bg-background text-sm"
             placeholder="품번·상품명 검색"
-            value={search}
-            onChange={(e) => patchParams({ q: e.target.value || null })}
+            value={searchDraft}
+            onChange={(event) => setSearchDraft(event.target.value)}
+            onCompositionStart={() => setIsSearchComposing(true)}
+            onCompositionEnd={(event) => {
+              setSearchDraft(event.currentTarget.value)
+              setIsSearchComposing(false)
+            }}
           />
           <Select
             className="h-8 bg-background text-sm"
@@ -328,11 +427,12 @@ export function DataSheetPage() {
       </div>
 
       <p className="mb-3 text-[11px] text-muted-foreground">
-        값을 고치려면 <b className="font-medium">내보내기</b>로 받아 엑셀에서
-        편집한 뒤 <b className="font-medium">일괄 업로드</b>에 다시 올리세요.
-        품번이 같은 행만 덮어쓰고, <code>_작업</code> 열에 &quot;삭제&quot;라고
-        적은 행은 지워집니다. 열을 늘리거나 이름을 바꾸려면{' '}
-        <b className="font-medium">항목 관리</b>를 쓰세요.
+        <b className="font-medium">행을 누르면</b> 한 상품씩 바로 고칠 수
+        있습니다. 여러 건은 <b className="font-medium">내보내기</b>로 받아
+        엑셀에서 편집한 뒤 <b className="font-medium">일괄 업로드</b>에 다시
+        올리세요. 품번이 같은 행만 덮어쓰고, <code>_작업</code> 열에
+        &quot;삭제&quot;라고 적은 행은 지워집니다. 열을 늘리거나 이름을
+        바꾸려면 <b className="font-medium">항목 관리</b>를 쓰세요.
       </p>
 
       {banner ? (
@@ -373,6 +473,11 @@ export function DataSheetPage() {
           columns={columns}
           rows={rows}
           showOwnerGroups={owner === 'all'}
+          onRowOpen={(row) =>
+            navigate(
+              `/b/${brand.slug}/data/${owner}/${encodeURIComponent(row.styleNo)}${detailQuery}`,
+            )
+          }
         />
       )}
 
@@ -401,6 +506,8 @@ export function DataSheetPage() {
           </Button>
         </div>
       ) : null}
+
+      <Outlet />
     </div>
   )
 }

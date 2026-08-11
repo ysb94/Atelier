@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Minus, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
 import type {
+  BarcodeField,
   ProductCode,
   ProductCodeComponent,
   ProductCodeInput,
   ProductCodeKind,
   Style,
 } from '@/lib/types'
+import { parsePositiveCm } from '@/lib/codes/barcode-fields'
 import {
   barcodePrefix,
   describeEan13Problem,
@@ -30,6 +32,7 @@ type ProductCodeDialogProps = {
   /** 수정 대상, 또는 복제 등록 시 값을 가져올 원본 */
   source?: ProductCode | null
   styles: Style[]
+  fields: BarcodeField[]
   existingCodes: ProductCode[]
   isSubmitting?: boolean
   errorMessage?: string | null
@@ -45,6 +48,7 @@ type Draft = {
   depth: string
   height: string
   note: string
+  values: Record<string, string>
   components: ProductCodeComponent[]
 }
 
@@ -56,6 +60,7 @@ const EMPTY_DRAFT: Draft = {
   depth: '',
   height: '',
   note: '',
+  values: {},
   components: [],
 }
 
@@ -76,10 +81,11 @@ function toDraft(source: ProductCode | null | undefined, keepCode: boolean) {
     code: keepCode ? source.code : '',
     name: source.name,
     weight: numberToInput(source.weightG),
-    width: numberToInput(source.widthMm),
-    depth: numberToInput(source.depthMm),
-    height: numberToInput(source.heightMm),
+    width: numberToInput(source.widthCm),
+    depth: numberToInput(source.depthCm),
+    height: numberToInput(source.heightCm),
     note: source.note,
+    values: { ...source.values },
     components: source.components.map((component) => ({ ...component })),
   }
 }
@@ -91,6 +97,7 @@ export function ProductCodeDialog({
   brandId,
   source,
   styles,
+  fields,
   existingCodes,
   isSubmitting = false,
   errorMessage,
@@ -111,6 +118,11 @@ export function ProductCodeDialog({
   const styleMap = useMemo(
     () => new Map(styles.map((style) => [style.id, style])),
     [styles],
+  )
+
+  const customFields = useMemo(
+    () => fields.filter((field) => field.systemKey === null),
+    [fields],
   )
 
   const usedStyleIds = useMemo(
@@ -184,6 +196,16 @@ export function ProductCodeDialog({
     setLocalError(null)
   }
 
+  function patchCustomValue(fieldId: string, value: string) {
+    setDraft((prev) => {
+      const values = { ...prev.values }
+      if (value) values[fieldId] = value
+      else delete values[fieldId]
+      return { ...prev, values }
+    })
+    setLocalError(null)
+  }
+
   function addComponent(style: Style) {
     setDraft((prev) => ({
       ...prev,
@@ -249,8 +271,26 @@ export function ProductCodeDialog({
       setLocalError(`이미 등록된 코드입니다. (${duplicateCode.name})`)
       return
     }
-    if (draft.components.length === 0) {
-      setLocalError('구성품을 한 개 이상 담아 주세요.')
+    const invalidNumberField = customFields.find((field) => {
+      const value = draft.values[field.id]
+      return (
+        field.type === 'number' &&
+        value !== undefined &&
+        value.trim() !== '' &&
+        !Number.isFinite(Number(value.replace(/,/g, '')))
+      )
+    })
+    if (invalidNumberField) {
+      setLocalError(`${invalidNumberField.label}은(는) 숫자로 입력하세요.`)
+      return
+    }
+
+    const width = parsePositiveCm(draft.width, '가로')
+    const depth = parsePositiveCm(draft.depth, '세로')
+    const height = parsePositiveCm(draft.height, '높이')
+    const dimensionError = width.error ?? depth.error ?? height.error
+    if (dimensionError) {
+      setLocalError(dimensionError)
       return
     }
 
@@ -259,10 +299,11 @@ export function ProductCodeDialog({
       code: draft.code.trim(),
       name: draft.name.trim(),
       weightG: inputToNumber(draft.weight),
-      widthMm: inputToNumber(draft.width),
-      depthMm: inputToNumber(draft.depth),
-      heightMm: inputToNumber(draft.height),
+      widthCm: width.value ?? null,
+      depthCm: depth.value ?? null,
+      heightCm: height.value ?? null,
       note: draft.note,
+      values: draft.values,
       components: draft.components,
     })
   }
@@ -426,8 +467,8 @@ export function ProductCodeDialog({
 
             {draft.components.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-                담은 구성품이 없습니다. 단품 하나만 나가는 코드도 그 단품을 담아
-                주세요.
+                담은 구성품이 없습니다. 비워 두면 M번호 미지정으로 저장되고,
+                자사 바코드 화면의 미지정 탭에서 나중에 채울 수 있습니다.
               </div>
             ) : (
               <ul className="divide-y divide-border rounded-lg border border-border">
@@ -555,11 +596,14 @@ export function ProductCodeDialog({
                   ) : null}
                 </div>
               </Field>
-              <Field label="규격 (mm)" hint="가로 × 세로 × 높이">
+              <Field
+                label="규격 (cm)"
+                hint="가로 × 세로 × 높이. 소수 첫째 자리까지"
+              >
                 <div className="flex items-center gap-1.5">
                   <Input
                     className="text-center"
-                    inputMode="numeric"
+                    inputMode="decimal"
                     placeholder="가로"
                     value={draft.width}
                     disabled={isSubmitting}
@@ -568,7 +612,7 @@ export function ProductCodeDialog({
                   <span className="text-muted-foreground">×</span>
                   <Input
                     className="text-center"
-                    inputMode="numeric"
+                    inputMode="decimal"
                     placeholder="세로"
                     value={draft.depth}
                     disabled={isSubmitting}
@@ -577,7 +621,7 @@ export function ProductCodeDialog({
                   <span className="text-muted-foreground">×</span>
                   <Input
                     className="text-center"
-                    inputMode="numeric"
+                    inputMode="decimal"
                     placeholder="높이"
                     value={draft.height}
                     disabled={isSubmitting}
@@ -596,6 +640,26 @@ export function ProductCodeDialog({
               />
             </Field>
           </section>
+
+          {customFields.length > 0 ? (
+            <section className="space-y-3">
+              <SectionTitle>추가 정보</SectionTitle>
+              <div className="grid gap-4 sm:grid-cols-2">
+                {customFields.map((field) => (
+                  <Field key={field.id} label={field.label}>
+                    <Input
+                      value={draft.values[field.id] ?? ''}
+                      inputMode={field.type === 'number' ? 'decimal' : undefined}
+                      disabled={isSubmitting}
+                      onChange={(event) =>
+                        patchCustomValue(field.id, event.target.value)
+                      }
+                    />
+                  </Field>
+                ))}
+              </div>
+            </section>
+          ) : null}
 
           {localError || errorMessage ? (
             <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">

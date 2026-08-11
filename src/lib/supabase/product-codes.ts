@@ -9,7 +9,12 @@ import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 
 const CODE_COLUMNS =
-  'id, brand_id, kind, code, name, weight_g, width_mm, depth_mm, height_mm, note, created_at, updated_at'
+  'id, brand_id, kind, code, name, weight_g, width_cm, depth_cm, height_cm, note, values, created_at, updated_at'
+
+/** PostgREST 응답 상한에 걸리지 않도록 코드 목록을 나눠 읽는다. */
+const CODE_PAGE_SIZE = 1000
+/** UUID IN 필터가 URL 길이 제한을 넘지 않도록 구성품 조회를 더 작게 나눈다. */
+const COMPONENT_QUERY_SIZE = 100
 
 type CodeRow = {
   id: string
@@ -18,10 +23,11 @@ type CodeRow = {
   code: string
   name: string
   weight_g: number | null
-  width_mm: number | null
-  depth_mm: number | null
-  height_mm: number | null
+  width_cm: number | string | null
+  depth_cm: number | string | null
+  height_cm: number | string | null
   note: string
+  values: Record<string, unknown> | null
   created_at: string
   updated_at: string
 }
@@ -44,10 +50,35 @@ export class ProductCodeStoreError extends Error {
   }
 }
 
-function normalizePositive(value: number | null): number | null {
+function normalizePositiveInteger(value: number | null): number | null {
   if (value === null || !Number.isFinite(value)) return null
   const rounded = Math.round(value)
   return rounded > 0 ? rounded : null
+}
+
+/** 규격(cm). 0보다 크고 소수 첫째 자리까지만 허용한다. */
+function normalizePositiveCm(value: number | null): number | null {
+  if (value === null || !Number.isFinite(value)) return null
+  if (value <= 0) {
+    throw new ProductCodeStoreError(
+      '규격은 0보다 큰 수여야 합니다.',
+      'invalid',
+    )
+  }
+  const tenths = Math.round(value * 10)
+  if (Math.abs(value * 10 - tenths) > 1e-8) {
+    throw new ProductCodeStoreError(
+      '규격은 소수 첫째 자리까지 입력하세요.',
+      'invalid',
+    )
+  }
+  return tenths / 10
+}
+
+function toNullableNumber(value: number | string | null | undefined) {
+  if (value === null || value === undefined || value === '') return null
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function normalizeComponents(
@@ -78,6 +109,19 @@ function normalizeComponents(
   return Array.from(merged.values())
 }
 
+function normalizeValues(
+  values: Record<string, string>,
+): Record<string, string> {
+  const normalized: Record<string, string> = {}
+  for (const [key, value] of Object.entries(values)) {
+    const id = key.trim()
+    if (!id || typeof value !== 'string') continue
+    const text = value.trim()
+    if (text) normalized[id] = text
+  }
+  return normalized
+}
+
 function validate(input: ProductCodeInput) {
   const code = input.code.trim()
   const name = input.name.trim()
@@ -93,14 +137,9 @@ function validate(input: ProductCodeInput) {
   }
 
   const components = normalizeComponents(input.components)
-  if (components.length === 0) {
-    throw new ProductCodeStoreError(
-      '구성품을 한 개 이상 담아 주세요.',
-      'invalid',
-    )
-  }
+  const values = normalizeValues(input.values)
 
-  return { code, name, components }
+  return { code, name, components, values }
 }
 
 function toCode(row: CodeRow, components: ProductCodeComponent[]): ProductCode {
@@ -111,10 +150,15 @@ function toCode(row: CodeRow, components: ProductCodeComponent[]): ProductCode {
     code: row.code,
     name: row.name,
     weightG: row.weight_g,
-    widthMm: row.width_mm,
-    depthMm: row.depth_mm,
-    heightMm: row.height_mm,
+    widthCm: toNullableNumber(row.width_cm),
+    depthCm: toNullableNumber(row.depth_cm),
+    heightCm: toNullableNumber(row.height_cm),
     note: row.note ?? '',
+    values: Object.fromEntries(
+      Object.entries(row.values ?? {}).flatMap(([key, value]) =>
+        typeof value === 'string' ? [[key, value]] : [],
+      ),
+    ),
     components,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -125,27 +169,30 @@ async function loadComponents(codeIds: string[]) {
   const map = new Map<string, ProductCodeComponent[]>()
   if (codeIds.length === 0) return map
 
-  const { data, error } = await getSupabase()
-    .from('product_code_components')
-    .select('product_code_id, style_id, style_no, qty, sort_order')
-    .in('product_code_id', codeIds)
-    .order('sort_order', { ascending: true })
+  for (let start = 0; start < codeIds.length; start += COMPONENT_QUERY_SIZE) {
+    const chunk = codeIds.slice(start, start + COMPONENT_QUERY_SIZE)
+    const { data, error } = await getSupabase()
+      .from('product_code_components')
+      .select('product_code_id, style_id, style_no, qty, sort_order')
+      .in('product_code_id', chunk)
+      .order('sort_order', { ascending: true })
 
-  if (error) {
-    throw new ProductCodeStoreError(
-      errorMessage(error, '코드 구성품을 불러오지 못했습니다.'),
-      'invalid',
-    )
-  }
+    if (error) {
+      throw new ProductCodeStoreError(
+        errorMessage(error, '코드 구성품을 불러오지 못했습니다.'),
+        'invalid',
+      )
+    }
 
-  for (const row of (data as ComponentRow[]) ?? []) {
-    const list = map.get(row.product_code_id) ?? []
-    list.push({
-      styleId: row.style_id,
-      styleNo: row.style_no,
-      qty: row.qty,
-    })
-    map.set(row.product_code_id, list)
+    for (const row of (data as ComponentRow[]) ?? []) {
+      const list = map.get(row.product_code_id) ?? []
+      list.push({
+        styleId: row.style_id,
+        styleNo: row.style_no,
+        qty: row.qty,
+      })
+      map.set(row.product_code_id, list)
+    }
   }
   return map
 }
@@ -155,7 +202,7 @@ async function saveViaRpc(
   id: string | null,
   input: ProductCodeInput,
 ): Promise<string> {
-  const { code, name, components } = validate(input)
+  const { code, name, components, values } = validate(input)
   const { data, error } = await getSupabase().rpc(
     'save_product_code_with_components',
     {
@@ -164,11 +211,12 @@ async function saveViaRpc(
       p_kind: input.kind,
       p_code: code,
       p_name: name,
-      p_weight_g: normalizePositive(input.weightG),
-      p_width_mm: normalizePositive(input.widthMm),
-      p_depth_mm: normalizePositive(input.depthMm),
-      p_height_mm: normalizePositive(input.heightMm),
+      p_weight_g: normalizePositiveInteger(input.weightG),
+      p_width_cm: normalizePositiveCm(input.widthCm),
+      p_depth_cm: normalizePositiveCm(input.depthCm),
+      p_height_cm: normalizePositiveCm(input.heightCm),
       p_note: input.note.trim(),
+      p_values: values,
       p_components: components,
     },
   )
@@ -189,21 +237,35 @@ export async function listProductCodes(
   brandId: string,
   kind?: ProductCodeKind,
 ): Promise<ProductCode[]> {
-  let query = getSupabase()
-    .from('product_codes')
-    .select(CODE_COLUMNS)
-    .eq('brand_id', brandId)
-  if (kind) query = query.eq('kind', kind)
+  const rows: CodeRow[] = []
 
-  const { data, error } = await query
-  if (error) {
-    throw new ProductCodeStoreError(
-      errorMessage(error, '코드를 불러오지 못했습니다.'),
-      'invalid',
-    )
+  for (let page = 0; ; page += 1) {
+    let query = getSupabase()
+      .from('product_codes')
+      .select(CODE_COLUMNS)
+      .eq('brand_id', brandId)
+    if (kind) query = query.eq('kind', kind)
+
+    const { data, error } = await query
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(
+        page * CODE_PAGE_SIZE,
+        (page + 1) * CODE_PAGE_SIZE - 1,
+      )
+
+    if (error) {
+      throw new ProductCodeStoreError(
+        errorMessage(error, '코드를 불러오지 못했습니다.'),
+        'invalid',
+      )
+    }
+
+    const batch = (data as CodeRow[]) ?? []
+    rows.push(...batch)
+    if (batch.length < CODE_PAGE_SIZE) break
   }
 
-  const rows = (data as CodeRow[]) ?? []
   const components = await loadComponents(rows.map((row) => row.id))
   return rows
     .map((row) => toCode(row, components.get(row.id) ?? []))

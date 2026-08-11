@@ -23,7 +23,9 @@ function buildOwnerGroups(columns: BrandField[]): OwnerGroup[] {
   const groups: OwnerGroup[] = []
   for (const column of columns) {
     const owner: FieldOwner | 'pin' =
-      column.systemKey === 'styleNo' || column.systemKey === 'name'
+      column.systemKey === 'styleNo' ||
+      column.systemKey === 'name' ||
+      column.systemKey === 'ownBarcode'
         ? 'pin'
         : column.owner
     const label = owner === 'pin' ? '식별' : OWNER_LABEL[owner]
@@ -47,8 +49,8 @@ function stickyLeft(colIndex: number): number | undefined {
 }
 
 /**
- * 읽기 전용 상품 표.
- * 값 수정은 내보내기 → 엑셀 → 일괄 업로드로만 한다.
+ * 상품 데이터 표.
+ * 행 또는 수정 버튼으로 단건 편집 서랍을 열 수 있다.
  * 칸마다 선택·편집 상태를 들지 않아서 열이 많아도 스크롤이 가볍다.
  * 범위를 끌어 복사하면 표 그대로 엑셀에 붙는다.
  */
@@ -56,10 +58,13 @@ export function SheetTable({
   columns,
   rows,
   showOwnerGroups = false,
+  onRowOpen,
 }: {
   columns: BrandField[]
   rows: SheetRow[]
   showOwnerGroups?: boolean
+  /** 행을 누르면 단건 수정 화면으로 연다. */
+  onRowOpen?: (row: SheetRow) => void
 }) {
   const ownerGroups = useMemo(
     () => (showOwnerGroups ? buildOwnerGroups(columns) : []),
@@ -82,6 +87,14 @@ export function SheetTable({
                   {group.label}
                 </th>
               ))}
+              {onRowOpen ? (
+                <th
+                  className="sticky top-0 z-20 border-b border-border bg-muted px-2 py-1.5 text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+                  colSpan={1}
+                >
+                  수정
+                </th>
+              ) : null}
             </tr>
           ) : null}
           <tr>
@@ -104,13 +117,18 @@ export function SheetTable({
                 </th>
               )
             })}
+            {onRowOpen ? (
+              <th className="sticky top-0 z-20 w-16 border-b border-border bg-muted/90 px-2 py-1.5 text-center font-medium backdrop-blur">
+                수정
+              </th>
+            ) : null}
           </tr>
         </thead>
         <tbody>
           {rows.length === 0 ? (
             <tr>
               <td
-                colSpan={Math.max(columns.length, 1)}
+                colSpan={Math.max(columns.length + (onRowOpen ? 1 : 0), 1)}
                 className="px-4 py-10 text-center text-muted-foreground"
               >
                 조건에 맞는 상품이 없습니다.
@@ -118,7 +136,14 @@ export function SheetTable({
             </tr>
           ) : (
             rows.map((row) => (
-              <tr key={row.id} className="group/row hover:bg-muted/20">
+              <tr
+                key={row.id}
+                className={cn(
+                  'group/row hover:bg-muted/20',
+                  onRowOpen && 'cursor-pointer',
+                )}
+                onClick={onRowOpen ? () => onRowOpen(row) : undefined}
+              >
                 {columns.map((column, colIndex) => {
                   const key = fieldValueKey(column)
                   const left = stickyLeft(colIndex)
@@ -162,6 +187,20 @@ export function SheetTable({
                     </td>
                   )
                 })}
+                {onRowOpen ? (
+                  <td className="border-b border-border px-2 py-0 text-center">
+                    <button
+                      type="button"
+                      className="rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onRowOpen(row)
+                      }}
+                    >
+                      수정
+                    </button>
+                  </td>
+                ) : null}
               </tr>
             ))
           )}

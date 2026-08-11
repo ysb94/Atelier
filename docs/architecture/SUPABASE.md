@@ -37,6 +37,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 출시 기획(`seasons`), 브랜드 항목(`brand_fields`), 상품(`styles`) | Supabase |
 | 기획안(`product_drafts` + `draft_colors` + `draft_options`) | Supabase |
 | 코드·사용처(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_assignments`) | Supabase |
+| 송장 품목명 변환 기준(`invoice_name_rules`) | Supabase |
 
 - 상품·출시 기획·기획안·코드·사용처는 **0건으로 시작**한다. 자동 목업 시드를 넣지 않는다.
 - `brand_fields`만 품번·상품명 등 실행에 필요한 시스템 항목 구조를 브랜드별로 깐다.
@@ -96,12 +97,56 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 앱에서 바코드를 자동 발급하지 않는다.
 
 - 진입점: 자사 바코드 화면의 `일괄 등록`, 또는 `데이터 · 일괄 업로드`의 자사 바코드 탭.
-- 한 행 = 바코드 1건. 필수 열은 `88코드 | 바코드 상품명 | M번호`다.
+- 한 행 = 바코드 1건. 필수 열은 `88코드 | 바코드 상품명`이고 `M번호`는 선택이다.
 - `M번호`는 쉼표·줄바꿈으로 1개 이상 적는다. 1:1·1:N 모두 가능하고 각 구성 수량은 1이다.
+- `M번호`를 비우면 구성품 0개로 등록하고, 자사 바코드 화면의 `M번호 미지정` 탭에서
+  행별 입력 또는 채우기 엑셀로 나중에 채운다.
 - 생성만 한다. 파일 안 중복, 브랜드에 이미 있는 88코드(자사·거래처 포함),
   잘못된 체크디지트, 등록되지 않은 M번호, 같은 행의 반복 M번호는 오류로 제외하고
-  나머지 정상 행만 `save_product_code_with_components`로 저장한다.
-- 로직: `src/lib/codes/barcode-import.ts`, 화면: `BarcodeBulkUploadPanel.tsx`.
+  나머지 정상·미지정 행만 `save_product_code_with_components`로 저장한다.
+- `save_product_code_with_components`는 구성품 배열이 비어 있어도 허용한다.
+- 미지정 채우기 업로드는 구성이 빈 코드만 갱신하고, 이미 M번호가 있는 코드는
+  덮어쓰지 않는다.
+- 바코드 엑셀의 1행 헤더는 자사 바코드 화면의 `항목 관리`에서 관리한다.
+  - `88코드`, `바코드 상품명`은 식별·등록에 반드시 필요하므로 이름과 순서만 바꿀 수 있다.
+  - 기본 항목(M번호·무게·규격·비고)은 삭제하면 이후 양식에서 숨기지만 기존 값은 지우지
+    않는다.
+  - 사용자 항목은 텍스트·숫자 유형으로 추가할 수 있고, 이름 변경·순서 변경·삭제가
+    가능하다. 값은 `product_codes.values` JSONB에 `barcode_fields.id`를 키로 저장하므로
+    헤더 이름을 바꿔도 기존 값이 유지된다.
+- 기존 바코드 정보는 자사 바코드 화면의 `정보 일괄 수정`에서 현재 값을 XLSX로 내려받아
+  수정한 뒤 다시 올린다. 88코드로 기존 행을 정확히 매칭하고, 관리 중인 헤더만 갱신한다.
+  빈 칸은 기존 값을 유지하며 신규 바코드를 만들지 않는다. 바코드 상품명·M번호 변경은
+  각각 단건 수정·`M번호 미지정` 흐름을 사용한다.
+- 포장 규격(가로·세로·높이)의 단위는 `cm`다. DB 컬럼은 `width_cm`/`depth_cm`/`height_cm`
+  (`numeric(8,1)`)이고, 0보다 큰 값만 받으며 소수 첫째 자리까지 허용한다. 무게는 정수
+  `g`를 유지한다. 예전 `가로(mm)` 헤더 파일도 읽지만 값은 cm로 해석하며 단위 변환은
+  하지 않는다.
+- 로직: `src/lib/codes/barcode-import.ts`, 화면: `BarcodeBulkUploadPanel.tsx`,
+  `PendingBarcodePanel.tsx`, `BarcodeInfoBulkPanel.tsx`, `BarcodeFieldManager.tsx`.
+
+### 송장 품목명 변환 기준
+
+- `invoice_name_rules`는 사방넷 원본 식별값을 CJ 송장용 표준 품목명으로 연결한다.
+  업로드한 주문 원본과 수령인·전화번호·주소는 이 테이블이나 다른 서버 저장소에 넣지 않고
+  브라우저 메모리에서만 처리한다.
+- 현재는 `자체품번코드` exact-match 한 단계만 실행한다. 사용자는 기준정보 화면에서
+  직접 등록하거나, 주문 변환 중 미등록 코드 목록에서 처리한다. 품목명·내품명 보조 조회와
+  엑셀 일괄 등록은 이 흐름을 소량 데이터로 검증한 뒤 추가한다.
+- `action = rename`이면 `target_name`에 `상품업체 상품명(업체 공식)`을 저장해 결과
+  품목명을 바꾼다. `action = exception`이면 `target_name`은 null이고 원본 품목명을
+  유지한 채 자체품번 단계 검토를 완료한다.
+- 원본 문자열은 그대로 보존하고, 조회 키만 앞뒤·연속 공백과 영문 대소문자를 정규화한다.
+  `(brand_id, match_type, normalized_source_value)`를 유일하게 만들어 같은 단계의 모순된
+  결과가 저장되지 않게 한다.
+- RLS는 `app.can_read_brand` / `app.can_edit_brand`를 사용한다. 임의 샘플 규칙은
+  DB와 앱 코드 어디에도 두지 않는다. 직접 저장한 실제 기준만 `is_test = false`로
+  관리한다.
+- 마이그레이션:
+  `20260811080000_create_invoice_name_rules.sql`,
+  `20260811080100_seed_invoice_name_rule_tests.sql`,
+  `20260811083000_add_invoice_name_rule_actions.sql`,
+  `20260811090000_remove_invoice_sample_data.sql`.
 
 ### 수천 건 적재
 

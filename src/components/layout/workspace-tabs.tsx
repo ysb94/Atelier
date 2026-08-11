@@ -45,6 +45,10 @@ const NAV_LABELS: {
   { match: /^\/work\/design(?:\/|$)/, label: '디자인 · 상품 정보' },
   { match: /^\/work\/md(?:\/|$)/, label: 'MD · 상품 정보' },
   { match: /^\/work\/logistics(?:\/|$)/, label: '물류 · 상품 정보' },
+  {
+    match: /^\/logistics\/invoices(?:\/|$)/,
+    label: '물류 · 송장작업',
+  },
   { match: /^\/barcodes(?:\/|$)/, label: '자사 바코드' },
   { match: /^\/usage-codes(?:\/|$)/, label: '사용처별 바코드' },
   { match: /^\/partner-codes(?:\/|$)/, label: '거래처 코드' },
@@ -63,6 +67,9 @@ function stripDetailPath(rest: string): string {
 
   const workDetail = rest.match(/^(\/work\/[^/]+)\/[^/]+\/?$/)
   if (workDetail) return workDetail[1]
+
+  const dataDetail = rest.match(/^(\/data\/[^/]+)\/[^/]+\/?$/)
+  if (dataDetail) return dataDetail[1]
 
   return rest.replace(/\/$/, '') || '/'
 }

@@ -324,6 +324,36 @@ export type ProductCodeComponent = {
   qty: number
 }
 
+/**
+ * 바코드 행의 시스템 항목. code·name은 등록 식별과 생성에 반드시 필요하다.
+ * 나머지는 헤더 관리에서 숨겨도 DB 값은 보존한다.
+ */
+export type BarcodeFieldSystemKey =
+  | 'code'
+  | 'name'
+  | 'components'
+  | 'weightG'
+  | 'widthCm'
+  | 'depthCm'
+  | 'heightCm'
+  | 'note'
+
+export type BarcodeFieldType = 'text' | 'number'
+
+export type BarcodeField = {
+  id: string
+  brandId: string
+  label: string
+  systemKey: BarcodeFieldSystemKey | null
+  type: BarcodeFieldType
+  order: number
+}
+
+export type BarcodeFieldInput = {
+  label: string
+  type: BarcodeFieldType
+}
+
 /** 자사 바코드가 사용되는 판매처·납품처(면세점, 무신사 등) */
 export type CodeUsageTarget = {
   id: string
@@ -376,11 +406,13 @@ export type ProductCode = {
   name: string
   /** 포장 후 실측 무게(g). 미입력이면 null */
   weightG: number | null
-  /** 포장 규격(mm) */
-  widthMm: number | null
-  depthMm: number | null
-  heightMm: number | null
+  /** 포장 규격(cm). 소수 첫째 자리까지 */
+  widthCm: number | null
+  depthCm: number | null
+  heightCm: number | null
   note: string
+  /** barcode_fields의 사용자 추가 항목 id -> 값 */
+  values: Record<string, string>
   components: ProductCodeComponent[]
   createdAt: string
   updatedAt: string
@@ -391,11 +423,39 @@ export type ProductCodeInput = {
   code: string
   name: string
   weightG: number | null
-  widthMm: number | null
-  depthMm: number | null
-  heightMm: number | null
+  widthCm: number | null
+  depthCm: number | null
+  heightCm: number | null
   note: string
+  /** barcode_fields의 사용자 추가 항목 id -> 값 */
+  values: Record<string, string>
   components: ProductCodeComponent[]
+}
+
+/** 사방넷 품목명을 찾을 때 적용하는 exact-match 단계 */
+export type InvoiceNameRuleMatchType =
+  | 'own_product_code'
+  | 'product_name'
+  | 'product_and_item'
+
+export type InvoiceNameRuleAction = 'rename' | 'exception'
+
+/** 브랜드별 CJ 송장 품목명 변환 기준 */
+export type InvoiceNameRule = {
+  id: string
+  brandId: string
+  matchType: InvoiceNameRuleMatchType
+  sourceValue: string
+  normalizedSourceValue: string
+  action: InvoiceNameRuleAction
+  /** exception 규칙이면 null */
+  targetName: string | null
+  isActive: boolean
+  /** 기존 엑셀을 검증 중인 임시 규칙. 운영 확정 규칙과 구분한다. */
+  isTest: boolean
+  note: string
+  createdAt: string
+  updatedAt: string
 }
 
 export const CODE_USAGE_STATUS_LABEL: Record<CodeUsageStatus, string> = {

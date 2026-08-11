@@ -236,6 +236,47 @@ export async function listStylesPage(
   }
 }
 
+/**
+ * 송장 공식명 입력처럼 이름만 빠르게 고를 때 쓴다.
+ * 전체 Style 행을 받지 않고 name만 최대 limit개 반환한다.
+ */
+export async function searchStyleNames(
+  brandId: string,
+  search: string,
+  limit = 3,
+): Promise<string[]> {
+  const keyword = sanitizeSearch(search)
+  if (!keyword) return []
+
+  const { data, error } = await getSupabase()
+    .from('styles')
+    .select('name')
+    .eq('brand_id', brandId)
+    .ilike('name', `%${keyword}%`)
+    .order('name', { ascending: true })
+    .limit(Math.max(limit * 4, limit))
+
+  if (error) {
+    throw new StyleStoreError(
+      errorMessage(error, '상품명을 검색하지 못했습니다.'),
+      'invalid',
+    )
+  }
+
+  const names: string[] = []
+  const seen = new Set<string>()
+  for (const row of (data as { name: string }[]) ?? []) {
+    const name = row.name?.trim()
+    if (!name) continue
+    const key = name.toLocaleLowerCase('ko-KR')
+    if (seen.has(key)) continue
+    seen.add(key)
+    names.push(name)
+    if (names.length >= limit) break
+  }
+  return names
+}
+
 /** 같은 조건으로 전부 읽는다. 내보내기처럼 한 번에 다 필요할 때만 쓴다. */
 export async function listStylesFiltered(
   brandId: string,
@@ -379,8 +420,7 @@ export async function updateStyle(
         ? input.retailPrice
         : existing.retailPrice,
     status: input.status ?? existing.status,
-    designer:
-      input.designer !== undefined ? input.designer : existing.designer,
+    designer: input.designer !== undefined ? input.designer : existing.designer,
     planner: input.planner !== undefined ? input.planner : existing.planner,
     description:
       input.description !== undefined

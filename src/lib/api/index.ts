@@ -3,11 +3,14 @@ import type {
   BrandInput,
   BrandField,
   BrandFieldInput,
+  BarcodeField,
+  BarcodeFieldInput,
   CodeUsageAssignment,
   CodeUsageAssignmentInput,
   CodeUsageStatus,
   CodeUsageTarget,
   CodeUsageTargetInput,
+  InvoiceNameRule,
   ProductCode,
   ProductCodeInput,
   ProductCodeKind,
@@ -21,8 +24,10 @@ import type {
 import * as brandStore from '@/lib/supabase/brands'
 import { getMyProfile } from '@/lib/supabase/profiles'
 import * as brandFieldStore from '@/lib/supabase/brand-fields'
+import * as barcodeFieldStore from '@/lib/supabase/barcode-fields'
 import * as codeUsageTargetStore from '@/lib/supabase/code-usage-targets'
 import * as codeUsageAssignmentStore from '@/lib/supabase/code-usage-assignments'
+import * as invoiceNameRuleStore from '@/lib/supabase/invoice-name-rules'
 import * as productCodeStore from '@/lib/supabase/product-codes'
 import * as productDraftStore from '@/lib/supabase/product-drafts'
 import * as seasonStore from '@/lib/supabase/seasons'
@@ -32,8 +37,14 @@ const delay = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export { BrandStoreError } from '@/lib/supabase/brands'
 export { BrandFieldStoreError } from '@/lib/supabase/brand-fields'
+export { BarcodeFieldStoreError } from '@/lib/supabase/barcode-fields'
 export { CodeUsageTargetStoreError } from '@/lib/supabase/code-usage-targets'
 export { CodeUsageAssignmentStoreError } from '@/lib/supabase/code-usage-assignments'
+export { InvoiceNameRuleStoreError } from '@/lib/supabase/invoice-name-rules'
+export type {
+  InvoiceCodeRuleInput,
+  InvoiceNameRuleUpdateInput,
+} from '@/lib/supabase/invoice-name-rules'
 export { ProductCodeStoreError } from '@/lib/supabase/product-codes'
 export {
   ProductDraftStoreError,
@@ -133,6 +144,106 @@ export async function deleteBrandField(id: string): Promise<void> {
   return brandFieldStore.deleteBrandField(id)
 }
 
+export async function getBarcodeFields(
+  brandId: string,
+): Promise<BarcodeField[]> {
+  await delay()
+  return barcodeFieldStore.listBarcodeFields(brandId)
+}
+
+export async function createBarcodeField(
+  brandId: string,
+  input: BarcodeFieldInput,
+): Promise<BarcodeField> {
+  await delay()
+  return barcodeFieldStore.createBarcodeField(brandId, input)
+}
+
+export async function updateBarcodeField(
+  id: string,
+  input: BarcodeFieldInput,
+): Promise<BarcodeField> {
+  await delay()
+  return barcodeFieldStore.updateBarcodeField(id, input)
+}
+
+export async function deleteBarcodeField(id: string): Promise<void> {
+  await delay()
+  return barcodeFieldStore.deleteBarcodeField(id)
+}
+
+export async function moveBarcodeField(
+  id: string,
+  direction: 'up' | 'down',
+): Promise<void> {
+  await delay()
+  return barcodeFieldStore.moveBarcodeField(id, direction)
+}
+
+/** 송장 변환과 기준정보 화면이 같은 이름변경 원본을 사용한다. */
+export async function getInvoiceNameRules(
+  brandId: string,
+  activeOnly = false,
+): Promise<InvoiceNameRule[]> {
+  await delay()
+  return invoiceNameRuleStore.listInvoiceNameRules(brandId, { activeOnly })
+}
+
+export async function saveInvoiceCodeRule(
+  brandId: string,
+  input: invoiceNameRuleStore.InvoiceCodeRuleInput,
+): Promise<InvoiceNameRule> {
+  await delay()
+  return invoiceNameRuleStore.saveInvoiceCodeRule(brandId, input)
+}
+
+export async function updateInvoiceNameRule(
+  id: string,
+  input: invoiceNameRuleStore.InvoiceNameRuleUpdateInput,
+): Promise<InvoiceNameRule> {
+  await delay()
+  return invoiceNameRuleStore.updateInvoiceNameRule(id, input)
+}
+
+export type BulkInvoiceRuleRow = {
+  lineNo: number
+  input: invoiceNameRuleStore.InvoiceCodeRuleInput
+}
+
+export type BulkInvoiceRuleFailure = {
+  lineNo: number
+  code: string
+  message: string
+}
+
+/** 자체품번코드 기준 일괄 등록. 미리보기에서 통과한 행만 넘긴다. */
+export async function applyBulkInvoiceCodeRules(
+  brandId: string,
+  rows: BulkInvoiceRuleRow[],
+): Promise<{ saved: number; failures: BulkInvoiceRuleFailure[] }> {
+  await delay(200)
+  if (rows.length === 0) return { saved: 0, failures: [] }
+
+  const failures: BulkInvoiceRuleFailure[] = []
+  let saved = 0
+
+  await mapPool(rows, 3, async (row) => {
+    try {
+      await invoiceNameRuleStore.saveInvoiceCodeRule(brandId, row.input)
+      saved += 1
+    } catch (error) {
+      failures.push({
+        lineNo: row.lineNo,
+        code: row.input.ownProductCode,
+        message:
+          error instanceof Error ? error.message : '저장하지 못했습니다.',
+      })
+    }
+  })
+
+  return { saved, failures }
+}
+
 /**
  * 출고 거래 단위 코드 API.
  * 자사 바코드(88코드)와 거래처 코드가 같은 스토어를 kind로 구분해 쓴다.
@@ -226,6 +337,54 @@ export async function applyBulkProductCodes(
   })
 
   return { created, failures }
+}
+
+export type BulkBarcodeUpdateRow = {
+  lineNo: number
+  codeId: string
+  input: ProductCodeInput
+}
+
+export type BulkBarcodeFillRow = BulkBarcodeUpdateRow
+
+/**
+ * 기존 자사 바코드를 제한된 동시성으로 갱신한다.
+ * 호출부가 미리보기에서 통과한 행만 넘긴다.
+ */
+async function applyBulkBarcodeUpdates(
+  rows: BulkBarcodeUpdateRow[],
+): Promise<{ updated: number; failures: BulkBarcodeFailure[] }> {
+  await delay(200)
+  if (rows.length === 0) return { updated: 0, failures: [] }
+
+  const failures: BulkBarcodeFailure[] = []
+  let updated = 0
+
+  await mapPool(rows, 5, async (row) => {
+    try {
+      await productCodeStore.updateProductCode(row.codeId, row.input)
+      updated += 1
+    } catch (error) {
+      failures.push({
+        lineNo: row.lineNo,
+        code: row.input.code,
+        message:
+          error instanceof Error ? error.message : '저장에 실패했습니다.',
+      })
+    }
+  })
+
+  return { updated, failures }
+}
+
+/** 미지정 자사 바코드에 M번호(구성품)만 채운다. */
+export async function applyBulkBarcodeComponents(rows: BulkBarcodeFillRow[]) {
+  return applyBulkBarcodeUpdates(rows)
+}
+
+/** 88코드로 매칭한 기존 자사 바코드의 포장 정보를 갱신한다. */
+export async function applyBulkBarcodeInfo(rows: BulkBarcodeUpdateRow[]) {
+  return applyBulkBarcodeUpdates(rows)
 }
 
 export async function getCodeUsageTargets(
@@ -408,7 +567,19 @@ export async function getStylesFiltered(
   return styleStore.listStylesFiltered(brandId, filter)
 }
 
-export async function getStyleById(styleId: string): Promise<Style | undefined> {
+/** 송장 공식명 입력용. 데이터 시트에 등록된 상품명만 검색한다. */
+export async function searchStyleNames(
+  brandId: string,
+  search: string,
+  limit = 3,
+): Promise<string[]> {
+  await delay()
+  return styleStore.searchStyleNames(brandId, search, limit)
+}
+
+export async function getStyleById(
+  styleId: string,
+): Promise<Style | undefined> {
   await delay()
   return styleStore.getStyleById(styleId)
 }

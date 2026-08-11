@@ -1,0 +1,2 @@
+-- Intentionally empty.
+-- 송장 샘플 규칙은 사용자 요청에 따라 어떤 환경에도 seed하지 않는다.

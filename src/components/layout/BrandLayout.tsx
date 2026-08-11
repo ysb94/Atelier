@@ -13,6 +13,7 @@ import {
   Building2,
   CalendarRange,
   ChevronDown,
+  FileSpreadsheet,
   Home,
   LayoutGrid,
   Lightbulb,
@@ -72,7 +73,14 @@ const navGroups: { title: string; items: NavItem[] }[] = [
   },
   {
     title: '물류',
-    items: [{ to: 'work/logistics', label: '상품 정보', icon: Boxes }],
+    items: [
+      { to: 'work/logistics', label: '상품 정보', icon: Boxes },
+      {
+        to: 'logistics/invoices',
+        label: '송장작업',
+        icon: FileSpreadsheet,
+      },
+    ],
   },
   {
     title: '데이터',

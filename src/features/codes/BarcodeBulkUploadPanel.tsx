@@ -9,7 +9,7 @@ import {
   type PreparedBarcodeRow,
 } from '@/lib/codes/barcode-import'
 import { parseFile } from '@/lib/import/parse'
-import type { ProductCode, Style } from '@/lib/types'
+import type { BarcodeField, ProductCode, Style } from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn, formatNumber } from '@/lib/utils'
@@ -18,6 +18,7 @@ type BarcodeBulkUploadPanelProps = {
   brandName: string
   brandId: string
   styles: Style[]
+  fields: BarcodeField[]
   /** 브랜드의 자사·거래처 코드 전체. 중복 88코드 차단용 */
   existingCodes: ProductCode[]
   onApplied: () => void | Promise<void>
@@ -29,6 +30,7 @@ export function BarcodeBulkUploadPanel({
   brandName,
   brandId,
   styles,
+  fields,
   existingCodes,
   onApplied,
   onClose,
@@ -41,7 +43,7 @@ export function BarcodeBulkUploadPanel({
   const applyMutation = useMutation({
     mutationFn: async () => {
       const rows = (prepared ?? [])
-        .filter((row) => row.statusLabel === 'ok' && row.components.length > 0)
+        .filter((row) => row.statusLabel !== 'error')
         .map((row) => ({
           lineNo: row.lineNo,
           input: toProductCodeInput(row),
@@ -87,6 +89,7 @@ export function BarcodeBulkUploadPanel({
         prepareBarcodeRows({
           rows: sheet.rows,
           styles,
+          fields,
           existingCodes,
         }),
       )
@@ -97,7 +100,11 @@ export function BarcodeBulkUploadPanel({
     }
   }
 
-  const okCount = prepared?.filter((r) => r.statusLabel === 'ok').length ?? 0
+  const okCount =
+    prepared?.filter((r) => r.statusLabel === 'ok').length ?? 0
+  const pendingCount =
+    prepared?.filter((r) => r.statusLabel === 'pending').length ?? 0
+  const applyCount = okCount + pendingCount
   const errorCount =
     prepared?.filter((r) => r.statusLabel === 'error').length ?? 0
 
@@ -108,8 +115,9 @@ export function BarcodeBulkUploadPanel({
           <div>
             <div className="text-sm font-medium">자사 바코드 일괄 등록</div>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              회사에서 발급한 88코드·바코드 상품명·M번호를 넣으세요. 이미 있는
-              바코드는 덮어쓰지 않습니다.
+              회사에서 발급한 88코드·바코드 상품명을 넣으세요. M번호는 비워도
+              됩니다. 미지정으로 등록한 뒤 미지정 탭에서 채울 수 있습니다. 이미
+              있는 바코드는 덮어쓰지 않습니다.
             </p>
           </div>
           {onClose ? (
@@ -127,7 +135,7 @@ export function BarcodeBulkUploadPanel({
             onClick={async () => {
               setDownloading(true)
               try {
-                await downloadBarcodeTemplate({ brandName })
+                await downloadBarcodeTemplate({ brandName, fields })
               } catch (err) {
                 setError(
                   err instanceof Error
@@ -195,6 +203,7 @@ export function BarcodeBulkUploadPanel({
                         className={cn(
                           'text-xs',
                           row.statusLabel === 'error' && 'text-danger',
+                          row.statusLabel === 'pending' && 'text-warning',
                           row.statusLabel === 'ok' && 'text-muted-foreground',
                         )}
                       >
@@ -210,8 +219,11 @@ export function BarcodeBulkUploadPanel({
 
         {prepared ? (
           <p className="text-xs text-muted-foreground">
-            반영 가능 {formatNumber(okCount)}건 · 오류{' '}
-            {formatNumber(errorCount)}건
+            반영 가능 {formatNumber(applyCount)}건
+            {pendingCount > 0
+              ? `(M번호 미지정 ${formatNumber(pendingCount)}건 포함)`
+              : ''}{' '}
+            · 오류 {formatNumber(errorCount)}건
           </p>
         ) : null}
 
@@ -235,12 +247,12 @@ export function BarcodeBulkUploadPanel({
           ) : null}
           <Button
             type="button"
-            disabled={okCount === 0 || applyMutation.isPending}
+            disabled={applyCount === 0 || applyMutation.isPending}
             onClick={() => applyMutation.mutate()}
           >
             {applyMutation.isPending
               ? '등록 중...'
-              : `${formatNumber(okCount)}건 반영`}
+              : `${formatNumber(applyCount)}건 반영`}
           </Button>
         </div>
       </CardContent>
