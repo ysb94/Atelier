@@ -18,6 +18,7 @@ import {
   RotateCcw,
   Settings2,
   ShieldCheck,
+  Tag,
   Tags,
   Upload,
 } from 'lucide-react'
@@ -32,19 +33,22 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { getInvoiceNameRules } from '@/lib/api'
+import { getInvoiceNameRules, getInvoicePrefixRequests } from '@/lib/api'
 import { parseFile } from '@/lib/import/parse'
 import { transformInvoiceNamesByCode } from '@/lib/invoice/name-transform'
+import { createGiftSeed } from '@/lib/invoice/gift-assign'
 import {
   inspectSabangnetSheets,
   type SabangnetInspection,
 } from '@/lib/invoice/sabangnet'
-import type { InvoiceNameRule } from '@/lib/types'
+import type { InvoiceNameRule, InvoicePrefixRequest } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
 import { InvoiceCodeRuleBulkPanel } from './InvoiceCodeRuleBulkPanel'
 import { InvoiceCodeRuleForm } from './InvoiceCodeRuleForm'
 import { InvoiceCodeRuleTable } from './InvoiceCodeRuleTable'
 import { InvoiceNameTransformTable } from './InvoiceNameTransformTable'
+import { InvoicePrefixRequestPanel } from './InvoicePrefixRequestPanel'
+import { InvoicePrefixStepPanel } from './InvoicePrefixStepPanel'
 import { SabangnetOrderTable } from './SabangnetOrderTable'
 import { UnresolvedInvoiceCodePanel } from './UnresolvedInvoiceCodePanel'
 
@@ -352,7 +356,7 @@ function WaitingOrdersPanel() {
   )
 }
 
-type RuleView = 'aliases' | 'holds' | 'gifts' | 'packing'
+type RuleView = 'prefixes' | 'aliases' | 'holds' | 'gifts' | 'packing'
 
 const RULE_VIEWS: {
   value: RuleView
@@ -360,6 +364,12 @@ const RULE_VIEWS: {
   description: string
   icon: typeof Tags
 }[] = [
+  {
+    value: 'prefixes',
+    label: '접두어',
+    description: '사은품 증정 요청 건별 품목명 앞 표시',
+    icon: Tag,
+  },
   {
     value: 'aliases',
     label: '이름변경',
@@ -390,6 +400,12 @@ const RULE_TABLES: Record<
   RuleView,
   { title: string; description: string; columns: string[] }
 > = {
+  prefixes: {
+    title: '접두어 요청 건',
+    description:
+      '사은품 증정 요청서를 제목·쇼핑몰·행사 기간·산정 단위로 등록하고, 상품명마다 붙일 접두어를 1:1로 관리합니다.',
+    columns: ['제목', '쇼핑몰명', '기간', '상품 수', '상태'],
+  },
   aliases: {
     title: '자체품번코드 기준',
     description:
@@ -422,12 +438,18 @@ function RulesPanel({
   nameRules,
   nameRulesLoading,
   nameRulesError,
+  prefixRequests,
+  prefixRequestsLoading,
+  prefixRequestsError,
 }: {
   brandId: string
   brandName: string
   nameRules: InvoiceNameRule[]
   nameRulesLoading: boolean
   nameRulesError: string | null
+  prefixRequests: InvoicePrefixRequest[]
+  prefixRequestsLoading: boolean
+  prefixRequestsError: string | null
 }) {
   const [activeRule, setActiveRule] = useState<RuleView>('aliases')
   const [registerMode, setRegisterMode] = useState<'single' | 'bulk'>('single')
@@ -537,7 +559,14 @@ function RulesPanel({
         </div>
       ) : null}
 
-      {activeRule === 'aliases' ? (
+      {activeRule === 'prefixes' ? (
+        <InvoicePrefixRequestPanel
+          brandId={brandId}
+          requests={prefixRequests}
+          loading={prefixRequestsLoading}
+          error={prefixRequestsError}
+        />
+      ) : activeRule === 'aliases' ? (
         <>
           <InvoiceCodeRuleTable
             brandId={brandId}
@@ -768,11 +797,12 @@ function HistoryPanel() {
   )
 }
 
-type TodayStep = 'upload' | 'check' | 'transform'
+type TodayStep = 'upload' | 'check' | 'prefix' | 'transform'
 
 const TODAY_STEPS: { value: TodayStep; label: string }[] = [
   { value: 'upload', label: '파일 올리기' },
   { value: 'check', label: '파일 확인' },
+  { value: 'prefix', label: '접두어' },
   { value: 'transform', label: '품목명 변환' },
 ]
 
@@ -848,6 +878,26 @@ export function InvoiceWorkPage() {
     queryKey: ['invoice-name-rules', brand.id],
     queryFn: () => getInvoiceNameRules(brand.id),
   })
+  const prefixRequestsQuery = useQuery({
+    queryKey: ['invoice-prefix-requests', brand.id],
+    queryFn: () => getInvoicePrefixRequests(brand.id),
+  })
+  const prefixRequests = useMemo(
+    () => prefixRequestsQuery.data ?? [],
+    [prefixRequestsQuery.data],
+  )
+  const prefixRequestsError =
+    prefixRequestsQuery.error instanceof Error
+      ? prefixRequestsQuery.error.message
+      : prefixRequestsQuery.error
+        ? '송장 접두어 요청 건을 불러오지 못했습니다.'
+        : null
+  // 기간이 겹치는 요청 건이 둘 이상일 때 사용자가 고른 값. 단계를 옮겨도 유지한다.
+  const [prefixResolutions, setPrefixResolutions] = useState<
+    Record<string, string>
+  >({})
+  const [giftSeed, setGiftSeed] = useState(createGiftSeed)
+  const [excludedGiftNames, setExcludedGiftNames] = useState<string[]>([])
   const nameRules = useMemo(
     () => nameRulesQuery.data ?? [],
     [nameRulesQuery.data],
@@ -888,7 +938,11 @@ export function InvoiceWorkPage() {
   )
 
   // 준비되지 않은 단계로는 갈 수 없게 현재 단계를 되돌린다.
-  const maxStepIndex = !inspection ? 0 : headerReady ? 2 : 1
+  const maxStepIndex = !inspection
+    ? 0
+    : headerReady
+      ? TODAY_STEPS.length - 1
+      : 1
   const stepIndex = Math.min(
     TODAY_STEPS.findIndex((item) => item.value === step),
     maxStepIndex,
@@ -904,11 +958,18 @@ export function InvoiceWorkPage() {
     })
   }
 
+  function resetGiftState() {
+    setPrefixResolutions({})
+    setGiftSeed(createGiftSeed())
+    setExcludedGiftNames([])
+  }
+
   function resetFile() {
     setInspection(null)
     setFileName('')
     setError(null)
     setStep('upload')
+    resetGiftState()
     if (inputRef.current) inputRef.current.value = ''
   }
 
@@ -927,6 +988,7 @@ export function InvoiceWorkPage() {
     setError(null)
     setInspection(null)
     setFileName(file.name)
+    resetGiftState()
 
     try {
       const sheets = await parseFile(file)
@@ -1193,8 +1255,61 @@ export function InvoiceWorkPage() {
                   <Button
                     type="button"
                     disabled={!headerReady}
-                    onClick={() => setStep('transform')}
+                    onClick={() => setStep('prefix')}
                   >
+                    접두어 넣기
+                    <ArrowRight className="size-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {activeStep === 'prefix' && inspection && headerReady ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>쇼핑몰별 접두어 넣기</CardTitle>
+                <CardDescription>
+                  품목명이 바뀌기 전인 지금 접두어를 정합니다. 실제 결합은 모든
+                  작업이 끝난 최종 품목명 앞에 적용합니다.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                <InvoicePrefixStepPanel
+                  rows={inspection.rows}
+                  requests={prefixRequests}
+                  loading={prefixRequestsQuery.isPending}
+                  error={prefixRequestsError}
+                  resolutions={prefixResolutions}
+                  onResolve={(key, requestId) =>
+                    setPrefixResolutions((current) => ({
+                      ...current,
+                      [key]: requestId,
+                    }))
+                  }
+                  giftSeed={giftSeed}
+                  excludedGiftNames={excludedGiftNames}
+                  onRedrawGifts={() => setGiftSeed(createGiftSeed())}
+                  onToggleExcludeGift={(giftName) =>
+                    setExcludedGiftNames((current) =>
+                      current.includes(giftName)
+                        ? current.filter((name) => name !== giftName)
+                        : [...current, giftName],
+                    )
+                  }
+                  sourceFileName={fileName}
+                />
+
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setStep('check')}
+                  >
+                    <ArrowLeft className="size-4" />
+                    파일 확인으로
+                  </Button>
+                  <Button type="button" onClick={() => setStep('transform')}>
                     품목명 변환하기
                     <ArrowRight className="size-4" />
                   </Button>
@@ -1227,6 +1342,7 @@ export function InvoiceWorkPage() {
                   <>
                     <UnresolvedInvoiceCodePanel
                       brandId={brand.id}
+                      brandName={brand.name}
                       codes={nameTransformation.unresolvedCodes}
                     />
 
@@ -1238,13 +1354,14 @@ export function InvoiceWorkPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setStep('check')}
+                    onClick={() => setStep('prefix')}
                   >
                     <ArrowLeft className="size-4" />
-                    파일 확인으로
+                    접두어로
                   </Button>
                   <p className="text-xs text-muted-foreground">
                     다음 변환 단계는 자체품번코드 검증이 끝난 뒤 추가합니다.
+                    접두어는 최종 품목명이 정해질 때 앞에 붙습니다.
                   </p>
                 </div>
               </CardContent>
@@ -1260,6 +1377,9 @@ export function InvoiceWorkPage() {
           nameRules={nameRules}
           nameRulesLoading={nameRulesQuery.isPending}
           nameRulesError={nameRulesError}
+          prefixRequests={prefixRequests}
+          prefixRequestsLoading={prefixRequestsQuery.isPending}
+          prefixRequestsError={prefixRequestsError}
         />
       ) : (
         <HistoryPanel />

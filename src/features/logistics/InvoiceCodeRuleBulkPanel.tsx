@@ -93,7 +93,8 @@ export function InvoiceCodeRuleBulkPanel({
     <div className="space-y-3">
       <p className="text-xs leading-5 text-muted-foreground">
         1열 자체품번코드, 2열 공식 상품명, 3열 메모(선택)로 된 엑셀을 올리세요.
-        공식 상품명을 비우면 예외(원본 품목명 유지)로 등록됩니다.
+        공식 상품명을 비우면 예외(원본 품목명 유지)로 등록됩니다. 오늘 작업에서
+        받은 「변환 안 된 코드」일괄 다운로드 파일도 그대로 올릴 수 있습니다.
       </p>
 
       <div className="flex flex-wrap gap-2">

@@ -110,19 +110,29 @@ function toRowPatch(style: Style) {
   }
 }
 
-export async function countStylesByBrand(): Promise<Record<string, number>> {
-  const { data, error } = await getSupabase().from('styles').select('brand_id')
-  if (error) {
-    throw new StyleStoreError(
-      errorMessage(error, '상품 수를 불러오지 못했습니다.'),
-      'invalid',
-    )
-  }
+/**
+ * 브랜드별 상품 수. PostgREST 기본 1000행 상한에 걸리지 않도록
+ * brand_id마다 count: exact + head로 센다.
+ */
+export async function countStylesByBrand(
+  brandIds: string[],
+): Promise<Record<string, number>> {
   const counts: Record<string, number> = {}
-  for (const row of data ?? []) {
-    const brandId = (row as { brand_id: string }).brand_id
-    counts[brandId] = (counts[brandId] ?? 0) + 1
-  }
+  await Promise.all(
+    brandIds.map(async (brandId) => {
+      const { count, error } = await getSupabase()
+        .from('styles')
+        .select('id', { count: 'exact', head: true })
+        .eq('brand_id', brandId)
+      if (error) {
+        throw new StyleStoreError(
+          errorMessage(error, '상품 수를 불러오지 못했습니다.'),
+          'invalid',
+        )
+      }
+      counts[brandId] = count ?? 0
+    }),
+  )
   return counts
 }
 

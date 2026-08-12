@@ -11,6 +11,7 @@ import type {
   CodeUsageTarget,
   CodeUsageTargetInput,
   InvoiceNameRule,
+  InvoicePrefixRequest,
   ProductCode,
   ProductCodeInput,
   ProductCodeKind,
@@ -28,6 +29,7 @@ import * as barcodeFieldStore from '@/lib/supabase/barcode-fields'
 import * as codeUsageTargetStore from '@/lib/supabase/code-usage-targets'
 import * as codeUsageAssignmentStore from '@/lib/supabase/code-usage-assignments'
 import * as invoiceNameRuleStore from '@/lib/supabase/invoice-name-rules'
+import * as invoicePrefixRequestStore from '@/lib/supabase/invoice-prefix-requests'
 import * as productCodeStore from '@/lib/supabase/product-codes'
 import * as productDraftStore from '@/lib/supabase/product-drafts'
 import * as seasonStore from '@/lib/supabase/seasons'
@@ -45,6 +47,11 @@ export type {
   InvoiceCodeRuleInput,
   InvoiceNameRuleUpdateInput,
 } from '@/lib/supabase/invoice-name-rules'
+export { InvoicePrefixRequestStoreError } from '@/lib/supabase/invoice-prefix-requests'
+export type {
+  InvoicePrefixItemInput,
+  InvoicePrefixRequestInput,
+} from '@/lib/supabase/invoice-prefix-requests'
 export { ProductCodeStoreError } from '@/lib/supabase/product-codes'
 export {
   ProductDraftStoreError,
@@ -68,7 +75,8 @@ export type { StyleFilter } from '@/lib/supabase/styles'
 async function withStyleCounts(
   brands: Omit<Brand, 'styleCount'>[],
 ): Promise<Brand[]> {
-  const counts = await styleStore.countStylesByBrand()
+  if (brands.length === 0) return []
+  const counts = await styleStore.countStylesByBrand(brands.map((b) => b.id))
   return brands.map((brand) => ({
     ...brand,
     styleCount: counts[brand.id] ?? 0,
@@ -203,6 +211,40 @@ export async function updateInvoiceNameRule(
 ): Promise<InvoiceNameRule> {
   await delay()
   return invoiceNameRuleStore.updateInvoiceNameRule(id, input)
+}
+
+/** 접두어는 요청 건 단위로 관리하고 쇼핑몰명 + 원본 품목명 완전 일치로 찾는다. */
+export async function getInvoicePrefixRequests(
+  brandId: string,
+): Promise<InvoicePrefixRequest[]> {
+  await delay()
+  return invoicePrefixRequestStore.listInvoicePrefixRequests(brandId)
+}
+
+export async function saveInvoicePrefixRequest(
+  brandId: string,
+  input: invoicePrefixRequestStore.InvoicePrefixRequestInput,
+  requestId?: string,
+): Promise<InvoicePrefixRequest> {
+  await delay()
+  return invoicePrefixRequestStore.saveInvoicePrefixRequest(
+    brandId,
+    input,
+    requestId,
+  )
+}
+
+export async function setInvoicePrefixRequestActive(
+  id: string,
+  isActive: boolean,
+): Promise<void> {
+  await delay()
+  return invoicePrefixRequestStore.setInvoicePrefixRequestActive(id, isActive)
+}
+
+export async function deleteInvoicePrefixRequest(id: string): Promise<void> {
+  await delay()
+  return invoicePrefixRequestStore.deleteInvoicePrefixRequest(id)
 }
 
 export type BulkInvoiceRuleRow = {

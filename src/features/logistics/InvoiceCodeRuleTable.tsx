@@ -39,6 +39,25 @@ function parseDayInput(value: string): number | null {
   return date.getTime()
 }
 
+/** <input type="date">용 YYYY-MM-DD (로컬 날짜). */
+function toDateInputValue(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, '0')
+  const day = String(date.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function defaultDateRange() {
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  const weekAgo = new Date(today)
+  weekAgo.setDate(weekAgo.getDate() - 7)
+  return {
+    from: toDateInputValue(weekAgo),
+    to: toDateInputValue(today),
+  }
+}
+
 type EditDraft = {
   action: InvoiceNameRuleAction
   officialProductName: string
@@ -67,12 +86,17 @@ export function InvoiceCodeRuleTable({
   error: string | null
 }) {
   const queryClient = useQueryClient()
+  const defaultDates = useMemo(() => defaultDateRange(), [])
   const [search, setSearch] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [dateFrom, setDateFrom] = useState(defaultDates.from)
+  const [dateTo, setDateTo] = useState(defaultDates.to)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<EditDraft | null>(null)
   const [rowError, setRowError] = useState<string | null>(null)
+  const hasCustomFilter =
+    Boolean(search.trim()) ||
+    dateFrom !== defaultDates.from ||
+    dateTo !== defaultDates.to
 
   const codeRules = useMemo(
     () =>
@@ -216,15 +240,15 @@ export function InvoiceCodeRuleTable({
               className="w-40"
             />
           </div>
-          {dateFrom || dateTo || search ? (
+          {hasCustomFilter ? (
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => {
                 setSearch('')
-                setDateFrom('')
-                setDateTo('')
+                setDateFrom(defaultDates.from)
+                setDateTo(defaultDates.to)
               }}
             >
               <X className="size-3.5" />

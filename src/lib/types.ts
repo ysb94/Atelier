@@ -84,12 +84,7 @@ export function formatSeasonLabel(season: {
 export type FieldLevel = 'style' | 'sku'
 
 export type StyleStatus =
-  | 'draft'
-  | 'design'
-  | 'sampling'
-  | 'confirmed'
-  | 'ordered'
-  | 'received'
+  'draft' | 'design' | 'sampling' | 'confirmed' | 'ordered' | 'received'
 
 export type FieldOwner = 'common' | 'planning' | 'design' | 'md' | 'logistics'
 
@@ -434,9 +429,7 @@ export type ProductCodeInput = {
 
 /** 사방넷 품목명을 찾을 때 적용하는 exact-match 단계 */
 export type InvoiceNameRuleMatchType =
-  | 'own_product_code'
-  | 'product_name'
-  | 'product_and_item'
+  'own_product_code' | 'product_name' | 'product_and_item'
 
 export type InvoiceNameRuleAction = 'rename' | 'exception'
 
@@ -456,6 +449,85 @@ export type InvoiceNameRule = {
   note: string
   createdAt: string
   updatedAt: string
+}
+
+/** 요청 건 안의 상품명 1:1 접두어 */
+export type InvoicePrefixItem = {
+  id: string
+  requestId: string
+  productName: string
+  normalizedProductName: string
+  prefix: string
+  /** 접두어가 붙을 때 함께 나가는 제품명(데이터 시트) */
+  outgoingProductNames: string[]
+  /** 나가는 제품이 여러 개일 때 랜덤 출고 여부 */
+  isRandom: boolean
+}
+
+/** 사은품을 몇 개 낼지. 요청 건(행사) 단위로 정한다. */
+export type InvoicePrefixCountBasis =
+  | 'per_order'
+  | 'per_product'
+  | 'per_quantity'
+
+/** 합포장 상자에서 사은품 개수를 줄이는 방식. */
+export type InvoicePrefixMergeBasis = 'per_order' | 'per_shipment'
+
+/**
+ * 쇼핑몰 사은품 증정 요청 건.
+ * 사방넷 주문일시가 행사 기간 안인 주문에만 접두어를 붙인다.
+ */
+export type InvoicePrefixRequest = {
+  id: string
+  brandId: string
+  title: string
+  taskNo: string
+  mallName: string
+  normalizedMallName: string
+  /** YYYY-MM-DD HH:MM — 사방넷 주문일시와 같은 한국 벽시계 */
+  startsAt: string
+  /** YYYY-MM-DD HH:MM — 양끝 포함 */
+  endsAt: string
+  countBasis: InvoicePrefixCountBasis
+  mergeBasis: InvoicePrefixMergeBasis
+  isActive: boolean
+  note: string
+  items: InvoicePrefixItem[]
+  createdAt: string
+  updatedAt: string
+}
+
+export type InvoicePrefixRequestStatus =
+  | 'scheduled'
+  | 'running'
+  | 'ended'
+  | 'paused'
+
+export const INVOICE_PREFIX_REQUEST_STATUS_LABEL: Record<
+  InvoicePrefixRequestStatus,
+  string
+> = {
+  scheduled: '예정',
+  running: '진행중',
+  ended: '종료',
+  paused: '중지',
+}
+
+export const INVOICE_PREFIX_COUNT_BASIS_LABEL: Record<
+  InvoicePrefixCountBasis,
+  string
+> = {
+  per_order: '주문당 1개',
+  per_product: '대상 상품 종류당 1개',
+  per_quantity: '대상 수량만큼',
+}
+
+export const INVOICE_PREFIX_MERGE_BASIS_LABEL: Record<
+  InvoicePrefixMergeBasis,
+  string
+> = {
+  per_order: '주문 수만큼',
+  per_shipment: '상자당 1개만',
 }
 
 export const CODE_USAGE_STATUS_LABEL: Record<CodeUsageStatus, string> = {

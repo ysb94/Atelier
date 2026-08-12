@@ -38,6 +38,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 기획안(`product_drafts` + `draft_colors` + `draft_options`) | Supabase |
 | 코드·사용처(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_assignments`) | Supabase |
 | 송장 품목명 변환 기준(`invoice_name_rules`) | Supabase |
+| 송장 접두어 요청 건(`invoice_prefix_requests` + `invoice_prefix_items`) | Supabase |
 
 - 상품·출시 기획·기획안·코드·사용처는 **0건으로 시작**한다. 자동 목업 시드를 넣지 않는다.
 - `brand_fields`만 품번·상품명 등 실행에 필요한 시스템 항목 구조를 브랜드별로 깐다.
@@ -147,6 +148,46 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260811080100_seed_invoice_name_rule_tests.sql`,
   `20260811083000_add_invoice_name_rule_actions.sql`,
   `20260811090000_remove_invoice_sample_data.sql`.
+
+### 송장 접두어 요청 건
+
+- 접두어는 쇼핑몰 사은품 증정 요청서 단위로 들어온다. 그래서 요청 건(`invoice_prefix_requests`)과
+  상품별 접두어(`invoice_prefix_items`) 두 단계로 나눈다. 요청 건은 제목·쇼핑몰·행사
+  기간(분 단위)·사은품 산정 단위(`count_basis`)·합포장 처리(`merge_basis`)를 갖고,
+  항목은 사방넷 품목명·접두어·나가는 제품명 목록·랜덤 여부를 담는다.
+- 행사 기간은 `starts_at` / `ends_at`의 `timestamp`(시간대 없음)이다. 사방넷 주문일시가
+  시간대 없는 한국 벽시계 문자열(`2026-08-08 20:54`)이라 `timestamptz`를 쓰면 UTC로
+  밀릴 수 있다. 앱 표준은 `YYYY-MM-DD HH:MM`이고 양끝 포함으로 비교한다.
+- 자체품번코드 변환이 원본 품목명을 덮어쓰기 때문에 접두어 단계는 파일 확인 다음,
+  품목명 변환 앞에서 실행한다.
+- 이 단계는 접두어를 바로 붙이지 않는다. 행마다 붙일 접두어만 정해 두고, 모든 변환이
+  끝난 최종 품목명 앞에 `applyInvoicePrefix`로 결합한다.
+- 매칭은 쇼핑몰명 + 원본 품목명 완전 일치이고, 사방넷 주문일시가 요청 건의 행사 기간
+  안일 때만 적용한다. 나가는 제품(`outgoing_product_names`)은 데이터 시트 상품명에서
+  고르며, `is_random`이 켜져 있으면 2개 이상 중 랜덤 출고 대상으로 본다.
+- 사은품 개수는 요청 건의 `count_basis`로 센다. `per_order`는 고객주문번호당 1개,
+  `per_product`는 (주문, 품목명)당 1개, `per_quantity`는 내품수량 합이다.
+  `merge_basis`가 `per_shipment`이면 합포장 상자당 1개로 줄인다. 합포장 키는
+  받는분성명 + 전화번호(숫자만) + 주소다. 랜덤은 그날 파일 안에서 종류별 같은
+  수량으로 맞추고, 같은 상자 안에서는 가능한 한 겹치지 않게 고른다. 사은품은
+  원 주문 행을 복사한 별도 행으로 나가며 접두어는 원 주문 행에만 붙는다.
+- 원문은 보존하고 비교 키만 앞뒤·연속 공백과 영문 대소문자를 정규화한다. 유일 제약은
+  요청 건 안에서 `(request_id, normalized_product_name)`이라 같은 상품이 다른 행사에서
+  다른 접두어를 받을 수 있다.
+- 기간이 겹치는 요청 건이 둘 이상이면 자동으로 고르지 않고 오늘 작업의 접두어 단계에서
+  충돌로 보여주고 사용자가 고른 요청 건을 쓴다. 규칙이 없는 조합은 그대로 통과시킨다.
+- 자식 테이블은 `brand_id`를 함께 두고 `(brand_id, request_id)` 복합 FK로 브랜드 경계를
+  강제한다. RLS는 `app.can_read_brand` / `app.can_edit_brand`를 쓰고 샘플 데이터는 두지 않는다.
+- 로직: `src/lib/invoice/prefix-transform.ts`, 사은품 배정:
+  `src/lib/invoice/gift-assign.ts`, 붙여넣기 파서:
+  `src/lib/invoice/prefix-paste.ts`, 저장소: `src/lib/supabase/invoice-prefix-requests.ts`,
+  화면: `InvoicePrefixRequestPanel.tsx`, `InvoicePrefixRequestForm.tsx`,
+  `InvoicePrefixStepPanel.tsx`.
+- 마이그레이션: `20260812060000_create_invoice_prefix_rules.sql`,
+  `20260812070000_restructure_invoice_prefix_requests.sql`,
+  `20260812080000_invoice_prefix_request_period_to_minutes.sql`,
+  `20260812090000_invoice_prefix_item_outgoing_products.sql`,
+  `20260812100000_invoice_prefix_request_count_basis.sql`.
 
 ### 수천 건 적재
 

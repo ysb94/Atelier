@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CheckCircle2, Loader2, Save } from 'lucide-react'
+import { CheckCircle2, Download, Loader2, Save } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { saveInvoiceCodeRule, searchStyleNames } from '@/lib/api'
+import { downloadUnresolvedInvoiceCodes } from '@/lib/invoice/rule-import'
 import type { UnresolvedInvoiceCode } from '@/lib/invoice/name-transform'
 import { cn, formatNumber } from '@/lib/utils'
 
@@ -57,9 +58,11 @@ type RowDraft = {
 
 export function UnresolvedInvoiceCodePanel({
   brandId,
+  brandName,
   codes,
 }: {
   brandId: string
+  brandName: string
   codes: UnresolvedInvoiceCode[]
 }) {
   const queryClient = useQueryClient()
@@ -68,7 +71,9 @@ export function UnresolvedInvoiceCodePanel({
   const [highlightIndex, setHighlightIndex] = useState(0)
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+  const [isDownloading, setIsDownloading] = useState(false)
   const [saveMessage, setSaveMessage] = useState('')
+  const [messageIsError, setMessageIsError] = useState(false)
   const [dropdownRect, setDropdownRect] = useState<DropdownRect | null>(null)
   const blurTimerRef = useRef<number | null>(null)
   const anchorRefs = useRef(new Map<string, HTMLDivElement>())
@@ -231,10 +236,12 @@ export function UnresolvedInvoiceCodePanel({
         }
         return next
       })
+      setMessageIsError(false)
       setSaveMessage(`${variables.length}건을 저장했습니다.`)
       setActiveKey(null)
     },
     onError: (error) => {
+      setMessageIsError(true)
       setSaveMessage(
         error instanceof Error
           ? error.message
@@ -253,6 +260,7 @@ export function UnresolvedInvoiceCodePanel({
       isException: nextException,
       officialName: nextException ? '' : draft.officialName,
     })
+    setMessageIsError(false)
     setSaveMessage('')
   }
 
@@ -262,12 +270,14 @@ export function UnresolvedInvoiceCodePanel({
       isException: false,
     })
     setActiveKey(code.normalizedCode)
+    setMessageIsError(false)
     setSaveMessage('')
   }
 
   function savePending() {
     if (isSaving || pendingRows.length === 0) return
     setIsSaving(true)
+    setMessageIsError(false)
     setSaveMessage('')
 
     const rows = pendingRows.map((code) => {
@@ -288,6 +298,35 @@ export function UnresolvedInvoiceCodePanel({
     })
 
     mutation.mutate(rows)
+  }
+
+  async function downloadBulkSheet() {
+    if (isDownloading || codes.length === 0) return
+    setIsDownloading(true)
+    setSaveMessage('')
+    try {
+      await downloadUnresolvedInvoiceCodes({
+        brandName,
+        codes: codes.map((code) => ({
+          ownProductCode: code.ownProductCode,
+          productNames: code.productNames,
+          rowCount: code.rowCount,
+        })),
+      })
+      setMessageIsError(false)
+      setSaveMessage(
+        `${formatNumber(codes.length)}건을 내려받았습니다. 기준정보 → 엑셀 일괄 등록에 올리면 됩니다.`,
+      )
+    } catch (error) {
+      setMessageIsError(true)
+      setSaveMessage(
+        error instanceof Error
+          ? error.message
+          : '엑셀을 내려받지 못했습니다. 다시 시도해주세요.',
+      )
+    } finally {
+      setIsDownloading(false)
+    }
   }
 
   if (codes.length === 0) {
@@ -318,8 +357,19 @@ export function UnresolvedInvoiceCodePanel({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-xs text-muted-foreground">
-            데이터 시트 상품명 검색 · Enter는 예외 체크 · 저장 버튼으로 반영
+            데이터 시트 상품명 검색 · Enter는 예외 체크 · 저장 버튼으로 반영 ·
+            많을 때는 일괄 다운로드 후 기준정보에서 업로드
           </p>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={isDownloading}
+            onClick={() => void downloadBulkSheet()}
+          >
+            <Download className="size-3.5" />
+            {isDownloading ? '준비 중...' : '일괄 다운로드'}
+          </Button>
           <Button
             type="button"
             size="sm"
@@ -336,7 +386,7 @@ export function UnresolvedInvoiceCodePanel({
         <p
           className={cn(
             'text-xs',
-            mutation.isError ? 'text-danger' : 'text-success',
+            messageIsError ? 'text-danger' : 'text-success',
           )}
         >
           {saveMessage}
