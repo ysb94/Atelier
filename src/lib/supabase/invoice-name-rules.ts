@@ -2,12 +2,21 @@ import type {
   InvoiceNameRule,
   InvoiceNameRuleAction,
   InvoiceNameRuleMatchType,
+  StyleRef,
 } from '@/lib/types'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage } from '@/lib/supabase/map-error'
 
 const COLUMNS =
-  'id, brand_id, match_type, source_value, normalized_source_value, action, target_name, is_active, is_test, note, created_at, updated_at'
+  'id, brand_id, match_type, source_value, normalized_source_value, action, target_style_id, target_name, is_active, is_test, note, created_at, updated_at'
+
+const SELECT_WITH_STYLE = `${COLUMNS}, styles!invoice_name_rules_target_style_fkey(id, style_no, name)`
+
+type StyleEmbed = {
+  id: string
+  style_no: string
+  name: string
+} | null
 
 type InvoiceNameRuleRow = {
   id: string
@@ -16,12 +25,14 @@ type InvoiceNameRuleRow = {
   source_value: string
   normalized_source_value: string
   action: InvoiceNameRuleAction
+  target_style_id: string | null
   target_name: string | null
   is_active: boolean
   is_test: boolean
   note: string
   created_at: string
   updated_at: string
+  styles?: StyleEmbed | StyleEmbed[] | null
 }
 
 export class InvoiceNameRuleStoreError extends Error {
@@ -31,7 +42,15 @@ export class InvoiceNameRuleStoreError extends Error {
   }
 }
 
+function embedStyle(row: InvoiceNameRuleRow): StyleEmbed {
+  const embed = row.styles
+  if (Array.isArray(embed)) return embed[0] ?? null
+  return embed ?? null
+}
+
 function toRule(row: InvoiceNameRuleRow): InvoiceNameRule {
+  const style = embedStyle(row)
+  const targetStyleId = row.target_style_id
   return {
     id: row.id,
     brandId: row.brand_id,
@@ -39,7 +58,12 @@ function toRule(row: InvoiceNameRuleRow): InvoiceNameRule {
     sourceValue: row.source_value,
     normalizedSourceValue: row.normalized_source_value,
     action: row.action,
-    targetName: row.target_name,
+    targetStyleId,
+    targetStyleNo: style?.style_no ?? null,
+    // 연결된 상품이 있으면 현재 이름, 없으면 스냅샷(예외·구 데이터 대비)
+    targetName:
+      style?.name ??
+      (targetStyleId ? null : row.target_name),
     isActive: row.is_active,
     isTest: row.is_test,
     note: row.note,
@@ -54,7 +78,7 @@ export async function listInvoiceNameRules(
 ): Promise<InvoiceNameRule[]> {
   let query = getSupabase()
     .from('invoice_name_rules')
-    .select(COLUMNS)
+    .select(SELECT_WITH_STYLE)
     .eq('brand_id', brandId)
     .order('match_type', { ascending: true })
     .order('source_value', { ascending: true })
@@ -73,7 +97,7 @@ export async function listInvoiceNameRules(
 export type InvoiceCodeRuleInput = {
   ownProductCode: string
   action: InvoiceNameRuleAction
-  officialProductName?: string
+  targetStyle?: StyleRef
   note?: string
 }
 
@@ -87,14 +111,15 @@ export async function saveInvoiceCodeRule(
   input: InvoiceCodeRuleInput,
 ): Promise<InvoiceNameRule> {
   const sourceValue = input.ownProductCode.trim()
-  const officialProductName = input.officialProductName?.trim() ?? ''
   if (!sourceValue) {
     throw new InvoiceNameRuleStoreError('자체품번코드를 입력하세요.')
   }
-  if (input.action === 'rename' && !officialProductName) {
-    throw new InvoiceNameRuleStoreError(
-      '상품업체 상품명(업체 공식)을 입력하세요.',
-    )
+  if (input.action === 'rename') {
+    if (!input.targetStyle?.styleId) {
+      throw new InvoiceNameRuleStoreError(
+        '데이터 시트 상품(M번호)을 고르세요.',
+      )
+    }
   }
 
   const supabase = getSupabase()
@@ -117,7 +142,10 @@ export async function saveInvoiceCodeRule(
     match_type: 'own_product_code' as const,
     source_value: sourceValue,
     action: input.action,
-    target_name: input.action === 'rename' ? officialProductName : null,
+    target_style_id:
+      input.action === 'rename' ? input.targetStyle!.styleId : null,
+    target_name:
+      input.action === 'rename' ? input.targetStyle!.name.trim() : null,
     is_active: true,
     is_test: false,
     note: input.note?.trim() ?? '',
@@ -129,7 +157,7 @@ export async function saveInvoiceCodeRule(
         .update(payload)
         .eq('id', (existing as { id: string }).id)
     : supabase.from('invoice_name_rules').insert(payload)
-  const { data, error } = await query.select(COLUMNS).single()
+  const { data, error } = await query.select(SELECT_WITH_STYLE).single()
 
   if (error) {
     throw new InvoiceNameRuleStoreError(
@@ -141,26 +169,28 @@ export async function saveInvoiceCodeRule(
 
 export type InvoiceNameRuleUpdateInput = {
   action: InvoiceNameRuleAction
-  officialProductName?: string
+  targetStyle?: StyleRef
   note?: string
   isActive: boolean
 }
 
-/** 자체품번코드는 그대로 두고 처리·공식 상품명·메모·상태만 고친다. */
+/** 자체품번코드는 그대로 두고 처리·공식 상품·메모·상태만 고친다. */
 export async function updateInvoiceNameRule(
   id: string,
   input: InvoiceNameRuleUpdateInput,
 ): Promise<InvoiceNameRule> {
-  const officialProductName = input.officialProductName?.trim() ?? ''
-  if (input.action === 'rename' && !officialProductName) {
+  if (input.action === 'rename' && !input.targetStyle?.styleId) {
     throw new InvoiceNameRuleStoreError(
-      '상품업체 상품명(업체 공식)을 입력하세요.',
+      '데이터 시트 상품(M번호)을 고르세요.',
     )
   }
 
   const payload = {
     action: input.action,
-    target_name: input.action === 'rename' ? officialProductName : null,
+    target_style_id:
+      input.action === 'rename' ? input.targetStyle!.styleId : null,
+    target_name:
+      input.action === 'rename' ? input.targetStyle!.name.trim() : null,
     is_active: input.isActive,
     note: input.note?.trim() ?? '',
   }
@@ -169,7 +199,7 @@ export async function updateInvoiceNameRule(
     .from('invoice_name_rules')
     .update(payload)
     .eq('id', id)
-    .select(COLUMNS)
+    .select(SELECT_WITH_STYLE)
     .single()
 
   if (error) {

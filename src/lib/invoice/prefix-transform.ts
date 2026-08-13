@@ -38,6 +38,8 @@ export type InvoicePrefixUnusedItem = {
   mallName: string
   productName: string
   prefix: string
+  /** 품목명은 파일에 있는데 쇼핑몰명이 달라 못 붙인 경우 */
+  fileMallNames: string[]
 }
 
 export type InvoicePrefixRowMatch = {
@@ -60,57 +62,115 @@ export type InvoicePrefixPlan = {
   undatedRowCount: number
   /** 상품명은 맞지만 주문일시가 행사 기간을 벗어난 행 */
   outOfPeriodRowCount: number
+  /** 품목명은 파일에 있는데 쇼핑몰명이 다른 행 */
+  mallMismatchRowCount: number
 }
 
 /** DB 생성 열과 같은 규칙으로 비교 키만 정리한다. 원문은 바꾸지 않는다. */
 export function normalizeInvoiceText(value: string): string {
-  return value.trim().replace(/\s+/g, ' ').toLocaleLowerCase('ko-KR')
+  return value
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF\u00AD]/g, '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[［\[]/g, '[')
+    .replace(/[］\]]/g, ']')
+    .replace(/[‐‑‒–—―]/g, '-')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/\]\s+/g, ']')
+    .toLocaleLowerCase('ko-KR')
 }
 
-function matchKey(mallName: string, productName: string): string {
-  return `${normalizeInvoiceText(mallName)}\u0000${normalizeInvoiceText(productName)}`
+function productKey(productName: string): string {
+  return normalizeInvoiceText(productName)
+}
+
+function mallKey(mallName: string): string {
+  return normalizeInvoiceText(mallName).replace(/\s+/g, '')
 }
 
 function pad2(value: number | string): string {
   return String(value).padStart(2, '0')
 }
 
-function expandYear(year: string): string {
-  if (year.length === 4) return year
-  const n = Number(year)
-  // 사방넷·요청서가 쓰는 두 자리 연도는 2000년대다.
-  return String(2000 + n)
+function orderYmd(
+  first: string,
+  second: string,
+  third: string,
+): { year: string; month: string; day: string } | null {
+  const n1 = Number(first)
+  const n2 = Number(second)
+  const n3 = Number(third)
+  if (!Number.isFinite(n1) || !Number.isFinite(n2) || !Number.isFinite(n3)) {
+    return null
+  }
+
+  let year: number
+  let month: number
+  let day: number
+
+  if (first.length === 4 || n1 >= 1000) {
+    year = n1
+    month = n2
+    day = n3
+  } else if (third.length === 4 || n3 >= 1000) {
+    if (n1 <= 12) {
+      month = n1
+      day = n2
+    } else {
+      day = n1
+      month = n2
+    }
+    year = n3
+  } else if (n1 > 12 && n2 <= 12) {
+    year = 2000 + n1
+    month = n2
+    day = n3
+  } else {
+    month = n1
+    day = n2
+    year = 2000 + n3
+  }
+
+  if (month < 1 || month > 12 || day < 1 || day > 31 || year < 2000) return null
+  return { year: String(year), month: pad2(month), day: pad2(day) }
 }
 
 /**
  * 사방넷 주문일시를 앱 표준 YYYY-MM-DD HH:MM으로 읽는다.
- * 기본은 `2026-08-08 20:54`. 안전망으로 두 자리 연도, `/` `.` `T`,
- * 초, 오전/오후·AM/PM도 받는다. 시각이 없으면 00:00으로 본다.
+ * 기본은 `2026-08-08 20:54`. 엑셀이 만든 `8/13/26`, `2026. 8. 13`,
+ * 오전/오후·AM/PM도 받는다. 시각이 없으면 00:00으로 본다.
  */
 export function parseMoment(value: string): string | null {
-  const text = value.trim()
+  const text = value.trim().replace(/\s+/g, ' ')
   if (!text) return null
 
   const ampmMatch = text.match(
-    /^(\d{2,4})[-./](\d{1,2})[-./](\d{1,2})(?:[ T]+)?(오전|오후|AM|PM|am|pm)\s*(\d{1,2}):(\d{2})(?::\d{2})?$/,
+    /^(\d{1,4})\s*[-./]\s*(\d{1,2})\s*[-./]\s*(\d{1,4})(?:[ T,]+)?(오전|오후|AM|PM|am|pm)\s*(\d{1,2}):(\d{2})(?::\d{2})?$/,
   )
   if (ampmMatch) {
-    const [, yearRaw, month, day, meridem, hourRaw, minute] = ampmMatch
-    let hour = Number(hourRaw)
-    const isPm = /오후|pm/i.test(meridem!)
-    const isAm = /오전|am/i.test(meridem!)
+    const ymd = orderYmd(ampmMatch[1]!, ampmMatch[2]!, ampmMatch[3]!)
+    if (!ymd) return null
+    let hour = Number(ampmMatch[5])
+    const minute = ampmMatch[6]!
+    const meridem = ampmMatch[4]!
+    const isPm = /오후|pm/i.test(meridem)
+    const isAm = /오전|am/i.test(meridem)
     if (isPm && hour < 12) hour += 12
     if (isAm && hour === 12) hour = 0
-    return `${expandYear(yearRaw!)}-${pad2(month!)}-${pad2(day!)} ${pad2(hour)}:${pad2(minute!)}`
+    return `${ymd.year}-${ymd.month}-${ymd.day} ${pad2(hour)}:${pad2(minute)}`
   }
 
   const fullMatch = text.match(
-    /^(\d{2,4})[-./](\d{1,2})[-./](\d{1,2})(?:[ T]+(\d{1,2}):(\d{2})(?::\d{2})?)?$/,
+    /^(\d{1,4})\s*[-./]\s*(\d{1,2})\s*[-./]\s*(\d{1,4})(?:[ T]+(\d{1,2}):(\d{2})(?::\d{2})?)?$/,
   )
   if (!fullMatch) return null
 
-  const [, yearRaw, month, day, hour = '0', minute = '0'] = fullMatch
-  return `${expandYear(yearRaw!)}-${pad2(month!)}-${pad2(day!)} ${pad2(hour)}:${pad2(minute)}`
+  const ymd = orderYmd(fullMatch[1]!, fullMatch[2]!, fullMatch[3]!)
+  if (!ymd) return null
+  const hour = fullMatch[4] ?? '0'
+  const minute = fullMatch[5] ?? '0'
+  return `${ymd.year}-${ymd.month}-${ymd.day} ${pad2(hour)}:${pad2(minute)}`
 }
 
 /** 사방넷 주문행의 주문일시를 YYYY-MM-DD HH:MM으로 뽑는다. */
@@ -188,9 +248,7 @@ export function planInvoicePrefixes(
   for (const request of requests) {
     if (!request.isActive) continue
     for (const item of request.items) {
-      const key = `${request.normalizedMallName || normalizeInvoiceText(request.mallName)}\u0000${
-        item.normalizedProductName || normalizeInvoiceText(item.productName)
-      }`
+      const key = `${mallKey(request.mallName)}\u0000${productKey(item.productName)}`
       const list = itemsByKey.get(key) ?? []
       list.push({ request, item })
       itemsByKey.set(key, list)
@@ -205,11 +263,27 @@ export function planInvoicePrefixes(
   let prefixedRowCount = 0
   let undatedRowCount = 0
   let outOfPeriodRowCount = 0
+  let mallMismatchRowCount = 0
+
+  const requestProducts = new Map<string, IndexedItem[]>()
+  for (const request of requests) {
+    if (!request.isActive) continue
+    for (const item of request.items) {
+      const key = productKey(item.productName)
+      const list = requestProducts.get(key) ?? []
+      list.push({ request, item })
+      requestProducts.set(key, list)
+    }
+  }
 
   for (const row of rows) {
-    const key = matchKey(row.mallName, row.productName)
+    const key = `${mallKey(row.mallName)}\u0000${productKey(row.productName)}`
     const candidates = itemsByKey.get(key)
-    if (!candidates || candidates.length === 0) continue
+    if (!candidates || candidates.length === 0) {
+      const sameProduct = requestProducts.get(productKey(row.productName))
+      if (sameProduct && sameProduct.length > 0) mallMismatchRowCount += 1
+      continue
+    }
 
     const moment = orderMomentOf(row)
     if (!moment) {
@@ -290,13 +364,29 @@ export function planInvoicePrefixes(
   const firstMoment = fileMoments[0]
   const lastMoment = fileMoments[fileMoments.length - 1]
 
+  const fileMallsByProduct = new Map<string, Set<string>>()
+  for (const row of rows) {
+    const key = productKey(row.productName)
+    if (!key) continue
+    const malls = fileMallsByProduct.get(key) ?? new Set<string>()
+    if (row.mallName.trim()) malls.add(row.mallName.trim())
+    fileMallsByProduct.set(key, malls)
+  }
+
   const unusedItems: InvoicePrefixUnusedItem[] = []
   for (const request of requests) {
     if (!request.isActive) continue
-    // 파일의 주문일시 범위와 겹치지 않는 요청 건은 애초에 대상이 아니다.
-    if (firstMoment && lastMoment) {
-      if (request.endsAt < firstMoment || request.startsAt > lastMoment) continue
-    }
+    const mallInFile = rows.some(
+      (row) => mallKey(row.mallName) === mallKey(request.mallName),
+    )
+    const productInFile = request.items.some((item) =>
+      fileMallsByProduct.has(productKey(item.productName)),
+    )
+    const periodOverlaps =
+      !firstMoment ||
+      !lastMoment ||
+      !(request.endsAt < firstMoment || request.startsAt > lastMoment)
+    if (!periodOverlaps && !mallInFile && !productInFile) continue
     for (const item of request.items) {
       if (usedItemIds.has(item.id)) continue
       unusedItems.push({
@@ -305,6 +395,9 @@ export function planInvoicePrefixes(
         mallName: request.mallName,
         productName: item.productName,
         prefix: item.prefix,
+        fileMallNames: [
+          ...(fileMallsByProduct.get(productKey(item.productName)) ?? []),
+        ],
       })
     }
   }
@@ -321,6 +414,7 @@ export function planInvoicePrefixes(
     passedRowCount: rows.length - prefixedRowCount,
     undatedRowCount,
     outOfPeriodRowCount,
+    mallMismatchRowCount,
   }
 }
 

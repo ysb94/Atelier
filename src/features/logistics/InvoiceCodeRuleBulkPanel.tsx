@@ -1,7 +1,10 @@
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Download, Upload } from 'lucide-react'
-import { applyBulkInvoiceCodeRules } from '@/lib/api'
+import {
+  applyBulkInvoiceCodeRules,
+  listStyleRefsForLookup,
+} from '@/lib/api'
 import { parseFile } from '@/lib/import/parse'
 import {
   downloadInvoiceCodeRuleTemplate,
@@ -14,7 +17,7 @@ import { cn, formatNumber } from '@/lib/utils'
 
 const PREVIEW_LIMIT = 200
 
-/** 자체품번코드·공식 상품명·메모 3열 엑셀로 이름변경 기준을 한 번에 등록한다. */
+/** 자체품번코드·M번호·공식 상품명·메모 엑셀로 이름변경 기준을 한 번에 등록한다. */
 export function InvoiceCodeRuleBulkPanel({
   brandId,
   brandName,
@@ -29,6 +32,7 @@ export function InvoiceCodeRuleBulkPanel({
   const [error, setError] = useState<string | null>(null)
   const [summary, setSummary] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
+  const [parsing, setParsing] = useState(false)
 
   const applyMutation = useMutation({
     mutationFn: async () => {
@@ -64,6 +68,7 @@ export function InvoiceCodeRuleBulkPanel({
   async function handleFile(file: File) {
     setError(null)
     setSummary(null)
+    setParsing(true)
     try {
       const sheets = await parseFile(file)
       const sheet = sheets[0]
@@ -71,11 +76,28 @@ export function InvoiceCodeRuleBulkPanel({
         setError('파일에서 데이터를 읽지 못했습니다.')
         return
       }
-      setPrepared(prepareInvoiceRuleRows(sheet.rows))
+
+      const styleNos: string[] = []
+      const names: string[] = []
+      for (let i = 1; i < sheet.rows.length; i += 1) {
+        const row = sheet.rows[i] ?? []
+        const styleNo = (row[1] ?? '').trim()
+        const name = (row[2] ?? '').trim()
+        if (styleNo) styleNos.push(styleNo)
+        else if (name) names.push(name)
+      }
+
+      const lookup = await listStyleRefsForLookup(brandId, {
+        styleNos,
+        names,
+      })
+      setPrepared(prepareInvoiceRuleRows(sheet.rows, lookup))
     } catch (err) {
       setError(
         err instanceof Error ? err.message : '파일을 파싱하지 못했습니다.',
       )
+    } finally {
+      setParsing(false)
     }
   }
 
@@ -92,9 +114,10 @@ export function InvoiceCodeRuleBulkPanel({
   return (
     <div className="space-y-3">
       <p className="text-xs leading-5 text-muted-foreground">
-        1열 자체품번코드, 2열 공식 상품명, 3열 메모(선택)로 된 엑셀을 올리세요.
-        공식 상품명을 비우면 예외(원본 품목명 유지)로 등록됩니다. 오늘 작업에서
-        받은 「변환 안 된 코드」일괄 다운로드 파일도 그대로 올릴 수 있습니다.
+        1열 자체품번코드, 2열 M번호, 3열 공식 상품명(참고), 4열 메모(선택)로 된
+        엑셀을 올리세요. M번호·상품명을 비우면 예외(원본 품목명 유지)로
+        등록됩니다. 「변환 안 된 코드」일괄 다운로드 파일도 그대로 올릴 수
+        있습니다.
       </p>
 
       <div className="flex flex-wrap gap-2">
@@ -127,6 +150,7 @@ export function InvoiceCodeRuleBulkPanel({
             type="file"
             accept=".xlsx,.xls,.csv,.txt"
             className="hidden"
+            disabled={parsing}
             onChange={(event) => {
               const file = event.target.files?.[0]
               if (file) void handleFile(file)
@@ -135,7 +159,7 @@ export function InvoiceCodeRuleBulkPanel({
           />
           <span className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-md border border-border bg-card px-3 text-xs hover:bg-muted">
             <Upload className="size-3.5" />
-            파일 선택
+            {parsing ? '해석 중...' : '파일 선택'}
           </span>
         </label>
       </div>
@@ -150,11 +174,12 @@ export function InvoiceCodeRuleBulkPanel({
           </p>
           {previewRows.length > 0 ? (
             <div className="max-h-72 overflow-auto rounded-lg border border-border">
-              <table className="w-full min-w-[640px] text-left text-xs">
+              <table className="w-full min-w-[720px] text-left text-xs">
                 <thead className="sticky top-0 border-b border-border bg-muted/60">
                   <tr>
                     <th className="px-3 py-2 font-medium">행</th>
                     <th className="px-3 py-2 font-medium">자체품번코드</th>
+                    <th className="px-3 py-2 font-medium">M번호</th>
                     <th className="px-3 py-2 font-medium">공식 상품명</th>
                     <th className="px-3 py-2 font-medium">메모</th>
                     <th className="px-3 py-2 font-medium">결과</th>
@@ -171,6 +196,10 @@ export function InvoiceCodeRuleBulkPanel({
                       </td>
                       <td className="px-3 py-2 font-medium">
                         {row.code || '—'}
+                      </td>
+                      <td className="px-3 py-2 font-medium">
+                        {row.styleNo ||
+                          (row.action === 'exception' ? '-' : '—')}
                       </td>
                       <td className="max-w-56 truncate px-3 py-2">
                         {row.officialName || '(예외 · 원본 유지)'}

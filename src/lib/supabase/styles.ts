@@ -1,4 +1,5 @@
-import type { Style, StyleInput, StyleStatus } from '@/lib/types'
+import type { Style, StyleInput, StyleRef, StyleStatus } from '@/lib/types'
+import { normalizeStyleNo } from '@/lib/import/transform'
 import {
   isStyleStatus,
   parseColors,
@@ -246,45 +247,152 @@ export async function listStylesPage(
   }
 }
 
+type StyleRefRow = {
+  id: string
+  style_no: string
+  name: string
+}
+
+function toStyleRef(row: StyleRefRow): StyleRef {
+  return {
+    styleId: row.id,
+    styleNo: row.style_no,
+    name: row.name,
+  }
+}
+
 /**
- * 송장 공식명 입력처럼 이름만 빠르게 고를 때 쓴다.
- * 전체 Style 행을 받지 않고 name만 최대 limit개 반환한다.
+ * 송장·접두어처럼 상품을 고를 때 쓴다.
+ * 상품명·M번호(품번)로 검색하고 styleId까지 돌려준다.
  */
-export async function searchStyleNames(
+export async function searchStyleRefs(
   brandId: string,
   search: string,
-  limit = 3,
-): Promise<string[]> {
+  limit = 8,
+): Promise<StyleRef[]> {
   const keyword = sanitizeSearch(search)
   if (!keyword) return []
 
   const { data, error } = await getSupabase()
     .from('styles')
-    .select('name')
+    .select('id, style_no, name')
     .eq('brand_id', brandId)
-    .ilike('name', `%${keyword}%`)
-    .order('name', { ascending: true })
-    .limit(Math.max(limit * 4, limit))
+    .or(`name.ilike.%${keyword}%,style_no.ilike.%${keyword}%`)
+    .order('style_no', { ascending: true })
+    .limit(Math.max(limit * 3, limit))
 
   if (error) {
     throw new StyleStoreError(
-      errorMessage(error, '상품명을 검색하지 못했습니다.'),
+      errorMessage(error, '상품을 검색하지 못했습니다.'),
       'invalid',
     )
   }
 
-  const names: string[] = []
+  const refs: StyleRef[] = []
   const seen = new Set<string>()
-  for (const row of (data as { name: string }[]) ?? []) {
-    const name = row.name?.trim()
-    if (!name) continue
-    const key = name.toLocaleLowerCase('ko-KR')
-    if (seen.has(key)) continue
-    seen.add(key)
-    names.push(name)
-    if (names.length >= limit) break
+  for (const row of (data as StyleRefRow[]) ?? []) {
+    if (!row.id || seen.has(row.id)) continue
+    seen.add(row.id)
+    refs.push(toStyleRef(row))
+    if (refs.length >= limit) break
   }
-  return names
+  return refs
+}
+
+export type StyleRefLookup = {
+  byStyleNo: Map<string, StyleRef>
+  byName: Map<string, StyleRef[]>
+}
+
+/**
+ * 대량 엑셀 대조용 상품 참조 조회.
+ * 후보 전체를 PostgREST `in(...)` URL에 싣지 않고 브랜드 상품을 페이지로 읽어
+ * 브라우저에서 필요한 M번호·공식명만 고른다.
+ */
+export async function listStyleRefsForLookup(
+  brandId: string,
+  options: { styleNos?: string[]; names?: string[] },
+): Promise<StyleRefLookup> {
+  const wantedStyleNos = new Set<string>()
+  for (const value of options.styleNos ?? []) {
+    const trimmed = value.trim()
+    if (!trimmed) continue
+    wantedStyleNos.add(normalizeStyleNo(trimmed))
+    wantedStyleNos.add(trimmed.toLocaleLowerCase('ko-KR'))
+  }
+  const wantedNames = new Set(
+    (options.names ?? [])
+      .map((value) => value.trim().toLocaleLowerCase('ko-KR'))
+      .filter(Boolean),
+  )
+  const byStyleNo = new Map<string, StyleRef>()
+  const byName = new Map<string, StyleRef[]>()
+  if (wantedStyleNos.size === 0 && wantedNames.size === 0) {
+    return { byStyleNo, byName }
+  }
+
+  const supabase = getSupabase()
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('styles')
+      .select('id, style_no, name')
+      .eq('brand_id', brandId)
+      .order('style_no', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1)
+
+    if (error) {
+      throw new StyleStoreError(
+        errorMessage(error, '상품 마스터를 대조하지 못했습니다.'),
+        'invalid',
+      )
+    }
+
+    const page = (data as StyleRefRow[]) ?? []
+    for (const row of page) {
+      const ref = toStyleRef(row)
+      const normalizedNo = normalizeStyleNo(ref.styleNo)
+      const lowerNo = ref.styleNo.trim().toLocaleLowerCase('ko-KR')
+      if (
+        wantedStyleNos.has(normalizedNo) ||
+        wantedStyleNos.has(lowerNo)
+      ) {
+        byStyleNo.set(normalizedNo, ref)
+        byStyleNo.set(lowerNo, ref)
+      }
+
+      const nameKey = ref.name.trim().toLocaleLowerCase('ko-KR')
+      if (wantedNames.has(nameKey)) {
+        const matches = byName.get(nameKey) ?? []
+        matches.push(ref)
+        byName.set(nameKey, matches)
+      }
+    }
+
+    if (page.length < PAGE_SIZE) break
+  }
+
+  return { byStyleNo, byName }
+}
+
+/** 엑셀 일괄 등록에서 M번호 열을 StyleRef로 해석한다. */
+export async function listStyleRefsByStyleNos(
+  brandId: string,
+  styleNos: string[],
+): Promise<Map<string, StyleRef>> {
+  const lookup = await listStyleRefsForLookup(brandId, { styleNos })
+  return lookup.byStyleNo
+}
+
+/**
+ * 엑셀에서 상품명만 있을 때 exact-match로 해석한다.
+ * 같은 이름이 여러 상품이면 배열에 모두 담아 호출측에서 오류로 처리한다.
+ */
+export async function listStyleRefsByNames(
+  brandId: string,
+  names: string[],
+): Promise<Map<string, StyleRef[]>> {
+  const lookup = await listStyleRefsForLookup(brandId, { names })
+  return lookup.byName
 }
 
 /** 같은 조건으로 전부 읽는다. 내보내기처럼 한 번에 다 필요할 때만 쓴다. */

@@ -92,12 +92,23 @@ function isSpreadsheet(file: File) {
   return /\.(xlsx|xls|xlsm)$/i.test(file.name)
 }
 
+function stringifyCell(cell: unknown): string {
+  if (cell instanceof Date && !Number.isNaN(cell.getTime())) {
+    const year = cell.getFullYear()
+    const month = String(cell.getMonth() + 1).padStart(2, '0')
+    const day = String(cell.getDate()).padStart(2, '0')
+    const hour = String(cell.getHours()).padStart(2, '0')
+    const minute = String(cell.getMinutes()).padStart(2, '0')
+    return `${year}-${month}-${day} ${hour}:${minute}`
+  }
+  return String(cell ?? '').trim()
+}
+
 export async function parseFile(file: File): Promise<ParsedSheet[]> {
   if (isSpreadsheet(file)) {
-    // 엑셀 파서는 무거워서 실제로 엑셀을 올릴 때만 불러온다.
     const XLSX = await import('xlsx')
     const buffer = await file.arrayBuffer()
-    const workbook = XLSX.read(buffer, { type: 'array' })
+    const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
     return workbook.SheetNames.map((sheetName) => {
       const sheet = workbook.Sheets[sheetName]
       const raw = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
@@ -105,9 +116,10 @@ export async function parseFile(file: File): Promise<ParsedSheet[]> {
         blankrows: false,
         defval: '',
         raw: false,
+        dateNF: 'yyyy-mm-dd hh:mm',
       })
       const rows = raw
-        .map((cells) => cells.map((cell) => String(cell ?? '').trim()))
+        .map((cells) => cells.map((cell) => stringifyCell(cell)))
         .filter((cells) => cells.some((cell) => cell !== ''))
       return { name: sheetName, rows }
     }).filter((sheet) => sheet.rows.length > 0)

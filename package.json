@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
-    "check:supabase": "node scripts/check-supabase.mjs"
+    "check:supabase": "node scripts/check-supabase.mjs",
+    "verify:gift-first-come": "node scripts/verify-gift-first-come.mjs",
+    "verify:option-maps": "node scripts/verify-option-maps.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",

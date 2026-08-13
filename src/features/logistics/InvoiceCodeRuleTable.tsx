@@ -11,8 +11,13 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { StylePicker } from '@/components/style-picker'
 import { updateInvoiceNameRule } from '@/lib/api'
-import type { InvoiceNameRule, InvoiceNameRuleAction } from '@/lib/types'
+import type {
+  InvoiceNameRule,
+  InvoiceNameRuleAction,
+  StyleRef,
+} from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 function formatDateOnly(iso: string): string {
@@ -60,7 +65,7 @@ function defaultDateRange() {
 
 type EditDraft = {
   action: InvoiceNameRuleAction
-  officialProductName: string
+  targetStyle: StyleRef | null
   note: string
   isActive: boolean
 }
@@ -68,7 +73,14 @@ type EditDraft = {
 function draftFromRule(rule: InvoiceNameRule): EditDraft {
   return {
     action: rule.action,
-    officialProductName: rule.targetName ?? '',
+    targetStyle:
+      rule.targetStyleId && rule.targetStyleNo && rule.targetName
+        ? {
+            styleId: rule.targetStyleId,
+            styleNo: rule.targetStyleNo,
+            name: rule.targetName,
+          }
+        : null,
     note: rule.note,
     isActive: rule.isActive,
   }
@@ -118,7 +130,7 @@ export function InvoiceCodeRuleTable({
     return codeRules.filter((rule) => {
       if (query) {
         const haystack =
-          `${rule.sourceValue} ${rule.targetName ?? ''} ${rule.note}`.toLocaleLowerCase(
+          `${rule.sourceValue} ${rule.targetStyleNo ?? ''} ${rule.targetName ?? ''} ${rule.note}`.toLocaleLowerCase(
             'ko-KR',
           )
         if (!haystack.includes(query)) return false
@@ -142,7 +154,7 @@ export function InvoiceCodeRuleTable({
     mutationFn: ({ id, input }: { id: string; input: EditDraft }) =>
       updateInvoiceNameRule(id, {
         action: input.action,
-        officialProductName: input.officialProductName,
+        targetStyle: input.targetStyle ?? undefined,
         note: input.note,
         isActive: input.isActive,
       }),
@@ -212,7 +224,7 @@ export function InvoiceCodeRuleTable({
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="코드·공식명·메모 검색"
+              placeholder="코드·M번호·공식명·메모 검색"
               className="pl-8"
             />
           </div>
@@ -264,6 +276,7 @@ export function InvoiceCodeRuleTable({
                 <th className="px-3 py-2.5 font-medium">자체품번코드</th>
                 <th className="px-3 py-2.5 font-medium">등록일</th>
                 <th className="px-3 py-2.5 font-medium">처리</th>
+                <th className="px-3 py-2.5 font-medium">M번호</th>
                 <th className="px-3 py-2.5 font-medium">공식 상품명</th>
                 <th className="px-3 py-2.5 font-medium">메모</th>
                 <th className="px-3 py-2.5 font-medium">상태</th>
@@ -274,7 +287,7 @@ export function InvoiceCodeRuleTable({
               {loading ? (
                 <tr className="border-t border-border">
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-4 py-16 text-center text-muted-foreground"
                   >
                     Supabase에서 자체품번코드 기준을 불러오는 중입니다.
@@ -283,7 +296,7 @@ export function InvoiceCodeRuleTable({
               ) : error ? (
                 <tr className="border-t border-border">
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-4 py-16 text-center text-danger"
                   >
                     {error}
@@ -292,7 +305,7 @@ export function InvoiceCodeRuleTable({
               ) : filteredRules.length === 0 ? (
                 <tr className="border-t border-border">
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-4 py-16 text-center text-muted-foreground"
                   >
                     {codeRules.length === 0
@@ -346,7 +359,11 @@ export function InvoiceCodeRuleTable({
                                   : 'outline'
                               }
                               onClick={() =>
-                                setDraft({ ...rowDraft, action: 'exception' })
+                                setDraft({
+                                  ...rowDraft,
+                                  action: 'exception',
+                                  targetStyle: null,
+                                })
                               }
                             >
                               예외
@@ -362,24 +379,29 @@ export function InvoiceCodeRuleTable({
                           </Badge>
                         )}
                       </td>
+                      <td className="whitespace-nowrap px-3 py-3 font-medium">
+                        {isEditing && rowDraft
+                          ? rowDraft.action === 'exception'
+                            ? '-'
+                            : (rowDraft.targetStyle?.styleNo ?? '-')
+                          : (rule.targetStyleNo ?? '-')}
+                      </td>
                       <td className="max-w-80 px-3 py-3">
                         {isEditing && rowDraft ? (
-                          <Input
-                            value={rowDraft.officialProductName}
-                            disabled={rowDraft.action === 'exception'}
-                            placeholder={
-                              rowDraft.action === 'exception'
-                                ? '예외 처리 (품목명 유지)'
-                                : '공식 상품명'
-                            }
-                            className="h-8"
-                            onChange={(event) =>
-                              setDraft({
-                                ...rowDraft,
-                                officialProductName: event.target.value,
-                              })
-                            }
-                          />
+                          rowDraft.action === 'exception' ? (
+                            <span className="text-muted-foreground">
+                              예외 처리 (품목명 유지)
+                            </span>
+                          ) : (
+                            <StylePicker
+                              brandId={brandId}
+                              value={rowDraft.targetStyle}
+                              onChange={(next) =>
+                                setDraft({ ...rowDraft, targetStyle: next })
+                              }
+                              inputClassName="h-8"
+                            />
+                          )
                         ) : (
                           (rule.targetName ?? '-')
                         )}

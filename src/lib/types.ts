@@ -433,6 +433,99 @@ export type InvoiceNameRuleMatchType =
 
 export type InvoiceNameRuleAction = 'rename' | 'exception'
 
+/** 데이터 시트 상품을 가리키는 가벼운 참조. 연결은 styleId, 표시는 styleNo·name. */
+export type StyleRef = {
+  styleId: string
+  styleNo: string
+  name: string
+}
+
+/** 품목·옵션 조합에서 나가는 구성의 역할 */
+export type InvoiceOptionComponentRole =
+  | 'main'
+  | 'included'
+  | 'required'
+  | 'paid_add'
+
+export const INVOICE_OPTION_COMPONENT_ROLE_LABEL: Record<
+  InvoiceOptionComponentRole,
+  string
+> = {
+  main: '본품',
+  included: '기본포함',
+  required: '필수옵션',
+  paid_add: '유료추가',
+}
+
+export const INVOICE_OPTION_COMPONENT_ROLE_SHORT: Record<
+  InvoiceOptionComponentRole,
+  string
+> = {
+  main: '본품',
+  included: '포함',
+  required: '필수',
+  paid_add: '추가',
+}
+
+/** 확정된 조합에서 실제로 나가는 M번호 1건 */
+export type InvoiceOptionMapComponent = {
+  id: string
+  mapId: string
+  style: StyleRef
+  role: InvoiceOptionComponentRole
+  quantity: number
+  sortOrder: number
+}
+
+/**
+ * 사방넷 원본 품목명·내품명 조합을 본품 + 구성품 M번호로 연결하는 기준.
+ * 쇼핑몰명을 비우면 모든 쇼핑몰에 적용한다.
+ */
+export type InvoiceOptionMap = {
+  id: string
+  brandId: string
+  mallName: string
+  normalizedMallName: string
+  productName: string
+  normalizedProductName: string
+  itemName: string
+  normalizedItemName: string
+  ownProductCode: string
+  normalizedOwnProductCode: string
+  /** 승인된 변환 내품명. 비우면 원문을 유지한다. */
+  displayItemName: string
+  isActive: boolean
+  note: string
+  components: InvoiceOptionMapComponent[]
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 사방넷 원본 품목명(+내품명 문맥)을 본품 styles.id로 연결하는 품목명 전용 기준.
+ * itemNameContext는 조회 키일 뿐 출력 내품명이 아니다.
+ */
+export type InvoiceProductNameMap = {
+  id: string
+  brandId: string
+  mallName: string
+  normalizedMallName: string
+  productName: string
+  normalizedProductName: string
+  itemNameContext: string
+  normalizedItemNameContext: string
+  ownProductCode: string
+  normalizedOwnProductCode: string
+  /** 기존 원장 조회 키. 비우면 쇼핑몰+품목명+문맥 조합으로 매칭한다. */
+  lookupKey: string
+  normalizedLookupKey: string
+  style: StyleRef
+  isActive: boolean
+  note: string
+  createdAt: string
+  updatedAt: string
+}
+
 /** 브랜드별 CJ 송장 품목명 변환 기준 */
 export type InvoiceNameRule = {
   id: string
@@ -441,7 +534,11 @@ export type InvoiceNameRule = {
   sourceValue: string
   normalizedSourceValue: string
   action: InvoiceNameRuleAction
-  /** exception 규칙이면 null */
+  /** rename일 때 공식 상품. exception이면 null */
+  targetStyleId: string | null
+  /** styles.style_no (M번호). exception이면 null */
+  targetStyleNo: string | null
+  /** 연결된 상품의 현재 이름. exception이면 null */
   targetName: string | null
   isActive: boolean
   /** 기존 엑셀을 검증 중인 임시 규칙. 운영 확정 규칙과 구분한다. */
@@ -451,33 +548,73 @@ export type InvoiceNameRule = {
   updatedAt: string
 }
 
-/** 요청 건 안의 상품명 1:1 접두어 */
-export type InvoicePrefixItem = {
+/** 사은품 요청 건 안의 대상 원본 품목명 1건 */
+export type InvoiceGiftItem = {
   id: string
   requestId: string
   productName: string
   normalizedProductName: string
+  /** @deprecated 사은품은 별도 행으로 나가며 쓰지 않는다 */
   prefix: string
-  /** 접두어가 붙을 때 함께 나가는 제품명(데이터 시트) */
-  outgoingProductNames: string[]
+  /** 나갈 사은품 제품(M번호 참조) */
+  outgoingProducts: StyleRef[]
   /** 나가는 제품이 여러 개일 때 랜덤 출고 여부 */
   isRandom: boolean
 }
 
 /** 사은품을 몇 개 낼지. 요청 건(행사) 단위로 정한다. */
-export type InvoicePrefixCountBasis =
+export type InvoiceGiftCountBasis =
   | 'per_order'
   | 'per_product'
   | 'per_quantity'
 
-/** 합포장 상자에서 사은품 개수를 줄이는 방식. */
-export type InvoicePrefixMergeBasis = 'per_order' | 'per_shipment'
+/** 같은 합포장에서 사은품 개수를 줄이는 방식. */
+export type InvoiceGiftMergeBasis = 'per_order' | 'per_shipment'
+
+/** 선착순 행사 한도를 M번호별로 둘지, 모든 M번호의 실제 사은품 합계로 둘지. */
+export type InvoiceGiftLimitMode = 'per_style' | 'shared_total'
+
+/** 요청 건의 M번호별 선착순 행사 배정수량 */
+export type InvoiceGiftQuota = {
+  id: string
+  requestId: string
+  styleId: string
+  styleNo: string
+  styleName: string
+  quantityLimit: number
+  /** 활성 배정 수. 목록 조회 시 집계 */
+  usedCount: number
+  remainingCount: number
+}
+
+/**
+ * 사은품 1개 단위 영속 배정.
+ * 수령인·전화·주소는 저장하지 않는다.
+ */
+export type InvoiceGiftAllocation = {
+  id: string
+  requestId: string
+  itemId: string
+  styleId: string
+  styleNo: string
+  styleName: string
+  mallName: string
+  customerOrderNo: string
+  /** YYYY-MM-DD HH:MM 또는 빈 문자열 */
+  orderedAt: string
+  orderFingerprint: string
+  allocationKey: string
+  giftSlotIndex: number
+  sourceFileName: string
+  cancelledAt: string | null
+  createdAt: string
+}
 
 /**
  * 쇼핑몰 사은품 증정 요청 건.
- * 사방넷 주문일시가 행사 기간 안인 주문에만 접두어를 붙인다.
+ * 사방넷 주문일시가 행사 기간 안인 주문에만 사은품 행을 추가한다.
  */
-export type InvoicePrefixRequest = {
+export type InvoiceGiftRequest = {
   id: string
   brandId: string
   title: string
@@ -488,23 +625,44 @@ export type InvoicePrefixRequest = {
   startsAt: string
   /** YYYY-MM-DD HH:MM — 양끝 포함 */
   endsAt: string
-  countBasis: InvoicePrefixCountBasis
-  mergeBasis: InvoicePrefixMergeBasis
+  countBasis: InvoiceGiftCountBasis
+  mergeBasis: InvoiceGiftMergeBasis
+  /** true이면 선택한 한도 방식 안에서 주문일시 선착순으로 배정한다 */
+  usesFirstCome: boolean
+  firstComeLimitMode: InvoiceGiftLimitMode
+  /** shared_total일 때 실제 사은품 전체 합계 한도 */
+  firstComeTotalLimit: number | null
+  /** 요청 건의 활성 배정 원장 행 수 */
+  firstComeUsedCount: number
+  /** 취소 이력을 포함해 배정 원장이 한 번이라도 생겼는지 */
+  hasAllocationHistory: boolean
   isActive: boolean
   note: string
-  items: InvoicePrefixItem[]
+  items: InvoiceGiftItem[]
+  quotas: InvoiceGiftQuota[]
   createdAt: string
   updatedAt: string
 }
 
-export type InvoicePrefixRequestStatus =
+export type InvoiceGiftRequestStatus =
   | 'scheduled'
   | 'running'
   | 'ended'
   | 'paused'
 
-export const INVOICE_PREFIX_REQUEST_STATUS_LABEL: Record<
-  InvoicePrefixRequestStatus,
+/** @deprecated InvoiceGiftItem 사용 */
+export type InvoicePrefixItem = InvoiceGiftItem
+/** @deprecated InvoiceGiftCountBasis 사용 */
+export type InvoicePrefixCountBasis = InvoiceGiftCountBasis
+/** @deprecated InvoiceGiftMergeBasis 사용 */
+export type InvoicePrefixMergeBasis = InvoiceGiftMergeBasis
+/** @deprecated InvoiceGiftRequest 사용 */
+export type InvoicePrefixRequest = InvoiceGiftRequest
+/** @deprecated InvoiceGiftRequestStatus 사용 */
+export type InvoicePrefixRequestStatus = InvoiceGiftRequestStatus
+
+export const INVOICE_GIFT_REQUEST_STATUS_LABEL: Record<
+  InvoiceGiftRequestStatus,
   string
 > = {
   scheduled: '예정',
@@ -513,8 +671,12 @@ export const INVOICE_PREFIX_REQUEST_STATUS_LABEL: Record<
   paused: '중지',
 }
 
-export const INVOICE_PREFIX_COUNT_BASIS_LABEL: Record<
-  InvoicePrefixCountBasis,
+/** @deprecated INVOICE_GIFT_REQUEST_STATUS_LABEL 사용 */
+export const INVOICE_PREFIX_REQUEST_STATUS_LABEL =
+  INVOICE_GIFT_REQUEST_STATUS_LABEL
+
+export const INVOICE_GIFT_COUNT_BASIS_LABEL: Record<
+  InvoiceGiftCountBasis,
   string
 > = {
   per_order: '주문당 1개',
@@ -522,12 +684,66 @@ export const INVOICE_PREFIX_COUNT_BASIS_LABEL: Record<
   per_quantity: '대상 수량만큼',
 }
 
-export const INVOICE_PREFIX_MERGE_BASIS_LABEL: Record<
-  InvoicePrefixMergeBasis,
+/** @deprecated INVOICE_GIFT_COUNT_BASIS_LABEL 사용 */
+export const INVOICE_PREFIX_COUNT_BASIS_LABEL = INVOICE_GIFT_COUNT_BASIS_LABEL
+
+export const INVOICE_GIFT_MERGE_BASIS_LABEL: Record<
+  InvoiceGiftMergeBasis,
   string
 > = {
   per_order: '주문 수만큼',
-  per_shipment: '상자당 1개만',
+  per_shipment: '합포장당 1개만',
+}
+
+/** @deprecated INVOICE_GIFT_MERGE_BASIS_LABEL 사용 */
+export const INVOICE_PREFIX_MERGE_BASIS_LABEL = INVOICE_GIFT_MERGE_BASIS_LABEL
+
+/** 작업 지시 포장재 산정 단위 */
+export type InvoiceWorkInstructionCountBasis =
+  | 'per_shipment'
+  | 'per_order'
+  | 'per_row'
+  | 'per_quantity'
+
+export const INVOICE_WORK_INSTRUCTION_COUNT_BASIS_LABEL: Record<
+  InvoiceWorkInstructionCountBasis,
+  string
+> = {
+  per_shipment: '합포장당 1개',
+  per_order: '주문건당 1개',
+  per_row: '대상 행당 1개',
+  per_quantity: '내품수량만큼',
+}
+
+/** 작업 지시 대상 원본 품목명 */
+export type InvoiceWorkInstructionItem = {
+  id: string
+  instructionId: string
+  productName: string
+  normalizedProductName: string
+}
+
+/**
+ * 포장·특이사항 작업 지시.
+ * 원본 품목명 exact-match로 최종 품목명 앞에 표시 문구를 붙인다.
+ * 적용 기간(startsAt/endsAt)이 있으면 주문일시가 그 안일 때만 적용하고,
+ * 비어 있으면 중지 전까지 항상 적용한다.
+ * outgoingProducts는 Gift box처럼 지시가 적용될 때 나가는 포장재다.
+ */
+export type InvoiceWorkInstruction = {
+  id: string
+  brandId: string
+  title: string
+  labelText: string
+  isActive: boolean
+  note: string
+  startsAt: string | null
+  endsAt: string | null
+  countBasis: InvoiceWorkInstructionCountBasis
+  outgoingProducts: StyleRef[]
+  items: InvoiceWorkInstructionItem[]
+  createdAt: string
+  updatedAt: string
 }
 
 export const CODE_USAGE_STATUS_LABEL: Record<CodeUsageStatus, string> = {

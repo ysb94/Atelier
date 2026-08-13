@@ -38,7 +38,11 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 기획안(`product_drafts` + `draft_colors` + `draft_options`) | Supabase |
 | 코드·사용처(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_assignments`) | Supabase |
 | 송장 품목명 변환 기준(`invoice_name_rules`) | Supabase |
-| 송장 접두어 요청 건(`invoice_prefix_requests` + `invoice_prefix_items`) | Supabase |
+| 송장 품목명 exact 기준(`invoice_product_name_maps`) | Supabase |
+| 송장 내품명·출고구성 기준(`invoice_option_maps` + `invoice_option_map_components`) | Supabase |
+| 송장 사은품 증정 요청 건(`invoice_prefix_requests` + `invoice_prefix_items` + `invoice_prefix_item_products`, 앱 모델명 Gift) | Supabase |
+| 송장 사은품 선착순 한도·배정 원장(`invoice_prefix_requests` 한도 필드 + `invoice_gift_quotas` + `invoice_gift_allocations`) | Supabase |
+| 송장 작업 지시(`invoice_work_instructions` + `invoice_work_instruction_items`) | Supabase |
 
 - 상품·출시 기획·기획안·코드·사용처는 **0건으로 시작**한다. 자동 목업 시드를 넣지 않는다.
 - `brand_fields`만 품번·상품명 등 실행에 필요한 시스템 항목 구조를 브랜드별로 깐다.
@@ -126,17 +130,28 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 로직: `src/lib/codes/barcode-import.ts`, 화면: `BarcodeBulkUploadPanel.tsx`,
   `PendingBarcodePanel.tsx`, `BarcodeInfoBulkPanel.tsx`, `BarcodeFieldManager.tsx`.
 
+### 상품 연결 원칙 (M번호)
+
+- 송장·접두어·바코드처럼 데이터 시트 상품을 가리킬 때는 이름 문자열을 저장하지 않는다.
+  항상 `styles.id`(`style_id` / `target_style_id`)로 연결하고, 표시 이름은 읽을 때
+  `styles.name`을 조인한다. 사람에게 보이는 번호는 `styles.style_no`(브랜드 UI에서는
+  「M번호」).
+- UI에서는 상품명·M번호로 검색해 고르지만, 저장 값은 `StyleRef { styleId, styleNo, name }`의
+  `styleId`다. 데이터 시트에 없는 이름은 등록할 수 없다.
+- FK는 `(brand_id, style_id) REFERENCES styles(brand_id, id)` 복합키를 쓴다. 연결된
+  상품은 삭제가 막힌다(`product_code_components`와 동일).
+
 ### 송장 품목명 변환 기준
 
 - `invoice_name_rules`는 사방넷 원본 식별값을 CJ 송장용 표준 품목명으로 연결한다.
   업로드한 주문 원본과 수령인·전화번호·주소는 이 테이블이나 다른 서버 저장소에 넣지 않고
   브라우저 메모리에서만 처리한다.
 - 현재는 `자체품번코드` exact-match 한 단계만 실행한다. 사용자는 기준정보 화면에서
-  직접 등록하거나, 주문 변환 중 미등록 코드 목록에서 처리한다. 품목명·내품명 보조 조회와
-  엑셀 일괄 등록은 이 흐름을 소량 데이터로 검증한 뒤 추가한다.
-- `action = rename`이면 `target_name`에 `상품업체 상품명(업체 공식)`을 저장해 결과
-  품목명을 바꾼다. `action = exception`이면 `target_name`은 null이고 원본 품목명을
-  유지한 채 자체품번 단계 검토를 완료한다.
+  직접 등록하거나, 주문 변환 중 미등록 코드 목록에서 처리한다. 엑셀 일괄 등록도 같은
+  흐름이다.
+- `action = rename`이면 `target_style_id`에 데이터 시트 상품을 저장한다. 결과 품목명은
+  조인한 현재 `styles.name`을 쓴다. `target_name`은 표시용 캐시일 뿐 진짜 연결이 아니다.
+  `action = exception`이면 `target_style_id`/`target_name`은 null이고 원본 품목명을 유지한다.
 - 원본 문자열은 그대로 보존하고, 조회 키만 앞뒤·연속 공백과 영문 대소문자를 정규화한다.
   `(brand_id, match_type, normalized_source_value)`를 유일하게 만들어 같은 단계의 모순된
   결과가 저장되지 않게 한다.
@@ -147,47 +162,200 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260811080000_create_invoice_name_rules.sql`,
   `20260811080100_seed_invoice_name_rule_tests.sql`,
   `20260811083000_add_invoice_name_rule_actions.sql`,
-  `20260811090000_remove_invoice_sample_data.sql`.
+  `20260811090000_remove_invoice_sample_data.sql`,
+  `20260813100000_invoice_links_by_style.sql`.
 
-### 송장 접두어 요청 건
+### 송장 품목명 exact 기준
 
-- 접두어는 쇼핑몰 사은품 증정 요청서 단위로 들어온다. 그래서 요청 건(`invoice_prefix_requests`)과
-  상품별 접두어(`invoice_prefix_items`) 두 단계로 나눈다. 요청 건은 제목·쇼핑몰·행사
-  기간(분 단위)·사은품 산정 단위(`count_basis`)·합포장 처리(`merge_basis`)를 갖고,
-  항목은 사방넷 품목명·접두어·나가는 제품명 목록·랜덤 여부를 담는다.
+- `invoice_product_name_maps`는 사방넷 원본 품목명(+내품명 문맥)을 본품 `styles.id`로만
+  연결한다. 내품명 문자열을 출력하거나 구성품을 만들지 않는다.
+- 키는 두 가지다. 조합 키는
+  `(brand_id, normalized_mall_name, normalized_product_name, normalized_item_name_context)`,
+  기존 원장 키는 `lookup_key` 한 열이며 `(brand_id, normalized_lookup_key)`가 unique다.
+  `item_name_context`는 조회 키일 뿐 출력값이 아니다.
+- `lookup_key`는 기존 시트 수식이 만든 문자열 그대로다. 내품명·쇼핑몰 열이 없는
+  `변경전 → 변경후` 원장은 변경전 값을 `lookup_key`로 넣는다.
+- 품목명 원장 양식은 `조회 키` · `본품 M번호` 2열이다. M번호를 `styles.id`로
+  연결하고 공식 명칭은 조인한 현재 `styles.name`을 쓴다. 상품명이 바뀌어도 원장을
+  고치지 않는다. 예전 `변경전 / 변경후` 공식명 원장도 호환용으로 계속 읽는다.
+  양식에 `작성안내`와 `조회키만드는법` 시트를 함께 넣는다.
+- 쇼핑몰·내품명 열이 있는 원장이나 사례집은 조합 방식으로 읽는다. 한 파일에 `조회 키`를
+  채운 행과 비운 행이 섞여도 행마다 갈라 처리한다.
+- 조회 키와 본품은 1:1이다. 한 키가 두 `styles.id`를 가리키면 unique 인덱스가 막고,
+  가져오기에서는 충돌로 남긴다. 서로 다른 키가 같은 본품을 가리키는 것은 허용한다.
+- 후보 문자열은 `src/lib/invoice/product-name-patterns.ts`가 시트 수식과 같은 순서로
+  만든다. 괄호를 보지 않고 항상 첫 구분자에서만 자른다.
+  1. `품목명 + " " + 내품명 전체`
+  2. `품목명 + " " + 내품명 첫 / 앞`
+  3. `품목명 + " " + 내품명 첫 , 앞`
+  4. `품목명 + " " + "Color: 값"` (`Color:` 라벨을 키에 남긴다)
+  5. `품목명 + " " + 내품명 첫 : 앞`
+  6. `내품명 첫 / 앞` 단독
+  7. `내품명 첫 , 앞` 단독
+  8. `내품명 전체` 단독 — `Color:` 같은 원장 키 라벨도 보존한다
+  9. `옵션값` 단독 — 첫 `:` 뒤 값
+  10. `내품명 첫 / 뒤` 단독 — 쇼핑몰명에 `SSG`나 `쓱`이 있을 때만 만든다
+  11. 자체상품코드(보조 힌트, 수식에는 없다)
+- 2~5번 열은 구분자가 없으면 IFERROR로 품목명 단독이 된다. 그래서 `품목명` 단독은
+  구분자를 못 찾은 첫 열의 자리에서만 조회 키가 된다. 네 열이 모두 구분자를 찾으면
+  품목명 단독은 조회하지 않는다. 6~8번은 실패하면 빈 값이라 건너뛴다.
+- 매칭 순서는 조합 exact → 전쇼핑몰 조합 → 후보 순서대로 `lookup_key` → 후보 순서대로
+  `styles.name`이다. 왼쪽 후보가 먼저 맞으면 그 값이 정답이다. 후보가 하나여도 기준을
+  자동 저장하지 않는다.
+- 품목명을 포함하지 않은 내품명 단독 후보(6~10번)가 `lookup_key`와 exact 매칭되면
+  내품명을 본품 식별에 소비한 것으로 표시하고 내품명 단계에서 최종 값을 비운다.
+  원장 미일치·충돌 또는 `styles.name` 직접 후보만 맞은 경우에는 원문을 유지한다.
+- 공식명 후보가 `styles`에 없으면 `M번호 발급 필요`, 둘 이상이면 충돌, 고를 수 없으면
+  검토 필요로 남긴다.
+- RLS는 `app.can_read_brand` / `app.can_edit_brand`를 사용한다.
+- 마이그레이션: `20260813190000_invoice_product_name_maps.sql`,
+  `20260813200000_invoice_product_name_lookup_key.sql`.
+
+### 송장 내품명·출고구성 기준
+
+- `invoice_option_maps`는 내품명 단계에서만 사용한다. 품목명 원장을 이 테이블에 섞지
+  않는다. 주문 원본과 수령인 개인정보는 저장하지 않는다.
+- 구성은 `invoice_option_map_components.style_id`로만 연결한다. 역할은 `main`(본품 1개),
+  `included`(기본포함), `required`(필수옵션), `paid_add`(유료추가)다. 수량은 주문 1행당
+  구성 수이고, 출고 확인 파일에서는 내품수량과 곱한다.
+- `display_item_name`이 있을 때만 CJ 내품명을 바꾼다. 비우면 원문을 유지하며 `-`나
+  `포함:M번호...`로 덮지 않는다. 예외적으로 품목명 원장의 내품명 단독 조회 키가
+  exact 매칭된 행은 본품 식별에 소비된 내품명을 빈 값으로 확정한다.
+- unique는 `(brand_id, normalized_mall_name, normalized_product_name, normalized_item_name)`이다.
+  쇼핑몰명을 비우면 모든 쇼핑몰에 적용한다. 자체상품코드는 참고용이며 단독 정답이 아니다.
+- 매칭은 쇼핑몰+품목+내품 exact-match, 없으면 전쇼핑몰+품목+내품이다. 승인된 규칙이 없으면
+  원문 유지/검토 필요로 남긴다.
+- 같은 원본 주문 행은 CJ 13열에서도 한 줄이다. 품목명은 품목명 단계 결과, 내품명은 내품명
+  단계 결과를 마지막에만 합친다. 구성품을 별도 송장 행으로 만들지 않는다. M번호별
+  출고구성은 별도 XLSX다.
+- RLS는 `app.can_read_brand` / `app.can_edit_brand`를 사용한다.
+- 마이그레이션: `20260813180000_invoice_option_maps.sql`,
+  `20260813190000_invoice_product_name_maps.sql`,
+  `20260813200000_invoice_product_name_lookup_key.sql`.
+
+### 송장 사은품 증정 · 작업 지시
+
+사은품 증정과 작업 지시(예: 전체 선물포장)는 역할이 다르다. 물리 테이블
+`invoice_prefix_*`는 이번 단계에서 rename/drop 하지 않고, 앱 모델만
+`InvoiceGiftRequest`로 부른다.
+
+#### 사은품 증정 (`invoice_prefix_*`)
+
+- 요청 건(`invoice_prefix_requests`)과 대상 품목(`invoice_prefix_items`) 두 단계다.
+  요청 건은 제목·쇼핑몰·행사 기간(분 단위)·산정 단위(`count_basis`)·합포장
+  처리(`merge_basis`)를 갖고, 항목은 원본 품목명·랜덤 여부를 담는다.
+  `invoice_prefix_items.prefix`는 데이터 보존용으로 남기되 빈 값을 허용하며
+  deprecated다. 나가는 제품은 `invoice_prefix_item_products.style_id`만 사용한다.
+- 항목의 `product_name`은 사방넷 원본 품목명 완전 일치 키다. 데이터 시트 연결이 아니다.
 - 행사 기간은 `starts_at` / `ends_at`의 `timestamp`(시간대 없음)이다. 사방넷 주문일시가
   시간대 없는 한국 벽시계 문자열(`2026-08-08 20:54`)이라 `timestamptz`를 쓰면 UTC로
   밀릴 수 있다. 앱 표준은 `YYYY-MM-DD HH:MM`이고 양끝 포함으로 비교한다.
-- 자체품번코드 변환이 원본 품목명을 덮어쓰기 때문에 접두어 단계는 파일 확인 다음,
-  품목명 변환 앞에서 실행한다.
-- 이 단계는 접두어를 바로 붙이지 않는다. 행마다 붙일 접두어만 정해 두고, 모든 변환이
-  끝난 최종 품목명 앞에 `applyInvoicePrefix`로 결합한다.
-- 매칭은 쇼핑몰명 + 원본 품목명 완전 일치이고, 사방넷 주문일시가 요청 건의 행사 기간
-  안일 때만 적용한다. 나가는 제품(`outgoing_product_names`)은 데이터 시트 상품명에서
-  고르며, `is_random`이 켜져 있으면 2개 이상 중 랜덤 출고 대상으로 본다.
-- 사은품 개수는 요청 건의 `count_basis`로 센다. `per_order`는 고객주문번호당 1개,
-  `per_product`는 (주문, 품목명)당 1개, `per_quantity`는 내품수량 합이다.
-  `merge_basis`가 `per_shipment`이면 합포장 상자당 1개로 줄인다. 합포장 키는
-  받는분성명 + 전화번호(숫자만) + 주소다. 랜덤은 그날 파일 안에서 종류별 같은
-  수량으로 맞추고, 같은 상자 안에서는 가능한 한 겹치지 않게 고른다. 사은품은
-  원 주문 행을 복사한 별도 행으로 나가며 접두어는 원 주문 행에만 붙는다.
-- 원문은 보존하고 비교 키만 앞뒤·연속 공백과 영문 대소문자를 정규화한다. 유일 제약은
-  요청 건 안에서 `(request_id, normalized_product_name)`이라 같은 상품이 다른 행사에서
-  다른 접두어를 받을 수 있다.
-- 기간이 겹치는 요청 건이 둘 이상이면 자동으로 고르지 않고 오늘 작업의 접두어 단계에서
-  충돌로 보여주고 사용자가 고른 요청 건을 쓴다. 규칙이 없는 조합은 그대로 통과시킨다.
-- 자식 테이블은 `brand_id`를 함께 두고 `(brand_id, request_id)` 복합 FK로 브랜드 경계를
-  강제한다. RLS는 `app.can_read_brand` / `app.can_edit_brand`를 쓰고 샘플 데이터는 두지 않는다.
-- 로직: `src/lib/invoice/prefix-transform.ts`, 사은품 배정:
-  `src/lib/invoice/gift-assign.ts`, 붙여넣기 파서:
-  `src/lib/invoice/prefix-paste.ts`, 저장소: `src/lib/supabase/invoice-prefix-requests.ts`,
-  화면: `InvoicePrefixRequestPanel.tsx`, `InvoicePrefixRequestForm.tsx`,
-  `InvoicePrefixStepPanel.tsx`.
+- 매칭은 쇼핑몰명 + 원본 품목명 완전 일치이고, 주문일시가 행사 기간 안일 때만 적용한다.
+  원 주문 품목명에는 접두어를 붙이지 않는다.
+- 사은품 개수는 `count_basis`로 센다. `per_order`는 같은 합포장에서 주문일시가 같은
+  행을 한 주문건으로 보고 1개, `per_product`는 (주문건, 품목명)당 1개,
+  `per_quantity`는 내품수량 합이다. `merge_basis`가 `per_shipment`이면 합포장당
+  1개로 줄인다. 합포장 키는 받는분성명 + 전화번호(숫자만) + 주소 + 쇼핑몰명이다.
+- 배정 결과는 합포장마다 `사은품(1) : 현재 styles.name`부터 번호를 매긴 별도 행이다.
+  수량 1, 자체품번코드 빈 값, 배송·주문 필드는 근거 원 주문 행에서 복사한다.
+  품절 제외 키는 `style_id`다. M번호 상품명을 바꾸면 다음 배정부터 새 공식명이 반영된다.
+- 기간이 겹치는 요청 건이 둘 이상이면 오늘 작업의 **사은품 추가** 단계에서 충돌로
+  보여주고 사용자가 고른 요청 건을 쓴다.
+
+#### 사은품 선착순 원장
+
+- `invoice_prefix_requests.uses_first_come`이 켜진 요청만 원장을 쓴다.
+- 한도 방식은 요청별 `first_come_limit_mode`로 고른다.
+  - `per_style`: `invoice_gift_quotas`의
+    `(brand_id, request_id, style_id)`별 행사 배정수량을 쓴다. 같은 M번호가 여러
+    대상 품목에 쓰여도 요청 안에서 한 quota를 공유한다.
+  - `shared_total`: `first_come_total_limit`을 쓰며, 선택한 모든 M번호에서 실제로
+    나가는 사은품 수의 합계가 이 수량에 도달하면 종료한다. 예를 들어 여러 종류의
+    사은품을 섞어도 전체 100개가 확정되면 끝난다.
+- `invoice_gift_allocations`는 실제 사은품 1개당 1행이다. 사용량·잔여는 활성
+  배정 합계로 계산하며 별도 가변 카운터를 두지 않는다.
+- 주문 식별은 쇼핑몰명 + 고객주문번호 + 주문일시 + 멱등 지문(`order_fingerprint`,
+  `allocation_key`)만 저장한다. 수령인·전화번호·주소 등 PII는 원장에 넣지 않는다.
+  주문번호가 없으면 브라우저에서 만든 비가역 익명 지문을 쓴다.
+  `allocation_key`는 fingerprint·item·style·slot을 US(`0x1f`)로 이은 문자열이다
+  (Postgres text에 null byte를 넣을 수 없다).
+- 두 한도 방식 모두 카운트 단위는 **실제 사은품 1개**다. 고정 세트는 M번호별
+  잔여가 모두 있거나 전체 합계 잔여가 세트 크기 이상일 때만 원자 배정한다.
+  랜덤은 M번호별 모드에서는 잔여가 있는 M번호 중에서, 전체 합계 모드에서는 선택된
+  M번호 중에서 기존 행사 배정 수가 고르게 되도록 고른다. 이미 확정된 M번호는
+  재추첨하지 않는다.
+- 미리보기는 DB를 바꾸지 않는다. 사은품 행/최종 XLSX 다운로드 직전에
+  `confirm_invoice_gift_allocations` RPC로 원자 확정한다. 동일 파일 재실행은
+  멱등키로 재사용하며 중복 차감하지 않는다. 취소된 주문은 자동 재배정하지 않는다.
+- 주문 단위 해제는 `cancel_invoice_gift_allocations`다. 배정 이력이 있는 요청은
+  삭제·구조 변경을 막고, 제목·메모·활성·한도 증가만 허용한다.
+- 재고·예약발송 연결 원칙은 [`INVENTORY.md`](./INVENTORY.md)를 본다. 향후
+  `stock_reservations`가 allocation을 참조할 수 있게 경계를 둔다.
+
+#### 작업 지시 (`invoice_work_instructions`)
+
+- 지시(`invoice_work_instructions`)와 대상 원본 품목명
+  (`invoice_work_instruction_items`)으로 나눈다. 쇼핑몰 조건은 없다.
+  적용 기간(`starts_at` / `ends_at`, `timestamp` 시간대 없음)은 선택이다.
+  둘 다 null이면 중지 전까지 항상 적용하고, 있으면 사은품과 같이 주문일시가
+  양끝 포함 기간 안일 때만 적용한다.
+- 활성 지시만, 원본 품목명 exact-match로 모든 쇼핑몰에 적용한다. 같은 원본
+  품목명은 한 지시 안에서만 unique이고, 기간이 겹치지 않으면 여러 지시에 둘 수
+  있다. 기간 있는 지시와 기간 없는 지시가 겹치면 기간 있는 쪽을 쓰고, 같은
+  종류의 지시가 둘 이상 맞으면 오늘 작업에서 충돌로 보여 붙이지 않는다.
+- 표시 문구는 자체품번 변환이 끝난 최종 공식명 앞에 붙인다. 사은품 행에는 적용하지
+  않는다. 중지(`is_active = false`)한 지시는 적용하지 않는다.
+- 나가는 포장재는 `invoice_work_instruction_products.style_id`로 연결한다.
+  예: Gift box L(`styles`). `count_basis`는 기본 `per_shipment`(합포장당 1개)이고
+  `per_order` / `per_row` / `per_quantity`도 있다. 오늘 작업에서 적용된 행만 집계한다.
+  송장에 별도 행을 만들지 않으며, 실재고 테이블은 아직 없다. 이후
+  `stock_reservations`가 이 집계 수량을 예약으로 받는다.
+
+#### 오늘 작업 최종 행 순서
+
+```
+파일 올리기 → 파일 확인 → 사은품 추가 → 작업 지시 → 품목명 변환 → 내품명 변환 → 최종 행
+```
+
+1. 원본 품목명으로 사은품 적격·배정과 작업 지시 매칭을 확정한다.
+   선착순이면 기존 원장을 재사용하고 잔여 한도 안에서만 이번 예정을 계산한다.
+2. 품목명 단계에서만 원본 품목명을 본품 공식명으로 바꾼다. 내품명은 글자 단위로
+   통과한다. 미등록 조합은 품목명 검토 목록에만 나타난다.
+3. 내품명 단계는 확정된 본품과 원본 내품명으로 표시명·출고구성을 계산한다.
+   승인된 규칙이 없으면 원문을 유지한다. 품목명 규칙만으로 내품명을 바꾸지 않는다.
+   사은품 행(`kind = gift`)은 미변환 목록에서 제외한다.
+4. 다운로드 직전에 선착순 신규 배정을 원자 확정한 뒤, 주문 행의 최종 품목명 앞에
+   작업 지시 문구를 붙이고 그 행 바로 뒤에 배정된 사은품 행을 순서대로 삽입한다.
+   CJ 13열과 M번호 출고구성 XLSX를 따로 내려받는다. 한 단계의 실패가 다른 열을
+   되돌리거나 비우지 않는다.
+
+- 로직: `src/lib/invoice/prefix-transform.ts`, `gift-assign.ts`,
+  `gift-confirm.ts`, `work-instruction-transform.ts`, `product-name-patterns.ts`,
+  `product-name-transform.ts`, `item-name-transform.ts`, `option-transform.ts`,
+  `option-ledger-import.ts`, `invoice-output.ts`, `prefix-paste.ts`.
+  저장소: `invoice-prefix-requests.ts`, `invoice-gift-allocations.ts`,
+  `invoice-work-instructions.ts`, `invoice-product-name-maps.ts`,
+  `invoice-option-maps.ts`.
+  화면: `InvoicePrefixRequestPanel/Form`, `InvoiceWorkInstructionPanel/Form`,
+  `InvoicePrefixStepPanel`, `InvoiceWorkInstructionStepPanel`,
+  `InvoiceOptionMapRulesPanel`, `InvoiceProductNameTransformPanel`,
+  `InvoiceItemNameTransformPanel`, `InvoiceOutputStepPanel`.
 - 마이그레이션: `20260812060000_create_invoice_prefix_rules.sql`,
   `20260812070000_restructure_invoice_prefix_requests.sql`,
   `20260812080000_invoice_prefix_request_period_to_minutes.sql`,
   `20260812090000_invoice_prefix_item_outgoing_products.sql`,
-  `20260812100000_invoice_prefix_request_count_basis.sql`.
+  `20260812100000_invoice_prefix_request_count_basis.sql`,
+  `20260813100000_invoice_links_by_style.sql`,
+  `20260813110000_work_instructions_and_gift_prefix_optional.sql`,
+  `20260813130000_gift_first_come_allocations.sql`,
+  `20260813140000_gift_style_fk_indexes.sql`,
+  `20260813150000_gift_shared_total_limit.sql`,
+  `20260813160000_work_instruction_period.sql`,
+  `20260813170000_work_instruction_outgoing_products.sql`,
+  `20260813180000_invoice_option_maps.sql`,
+  `20260813190000_invoice_product_name_maps.sql`,
+  `20260813200000_invoice_product_name_lookup_key.sql`.
+- 재고 원칙: [`INVENTORY.md`](./INVENTORY.md).
 
 ### 수천 건 적재
 

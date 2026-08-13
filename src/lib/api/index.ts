@@ -11,7 +11,12 @@ import type {
   CodeUsageTarget,
   CodeUsageTargetInput,
   InvoiceNameRule,
+  InvoiceOptionMap,
+  InvoiceProductNameMap,
+  InvoiceGiftAllocation,
+  InvoiceGiftRequest,
   InvoicePrefixRequest,
+  InvoiceWorkInstruction,
   ProductCode,
   ProductCodeInput,
   ProductCodeKind,
@@ -28,8 +33,12 @@ import * as brandFieldStore from '@/lib/supabase/brand-fields'
 import * as barcodeFieldStore from '@/lib/supabase/barcode-fields'
 import * as codeUsageTargetStore from '@/lib/supabase/code-usage-targets'
 import * as codeUsageAssignmentStore from '@/lib/supabase/code-usage-assignments'
+import * as invoiceGiftAllocationStore from '@/lib/supabase/invoice-gift-allocations'
 import * as invoiceNameRuleStore from '@/lib/supabase/invoice-name-rules'
+import * as invoiceOptionMapStore from '@/lib/supabase/invoice-option-maps'
+import * as invoiceProductNameMapStore from '@/lib/supabase/invoice-product-name-maps'
 import * as invoicePrefixRequestStore from '@/lib/supabase/invoice-prefix-requests'
+import * as invoiceWorkInstructionStore from '@/lib/supabase/invoice-work-instructions'
 import * as productCodeStore from '@/lib/supabase/product-codes'
 import * as productDraftStore from '@/lib/supabase/product-drafts'
 import * as seasonStore from '@/lib/supabase/seasons'
@@ -47,11 +56,29 @@ export type {
   InvoiceCodeRuleInput,
   InvoiceNameRuleUpdateInput,
 } from '@/lib/supabase/invoice-name-rules'
+export { InvoiceOptionMapStoreError } from '@/lib/supabase/invoice-option-maps'
+export type {
+  InvoiceOptionComponentInput,
+  InvoiceOptionMapInput,
+} from '@/lib/supabase/invoice-option-maps'
+export { InvoiceProductNameMapStoreError } from '@/lib/supabase/invoice-product-name-maps'
+export type { InvoiceProductNameMapInput } from '@/lib/supabase/invoice-product-name-maps'
 export { InvoicePrefixRequestStoreError } from '@/lib/supabase/invoice-prefix-requests'
 export type {
+  InvoiceGiftQuotaInput,
   InvoicePrefixItemInput,
   InvoicePrefixRequestInput,
 } from '@/lib/supabase/invoice-prefix-requests'
+export { InvoiceGiftAllocationStoreError } from '@/lib/supabase/invoice-gift-allocations'
+export type {
+  ConfirmGiftAllocationsResult,
+  GiftAllocationCandidateInput,
+} from '@/lib/supabase/invoice-gift-allocations'
+export { InvoiceWorkInstructionStoreError } from '@/lib/supabase/invoice-work-instructions'
+export type {
+  InvoiceWorkInstructionInput,
+  InvoiceWorkInstructionItemInput,
+} from '@/lib/supabase/invoice-work-instructions'
 export { ProductCodeStoreError } from '@/lib/supabase/product-codes'
 export {
   ProductDraftStoreError,
@@ -213,19 +240,117 @@ export async function updateInvoiceNameRule(
   return invoiceNameRuleStore.updateInvoiceNameRule(id, input)
 }
 
-/** 접두어는 요청 건 단위로 관리하고 쇼핑몰명 + 원본 품목명 완전 일치로 찾는다. */
-export async function getInvoicePrefixRequests(
+export async function getInvoiceOptionMaps(
   brandId: string,
-): Promise<InvoicePrefixRequest[]> {
+  activeOnly = false,
+): Promise<InvoiceOptionMap[]> {
+  await delay()
+  return invoiceOptionMapStore.listInvoiceOptionMaps(brandId, { activeOnly })
+}
+
+export async function saveInvoiceOptionMap(
+  brandId: string,
+  input: invoiceOptionMapStore.InvoiceOptionMapInput,
+  mapId?: string,
+): Promise<InvoiceOptionMap> {
+  await delay()
+  return invoiceOptionMapStore.saveInvoiceOptionMap(brandId, input, mapId)
+}
+
+export async function setInvoiceOptionMapActive(
+  id: string,
+  isActive: boolean,
+): Promise<void> {
+  await delay()
+  return invoiceOptionMapStore.setInvoiceOptionMapActive(id, isActive)
+}
+
+export async function deleteInvoiceOptionMap(id: string): Promise<void> {
+  await delay()
+  return invoiceOptionMapStore.deleteInvoiceOptionMap(id)
+}
+
+export async function applyBulkInvoiceOptionMaps(
+  brandId: string,
+  rows: invoiceOptionMapStore.InvoiceOptionMapInput[],
+): Promise<{
+  saved: number
+  failures: { index: number; message: string }[]
+}> {
+  await delay(200)
+  return invoiceOptionMapStore.applyBulkInvoiceOptionMaps(brandId, rows)
+}
+
+export async function getInvoiceProductNameMaps(
+  brandId: string,
+  activeOnly = false,
+): Promise<InvoiceProductNameMap[]> {
+  await delay()
+  return invoiceProductNameMapStore.listInvoiceProductNameMaps(brandId, {
+    activeOnly,
+  })
+}
+
+export async function saveInvoiceProductNameMap(
+  brandId: string,
+  input: invoiceProductNameMapStore.InvoiceProductNameMapInput,
+  mapId?: string,
+): Promise<InvoiceProductNameMap> {
+  await delay()
+  return invoiceProductNameMapStore.saveInvoiceProductNameMap(
+    brandId,
+    input,
+    mapId,
+  )
+}
+
+export async function setInvoiceProductNameMapActive(
+  id: string,
+  isActive: boolean,
+): Promise<void> {
+  await delay()
+  return invoiceProductNameMapStore.setInvoiceProductNameMapActive(id, isActive)
+}
+
+export async function deleteInvoiceProductNameMap(id: string): Promise<void> {
+  await delay()
+  return invoiceProductNameMapStore.deleteInvoiceProductNameMap(id)
+}
+
+export async function applyBulkInvoiceProductNameMaps(
+  brandId: string,
+  rows: invoiceProductNameMapStore.InvoiceProductNameMapInput[],
+): Promise<{
+  saved: number
+  failures: { index: number; message: string }[]
+}> {
+  await delay(200)
+  return invoiceProductNameMapStore.applyBulkInvoiceProductNameMaps(
+    brandId,
+    rows,
+  )
+}
+
+/** 사은품 증정 요청 건. 쇼핑몰명 + 원본 품목명 + 행사 기간으로 찾는다. */
+export async function getInvoiceGiftRequests(
+  brandId: string,
+): Promise<InvoiceGiftRequest[]> {
   await delay()
   return invoicePrefixRequestStore.listInvoicePrefixRequests(brandId)
 }
 
-export async function saveInvoicePrefixRequest(
+/** @deprecated getInvoiceGiftRequests 사용 */
+export async function getInvoicePrefixRequests(
+  brandId: string,
+): Promise<InvoicePrefixRequest[]> {
+  return getInvoiceGiftRequests(brandId)
+}
+
+export async function saveInvoiceGiftRequest(
   brandId: string,
   input: invoicePrefixRequestStore.InvoicePrefixRequestInput,
   requestId?: string,
-): Promise<InvoicePrefixRequest> {
+): Promise<InvoiceGiftRequest> {
   await delay()
   return invoicePrefixRequestStore.saveInvoicePrefixRequest(
     brandId,
@@ -234,7 +359,16 @@ export async function saveInvoicePrefixRequest(
   )
 }
 
-export async function setInvoicePrefixRequestActive(
+/** @deprecated saveInvoiceGiftRequest 사용 */
+export async function saveInvoicePrefixRequest(
+  brandId: string,
+  input: invoicePrefixRequestStore.InvoicePrefixRequestInput,
+  requestId?: string,
+): Promise<InvoicePrefixRequest> {
+  return saveInvoiceGiftRequest(brandId, input, requestId)
+}
+
+export async function setInvoiceGiftRequestActive(
   id: string,
   isActive: boolean,
 ): Promise<void> {
@@ -242,9 +376,92 @@ export async function setInvoicePrefixRequestActive(
   return invoicePrefixRequestStore.setInvoicePrefixRequestActive(id, isActive)
 }
 
-export async function deleteInvoicePrefixRequest(id: string): Promise<void> {
+/** @deprecated setInvoiceGiftRequestActive 사용 */
+export async function setInvoicePrefixRequestActive(
+  id: string,
+  isActive: boolean,
+): Promise<void> {
+  return setInvoiceGiftRequestActive(id, isActive)
+}
+
+export async function deleteInvoiceGiftRequest(id: string): Promise<void> {
   await delay()
   return invoicePrefixRequestStore.deleteInvoicePrefixRequest(id)
+}
+
+/** @deprecated deleteInvoiceGiftRequest 사용 */
+export async function deleteInvoicePrefixRequest(id: string): Promise<void> {
+  return deleteInvoiceGiftRequest(id)
+}
+
+/** 사은품 배정 원장. 활성 배정만 기본 조회한다. */
+export async function getInvoiceGiftAllocations(
+  brandId: string,
+  options?: { requestId?: string; activeOnly?: boolean },
+): Promise<InvoiceGiftAllocation[]> {
+  await delay()
+  return invoiceGiftAllocationStore.listInvoiceGiftAllocations(brandId, options)
+}
+
+export async function confirmInvoiceGiftAllocations(
+  brandId: string,
+  candidates: invoiceGiftAllocationStore.GiftAllocationCandidateInput[],
+): Promise<invoiceGiftAllocationStore.ConfirmGiftAllocationsResult> {
+  await delay()
+  return invoiceGiftAllocationStore.confirmInvoiceGiftAllocations(
+    brandId,
+    candidates,
+  )
+}
+
+export async function cancelInvoiceGiftAllocations(
+  brandId: string,
+  requestId: string,
+  orderFingerprint: string,
+): Promise<number> {
+  await delay()
+  return invoiceGiftAllocationStore.cancelInvoiceGiftAllocations(
+    brandId,
+    requestId,
+    orderFingerprint,
+  )
+}
+
+/** 작업 지시. 원본 품목명 exact-match로 최종 품목명 앞에 표시 문구를 붙인다. */
+export async function getInvoiceWorkInstructions(
+  brandId: string,
+): Promise<InvoiceWorkInstruction[]> {
+  await delay()
+  return invoiceWorkInstructionStore.listInvoiceWorkInstructions(brandId)
+}
+
+export async function saveInvoiceWorkInstruction(
+  brandId: string,
+  input: invoiceWorkInstructionStore.InvoiceWorkInstructionInput,
+  instructionId?: string,
+): Promise<InvoiceWorkInstruction> {
+  await delay()
+  return invoiceWorkInstructionStore.saveInvoiceWorkInstruction(
+    brandId,
+    input,
+    instructionId,
+  )
+}
+
+export async function setInvoiceWorkInstructionActive(
+  id: string,
+  isActive: boolean,
+): Promise<void> {
+  await delay()
+  return invoiceWorkInstructionStore.setInvoiceWorkInstructionActive(
+    id,
+    isActive,
+  )
+}
+
+export async function deleteInvoiceWorkInstruction(id: string): Promise<void> {
+  await delay()
+  return invoiceWorkInstructionStore.deleteInvoiceWorkInstruction(id)
 }
 
 export type BulkInvoiceRuleRow = {
@@ -609,14 +826,38 @@ export async function getStylesFiltered(
   return styleStore.listStylesFiltered(brandId, filter)
 }
 
-/** 송장 공식명 입력용. 데이터 시트에 등록된 상품명만 검색한다. */
-export async function searchStyleNames(
+/** 송장·접두어 상품 선택용. M번호·상품명으로 검색하고 styleId를 돌려준다. */
+export async function searchStyleRefs(
   brandId: string,
   search: string,
-  limit = 3,
-): Promise<string[]> {
+  limit = 8,
+) {
   await delay()
-  return styleStore.searchStyleNames(brandId, search, limit)
+  return styleStore.searchStyleRefs(brandId, search, limit)
+}
+
+export async function listStyleRefsByStyleNos(
+  brandId: string,
+  styleNos: string[],
+) {
+  await delay()
+  return styleStore.listStyleRefsByStyleNos(brandId, styleNos)
+}
+
+export async function listStyleRefsByNames(
+  brandId: string,
+  names: string[],
+) {
+  await delay()
+  return styleStore.listStyleRefsByNames(brandId, names)
+}
+
+export async function listStyleRefsForLookup(
+  brandId: string,
+  options: { styleNos?: string[]; names?: string[] },
+) {
+  await delay()
+  return styleStore.listStyleRefsForLookup(brandId, options)
 }
 
 export async function getStyleById(

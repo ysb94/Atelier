@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import {
@@ -8,8 +8,8 @@ import {
   Boxes,
   CalendarClock,
   CheckCircle2,
-  ChevronRight,
   Clock3,
+  Download,
   FileSpreadsheet,
   Gift,
   History,
@@ -33,24 +33,63 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { getInvoiceNameRules, getInvoicePrefixRequests } from '@/lib/api'
+import {
+  getInvoiceGiftAllocations,
+  getInvoiceGiftRequests,
+  getInvoiceNameRules,
+  getInvoiceOptionMaps,
+  getInvoiceProductNameMaps,
+  getInvoiceWorkInstructions,
+  listStyleRefsForLookup,
+} from '@/lib/api'
 import { parseFile } from '@/lib/import/parse'
-import { transformInvoiceNamesByCode } from '@/lib/invoice/name-transform'
-import { createGiftSeed } from '@/lib/invoice/gift-assign'
+import {
+  createGiftSeed,
+  planGiftAssignments,
+  type GiftAssignmentPlan,
+} from '@/lib/invoice/gift-assign'
+import {
+  downloadInvoiceStepSnapshot,
+  type InvoiceStepSnapshotStage,
+} from '@/lib/invoice/invoice-output'
+import { transformInvoiceItemNames, type InvoiceItemNameTransformation } from '@/lib/invoice/item-name-transform'
+import {
+  transformInvoiceNamesByCode,
+  type InvoiceNameTransformation,
+} from '@/lib/invoice/name-transform'
+import { collectProductNameCandidateTexts } from '@/lib/invoice/product-name-patterns'
+import {
+  catalogFromStyles,
+  transformInvoiceProductNames,
+  type InvoiceProductNameTransformation,
+} from '@/lib/invoice/product-name-transform'
+import { planInvoicePrefixes } from '@/lib/invoice/prefix-transform'
 import {
   inspectSabangnetSheets,
   type SabangnetInspection,
+  type SabangnetOrderRow,
 } from '@/lib/invoice/sabangnet'
-import type { InvoiceNameRule, InvoicePrefixRequest } from '@/lib/types'
+import {
+  planWorkInstructions,
+  type WorkInstructionPlan,
+} from '@/lib/invoice/work-instruction-transform'
+import type {
+  InvoiceGiftRequest,
+  InvoiceNameRule,
+  InvoiceOptionMap,
+  InvoiceProductNameMap,
+  InvoiceWorkInstruction,
+} from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
-import { InvoiceCodeRuleBulkPanel } from './InvoiceCodeRuleBulkPanel'
-import { InvoiceCodeRuleForm } from './InvoiceCodeRuleForm'
-import { InvoiceCodeRuleTable } from './InvoiceCodeRuleTable'
-import { InvoiceNameTransformTable } from './InvoiceNameTransformTable'
+import { InvoiceItemNameTransformPanel } from './InvoiceItemNameTransformPanel'
+import { InvoiceOptionMapRulesPanel } from './InvoiceOptionMapRulesPanel'
+import { InvoiceOutputStepPanel } from './InvoiceOutputStepPanel'
 import { InvoicePrefixRequestPanel } from './InvoicePrefixRequestPanel'
 import { InvoicePrefixStepPanel } from './InvoicePrefixStepPanel'
+import { InvoiceProductNameTransformPanel } from './InvoiceProductNameTransformPanel'
+import { InvoiceWorkInstructionPanel } from './InvoiceWorkInstructionPanel'
+import { InvoiceWorkInstructionStepPanel } from './InvoiceWorkInstructionStepPanel'
 import { SabangnetOrderTable } from './SabangnetOrderTable'
-import { UnresolvedInvoiceCodePanel } from './UnresolvedInvoiceCodePanel'
 
 const MAX_FILE_BYTES = 50 * 1024 * 1024
 
@@ -105,7 +144,7 @@ function InvoiceViewTabs({
   onChange: (view: InvoiceView) => void
 }) {
   return (
-    <div className="mb-6 flex items-stretch gap-0.5 overflow-x-auto border-b border-border px-1">
+    <div className="mb-6 flex items-stretch gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border px-1 pb-px">
       {INVOICE_VIEWS.map((item) => {
         const Icon = item.icon
         const active = item.value === activeView
@@ -365,15 +404,21 @@ const RULE_VIEWS: {
   icon: typeof Tags
 }[] = [
   {
+    value: 'gifts',
+    label: '사은품 증정',
+    description: '행사 기간·대상 품목·나가는 M번호',
+    icon: Gift,
+  },
+  {
     value: 'prefixes',
-    label: '접두어',
-    description: '사은품 증정 요청 건별 품목명 앞 표시',
+    label: '작업 지시',
+    description: '표시 문구 · 선택 적용 기간',
     icon: Tag,
   },
   {
     value: 'aliases',
-    label: '이름변경',
-    description: '자체품번코드와 업체 공식명 연결',
+    label: '품목명·내품명 변환',
+    description: '품목명과 내품명을 따로 연결',
     icon: Tags,
   },
   {
@@ -381,12 +426,6 @@ const RULE_VIEWS: {
     label: '출고상태',
     description: '예발·재고부족 설정',
     icon: CalendarClock,
-  },
-  {
-    value: 'gifts',
-    label: '사은품',
-    description: '증정 조건과 송장 표시',
-    icon: Gift,
   },
   {
     value: 'packing',
@@ -400,29 +439,29 @@ const RULE_TABLES: Record<
   RuleView,
   { title: string; description: string; columns: string[] }
 > = {
-  prefixes: {
-    title: '접두어 요청 건',
+  gifts: {
+    title: '사은품 증정',
     description:
-      '사은품 증정 요청서를 제목·쇼핑몰·행사 기간·산정 단위로 등록하고, 상품명마다 붙일 접두어를 1:1로 관리합니다.',
-    columns: ['제목', '쇼핑몰명', '기간', '상품 수', '상태'],
+      '쇼핑몰·행사 기간·산정 단위·합포장 방식과 대상 원본 품목명, 나가는 제품(M번호)을 등록합니다. 오늘 작업에서 합포장별 사은품 행을 만듭니다.',
+    columns: ['제목', '쇼핑몰명', '기간', '대상 수', '상태'],
+  },
+  prefixes: {
+    title: '작업 지시',
+    description:
+      '원본 품목명과 완전 일치할 때 최종 공식명 앞에 붙일 표시 문구를 관리합니다. 적용 기간은 선택입니다.',
+    columns: ['지시명', '표시 문구', '기간', '대상 수', '상태'],
   },
   aliases: {
-    title: '자체품번코드 기준',
+    title: '품목명·내품명 변환',
     description:
-      '자체품번코드에 상품업체 공식 상품명을 연결하거나 원본명을 유지할 예외 코드로 등록합니다.',
-    columns: ['자체품번코드', '처리', '공식 상품명', '메모', '상태'],
+      '품목명 기준과 내품명 기준을 따로 관리합니다. 한 단계의 저장이 다른 열을 바꾸지 않습니다.',
+    columns: ['원본 품목명', '내품명', '본품', '구성', '상태'],
   },
   holds: {
     title: '출고 보류 규칙',
     description:
       '상품 또는 옵션별로 예발일과 재고부족 상태를 관리하고 실제 주문은 출고 대기로 보냅니다.',
     columns: ['상품·옵션', '보류 사유', '시작일', '출고 가능일', '상태'],
-  },
-  gifts: {
-    title: '사은품 지급 규칙',
-    description:
-      '쇼핑몰·기간·구매상품·수량 조건을 만족할 때 송장 표시와 사은품 행을 자동 생성합니다.',
-    columns: ['조건 이름', '적용 조건', '사은품', '송장 표시', '상태'],
   },
   packing: {
     title: '포장·위치 규칙',
@@ -438,21 +477,38 @@ function RulesPanel({
   nameRules,
   nameRulesLoading,
   nameRulesError,
-  prefixRequests,
-  prefixRequestsLoading,
-  prefixRequestsError,
+  optionMaps,
+  optionMapsLoading,
+  optionMapsError,
+  productNameMaps,
+  productNameMapsLoading,
+  productNameMapsError,
+  giftRequests,
+  giftRequestsLoading,
+  giftRequestsError,
+  workInstructions,
+  workInstructionsLoading,
+  workInstructionsError,
 }: {
   brandId: string
   brandName: string
   nameRules: InvoiceNameRule[]
   nameRulesLoading: boolean
   nameRulesError: string | null
-  prefixRequests: InvoicePrefixRequest[]
-  prefixRequestsLoading: boolean
-  prefixRequestsError: string | null
+  optionMaps: InvoiceOptionMap[]
+  optionMapsLoading: boolean
+  optionMapsError: string | null
+  productNameMaps: InvoiceProductNameMap[]
+  productNameMapsLoading: boolean
+  productNameMapsError: string | null
+  giftRequests: InvoiceGiftRequest[]
+  giftRequestsLoading: boolean
+  giftRequestsError: string | null
+  workInstructions: InvoiceWorkInstruction[]
+  workInstructionsLoading: boolean
+  workInstructionsError: string | null
 }) {
-  const [activeRule, setActiveRule] = useState<RuleView>('aliases')
-  const [registerMode, setRegisterMode] = useState<'single' | 'bulk'>('single')
+  const [activeRule, setActiveRule] = useState<RuleView>('gifts')
   const table = RULE_TABLES[activeRule]
 
   return (
@@ -469,7 +525,7 @@ function RulesPanel({
           <Badge variant="muted">관리자용 · 자체품번 DB 연결</Badge>
         </CardHeader>
         <CardContent>
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             {RULE_VIEWS.map((item) => {
               const Icon = item.icon
               const active = item.value === activeRule
@@ -559,70 +615,34 @@ function RulesPanel({
         </div>
       ) : null}
 
-      {activeRule === 'prefixes' ? (
+      {activeRule === 'gifts' ? (
         <InvoicePrefixRequestPanel
           brandId={brandId}
-          requests={prefixRequests}
-          loading={prefixRequestsLoading}
-          error={prefixRequestsError}
+          requests={giftRequests}
+          loading={giftRequestsLoading}
+          error={giftRequestsError}
+        />
+      ) : activeRule === 'prefixes' ? (
+        <InvoiceWorkInstructionPanel
+          brandId={brandId}
+          instructions={workInstructions}
+          loading={workInstructionsLoading}
+          error={workInstructionsError}
         />
       ) : activeRule === 'aliases' ? (
-        <>
-          <InvoiceCodeRuleTable
-            brandId={brandId}
-            rules={nameRules}
-            loading={nameRulesLoading}
-            error={nameRulesError}
-          />
-          <Card className="shadow-none">
-            <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <CardTitle>자체품번코드 등록</CardTitle>
-                <CardDescription className="mt-1">
-                  저장한 값은 이후 모든 송장작업에 다시 사용됩니다.
-                </CardDescription>
-              </div>
-              <div className="flex gap-1 rounded-lg border border-border bg-muted/30 p-1">
-                <button
-                  type="button"
-                  aria-pressed={registerMode === 'single'}
-                  onClick={() => setRegisterMode('single')}
-                  className={cn(
-                    'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
-                    registerMode === 'single'
-                      ? 'bg-card shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  직접 입력
-                </button>
-                <button
-                  type="button"
-                  aria-pressed={registerMode === 'bulk'}
-                  onClick={() => setRegisterMode('bulk')}
-                  className={cn(
-                    'rounded-md px-3 py-1.5 text-xs font-medium transition-colors',
-                    registerMode === 'bulk'
-                      ? 'bg-card shadow-sm'
-                      : 'text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  엑셀 일괄 등록
-                </button>
-              </div>
-            </CardHeader>
-            <CardContent>
-              {registerMode === 'single' ? (
-                <InvoiceCodeRuleForm brandId={brandId} />
-              ) : (
-                <InvoiceCodeRuleBulkPanel
-                  brandId={brandId}
-                  brandName={brandName}
-                />
-              )}
-            </CardContent>
-          </Card>
-        </>
+        <InvoiceOptionMapRulesPanel
+          brandId={brandId}
+          brandName={brandName}
+          maps={optionMaps}
+          mapsLoading={optionMapsLoading}
+          mapsError={optionMapsError}
+          productNameMaps={productNameMaps}
+          productNameMapsLoading={productNameMapsLoading}
+          productNameMapsError={productNameMapsError}
+          nameRules={nameRules}
+          nameRulesLoading={nameRulesLoading}
+          nameRulesError={nameRulesError}
+        />
       ) : (
         <Card>
           <CardHeader>
@@ -797,13 +817,23 @@ function HistoryPanel() {
   )
 }
 
-type TodayStep = 'upload' | 'check' | 'prefix' | 'transform'
+type TodayStep =
+  | 'upload'
+  | 'check'
+  | 'gift'
+  | 'instruction'
+  | 'product'
+  | 'item'
+  | 'output'
 
 const TODAY_STEPS: { value: TodayStep; label: string }[] = [
   { value: 'upload', label: '파일 올리기' },
   { value: 'check', label: '파일 확인' },
-  { value: 'prefix', label: '접두어' },
-  { value: 'transform', label: '품목명 변환' },
+  { value: 'gift', label: '사은품 추가' },
+  { value: 'instruction', label: '작업 지시' },
+  { value: 'product', label: '품목명 변환' },
+  { value: 'item', label: '내품명 변환' },
+  { value: 'output', label: '최종 행' },
 ]
 
 function TodayStepProgress({
@@ -816,46 +846,107 @@ function TodayStepProgress({
   onChange: (step: TodayStep) => void
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-1">
+    <div className="flex items-stretch gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border pb-px">
       {TODAY_STEPS.map((item, index) => {
         const active = index === stepIndex
         const reachable = index <= maxStepIndex
         return (
-          <Fragment key={item.value}>
-            <button
-              type="button"
-              disabled={!reachable}
-              aria-current={active ? 'step' : undefined}
-              onClick={() => onChange(item.value)}
-              className={cn(
-                'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs transition-colors',
-                active
-                  ? 'bg-primary text-primary-foreground'
-                  : reachable
-                    ? 'text-muted-foreground hover:bg-muted hover:text-foreground'
-                    : 'text-muted-foreground/50',
-              )}
-            >
+          <button
+            key={item.value}
+            type="button"
+            disabled={!reachable}
+            aria-current={active ? 'step' : undefined}
+            onClick={() => onChange(item.value)}
+            className={cn(
+              '-mb-px flex shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-3 py-1.5 text-xs transition-colors',
+              active
+                ? 'border-border bg-card text-foreground'
+                : reachable
+                  ? 'border-transparent text-muted-foreground hover:bg-muted/50 hover:text-foreground'
+                  : 'border-transparent text-muted-foreground/40',
+            )}
+          >
+            {index < stepIndex ? (
+              <CheckCircle2 className="size-3.5 text-success" />
+            ) : (
               <span
                 className={cn(
                   'flex size-4 items-center justify-center rounded-full text-[10px] font-semibold',
-                  active ? 'bg-primary-foreground/20' : 'bg-muted',
+                  active ? 'bg-muted' : 'bg-muted/70',
                 )}
               >
-                {index < stepIndex ? (
-                  <CheckCircle2 className="size-3 text-success" />
-                ) : (
-                  index + 1
-                )}
+                {index + 1}
               </span>
-              {item.label}
-            </button>
-            {index < TODAY_STEPS.length - 1 ? (
-              <ChevronRight className="size-3.5 text-muted-foreground/50" />
-            ) : null}
-          </Fragment>
+            )}
+            {item.label}
+          </button>
         )
       })}
+    </div>
+  )
+}
+
+function StepSnapshotButton({
+  stage,
+  brandName,
+  sourceFileName,
+  sourceRows,
+  giftPlan,
+  workPlan,
+  nameTransformation,
+  productTransformation,
+  itemTransformation,
+  disabled,
+}: {
+  stage: InvoiceStepSnapshotStage
+  brandName: string
+  sourceFileName?: string
+  sourceRows: SabangnetOrderRow[]
+  giftPlan?: GiftAssignmentPlan | null
+  workPlan?: WorkInstructionPlan | null
+  nameTransformation?: InvoiceNameTransformation | null
+  productTransformation?: InvoiceProductNameTransformation | null
+  itemTransformation?: InvoiceItemNameTransformation | null
+  disabled?: boolean
+}) {
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  return (
+    <div className="flex flex-col gap-1">
+      <Button
+        type="button"
+        variant="outline"
+        disabled={disabled || busy}
+        title="이 단계까지 적용된 전체 13열입니다. 선착순 확정은 하지 않습니다."
+        onClick={() => {
+          setBusy(true)
+          setError(null)
+          void downloadInvoiceStepSnapshot({
+            stage,
+            brandName,
+            sourceFileName,
+            sourceRows,
+            giftPlan,
+            workPlan,
+            nameTransformation,
+            productTransformation,
+            itemTransformation,
+          })
+            .catch((reason) => {
+              setError(
+                reason instanceof Error
+                  ? reason.message
+                  : '엑셀을 내려받지 못했습니다.',
+              )
+            })
+            .finally(() => setBusy(false))
+        }}
+      >
+        <Download className="size-4" />
+        {busy ? '받는 중...' : '이 단계까지 내려받기'}
+      </Button>
+      {error ? <p className="text-xs text-danger">{error}</p> : null}
     </div>
   )
 }
@@ -878,26 +969,58 @@ export function InvoiceWorkPage() {
     queryKey: ['invoice-name-rules', brand.id],
     queryFn: () => getInvoiceNameRules(brand.id),
   })
-  const prefixRequestsQuery = useQuery({
-    queryKey: ['invoice-prefix-requests', brand.id],
-    queryFn: () => getInvoicePrefixRequests(brand.id),
+  const optionMapsQuery = useQuery({
+    queryKey: ['invoice-option-maps', brand.id],
+    queryFn: () => getInvoiceOptionMaps(brand.id),
   })
-  const prefixRequests = useMemo(
-    () => prefixRequestsQuery.data ?? [],
-    [prefixRequestsQuery.data],
+  const productNameMapsQuery = useQuery({
+    queryKey: ['invoice-product-name-maps', brand.id],
+    queryFn: () => getInvoiceProductNameMaps(brand.id),
+  })
+  const giftRequestsQuery = useQuery({
+    queryKey: ['invoice-prefix-requests', brand.id],
+    queryFn: () => getInvoiceGiftRequests(brand.id),
+  })
+  const giftAllocationsQuery = useQuery({
+    queryKey: ['invoice-gift-allocations', brand.id],
+    queryFn: () => getInvoiceGiftAllocations(brand.id, { activeOnly: false }),
+  })
+  const workInstructionsQuery = useQuery({
+    queryKey: ['invoice-work-instructions', brand.id],
+    queryFn: () => getInvoiceWorkInstructions(brand.id),
+  })
+  const giftRequests = useMemo(
+    () => giftRequestsQuery.data ?? [],
+    [giftRequestsQuery.data],
   )
-  const prefixRequestsError =
-    prefixRequestsQuery.error instanceof Error
-      ? prefixRequestsQuery.error.message
-      : prefixRequestsQuery.error
-        ? '송장 접두어 요청 건을 불러오지 못했습니다.'
+  const giftAllocations = useMemo(
+    () => giftAllocationsQuery.data ?? [],
+    [giftAllocationsQuery.data],
+  )
+  const workInstructions = useMemo(
+    () => workInstructionsQuery.data ?? [],
+    [workInstructionsQuery.data],
+  )
+  const giftRequestsError =
+    giftRequestsQuery.error instanceof Error
+      ? giftRequestsQuery.error.message
+      : giftRequestsQuery.error
+        ? '사은품 증정 요청 건을 불러오지 못했습니다.'
         : null
-  // 기간이 겹치는 요청 건이 둘 이상일 때 사용자가 고른 값. 단계를 옮겨도 유지한다.
-  const [prefixResolutions, setPrefixResolutions] = useState<
+  const workInstructionsError =
+    workInstructionsQuery.error instanceof Error
+      ? workInstructionsQuery.error.message
+      : workInstructionsQuery.error
+        ? '작업 지시를 불러오지 못했습니다.'
+        : null
+  // 기간이 겹치는 사은품 요청 건이 둘 이상일 때 사용자가 고른 값. 단계를 옮겨도 유지한다.
+  const [giftResolutions, setGiftResolutions] = useState<
     Record<string, string>
   >({})
   const [giftSeed, setGiftSeed] = useState(createGiftSeed)
-  const [excludedGiftNames, setExcludedGiftNames] = useState<string[]>([])
+  const [excludedGiftStyleIds, setExcludedGiftStyleIds] = useState<string[]>(
+    [],
+  )
   const nameRules = useMemo(
     () => nameRulesQuery.data ?? [],
     [nameRulesQuery.data],
@@ -923,6 +1046,119 @@ export function InvoiceWorkPage() {
     nameRulesQuery.error,
     nameRulesQuery.isPending,
   ])
+  const optionMaps = useMemo(
+    () => optionMapsQuery.data ?? [],
+    [optionMapsQuery.data],
+  )
+  const optionMapsError =
+    optionMapsQuery.error instanceof Error
+      ? optionMapsQuery.error.message
+      : optionMapsQuery.error
+        ? '내품명 변환 기준을 불러오지 못했습니다.'
+        : null
+  const productNameMaps = useMemo(
+    () => productNameMapsQuery.data ?? [],
+    [productNameMapsQuery.data],
+  )
+  const productNameMapsError =
+    productNameMapsQuery.error instanceof Error
+      ? productNameMapsQuery.error.message
+      : productNameMapsQuery.error
+        ? '품목명 변환 기준을 불러오지 못했습니다.'
+        : null
+  const productCandidateNames = useMemo(
+    () =>
+      inspection
+        ? collectProductNameCandidateTexts(inspection.rows)
+        : [],
+    [inspection],
+  )
+  const productStyleLookupQuery = useQuery({
+    queryKey: [
+      'invoice-product-name-style-lookup',
+      brand.id,
+      fileName,
+      inspection?.rows.length ?? 0,
+    ],
+    queryFn: () =>
+      listStyleRefsForLookup(brand.id, { names: productCandidateNames }),
+    enabled: Boolean(inspection),
+  })
+  const productTransformation = useMemo(() => {
+    if (
+      !inspection ||
+      productNameMapsQuery.isPending ||
+      productNameMapsQuery.error ||
+      productStyleLookupQuery.isPending ||
+      productStyleLookupQuery.error
+    ) {
+      return null
+    }
+    return transformInvoiceProductNames(
+      inspection.rows,
+      productNameMaps,
+      catalogFromStyles(
+        [...(productStyleLookupQuery.data?.byName.values() ?? [])].flat(),
+      ),
+    )
+  }, [
+    inspection,
+    productNameMaps,
+    productNameMapsQuery.error,
+    productNameMapsQuery.isPending,
+    productStyleLookupQuery.data,
+    productStyleLookupQuery.error,
+    productStyleLookupQuery.isPending,
+  ])
+  const itemTransformation = useMemo(() => {
+    if (
+      !inspection ||
+      !productTransformation ||
+      optionMapsQuery.isPending ||
+      optionMapsQuery.error
+    ) {
+      return null
+    }
+    return transformInvoiceItemNames(
+      inspection.rows,
+      optionMaps,
+      productTransformation.rows,
+    )
+  }, [
+    inspection,
+    optionMaps,
+    optionMapsQuery.error,
+    optionMapsQuery.isPending,
+    productTransformation,
+  ])
+  const giftEligibilityPlan = useMemo(() => {
+    if (!inspection) return null
+    return planInvoicePrefixes(inspection.rows, giftRequests, giftResolutions)
+  }, [inspection, giftRequests, giftResolutions])
+  const giftPlan = useMemo(() => {
+    if (!inspection || !giftEligibilityPlan) return null
+    return planGiftAssignments(
+      inspection.rows,
+      giftEligibilityPlan,
+      giftRequests,
+      {
+        seed: giftSeed,
+        excludedGiftStyleIds,
+        existingAllocations: giftAllocations,
+      },
+    )
+  }, [
+    inspection,
+    giftEligibilityPlan,
+    giftRequests,
+    giftSeed,
+    excludedGiftStyleIds,
+    giftAllocations,
+  ])
+  const workPlan = useMemo(() => {
+    if (!inspection) return null
+    return planWorkInstructions(inspection.rows, workInstructions)
+  }, [inspection, workInstructions])
   const nameRulesError =
     nameRulesQuery.error instanceof Error
       ? nameRulesQuery.error.message
@@ -959,9 +1195,9 @@ export function InvoiceWorkPage() {
   }
 
   function resetGiftState() {
-    setPrefixResolutions({})
+    setGiftResolutions({})
     setGiftSeed(createGiftSeed())
-    setExcludedGiftNames([])
+    setExcludedGiftStyleIds([])
   }
 
   function resetFile() {
@@ -1020,11 +1256,13 @@ export function InvoiceWorkPage() {
 
       {activeView === 'today' ? (
         <div className="space-y-4">
-          <TodayStepProgress
-            stepIndex={stepIndex}
-            maxStepIndex={maxStepIndex}
-            onChange={setStep}
-          />
+          <div className="sticky top-0 z-10 bg-background/95 backdrop-blur">
+            <TodayStepProgress
+              stepIndex={stepIndex}
+              maxStepIndex={maxStepIndex}
+              onChange={setStep}
+            />
+          </div>
 
           {activeStep === 'upload' ? (
             <Card>
@@ -1248,16 +1486,24 @@ export function InvoiceWorkPage() {
                 />
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
-                  <Button type="button" variant="outline" onClick={resetFile}>
-                    <RotateCcw className="size-4" />
-                    다른 파일 선택
-                  </Button>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button type="button" variant="outline" onClick={resetFile}>
+                      <RotateCcw className="size-4" />
+                      다른 파일 선택
+                    </Button>
+                    <StepSnapshotButton
+                      stage="check"
+                      brandName={brand.name}
+                      sourceFileName={fileName}
+                      sourceRows={inspection.rows}
+                    />
+                  </div>
                   <Button
                     type="button"
                     disabled={!headerReady}
-                    onClick={() => setStep('prefix')}
+                    onClick={() => setStep('gift')}
                   >
-                    접두어 넣기
+                    사은품 추가로
                     <ArrowRight className="size-4" />
                   </Button>
                 </div>
@@ -1265,51 +1511,108 @@ export function InvoiceWorkPage() {
             </Card>
           ) : null}
 
-          {activeStep === 'prefix' && inspection && headerReady ? (
+          {activeStep === 'gift' && inspection && headerReady ? (
             <Card>
-              <CardHeader>
-                <CardTitle>쇼핑몰별 접두어 넣기</CardTitle>
-                <CardDescription>
-                  품목명이 바뀌기 전인 지금 접두어를 정합니다. 실제 결합은 모든
-                  작업이 끝난 최종 품목명 앞에 적용합니다.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-5">
+              <CardContent className="space-y-5 pt-5">
+                <p className="text-xs text-muted-foreground">
+                  원본 품목명으로 대상을 확인하고, 합포장별로 사은품 행을
+                  만듭니다. 사은품 이름은 품목명에만 들어갑니다.
+                </p>
                 <InvoicePrefixStepPanel
+                  brandId={brand.id}
                   rows={inspection.rows}
-                  requests={prefixRequests}
-                  loading={prefixRequestsQuery.isPending}
-                  error={prefixRequestsError}
-                  resolutions={prefixResolutions}
+                  requests={giftRequests}
+                  existingAllocations={giftAllocations}
+                  loading={
+                    giftRequestsQuery.isPending ||
+                    giftAllocationsQuery.isPending
+                  }
+                  error={giftRequestsError}
+                  resolutions={giftResolutions}
                   onResolve={(key, requestId) =>
-                    setPrefixResolutions((current) => ({
+                    setGiftResolutions((current) => ({
                       ...current,
                       [key]: requestId,
                     }))
                   }
                   giftSeed={giftSeed}
-                  excludedGiftNames={excludedGiftNames}
+                  excludedGiftStyleIds={excludedGiftStyleIds}
                   onRedrawGifts={() => setGiftSeed(createGiftSeed())}
-                  onToggleExcludeGift={(giftName) =>
-                    setExcludedGiftNames((current) =>
-                      current.includes(giftName)
-                        ? current.filter((name) => name !== giftName)
-                        : [...current, giftName],
+                  onToggleExcludeGift={(styleId) =>
+                    setExcludedGiftStyleIds((current) =>
+                      current.includes(styleId)
+                        ? current.filter((id) => id !== styleId)
+                        : [...current, styleId],
                     )
                   }
                   sourceFileName={fileName}
                 />
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setStep('check')}
+                    >
+                      <ArrowLeft className="size-4" />
+                      파일 확인으로
+                    </Button>
+                    <StepSnapshotButton
+                      stage="gift"
+                      brandName={brand.name}
+                      sourceFileName={fileName}
+                      sourceRows={inspection.rows}
+                      giftPlan={giftPlan}
+                    />
+                  </div>
                   <Button
                     type="button"
-                    variant="outline"
-                    onClick={() => setStep('check')}
+                    onClick={() => setStep('instruction')}
                   >
-                    <ArrowLeft className="size-4" />
-                    파일 확인으로
+                    작업 지시로
+                    <ArrowRight className="size-4" />
                   </Button>
-                  <Button type="button" onClick={() => setStep('transform')}>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {activeStep === 'instruction' && inspection && headerReady ? (
+            <Card>
+              <CardContent className="space-y-5 pt-5">
+                <p className="text-xs text-muted-foreground">
+                  원본 품목명과 완전 일치하는 활성 지시를 확인합니다. 적용
+                  기간이 있으면 주문일시가 그 안인 행에만 붙습니다. 표시 문구는
+                  자체품번 변환이 끝난 최종 품목명 앞에 붙습니다.
+                </p>
+                <InvoiceWorkInstructionStepPanel
+                  rows={inspection.rows}
+                  instructions={workInstructions}
+                  loading={workInstructionsQuery.isPending}
+                  error={workInstructionsError}
+                />
+
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setStep('gift')}
+                    >
+                      <ArrowLeft className="size-4" />
+                      사은품 추가로
+                    </Button>
+                    <StepSnapshotButton
+                      stage="instruction"
+                      brandName={brand.name}
+                      sourceFileName={fileName}
+                      sourceRows={inspection.rows}
+                      giftPlan={giftPlan}
+                      workPlan={workPlan}
+                    />
+                  </div>
+                  <Button type="button" onClick={() => setStep('product')}>
                     품목명 변환하기
                     <ArrowRight className="size-4" />
                   </Button>
@@ -1318,51 +1621,175 @@ export function InvoiceWorkPage() {
             </Card>
           ) : null}
 
-          {activeStep === 'transform' && inspection && headerReady ? (
+          {activeStep === 'product' && inspection && headerReady ? (
             <Card>
-              <CardHeader>
-                <CardTitle>자체품번코드로 품목명 변경</CardTitle>
-                <CardDescription>
-                  데이터 시트에 등록된 상품명을 검색해 고르거나, Enter로 예외만
-                  체크한 뒤 저장 버튼으로 반영합니다.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-5">
-                {nameRulesQuery.isPending ? (
+              <CardContent className="space-y-5 pt-5">
+                <p className="text-xs text-muted-foreground">
+                  원본 품목명을 본품 공식명으로 바꿉니다. 내품명은 원칙적으로
+                  그대로 전달합니다. 단, 내품명 옵션값 단독 조회 키가 품목명
+                  원장과 정확히 맞으면 본품 식별에 사용된 값으로 표시하고 다음
+                  단계에서 비웁니다.
+                </p>
+                {productNameMapsQuery.isPending ||
+                productStyleLookupQuery.isPending ? (
                   <div className="rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-                    Supabase에서 이 브랜드의 자체품번코드 기준만 불러오고
-                    있습니다.
+                    이 브랜드의 품목명 변환 기준을 불러오고 있습니다.
                   </div>
-                ) : nameRulesError ? (
+                ) : productNameMapsError || productStyleLookupQuery.error ? (
                   <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                    <span>{nameRulesError}</span>
+                    <span>
+                      {productNameMapsError ||
+                        (productStyleLookupQuery.error instanceof Error
+                          ? productStyleLookupQuery.error.message
+                          : '상품 마스터를 대조하지 못했습니다.')}
+                    </span>
                   </div>
-                ) : nameTransformation ? (
-                  <>
-                    <UnresolvedInvoiceCodePanel
-                      brandId={brand.id}
-                      brandName={brand.name}
-                      codes={nameTransformation.unresolvedCodes}
-                    />
-
-                    <InvoiceNameTransformTable rows={nameTransformation.rows} />
-                  </>
+                ) : productTransformation ? (
+                  <InvoiceProductNameTransformPanel
+                    brandId={brand.id}
+                    transformation={productTransformation}
+                  />
                 ) : null}
+
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setStep('instruction')}
+                    >
+                      <ArrowLeft className="size-4" />
+                      작업 지시로
+                    </Button>
+                    <StepSnapshotButton
+                      stage="product"
+                      brandName={brand.name}
+                      sourceFileName={fileName}
+                      sourceRows={inspection.rows}
+                      giftPlan={giftPlan}
+                      workPlan={workPlan}
+                      nameTransformation={nameTransformation}
+                      productTransformation={productTransformation}
+                      disabled={!productTransformation}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    disabled={!productTransformation}
+                    onClick={() => setStep('item')}
+                  >
+                    내품명 변환하기
+                    <ArrowRight className="size-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {activeStep === 'item' && inspection && headerReady ? (
+            <Card>
+              <CardContent className="space-y-5 pt-5">
+                <p className="text-xs text-muted-foreground">
+                  승인된 내품명 규칙이 있는 행만 표시명을 바꿉니다. 없으면 원문을
+                  유지합니다. 품목명 단계에서 옵션값 단독으로 본품을 찾은 행은
+                  내품명을 비웁니다. 구성품 M번호는 별도 출고구성 파일에 기록합니다.
+                </p>
+                {optionMapsQuery.isPending ? (
+                  <div className="rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+                    이 브랜드의 내품명 변환 기준을 불러오고 있습니다.
+                  </div>
+                ) : optionMapsError ? (
+                  <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">
+                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                    <span>{optionMapsError}</span>
+                  </div>
+                ) : itemTransformation ? (
+                  <InvoiceItemNameTransformPanel
+                    brandId={brand.id}
+                    transformation={itemTransformation}
+                  />
+                ) : null}
+
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setStep('product')}
+                    >
+                      <ArrowLeft className="size-4" />
+                      품목명 변환으로
+                    </Button>
+                    <StepSnapshotButton
+                      stage="item"
+                      brandName={brand.name}
+                      sourceFileName={fileName}
+                      sourceRows={inspection.rows}
+                      giftPlan={giftPlan}
+                      workPlan={workPlan}
+                      nameTransformation={nameTransformation}
+                      productTransformation={productTransformation}
+                      itemTransformation={itemTransformation}
+                      disabled={!itemTransformation}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    disabled={!itemTransformation}
+                    onClick={() => setStep('output')}
+                  >
+                    최종 행 보기
+                    <ArrowRight className="size-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {activeStep === 'output' &&
+          inspection &&
+          headerReady &&
+          productTransformation &&
+          itemTransformation &&
+          workPlan &&
+          giftPlan ? (
+            <Card>
+              <CardContent className="space-y-5 pt-5">
+                <p className="text-xs text-muted-foreground">
+                  같은 원본 주문 행은 CJ에서도 한 줄입니다. 품목명은 품목명
+                  단계, 내품명은 내품명 단계 결과를 마지막에만 합칩니다. 미등록
+                  내품명은 원문이며, 본품 식별에 소비된 내품명만 빈 값입니다.
+                  출고구성 파일은 따로 내려받습니다.
+                </p>
+                <InvoiceOutputStepPanel
+                  brandId={brand.id}
+                  brandName={brand.name}
+                  sourceFileName={fileName}
+                  rows={inspection.rows}
+                  giftRequests={giftRequests}
+                  giftResolutions={giftResolutions}
+                  giftSeed={giftSeed}
+                  excludedGiftStyleIds={excludedGiftStyleIds}
+                  productTransformation={productTransformation}
+                  itemTransformation={itemTransformation}
+                  workPlan={workPlan}
+                  giftPlan={giftPlan}
+                />
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setStep('prefix')}
+                    onClick={() => setStep('item')}
                   >
                     <ArrowLeft className="size-4" />
-                    접두어로
+                    내품명 변환으로
                   </Button>
-                  <p className="text-xs text-muted-foreground">
-                    다음 변환 단계는 자체품번코드 검증이 끝난 뒤 추가합니다.
-                    접두어는 최종 품목명이 정해질 때 앞에 붙습니다.
-                  </p>
+                  <Button type="button" variant="outline" onClick={resetFile}>
+                    <RotateCcw className="size-4" />
+                    다른 파일 선택
+                  </Button>
                 </div>
               </CardContent>
             </Card>
@@ -1377,9 +1804,18 @@ export function InvoiceWorkPage() {
           nameRules={nameRules}
           nameRulesLoading={nameRulesQuery.isPending}
           nameRulesError={nameRulesError}
-          prefixRequests={prefixRequests}
-          prefixRequestsLoading={prefixRequestsQuery.isPending}
-          prefixRequestsError={prefixRequestsError}
+          optionMaps={optionMaps}
+          optionMapsLoading={optionMapsQuery.isPending}
+          optionMapsError={optionMapsError}
+          productNameMaps={productNameMaps}
+          productNameMapsLoading={productNameMapsQuery.isPending}
+          productNameMapsError={productNameMapsError}
+          giftRequests={giftRequests}
+          giftRequestsLoading={giftRequestsQuery.isPending}
+          giftRequestsError={giftRequestsError}
+          workInstructions={workInstructions}
+          workInstructionsLoading={workInstructionsQuery.isPending}
+          workInstructionsError={workInstructionsError}
         />
       ) : (
         <HistoryPanel />

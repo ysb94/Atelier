@@ -8,8 +8,22 @@ export function isUniqueViolation(error: { code?: string; message?: string }) {
 }
 
 export function errorMessage(
-  error: { message?: string } | null | undefined,
+  error: { code?: string; message?: string } | null | undefined,
   fallback: string,
 ) {
-  return error?.message?.trim() || fallback
+  const message = error?.message?.trim() || ''
+  // 송장·바코드가 styles를 참조하면 상품 삭제가 FK로 막힌다.
+  if (
+    error?.code === '23503' ||
+    /foreign key|violates foreign key/i.test(message)
+  ) {
+    if (
+      /invoice_name_rules|invoice_option_map|invoice_product_name_map|invoice_prefix_item_products|product_code_components/i.test(
+        message,
+      )
+    ) {
+      return '송장 기준이나 바코드에 연결된 상품이라 삭제할 수 없습니다. 연결을 먼저 해제하세요.'
+    }
+  }
+  return message || fallback
 }
