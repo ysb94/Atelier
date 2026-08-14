@@ -39,6 +39,7 @@ import {
   getInvoiceNameRules,
   getInvoiceOptionMaps,
   getInvoiceProductNameMaps,
+  getInvoiceProductNameTagRoles,
   getInvoiceWorkInstructions,
   listStyleRefsForLookup,
 } from '@/lib/api'
@@ -58,6 +59,7 @@ import {
   type InvoiceNameTransformation,
 } from '@/lib/invoice/name-transform'
 import { collectProductNameCandidateTexts } from '@/lib/invoice/product-name-patterns'
+import { tagRoleFingerprint } from '@/lib/invoice/product-name-tags'
 import {
   catalogFromStyles,
   transformInvoiceProductNames,
@@ -977,6 +979,10 @@ export function InvoiceWorkPage() {
     queryKey: ['invoice-product-name-maps', brand.id],
     queryFn: () => getInvoiceProductNameMaps(brand.id),
   })
+  const productNameTagRolesQuery = useQuery({
+    queryKey: ['invoice-product-name-tag-roles', brand.id],
+    queryFn: () => getInvoiceProductNameTagRoles(brand.id),
+  })
   const giftRequestsQuery = useQuery({
     queryKey: ['invoice-prefix-requests', brand.id],
     queryFn: () => getInvoiceGiftRequests(brand.id),
@@ -1060,6 +1066,14 @@ export function InvoiceWorkPage() {
     () => productNameMapsQuery.data ?? [],
     [productNameMapsQuery.data],
   )
+  const productNameTagRoles = useMemo(
+    () => productNameTagRolesQuery.data ?? [],
+    [productNameTagRolesQuery.data],
+  )
+  const productNameTagRoleFingerprint = useMemo(
+    () => tagRoleFingerprint(productNameTagRoles),
+    [productNameTagRoles],
+  )
   const productNameMapsError =
     productNameMapsQuery.error instanceof Error
       ? productNameMapsQuery.error.message
@@ -1069,9 +1083,12 @@ export function InvoiceWorkPage() {
   const productCandidateNames = useMemo(
     () =>
       inspection
-        ? collectProductNameCandidateTexts(inspection.rows)
+        ? collectProductNameCandidateTexts(
+            inspection.rows,
+            productNameTagRoles,
+          )
         : [],
-    [inspection],
+    [inspection, productNameTagRoles],
   )
   const productStyleLookupQuery = useQuery({
     queryKey: [
@@ -1079,6 +1096,7 @@ export function InvoiceWorkPage() {
       brand.id,
       fileName,
       inspection?.rows.length ?? 0,
+      productNameTagRoleFingerprint,
     ],
     queryFn: () =>
       listStyleRefsForLookup(brand.id, { names: productCandidateNames }),
@@ -1089,6 +1107,8 @@ export function InvoiceWorkPage() {
       !inspection ||
       productNameMapsQuery.isPending ||
       productNameMapsQuery.error ||
+      productNameTagRolesQuery.isPending ||
+      productNameTagRolesQuery.error ||
       productStyleLookupQuery.isPending ||
       productStyleLookupQuery.error
     ) {
@@ -1100,12 +1120,16 @@ export function InvoiceWorkPage() {
       catalogFromStyles(
         [...(productStyleLookupQuery.data?.byName.values() ?? [])].flat(),
       ),
+      productNameTagRoles,
     )
   }, [
     inspection,
     productNameMaps,
     productNameMapsQuery.error,
     productNameMapsQuery.isPending,
+    productNameTagRoles,
+    productNameTagRolesQuery.error,
+    productNameTagRolesQuery.isPending,
     productStyleLookupQuery.data,
     productStyleLookupQuery.error,
     productStyleLookupQuery.isPending,

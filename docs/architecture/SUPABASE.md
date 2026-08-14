@@ -39,6 +39,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 코드·사용처(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_assignments`) | Supabase |
 | 송장 품목명 변환 기준(`invoice_name_rules`) | Supabase |
 | 송장 품목명 exact 기준(`invoice_product_name_maps`) | Supabase |
+| 송장 품목명 태그 역할 사전(`invoice_product_name_tag_roles`) | Supabase |
 | 송장 내품명·출고구성 기준(`invoice_option_maps` + `invoice_option_map_components`) | Supabase |
 | 송장 사은품 증정 요청 건(`invoice_prefix_requests` + `invoice_prefix_items` + `invoice_prefix_item_products`, 앱 모델명 Gift) | Supabase |
 | 송장 사은품 선착순 한도·배정 원장(`invoice_prefix_requests` 한도 필드 + `invoice_gift_quotas` + `invoice_gift_allocations`) | Supabase |
@@ -185,7 +186,9 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 조회 키와 본품은 1:1이다. 한 키가 두 `styles.id`를 가리키면 unique 인덱스가 막고,
   가져오기에서는 충돌로 남긴다. 서로 다른 키가 같은 본품을 가리키는 것은 허용한다.
 - 후보 문자열은 `src/lib/invoice/product-name-patterns.ts`가 시트 수식과 같은 순서로
-  만든다. 괄호를 보지 않고 항상 첫 구분자에서만 자른다.
+  만든다. 내품명 구간은 괄호를 보지 않고 항상 첫 구분자에서만 자른다. 원문 품목명
+  후보를 먼저 만들고, 저장된 태그 역할이 행사·구성이면 그 태그를 뺀 품목명 후보를
+  뒤에 추가한다.
   1. `품목명 + " " + 내품명 전체`
   2. `품목명 + " " + 내품명 첫 / 앞`
   3. `품목명 + " " + 내품명 첫 , 앞`
@@ -211,6 +214,32 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - RLS는 `app.can_read_brand` / `app.can_edit_brand`를 사용한다.
 - 마이그레이션: `20260813190000_invoice_product_name_maps.sql`,
   `20260813200000_invoice_product_name_lookup_key.sql`.
+
+### 송장 품목명 태그 역할 사전
+
+- `invoice_product_name_tag_roles`는 브랜드별 품목명 맨 앞 `[태그]` 역할 사전이다.
+  사방넷 원본 품목명과 태그 원문은 덮어쓰지 않는다. 역할은 상품 인식 후보만 조정한다.
+- 고유 범위는 `(brand_id, normalized_tag)`다. `normalized_tag`는 앱
+  `normalizeInvoiceText`와 같은 exact 비교 키이거나, 날짜만 다른 예약배송처럼
+  묶는 계열 키(`family:reservation_shipping_date`)다.
+- `[8/21예약배송]`, `[8/21 예약배송]`, `[8월 21일 예약배송]`은 같은 예약배송
+  계열이다. 한 번 역할을 저장하면 다른 날짜에도 재사용한다. 예전 exact 행
+  (`[8/14예약배송]`)도 같은 계열로 읽는다. 원문 태그는 덮어쓰지 않는다.
+- 역할은 네 가지로 고정한다.
+  - `event_marketing`: 행사·마케팅. 상품 인식 후보에서 제외한다.
+  - `composition_gift`: 증정·포함·구성. 상품 인식 후보에서 제외하고 메타데이터로만
+    보존한다. 출고구성·사은품·작업 지시와 연결하지 않는다.
+  - `identity_condition`: 리퍼브 등 상품 특징·상태. 상품 인식에 유지한다.
+  - `unknown`: 미분류. 자동으로 제외하지 않는다.
+- 예약배송·`1+1`·증정·포함·리퍼브 같은 휴리스틱은 화면 추천에만 쓴다. 사용자가
+  역할을 저장하기 전에는 매칭에 반영하지 않는다.
+- 매칭 순서는 원문 exact 조합 → 기존 원문 원장 → 역할 반영 후보다. 서로 다른
+  상품이 맞으면 자동 확정하지 않고 충돌로 남긴다.
+- RLS는 `app.can_read_brand` / `app.can_edit_brand`를 사용한다.
+- 로직: `src/lib/invoice/product-name-tags.ts`.
+  저장소: `src/lib/supabase/invoice-product-name-tag-roles.ts`.
+- 마이그레이션: `20260814035922_invoice_product_name_tag_roles.sql`,
+  `20260814041855_invoice_product_name_tag_role_family.sql`.
 
 ### 송장 내품명·출고구성 기준
 
@@ -362,11 +391,12 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 
 - 로직: `src/lib/invoice/prefix-transform.ts`, `gift-assign.ts`,
   `gift-confirm.ts`, `work-instruction-transform.ts`, `product-name-patterns.ts`,
-  `product-name-transform.ts`, `item-name-transform.ts`, `option-transform.ts`,
-  `option-ledger-import.ts`, `invoice-output.ts`, `prefix-paste.ts`.
+  `product-name-tags.ts`, `product-name-transform.ts`, `item-name-transform.ts`,
+  `option-transform.ts`, `option-ledger-import.ts`, `invoice-output.ts`,
+  `prefix-paste.ts`.
   저장소: `invoice-prefix-requests.ts`, `invoice-gift-allocations.ts`,
   `invoice-work-instructions.ts`, `invoice-product-name-maps.ts`,
-  `invoice-option-maps.ts`.
+  `invoice-product-name-tag-roles.ts`, `invoice-option-maps.ts`.
   화면: `InvoicePrefixRequestPanel/Form`, `InvoiceWorkInstructionPanel/Form`,
   `InvoicePrefixStepPanel`, `InvoiceWorkInstructionStepPanel`,
   `InvoiceOptionMapRulesPanel`, `InvoiceProductNameTransformPanel`,
@@ -385,7 +415,9 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260813170000_work_instruction_outgoing_products.sql`,
   `20260813180000_invoice_option_maps.sql`,
   `20260813190000_invoice_product_name_maps.sql`,
-  `20260813200000_invoice_product_name_lookup_key.sql`.
+  `20260813200000_invoice_product_name_lookup_key.sql`,
+  `20260814035922_invoice_product_name_tag_roles.sql`,
+  `20260814041855_invoice_product_name_tag_role_family.sql`.
 - 재고 원칙: [`INVENTORY.md`](./INVENTORY.md).
 
 ### 수천 건 적재

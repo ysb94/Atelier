@@ -10,6 +10,7 @@ import {
   getAiFeatureRoute,
   recommendInvoiceProduct,
   saveInvoiceProductNameMap,
+  saveInvoiceProductNameTagRole,
   searchInvoiceProductCandidates,
 } from '@/lib/api'
 import type {
@@ -17,11 +18,17 @@ import type {
   InvoiceProductNameTransformation,
   UnresolvedProductNameCombo,
 } from '@/lib/invoice/product-name-transform'
+import {
+  collectFileTagGroups,
+  type ParsedProductNameTag,
+} from '@/lib/invoice/product-name-tags'
 import type {
   AiProductRecommendation,
   InvoiceProductNameMap,
+  InvoiceProductNameTagRole,
   StyleRef,
 } from '@/lib/types'
+import { INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
 
 const STATUS_META: Record<
@@ -102,6 +109,14 @@ function groupCombos(
     }))
 }
 
+const TAG_ROLES: InvoiceProductNameTagRole[] = [
+  'event_marketing',
+  'composition_gift',
+  'identity_condition',
+  'unknown',
+]
+
+
 export function InvoiceProductNameTransformPanel({
   brandId,
   transformation,
@@ -113,6 +128,18 @@ export function InvoiceProductNameTransformPanel({
     () => groupCombos(transformation.unresolvedCombos),
     [transformation.unresolvedCombos],
   )
+  const fileTags = useMemo(
+    () =>
+      collectFileTagGroups(
+        transformation.rows.map((row) => ({
+          productName: row.source.productName,
+          tags: row.tags,
+        })),
+      ),
+    [transformation.rows],
+  )
+  const unknownTagCount = fileTags.filter((tag) => tag.tag.role === 'unknown')
+    .length
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState<'all' | InvoiceProductNameMatchStatus>(
     'all',
@@ -176,6 +203,36 @@ export function InvoiceProductNameTransformPanel({
           검토 필요 {formatNumber(transformation.unresolvedRowCount)}
         </Badge>
       </div>
+
+      {fileTags.length > 0 ? (
+        <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+          <div>
+            <p className="text-sm font-medium">
+              이 파일 태그 {formatNumber(fileTags.length)}개
+              {unknownTagCount > 0
+                ? ` · 미분류 ${formatNumber(unknownTagCount)}개`
+                : ''}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              같은 태그는 한 번만 정하면 아래 품목과 다음 업로드에 바로
+              반영됩니다.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-2">
+            {fileTags.map((group) => (
+              <ProductNameTagRoleControl
+                key={group.tag.key}
+                brandId={brandId}
+                tag={group.tag}
+                savedRole={group.tag.role === 'unknown' ? undefined : group.tag.role}
+                productCount={group.productCount}
+                variantCount={group.variantCount}
+                examples={group.examples}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
 
       {reviewCount > 0 ? (
         <div className="space-y-3">
@@ -286,6 +343,90 @@ export function InvoiceProductNameTransformPanel({
   )
 }
 
+function ProductNameTagRoleControl({
+  brandId,
+  tag,
+  savedRole,
+  productCount,
+  variantCount = 1,
+  examples = [],
+}: {
+  brandId: string
+  tag: ParsedProductNameTag
+  savedRole?: InvoiceProductNameTagRole
+  productCount: number
+  variantCount?: number
+  examples?: string[]
+}) {
+  const queryClient = useQueryClient()
+  const mutation = useMutation({
+    mutationFn: (role: InvoiceProductNameTagRole) =>
+      saveInvoiceProductNameTagRole(brandId, {
+        tagText: tag.raw,
+        role,
+      }),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ['invoice-product-name-tag-roles', brandId],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ['ai-product-recommendation', brandId],
+        refetchType: 'none',
+      })
+    },
+  })
+  const current = savedRole ?? tag.role
+  const showHint = current === 'unknown' && tag.suggestedRole !== 'unknown'
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Badge variant="outline">{tag.raw}</Badge>
+        <Select
+          value={current}
+          disabled={mutation.isPending}
+          className="h-7 w-[8.5rem] px-2 text-xs"
+          onChange={(event) => {
+            const next = event.target.value as InvoiceProductNameTagRole
+            if (next === current) return
+            mutation.mutate(next)
+          }}
+        >
+          {TAG_ROLES.map((role) => (
+            <option key={role} value={role}>
+              {INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL[role]}
+            </option>
+          ))}
+        </Select>
+        {productCount > 1 || variantCount > 1 ? (
+          <span className="text-[11px] text-muted-foreground">
+            이 파일 {formatNumber(productCount)}개 상품
+            {variantCount > 1 ? ` · 날짜 ${formatNumber(variantCount)}개` : ''}
+          </span>
+        ) : null}
+      </div>
+      {examples.length > 0 ? (
+        <p className="text-[11px] text-muted-foreground">
+          예: {examples.join(', ')}
+        </p>
+      ) : null}
+      {showHint ? (
+        <p className="text-[11px] text-muted-foreground">
+          추천: {INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL[tag.suggestedRole]}
+        </p>
+      ) : null}
+      {current === 'composition_gift' ? (
+        <p className="text-[11px] text-muted-foreground">
+          상품 인식에만 반영하며 출고구성은 바꾸지 않습니다.
+        </p>
+      ) : null}
+      {mutation.error instanceof Error ? (
+        <p className="text-[11px] text-danger">{mutation.error.message}</p>
+      ) : null}
+    </div>
+  )
+}
+
 function ProductReviewGroupCard({
   brandId,
   group,
@@ -298,6 +439,7 @@ function ProductReviewGroupCard({
   onToggle: () => void
 }) {
   const variantCount = group.combos.length
+  const tags = group.combos[0]?.tags ?? []
 
   return (
     <div className="rounded-lg border border-border">
@@ -313,6 +455,15 @@ function ProductReviewGroupCard({
             {formatNumber(group.rowCount)}행
             {variantCount > 1 ? ' · 색상·구성 변형' : ''}
           </p>
+          {tags.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {tags.map((tag) => (
+                <Badge key={`${tag.key}:${tag.raw}`} variant="outline">
+                  {tag.raw} · {INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL[tag.role]}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Badge variant={variantCount > 1 ? 'default' : 'warning'}>

@@ -12,7 +12,8 @@
     "verify:gift-first-come": "node scripts/verify-gift-first-come.mjs",
     "verify:option-maps": "node scripts/verify-option-maps.mjs",
     "verify:ai-gateway": "node scripts/verify-ai-gateway.mjs",
-    "verify:ai-hybrid-replay": "node scripts/verify-ai-hybrid-replay.mjs"
+    "verify:ai-hybrid-replay": "node scripts/verify-ai-hybrid-replay.mjs",
+    "verify:product-name-tags": "node scripts/verify-product-name-tags.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",

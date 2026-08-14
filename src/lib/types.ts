@@ -501,6 +501,35 @@ export type InvoiceOptionMap = {
   updatedAt: string
 }
 
+/** 품목명 맨 앞 [태그]의 브랜드별 역할. 원문과 출고구성은 바꾸지 않는다. */
+export type InvoiceProductNameTagRole =
+  | 'event_marketing'
+  | 'composition_gift'
+  | 'identity_condition'
+  | 'unknown'
+
+export const INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL: Record<
+  InvoiceProductNameTagRole,
+  string
+> = {
+  event_marketing: '행사/마케팅',
+  composition_gift: '증정/구성',
+  identity_condition: '상품 특징',
+  unknown: '미분류',
+}
+
+export type InvoiceProductNameTagRoleEntry = {
+  id: string
+  brandId: string
+  tagText: string
+  normalizedTag: string
+  role: InvoiceProductNameTagRole
+  isActive: boolean
+  note: string
+  createdAt: string
+  updatedAt: string
+}
+
 /**
  * 사방넷 원본 품목명(+내품명 문맥)을 본품 styles.id로 연결하는 품목명 전용 기준.
  * itemNameContext는 조회 키일 뿐 출력 내품명이 아니다.

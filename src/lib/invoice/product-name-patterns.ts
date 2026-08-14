@@ -1,4 +1,6 @@
+import { matchingProductName } from '@/lib/invoice/product-name-tags'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
+import type { InvoiceProductNameTagRoleEntry } from '@/lib/types'
 
 export type ProductNameCandidate = {
   text: string
@@ -96,18 +98,14 @@ export function isSsgMall(mallName: string) {
  * 기존 시트의 조회 키 후보를 그대로 만든다. 왼쪽 열이 먼저 맞으면 그 값이 정답이므로
  * 반환 순서가 우선순위다. 내품명은 조회 문맥일 뿐이라 어떤 후보도 내품명을 바꾸지 않는다.
  */
-export function generateProductNameCandidates(input: {
-  productName: string
-  itemName: string
-  mallName?: string
-  ownProductCode?: string
-}): ProductNameCandidate[] {
-  const productName = input.productName.trim()
-  const itemName = input.itemName.trim()
-  const mallName = input.mallName?.trim() ?? ''
-  const ownProductCode = input.ownProductCode?.trim() ?? ''
-  const output: ProductNameCandidate[] = []
-  const seen = new Set<string>()
+function generateCandidatesForProductName(
+  productName: string,
+  itemName: string,
+  mallName: string,
+  ownProductCode: string,
+  output: ProductNameCandidate[],
+  seen: Set<string>,
+) {
 
   pushCandidate(
     output,
@@ -211,7 +209,40 @@ export function generateProductNameCandidates(input: {
       '자체상품코드 보조 힌트',
     )
   }
+}
 
+export function generateProductNameCandidates(input: {
+  productName: string
+  itemName: string
+  mallName?: string
+  ownProductCode?: string
+  matchingProductName?: string
+}): ProductNameCandidate[] {
+  const productName = input.productName.trim()
+  const itemName = input.itemName.trim()
+  const mallName = input.mallName?.trim() ?? ''
+  const ownProductCode = input.ownProductCode?.trim() ?? ''
+  const matching = (input.matchingProductName ?? productName).trim()
+  const output: ProductNameCandidate[] = []
+  const seen = new Set<string>()
+  generateCandidatesForProductName(
+    productName,
+    itemName,
+    mallName,
+    ownProductCode,
+    output,
+    seen,
+  )
+  if (normalizeInvoiceText(matching) !== normalizeInvoiceText(productName)) {
+    generateCandidatesForProductName(
+      matching,
+      itemName,
+      mallName,
+      ownProductCode,
+      output,
+      seen,
+    )
+  }
   return output
 }
 
@@ -222,11 +253,15 @@ export function collectProductNameCandidateTexts(
     mallName?: string
     ownProductCode?: string
   }[],
+  tagRoles: InvoiceProductNameTagRoleEntry[] = [],
 ): string[] {
   const seen = new Set<string>()
   const texts: string[] = []
   for (const row of rows) {
-    for (const candidate of generateProductNameCandidates(row)) {
+    for (const candidate of generateProductNameCandidates({
+      ...row,
+      matchingProductName: matchingProductName(row.productName, tagRoles),
+    })) {
       const key = normalizeInvoiceText(candidate.text)
       if (seen.has(key)) continue
       seen.add(key)

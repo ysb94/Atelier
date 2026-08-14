@@ -16,6 +16,7 @@ import {
 } from '@/lib/invoice/option-transform'
 import { PRODUCT_NAME_CASES } from '@/lib/invoice/product-name-cases'
 import { generateProductNameCandidates } from '@/lib/invoice/product-name-patterns'
+import { matchingProductName } from '@/lib/invoice/product-name-tags'
 import {
   catalogFromStyles,
   transformInvoiceProductNames,
@@ -28,6 +29,8 @@ import type {
   InvoiceOptionMap,
   InvoiceOptionMapComponent,
   InvoiceProductNameMap,
+  InvoiceProductNameTagRole,
+  InvoiceProductNameTagRoleEntry,
   StyleRef,
 } from '@/lib/types'
 
@@ -1078,5 +1081,114 @@ const tasselOut = outgoingFromStages.find(
   (item) => item.role === 'paid_add' && item.styleNo === 'M3000',
 )
 assert(tasselOut?.quantity === 1, '구성 수량 보존')
+
+function tagRole(
+  tagText: string,
+  value: InvoiceProductNameTagRole,
+): InvoiceProductNameTagRoleEntry {
+  return {
+    id: tagText,
+    brandId: 'brand',
+    tagText,
+    normalizedTag: normalizeInvoiceText(tagText),
+    role: value,
+    isActive: true,
+    note: '',
+    createdAt: '2026-08-14T00:00:00.000Z',
+    updatedAt: '2026-08-14T00:00:00.000Z',
+  }
+}
+
+const soloCandidates = generateProductNameCandidates({
+  productName: '[단독] 마스마룰즈 래빗에코백 32타입',
+  itemName: 'Color: 트로피칼',
+  matchingProductName: matchingProductName(
+    '[단독] 마스마룰즈 래빗에코백 32타입',
+    [tagRole('[단독]', 'event_marketing')],
+  ),
+})
+assert(
+  soloCandidates[0]?.text ===
+    '[단독] 마스마룰즈 래빗에코백 32타입 Color: 트로피칼',
+  '[단독] 원문 후보를 유지',
+)
+assert(
+  soloCandidates.some(
+    (item) => item.text === '마스마룰즈 래빗에코백 32타입 Color: 트로피칼',
+  ),
+  '[단독]을 행사로 저장하면 인식 후보를 추가',
+)
+
+assert(
+  matchingProductName('[태슬1개 포함] 베이직 파우치', [
+    tagRole('[태슬1개 포함]', 'composition_gift'),
+  ]) === '베이직 파우치',
+  '포함 태그는 인식에서만 제외',
+)
+assert(
+  matchingProductName('[리퍼브] String flap backpack _ Glittery pink', [
+    tagRole('[리퍼브]', 'identity_condition'),
+  ]) === '[리퍼브] String flap backpack _ Glittery pink',
+  '리퍼브는 인식에 유지',
+)
+assert(
+  matchingProductName('[비치볼 증정]8 pocket cross bag_4colors', [
+    tagRole('[비치볼 증정]', 'composition_gift'),
+  ]) === '8 pocket cross bag_4colors',
+  '증정 태그는 인식에서만 제외',
+)
+
+const taggedSource = row({
+  rowNumber: 90,
+  productName: '[단독] 마스마룰즈 래빗에코백 32타입',
+  itemName: 'Color: 트로피칼',
+  mallName: '스마트스토어',
+})
+const taggedCatalog = catalogFromStyles([
+  style('s-rabbit', 'M9010', '마스마룰즈 래빗에코백 32타입'),
+])
+const taggedProduct = transformInvoiceProductNames(
+  [taggedSource],
+  [],
+  taggedCatalog,
+  [tagRole('[단독]', 'event_marketing')],
+)
+assert(
+  taggedProduct.rows[0]?.source.productName === taggedSource.productName,
+  '태그 역할 저장 뒤에도 원문 품목명 유지',
+)
+assert(
+  taggedProduct.rows[0]?.status === 'candidate' &&
+    taggedProduct.rows[0]?.transformedProductName ===
+      '마스마룰즈 래빗에코백 32타입',
+  '행사 태그를 빼면 공식명 후보로 인식',
+)
+
+const outgoingWithTags = buildOutgoingComponentRowsFromStages({
+  productRows: taggedProduct.rows,
+  itemRows: transformInvoiceItemNames(
+    [taggedSource],
+    [],
+    taggedProduct.rows,
+  ).rows,
+  giftRowsBySource: new Map(),
+})
+const outgoingWithoutTags = buildOutgoingComponentRowsFromStages({
+  productRows: transformInvoiceProductNames(
+    [taggedSource],
+    [],
+    taggedCatalog,
+  ).rows,
+  itemRows: transformInvoiceItemNames(
+    [taggedSource],
+    [],
+    transformInvoiceProductNames([taggedSource], [], taggedCatalog).rows,
+  ).rows,
+  giftRowsBySource: new Map(),
+})
+assert(
+  outgoingWithTags.length === outgoingWithoutTags.length,
+  '태그 역할은 출고구성 행 수를 바꾸지 않음',
+)
 
 console.log('option-maps verify ok')

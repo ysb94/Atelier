@@ -3,10 +3,19 @@ import {
   productNameRuleConsumesItemName,
   type ProductNameCandidate,
 } from '@/lib/invoice/product-name-patterns'
+import {
+  classifyLeadingTags,
+  matchingProductName,
+  type ParsedProductNameTag,
+} from '@/lib/invoice/product-name-tags'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import type { InvoiceNameTransformation } from '@/lib/invoice/name-transform'
 import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
-import type { InvoiceProductNameMap, StyleRef } from '@/lib/types'
+import type {
+  InvoiceProductNameMap,
+  InvoiceProductNameTagRoleEntry,
+  StyleRef,
+} from '@/lib/types'
 
 export type InvoiceProductNameMatchStatus =
   | 'mapped'
@@ -26,6 +35,7 @@ export type InvoiceProductNameTransformRow = {
   itemNameConsumed: boolean
   candidates: ProductNameCandidate[]
   candidateStyles: StyleRef[]
+  tags: ParsedProductNameTag[]
 }
 
 export type UnresolvedProductNameCombo = {
@@ -39,6 +49,7 @@ export type UnresolvedProductNameCombo = {
   appliedRule: string | null
   candidateStyles: StyleRef[]
   candidates: ProductNameCandidate[]
+  tags: ParsedProductNameTag[]
 }
 
 export type InvoiceProductNameTransformation = {
@@ -136,6 +147,7 @@ export function transformInvoiceProductNames(
   sourceRows: SabangnetOrderRow[],
   maps: InvoiceProductNameMap[],
   catalog: ProductNameStyleCatalog,
+  tagRoles: InvoiceProductNameTagRoleEntry[] = [],
 ): InvoiceProductNameTransformation {
   const activeMaps = maps.filter((map) => map.isActive)
   const comboIndex = indexComboMaps(activeMaps)
@@ -177,10 +189,12 @@ export function transformInvoiceProductNames(
       appliedRule: row.appliedRule,
       candidateStyles: row.candidateStyles,
       candidates: row.candidates,
+      tags: row.tags,
     })
   }
 
   const rows = sourceRows.map((source): InvoiceProductNameTransformRow => {
+    const tags = classifyLeadingTags(source.productName, tagRoles)
     const matches = pickMaps(
       comboIndex,
       source.mallName,
@@ -200,6 +214,7 @@ export function transformInvoiceProductNames(
         itemNameConsumed: false,
         candidates: [],
         candidateStyles: [map.style],
+        tags,
       }
     }
     if (matches.length > 1) {
@@ -215,6 +230,7 @@ export function transformInvoiceProductNames(
         itemNameConsumed: false,
         candidates: [],
         candidateStyles: styles,
+        tags,
       }
       remember(row)
       return row
@@ -225,6 +241,7 @@ export function transformInvoiceProductNames(
       itemName: source.itemName,
       mallName: source.mallName,
       ownProductCode: source.ownProductCode,
+      matchingProductName: matchingProductName(source.productName, tagRoles),
     })
     // 기존 원장은 후보 순서대로 훑고 먼저 맞는 조회 키가 정답이다.
     for (const candidate of candidates) {
@@ -243,6 +260,7 @@ export function transformInvoiceProductNames(
           itemNameConsumed: false,
           candidates,
           candidateStyles: styles,
+          tags,
         }
         remember(row)
         return row
@@ -258,6 +276,7 @@ export function transformInvoiceProductNames(
         itemNameConsumed: productNameRuleConsumesItemName(candidate.rule),
         candidates,
         candidateStyles: styles,
+        tags,
       }
     }
 
@@ -284,6 +303,7 @@ export function transformInvoiceProductNames(
         itemNameConsumed: false,
         candidates,
         candidateStyles: allStyles,
+        tags,
       }
       remember(row)
       return row
@@ -300,6 +320,7 @@ export function transformInvoiceProductNames(
         itemNameConsumed: false,
         candidates,
         candidateStyles: allStyles,
+        tags,
       }
       remember(row)
       return row
@@ -316,6 +337,7 @@ export function transformInvoiceProductNames(
         itemNameConsumed: false,
         candidates,
         candidateStyles: [],
+        tags,
       }
       remember(row)
       return row
@@ -332,6 +354,7 @@ export function transformInvoiceProductNames(
       itemNameConsumed: false,
       candidates,
       candidateStyles: [],
+      tags,
     }
     remember(row)
     return row

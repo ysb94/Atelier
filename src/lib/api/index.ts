@@ -19,6 +19,7 @@ import type {
   InvoiceNameRule,
   InvoiceOptionMap,
   InvoiceProductNameMap,
+  InvoiceProductNameTagRoleEntry,
   InvoiceGiftAllocation,
   InvoiceGiftRequest,
   InvoicePrefixRequest,
@@ -46,6 +47,7 @@ import * as invoiceGiftAllocationStore from '@/lib/supabase/invoice-gift-allocat
 import * as invoiceNameRuleStore from '@/lib/supabase/invoice-name-rules'
 import * as invoiceOptionMapStore from '@/lib/supabase/invoice-option-maps'
 import * as invoiceProductNameMapStore from '@/lib/supabase/invoice-product-name-maps'
+import * as invoiceProductNameTagRoleStore from '@/lib/supabase/invoice-product-name-tag-roles'
 import * as invoicePrefixRequestStore from '@/lib/supabase/invoice-prefix-requests'
 import * as invoiceWorkInstructionStore from '@/lib/supabase/invoice-work-instructions'
 import * as productCodeStore from '@/lib/supabase/product-codes'
@@ -75,6 +77,8 @@ export type {
 } from '@/lib/supabase/invoice-option-maps'
 export { InvoiceProductNameMapStoreError } from '@/lib/supabase/invoice-product-name-maps'
 export type { InvoiceProductNameMapInput } from '@/lib/supabase/invoice-product-name-maps'
+export { InvoiceProductNameTagRoleStoreError } from '@/lib/supabase/invoice-product-name-tag-roles'
+export type { InvoiceProductNameTagRoleInput } from '@/lib/supabase/invoice-product-name-tag-roles'
 export { InvoicePrefixRequestStoreError } from '@/lib/supabase/invoice-prefix-requests'
 export type {
   InvoiceGiftQuotaInput,
@@ -327,6 +331,29 @@ export async function setInvoiceProductNameMapActive(
 export async function deleteInvoiceProductNameMap(id: string): Promise<void> {
   await delay()
   return invoiceProductNameMapStore.deleteInvoiceProductNameMap(id)
+}
+
+export async function getInvoiceProductNameTagRoles(
+  brandId: string,
+  activeOnly = false,
+): Promise<InvoiceProductNameTagRoleEntry[]> {
+  await delay()
+  return invoiceProductNameTagRoleStore.listInvoiceProductNameTagRoles(brandId, {
+    activeOnly,
+  })
+}
+
+export async function saveInvoiceProductNameTagRole(
+  brandId: string,
+  input: invoiceProductNameTagRoleStore.InvoiceProductNameTagRoleInput,
+  roleId?: string,
+): Promise<InvoiceProductNameTagRoleEntry> {
+  await delay()
+  return invoiceProductNameTagRoleStore.saveInvoiceProductNameTagRole(
+    brandId,
+    input,
+    roleId,
+  )
 }
 
 export async function applyBulkInvoiceProductNameMaps(
