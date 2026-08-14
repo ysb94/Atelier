@@ -1,16 +1,27 @@
 import { useMemo, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { StylePicker, formatStyleRef } from '@/components/style-picker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
-import { applyBulkInvoiceProductNameMaps } from '@/lib/api'
+import { PROVIDER_LABEL } from '@/lib/ai/gateway-core'
+import { withRecommendSlot } from '@/lib/ai/recommend-queue'
+import {
+  getAiFeatureRoute,
+  recommendInvoiceProduct,
+  saveInvoiceProductNameMap,
+  searchInvoiceProductCandidates,
+} from '@/lib/api'
 import type {
   InvoiceProductNameMatchStatus,
   InvoiceProductNameTransformation,
   UnresolvedProductNameCombo,
 } from '@/lib/invoice/product-name-transform'
-import type { StyleRef } from '@/lib/types'
+import type {
+  AiProductRecommendation,
+  InvoiceProductNameMap,
+  StyleRef,
+} from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
 
 const STATUS_META: Record<
@@ -49,6 +60,28 @@ type ProductReviewGroup = {
   productName: string
   combos: UnresolvedProductNameCombo[]
   rowCount: number
+}
+
+function upsertInvoiceProductNameMapCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  brandId: string,
+  saved: InvoiceProductNameMap,
+) {
+  const queryKey = ['invoice-product-name-maps', brandId] as const
+  const current = queryClient.getQueryData<InvoiceProductNameMap[]>(queryKey)
+  if (!current) {
+    return queryClient.invalidateQueries({ queryKey })
+  }
+  queryClient.setQueryData<InvoiceProductNameMap[]>(queryKey, (maps = []) => {
+    const next = maps.filter((map) => {
+      if (map.id === saved.id) return false
+      return !(
+        saved.normalizedLookupKey &&
+        map.normalizedLookupKey === saved.normalizedLookupKey
+      )
+    })
+    return [saved, ...next]
+  })
 }
 
 function groupCombos(
@@ -322,32 +355,51 @@ function VariantAssignRow({
     combo.candidateStyles[0] ?? null,
   )
   const [savedMessage, setSavedMessage] = useState('')
+  const [pickedRecommendation, setPickedRecommendation] =
+    useState<AiProductRecommendation | null>(null)
   const meta = STATUS_META[combo.status]
 
   const mutation = useMutation({
-    mutationFn: async ({
+    mutationFn: ({
       lookupKey,
       nextStyle,
     }: {
       lookupKey: string
       nextStyle: StyleRef
     }) => {
-      const result = await applyBulkInvoiceProductNameMaps(brandId, [
-        {
-          productName: lookupKey,
-          lookupKey,
-          styleId: nextStyle.styleId,
+      const shownRank = pickedRecommendation?.products.findIndex(
+        (product) => product.styleId === nextStyle.styleId,
+      )
+      const usedRecommendation =
+        pickedRecommendation &&
+        pickedRecommendation.lookupKey === lookupKey &&
+        shownRank !== undefined &&
+        shownRank >= 0
+      return saveInvoiceProductNameMap(brandId, {
+        productName: lookupKey,
+        lookupKey,
+        styleId: nextStyle.styleId,
+        feedback: {
+          source: usedRecommendation
+            ? pickedRecommendation.source === 'local'
+              ? 'local'
+              : 'ai'
+            : 'manual',
+          cacheId: usedRecommendation ? pickedRecommendation.cacheId : null,
+          shownRank: usedRecommendation ? shownRank + 1 : null,
+          provider: usedRecommendation ? pickedRecommendation.provider : null,
+          modelId: usedRecommendation ? pickedRecommendation.modelId : null,
         },
-      ])
-      if (result.saved === 0) {
-        throw new Error(
-          result.failures[0]?.message || '조회 키를 저장하지 못했습니다.',
-        )
-      }
+      })
     },
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
+      await upsertInvoiceProductNameMapCache(queryClient, brandId, saved)
       await queryClient.invalidateQueries({
-        queryKey: ['invoice-product-name-maps', brandId],
+        queryKey: ['ai-product-recommendation', brandId, combo.key],
+        refetchType: 'none',
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ['ai-usage-summary', brandId],
       })
       setSavedMessage('조회 키와 본품 연결을 저장했습니다. 바로 다시 적용됩니다.')
     },
@@ -357,113 +409,297 @@ function VariantAssignRow({
 
   return (
     <div className="rounded-md border border-border/80 p-2.5">
-      <div className="flex flex-wrap items-start justify-between gap-2">
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(16rem,20rem)]">
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium">
-            {combo.itemName || '내품명 없음'}
-          </p>
-          <p className="truncate text-xs text-muted-foreground">
-            {combo.mallName || '모든 쇼핑몰'}
-            {combo.appliedRule ? ` · ${ruleLabel(combo.appliedRule)}` : ''}
-            {` · ${formatNumber(combo.rowCount)}행`}
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium">
+                {combo.itemName || '내품명 없음'}
+              </p>
+              <p className="truncate text-xs text-muted-foreground">
+                {combo.mallName || '모든 쇼핑몰'}
+                {combo.appliedRule ? ` · ${ruleLabel(combo.appliedRule)}` : ''}
+                {` · ${formatNumber(combo.rowCount)}행`}
+              </p>
+            </div>
+            <Badge variant={meta.variant}>{meta.label}</Badge>
+          </div>
+
+          {combo.candidates.length > 0 ? (
+            <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+              {combo.candidates.map((candidate) => {
+                const selected = selectedLookupKey === candidate.text
+                return (
+                  <li key={candidate.rule} className="truncate">
+                    <button
+                      type="button"
+                      disabled={mutation.isPending}
+                      title={`${candidate.text} · ${ruleLabel(candidate.rule)}`}
+                      className={`w-full truncate rounded px-1 text-left ${
+                        selected
+                          ? 'bg-primary/10 font-medium'
+                          : 'hover:bg-muted/40'
+                      }`}
+                      onClick={() => {
+                        setSelectedLookupKey(candidate.text)
+                        setPickedRecommendation(null)
+                        setSavedMessage('')
+                        mutation.reset()
+                      }}
+                    >
+                      <span
+                        className={selected ? 'text-primary' : 'text-foreground'}
+                      >
+                        {selected ? '✓ ' : ''}
+                        {candidate.text}
+                      </span>{' '}
+                      · {ruleLabel(candidate.rule)}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          ) : (
+            <p className="mt-2 text-xs text-danger">
+              이 행에서 선택할 조회 키를 만들지 못했습니다.
+            </p>
+          )}
+
+          <div className="mt-2 flex flex-wrap items-end gap-2">
+            <div className="min-w-[16rem] flex-1">
+              <StylePicker
+                brandId={brandId}
+                value={style}
+                disabled={mutation.isPending}
+                onChange={(next) => {
+                  setStyle(next)
+                  setPickedRecommendation(null)
+                  setSavedMessage('')
+                  mutation.reset()
+                }}
+                placeholder="본품 1개만 고르세요"
+              />
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!selectedLookupKey || !style || mutation.isPending}
+              onClick={() => {
+                if (!selectedLookupKey || !style) return
+                setSavedMessage('')
+                mutation.mutate({
+                  lookupKey: selectedLookupKey,
+                  nextStyle: style,
+                })
+              }}
+            >
+              {mutation.isPending ? '저장 중...' : '등록'}
+            </Button>
+          </div>
+          {errorMessage ? (
+            <p className="mt-1 text-xs text-danger">{errorMessage}</p>
+          ) : savedMessage ? (
+            <p className="mt-1 text-xs text-success">{savedMessage}</p>
+          ) : selectedLookupKey && style ? (
+            <p className="mt-1 break-words text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">
+                {selectedLookupKey}
+              </span>
+              을(를){' '}
+              <span className="font-medium text-foreground">
+                {formatStyleRef(style)}
+              </span>
+              (으)로 바꿉니다.
+            </p>
+          ) : selectedLookupKey ? (
+            <p
+              className="mt-1 truncate text-xs text-muted-foreground"
+              title={selectedLookupKey}
+            >
+              선택: <span className="text-foreground">{selectedLookupKey}</span> ·
+              바꿀 본품 M번호를 고르세요.
+            </p>
+          ) : null}
+        </div>
+        <AiRecommendPanel
+          brandId={brandId}
+          combo={combo}
+          disabled={mutation.isPending}
+          onPick={({ lookupKey, nextStyle, recommendation }) => {
+            setSelectedLookupKey(lookupKey)
+            if (nextStyle) setStyle(nextStyle)
+            setPickedRecommendation(recommendation)
+            setSavedMessage('')
+            mutation.reset()
+          }}
+        />
+      </div>
+    </div>
+  )
+}
+
+function AiRecommendPanel({
+  brandId,
+  combo,
+  disabled,
+  onPick,
+}: {
+  brandId: string
+  combo: UnresolvedProductNameCombo
+  disabled: boolean
+  onPick: (next: {
+    lookupKey: string
+    nextStyle?: StyleRef
+    recommendation: AiProductRecommendation
+  }) => void
+}) {
+  const lookupKeys = useMemo(
+    () =>
+      combo.candidates
+        .map((candidate) => candidate.text.trim())
+        .filter(Boolean),
+    [combo.candidates],
+  )
+  const routeQuery = useQuery({
+    queryKey: ['ai-feature-route', brandId, 'invoice_product_recommendation'],
+    queryFn: () =>
+      getAiFeatureRoute(brandId, 'invoice_product_recommendation'),
+    staleTime: 5 * 60_000,
+  })
+  const route = routeQuery.data ?? null
+  const recommendQuery = useQuery({
+    queryKey: [
+      'ai-product-recommendation',
+      brandId,
+      combo.key,
+      route?.provider ?? '',
+      route?.modelId ?? '',
+      route?.recommendationPolicy ?? 'hybrid_auto',
+      JSON.stringify(route?.decisionConfig ?? {}),
+    ],
+    enabled: Boolean(route?.isActive && lookupKeys.length > 0),
+    staleTime: Infinity,
+    retry: false,
+    queryFn: async (): Promise<AiProductRecommendation> =>
+      withRecommendSlot(async () => {
+        const candidates = await searchInvoiceProductCandidates(
+          brandId,
+          lookupKeys,
+          20,
+        )
+        return recommendInvoiceProduct({
+          brandId,
+          lookupKeys,
+          candidates,
+          productName: combo.productName,
+          itemName: combo.itemName,
+          mallName: combo.mallName,
+        })
+      }),
+  })
+  const recommendation = recommendQuery.data
+  const error =
+    recommendQuery.error instanceof Error ? recommendQuery.error.message : null
+
+  return (
+    <div className="rounded-md border border-dashed border-border bg-muted/20 p-2">
+      <p className="text-[11px] font-medium text-muted-foreground">
+        {recommendation?.source === 'local'
+          ? '원장 추천'
+          : recommendation?.source === 'manual'
+            ? '수동 확인'
+            : 'AI 추천'}
+      </p>
+      {routeQuery.isLoading || recommendQuery.isFetching ? (
+        <p className="mt-1 text-xs text-muted-foreground">추천을 만드는 중...</p>
+      ) : !route ? (
+        <p className="mt-1 text-xs text-muted-foreground">
+          설정 → AI 설정에서 모델을 고르면 여기에 추천이 나타납니다.
+        </p>
+      ) : error ? (
+        <p className="mt-1 text-xs text-danger">{error}</p>
+      ) : recommendation ? (
+        <div className="mt-1 space-y-1.5">
+          <button
+            type="button"
+            disabled={disabled}
+            className="w-full truncate rounded px-1 text-left text-xs hover:bg-muted/60"
+            onClick={() => {
+              if (!recommendation.lookupKey) return
+              const first = recommendation.products[0]
+              onPick({
+                lookupKey: recommendation.lookupKey,
+                recommendation,
+                nextStyle: first
+                  ? {
+                      styleId: first.styleId,
+                      styleNo: first.styleNo,
+                      name: first.name,
+                    }
+                  : undefined,
+              })
+            }}
+            title={recommendation.lookupKey}
+          >
+            <span className="text-muted-foreground">조회 키 · </span>
+            <span className="font-medium text-foreground">
+              {recommendation.lookupKey || '추천 없음'}
+            </span>
+          </button>
+          {recommendation.products.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              관련 공식상품을 고르지 못했습니다. 왼쪽에서 직접 지정하세요.
+            </p>
+          ) : (
+            <ul className="space-y-1">
+              {recommendation.products.map((product) => (
+                <li key={product.styleId}>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    className="w-full rounded px-1 py-0.5 text-left text-xs hover:bg-muted/60"
+                    title={`${product.styleNo} · ${product.name}`}
+                    onClick={() =>
+                      onPick({
+                        lookupKey:
+                          recommendation.lookupKey || lookupKeys[0] || '',
+                        recommendation,
+                        nextStyle: {
+                          styleId: product.styleId,
+                          styleNo: product.styleNo,
+                          name: product.name,
+                        },
+                      })
+                    }
+                  >
+                    <span className="font-medium text-foreground">
+                      {product.styleNo}
+                    </span>
+                    <span className="ml-1 text-muted-foreground">
+                      {product.name}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="truncate text-[10px] text-muted-foreground">
+            {recommendation.source === 'local'
+              ? '원장'
+              : recommendation.cacheHit
+                ? '캐시'
+                : PROVIDER_LABEL[recommendation.provider]}
+            {recommendation.source !== 'local' && recommendation.modelId
+              ? ` · ${recommendation.modelId}`
+              : ''}
+            {recommendation.reason ? ` · ${recommendation.reason}` : ''}
           </p>
         </div>
-        <Badge variant={meta.variant}>{meta.label}</Badge>
-      </div>
-
-      {combo.candidates.length > 0 ? (
-        <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
-          {combo.candidates.map((candidate) => {
-            const selected = selectedLookupKey === candidate.text
-            return (
-              <li key={candidate.rule} className="truncate">
-                <button
-                  type="button"
-                  disabled={mutation.isPending}
-                  title={`${candidate.text} · ${ruleLabel(candidate.rule)}`}
-                  className={`w-full truncate rounded px-1 text-left ${
-                    selected
-                      ? 'bg-primary/10 font-medium'
-                      : 'hover:bg-muted/40'
-                  }`}
-                  onClick={() => {
-                    setSelectedLookupKey(candidate.text)
-                    setSavedMessage('')
-                    mutation.reset()
-                  }}
-                >
-                  <span
-                    className={selected ? 'text-primary' : 'text-foreground'}
-                  >
-                    {selected ? '✓ ' : ''}
-                    {candidate.text}
-                  </span>{' '}
-                  · {ruleLabel(candidate.rule)}
-                </button>
-              </li>
-            )
-          })}
-        </ul>
       ) : (
-        <p className="mt-2 text-xs text-danger">
-          이 행에서 선택할 조회 키를 만들지 못했습니다.
+        <p className="mt-1 text-xs text-muted-foreground">
+          추천을 아직 받지 못했습니다.
         </p>
       )}
-
-      <div className="mt-2 flex flex-wrap items-end gap-2">
-        <div className="min-w-[16rem] flex-1">
-          <StylePicker
-            brandId={brandId}
-            value={style}
-            disabled={mutation.isPending}
-            onChange={(next) => {
-              setStyle(next)
-              setSavedMessage('')
-              mutation.reset()
-            }}
-            placeholder="본품 1개만 고르세요"
-          />
-        </div>
-        <Button
-          type="button"
-          size="sm"
-          disabled={!selectedLookupKey || !style || mutation.isPending}
-          onClick={() => {
-            if (!selectedLookupKey || !style) return
-            setSavedMessage('')
-            mutation.mutate({
-              lookupKey: selectedLookupKey,
-              nextStyle: style,
-            })
-          }}
-        >
-          {mutation.isPending ? '저장 중...' : '등록'}
-        </Button>
-      </div>
-      {errorMessage ? (
-        <p className="mt-1 text-xs text-danger">{errorMessage}</p>
-      ) : savedMessage ? (
-        <p className="mt-1 text-xs text-success">{savedMessage}</p>
-      ) : selectedLookupKey && style ? (
-        <p className="mt-1 break-words text-xs text-muted-foreground">
-          <span className="font-medium text-foreground">
-            {selectedLookupKey}
-          </span>
-          을(를){' '}
-          <span className="font-medium text-foreground">
-            {formatStyleRef(style)}
-          </span>
-          (으)로 바꿉니다.
-        </p>
-      ) : selectedLookupKey ? (
-        <p
-          className="mt-1 truncate text-xs text-muted-foreground"
-          title={selectedLookupKey}
-        >
-          선택: <span className="text-foreground">{selectedLookupKey}</span> ·
-          바꿀 본품 M번호를 고르세요.
-        </p>
-      ) : null}
     </div>
   )
 }

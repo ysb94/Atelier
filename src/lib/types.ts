@@ -764,3 +764,72 @@ export const SEASON_STATUS_LABEL: Record<SeasonStatus, string> = {
   active: '진행 중',
   archived: '마감',
 }
+
+export type AiProvider = 'openai' | 'anthropic' | 'gemini'
+
+export type AiFeatureKey = 'invoice_product_recommendation'
+
+export type AiRecommendationPolicy = 'hybrid_auto' | 'always_ai' | 'local_only'
+
+export type AiFeatureRoute = {
+  id: string
+  brandId: string
+  featureKey: string
+  provider: AiProvider
+  modelId: string
+  isActive: boolean
+  recommendationPolicy: AiRecommendationPolicy
+  decisionConfig: {
+    high: number
+    margin: number
+    low: number
+    aiTopN: number
+  }
+  createdAt: string
+  updatedAt: string
+}
+
+export type AiProductCandidate = {
+  source: string
+  lookupKey: string
+  styleId: string
+  styleNo: string
+  name: string
+  score: number
+  rank?: number
+}
+
+export type AiRecommendProduct = {
+  styleId: string
+  styleNo: string
+  name: string
+  reason: string
+  confidence: number
+}
+
+export type AiRecommendationSource = 'local' | 'manual' | 'ai' | 'cache'
+
+export type AiProductRecommendation = {
+  lookupKey: string
+  reason: string
+  products: AiRecommendProduct[]
+  provider: AiProvider
+  modelId: string
+  source: AiRecommendationSource
+  cacheId: string | null
+  skippedAi: boolean
+  cacheHit: boolean
+}
+
+export type AiUsageSummary = {
+  total: number
+  localCount: number
+  aiCount: number
+  cacheCount: number
+  skippedAiCount: number
+  inputTokens: number
+  outputTokens: number
+  top1Rate: number | null
+  top3Rate: number | null
+  editRate: number | null
+}

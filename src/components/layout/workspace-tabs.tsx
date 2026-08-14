@@ -57,6 +57,7 @@ const NAV_LABELS: {
   { match: /^\/settings\/usage-targets(?:\/|$)/, label: '사용처' },
   { match: /^\/settings\/import(?:\/|$)/, label: '가져오기' },
   { match: /^\/settings\/members(?:\/|$)/, label: '멤버' },
+  { match: /^\/settings\/ai(?:\/|$)/, label: 'AI 설정' },
   { match: /^\/settings\/brand(?:\/|$)/, label: '브랜드 정보' },
 ]
 

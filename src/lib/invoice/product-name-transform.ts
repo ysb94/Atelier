@@ -63,8 +63,44 @@ function comboKey(mallName: string, productName: string, itemName: string) {
   ].join('\u0000')
 }
 
+function comboIndexKey(mall: string, product: string, item: string) {
+  return [mall, product, item].join('\u0000')
+}
+
+type ComboMapIndex = {
+  exact: Map<string, InvoiceProductNameMap[]>
+  anyMall: Map<string, InvoiceProductNameMap[]>
+}
+
+function indexComboMaps(maps: InvoiceProductNameMap[]): ComboMapIndex {
+  const exact = new Map<string, InvoiceProductNameMap[]>()
+  const anyMall = new Map<string, InvoiceProductNameMap[]>()
+  for (const map of maps) {
+    if (map.normalizedLookupKey) continue
+    const exactKey = comboIndexKey(
+      map.normalizedMallName,
+      map.normalizedProductName,
+      map.normalizedItemNameContext,
+    )
+    const exactList = exact.get(exactKey) ?? []
+    exactList.push(map)
+    exact.set(exactKey, exactList)
+    if (!map.normalizedMallName) {
+      const anyKey = comboIndexKey(
+        '',
+        map.normalizedProductName,
+        map.normalizedItemNameContext,
+      )
+      const anyList = anyMall.get(anyKey) ?? []
+      anyList.push(map)
+      anyMall.set(anyKey, anyList)
+    }
+  }
+  return { exact, anyMall }
+}
+
 function pickMaps(
-  maps: InvoiceProductNameMap[],
+  index: ComboMapIndex,
   mallName: string,
   productName: string,
   itemName: string,
@@ -72,22 +108,9 @@ function pickMaps(
   const mall = normalizeInvoiceText(mallName)
   const product = normalizeInvoiceText(productName)
   const item = normalizeInvoiceText(itemName)
-  // 조회 키 기준은 조합 열이 아니라 후보 문자열로만 맞춘다.
-  const comboMaps = maps.filter((map) => !map.normalizedLookupKey)
-  const exact = comboMaps.filter(
-    (map) =>
-      map.normalizedMallName === mall &&
-      map.normalizedProductName === product &&
-      map.normalizedItemNameContext === item,
-  )
+  const exact = index.exact.get(comboIndexKey(mall, product, item)) ?? []
   if (exact.length > 0) return exact
-
-  return comboMaps.filter(
-    (map) =>
-      !map.normalizedMallName &&
-      map.normalizedProductName === product &&
-      map.normalizedItemNameContext === item,
-  )
+  return index.anyMall.get(comboIndexKey('', product, item)) ?? []
 }
 
 function lookupStyles(
@@ -115,6 +138,7 @@ export function transformInvoiceProductNames(
   catalog: ProductNameStyleCatalog,
 ): InvoiceProductNameTransformation {
   const activeMaps = maps.filter((map) => map.isActive)
+  const comboIndex = indexComboMaps(activeMaps)
   const ledgerByKey = new Map<string, InvoiceProductNameMap[]>()
   for (const map of activeMaps) {
     if (!map.normalizedLookupKey) continue
@@ -158,7 +182,7 @@ export function transformInvoiceProductNames(
 
   const rows = sourceRows.map((source): InvoiceProductNameTransformRow => {
     const matches = pickMaps(
-      activeMaps,
+      comboIndex,
       source.mallName,
       source.productName,
       source.itemName,

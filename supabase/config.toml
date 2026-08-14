@@ -1,0 +1,4 @@
+# Atelier Edge Functions
+
+[functions.ai-gateway]
+verify_jwt = true

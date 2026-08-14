@@ -19,6 +19,7 @@ import { SeasonsSettingsPage } from '@/features/settings/SeasonsSettingsPage'
 import { UsageTargetsSettingsPage } from '@/features/settings/UsageTargetsSettingsPage'
 import { ImportSettingsPage } from '@/features/settings/ImportSettingsPage'
 import { BrandSettingsPage } from '@/features/settings/BrandSettingsPage'
+import { AiSettingsPage } from '@/features/settings/AiSettingsPage'
 import { MembersPage } from '@/features/settings/MembersPage'
 import { DataSheetPage } from '@/features/data/DataSheetPage'
 import { DataUploadPage } from '@/features/data/DataUploadPage'
@@ -66,6 +67,7 @@ export function BrandWorkspaceRouteTree() {
       />
       <Route path="settings/import" element={<ImportSettingsPage />} />
       <Route path="settings/members" element={<MembersPage />} />
+      <Route path="settings/ai" element={<AiSettingsPage />} />
       <Route path="settings/brand" element={<BrandSettingsPage />} />
       <Route path="upload" element={<RedirectTo to="data/upload" />} />
       <Route path="import" element={<RedirectTo to="data/upload" />} />

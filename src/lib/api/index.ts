@@ -1,4 +1,10 @@
 import type {
+  AiFeatureRoute,
+  AiProductCandidate,
+  AiProductRecommendation,
+  AiProvider,
+  AiRecommendationPolicy,
+  AiUsageSummary,
   Brand,
   BrandInput,
   BrandField,
@@ -27,6 +33,9 @@ import type {
   Style,
   StyleInput,
 } from '@/lib/types'
+import * as aiCandidateStore from '@/lib/supabase/ai-candidates'
+import * as aiGatewayStore from '@/lib/supabase/ai-gateway'
+import * as aiSettingsStore from '@/lib/supabase/ai-settings'
 import * as brandStore from '@/lib/supabase/brands'
 import { getMyProfile } from '@/lib/supabase/profiles'
 import * as brandFieldStore from '@/lib/supabase/brand-fields'
@@ -46,6 +55,9 @@ import * as styleStore from '@/lib/supabase/styles'
 
 const delay = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms))
 
+export { AiCandidateStoreError } from '@/lib/supabase/ai-candidates'
+export { AiGatewayError } from '@/lib/supabase/ai-gateway'
+export { AiSettingsStoreError } from '@/lib/supabase/ai-settings'
 export { BrandStoreError } from '@/lib/supabase/brands'
 export { BrandFieldStoreError } from '@/lib/supabase/brand-fields'
 export { BarcodeFieldStoreError } from '@/lib/supabase/barcode-fields'
@@ -329,6 +341,64 @@ export async function applyBulkInvoiceProductNameMaps(
     brandId,
     rows,
   )
+}
+
+export async function getAiFeatureRoutes(
+  brandId: string,
+): Promise<AiFeatureRoute[]> {
+  return aiSettingsStore.listAiFeatureRoutes(brandId)
+}
+
+export async function getAiFeatureRoute(
+  brandId: string,
+  featureKey: string,
+): Promise<AiFeatureRoute | null> {
+  return aiSettingsStore.getAiFeatureRoute(brandId, featureKey)
+}
+
+export async function saveAiFeatureRoute(
+  brandId: string,
+  input: {
+    featureKey: string
+    provider: AiProvider
+    modelId: string
+    isActive?: boolean
+    recommendationPolicy?: AiRecommendationPolicy
+  },
+): Promise<AiFeatureRoute> {
+  return aiSettingsStore.saveAiFeatureRoute(brandId, input)
+}
+
+export async function getAiUsageSummary(brandId: string): Promise<AiUsageSummary> {
+  return aiSettingsStore.getAiUsageSummary(brandId)
+}
+
+export async function listAiModels(provider: AiProvider) {
+  return aiGatewayStore.listAiModels(provider)
+}
+
+export async function testAiConnection(provider: AiProvider, modelId: string) {
+  return aiGatewayStore.testAiConnection(provider, modelId)
+}
+
+export async function searchInvoiceProductCandidates(
+  brandId: string,
+  texts: string[],
+  limit = 20,
+): Promise<AiProductCandidate[]> {
+  return aiCandidateStore.searchInvoiceProductCandidates(brandId, texts, limit)
+}
+
+export async function recommendInvoiceProduct(input: {
+  brandId: string
+  featureKey?: string
+  lookupKeys: string[]
+  candidates: AiProductCandidate[]
+  productName: string
+  itemName: string
+  mallName: string
+}): Promise<AiProductRecommendation> {
+  return aiGatewayStore.recommendInvoiceProduct(input)
 }
 
 /** 사은품 증정 요청 건. 쇼핑몰명 + 원본 품목명 + 행사 기간으로 찾는다. */

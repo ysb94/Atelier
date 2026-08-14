@@ -43,6 +43,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 송장 사은품 증정 요청 건(`invoice_prefix_requests` + `invoice_prefix_items` + `invoice_prefix_item_products`, 앱 모델명 Gift) | Supabase |
 | 송장 사은품 선착순 한도·배정 원장(`invoice_prefix_requests` 한도 필드 + `invoice_gift_quotas` + `invoice_gift_allocations`) | Supabase |
 | 송장 작업 지시(`invoice_work_instructions` + `invoice_work_instruction_items`) | Supabase |
+| 브랜드 AI 설정·사용량(`ai_feature_routes` + `ai_usage_logs`) | Supabase |
 
 - 상품·출시 기획·기획안·코드·사용처는 **0건으로 시작**한다. 자동 목업 시드를 넣지 않는다.
 - `brand_fields`만 품번·상품명 등 실행에 필요한 시스템 항목 구조를 브랜드별로 깐다.
@@ -232,6 +233,36 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 마이그레이션: `20260813180000_invoice_option_maps.sql`,
   `20260813190000_invoice_product_name_maps.sql`,
   `20260813200000_invoice_product_name_lookup_key.sql`.
+
+### 브랜드별 AI 설정
+
+- `ai_feature_routes`는 브랜드·기능마다 제공자(`openai|anthropic|gemini`)와
+  모델 ID만 저장한다. API 키는 DB·Git·브라우저에 두지 않고 Edge Function
+  Secret(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`)에만 둔다.
+- 기본 정책은 `hybrid_auto`다. 확정 원장·등록 이력·유사도 1위가 충분하면
+  AI를 건너뛰고, 후보가 없거나 저신뢰 1개면 수동 확인, 2개 이상이 애매할
+  때만 상위 6개를 AI에 보낸다. 임계값은 로컬 정밀도 검증으로 맞추며 일반
+  화면에서는 직접 고치지 않는다.
+- `ai_recommendation_cache`는 브랜드·모델·입력 fingerprint로 추천을 공유한다.
+  `ai_recommendation_feedback`는 기존 `등록`이 성공한 결과만 남긴다.
+  원장 저장과 피드백은 `save_invoice_product_name_map_with_feedback` 한
+  트랜잭션으로 처리한다. 등록은 관련 조회 키 캐시만 지운다. 다른 조합은
+  후보 fingerprint가 바뀌면 키가 달라져 자연히 무효가 된다. 모델·정책
+  변경처럼 전체 초기화가 필요할 때만 1인자
+  `app.invalidate_ai_recommendation_cache(brand_id)`를 쓴다.
+- `ai_usage_logs`는 토큰, `resolution_source`, 캐시 적중, AI 생략 여부를
+  남긴다. 프롬프트·응답 원문과 주문자 개인정보는 저장하지 않는다.
+- 유사 후보는 `app.search_invoice_product_candidates_core`가 브랜드 권한을
+  한 번만 검사한 뒤 exact → 원장 trigram → 상품명 trigram 순으로 고른다.
+  `public.search_invoice_product_candidates`는 기존 시그니처의 래퍼다.
+- 읽기는 `app.can_read_brand`, 설정 쓰기는
+  `app.is_admin() or app.is_brand_lead(brand_id)`다. 일반 멤버는 선택된
+  설정으로 추천만 요청한다.
+- 게이트웨이는 `supabase/functions/ai-gateway` 하나다. 앱 API는
+  `src/lib/supabase/ai-settings.ts`, `ai-gateway.ts`, `ai-candidates.ts`다.
+- 마이그레이션: `20260814013200_ai_feature_routes.sql`,
+  `20260814025900_ai_hybrid_recommendation.sql`,
+  `20260814033319_ai_cache_lookup_invalidate.sql`.
 
 ### 송장 사은품 증정 · 작업 지시
 

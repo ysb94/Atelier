@@ -987,6 +987,88 @@ assert(
   '조회 키로 맞아도 내품명 원문 유지',
 )
 
+const comboExactStyle = style('s-combo-exact', 'M9001', '조합 exact 본품')
+const comboAnyStyle = style('s-combo-any', 'M9002', '전쇼핑몰 본품')
+const comboSource = row({
+  rowNumber: 8801,
+  productName: '조합 품목명',
+  itemName: '조합 내품명',
+  mallName: '스마트스토어',
+})
+function comboMap(
+  id: string,
+  mallName: string,
+  ref: StyleRef,
+): InvoiceProductNameMap {
+  return {
+    id,
+    brandId: 'brand',
+    mallName,
+    normalizedMallName: normalizeInvoiceText(mallName),
+    productName: comboSource.productName,
+    normalizedProductName: normalizeInvoiceText(comboSource.productName),
+    itemNameContext: comboSource.itemName,
+    normalizedItemNameContext: normalizeInvoiceText(comboSource.itemName),
+    ownProductCode: '',
+    normalizedOwnProductCode: '',
+    lookupKey: '',
+    normalizedLookupKey: '',
+    style: ref,
+    isActive: true,
+    note: '',
+    createdAt: '2026-08-13T00:00:00.000Z',
+    updatedAt: '2026-08-13T00:00:00.000Z',
+  }
+}
+const noisyLookupMaps: InvoiceProductNameMap[] = Array.from(
+  { length: 40 },
+  (_, index) => ({
+    id: `noise-${index}`,
+    brandId: 'brand',
+    mallName: '',
+    normalizedMallName: '',
+    productName: `노이즈 ${index}`,
+    normalizedProductName: normalizeInvoiceText(`노이즈 ${index}`),
+    itemNameContext: '',
+    normalizedItemNameContext: '',
+    ownProductCode: '',
+    normalizedOwnProductCode: '',
+    lookupKey: `노이즈 ${index}`,
+    normalizedLookupKey: normalizeInvoiceText(`노이즈 ${index}`),
+    style: comboAnyStyle,
+    isActive: true,
+    note: '',
+    createdAt: '2026-08-13T00:00:00.000Z',
+    updatedAt: '2026-08-13T00:00:00.000Z',
+  }),
+)
+const comboExactResult = transformInvoiceProductNames(
+  [comboSource],
+  [
+    ...noisyLookupMaps,
+    comboMap('combo-any', '', comboAnyStyle),
+    comboMap('combo-exact', '스마트스토어', comboExactStyle),
+  ],
+  catalogFromStyles([]),
+)
+assert(
+  comboExactResult.rows[0]?.status === 'mapped' &&
+    comboExactResult.rows[0]?.appliedRule === 'exact' &&
+    comboExactResult.rows[0]?.transformedProductName === comboExactStyle.name,
+  '쇼핑몰 지정 조합이 조회 키 원장보다 우선',
+)
+const comboAnyResult = transformInvoiceProductNames(
+  [comboSource],
+  [...noisyLookupMaps, comboMap('combo-any-only', '', comboAnyStyle)],
+  catalogFromStyles([]),
+)
+assert(
+  comboAnyResult.rows[0]?.status === 'mapped' &&
+    comboAnyResult.rows[0]?.appliedRule === 'exact' &&
+    comboAnyResult.rows[0]?.transformedProductName === comboAnyStyle.name,
+  '쇼핑몰이 비어 있으면 전쇼핑몰 조합으로 맞음',
+)
+
 const outgoingFromStages = buildOutgoingComponentRowsFromStages({
   productRows: productResult.rows,
   itemRows: displayed.rows,

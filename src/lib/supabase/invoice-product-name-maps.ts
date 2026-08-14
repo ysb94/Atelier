@@ -75,6 +75,14 @@ function toMap(row: MapRow): InvoiceProductNameMap | null {
   }
 }
 
+export type InvoiceProductNameMapFeedback = {
+  source: 'manual' | 'local' | 'ai'
+  cacheId?: string | null
+  shownRank?: number | null
+  provider?: string | null
+  modelId?: string | null
+}
+
 export type InvoiceProductNameMapInput = {
   mallName?: string
   productName: string
@@ -85,6 +93,7 @@ export type InvoiceProductNameMapInput = {
   styleId: string
   isActive?: boolean
   note?: string
+  feedback?: InvoiceProductNameMapFeedback
 }
 
 function validateInput(input: InvoiceProductNameMapInput) {
@@ -178,14 +187,25 @@ export async function saveInvoiceProductNameMap(
     )
   }
 
-  const targetId = mapId || existing?.id || null
-  const writer = targetId
-    ? supabase.from('invoice_product_name_maps').update(payload).eq('id', targetId)
-    : supabase.from('invoice_product_name_maps').insert(payload)
-
-  const { data, error } = await writer.select(SELECT_WITH_STYLE).single()
-  if (error || !data) {
-    if (isUniqueViolation(error ?? {})) {
+  const { data: savedId, error: saveError } = await supabase.rpc(
+    'save_invoice_product_name_map_with_feedback',
+    {
+      p_brand_id: brandId,
+      p_row: payload,
+      p_map_id: mapId || existing?.id || null,
+      p_feedback: input.feedback
+        ? {
+            source: input.feedback.source,
+            cache_id: input.feedback.cacheId ?? null,
+            shown_rank: input.feedback.shownRank ?? null,
+            provider: input.feedback.provider ?? null,
+            model_id: input.feedback.modelId ?? null,
+          }
+        : null,
+    },
+  )
+  if (saveError || !savedId) {
+    if (isUniqueViolation(saveError ?? {})) {
       throw new InvoiceProductNameMapStoreError(
         payload.normalized_lookup_key
           ? '같은 조회 키가 다른 본품으로 이미 있습니다.'
@@ -193,7 +213,18 @@ export async function saveInvoiceProductNameMap(
       )
     }
     throw new InvoiceProductNameMapStoreError(
-      errorMessage(error, '품목명 변환 기준을 저장하지 못했습니다.'),
+      errorMessage(saveError, '품목명 변환 기준을 저장하지 못했습니다.'),
+    )
+  }
+
+  const { data, error } = await supabase
+    .from('invoice_product_name_maps')
+    .select(SELECT_WITH_STYLE)
+    .eq('id', savedId)
+    .single()
+  if (error || !data) {
+    throw new InvoiceProductNameMapStoreError(
+      errorMessage(error, '저장한 본품을 불러오지 못했습니다.'),
     )
   }
   const mapped = toMap(data as MapRow)
