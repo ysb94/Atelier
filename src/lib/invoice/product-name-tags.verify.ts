@@ -3,6 +3,7 @@
  * 실행: npm run verify:product-name-tags
  */
 import { generateProductNameCandidates } from '@/lib/invoice/product-name-patterns'
+import { compactProductNameKey } from '@/lib/invoice/lookup-normalization'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import {
   RESERVATION_SHIPPING_DATE_FAMILY,
@@ -165,6 +166,22 @@ assert(
   fileGroups.find((group) => group.tag.key === RESERVATION_SHIPPING_DATE_FAMILY)
     ?.variantCount === 2,
   '날짜 변형 수를 모은다',
+)
+
+assert(
+  compactProductNameKey('MSMRZ Logo Ball cap_12color / Color: Ivory') ===
+    compactProductNameKey('msmrz logo ball cap 12color Color=Ivory'),
+  '대소문자·공백·기호 차이는 압축 키가 같음',
+)
+assert(
+  compactProductNameKey('[1+1] MSMRZ Logo Ball cap') !==
+    compactProductNameKey('MSMRZ Logo Ball cap'),
+  '압축 키는 태그 괄호를 직접 해석하지 않음',
+)
+assert(
+  compactProductNameKey('[리퍼브] String flap backpack') ===
+    '리퍼브stringflapbackpack',
+  '특징 태그는 압축 키에 내용이 남음',
 )
 
 console.log('product-name-tags verify: ok')

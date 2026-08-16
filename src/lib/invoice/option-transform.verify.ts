@@ -1191,4 +1191,192 @@ assert(
   '태그 역할은 출고구성 행 수를 바꾸지 않음',
 )
 
+function lookupMap(
+  id: string,
+  lookupKey: string,
+  ref: StyleRef,
+): InvoiceProductNameMap {
+  return {
+    id,
+    brandId: 'brand',
+    mallName: '',
+    normalizedMallName: '',
+    productName: lookupKey,
+    normalizedProductName: normalizeInvoiceText(lookupKey),
+    itemNameContext: '',
+    normalizedItemNameContext: '',
+    ownProductCode: '',
+    normalizedOwnProductCode: '',
+    lookupKey,
+    normalizedLookupKey: normalizeInvoiceText(lookupKey),
+    style: ref,
+    isActive: true,
+    note: '',
+    createdAt: '2026-08-16T00:00:00.000Z',
+    updatedAt: '2026-08-16T00:00:00.000Z',
+  }
+}
+
+const compactStyle = style('s-compact', 'M9100', 'MSMRZ Logo Ball cap')
+const compactSource = row({
+  rowNumber: 9101,
+  productName: 'MSMRZ Logo Ball_cap / 12color',
+  itemName: '',
+  mallName: '스마트스토어',
+})
+const compactMapped = transformInvoiceProductNames(
+  [compactSource],
+  [lookupMap('compact-1', 'MSMRZ Logo Ball cap 12color', compactStyle)],
+  catalogFromStyles([]),
+)
+assert(
+  compactMapped.rows[0]?.status === 'mapped' &&
+    compactMapped.rows[0]?.appliedRule === 'compact' &&
+    compactMapped.rows[0]?.transformedProductName === compactStyle.name,
+  '공백·기호만 다른 원장 조회 키는 압축 매칭',
+)
+
+const taggedLedgerStyle = style('s-tag-ledger', 'M9101', '마스마룰즈 래빗에코백')
+const taggedLedger = transformInvoiceProductNames(
+  [
+    row({
+      rowNumber: 9102,
+      productName: '마스마룰즈 래빗에코백',
+      itemName: '',
+      mallName: '스마트스토어',
+    }),
+  ],
+  [lookupMap('tag-ledger-1', '[단독] 마스마룰즈 래빗에코백', taggedLedgerStyle)],
+  catalogFromStyles([]),
+  [tagRole('[단독]', 'event_marketing')],
+)
+assert(
+  taggedLedger.rows[0]?.status === 'mapped' &&
+    taggedLedger.rows[0]?.transformedProductName === taggedLedgerStyle.name,
+  '원장 조회 키의 행사 태그를 빼면 별칭으로 매칭',
+)
+
+const keepIdentity = transformInvoiceProductNames(
+  [
+    row({
+      rowNumber: 9103,
+      productName: 'String flap backpack',
+      itemName: '',
+      mallName: '스마트스토어',
+    }),
+  ],
+  [
+    lookupMap(
+      'identity-1',
+      '[리퍼브] String flap backpack',
+      style('s-refurb', 'M9102', '[리퍼브] String flap backpack'),
+    ),
+  ],
+  catalogFromStyles([]),
+  [tagRole('[리퍼브]', 'identity_condition')],
+)
+assert(
+  keepIdentity.rows[0]?.status !== 'mapped',
+  '상품 특징 태그는 원장 별칭에서 제거하지 않음',
+)
+
+const sameStyleA = style('s-same-a', 'M9103', '동일 본품 A')
+const sameStyleAlias = style('s-same-a', 'M9103', '동일 본품 A')
+const sameStyleMaps = transformInvoiceProductNames(
+  [
+    row({
+      rowNumber: 9104,
+      productName: '동일본품A',
+      itemName: '',
+      mallName: '스마트스토어',
+    }),
+  ],
+  [
+    lookupMap('same-1', '동일 본품 A', sameStyleA),
+    lookupMap('same-2', '동일_본품_A', sameStyleAlias),
+  ],
+  catalogFromStyles([]),
+)
+assert(
+  sameStyleMaps.rows[0]?.status === 'mapped' &&
+    sameStyleMaps.rows[0]?.style?.styleId === 's-same-a',
+  '같은 M번호의 여러 압축 별칭은 자동 완료',
+)
+
+const conflictCompact = transformInvoiceProductNames(
+  [
+    row({
+      rowNumber: 9105,
+      productName: '충돌본품',
+      itemName: '',
+      mallName: '스마트스토어',
+    }),
+  ],
+  [
+    lookupMap(
+      'conflict-1',
+      '충돌 본품',
+      style('s-conflict-1', 'M9104', '충돌 본품 1'),
+    ),
+    lookupMap(
+      'conflict-2',
+      '충돌_본품',
+      style('s-conflict-2', 'M9105', '충돌 본품 2'),
+    ),
+  ],
+  catalogFromStyles([]),
+)
+assert(
+  conflictCompact.rows[0]?.status === 'conflict',
+  '서로 다른 M번호의 같은 압축 키는 충돌',
+)
+
+const strictFirstStyle = style('s-strict-first', 'M9106', '엄격 우선 본품')
+const strictFirst = transformInvoiceProductNames(
+  [
+    row({
+      rowNumber: 9106,
+      productName: '엄격우선본품',
+      itemName: '',
+      mallName: '스마트스토어',
+    }),
+  ],
+  [
+    lookupMap('strict-first', '엄격우선본품', strictFirstStyle),
+    lookupMap(
+      'compact-other',
+      '엄격_우선_본품',
+      style('s-compact-other', 'M9107', '압축만 같은 다른 본품'),
+    ),
+  ],
+  catalogFromStyles([]),
+)
+assert(
+  strictFirst.rows[0]?.status === 'mapped' &&
+    strictFirst.rows[0]?.appliedRule !== 'compact' &&
+    strictFirst.rows[0]?.style?.styleId === 's-strict-first',
+  '엄격 키가 있으면 압축 키보다 우선',
+)
+
+const compactOfficial = transformInvoiceProductNames(
+  [
+    row({
+      rowNumber: 9107,
+      productName: '공식_상품명_압축',
+      itemName: '',
+      mallName: '스마트스토어',
+    }),
+  ],
+  [],
+  catalogFromStyles([
+    style('s-official-compact', 'M9108', '공식 상품명 압축'),
+  ]),
+)
+assert(
+  compactOfficial.rows[0]?.status === 'candidate' &&
+    compactOfficial.rows[0]?.appliedRule === 'compact' &&
+    compactOfficial.rows[0]?.transformedProductName === '공식 상품명 압축',
+  '공식상품명도 압축 키로 후보 1개',
+)
+
 console.log('option-maps verify ok')

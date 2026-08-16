@@ -12,25 +12,31 @@ export function ProductThumb({
   alt,
   size = 24,
   className,
+  onCurrentSourceChange,
 }: {
   sources: string[]
   alt: string
   size?: number
   className?: string
+  onCurrentSourceChange?: (url: string | null) => void
 }) {
   const key = sources.join('|')
   const [index, setIndex] = useState(0)
+  const current = sources[index] ?? null
 
   useEffect(() => {
     setIndex(0)
   }, [key])
 
+  useEffect(() => {
+    onCurrentSourceChange?.(current)
+  }, [current, onCurrentSourceChange])
+
   const shell = cn(
-    'shrink-0 overflow-hidden rounded border border-border bg-muted',
+    'shrink-0 overflow-hidden rounded border border-border bg-muted object-cover',
     className,
   )
   const box = { width: size, height: size }
-  const current = sources[index]
 
   if (!current) {
     return (
@@ -43,7 +49,12 @@ export function ProductThumb({
             : '이미지를 찾을 수 없습니다.'
         }
       >
-        <ImageOff className="size-3 text-muted-foreground/60" />
+        <ImageOff
+          className={cn(
+            'text-muted-foreground/60',
+            size >= 80 ? 'size-8' : 'size-3',
+          )}
+        />
       </div>
     )
   }
@@ -55,7 +66,7 @@ export function ProductThumb({
       alt={alt}
       loading="lazy"
       decoding="async"
-      className={cn(shell, 'object-cover')}
+      className={shell}
       style={box}
       onError={() => setIndex((prev) => prev + 1)}
     />

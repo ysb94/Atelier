@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { StylePicker, formatStyleRef } from '@/components/style-picker'
 import { Badge } from '@/components/ui/badge'
@@ -9,7 +9,6 @@ import { withRecommendSlot } from '@/lib/ai/recommend-queue'
 import {
   getAiFeatureRoute,
   recommendInvoiceProduct,
-  saveInvoiceProductNameMap,
   saveInvoiceProductNameTagRole,
   searchInvoiceProductCandidates,
 } from '@/lib/api'
@@ -20,8 +19,10 @@ import type {
 } from '@/lib/invoice/product-name-transform'
 import {
   collectFileTagGroups,
+  type FileTagGroup,
   type ParsedProductNameTag,
 } from '@/lib/invoice/product-name-tags'
+import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import type {
   AiProductRecommendation,
   InvoiceProductNameMap,
@@ -30,6 +31,13 @@ import type {
 } from '@/lib/types'
 import { INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
+import { InvoiceProductNameRecentSavesPanel } from './InvoiceProductNameRecentSavesPanel'
+import {
+  useInvoiceProductNameSaveQueue,
+  type ProductMapEnqueueInput,
+  type ProductMapSaveDraft,
+  type ProductMapSaveFeedback,
+} from './useInvoiceProductNameSaveQueue'
 
 const STATUS_META: Record<
   InvoiceProductNameMatchStatus,
@@ -56,6 +64,7 @@ const RULE_LABELS: Record<string, string> = {
   item_value: '옵션값 단독(내품명 비움)',
   item_slash_suffix: '내품명 / 뒷부분(SSG)',
   own_code: '자체상품코드',
+  compact: '기호·공백 정리',
 }
 
 function ruleLabel(rule: string | null) {
@@ -69,26 +78,33 @@ type ProductReviewGroup = {
   rowCount: number
 }
 
-function upsertInvoiceProductNameMapCache(
-  queryClient: ReturnType<typeof useQueryClient>,
-  brandId: string,
-  saved: InvoiceProductNameMap,
-) {
-  const queryKey = ['invoice-product-name-maps', brandId] as const
-  const current = queryClient.getQueryData<InvoiceProductNameMap[]>(queryKey)
-  if (!current) {
-    return queryClient.invalidateQueries({ queryKey })
+function buildReviewReasons(input: {
+  combo: UnresolvedProductNameCombo
+  lookupKey: string
+  style: StyleRef
+  selectedRule: string | null
+  feedback: ProductMapSaveFeedback
+  previousMap: InvoiceProductNameMap | null
+  variantCount: number
+}): string[] {
+  const reasons: string[] = []
+  if (input.combo.status === 'conflict') reasons.push('충돌')
+  if (input.selectedRule === 'compact') reasons.push('기호·공백 매칭')
+  if (
+    input.previousMap &&
+    input.previousMap.style.styleId !== input.style.styleId
+  ) {
+    reasons.push('기존 M번호 변경')
   }
-  queryClient.setQueryData<InvoiceProductNameMap[]>(queryKey, (maps = []) => {
-    const next = maps.filter((map) => {
-      if (map.id === saved.id) return false
-      return !(
-        saved.normalizedLookupKey &&
-        map.normalizedLookupKey === saved.normalizedLookupKey
-      )
-    })
-    return [saved, ...next]
-  })
+  if (input.feedback.source === 'ai') reasons.push('AI 추천')
+  const productOnly =
+    input.selectedRule === 'product' ||
+    normalizeInvoiceText(input.lookupKey) ===
+      normalizeInvoiceText(input.combo.productName)
+  if (productOnly && input.variantCount > 1) {
+    reasons.push('품목명 단독·여러 변형')
+  }
+  return reasons
 }
 
 function groupCombos(
@@ -124,10 +140,44 @@ export function InvoiceProductNameTransformPanel({
   brandId: string
   transformation: InvoiceProductNameTransformation
 }) {
-  const groups = useMemo(
-    () => groupCombos(transformation.unresolvedCombos),
-    [transformation.unresolvedCombos],
+  const queryClient = useQueryClient()
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState<'all' | InvoiceProductNameMatchStatus>(
+    'all',
   )
+  const {
+    history,
+    activeComboKeys,
+    failedDrafts,
+    savingCount,
+    failedCount,
+    enqueue,
+    undo,
+  } = useInvoiceProductNameSaveQueue(brandId)
+
+  const visibleCombos = useMemo(
+    () =>
+      transformation.unresolvedCombos.filter((combo) => {
+        if (failedDrafts[combo.key]) return true
+        return !activeComboKeys.has(combo.key)
+      }),
+    [activeComboKeys, failedDrafts, transformation.unresolvedCombos],
+  )
+  const groups = useMemo(() => groupCombos(visibleCombos), [visibleCombos])
+  const [openProductName, setOpenProductName] = useState<string | null>(
+    groups[0]?.productName ?? null,
+  )
+
+  useEffect(() => {
+    if (openProductName) {
+      const stillOpen = groups.some(
+        (group) => group.productName === openProductName,
+      )
+      if (stillOpen) return
+    }
+    setOpenProductName(groups[0]?.productName ?? null)
+  }, [groups, openProductName])
+
   const fileTags = useMemo(
     () =>
       collectFileTagGroups(
@@ -140,19 +190,158 @@ export function InvoiceProductNameTransformPanel({
   )
   const unknownTagCount = fileTags.filter((tag) => tag.tag.role === 'unknown')
     .length
-  const [query, setQuery] = useState('')
-  const [status, setStatus] = useState<'all' | InvoiceProductNameMatchStatus>(
-    'all',
+  /** 저장 전 화면에서만 고른 역할. 키는 tag.key */
+  const [draftRoles, setDraftRoles] = useState<
+    Record<string, InvoiceProductNameTagRole>
+  >({})
+  const [tagSaveMessage, setTagSaveMessage] = useState('')
+  const [tagSaveError, setTagSaveError] = useState('')
+  const [tagSaveErrors, setTagSaveErrors] = useState<Record<string, string>>(
+    {},
   )
-  const [openProductName, setOpenProductName] = useState<string | null>(
-    groups[0]?.productName ?? null,
-  )
+  const [unsetTagsOpen, setUnsetTagsOpen] = useState(true)
+  const [setTagsOpen, setSetTagsOpen] = useState(false)
 
-  const reviewCount =
-    transformation.unresolvedRowCount +
-    transformation.conflictRowCount +
-    transformation.missingStyleRowCount +
-    transformation.candidateRowCount
+  const baselineRoles = useMemo(() => {
+    const map: Record<string, InvoiceProductNameTagRole> = {}
+    for (const group of fileTags) {
+      map[group.tag.key] = group.tag.role
+    }
+    return map
+  }, [fileTags])
+
+  const { unsetTags, setTags } = useMemo(() => {
+    const unset: FileTagGroup[] = []
+    const set: FileTagGroup[] = []
+    for (const group of fileTags) {
+      if ((baselineRoles[group.tag.key] ?? group.tag.role) === 'unknown') {
+        unset.push(group)
+      } else {
+        set.push(group)
+      }
+    }
+    return { unsetTags: unset, setTags: set }
+  }, [baselineRoles, fileTags])
+
+  const pendingTagChanges = useMemo(() => {
+    const changes: {
+      key: string
+      tagText: string
+      role: InvoiceProductNameTagRole
+    }[] = []
+    for (const group of fileTags) {
+      const next = draftRoles[group.tag.key]
+      if (next === undefined) continue
+      if (next === baselineRoles[group.tag.key]) continue
+      changes.push({
+        key: group.tag.key,
+        tagText: group.tag.raw,
+        role: next,
+      })
+    }
+    return changes
+  }, [baselineRoles, draftRoles, fileTags])
+
+  const tagSaveMutation = useMutation({
+    mutationFn: async (
+      changes: {
+        key: string
+        tagText: string
+        role: InvoiceProductNameTagRole
+      }[],
+    ) => {
+      const failures: { key: string; tagText: string; message: string }[] = []
+      const succeeded: string[] = []
+      await Promise.all(
+        changes.map(async (change) => {
+          try {
+            await saveInvoiceProductNameTagRole(brandId, {
+              tagText: change.tagText,
+              role: change.role,
+            })
+            succeeded.push(change.key)
+          } catch (error) {
+            failures.push({
+              key: change.key,
+              tagText: change.tagText,
+              message:
+                error instanceof Error
+                  ? error.message
+                  : '저장하지 못했습니다.',
+            })
+          }
+        }),
+      )
+      return { succeeded, failures }
+    },
+    onSuccess: async ({ succeeded, failures }) => {
+      if (succeeded.length > 0) {
+        setDraftRoles((current) => {
+          const next = { ...current }
+          for (const key of succeeded) delete next[key]
+          return next
+        })
+        await queryClient.invalidateQueries({
+          queryKey: ['invoice-product-name-tag-roles', brandId],
+        })
+        await queryClient.invalidateQueries({
+          queryKey: ['ai-product-recommendation', brandId],
+          refetchType: 'none',
+        })
+      }
+      const nextErrors: Record<string, string> = {}
+      for (const failure of failures) {
+        nextErrors[failure.key] = failure.message
+      }
+      setTagSaveErrors(nextErrors)
+      if (failures.length === 0) {
+        setTagSaveError('')
+        setTagSaveMessage(
+          succeeded.length > 0
+            ? `태그 ${formatNumber(succeeded.length)}개 역할을 저장했습니다.`
+            : '',
+        )
+        return
+      }
+      setTagSaveMessage(
+        succeeded.length > 0
+          ? `태그 ${formatNumber(succeeded.length)}개는 저장됐고 ${formatNumber(failures.length)}개는 실패했습니다.`
+          : '',
+      )
+      setTagSaveError(
+        failures
+          .map((failure) => `${failure.tagText}: ${failure.message}`)
+          .join(' · '),
+      )
+    },
+    onError: (error) => {
+      setTagSaveMessage('')
+      setTagSaveError(
+        error instanceof Error ? error.message : '태그 역할을 저장하지 못했습니다.',
+      )
+    },
+  })
+
+  function changeTagRole(key: string, next: InvoiceProductNameTagRole) {
+    setTagSaveMessage('')
+    setTagSaveError('')
+    setTagSaveErrors((current) => {
+      if (!current[key]) return current
+      const updated = { ...current }
+      delete updated[key]
+      return updated
+    })
+    setDraftRoles((current) => {
+      const baseline = baselineRoles[key]!
+      if (next === baseline) {
+        if (!(key in current)) return current
+        const updated = { ...current }
+        delete updated[key]
+        return updated
+      }
+      return { ...current, [key]: next }
+    })
+  }
 
   const rows = useMemo(() => {
     const q = query.trim().toLocaleLowerCase('ko-KR')
@@ -205,62 +394,182 @@ export function InvoiceProductNameTransformPanel({
       </div>
 
       {fileTags.length > 0 ? (
-        <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+        <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
           <div>
             <p className="text-sm font-medium">
               이 파일 태그 {formatNumber(fileTags.length)}개
               {unknownTagCount > 0
                 ? ` · 미분류 ${formatNumber(unknownTagCount)}개`
                 : ''}
+              {pendingTagChanges.length > 0
+                ? ` · 변경 ${formatNumber(pendingTagChanges.length)}개`
+                : ''}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              같은 태그는 한 번만 정하면 아래 품목과 다음 업로드에 바로
-              반영됩니다.
+              역할을 고른 뒤 아래 저장을 누르면 한 번에 반영됩니다. 저장
+              전에는 아래 품목 목록이 바뀌지 않습니다.
             </p>
           </div>
-          <div className="flex flex-wrap gap-x-4 gap-y-2">
-            {fileTags.map((group) => (
-              <ProductNameTagRoleControl
-                key={group.tag.key}
-                brandId={brandId}
-                tag={group.tag}
-                savedRole={group.tag.role === 'unknown' ? undefined : group.tag.role}
-                productCount={group.productCount}
-                variantCount={group.variantCount}
-                examples={group.examples}
-              />
-            ))}
+          {unsetTags.length > 0 ? (
+            <TagRoleSection
+              title={`미설정 ${formatNumber(unsetTags.length)}개`}
+              open={unsetTagsOpen}
+              onToggle={() => setUnsetTagsOpen((current) => !current)}
+            >
+              {unsetTags.map((group) => (
+                <ProductNameTagRoleControl
+                  key={group.tag.key}
+                  tag={group.tag}
+                  role={draftRoles[group.tag.key] ?? baselineRoles[group.tag.key]!}
+                  disabled={tagSaveMutation.isPending}
+                  productCount={group.productCount}
+                  variantCount={group.variantCount}
+                  examples={group.examples}
+                  error={tagSaveErrors[group.tag.key]}
+                  onRoleChange={(next) => changeTagRole(group.tag.key, next)}
+                />
+              ))}
+            </TagRoleSection>
+          ) : null}
+          {setTags.length > 0 ? (
+            <TagRoleSection
+              title={`설정됨 ${formatNumber(setTags.length)}개`}
+              open={setTagsOpen}
+              onToggle={() => setSetTagsOpen((current) => !current)}
+            >
+              {setTags.map((group) => (
+                <ProductNameTagRoleControl
+                  key={group.tag.key}
+                  tag={group.tag}
+                  role={draftRoles[group.tag.key] ?? baselineRoles[group.tag.key]!}
+                  disabled={tagSaveMutation.isPending}
+                  productCount={group.productCount}
+                  variantCount={group.variantCount}
+                  examples={group.examples}
+                  error={tagSaveErrors[group.tag.key]}
+                  onRoleChange={(next) => changeTagRole(group.tag.key, next)}
+                />
+              ))}
+            </TagRoleSection>
+          ) : null}
+          <div className="flex flex-wrap items-end justify-between gap-2">
+            <div className="min-w-0 flex-1 space-y-1">
+              {tagSaveMessage ? (
+                <p className="text-xs text-success">{tagSaveMessage}</p>
+              ) : null}
+              {tagSaveError ? (
+                <p className="text-xs text-danger">{tagSaveError}</p>
+              ) : null}
+            </div>
+            <Button
+              type="button"
+              size="sm"
+              className="shrink-0"
+              disabled={
+                pendingTagChanges.length === 0 || tagSaveMutation.isPending
+              }
+              onClick={() => {
+                setTagSaveMessage('')
+                setTagSaveError('')
+                tagSaveMutation.mutate(pendingTagChanges)
+              }}
+            >
+              {tagSaveMutation.isPending
+                ? '저장 중...'
+                : pendingTagChanges.length > 0
+                  ? `저장 ${formatNumber(pendingTagChanges.length)}`
+                  : '저장'}
+            </Button>
           </div>
         </div>
       ) : null}
 
-      {reviewCount > 0 ? (
+      <InvoiceProductNameRecentSavesPanel
+        brandId={brandId}
+        history={history}
+        onCorrect={({ historyId, lookupKey, style }) => {
+          const entry = history.find((item) => item.id === historyId)
+          if (!entry) return
+          enqueue({
+            historyId,
+            comboKey: entry.comboKey,
+            productName: entry.productName,
+            itemName: entry.itemName,
+            mallName: entry.mallName,
+            lookupKey,
+            style,
+            appliedRule: entry.appliedRule,
+            feedback: {
+              source: 'manual',
+              cacheId: null,
+              shownRank: null,
+              provider: null,
+              modelId: null,
+            },
+            reviewReasons: entry.reviewReasons,
+          })
+        }}
+        onUndo={undo}
+      />
+
+      {groups.length > 0 || savingCount > 0 || failedCount > 0 ? (
         <div className="space-y-3">
           <div>
             <p className="text-sm font-medium">
               본품 확인 {formatNumber(groups.length)}개 품목 · 내품명{' '}
-              {formatNumber(transformation.unresolvedCombos.length)}개
+              {formatNumber(visibleCombos.length)}개
+              {savingCount > 0
+                ? ` · 저장 중 ${formatNumber(savingCount)}개`
+                : ''}
+              {failedCount > 0
+                ? ` · 실패 ${formatNumber(failedCount)}개`
+                : ''}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              같은 품목명은 한 그룹입니다. 색상·구성만 다른 내품명은 안에서
-              각각 본품을 지정합니다.
+              등록을 누르면 바로 다음 항목으로 넘어가고, 저장은 뒤에서
+              이어집니다. 실패한 항목만 다시 나타납니다.
             </p>
+            {failedCount > 0 ? (
+              <p className="mt-1 text-xs text-danger">
+                {Object.values(failedDrafts)
+                  .slice(0, 3)
+                  .map((draft) => draft.error)
+                  .join(' · ')}
+                {failedCount > 3
+                  ? ` 외 ${formatNumber(failedCount - 3)}건`
+                  : ''}
+              </p>
+            ) : null}
           </div>
-          <div className="space-y-2">
-            {groups.map((group) => (
-              <ProductReviewGroupCard
-                key={group.productName}
-                brandId={brandId}
-                group={group}
-                open={openProductName === group.productName}
-                onToggle={() =>
-                  setOpenProductName((current) =>
-                    current === group.productName ? null : group.productName,
-                  )
-                }
-              />
-            ))}
-          </div>
+          {groups.length > 0 ? (
+            <div className="space-y-2">
+              {groups.map((group) => (
+                <ProductReviewGroupCard
+                  key={group.productName}
+                  brandId={brandId}
+                  group={group}
+                  open={openProductName === group.productName}
+                  drafts={Object.fromEntries(
+                    group.combos.flatMap((combo) => {
+                      const draft = failedDrafts[combo.key]
+                      if (!draft) return []
+                      return [[combo.key, draft]]
+                    }),
+                  )}
+                  onEnqueue={enqueue}
+                  onToggle={() =>
+                    setOpenProductName((current) =>
+                      current === group.productName ? null : group.productName,
+                    )
+                  }
+                />
+              ))}
+            </div>
+          ) : (
+            <p className="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
+              선택하신 항목을 저장하는 중입니다.
+            </p>
+          )}
         </div>
       ) : (
         <p className="rounded-lg border border-success/30 bg-success/10 p-4 text-sm">
@@ -343,86 +652,104 @@ export function InvoiceProductNameTransformPanel({
   )
 }
 
+function TagRoleSection({
+  title,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string
+  open: boolean
+  onToggle: () => void
+  children: ReactNode
+}) {
+  return (
+    <div className="space-y-2">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-center justify-between gap-2 text-left"
+      >
+        <span className="text-xs font-medium">{title}</span>
+        <span className="text-[11px] text-muted-foreground">
+          {open ? '접기' : '펼치기'}
+        </span>
+      </button>
+      {open ? (
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {children}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 function ProductNameTagRoleControl({
-  brandId,
   tag,
-  savedRole,
+  role,
+  disabled = false,
   productCount,
   variantCount = 1,
   examples = [],
+  error,
+  onRoleChange,
 }: {
-  brandId: string
   tag: ParsedProductNameTag
-  savedRole?: InvoiceProductNameTagRole
+  role: InvoiceProductNameTagRole
+  disabled?: boolean
   productCount: number
   variantCount?: number
   examples?: string[]
+  error?: string
+  onRoleChange: (role: InvoiceProductNameTagRole) => void
 }) {
-  const queryClient = useQueryClient()
-  const mutation = useMutation({
-    mutationFn: (role: InvoiceProductNameTagRole) =>
-      saveInvoiceProductNameTagRole(brandId, {
-        tagText: tag.raw,
-        role,
-      }),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ['invoice-product-name-tag-roles', brandId],
-      })
-      await queryClient.invalidateQueries({
-        queryKey: ['ai-product-recommendation', brandId],
-        refetchType: 'none',
-      })
-    },
-  })
-  const current = savedRole ?? tag.role
-  const showHint = current === 'unknown' && tag.suggestedRole !== 'unknown'
+  const showHint = role === 'unknown' && tag.suggestedRole !== 'unknown'
 
   return (
-    <div className="flex min-w-0 flex-col gap-1">
-      <div className="flex flex-wrap items-center gap-1.5">
-        <Badge variant="outline">{tag.raw}</Badge>
-        <Select
-          value={current}
-          disabled={mutation.isPending}
-          className="h-7 w-[8.5rem] px-2 text-xs"
-          onChange={(event) => {
-            const next = event.target.value as InvoiceProductNameTagRole
-            if (next === current) return
-            mutation.mutate(next)
-          }}
-        >
-          {TAG_ROLES.map((role) => (
-            <option key={role} value={role}>
-              {INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL[role]}
-            </option>
-          ))}
-        </Select>
-        {productCount > 1 || variantCount > 1 ? (
-          <span className="text-[11px] text-muted-foreground">
-            이 파일 {formatNumber(productCount)}개 상품
-            {variantCount > 1 ? ` · 날짜 ${formatNumber(variantCount)}개` : ''}
-          </span>
-        ) : null}
+    <div className="flex h-full min-w-0 flex-col gap-2 rounded-md border border-border bg-background/80 p-2.5">
+      <div className="flex min-w-0 items-start justify-between gap-2">
+        <Badge variant="outline" className="max-w-full truncate">
+          {tag.raw}
+        </Badge>
+        <span className="shrink-0 text-[11px] text-muted-foreground">
+          {formatNumber(productCount)}개 상품
+          {variantCount > 1 ? ` · 날짜 ${formatNumber(variantCount)}` : ''}
+        </span>
       </div>
-      {examples.length > 0 ? (
-        <p className="text-[11px] text-muted-foreground">
-          예: {examples.join(', ')}
-        </p>
-      ) : null}
-      {showHint ? (
-        <p className="text-[11px] text-muted-foreground">
-          추천: {INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL[tag.suggestedRole]}
-        </p>
-      ) : null}
-      {current === 'composition_gift' ? (
-        <p className="text-[11px] text-muted-foreground">
-          상품 인식에만 반영하며 출고구성은 바꾸지 않습니다.
-        </p>
-      ) : null}
-      {mutation.error instanceof Error ? (
-        <p className="text-[11px] text-danger">{mutation.error.message}</p>
-      ) : null}
+      <Select
+        value={role}
+        disabled={disabled}
+        className="h-8 w-full px-2 text-xs"
+        onChange={(event) => {
+          const next = event.target.value as InvoiceProductNameTagRole
+          if (next === role) return
+          onRoleChange(next)
+        }}
+      >
+        {TAG_ROLES.map((option) => (
+          <option key={option} value={option}>
+            {INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL[option]}
+          </option>
+        ))}
+      </Select>
+      <div className="mt-auto space-y-1">
+        {examples.length > 0 ? (
+          <p className="line-clamp-2 text-[11px] text-muted-foreground">
+            예: {examples.join(', ')}
+          </p>
+        ) : null}
+        {showHint ? (
+          <p className="text-[11px] text-muted-foreground">
+            추천: {INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL[tag.suggestedRole]}
+          </p>
+        ) : null}
+        {role === 'composition_gift' ? (
+          <p className="text-[11px] text-muted-foreground">
+            상품 인식에만 반영하며 출고구성은 바꾸지 않습니다.
+          </p>
+        ) : null}
+        {error ? <p className="text-[11px] text-danger">{error}</p> : null}
+      </div>
     </div>
   )
 }
@@ -431,11 +758,15 @@ function ProductReviewGroupCard({
   brandId,
   group,
   open,
+  drafts,
+  onEnqueue,
   onToggle,
 }: {
   brandId: string
   group: ProductReviewGroup
   open: boolean
+  drafts: Record<string, ProductMapSaveDraft>
+  onEnqueue: (job: ProductMapEnqueueInput) => void
   onToggle: () => void
 }) {
   const variantCount = group.combos.length
@@ -481,9 +812,16 @@ function ProductReviewGroupCard({
           <div className="space-y-2">
             {group.combos.map((combo) => (
               <VariantAssignRow
-                key={combo.key}
+                key={
+                  drafts[combo.key]
+                    ? `${combo.key}:fail:${drafts[combo.key]!.error}`
+                    : combo.key
+                }
                 brandId={brandId}
                 combo={combo}
+                draft={drafts[combo.key] ?? null}
+                variantCount={variantCount}
+                onEnqueue={onEnqueue}
               />
             ))}
           </div>
@@ -496,67 +834,32 @@ function ProductReviewGroupCard({
 function VariantAssignRow({
   brandId,
   combo,
+  draft,
+  variantCount,
+  onEnqueue,
 }: {
   brandId: string
   combo: UnresolvedProductNameCombo
+  draft: ProductMapSaveDraft | null
+  variantCount: number
+  onEnqueue: (job: ProductMapEnqueueInput) => void
 }) {
   const queryClient = useQueryClient()
-  const [selectedLookupKey, setSelectedLookupKey] = useState('')
-  const [style, setStyle] = useState<StyleRef | null>(
-    combo.candidateStyles[0] ?? null,
+  const [selectedLookupKey, setSelectedLookupKey] = useState(
+    draft?.lookupKey ?? '',
   )
-  const [savedMessage, setSavedMessage] = useState('')
+  const [style, setStyle] = useState<StyleRef | null>(
+    draft?.style ?? combo.candidateStyles[0] ?? null,
+  )
   const [pickedRecommendation, setPickedRecommendation] =
     useState<AiProductRecommendation | null>(null)
+  const [localError, setLocalError] = useState<string | null>(draft?.error ?? null)
   const meta = STATUS_META[combo.status]
 
-  const mutation = useMutation({
-    mutationFn: ({
-      lookupKey,
-      nextStyle,
-    }: {
-      lookupKey: string
-      nextStyle: StyleRef
-    }) => {
-      const shownRank = pickedRecommendation?.products.findIndex(
-        (product) => product.styleId === nextStyle.styleId,
-      )
-      const usedRecommendation =
-        pickedRecommendation &&
-        pickedRecommendation.lookupKey === lookupKey &&
-        shownRank !== undefined &&
-        shownRank >= 0
-      return saveInvoiceProductNameMap(brandId, {
-        productName: lookupKey,
-        lookupKey,
-        styleId: nextStyle.styleId,
-        feedback: {
-          source: usedRecommendation
-            ? pickedRecommendation.source === 'local'
-              ? 'local'
-              : 'ai'
-            : 'manual',
-          cacheId: usedRecommendation ? pickedRecommendation.cacheId : null,
-          shownRank: usedRecommendation ? shownRank + 1 : null,
-          provider: usedRecommendation ? pickedRecommendation.provider : null,
-          modelId: usedRecommendation ? pickedRecommendation.modelId : null,
-        },
-      })
-    },
-    onSuccess: async (saved) => {
-      await upsertInvoiceProductNameMapCache(queryClient, brandId, saved)
-      await queryClient.invalidateQueries({
-        queryKey: ['ai-product-recommendation', brandId, combo.key],
-        refetchType: 'none',
-      })
-      await queryClient.invalidateQueries({
-        queryKey: ['ai-usage-summary', brandId],
-      })
-      setSavedMessage('조회 키와 본품 연결을 저장했습니다. 바로 다시 적용됩니다.')
-    },
-  })
-  const errorMessage =
-    mutation.error instanceof Error ? mutation.error.message : null
+  function clearDraftMessage() {
+    setLocalError(null)
+    setPickedRecommendation(null)
+  }
 
   return (
     <div className="rounded-md border border-border/80 p-2.5">
@@ -584,7 +887,6 @@ function VariantAssignRow({
                   <li key={candidate.rule} className="truncate">
                     <button
                       type="button"
-                      disabled={mutation.isPending}
                       title={`${candidate.text} · ${ruleLabel(candidate.rule)}`}
                       className={`w-full truncate rounded px-1 text-left ${
                         selected
@@ -593,9 +895,7 @@ function VariantAssignRow({
                       }`}
                       onClick={() => {
                         setSelectedLookupKey(candidate.text)
-                        setPickedRecommendation(null)
-                        setSavedMessage('')
-                        mutation.reset()
+                        clearDraftMessage()
                       }}
                     >
                       <span
@@ -621,12 +921,9 @@ function VariantAssignRow({
               <StylePicker
                 brandId={brandId}
                 value={style}
-                disabled={mutation.isPending}
                 onChange={(next) => {
                   setStyle(next)
-                  setPickedRecommendation(null)
-                  setSavedMessage('')
-                  mutation.reset()
+                  clearDraftMessage()
                 }}
                 placeholder="본품 1개만 고르세요"
               />
@@ -634,23 +931,74 @@ function VariantAssignRow({
             <Button
               type="button"
               size="sm"
-              disabled={!selectedLookupKey || !style || mutation.isPending}
+              disabled={!selectedLookupKey || !style}
               onClick={() => {
                 if (!selectedLookupKey || !style) return
-                setSavedMessage('')
-                mutation.mutate({
+                const shownRank = pickedRecommendation?.products.findIndex(
+                  (product) => product.styleId === style.styleId,
+                )
+                const usedRecommendation =
+                  pickedRecommendation &&
+                  pickedRecommendation.lookupKey === selectedLookupKey &&
+                  shownRank !== undefined &&
+                  shownRank >= 0
+                const feedback: ProductMapSaveFeedback = {
+                  source: usedRecommendation
+                    ? pickedRecommendation.source === 'local'
+                      ? 'local'
+                      : 'ai'
+                    : 'manual',
+                  cacheId: usedRecommendation
+                    ? pickedRecommendation.cacheId
+                    : null,
+                  shownRank: usedRecommendation ? shownRank + 1 : null,
+                  provider: usedRecommendation
+                    ? pickedRecommendation.provider
+                    : null,
+                  modelId: usedRecommendation
+                    ? pickedRecommendation.modelId
+                    : null,
+                }
+                const selectedRule =
+                  combo.candidates.find(
+                    (candidate) => candidate.text === selectedLookupKey,
+                  )?.rule ?? combo.appliedRule
+                const maps =
+                  queryClient.getQueryData<InvoiceProductNameMap[]>([
+                    'invoice-product-name-maps',
+                    brandId,
+                  ]) ?? []
+                const lookupNorm = normalizeInvoiceText(selectedLookupKey)
+                const previousMap =
+                  maps.find(
+                    (map) => map.normalizedLookupKey === lookupNorm,
+                  ) ?? null
+                onEnqueue({
+                  comboKey: combo.key,
+                  productName: combo.productName,
+                  itemName: combo.itemName,
+                  mallName: combo.mallName,
                   lookupKey: selectedLookupKey,
-                  nextStyle: style,
+                  style,
+                  appliedRule: selectedRule,
+                  feedback,
+                  reviewReasons: buildReviewReasons({
+                    combo,
+                    lookupKey: selectedLookupKey,
+                    style,
+                    selectedRule,
+                    feedback,
+                    previousMap,
+                    variantCount,
+                  }),
                 })
               }}
             >
-              {mutation.isPending ? '저장 중...' : '등록'}
+              등록
             </Button>
           </div>
-          {errorMessage ? (
-            <p className="mt-1 text-xs text-danger">{errorMessage}</p>
-          ) : savedMessage ? (
-            <p className="mt-1 text-xs text-success">{savedMessage}</p>
+          {localError ? (
+            <p className="mt-1 text-xs text-danger">{localError}</p>
           ) : selectedLookupKey && style ? (
             <p className="mt-1 break-words text-xs text-muted-foreground">
               <span className="font-medium text-foreground">
@@ -675,13 +1023,12 @@ function VariantAssignRow({
         <AiRecommendPanel
           brandId={brandId}
           combo={combo}
-          disabled={mutation.isPending}
+          disabled={false}
           onPick={({ lookupKey, nextStyle, recommendation }) => {
             setSelectedLookupKey(lookupKey)
             if (nextStyle) setStyle(nextStyle)
             setPickedRecommendation(recommendation)
-            setSavedMessage('')
-            mutation.reset()
+            setLocalError(null)
           }}
         />
       </div>

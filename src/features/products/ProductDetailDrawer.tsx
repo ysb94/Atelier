@@ -8,6 +8,7 @@ import {
   useSearchParams,
 } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
+import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
@@ -22,6 +23,7 @@ import {
   updateStyleFields,
 } from '@/lib/api'
 import { OWNER_LABEL, OWNER_ORDER } from '@/lib/import/fields'
+import { isImageField, pickImageSources } from '@/lib/products/product-image'
 import {
   fieldValueKey,
   getStyleFieldRaw,
@@ -94,6 +96,44 @@ function CompletenessDots({
           />
         )
       })}
+    </div>
+  )
+}
+
+function ProductImagePreview({
+  sources,
+  alt,
+}: {
+  sources: string[]
+  alt: string
+}) {
+  const [currentUrl, setCurrentUrl] = useState<string | null>(
+    sources[0] ?? null,
+  )
+
+  return (
+    <div className="space-y-2">
+      {currentUrl ? (
+        <a
+          href={currentUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="block break-all text-xs text-primary underline-offset-2 hover:underline"
+        >
+          {currentUrl}
+        </a>
+      ) : (
+        <p className="text-xs text-muted-foreground">
+          표시할 이미지 주소가 없습니다.
+        </p>
+      )}
+      <ProductThumb
+        sources={sources}
+        alt={alt}
+        size={200}
+        className="object-contain"
+        onCurrentSourceChange={setCurrentUrl}
+      />
     </div>
   )
 }
@@ -397,7 +437,28 @@ export function ProductDetailDrawer() {
                                 ) : null}
                               </span>
 
-                              {field.type === 'season' ||
+                              {isImageField(field) ? (
+                                <>
+                                  <ProductImagePreview
+                                    sources={pickImageSources(
+                                      value,
+                                      style.styleNo,
+                                      key,
+                                    )}
+                                    alt={`${style.styleNo} ${field.label}`}
+                                  />
+                                  <Input
+                                    type="url"
+                                    value={value}
+                                    disabled={saveMutation.isPending}
+                                    placeholder="직접 넣은 주소가 있으면 규칙을 대신합니다"
+                                    onChange={(e) =>
+                                      setDraft(field, e.target.value)
+                                    }
+                                    onBlur={() => saveField(field)}
+                                  />
+                                </>
+                              ) : field.type === 'season' ||
                               field.systemKey === 'seasonCode' ||
                               field.systemKey === 'seasonId' ? (
                                 <Select

@@ -333,6 +333,18 @@ export async function deleteInvoiceProductNameMap(id: string): Promise<void> {
   return invoiceProductNameMapStore.deleteInvoiceProductNameMap(id)
 }
 
+export async function undoInvoiceProductNameMap(
+  brandId: string,
+  input: {
+    mapId: string
+    expectedUpdatedAt: string
+    previous: InvoiceProductNameMap | null
+  },
+): Promise<'deleted' | 'restored'> {
+  await delay()
+  return invoiceProductNameMapStore.undoInvoiceProductNameMap(brandId, input)
+}
+
 export async function getInvoiceProductNameTagRoles(
   brandId: string,
   activeOnly = false,

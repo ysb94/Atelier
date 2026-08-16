@@ -263,6 +263,59 @@ export async function deleteInvoiceProductNameMap(id: string): Promise<void> {
   }
 }
 
+function snapshotToRow(snapshot: InvoiceProductNameMap) {
+  return {
+    mall_name: snapshot.mallName,
+    normalized_mall_name: snapshot.normalizedMallName,
+    product_name: snapshot.productName,
+    normalized_product_name: snapshot.normalizedProductName,
+    item_name_context: snapshot.itemNameContext,
+    normalized_item_name_context: snapshot.normalizedItemNameContext,
+    own_product_code: snapshot.ownProductCode,
+    normalized_own_product_code: snapshot.normalizedOwnProductCode,
+    lookup_key: snapshot.lookupKey,
+    normalized_lookup_key: snapshot.normalizedLookupKey,
+    style_id: snapshot.style.styleId,
+    is_active: snapshot.isActive,
+    note: snapshot.note,
+  }
+}
+
+/**
+ * 방금 저장한 품목명 원장을 되돌린다.
+ * previous가 null이면 신규 저장을 삭제하고, 있으면 저장 전 스냅샷으로 복원한다.
+ * expectedUpdatedAt이 다르면 충돌로 실패한다.
+ */
+export async function undoInvoiceProductNameMap(
+  brandId: string,
+  input: {
+    mapId: string
+    expectedUpdatedAt: string
+    previous: InvoiceProductNameMap | null
+  },
+): Promise<'deleted' | 'restored'> {
+  const { data, error } = await getSupabase().rpc(
+    'undo_invoice_product_name_map',
+    {
+      p_brand_id: brandId,
+      p_map_id: input.mapId,
+      p_expected_updated_at: input.expectedUpdatedAt,
+      p_previous: input.previous ? snapshotToRow(input.previous) : null,
+    },
+  )
+  if (error) {
+    throw new InvoiceProductNameMapStoreError(
+      errorMessage(error, '품목명 변환 기준을 되돌리지 못했습니다.'),
+    )
+  }
+  if (data !== 'deleted' && data !== 'restored') {
+    throw new InvoiceProductNameMapStoreError(
+      '품목명 변환 기준을 되돌리지 못했습니다.',
+    )
+  }
+  return data
+}
+
 export async function applyBulkInvoiceProductNameMaps(
   brandId: string,
   rows: InvoiceProductNameMapInput[],

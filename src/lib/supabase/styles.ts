@@ -1,5 +1,6 @@
 import type { Style, StyleInput, StyleRef, StyleStatus } from '@/lib/types'
 import { normalizeStyleNo } from '@/lib/import/transform'
+import { compactProductNameKey } from '@/lib/invoice/lookup-normalization'
 import {
   isStyleStatus,
   parseColors,
@@ -325,9 +326,18 @@ export async function listStyleRefsForLookup(
       .map((value) => value.trim().toLocaleLowerCase('ko-KR'))
       .filter(Boolean),
   )
+  const wantedCompactNames = new Set(
+    (options.names ?? [])
+      .map((value) => compactProductNameKey(value))
+      .filter(Boolean),
+  )
   const byStyleNo = new Map<string, StyleRef>()
   const byName = new Map<string, StyleRef[]>()
-  if (wantedStyleNos.size === 0 && wantedNames.size === 0) {
+  if (
+    wantedStyleNos.size === 0 &&
+    wantedNames.size === 0 &&
+    wantedCompactNames.size === 0
+  ) {
     return { byStyleNo, byName }
   }
 
@@ -361,7 +371,11 @@ export async function listStyleRefsForLookup(
       }
 
       const nameKey = ref.name.trim().toLocaleLowerCase('ko-KR')
-      if (wantedNames.has(nameKey)) {
+      const compactName = compactProductNameKey(ref.name)
+      if (
+        wantedNames.has(nameKey) ||
+        (compactName && wantedCompactNames.has(compactName))
+      ) {
         const matches = byName.get(nameKey) ?? []
         matches.push(ref)
         byName.set(nameKey, matches)

@@ -1,3 +1,4 @@
+import { compactProductNameKey } from '@/lib/invoice/lookup-normalization'
 import {
   generateProductNameCandidates,
   productNameRuleConsumesItemName,
@@ -64,6 +65,7 @@ export type InvoiceProductNameTransformation = {
 
 export type ProductNameStyleCatalog = {
   byName: Map<string, StyleRef[]>
+  byCompactName: Map<string, StyleRef[]>
 }
 
 function comboKey(mallName: string, productName: string, itemName: string) {
@@ -81,6 +83,22 @@ function comboIndexKey(mall: string, product: string, item: string) {
 type ComboMapIndex = {
   exact: Map<string, InvoiceProductNameMap[]>
   anyMall: Map<string, InvoiceProductNameMap[]>
+}
+
+type LookupMapIndex = {
+  strict: Map<string, InvoiceProductNameMap[]>
+  compact: Map<string, InvoiceProductNameMap[]>
+}
+
+function pushMap(
+  target: Map<string, InvoiceProductNameMap[]>,
+  key: string,
+  map: InvoiceProductNameMap,
+) {
+  if (!key) return
+  const list = target.get(key) ?? []
+  list.push(map)
+  target.set(key, list)
 }
 
 function indexComboMaps(maps: InvoiceProductNameMap[]): ComboMapIndex {
@@ -110,6 +128,37 @@ function indexComboMaps(maps: InvoiceProductNameMap[]): ComboMapIndex {
   return { exact, anyMall }
 }
 
+/**
+ * 조회 키 원장 색인.
+ * 엄격 키를 먼저 쓰고, 없을 때만 압축 키를 본다.
+ * 저장된 태그 역할로 제외되는 선행 태그는 별칭으로도 넣는다.
+ */
+function indexLookupMaps(
+  maps: InvoiceProductNameMap[],
+  tagRoles: InvoiceProductNameTagRoleEntry[],
+): LookupMapIndex {
+  const strict = new Map<string, InvoiceProductNameMap[]>()
+  const compact = new Map<string, InvoiceProductNameMap[]>()
+  for (const map of maps) {
+    if (!map.normalizedLookupKey) continue
+    const raw = map.lookupKey.trim() || map.normalizedLookupKey
+    pushMap(strict, map.normalizedLookupKey, map)
+    pushMap(compact, compactProductNameKey(raw), map)
+
+    const stripped = matchingProductName(raw, tagRoles)
+    const strippedNorm = normalizeInvoiceText(stripped)
+    if (strippedNorm && strippedNorm !== map.normalizedLookupKey) {
+      pushMap(strict, strippedNorm, map)
+    }
+    const strippedCompact = compactProductNameKey(stripped)
+    const rawCompact = compactProductNameKey(raw)
+    if (strippedCompact && strippedCompact !== rawCompact) {
+      pushMap(compact, strippedCompact, map)
+    }
+  }
+  return { strict, compact }
+}
+
 function pickMaps(
   index: ComboMapIndex,
   mallName: string,
@@ -128,13 +177,25 @@ function lookupStyles(
   catalog: ProductNameStyleCatalog,
   text: string,
 ): StyleRef[] {
-  return catalog.byName.get(normalizeInvoiceText(text)) ?? []
+  const strict = catalog.byName.get(normalizeInvoiceText(text)) ?? []
+  if (strict.length > 0) return strict
+  const compact = compactProductNameKey(text)
+  if (!compact) return []
+  return catalog.byCompactName.get(compact) ?? []
 }
 
 function uniqueStyles(styles: StyleRef[]) {
   const byId = new Map<string, StyleRef>()
   for (const style of styles) {
     if (!byId.has(style.styleId)) byId.set(style.styleId, style)
+  }
+  return [...byId.values()]
+}
+
+function uniqueMaps(maps: InvoiceProductNameMap[]) {
+  const byId = new Map<string, InvoiceProductNameMap>()
+  for (const map of maps) {
+    if (!byId.has(map.id)) byId.set(map.id, map)
   }
   return [...byId.values()]
 }
@@ -151,13 +212,7 @@ export function transformInvoiceProductNames(
 ): InvoiceProductNameTransformation {
   const activeMaps = maps.filter((map) => map.isActive)
   const comboIndex = indexComboMaps(activeMaps)
-  const ledgerByKey = new Map<string, InvoiceProductNameMap[]>()
-  for (const map of activeMaps) {
-    if (!map.normalizedLookupKey) continue
-    const list = ledgerByKey.get(map.normalizedLookupKey) ?? []
-    list.push(map)
-    ledgerByKey.set(map.normalizedLookupKey, list)
-  }
+  const lookupIndex = indexLookupMaps(activeMaps, tagRoles)
   const unresolvedByKey = new Map<string, UnresolvedProductNameCombo>()
   let mappedRowCount = 0
   let candidateRowCount = 0
@@ -191,6 +246,20 @@ export function transformInvoiceProductNames(
       candidates: row.candidates,
       tags: row.tags,
     })
+  }
+
+  function matchLookupMaps(
+    candidate: ProductNameCandidate,
+  ): { maps: InvoiceProductNameMap[]; viaCompact: boolean } | null {
+    const strictHits = uniqueMaps(
+      lookupIndex.strict.get(normalizeInvoiceText(candidate.text)) ?? [],
+    )
+    if (strictHits.length > 0) return { maps: strictHits, viaCompact: false }
+    const compact = compactProductNameKey(candidate.text)
+    if (!compact) return null
+    const compactHits = uniqueMaps(lookupIndex.compact.get(compact) ?? [])
+    if (compactHits.length === 0) return null
+    return { maps: compactHits, viaCompact: true }
   }
 
   const rows = sourceRows.map((source): InvoiceProductNameTransformRow => {
@@ -244,10 +313,12 @@ export function transformInvoiceProductNames(
       matchingProductName: matchingProductName(source.productName, tagRoles),
     })
     // 기존 원장은 후보 순서대로 훑고 먼저 맞는 조회 키가 정답이다.
+    // 엄격 키가 없으면 같은 후보의 압축 키로 이어 본다.
     for (const candidate of candidates) {
-      const hits = ledgerByKey.get(normalizeInvoiceText(candidate.text)) ?? []
-      if (hits.length === 0) continue
-      const styles = uniqueStyles(hits.map((hit) => hit.style))
+      const hit = matchLookupMaps(candidate)
+      if (!hit) continue
+      const styles = uniqueStyles(hit.maps.map((map) => map.style))
+      const appliedRule = hit.viaCompact ? 'compact' : candidate.rule
       if (styles.length > 1) {
         conflictRowCount += 1
         const row: InvoiceProductNameTransformRow = {
@@ -256,7 +327,7 @@ export function transformInvoiceProductNames(
           mapId: null,
           style: null,
           transformedProductName: source.productName,
-          appliedRule: candidate.rule,
+          appliedRule,
           itemNameConsumed: false,
           candidates,
           candidateStyles: styles,
@@ -269,10 +340,10 @@ export function transformInvoiceProductNames(
       return {
         source,
         status: 'mapped',
-        mapId: hits[0]!.id,
+        mapId: hit.maps[0]!.id,
         style: styles[0]!,
         transformedProductName: styles[0]!.name,
-        appliedRule: candidate.rule,
+        appliedRule,
         itemNameConsumed: productNameRuleConsumesItemName(candidate.rule),
         candidates,
         candidateStyles: styles,
@@ -292,6 +363,10 @@ export function transformInvoiceProductNames(
       const hit = matched.find((item) =>
         item.styles.some((style) => style.styleId === allStyles[0]?.styleId),
       )
+      const viaCompact =
+        hit !== undefined &&
+        (catalog.byName.get(normalizeInvoiceText(hit.candidate.text)) ?? [])
+          .length === 0
       candidateRowCount += 1
       const row: InvoiceProductNameTransformRow = {
         source,
@@ -299,7 +374,9 @@ export function transformInvoiceProductNames(
         mapId: null,
         style: allStyles[0]!,
         transformedProductName: allStyles[0]!.name,
-        appliedRule: hit?.candidate.rule ?? 'candidate',
+        appliedRule: viaCompact
+          ? 'compact'
+          : (hit?.candidate.rule ?? 'candidate'),
         itemNameConsumed: false,
         candidates,
         candidateStyles: allStyles,
@@ -378,13 +455,20 @@ export function transformInvoiceProductNames(
 
 export function catalogFromStyles(styles: StyleRef[]): ProductNameStyleCatalog {
   const byName = new Map<string, StyleRef[]>()
+  const byCompactName = new Map<string, StyleRef[]>()
   for (const style of styles) {
     const key = normalizeInvoiceText(style.name)
-    const list = byName.get(key) ?? []
-    list.push(style)
-    byName.set(key, list)
+    const nameList = byName.get(key) ?? []
+    nameList.push(style)
+    byName.set(key, nameList)
+
+    const compact = compactProductNameKey(style.name)
+    if (!compact) continue
+    const compactList = byCompactName.get(compact) ?? []
+    compactList.push(style)
+    byCompactName.set(compact, compactList)
   }
-  return { byName }
+  return { byName, byCompactName }
 }
 
 export function productNameTransformationToName(

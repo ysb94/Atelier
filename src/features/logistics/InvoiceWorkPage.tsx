@@ -1671,6 +1671,7 @@ export function InvoiceWorkPage() {
                   </div>
                 ) : productTransformation ? (
                   <InvoiceProductNameTransformPanel
+                    key={fileName || 'product-name-panel'}
                     brandId={brand.id}
                     transformation={productTransformation}
                   />
