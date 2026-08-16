@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react'
 import { Navigate, Route, useParams } from 'react-router-dom'
 import { BrandHomePage } from '@/features/home/BrandHomePage'
 import {
@@ -24,6 +25,25 @@ import { MembersPage } from '@/features/settings/MembersPage'
 import { DataSheetPage } from '@/features/data/DataSheetPage'
 import { DataUploadPage } from '@/features/data/DataUploadPage'
 import { InvoiceWorkPage } from '@/features/logistics/InvoiceWorkPage'
+
+const DesignFileManagerPage = lazy(async () => {
+  const mod = await import('@/features/design/file-manager/DesignFileManagerPage')
+  return { default: mod.DesignFileManagerPage }
+})
+
+function DesignFileManagerRoute() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
+          이미지 업로드 화면을 불러오는 중...
+        </div>
+      }
+    >
+      <DesignFileManagerPage />
+    </Suspense>
+  )
+}
 
 function RedirectTo({ to }: { to: string }) {
   const { brandSlug } = useParams()
@@ -72,6 +92,10 @@ export function BrandWorkspaceRouteTree() {
       <Route path="upload" element={<RedirectTo to="data/upload" />} />
       <Route path="import" element={<RedirectTo to="data/upload" />} />
       <Route path="planning" element={<RedirectTo to="work/planning" />} />
+      <Route
+        path="design/file-manager"
+        element={<DesignFileManagerRoute />}
+      />
       <Route path="design" element={<RedirectTo to="work/design" />} />
       <Route path="md" element={<RedirectTo to="work/md" />} />
       <Route path="logistics" element={<RedirectTo to="work/logistics" />} />

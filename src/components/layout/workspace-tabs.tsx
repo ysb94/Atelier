@@ -43,6 +43,10 @@ const NAV_LABELS: {
   { match: /^\/data(?:\/|$)/, label: '데이터 · 전체 상품' },
   { match: /^\/work\/planning(?:\/|$)/, label: '기획 · 상품 정보' },
   { match: /^\/work\/design(?:\/|$)/, label: '디자인 · 상품 정보' },
+  {
+    match: /^\/design\/file-manager(?:\/|$)/,
+    label: '디자인 · 이미지 업로드',
+  },
   { match: /^\/work\/md(?:\/|$)/, label: 'MD · 상품 정보' },
   { match: /^\/work\/logistics(?:\/|$)/, label: '물류 · 상품 정보' },
   {
@@ -311,7 +315,10 @@ export function WorkspaceTabPanels({
           <div
             key={tab.id}
             hidden={!active}
-            className={active ? undefined : 'hidden'}
+            className={cn(
+              active ? undefined : 'hidden',
+              tab.id === 'design/file-manager' && active && 'h-full min-h-0',
+            )}
           >
             <Routes location={toTabLocation(tab)}>
               {BrandWorkspaceRouteTree()}

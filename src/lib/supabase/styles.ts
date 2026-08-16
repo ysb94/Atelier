@@ -388,6 +388,37 @@ export async function listStyleRefsForLookup(
   return { byStyleNo, byName }
 }
 
+/**
+ * 품목명 분해 매칭용. 브랜드 전체 StyleRef를 페이지로 읽는다.
+ * id·style_no·name만 가져오므로 수천 건이어도 가볍다.
+ */
+export async function listAllStyleRefs(brandId: string): Promise<StyleRef[]> {
+  const supabase = getSupabase()
+  const refs: StyleRef[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from('styles')
+      .select('id, style_no, name')
+      .eq('brand_id', brandId)
+      .order('style_no', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1)
+
+    if (error) {
+      throw new StyleStoreError(
+        errorMessage(error, '상품 마스터를 불러오지 못했습니다.'),
+        'invalid',
+      )
+    }
+
+    const page = (data as StyleRefRow[]) ?? []
+    for (const row of page) {
+      refs.push(toStyleRef(row))
+    }
+    if (page.length < PAGE_SIZE) break
+  }
+  return refs
+}
+
 /** 엑셀 일괄 등록에서 M번호 열을 StyleRef로 해석한다. */
 export async function listStyleRefsByStyleNos(
   brandId: string,

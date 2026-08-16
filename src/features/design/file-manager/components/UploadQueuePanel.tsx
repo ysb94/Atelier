@@ -1,0 +1,5 @@
+import type { UploadQueueItem } from '../types'
+export function UploadQueuePanel({ queue, busy, upload, remove, uploadAll }: { queue: UploadQueueItem[]; busy: boolean; upload: (job: UploadQueueItem) => void; remove: (id: string) => void; uploadAll: () => void }) {
+ const pending = queue.filter((x) => x.status !== 'completed')
+ return <><div className="upload-queue">{queue.map((job) => <div className="upload-row" key={job.id}><span>{job.targetPath}/{job.file.name}</span><button className={`upload-button${job.status === 'completed' ? ' completed' : ''}`} disabled={busy || job.status === 'uploading' || job.status === 'completed'} onClick={() => upload(job)}>{job.status === 'completed' ? '업로드 완료' : job.status === 'uploading' ? '업로드 중...' : '업로드'}</button><button className="upload-button" disabled={busy} onClick={() => remove(job.id)}>삭제</button></div>)}</div><div className="upload-queue-header"><span className="upload-queue-status">{queue.length ? `대기 ${pending.length}개 / 전체 ${queue.length}개` : '업로드 대기열 없음'}</span><button className="toolbar-button" disabled={!pending.length || busy} onClick={uploadAll}>일괄 업로드</button></div></>
+}

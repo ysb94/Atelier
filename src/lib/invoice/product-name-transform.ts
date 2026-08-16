@@ -1,4 +1,5 @@
 import { compactProductNameKey } from '@/lib/invoice/lookup-normalization'
+import type { LedgerAliases } from '@/lib/invoice/ledger-aliases'
 import {
   generateProductNameCandidates,
   productNameRuleConsumesItemName,
@@ -10,6 +11,12 @@ import {
   type ParsedProductNameTag,
 } from '@/lib/invoice/product-name-tags'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
+import {
+  buildStylePartsIndex,
+  detectSizeInText,
+  stylePartsLookupKey,
+  type StylePartsIndex,
+} from '@/lib/invoice/style-name-parts'
 import type { InvoiceNameTransformation } from '@/lib/invoice/name-transform'
 import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
 import type {
@@ -66,6 +73,8 @@ export type InvoiceProductNameTransformation = {
 export type ProductNameStyleCatalog = {
   byName: Map<string, StyleRef[]>
   byCompactName: Map<string, StyleRef[]>
+  parts?: StylePartsIndex
+  aliases?: LedgerAliases
 }
 
 function comboKey(mallName: string, productName: string, itemName: string) {
@@ -201,6 +210,118 @@ function uniqueMaps(maps: InvoiceProductNameMap[]) {
 }
 
 /**
+ * haystack(압축 주문 텍스트)에서 제품군·색상·사이즈로 공식 상품을 찾는다.
+ * 별칭으로 몸통/색상을 해석한 뒤 family|color|size 인덱스를 조회한다.
+ */
+function matchByStyleParts(
+  catalog: ProductNameStyleCatalog,
+  productName: string,
+  itemName: string,
+  tagRoles: InvoiceProductNameTagRoleEntry[],
+): StyleRef[] {
+  const parts = catalog.parts
+  if (!parts) return []
+
+  const matching = matchingProductName(productName, tagRoles)
+  const haystackRaw = `${matching} ${itemName}`
+  const haystack = compactProductNameKey(haystackRaw)
+  if (!haystack) return []
+
+  const size = detectSizeInText(haystackRaw)
+
+  // 색상: 어휘 + 별칭 중 haystack에 포함되는 것, 긴 것 우선
+  const colorCandidates: { key: string; len: number }[] = []
+  for (const colorKey of parts.colorVocab.keys()) {
+    if (colorKey.length >= 2 && haystack.includes(colorKey)) {
+      colorCandidates.push({ key: colorKey, len: colorKey.length })
+    }
+  }
+  for (const [alias, colorKey] of catalog.aliases?.colorAliases ?? []) {
+    if (alias.length >= 2 && haystack.includes(alias)) {
+      colorCandidates.push({ key: colorKey, len: alias.length })
+    }
+  }
+  colorCandidates.sort((a, b) => b.len - a.len)
+  // 가장 긴 색상만 채택 (블랙이 블랙그레이보다 짧으면 블랙그레이 우선)
+  const bestColorLen = colorCandidates[0]?.len ?? 0
+  const colorKeys = [
+    ...new Set(
+      colorCandidates
+        .filter((item) => item.len === bestColorLen)
+        .map((item) => item.key),
+    ),
+  ]
+  if (colorKeys.length === 0) return []
+
+  // 제품군: familyKey 직접 포함 또는 몸통 별칭. 긴 별칭 우선.
+  const familyCandidates: { key: string; len: number }[] = []
+  for (const familyKey of parts.familyKeys) {
+    if (familyKey.length >= 2 && haystack.includes(familyKey)) {
+      familyCandidates.push({ key: familyKey, len: familyKey.length })
+    }
+  }
+  for (const [body, familyKey] of catalog.aliases?.bodyToFamily ?? []) {
+    if (body.length >= 2 && haystack.includes(body)) {
+      familyCandidates.push({ key: familyKey, len: body.length })
+    }
+  }
+  familyCandidates.sort((a, b) => b.len - a.len)
+  const bestFamilyLen = familyCandidates[0]?.len ?? 0
+  const familyKeys = [
+    ...new Set(
+      familyCandidates
+        .filter((item) => item.len === bestFamilyLen)
+        .map((item) => item.key),
+    ),
+  ]
+  if (familyKeys.length === 0) return []
+
+  const hits: StyleRef[] = []
+  for (const familyKey of familyKeys) {
+    for (const colorKey of colorKeys) {
+      if (size) {
+        hits.push(
+          ...(parts.byFamilyColorSize.get(
+            stylePartsLookupKey(familyKey, colorKey, size),
+          ) ?? []),
+        )
+        continue
+      }
+      // 사이즈 미감지: 사이즈 없는 키만. 없으면 같은 family+color의 전 사이즈가
+      // 정확히 1개일 때만 채택한다.
+      const noSize =
+        parts.byFamilyColorSize.get(
+          stylePartsLookupKey(familyKey, colorKey, null),
+        ) ?? []
+      if (noSize.length > 0) {
+        hits.push(...noSize)
+        continue
+      }
+      const acrossSizes: StyleRef[] = []
+      for (const sizeToken of [
+        'S',
+        'M',
+        'L',
+        'F',
+        'XL',
+        'XS',
+        'FREE',
+        'ONE',
+      ]) {
+        acrossSizes.push(
+          ...(parts.byFamilyColorSize.get(
+            stylePartsLookupKey(familyKey, colorKey, sizeToken),
+          ) ?? []),
+        )
+      }
+      const uniqueAcross = uniqueStyles(acrossSizes)
+      if (uniqueAcross.length === 1) hits.push(...uniqueAcross)
+    }
+  }
+  return uniqueStyles(hits)
+}
+
+/**
  * 품목명 exact 기준을 최우선으로 쓰고, 없을 때만 후보 파서로 styles.name을 찾는다.
  * 내품명 변환 결과는 포함하지 않는다. 후보가 하나여도 기준을 자동 저장하지 않는다.
  */
@@ -214,6 +335,7 @@ export function transformInvoiceProductNames(
   const comboIndex = indexComboMaps(activeMaps)
   const lookupIndex = indexLookupMaps(activeMaps, tagRoles)
   const unresolvedByKey = new Map<string, UnresolvedProductNameCombo>()
+  const stylePartsMemo = new Map<string, StyleRef[]>()
   let mappedRowCount = 0
   let candidateRowCount = 0
   let missingStyleRowCount = 0
@@ -402,6 +524,58 @@ export function transformInvoiceProductNames(
       remember(row)
       return row
     }
+
+    // 공식명 직접/압축이 없으면 제품군·색상·사이즈 분해 매칭
+    const memoKey = comboKey(
+      source.mallName,
+      source.productName,
+      source.itemName,
+    )
+    let partStyles = stylePartsMemo.get(memoKey)
+    if (partStyles === undefined) {
+      partStyles = matchByStyleParts(
+        catalog,
+        source.productName,
+        source.itemName,
+        tagRoles,
+      )
+      stylePartsMemo.set(memoKey, partStyles)
+    }
+    if (partStyles.length === 1) {
+      candidateRowCount += 1
+      const row: InvoiceProductNameTransformRow = {
+        source,
+        status: 'candidate',
+        mapId: null,
+        style: partStyles[0]!,
+        transformedProductName: partStyles[0]!.name,
+        appliedRule: 'style_parts',
+        itemNameConsumed: false,
+        candidates,
+        candidateStyles: partStyles,
+        tags,
+      }
+      remember(row)
+      return row
+    }
+    if (partStyles.length > 1) {
+      conflictRowCount += 1
+      const row: InvoiceProductNameTransformRow = {
+        source,
+        status: 'conflict',
+        mapId: null,
+        style: null,
+        transformedProductName: source.productName,
+        appliedRule: 'style_parts',
+        itemNameConsumed: false,
+        candidates,
+        candidateStyles: partStyles,
+        tags,
+      }
+      remember(row)
+      return row
+    }
+
     if (candidates.length > 0) {
       missingStyleRowCount += 1
       const row: InvoiceProductNameTransformRow = {
@@ -453,7 +627,10 @@ export function transformInvoiceProductNames(
   }
 }
 
-export function catalogFromStyles(styles: StyleRef[]): ProductNameStyleCatalog {
+export function catalogFromStyles(
+  styles: StyleRef[],
+  options?: { aliases?: LedgerAliases; buildParts?: boolean },
+): ProductNameStyleCatalog {
   const byName = new Map<string, StyleRef[]>()
   const byCompactName = new Map<string, StyleRef[]>()
   for (const style of styles) {
@@ -468,7 +645,14 @@ export function catalogFromStyles(styles: StyleRef[]): ProductNameStyleCatalog {
     compactList.push(style)
     byCompactName.set(compact, compactList)
   }
-  return { byName, byCompactName }
+  const parts =
+    options?.buildParts === false ? undefined : buildStylePartsIndex(styles)
+  return {
+    byName,
+    byCompactName,
+    parts,
+    aliases: options?.aliases,
+  }
 }
 
 export function productNameTransformationToName(

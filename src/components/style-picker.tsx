@@ -2,12 +2,40 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
+import { parseStyleName } from '@/lib/invoice/style-name-parts'
 import { searchStyleRefs } from '@/lib/api'
 import type { StyleRef } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
 export function formatStyleRef(ref: StyleRef): string {
   return `${ref.styleNo} · ${ref.name}`
+}
+
+/** 채워진 선택값: 제품군은 흐리게, 색상(+사이즈)만 진하게 구분해 훑어보기 쉽게 한다. */
+function SelectedStyleLabel({ value }: { value: StyleRef }) {
+  const parts = parseStyleName(value.name)
+  const colorLabel = parts
+    ? [parts.colorRaw, parts.size].filter(Boolean).join(' ')
+    : null
+
+  return (
+    <>
+      <span className="shrink-0 font-semibold tabular-nums text-foreground">
+        {value.styleNo}
+      </span>
+      <span className="mx-1 shrink-0 text-muted-foreground/70">·</span>
+      {parts && colorLabel ? (
+        <span className="min-w-0 truncate">
+          {parts.familyRaw ? (
+            <span className="text-muted-foreground">{parts.familyRaw} </span>
+          ) : null}
+          <span className="font-semibold text-foreground">{colorLabel}</span>
+        </span>
+      ) : (
+        <span className="truncate text-muted-foreground">{value.name}</span>
+      )}
+    </>
+  )
 }
 
 function SuggestionList({
@@ -131,14 +159,12 @@ export function StylePicker({
       <div className={cn('flex min-w-0 items-center gap-1', className)}>
         <span
           className={cn(
-            'inline-flex min-w-0 flex-1 items-center rounded-md border border-border bg-muted/40 px-2 py-1.5 text-xs',
+            'inline-flex min-w-0 flex-1 items-center rounded-md border border-amber-500/35 bg-amber-500/10 px-2 py-1.5 text-xs',
             inputClassName,
           )}
           title={formatStyleRef(value)}
         >
-          <span className="truncate font-medium">{value.styleNo}</span>
-          <span className="mx-1 shrink-0 text-muted-foreground">·</span>
-          <span className="truncate text-muted-foreground">{value.name}</span>
+          <SelectedStyleLabel value={value} />
         </span>
         {!disabled ? (
           <button
@@ -248,24 +274,39 @@ export function StyleMultiPicker({
     <div className={cn('min-w-56 space-y-1.5', className)}>
       {selected.length > 0 ? (
         <div className="flex flex-wrap gap-1">
-          {selected.map((ref) => (
-            <span
-              key={ref.styleId}
-              className="inline-flex max-w-full items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px]"
-              title={formatStyleRef(ref)}
-            >
-              <span className="truncate font-medium">{ref.styleNo}</span>
-              <span className="truncate text-muted-foreground">{ref.name}</span>
-              <button
-                type="button"
-                className="shrink-0 text-muted-foreground hover:text-foreground"
-                onClick={() => removeRef(ref.styleId)}
-                aria-label={`${ref.styleNo} 제거`}
+          {selected.map((ref) => {
+            const parts = parseStyleName(ref.name)
+            const colorLabel = parts
+              ? [parts.colorRaw, parts.size].filter(Boolean).join(' ')
+              : null
+            return (
+              <span
+                key={ref.styleId}
+                className="inline-flex max-w-full items-center gap-1 rounded-md border border-amber-500/35 bg-amber-500/10 px-1.5 py-0.5 text-[11px]"
+                title={formatStyleRef(ref)}
               >
-                <X className="size-3" />
-              </button>
-            </span>
-          ))}
+                <span className="shrink-0 font-semibold tabular-nums">{ref.styleNo}</span>
+                {parts && colorLabel ? (
+                  <span className="min-w-0 truncate">
+                    {parts.familyRaw ? (
+                      <span className="text-muted-foreground">{parts.familyRaw} </span>
+                    ) : null}
+                    <span className="font-semibold text-foreground">{colorLabel}</span>
+                  </span>
+                ) : (
+                  <span className="truncate text-muted-foreground">{ref.name}</span>
+                )}
+                <button
+                  type="button"
+                  className="shrink-0 text-muted-foreground hover:text-foreground"
+                  onClick={() => removeRef(ref.styleId)}
+                  aria-label={`${ref.styleNo} 제거`}
+                >
+                  <X className="size-3" />
+                </button>
+              </span>
+            )
+          })}
         </div>
       ) : (
         <p className="text-[11px] text-muted-foreground">아직 고른 제품 없음</p>

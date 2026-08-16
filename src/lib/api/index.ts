@@ -969,6 +969,11 @@ export async function listStyleRefsForLookup(
   return styleStore.listStyleRefsForLookup(brandId, options)
 }
 
+export async function listAllStyleRefs(brandId: string) {
+  await delay()
+  return styleStore.listAllStyleRefs(brandId)
+}
+
 export async function getStyleById(
   styleId: string,
 ): Promise<Style | undefined> {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { StylePicker, formatStyleRef } from '@/components/style-picker'
 import { Badge } from '@/components/ui/badge'
@@ -65,6 +65,7 @@ const RULE_LABELS: Record<string, string> = {
   item_slash_suffix: '내품명 / 뒷부분(SSG)',
   own_code: '자체상품코드',
   compact: '기호·공백 정리',
+  style_parts: '제품군·색상 조합',
 }
 
 function ruleLabel(rule: string | null) {
@@ -831,6 +832,18 @@ function ProductReviewGroupCard({
   )
 }
 
+/**
+ * 엔진이 실제로 맞춘 규칙의 후보를 기본 조회 키로 둔다.
+ * 분해 매칭처럼 후보 규칙 밖에서 맞은 경우는 시트 열 우선순위 첫 후보를 쓴다.
+ */
+function pickDefaultLookupKey(combo: UnresolvedProductNameCombo): string {
+  if (combo.candidates.length === 0) return ''
+  const byRule = combo.appliedRule
+    ? combo.candidates.find((candidate) => candidate.rule === combo.appliedRule)
+    : undefined
+  return (byRule ?? combo.candidates[0]!).text
+}
+
 function VariantAssignRow({
   brandId,
   combo,
@@ -845,12 +858,17 @@ function VariantAssignRow({
   onEnqueue: (job: ProductMapEnqueueInput) => void
 }) {
   const queryClient = useQueryClient()
+  // 후보가 여럿인 충돌 행은 임의로 고르지 않는다. 사람이 반드시 지목해야 한다.
+  const autoStyle =
+    combo.candidateStyles.length === 1 ? combo.candidateStyles[0]! : null
   const [selectedLookupKey, setSelectedLookupKey] = useState(
-    draft?.lookupKey ?? '',
+    () => draft?.lookupKey ?? pickDefaultLookupKey(combo),
   )
   const [style, setStyle] = useState<StyleRef | null>(
-    draft?.style ?? combo.candidateStyles[0] ?? null,
+    () => draft?.style ?? autoStyle,
   )
+  const [lookupTouched, setLookupTouched] = useState(Boolean(draft?.lookupKey))
+  const [styleTouched, setStyleTouched] = useState(Boolean(draft?.style))
   const [pickedRecommendation, setPickedRecommendation] =
     useState<AiProductRecommendation | null>(null)
   const [localError, setLocalError] = useState<string | null>(draft?.error ?? null)
@@ -895,6 +913,7 @@ function VariantAssignRow({
                       }`}
                       onClick={() => {
                         setSelectedLookupKey(candidate.text)
+                        setLookupTouched(true)
                         clearDraftMessage()
                       }}
                     >
@@ -905,6 +924,9 @@ function VariantAssignRow({
                         {candidate.text}
                       </span>{' '}
                       · {ruleLabel(candidate.rule)}
+                      {selected && !lookupTouched ? (
+                        <span className="ml-1 text-primary/70">· 자동 선택</span>
+                      ) : null}
                     </button>
                   </li>
                 )
@@ -923,6 +945,7 @@ function VariantAssignRow({
                 value={style}
                 onChange={(next) => {
                   setStyle(next)
+                  setStyleTouched(true)
                   clearDraftMessage()
                 }}
                 placeholder="본품 1개만 고르세요"
@@ -1026,9 +1049,26 @@ function VariantAssignRow({
           disabled={false}
           onPick={({ lookupKey, nextStyle, recommendation }) => {
             setSelectedLookupKey(lookupKey)
-            if (nextStyle) setStyle(nextStyle)
+            setLookupTouched(true)
+            if (nextStyle) {
+              setStyle(nextStyle)
+              setStyleTouched(true)
+            }
             setPickedRecommendation(recommendation)
             setLocalError(null)
+          }}
+          onAutoFill={({ lookupKey, nextStyle, recommendation }) => {
+            // 사람이 이미 고른 칸은 절대 덮지 않는다.
+            let filled = false
+            if (!lookupTouched && lookupKey) {
+              setSelectedLookupKey(lookupKey)
+              filled = true
+            }
+            if (!styleTouched && !style && nextStyle) {
+              setStyle(nextStyle)
+              filled = true
+            }
+            if (filled) setPickedRecommendation(recommendation)
           }}
         />
       </div>
@@ -1041,11 +1081,17 @@ function AiRecommendPanel({
   combo,
   disabled,
   onPick,
+  onAutoFill,
 }: {
   brandId: string
   combo: UnresolvedProductNameCombo
   disabled: boolean
   onPick: (next: {
+    lookupKey: string
+    nextStyle?: StyleRef
+    recommendation: AiProductRecommendation
+  }) => void
+  onAutoFill?: (next: {
     lookupKey: string
     nextStyle?: StyleRef
     recommendation: AiProductRecommendation
@@ -1098,6 +1144,20 @@ function AiRecommendPanel({
   const recommendation = recommendQuery.data
   const error =
     recommendQuery.error instanceof Error ? recommendQuery.error.message : null
+
+  const autoFillRef = useRef(onAutoFill)
+  autoFillRef.current = onAutoFill
+  useEffect(() => {
+    if (!recommendation) return
+    const first = recommendation.products[0]
+    autoFillRef.current?.({
+      lookupKey: recommendation.lookupKey,
+      recommendation,
+      nextStyle: first
+        ? { styleId: first.styleId, styleNo: first.styleNo, name: first.name }
+        : undefined,
+    })
+  }, [recommendation])
 
   return (
     <div className="rounded-md border border-dashed border-border bg-muted/20 p-2">

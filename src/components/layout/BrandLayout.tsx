@@ -15,6 +15,7 @@ import {
   ChevronDown,
   FileSpreadsheet,
   Home,
+  Images,
   LayoutGrid,
   Lightbulb,
   ListChecks,
@@ -66,7 +67,10 @@ const navGroups: { title: string; items: NavItem[] }[] = [
   },
   {
     title: '디자인',
-    items: [{ to: 'work/design', label: '상품 정보', icon: Palette }],
+    items: [
+      { to: 'work/design', label: '상품 정보', icon: Palette },
+      { to: 'design/file-manager', label: '이미지 업로드', icon: Images },
+    ],
   },
   {
     title: 'MD',
@@ -454,11 +458,28 @@ export function BrandLayout() {
             onOpen={openTab}
             onClose={closeTab}
           />
-          <div className="min-h-0 flex-1 overflow-auto">
-            <div className="mx-auto max-w-[1600px] p-6 md:p-8">
-              <WorkspaceTabPanels tabs={tabs} activeId={activeId} />
-            </div>
-          </div>
+          {(() => {
+            const fullBleed =
+              location.pathname.includes('/design/file-manager')
+            return (
+              <div
+                className={cn(
+                  'min-h-0 flex-1',
+                  fullBleed ? 'overflow-hidden' : 'overflow-auto',
+                )}
+              >
+                <div
+                  className={cn(
+                    fullBleed
+                      ? 'h-full min-h-0'
+                      : 'mx-auto max-w-[1600px] p-6 md:p-8',
+                  )}
+                >
+                  <WorkspaceTabPanels tabs={tabs} activeId={activeId} />
+                </div>
+              </div>
+            )
+          })()}
         </main>
       </div>
     </BrandContext.Provider>

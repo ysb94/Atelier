@@ -41,7 +41,7 @@ import {
   getInvoiceProductNameMaps,
   getInvoiceProductNameTagRoles,
   getInvoiceWorkInstructions,
-  listStyleRefsForLookup,
+  listAllStyleRefs,
 } from '@/lib/api'
 import { parseFile } from '@/lib/import/parse'
 import {
@@ -58,8 +58,7 @@ import {
   transformInvoiceNamesByCode,
   type InvoiceNameTransformation,
 } from '@/lib/invoice/name-transform'
-import { collectProductNameCandidateTexts } from '@/lib/invoice/product-name-patterns'
-import { tagRoleFingerprint } from '@/lib/invoice/product-name-tags'
+import { learnLedgerAliases } from '@/lib/invoice/ledger-aliases'
 import {
   catalogFromStyles,
   transformInvoiceProductNames,
@@ -1070,37 +1069,17 @@ export function InvoiceWorkPage() {
     () => productNameTagRolesQuery.data ?? [],
     [productNameTagRolesQuery.data],
   )
-  const productNameTagRoleFingerprint = useMemo(
-    () => tagRoleFingerprint(productNameTagRoles),
-    [productNameTagRoles],
-  )
   const productNameMapsError =
     productNameMapsQuery.error instanceof Error
       ? productNameMapsQuery.error.message
       : productNameMapsQuery.error
         ? '품목명 변환 기준을 불러오지 못했습니다.'
         : null
-  const productCandidateNames = useMemo(
-    () =>
-      inspection
-        ? collectProductNameCandidateTexts(
-            inspection.rows,
-            productNameTagRoles,
-          )
-        : [],
-    [inspection, productNameTagRoles],
-  )
   const productStyleLookupQuery = useQuery({
-    queryKey: [
-      'invoice-product-name-style-lookup',
-      brand.id,
-      fileName,
-      inspection?.rows.length ?? 0,
-      productNameTagRoleFingerprint,
-    ],
-    queryFn: () =>
-      listStyleRefsForLookup(brand.id, { names: productCandidateNames }),
+    queryKey: ['invoice-product-name-all-styles', brand.id],
+    queryFn: () => listAllStyleRefs(brand.id),
     enabled: Boolean(inspection),
+    staleTime: 5 * 60_000,
   })
   const productTransformation = useMemo(() => {
     if (
@@ -1114,12 +1093,17 @@ export function InvoiceWorkPage() {
     ) {
       return null
     }
+    const styles = productStyleLookupQuery.data ?? []
+    const catalog = catalogFromStyles(styles)
+    const aliases = catalog.parts
+      ? learnLedgerAliases(productNameMaps, catalog.parts, {
+          tagRoles: productNameTagRoles,
+        })
+      : undefined
     return transformInvoiceProductNames(
       inspection.rows,
       productNameMaps,
-      catalogFromStyles(
-        [...(productStyleLookupQuery.data?.byName.values() ?? [])].flat(),
-      ),
+      { ...catalog, aliases },
       productNameTagRoles,
     )
   }, [

@@ -1,0 +1,27 @@
+import { useEffect, useRef } from 'react'
+import type { FolderGroup, PreviewSelection, SelectionEntry, ServerFileItem } from '../types'
+import { getFolderDisplayName, getImmediateChildFolders, getItemDisplayUrl, getItemKey, getListTypeIconMeta, getParentFolderPath, isImageItem, isVideoItem } from '../file-manager-utils'
+import type { GlobalSearchMatch } from '../useDesignFileManager'
+
+interface Props { browseTypes: string[]; type: string | null; folder: string | null; groups: FolderGroup[]; files: ServerFileItem[]; global: GlobalSearchMatch[]; searching: boolean; selected: Map<string, SelectionEntry>; preview: PreviewSelection | null; view: string; limit: number; onMore: () => void; onFolder: (folder: string | null) => void; onType: (type: string | null) => void; onSelect: (key: string, entry: SelectionEntry, event: React.MouseEvent) => void; onContext: (event: React.MouseEvent, item?: ServerFileItem, itemType?: string, folder?: string) => void }
+function MediaThumb({ item, type }: { item: ServerFileItem; type: string }) {
+ const video = useRef<HTMLVideoElement>(null)
+ useEffect(() => { const node = video.current; if (!node || !isVideoItem(item, type)) return; const observer = new IntersectionObserver(([entry]) => { if (entry.isIntersecting && node.dataset.src) { node.src = node.dataset.src; observer.disconnect() } }, { rootMargin: '200px' }); observer.observe(node); return () => observer.disconnect() }, [item, type])
+ if (isVideoItem(item, type)) return <div className="grid-thumb video-thumb loading-video"><video ref={video} data-src={getItemDisplayUrl(item, type)} muted playsInline preload="metadata" onLoadedData={(event) => event.currentTarget.parentElement?.classList.remove('loading-video')} /></div>
+ if (isImageItem(item, type)) return <div className="grid-thumb"><img src={getItemDisplayUrl(item, type)} alt={item.displayName || item.name || ''} loading="lazy" /></div>
+ return <div className="grid-thumb"><div className="grid-icon-file">▣</div></div>
+}
+export function FileGrid(props: Props) {
+ const items = props.global.length ? props.global.map((x) => ({ ...x, locationLabel: x.locationLabel })) : props.files.map((item) => ({ item, type: props.type || '', locationLabel: '' }))
+ const folders = props.type ? getImmediateChildFolders(props.groups, props.folder) : []
+ const visible = items.slice(0, props.limit)
+ const card = (item: ServerFileItem, type: string, locationLabel = '') => { const key = getItemKey(item, type); const selected = props.selected.has(key); const active = props.preview && getItemKey(props.preview.item, props.preview.type) === key; return <div key={key} className={`grid-card file-card${selected ? ' selected' : ''}${active ? ' active' : ''}`} title={locationLabel || item.displayName || item.name} onClick={(event) => props.onSelect(key, { kind: 'file', item, type }, event)} onDoubleClick={() => window.open(getItemDisplayUrl(item, type), '_blank', 'noopener')} onContextMenu={(event) => props.onContext(event, item, type)}>{props.view === 'list' ? <span className="grid-list-type-icon">{getListTypeIconMeta(item, type).icon}</span> : <MediaThumb item={item} type={type} />}<div className="grid-name-wrap"><div className="grid-name">{item.displayName || item.name || 'unknown'}</div>{locationLabel && <div className="grid-path">{locationLabel}</div>}</div></div> }
+ if (props.searching) return <div className={`folder-grid view-${props.view}`}><div className="preview-placeholder">전체 검색 중...</div></div>
+ return <div className={`folder-grid${props.view === 'normal' ? '' : ` view-${props.view}`}`} onContextMenu={(event) => { if (event.target === event.currentTarget) props.onContext(event) }}>
+  {props.type && <button className="grid-card" title="상위 폴더" onClick={() => props.folder ? props.onFolder(getParentFolderPath(props.folder)) : props.onType(null)}>{props.view === 'list' ? <span className="grid-list-type-icon">↩</span> : <div className="grid-thumb"><div className="grid-icon-parent">↩</div></div>}<div className="grid-name">..</div></button>}
+  {!props.global.length && folders.map((folder) => { const key = `folder::${props.type}::${folder}`; return <div key={key} className={`grid-card folder-card selectable${props.selected.has(key) ? ' selected' : ''}`} onClick={(event) => props.onSelect(key, { kind: 'folder', folder, type: props.type || '' }, event)} onDoubleClick={() => props.onFolder(folder)} onContextMenu={(event) => props.onContext(event, undefined, props.type || '', folder)}>{props.view === 'list' ? <span className="grid-list-type-icon">📁</span> : <div className="grid-thumb"><div className="grid-icon-folder" /></div>}<div className="grid-name">{getFolderDisplayName(folder)}</div></div> })}
+  {visible.map(({ item, type, locationLabel }) => card(item, type, locationLabel))}
+  {items.length > visible.length && <button className="grid-card load-more-card" onClick={props.onMore}><strong>더 보기</strong>{items.length - visible.length}개 파일 더 있음</button>}
+  {!props.type && !props.global.length && props.browseTypes.map((type) => { const key = `browse::${type}`; return <div key={key} className={`grid-card folder-card selectable${props.selected.has(key) ? ' selected' : ''}`} onClick={(event) => props.onSelect(key, { kind: 'browse', browseType: type }, event)} onDoubleClick={() => props.onType(type)}><div className="grid-thumb"><div className="grid-icon-folder" /></div><div className="grid-name">{type}</div></div> })}
+ </div>
+}
