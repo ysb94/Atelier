@@ -17,6 +17,7 @@ import type {
   CodeUsageTarget,
   CodeUsageTargetInput,
   InvoiceNameRule,
+  InvoiceItemNameRule,
   InvoiceOptionMap,
   InvoiceProductNameMap,
   InvoiceProductNameTagRoleEntry,
@@ -45,6 +46,7 @@ import * as codeUsageTargetStore from '@/lib/supabase/code-usage-targets'
 import * as codeUsageAssignmentStore from '@/lib/supabase/code-usage-assignments'
 import * as invoiceGiftAllocationStore from '@/lib/supabase/invoice-gift-allocations'
 import * as invoiceNameRuleStore from '@/lib/supabase/invoice-name-rules'
+import * as invoiceItemNameRuleStore from '@/lib/supabase/invoice-item-name-rules'
 import * as invoiceOptionMapStore from '@/lib/supabase/invoice-option-maps'
 import * as invoiceProductNameMapStore from '@/lib/supabase/invoice-product-name-maps'
 import * as invoiceProductNameTagRoleStore from '@/lib/supabase/invoice-product-name-tag-roles'
@@ -70,13 +72,21 @@ export type {
   InvoiceCodeRuleInput,
   InvoiceNameRuleUpdateInput,
 } from '@/lib/supabase/invoice-name-rules'
+export { InvoiceItemNameRuleStoreError } from '@/lib/supabase/invoice-item-name-rules'
+export type {
+  InvoiceItemNameRuleComponentInput,
+  InvoiceItemNameRuleInput,
+} from '@/lib/supabase/invoice-item-name-rules'
 export { InvoiceOptionMapStoreError } from '@/lib/supabase/invoice-option-maps'
 export type {
   InvoiceOptionComponentInput,
   InvoiceOptionMapInput,
 } from '@/lib/supabase/invoice-option-maps'
 export { InvoiceProductNameMapStoreError } from '@/lib/supabase/invoice-product-name-maps'
-export type { InvoiceProductNameMapInput } from '@/lib/supabase/invoice-product-name-maps'
+export type {
+  InvoiceProductNameLookupHit,
+  InvoiceProductNameMapInput,
+} from '@/lib/supabase/invoice-product-name-maps'
 export { InvoiceProductNameTagRoleStoreError } from '@/lib/supabase/invoice-product-name-tag-roles'
 export type { InvoiceProductNameTagRoleInput } from '@/lib/supabase/invoice-product-name-tag-roles'
 export { InvoicePrefixRequestStoreError } from '@/lib/supabase/invoice-prefix-requests'
@@ -256,6 +266,29 @@ export async function updateInvoiceNameRule(
   return invoiceNameRuleStore.updateInvoiceNameRule(id, input)
 }
 
+export async function getInvoiceItemNameRules(
+  brandId: string,
+  activeOnly = false,
+): Promise<InvoiceItemNameRule[]> {
+  await delay()
+  return invoiceItemNameRuleStore.listInvoiceItemNameRules(brandId, {
+    activeOnly,
+  })
+}
+
+export async function saveInvoiceItemNameRule(
+  brandId: string,
+  input: invoiceItemNameRuleStore.InvoiceItemNameRuleInput,
+  ruleId?: string,
+): Promise<InvoiceItemNameRule> {
+  await delay()
+  return invoiceItemNameRuleStore.saveInvoiceItemNameRule(
+    brandId,
+    input,
+    ruleId,
+  )
+}
+
 export async function getInvoiceOptionMaps(
   brandId: string,
   activeOnly = false,
@@ -305,6 +338,19 @@ export async function getInvoiceProductNameMaps(
   return invoiceProductNameMapStore.listInvoiceProductNameMaps(brandId, {
     activeOnly,
   })
+}
+
+export async function searchInvoiceProductNameMapsByLookupKey(
+  brandId: string,
+  search: string,
+  limit = 20,
+) {
+  await delay()
+  return invoiceProductNameMapStore.searchInvoiceProductNameMapsByLookupKey(
+    brandId,
+    search,
+    limit,
+  )
 }
 
 export async function saveInvoiceProductNameMap(

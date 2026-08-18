@@ -501,8 +501,57 @@ export type InvoiceOptionMap = {
   updatedAt: string
 }
 
+export type InvoiceItemNameRuleScope = 'global' | 'main_style'
+export type InvoiceItemNameRuleAction = 'delete' | 'components'
+
+export const INVOICE_ITEM_NAME_RULE_SCOPE_LABEL: Record<
+  InvoiceItemNameRuleScope,
+  string
+> = {
+  global: '품목명 안 봐도 됨',
+  main_style: '본품별로 봐야 함',
+}
+
+export const INVOICE_ITEM_NAME_RULE_ACTION_LABEL: Record<
+  InvoiceItemNameRuleAction,
+  string
+> = {
+  delete: '지우기',
+  components: '구성품으로 설정',
+}
+
+/** 내품명 규칙이 추가하는 출고 구성품 1건 */
+export type InvoiceItemNameRuleComponent = {
+  id: string
+  ruleId: string
+  style: StyleRef
+  role: Exclude<InvoiceOptionComponentRole, 'main'>
+  quantity: number
+  sortOrder: number
+}
+
+/**
+ * 유효 내품명을 지우거나 구성품 M번호로 연결하는 기준.
+ * global은 본품을 보지 않고, main_style은 확정 본품 styles.id로 나눈다.
+ */
+export type InvoiceItemNameRule = {
+  id: string
+  brandId: string
+  scope: InvoiceItemNameRuleScope
+  mainStyle: StyleRef | null
+  itemName: string
+  normalizedItemName: string
+  action: InvoiceItemNameRuleAction
+  isActive: boolean
+  note: string
+  components: InvoiceItemNameRuleComponent[]
+  createdAt: string
+  updatedAt: string
+}
+
 /** 품목명 맨 앞 [태그]의 브랜드별 역할. 원문과 출고구성은 바꾸지 않는다. */
 export type InvoiceProductNameTagRole =
+  | 'product_composition'
   | 'event_marketing'
   | 'composition_gift'
   | 'identity_condition'
@@ -512,8 +561,9 @@ export const INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL: Record<
   InvoiceProductNameTagRole,
   string
 > = {
+  product_composition: '상품 구성',
   event_marketing: '행사/마케팅',
-  composition_gift: '증정/구성',
+  composition_gift: '증정/사은',
   identity_condition: '상품 특징',
   unknown: '미분류',
 }

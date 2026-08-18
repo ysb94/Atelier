@@ -200,30 +200,10 @@ assert(
   '선택안함 다의어 별칭 제외',
 )
 
-// --- 변환 통합: 학습에 없던 Navy가 붙는지 ---
-const catalog = catalogFromStyles(learnStyles, {
-  aliases: learnLedgerAliases(
-    [
-      ...maps,
-      // navy 학습용 — 다른 제품군에도 Navy→네이비
-      lookupMap(
-        'm5',
-        'Patch Cap_13 Colors Color=Navy',
-        style('sz', 'M9993', '패치 캡 네이비'),
-      ),
-      lookupMap(
-        'm6',
-        'Logo Cap Color=Navy',
-        navy,
-      ),
-    ],
-    buildStylePartsIndex([
-      ...learnStyles,
-      style('sz', 'M9993', '패치 캡 네이비'),
-    ]),
-    { minFamilies: 2 },
-  ),
-})
+// --- 변환 통합: 분해 매칭은 더 이상 상품을 확정하지 않는다 ---
+// 색상 토큰만 걸려도 다른 상품을 확정해 오탐이 잦았으므로 제거했다.
+// 원장에 조회 키가 없으면 사람이나 AI 추천이 지목해야 한다.
+const catalog = catalogFromStyles(learnStyles)
 
 const navyRow = transformInvoiceProductNames(
   [
@@ -237,10 +217,14 @@ const navyRow = transformInvoiceProductNames(
   catalog,
 )
 assert(
-  navyRow.rows[0]?.status === 'candidate' &&
-    navyRow.rows[0]?.appliedRule === 'style_parts' &&
-    navyRow.rows[0]?.style?.styleId === 's3',
-  '학습 없는 Color=Navy도 볼 캡 네이비로 분해 매칭',
+  navyRow.rows[0]?.status !== 'candidate' &&
+    navyRow.rows[0]?.style?.styleId !== navy.styleId,
+  '원장에 없는 Color=Navy를 분해 매칭으로 확정하지 않는다',
+)
+assert(
+  navyRow.rows[0]?.transformedProductName ===
+    'MSMRZ Logo Ball cap_12color',
+  '확정 못한 행은 원문 품목명을 유지한다',
 )
 
 const greenDirect = transformInvoiceProductNames(
@@ -255,9 +239,20 @@ const greenDirect = transformInvoiceProductNames(
   catalog,
 )
 assert(
-  greenDirect.rows[0]?.status === 'candidate' &&
-    greenDirect.rows[0]?.style?.styleId === 's1',
-  'Color=Green → 볼 캡 그린',
+  greenDirect.rows[0]?.status !== 'candidate',
+  '학습된 색상이어도 분해 매칭으로 확정하지 않는다',
+)
+
+// 공식 상품명이 조회 키로 그대로 나오면 여전히 후보로 잡는다
+const exactName = transformInvoiceProductNames(
+  [row({ rowNumber: 3, productName: '볼 캡 그린', itemName: '' })],
+  [],
+  catalog,
+)
+assert(
+  exactName.rows[0]?.status === 'candidate' &&
+    exactName.rows[0]?.style?.styleId === green.styleId,
+  '공식 상품명 직접 일치는 계속 후보로 잡는다',
 )
 
 console.log('style-parts verify: ok')

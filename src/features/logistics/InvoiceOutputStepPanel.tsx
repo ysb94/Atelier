@@ -83,6 +83,11 @@ export function InvoiceOutputStepPanel({
   )
 
   const orderCount = previewRows.filter((row) => row.kind === 'order').length
+  const sourceOrderCount = new Set(
+    previewRows
+      .filter((row) => row.kind === 'order')
+      .map((row) => row.sourceRowNumber),
+  ).size
   const giftCount = previewRows.filter((row) => row.kind === 'gift').length
   const reviewCount =
     productTransformation.unresolvedRowCount +
@@ -188,7 +193,12 @@ export function InvoiceOutputStepPanel({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline">전체 {formatNumber(previewRows.length)}행</Badge>
-          <Badge variant="success">주문 {formatNumber(orderCount)}</Badge>
+          <Badge variant="success">송장 {formatNumber(orderCount)}행</Badge>
+          {sourceOrderCount !== orderCount ? (
+            <Badge variant="outline">
+              원본 {formatNumber(sourceOrderCount)}건
+            </Badge>
+          ) : null}
           <Badge variant="muted">사은품 {formatNumber(giftCount)}</Badge>
           {reviewCount > 0 ? (
             <Badge variant="danger">
@@ -235,8 +245,8 @@ export function InvoiceOutputStepPanel({
         </p>
       ) : (
         <p className="text-xs text-muted-foreground">
-          품목명과 내품명은 각 단계 결과를 마지막에만 합칩니다. 내품명 규칙이
-          없으면 원문입니다. 구성품은 출고구성 파일에서 확인하세요.
+          품목명과 내품명은 각 단계 결과를 마지막에만 합칩니다. 세트는 구성품별
+          행으로 펼치고, 변환된 내품명은 모든 구성행에 동일하게 넣습니다.
         </p>
       )}
 

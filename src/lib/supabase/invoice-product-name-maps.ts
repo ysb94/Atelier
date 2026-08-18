@@ -158,6 +158,75 @@ export async function listInvoiceProductNameMaps(
   return all
 }
 
+function sanitizeLookupSearch(raw: string) {
+  return raw
+    .replace(/[,()%*\\"']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function escapeIlike(value: string) {
+  return value.replace(/[\\_]/g, '\\$&')
+}
+
+export type InvoiceProductNameLookupHit = {
+  mapId: string
+  lookupKey: string
+  style: StyleRef
+}
+
+/**
+ * 복사·입력한 글자를 조회 키 원장에서 찾고, 연결된 본품 공식명·M번호를 돌려준다.
+ * 상품 시트(styles)를 직접 검색하지 않는다.
+ */
+export async function searchInvoiceProductNameMapsByLookupKey(
+  brandId: string,
+  search: string,
+  limit = 20,
+): Promise<InvoiceProductNameLookupHit[]> {
+  const keyword = sanitizeLookupSearch(search)
+  if (keyword.length < 2) return []
+
+  const pattern = `%${escapeIlike(keyword)}%`
+  const normalized = normalizeInvoiceText(keyword)
+  const normalizedPattern = normalized
+    ? `%${escapeIlike(normalized)}%`
+    : pattern
+
+  const { data, error } = await getSupabase()
+    .from('invoice_product_name_maps')
+    .select(SELECT_WITH_STYLE)
+    .eq('brand_id', brandId)
+    .eq('is_active', true)
+    .or(
+      `lookup_key.ilike.${pattern},normalized_lookup_key.ilike.${normalizedPattern}`,
+    )
+    .order('lookup_key', { ascending: true })
+    .limit(Math.max(limit * 3, limit))
+
+  if (error) {
+    throw new InvoiceProductNameMapStoreError(
+      errorMessage(error, '조회 키를 검색하지 못했습니다.'),
+    )
+  }
+
+  const hits: InvoiceProductNameLookupHit[] = []
+  const seen = new Set<string>()
+  for (const mapped of ((data as MapRow[]) ?? [])
+    .map(toMap)
+    .filter((item): item is InvoiceProductNameMap => Boolean(item))) {
+    if (seen.has(mapped.style.styleId)) continue
+    seen.add(mapped.style.styleId)
+    hits.push({
+      mapId: mapped.id,
+      lookupKey: mapped.lookupKey || mapped.productName,
+      style: mapped.style,
+    })
+    if (hits.length >= limit) break
+  }
+  return hits
+}
+
 export async function saveInvoiceProductNameMap(
   brandId: string,
   input: InvoiceProductNameMapInput,

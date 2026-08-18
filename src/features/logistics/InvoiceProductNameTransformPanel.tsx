@@ -1,4 +1,13 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { StylePicker, formatStyleRef } from '@/components/style-picker'
 import { Badge } from '@/components/ui/badge'
@@ -22,17 +31,30 @@ import {
   type FileTagGroup,
   type ParsedProductNameTag,
 } from '@/lib/invoice/product-name-tags'
+import { optionMapItemNameForRule } from '@/lib/invoice/product-name-patterns'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import type {
   AiProductRecommendation,
+  InvoiceOptionMap,
   InvoiceProductNameMap,
   InvoiceProductNameTagRole,
   StyleRef,
 } from '@/lib/types'
 import { INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
+import {
+  InvoiceOptionExtrasEditor,
+  extrasFromOptionMap,
+  type OptionExtraDraft,
+} from './InvoiceOptionExtrasEditor'
+import { InvoiceProductLookupDock } from './InvoiceProductLookupDock'
 import { InvoiceProductNameRecentSavesPanel } from './InvoiceProductNameRecentSavesPanel'
 import {
+  useInvoiceProductNameBulkAiApply,
+  type BulkAiApplyHoldReason,
+} from './useInvoiceProductNameBulkAiApply'
+import {
+  findOptionMapByComboPreferring,
   useInvoiceProductNameSaveQueue,
   type ProductMapEnqueueInput,
   type ProductMapSaveDraft,
@@ -51,21 +73,17 @@ const STATUS_META: Record<
 }
 
 const RULE_LABELS: Record<string, string> = {
-  exact: '쇼핑몰·품목명·내품명 조합',
-  product_item: '품목명 + 내품명 전체',
+  own_code: '자체상품코드',
   product: '품목명 단독',
+  product_item: '품목명 + 내품명 전체',
   product_item_slash_prefix: '품목명 + 내품명 / 앞부분',
   product_item_comma_prefix: '품목명 + 내품명 , 앞부분',
   product_item_color_label: '품목명 + Color: 구간',
   product_item_colon_prefix: '품목명 + 내품명 : 앞부분',
-  item_slash_prefix: '내품명 / 앞부분',
-  item_comma_prefix: '내품명 , 앞부분',
-  item_full: '내품명 전체 단독(내품명 비움)',
-  item_value: '옵션값 단독(내품명 비움)',
-  item_slash_suffix: '내품명 / 뒷부분(SSG)',
-  own_code: '자체상품코드',
+  item_slash_prefix: '내품명 / 앞부분 단독',
+  item_comma_prefix: '내품명 , 앞부분 단독',
+  item_full: '내품명 전체 단독',
   compact: '기호·공백 정리',
-  style_parts: '제품군·색상 조합',
 }
 
 function ruleLabel(rule: string | null) {
@@ -127,6 +145,7 @@ function groupCombos(
 }
 
 const TAG_ROLES: InvoiceProductNameTagRole[] = [
+  'product_composition',
   'event_marketing',
   'composition_gift',
   'identity_condition',
@@ -137,9 +156,11 @@ const TAG_ROLES: InvoiceProductNameTagRole[] = [
 export function InvoiceProductNameTransformPanel({
   brandId,
   transformation,
+  onBlockingSaveCountChange,
 }: {
   brandId: string
   transformation: InvoiceProductNameTransformation
+  onBlockingSaveCountChange?: (count: number) => void
 }) {
   const queryClient = useQueryClient()
   const [query, setQuery] = useState('')
@@ -156,6 +177,17 @@ export function InvoiceProductNameTransformPanel({
     undo,
   } = useInvoiceProductNameSaveQueue(brandId)
 
+  useEffect(() => {
+    onBlockingSaveCountChange?.(savingCount + failedCount)
+  }, [failedCount, onBlockingSaveCountChange, savingCount])
+
+  useEffect(
+    () => () => {
+      onBlockingSaveCountChange?.(0)
+    },
+    [onBlockingSaveCountChange],
+  )
+
   const visibleCombos = useMemo(
     () =>
       transformation.unresolvedCombos.filter((combo) => {
@@ -168,6 +200,11 @@ export function InvoiceProductNameTransformPanel({
   const [openProductName, setOpenProductName] = useState<string | null>(
     groups[0]?.productName ?? null,
   )
+  const bulk = useInvoiceProductNameBulkAiApply({
+    brandId,
+    combos: visibleCombos,
+    enqueue,
+  })
 
   useEffect(() => {
     if (openProductName) {
@@ -375,7 +412,8 @@ export function InvoiceProductNameTransformPanel({
   }, [query, status, transformation.rows])
 
   return (
-    <div className="space-y-5">
+    <div className="flex flex-col-reverse gap-4 lg:flex-row lg:items-start">
+      <div className="min-w-0 flex-1 space-y-5">
       <div className="flex flex-wrap gap-2">
         <Badge variant="success">
           자동 완료 {formatNumber(transformation.mappedRowCount)}
@@ -407,8 +445,9 @@ export function InvoiceProductNameTransformPanel({
                 : ''}
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              역할을 고른 뒤 아래 저장을 누르면 한 번에 반영됩니다. 저장
-              전에는 아래 품목 목록이 바뀌지 않습니다.
+              상품 구성 태그만 비교에 남기고, 행사·증정·상품 특징 태그는
+              비교에서 뺍니다. 역할을 고른 뒤 아래 저장을 누르면 한 번에
+              반영됩니다. 저장 전에는 아래 품목 목록이 바뀌지 않습니다.
             </p>
           </div>
           {unsetTags.length > 0 ? (
@@ -488,7 +527,7 @@ export function InvoiceProductNameTransformPanel({
       <InvoiceProductNameRecentSavesPanel
         brandId={brandId}
         history={history}
-        onCorrect={({ historyId, lookupKey, style }) => {
+        onCorrect={({ historyId, lookupKey, style, extras }) => {
           const entry = history.find((item) => item.id === historyId)
           if (!entry) return
           enqueue({
@@ -496,9 +535,12 @@ export function InvoiceProductNameTransformPanel({
             comboKey: entry.comboKey,
             productName: entry.productName,
             itemName: entry.itemName,
+            originalItemName: entry.originalItemName,
             mallName: entry.mallName,
+            ownProductCode: entry.ownProductCode,
             lookupKey,
             style,
+            extras,
             appliedRule: entry.appliedRule,
             feedback: {
               source: 'manual',
@@ -542,6 +584,8 @@ export function InvoiceProductNameTransformPanel({
               </p>
             ) : null}
           </div>
+
+          <BulkAiApplyBar targetCount={visibleCombos.length} bulk={bulk} />
           {groups.length > 0 ? (
             <div className="space-y-2">
               {groups.map((group) => (
@@ -649,6 +693,8 @@ export function InvoiceProductNameTransformPanel({
           </tbody>
         </table>
       </div>
+      </div>
+      <InvoiceProductLookupDock brandId={brandId} />
     </div>
   )
 }
@@ -744,15 +790,249 @@ function ProductNameTagRoleControl({
             추천: {INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL[tag.suggestedRole]}
           </p>
         ) : null}
-        {role === 'composition_gift' ? (
+        {role === 'product_composition' ? (
           <p className="text-[11px] text-muted-foreground">
-            상품 인식에만 반영하며 출고구성은 바꾸지 않습니다.
+            비교 키에 남깁니다. 출고구성은 바꾸지 않습니다.
+          </p>
+        ) : null}
+        {role === 'event_marketing' ||
+        role === 'composition_gift' ||
+        role === 'identity_condition' ? (
+          <p className="text-[11px] text-muted-foreground">
+            비교에서 제외합니다. 원문 품목명은 유지합니다.
           </p>
         ) : null}
         {error ? <p className="text-[11px] text-danger">{error}</p> : null}
       </div>
     </div>
   )
+}
+
+const HOLD_REASON_LABEL: Record<BulkAiApplyHoldReason, string> = {
+  no_lookup_key: '조회 키 없음',
+  no_product: '추천 없음',
+  failed: '추천 실패',
+}
+
+function BulkAiApplyBar({
+  targetCount,
+  bulk,
+}: {
+  targetCount: number
+  bulk: ReturnType<typeof useInvoiceProductNameBulkAiApply>
+}) {
+  const holdCounts = useMemo(() => {
+    const counts = new Map<BulkAiApplyHoldReason, number>()
+    for (const row of bulk.holdRows) {
+      counts.set(row.reason, (counts.get(row.reason) ?? 0) + 1)
+    }
+    return [...counts.entries()]
+  }, [bulk.holdRows])
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-sm font-medium">AI 추천 일괄 검토</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            남은 {formatNumber(targetCount)}개 내품명의 추천을 먼저 모아서
+            보여줍니다. 모으는 동안에는 원장이 바뀌지 않고, 목록에서 고른
+            항목만 등록됩니다.
+          </p>
+        </div>
+        {bulk.phase === 'collecting' ? (
+          <Button type="button" size="sm" variant="ghost" onClick={bulk.cancel}>
+            중단
+          </Button>
+        ) : bulk.phase === 'review' ? (
+          <div className="flex shrink-0 gap-2">
+            <Button
+              type="button"
+              size="sm"
+              disabled={bulk.selectedCount === 0}
+              onClick={bulk.applySelected}
+            >
+              선택 {formatNumber(bulk.selectedCount)}개 등록
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              onClick={bulk.reset}
+            >
+              닫기
+            </Button>
+          </div>
+        ) : (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={!bulk.routeReady || targetCount === 0}
+            onClick={() => void bulk.collect()}
+          >
+            추천 모으기
+          </Button>
+        )}
+      </div>
+
+      {bulk.routeLoading ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          AI 설정을 불러오는 중...
+        </p>
+      ) : !bulk.routeReady ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          설정 → AI 설정에서 모델을 켜면 일괄 검토를 쓸 수 있습니다.
+        </p>
+      ) : null}
+
+      {bulk.phase === 'collecting' ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          {formatNumber(bulk.progress.done)} /{' '}
+          {formatNumber(bulk.progress.total)} 추천을 모으는 중...
+        </p>
+      ) : null}
+
+      {bulk.phase === 'review' ? (
+        <div className="mt-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+            <span className="text-muted-foreground">
+              추천 {formatNumber(bulk.planRows.length)}개 · 확실도{' '}
+              {bulk.minConfidence.toFixed(2)} 이상{' '}
+              {formatNumber(bulk.recommendedCount)}개를 미리 골라뒀습니다
+            </span>
+            <button
+              type="button"
+              className="text-primary hover:underline"
+              onClick={bulk.selectRecommended}
+            >
+              기준 통과만 선택
+            </button>
+            <button
+              type="button"
+              className="text-muted-foreground hover:underline"
+              onClick={bulk.clearSelection}
+            >
+              전체 해제
+            </button>
+          </div>
+
+          {bulk.planRows.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              추천을 받은 항목이 없습니다. 아래 목록에서 직접 지정하세요.
+            </p>
+          ) : (
+            <div className="max-h-96 space-y-0.5 overflow-auto rounded-md border border-border bg-card p-2">
+              {bulk.planRows.map((row) => (
+                <label
+                  key={row.comboKey}
+                  className="flex cursor-pointer gap-2 rounded px-1 py-1 hover:bg-muted/40"
+                >
+                  <input
+                    type="checkbox"
+                    checked={bulk.selected.has(row.comboKey)}
+                    onChange={() => bulk.toggle(row.comboKey)}
+                    className="mt-0.5 shrink-0"
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium">
+                      {row.style.styleNo} · {row.style.name}
+                    </span>
+                    <span
+                      className="block truncate text-[11px] text-muted-foreground"
+                      title={row.lookupKey}
+                    >
+                      조회 키 · {row.lookupKey}
+                    </span>
+                    <span className="block truncate text-[11px] text-muted-foreground">
+                      {row.productName} ·{' '}
+                      {row.itemName || '내품명 없음'} ·{' '}
+                      {formatNumber(row.rowCount)}행
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-right">
+                    <Badge variant={row.passesGate ? 'success' : 'warning'}>
+                      {row.confidence.toFixed(2)}
+                    </Badge>
+                    {row.duplicateOf ? (
+                      <span
+                        className="mt-1 block text-[10px] text-warning"
+                        title={`${row.duplicateOf}과 같은 조회 키`}
+                      >
+                        조회 키 중복
+                      </span>
+                    ) : null}
+                    {row.isConflict ? (
+                      <span className="mt-1 block text-[10px] text-warning">
+                        충돌
+                      </span>
+                    ) : null}
+                  </span>
+                </label>
+              ))}
+            </div>
+          )}
+
+          {holdCounts.length > 0 ? (
+            <p className="text-xs text-muted-foreground">
+              추천을 못 받아 남긴 항목{' '}
+              {formatNumber(bulk.holdRows.length)}개 ·{' '}
+              {holdCounts
+                .map(
+                  ([reason, count]) =>
+                    `${HOLD_REASON_LABEL[reason]} ${formatNumber(count)}`,
+                )
+                .join(' · ')}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {bulk.phase === 'applied' ? (
+        <p className="mt-2 text-xs">
+          <span className="font-medium text-success">
+            등록 {formatNumber(bulk.appliedCount)}개
+          </span>
+          {' · 최근 저장 목록에서 되돌릴 수 있습니다.'}
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+const CARD_SCROLL_OFFSET = 88
+
+function getOverflowParent(el: HTMLElement): HTMLElement | null {
+  let parent = el.parentElement
+  while (parent) {
+    const { overflowY } = getComputedStyle(parent)
+    if (
+      (overflowY === 'auto' || overflowY === 'scroll') &&
+      parent.scrollHeight > parent.clientHeight
+    ) {
+      return parent
+    }
+    parent = parent.parentElement
+  }
+  return null
+}
+
+/** 카드 제목이 스크롤 영역 안에 있으면 화면을 움직이지 않는다. */
+function isCardHeaderInView(el: HTMLElement, container: HTMLElement) {
+  const card = el.getBoundingClientRect()
+  const view = container.getBoundingClientRect()
+  const headerBottom = Math.min(card.bottom, card.top + 96)
+  return card.top >= view.top + 8 && headerBottom <= view.bottom - 8
+}
+
+function scrollCardIntoView(el: HTMLElement) {
+  const container = getOverflowParent(el)
+  if (!container) return
+  if (isCardHeaderInView(el, container)) return
+  const card = el.getBoundingClientRect()
+  const view = container.getBoundingClientRect()
+  const nextTop = container.scrollTop + (card.top - view.top) - CARD_SCROLL_OFFSET
+  container.scrollTo({ top: Math.max(0, nextTop), behavior: 'smooth' })
 }
 
 function ProductReviewGroupCard({
@@ -772,16 +1052,85 @@ function ProductReviewGroupCard({
 }) {
   const variantCount = group.combos.length
   const tags = group.combos[0]?.tags ?? []
+  const cardRef = useRef<HTMLDivElement>(null)
+  const wasOpenRef = useRef(open)
+  const rowRefs = useRef(new Map<string, VariantAssignHandle>())
+  const [readyKeys, setReadyKeys] = useState<Set<string>>(() => new Set())
+  const [batchMessage, setBatchMessage] = useState('')
+  const readyCount = group.combos.filter((combo) => readyKeys.has(combo.key))
+    .length
+
+  const markReady = useCallback((comboKey: string, ready: boolean) => {
+    setReadyKeys((current) => {
+      const has = current.has(comboKey)
+      if (ready === has) return current
+      const next = new Set(current)
+      if (ready) next.add(comboKey)
+      else next.delete(comboKey)
+      return next
+    })
+  }, [])
+
+  function registerOpenGroup() {
+    let queued = 0
+    let skipped = 0
+    for (const combo of group.combos) {
+      const handle = rowRefs.current.get(combo.key)
+      if (handle?.register()) queued += 1
+      else skipped += 1
+    }
+    if (queued === 0) {
+      setBatchMessage('등록할 수 있는 행이 없습니다. 본품 M번호를 먼저 고르세요.')
+      return
+    }
+    setBatchMessage(
+      skipped > 0
+        ? `${formatNumber(queued)}개 등록을 넣었습니다. ${formatNumber(skipped)}개는 본품이 없어 건너뛰었습니다.`
+        : `펼친 ${formatNumber(queued)}개 등록을 넣었습니다.`,
+    )
+  }
+
+  useEffect(() => {
+    const wasOpen = wasOpenRef.current
+    wasOpenRef.current = open
+    if (!open) {
+      setBatchMessage('')
+      return
+    }
+    // 처음 그려질 때와 접을 때는 화면을 움직이지 않는다.
+    if (wasOpen) return
+    // 앞서 열려 있던 카드가 접히며 위치가 밀리므로 배치가 끝난 다음 프레임에 맞춘다.
+    const frame = requestAnimationFrame(() => {
+      if (cardRef.current) scrollCardIntoView(cardRef.current)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [open])
 
   return (
-    <div className="rounded-lg border border-border">
-      <button
-        type="button"
+    <div ref={cardRef} className="rounded-lg border border-border">
+      <div
+        role="button"
+        tabIndex={0}
         onClick={onToggle}
-        className="flex w-full items-start justify-between gap-3 px-3 py-2.5 text-left"
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            onToggle()
+          }
+        }}
+        className="flex w-full cursor-pointer items-start justify-between gap-3 px-3 py-2.5 text-left"
       >
         <div className="min-w-0">
-          <p className="truncate text-sm font-medium">{group.productName}</p>
+          <p
+            title={group.productName}
+            className="cursor-text select-text truncate text-sm font-medium"
+            onClick={(event) => {
+              // 글자를 드래그해 골랐으면 카드를 접거나 열지 않는다.
+              if (window.getSelection()?.toString()) event.stopPropagation()
+            }}
+          >
+            {group.productName}
+          </p>
           <p className="truncate text-xs text-muted-foreground">
             내품명 {formatNumber(variantCount)}개 ·{' '}
             {formatNumber(group.rowCount)}행
@@ -807,9 +1156,29 @@ function ProductReviewGroupCard({
             {open ? '접기' : '지정'}
           </Button>
         </div>
-      </button>
+      </div>
       {open ? (
         <div className="space-y-3 border-t border-border p-3">
+          {variantCount > 1 ? (
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs text-muted-foreground">
+                지금 펼친 변형만 각 행에 고른 조회 키·본품으로 한 번에
+                등록합니다.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                disabled={readyCount === 0}
+                onClick={registerOpenGroup}
+              >
+                이 그룹 일괄등록
+                {readyCount > 0 ? ` ${formatNumber(readyCount)}` : ''}
+              </Button>
+            </div>
+          ) : null}
+          {batchMessage ? (
+            <p className="text-xs text-muted-foreground">{batchMessage}</p>
+          ) : null}
           <div className="space-y-2">
             {group.combos.map((combo) => (
               <VariantAssignRow
@@ -818,11 +1187,16 @@ function ProductReviewGroupCard({
                     ? `${combo.key}:fail:${drafts[combo.key]!.error}`
                     : combo.key
                 }
+                ref={(handle) => {
+                  if (handle) rowRefs.current.set(combo.key, handle)
+                  else rowRefs.current.delete(combo.key)
+                }}
                 brandId={brandId}
                 combo={combo}
                 draft={drafts[combo.key] ?? null}
                 variantCount={variantCount}
                 onEnqueue={onEnqueue}
+                onReadyChange={markReady}
               />
             ))}
           </div>
@@ -834,7 +1208,7 @@ function ProductReviewGroupCard({
 
 /**
  * 엔진이 실제로 맞춘 규칙의 후보를 기본 조회 키로 둔다.
- * 분해 매칭처럼 후보 규칙 밖에서 맞은 경우는 시트 열 우선순위 첫 후보를 쓴다.
+ * 맞은 규칙이 후보 목록에 없으면 시트 열 우선순위 첫 후보를 쓴다.
  */
 function pickDefaultLookupKey(combo: UnresolvedProductNameCombo): string {
   if (combo.candidates.length === 0) return ''
@@ -844,19 +1218,25 @@ function pickDefaultLookupKey(combo: UnresolvedProductNameCombo): string {
   return (byRule ?? combo.candidates[0]!).text
 }
 
-function VariantAssignRow({
-  brandId,
-  combo,
-  draft,
-  variantCount,
-  onEnqueue,
-}: {
-  brandId: string
-  combo: UnresolvedProductNameCombo
-  draft: ProductMapSaveDraft | null
-  variantCount: number
-  onEnqueue: (job: ProductMapEnqueueInput) => void
-}) {
+type VariantAssignHandle = {
+  canRegister: () => boolean
+  register: () => boolean
+}
+
+const VariantAssignRow = forwardRef<
+  VariantAssignHandle,
+  {
+    brandId: string
+    combo: UnresolvedProductNameCombo
+    draft: ProductMapSaveDraft | null
+    variantCount: number
+    onEnqueue: (job: ProductMapEnqueueInput) => void
+    onReadyChange?: (comboKey: string, ready: boolean) => void
+  }
+>(function VariantAssignRow(
+  { brandId, combo, draft, variantCount, onEnqueue, onReadyChange },
+  ref,
+) {
   const queryClient = useQueryClient()
   // 후보가 여럿인 충돌 행은 임의로 고르지 않는다. 사람이 반드시 지목해야 한다.
   const autoStyle =
@@ -867,6 +1247,30 @@ function VariantAssignRow({
   const [style, setStyle] = useState<StyleRef | null>(
     () => draft?.style ?? autoStyle,
   )
+  const [extras, setExtras] = useState<OptionExtraDraft[]>(() => {
+    if (draft?.extras) return draft.extras
+    const maps =
+      queryClient.getQueryData<InvoiceOptionMap[]>([
+        'invoice-option-maps',
+        brandId,
+      ]) ?? []
+    const defaultRule =
+      combo.candidates.find(
+        (candidate) =>
+          candidate.text === (draft?.lookupKey ?? pickDefaultLookupKey(combo)),
+      )?.rule ?? combo.appliedRule
+    return extrasFromOptionMap(
+      findOptionMapByComboPreferring(
+        maps,
+        combo.mallName,
+        combo.productName,
+        optionMapItemNameForRule(defaultRule, combo.itemName),
+        combo.itemName,
+      ),
+    )
+  })
+  const extrasReady = extras.every((item) => item.style)
+  const canRegister = Boolean(selectedLookupKey && style && extrasReady)
   const [lookupTouched, setLookupTouched] = useState(Boolean(draft?.lookupKey))
   const [styleTouched, setStyleTouched] = useState(Boolean(draft?.style))
   const [pickedRecommendation, setPickedRecommendation] =
@@ -878,6 +1282,88 @@ function VariantAssignRow({
     setLocalError(null)
     setPickedRecommendation(null)
   }
+
+  const register = useCallback(() => {
+    if (!selectedLookupKey || !style || !extrasReady) return false
+    const shownRank = pickedRecommendation?.products.findIndex(
+      (product) => product.styleId === style.styleId,
+    )
+    const usedRecommendation =
+      pickedRecommendation &&
+      pickedRecommendation.lookupKey === selectedLookupKey &&
+      shownRank !== undefined &&
+      shownRank >= 0
+    const feedback: ProductMapSaveFeedback = {
+      source: usedRecommendation
+        ? pickedRecommendation.source === 'local'
+          ? 'local'
+          : 'ai'
+        : 'manual',
+      cacheId: usedRecommendation ? pickedRecommendation.cacheId : null,
+      shownRank: usedRecommendation ? shownRank + 1 : null,
+      provider: usedRecommendation ? pickedRecommendation.provider : null,
+      modelId: usedRecommendation ? pickedRecommendation.modelId : null,
+    }
+    const selectedRule =
+      combo.candidates.find((candidate) => candidate.text === selectedLookupKey)
+        ?.rule ?? combo.appliedRule
+    const maps =
+      queryClient.getQueryData<InvoiceProductNameMap[]>([
+        'invoice-product-name-maps',
+        brandId,
+      ]) ?? []
+    const lookupNorm = normalizeInvoiceText(selectedLookupKey)
+    const previousMap =
+      maps.find((map) => map.normalizedLookupKey === lookupNorm) ?? null
+    onEnqueue({
+      comboKey: combo.key,
+      productName: combo.productName,
+      itemName: optionMapItemNameForRule(selectedRule, combo.itemName),
+      originalItemName: combo.itemName,
+      mallName: combo.mallName,
+      ownProductCode: combo.ownProductCode,
+      lookupKey: selectedLookupKey,
+      style,
+      extras,
+      appliedRule: selectedRule,
+      feedback,
+      reviewReasons: buildReviewReasons({
+        combo,
+        lookupKey: selectedLookupKey,
+        style,
+        selectedRule,
+        feedback,
+        previousMap,
+        variantCount,
+      }),
+    })
+    return true
+  }, [
+    brandId,
+    combo,
+    extras,
+    extrasReady,
+    onEnqueue,
+    pickedRecommendation,
+    queryClient,
+    selectedLookupKey,
+    style,
+    variantCount,
+  ])
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      canRegister: () => canRegister,
+      register,
+    }),
+    [canRegister, register],
+  )
+
+  useEffect(() => {
+    onReadyChange?.(combo.key, canRegister)
+    return () => onReadyChange?.(combo.key, false)
+  }, [canRegister, combo.key, onReadyChange])
 
   return (
     <div className="rounded-md border border-border/80 p-2.5">
@@ -954,75 +1440,28 @@ function VariantAssignRow({
             <Button
               type="button"
               size="sm"
-              disabled={!selectedLookupKey || !style}
+              disabled={!canRegister}
               onClick={() => {
-                if (!selectedLookupKey || !style) return
-                const shownRank = pickedRecommendation?.products.findIndex(
-                  (product) => product.styleId === style.styleId,
-                )
-                const usedRecommendation =
-                  pickedRecommendation &&
-                  pickedRecommendation.lookupKey === selectedLookupKey &&
-                  shownRank !== undefined &&
-                  shownRank >= 0
-                const feedback: ProductMapSaveFeedback = {
-                  source: usedRecommendation
-                    ? pickedRecommendation.source === 'local'
-                      ? 'local'
-                      : 'ai'
-                    : 'manual',
-                  cacheId: usedRecommendation
-                    ? pickedRecommendation.cacheId
-                    : null,
-                  shownRank: usedRecommendation ? shownRank + 1 : null,
-                  provider: usedRecommendation
-                    ? pickedRecommendation.provider
-                    : null,
-                  modelId: usedRecommendation
-                    ? pickedRecommendation.modelId
-                    : null,
-                }
-                const selectedRule =
-                  combo.candidates.find(
-                    (candidate) => candidate.text === selectedLookupKey,
-                  )?.rule ?? combo.appliedRule
-                const maps =
-                  queryClient.getQueryData<InvoiceProductNameMap[]>([
-                    'invoice-product-name-maps',
-                    brandId,
-                  ]) ?? []
-                const lookupNorm = normalizeInvoiceText(selectedLookupKey)
-                const previousMap =
-                  maps.find(
-                    (map) => map.normalizedLookupKey === lookupNorm,
-                  ) ?? null
-                onEnqueue({
-                  comboKey: combo.key,
-                  productName: combo.productName,
-                  itemName: combo.itemName,
-                  mallName: combo.mallName,
-                  lookupKey: selectedLookupKey,
-                  style,
-                  appliedRule: selectedRule,
-                  feedback,
-                  reviewReasons: buildReviewReasons({
-                    combo,
-                    lookupKey: selectedLookupKey,
-                    style,
-                    selectedRule,
-                    feedback,
-                    previousMap,
-                    variantCount,
-                  }),
-                })
+                register()
               }}
             >
               등록
             </Button>
           </div>
+          <div className="mt-2">
+            <InvoiceOptionExtrasEditor
+              brandId={brandId}
+              extras={extras}
+              onChange={(next) => {
+                setExtras(next)
+                clearDraftMessage()
+              }}
+              compact
+            />
+          </div>
           {localError ? (
             <p className="mt-1 text-xs text-danger">{localError}</p>
-          ) : selectedLookupKey && style ? (
+          ) : selectedLookupKey && style && extrasReady ? (
             <p className="mt-1 break-words text-xs text-muted-foreground">
               <span className="font-medium text-foreground">
                 {selectedLookupKey}
@@ -1031,6 +1470,9 @@ function VariantAssignRow({
               <span className="font-medium text-foreground">
                 {formatStyleRef(style)}
               </span>
+              {extras.length > 0
+                ? ` 및 구성 ${extras.length}개`
+                : ''}
               (으)로 바꿉니다.
             </p>
           ) : selectedLookupKey ? (
@@ -1074,7 +1516,8 @@ function VariantAssignRow({
       </div>
     </div>
   )
-}
+})
+VariantAssignRow.displayName = 'VariantAssignRow'
 
 function AiRecommendPanel({
   brandId,

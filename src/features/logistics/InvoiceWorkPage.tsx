@@ -36,6 +36,7 @@ import {
 import {
   getInvoiceGiftAllocations,
   getInvoiceGiftRequests,
+  getInvoiceItemNameRules,
   getInvoiceNameRules,
   getInvoiceOptionMaps,
   getInvoiceProductNameMaps,
@@ -58,7 +59,6 @@ import {
   transformInvoiceNamesByCode,
   type InvoiceNameTransformation,
 } from '@/lib/invoice/name-transform'
-import { learnLedgerAliases } from '@/lib/invoice/ledger-aliases'
 import {
   catalogFromStyles,
   transformInvoiceProductNames,
@@ -966,6 +966,7 @@ export function InvoiceWorkPage() {
   const [isParsing, setIsParsing] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [productSaveBlockCount, setProductSaveBlockCount] = useState(0)
   const nameRulesQuery = useQuery({
     queryKey: ['invoice-name-rules', brand.id],
     queryFn: () => getInvoiceNameRules(brand.id),
@@ -973,6 +974,11 @@ export function InvoiceWorkPage() {
   const optionMapsQuery = useQuery({
     queryKey: ['invoice-option-maps', brand.id],
     queryFn: () => getInvoiceOptionMaps(brand.id),
+  })
+  const itemNameRulesQuery = useQuery({
+    queryKey: ['invoice-item-name-rules', brand.id],
+    queryFn: () => getInvoiceItemNameRules(brand.id),
+    refetchOnWindowFocus: true,
   })
   const productNameMapsQuery = useQuery({
     queryKey: ['invoice-product-name-maps', brand.id],
@@ -1061,6 +1067,19 @@ export function InvoiceWorkPage() {
       : optionMapsQuery.error
         ? '내품명 변환 기준을 불러오지 못했습니다.'
         : null
+  const itemNameRules = useMemo(
+    () => itemNameRulesQuery.data ?? [],
+    [itemNameRulesQuery.data],
+  )
+  const itemNameRulesError =
+    itemNameRulesQuery.error instanceof Error
+      ? itemNameRulesQuery.error.message
+      : itemNameRulesQuery.error
+        ? '내품명 규칙을 불러오지 못했습니다.'
+        : null
+  const itemNameCriteriaError = optionMapsError || itemNameRulesError
+  const itemNameCriteriaLoading =
+    optionMapsQuery.isPending || itemNameRulesQuery.isPending
   const productNameMaps = useMemo(
     () => productNameMapsQuery.data ?? [],
     [productNameMapsQuery.data],
@@ -1094,16 +1113,10 @@ export function InvoiceWorkPage() {
       return null
     }
     const styles = productStyleLookupQuery.data ?? []
-    const catalog = catalogFromStyles(styles)
-    const aliases = catalog.parts
-      ? learnLedgerAliases(productNameMaps, catalog.parts, {
-          tagRoles: productNameTagRoles,
-        })
-      : undefined
     return transformInvoiceProductNames(
       inspection.rows,
       productNameMaps,
-      { ...catalog, aliases },
+      catalogFromStyles(styles),
       productNameTagRoles,
     )
   }, [
@@ -1123,7 +1136,9 @@ export function InvoiceWorkPage() {
       !inspection ||
       !productTransformation ||
       optionMapsQuery.isPending ||
-      optionMapsQuery.error
+      optionMapsQuery.error ||
+      itemNameRulesQuery.isPending ||
+      itemNameRulesQuery.error
     ) {
       return null
     }
@@ -1131,9 +1146,13 @@ export function InvoiceWorkPage() {
       inspection.rows,
       optionMaps,
       productTransformation.rows,
+      itemNameRules,
     )
   }, [
     inspection,
+    itemNameRules,
+    itemNameRulesQuery.error,
+    itemNameRulesQuery.isPending,
     optionMaps,
     optionMapsQuery.error,
     optionMapsQuery.isPending,
@@ -1212,6 +1231,7 @@ export function InvoiceWorkPage() {
     setInspection(null)
     setFileName('')
     setError(null)
+    setProductSaveBlockCount(0)
     setStep('upload')
     resetGiftState()
     if (inputRef.current) inputRef.current.value = ''
@@ -1232,6 +1252,7 @@ export function InvoiceWorkPage() {
     setError(null)
     setInspection(null)
     setFileName(file.name)
+    setProductSaveBlockCount(0)
     resetGiftState()
 
     try {
@@ -1253,6 +1274,17 @@ export function InvoiceWorkPage() {
     }
   }
 
+  function changeTodayStep(next: TodayStep) {
+    if (
+      step === 'product' &&
+      next !== 'product' &&
+      productSaveBlockCount > 0
+    ) {
+      return
+    }
+    setStep(next)
+  }
+
   return (
     <div>
       <PageHeader
@@ -1268,7 +1300,7 @@ export function InvoiceWorkPage() {
             <TodayStepProgress
               stepIndex={stepIndex}
               maxStepIndex={maxStepIndex}
-              onChange={setStep}
+              onChange={changeTodayStep}
             />
           </div>
 
@@ -1633,10 +1665,11 @@ export function InvoiceWorkPage() {
             <Card>
               <CardContent className="space-y-5 pt-5">
                 <p className="text-xs text-muted-foreground">
-                  원본 품목명을 본품 공식명으로 바꿉니다. 내품명은 원칙적으로
-                  그대로 전달합니다. 단, 내품명 옵션값 단독 조회 키가 품목명
-                  원장과 정확히 맞으면 본품 식별에 사용된 값으로 표시하고 다음
-                  단계에서 비웁니다.
+                  원본 품목명을 본품 공식명으로 바꿉니다. 자체상품코드·품목명·
+                  품목명+내품명·옵션 일부 결합 다음에 내품명 /·, 앞부분 단독을
+                  보고, 내품명 전체 단독이 맞으면 내품명을 비웁니다. 앞부분
+                  단독이 맞으면 남은 옵션만 다음 단계로 넘깁니다. 세트 구성품은
+                  이 단계부터 행을 펼칩니다.
                 </p>
                 {productNameMapsQuery.isPending ||
                 productStyleLookupQuery.isPending ? (
@@ -1658,6 +1691,7 @@ export function InvoiceWorkPage() {
                     key={fileName || 'product-name-panel'}
                     brandId={brand.id}
                     transformation={productTransformation}
+                    onBlockingSaveCountChange={setProductSaveBlockCount}
                   />
                 ) : null}
 
@@ -1666,6 +1700,7 @@ export function InvoiceWorkPage() {
                     <Button
                       type="button"
                       variant="outline"
+                      disabled={productSaveBlockCount > 0}
                       onClick={() => setStep('instruction')}
                     >
                       <ArrowLeft className="size-4" />
@@ -1680,12 +1715,19 @@ export function InvoiceWorkPage() {
                       workPlan={workPlan}
                       nameTransformation={nameTransformation}
                       productTransformation={productTransformation}
-                      disabled={!productTransformation}
+                      itemTransformation={itemTransformation}
+                      disabled={
+                        !productTransformation ||
+                        !itemTransformation ||
+                        productSaveBlockCount > 0
+                      }
                     />
                   </div>
                   <Button
                     type="button"
-                    disabled={!productTransformation}
+                    disabled={
+                      !productTransformation || productSaveBlockCount > 0
+                    }
                     onClick={() => setStep('item')}
                   >
                     내품명 변환하기
@@ -1700,23 +1742,40 @@ export function InvoiceWorkPage() {
             <Card>
               <CardContent className="space-y-5 pt-5">
                 <p className="text-xs text-muted-foreground">
-                  승인된 내품명 규칙이 있는 행만 표시명을 바꿉니다. 없으면 원문을
-                  유지합니다. 품목명 단계에서 옵션값 단독으로 본품을 찾은 행은
-                  내품명을 비웁니다. 구성품 M번호는 별도 출고구성 파일에 기록합니다.
+                  공통 규칙 또는 확정 본품별 규칙으로 내품명을 지거나 구성품
+                  공식명으로 바꿉니다. 품목명 원장이 내품명 전체로 본품을 찾은
+                  행은 빈 값으로 정리되어 여기 검토 목록에 나오지 않습니다.
+                  내품명 / 또는 , 앞부분만으로 본품을 찾은 행은 남은 옵션만
+                  여기서 변환합니다. 예전 조합 원장은 호환용으로만 읽습니다.
+                  세트 구성품은 최종 CJ 행에서 자동으로 펼칩니다.
                 </p>
-                {optionMapsQuery.isPending ? (
+                {itemNameCriteriaLoading ? (
                   <div className="rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
                     이 브랜드의 내품명 변환 기준을 불러오고 있습니다.
                   </div>
-                ) : optionMapsError ? (
-                  <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">
-                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                    <span>{optionMapsError}</span>
+                ) : itemNameCriteriaError ? (
+                  <div className="flex items-start justify-between gap-2 rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                      <span>{itemNameCriteriaError}</span>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        void optionMapsQuery.refetch()
+                        void itemNameRulesQuery.refetch()
+                      }}
+                    >
+                      다시 불러오기
+                    </Button>
                   </div>
                 ) : itemTransformation ? (
                   <InvoiceItemNameTransformPanel
                     brandId={brand.id}
                     transformation={itemTransformation}
+                    itemNameRules={itemNameRules}
                   />
                 ) : null}
 
@@ -1766,10 +1825,12 @@ export function InvoiceWorkPage() {
             <Card>
               <CardContent className="space-y-5 pt-5">
                 <p className="text-xs text-muted-foreground">
-                  같은 원본 주문 행은 CJ에서도 한 줄입니다. 품목명은 품목명
-                  단계, 내품명은 내품명 단계 결과를 마지막에만 합칩니다. 미등록
-                  내품명은 원문이며, 본품 식별에 소비된 내품명만 빈 값입니다.
-                  출고구성 파일은 따로 내려받습니다.
+                  품목명과 내품명은 각 단계 결과를 마지막에만 합칩니다. 세트로
+                  등록한 행은 구성품 수만큼 CJ 행을 펼치고, 수령인·주소·전화·
+                  주문번호는 그대로 복사합니다. 수량은 원본 내품수량 × 구성
+                  수량입니다. 내품명 전체로 본품을 찾은 행은 빈 내품명을 유지하고,
+                  앞부분만 쓴 행은 남은 옵션을 유지합니다. 변환 내품명을 저장하지
+                  않은 나머지 행은 유효 내품명을 유지합니다.
                 </p>
                 <InvoiceOutputStepPanel
                   brandId={brand.id}

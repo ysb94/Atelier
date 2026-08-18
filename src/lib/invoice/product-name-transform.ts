@@ -1,8 +1,8 @@
 import { compactProductNameKey } from '@/lib/invoice/lookup-normalization'
-import type { LedgerAliases } from '@/lib/invoice/ledger-aliases'
 import {
   generateProductNameCandidates,
-  productNameRuleConsumesItemName,
+  isEmptyItemNameHint,
+  resolveItemNameConsumption,
   type ProductNameCandidate,
 } from '@/lib/invoice/product-name-patterns'
 import {
@@ -11,12 +11,6 @@ import {
   type ParsedProductNameTag,
 } from '@/lib/invoice/product-name-tags'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
-import {
-  buildStylePartsIndex,
-  detectSizeInText,
-  stylePartsLookupKey,
-  type StylePartsIndex,
-} from '@/lib/invoice/style-name-parts'
 import type { InvoiceNameTransformation } from '@/lib/invoice/name-transform'
 import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
 import type {
@@ -39,8 +33,9 @@ export type InvoiceProductNameTransformRow = {
   style: StyleRef | null
   transformedProductName: string
   appliedRule: string | null
-  /** 내품명 단독 조회 키가 원장과 exact 매칭되어 최종 내품명을 비울지 여부 */
   itemNameConsumed: boolean
+  /** 품목명 원장이 앞부분을 소비하면 suffix, 전체를 소비하면 빈 값, 아니면 원문 */
+  effectiveItemName: string
   candidates: ProductNameCandidate[]
   candidateStyles: StyleRef[]
   tags: ParsedProductNameTag[]
@@ -73,8 +68,6 @@ export type InvoiceProductNameTransformation = {
 export type ProductNameStyleCatalog = {
   byName: Map<string, StyleRef[]>
   byCompactName: Map<string, StyleRef[]>
-  parts?: StylePartsIndex
-  aliases?: LedgerAliases
 }
 
 function comboKey(mallName: string, productName: string, itemName: string) {
@@ -85,17 +78,7 @@ function comboKey(mallName: string, productName: string, itemName: string) {
   ].join('\u0000')
 }
 
-function comboIndexKey(mall: string, product: string, item: string) {
-  return [mall, product, item].join('\u0000')
-}
-
-type ComboMapIndex = {
-  exact: Map<string, InvoiceProductNameMap[]>
-  anyMall: Map<string, InvoiceProductNameMap[]>
-}
-
 type LookupMapIndex = {
-  strict: Map<string, InvoiceProductNameMap[]>
   compact: Map<string, InvoiceProductNameMap[]>
 }
 
@@ -110,76 +93,57 @@ function pushMap(
   target.set(key, list)
 }
 
-function indexComboMaps(maps: InvoiceProductNameMap[]): ComboMapIndex {
-  const exact = new Map<string, InvoiceProductNameMap[]>()
-  const anyMall = new Map<string, InvoiceProductNameMap[]>()
-  for (const map of maps) {
-    if (map.normalizedLookupKey) continue
-    const exactKey = comboIndexKey(
-      map.normalizedMallName,
-      map.normalizedProductName,
-      map.normalizedItemNameContext,
+function mapLookupTexts(map: InvoiceProductNameMap): string[] {
+  const texts: string[] = []
+  const lookupKey = map.lookupKey.trim() || map.normalizedLookupKey
+  if (lookupKey) {
+    texts.push(lookupKey)
+  } else {
+    const itemContext = map.itemNameContext.trim()
+    texts.push(
+      itemContext && !isEmptyItemNameHint(itemContext)
+        ? `${map.productName} ${itemContext}`
+        : map.productName,
     )
-    const exactList = exact.get(exactKey) ?? []
-    exactList.push(map)
-    exact.set(exactKey, exactList)
-    if (!map.normalizedMallName) {
-      const anyKey = comboIndexKey(
-        '',
-        map.normalizedProductName,
-        map.normalizedItemNameContext,
-      )
-      const anyList = anyMall.get(anyKey) ?? []
-      anyList.push(map)
-      anyMall.set(anyKey, anyList)
-    }
   }
-  return { exact, anyMall }
+  if (map.ownProductCode.trim()) texts.push(map.ownProductCode)
+  return texts
 }
 
 /**
- * 조회 키 원장 색인.
- * 엄격 키를 먼저 쓰고, 없을 때만 압축 키를 본다.
+ * 조회 키 원장과 조합 원장을 같은 압축 키로 색인한다.
  * 저장된 태그 역할로 제외되는 선행 태그는 별칭으로도 넣는다.
  */
 function indexLookupMaps(
   maps: InvoiceProductNameMap[],
   tagRoles: InvoiceProductNameTagRoleEntry[],
 ): LookupMapIndex {
-  const strict = new Map<string, InvoiceProductNameMap[]>()
   const compact = new Map<string, InvoiceProductNameMap[]>()
   for (const map of maps) {
-    if (!map.normalizedLookupKey) continue
-    const raw = map.lookupKey.trim() || map.normalizedLookupKey
-    pushMap(strict, map.normalizedLookupKey, map)
-    pushMap(compact, compactProductNameKey(raw), map)
-
-    const stripped = matchingProductName(raw, tagRoles)
-    const strippedNorm = normalizeInvoiceText(stripped)
-    if (strippedNorm && strippedNorm !== map.normalizedLookupKey) {
-      pushMap(strict, strippedNorm, map)
-    }
-    const strippedCompact = compactProductNameKey(stripped)
-    const rawCompact = compactProductNameKey(raw)
-    if (strippedCompact && strippedCompact !== rawCompact) {
-      pushMap(compact, strippedCompact, map)
+    for (const raw of mapLookupTexts(map)) {
+      const rawCompact = compactProductNameKey(raw)
+      pushMap(compact, rawCompact, map)
+      const stripped = matchingProductName(raw, tagRoles)
+      const strippedCompact = compactProductNameKey(stripped)
+      if (strippedCompact && strippedCompact !== rawCompact) {
+        pushMap(compact, strippedCompact, map)
+      }
     }
   }
-  return { strict, compact }
+  return { compact }
 }
 
-function pickMaps(
-  index: ComboMapIndex,
+function preferMallMaps(
+  maps: InvoiceProductNameMap[],
   mallName: string,
-  productName: string,
-  itemName: string,
 ): InvoiceProductNameMap[] {
+  const unique = uniqueMaps(maps)
   const mall = normalizeInvoiceText(mallName)
-  const product = normalizeInvoiceText(productName)
-  const item = normalizeInvoiceText(itemName)
-  const exact = index.exact.get(comboIndexKey(mall, product, item)) ?? []
-  if (exact.length > 0) return exact
-  return index.anyMall.get(comboIndexKey('', product, item)) ?? []
+  const exactMall = unique.filter((map) => map.normalizedMallName === mall)
+  if (exactMall.length > 0) return exactMall
+  const anyMall = unique.filter((map) => !map.normalizedMallName)
+  if (anyMall.length > 0) return anyMall
+  return unique
 }
 
 function lookupStyles(
@@ -209,121 +173,27 @@ function uniqueMaps(maps: InvoiceProductNameMap[]) {
   return [...byId.values()]
 }
 
-/**
- * haystack(압축 주문 텍스트)에서 제품군·색상·사이즈로 공식 상품을 찾는다.
- * 별칭으로 몸통/색상을 해석한 뒤 family|color|size 인덱스를 조회한다.
- */
-function matchByStyleParts(
-  catalog: ProductNameStyleCatalog,
-  productName: string,
+function itemNameOutcome(
+  rule: string | null,
   itemName: string,
-  tagRoles: InvoiceProductNameTagRoleEntry[],
-): StyleRef[] {
-  const parts = catalog.parts
-  if (!parts) return []
-
-  const matching = matchingProductName(productName, tagRoles)
-  const haystackRaw = `${matching} ${itemName}`
-  const haystack = compactProductNameKey(haystackRaw)
-  if (!haystack) return []
-
-  const size = detectSizeInText(haystackRaw)
-
-  // 색상: 어휘 + 별칭 중 haystack에 포함되는 것, 긴 것 우선
-  const colorCandidates: { key: string; len: number }[] = []
-  for (const colorKey of parts.colorVocab.keys()) {
-    if (colorKey.length >= 2 && haystack.includes(colorKey)) {
-      colorCandidates.push({ key: colorKey, len: colorKey.length })
-    }
+  consumeFromLedger: boolean,
+) {
+  if (!consumeFromLedger) {
+    return { itemNameConsumed: false, effectiveItemName: itemName }
   }
-  for (const [alias, colorKey] of catalog.aliases?.colorAliases ?? []) {
-    if (alias.length >= 2 && haystack.includes(alias)) {
-      colorCandidates.push({ key: colorKey, len: alias.length })
-    }
+  const consumption = resolveItemNameConsumption(rule, itemName)
+  return {
+    itemNameConsumed: consumption.kind === 'full',
+    effectiveItemName: consumption.effectiveItemName,
   }
-  colorCandidates.sort((a, b) => b.len - a.len)
-  // 가장 긴 색상만 채택 (블랙이 블랙그레이보다 짧으면 블랙그레이 우선)
-  const bestColorLen = colorCandidates[0]?.len ?? 0
-  const colorKeys = [
-    ...new Set(
-      colorCandidates
-        .filter((item) => item.len === bestColorLen)
-        .map((item) => item.key),
-    ),
-  ]
-  if (colorKeys.length === 0) return []
-
-  // 제품군: familyKey 직접 포함 또는 몸통 별칭. 긴 별칭 우선.
-  const familyCandidates: { key: string; len: number }[] = []
-  for (const familyKey of parts.familyKeys) {
-    if (familyKey.length >= 2 && haystack.includes(familyKey)) {
-      familyCandidates.push({ key: familyKey, len: familyKey.length })
-    }
-  }
-  for (const [body, familyKey] of catalog.aliases?.bodyToFamily ?? []) {
-    if (body.length >= 2 && haystack.includes(body)) {
-      familyCandidates.push({ key: familyKey, len: body.length })
-    }
-  }
-  familyCandidates.sort((a, b) => b.len - a.len)
-  const bestFamilyLen = familyCandidates[0]?.len ?? 0
-  const familyKeys = [
-    ...new Set(
-      familyCandidates
-        .filter((item) => item.len === bestFamilyLen)
-        .map((item) => item.key),
-    ),
-  ]
-  if (familyKeys.length === 0) return []
-
-  const hits: StyleRef[] = []
-  for (const familyKey of familyKeys) {
-    for (const colorKey of colorKeys) {
-      if (size) {
-        hits.push(
-          ...(parts.byFamilyColorSize.get(
-            stylePartsLookupKey(familyKey, colorKey, size),
-          ) ?? []),
-        )
-        continue
-      }
-      // 사이즈 미감지: 사이즈 없는 키만. 없으면 같은 family+color의 전 사이즈가
-      // 정확히 1개일 때만 채택한다.
-      const noSize =
-        parts.byFamilyColorSize.get(
-          stylePartsLookupKey(familyKey, colorKey, null),
-        ) ?? []
-      if (noSize.length > 0) {
-        hits.push(...noSize)
-        continue
-      }
-      const acrossSizes: StyleRef[] = []
-      for (const sizeToken of [
-        'S',
-        'M',
-        'L',
-        'F',
-        'XL',
-        'XS',
-        'FREE',
-        'ONE',
-      ]) {
-        acrossSizes.push(
-          ...(parts.byFamilyColorSize.get(
-            stylePartsLookupKey(familyKey, colorKey, sizeToken),
-          ) ?? []),
-        )
-      }
-      const uniqueAcross = uniqueStyles(acrossSizes)
-      if (uniqueAcross.length === 1) hits.push(...uniqueAcross)
-    }
-  }
-  return uniqueStyles(hits)
 }
 
 /**
- * 품목명 exact 기준을 최우선으로 쓰고, 없을 때만 후보 파서로 styles.name을 찾는다.
+ * 조회 키·조합 원장을 같은 압축 키와 후보 우선순위로 맞춘다.
  * 내품명 변환 결과는 포함하지 않는다. 후보가 하나여도 기준을 자동 저장하지 않는다.
+ *
+ * 제품군·색상 분해 매칭은 쓰지 않는다. 색상 토큰 하나만 걸려도 다른 상품을 확정해
+ * 오탐이 잦았고, 그 자리는 AI 추천이 맡는다.
  */
 export function transformInvoiceProductNames(
   sourceRows: SabangnetOrderRow[],
@@ -332,10 +202,8 @@ export function transformInvoiceProductNames(
   tagRoles: InvoiceProductNameTagRoleEntry[] = [],
 ): InvoiceProductNameTransformation {
   const activeMaps = maps.filter((map) => map.isActive)
-  const comboIndex = indexComboMaps(activeMaps)
   const lookupIndex = indexLookupMaps(activeMaps, tagRoles)
   const unresolvedByKey = new Map<string, UnresolvedProductNameCombo>()
-  const stylePartsMemo = new Map<string, StyleRef[]>()
   let mappedRowCount = 0
   let candidateRowCount = 0
   let missingStyleRowCount = 0
@@ -370,63 +238,14 @@ export function transformInvoiceProductNames(
     })
   }
 
-  function matchLookupMaps(
-    candidate: ProductNameCandidate,
-  ): { maps: InvoiceProductNameMap[]; viaCompact: boolean } | null {
-    const strictHits = uniqueMaps(
-      lookupIndex.strict.get(normalizeInvoiceText(candidate.text)) ?? [],
-    )
-    if (strictHits.length > 0) return { maps: strictHits, viaCompact: false }
+  function matchLookupMaps(candidate: ProductNameCandidate, mallName: string) {
     const compact = compactProductNameKey(candidate.text)
-    if (!compact) return null
-    const compactHits = uniqueMaps(lookupIndex.compact.get(compact) ?? [])
-    if (compactHits.length === 0) return null
-    return { maps: compactHits, viaCompact: true }
+    if (!compact) return []
+    return preferMallMaps(lookupIndex.compact.get(compact) ?? [], mallName)
   }
 
   const rows = sourceRows.map((source): InvoiceProductNameTransformRow => {
     const tags = classifyLeadingTags(source.productName, tagRoles)
-    const matches = pickMaps(
-      comboIndex,
-      source.mallName,
-      source.productName,
-      source.itemName,
-    )
-    if (matches.length === 1) {
-      const map = matches[0]!
-      mappedRowCount += 1
-      return {
-        source,
-        status: 'mapped',
-        mapId: map.id,
-        style: map.style,
-        transformedProductName: map.style.name,
-        appliedRule: 'exact',
-        itemNameConsumed: false,
-        candidates: [],
-        candidateStyles: [map.style],
-        tags,
-      }
-    }
-    if (matches.length > 1) {
-      conflictRowCount += 1
-      const styles = uniqueStyles(matches.map((map) => map.style))
-      const row: InvoiceProductNameTransformRow = {
-        source,
-        status: 'conflict',
-        mapId: null,
-        style: null,
-        transformedProductName: source.productName,
-        appliedRule: 'exact',
-        itemNameConsumed: false,
-        candidates: [],
-        candidateStyles: styles,
-        tags,
-      }
-      remember(row)
-      return row
-    }
-
     const candidates = generateProductNameCandidates({
       productName: source.productName,
       itemName: source.itemName,
@@ -434,13 +253,11 @@ export function transformInvoiceProductNames(
       ownProductCode: source.ownProductCode,
       matchingProductName: matchingProductName(source.productName, tagRoles),
     })
-    // 기존 원장은 후보 순서대로 훑고 먼저 맞는 조회 키가 정답이다.
-    // 엄격 키가 없으면 같은 후보의 압축 키로 이어 본다.
+
     for (const candidate of candidates) {
-      const hit = matchLookupMaps(candidate)
-      if (!hit) continue
-      const styles = uniqueStyles(hit.maps.map((map) => map.style))
-      const appliedRule = hit.viaCompact ? 'compact' : candidate.rule
+      const hitMaps = matchLookupMaps(candidate, source.mallName)
+      if (hitMaps.length === 0) continue
+      const styles = uniqueStyles(hitMaps.map((map) => map.style))
       if (styles.length > 1) {
         conflictRowCount += 1
         const row: InvoiceProductNameTransformRow = {
@@ -449,8 +266,8 @@ export function transformInvoiceProductNames(
           mapId: null,
           style: null,
           transformedProductName: source.productName,
-          appliedRule,
-          itemNameConsumed: false,
+          appliedRule: candidate.rule,
+          ...itemNameOutcome(candidate.rule, source.itemName, false),
           candidates,
           candidateStyles: styles,
           tags,
@@ -462,114 +279,51 @@ export function transformInvoiceProductNames(
       return {
         source,
         status: 'mapped',
-        mapId: hit.maps[0]!.id,
+        mapId: hitMaps[0]!.id,
         style: styles[0]!,
         transformedProductName: styles[0]!.name,
-        appliedRule,
-        itemNameConsumed: productNameRuleConsumesItemName(candidate.rule),
+        appliedRule: candidate.rule,
+        ...itemNameOutcome(candidate.rule, source.itemName, true),
         candidates,
         candidateStyles: styles,
         tags,
       }
     }
 
-    const matched: { candidate: ProductNameCandidate; styles: StyleRef[] }[] =
-      []
     for (const candidate of candidates) {
-      const styles = lookupStyles(catalog, candidate.text)
-      if (styles.length > 0) matched.push({ candidate, styles })
-    }
-    const allStyles = uniqueStyles(matched.flatMap((item) => item.styles))
-
-    if (allStyles.length === 1) {
-      const hit = matched.find((item) =>
-        item.styles.some((style) => style.styleId === allStyles[0]?.styleId),
-      )
+      const styles = uniqueStyles(lookupStyles(catalog, candidate.text))
+      if (styles.length === 0) continue
+      if (styles.length > 1) {
+        conflictRowCount += 1
+        const row: InvoiceProductNameTransformRow = {
+          source,
+          status: 'conflict',
+          mapId: null,
+          style: null,
+          transformedProductName: source.productName,
+          appliedRule: candidate.rule,
+          ...itemNameOutcome(candidate.rule, source.itemName, false),
+          candidates,
+          candidateStyles: styles,
+          tags,
+        }
+        remember(row)
+        return row
+      }
       const viaCompact =
-        hit !== undefined &&
-        (catalog.byName.get(normalizeInvoiceText(hit.candidate.text)) ?? [])
+        (catalog.byName.get(normalizeInvoiceText(candidate.text)) ?? [])
           .length === 0
       candidateRowCount += 1
       const row: InvoiceProductNameTransformRow = {
         source,
         status: 'candidate',
         mapId: null,
-        style: allStyles[0]!,
-        transformedProductName: allStyles[0]!.name,
-        appliedRule: viaCompact
-          ? 'compact'
-          : (hit?.candidate.rule ?? 'candidate'),
-        itemNameConsumed: false,
+        style: styles[0]!,
+        transformedProductName: styles[0]!.name,
+        appliedRule: viaCompact ? 'compact' : candidate.rule,
+        ...itemNameOutcome(candidate.rule, source.itemName, false),
         candidates,
-        candidateStyles: allStyles,
-        tags,
-      }
-      remember(row)
-      return row
-    }
-    if (allStyles.length > 1) {
-      conflictRowCount += 1
-      const row: InvoiceProductNameTransformRow = {
-        source,
-        status: 'conflict',
-        mapId: null,
-        style: null,
-        transformedProductName: source.productName,
-        appliedRule: matched[0]?.candidate.rule ?? null,
-        itemNameConsumed: false,
-        candidates,
-        candidateStyles: allStyles,
-        tags,
-      }
-      remember(row)
-      return row
-    }
-
-    // 공식명 직접/압축이 없으면 제품군·색상·사이즈 분해 매칭
-    const memoKey = comboKey(
-      source.mallName,
-      source.productName,
-      source.itemName,
-    )
-    let partStyles = stylePartsMemo.get(memoKey)
-    if (partStyles === undefined) {
-      partStyles = matchByStyleParts(
-        catalog,
-        source.productName,
-        source.itemName,
-        tagRoles,
-      )
-      stylePartsMemo.set(memoKey, partStyles)
-    }
-    if (partStyles.length === 1) {
-      candidateRowCount += 1
-      const row: InvoiceProductNameTransformRow = {
-        source,
-        status: 'candidate',
-        mapId: null,
-        style: partStyles[0]!,
-        transformedProductName: partStyles[0]!.name,
-        appliedRule: 'style_parts',
-        itemNameConsumed: false,
-        candidates,
-        candidateStyles: partStyles,
-        tags,
-      }
-      remember(row)
-      return row
-    }
-    if (partStyles.length > 1) {
-      conflictRowCount += 1
-      const row: InvoiceProductNameTransformRow = {
-        source,
-        status: 'conflict',
-        mapId: null,
-        style: null,
-        transformedProductName: source.productName,
-        appliedRule: 'style_parts',
-        itemNameConsumed: false,
-        candidates,
-        candidateStyles: partStyles,
+        candidateStyles: styles,
         tags,
       }
       remember(row)
@@ -585,7 +339,7 @@ export function transformInvoiceProductNames(
         style: null,
         transformedProductName: source.productName,
         appliedRule: candidates[0]?.rule ?? null,
-        itemNameConsumed: false,
+        ...itemNameOutcome(candidates[0]?.rule ?? null, source.itemName, false),
         candidates,
         candidateStyles: [],
         tags,
@@ -602,7 +356,7 @@ export function transformInvoiceProductNames(
       style: null,
       transformedProductName: source.productName,
       appliedRule: null,
-      itemNameConsumed: false,
+      ...itemNameOutcome(null, source.itemName, false),
       candidates,
       candidateStyles: [],
       tags,
@@ -629,7 +383,6 @@ export function transformInvoiceProductNames(
 
 export function catalogFromStyles(
   styles: StyleRef[],
-  options?: { aliases?: LedgerAliases; buildParts?: boolean },
 ): ProductNameStyleCatalog {
   const byName = new Map<string, StyleRef[]>()
   const byCompactName = new Map<string, StyleRef[]>()
@@ -645,14 +398,7 @@ export function catalogFromStyles(
     compactList.push(style)
     byCompactName.set(compact, compactList)
   }
-  const parts =
-    options?.buildParts === false ? undefined : buildStylePartsIndex(styles)
-  return {
-    byName,
-    byCompactName,
-    parts,
-    aliases: options?.aliases,
-  }
+  return { byName, byCompactName }
 }
 
 export function productNameTransformationToName(

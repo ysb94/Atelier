@@ -338,6 +338,43 @@ export function parseOrderQuantity(value: string): number {
   return parsed
 }
 
+export type InvoiceOutputBundleLine = {
+  productName: string
+  quantity: string
+}
+
+/**
+ * 추가 구성품이 있으면 본품 다음에 구성품 행을 펼친다.
+ * 수량은 원본 내품수량 × 구성 수량이다.
+ */
+export function resolveInvoiceOutputBundle(options: {
+  sourceQuantity: string
+  baseName: string
+  main: StyleRef | null
+  extras: InvoiceOptionMapComponent[]
+  expandable: boolean
+}): InvoiceOutputBundleLine[] {
+  if (!options.expandable || options.extras.length === 0) {
+    return [
+      {
+        productName: options.baseName,
+        quantity: options.sourceQuantity,
+      },
+    ]
+  }
+  const orderQty = parseOrderQuantity(options.sourceQuantity)
+  return [
+    {
+      productName: options.main?.name || options.baseName,
+      quantity: String(orderQty),
+    },
+    ...options.extras.map((extra) => ({
+      productName: extra.style.name,
+      quantity: String(orderQty * extra.quantity),
+    })),
+  ]
+}
+
 export type InvoiceOutgoingComponentRow = {
   sourceRowNumber: number
   customerOrderNo: string

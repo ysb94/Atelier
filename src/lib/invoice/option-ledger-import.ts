@@ -3,7 +3,7 @@ import type { ParsedSheet } from '@/lib/import/parse'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import type { InvoiceOptionMapInput } from '@/lib/supabase/invoice-option-maps'
 import type { InvoiceProductNameMapInput } from '@/lib/supabase/invoice-product-name-maps'
-import type { StyleRef } from '@/lib/types'
+import type { InvoiceProductNameMap, StyleRef } from '@/lib/types'
 
 function todayStamp() {
   const d = new Date()
@@ -132,32 +132,36 @@ export async function downloadInvoiceProductNameLedgerTemplate(
   ]
   const formulaRows = [
     ['순서', '조회 키 만드는 방법', '예시'],
-    ['1', '품목명 + 한 칸 + 내품명 전체', '래빗에코백 32타입 Color: 트로피칼'],
-    ['2', '품목명 + 한 칸 + 내품명 첫 / 앞부분', '크로스백 Bag: 8pocket _ 블랙'],
-    ['3', '품목명 + 한 칸 + 내품명 첫 , 앞부분', '파우치 파우치 선택: 하트'],
-    ['4', '품목명 + 한 칸 + Color: 값', '래빗에코백 32타입 Color: 트로피칼'],
-    ['5', '품목명 + 한 칸 + 내품명 첫 : 앞부분', '크로스백 Bag'],
-    [
-      '2~5 공통',
-      '해당 구분자가 없으면 그 자리에서는 품목명 단독이 조회 키가 된다',
-      '크로스백 4컬러',
-    ],
-    ['6', '내품명 첫 / 앞부분만', 'Bag: 8pocket _ 블랙'],
-    ['7', '내품명 첫 , 앞부분만', '파우치 선택: 하트'],
+    ['1', '자체상품코드', 'CODE-1000'],
+    ['2', '품목명 단독', '래빗에코백 32타입'],
+    ['3', '품목명 + 한 칸 + 내품명 전체', '래빗에코백 32타입 Color: 트로피칼'],
+    ['4', '품목명 + 한 칸 + 내품명 첫 / 앞부분', '크로스백 Bag: 8pocket _ 블랙'],
+    ['5', '품목명 + 한 칸 + 내품명 첫 , 앞부분', '파우치 파우치 선택: 하트'],
+    ['6', '품목명 + 한 칸 + Color: 값', '래빗에코백 32타입 Color: 트로피칼'],
+    ['7', '품목명 + 한 칸 + 내품명 첫 : 앞부분', '크로스백 Bag'],
     [
       '8',
-      '내품명 전체만. 원장과 맞으면 최종 내품명을 비움',
-      'Color: 그랑 레오파드 아이보리_RB',
+      '내품명 첫 / 앞부분만. 원장과 맞으면 앞부분을 지우고 뒷부분을 남긴다',
+      '파우치 선택: [단독]BP_하트 체크 라벤더',
     ],
     [
       '9',
-      '라벨을 뺀 옵션값만 — 첫 : 뒤 값. 원장과 맞으면 최종 내품명을 비움',
-      '180 HP_보드리 옐로우그린',
+      '내품명 첫 , 앞부분만. 원장과 맞으면 앞부분을 지우고 뒷부분을 남긴다',
+      '파우치 선택: [단독]BP_하트 체크 라벤더',
     ],
-    ['10', '내품명 첫 / 뒷부분만 — SSG 몰에만 적용', 'shoulder strap: Ocean blue'],
+    [
+      '10',
+      '내품명 전체만. 원장과 맞으면 내품명을 비운다',
+      'Color: 그랑 레오파드 아이보리_RB',
+    ],
+    [
+      '제외',
+      '옵션값 단독·SSG / 뒷부분은 오탐이 커서 자동 비교하지 않는다. 앞·뒤가 모두 있는 /·,만 8·9번에 쓴다',
+      '',
+    ],
     [
       '적용',
-      '위 순서대로 원장을 찾고 먼저 맞은 M번호의 현재 상품명이 공식 명칭이 된다. 괄호는 보지 않고 항상 첫 구분자에서 자른다',
+      '위 순서대로 원장을 찾고 먼저 맞은 M번호의 현재 상품명이 공식 명칭이 된다. 공백·특수기호·영문 대소문자·HTML 엔티티 차이는 무시한다',
       '',
     ],
   ]
@@ -175,6 +179,59 @@ export async function downloadInvoiceProductNameLedgerTemplate(
   XLSX.writeFile(
     workbook,
     `${safeFilePart(brandName)}_품목명원장_${todayStamp()}.xlsx`,
+  )
+}
+
+/** Supabase에 실제 저장된 품목명 기준 전체를 확인·재업로드 가능한 XLSX로 내린다. */
+export async function downloadInvoiceProductNameLedgerList(
+  brandName: string,
+  maps: InvoiceProductNameMap[],
+) {
+  const XLSX = await import('xlsx')
+  const headers = [
+    '조회 키',
+    '본품 M번호',
+    '본품 공식명',
+    '쇼핑몰명',
+    '원본 품목명',
+    '원본 내품명',
+    '자체상품코드',
+    '활성 상태',
+    '메모',
+    '수정일',
+  ]
+  const rows = maps.map((map) => [
+    map.lookupKey,
+    map.style.styleNo,
+    map.style.name,
+    map.mallName,
+    map.productName,
+    map.itemNameContext,
+    map.ownProductCode,
+    map.isActive ? '사용' : '중지',
+    map.note,
+    map.updatedAt,
+  ])
+  const sheet = XLSX.utils.aoa_to_sheet([headers, ...rows])
+  sheet['!cols'] = [
+    { wch: 64 },
+    { wch: 16 },
+    { wch: 32 },
+    { wch: 20 },
+    { wch: 52 },
+    { wch: 40 },
+    { wch: 22 },
+    { wch: 12 },
+    { wch: 32 },
+    { wch: 26 },
+  ]
+  sheet['!autofilter'] = { ref: `A1:J${Math.max(rows.length + 1, 1)}` }
+
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, sheet, '현재품목명원장')
+  XLSX.writeFile(
+    workbook,
+    `${safeFilePart(brandName)}_품목명원장_현재목록_${todayStamp()}.xlsx`,
   )
 }
 

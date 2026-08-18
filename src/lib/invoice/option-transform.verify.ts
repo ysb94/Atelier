@@ -1,7 +1,10 @@
 /**
  * 품목·옵션 변환 검증. 실행: npm run verify:option-maps
  */
-import { buildInvoiceOutputRows } from '@/lib/invoice/invoice-output'
+import {
+  buildInvoiceOutputRows,
+  buildInvoiceStepSnapshot,
+} from '@/lib/invoice/invoice-output'
 import { transformInvoiceItemNames, buildOutgoingComponentRowsFromStages } from '@/lib/invoice/item-name-transform'
 import {
   collectInvoiceOptionLedgerStyleCandidates,
@@ -25,6 +28,8 @@ import { normalizeInvoiceCode } from '@/lib/invoice/name-transform'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
 import type {
+  InvoiceItemNameRule,
+  InvoiceItemNameRuleComponent,
   InvoiceNameRule,
   InvoiceOptionMap,
   InvoiceOptionMapComponent,
@@ -143,13 +148,13 @@ const product = '8 pocket cross bag_black'
 const maps: InvoiceOptionMap[] = [
   optionMap({
     id: 'map-main',
-    productName: product,
+  productName: product,
     itemName: '',
     components: [component('map-main', bag, 'main')],
   }),
   optionMap({
     id: 'map-strap',
-    productName: product,
+  productName: product,
     itemName: 'Shoulder strap=Ocean blue',
     components: [
       component('map-strap', bag, 'main'),
@@ -158,7 +163,7 @@ const maps: InvoiceOptionMap[] = [
   }),
   optionMap({
     id: 'map-tassel',
-    productName: product,
+  productName: product,
     itemName: 'Tassel=Black',
     components: [
       component('map-tassel', bag, 'main'),
@@ -167,7 +172,7 @@ const maps: InvoiceOptionMap[] = [
   }),
   optionMap({
     id: 'map-paid',
-    productName: product,
+  productName: product,
     itemName: 'Charm=Silver',
     components: [
       component('map-paid', bag, 'main'),
@@ -277,19 +282,28 @@ const output = buildInvoiceOutputRows({
 
 const orderRows = output.filter((item) => item.kind === 'order')
 const giftRows = output.filter((item) => item.kind === 'gift')
-assert(orderRows.length === sourceRows.length, '원 주문 행 수 유지')
 assert(giftRows.length === 1, '사은품은 별도 행')
 assert(giftRows[0]?.finalItemName === '', '사은품 내품명 비움')
 assert(
   output[0]?.kind === 'order' && output[1]?.kind === 'gift',
   '사은품은 근거 주문 바로 뒤',
 )
-assert(orderRows[1]?.finalProductName === bag.name, 'CJ 품목명=본품')
+const strapOrders = orderRows.filter((item) => item.sourceRowNumber === 2)
+assert(strapOrders.length === 2, '스트랩 세트는 본품+구성 2행')
+assert(strapOrders[0]?.finalProductName === bag.name, 'CJ 품목명=본품')
 assert(
-  orderRows[1]?.finalItemName === 'Shoulder strap=Ocean blue',
+  strapOrders[0]?.finalItemName === 'Shoulder strap=Ocean blue',
   '승인된 표시 내품명이 없으면 원문',
 )
-assert(orderRows[4]?.finalProductName === otherBag.name, '별도 구매는 별도 행')
+assert(
+  strapOrders[1]?.finalProductName === strap.name,
+  '구성품 행 품목명=스트랩',
+)
+assert(
+  orderRows.find((item) => item.sourceRowNumber === 5)?.finalProductName ===
+    otherBag.name,
+  '별도 구매는 별도 행',
+)
 
 const outgoing = buildOutgoingComponentRows({
   optionRows: result.rows,
@@ -316,13 +330,13 @@ assert(
 const duplicateMaps: InvoiceOptionMap[] = [
   optionMap({
     id: 'c1',
-    productName: product,
+  productName: product,
     itemName: 'dup',
     components: [component('c1', bag, 'main')],
   }),
   optionMap({
     id: 'c2',
-    productName: product,
+  productName: product,
     itemName: 'dup',
     components: [component('c2', otherBag, 'main')],
   }),
@@ -542,21 +556,21 @@ for (const [index, item] of PRODUCT_NAME_CASES.entries()) {
   assert(output29[index]?.finalItemName === item.itemName, 'CJ 내품명=원문')
 }
 
-// 후보는 시트 수식 그대로다. 괄호를 보지 않고 언제나 첫 구분자에서만 자른다.
+// 후보는 지정 우선순위다. 괄호를 보지 않고 언제나 첫 구분자에서만 자른다.
 const parenCandidates = generateProductNameCandidates({
   productName: 'Strap pouch _ 와플 스트라이프 블랙',
   itemName: 'Tassel 1=Yellow (,3300), Tassel 2=Black (,3300)',
 })
 assert(
-  parenCandidates[0]?.rule === 'product_item' &&
-    parenCandidates[0]?.text ===
-      'Strap pouch _ 와플 스트라이프 블랙 Tassel 1=Yellow (,3300), Tassel 2=Black (,3300)',
-  '첫 후보는 품목명 한 칸 띄고 내품명 전체',
+  parenCandidates[0]?.rule === 'product' &&
+    parenCandidates[0]?.text === 'Strap pouch _ 와플 스트라이프 블랙',
+  '첫 후보는 품목명 단독',
 )
 assert(
-  parenCandidates[1]?.rule === 'product' &&
-    parenCandidates[1]?.text === 'Strap pouch _ 와플 스트라이프 블랙',
-  '두 번째 후보는 IFERROR 낙하지점인 품목명 단독',
+  parenCandidates[1]?.rule === 'product_item' &&
+    parenCandidates[1]?.text ===
+      'Strap pouch _ 와플 스트라이프 블랙 Tassel 1=Yellow (,3300), Tassel 2=Black (,3300)',
+  '두 번째 후보는 품목명 한 칸 띄고 내품명 전체',
 )
 assert(
   parenCandidates.some(
@@ -572,6 +586,10 @@ const slashCandidates = generateProductNameCandidates({
   itemName: 'Bag: 8pocket _ 블랙 / shoulder strap: Ocean blue',
 })
 assert(
+  slashCandidates[0]?.rule === 'product',
+  '슬래시가 있어도 품목명 단독이 먼저',
+)
+assert(
   slashCandidates.some(
     (item) =>
       item.rule === 'product_item_slash_prefix' &&
@@ -582,13 +600,14 @@ assert(
 assert(
   slashCandidates.some(
     (item) =>
-      item.rule === 'item_slash_prefix' && item.text === 'Bag: 8pocket _ 블랙',
+      item.rule === 'item_slash_prefix' &&
+      item.text === 'Bag: 8pocket _ 블랙',
   ),
-  '내품명 / 앞부분 단독',
+  '내품명 / 앞부분 단독 후보를 만든다',
 )
 assert(
   !slashCandidates.some((item) => item.rule === 'item_slash_suffix'),
-  'SSG가 아니면 / 뒷부분 후보를 만들지 않음',
+  'SSG / 뒷부분 단독 후보는 만들지 않음',
 )
 const ssgCandidates = generateProductNameCandidates({
   productName: '마스마룰즈 8포켓 크로스백 4컬러',
@@ -596,17 +615,9 @@ const ssgCandidates = generateProductNameCandidates({
   mallName: 'SSG.COM',
 })
 assert(
-  ssgCandidates.some(
-    (item) =>
-      item.rule === 'item_slash_suffix' &&
-      item.text === 'shoulder strap: Ocean blue',
-  ),
-  'SSG 몰에서만 / 뒷부분 단독 후보',
-)
-assert(
-  ssgCandidates.length === slashCandidates.length + 1 &&
-    ssgCandidates.at(-1)?.rule === 'item_slash_suffix',
-  'SSG 후보는 마지막에 하나만 늘어남',
+  ssgCandidates.every((item) => item.rule !== 'item_slash_suffix') &&
+    ssgCandidates.length === slashCandidates.length,
+  'SSG여도 / 뒷부분 단독 후보를 추가하지 않음',
 )
 assert(
   slashCandidates.some(
@@ -617,14 +628,13 @@ assert(
   '품목명 + 첫 : 앞부분',
 )
 
-// 네 열이 모두 구분자를 찾으면 시트에는 품목명 단독 값이 나오지 않는다.
 const allDelimiterCandidates = generateProductNameCandidates({
   productName: '마스마룰즈 파우치',
   itemName: 'Color: 트로피칼, 옵션/기타: 값',
 })
 assert(
-  !allDelimiterCandidates.some((item) => item.rule === 'product'),
-  '모든 열이 맞으면 품목명 단독은 조회 키가 아님',
+  allDelimiterCandidates[0]?.rule === 'product',
+  '구분자가 있어도 품목명 단독 후보를 만든다',
 )
 assert(
   allDelimiterCandidates.some(
@@ -639,9 +649,10 @@ const oneDelimiterCandidates = generateProductNameCandidates({
   itemName: '블랙 / 옐로',
 })
 assert(
-  oneDelimiterCandidates[1]?.rule === 'product_item_slash_prefix' &&
-    oneDelimiterCandidates[2]?.rule === 'product',
-  '/ 열 다음 쉼표 열에서 품목명 단독이 나옴',
+  oneDelimiterCandidates[0]?.rule === 'product' &&
+    oneDelimiterCandidates[1]?.rule === 'product_item' &&
+    oneDelimiterCandidates[2]?.rule === 'product_item_slash_prefix',
+  '품목명 단독 다음 결합·슬래시 결합',
 )
 
 const colorCandidates = generateProductNameCandidates({
@@ -669,12 +680,30 @@ assert(
   'Color: 라벨을 보존한 내품명 전체 단독 후보',
 )
 assert(
-  colorItemOnlyCandidates.some(
-    (item) =>
-      item.rule === 'item_value' &&
-      item.text === '그랑 레오파드 아이보리_RB',
-  ),
-  'Color: 라벨을 뺀 옵션값 후보도 다음 순서로 유지',
+  !colorItemOnlyCandidates.some((item) => item.rule === 'item_value'),
+  '옵션값 단독 후보는 만들지 않음',
+)
+
+const priorityCandidates = generateProductNameCandidates({
+  productName: '품목',
+  itemName: 'Color: 빨강 / 기타, 옵션: 값',
+  ownProductCode: 'CODE-1',
+})
+assert(
+  priorityCandidates.map((item) => item.rule).join(',') ===
+    [
+      'own_code',
+      'product',
+      'product_item',
+      'product_item_slash_prefix',
+      'product_item_comma_prefix',
+      'product_item_color_label',
+      'product_item_colon_prefix',
+      'item_slash_prefix',
+      'item_comma_prefix',
+      'item_full',
+    ].join(','),
+  '자체상품코드부터 내품명 전체까지 10단계 우선순위',
 )
 
 const kakaoCandidates = generateProductNameCandidates({
@@ -687,7 +716,7 @@ assert(
       item.rule === 'item_comma_prefix' &&
       item.text === '파우치 선택: 스파 하트 레오파드 머스터드',
   ),
-  '카카오 쉼표 앞부분 단독',
+  '내품명 쉼표 앞부분 단독 후보를 만든다',
 )
 assert(
   kakaoCandidates.some(
@@ -697,26 +726,27 @@ assert(
   ),
   '추가·태슬 문구가 있어도 후보를 버리지 않음',
 )
+assert(
+  !generateProductNameCandidates({
+    productName: '가방',
+    itemName: 'Bag: Black /',
+  }).some((item) => item.rule === 'item_slash_prefix'),
+  '뒷부분이 없으면 내품명 / 앞부분 단독 후보를 만들지 않음',
+)
+assert(
+  !generateProductNameCandidates({
+    productName: '가방',
+    itemName: 'Bag: Black,',
+  }).some((item) => item.rule === 'item_comma_prefix'),
+  '뒷부분이 없으면 내품명 , 앞부분 단독 후보를 만들지 않음',
+)
 
 const optionValueCases = [
-  {
-    productName: '마스마룰즈 180도 하품 멀티파우치 모음전 VER.2',
-    itemName: '파우치 선택: 180 HP_보드리 옐로우그린',
-    expected: '180 HP_보드리 옐로우그린',
-    expectedRule: 'item_value',
-  },
   {
     productName: '마스마룰즈 180도 하품 파우치 모음전 VER.2',
     itemName: '180 HP_보드리 파스텔그린',
     expected: '180 HP_보드리 파스텔그린',
     expectedRule: 'item_full',
-  },
-  {
-    productName:
-      '마스마룰즈 180도 하품 화장품파우치 대용량 여행 입학 선물 필통',
-    itemName: '선택1: HP_스카이블루',
-    expected: 'HP_스카이블루',
-    expectedRule: 'item_value',
   },
 ]
 for (const item of optionValueCases) {
@@ -727,7 +757,11 @@ for (const item of optionValueCases) {
         candidate.rule === item.expectedRule &&
         candidate.text === item.expected,
     ),
-    `옵션값 단독 후보: ${item.expected}`,
+    `내품명 전체 단독 후보: ${item.expected}`,
+  )
+  assert(
+    !candidates.some((candidate) => candidate.rule === 'item_value'),
+    '옵션값 단독 후보는 제외',
   )
 }
 
@@ -738,12 +772,12 @@ const hapumStyle = style(
 )
 const hapumSource = row({
   rowNumber: 9001,
-  productName: optionValueCases[1]!.productName,
-  itemName: optionValueCases[1]!.itemName,
+  productName: optionValueCases[0]!.productName,
+  itemName: optionValueCases[0]!.itemName,
   mallName: '스마트스토어',
   ownProductCode: '',
 })
-const hapumKey = optionValueCases[1]!.expected
+const hapumKey = optionValueCases[0]!.expected
 const hapumProduct = transformInvoiceProductNames(
   [hapumSource],
   [
@@ -772,9 +806,8 @@ const hapumProduct = transformInvoiceProductNames(
 assert(
   hapumProduct.rows[0]?.status === 'mapped' &&
     hapumProduct.rows[0]?.transformedProductName === hapumStyle.name &&
-    hapumProduct.rows[0]?.appliedRule === 'item_full' &&
-    hapumProduct.rows[0]?.itemNameConsumed,
-  '옵션값 단독 원장 exact 매칭으로 본품 확정',
+    hapumProduct.rows[0]?.appliedRule === 'item_full',
+  '내품명 전체 단독 원장 매칭으로 본품 확정',
 )
 
 const hapumItem = transformInvoiceItemNames(
@@ -783,11 +816,13 @@ const hapumItem = transformInvoiceItemNames(
   hapumProduct.rows,
 )
 assert(
-  hapumItem.rows[0]?.status === 'consumed' &&
+  hapumProduct.rows[0]?.itemNameConsumed === true &&
+    hapumItem.rows[0]?.status === 'consumed' &&
     hapumItem.rows[0]?.transformedItemName === '' &&
+    hapumItem.mappedRowCount === 0 &&
     hapumItem.consumedRowCount === 1 &&
-    hapumItem.unresolvedRowCount === 0,
-  '본품 식별에 사용한 내품명은 빈 값으로 확정',
+    hapumItem.unresolvedCombos.length === 0,
+  '내품명 전체 조회로 본품을 찾으면 내품명을 비우고 검토 목록에서 뺀다',
 )
 
 const hapumOutput = buildInvoiceOutputRows({
@@ -810,6 +845,66 @@ assert(
   'CJ 결과는 공식 품목명과 빈 내품명',
 )
 
+const hapumProductStage = buildInvoiceStepSnapshot({
+  stage: 'product',
+  sourceRows: [hapumSource],
+  productTransformation: hapumProduct,
+  itemTransformation: hapumItem,
+})
+assert(
+  hapumProductStage[0]?.finalItemName === '' &&
+    hapumProductStage[0]?.itemName === '',
+  '품목명 단계 스냅샷부터 소비된 내품명을 비움',
+)
+
+const hapumWithExtras = transformInvoiceItemNames(
+  [hapumSource],
+  [
+    optionMap({
+      id: 'hapum-extras',
+      productName: hapumSource.productName,
+      itemName: hapumSource.itemName,
+      components: [
+        component('hapum-extras', hapumStyle, 'main'),
+        component('hapum-extras', strap, 'included'),
+      ],
+    }),
+  ],
+  hapumProduct.rows,
+)
+assert(
+  hapumWithExtras.rows[0]?.status === 'consumed' &&
+    hapumWithExtras.rows[0]?.transformedItemName === '' &&
+    hapumWithExtras.rows[0]?.extras.length === 1 &&
+    hapumWithExtras.unresolvedCombos.length === 0,
+  '소비된 행도 저장된 세트 구성은 유지하고 검토 목록에는 안 넣는다',
+)
+const hapumExtrasOutput = buildInvoiceOutputRows({
+  transformedRows: [
+    {
+      source: hapumSource,
+      transformedName: hapumStyle.name,
+      status: 'renamed',
+      matchedRuleId: hapumProduct.rows[0]!.mapId,
+    },
+  ],
+  workMatches: new Map(),
+  giftRowsBySource: new Map(),
+  productTransformation: hapumProduct,
+  itemTransformation: hapumWithExtras,
+})
+const hapumExtraOrders = hapumExtrasOutput.filter((item) => item.kind === 'order')
+assert(hapumExtraOrders.length === 2, '소비된 세트도 구성행을 펼친다')
+assert(
+  hapumExtraOrders.every((line) => line.finalItemName === ''),
+  '소비된 내품명은 모든 구성행에서 빈 값',
+)
+assert(
+  hapumExtraOrders[0]?.recipientName === hapumSource.recipientName &&
+    hapumExtraOrders[1]?.recipientName === hapumSource.recipientName,
+  '소비된 세트 구성행도 고객정보를 복제한다',
+)
+
 const directOptionValueStyle = style(
   's-hapum-direct',
   'M0778',
@@ -821,9 +916,8 @@ const directOptionValueProduct = transformInvoiceProductNames(
   catalogFromStyles([directOptionValueStyle]),
 )
 assert(
-  directOptionValueProduct.rows[0]?.status === 'candidate' &&
-    !directOptionValueProduct.rows[0]?.itemNameConsumed,
-  '상품명 직접 후보만 맞으면 내품명을 소비하지 않음',
+  directOptionValueProduct.rows[0]?.status === 'candidate',
+  '상품명 직접 후보만 맞으면 후보 1개로 남김',
 )
 const directOptionValueItem = transformInvoiceItemNames(
   [hapumSource],
@@ -1056,7 +1150,7 @@ const comboExactResult = transformInvoiceProductNames(
 )
 assert(
   comboExactResult.rows[0]?.status === 'mapped' &&
-    comboExactResult.rows[0]?.appliedRule === 'exact' &&
+    comboExactResult.rows[0]?.appliedRule === 'product_item' &&
     comboExactResult.rows[0]?.transformedProductName === comboExactStyle.name,
   '쇼핑몰 지정 조합이 조회 키 원장보다 우선',
 )
@@ -1067,7 +1161,7 @@ const comboAnyResult = transformInvoiceProductNames(
 )
 assert(
   comboAnyResult.rows[0]?.status === 'mapped' &&
-    comboAnyResult.rows[0]?.appliedRule === 'exact' &&
+    comboAnyResult.rows[0]?.appliedRule === 'product_item' &&
     comboAnyResult.rows[0]?.transformedProductName === comboAnyStyle.name,
   '쇼핑몰이 비어 있으면 전쇼핑몰 조합으로 맞음',
 )
@@ -1108,9 +1202,9 @@ const soloCandidates = generateProductNameCandidates({
   ),
 })
 assert(
-  soloCandidates[0]?.text ===
-    '[단독] 마스마룰즈 래빗에코백 32타입 Color: 트로피칼',
-  '[단독] 원문 후보를 유지',
+  soloCandidates[0]?.rule === 'product' &&
+    soloCandidates[0]?.text === '[단독] 마스마룰즈 래빗에코백 32타입',
+  '[단독] 원문 품목명 단독 후보를 유지',
 )
 assert(
   soloCandidates.some(
@@ -1121,15 +1215,15 @@ assert(
 
 assert(
   matchingProductName('[태슬1개 포함] 베이직 파우치', [
-    tagRole('[태슬1개 포함]', 'composition_gift'),
-  ]) === '베이직 파우치',
-  '포함 태그는 인식에서만 제외',
+    tagRole('[태슬1개 포함]', 'product_composition'),
+  ]) === '[태슬1개 포함] 베이직 파우치',
+  '상품 구성 태그는 인식에 유지',
 )
 assert(
   matchingProductName('[리퍼브] String flap backpack _ Glittery pink', [
     tagRole('[리퍼브]', 'identity_condition'),
-  ]) === '[리퍼브] String flap backpack _ Glittery pink',
-  '리퍼브는 인식에 유지',
+  ]) === 'String flap backpack _ Glittery pink',
+  '상품 특징 태그는 비교에서 제외',
 )
 assert(
   matchingProductName('[비치볼 증정]8 pocket cross bag_4colors', [
@@ -1231,7 +1325,7 @@ const compactMapped = transformInvoiceProductNames(
 )
 assert(
   compactMapped.rows[0]?.status === 'mapped' &&
-    compactMapped.rows[0]?.appliedRule === 'compact' &&
+    compactMapped.rows[0]?.appliedRule === 'product' &&
     compactMapped.rows[0]?.transformedProductName === compactStyle.name,
   '공백·기호만 다른 원장 조회 키는 압축 매칭',
 )
@@ -1276,8 +1370,8 @@ const keepIdentity = transformInvoiceProductNames(
   [tagRole('[리퍼브]', 'identity_condition')],
 )
 assert(
-  keepIdentity.rows[0]?.status !== 'mapped',
-  '상품 특징 태그는 원장 별칭에서 제거하지 않음',
+  keepIdentity.rows[0]?.status === 'mapped',
+  '상품 특징 태그는 비교 별칭에서 제거해 본품명과 맞춘다',
 )
 
 const sameStyleA = style('s-same-a', 'M9103', '동일 본품 A')
@@ -1352,10 +1446,8 @@ const strictFirst = transformInvoiceProductNames(
   catalogFromStyles([]),
 )
 assert(
-  strictFirst.rows[0]?.status === 'mapped' &&
-    strictFirst.rows[0]?.appliedRule !== 'compact' &&
-    strictFirst.rows[0]?.style?.styleId === 's-strict-first',
-  '엄격 키가 있으면 압축 키보다 우선',
+  strictFirst.rows[0]?.status === 'conflict',
+  '같은 압축 키가 서로 다른 M번호면 충돌',
 )
 
 const compactOfficial = transformInvoiceProductNames(
@@ -1377,6 +1469,751 @@ assert(
     compactOfficial.rows[0]?.appliedRule === 'compact' &&
     compactOfficial.rows[0]?.transformedProductName === '공식 상품명 압축',
   '공식상품명도 압축 키로 후보 1개',
+)
+assert(
+  compactOfficial.rows[0]?.itemNameConsumed !== true,
+  'styles.name 직접 후보는 내품명을 소비하지 않는다',
+)
+
+const ownCodeStyle = style('s-own-code', 'M9200', '코드 우선 본품')
+const ownCodeProductStyle = style('s-own-product', 'M9201', '품목명 본품')
+const ownCodeSource = row({
+  rowNumber: 9201,
+  productName: '품목명 본품',
+  itemName: '옵션값',
+  ownProductCode: 'CODE-9200',
+})
+const ownCodeFirst = transformInvoiceProductNames(
+  [ownCodeSource],
+  [
+    lookupMap('own-product', '품목명 본품', ownCodeProductStyle),
+    {
+      ...lookupMap('own-code', '다른조회키', ownCodeStyle),
+      ownProductCode: 'CODE-9200',
+      normalizedOwnProductCode: normalizeInvoiceText('CODE-9200'),
+    },
+  ],
+  catalogFromStyles([]),
+)
+assert(
+  ownCodeFirst.rows[0]?.status === 'mapped' &&
+    ownCodeFirst.rows[0]?.appliedRule === 'own_code' &&
+    ownCodeFirst.rows[0]?.style?.styleId === 's-own-code' &&
+    ownCodeFirst.rows[0]?.itemNameConsumed !== true,
+  '자체상품코드가 품목명보다 먼저 맞는다',
+)
+
+const setEntitySource = row({
+  rowNumber: 9202,
+  productName: '[SET] Daily backpack_Black &amp; Strap pouch_Leopard',
+  itemName: 'FREE',
+})
+const setEntityProduct = transformInvoiceProductNames(
+  [setEntitySource],
+  [
+    lookupMap(
+      'set-entity',
+      '[SET] Daily backpack_Black & Strap pouch_Leopard',
+      bag,
+    ),
+  ],
+  catalogFromStyles([]),
+  [tagRole('[SET]', 'product_composition')],
+)
+assert(
+  setEntityProduct.rows[0]?.status === 'mapped' &&
+    setEntityProduct.rows[0]?.appliedRule === 'product' &&
+    setEntityProduct.rows[0]?.transformedProductName === bag.name,
+  '상품 구성 태그와 HTML 엔티티는 같은 품목명으로 맞춘다',
+)
+
+const prefixStyle = style('s-bp-heart', 'M9300', '베파 하트 체크 라벤더')
+const prefixProductName =
+  '[태슬1개 포함] 마스마룰즈 베이직파우치 모음전 VER.1'
+const prefixLookup = '파우치 선택: [단독]BP_하트 체크 라벤더'
+const commaPrefixSource = row({
+  rowNumber: 9210,
+  productName: prefixProductName,
+  itemName: '파우치 선택: [단독]BP_하트 체크 라벤더, Tassel: Purple',
+  recipientName: '옵션고객',
+})
+const slashPrefixSource = row({
+  rowNumber: 9211,
+  productName: prefixProductName,
+  itemName: '파우치 선택: [단독]BP_하트 체크 라벤더/ Tassel: Purple',
+  recipientName: '옵션고객',
+})
+const commaPrefixProduct = transformInvoiceProductNames(
+  [commaPrefixSource],
+  [lookupMap('prefix-comma', prefixLookup, prefixStyle)],
+  catalogFromStyles([]),
+)
+assert(
+  commaPrefixProduct.rows[0]?.status === 'mapped' &&
+    commaPrefixProduct.rows[0]?.appliedRule === 'item_comma_prefix' &&
+    commaPrefixProduct.rows[0]?.itemNameConsumed !== true &&
+    commaPrefixProduct.rows[0]?.effectiveItemName === 'Tassel: Purple',
+  '내품명 , 앞부분 단독 원장은 본품을 확정하고 남은 옵션을 남긴다',
+)
+const slashPrefixProduct = transformInvoiceProductNames(
+  [slashPrefixSource],
+  [lookupMap('prefix-slash', prefixLookup, prefixStyle)],
+  catalogFromStyles([]),
+)
+assert(
+  slashPrefixProduct.rows[0]?.status === 'mapped' &&
+    slashPrefixProduct.rows[0]?.appliedRule === 'item_slash_prefix' &&
+    slashPrefixProduct.rows[0]?.effectiveItemName === 'Tassel: Purple',
+  '내품명 / 앞부분 단독 원장도 같은 남은 옵션을 남긴다',
+)
+const commaPrefixItem = transformInvoiceItemNames(
+  [commaPrefixSource],
+  [],
+  commaPrefixProduct.rows,
+)
+assert(
+  commaPrefixItem.rows[0]?.status === 'passthrough' &&
+    commaPrefixItem.rows[0]?.transformedItemName === 'Tassel: Purple' &&
+    commaPrefixItem.unresolvedCombos.length === 1 &&
+    commaPrefixItem.unresolvedCombos[0]?.itemName === 'Tassel: Purple' &&
+    commaPrefixItem.unresolvedCombos[0]?.originalItemName ===
+      commaPrefixSource.itemName,
+  '남은 옵션은 내품명 검토 목록의 입력이 된다',
+)
+const prefixFallbackItem = transformInvoiceItemNames(
+  [commaPrefixSource],
+  [
+    optionMap({
+      id: 'prefix-full-fallback',
+      productName: prefixProductName,
+      itemName: commaPrefixSource.itemName,
+      displayItemName: '태슬=퍼플',
+      components: [component('prefix-full-fallback', prefixStyle, 'main')],
+    }),
+  ],
+  commaPrefixProduct.rows,
+)
+assert(
+  prefixFallbackItem.rows[0]?.status === 'mapped' &&
+    prefixFallbackItem.rows[0]?.transformedItemName === '태슬=퍼플',
+  'suffix 기준이 없으면 원문 조합 원장을 본다',
+)
+const prefixSuffixItem = transformInvoiceItemNames(
+  [commaPrefixSource],
+  [
+    optionMap({
+      id: 'prefix-suffix',
+      productName: prefixProductName,
+      itemName: 'Tassel: Purple',
+      displayItemName: 'Tassel=Purple',
+      components: [
+        component('prefix-suffix', prefixStyle, 'main'),
+        component('prefix-suffix', tassel, 'paid_add'),
+      ],
+    }),
+  ],
+  commaPrefixProduct.rows,
+)
+assert(
+  prefixSuffixItem.rows[0]?.status === 'mapped' &&
+    prefixSuffixItem.rows[0]?.transformedItemName === 'Tassel=Purple' &&
+    prefixSuffixItem.rows[0]?.extras.length === 1,
+  '남은 옵션 기준으로 내품명 변환과 구성품을 찾는다',
+)
+const prefixSuffixOutput = buildInvoiceOutputRows({
+  transformedRows: [
+    {
+      source: commaPrefixSource,
+      transformedName: prefixStyle.name,
+      status: 'renamed',
+      matchedRuleId: commaPrefixProduct.rows[0]!.mapId,
+    },
+  ],
+  workMatches: new Map(),
+  giftRowsBySource: new Map(),
+  productTransformation: commaPrefixProduct,
+  itemTransformation: prefixSuffixItem,
+})
+const prefixSuffixOrders = prefixSuffixOutput.filter(
+  (item) => item.kind === 'order',
+)
+assert(prefixSuffixOrders.length === 2, '남은 옵션 세트도 구성행을 펼친다')
+assert(
+  prefixSuffixOrders.every((line) => line.finalItemName === 'Tassel=Purple'),
+  '변환된 남은 옵션은 모든 구성행에 복사한다',
+)
+assert(
+  prefixSuffixOrders.every((line) => line.recipientName === '옵션고객'),
+  '남은 옵션 세트도 고객정보를 복제한다',
+)
+const prefixProductStage = buildInvoiceStepSnapshot({
+  stage: 'product',
+  sourceRows: [commaPrefixSource],
+  productTransformation: commaPrefixProduct,
+  itemTransformation: commaPrefixItem,
+})
+assert(
+  prefixProductStage[0]?.finalItemName === 'Tassel: Purple' &&
+    prefixProductStage[0]?.itemName === 'Tassel: Purple',
+  '품목명 단계 스냅샷부터 앞부분을 빼고 남은 옵션을 보여 준다',
+)
+const combinedPrefixProduct = transformInvoiceProductNames(
+  [slashPrefixSource],
+  [
+    lookupMap(
+      'prefix-combined',
+      `${prefixProductName} ${prefixLookup}`,
+      prefixStyle,
+    ),
+  ],
+  catalogFromStyles([]),
+)
+assert(
+  combinedPrefixProduct.rows[0]?.appliedRule === 'product_item_slash_prefix' &&
+    combinedPrefixProduct.rows[0]?.effectiveItemName ===
+      slashPrefixSource.itemName,
+  '품목명+내품명 / 앞 결합은 내품명 원문을 유지한다',
+)
+const prefixConflict = transformInvoiceProductNames(
+  [commaPrefixSource],
+  [
+    lookupMap('prefix-conflict-1', prefixLookup, prefixStyle),
+    lookupMap(
+      'prefix-conflict-2',
+      prefixLookup,
+      style('s-bp-other', 'M9301', '다른 베파'),
+    ),
+  ],
+  catalogFromStyles([]),
+)
+assert(
+  prefixConflict.rows[0]?.status === 'conflict' &&
+    prefixConflict.rows[0]?.effectiveItemName === commaPrefixSource.itemName,
+  '같은 앞부분 키가 다른 M번호면 충돌하고 내품명을 소비하지 않는다',
+)
+
+const setSource = row({
+  rowNumber: 9301,
+  productName:
+    '[SET] Daily backpack_Black &amp; Strap pouch_Leopard &amp; BB KEYRING SET',
+  itemName: 'FREE',
+  quantity: '2',
+  recipientName: '세트고객',
+  recipientPhone: '01011112222',
+  recipientAddress: '부산',
+  customerOrderNo: 'ORD-SET-1',
+})
+const keyring = style('s-keyring', 'M6000', 'BB 키링 세트')
+const setMap = optionMap({
+  id: 'map-set',
+  productName: setSource.productName,
+  itemName: setSource.itemName,
+  displayItemName: '변환 세트 옵션',
+  components: [
+    component('map-set', bag, 'main'),
+    component('map-set', strap, 'included'),
+    component('map-set', keyring, 'included', 2),
+  ],
+})
+const setProduct = transformInvoiceProductNames(
+  [setSource],
+  [lookupMap('pmap-set', setSource.productName, bag)],
+  catalogFromStyles([bag, strap, keyring]),
+)
+const setItem = transformInvoiceItemNames([setSource], [setMap], setProduct.rows)
+assert(
+  setItem.rows[0]?.status === 'mapped' &&
+    setItem.mappedRowCount === 1 &&
+    setItem.unresolvedCombos.length === 0,
+  '명시적인 변환 내품명만 기준 적용',
+)
+const setGifts = new Map<number, SabangnetOrderRow[]>([
+  [
+    9301,
+    [
+      row({
+        rowNumber: 9302,
+        productName: '사은품(1) : 파우치',
+        itemName: '',
+        quantity: '1',
+      }),
+    ],
+  ],
+])
+const setOutput = buildInvoiceOutputRows({
+  transformedRows: setProduct.rows.map((item) => ({
+    source: item.source,
+    transformedName: item.transformedProductName,
+    status: 'renamed',
+    matchedRuleId: item.mapId,
+  })),
+  workMatches: new Map(),
+  giftRowsBySource: setGifts,
+  productTransformation: setProduct,
+  itemTransformation: setItem,
+})
+const setOrders = setOutput.filter((item) => item.kind === 'order')
+const setGiftRows = setOutput.filter((item) => item.kind === 'gift')
+assert(setOrders.length === 3, '본품+구성 2개가 CJ 3행')
+assert(setGiftRows.length === 1, '사은품은 구성행 뒤에 한 번만')
+assert(setOutput[3]?.kind === 'gift', '사은품은 세트 블록 뒤')
+assert(setOrders[0]?.finalProductName === bag.name, '1행 본품')
+assert(setOrders[1]?.finalProductName === strap.name, '2행 스트랩')
+assert(setOrders[2]?.finalProductName === keyring.name, '3행 키링')
+assert(setOrders[0]?.quantity === '2', '본품 수량=주문수량')
+assert(setOrders[1]?.quantity === '2', '구성수량 1은 주문수량만 곱함')
+assert(setOrders[2]?.quantity === '4', '구성수량 2는 주문수량과 곱함')
+for (const line of setOrders) {
+  assert(line.recipientName === '세트고객', '수령인 복제')
+  assert(line.recipientPhone === '01011112222', '전화 복제')
+  assert(line.recipientAddress === '부산', '주소 복제')
+  assert(line.customerOrderNo === 'ORD-SET-1', '주문번호 복제')
+  assert(
+    line.finalItemName === '변환 세트 옵션',
+    '세트 내품명은 변환값 그대로 복사',
+  )
+}
+
+const productStageSetOutput = buildInvoiceStepSnapshot({
+  stage: 'product',
+  sourceRows: [setSource],
+  productTransformation: setProduct,
+  itemTransformation: setItem,
+})
+assert(
+  productStageSetOutput.filter((item) => item.kind === 'order').length === 3,
+  '품목명 단계 스냅샷도 본품+구성 2개를 3행으로 펼침',
+)
+assert(
+  productStageSetOutput.every(
+    (item) =>
+      item.kind !== 'order' ||
+      (item.itemName === 'FREE' && item.finalItemName === 'FREE'),
+  ),
+  '품목명 단계 스냅샷은 구성만 펼치고 내품명은 원문 유지',
+)
+
+const plainSource = row({
+  rowNumber: 9303,
+  productName: product,
+  itemName: '',
+})
+const plainProduct = transformInvoiceProductNames(
+  [plainSource],
+  [lookupMap('pmap-plain', product, bag)],
+  catalogFromStyles([bag]),
+)
+const plainItem = transformInvoiceItemNames([plainSource], [], plainProduct.rows)
+const plainOutput = buildInvoiceOutputRows({
+  transformedRows: plainProduct.rows.map((item) => ({
+    source: item.source,
+    transformedName: item.transformedProductName,
+    status: 'renamed',
+    matchedRuleId: item.mapId,
+  })),
+  workMatches: new Map(),
+  giftRowsBySource: new Map(),
+  productTransformation: plainProduct,
+  itemTransformation: plainItem,
+})
+assert(plainOutput.length === 1, '일반 상품은 1행 유지')
+assert(plainOutput[0]?.finalProductName === bag.name, '일반 상품 품목명')
+assert(plainOutput[0]?.finalItemName === '', '빈 내품명은 빈 값 유지')
+assert(
+  plainItem.rows[0]?.status === 'consumed' &&
+    plainItem.rows[0]?.transformedItemName === '' &&
+    plainItem.consumedRowCount === 1 &&
+    plainItem.unresolvedCombos.length === 0,
+  '빈 내품명은 빈칸 통과·검토 제외',
+)
+
+const compositionOnlyMap = optionMap({
+  id: 'map-set-composition',
+  productName: setSource.productName,
+  itemName: setSource.itemName,
+  components: [
+    component('map-set-composition', bag, 'main'),
+    component('map-set-composition', strap, 'included'),
+    component('map-set-composition', keyring, 'included', 2),
+  ],
+})
+const compositionOnlyItem = transformInvoiceItemNames(
+  [setSource],
+  [compositionOnlyMap],
+  setProduct.rows,
+)
+assert(
+  compositionOnlyItem.rows[0]?.status === 'passthrough' &&
+    compositionOnlyItem.rows[0]?.transformedItemName === 'FREE' &&
+    compositionOnlyItem.rows[0]?.extras.length === 2 &&
+    compositionOnlyItem.mappedRowCount === 0 &&
+    compositionOnlyItem.unresolvedCombos.length === 1,
+  '구성만 저장된 세트는 원문 유지·검토',
+)
+const compositionOnlyOutput = buildInvoiceOutputRows({
+  transformedRows: setProduct.rows.map((item) => ({
+    source: item.source,
+    transformedName: item.transformedProductName,
+    status: 'renamed',
+    matchedRuleId: item.mapId,
+  })),
+  workMatches: new Map(),
+  giftRowsBySource: new Map(),
+  productTransformation: setProduct,
+  itemTransformation: compositionOnlyItem,
+})
+const compositionOnlyOrders = compositionOnlyOutput.filter(
+  (item) => item.kind === 'order',
+)
+assert(compositionOnlyOrders.length === 3, '구성만 있어도 세트 3행 확장')
+assert(
+  compositionOnlyOrders.every((line) => line.finalItemName === 'FREE'),
+  '구성만 있으면 모든 구성행 내품명 원문 유지',
+)
+const compositionProductStage = buildInvoiceStepSnapshot({
+  stage: 'product',
+  sourceRows: [setSource],
+  productTransformation: setProduct,
+  itemTransformation: compositionOnlyItem,
+})
+assert(
+  compositionProductStage.filter((item) => item.kind === 'order').length === 3 &&
+    compositionProductStage.every(
+      (item) =>
+        item.kind !== 'order' ||
+        (item.itemName === 'FREE' && item.finalItemName === 'FREE'),
+    ),
+  '품목명 단계 스냅샷도 구성 펼침과 내품명 원문 유지',
+)
+
+const unresolvedOutput = buildInvoiceOutputRows({
+  transformedRows: result.rows
+    .filter((item) => item.source.rowNumber === 6)
+    .map((item) => ({
+      source: item.source,
+      transformedName: item.transformedName,
+      status: 'unmapped_code' as const,
+      matchedRuleId: null,
+    })),
+  workMatches: new Map(),
+  giftRowsBySource: new Map(),
+  optionTransformation: {
+    ...result,
+    rows: result.rows.filter((item) => item.source.rowNumber === 6),
+  },
+})
+assert(unresolvedOutput.length === 1, '미확정은 임의 확장하지 않음')
+assert(
+  unresolvedOutput[0]?.finalProductName === product,
+  '미확정은 원문 품목명',
+)
+
+function itemNameRule(options: {
+  id: string
+  itemName: string
+  scope?: InvoiceItemNameRule['scope']
+  mainStyle?: StyleRef | null
+  action: InvoiceItemNameRule['action']
+  components?: InvoiceItemNameRuleComponent[]
+}): InvoiceItemNameRule {
+  const mainStyle = options.mainStyle ?? null
+  return {
+    id: options.id,
+    brandId: 'brand',
+    scope: options.scope ?? 'global',
+    mainStyle,
+    itemName: options.itemName,
+    normalizedItemName: normalizeInvoiceText(options.itemName),
+    action: options.action,
+    isActive: true,
+    note: '',
+    components: options.components ?? [],
+    createdAt: '2026-08-18T00:00:00.000Z',
+    updatedAt: '2026-08-18T00:00:00.000Z',
+  }
+}
+
+function ruleComponent(
+  ruleId: string,
+  ref: StyleRef,
+  role: InvoiceItemNameRuleComponent['role'],
+  quantity = 1,
+  sortOrder = 0,
+): InvoiceItemNameRuleComponent {
+  return {
+    id: `${ruleId}-${ref.styleId}`,
+    ruleId,
+    style: ref,
+    role,
+    quantity,
+    sortOrder,
+  }
+}
+
+const keyringSkipSource = row({
+  rowNumber: 9401,
+  productName: '다른 품목명',
+  itemName: 'KEYRING 추가=선택안함',
+  mallName: '스마트스토어',
+})
+const keyringSkipOther = row({
+  rowNumber: 9402,
+  productName: '또 다른 품목',
+  itemName: 'KEYRING 추가=선택안함',
+  mallName: '카카오톡스토어',
+})
+const keyringSkipProduct = transformInvoiceProductNames(
+  [keyringSkipSource, keyringSkipOther],
+  [
+    lookupMap('pmap-keyring-1', keyringSkipSource.productName, bag),
+    lookupMap('pmap-keyring-2', keyringSkipOther.productName, otherBag),
+  ],
+  catalogFromStyles([bag, otherBag]),
+)
+const keyringSkipItem = transformInvoiceItemNames(
+  [keyringSkipSource, keyringSkipOther],
+  [],
+  keyringSkipProduct.rows,
+  [
+    itemNameRule({
+      id: 'rule-global-delete',
+      itemName: 'KEYRING 추가=선택안함',
+      action: 'delete',
+    }),
+  ],
+)
+assert(
+  keyringSkipItem.rows.every((item) => item.status === 'deleted') &&
+    keyringSkipItem.rows.every((item) => item.transformedItemName === '') &&
+    keyringSkipItem.deletedRowCount === 2 &&
+    keyringSkipItem.unresolvedCombos.length === 0,
+  '공통 삭제 규칙은 쇼핑몰·품목명을 보지 않는다',
+)
+
+const suffixSource = row({
+  rowNumber: 9403,
+  productName: '마스마룰즈 베이직파우치 모음전',
+  itemName: '파우치 선택: 스파 하트 레오파드 머스터드, 태슬: Black',
+})
+const suffixProduct = transformInvoiceProductNames(
+  [suffixSource],
+  [
+    lookupMap(
+      'pmap-suffix',
+      '파우치 선택: 스파 하트 레오파드 머스터드',
+      bag,
+    ),
+  ],
+  catalogFromStyles([bag, tassel]),
+)
+const suffixItem = transformInvoiceItemNames(
+  [suffixSource],
+  [],
+  suffixProduct.rows,
+  [
+    itemNameRule({
+      id: 'rule-suffix-components',
+      itemName: '태슬: Black',
+      action: 'components',
+      components: [ruleComponent('rule-suffix-components', tassel, 'paid_add')],
+    }),
+  ],
+)
+assert(
+  suffixProduct.rows[0]?.effectiveItemName === '태슬: Black',
+  '앞부분 소비 후 suffix가 유효 내품명',
+)
+assert(
+  suffixItem.rows[0]?.status === 'mapped' &&
+    suffixItem.rows[0]?.transformedItemName === tassel.name &&
+    suffixItem.rows[0]?.extras[0]?.style.styleId === tassel.styleId,
+  '규칙은 남은 suffix를 기준으로 맞춘다',
+)
+
+const mainOverrideSource = row({
+  rowNumber: 9404,
+  productName: '본품별 가방',
+  itemName: '추가옵션',
+})
+const mainOverrideOther = row({
+  rowNumber: 9405,
+  productName: '다른 본품 가방',
+  itemName: '추가옵션',
+})
+const unconfirmedSource = row({
+  rowNumber: 9406,
+  productName: '미확정 가방',
+  itemName: '추가옵션',
+})
+const mainOverrideProduct = transformInvoiceProductNames(
+  [mainOverrideSource, mainOverrideOther, unconfirmedSource],
+  [
+    lookupMap('pmap-main-1', mainOverrideSource.productName, bag),
+    lookupMap('pmap-main-2', mainOverrideOther.productName, otherBag),
+  ],
+  catalogFromStyles([bag, otherBag, strap, tassel]),
+)
+const mainOverrideItem = transformInvoiceItemNames(
+  [mainOverrideSource, mainOverrideOther, unconfirmedSource],
+  [],
+  mainOverrideProduct.rows,
+  [
+    itemNameRule({
+      id: 'rule-global-comp',
+      itemName: '추가옵션',
+      action: 'components',
+      components: [ruleComponent('rule-global-comp', strap, 'included')],
+    }),
+    itemNameRule({
+      id: 'rule-main-comp',
+      itemName: '추가옵션',
+      scope: 'main_style',
+      mainStyle: bag,
+      action: 'components',
+      components: [
+        ruleComponent('rule-main-comp', tassel, 'required', 2, 0),
+        ruleComponent('rule-main-comp', strap, 'included', 1, 1),
+      ],
+    }),
+  ],
+)
+assert(
+  mainOverrideItem.rows[0]?.status === 'mapped' &&
+    mainOverrideItem.rows[0]?.ruleId === 'rule-main-comp' &&
+    mainOverrideItem.rows[0]?.transformedItemName ===
+      `${tassel.name}×2 + ${strap.name}`,
+  '본품별 규칙이 공통 규칙보다 우선하고 수량 공식명을 만든다',
+)
+assert(
+  mainOverrideItem.rows[1]?.ruleId === 'rule-global-comp' &&
+    mainOverrideItem.rows[1]?.transformedItemName === strap.name,
+  '다른 본품은 공통 규칙을 쓴다',
+)
+assert(
+  mainOverrideItem.rows[2]?.status === 'mapped' &&
+    mainOverrideItem.rows[2]?.ruleId === 'rule-global-comp' &&
+    mainOverrideItem.rows[2]?.productStyle === null,
+  '본품 미확정 행에는 본품별 규칙을 쓰지 않고 공통 규칙을 쓴다',
+)
+
+const compatSource = row({
+  rowNumber: 9407,
+  productName: product,
+  itemName: '호환옵션',
+})
+const compatProduct = transformInvoiceProductNames(
+  [compatSource],
+  [lookupMap('pmap-compat', product, bag)],
+  catalogFromStyles([bag, charm]),
+)
+const compatMap = optionMap({
+  id: 'map-compat',
+  productName: product,
+  itemName: '호환옵션',
+  displayItemName: '예전 변환명',
+  components: [
+    component('map-compat', bag, 'main'),
+    component('map-compat', charm, 'paid_add'),
+  ],
+})
+const compatItem = transformInvoiceItemNames(
+  [compatSource],
+  [compatMap],
+  compatProduct.rows,
+  [],
+)
+assert(
+  compatItem.rows[0]?.status === 'mapped' &&
+    compatItem.rows[0]?.transformedItemName === '예전 변환명' &&
+    compatItem.rows[0]?.extras[0]?.style.styleId === charm.styleId,
+  '신규 규칙이 없으면 기존 조합 원장을 그대로 쓴다',
+)
+
+const mergeSource = row({
+  rowNumber: 9408,
+  productName: product,
+  itemName: '병합옵션',
+  quantity: '2',
+})
+const mergeProduct = transformInvoiceProductNames(
+  [mergeSource],
+  [lookupMap('pmap-merge', product, bag)],
+  catalogFromStyles([bag, strap, tassel, charm]),
+)
+const mergeMap = optionMap({
+  id: 'map-merge',
+  productName: product,
+  itemName: '병합옵션',
+  components: [
+    component('map-merge', bag, 'main'),
+    component('map-merge', tassel, 'included', 3),
+    component('map-merge', charm, 'paid_add'),
+  ],
+})
+const mergeItem = transformInvoiceItemNames(
+  [mergeSource],
+  [mergeMap],
+  mergeProduct.rows,
+  [
+    itemNameRule({
+      id: 'rule-merge',
+      itemName: '병합옵션',
+      action: 'components',
+      components: [ruleComponent('rule-merge', tassel, 'required', 2)],
+    }),
+  ],
+)
+assert(
+  mergeItem.rows[0]?.transformedItemName === `${tassel.name}×2` &&
+    mergeItem.rows[0]?.extras.map((item) => item.style.styleId).join(',') ===
+      `${tassel.styleId},${charm.styleId}` &&
+    mergeItem.rows[0]?.extras[0]?.quantity === 2,
+  '같은 M번호 구성품은 한 번만 유지하고 규칙 수량을 쓴다',
+)
+const mergeOutput = buildInvoiceOutputRows({
+  transformedRows: mergeProduct.rows.map((item) => ({
+    source: item.source,
+    transformedName: item.transformedProductName,
+    status: 'renamed',
+    matchedRuleId: item.mapId,
+  })),
+  workMatches: new Map(),
+  giftRowsBySource: new Map(),
+  productTransformation: mergeProduct,
+  itemTransformation: mergeItem,
+})
+const mergeOrders = mergeOutput.filter((item) => item.kind === 'order')
+assert(mergeOrders.length === 3, '규칙 구성품과 기존 세트를 합쳐 CJ 행을 펼친다')
+assert(
+  mergeOrders.every((line) => line.finalItemName === `${tassel.name}×2`),
+  '모든 구성행에 같은 최종 내품명을 복사한다',
+)
+assert(mergeOrders[0]?.finalProductName === bag.name, '1행 본품')
+assert(mergeOrders[1]?.finalProductName === tassel.name, '2행 규칙 구성품')
+assert(mergeOrders[2]?.finalProductName === charm.name, '3행 기존 세트 구성품')
+assert(mergeOrders[1]?.quantity === '4', '규칙 수량 2 × 주문 2')
+
+const blankStill = transformInvoiceItemNames(
+  [row({ rowNumber: 9409, productName: product, itemName: '' })],
+  [],
+  transformInvoiceProductNames(
+    [row({ rowNumber: 9409, productName: product, itemName: '' })],
+    [lookupMap('pmap-blank-rule', product, bag)],
+    catalogFromStyles([bag]),
+  ).rows,
+  [
+    itemNameRule({
+      id: 'rule-blank',
+      itemName: '',
+      action: 'delete',
+    }),
+  ],
+)
+assert(
+  blankStill.rows[0]?.status === 'consumed' &&
+    blankStill.unresolvedCombos.length === 0 &&
+    blankStill.deletedRowCount === 0,
+  '처음부터 빈 내품명은 규칙을 보지 않고 검토에서 뺀다',
 )
 
 console.log('option-maps verify ok')

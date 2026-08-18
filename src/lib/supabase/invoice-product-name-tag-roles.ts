@@ -15,6 +15,7 @@ const COLUMNS =
   'id, brand_id, tag_text, normalized_tag, role, is_active, note, created_at, updated_at'
 const PAGE_SIZE = 1000
 const ROLES = new Set<InvoiceProductNameTagRole>([
+  'product_composition',
   'event_marketing',
   'composition_gift',
   'identity_condition',

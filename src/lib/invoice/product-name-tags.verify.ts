@@ -72,7 +72,8 @@ assert(tagRoleKey('[단독]') === normalizeInvoiceText('[단독]'), '단독은 e
 assert(suggestTagRole('[8/21예약배송]') === 'event_marketing', '예약배송 추천')
 assert(suggestTagRole('[1+1]') === 'event_marketing', '1+1 추천')
 assert(suggestTagRole('[비치볼 증정]') === 'composition_gift', '증정 추천')
-assert(suggestTagRole('[태슬1개 포함]') === 'composition_gift', '포함 추천')
+assert(suggestTagRole('[태슬1개 포함]') === 'product_composition', '포함 구성 추천')
+assert(suggestTagRole('[SET]') === 'product_composition', 'SET 구성 추천')
 assert(suggestTagRole('[리퍼브]') === 'identity_condition', '리퍼브 추천')
 assert(suggestTagRole('[생일/응원/축하]') === 'unknown', '불확실 태그는 미분류')
 
@@ -105,14 +106,14 @@ assert(
 )
 
 const mixed = matchingProductName(
-  '[단독][태슬1개 포함][리퍼브] 베이직 파우치',
+  '[SET][단독][리퍼브] 베이직 파우치',
   [
+    role('[SET]', 'product_composition'),
     role('[단독]', 'event_marketing'),
-    role('[태슬1개 포함]', 'composition_gift'),
     role('[리퍼브]', 'identity_condition'),
   ],
 )
-assert(mixed === '[리퍼브] 베이직 파우치', '행사·구성만 제외하고 특징은 유지')
+assert(mixed === '[SET] 베이직 파우치', '상품 구성만 남기고 행사·특징은 제외')
 
 const original = generateProductNameCandidates({
   productName: '[단독] 마스마룰즈 래빗에코백 32타입',
@@ -124,8 +125,17 @@ const stripped = generateProductNameCandidates({
   matchingProductName: '마스마룰즈 래빗에코백 32타입',
 })
 assert(
-  original[0]?.text === '[단독] 마스마룰즈 래빗에코백 32타입 Color: 트로피칼',
-  '원문 후보가 먼저',
+  original[0]?.rule === 'product' &&
+    original[0]?.text === '[단독] 마스마룰즈 래빗에코백 32타입',
+  '첫 후보는 품목명 단독',
+)
+assert(
+  original.some(
+    (item) =>
+      item.rule === 'product_item' &&
+      item.text === '[단독] 마스마룰즈 래빗에코백 32타입 Color: 트로피칼',
+  ),
+  '원문 결합 후보를 유지',
 )
 assert(
   stripped.some(
@@ -182,6 +192,13 @@ assert(
   compactProductNameKey('[리퍼브] String flap backpack') ===
     '리퍼브stringflapbackpack',
   '특징 태그는 압축 키에 내용이 남음',
+)
+assert(
+  compactProductNameKey(
+    '[SET] Daily backpack_Black &amp; Strap pouch_Leopard',
+  ) ===
+    compactProductNameKey('[SET] Daily backpack_Black & Strap pouch_Leopard'),
+  'HTML 엔티티와 원문 기호는 같은 압축 키',
 )
 
 console.log('product-name-tags verify: ok')

@@ -5,6 +5,7 @@ import type {
   InvoiceNameTransformRow,
 } from '@/lib/invoice/name-transform'
 import type { InvoiceOptionTransformation } from '@/lib/invoice/option-transform'
+import { resolveInvoiceOutputBundle } from '@/lib/invoice/option-transform'
 import type { InvoiceProductNameTransformation } from '@/lib/invoice/product-name-transform'
 import { productNameTransformationToName } from '@/lib/invoice/product-name-transform'
 import type {
@@ -23,14 +24,39 @@ export type InvoiceOutputRow = SabangnetOrderRow & {
   kind: InvoiceOutputKind
   /** 최종 송장에 쓸 품목명(본품 공식명) */
   finalProductName: string
-  /** 최종 송장에 쓸 내품명. 승인된 내품명 규칙이 없으면 원문 */
+  /** 최종 송장에 쓸 내품명. 지우기·소비면 빈칸, 구성품 규칙이면 공식명 조합 */
   finalItemName: string
   sourceRowNumber: number
+}
+
+function canExpandInvoiceBundle(options: {
+  productStatus?: string
+  itemStatus?: string
+  optionStatus?: string
+}) {
+  if (
+    options.productStatus === 'conflict' ||
+    options.productStatus === 'unresolved' ||
+    options.productStatus === 'missing_style'
+  ) {
+    return false
+  }
+  if (options.itemStatus === 'conflict' || options.itemStatus === 'unresolved') {
+    return false
+  }
+  if (
+    options.optionStatus === 'conflict' ||
+    options.optionStatus === 'unresolved'
+  ) {
+    return false
+  }
+  return true
 }
 
 /**
  * 품목명 단계 결과와 내품명 단계 결과를 마지막에만 합친다.
  * 한 단계의 실패가 다른 열을 되돌리거나 비우지 않는다.
+ * 추가 구성품이 있으면 원본 고객정보를 복사한 CJ 행을 구성품 수만큼 펼친다.
  */
 export function buildInvoiceOutputRows(options: {
   transformedRows: InvoiceNameTransformRow[]
@@ -39,6 +65,8 @@ export function buildInvoiceOutputRows(options: {
   optionTransformation?: InvoiceOptionTransformation | null
   productTransformation?: InvoiceProductNameTransformation | null
   itemTransformation?: InvoiceItemNameTransformation | null
+  /** false면 구성품만 펼치고 내품명은 아직 원문을 유지한다. */
+  applyItemName?: boolean
 }): InvoiceOutputRow[] {
   const output: InvoiceOutputRow[] = []
   let nextRowNumber = 1
@@ -72,26 +100,49 @@ export function buildInvoiceOutputRows(options: {
       option?.transformedName ||
       transformed.transformedName ||
       source.productName
-    const finalProductName = work
-      ? applyWorkInstructionLabel(work.labelText, baseName)
-      : baseName
-    const finalItemName = item
-      ? item.transformedItemName
-      : option
-        ? option.transformedItemName
-        : source.itemName
-
-    output.push({
-      ...source,
-      rowNumber: nextRowNumber,
-      kind: 'order',
-      finalProductName,
-      finalItemName,
-      productName: finalProductName,
-      itemName: finalItemName,
-      sourceRowNumber: source.rowNumber,
+    const effectiveItemName = product?.effectiveItemName ?? source.itemName
+    const finalItemName =
+      item?.status === 'consumed' || item?.status === 'deleted'
+        ? ''
+        : options.applyItemName === false
+          ? effectiveItemName
+          : item
+            ? item.transformedItemName
+            : option
+              ? option.transformedItemName
+              : effectiveItemName
+    const extras = item?.extras ?? option?.extras ?? []
+    const main = product?.style ?? item?.productStyle ?? option?.main ?? null
+    const expandable = canExpandInvoiceBundle({
+      productStatus: product?.status,
+      itemStatus: item?.status,
+      optionStatus: option?.status,
     })
-    nextRowNumber += 1
+    const lines = resolveInvoiceOutputBundle({
+      sourceQuantity: source.quantity,
+      baseName,
+      main,
+      extras,
+      expandable,
+    })
+
+    for (const line of lines) {
+      const finalProductName = work
+        ? applyWorkInstructionLabel(work.labelText, line.productName)
+        : line.productName
+      output.push({
+        ...source,
+        quantity: line.quantity,
+        rowNumber: nextRowNumber,
+        kind: 'order',
+        finalProductName,
+        finalItemName,
+        productName: finalProductName,
+        itemName: finalItemName,
+        sourceRowNumber: source.rowNumber,
+      })
+      nextRowNumber += 1
+    }
 
     const gifts = options.giftRowsBySource.get(source.rowNumber) ?? []
     for (const gift of gifts) {
@@ -168,6 +219,9 @@ export function buildInvoiceStepSnapshot(options: {
     options.stage === 'item' ||
     options.stage === 'transform'
   const includeItem = options.stage === 'item' || options.stage === 'transform'
+  // 품목명 카드에서 함께 저장한 세트 구성은 품목명 단계 스냅샷부터 펼친다.
+  // 내품명 문자열 변환 자체는 기존처럼 내품명 단계부터 적용한다.
+  const includeBundle = includeProduct
   const transformation = includeProduct
     ? options.productTransformation
       ? productNameTransformationToName(options.productTransformation)
@@ -201,8 +255,9 @@ export function buildInvoiceStepSnapshot(options: {
     productTransformation: includeProduct
       ? options.productTransformation
       : null,
-    itemTransformation: includeItem ? options.itemTransformation : null,
+    itemTransformation: includeBundle ? options.itemTransformation : null,
     optionTransformation: includeItem ? options.optionTransformation : null,
+    applyItemName: includeItem,
   })
 }
 

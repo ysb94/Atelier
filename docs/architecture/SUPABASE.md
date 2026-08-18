@@ -41,6 +41,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 송장 품목명 exact 기준(`invoice_product_name_maps`) | Supabase |
 | 송장 품목명 태그 역할 사전(`invoice_product_name_tag_roles`) | Supabase |
 | 송장 내품명·출고구성 기준(`invoice_option_maps` + `invoice_option_map_components`) | Supabase |
+| 송장 내품명 공통·본품별 규칙(`invoice_item_name_rules` + `invoice_item_name_rule_components`) | Supabase |
 | 송장 사은품 증정 요청 건(`invoice_prefix_requests` + `invoice_prefix_items` + `invoice_prefix_item_products`, 앱 모델명 Gift) | Supabase |
 | 송장 사은품 선착순 한도·배정 원장(`invoice_prefix_requests` 한도 필드 + `invoice_gift_quotas` + `invoice_gift_allocations`) | Supabase |
 | 송장 작업 지시(`invoice_work_instructions` + `invoice_work_instruction_items`) | Supabase |
@@ -170,7 +171,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 ### 송장 품목명 exact 기준
 
 - `invoice_product_name_maps`는 사방넷 원본 품목명(+내품명 문맥)을 본품 `styles.id`로만
-  연결한다. 내품명 문자열을 출력하거나 구성품을 만들지 않는다.
+  연결한다. 내품명 문자열을 출력하지 않는다. 세트 구성품은 같은 화면에서
+  `invoice_option_maps`에 따로 저장한다.
 - 키는 두 가지다. 조합 키는
   `(brand_id, normalized_mall_name, normalized_product_name, normalized_item_name_context)`,
   기존 원장 키는 `lookup_key` 한 열이며 `(brand_id, normalized_lookup_key)`가 unique다.
@@ -181,34 +183,39 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   연결하고 공식 명칭은 조인한 현재 `styles.name`을 쓴다. 상품명이 바뀌어도 원장을
   고치지 않는다. 예전 `변경전 / 변경후` 공식명 원장도 호환용으로 계속 읽는다.
   양식에 `작성안내`와 `조회키만드는법` 시트를 함께 넣는다.
+- `현재 원장 내려받기`는 DB에 실제 저장된 활성·중지 기준을 모두 내리고, 현재
+  `styles.style_no`·`styles.name`과 활성 상태를 함께 적어 등록 여부를 확인하게 한다.
 - 쇼핑몰·내품명 열이 있는 원장이나 사례집은 조합 방식으로 읽는다. 한 파일에 `조회 키`를
   채운 행과 비운 행이 섞여도 행마다 갈라 처리한다.
 - 조회 키와 본품은 1:1이다. 한 키가 두 `styles.id`를 가리키면 unique 인덱스가 막고,
   가져오기에서는 충돌로 남긴다. 서로 다른 키가 같은 본품을 가리키는 것은 허용한다.
-- 후보 문자열은 `src/lib/invoice/product-name-patterns.ts`가 시트 수식과 같은 순서로
-  만든다. 내품명 구간은 괄호를 보지 않고 항상 첫 구분자에서만 자른다. 원문 품목명
-  후보를 먼저 만들고, 저장된 태그 역할이 행사·구성이면 그 태그를 뺀 품목명 후보를
-  뒤에 추가한다.
-  1. `품목명 + " " + 내품명 전체`
-  2. `품목명 + " " + 내품명 첫 / 앞`
-  3. `품목명 + " " + 내품명 첫 , 앞`
-  4. `품목명 + " " + "Color: 값"` (`Color:` 라벨을 키에 남긴다)
-  5. `품목명 + " " + 내품명 첫 : 앞`
-  6. `내품명 첫 / 앞` 단독
-  7. `내품명 첫 , 앞` 단독
-  8. `내품명 전체` 단독 — `Color:` 같은 원장 키 라벨도 보존한다
-  9. `옵션값` 단독 — 첫 `:` 뒤 값
-  10. `내품명 첫 / 뒤` 단독 — 쇼핑몰명에 `SSG`나 `쓱`이 있을 때만 만든다
-  11. 자체상품코드(보조 힌트, 수식에는 없다)
-- 2~5번 열은 구분자가 없으면 IFERROR로 품목명 단독이 된다. 그래서 `품목명` 단독은
-  구분자를 못 찾은 첫 열의 자리에서만 조회 키가 된다. 네 열이 모두 구분자를 찾으면
-  품목명 단독은 조회하지 않는다. 6~8번은 실패하면 빈 값이라 건너뛴다.
-- 매칭 순서는 조합 exact → 전쇼핑몰 조합 → 후보 순서대로 `lookup_key` → 후보 순서대로
-  `styles.name`이다. 왼쪽 후보가 먼저 맞으면 그 값이 정답이다. 후보가 하나여도 기준을
+- 후보 문자열은 `src/lib/invoice/product-name-patterns.ts`가 아래 순서로 만든다.
+  내품명 구간은 괄호를 보지 않고 항상 첫 구분자에서만 자른다. 원문 품목명 후보를
+  먼저 만들고, 저장된 태그 역할이 상품 구성이 아니면 그 태그를 뺀 품목명 후보를
+  뒤에 추가한다. 비교 키는 HTML 엔티티를 푼 뒤 NFKC·소문자화하고 공백·특수기호를
+  제거한 압축 키다. 조회 키 원장과 조합 원장에 같은 우선순위를 적용한다.
+  1. 자체상품코드
+  2. `품목명` 단독
+  3. `품목명 + " " + 내품명 전체`
+  4. `품목명 + " " + 내품명 첫 / 앞`
+  5. `품목명 + " " + 내품명 첫 , 앞`
+  6. `품목명 + " " + "Color: 값"` (`Color:` 라벨을 키에 남긴다)
+  7. `품목명 + " " + 내품명 첫 : 앞`
+  8. `내품명 첫 / 앞` 단독
+  9. `내품명 첫 , 앞` 단독
+  10. `내품명 전체` 단독
+- 옵션값 단독·SSG `/` 뒷부분은 오탐이 커서 자동 후보로 만들지 않는다. 8·9번은
+  구분자 앞·뒤가 모두 있을 때만 만든다. 왼쪽 후보가 먼저 맞으면 그 값이 정답이다.
+  같은 압축 키가 서로 다른 M번호를 가리키면 충돌로 남긴다. 후보가 하나여도 기준을
   자동 저장하지 않는다.
-- 품목명을 포함하지 않은 내품명 단독 후보(6~10번)가 `lookup_key`와 exact 매칭되면
-  내품명을 본품 식별에 소비한 것으로 표시하고 내품명 단계에서 최종 값을 비운다.
-  원장 미일치·충돌 또는 `styles.name` 직접 후보만 맞은 경우에는 원문을 유지한다.
+- 8·9번이 품목명 원장과 맞으면 사용한 앞부분과 구분자를 소비하고 남은 suffix를
+  내품명 단계 입력으로 넘긴다. 10번 내품명 전체가 `lookup_key`와 맞으면 본품을
+  확정하고 내품명을 빈 값으로 소비한다. 품목명과 결합된 후보나 `styles.name` 직접
+  후보는 내품명을 바꾸지 않는다. 전체 소비된 행은 내품명 검토 목록에 나타나지
+  않는다.
+- 제품군·색상·사이즈를 분해해 짜맞추는 매칭은 쓰지 않는다. 색상 토큰 하나만 걸려도
+  다른 상품을 확정해 오탐이 잦았다. 그 자리는 AI 추천이 맡고, 확정은 원장 등록으로만
+  한다.
 - 공식명 후보가 `styles`에 없으면 `M번호 발급 필요`, 둘 이상이면 충돌, 고를 수 없으면
   검토 필요로 남긴다.
 - RLS는 `app.can_read_brand` / `app.can_edit_brand`를 사용한다.
@@ -225,41 +232,79 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - `[8/21예약배송]`, `[8/21 예약배송]`, `[8월 21일 예약배송]`은 같은 예약배송
   계열이다. 한 번 역할을 저장하면 다른 날짜에도 재사용한다. 예전 exact 행
   (`[8/14예약배송]`)도 같은 계열로 읽는다. 원문 태그는 덮어쓰지 않는다.
-- 역할은 네 가지로 고정한다.
-  - `event_marketing`: 행사·마케팅. 상품 인식 후보에서 제외한다.
-  - `composition_gift`: 증정·포함·구성. 상품 인식 후보에서 제외하고 메타데이터로만
+- 역할은 다섯 가지다.
+  - `product_composition`: `[SET]`·세트·실제 포함 구성. 상품 인식 비교에 남긴다.
+  - `event_marketing`: 행사·마케팅·예약배송. 상품 인식 후보에서 제외한다.
+  - `composition_gift`: 증정·사은. 상품 인식 후보에서 제외하고 메타데이터로만
     보존한다. 출고구성·사은품·작업 지시와 연결하지 않는다.
-  - `identity_condition`: 리퍼브 등 상품 특징·상태. 상품 인식에 유지한다.
-  - `unknown`: 미분류. 자동으로 제외하지 않는다.
-- 예약배송·`1+1`·증정·포함·리퍼브 같은 휴리스틱은 화면 추천에만 쓴다. 사용자가
+  - `identity_condition`: 리퍼브 등 상품 특징·상태. 상품 인식 후보에서 제외한다.
+  - `unknown`: 미분류. 사용자가 역할을 저장하기 전에는 원문을 유지한다.
+- 예약배송·`1+1`·증정·세트·리퍼브 같은 휴리스틱은 화면 추천에만 쓴다. 사용자가
   역할을 저장하기 전에는 매칭에 반영하지 않는다.
-- 매칭 순서는 원문 exact 조합 → 기존 원문 원장 → 역할 반영 후보다. 서로 다른
+- 매칭은 압축 키 우선순위 후보로 조회 키 원장과 조합 원장을 함께 본다. 서로 다른
   상품이 맞으면 자동 확정하지 않고 충돌로 남긴다.
 - RLS는 `app.can_read_brand` / `app.can_edit_brand`를 사용한다.
 - 로직: `src/lib/invoice/product-name-tags.ts`.
   저장소: `src/lib/supabase/invoice-product-name-tag-roles.ts`.
-- 마이그레이션: `20260814035922_invoice_product_name_tag_roles.sql`,
-  `20260814041855_invoice_product_name_tag_role_family.sql`.
+-   마이그레이션: `20260814035922_invoice_product_name_tag_roles.sql`,
+  `20260814041855_invoice_product_name_tag_role_family.sql`,
+  `20260818090000_invoice_product_name_tag_product_composition.sql`.
+
+### 송장 내품명 공통·본품별 규칙
+
+- `invoice_item_name_rules`는 품목명 단계가 소비하고 남은 유효 내품명을 지우거나
+  출고 구성품 M번호로 연결한다. 쇼핑몰·원본 품목명은 보지 않는다.
+- `scope`는 `global`(브랜드 전체 공통) 또는 `main_style`(확정 본품 `styles.id`별)이다.
+  본품이 아직 확정되지 않은 행에는 `main_style` 규칙을 적용하지 않는다.
+- `action`은 `delete`(최종 내품명 빈칸, 구성품 없음) 또는 `components`(구성품
+  M번호·역할·수량을 저장 순서대로 연결)다. 구성품 모드의 최종 내품명은 각 구성품의
+  최신 `styles.name`을 `공식명×수량 + 공식명` 형식으로 붙인다. 수량 1은 `×1`을 쓰지
+  않는다.
+- 적용 우선순위는 `본품별 규칙 → 공통 규칙 → 기존 invoice_option_maps → 원문 유지`다.
+  기존 7개 `invoice_option_maps` 행은 백필하지 않고 dual-read로만 읽는다.
+- 구성품 규칙은 기존 세트 구성품과 병합한다. 같은 M번호가 겹치면 한 번만 출고하고
+  규칙 쪽 수량을 쓴다. 펼친 CJ 행과 출고구성 XLSX의 관련 구성행에는 같은 최종
+  내품명을 복사한다.
+- 처음부터 빈 내품명과 품목명 단계에서 전체를 소비한 내품명은 규칙을 보지 않고
+  검토 목록에서 뺀다.
+- 활성 공통 규칙은 `(brand_id, normalized_item_name)`, 활성 본품별 규칙은
+  `(brand_id, main_style_id, normalized_item_name)`에서 하나만 허용한다.
+- RLS는 `app.can_read_brand` / `app.can_edit_brand`를 사용한다.
+- 마이그레이션: `20260818120000_invoice_item_name_rules.sql`.
 
 ### 송장 내품명·출고구성 기준
 
-- `invoice_option_maps`는 내품명 단계에서만 사용한다. 품목명 원장을 이 테이블에 섞지
-  않는다. 주문 원본과 수령인 개인정보는 저장하지 않는다.
+- `invoice_option_maps`는 품목명·내품명 단계에서 출고구성을 저장한다. 품목명 원장
+  (`invoice_product_name_maps`)은 대표 본품 1개만 두고, 복수 M번호는 이 테이블의
+  구성품으로 저장한다. 신규 내품명 규칙이 있으면 그 규칙이 우선한다. 주문 원본과
+  수령인 개인정보는 저장하지 않는다.
 - 구성은 `invoice_option_map_components.style_id`로만 연결한다. 역할은 `main`(본품 1개),
   `included`(기본포함), `required`(필수옵션), `paid_add`(유료추가)다. 수량은 주문 1행당
-  구성 수이고, 출고 확인 파일에서는 내품수량과 곱한다.
+  구성 수이고, 최종 CJ 수량과 출고구성 수량은 모두 `내품수량 × 구성 수량`이다.
 - `display_item_name`이 있을 때만 CJ 내품명을 바꾼다. 비우면 원문을 유지하며 `-`나
-  `포함:M번호...`로 덮지 않는다. 예외적으로 품목명 원장의 내품명 단독 조회 키가
-  exact 매칭된 행은 본품 식별에 소비된 내품명을 빈 값으로 확정한다.
+  `포함:M번호...`로 덮지 않는다. 품목명 원장이 내품명 전체 단독으로 본품을 확정한
+  행만 내품명을 비운다. 원본·유효 내품명이 처음부터 비어 있으면 빈칸으로 통과하고
+  검토 목록에 넣지 않는다. 내품명 `/`·`,` 앞부분 단독으로 맞춘 행은 남은 suffix를
+  내품명 기준으로 쓰고, 없으면 원문 조합 원장을 fallback한다. 세트 구성 저장만으로는
+  내품명을 바꾸거나 비우지 않는다.
 - unique는 `(brand_id, normalized_mall_name, normalized_product_name, normalized_item_name)`이다.
   쇼핑몰명을 비우면 모든 쇼핑몰에 적용한다. 자체상품코드는 참고용이며 단독 정답이 아니다.
-- 매칭은 쇼핑몰+품목+내품 exact-match, 없으면 전쇼핑몰+품목+내품이다. 승인된 규칙이 없으면
-  원문 유지/검토 필요로 남긴다.
-- 같은 원본 주문 행은 CJ 13열에서도 한 줄이다. 품목명은 품목명 단계 결과, 내품명은 내품명
-  단계 결과를 마지막에만 합친다. 구성품을 별도 송장 행으로 만들지 않는다. M번호별
-  출고구성은 별도 XLSX다.
+- 매칭은 쇼핑몰+품목+내품 exact-match, 없으면 전쇼핑몰+품목+내품이다. 승인된
+  `display_item_name`이 없으면 원문 유지/검토 필요로 남긴다. 처음부터 비어 있는
+  내품명은 예외로 빈칸 통과한다. 구성만 저장된 기준은 세트 행 확장에만 쓰고
+  내품명 완료로 보지 않는다. 빈 내품명에 구성만 있으면 구성은 펼치고 검토는 생략한다.
+- 일반 상품은 원본 주문 1행이 CJ 13열 1행이다. 추가 구성품이 있으면 본품 다음에
+  구성품 저장 순서대로 행을 펼친다. 각 행은 수령인·주소·전화·주문번호 등 원본
+  13열을 복사하고, 품목명만 해당 M번호의 현재 공식명으로 바꾼다. 변환된 내품명은
+  모든 구성행에 동일하게 복사한다. 사은품은 그 세트 블록 뒤에 한 번만 삽입한다.
+  M번호별 출고구성 XLSX도 같은 수량 규칙을 쓴다.
+- `품목명 변환` 단계 스냅샷부터 저장된 구성품을 여러 행으로 펼친다. 내품명 전체로
+  본품을 찾아 소비한 행은 이 단계부터 내품명을 비우고, 앞부분만 소비한 행은 suffix를
+  보여 주며, 나머지는 원문을 유지한다. `내품명 변환` 단계부터 승인된 변환 내품명을
+  모든 구성행에 적용한다.
 - RLS는 `app.can_read_brand` / `app.can_edit_brand`를 사용한다.
 - 마이그레이션: `20260813180000_invoice_option_maps.sql`,
+  `20260818120000_invoice_item_name_rules.sql`,
   `20260813190000_invoice_product_name_maps.sql`,
   `20260813200000_invoice_product_name_lookup_key.sql`.
 
@@ -281,6 +326,19 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `app.invalidate_ai_recommendation_cache(brand_id)`를 쓴다.
 - `ai_usage_logs`는 토큰, `resolution_source`, 캐시 적중, AI 생략 여부를
   남긴다. 프롬프트·응답 원문과 주문자 개인정보는 저장하지 않는다.
+- 본품 확인 화면의 `AI 추천 일괄 검토`는 추천을 모으는 단계와 원장에 쓰는
+  단계를 나눈다. `추천 모으기`는 남은 내품명을 순회해 추천 1순위를 목록으로만
+  만들고 원장을 건드리지 않는다. 사람이 목록에서 고른 항목만 `등록`으로
+  저장한다. AI가 스스로 원장을 바꾸는 경로는 두지 않는다.
+- 확실도 `decision_config.high` 이상이면 기본 선택하고, 미만이면 선택을 풀어
+  둔 채 보여준다. 사람이 직접 체크하면 미달 항목도 등록할 수 있고 그때는
+  검토 사유에 남긴다. 추천을 못 받은 항목은 이유와 함께 목록 밖에 남긴다.
+- 한 번의 등록에서 같은 조회 키는 한 번만 저장해 원장 중복을 막는다. 목록에도
+  중복을 표시하고 기본 선택에서 뺀다.
+- 추천은 펼친 그룹에서만 계산되므로 최종 품목명에 곧바로 흘려보내지 않는다.
+  출력은 언제나 원장에 등록된 값만 쓰고, 등록은 사람이 승인한 일괄 검토나
+  개별 `등록`을 거친다. 등록 내역은 최근 저장 목록에서 되돌릴 수 있다.
+  로직: `src/features/logistics/useInvoiceProductNameBulkAiApply.ts`.
 - 유사 후보는 `app.search_invoice_product_candidates_core`가 브랜드 권한을
   한 번만 검사한 뒤 exact → 원장 trigram → 상품명 trigram 순으로 고른다.
   `public.search_invoice_product_candidates`는 기존 시그니처의 래퍼다.
@@ -379,15 +437,20 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 
 1. 원본 품목명으로 사은품 적격·배정과 작업 지시 매칭을 확정한다.
    선착순이면 기존 원장을 재사용하고 잔여 한도 안에서만 이번 예정을 계산한다.
-2. 품목명 단계에서만 원본 품목명을 본품 공식명으로 바꾼다. 내품명은 글자 단위로
-   통과한다. 미등록 조합은 품목명 검토 목록에만 나타난다.
-3. 내품명 단계는 확정된 본품과 원본 내품명으로 표시명·출고구성을 계산한다.
-   승인된 규칙이 없으면 원문을 유지한다. 품목명 규칙만으로 내품명을 바꾸지 않는다.
+2. 품목명 단계에서만 원본 품목명을 본품 공식명으로 바꾼다. 내품명 `/`·`,` 앞부분
+   단독으로 본품을 찾은 행은 앞부분을 소비하고 남은 옵션을 내품명 단계로 넘긴다.
+   내품명 전체 단독으로 본품을 찾은 행은 내품명을 빈 값으로 소비한다. 그 외 후보는
+   내품명 원문을 유지한다. 미등록 조합은 품목명 검토 목록에만 나타난다.
+3. 내품명 단계는 확정된 본품과 유효 내품명으로 표시명·출고구성을 계산한다.
+   우선순위는 본품별 규칙 → 공통 규칙 → 기존 `invoice_option_maps` → 원문 유지다.
+   지우기 규칙은 내품명을 비우고, 구성품 규칙은 최신 공식명 조합을 쓴다. 품목명
+   단계에서 전체를 소비한 내품명과 처음부터 빈 내품명은 빈 값으로 두고 검토
+   목록에 넣지 않는다. 세트 구성만으로는 내품명을 바꾸거나 비우지 않는다.
    사은품 행(`kind = gift`)은 미변환 목록에서 제외한다.
-4. 다운로드 직전에 선착순 신규 배정을 원자 확정한 뒤, 주문 행의 최종 품목명 앞에
-   작업 지시 문구를 붙이고 그 행 바로 뒤에 배정된 사은품 행을 순서대로 삽입한다.
-   CJ 13열과 M번호 출고구성 XLSX를 따로 내려받는다. 한 단계의 실패가 다른 열을
-   되돌리거나 비우지 않는다.
+4. 다운로드 직전에 선착순 신규 배정을 원자 확정한 뒤, 세트면 구성품별 CJ 행을
+   펼치고 각 상품 행의 최종 품목명 앞에 작업 지시 문구를 붙인다. 사은품은 그
+   세트 블록 뒤에 순서대로 삽입한다. CJ 13열과 M번호 출고구성 XLSX를 따로
+   내려받는다. 한 단계의 실패가 다른 열을 되돌리거나 비우지 않는다.
 
 - 로직: `src/lib/invoice/prefix-transform.ts`, `gift-assign.ts`,
   `gift-confirm.ts`, `work-instruction-transform.ts`, `product-name-patterns.ts`,
@@ -396,11 +459,13 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `prefix-paste.ts`.
   저장소: `invoice-prefix-requests.ts`, `invoice-gift-allocations.ts`,
   `invoice-work-instructions.ts`, `invoice-product-name-maps.ts`,
-  `invoice-product-name-tag-roles.ts`, `invoice-option-maps.ts`.
+  `invoice-product-name-tag-roles.ts`, `invoice-option-maps.ts`,
+  `invoice-item-name-rules.ts`.
   화면: `InvoicePrefixRequestPanel/Form`, `InvoiceWorkInstructionPanel/Form`,
   `InvoicePrefixStepPanel`, `InvoiceWorkInstructionStepPanel`,
   `InvoiceOptionMapRulesPanel`, `InvoiceProductNameTransformPanel`,
-  `InvoiceItemNameTransformPanel`, `InvoiceOutputStepPanel`.
+  `InvoiceItemNameTransformPanel`, `InvoiceItemNameRuleForm`,
+  `InvoiceOutputStepPanel`.
 - 마이그레이션: `20260812060000_create_invoice_prefix_rules.sql`,
   `20260812070000_restructure_invoice_prefix_requests.sql`,
   `20260812080000_invoice_prefix_request_period_to_minutes.sql`,
@@ -414,6 +479,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260813160000_work_instruction_period.sql`,
   `20260813170000_work_instruction_outgoing_products.sql`,
   `20260813180000_invoice_option_maps.sql`,
+  `20260818120000_invoice_item_name_rules.sql`,
   `20260813190000_invoice_product_name_maps.sql`,
   `20260813200000_invoice_product_name_lookup_key.sql`,
   `20260814035922_invoice_product_name_tag_roles.sql`,

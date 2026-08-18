@@ -526,7 +526,6 @@ async function completeOpenAi(
     },
     body: JSON.stringify({
       model: modelId,
-      temperature: 0.2,
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system', content: prompt.system },
@@ -592,7 +591,6 @@ async function completeGemini(
         systemInstruction: { parts: [{ text: prompt.system }] },
         contents: [{ role: 'user', parts: [{ text: prompt.user }] }],
         generationConfig: {
-          temperature: 0.2,
           responseMimeType: 'application/json',
         },
       }),

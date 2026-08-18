@@ -4,6 +4,10 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatNumber } from '@/lib/utils'
+import {
+  InvoiceOptionExtrasEditor,
+  type OptionExtraDraft,
+} from './InvoiceOptionExtrasEditor'
 import type {
   ProductMapHistoryEntry,
   ProductMapHistoryStatus,
@@ -44,6 +48,7 @@ export function InvoiceProductNameRecentSavesPanel({
     historyId: string
     lookupKey: string
     style: StyleRef
+    extras: OptionExtraDraft[]
   }) => void
   onUndo: (historyId: string) => Promise<void>
 }) {
@@ -52,6 +57,7 @@ export function InvoiceProductNameRecentSavesPanel({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editLookupKey, setEditLookupKey] = useState('')
   const [editStyle, setEditStyle] = useState<StyleRef | null>(null)
+  const [editExtras, setEditExtras] = useState<OptionExtraDraft[]>([])
   const [confirmUndoId, setConfirmUndoId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
 
@@ -84,6 +90,7 @@ export function InvoiceProductNameRecentSavesPanel({
     setEditingId(entry.id)
     setEditLookupKey(entry.lookupKey)
     setEditStyle(entry.style)
+    setEditExtras(entry.extras)
     setConfirmUndoId(null)
   }
 
@@ -91,6 +98,7 @@ export function InvoiceProductNameRecentSavesPanel({
     setEditingId(null)
     setEditLookupKey('')
     setEditStyle(null)
+    setEditExtras([])
   }
 
   return (
@@ -197,12 +205,21 @@ export function InvoiceProductNameRecentSavesPanel({
                           onChange={setEditStyle}
                           placeholder="본품 M번호"
                         />
+                        <InvoiceOptionExtrasEditor
+                          brandId={brandId}
+                          extras={editExtras}
+                          onChange={setEditExtras}
+                          compact
+                        />
                         <div className="flex flex-wrap gap-2">
                           <Button
                             type="button"
                             size="sm"
                             disabled={
-                              busy || !editLookupKey.trim() || !editStyle
+                              busy ||
+                              !editLookupKey.trim() ||
+                              !editStyle ||
+                              editExtras.some((item) => !item.style)
                             }
                             onClick={() => {
                               if (!editStyle || !editLookupKey.trim()) return
@@ -210,6 +227,7 @@ export function InvoiceProductNameRecentSavesPanel({
                                 historyId: entry.id,
                                 lookupKey: editLookupKey.trim(),
                                 style: editStyle,
+                                extras: editExtras,
                               })
                               cancelEdit()
                             }}
@@ -241,6 +259,30 @@ export function InvoiceProductNameRecentSavesPanel({
                             {formatStyleRef(entry.style)}
                           </span>
                         </p>
+                        {entry.extras.length > 0 ? (
+                          <p
+                            className="truncate"
+                            title={entry.extras
+                              .map((item) =>
+                                item.style
+                                  ? `${formatStyleRef(item.style)}×${item.quantity}`
+                                  : '',
+                              )
+                              .filter(Boolean)
+                              .join(', ')}
+                          >
+                            구성 ·{' '}
+                            <span className="text-foreground">
+                              {entry.extras
+                                .filter((item) => item.style)
+                                .map(
+                                  (item) =>
+                                    `${item.style!.styleNo}×${item.quantity}`,
+                                )
+                                .join(', ')}
+                            </span>
+                          </p>
+                        ) : null}
                       </div>
                     )}
 

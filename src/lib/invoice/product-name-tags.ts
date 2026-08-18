@@ -23,9 +23,11 @@ export type FileTagGroup = {
   examples: string[]
 }
 
+/** 상품 구성이 아닌 선행 태그는 비교 키에서 뺀다. 미분류는 저장 전까지 원문을 유지한다. */
 const STRIP_ROLES = new Set<InvoiceProductNameTagRole>([
   'event_marketing',
   'composition_gift',
+  'identity_condition',
 ])
 
 const DATE_THEN_RESERVATION =
@@ -113,8 +115,16 @@ export function extractLeadingBracketTags(productName: string): {
 /** UI 추천용. 저장 전에는 매칭에 쓰지 않는다. */
 export function suggestTagRole(tag: string): InvoiceProductNameTagRole {
   const normalized = normalizeInvoiceText(tag)
+  const inner = tagInner(normalized)
   if (/리퍼브|리퍼(?!브)|b급/.test(normalized)) return 'identity_condition'
-  if (/증정|포함/.test(normalized)) return 'composition_gift'
+  if (/증정/.test(normalized)) return 'composition_gift'
+  if (
+    /(?:^|[^가-힣])set(?:$|[^가-힣])/.test(inner) ||
+    /세트|2pack|3pack|2팩|3팩/.test(inner) ||
+    (/포함/.test(inner) && !/단독구성/.test(inner))
+  ) {
+    return 'product_composition'
+  }
   if (
     isReservationShippingDateTag(normalized) ||
     /예약배송|1\+1|단독|기획|한정|이벤트/.test(normalized)
@@ -142,7 +152,7 @@ export function classifyLeadingTags(
   })
 }
 
-/** 행사·구성 태그만 제외한 상품 인식용 품목명. 원문은 바꾸지 않는다. */
+/** 상품 구성·미분류만 남긴 인식용 품목명. 원문은 바꾸지 않는다. */
 export function matchingProductName(
   productName: string,
   roles: InvoiceProductNameTagRoleEntry[] = [],

@@ -3,11 +3,13 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Download, Upload } from 'lucide-react'
 import {
   applyBulkInvoiceProductNameMaps,
+  getInvoiceProductNameMaps,
   listStyleRefsForLookup,
 } from '@/lib/api'
 import { parseFile } from '@/lib/import/parse'
 import {
   collectInvoiceProductNameLedgerStyleCandidates,
+  downloadInvoiceProductNameLedgerList,
   downloadInvoiceProductNameLedgerTemplate,
   isNameChangeCasebook,
   prepareInvoiceProductNameLedgerRows,
@@ -34,6 +36,7 @@ export function InvoiceProductNameLedgerImportPanel({
   const [summary, setSummary] = useState<string | null>(null)
   const [parsing, setParsing] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [downloadingList, setDownloadingList] = useState(false)
   const [formatLabel, setFormatLabel] = useState('')
 
   const counts = {
@@ -141,6 +144,35 @@ export function InvoiceProductNameLedgerImportPanel({
         읽어도 서버에 저장하지 않습니다.
       </p>
       <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={downloadingList}
+          onClick={async () => {
+            setError(null)
+            setSummary(null)
+            setDownloadingList(true)
+            try {
+              const maps = await getInvoiceProductNameMaps(brandId)
+              await downloadInvoiceProductNameLedgerList(brandName, maps)
+              setSummary(
+                `DB에 저장된 품목명 원장 ${formatNumber(maps.length)}건을 내려받았습니다.`,
+              )
+            } catch (reason) {
+              setError(
+                reason instanceof Error
+                  ? reason.message
+                  : '현재 원장을 내려받지 못했습니다.',
+              )
+            } finally {
+              setDownloadingList(false)
+            }
+          }}
+        >
+          <Download className="size-3.5" />
+          {downloadingList ? '목록 준비 중...' : '현재 원장 내려받기'}
+        </Button>
         <Button
           type="button"
           size="sm"

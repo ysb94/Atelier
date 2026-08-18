@@ -1,15 +1,22 @@
 import { useCallback, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
+  deleteInvoiceOptionMap,
+  saveInvoiceOptionMap,
   saveInvoiceProductNameMap,
   undoInvoiceProductNameMap,
 } from '@/lib/api'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import type {
   AiProductRecommendation,
+  InvoiceOptionMap,
   InvoiceProductNameMap,
   StyleRef,
 } from '@/lib/types'
+import {
+  completedOptionExtras,
+  type OptionExtraDraft,
+} from './InvoiceOptionExtrasEditor'
 
 export type ProductMapSaveFeedback = {
   source: 'local' | 'ai' | 'manual'
@@ -33,9 +40,12 @@ export type ProductMapHistoryEntry = {
   comboKey: string
   productName: string
   itemName: string
+  originalItemName: string
   mallName: string
+  ownProductCode: string
   lookupKey: string
   style: StyleRef
+  extras: OptionExtraDraft[]
   appliedRule: string | null
   feedback: ProductMapSaveFeedback
   status: ProductMapHistoryStatus
@@ -43,7 +53,10 @@ export type ProductMapHistoryEntry = {
   createdAt: number
   savedMap: InvoiceProductNameMap | null
   previousMap: InvoiceProductNameMap | null
+  savedOptionMap: InvoiceOptionMap | null
+  previousOptionMap: InvoiceOptionMap | null
   wasCreate: boolean
+  optionWasCreate: boolean
   reviewReasons: string[]
 }
 
@@ -52,9 +65,12 @@ export type ProductMapEnqueueInput = {
   comboKey: string
   productName: string
   itemName: string
+  originalItemName?: string
   mallName: string
+  ownProductCode?: string
   lookupKey: string
   style: StyleRef
+  extras?: OptionExtraDraft[]
   appliedRule: string | null
   feedback: ProductMapSaveFeedback
   reviewReasons?: string[]
@@ -63,6 +79,7 @@ export type ProductMapEnqueueInput = {
 export type ProductMapSaveDraft = {
   lookupKey: string
   style: StyleRef
+  extras: OptionExtraDraft[]
   error: string
 }
 
@@ -99,6 +116,78 @@ function findMapByLookupKey(
   return maps.find((map) => map.normalizedLookupKey === key) ?? null
 }
 
+export function findOptionMapByCombo(
+  maps: InvoiceOptionMap[],
+  mallName: string,
+  productName: string,
+  itemName: string,
+): InvoiceOptionMap | null {
+  const mall = normalizeInvoiceText(mallName)
+  const product = normalizeInvoiceText(productName)
+  const item = normalizeInvoiceText(itemName)
+  const exact = maps.find(
+    (map) =>
+      map.normalizedMallName === mall &&
+      map.normalizedProductName === product &&
+      map.normalizedItemName === item,
+  )
+  if (exact) return exact
+  return (
+    maps.find(
+      (map) =>
+        !map.normalizedMallName &&
+        map.normalizedProductName === product &&
+        map.normalizedItemName === item,
+    ) ?? null
+  )
+}
+
+export function findOptionMapByComboPreferring(
+  maps: InvoiceOptionMap[],
+  mallName: string,
+  productName: string,
+  preferredItemName: string,
+  fallbackItemName: string,
+) {
+  return (
+    findOptionMapByCombo(maps, mallName, productName, preferredItemName) ??
+    (preferredItemName !== fallbackItemName
+      ? findOptionMapByCombo(maps, mallName, productName, fallbackItemName)
+      : null)
+  )
+}
+
+export function upsertInvoiceOptionMapCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  brandId: string,
+  saved: InvoiceOptionMap,
+) {
+  const queryKey = ['invoice-option-maps', brandId] as const
+  const current = queryClient.getQueryData<InvoiceOptionMap[]>(queryKey)
+  if (!current) {
+    return queryClient.invalidateQueries({ queryKey })
+  }
+  queryClient.setQueryData<InvoiceOptionMap[]>(queryKey, (maps = []) => {
+    const next = maps.filter((map) => map.id !== saved.id)
+    return [saved, ...next]
+  })
+}
+
+function removeInvoiceOptionMapCache(
+  queryClient: ReturnType<typeof useQueryClient>,
+  brandId: string,
+  mapId: string,
+) {
+  const queryKey = ['invoice-option-maps', brandId] as const
+  const current = queryClient.getQueryData<InvoiceOptionMap[]>(queryKey)
+  if (!current) {
+    return queryClient.invalidateQueries({ queryKey })
+  }
+  queryClient.setQueryData<InvoiceOptionMap[]>(queryKey, (maps = []) =>
+    maps.filter((map) => map.id !== mapId),
+  )
+}
+
 function newHistoryId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
@@ -129,6 +218,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
       drafts[entry.comboKey] = {
         lookupKey: entry.lookupKey,
         style: entry.style,
+        extras: entry.extras,
         error: entry.error,
       }
     }
@@ -181,6 +271,21 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
               const previousMap =
                 entry.previousMap ??
                 findMapByLookupKey(maps, entry.lookupKey)
+              const optionMaps =
+                queryClient.getQueryData<InvoiceOptionMap[]>([
+                  'invoice-option-maps',
+                  brandId,
+                ]) ?? []
+              const previousOptionMap =
+                entry.previousOptionMap ??
+                findOptionMapByComboPreferring(
+                  optionMaps,
+                  entry.mallName,
+                  entry.productName,
+                  entry.itemName,
+                  entry.originalItemName,
+                )
+              const extras = completedOptionExtras(entry.extras)
               const saved = await saveInvoiceProductNameMap(
                 brandId,
                 {
@@ -192,6 +297,38 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
                 previousMap?.id,
               )
               await upsertInvoiceProductNameMapCache(queryClient, brandId, saved)
+              let savedOptionMap: InvoiceOptionMap | null = null
+              if (extras.length > 0) {
+                savedOptionMap = await saveInvoiceOptionMap(
+                  brandId,
+                  {
+                    productName: entry.productName,
+                    itemName: entry.itemName,
+                    mallName: entry.mallName,
+                    ownProductCode: entry.ownProductCode,
+                    displayItemName: previousOptionMap?.displayItemName,
+                    note: previousOptionMap?.note,
+                    components: [
+                      {
+                        styleId: entry.style.styleId,
+                        role: 'main',
+                        quantity: 1,
+                      },
+                      ...extras.map((item) => ({
+                        styleId: item.style.styleId,
+                        role: item.role,
+                        quantity: item.quantity,
+                      })),
+                    ],
+                  },
+                  previousOptionMap?.id,
+                )
+                await upsertInvoiceOptionMapCache(
+                  queryClient,
+                  brandId,
+                  savedOptionMap,
+                )
+              }
               await queryClient.invalidateQueries({
                 queryKey: [
                   'ai-product-recommendation',
@@ -212,7 +349,10 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
                         error: null,
                         savedMap: saved,
                         previousMap,
+                        savedOptionMap,
+                        previousOptionMap,
                         wasCreate: previousMap === null,
+                        optionWasCreate: extras.length > 0 && !previousOptionMap,
                         style: saved.style,
                         lookupKey: saved.lookupKey || entry.lookupKey,
                       }
@@ -277,6 +417,25 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
         existingEntry?.savedMap ??
         existingEntry?.previousMap ??
         findMapByLookupKey(maps, input.lookupKey)
+      const optionMaps =
+        queryClient.getQueryData<InvoiceOptionMap[]>([
+          'invoice-option-maps',
+          brandId,
+        ]) ?? []
+      const originalItemName =
+        input.originalItemName ??
+        existingEntry?.originalItemName ??
+        input.itemName
+      const previousOptionMap =
+        existingEntry?.savedOptionMap ??
+        existingEntry?.previousOptionMap ??
+        findOptionMapByComboPreferring(
+          optionMaps,
+          input.mallName,
+          input.productName,
+          input.itemName,
+          originalItemName,
+        )
 
       setHistory((current) => {
         const nextEntry: ProductMapHistoryEntry = {
@@ -284,9 +443,12 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
           comboKey: input.comboKey,
           productName: input.productName,
           itemName: input.itemName,
+          originalItemName,
           mallName: input.mallName,
+          ownProductCode: input.ownProductCode ?? existingEntry?.ownProductCode ?? '',
           lookupKey: input.lookupKey,
           style: input.style,
+          extras: input.extras ?? existingEntry?.extras ?? [],
           appliedRule: input.appliedRule,
           feedback: input.feedback,
           status: 'queued',
@@ -294,7 +456,10 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
           createdAt: Date.now(),
           savedMap: null,
           previousMap,
+          savedOptionMap: null,
+          previousOptionMap,
           wasCreate: previousMap === null,
+          optionWasCreate: false,
           reviewReasons:
             input.reviewReasons ?? existingEntry?.reviewReasons ?? [],
         }
@@ -330,8 +495,40 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
           expectedUpdatedAt: entry.savedMap.updatedAt,
           previous: entry.wasCreate ? null : entry.previousMap,
         })
+        if (entry.savedOptionMap) {
+          if (entry.optionWasCreate || !entry.previousOptionMap) {
+            await deleteInvoiceOptionMap(entry.savedOptionMap.id)
+            removeInvoiceOptionMapCache(
+              queryClient,
+              brandId,
+              entry.savedOptionMap.id,
+            )
+          } else {
+            const restored = await saveInvoiceOptionMap(
+              brandId,
+              {
+                productName: entry.previousOptionMap.productName,
+                itemName: entry.previousOptionMap.itemName,
+                mallName: entry.previousOptionMap.mallName,
+                ownProductCode: entry.previousOptionMap.ownProductCode,
+                displayItemName: entry.previousOptionMap.displayItemName,
+                note: entry.previousOptionMap.note,
+                components: entry.previousOptionMap.components.map((item) => ({
+                  styleId: item.style.styleId,
+                  role: item.role,
+                  quantity: item.quantity,
+                })),
+              },
+              entry.savedOptionMap.id,
+            )
+            await upsertInvoiceOptionMapCache(queryClient, brandId, restored)
+          }
+        }
         await queryClient.invalidateQueries({
           queryKey: ['invoice-product-name-maps', brandId],
+        })
+        await queryClient.invalidateQueries({
+          queryKey: ['invoice-option-maps', brandId],
         })
         await queryClient.invalidateQueries({
           queryKey: ['ai-product-recommendation', brandId],
@@ -346,7 +543,12 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
                   error: null,
                   savedMap: entry.wasCreate ? null : entry.previousMap,
                   previousMap: null,
+                  savedOptionMap: entry.optionWasCreate
+                    ? null
+                    : entry.previousOptionMap,
+                  previousOptionMap: null,
                   wasCreate: false,
+                  optionWasCreate: false,
                   style: entry.previousMap?.style ?? entry.style,
                   lookupKey:
                     entry.previousMap?.lookupKey ||
