@@ -80,20 +80,9 @@ function colorLabelPrefix(value: string): string | null {
 function generateCandidatesForProductName(
   productName: string,
   itemName: string,
-  ownProductCode: string,
   output: ProductNameCandidate[],
   seen: Set<string>,
 ) {
-  if (ownProductCode) {
-    pushCandidate(
-      output,
-      seen,
-      ownProductCode,
-      'own_code',
-      '자체상품코드 단독',
-    )
-  }
-
   pushCandidate(output, seen, productName, 'product', '품목명 단독')
 
   if (itemName && !isEmptyItemNameHint(itemName)) {
@@ -163,30 +152,16 @@ export function generateProductNameCandidates(input: {
   productName: string
   itemName: string
   mallName?: string
-  ownProductCode?: string
   matchingProductName?: string
 }): ProductNameCandidate[] {
   const productName = input.productName.trim()
   const itemName = input.itemName.trim()
-  const ownProductCode = input.ownProductCode?.trim() ?? ''
   const matching = (input.matchingProductName ?? productName).trim()
   const output: ProductNameCandidate[] = []
   const seen = new Set<string>()
-  generateCandidatesForProductName(
-    productName,
-    itemName,
-    ownProductCode,
-    output,
-    seen,
-  )
+  generateCandidatesForProductName(productName, itemName, output, seen)
   if (normalizeInvoiceText(matching) !== normalizeInvoiceText(productName)) {
-    generateCandidatesForProductName(
-      matching,
-      itemName,
-      ownProductCode,
-      output,
-      seen,
-    )
+    generateCandidatesForProductName(matching, itemName, output, seen)
   }
   return output
 }
@@ -235,7 +210,6 @@ export function collectProductNameCandidateTexts(
     productName: string
     itemName: string
     mallName?: string
-    ownProductCode?: string
   }[],
   tagRoles: InvoiceProductNameTagRoleEntry[] = [],
 ): string[] {

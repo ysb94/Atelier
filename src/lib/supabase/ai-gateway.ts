@@ -1,5 +1,6 @@
-import type { AiProvider } from '@/lib/ai/gateway-core'
+import { ACCESSORY_FEATURE_KEY, type AiProvider } from '@/lib/ai/gateway-core'
 import type {
+  AiAccessoryRecommendation,
   AiProductCandidate,
   AiProductRecommendation,
   AiRecommendationSource,
@@ -94,6 +95,58 @@ export async function recommendInvoiceProduct(input: {
   })
   return {
     ...result.recommendation,
+    provider: result.provider,
+    modelId: result.modelId,
+    source: result.source ?? 'ai',
+    cacheId: result.cacheId ?? null,
+    skippedAi: result.skippedAi ?? false,
+    cacheHit: result.cacheHit ?? false,
+  }
+}
+
+export async function recommendInvoiceAccessoryRules(input: {
+  brandId: string
+  featureKey?: string
+  unknownPiece: string
+  itemNames: string[]
+  lookupKeys: string[]
+  mainProducts: string[]
+  contexts?: Array<{
+    contextId: string
+    itemName: string
+    productLookupKey: string
+    mainProduct: string
+    unknownPieces: string[]
+    candidateStyleIds?: string[]
+  }>
+  dictionary: Array<{
+    ruleType: string
+    pattern: string
+    accessoryKind?: string
+    namePrefix?: string
+    colorName?: string
+  }>
+  candidates: AiProductCandidate[]
+}): Promise<AiAccessoryRecommendation> {
+  const result = await invokeGateway<{
+    provider: AiProvider
+    modelId: string
+    source?: AiRecommendationSource
+    cacheId?: string | null
+    skippedAi?: boolean
+    cacheHit?: boolean
+    recommendation: Omit<
+      AiAccessoryRecommendation,
+      'provider' | 'modelId' | 'source' | 'cacheId' | 'skippedAi' | 'cacheHit'
+    >
+  }>({
+    action: 'recommend_accessory_rules',
+    ...input,
+    featureKey: input.featureKey ?? ACCESSORY_FEATURE_KEY,
+  })
+  return {
+    ...result.recommendation,
+    contexts: result.recommendation.contexts ?? [],
     provider: result.provider,
     modelId: result.modelId,
     source: result.source ?? 'ai',

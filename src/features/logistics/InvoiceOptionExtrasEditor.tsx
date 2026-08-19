@@ -1,13 +1,12 @@
 import { Plus, Trash2 } from 'lucide-react'
 import { StylePicker } from '@/components/style-picker'
 import { Button } from '@/components/ui/button'
-import { Input, Select } from '@/components/ui/input'
-import {
-  INVOICE_OPTION_COMPONENT_ROLE_LABEL,
-  type InvoiceItemNameRuleComponent,
-  type InvoiceOptionMap,
-  type InvoiceOptionMapComponent,
-  type StyleRef,
+import { Input } from '@/components/ui/input'
+import type {
+  InvoiceItemNameRuleComponent,
+  InvoiceOptionMap,
+  InvoiceOptionMapComponent,
+  StyleRef,
 } from '@/lib/types'
 
 export type OptionExtraDraft = {
@@ -90,14 +89,18 @@ export function InvoiceOptionExtrasEditor({
       {extras.length === 0 ? (
         <p className="text-xs text-muted-foreground">
           {compact
-            ? '세트면 포함 상품을 넣습니다. 본품만 나가면 비워 두세요.'
-            : '본품만 나가면 비워 두세요. 포함 스트랩·필수 태슬·유료추가는 아래에 넣습니다.'}
+            ? '같이 나가는 상품을 넣습니다. 본품만 나가면 비워 두세요.'
+            : '본품만 나가면 비워 두세요. 같이 나가는 상품과 수량을 아래에 넣습니다.'}
         </p>
       ) : (
         extras.map((extra) => (
           <div
             key={extra.key}
-            className="grid gap-2 rounded-lg border border-border p-2 sm:grid-cols-[minmax(0,1.6fr)_7.5rem_4.5rem_auto]"
+            className={
+              compact
+                ? 'space-y-2 rounded-lg border border-border p-2'
+                : 'grid gap-2 rounded-lg border border-border p-2 sm:grid-cols-[minmax(14rem,1fr)_6.5rem_auto]'
+            }
           >
             <StylePicker
               brandId={brandId}
@@ -111,35 +114,20 @@ export function InvoiceOptionExtrasEditor({
               }
               placeholder="구성 M번호 검색"
             />
-            <Select
-              value={extra.role}
-              onChange={(event) =>
-                onChange(
-                  extras.map((item) =>
-                    item.key === extra.key
-                      ? {
-                          ...item,
-                          role: event.target.value as OptionExtraDraft['role'],
-                        }
-                      : item,
-                  ),
-                )
+            <div
+              className={
+                compact
+                  ? 'flex items-center gap-2'
+                  : 'contents'
               }
             >
-              <option value="included">
-                {INVOICE_OPTION_COMPONENT_ROLE_LABEL.included}
-              </option>
-              <option value="required">
-                {INVOICE_OPTION_COMPONENT_ROLE_LABEL.required}
-              </option>
-              <option value="paid_add">
-                {INVOICE_OPTION_COMPONENT_ROLE_LABEL.paid_add}
-              </option>
-            </Select>
             <Input
               type="number"
               min={1}
               step={1}
+              aria-label="나가는 수량"
+              title="주문 1행당 나가는 수량"
+              className={compact ? 'w-20' : undefined}
               value={extra.quantity}
               onChange={(event) =>
                 onChange(
@@ -157,10 +145,14 @@ export function InvoiceOptionExtrasEditor({
                 )
               }
             />
+            <span className={compact ? 'shrink-0 text-xs text-muted-foreground' : 'hidden'}>
+              개
+            </span>
             <Button
               type="button"
               size="icon"
               variant="ghost"
+              className={compact ? 'ml-auto' : undefined}
               onClick={() =>
                 onChange(extras.filter((item) => item.key !== extra.key))
               }
@@ -168,6 +160,7 @@ export function InvoiceOptionExtrasEditor({
             >
               <Trash2 className="size-3.5" />
             </Button>
+            </div>
           </div>
         ))
       )}

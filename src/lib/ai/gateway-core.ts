@@ -1,7 +1,52 @@
 export const AI_PROVIDERS = ['openai', 'anthropic', 'gemini'] as const
 export type AiProvider = (typeof AI_PROVIDERS)[number]
 
-export const AI_FEATURE_KEYS = ['invoice_product_recommendation'] as const
+export const AI_FEATURE_KEYS = [
+  'invoice_product_recommendation',
+  'invoice_accessory_recommendation',
+] as const
+
+export const ACCESSORY_FEATURE_KEY = 'invoice_accessory_recommendation' as const
+export const ACCESSORY_RULE_TYPES = [
+  'label',
+  'color',
+  'token',
+  'ignore',
+  'default',
+] as const
+
+export type AccessoryRuleType = (typeof ACCESSORY_RULE_TYPES)[number]
+
+export type AccessorySuggestRule = {
+  ruleType: AccessoryRuleType
+  pattern: string
+  accessoryKind: string
+  namePrefix: string
+  colorName: string
+  styleId: string
+  styleNo: string
+  name: string
+  reason: string
+  confidence: number
+}
+
+export type AccessoryContextDecision = {
+  contextId: string
+  action: 'components' | 'delete' | 'hold'
+  components: Array<{
+    styleId: string
+    styleNo: string
+    name: string
+    quantity: number
+  }>
+  reason: string
+}
+
+export type AccessorySuggestResult = {
+  reason: string
+  rules: AccessorySuggestRule[]
+  contexts: AccessoryContextDecision[]
+}
 export type AiFeatureKey = (typeof AI_FEATURE_KEYS)[number]
 
 export const PROVIDER_SECRET: Record<AiProvider, string> = {
@@ -449,6 +494,206 @@ export function summarizeHybridReplay(
     aiCallRate: samples.length === 0 ? 0 : aiCalls / samples.length,
     manual,
   }
+}
+
+export function isAccessoryRuleType(value: string): value is AccessoryRuleType {
+  return (ACCESSORY_RULE_TYPES as readonly string[]).includes(value)
+}
+
+export function parseAccessorySuggestJson(
+  payload: unknown,
+  candidates: ProductCandidate[],
+  contexts: Array<{ contextId: string; candidateStyleIds?: string[] }> = [],
+): AccessorySuggestResult {
+  const row = asRecord(payload)
+  if (!row) throw new Error('AI 부속품 추천 JSON 형식이 아닙니다.')
+  const reason = asString(row.reason)
+  const rawRules = Array.isArray(row.rules) ? row.rules : []
+  const rules = filterHallucinatedAccessoryRules(
+    rawRules.flatMap((item) => {
+      const rule = asRecord(item)
+      const ruleType = asString(rule?.ruleType || rule?.rule_type).toLocaleLowerCase(
+        'en-US',
+      )
+      if (!isAccessoryRuleType(ruleType) || !asString(rule?.pattern)) return []
+      return [
+        {
+          ruleType,
+          pattern: asString(rule?.pattern),
+          accessoryKind: asString(rule?.accessoryKind || rule?.accessory_kind),
+          namePrefix: asString(rule?.namePrefix || rule?.name_prefix),
+          colorName: asString(rule?.colorName || rule?.color_name),
+          styleId: asString(rule?.styleId || rule?.style_id),
+          styleNo: asString(rule?.styleNo || rule?.style_no),
+          name: asString(rule?.name),
+          reason: asString(rule?.reason),
+          confidence: clampConfidence(rule?.confidence),
+        },
+      ]
+    }),
+    candidates,
+  ).slice(0, 2)
+  return {
+    reason,
+    rules,
+    contexts: filterAccessoryContextDecisions(
+      Array.isArray(row.contexts) ? row.contexts : [],
+      candidates,
+      contexts,
+    ),
+  }
+}
+
+const CONTEXT_ACTIONS = ['components', 'delete', 'hold'] as const
+
+export function filterAccessoryContextDecisions(
+  raw: unknown[],
+  candidates: ProductCandidate[],
+  contexts: Array<{ contextId: string; candidateStyleIds?: string[] }> = [],
+): AccessoryContextDecision[] {
+  const allowedIds = new Set(contexts.map((item) => item.contextId).filter(Boolean))
+  const byContextCandidates = new Map(
+    contexts.map((item) => [item.contextId, new Set(item.candidateStyleIds ?? [])]),
+  )
+  const globalById = new Map(candidates.map((item) => [item.styleId, item]))
+  const next: AccessoryContextDecision[] = []
+  const seen = new Set<string>()
+  for (const item of raw) {
+    const row = asRecord(item)
+    const contextId = asString(row?.contextId || row?.context_id)
+    const action = asString(row?.action).toLocaleLowerCase('en-US')
+    if (!contextId || seen.has(contextId)) continue
+    if (allowedIds.size > 0 && !allowedIds.has(contextId)) continue
+    if (!CONTEXT_ACTIONS.includes(action as (typeof CONTEXT_ACTIONS)[number])) {
+      continue
+    }
+    seen.add(contextId)
+    if (action === 'hold' || action === 'delete') {
+      next.push({
+        contextId,
+        action,
+        components: [],
+        reason: asString(row?.reason),
+      })
+      continue
+    }
+    const allowed =
+      byContextCandidates.get(contextId) && byContextCandidates.get(contextId)!.size > 0
+        ? byContextCandidates.get(contextId)!
+        : new Set(candidates.map((entry) => entry.styleId))
+    const used = new Set<string>()
+    const components = (Array.isArray(row?.components) ? row.components : []).flatMap(
+      (entry) => {
+        const component = asRecord(entry)
+        const styleId = asString(component?.styleId || component?.style_id)
+        if (!styleId || used.has(styleId) || !allowed.has(styleId)) return []
+        const match = globalById.get(styleId)
+        if (!match) return []
+        used.add(styleId)
+        return [
+          {
+            styleId: match.styleId,
+            styleNo: match.styleNo,
+            name: match.name,
+            quantity: Math.max(1, Math.min(9, asPositiveInt(component?.quantity) ?? 1)),
+          },
+        ]
+      },
+    )
+    if (components.length === 0) continue
+    next.push({
+      contextId,
+      action: 'components',
+      components,
+      reason: asString(row?.reason),
+    })
+  }
+  return next.slice(0, 8)
+}
+
+export function filterHallucinatedAccessoryRules(
+  rules: AccessorySuggestRule[],
+  candidates: ProductCandidate[],
+): AccessorySuggestRule[] {
+  const byId = new Map(candidates.map((item) => [item.styleId, item]))
+  const next: AccessorySuggestRule[] = []
+  for (const rule of rules) {
+    if (!isAccessoryRuleType(rule.ruleType) || !rule.pattern.trim()) continue
+    if (rule.ruleType === 'token') {
+      const match = byId.get(rule.styleId)
+      if (!match) continue
+      next.push({
+        ...rule,
+        styleId: match.styleId,
+        styleNo: match.styleNo,
+        name: match.name,
+      })
+      continue
+    }
+    next.push({
+      ...rule,
+      styleId: '',
+      styleNo: '',
+      name: '',
+    })
+  }
+  return next
+}
+
+export function buildAccessorySuggestPrompt(input: {
+  unknownPiece: string
+  itemNames: string[]
+  lookupKeys: string[]
+  mainProducts: string[]
+  contexts?: Array<{
+    contextId: string
+    itemName: string
+    productLookupKey: string
+    mainProduct: string
+    unknownPieces: string[]
+    candidateStyleIds?: string[]
+  }>
+  dictionary: Array<{
+    ruleType: string
+    pattern: string
+    accessoryKind?: string
+    namePrefix?: string
+    colorName?: string
+  }>
+  candidates: ProductCandidate[]
+}) {
+  const system = [
+    '당신은 송장 내품명에서 부속품 사전 규칙과 조회 키 exact 초안을 제안하는 어시스턴트입니다.',
+    '반드시 JSON만 반환하세요.',
+    'ruleType은 label, color, token, ignore, default 중 하나입니다.',
+    'token의 styleId와 contexts.components.styleId는 그 문맥에 제공된 후보에만 있어야 합니다.',
+    'Pink, Red 같은 단색 단어는 token으로 쓰지 마세요. 모든 문맥에 같은 색상 별칭이면 color를 쓰세요.',
+    '같은 조각이 본품·조회 키마다 다른 구성품이면 rules를 비우고 contexts에만 넣으세요.',
+    'label/default는 accessoryKind와 namePrefix가 필요합니다. 예: 태슬 / "태슬 - ".',
+    'color는 colorName(한글 색상)이 필요합니다.',
+    '본품 되풀이이거나 품목명에 이미 있는 색상은 ignore로 제안하세요.',
+    '전역 규칙은 최대 2개입니다. 주문자 개인정보는 다루지 않습니다.',
+    '형식: {"reason":"","rules":[{"ruleType":"color","pattern":"","accessoryKind":"","namePrefix":"","colorName":"","styleId":"","confidence":0.0,"reason":""}],"contexts":[{"contextId":"","action":"components","components":[{"styleId":"","quantity":1}],"reason":""}]}',
+  ].join(' ')
+
+  const user = JSON.stringify({
+    unknownPiece: input.unknownPiece,
+    itemNames: input.itemNames,
+    lookupKeys: input.lookupKeys,
+    mainProducts: input.mainProducts,
+    contexts: input.contexts ?? [],
+    dictionary: input.dictionary,
+    candidates: input.candidates.map((item) => ({
+      styleId: item.styleId,
+      styleNo: item.styleNo,
+      name: item.name,
+      lookupKey: item.lookupKey,
+      source: item.source,
+      score: item.score,
+    })),
+  })
+
+  return { system, user }
 }
 
 export function clampTextList(values: string[], maxItems: number, maxChars: number) {

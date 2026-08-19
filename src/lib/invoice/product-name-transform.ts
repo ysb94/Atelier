@@ -10,10 +10,12 @@ import {
   matchingProductName,
   type ParsedProductNameTag,
 } from '@/lib/invoice/product-name-tags'
+import { buildOrderFingerprint } from '@/lib/invoice/gift-assign'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import type { InvoiceNameTransformation } from '@/lib/invoice/name-transform'
 import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
 import type {
+  InvoiceProductNameExclusion,
   InvoiceProductNameMap,
   InvoiceProductNameTagRoleEntry,
   StyleRef,
@@ -25,6 +27,8 @@ export type InvoiceProductNameMatchStatus =
   | 'missing_style'
   | 'conflict'
   | 'unresolved'
+  | 'excluded'
+  | 'exclusion_guarded'
 
 export type InvoiceProductNameTransformRow = {
   source: SabangnetOrderRow
@@ -48,7 +52,7 @@ export type UnresolvedProductNameCombo = {
   itemName: string
   ownProductCode: string
   rowCount: number
-  status: Exclude<InvoiceProductNameMatchStatus, 'mapped'>
+  status: Exclude<InvoiceProductNameMatchStatus, 'mapped' | 'excluded'>
   appliedRule: string | null
   candidateStyles: StyleRef[]
   candidates: ProductNameCandidate[]
@@ -62,7 +66,43 @@ export type InvoiceProductNameTransformation = {
   missingStyleRowCount: number
   conflictRowCount: number
   unresolvedRowCount: number
+  excludedRowCount: number
+  exclusionGuardedRowCount: number
   unresolvedCombos: UnresolvedProductNameCombo[]
+}
+
+export function productExclusionKey(
+  mallName: string,
+  productName: string,
+  itemName: string,
+) {
+  return [
+    normalizeInvoiceText(mallName),
+    normalizeInvoiceText(productName),
+    normalizeInvoiceText(itemName),
+  ].join('\u0000')
+}
+
+export function isInvoiceProductRowExcluded(
+  row: Pick<InvoiceProductNameTransformRow, 'status'> | undefined,
+) {
+  return row?.status === 'excluded'
+}
+
+/** 품목명 단계에서 실제로 맞춘 후보 텍스트. 규칙이 후보에 없으면 첫 후보. */
+export function lookupKeyFromProductRow(
+  row:
+    | Pick<InvoiceProductNameTransformRow, 'appliedRule' | 'candidates'>
+    | undefined,
+): { productLookupKey: string; productAppliedRule: string | null } {
+  if (!row) return { productLookupKey: '', productAppliedRule: null }
+  const byRule = row.appliedRule
+    ? row.candidates.find((candidate) => candidate.rule === row.appliedRule)
+    : undefined
+  return {
+    productLookupKey: (byRule ?? row.candidates[0])?.text ?? '',
+    productAppliedRule: row.appliedRule,
+  }
 }
 
 export type ProductNameStyleCatalog = {
@@ -106,7 +146,6 @@ function mapLookupTexts(map: InvoiceProductNameMap): string[] {
         : map.productName,
     )
   }
-  if (map.ownProductCode.trim()) texts.push(map.ownProductCode)
   return texts
 }
 
@@ -195,23 +234,81 @@ function itemNameOutcome(
  * 제품군·색상 분해 매칭은 쓰지 않는다. 색상 토큰 하나만 걸려도 다른 상품을 확정해
  * 오탐이 잦았고, 그 자리는 AI 추천이 맡는다.
  */
-export function transformInvoiceProductNames(
-  sourceRows: SabangnetOrderRow[],
-  maps: InvoiceProductNameMap[],
-  catalog: ProductNameStyleCatalog,
-  tagRoles: InvoiceProductNameTagRoleEntry[] = [],
-): InvoiceProductNameTransformation {
-  const activeMaps = maps.filter((map) => map.isActive)
-  const lookupIndex = indexLookupMaps(activeMaps, tagRoles)
+function applyProductNameExclusions(
+  rows: InvoiceProductNameTransformRow[],
+  exclusions: InvoiceProductNameExclusion[],
+): InvoiceProductNameTransformRow[] {
+  const activeKeys = new Set(
+    exclusions
+      .filter((item) => item.isActive)
+      .map((item) =>
+        productExclusionKey(item.mallName, item.productName, item.itemName),
+      ),
+  )
+  if (activeKeys.size === 0) return rows
+
+  const confirmedOrders = new Set<string>()
+  for (const row of rows) {
+    const key = productExclusionKey(
+      row.source.mallName,
+      row.source.productName,
+      row.source.itemName,
+    )
+    if (activeKeys.has(key)) continue
+    if (row.status === 'mapped' || row.status === 'candidate') {
+      confirmedOrders.add(buildOrderFingerprint(row.source))
+    }
+  }
+
+  return rows.map((row) => {
+    const key = productExclusionKey(
+      row.source.mallName,
+      row.source.productName,
+      row.source.itemName,
+    )
+    if (!activeKeys.has(key)) return row
+    const hasOrderNo = Boolean(row.source.customerOrderNo.trim())
+    const excluded =
+      hasOrderNo && confirmedOrders.has(buildOrderFingerprint(row.source))
+    return {
+      ...row,
+      status: excluded ? 'excluded' : 'exclusion_guarded',
+      mapId: null,
+      style: null,
+      transformedProductName: row.source.productName,
+      appliedRule: 'exclusion',
+      itemNameConsumed: false,
+      effectiveItemName: row.source.itemName,
+      candidateStyles: [],
+    }
+  })
+}
+
+function summarizeProductNameRows(rows: InvoiceProductNameTransformRow[]) {
   const unresolvedByKey = new Map<string, UnresolvedProductNameCombo>()
   let mappedRowCount = 0
   let candidateRowCount = 0
   let missingStyleRowCount = 0
   let conflictRowCount = 0
   let unresolvedRowCount = 0
+  let excludedRowCount = 0
+  let exclusionGuardedRowCount = 0
 
-  function remember(row: InvoiceProductNameTransformRow) {
-    if (row.status === 'mapped') return
+  for (const row of rows) {
+    if (row.status === 'mapped') {
+      mappedRowCount += 1
+      continue
+    }
+    if (row.status === 'excluded') {
+      excludedRowCount += 1
+      continue
+    }
+    if (row.status === 'candidate') candidateRowCount += 1
+    else if (row.status === 'missing_style') missingStyleRowCount += 1
+    else if (row.status === 'conflict') conflictRowCount += 1
+    else if (row.status === 'exclusion_guarded') exclusionGuardedRowCount += 1
+    else unresolvedRowCount += 1
+
     const key = comboKey(
       row.source.mallName,
       row.source.productName,
@@ -221,7 +318,8 @@ export function transformInvoiceProductNames(
     if (current) {
       current.rowCount += 1
       if (row.status === 'conflict') current.status = 'conflict'
-      return
+      if (row.status === 'exclusion_guarded') current.status = 'exclusion_guarded'
+      continue
     }
     unresolvedByKey.set(key, {
       key,
@@ -238,19 +336,45 @@ export function transformInvoiceProductNames(
     })
   }
 
+  return {
+    mappedRowCount,
+    candidateRowCount,
+    missingStyleRowCount,
+    conflictRowCount,
+    unresolvedRowCount,
+    excludedRowCount,
+    exclusionGuardedRowCount,
+    unresolvedCombos: [...unresolvedByKey.values()].sort(
+      (left, right) =>
+        left.productName.localeCompare(right.productName, 'ko-KR') ||
+        left.itemName.localeCompare(right.itemName, 'ko-KR') ||
+        right.rowCount - left.rowCount,
+    ),
+  }
+}
+
+export function transformInvoiceProductNames(
+  sourceRows: SabangnetOrderRow[],
+  maps: InvoiceProductNameMap[],
+  catalog: ProductNameStyleCatalog,
+  tagRoles: InvoiceProductNameTagRoleEntry[] = [],
+  exclusions: InvoiceProductNameExclusion[] = [],
+): InvoiceProductNameTransformation {
+  const activeMaps = maps.filter((map) => map.isActive)
+  const lookupIndex = indexLookupMaps(activeMaps, tagRoles)
+
   function matchLookupMaps(candidate: ProductNameCandidate, mallName: string) {
     const compact = compactProductNameKey(candidate.text)
     if (!compact) return []
     return preferMallMaps(lookupIndex.compact.get(compact) ?? [], mallName)
   }
 
-  const rows = sourceRows.map((source): InvoiceProductNameTransformRow => {
+  const matchedRows = sourceRows.map((source): InvoiceProductNameTransformRow => {
     const tags = classifyLeadingTags(source.productName, tagRoles)
     const candidates = generateProductNameCandidates({
       productName: source.productName,
       itemName: source.itemName,
       mallName: source.mallName,
-      ownProductCode: source.ownProductCode,
       matchingProductName: matchingProductName(source.productName, tagRoles),
     })
 
@@ -259,8 +383,7 @@ export function transformInvoiceProductNames(
       if (hitMaps.length === 0) continue
       const styles = uniqueStyles(hitMaps.map((map) => map.style))
       if (styles.length > 1) {
-        conflictRowCount += 1
-        const row: InvoiceProductNameTransformRow = {
+        return {
           source,
           status: 'conflict',
           mapId: null,
@@ -272,10 +395,7 @@ export function transformInvoiceProductNames(
           candidateStyles: styles,
           tags,
         }
-        remember(row)
-        return row
       }
-      mappedRowCount += 1
       return {
         source,
         status: 'mapped',
@@ -294,8 +414,7 @@ export function transformInvoiceProductNames(
       const styles = uniqueStyles(lookupStyles(catalog, candidate.text))
       if (styles.length === 0) continue
       if (styles.length > 1) {
-        conflictRowCount += 1
-        const row: InvoiceProductNameTransformRow = {
+        return {
           source,
           status: 'conflict',
           mapId: null,
@@ -307,14 +426,11 @@ export function transformInvoiceProductNames(
           candidateStyles: styles,
           tags,
         }
-        remember(row)
-        return row
       }
       const viaCompact =
         (catalog.byName.get(normalizeInvoiceText(candidate.text)) ?? [])
           .length === 0
-      candidateRowCount += 1
-      const row: InvoiceProductNameTransformRow = {
+      return {
         source,
         status: 'candidate',
         mapId: null,
@@ -326,13 +442,10 @@ export function transformInvoiceProductNames(
         candidateStyles: styles,
         tags,
       }
-      remember(row)
-      return row
     }
 
     if (candidates.length > 0) {
-      missingStyleRowCount += 1
-      const row: InvoiceProductNameTransformRow = {
+      return {
         source,
         status: 'missing_style',
         mapId: null,
@@ -344,12 +457,9 @@ export function transformInvoiceProductNames(
         candidateStyles: [],
         tags,
       }
-      remember(row)
-      return row
     }
 
-    unresolvedRowCount += 1
-    const row: InvoiceProductNameTransformRow = {
+    return {
       source,
       status: 'unresolved',
       mapId: null,
@@ -361,24 +471,56 @@ export function transformInvoiceProductNames(
       candidateStyles: [],
       tags,
     }
-    remember(row)
-    return row
   })
 
+  const rows = applyProductNameExclusions(matchedRows, exclusions)
   return {
     rows,
-    mappedRowCount,
-    candidateRowCount,
-    missingStyleRowCount,
-    conflictRowCount,
-    unresolvedRowCount,
-    unresolvedCombos: [...unresolvedByKey.values()].sort(
-      (left, right) =>
-        left.productName.localeCompare(right.productName, 'ko-KR') ||
-        left.itemName.localeCompare(right.itemName, 'ko-KR') ||
-        right.rowCount - left.rowCount,
-    ),
+    ...summarizeProductNameRows(rows),
   }
+}
+
+export function previewProductNameExclusion(
+  rows: InvoiceProductNameTransformRow[],
+  combo: { mallName: string; productName: string; itemName: string },
+) {
+  const targetKey = productExclusionKey(
+    combo.mallName,
+    combo.productName,
+    combo.itemName,
+  )
+  const confirmedOrders = new Set<string>()
+  for (const row of rows) {
+    const key = productExclusionKey(
+      row.source.mallName,
+      row.source.productName,
+      row.source.itemName,
+    )
+    if (key === targetKey) continue
+    if (row.status === 'mapped' || row.status === 'candidate') {
+      confirmedOrders.add(buildOrderFingerprint(row.source))
+    }
+  }
+
+  let matchCount = 0
+  let excludedCount = 0
+  let guardedCount = 0
+  for (const row of rows) {
+    const key = productExclusionKey(
+      row.source.mallName,
+      row.source.productName,
+      row.source.itemName,
+    )
+    if (key !== targetKey) continue
+    matchCount += 1
+    const hasOrderNo = Boolean(row.source.customerOrderNo.trim())
+    if (hasOrderNo && confirmedOrders.has(buildOrderFingerprint(row.source))) {
+      excludedCount += 1
+    } else {
+      guardedCount += 1
+    }
+  }
+  return { matchCount, excludedCount, guardedCount }
 }
 
 export function catalogFromStyles(
@@ -410,26 +552,30 @@ export function productNameTransformationToName(
     status:
       row.status === 'mapped' || row.status === 'candidate'
         ? ('renamed' as const)
-        : row.status === 'conflict'
-          ? ('unmapped_code' as const)
-          : row.source.ownProductCode.trim()
+        : row.status === 'excluded'
+          ? ('exception' as const)
+          : row.status === 'conflict'
             ? ('unmapped_code' as const)
-            : ('missing_code' as const),
+            : row.source.ownProductCode.trim()
+              ? ('unmapped_code' as const)
+              : ('missing_code' as const),
     matchedRuleId: row.mapId,
   }))
   return {
     rows,
     renamedRowCount:
       transformation.mappedRowCount + transformation.candidateRowCount,
-    exceptionRowCount: 0,
+    exceptionRowCount: transformation.excludedRowCount,
     unmappedCodeRowCount:
       transformation.unresolvedRowCount +
       transformation.conflictRowCount +
-      transformation.missingStyleRowCount,
+      transformation.missingStyleRowCount +
+      transformation.exclusionGuardedRowCount,
     missingCodeRowCount: transformation.rows.filter(
       (row) =>
         row.status !== 'mapped' &&
         row.status !== 'candidate' &&
+        row.status !== 'excluded' &&
         !row.source.ownProductCode.trim(),
     ).length,
     unresolvedCodes: [],

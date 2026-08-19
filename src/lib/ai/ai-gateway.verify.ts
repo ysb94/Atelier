@@ -5,8 +5,11 @@ import {
   buildLocalRecommendation,
   evaluateHybridDecision,
   extractJsonObject,
+  filterAccessoryContextDecisions,
+  filterHallucinatedAccessoryRules,
   filterHallucinatedProducts,
   missingKeyError,
+  parseAccessorySuggestJson,
   parseAnthropicModels,
   parseGeminiModels,
   parseOpenAiModels,
@@ -256,5 +259,107 @@ const tuned = tuneDecisionConfig([
 ])
 assert(tuned.aiTopN === 6, '검증으로 맞춘 설정은 상위 6개')
 assert(tuned.high >= 0.6, '로컬 정밀도를 지키는 임계값을 고른다')
+
+const accessoryParsed = parseAccessorySuggestJson(
+  {
+    reason: '키링',
+    rules: [
+      {
+        ruleType: 'token',
+        pattern: '스텔라 글러브 홀더 키링',
+        styleId: 's-1',
+        confidence: 0.9,
+        reason: '후보 일치',
+      },
+      {
+        ruleType: 'token',
+        pattern: '없는 키링',
+        styleId: 'invented',
+        confidence: 0.99,
+        reason: '환각',
+      },
+      {
+        ruleType: 'mystery',
+        pattern: '이상한 종류',
+        confidence: 0.8,
+      },
+    ],
+  },
+  candidates,
+)
+assert(accessoryParsed.rules.length === 1, '없는 styleId와 잘못된 종류는 버린다')
+assert(accessoryParsed.rules[0]?.styleId === 's-1', '허용 후보만 남긴다')
+assert(accessoryParsed.contexts.length === 0, '문맥 목록이 없으면 비운다')
+
+const accessoryFiltered = filterHallucinatedAccessoryRules(
+  [
+    {
+      ruleType: 'color',
+      pattern: 'scarlet',
+      accessoryKind: '',
+      namePrefix: '',
+      colorName: '스칼렛',
+      styleId: 'invented',
+      styleNo: 'M9',
+      name: '없는 상품',
+      reason: '',
+      confidence: 0.8,
+    },
+  ],
+  candidates,
+)
+assert(
+  accessoryFiltered.length === 1 && accessoryFiltered[0]?.styleId === '',
+  '색상 규칙은 상품 ID를 쓰지 않는다',
+)
+
+const accessoryWithContexts = parseAccessorySuggestJson(
+  {
+    reason: '문맥 분리',
+    rules: [],
+    contexts: [
+      {
+        contextId: 'ctx-a',
+        action: 'components',
+        components: [
+          { styleId: 's-1', quantity: 1 },
+          { styleId: 's-1', quantity: 2 },
+          { styleId: 'invented', quantity: 1 },
+        ],
+        reason: '허용 후보',
+      },
+      {
+        contextId: 'unknown-ctx',
+        action: 'components',
+        components: [{ styleId: 's-2', quantity: 1 }],
+        reason: '없는 문맥',
+      },
+      {
+        contextId: 'ctx-b',
+        action: 'hold',
+        reason: '보류',
+      },
+    ],
+  },
+  candidates,
+  [
+    { contextId: 'ctx-a', candidateStyleIds: ['s-1'] },
+    { contextId: 'ctx-b', candidateStyleIds: ['s-2'] },
+  ],
+)
+assert(accessoryWithContexts.contexts.length === 2, '허용된 문맥만 남긴다')
+assert(
+  accessoryWithContexts.contexts[0]?.components.length === 1 &&
+    accessoryWithContexts.contexts[0]?.components[0]?.styleId === 's-1',
+  '환각 M번호와 중복 구성품은 버린다',
+)
+assert(
+  filterAccessoryContextDecisions(
+    [{ contextId: 'ctx-a', action: 'mystery', components: [{ styleId: 's-1' }] }],
+    candidates,
+    [{ contextId: 'ctx-a', candidateStyleIds: ['s-1'] }],
+  ).length === 0,
+  '알 수 없는 action은 버린다',
+)
 
 console.log('ai-gateway verify: ok')

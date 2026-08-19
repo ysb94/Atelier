@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { formatStyleRef } from '@/components/style-picker'
+import { Download } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
@@ -10,13 +10,31 @@ import type {
 } from '@/lib/invoice/item-name-transform'
 import { formatOptionItemName } from '@/lib/invoice/option-transform'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
-import type {
-  InvoiceItemNameRule,
-  InvoiceItemNameRuleScope,
-  StyleRef,
+import {
+  INVOICE_ITEM_NAME_RULE_SCOPE_LABEL,
+  type InvoiceAccessoryRule,
+  type InvoiceItemNameRule,
+  type InvoiceItemNameRuleScope,
+  type StyleRef,
 } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
+import {
+  downloadInvoiceItemNameReviewList,
+  type InvoiceItemNameReviewEntry,
+} from '@/lib/invoice/item-name-rule-import'
+import {
+  InvoiceItemNameLookupKeyTable,
+  buildInvoiceItemNameLookupKeyRows,
+} from './InvoiceItemNameLookupKeyTable'
+import { InvoiceAccessoryAiApplyBar } from './InvoiceAccessoryAiApplyBar'
+import { InvoiceAccessoryRuleForm } from './InvoiceAccessoryRuleTable'
 import { InvoiceItemNameRuleForm } from './InvoiceItemNameRuleForm'
+import { useInvoiceAccessoryBulkAiApply } from './useInvoiceAccessoryBulkAiApply'
+
+type ItemNameEditorScope = Extract<
+  InvoiceItemNameRuleScope,
+  'global' | 'lookup_key'
+>
 
 const STATUS_META: Record<
   InvoiceItemNameMatchStatus,
@@ -39,56 +57,18 @@ type ItemReviewGroup = {
   status: 'passthrough' | 'conflict'
 }
 
-type MainBucket = {
-  key: string
-  style: StyleRef | null
-  combos: UnresolvedItemNameCombo[]
-  rowCount: number
-}
-
-function bucketKeyOf(combo: UnresolvedItemNameCombo) {
-  return combo.productStyle?.styleId ?? '__none__'
-}
-
-function groupBuckets(combos: UnresolvedItemNameCombo[]): MainBucket[] {
-  const byStyle = new Map<string, UnresolvedItemNameCombo[]>()
-  for (const combo of combos) {
-    const key = bucketKeyOf(combo)
-    const list = byStyle.get(key) ?? []
-    list.push(combo)
-    byStyle.set(key, list)
-  }
-  return [...byStyle.entries()]
-    .map(([key, items]) => ({
-      key,
-      style: items.find((item) => item.productStyle)?.productStyle ?? null,
-      combos: items,
-      rowCount: items.reduce((sum, item) => sum + item.rowCount, 0),
-    }))
-    .sort((left, right) => {
-      if (left.key === '__none__') return 1
-      if (right.key === '__none__') return -1
-      return (
-        right.rowCount - left.rowCount ||
-        (left.style?.styleNo ?? '').localeCompare(right.style?.styleNo ?? '', 'ko-KR')
-      )
-    })
-}
-
-function findItemNameRule(
+function findGlobalItemNameRule(
   rules: InvoiceItemNameRule[],
   itemName: string,
-  scope: InvoiceItemNameRuleScope,
-  mainStyleId: string | null,
 ) {
   const item = normalizeInvoiceText(itemName)
   return (
-    rules.find((rule) => {
-      if (!rule.isActive || rule.scope !== scope) return false
-      if (rule.normalizedItemName !== item) return false
-      if (scope === 'global') return true
-      return Boolean(mainStyleId) && rule.mainStyle?.styleId === mainStyleId
-    }) ?? null
+    rules.find(
+      (rule) =>
+        rule.isActive &&
+        rule.scope === 'global' &&
+        rule.normalizedItemName === item,
+    ) ?? null
   )
 }
 
@@ -141,6 +121,7 @@ function comboMatchesQuery(combo: UnresolvedItemNameCombo, query: string) {
     combo.originalItemName,
     combo.mallName,
     combo.ownProductCode,
+    combo.productLookupKey,
     combo.productStyle?.name,
     combo.productStyle?.styleNo,
   ]
@@ -216,14 +197,22 @@ function pickNextSelection(
 
 export function InvoiceItemNameTransformPanel({
   brandId,
+  brandName,
   transformation,
   itemNameRules = [],
+  accessoryRules = [],
+  styles = [],
 }: {
   brandId: string
+  brandName: string
   transformation: InvoiceItemNameTransformation
   itemNameRules?: InvoiceItemNameRule[]
+  accessoryRules?: InvoiceAccessoryRule[]
+  styles?: StyleRef[]
 }) {
   const [query, setQuery] = useState('')
+  const [downloading, setDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState<string | null>(null)
   const [status, setStatus] = useState<'all' | InvoiceItemNameMatchStatus>(
     'all',
   )
@@ -233,6 +222,13 @@ export function InvoiceItemNameTransformPanel({
   const previousGroupsRef = useRef<ItemReviewGroup[]>([])
 
   const combos = transformation.unresolvedCombos
+  const accessoryBulk = useInvoiceAccessoryBulkAiApply({
+    brandId,
+    combos,
+    accessoryRules,
+    itemNameRules,
+    styles,
+  })
   const reviewCount =
     transformation.unresolvedRowCount + transformation.conflictRowCount
 
@@ -292,6 +288,28 @@ export function InvoiceItemNameTransformPanel({
     })
   }, [query, status, transformation.rows])
 
+  /** 검색·필터에 걸린 모든 내품명의 조회 키 중 아직 규칙이 없는 건만 모은다. */
+  const reviewEntries = useMemo<InvoiceItemNameReviewEntry[]>(() => {
+    const entries: InvoiceItemNameReviewEntry[] = []
+    for (const group of groups) {
+      const lookupRows = buildInvoiceItemNameLookupKeyRows(
+        group.combos,
+        group.itemName,
+        itemNameRules,
+      )
+      for (const row of lookupRows) {
+        if (!row.selectable || row.existingRule) continue
+        entries.push({
+          itemName: group.itemName,
+          productLookupKey: row.productLookupKey,
+          styleNo: row.style?.styleNo ?? '',
+          rowCount: row.rowCount,
+        })
+      }
+    }
+    return entries
+  }, [groups, itemNameRules])
+
   function selectGroup(group: ItemReviewGroup) {
     setSelectedGroupKey(group.key)
     setSelectedComboKey(group.combos[0]?.key ?? null)
@@ -309,6 +327,12 @@ export function InvoiceItemNameTransformPanel({
         <Badge variant="success">
           내품명 지움 {formatNumber(transformation.deletedRowCount)}
         </Badge>
+        <Badge variant="success">
+          사전 구성품 {formatNumber(transformation.autoComponentsRowCount)}
+        </Badge>
+        <Badge variant="success">
+          사전 비움 {formatNumber(transformation.autoDeletedRowCount)}
+        </Badge>
         <Badge variant="danger">
           미설정·원문 유지 {formatNumber(transformation.passthroughRowCount)}
         </Badge>
@@ -319,6 +343,7 @@ export function InvoiceItemNameTransformPanel({
 
       {reviewCount > 0 ? (
         <div className="space-y-3">
+          <InvoiceAccessoryAiApplyBar bulk={accessoryBulk} />
           <div>
             <p className="text-sm font-medium">
               내품명 확인 {formatNumber(groups.length)}개
@@ -328,7 +353,7 @@ export function InvoiceItemNameTransformPanel({
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               같은 내품명은 한 줄로 묶습니다. 공통 규칙은 품목명을 보지 않고,
-              본품별 규칙은 확정된 본품 M번호마다 따로 저장합니다.
+              조회 키 규칙은 체크한 조회 키와 그때의 확정 본품 조합에만 적용합니다.
               처음부터 비어 있는 내품명과 품목명 단계에서 전부 소비된 내품명은
               여기 나오지 않습니다. / 또는 , 앞부분만 쓴 행은 남은 옵션만 남깁니다.
             </p>
@@ -359,12 +384,54 @@ export function InvoiceItemNameTransformPanel({
               <option value="passthrough">미설정·원문 유지</option>
               <option value="conflict">충돌</option>
             </Select>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={downloading || reviewEntries.length === 0}
+              onClick={async () => {
+                setDownloading(true)
+                setDownloadError(null)
+                try {
+                  await downloadInvoiceItemNameReviewList(
+                    brandName,
+                    reviewEntries,
+                  )
+                } catch (err) {
+                  setDownloadError(
+                    err instanceof Error
+                      ? err.message
+                      : '검토 목록을 내려받지 못했습니다.',
+                  )
+                } finally {
+                  setDownloading(false)
+                }
+              }}
+            >
+              <Download className="size-3.5" />
+              {downloading
+                ? '만드는 중...'
+                : `검토 목록 내려받기 ${formatNumber(reviewEntries.length)}`}
+            </Button>
           </div>
 
+          <p className="text-xs text-muted-foreground">
+            내려받은 파일에서 지울 행은 `지우기`에 Y, 구성품을 넣을 행은 `구성품
+            M번호`만 채워 기준정보 &gt; 내품명 일괄 규칙에서 올리면 한 번에
+            등록됩니다. 구성품이 여러 개면 한 칸에 `M1999,M1999,M2000`처럼 쉼표로
+            나열하고, 같은 M번호를 반복한 횟수가 수량이 됩니다. 둘 다 비운 행은
+            건너뛰니 필요한 행만 채우면 됩니다.
+          </p>
+          {downloadError ? (
+            <p className="rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">
+              {downloadError}
+            </p>
+          ) : null}
+
           {groups.length > 0 ? (
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
-              <div className="min-w-0 flex-1 overflow-hidden rounded-lg border border-border">
-                <div className="max-h-[36rem] overflow-auto">
+            <div className="space-y-4">
+              <div className="max-h-40 overflow-auto rounded-lg border border-border bg-muted/10 p-2">
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
                   {groups.map((group) => {
                     const selected = group.key === selectedGroupKey
                     const meta = STATUS_META[group.status]
@@ -374,43 +441,44 @@ export function InvoiceItemNameTransformPanel({
                         type="button"
                         aria-pressed={selected}
                         onClick={() => selectGroup(group)}
-                        className={`flex w-full items-start justify-between gap-3 border-b border-border px-3 py-2 text-left last:border-b-0 ${
+                        className={`flex min-h-16 w-full items-start justify-between gap-3 rounded-md border px-3 py-2 text-left ${
                           selected
-                            ? 'bg-primary/5'
-                            : 'hover:bg-muted/40'
+                            ? 'border-primary/50 bg-primary/10'
+                            : 'border-border bg-card hover:bg-muted/40'
                         }`}
                       >
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">
+                          <p className="break-words text-sm font-medium leading-5">
                             {group.itemName || '내품명 없음'}
                           </p>
-                          <p className="truncate text-xs text-muted-foreground">
+                          <p className="mt-1 text-xs text-muted-foreground">
                             상품 {formatNumber(group.productCount)}개 ·{' '}
                             {formatNumber(group.rowCount)}행
                           </p>
                         </div>
-                        <Badge variant={meta.variant}>{meta.label}</Badge>
+                        <Badge className="shrink-0" variant={meta.variant}>
+                          {meta.label}
+                        </Badge>
                       </button>
                     )
                   })}
                 </div>
               </div>
 
-              <aside className="min-w-0 rounded-lg border border-border bg-card p-3 lg:sticky lg:top-4 lg:w-[26rem] lg:shrink-0">
+              <section className="min-w-0 rounded-lg border border-border bg-card p-4">
                 {selectedGroup ? (
                   <ItemEditor
                     brandId={brandId}
                     group={selectedGroup}
-                    selectedComboKey={selectedComboKey}
                     rules={itemNameRules}
-                    onSelectCombo={setSelectedComboKey}
+                    accessoryCount={accessoryRules.length}
                   />
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    왼쪽에서 내품명을 고르면 여기서 규칙을 지정합니다.
+                    위에서 내품명을 고르면 여기서 규칙을 지정합니다.
                   </p>
                 )}
-              </aside>
+              </section>
             </div>
           ) : (
             <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">
@@ -445,6 +513,7 @@ export function InvoiceItemNameTransformPanel({
                   <th className="px-3 py-2 font-medium">변환 내품명</th>
                   <th className="px-3 py-2 font-medium">구성</th>
                   <th className="px-3 py-2 font-medium">상태</th>
+                  <th className="px-3 py-2 font-medium">근거</th>
                 </tr>
               </thead>
               <tbody>
@@ -470,7 +539,15 @@ export function InvoiceItemNameTransformPanel({
                           : '-'}
                       </td>
                       <td className="px-3 py-2">
-                        <Badge variant={meta.variant}>{meta.label}</Badge>
+                        <div className="flex flex-wrap gap-1">
+                          <Badge variant={meta.variant}>{meta.label}</Badge>
+                          {row.resolvedBy === 'dictionary' ? (
+                            <Badge variant="success">사전 자동</Badge>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="max-w-72 truncate px-3 py-2 text-muted-foreground">
+                        {row.evidence.join(' · ') || '-'}
                       </td>
                     </tr>
                   )
@@ -487,73 +564,49 @@ export function InvoiceItemNameTransformPanel({
 function ItemEditor({
   brandId,
   group,
-  selectedComboKey,
   rules,
-  onSelectCombo,
+  accessoryCount,
 }: {
   brandId: string
   group: ItemReviewGroup
-  selectedComboKey: string | null
   rules: InvoiceItemNameRule[]
-  onSelectCombo: (key: string) => void
+  accessoryCount: number
 }) {
-  const [scope, setScope] = useState<InvoiceItemNameRuleScope>('global')
-  const [selectedBucketKey, setSelectedBucketKey] = useState<string | null>(null)
-  const buckets = useMemo(() => groupBuckets(group.combos), [group.combos])
-  const selectedBucket =
-    buckets.find((bucket) => bucket.key === selectedBucketKey) ??
-    buckets[0] ??
-    null
-  const selectedCombo =
-    selectedBucket?.combos.find((combo) => combo.key === selectedComboKey) ??
-    selectedBucket?.combos[0] ??
-    group.combos[0] ??
-    null
-  const existingRule = findItemNameRule(
-    rules,
-    group.itemName,
-    scope,
-    scope === 'main_style' ? (selectedBucket?.style?.styleId ?? null) : null,
+  const [scope, setScope] = useState<ItemNameEditorScope>('global')
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([])
+  const lookupRows = useMemo(
+    () =>
+      buildInvoiceItemNameLookupKeyRows(group.combos, group.itemName, rules),
+    [group.combos, group.itemName, rules],
   )
-  const consumed =
-    Boolean(selectedCombo?.originalItemName) &&
-    selectedCombo?.originalItemName !== selectedCombo.itemName
+  const existingRule =
+    scope === 'global' ? findGlobalItemNameRule(rules, group.itemName) : null
+  const selectedRows = lookupRows.filter(
+    (row) => row.selectable && selectedKeys.includes(row.key),
+  )
+  const consumedCombo =
+    group.combos.find(
+      (combo) =>
+        Boolean(combo.originalItemName) &&
+        combo.originalItemName !== combo.itemName,
+    ) ?? null
+  const unknownPieces = [
+    ...new Set(group.combos.flatMap((combo) => combo.unknownPieces)),
+  ]
+  const [registerPiece, setRegisterPiece] = useState(unknownPieces[0] ?? '')
 
   useEffect(() => {
-    if (scope !== 'main_style') return
-    const current = buckets.find((bucket) => bucket.key === selectedBucketKey)
-    if (current && current.key !== '__none__') return
-    const nextUnsaved =
-      buckets.find(
-        (bucket) =>
-          bucket.key !== '__none__' &&
-          !findItemNameRule(
-            rules,
-            group.itemName,
-            'main_style',
-            bucket.style?.styleId ?? null,
-          ),
-      ) ??
-      buckets.find((bucket) => bucket.key !== '__none__') ??
-      buckets[0] ??
-      null
-    if (nextUnsaved && nextUnsaved.key !== selectedBucketKey) {
-      setSelectedBucketKey(nextUnsaved.key)
-      onSelectCombo(nextUnsaved.combos[0]?.key ?? '')
-    }
-  }, [
-    buckets,
-    group.itemName,
-    onSelectCombo,
-    rules,
-    scope,
-    selectedBucketKey,
-  ])
+    setSelectedKeys([])
+    setRegisterPiece(unknownPieces[0] ?? '')
+  }, [group.key])
 
-  function selectBucket(bucket: MainBucket) {
-    setSelectedBucketKey(bucket.key)
-    onSelectCombo(bucket.combos[0]?.key ?? '')
-  }
+  useEffect(() => {
+    setSelectedKeys((current) =>
+      current.filter((key) =>
+        lookupRows.some((row) => row.selectable && row.key === key),
+      ),
+    )
+  }, [lookupRows])
 
   return (
     <div className="space-y-3">
@@ -565,59 +618,80 @@ function ItemEditor({
           상품 {formatNumber(group.productCount)}개 ·{' '}
           {formatNumber(group.rowCount)}행
         </p>
-        {consumed && selectedCombo ? (
+        {unknownPieces.length > 0 ? (
+          <div className="mt-3 space-y-2 rounded-lg border border-border bg-muted/20 p-3">
+            <p className="text-xs font-medium">사전에 없는 조각</p>
+            <p className="text-xs text-muted-foreground">
+              {accessoryCount === 0
+                ? '부속품 사전이 비어 있습니다. 기준정보에서 권장 사전을 등록하면 같은 표기는 다음부터 자동으로 잡힙니다.'
+                : '이 조각을 사전에 등록하면 같은 표기는 다음부터 자동으로 잡힙니다.'}
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {unknownPieces.map((piece) => (
+                <button
+                  key={piece}
+                  type="button"
+                  onClick={() => setRegisterPiece(piece)}
+                  className={`rounded-md border px-2 py-1 text-xs ${
+                    registerPiece === piece
+                      ? 'border-primary/50 bg-primary/10'
+                      : 'border-border bg-card'
+                  }`}
+                >
+                  {piece}
+                </button>
+              ))}
+            </div>
+            {registerPiece ? (
+              <InvoiceAccessoryRuleForm
+                key={registerPiece}
+                brandId={brandId}
+                initialPattern={registerPiece}
+                initialType="token"
+              />
+            ) : null}
+          </div>
+        ) : null}
+        {consumedCombo ? (
           <p className="mt-1 break-words text-xs text-muted-foreground">
-            <span className="line-through">{selectedCombo.originalItemName}</span>
+            <span className="line-through">{consumedCombo.originalItemName}</span>
             <span className="mx-1">→</span>
             <span className="font-medium text-foreground">
-              {selectedCombo.itemName || '남은 내품명 없음'}
+              {consumedCombo.itemName || '남은 내품명 없음'}
             </span>
           </p>
         ) : null}
       </div>
 
-      {scope === 'main_style' && buckets.length > 0 ? (
-        <div className="space-y-1">
-          <p className="text-xs font-medium">확정 본품</p>
-          <div className="max-h-40 overflow-auto rounded-md border border-border">
-            {buckets.map((bucket) => {
-              const selected = bucket.key === selectedBucket?.key
-              const saved = Boolean(
-                bucket.style &&
-                  findItemNameRule(
-                    rules,
-                    group.itemName,
-                    'main_style',
-                    bucket.style.styleId,
-                  ),
-              )
-              return (
-                <button
-                  key={bucket.key}
-                  type="button"
-                  aria-pressed={selected}
-                  onClick={() => selectBucket(bucket)}
-                  className={`flex w-full items-start justify-between gap-2 border-b border-border px-2 py-1.5 text-left last:border-b-0 ${
-                    selected ? 'bg-primary/10' : 'hover:bg-muted/40'
-                  }`}
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-medium">
-                      {bucket.style
-                        ? formatStyleRef(bucket.style)
-                        : '본품 미확정'}
-                    </p>
-                    <p className="truncate text-xs text-muted-foreground">
-                      {formatNumber(bucket.rowCount)}행
-                      {saved ? ' · 규칙 있음' : ''}
-                      {!bucket.style ? ' · 본품별 규칙 불가' : ''}
-                    </p>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
+      <fieldset className="space-y-1.5">
+        <legend className="text-xs font-medium">적용 범위</legend>
+        <div className="grid grid-cols-2 gap-1">
+          {(['global', 'lookup_key'] as const).map((value) => (
+            <Button
+              key={value}
+              type="button"
+              size="sm"
+              variant={scope === value ? 'default' : 'outline'}
+              aria-pressed={scope === value}
+              onClick={() => setScope(value)}
+            >
+              {INVOICE_ITEM_NAME_RULE_SCOPE_LABEL[value]}
+            </Button>
+          ))}
         </div>
+        <p className="text-xs text-muted-foreground">
+          {scope === 'global'
+            ? '쇼핑몰과 품목명을 보지 않고 이 브랜드의 같은 내품명에 모두 적용합니다.'
+            : '체크한 조회 키와 그때의 확정 본품 조합에만 적용합니다. 체크하지 않은 조회 키는 그대로 둡니다.'}
+        </p>
+      </fieldset>
+
+      {scope === 'lookup_key' ? (
+        <InvoiceItemNameLookupKeyTable
+          rows={lookupRows}
+          selectedKeys={selectedKeys}
+          onChangeSelectedKeys={setSelectedKeys}
+        />
       ) : (
         <p className="text-xs text-muted-foreground">
           이 내품명이 붙은 상품 {formatNumber(group.productCount)}개를 함께
@@ -626,13 +700,12 @@ function ItemEditor({
       )}
 
       <InvoiceItemNameRuleForm
-        key={`${group.key}-${scope}-${selectedBucket?.key ?? 'none'}`}
+        key={`${group.key}-${scope}`}
         brandId={brandId}
         itemName={group.itemName}
         scope={scope}
-        onScopeChange={setScope}
-        mainStyle={scope === 'main_style' ? (selectedBucket?.style ?? null) : null}
         existingRule={existingRule}
+        selectedRows={scope === 'lookup_key' ? selectedRows : []}
       />
     </div>
   )

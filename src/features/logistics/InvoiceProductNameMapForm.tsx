@@ -8,6 +8,7 @@ import {
   type InvoiceProductNameMapInput,
 } from '@/lib/api'
 import type { InvoiceProductNameMap, StyleRef } from '@/lib/types'
+import { upsertInvoiceProductNameMapCache } from './useInvoiceProductNameSaveQueue'
 
 export function InvoiceProductNameMapForm({
   brandId,
@@ -78,10 +79,10 @@ export function InvoiceProductNameMapForm({
   const mutation = useMutation({
     mutationFn: (input: InvoiceProductNameMapInput) =>
       saveInvoiceProductNameMap(brandId, input, map?.id),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ['invoice-product-name-maps', brandId],
-      })
+    onSuccess: (saved) => {
+      // 저장 API가 완성된 행을 돌려주므로, 1만여 건 전체를 다시 읽지 않는다.
+      // 같은 React Query 캐시를 쓰는 품목명 단계와 기준 표가 즉시 함께 갱신된다.
+      void upsertInvoiceProductNameMapCache(queryClient, brandId, saved)
       setSavedMessage('저장했습니다. 품목명 단계에만 바로 다시 쓰입니다.')
       if (!lockSource && !map) {
         setProductName('')

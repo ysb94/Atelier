@@ -1,5 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import {
+  ACCESSORY_FEATURE_KEY,
+  buildAccessorySuggestPrompt,
   buildLocalRecommendation,
   buildRecommendPrompt,
   clampTextList,
@@ -8,6 +10,7 @@ import {
   isAiProvider,
   missingKeyError,
   normalizeUsage,
+  parseAccessorySuggestJson,
   parseAnthropicModels,
   parseDecisionConfig,
   parseGeminiModels,
@@ -35,6 +38,31 @@ type GatewayRequest =
       productName?: string
       itemName?: string
       mallName?: string
+    }
+  | {
+      action: 'recommend_accessory_rules'
+      brandId: string
+      featureKey?: string
+      unknownPiece: string
+      itemNames?: string[]
+      lookupKeys?: string[]
+      mainProducts?: string[]
+      contexts?: Array<{
+        contextId: string
+        itemName: string
+        productLookupKey: string
+        mainProduct: string
+        unknownPieces?: string[]
+        candidateStyleIds?: string[]
+      }>
+      dictionary?: Array<{
+        ruleType: string
+        pattern: string
+        accessoryKind?: string
+        namePrefix?: string
+        colorName?: string
+      }>
+      candidates: ProductCandidate[]
     }
 
 Deno.serve(async (req) => {
@@ -79,6 +107,9 @@ Deno.serve(async (req) => {
       return json(
         await recommendProduct(supabase, user.id, body),
       )
+    }
+    if (body.action === 'recommend_accessory_rules') {
+      return json(await recommendAccessoryRules(supabase, user.id, body))
     }
     return json({ ok: false, error: '지원하지 않는 action입니다.' }, 400)
   } catch (error) {
@@ -357,6 +388,183 @@ async function recommendProduct(
   }
 }
 
+async function recommendAccessoryRules(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  body: Extract<GatewayRequest, { action: 'recommend_accessory_rules' }>,
+) {
+  const brandId = String(body.brandId ?? '').trim()
+  const featureKey = String(body.featureKey ?? ACCESSORY_FEATURE_KEY).trim()
+  if (!brandId) throw new Error('brandId가 필요합니다.')
+  const unknownPiece = String(body.unknownPiece ?? '').trim()
+  if (!unknownPiece) throw new Error('unknownPiece가 필요합니다.')
+
+  const itemNames = clampTextList(body.itemNames ?? [], 8, 200)
+  const lookupKeys = clampTextList(body.lookupKeys ?? [], 8, 200)
+  const mainProducts = clampTextList(body.mainProducts ?? [], 8, 120)
+  const candidates = (body.candidates ?? []).slice(0, MAX_CANDIDATES)
+  const dictionary = (body.dictionary ?? []).slice(0, 40)
+  const contexts = (body.contexts ?? []).slice(0, 8).map((item) => ({
+    contextId: String(item.contextId ?? '').trim(),
+    itemName: String(item.itemName ?? '').trim().slice(0, 200),
+    productLookupKey: String(item.productLookupKey ?? '').trim().slice(0, 200),
+    mainProduct: String(item.mainProduct ?? '').trim().slice(0, 120),
+    unknownPieces: clampTextList(item.unknownPieces ?? [], 6, 120),
+    candidateStyleIds: (item.candidateStyleIds ?? [])
+      .map((value) => String(value).trim())
+      .filter(Boolean)
+      .slice(0, MAX_CANDIDATES),
+  })).filter((item) => item.contextId)
+
+  const { data: route, error: routeError } = await supabase
+    .from('ai_feature_routes')
+    .select('provider, model_id, is_active, recommendation_policy, decision_config')
+    .eq('brand_id', brandId)
+    .eq('feature_key', featureKey)
+    .maybeSingle()
+  if (routeError) throw new Error(routeError.message)
+  if (!route || !route.is_active) {
+    throw new Error('이 브랜드의 부속품 AI 모델이 아직 설정되지 않았습니다.')
+  }
+  if (!isAiProvider(route.provider)) {
+    throw new Error('지원하지 않는 provider입니다.')
+  }
+
+  const started = Date.now()
+  const cacheKey = await recommendationCacheKey({
+    brandId,
+    featureKey,
+    provider: route.provider,
+    modelId: route.model_id,
+    policy: String(route.recommendation_policy ?? 'always_ai'),
+    config: parseDecisionConfig(route.decision_config),
+    mallName: dictionary
+      .map((item) => `${item.ruleType}:${item.pattern}`)
+      .join('|'),
+    productName: unknownPiece,
+    itemName: [
+      itemNames.join('|'),
+      contexts
+        .map(
+          (item) =>
+            `${item.contextId}:${item.itemName}:${item.productLookupKey}:${item.candidateStyleIds.join(',')}`,
+        )
+        .join('|'),
+    ].join('||'),
+    lookupKeys,
+    candidates,
+  })
+  const cached = await readRecommendationCache(supabase, brandId, featureKey, cacheKey)
+  if (cached) {
+    await insertUsageLog(supabase, {
+      brandId,
+      userId,
+      featureKey,
+      provider: route.provider,
+      modelId: route.model_id,
+      action: 'recommend_accessory_rules',
+      status: 'ok',
+      usage: normalizeUsage(null, null),
+      errorCode: '',
+      resolutionSource: 'cache',
+      skippedAi: true,
+      cacheHit: true,
+      candidateCount: candidates.length,
+      latencyMs: Date.now() - started,
+    })
+    return {
+      ok: true,
+      provider: route.provider,
+      modelId: route.model_id,
+      source: 'cache',
+      cacheId: cached.id,
+      skippedAi: true,
+      cacheHit: true,
+      recommendation: cached.recommendation,
+    }
+  }
+
+  const prompt = buildAccessorySuggestPrompt({
+    unknownPiece,
+    itemNames,
+    lookupKeys,
+    mainProducts,
+    contexts,
+    dictionary,
+    candidates,
+  })
+
+  let usage = normalizeUsage(null, null)
+  try {
+    const completed = await completeJson(route.provider, route.model_id, prompt, {
+      maxTokens: 1200,
+    })
+    usage = completed.usage
+    const recommendation = parseAccessorySuggestJson(
+      extractJsonObject(completed.text),
+      candidates,
+      contexts,
+    )
+    const cacheId = await writeRecommendationCache(supabase, {
+      brandId,
+      featureKey,
+      cacheKey,
+      provider: route.provider,
+      modelId: route.model_id,
+      policy: String(route.recommendation_policy ?? 'always_ai'),
+      lookupKeys,
+      candidates,
+      recommendation,
+      usage,
+    })
+    await insertUsageLog(supabase, {
+      brandId,
+      userId,
+      featureKey,
+      provider: route.provider,
+      modelId: route.model_id,
+      action: 'recommend_accessory_rules',
+      status: 'ok',
+      usage,
+      errorCode: '',
+      resolutionSource: 'ai',
+      skippedAi: false,
+      cacheHit: false,
+      candidateCount: candidates.length,
+      latencyMs: Date.now() - started,
+    })
+    return {
+      ok: true,
+      provider: route.provider,
+      modelId: route.model_id,
+      source: 'ai',
+      cacheId,
+      skippedAi: false,
+      cacheHit: false,
+      recommendation,
+      usage,
+    }
+  } catch (error) {
+    await insertUsageLog(supabase, {
+      brandId,
+      userId,
+      featureKey,
+      provider: route.provider,
+      modelId: route.model_id,
+      action: 'recommend_accessory_rules',
+      status: 'error',
+      usage,
+      errorCode: error instanceof Error ? error.message.slice(0, 180) : 'unknown',
+      resolutionSource: 'ai',
+      skippedAi: false,
+      cacheHit: false,
+      candidateCount: candidates.length,
+      latencyMs: Date.now() - started,
+    })
+    throw error
+  }
+}
+
 async function insertUsageLog(
   supabase: ReturnType<typeof createClient>,
   input: {
@@ -365,6 +573,7 @@ async function insertUsageLog(
     featureKey: string
     provider: AiProvider
     modelId: string
+    action?: string
     status: 'ok' | 'error'
     usage: ReturnType<typeof normalizeUsage>
     errorCode: string
@@ -381,7 +590,7 @@ async function insertUsageLog(
     feature_key: input.featureKey,
     provider: input.provider,
     model_id: input.modelId,
-    action: 'recommend_product',
+    action: input.action ?? 'recommend_product',
     status: input.status,
     input_tokens: input.usage.inputTokens,
     output_tokens: input.usage.outputTokens,
@@ -468,7 +677,7 @@ async function writeRecommendationCache(
     policy: string
     lookupKeys: string[]
     candidates: ProductCandidate[]
-    recommendation: ReturnType<typeof parseRecommendJson>
+    recommendation: unknown
     usage: ReturnType<typeof normalizeUsage>
   },
 ) {
@@ -502,13 +711,14 @@ async function completeJson(
   provider: AiProvider,
   modelId: string,
   prompt: { system: string; user: string },
+  options: { maxTokens?: number } = {},
 ) {
   const key = requireApiKey(provider)
   if (provider === 'openai') {
     return completeOpenAi(key, modelId, prompt)
   }
   if (provider === 'anthropic') {
-    return completeAnthropic(key, modelId, prompt)
+    return completeAnthropic(key, modelId, prompt, options.maxTokens ?? 500)
   }
   return completeGemini(key, modelId, prompt)
 }
@@ -548,6 +758,7 @@ async function completeAnthropic(
   key: string,
   modelId: string,
   prompt: { system: string; user: string },
+  maxTokens = 500,
 ) {
   const payload = await providerFetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
@@ -557,7 +768,7 @@ async function completeAnthropic(
     },
     body: JSON.stringify({
       model: modelId,
-      max_tokens: 500,
+      max_tokens: maxTokens,
       system: prompt.system,
       messages: [{ role: 'user', content: prompt.user }],
     }),

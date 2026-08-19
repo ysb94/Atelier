@@ -18,6 +18,7 @@ import { withRecommendSlot } from '@/lib/ai/recommend-queue'
 import {
   getAiFeatureRoute,
   recommendInvoiceProduct,
+  saveInvoiceProductNameExclusion,
   saveInvoiceProductNameTagRole,
   searchInvoiceProductCandidates,
 } from '@/lib/api'
@@ -26,6 +27,7 @@ import type {
   InvoiceProductNameTransformation,
   UnresolvedProductNameCombo,
 } from '@/lib/invoice/product-name-transform'
+import { previewProductNameExclusion } from '@/lib/invoice/product-name-transform'
 import {
   collectFileTagGroups,
   type FileTagGroup,
@@ -36,6 +38,7 @@ import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import type {
   AiProductRecommendation,
   InvoiceOptionMap,
+  InvoiceProductNameExclusion,
   InvoiceProductNameMap,
   InvoiceProductNameTagRole,
   StyleRef,
@@ -63,17 +66,21 @@ import {
 
 const STATUS_META: Record<
   InvoiceProductNameMatchStatus,
-  { label: string; variant: 'success' | 'default' | 'warning' | 'danger' }
+  {
+    label: string
+    variant: 'success' | 'default' | 'warning' | 'danger' | 'muted'
+  }
 > = {
   mapped: { label: '자동 완료', variant: 'success' },
   candidate: { label: '후보 1개', variant: 'default' },
   missing_style: { label: 'M번호 발급 필요', variant: 'warning' },
   conflict: { label: '충돌', variant: 'warning' },
   unresolved: { label: '검토 필요', variant: 'danger' },
+  excluded: { label: '송장 제외', variant: 'muted' },
+  exclusion_guarded: { label: '제외 보류', variant: 'warning' },
 }
 
 const RULE_LABELS: Record<string, string> = {
-  own_code: '자체상품코드',
   product: '품목명 단독',
   product_item: '품목명 + 내품명 전체',
   product_item_slash_prefix: '품목명 + 내품명 / 앞부분',
@@ -177,9 +184,33 @@ export function InvoiceProductNameTransformPanel({
     undo,
   } = useInvoiceProductNameSaveQueue(brandId)
 
+  const excludeMutation = useMutation({
+    mutationFn: (input: {
+      mallName: string
+      productName: string
+      itemName: string
+    }) => saveInvoiceProductNameExclusion(brandId, input),
+    onSuccess: (saved) => {
+      queryClient.setQueryData<InvoiceProductNameExclusion[]>(
+        ['invoice-product-name-exclusions', brandId],
+        (current) => {
+          const next = current ? current.filter((item) => item.id !== saved.id) : []
+          return [saved, ...next]
+        },
+      )
+    },
+  })
+
   useEffect(() => {
-    onBlockingSaveCountChange?.(savingCount + failedCount)
-  }, [failedCount, onBlockingSaveCountChange, savingCount])
+    onBlockingSaveCountChange?.(
+      savingCount + failedCount + (excludeMutation.isPending ? 1 : 0),
+    )
+  }, [
+    excludeMutation.isPending,
+    failedCount,
+    onBlockingSaveCountChange,
+    savingCount,
+  ])
 
   useEffect(
     () => () => {
@@ -202,7 +233,9 @@ export function InvoiceProductNameTransformPanel({
   )
   const bulk = useInvoiceProductNameBulkAiApply({
     brandId,
-    combos: visibleCombos,
+    combos: visibleCombos.filter(
+      (combo) => combo.status !== 'exclusion_guarded',
+    ),
     enqueue,
   })
 
@@ -430,6 +463,12 @@ export function InvoiceProductNameTransformPanel({
         <Badge variant="danger">
           검토 필요 {formatNumber(transformation.unresolvedRowCount)}
         </Badge>
+        <Badge variant="muted">
+          송장 제외 {formatNumber(transformation.excludedRowCount)}
+        </Badge>
+        <Badge variant="warning">
+          제외 보류 {formatNumber(transformation.exclusionGuardedRowCount)}
+        </Badge>
       </div>
 
       {fileTags.length > 0 ? (
@@ -585,7 +624,14 @@ export function InvoiceProductNameTransformPanel({
             ) : null}
           </div>
 
-          <BulkAiApplyBar targetCount={visibleCombos.length} bulk={bulk} />
+          <BulkAiApplyBar
+            targetCount={
+              visibleCombos.filter(
+                (combo) => combo.status !== 'exclusion_guarded',
+              ).length
+            }
+            bulk={bulk}
+          />
           {groups.length > 0 ? (
             <div className="space-y-2">
               {groups.map((group) => (
@@ -602,6 +648,41 @@ export function InvoiceProductNameTransformPanel({
                     }),
                   )}
                   onEnqueue={enqueue}
+                  onExclude={(combo) => {
+                    if (!combo.mallName.trim()) return
+                    const impact = previewProductNameExclusion(
+                      transformation.rows,
+                      combo,
+                    )
+                    const confirmed = window.confirm(
+                      [
+                        `${combo.mallName}의 품목명 "${combo.productName}", 내품명 "${combo.itemName}"만 송장에서 뺍니다.`,
+                        `이 파일에서 ${formatNumber(impact.matchCount)}행이 맞습니다.`,
+                        impact.excludedCount > 0
+                          ? `같은 주문에 본품이 확정된 행이 있어 ${formatNumber(impact.excludedCount)}행은 최종 송장에서 제외됩니다.`
+                          : '같은 주문에 본품이 확정된 행이 없으면 원문을 남기고 제외 보류로 표시합니다.',
+                        impact.guardedCount > 0 && impact.excludedCount > 0
+                          ? `단독 행 ${formatNumber(impact.guardedCount)}건은 제외하지 않고 검토에 남깁니다.`
+                          : '',
+                      ]
+                        .filter(Boolean)
+                        .join('\n'),
+                    )
+                    if (!confirmed) return
+                    excludeMutation.mutate({
+                      mallName: combo.mallName,
+                      productName: combo.productName,
+                      itemName: combo.itemName,
+                    })
+                  }}
+                  excludePending={excludeMutation.isPending}
+                  excludeError={
+                    excludeMutation.error instanceof Error
+                      ? excludeMutation.error.message
+                      : excludeMutation.error
+                        ? '송장 제외 기준을 저장하지 못했습니다.'
+                        : null
+                  }
                   onToggle={() =>
                     setOpenProductName((current) =>
                       current === group.productName ? null : group.productName,
@@ -644,6 +725,8 @@ export function InvoiceProductNameTransformPanel({
           <option value="missing_style">M번호 발급 필요</option>
           <option value="conflict">충돌</option>
           <option value="unresolved">검토 필요</option>
+          <option value="excluded">송장 제외</option>
+          <option value="exclusion_guarded">제외 보류</option>
         </Select>
       </div>
 
@@ -1041,6 +1124,9 @@ function ProductReviewGroupCard({
   open,
   drafts,
   onEnqueue,
+  onExclude,
+  excludePending,
+  excludeError,
   onToggle,
 }: {
   brandId: string
@@ -1048,6 +1134,9 @@ function ProductReviewGroupCard({
   open: boolean
   drafts: Record<string, ProductMapSaveDraft>
   onEnqueue: (job: ProductMapEnqueueInput) => void
+  onExclude: (combo: UnresolvedProductNameCombo) => void
+  excludePending: boolean
+  excludeError: string | null
   onToggle: () => void
 }) {
   const variantCount = group.combos.length
@@ -1196,6 +1285,9 @@ function ProductReviewGroupCard({
                 draft={drafts[combo.key] ?? null}
                 variantCount={variantCount}
                 onEnqueue={onEnqueue}
+                onExclude={() => onExclude(combo)}
+                excludePending={excludePending}
+                excludeError={excludeError}
                 onReadyChange={markReady}
               />
             ))}
@@ -1231,10 +1323,23 @@ const VariantAssignRow = forwardRef<
     draft: ProductMapSaveDraft | null
     variantCount: number
     onEnqueue: (job: ProductMapEnqueueInput) => void
+    onExclude: () => void
+    excludePending: boolean
+    excludeError: string | null
     onReadyChange?: (comboKey: string, ready: boolean) => void
   }
 >(function VariantAssignRow(
-  { brandId, combo, draft, variantCount, onEnqueue, onReadyChange },
+  {
+    brandId,
+    combo,
+    draft,
+    variantCount,
+    onEnqueue,
+    onExclude,
+    excludePending,
+    excludeError,
+    onReadyChange,
+  },
   ref,
 ) {
   const queryClient = useQueryClient()
@@ -1270,7 +1375,10 @@ const VariantAssignRow = forwardRef<
     )
   })
   const extrasReady = extras.every((item) => item.style)
-  const canRegister = Boolean(selectedLookupKey && style && extrasReady)
+  const isGuarded = combo.status === 'exclusion_guarded'
+  const canExclude = Boolean(combo.mallName.trim()) && !isGuarded
+  const canRegister =
+    !isGuarded && Boolean(selectedLookupKey && style && extrasReady)
   const [lookupTouched, setLookupTouched] = useState(Boolean(draft?.lookupKey))
   const [styleTouched, setStyleTouched] = useState(Boolean(draft?.style))
   const [pickedRecommendation, setPickedRecommendation] =
@@ -1425,29 +1533,56 @@ const VariantAssignRow = forwardRef<
           )}
 
           <div className="mt-2 flex flex-wrap items-end gap-2">
-            <div className="min-w-[16rem] flex-1">
-              <StylePicker
-                brandId={brandId}
-                value={style}
-                onChange={(next) => {
-                  setStyle(next)
-                  setStyleTouched(true)
-                  clearDraftMessage()
-                }}
-                placeholder="본품 1개만 고르세요"
-              />
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              disabled={!canRegister}
-              onClick={() => {
-                register()
-              }}
-            >
-              등록
-            </Button>
+            {isGuarded ? (
+              <p className="text-xs text-muted-foreground">
+                같은 주문에 본품이 확정된 행이 없어 원문을 유지합니다. 최종
+                송장에서는 빼지 않습니다.
+              </p>
+            ) : (
+              <>
+                <div className="min-w-[16rem] flex-1">
+                  <StylePicker
+                    brandId={brandId}
+                    value={style}
+                    onChange={(next) => {
+                      setStyle(next)
+                      setStyleTouched(true)
+                      clearDraftMessage()
+                    }}
+                    placeholder="본품 1개만 고르세요"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={!canRegister}
+                  onClick={() => {
+                    register()
+                  }}
+                >
+                  등록
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!canExclude || excludePending}
+                  title={
+                    canExclude
+                      ? '이 쇼핑몰의 이 품목명·내품명만 최종 송장에서 뺍니다.'
+                      : '쇼핑몰명이 있는 조합만 송장에서 뺄 수 있습니다.'
+                  }
+                  onClick={onExclude}
+                >
+                  {excludePending ? '저장 중' : '미선택 옵션 · 송장 제외'}
+                </Button>
+              </>
+            )}
           </div>
+          {excludeError && !isGuarded ? (
+            <p className="mt-1 text-xs text-danger">{excludeError}</p>
+          ) : null}
+          {isGuarded ? null : (
           <div className="mt-2">
             <InvoiceOptionExtrasEditor
               brandId={brandId}
@@ -1459,7 +1594,8 @@ const VariantAssignRow = forwardRef<
               compact
             />
           </div>
-          {localError ? (
+          )}
+          {isGuarded ? null : localError ? (
             <p className="mt-1 text-xs text-danger">{localError}</p>
           ) : selectedLookupKey && style && extrasReady ? (
             <p className="mt-1 break-words text-xs text-muted-foreground">
@@ -1485,6 +1621,7 @@ const VariantAssignRow = forwardRef<
             </p>
           ) : null}
         </div>
+        {isGuarded ? null : (
         <AiRecommendPanel
           brandId={brandId}
           combo={combo}
@@ -1513,6 +1650,7 @@ const VariantAssignRow = forwardRef<
             if (filled) setPickedRecommendation(recommendation)
           }}
         />
+        )}
       </div>
     </div>
   )

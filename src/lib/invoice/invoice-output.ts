@@ -37,7 +37,9 @@ function canExpandInvoiceBundle(options: {
   if (
     options.productStatus === 'conflict' ||
     options.productStatus === 'unresolved' ||
-    options.productStatus === 'missing_style'
+    options.productStatus === 'missing_style' ||
+    options.productStatus === 'excluded' ||
+    options.productStatus === 'exclusion_guarded'
   ) {
     return false
   }
@@ -91,8 +93,9 @@ export function buildInvoiceOutputRows(options: {
 
   for (const transformed of options.transformedRows) {
     const source = transformed.source
-    const work = options.workMatches.get(source.rowNumber)
     const product = productBySource.get(source.rowNumber)
+    if (product?.status === 'excluded') continue
+    const work = options.workMatches.get(source.rowNumber)
     const item = itemBySource.get(source.rowNumber)
     const option = optionBySource.get(source.rowNumber)
     const baseName =

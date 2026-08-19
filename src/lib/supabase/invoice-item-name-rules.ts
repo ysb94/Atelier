@@ -11,7 +11,8 @@ import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 
 const RULE_COLUMNS =
-  'id, brand_id, scope, main_style_id, item_name, normalized_item_name, action, is_active, note, created_at, updated_at'
+  'id, brand_id, scope, main_style_id, item_name, normalized_item_name, product_lookup_key, normalized_product_lookup_key, action, is_active, note, created_at, updated_at'
+const LOOKUP_SAVE_CONCURRENCY = 4
 const COMPONENT_EMBED =
   'invoice_item_name_rule_components(id, rule_id, style_id, role, quantity, sort_order, styles!invoice_item_name_rule_components_style_fkey(id, style_no, name))'
 const MAIN_STYLE_EMBED =
@@ -42,6 +43,8 @@ type RuleRow = {
   main_style_id: string | null
   item_name: string
   normalized_item_name: string
+  product_lookup_key: string
+  normalized_product_lookup_key: string
   action: string
   is_active: boolean
   note: string
@@ -83,7 +86,9 @@ function parseComponentRole(
 }
 
 function parseScope(value: string): InvoiceItemNameRuleScope | null {
-  if (value === 'global' || value === 'main_style') return value
+  if (value === 'global' || value === 'main_style' || value === 'lookup_key') {
+    return value
+  }
   return null
 }
 
@@ -111,7 +116,9 @@ function toRule(row: RuleRow): InvoiceItemNameRule | null {
   const action = parseAction(row.action)
   if (!scope || !action) return null
   const mainStyle = styleFromEmbed(row.styles)
-  if (scope === 'main_style' && !mainStyle) return null
+  if ((scope === 'main_style' || scope === 'lookup_key') && !mainStyle) {
+    return null
+  }
   const components = [...(row.invoice_item_name_rule_components ?? [])]
     .map(toComponent)
     .filter((item): item is InvoiceItemNameRuleComponent => Boolean(item))
@@ -123,6 +130,8 @@ function toRule(row: RuleRow): InvoiceItemNameRule | null {
     mainStyle: mainStyle ? toStyleRef(mainStyle) : null,
     itemName: row.item_name,
     normalizedItemName: row.normalized_item_name,
+    productLookupKey: row.product_lookup_key ?? '',
+    normalizedProductLookupKey: row.normalized_product_lookup_key ?? '',
     action,
     isActive: row.is_active,
     note: row.note,
@@ -141,6 +150,7 @@ export type InvoiceItemNameRuleComponentInput = {
 export type InvoiceItemNameRuleInput = {
   scope: InvoiceItemNameRuleScope
   mainStyleId?: string | null
+  productLookupKey?: string | null
   itemName: string
   action: InvoiceItemNameRuleAction
   isActive?: boolean
@@ -148,19 +158,43 @@ export type InvoiceItemNameRuleInput = {
   components?: InvoiceItemNameRuleComponentInput[]
 }
 
+export type InvoiceItemNameRuleBulkFailure = {
+  productLookupKey: string
+  mainStyleId: string
+  message: string
+}
+
+export type InvoiceItemNameRuleBulkResult = {
+  applied: InvoiceItemNameRule[]
+  failed: InvoiceItemNameRuleBulkFailure[]
+}
+
 function validateInput(input: InvoiceItemNameRuleInput) {
   const itemName = input.itemName.trim()
   if (!itemName) {
     throw new InvoiceItemNameRuleStoreError('내품명을 입력하세요.')
   }
-  if (input.scope === 'main_style' && !input.mainStyleId?.trim()) {
+  if (
+    (input.scope === 'main_style' || input.scope === 'lookup_key') &&
+    !input.mainStyleId?.trim()
+  ) {
     throw new InvoiceItemNameRuleStoreError(
-      '본품별 규칙은 확정된 본품 M번호가 필요합니다.',
+      input.scope === 'lookup_key'
+        ? '조회 키 규칙은 확정된 본품 M번호가 필요합니다.'
+        : '본품별 규칙은 확정된 본품 M번호가 필요합니다.',
     )
+  }
+  if (input.scope === 'lookup_key' && !input.productLookupKey?.trim()) {
+    throw new InvoiceItemNameRuleStoreError('조회 키를 입력하세요.')
   }
   if (input.scope === 'global' && input.mainStyleId?.trim()) {
     throw new InvoiceItemNameRuleStoreError(
       '공통 규칙에는 본품 M번호를 넣지 않습니다.',
+    )
+  }
+  if (input.scope !== 'lookup_key' && input.productLookupKey?.trim()) {
+    throw new InvoiceItemNameRuleStoreError(
+      '공통·본품별 규칙에는 조회 키를 넣지 않습니다.',
     )
   }
   const components = input.components ?? []
@@ -192,13 +226,17 @@ function validateInput(input: InvoiceItemNameRuleInput) {
 function payloadFromInput(brandId: string, input: InvoiceItemNameRuleInput) {
   const itemName = input.itemName.trim()
   const mainStyleId =
-    input.scope === 'main_style' ? input.mainStyleId?.trim() || null : null
+    input.scope === 'global' ? null : input.mainStyleId?.trim() || null
+  const productLookupKey =
+    input.scope === 'lookup_key' ? input.productLookupKey?.trim() || '' : ''
   return {
     brand_id: brandId,
     scope: input.scope,
     main_style_id: mainStyleId,
     item_name: itemName,
     normalized_item_name: normalizeInvoiceText(itemName),
+    product_lookup_key: productLookupKey,
+    normalized_product_lookup_key: normalizeInvoiceText(productLookupKey),
     action: input.action,
     is_active: input.isActive ?? true,
     note: input.note?.trim() ?? '',
@@ -306,6 +344,13 @@ export async function saveInvoiceItemNameRule(
   existingQuery = payload.main_style_id
     ? existingQuery.eq('main_style_id', payload.main_style_id)
     : existingQuery.is('main_style_id', null)
+  existingQuery =
+    payload.scope === 'lookup_key'
+      ? existingQuery.eq(
+          'normalized_product_lookup_key',
+          payload.normalized_product_lookup_key,
+        )
+      : existingQuery.eq('normalized_product_lookup_key', '')
   const { data: existing, error: existingError } = await existingQuery.maybeSingle()
   if (existingError) {
     throw new InvoiceItemNameRuleStoreError(
@@ -324,7 +369,9 @@ export async function saveInvoiceItemNameRule(
       throw new InvoiceItemNameRuleStoreError(
         payload.scope === 'global'
           ? '같은 내품명 공통 규칙이 이미 있습니다.'
-          : '같은 본품·내품명 규칙이 이미 있습니다.',
+          : payload.scope === 'lookup_key'
+            ? '같은 본품·조회 키·내품명 규칙이 이미 있습니다.'
+            : '같은 본품·내품명 규칙이 이미 있습니다.',
       )
     }
     throw new InvoiceItemNameRuleStoreError(
@@ -335,4 +382,61 @@ export async function saveInvoiceItemNameRule(
   const savedId = (data as { id: string }).id
   await replaceComponents(brandId, savedId, input.components ?? [])
   return fetchRule(savedId)
+}
+
+export async function setInvoiceItemNameRuleActive(
+  id: string,
+  isActive: boolean,
+): Promise<InvoiceItemNameRule> {
+  const { error } = await getSupabase()
+    .from('invoice_item_name_rules')
+    .update({ is_active: isActive })
+    .eq('id', id)
+  if (error) {
+    throw new InvoiceItemNameRuleStoreError(
+      errorMessage(error, '내품명 규칙 활성 상태를 바꾸지 못했습니다.'),
+    )
+  }
+  return fetchRule(id)
+}
+
+export async function saveInvoiceItemNameRules(
+  brandId: string,
+  items: Array<{ input: InvoiceItemNameRuleInput; ruleId?: string }>,
+  options: { concurrency?: number } = {},
+): Promise<InvoiceItemNameRuleBulkResult> {
+  const concurrency = Math.max(
+    1,
+    Math.min(options.concurrency ?? LOOKUP_SAVE_CONCURRENCY, 8),
+  )
+  const applied: InvoiceItemNameRule[] = []
+  const failed: InvoiceItemNameRuleBulkFailure[] = []
+  let cursor = 0
+
+  async function worker() {
+    while (cursor < items.length) {
+      const current = items[cursor]
+      cursor += 1
+      if (!current) continue
+      try {
+        applied.push(
+          await saveInvoiceItemNameRule(brandId, current.input, current.ruleId),
+        )
+      } catch (error) {
+        failed.push({
+          productLookupKey: current.input.productLookupKey?.trim() ?? '',
+          mainStyleId: current.input.mainStyleId?.trim() ?? '',
+          message:
+            error instanceof Error ? error.message : '저장하지 못했습니다.',
+        })
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, items.length || 1) }, () =>
+      worker(),
+    ),
+  )
+  return { applied, failed }
 }

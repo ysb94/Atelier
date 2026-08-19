@@ -5,7 +5,37 @@ import {
   buildInvoiceOutputRows,
   buildInvoiceStepSnapshot,
 } from '@/lib/invoice/invoice-output'
+import {
+  ACCESSORY_RESOLVE_CASES,
+  ACCESSORY_STYLE_FIXTURES,
+} from '@/lib/invoice/accessory-resolve.cases'
+import {
+  accessoryStyleNameIndex,
+  resolveInvoiceAccessories,
+} from '@/lib/invoice/accessory-resolve'
+import { accessoryRulesFromSeeds, INVOICE_ACCESSORY_SEED_DRAFTS } from '@/lib/invoice/accessory-rule-seed'
+import {
+  accessoryReviewExpectedLines,
+  decideAccessoryReviewSaves,
+  flattenAccessoryPlanRows,
+  isAccessoryReviewDirty,
+  revalidateAccessoryReviewRow,
+  type AccessoryFlattenSource,
+} from '@/lib/invoice/accessory-review-table'
+import {
+  accessoryContextId,
+  buildLookupKeyDraftsFromDecisions,
+  collectUnknownAccessoryPieces,
+  evaluateAccessorySuggestion,
+  findExistingLookupRule,
+  isUnsafeGlobalToken,
+  type AccessoryContextPreview,
+} from '@/lib/invoice/accessory-suggest'
 import { transformInvoiceItemNames, buildOutgoingComponentRowsFromStages } from '@/lib/invoice/item-name-transform'
+import {
+  collectInvoiceItemNameRuleStyleNos,
+  prepareInvoiceItemNameRuleRows,
+} from '@/lib/invoice/item-name-rule-import'
 import {
   collectInvoiceOptionLedgerStyleCandidates,
   collectInvoiceProductNameLedgerStyleCandidates,
@@ -22,6 +52,7 @@ import { generateProductNameCandidates } from '@/lib/invoice/product-name-patter
 import { matchingProductName } from '@/lib/invoice/product-name-tags'
 import {
   catalogFromStyles,
+  productNameTransformationToName,
   transformInvoiceProductNames,
 } from '@/lib/invoice/product-name-transform'
 import { normalizeInvoiceCode } from '@/lib/invoice/name-transform'
@@ -33,6 +64,7 @@ import type {
   InvoiceNameRule,
   InvoiceOptionMap,
   InvoiceOptionMapComponent,
+  InvoiceProductNameExclusion,
   InvoiceProductNameMap,
   InvoiceProductNameTagRole,
   InvoiceProductNameTagRoleEntry,
@@ -687,12 +719,10 @@ assert(
 const priorityCandidates = generateProductNameCandidates({
   productName: '품목',
   itemName: 'Color: 빨강 / 기타, 옵션: 값',
-  ownProductCode: 'CODE-1',
 })
 assert(
   priorityCandidates.map((item) => item.rule).join(',') ===
     [
-      'own_code',
       'product',
       'product_item',
       'product_item_slash_prefix',
@@ -703,7 +733,11 @@ assert(
       'item_comma_prefix',
       'item_full',
     ].join(','),
-  '자체상품코드부터 내품명 전체까지 10단계 우선순위',
+  '품목명부터 내품명 전체까지 9단계 우선순위',
+)
+assert(
+  !priorityCandidates.some((item) => item.rule === 'own_code'),
+  '자체상품코드는 조회 키 후보에 넣지 않는다',
 )
 
 const kakaoCandidates = generateProductNameCandidates({
@@ -1497,10 +1531,28 @@ const ownCodeFirst = transformInvoiceProductNames(
 )
 assert(
   ownCodeFirst.rows[0]?.status === 'mapped' &&
-    ownCodeFirst.rows[0]?.appliedRule === 'own_code' &&
-    ownCodeFirst.rows[0]?.style?.styleId === 's-own-code' &&
+    ownCodeFirst.rows[0]?.appliedRule === 'product' &&
+    ownCodeFirst.rows[0]?.style?.styleId === 's-own-product' &&
     ownCodeFirst.rows[0]?.itemNameConsumed !== true,
-  '자체상품코드가 품목명보다 먼저 맞는다',
+  '자체상품코드 원장 별칭은 쓰지 않고 품목명 후보를 적용한다',
+)
+
+const ownCodeOnly = transformInvoiceProductNames(
+  [ownCodeSource],
+  [
+    {
+      ...lookupMap('own-code-only', '다른조회키', ownCodeStyle),
+      ownProductCode: 'CODE-9200',
+      normalizedOwnProductCode: normalizeInvoiceText('CODE-9200'),
+    },
+  ],
+  catalogFromStyles([]),
+)
+assert(
+  ownCodeOnly.rows[0]?.status !== 'mapped' &&
+    ownCodeOnly.rows[0]?.appliedRule !== 'own_code' &&
+    !ownCodeOnly.rows[0]?.candidates.some((item) => item.rule === 'own_code'),
+  '자체품번만 맞는 레거시 원장은 자동 확정하지 않는다',
 )
 
 const setEntitySource = row({
@@ -1577,7 +1629,10 @@ assert(
     commaPrefixItem.unresolvedCombos.length === 1 &&
     commaPrefixItem.unresolvedCombos[0]?.itemName === 'Tassel: Purple' &&
     commaPrefixItem.unresolvedCombos[0]?.originalItemName ===
-      commaPrefixSource.itemName,
+      commaPrefixSource.itemName &&
+    commaPrefixItem.unresolvedCombos[0]?.productLookupKey === prefixLookup &&
+    commaPrefixItem.unresolvedCombos[0]?.productAppliedRule ===
+      'item_comma_prefix',
   '남은 옵션은 내품명 검토 목록의 입력이 된다',
 )
 const prefixFallbackItem = transformInvoiceItemNames(
@@ -1913,10 +1968,12 @@ function itemNameRule(options: {
   itemName: string
   scope?: InvoiceItemNameRule['scope']
   mainStyle?: StyleRef | null
+  productLookupKey?: string
   action: InvoiceItemNameRule['action']
   components?: InvoiceItemNameRuleComponent[]
 }): InvoiceItemNameRule {
   const mainStyle = options.mainStyle ?? null
+  const productLookupKey = options.productLookupKey ?? ''
   return {
     id: options.id,
     brandId: 'brand',
@@ -1924,6 +1981,8 @@ function itemNameRule(options: {
     mainStyle,
     itemName: options.itemName,
     normalizedItemName: normalizeInvoiceText(options.itemName),
+    productLookupKey,
+    normalizedProductLookupKey: normalizeInvoiceText(productLookupKey),
     action: options.action,
     isActive: true,
     note: '',
@@ -2214,6 +2273,1226 @@ assert(
     blankStill.unresolvedCombos.length === 0 &&
     blankStill.deletedRowCount === 0,
   '처음부터 빈 내품명은 규칙을 보지 않고 검토에서 뺀다',
+)
+
+const lookupExactSourceA = row({
+  rowNumber: 9410,
+  productName: '조회키 A 품목',
+  itemName: 'Color: 하트 RB',
+})
+const lookupExactSourceB = row({
+  rowNumber: 9411,
+  productName: '조회키 B 품목',
+  itemName: 'Color: 하트 RB',
+})
+const lookupRemapSource = row({
+  rowNumber: 9412,
+  productName: '조회키 A 품목',
+  itemName: 'Color: 하트 RB',
+  mallName: '다른몰',
+})
+const lookupExactProduct = transformInvoiceProductNames(
+  [lookupExactSourceA, lookupExactSourceB],
+  [
+    lookupMap('pmap-lookup-a', '조회키 A 품목', bag),
+    lookupMap('pmap-lookup-b', '조회키 B 품목', bag),
+  ],
+  catalogFromStyles([bag, strap, tassel]),
+)
+const lookupExactOnly = transformInvoiceItemNames(
+  [lookupExactSourceA, lookupExactSourceB],
+  [],
+  lookupExactProduct.rows,
+  [
+    itemNameRule({
+      id: 'rule-lookup-a-delete',
+      itemName: 'Color: 하트 RB',
+      scope: 'lookup_key',
+      mainStyle: bag,
+      productLookupKey: '조회키 A 품목',
+      action: 'delete',
+    }),
+    itemNameRule({
+      id: 'rule-lookup-b-comp',
+      itemName: 'Color: 하트 RB',
+      scope: 'lookup_key',
+      mainStyle: bag,
+      productLookupKey: '조회키 B 품목',
+      action: 'components',
+      components: [ruleComponent('rule-lookup-b-comp', strap, 'included')],
+    }),
+  ],
+)
+assert(
+  lookupExactOnly.rows[0]?.status === 'deleted' &&
+    lookupExactOnly.rows[0]?.ruleId === 'rule-lookup-a-delete' &&
+    lookupExactOnly.rows[0]?.transformedItemName === '',
+  '체크한 조회 키에만 지우기를 적용한다',
+)
+assert(
+  lookupExactOnly.rows[1]?.status === 'mapped' &&
+    lookupExactOnly.rows[1]?.ruleId === 'rule-lookup-b-comp' &&
+    lookupExactOnly.rows[1]?.transformedItemName === strap.name,
+  '다른 조회 키는 따로 구성품 규칙을 적용한다',
+)
+
+const lookupKeepOther = transformInvoiceItemNames(
+  [lookupExactSourceA, lookupExactSourceB],
+  [],
+  lookupExactProduct.rows,
+  [
+    itemNameRule({
+      id: 'rule-lookup-a-only',
+      itemName: 'Color: 하트 RB',
+      scope: 'lookup_key',
+      mainStyle: bag,
+      productLookupKey: '조회키 A 품목',
+      action: 'delete',
+    }),
+  ],
+)
+assert(
+  lookupKeepOther.rows[1]?.status === 'passthrough' &&
+    lookupKeepOther.rows[1]?.transformedItemName === 'Color: 하트 RB' &&
+    lookupKeepOther.rows[1]?.ruleId === null,
+  '체크하지 않은 조회 키는 원문을 유지한다',
+)
+
+const lookupPriority = transformInvoiceItemNames(
+  [lookupExactSourceA, lookupExactSourceB],
+  [],
+  lookupExactProduct.rows,
+  [
+    itemNameRule({
+      id: 'rule-lookup-priority',
+      itemName: 'Color: 하트 RB',
+      scope: 'lookup_key',
+      mainStyle: bag,
+      productLookupKey: '조회키 A 품목',
+      action: 'delete',
+    }),
+    itemNameRule({
+      id: 'rule-main-priority',
+      itemName: 'Color: 하트 RB',
+      scope: 'main_style',
+      mainStyle: bag,
+      action: 'components',
+      components: [ruleComponent('rule-main-priority', strap, 'included')],
+    }),
+    itemNameRule({
+      id: 'rule-global-priority',
+      itemName: 'Color: 하트 RB',
+      action: 'components',
+      components: [ruleComponent('rule-global-priority', tassel, 'paid_add')],
+    }),
+  ],
+)
+assert(
+  lookupPriority.rows[0]?.ruleId === 'rule-lookup-priority',
+  '조회 키 exact가 기존 본품 전체·공통보다 우선한다',
+)
+assert(
+  lookupPriority.rows[1]?.ruleId === 'rule-main-priority' &&
+    lookupPriority.rows[1]?.transformedItemName === strap.name,
+  '다른 조회 키는 기존 본품 전체 규칙으로 넘어간다',
+)
+
+const lookupRemapProduct = transformInvoiceProductNames(
+  [lookupRemapSource],
+  [lookupMap('pmap-lookup-remap', '조회키 A 품목', otherBag)],
+  catalogFromStyles([bag, otherBag]),
+)
+const lookupRemapItem = transformInvoiceItemNames(
+  [lookupRemapSource],
+  [],
+  lookupRemapProduct.rows,
+  [
+    itemNameRule({
+      id: 'rule-lookup-old-main',
+      itemName: 'Color: 하트 RB',
+      scope: 'lookup_key',
+      mainStyle: bag,
+      productLookupKey: '조회키 A 품목',
+      action: 'delete',
+    }),
+  ],
+)
+assert(
+  lookupRemapItem.rows[0]?.status === 'passthrough' &&
+    lookupRemapItem.rows[0]?.ruleId === null &&
+    lookupRemapItem.rows[0]?.transformedItemName === 'Color: 하트 RB',
+  '같은 조회 키가 다른 본품으로 재연결되면 규칙을 적용하지 않는다',
+)
+
+function productExclusion(options: {
+  id?: string
+  mallName?: string
+  productName: string
+  itemName: string
+  isActive?: boolean
+}): InvoiceProductNameExclusion {
+  const mallName = options.mallName ?? '테스트몰'
+  return {
+    id: options.id ?? 'ex-1',
+    brandId: 'brand',
+    mallName,
+    normalizedMallName: normalizeInvoiceText(mallName),
+    productName: options.productName,
+    normalizedProductName: normalizeInvoiceText(options.productName),
+    itemName: options.itemName,
+    normalizedItemName: normalizeInvoiceText(options.itemName),
+    isActive: options.isActive ?? true,
+    note: '',
+    createdAt: '2026-08-19T00:00:00.000Z',
+    updatedAt: '2026-08-19T00:00:00.000Z',
+  }
+}
+
+const dummyName = '선택안함'
+const dummyItem = '선택안함'
+const dummyExclusion = productExclusion({
+  productName: dummyName,
+  itemName: dummyItem,
+})
+const dummyMainMap = lookupMap('pmap-dummy-main', product, bag)
+const dummySiblingMain = row({
+  rowNumber: 9601,
+  productName: product,
+  itemName: '',
+  customerOrderNo: 'ORD-DUMMY-1',
+})
+const dummySiblingRow = row({
+  rowNumber: 9602,
+  productName: dummyName,
+  itemName: dummyItem,
+  customerOrderNo: 'ORD-DUMMY-1',
+})
+const dummySiblingProduct = transformInvoiceProductNames(
+  [dummySiblingMain, dummySiblingRow],
+  [dummyMainMap],
+  catalogFromStyles([bag]),
+  [],
+  [dummyExclusion],
+)
+assert(
+  dummySiblingProduct.rows[0]?.status === 'mapped' &&
+    dummySiblingProduct.rows[1]?.status === 'excluded' &&
+    dummySiblingProduct.excludedRowCount === 1 &&
+    dummySiblingProduct.unresolvedCombos.every(
+      (combo) => combo.productName !== dummyName,
+    ),
+  '정확 조합과 정상 형제 행이 있으면 더미 행만 송장 제외',
+)
+
+const dummyGiftMain = row({
+  rowNumber: 9603,
+  productName: '사은품',
+  customerOrderNo: 'ORD-DUMMY-1',
+})
+const dummyGiftExcluded = row({
+  rowNumber: 9604,
+  productName: '더미 사은품',
+  customerOrderNo: 'ORD-DUMMY-1',
+})
+const dummySiblingOutput = buildInvoiceOutputRows({
+  transformedRows: productNameTransformationToName(dummySiblingProduct).rows,
+  workMatches: new Map(),
+  giftRowsBySource: new Map([
+    [9601, [dummyGiftMain]],
+    [9602, [dummyGiftExcluded]],
+  ]),
+  productTransformation: dummySiblingProduct,
+})
+assert(
+  dummySiblingOutput.length === 2 &&
+    dummySiblingOutput[0]?.sourceRowNumber === 9601 &&
+    dummySiblingOutput[0]?.rowNumber === 1 &&
+    dummySiblingOutput[0]?.kind === 'order' &&
+    dummySiblingOutput[1]?.kind === 'gift' &&
+    dummySiblingOutput[1]?.finalProductName === '사은품' &&
+    dummySiblingOutput.every((item) => item.sourceRowNumber !== 9602),
+  '최종 송장은 제외 행과 그 행 사은품만 빼고 행 번호를 다시 매긴다',
+)
+
+const dummySolo = row({
+  rowNumber: 9610,
+  productName: dummyName,
+  itemName: dummyItem,
+  customerOrderNo: 'ORD-SOLO',
+})
+const dummySoloProduct = transformInvoiceProductNames(
+  [dummySolo],
+  [dummyMainMap],
+  catalogFromStyles([bag]),
+  [],
+  [dummyExclusion],
+)
+assert(
+  dummySoloProduct.rows[0]?.status === 'exclusion_guarded' &&
+    dummySoloProduct.rows[0]?.transformedProductName === dummyName &&
+    dummySoloProduct.exclusionGuardedRowCount === 1 &&
+    dummySoloProduct.unresolvedCombos.some(
+      (combo) => combo.status === 'exclusion_guarded',
+    ),
+  '단독 더미 행은 제외 보류로 원문을 유지하고 검토에 남긴다',
+)
+const dummySoloOutput = buildInvoiceOutputRows({
+  transformedRows: productNameTransformationToName(dummySoloProduct).rows,
+  workMatches: new Map(),
+  giftRowsBySource: new Map(),
+  productTransformation: dummySoloProduct,
+})
+assert(
+  dummySoloOutput.length === 1 &&
+    dummySoloOutput[0]?.finalProductName === dummyName &&
+    dummySoloOutput[0]?.finalItemName === dummyItem,
+  '제외 보류 행은 최종 송장에서 빼지 않는다',
+)
+
+const dummyOtherMall = row({
+  rowNumber: 9620,
+  productName: dummyName,
+  itemName: dummyItem,
+  mallName: '다른몰',
+  customerOrderNo: 'ORD-OTHER',
+})
+const dummyOtherMain = row({
+  rowNumber: 9621,
+  productName: product,
+  itemName: '',
+  mallName: '다른몰',
+  customerOrderNo: 'ORD-OTHER',
+})
+const dummyOtherProduct = transformInvoiceProductNames(
+  [dummyOtherMain, dummyOtherMall],
+  [dummyMainMap],
+  catalogFromStyles([bag]),
+  [],
+  [dummyExclusion],
+)
+assert(
+  dummyOtherProduct.rows[1]?.status !== 'excluded' &&
+    dummyOtherProduct.rows[1]?.status !== 'exclusion_guarded',
+  '다른 쇼핑몰의 같은 품목명·내품명은 제외하지 않는다',
+)
+
+const dummyRealItem = row({
+  rowNumber: 9630,
+  productName: dummyName,
+  itemName: product,
+  customerOrderNo: 'ORD-REAL',
+})
+const dummyRealSibling = row({
+  rowNumber: 9631,
+  productName: product,
+  itemName: '',
+  customerOrderNo: 'ORD-REAL',
+})
+const dummyRealProduct = transformInvoiceProductNames(
+  [dummyRealSibling, dummyRealItem],
+  [dummyMainMap],
+  catalogFromStyles([bag]),
+  [],
+  [dummyExclusion],
+)
+assert(
+  dummyRealProduct.rows[1]?.status === 'mapped' &&
+    dummyRealProduct.rows[1]?.transformedProductName === bag.name,
+  '내품명이 실제 상품명이면 제외 조합이 달라이므로 본품 탐색을 유지한다',
+)
+
+const dummyNoOrder = row({
+  rowNumber: 9640,
+  productName: dummyName,
+  itemName: dummyItem,
+  customerOrderNo: '',
+})
+const dummyNoOrderSibling = row({
+  rowNumber: 9641,
+  productName: product,
+  itemName: '',
+  customerOrderNo: '',
+})
+const dummyNoOrderProduct = transformInvoiceProductNames(
+  [dummyNoOrderSibling, dummyNoOrder],
+  [dummyMainMap],
+  catalogFromStyles([bag]),
+  [],
+  [dummyExclusion],
+)
+assert(
+  dummyNoOrderProduct.rows[1]?.status === 'exclusion_guarded',
+  '고객주문번호가 없으면 형제 행이 있어도 제외 보류로 남긴다',
+)
+
+const dummyItemNames = transformInvoiceItemNames(
+  [dummySiblingMain, dummySiblingRow],
+  [],
+  dummySiblingProduct.rows,
+  [],
+)
+assert(
+  dummyItemNames.rows.every((item) => item.source.rowNumber !== 9602),
+  '내품명 변환은 송장 제외 행을 빼 둔다',
+)
+const dummyOutgoing = buildOutgoingComponentRowsFromStages({
+  productRows: dummySiblingProduct.rows,
+  itemRows: dummyItemNames.rows,
+  giftRowsBySource: new Map(),
+})
+assert(
+  dummyOutgoing.every((item) => item.sourceRowNumber !== 9602),
+  '출고구성도 송장 제외 행을 빼 둔다',
+)
+
+const importMain = style('s-imp-main', 'M0885', '래빗에코백 하트')
+const importExtraA = style('s-imp-a', 'M1999', '스파 트리플 블루테슬')
+const importExtraB = style('s-imp-b', 'M2000', '래빗 스트랩')
+const importLookup = {
+  byStyleNo: new Map<string, StyleRef>([
+    ['m0885', importMain],
+    ['m1999', importExtraA],
+    ['m2000', importExtraB],
+  ]),
+}
+const IMPORT_HEADERS = [
+  '확정 본품 M번호',
+  '조회 키',
+  '옵션명',
+  '조회 키 선택',
+  '지우기',
+  '구성품 M번호',
+  '메모',
+  '대상 행',
+]
+
+const importStyleNos = collectInvoiceItemNameRuleStyleNos([
+  IMPORT_HEADERS,
+  ['M0885', '단독 래빗 모브블루', 'Color: 모브블루', 'Y', '', 'M1999,M2000', '', '3'],
+])
+assert(
+  importStyleNos.includes('M0885') &&
+    importStyleNos.includes('M1999') &&
+    importStyleNos.includes('M2000'),
+  '내품명 원장 엑셀은 본품·구성품 M번호를 모두 대조 후보로 모은다',
+)
+
+const importQuantity = prepareInvoiceItemNameRuleRows(
+  [
+    IMPORT_HEADERS,
+    [
+      'M0885',
+      '단독 래빗 모브블루',
+      'Color: 모브블루',
+      'Y',
+      '',
+      'M1999,M1999,M2000',
+      '메모',
+      '104',
+    ],
+  ],
+  importLookup,
+)
+assert(importQuantity.length === 1, '한 행은 규칙 한 건이 된다')
+assert(importQuantity[0]?.status === 'new', '기존 규칙이 없으면 신규다')
+assert(
+  importQuantity[0]?.components.find(
+    (item) => item.style.styleNo === 'M1999',
+  )?.quantity === 2,
+  '같은 M번호를 두 번 쓰면 수량 2가 된다',
+)
+assert(
+  importQuantity[0]?.components.find(
+    (item) => item.style.styleNo === 'M2000',
+  )?.quantity === 1,
+  '한 번만 쓴 M번호는 수량 1이다',
+)
+assert(
+  importQuantity[0]?.input?.components?.every(
+    (item) => item.role === 'included',
+  ) === true,
+  '엑셀로 올린 구성품은 모두 기본포함으로 저장한다',
+)
+
+const importMerged = prepareInvoiceItemNameRuleRows(
+  [
+    IMPORT_HEADERS,
+    ['M0885', '단독 래빗 모브블루', 'Color: 모브블루', 'Y', '', 'M1999', '', ''],
+    ['M0885', '단독 래빗 모브블루', 'Color: 모브블루', 'Y', '', 'M1999,M2000', '', ''],
+  ],
+  importLookup,
+)
+assert(importMerged.length === 1, '같은 규칙 키의 여러 행은 한 규칙으로 합친다')
+assert(
+  importMerged[0]?.components.find((item) => item.style.styleNo === 'M1999')
+    ?.quantity === 2,
+  '행을 나눠 쓴 같은 M번호도 수량으로 합친다',
+)
+
+const importConflict = prepareInvoiceItemNameRuleRows(
+  [
+    IMPORT_HEADERS,
+    ['M0885', '단독 래빗 모브블루', 'Color: 모브블루', 'Y', '', 'M1999', '', ''],
+    ['M0885', '단독 래빗 모브블루', 'Color: 모브블루', 'Y', 'Y', '', '', ''],
+  ],
+  importLookup,
+)
+assert(
+  importConflict.some((item) => item.status === 'error'),
+  '같은 규칙에 지우기와 구성품이 섞이면 오류로 막는다',
+)
+
+const importSkipped = prepareInvoiceItemNameRuleRows(
+  [
+    IMPORT_HEADERS,
+    ['M0885', '단독 래빗 모브블루', 'Color: 모브블루', 'Y', '', '', '', '104'],
+  ],
+  importLookup,
+)
+assert(
+  importSkipped[0]?.status === 'skip' && importSkipped[0]?.input === null,
+  '지우기와 구성품을 모두 비운 행은 오류가 아니라 안 정한 행으로 건너뛴다',
+)
+
+const importMissing = prepareInvoiceItemNameRuleRows(
+  [
+    IMPORT_HEADERS,
+    ['M0885', '단독 래빗 모브블루', 'Color: 모브블루', 'Y', '', 'M9999', '', ''],
+    ['', '단독 래빗 모브블루', 'Color: 모브블루', 'Y', '', 'M1999', '', ''],
+    ['M0885', '단독 래빗 모브블루', 'Color: 모브블루', 'Y', 'Y', 'M1999', '', ''],
+  ],
+  importLookup,
+)
+assert(
+  importMissing.length === 3 &&
+    importMissing.every((item) => item.status === 'error'),
+  '미등록 M번호·조회 키 선택인데 본품 누락·지우기와 구성품 동시 기입은 모두 오류다',
+)
+
+const importGlobalDelete = prepareInvoiceItemNameRuleRows(
+  [
+    IMPORT_HEADERS,
+    ['M0885', '단독 래빗 모브블루', 'KEYRING=선택안함', '', 'Y', '', '', '12'],
+  ],
+  importLookup,
+)
+assert(
+  importGlobalDelete[0]?.status === 'new' &&
+    importGlobalDelete[0]?.input?.scope === 'global' &&
+    importGlobalDelete[0]?.input?.action === 'delete' &&
+    importGlobalDelete[0]?.input?.mainStyleId === null &&
+    importGlobalDelete[0]?.input?.productLookupKey === null,
+  '조회 키 선택을 비우면 남아 있는 본품·조회 키를 무시하고 공통 규칙으로 저장한다',
+)
+
+const importExistingRule = itemNameRule({
+  id: 'rule-import',
+  scope: 'lookup_key',
+  mainStyle: importMain,
+  productLookupKey: '단독 래빗 모브블루',
+  itemName: 'Color: 모브블루',
+  action: 'components',
+})
+importExistingRule.components = [
+  ruleComponent('rule-import', importExtraA, 'included', 2),
+]
+const importUnchanged = prepareInvoiceItemNameRuleRows(
+  [
+    IMPORT_HEADERS,
+    ['M0885', '단독  래빗 모브블루', 'color: 모브블루', 'y', '', 'M1999,M1999', '', ''],
+  ],
+  importLookup,
+  [importExistingRule],
+)
+assert(
+  importUnchanged[0]?.status === 'unchanged' && importUnchanged[0]?.input === null,
+  '같은 내용이면 변화없음으로 두고 저장하지 않는다',
+)
+
+const importOverwrite = prepareInvoiceItemNameRuleRows(
+  [
+    IMPORT_HEADERS,
+    ['M0885', '단독 래빗 모브블루', 'Color: 모브블루', 'Y', '', 'M1999,M2000', '', ''],
+  ],
+  importLookup,
+  [importExistingRule],
+)
+assert(
+  importOverwrite[0]?.status === 'overwrite' &&
+    importOverwrite[0]?.existingRuleId === 'rule-import',
+  '내용이 다르면 기존 규칙 id로 덮어쓴다',
+)
+
+const accessoryDict = accessoryRulesFromSeeds(
+  INVOICE_ACCESSORY_SEED_DRAFTS,
+  ACCESSORY_STYLE_FIXTURES,
+)
+const accessoryByName = accessoryStyleNameIndex(ACCESSORY_STYLE_FIXTURES)
+const accessoryByNo = new Map(
+  ACCESSORY_STYLE_FIXTURES.map((item) => [item.styleNo, item]),
+)
+for (const item of ACCESSORY_RESOLVE_CASES) {
+  const resolved = resolveInvoiceAccessories({
+    itemName: item.itemName,
+    productLookupKey: item.productLookupKey,
+    mainStyle: item.mainStyleNo
+      ? (accessoryByNo.get(item.mainStyleNo) ?? null)
+      : null,
+    dictionary: accessoryDict,
+    styleByName: accessoryByName,
+  })
+  const got = resolved.components.flatMap((component) =>
+    Array.from({ length: component.quantity }, () => component.style.styleNo),
+  )
+  const want = [...item.expectStyleNos].sort()
+  const have = [...got].sort()
+  assert(
+    want.length === have.length && want.every((value, index) => value === have[index]),
+    `${item.id} 구성품 ${want.join(',') || '(없음)'} 이어야 하는데 ${have.join(',') || '(없음)'}`,
+  )
+  assert(
+    item.expectUnknown ? resolved.unknown.length > 0 : resolved.unknown.length === 0,
+    `${item.id} unknown ${item.expectUnknown ? '있어야' : '없어야'} 함: ${resolved.unknown.join(' / ')}`,
+  )
+}
+
+const emptyAccessoryDictionary = transformInvoiceItemNames(
+  [
+    row({
+      rowNumber: 9700,
+      productName: '드롭 숄더백',
+      itemName: '스텔라 글러브 홀더 키링',
+    }),
+  ],
+  [],
+  [],
+  [],
+  [],
+  ACCESSORY_STYLE_FIXTURES,
+)
+assert(
+  emptyAccessoryDictionary.rows[0]?.status === 'passthrough' &&
+    emptyAccessoryDictionary.unresolvedCombos[0]?.unknownPieces.includes(
+      '스텔라 글러브 홀더 키링',
+    ),
+  '사전이 비어 있어도 첫 AI 추천용 미인식 조각을 수집한다',
+)
+
+const accessoryMapped = transformInvoiceItemNames(
+  [row({ rowNumber: 9701, productName: 'Strap pouch 하트', itemName: '태슬: Red' })],
+  [],
+  [],
+  [],
+  accessoryDict,
+  ACCESSORY_STYLE_FIXTURES,
+)
+assert(
+  accessoryMapped.rows[0]?.status === 'mapped' &&
+    accessoryMapped.autoComponentsRowCount === 1 &&
+    accessoryMapped.rows[0]?.resolvedBy === 'dictionary' &&
+    accessoryMapped.rows[0]?.extras[0]?.style.styleNo === 'M0983',
+  '사전이 태슬 라벨을 구성품으로 바꾼다',
+)
+
+const accessoryDeleted = transformInvoiceItemNames(
+  [
+    row({
+      rowNumber: 9702,
+      productName: 'T-Shirt_Black',
+      itemName: '[COLOR]BLACK [SIZE]ONE SIZE (F)',
+    }),
+  ],
+  [],
+  [],
+  [],
+  accessoryDict,
+  ACCESSORY_STYLE_FIXTURES,
+)
+assert(
+  accessoryDeleted.rows[0]?.status === 'deleted' &&
+    accessoryDeleted.autoDeletedRowCount === 1,
+  '색상·사이즈만 있으면 사전으로 내품명을 비운다',
+)
+
+const accessoryUnknown = transformInvoiceItemNames(
+  [
+    row({
+      rowNumber: 9703,
+      productName: '드롭 숄더백',
+      itemName: '스텔라 글러브 홀더 키링',
+    }),
+  ],
+  [],
+  [],
+  [],
+  accessoryDict,
+  ACCESSORY_STYLE_FIXTURES,
+)
+assert(
+  accessoryUnknown.rows[0]?.status === 'passthrough' &&
+    accessoryUnknown.unresolvedCombos[0]?.unknownPieces.length,
+  '사전에 없는 조각은 검토로 남긴다',
+)
+
+const accessoryManualFirst = transformInvoiceItemNames(
+  [row({ rowNumber: 9704, productName: 'Strap pouch 하트', itemName: '태슬: Red' })],
+  [],
+  [],
+  [
+    itemNameRule({
+      id: 'rule-manual-first',
+      itemName: '태슬: Red',
+      action: 'delete',
+    }),
+  ],
+  accessoryDict,
+  ACCESSORY_STYLE_FIXTURES,
+)
+assert(
+  accessoryManualFirst.rows[0]?.status === 'deleted' &&
+    accessoryManualFirst.rows[0]?.resolvedBy === 'rule' &&
+    accessoryManualFirst.autoDeletedRowCount === 0,
+  '사람이 박은 규칙이 사전보다 우선한다',
+)
+
+const stella = accessoryByNo.get('M0998')!
+const stellaDraft = evaluateAccessorySuggestion(
+  {
+    ruleType: 'token',
+    pattern: '스텔라 글러브 홀더 키링',
+    accessoryKind: '',
+    namePrefix: '',
+    colorName: '',
+    targetStyle: stella,
+    confidence: 0.9,
+    reason: '키링',
+  },
+  accessoryDict,
+  [
+    {
+      itemName: '스텔라 글러브 홀더 키링',
+      productLookupKey: '드롭 숄더백',
+      mainStyle: accessoryByNo.get('M0048') ?? null,
+      unknownPieces: ['스텔라 글러브 홀더 키링'],
+      rowCount: 2,
+    },
+  ],
+  ACCESSORY_STYLE_FIXTURES,
+  new Set([stella.styleId]),
+)
+assert(
+  stellaDraft.ok && stellaDraft.unknownAfter < stellaDraft.unknownBefore,
+  'AI 후보를 넣으면 모르는 조각이 줄어야 한다',
+)
+
+const hallucinatedDraft = evaluateAccessorySuggestion(
+  {
+    ruleType: 'token',
+    pattern: '없는 키링',
+    accessoryKind: '',
+    namePrefix: '',
+    colorName: '',
+    targetStyle: { styleId: 'invented', styleNo: 'M9999', name: '없는 상품' },
+    confidence: 0.99,
+    reason: '환각',
+  },
+  accessoryDict,
+  [
+    {
+      itemName: '없는 키링',
+      productLookupKey: '드롭 숄더백',
+      mainStyle: accessoryByNo.get('M0048') ?? null,
+      unknownPieces: ['없는 키링'],
+      rowCount: 1,
+    },
+  ],
+  ACCESSORY_STYLE_FIXTURES,
+  new Set([stella.styleId]),
+)
+assert(
+  !hallucinatedDraft.ok && hallucinatedDraft.holdReason === 'invalid_style',
+  '허용 후보 밖 M번호는 보류한다',
+)
+
+assert(isUnsafeGlobalToken('Pink'), '단색 단어 Pink는 전역 토큰으로 위험하다')
+assert(isUnsafeGlobalToken('핑크'), '단색 단어 핑크는 전역 토큰으로 위험하다')
+assert(
+  !isUnsafeGlobalToken('스텔라 글러브 홀더 키링'),
+  '긴 고유 문구는 전역 토큰으로 쓸 수 있다',
+)
+
+const pinkContexts = [
+  {
+    itemName: 'Tassel 1=Pink',
+    productLookupKey: 'Strap pouch 하트',
+    mainStyle: accessoryByNo.get('M2276') ?? null,
+    unknownPieces: ['Tassel 1=Pink'],
+    rowCount: 3,
+  },
+  {
+    itemName: 'Pink',
+    productLookupKey: '8 pocket cross bag black',
+    mainStyle: accessoryByNo.get('M0088') ?? null,
+    unknownPieces: ['Pink (종류를 모름)'],
+    rowCount: 2,
+  },
+]
+const pinkToken = evaluateAccessorySuggestion(
+  {
+    ruleType: 'token',
+    pattern: 'Pink',
+    accessoryKind: '',
+    namePrefix: '',
+    colorName: '',
+    targetStyle: accessoryByNo.get('M0992') ?? null,
+    confidence: 0.92,
+    reason: '태슬 핑크',
+  },
+  accessoryDict,
+  pinkContexts,
+  ACCESSORY_STYLE_FIXTURES,
+  new Set(['s-m0992', 's-m0350']),
+)
+assert(
+  !pinkToken.ok && pinkToken.holdReason === 'unsafe_global',
+  '같은 Pink를 전역 토큰으로 두면 보류한다',
+)
+
+const pinkColor = evaluateAccessorySuggestion(
+  {
+    ruleType: 'color',
+    pattern: 'Pink',
+    accessoryKind: '',
+    namePrefix: '',
+    colorName: '핑크',
+    targetStyle: null,
+    confidence: 0.88,
+    reason: '색상 별칭',
+  },
+  accessoryDict.filter(
+    (rule) =>
+      !(rule.ruleType === 'color' && rule.normalizedPattern === 'pink'),
+  ),
+  [
+    {
+      itemName: '태슬: Pink',
+      productLookupKey: 'Strap pouch 하트',
+      mainStyle: accessoryByNo.get('M2276') ?? null,
+      unknownPieces: ['태슬: Pink'],
+      rowCount: 1,
+    },
+    {
+      itemName: '태슬: Pink',
+      productLookupKey: 'Strap pouch 다른색',
+      mainStyle: accessoryByNo.get('M2276') ?? null,
+      unknownPieces: ['태슬: Pink'],
+      rowCount: 1,
+    },
+  ],
+  ACCESSORY_STYLE_FIXTURES,
+  new Set(['s-m0992']),
+)
+assert(
+  pinkColor.ok && !pinkColor.safety.unsafeGlobal,
+  '모든 문맥에서 같은 색상 별칭은 전역으로 허용한다',
+)
+
+const cleanRegression = evaluateAccessorySuggestion(
+  {
+    ruleType: 'token',
+    pattern: 'PEARL RIBBON KEYRING',
+    accessoryKind: '',
+    namePrefix: '',
+    colorName: '',
+    targetStyle: accessoryByNo.get('M0998') ?? null,
+    confidence: 0.9,
+    reason: '키링',
+  },
+  accessoryDict,
+  [
+    {
+      itemName: 'KEYRING 추가: PEARL RIBBON KEYRING',
+      productLookupKey: 'PEARL RIBBON KEYRING',
+      mainStyle: accessoryByNo.get('M0998') ?? null,
+      unknownPieces: [],
+      rowCount: 1,
+    },
+  ],
+  ACCESSORY_STYLE_FIXTURES,
+  new Set(['s-m0998']),
+)
+assert(
+  !cleanRegression.ok,
+  '이미 깨끗한 문맥에 구성품을 더하면 보류한다',
+)
+
+const pinkLookupDrafts = buildLookupKeyDraftsFromDecisions({
+  contexts: pinkContexts,
+  dictionary: accessoryDict,
+  styles: ACCESSORY_STYLE_FIXTURES,
+  itemNameRules: [],
+  decisions: [
+    {
+      contextId: accessoryContextId(pinkContexts[0]!),
+      action: 'components',
+      components: [
+        {
+          styleId: 's-m0992',
+          styleNo: 'M0992',
+          name: '태슬 - 핑크',
+          quantity: 1,
+        },
+      ],
+      reason: '파우치 태슬',
+    },
+    {
+      contextId: accessoryContextId(pinkContexts[1]!),
+      action: 'components',
+      components: [
+        {
+          styleId: 's-m0350',
+          styleNo: 'M0350',
+          name: '숄더스트랩 - 그린',
+          quantity: 1,
+        },
+      ],
+      reason: '크로스백 스트랩',
+    },
+  ],
+  fallbackAllowed: new Set(['s-m0992', 's-m0350']),
+  reason: '문맥 분리',
+  confidence: 0.9,
+})
+assert(pinkLookupDrafts.length === 2, '문맥이 다르면 조회 키 초안을 나눈다')
+assert(
+  pinkLookupDrafts[0]?.components[0]?.style.styleNo !==
+    pinkLookupDrafts[1]?.components[0]?.style.styleNo,
+  '같은 Pink라도 조회 키마다 다른 M번호를 초안으로 둔다',
+)
+
+const existingLookup = itemNameRule({
+  id: 'rule-pink-existing',
+  itemName: 'Tassel 1=Pink',
+  scope: 'lookup_key',
+  mainStyle: accessoryByNo.get('M2276') ?? null,
+  productLookupKey: 'Strap pouch 하트',
+  action: 'components',
+  components: [
+    ruleComponent('rule-pink-existing', accessoryByNo.get('M0992')!, 'included'),
+  ],
+})
+const overwriteDrafts = buildLookupKeyDraftsFromDecisions({
+  contexts: [pinkContexts[0]!],
+  dictionary: accessoryDict,
+  styles: ACCESSORY_STYLE_FIXTURES,
+  itemNameRules: [existingLookup],
+  decisions: [
+    {
+      contextId: accessoryContextId(pinkContexts[0]!),
+      action: 'components',
+      components: [
+        {
+          styleId: 's-m0992',
+          styleNo: 'M0992',
+          name: '태슬 - 핑크',
+          quantity: 1,
+        },
+      ],
+      reason: '덮어쓰기',
+    },
+  ],
+  fallbackAllowed: new Set(['s-m0992']),
+  reason: '덮어쓰기',
+  confidence: 0.8,
+})
+assert(
+  overwriteDrafts[0]?.existingRuleId === 'rule-pink-existing',
+  '같은 조회 키 규칙이 있으면 덮어쓰기 대상으로 연결한다',
+)
+assert(
+  findExistingLookupRule(
+    [existingLookup],
+    'Tassel 1=Pink',
+    's-m2276',
+    'Strap pouch 하트',
+  )?.id === 'rule-pink-existing',
+  '기존 조회 키 규칙을 본품·조회 키로 찾는다',
+)
+
+const collectedPink = collectUnknownAccessoryPieces([
+  {
+    key: 'a',
+    mallName: '몰',
+    productName: '파우치',
+    itemName: 'Pink',
+    originalItemName: 'Pink',
+    ownProductCode: '',
+    productStyle: accessoryByNo.get('M2276') ?? null,
+    productLookupKey: 'Strap pouch 하트',
+    productAppliedRule: null,
+    mapId: null,
+    rowCount: 1,
+    status: 'passthrough',
+    unknownPieces: ['Pink (종류를 모름)'],
+    evidence: [],
+  },
+  {
+    key: 'b',
+    mallName: '몰',
+    productName: '크로스백',
+    itemName: 'Pink',
+    originalItemName: 'Pink',
+    ownProductCode: '',
+    productStyle: accessoryByNo.get('M0088') ?? null,
+    productLookupKey: '8 pocket cross bag black',
+    productAppliedRule: null,
+    mapId: null,
+    rowCount: 1,
+    status: 'passthrough',
+    unknownPieces: ['Pink (종류를 모름)'],
+    evidence: [],
+  },
+])
+assert(
+  collectedPink[0]?.contexts.length === 2,
+  '같은 Pink 조각도 본품·조회 키 문맥을 따로 둔다',
+)
+
+const reviewMain = style('s-m0834', 'M0834', '아치로고 링거티 네이비')
+const reviewShorts = style('s-m0864', 'M0864', '미니심볼 돌핀쇼츠')
+const reviewStrap = style('s-m0350', 'M0350', '숄더스트랩 - 그린')
+const reviewStyles = [reviewMain, reviewShorts, reviewStrap]
+
+function reviewPreview(input: {
+  itemName: string
+  productLookupKey: string
+  mainStyle: StyleRef
+  styleIdsAfter: string[]
+  rowCount?: number
+}): AccessoryContextPreview {
+  return {
+    contextId: accessoryContextId(input),
+    itemName: input.itemName,
+    productLookupKey: input.productLookupKey,
+    mainStyle: input.mainStyle,
+    rowCount: input.rowCount ?? 1,
+    unknownBefore: 1,
+    unknownAfter: 0,
+    componentsBefore: '',
+    componentsAfter: '',
+    styleIdsBefore: [],
+    styleIdsAfter: input.styleIdsAfter,
+    improved: true,
+    sameAsMainSuppressed: false,
+    regressing: false,
+  }
+}
+
+function reviewSource(
+  partial: Partial<AccessoryFlattenSource> &
+    Pick<AccessoryFlattenSource, 'key' | 'kind'>,
+): AccessoryFlattenSource {
+  return {
+    groupKey: 'set-black',
+    pattern: 'BLACK : M (F+)',
+    ruleType: 'token',
+    accessoryKind: '',
+    namePrefix: '',
+    colorName: '',
+    targetStyle: reviewShorts,
+    itemName: '',
+    productLookupKey: '',
+    mainStyle: null,
+    action: 'components',
+    components: [],
+    existingRuleId: null,
+    reason: '세트 구성품',
+    confidence: 0.9,
+    rowCount: 2,
+    passesGate: true,
+    contexts: [],
+    revalidationError: null,
+    allowedStyleIds: [reviewShorts.styleId, reviewStrap.styleId],
+    ...partial,
+  }
+}
+
+const setItemName =
+  '[SET] Arch Logo Ringer T-Shirt + Mini Symbol Dolphin Shorts'
+const setLookupA =
+  '[SET] Arch Logo Ringer T-Shirt + Mini Symbol Dolphin Shorts_BLACK : M (F+)'
+const setLookupB =
+  '[SET] Arch Logo Ringer T-Shirt + Mini Symbol Dolphin Shorts_WHITE : M (F+)'
+const dictContexts = [
+  reviewPreview({
+    itemName: setItemName,
+    productLookupKey: setLookupA,
+    mainStyle: reviewMain,
+    styleIdsAfter: [reviewShorts.styleId],
+    rowCount: 3,
+  }),
+  reviewPreview({
+    itemName: setItemName,
+    productLookupKey: setLookupB,
+    mainStyle: reviewMain,
+    styleIdsAfter: [reviewShorts.styleId],
+    rowCount: 2,
+  }),
+]
+const flattenedReview = flattenAccessoryPlanRows(
+  [
+    reviewSource({
+      key: 'dict-1',
+      kind: 'dictionary',
+      contexts: dictContexts,
+    }),
+  ],
+  reviewStyles,
+  [],
+)
+assert(flattenedReview.length === 2, '전역 후보도 조회 키 조합마다 한 행으로 펼친다')
+assert(
+  flattenedReview.every(
+    (row) =>
+      row.itemName === setItemName &&
+      row.mainStyle?.styleNo === 'M0834' &&
+      row.components[0]?.style.styleNo === 'M0864',
+  ),
+  '펼친 행은 옵션명·본품·예상 구성품만 가진다',
+)
+assert(
+  accessoryReviewExpectedLines('components', [
+    { style: reviewShorts, quantity: 1 },
+    { style: reviewStrap, quantity: 2 },
+  ]).join('|') ===
+    'M0864 · 미니심볼 돌핀쇼츠|M0350 · 숄더스트랩 - 그린 × 2',
+  '복수 구성품은 M번호 · 상품명 × 수량으로 표시한다',
+)
+assert(
+  accessoryReviewExpectedLines('delete', []).join('|') === '내품명을 비움',
+  '내품명 비움은 그 문구로 표시한다',
+)
+
+const overlappingLookup = flattenAccessoryPlanRows(
+  [
+    reviewSource({
+      key: 'lookup-1',
+      kind: 'lookup_key',
+      itemName: setItemName,
+      productLookupKey: setLookupA,
+      mainStyle: reviewMain,
+      components: [{ style: reviewStrap, quantity: 1 }],
+      confidence: 0.95,
+      rowCount: 3,
+    }),
+    reviewSource({
+      key: 'dict-1',
+      kind: 'dictionary',
+      confidence: 0.7,
+      contexts: dictContexts,
+    }),
+  ],
+  reviewStyles,
+  [],
+)
+assert(overlappingLookup.length === 2, '같은 조회 키는 한 행만 남긴다')
+assert(
+  overlappingLookup.find((row) => row.productLookupKey === setLookupA)
+    ?.components[0]?.style.styleNo === 'M0350',
+  '같은 조회 키면 확실도 높은 행만 남긴다',
+)
+
+const existingExact = itemNameRule({
+  id: 'rule-set-existing',
+  itemName: setItemName,
+  scope: 'lookup_key',
+  mainStyle: reviewMain,
+  productLookupKey: setLookupA,
+  action: 'components',
+  components: [ruleComponent('rule-set-existing', reviewShorts, 'included')],
+})
+const flattenedWithExisting = flattenAccessoryPlanRows(
+  [
+    reviewSource({
+      key: 'lookup-exist',
+      kind: 'lookup_key',
+      itemName: setItemName,
+      productLookupKey: setLookupA,
+      mainStyle: reviewMain,
+      components: [{ style: reviewShorts, quantity: 1 }],
+    }),
+  ],
+  reviewStyles,
+  [existingExact],
+)
+assert(
+  flattenedWithExisting[0]?.existingRuleId === 'rule-set-existing',
+  '같은 문맥의 기존 exact는 덮어쓰기 대상으로 연결한다',
+)
+
+const allKeys = flattenedReview.map((row) => row.key)
+const globalSave = decideAccessoryReviewSaves(flattenedReview, allKeys)
+assert(globalSave.dictionaries.length === 1, '전역 후보를 모두 고르고 수정하지 않으면 한 번만 저장한다')
+assert(globalSave.lookups.length === 0, '전역으로 저장한 문맥은 exact를 겹쳐 쓰지 않는다')
+assert(
+  globalSave.dictionaries[0]?.input.pattern === 'BLACK : M (F+)',
+  '전역 저장은 사전 패턴을 그대로 쓴다',
+)
+
+const partialSave = decideAccessoryReviewSaves(flattenedReview, [flattenedReview[0]!.key])
+assert(partialSave.dictionaries.length === 0, '일부만 고르면 전역 규칙을 쓰지 않는다')
+assert(partialSave.lookups.length === 1, '일부 선택은 고른 행만 exact로 저장한다')
+assert(
+  partialSave.lookups[0]?.input.productLookupKey === setLookupA &&
+    partialSave.lookups[0]?.input.scope === 'lookup_key' &&
+    partialSave.lookups[0]?.input.components?.[0]?.styleId === reviewShorts.styleId,
+  '부분 선택의 exact는 그 조회 키 조합만 가리킨다',
+)
+
+const dirtyRow = {
+  ...flattenedReview[0]!,
+  action: 'delete' as const,
+  components: [],
+}
+assert(isAccessoryReviewDirty(dirtyRow), '예상값을 바꾸면 수정된 행으로 본다')
+const splitSave = decideAccessoryReviewSaves(
+  [dirtyRow, flattenedReview[1]!],
+  [dirtyRow.key, flattenedReview[1]!.key],
+)
+assert(splitSave.dictionaries.length === 0, '한 행을 수정하면 전역 저장을 하지 않는다')
+assert(splitSave.lookups.length === 2, '수정 후 선택된 행은 모두 exact로 나눈다')
+assert(
+  splitSave.lookups.find((item) => item.reviewKey === dirtyRow.key)?.input.action ===
+    'delete',
+  '수정한 행만 내품명 비움 exact로 저장한다',
+)
+
+const blockedEmpty = revalidateAccessoryReviewRow({
+  ...flattenedReview[0]!,
+  action: 'components',
+  components: [],
+})
+assert(
+  blockedEmpty.revalidationError === '구성품 M번호를 하나 이상 고르세요.',
+  '빈 구성품은 해당 행의 저장을 막는다',
+)
+const blockedUnknown = revalidateAccessoryReviewRow({
+  ...flattenedReview[0]!,
+  components: [{ style: style('s-unknown', 'M0000', '없는 상품'), quantity: 1 }],
+})
+assert(
+  blockedUnknown.revalidationError === '후보에 없는 구성품입니다.',
+  '후보 밖 M번호는 해당 행의 저장을 막는다',
+)
+const blockedDirtySave = decideAccessoryReviewSaves(
+  [blockedEmpty, flattenedReview[1]!],
+  [blockedEmpty.key, flattenedReview[1]!.key],
+)
+assert(
+  blockedDirtySave.dictionaries.length === 0 &&
+    blockedDirtySave.lookups.length === 1 &&
+    blockedDirtySave.lookups[0]?.reviewKey === flattenedReview[1]!.key,
+  '검증 오류 행은 빼고 나머지 선택만 exact로 저장한다',
 )
 
 console.log('option-maps verify ok')

@@ -321,15 +321,169 @@ export async function setInvoiceProductNameMapActive(
 }
 
 export async function deleteInvoiceProductNameMap(id: string): Promise<void> {
-  const { error } = await getSupabase()
+  const { data, error } = await getSupabase()
     .from('invoice_product_name_maps')
     .delete()
     .eq('id', id)
+    .select('id')
   if (error) {
     throw new InvoiceProductNameMapStoreError(
       errorMessage(error, '품목명 변환 기준을 삭제하지 못했습니다.'),
     )
   }
+  if (!data?.length) {
+    throw new InvoiceProductNameMapStoreError(
+      '삭제할 기준을 찾지 못했거나 권한이 없습니다.',
+    )
+  }
+}
+
+const BULK_CHUNK = 200
+
+export type InvoiceProductNameMapBulkResult = {
+  requested: number
+  appliedIds: string[]
+}
+
+function uniqueIds(ids: string[]) {
+  return [...new Set(ids.map((id) => id.trim()).filter(Boolean))]
+}
+
+function chunked<T>(items: T[], size = BULK_CHUNK): T[][] {
+  const out: T[][] = []
+  for (let start = 0; start < items.length; start += size) {
+    out.push(items.slice(start, start + size))
+  }
+  return out
+}
+
+function idsOf(rows: Array<{ id: string }> | null | undefined) {
+  return (rows ?? []).map((row) => row.id)
+}
+
+async function applyBulkIds(
+  ids: string[],
+  emptyMessage: string,
+  runChunk: (chunk: string[]) => Promise<string[]>,
+): Promise<InvoiceProductNameMapBulkResult> {
+  const requested = uniqueIds(ids)
+  if (requested.length === 0) {
+    throw new InvoiceProductNameMapStoreError(emptyMessage)
+  }
+  const appliedIds: string[] = []
+  for (const chunk of chunked(requested)) {
+    appliedIds.push(...(await runChunk(chunk)))
+  }
+  if (appliedIds.length === 0) {
+    throw new InvoiceProductNameMapStoreError(
+      '선택한 기준을 바꾸지 못했거나 권한이 없습니다.',
+    )
+  }
+  return { requested: requested.length, appliedIds }
+}
+
+export async function setInvoiceProductNameMapsStyle(
+  brandId: string,
+  ids: string[],
+  styleId: string,
+): Promise<InvoiceProductNameMapBulkResult> {
+  const supabase = getSupabase()
+  return applyBulkIds(ids, '본품을 바꿀 기준이 없습니다.', async (chunk) => {
+    const { data, error } = await supabase
+      .from('invoice_product_name_maps')
+      .update({ style_id: styleId })
+      .eq('brand_id', brandId)
+      .in('id', chunk)
+      .select('id')
+    if (!error) return idsOf(data)
+
+    const applied: string[] = []
+    for (const id of chunk) {
+      const { data: row, error: rowError } = await supabase
+        .from('invoice_product_name_maps')
+        .update({ style_id: styleId })
+        .eq('brand_id', brandId)
+        .eq('id', id)
+        .select('id')
+      if (rowError || !row?.length) continue
+      applied.push(id)
+    }
+    if (applied.length === 0) {
+      throw new InvoiceProductNameMapStoreError(
+        errorMessage(error, '선택한 기준의 본품을 바꾸지 못했습니다.'),
+      )
+    }
+    return applied
+  })
+}
+
+export async function setInvoiceProductNameMapsActive(
+  brandId: string,
+  ids: string[],
+  isActive: boolean,
+): Promise<InvoiceProductNameMapBulkResult> {
+  const supabase = getSupabase()
+  return applyBulkIds(ids, '상태를 바꿀 기준이 없습니다.', async (chunk) => {
+    const { data, error } = await supabase
+      .from('invoice_product_name_maps')
+      .update({ is_active: isActive })
+      .eq('brand_id', brandId)
+      .in('id', chunk)
+      .select('id')
+    if (!error) return idsOf(data)
+
+    const applied: string[] = []
+    for (const id of chunk) {
+      const { data: row, error: rowError } = await supabase
+        .from('invoice_product_name_maps')
+        .update({ is_active: isActive })
+        .eq('brand_id', brandId)
+        .eq('id', id)
+        .select('id')
+      if (rowError || !row?.length) continue
+      applied.push(id)
+    }
+    if (applied.length === 0) {
+      throw new InvoiceProductNameMapStoreError(
+        errorMessage(error, '선택한 기준 상태를 바꾸지 못했습니다.'),
+      )
+    }
+    return applied
+  })
+}
+
+export async function deleteInvoiceProductNameMaps(
+  brandId: string,
+  ids: string[],
+): Promise<InvoiceProductNameMapBulkResult> {
+  const supabase = getSupabase()
+  return applyBulkIds(ids, '삭제할 기준이 없습니다.', async (chunk) => {
+    const { data, error } = await supabase
+      .from('invoice_product_name_maps')
+      .delete()
+      .eq('brand_id', brandId)
+      .in('id', chunk)
+      .select('id')
+    if (!error) return idsOf(data)
+
+    const applied: string[] = []
+    for (const id of chunk) {
+      const { data: row, error: rowError } = await supabase
+        .from('invoice_product_name_maps')
+        .delete()
+        .eq('brand_id', brandId)
+        .eq('id', id)
+        .select('id')
+      if (rowError || !row?.length) continue
+      applied.push(id)
+    }
+    if (applied.length === 0) {
+      throw new InvoiceProductNameMapStoreError(
+        errorMessage(error, '선택한 기준을 삭제하지 못했습니다.'),
+      )
+    }
+    return applied
+  })
 }
 
 function snapshotToRow(snapshot: InvoiceProductNameMap) {

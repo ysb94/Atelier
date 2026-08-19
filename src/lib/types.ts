@@ -501,7 +501,7 @@ export type InvoiceOptionMap = {
   updatedAt: string
 }
 
-export type InvoiceItemNameRuleScope = 'global' | 'main_style'
+export type InvoiceItemNameRuleScope = 'global' | 'main_style' | 'lookup_key'
 export type InvoiceItemNameRuleAction = 'delete' | 'components'
 
 export const INVOICE_ITEM_NAME_RULE_SCOPE_LABEL: Record<
@@ -510,6 +510,7 @@ export const INVOICE_ITEM_NAME_RULE_SCOPE_LABEL: Record<
 > = {
   global: '품목명 안 봐도 됨',
   main_style: '본품별로 봐야 함',
+  lookup_key: '조회 키 선택',
 }
 
 export const INVOICE_ITEM_NAME_RULE_ACTION_LABEL: Record<
@@ -518,6 +519,45 @@ export const INVOICE_ITEM_NAME_RULE_ACTION_LABEL: Record<
 > = {
   delete: '지우기',
   components: '구성품으로 설정',
+}
+
+/** 내품명 부속품 인식 사전의 규칙 종류 */
+export type InvoiceAccessoryRuleType =
+  | 'label'
+  | 'color'
+  | 'token'
+  | 'ignore'
+  | 'default'
+
+export const INVOICE_ACCESSORY_RULE_TYPE_LABEL: Record<
+  InvoiceAccessoryRuleType,
+  string
+> = {
+  label: '라벨 별칭',
+  color: '색상 별칭',
+  token: '문구 → M번호',
+  ignore: '버릴 조각',
+  default: '본품 기본 종류',
+}
+
+/**
+ * 옵션 문구에서 부속품 M번호를 찾는 사전 1줄.
+ * 인식 결과는 저장하지 않고 매 파일마다 다시 계산한다.
+ */
+export type InvoiceAccessoryRule = {
+  id: string
+  brandId: string
+  ruleType: InvoiceAccessoryRuleType
+  pattern: string
+  normalizedPattern: string
+  accessoryKind: string
+  namePrefix: string
+  colorName: string
+  targetStyle: StyleRef | null
+  isActive: boolean
+  note: string
+  createdAt: string
+  updatedAt: string
 }
 
 /** 내품명 규칙이 추가하는 출고 구성품 1건 */
@@ -533,6 +573,7 @@ export type InvoiceItemNameRuleComponent = {
 /**
  * 유효 내품명을 지우거나 구성품 M번호로 연결하는 기준.
  * global은 본품을 보지 않고, main_style은 확정 본품 styles.id로 나눈다.
+ * lookup_key는 확정 본품과 품목명 단계 조회 키 exact 조합으로 나눈다.
  */
 export type InvoiceItemNameRule = {
   id: string
@@ -541,6 +582,8 @@ export type InvoiceItemNameRule = {
   mainStyle: StyleRef | null
   itemName: string
   normalizedItemName: string
+  productLookupKey: string
+  normalizedProductLookupKey: string
   action: InvoiceItemNameRuleAction
   isActive: boolean
   note: string
@@ -599,6 +642,25 @@ export type InvoiceProductNameMap = {
   lookupKey: string
   normalizedLookupKey: string
   style: StyleRef
+  isActive: boolean
+  note: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 사방넷 원본 쇼핑몰·품목명·내품명 exact 조합을 최종 송장에서 빼는 기준.
+ * 본품 연결이 없고, 모든 쇼핑몰에 적용하는 규칙은 두지 않는다.
+ */
+export type InvoiceProductNameExclusion = {
+  id: string
+  brandId: string
+  mallName: string
+  normalizedMallName: string
+  productName: string
+  normalizedProductName: string
+  itemName: string
+  normalizedItemName: string
   isActive: boolean
   note: string
   createdAt: string
@@ -846,7 +908,9 @@ export const SEASON_STATUS_LABEL: Record<SeasonStatus, string> = {
 
 export type AiProvider = 'openai' | 'anthropic' | 'gemini'
 
-export type AiFeatureKey = 'invoice_product_recommendation'
+export type AiFeatureKey =
+  | 'invoice_product_recommendation'
+  | 'invoice_accessory_recommendation'
 
 export type AiRecommendationPolicy = 'hybrid_auto' | 'always_ai' | 'local_only'
 
@@ -887,6 +951,43 @@ export type AiRecommendProduct = {
 }
 
 export type AiRecommendationSource = 'local' | 'manual' | 'ai' | 'cache'
+
+export type AiAccessorySuggestRule = {
+  ruleType: InvoiceAccessoryRuleType
+  pattern: string
+  accessoryKind: string
+  namePrefix: string
+  colorName: string
+  styleId: string
+  styleNo: string
+  name: string
+  reason: string
+  confidence: number
+}
+
+export type AiAccessoryContextDecision = {
+  contextId: string
+  action: 'components' | 'delete' | 'hold'
+  components: Array<{
+    styleId: string
+    styleNo: string
+    name: string
+    quantity: number
+  }>
+  reason: string
+}
+
+export type AiAccessoryRecommendation = {
+  reason: string
+  rules: AiAccessorySuggestRule[]
+  contexts: AiAccessoryContextDecision[]
+  provider: AiProvider
+  modelId: string
+  source: AiRecommendationSource
+  cacheId: string | null
+  skippedAi: boolean
+  cacheHit: boolean
+}
 
 export type AiProductRecommendation = {
   lookupKey: string

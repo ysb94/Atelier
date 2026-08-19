@@ -18,8 +18,11 @@ import type {
   CodeUsageTargetInput,
   InvoiceNameRule,
   InvoiceItemNameRule,
+  InvoiceAccessoryRule,
   InvoiceOptionMap,
+  AiAccessoryRecommendation,
   InvoiceProductNameMap,
+  InvoiceProductNameExclusion,
   InvoiceProductNameTagRoleEntry,
   InvoiceGiftAllocation,
   InvoiceGiftRequest,
@@ -47,8 +50,10 @@ import * as codeUsageAssignmentStore from '@/lib/supabase/code-usage-assignments
 import * as invoiceGiftAllocationStore from '@/lib/supabase/invoice-gift-allocations'
 import * as invoiceNameRuleStore from '@/lib/supabase/invoice-name-rules'
 import * as invoiceItemNameRuleStore from '@/lib/supabase/invoice-item-name-rules'
+import * as invoiceAccessoryRuleStore from '@/lib/supabase/invoice-accessory-rules'
 import * as invoiceOptionMapStore from '@/lib/supabase/invoice-option-maps'
 import * as invoiceProductNameMapStore from '@/lib/supabase/invoice-product-name-maps'
+import * as invoiceProductNameExclusionStore from '@/lib/supabase/invoice-product-name-exclusions'
 import * as invoiceProductNameTagRoleStore from '@/lib/supabase/invoice-product-name-tag-roles'
 import * as invoicePrefixRequestStore from '@/lib/supabase/invoice-prefix-requests'
 import * as invoiceWorkInstructionStore from '@/lib/supabase/invoice-work-instructions'
@@ -74,9 +79,13 @@ export type {
 } from '@/lib/supabase/invoice-name-rules'
 export { InvoiceItemNameRuleStoreError } from '@/lib/supabase/invoice-item-name-rules'
 export type {
+  InvoiceItemNameRuleBulkFailure,
+  InvoiceItemNameRuleBulkResult,
   InvoiceItemNameRuleComponentInput,
   InvoiceItemNameRuleInput,
 } from '@/lib/supabase/invoice-item-name-rules'
+export { InvoiceAccessoryRuleStoreError } from '@/lib/supabase/invoice-accessory-rules'
+export type { InvoiceAccessoryRuleInput } from '@/lib/supabase/invoice-accessory-rules'
 export { InvoiceOptionMapStoreError } from '@/lib/supabase/invoice-option-maps'
 export type {
   InvoiceOptionComponentInput,
@@ -85,8 +94,11 @@ export type {
 export { InvoiceProductNameMapStoreError } from '@/lib/supabase/invoice-product-name-maps'
 export type {
   InvoiceProductNameLookupHit,
+  InvoiceProductNameMapBulkResult,
   InvoiceProductNameMapInput,
 } from '@/lib/supabase/invoice-product-name-maps'
+export { InvoiceProductNameExclusionStoreError } from '@/lib/supabase/invoice-product-name-exclusions'
+export type { InvoiceProductNameExclusionInput } from '@/lib/supabase/invoice-product-name-exclusions'
 export { InvoiceProductNameTagRoleStoreError } from '@/lib/supabase/invoice-product-name-tag-roles'
 export type { InvoiceProductNameTagRoleInput } from '@/lib/supabase/invoice-product-name-tag-roles'
 export { InvoicePrefixRequestStoreError } from '@/lib/supabase/invoice-prefix-requests'
@@ -289,6 +301,69 @@ export async function saveInvoiceItemNameRule(
   )
 }
 
+export async function saveInvoiceItemNameRules(
+  brandId: string,
+  items: Array<{
+    input: invoiceItemNameRuleStore.InvoiceItemNameRuleInput
+    ruleId?: string
+  }>,
+): Promise<invoiceItemNameRuleStore.InvoiceItemNameRuleBulkResult> {
+  await delay()
+  return invoiceItemNameRuleStore.saveInvoiceItemNameRules(brandId, items)
+}
+
+export async function setInvoiceItemNameRuleActive(
+  id: string,
+  isActive: boolean,
+): Promise<InvoiceItemNameRule> {
+  await delay()
+  return invoiceItemNameRuleStore.setInvoiceItemNameRuleActive(id, isActive)
+}
+
+export async function getInvoiceAccessoryRules(
+  brandId: string,
+  activeOnly = false,
+): Promise<InvoiceAccessoryRule[]> {
+  await delay()
+  return invoiceAccessoryRuleStore.listInvoiceAccessoryRules(brandId, {
+    activeOnly,
+  })
+}
+
+export async function saveInvoiceAccessoryRule(
+  brandId: string,
+  input: invoiceAccessoryRuleStore.InvoiceAccessoryRuleInput,
+  ruleId?: string,
+): Promise<InvoiceAccessoryRule> {
+  await delay()
+  return invoiceAccessoryRuleStore.saveInvoiceAccessoryRule(
+    brandId,
+    input,
+    ruleId,
+  )
+}
+
+export async function saveInvoiceAccessoryRules(
+  brandId: string,
+  items: invoiceAccessoryRuleStore.InvoiceAccessoryRuleInput[],
+) {
+  await delay()
+  return invoiceAccessoryRuleStore.saveInvoiceAccessoryRules(brandId, items)
+}
+
+export async function setInvoiceAccessoryRuleActive(
+  id: string,
+  isActive: boolean,
+): Promise<InvoiceAccessoryRule> {
+  await delay()
+  return invoiceAccessoryRuleStore.setInvoiceAccessoryRuleActive(id, isActive)
+}
+
+export async function deleteInvoiceAccessoryRule(id: string): Promise<void> {
+  await delay()
+  return invoiceAccessoryRuleStore.deleteInvoiceAccessoryRule(id)
+}
+
 export async function getInvoiceOptionMaps(
   brandId: string,
   activeOnly = false,
@@ -379,6 +454,40 @@ export async function deleteInvoiceProductNameMap(id: string): Promise<void> {
   return invoiceProductNameMapStore.deleteInvoiceProductNameMap(id)
 }
 
+export async function setInvoiceProductNameMapsStyle(
+  brandId: string,
+  ids: string[],
+  styleId: string,
+) {
+  await delay()
+  return invoiceProductNameMapStore.setInvoiceProductNameMapsStyle(
+    brandId,
+    ids,
+    styleId,
+  )
+}
+
+export async function setInvoiceProductNameMapsActive(
+  brandId: string,
+  ids: string[],
+  isActive: boolean,
+) {
+  await delay()
+  return invoiceProductNameMapStore.setInvoiceProductNameMapsActive(
+    brandId,
+    ids,
+    isActive,
+  )
+}
+
+export async function deleteInvoiceProductNameMaps(
+  brandId: string,
+  ids: string[],
+) {
+  await delay()
+  return invoiceProductNameMapStore.deleteInvoiceProductNameMaps(brandId, ids)
+}
+
 export async function undoInvoiceProductNameMap(
   brandId: string,
   input: {
@@ -389,6 +498,48 @@ export async function undoInvoiceProductNameMap(
 ): Promise<'deleted' | 'restored'> {
   await delay()
   return invoiceProductNameMapStore.undoInvoiceProductNameMap(brandId, input)
+}
+
+export async function getInvoiceProductNameExclusions(
+  brandId: string,
+  activeOnly = false,
+): Promise<InvoiceProductNameExclusion[]> {
+  await delay()
+  return invoiceProductNameExclusionStore.listInvoiceProductNameExclusions(
+    brandId,
+    { activeOnly },
+  )
+}
+
+export async function saveInvoiceProductNameExclusion(
+  brandId: string,
+  input: invoiceProductNameExclusionStore.InvoiceProductNameExclusionInput,
+  exclusionId?: string,
+): Promise<InvoiceProductNameExclusion> {
+  await delay()
+  return invoiceProductNameExclusionStore.saveInvoiceProductNameExclusion(
+    brandId,
+    input,
+    exclusionId,
+  )
+}
+
+export async function setInvoiceProductNameExclusionActive(
+  id: string,
+  isActive: boolean,
+): Promise<void> {
+  await delay()
+  return invoiceProductNameExclusionStore.setInvoiceProductNameExclusionActive(
+    id,
+    isActive,
+  )
+}
+
+export async function deleteInvoiceProductNameExclusion(
+  id: string,
+): Promise<void> {
+  await delay()
+  return invoiceProductNameExclusionStore.deleteInvoiceProductNameExclusion(id)
 }
 
 export async function getInvoiceProductNameTagRoles(
@@ -484,6 +635,33 @@ export async function recommendInvoiceProduct(input: {
   mallName: string
 }): Promise<AiProductRecommendation> {
   return aiGatewayStore.recommendInvoiceProduct(input)
+}
+
+export async function recommendInvoiceAccessoryRules(input: {
+  brandId: string
+  featureKey?: string
+  unknownPiece: string
+  itemNames: string[]
+  lookupKeys: string[]
+  mainProducts: string[]
+  contexts?: Array<{
+    contextId: string
+    itemName: string
+    productLookupKey: string
+    mainProduct: string
+    unknownPieces: string[]
+    candidateStyleIds?: string[]
+  }>
+  dictionary: Array<{
+    ruleType: string
+    pattern: string
+    accessoryKind?: string
+    namePrefix?: string
+    colorName?: string
+  }>
+  candidates: AiProductCandidate[]
+}): Promise<AiAccessoryRecommendation> {
+  return aiGatewayStore.recommendInvoiceAccessoryRules(input)
 }
 
 /** 사은품 증정 요청 건. 쇼핑몰명 + 원본 품목명 + 행사 기간으로 찾는다. */

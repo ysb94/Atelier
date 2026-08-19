@@ -50,7 +50,7 @@ function SuggestionList({
   onPick: (ref: StyleRef) => void
 }) {
   return (
-    <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-48 overflow-auto rounded-md border border-border bg-card shadow-sm">
+    <div className="absolute left-0 top-full z-30 mt-1 max-h-56 w-80 max-w-full overflow-auto rounded-md border border-border bg-card shadow-sm">
       {loading ? (
         <p className="px-2 py-2 text-[11px] text-muted-foreground">검색 중...</p>
       ) : suggestions.length === 0 ? (
@@ -60,11 +60,14 @@ function SuggestionList({
           <button
             key={ref.styleId}
             type="button"
-            className="block w-full truncate px-2 py-1.5 text-left text-[11px] hover:bg-muted/60"
+            className="flex w-full items-baseline gap-1.5 px-2 py-1.5 text-left text-xs hover:bg-muted/60"
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => onPick(ref)}
           >
-            {formatStyleRef(ref)}
+            <span className="shrink-0 font-medium tabular-nums">{ref.styleNo}</span>
+            <span className="min-w-0 break-words text-muted-foreground">
+              {ref.name}
+            </span>
           </button>
         ))
       )}
@@ -86,7 +89,7 @@ function SuggestionChecklist({
   onToggle: (ref: StyleRef) => void
 }) {
   return (
-    <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-64 overflow-auto rounded-md border border-border bg-card shadow-sm">
+    <div className="absolute left-0 top-full z-30 mt-1 max-h-64 w-80 max-w-full overflow-auto rounded-md border border-border bg-card shadow-sm">
       {loading ? (
         <p className="px-2 py-2 text-[11px] text-muted-foreground">검색 중...</p>
       ) : suggestions.length === 0 ? (
@@ -97,18 +100,20 @@ function SuggestionChecklist({
           return (
             <label
               key={ref.styleId}
-              className="flex cursor-pointer items-center gap-2 px-2 py-1.5 text-left hover:bg-muted/60"
+              className="flex cursor-pointer items-baseline gap-2 px-2 py-1.5 text-left hover:bg-muted/60"
               onMouseDown={(event) => event.preventDefault()}
             >
               <input
                 type="checkbox"
-                className="size-3.5 shrink-0 accent-primary"
+                className="mt-0.5 size-3.5 shrink-0 accent-primary"
                 checked={checked}
                 onChange={() => onToggle(ref)}
               />
-              <span className="min-w-0 truncate text-[11px]">
-                <span className="font-medium">{ref.styleNo}</span>
-                <span className="text-muted-foreground"> · {ref.name}</span>
+              <span className="flex min-w-0 items-baseline gap-1.5 text-xs">
+                <span className="shrink-0 font-medium tabular-nums">{ref.styleNo}</span>
+                <span className="min-w-0 break-words text-muted-foreground">
+                  {ref.name}
+                </span>
               </span>
             </label>
           )

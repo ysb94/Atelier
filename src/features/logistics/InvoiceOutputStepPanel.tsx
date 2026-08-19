@@ -93,6 +93,7 @@ export function InvoiceOutputStepPanel({
     productTransformation.unresolvedRowCount +
     productTransformation.conflictRowCount +
     productTransformation.missingStyleRowCount +
+    productTransformation.exclusionGuardedRowCount +
     itemTransformation.unresolvedRowCount +
     itemTransformation.conflictRowCount
 
@@ -200,6 +201,11 @@ export function InvoiceOutputStepPanel({
             </Badge>
           ) : null}
           <Badge variant="muted">사은품 {formatNumber(giftCount)}</Badge>
+          {productTransformation.excludedRowCount > 0 ? (
+            <Badge variant="muted">
+              송장 제외 {formatNumber(productTransformation.excludedRowCount)}건
+            </Badge>
+          ) : null}
           {reviewCount > 0 ? (
             <Badge variant="danger">
               미확정 {formatNumber(reviewCount)}행

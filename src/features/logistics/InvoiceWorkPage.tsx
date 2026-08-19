@@ -36,9 +36,11 @@ import {
 import {
   getInvoiceGiftAllocations,
   getInvoiceGiftRequests,
+  getInvoiceAccessoryRules,
   getInvoiceItemNameRules,
   getInvoiceNameRules,
   getInvoiceOptionMaps,
+  getInvoiceProductNameExclusions,
   getInvoiceProductNameMaps,
   getInvoiceProductNameTagRoles,
   getInvoiceWorkInstructions,
@@ -980,9 +982,18 @@ export function InvoiceWorkPage() {
     queryFn: () => getInvoiceItemNameRules(brand.id),
     refetchOnWindowFocus: true,
   })
+  const accessoryRulesQuery = useQuery({
+    queryKey: ['invoice-accessory-rules', brand.id],
+    queryFn: () => getInvoiceAccessoryRules(brand.id, true),
+    refetchOnWindowFocus: true,
+  })
   const productNameMapsQuery = useQuery({
     queryKey: ['invoice-product-name-maps', brand.id],
     queryFn: () => getInvoiceProductNameMaps(brand.id),
+  })
+  const productNameExclusionsQuery = useQuery({
+    queryKey: ['invoice-product-name-exclusions', brand.id],
+    queryFn: () => getInvoiceProductNameExclusions(brand.id),
   })
   const productNameTagRolesQuery = useQuery({
     queryKey: ['invoice-product-name-tag-roles', brand.id],
@@ -1077,12 +1088,29 @@ export function InvoiceWorkPage() {
       : itemNameRulesQuery.error
         ? '내품명 규칙을 불러오지 못했습니다.'
         : null
-  const itemNameCriteriaError = optionMapsError || itemNameRulesError
+  const accessoryRules = useMemo(
+    () => accessoryRulesQuery.data ?? [],
+    [accessoryRulesQuery.data],
+  )
+  const accessoryRulesError =
+    accessoryRulesQuery.error instanceof Error
+      ? accessoryRulesQuery.error.message
+      : accessoryRulesQuery.error
+        ? '부속품 사전을 불러오지 못했습니다.'
+        : null
+  const itemNameCriteriaError =
+    optionMapsError || itemNameRulesError || accessoryRulesError
   const itemNameCriteriaLoading =
-    optionMapsQuery.isPending || itemNameRulesQuery.isPending
+    optionMapsQuery.isPending ||
+    itemNameRulesQuery.isPending ||
+    accessoryRulesQuery.isPending
   const productNameMaps = useMemo(
     () => productNameMapsQuery.data ?? [],
     [productNameMapsQuery.data],
+  )
+  const productNameExclusions = useMemo(
+    () => productNameExclusionsQuery.data ?? [],
+    [productNameExclusionsQuery.data],
   )
   const productNameTagRoles = useMemo(
     () => productNameTagRolesQuery.data ?? [],
@@ -1093,6 +1121,12 @@ export function InvoiceWorkPage() {
       ? productNameMapsQuery.error.message
       : productNameMapsQuery.error
         ? '품목명 변환 기준을 불러오지 못했습니다.'
+        : null
+  const productNameExclusionsError =
+    productNameExclusionsQuery.error instanceof Error
+      ? productNameExclusionsQuery.error.message
+      : productNameExclusionsQuery.error
+        ? '송장 제외 기준을 불러오지 못했습니다.'
         : null
   const productStyleLookupQuery = useQuery({
     queryKey: ['invoice-product-name-all-styles', brand.id],
@@ -1105,6 +1139,8 @@ export function InvoiceWorkPage() {
       !inspection ||
       productNameMapsQuery.isPending ||
       productNameMapsQuery.error ||
+      productNameExclusionsQuery.isPending ||
+      productNameExclusionsQuery.error ||
       productNameTagRolesQuery.isPending ||
       productNameTagRolesQuery.error ||
       productStyleLookupQuery.isPending ||
@@ -1118,9 +1154,13 @@ export function InvoiceWorkPage() {
       productNameMaps,
       catalogFromStyles(styles),
       productNameTagRoles,
+      productNameExclusions,
     )
   }, [
     inspection,
+    productNameExclusions,
+    productNameExclusionsQuery.error,
+    productNameExclusionsQuery.isPending,
     productNameMaps,
     productNameMapsQuery.error,
     productNameMapsQuery.isPending,
@@ -1131,6 +1171,17 @@ export function InvoiceWorkPage() {
     productStyleLookupQuery.error,
     productStyleLookupQuery.isPending,
   ])
+  const processRows = useMemo(() => {
+    if (!inspection) return []
+    if (!productTransformation) return inspection.rows
+    const excluded = new Set(
+      productTransformation.rows
+        .filter((row) => row.status === 'excluded')
+        .map((row) => row.source.rowNumber),
+    )
+    if (excluded.size === 0) return inspection.rows
+    return inspection.rows.filter((row) => !excluded.has(row.rowNumber))
+  }, [inspection, productTransformation])
   const itemTransformation = useMemo(() => {
     if (
       !inspection ||
@@ -1138,17 +1189,26 @@ export function InvoiceWorkPage() {
       optionMapsQuery.isPending ||
       optionMapsQuery.error ||
       itemNameRulesQuery.isPending ||
-      itemNameRulesQuery.error
+      itemNameRulesQuery.error ||
+      accessoryRulesQuery.isPending ||
+      accessoryRulesQuery.error ||
+      productStyleLookupQuery.isPending ||
+      productStyleLookupQuery.error
     ) {
       return null
     }
     return transformInvoiceItemNames(
-      inspection.rows,
+      processRows,
       optionMaps,
       productTransformation.rows,
       itemNameRules,
+      accessoryRules,
+      productStyleLookupQuery.data ?? [],
     )
   }, [
+    accessoryRules,
+    accessoryRulesQuery.error,
+    accessoryRulesQuery.isPending,
     inspection,
     itemNameRules,
     itemNameRulesQuery.error,
@@ -1156,16 +1216,20 @@ export function InvoiceWorkPage() {
     optionMaps,
     optionMapsQuery.error,
     optionMapsQuery.isPending,
+    processRows,
+    productStyleLookupQuery.data,
+    productStyleLookupQuery.error,
+    productStyleLookupQuery.isPending,
     productTransformation,
   ])
   const giftEligibilityPlan = useMemo(() => {
     if (!inspection) return null
-    return planInvoicePrefixes(inspection.rows, giftRequests, giftResolutions)
-  }, [inspection, giftRequests, giftResolutions])
+    return planInvoicePrefixes(processRows, giftRequests, giftResolutions)
+  }, [inspection, processRows, giftRequests, giftResolutions])
   const giftPlan = useMemo(() => {
     if (!inspection || !giftEligibilityPlan) return null
     return planGiftAssignments(
-      inspection.rows,
+      processRows,
       giftEligibilityPlan,
       giftRequests,
       {
@@ -1176,6 +1240,7 @@ export function InvoiceWorkPage() {
     )
   }, [
     inspection,
+    processRows,
     giftEligibilityPlan,
     giftRequests,
     giftSeed,
@@ -1184,8 +1249,8 @@ export function InvoiceWorkPage() {
   ])
   const workPlan = useMemo(() => {
     if (!inspection) return null
-    return planWorkInstructions(inspection.rows, workInstructions)
-  }, [inspection, workInstructions])
+    return planWorkInstructions(processRows, workInstructions)
+  }, [inspection, processRows, workInstructions])
   const nameRulesError =
     nameRulesQuery.error instanceof Error
       ? nameRulesQuery.error.message
@@ -1560,7 +1625,7 @@ export function InvoiceWorkPage() {
                 </p>
                 <InvoicePrefixStepPanel
                   brandId={brand.id}
-                  rows={inspection.rows}
+                  rows={processRows}
                   requests={giftRequests}
                   existingAllocations={giftAllocations}
                   loading={
@@ -1627,7 +1692,7 @@ export function InvoiceWorkPage() {
                   자체품번 변환이 끝난 최종 품목명 앞에 붙습니다.
                 </p>
                 <InvoiceWorkInstructionStepPanel
-                  rows={inspection.rows}
+                  rows={processRows}
                   instructions={workInstructions}
                   loading={workInstructionsQuery.isPending}
                   error={workInstructionsError}
@@ -1665,22 +1730,27 @@ export function InvoiceWorkPage() {
             <Card>
               <CardContent className="space-y-5 pt-5">
                 <p className="text-xs text-muted-foreground">
-                  원본 품목명을 본품 공식명으로 바꿉니다. 자체상품코드·품목명·
-                  품목명+내품명·옵션 일부 결합 다음에 내품명 /·, 앞부분 단독을
-                  보고, 내품명 전체 단독이 맞으면 내품명을 비웁니다. 앞부분
-                  단독이 맞으면 남은 옵션만 다음 단계로 넘깁니다. 세트 구성품은
-                  이 단계부터 행을 펼칩니다.
+                  원본 품목명을 본품 공식명으로 바꿉니다. 품목명·품목명+내품명·
+                  옵션 일부 결합 다음에 내품명 /·, 앞부분 단독을 보고, 내품명
+                  전체 단독이 맞으면 내품명을 비웁니다. 앞부분 단독이 맞으면
+                  남은 옵션만 다음 단계로 넘깁니다. 자체상품코드는 이 단계
+                  조회 키로 쓰지 않습니다. 세트 구성품은 이 단계부터 행을
+                  펼칩니다.
                 </p>
                 {productNameMapsQuery.isPending ||
+                productNameExclusionsQuery.isPending ||
                 productStyleLookupQuery.isPending ? (
                   <div className="rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
                     이 브랜드의 품목명 변환 기준을 불러오고 있습니다.
                   </div>
-                ) : productNameMapsError || productStyleLookupQuery.error ? (
+                ) : productNameMapsError ||
+                  productNameExclusionsError ||
+                  productStyleLookupQuery.error ? (
                   <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">
                     <AlertTriangle className="mt-0.5 size-4 shrink-0" />
                     <span>
                       {productNameMapsError ||
+                        productNameExclusionsError ||
                         (productStyleLookupQuery.error instanceof Error
                           ? productStyleLookupQuery.error.message
                           : '상품 마스터를 대조하지 못했습니다.')}
@@ -1742,7 +1812,7 @@ export function InvoiceWorkPage() {
             <Card>
               <CardContent className="space-y-5 pt-5">
                 <p className="text-xs text-muted-foreground">
-                  공통 규칙 또는 확정 본품별 규칙으로 내품명을 지거나 구성품
+                  공통 규칙 또는 조회 키 선택 규칙으로 내품명을 지거나 구성품
                   공식명으로 바꿉니다. 품목명 원장이 내품명 전체로 본품을 찾은
                   행은 빈 값으로 정리되어 여기 검토 목록에 나오지 않습니다.
                   내품명 / 또는 , 앞부분만으로 본품을 찾은 행은 남은 옵션만
@@ -1774,8 +1844,11 @@ export function InvoiceWorkPage() {
                 ) : itemTransformation ? (
                   <InvoiceItemNameTransformPanel
                     brandId={brand.id}
+                    brandName={brand.name}
                     transformation={itemTransformation}
                     itemNameRules={itemNameRules}
+                    accessoryRules={accessoryRules}
+                    styles={productStyleLookupQuery.data ?? []}
                   />
                 ) : null}
 
@@ -1836,7 +1909,7 @@ export function InvoiceWorkPage() {
                   brandId={brand.id}
                   brandName={brand.name}
                   sourceFileName={fileName}
-                  rows={inspection.rows}
+                  rows={processRows}
                   giftRequests={giftRequests}
                   giftResolutions={giftResolutions}
                   giftSeed={giftSeed}

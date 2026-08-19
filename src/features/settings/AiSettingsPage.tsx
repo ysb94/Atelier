@@ -13,9 +13,11 @@ import {
 } from '@/components/ui/card'
 import { Select } from '@/components/ui/input'
 import {
+  ACCESSORY_FEATURE_KEY,
   AI_PROVIDERS,
   PROVIDER_LABEL,
   PROVIDER_SECRET,
+  type AiFeatureKey,
   type AiProvider,
 } from '@/lib/ai/gateway-core'
 import {
@@ -29,13 +31,19 @@ import {
 } from '@/lib/api'
 import { isBrandLead, useAuth } from '@/lib/supabase/auth'
 
-const FEATURE_KEY = 'invoice_product_recommendation'
+const FEATURE_LABEL: Record<AiFeatureKey, string> = {
+  invoice_product_recommendation: '품목명 공식상품 추천',
+  invoice_accessory_recommendation: '부속품 사전 추천',
+}
 
 export function AiSettingsPage() {
   const { brand } = useBrand()
   const { profile } = useAuth()
   const queryClient = useQueryClient()
   const canEdit = isBrandLead(profile, brand.id)
+  const [featureKey, setFeatureKey] = useState<AiFeatureKey>(
+    'invoice_product_recommendation',
+  )
   const [provider, setProvider] = useState<AiProvider>('openai')
   const [modelId, setModelId] = useState('')
   const [message, setMessage] = useState('')
@@ -46,8 +54,8 @@ export function AiSettingsPage() {
   })
   const route = useMemo(
     () =>
-      routesQuery.data?.find((item) => item.featureKey === FEATURE_KEY) ?? null,
-    [routesQuery.data],
+      routesQuery.data?.find((item) => item.featureKey === featureKey) ?? null,
+    [featureKey, routesQuery.data],
   )
 
   const modelsQuery = useQuery({
@@ -64,7 +72,7 @@ export function AiSettingsPage() {
   const saveMutation = useMutation({
     mutationFn: () =>
       saveAiFeatureRoute(brand.id, {
-        featureKey: FEATURE_KEY,
+        featureKey,
         provider,
         modelId,
       }),
@@ -78,6 +86,12 @@ export function AiSettingsPage() {
       })
       await queryClient.invalidateQueries({
         queryKey: ['ai-product-recommendation', brand.id],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ['ai-accessory-recommendation', brand.id],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ['ai-feature-route', brand.id],
       })
     },
     onError: (error) => {
@@ -107,7 +121,7 @@ export function AiSettingsPage() {
     <div>
       <PageHeader
         title="AI 설정"
-        description="브랜드별로 품목명 추천에 쓸 제공자와 모델을 고릅니다. API 키는 화면에 저장하지 않습니다."
+        description="브랜드별로 품목명·부속품 추천에 쓸 제공자와 모델을 고릅니다. API 키는 화면에 저장하지 않습니다."
       />
 
       <div className="space-y-4">
@@ -180,13 +194,30 @@ export function AiSettingsPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle>품목명 공식상품 추천</CardTitle>
+            <CardTitle>{FEATURE_LABEL[featureKey]}</CardTitle>
             <CardDescription>
-              송장 품목명 지정 화면에 추천 조회 키 1개와 공식상품 3개를 보여
-              줍니다. AI는 채우기만 하고 등록은 기존 버튼이 확정합니다.
+              {featureKey === ACCESSORY_FEATURE_KEY
+                ? '내품명 검토의 미인식 조각을 부속품 사전 후보로 제안합니다. AI는 채우기만 하고 등록은 사람이 고른 뒤에만 저장합니다.'
+                : '송장 품목명 지정 화면에 추천 조회 키 1개와 공식상품 3개를 보여 줍니다. AI는 채우기만 하고 등록은 기존 버튼이 확정합니다.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+              {(Object.keys(FEATURE_LABEL) as AiFeatureKey[]).map((key) => (
+                <Button
+                  key={key}
+                  type="button"
+                  size="sm"
+                  variant={featureKey === key ? 'default' : 'outline'}
+                  onClick={() => {
+                    setFeatureKey(key)
+                    setMessage('')
+                  }}
+                >
+                  {FEATURE_LABEL[key]}
+                </Button>
+              ))}
+            </div>
             {route ? (
               <p className="text-sm">
                 현재 사용:{' '}
