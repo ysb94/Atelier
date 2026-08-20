@@ -127,6 +127,7 @@ export function InvoiceOptionMapRulesPanel({
           <InvoiceProductNameMapTable
             brandId={brandId}
             maps={productNameMaps}
+            optionMaps={maps}
             loading={productNameMapsLoading}
             error={productNameMapsError}
           />

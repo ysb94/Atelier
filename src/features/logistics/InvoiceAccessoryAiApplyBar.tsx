@@ -41,18 +41,23 @@ function ExpectedCell({
   const lines = accessoryReviewExpectedLines(row.action, row.components)
   return (
     <div className="space-y-1">
-      {lines.map((line) => (
+      <div className="flex flex-wrap items-center gap-2">
+        <p className="min-w-0 break-words">{lines[0]}</p>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          className="h-6 shrink-0 px-2 text-[11px]"
+          onClick={onEdit}
+        >
+          수정
+        </Button>
+      </div>
+      {lines.slice(1).map((line) => (
         <p key={line} className="break-words">
           {line}
         </p>
       ))}
-      <button
-        type="button"
-        className="text-[11px] text-primary hover:underline"
-        onClick={onEdit}
-      >
-        수정
-      </button>
       {row.revalidationError ? (
         <p className="text-[11px] text-danger">{row.revalidationError}</p>
       ) : null}
@@ -222,7 +227,11 @@ export function InvoiceAccessoryAiApplyBar({
                       <Fragment key={row.key}>
                         <tr
                           className={`border-t border-border ${
-                            disabled ? 'bg-muted/20 text-muted-foreground' : ''
+                            row.action === 'delete'
+                              ? 'bg-warning/20'
+                              : disabled
+                                ? 'bg-muted/20 text-muted-foreground'
+                                : ''
                           }`}
                         >
                           <td className="px-2 py-1.5">
@@ -260,7 +269,13 @@ export function InvoiceAccessoryAiApplyBar({
                           </td>
                         </tr>
                         {open ? (
-                          <tr className="border-t border-border bg-muted/20">
+                          <tr
+                            className={`border-t border-border ${
+                              row.action === 'delete'
+                                ? 'bg-warning/15'
+                                : 'bg-muted/20'
+                            }`}
+                          >
                             <td colSpan={5} className="px-3 py-2">
                               <div className="max-w-xl space-y-2">
                                 <Select

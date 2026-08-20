@@ -1,4 +1,5 @@
 import { formatItemNameFromComponents } from '@/lib/invoice/item-name-transform'
+import { formatProductCompositionLines } from '@/lib/invoice/product-composition'
 import {
   accessoryContextId,
   evaluateLookupKeyDraft,
@@ -110,11 +111,7 @@ export function accessoryReviewExpectedLines(
 ) {
   if (action === 'delete') return ['내품명을 비움']
   if (components.length === 0) return ['구성품 없음']
-  return components.map((item) =>
-    item.quantity > 1
-      ? `${item.style.styleNo} · ${item.style.name} × ${item.quantity}`
-      : `${item.style.styleNo} · ${item.style.name}`,
-  )
+  return formatProductCompositionLines(components)
 }
 
 export function componentsFromStyleIds(

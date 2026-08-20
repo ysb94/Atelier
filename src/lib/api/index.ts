@@ -21,6 +21,7 @@ import type {
   InvoiceAccessoryRule,
   InvoiceOptionMap,
   AiAccessoryRecommendation,
+  AiItemNameRecommendation,
   InvoiceProductNameMap,
   InvoiceProductNameExclusion,
   InvoiceProductNameTagRoleEntry,
@@ -662,6 +663,21 @@ export async function recommendInvoiceAccessoryRules(input: {
   candidates: AiProductCandidate[]
 }): Promise<AiAccessoryRecommendation> {
   return aiGatewayStore.recommendInvoiceAccessoryRules(input)
+}
+
+export async function recommendInvoiceItemNameRules(input: {
+  brandId: string
+  featureKey?: string
+  contexts: Array<{
+    contextId: string
+    itemName: string
+    productLookupKey: string
+    mainProduct: string
+    candidateStyleIds?: string[]
+  }>
+  candidates: AiProductCandidate[]
+}): Promise<AiItemNameRecommendation> {
+  return aiGatewayStore.recommendInvoiceItemNameRules(input)
 }
 
 /** 사은품 증정 요청 건. 쇼핑몰명 + 원본 품목명 + 행사 기간으로 찾는다. */

@@ -975,11 +975,23 @@ export type AiAccessoryContextDecision = {
     quantity: number
   }>
   reason: string
+  confidence: number
 }
 
 export type AiAccessoryRecommendation = {
   reason: string
   rules: AiAccessorySuggestRule[]
+  contexts: AiAccessoryContextDecision[]
+  provider: AiProvider
+  modelId: string
+  source: AiRecommendationSource
+  cacheId: string | null
+  skippedAi: boolean
+  cacheHit: boolean
+}
+
+export type AiItemNameRecommendation = {
+  reason: string
   contexts: AiAccessoryContextDecision[]
   provider: AiProvider
   modelId: string

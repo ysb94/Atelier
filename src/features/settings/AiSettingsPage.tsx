@@ -33,7 +33,7 @@ import { isBrandLead, useAuth } from '@/lib/supabase/auth'
 
 const FEATURE_LABEL: Record<AiFeatureKey, string> = {
   invoice_product_recommendation: '품목명 공식상품 추천',
-  invoice_accessory_recommendation: '부속품 사전 추천',
+  invoice_accessory_recommendation: '내품명 옵션 추천',
 }
 
 export function AiSettingsPage() {
@@ -121,7 +121,7 @@ export function AiSettingsPage() {
     <div>
       <PageHeader
         title="AI 설정"
-        description="브랜드별로 품목명·부속품 추천에 쓸 제공자와 모델을 고릅니다. API 키는 화면에 저장하지 않습니다."
+        description="브랜드별로 품목명·내품명 추천에 쓸 제공자와 모델을 고릅니다. API 키는 화면에 저장하지 않습니다."
       />
 
       <div className="space-y-4">
@@ -197,7 +197,7 @@ export function AiSettingsPage() {
             <CardTitle>{FEATURE_LABEL[featureKey]}</CardTitle>
             <CardDescription>
               {featureKey === ACCESSORY_FEATURE_KEY
-                ? '내품명 검토의 미인식 조각을 부속품 사전 후보로 제안합니다. AI는 채우기만 하고 등록은 사람이 고른 뒤에만 저장합니다.'
+                ? '미설정 내품명을 조회 키·확정 본품 조합별로 추천합니다. AI는 예상값만 채우고 사람이 고른 뒤에만 저장합니다.'
                 : '송장 품목명 지정 화면에 추천 조회 키 1개와 공식상품 3개를 보여 줍니다. AI는 채우기만 하고 등록은 기존 버튼이 확정합니다.'}
             </CardDescription>
           </CardHeader>

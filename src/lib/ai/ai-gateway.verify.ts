@@ -2,6 +2,7 @@
  * 멀티프로바이더 게이트웨이 정규화 검증. 실행: npm run verify:ai-gateway
  */
 import {
+  buildItemNameSuggestPrompt,
   buildLocalRecommendation,
   evaluateHybridDecision,
   extractJsonObject,
@@ -12,6 +13,7 @@ import {
   parseAccessorySuggestJson,
   parseAnthropicModels,
   parseGeminiModels,
+  parseItemNameSuggestJson,
   parseOpenAiModels,
   parseRecommendJson,
   pickLookupKey,
@@ -326,6 +328,7 @@ const accessoryWithContexts = parseAccessorySuggestJson(
           { styleId: 's-1', quantity: 2 },
           { styleId: 'invented', quantity: 1 },
         ],
+        confidence: 0.86,
         reason: '허용 후보',
       },
       {
@@ -337,6 +340,7 @@ const accessoryWithContexts = parseAccessorySuggestJson(
       {
         contextId: 'ctx-b',
         action: 'hold',
+        confidence: 0.3,
         reason: '보류',
       },
     ],
@@ -354,12 +358,73 @@ assert(
   '환각 M번호와 중복 구성품은 버린다',
 )
 assert(
+  accessoryWithContexts.contexts[0]?.confidence === 0.86,
+  '문맥별 확실도를 읽는다',
+)
+assert(
   filterAccessoryContextDecisions(
     [{ contextId: 'ctx-a', action: 'mystery', components: [{ styleId: 's-1' }] }],
     candidates,
     [{ contextId: 'ctx-a', candidateStyleIds: ['s-1'] }],
   ).length === 0,
   '알 수 없는 action은 버린다',
+)
+
+const itemNameParsed = parseItemNameSuggestJson(
+  {
+    reason: '옵션 판정',
+    contexts: [
+      {
+        contextId: 'ctx-a',
+        action: 'components',
+        components: [{ styleId: 's-1', quantity: 2 }],
+        confidence: 0.91,
+        reason: '추가 구성',
+      },
+      {
+        contextId: 'ctx-empty',
+        action: 'components',
+        components: [{ styleId: 's-2', quantity: 1 }],
+        confidence: 0.99,
+        reason: '다른 문맥 후보',
+      },
+      {
+        contextId: 'ctx-delete',
+        action: 'delete',
+        components: [],
+        confidence: 0.88,
+        reason: '본품 속성',
+      },
+    ],
+  },
+  candidates,
+  [
+    { contextId: 'ctx-a', candidateStyleIds: ['s-1'] },
+    { contextId: 'ctx-empty', candidateStyleIds: [] },
+    { contextId: 'ctx-delete', candidateStyleIds: [] },
+  ],
+)
+assert(
+  itemNameParsed.contexts.length === 2 &&
+    itemNameParsed.contexts[0]?.components[0]?.styleId === 's-1' &&
+    itemNameParsed.contexts[1]?.action === 'delete',
+  '내품명 추천은 문맥 후보 밖 구성품을 버리고 비움 결정은 유지한다',
+)
+const itemPrompt = buildItemNameSuggestPrompt({
+  contexts: [
+    {
+      contextId: 'ctx-a',
+      itemName: '키링 추가',
+      productLookupKey: '가방 블랙',
+      mainProduct: 'M0001 가방',
+      candidateStyleIds: ['s-1'],
+    },
+  ],
+  candidates,
+})
+assert(
+  itemPrompt.user.includes('"s-1"') && !itemPrompt.user.includes('"s-2"'),
+  '내품명 프롬프트에는 문맥에 허용된 후보만 넣는다',
 )
 
 console.log('ai-gateway verify: ok')

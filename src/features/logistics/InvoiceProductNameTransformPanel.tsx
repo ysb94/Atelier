@@ -231,6 +231,7 @@ export function InvoiceProductNameTransformPanel({
   const [openProductName, setOpenProductName] = useState<string | null>(
     groups[0]?.productName ?? null,
   )
+  const collapsedByUserRef = useRef(false)
   const bulk = useInvoiceProductNameBulkAiApply({
     brandId,
     combos: visibleCombos.filter(
@@ -240,13 +241,23 @@ export function InvoiceProductNameTransformPanel({
   })
 
   useEffect(() => {
+    if (groups.length === 0) {
+      collapsedByUserRef.current = false
+      if (openProductName !== null) setOpenProductName(null)
+      return
+    }
     if (openProductName) {
       const stillOpen = groups.some(
         (group) => group.productName === openProductName,
       )
       if (stillOpen) return
+      collapsedByUserRef.current = false
+      setOpenProductName(groups[0]!.productName)
+      return
     }
-    setOpenProductName(groups[0]?.productName ?? null)
+    if (!collapsedByUserRef.current) {
+      setOpenProductName(groups[0]!.productName)
+    }
   }, [groups, openProductName])
 
   const fileTags = useMemo(
@@ -684,9 +695,14 @@ export function InvoiceProductNameTransformPanel({
                         : null
                   }
                   onToggle={() =>
-                    setOpenProductName((current) =>
-                      current === group.productName ? null : group.productName,
-                    )
+                    setOpenProductName((current) => {
+                      if (current === group.productName) {
+                        collapsedByUserRef.current = true
+                        return null
+                      }
+                      collapsedByUserRef.current = false
+                      return group.productName
+                    })
                   }
                 />
               ))}

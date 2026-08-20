@@ -1,4 +1,3 @@
-import { formatStyleRef } from '@/components/style-picker'
 import { Badge } from '@/components/ui/badge'
 import {
   formatItemNameFromComponents,
@@ -6,11 +5,17 @@ import {
 } from '@/lib/invoice/item-name-transform'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import {
+  productCompositionFromStyle,
+  richerProductComposition,
+  type ProductCompositionItem,
+} from '@/lib/invoice/product-composition'
+import {
   INVOICE_ITEM_NAME_RULE_ACTION_LABEL,
   type InvoiceItemNameRule,
   type StyleRef,
 } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
+import { ProductCompositionLines } from './ProductCompositionLines'
 
 export type InvoiceItemNameLookupKeyRow = {
   key: string
@@ -18,6 +23,7 @@ export type InvoiceItemNameLookupKeyRow = {
   normalizedProductLookupKey: string
   itemName: string
   style: StyleRef | null
+  productComponents: ProductCompositionItem[]
   rowCount: number
   selectable: boolean
   disabledReason: string
@@ -76,11 +82,16 @@ export function buildInvoiceItemNameLookupKeyRows(
     {
       productLookupKey: string
       style: StyleRef | null
+      productComponents: ProductCompositionItem[]
       rowCount: number
     }
   >()
   for (const combo of combos) {
     const style = combo.productStyle
+    const productComponents =
+      combo.productComponents && combo.productComponents.length > 0
+        ? combo.productComponents
+        : productCompositionFromStyle(style)
     const key = lookupKeyRowKey(combo.productLookupKey, style?.styleId ?? null)
     const current = byKey.get(key)
     if (current) {
@@ -88,11 +99,16 @@ export function buildInvoiceItemNameLookupKeyRows(
       if (!current.productLookupKey && combo.productLookupKey.trim()) {
         current.productLookupKey = combo.productLookupKey
       }
+      current.productComponents = richerProductComposition(
+        current.productComponents,
+        productComponents,
+      )
       continue
     }
     byKey.set(key, {
       productLookupKey: combo.productLookupKey,
       style,
+      productComponents,
       rowCount: combo.rowCount,
     })
   }
@@ -111,6 +127,7 @@ export function buildInvoiceItemNameLookupKeyRows(
         normalizedProductLookupKey: normalizeInvoiceText(item.productLookupKey),
         itemName,
         style: item.style,
+        productComponents: item.productComponents,
         rowCount: item.rowCount,
         selectable: Boolean(lookup && item.style),
         disabledReason,
@@ -189,7 +206,7 @@ export function InvoiceItemNameLookupKeyTable({
                   onChange={(event) => toggleAll(event.target.checked)}
                 />
               </th>
-              <th className="px-2 py-1.5 font-medium">확정 본품</th>
+              <th className="px-2 py-1.5 font-medium">품목명 변환 정보</th>
               <th className="px-2 py-1.5 font-medium">조회 키</th>
               <th className="px-2 py-1.5 font-medium">옵션명</th>
               <th className="px-2 py-1.5 font-medium">대상 행</th>
@@ -215,8 +232,8 @@ export function InvoiceItemNameLookupKeyTable({
                       onChange={(event) => toggle(row, event.target.checked)}
                     />
                   </td>
-                  <td className="whitespace-nowrap px-2 py-1.5">
-                    {row.style ? formatStyleRef(row.style) : '본품 미확정'}
+                  <td className="max-w-72 px-2 py-1.5">
+                    <ProductCompositionLines items={row.productComponents} />
                   </td>
                   <td className="max-w-72 break-words px-2 py-1.5">
                     {row.productLookupKey || '(조회 키 없음)'}

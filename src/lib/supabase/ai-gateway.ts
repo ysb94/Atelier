@@ -1,6 +1,7 @@
 import { ACCESSORY_FEATURE_KEY, type AiProvider } from '@/lib/ai/gateway-core'
 import type {
   AiAccessoryRecommendation,
+  AiItemNameRecommendation,
   AiProductCandidate,
   AiProductRecommendation,
   AiRecommendationSource,
@@ -143,6 +144,64 @@ export async function recommendInvoiceAccessoryRules(input: {
     action: 'recommend_accessory_rules',
     ...input,
     featureKey: input.featureKey ?? ACCESSORY_FEATURE_KEY,
+  })
+  return {
+    ...result.recommendation,
+    contexts: result.recommendation.contexts ?? [],
+    provider: result.provider,
+    modelId: result.modelId,
+    source: result.source ?? 'ai',
+    cacheId: result.cacheId ?? null,
+    skippedAi: result.skippedAi ?? false,
+    cacheHit: result.cacheHit ?? false,
+  }
+}
+
+export async function recommendInvoiceItemNameRules(input: {
+  brandId: string
+  featureKey?: string
+  contexts: Array<{
+    contextId: string
+    itemName: string
+    productLookupKey: string
+    mainProduct: string
+    candidateStyleIds?: string[]
+  }>
+  candidates: AiProductCandidate[]
+}): Promise<AiItemNameRecommendation> {
+  const itemNames = [...new Set(input.contexts.map((item) => item.itemName))]
+  const lookupKeys = [
+    ...new Set(input.contexts.map((item) => item.productLookupKey).filter(Boolean)),
+  ]
+  const mainProducts = [
+    ...new Set(input.contexts.map((item) => item.mainProduct).filter(Boolean)),
+  ]
+  const result = await invokeGateway<{
+    provider: AiProvider
+    modelId: string
+    source?: AiRecommendationSource
+    cacheId?: string | null
+    skippedAi?: boolean
+    cacheHit?: boolean
+    recommendation: Omit<
+      AiItemNameRecommendation,
+      'provider' | 'modelId' | 'source' | 'cacheId' | 'skippedAi' | 'cacheHit'
+    >
+  }>({
+    action: 'recommend_accessory_rules',
+    mode: 'item_name',
+    brandId: input.brandId,
+    featureKey: input.featureKey ?? ACCESSORY_FEATURE_KEY,
+    unknownPiece: '내품명 일괄 검토',
+    itemNames,
+    lookupKeys,
+    mainProducts,
+    contexts: input.contexts.map((item) => ({
+      ...item,
+      unknownPieces: [],
+    })),
+    dictionary: [],
+    candidates: input.candidates,
   })
   return {
     ...result.recommendation,

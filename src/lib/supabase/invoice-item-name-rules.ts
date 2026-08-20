@@ -159,6 +159,8 @@ export type InvoiceItemNameRuleInput = {
 }
 
 export type InvoiceItemNameRuleBulkFailure = {
+  scope: InvoiceItemNameRuleScope
+  itemName: string
   productLookupKey: string
   mainStyleId: string
   message: string
@@ -424,6 +426,8 @@ export async function saveInvoiceItemNameRules(
         )
       } catch (error) {
         failed.push({
+          scope: current.input.scope,
+          itemName: current.input.itemName,
           productLookupKey: current.input.productLookupKey?.trim() ?? '',
           mainStyleId: current.input.mainStyleId?.trim() ?? '',
           message:

@@ -10,6 +10,7 @@ import type {
 } from '@/lib/invoice/item-name-transform'
 import { formatOptionItemName } from '@/lib/invoice/option-transform'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
+import { productCompositionSearchText } from '@/lib/invoice/product-composition'
 import {
   INVOICE_ITEM_NAME_RULE_SCOPE_LABEL,
   type InvoiceAccessoryRule,
@@ -26,10 +27,10 @@ import {
   InvoiceItemNameLookupKeyTable,
   buildInvoiceItemNameLookupKeyRows,
 } from './InvoiceItemNameLookupKeyTable'
-import { InvoiceAccessoryAiApplyBar } from './InvoiceAccessoryAiApplyBar'
+import { InvoiceItemNameAiApplyBar } from './InvoiceItemNameAiApplyBar'
 import { InvoiceAccessoryRuleForm } from './InvoiceAccessoryRuleTable'
 import { InvoiceItemNameRuleForm } from './InvoiceItemNameRuleForm'
-import { useInvoiceAccessoryBulkAiApply } from './useInvoiceAccessoryBulkAiApply'
+import { useInvoiceItemNameBulkAiApply } from './useInvoiceItemNameBulkAiApply'
 
 type ItemNameEditorScope = Extract<
   InvoiceItemNameRuleScope,
@@ -124,6 +125,7 @@ function comboMatchesQuery(combo: UnresolvedItemNameCombo, query: string) {
     combo.productLookupKey,
     combo.productStyle?.name,
     combo.productStyle?.styleNo,
+    productCompositionSearchText(combo.productComponents ?? []),
   ]
     .join(' ')
     .toLocaleLowerCase('ko-KR')
@@ -219,10 +221,11 @@ export function InvoiceItemNameTransformPanel({
   const [selectedGroupKey, setSelectedGroupKey] = useState<string | null>(null)
   const [selectedComboKey, setSelectedComboKey] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
+  const [manualOpen, setManualOpen] = useState(false)
   const previousGroupsRef = useRef<ItemReviewGroup[]>([])
 
   const combos = transformation.unresolvedCombos
-  const accessoryBulk = useInvoiceAccessoryBulkAiApply({
+  const itemNameBulk = useInvoiceItemNameBulkAiApply({
     brandId,
     combos,
     accessoryRules,
@@ -343,148 +346,178 @@ export function InvoiceItemNameTransformPanel({
 
       {reviewCount > 0 ? (
         <div className="space-y-3">
-          <InvoiceAccessoryAiApplyBar bulk={accessoryBulk} />
-          <div>
-            <p className="text-sm font-medium">
-              내품명 확인 {formatNumber(groups.length)}개
-              {groups.length !== combos.length
-                ? ` · 상품 조합 ${formatNumber(combos.length)}개`
-                : ''}
-            </p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              같은 내품명은 한 줄로 묶습니다. 공통 규칙은 품목명을 보지 않고,
-              조회 키 규칙은 체크한 조회 키와 그때의 확정 본품 조합에만 적용합니다.
-              처음부터 비어 있는 내품명과 품목명 단계에서 전부 소비된 내품명은
-              여기 나오지 않습니다. / 또는 , 앞부분만 쓴 행은 남은 옵션만 남깁니다.
-            </p>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="내품명·품목명 검색"
-              className="max-w-xs"
-              aria-label="내품명 검색"
-            />
-            <Select
-              value={status}
-              onChange={(event) =>
-                setStatus(
-                  event.target.value as 'all' | InvoiceItemNameMatchStatus,
-                )
-              }
-              className="w-44"
-              aria-label="내품명 상태 필터"
-            >
-              <option value="all">상태 전체</option>
-              <option value="mapped">내품명 기준 적용</option>
-              <option value="consumed">본품 식별 후 비움</option>
-              <option value="deleted">내품명 지움</option>
-              <option value="passthrough">미설정·원문 유지</option>
-              <option value="conflict">충돌</option>
-            </Select>
+          <InvoiceItemNameAiApplyBar bulk={itemNameBulk} />
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium">
+                직접 지정 {formatNumber(groups.length)}개
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                AI가 결정하지 못한 항목만 필요할 때 직접 지정할 수 있습니다.
+              </p>
+            </div>
             <Button
               type="button"
               size="sm"
-              variant="outline"
-              disabled={downloading || reviewEntries.length === 0}
-              onClick={async () => {
-                setDownloading(true)
-                setDownloadError(null)
-                try {
-                  await downloadInvoiceItemNameReviewList(
-                    brandName,
-                    reviewEntries,
-                  )
-                } catch (err) {
-                  setDownloadError(
-                    err instanceof Error
-                      ? err.message
-                      : '검토 목록을 내려받지 못했습니다.',
-                  )
-                } finally {
-                  setDownloading(false)
-                }
-              }}
+              variant="ghost"
+              onClick={() => setManualOpen((open) => !open)}
             >
-              <Download className="size-3.5" />
-              {downloading
-                ? '만드는 중...'
-                : `검토 목록 내려받기 ${formatNumber(reviewEntries.length)}`}
+              {manualOpen ? '직접 지정 접기' : '직접 지정 펼치기'}
             </Button>
           </div>
 
-          <p className="text-xs text-muted-foreground">
-            내려받은 파일에서 지울 행은 `지우기`에 Y, 구성품을 넣을 행은 `구성품
-            M번호`만 채워 기준정보 &gt; 내품명 일괄 규칙에서 올리면 한 번에
-            등록됩니다. 구성품이 여러 개면 한 칸에 `M1999,M1999,M2000`처럼 쉼표로
-            나열하고, 같은 M번호를 반복한 횟수가 수량이 됩니다. 둘 다 비운 행은
-            건너뛰니 필요한 행만 채우면 됩니다.
-          </p>
-          {downloadError ? (
-            <p className="rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">
-              {downloadError}
-            </p>
-          ) : null}
-
-          {groups.length > 0 ? (
-            <div className="space-y-4">
-              <div className="max-h-40 overflow-auto rounded-lg border border-border bg-muted/10 p-2">
-                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                  {groups.map((group) => {
-                    const selected = group.key === selectedGroupKey
-                    const meta = STATUS_META[group.status]
-                    return (
-                      <button
-                        key={group.key}
-                        type="button"
-                        aria-pressed={selected}
-                        onClick={() => selectGroup(group)}
-                        className={`flex min-h-16 w-full items-start justify-between gap-3 rounded-md border px-3 py-2 text-left ${
-                          selected
-                            ? 'border-primary/50 bg-primary/10'
-                            : 'border-border bg-card hover:bg-muted/40'
-                        }`}
-                      >
-                        <div className="min-w-0">
-                          <p className="break-words text-sm font-medium leading-5">
-                            {group.itemName || '내품명 없음'}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            상품 {formatNumber(group.productCount)}개 ·{' '}
-                            {formatNumber(group.rowCount)}행
-                          </p>
-                        </div>
-                        <Badge className="shrink-0" variant={meta.variant}>
-                          {meta.label}
-                        </Badge>
-                      </button>
-                    )
-                  })}
-                </div>
+          {manualOpen ? (
+            <>
+              <div>
+                <p className="text-sm font-medium">
+                  내품명 확인 {formatNumber(groups.length)}개
+                  {groups.length !== combos.length
+                    ? ` · 상품 조합 ${formatNumber(combos.length)}개`
+                    : ''}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  같은 내품명은 한 줄로 묶습니다. 공통 규칙은 품목명을 보지
+                  않고, 조회 키 규칙은 체크한 조회 키와 그때의 확정 본품
+                  조합에만 적용합니다. 처음부터 비어 있는 내품명과 품목명
+                  단계에서 전부 소비된 내품명은 여기 나오지 않습니다. / 또는 ,
+                  앞부분만 쓴 행은 남은 옵션만 남깁니다.
+                </p>
               </div>
 
-              <section className="min-w-0 rounded-lg border border-border bg-card p-4">
-                {selectedGroup ? (
-                  <ItemEditor
-                    brandId={brandId}
-                    group={selectedGroup}
-                    rules={itemNameRules}
-                    accessoryCount={accessoryRules.length}
-                  />
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    위에서 내품명을 고르면 여기서 규칙을 지정합니다.
-                  </p>
-                )}
-              </section>
-            </div>
-          ) : (
-            <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">
-              검색·필터에 맞는 내품명이 없습니다.
-            </p>
-          )}
+              <div className="flex flex-wrap gap-2">
+                <Input
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder="내품명·품목명 검색"
+                  className="max-w-xs"
+                  aria-label="내품명 검색"
+                />
+                <Select
+                  value={status}
+                  onChange={(event) =>
+                    setStatus(
+                      event.target.value as
+                        | 'all'
+                        | InvoiceItemNameMatchStatus,
+                    )
+                  }
+                  className="w-44"
+                  aria-label="내품명 상태 필터"
+                >
+                  <option value="all">상태 전체</option>
+                  <option value="mapped">내품명 기준 적용</option>
+                  <option value="consumed">본품 식별 후 비움</option>
+                  <option value="deleted">내품명 지움</option>
+                  <option value="passthrough">미설정·원문 유지</option>
+                  <option value="conflict">충돌</option>
+                </Select>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={downloading || reviewEntries.length === 0}
+                  onClick={async () => {
+                    setDownloading(true)
+                    setDownloadError(null)
+                    try {
+                      await downloadInvoiceItemNameReviewList(
+                        brandName,
+                        reviewEntries,
+                      )
+                    } catch (err) {
+                      setDownloadError(
+                        err instanceof Error
+                          ? err.message
+                          : '검토 목록을 내려받지 못했습니다.',
+                      )
+                    } finally {
+                      setDownloading(false)
+                    }
+                  }}
+                >
+                  <Download className="size-3.5" />
+                  {downloading
+                    ? '만드는 중...'
+                    : `검토 목록 내려받기 ${formatNumber(reviewEntries.length)}`}
+                </Button>
+              </div>
+
+              <p className="text-xs text-muted-foreground">
+                내려받은 파일에서 지울 행은 `지우기`에 Y, 구성품을 넣을 행은
+                `구성품 M번호`만 채워 기준정보 &gt; 내품명 일괄 규칙에서 올리면
+                한 번에 등록됩니다. 구성품이 여러 개면 한 칸에
+                `M1999,M1999,M2000`처럼 쉼표로 나열하고, 같은 M번호를 반복한
+                횟수가 수량이 됩니다. 둘 다 비운 행은 건너뛰니 필요한 행만
+                채우면 됩니다.
+              </p>
+              {downloadError ? (
+                <p className="rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">
+                  {downloadError}
+                </p>
+              ) : null}
+
+              {groups.length > 0 ? (
+                <div className="space-y-4">
+                  <div className="max-h-40 overflow-auto rounded-lg border border-border bg-muted/10 p-2">
+                    <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                      {groups.map((group) => {
+                        const selected = group.key === selectedGroupKey
+                        const meta = STATUS_META[group.status]
+                        return (
+                          <button
+                            key={group.key}
+                            type="button"
+                            aria-pressed={selected}
+                            onClick={() => selectGroup(group)}
+                            className={`flex min-h-16 w-full items-start justify-between gap-3 rounded-md border px-3 py-2 text-left ${
+                              selected
+                                ? 'border-primary/50 bg-primary/10'
+                                : 'border-border bg-card hover:bg-muted/40'
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <p className="break-words text-sm font-medium leading-5">
+                                {group.itemName || '내품명 없음'}
+                              </p>
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                상품 {formatNumber(group.productCount)}개 ·{' '}
+                                {formatNumber(group.rowCount)}행
+                              </p>
+                            </div>
+                            <Badge
+                              className="shrink-0"
+                              variant={meta.variant}
+                            >
+                              {meta.label}
+                            </Badge>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  <section className="min-w-0 rounded-lg border border-border bg-card p-4">
+                    {selectedGroup ? (
+                      <ItemEditor
+                        brandId={brandId}
+                        group={selectedGroup}
+                        rules={itemNameRules}
+                        accessoryCount={accessoryRules.length}
+                      />
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        위에서 내품명을 고르면 여기서 규칙을 지정합니다.
+                      </p>
+                    )}
+                  </section>
+                </div>
+              ) : (
+                <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">
+                  검색·필터에 맞는 내품명이 없습니다.
+                </p>
+              )}
+            </>
+          ) : null}
         </div>
       ) : (
         <p className="rounded-lg border border-success/30 bg-success/10 p-4 text-sm">

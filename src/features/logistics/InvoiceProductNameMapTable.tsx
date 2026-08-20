@@ -21,18 +21,29 @@ import {
   setInvoiceProductNameMapsStyle,
   type InvoiceProductNameMapBulkResult,
 } from '@/lib/api'
-import type { InvoiceProductNameMap, StyleRef } from '@/lib/types'
+import type {
+  InvoiceOptionMap,
+  InvoiceProductNameMap,
+  StyleRef,
+} from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
+import {
+  productCompositionSearchText,
+  productCompositionVariantsForMap,
+} from '@/lib/invoice/product-composition'
 import { InvoiceProductNameMapForm } from './InvoiceProductNameMapForm'
+import { ProductCompositionLines } from './ProductCompositionLines'
 
 export function InvoiceProductNameMapTable({
   brandId,
   maps,
+  optionMaps = [],
   loading,
   error,
 }: {
   brandId: string
   maps: InvoiceProductNameMap[]
+  optionMaps?: InvoiceOptionMap[]
   loading: boolean
   error: string | null
 }) {
@@ -63,12 +74,16 @@ export function InvoiceProductNameMapTable({
         map.ownProductCode,
         map.style.styleNo,
         map.style.name,
+        ...productCompositionVariantsForMap(optionMaps, map).flatMap((variant) => [
+          variant.itemName,
+          productCompositionSearchText(variant.items),
+        ]),
       ]
         .join(' ')
         .toLocaleLowerCase('ko-KR')
         .includes(q),
     )
-  }, [maps, search])
+  }, [maps, optionMaps, search])
 
   const mapIds = useMemo(() => new Set(maps.map((map) => map.id)), [maps])
   const filteredIds = useMemo(
@@ -462,7 +477,7 @@ export function InvoiceProductNameMapTable({
                   </th>
                   <th className="px-3 py-2 font-medium">원본 품목명·조회 키</th>
                   <th className="px-3 py-2 font-medium">매칭 방식</th>
-                  <th className="px-3 py-2 font-medium">본품</th>
+                  <th className="px-3 py-2 font-medium">품목명 변환 정보</th>
                   <th className="px-3 py-2 font-medium">상태</th>
                   <th className="px-3 py-2 font-medium" />
                 </tr>
@@ -492,8 +507,11 @@ export function InvoiceProductNameMapTable({
                           ? '조회 키'
                           : `조합 · 내품명 ${map.itemNameContext || '없음'}`}
                       </td>
-                      <td className="max-w-48 truncate px-3 py-2">
-                        {map.style.styleNo} · {map.style.name}
+                      <td className="max-w-64 px-3 py-2">
+                        <ProductNameMapComposition
+                          map={map}
+                          optionMaps={optionMaps}
+                        />
                       </td>
                       <td className="px-3 py-2">
                         <Badge variant={map.isActive ? 'success' : 'muted'}>
@@ -574,5 +592,31 @@ export function InvoiceProductNameMapTable({
         ) : null}
       </CardContent>
     </Card>
+  )
+}
+
+function ProductNameMapComposition({
+  map,
+  optionMaps,
+}: {
+  map: InvoiceProductNameMap
+  optionMaps: InvoiceOptionMap[]
+}) {
+  const variants = productCompositionVariantsForMap(optionMaps, map)
+  const showLabels = variants.length > 1
+  return (
+    <div className="space-y-1.5">
+      {variants.map((variant) => (
+        <div key={variant.key} className="space-y-0.5">
+          {showLabels ? (
+            <p className="text-[11px] text-muted-foreground">
+              {variant.itemName || '(내품명 없음)'}
+              {variant.mallName ? ` · ${variant.mallName}` : ''}
+            </p>
+          ) : null}
+          <ProductCompositionLines items={variant.items} />
+        </div>
+      ))}
+    </div>
   )
 }

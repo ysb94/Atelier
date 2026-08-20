@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import {
@@ -889,6 +889,24 @@ function TodayStepProgress({
   )
 }
 
+/** 한 번 열어본 단계는 숨겨만 둔다. 탭을 옮겨도 검수표·초안이 남는다. */
+function TodayStepPanel({
+  active,
+  keepMounted,
+  children,
+}: {
+  active: boolean
+  keepMounted: boolean
+  children: ReactNode
+}) {
+  if (!keepMounted) return null
+  return (
+    <div hidden={!active} className={active ? undefined : 'hidden'}>
+      {children}
+    </div>
+  )
+}
+
 function StepSnapshotButton({
   stage,
   brandName,
@@ -1276,6 +1294,8 @@ export function InvoiceWorkPage() {
     maxStepIndex,
   )
   const activeStep = TODAY_STEPS[stepIndex].value
+  const visitedStepsRef = useRef(new Set<TodayStep>())
+  visitedStepsRef.current.add(activeStep)
 
   function selectView(view: InvoiceView) {
     setSearchParams((current) => {
@@ -1293,6 +1313,7 @@ export function InvoiceWorkPage() {
   }
 
   function resetFile() {
+    visitedStepsRef.current = new Set<TodayStep>(['upload'])
     setInspection(null)
     setFileName('')
     setError(null)
@@ -1315,6 +1336,7 @@ export function InvoiceWorkPage() {
 
     setIsParsing(true)
     setError(null)
+    visitedStepsRef.current = new Set<TodayStep>(['upload'])
     setInspection(null)
     setFileName(file.name)
     setProductSaveBlockCount(0)
@@ -1369,7 +1391,10 @@ export function InvoiceWorkPage() {
             />
           </div>
 
-          {activeStep === 'upload' ? (
+          <TodayStepPanel
+            active={activeStep === 'upload'}
+            keepMounted={visitedStepsRef.current.has('upload')}
+          >
             <Card>
               <CardHeader>
                 <CardTitle>사방넷 파일 올리기</CardTitle>
@@ -1471,9 +1496,13 @@ export function InvoiceWorkPage() {
                 ) : null}
               </CardContent>
             </Card>
-          ) : null}
+          </TodayStepPanel>
 
-          {activeStep === 'check' && inspection ? (
+          <TodayStepPanel
+            active={activeStep === 'check'}
+            keepMounted={visitedStepsRef.current.has('check') && Boolean(inspection)}
+          >
+            {inspection ? (
             <Card>
               <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
@@ -1614,9 +1643,18 @@ export function InvoiceWorkPage() {
                 </div>
               </CardContent>
             </Card>
-          ) : null}
+            ) : null}
+          </TodayStepPanel>
 
-          {activeStep === 'gift' && inspection && headerReady ? (
+          <TodayStepPanel
+            active={activeStep === 'gift'}
+            keepMounted={
+              visitedStepsRef.current.has('gift') &&
+              Boolean(inspection) &&
+              headerReady
+            }
+          >
+            {inspection ? (
             <Card>
               <CardContent className="space-y-5 pt-5">
                 <p className="text-xs text-muted-foreground">
@@ -1681,9 +1719,18 @@ export function InvoiceWorkPage() {
                 </div>
               </CardContent>
             </Card>
-          ) : null}
+            ) : null}
+          </TodayStepPanel>
 
-          {activeStep === 'instruction' && inspection && headerReady ? (
+          <TodayStepPanel
+            active={activeStep === 'instruction'}
+            keepMounted={
+              visitedStepsRef.current.has('instruction') &&
+              Boolean(inspection) &&
+              headerReady
+            }
+          >
+            {inspection ? (
             <Card>
               <CardContent className="space-y-5 pt-5">
                 <p className="text-xs text-muted-foreground">
@@ -1724,9 +1771,18 @@ export function InvoiceWorkPage() {
                 </div>
               </CardContent>
             </Card>
-          ) : null}
+            ) : null}
+          </TodayStepPanel>
 
-          {activeStep === 'product' && inspection && headerReady ? (
+          <TodayStepPanel
+            active={activeStep === 'product'}
+            keepMounted={
+              visitedStepsRef.current.has('product') &&
+              Boolean(inspection) &&
+              headerReady
+            }
+          >
+            {inspection ? (
             <Card>
               <CardContent className="space-y-5 pt-5">
                 <p className="text-xs text-muted-foreground">
@@ -1806,9 +1862,18 @@ export function InvoiceWorkPage() {
                 </div>
               </CardContent>
             </Card>
-          ) : null}
+            ) : null}
+          </TodayStepPanel>
 
-          {activeStep === 'item' && inspection && headerReady ? (
+          <TodayStepPanel
+            active={activeStep === 'item'}
+            keepMounted={
+              visitedStepsRef.current.has('item') &&
+              Boolean(inspection) &&
+              headerReady
+            }
+          >
+            {inspection ? (
             <Card>
               <CardContent className="space-y-5 pt-5">
                 <p className="text-xs text-muted-foreground">
@@ -1886,7 +1951,8 @@ export function InvoiceWorkPage() {
                 </div>
               </CardContent>
             </Card>
-          ) : null}
+            ) : null}
+          </TodayStepPanel>
 
           {activeStep === 'output' &&
           inspection &&

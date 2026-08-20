@@ -40,11 +40,17 @@ export type AccessoryContextDecision = {
     quantity: number
   }>
   reason: string
+  confidence: number
 }
 
 export type AccessorySuggestResult = {
   reason: string
   rules: AccessorySuggestRule[]
+  contexts: AccessoryContextDecision[]
+}
+
+export type ItemNameSuggestResult = {
+  reason: string
   contexts: AccessoryContextDecision[]
 }
 export type AiFeatureKey = (typeof AI_FEATURE_KEYS)[number]
@@ -550,6 +556,7 @@ export function filterAccessoryContextDecisions(
   raw: unknown[],
   candidates: ProductCandidate[],
   contexts: Array<{ contextId: string; candidateStyleIds?: string[] }> = [],
+  fallbackToAllCandidates = true,
 ): AccessoryContextDecision[] {
   const allowedIds = new Set(contexts.map((item) => item.contextId).filter(Boolean))
   const byContextCandidates = new Map(
@@ -574,12 +581,14 @@ export function filterAccessoryContextDecisions(
         action,
         components: [],
         reason: asString(row?.reason),
+        confidence: clampConfidence(row?.confidence),
       })
       continue
     }
+    const scoped = byContextCandidates.get(contextId)
     const allowed =
-      byContextCandidates.get(contextId) && byContextCandidates.get(contextId)!.size > 0
-        ? byContextCandidates.get(contextId)!
+      scoped && (scoped.size > 0 || !fallbackToAllCandidates)
+        ? scoped
         : new Set(candidates.map((entry) => entry.styleId))
     const used = new Set<string>()
     const components = (Array.isArray(row?.components) ? row.components : []).flatMap(
@@ -606,6 +615,7 @@ export function filterAccessoryContextDecisions(
       action: 'components',
       components,
       reason: asString(row?.reason),
+      confidence: clampConfidence(row?.confidence),
     })
   }
   return next.slice(0, 8)
@@ -673,7 +683,7 @@ export function buildAccessorySuggestPrompt(input: {
     'color는 colorName(한글 색상)이 필요합니다.',
     '본품 되풀이이거나 품목명에 이미 있는 색상은 ignore로 제안하세요.',
     '전역 규칙은 최대 2개입니다. 주문자 개인정보는 다루지 않습니다.',
-    '형식: {"reason":"","rules":[{"ruleType":"color","pattern":"","accessoryKind":"","namePrefix":"","colorName":"","styleId":"","confidence":0.0,"reason":""}],"contexts":[{"contextId":"","action":"components","components":[{"styleId":"","quantity":1}],"reason":""}]}',
+    '형식: {"reason":"","rules":[{"ruleType":"color","pattern":"","accessoryKind":"","namePrefix":"","colorName":"","styleId":"","confidence":0.0,"reason":""}],"contexts":[{"contextId":"","action":"components","components":[{"styleId":"","quantity":1}],"confidence":0.0,"reason":""}]}',
   ].join(' ')
 
   const user = JSON.stringify({
@@ -693,6 +703,66 @@ export function buildAccessorySuggestPrompt(input: {
     })),
   })
 
+  return { system, user }
+}
+
+export function parseItemNameSuggestJson(
+  payload: unknown,
+  candidates: ProductCandidate[],
+  contexts: Array<{ contextId: string; candidateStyleIds?: string[] }>,
+): ItemNameSuggestResult {
+  const row = asRecord(payload)
+  if (!row) throw new Error('AI 내품명 추천 JSON 형식이 아닙니다.')
+  return {
+    reason: asString(row.reason),
+    contexts: filterAccessoryContextDecisions(
+      Array.isArray(row.contexts) ? row.contexts : [],
+      candidates,
+      contexts,
+      false,
+    ),
+  }
+}
+
+export function buildItemNameSuggestPrompt(input: {
+  contexts: Array<{
+    contextId: string
+    itemName: string
+    productLookupKey: string
+    mainProduct: string
+    candidateStyleIds?: string[]
+  }>
+  candidates: ProductCandidate[]
+}) {
+  const system = [
+    '당신은 송장 내품명을 확정 본품과 조회 키 문맥에 맞게 변환하는 어시스턴트입니다.',
+    '반드시 JSON만 반환하고 제공된 모든 contextId에 정확히 한 개의 결정을 반환하세요.',
+    'action은 components, delete, hold 중 하나입니다.',
+    'components는 본품 외에 실제로 함께 출고할 상품이 있을 때만 사용하세요.',
+    'delete는 색상, 사이즈, 배송 표시, 선택값처럼 본품의 속성만 있고 추가 출고 상품이 없을 때 사용하세요.',
+    '확신할 수 없거나 후보가 없으면 추측하지 말고 hold를 사용하세요.',
+    'components.styleId는 해당 문맥의 candidateStyleIds 안에서만 고르고 확정 본품 자체는 구성품에 넣지 마세요.',
+    '같은 구성품은 한 번만 쓰고 quantity로 수량을 나타내세요.',
+    'confidence는 0부터 1 사이입니다. 주문자 개인정보는 다루지 않습니다.',
+    '형식: {"reason":"","contexts":[{"contextId":"","action":"components","components":[{"styleId":"","quantity":1}],"confidence":0.0,"reason":""}]}',
+  ].join(' ')
+  const usedIds = new Set(
+    input.contexts.flatMap((context) => context.candidateStyleIds ?? []),
+  )
+  const candidates = input.candidates
+    .filter((candidate) => usedIds.has(candidate.styleId))
+    .map((candidate) => ({
+      styleId: candidate.styleId,
+      styleNo: candidate.styleNo,
+      name: candidate.name,
+      lookupKey: candidate.lookupKey,
+      source: candidate.source,
+      score: candidate.score,
+    }))
+  const user = JSON.stringify({
+    contexts: input.contexts,
+    candidates,
+  })
   return { system, user }
 }
 

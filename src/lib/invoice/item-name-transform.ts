@@ -12,6 +12,12 @@ import {
   type InvoiceProductNameTransformRow,
 } from '@/lib/invoice/product-name-transform'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
+import {
+  productCompositionFromOptionMap,
+  productCompositionFromStyle,
+  richerProductComposition,
+  type ProductCompositionItem,
+} from '@/lib/invoice/product-composition'
 import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
 import type {
   InvoiceAccessoryRule,
@@ -55,6 +61,8 @@ export type UnresolvedItemNameCombo = {
   originalItemName: string
   ownProductCode: string
   productStyle: StyleRef | null
+  /** 품목명 단계에서 맞춘 본품+구성품. 옵션 기준이 없으면 대표 본품 1개 */
+  productComponents?: ProductCompositionItem[]
   /** 품목명 단계에서 본품을 맞춘 조회 키 */
   productLookupKey: string
   productAppliedRule: string | null
@@ -258,10 +266,16 @@ export function transformInvoiceItemNames(
     status: 'unresolved' | 'conflict' | 'passthrough',
     productStyle: StyleRef | null,
     mapId: string | null = null,
-    extra: { unknownPieces?: string[]; evidence?: string[] } = {},
+    extra: {
+      unknownPieces?: string[]
+      evidence?: string[]
+      productComponents?: ProductCompositionItem[]
+    } = {},
   ) {
     const key = comboKey(source.mallName, source.productName, itemName)
     const lookup = lookupKeyFromProductRow(productByRow.get(source.rowNumber))
+    const productComponents =
+      extra.productComponents ?? productCompositionFromStyle(productStyle)
     const current = unresolvedByKey.get(key)
     if (current) {
       current.rowCount += 1
@@ -271,6 +285,10 @@ export function transformInvoiceItemNames(
         current.productLookupKey = lookup.productLookupKey
         current.productAppliedRule = lookup.productAppliedRule
       }
+      current.productComponents = richerProductComposition(
+        current.productComponents ?? [],
+        productComponents,
+      )
       if (extra.unknownPieces?.length) {
         current.unknownPieces = [
           ...new Set([...current.unknownPieces, ...extra.unknownPieces]),
@@ -289,6 +307,7 @@ export function transformInvoiceItemNames(
       originalItemName: source.itemName,
       ownProductCode: source.ownProductCode,
       productStyle,
+      productComponents,
       productLookupKey: lookup.productLookupKey,
       productAppliedRule: lookup.productAppliedRule,
       mapId,
@@ -430,7 +449,9 @@ export function transformInvoiceItemNames(
       }
       unresolvedRowCount += 1
       passthroughRowCount += 1
-      remember(source, effectiveItemName, 'passthrough', resolvedStyle, map.id)
+      remember(source, effectiveItemName, 'passthrough', resolvedStyle, map.id, {
+        productComponents: productCompositionFromOptionMap(map, resolvedStyle),
+      })
       return {
         source,
         status: 'passthrough',

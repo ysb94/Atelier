@@ -32,10 +32,35 @@ import {
   type AccessoryContextPreview,
 } from '@/lib/invoice/accessory-suggest'
 import { transformInvoiceItemNames, buildOutgoingComponentRowsFromStages } from '@/lib/invoice/item-name-transform'
+import { buildInvoiceItemNameLookupKeyRows } from '@/features/logistics/InvoiceItemNameLookupKeyTable'
+import {
+  findOptionMapsForProductNameMap,
+  formatProductCompositionLines,
+  productCompositionFromOptionMap,
+  productCompositionFromStyle,
+  productCompositionVariantsForMap,
+} from '@/lib/invoice/product-composition'
 import {
   collectInvoiceItemNameRuleStyleNos,
   prepareInvoiceItemNameRuleRows,
 } from '@/lib/invoice/item-name-rule-import'
+import {
+  appendItemNameAiComponent,
+  buildItemNameAiReviewRows,
+  collectItemNameAiGroups,
+  decideItemNameAiSaves,
+  dedupeItemNameAiContexts,
+  isItemNameAiReviewDirty,
+  itemNameAiCandidateTexts,
+  itemNameAiGroupsForContexts,
+  itemNameAiReviewKind,
+  mergeItemNameAiDrafts,
+  mirrorItemNameAiDecisions,
+  overlayItemNameAiDrafts,
+  planItemNameAiBatches,
+  restoreItemNameAiDrafts,
+  validateItemNameAiReviewRow,
+} from '@/lib/invoice/item-name-ai-review'
 import {
   collectInvoiceOptionLedgerStyleCandidates,
   collectInvoiceProductNameLedgerStyleCandidates,
@@ -3261,7 +3286,8 @@ assert(
 const reviewMain = style('s-m0834', 'M0834', '아치로고 링거티 네이비')
 const reviewShorts = style('s-m0864', 'M0864', '미니심볼 돌핀쇼츠')
 const reviewStrap = style('s-m0350', 'M0350', '숄더스트랩 - 그린')
-const reviewStyles = [reviewMain, reviewShorts, reviewStrap]
+const reviewPurple = style('s-m0351', 'M0351', '숄더스트랩 - 퍼플')
+const reviewStyles = [reviewMain, reviewShorts, reviewStrap, reviewPurple]
 
 function reviewPreview(input: {
   itemName: string
@@ -3493,6 +3519,435 @@ assert(
     blockedDirtySave.lookups.length === 1 &&
     blockedDirtySave.lookups[0]?.reviewKey === flattenedReview[1]!.key,
   '검증 오류 행은 빼고 나머지 선택만 exact로 저장한다',
+)
+
+const aiItemCombos = [
+  {
+    key: 'ai-item-a',
+    mallName: '몰',
+    productName: '드롭 숄더백 블랙',
+    itemName: 'Color: Black',
+    originalItemName: 'Color: Black',
+    ownProductCode: '',
+    productStyle: reviewMain,
+    productLookupKey: 'drop bag black',
+    productAppliedRule: null,
+    mapId: null,
+    rowCount: 2,
+    status: 'passthrough' as const,
+    unknownPieces: [],
+    evidence: [],
+  },
+  {
+    key: 'ai-item-b',
+    mallName: '몰',
+    productName: '드롭 숄더백 네이비',
+    itemName: 'Color: Black',
+    originalItemName: 'Color: Black',
+    ownProductCode: '',
+    productStyle: reviewStrap,
+    productLookupKey: 'drop bag navy',
+    productAppliedRule: null,
+    mapId: null,
+    rowCount: 3,
+    status: 'passthrough' as const,
+    unknownPieces: [],
+    evidence: [],
+  },
+]
+const aiItemGroups = collectItemNameAiGroups(aiItemCombos)
+assert(
+  aiItemGroups.length === 1 &&
+    aiItemGroups[0]?.contexts.length === 2 &&
+    aiItemGroups[0]?.rowCount === 5,
+  '같은 옵션명은 실제 조회 키 조합별 행으로 묶는다',
+)
+const aiDeleteRows = buildItemNameAiReviewRows({
+  groups: aiItemGroups,
+  decisions: aiItemGroups[0]!.contexts.map((context) => ({
+    contextId: context.contextId,
+    action: 'delete' as const,
+    components: [],
+    reason: '본품 색상',
+    confidence: 0.92,
+  })),
+  styles: reviewStyles,
+  itemNameRules: [],
+  minConfidence: 0.72,
+})
+const aiGlobalPlan = decideItemNameAiSaves(
+  aiDeleteRows,
+  aiDeleteRows.map((row) => row.key),
+)
+assert(
+  aiGlobalPlan.globals.length === 1 &&
+    aiGlobalPlan.lookups.length === 0 &&
+    aiGlobalPlan.globals[0]?.input.action === 'delete',
+  '같은 옵션명의 모든 조합이 같은 고신뢰 결과면 공통 규칙 한 번만 저장한다',
+)
+const aiPartialPlan = decideItemNameAiSaves(aiDeleteRows, [
+  aiDeleteRows[0]!.key,
+])
+assert(
+  aiPartialPlan.globals.length === 0 &&
+    aiPartialPlan.lookups.length === 1 &&
+    aiPartialPlan.lookups[0]?.input.scope === 'lookup_key',
+  '일부 조합만 고르면 선택한 조회 키 exact만 저장한다',
+)
+const aiEditedRow = validateItemNameAiReviewRow({
+  ...aiDeleteRows[0]!,
+  action: 'components',
+  components: [{ style: reviewShorts, quantity: 2 }],
+})
+assert(isItemNameAiReviewDirty(aiEditedRow), 'AI 예상값 수정 여부를 감지한다')
+const aiEditedPlan = decideItemNameAiSaves(
+  [aiEditedRow, aiDeleteRows[1]!],
+  [aiEditedRow.key, aiDeleteRows[1]!.key],
+)
+assert(
+  aiEditedPlan.globals.length === 0 &&
+    aiEditedPlan.lookups.length === 2 &&
+    aiEditedPlan.lookups.find((item) => item.reviewKey === aiEditedRow.key)
+      ?.input.components?.[0]?.quantity === 2,
+  '한 행을 수정하면 선택된 조합을 각각 exact로 저장한다',
+)
+const aiHoldRows = buildItemNameAiReviewRows({
+  groups: aiItemGroups,
+  decisions: [],
+  styles: reviewStyles,
+  itemNameRules: [],
+  minConfidence: 0.72,
+})
+const aiHoldPlan = decideItemNameAiSaves(aiHoldRows, [
+  aiHoldRows[0]!.key,
+])
+assert(
+  aiHoldRows[0]?.validationError === '구성품 또는 비움을 정하세요.' &&
+    aiHoldPlan.blocked.length === 1,
+  '추천 보류 행은 사람이 값을 정하기 전까지 저장하지 않는다',
+)
+assert(
+  itemNameAiReviewKind(aiDeleteRows[0]!) === 'delete' &&
+    itemNameAiReviewKind(aiEditedRow) === 'single' &&
+    itemNameAiReviewKind({
+      ...aiEditedRow,
+      components: [
+        { style: reviewShorts, quantity: 1 },
+        { style: reviewStrap, quantity: 1 },
+      ],
+    }) === 'bundle' &&
+    itemNameAiReviewKind(aiHoldRows[0]!) === 'hold',
+  '검수 행을 비움·옵션 1개·구성 2개 이상·결정 필요로 나눈다',
+)
+const appendGreen = appendItemNameAiComponent(
+  aiHoldRows,
+  [aiHoldRows[0]!.key, aiHoldRows[1]!.key],
+  { style: reviewStrap, quantity: 1 },
+)
+assert(
+  appendGreen.addedKeys.length === 2 &&
+    appendGreen.skippedKeys.length === 0 &&
+    itemNameAiReviewKind(appendGreen.rows[0]!) === 'single' &&
+    itemNameAiReviewKind(appendGreen.rows[1]!) === 'single' &&
+    appendGreen.rows.every(
+      (row) => row.components[0]?.style.styleId === reviewStrap.styleId,
+    ),
+  '그린을 두 행에 추가하면 둘 다 단일 구성이 된다',
+)
+const appendPurple = appendItemNameAiComponent(
+  appendGreen.rows,
+  [appendGreen.rows[0]!.key],
+  { style: reviewPurple, quantity: 1 },
+)
+assert(
+  appendPurple.addedKeys.length === 1 &&
+    itemNameAiReviewKind(appendPurple.rows[0]!) === 'bundle' &&
+    itemNameAiReviewKind(appendPurple.rows[1]!) === 'single' &&
+    appendPurple.rows[0]!.components.length === 2 &&
+    appendPurple.rows[1]!.components.length === 1,
+  '퍼플을 한 행에 추가하면 그 행만 2개 구성이 된다',
+)
+const appendDup = appendItemNameAiComponent(
+  appendPurple.rows,
+  [appendPurple.rows[0]!.key],
+  { style: reviewStrap, quantity: 3 },
+)
+assert(
+  appendDup.addedKeys.length === 0 &&
+    appendDup.skippedKeys.length === 1 &&
+    appendDup.rows[0]!.components.find(
+      (item) => item.style.styleId === reviewStrap.styleId,
+    )?.quantity === 1,
+  '이미 있는 M번호는 수량을 늘리지 않고 건너뛴다',
+)
+assert(
+  appendPurple.rows[1]!.components.length === 1 &&
+    appendPurple.rows[0]!.originalSignature ===
+      aiHoldRows[0]!.originalSignature &&
+    appendPurple.rows[1]!.originalSignature ===
+      aiHoldRows[1]!.originalSignature,
+  '대상이 아닌 행과 원래 AI 서명은 유지한다',
+)
+const appendSavePlan = decideItemNameAiSaves(
+  appendPurple.rows,
+  appendPurple.rows.map((row) => row.key),
+)
+assert(
+  appendSavePlan.globals.length === 0 &&
+    appendSavePlan.lookups.length === 2 &&
+    appendSavePlan.lookups.every(
+      (item) => item.input.scope === 'lookup_key',
+    ),
+  '일괄 추가로 바뀐 행은 exact 규칙으로 저장한다',
+)
+const firstDrafts = mergeItemNameAiDrafts(new Map(), appendGreen)
+const draftView = overlayItemNameAiDrafts(aiHoldRows, firstDrafts)
+assert(
+  itemNameAiReviewKind(aiHoldRows[0]!) === 'hold' &&
+    itemNameAiReviewKind(aiHoldRows[1]!) === 'hold' &&
+    itemNameAiReviewKind(draftView[0]!) === 'single' &&
+    itemNameAiReviewKind(draftView[1]!) === 'single',
+  '초안은 원본 분류를 유지한 채 표시만 덮는다',
+)
+const secondDraftResult = appendItemNameAiComponent(
+  draftView,
+  [aiHoldRows[0]!.key],
+  { style: reviewPurple, quantity: 1 },
+)
+const secondDrafts = mergeItemNameAiDrafts(firstDrafts, secondDraftResult)
+const undoneDrafts = restoreItemNameAiDrafts(
+  secondDrafts,
+  secondDraftResult.previous,
+  aiHoldRows,
+)
+assert(
+  undoneDrafts.get(aiHoldRows[0]!.key)?.components.length === 1 &&
+    undoneDrafts.get(aiHoldRows[1]!.key)?.components.length === 1 &&
+    restoreItemNameAiDrafts(firstDrafts, appendGreen.previous, aiHoldRows)
+      .size === 0,
+  '마지막 넣기만 취소하면 이전 초안은 남고 첫 추가는 비워진다',
+)
+const committed = overlayItemNameAiDrafts(aiHoldRows, secondDrafts)
+assert(
+  itemNameAiReviewKind(committed[0]!) === 'bundle' &&
+    itemNameAiReviewKind(committed[1]!) === 'single',
+  '초안을 반영하면 행이 최종 분류로 바뀐다',
+)
+
+function aiCombo(input: {
+  key: string
+  itemName: string
+  productName: string
+  productLookupKey: string
+  productStyle: StyleRef
+  rowCount: number
+}) {
+  return {
+    key: input.key,
+    mallName: '몰',
+    productName: input.productName,
+    itemName: input.itemName,
+    originalItemName: input.itemName,
+    ownProductCode: '',
+    productStyle: input.productStyle,
+    productLookupKey: input.productLookupKey,
+    productAppliedRule: null,
+    mapId: null,
+    rowCount: input.rowCount,
+    status: 'passthrough' as const,
+    unknownPieces: [],
+    evidence: [],
+  }
+}
+
+const aiSpeedGroups = collectItemNameAiGroups([
+  aiCombo({
+    key: 'speed-a1',
+    itemName: 'Color: Black',
+    productName: '드롭 숄더백 블랙',
+    productLookupKey: 'drop bag black',
+    productStyle: reviewMain,
+    rowCount: 4,
+  }),
+  aiCombo({
+    key: 'speed-a2',
+    itemName: 'Color: Black',
+    productName: '드롭 숄더백 블랙 단독',
+    productLookupKey: 'drop bag black solo',
+    productStyle: reviewMain,
+    rowCount: 3,
+  }),
+  aiCombo({
+    key: 'speed-a3',
+    itemName: 'Color: Black',
+    productName: '드롭 숄더백 네이비',
+    productLookupKey: 'drop bag navy',
+    productStyle: reviewStrap,
+    rowCount: 2,
+  }),
+  aiCombo({
+    key: 'speed-b1',
+    itemName: 'Size: FREE',
+    productName: '드롭 숄더백 블랙',
+    productLookupKey: 'drop bag black',
+    productStyle: reviewMain,
+    rowCount: 1,
+  }),
+])
+const aiSpeedContexts = aiSpeedGroups.flatMap((group) => group.contexts)
+const aiSpeedDedupe = dedupeItemNameAiContexts(aiSpeedContexts)
+assert(
+  aiSpeedContexts.length === 4 &&
+    aiSpeedDedupe.requests.length === 3 &&
+    aiSpeedDedupe.mirrors.size === 1,
+  '옵션명과 확정 본품이 같고 조회 키만 다른 조합은 한 번만 AI에 묻는다',
+)
+const aiSpeedRepresentative = aiSpeedDedupe.requests.find(
+  (context) => aiSpeedDedupe.mirrors.has(context.contextId),
+)
+const aiSpeedMirrored = mirrorItemNameAiDecisions(
+  [
+    {
+      contextId: aiSpeedRepresentative!.contextId,
+      action: 'delete' as const,
+      components: [],
+      reason: '본품 색상',
+      confidence: 0.9,
+    },
+  ],
+  aiSpeedDedupe.mirrors,
+)
+const aiSpeedMirroredIds = new Set(
+  aiSpeedMirrored.map((decision) => decision.contextId),
+)
+const aiSpeedMirrorRows = buildItemNameAiReviewRows({
+  groups: itemNameAiGroupsForContexts(aiSpeedGroups, aiSpeedMirroredIds),
+  decisions: aiSpeedMirrored,
+  styles: reviewStyles,
+  itemNameRules: [],
+  minConfidence: 0.72,
+})
+assert(
+  aiSpeedMirrored.length === 2 &&
+    aiSpeedMirrorRows.length === 2 &&
+    aiSpeedMirrorRows.every((row) => row.action === 'delete' && row.passesGate),
+  '대표 조합의 결정은 같은 옵션명·본품의 다른 조회 키에도 그대로 쓴다',
+)
+const aiSpeedBatches = planItemNameAiBatches(aiSpeedContexts, 2)
+assert(
+  aiSpeedBatches.length === 2 &&
+    aiSpeedBatches[0]?.length === 2 &&
+    new Set(aiSpeedBatches[0]!.map((context) => context.groupKey)).size === 1 &&
+    aiSpeedBatches[1]?.length === 2,
+  '한 옵션명은 같은 요청에 담고 남는 자리는 다음 옵션명으로 채운다',
+)
+const aiSpeedTexts = itemNameAiCandidateTexts(aiSpeedContexts, 5)
+assert(
+  aiSpeedTexts.length === 5 &&
+    aiSpeedTexts[0] === 'Color: Black' &&
+    aiSpeedTexts[1] === 'Size: FREE' &&
+    new Set(aiSpeedTexts).size === 5,
+  '후보 검색 문구는 옵션명부터 채우고 같은 문구를 다시 넣지 않는다',
+)
+
+const kitMain = style('s-m0026', 'M0026', '하프문 블랙')
+const kitEco = style('s-m0005', 'M0005', '래빗에코백 블랙 플라워')
+const kitKeyring = style('s-m0997', 'M0997', 'BB키링')
+const kitName =
+  '[SET] Halfmoon cross bag_black & Rabbit eco bag_Black flower & BB KEYRING SET'
+const kitSource = row({
+  rowNumber: 9901,
+  productName: kitName,
+  itemName: 'FREE',
+  mallName: '무신사',
+})
+const kitProductMap = lookupMap('pmap-kit', kitName, kitMain)
+const kitOption = optionMap({
+  id: 'omap-kit',
+  productName: kitName,
+  itemName: 'FREE',
+  mallName: '무신사',
+  components: [
+    component('omap-kit', kitMain, 'main', 1, 0),
+    component('omap-kit', kitEco, 'included', 1, 1),
+    component('omap-kit', kitKeyring, 'included', 1, 2),
+  ],
+})
+const kitProduct = transformInvoiceProductNames(
+  [kitSource],
+  [kitProductMap],
+  catalogFromStyles([kitMain]),
+)
+const kitItem = transformInvoiceItemNames(
+  [kitSource],
+  [kitOption],
+  kitProduct.rows,
+)
+const kitCombo = kitItem.unresolvedCombos[0]
+assert(
+  kitCombo?.productComponents?.length === 3 &&
+    formatProductCompositionLines(kitCombo.productComponents).join('|') ===
+      'M0026 · 하프문 블랙|M0005 · 래빗에코백 블랙 플라워|M0997 · BB키링',
+  '품목명 단계의 세트 구성 3개는 내품명 검수 조합에 모두 유지된다',
+)
+assert(
+  collectItemNameAiGroups(kitItem.unresolvedCombos)[0]?.contexts[0]
+    ?.productComponents.length === 3,
+  'AI 검수 행도 세트 구성 3개를 유지한다',
+)
+assert(
+  buildInvoiceItemNameLookupKeyRows(
+    kitItem.unresolvedCombos,
+    kitCombo!.itemName,
+    [],
+  )[0]?.productComponents.length === 3,
+  '수동 조회 키 행도 세트 구성 3개를 유지한다',
+)
+assert(
+  findOptionMapsForProductNameMap([kitOption], kitProductMap).length === 1 &&
+    productCompositionFromOptionMap(kitOption).length === 3,
+  '기준정보 품목명 행은 조회 키·본품이 맞는 옵션 기준의 전체 구성을 쓴다',
+)
+assert(
+  productCompositionFromStyle(kitMain).length === 1,
+  '옵션 기준이 없으면 대표 본품 1개만 둔다',
+)
+
+const kitOptionVariant = optionMap({
+  id: 'omap-kit-b',
+  productName: kitName,
+  itemName: 'BLACK',
+  mallName: '29CM',
+  components: [
+    component('omap-kit-b', kitMain, 'main', 1, 0),
+    component('omap-kit-b', kitEco, 'included', 1, 1),
+  ],
+})
+const kitVariants = productCompositionVariantsForMap(
+  [kitOption, kitOptionVariant],
+  kitProductMap,
+)
+assert(
+  kitVariants.length === 2 &&
+    kitVariants[0]?.items.length === 2 &&
+    kitVariants[1]?.items.length === 3,
+  '같은 조회 키의 옵션 변형은 구성별로 나눈다',
+)
+assert(
+  productCompositionVariantsForMap(
+    [
+      kitOption,
+      optionMap({
+        id: 'omap-kit-html',
+        productName: kitName.replace(' & ', ' &amp; '),
+        itemName: 'FREE',
+        mallName: '무신사',
+        components: kitOption.components,
+      }),
+    ],
+    kitProductMap,
+  ).length === 1,
+  '같은 구성의 HTML 엔티티 변형은 한 번만 표시한다',
 )
 
 console.log('option-maps verify ok')

@@ -456,6 +456,18 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   나눈다. 같은 문맥에 둘 다 고르면 조회 키 규칙만 남긴다.
   로직: `src/lib/invoice/accessory-suggest.ts`,
   `src/features/logistics/useInvoiceAccessoryBulkAiApply.ts`.
+- 내품명 옵션 일괄추천도 같은 `invoice_accessory_recommendation` 모델 설정을
+  사용하되 게이트웨이 `mode = item_name`으로 프롬프트와 캐시를 분리한다. 한 요청은
+  최대 8개 실제 `(내품명, 확정 본품, 조회 키)` 문맥을 판정하고, 각 문맥은
+  `components | delete | hold` 중 하나만 반환한다. AI가 고를 수 있는 M번호는 해당
+  문맥에 제공한 후보로 제한하며 후보가 없거나 불확실하면 `hold`로 남긴다.
+- 사람이 고른 추천만 `invoice_item_name_rules`에 저장한다. 같은 내품명의 여러 실제
+  문맥이 모두 선택되고 고신뢰·무수정·동일 결과일 때만 `global` 한 건으로 저장한다.
+  단일 문맥, 일부 선택, 저신뢰 직접 선택 또는 수정한 행은
+  `(main_style_id, item_name, product_lookup_key)` `lookup_key` exact로 저장한다.
+  추천을 못 받은 행은 표에서 구성품/비움을 직접 정한 뒤 exact로 저장할 수 있다.
+  로직: `src/lib/invoice/item-name-ai-review.ts`,
+  `src/features/logistics/useInvoiceItemNameBulkAiApply.ts`.
 - 마이그레이션: `20260814013200_ai_feature_routes.sql`,
   `20260814025900_ai_hybrid_recommendation.sql`,
   `20260814033319_ai_cache_lookup_invalidate.sql`,

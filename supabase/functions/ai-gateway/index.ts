@@ -2,6 +2,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2'
 import {
   ACCESSORY_FEATURE_KEY,
   buildAccessorySuggestPrompt,
+  buildItemNameSuggestPrompt,
   buildLocalRecommendation,
   buildRecommendPrompt,
   clampTextList,
@@ -11,6 +12,7 @@ import {
   missingKeyError,
   normalizeUsage,
   parseAccessorySuggestJson,
+  parseItemNameSuggestJson,
   parseAnthropicModels,
   parseDecisionConfig,
   parseGeminiModels,
@@ -41,6 +43,7 @@ type GatewayRequest =
     }
   | {
       action: 'recommend_accessory_rules'
+      mode?: 'accessory' | 'item_name'
       brandId: string
       featureKey?: string
       unknownPiece: string
@@ -395,14 +398,18 @@ async function recommendAccessoryRules(
 ) {
   const brandId = String(body.brandId ?? '').trim()
   const featureKey = String(body.featureKey ?? ACCESSORY_FEATURE_KEY).trim()
+  const mode = body.mode === 'item_name' ? 'item_name' : 'accessory'
   if (!brandId) throw new Error('brandId가 필요합니다.')
   const unknownPiece = String(body.unknownPiece ?? '').trim()
-  if (!unknownPiece) throw new Error('unknownPiece가 필요합니다.')
+  if (mode === 'accessory' && !unknownPiece) {
+    throw new Error('unknownPiece가 필요합니다.')
+  }
 
   const itemNames = clampTextList(body.itemNames ?? [], 8, 200)
   const lookupKeys = clampTextList(body.lookupKeys ?? [], 8, 200)
   const mainProducts = clampTextList(body.mainProducts ?? [], 8, 120)
-  const candidates = (body.candidates ?? []).slice(0, MAX_CANDIDATES)
+  const candidateLimit = mode === 'item_name' ? 60 : MAX_CANDIDATES
+  const candidates = (body.candidates ?? []).slice(0, candidateLimit)
   const dictionary = (body.dictionary ?? []).slice(0, 40)
   const contexts = (body.contexts ?? []).slice(0, 8).map((item) => ({
     contextId: String(item.contextId ?? '').trim(),
@@ -413,7 +420,7 @@ async function recommendAccessoryRules(
     candidateStyleIds: (item.candidateStyleIds ?? [])
       .map((value) => String(value).trim())
       .filter(Boolean)
-      .slice(0, MAX_CANDIDATES),
+      .slice(0, candidateLimit),
   })).filter((item) => item.contextId)
 
   const { data: route, error: routeError } = await supabase
@@ -424,7 +431,7 @@ async function recommendAccessoryRules(
     .maybeSingle()
   if (routeError) throw new Error(routeError.message)
   if (!route || !route.is_active) {
-    throw new Error('이 브랜드의 부속품 AI 모델이 아직 설정되지 않았습니다.')
+    throw new Error('이 브랜드의 내품명 AI 모델이 아직 설정되지 않았습니다.')
   }
   if (!isAiProvider(route.provider)) {
     throw new Error('지원하지 않는 provider입니다.')
@@ -441,7 +448,7 @@ async function recommendAccessoryRules(
     mallName: dictionary
       .map((item) => `${item.ruleType}:${item.pattern}`)
       .join('|'),
-    productName: unknownPiece,
+    productName: `${mode}:${unknownPiece}`,
     itemName: [
       itemNames.join('|'),
       contexts
@@ -462,7 +469,10 @@ async function recommendAccessoryRules(
       featureKey,
       provider: route.provider,
       modelId: route.model_id,
-      action: 'recommend_accessory_rules',
+      action:
+        mode === 'item_name'
+          ? 'recommend_item_name_rules'
+          : 'recommend_accessory_rules',
       status: 'ok',
       usage: normalizeUsage(null, null),
       errorCode: '',
@@ -484,27 +494,30 @@ async function recommendAccessoryRules(
     }
   }
 
-  const prompt = buildAccessorySuggestPrompt({
-    unknownPiece,
-    itemNames,
-    lookupKeys,
-    mainProducts,
-    contexts,
-    dictionary,
-    candidates,
-  })
+  const prompt =
+    mode === 'item_name'
+      ? buildItemNameSuggestPrompt({ contexts, candidates })
+      : buildAccessorySuggestPrompt({
+          unknownPiece,
+          itemNames,
+          lookupKeys,
+          mainProducts,
+          contexts,
+          dictionary,
+          candidates,
+        })
 
   let usage = normalizeUsage(null, null)
   try {
     const completed = await completeJson(route.provider, route.model_id, prompt, {
-      maxTokens: 1200,
+      maxTokens: mode === 'item_name' ? 1800 : 1200,
     })
     usage = completed.usage
-    const recommendation = parseAccessorySuggestJson(
-      extractJsonObject(completed.text),
-      candidates,
-      contexts,
-    )
+    const rawRecommendation = extractJsonObject(completed.text)
+    const recommendation =
+      mode === 'item_name'
+        ? parseItemNameSuggestJson(rawRecommendation, candidates, contexts)
+        : parseAccessorySuggestJson(rawRecommendation, candidates, contexts)
     const cacheId = await writeRecommendationCache(supabase, {
       brandId,
       featureKey,
@@ -523,7 +536,10 @@ async function recommendAccessoryRules(
       featureKey,
       provider: route.provider,
       modelId: route.model_id,
-      action: 'recommend_accessory_rules',
+      action:
+        mode === 'item_name'
+          ? 'recommend_item_name_rules'
+          : 'recommend_accessory_rules',
       status: 'ok',
       usage,
       errorCode: '',
@@ -551,7 +567,10 @@ async function recommendAccessoryRules(
       featureKey,
       provider: route.provider,
       modelId: route.model_id,
-      action: 'recommend_accessory_rules',
+      action:
+        mode === 'item_name'
+          ? 'recommend_item_name_rules'
+          : 'recommend_accessory_rules',
       status: 'error',
       usage,
       errorCode: error instanceof Error ? error.message.slice(0, 180) : 'unknown',

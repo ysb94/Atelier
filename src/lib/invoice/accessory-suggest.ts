@@ -145,7 +145,7 @@ export function accessoryContextId(context: {
     normalizeInvoiceText(context.itemName),
     normalizeInvoiceText(context.productLookupKey),
     context.mainStyle?.styleId ?? '',
-  ].join('\u0000')
+  ].join('\u001f')
 }
 
 export function lookupDraftKey(
