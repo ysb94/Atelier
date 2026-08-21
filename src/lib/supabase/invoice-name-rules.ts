@@ -72,26 +72,36 @@ function toRule(row: InvoiceNameRuleRow): InvoiceNameRule {
   }
 }
 
+const RULE_PAGE_SIZE = 1000
+
 export async function listInvoiceNameRules(
   brandId: string,
   options: { activeOnly?: boolean } = {},
 ): Promise<InvoiceNameRule[]> {
-  let query = getSupabase()
-    .from('invoice_name_rules')
-    .select(SELECT_WITH_STYLE)
-    .eq('brand_id', brandId)
-    .order('match_type', { ascending: true })
-    .order('source_value', { ascending: true })
+  const all: InvoiceNameRule[] = []
+  for (let from = 0; ; from += RULE_PAGE_SIZE) {
+    let query = getSupabase()
+      .from('invoice_name_rules')
+      .select(SELECT_WITH_STYLE)
+      .eq('brand_id', brandId)
+      .order('match_type', { ascending: true })
+      .order('source_value', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + RULE_PAGE_SIZE - 1)
 
-  if (options.activeOnly) query = query.eq('is_active', true)
+    if (options.activeOnly) query = query.eq('is_active', true)
 
-  const { data, error } = await query
-  if (error) {
-    throw new InvoiceNameRuleStoreError(
-      errorMessage(error, '송장 이름변경 규칙을 불러오지 못했습니다.'),
-    )
+    const { data, error } = await query
+    if (error) {
+      throw new InvoiceNameRuleStoreError(
+        errorMessage(error, '송장 이름변경 규칙을 불러오지 못했습니다.'),
+      )
+    }
+    const rows = ((data as InvoiceNameRuleRow[]) ?? []).map(toRule)
+    all.push(...rows)
+    if (rows.length < RULE_PAGE_SIZE) break
   }
-  return ((data as InvoiceNameRuleRow[]) ?? []).map(toRule)
+  return all
 }
 
 export type InvoiceCodeRuleInput = {

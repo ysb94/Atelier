@@ -96,10 +96,11 @@ export function InvoiceOptionMapTable({
     <Card className="shadow-none">
       <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <CardTitle>변환 기준</CardTitle>
+          <CardTitle>세트·구성 기준</CardTitle>
           <CardDescription className="mt-1">
-            원본 품목명·내품명 조합을 본품과 구성품 M번호로 연결합니다. 한 번
-            저장하면 오늘 파일과 이후 작업에 다시 쓰입니다.
+            원본 품목명·사방넷 옵션·쇼핑몰 조합을 실제 나가는 본품과 추가
+            구성품 M번호로 연결합니다. 내품명 문구 변환은 「내품명 규칙」에서
+            관리합니다.
           </CardDescription>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -118,7 +119,7 @@ export function InvoiceOptionMapTable({
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="품목명·내품명·M번호 검색"
+            placeholder="품목명·옵션·M번호 검색"
             className="pl-8"
           />
         </div>
@@ -127,8 +128,8 @@ export function InvoiceOptionMapTable({
           <p className="text-sm text-muted-foreground">불러오는 중...</p>
         ) : filtered.length === 0 ? (
           <p className="rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-            아직 변환 기준이 없습니다. 기존 원장을 가져오거나 아래에서 직접
-            등록하세요.
+            아직 세트·구성 기준이 없습니다. 구성 원장을 가져오거나 아래에서
+            직접 등록하세요.
           </p>
         ) : (
           <div className="max-h-[36rem] overflow-auto rounded-lg border border-border">
@@ -136,7 +137,9 @@ export function InvoiceOptionMapTable({
               <thead className="sticky top-0 bg-muted/80">
                 <tr>
                   <th className="px-3 py-2 font-medium">원본 품목명</th>
-                  <th className="px-3 py-2 font-medium">내품명</th>
+                  <th className="px-3 py-2 font-medium">
+                    원본 옵션값
+                  </th>
                   <th className="px-3 py-2 font-medium">쇼핑몰</th>
                   <th className="px-3 py-2 font-medium">본품</th>
                   <th className="px-3 py-2 font-medium">구성</th>
@@ -216,7 +219,7 @@ export function InvoiceOptionMapTable({
                             onClick={() => {
                               if (
                                 window.confirm(
-                                  '이 변환 기준을 삭제할까요? 같은 조합은 다시 검토 대상이 됩니다.',
+                                  '이 세트·구성 기준을 삭제할까요? 같은 조합은 다시 검토 대상이 됩니다.',
                                 )
                               ) {
                                 deleteMutation.mutate(map.id)
@@ -236,7 +239,7 @@ export function InvoiceOptionMapTable({
         )}
         {editing ? (
           <div className="rounded-lg border border-border p-4">
-            <p className="mb-3 text-sm font-medium">변환 기준 수정</p>
+            <p className="mb-3 text-sm font-medium">세트·구성 기준 수정</p>
             <InvoiceOptionMapForm
               brandId={brandId}
               map={editing}

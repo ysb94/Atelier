@@ -200,10 +200,10 @@ export function InvoiceOutputStepPanel({
               원본 {formatNumber(sourceOrderCount)}건
             </Badge>
           ) : null}
-          <Badge variant="muted">사은품 {formatNumber(giftCount)}</Badge>
+          <Badge variant="muted">사은품 {formatNumber(giftCount)}행</Badge>
           {productTransformation.excludedRowCount > 0 ? (
             <Badge variant="muted">
-              송장 제외 {formatNumber(productTransformation.excludedRowCount)}건
+              상품 연결 예외 {formatNumber(productTransformation.excludedRowCount)}건
             </Badge>
           ) : null}
           {reviewCount > 0 ? (
@@ -213,7 +213,7 @@ export function InvoiceOutputStepPanel({
           ) : null}
           {giftPlan.newConfirmCandidates.length > 0 ? (
             <Badge variant="warning">
-              확정 예정 {formatNumber(giftPlan.newConfirmCandidates.length)}
+              확정 예정 {formatNumber(giftPlan.newConfirmCandidates.length)}건
             </Badge>
           ) : null}
         </div>
@@ -249,12 +249,7 @@ export function InvoiceOutputStepPanel({
         >
           {message}
         </p>
-      ) : (
-        <p className="text-xs text-muted-foreground">
-          품목명과 내품명은 각 단계 결과를 마지막에만 합칩니다. 세트는 구성품별
-          행으로 펼치고, 변환된 내품명은 모든 구성행에 동일하게 넣습니다.
-        </p>
-      )}
+      ) : null}
 
       {giftPlan.sharedQuotaPreviews.length > 0 ? (
         <div className="overflow-x-auto rounded-lg border border-border">

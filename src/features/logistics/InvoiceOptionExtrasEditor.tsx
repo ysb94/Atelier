@@ -55,6 +55,19 @@ export function newOptionExtraDraft(): OptionExtraDraft {
   }
 }
 
+export function expandOptionExtrasToUnits(
+  extras: OptionExtraDraft[],
+): OptionExtraDraft[] {
+  return extras.flatMap((extra, index) => {
+    const count = extra.style ? Math.max(1, Math.floor(extra.quantity || 1)) : 1
+    return Array.from({ length: count }, (_, unit) => ({
+      ...extra,
+      key: `${extra.key || extra.style?.styleId || 'extra'}-${index}-${unit}`,
+      quantity: 1,
+    }))
+  })
+}
+
 export function completedOptionExtras(extras: OptionExtraDraft[]) {
   return extras.filter(
     (item): item is OptionExtraDraft & { style: StyleRef } => Boolean(item.style),
@@ -66,11 +79,13 @@ export function InvoiceOptionExtrasEditor({
   extras,
   onChange,
   compact = false,
+  unitMode = false,
 }: {
   brandId: string
   extras: OptionExtraDraft[]
   onChange: (next: OptionExtraDraft[]) => void
   compact?: boolean
+  unitMode?: boolean
 }) {
   return (
     <div className="space-y-2">
@@ -88,9 +103,11 @@ export function InvoiceOptionExtrasEditor({
       </div>
       {extras.length === 0 ? (
         <p className="text-xs text-muted-foreground">
-          {compact
-            ? '같이 나가는 상품을 넣습니다. 본품만 나가면 비워 두세요.'
-            : '본품만 나가면 비워 두세요. 같이 나가는 상품과 수량을 아래에 넣습니다.'}
+          {unitMode
+            ? '같이 나가는 상품을 1개씩 넣습니다. 같은 M번호도 행을 나눠 추가합니다.'
+            : compact
+              ? '같이 나가는 상품을 넣습니다. 본품만 나가면 비워 두세요.'
+              : '본품만 나가면 비워 두세요. 같이 나가는 상품과 수량을 아래에 넣습니다.'}
         </p>
       ) : (
         extras.map((extra) => (
@@ -108,7 +125,13 @@ export function InvoiceOptionExtrasEditor({
               onChange={(next) =>
                 onChange(
                   extras.map((item) =>
-                    item.key === extra.key ? { ...item, style: next } : item,
+                    item.key === extra.key
+                      ? {
+                          ...item,
+                          style: next,
+                          quantity: unitMode ? 1 : item.quantity,
+                        }
+                      : item,
                   ),
                 )
               }
@@ -121,33 +144,43 @@ export function InvoiceOptionExtrasEditor({
                   : 'contents'
               }
             >
-            <Input
-              type="number"
-              min={1}
-              step={1}
-              aria-label="나가는 수량"
-              title="주문 1행당 나가는 수량"
-              className={compact ? 'w-20' : undefined}
-              value={extra.quantity}
-              onChange={(event) =>
-                onChange(
-                  extras.map((item) =>
-                    item.key === extra.key
-                      ? {
-                          ...item,
-                          quantity: Math.max(
-                            1,
-                            Math.floor(Number(event.target.value) || 1),
-                          ),
-                        }
-                      : item,
-                  ),
-                )
-              }
-            />
-            <span className={compact ? 'shrink-0 text-xs text-muted-foreground' : 'hidden'}>
-              개
-            </span>
+            {unitMode ? null : (
+              <>
+                <Input
+                  type="number"
+                  min={1}
+                  step={1}
+                  aria-label="나가는 수량"
+                  title="주문 1행당 나가는 수량"
+                  className={compact ? 'w-20' : undefined}
+                  value={extra.quantity}
+                  onChange={(event) =>
+                    onChange(
+                      extras.map((item) =>
+                        item.key === extra.key
+                          ? {
+                              ...item,
+                              quantity: Math.max(
+                                1,
+                                Math.floor(Number(event.target.value) || 1),
+                              ),
+                            }
+                          : item,
+                      ),
+                    )
+                  }
+                />
+                <span
+                  className={
+                    compact
+                      ? 'shrink-0 text-xs text-muted-foreground'
+                      : 'hidden'
+                  }
+                >
+                  개
+                </span>
+              </>
+            )}
             <Button
               type="button"
               size="icon"

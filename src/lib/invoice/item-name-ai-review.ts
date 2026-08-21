@@ -6,7 +6,7 @@ import {
   type AccessoryLookupComponent,
 } from '@/lib/invoice/accessory-suggest'
 import {
-  formatProductCompositionLines,
+  formatProductCompositionUnitLines,
   productCompositionFromStyle,
   richerProductComposition,
   type ProductCompositionItem,
@@ -14,6 +14,8 @@ import {
 import type { InvoiceItemNameRuleInput } from '@/lib/supabase/invoice-item-name-rules'
 import type {
   AiAccessoryContextDecision,
+  AiRecommendProduct,
+  AiRecommendationSource,
   InvoiceItemNameRule,
   InvoiceItemNameRuleAction,
   StyleRef,
@@ -30,6 +32,7 @@ export type ItemNameAiContext = {
   mainStyle: StyleRef | null
   productComponents: ProductCompositionItem[]
   sourceProductName: string
+  productConnectionExcluded: boolean
   rowCount: number
 }
 
@@ -109,6 +112,8 @@ export function collectItemNameAiGroups(
     )
     if (existing) {
       existing.rowCount += combo.rowCount
+      existing.productConnectionExcluded =
+        existing.productConnectionExcluded || combo.productConnectionExcluded
       existing.productComponents = richerProductComposition(
         existing.productComponents,
         productComponents,
@@ -122,6 +127,7 @@ export function collectItemNameAiGroups(
         mainStyle: combo.productStyle,
         productComponents,
         sourceProductName: combo.productName,
+        productConnectionExcluded: combo.productConnectionExcluded,
         rowCount: combo.rowCount,
       })
     }
@@ -330,6 +336,394 @@ export function validateItemNameAiReviewRow(
   }
 }
 
+export function markItemNameAiDecisionNeeded(
+  row: ItemNameAiReviewRow,
+  knownStyleIds?: Set<string>,
+): ItemNameAiReviewRow {
+  return validateItemNameAiReviewRow(
+    {
+      ...row,
+      action: 'hold',
+    },
+    knownStyleIds,
+  )
+}
+
+export const ITEM_NAME_AI_QUICK_SLOT_LIMIT = 3
+
+export type ItemNameAiQuickSlotStatus =
+  | 'empty'
+  | 'draft'
+  | 'matched'
+  | 'ambiguous'
+  | 'unmatched'
+
+export type ItemNameAiQuickSlot = {
+  text: string
+  quantity: number
+  style: StyleRef | null
+  status: ItemNameAiQuickSlotStatus
+  candidates: StyleRef[]
+  error: string | null
+}
+
+export function formatItemNameAiStyleLabel(style: StyleRef) {
+  return `${style.styleNo} · ${style.name}`
+}
+
+export function emptyItemNameAiQuickSlot(): ItemNameAiQuickSlot {
+  return {
+    text: '',
+    quantity: 1,
+    style: null,
+    status: 'empty',
+    candidates: [],
+    error: null,
+  }
+}
+
+export function itemNameAiQuickSlotsFromComponents(
+  components: AccessoryLookupComponent[],
+): ItemNameAiQuickSlot[] {
+  const filled = components
+    .slice(0, ITEM_NAME_AI_QUICK_SLOT_LIMIT)
+    .map((item) => ({
+      text: formatItemNameAiStyleLabel(item.style),
+      quantity: item.quantity,
+      style: item.style,
+      status: 'matched' as const,
+      candidates: [],
+      error: null,
+    }))
+  return filled.length > 0 ? filled : [emptyItemNameAiQuickSlot()]
+}
+
+export function applyItemNameAiQuickSlotText(
+  slot: ItemNameAiQuickSlot,
+  text: string,
+): ItemNameAiQuickSlot {
+  if (!text.trim()) return emptyItemNameAiQuickSlot()
+  if (slot.style && text === formatItemNameAiStyleLabel(slot.style)) {
+    return { ...slot, text, status: 'matched', error: null }
+  }
+  return {
+    text,
+    quantity: 1,
+    style: null,
+    status: 'draft',
+    candidates: [],
+    error: null,
+  }
+}
+
+export function applyItemNameAiQuickSlotStyle(
+  slot: ItemNameAiQuickSlot,
+  style: StyleRef,
+): ItemNameAiQuickSlot {
+  return {
+    text: formatItemNameAiStyleLabel(style),
+    quantity: Math.max(1, Math.floor(slot.quantity || 1)),
+    style,
+    status: 'matched',
+    candidates: [],
+    error: null,
+  }
+}
+
+export function itemNameAiQuickRowComponents(slots: ItemNameAiQuickSlot[]):
+  | { ok: true; components: AccessoryLookupComponent[] }
+  | { ok: false; reason: 'empty' | 'incomplete' | 'duplicate' } {
+  const filled = slots.filter((slot) => slot.text.trim())
+  if (filled.length === 0) return { ok: false, reason: 'empty' }
+  if (filled.some((slot) => !slot.style)) {
+    return { ok: false, reason: 'incomplete' }
+  }
+  const seen = new Set<string>()
+  const components: AccessoryLookupComponent[] = []
+  for (const slot of filled) {
+    const style = slot.style!
+    if (seen.has(style.styleId)) return { ok: false, reason: 'duplicate' }
+    seen.add(style.styleId)
+    components.push({
+      style,
+      quantity: Math.max(1, Math.floor(slot.quantity || 1)),
+    })
+  }
+  return { ok: true, components }
+}
+
+export function replaceItemNameAiRowComponents(
+  row: ItemNameAiReviewRow,
+  components: AccessoryLookupComponent[],
+  knownStyleIds?: Set<string>,
+):
+  | { ok: true; row: ItemNameAiReviewRow }
+  | { ok: false; error: string; row: ItemNameAiReviewRow } {
+  const next = validateItemNameAiReviewRow(
+    {
+      ...row,
+      action: components.length > 0 ? 'components' : 'hold',
+      components,
+    },
+    knownStyleIds,
+  )
+  if (next.validationError) {
+    return { ok: false, error: next.validationError, row }
+  }
+  return { ok: true, row: next }
+}
+
+export type ItemNameAiEnterDecision =
+  | { status: 'delete' }
+  | { status: 'components'; components: AccessoryLookupComponent[] }
+  | { status: 'needs_ai' }
+  | { status: 'invalid'; reason: 'duplicate' }
+
+export function itemNameAiSlotsAreAllEmpty(slots: ItemNameAiQuickSlot[]) {
+  return slots.every((slot) => !slot.text.trim())
+}
+
+export function itemNameAiSlotsNeedAi(slots: ItemNameAiQuickSlot[]) {
+  return slots.some(
+    (slot) =>
+      Boolean(slot.text.trim()) &&
+      (slot.status === 'draft' ||
+        slot.status === 'ambiguous' ||
+        slot.status === 'unmatched'),
+  )
+}
+
+export function decideItemNameAiEnterAction(
+  slots: ItemNameAiQuickSlot[],
+): ItemNameAiEnterDecision {
+  const filled = slots.filter((slot) => slot.text.trim())
+  if (filled.length === 0) return { status: 'delete' }
+  if (filled.some((slot) => !slot.style)) return { status: 'needs_ai' }
+  const result = itemNameAiQuickRowComponents(slots)
+  if (result.ok) return { status: 'components', components: result.components }
+  if (result.reason === 'duplicate') {
+    return { status: 'invalid', reason: 'duplicate' }
+  }
+  return { status: 'needs_ai' }
+}
+
+export function applyItemNameAiRowAction(
+  row: ItemNameAiReviewRow,
+  next:
+    | { action: 'delete' }
+    | { action: 'hold' }
+    | { action: 'components'; components: AccessoryLookupComponent[] },
+  knownStyleIds?: Set<string>,
+):
+  | { ok: true; row: ItemNameAiReviewRow }
+  | { ok: false; error: string; row: ItemNameAiReviewRow } {
+  if (next.action === 'hold') {
+    return {
+      ok: true,
+      row: markItemNameAiDecisionNeeded(row, knownStyleIds),
+    }
+  }
+  if (next.action === 'delete') {
+    const validated = validateItemNameAiReviewRow(
+      {
+        ...row,
+        action: 'delete',
+        components: [],
+      },
+      knownStyleIds,
+    )
+    if (validated.validationError) {
+      return { ok: false, error: validated.validationError, row }
+    }
+    return { ok: true, row: validated }
+  }
+  return replaceItemNameAiRowComponents(row, next.components, knownStyleIds)
+}
+
+export type ItemNameAiQueueProgress =
+  | 'pending'
+  | 'needs_ai'
+  | 'ready_delete'
+  | 'ready_hold'
+  | 'ready_components'
+  | 'committed'
+
+export function itemNameAiQueueProgress(input: {
+  confirmed: boolean
+  committed: boolean
+  pendingAi: boolean
+  draft?: Pick<ItemNameAiReviewRow, 'action'> | null
+  row?: Pick<ItemNameAiReviewRow, 'action'> | null
+}): ItemNameAiQueueProgress {
+  if (input.committed) return 'committed'
+  if (input.pendingAi) return 'needs_ai'
+  if (!input.confirmed) return 'pending'
+  const action = input.draft?.action ?? input.row?.action
+  if (!input.draft && action === 'hold') return 'pending'
+  if (action === 'delete') return 'ready_delete'
+  if (action === 'hold') return 'ready_hold'
+  if (action === 'components') return 'ready_components'
+  return 'pending'
+}
+
+export function itemNameAiQueueProgressLabel(
+  progress: ItemNameAiQueueProgress,
+) {
+  if (progress === 'needs_ai') return 'AI 정리 필요'
+  if (progress === 'ready_components') return '공식명칭 확정'
+  if (progress === 'ready_delete' || progress === 'ready_hold') {
+    return '입력 완료'
+  }
+  if (progress === 'committed') return '저장 완료'
+  return null
+}
+
+export type ItemNameAiQueueFilter = 'queue' | ItemNameAiReviewKind
+
+export function itemNameAiMatchesQueueFilter(
+  row: Pick<ItemNameAiReviewRow, 'key' | 'action' | 'components'>,
+  filter: ItemNameAiQueueFilter,
+  committedKeys: ReadonlySet<string>,
+) {
+  const committed = committedKeys.has(row.key)
+  if (filter === 'queue') return !committed
+  return committed && itemNameAiReviewKind(row) === filter
+}
+
+export function itemNameAiRowReadyToCommit(
+  row: Pick<ItemNameAiReviewRow, 'action' | 'validationError'>,
+  hasDraft = true,
+) {
+  if (row.action === 'hold') return hasDraft
+  if (row.validationError) return false
+  return row.action === 'components' || row.action === 'delete'
+}
+
+export function commitReadyItemNameAiDrafts(options: {
+  rows: ItemNameAiReviewRow[]
+  drafts: ReadonlyMap<string, ItemNameAiReviewRow>
+  confirmedKeys: ReadonlySet<string>
+  pendingAiKeys: ReadonlySet<string>
+  committedKeys: ReadonlySet<string>
+}) {
+  const overlay = new Map<string, ItemNameAiReviewRow>()
+  const nextDrafts = new Map(options.drafts)
+  const nextCommitted = new Set(options.committedKeys)
+  const selectedKeys: string[] = []
+  const originalByKey = new Map(options.rows.map((row) => [row.key, row]))
+  for (const key of options.confirmedKeys) {
+    if (options.pendingAiKeys.has(key) || nextCommitted.has(key)) continue
+    const draft = options.drafts.get(key)
+    const row = draft ?? originalByKey.get(key)
+    if (!row) continue
+    if (!itemNameAiRowReadyToCommit(row, Boolean(draft))) continue
+    overlay.set(key, row)
+    nextDrafts.delete(key)
+    nextCommitted.add(key)
+    if (row.action !== 'hold' && !row.validationError) {
+      selectedKeys.push(key)
+    }
+  }
+  return {
+    rows: options.rows.map((row) => overlay.get(row.key) ?? row),
+    drafts: nextDrafts,
+    committedKeys: nextCommitted,
+    selectedKeys,
+  }
+}
+
+export function reopenItemNameAiCommittedRow(options: {
+  committedKeys: ReadonlySet<string>
+  selectedKeys?: ReadonlySet<string>
+  confirmedKeys?: ReadonlySet<string>
+  pendingAiKeys?: ReadonlySet<string>
+  key: string
+}) {
+  const committedKeys = new Set(options.committedKeys)
+  const selectedKeys = new Set(options.selectedKeys ?? [])
+  const confirmedKeys = new Set(options.confirmedKeys ?? [])
+  const pendingAiKeys = new Set(options.pendingAiKeys ?? [])
+  committedKeys.delete(options.key)
+  selectedKeys.delete(options.key)
+  confirmedKeys.delete(options.key)
+  pendingAiKeys.delete(options.key)
+  return { committedKeys, selectedKeys, confirmedKeys, pendingAiKeys }
+}
+
+function itemNameAiQuickSlotCount(
+  slotCountByKey: ReadonlyMap<string, number> | Readonly<Record<string, number>> | undefined,
+  rowKey: string,
+) {
+  if (!slotCountByKey) return 1
+  const count =
+    slotCountByKey instanceof Map
+      ? slotCountByKey.get(rowKey)
+      : (slotCountByKey as Record<string, number>)[rowKey]
+  return Math.max(1, count ?? 1)
+}
+
+export function nextItemNameAiQuickFocus(
+  visibleKeys: string[],
+  rowKey: string,
+  slotIndex: number,
+  direction: 'down' | 'right',
+  slotCountByKey?: ReadonlyMap<string, number> | Readonly<Record<string, number>>,
+): { rowKey: string; slotIndex: number; ensureCount: number } | null {
+  const rowIndex = visibleKeys.indexOf(rowKey)
+  if (rowIndex < 0) return null
+  if (direction === 'down') {
+    const nextKey = visibleKeys[rowIndex + 1]
+    if (!nextKey) return null
+    const existing = itemNameAiQuickSlotCount(slotCountByKey, nextKey)
+    return {
+      rowKey: nextKey,
+      slotIndex: Math.min(slotIndex, existing - 1),
+      ensureCount: existing,
+    }
+  }
+  if (slotIndex < ITEM_NAME_AI_QUICK_SLOT_LIMIT - 1) {
+    return {
+      rowKey,
+      slotIndex: slotIndex + 1,
+      ensureCount: slotIndex + 2,
+    }
+  }
+  return nextItemNameAiQuickFocus(visibleKeys, rowKey, 0, 'down', slotCountByKey)
+}
+
+export function decideItemNameAiQuickSlotMatch(
+  products: AiRecommendProduct[],
+  source: AiRecommendationSource,
+  minConfidence: number,
+  excludeStyleId?: string | null,
+) {
+  const filtered = products.filter(
+    (item) => item.styleId !== excludeStyleId,
+  )
+  if (source === 'manual' || filtered.length === 0) {
+    return {
+      status: 'unmatched' as const,
+      style: null,
+      candidates: [] as StyleRef[],
+    }
+  }
+  const top = filtered[0]!
+  const second = filtered[1]
+  const candidates = filtered.slice(0, 3).map((item) => ({
+    styleId: item.styleId,
+    styleNo: item.styleNo,
+    name: item.name,
+  }))
+  const style = candidates[0]!
+  if (
+    top.confidence >= minConfidence &&
+    (!second || top.confidence - second.confidence >= 0.1)
+  ) {
+    return { status: 'matched' as const, style, candidates: [] as StyleRef[] }
+  }
+  return { status: 'ambiguous' as const, style: null, candidates }
+}
+
 export type ItemNameAiAppendResult = {
   rows: ItemNameAiReviewRow[]
   addedKeys: string[]
@@ -416,6 +810,116 @@ export function restoreItemNameAiDrafts(
     }
   }
   return next
+}
+
+function keepItemNameAiKeyedMap<T>(
+  source: ReadonlyMap<string, T>,
+  liveKeys: ReadonlySet<string>,
+) {
+  let changed = false
+  const next = new Map<string, T>()
+  for (const [key, value] of source) {
+    if (liveKeys.has(key)) next.set(key, value)
+    else changed = true
+  }
+  return { next, changed }
+}
+
+function keepItemNameAiKeySet(
+  source: Iterable<string>,
+  liveKeys: ReadonlySet<string>,
+) {
+  let changed = false
+  const next = new Set<string>()
+  for (const key of source) {
+    if (liveKeys.has(key)) next.add(key)
+    else changed = true
+  }
+  return { next, changed }
+}
+
+function pruneItemNameAiLastAppend(
+  lastAppend: ItemNameAiLastAppend | null | undefined,
+  liveKeys: ReadonlySet<string>,
+) {
+  if (!lastAppend) return null
+  const stale =
+    lastAppend.addedKeys.some((key) => !liveKeys.has(key)) ||
+    lastAppend.skippedKeys.some((key) => !liveKeys.has(key)) ||
+    lastAppend.previous.some((row) => !liveKeys.has(row.key))
+  return stale ? null : lastAppend
+}
+
+export type ItemNameAiReviewReconcile = {
+  rows: ItemNameAiReviewRow[]
+  drafts: Map<string, ItemNameAiReviewRow>
+  selected: Set<string>
+  confirmedKeys: Set<string>
+  pendingAiKeys: Set<string>
+  committedKeys: Set<string>
+  lastAppend: ItemNameAiLastAppend | null
+  removedKeys: string[]
+  changed: boolean
+  phase: 'idle' | 'review'
+}
+
+/**
+ * 현재 조회 키 조합에 없는 검수 행만 빼고, 유효 초안·선택 상태는 그대로 둡니다.
+ */
+export function reconcileItemNameAiReviewState(options: {
+  liveContextIds: Iterable<string>
+  rows: ItemNameAiReviewRow[]
+  drafts: ReadonlyMap<string, ItemNameAiReviewRow>
+  selected?: Iterable<string>
+  confirmedKeys?: Iterable<string>
+  pendingAiKeys?: Iterable<string>
+  committedKeys?: Iterable<string>
+  lastAppend?: ItemNameAiLastAppend | null
+}): ItemNameAiReviewReconcile {
+  const liveKeys = new Set(
+    [...options.liveContextIds].filter((id) => id.trim()),
+  )
+  const rows: ItemNameAiReviewRow[] = []
+  const removedKeys: string[] = []
+  for (const row of options.rows) {
+    if (liveKeys.has(row.key)) rows.push(row)
+    else removedKeys.push(row.key)
+  }
+  const drafts = keepItemNameAiKeyedMap(options.drafts, liveKeys)
+  const selected = keepItemNameAiKeySet(options.selected ?? [], liveKeys)
+  const confirmedKeys = keepItemNameAiKeySet(
+    options.confirmedKeys ?? [],
+    liveKeys,
+  )
+  const pendingAiKeys = keepItemNameAiKeySet(
+    options.pendingAiKeys ?? [],
+    liveKeys,
+  )
+  const committedKeys = keepItemNameAiKeySet(
+    options.committedKeys ?? [],
+    liveKeys,
+  )
+  const lastAppend = pruneItemNameAiLastAppend(options.lastAppend, liveKeys)
+  const changed =
+    removedKeys.length > 0 ||
+    drafts.changed ||
+    selected.changed ||
+    confirmedKeys.changed ||
+    pendingAiKeys.changed ||
+    committedKeys.changed ||
+    lastAppend !== (options.lastAppend ?? null)
+  return {
+    rows,
+    drafts: drafts.next,
+    selected: selected.next,
+    confirmedKeys: confirmedKeys.next,
+    pendingAiKeys: pendingAiKeys.next,
+    committedKeys: committedKeys.next,
+    lastAppend,
+    removedKeys,
+    changed,
+    phase: rows.length > 0 ? 'review' : 'idle',
+  }
 }
 
 export function buildItemNameAiReviewRows(options: {
@@ -531,15 +1035,44 @@ export function decideItemNameAiSaves(
           !isItemNameAiReviewDirty(row),
       ) &&
       signatures.size === 1
-    if (!canSaveGlobal) continue
-    const first = siblings[0]!
+    if (canSaveGlobal) {
+      const first = siblings[0]!
+      globals.push({
+        groupKey,
+        reviewKeys: siblings.map((row) => row.key),
+        input: inputFromReviewRow(first, 'global'),
+        existingRuleId: first.existingGlobalRuleId,
+      })
+      for (const row of siblings) used.add(row.key)
+      continue
+    }
+
+    const selectedExceptionRows = siblings.filter((row) =>
+      selected.has(row.key),
+    )
+    const exceptionSignatures = new Set(
+      selectedExceptionRows.map((row) =>
+        itemNameAiSignature(row.action, row.components),
+      ),
+    )
+    const canSaveProductExceptionGlobal =
+      siblings.every(
+        (row) => row.productConnectionExcluded && !row.mainStyle,
+      ) &&
+      selectedExceptionRows.length > 0 &&
+      selectedExceptionRows.every(
+        (row) => !row.validationError && row.action !== 'hold',
+      ) &&
+      exceptionSignatures.size === 1
+    if (!canSaveProductExceptionGlobal) continue
+    const first = selectedExceptionRows[0]!
     globals.push({
       groupKey,
-      reviewKeys: siblings.map((row) => row.key),
+      reviewKeys: selectedExceptionRows.map((row) => row.key),
       input: inputFromReviewRow(first, 'global'),
       existingRuleId: first.existingGlobalRuleId,
     })
-    for (const row of siblings) used.add(row.key)
+    for (const row of selectedExceptionRows) used.add(row.key)
   }
 
   for (const row of rows) {
@@ -576,20 +1109,40 @@ export const ITEM_NAME_AI_REVIEW_KINDS = [
 
 export type ItemNameAiReviewKind = (typeof ITEM_NAME_AI_REVIEW_KINDS)[number]
 
+export function mergeItemNameAiComponents(
+  items: AccessoryLookupComponent[],
+): AccessoryLookupComponent[] {
+  const byId = new Map<string, AccessoryLookupComponent>()
+  for (const item of items) {
+    const quantity = Math.max(1, Math.floor(item.quantity || 1))
+    const current = byId.get(item.style.styleId)
+    if (current) current.quantity += quantity
+    else byId.set(item.style.styleId, { style: item.style, quantity })
+  }
+  return [...byId.values()]
+}
+
 export function itemNameAiReviewKind(
   row: Pick<ItemNameAiReviewRow, 'action' | 'components'>,
 ): ItemNameAiReviewKind {
   if (row.action === 'delete') return 'delete'
-  if (row.action === 'components' && row.components.length >= 2) return 'bundle'
-  if (row.action === 'components' && row.components.length === 1) return 'single'
+  const total = row.components.reduce(
+    (sum, item) => sum + Math.max(0, item.quantity || 0),
+    0,
+  )
+  if (row.action === 'components' && total >= 2) return 'bundle'
+  if (row.action === 'components' && total === 1) return 'single'
   return 'hold'
 }
 
 export function itemNameAiExpectedLines(row: ItemNameAiReviewRow) {
-  if (row.action === 'hold') return ['결정 필요']
+  if (row.action === 'hold') {
+    if (row.components.length === 0) return ['결정 필요']
+    return ['결정 필요', ...formatProductCompositionUnitLines(row.components)]
+  }
   if (row.action === 'delete') return ['내품명을 비움']
   if (row.components.length === 0) return ['구성품 없음']
-  return formatProductCompositionLines(row.components)
+  return formatProductCompositionUnitLines(row.components)
 }
 
 export function formatItemNameAiExpected(row: ItemNameAiReviewRow) {

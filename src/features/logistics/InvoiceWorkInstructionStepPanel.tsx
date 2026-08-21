@@ -275,6 +275,12 @@ export function InvoiceWorkInstructionStepPanel({
           </tbody>
         </table>
       </div>
+      {previewRows.length > 200 ? (
+        <p className="text-xs text-muted-foreground">
+          미리보기는 앞의 200행만 표시합니다. 변환과 다운로드에는 전체가
+          들어갑니다.
+        </p>
+      ) : null}
     </div>
   )
 }

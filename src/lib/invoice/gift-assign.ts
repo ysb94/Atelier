@@ -526,15 +526,9 @@ export function planGiftAssignments(
       }
     }
 
-    const itemEntries = [...byItem.entries()].sort((left, right) => {
-      const leftRow = left[1]
-        .slice()
-        .sort(compareGiftOrder)[0]!
-      const rightRow = right[1]
-        .slice()
-        .sort(compareGiftOrder)[0]!
-      return compareGiftOrder(leftRow, rightRow)
-    })
+    const itemEntries = [...byItem.entries()]
+      .map(([itemId, rows]) => [itemId, [...rows].sort(compareGiftOrder)] as const)
+      .sort((left, right) => compareGiftOrder(left[1][0]!, right[1][0]!))
 
     for (const [itemId, itemRows] of itemEntries) {
       const indexed = itemById.get(itemId)
@@ -544,12 +538,20 @@ export function planGiftAssignments(
       const count = countGifts(itemRows, liveRequest)
       if (count <= 0) continue
 
-      itemRows.sort(compareGiftOrder)
-      const source = itemRows[0]!
-      const fingerprint = buildOrderFingerprint(source)
-      const orderFingerprints = [
-        ...new Set(itemRows.map(buildOrderFingerprint)),
-      ]
+      const rowFingerprints = itemRows.map(buildOrderFingerprint)
+      const sourceIndexByFingerprint = new Map<string, number>()
+      rowFingerprints.forEach((value, index) => {
+        if (!sourceIndexByFingerprint.has(value)) {
+          sourceIndexByFingerprint.set(value, index)
+        }
+      })
+      // 사은품 그룹(세트 1개 단위)은 주문 행 하나에 붙여
+      // atomicGroupKey와 allocationKey가 같은 주문 지문을 가리키게 한다.
+      const sourceIndexOfGroup = (groupIndex: number) =>
+        (groupIndex - 1) % itemRows.length
+      const groupFingerprint = (groupIndex: number) =>
+        rowFingerprints[sourceIndexOfGroup(groupIndex)]!
+      const orderFingerprints = [...new Set(rowFingerprints)]
       const existingForOrder = orderFingerprints
         .flatMap(
           (orderFingerprint) =>
@@ -590,6 +592,7 @@ export function planGiftAssignments(
           slot: number
           existing: boolean
           atomicGroupKey: string
+          sourceIndex: number
         }
       > = []
 
@@ -612,6 +615,8 @@ export function planGiftAssignments(
               item.id,
               groupIndex,
             ),
+            sourceIndex:
+              sourceIndexByFingerprint.get(allocation.orderFingerprint) ?? 0,
           })
           usedInShipment.add(allocation.styleId)
           bumpTotal({
@@ -643,10 +648,11 @@ export function planGiftAssignments(
               slot: nextSlot,
               existing: false,
               atomicGroupKey: buildAtomicGroupKey(
-                fingerprint,
+                groupFingerprint(i + 1),
                 item.id,
                 i + 1,
               ),
+              sourceIndex: sourceIndexOfGroup(i + 1),
             })
             nextSlot += 1
             usedInShipment.add(picked.styleId)
@@ -661,16 +667,18 @@ export function planGiftAssignments(
               break
             }
             const atomicGroupKey = buildAtomicGroupKey(
-              fingerprint,
+              groupFingerprint(i + 1),
               item.id,
               i + 1,
             )
+            const sourceIndex = sourceIndexOfGroup(i + 1)
             for (const ref of candidates) {
               gifts.push({
                 ...ref,
                 slot: nextSlot,
                 existing: false,
                 atomicGroupKey,
+                sourceIndex,
               })
               nextSlot += 1
               usedInShipment.add(ref.styleId)
@@ -699,10 +707,11 @@ export function planGiftAssignments(
               slot: nextSlot,
               existing: false,
               atomicGroupKey: buildAtomicGroupKey(
-                fingerprint,
+                groupFingerprint(i + 1),
                 item.id,
                 i + 1,
               ),
+              sourceIndex: sourceIndexOfGroup(i + 1),
             })
             nextSlot += 1
             usedInShipment.add(picked.styleId)
@@ -720,16 +729,18 @@ export function planGiftAssignments(
               break
             }
             const atomicGroupKey = buildAtomicGroupKey(
-              fingerprint,
+              groupFingerprint(i + 1),
               item.id,
               i + 1,
             )
+            const sourceIndex = sourceIndexOfGroup(i + 1)
             for (const ref of candidates) {
               gifts.push({
                 ...ref,
                 slot: nextSlot,
                 existing: false,
                 atomicGroupKey,
+                sourceIndex,
               })
               nextSlot += 1
               usedInShipment.add(ref.styleId)
@@ -754,10 +765,11 @@ export function planGiftAssignments(
             slot: nextSlot,
             existing: false,
             atomicGroupKey: buildAtomicGroupKey(
-              fingerprint,
+              groupFingerprint(i + 1),
               item.id,
               i + 1,
             ),
+            sourceIndex: sourceIndexOfGroup(i + 1),
           })
           nextSlot += 1
           usedInShipment.add(picked.styleId)
@@ -768,16 +780,18 @@ export function planGiftAssignments(
         let nextSlot = 1
         for (let i = 0; i < count; i += 1) {
           const atomicGroupKey = buildAtomicGroupKey(
-            fingerprint,
+            groupFingerprint(i + 1),
             item.id,
             i + 1,
           )
+          const sourceIndex = sourceIndexOfGroup(i + 1)
           for (const ref of candidates) {
             gifts.push({
               ...ref,
               slot: nextSlot,
               existing: false,
               atomicGroupKey,
+              sourceIndex,
             })
             nextSlot += 1
             usedInShipment.add(ref.styleId)
@@ -787,9 +801,9 @@ export function planGiftAssignments(
         }
       }
 
-      gifts.forEach((gift, index) => {
-        const giftSource = itemRows[index % itemRows.length]!
-        const giftFingerprint = buildOrderFingerprint(giftSource)
+      for (const gift of gifts) {
+        const giftSource = itemRows[gift.sourceIndex]!
+        const giftFingerprint = rowFingerprints[gift.sourceIndex]!
         const allocationKey = buildAllocationKey(
           giftFingerprint,
           item.id,
@@ -838,7 +852,7 @@ export function planGiftAssignments(
               existingByKey.has(`${liveRequest.id}\u0000${allocationKey}`),
           })
         }
-      })
+      }
     }
 
     if (matchedRows.length === 0) continue

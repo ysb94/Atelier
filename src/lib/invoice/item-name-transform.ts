@@ -44,7 +44,10 @@ export type InvoiceItemNameTransformRow = {
   mapId: string | null
   ruleId: string | null
   productStyle: StyleRef | null
+  /** 출고구성 XLSX·화면 구성 열. 내품명 규칙/사전과 실제 세트 구성을 합친다. */
   extras: InvoiceOptionMapComponent[]
+  /** CJ 13열 행 확장 전용. 실제 invoice_option_maps 세트 구성만 담는다. */
+  expandableExtras: InvoiceOptionMapComponent[]
   transformedItemName: string
   displayChanged: boolean
   resolvedBy: InvoiceItemNameResolvedBy
@@ -66,6 +69,8 @@ export type UnresolvedItemNameCombo = {
   /** 품목명 단계에서 본품을 맞춘 조회 키 */
   productLookupKey: string
   productAppliedRule: string | null
+  /** 품목명 본품 연결만 예외 처리되어 공통 내품명 규칙만 저장할 수 있는 조합 */
+  productConnectionExcluded: boolean
   mapId: string | null
   rowCount: number
   status: 'unresolved' | 'conflict' | 'passthrough'
@@ -102,30 +107,40 @@ export function formatItemNameFromComponents(
   components: Array<Pick<InvoiceItemNameRuleComponent, 'style' | 'quantity'>>,
 ): string {
   return components
-    .map((item) =>
-      item.quantity > 1 ? `${item.style.name}×${item.quantity}` : item.style.name,
+    .flatMap((item) =>
+      Array.from(
+        { length: Math.max(1, Math.floor(item.quantity || 1)) },
+        () => item.style.name,
+      ),
     )
-    .join(' + ')
+    .join(', ')
 }
 
-export function pickInvoiceItemNameRule(
+/** normalizedItemName별 활성 규칙 목록. 변환 시작 시 한 번만 만든다. */
+function indexItemNameRules(
   rules: InvoiceItemNameRule[],
-  itemName: string,
+): Map<string, InvoiceItemNameRule[]> {
+  const byItemName = new Map<string, InvoiceItemNameRule[]>()
+  for (const rule of rules) {
+    if (!rule.isActive) continue
+    const list = byItemName.get(rule.normalizedItemName)
+    if (list) list.push(rule)
+    else byItemName.set(rule.normalizedItemName, [rule])
+  }
+  return byItemName
+}
+
+function pickRuleFromCandidates(
+  active: InvoiceItemNameRule[],
   mainStyleId: string | null,
-  productLookupKey: string | null = null,
+  normalizedLookup: string,
 ): InvoiceItemNameRule | null {
-  const item = normalizeInvoiceText(itemName)
-  if (!item) return null
-  const lookup = normalizeInvoiceText(productLookupKey ?? '')
-  const active = rules.filter(
-    (rule) => rule.isActive && rule.normalizedItemName === item,
-  )
-  if (mainStyleId && lookup) {
+  if (mainStyleId && normalizedLookup) {
     const exact = active.find(
       (rule) =>
         rule.scope === 'lookup_key' &&
         rule.mainStyle?.styleId === mainStyleId &&
-        rule.normalizedProductLookupKey === lookup,
+        rule.normalizedProductLookupKey === normalizedLookup,
     )
     if (exact) return exact
   }
@@ -137,6 +152,24 @@ export function pickInvoiceItemNameRule(
     if (main) return main
   }
   return active.find((rule) => rule.scope === 'global') ?? null
+}
+
+export function pickInvoiceItemNameRule(
+  rules: InvoiceItemNameRule[],
+  itemName: string,
+  mainStyleId: string | null,
+  productLookupKey: string | null = null,
+): InvoiceItemNameRule | null {
+  const item = normalizeInvoiceText(itemName)
+  if (!item) return null
+  const active = rules.filter(
+    (rule) => rule.isActive && rule.normalizedItemName === item,
+  )
+  return pickRuleFromCandidates(
+    active,
+    mainStyleId,
+    normalizeInvoiceText(productLookupKey ?? ''),
+  )
 }
 
 function extrasFromRule(rule: InvoiceItemNameRule): InvoiceOptionMapComponent[] {
@@ -177,41 +210,66 @@ function mergeExtras(
   return merged
 }
 
+function expandableExtrasOf(
+  extras: InvoiceOptionMapComponent[],
+  mapExtras: InvoiceOptionMapComponent[],
+) {
+  if (mapExtras.length === 0) return []
+  const allowed = new Set(mapExtras.map((item) => item.style.styleId))
+  return extras.filter((item) => allowed.has(item.style.styleId))
+}
+
+type OptionMapIndex = {
+  /** `mall\u0000product\u0000item` exact 조합 */
+  exact: Map<string, InvoiceOptionMap[]>
+  /** 쇼핑몰을 비운 기준의 `product\u0000item` 조합 */
+  noMall: Map<string, InvoiceOptionMap[]>
+}
+
+/** 활성 옵션맵을 조합 키로 인덱싱한다. 변환 시작 시 한 번만 만든다. */
+function indexOptionMaps(maps: InvoiceOptionMap[]): OptionMapIndex {
+  const exact = new Map<string, InvoiceOptionMap[]>()
+  const noMall = new Map<string, InvoiceOptionMap[]>()
+  for (const map of maps) {
+    const combo = `${map.normalizedProductName}\u0000${map.normalizedItemName}`
+    const exactKey = `${map.normalizedMallName}\u0000${combo}`
+    const exactList = exact.get(exactKey)
+    if (exactList) exactList.push(map)
+    else exact.set(exactKey, [map])
+    if (!map.normalizedMallName) {
+      const noMallList = noMall.get(combo)
+      if (noMallList) noMallList.push(map)
+      else noMall.set(combo, [map])
+    }
+  }
+  return { exact, noMall }
+}
+
 function pickMaps(
-  maps: InvoiceOptionMap[],
-  mallName: string,
-  productName: string,
+  index: OptionMapIndex,
+  normalizedMall: string,
+  normalizedProduct: string,
   itemName: string,
 ): InvoiceOptionMap[] {
-  const mall = normalizeInvoiceText(mallName)
-  const product = normalizeInvoiceText(productName)
-  const item = normalizeInvoiceText(itemName)
-  const exact = maps.filter(
-    (map) =>
-      map.normalizedMallName === mall &&
-      map.normalizedProductName === product &&
-      map.normalizedItemName === item,
-  )
-  if (exact.length > 0) return exact
-  return maps.filter(
-    (map) =>
-      !map.normalizedMallName &&
-      map.normalizedProductName === product &&
-      map.normalizedItemName === item,
-  )
+  const combo = `${normalizedProduct}\u0000${normalizeInvoiceText(itemName)}`
+  const exact = index.exact.get(`${normalizedMall}\u0000${combo}`)
+  if (exact && exact.length > 0) return exact
+  return index.noMall.get(combo) ?? []
 }
 
 function pickMapsPreferring(
-  maps: InvoiceOptionMap[],
+  index: OptionMapIndex,
   mallName: string,
   productName: string,
   preferredItemName: string,
   fallbackItemName: string,
 ) {
-  const preferred = pickMaps(maps, mallName, productName, preferredItemName)
+  const mall = normalizeInvoiceText(mallName)
+  const product = normalizeInvoiceText(productName)
+  const preferred = pickMaps(index, mall, product, preferredItemName)
   if (preferred.length > 0) return preferred
   if (preferredItemName !== fallbackItemName) {
-    return pickMaps(maps, mallName, productName, fallbackItemName)
+    return pickMaps(index, mall, product, fallbackItemName)
   }
   return []
 }
@@ -226,6 +284,9 @@ function pickMapsPreferring(
  * 품목명 원장이 내품명 전체 단독으로 본품을 확정한 행은 내품명을 비우고 검토 목록에서 뺀다.
  * 앞부분만 소비한 행은 남은 suffix로 내품명 기준을 찾고, 없으면 원문 조합 원장을 본다.
  * 구성만 저장된 기준은 세트 행 확장에 쓰되, 소비되지 않은 내품명은 유효 값을 유지한다.
+ * 내품명 규칙·부속품 사전의 M번호는 공식 내품명과 출고구성에만 쓰고 CJ 행은 늘리지 않는다.
+ * CJ 13열 행 확장은 invoice_option_maps에 등록된 실제 세트 구성만 사용한다.
+ * 상품 연결 예외 행도 내품명은 같은 규칙으로 처리하되 option map으로 본품을 다시 연결하지 않는다.
  */
 export function transformInvoiceItemNames(
   sourceRows: SabangnetOrderRow[],
@@ -237,16 +298,10 @@ export function transformInvoiceItemNames(
 ): InvoiceItemNameTransformation {
   const activeMaps = maps.filter((map) => map.isActive)
   const activeRules = rules.filter((rule) => rule.isActive)
-  const excludedRowNumbers = new Set(
-    productRows
-      .filter((row) => row.status === 'excluded')
-      .map((row) => row.source.rowNumber),
-  )
+  const optionMapIndex = indexOptionMaps(activeMaps)
+  const rulesByItemName = indexItemNameRules(activeRules)
   const productByRow = new Map(
     productRows.map((row) => [row.source.rowNumber, row]),
-  )
-  const workRows = sourceRows.filter(
-    (source) => !excludedRowNumbers.has(source.rowNumber),
   )
   const unresolvedByKey = new Map<string, UnresolvedItemNameCombo>()
   const styleByName = accessoryStyleNameIndex(styles)
@@ -273,7 +328,9 @@ export function transformInvoiceItemNames(
     } = {},
   ) {
     const key = comboKey(source.mallName, source.productName, itemName)
-    const lookup = lookupKeyFromProductRow(productByRow.get(source.rowNumber))
+    const product = productByRow.get(source.rowNumber)
+    const lookup = lookupKeyFromProductRow(product)
+    const productConnectionExcluded = product?.status === 'excluded'
     const productComponents =
       extra.productComponents ?? productCompositionFromStyle(productStyle)
     const current = unresolvedByKey.get(key)
@@ -285,6 +342,8 @@ export function transformInvoiceItemNames(
         current.productLookupKey = lookup.productLookupKey
         current.productAppliedRule = lookup.productAppliedRule
       }
+      current.productConnectionExcluded =
+        current.productConnectionExcluded || productConnectionExcluded
       current.productComponents = richerProductComposition(
         current.productComponents ?? [],
         productComponents,
@@ -310,6 +369,7 @@ export function transformInvoiceItemNames(
       productComponents,
       productLookupKey: lookup.productLookupKey,
       productAppliedRule: lookup.productAppliedRule,
+      productConnectionExcluded,
       mapId,
       rowCount: 1,
       status,
@@ -318,30 +378,36 @@ export function transformInvoiceItemNames(
     })
   }
 
-  const rows = workRows.map((source): InvoiceItemNameTransformRow => {
+  const rows = sourceRows.map((source): InvoiceItemNameTransformRow => {
     const product = productByRow.get(source.rowNumber)
+    const productExcluded = product?.status === 'excluded'
     const productStyle = product?.style ?? null
     const effectiveItemName = product?.effectiveItemName ?? source.itemName
-    const matches = pickMapsPreferring(
-      activeMaps,
-      source.mallName,
-      source.productName,
-      effectiveItemName,
-      source.itemName,
-    )
+    // 상품 연결 예외는 option map으로 본품을 다시 연결하지 않는다.
+    // 내품명 자체는 일반 행과 같이 전역 규칙·부속품 사전을 적용한다.
+    const matches = productExcluded
+      ? []
+      : pickMapsPreferring(
+          optionMapIndex,
+          source.mallName,
+          source.productName,
+          effectiveItemName,
+          source.itemName,
+        )
     const mapExtras = matches.length === 1 ? extrasOf(matches[0]!) : []
     const consumed = Boolean(product?.itemNameConsumed)
     const blankItem =
       !effectiveItemName.trim() && !source.itemName.trim()
     const productLookupKey = lookupKeyFromProductRow(product).productLookupKey
-    const rule = consumed
-      ? null
-      : pickInvoiceItemNameRule(
-          activeRules,
-          effectiveItemName,
-          productStyle?.styleId ?? null,
-          productLookupKey,
-        )
+    const normalizedEffectiveItemName = normalizeInvoiceText(effectiveItemName)
+    const rule =
+      consumed || !normalizedEffectiveItemName
+        ? null
+        : pickRuleFromCandidates(
+            rulesByItemName.get(normalizedEffectiveItemName) ?? [],
+            productStyle?.styleId ?? null,
+            normalizeInvoiceText(productLookupKey),
+          )
 
     if (matches.length > 1 && !rule) {
       conflictRowCount += 1
@@ -353,6 +419,7 @@ export function transformInvoiceItemNames(
         ruleId: null,
         productStyle,
         extras: [],
+        expandableExtras: [],
         transformedItemName: consumed ? '' : effectiveItemName,
         displayChanged: consumed || effectiveItemName !== source.itemName,
         resolvedBy: null,
@@ -374,6 +441,7 @@ export function transformInvoiceItemNames(
         ruleId: null,
         productStyle: resolvedStyle,
         extras: mapExtras,
+        expandableExtras: mapExtras,
         transformedItemName: '',
         displayChanged: Boolean(source.itemName),
         resolvedBy: null,
@@ -389,7 +457,8 @@ export function transformInvoiceItemNames(
         mapId: map?.id ?? null,
         ruleId: rule.id,
         productStyle: resolvedStyle,
-        extras: [],
+        extras: mapExtras,
+        expandableExtras: mapExtras,
         transformedItemName: '',
         displayChanged: Boolean(source.itemName) || Boolean(effectiveItemName),
         resolvedBy: 'rule',
@@ -408,6 +477,7 @@ export function transformInvoiceItemNames(
         ruleId: rule.id,
         productStyle: resolvedStyle,
         extras,
+        expandableExtras: expandableExtrasOf(extras, mapExtras),
         transformedItemName: display,
         displayChanged: display !== source.itemName,
         resolvedBy: 'rule',
@@ -426,6 +496,7 @@ export function transformInvoiceItemNames(
           ruleId: null,
           productStyle: resolvedStyle,
           extras: mapExtras,
+          expandableExtras: mapExtras,
           transformedItemName: display,
           displayChanged: display !== source.itemName,
           resolvedBy: 'map',
@@ -441,6 +512,7 @@ export function transformInvoiceItemNames(
           ruleId: null,
           productStyle: resolvedStyle,
           extras: mapExtras,
+          expandableExtras: mapExtras,
           transformedItemName: '',
           displayChanged: false,
           resolvedBy: 'map',
@@ -459,6 +531,7 @@ export function transformInvoiceItemNames(
         ruleId: null,
         productStyle: resolvedStyle,
         extras: mapExtras,
+        expandableExtras: mapExtras,
         transformedItemName: effectiveItemName,
         displayChanged: effectiveItemName !== source.itemName,
         resolvedBy: 'map',
@@ -475,6 +548,7 @@ export function transformInvoiceItemNames(
         ruleId: null,
         productStyle: resolvedStyle,
         extras: [],
+        expandableExtras: [],
         transformedItemName: '',
         displayChanged: false,
         resolvedBy: null,
@@ -505,6 +579,7 @@ export function transformInvoiceItemNames(
         ruleId: null,
         productStyle,
         extras: [],
+        expandableExtras: [],
         transformedItemName: effectiveItemName,
         displayChanged: effectiveItemName !== source.itemName,
         resolvedBy: 'dictionary',
@@ -523,6 +598,7 @@ export function transformInvoiceItemNames(
         ruleId: null,
         productStyle: resolvedStyle,
         extras,
+        expandableExtras: [],
         transformedItemName: display,
         displayChanged: display !== source.itemName,
         resolvedBy: 'dictionary',
@@ -539,6 +615,7 @@ export function transformInvoiceItemNames(
         ruleId: null,
         productStyle: resolvedStyle,
         extras: [],
+        expandableExtras: [],
         transformedItemName: '',
         displayChanged: Boolean(source.itemName) || Boolean(effectiveItemName),
         resolvedBy: 'dictionary',
@@ -558,6 +635,7 @@ export function transformInvoiceItemNames(
       ruleId: null,
       productStyle,
       extras: [],
+      expandableExtras: [],
       transformedItemName: effectiveItemName,
       displayChanged: effectiveItemName !== source.itemName,
       resolvedBy: 'dictionary',

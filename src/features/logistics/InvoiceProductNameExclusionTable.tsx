@@ -77,7 +77,7 @@ export function InvoiceProductNameExclusionTable({
       setActionError(
         reason instanceof Error
           ? reason.message
-          : '송장 제외 기준 상태를 바꾸지 못했습니다.',
+          : '상품 연결 예외 기준 상태를 바꾸지 못했습니다.',
       )
     },
   })
@@ -99,7 +99,7 @@ export function InvoiceProductNameExclusionTable({
       setActionError(
         reason instanceof Error
           ? reason.message
-          : '송장 제외 기준을 삭제하지 못했습니다.',
+          : '상품 연결 예외 기준을 삭제하지 못했습니다.',
       )
     },
   })
@@ -109,17 +109,18 @@ export function InvoiceProductNameExclusionTable({
     listQuery.error instanceof Error
       ? listQuery.error.message
       : listQuery.error
-        ? '송장 제외 기준을 불러오지 못했습니다.'
+        ? '상품 연결 예외 기준을 불러오지 못했습니다.'
         : null
 
   return (
     <Card className="shadow-none">
       <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <CardTitle>송장 제외 기준</CardTitle>
+          <CardTitle>상품 연결 예외 기준</CardTitle>
           <CardDescription className="mt-1">
-            특정 쇼핑몰의 품목명·내품명 정확 조합만 최종 송장에서 뺍니다. 본품
-            M번호는 쓰지 않고, 같은 주문에 확정 본품 행이 있을 때만 제외합니다.
+            특정 쇼핑몰의 품목명·내품명 정확 조합은 상품을 연결하지 않고 CJ에
+            원문과 자체품번코드를 남깁니다. 본품 M번호는 쓰지 않고, 같은 주문에
+            확정 본품 행이 있을 때만 예외로 확정합니다.
           </CardDescription>
         </div>
         <Badge variant="muted">활성 {formatNumber(activeCount)}</Badge>
@@ -140,8 +141,8 @@ export function InvoiceProductNameExclusionTable({
           <p className="text-sm text-muted-foreground">불러오는 중...</p>
         ) : filtered.length === 0 ? (
           <p className="rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-            저장된 송장 제외 기준이 없습니다. 오늘 작업의 품목명 검토에서
-            `미선택 옵션 · 송장 제외`로 추가합니다.
+            저장된 상품 연결 예외 기준이 없습니다. 오늘 작업의 품목명 검토에서
+            `미선택 옵션 · 상품 연결 예외`로 추가합니다.
           </p>
         ) : (
           <div className="max-h-[28rem] overflow-auto rounded-lg border border-border">
@@ -193,7 +194,7 @@ export function InvoiceProductNameExclusionTable({
                           onClick={() => {
                             if (
                               !window.confirm(
-                                '이 송장 제외 기준을 삭제할까요? 같은 조합은 다시 최종 송장에 나옵니다.',
+                                '이 상품 연결 예외 기준을 삭제할까요? 같은 조합은 다시 상품 연결 대상으로 돌아갑니다.',
                               )
                             ) {
                               return

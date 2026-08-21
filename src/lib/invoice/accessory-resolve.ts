@@ -40,6 +40,39 @@ function longestFirst<T extends { normalizedPattern: string }>(items: T[]) {
   )
 }
 
+type AccessoryDictionaryIndex = {
+  labels: InvoiceAccessoryRule[]
+  colors: InvoiceAccessoryRule[]
+  tokens: InvoiceAccessoryRule[]
+  ignores: InvoiceAccessoryRule[]
+  defaults: InvoiceAccessoryRule[]
+}
+
+/** 같은 사전 배열이면 type별 정렬 인덱스를 재사용한다. 행마다 재정렬하지 않는다. */
+const dictionaryIndexCache = new WeakMap<
+  InvoiceAccessoryRule[],
+  AccessoryDictionaryIndex
+>()
+
+function dictionaryIndexOf(
+  dictionary: InvoiceAccessoryRule[],
+): AccessoryDictionaryIndex {
+  const cached = dictionaryIndexCache.get(dictionary)
+  if (cached) return cached
+  const active = dictionary.filter((rule) => rule.isActive)
+  const ofActiveType = (type: InvoiceAccessoryRule['ruleType']) =>
+    active.filter((rule) => rule.ruleType === type)
+  const index: AccessoryDictionaryIndex = {
+    labels: longestFirst(ofActiveType('label')),
+    colors: longestFirst(ofActiveType('color')),
+    tokens: longestFirst(ofActiveType('token')),
+    ignores: ofActiveType('ignore'),
+    defaults: longestFirst(ofActiveType('default')),
+  }
+  dictionaryIndexCache.set(dictionary, index)
+  return index
+}
+
 function compact(value: string) {
   return normalizeInvoiceText(value).replace(/\s+/g, '')
 }
@@ -70,20 +103,14 @@ function lookupContains(lookupKey: string, value: string) {
   return Boolean(hay && needle && hay.includes(needle))
 }
 
-function ofType(
-  dictionary: InvoiceAccessoryRule[],
-  type: InvoiceAccessoryRule['ruleType'],
-) {
-  return dictionary.filter((rule) => rule.isActive && rule.ruleType === type)
-}
-
+/** labels는 미리 길이순으로 정렬돼 있어야 한다. */
 function findLabelKind(
   label: string,
   labels: InvoiceAccessoryRule[],
 ): KindHit | null {
   const key = normalizeInvoiceText(label)
   if (!key) return null
-  for (const rule of longestFirst(labels)) {
+  for (const rule of labels) {
     if (key.includes(rule.normalizedPattern)) {
       return { kind: rule.accessoryKind, namePrefix: rule.namePrefix }
     }
@@ -91,13 +118,14 @@ function findLabelKind(
   return null
 }
 
+/** defaults는 미리 길이순으로 정렬돼 있어야 한다. */
 function findDefaultKind(
   lookupKey: string,
   defaults: InvoiceAccessoryRule[],
 ): KindHit | null {
   const key = normalizeInvoiceText(lookupKey)
   if (!key) return null
-  for (const rule of longestFirst(defaults)) {
+  for (const rule of defaults) {
     if (key.includes(rule.normalizedPattern)) {
       return { kind: rule.accessoryKind, namePrefix: rule.namePrefix }
     }
@@ -105,10 +133,11 @@ function findDefaultKind(
   return null
 }
 
+/** colors는 미리 길이순으로 정렬돼 있어야 한다. */
 function findColor(value: string, colors: InvoiceAccessoryRule[]) {
   const key = normalizeInvoiceText(value)
   if (!key) return null
-  for (const rule of longestFirst(colors)) {
+  for (const rule of colors) {
     if (key === rule.normalizedPattern || key === normalizeInvoiceText(rule.colorName)) {
       return rule.colorName
     }
@@ -116,13 +145,14 @@ function findColor(value: string, colors: InvoiceAccessoryRule[]) {
   return null
 }
 
+/** tokens는 미리 길이순으로 정렬돼 있어야 한다. */
 function findToken(
   value: string,
   tokens: InvoiceAccessoryRule[],
 ): StyleRef | null {
   const key = normalizeInvoiceText(value)
   if (!key) return null
-  for (const rule of longestFirst(tokens)) {
+  for (const rule of tokens) {
     if (!rule.targetStyle) continue
     if (key.includes(rule.normalizedPattern)) return rule.targetStyle
   }
@@ -196,12 +226,9 @@ function styleNameOf(prefix: string, colorName: string) {
 export function resolveInvoiceAccessories(
   options: InvoiceAccessoryResolveOptions,
 ): InvoiceAccessoryResolveResult {
-  const dictionary = options.dictionary.filter((rule) => rule.isActive)
-  const labels = ofType(dictionary, 'label')
-  const colors = ofType(dictionary, 'color')
-  const tokens = ofType(dictionary, 'token')
-  const ignores = ofType(dictionary, 'ignore')
-  const defaults = ofType(dictionary, 'default')
+  const { labels, colors, tokens, ignores, defaults } = dictionaryIndexOf(
+    options.dictionary,
+  )
   const fallback = findDefaultKind(options.productLookupKey, defaults)
 
   const ignored: string[] = []

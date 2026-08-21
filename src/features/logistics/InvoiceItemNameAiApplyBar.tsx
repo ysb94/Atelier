@@ -1,11 +1,16 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { StylePicker } from '@/components/style-picker'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import {
   itemNameAiExpectedLines,
+  itemNameAiMatchesQueueFilter,
+  itemNameAiQueueProgress,
+  itemNameAiQueueProgressLabel,
   itemNameAiReviewKind,
   type ItemNameAiAction,
+  type ItemNameAiQueueFilter,
+  type ItemNameAiQuickSlot,
   type ItemNameAiReviewKind,
 } from '@/lib/invoice/item-name-ai-review'
 import { productCompositionSearchText } from '@/lib/invoice/product-composition'
@@ -14,15 +19,16 @@ import { formatNumber } from '@/lib/utils'
 import { ProductCompositionLines } from './ProductCompositionLines'
 import {
   InvoiceOptionExtrasEditor,
+  expandOptionExtrasToUnits,
   newOptionExtraDraft,
   type OptionExtraDraft,
 } from './InvoiceOptionExtrasEditor'
+import { InvoiceItemNameAiQuickSlots } from './InvoiceItemNameAiQuickSlots'
 import {
   extrasOfItemNameAiRow,
   useInvoiceItemNameBulkAiApply,
 } from './useInvoiceItemNameBulkAiApply'
-
-type ReviewFilter = 'all' | ItemNameAiReviewKind
+import { useInvoiceItemNameQuickEntry } from './useInvoiceItemNameQuickEntry'
 
 type EditDraft = {
   key: string
@@ -30,11 +36,27 @@ type EditDraft = {
   extras: OptionExtraDraft[]
 }
 
+function extrasFromQuickSlots(slots: ItemNameAiQuickSlot[]): OptionExtraDraft[] {
+  const extras = slots.flatMap((slot, index) =>
+    slot.style
+      ? expandOptionExtrasToUnits([
+          {
+            key: `${slot.style.styleId}-${index}`,
+            style: slot.style,
+            role: 'included' as const,
+            quantity: Math.max(1, Math.floor(slot.quantity || 1)),
+          },
+        ])
+      : [],
+  )
+  return extras.length > 0 ? extras : [newOptionExtraDraft()]
+}
+
 const REVIEW_FILTERS: Array<{
-  value: ReviewFilter
+  value: ItemNameAiQueueFilter
   label: string
 }> = [
-  { value: 'all', label: '전체' },
+  { value: 'queue', label: '입력 대기' },
   { value: 'delete', label: '내품명 비움' },
   { value: 'single', label: '옵션 상품 1개' },
   { value: 'bundle', label: '구성 2개 이상' },
@@ -47,7 +69,17 @@ export function InvoiceItemNameAiApplyBar({
   bulk: ReturnType<typeof useInvoiceItemNameBulkAiApply>
 }) {
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<ReviewFilter>('all')
+  const [filter, setFilter] = useState<ItemNameAiQueueFilter>('queue')
+  const quick = useInvoiceItemNameQuickEntry({
+    brandId: bulk.brandId,
+    rows: bulk.reviewRows,
+    confirmedKeys: bulk.confirmedKeys,
+    stageRowComponents: bulk.stageRowComponents,
+    stageRowDelete: bulk.stageRowDelete,
+    unstageRow: bulk.unstageRow,
+    confirmRow: bulk.confirmRow,
+    unconfirmRow: bulk.unconfirmRow,
+  })
   const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
   const [editError, setEditError] = useState<string | null>(null)
   const [bulkAppendMode, setBulkAppendMode] = useState(false)
@@ -55,6 +87,49 @@ export function InvoiceItemNameAiApplyBar({
   const [appendStyle, setAppendStyle] = useState<StyleRef | null>(null)
   const [appendQty, setAppendQty] = useState(1)
   const [appendError, setAppendError] = useState<string | null>(null)
+  const [collapsed, setCollapsed] = useState(false)
+  const [dialog, setDialog] = useState<
+    'bulk-append' | 'quick-entry' | 'commit' | 'reset' | null
+  >(null)
+
+  const editDraftRef = useRef(editDraft)
+  editDraftRef.current = editDraft
+
+  useEffect(() => {
+    const liveKeys = new Set(bulk.reviewRows.map((row) => row.key))
+    const draft = editDraftRef.current
+    if (draft && !liveKeys.has(draft.key)) {
+      setEditDraft(null)
+      setEditError(null)
+    }
+    setAppendTargets((current) => {
+      let changed = false
+      const next = new Set<string>()
+      for (const key of current) {
+        if (liveKeys.has(key)) next.add(key)
+        else changed = true
+      }
+      return changed ? next : current
+    })
+    if (liveKeys.size === 0) {
+      setAppendError(null)
+      setBulkAppendMode(false)
+      setDialog((current) => (current === 'reset' ? current : null))
+    }
+  }, [bulk.reviewRows])
+
+  function resetLocalUi() {
+    setQuery('')
+    setFilter('queue')
+    setEditDraft(null)
+    setEditError(null)
+    setBulkAppendMode(false)
+    setAppendTargets(new Set())
+    setAppendStyle(null)
+    setAppendQty(1)
+    setAppendError(null)
+    setCollapsed(false)
+  }
 
   function closeEdit() {
     setEditDraft(null)
@@ -70,6 +145,29 @@ export function InvoiceItemNameAiApplyBar({
     })
   }
 
+  function startEdit(
+    rowKey: string,
+    shown: (typeof bulk.reviewRows)[number],
+    committed: boolean,
+  ) {
+    const extras =
+      shown.components.length > 0
+        ? extrasOfItemNameAiRow(shown)
+        : extrasFromQuickSlots(quick.getSlots(shown))
+    const hasOfficial = extras.some((item) => item.style)
+    const action: ItemNameAiAction = hasOfficial
+      ? 'components'
+      : shown.action
+    if (committed) {
+      bulk.reopenRow(rowKey)
+      setFilter('queue')
+    }
+    if (hasOfficial) {
+      bulk.updateRow(rowKey, { action: 'components', extras })
+    }
+    openEdit(rowKey, action, extras)
+  }
+
   function saveEdit() {
     if (!editDraft) return
     if (editDraft.action === 'components') {
@@ -78,18 +176,27 @@ export function InvoiceItemNameAiApplyBar({
         setEditError('구성품 M번호를 하나 이상 고르세요.')
         return
       }
-      bulk.updateRow(editDraft.key, {
+      const result = bulk.updateRow(editDraft.key, {
         action: 'components',
         extras: ready,
       })
+      if (!result.ok) {
+        setEditError(result.error)
+        return
+      }
     } else {
-      bulk.updateRow(editDraft.key, {
+      const result = bulk.updateRow(editDraft.key, {
         action: editDraft.action,
         extras: [],
       })
+      if (!result.ok) {
+        setEditError(result.error)
+        return
+      }
     }
     closeEdit()
   }
+
   const kindCounts = useMemo(() => {
     const counts: Record<ItemNameAiReviewKind, number> = {
       delete: 0,
@@ -97,20 +204,25 @@ export function InvoiceItemNameAiApplyBar({
       bundle: 0,
       hold: 0,
     }
-    for (const row of bulk.reviewRows) counts[itemNameAiReviewKind(row)] += 1
+    for (const row of bulk.reviewRows) {
+      if (!bulk.committedKeys.has(row.key)) continue
+      counts[itemNameAiReviewKind(row)] += 1
+    }
     return counts
-  }, [bulk.reviewRows])
+  }, [bulk.committedKeys, bulk.reviewRows])
   const visibleRows = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase('ko-KR')
     return bulk.reviewRows
       .filter((row) => {
+        const shown = bulk.draftByKey.get(row.key) ?? row
         if (editDraft?.key === row.key) {
           if (!normalized) return true
-        } else if (filter !== 'all' && itemNameAiReviewKind(row) !== filter) {
+        } else if (
+          !itemNameAiMatchesQueueFilter(shown, filter, bulk.committedKeys)
+        ) {
           return false
         }
         if (!normalized) return true
-        const shown = bulk.draftByKey.get(row.key) ?? row
         return [
           row.itemName,
           row.productLookupKey,
@@ -118,6 +230,7 @@ export function InvoiceItemNameAiApplyBar({
           row.mainStyle?.name ?? '',
           productCompositionSearchText(row.productComponents),
           ...itemNameAiExpectedLines(shown),
+          ...quick.getSlots(shown).map((slot) => slot.text),
         ]
           .join(' ')
           .toLocaleLowerCase('ko-KR')
@@ -131,9 +244,27 @@ export function InvoiceItemNameAiApplyBar({
         if (byLookup !== 0) return byLookup
         return left.itemName.localeCompare(right.itemName, 'ko-KR')
       })
-  }, [bulk.draftByKey, bulk.reviewRows, editDraft?.key, filter, query])
+  }, [
+    bulk.committedKeys,
+    bulk.draftByKey,
+    bulk.reviewRows,
+    editDraft?.key,
+    filter,
+    query,
+    quick,
+  ])
+
+  function holdRow(rowKey: string) {
+    if (editDraft?.key === rowKey) closeEdit()
+    bulk.markDecisionNeeded(rowKey)
+    quick.moveDown(visibleRows, rowKey, 0)
+  }
+
   const selectableRows = visibleRows.filter(
-    (row) => row.action !== 'hold' && !row.validationError,
+    (row) =>
+      bulk.committedKeys.has(row.key) &&
+      row.action !== 'hold' &&
+      !row.validationError,
   )
   const selectedVisibleCount = selectableRows.filter((row) =>
     bulk.selected.has(row.key),
@@ -142,7 +273,9 @@ export function InvoiceItemNameAiApplyBar({
     selectableRows.length > 0 &&
     selectedVisibleCount === selectableRows.length
 
-  const columnCount = bulkAppendMode ? 6 : 5
+  const columnCount = bulkAppendMode ? 7 : 6
+  const blockBulkAppend =
+    quick.pendingCount > 0 || quick.resolving || bulk.hasDraftChanges
   const appendTargetVisibleCount = visibleRows.filter((row) =>
     appendTargets.has(row.key),
   ).length
@@ -193,23 +326,47 @@ export function InvoiceItemNameAiApplyBar({
     setAppendTargets(new Set())
   }
 
-  function closeBulkAppendMode() {
-    if (
-      bulk.hasDraftChanges &&
-      !window.confirm('저장하지 않은 일괄 변경을 버릴까요?')
-    ) {
-      return
-    }
+  function discardBulkAppend() {
     bulk.discardDrafts()
     setAppendTargets(new Set())
     setAppendError(null)
     setBulkAppendMode(false)
   }
 
+  function closeBulkAppendMode() {
+    if (bulk.hasDraftChanges) {
+      setDialog('bulk-append')
+      return
+    }
+    discardBulkAppend()
+  }
+
+  function confirmDialog() {
+    if (dialog === 'bulk-append') discardBulkAppend()
+    if (dialog === 'quick-entry') {
+      bulk.discardDrafts()
+      quick.reset()
+    }
+    if (dialog === 'commit') bulk.commitDrafts()
+    if (dialog === 'reset') {
+      bulk.reset()
+      quick.reset()
+      resetLocalUi()
+    }
+    setDialog(null)
+  }
+
   function openBulkAppendMode() {
     closeEdit()
     setAppendError(null)
     setBulkAppendMode(true)
+  }
+
+  async function registerSelected() {
+    const registeredCount = await bulk.applySelected()
+    if (registeredCount > 0 && bulk.queueCount > 0) {
+      setFilter('queue')
+    }
   }
 
   return (
@@ -226,30 +383,50 @@ export function InvoiceItemNameAiApplyBar({
           <Button type="button" size="sm" variant="ghost" onClick={bulk.cancel}>
             중단
           </Button>
-        ) : bulk.phase === 'review' ? (
+        ) : bulk.phase === 'review' || bulk.phase === 'applied' ? (
           <div className="flex shrink-0 gap-2">
+            {bulk.reviewRows.length > 0 && !collapsed ? (
+              <Button
+                type="button"
+                size="sm"
+                disabled={bulk.selectedCount === 0 || bulk.applying}
+                onClick={() => void registerSelected()}
+              >
+                {bulk.applying
+                  ? '저장 중...'
+                  : `선택 ${formatNumber(bulk.selectedCount)}개 등록`}
+              </Button>
+            ) : null}
+            {bulk.reviewRows.length > 0 ? (
+              collapsed ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setCollapsed(false)}
+                >
+                  검수표 열기
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setCollapsed(true)}
+                >
+                  닫기
+                </Button>
+              )
+            ) : null}
             <Button
               type="button"
               size="sm"
-              disabled={
-                bulk.selectedCount === 0 ||
-                bulk.applying ||
-                bulk.hasDraftChanges
-              }
-              onClick={() => void bulk.applySelected()}
+              variant="ghost"
+              onClick={() => setDialog('reset')}
             >
-              {bulk.applying
-                ? '저장 중...'
-                : `선택 ${formatNumber(bulk.selectedCount)}개 등록`}
-            </Button>
-            <Button type="button" size="sm" variant="ghost" onClick={bulk.reset}>
-              닫기
+              처음부터
             </Button>
           </div>
-        ) : bulk.phase === 'applied' ? (
-          <Button type="button" size="sm" variant="ghost" onClick={bulk.reset}>
-            닫기
-          </Button>
         ) : (
           <Button
             type="button"
@@ -282,9 +459,9 @@ export function InvoiceItemNameAiApplyBar({
         </p>
       ) : null}
 
-      {bulk.phase === 'applied' ? (
+      {bulk.appliedCount > 0 ? (
         <p className="mt-2 text-xs">
-          {formatNumber(bulk.appliedCount)}개 조합 등록
+          최근 {formatNumber(bulk.appliedCount)}개 조합 등록
           {bulk.failedCount
             ? ` · 실패 ${formatNumber(bulk.failedCount)}개`
             : ''}
@@ -295,8 +472,20 @@ export function InvoiceItemNameAiApplyBar({
         <p className="mt-2 text-xs text-danger">{bulk.applyError}</p>
       ) : null}
 
-      {bulk.phase === 'review' ||
-      (bulk.phase === 'collecting' && bulk.reviewRows.length > 0) ? (
+      {collapsed &&
+      bulk.reviewRows.length > 0 &&
+      (bulk.phase === 'review' || bulk.phase === 'applied') ? (
+        <p className="mt-2 text-xs text-muted-foreground">
+          입력 대기 {formatNumber(bulk.queueCount)}개 · 저장 완료{' '}
+          {formatNumber(bulk.committedCount)}개 · 등록 선택{' '}
+          {formatNumber(bulk.selectedCount)}개
+        </p>
+      ) : null}
+
+      {!collapsed &&
+      (bulk.phase === 'review' ||
+        bulk.phase === 'applied' ||
+        (bulk.phase === 'collecting' && bulk.reviewRows.length > 0)) ? (
         <div className="mt-3 space-y-2">
           <div
             className="flex flex-wrap gap-1"
@@ -305,8 +494,8 @@ export function InvoiceItemNameAiApplyBar({
           >
             {REVIEW_FILTERS.map((item) => {
               const count =
-                item.value === 'all'
-                  ? bulk.reviewRows.length
+                item.value === 'queue'
+                  ? bulk.queueCount
                   : kindCounts[item.value]
               const active = filter === item.value
               return (
@@ -336,8 +525,8 @@ export function InvoiceItemNameAiApplyBar({
               className="h-8 max-w-xs text-xs"
             />
             <span className="text-xs text-muted-foreground">
-              추천 {formatNumber(bulk.recommendedCount)}개 · 결정 필요{' '}
-              {formatNumber(bulk.pendingDecisionCount)}개
+              입력 대기 {formatNumber(bulk.queueCount)}개 · 저장 완료{' '}
+              {formatNumber(bulk.committedCount)}개
             </span>
             <button
               type="button"
@@ -357,8 +546,13 @@ export function InvoiceItemNameAiApplyBar({
               type="button"
               className={`text-xs hover:underline ${
                 bulkAppendMode ? 'text-foreground' : 'text-primary'
+              } ${
+                !bulkAppendMode && blockBulkAppend
+                  ? 'pointer-events-none opacity-50'
+                  : ''
               }`}
               aria-pressed={bulkAppendMode}
+              disabled={!bulkAppendMode && blockBulkAppend}
               onClick={() => {
                 if (bulkAppendMode) closeBulkAppendMode()
                 else openBulkAppendMode()
@@ -366,7 +560,61 @@ export function InvoiceItemNameAiApplyBar({
             >
               {bulkAppendMode ? '일괄 넣기 닫기' : '구성품 일괄 넣기'}
             </button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 px-2 text-[11px]"
+              disabled={
+                bulkAppendMode ||
+                quick.pendingCount === 0 ||
+                quick.resolving ||
+                !quick.routeReady
+              }
+              onClick={() => void quick.resolve()}
+            >
+              {quick.resolving
+                ? `정리 중 ${quick.progress.done}/${quick.progress.total}`
+                : 'AI 공식명칭 정리'}
+            </Button>
+            {quick.resolving ? (
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:underline"
+                onClick={quick.cancel}
+              >
+                중단
+              </button>
+            ) : null}
+            {!bulkAppendMode ? (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  className="h-7 px-2 text-[11px]"
+                  disabled={!bulk.canCommit}
+                  onClick={() => setDialog('commit')}
+                >
+                  변경 저장
+                </Button>
+                {bulk.hasDraftChanges ? (
+                  <button
+                    type="button"
+                    className="text-xs text-muted-foreground hover:underline"
+                    onClick={() => setDialog('quick-entry')}
+                  >
+                    초안 버리기
+                  </button>
+                ) : null}
+              </>
+            ) : null}
           </div>
+          {quick.resolveError ||
+          (!quick.routeReady && !quick.routeLoading) ? (
+            <p className="text-[11px] text-danger">
+              {quick.resolveError ||
+                '상품 추천 라우트가 꺼져 있어 공식명칭을 정리할 수 없습니다.'}
+            </p>
+          ) : null}
 
           {bulkAppendMode ? (
             <div className="flex flex-wrap items-end gap-2 rounded-md border border-border bg-card px-3 py-2">
@@ -431,8 +679,8 @@ export function InvoiceItemNameAiApplyBar({
               <Button
                 type="button"
                 size="sm"
-                disabled={!bulk.hasDraftChanges}
-                onClick={bulk.commitDrafts}
+                disabled={!bulk.canCommit}
+                onClick={() => setDialog('commit')}
               >
                 변경 저장
               </Button>
@@ -453,8 +701,11 @@ export function InvoiceItemNameAiApplyBar({
             </div>
           ) : null}
 
-          <div className="max-h-[32rem] overflow-auto rounded-md border border-border bg-card">
-            <table className="w-full min-w-[56rem] text-left text-xs">
+          <div
+            data-item-name-ai-scroll
+            className="max-h-[32rem] overflow-auto rounded-md border border-border bg-card"
+          >
+            <table className="w-full min-w-[72rem] text-left text-xs">
               <thead className="sticky top-0 z-10 bg-muted/90">
                 <tr>
                   <th className="w-10 px-2 py-1.5">
@@ -484,6 +735,7 @@ export function InvoiceItemNameAiApplyBar({
                   ) : null}
                   <th className="px-2 py-1.5 font-medium">조회 키</th>
                   <th className="px-2 py-1.5 font-medium">옵션명</th>
+                  <th className="px-2 py-1.5 font-medium">구성품 빠른 입력</th>
                   <th className="px-2 py-1.5 font-medium">
                     예상 옵션 변환명
                   </th>
@@ -497,7 +749,9 @@ export function InvoiceItemNameAiApplyBar({
                       colSpan={columnCount}
                       className="px-2 py-6 text-center text-muted-foreground"
                     >
-                      이 종류에 해당하는 추천이 없습니다.
+                      {filter === 'queue'
+                        ? '입력 대기 행이 없습니다.'
+                        : '저장된 행이 없습니다.'}
                     </td>
                   </tr>
                 ) : null}
@@ -505,8 +759,20 @@ export function InvoiceItemNameAiApplyBar({
                   const draft = editDraft?.key === row.key ? editDraft : null
                   const open = Boolean(draft)
                   const shown = bulk.draftByKey.get(row.key) ?? row
+                  const committed = bulk.committedKeys.has(row.key)
                   const disabled = Boolean(
-                    row.action === 'hold' || row.validationError,
+                    !committed ||
+                      shown.action === 'hold' ||
+                      shown.validationError,
+                  )
+                  const progressLabel = itemNameAiQueueProgressLabel(
+                    itemNameAiQueueProgress({
+                      confirmed: bulk.confirmedKeys.has(row.key),
+                      committed,
+                      pendingAi: bulk.pendingAiKeys.has(row.key),
+                      draft: bulk.draftByKey.get(row.key) ?? null,
+                      row,
+                    }),
                   )
                   const extras =
                     draft?.extras ??
@@ -523,7 +789,9 @@ export function InvoiceItemNameAiApplyBar({
                           <input
                             type="checkbox"
                             aria-label={`${row.productLookupKey || row.itemName} 선택`}
-                            checked={bulk.selected.has(row.key)}
+                            checked={
+                              committed && bulk.selected.has(row.key)
+                            }
                             disabled={disabled}
                             onChange={() => bulk.toggle(row.key)}
                           />
@@ -550,41 +818,94 @@ export function InvoiceItemNameAiApplyBar({
                         <td className="max-w-56 break-words px-2 py-1.5">
                           {row.itemName}
                         </td>
+                        <td className="px-2 py-1.5 align-top">
+                          <InvoiceItemNameAiQuickSlots
+                            brandId={bulk.brandId}
+                            rowKey={row.key}
+                            slots={quick.getSlots(shown)}
+                            disabled={
+                              bulkAppendMode ||
+                              quick.resolving ||
+                              committed
+                            }
+                            onTextChange={(slotIndex, text) =>
+                              quick.setSlotText(row.key, slotIndex, text)
+                            }
+                            onPickStyle={(slotIndex, style) =>
+                              quick.pickSlotStyle(row.key, slotIndex, style)
+                            }
+                            onClear={(slotIndex) =>
+                              quick.clearSlot(row.key, slotIndex)
+                            }
+                            onRegister={(slotIndex, el) =>
+                              quick.registerInput(row.key, slotIndex, el)
+                            }
+                            onEnter={(slotIndex) =>
+                              quick.confirmAndMove(
+                                visibleRows,
+                                row.key,
+                                slotIndex,
+                              )
+                            }
+                            onTab={(slotIndex) =>
+                              quick.moveRight(visibleRows, row.key, slotIndex)
+                            }
+                          />
+                        </td>
                         <td className="max-w-72 px-2 py-1.5">
                           <div className="space-y-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <p className="min-w-0 break-words">
                                 {expectedLines[0]}
                               </p>
+                              {progressLabel ? (
+                                <span className="shrink-0 rounded-full border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                                  {progressLabel}
+                                </span>
+                              ) : null}
                               <Button
                                 type="button"
                                 size="sm"
                                 variant="outline"
                                 className="h-6 shrink-0 px-2 text-[11px]"
-                                disabled={bulk.hasDraftChanges}
+                                disabled={quick.resolving}
                                 onClick={() => {
                                   if (open) {
                                     closeEdit()
                                     return
                                   }
-                                  openEdit(
-                                    row.key,
-                                    row.action,
-                                    extrasOfItemNameAiRow(row),
-                                  )
+                                  startEdit(row.key, shown, committed)
                                 }}
                               >
                                 {open ? '닫기' : '수정'}
                               </Button>
+                              {!committed &&
+                              itemNameAiReviewKind(shown) !== 'hold' ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 shrink-0 px-2 text-[11px]"
+                                  disabled={quick.resolving}
+                                  onClick={() => holdRow(row.key)}
+                                >
+                                  결정 필요
+                                </Button>
+                              ) : null}
                             </div>
-                            {expectedLines.slice(1).map((line) => (
-                                <p key={line} className="break-words">
+                            {expectedLines.slice(1).map((line, index) => (
+                                <p key={`${line}-${index}`} className="break-words">
                                   {line}
                                 </p>
                               ))}
                             {shown.validationError ? (
                               <p className="text-[11px] text-danger">
                                 {shown.validationError}
+                              </p>
+                            ) : null}
+                            {quick.stageErrorByKey.get(row.key) ? (
+                              <p className="text-[11px] text-danger">
+                                {quick.stageErrorByKey.get(row.key)}
                               </p>
                             ) : null}
                           </div>
@@ -655,6 +976,7 @@ export function InvoiceItemNameAiApplyBar({
                                     )
                                   }}
                                   compact
+                                  unitMode
                                 />
                               ) : draft?.action === 'delete' ? (
                                 <p className="text-[11px] text-muted-foreground">
@@ -684,6 +1006,65 @@ export function InvoiceItemNameAiApplyBar({
                 })}
               </tbody>
             </table>
+          </div>
+        </div>
+      ) : null}
+
+      {dialog ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="닫기"
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setDialog(null)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="item-name-ai-dialog-title"
+            className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-card p-4 shadow-xl"
+          >
+            <h2
+              id="item-name-ai-dialog-title"
+              className="text-sm font-semibold"
+            >
+              {dialog === 'commit'
+                ? '변경을 저장할까요?'
+                : dialog === 'reset'
+                  ? '처음부터 시작할까요?'
+                  : '초안을 버릴까요?'}
+            </h2>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {dialog === 'commit'
+                ? '확인한 행을 검수표에 반영합니다. DB 등록은 아니며, 저장한 행만 결과 탭으로 이동합니다.'
+                : dialog === 'reset'
+                  ? 'AI 추천과 입력한 검수 내용이 모두 지워지고 추천 모으기부터 다시 시작합니다.'
+                  : dialog === 'bulk-append'
+                    ? '저장하지 않은 일괄 변경을 버립니다. 검수표에는 반영되지 않습니다.'
+                    : '저장하지 않은 빠른 입력 변경을 버립니다. 검수표에는 반영되지 않습니다.'}
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setDialog(null)}
+              >
+                취소
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={dialog === 'commit' ? 'default' : 'danger'}
+                onClick={confirmDialog}
+              >
+                {dialog === 'commit'
+                  ? '변경 저장'
+                  : dialog === 'reset'
+                    ? '처음부터'
+                    : '버리기'}
+              </Button>
+            </div>
           </div>
         </div>
       ) : null}

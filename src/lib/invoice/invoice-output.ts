@@ -59,6 +59,8 @@ function canExpandInvoiceBundle(options: {
  * 품목명 단계 결과와 내품명 단계 결과를 마지막에만 합친다.
  * 한 단계의 실패가 다른 열을 되돌리거나 비우지 않는다.
  * 추가 구성품이 있으면 원본 고객정보를 복사한 CJ 행을 구성품 수만큼 펼친다.
+ * 상품 연결 예외 행은 원문 품목명 1행과 자체품번코드를 남기고 내품명 규칙만 적용한다.
+ * 세트·작업 지시·사은품은 상품 연결 예외 행에 붙이지 않는다.
  */
 export function buildInvoiceOutputRows(options: {
   transformedRows: InvoiceNameTransformRow[]
@@ -94,15 +96,8 @@ export function buildInvoiceOutputRows(options: {
   for (const transformed of options.transformedRows) {
     const source = transformed.source
     const product = productBySource.get(source.rowNumber)
-    if (product?.status === 'excluded') continue
-    const work = options.workMatches.get(source.rowNumber)
     const item = itemBySource.get(source.rowNumber)
     const option = optionBySource.get(source.rowNumber)
-    const baseName =
-      product?.transformedProductName ||
-      option?.transformedName ||
-      transformed.transformedName ||
-      source.productName
     const effectiveItemName = product?.effectiveItemName ?? source.itemName
     const finalItemName =
       item?.status === 'consumed' || item?.status === 'deleted'
@@ -114,7 +109,29 @@ export function buildInvoiceOutputRows(options: {
             : option
               ? option.transformedItemName
               : effectiveItemName
-    const extras = item?.extras ?? option?.extras ?? []
+    if (product?.status === 'excluded') {
+      output.push({
+        ...source,
+        rowNumber: nextRowNumber,
+        kind: 'order',
+        finalProductName: source.productName,
+        finalItemName,
+        productName: source.productName,
+        itemName: finalItemName,
+        sourceRowNumber: source.rowNumber,
+      })
+      nextRowNumber += 1
+      continue
+    }
+    const work = options.workMatches.get(source.rowNumber)
+    const baseName =
+      product?.transformedProductName ||
+      option?.transformedName ||
+      transformed.transformedName ||
+      source.productName
+    const extras = item
+      ? item.expandableExtras
+      : (option?.extras ?? [])
     const main = product?.style ?? item?.productStyle ?? option?.main ?? null
     const expandable = canExpandInvoiceBundle({
       productStatus: product?.status,

@@ -322,25 +322,25 @@ export function InvoiceItemNameTransformPanel({
     <div className="space-y-5">
       <div className="flex flex-wrap gap-2">
         <Badge variant="success">
-          내품명 기준 적용 {formatNumber(transformation.mappedRowCount)}
+          내품명 기준 적용 {formatNumber(transformation.mappedRowCount)}행
         </Badge>
         <Badge variant="success">
-          본품 식별 후 비움 {formatNumber(transformation.consumedRowCount)}
+          본품 식별 후 비움 {formatNumber(transformation.consumedRowCount)}행
         </Badge>
         <Badge variant="success">
-          내품명 지움 {formatNumber(transformation.deletedRowCount)}
+          내품명 지움 {formatNumber(transformation.deletedRowCount)}행
         </Badge>
         <Badge variant="success">
-          사전 구성품 {formatNumber(transformation.autoComponentsRowCount)}
+          사전 구성품 {formatNumber(transformation.autoComponentsRowCount)}행
         </Badge>
         <Badge variant="success">
-          사전 비움 {formatNumber(transformation.autoDeletedRowCount)}
+          사전 비움 {formatNumber(transformation.autoDeletedRowCount)}행
         </Badge>
         <Badge variant="danger">
-          미설정·원문 유지 {formatNumber(transformation.passthroughRowCount)}
+          미설정·원문 유지 {formatNumber(transformation.passthroughRowCount)}행
         </Badge>
         <Badge variant="warning">
-          충돌 {formatNumber(transformation.conflictRowCount)}
+          충돌 {formatNumber(transformation.conflictRowCount)}행
         </Badge>
       </div>
 
@@ -444,7 +444,7 @@ export function InvoiceItemNameTransformPanel({
 
               <p className="text-xs text-muted-foreground">
                 내려받은 파일에서 지울 행은 `지우기`에 Y, 구성품을 넣을 행은
-                `구성품 M번호`만 채워 기준정보 &gt; 내품명 일괄 규칙에서 올리면
+                `구성품 M번호`만 채워 기준정보 &gt; 내품명 규칙에서 올리면
                 한 번에 등록됩니다. 구성품이 여러 개면 한 칸에
                 `M1999,M1999,M2000`처럼 쉼표로 나열하고, 같은 M번호를 반복한
                 횟수가 수량이 됩니다. 둘 다 비운 행은 건너뛰니 필요한 행만
@@ -587,6 +587,12 @@ export function InvoiceItemNameTransformPanel({
                 })}
               </tbody>
             </table>
+            {rows.length > 300 ? (
+              <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+                미리보기는 앞의 300행만 표시합니다. 변환과 다운로드에는 전체가
+                들어갑니다.
+              </p>
+            ) : null}
           </div>
         ) : null}
       </div>

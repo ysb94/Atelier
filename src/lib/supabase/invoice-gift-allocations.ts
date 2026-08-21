@@ -78,6 +78,8 @@ function toAllocation(row: AllocationRow): InvoiceGiftAllocation {
   }
 }
 
+const ALLOCATION_PAGE_SIZE = 1000
+
 export async function listInvoiceGiftAllocations(
   brandId: string,
   options?: {
@@ -85,27 +87,35 @@ export async function listInvoiceGiftAllocations(
     activeOnly?: boolean
   },
 ): Promise<InvoiceGiftAllocation[]> {
-  let query = getSupabase()
-    .from('invoice_gift_allocations')
-    .select(ALLOCATION_SELECT)
-    .eq('brand_id', brandId)
-    .order('ordered_at', { ascending: true, nullsFirst: false })
-    .order('created_at', { ascending: true })
+  const all: InvoiceGiftAllocation[] = []
+  for (let from = 0; ; from += ALLOCATION_PAGE_SIZE) {
+    let query = getSupabase()
+      .from('invoice_gift_allocations')
+      .select(ALLOCATION_SELECT)
+      .eq('brand_id', brandId)
+      .order('ordered_at', { ascending: true, nullsFirst: false })
+      .order('created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + ALLOCATION_PAGE_SIZE - 1)
 
-  if (options?.requestId) {
-    query = query.eq('request_id', options.requestId)
-  }
-  if (options?.activeOnly !== false) {
-    query = query.is('cancelled_at', null)
-  }
+    if (options?.requestId) {
+      query = query.eq('request_id', options.requestId)
+    }
+    if (options?.activeOnly !== false) {
+      query = query.is('cancelled_at', null)
+    }
 
-  const { data, error } = await query
-  if (error) {
-    throw new InvoiceGiftAllocationStoreError(
-      errorMessage(error, '사은품 배정 원장을 불러오지 못했습니다.'),
-    )
+    const { data, error } = await query
+    if (error) {
+      throw new InvoiceGiftAllocationStoreError(
+        errorMessage(error, '사은품 배정 원장을 불러오지 못했습니다.'),
+      )
+    }
+    const rows = ((data as AllocationRow[]) ?? []).map(toAllocation)
+    all.push(...rows)
+    if (rows.length < ALLOCATION_PAGE_SIZE) break
   }
-  return ((data as AllocationRow[]) ?? []).map(toAllocation)
+  return all
 }
 
 export type GiftAllocationCandidateInput = {

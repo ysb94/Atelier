@@ -95,8 +95,8 @@ export function InvoiceOptionLedgerImportPanel({
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        누적 VLOOKUP이나 변환 원장을 올리면 공식 M번호와 대조합니다. 충돌·미일치는
-        등록하지 않고, 정상 건만 일괄 반영합니다.
+        세트·구성 원장을 올리면 실제 나가는 본품·추가 구성품을 공식 M번호와
+        대조합니다. 충돌·미일치는 등록하지 않고 정상 건만 일괄 반영합니다.
       </p>
       <div className="flex flex-wrap gap-2">
         <Button
@@ -130,7 +130,7 @@ export function InvoiceOptionLedgerImportPanel({
           />
           <span className="inline-flex h-8 cursor-pointer items-center gap-2 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:bg-primary/90">
             <Upload className="size-3.5" />
-            {parsing ? '읽는 중...' : '원장 올리기'}
+            {parsing ? '읽는 중...' : '구성 원장 올리기'}
           </span>
         </label>
         <Button
@@ -164,7 +164,7 @@ export function InvoiceOptionLedgerImportPanel({
                 <tr>
                   <th className="px-3 py-2 font-medium">행</th>
                   <th className="px-3 py-2 font-medium">원본 품목명</th>
-                  <th className="px-3 py-2 font-medium">내품명</th>
+                  <th className="px-3 py-2 font-medium">원본 옵션값</th>
                   <th className="px-3 py-2 font-medium">본품</th>
                   <th className="px-3 py-2 font-medium">상태</th>
                   <th className="px-3 py-2 font-medium">내용</th>

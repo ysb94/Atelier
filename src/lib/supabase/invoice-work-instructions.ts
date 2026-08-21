@@ -147,23 +147,31 @@ function toInstruction(row: InstructionRow): InvoiceWorkInstruction {
   }
 }
 
+const INSTRUCTION_PAGE_SIZE = 1000
+
 export async function listInvoiceWorkInstructions(
   brandId: string,
 ): Promise<InvoiceWorkInstruction[]> {
-  const { data, error } = await getSupabase()
-    .from('invoice_work_instructions')
-    .select(
-      INSTRUCTION_SELECT,
-    )
-    .eq('brand_id', brandId)
-    .order('created_at', { ascending: false })
+  const all: InvoiceWorkInstruction[] = []
+  for (let from = 0; ; from += INSTRUCTION_PAGE_SIZE) {
+    const { data, error } = await getSupabase()
+      .from('invoice_work_instructions')
+      .select(INSTRUCTION_SELECT)
+      .eq('brand_id', brandId)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + INSTRUCTION_PAGE_SIZE - 1)
 
-  if (error) {
-    throw new InvoiceWorkInstructionStoreError(
-      errorMessage(error, '작업 지시를 불러오지 못했습니다.'),
-    )
+    if (error) {
+      throw new InvoiceWorkInstructionStoreError(
+        errorMessage(error, '작업 지시를 불러오지 못했습니다.'),
+      )
+    }
+    const rows = ((data as InstructionRow[]) ?? []).map(toInstruction)
+    all.push(...rows)
+    if (rows.length < INSTRUCTION_PAGE_SIZE) break
   }
-  return ((data as InstructionRow[]) ?? []).map(toInstruction)
+  return all
 }
 
 export type InvoiceWorkInstructionItemInput = {

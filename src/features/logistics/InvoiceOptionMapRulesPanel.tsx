@@ -14,6 +14,7 @@ import { InvoiceCodeRuleForm } from './InvoiceCodeRuleForm'
 import { InvoiceCodeRuleTable } from './InvoiceCodeRuleTable'
 import { InvoiceAccessoryRuleTable } from './InvoiceAccessoryRuleTable'
 import { InvoiceItemNameRuleBulkPanel } from './InvoiceItemNameRuleBulkPanel'
+import { InvoiceItemNameRuleTable } from './InvoiceItemNameRuleTable'
 import { InvoiceOptionLedgerImportPanel } from './InvoiceOptionLedgerImportPanel'
 import { InvoiceOptionMapForm } from './InvoiceOptionMapForm'
 import { InvoiceOptionMapTable } from './InvoiceOptionMapTable'
@@ -36,10 +37,10 @@ type OptionRuleView =
 const OPTION_VIEWS: { value: OptionRuleView; label: string }[] = [
   { value: 'productLedger', label: '품목명 원장' },
   { value: 'productMaps', label: '품목명 기준' },
-  { value: 'exclusions', label: '송장 제외 기준' },
-  { value: 'ledger', label: '내품명 원장' },
-  { value: 'maps', label: '내품명 기준' },
-  { value: 'itemNameRules', label: '내품명 일괄 규칙' },
+  { value: 'exclusions', label: '상품 연결 예외 기준' },
+  { value: 'ledger', label: '세트·구성 원장' },
+  { value: 'maps', label: '세트·구성 기준' },
+  { value: 'itemNameRules', label: '내품명 규칙' },
   { value: 'accessories', label: '부속품 사전' },
   { value: 'review', label: '검토 필요' },
   { value: 'codes', label: '자체품번코드' },
@@ -152,10 +153,11 @@ export function InvoiceOptionMapRulesPanel({
       {view === 'ledger' ? (
         <Card className="shadow-none">
           <CardHeader>
-            <CardTitle>내품명 원장 가져오기</CardTitle>
+            <CardTitle>세트·구성 원장 가져오기</CardTitle>
             <CardDescription>
-              누적 VLOOKUP이나 구성 원장을 올립니다. 품목명 원장과 섞지
-              않습니다.
+              원본 품목명·옵션 조합별로 실제 나가는 본품과 추가 구성품을
+              담은 원장을 올립니다. 내품명 문구 변환은 「내품명 규칙」에서
+              관리합니다.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -177,10 +179,10 @@ export function InvoiceOptionMapRulesPanel({
           />
           <Card className="shadow-none">
             <CardHeader>
-              <CardTitle>내품명 변환 기준 직접 등록</CardTitle>
+              <CardTitle>세트·구성 기준 직접 등록</CardTitle>
               <CardDescription>
-                원본 내품명과 같이 나가는 구성품 M번호·수량을 지정합니다. 변환
-                내품명을 비우면 원문을 유지합니다.
+                원본 품목명·옵션 조합에 실제 나가는 본품과 추가 구성품
+                M번호·수량을 지정합니다. 내품명 문구 변환 규칙이 아닙니다.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -191,23 +193,26 @@ export function InvoiceOptionMapRulesPanel({
       ) : null}
 
       {view === 'itemNameRules' ? (
-        <Card className="shadow-none">
-          <CardHeader>
-            <CardTitle>내품명 일괄 규칙 엑셀 등록</CardTitle>
-            <CardDescription>
-              품목명 단계에서 본품은 맞았지만 내품명을 지우거나 구성품으로
-              바꿔야 하는 건을 엑셀로 한 번에 등록합니다. 오늘 작업의 내품명
-              변환 단계에서 「검토 목록 내려받기」로 받아 동작과 구성품만 채워
-              올리세요.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <InvoiceItemNameRuleBulkPanel
-              brandId={brandId}
-              brandName={brandName}
-            />
-          </CardContent>
-        </Card>
+        <>
+          <InvoiceItemNameRuleTable brandId={brandId} />
+          <Card className="shadow-none">
+            <CardHeader>
+              <CardTitle>엑셀 일괄 등록</CardTitle>
+              <CardDescription>
+                품목명 단계에서 본품은 맞았지만 내품명을 지우거나 구성품으로
+                바꿔야 하는 건을 엑셀로 한 번에 등록합니다. 오늘 작업의 내품명
+                변환 단계에서 「검토 목록 내려받기」로 받아 동작과 구성품만 채워
+                올리세요.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <InvoiceItemNameRuleBulkPanel
+                brandId={brandId}
+                brandName={brandName}
+              />
+            </CardContent>
+          </Card>
+        </>
       ) : null}
 
       {view === 'accessories' ? (

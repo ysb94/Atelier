@@ -277,29 +277,41 @@ async function loadActiveUsageByRequest(
   return byRequest
 }
 
+const REQUEST_PAGE_SIZE = 1000
+
 export async function listInvoicePrefixRequests(
   brandId: string,
 ): Promise<InvoicePrefixRequest[]> {
-  const [{ data, error }, usageByRequest] = await Promise.all([
-    getSupabase()
-      .from('invoice_prefix_requests')
-      .select(
-        `${REQUEST_COLUMNS}, invoice_prefix_items(${ITEM_SELECT}), ${QUOTA_EMBED}`,
-      )
-      .eq('brand_id', brandId)
-      .order('starts_at', { ascending: false })
-      .order('created_at', { ascending: false }),
+  const loadRows = async () => {
+    const all: InvoicePrefixRequestRow[] = []
+    for (let from = 0; ; from += REQUEST_PAGE_SIZE) {
+      const { data, error } = await getSupabase()
+        .from('invoice_prefix_requests')
+        .select(
+          `${REQUEST_COLUMNS}, invoice_prefix_items(${ITEM_SELECT}), ${QUOTA_EMBED}`,
+        )
+        .eq('brand_id', brandId)
+        .order('starts_at', { ascending: false })
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: true })
+        .range(from, from + REQUEST_PAGE_SIZE - 1)
+
+      if (error) {
+        throw new InvoicePrefixRequestStoreError(
+          errorMessage(error, '접두어 요청 건을 불러오지 못했습니다.'),
+        )
+      }
+      const rows = (data as InvoicePrefixRequestRow[]) ?? []
+      all.push(...rows)
+      if (rows.length < REQUEST_PAGE_SIZE) break
+    }
+    return all
+  }
+  const [rows, usageByRequest] = await Promise.all([
+    loadRows(),
     loadActiveUsageByRequest(brandId),
   ])
-
-  if (error) {
-    throw new InvoicePrefixRequestStoreError(
-      errorMessage(error, '접두어 요청 건을 불러오지 못했습니다.'),
-    )
-  }
-  return ((data as InvoicePrefixRequestRow[]) ?? []).map((row) =>
-    toRequest(row, usageByRequest.get(row.id)),
-  )
+  return rows.map((row) => toRequest(row, usageByRequest.get(row.id)))
 }
 
 export type InvoicePrefixItemInput = {

@@ -31,7 +31,12 @@ import {
   isUnsafeGlobalToken,
   type AccessoryContextPreview,
 } from '@/lib/invoice/accessory-suggest'
-import { transformInvoiceItemNames, buildOutgoingComponentRowsFromStages } from '@/lib/invoice/item-name-transform'
+import {
+  buildOutgoingComponentRowsFromStages,
+  formatItemNameFromComponents,
+  transformInvoiceItemNames,
+} from '@/lib/invoice/item-name-transform'
+import { extrasOfItemNameAiRow } from '@/features/logistics/useInvoiceItemNameBulkAiApply'
 import { buildInvoiceItemNameLookupKeyRows } from '@/features/logistics/InvoiceItemNameLookupKeyTable'
 import {
   findOptionMapsForProductNameMap,
@@ -52,15 +57,41 @@ import {
   dedupeItemNameAiContexts,
   isItemNameAiReviewDirty,
   itemNameAiCandidateTexts,
+  applyItemNameAiQuickSlotStyle,
+  applyItemNameAiQuickSlotText,
+  applyItemNameAiRowAction,
+  commitReadyItemNameAiDrafts,
+  decideItemNameAiEnterAction,
+  decideItemNameAiQuickSlotMatch,
+  emptyItemNameAiQuickSlot,
+  itemNameAiExpectedLines,
   itemNameAiGroupsForContexts,
+  itemNameAiMatchesQueueFilter,
+  itemNameAiQuickRowComponents,
+  itemNameAiQuickSlotsFromComponents,
+  itemNameAiQueueProgress,
   itemNameAiReviewKind,
+  markItemNameAiDecisionNeeded,
+  nextItemNameAiQuickFocus,
+  replaceItemNameAiRowComponents,
+  mergeItemNameAiComponents,
   mergeItemNameAiDrafts,
   mirrorItemNameAiDecisions,
   overlayItemNameAiDrafts,
   planItemNameAiBatches,
+  reconcileItemNameAiReviewState,
+  reopenItemNameAiCommittedRow,
   restoreItemNameAiDrafts,
   validateItemNameAiReviewRow,
+  type ItemNameAiReviewRow,
 } from '@/lib/invoice/item-name-ai-review'
+import {
+  formatItemNameRuleResult,
+  formatItemNameRuleStyleNos,
+  itemNameRuleEditSave,
+  itemNameRuleSearchText,
+  listLookupKeyItemNameRules,
+} from '@/lib/invoice/item-name-rule-manage'
 import {
   collectInvoiceOptionLedgerStyleCandidates,
   collectInvoiceProductNameLedgerStyleCandidates,
@@ -77,6 +108,8 @@ import { generateProductNameCandidates } from '@/lib/invoice/product-name-patter
 import { matchingProductName } from '@/lib/invoice/product-name-tags'
 import {
   catalogFromStyles,
+  collectProductNameComboOrders,
+  previewProductNameExclusion,
   productNameTransformationToName,
   transformInvoiceProductNames,
 } from '@/lib/invoice/product-name-transform'
@@ -2110,8 +2143,9 @@ assert(
 assert(
   suffixItem.rows[0]?.status === 'mapped' &&
     suffixItem.rows[0]?.transformedItemName === tassel.name &&
-    suffixItem.rows[0]?.extras[0]?.style.styleId === tassel.styleId,
-  '규칙은 남은 suffix를 기준으로 맞춘다',
+    suffixItem.rows[0]?.extras[0]?.style.styleId === tassel.styleId &&
+    suffixItem.rows[0]?.expandableExtras.length === 0,
+  '규칙은 남은 suffix를 기준으로 맞추고 CJ 행은 늘리지 않는다',
 )
 
 const mainOverrideSource = row({
@@ -2165,8 +2199,8 @@ assert(
   mainOverrideItem.rows[0]?.status === 'mapped' &&
     mainOverrideItem.rows[0]?.ruleId === 'rule-main-comp' &&
     mainOverrideItem.rows[0]?.transformedItemName ===
-      `${tassel.name}×2 + ${strap.name}`,
-  '본품별 규칙이 공통 규칙보다 우선하고 수량 공식명을 만든다',
+      `${tassel.name}, ${tassel.name}, ${strap.name}`,
+  '본품별 규칙이 공통 규칙보다 우선하고 수량만큼 공식명을 나열한다',
 )
 assert(
   mainOverrideItem.rows[1]?.ruleId === 'rule-global-comp' &&
@@ -2248,10 +2282,15 @@ const mergeItem = transformInvoiceItemNames(
   ],
 )
 assert(
-  mergeItem.rows[0]?.transformedItemName === `${tassel.name}×2` &&
+  mergeItem.rows[0]?.transformedItemName ===
+      `${tassel.name}, ${tassel.name}` &&
     mergeItem.rows[0]?.extras.map((item) => item.style.styleId).join(',') ===
       `${tassel.styleId},${charm.styleId}` &&
-    mergeItem.rows[0]?.extras[0]?.quantity === 2,
+    mergeItem.rows[0]?.extras[0]?.quantity === 2 &&
+    mergeItem.rows[0]?.expandableExtras.map((item) => item.style.styleId).join(
+      ',',
+    ) === `${tassel.styleId},${charm.styleId}` &&
+    mergeItem.rows[0]?.expandableExtras[0]?.quantity === 2,
   '같은 M번호 구성품은 한 번만 유지하고 규칙 수량을 쓴다',
 )
 const mergeOutput = buildInvoiceOutputRows({
@@ -2267,15 +2306,17 @@ const mergeOutput = buildInvoiceOutputRows({
   itemTransformation: mergeItem,
 })
 const mergeOrders = mergeOutput.filter((item) => item.kind === 'order')
-assert(mergeOrders.length === 3, '규칙 구성품과 기존 세트를 합쳐 CJ 행을 펼친다')
+assert(mergeOrders.length === 3, '실제 세트에 있는 구성만 CJ 행을 펼친다')
 assert(
-  mergeOrders.every((line) => line.finalItemName === `${tassel.name}×2`),
+  mergeOrders.every(
+    (line) => line.finalItemName === `${tassel.name}, ${tassel.name}`,
+  ),
   '모든 구성행에 같은 최종 내품명을 복사한다',
 )
 assert(mergeOrders[0]?.finalProductName === bag.name, '1행 본품')
-assert(mergeOrders[1]?.finalProductName === tassel.name, '2행 규칙 구성품')
+assert(mergeOrders[1]?.finalProductName === tassel.name, '2행 세트 구성품')
 assert(mergeOrders[2]?.finalProductName === charm.name, '3행 기존 세트 구성품')
-assert(mergeOrders[1]?.quantity === '4', '규칙 수량 2 × 주문 2')
+assert(mergeOrders[1]?.quantity === '4', '세트에 겹친 규칙 수량 2 × 주문 2')
 
 const blankStill = transformInvoiceItemNames(
   [row({ rowNumber: 9409, productName: product, itemName: '' })],
@@ -2491,6 +2532,7 @@ const dummySiblingRow = row({
   productName: dummyName,
   itemName: dummyItem,
   customerOrderNo: 'ORD-DUMMY-1',
+  ownProductCode: 'SB-DUMMY-1',
 })
 const dummySiblingProduct = transformInvoiceProductNames(
   [dummySiblingMain, dummySiblingRow],
@@ -2506,7 +2548,42 @@ assert(
     dummySiblingProduct.unresolvedCombos.every(
       (combo) => combo.productName !== dummyName,
     ),
-  '정확 조합과 정상 형제 행이 있으면 더미 행만 송장 제외',
+  '정확 조합과 정상 형제 행이 있으면 더미 행만 상품 연결 예외',
+)
+const dummyUnruledItemNames = transformInvoiceItemNames(
+  [dummySiblingMain, dummySiblingRow],
+  [],
+  dummySiblingProduct.rows,
+  [],
+)
+assert(
+  dummyUnruledItemNames.unresolvedCombos[0]?.productConnectionExcluded ===
+    true &&
+    collectItemNameAiGroups(dummyUnruledItemNames.unresolvedCombos)
+      .flatMap((group) => group.contexts)
+      .some((context) => context.productConnectionExcluded),
+  '상품 연결 예외의 미설정 내품명은 공통 규칙 저장 가능 문맥을 유지한다',
+)
+const dummyDeleteRule = itemNameRule({
+  id: 'rule-dummy-delete',
+  itemName: dummyItem,
+  action: 'delete',
+})
+const dummyItemNames = transformInvoiceItemNames(
+  [dummySiblingMain, dummySiblingRow],
+  [],
+  dummySiblingProduct.rows,
+  [dummyDeleteRule],
+)
+const dummyDeletedItem = dummyItemNames.rows.find(
+  (item) => item.source.rowNumber === 9602,
+)
+assert(
+  dummyDeletedItem?.status === 'deleted' &&
+    dummyDeletedItem.ruleId === dummyDeleteRule.id &&
+    dummyDeletedItem.productStyle === null &&
+    dummyDeletedItem.transformedItemName === '',
+  '상품 연결 예외 행도 일반 내품명 비움 규칙을 적용한다',
 )
 
 const dummyGiftMain = row({
@@ -2527,16 +2604,25 @@ const dummySiblingOutput = buildInvoiceOutputRows({
     [9602, [dummyGiftExcluded]],
   ]),
   productTransformation: dummySiblingProduct,
+  itemTransformation: dummyItemNames,
 })
 assert(
-  dummySiblingOutput.length === 2 &&
+  dummySiblingOutput.length === 3 &&
     dummySiblingOutput[0]?.sourceRowNumber === 9601 &&
     dummySiblingOutput[0]?.rowNumber === 1 &&
     dummySiblingOutput[0]?.kind === 'order' &&
     dummySiblingOutput[1]?.kind === 'gift' &&
     dummySiblingOutput[1]?.finalProductName === '사은품' &&
-    dummySiblingOutput.every((item) => item.sourceRowNumber !== 9602),
-  '최종 송장은 제외 행과 그 행 사은품만 빼고 행 번호를 다시 매긴다',
+    dummySiblingOutput[2]?.sourceRowNumber === 9602 &&
+    dummySiblingOutput[2]?.kind === 'order' &&
+    dummySiblingOutput[2]?.finalProductName === dummyName &&
+    dummySiblingOutput[2]?.finalItemName === '' &&
+    dummySiblingOutput[2]?.ownProductCode === 'SB-DUMMY-1' &&
+    dummySiblingOutput[2]?.quantity === '1' &&
+    dummySiblingOutput.every(
+      (item) => item.kind !== 'gift' || item.finalProductName === '사은품',
+    ),
+  '상품 연결 예외 행은 CJ 원문 품목명·자체품번코드를 남기고 내품명 비움만 적용한다',
 )
 
 const dummySolo = row({
@@ -2646,20 +2732,159 @@ const dummyNoOrderProduct = transformInvoiceProductNames(
   [dummyExclusion],
 )
 assert(
-  dummyNoOrderProduct.rows[1]?.status === 'exclusion_guarded',
-  '고객주문번호가 없으면 형제 행이 있어도 제외 보류로 남긴다',
+  dummyNoOrderProduct.rows[1]?.status === 'excluded',
+  '고객주문번호가 없어도 같은 배송정보·주문시각의 본품이 있으면 제외한다',
 )
 
-const dummyItemNames = transformInvoiceItemNames(
-  [dummySiblingMain, dummySiblingRow],
+const splitMain = row({
+  rowNumber: 9801,
+  productName: product,
+  itemName: '',
+  customerOrderNo: '2145655974',
+  recipientName: '김별(정현아)',
+  recipientPhone: '0502-2880-5815',
+  recipientAddress: '서울특별시 노원구',
+  orderedAt: '2026-08-16 18:52',
+})
+const splitDummy = row({
+  rowNumber: 9802,
+  productName: dummyName,
+  itemName: dummyItem,
+  customerOrderNo: '2145655975',
+  recipientName: '김별(정현아)',
+  recipientPhone: '0502-2880-5815',
+  recipientAddress: '서울특별시 노원구',
+  orderedAt: '2026-08-16 18:52',
+  ownProductCode: 'SB-SPLIT-DUMMY',
+})
+const splitProduct = transformInvoiceProductNames(
+  [splitMain, splitDummy],
+  [dummyMainMap],
+  catalogFromStyles([bag]),
   [],
-  dummySiblingProduct.rows,
+  [dummyExclusion],
+)
+const splitPreview = previewProductNameExclusion(splitProduct.rows, {
+  mallName: '테스트몰',
+  productName: dummyName,
+  itemName: dummyItem,
+})
+const splitScan = collectProductNameComboOrders(splitProduct.rows, {
+  productName: dummyName,
+})
+const splitOutput = buildInvoiceOutputRows({
+  transformedRows: productNameTransformationToName(splitProduct).rows,
+  workMatches: new Map(),
+  giftRowsBySource: new Map(),
+  productTransformation: splitProduct,
+})
+assert(
+  splitProduct.rows[0]?.status === 'mapped' &&
+    splitProduct.rows[1]?.status === 'excluded' &&
+    splitPreview.excludedCount === 1 &&
+    splitPreview.guardedCount === 0 &&
+    splitScan.soloCount === 0 &&
+    splitOutput.length === 2 &&
+    splitOutput[0]?.sourceRowNumber === 9801 &&
+    splitOutput[1]?.sourceRowNumber === 9802 &&
+    splitOutput[1]?.finalProductName === dummyName &&
+    splitOutput[1]?.ownProductCode === 'SB-SPLIT-DUMMY',
+  '고객주문번호가 달라도 배송정보·주문시각이 같은 본품이 있으면 상품 연결 예외로 두고 CJ 원문은 남긴다',
+)
+
+const mismatchDummy = row({
+  rowNumber: 9812,
+  productName: dummyName,
+  itemName: dummyItem,
+  customerOrderNo: '2145655999',
+  recipientName: '김별(정현아)',
+  recipientPhone: '0502-2880-5815',
+  recipientAddress: '다른 주소',
+  orderedAt: '2026-08-16 18:52',
+})
+const mismatchProduct = transformInvoiceProductNames(
+  [splitMain, mismatchDummy],
+  [dummyMainMap],
+  catalogFromStyles([bag]),
   [],
+  [dummyExclusion],
 )
 assert(
-  dummyItemNames.rows.every((item) => item.source.rowNumber !== 9602),
-  '내품명 변환은 송장 제외 행을 빼 둔다',
+  mismatchProduct.rows[1]?.status === 'exclusion_guarded',
+  '주소가 다르면 다른 주문번호 더미를 제외 보류로 남긴다',
 )
+
+const noRuleDummy = row({
+  rowNumber: 9822,
+  productName: dummyName,
+  itemName: dummyItem,
+  customerOrderNo: '2145655888',
+  recipientName: '김별(정현아)',
+  recipientPhone: '0502-2880-5815',
+  recipientAddress: '서울특별시 노원구',
+  orderedAt: '2026-08-16 18:52',
+})
+const noRuleProduct = transformInvoiceProductNames(
+  [splitMain, noRuleDummy],
+  [dummyMainMap],
+  catalogFromStyles([bag]),
+)
+assert(
+  noRuleProduct.rows[1]?.status !== 'excluded' &&
+    noRuleProduct.rows[1]?.status !== 'exclusion_guarded',
+  '송장 제외 규칙이 없으면 배송정보가 같아도 자동 제외하지 않는다',
+)
+
+const soloSafeMain = row({
+  rowNumber: 9701,
+  productName: product,
+  itemName: '',
+  customerOrderNo: 'ORD-SAFE',
+})
+const soloSafeDummy = row({
+  rowNumber: 9702,
+  productName: dummyName,
+  itemName: dummyItem,
+  customerOrderNo: 'ORD-SAFE',
+})
+const soloNoOrderDummy = row({
+  rowNumber: 9703,
+  productName: dummyName,
+  itemName: dummyItem,
+  customerOrderNo: '',
+  recipientName: '주문번호없음',
+  recipientPhone: '01011111111',
+  recipientAddress: '부산',
+})
+const soloOrphanDummy = row({
+  rowNumber: 9704,
+  productName: dummyName,
+  itemName: dummyItem,
+  customerOrderNo: 'ORD-ORPHAN',
+  recipientName: '단독수신',
+  recipientPhone: '01022222222',
+  recipientAddress: '대전',
+})
+const soloScanProduct = transformInvoiceProductNames(
+  [soloSafeMain, soloSafeDummy, soloNoOrderDummy, soloOrphanDummy],
+  [dummyMainMap],
+  catalogFromStyles([bag]),
+)
+const soloScan = collectProductNameComboOrders(soloScanProduct.rows, {
+  productName: dummyName,
+})
+assert(
+  soloScan.orders.length === 3 &&
+    soloScan.soloCount === 2 &&
+    soloScan.orders[0]?.source.rowNumber === 9703 &&
+    soloScan.orders[0]?.soloReason === 'no_order_no' &&
+    soloScan.orders[1]?.source.rowNumber === 9704 &&
+    soloScan.orders[1]?.soloReason === 'no_confirmed_sibling' &&
+    soloScan.orders[2]?.source.rowNumber === 9702 &&
+    soloScan.orders[2]?.soloReason === null,
+  '형제 본품이 있는 더미는 안전하고 주문번호 없음·단독 주문은 따로 표시한다',
+)
+
 const dummyOutgoing = buildOutgoingComponentRowsFromStages({
   productRows: dummySiblingProduct.rows,
   itemRows: dummyItemNames.rows,
@@ -2667,7 +2892,67 @@ const dummyOutgoing = buildOutgoingComponentRowsFromStages({
 })
 assert(
   dummyOutgoing.every((item) => item.sourceRowNumber !== 9602),
-  '출고구성도 송장 제외 행을 빼 둔다',
+  '출고구성도 상품 연결 예외 행을 빼 둔다',
+)
+const dummyReconnectMap = optionMap({
+  id: 'map-dummy-reconnect',
+  productName: dummyName,
+  itemName: dummyItem,
+  mallName: '테스트몰',
+  components: [
+    component('map-dummy-reconnect', bag, 'main'),
+    component('map-dummy-reconnect', tassel, 'included'),
+  ],
+})
+const dummyNoReconnectItem = transformInvoiceItemNames(
+  [dummySiblingMain, dummySiblingRow],
+  [dummyReconnectMap],
+  dummySiblingProduct.rows,
+  [dummyDeleteRule],
+)
+const dummyNoReconnectRow = dummyNoReconnectItem.rows.find(
+  (item) => item.source.rowNumber === 9602,
+)
+assert(
+  dummyNoReconnectRow?.status === 'deleted' &&
+    dummyNoReconnectRow.mapId === null &&
+    dummyNoReconnectRow.productStyle === null &&
+    dummyNoReconnectRow.extras.length === 0,
+  '상품 연결 예외 행은 내품명 규칙을 적용해도 세트 기준으로 본품을 다시 연결하지 않는다',
+)
+const dummySetOutput = buildInvoiceOutputRows({
+  transformedRows: productNameTransformationToName(dummySiblingProduct).rows,
+  workMatches: new Map(),
+  giftRowsBySource: new Map(),
+  productTransformation: dummySiblingProduct,
+  optionTransformation: {
+    rows: [
+      {
+        source: dummySiblingRow,
+        status: 'mapped',
+        mapId: 'map-dummy-set',
+        main: bag,
+        extras: [component('map-dummy-set', tassel, 'included')],
+        transformedName: bag.name,
+        transformedItemName: dummyItem,
+        codeHintName: null,
+      },
+    ],
+    mappedRowCount: 1,
+    codeFallbackRowCount: 0,
+    exceptionRowCount: 0,
+    conflictRowCount: 0,
+    unresolvedRowCount: 0,
+    unresolvedCombos: [],
+  },
+})
+const dummySetPassthrough = dummySetOutput.find(
+  (item) => item.sourceRowNumber === 9602,
+)
+assert(
+  dummySetPassthrough?.finalProductName === dummyName &&
+    dummySetOutput.filter((item) => item.sourceRowNumber === 9602).length === 1,
+  '상품 연결 예외 행은 세트 구성이 있어도 CJ에서 펼치지 않는다',
 )
 
 const importMain = style('s-imp-main', 'M0885', '래빗에코백 하트')
@@ -2915,8 +3200,9 @@ assert(
   accessoryMapped.rows[0]?.status === 'mapped' &&
     accessoryMapped.autoComponentsRowCount === 1 &&
     accessoryMapped.rows[0]?.resolvedBy === 'dictionary' &&
-    accessoryMapped.rows[0]?.extras[0]?.style.styleNo === 'M0983',
-  '사전이 태슬 라벨을 구성품으로 바꾼다',
+    accessoryMapped.rows[0]?.extras[0]?.style.styleNo === 'M0983' &&
+    accessoryMapped.rows[0]?.expandableExtras.length === 0,
+  '사전이 태슬 라벨을 구성품으로 바꾸고 CJ 행은 늘리지 않는다',
 )
 
 const accessoryDeleted = transformInvoiceItemNames(
@@ -3255,6 +3541,7 @@ const collectedPink = collectUnknownAccessoryPieces([
     productStyle: accessoryByNo.get('M2276') ?? null,
     productLookupKey: 'Strap pouch 하트',
     productAppliedRule: null,
+    productConnectionExcluded: false,
     mapId: null,
     rowCount: 1,
     status: 'passthrough',
@@ -3271,6 +3558,7 @@ const collectedPink = collectUnknownAccessoryPieces([
     productStyle: accessoryByNo.get('M0088') ?? null,
     productLookupKey: '8 pocket cross bag black',
     productAppliedRule: null,
+    productConnectionExcluded: false,
     mapId: null,
     rowCount: 1,
     status: 'passthrough',
@@ -3532,6 +3820,7 @@ const aiItemCombos = [
     productStyle: reviewMain,
     productLookupKey: 'drop bag black',
     productAppliedRule: null,
+    productConnectionExcluded: false,
     mapId: null,
     rowCount: 2,
     status: 'passthrough' as const,
@@ -3548,6 +3837,7 @@ const aiItemCombos = [
     productStyle: reviewStrap,
     productLookupKey: 'drop bag navy',
     productAppliedRule: null,
+    productConnectionExcluded: false,
     mapId: null,
     rowCount: 3,
     status: 'passthrough' as const,
@@ -3628,7 +3918,7 @@ assert(
 )
 assert(
   itemNameAiReviewKind(aiDeleteRows[0]!) === 'delete' &&
-    itemNameAiReviewKind(aiEditedRow) === 'single' &&
+    itemNameAiReviewKind(aiEditedRow) === 'bundle' &&
     itemNameAiReviewKind({
       ...aiEditedRow,
       components: [
@@ -3733,6 +4023,568 @@ assert(
     itemNameAiReviewKind(committed[1]!) === 'single',
   '초안을 반영하면 행이 최종 분류로 바뀐다',
 )
+const heldSingle = markItemNameAiDecisionNeeded(aiEditedRow)
+const heldBundle = markItemNameAiDecisionNeeded({
+  ...aiEditedRow,
+  components: [
+    { style: reviewShorts, quantity: 2 },
+    { style: reviewStrap, quantity: 1 },
+  ],
+})
+assert(
+  itemNameAiReviewKind(heldSingle) === 'hold' &&
+    heldSingle.components.length === 1 &&
+    heldSingle.components[0]?.style.styleId === reviewShorts.styleId &&
+    heldSingle.components[0]?.quantity === 2 &&
+    heldSingle.originalSignature === aiEditedRow.originalSignature &&
+    itemNameAiExpectedLines(heldSingle)[0] === '결정 필요' &&
+    itemNameAiExpectedLines(heldSingle).length > 1,
+  '단일 구성 행을 결정 필요로 보내도 구성·수량·서명은 유지한다',
+)
+assert(
+  itemNameAiReviewKind(heldBundle) === 'hold' &&
+    heldBundle.components.length === 2 &&
+    heldBundle.components[1]?.style.styleId === reviewStrap.styleId &&
+    heldBundle.originalSignature === aiEditedRow.originalSignature,
+  '복수 구성 행을 결정 필요로 보내도 구성을 비우지 않는다',
+)
+const heldThenAppend = appendItemNameAiComponent(
+  [heldSingle],
+  [heldSingle.key],
+  { style: reviewPurple, quantity: 1 },
+)
+assert(
+  heldThenAppend.addedKeys.length === 1 &&
+    heldThenAppend.rows[0]!.action === 'components' &&
+    heldThenAppend.rows[0]!.components.length === 2 &&
+    heldThenAppend.rows[0]!.components[0]?.style.styleId ===
+      reviewShorts.styleId &&
+    heldThenAppend.rows[0]!.components[1]?.style.styleId ===
+      reviewPurple.styleId,
+  '결정 필요에서 구성품을 추가하면 기존 구성 뒤에 누적한다',
+)
+const unitRows = extrasOfItemNameAiRow({
+  ...aiEditedRow,
+  action: 'components',
+  components: [{ style: reviewStrap, quantity: 2 }],
+})
+const mergedUnits = mergeItemNameAiComponents(
+  unitRows.map((item) => ({
+    style: item.style!,
+    quantity: item.quantity,
+  })),
+)
+const unitQtyRow = validateItemNameAiReviewRow({
+  ...aiEditedRow,
+  action: 'components',
+  components: mergedUnits,
+})
+assert(
+  unitRows.length === 2 &&
+    unitRows.every((item) => item.quantity === 1) &&
+    unitRows.every((item) => item.style?.styleId === reviewStrap.styleId) &&
+    mergedUnits.length === 1 &&
+    mergedUnits[0]?.quantity === 2 &&
+    itemNameAiReviewKind(unitQtyRow) === 'bundle' &&
+    itemNameAiExpectedLines(unitQtyRow).join('|') ===
+      `${reviewStrap.styleNo} · ${reviewStrap.name}|${reviewStrap.styleNo} · ${reviewStrap.name}` &&
+    formatItemNameFromComponents(unitQtyRow.components) ===
+      `${reviewStrap.name}, ${reviewStrap.name}` &&
+    mergeOrders[1]?.quantity === '4',
+  '같은 M번호 단위 행 2개는 내부 수량 2·검수표 두 줄·bundle·송장 두 번 표기·출고 총수량을 유지한다',
+)
+function stubItemNameAiReviewRow(
+  key: string,
+  itemName: string,
+  extra?: Partial<ItemNameAiReviewRow>,
+): ItemNameAiReviewRow {
+  return validateItemNameAiReviewRow({
+    contextId: key,
+    groupKey: key,
+    itemName,
+    productLookupKey: extra?.productLookupKey ?? key,
+    mainStyle: extra?.mainStyle === undefined ? reviewMain : extra.mainStyle,
+    productComponents: [],
+    sourceProductName: '본품',
+    productConnectionExcluded: extra?.productConnectionExcluded ?? false,
+    rowCount: 1,
+    key,
+    action: extra?.action ?? 'hold',
+    components: extra?.components ?? [],
+    originalSignature: extra?.originalSignature ?? extra?.action ?? 'hold',
+    reason: '',
+    confidence: extra?.confidence ?? 0,
+    passesGate: extra?.passesGate ?? false,
+    validationError: null,
+    existingRuleId: null,
+    existingGlobalRuleId: null,
+    ...extra,
+  })
+}
+const liveReviewRows = Array.from({ length: 6 }, (_, index) =>
+  stubItemNameAiReviewRow(`live-${index}`, `옵션 ${index}`),
+)
+const staleDummyRows = Array.from({ length: 4 }, (_, index) =>
+  stubItemNameAiReviewRow(`stale-${index}`, '선택안함', {
+    action: 'delete',
+    originalSignature: 'delete',
+    mainStyle: null,
+    productLookupKey: '',
+  }),
+)
+const liveDraftRow = validateItemNameAiReviewRow({
+  ...liveReviewRows[0]!,
+  action: 'components',
+  components: [{ style: reviewStrap, quantity: 1 }],
+})
+const reconciledReview = reconcileItemNameAiReviewState({
+  liveContextIds: liveReviewRows.map((row) => row.contextId),
+  rows: [...liveReviewRows, ...staleDummyRows],
+  drafts: new Map([
+    [liveReviewRows[0]!.key, liveDraftRow],
+    [staleDummyRows[0]!.key, staleDummyRows[0]!],
+  ]),
+  selected: [liveReviewRows[1]!.key, staleDummyRows[1]!.key],
+  confirmedKeys: [liveReviewRows[0]!.key, staleDummyRows[0]!.key],
+  pendingAiKeys: [staleDummyRows[2]!.key],
+  committedKeys: [staleDummyRows[3]!.key],
+  lastAppend: {
+    addedKeys: [staleDummyRows[0]!.key],
+    skippedKeys: [],
+    previous: [staleDummyRows[0]!],
+  },
+})
+assert(
+  reconciledReview.rows.length === 6 &&
+    reconciledReview.removedKeys.length === 4 &&
+    reconciledReview.removedKeys.every((key) => key.startsWith('stale-')) &&
+    reconciledReview.drafts.size === 1 &&
+    reconciledReview.drafts.get(liveReviewRows[0]!.key)?.action ===
+      'components' &&
+    reconciledReview.selected.size === 1 &&
+    reconciledReview.selected.has(liveReviewRows[1]!.key) &&
+    reconciledReview.confirmedKeys.has(liveReviewRows[0]!.key) &&
+    reconciledReview.pendingAiKeys.size === 0 &&
+    reconciledReview.committedKeys.size === 0 &&
+    reconciledReview.lastAppend === null &&
+    reconciledReview.changed &&
+    reconciledReview.phase === 'review',
+  '현재 context 6개에 없는 선택안함 검수 행 4개는 제거하고 유효 초안은 보존한다',
+)
+const soloDummyDelete = stubItemNameAiReviewRow('solo-dummy', '선택안함', {
+  action: 'delete',
+  originalSignature: 'delete',
+  mainStyle: null,
+  productLookupKey: '',
+  productConnectionExcluded: true,
+  passesGate: true,
+  confidence: 0.95,
+})
+const soloDummyPlan = decideItemNameAiSaves([soloDummyDelete], [
+  soloDummyDelete.key,
+])
+assert(
+  soloDummyPlan.globals.length === 1 &&
+    soloDummyPlan.globals[0]?.input.scope === 'global' &&
+    soloDummyPlan.globals[0]?.input.action === 'delete' &&
+    soloDummyPlan.lookups.length === 0 &&
+    soloDummyPlan.blocked.length === 0,
+  '상품 연결 예외의 본품 없는 단일 내품명은 공통 exact 규칙으로 저장한다',
+)
+const soloUnknownDelete = stubItemNameAiReviewRow(
+  'solo-unknown',
+  '일반 미확정 옵션',
+  {
+    action: 'delete',
+    originalSignature: 'delete',
+    mainStyle: null,
+    productLookupKey: '',
+    productConnectionExcluded: false,
+    passesGate: true,
+  },
+)
+const soloUnknownPlan = decideItemNameAiSaves([soloUnknownDelete], [
+  soloUnknownDelete.key,
+])
+assert(
+  soloUnknownPlan.globals.length === 0 &&
+    soloUnknownPlan.lookups.length === 0 &&
+    soloUnknownPlan.blocked[0]?.message ===
+      '개별 저장에는 확정 본품과 조회 키가 필요합니다.',
+  '일반 본품 미확정 행은 공통 규칙으로 넓히지 않는다',
+)
+const emptyReconcile = reconcileItemNameAiReviewState({
+  liveContextIds: [],
+  rows: staleDummyRows,
+  drafts: new Map([[staleDummyRows[0]!.key, staleDummyRows[0]!]]),
+})
+assert(
+  emptyReconcile.rows.length === 0 &&
+    emptyReconcile.drafts.size === 0 &&
+    emptyReconcile.phase === 'idle',
+  '남은 context가 없으면 검수 상태를 비우고 idle로 돌린다',
+)
+const emptySlots = itemNameAiQuickSlotsFromComponents([])
+assert(
+  emptySlots.length === 1 && emptySlots[0]?.status === 'empty',
+  '구성이 없으면 빈칸 하나만 보여 준다',
+)
+const prefilledSlots = itemNameAiQuickSlotsFromComponents([
+  { style: reviewShorts, quantity: 2 },
+  { style: reviewStrap, quantity: 1 },
+])
+assert(
+  prefilledSlots.length === 2 &&
+    prefilledSlots[0]?.status === 'matched' &&
+    prefilledSlots[0]?.quantity === 2 &&
+    prefilledSlots[1]?.style?.styleId === reviewStrap.styleId,
+  '빠른 입력칸은 기존 구성과 수량을 미리 채운다',
+)
+const renamedSlot = applyItemNameAiQuickSlotText(
+  prefilledSlots[0]!,
+  '퍼플 스트랩',
+)
+assert(
+  renamedSlot.status === 'draft' &&
+    renamedSlot.style === null &&
+    renamedSlot.quantity === 1,
+  '공식명을 바꾸면 미확정 초안이 되고 수량은 1이 된다',
+)
+const incompleteSlots = [renamedSlot, prefilledSlots[1]!]
+assert(
+  itemNameAiQuickRowComponents(incompleteSlots).ok === false,
+  '일부 슬롯이 미확정이면 기존 구성을 덮지 않는다',
+)
+const replaced = replaceItemNameAiRowComponents(aiEditedRow, [
+  { style: reviewStrap, quantity: 2 },
+  { style: reviewPurple, quantity: 1 },
+])
+assert(
+  replaced.ok &&
+    replaced.row.originalSignature === aiEditedRow.originalSignature &&
+    replaced.row.components[0]?.style.styleId === reviewStrap.styleId &&
+    replaced.row.components[1]?.style.styleId === reviewPurple.styleId &&
+    replaced.row.components[0]?.quantity === 2,
+  '확정 슬롯은 순서를 유지한 채 행 전체 구성을 교체한다',
+)
+const unknownReplace = replaceItemNameAiRowComponents(
+  aiEditedRow,
+  [{ style: style('s-unknown', 'M9999', '없는상품'), quantity: 1 }],
+  new Set([
+    reviewShorts.styleId,
+    reviewStrap.styleId,
+    reviewPurple.styleId,
+  ]),
+)
+assert(
+  unknownReplace.ok === false &&
+    unknownReplace.row.components[0]?.style.styleId ===
+      aiEditedRow.components[0]?.style.styleId,
+  '미등록 M번호는 기존 구성을 덮지 않는다',
+)
+const duplicated = itemNameAiQuickRowComponents([
+  {
+    text: '쇼츠',
+    quantity: 1,
+    style: reviewShorts,
+    status: 'matched',
+    candidates: [],
+    error: null,
+  },
+  {
+    text: '쇼츠 다시',
+    quantity: 1,
+    style: reviewShorts,
+    status: 'matched',
+    candidates: [],
+    error: null,
+  },
+])
+assert(duplicated.ok === false, '같은 M번호를 두 칸에 넣으면 반영하지 않는다')
+const exactMatch = decideItemNameAiQuickSlotMatch(
+  [
+    {
+      styleId: reviewStrap.styleId,
+      styleNo: reviewStrap.styleNo,
+      name: reviewStrap.name,
+      reason: 'exact',
+      confidence: 0.96,
+    },
+  ],
+  'local',
+  0.72,
+)
+assert(
+  exactMatch.status === 'matched' &&
+    exactMatch.style?.styleId === reviewStrap.styleId,
+  '고신뢰 1순위는 공식 StyleRef로 확정한다',
+)
+const ambiguousMatch = decideItemNameAiQuickSlotMatch(
+  [
+    {
+      styleId: reviewStrap.styleId,
+      styleNo: reviewStrap.styleNo,
+      name: reviewStrap.name,
+      reason: '비슷',
+      confidence: 0.61,
+    },
+    {
+      styleId: reviewPurple.styleId,
+      styleNo: reviewPurple.styleNo,
+      name: reviewPurple.name,
+      reason: '비슷',
+      confidence: 0.58,
+    },
+  ],
+  'ai',
+  0.72,
+)
+assert(
+  ambiguousMatch.status === 'ambiguous' &&
+    ambiguousMatch.candidates.length === 2,
+  '애매한 추천은 후보만 남기고 확정하지 않는다',
+)
+const visibleKeys = ['row-a', 'row-b', 'row-c']
+assert(
+  nextItemNameAiQuickFocus(visibleKeys, 'row-a', 0, 'down')?.rowKey ===
+    'row-b' &&
+    nextItemNameAiQuickFocus(visibleKeys, 'row-a', 1, 'down', {
+      'row-b': 2,
+    })?.slotIndex === 1 &&
+    nextItemNameAiQuickFocus(visibleKeys, 'row-a', 1, 'down', {
+      'row-b': 1,
+    })?.slotIndex === 0 &&
+    nextItemNameAiQuickFocus(visibleKeys, 'row-a', 1, 'down', {
+      'row-b': 1,
+    })?.ensureCount === 1 &&
+    nextItemNameAiQuickFocus(visibleKeys, 'row-c', 0, 'down') === null,
+  'Enter는 다음 행의 있는 칸으로만 이동하고 새 칸을 만들지 않는다',
+)
+assert(
+  nextItemNameAiQuickFocus(visibleKeys, 'row-a', 0, 'right')?.slotIndex ===
+    1 &&
+    nextItemNameAiQuickFocus(visibleKeys, 'row-a', 1, 'right')
+      ?.ensureCount === 3 &&
+    nextItemNameAiQuickFocus(visibleKeys, 'row-a', 2, 'right')?.rowKey ===
+      'row-b' &&
+    nextItemNameAiQuickFocus(visibleKeys, 'row-a', 2, 'right')?.slotIndex ===
+      0,
+  'Tab은 같은 행에 칸을 만들고 세 번째에서는 다음 행 첫 칸으로 간다',
+)
+assert(
+  decideItemNameAiEnterAction([emptyItemNameAiQuickSlot()]).status ===
+    'delete',
+  '행 전체가 빈칸이면 Enter는 내품명 비움이다',
+)
+assert(
+  decideItemNameAiEnterAction([
+    prefilledSlots[0]!,
+    emptyItemNameAiQuickSlot(),
+  ]).status === 'components' &&
+    decideItemNameAiEnterAction([
+      prefilledSlots[0]!,
+      emptyItemNameAiQuickSlot(),
+    ]).status === 'components',
+  '일부 칸만 비고 나머지가 공식이면 그 구성만 확정한다',
+)
+assert(
+  decideItemNameAiEnterAction(incompleteSlots).status === 'needs_ai',
+  '미확정 문자열이 있으면 AI 정리 대기로 남긴다',
+)
+const approvedSame = applyItemNameAiRowAction(aiEditedRow, {
+  action: 'components',
+  components: aiEditedRow.components,
+})
+assert(
+  approvedSame.ok &&
+    approvedSame.row.originalSignature === aiEditedRow.originalSignature &&
+    approvedSame.row.action === 'components',
+  '기존 공식 구성을 Enter로 승인해도 서명은 유지한다',
+)
+const deletedDraft = applyItemNameAiRowAction(aiEditedRow, {
+  action: 'delete',
+})
+const heldDraft = applyItemNameAiRowAction(heldSingle, { action: 'hold' })
+assert(
+  deletedDraft.ok && deletedDraft.row.action === 'delete',
+  '빈 행 Enter는 삭제 초안을 만든다',
+)
+assert(heldDraft.ok, '결정 필요는 초안으로 올린다')
+const heldOther = { ...heldDraft.row, key: 'held-other' }
+const readyCommit = commitReadyItemNameAiDrafts({
+  rows: [aiEditedRow, heldOther],
+  drafts: new Map([
+    [aiEditedRow.key, deletedDraft.row],
+    [heldOther.key, heldOther],
+  ]),
+  confirmedKeys: new Set([aiEditedRow.key, heldOther.key, 'needs-ai']),
+  pendingAiKeys: new Set(['needs-ai']),
+  committedKeys: new Set(),
+})
+assert(
+  readyCommit.rows[0]!.action === 'delete' &&
+    readyCommit.rows[1]!.action === 'hold' &&
+    readyCommit.committedKeys.has(aiEditedRow.key) &&
+    readyCommit.committedKeys.has(heldOther.key) &&
+    !readyCommit.committedKeys.has('needs-ai') &&
+    readyCommit.selectedKeys.includes(aiEditedRow.key) &&
+    !readyCommit.selectedKeys.includes(heldOther.key) &&
+    readyCommit.drafts.size === 0,
+  '준비된 행만 부분 저장하고 미확정 행은 입력 대기에 남긴다',
+)
+assert(
+  itemNameAiMatchesQueueFilter(readyCommit.rows[0]!, 'queue', new Set()) &&
+    !itemNameAiMatchesQueueFilter(
+      readyCommit.rows[0]!,
+      'queue',
+      readyCommit.committedKeys,
+    ) &&
+    itemNameAiMatchesQueueFilter(
+      readyCommit.rows[0]!,
+      'delete',
+      readyCommit.committedKeys,
+    ) &&
+    itemNameAiMatchesQueueFilter(
+      readyCommit.rows[1]!,
+      'hold',
+      readyCommit.committedKeys,
+    ),
+  '저장 완료 행만 결과 탭에 들어가고 입력 대기에서는 빠진다',
+)
+const approvedOriginal = commitReadyItemNameAiDrafts({
+  rows: [aiEditedRow],
+  drafts: new Map(),
+  confirmedKeys: new Set([aiEditedRow.key]),
+  pendingAiKeys: new Set(),
+  committedKeys: new Set(),
+})
+assert(
+  approvedOriginal.committedKeys.has(aiEditedRow.key) &&
+    approvedOriginal.rows[0]!.action === 'components' &&
+    itemNameAiMatchesQueueFilter(
+      approvedOriginal.rows[0]!,
+      'bundle',
+      approvedOriginal.committedKeys,
+    ) &&
+    !itemNameAiMatchesQueueFilter(
+      approvedOriginal.rows[0]!,
+      'queue',
+      approvedOriginal.committedKeys,
+    ),
+  '기존 공식 구성을 Enter로 확인한 행은 초안이 없어도 결과 탭으로 간다',
+)
+const heldOriginal = commitReadyItemNameAiDrafts({
+  rows: [heldSingle],
+  drafts: new Map(),
+  confirmedKeys: new Set([heldSingle.key]),
+  pendingAiKeys: new Set(),
+  committedKeys: new Set(),
+})
+assert(
+  !heldOriginal.committedKeys.has(heldSingle.key),
+  '결정 필요 원본은 초안 없이 저장하지 않는다',
+)
+const unmatchedSlot = {
+  text: '태슬 핑크',
+  quantity: 1,
+  style: null,
+  status: 'unmatched' as const,
+  candidates: [reviewStrap],
+  error: '공식 상품을 찾지 못했습니다.',
+}
+const pickedSlot = applyItemNameAiQuickSlotStyle(unmatchedSlot, reviewStrap)
+const pickedDecision = decideItemNameAiEnterAction([pickedSlot])
+assert(
+  pickedSlot.status === 'matched' &&
+    pickedSlot.style?.styleId === reviewStrap.styleId &&
+    pickedDecision.status === 'components' &&
+    pickedDecision.components[0]?.style.styleId === reviewStrap.styleId,
+  'AI 미매칭 뒤 후보를 고르면 공식 구성품 1개로 확정한다',
+)
+const emptyStillDelete = decideItemNameAiEnterAction([
+  emptyItemNameAiQuickSlot(),
+])
+assert(
+  emptyStillDelete.status === 'delete',
+  '빈 슬롯은 계속 내품명 비움이다',
+)
+const pickedDraft = applyItemNameAiRowAction(deletedDraft.row, {
+  action: 'components',
+  components:
+    pickedDecision.status === 'components' ? pickedDecision.components : [],
+})
+assert(pickedDraft.ok, '후보로 고른 구성은 비움 초안을 덮는다')
+const pickedCommit = commitReadyItemNameAiDrafts({
+  rows: [deletedDraft.row],
+  drafts: new Map([[deletedDraft.row.key, pickedDraft.row]]),
+  confirmedKeys: new Set([deletedDraft.row.key]),
+  pendingAiKeys: new Set(),
+  committedKeys: new Set(),
+})
+assert(
+  pickedCommit.rows[0]!.action === 'components' &&
+    itemNameAiReviewKind(pickedCommit.rows[0]!) === 'single' &&
+    itemNameAiMatchesQueueFilter(
+      pickedCommit.rows[0]!,
+      'single',
+      pickedCommit.committedKeys,
+    ) &&
+    !itemNameAiMatchesQueueFilter(
+      pickedCommit.rows[0]!,
+      'delete',
+      pickedCommit.committedKeys,
+    ),
+  '후보를 고른 행은 변경 저장 후 옵션 상품 1개 탭으로 간다',
+)
+const reopened = reopenItemNameAiCommittedRow({
+  committedKeys: pickedCommit.committedKeys,
+  selectedKeys: new Set(pickedCommit.selectedKeys),
+  confirmedKeys: new Set([deletedDraft.row.key]),
+  pendingAiKeys: new Set(),
+  key: deletedDraft.row.key,
+})
+assert(
+  !reopened.committedKeys.has(deletedDraft.row.key) &&
+    !reopened.selectedKeys.has(deletedDraft.row.key) &&
+    !reopened.confirmedKeys.has(deletedDraft.row.key) &&
+    pickedCommit.committedKeys.has(deletedDraft.row.key),
+  '저장 완료 행만 검수 대기로 되돌리고 다른 상태는 유지한다',
+)
+assert(
+  itemNameAiQueueProgress({
+    confirmed: true,
+    committed: false,
+    pendingAi: true,
+  }) === 'needs_ai' &&
+    itemNameAiQueueProgress({
+      confirmed: true,
+      committed: false,
+      pendingAi: false,
+      draft: { action: 'components' },
+    }) === 'ready_components' &&
+    itemNameAiQueueProgress({
+      confirmed: true,
+      committed: false,
+      pendingAi: false,
+      draft: null,
+      row: { action: 'hold' },
+    }) === 'pending',
+  '입력 완료와 AI 정리 필요 상태를 구분한다',
+)
+const holdToStrap = applyItemNameAiRowAction(
+  heldSingle,
+  {
+    action: 'components',
+    components: [{ style: reviewStrap, quantity: 1 }],
+  },
+  new Set([reviewStrap.styleId]),
+)
+assert(
+  holdToStrap.ok &&
+    holdToStrap.row.action === 'components' &&
+    holdToStrap.row.components[0]?.style.styleId === reviewStrap.styleId,
+  '결정 필요 행에 스트랩 후보를 고르면 구성품 초안이 된다',
+)
 
 function aiCombo(input: {
   key: string
@@ -3752,6 +4604,7 @@ function aiCombo(input: {
     productStyle: input.productStyle,
     productLookupKey: input.productLookupKey,
     productAppliedRule: null,
+    productConnectionExcluded: false,
     mapId: null,
     rowCount: input.rowCount,
     status: 'passthrough' as const,
@@ -3948,6 +4801,324 @@ assert(
     kitProductMap,
   ).length === 1,
   '같은 구성의 HTML 엔티티 변형은 한 번만 표시한다',
+)
+
+const lookupRuleLive = itemNameRule({
+  id: 'rule-lookup-live',
+  itemName: 'Tassel 1: Green',
+  scope: 'lookup_key',
+  mainStyle: reviewMain,
+  productLookupKey: '[컬러스트랩세트] 빅 트래블백 _ 크림',
+  action: 'components',
+  components: [ruleComponent('rule-lookup-live', reviewStrap, 'included', 2)],
+})
+const lookupRulePaused = {
+  ...itemNameRule({
+    id: 'rule-lookup-paused',
+    itemName: '선택안함',
+    scope: 'lookup_key',
+    mainStyle: reviewMain,
+    productLookupKey: 'drop bag black',
+    action: 'delete',
+  }),
+  isActive: false,
+  updatedAt: '2026-08-17T00:00:00.000Z',
+}
+const globalRuleHidden = itemNameRule({
+  id: 'rule-global-hidden',
+  itemName: 'Tassel 1: Green',
+  action: 'delete',
+})
+const listedLookupRules = listLookupKeyItemNameRules([
+  globalRuleHidden,
+  lookupRulePaused,
+  lookupRuleLive,
+])
+assert(
+  listedLookupRules.length === 2 &&
+    listedLookupRules.every((rule) => rule.scope === 'lookup_key') &&
+    listedLookupRules[0]?.id === lookupRuleLive.id,
+  '조회 키 규칙만 모아 최근 수정순으로 보여 준다',
+)
+assert(
+  formatItemNameRuleResult(lookupRuleLive) ===
+    `${reviewStrap.name}, ${reviewStrap.name}` &&
+    formatItemNameRuleStyleNos(lookupRuleLive) === `${reviewStrap.styleNo}×2` &&
+    formatItemNameRuleResult(lookupRulePaused) === '(빈 값)' &&
+    formatItemNameRuleStyleNos(lookupRulePaused) === '-' &&
+    itemNameRuleSearchText(lookupRuleLive).includes(reviewStrap.styleNo),
+  '조회 키 규칙은 수량만큼 공식명을 나열하고 비움은 빈 값으로 표시한다',
+)
+const pausedEdit = itemNameRuleEditSave(lookupRulePaused, {
+  action: 'components',
+  components: [{ style: reviewStrap, quantity: 1 }],
+})
+assert(
+  pausedEdit.ruleId === lookupRulePaused.id &&
+    pausedEdit.input.isActive === false &&
+    pausedEdit.input.scope === 'lookup_key' &&
+    pausedEdit.input.productLookupKey === lookupRulePaused.productLookupKey &&
+    pausedEdit.input.mainStyleId === reviewMain.styleId &&
+    pausedEdit.input.itemName === lookupRulePaused.itemName &&
+    pausedEdit.input.action === 'components' &&
+    pausedEdit.input.components?.[0]?.styleId === reviewStrap.styleId,
+  '중지된 조회 키 규칙을 고쳐도 식별값과 중지 상태를 유지한다',
+)
+
+const stitchBlack = style('s-m0622', 'M0622', '스파 리본 퀼트 블랙')
+const tasselOfficial = style('s-m0982-official', 'M0982', '태슬 - 블랙')
+const reproSource = row({
+  rowNumber: 9501,
+  productName: 'Strap pouch_Stitched ribbon quilt Black',
+  itemName: 'Tassel 1=Black, Tassel 2=선택안함',
+})
+const reproProduct = transformInvoiceProductNames(
+  [reproSource],
+  [lookupMap('pmap-repro-stitch', reproSource.productName, stitchBlack)],
+  catalogFromStyles([stitchBlack, tasselOfficial]),
+)
+const reproItem = transformInvoiceItemNames(
+  [reproSource],
+  [],
+  reproProduct.rows,
+  [
+    itemNameRule({
+      id: 'rule-repro-tassel-black',
+      itemName: reproSource.itemName,
+      scope: 'lookup_key',
+      mainStyle: stitchBlack,
+      productLookupKey: reproSource.productName,
+      action: 'components',
+      components: [
+        ruleComponent('rule-repro-tassel-black', tasselOfficial, 'included'),
+      ],
+    }),
+  ],
+)
+assert(
+  reproItem.rows[0]?.status === 'mapped' &&
+    reproItem.rows[0]?.ruleId === 'rule-repro-tassel-black' &&
+    reproItem.rows[0]?.transformedItemName === tasselOfficial.name &&
+    reproItem.rows[0]?.extras[0]?.style.styleNo === 'M0982' &&
+    reproItem.rows[0]?.expandableExtras.length === 0,
+  '재현 규칙은 공식 내품명과 출고구성만 만들고 CJ 확장 구성은 비운다',
+)
+const reproOutput = buildInvoiceOutputRows({
+  transformedRows: reproProduct.rows.map((item) => ({
+    source: item.source,
+    transformedName: item.transformedProductName,
+    status: 'renamed',
+    matchedRuleId: item.mapId,
+  })),
+  workMatches: new Map(),
+  giftRowsBySource: new Map(),
+  productTransformation: reproProduct,
+  itemTransformation: reproItem,
+})
+const reproOrders = reproOutput.filter((item) => item.kind === 'order')
+assert(reproOrders.length === 1, '재현 케이스는 본품 CJ 1행만 남긴다')
+assert(
+  reproOrders[0]?.finalProductName === stitchBlack.name &&
+    reproOrders[0]?.finalItemName === tasselOfficial.name &&
+    reproOrders[0]?.quantity === '1',
+  '재현 CJ는 본품 공식명과 태슬 내품명만 쓴다',
+)
+const reproOutgoing = buildOutgoingComponentRowsFromStages({
+  productRows: reproProduct.rows,
+  itemRows: reproItem.rows,
+  giftRowsBySource: new Map(),
+})
+assert(
+  reproOutgoing.some(
+    (item) => item.role === 'main' && item.styleNo === 'M0622' && item.quantity === 1,
+  ) &&
+    reproOutgoing.some(
+      (item) =>
+        item.role === 'included' &&
+        item.styleNo === 'M0982' &&
+        item.quantity === 1,
+    ) &&
+    reproOutgoing.length === 2,
+  '재현 출고구성은 본품과 태슬을 각각 1개로 남긴다',
+)
+const reproProductStage = buildInvoiceStepSnapshot({
+  stage: 'product',
+  sourceRows: [reproSource],
+  productTransformation: reproProduct,
+  itemTransformation: reproItem,
+})
+assert(
+  reproProductStage.filter((item) => item.kind === 'order').length === 1 &&
+    reproProductStage[0]?.finalItemName === reproSource.itemName,
+  '품목명 단계 스냅샷은 규칙 구성품을 펼치지 않고 원문 내품명을 유지한다',
+)
+const reproItemStage = buildInvoiceStepSnapshot({
+  stage: 'item',
+  sourceRows: [reproSource],
+  productTransformation: reproProduct,
+  itemTransformation: reproItem,
+})
+assert(
+  reproItemStage.filter((item) => item.kind === 'order').length === 1 &&
+    reproItemStage[0]?.finalItemName === tasselOfficial.name,
+  '내품명 단계 스냅샷도 본품 1행에 공식 내품명만 넣는다',
+)
+
+const qtyTwoSource = row({
+  rowNumber: 9502,
+  productName: reproSource.productName,
+  itemName: reproSource.itemName,
+  quantity: '2',
+})
+const qtyTwoProduct = transformInvoiceProductNames(
+  [qtyTwoSource],
+  [lookupMap('pmap-repro-qty2', qtyTwoSource.productName, stitchBlack)],
+  catalogFromStyles([stitchBlack, tasselOfficial]),
+)
+const qtyTwoItem = transformInvoiceItemNames(
+  [qtyTwoSource],
+  [],
+  qtyTwoProduct.rows,
+  [
+    itemNameRule({
+      id: 'rule-repro-tassel-qty2',
+      itemName: qtyTwoSource.itemName,
+      action: 'components',
+      components: [
+        ruleComponent('rule-repro-tassel-qty2', tasselOfficial, 'included', 2),
+      ],
+    }),
+  ],
+)
+const qtyTwoOutput = buildInvoiceOutputRows({
+  transformedRows: qtyTwoProduct.rows.map((item) => ({
+    source: item.source,
+    transformedName: item.transformedProductName,
+    status: 'renamed',
+    matchedRuleId: item.mapId,
+  })),
+  workMatches: new Map(),
+  giftRowsBySource: new Map(),
+  productTransformation: qtyTwoProduct,
+  itemTransformation: qtyTwoItem,
+}).filter((item) => item.kind === 'order')
+assert(
+  qtyTwoOutput.length === 1 &&
+    qtyTwoOutput[0]?.quantity === '2' &&
+    qtyTwoOutput[0]?.finalItemName ===
+      `${tasselOfficial.name}, ${tasselOfficial.name}`,
+  '규칙 수량 2도 CJ 행을 늘리지 않고 주문 수량만 남긴다',
+)
+const qtyTwoOutgoing = buildOutgoingComponentRowsFromStages({
+  productRows: qtyTwoProduct.rows,
+  itemRows: qtyTwoItem.rows,
+  giftRowsBySource: new Map(),
+})
+assert(
+  qtyTwoOutgoing.find((item) => item.styleNo === 'M0622')?.quantity === 2 &&
+    qtyTwoOutgoing.find((item) => item.styleNo === 'M0982')?.quantity === 4,
+  '규칙 수량 2는 출고구성에서만 주문 수량과 곱한다',
+)
+
+const deleteSetSource = row({
+  rowNumber: 9503,
+  productName: product,
+  itemName: '지우기세트',
+})
+const deleteSetProduct = transformInvoiceProductNames(
+  [deleteSetSource],
+  [lookupMap('pmap-delete-set', product, bag)],
+  catalogFromStyles([bag, charm]),
+)
+const deleteSetMap = optionMap({
+  id: 'map-delete-set',
+  productName: product,
+  itemName: '지우기세트',
+  components: [
+    component('map-delete-set', bag, 'main'),
+    component('map-delete-set', charm, 'included'),
+  ],
+})
+const deleteSetItem = transformInvoiceItemNames(
+  [deleteSetSource],
+  [deleteSetMap],
+  deleteSetProduct.rows,
+  [
+    itemNameRule({
+      id: 'rule-delete-set',
+      itemName: '지우기세트',
+      action: 'delete',
+    }),
+  ],
+)
+assert(
+  deleteSetItem.rows[0]?.status === 'deleted' &&
+    deleteSetItem.rows[0]?.transformedItemName === '' &&
+    deleteSetItem.rows[0]?.extras[0]?.style.styleId === charm.styleId &&
+    deleteSetItem.rows[0]?.expandableExtras[0]?.style.styleId === charm.styleId,
+  '지우기 규칙은 내품명만 비우고 실제 세트 구성은 유지한다',
+)
+const deleteSetOutput = buildInvoiceOutputRows({
+  transformedRows: deleteSetProduct.rows.map((item) => ({
+    source: item.source,
+    transformedName: item.transformedProductName,
+    status: 'renamed',
+    matchedRuleId: item.mapId,
+  })),
+  workMatches: new Map(),
+  giftRowsBySource: new Map(),
+  productTransformation: deleteSetProduct,
+  itemTransformation: deleteSetItem,
+}).filter((item) => item.kind === 'order')
+assert(
+  deleteSetOutput.length === 2 &&
+    deleteSetOutput.every((line) => line.finalItemName === '') &&
+    deleteSetOutput[0]?.finalProductName === bag.name &&
+    deleteSetOutput[1]?.finalProductName === charm.name,
+  '지우기+실제 세트는 내품명을 비운 채 세트 행만 펼친다',
+)
+
+const accessoryMappedOutput = buildInvoiceOutputRows({
+  transformedRows: [
+    {
+      source: accessoryMapped.rows[0]!.source,
+      transformedName: accessoryMapped.rows[0]!.source.productName,
+      status: 'renamed',
+      matchedRuleId: null,
+    },
+  ],
+  workMatches: new Map(),
+  giftRowsBySource: new Map(),
+  itemTransformation: accessoryMapped,
+}).filter((item) => item.kind === 'order')
+assert(
+  accessoryMappedOutput.length === 1 &&
+    accessoryMappedOutput[0]?.finalItemName ===
+      accessoryMapped.rows[0]?.transformedItemName,
+  '부속품 사전 구성품도 CJ 행을 늘리지 않는다',
+)
+const accessoryPouch = ACCESSORY_STYLE_FIXTURES.find(
+  (item) => item.styleNo === 'M2276',
+)!
+const accessoryMappedProduct = transformInvoiceProductNames(
+  [accessoryMapped.rows[0]!.source],
+  [
+    lookupMap(
+      'pmap-acc-mapped',
+      accessoryMapped.rows[0]!.source.productName,
+      accessoryPouch,
+    ),
+  ],
+  catalogFromStyles(ACCESSORY_STYLE_FIXTURES),
+)
+const accessoryMappedOutgoing = buildOutgoingComponentRowsFromStages({
+  productRows: accessoryMappedProduct.rows,
+  itemRows: accessoryMapped.rows,
+  giftRowsBySource: new Map(),
+})
+assert(
+  accessoryMappedOutgoing.some((item) => item.styleNo === 'M0983'),
+  '부속품 사전 구성품은 출고구성에 남긴다',
 )
 
 console.log('option-maps verify ok')

@@ -25,6 +25,17 @@ export function formatProductCompositionLines(
   return items.map(formatProductCompositionLine)
 }
 
+export function formatProductCompositionUnitLines(
+  items: ProductCompositionItem[],
+): string[] {
+  return items.flatMap((item) =>
+    Array.from(
+      { length: Math.max(1, Math.floor(item.quantity || 1)) },
+      () => `${item.style.styleNo} · ${item.style.name}`,
+    ),
+  )
+}
+
 export function productCompositionSearchText(items: ProductCompositionItem[]) {
   return items
     .flatMap((item) => [item.style.styleNo, item.style.name])

@@ -8,6 +8,7 @@ import {
   type InvoiceItemNameRuleInput,
 } from '@/lib/api'
 import { formatItemNameFromComponents } from '@/lib/invoice/item-name-transform'
+import { itemNameRuleEditSave } from '@/lib/invoice/item-name-rule-manage'
 import {
   INVOICE_ITEM_NAME_RULE_ACTION_LABEL,
   type InvoiceItemNameRule,
@@ -38,12 +39,18 @@ export function InvoiceItemNameRuleForm({
   scope,
   existingRule,
   selectedRows = [],
+  lockedLookupRule = null,
+  onSaved,
+  submitLabel,
 }: {
   brandId: string
   itemName: string
   scope: Extract<InvoiceItemNameRuleScope, 'global' | 'lookup_key'>
   existingRule: InvoiceItemNameRule | null
   selectedRows?: InvoiceItemNameLookupKeyRow[]
+  lockedLookupRule?: InvoiceItemNameRule | null
+  onSaved?: () => void
+  submitLabel?: string
 }) {
   const queryClient = useQueryClient()
   const [action, setAction] = useState<InvoiceItemNameRuleAction>(
@@ -63,7 +70,7 @@ export function InvoiceItemNameRuleForm({
         : draftsFromRule(existingRule),
     )
     setSavedMessage('')
-  }, [existingRule, itemName, scope])
+  }, [existingRule, itemName, lockedLookupRule?.id, scope])
 
   function selectAction(next: InvoiceItemNameRuleAction) {
     setAction(next)
@@ -78,13 +85,21 @@ export function InvoiceItemNameRuleForm({
   const previewName =
     action === 'delete' ? '' : formatItemNameFromComponents(completed)
   const selectedCount = selectedRows.length
+  const editingLookup = Boolean(lockedLookupRule)
   const canSave =
     Boolean(itemName.trim()) &&
-    (scope === 'global' || selectedCount > 0) &&
+    (scope === 'global' || editingLookup || selectedCount > 0) &&
     (action === 'delete' || completed.length > 0)
 
   const mutation = useMutation({
     mutationFn: async (input: InvoiceItemNameRuleInput) => {
+      if (lockedLookupRule) {
+        const saved = itemNameRuleEditSave(lockedLookupRule, {
+          action: input.action,
+          components: completed,
+        })
+        return saveInvoiceItemNameRule(brandId, saved.input, saved.ruleId)
+      }
       if (scope === 'lookup_key') {
         return saveInvoiceItemNameRules(
           brandId,
@@ -104,6 +119,11 @@ export function InvoiceItemNameRuleForm({
       await queryClient.invalidateQueries({
         queryKey: ['invoice-item-name-rules', brandId],
       })
+      onSaved?.()
+      if (lockedLookupRule) {
+        setSavedMessage('저장했습니다. 현재 파일과 이후 작업에 바로 쓰입니다.')
+        return
+      }
       if (scope === 'lookup_key' && 'failed' in result) {
         const failed = result.failed
         const applied = result.applied.length
@@ -146,6 +166,7 @@ export function InvoiceItemNameRuleForm({
   }
 
   const bulkFailed =
+    !editingLookup &&
     scope === 'lookup_key' &&
     mutation.data &&
     'failed' in mutation.data &&
@@ -216,9 +237,13 @@ export function InvoiceItemNameRuleForm({
         <Save className="size-3.5" />
         {mutation.isPending
           ? '저장 중'
-          : scope === 'lookup_key'
-            ? `선택 ${selectedCount}건 적용`
-            : '저장 후 다음'}
+          : submitLabel
+            ? submitLabel
+            : editingLookup
+              ? '수정 저장'
+              : scope === 'lookup_key'
+                ? `선택 ${selectedCount}건 적용`
+                : '저장 후 다음'}
       </Button>
     </div>
   )

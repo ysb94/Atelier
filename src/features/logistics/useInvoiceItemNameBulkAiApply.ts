@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ACCESSORY_FEATURE_KEY,
@@ -13,16 +13,22 @@ import {
 } from '@/lib/api'
 import {
   appendItemNameAiComponent,
+  applyItemNameAiRowAction,
   buildItemNameAiReviewRows,
   collectItemNameAiGroups,
+  commitReadyItemNameAiDrafts,
+  itemNameAiRowReadyToCommit,
+  reopenItemNameAiCommittedRow,
   decideItemNameAiSaves,
   dedupeItemNameAiContexts,
   itemNameAiCandidateTexts,
   itemNameAiGroupsForContexts,
+  mergeItemNameAiComponents,
   mergeItemNameAiDrafts,
   mirrorItemNameAiDecisions,
   overlayItemNameAiDrafts,
   planItemNameAiBatches,
+  reconcileItemNameAiReviewState,
   restoreItemNameAiDrafts,
   validateItemNameAiReviewRow,
   type ItemNameAiContext,
@@ -49,6 +55,10 @@ import type { OptionExtraDraft } from './InvoiceOptionExtrasEditor'
 
 export type ItemNameAiBulkPhase = 'idle' | 'collecting' | 'review' | 'applied'
 
+export type ItemNameAiStageResult =
+  | { ok: true }
+  | { ok: false; error: string }
+
 const CONTEXTS_PER_REQUEST = 8
 /** 실제 상한은 추천 큐가 잡는다. 여기서는 큐를 굶기지 않을 만큼만 띄운다. */
 const COLLECT_WORKERS = 8
@@ -58,22 +68,26 @@ const CANDIDATE_LIMIT = 40
 function componentsFromExtras(
   extras: OptionExtraDraft[],
 ): AccessoryLookupComponent[] {
-  return extras.flatMap((item) =>
-    item.style
-      ? [{ style: item.style, quantity: Math.max(1, item.quantity || 1) }]
-      : [],
+  return mergeItemNameAiComponents(
+    extras.flatMap((item) =>
+      item.style
+        ? [{ style: item.style, quantity: Math.max(1, item.quantity || 1) }]
+        : [],
+    ),
   )
 }
 
 export function extrasOfItemNameAiRow(
   row: ItemNameAiReviewRow,
 ): OptionExtraDraft[] {
-  return row.components.map((item, index) => ({
-    key: `${item.style.styleId}-${index}`,
-    style: item.style,
-    role: 'included',
-    quantity: item.quantity,
-  }))
+  return row.components.flatMap((item, index) =>
+    Array.from({ length: Math.max(1, item.quantity) }, (_, unit) => ({
+      key: `${item.style.styleId}-${index}-${unit}`,
+      style: item.style,
+      role: 'included' as const,
+      quantity: 1,
+    })),
+  )
 }
 
 function inputIdentity(input: {
@@ -130,11 +144,90 @@ export function useInvoiceItemNameBulkAiApply({
     () => new Map(),
   )
   const [lastAppend, setLastAppend] = useState<ItemNameAiLastAppend | null>(null)
+  const [confirmedKeys, setConfirmedKeys] = useState<Set<string>>(
+    () => new Set(),
+  )
+  const [pendingAiKeys, setPendingAiKeys] = useState<Set<string>>(
+    () => new Set(),
+  )
+  const [committedKeys, setCommittedKeys] = useState<Set<string>>(
+    () => new Set(),
+  )
   const [appliedCount, setAppliedCount] = useState(0)
   const [failedCount, setFailedCount] = useState(0)
   const [applyError, setApplyError] = useState<string | null>(null)
   const [applying, setApplying] = useState(false)
   const cancelRef = useRef(false)
+  const collectGenerationRef = useRef(0)
+  const contextsRef = useRef(contexts)
+  contextsRef.current = contexts
+  const liveContextIds = useMemo(
+    () =>
+      contexts
+        .map((context) => context.contextId)
+        .filter((id) => id.trim())
+        .sort(),
+    [contexts],
+  )
+  const liveContextKey = liveContextIds.join('\u0000')
+  const liveContextIdsRef = useRef(liveContextIds)
+  liveContextIdsRef.current = liveContextIds
+  const reviewStateRef = useRef({
+    phase,
+    reviewRows,
+    draftByKey,
+    selected,
+    confirmedKeys,
+    pendingAiKeys,
+    committedKeys,
+    lastAppend,
+  })
+  reviewStateRef.current = {
+    phase,
+    reviewRows,
+    draftByKey,
+    selected,
+    confirmedKeys,
+    pendingAiKeys,
+    committedKeys,
+    lastAppend,
+  }
+
+  const invalidateCollect = useCallback((markCancel = true) => {
+    collectGenerationRef.current += 1
+    if (markCancel) cancelRef.current = true
+  }, [])
+
+  useEffect(() => {
+    const current = reviewStateRef.current
+    const next = reconcileItemNameAiReviewState({
+      liveContextIds: liveContextIdsRef.current,
+      rows: current.reviewRows,
+      drafts: current.draftByKey,
+      selected: current.selected,
+      confirmedKeys: current.confirmedKeys,
+      pendingAiKeys: current.pendingAiKeys,
+      committedKeys: current.committedKeys,
+      lastAppend: current.lastAppend,
+    })
+    const collecting = current.phase === 'collecting'
+    if (!next.changed && !collecting) return
+    invalidateCollect()
+    if (next.changed) {
+      setReviewRows(next.rows)
+      setDraftByKey(next.drafts)
+      setSelected(next.selected)
+      setConfirmedKeys(next.confirmedKeys)
+      setPendingAiKeys(next.pendingAiKeys)
+      setCommittedKeys(next.committedKeys)
+      setLastAppend(next.lastAppend)
+      setAppliedCount(0)
+      setFailedCount(0)
+      setApplyError(null)
+      setProgress({ done: 0, total: 0 })
+    }
+    setPhase(next.phase)
+  }, [invalidateCollect, liveContextKey])
 
   const fetchRecommendation = useCallback(
     (
@@ -172,30 +265,39 @@ export function useInvoiceItemNameBulkAiApply({
   )
 
   const cancel = useCallback(() => {
-    cancelRef.current = true
-  }, [])
+    invalidateCollect()
+    setPhase((current) => (current === 'collecting' ? 'review' : current))
+  }, [invalidateCollect])
 
   const reset = useCallback(() => {
-    cancelRef.current = false
+    invalidateCollect()
     setPhase('idle')
     setReviewRows([])
     setSelected(new Set())
     setDraftByKey(new Map())
     setLastAppend(null)
+    setConfirmedKeys(new Set())
+    setPendingAiKeys(new Set())
+    setCommittedKeys(new Set())
     setAppliedCount(0)
     setFailedCount(0)
     setApplyError(null)
     setProgress({ done: 0, total: 0 })
-  }, [])
+  }, [invalidateCollect])
 
   const collect = useCallback(async () => {
     if (phase === 'collecting' || contexts.length === 0) return
+    const generation = collectGenerationRef.current + 1
+    collectGenerationRef.current = generation
     cancelRef.current = false
     setPhase('collecting')
     setReviewRows([])
     setSelected(new Set())
     setDraftByKey(new Map())
     setLastAppend(null)
+    setConfirmedKeys(new Set())
+    setPendingAiKeys(new Set())
+    setCommittedKeys(new Set())
     setAppliedCount(0)
     setFailedCount(0)
     setApplyError(null)
@@ -275,7 +377,19 @@ export function useInvoiceItemNameBulkAiApply({
       }))
 
     const publish = (decisions: AiAccessoryContextDecision[]) => {
-      const mirrored = mirrorItemNameAiDecisions(decisions, mirrors)
+      if (
+        generation !== collectGenerationRef.current ||
+        cancelRef.current
+      ) {
+        return
+      }
+      const liveIds = new Set(
+        contextsRef.current.map((context) => context.contextId),
+      )
+      const mirrored = mirrorItemNameAiDecisions(decisions, mirrors).filter(
+        (item) => liveIds.has(item.contextId),
+      )
+      if (mirrored.length === 0) return
       const contextIds = new Set(mirrored.map((item) => item.contextId))
       for (const contextId of contextIds) decidedIds.add(contextId)
       const rows = buildItemNameAiReviewRows({
@@ -293,15 +407,8 @@ export function useInvoiceItemNameBulkAiApply({
             (orderByContextId.get(right.key) ?? 0),
         ),
       )
-      setSelected((current) => {
-        const next = new Set(current)
-        for (const row of rows) {
-          if (row.passesGate && !row.validationError) next.add(row.key)
-        }
-        return next
-      })
       done += contextIds.size
-      setProgress({ done, total: contexts.length })
+      setProgress({ done, total: contextsRef.current.length })
     }
 
     const worker = async () => {
@@ -358,14 +465,16 @@ export function useInvoiceItemNameBulkAiApply({
       ),
     )
 
+    if (generation !== collectGenerationRef.current) return
     if (!cancelRef.current) {
-      const missing = contexts.filter(
+      const missing = contextsRef.current.filter(
         (context) => !decidedIds.has(context.contextId),
       )
       if (missing.length > 0) {
         publish(holdsFor(missing, '추천 결과가 없습니다.'))
       }
     }
+    if (generation !== collectGenerationRef.current) return
     setPhase('review')
   }, [
     accessoryRules,
@@ -388,6 +497,90 @@ export function useInvoiceItemNameBulkAiApply({
     })
   }, [])
 
+  const writeDrafts = useCallback(
+    (drafts: Map<string, ItemNameAiReviewRow>) => {
+      reviewStateRef.current = {
+        ...reviewStateRef.current,
+        draftByKey: drafts,
+      }
+      setDraftByKey(drafts)
+    },
+    [],
+  )
+
+  const confirmRow = useCallback((key: string, pendingAi = false) => {
+    const current = reviewStateRef.current
+    const nextConfirmed = new Set(current.confirmedKeys)
+    nextConfirmed.add(key)
+    const nextPending = new Set(current.pendingAiKeys)
+    if (pendingAi) nextPending.add(key)
+    else nextPending.delete(key)
+    reviewStateRef.current = {
+      ...current,
+      confirmedKeys: nextConfirmed,
+      pendingAiKeys: nextPending,
+    }
+    setConfirmedKeys(nextConfirmed)
+    setPendingAiKeys(nextPending)
+  }, [])
+
+  const unconfirmRow = useCallback((key: string) => {
+    const current = reviewStateRef.current
+    if (!current.confirmedKeys.has(key) && !current.pendingAiKeys.has(key)) {
+      return
+    }
+    const nextConfirmed = new Set(current.confirmedKeys)
+    nextConfirmed.delete(key)
+    const nextPending = new Set(current.pendingAiKeys)
+    nextPending.delete(key)
+    reviewStateRef.current = {
+      ...current,
+      confirmedKeys: nextConfirmed,
+      pendingAiKeys: nextPending,
+    }
+    setConfirmedKeys(nextConfirmed)
+    setPendingAiKeys(nextPending)
+  }, [])
+
+  const unstageRow = useCallback((key: string) => {
+    const current = reviewStateRef.current.draftByKey
+    if (!current.has(key)) return
+    const next = new Map(current)
+    next.delete(key)
+    writeDrafts(next)
+  }, [writeDrafts])
+
+  const stageRowAction = useCallback(
+    (
+      key: string,
+      next:
+        | { action: 'delete' }
+        | { action: 'hold' }
+        | { action: 'components'; components: AccessoryLookupComponent[] },
+    ): ItemNameAiStageResult => {
+      const current = reviewStateRef.current
+      const base =
+        current.draftByKey.get(key) ??
+        current.reviewRows.find((row) => row.key === key)
+      if (!base) return { ok: false, error: '행을 찾을 수 없습니다.' }
+      const knownIds =
+        next.action === 'components'
+          ? new Set([
+              ...knownStyleIds,
+              ...next.components.map((item) => item.style.styleId),
+            ])
+          : knownStyleIds
+      const applied = applyItemNameAiRowAction(base, next, knownIds)
+      if (!applied.ok) return { ok: false, error: applied.error }
+      const drafts = new Map(current.draftByKey)
+      drafts.set(key, applied.row)
+      writeDrafts(drafts)
+      confirmRow(key, false)
+      return { ok: true }
+    },
+    [confirmRow, knownStyleIds, writeDrafts],
+  )
+
   const updateRow = useCallback(
     (
       key: string,
@@ -396,95 +589,166 @@ export function useInvoiceItemNameBulkAiApply({
         extras?: OptionExtraDraft[]
         components?: AccessoryLookupComponent[]
       },
-    ) => {
-      if (draftByKey.size > 0) return
-      setReviewRows((current) =>
-        current.map((row) => {
-          if (row.key !== key) return row
-          const action = patch.action ?? row.action
-          const components =
-            patch.components ??
-            (patch.extras ? componentsFromExtras(patch.extras) : row.components)
-          const next = validateItemNameAiReviewRow(
-            {
-              ...row,
-              action,
-              components: action === 'components' ? components : [],
-            },
-            knownStyleIds,
-          )
-          if (next.validationError) {
-            setSelected((selectedKeys) => {
-              if (!selectedKeys.has(key)) return selectedKeys
-              const copy = new Set(selectedKeys)
-              copy.delete(key)
-              return copy
-            })
-          }
-          return next
-        }),
-      )
+    ): ItemNameAiStageResult => {
+      const action = patch.action
+      if (action === 'delete') {
+        return stageRowAction(key, { action: 'delete' })
+      }
+      if (action === 'hold') {
+        return stageRowAction(key, { action: 'hold' })
+      }
+      const components =
+        patch.components ??
+        (patch.extras ? componentsFromExtras(patch.extras) : undefined)
+      if (!components) {
+        return { ok: false, error: '구성품 M번호를 하나 이상 고르세요.' }
+      }
+      return stageRowAction(key, { action: 'components', components })
     },
-    [draftByKey, knownStyleIds],
+    [stageRowAction],
+  )
+
+  const markDecisionNeeded = useCallback(
+    (key: string) => {
+      stageRowAction(key, { action: 'hold' })
+    },
+    [stageRowAction],
   )
 
   const appendComponentToRows = useCallback(
     (keys: Iterable<string>, component: AccessoryLookupComponent) => {
-      let result: ItemNameAiLastAppend | null = null
-      setDraftByKey((current) => {
-        const next = appendItemNameAiComponent(
-          overlayItemNameAiDrafts(reviewRows, current),
-          keys,
-          component,
-          knownStyleIds,
-        )
-        result = {
-          addedKeys: next.addedKeys,
-          skippedKeys: next.skippedKeys,
-          previous: next.previous,
-        }
-        return mergeItemNameAiDrafts(current, next)
-      })
+      const current = reviewStateRef.current
+      const appended = appendItemNameAiComponent(
+        overlayItemNameAiDrafts(current.reviewRows, current.draftByKey),
+        keys,
+        component,
+        knownStyleIds,
+      )
+      const result: ItemNameAiLastAppend = {
+        addedKeys: appended.addedKeys,
+        skippedKeys: appended.skippedKeys,
+        previous: appended.previous,
+      }
+      writeDrafts(mergeItemNameAiDrafts(current.draftByKey, appended))
       setLastAppend(result)
+      if (appended.addedKeys.length > 0) {
+        const nextConfirmed = new Set(current.confirmedKeys)
+        for (const key of appended.addedKeys) nextConfirmed.add(key)
+        const nextPending = new Set(current.pendingAiKeys)
+        for (const key of appended.addedKeys) nextPending.delete(key)
+        reviewStateRef.current = {
+          ...reviewStateRef.current,
+          confirmedKeys: nextConfirmed,
+          pendingAiKeys: nextPending,
+        }
+        setConfirmedKeys(nextConfirmed)
+        setPendingAiKeys(nextPending)
+      }
       return result
     },
-    [knownStyleIds, reviewRows],
+    [knownStyleIds, writeDrafts],
   )
 
   const undoLastAppend = useCallback(() => {
     if (!lastAppend || lastAppend.previous.length === 0) return
-    setDraftByKey((current) =>
-      restoreItemNameAiDrafts(current, lastAppend.previous, reviewRows),
+    const current = reviewStateRef.current
+    writeDrafts(
+      restoreItemNameAiDrafts(
+        current.draftByKey,
+        lastAppend.previous,
+        current.reviewRows,
+      ),
     )
+    const nextConfirmed = new Set(current.confirmedKeys)
+    for (const key of lastAppend.addedKeys) nextConfirmed.delete(key)
+    reviewStateRef.current = {
+      ...reviewStateRef.current,
+      confirmedKeys: nextConfirmed,
+    }
+    setConfirmedKeys(nextConfirmed)
     setLastAppend(null)
-  }, [lastAppend, reviewRows])
+  }, [lastAppend, writeDrafts])
 
   const commitDrafts = useCallback(() => {
-    if (draftByKey.size === 0) return
-    setReviewRows((current) => overlayItemNameAiDrafts(current, draftByKey))
-    setDraftByKey(new Map())
+    const result = commitReadyItemNameAiDrafts({
+      rows: reviewRows,
+      drafts: draftByKey,
+      confirmedKeys,
+      pendingAiKeys,
+      committedKeys,
+    })
+    if (result.committedKeys.size === committedKeys.size) return
+    setReviewRows(result.rows)
+    setDraftByKey(result.drafts)
+    setCommittedKeys(result.committedKeys)
+    if (result.selectedKeys.length > 0) {
+      setSelected((current) => {
+        const next = new Set(current)
+        for (const key of result.selectedKeys) next.add(key)
+        return next
+      })
+    }
     setLastAppend(null)
-  }, [draftByKey])
+  }, [
+    committedKeys,
+    confirmedKeys,
+    draftByKey,
+    pendingAiKeys,
+    reviewRows,
+  ])
 
   const discardDrafts = useCallback(() => {
     setDraftByKey(new Map())
     setLastAppend(null)
+    setConfirmedKeys(new Set())
+    setPendingAiKeys(new Set())
   }, [])
+
+  const reopenRow = useCallback((key: string) => {
+    const next = reopenItemNameAiCommittedRow({
+      committedKeys,
+      selectedKeys: selected,
+      confirmedKeys,
+      pendingAiKeys,
+      key,
+    })
+    setCommittedKeys(next.committedKeys)
+    setSelected(next.selectedKeys)
+    setConfirmedKeys(next.confirmedKeys)
+    setPendingAiKeys(next.pendingAiKeys)
+  }, [committedKeys, confirmedKeys, pendingAiKeys, selected])
+
+  const stageRowComponents = useCallback(
+    (key: string, components: AccessoryLookupComponent[]) =>
+      stageRowAction(key, { action: 'components', components }),
+    [stageRowAction],
+  )
+
+  const stageRowDelete = useCallback(
+    (key: string) => stageRowAction(key, { action: 'delete' }),
+    [stageRowAction],
+  )
 
   const selectRecommended = useCallback(() => {
     setSelected(
       new Set(
         reviewRows
-          .filter((row) => row.passesGate && !row.validationError)
+          .filter(
+            (row) =>
+              committedKeys.has(row.key) &&
+              row.passesGate &&
+              !row.validationError &&
+              row.action !== 'hold',
+          )
           .map((row) => row.key),
       ),
     )
-  }, [reviewRows])
+  }, [committedKeys, reviewRows])
 
   const clearSelection = useCallback(() => setSelected(new Set()), [])
 
   const applySelected = useCallback(async () => {
-    if (selected.size === 0 || draftByKey.size > 0) return
+    if (selected.size === 0) return 0
     setApplying(true)
     setApplyError(null)
 
@@ -533,7 +797,7 @@ export function useInvoiceItemNameBulkAiApply({
       )
       setFailedCount(plan.blocked.length)
       setApplying(false)
-      return
+      return 0
     }
 
     const reviewKeysByIdentity = new Map<string, string[]>()
@@ -563,8 +827,28 @@ export function useInvoiceItemNameBulkAiApply({
       }
       setAppliedCount(succeeded.size)
       setFailedCount(result.failed.length + plan.blocked.length)
-      setDraftByKey(new Map())
+      setDraftByKey((current) => {
+        if (succeeded.size === 0) return current
+        const next = new Map(current)
+        for (const key of succeeded) next.delete(key)
+        return next
+      })
       setLastAppend(null)
+      setCommittedKeys((current) => {
+        const next = new Set(current)
+        for (const key of succeeded) next.delete(key)
+        return next
+      })
+      setConfirmedKeys((current) => {
+        const next = new Set(current)
+        for (const key of succeeded) next.delete(key)
+        return next
+      })
+      setPendingAiKeys((current) => {
+        const next = new Set(current)
+        for (const key of succeeded) next.delete(key)
+        return next
+      })
       setApplyError(
         result.failed[0]?.message ?? plan.blocked[0]?.message ?? null,
       )
@@ -580,20 +864,21 @@ export function useInvoiceItemNameBulkAiApply({
         queryKey: ['invoice-item-name-rules', brandId],
       })
       if (result.failed.length === 0 && plan.blocked.length === 0) {
-        setPhase('applied')
+        setPhase(succeeded.size < rechecked.length ? 'review' : 'applied')
       }
+      return succeeded.size
     } catch (error) {
       setApplyError(
         error instanceof Error
           ? error.message
           : '선택한 내품명 규칙을 저장하지 못했습니다.',
       )
+      return 0
     } finally {
       setApplying(false)
     }
   }, [
     brandId,
-    draftByKey,
     itemNameRules,
     knownStyleIds,
     queryClient,
@@ -602,13 +887,45 @@ export function useInvoiceItemNameBulkAiApply({
   ])
 
   const recommendedCount = useMemo(
-    () => reviewRows.filter((row) => row.passesGate).length,
-    [reviewRows],
+    () =>
+      reviewRows.filter(
+        (row) =>
+          committedKeys.has(row.key) &&
+          row.passesGate &&
+          row.action !== 'hold',
+      ).length,
+    [committedKeys, reviewRows],
   )
   const pendingDecisionCount = useMemo(
-    () => reviewRows.filter((row) => row.action === 'hold').length,
-    [reviewRows],
+    () =>
+      reviewRows.filter(
+        (row) => committedKeys.has(row.key) && row.action === 'hold',
+      ).length,
+    [committedKeys, reviewRows],
   )
+  const queueCount = useMemo(
+    () => reviewRows.filter((row) => !committedKeys.has(row.key)).length,
+    [committedKeys, reviewRows],
+  )
+  const committedCount = committedKeys.size
+  const canCommit = useMemo(() => {
+    for (const key of confirmedKeys) {
+      if (pendingAiKeys.has(key) || committedKeys.has(key)) continue
+      const draft = draftByKey.get(key)
+      const row = draft ?? reviewRows.find((item) => item.key === key)
+      if (row && itemNameAiRowReadyToCommit(row, Boolean(draft))) return true
+    }
+    return false
+  }, [
+    committedKeys,
+    confirmedKeys,
+    draftByKey,
+    pendingAiKeys,
+    reviewRows,
+  ])
+  const hasQueueChanges =
+    draftByKey.size > 0 ||
+    [...confirmedKeys].some((key) => !committedKeys.has(key))
 
   return {
     brandId,
@@ -623,7 +940,13 @@ export function useInvoiceItemNameBulkAiApply({
     selected,
     selectedCount: selected.size,
     draftByKey,
-    hasDraftChanges: draftByKey.size > 0,
+    confirmedKeys,
+    pendingAiKeys,
+    committedKeys,
+    hasDraftChanges: hasQueueChanges,
+    canCommit,
+    queueCount,
+    committedCount,
     lastAppend,
     recommendedCount,
     pendingDecisionCount,
@@ -635,10 +958,17 @@ export function useInvoiceItemNameBulkAiApply({
     cancel,
     toggle,
     updateRow,
+    markDecisionNeeded,
     appendComponentToRows,
     undoLastAppend,
     commitDrafts,
     discardDrafts,
+    stageRowComponents,
+    stageRowDelete,
+    unstageRow,
+    confirmRow,
+    unconfirmRow,
+    reopenRow,
     selectRecommended,
     clearSelection,
     applySelected,

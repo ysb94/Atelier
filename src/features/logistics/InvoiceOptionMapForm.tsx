@@ -173,7 +173,7 @@ export function InvoiceOptionMapForm({
           htmlFor={`${formId}-item`}
           className="mb-1.5 block text-xs font-medium"
         >
-          원본 내품명
+          원본 옵션값
         </label>
         <Input
           id={`${formId}-item`}
@@ -254,7 +254,7 @@ export function InvoiceOptionMapForm({
         htmlFor={`${formId}-display`}
         className="mb-1.5 block text-xs font-medium"
       >
-        변환 내품명(선택)
+          CJ 내품명 표시(선택)
       </label>
       <Input
         id={`${formId}-display`}

@@ -25,9 +25,13 @@ import {
 import type {
   InvoiceProductNameMatchStatus,
   InvoiceProductNameTransformation,
+  InvoiceProductNameTransformRow,
   UnresolvedProductNameCombo,
 } from '@/lib/invoice/product-name-transform'
-import { previewProductNameExclusion } from '@/lib/invoice/product-name-transform'
+import {
+  collectProductNameComboOrders,
+  previewProductNameExclusion,
+} from '@/lib/invoice/product-name-transform'
 import {
   collectFileTagGroups,
   type FileTagGroup,
@@ -50,6 +54,7 @@ import {
   extrasFromOptionMap,
   type OptionExtraDraft,
 } from './InvoiceOptionExtrasEditor'
+import { InvoiceProductNameComboOrderTable } from './InvoiceProductNameComboOrderTable'
 import { InvoiceProductLookupDock } from './InvoiceProductLookupDock'
 import { InvoiceProductNameRecentSavesPanel } from './InvoiceProductNameRecentSavesPanel'
 import {
@@ -76,8 +81,8 @@ const STATUS_META: Record<
   missing_style: { label: 'M번호 발급 필요', variant: 'warning' },
   conflict: { label: '충돌', variant: 'warning' },
   unresolved: { label: '검토 필요', variant: 'danger' },
-  excluded: { label: '송장 제외', variant: 'muted' },
-  exclusion_guarded: { label: '제외 보류', variant: 'warning' },
+  excluded: { label: '상품 연결 예외', variant: 'muted' },
+  exclusion_guarded: { label: '예외 보류', variant: 'warning' },
 }
 
 const RULE_LABELS: Record<string, string> = {
@@ -460,25 +465,25 @@ export function InvoiceProductNameTransformPanel({
       <div className="min-w-0 flex-1 space-y-5">
       <div className="flex flex-wrap gap-2">
         <Badge variant="success">
-          자동 완료 {formatNumber(transformation.mappedRowCount)}
+          자동 완료 {formatNumber(transformation.mappedRowCount)}행
         </Badge>
         <Badge variant="outline">
-          후보 {formatNumber(transformation.candidateRowCount)}
+          후보 {formatNumber(transformation.candidateRowCount)}행
         </Badge>
         <Badge variant="warning">
-          M번호 발급 필요 {formatNumber(transformation.missingStyleRowCount)}
+          M번호 발급 필요 {formatNumber(transformation.missingStyleRowCount)}행
         </Badge>
         <Badge variant="warning">
-          충돌 {formatNumber(transformation.conflictRowCount)}
+          충돌 {formatNumber(transformation.conflictRowCount)}행
         </Badge>
         <Badge variant="danger">
-          검토 필요 {formatNumber(transformation.unresolvedRowCount)}
+          검토 필요 {formatNumber(transformation.unresolvedRowCount)}행
         </Badge>
         <Badge variant="muted">
-          송장 제외 {formatNumber(transformation.excludedRowCount)}
+          상품 연결 예외 {formatNumber(transformation.excludedRowCount)}행
         </Badge>
         <Badge variant="warning">
-          제외 보류 {formatNumber(transformation.exclusionGuardedRowCount)}
+          예외 보류 {formatNumber(transformation.exclusionGuardedRowCount)}행
         </Badge>
       </div>
 
@@ -649,6 +654,7 @@ export function InvoiceProductNameTransformPanel({
                 <ProductReviewGroupCard
                   key={group.productName}
                   brandId={brandId}
+                  rows={transformation.rows}
                   group={group}
                   open={openProductName === group.productName}
                   drafts={Object.fromEntries(
@@ -667,13 +673,13 @@ export function InvoiceProductNameTransformPanel({
                     )
                     const confirmed = window.confirm(
                       [
-                        `${combo.mallName}의 품목명 "${combo.productName}", 내품명 "${combo.itemName}"만 송장에서 뺍니다.`,
+                        `${combo.mallName}의 품목명 "${combo.productName}", 내품명 "${combo.itemName}"만 상품 연결에서 예외 처리합니다.`,
                         `이 파일에서 ${formatNumber(impact.matchCount)}행이 맞습니다.`,
                         impact.excludedCount > 0
-                          ? `같은 주문에 본품이 확정된 행이 있어 ${formatNumber(impact.excludedCount)}행은 최종 송장에서 제외됩니다.`
-                          : '같은 주문에 본품이 확정된 행이 없으면 원문을 남기고 제외 보류로 표시합니다.',
+                          ? `같은 주문에 본품이 확정된 행이 있어 ${formatNumber(impact.excludedCount)}행은 CJ에 원문과 자체품번코드만 남깁니다.`
+                          : '같은 주문에 본품이 확정된 행이 없으면 원문을 남기고 예외 보류로 표시합니다.',
                         impact.guardedCount > 0 && impact.excludedCount > 0
-                          ? `단독 행 ${formatNumber(impact.guardedCount)}건은 제외하지 않고 검토에 남깁니다.`
+                          ? `단독 행 ${formatNumber(impact.guardedCount)}건은 예외 확정하지 않고 검토에 남깁니다.`
                           : '',
                       ]
                         .filter(Boolean)
@@ -691,7 +697,7 @@ export function InvoiceProductNameTransformPanel({
                     excludeMutation.error instanceof Error
                       ? excludeMutation.error.message
                       : excludeMutation.error
-                        ? '송장 제외 기준을 저장하지 못했습니다.'
+                        ? '상품 연결 예외 기준을 저장하지 못했습니다.'
                         : null
                   }
                   onToggle={() =>
@@ -741,8 +747,8 @@ export function InvoiceProductNameTransformPanel({
           <option value="missing_style">M번호 발급 필요</option>
           <option value="conflict">충돌</option>
           <option value="unresolved">검토 필요</option>
-          <option value="excluded">송장 제외</option>
-          <option value="exclusion_guarded">제외 보류</option>
+          <option value="excluded">상품 연결 예외</option>
+          <option value="exclusion_guarded">예외 보류</option>
         </Select>
       </div>
 
@@ -792,6 +798,12 @@ export function InvoiceProductNameTransformPanel({
           </tbody>
         </table>
       </div>
+      {rows.length > 300 ? (
+        <p className="text-xs text-muted-foreground">
+          미리보기는 앞의 300행만 표시합니다. 변환과 다운로드에는 전체가
+          들어갑니다.
+        </p>
+      ) : null}
       </div>
       <InvoiceProductLookupDock brandId={brandId} />
     </div>
@@ -1136,6 +1148,7 @@ function scrollCardIntoView(el: HTMLElement) {
 
 function ProductReviewGroupCard({
   brandId,
+  rows,
   group,
   open,
   drafts,
@@ -1146,6 +1159,7 @@ function ProductReviewGroupCard({
   onToggle,
 }: {
   brandId: string
+  rows: InvoiceProductNameTransformRow[]
   group: ProductReviewGroup
   open: boolean
   drafts: Record<string, ProductMapSaveDraft>
@@ -1162,6 +1176,11 @@ function ProductReviewGroupCard({
   const rowRefs = useRef(new Map<string, VariantAssignHandle>())
   const [readyKeys, setReadyKeys] = useState<Set<string>>(() => new Set())
   const [batchMessage, setBatchMessage] = useState('')
+  const [showOrders, setShowOrders] = useState(false)
+  const comboOrders = useMemo(
+    () => collectProductNameComboOrders(rows, { productName: group.productName }),
+    [group.productName, rows],
+  )
   const readyCount = group.combos.filter((combo) => readyKeys.has(combo.key))
     .length
 
@@ -1200,6 +1219,7 @@ function ProductReviewGroupCard({
     wasOpenRef.current = open
     if (!open) {
       setBatchMessage('')
+      setShowOrders(false)
       return
     }
     // 처음 그려질 때와 접을 때는 화면을 움직이지 않는다.
@@ -1236,10 +1256,19 @@ function ProductReviewGroupCard({
           >
             {group.productName}
           </p>
-          <p className="truncate text-xs text-muted-foreground">
-            내품명 {formatNumber(variantCount)}개 ·{' '}
-            {formatNumber(group.rowCount)}행
-            {variantCount > 1 ? ' · 색상·구성 변형' : ''}
+          <p className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+            <span>
+              내품명 {formatNumber(variantCount)}개 ·{' '}
+              {formatNumber(group.rowCount)}행
+              {variantCount > 1 ? ' · 색상·구성 변형' : ''}
+            </span>
+            {comboOrders.soloCount > 0 ? (
+              <Badge variant="danger">
+                단독 주문 {formatNumber(comboOrders.soloCount)}행
+              </Badge>
+            ) : (
+              <Badge variant="success">모두 뺄 수 있음</Badge>
+            )}
           </p>
           {tags.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -1264,6 +1293,22 @@ function ProductReviewGroupCard({
       </div>
       {open ? (
         <div className="space-y-3 border-t border-border p-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">
+              송장에서 빼면 주문이 통째로 사라지는 행이 있는지 먼저 확인합니다.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setShowOrders((current) => !current)}
+            >
+              {showOrders ? '주문 접기' : '주문 보기'}
+            </Button>
+          </div>
+          {showOrders ? (
+            <InvoiceProductNameComboOrderTable orders={comboOrders.orders} />
+          ) : null}
           {variantCount > 1 ? (
             <div className="flex flex-wrap items-center justify-between gap-2">
               <p className="text-xs text-muted-foreground">
@@ -1551,8 +1596,8 @@ const VariantAssignRow = forwardRef<
           <div className="mt-2 flex flex-wrap items-end gap-2">
             {isGuarded ? (
               <p className="text-xs text-muted-foreground">
-                같은 주문에 본품이 확정된 행이 없어 원문을 유지합니다. 최종
-                송장에서는 빼지 않습니다.
+                같은 주문에 본품이 확정된 행이 없어 원문을 유지합니다. CJ에서도
+                그대로 남습니다.
               </p>
             ) : (
               <>
@@ -1590,7 +1635,7 @@ const VariantAssignRow = forwardRef<
                   }
                   onClick={onExclude}
                 >
-                  {excludePending ? '저장 중' : '미선택 옵션 · 송장 제외'}
+                  {excludePending ? '저장 중' : '미선택 옵션 · 상품 연결 예외'}
                 </Button>
               </>
             )}

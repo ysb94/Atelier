@@ -1,4 +1,10 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  useDeferredValue,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import {
@@ -457,8 +463,8 @@ const RULE_TABLES: Record<
   aliases: {
     title: '품목명·내품명 변환',
     description:
-      '품목명 기준과 내품명 기준을 따로 관리합니다. 한 단계의 저장이 다른 열을 바꾸지 않습니다.',
-    columns: ['원본 품목명', '내품명', '본품', '구성', '상태'],
+      '품목명 연결, 실제 나가는 세트·구성, 내품명 문구 변환 규칙을 각각 관리합니다.',
+    columns: ['원본 품목명', '원본 옵션값', '본품', '구성', '상태'],
   },
   holds: {
     title: '출고 보류 규칙',
@@ -889,6 +895,36 @@ function TodayStepProgress({
   )
 }
 
+/** 단계 공통 기준 로딩 표시 */
+function StepCriteriaLoading({ label }: { label: string }) {
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+      {label}
+    </div>
+  )
+}
+
+/** 단계 공통 기준 오류 표시. 항상 다시 불러오기를 함께 보여준다. */
+function StepCriteriaError({
+  message,
+  onRetry,
+}: {
+  message: string
+  onRetry: () => void
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+        <span>{message}</span>
+      </div>
+      <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+        다시 불러오기
+      </Button>
+    </div>
+  )
+}
+
 /** 한 번 열어본 단계는 숨겨만 둔다. 탭을 옮겨도 검수표·초안이 남는다. */
 function TodayStepPanel({
   active,
@@ -1144,7 +1180,7 @@ export function InvoiceWorkPage() {
     productNameExclusionsQuery.error instanceof Error
       ? productNameExclusionsQuery.error.message
       : productNameExclusionsQuery.error
-        ? '송장 제외 기준을 불러오지 못했습니다.'
+        ? '상품 연결 예외 기준을 불러오지 못했습니다.'
         : null
   const productStyleLookupQuery = useQuery({
     queryKey: ['invoice-product-name-all-styles', brand.id],
@@ -1152,6 +1188,13 @@ export function InvoiceWorkPage() {
     enabled: Boolean(inspection),
     staleTime: 5 * 60_000,
   })
+  // 규칙 저장 직후 수천 행 재변환이 입력을 막지 않도록 한 박자 늦춰 계산한다.
+  const deferredOptionMaps = useDeferredValue(optionMaps)
+  const deferredItemNameRules = useDeferredValue(itemNameRules)
+  const deferredAccessoryRules = useDeferredValue(accessoryRules)
+  const deferredProductNameMaps = useDeferredValue(productNameMaps)
+  const deferredProductNameExclusions = useDeferredValue(productNameExclusions)
+  const deferredProductNameTagRoles = useDeferredValue(productNameTagRoles)
   const productTransformation = useMemo(() => {
     if (
       !inspection ||
@@ -1169,20 +1212,20 @@ export function InvoiceWorkPage() {
     const styles = productStyleLookupQuery.data ?? []
     return transformInvoiceProductNames(
       inspection.rows,
-      productNameMaps,
+      deferredProductNameMaps,
       catalogFromStyles(styles),
-      productNameTagRoles,
-      productNameExclusions,
+      deferredProductNameTagRoles,
+      deferredProductNameExclusions,
     )
   }, [
+    deferredProductNameExclusions,
+    deferredProductNameMaps,
+    deferredProductNameTagRoles,
     inspection,
-    productNameExclusions,
     productNameExclusionsQuery.error,
     productNameExclusionsQuery.isPending,
-    productNameMaps,
     productNameMapsQuery.error,
     productNameMapsQuery.isPending,
-    productNameTagRoles,
     productNameTagRolesQuery.error,
     productNameTagRolesQuery.isPending,
     productStyleLookupQuery.data,
@@ -1216,25 +1259,24 @@ export function InvoiceWorkPage() {
       return null
     }
     return transformInvoiceItemNames(
-      processRows,
-      optionMaps,
+      inspection.rows,
+      deferredOptionMaps,
       productTransformation.rows,
-      itemNameRules,
-      accessoryRules,
+      deferredItemNameRules,
+      deferredAccessoryRules,
       productStyleLookupQuery.data ?? [],
     )
   }, [
-    accessoryRules,
     accessoryRulesQuery.error,
     accessoryRulesQuery.isPending,
+    deferredAccessoryRules,
+    deferredItemNameRules,
+    deferredOptionMaps,
     inspection,
-    itemNameRules,
     itemNameRulesQuery.error,
     itemNameRulesQuery.isPending,
-    optionMaps,
     optionMapsQuery.error,
     optionMapsQuery.isPending,
-    processRows,
     productStyleLookupQuery.data,
     productStyleLookupQuery.error,
     productStyleLookupQuery.isPending,
@@ -1656,11 +1698,14 @@ export function InvoiceWorkPage() {
           >
             {inspection ? (
             <Card>
-              <CardContent className="space-y-5 pt-5">
-                <p className="text-xs text-muted-foreground">
+              <CardHeader>
+                <CardTitle>사은품 추가</CardTitle>
+                <CardDescription>
                   원본 품목명으로 대상을 확인하고, 합포장별로 사은품 행을
                   만듭니다. 사은품 이름은 품목명에만 들어갑니다.
-                </p>
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
                 <InvoicePrefixStepPanel
                   brandId={brand.id}
                   rows={processRows}
@@ -1732,12 +1777,15 @@ export function InvoiceWorkPage() {
           >
             {inspection ? (
             <Card>
-              <CardContent className="space-y-5 pt-5">
-                <p className="text-xs text-muted-foreground">
+              <CardHeader>
+                <CardTitle>작업 지시</CardTitle>
+                <CardDescription>
                   원본 품목명과 완전 일치하는 활성 지시를 확인합니다. 적용
                   기간이 있으면 주문일시가 그 안인 행에만 붙습니다. 표시 문구는
                   자체품번 변환이 끝난 최종 품목명 앞에 붙습니다.
-                </p>
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
                 <InvoiceWorkInstructionStepPanel
                   rows={processRows}
                   instructions={workInstructions}
@@ -1784,34 +1832,44 @@ export function InvoiceWorkPage() {
           >
             {inspection ? (
             <Card>
-              <CardContent className="space-y-5 pt-5">
-                <p className="text-xs text-muted-foreground">
+              <CardHeader>
+                <CardTitle>품목명 변환</CardTitle>
+                <CardDescription>
                   원본 품목명을 본품 공식명으로 바꿉니다. 품목명·품목명+내품명·
                   옵션 일부 결합 다음에 내품명 /·, 앞부분 단독을 보고, 내품명
                   전체 단독이 맞으면 내품명을 비웁니다. 앞부분 단독이 맞으면
                   남은 옵션만 다음 단계로 넘깁니다. 자체상품코드는 이 단계
                   조회 키로 쓰지 않습니다. 세트 구성품은 이 단계부터 행을
                   펼칩니다.
-                </p>
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
                 {productNameMapsQuery.isPending ||
                 productNameExclusionsQuery.isPending ||
+                productNameTagRolesQuery.isPending ||
                 productStyleLookupQuery.isPending ? (
-                  <div className="rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-                    이 브랜드의 품목명 변환 기준을 불러오고 있습니다.
-                  </div>
+                  <StepCriteriaLoading label="이 브랜드의 품목명 변환 기준을 불러오고 있습니다." />
                 ) : productNameMapsError ||
                   productNameExclusionsError ||
+                  productNameTagRolesQuery.error ||
                   productStyleLookupQuery.error ? (
-                  <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">
-                    <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                    <span>
-                      {productNameMapsError ||
-                        productNameExclusionsError ||
-                        (productStyleLookupQuery.error instanceof Error
+                  <StepCriteriaError
+                    message={
+                      productNameMapsError ||
+                      productNameExclusionsError ||
+                      (productNameTagRolesQuery.error
+                        ? '품목명 태그 역할을 불러오지 못했습니다.'
+                        : productStyleLookupQuery.error instanceof Error
                           ? productStyleLookupQuery.error.message
-                          : '상품 마스터를 대조하지 못했습니다.')}
-                    </span>
-                  </div>
+                          : '상품 마스터를 대조하지 못했습니다.')
+                    }
+                    onRetry={() => {
+                      void productNameMapsQuery.refetch()
+                      void productNameExclusionsQuery.refetch()
+                      void productNameTagRolesQuery.refetch()
+                      void productStyleLookupQuery.refetch()
+                    }}
+                  />
                 ) : productTransformation ? (
                   <InvoiceProductNameTransformPanel
                     key={fileName || 'product-name-panel'}
@@ -1875,37 +1933,30 @@ export function InvoiceWorkPage() {
           >
             {inspection ? (
             <Card>
-              <CardContent className="space-y-5 pt-5">
-                <p className="text-xs text-muted-foreground">
+              <CardHeader>
+                <CardTitle>내품명 변환</CardTitle>
+                <CardDescription>
                   공통 규칙 또는 조회 키 선택 규칙으로 내품명을 지거나 구성품
                   공식명으로 바꿉니다. 품목명 원장이 내품명 전체로 본품을 찾은
                   행은 빈 값으로 정리되어 여기 검토 목록에 나오지 않습니다.
                   내품명 / 또는 , 앞부분만으로 본품을 찾은 행은 남은 옵션만
                   여기서 변환합니다. 예전 조합 원장은 호환용으로만 읽습니다.
-                  세트 구성품은 최종 CJ 행에서 자동으로 펼칩니다.
-                </p>
+                  내품명 규칙의 M번호는 공식 내품명과 출고구성에만 넣고,
+                  실제 세트 구성만 최종 CJ 행에서 펼칩니다.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
                 {itemNameCriteriaLoading ? (
-                  <div className="rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
-                    이 브랜드의 내품명 변환 기준을 불러오고 있습니다.
-                  </div>
+                  <StepCriteriaLoading label="이 브랜드의 내품명 변환 기준을 불러오고 있습니다." />
                 ) : itemNameCriteriaError ? (
-                  <div className="flex items-start justify-between gap-2 rounded-lg border border-danger/30 bg-danger/10 p-4 text-sm text-danger">
-                    <div className="flex items-start gap-2">
-                      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                      <span>{itemNameCriteriaError}</span>
-                    </div>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        void optionMapsQuery.refetch()
-                        void itemNameRulesQuery.refetch()
-                      }}
-                    >
-                      다시 불러오기
-                    </Button>
-                  </div>
+                  <StepCriteriaError
+                    message={itemNameCriteriaError}
+                    onRetry={() => {
+                      void optionMapsQuery.refetch()
+                      void itemNameRulesQuery.refetch()
+                      void accessoryRulesQuery.refetch()
+                    }}
+                  />
                 ) : itemTransformation ? (
                   <InvoiceItemNameTransformPanel
                     brandId={brand.id}
@@ -1962,15 +2013,19 @@ export function InvoiceWorkPage() {
           workPlan &&
           giftPlan ? (
             <Card>
-              <CardContent className="space-y-5 pt-5">
-                <p className="text-xs text-muted-foreground">
-                  품목명과 내품명은 각 단계 결과를 마지막에만 합칩니다. 세트로
-                  등록한 행은 구성품 수만큼 CJ 행을 펼치고, 수령인·주소·전화·
-                  주문번호는 그대로 복사합니다. 수량은 원본 내품수량 × 구성
+              <CardHeader>
+                <CardTitle>최종 행</CardTitle>
+                <CardDescription>
+                  품목명과 내품명은 각 단계 결과를 마지막에만 합칩니다. 내품명
+                  규칙의 M번호는 CJ 행을 늘리지 않고 출고구성에 반영합니다. 실제
+                  세트로 등록한 행만 구성품 수만큼 CJ 행을 펼치고, 수령인·주소·
+                  전화·주문번호는 그대로 복사합니다. 수량은 원본 내품수량 × 구성
                   수량입니다. 내품명 전체로 본품을 찾은 행은 빈 내품명을 유지하고,
                   앞부분만 쓴 행은 남은 옵션을 유지합니다. 변환 내품명을 저장하지
                   않은 나머지 행은 유효 내품명을 유지합니다.
-                </p>
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
                 <InvoiceOutputStepPanel
                   brandId={brand.id}
                   brandName={brand.name}

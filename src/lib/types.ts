@@ -560,7 +560,7 @@ export type InvoiceAccessoryRule = {
   updatedAt: string
 }
 
-/** 내품명 규칙이 추가하는 출고 구성품 1건 */
+/** 내품명 규칙이 추가하는 출고 구성품 1건. CJ 13열 행 확장은 하지 않는다. */
 export type InvoiceItemNameRuleComponent = {
   id: string
   ruleId: string

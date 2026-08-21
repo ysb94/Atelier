@@ -10,7 +10,11 @@ import {
   matchingProductName,
   type ParsedProductNameTag,
 } from '@/lib/invoice/product-name-tags'
-import { buildOrderFingerprint } from '@/lib/invoice/gift-assign'
+import {
+  buildOrderFingerprint,
+  orderKeyOf,
+  shipmentKeyOf,
+} from '@/lib/invoice/gift-assign'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import type { InvoiceNameTransformation } from '@/lib/invoice/name-transform'
 import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
@@ -234,6 +238,35 @@ function itemNameOutcome(
  * 제품군·색상 분해 매칭은 쓰지 않는다. 색상 토큰 하나만 걸려도 다른 상품을 확정해
  * 오탐이 잦았고, 그 자리는 AI 추천이 맡는다.
  */
+function shipmentOrderKeyOf(row: SabangnetOrderRow) {
+  return `${shipmentKeyOf(row)}\u0000${orderKeyOf(row)}`
+}
+
+function collectConfirmedExclusionSiblings(
+  rows: InvoiceProductNameTransformRow[],
+  skip: (row: InvoiceProductNameTransformRow) => boolean,
+) {
+  const orderFingerprints = new Set<string>()
+  const shipmentOrderKeys = new Set<string>()
+  for (const row of rows) {
+    if (skip(row)) continue
+    if (row.status !== 'mapped' && row.status !== 'candidate') continue
+    orderFingerprints.add(buildOrderFingerprint(row.source))
+    shipmentOrderKeys.add(shipmentOrderKeyOf(row.source))
+  }
+  return { orderFingerprints, shipmentOrderKeys }
+}
+
+function hasConfirmedExclusionSibling(
+  source: SabangnetOrderRow,
+  confirmed: ReturnType<typeof collectConfirmedExclusionSiblings>,
+) {
+  return (
+    confirmed.orderFingerprints.has(buildOrderFingerprint(source)) ||
+    confirmed.shipmentOrderKeys.has(shipmentOrderKeyOf(source))
+  )
+}
+
 function applyProductNameExclusions(
   rows: InvoiceProductNameTransformRow[],
   exclusions: InvoiceProductNameExclusion[],
@@ -247,18 +280,15 @@ function applyProductNameExclusions(
   )
   if (activeKeys.size === 0) return rows
 
-  const confirmedOrders = new Set<string>()
-  for (const row of rows) {
-    const key = productExclusionKey(
-      row.source.mallName,
-      row.source.productName,
-      row.source.itemName,
-    )
-    if (activeKeys.has(key)) continue
-    if (row.status === 'mapped' || row.status === 'candidate') {
-      confirmedOrders.add(buildOrderFingerprint(row.source))
-    }
-  }
+  const confirmed = collectConfirmedExclusionSiblings(rows, (row) =>
+    activeKeys.has(
+      productExclusionKey(
+        row.source.mallName,
+        row.source.productName,
+        row.source.itemName,
+      ),
+    ),
+  )
 
   return rows.map((row) => {
     const key = productExclusionKey(
@@ -267,9 +297,7 @@ function applyProductNameExclusions(
       row.source.itemName,
     )
     if (!activeKeys.has(key)) return row
-    const hasOrderNo = Boolean(row.source.customerOrderNo.trim())
-    const excluded =
-      hasOrderNo && confirmedOrders.has(buildOrderFingerprint(row.source))
+    const excluded = hasConfirmedExclusionSibling(row.source, confirmed)
     return {
       ...row,
       status: excluded ? 'excluded' : 'exclusion_guarded',
@@ -489,18 +517,15 @@ export function previewProductNameExclusion(
     combo.productName,
     combo.itemName,
   )
-  const confirmedOrders = new Set<string>()
-  for (const row of rows) {
-    const key = productExclusionKey(
-      row.source.mallName,
-      row.source.productName,
-      row.source.itemName,
-    )
-    if (key === targetKey) continue
-    if (row.status === 'mapped' || row.status === 'candidate') {
-      confirmedOrders.add(buildOrderFingerprint(row.source))
-    }
-  }
+  const confirmed = collectConfirmedExclusionSiblings(
+    rows,
+    (row) =>
+      productExclusionKey(
+        row.source.mallName,
+        row.source.productName,
+        row.source.itemName,
+      ) === targetKey,
+  )
 
   let matchCount = 0
   let excludedCount = 0
@@ -513,14 +538,90 @@ export function previewProductNameExclusion(
     )
     if (key !== targetKey) continue
     matchCount += 1
-    const hasOrderNo = Boolean(row.source.customerOrderNo.trim())
-    if (hasOrderNo && confirmedOrders.has(buildOrderFingerprint(row.source))) {
+    if (hasConfirmedExclusionSibling(row.source, confirmed)) {
       excludedCount += 1
     } else {
       guardedCount += 1
     }
   }
   return { matchCount, excludedCount, guardedCount }
+}
+
+export type ProductNameComboOrderSoloReason =
+  | 'no_order_no'
+  | 'no_confirmed_sibling'
+
+export type ProductNameComboOrder = {
+  source: SabangnetOrderRow
+  soloReason: ProductNameComboOrderSoloReason | null
+}
+
+export type ProductNameComboOrderTarget =
+  | { productName: string }
+  | { mallName: string; productName: string; itemName: string }
+
+function isExactComboTarget(
+  target: ProductNameComboOrderTarget,
+): target is { mallName: string; productName: string; itemName: string } {
+  return 'itemName' in target
+}
+
+function matchesProductNameComboTarget(
+  row: InvoiceProductNameTransformRow,
+  target: ProductNameComboOrderTarget,
+) {
+  if (isExactComboTarget(target)) {
+    return (
+      productExclusionKey(
+        row.source.mallName,
+        row.source.productName,
+        row.source.itemName,
+      ) ===
+      productExclusionKey(target.mallName, target.productName, target.itemName)
+    )
+  }
+  return (
+    normalizeInvoiceText(row.source.productName) ===
+    normalizeInvoiceText(target.productName)
+  )
+}
+
+export function collectProductNameComboOrders(
+  rows: InvoiceProductNameTransformRow[],
+  target: ProductNameComboOrderTarget,
+): { orders: ProductNameComboOrder[]; soloCount: number } {
+  const confirmed = collectConfirmedExclusionSiblings(rows, (row) =>
+    matchesProductNameComboTarget(row, target),
+  )
+
+  const orders: ProductNameComboOrder[] = []
+  for (const row of rows) {
+    if (!matchesProductNameComboTarget(row, target)) continue
+    const hasOrderNo = Boolean(row.source.customerOrderNo.trim())
+    const soloReason: ProductNameComboOrder['soloReason'] =
+      hasConfirmedExclusionSibling(row.source, confirmed)
+        ? null
+        : !hasOrderNo
+          ? 'no_order_no'
+          : 'no_confirmed_sibling'
+    orders.push({ source: row.source, soloReason })
+  }
+
+  const soloRank = {
+    no_order_no: 0,
+    no_confirmed_sibling: 1,
+  } as const
+  orders.sort((left, right) => {
+    const leftRank = left.soloReason ? soloRank[left.soloReason] : 2
+    const rightRank = right.soloReason ? soloRank[right.soloReason] : 2
+    if (leftRank !== rightRank) return leftRank - rightRank
+    return left.source.rowNumber - right.source.rowNumber
+  })
+
+  return {
+    orders,
+    soloCount: orders.filter((item) => item.soloReason).length,
+  }
 }
 
 export function catalogFromStyles(
