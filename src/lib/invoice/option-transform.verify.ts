@@ -2612,7 +2612,7 @@ assert(
     dummySiblingOutput[0]?.rowNumber === 1 &&
     dummySiblingOutput[0]?.kind === 'order' &&
     dummySiblingOutput[1]?.kind === 'gift' &&
-    dummySiblingOutput[1]?.finalProductName === '사은품' &&
+    dummySiblingOutput[1]?.finalProductName === '사은품(1) : 사은품' &&
     dummySiblingOutput[2]?.sourceRowNumber === 9602 &&
     dummySiblingOutput[2]?.kind === 'order' &&
     dummySiblingOutput[2]?.finalProductName === dummyName &&
@@ -2620,7 +2620,9 @@ assert(
     dummySiblingOutput[2]?.ownProductCode === 'SB-DUMMY-1' &&
     dummySiblingOutput[2]?.quantity === '1' &&
     dummySiblingOutput.every(
-      (item) => item.kind !== 'gift' || item.finalProductName === '사은품',
+      (item) =>
+        item.kind !== 'gift' ||
+        item.finalProductName === '사은품(1) : 사은품',
     ),
   '상품 연결 예외 행은 CJ 원문 품목명·자체품번코드를 남기고 내품명 비움만 적용한다',
 )

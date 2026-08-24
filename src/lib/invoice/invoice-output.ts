@@ -1,4 +1,8 @@
-import type { GiftAssignmentPlan } from '@/lib/invoice/gift-assign'
+import {
+  formatGiftProductName,
+  shipmentKeyOf,
+  type GiftAssignmentPlan,
+} from '@/lib/invoice/gift-assign'
 import type { InvoiceItemNameTransformation } from '@/lib/invoice/item-name-transform'
 import type {
   InvoiceNameTransformation,
@@ -39,7 +43,9 @@ function canExpandInvoiceBundle(options: {
     options.productStatus === 'unresolved' ||
     options.productStatus === 'missing_style' ||
     options.productStatus === 'excluded' ||
-    options.productStatus === 'exclusion_guarded'
+    options.productStatus === 'exclusion_guarded' ||
+    options.productStatus === 'gift_pending' ||
+    options.productStatus === 'gift_mapped'
   ) {
     return false
   }
@@ -109,6 +115,24 @@ export function buildInvoiceOutputRows(options: {
             : option
               ? option.transformedItemName
               : effectiveItemName
+    if (product?.status === 'gift_mapped' && product.giftReplacements?.length) {
+      for (const replacement of product.giftReplacements) {
+        output.push({
+          ...source,
+          quantity: String(replacement.quantity),
+          ownProductCode: '',
+          rowNumber: nextRowNumber,
+          kind: 'gift',
+          finalProductName: replacement.style.name,
+          finalItemName: '',
+          productName: replacement.style.name,
+          itemName: '',
+          sourceRowNumber: source.rowNumber,
+        })
+        nextRowNumber += 1
+      }
+      continue
+    }
     if (product?.status === 'excluded') {
       output.push({
         ...source,
@@ -178,7 +202,30 @@ export function buildInvoiceOutputRows(options: {
     }
   }
 
-  return output
+  return numberGiftOutputRows(output)
+}
+
+const GIFT_LABEL_RE = /^사은품\(\d+\) : /
+
+function officialGiftNameOf(value: string) {
+  return value.replace(GIFT_LABEL_RE, '')
+}
+
+/** 품목명 대체·추가 사은품을 합포장마다 사은품(1)부터 다시 번호 매긴다. */
+function numberGiftOutputRows(rows: InvoiceOutputRow[]) {
+  const giftIndexByShipment = new Map<string, number>()
+  return rows.map((row) => {
+    if (row.kind !== 'gift') return row
+    const key = shipmentKeyOf(row)
+    const next = (giftIndexByShipment.get(key) ?? 0) + 1
+    giftIndexByShipment.set(key, next)
+    const label = formatGiftProductName(next, officialGiftNameOf(row.finalProductName))
+    return {
+      ...row,
+      finalProductName: label,
+      productName: label,
+    }
+  })
 }
 
 export type InvoiceStepSnapshotStage =

@@ -1,5 +1,9 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import {
+  logInvoiceWork,
+  timeInvoiceWorkAsync,
+} from '@/lib/invoice/invoice-work-perf'
 import {
   deleteInvoiceOptionMap,
   saveInvoiceOptionMap,
@@ -85,6 +89,43 @@ export type ProductMapSaveDraft = {
 
 const PRODUCT_MAP_SAVE_LIMIT = 3
 
+export function productMapSaveIdentity(input: {
+  lookupKey: string
+  styleId: string
+}) {
+  return `${normalizeInvoiceText(input.lookupKey)}\u0000${input.styleId}`
+}
+
+type SharedProductMapSave = {
+  identity: string
+  consumerIds: Set<string>
+  promise: Promise<{
+    saved: InvoiceProductNameMap
+    previousMap: InvoiceProductNameMap | null
+  }>
+}
+
+function applyInvoiceProductNameMapUpsert(
+  maps: InvoiceProductNameMap[],
+  saved: InvoiceProductNameMap,
+) {
+  const next = maps.filter((map) => {
+    if (map.id === saved.id) return false
+    return !(
+      saved.normalizedLookupKey &&
+      map.normalizedLookupKey === saved.normalizedLookupKey
+    )
+  })
+  return [saved, ...next]
+}
+
+function applyInvoiceOptionMapUpsert(
+  maps: InvoiceOptionMap[],
+  saved: InvoiceOptionMap,
+) {
+  return [saved, ...maps.filter((map) => map.id !== saved.id)]
+}
+
 export function upsertInvoiceProductNameMapCache(
   queryClient: ReturnType<typeof useQueryClient>,
   brandId: string,
@@ -95,16 +136,9 @@ export function upsertInvoiceProductNameMapCache(
   if (!current) {
     return queryClient.invalidateQueries({ queryKey })
   }
-  queryClient.setQueryData<InvoiceProductNameMap[]>(queryKey, (maps = []) => {
-    const next = maps.filter((map) => {
-      if (map.id === saved.id) return false
-      return !(
-        saved.normalizedLookupKey &&
-        map.normalizedLookupKey === saved.normalizedLookupKey
-      )
-    })
-    return [saved, ...next]
-  })
+  queryClient.setQueryData<InvoiceProductNameMap[]>(queryKey, (maps = []) =>
+    applyInvoiceProductNameMapUpsert(maps, saved),
+  )
 }
 
 function findMapByLookupKey(
@@ -167,10 +201,9 @@ export function upsertInvoiceOptionMapCache(
   if (!current) {
     return queryClient.invalidateQueries({ queryKey })
   }
-  queryClient.setQueryData<InvoiceOptionMap[]>(queryKey, (maps = []) => {
-    const next = maps.filter((map) => map.id !== saved.id)
-    return [saved, ...next]
-  })
+  queryClient.setQueryData<InvoiceOptionMap[]>(queryKey, (maps = []) =>
+    applyInvoiceOptionMapUpsert(maps, saved),
+  )
 }
 
 function removeInvoiceOptionMapCache(
@@ -192,14 +225,116 @@ function newHistoryId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
 
+const CACHE_FLUSH_MS = 32
+const AI_USAGE_INVALIDATE_MS = 400
+
 export function useInvoiceProductNameSaveQueue(brandId: string) {
   const queryClient = useQueryClient()
   const [history, setHistory] = useState<ProductMapHistoryEntry[]>([])
   const historyRef = useRef(history)
-  historyRef.current = history
   const saveActiveRef = useRef(0)
   const savePumpingRef = useRef(false)
   const saveInFlightRef = useRef(new Set<string>())
+  const sharedProductMapSavesRef = useRef(
+    new Map<string, SharedProductMapSave>(),
+  )
+  const pendingProductMapsRef = useRef<InvoiceProductNameMap[]>([])
+  const pendingOptionMapsRef = useRef<InvoiceOptionMap[]>([])
+  const historyFlushRafRef = useRef<number | null>(null)
+  const cacheFlushTimerRef = useRef<number | null>(null)
+  const aiUsageTimerRef = useRef<number | null>(null)
+
+  const patchHistory = useCallback(
+    (patch: (current: ProductMapHistoryEntry[]) => ProductMapHistoryEntry[]) => {
+      historyRef.current = patch(historyRef.current)
+      if (historyFlushRafRef.current != null) return
+      historyFlushRafRef.current = requestAnimationFrame(() => {
+        historyFlushRafRef.current = null
+        setHistory(historyRef.current)
+      })
+    },
+    [],
+  )
+
+  const flushCaches = useCallback(() => {
+    cacheFlushTimerRef.current = null
+    const products = pendingProductMapsRef.current
+    pendingProductMapsRef.current = []
+    const options = pendingOptionMapsRef.current
+    pendingOptionMapsRef.current = []
+    if (products.length > 0) {
+      const queryKey = ['invoice-product-name-maps', brandId] as const
+      if (!queryClient.getQueryData(queryKey)) {
+        void queryClient.invalidateQueries({ queryKey })
+      } else {
+        queryClient.setQueryData<InvoiceProductNameMap[]>(queryKey, (maps = []) => {
+          let next = maps
+          for (const saved of products) {
+            next = applyInvoiceProductNameMapUpsert(next, saved)
+          }
+          return next
+        })
+      }
+      logInvoiceWork('product-map-cache-flush', { count: products.length })
+    }
+    if (options.length > 0) {
+      const queryKey = ['invoice-option-maps', brandId] as const
+      if (!queryClient.getQueryData(queryKey)) {
+        void queryClient.invalidateQueries({ queryKey })
+      } else {
+        queryClient.setQueryData<InvoiceOptionMap[]>(queryKey, (maps = []) => {
+          let next = maps
+          for (const saved of options) {
+            next = applyInvoiceOptionMapUpsert(next, saved)
+          }
+          return next
+        })
+      }
+    }
+  }, [brandId, queryClient])
+
+  const queueProductMapUpsert = useCallback(
+    (saved: InvoiceProductNameMap) => {
+      pendingProductMapsRef.current.push(saved)
+      if (cacheFlushTimerRef.current != null) return
+      cacheFlushTimerRef.current = window.setTimeout(flushCaches, CACHE_FLUSH_MS)
+    },
+    [flushCaches],
+  )
+
+  const queueOptionMapUpsert = useCallback(
+    (saved: InvoiceOptionMap) => {
+      pendingOptionMapsRef.current.push(saved)
+      if (cacheFlushTimerRef.current != null) return
+      cacheFlushTimerRef.current = window.setTimeout(flushCaches, CACHE_FLUSH_MS)
+    },
+    [flushCaches],
+  )
+
+  const scheduleAiUsageInvalidate = useCallback(() => {
+    if (aiUsageTimerRef.current != null) return
+    aiUsageTimerRef.current = window.setTimeout(() => {
+      aiUsageTimerRef.current = null
+      void queryClient.invalidateQueries({
+        queryKey: ['ai-usage-summary', brandId],
+      })
+    }, AI_USAGE_INVALIDATE_MS)
+  }, [brandId, queryClient])
+
+  useEffect(
+    () => () => {
+      if (historyFlushRafRef.current != null) {
+        cancelAnimationFrame(historyFlushRafRef.current)
+      }
+      if (cacheFlushTimerRef.current != null) {
+        window.clearTimeout(cacheFlushTimerRef.current)
+      }
+      if (aiUsageTimerRef.current != null) {
+        window.clearTimeout(aiUsageTimerRef.current)
+      }
+    },
+    [],
+  )
 
   const activeComboKeys = useMemo(() => {
     const keys = new Set<string>()
@@ -255,7 +390,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
           batch.map(async (entry) => {
             saveInFlightRef.current.add(entry.id)
             saveActiveRef.current += 1
-            setHistory((current) =>
+            patchHistory((current) =>
               current.map((item) =>
                 item.id === entry.id && item.status === 'queued'
                   ? { ...item, status: 'saving', error: null }
@@ -286,17 +421,66 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
                   entry.originalItemName,
                 )
               const extras = completedOptionExtras(entry.extras)
-              const saved = await saveInvoiceProductNameMap(
-                brandId,
-                {
-                  productName: entry.lookupKey,
-                  lookupKey: entry.lookupKey,
-                  styleId: entry.style.styleId,
-                  feedback: entry.feedback,
-                },
-                previousMap?.id,
-              )
-              await upsertInvoiceProductNameMapCache(queryClient, brandId, saved)
+              const normalizedLookupKey = normalizeInvoiceText(entry.lookupKey)
+              const identity = productMapSaveIdentity({
+                lookupKey: entry.lookupKey,
+                styleId: entry.style.styleId,
+              })
+              const activeShared =
+                sharedProductMapSavesRef.current.get(normalizedLookupKey)
+              let ownsProductMapSave = false
+              let shared: SharedProductMapSave
+              if (activeShared?.identity === identity) {
+                shared = activeShared
+                shared.consumerIds.add(entry.id)
+              } else {
+                ownsProductMapSave = true
+                const save = async () => {
+                  const saved = await timeInvoiceWorkAsync(
+                    'product-map-save',
+                    () =>
+                      saveInvoiceProductNameMap(
+                        brandId,
+                        {
+                          productName: entry.lookupKey,
+                          lookupKey: entry.lookupKey,
+                          styleId: entry.style.styleId,
+                          feedback: entry.feedback,
+                        },
+                        previousMap?.id,
+                      ),
+                  )
+                  return { saved, previousMap }
+                }
+                const promise = activeShared
+                  ? activeShared.promise
+                      .catch(() => null)
+                      .then(() => save())
+                  : save()
+                shared = {
+                  identity,
+                  consumerIds: new Set([entry.id]),
+                  promise,
+                }
+                sharedProductMapSavesRef.current.set(
+                  normalizedLookupKey,
+                  shared,
+                )
+              }
+              let sharedResult: Awaited<typeof shared.promise>
+              try {
+                sharedResult = await shared.promise
+              } catch (error) {
+                if (
+                  sharedProductMapSavesRef.current.get(normalizedLookupKey) ===
+                  shared
+                ) {
+                  sharedProductMapSavesRef.current.delete(normalizedLookupKey)
+                }
+                throw error
+              }
+              const saved = sharedResult.saved
+              if (ownsProductMapSave) queueProductMapUpsert(saved)
               let savedOptionMap: InvoiceOptionMap | null = null
               if (extras.length > 0) {
                 savedOptionMap = await saveInvoiceOptionMap(
@@ -323,11 +507,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
                   },
                   previousOptionMap?.id,
                 )
-                await upsertInvoiceOptionMapCache(
-                  queryClient,
-                  brandId,
-                  savedOptionMap,
-                )
+                queueOptionMapUpsert(savedOptionMap)
               }
               await queryClient.invalidateQueries({
                 queryKey: [
@@ -337,30 +517,44 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
                 ],
                 refetchType: 'none',
               })
-              await queryClient.invalidateQueries({
-                queryKey: ['ai-usage-summary', brandId],
-              })
-              setHistory((current) =>
-                current.map((item) =>
-                  item.id === entry.id
-                    ? {
-                        ...item,
-                        status: 'saved',
-                        error: null,
-                        savedMap: saved,
-                        previousMap,
-                        savedOptionMap,
-                        previousOptionMap,
-                        wasCreate: previousMap === null,
-                        optionWasCreate: extras.length > 0 && !previousOptionMap,
-                        style: saved.style,
-                        lookupKey: saved.lookupKey || entry.lookupKey,
-                      }
-                    : item,
-                ),
+              scheduleAiUsageInvalidate()
+              const sharesProductMap = shared.consumerIds.size > 1
+              patchHistory((current) =>
+                current.map((item) => {
+                  if (item.id === entry.id) {
+                    return {
+                      ...item,
+                      status: 'saved',
+                      error: null,
+                      savedMap: saved,
+                      previousMap: sharesProductMap
+                        ? saved
+                        : sharedResult.previousMap,
+                      savedOptionMap,
+                      previousOptionMap,
+                      wasCreate:
+                        !sharesProductMap && sharedResult.previousMap === null,
+                      optionWasCreate: extras.length > 0 && !previousOptionMap,
+                      style: saved.style,
+                      lookupKey: saved.lookupKey || entry.lookupKey,
+                    }
+                  }
+                  if (
+                    sharesProductMap &&
+                    shared.consumerIds.has(item.id) &&
+                    item.savedMap?.id === saved.id
+                  ) {
+                    return {
+                      ...item,
+                      previousMap: saved,
+                      wasCreate: false,
+                    }
+                  }
+                  return item
+                }),
               )
             } catch (error) {
-              setHistory((current) =>
+              patchHistory((current) =>
                 current.map((item) =>
                   item.id === entry.id
                     ? {
@@ -393,7 +587,14 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
         void pump()
       }
     }
-  }, [brandId, queryClient])
+  }, [
+    brandId,
+    patchHistory,
+    queryClient,
+    queueOptionMapUpsert,
+    queueProductMapUpsert,
+    scheduleAiUsageInvalidate,
+  ])
 
   const enqueue = useCallback(
     (input: ProductMapEnqueueInput) => {
@@ -437,7 +638,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
           originalItemName,
         )
 
-      setHistory((current) => {
+      patchHistory((current) => {
         const nextEntry: ProductMapHistoryEntry = {
           id: historyId,
           comboKey: input.comboKey,
@@ -470,7 +671,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
         void pump()
       })
     },
-    [brandId, pump, queryClient],
+    [brandId, patchHistory, pump, queryClient],
   )
 
   const undo = useCallback(
@@ -479,7 +680,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
       if (!entry?.savedMap || entry.status !== 'saved') {
         throw new Error('되돌릴 저장 내역이 없습니다.')
       }
-      setHistory((current) =>
+      patchHistory((current) =>
         current.map((item) =>
           item.id === historyId
             ? { ...item, status: 'undoing', error: null }
@@ -524,6 +725,11 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
             await upsertInvoiceOptionMapCache(queryClient, brandId, restored)
           }
         }
+        if (entry.previousMap?.id !== entry.savedMap.id) {
+          sharedProductMapSavesRef.current.delete(
+            normalizeInvoiceText(entry.lookupKey),
+          )
+        }
         await queryClient.invalidateQueries({
           queryKey: ['invoice-product-name-maps', brandId],
         })
@@ -534,7 +740,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
           queryKey: ['ai-product-recommendation', brandId],
           refetchType: 'none',
         })
-        setHistory((current) =>
+        patchHistory((current) =>
           current.map((item) =>
             item.id === historyId
               ? {
@@ -559,7 +765,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
           ),
         )
       } catch (error) {
-        setHistory((current) =>
+        patchHistory((current) =>
           current.map((item) =>
             item.id === historyId
               ? {
@@ -576,7 +782,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
         throw error
       }
     },
-    [brandId, queryClient],
+    [brandId, patchHistory, queryClient],
   )
 
   return {

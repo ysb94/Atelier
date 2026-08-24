@@ -1,11 +1,12 @@
 import {
+  useCallback,
   useDeferredValue,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import {
   AlertTriangle,
@@ -42,6 +43,9 @@ import {
 import {
   getInvoiceGiftAllocations,
   getInvoiceGiftRequests,
+  getInvoiceGiftSourceAllocations,
+  getInvoiceGiftSourceMaps,
+  saveInvoiceGiftSourceMap,
   getInvoiceAccessoryRules,
   getInvoiceItemNameRules,
   getInvoiceNameRules,
@@ -55,9 +59,9 @@ import {
 import { parseFile } from '@/lib/import/parse'
 import {
   createGiftSeed,
-  planGiftAssignments,
   type GiftAssignmentPlan,
 } from '@/lib/invoice/gift-assign'
+import { finalizeUnifiedGiftPlanForDownload } from '@/lib/invoice/gift-confirm'
 import {
   downloadInvoiceStepSnapshot,
   type InvoiceStepSnapshotStage,
@@ -67,11 +71,22 @@ import {
   transformInvoiceNamesByCode,
   type InvoiceNameTransformation,
 } from '@/lib/invoice/name-transform'
+import { timeInvoiceWork } from '@/lib/invoice/invoice-work-perf'
 import {
   catalogFromStyles,
+  overlayGiftSourceOnProductNames,
   transformInvoiceProductNames,
   type InvoiceProductNameTransformation,
 } from '@/lib/invoice/product-name-transform'
+import {
+  collectGiftSourceSlots,
+  emptyGiftSourcePlan,
+  giftSourceGroupKey,
+  inspectGiftSourceGroup,
+  type GiftSourceGroup,
+  type GiftSourceSessionRule,
+} from '@/lib/invoice/gift-source-transform'
+import { planUnifiedGifts } from '@/lib/invoice/gift-unified'
 import { planInvoicePrefixes } from '@/lib/invoice/prefix-transform'
 import {
   inspectSabangnetSheets,
@@ -84,7 +99,9 @@ import {
 } from '@/lib/invoice/work-instruction-transform'
 import type {
   InvoiceGiftRequest,
+  InvoiceGiftSourceMap,
   InvoiceNameRule,
+  StyleRef,
   InvoiceOptionMap,
   InvoiceProductNameMap,
   InvoiceWorkInstruction,
@@ -93,8 +110,10 @@ import { cn, formatNumber } from '@/lib/utils'
 import { InvoiceItemNameTransformPanel } from './InvoiceItemNameTransformPanel'
 import { InvoiceOptionMapRulesPanel } from './InvoiceOptionMapRulesPanel'
 import { InvoiceOutputStepPanel } from './InvoiceOutputStepPanel'
+import { InvoiceGiftSourceMapPanel } from './InvoiceGiftSourceMapPanel'
 import { InvoicePrefixRequestPanel } from './InvoicePrefixRequestPanel'
 import { InvoicePrefixStepPanel } from './InvoicePrefixStepPanel'
+import { InvoiceGiftSetupDialog } from './InvoiceGiftSetupDialog'
 import { InvoiceProductNameTransformPanel } from './InvoiceProductNameTransformPanel'
 import { InvoiceWorkInstructionPanel } from './InvoiceWorkInstructionPanel'
 import { InvoiceWorkInstructionStepPanel } from './InvoiceWorkInstructionStepPanel'
@@ -415,7 +434,7 @@ const RULE_VIEWS: {
   {
     value: 'gifts',
     label: '사은품 증정',
-    description: '행사 기간·대상 품목·나가는 M번호',
+    description: '행 추가 행사 · 원본행 품목명 대체',
     icon: Gift,
   },
   {
@@ -451,7 +470,7 @@ const RULE_TABLES: Record<
   gifts: {
     title: '사은품 증정',
     description:
-      '쇼핑몰·행사 기간·산정 단위·합포장 방식과 대상 원본 품목명, 나가는 제품(M번호)을 등록합니다. 오늘 작업에서 합포장별 사은품 행을 만듭니다.',
+      '사은품 행을 추가하는 행사 요청과, 원본 [사은품] 행을 M번호로 바꾸는 품목명 대체 매핑을 함께 관리합니다.',
     columns: ['제목', '쇼핑몰명', '기간', '대상 수', '상태'],
   },
   prefixes: {
@@ -495,6 +514,9 @@ function RulesPanel({
   giftRequests,
   giftRequestsLoading,
   giftRequestsError,
+  giftSourceMaps,
+  giftSourceMapsLoading,
+  giftSourceMapsError,
   workInstructions,
   workInstructionsLoading,
   workInstructionsError,
@@ -513,6 +535,9 @@ function RulesPanel({
   giftRequests: InvoiceGiftRequest[]
   giftRequestsLoading: boolean
   giftRequestsError: string | null
+  giftSourceMaps: InvoiceGiftSourceMap[]
+  giftSourceMapsLoading: boolean
+  giftSourceMapsError: string | null
   workInstructions: InvoiceWorkInstruction[]
   workInstructionsLoading: boolean
   workInstructionsError: string | null
@@ -625,12 +650,20 @@ function RulesPanel({
       ) : null}
 
       {activeRule === 'gifts' ? (
-        <InvoicePrefixRequestPanel
-          brandId={brandId}
-          requests={giftRequests}
-          loading={giftRequestsLoading}
-          error={giftRequestsError}
-        />
+        <>
+          <InvoicePrefixRequestPanel
+            brandId={brandId}
+            requests={giftRequests}
+            loading={giftRequestsLoading}
+            error={giftRequestsError}
+          />
+          <InvoiceGiftSourceMapPanel
+            brandId={brandId}
+            maps={giftSourceMaps}
+            loading={giftSourceMapsLoading}
+            error={giftSourceMapsError}
+          />
+        </>
       ) : activeRule === 'prefixes' ? (
         <InvoiceWorkInstructionPanel
           brandId={brandId}
@@ -953,6 +986,7 @@ function StepSnapshotButton({
   nameTransformation,
   productTransformation,
   itemTransformation,
+  resolveItemTransformation,
   disabled,
 }: {
   stage: InvoiceStepSnapshotStage
@@ -964,6 +998,7 @@ function StepSnapshotButton({
   nameTransformation?: InvoiceNameTransformation | null
   productTransformation?: InvoiceProductNameTransformation | null
   itemTransformation?: InvoiceItemNameTransformation | null
+  resolveItemTransformation?: () => InvoiceItemNameTransformation | null
   disabled?: boolean
 }) {
   const [busy, setBusy] = useState(false)
@@ -979,25 +1014,29 @@ function StepSnapshotButton({
         onClick={() => {
           setBusy(true)
           setError(null)
-          void downloadInvoiceStepSnapshot({
-            stage,
-            brandName,
-            sourceFileName,
-            sourceRows,
-            giftPlan,
-            workPlan,
-            nameTransformation,
-            productTransformation,
-            itemTransformation,
-          })
-            .catch((reason) => {
-              setError(
-                reason instanceof Error
-                  ? reason.message
-                  : '엑셀을 내려받지 못했습니다.',
-              )
+          window.setTimeout(() => {
+            const item =
+              itemTransformation ?? resolveItemTransformation?.() ?? null
+            void downloadInvoiceStepSnapshot({
+              stage,
+              brandName,
+              sourceFileName,
+              sourceRows,
+              giftPlan,
+              workPlan,
+              nameTransformation,
+              productTransformation,
+              itemTransformation: item,
             })
-            .finally(() => setBusy(false))
+              .catch((reason) => {
+                setError(
+                  reason instanceof Error
+                    ? reason.message
+                    : '엑셀을 내려받지 못했습니다.',
+                )
+              })
+              .finally(() => setBusy(false))
+          }, 0)
         }}
       >
         <Download className="size-4" />
@@ -1010,6 +1049,7 @@ function StepSnapshotButton({
 
 export function InvoiceWorkPage() {
   const { brand } = useBrand()
+  const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const requestedView = searchParams.get('view')
   const activeView: InvoiceView = isInvoiceView(requestedView)
@@ -1065,6 +1105,10 @@ export function InvoiceWorkPage() {
     queryKey: ['invoice-work-instructions', brand.id],
     queryFn: () => getInvoiceWorkInstructions(brand.id),
   })
+  const giftSourceMapsQuery = useQuery({
+    queryKey: ['invoice-gift-source-maps', brand.id],
+    queryFn: () => getInvoiceGiftSourceMaps(brand.id),
+  })
   const giftRequests = useMemo(
     () => giftRequestsQuery.data ?? [],
     [giftRequestsQuery.data],
@@ -1083,6 +1127,12 @@ export function InvoiceWorkPage() {
       : giftRequestsQuery.error
         ? '사은품 증정 요청 건을 불러오지 못했습니다.'
         : null
+  const giftSourceMapsError =
+    giftSourceMapsQuery.error instanceof Error
+      ? giftSourceMapsQuery.error.message
+      : giftSourceMapsQuery.error
+        ? '품목명 대체 매핑을 불러오지 못했습니다.'
+        : null
   const workInstructionsError =
     workInstructionsQuery.error instanceof Error
       ? workInstructionsQuery.error.message
@@ -1097,6 +1147,25 @@ export function InvoiceWorkPage() {
   const [excludedGiftStyleIds, setExcludedGiftStyleIds] = useState<string[]>(
     [],
   )
+  const [giftSourceSessionRules, setGiftSourceSessionRules] = useState<
+    Record<string, GiftSourceSessionRule>
+  >({})
+  const [giftSourceSessionAllocations, setGiftSourceSessionAllocations] =
+    useState<Record<string, StyleRef>>({})
+  const [giftSourceIgnoredKeys, setGiftSourceIgnoredKeys] = useState<string[]>(
+    [],
+  )
+  const [giftSourceApplyingKey, setGiftSourceApplyingKey] = useState<
+    string | null
+  >(null)
+  const [giftSourceError, setGiftSourceError] = useState<string | null>(null)
+  const [giftSourceAppliedKeys, setGiftSourceAppliedKeys] = useState<string[]>(
+    [],
+  )
+  const [giftSetupTarget, setGiftSetupTarget] = useState<{
+    mallName: string
+    productName: string
+  } | null>(null)
   const nameRules = useMemo(
     () => nameRulesQuery.data ?? [],
     [nameRulesQuery.data],
@@ -1170,6 +1239,51 @@ export function InvoiceWorkPage() {
     () => productNameTagRolesQuery.data ?? [],
     [productNameTagRolesQuery.data],
   )
+  const giftSourceMaps = useMemo(
+    () => giftSourceMapsQuery.data ?? [],
+    [giftSourceMapsQuery.data],
+  )
+  const giftSourceIgnoredKeySet = useMemo(
+    () => new Set(giftSourceIgnoredKeys),
+    [giftSourceIgnoredKeys],
+  )
+  const giftSourceFileMapIds = useMemo(() => {
+    if (!inspection) return []
+    const keys = new Set(
+      inspection.rows.map((row) =>
+        giftSourceGroupKey(row.mallName, row.productName),
+      ),
+    )
+    return giftSourceMaps
+      .filter((map) =>
+        keys.has(giftSourceGroupKey(map.mallName, map.productName)),
+      )
+      .map((map) => map.id)
+  }, [giftSourceMaps, inspection])
+  const giftSourceAllocationsQuery = useQuery({
+    queryKey: ['invoice-gift-source-allocations', brand.id, giftSourceFileMapIds],
+    queryFn: () =>
+      getInvoiceGiftSourceAllocations(brand.id, {
+        mapIds: giftSourceFileMapIds,
+      }),
+    enabled: Boolean(inspection) && giftSourceFileMapIds.length > 0,
+  })
+  const giftSourceAllocations = useMemo(
+    () => giftSourceAllocationsQuery.data ?? [],
+    [giftSourceAllocationsQuery.data],
+  )
+  const giftSourceSessionRuleMap = useMemo(
+    () => new Map(Object.entries(giftSourceSessionRules)),
+    [giftSourceSessionRules],
+  )
+  const giftSourceSessionAllocationMap = useMemo(
+    () => new Map(Object.entries(giftSourceSessionAllocations)),
+    [giftSourceSessionAllocations],
+  )
+  const giftSourceAppliedKeySet = useMemo(
+    () => new Set(giftSourceAppliedKeys),
+    [giftSourceAppliedKeys],
+  )
   const productNameMapsError =
     productNameMapsQuery.error instanceof Error
       ? productNameMapsQuery.error.message
@@ -1195,7 +1309,27 @@ export function InvoiceWorkPage() {
   const deferredProductNameMaps = useDeferredValue(productNameMaps)
   const deferredProductNameExclusions = useDeferredValue(productNameExclusions)
   const deferredProductNameTagRoles = useDeferredValue(productNameTagRoles)
-  const productTransformation = useMemo(() => {
+  const headerReady = Boolean(
+    inspection && inspection.missingHeaders.length === 0,
+  )
+  const fileReady = Boolean(
+    headerReady && inspection && inspection.blockingRowCount === 0,
+  )
+  const maxStepIndex = !inspection
+    ? 0
+    : headerReady
+      ? TODAY_STEPS.length - 1
+      : 1
+  const stepIndex = Math.min(
+    TODAY_STEPS.findIndex((item) => item.value === step),
+    maxStepIndex,
+  )
+  const activeStep = TODAY_STEPS[stepIndex]!.value
+  const visitedStepsRef = useRef(new Set<TodayStep>())
+  visitedStepsRef.current.add(activeStep)
+  const shouldComputeItem =
+    activeStep === 'item' || activeStep === 'output'
+  const baseProductTransformation = useMemo(() => {
     if (
       !inspection ||
       productNameMapsQuery.isPending ||
@@ -1210,12 +1344,14 @@ export function InvoiceWorkPage() {
       return null
     }
     const styles = productStyleLookupQuery.data ?? []
-    return transformInvoiceProductNames(
-      inspection.rows,
-      deferredProductNameMaps,
-      catalogFromStyles(styles),
-      deferredProductNameTagRoles,
-      deferredProductNameExclusions,
+    return timeInvoiceWork('product-transform', () =>
+      transformInvoiceProductNames(
+        inspection.rows,
+        deferredProductNameMaps,
+        catalogFromStyles(styles),
+        deferredProductNameTagRoles,
+        deferredProductNameExclusions,
+      ),
     )
   }, [
     deferredProductNameExclusions,
@@ -1232,84 +1368,198 @@ export function InvoiceWorkPage() {
     productStyleLookupQuery.error,
     productStyleLookupQuery.isPending,
   ])
-  const processRows = useMemo(() => {
-    if (!inspection) return []
-    if (!productTransformation) return inspection.rows
-    const excluded = new Set(
-      productTransformation.rows
-        .filter((row) => row.status === 'excluded')
-        .map((row) => row.source.rowNumber),
-    )
-    if (excluded.size === 0) return inspection.rows
-    return inspection.rows.filter((row) => !excluded.has(row.rowNumber))
-  }, [inspection, productTransformation])
-  const itemTransformation = useMemo(() => {
-    if (
-      !inspection ||
-      !productTransformation ||
-      optionMapsQuery.isPending ||
-      optionMapsQuery.error ||
-      itemNameRulesQuery.isPending ||
-      itemNameRulesQuery.error ||
-      accessoryRulesQuery.isPending ||
-      accessoryRulesQuery.error ||
-      productStyleLookupQuery.isPending ||
-      productStyleLookupQuery.error
-    ) {
-      return null
-    }
-    return transformInvoiceItemNames(
-      inspection.rows,
-      deferredOptionMaps,
-      productTransformation.rows,
-      deferredItemNameRules,
-      deferredAccessoryRules,
-      productStyleLookupQuery.data ?? [],
+  const giftSourceAppliedRowNumbers = useMemo(() => {
+    if (!inspection) return new Set<number>()
+    const appliedKeys = new Set(giftSourceAppliedKeySet)
+    for (const key of giftSourceSessionRuleMap.keys()) appliedKeys.add(key)
+    return new Set(
+      collectGiftSourceSlots(
+        inspection.rows,
+        deferredProductNameTagRoles,
+        giftSourceIgnoredKeySet,
+        appliedKeys,
+      )
+        .filter((slot) => appliedKeys.has(slot.groupKey))
+        .map((slot) => slot.source.rowNumber),
     )
   }, [
-    accessoryRulesQuery.error,
-    accessoryRulesQuery.isPending,
-    deferredAccessoryRules,
-    deferredItemNameRules,
-    deferredOptionMaps,
+    deferredProductNameTagRoles,
+    giftSourceAppliedKeySet,
+    giftSourceIgnoredKeySet,
+    giftSourceSessionRuleMap,
     inspection,
-    itemNameRulesQuery.error,
-    itemNameRulesQuery.isPending,
-    optionMapsQuery.error,
-    optionMapsQuery.isPending,
-    productStyleLookupQuery.data,
-    productStyleLookupQuery.error,
-    productStyleLookupQuery.isPending,
-    productTransformation,
   ])
+  const giftSetupGroup = useMemo(() => {
+    if (!inspection || !giftSetupTarget) return null
+    return inspectGiftSourceGroup({
+      rows: inspection.rows,
+      mallName: giftSetupTarget.mallName,
+      productName: giftSetupTarget.productName,
+      tagRoles: deferredProductNameTagRoles,
+      maps: giftSourceMaps,
+      allocations: giftSourceAllocations,
+      sessionRules: giftSourceSessionRuleMap,
+      sessionAllocations: giftSourceSessionAllocationMap,
+      appliedKeys: giftSourceAppliedKeySet,
+    })
+  }, [
+    deferredProductNameTagRoles,
+    giftSetupTarget,
+    giftSourceAllocations,
+    giftSourceAppliedKeySet,
+    giftSourceMaps,
+    giftSourceSessionAllocationMap,
+    giftSourceSessionRuleMap,
+    inspection,
+  ])
+  const excludedRowSignature = useMemo(() => {
+    if (!baseProductTransformation) return ''
+    return baseProductTransformation.rows
+      .filter((row) => row.status === 'excluded')
+      .map((row) => row.source.rowNumber)
+      .sort((left, right) => left - right)
+      .join(',')
+  }, [baseProductTransformation])
+  const processRowsCacheRef = useRef<{
+    inspectionRows: SabangnetOrderRow[]
+    signature: string
+    rows: SabangnetOrderRow[]
+  } | null>(null)
+  const processRows = useMemo(() => {
+    if (!inspection) {
+      processRowsCacheRef.current = null
+      return []
+    }
+    const cached = processRowsCacheRef.current
+    if (
+      cached &&
+      cached.inspectionRows === inspection.rows &&
+      cached.signature === excludedRowSignature
+    ) {
+      return cached.rows
+    }
+    const excluded = excludedRowSignature
+      ? new Set(
+          excludedRowSignature.split(',').map((value) => Number(value)),
+        )
+      : null
+    const rows =
+      !excluded || excluded.size === 0
+        ? inspection.rows
+        : inspection.rows.filter((row) => !excluded.has(row.rowNumber))
+    processRowsCacheRef.current = {
+      inspectionRows: inspection.rows,
+      signature: excludedRowSignature,
+      rows,
+    }
+    return rows
+  }, [excludedRowSignature, inspection])
+  const campaignRows = useMemo(
+    () =>
+      processRows.filter(
+        (row) => !giftSourceAppliedRowNumbers.has(row.rowNumber),
+      ),
+    [giftSourceAppliedRowNumbers, processRows],
+  )
   const giftEligibilityPlan = useMemo(() => {
     if (!inspection) return null
-    return planInvoicePrefixes(processRows, giftRequests, giftResolutions)
-  }, [inspection, processRows, giftRequests, giftResolutions])
-  const giftPlan = useMemo(() => {
+    return timeInvoiceWork('gift-eligibility', () =>
+      planInvoicePrefixes(campaignRows, giftRequests, giftResolutions),
+    )
+  }, [inspection, campaignRows, giftRequests, giftResolutions])
+  const unifiedGiftPlan = useMemo(() => {
     if (!inspection || !giftEligibilityPlan) return null
-    return planGiftAssignments(
-      processRows,
-      giftEligibilityPlan,
-      giftRequests,
-      {
+    return timeInvoiceWork('gift-unified-plan', () =>
+      planUnifiedGifts({
+        campaignRows,
+        sourceRows: inspection.rows,
+        prefixPlan: giftEligibilityPlan,
+        requests: giftRequests,
         seed: giftSeed,
         excludedGiftStyleIds,
         existingAllocations: giftAllocations,
-      },
+        tagRoles: deferredProductNameTagRoles,
+        maps: giftSourceMaps,
+        sourceAllocations: giftSourceAllocations,
+        sessionRules: giftSourceSessionRuleMap,
+        sessionAllocations: giftSourceSessionAllocationMap,
+        ignoredKeys: giftSourceIgnoredKeySet,
+        appliedKeys: giftSourceAppliedKeySet,
+      }),
     )
   }, [
-    inspection,
-    processRows,
+    campaignRows,
+    deferredProductNameTagRoles,
+    excludedGiftStyleIds,
+    giftAllocations,
     giftEligibilityPlan,
     giftRequests,
     giftSeed,
-    excludedGiftStyleIds,
-    giftAllocations,
+    giftSourceAllocations,
+    giftSourceAppliedKeySet,
+    giftSourceIgnoredKeySet,
+    giftSourceMaps,
+    giftSourceSessionAllocationMap,
+    giftSourceSessionRuleMap,
+    inspection,
   ])
+  const giftPlan = unifiedGiftPlan?.giftPlan ?? null
+  const giftSourcePlan = unifiedGiftPlan?.giftSourcePlan ?? emptyGiftSourcePlan()
+  const productTransformation = useMemo(() => {
+    if (!baseProductTransformation) return null
+    return overlayGiftSourceOnProductNames(
+      baseProductTransformation,
+      giftSourcePlan,
+    )
+  }, [baseProductTransformation, giftSourcePlan])
+  const canComputeItemTransformation = Boolean(
+    inspection &&
+      productTransformation &&
+      !optionMapsQuery.isPending &&
+      !optionMapsQuery.error &&
+      !itemNameRulesQuery.isPending &&
+      !itemNameRulesQuery.error &&
+      !accessoryRulesQuery.isPending &&
+      !accessoryRulesQuery.error &&
+      !productStyleLookupQuery.isPending &&
+      !productStyleLookupQuery.error,
+  )
+  const computeItemTransformation =
+    useCallback((): InvoiceItemNameTransformation | null => {
+      if (!inspection || !productTransformation || !canComputeItemTransformation) {
+        return null
+      }
+      return timeInvoiceWork('item-transform', () =>
+        transformInvoiceItemNames(
+          inspection.rows,
+          deferredOptionMaps,
+          productTransformation.rows,
+          deferredItemNameRules,
+          deferredAccessoryRules,
+          productStyleLookupQuery.data ?? [],
+        ),
+      )
+    }, [
+      canComputeItemTransformation,
+      deferredAccessoryRules,
+      deferredItemNameRules,
+      deferredOptionMaps,
+      inspection,
+      productStyleLookupQuery.data,
+      productTransformation,
+    ])
+  const itemCacheRef = useRef<InvoiceItemNameTransformation | null>(null)
+  const itemTransformation = useMemo(() => {
+    if (!shouldComputeItem) return itemCacheRef.current
+    const next = computeItemTransformation()
+    itemCacheRef.current = next
+    return next
+  }, [computeItemTransformation, shouldComputeItem])
   const workPlan = useMemo(() => {
     if (!inspection) return null
-    return planWorkInstructions(processRows, workInstructions)
+    return timeInvoiceWork('work-plan', () =>
+      planWorkInstructions(processRows, workInstructions),
+    )
   }, [inspection, processRows, workInstructions])
   const nameRulesError =
     nameRulesQuery.error instanceof Error
@@ -1317,27 +1567,6 @@ export function InvoiceWorkPage() {
       : nameRulesQuery.error
         ? '송장 자체품번코드 기준을 불러오지 못했습니다.'
         : null
-
-  const headerReady = Boolean(
-    inspection && inspection.missingHeaders.length === 0,
-  )
-  const fileReady = Boolean(
-    headerReady && inspection && inspection.blockingRowCount === 0,
-  )
-
-  // 준비되지 않은 단계로는 갈 수 없게 현재 단계를 되돌린다.
-  const maxStepIndex = !inspection
-    ? 0
-    : headerReady
-      ? TODAY_STEPS.length - 1
-      : 1
-  const stepIndex = Math.min(
-    TODAY_STEPS.findIndex((item) => item.value === step),
-    maxStepIndex,
-  )
-  const activeStep = TODAY_STEPS[stepIndex].value
-  const visitedStepsRef = useRef(new Set<TodayStep>())
-  visitedStepsRef.current.add(activeStep)
 
   function selectView(view: InvoiceView) {
     setSearchParams((current) => {
@@ -1352,10 +1581,19 @@ export function InvoiceWorkPage() {
     setGiftResolutions({})
     setGiftSeed(createGiftSeed())
     setExcludedGiftStyleIds([])
+    setGiftSourceSessionRules({})
+    setGiftSourceSessionAllocations({})
+    setGiftSourceIgnoredKeys([])
+    setGiftSourceApplyingKey(null)
+    setGiftSourceError(null)
+    setGiftSourceAppliedKeys([])
+    setGiftSetupTarget(null)
   }
 
   function resetFile() {
     visitedStepsRef.current = new Set<TodayStep>(['upload'])
+    itemCacheRef.current = null
+    processRowsCacheRef.current = null
     setInspection(null)
     setFileName('')
     setError(null)
@@ -1379,6 +1617,8 @@ export function InvoiceWorkPage() {
     setIsParsing(true)
     setError(null)
     visitedStepsRef.current = new Set<TodayStep>(['upload'])
+    itemCacheRef.current = null
+    processRowsCacheRef.current = null
     setInspection(null)
     setFileName(file.name)
     setProductSaveBlockCount(0)
@@ -1412,6 +1652,59 @@ export function InvoiceWorkPage() {
       return
     }
     setStep(next)
+  }
+
+  function markGiftSourceApplied(key: string) {
+    setGiftSourceAppliedKeys((current) =>
+      current.includes(key) ? current : [...current, key],
+    )
+    setGiftSourceIgnoredKeys((current) => current.filter((item) => item !== key))
+    setGiftSetupTarget(null)
+  }
+
+  function applyGiftSourceSession(
+    group: GiftSourceGroup,
+    rule: GiftSourceSessionRule,
+  ) {
+    setGiftSourceError(null)
+    setGiftSourceSessionRules((current) => ({ ...current, [group.key]: rule }))
+    markGiftSourceApplied(group.key)
+  }
+
+  async function applyGiftSourcePersist(
+    group: GiftSourceGroup,
+    rule: GiftSourceSessionRule,
+  ) {
+    setGiftSourceApplyingKey(group.key)
+    setGiftSourceError(null)
+    try {
+      await saveInvoiceGiftSourceMap(brand.id, {
+        mallName: group.mallName,
+        productName: group.productName,
+        assignmentMode: rule.assignmentMode,
+        styleIds: rule.poolStyles.map((style) => style.styleId),
+        uniquePerRecipient: true,
+      })
+      setGiftSourceSessionRules((current) => ({ ...current, [group.key]: rule }))
+      markGiftSourceApplied(group.key)
+      await queryClient.invalidateQueries({
+        queryKey: ['invoice-gift-source-maps', brand.id],
+      })
+    } catch (error) {
+      setGiftSourceError(
+        error instanceof Error
+          ? error.message
+          : '사은품 원본행 설정을 저장하지 못했습니다.',
+      )
+    } finally {
+      setGiftSourceApplyingKey(null)
+    }
+  }
+
+  async function applyGiftSourceExisting(group: GiftSourceGroup) {
+    if (!group.mapId) return
+    setGiftSourceError(null)
+    markGiftSourceApplied(group.key)
   }
 
   return (
@@ -1711,6 +2004,7 @@ export function InvoiceWorkPage() {
                   rows={processRows}
                   requests={giftRequests}
                   existingAllocations={giftAllocations}
+                  giftPlan={giftPlan}
                   loading={
                     giftRequestsQuery.isPending ||
                     giftAllocationsQuery.isPending
@@ -1876,6 +2170,14 @@ export function InvoiceWorkPage() {
                     brandId={brand.id}
                     transformation={productTransformation}
                     onBlockingSaveCountChange={setProductSaveBlockCount}
+                    giftGroups={giftSourcePlan.groups}
+                    onOpenGiftSetup={(row) => {
+                      setGiftSourceError(null)
+                      setGiftSetupTarget({
+                        mallName: row.mallName,
+                        productName: row.productName,
+                      })
+                    }}
                   />
                 ) : null}
 
@@ -1900,10 +2202,9 @@ export function InvoiceWorkPage() {
                       nameTransformation={nameTransformation}
                       productTransformation={productTransformation}
                       itemTransformation={itemTransformation}
+                      resolveItemTransformation={computeItemTransformation}
                       disabled={
-                        !productTransformation ||
-                        !itemTransformation ||
-                        productSaveBlockCount > 0
+                        !productTransformation || productSaveBlockCount > 0
                       }
                     />
                   </div>
@@ -2039,6 +2340,32 @@ export function InvoiceWorkPage() {
                   itemTransformation={itemTransformation}
                   workPlan={workPlan}
                   giftPlan={giftPlan}
+                  giftSourcePlan={giftSourcePlan}
+                  baseProductTransformation={
+                    baseProductTransformation ?? undefined
+                  }
+                  finalizeUnified={
+                    giftEligibilityPlan && baseProductTransformation
+                      ? () =>
+                          finalizeUnifiedGiftPlanForDownload({
+                            brandId: brand.id,
+                            rows: inspection.rows,
+                            campaignRows,
+                            prefixPlan: giftEligibilityPlan,
+                            requests: giftRequests,
+                            giftPlan,
+                            giftSourcePlan,
+                            seed: giftSeed,
+                            excludedGiftStyleIds,
+                            sourceFileName: fileName,
+                            tagRoles: deferredProductNameTagRoles,
+                            sessionRules: giftSourceSessionRuleMap,
+                            sessionAllocations: giftSourceSessionAllocationMap,
+                            ignoredKeys: giftSourceIgnoredKeySet,
+                            appliedKeys: giftSourceAppliedKeySet,
+                          })
+                      : undefined
+                  }
                 />
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
@@ -2077,6 +2404,9 @@ export function InvoiceWorkPage() {
           giftRequests={giftRequests}
           giftRequestsLoading={giftRequestsQuery.isPending}
           giftRequestsError={giftRequestsError}
+          giftSourceMaps={giftSourceMaps}
+          giftSourceMapsLoading={giftSourceMapsQuery.isPending}
+          giftSourceMapsError={giftSourceMapsError}
           workInstructions={workInstructions}
           workInstructionsLoading={workInstructionsQuery.isPending}
           workInstructionsError={workInstructionsError}
@@ -2084,6 +2414,28 @@ export function InvoiceWorkPage() {
       ) : (
         <HistoryPanel />
       )}
+
+      {giftSetupGroup ? (
+        <InvoiceGiftSetupDialog
+          brandId={brand.id}
+          group={giftSetupGroup}
+          applying={giftSourceApplyingKey === giftSetupGroup.key}
+          error={giftSourceError}
+          existingRequests={giftRequests}
+          onClose={() => {
+            if (giftSourceApplyingKey) return
+            setGiftSourceError(null)
+            setGiftSetupTarget(null)
+          }}
+          onApplySession={(rule) => applyGiftSourceSession(giftSetupGroup, rule)}
+          onApplyPersist={(rule) => {
+            void applyGiftSourcePersist(giftSetupGroup, rule)
+          }}
+          onApplyExisting={() => {
+            void applyGiftSourceExisting(giftSetupGroup)
+          }}
+        />
+      ) : null}
     </div>
   )
 }

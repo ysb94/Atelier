@@ -459,20 +459,24 @@ export function BrandLayout() {
             onClose={closeTab}
           />
           {(() => {
-            const fullBleed =
-              location.pathname.includes('/design/file-manager')
+            const pageLayout = location.pathname.includes('/design/file-manager')
+              ? 'full'
+              : location.pathname.includes('/logistics/invoices')
+                ? 'wide'
+                : 'default'
             return (
               <div
                 className={cn(
                   'min-h-0 flex-1',
-                  fullBleed ? 'overflow-hidden' : 'overflow-auto',
+                  pageLayout === 'full' ? 'overflow-hidden' : 'overflow-auto',
                 )}
               >
                 <div
                   className={cn(
-                    fullBleed
-                      ? 'h-full min-h-0'
-                      : 'mx-auto max-w-[1600px] p-6 md:p-8',
+                    pageLayout === 'full' && 'h-full min-h-0',
+                    pageLayout === 'wide' && 'w-full px-4 py-5 md:px-6 md:py-6',
+                    pageLayout === 'default' &&
+                      'mx-auto max-w-[1600px] p-6 md:p-8',
                   )}
                 >
                   <WorkspaceTabPanels tabs={tabs} activeId={activeId} />

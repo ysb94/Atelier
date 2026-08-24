@@ -8,6 +8,11 @@ export type ProductNameCandidate = {
   reason: string
 }
 
+export type ProductNameRegistrationRule =
+  | 'product'
+  | 'item_full'
+  | 'product_item'
+
 const EMPTY_HINTS = new Set([
   '',
   '-',
@@ -148,6 +153,32 @@ function generateCandidatesForProductName(
   }
 }
 
+/** 같은 rule의 태그 전·후 후보를 구분하는 React key·선택 식별자. */
+export function productNameCandidateKey(candidate: ProductNameCandidate): string {
+  return `${candidate.rule}:${normalizeInvoiceText(candidate.text)}`
+}
+
+export function pickDefaultProductNameLookupKey(combo: {
+  candidates: ProductNameCandidate[]
+  appliedRule: string | null
+  appliedLookupKey?: string | null
+}): string {
+  if (combo.candidates.length === 0) return ''
+  if (combo.appliedLookupKey) {
+    const exact = combo.candidates.find(
+      (candidate) => candidate.text === combo.appliedLookupKey,
+    )
+    if (exact) return exact.text
+  }
+  if (combo.appliedRule) {
+    const byRule = combo.candidates.find(
+      (candidate) => candidate.rule === combo.appliedRule,
+    )
+    if (byRule) return byRule.text
+  }
+  return combo.candidates[0]!.text
+}
+
 export function generateProductNameCandidates(input: {
   productName: string
   itemName: string
@@ -164,6 +195,54 @@ export function generateProductNameCandidates(input: {
     generateCandidatesForProductName(matching, itemName, output, seen)
   }
   return output
+}
+
+/**
+ * 신규 원장 등록 전용 후보.
+ * 자동 조회용 앞부분 후보와 분리하고 품목명·내품명·두 열 전체 조합만 만든다.
+ */
+export function generateProductNameRegistrationCandidates(input: {
+  productName: string
+  itemName: string
+}): ProductNameCandidate[] {
+  const productName = sheetTrim(input.productName)
+  const itemName = sheetTrim(input.itemName)
+  const output: ProductNameCandidate[] = []
+  const seen = new Set<string>()
+
+  pushCandidate(output, seen, productName, 'product', '품목명')
+  if (itemName && !isEmptyItemNameHint(itemName)) {
+    pushCandidate(output, seen, itemName, 'item_full', '내품명')
+    pushCandidate(
+      output,
+      seen,
+      `${productName} ${itemName}`,
+      'product_item',
+      '품목명 + 내품명',
+    )
+  }
+  return output
+}
+
+/** 기존 자동 조회 규칙을 가장 가까운 신규 등록 3종으로 접는다. */
+export function productNameRegistrationRuleForMatch(
+  rule: string | null,
+): ProductNameRegistrationRule {
+  if (rule?.startsWith('item_')) return 'item_full'
+  if (rule?.startsWith('product_item')) return 'product_item'
+  return 'product'
+}
+
+export function pickProductNameRegistrationCandidate(
+  candidates: ProductNameCandidate[],
+  matchedRule: string | null,
+): ProductNameCandidate | null {
+  if (candidates.length === 0) return null
+  const preferredRule = productNameRegistrationRuleForMatch(matchedRule)
+  return (
+    candidates.find((candidate) => candidate.rule === preferredRule) ??
+    candidates[0]!
+  )
 }
 
 export type ItemNameConsumptionKind = 'none' | 'full' | 'prefix'

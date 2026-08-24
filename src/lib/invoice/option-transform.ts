@@ -388,9 +388,16 @@ export type InvoiceOutgoingComponentRow = {
   source: 'map' | 'code' | 'gift' | 'unresolved' | 'packing'
 }
 
+export type InvoiceGiftOutgoingComponent = {
+  styleNo: string
+  styleName: string
+  quantity: number
+}
+
 export function buildOutgoingComponentRows(options: {
   optionRows: InvoiceOptionTransformRow[]
   giftRowsBySource: Map<number, SabangnetOrderRow[]>
+  giftOutgoingBySource?: Map<number, InvoiceGiftOutgoingComponent[]>
   packingMaterials?: {
     styleNo: string
     name: string
@@ -400,7 +407,11 @@ export function buildOutgoingComponentRows(options: {
   const output: InvoiceOutgoingComponentRow[] = []
   for (const row of options.optionRows) {
     const orderQty = parseOrderQuantity(row.source.quantity)
-    if (row.main && row.main.styleNo) {
+    const giftOutgoing = options.giftOutgoingBySource?.get(row.source.rowNumber)
+    const skipMain = Boolean(giftOutgoing && !row.main)
+    if (skipMain) {
+      // 원본 사은품 치환 행은 본품 없이 gift만 낸다.
+    } else if (row.main && row.main.styleNo) {
       output.push({
         sourceRowNumber: row.source.rowNumber,
         customerOrderNo: row.source.customerOrderNo,
@@ -440,34 +451,53 @@ export function buildOutgoingComponentRows(options: {
         source: 'unresolved',
       })
     }
-    for (const extra of row.extras) {
-      output.push({
-        sourceRowNumber: row.source.rowNumber,
-        customerOrderNo: row.source.customerOrderNo,
-        mallName: row.source.mallName,
-        productName: row.source.productName,
-        itemName: row.source.itemName,
-        role: extra.role,
-        styleNo: extra.style.styleNo,
-        styleName: extra.style.name,
-        quantity: orderQty * extra.quantity,
-        source: 'map',
-      })
+    if (!skipMain) {
+      for (const extra of row.extras) {
+        output.push({
+          sourceRowNumber: row.source.rowNumber,
+          customerOrderNo: row.source.customerOrderNo,
+          mallName: row.source.mallName,
+          productName: row.source.productName,
+          itemName: row.source.itemName,
+          role: extra.role,
+          styleNo: extra.style.styleNo,
+          styleName: extra.style.name,
+          quantity: orderQty * extra.quantity,
+          source: 'map',
+        })
+      }
     }
-    const gifts = options.giftRowsBySource.get(row.source.rowNumber) ?? []
-    for (const gift of gifts) {
-      output.push({
-        sourceRowNumber: row.source.rowNumber,
-        customerOrderNo: gift.customerOrderNo,
-        mallName: gift.mallName,
-        productName: gift.productName,
-        itemName: gift.itemName,
-        role: 'gift',
-        styleNo: '',
-        styleName: gift.productName,
-        quantity: parseOrderQuantity(gift.quantity),
-        source: 'gift',
-      })
+    if (giftOutgoing) {
+      for (const gift of giftOutgoing) {
+        output.push({
+          sourceRowNumber: row.source.rowNumber,
+          customerOrderNo: row.source.customerOrderNo,
+          mallName: row.source.mallName,
+          productName: row.source.productName,
+          itemName: row.source.itemName,
+          role: 'gift',
+          styleNo: gift.styleNo,
+          styleName: gift.styleName,
+          quantity: gift.quantity,
+          source: 'gift',
+        })
+      }
+    } else {
+      const gifts = options.giftRowsBySource.get(row.source.rowNumber) ?? []
+      for (const gift of gifts) {
+        output.push({
+          sourceRowNumber: row.source.rowNumber,
+          customerOrderNo: gift.customerOrderNo,
+          mallName: gift.mallName,
+          productName: gift.productName,
+          itemName: gift.itemName,
+          role: 'gift',
+          styleNo: '',
+          styleName: gift.productName,
+          quantity: parseOrderQuantity(gift.quantity),
+          source: 'gift',
+        })
+      }
     }
   }
   for (const material of options.packingMaterials ?? []) {

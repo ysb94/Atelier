@@ -156,16 +156,22 @@ export function InvoicePrefixRequestForm({
   brandId,
   editing,
   existingRequests = [],
+  initialMallName,
+  initialProductName,
   onDone,
 }: {
   brandId: string
   editing?: InvoiceGiftRequest
   existingRequests?: InvoiceGiftRequest[]
+  initialMallName?: string
+  initialProductName?: string
   onDone?: () => void
 }) {
   const queryClient = useQueryClient()
   const [title, setTitle] = useState(editing?.title ?? '')
-  const [mallName, setMallName] = useState(editing?.mallName ?? '')
+  const [mallName, setMallName] = useState(
+    editing?.mallName ?? initialMallName ?? '',
+  )
   const [startsAt, setStartsAt] = useState(editing?.startsAt ?? '')
   const [endsAt, setEndsAt] = useState(editing?.endsAt ?? '')
   const [countBasis, setCountBasis] = useState<InvoiceGiftCountBasis>(
@@ -196,7 +202,18 @@ export function InvoicePrefixRequestForm({
   })
   const [note, setNote] = useState(editing?.note ?? '')
   const [items, setItems] = useState<ItemDraft[]>(
-    editing ? draftsFromRequest(editing) : [],
+    editing
+      ? draftsFromRequest(editing)
+      : initialProductName
+        ? [
+            {
+              key: newItemKey(),
+              productName: initialProductName,
+              outgoingProducts: [],
+              isRandom: false,
+            },
+          ]
+        : [],
   )
   const [selectedItemKeys, setSelectedItemKeys] = useState<Set<string>>(
     () => new Set(),

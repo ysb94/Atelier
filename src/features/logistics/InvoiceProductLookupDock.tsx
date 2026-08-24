@@ -12,7 +12,7 @@ function lookupTextFromCopied(value: string) {
 }
 
 /**
- * 본품 확인 목록을 스크롤해도 오른쪽에 남는 검색 창.
+ * 본품 확인 목록 위에 떠 있는 검색 창. 표 너비는 가로를 다 쓴다.
  * 품목명을 복사하면 그 글자를 조회 키 원장에서 찾고, 연결된 공식명·M번호를 보여준다.
  * 원장에는 쓰지 않는다.
  */
@@ -63,8 +63,8 @@ export function InvoiceProductLookupDock({ brandId }: { brandId: string }) {
   }
 
   return (
-    <aside className="sticky top-4 z-20 lg:w-80 lg:shrink-0">
-      <div className="rounded-lg border border-border bg-card p-3 shadow-sm">
+    <aside className="fixed right-4 top-24 z-40 w-80 max-w-[calc(100vw-2rem)]">
+      <div className="max-h-[calc(100vh-7rem)] overflow-auto rounded-lg border border-border bg-card p-3 shadow-lg">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
             <p className="text-sm font-medium">비슷한 상품 찾기</p>

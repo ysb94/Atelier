@@ -26,6 +26,8 @@ import type {
   InvoiceProductNameExclusion,
   InvoiceProductNameTagRoleEntry,
   InvoiceGiftAllocation,
+  InvoiceGiftSourceAllocation,
+  InvoiceGiftSourceMap,
   InvoiceGiftRequest,
   InvoicePrefixRequest,
   InvoiceWorkInstruction,
@@ -49,6 +51,7 @@ import * as barcodeFieldStore from '@/lib/supabase/barcode-fields'
 import * as codeUsageTargetStore from '@/lib/supabase/code-usage-targets'
 import * as codeUsageAssignmentStore from '@/lib/supabase/code-usage-assignments'
 import * as invoiceGiftAllocationStore from '@/lib/supabase/invoice-gift-allocations'
+import * as invoiceGiftSourceMapStore from '@/lib/supabase/invoice-gift-source-maps'
 import * as invoiceNameRuleStore from '@/lib/supabase/invoice-name-rules'
 import * as invoiceItemNameRuleStore from '@/lib/supabase/invoice-item-name-rules'
 import * as invoiceAccessoryRuleStore from '@/lib/supabase/invoice-accessory-rules'
@@ -108,6 +111,13 @@ export type {
   InvoicePrefixItemInput,
   InvoicePrefixRequestInput,
 } from '@/lib/supabase/invoice-prefix-requests'
+export { InvoiceGiftSourceMapStoreError } from '@/lib/supabase/invoice-gift-source-maps'
+export type {
+  InvoiceGiftSourceAssignRequest,
+  InvoiceGiftSourceAssignResult,
+  InvoiceGiftSourceConfirmRequest,
+  InvoiceGiftSourceMapInput,
+} from '@/lib/supabase/invoice-gift-source-maps'
 export { InvoiceGiftAllocationStoreError } from '@/lib/supabase/invoice-gift-allocations'
 export type {
   ConfirmGiftAllocationsResult,
@@ -773,6 +783,63 @@ export async function cancelInvoiceGiftAllocations(
     brandId,
     requestId,
     orderFingerprint,
+  )
+}
+
+/** 원본 [사은품] 요청행 치환 매핑. 캠페인형 사은품 추가와 분리한다. */
+export async function getInvoiceGiftSourceMaps(
+  brandId: string,
+  options?: { activeOnly?: boolean },
+): Promise<InvoiceGiftSourceMap[]> {
+  await delay()
+  return invoiceGiftSourceMapStore.listInvoiceGiftSourceMaps(brandId, options)
+}
+
+export async function getInvoiceGiftSourceAllocations(
+  brandId: string,
+  options?: { mapIds?: string[] },
+): Promise<InvoiceGiftSourceAllocation[]> {
+  await delay()
+  return invoiceGiftSourceMapStore.listInvoiceGiftSourceAllocations(
+    brandId,
+    options,
+  )
+}
+
+export async function saveInvoiceGiftSourceMap(
+  brandId: string,
+  input: invoiceGiftSourceMapStore.InvoiceGiftSourceMapInput,
+  mapId?: string,
+): Promise<InvoiceGiftSourceMap> {
+  await delay()
+  return invoiceGiftSourceMapStore.saveInvoiceGiftSourceMap(
+    brandId,
+    input,
+    mapId,
+  )
+}
+
+export async function assignInvoiceGiftSourceRows(
+  brandId: string,
+  mapId: string,
+  requests: invoiceGiftSourceMapStore.InvoiceGiftSourceAssignRequest[],
+): Promise<invoiceGiftSourceMapStore.InvoiceGiftSourceAssignResult[]> {
+  await delay()
+  return invoiceGiftSourceMapStore.assignInvoiceGiftSourceRows(
+    brandId,
+    mapId,
+    requests,
+  )
+}
+
+export async function confirmInvoiceGiftSourceAllocations(
+  brandId: string,
+  candidates: invoiceGiftSourceMapStore.InvoiceGiftSourceConfirmRequest[],
+): Promise<invoiceGiftSourceMapStore.InvoiceGiftSourceAssignResult[]> {
+  await delay()
+  return invoiceGiftSourceMapStore.confirmInvoiceGiftSourceAllocations(
+    brandId,
+    candidates,
   )
 }
 

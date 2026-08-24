@@ -18,6 +18,7 @@ import {
   buildPrefixReview,
   downloadGiftRows,
   planGiftAssignments,
+  type GiftAssignmentPlan,
   type PrefixReviewRequest,
 } from '@/lib/invoice/gift-assign'
 import { finalizeGiftPlanForDownload } from '@/lib/invoice/gift-confirm'
@@ -64,11 +65,13 @@ export function InvoicePrefixStepPanel({
   onRedrawGifts,
   onToggleExcludeGift,
   sourceFileName,
+  giftPlan: giftPlanProp,
 }: {
   brandId: string
   rows: SabangnetOrderRow[]
   requests: InvoicePrefixRequest[]
   existingAllocations: InvoiceGiftAllocation[]
+  giftPlan?: GiftAssignmentPlan | null
   loading: boolean
   error: string | null
   resolutions: Record<string, string>
@@ -94,22 +97,25 @@ export function InvoicePrefixStepPanel({
     [rows, requests, resolutions],
   )
 
-  const giftPlan = useMemo(
+  const localGiftPlan = useMemo(
     () =>
+      giftPlanProp ??
       planGiftAssignments(rows, plan, requests, {
         seed: giftSeed,
         excludedGiftStyleIds,
         existingAllocations,
       }),
     [
-      rows,
+      existingAllocations,
+      excludedGiftStyleIds,
+      giftPlanProp,
+      giftSeed,
       plan,
       requests,
-      giftSeed,
-      excludedGiftStyleIds,
-      existingAllocations,
+      rows,
     ],
   )
+  const giftPlan = localGiftPlan
 
   const warehouseRows = useMemo(() => {
     const byId = new Map(
@@ -285,6 +291,14 @@ export function InvoicePrefixStepPanel({
           tone={giftPlan.giftCount > 0 ? 'success' : 'muted'}
         />
       </div>
+
+      {giftPlan.unavoidableDuplicateCount > 0 ? (
+        <p className="rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-warning">
+          같은 받는분에 같은 M번호가 {formatNumber(giftPlan.unavoidableDuplicateCount)}건
+          반복됩니다. 고정 사은품이거나 후보가 부족해서이며, 작업은 계속할 수
+          있습니다.
+        </p>
+      ) : null}
 
       {filePeriod ? (
         <p className="text-xs text-muted-foreground">

@@ -117,7 +117,7 @@ export function suggestTagRole(tag: string): InvoiceProductNameTagRole {
   const normalized = normalizeInvoiceText(tag)
   const inner = tagInner(normalized)
   if (/리퍼브|리퍼(?!브)|b급/.test(normalized)) return 'identity_condition'
-  if (/증정/.test(normalized)) return 'composition_gift'
+  if (/증정|사은품/.test(normalized)) return 'composition_gift'
   if (
     /(?:^|[^가-힣])set(?:$|[^가-힣])/.test(inner) ||
     /세트|2pack|3pack|2팩|3팩/.test(inner) ||
@@ -152,18 +152,31 @@ export function classifyLeadingTags(
   })
 }
 
+/** 이미 분류한 파일 태그에서 상품 구성·미분류만 남긴 품목명. */
+export function matchingProductNameFromTags(
+  productName: string,
+  classifiedTags: ParsedProductNameTag[],
+): string {
+  const { tags, remainder } = extractLeadingBracketTags(productName)
+  const roleByRaw = new Map(
+    classifiedTags.map((tag) => [tag.raw, tag.role] as const),
+  )
+  const kept = tags
+    .filter((raw) => !STRIP_ROLES.has(roleByRaw.get(raw) ?? 'unknown'))
+    .join('')
+  const next = `${kept}${kept && remainder ? ' ' : ''}${remainder}`.trim()
+  return next || productName.trim()
+}
+
 /** 상품 구성·미분류만 남긴 인식용 품목명. 원문은 바꾸지 않는다. */
 export function matchingProductName(
   productName: string,
   roles: InvoiceProductNameTagRoleEntry[] = [],
 ): string {
-  const { remainder } = extractLeadingBracketTags(productName)
-  const kept = classifyLeadingTags(productName, roles)
-    .filter((tag) => !STRIP_ROLES.has(tag.role))
-    .map((tag) => tag.raw)
-    .join('')
-  const next = `${kept}${kept && remainder ? ' ' : ''}${remainder}`.trim()
-  return next || productName.trim()
+  return matchingProductNameFromTags(
+    productName,
+    classifyLeadingTags(productName, roles),
+  )
 }
 
 export function countLeadingTagProducts(

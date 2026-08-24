@@ -46,6 +46,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 송장 내품명 부속품 사전(`invoice_accessory_rules`) | Supabase |
 | 송장 사은품 증정 요청 건(`invoice_prefix_requests` + `invoice_prefix_items` + `invoice_prefix_item_products`, 앱 모델명 Gift) | Supabase |
 | 송장 사은품 선착순 한도·배정 원장(`invoice_prefix_requests` 한도 필드 + `invoice_gift_quotas` + `invoice_gift_allocations`) | Supabase |
+| 송장 사은품 원본행 치환 매핑(`invoice_gift_source_maps` + `invoice_gift_source_map_products` + `invoice_gift_source_allocations`) | Supabase |
 | 송장 작업 지시(`invoice_work_instructions` + `invoice_work_instruction_items`) | Supabase |
 | 브랜드 AI 설정·사용량(`ai_feature_routes` + `ai_usage_logs`) | Supabase |
 
@@ -210,6 +211,13 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   구분자 앞·뒤가 모두 있을 때만 만든다. 왼쪽 후보가 먼저 맞으면 그 값이 정답이다.
   같은 압축 키가 서로 다른 M번호를 가리키면 충돌로 남긴다. 후보가 하나여도 기준을
   자동 저장하지 않는다.
+- 위 1~9번과 태그 전·후 후보는 기존 원장을 찾고 AI 추천을 모으는 **자동 조회용**으로
+  계속 사용한다. 오늘 작업 AI 검수표에서 새 원장에 등록하는 키는 별도로
+  `정리된 품목명`, `내품명 전체`, `정리된 품목명 + 내품명 전체` 최대 3종만 쓴다.
+  품목명 정리에서는 저장된 태그 역할 중 `event_marketing`, `composition_gift`,
+  `identity_condition`만 빼고 `product_composition`, `unknown`은 남긴다.
+  앞부분 자동 조회가 맞은 경우에도 저장할 때는 대응하는 전체 3종 키로 접는다.
+  기준정보 수동 입력과 기존 엑셀 원장 가져오기는 이 제한을 적용하지 않는다.
 - 7·8번이 품목명 원장과 맞으면 사용한 앞부분과 구분자를 소비하고 남은 suffix를
   내품명 단계 입력으로 넘긴다. 9번 내품명 전체가 `lookup_key`와 맞으면 본품을
   확정하고 내품명을 빈 값으로 소비한다. 품목명과 결합된 후보나 `styles.name` 직접
@@ -433,8 +441,10 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 확실도 `decision_config.high` 이상이면 기본 선택하고, 미만이면 선택을 풀어
   둔 채 보여준다. 사람이 직접 체크하면 미달 항목도 등록할 수 있고 그때는
   검토 사유에 남긴다. 추천을 못 받은 항목은 이유와 함께 목록 밖에 남긴다.
-- 한 번의 등록에서 같은 조회 키는 한 번만 저장해 원장 중복을 막는다. 목록에도
-  중복을 표시하고 기본 선택에서 뺀다.
+- AI 검수표에서 같은 정규화 등록 키가 서로 다른 본품 M번호를 가리키면 충돌로
+  표시하고 준비 완료에서 뺀다. 같은 키·같은 M번호를 여러 원본 조합이 공유하면
+  품목명 원장 저장은 한 번만 실행하고, 조합별 `invoice_option_maps` 구성품 저장은
+  각각 유지한다.
 - 추천은 펼친 그룹에서만 계산되므로 최종 품목명에 곧바로 흘려보내지 않는다.
   출력은 언제나 원장에 등록된 값만 쓰고, 등록은 사람이 승인한 일괄 검토나
   개별 `등록`을 거친다. 등록 내역은 최근 저장 목록에서 되돌릴 수 있다.
@@ -512,6 +522,48 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   품절 제외 키는 `style_id`다. M번호 상품명을 바꾸면 다음 배정부터 새 공식명이 반영된다.
 - 기간이 겹치는 요청 건이 둘 이상이면 오늘 작업의 **사은품 추가** 단계에서 충돌로
   보여주고 사용자가 고른 요청 건을 쓴다.
+
+#### 사은품 원본행 치환 (`invoice_gift_source_*`)
+
+캠페인형 `invoice_prefix_*`는 “구매 조건 충족 → 사은품 **새 행 추가**” 전용이다.
+원본 품목명이 `[사은품]`·`[증정]`으로 시작하는 요청행을 실제 M번호로 **제자리 치환**하는
+흐름은 기간·행 추가·선착순과 의미가 달라 별도 모델이다.
+
+- `invoice_gift_source_maps`는 `brand_id + normalized_mall_name + normalized_product_name`
+  exact 1규칙이다. 정규화는 앱 `normalizeInvoiceText`로 넣고 DB generated column을
+  쓰지 않는다. `assignment_mode`는 `fixed`(1종) 또는 `balanced_random`(누적 최소 후보
+  중 안정 해시)이다. `unique_per_recipient` 컬럼은 호환용으로 남기되, 배정은 작업자
+  옵션 없이 **현재 업로드 파일 한 건**에서 받는분 단위로 항상 최대 다양성을 쓴다.
+  받는분 키는 성명 + 전화(숫자) + 주소이고 쇼핑몰명은 빼며, 식별 필드가 비면 주문
+  지문으로 폴백한다. 행 추가 캠페인과 품목명 대체를 한 resolver에서 묶고, 기존
+  확정·고정은 잠근 뒤 랜덤만 후보가 적은 건을 보호하는 최대 매칭으로 고른다.
+  고정 규칙이나 후보 합집합이 부족하면 최소 횟수만 반복하고 비차단 안내를 남긴다.
+  고객별 장기 이력은 만들지 않으며, 새 파일을 올리면 받는분별 사용 M번호도 초기화한다.
+- `invoice_gift_source_map_products`는 `(brand_id, map_id)`·`(brand_id, style_id)`
+  복합 FK로 후보 M번호 순서와 `(map_id, style_id)` 중복을 막는다.
+- `invoice_gift_source_allocations`의 unique는 style과 무관한 `allocation_key`다.
+  주문 지문·수량 슬롯만 저장하고 수령인·전화·주소는 넣지 않는다. 후보 풀이 바뀌어도
+  기존 주문은 재추첨하지 않는다.
+- 원자 RPC: `save_invoice_gift_source_map`(부모+후보 풀),
+  `assign_invoice_gift_source_rows`(map별 자동 배정, 호환용),
+  `confirm_invoice_gift_source_allocations`(브라우저가 고른
+  `map_id + allocation_key + style_id`를 한 트랜잭션에서 검증·확정).
+  새 작업 흐름은 매핑 기준만 저장하고 신규 슬롯 배정은 브라우저 통합 plan에서
+  미리보기한 뒤 다운로드 직전에 `confirm_invoice_gift_source_allocations`로
+  확정한다. 후보 풀 소속·브랜드 편집 권한·기존 allocation 재사용을 검증하고
+  수령인 키/PII는 저장하지 않는다. 외부 RPC는 `SECURITY INVOKER`와
+  `app.can_edit_brand`를 유지한다. 균등 랜덤이 부르는 `app.fnv1a_32_utf8(text)`만
+  `authenticated` 실행을 열고 `public`·`anon`은 막는다.
+- 감지는 선행 `[사은품]`·`[증정]` 또는 저장된 `composition_gift` 역할로만 한다.
+  `컬러랜덤`은 사은품 판정이 아니라 균등 랜덤 추천에만 쓴다.
+- 이번 파일 전용 규칙은 브라우저 메모리에만 두고, 재사용 설정과 배정만 Supabase에
+  남긴다. 저장된 매핑은 기준정보 「사은품 증정」의 품목명 대체 목록에서 보고
+  고친다. 원본 사은품 후보 행은 캠페인 `planInvoicePrefixes` 입력에서 빼 중복
+  추가를 막는다.
+- 최종 송장 표시명은 캠페인 추가 행과 같다. `kind = gift` 행을 출력 순서대로
+  합포장마다 `사은품(1) : 현재 styles.name`부터 다시 번호 매긴다. 품목명 대체와
+  사은품 행 추가가 한 합포장에 섞여도 번호를 이어 쓰고, 다른 합포장에서는 1부터
+  시작한다. 출고구성의 M번호·공식명·수량은 접두어 없이 유지한다.
 
 #### 사은품 선착순 원장
 
@@ -591,6 +643,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
    내려받는다. 한 단계의 실패가 다른 열을 되돌리거나 비우지 않는다.
 
 - 로직: `src/lib/invoice/prefix-transform.ts`, `gift-assign.ts`,
+  `gift-diversity.ts`, `gift-unified.ts`,
   `gift-confirm.ts`, `work-instruction-transform.ts`, `product-name-patterns.ts`,
   `product-name-tags.ts`, `product-name-transform.ts`, `item-name-transform.ts`,
   `option-transform.ts`, `option-ledger-import.ts`, `invoice-output.ts`,
@@ -626,7 +679,11 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260813190000_invoice_product_name_maps.sql`,
   `20260813200000_invoice_product_name_lookup_key.sql`,
   `20260814035922_invoice_product_name_tag_roles.sql`,
-  `20260814041855_invoice_product_name_tag_role_family.sql`.
+  `20260814041855_invoice_product_name_tag_role_family.sql`,
+  `20260824140000_invoice_gift_source_maps.sql`,
+  `20260824141000_grant_fnv1a_32_utf8_authenticated.sql`,
+  `20260824142000_gift_source_unique_per_recipient.sql`,
+  `20260824143000_confirm_gift_source_allocations.sql`.
 - 재고 원칙: [`INVENTORY.md`](./INVENTORY.md).
 
 ### 수천 건 적재

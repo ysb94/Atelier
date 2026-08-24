@@ -18,6 +18,7 @@ import {
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import type { InvoiceNameTransformation } from '@/lib/invoice/name-transform'
 import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
+import type { GiftSourcePlan, GiftSourceReplacement } from '@/lib/invoice/gift-source-transform'
 import type {
   InvoiceProductNameExclusion,
   InvoiceProductNameMap,
@@ -33,6 +34,8 @@ export type InvoiceProductNameMatchStatus =
   | 'unresolved'
   | 'excluded'
   | 'exclusion_guarded'
+  | 'gift_pending'
+  | 'gift_mapped'
 
 export type InvoiceProductNameTransformRow = {
   source: SabangnetOrderRow
@@ -41,12 +44,16 @@ export type InvoiceProductNameTransformRow = {
   style: StyleRef | null
   transformedProductName: string
   appliedRule: string | null
+  /** 엔진이 실제로 맞춘 후보 원문. 같은 rule의 태그 전·후 후보를 구분한다. */
+  appliedLookupKey: string | null
   itemNameConsumed: boolean
   /** 품목명 원장이 앞부분을 소비하면 suffix, 전체를 소비하면 빈 값, 아니면 원문 */
   effectiveItemName: string
   candidates: ProductNameCandidate[]
   candidateStyles: StyleRef[]
   tags: ParsedProductNameTag[]
+  giftSourceKey?: string | null
+  giftReplacements?: GiftSourceReplacement[]
 }
 
 export type UnresolvedProductNameCombo = {
@@ -56,8 +63,12 @@ export type UnresolvedProductNameCombo = {
   itemName: string
   ownProductCode: string
   rowCount: number
-  status: Exclude<InvoiceProductNameMatchStatus, 'mapped' | 'excluded'>
+  status: Exclude<
+    InvoiceProductNameMatchStatus,
+    'mapped' | 'excluded' | 'gift_pending' | 'gift_mapped'
+  >
   appliedRule: string | null
+  appliedLookupKey: string | null
   candidateStyles: StyleRef[]
   candidates: ProductNameCandidate[]
   tags: ParsedProductNameTag[]
@@ -72,6 +83,8 @@ export type InvoiceProductNameTransformation = {
   unresolvedRowCount: number
   excludedRowCount: number
   exclusionGuardedRowCount: number
+  giftPendingRowCount: number
+  giftMappedRowCount: number
   unresolvedCombos: UnresolvedProductNameCombo[]
 }
 
@@ -93,13 +106,33 @@ export function isInvoiceProductRowExcluded(
   return row?.status === 'excluded'
 }
 
+export function isGiftSourceProductRow(
+  row: Pick<InvoiceProductNameTransformRow, 'status'> | undefined,
+) {
+  return row?.status === 'gift_pending' || row?.status === 'gift_mapped'
+}
+
 /** 품목명 단계에서 실제로 맞춘 후보 텍스트. 규칙이 후보에 없으면 첫 후보. */
 export function lookupKeyFromProductRow(
   row:
-    | Pick<InvoiceProductNameTransformRow, 'appliedRule' | 'candidates'>
+    | Pick<
+        InvoiceProductNameTransformRow,
+        'appliedRule' | 'appliedLookupKey' | 'candidates'
+      >
     | undefined,
 ): { productLookupKey: string; productAppliedRule: string | null } {
   if (!row) return { productLookupKey: '', productAppliedRule: null }
+  if (row.appliedLookupKey) {
+    const exact = row.candidates.find(
+      (candidate) => candidate.text === row.appliedLookupKey,
+    )
+    if (exact) {
+      return {
+        productLookupKey: exact.text,
+        productAppliedRule: row.appliedRule,
+      }
+    }
+  }
   const byRule = row.appliedRule
     ? row.candidates.find((candidate) => candidate.rule === row.appliedRule)
     : undefined
@@ -321,6 +354,8 @@ function summarizeProductNameRows(rows: InvoiceProductNameTransformRow[]) {
   let unresolvedRowCount = 0
   let excludedRowCount = 0
   let exclusionGuardedRowCount = 0
+  let giftPendingRowCount = 0
+  let giftMappedRowCount = 0
 
   for (const row of rows) {
     if (row.status === 'mapped') {
@@ -329,6 +364,14 @@ function summarizeProductNameRows(rows: InvoiceProductNameTransformRow[]) {
     }
     if (row.status === 'excluded') {
       excludedRowCount += 1
+      continue
+    }
+    if (row.status === 'gift_pending') {
+      giftPendingRowCount += 1
+      continue
+    }
+    if (row.status === 'gift_mapped') {
+      giftMappedRowCount += 1
       continue
     }
     if (row.status === 'candidate') candidateRowCount += 1
@@ -358,6 +401,7 @@ function summarizeProductNameRows(rows: InvoiceProductNameTransformRow[]) {
       rowCount: 1,
       status: row.status,
       appliedRule: row.appliedRule,
+      appliedLookupKey: row.appliedLookupKey,
       candidateStyles: row.candidateStyles,
       candidates: row.candidates,
       tags: row.tags,
@@ -372,6 +416,8 @@ function summarizeProductNameRows(rows: InvoiceProductNameTransformRow[]) {
     unresolvedRowCount,
     excludedRowCount,
     exclusionGuardedRowCount,
+    giftPendingRowCount,
+    giftMappedRowCount,
     unresolvedCombos: [...unresolvedByKey.values()].sort(
       (left, right) =>
         left.productName.localeCompare(right.productName, 'ko-KR') ||
@@ -418,6 +464,7 @@ export function transformInvoiceProductNames(
           style: null,
           transformedProductName: source.productName,
           appliedRule: candidate.rule,
+          appliedLookupKey: candidate.text,
           ...itemNameOutcome(candidate.rule, source.itemName, false),
           candidates,
           candidateStyles: styles,
@@ -431,6 +478,7 @@ export function transformInvoiceProductNames(
         style: styles[0]!,
         transformedProductName: styles[0]!.name,
         appliedRule: candidate.rule,
+        appliedLookupKey: candidate.text,
         ...itemNameOutcome(candidate.rule, source.itemName, true),
         candidates,
         candidateStyles: styles,
@@ -449,6 +497,7 @@ export function transformInvoiceProductNames(
           style: null,
           transformedProductName: source.productName,
           appliedRule: candidate.rule,
+          appliedLookupKey: candidate.text,
           ...itemNameOutcome(candidate.rule, source.itemName, false),
           candidates,
           candidateStyles: styles,
@@ -465,6 +514,7 @@ export function transformInvoiceProductNames(
         style: styles[0]!,
         transformedProductName: styles[0]!.name,
         appliedRule: viaCompact ? 'compact' : candidate.rule,
+        appliedLookupKey: candidate.text,
         ...itemNameOutcome(candidate.rule, source.itemName, false),
         candidates,
         candidateStyles: styles,
@@ -480,6 +530,7 @@ export function transformInvoiceProductNames(
         style: null,
         transformedProductName: source.productName,
         appliedRule: candidates[0]?.rule ?? null,
+        appliedLookupKey: candidates[0]?.text ?? null,
         ...itemNameOutcome(candidates[0]?.rule ?? null, source.itemName, false),
         candidates,
         candidateStyles: [],
@@ -494,6 +545,7 @@ export function transformInvoiceProductNames(
       style: null,
       transformedProductName: source.productName,
       appliedRule: null,
+      appliedLookupKey: null,
       ...itemNameOutcome(null, source.itemName, false),
       candidates,
       candidateStyles: [],
@@ -502,6 +554,51 @@ export function transformInvoiceProductNames(
   })
 
   const rows = applyProductNameExclusions(matchedRows, exclusions)
+  return {
+    rows,
+    ...summarizeProductNameRows(rows),
+  }
+}
+
+/**
+ * 일반 품목명 변환 뒤에만, 사용자가 명시적으로 적용한 사은품 계획을 덮어쓴다.
+ * 행 객체와 조합 키는 유지하고, 적용된 사은품 조합만 AI 미해결 목록에서 뺀다.
+ */
+export function overlayGiftSourceOnProductNames(
+  transformation: InvoiceProductNameTransformation,
+  plan: GiftSourcePlan,
+): InvoiceProductNameTransformation {
+  if (plan.candidateRowNumbers.size === 0) return transformation
+  const groupByRow = new Map<number, string>()
+  for (const group of plan.groups) {
+    for (const rowNumber of group.sourceRowNumbers) {
+      groupByRow.set(rowNumber, group.key)
+    }
+  }
+  const rows = transformation.rows.map((row) => {
+    const rowNumber = row.source.rowNumber
+    if (plan.mappedRowNumbers.has(rowNumber)) {
+      const replacements = plan.replacementsByRow.get(rowNumber) ?? []
+      const first = replacements[0]?.style ?? null
+      return {
+        ...row,
+        status: 'gift_mapped' as const,
+        style: first,
+        transformedProductName: first?.name ?? row.source.productName,
+        giftSourceKey: groupByRow.get(rowNumber) ?? null,
+        giftReplacements: replacements,
+      }
+    }
+    if (plan.pendingRowNumbers.has(rowNumber)) {
+      return {
+        ...row,
+        status: 'gift_pending' as const,
+        giftSourceKey: groupByRow.get(rowNumber) ?? null,
+        giftReplacements: [],
+      }
+    }
+    return row
+  })
   return {
     rows,
     ...summarizeProductNameRows(rows),

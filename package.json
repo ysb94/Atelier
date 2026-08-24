@@ -14,6 +14,9 @@
     "verify:ai-gateway": "node scripts/verify-ai-gateway.mjs",
     "verify:ai-hybrid-replay": "node scripts/verify-ai-hybrid-replay.mjs",
     "verify:product-name-tags": "node scripts/verify-product-name-tags.mjs",
+    "verify:product-name-ai-review": "node scripts/verify-product-name-ai-review.mjs",
+    "verify:gift-source": "node scripts/verify-gift-source.mjs",
+    "verify:gift-diversity": "node scripts/verify-gift-diversity.mjs",
     "verify:style-parts": "node scripts/verify-style-parts.mjs"
   },
   "dependencies": {

@@ -2,7 +2,12 @@
  * 품목명 선행 [태그] 추출·역할·매칭명 검증.
  * 실행: npm run verify:product-name-tags
  */
-import { generateProductNameCandidates } from '@/lib/invoice/product-name-patterns'
+import {
+  generateProductNameCandidates,
+  generateProductNameRegistrationCandidates,
+  pickDefaultProductNameLookupKey,
+  productNameCandidateKey,
+} from '@/lib/invoice/product-name-patterns'
 import { compactProductNameKey } from '@/lib/invoice/lookup-normalization'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import {
@@ -11,6 +16,7 @@ import {
   collectFileTagGroups,
   extractLeadingBracketTags,
   matchingProductName,
+  matchingProductNameFromTags,
   suggestTagRole,
   tagRoleKey,
 } from '@/lib/invoice/product-name-tags'
@@ -72,6 +78,7 @@ assert(tagRoleKey('[단독]') === normalizeInvoiceText('[단독]'), '단독은 e
 assert(suggestTagRole('[8/21예약배송]') === 'event_marketing', '예약배송 추천')
 assert(suggestTagRole('[1+1]') === 'event_marketing', '1+1 추천')
 assert(suggestTagRole('[비치볼 증정]') === 'composition_gift', '증정 추천')
+assert(suggestTagRole('[사은품]') === 'composition_gift', '사은품 추천')
 assert(suggestTagRole('[태슬1개 포함]') === 'product_composition', '포함 구성 추천')
 assert(suggestTagRole('[SET]') === 'product_composition', 'SET 구성 추천')
 assert(suggestTagRole('[리퍼브]') === 'identity_condition', '리퍼브 추천')
@@ -103,6 +110,13 @@ assert(
   matchingProductName('[단독] 마스마룰즈 로그 나일론 숄더백') ===
     '[단독] 마스마룰즈 로그 나일론 숄더백',
   '미분류는 매칭명에서 빼지 않음',
+)
+assert(
+  matchingProductNameFromTags(
+    '[단독] 마스마룰즈 로그 나일론 숄더백',
+    [],
+  ) === '[단독] 마스마룰즈 로그 나일론 숄더백',
+  '분류 목록에 없는 태그도 신규 등록 품목명에 남김',
 )
 
 const mixed = matchingProductName(
@@ -151,6 +165,84 @@ assert(
       (item) => item.text === '마스마룰즈 래빗에코백 32타입 Color: 트로피칼',
     ),
   '원문 후보가 역할 반영 후보보다 앞',
+)
+const candidateKeys = stripped.map(productNameCandidateKey)
+assert(
+  new Set(candidateKeys).size === candidateKeys.length,
+  '태그 전·후 후보 키는 모두 유일해야 한다',
+)
+assert(
+  stripped.filter((item) => item.rule === 'product').length >= 2,
+  '같은 product rule의 태그 전·후 후보가 함께 있다',
+)
+assert(
+  pickDefaultProductNameLookupKey({
+    candidates: stripped,
+    appliedRule: 'product',
+    appliedLookupKey: '마스마룰즈 래빗에코백 32타입',
+  }) === '마스마룰즈 래빗에코백 32타입',
+  '기본 선택은 실제 맞춘 후보 텍스트를 우선한다',
+)
+assert(
+  pickDefaultProductNameLookupKey({
+    candidates: stripped,
+    appliedRule: 'product',
+  }) === '[단독] 마스마룰즈 래빗에코백 32타입',
+  '맞춘 텍스트가 없으면 같은 규칙의 첫 후보를 쓴다',
+)
+
+const registrationProductName =
+  '[SET][단독][사은품][리퍼브] 마스마룰즈 래빗에코백 32타입'
+const registrationTags = classifyLeadingTags(registrationProductName, [
+  role('[SET]', 'product_composition'),
+  role('[단독]', 'event_marketing'),
+  role('[사은품]', 'composition_gift'),
+  role('[리퍼브]', 'identity_condition'),
+])
+const registration = generateProductNameRegistrationCandidates({
+  productName: matchingProductNameFromTags(
+    registrationProductName,
+    registrationTags,
+  ),
+  itemName: 'Color: [9/2예약배송]레이스 플라워',
+})
+assert(registration.length === 3, '신규 등록 후보는 최대 3종')
+assert(
+  registration.map((item) => item.rule).join(',') ===
+    'product,item_full,product_item',
+  '신규 등록 후보 순서는 품목명·내품명·결합',
+)
+assert(
+  registration[0]?.text === '[SET] 마스마룰즈 래빗에코백 32타입',
+  '행사·사은품·상품상태 태그만 품목명에서 제거',
+)
+assert(
+  registration[1]?.text === 'Color: [9/2예약배송]레이스 플라워',
+  '내품명은 앞부분으로 자르지 않고 원문 전체를 등록',
+)
+assert(
+  registration[2]?.text ===
+    '[SET] 마스마룰즈 래빗에코백 32타입 Color: [9/2예약배송]레이스 플라워',
+  '정리된 품목명과 내품명 전체를 결합',
+)
+assert(
+  generateProductNameRegistrationCandidates({
+    productName: '마스마룰즈 파우치',
+    itemName: '-',
+  }).length === 1,
+  '빈 값 힌트인 내품명은 등록 후보에서 제외',
+)
+const legacyPrefixCandidates = generateProductNameCandidates({
+  productName: '[단독] 마스마룰즈 파우치',
+  itemName: 'Blue / Large',
+})
+assert(
+  legacyPrefixCandidates.some(
+    (item) =>
+      item.rule === 'product_item_slash_prefix' &&
+      item.text === '[단독] 마스마룰즈 파우치 Blue',
+  ),
+  '기존 자동 조회의 슬래시 앞부분 후보는 유지',
 )
 
 const fileGroups = collectFileTagGroups([

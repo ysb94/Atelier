@@ -1,5 +1,7 @@
+import type { GiftAssignment } from '@/lib/invoice/gift-assign'
 import {
   buildOutgoingComponentRows,
+  type InvoiceGiftOutgoingComponent,
   type InvoiceOptionTransformRow,
   type InvoiceOutgoingComponentRow,
 } from '@/lib/invoice/option-transform'
@@ -380,6 +382,24 @@ export function transformInvoiceItemNames(
 
   const rows = sourceRows.map((source): InvoiceItemNameTransformRow => {
     const product = productByRow.get(source.rowNumber)
+    if (
+      product?.status === 'gift_pending' ||
+      product?.status === 'gift_mapped'
+    ) {
+      return {
+        source,
+        status: 'consumed',
+        mapId: null,
+        ruleId: null,
+        productStyle: product.style,
+        extras: [],
+        expandableExtras: [],
+        transformedItemName: '',
+        displayChanged: Boolean(source.itemName),
+        resolvedBy: null,
+        evidence: [],
+      }
+    }
     const productExcluded = product?.status === 'excluded'
     const productStyle = product?.style ?? null
     const effectiveItemName = product?.effectiveItemName ?? source.itemName
@@ -670,6 +690,7 @@ export function buildOutgoingComponentRowsFromStages(options: {
   productRows: InvoiceProductNameTransformRow[]
   itemRows: InvoiceItemNameTransformRow[]
   giftRowsBySource: Map<number, SabangnetOrderRow[]>
+  giftAssignments?: GiftAssignment[]
   packingMaterials?: {
     styleNo: string
     name: string
@@ -679,29 +700,68 @@ export function buildOutgoingComponentRowsFromStages(options: {
   const itemByRow = new Map(
     options.itemRows.map((row) => [row.source.rowNumber, row]),
   )
+  const giftOutgoingBySource = new Map<number, InvoiceGiftOutgoingComponent[]>()
+  const inlineGiftRows = new Set<number>()
+  for (const product of options.productRows) {
+    if (product.status !== 'gift_mapped' || !product.giftReplacements?.length) {
+      continue
+    }
+    inlineGiftRows.add(product.source.rowNumber)
+    giftOutgoingBySource.set(
+      product.source.rowNumber,
+      product.giftReplacements.map((item) => ({
+        styleNo: item.style.styleNo,
+        styleName: item.style.name,
+        quantity: item.quantity,
+      })),
+    )
+  }
+  if (options.giftAssignments) {
+    for (const assignment of options.giftAssignments) {
+      if (inlineGiftRows.has(assignment.sourceRowNumber)) continue
+      const list = giftOutgoingBySource.get(assignment.sourceRowNumber) ?? []
+      list.push({
+        styleNo: assignment.styleNo,
+        styleName: assignment.styleName || assignment.giftName,
+        quantity: 1,
+      })
+      giftOutgoingBySource.set(assignment.sourceRowNumber, list)
+    }
+  }
   const optionRows: InvoiceOptionTransformRow[] = options.productRows
-    .filter((product) => product.status !== 'excluded')
+    .filter(
+      (product) =>
+        product.status !== 'excluded' && product.status !== 'gift_pending',
+    )
     .map((product) => {
       const item = itemByRow.get(product.source.rowNumber)
+      const giftMapped = product.status === 'gift_mapped'
       const mapped =
         product.status === 'mapped' || product.status === 'candidate'
       return {
         source: product.source,
-        status: mapped ? 'mapped' : product.status === 'conflict' ? 'conflict' : 'unresolved',
+        status: giftMapped || mapped
+          ? 'mapped'
+          : product.status === 'conflict'
+            ? 'conflict'
+            : 'unresolved',
         mapId: item?.mapId ?? product.mapId,
-        main: product.style,
-        extras: item?.extras ?? [],
+        main: giftMapped ? null : product.style,
+        extras: giftMapped ? [] : (item?.extras ?? []),
         transformedName: product.transformedProductName,
-        transformedItemName:
-          item?.transformedItemName ??
-          product.effectiveItemName ??
-          product.source.itemName,
+        transformedItemName: giftMapped
+          ? ''
+          : item?.transformedItemName ??
+            product.effectiveItemName ??
+            product.source.itemName,
         codeHintName: null,
       }
     })
   return buildOutgoingComponentRows({
     optionRows,
     giftRowsBySource: options.giftRowsBySource,
+    giftOutgoingBySource:
+      giftOutgoingBySource.size > 0 ? giftOutgoingBySource : undefined,
     packingMaterials: options.packingMaterials,
   })
 }

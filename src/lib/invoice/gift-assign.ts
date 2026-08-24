@@ -1,4 +1,9 @@
 import {
+  resolveGiftDiversity,
+  type GiftDiversityClaim,
+  type GiftDiversityResult,
+} from '@/lib/invoice/gift-diversity'
+import {
   normalizeInvoiceText,
   orderMomentOf,
   type InvoicePrefixPlan,
@@ -17,6 +22,8 @@ import type {
 export type GiftAssignment = {
   styleId: string
   styleNo: string
+  /** 접두어 없는 현재 공식명 */
+  styleName: string
   giftName: string
   sourceRowNumber: number
   requestId: string
@@ -127,6 +134,8 @@ export type GiftAssignmentPlan = {
   sharedQuotaPreviews: GiftSharedQuotaPreview[]
   exhaustedSkipCount: number
   cancelledSkipCount: number
+  /** 고정 규칙·후보 부족으로 같은 받는분에 같은 M번호가 반복된 횟수 */
+  unavoidableDuplicateCount: number
 }
 
 export type GiftAssignOptions = {
@@ -155,6 +164,19 @@ export function shipmentKeyOf(row: SabangnetOrderRow): string {
   ].join('\u0000')
 }
 
+/**
+ * 파일 안 사은품 중복 방지 키. 쇼핑몰명은 빼고, 식별 필드가 비면 주문 지문으로 폴백한다.
+ */
+export function giftRecipientKey(row: SabangnetOrderRow): string {
+  const name = normalizeInvoiceText(row.recipientName)
+  const phone = phoneOf(row)
+  const address = normalizeInvoiceText(row.recipientAddress)
+  if (!name && !phone && !address) {
+    return `fp:${buildOrderFingerprint(row)}`
+  }
+  return [name, phone, address].join('\u0000')
+}
+
 /** 같은 합포장 안에서 주문일시가 같으면 같은 주문건이다. */
 export function orderKeyOf(row: SabangnetOrderRow): string {
   return orderMomentOf(row) || row.orderedAt.trim() || `#${row.rowNumber}`
@@ -164,28 +186,6 @@ function parseQuantity(value: string): number {
   const parsed = Number(value.replace(/,/g, ''))
   if (!Number.isFinite(parsed) || parsed <= 0) return 1
   return Math.floor(parsed)
-}
-
-function mulberry32(seed: number): () => number {
-  let state = seed >>> 0
-  return () => {
-    state = (state + 0x6d2b79f5) >>> 0
-    let t = state
-    t = Math.imul(t ^ (t >>> 15), t | 1)
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-
-function shuffle<T>(items: T[], rng: () => number): T[] {
-  const next = [...items]
-  for (let i = next.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(rng() * (i + 1))
-    const left = next[i]!
-    next[i] = next[j]!
-    next[j] = left
-  }
-  return next
 }
 
 export function createGiftSeed(): number {
@@ -258,24 +258,6 @@ function compareGiftOrder(left: SabangnetOrderRow, right: SabangnetOrderRow) {
   return left.rowNumber - right.rowNumber
 }
 
-function pickRandomGift(
-  candidates: StyleRef[],
-  usedInShipment: Set<string>,
-  counts: Map<string, number>,
-  rng: () => number,
-): StyleRef | null {
-  if (candidates.length === 0) return null
-  const unused = candidates.filter((ref) => !usedInShipment.has(ref.styleId))
-  const pool = unused.length > 0 ? unused : candidates
-  let min = Infinity
-  for (const ref of pool) {
-    const n = counts.get(ref.styleId) ?? 0
-    if (n < min) min = n
-  }
-  const tied = pool.filter((ref) => (counts.get(ref.styleId) ?? 0) === min)
-  return shuffle(tied, rng)[0] ?? null
-}
-
 function countGifts(
   rows: SabangnetOrderRow[],
   request: InvoicePrefixRequest,
@@ -336,17 +318,54 @@ type ShipmentBucket = {
   earliestRow: SabangnetOrderRow
 }
 
-/**
- * 사은품 대상 행을 합포장 묶음으로 모아 사은품을 배정한다.
- * 선착순 요청은 주문일시 순으로 M번호별 잔여 한도 안에서만 배정한다.
- * 표시명은 합포장마다 `사은품(1) : 공식명`부터 번호를 매긴다.
- */
-export function planGiftAssignments(
+export type CampaignGiftClaimRecord = {
+  claim: GiftDiversityClaim
+  bucketKey: string
+  source: SabangnetOrderRow
+  liveRequest: InvoicePrefixRequest
+  item: InvoicePrefixItem
+  orderFingerprint: string
+  slot: number
+  atomicGroupKey: string
+  sourceIndex: number
+}
+
+export type CampaignGiftCollectResult = {
+  claims: GiftDiversityClaim[]
+  records: CampaignGiftClaimRecord[]
+  buckets: ShipmentBucket[]
+  cancelledSkipCount: number
+  priorCounts: Map<string, number>
+  remainingByRequestStyle: Map<string, number>
+  remainingByRequest: Map<string, number>
+  usedByRequestStyle: Map<string, number>
+  usedByRequest: Map<string, number>
+  existingByKey: Map<string, InvoiceGiftAllocation>
+  prefixPlan: InvoicePrefixPlan
+  requests: InvoicePrefixRequest[]
+  rows: SabangnetOrderRow[]
+}
+
+function claimSortKey(
+  source: SabangnetOrderRow,
+  fingerprint: string,
+  slot: number,
+) {
+  return [
+    orderMomentOf(source) || source.orderedAt.trim(),
+    normalizeInvoiceText(source.customerOrderNo),
+    fingerprint,
+    String(source.rowNumber).padStart(8, '0'),
+    String(slot).padStart(4, '0'),
+  ].join('\u0000')
+}
+
+export function collectCampaignGiftClaims(
   rows: SabangnetOrderRow[],
   prefixPlan: InvoicePrefixPlan,
   requests: InvoicePrefixRequest[],
   options: GiftAssignOptions,
-): GiftAssignmentPlan {
+): CampaignGiftCollectResult {
   const requestById = new Map(requests.map((request) => [request.id, request]))
   const itemById = new Map<string, IndexedItem>()
   for (const request of requests) {
@@ -408,10 +427,13 @@ export function planGiftAssignments(
     }
   }
 
-  const totalsById = new Map<string, GiftTotal>()
-  const confirmCandidates: GiftConfirmCandidate[] = []
-  let exhaustedSkipCount = 0
-  let cancelledSkipCount = 0
+  const priorCounts = new Map<string, number>()
+  for (const allocation of activeAllocations) {
+    priorCounts.set(
+      allocation.styleId,
+      (priorCounts.get(allocation.styleId) ?? 0) + 1,
+    )
+  }
 
   const allByKey = new Map<string, SabangnetOrderRow[]>()
   for (const row of rows) {
@@ -441,61 +463,18 @@ export function planGiftAssignments(
     })
   }
 
-  const rng = mulberry32(options.seed)
-  // 랜덤 균형은 행사 전체 기존 배정 + 이번 계획 누적을 함께 본다.
-  const counts = new Map<string, number>()
-  for (const allocation of activeAllocations) {
-    counts.set(
-      allocation.styleId,
-      (counts.get(allocation.styleId) ?? 0) + 1,
-    )
-  }
-
-  const shipments: GiftShipment[] = []
-  const addedRows: SabangnetOrderRow[] = []
-  const giftsBySourceRowNumber = new Map<number, SabangnetOrderRow[]>()
-  let nextRowNumber =
-    rows.reduce((max, row) => Math.max(max, row.rowNumber), 0) + 1
-
-  function bumpTotal(ref: StyleRef) {
-    const previous = totalsById.get(ref.styleId)
-    if (previous) {
-      previous.count += 1
-      return
-    }
-    totalsById.set(ref.styleId, {
-      styleId: ref.styleId,
-      styleNo: ref.styleNo,
-      giftName: ref.name,
-      count: 1,
-    })
-  }
-
-  function remainingOf(requestId: string, styleId: string) {
-    return remainingByRequestStyle.get(`${requestId}\u0000${styleId}`) ?? 0
-  }
-
-  function consumeRemaining(requestId: string, styleId: string) {
-    const key = `${requestId}\u0000${styleId}`
-    remainingByRequestStyle.set(key, Math.max(0, remainingOf(requestId, styleId) - 1))
-  }
-
-  function sharedRemainingOf(requestId: string) {
-    return remainingByRequest.get(requestId) ?? 0
-  }
-
-  function consumeSharedRemaining(requestId: string, count: number) {
-    remainingByRequest.set(
-      requestId,
-      Math.max(0, sharedRemainingOf(requestId) - count),
-    )
-  }
-
   const orderedBuckets = [...buckets.values()].sort((left, right) => {
     const byOrder = compareGiftOrder(left.earliestRow, right.earliestRow)
     if (byOrder !== 0) return byOrder
     return left.firstRowNumber - right.firstRowNumber
   })
+
+  const records: CampaignGiftClaimRecord[] = []
+  let cancelledSkipCount = 0
+
+  function pushRecord(record: CampaignGiftClaimRecord) {
+    records.push(record)
+  }
 
   for (const bucket of orderedBuckets) {
     const byItem = new Map<string, SabangnetOrderRow[]>()
@@ -507,27 +486,8 @@ export function planGiftAssignments(
       byItem.set(match.itemId, list)
     }
 
-    const usedInShipment = new Set<string>()
-    const assignments: GiftAssignment[] = []
-    const productNames: string[] = []
-    const seenProduct = new Set<string>()
-    const orderNos = new Set<string>()
-    const matchedRows: SabangnetOrderRow[] = []
-    let giftIndexInShipment = 0
-
-    for (const row of bucket.rows) {
-      orderNos.add(orderKeyOf(row))
-      if (prefixPlan.matchByRowNumber.has(row.rowNumber)) {
-        matchedRows.push(row)
-        const key = normalizeInvoiceText(row.productName)
-        if (seenProduct.has(key)) continue
-        seenProduct.add(key)
-        productNames.push(row.productName)
-      }
-    }
-
     const itemEntries = [...byItem.entries()]
-      .map(([itemId, rows]) => [itemId, [...rows].sort(compareGiftOrder)] as const)
+      .map(([itemId, itemRows]) => [itemId, [...itemRows].sort(compareGiftOrder)] as const)
       .sort((left, right) => compareGiftOrder(left[1][0]!, right[1][0]!))
 
     for (const [itemId, itemRows] of itemEntries) {
@@ -545,8 +505,6 @@ export function planGiftAssignments(
           sourceIndexByFingerprint.set(value, index)
         }
       })
-      // 사은품 그룹(세트 1개 단위)은 주문 행 하나에 붙여
-      // atomicGroupKey와 allocationKey가 같은 주문 지문을 가리키게 한다.
       const sourceIndexOfGroup = (groupIndex: number) =>
         (groupIndex - 1) % itemRows.length
       const groupFingerprint = (groupIndex: number) =>
@@ -578,7 +536,6 @@ export function planGiftAssignments(
         (ref) => !excluded.has(ref.styleId),
       )
       if (candidates.length === 0) continue
-      // 고정 세트는 품절 제외된 구성품이 하나라도 있으면 일부만 지급하지 않는다.
       if (
         existingForOrder.length === 0 &&
         !item.isRandom &&
@@ -587,14 +544,13 @@ export function planGiftAssignments(
         continue
       }
 
-      const gifts: Array<
-        StyleRef & {
-          slot: number
-          existing: boolean
-          atomicGroupKey: string
-          sourceIndex: number
-        }
-      > = []
+      const quota =
+        liveRequest.usesFirstCome
+          ? {
+              requestId: liveRequest.id,
+              mode: liveRequest.firstComeLimitMode,
+            }
+          : undefined
 
       if (existingForOrder.length > 0) {
         for (const allocation of existingForOrder) {
@@ -604,254 +560,245 @@ export function planGiftAssignments(
                 (allocation.giftSlotIndex - 1) /
                   Math.max(1, configuredCandidates.length),
               ) + 1
-          gifts.push({
+          const sourceIndex =
+            sourceIndexByFingerprint.get(allocation.orderFingerprint) ?? 0
+          const source = itemRows[sourceIndex]!
+          const style = {
             styleId: allocation.styleId,
             styleNo: allocation.styleNo,
             name: allocation.styleName,
+          }
+          const claim: GiftDiversityClaim = {
+            id: `campaign:${liveRequest.id}:${allocation.allocationKey}`,
+            recipientKey: giftRecipientKey(source),
+            sortKey: claimSortKey(source, allocation.orderFingerprint, allocation.giftSlotIndex),
+            candidates: [style],
+            lockedStyle: style,
+            isExisting: true,
+            groupId: `campaign-existing:${liveRequest.id}:${allocation.allocationKey}`,
+            skipUnit: 'claim',
+          }
+          pushRecord({
+            claim,
+            bucketKey: bucket.key,
+            source,
+            liveRequest,
+            item,
+            orderFingerprint: allocation.orderFingerprint,
             slot: allocation.giftSlotIndex,
-            existing: true,
             atomicGroupKey: buildAtomicGroupKey(
               allocation.orderFingerprint,
               item.id,
               groupIndex,
             ),
-            sourceIndex:
-              sourceIndexByFingerprint.get(allocation.orderFingerprint) ?? 0,
-          })
-          usedInShipment.add(allocation.styleId)
-          bumpTotal({
-            styleId: allocation.styleId,
-            styleNo: allocation.styleNo,
-            name: allocation.styleName,
+            sourceIndex,
           })
         }
-      } else if (liveRequest.usesFirstCome) {
-        let nextSlot = 1
-        if (
-          liveRequest.firstComeLimitMode === 'shared_total' &&
-          item.isRandom
-        ) {
-          for (let i = 0; i < count; i += 1) {
-            if (sharedRemainingOf(liveRequest.id) < 1) {
-              exhaustedSkipCount += 1
-              break
-            }
-            const picked = pickRandomGift(
-              candidates,
-              usedInShipment,
-              counts,
-              rng,
-            )
-            if (!picked) break
-            gifts.push({
-              ...picked,
-              slot: nextSlot,
-              existing: false,
-              atomicGroupKey: buildAtomicGroupKey(
-                groupFingerprint(i + 1),
-                item.id,
-                i + 1,
-              ),
-              sourceIndex: sourceIndexOfGroup(i + 1),
-            })
-            nextSlot += 1
-            usedInShipment.add(picked.styleId)
-            counts.set(picked.styleId, (counts.get(picked.styleId) ?? 0) + 1)
-            consumeSharedRemaining(liveRequest.id, 1)
-            bumpTotal(picked)
-          }
-        } else if (liveRequest.firstComeLimitMode === 'shared_total') {
-          for (let i = 0; i < count; i += 1) {
-            if (sharedRemainingOf(liveRequest.id) < candidates.length) {
-              exhaustedSkipCount += 1
-              break
-            }
-            const atomicGroupKey = buildAtomicGroupKey(
-              groupFingerprint(i + 1),
-              item.id,
-              i + 1,
-            )
-            const sourceIndex = sourceIndexOfGroup(i + 1)
-            for (const ref of candidates) {
-              gifts.push({
-                ...ref,
-                slot: nextSlot,
-                existing: false,
-                atomicGroupKey,
-                sourceIndex,
-              })
-              nextSlot += 1
-              usedInShipment.add(ref.styleId)
-              counts.set(ref.styleId, (counts.get(ref.styleId) ?? 0) + 1)
-              bumpTotal(ref)
-            }
-            consumeSharedRemaining(liveRequest.id, candidates.length)
-          }
-        } else if (item.isRandom) {
-          for (let i = 0; i < count; i += 1) {
-            const withQuota = candidates.filter(
-              (ref) => remainingOf(liveRequest.id, ref.styleId) > 0,
-            )
-            const picked = pickRandomGift(
-              withQuota,
-              usedInShipment,
-              counts,
-              rng,
-            )
-            if (!picked) {
-              exhaustedSkipCount += 1
-              break
-            }
-            gifts.push({
-              ...picked,
-              slot: nextSlot,
-              existing: false,
-              atomicGroupKey: buildAtomicGroupKey(
-                groupFingerprint(i + 1),
-                item.id,
-                i + 1,
-              ),
-              sourceIndex: sourceIndexOfGroup(i + 1),
-            })
-            nextSlot += 1
-            usedInShipment.add(picked.styleId)
-            counts.set(picked.styleId, (counts.get(picked.styleId) ?? 0) + 1)
-            consumeRemaining(liveRequest.id, picked.styleId)
-            bumpTotal(picked)
-          }
-        } else {
-          for (let i = 0; i < count; i += 1) {
-            const canTakeSet = candidates.every(
-              (ref) => remainingOf(liveRequest.id, ref.styleId) > 0,
-            )
-            if (!canTakeSet) {
-              exhaustedSkipCount += 1
-              break
-            }
-            const atomicGroupKey = buildAtomicGroupKey(
-              groupFingerprint(i + 1),
-              item.id,
-              i + 1,
-            )
-            const sourceIndex = sourceIndexOfGroup(i + 1)
-            for (const ref of candidates) {
-              gifts.push({
-                ...ref,
-                slot: nextSlot,
-                existing: false,
-                atomicGroupKey,
-                sourceIndex,
-              })
-              nextSlot += 1
-              usedInShipment.add(ref.styleId)
-              counts.set(ref.styleId, (counts.get(ref.styleId) ?? 0) + 1)
-              consumeRemaining(liveRequest.id, ref.styleId)
-              bumpTotal(ref)
-            }
-          }
-        }
-      } else if (item.isRandom) {
-        let nextSlot = 1
-        for (let i = 0; i < count; i += 1) {
-          const picked = pickRandomGift(
-            candidates,
-            usedInShipment,
-            counts,
-            rng,
-          )
-          if (!picked) break
-          gifts.push({
-            ...picked,
-            slot: nextSlot,
-            existing: false,
-            atomicGroupKey: buildAtomicGroupKey(
-              groupFingerprint(i + 1),
-              item.id,
-              i + 1,
-            ),
-            sourceIndex: sourceIndexOfGroup(i + 1),
-          })
-          nextSlot += 1
-          usedInShipment.add(picked.styleId)
-          counts.set(picked.styleId, (counts.get(picked.styleId) ?? 0) + 1)
-          bumpTotal(picked)
-        }
-      } else {
-        let nextSlot = 1
-        for (let i = 0; i < count; i += 1) {
-          const atomicGroupKey = buildAtomicGroupKey(
-            groupFingerprint(i + 1),
-            item.id,
-            i + 1,
-          )
-          const sourceIndex = sourceIndexOfGroup(i + 1)
-          for (const ref of candidates) {
-            gifts.push({
-              ...ref,
-              slot: nextSlot,
-              existing: false,
-              atomicGroupKey,
-              sourceIndex,
-            })
-            nextSlot += 1
-            usedInShipment.add(ref.styleId)
-            counts.set(ref.styleId, (counts.get(ref.styleId) ?? 0) + 1)
-            bumpTotal(ref)
-          }
-        }
+        continue
       }
 
-      for (const gift of gifts) {
-        const giftSource = itemRows[gift.sourceIndex]!
-        const giftFingerprint = rowFingerprints[gift.sourceIndex]!
-        const allocationKey = buildAllocationKey(
-          giftFingerprint,
-          item.id,
-          gift.styleId,
-          gift.slot,
-        )
-        giftIndexInShipment += 1
-        const giftLabel = formatGiftProductName(giftIndexInShipment, gift.name)
-        assignments.push({
-          styleId: gift.styleId,
-          styleNo: gift.styleNo,
-          giftName: giftLabel,
-          sourceRowNumber: giftSource.rowNumber,
-          requestId: liveRequest.id,
-          requestTitle: liveRequest.title,
-          itemId: item.id,
-          isRandom: item.isRandom,
-        })
-        const giftRow = copyAsGiftRow(giftSource, giftLabel, nextRowNumber)
-        addedRows.push(giftRow)
-        const list = giftsBySourceRowNumber.get(giftSource.rowNumber) ?? []
-        list.push(giftRow)
-        giftsBySourceRowNumber.set(giftSource.rowNumber, list)
-        nextRowNumber += 1
-
-        if (liveRequest.usesFirstCome) {
-          confirmCandidates.push({
-            requestId: liveRequest.id,
-            itemId: item.id,
-            styleId: gift.styleId,
-            styleNo: gift.styleNo,
-            styleName: gift.name,
-            mallName: giftSource.mallName,
-            customerOrderNo: giftSource.customerOrderNo,
-            orderedAt:
-              orderMomentOf(giftSource) || giftSource.orderedAt.trim(),
-            orderFingerprint: giftFingerprint,
-            allocationKey,
-            atomicGroupKey: gift.atomicGroupKey,
-            giftSlotIndex: gift.slot,
-            sourceRowNumber: giftSource.rowNumber,
-            requestTitle: liveRequest.title,
-            isRandom: item.isRandom,
-            isExisting:
-              gift.existing ||
-              existingByKey.has(`${liveRequest.id}\u0000${allocationKey}`),
+      if (item.isRandom) {
+        for (let i = 0; i < count; i += 1) {
+          const slot = i + 1
+          const sourceIndex = sourceIndexOfGroup(slot)
+          const source = itemRows[sourceIndex]!
+          const fingerprint = groupFingerprint(slot)
+          const claim: GiftDiversityClaim = {
+            id: `campaign:${liveRequest.id}:${item.id}:${fingerprint}:${slot}`,
+            recipientKey: giftRecipientKey(source),
+            sortKey: claimSortKey(source, fingerprint, slot),
+            candidates,
+            groupId: `campaign:${liveRequest.id}:${item.id}:${fingerprint}:${slot}`,
+            skipUnit: 'claim',
+            quota: quota
+              ? {
+                  ...quota,
+                  sharedCost: 1,
+                }
+              : undefined,
+          }
+          pushRecord({
+            claim,
+            bucketKey: bucket.key,
+            source,
+            liveRequest,
+            item,
+            orderFingerprint: fingerprint,
+            slot,
+            atomicGroupKey: buildAtomicGroupKey(fingerprint, item.id, slot),
+            sourceIndex,
           })
         }
+        continue
+      }
+
+      for (let i = 0; i < count; i += 1) {
+        const groupIndex = i + 1
+        const fingerprint = groupFingerprint(groupIndex)
+        const sourceIndex = sourceIndexOfGroup(groupIndex)
+        const source = itemRows[sourceIndex]!
+        const groupId = `campaign-set:${liveRequest.id}:${item.id}:${fingerprint}:${groupIndex}`
+        let slot = (groupIndex - 1) * candidates.length + 1
+        for (const ref of candidates) {
+          const claim: GiftDiversityClaim = {
+            id: `campaign:${liveRequest.id}:${item.id}:${fingerprint}:${slot}`,
+            recipientKey: giftRecipientKey(source),
+            sortKey: claimSortKey(source, fingerprint, slot),
+            candidates: [ref],
+            lockedStyle: ref,
+            groupId,
+            skipUnit: 'group',
+            quota: quota
+              ? {
+                  ...quota,
+                  sharedCost: candidates.length,
+                }
+              : undefined,
+          }
+          pushRecord({
+            claim,
+            bucketKey: bucket.key,
+            source,
+            liveRequest,
+            item,
+            orderFingerprint: fingerprint,
+            slot,
+            atomicGroupKey: buildAtomicGroupKey(fingerprint, item.id, groupIndex),
+            sourceIndex,
+          })
+          slot += 1
+        }
+      }
+    }
+  }
+
+  return {
+    claims: records.map((record) => record.claim),
+    records,
+    buckets: orderedBuckets,
+    cancelledSkipCount,
+    priorCounts,
+    remainingByRequestStyle,
+    remainingByRequest,
+    usedByRequestStyle,
+    usedByRequest,
+    existingByKey,
+    prefixPlan,
+    requests,
+    rows,
+  }
+}
+
+export function materializeCampaignGiftPlan(
+  collected: CampaignGiftCollectResult,
+  resolved: GiftDiversityResult,
+): GiftAssignmentPlan {
+  const totalsById = new Map<string, GiftTotal>()
+  const confirmCandidates: GiftConfirmCandidate[] = []
+  const shipments: GiftShipment[] = []
+  const addedRows: SabangnetOrderRow[] = []
+  const giftsBySourceRowNumber = new Map<number, SabangnetOrderRow[]>()
+  let nextRowNumber =
+    collected.rows.reduce((max, row) => Math.max(max, row.rowNumber), 0) + 1
+
+  function bumpTotal(ref: StyleRef) {
+    const previous = totalsById.get(ref.styleId)
+    if (previous) {
+      previous.count += 1
+      return
+    }
+    totalsById.set(ref.styleId, {
+      styleId: ref.styleId,
+      styleNo: ref.styleNo,
+      giftName: ref.name,
+      count: 1,
+    })
+  }
+
+  const recordsByBucket = new Map<string, CampaignGiftClaimRecord[]>()
+  for (const record of collected.records) {
+    if (resolved.skippedClaimIds.has(record.claim.id)) continue
+    if (!resolved.byClaimId.has(record.claim.id)) continue
+    const list = recordsByBucket.get(record.bucketKey) ?? []
+    list.push(record)
+    recordsByBucket.set(record.bucketKey, list)
+  }
+
+  for (const bucket of collected.buckets) {
+    const assignments: GiftAssignment[] = []
+    const productNames: string[] = []
+    const seenProduct = new Set<string>()
+    const orderNos = new Set<string>()
+    const matchedRows: SabangnetOrderRow[] = []
+    let giftIndexInShipment = 0
+
+    for (const row of bucket.rows) {
+      orderNos.add(orderKeyOf(row))
+      if (collected.prefixPlan.matchByRowNumber.has(row.rowNumber)) {
+        matchedRows.push(row)
+        const key = normalizeInvoiceText(row.productName)
+        if (seenProduct.has(key)) continue
+        seenProduct.add(key)
+        productNames.push(row.productName)
+      }
+    }
+
+    const bucketRecords = recordsByBucket.get(bucket.key) ?? []
+    for (const record of bucketRecords) {
+      const picked = resolved.byClaimId.get(record.claim.id)
+      if (!picked) continue
+      const gift = picked.style
+      const allocationKey = buildAllocationKey(
+        record.orderFingerprint,
+        record.item.id,
+        gift.styleId,
+        record.slot,
+      )
+      giftIndexInShipment += 1
+      const giftLabel = formatGiftProductName(giftIndexInShipment, gift.name)
+      assignments.push({
+        styleId: gift.styleId,
+        styleNo: gift.styleNo,
+        styleName: gift.name,
+        giftName: giftLabel,
+        sourceRowNumber: record.source.rowNumber,
+        requestId: record.liveRequest.id,
+        requestTitle: record.liveRequest.title,
+        itemId: record.item.id,
+        isRandom: record.item.isRandom,
+      })
+      const giftRow = copyAsGiftRow(record.source, giftLabel, nextRowNumber)
+      addedRows.push(giftRow)
+      const list = giftsBySourceRowNumber.get(record.source.rowNumber) ?? []
+      list.push(giftRow)
+      giftsBySourceRowNumber.set(record.source.rowNumber, list)
+      nextRowNumber += 1
+      bumpTotal(gift)
+
+      if (record.liveRequest.usesFirstCome) {
+        confirmCandidates.push({
+          requestId: record.liveRequest.id,
+          itemId: record.item.id,
+          styleId: gift.styleId,
+          styleNo: gift.styleNo,
+          styleName: gift.name,
+          mallName: record.source.mallName,
+          customerOrderNo: record.source.customerOrderNo,
+          orderedAt:
+            orderMomentOf(record.source) || record.source.orderedAt.trim(),
+          orderFingerprint: record.orderFingerprint,
+          allocationKey,
+          atomicGroupKey: record.atomicGroupKey,
+          giftSlotIndex: record.slot,
+          sourceRowNumber: record.source.rowNumber,
+          requestTitle: record.liveRequest.title,
+          isRandom: record.item.isRandom,
+          isExisting:
+            picked.isExisting ||
+            collected.existingByKey.has(
+              `${record.liveRequest.id}\u0000${allocationKey}`,
+            ),
+        })
       }
     }
 
@@ -895,14 +842,14 @@ export function planGiftAssignments(
 
   const quotaPreviews: GiftQuotaPreview[] = []
   const sharedQuotaPreviews: GiftSharedQuotaPreview[] = []
-  for (const request of requests) {
+  for (const request of collected.requests) {
     if (!request.usesFirstCome) continue
     if (
       request.firstComeLimitMode === 'shared_total' &&
       request.firstComeTotalLimit !== null
     ) {
       const usedCount =
-        usedByRequest.get(request.id) ?? request.firstComeUsedCount
+        collected.usedByRequest.get(request.id) ?? request.firstComeUsedCount
       const plannedCount = newPlannedByRequest.get(request.id) ?? 0
       sharedQuotaPreviews.push({
         requestId: request.id,
@@ -910,18 +857,16 @@ export function planGiftAssignments(
         quantityLimit: request.firstComeTotalLimit,
         usedCount,
         plannedCount,
-        remainingCount:
-          remainingByRequest.get(request.id) ??
-          Math.max(
-            0,
-            request.firstComeTotalLimit - usedCount - plannedCount,
-          ),
+        remainingCount: Math.max(
+          0,
+          request.firstComeTotalLimit - usedCount - plannedCount,
+        ),
       })
       continue
     }
     for (const quota of request.quotas) {
       const key = `${request.id}\u0000${quota.styleId}`
-      const usedCount = usedByRequestStyle.get(key) ?? quota.usedCount
+      const usedCount = collected.usedByRequestStyle.get(key) ?? quota.usedCount
       const plannedCount = newPlannedByRequestStyle.get(key) ?? 0
       quotaPreviews.push({
         requestId: request.id,
@@ -931,9 +876,7 @@ export function planGiftAssignments(
         quantityLimit: quota.quantityLimit,
         usedCount,
         plannedCount,
-        remainingCount:
-          remainingByRequestStyle.get(key) ??
-          Math.max(0, quota.quantityLimit - usedCount - plannedCount),
+        remainingCount: Math.max(0, quota.quantityLimit - usedCount - plannedCount),
       })
     }
   }
@@ -949,9 +892,32 @@ export function planGiftAssignments(
     newConfirmCandidates: confirmCandidates.filter((item) => !item.isExisting),
     quotaPreviews,
     sharedQuotaPreviews,
-    exhaustedSkipCount,
-    cancelledSkipCount,
+    exhaustedSkipCount: resolved.exhaustedSkipCount,
+    cancelledSkipCount: collected.cancelledSkipCount,
+    unavoidableDuplicateCount: resolved.unavoidableDuplicateCount,
   }
+}
+
+/**
+ * 사은품 대상 행을 합포장 묶음으로 모아 사은품을 배정한다.
+ * 선착순 요청은 주문일시 순으로 M번호별 잔여 한도 안에서만 배정한다.
+ * 표시명은 합포장마다 `사은품(1) : 공식명`부터 번호를 매긴다.
+ */
+export function planGiftAssignments(
+  rows: SabangnetOrderRow[],
+  prefixPlan: InvoicePrefixPlan,
+  requests: InvoicePrefixRequest[],
+  options: GiftAssignOptions,
+): GiftAssignmentPlan {
+  const collected = collectCampaignGiftClaims(rows, prefixPlan, requests, options)
+  const resolved = resolveGiftDiversity({
+    claims: collected.claims,
+    seed: options.seed,
+    priorCounts: collected.priorCounts,
+    remainingByRequestStyle: collected.remainingByRequestStyle,
+    remainingByRequest: collected.remainingByRequest,
+  })
+  return materializeCampaignGiftPlan(collected, resolved)
 }
 
 /**

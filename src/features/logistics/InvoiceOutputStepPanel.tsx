@@ -4,7 +4,11 @@ import { Download } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import type { GiftAssignmentPlan } from '@/lib/invoice/gift-assign'
-import { finalizeGiftPlanForDownload } from '@/lib/invoice/gift-confirm'
+import {
+  finalizeGiftPlanForDownload,
+  type FinalizeUnifiedGiftPlanResult,
+} from '@/lib/invoice/gift-confirm'
+import type { GiftSourcePlan } from '@/lib/invoice/gift-source-transform'
 import {
   buildInvoiceOutputRows,
   downloadInvoiceOutputRows,
@@ -18,6 +22,7 @@ import {
 } from '@/lib/invoice/option-transform'
 import { planInvoicePrefixes } from '@/lib/invoice/prefix-transform'
 import {
+  overlayGiftSourceOnProductNames,
   productNameTransformationToName,
   type InvoiceProductNameTransformation,
 } from '@/lib/invoice/product-name-transform'
@@ -39,6 +44,9 @@ export function InvoiceOutputStepPanel({
   itemTransformation,
   workPlan,
   giftPlan,
+  giftSourcePlan,
+  baseProductTransformation,
+  finalizeUnified,
 }: {
   brandId: string
   brandName: string
@@ -52,6 +60,9 @@ export function InvoiceOutputStepPanel({
   itemTransformation: InvoiceItemNameTransformation
   workPlan: WorkInstructionPlan
   giftPlan: GiftAssignmentPlan
+  giftSourcePlan?: GiftSourcePlan
+  baseProductTransformation?: InvoiceProductNameTransformation
+  finalizeUnified?: () => Promise<FinalizeUnifiedGiftPlanResult>
 }) {
   const queryClient = useQueryClient()
   const [downloading, setDownloading] = useState(false)
@@ -107,16 +118,21 @@ export function InvoiceOutputStepPanel({
         giftRequests,
         giftResolutions,
       )
-      const finalized = await finalizeGiftPlanForDownload({
-        brandId,
-        rows,
-        prefixPlan,
-        requests: giftRequests,
-        giftPlan,
-        seed: giftSeed,
-        excludedGiftStyleIds,
-        sourceFileName,
-      })
+      const finalized = finalizeUnified
+        ? await finalizeUnified()
+        : {
+            ...(await finalizeGiftPlanForDownload({
+              brandId,
+              rows,
+              prefixPlan,
+              requests: giftRequests,
+              giftPlan,
+              seed: giftSeed,
+              excludedGiftStyleIds,
+              sourceFileName,
+            })),
+            giftSourcePlan: giftSourcePlan ?? null,
+          }
       await Promise.all([
         queryClient.invalidateQueries({
           queryKey: ['invoice-gift-allocations', brandId],
@@ -124,13 +140,26 @@ export function InvoiceOutputStepPanel({
         queryClient.invalidateQueries({
           queryKey: ['invoice-prefix-requests', brandId],
         }),
+        queryClient.invalidateQueries({
+          queryKey: ['invoice-gift-source-allocations', brandId],
+        }),
       ])
 
+      const finalizedSourcePlan = finalized.giftSourcePlan
+      const finalizedProduct =
+        baseProductTransformation && finalizedSourcePlan
+          ? overlayGiftSourceOnProductNames(
+              baseProductTransformation,
+              finalizedSourcePlan,
+            )
+          : productTransformation
+      const finalizedName = productNameTransformationToName(finalizedProduct)
+
       const outputRows = buildInvoiceOutputRows({
-        transformedRows: nameTransformation.rows,
+        transformedRows: finalizedName.rows,
         workMatches: workPlan.matchByRowNumber,
         giftRowsBySource: finalized.plan.giftsBySourceRowNumber,
-        productTransformation,
+        productTransformation: finalizedProduct,
         itemTransformation,
       })
 
@@ -166,6 +195,7 @@ export function InvoiceOutputStepPanel({
         productRows: productTransformation.rows,
         itemRows: itemTransformation.rows,
         giftRowsBySource: giftPlan.giftsBySourceRowNumber,
+        giftAssignments: giftPlan.shipments.flatMap((item) => item.assignments),
         packingMaterials: workPlan.materialTotals,
       })
       await downloadOutgoingComponentRows({
@@ -248,6 +278,14 @@ export function InvoiceOutputStepPanel({
           )}
         >
           {message}
+        </p>
+      ) : null}
+
+      {giftPlan.unavoidableDuplicateCount > 0 ? (
+        <p className="rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-warning">
+          같은 받는분에 같은 M번호가 {formatNumber(giftPlan.unavoidableDuplicateCount)}건
+          반복됩니다. 고정 사은품이거나 후보가 부족해서이며, 다운로드는 막지
+          않습니다.
         </p>
       ) : null}
 

@@ -728,6 +728,46 @@ export type InvoiceGiftQuota = {
   remainingCount: number
 }
 
+export type InvoiceGiftSourceAssignmentMode = 'fixed' | 'balanced_random'
+
+/** 원본 [사은품]/[증정] 요청행을 실제 M번호로 치환하는 exact 매핑 */
+export type InvoiceGiftSourceMap = {
+  id: string
+  brandId: string
+  mallName: string
+  normalizedMallName: string
+  productName: string
+  normalizedProductName: string
+  assignmentMode: InvoiceGiftSourceAssignmentMode
+  poolStyles: StyleRef[]
+  /** 호환용. 배정은 파일 단위 받는분 다양성 resolver가 항상 담당한다. */
+  uniquePerRecipient: boolean
+  isActive: boolean
+  note: string
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 사은품 원본행 수량 슬롯 배정.
+ * unique는 style과 무관한 allocation_key다. 수령인·전화·주소는 저장하지 않는다.
+ */
+export type InvoiceGiftSourceAllocation = {
+  id: string
+  mapId: string
+  styleId: string
+  styleNo: string
+  styleName: string
+  allocationKey: string
+  orderFingerprint: string
+  quantitySlot: number
+  mallName: string
+  customerOrderNo: string
+  orderedAt: string
+  sourceFileName: string
+  createdAt: string
+}
+
 /**
  * 사은품 1개 단위 영속 배정.
  * 수령인·전화·주소는 저장하지 않는다.
