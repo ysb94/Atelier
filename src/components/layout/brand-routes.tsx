@@ -22,9 +22,12 @@ import { ImportSettingsPage } from '@/features/settings/ImportSettingsPage'
 import { BrandSettingsPage } from '@/features/settings/BrandSettingsPage'
 import { AiSettingsPage } from '@/features/settings/AiSettingsPage'
 import { MembersPage } from '@/features/settings/MembersPage'
+import { ProfileSettingsPage } from '@/features/settings/ProfileSettingsPage'
+import { OrgChartPage } from '@/features/org/OrgChartPage'
 import { DataSheetPage } from '@/features/data/DataSheetPage'
 import { DataUploadPage } from '@/features/data/DataUploadPage'
 import { InvoiceWorkPage } from '@/features/logistics/InvoiceWorkPage'
+import { WorkRequestPage } from '@/features/work-requests/WorkRequestPage'
 
 const DesignFileManagerPage = lazy(async () => {
   const mod = await import('@/features/design/file-manager/DesignFileManagerPage')
@@ -70,6 +73,7 @@ export function BrandWorkspaceRouteTree() {
       <Route path="work/:owner" element={<DepartmentProductsPage />}>
         <Route path=":styleNo" element={<ProductDetailDrawer />} />
       </Route>
+      <Route path="work-requests/:owner" element={<WorkRequestPage />} />
       <Route path="logistics/invoices" element={<InvoiceWorkPage />} />
       <Route path="data" element={<RedirectTo to="data/all" />} />
       <Route path="data/upload" element={<DataUploadPage />} />
@@ -79,6 +83,8 @@ export function BrandWorkspaceRouteTree() {
       <Route path="barcodes" element={<BarcodePage />} />
       <Route path="usage-codes" element={<UsageCodePage />} />
       <Route path="partner-codes" element={<PartnerCodePage />} />
+      <Route path="settings/profile" element={<ProfileSettingsPage />} />
+      <Route path="org-chart" element={<OrgChartPage />} />
       <Route path="settings/fields" element={<FieldsSettingsPage />} />
       <Route path="settings/seasons" element={<SeasonsSettingsPage />} />
       <Route

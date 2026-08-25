@@ -51,6 +51,12 @@ export type AccessRequestInput = {
   requestNote?: string
 }
 
+export type MyProfileUpdateInput = {
+  displayName: string
+  departmentId: string
+  position: string
+}
+
 export type ApproveMemberInput = {
   profileId: string
   departmentId: string
@@ -219,6 +225,36 @@ export async function getMyProfile(): Promise<Profile | null> {
 
   if (error) throw toStoreError(error)
   if (!data) return null
+
+  const memberships = await membershipsFor([userId])
+  return toProfile(data as ProfileRow, memberships.get(userId) ?? [])
+}
+
+export async function updateMyProfile(
+  input: MyProfileUpdateInput,
+): Promise<Profile> {
+  const { data: userData, error: userError } = await getSupabase().auth.getUser()
+  if (userError) throw toStoreError(userError)
+  const userId = userData.user?.id
+  if (!userId) throw new Error('로그인이 필요합니다.')
+
+  const displayName = input.displayName.trim()
+  if (!displayName) throw new Error('이름을 입력하세요.')
+  if (!input.departmentId) throw new Error('팀을 선택하세요.')
+  if (!input.position.trim()) throw new Error('직책을 선택하세요.')
+
+  const { data, error } = await getSupabase()
+    .from('profiles')
+    .update({
+      display_name: displayName,
+      department_id: input.departmentId,
+      position: input.position.trim(),
+    })
+    .eq('id', userId)
+    .select(PROFILE_COLUMNS)
+    .single()
+
+  if (error) throw toStoreError(error)
 
   const memberships = await membershipsFor([userId])
   return toProfile(data as ProfileRow, memberships.get(userId) ?? [])

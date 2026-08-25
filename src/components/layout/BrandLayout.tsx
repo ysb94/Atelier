@@ -13,6 +13,7 @@ import {
   Building2,
   CalendarRange,
   ChevronDown,
+  ClipboardList,
   FileSpreadsheet,
   Home,
   Images,
@@ -33,7 +34,9 @@ import {
   Store,
   Table2,
   Upload,
+  UserRound,
   Users,
+  Network,
 } from 'lucide-react'
 import { getBrandBySlug, getBrands } from '@/lib/api'
 import { useAuth } from '@/lib/supabase/auth'
@@ -48,21 +51,39 @@ import {
 
 type NavItem = { to: string; label: string; icon: typeof Shirt }
 
+const homeNavItem: NavItem = {
+  to: '',
+  label: '홈',
+  icon: Home,
+}
+
+const profileNavItem: NavItem = {
+  to: 'settings/profile',
+  label: '내 설정',
+  icon: UserRound,
+}
+
+const orgNavItem: NavItem = {
+  to: 'org-chart',
+  label: '조직도',
+  icon: Network,
+}
+
+const topNavItems: NavItem[] = [homeNavItem, profileNavItem, orgNavItem]
+
 const SIDEBAR_COLLAPSED_KEY = 'atelier:sidebar-collapsed'
 
 const navGroups: { title: string; items: NavItem[] }[] = [
   {
     title: '상품',
-    items: [
-      { to: '', label: '홈', icon: Home },
-      { to: 'products', label: '전체 상품', icon: Shirt },
-    ],
+    items: [{ to: 'products', label: '전체 상품', icon: Shirt }],
   },
   {
     title: '기획',
     items: [
       { to: 'drafts', label: '기획안', icon: Lightbulb },
       { to: 'work/planning', label: '상품 정보', icon: PenLine },
+      { to: 'work-requests/planning', label: '작업 요청', icon: ClipboardList },
     ],
   },
   {
@@ -70,11 +91,15 @@ const navGroups: { title: string; items: NavItem[] }[] = [
     items: [
       { to: 'work/design', label: '상품 정보', icon: Palette },
       { to: 'design/file-manager', label: '이미지 업로드', icon: Images },
+      { to: 'work-requests/design', label: '작업 요청', icon: ClipboardList },
     ],
   },
   {
     title: 'MD',
-    items: [{ to: 'work/md', label: '상품 정보', icon: LayoutGrid }],
+    items: [
+      { to: 'work/md', label: '상품 정보', icon: LayoutGrid },
+      { to: 'work-requests/md', label: '작업 요청', icon: ClipboardList },
+    ],
   },
   {
     title: '물류',
@@ -85,6 +110,7 @@ const navGroups: { title: string; items: NavItem[] }[] = [
         label: '송장작업',
         icon: FileSpreadsheet,
       },
+      { to: 'work-requests/logistics', label: '작업 요청', icon: ClipboardList },
     ],
   },
   {
@@ -325,6 +351,33 @@ export function BrandLayout() {
           ) : null}
 
           <nav className="flex flex-1 flex-col overflow-y-auto p-2">
+            <div className="mb-2 flex flex-col gap-0.5">
+              {topNavItems.map(({ to, label, icon: Icon }) => (
+                <NavLink
+                  key={to || 'home'}
+                  to={to ? `/b/${brand.slug}/${to}` : `/b/${brand.slug}`}
+                  end={!to}
+                  title={collapsed ? label : undefined}
+                  className={() =>
+                    cn(
+                      'flex items-center rounded-md transition-colors',
+                      collapsed
+                        ? 'justify-center p-2.5'
+                        : 'gap-2.5 px-2.5 py-2 text-sm',
+                      navItemActive(to, location.pathname, brand.slug)
+                        ? 'bg-sidebar-accent text-white'
+                        : 'text-white/65 hover:bg-sidebar-muted hover:text-white',
+                    )
+                  }
+                >
+                  <Icon
+                    className="size-4 shrink-0"
+                    aria-label={collapsed ? label : undefined}
+                  />
+                  {collapsed ? null : label}
+                </NavLink>
+              ))}
+            </div>
             {collapsed
               ? flatNavItems.map(({ to, label, icon: Icon, tip }) => (
                   <NavLink
