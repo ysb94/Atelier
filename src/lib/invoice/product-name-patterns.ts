@@ -1,4 +1,7 @@
-import { matchingProductName } from '@/lib/invoice/product-name-tags'
+import {
+  matchingItemName,
+  matchingProductName,
+} from '@/lib/invoice/product-name-tags'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import type { InvoiceProductNameTagRoleEntry } from '@/lib/types'
 
@@ -184,15 +187,23 @@ export function generateProductNameCandidates(input: {
   itemName: string
   mallName?: string
   matchingProductName?: string
+  matchingItemName?: string
 }): ProductNameCandidate[] {
   const productName = input.productName.trim()
   const itemName = input.itemName.trim()
   const matching = (input.matchingProductName ?? productName).trim()
+  const matchingItem = (input.matchingItemName ?? itemName).trim()
   const output: ProductNameCandidate[] = []
   const seen = new Set<string>()
   generateCandidatesForProductName(productName, itemName, output, seen)
   if (normalizeInvoiceText(matching) !== normalizeInvoiceText(productName)) {
     generateCandidatesForProductName(matching, itemName, output, seen)
+  }
+  if (normalizeInvoiceText(matchingItem) !== normalizeInvoiceText(itemName)) {
+    generateCandidatesForProductName(productName, matchingItem, output, seen)
+    if (normalizeInvoiceText(matching) !== normalizeInvoiceText(productName)) {
+      generateCandidatesForProductName(matching, matchingItem, output, seen)
+    }
   }
   return output
 }
@@ -278,6 +289,26 @@ export function productNameRuleStripsItemPrefix(rule: string | null) {
   return rule === 'item_slash_prefix' || rule === 'item_comma_prefix'
 }
 
+const SIMILAR_PRODUCT_DELIMITERS = ['_', '/', ',', ':', '|'] as const
+
+/**
+ * 비슷한 상품 조회용. 색상·옵션 구분자 앞의 상품명 앞부분만 남긴다.
+ * 앞부분이 두 글자 미만이면 원본을 그대로 돌려준다.
+ */
+export function similarProductSearchText(lookupKey: string): string {
+  const trimmed = sheetTrim(lookupKey)
+  if (!trimmed) return ''
+  let earliest = -1
+  for (const delimiter of SIMILAR_PRODUCT_DELIMITERS) {
+    const at = trimmed.indexOf(delimiter)
+    if (at < 0) continue
+    if (earliest < 0 || at < earliest) earliest = at
+  }
+  if (earliest < 0) return trimmed
+  const prefix = sheetTrim(trimmed.slice(0, earliest))
+  return prefix.length >= 2 ? prefix : trimmed
+}
+
 /** 품목명 원장 등록 시 내품명 기준에 쓸 값. 앞부분 단독이면 남은 suffix다. */
 export function optionMapItemNameForRule(rule: string | null, itemName: string) {
   const consumption = resolveItemNameConsumption(rule, itemName)
@@ -298,6 +329,7 @@ export function collectProductNameCandidateTexts(
     for (const candidate of generateProductNameCandidates({
       ...row,
       matchingProductName: matchingProductName(row.productName, tagRoles),
+      matchingItemName: matchingItemName(row.itemName, tagRoles),
     })) {
       const key = normalizeInvoiceText(candidate.text)
       if (seen.has(key)) continue

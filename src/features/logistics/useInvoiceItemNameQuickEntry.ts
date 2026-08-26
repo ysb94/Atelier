@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { DEFAULT_DECISION_CONFIG } from '@/lib/ai/gateway-core'
+import {
+  DEFAULT_DECISION_CONFIG,
+  ITEM_NAME_FEATURE_KEY,
+} from '@/lib/ai/gateway-core'
 import { createSlotGate, withRecommendSlot } from '@/lib/ai/recommend-queue'
 import {
   getAiFeatureRoute,
   recommendInvoiceProduct,
+  searchInvoiceItemNameCases,
   searchInvoiceProductCandidates,
 } from '@/lib/api'
 import {
@@ -23,7 +27,6 @@ import {
 import type { AccessoryLookupComponent } from '@/lib/invoice/accessory-suggest'
 import type { AiProductCandidate, StyleRef } from '@/lib/types'
 
-const PRODUCT_FEATURE_KEY = 'invoice_product_recommendation'
 const SEARCH_WORKERS = 4
 
 function slotKey(rowKey: string, slotIndex: number) {
@@ -106,8 +109,8 @@ export function useInvoiceItemNameQuickEntry({
 }) {
   const queryClient = useQueryClient()
   const routeQuery = useQuery({
-    queryKey: ['ai-feature-route', brandId, PRODUCT_FEATURE_KEY],
-    queryFn: () => getAiFeatureRoute(brandId, PRODUCT_FEATURE_KEY),
+    queryKey: ['ai-feature-route', brandId, ITEM_NAME_FEATURE_KEY],
+    queryFn: () => getAiFeatureRoute(brandId, ITEM_NAME_FEATURE_KEY),
     staleTime: 5 * 60_000,
   })
   const route = routeQuery.data ?? null
@@ -507,8 +510,8 @@ export function useInvoiceItemNameQuickEntry({
             const rowSlots = nextByRow.get(task.rowKey)
             if (!rowSlots) return
             try {
-              const candidates = (
-                await queryClient.fetchQuery({
+              const [searched, cases] = await Promise.all([
+                queryClient.fetchQuery({
                   queryKey: [
                     'ai-quick-slot-candidates',
                     brandId,
@@ -516,8 +519,45 @@ export function useInvoiceItemNameQuickEntry({
                   ],
                   staleTime: 30_000,
                   queryFn: () => search(task.text),
-                })
-              ).filter((item) => item.styleId !== task.mainStyleId)
+                }),
+                queryClient.fetchQuery({
+                  queryKey: [
+                    'ai-item-name-cases',
+                    brandId,
+                    task.itemName,
+                    task.mainStyleId ?? '',
+                    task.productLookupKey,
+                  ],
+                  staleTime: 30_000,
+                  queryFn: () =>
+                    searchInvoiceItemNameCases(brandId, [
+                      {
+                        contextId: task.rowKey,
+                        itemName: task.itemName,
+                        mainStyleId: task.mainStyleId,
+                        productLookupKey: task.productLookupKey,
+                      },
+                    ]),
+                }),
+              ])
+              const caseCandidates = cases.flatMap((item) =>
+                item.components.map((component, index) => ({
+                  source: 'history',
+                  lookupKey: item.itemName,
+                  styleId: component.styleId,
+                  styleNo: component.styleNo ?? '',
+                  name: component.name ?? '',
+                  score: Math.max(0.4, item.score - index * 0.02),
+                })),
+              )
+              const seen = new Set<string>()
+              const candidates = [...searched, ...caseCandidates].filter((item) => {
+                if (item.styleId === task.mainStyleId || seen.has(item.styleId)) {
+                  return false
+                }
+                seen.add(item.styleId)
+                return true
+              })
               const recommendation = await queryClient.fetchQuery({
                 queryKey: [
                   'ai-quick-slot-match',

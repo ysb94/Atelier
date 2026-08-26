@@ -13,13 +13,17 @@ import {
   applyProductNameAiRowSlots,
   applyProductNameLookupKey,
   buildProductNameAiReviewRows,
-  decideProductNameAiSaves,
+  productNameAiSearchKeys,
+  countProductNameAiWorkflow,
+  decideProductNameAiConfirmedSaves,
+  isProductNameAiSaveFailed,
   markProductNameAiCollectFailure,
-  markProductNameAiDecisionNeeded,
   markProductNameAiDuplicates,
   overlayProductNameAiDrafts,
+  productNameAiCollectFailed,
   productNameAiRowReadyToCommit,
   reconcileProductNameAiReviewState,
+  selectLatestFailedSaveRetries,
   validateProductNameAiReviewRow,
   type ProductNameAiEnterDecision,
   type ProductNameAiExtra,
@@ -31,6 +35,7 @@ import type { AiProductRecommendation } from '@/lib/types'
 import type { OptionExtraDraft } from './InvoiceOptionExtrasEditor'
 import type {
   ProductMapEnqueueInput,
+  ProductMapHistoryEntry,
   ProductMapHistoryStatus,
 } from './useInvoiceProductNameSaveQueue'
 
@@ -116,6 +121,9 @@ export function useInvoiceProductNameBulkAiApply({
               .map((candidate) => `${candidate.rule}:${candidate.text}`)
               .join('\u0002'),
             combo.tags.map((tag) => `${tag.raw}:${tag.role}`).join('\u0002'),
+            combo.itemTags
+              .map((tag) => `${tag.raw}:${tag.role}`)
+              .join('\u0002'),
           ].join('\u0001'),
         )
         .sort()
@@ -231,75 +239,7 @@ export function useInvoiceProductNameBulkAiApply({
     })
   }, [])
 
-  const updateRow = useCallback(
-    (
-      key: string,
-      patch: {
-        lookupKey?: string
-        extras?: OptionExtraDraft[]
-        hold?: boolean
-      },
-    ): { ok: boolean; error?: string } => {
-      const current =
-        draftByKey.get(key) ?? reviewRows.find((row) => row.key === key)
-      if (!current) return { ok: false, error: '행을 찾지 못했습니다.' }
-      let next = current
-      if (patch.lookupKey !== undefined) {
-        next = applyProductNameLookupKey(next, patch.lookupKey)
-      }
-      if (patch.extras) {
-        next = validateProductNameAiReviewRow({
-          ...next,
-          extras: extrasFromDrafts(patch.extras),
-          source: 'manual',
-          cacheId: null,
-          shownRank: null,
-        })
-      }
-      if (patch.hold) {
-        next = markProductNameAiDecisionNeeded(next)
-      }
-      if (next.validationError && patch.extras) {
-        return { ok: false, error: next.validationError }
-      }
-      writeDraft(next)
-      return { ok: true }
-    },
-    [draftByKey, reviewRows, writeDraft],
-  )
-
-  const applySlots = useCallback(
-    (
-      key: string,
-      slots: ProductNameAiQuickSlot[],
-      mode: 'edit' | 'confirm' | 'resolved',
-    ): { ok: boolean; error?: string; decision?: ProductNameAiEnterDecision } => {
-      const current =
-        draftByKey.get(key) ?? reviewRows.find((row) => row.key === key)
-      if (!current) return { ok: false, error: '행을 찾지 못했습니다.' }
-      const result = applyProductNameAiRowSlots(current, slots, mode)
-      if (!result.ok) return { ok: false, error: result.error, decision: result.decision }
-      writeDraft(result.row)
-      if (result.decision.status === 'needs_ai') {
-        setPendingAiKeys((currentKeys) => {
-          const next = new Set(currentKeys)
-          next.add(key)
-          return next
-        })
-      } else {
-        setPendingAiKeys((currentKeys) => {
-          if (!currentKeys.has(key)) return currentKeys
-          const next = new Set(currentKeys)
-          next.delete(key)
-          return next
-        })
-      }
-      return { ok: true, decision: result.decision }
-    },
-    [draftByKey, reviewRows, writeDraft],
-  )
-
-  const confirmRow = useCallback((key: string, pendingAi = false) => {
+  const confirmRow = useCallback((key: string) => {
     setConfirmedKeys((current) => {
       if (current.has(key)) return current
       const next = new Set(current)
@@ -307,11 +247,24 @@ export function useInvoiceProductNameBulkAiApply({
       return next
     })
     setPendingAiKeys((current) => {
-      const has = current.has(key)
-      if (pendingAi === has) return current
+      if (!current.has(key)) return current
       const next = new Set(current)
-      if (pendingAi) next.add(key)
-      else next.delete(key)
+      next.delete(key)
+      return next
+    })
+  }, [])
+
+  const markPendingAi = useCallback((key: string) => {
+    setConfirmedKeys((current) => {
+      if (!current.has(key)) return current
+      const next = new Set(current)
+      next.delete(key)
+      return next
+    })
+    setPendingAiKeys((current) => {
+      if (current.has(key)) return current
+      const next = new Set(current)
+      next.add(key)
       return next
     })
   }, [])
@@ -331,12 +284,59 @@ export function useInvoiceProductNameBulkAiApply({
     })
   }, [])
 
-  const markDecisionNeeded = useCallback(
-    (key: string) => {
-      updateRow(key, { hold: true })
+  const updateRow = useCallback(
+    (
+      key: string,
+      patch: {
+        lookupKey?: string
+        extras?: OptionExtraDraft[]
+      },
+    ): { ok: boolean; error?: string } => {
+      const current =
+        draftByKey.get(key) ?? reviewRows.find((row) => row.key === key)
+      if (!current) return { ok: false, error: '행을 찾지 못했습니다.' }
+      let next = current
+      if (patch.lookupKey !== undefined) {
+        next = applyProductNameLookupKey(next, patch.lookupKey)
+      }
+      if (patch.extras) {
+        next = validateProductNameAiReviewRow({
+          ...next,
+          extras: extrasFromDrafts(patch.extras),
+          source: 'manual',
+        })
+      }
+      if (next.validationError && patch.extras) {
+        return { ok: false, error: next.validationError }
+      }
+      writeDraft(next)
       unconfirmRow(key)
+      return { ok: true }
     },
-    [unconfirmRow, updateRow],
+    [draftByKey, reviewRows, unconfirmRow, writeDraft],
+  )
+
+  const applySlots = useCallback(
+    (
+      key: string,
+      slots: ProductNameAiQuickSlot[],
+      mode: 'edit' | 'confirm' | 'resolved',
+    ): { ok: boolean; error?: string; decision?: ProductNameAiEnterDecision } => {
+      const current =
+        draftByKey.get(key) ?? reviewRows.find((row) => row.key === key)
+      if (!current) return { ok: false, error: '행을 찾지 못했습니다.' }
+      const result = applyProductNameAiRowSlots(current, slots, mode)
+      if (!result.ok) return { ok: false, error: result.error, decision: result.decision }
+      writeDraft(result.row)
+      if (mode === 'confirm') {
+        if (result.decision.status === 'needs_ai') markPendingAi(key)
+        else confirmRow(key)
+      } else {
+        unconfirmRow(key)
+      }
+      return { ok: true, decision: result.decision }
+    },
+    [confirmRow, draftByKey, markPendingAi, reviewRows, unconfirmRow, writeDraft],
   )
 
   const collect = useCallback(async () => {
@@ -362,9 +362,7 @@ export function useInvoiceProductNameBulkAiApply({
     const collectOne = async (row: ProductNameAiReviewRow) => {
       if (row.holdReason === 'exclusion_guarded') return row
       const source = comboByKey.get(row.key)
-      const lookupKeys = (source?.candidates ?? row.candidates)
-        .map((candidate) => candidate.text.trim())
-        .filter(Boolean)
+      const lookupKeys = productNameAiSearchKeys(row)
       if (lookupKeys.length === 0) {
         return markProductNameAiCollectFailure(row, 'no_lookup_key', null)
       }
@@ -413,14 +411,9 @@ export function useInvoiceProductNameBulkAiApply({
     )
     if (generation !== collectGenerationRef.current) return
     const marked = markProductNameAiDuplicates(nextRows)
-    const confirmed = new Set<string>()
-    for (const row of marked) {
-      if (productNameAiRowReadyToCommit(row) && !row.holdReason) {
-        confirmed.add(row.key)
-      }
-    }
     setReviewRows(marked)
-    setConfirmedKeys(confirmed)
+    setConfirmedKeys(new Set())
+    setPendingAiKeys(new Set())
     setPhase('review')
   }, [fetchRecommendation, minConfidence, phase])
 
@@ -461,9 +454,7 @@ export function useInvoiceProductNameBulkAiApply({
         if (!row) return
         if (!failedKeys.has(row.key)) continue
         const source = comboByKey.get(row.key)
-        const lookupKeys = (source?.candidates ?? row.candidates)
-          .map((candidate) => candidate.text.trim())
-          .filter(Boolean)
+        const lookupKeys = productNameAiSearchKeys(row)
         if (!source || lookupKeys.length === 0) {
           nextRows[index] = markProductNameAiCollectFailure(
             row,
@@ -501,13 +492,12 @@ export function useInvoiceProductNameBulkAiApply({
     setReviewRows(marked)
     setConfirmedKeys((current) => {
       const next = new Set(current)
-      for (const row of marked) {
-        if (productNameAiRowReadyToCommit(row) && !row.holdReason) {
-          next.add(row.key)
-        } else if (failedKeys.has(row.key)) {
-          next.delete(row.key)
-        }
-      }
+      for (const key of failedKeys) next.delete(key)
+      return next
+    })
+    setPendingAiKeys((current) => {
+      const next = new Set(current)
+      for (const key of failedKeys) next.delete(key)
       return next
     })
     setPhase('review')
@@ -517,13 +507,31 @@ export function useInvoiceProductNameBulkAiApply({
     const live = markProductNameAiDuplicates(
       overlayProductNameAiDrafts(reviewRows, draftByKey),
     )
+    const saveFailedKeys = new Set<string>()
+    for (const [key, status] of saveStatusByKey ?? []) {
+      if (isProductNameAiSaveFailed(status)) saveFailedKeys.add(key)
+    }
+    const counts = countProductNameAiWorkflow({
+      rows: live,
+      confirmedKeys,
+      saveFailedKeys,
+    })
+    if (counts.reviewCount > 0) {
+      setApplyError('검토 필요한 행이 남아 있습니다.')
+      return
+    }
     const ready = live.filter(
       (row) =>
+        confirmedKeys.has(row.key) &&
         productNameAiRowReadyToCommit(row) &&
         saveStatusByKey?.get(row.key) !== 'queued' &&
         saveStatusByKey?.get(row.key) !== 'saving',
     )
-    const plan = decideProductNameAiSaves(ready)
+    const plan = decideProductNameAiConfirmedSaves(
+      ready,
+      confirmedKeys,
+      saveFailedKeys,
+    )
     if (plan.items.length === 0) {
       setApplyError(
         plan.skipped[0]?.message ?? '등록할 수 있는 공식명칭이 없습니다.',
@@ -551,6 +559,8 @@ export function useInvoiceProductNameBulkAiApply({
           shownRank: item.shownRank,
           provider: item.provider,
           modelId: item.modelId,
+          suggestedStyleId: item.suggestedStyleId,
+          outcome: item.outcome,
         },
         reviewReasons: [
           item.source === 'local'
@@ -575,28 +585,58 @@ export function useInvoiceProductNameBulkAiApply({
         : null,
     )
     setPhase('applied')
-  }, [draftByKey, enqueue, reviewRows, saveStatusByKey])
+  }, [confirmedKeys, draftByKey, enqueue, reviewRows, saveStatusByKey])
 
-  const readyRows = useMemo(
-    () => shownRows.filter((row) => productNameAiRowReadyToCommit(row)),
-    [shownRows],
+  const retrySaveFailed = useCallback(
+    (history: ProductMapHistoryEntry[]) => {
+      for (const entry of selectLatestFailedSaveRetries(history)) {
+        const status = saveStatusByKey?.get(entry.comboKey)
+        if (status === 'queued' || status === 'saving') continue
+        enqueue({
+          historyId: entry.id,
+          comboKey: entry.comboKey,
+          productName: entry.productName,
+          itemName: entry.itemName,
+          originalItemName: entry.originalItemName,
+          mallName: entry.mallName,
+          ownProductCode: entry.ownProductCode,
+          lookupKey: entry.lookupKey,
+          style: entry.style,
+          extras: entry.extras,
+          appliedRule: entry.appliedRule,
+          feedback: entry.feedback,
+          reviewReasons: entry.reviewReasons,
+        })
+      }
+    },
+    [enqueue, saveStatusByKey],
   )
-  const holdCount = useMemo(
+
+  const saveFailedKeys = useMemo(() => {
+    const next = new Set<string>()
+    for (const [key, status] of saveStatusByKey ?? []) {
+      if (isProductNameAiSaveFailed(status)) next.add(key)
+    }
+    return next
+  }, [saveStatusByKey])
+
+  const workflowCounts = useMemo(
     () =>
-      shownRows.filter(
-        (row) => row.holdReason && !productNameAiRowReadyToCommit(row),
-      ).length,
-    [shownRows],
+      countProductNameAiWorkflow({
+        rows: shownRows,
+        confirmedKeys,
+        saveFailedKeys,
+      }),
+    [confirmedKeys, saveFailedKeys, shownRows],
   )
   const failedCollectCount = useMemo(
-    () =>
-      shownRows.filter(
-        (row) =>
-          row.holdReason === 'failed' || row.holdReason === 'no_product',
-      ).length,
+    () => shownRows.filter((row) => productNameAiCollectFailed(row)).length,
     [shownRows],
   )
-  const canCommit = readyRows.length > 0 && phase !== 'collecting'
+  const canCommit =
+    workflowCounts.reviewCount === 0 &&
+    workflowCounts.readyCount > 0 &&
+    phase !== 'collecting'
 
   return {
     brandId,
@@ -610,8 +650,10 @@ export function useInvoiceProductNameBulkAiApply({
     confirmedKeys,
     pendingAiKeys,
     committedKeys,
-    readyCount: readyRows.length,
-    holdCount,
+    saveFailedKeys,
+    readyCount: workflowCounts.readyCount,
+    reviewCount: workflowCounts.reviewCount,
+    saveFailedCount: workflowCounts.saveFailedCount,
     failedCollectCount,
     targetCount: combos.length,
     queueCount: shownRows.length,
@@ -620,13 +662,14 @@ export function useInvoiceProductNameBulkAiApply({
     canCommit,
     collect,
     retryFailed,
+    retrySaveFailed,
     cancel,
     reset,
     updateRow,
     applySlots,
     confirmRow,
+    markPendingAi,
     unconfirmRow,
-    markDecisionNeeded,
     applyReady,
   }
 }

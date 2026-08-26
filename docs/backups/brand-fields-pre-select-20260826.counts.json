@@ -1,0 +1,21 @@
+{
+  "createdAt": "2026-08-26T06:14:47.216Z",
+  "note": "선택형 항목 작업 직전 brand_fields와 관련 상품값 스냅샷.",
+  "tables": {
+    "brand_fields": {
+      "fetched": 22,
+      "count": 22,
+      "error": null
+    },
+    "brand_field_options": {
+      "fetched": 0,
+      "count": 0,
+      "error": "Could not find the table 'public.brand_field_options' in the schema cache"
+    },
+    "styles": {
+      "fetched": 2396,
+      "count": 2396,
+      "error": null
+    }
+  }
+}

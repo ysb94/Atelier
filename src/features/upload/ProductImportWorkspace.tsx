@@ -292,6 +292,7 @@ export function ProductImportWorkspace({
             <BulkUploadStep
               brandName={brand.name}
               fields={fields}
+              seasons={seasons}
               sheets={sheets}
               activeSheetIndex={activeSheetIndex}
               onSheetsLoaded={(loaded) => {

@@ -4,6 +4,7 @@ import {
   logInvoiceWork,
   timeInvoiceWorkAsync,
 } from '@/lib/invoice/invoice-work-perf'
+import { invalidateAiRecommendationQueries } from '@/lib/ai/query-cache'
 import {
   deleteInvoiceOptionMap,
   saveInvoiceOptionMap,
@@ -28,6 +29,8 @@ export type ProductMapSaveFeedback = {
   shownRank: number | null
   provider: AiProductRecommendation['provider'] | null
   modelId: string | null
+  suggestedStyleId?: string | null
+  outcome?: 'confirmed' | 'corrected'
 }
 
 export type ProductMapHistoryStatus =
@@ -509,14 +512,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
                 )
                 queueOptionMapUpsert(savedOptionMap)
               }
-              await queryClient.invalidateQueries({
-                queryKey: [
-                  'ai-product-recommendation',
-                  brandId,
-                  entry.comboKey,
-                ],
-                refetchType: 'none',
-              })
+              await invalidateAiRecommendationQueries(queryClient, brandId)
               scheduleAiUsageInvalidate()
               const sharesProductMap = shared.consumerIds.size > 1
               patchHistory((current) =>
@@ -736,10 +732,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
         await queryClient.invalidateQueries({
           queryKey: ['invoice-option-maps', brandId],
         })
-        await queryClient.invalidateQueries({
-          queryKey: ['ai-product-recommendation', brandId],
-          refetchType: 'none',
-        })
+        await invalidateAiRecommendationQueries(queryClient, brandId)
         patchHistory((current) =>
           current.map((item) =>
             item.id === historyId

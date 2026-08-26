@@ -23,6 +23,14 @@ export type FileTagGroup = {
   examples: string[]
 }
 
+export type FileOptionReservationTagGroup = {
+  tag: ParsedProductNameTag
+  itemCount: number
+  variantCount: number
+  examples: string[]
+  previews: Array<{ raw: string; matching: string }>
+}
+
 /** 상품 구성이 아닌 선행 태그는 비교 키에서 뺀다. 미분류는 저장 전까지 원문을 유지한다. */
 const STRIP_ROLES = new Set<InvoiceProductNameTagRole>([
   'event_marketing',
@@ -152,6 +160,107 @@ export function classifyLeadingTags(
   })
 }
 
+function classifyReservationToken(
+  raw: string,
+  byKey: Map<string, InvoiceProductNameTagRole>,
+): ParsedProductNameTag {
+  const normalized = normalizeInvoiceText(raw)
+  const key = tagRoleKey(raw)
+  return {
+    raw,
+    normalized,
+    key,
+    role: byKey.get(key) ?? 'unknown',
+    suggestedRole: suggestTagRole(raw),
+  }
+}
+
+/** 옵션 문자열 어디에 있든 날짜 예약배송 대괄호만 추출한다. 다른 대괄호는 보지 않는다. */
+export function extractInlineReservationShippingDateTags(value: string): string[] {
+  const tags: string[] = []
+  let index = 0
+  while (index < value.length) {
+    const open = value[index] ?? ''
+    if (!isOpenBracket(open)) {
+      index += 1
+      continue
+    }
+    const close = closeBracket(open)
+    const end = value.indexOf(close, index + 1)
+    if (end < 0) break
+    const raw = value.slice(index, end + 1)
+    if (raw.length > 2 && isReservationShippingDateTag(raw)) tags.push(raw)
+    index = end + 1
+  }
+  return tags
+}
+
+export function classifyInlineReservationShippingDateTags(
+  itemName: string,
+  roles: InvoiceProductNameTagRoleEntry[] = [],
+): ParsedProductNameTag[] {
+  const byKey = roleByKey(roles)
+  return extractInlineReservationShippingDateTags(itemName).map((raw) =>
+    classifyReservationToken(raw, byKey),
+  )
+}
+
+function replaceInlineReservationShippingDateTags(
+  value: string,
+  shouldStrip: (raw: string) => boolean,
+): string {
+  let result = ''
+  let index = 0
+  while (index < value.length) {
+    const open = value[index] ?? ''
+    if (!isOpenBracket(open)) {
+      result += open
+      index += 1
+      continue
+    }
+    const close = closeBracket(open)
+    const end = value.indexOf(close, index + 1)
+    if (end < 0) {
+      result += value.slice(index)
+      break
+    }
+    const raw = value.slice(index, end + 1)
+    result +=
+      raw.length > 2 &&
+      isReservationShippingDateTag(raw) &&
+      shouldStrip(raw)
+        ? ' '
+        : raw
+    index = end + 1
+  }
+  return result.replace(/\s+/g, ' ').trim()
+}
+
+/** 저장된 비교 제외 역할의 날짜 예약배송 토큰만 뺀 옵션 비교값. */
+export function matchingItemNameFromTags(
+  itemName: string,
+  classifiedTags: ParsedProductNameTag[],
+): string {
+  const roleByRaw = new Map(
+    classifiedTags.map((tag) => [tag.raw, tag.role] as const),
+  )
+  const next = replaceInlineReservationShippingDateTags(itemName, (raw) =>
+    STRIP_ROLES.has(roleByRaw.get(raw) ?? 'unknown'),
+  )
+  return next || itemName.trim()
+}
+
+/** 저장된 예약배송 역할이 비교 제외일 때만 옵션 비교값을 정리한다. */
+export function matchingItemName(
+  itemName: string,
+  roles: InvoiceProductNameTagRoleEntry[] = [],
+): string {
+  return matchingItemNameFromTags(
+    itemName,
+    classifyInlineReservationShippingDateTags(itemName, roles),
+  )
+}
+
 /** 이미 분류한 파일 태그에서 상품 구성·미분류만 남긴 품목명. */
 export function matchingProductNameFromTags(
   productName: string,
@@ -256,6 +365,72 @@ export function collectFileTagGroups(
       if (leftUnknown !== rightUnknown) return leftUnknown - rightUnknown
       if (right.productCount !== left.productCount) {
         return right.productCount - left.productCount
+      }
+      return left.tag.raw.localeCompare(right.tag.raw, 'ko-KR')
+    })
+}
+
+export function collectFileOptionReservationTagGroups(
+  rows: { itemName: string; itemTags: ParsedProductNameTag[] }[],
+): FileOptionReservationTagGroup[] {
+  const groups = new Map<
+    string,
+    {
+      tag: ParsedProductNameTag
+      items: Set<string>
+      variants: Set<string>
+      examples: string[]
+      previews: Array<{ raw: string; matching: string }>
+    }
+  >()
+  for (const row of rows) {
+    const itemKey = normalizeInvoiceText(row.itemName)
+    if (!itemKey || row.itemTags.length === 0) continue
+    const matching = matchingItemNameFromTags(row.itemName, row.itemTags)
+    for (const tag of row.itemTags) {
+      if (tag.key !== RESERVATION_SHIPPING_DATE_FAMILY) continue
+      const current = groups.get(tag.key)
+      if (!current) {
+        groups.set(tag.key, {
+          tag: {
+            ...tag,
+            raw: RESERVATION_SHIPPING_DATE_LABEL,
+            normalized: RESERVATION_SHIPPING_DATE_FAMILY,
+          },
+          items: new Set([itemKey]),
+          variants: new Set([tag.normalized]),
+          examples: [tag.raw],
+          previews: [{ raw: row.itemName, matching }],
+        })
+        continue
+      }
+      current.items.add(itemKey)
+      current.variants.add(tag.normalized)
+      if (current.examples.length < 3 && !current.examples.includes(tag.raw)) {
+        current.examples.push(tag.raw)
+      }
+      if (
+        current.previews.length < 2 &&
+        !current.previews.some((preview) => preview.raw === row.itemName)
+      ) {
+        current.previews.push({ raw: row.itemName, matching })
+      }
+    }
+  }
+  return [...groups.values()]
+    .map((group) => ({
+      tag: group.tag,
+      itemCount: group.items.size,
+      variantCount: group.variants.size,
+      examples: group.examples,
+      previews: group.previews,
+    }))
+    .sort((left, right) => {
+      const leftUnknown = left.tag.role === 'unknown' ? 0 : 1
+      const rightUnknown = right.tag.role === 'unknown' ? 0 : 1
+      if (leftUnknown !== rightUnknown) return leftUnknown - rightUnknown
+      if (right.itemCount !== left.itemCount) {
+        return right.itemCount - left.itemCount
       }
       return left.tag.raw.localeCompare(right.tag.raw, 'ko-KR')
     })

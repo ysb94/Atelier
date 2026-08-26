@@ -104,8 +104,15 @@ import {
   transformInvoiceOptions,
 } from '@/lib/invoice/option-transform'
 import { PRODUCT_NAME_CASES } from '@/lib/invoice/product-name-cases'
-import { generateProductNameCandidates } from '@/lib/invoice/product-name-patterns'
-import { matchingProductName } from '@/lib/invoice/product-name-tags'
+import {
+  generateProductNameCandidates,
+  generateProductNameRegistrationCandidates,
+} from '@/lib/invoice/product-name-patterns'
+import {
+  matchingItemNameFromTags,
+  matchingProductName,
+  matchingProductNameFromTags,
+} from '@/lib/invoice/product-name-tags'
 import {
   catalogFromStyles,
   collectProductNameComboOrders,
@@ -1440,6 +1447,144 @@ assert(
   taggedLedger.rows[0]?.status === 'mapped' &&
     taggedLedger.rows[0]?.transformedProductName === taggedLedgerStyle.name,
   '원장 조회 키의 행사 태그를 빼면 별칭으로 매칭',
+)
+
+const optionReserveStyle = style(
+  's-opt-reserve',
+  'M9201',
+  '래빗에코백 트와일라잇 블랙',
+)
+const optionReserveSource = row({
+  rowNumber: 9201,
+  productName: '마스마룰즈 래빗에코백',
+  itemName: 'Color: [9/1예약배송]트와일라잇 블랙',
+  mallName: '스마트스토어',
+})
+const optionReserveMapped = transformInvoiceProductNames(
+  [optionReserveSource],
+  [
+    lookupMap(
+      'opt-reserve-1',
+      '마스마룰즈 래빗에코백 Color: [8/14예약배송]트와일라잇 블랙',
+      optionReserveStyle,
+    ),
+  ],
+  catalogFromStyles([]),
+  [tagRole('[8/14예약배송]', 'event_marketing')],
+)
+assert(
+  optionReserveMapped.rows[0]?.status === 'mapped' &&
+    optionReserveMapped.rows[0]?.style?.styleId === optionReserveStyle.styleId &&
+    optionReserveMapped.rows[0]?.source.itemName ===
+      optionReserveSource.itemName &&
+    optionReserveMapped.rows[0]?.effectiveItemName ===
+      optionReserveSource.itemName,
+  '이전 날짜 원장과 새 날짜 옵션을 연결하고 원문은 보존',
+)
+
+const optionExactStyle = style('s-opt-exact', 'M9202', '현재 날짜 원장')
+const optionAliasStyle = style('s-opt-alias', 'M9203', '정리 별칭 원장')
+const optionExactMapped = transformInvoiceProductNames(
+  [optionReserveSource],
+  [
+    lookupMap(
+      'opt-alias-1',
+      '마스마룰즈 래빗에코백 Color: 트와일라잇 블랙',
+      optionAliasStyle,
+    ),
+    lookupMap(
+      'opt-exact-1',
+      '마스마룰즈 래빗에코백 Color: [9/1예약배송]트와일라잇 블랙',
+      optionExactStyle,
+    ),
+  ],
+  catalogFromStyles([]),
+  [tagRole('[날짜 예약배송]', 'event_marketing')],
+)
+assert(
+  optionExactMapped.rows[0]?.status === 'mapped' &&
+    optionExactMapped.rows[0]?.style?.styleId === optionExactStyle.styleId &&
+    optionExactMapped.rows[0]?.appliedLookupKey ===
+      '마스마룰즈 래빗에코백 Color: [9/1예약배송]트와일라잇 블랙',
+  '현재 날짜 원문 exact 조회 키를 정리 별칭보다 우선',
+)
+
+const optionUnknown = transformInvoiceProductNames(
+  [optionReserveSource],
+  [
+    lookupMap(
+      'opt-clean-1',
+      '마스마룰즈 래빗에코백 Color: 트와일라잇 블랙',
+      optionReserveStyle,
+    ),
+  ],
+  catalogFromStyles([]),
+)
+assert(
+  optionUnknown.rows[0]?.status !== 'mapped' &&
+    optionUnknown.rows[0]?.source.itemName === optionReserveSource.itemName,
+  '역할 미저장이면 날짜 제거 별칭으로 맞추지 않고 원문을 유지',
+)
+
+const rematchRoles = [tagRole('[8/14예약배송]', 'event_marketing')]
+const rematchSource = row({
+  rowNumber: 9210,
+  productName: '마스마룰즈 래빗에코백',
+  itemName: 'Color: [9/1예약배송]트와일라잇 블랙',
+  mallName: '스마트스토어',
+})
+const rematchFirst = transformInvoiceProductNames(
+  [rematchSource],
+  [],
+  catalogFromStyles([]),
+  rematchRoles,
+)
+assert(
+  rematchFirst.rows[0]?.status !== 'mapped' &&
+    rematchFirst.unresolvedCombos.length === 1,
+  '등록 전 조회 키는 미해결 조합으로 남음',
+)
+const rematchCombo = rematchFirst.unresolvedCombos[0]!
+const rematchKey = generateProductNameRegistrationCandidates({
+  productName: matchingProductNameFromTags(
+    rematchCombo.productName,
+    rematchCombo.tags,
+  ),
+  itemName: matchingItemNameFromTags(rematchCombo.itemName, rematchCombo.itemTags),
+}).find((candidate) => candidate.rule === 'product_item')?.text
+assert(rematchKey, 'AI 등록 품목명+내품명 조회 키를 만들 수 있음')
+const rematchStyle = style('s-rematch', 'M9210', '래빗에코백 트와일라잇 블랙')
+const rematchSaved = transformInvoiceProductNames(
+  [rematchSource],
+  [lookupMap('rematch-1', rematchKey, rematchStyle)],
+  catalogFromStyles([]),
+  rematchRoles,
+)
+assert(
+  rematchSaved.rows[0]?.status === 'mapped' &&
+    rematchSaved.rows[0]?.style?.styleId === rematchStyle.styleId,
+  '등록 조회 키를 원장에 넣으면 같은 파일이 자동 완료',
+)
+assert(
+  rematchSaved.unresolvedCombos.length === 0,
+  '저장된 조합은 미해결 목록에서 빠짐',
+)
+const rematchLater = transformInvoiceProductNames(
+  [
+    {
+      ...rematchSource,
+      rowNumber: 9211,
+      itemName: 'Color: [9/15예약배송]트와일라잇 블랙',
+    },
+  ],
+  [lookupMap('rematch-1', rematchKey, rematchStyle)],
+  catalogFromStyles([]),
+  rematchRoles,
+)
+assert(
+  rematchLater.rows[0]?.status === 'mapped' &&
+    rematchLater.unresolvedCombos.length === 0,
+  '같은 등록 키로 후속 파일도 자동 완료',
 )
 
 const keepIdentity = transformInvoiceProductNames(
@@ -4120,6 +4265,12 @@ function stubItemNameAiReviewRow(
     validationError: null,
     existingRuleId: null,
     existingGlobalRuleId: null,
+    source: extra?.source ?? null,
+    cacheId: extra?.cacheId ?? null,
+    provider: extra?.provider ?? null,
+    modelId: extra?.modelId ?? null,
+    suggestedAction: extra?.suggestedAction ?? extra?.action ?? null,
+    suggestedComponents: extra?.suggestedComponents ?? extra?.components ?? [],
     ...extra,
   })
 }

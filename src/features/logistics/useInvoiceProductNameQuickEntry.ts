@@ -59,40 +59,31 @@ function slotsForRow(
   return stored ?? productNameAiQuickSlotsFromRow(row)
 }
 
-function pendingSlotCount(slotsByKey: Map<string, ProductNameAiQuickSlot[]>) {
-  let count = 0
-  for (const slots of slotsByKey.values()) {
-    for (const slot of slots) {
-      if (
-        slot.text.trim() &&
-        (slot.status === 'draft' ||
-          slot.status === 'ambiguous' ||
-          slot.status === 'unmatched')
-      ) {
-        count += 1
-      }
-    }
-  }
-  return count
+function pendingSlotCount(pendingAiKeys: ReadonlySet<string>) {
+  return pendingAiKeys.size
 }
 
 export function useInvoiceProductNameQuickEntry({
   brandId,
   rows,
   confirmedKeys,
+  pendingAiKeys,
   applySlots,
   confirmRow,
+  markPendingAi,
   unconfirmRow,
 }: {
   brandId: string
   rows: ProductNameAiReviewRow[]
   confirmedKeys: ReadonlySet<string>
+  pendingAiKeys: ReadonlySet<string>
   applySlots: (
     key: string,
     slots: ProductNameAiQuickSlot[],
     mode: 'edit' | 'confirm' | 'resolved',
   ) => { ok: boolean; error?: string }
-  confirmRow: (key: string, pendingAi?: boolean) => void
+  confirmRow: (key: string) => void
+  markPendingAi: (key: string) => void
   unconfirmRow: (key: string) => void
 }) {
   const queryClient = useQueryClient()
@@ -236,15 +227,16 @@ export function useInvoiceProductNameQuickEntry({
       }
       const staged = applySlots(rowKey, slots, mode)
       setStageError(rowKey, staged.ok ? null : staged.error ?? '반영하지 못했습니다.')
-      if (mode === 'confirm' || mode === 'resolved') {
-        if (decision.status === 'needs_ai') confirmRow(rowKey, true)
-        else if (staged.ok) confirmRow(rowKey, false)
-      } else if (decision.status === 'needs_ai' && confirmed) {
-        confirmRow(rowKey, true)
+      if (!staged.ok) return decision
+      if (mode === 'confirm') {
+        if (decision.status === 'needs_ai') markPendingAi(rowKey)
+        else confirmRow(rowKey)
+      } else {
+        unconfirmRow(rowKey)
       }
       return decision
     },
-    [applySlots, confirmRow, confirmedKeys, setStageError, unconfirmRow],
+    [applySlots, confirmRow, confirmedKeys, markPendingAi, setStageError, unconfirmRow],
   )
 
   const setSlotText = useCallback(
@@ -382,8 +374,8 @@ export function useInvoiceProductNameQuickEntry({
   )
 
   const pendingCount = useMemo(
-    () => pendingSlotCount(slotsByKey),
-    [slotsByKey],
+    () => pendingSlotCount(pendingAiKeys),
+    [pendingAiKeys],
   )
 
   const resolve = useCallback(async () => {
@@ -400,6 +392,7 @@ export function useInvoiceProductNameQuickEntry({
     for (const [rowKey, slots] of currentSlots) {
       const row = rowByKey.get(rowKey)
       if (!row) continue
+      if (!pendingAiKeys.has(rowKey)) continue
       const mainStyleId = slots[0]?.style?.styleId ?? row.style?.styleId ?? null
       slots.forEach((slot, slotIndex) => {
         if (
@@ -564,7 +557,7 @@ export function useInvoiceProductNameQuickEntry({
       const resolvedKeys = new Set(tasks.map((task) => task.rowKey))
       for (const [rowKey, slots] of nextByRow) {
         if (!liveKeys.has(rowKey)) continue
-        if (resolvedKeys.has(rowKey) || confirmedKeys.has(rowKey)) {
+        if (resolvedKeys.has(rowKey)) {
           applyDecision(rowKey, slots, 'resolved')
         }
       }
@@ -574,8 +567,8 @@ export function useInvoiceProductNameQuickEntry({
   }, [
     applyDecision,
     brandId,
-    confirmedKeys,
     minConfidence,
+    pendingAiKeys,
     queryClient,
     replaceSlots,
     route?.modelId,

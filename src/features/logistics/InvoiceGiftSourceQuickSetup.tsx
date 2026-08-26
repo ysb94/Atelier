@@ -16,7 +16,6 @@ export function InvoiceGiftSourceQuickSetup({
   error,
   onApplySession,
   onApplyPersist,
-  onApplyExisting,
   onTreatAsRegular,
 }: {
   brandId: string
@@ -25,7 +24,6 @@ export function InvoiceGiftSourceQuickSetup({
   error: string | null
   onApplySession: (rule: GiftSourceSessionRule) => void
   onApplyPersist: (rule: GiftSourceSessionRule) => void
-  onApplyExisting: () => void
   onTreatAsRegular?: () => void
 }) {
   const [selected, setSelected] = useState<StyleRef[]>(group.poolStyles)
@@ -90,20 +88,10 @@ export function InvoiceGiftSourceQuickSetup({
       ) : null}
 
       {group.status === 'map_found' ? (
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            size="sm"
-            className="h-7 px-2 text-[11px]"
-            disabled={applying}
-            onClick={onApplyExisting}
-          >
-            바로 적용
-          </Button>
-          <p className="self-center text-[11px] text-muted-foreground">
-            저장된 후보 풀로 미배정 키만 확정합니다.
-          </p>
-        </div>
+        <p className="text-[11px] text-muted-foreground">
+          저장된 설정이 있지만 후보가 없거나 이번 파일에서 배정하지 못했습니다.
+          후보를 고른 뒤 적용하세요.
+        </p>
       ) : null}
 
       <StyleMultiPicker
@@ -156,6 +144,11 @@ export function InvoiceGiftSourceQuickSetup({
           다음 주문에도 자동 적용
         </label>
       </div>
+      <p className="text-[11px] text-muted-foreground">
+        {scope === 'session'
+          ? '이 파일에만 적용하고 원장에는 남기지 않습니다.'
+          : '원장에 저장하면 다음 파일부터 같은 쇼핑몰·품목명에 바로 적용됩니다.'}
+      </p>
 
       {error ? <p className="text-[11px] text-danger">{error}</p> : null}
 

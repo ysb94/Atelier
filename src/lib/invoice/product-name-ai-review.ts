@@ -4,8 +4,12 @@ import {
   type ProductNameCandidate,
 } from '@/lib/invoice/product-name-patterns'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
-import { matchingProductNameFromTags } from '@/lib/invoice/product-name-tags'
+import {
+  matchingItemNameFromTags,
+  matchingProductNameFromTags,
+} from '@/lib/invoice/product-name-tags'
 import type { UnresolvedProductNameCombo } from '@/lib/invoice/product-name-transform'
+import { decideProductNameFeedbackOutcome } from '@/lib/ai/learning-core'
 import type {
   AiProductRecommendation,
   AiRecommendProduct,
@@ -26,6 +30,8 @@ export type ProductNameAiHoldReason =
   | 'exclusion_guarded'
 
 export type ProductNameAiReviewKind = 'queue' | 'hold' | 'ready' | 'failed'
+
+export type ProductNameAiWorkflowTab = 'review' | 'ready' | 'failed'
 
 export type ProductNameAiExtra = {
   style: StyleRef
@@ -54,6 +60,7 @@ export type ProductNameAiReviewRow = {
   provider: AiProductRecommendation['provider'] | null
   modelId: string | null
   shownRank: number | null
+  suggestedStyleId: string | null
   passesGate: boolean
   isConflict: boolean
   /** 동일 등록 키가 서로 다른 본품 M번호를 가리키는 검수표 내부 충돌. */
@@ -96,12 +103,30 @@ export type ProductNameAiSavePlanItem = {
   shownRank: number | null
   provider: AiProductRecommendation['provider'] | null
   modelId: string | null
+  suggestedStyleId: string | null
+  outcome: 'confirmed' | 'corrected'
   sharesLookupKey: boolean
 }
 
 export type ProductNameAiSavePlan = {
   items: ProductNameAiSavePlanItem[]
   skipped: Array<{ reviewKey: string; message: string }>
+}
+
+export function productNameAiSearchKeys(row: {
+  candidates: Array<{ text: string }>
+  registrationCandidates: Array<{ text: string }>
+}) {
+  const seen = new Set<string>()
+  const keys: string[] = []
+  for (const item of [...row.candidates, ...row.registrationCandidates]) {
+    const text = item.text.trim()
+    const key = normalizeInvoiceText(text)
+    if (!text || seen.has(key)) continue
+    seen.add(key)
+    keys.push(text)
+  }
+  return keys
 }
 
 export function productNameAiSignature(row: {
@@ -139,7 +164,7 @@ export function buildProductNameAiReviewRow(
       : null)
   const registrationCandidates = generateProductNameRegistrationCandidates({
     productName: matchingProductNameFromTags(combo.productName, combo.tags),
-    itemName: combo.itemName,
+    itemName: matchingItemNameFromTags(combo.itemName, combo.itemTags),
   })
   const selectedRegistration = pickProductNameRegistrationCandidate(
     registrationCandidates,
@@ -166,6 +191,7 @@ export function buildProductNameAiReviewRow(
     provider: null,
     modelId: null,
     shownRank: null,
+    suggestedStyleId: null,
     passesGate: false,
     isConflict: combo.status === 'conflict',
     lookupKeyConflict: false,
@@ -208,6 +234,7 @@ export function applyProductNameLookupKey(
     lookupKey,
     appliedRule: candidate?.rule ?? row.appliedRule,
     source: row.source && row.source !== 'manual' ? 'manual' : row.source,
+    suggestedStyleId: row.suggestedStyleId,
   })
 }
 
@@ -242,6 +269,7 @@ export function applyProductNameAiRecommendation(
       provider: recommendation.provider,
       modelId: recommendation.modelId,
       shownRank: null,
+      suggestedStyleId: row.suggestedStyleId,
       passesGate: false,
       holdReason: 'no_product',
       message: recommendation.reason || '추천 상품이 없습니다.',
@@ -269,13 +297,10 @@ export function applyProductNameAiRecommendation(
     provider: recommendation.provider,
     modelId: recommendation.modelId,
     shownRank: 1,
+    suggestedStyleId: row.suggestedStyleId ?? top.styleId,
     passesGate,
     holdReason,
-    message: row.isConflict
-      ? '본품 후보가 여러 개입니다.'
-      : passesGate
-        ? null
-        : '확실도가 낮아 확인이 필요합니다.',
+    message: row.isConflict ? '본품 후보가 여러 개입니다.' : null,
   })
 }
 
@@ -393,7 +418,7 @@ export function markProductNameAiDecisionNeeded(
   return validateProductNameAiReviewRow({
     ...row,
     holdReason: row.style ? row.holdReason ?? 'low_confidence' : 'incomplete',
-    message: row.message ?? '사람이 다시 확인해야 합니다.',
+    message: row.message,
   })
 }
 
@@ -440,6 +465,84 @@ export function productNameAiMatchesQueueFilter(
   if (saveFailed) return filter === 'failed'
   if (filter === 'failed') return false
   return productNameAiReviewKind(row) === filter
+}
+
+export function isProductNameAiSaveFailed(
+  status: string | null | undefined,
+) {
+  return status === 'failed'
+}
+
+export function productNameAiWorkflowTab(options: {
+  confirmed: boolean
+  saveFailed: boolean
+  readyToCommit: boolean
+}): ProductNameAiWorkflowTab {
+  if (options.saveFailed) return 'failed'
+  if (options.confirmed && options.readyToCommit) return 'ready'
+  return 'review'
+}
+
+export function productNameAiMatchesWorkflowTab(
+  options: {
+    confirmed: boolean
+    saveFailed: boolean
+    readyToCommit: boolean
+  },
+  tab: ProductNameAiWorkflowTab,
+) {
+  return productNameAiWorkflowTab(options) === tab
+}
+
+export function countProductNameAiWorkflow(options: {
+  rows: ProductNameAiReviewRow[]
+  confirmedKeys: ReadonlySet<string>
+  saveFailedKeys: ReadonlySet<string>
+}) {
+  let reviewCount = 0
+  let readyCount = 0
+  let saveFailedCount = 0
+  for (const row of options.rows) {
+    const tab = productNameAiWorkflowTab({
+      confirmed: options.confirmedKeys.has(row.key),
+      saveFailed: options.saveFailedKeys.has(row.key),
+      readyToCommit: productNameAiRowReadyToCommit(row),
+    })
+    if (tab === 'failed') saveFailedCount += 1
+    else if (tab === 'ready') readyCount += 1
+    else reviewCount += 1
+  }
+  return { reviewCount, readyCount, saveFailedCount }
+}
+
+export function decideProductNameAiConfirmedSaves(
+  rows: ProductNameAiReviewRow[],
+  confirmedKeys: ReadonlySet<string>,
+  saveFailedKeys: ReadonlySet<string> = new Set(),
+) {
+  return decideProductNameAiSaves(
+    rows.filter(
+      (row) =>
+        confirmedKeys.has(row.key) && !saveFailedKeys.has(row.key),
+    ),
+  )
+}
+
+export function productNameAiCollectFailed(row: ProductNameAiReviewRow) {
+  return row.holdReason === 'failed' || row.holdReason === 'no_product'
+}
+
+export function selectLatestFailedSaveRetries<
+  T extends { comboKey: string; status: string },
+>(history: T[]) {
+  const seen = new Set<string>()
+  const failed: T[] = []
+  for (const entry of history) {
+    if (seen.has(entry.comboKey)) continue
+    seen.add(entry.comboKey)
+    if (entry.status === 'failed') failed.push(entry)
+  }
+  return failed
 }
 
 export function formatProductNameAiStyleLabel(style: StyleRef) {
@@ -507,8 +610,17 @@ export function applyProductNameAiQuickSlotText(
   text: string,
 ): ProductNameAiQuickSlot {
   if (!text.trim()) return emptyProductNameAiQuickSlot()
-  if (slot.style && text === formatProductNameAiStyleLabel(slot.style)) {
-    return { ...slot, text, status: 'matched', error: null }
+  if (
+    slot.style &&
+    (text === formatProductNameAiStyleLabel(slot.style) ||
+      text === slot.style.name)
+  ) {
+    return {
+      ...slot,
+      text: formatProductNameAiStyleLabel(slot.style),
+      status: 'matched',
+      error: null,
+    }
   }
   return {
     text,
@@ -604,10 +716,11 @@ export function applyProductNameAiRowSlots(
       style: mode === 'edit' ? row.style : null,
       extras: mode === 'edit' ? row.extras : [],
       source: 'manual',
-      shownRank: null,
-      cacheId: null,
+      shownRank: row.shownRank,
+      cacheId: row.cacheId,
+      suggestedStyleId: row.suggestedStyleId,
       holdReason: 'incomplete',
-      message: 'AI 공식명칭 완성이 필요합니다.',
+      message: null,
     })
     return { ok: true, row: next, decision }
   }
@@ -616,8 +729,9 @@ export function applyProductNameAiRowSlots(
     style: decision.style,
     extras: decision.extras,
     source: 'manual',
-    shownRank: null,
-    cacheId: null,
+    shownRank: row.shownRank,
+    cacheId: row.cacheId,
+    suggestedStyleId: row.suggestedStyleId,
     holdReason: row.isConflict ? 'conflict' : null,
     message: null,
     passesGate: true,
@@ -742,10 +856,15 @@ export function decideProductNameAiSaves(
       style: row.style,
       extras: row.extras,
       source: row.source ?? 'manual',
-      cacheId: row.source === 'manual' ? null : row.cacheId,
-      shownRank: row.source === 'manual' ? null : row.shownRank,
-      provider: row.source === 'manual' ? null : row.provider,
-      modelId: row.source === 'manual' ? null : row.modelId,
+      cacheId: row.cacheId,
+      shownRank: row.shownRank,
+      provider: row.provider,
+      modelId: row.modelId,
+      suggestedStyleId: row.suggestedStyleId,
+      outcome: decideProductNameFeedbackOutcome({
+        suggestedStyleId: row.suggestedStyleId,
+        finalStyleId: row.style.styleId,
+      }),
       sharesLookupKey: Boolean(owner && owner !== row.key),
     })
   }

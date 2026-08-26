@@ -1,15 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Check, Download, Pencil, Plus, Trash2, X } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Check, Download, List, Pencil, Plus, Trash2, X } from 'lucide-react'
 import {
   BrandFieldStoreError,
   createBrandField,
   deleteBrandField,
+  getSeasonsByBrand,
   updateBrandField,
 } from '@/lib/api'
 import type { BrandField, FieldOwner, FieldType } from '@/lib/types'
 import { OWNER_LABEL, OWNER_ORDER } from '@/lib/import/fields'
 import { downloadUploadTemplate } from '@/lib/import/template'
+import { canEditFieldType } from '@/lib/products/brand-field-select'
+import { FieldOptionEditor } from '@/features/upload/FieldOptionEditor'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -19,9 +22,15 @@ const TYPE_OPTIONS: { value: FieldType; label: string }[] = [
   { value: 'text', label: '텍스트' },
   { value: 'number', label: '숫자' },
   { value: 'list', label: '목록' },
+  { value: 'select', label: '단일 선택' },
   { value: 'gender', label: '성별' },
   { value: 'season', label: '시즌' },
   { value: 'image', label: '이미지' },
+]
+
+const SYSTEM_SELECT_TYPE_OPTIONS: { value: FieldType; label: string }[] = [
+  { value: 'text', label: '텍스트' },
+  { value: 'select', label: '단일 선택' },
 ]
 
 type Draft = {
@@ -39,6 +48,12 @@ type FieldManagerProps = {
 
 function typeLabel(type: FieldType) {
   return TYPE_OPTIONS.find((t) => t.value === type)?.label ?? type
+}
+
+function typeOptionsFor(field: BrandField) {
+  if (!field.systemKey) return TYPE_OPTIONS
+  if (canEditFieldType(field)) return SYSTEM_SELECT_TYPE_OPTIONS
+  return null
 }
 
 /** 품번(styleNo)은 삭제 불가. 표시 이름만 수정 가능 */
@@ -61,7 +76,12 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
   const [downloading, setDownloading] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
+  const [optionsFieldId, setOptionsFieldId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  const seasonsQuery = useQuery({
+    queryKey: ['seasons', brandId],
+    queryFn: () => getSeasonsByBrand(brandId),
+  })
 
   const deletableIds = useMemo(
     () => fields.filter(isDeletable).map((field) => field.id),
@@ -81,6 +101,11 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
     })
   }, [deletableIds])
 
+  const optionsField = useMemo(
+    () => fields.find((field) => field.id === optionsFieldId) ?? null,
+    [fields, optionsFieldId],
+  )
+
   const selectedCount = selectedIds.size
   const allDeletableSelected =
     deletableIds.length > 0 && deletableIds.every((id) => selectedIds.has(id))
@@ -95,10 +120,11 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
   const createMutation = useMutation({
     mutationFn: () =>
       createBrandField(brandId, { label, type, owner, required }),
-    onSuccess: async () => {
+    onSuccess: async (created) => {
       setLabel('')
       setRequired(false)
       setError(null)
+      if (created.type === 'select') setOptionsFieldId(created.id)
       await invalidate()
     },
     onError: (err) => {
@@ -210,7 +236,7 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
     if (!draft) return
     const patch: Draft = {
       label: draft.label.trim(),
-      type: field.systemKey ? field.type : draft.type,
+      type: canEditFieldType(field) ? draft.type : field.type,
       owner: draft.owner,
       required: draft.required,
     }
@@ -229,6 +255,7 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
         brandName,
         fields,
         ownerFilter,
+        seasons: seasonsQuery.data ?? [],
       })
     } catch (err) {
       setError(
@@ -378,11 +405,7 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
                           />
                         </td>
                         <td className="px-3 py-2">
-                          {system ? (
-                            <span className="text-muted-foreground">
-                              {typeLabel(field.type)}
-                            </span>
-                          ) : (
+                          {typeOptionsFor(field) ? (
                             <Select
                               value={draft.type}
                               onChange={(e) =>
@@ -393,12 +416,16 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
                               }
                               className="h-8 w-full"
                             >
-                              {TYPE_OPTIONS.map((opt) => (
+                              {typeOptionsFor(field)!.map((opt) => (
                                 <option key={opt.value} value={opt.value}>
                                   {opt.label}
                                 </option>
                               ))}
                             </Select>
+                          ) : (
+                            <span className="text-muted-foreground">
+                              {typeLabel(field.type)}
+                            </span>
                           )}
                         </td>
                         <td className="px-3 py-2">
@@ -529,6 +556,22 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center justify-end gap-1">
+                          {field.type === 'select' ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              aria-label={`${field.label} 선택지 관리`}
+                              disabled={pending}
+                              onClick={() =>
+                                setOptionsFieldId((current) =>
+                                  current === field.id ? null : field.id,
+                                )
+                              }
+                            >
+                              <List className="size-3.5" />
+                            </Button>
+                          ) : null}
                           <Button
                             type="button"
                             variant="ghost"
@@ -562,6 +605,14 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
               </tbody>
             </table>
           </div>
+
+          {optionsField ? (
+            <FieldOptionEditor
+              key={`${optionsField.id}:${optionsField.options.length}:${optionsField.options.map((option) => option.id).join(',')}`}
+              field={optionsField}
+              onSaved={invalidate}
+            />
+          ) : null}
 
           <div className="rounded-lg border border-dashed border-border p-4">
             <div className="mb-3 text-sm font-medium">항목 추가</div>

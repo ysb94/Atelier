@@ -96,6 +96,27 @@ export type FieldType =
   | 'season'
   /** 이미지 주소를 담는 항목. 값은 공개 URL 문자열이다. */
   | 'image'
+  /** 브랜드가 관리하는 단일 선택. 상품에는 정규 선택명 문자열을 저장한다. */
+  | 'select'
+
+/** 선택형 항목의 선택지 */
+export type BrandFieldOption = {
+  id: string
+  brandId: string
+  fieldId: string
+  label: string
+  aliases: string[]
+  sortOrder: number
+  isActive: boolean
+}
+
+export type BrandFieldOptionInput = {
+  id?: string
+  label: string
+  aliases?: string[]
+  sortOrder: number
+  isActive: boolean
+}
 
 /** 브랜드별 업로드 양식 항목(헤더) 정의 */
 export type BrandField = {
@@ -110,6 +131,7 @@ export type BrandField = {
   order: number
   /** 값이 붙는 계층. 기본 style */
   level: FieldLevel
+  options: BrandFieldOption[]
 }
 
 /** 사용자 추가 항목 입력 */
@@ -499,6 +521,130 @@ export type InvoiceOptionMap = {
   components: InvoiceOptionMapComponent[]
   createdAt: string
   updatedAt: string
+}
+
+/** 데이터 시트의 포장 규격 원문을 중복 제거한 한 줄. */
+export type InvoicePackingSizeSourceValue = {
+  fieldId: string
+  sourceValue: string
+  normalizedSourceValue: string
+  styleCount: number
+}
+
+/**
+ * 포장 규격 원문에 붙인 간단 표시값.
+ * 기준정보에서만 관리하며 아직 송장 변환이나 출력에는 적용하지 않는다.
+ */
+export type InvoicePackingSizeMap = {
+  id: string
+  brandId: string
+  fieldId: string
+  sourceValue: string
+  normalizedSourceValue: string
+  displayValue: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type WarehouseZone = 'box_storage' | 'picking'
+export type WarehouseInventoryKind = 'sandbox' | 'live'
+export type WarehouseInventoryStatus = 'active' | 'archived'
+export type WarehouseReviewFlag =
+  | 'missing_style'
+  | 'date_review'
+  | 'duplicate_suspect'
+  | 'special_location'
+export type WarehouseStockAction =
+  | 'import'
+  | 'receive'
+  | 'move'
+  | 'deplete'
+  | 'adjust'
+  | 'replenish'
+  | 'open'
+  | 'label'
+export type WarehouseBoxStatus = 'sealed' | 'opened' | 'depleted'
+
+export type WarehouseInventorySet = {
+  id: string
+  brandId: string
+  warehouseId: string
+  kind: WarehouseInventoryKind
+  status: WarehouseInventoryStatus
+  sourceFileName: string
+  rowCount: number
+  importedAt: string
+  importedBy: string | null
+}
+
+export type WarehouseLocation = {
+  id: string
+  warehouseId: string
+  code: string
+  zone: WarehouseZone
+}
+
+export type WarehouseStockPosition = {
+  id: string
+  brandId: string
+  setId: string
+  warehouseId: string
+  locationId: string
+  locationCode: string
+  zone: WarehouseZone
+  styleId: string | null
+  styleNo: string
+  styleName: string
+  sourceStyleNo: string
+  sourceProductName: string
+  receivedOn: string | null
+  receivedOnRaw: string
+  isForcedPriority: boolean
+  isFinalLocation: boolean
+  unitsPerBox: number
+  remainingBoxes: number
+  openedUnits: number
+  reviewFlags: WarehouseReviewFlag[]
+  sourceRowNumber: number
+  note: string
+  usageRank: number | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type WarehouseBox = {
+  id: string
+  brandId: string
+  setId: string
+  displayCode: string
+  locationId: string
+  locationCode: string
+  zone: WarehouseZone
+  styleId: string
+  styleNo: string
+  styleName: string
+  receivedOn: string | null
+  initialQty: number
+  currentQty: number
+  status: WarehouseBoxStatus
+  createdAt: string
+}
+
+export type WarehouseStockMovement = {
+  id: string
+  brandId: string
+  setId: string
+  action: WarehouseStockAction
+  positionId: string | null
+  boxId: string | null
+  styleId: string | null
+  fromLocationCode: string | null
+  toLocationCode: string | null
+  boxCount: number
+  unitCount: number
+  reason: string
+  actorId: string | null
+  createdAt: string
 }
 
 export type InvoiceItemNameRuleScope = 'global' | 'main_style' | 'lookup_key'
@@ -951,6 +1097,9 @@ export type AiProvider = 'openai' | 'anthropic' | 'gemini'
 export type AiFeatureKey =
   | 'invoice_product_recommendation'
   | 'invoice_accessory_recommendation'
+  | 'invoice_item_name_recommendation'
+
+export type AiLearningMode = 'observe' | 'assist'
 
 export type AiRecommendationPolicy = 'hybrid_auto' | 'always_ai' | 'local_only'
 
@@ -962,6 +1111,8 @@ export type AiFeatureRoute = {
   modelId: string
   isActive: boolean
   recommendationPolicy: AiRecommendationPolicy
+  learningMode: AiLearningMode
+  monthlyBudgetUsd: number | null
   decisionConfig: {
     high: number
     margin: number
@@ -1053,6 +1204,35 @@ export type AiProductRecommendation = {
   cacheHit: boolean
 }
 
+export type AiUsageModelSummary = {
+  provider: string
+  modelId: string
+  total: number
+  inputTokens: number
+  outputTokens: number
+  estimatedCostUsd: number | null
+}
+
+export type AiUsageFeatureSummary = {
+  featureKey: string
+  total: number
+  localCount: number
+  aiCount: number
+  cacheCount: number
+  skippedAiCount: number
+  inputTokens: number
+  outputTokens: number
+  estimatedCostUsd: number | null
+  monthlyBudgetUsd: number | null
+  budgetWarning: boolean
+  caseCount: number
+  confirmedRate: number | null
+  correctionRate: number | null
+  top1Rate: number | null
+  top3Rate: number | null
+  models: AiUsageModelSummary[]
+}
+
 export type AiUsageSummary = {
   total: number
   localCount: number
@@ -1061,7 +1241,9 @@ export type AiUsageSummary = {
   skippedAiCount: number
   inputTokens: number
   outputTokens: number
+  estimatedCostUsd: number | null
   top1Rate: number | null
   top3Rate: number | null
   editRate: number | null
+  features: AiUsageFeatureSummary[]
 }

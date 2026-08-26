@@ -2,8 +2,14 @@
  * 품목명 AI 검수표 초안·키보드·공식명칭 판정 검증.
  * 실행: npm run verify:product-name-ai-review
  */
-import { generateProductNameCandidates } from '@/lib/invoice/product-name-patterns'
-import { classifyLeadingTags } from '@/lib/invoice/product-name-tags'
+import {
+  generateProductNameCandidates,
+  similarProductSearchText,
+} from '@/lib/invoice/product-name-patterns'
+import {
+  classifyInlineReservationShippingDateTags,
+  classifyLeadingTags,
+} from '@/lib/invoice/product-name-tags'
 import {
   applyProductNameAiQuickSlotStyle,
   applyProductNameAiQuickSlotText,
@@ -11,14 +17,20 @@ import {
   applyProductNameAiRowSlots,
   applyProductNameLookupKey,
   buildProductNameAiReviewRow,
+  countProductNameAiWorkflow,
+  decideProductNameAiConfirmedSaves,
   decideProductNameAiEnterAction,
   decideProductNameAiQuickSlotMatch,
   decideProductNameAiSaves,
   emptyProductNameAiQuickSlot,
+  isProductNameAiSaveFailed,
   markProductNameAiDuplicates,
   nextProductNameAiQuickFocus,
+  productNameAiCollectFailed,
   productNameAiRowReadyToCommit,
   productNameAiSlotsNeedAi,
+  productNameAiWorkflowTab,
+  selectLatestFailedSaveRetries,
   shouldIgnoreProductNameAiQuickKey,
   type ProductNameAiReviewRow,
 } from '@/lib/invoice/product-name-ai-review'
@@ -70,6 +82,7 @@ function combo(overrides: Partial<UnresolvedProductNameCombo> = {}): UnresolvedP
     candidateStyles: overrides.candidateStyles ?? [],
     candidates,
     tags: overrides.tags ?? classifyLeadingTags(productName, tagRoles),
+    itemTags: overrides.itemTags ?? [],
   }
 }
 
@@ -116,6 +129,7 @@ const filled = applyProductNameAiRecommendation(
 assert(filled.style?.styleId === rabbit.styleId, '전체 추천이 본품 초안을 채움')
 assert(productNameAiRowReadyToCommit(filled), '확신 높은 추천은 저장 가능')
 assert(filled.source === 'local', '수정 전 추천 출처 유지')
+assert(filled.suggestedStyleId === rabbit.styleId, '최초 제안 본품을 보존')
 
 const low = applyProductNameAiRecommendation(
   tagged,
@@ -234,6 +248,44 @@ assert(
   '내품명 앞부분 조회는 내품명 전체 등록 키로 변환',
 )
 
+const reservedItemName = 'Color: [9/1예약배송]트와일라잇 블랙'
+const reservedItemRoles: InvoiceProductNameTagRoleEntry[] = [
+  {
+    id: 'tag-role-reserve',
+    brandId: 'brand',
+    tagText: '[8/14예약배송]',
+    normalizedTag: '[8/14예약배송]',
+    role: 'event_marketing',
+    isActive: true,
+    note: '',
+    createdAt: '2026-08-24T00:00:00.000Z',
+    updatedAt: '2026-08-24T00:00:00.000Z',
+  },
+]
+const reservedReview = buildProductNameAiReviewRow(
+  combo({
+    key: 'reserved-option',
+    productName: '[단독] 래빗에코백',
+    itemName: reservedItemName,
+    itemTags: classifyInlineReservationShippingDateTags(
+      reservedItemName,
+      reservedItemRoles,
+    ),
+  }),
+)
+assert(reservedReview.itemName === reservedItemName, '검수표 내품명 표시는 원문')
+assert(
+  reservedReview.registrationCandidates.find((item) => item.rule === 'item_full')
+    ?.text === 'Color: 트와일라잇 블랙',
+  '등록 내품명은 저장된 역할의 안정적인 비교값',
+)
+assert(
+  reservedReview.registrationCandidates.find(
+    (item) => item.rule === 'product_item',
+  )?.text === '래빗에코백 Color: 트와일라잇 블랙',
+  '등록 품목명+내품명도 정리된 옵션값을 사용',
+)
+
 const conflictingStyle = style('s-other', 'M0999', '다른 본품')
 const keyConflicts = markProductNameAiDuplicates([
   filled,
@@ -265,6 +317,11 @@ assert(productNameAiSlotsNeedAi([draftSlot]), '대기 칸은 완성 대상')
 
 const matchedSlot = applyProductNameAiQuickSlotStyle(draftSlot, rabbit)
 assert(matchedSlot.status === 'matched', '선택하면 공식명칭으로 치환')
+assert(
+  applyProductNameAiQuickSlotText(matchedSlot, rabbit.name).status ===
+    'matched',
+  '입력칸에 상품명만 있어도 매칭을 유지',
+)
 
 assert(
   decideProductNameAiEnterAction([
@@ -406,6 +463,159 @@ assert(
     0.72,
   ).status === 'unmatched',
   '수동 확인 결과는 자동 완성하지 않음',
+)
+
+assert(
+  similarProductSearchText('Strap pouch _ 오렌지퍼플믹스') === 'Strap pouch',
+  '비슷한 상품 검색은 구분자 앞부분만 남긴다',
+)
+assert(
+  similarProductSearchText('마스마룰즈 브리즈 리본 더플백') ===
+    '마스마룰즈 브리즈 리본 더플백',
+  '구분자가 없으면 조회 키를 그대로 쓴다',
+)
+assert(
+  similarProductSearchText('A_블랙') === 'A_블랙',
+  '앞부분이 두 글자 미만이면 원본을 유지한다',
+)
+assert(
+  similarProductSearchText('Color: beige') === 'Color',
+  '콜론 앞부분도 같은 규칙으로 자른다',
+)
+
+assert(
+  productNameAiWorkflowTab({
+    confirmed: false,
+    saveFailed: false,
+    readyToCommit: productNameAiRowReadyToCommit(filled),
+  }) === 'review',
+  'AI 추천 결과는 공식 M번호가 있어도 작업자 Enter 전에는 검토 필요',
+)
+assert(
+  productNameAiCollectFailed({ ...tagged, holdReason: 'failed' }) &&
+    productNameAiCollectFailed({ ...tagged, holdReason: 'no_product' }),
+  '수집 실패와 후보 없음은 검토 필요에서 재시도한다',
+)
+assert(
+  !isProductNameAiSaveFailed('undo_failed') &&
+    !isProductNameAiSaveFailed('ok') &&
+    isProductNameAiSaveFailed('failed'),
+  '저장 실패 탭은 최신 이력이 failed인 행만 포함한다',
+)
+
+const editedConfirm = applyProductNameAiRowSlots(
+  filled,
+  [applyProductNameAiQuickSlotText(emptyProductNameAiQuickSlot(), '래빗에코백 블랙')],
+  'confirm',
+)
+assert(
+  editedConfirm.ok &&
+    editedConfirm.decision.status === 'needs_ai' &&
+    !productNameAiRowReadyToCommit(editedConfirm.row) &&
+    productNameAiWorkflowTab({
+      confirmed: false,
+      saveFailed: false,
+      readyToCommit: productNameAiRowReadyToCommit(editedConfirm.row),
+    }) === 'review',
+  '수정값 Enter는 AI 완성 대기만 만들며 준비 완료가 아니다',
+)
+
+const resolvedOfficial = applyProductNameAiRowSlots(
+  editedConfirm.ok ? editedConfirm.row : filled,
+  [applyProductNameAiQuickSlotStyle(emptyProductNameAiQuickSlot(), rabbit)],
+  'resolved',
+)
+assert(
+  resolvedOfficial.ok &&
+    resolvedOfficial.decision.status === 'ready' &&
+    productNameAiRowReadyToCommit(resolvedOfficial.row) &&
+    productNameAiWorkflowTab({
+      confirmed: false,
+      saveFailed: false,
+      readyToCommit: true,
+    }) === 'review',
+  'AI 공식명칭 완성 후에도 다시 Enter하기 전에는 검토 필요',
+)
+assert(
+  productNameAiWorkflowTab({
+    confirmed: true,
+    saveFailed: false,
+    readyToCommit: true,
+  }) === 'ready',
+  '작업자가 Enter로 확인하면 준비 완료',
+)
+
+const unconfirmedPlan = decideProductNameAiConfirmedSaves(
+  [filled, other],
+  new Set(),
+)
+assert(
+  unconfirmedPlan.items.length === 0,
+  '확인되지 않은 행은 저장 계획에서 제외된다',
+)
+const partialConfirmPlan = decideProductNameAiConfirmedSaves(
+  [filled, other],
+  new Set([filled.key]),
+)
+assert(
+  partialConfirmPlan.items.length === 1 &&
+    partialConfirmPlan.items[0]?.reviewKey === filled.key,
+  '확인된 행만 저장 계획에 넣는다',
+)
+const leftoverReview = countProductNameAiWorkflow({
+  rows: [filled, other],
+  confirmedKeys: new Set([filled.key]),
+  saveFailedKeys: new Set(),
+})
+assert(
+  leftoverReview.reviewCount === 1 && leftoverReview.readyCount === 1,
+  '검토 필요가 남으면 일괄 등록할 수 없다',
+)
+const allReady = countProductNameAiWorkflow({
+  rows: [filled, other],
+  confirmedKeys: new Set([filled.key, other.key]),
+  saveFailedKeys: new Set(),
+})
+assert(
+  allReady.reviewCount === 0 && allReady.readyCount === 2,
+  '모든 행을 확인하면 일괄 등록할 수 있다',
+)
+assert(
+  productNameAiWorkflowTab({
+    confirmed: true,
+    saveFailed: true,
+    readyToCommit: true,
+  }) === 'failed',
+  '최신 저장 실패는 준비 완료보다 저장 실패 탭이 우선한다',
+)
+
+const saveRetries = selectLatestFailedSaveRetries([
+  { comboKey: 'a', status: 'failed' },
+  { comboKey: 'a', status: 'ok' },
+  { comboKey: 'b', status: 'undo_failed' },
+  { comboKey: 'c', status: 'ok' },
+  { comboKey: 'd', status: 'failed' },
+])
+assert(
+  saveRetries.map((entry) => entry.comboKey).join(',') === 'a,d',
+  '저장 실패 재시도는 최신 이력이 failed인 행만 대상으로 한다',
+)
+
+const corrected = decideProductNameAiSaves([
+  {
+    ...filled,
+    style: tassel,
+    source: 'manual',
+  },
+])
+assert(
+  corrected.items[0]?.suggestedStyleId === rabbit.styleId &&
+    corrected.items[0]?.outcome === 'corrected',
+  '최초 제안과 다른 본품은 corrected로 저장한다',
+)
+assert(
+  decideProductNameAiSaves([filled]).items[0]?.outcome === 'confirmed',
+  '같은 본품을 채택하면 confirmed로 저장한다',
 )
 
 console.log('product-name-ai-review verify: ok')

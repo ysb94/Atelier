@@ -34,7 +34,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 데이터 | 현재 위치 |
 | --- | --- |
 | 회사, 브랜드, 팀(조직도), 프로필, 브랜드 멤버 | Supabase |
-| 출시 기획(`seasons`), 브랜드 항목(`brand_fields`), 상품(`styles`) | Supabase |
+| 출시 기획(`seasons`), 브랜드 항목(`brand_fields` + `brand_field_options`), 상품(`styles`) | Supabase |
 | 기획안(`product_drafts` + `draft_colors` + `draft_options`) | Supabase |
 | 코드·사용처(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_assignments`) | Supabase |
 | 송장 품목명 변환 기준(`invoice_name_rules`) | Supabase |
@@ -44,11 +44,14 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 송장 내품명·출고구성 기준(`invoice_option_maps` + `invoice_option_map_components`) | Supabase |
 | 송장 내품명 공통·본품별·조회 키 규칙(`invoice_item_name_rules` + `invoice_item_name_rule_components`) | Supabase |
 | 송장 내품명 부속품 사전(`invoice_accessory_rules`) | Supabase |
+| 송장 기준정보 포장 규격 간단값(`invoice_packing_size_maps`) | Supabase |
+| 연습 창고 세트·자리·미식별 재고·박스 ID·이력(`warehouses` + `warehouse_locations` + `warehouse_inventory_sets` + `warehouse_stock_positions` + `warehouse_boxes` + `warehouse_stock_movements`) | Supabase |
 | 송장 사은품 증정 요청 건(`invoice_prefix_requests` + `invoice_prefix_items` + `invoice_prefix_item_products`, 앱 모델명 Gift) | Supabase |
 | 송장 사은품 선착순 한도·배정 원장(`invoice_prefix_requests` 한도 필드 + `invoice_gift_quotas` + `invoice_gift_allocations`) | Supabase |
 | 송장 사은품 원본행 치환 매핑(`invoice_gift_source_maps` + `invoice_gift_source_map_products` + `invoice_gift_source_allocations`) | Supabase |
 | 송장 작업 지시(`invoice_work_instructions` + `invoice_work_instruction_items`) | Supabase |
-| 브랜드 AI 설정·사용량(`ai_feature_routes` + `ai_usage_logs`) | Supabase |
+| 브랜드 AI 설정·사용량(`ai_feature_routes` + `ai_usage_logs` + `ai_model_pricing`) | Supabase |
+| 품목명·내품명 확정 사례(`ai_recommendation_feedback` + `ai_item_name_recommendation_feedback`) | Supabase |
 
 - 상품·출시 기획·기획안·코드·사용처는 **0건으로 시작**한다. 자동 목업 시드를 넣지 않는다.
 - `brand_fields`만 품번·상품명 등 실행에 필요한 시스템 항목 구조를 브랜드별로 깐다.
@@ -56,7 +59,11 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 브랜드 카드의 SKU 수는 `styles` COUNT로 `src/lib/api/index.ts`가 붙인다.
 - 앱 저장소는 `src/lib/supabase/*.ts`다. 공개 API 이름은 `src/lib/api/index.ts`에 유지한다.
 - 원자 작업 RPC: `save_product_draft`, `promote_product_draft`,
-  `save_product_code_with_components`. `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
+  `save_product_code_with_components`, `save_brand_field_options`,
+  `save_invoice_packing_size_maps`,
+  `import_warehouse_inventory_set`, `apply_warehouse_stock_action`,
+  `restore_warehouse_inventory_set`.
+  `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
 - 브랜드 로고는 지금 `logo_url`에 data URL로 저장한다. 이후 `brands/{brand_id}/...`
   Storage 경로로 옮긴다.
 
@@ -260,14 +267,18 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 
 ### 송장 품목명 태그 역할 사전
 
-- `invoice_product_name_tag_roles`는 브랜드별 품목명 맨 앞 `[태그]` 역할 사전이다.
-  사방넷 원본 품목명과 태그 원문은 덮어쓰지 않는다. 역할은 상품 인식 후보만 조정한다.
+- `invoice_product_name_tag_roles`는 브랜드별 `[태그]` 역할 사전이다.
+  사방넷 원본 품목명·내품명과 태그 원문은 덮어쓰지 않는다. 역할은 상품 인식
+  후보와 신규 등록 키만 조정한다. 테이블·RLS·저장 API는 그대로 재사용한다.
 - 고유 범위는 `(brand_id, normalized_tag)`다. `normalized_tag`는 앱
   `normalizeInvoiceText`와 같은 exact 비교 키이거나, 날짜만 다른 예약배송처럼
   묶는 계열 키(`family:reservation_shipping_date`)다.
 - `[8/21예약배송]`, `[8/21 예약배송]`, `[8월 21일 예약배송]`은 같은 예약배송
-  계열이다. 한 번 역할을 저장하면 다른 날짜에도 재사용한다. 예전 exact 행
-  (`[8/14예약배송]`)도 같은 계열로 읽는다. 원문 태그는 덮어쓰지 않는다.
+  계열이다. 한 번 역할을 저장하면 품목명 앞과 옵션 안의 다른 날짜에도
+  재사용한다. 예전 exact 행(`[8/14예약배송]`)도 같은 계열로 읽는다.
+- 옵션 안의 `Color: [9/1예약배송]트와일라잇 블랙` 같은 날짜 예약배송만 비교
+  키에서 뺀다. 날짜가 없는 `[예약배송]`이나 다른 옵션 대괄호는 보지 않는다.
+  원문 내품명·조합 키·최종 출력은 유지한다.
 - 역할은 다섯 가지다.
   - `product_composition`: `[SET]`·세트·실제 포함 구성. 상품 인식 비교에 남긴다.
   - `event_marketing`: 행사·마케팅·예약배송. 상품 인식 후보에서 제외한다.
@@ -378,6 +389,41 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260819153000_invoice_item_name_rule_lookup_key.sql`,
   `20260819180000_invoice_accessory_rules.sql`.
 
+### 포장 규격 간단 표시값
+
+- 데이터 시트의 `택배 포장 규격(단품)` 원문은 `styles.values[field.id]`에 그대로
+  보존한다. 레거시 행은 `styles.custom_fields[field.label]`을 읽기 폴백으로만 사용한다.
+- `invoice_packing_size_maps`는 브랜드·원본 항목·정규화된 원본값별 간단 표시값만
+  저장한다. 현재 상품에서 사라진 원본 매핑도 삭제하지 않고 사용 상품 수 `0`으로
+  관리 화면에 남긴다.
+- `list_invoice_packing_size_source_values`는 `SECURITY INVOKER`로 고유 원문과 사용
+  상품 수만 집계해 브라우저로 상품 전체를 보내지 않는다.
+- 읽기는 `app.can_read_brand`, 추가·수정·삭제와
+  `save_invoice_packing_size_maps`는 `app.can_edit_brand`를 적용한다. 빈 간단값은
+  해당 매핑만 삭제하며 상품 원문은 수정하지 않는다.
+- 현재 단계에서는 이 매핑을 송장 변환, 최종 미리보기, CJ 13열 또는 출고구성 엑셀에
+  적용하지 않는다. 적용 범위를 넓힐 때 별도 승인과 회귀 검증을 거친다.
+- 마이그레이션: `20260826070517_invoice_packing_size_maps.sql`.
+
+### 연습 창고
+
+- 회사 공통 `warehouses` / `warehouse_locations`와 브랜드 재고 행을 나눈다.
+  브랜드는 `brand_id`와 `(brand_id, style_id) → styles` 복합 FK로만 연결한다.
+- `warehouse_inventory_sets`는 XLSX 가져오기 단위다. `sandbox` 활성 세트는
+  브랜드당 하나다. 새 파일을 가져오면 기존 세트는 `archived`로 두고 이력을
+  보존한다. `restore_warehouse_inventory_set`이 보관한 세트를 다시 켠다.
+- `warehouse_stock_positions`는 위치·M번호·입고일·박스당 수량·잔여 박스의
+  미식별 묶음이다. `warehouse_boxes`는 향후 고유 박스 ID용이며 첫 적재는 비운다.
+- 읽기는 `app.can_read_brand`, 쓰기와 RPC는 `app.can_edit_brand`다. 회사 공통
+  창고/자리 RLS는 같은 회사 브랜드 멤버십으로 판별한다.
+- `import_warehouse_inventory_set`과 `apply_warehouse_stock_action`은
+  `SECURITY INVOKER` 트랜잭션이다. 잔여 박스는 음수가 될 수 없다. 연습 데이터는
+  송장 예약·실재고 차감과 연결하지 않는다.
+- 로직: `src/lib/warehouse/stock.ts`. 저장소: `src/lib/supabase/warehouse-stock.ts`.
+  화면: `WarehousePage`, `WarehouseInventoryPanel`.
+- 마이그레이션: `20260826095007_warehouse_practice.sql`.
+- 재고 원칙: [`INVENTORY.md`](./INVENTORY.md).
+
 ### 송장 내품명·출고구성 기준
 
 - `invoice_option_maps`는 품목명·내품명 단계에서 출고구성을 저장한다. 품목명 원장
@@ -419,21 +465,47 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 ### 브랜드별 AI 설정
 
 - `ai_feature_routes`는 브랜드·기능마다 제공자(`openai|anthropic|gemini`)와
-  모델 ID만 저장한다. API 키는 DB·Git·브라우저에 두지 않고 Edge Function
+  모델 ID, 내부 안전 스위치 `learning_mode(observe|assist)`, 선택적 월 소프트 예산을
+  저장한다. 일반 운영은 항상 `assist`이며 관리 화면에서 모드를 고르게 하지 않는다.
+  `observe`는 장애 대응 시 확정 사례 반영만 잠시 끄는 개발자용 롤백 값이다.
+  API 키는 DB·Git·브라우저에 두지 않고 Edge Function
   Secret(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`)에만 둔다.
+  기능 키는 `invoice_product_recommendation`,
+  `invoice_item_name_recommendation`, `invoice_accessory_recommendation`이다.
+  내품명 라우트는 부속품 라우트를 한 번 복사하고 이후 독립 관리한다.
+  모델 변경 시 해당 기능 캐시만 지우고 자동 누적학습은 계속 유지한다. 확정 사례는
+  모델과 독립된 데이터이므로 모델을 바꿔도 다시 수동 전환할 필요가 없다.
 - 기본 정책은 `hybrid_auto`다. 확정 원장·등록 이력·유사도 1위가 충분하면
   AI를 건너뛰고, 후보가 없거나 저신뢰 1개면 수동 확인, 2개 이상이 애매할
   때만 상위 6개를 AI에 보낸다. 임계값은 로컬 정밀도 검증으로 맞추며 일반
   화면에서는 직접 고치지 않는다.
-- `ai_recommendation_cache`는 브랜드·모델·입력 fingerprint로 추천을 공유한다.
-  `ai_recommendation_feedback`는 기존 `등록`이 성공한 결과만 남긴다.
-  원장 저장과 피드백은 `save_invoice_product_name_map_with_feedback` 한
-  트랜잭션으로 처리한다. 등록은 관련 조회 키 캐시만 지운다. 다른 조합은
-  후보 fingerprint가 바뀌면 키가 달라져 자연히 무효가 된다. 모델·정책
-  변경처럼 전체 초기화가 필요할 때만 1인자
-  `app.invalidate_ai_recommendation_cache(brand_id)`를 쓴다.
-- `ai_usage_logs`는 토큰, `resolution_source`, 캐시 적중, AI 생략 여부를
-  남긴다. 프롬프트·응답 원문과 주문자 개인정보는 저장하지 않는다.
+- `ai_recommendation_cache`는 브랜드·기능·모델·입력 fingerprint로 추천을 공유한다.
+  fingerprint에는 후보 목록과 내품명 확정 사례가 들어간다.
+- `ai_recommendation_feedback`는 품목명 원장 저장에 성공한 사람 확정만 남긴다.
+  최종 `style_id`가 정답이고, 최초 제안은 `suggested_style_id`, 결과는
+  `confirmed|corrected|reverted`다. 원장 저장과 피드백은
+  `save_invoice_product_name_map_with_feedback` 한 트랜잭션이다.
+  되돌리기는 최신 피드백을 `reverted`로 표시하고 관련 캐시를 지운다.
+- 내품명 사례는 `ai_item_name_recommendation_feedback`와 구성품 자식 테이블에
+  따로 둔다. AI 저장 경로는 `save_invoice_item_name_rule_with_feedback`이
+  규칙·구성품·피드백·캐시 무효화를 원자 처리한다. 수동·엑셀 저장 API는
+  기존처럼 호환된다.
+- 피드백의 `cache_id`는 추천 출처를 추적하는 UUID일 뿐 FK가 아니다. 한 캐시 응답으로
+  만든 여러 규칙을 저장할 때 첫 저장이 일시 캐시를 삭제해도 뒤 피드백은 독립적으로
+  저장돼야 한다. 영구 원장인 피드백을 삭제 가능한 캐시 행에 종속시키지 않는다.
+- 후보 검색은 활성 원장 exact를 항상 최우선으로 하고, 과거 피드백은 조회 키별
+  최신 유효 확정만 본다. 전역 인기 가산점은 쓰지 않고 같은·유사 문맥의
+  확정·수정 사례만 점수를 보정한다.
+- 내품명 사례 검색은 `search_invoice_item_name_cases`다. 활성 규칙과 최신
+  유효 확정에서 `내품명 + 본품 + 조회 키`가 가까운 사례를 찾는다. exact
+  변환 우선순위는 바꾸지 않는다. `observe`에서는 사례만 모으고, `assist`에서만
+  같은 결과의 가까운 사례로 로컬 초안을 만들고 few-shot을 넣는다.
+- 캐시 무효화는 `brand_id + feature_key + 관련 키`다. 키가 비면 해당 기능
+  전체를 지운다. 1인자 함수는 브랜드의 모든 기능 캐시를 지운다.
+- `ai_usage_logs`는 토큰, `resolution_source`, 캐시 적중, AI 생략, nullable
+  추정 USD와 가격 버전을 남긴다. 가격표는 `ai_model_pricing`이며 모르는
+  모델은 호출을 막지 않고 토큰만 표시한다. 앱 값은 추정치이고 공식 청구액은
+  제공자 대시보드다. 프롬프트·응답 원문과 주문자 개인정보는 저장하지 않는다.
 - 본품 확인 화면의 `AI 추천 일괄 검토`는 추천을 모으는 단계와 원장에 쓰는
   단계를 나눈다. `추천 모으기`는 남은 내품명을 순회해 추천 1순위를 목록으로만
   만들고 원장을 건드리지 않는다. 사람이 목록에서 고른 항목만 `등록`으로
@@ -474,8 +546,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   나눈다. 같은 문맥에 둘 다 고르면 조회 키 규칙만 남긴다.
   로직: `src/lib/invoice/accessory-suggest.ts`,
   `src/features/logistics/useInvoiceAccessoryBulkAiApply.ts`.
-- 내품명 옵션 일괄추천도 같은 `invoice_accessory_recommendation` 모델 설정을
-  사용하되 게이트웨이 `mode = item_name`으로 프롬프트와 캐시를 분리한다. 한 요청은
+- 내품명 옵션 일괄추천은 `invoice_item_name_recommendation` 전용 라우트를 쓰고
+  게이트웨이 `mode = item_name`으로 프롬프트와 캐시를 분리한다. 한 요청은
   최대 8개 실제 `(내품명, 확정 본품, 조회 키)` 문맥을 판정하고, 각 문맥은
   `components | delete | hold` 중 하나만 반환한다. AI가 고를 수 있는 M번호는 해당
   문맥에 제공한 후보로 제한하며 후보가 없거나 불확실하면 `hold`로 남긴다.
@@ -489,10 +561,23 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   결과를 `global` exact로 저장한다. 일반 본품 미확정 행은 이 예외를 적용하지 않는다.
   로직: `src/lib/invoice/item-name-ai-review.ts`,
   `src/features/logistics/useInvoiceItemNameBulkAiApply.ts`.
+- 롤백: 새 테이블·컬럼은 additive다. 문제가 있으면 `learning_mode`를
+  `observe`로 두고 기능 라우트를 끄면 추천 화면은 기존 Enter 검수로 돌아간다.
+  캐시는 복구 대상이 아니다. 원장·규칙은 구현 전 XLSX 스냅샷
+  `docs/backups/ai-learning-pre-20260826.xlsx`로 되돌린다.
+- 배포 검증: `ai_learning_v2` 마이그레이션과 `ai-gateway` 배포 후
+  `npm run verify:ai-learning-rpc`(읽기 전용)로 새 컬럼·가격표·RPC를 확인한다.
+  이어서 `npm run verify:ai-learning-deployment`로 내품명 전용 라우트,
+  Edge Function, 토큰·추정비용 로그를 통합 확인한다. 후자는 테스트용 캐시와
+  사용량 로그를 1건 남긴다. 적용 전에는 실패가 정상이다.
 - 마이그레이션: `20260814013200_ai_feature_routes.sql`,
   `20260814025900_ai_hybrid_recommendation.sql`,
   `20260814033319_ai_cache_lookup_invalidate.sql`,
-  `20260819190000_invoice_accessory_ai_route.sql`.
+  `20260819190000_invoice_accessory_ai_route.sql`,
+  `20260826034304_ai_learning_v2.sql`,
+  `20260826042107_ai_learning_v2_advisor_fixes.sql`,
+  `20260826044258_ai_learning_automatic_assist.sql`,
+  `20260826051756_ai_feedback_ephemeral_cache_fix.sql`.
 
 ### 송장 사은품 증정 · 작업 지시
 
@@ -557,9 +642,16 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 감지는 선행 `[사은품]`·`[증정]` 또는 저장된 `composition_gift` 역할로만 한다.
   `컬러랜덤`은 사은품 판정이 아니라 균등 랜덤 추천에만 쓴다.
 - 이번 파일 전용 규칙은 브라우저 메모리에만 두고, 재사용 설정과 배정만 Supabase에
-  남긴다. 저장된 매핑은 기준정보 「사은품 증정」의 품목명 대체 목록에서 보고
-  고친다. 원본 사은품 후보 행은 캠페인 `planInvoicePrefixes` 입력에서 빼 중복
-  추가를 막는다.
+  남긴다. 활성 저장 매핑은 새 파일에서 별도 클릭 없이 자동 적용한다. 기존
+  `invoice_gift_source_allocations`는 `allocation_key`로 잠가 재사용하고, 신규
+  슬롯만 저장된 고정/균등 랜덤 후보 풀로 배정한다. 비활성 매핑과 이번 파일에서
+  명시한 제외 키는 자동 적용하지 않는다. 원문 품목명·내품명은 보존한다.
+- 품목명 AI 검수표에서 빼는 시점은 사은품 overlay가 해당 행을 `gift_mapped` 또는
+  `gift_pending`으로 바꾼 뒤다. 매핑·allocation 조회가 끝나기 전에는 overlay를
+  확정하지 않아 사은품 행이 검수표에 잠깐 나타나지 않게 한다.
+- 저장된 매핑은 기준정보 「사은품 증정」의 품목명 대체 목록에서 보고 고친다.
+  원본 사은품 후보 행은 캠페인 `planInvoicePrefixes` 입력에서 빼 중복 추가를
+  막는다.
 - 최종 송장 표시명은 캠페인 추가 행과 같다. `kind = gift` 행을 출력 순서대로
   합포장마다 `사은품(1) : 현재 styles.name`부터 다시 번호 매긴다. 품목명 대체와
   사은품 행 추가가 한 합포장에 섞여도 번호를 이어 쓰고, 다른 합포장에서는 1부터
@@ -719,6 +811,16 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 
 - 새 컬럼을 만들지 않는다. 주소는 `styles.values`의 이미지 항목 키에 담는다. 덕분에
   내보내기 양식과 일괄 업로드가 추가 작업 없이 그대로 동작한다.
+- `brand_fields.type`에 `select`를 허용한다. 선택지는 `brand_field_options`에서
+  브랜드·항목별로 관리한다. `(brand_id, field_id)` 복합 FK, 필드별 정규화 이름
+  고유, 정렬, 사용 여부, 이전 이름 별칭을 둔다. 일괄 저장은
+  `save_brand_field_options` 트랜잭션 RPC로 하고, 빠진 선택지는 삭제하지 않고
+  사용 중지한다. 상품에는 옵션 UUID가 아니라 정규 선택명 문자열을 저장한다.
+  사용자 필드는 `styles.values[field.id]`에 쓰고, 예전
+  `styles.custom_fields[label]`은 읽기 폴백만 유지한다. 업로드 중 목록 밖 값은
+  자동 선택지로 만들지 않고 해당 행을 오류로 표시한다.
+- 상품 양식·수정용 내보내기는 ExcelJS로 숨김 `선택목록` 시트와 이름 범위를 만들고
+  실제 목록 유효성 검사를 넣는다. 업로드 파서는 기존 SheetJS로 셀 표시값만 읽는다.
 - `brand_fields.type`에 `image`를 허용한다. 시스템 이미지 항목은 두 개다.
   - `imageUrl`(표시 이름 `대표이미지`, 공통): 품번 바로 뒤에 둔다.
   - `logisticsImageUrl`(표시 이름 `물류이미지`, 물류): 물류 열 묶음 끝에 둔다.

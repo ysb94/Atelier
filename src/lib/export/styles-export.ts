@@ -3,6 +3,11 @@ import { formatSeasonLabel } from '@/lib/types'
 import { OWNER_LABEL, OWNER_ORDER } from '@/lib/import/fields'
 import { ROW_ACTION_HEADER, ROW_ID_HEADER } from '@/lib/import/row-keys'
 import {
+  allowedValuesForField,
+  createProductWorkbook,
+  downloadExcelWorkbook,
+} from '@/lib/export/product-workbook'
+import {
   fieldValueKey,
   getStyleFieldDisplay,
 } from '@/lib/products/style-fields'
@@ -59,6 +64,7 @@ export function columnsForSheet(
       required: true,
       order: -2,
       level: 'style',
+      options: [],
     })
   }
   if (name) pinned.push(name)
@@ -73,6 +79,7 @@ export function columnsForSheet(
       required: true,
       order: -1,
       level: 'style',
+      options: [],
     })
   }
   return [...pinned, ...rest]
@@ -104,6 +111,10 @@ const GUIDE_ROWS: string[][] = [
   [
     '대표이미지',
     '비워 두면 품번과 같은 이름의 사진을 자동으로 찾습니다. 규칙과 다른 사진을 쓸 때만 전체 주소를 적으세요.',
+  ],
+  [
+    '드롭다운 열',
+    '연한 하늘색 배경인 열은 엑셀 목록에서 고르세요. 목록에 없는 값은 업로드할 때 오류가 됩니다.',
   ],
 ]
 
@@ -139,28 +150,20 @@ function buildExportGrid(options: {
   return { headers, rows, editable: options.editable }
 }
 
-function buildWorkbook(
-  XLSX: typeof import('xlsx'),
-  grid: { headers: string[]; rows: string[][]; editable: boolean },
-) {
-  const workbook = XLSX.utils.book_new()
-  const sheet = XLSX.utils.aoa_to_sheet([grid.headers, ...grid.rows])
-  sheet['!cols'] = grid.headers.map((header) =>
-    header === ROW_ID_HEADER
-      ? { wch: 38 }
-      : header === ROW_ACTION_HEADER
-        ? { wch: 8 }
-        : { wch: 16 },
+function columnWidthsFor(headers: string[]) {
+  return headers.map((header) =>
+    header === ROW_ID_HEADER ? 38 : header === ROW_ACTION_HEADER ? 8 : 16,
   )
-  XLSX.utils.book_append_sheet(workbook, sheet, '상품데이터')
+}
 
-  if (grid.editable) {
-    const guide = XLSX.utils.aoa_to_sheet(GUIDE_ROWS)
-    guide['!cols'] = [{ wch: 12 }, { wch: 78 }]
-    XLSX.utils.book_append_sheet(workbook, guide, '작성안내')
-  }
-
-  return workbook
+function exportGuideRows(fields: BrandField[], seasons: Season[]) {
+  const allowedRows = fields
+    .map((field) => {
+      const allowed = allowedValuesForField(field, seasons)
+      return allowed ? [field.label, `허용값: ${allowed}`] : null
+    })
+    .filter((row): row is string[] => Boolean(row))
+  return [...GUIDE_ROWS, ...allowedRows]
 }
 
 /**
@@ -176,18 +179,30 @@ export async function downloadStylesExport(options: {
   /** _id·_작업 열을 넣어 다시 올릴 수 있게 한다. 기본값은 넣는다. */
   editable?: boolean
 }) {
-  const XLSX = await import('xlsx')
+  const editable = options.editable !== false
   const grid = buildExportGrid({
     owner: options.owner,
     fields: options.fields,
     styles: options.styles,
     seasons: options.seasons,
-    editable: options.editable !== false,
+    editable,
+  })
+  const columns = columnsForSheet(options.fields, options.owner)
+  const workbook = await createProductWorkbook({
+    dataSheetName: '상품데이터',
+    headers: grid.headers,
+    rows: grid.rows,
+    columnWidths: columnWidthsFor(grid.headers),
+    fields: columns,
+    seasons: options.seasons,
+    guideRows: editable ? exportGuideRows(columns, options.seasons) : undefined,
+    guideColumnWidths: editable ? [12, 78] : undefined,
+    validationRows: Math.max(grid.rows.length + 200, 200),
   })
 
   const ownerPart = sheetOwnerLabel(options.owner)
   const fileName = `${safeFilePart(options.brandName)}_${safeFilePart(ownerPart)}_${todayStamp()}.xlsx`
-  XLSX.writeFile(buildWorkbook(XLSX, grid), fileName)
+  await downloadExcelWorkbook(workbook, fileName)
 }
 
 /**
@@ -200,7 +215,6 @@ export async function downloadDeletionSnapshot(options: {
   styles: Style[]
   seasons: Season[]
 }) {
-  const XLSX = await import('xlsx')
   const grid = buildExportGrid({
     owner: 'all',
     fields: options.fields,
@@ -208,11 +222,23 @@ export async function downloadDeletionSnapshot(options: {
     seasons: options.seasons,
     editable: true,
   })
+  const columns = columnsForSheet(options.fields, 'all')
+  const workbook = await createProductWorkbook({
+    dataSheetName: '상품데이터',
+    headers: grid.headers,
+    rows: grid.rows,
+    columnWidths: columnWidthsFor(grid.headers),
+    fields: columns,
+    seasons: options.seasons,
+    guideRows: exportGuideRows(columns, options.seasons),
+    guideColumnWidths: [12, 78],
+    validationRows: Math.max(grid.rows.length + 200, 200),
+  })
 
   const stamp = new Date()
   const time = `${String(stamp.getHours()).padStart(2, '0')}${String(stamp.getMinutes()).padStart(2, '0')}`
   const fileName = `${safeFilePart(options.brandName)}_삭제전백업_${todayStamp()}_${time}.xlsx`
-  XLSX.writeFile(buildWorkbook(XLSX, grid), fileName)
+  await downloadExcelWorkbook(workbook, fileName)
 }
 
 export { fieldValueKey }

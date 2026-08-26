@@ -14,6 +14,7 @@ import {
 import type { InvoiceItemNameRuleInput } from '@/lib/supabase/invoice-item-name-rules'
 import type {
   AiAccessoryContextDecision,
+  AiProvider,
   AiRecommendProduct,
   AiRecommendationSource,
   InvoiceItemNameRule,
@@ -54,6 +55,22 @@ export type ItemNameAiReviewRow = ItemNameAiContext & {
   validationError: string | null
   existingRuleId: string | null
   existingGlobalRuleId: string | null
+  source: 'local' | 'ai' | 'manual' | null
+  cacheId: string | null
+  provider: AiProvider | null
+  modelId: string | null
+  suggestedAction: ItemNameAiAction | null
+  suggestedComponents: AccessoryLookupComponent[]
+}
+
+export type ItemNameAiSaveFeedback = {
+  source: 'manual' | 'local' | 'ai'
+  cacheId: string | null
+  provider: string | null
+  modelId: string | null
+  suggestedAction: InvoiceItemNameRuleAction | null
+  suggestedComponents: Array<{ styleId: string; quantity: number }>
+  outcome: 'confirmed' | 'corrected'
 }
 
 export type ItemNameAiSavePlan = {
@@ -62,11 +79,13 @@ export type ItemNameAiSavePlan = {
     reviewKeys: string[]
     input: InvoiceItemNameRuleInput
     existingRuleId: string | null
+    feedback: ItemNameAiSaveFeedback
   }>
   lookups: Array<{
     reviewKey: string
     input: InvoiceItemNameRuleInput
     existingRuleId: string | null
+    feedback: ItemNameAiSaveFeedback
   }>
   blocked: Array<{ reviewKey: string; message: string }>
 }
@@ -922,12 +941,47 @@ export function reconcileItemNameAiReviewState(options: {
   }
 }
 
+export function itemNameAiSaveFeedback(
+  row: ItemNameAiReviewRow,
+): ItemNameAiSaveFeedback {
+  const suggestedAction =
+    row.suggestedAction === 'delete' || row.suggestedAction === 'components'
+      ? row.suggestedAction
+      : null
+  const suggestedComponents = (row.suggestedComponents ?? []).map((item) => ({
+    styleId: item.style.styleId,
+    quantity: item.quantity,
+  }))
+  const suggestedSignature = suggestedAction
+    ? itemNameAiSignature(suggestedAction, row.suggestedComponents ?? [])
+    : null
+  const currentSignature = itemNameAiSignature(row.action, row.components)
+  return {
+    source: row.source ?? 'manual',
+    cacheId: row.cacheId,
+    provider: row.provider,
+    modelId: row.modelId,
+    suggestedAction,
+    suggestedComponents,
+    outcome:
+      suggestedSignature && suggestedSignature !== currentSignature
+        ? 'corrected'
+        : 'confirmed',
+  }
+}
+
 export function buildItemNameAiReviewRows(options: {
   groups: ItemNameAiGroup[]
   decisions: AiAccessoryContextDecision[]
   styles: StyleRef[]
   itemNameRules: InvoiceItemNameRule[]
   minConfidence: number
+  recommendationMeta?: {
+    source: 'local' | 'ai' | 'manual'
+    cacheId: string | null
+    provider: AiProvider | null
+    modelId: string | null
+  }
 }): ItemNameAiReviewRow[] {
   const decisionByContext = new Map(
     options.decisions.map((decision) => [decision.contextId, decision]),
@@ -974,6 +1028,12 @@ export function buildItemNameAiReviewRows(options: {
         validationError: null,
         existingRuleId: existingRule?.id ?? null,
         existingGlobalRuleId: globalRule?.id ?? null,
+        source: options.recommendationMeta?.source ?? null,
+        cacheId: options.recommendationMeta?.cacheId ?? null,
+        provider: options.recommendationMeta?.provider ?? null,
+        modelId: options.recommendationMeta?.modelId ?? null,
+        suggestedAction: action,
+        suggestedComponents: components,
       }
       rows.push(validateItemNameAiReviewRow(row, knownStyleIds))
     }
@@ -1042,6 +1102,7 @@ export function decideItemNameAiSaves(
         reviewKeys: siblings.map((row) => row.key),
         input: inputFromReviewRow(first, 'global'),
         existingRuleId: first.existingGlobalRuleId,
+        feedback: itemNameAiSaveFeedback(first),
       })
       for (const row of siblings) used.add(row.key)
       continue
@@ -1071,6 +1132,7 @@ export function decideItemNameAiSaves(
       reviewKeys: selectedExceptionRows.map((row) => row.key),
       input: inputFromReviewRow(first, 'global'),
       existingRuleId: first.existingGlobalRuleId,
+      feedback: itemNameAiSaveFeedback(first),
     })
     for (const row of selectedExceptionRows) used.add(row.key)
   }
@@ -1095,6 +1157,7 @@ export function decideItemNameAiSaves(
       reviewKey: row.key,
       input: inputFromReviewRow(row, 'lookup_key'),
       existingRuleId: row.existingRuleId,
+      feedback: itemNameAiSaveFeedback(row),
     })
   }
   return { globals, lookups, blocked }

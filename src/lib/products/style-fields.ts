@@ -1,4 +1,5 @@
 import type { BrandField, FieldOwner, Style, StyleStatus } from '@/lib/types'
+import { applySelectDisplay } from '@/lib/products/brand-field-select'
 
 /** Style 타입 속성으로 직접 저장되는 시스템 키 */
 export const STYLE_TYPED_KEYS = new Set([
@@ -35,7 +36,10 @@ export function getStyleFieldDisplay(
 ): string {
   const key = field.systemKey
   if (!key) {
-    return style.values?.[field.id] ?? style.customFields?.[field.label] ?? ''
+    return applySelectDisplay(
+      field,
+      style.values?.[field.id] ?? style.customFields?.[field.label] ?? '',
+    )
   }
 
   switch (key) {
@@ -47,7 +51,7 @@ export function getStyleFieldDisplay(
     case 'seasonId':
       return options?.seasonCode ?? ''
     case 'category':
-      return style.category
+      return applySelectDisplay(field, style.category)
     case 'gender':
       return style.gender === 'W'
         ? '여성'
@@ -65,9 +69,9 @@ export function getStyleFieldDisplay(
     case 'retailPrice':
       return style.retailPrice != null ? String(style.retailPrice) : ''
     case 'planner':
-      return style.planner ?? ''
+      return applySelectDisplay(field, style.planner ?? '')
     case 'designer':
-      return style.designer ?? ''
+      return applySelectDisplay(field, style.designer ?? '')
     case 'description':
       return style.description ?? ''
     case 'weightG':
@@ -77,7 +81,7 @@ export function getStyleFieldDisplay(
     case 'status':
       return style.status
     default:
-      return style.values?.[key] ?? ''
+      return applySelectDisplay(field, style.values?.[key] ?? '')
   }
 }
 
@@ -89,7 +93,9 @@ export function getStyleFieldRaw(
 ): string {
   const key = field.systemKey
   if (!key) {
-    return style.values?.[field.id] ?? style.customFields?.[field.label] ?? ''
+    const raw =
+      style.values?.[field.id] ?? style.customFields?.[field.label] ?? ''
+    return applySelectDisplay(field, raw)
   }
   if (key === 'gender') return style.gender
   if (key === 'colors') return style.colors.join(', ')

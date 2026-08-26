@@ -9,6 +9,7 @@ import type { BrandField, Season, Style } from '@/lib/types'
 import { prepareSingleEntry } from '@/lib/import/transform'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { SelectFieldInput } from '@/components/fields/SelectFieldInput'
 import { Input, Select, Textarea } from '@/components/ui/input'
 
 type SingleEntryFormProps = {
@@ -120,6 +121,20 @@ export function SingleEntryForm({
                       </option>
                     ))}
                   </Select>
+                </label>
+              )
+            }
+
+            if (field.type === 'select') {
+              return (
+                <label key={field.id} className="block space-y-1.5">
+                  <span className="text-sm font-medium">{label}</span>
+                  <SelectFieldInput
+                    field={field}
+                    value={value}
+                    required={field.required}
+                    onChange={(next) => setFieldValue(key, next)}
+                  />
                 </label>
               )
             }

@@ -147,6 +147,16 @@ export type InvoiceItemNameRuleComponentInput = {
   quantity: number
 }
 
+export type InvoiceItemNameRuleFeedback = {
+  source: 'manual' | 'local' | 'ai'
+  cacheId?: string | null
+  provider?: string | null
+  modelId?: string | null
+  suggestedAction?: 'delete' | 'components' | null
+  suggestedComponents?: Array<{ styleId: string; quantity: number }>
+  outcome?: 'confirmed' | 'corrected'
+}
+
 export type InvoiceItemNameRuleInput = {
   scope: InvoiceItemNameRuleScope
   mainStyleId?: string | null
@@ -331,10 +341,52 @@ export async function saveInvoiceItemNameRule(
   brandId: string,
   input: InvoiceItemNameRuleInput,
   ruleId?: string,
+  feedback?: InvoiceItemNameRuleFeedback,
 ): Promise<InvoiceItemNameRule> {
   validateInput(input)
   const supabase = getSupabase()
   const payload = payloadFromInput(brandId, input)
+  if (feedback) {
+    const { data: savedId, error: saveError } = await supabase.rpc(
+      'save_invoice_item_name_rule_with_feedback',
+      {
+        p_brand_id: brandId,
+        p_row: {
+          ...payload,
+          components: (input.components ?? []).map((item) => ({
+            styleId: item.styleId,
+            role: item.role,
+            quantity: item.quantity,
+          })),
+        },
+        p_rule_id: ruleId ?? null,
+        p_feedback: {
+          source: feedback.source,
+          cache_id: feedback.cacheId ?? null,
+          provider: feedback.provider ?? null,
+          model_id: feedback.modelId ?? null,
+          suggested_action: feedback.suggestedAction ?? null,
+          suggested_components: feedback.suggestedComponents ?? [],
+          outcome: feedback.outcome ?? 'confirmed',
+        },
+      },
+    )
+    if (saveError || !savedId) {
+      if (isUniqueViolation(saveError ?? {})) {
+        throw new InvoiceItemNameRuleStoreError(
+          payload.scope === 'global'
+            ? '같은 내품명 공통 규칙이 이미 있습니다.'
+            : payload.scope === 'lookup_key'
+              ? '같은 본품·조회 키·내품명 규칙이 이미 있습니다.'
+              : '같은 본품·내품명 규칙이 이미 있습니다.',
+        )
+      }
+      throw new InvoiceItemNameRuleStoreError(
+        errorMessage(saveError, '내품명 규칙을 저장하지 못했습니다.'),
+      )
+    }
+    return fetchRule(String(savedId))
+  }
 
   let existingQuery = supabase
     .from('invoice_item_name_rules')
@@ -404,7 +456,11 @@ export async function setInvoiceItemNameRuleActive(
 
 export async function saveInvoiceItemNameRules(
   brandId: string,
-  items: Array<{ input: InvoiceItemNameRuleInput; ruleId?: string }>,
+  items: Array<{
+    input: InvoiceItemNameRuleInput
+    ruleId?: string
+    feedback?: InvoiceItemNameRuleFeedback
+  }>,
   options: { concurrency?: number } = {},
 ): Promise<InvoiceItemNameRuleBulkResult> {
   const concurrency = Math.max(
@@ -422,7 +478,12 @@ export async function saveInvoiceItemNameRules(
       if (!current) continue
       try {
         applied.push(
-          await saveInvoiceItemNameRule(brandId, current.input, current.ruleId),
+          await saveInvoiceItemNameRule(
+            brandId,
+            current.input,
+            current.ruleId,
+            current.feedback,
+          ),
         )
       } catch (error) {
         failed.push({

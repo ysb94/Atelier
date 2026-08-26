@@ -15,9 +15,18 @@
     "verify:ai-hybrid-replay": "node scripts/verify-ai-hybrid-replay.mjs",
     "verify:product-name-tags": "node scripts/verify-product-name-tags.mjs",
     "verify:product-name-ai-review": "node scripts/verify-product-name-ai-review.mjs",
+    "verify:item-name-ai-review": "node scripts/verify-item-name-ai-review.mjs",
+    "verify:ai-learning": "node scripts/verify-ai-learning.mjs",
+    "verify:ai-learning-rpc": "node scripts/verify-ai-learning-rpc.mjs",
+    "verify:ai-learning-deployment": "node scripts/verify-ai-learning-deployment.mjs",
+    "verify:ai-feedback-cache-fix": "node scripts/verify-ai-feedback-cache-fix.mjs",
     "verify:gift-source": "node scripts/verify-gift-source.mjs",
     "verify:gift-diversity": "node scripts/verify-gift-diversity.mjs",
-    "verify:style-parts": "node scripts/verify-style-parts.mjs"
+    "verify:style-parts": "node scripts/verify-style-parts.mjs",
+    "verify:brand-field-select": "node scripts/verify-brand-field-select.mjs",
+    "verify:brand-field-select-xlsx": "node scripts/verify-brand-field-select-xlsx.mjs",
+    "verify:packing-size-map": "node scripts/verify-packing-size-map.mjs",
+    "verify:warehouse-stock": "node scripts/verify-warehouse-stock.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",
@@ -26,6 +35,7 @@
     "@tanstack/react-table": "^8.21.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "exceljs": "^4.4.0",
     "lucide-react": "^1.28.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

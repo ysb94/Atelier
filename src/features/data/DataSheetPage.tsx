@@ -64,6 +64,7 @@ const OWN_BARCODE_COLUMN: BrandField = {
   required: false,
   order: -1.5,
   level: 'style',
+  options: [],
 }
 
 function withOwnBarcodeColumn(columns: BrandField[]): BrandField[] {

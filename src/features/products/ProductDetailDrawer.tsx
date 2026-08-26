@@ -11,6 +11,7 @@ import { useBrand } from '@/components/layout/brand-context'
 import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { SelectFieldInput } from '@/components/fields/SelectFieldInput'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import {
   getBrandFields,
@@ -486,6 +487,23 @@ export function ProductDetailDrawer() {
                                     </option>
                                   ))}
                                 </Select>
+                              ) : field.type === 'select' ? (
+                                <SelectFieldInput
+                                  field={field}
+                                  value={value}
+                                  disabled={saveMutation.isPending}
+                                  onChange={(next) => {
+                                    setDraft(field, next)
+                                    if (!style) return
+                                    const current = getStyleFieldRaw(
+                                      style,
+                                      field,
+                                      { seasonCode },
+                                    )
+                                    if (next === current) return
+                                    saveMutation.mutate({ key, value: next })
+                                  }}
+                                />
                               ) : field.type === 'gender' ||
                                 field.systemKey === 'gender' ? (
                                 <Select

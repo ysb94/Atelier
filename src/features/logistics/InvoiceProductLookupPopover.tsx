@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { formatStyleRef } from '@/components/style-picker'
 import { Button } from '@/components/ui/button'
@@ -11,16 +11,30 @@ function lookupTextFromCopied(value: string) {
   return value.replace(/^\s*(?:\[[^\]]+\]\s*)+/g, '').trim()
 }
 
+function isLookupToggleKey(event: KeyboardEvent) {
+  return (
+    event.ctrlKey &&
+    !event.altKey &&
+    !event.metaKey &&
+    event.code === 'Slash'
+  )
+}
+
 /**
- * 본품 확인 목록 위에 떠 있는 검색 창. 표 너비는 가로를 다 쓴다.
+ * 검수표 툴바에서 여는 검색 창.
  * 품목명을 복사하면 그 글자를 조회 키 원장에서 찾고, 연결된 공식명·M번호를 보여준다.
  * 원장에는 쓰지 않는다.
  */
-export function InvoiceProductLookupDock({ brandId }: { brandId: string }) {
+export function InvoiceProductLookupPopover({ brandId }: { brandId: string }) {
   const [query, setQuery] = useState('')
   const [debounced, setDebounced] = useState('')
   const [source, setSource] = useState<'typed' | 'copied' | 'pasted'>('typed')
-  const [collapsed, setCollapsed] = useState(false)
+  const [open, setOpen] = useState(false)
+  const rootRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const lastFocusRef = useRef<HTMLElement | null>(null)
+  const openRef = useRef(open)
+  openRef.current = open
 
   useEffect(() => {
     const timer = window.setTimeout(() => setDebounced(query.trim()), 180)
@@ -39,6 +53,74 @@ export function InvoiceProductLookupDock({ brandId }: { brandId: string }) {
     return () => document.removeEventListener('copy', onCopy)
   }, [])
 
+  function rememberFocus() {
+    const active = document.activeElement
+    if (active instanceof HTMLElement && !rootRef.current?.contains(active)) {
+      lastFocusRef.current = active
+    }
+  }
+
+  function restoreFocus() {
+    const previous = lastFocusRef.current
+    lastFocusRef.current = null
+    if (previous && document.contains(previous)) {
+      previous.focus()
+      return
+    }
+    inputRef.current?.blur()
+  }
+
+  function openPopover() {
+    rememberFocus()
+    setOpen(true)
+  }
+
+  function closePopover() {
+    setOpen(false)
+    restoreFocus()
+  }
+
+  function togglePopover() {
+    if (openRef.current) closePopover()
+    else openPopover()
+  }
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if (isLookupToggleKey(event)) {
+        event.preventDefault()
+        togglePopover()
+        return
+      }
+      if (event.key === 'Escape' && openRef.current) {
+        event.preventDefault()
+        closePopover()
+      }
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  useEffect(() => {
+    if (!open) return
+    function onPointerDown(event: MouseEvent) {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (rootRef.current?.contains(target)) return
+      closePopover()
+    }
+    document.addEventListener('mousedown', onPointerDown)
+    return () => document.removeEventListener('mousedown', onPointerDown)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) return
+    const timer = window.requestAnimationFrame(() => {
+      inputRef.current?.focus()
+    })
+    return () => window.cancelAnimationFrame(timer)
+  }, [open])
+
   const resultsQuery = useQuery({
     queryKey: ['invoice-product-lookup', brandId, debounced],
     queryFn: () =>
@@ -49,6 +131,8 @@ export function InvoiceProductLookupDock({ brandId }: { brandId: string }) {
   const results = resultsQuery.data ?? []
   const error =
     resultsQuery.error instanceof Error ? resultsQuery.error.message : null
+  const badgeCount =
+    debounced.length >= 2 && !resultsQuery.isFetching ? results.length : 0
 
   async function pasteFromClipboard() {
     try {
@@ -63,29 +147,32 @@ export function InvoiceProductLookupDock({ brandId }: { brandId: string }) {
   }
 
   return (
-    <aside className="fixed right-4 top-24 z-40 w-80 max-w-[calc(100vw-2rem)]">
-      <div className="max-h-[calc(100vh-7rem)] overflow-auto rounded-lg border border-border bg-card p-3 shadow-lg">
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-sm font-medium">비슷한 상품 찾기</p>
-            <p className="mt-1 text-[11px] text-muted-foreground">
-              복사한 글자를 품목명 원장 조회 키에서 찾고, 연결된 공식명·M번호를
-              보여줍니다.
-            </p>
-          </div>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            onClick={() => setCollapsed((current) => !current)}
-          >
-            {collapsed ? '열기' : '접기'}
-          </Button>
-        </div>
-
-        {collapsed ? null : (
+    <div ref={rootRef} className="relative">
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 px-2 text-[11px]"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={togglePopover}
+      >
+        비슷한 상품 찾기
+        {!open && badgeCount > 0 ? ` ${formatNumber(badgeCount)}` : ''}
+      </Button>
+      {open ? (
+        <div
+          className="absolute right-0 top-full z-30 mt-1 w-80 max-w-[calc(100vw-2rem)] overflow-auto rounded-md border border-border bg-card p-3 shadow-sm"
+          role="dialog"
+          aria-label="비슷한 상품 찾기"
+        >
+          <p className="text-[11px] text-muted-foreground">
+            복사한 글자를 품목명 원장 조회 키에서 찾고, 연결된 공식명·M번호를
+            보여줍니다.
+          </p>
           <div className="mt-3 space-y-2">
             <Input
+              ref={inputRef}
               value={query}
               onChange={(event) => {
                 setQuery(event.target.value)
@@ -93,9 +180,15 @@ export function InvoiceProductLookupDock({ brandId }: { brandId: string }) {
               }}
               placeholder="조회 키"
               className="w-full"
+              aria-label="조회 키"
             />
             <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant="outline" onClick={() => void pasteFromClipboard()}>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => void pasteFromClipboard()}
+              >
                 붙여넣기
               </Button>
               {query ? (
@@ -163,8 +256,8 @@ export function InvoiceProductLookupDock({ brandId }: { brandId: string }) {
               </div>
             )}
           </div>
-        )}
-      </div>
-    </aside>
+        </div>
+      ) : null}
+    </div>
   )
 }

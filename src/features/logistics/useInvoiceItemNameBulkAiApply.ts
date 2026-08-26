@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ACCESSORY_FEATURE_KEY,
   DEFAULT_DECISION_CONFIG,
+  ITEM_NAME_FEATURE_KEY,
 } from '@/lib/ai/gateway-core'
+import {
+  decideItemNameLocalDraft,
+  pickItemNamePriorExamples,
+} from '@/lib/ai/learning-core'
+import { invalidateAiRecommendationQueries } from '@/lib/ai/query-cache'
 import { createSlotGate, withRecommendSlot } from '@/lib/ai/recommend-queue'
 import {
   getAiFeatureRoute,
   recommendInvoiceItemNameRules,
   saveInvoiceItemNameRules,
+  searchInvoiceItemNameCases,
   searchInvoiceProductCandidates,
 } from '@/lib/api'
 import {
@@ -119,8 +125,8 @@ export function useInvoiceItemNameBulkAiApply({
 }) {
   const queryClient = useQueryClient()
   const routeQuery = useQuery({
-    queryKey: ['ai-feature-route', brandId, ACCESSORY_FEATURE_KEY],
-    queryFn: () => getAiFeatureRoute(brandId, ACCESSORY_FEATURE_KEY),
+    queryKey: ['ai-feature-route', brandId, ITEM_NAME_FEATURE_KEY],
+    queryFn: () => getAiFeatureRoute(brandId, ITEM_NAME_FEATURE_KEY),
     staleTime: 5 * 60_000,
   })
   const route = routeQuery.data ?? null
@@ -239,6 +245,12 @@ export function useInvoiceItemNameBulkAiApply({
         productLookupKey: string
         mainProduct: string
         candidateStyleIds: string[]
+        priorExamples?: Array<{
+          itemName: string
+          productLookupKey: string
+          action: 'delete' | 'components'
+          components: Array<{ styleId: string; quantity: number }>
+        }>
       }>,
     ) =>
       queryClient.fetchQuery({
@@ -249,6 +261,13 @@ export function useInvoiceItemNameBulkAiApply({
           route?.modelId ?? '',
           batch.map((item) => item.contextId).join('|'),
           candidates.map((item) => item.styleId).join('|'),
+          requestContexts
+            .map((item) =>
+              (item.priorExamples ?? [])
+                .map((example) => `${example.action}:${example.itemName}`)
+                .join(','),
+            )
+            .join('|'),
         ],
         staleTime: Infinity,
         retry: false,
@@ -256,6 +275,7 @@ export function useInvoiceItemNameBulkAiApply({
           withRecommendSlot(() =>
             recommendInvoiceItemNameRules({
               brandId,
+              featureKey: ITEM_NAME_FEATURE_KEY,
               contexts: requestContexts,
               candidates,
             }),
@@ -263,6 +283,8 @@ export function useInvoiceItemNameBulkAiApply({
       }),
     [brandId, queryClient, route?.modelId, route?.provider],
   )
+
+  const learningMode = route?.learningMode ?? 'observe'
 
   const cancel = useCallback(() => {
     invalidateCollect()
@@ -345,6 +367,12 @@ export function useInvoiceItemNameBulkAiApply({
         )
         return {
           contextId: context.contextId,
+          priorExamples: [] as Array<{
+            itemName: string
+            productLookupKey: string
+            action: 'delete' | 'components'
+            components: Array<{ styleId: string; quantity: number }>
+          }>,
           itemName: context.itemName.slice(0, 200),
           productLookupKey: context.productLookupKey.slice(0, 200),
           mainProduct: context.mainStyle
@@ -376,7 +404,15 @@ export function useInvoiceItemNameBulkAiApply({
         reason,
       }))
 
-    const publish = (decisions: AiAccessoryContextDecision[]) => {
+    const publish = (
+      decisions: AiAccessoryContextDecision[],
+      meta?: {
+        source: 'local' | 'ai' | 'manual'
+        cacheId: string | null
+        provider: 'openai' | 'anthropic' | 'gemini' | null
+        modelId: string | null
+      },
+    ) => {
       if (
         generation !== collectGenerationRef.current ||
         cancelRef.current
@@ -398,6 +434,7 @@ export function useInvoiceItemNameBulkAiApply({
         styles,
         itemNameRules,
         minConfidence,
+        recommendationMeta: meta,
       })
       // 검수 표를 모으는 동안 채워 사용자가 끝까지 기다리지 않게 한다.
       setReviewRows((current) =>
@@ -431,21 +468,98 @@ export function useInvoiceItemNameBulkAiApply({
           continue
         }
         try {
+          const cases = await searchInvoiceItemNameCases(
+            brandId,
+            batch.map((context) => ({
+              contextId: context.contextId,
+              itemName: context.itemName,
+              mainStyleId: context.mainStyle?.styleId ?? null,
+              productLookupKey: context.productLookupKey,
+            })),
+          )
+          const localDecisions: AiAccessoryContextDecision[] = []
+          const aiContexts: typeof settled.value.requestContexts = []
+          for (const context of batch) {
+            const request = settled.value.requestContexts.find(
+              (item) => item.contextId === context.contextId,
+            )
+            if (!request) continue
+            const contextCases = cases.filter(
+              (item) => item.contextId === context.contextId,
+            )
+            const local =
+              learningMode === 'assist'
+                ? decideItemNameLocalDraft(contextCases)
+                : null
+            if (local) {
+              localDecisions.push({
+                contextId: context.contextId,
+                action: local.action,
+                components: local.components.map((item) => ({
+                  styleId: item.styleId,
+                  styleNo: item.styleNo ?? '',
+                  name: item.name ?? '',
+                  quantity: item.quantity,
+                })),
+                confidence: local.confidence,
+                reason: local.reason,
+              })
+              continue
+            }
+            const priorExamples =
+              learningMode === 'assist'
+                ? pickItemNamePriorExamples(contextCases, 5).map((item) => ({
+                    itemName: item.itemName,
+                    productLookupKey: item.productLookupKey,
+                    action: item.action,
+                    components: item.components.map((component) => ({
+                      styleId: component.styleId,
+                      quantity: component.quantity,
+                    })),
+                  }))
+                : []
+            aiContexts.push({ ...request, priorExamples })
+          }
+          if (localDecisions.length > 0) {
+            publish(localDecisions, {
+              source: 'local',
+              cacheId: null,
+              provider: route?.provider ?? null,
+              modelId: route?.modelId ?? null,
+            })
+          }
+          if (aiContexts.length === 0) continue
           const recommendation = await fetchRecommendation(
-            batch,
+            batch.filter((context) =>
+              aiContexts.some((item) => item.contextId === context.contextId),
+            ),
             settled.value.candidates,
-            settled.value.requestContexts,
+            aiContexts,
           )
           const returned = new Set(
             recommendation.contexts.map((item) => item.contextId),
           )
-          publish([
-            ...recommendation.contexts,
-            ...holdsFor(
-              batch.filter((context) => !returned.has(context.contextId)),
-              recommendation.reason || '추천 결과가 없습니다.',
-            ),
-          ])
+          publish(
+            [
+              ...recommendation.contexts,
+              ...holdsFor(
+                batch.filter(
+                  (context) =>
+                    !returned.has(context.contextId) &&
+                    !localDecisions.some(
+                      (item) => item.contextId === context.contextId,
+                    ),
+                ),
+                recommendation.reason || '추천 결과가 없습니다.',
+              ),
+            ],
+            {
+              source: recommendation.source === 'local' ? 'local' : 'ai',
+              cacheId: recommendation.cacheId,
+              provider: recommendation.provider,
+              modelId: recommendation.modelId,
+            },
+          )
         } catch (error) {
           publish(
             holdsFor(
@@ -483,8 +597,11 @@ export function useInvoiceItemNameBulkAiApply({
     fetchRecommendation,
     groups,
     itemNameRules,
+    learningMode,
     minConfidence,
     phase,
+    route?.modelId,
+    route?.provider,
     styles,
   ])
 
@@ -785,10 +902,12 @@ export function useInvoiceItemNameBulkAiApply({
       ...plan.globals.map((item) => ({
         input: item.input,
         ruleId: item.existingRuleId ?? undefined,
+        feedback: item.feedback,
       })),
       ...plan.lookups.map((item) => ({
         input: item.input,
         ruleId: item.existingRuleId ?? undefined,
+        feedback: item.feedback,
       })),
     ]
     if (requests.length === 0) {
@@ -863,6 +982,7 @@ export function useInvoiceItemNameBulkAiApply({
       await queryClient.invalidateQueries({
         queryKey: ['invoice-item-name-rules', brandId],
       })
+      await invalidateAiRecommendationQueries(queryClient, brandId)
       if (result.failed.length === 0 && plan.blocked.length === 0) {
         setPhase(succeeded.size < rechecked.length ? 'review' : 'applied')
       }

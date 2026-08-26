@@ -1,4 +1,8 @@
-import { ACCESSORY_FEATURE_KEY, type AiProvider } from '@/lib/ai/gateway-core'
+import {
+  ACCESSORY_FEATURE_KEY,
+  ITEM_NAME_FEATURE_KEY,
+  type AiProvider,
+} from '@/lib/ai/gateway-core'
 import type {
   AiAccessoryRecommendation,
   AiItemNameRecommendation,
@@ -166,6 +170,12 @@ export async function recommendInvoiceItemNameRules(input: {
     productLookupKey: string
     mainProduct: string
     candidateStyleIds?: string[]
+    priorExamples?: Array<{
+      itemName: string
+      productLookupKey: string
+      action: 'delete' | 'components'
+      components: Array<{ styleId: string; quantity: number }>
+    }>
   }>
   candidates: AiProductCandidate[]
 }): Promise<AiItemNameRecommendation> {
@@ -191,7 +201,7 @@ export async function recommendInvoiceItemNameRules(input: {
     action: 'recommend_accessory_rules',
     mode: 'item_name',
     brandId: input.brandId,
-    featureKey: input.featureKey ?? ACCESSORY_FEATURE_KEY,
+    featureKey: input.featureKey ?? ITEM_NAME_FEATURE_KEY,
     unknownPiece: '내품명 일괄 검토',
     itemNames,
     lookupKeys,

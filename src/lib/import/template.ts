@@ -1,6 +1,12 @@
-import type { BrandField, FieldOwner } from '@/lib/types'
+import type { BrandField, FieldOwner, Season } from '@/lib/types'
 import { OWNER_LABEL } from '@/lib/import/fields'
 import { filterFieldsForTemplate } from '@/lib/import/brand-field-template'
+import {
+  allowedValuesForField,
+  createProductWorkbook,
+  downloadExcelWorkbook,
+  isProductDropdownField,
+} from '@/lib/export/product-workbook'
 
 const TYPE_LABEL: Record<BrandField['type'], string> = {
   text: '텍스트',
@@ -9,6 +15,7 @@ const TYPE_LABEL: Record<BrandField['type'], string> = {
   gender: '성별(남성/여성/공용)',
   season: '시즌 코드',
   image: '이미지 주소',
+  select: '단일 선택',
 }
 
 const EXAMPLE: Record<string, string> = {
@@ -51,8 +58,9 @@ export async function downloadUploadTemplate(options: {
   brandName: string
   fields: BrandField[]
   ownerFilter?: FieldOwner | 'all'
+  seasons?: Season[]
 }) {
-  const XLSX = await import('xlsx')
+  const seasons = options.seasons ?? []
   const fields = filterFieldsForTemplate(
     options.fields,
     options.ownerFilter ?? 'all',
@@ -62,39 +70,41 @@ export async function downloadUploadTemplate(options: {
     throw new Error('다운로드할 항목이 없습니다.')
   }
 
-  const headers = fields.map((f) => f.label)
+  const headers = fields.map((field) => field.label)
   const guideRows = [
-    ['항목명', '유형', '필수', '부서', '예시', '설명'],
-    ...fields.map((f) => [
-      f.label,
-      TYPE_LABEL[f.type],
-      f.required ? 'Y' : 'N',
-      OWNER_LABEL[f.owner] ?? f.owner,
-      (f.systemKey && EXAMPLE[f.systemKey]) || '',
-      f.systemKey
-        ? '시스템 기본 항목'
-        : '브랜드에서 추가한 사용자 항목',
+    ['항목명', '유형', '필수', '부서', '예시', '허용값', '설명'],
+    ...fields.map((field) => [
+      field.label,
+      TYPE_LABEL[field.type],
+      field.required ? 'Y' : 'N',
+      OWNER_LABEL[field.owner] ?? field.owner,
+      allowedValuesForField(field, seasons).split(', ')[0] ||
+        (field.systemKey && EXAMPLE[field.systemKey]) ||
+        '',
+      allowedValuesForField(field, seasons),
+      [
+        field.systemKey
+          ? '시스템 기본 항목'
+          : '브랜드에서 추가한 사용자 항목',
+        isProductDropdownField(field)
+          ? '연한 하늘색 열은 목록에서 고릅니다'
+          : '',
+      ]
+        .filter(Boolean)
+        .join(' · '),
     ]),
   ]
 
-  const workbook = XLSX.utils.book_new()
-  const uploadSheet = XLSX.utils.aoa_to_sheet([headers])
-  const guideSheet = XLSX.utils.aoa_to_sheet(guideRows)
-
-  // 컬럼 너비 대략 조정
-  uploadSheet['!cols'] = headers.map(() => ({ wch: 16 }))
-  guideSheet['!cols'] = [
-    { wch: 14 },
-    { wch: 16 },
-    { wch: 6 },
-    { wch: 10 },
-    { wch: 20 },
-    { wch: 24 },
-  ]
-
-  XLSX.utils.book_append_sheet(workbook, uploadSheet, '상품업로드')
-  XLSX.utils.book_append_sheet(workbook, guideSheet, '작성안내')
+  const workbook = await createProductWorkbook({
+    dataSheetName: '상품업로드',
+    headers,
+    fields,
+    seasons,
+    guideRows,
+    guideColumnWidths: [14, 16, 6, 10, 20, 36, 24],
+    validationRows: 2000,
+  })
 
   const fileName = `${safeFilePart(options.brandName)}_상품업로드양식_${todayStamp()}.xlsx`
-  XLSX.writeFile(workbook, fileName)
+  await downloadExcelWorkbook(workbook, fileName)
 }

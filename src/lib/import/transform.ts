@@ -1,4 +1,8 @@
 import type { BrandField, Season, Style } from '@/lib/types'
+import {
+  formatSelectImportError,
+  resolveSelectOptionLabel,
+} from '@/lib/products/brand-field-select'
 import { FIELD_MAP, normalizeHeader } from './fields'
 import {
   isRowActionHeader,
@@ -116,13 +120,22 @@ function applyTypedValue(
   value: string,
   seasonByCode: Map<string, Season>,
   applied: Record<string, unknown>,
-  customFields: Record<string, string>,
   errors: string[],
   warnings: string[],
 ): { seasonRejected?: boolean } {
-  // 사용자 추가 항목
+  if (field.type === 'select') {
+    const canonical = resolveSelectOptionLabel(field, value)
+    if (!canonical) {
+      errors.push(formatSelectImportError(field, value))
+      return {}
+    }
+    if (field.systemKey) applied[field.systemKey] = canonical
+    else applied[field.id] = canonical
+    return {}
+  }
+
   if (!field.systemKey) {
-    customFields[field.label] = value
+    applied[field.id] = value
     return {}
   }
 
@@ -253,6 +266,7 @@ export function prepareRows({
           if (field.systemKey && !NON_CLEARABLE_KEYS.has(field.systemKey)) {
             clearKeys.push(field.systemKey)
           } else if (!field.systemKey) {
+            clearKeys.push(field.id)
             clearCustomFields.push(field.label)
           }
         }
@@ -275,7 +289,6 @@ export function prepareRows({
         value,
         seasonByCode,
         applied,
-        customFields,
         errors,
         warnings,
       )
@@ -371,7 +384,9 @@ export function prepareRows({
           }
           continue
         }
-        if (!customFields[field.label]) missing.push(field.label)
+        if (!applied[field.id] && !customFields[field.label]) {
+          missing.push(field.label)
+        }
       }
       if (missing.length > 0) {
         errors.push(`신규 상품은 ${missing.join(', ')}이(가) 필요합니다`)

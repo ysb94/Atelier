@@ -4,9 +4,11 @@ export type AiProvider = (typeof AI_PROVIDERS)[number]
 export const AI_FEATURE_KEYS = [
   'invoice_product_recommendation',
   'invoice_accessory_recommendation',
+  'invoice_item_name_recommendation',
 ] as const
 
 export const ACCESSORY_FEATURE_KEY = 'invoice_accessory_recommendation' as const
+export const ITEM_NAME_FEATURE_KEY = 'invoice_item_name_recommendation' as const
 export const ACCESSORY_RULE_TYPES = [
   'label',
   'color',
@@ -728,6 +730,12 @@ export function buildItemNameSuggestPrompt(input: {
     productLookupKey: string
     mainProduct: string
     candidateStyleIds?: string[]
+    priorExamples?: Array<{
+      itemName: string
+      productLookupKey: string
+      action: 'delete' | 'components'
+      components: Array<{ styleId: string; quantity: number }>
+    }>
   }>
   candidates: ProductCandidate[]
 }) {
@@ -740,6 +748,7 @@ export function buildItemNameSuggestPrompt(input: {
     '확신할 수 없거나 후보가 없으면 추측하지 말고 hold를 사용하세요.',
     'components.styleId는 해당 문맥의 candidateStyleIds 안에서만 고르고 확정 본품 자체는 구성품에 넣지 마세요.',
     '같은 구성품은 한 번만 쓰고 quantity로 수량을 나타내세요.',
+    'priorExamples는 사람이 확정한 과거 사례입니다. 참고만 하고 후보 밖 M번호는 쓰지 마세요.',
     'confidence는 0부터 1 사이입니다. 주문자 개인정보는 다루지 않습니다.',
     '형식: {"reason":"","contexts":[{"contextId":"","action":"components","components":[{"styleId":"","quantity":1}],"confidence":0.0,"reason":""}]}',
   ].join(' ')

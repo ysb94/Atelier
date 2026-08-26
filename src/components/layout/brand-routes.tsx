@@ -27,6 +27,7 @@ import { OrgChartPage } from '@/features/org/OrgChartPage'
 import { DataSheetPage } from '@/features/data/DataSheetPage'
 import { DataUploadPage } from '@/features/data/DataUploadPage'
 import { InvoiceWorkPage } from '@/features/logistics/InvoiceWorkPage'
+import { WarehousePage } from '@/features/logistics/WarehousePage'
 import { WorkRequestPage } from '@/features/work-requests/WorkRequestPage'
 
 const DesignFileManagerPage = lazy(async () => {
@@ -75,6 +76,7 @@ export function BrandWorkspaceRouteTree() {
       </Route>
       <Route path="work-requests/:owner" element={<WorkRequestPage />} />
       <Route path="logistics/invoices" element={<InvoiceWorkPage />} />
+      <Route path="logistics/warehouses" element={<WarehousePage />} />
       <Route path="data" element={<RedirectTo to="data/all" />} />
       <Route path="data/upload" element={<DataUploadPage />} />
       <Route path="data/:owner" element={<DataSheetPage />}>

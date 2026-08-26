@@ -8,6 +8,7 @@ import {
   assignGiftSourceSlots,
   collectGiftSourceSlots,
   collectGiftSourceSlotsForGroup,
+  effectiveGiftSourceAppliedKeys,
   giftSourceGroupKey,
   inspectGiftSourceGroup,
   isGiftSourceCandidate,
@@ -267,33 +268,108 @@ const kept: InvoiceGiftSourceAllocation = {
   sourceFileName: 'file.xlsx',
   createdAt: '2026-08-24T00:00:00.000Z',
 }
+const storedGroupKey = giftSourceGroupKey(
+  '테스트몰',
+  '[사은품] 마스마룰즈 파우치 (컬러랜덤)',
+)
+assert(
+  effectiveGiftSourceAppliedKeys({
+    maps: [{ ...storedMap, poolStyles: [b, c] }],
+  }).has(storedGroupKey),
+  '활성 저장 매핑은 기본 적용 키',
+)
+assert(
+  !effectiveGiftSourceAppliedKeys({
+    maps: [{ ...storedMap, isActive: false }],
+  }).has(storedGroupKey),
+  '비활성 매핑은 기본 적용 키가 아님',
+)
+assert(
+  !effectiveGiftSourceAppliedKeys({
+    maps: [storedMap],
+    ignoredKeys: new Set([storedGroupKey]),
+  }).has(storedGroupKey),
+  '명시 제외 키는 자동 적용하지 않음',
+)
 const storedOnly = planGiftSourceTransform({
   rows: thirtyOne.slice(0, 1),
   maps: [{ ...storedMap, poolStyles: [b, c] }],
   allocations: [kept],
 })
 assert(
-  storedOnly.groups[0]?.status === 'map_found',
-  '저장된 매핑은 적용 전 기존 설정으로만 표시',
+  storedOnly.groups[0]?.status === 'assigned',
+  '활성 저장 매핑은 자동 치환',
 )
 assert(
-  storedOnly.mappedRowCount === 0,
-  '저장된 매핑만으로는 자동 치환하지 않음',
+  storedOnly.mappedRowCount === 1,
+  '활성 저장 매핑은 별도 적용 없이 치환',
+)
+assert(
+  storedOnly.replacementsByRow.get(1)?.[0]?.style.styleId === a.styleId,
+  '자동 적용 때도 기존 allocation을 재사용',
 )
 const afterPoolChange = planGiftSourceTransform({
   rows: thirtyOne.slice(0, 1),
   maps: [{ ...storedMap, poolStyles: [b, c] }],
   allocations: [kept],
-  appliedKeys: new Set([
-    giftSourceGroupKey(
-      '테스트몰',
-      '[사은품] 마스마룰즈 파우치 (컬러랜덤)',
-    ),
-  ]),
 })
 assert(
   afterPoolChange.replacementsByRow.get(1)?.[0]?.style.styleId === a.styleId,
   '후보 풀이 바뀌어도 기존 배정은 재추첨하지 않음',
+)
+const nextFileAuto = planGiftSourceTransform({
+  rows: [
+    row({
+      rowNumber: 1,
+      customerOrderNo: 'NEW-99',
+      orderedAt: '2026-08-26 10:00',
+    }),
+  ],
+  maps: [storedMap],
+})
+assert(
+  nextFileAuto.mappedRowCount === 1 && nextFileAuto.groups[0]?.status === 'assigned',
+  '새 파일은 같은 활성 매핑을 자동 재적용',
+)
+assert(
+  nextFileAuto.replacementsByRow.get(1)?.[0]?.style.styleId !== undefined,
+  '신규 슬롯은 저장된 후보 풀로 배정',
+)
+const inactiveStored = planGiftSourceTransform({
+  rows: thirtyOne.slice(0, 1),
+  maps: [{ ...storedMap, isActive: false }],
+})
+assert(
+  inactiveStored.mappedRowCount === 0 &&
+    inactiveStored.groups[0]?.status === 'unset',
+  '비활성 매핑은 자동 적용하지 않음',
+)
+const mallMismatch = planGiftSourceTransform({
+  rows: [row({ rowNumber: 1, mallName: '다른몰' })],
+  maps: [storedMap],
+})
+assert(
+  mallMismatch.mappedRowCount === 0 &&
+    mallMismatch.groups.every((group) => group.status === 'unset'),
+  '쇼핑몰이 다른 저장 매핑은 적용하지 않음',
+)
+const ignoredStored = planGiftSourceTransform({
+  rows: thirtyOne.slice(0, 1),
+  maps: [storedMap],
+  ignoredKeys: new Set([storedGroupKey]),
+})
+assert(
+  ignoredStored.mappedRowCount === 0 && ignoredStored.groups.length === 0,
+  '파일에서 제외한 키는 자동 적용하지 않음',
+)
+const emptyPoolStored = planGiftSourceTransform({
+  rows: thirtyOne.slice(0, 1),
+  maps: [{ ...storedMap, poolStyles: [] }],
+})
+assert(
+  emptyPoolStored.groups[0]?.status === 'map_found' &&
+    emptyPoolStored.mappedRowCount === 0,
+  '후보가 없는 저장 매핑은 예외 상태로만 표시',
 )
 
 const sessionThenReset = planGiftSourceTransform({
@@ -383,20 +459,14 @@ const existingPrefill = inspectGiftSourceGroup({
   maps: [storedMap],
   allocations: [kept],
 })
-assert(existingPrefill.status === 'map_found', '기존 매핑은 팝업 사전 채움')
+assert(existingPrefill.status === 'assigned', '기존 매핑은 자동 치환')
 assert(existingPrefill.poolStyles.length === 3, '기존 후보 풀을 그대로 채움')
 const existingApplied = planGiftSourceTransform({
   rows: [row({ rowNumber: 1 })],
   maps: [storedMap],
   allocations: [kept],
-  appliedKeys: new Set([
-    giftSourceGroupKey(
-      '테스트몰',
-      '[사은품] 마스마룰즈 파우치 (컬러랜덤)',
-    ),
-  ]),
 })
-assert(existingApplied.mappedRowCount === 1, '기존 설정은 수동 적용 후에만 치환')
+assert(existingApplied.mappedRowCount === 1, '기존 설정은 자동 치환')
 
 const detectedOnly = planGiftSourceTransform({
   rows: [
@@ -502,8 +572,37 @@ assert(
         normalizedProductName: regularName,
       },
     ],
-  }).status === 'map_found',
-  '태그 없는 행의 기존 매핑은 팝업 사전 채움만',
+  }).status === 'assigned',
+  '태그 없는 행의 기존 매핑도 자동 치환',
+)
+
+const storedAutoOverlay = overlayGiftSourceOnProductNames(
+  base,
+  planGiftSourceTransform({
+    rows: [
+      row({ rowNumber: 1 }),
+      row({
+        rowNumber: 2,
+        productName: '일반 본품',
+        customerOrderNo: 'N-2',
+      }),
+    ],
+    maps: [storedMap],
+  }),
+)
+assert(
+  storedAutoOverlay.giftMappedRowCount === 1,
+  '활성 저장 매핑 overlay는 gift_mapped',
+)
+assert(
+  storedAutoOverlay.unresolvedCombos.every(
+    (combo) => combo.productName !== '[사은품] 마스마룰즈 파우치 (컬러랜덤)',
+  ),
+  '자동 적용된 사은품은 AI 미해결 목록에서 제외',
+)
+assert(
+  storedAutoOverlay.unresolvedCombos.some((combo) => combo.productName === '일반 본품'),
+  '자동 적용 후에도 일반 조합은 검수표에 유지',
 )
 
 const mappedOverlay = overlayGiftSourceOnProductNames(
@@ -706,6 +805,92 @@ const filteredCampaign = planGiftAssignments(
 assert(
   filteredCampaign.giftCount === 0,
   '원본 사은품 후보를 캠페인 입력에서 빼면 중복 추가 없음',
+)
+
+const broccoliWhite = style(
+  'style-m2305',
+  'M2305',
+  '헤이트 브로콜리 크롭티셔츠 화이트 F',
+)
+const broccoliBlack = style(
+  'style-m2306',
+  'M2306',
+  '헤이트 브로콜리 크롭티셔츠 블랙 F',
+)
+const broccoliRow = row({
+  rowNumber: 1,
+  mallName: 'Cafe24(신) 유튜브쇼핑',
+  productName: '[사은품] 헤이트 브로콜리 크롭티셔츠 (컬러랜덤)',
+  customerOrderNo: '2146235253',
+  recipientName: '기존고객',
+  recipientPhone: '01012345678',
+  recipientAddress: '서울 기존',
+})
+const broccoliSlots = collectGiftSourceSlots([broccoliRow])
+const broccoliMap: InvoiceGiftSourceMap = {
+  ...storedMap,
+  id: 'map-broccoli',
+  mallName: broccoliRow.mallName,
+  normalizedMallName: broccoliRow.mallName,
+  productName: broccoliRow.productName,
+  normalizedProductName: broccoliRow.productName,
+  poolStyles: [broccoliWhite, broccoliBlack],
+}
+const broccoliPlan = planGiftSourceTransform({
+  rows: [broccoliRow],
+  maps: [broccoliMap],
+  allocations: [
+    {
+      id: 'alloc-broccoli',
+      mapId: 'map-broccoli',
+      styleId: broccoliWhite.styleId,
+      styleNo: broccoliWhite.styleNo,
+      styleName: broccoliWhite.name,
+      allocationKey: broccoliSlots[0]!.allocationKey,
+      orderFingerprint: broccoliSlots[0]!.orderFingerprint,
+      quantitySlot: 1,
+      mallName: broccoliRow.mallName,
+      customerOrderNo: broccoliRow.customerOrderNo,
+      orderedAt: broccoliRow.orderedAt,
+      sourceFileName: 'file.xlsx',
+      createdAt: '2026-08-24T00:00:00.000Z',
+    },
+  ],
+})
+assert(
+  broccoliPlan.groups[0]?.status === 'assigned' &&
+    broccoliPlan.mappedRowCount === 1 &&
+    broccoliPlan.replacementsByRow.get(1)?.[0]?.style.styleNo === 'M2305',
+  '운영 사은품 행은 업로드 직후 기존 allocation M2305로 자동 치환',
+)
+const broccoliOverlay = overlayGiftSourceOnProductNames(
+  transformInvoiceProductNames(
+    [broccoliRow],
+    [],
+    { byName: new Map(), byCompactName: new Map() },
+  ),
+  broccoliPlan,
+)
+assert(
+  broccoliOverlay.rows[0]?.status === 'gift_mapped' &&
+    broccoliOverlay.unresolvedCombos.length === 0,
+  '자동 치환된 브로콜리 사은품은 품목명 AI 검수표에 없음',
+)
+const broccoliNextFile = planGiftSourceTransform({
+  rows: [
+    row({
+      rowNumber: 2,
+      mallName: broccoliRow.mallName,
+      productName: broccoliRow.productName,
+      customerOrderNo: 'NEW-BROCCOLI',
+    }),
+  ],
+  maps: [broccoliMap],
+})
+assert(
+  broccoliNextFile.mappedRowCount === 1 &&
+    broccoliNextFile.groups[0]?.status === 'assigned',
+  '같은 활성 매핑은 다음 파일에서도 자동 완료',
 )
 
 console.log('gift-source-transform verify ok')

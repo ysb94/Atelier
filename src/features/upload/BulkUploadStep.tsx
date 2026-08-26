@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
 import { Download, FileSpreadsheet, Upload } from 'lucide-react'
-import type { BrandField } from '@/lib/types'
+import type { BrandField, Season } from '@/lib/types'
 import { parseFile, parseText, type ParsedSheet } from '@/lib/import/parse'
 import { downloadUploadTemplate } from '@/lib/import/template'
 import { Button } from '@/components/ui/button'
@@ -11,6 +11,7 @@ import { cn, formatNumber } from '@/lib/utils'
 type BulkUploadStepProps = {
   brandName: string
   fields: BrandField[]
+  seasons?: Season[]
   sheets: ParsedSheet[]
   activeSheetIndex: number
   onSheetsLoaded: (sheets: ParsedSheet[]) => void
@@ -21,6 +22,7 @@ type BulkUploadStepProps = {
 export function BulkUploadStep({
   brandName,
   fields,
+  seasons,
   sheets,
   activeSheetIndex,
   onSheetsLoaded,
@@ -41,6 +43,7 @@ export function BulkUploadStep({
         brandName,
         fields,
         ownerFilter: 'all',
+        seasons,
       })
     } catch (err) {
       setError(

@@ -87,6 +87,30 @@ export function giftSourceGroupKey(mallName: string, productName: string) {
   ].join('\u0000')
 }
 
+/** 활성 저장 매핑·세션 규칙·명시 적용 키를 합친 실제 적용 집합. */
+export function effectiveGiftSourceAppliedKeys(options: {
+  maps?: InvoiceGiftSourceMap[]
+  sessionRules?: ReadonlyMap<string, GiftSourceSessionRule>
+  appliedKeys?: ReadonlySet<string>
+  ignoredKeys?: ReadonlySet<string>
+}): Set<string> {
+  const ignored = options.ignoredKeys
+  const next = new Set<string>()
+  for (const key of options.appliedKeys ?? []) {
+    if (!ignored?.has(key)) next.add(key)
+  }
+  for (const key of options.sessionRules?.keys() ?? []) {
+    if (!ignored?.has(key)) next.add(key)
+  }
+  for (const map of options.maps ?? []) {
+    if (!map.isActive || map.poolStyles.length === 0) continue
+    const key = giftSourceGroupKey(map.mallName, map.productName)
+    if (ignored?.has(key)) continue
+    next.add(key)
+  }
+  return next
+}
+
 export function recommendsGiftSourceBalancedRandom(productName: string) {
   return COLOR_RANDOM_RE.test(normalizeInvoiceText(productName))
 }
@@ -310,10 +334,12 @@ export function collectSourceGiftClaims(options: {
 }): SourceGiftCollectResult {
   const tagRoles = options.tagRoles ?? []
   const ignoredKeys = options.ignoredKeys
-  const appliedKeys = new Set(options.appliedKeys ?? [])
-  for (const key of options.sessionRules?.keys() ?? []) {
-    appliedKeys.add(key)
-  }
+  const appliedKeys = effectiveGiftSourceAppliedKeys({
+    maps: options.maps,
+    sessionRules: options.sessionRules,
+    appliedKeys: options.appliedKeys,
+    ignoredKeys,
+  })
   const slots = collectGiftSourceSlots(
     options.rows,
     tagRoles,
@@ -406,10 +432,12 @@ export function planGiftSourceTransform(options: {
 }): GiftSourcePlan {
   const tagRoles = options.tagRoles ?? []
   const ignoredKeys = options.ignoredKeys
-  const appliedKeys = new Set(options.appliedKeys ?? [])
-  for (const key of options.sessionRules?.keys() ?? []) {
-    appliedKeys.add(key)
-  }
+  const appliedKeys = effectiveGiftSourceAppliedKeys({
+    maps: options.maps,
+    sessionRules: options.sessionRules,
+    appliedKeys: options.appliedKeys,
+    ignoredKeys,
+  })
   const slots = collectGiftSourceSlots(
     options.rows,
     tagRoles,
@@ -625,6 +653,7 @@ export function inspectGiftSourceGroup(options: {
   allocations?: InvoiceGiftSourceAllocation[]
   sessionRules?: ReadonlyMap<string, GiftSourceSessionRule>
   sessionAllocations?: ReadonlyMap<string, StyleRef>
+  ignoredKeys?: ReadonlySet<string>
   appliedKeys?: ReadonlySet<string>
 }): GiftSourceGroup {
   const key = giftSourceGroupKey(options.mallName, options.productName)
@@ -635,6 +664,7 @@ export function inspectGiftSourceGroup(options: {
     allocations: options.allocations,
     sessionRules: options.sessionRules,
     sessionAllocations: options.sessionAllocations,
+    ignoredKeys: options.ignoredKeys,
     appliedKeys: options.appliedKeys,
   })
   const found = plan.groups.find((group) => group.key === key)

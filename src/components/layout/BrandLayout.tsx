@@ -37,6 +37,7 @@ import {
   UserRound,
   Users,
   Network,
+  Warehouse,
 } from 'lucide-react'
 import { getBrandBySlug, getBrands } from '@/lib/api'
 import { useAuth } from '@/lib/supabase/auth'
@@ -109,6 +110,11 @@ const navGroups: { title: string; items: NavItem[] }[] = [
         to: 'logistics/invoices',
         label: '송장작업',
         icon: FileSpreadsheet,
+      },
+      {
+        to: 'logistics/warehouses',
+        label: '창고 관리',
+        icon: Warehouse,
       },
       { to: 'work-requests/logistics', label: '작업 요청', icon: ClipboardList },
     ],
@@ -514,7 +520,8 @@ export function BrandLayout() {
           {(() => {
             const pageLayout = location.pathname.includes('/design/file-manager')
               ? 'full'
-              : location.pathname.includes('/logistics/invoices')
+              : location.pathname.includes('/logistics/invoices') ||
+                  location.pathname.includes('/logistics/warehouses')
                 ? 'wide'
                 : 'default'
             return (

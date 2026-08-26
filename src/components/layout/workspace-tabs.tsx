@@ -57,6 +57,10 @@ const NAV_LABELS: {
     match: /^\/logistics\/invoices(?:\/|$)/,
     label: '물류 · 송장작업',
   },
+  {
+    match: /^\/logistics\/warehouses(?:\/|$)/,
+    label: '물류 · 창고 관리',
+  },
   { match: /^\/barcodes(?:\/|$)/, label: '자사 바코드' },
   { match: /^\/usage-codes(?:\/|$)/, label: '사용처별 바코드' },
   { match: /^\/partner-codes(?:\/|$)/, label: '거래처 코드' },

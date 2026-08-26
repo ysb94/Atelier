@@ -27,6 +27,7 @@ import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { SelectFieldInput } from '@/components/fields/SelectFieldInput'
 import { Input, Select } from '@/components/ui/input'
 import {
   getBrandFields,
@@ -136,6 +137,10 @@ function isSeasonField(field: BrandField) {
 
 function isGenderField(field: BrandField) {
   return field.type === 'gender' || field.systemKey === 'gender'
+}
+
+function isSelectField(field: BrandField) {
+  return field.type === 'select'
 }
 
 /**
@@ -258,6 +263,24 @@ function EditableFieldCell({
         <option value="M">M · 남성</option>
         <option value="U">U · 공용</option>
       </Select>
+    )
+  }
+
+  if (isSelectField(field)) {
+    return (
+      <SelectFieldInput
+        className="h-8 w-full"
+        autoFocus
+        field={field}
+        value={draft}
+        disabled={disabled}
+        onClick={(e) => e.stopPropagation()}
+        onChange={(next) => {
+          setDraft(next)
+          commit(next)
+        }}
+        onBlur={() => setEditing(false)}
+      />
     )
   }
 

@@ -81,6 +81,8 @@ export type InvoiceProductNameMapFeedback = {
   shownRank?: number | null
   provider?: string | null
   modelId?: string | null
+  suggestedStyleId?: string | null
+  outcome?: 'confirmed' | 'corrected'
 }
 
 export type InvoiceProductNameMapInput = {
@@ -269,6 +271,8 @@ export async function saveInvoiceProductNameMap(
             shown_rank: input.feedback.shownRank ?? null,
             provider: input.feedback.provider ?? null,
             model_id: input.feedback.modelId ?? null,
+            suggested_style_id: input.feedback.suggestedStyleId ?? null,
+            outcome: input.feedback.outcome ?? null,
           }
         : null,
     },

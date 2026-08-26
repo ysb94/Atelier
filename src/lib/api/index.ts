@@ -9,6 +9,7 @@ import type {
   BrandInput,
   BrandField,
   BrandFieldInput,
+  BrandFieldOptionInput,
   BarcodeField,
   BarcodeFieldInput,
   CodeUsageAssignment,
@@ -20,6 +21,8 @@ import type {
   InvoiceItemNameRule,
   InvoiceAccessoryRule,
   InvoiceOptionMap,
+  InvoicePackingSizeMap,
+  InvoicePackingSizeSourceValue,
   AiAccessoryRecommendation,
   AiItemNameRecommendation,
   InvoiceProductNameMap,
@@ -40,6 +43,9 @@ import type {
   SeasonInput,
   Style,
   StyleInput,
+  WarehouseInventorySet,
+  WarehouseStockMovement,
+  WarehouseStockPosition,
 } from '@/lib/types'
 import * as aiCandidateStore from '@/lib/supabase/ai-candidates'
 import * as aiGatewayStore from '@/lib/supabase/ai-gateway'
@@ -56,6 +62,7 @@ import * as invoiceNameRuleStore from '@/lib/supabase/invoice-name-rules'
 import * as invoiceItemNameRuleStore from '@/lib/supabase/invoice-item-name-rules'
 import * as invoiceAccessoryRuleStore from '@/lib/supabase/invoice-accessory-rules'
 import * as invoiceOptionMapStore from '@/lib/supabase/invoice-option-maps'
+import * as invoicePackingSizeMapStore from '@/lib/supabase/invoice-packing-size-maps'
 import * as invoiceProductNameMapStore from '@/lib/supabase/invoice-product-name-maps'
 import * as invoiceProductNameExclusionStore from '@/lib/supabase/invoice-product-name-exclusions'
 import * as invoiceProductNameTagRoleStore from '@/lib/supabase/invoice-product-name-tag-roles'
@@ -65,6 +72,8 @@ import * as productCodeStore from '@/lib/supabase/product-codes'
 import * as productDraftStore from '@/lib/supabase/product-drafts'
 import * as seasonStore from '@/lib/supabase/seasons'
 import * as styleStore from '@/lib/supabase/styles'
+import * as warehouseStockStore from '@/lib/supabase/warehouse-stock'
+import type { PreparedWarehouseImportRow } from '@/lib/warehouse/stock'
 
 const delay = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -91,6 +100,14 @@ export type {
 export { InvoiceAccessoryRuleStoreError } from '@/lib/supabase/invoice-accessory-rules'
 export type { InvoiceAccessoryRuleInput } from '@/lib/supabase/invoice-accessory-rules'
 export { InvoiceOptionMapStoreError } from '@/lib/supabase/invoice-option-maps'
+export { WarehouseStockStoreError } from '@/lib/supabase/warehouse-stock'
+export type {
+  WarehouseAdjustInput,
+  WarehouseMoveInput,
+  WarehouseReceiveInput,
+} from '@/lib/supabase/warehouse-stock'
+export { InvoicePackingSizeMapStoreError } from '@/lib/supabase/invoice-packing-size-maps'
+export type { InvoicePackingSizeMapInput } from '@/lib/supabase/invoice-packing-size-maps'
 export type {
   InvoiceOptionComponentInput,
   InvoiceOptionMapInput,
@@ -226,6 +243,15 @@ export async function updateBrandField(
 export async function deleteBrandField(id: string): Promise<void> {
   await delay()
   return brandFieldStore.deleteBrandField(id)
+}
+
+export async function saveBrandFieldOptions(
+  brandId: string,
+  fieldId: string,
+  options: BrandFieldOptionInput[],
+): Promise<BrandField> {
+  await delay()
+  return brandFieldStore.saveBrandFieldOptions(brandId, fieldId, options)
 }
 
 export async function getBarcodeFields(
@@ -373,6 +399,142 @@ export async function setInvoiceAccessoryRuleActive(
 export async function deleteInvoiceAccessoryRule(id: string): Promise<void> {
   await delay()
   return invoiceAccessoryRuleStore.deleteInvoiceAccessoryRule(id)
+}
+
+export async function getInvoicePackingSizeMaps(
+  brandId: string,
+  fieldId: string,
+): Promise<InvoicePackingSizeMap[]> {
+  await delay()
+  return invoicePackingSizeMapStore.listInvoicePackingSizeMaps(
+    brandId,
+    fieldId,
+  )
+}
+
+export async function getInvoicePackingSizeSourceValues(
+  brandId: string,
+  fieldId: string,
+): Promise<InvoicePackingSizeSourceValue[]> {
+  await delay()
+  return invoicePackingSizeMapStore.listInvoicePackingSizeSourceValues(
+    brandId,
+    fieldId,
+  )
+}
+
+export async function saveInvoicePackingSizeMaps(
+  brandId: string,
+  fieldId: string,
+  mappings: invoicePackingSizeMapStore.InvoicePackingSizeMapInput[],
+): Promise<InvoicePackingSizeMap[]> {
+  await delay()
+  return invoicePackingSizeMapStore.saveInvoicePackingSizeMaps(
+    brandId,
+    fieldId,
+    mappings,
+  )
+}
+
+export async function getWarehouseInventorySets(brandId: string) {
+  await delay()
+  return warehouseStockStore.listWarehouseInventorySets(brandId)
+}
+
+export async function getActiveWarehouseInventorySet(brandId: string) {
+  await delay()
+  return warehouseStockStore.getActiveWarehouseInventorySet(brandId)
+}
+
+export async function getWarehouseStockPositions(
+  brandId: string,
+  setId: string,
+): Promise<WarehouseStockPosition[]> {
+  await delay()
+  return warehouseStockStore.listWarehouseStockPositions(brandId, setId)
+}
+
+export async function getWarehouseStockMovements(
+  brandId: string,
+  setId: string,
+  positionId?: string,
+): Promise<WarehouseStockMovement[]> {
+  await delay()
+  return warehouseStockStore.listWarehouseStockMovements(
+    brandId,
+    setId,
+    positionId,
+  )
+}
+
+export async function importWarehouseInventorySet(
+  brandId: string,
+  sourceFileName: string,
+  rows: PreparedWarehouseImportRow[],
+): Promise<WarehouseInventorySet> {
+  await delay()
+  return warehouseStockStore.importWarehouseInventorySet(
+    brandId,
+    sourceFileName,
+    rows,
+  )
+}
+
+export async function restoreWarehouseInventorySet(
+  brandId: string,
+  setId: string,
+): Promise<WarehouseInventorySet> {
+  await delay()
+  return warehouseStockStore.restoreWarehouseInventorySet(brandId, setId)
+}
+
+export async function receiveWarehouseStock(
+  brandId: string,
+  input: warehouseStockStore.WarehouseReceiveInput,
+) {
+  await delay()
+  return warehouseStockStore.receiveWarehouseStock(brandId, input)
+}
+
+export async function moveWarehouseStock(
+  brandId: string,
+  input: warehouseStockStore.WarehouseMoveInput,
+  action: 'move' | 'replenish' = 'move',
+) {
+  await delay()
+  return warehouseStockStore.moveWarehouseStock(brandId, input, action)
+}
+
+export async function depleteWarehouseStock(
+  brandId: string,
+  positionId: string,
+  reason?: string,
+) {
+  await delay()
+  return warehouseStockStore.depleteWarehouseStock(brandId, positionId, reason)
+}
+
+export async function adjustWarehouseStock(
+  brandId: string,
+  input: warehouseStockStore.WarehouseAdjustInput,
+) {
+  await delay()
+  return warehouseStockStore.adjustWarehouseStock(brandId, input)
+}
+
+export async function openWarehouseStock(
+  brandId: string,
+  positionId: string,
+  boxCount: number,
+  reason?: string,
+) {
+  await delay()
+  return warehouseStockStore.openWarehouseStock(
+    brandId,
+    positionId,
+    boxCount,
+    reason,
+  )
 }
 
 export async function getInvoiceOptionMaps(
@@ -611,6 +773,7 @@ export async function saveAiFeatureRoute(
     modelId: string
     isActive?: boolean
     recommendationPolicy?: AiRecommendationPolicy
+    monthlyBudgetUsd?: number | null
   },
 ): Promise<AiFeatureRoute> {
   return aiSettingsStore.saveAiFeatureRoute(brandId, input)
@@ -634,6 +797,19 @@ export async function searchInvoiceProductCandidates(
   limit = 20,
 ): Promise<AiProductCandidate[]> {
   return aiCandidateStore.searchInvoiceProductCandidates(brandId, texts, limit)
+}
+
+export async function searchInvoiceItemNameCases(
+  brandId: string,
+  contexts: Array<{
+    contextId: string
+    itemName: string
+    mainStyleId?: string | null
+    productLookupKey?: string
+  }>,
+  limit = 5,
+) {
+  return aiCandidateStore.searchInvoiceItemNameCases(brandId, contexts, limit)
 }
 
 export async function recommendInvoiceProduct(input: {
@@ -684,6 +860,12 @@ export async function recommendInvoiceItemNameRules(input: {
     productLookupKey: string
     mainProduct: string
     candidateStyleIds?: string[]
+    priorExamples?: Array<{
+      itemName: string
+      productLookupKey: string
+      action: 'delete' | 'components'
+      components: Array<{ styleId: string; quantity: number }>
+    }>
   }>
   candidates: AiProductCandidate[]
 }): Promise<AiItemNameRecommendation> {
@@ -1426,6 +1608,31 @@ function appliedToFieldPatch(
 
   const onHand = asNumber(applied.onHand)
   if (onHand !== undefined) patch.onHand = String(onHand)
+
+  const reserved = new Set([
+    'styleNo',
+    'name',
+    'category',
+    'planner',
+    'designer',
+    'description',
+    'seasonId',
+    'gender',
+    'colors',
+    'plannedQty',
+    'targetCost',
+    'retailPrice',
+    'weightG',
+    'fabric',
+    'orderQty',
+    'channel',
+    'warehouse',
+    'onHand',
+  ])
+  for (const [key, value] of Object.entries(applied)) {
+    if (reserved.has(key) || key in patch) continue
+    if (typeof value === 'string') patch[key] = value
+  }
 
   return patch
 }

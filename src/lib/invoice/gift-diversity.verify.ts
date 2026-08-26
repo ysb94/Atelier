@@ -16,6 +16,7 @@ import { planInvoicePrefixes } from '@/lib/invoice/prefix-transform'
 import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
 import type {
   InvoiceGiftRequest,
+  InvoiceGiftSourceMap,
   StyleRef,
 } from '@/lib/types'
 
@@ -284,6 +285,50 @@ assert(
   '한 파일에서 행 추가+대체는 서로 다른 M번호',
 )
 assert(mixed.unavoidableDuplicateCount === 0, '겹치는 풀이면 중복 없이 배정')
+
+const storedMixedMap: InvoiceGiftSourceMap = {
+  id: 'map-auto',
+  brandId: 'brand',
+  mallName: 'B몰',
+  normalizedMallName: 'B몰',
+  productName: '[사은품] 상품d',
+  normalizedProductName: '[사은품] 상품d',
+  assignmentMode: 'balanced_random',
+  uniquePerRecipient: true,
+  poolStyles: [c, d, e, f],
+  isActive: true,
+  note: '',
+  createdAt: '2026-08-24T00:00:00.000Z',
+  updatedAt: '2026-08-24T00:00:00.000Z',
+}
+const mixedAuto = planUnifiedGifts({
+  campaignRows: mixedRows.slice(0, 1),
+  sourceRows: mixedRows,
+  prefixPlan: mixedPrefix,
+  requests: mixedRequests,
+  seed: 7,
+  maps: [storedMixedMap],
+})
+const mixedAutoCampaign =
+  mixedAuto.giftPlan.shipments[0]?.assignments[0]?.styleId
+const mixedAutoSource =
+  mixedAuto.giftSourcePlan.replacementsByRow.get(2)?.[0]?.style.styleId
+assert(
+  mixedAutoCampaign && mixedAutoSource,
+  '활성 저장 매핑만으로 행 추가와 품목명 대체가 모두 배정',
+)
+assert(
+  mixedAutoCampaign !== mixedAutoSource,
+  '자동 적용된 원본행 사은품과 캠페인 사은품은 서로 다른 M번호',
+)
+assert(
+  mixedAuto.giftSourcePlan.groups[0]?.status === 'assigned',
+  '활성 저장 매핑은 통합 계획에서도 자동 치환',
+)
+assert(
+  mixedAuto.unavoidableDuplicateCount === 0,
+  '자동 적용과 캠페인 사은품도 중복 없이 배정',
+)
 
 const twoQty = collectGiftSourceSlots([
   row({

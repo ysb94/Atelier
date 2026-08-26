@@ -6,7 +6,9 @@ import {
   type ProductNameCandidate,
 } from '@/lib/invoice/product-name-patterns'
 import {
+  classifyInlineReservationShippingDateTags,
   classifyLeadingTags,
+  matchingItemName,
   matchingProductName,
   type ParsedProductNameTag,
 } from '@/lib/invoice/product-name-tags'
@@ -52,6 +54,7 @@ export type InvoiceProductNameTransformRow = {
   candidates: ProductNameCandidate[]
   candidateStyles: StyleRef[]
   tags: ParsedProductNameTag[]
+  itemTags: ParsedProductNameTag[]
   giftSourceKey?: string | null
   giftReplacements?: GiftSourceReplacement[]
 }
@@ -72,6 +75,7 @@ export type UnresolvedProductNameCombo = {
   candidateStyles: StyleRef[]
   candidates: ProductNameCandidate[]
   tags: ParsedProductNameTag[]
+  itemTags: ParsedProductNameTag[]
 }
 
 export type InvoiceProductNameTransformation = {
@@ -188,7 +192,7 @@ function mapLookupTexts(map: InvoiceProductNameMap): string[] {
 
 /**
  * 조회 키 원장과 조합 원장을 같은 압축 키로 색인한다.
- * 저장된 태그 역할로 제외되는 선행 태그는 별칭으로도 넣는다.
+ * 저장된 태그 역할로 제외되는 선행 태그와 옵션 예약배송 토큰은 별칭으로도 넣는다.
  */
 function indexLookupMaps(
   maps: InvoiceProductNameMap[],
@@ -197,12 +201,18 @@ function indexLookupMaps(
   const compact = new Map<string, InvoiceProductNameMap[]>()
   for (const map of maps) {
     for (const raw of mapLookupTexts(map)) {
-      const rawCompact = compactProductNameKey(raw)
-      pushMap(compact, rawCompact, map)
-      const stripped = matchingProductName(raw, tagRoles)
-      const strippedCompact = compactProductNameKey(stripped)
-      if (strippedCompact && strippedCompact !== rawCompact) {
-        pushMap(compact, strippedCompact, map)
+      const aliases = [
+        raw,
+        matchingProductName(raw, tagRoles),
+        matchingItemName(raw, tagRoles),
+        matchingItemName(matchingProductName(raw, tagRoles), tagRoles),
+      ]
+      const seen = new Set<string>()
+      for (const alias of aliases) {
+        const next = compactProductNameKey(alias)
+        if (!next || seen.has(next)) continue
+        seen.add(next)
+        pushMap(compact, next, map)
       }
     }
   }
@@ -405,6 +415,7 @@ function summarizeProductNameRows(rows: InvoiceProductNameTransformRow[]) {
       candidateStyles: row.candidateStyles,
       candidates: row.candidates,
       tags: row.tags,
+      itemTags: row.itemTags,
     })
   }
 
@@ -445,11 +456,16 @@ export function transformInvoiceProductNames(
 
   const matchedRows = sourceRows.map((source): InvoiceProductNameTransformRow => {
     const tags = classifyLeadingTags(source.productName, tagRoles)
+    const itemTags = classifyInlineReservationShippingDateTags(
+      source.itemName,
+      tagRoles,
+    )
     const candidates = generateProductNameCandidates({
       productName: source.productName,
       itemName: source.itemName,
       mallName: source.mallName,
       matchingProductName: matchingProductName(source.productName, tagRoles),
+      matchingItemName: matchingItemName(source.itemName, tagRoles),
     })
 
     for (const candidate of candidates) {
@@ -469,6 +485,7 @@ export function transformInvoiceProductNames(
           candidates,
           candidateStyles: styles,
           tags,
+          itemTags,
         }
       }
       return {
@@ -483,6 +500,7 @@ export function transformInvoiceProductNames(
         candidates,
         candidateStyles: styles,
         tags,
+        itemTags,
       }
     }
 
@@ -502,6 +520,7 @@ export function transformInvoiceProductNames(
           candidates,
           candidateStyles: styles,
           tags,
+          itemTags,
         }
       }
       const viaCompact =
@@ -519,6 +538,7 @@ export function transformInvoiceProductNames(
         candidates,
         candidateStyles: styles,
         tags,
+        itemTags,
       }
     }
 
@@ -535,6 +555,7 @@ export function transformInvoiceProductNames(
         candidates,
         candidateStyles: [],
         tags,
+        itemTags,
       }
     }
 
@@ -550,6 +571,7 @@ export function transformInvoiceProductNames(
       candidates,
       candidateStyles: [],
       tags,
+      itemTags,
     }
   })
 

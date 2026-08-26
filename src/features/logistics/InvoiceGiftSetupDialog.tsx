@@ -20,7 +20,6 @@ export function InvoiceGiftSetupDialog({
   onClose,
   onApplySession,
   onApplyPersist,
-  onApplyExisting,
 }: {
   brandId: string
   group: GiftSourceGroup
@@ -30,7 +29,6 @@ export function InvoiceGiftSetupDialog({
   onClose: () => void
   onApplySession: (rule: GiftSourceSessionRule) => void
   onApplyPersist: (rule: GiftSourceSessionRule) => void
-  onApplyExisting: () => void
 }) {
   const [mode, setMode] = useState<InvoiceGiftSetupMode>('replace')
 
@@ -111,7 +109,6 @@ export function InvoiceGiftSetupDialog({
               error={error}
               onApplySession={onApplySession}
               onApplyPersist={onApplyPersist}
-              onApplyExisting={onApplyExisting}
             />
           ) : (
             <InvoicePrefixRequestForm

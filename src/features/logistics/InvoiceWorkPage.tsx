@@ -80,6 +80,7 @@ import {
 } from '@/lib/invoice/product-name-transform'
 import {
   collectGiftSourceSlots,
+  effectiveGiftSourceAppliedKeys,
   emptyGiftSourcePlan,
   giftSourceGroupKey,
   inspectGiftSourceGroup,
@@ -110,6 +111,7 @@ import { cn, formatNumber } from '@/lib/utils'
 import { InvoiceItemNameTransformPanel } from './InvoiceItemNameTransformPanel'
 import { InvoiceOptionMapRulesPanel } from './InvoiceOptionMapRulesPanel'
 import { InvoiceOutputStepPanel } from './InvoiceOutputStepPanel'
+import { InvoicePackingSizeMapPanel } from './InvoicePackingSizeMapPanel'
 import { InvoiceGiftSourceMapPanel } from './InvoiceGiftSourceMapPanel'
 import { InvoicePrefixRequestPanel } from './InvoicePrefixRequestPanel'
 import { InvoicePrefixStepPanel } from './InvoicePrefixStepPanel'
@@ -458,7 +460,7 @@ const RULE_VIEWS: {
   {
     value: 'packing',
     label: '포장·위치',
-    description: '봉투·박스·사이즈·위치',
+    description: '위치·사이즈',
     icon: Package,
   },
 ]
@@ -494,8 +496,8 @@ const RULE_TABLES: Record<
   packing: {
     title: '포장·위치 규칙',
     description:
-      '상품별 기본 위치와 봉투·박스 종류를 정하고 수량 또는 합포장일 때 예외 규칙을 적용합니다.',
-    columns: ['상품', '현재 위치', '포장재', '사이즈·패킹코드', '상태'],
+      '상품별 기본 위치와 포장 사이즈를 관리합니다.',
+    columns: ['상품', '현재 위치', '포장 사이즈', '상태'],
   },
 }
 
@@ -543,6 +545,9 @@ function RulesPanel({
   workInstructionsError: string | null
 }) {
   const [activeRule, setActiveRule] = useState<RuleView>('gifts')
+  const [activePackingCard, setActivePackingCard] = useState<'size' | null>(
+    null,
+  )
   const table = RULE_TABLES[activeRule]
 
   return (
@@ -625,24 +630,59 @@ function RulesPanel({
       ) : null}
 
       {activeRule === 'packing' ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2">
           {[
-            [MapPin, '현재 위치', '상품을 꺼내는 방·선반 위치'],
-            [Package, '포장재', '봉투 또는 박스 종류'],
-            [Boxes, '포장 사이즈', 'S·M·L 또는 실제 박스 규격'],
-            [FileSpreadsheet, '패킹코드', '송장에 표시할 작업 코드'],
-          ].map(([Icon, title, description]) => {
-            const ItemIcon = Icon as typeof MapPin
-            return (
+            {
+              icon: MapPin,
+              title: '현재 위치',
+              description: '상품을 꺼내는 방·선반 위치',
+              value: null,
+            },
+            {
+              icon: Boxes,
+              title: '포장 사이즈',
+              description: 'S·M·L 또는 실제 박스 규격',
+              value: 'size' as const,
+            },
+          ].map((item) => {
+            const ItemIcon = item.icon
+            const active =
+              item.value === 'size' && activePackingCard === item.value
+            const content = (
+              <>
+                <ItemIcon
+                  className={cn(
+                    'size-4',
+                    active ? 'text-primary' : 'text-muted-foreground',
+                  )}
+                />
+                <p className="mt-2 text-sm font-medium">{item.title}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {item.description}
+                </p>
+              </>
+            )
+            return item.value === 'size' ? (
+              <button
+                key={item.title}
+                type="button"
+                aria-pressed={active}
+                onClick={() => setActivePackingCard('size')}
+                className={cn(
+                  'rounded-lg border p-4 text-left transition-colors',
+                  active
+                    ? 'border-primary/40 bg-primary/5'
+                    : 'border-border bg-muted/20 hover:bg-muted/40',
+                )}
+              >
+                {content}
+              </button>
+            ) : (
               <div
-                key={String(title)}
+                key={item.title}
                 className="rounded-lg border border-border bg-muted/20 p-4"
               >
-                <ItemIcon className="size-4 text-muted-foreground" />
-                <p className="mt-2 text-sm font-medium">{String(title)}</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  {String(description)}
-                </p>
+                {content}
               </div>
             )
           })}
@@ -685,6 +725,8 @@ function RulesPanel({
           nameRulesLoading={nameRulesLoading}
           nameRulesError={nameRulesError}
         />
+      ) : activeRule === 'packing' && activePackingCard === 'size' ? (
+        <InvoicePackingSizeMapPanel brandId={brandId} />
       ) : (
         <Card>
           <CardHeader>
@@ -1284,6 +1326,31 @@ export function InvoiceWorkPage() {
     () => new Set(giftSourceAppliedKeys),
     [giftSourceAppliedKeys],
   )
+  const giftSourceEffectiveAppliedKeys = useMemo(
+    () =>
+      effectiveGiftSourceAppliedKeys({
+        maps: giftSourceMaps,
+        sessionRules: giftSourceSessionRuleMap,
+        appliedKeys: giftSourceAppliedKeySet,
+        ignoredKeys: giftSourceIgnoredKeySet,
+      }),
+    [
+      giftSourceAppliedKeySet,
+      giftSourceIgnoredKeySet,
+      giftSourceMaps,
+      giftSourceSessionRuleMap,
+    ],
+  )
+  const giftSourceCriteriaReady =
+    !giftSourceMapsQuery.isPending &&
+    (giftSourceFileMapIds.length === 0 ||
+      !giftSourceAllocationsQuery.isPending)
+  const giftSourceAllocationsError =
+    giftSourceAllocationsQuery.error instanceof Error
+      ? giftSourceAllocationsQuery.error.message
+      : giftSourceAllocationsQuery.error
+        ? '사은품 원본행 배정을 불러오지 못했습니다.'
+        : null
   const productNameMapsError =
     productNameMapsQuery.error instanceof Error
       ? productNameMapsQuery.error.message
@@ -1370,23 +1437,20 @@ export function InvoiceWorkPage() {
   ])
   const giftSourceAppliedRowNumbers = useMemo(() => {
     if (!inspection) return new Set<number>()
-    const appliedKeys = new Set(giftSourceAppliedKeySet)
-    for (const key of giftSourceSessionRuleMap.keys()) appliedKeys.add(key)
     return new Set(
       collectGiftSourceSlots(
         inspection.rows,
         deferredProductNameTagRoles,
         giftSourceIgnoredKeySet,
-        appliedKeys,
+        giftSourceEffectiveAppliedKeys,
       )
-        .filter((slot) => appliedKeys.has(slot.groupKey))
+        .filter((slot) => giftSourceEffectiveAppliedKeys.has(slot.groupKey))
         .map((slot) => slot.source.rowNumber),
     )
   }, [
     deferredProductNameTagRoles,
-    giftSourceAppliedKeySet,
+    giftSourceEffectiveAppliedKeys,
     giftSourceIgnoredKeySet,
-    giftSourceSessionRuleMap,
     inspection,
   ])
   const giftSetupGroup = useMemo(() => {
@@ -1400,13 +1464,15 @@ export function InvoiceWorkPage() {
       allocations: giftSourceAllocations,
       sessionRules: giftSourceSessionRuleMap,
       sessionAllocations: giftSourceSessionAllocationMap,
-      appliedKeys: giftSourceAppliedKeySet,
+      ignoredKeys: giftSourceIgnoredKeySet,
+      appliedKeys: giftSourceEffectiveAppliedKeys,
     })
   }, [
     deferredProductNameTagRoles,
     giftSetupTarget,
     giftSourceAllocations,
-    giftSourceAppliedKeySet,
+    giftSourceEffectiveAppliedKeys,
+    giftSourceIgnoredKeySet,
     giftSourceMaps,
     giftSourceSessionAllocationMap,
     giftSourceSessionRuleMap,
@@ -1484,7 +1550,7 @@ export function InvoiceWorkPage() {
         sessionRules: giftSourceSessionRuleMap,
         sessionAllocations: giftSourceSessionAllocationMap,
         ignoredKeys: giftSourceIgnoredKeySet,
-        appliedKeys: giftSourceAppliedKeySet,
+        appliedKeys: giftSourceEffectiveAppliedKeys,
       }),
     )
   }, [
@@ -1496,7 +1562,7 @@ export function InvoiceWorkPage() {
     giftRequests,
     giftSeed,
     giftSourceAllocations,
-    giftSourceAppliedKeySet,
+    giftSourceEffectiveAppliedKeys,
     giftSourceIgnoredKeySet,
     giftSourceMaps,
     giftSourceSessionAllocationMap,
@@ -1506,12 +1572,16 @@ export function InvoiceWorkPage() {
   const giftPlan = unifiedGiftPlan?.giftPlan ?? null
   const giftSourcePlan = unifiedGiftPlan?.giftSourcePlan ?? emptyGiftSourcePlan()
   const productTransformation = useMemo(() => {
-    if (!baseProductTransformation) return null
+    if (!baseProductTransformation || !giftSourceCriteriaReady) return null
     return overlayGiftSourceOnProductNames(
       baseProductTransformation,
       giftSourcePlan,
     )
-  }, [baseProductTransformation, giftSourcePlan])
+  }, [
+    baseProductTransformation,
+    giftSourceCriteriaReady,
+    giftSourcePlan,
+  ])
   const canComputeItemTransformation = Boolean(
     inspection &&
       productTransformation &&
@@ -1699,12 +1769,6 @@ export function InvoiceWorkPage() {
     } finally {
       setGiftSourceApplyingKey(null)
     }
-  }
-
-  async function applyGiftSourceExisting(group: GiftSourceGroup) {
-    if (!group.mapId) return
-    setGiftSourceError(null)
-    markGiftSourceApplied(group.key)
   }
 
   return (
@@ -2141,16 +2205,23 @@ export function InvoiceWorkPage() {
                 {productNameMapsQuery.isPending ||
                 productNameExclusionsQuery.isPending ||
                 productNameTagRolesQuery.isPending ||
-                productStyleLookupQuery.isPending ? (
+                productStyleLookupQuery.isPending ||
+                giftSourceMapsQuery.isPending ||
+                (giftSourceFileMapIds.length > 0 &&
+                  giftSourceAllocationsQuery.isPending) ? (
                   <StepCriteriaLoading label="이 브랜드의 품목명 변환 기준을 불러오고 있습니다." />
                 ) : productNameMapsError ||
                   productNameExclusionsError ||
                   productNameTagRolesQuery.error ||
-                  productStyleLookupQuery.error ? (
+                  productStyleLookupQuery.error ||
+                  giftSourceMapsError ||
+                  giftSourceAllocationsError ? (
                   <StepCriteriaError
                     message={
                       productNameMapsError ||
                       productNameExclusionsError ||
+                      giftSourceMapsError ||
+                      giftSourceAllocationsError ||
                       (productNameTagRolesQuery.error
                         ? '품목명 태그 역할을 불러오지 못했습니다.'
                         : productStyleLookupQuery.error instanceof Error
@@ -2162,6 +2233,8 @@ export function InvoiceWorkPage() {
                       void productNameExclusionsQuery.refetch()
                       void productNameTagRolesQuery.refetch()
                       void productStyleLookupQuery.refetch()
+                      void giftSourceMapsQuery.refetch()
+                      void giftSourceAllocationsQuery.refetch()
                     }}
                   />
                 ) : productTransformation ? (
@@ -2362,7 +2435,7 @@ export function InvoiceWorkPage() {
                             sessionRules: giftSourceSessionRuleMap,
                             sessionAllocations: giftSourceSessionAllocationMap,
                             ignoredKeys: giftSourceIgnoredKeySet,
-                            appliedKeys: giftSourceAppliedKeySet,
+                            appliedKeys: giftSourceEffectiveAppliedKeys,
                           })
                       : undefined
                   }
@@ -2430,9 +2503,6 @@ export function InvoiceWorkPage() {
           onApplySession={(rule) => applyGiftSourceSession(giftSetupGroup, rule)}
           onApplyPersist={(rule) => {
             void applyGiftSourcePersist(giftSetupGroup, rule)
-          }}
-          onApplyExisting={() => {
-            void applyGiftSourceExisting(giftSetupGroup)
           }}
         />
       ) : null}

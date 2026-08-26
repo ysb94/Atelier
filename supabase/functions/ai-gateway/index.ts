@@ -1,6 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import {
   ACCESSORY_FEATURE_KEY,
+  ITEM_NAME_FEATURE_KEY,
   buildAccessorySuggestPrompt,
   buildItemNameSuggestPrompt,
   buildLocalRecommendation,
@@ -57,6 +58,12 @@ type GatewayRequest =
         mainProduct: string
         unknownPieces?: string[]
         candidateStyleIds?: string[]
+        priorExamples?: Array<{
+          itemName: string
+          productLookupKey: string
+          action: 'delete' | 'components'
+          components: Array<{ styleId: string; quantity: number }>
+        }>
       }>
       dictionary?: Array<{
         ruleType: string
@@ -397,8 +404,11 @@ async function recommendAccessoryRules(
   body: Extract<GatewayRequest, { action: 'recommend_accessory_rules' }>,
 ) {
   const brandId = String(body.brandId ?? '').trim()
-  const featureKey = String(body.featureKey ?? ACCESSORY_FEATURE_KEY).trim()
   const mode = body.mode === 'item_name' ? 'item_name' : 'accessory'
+  const featureKey = String(
+    body.featureKey ??
+      (mode === 'item_name' ? ITEM_NAME_FEATURE_KEY : ACCESSORY_FEATURE_KEY),
+  ).trim()
   if (!brandId) throw new Error('brandId가 필요합니다.')
   const unknownPiece = String(body.unknownPiece ?? '').trim()
   if (mode === 'accessory' && !unknownPiece) {
@@ -421,6 +431,15 @@ async function recommendAccessoryRules(
       .map((value) => String(value).trim())
       .filter(Boolean)
       .slice(0, candidateLimit),
+    priorExamples: (item.priorExamples ?? []).slice(0, 5).map((example) => ({
+      itemName: String(example.itemName ?? '').trim().slice(0, 200),
+      productLookupKey: String(example.productLookupKey ?? '').trim().slice(0, 200),
+      action: example.action === 'delete' ? 'delete' as const : 'components' as const,
+      components: (example.components ?? []).slice(0, 8).map((component) => ({
+        styleId: String(component.styleId ?? '').trim(),
+        quantity: Math.max(1, Number(component.quantity) || 1),
+      })),
+    })),
   })).filter((item) => item.contextId)
 
   const { data: route, error: routeError } = await supabase
@@ -454,7 +473,9 @@ async function recommendAccessoryRules(
       contexts
         .map(
           (item) =>
-            `${item.contextId}:${item.itemName}:${item.productLookupKey}:${item.candidateStyleIds.join(',')}`,
+            `${item.contextId}:${item.itemName}:${item.productLookupKey}:${item.candidateStyleIds.join(',')}:${(item.priorExamples ?? [])
+              .map((example) => `${example.action}:${example.itemName}`)
+              .join(',')}`,
         )
         .join('|'),
     ].join('||'),
@@ -603,6 +624,21 @@ async function insertUsageLog(
     latencyMs?: number
   },
 ) {
+  let estimatedCostUsd: number | null = null
+  let pricingVersion: string | null = null
+  if (input.usage.inputTokens > 0 || input.usage.outputTokens > 0) {
+    const { data } = await supabase.rpc('estimate_ai_usage_cost', {
+      p_provider: input.provider,
+      p_model_id: input.modelId,
+      p_input_tokens: input.usage.inputTokens,
+      p_output_tokens: input.usage.outputTokens,
+    })
+    const estimate = Array.isArray(data) ? data[0] : data
+    if (estimate?.estimated_cost_usd != null) {
+      estimatedCostUsd = Number(estimate.estimated_cost_usd)
+      pricingVersion = estimate.pricing_version ?? null
+    }
+  }
   await supabase.from('ai_usage_logs').insert({
     brand_id: input.brandId,
     user_id: input.userId,
@@ -613,6 +649,8 @@ async function insertUsageLog(
     status: input.status,
     input_tokens: input.usage.inputTokens,
     output_tokens: input.usage.outputTokens,
+    estimated_cost_usd: estimatedCostUsd,
+    pricing_version: pricingVersion,
     error_code: input.errorCode,
     resolution_source: input.resolutionSource ?? 'ai',
     skipped_ai: input.skippedAi ?? false,

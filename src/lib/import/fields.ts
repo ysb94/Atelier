@@ -7,6 +7,7 @@ export type FieldType =
   | 'gender'
   | 'season'
   | 'image'
+  | 'select'
 
 export type ImportField = {
   key: string

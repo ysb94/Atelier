@@ -12,9 +12,13 @@ import { compactProductNameKey } from '@/lib/invoice/lookup-normalization'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import {
   RESERVATION_SHIPPING_DATE_FAMILY,
+  classifyInlineReservationShippingDateTags,
   classifyLeadingTags,
+  collectFileOptionReservationTagGroups,
   collectFileTagGroups,
+  extractInlineReservationShippingDateTags,
   extractLeadingBracketTags,
+  matchingItemName,
   matchingProductName,
   matchingProductNameFromTags,
   suggestTagRole,
@@ -291,6 +295,86 @@ assert(
   ) ===
     compactProductNameKey('[SET] Daily backpack_Black & Strap pouch_Leopard'),
   'HTML 엔티티와 원문 기호는 같은 압축 키',
+)
+
+assert(
+  extractInlineReservationShippingDateTags(
+    'Color: [9/1예약배송]트와일라잇 블랙',
+  ).join(',') === '[9/1예약배송]',
+  '옵션 중간 날짜 예약배송만 추출',
+)
+assert(
+  extractInlineReservationShippingDateTags(
+    'Color: ［9/1예약배송］트와일라잇 블랙',
+  ).join(',') === '［9/1예약배송］',
+  '전각 괄호 옵션 예약배송도 추출',
+)
+assert(
+  extractInlineReservationShippingDateTags(
+    'Color: [black]트와일라잇 블랙',
+  ).length === 0,
+  '날짜가 없는 옵션 대괄호는 추출하지 않음',
+)
+assert(
+  extractInlineReservationShippingDateTags('Color: [예약배송]트와일라잇 블랙')
+    .length === 0,
+  '날짜 없는 예약배송 문구는 이번 범위에서 보지 않음',
+)
+assert(
+  matchingItemName('Color: [9/1예약배송]트와일라잇 블랙') ===
+    'Color: [9/1예약배송]트와일라잇 블랙',
+  '저장 전 옵션 예약배송은 원문을 유지',
+)
+assert(
+  matchingItemName('Color: [9/1예약배송]트와일라잇 블랙', [
+    role('[8/14예약배송]', 'event_marketing'),
+  ]) === 'Color: 트와일라잇 블랙',
+  '저장된 예약배송 역할은 다른 날짜 옵션에서도 제거',
+)
+assert(
+  matchingItemName('Color: [black][9/1예약배송]트와일라잇 블랙', [
+    role('[날짜 예약배송]', 'event_marketing'),
+  ]) === 'Color: [black] 트와일라잇 블랙',
+  '다른 옵션 대괄호는 남기고 예약배송만 제거',
+)
+const optionGroups = collectFileOptionReservationTagGroups([
+  {
+    itemName: 'Color: [9/1예약배송]트와일라잇 블랙',
+    itemTags: classifyInlineReservationShippingDateTags(
+      'Color: [9/1예약배송]트와일라잇 블랙',
+    ),
+  },
+  {
+    itemName: 'Color: [9/15예약배송]트와일라잇 블랙',
+    itemTags: classifyInlineReservationShippingDateTags(
+      'Color: [9/15예약배송]트와일라잇 블랙',
+    ),
+  },
+])
+assert(
+  optionGroups.length === 1 &&
+    optionGroups[0]?.tag.key === RESERVATION_SHIPPING_DATE_FAMILY &&
+    optionGroups[0]?.variantCount === 2 &&
+    optionGroups[0]?.itemCount === 2,
+  '옵션 날짜 예약배송은 한 계열로 묶는다',
+)
+const strippedOptionCandidates = generateProductNameCandidates({
+  productName: '[단독] 마스마룰즈 래빗에코백 32타입',
+  itemName: 'Color: [9/1예약배송]트와일라잇 블랙',
+  matchingItemName: 'Color: 트와일라잇 블랙',
+})
+assert(
+  strippedOptionCandidates.some(
+    (item) =>
+      item.text ===
+      '[단독] 마스마룰즈 래빗에코백 32타입 Color: [9/1예약배송]트와일라잇 블랙',
+  ) &&
+    strippedOptionCandidates.some(
+      (item) =>
+        item.text ===
+        '[단독] 마스마룰즈 래빗에코백 32타입 Color: 트와일라잇 블랙',
+    ),
+  '원문 옵션 후보를 앞에 두고 정리된 옵션 후보를 뒤에 추가',
 )
 
 console.log('product-name-tags verify: ok')

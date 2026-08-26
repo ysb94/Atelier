@@ -426,5 +426,30 @@ assert(
   itemPrompt.user.includes('"s-1"') && !itemPrompt.user.includes('"s-2"'),
   '내품명 프롬프트에는 문맥에 허용된 후보만 넣는다',
 )
+const itemPromptWithCases = buildItemNameSuggestPrompt({
+  contexts: [
+    {
+      contextId: 'ctx-a',
+      itemName: '키링 추가',
+      productLookupKey: '가방 블랙',
+      mainProduct: 'M0001 가방',
+      candidateStyleIds: ['s-1'],
+      priorExamples: [
+        {
+          itemName: '키링 추가',
+          productLookupKey: '가방 블랙',
+          action: 'components',
+          components: [{ styleId: 's-1', quantity: 1 }],
+        },
+      ],
+    },
+  ],
+  candidates,
+})
+assert(
+  itemPromptWithCases.system.includes('priorExamples') &&
+    itemPromptWithCases.user.includes('priorExamples'),
+  '내품명 프롬프트에 확정 사례만 참고용으로 넣는다',
+)
 
 console.log('ai-gateway verify: ok')
