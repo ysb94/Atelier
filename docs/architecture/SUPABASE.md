@@ -45,6 +45,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 송장 내품명 공통·본품별·조회 키 규칙(`invoice_item_name_rules` + `invoice_item_name_rule_components`) | Supabase |
 | 송장 내품명 부속품 사전(`invoice_accessory_rules`) | Supabase |
 | 송장 기준정보 포장 규격 간단값(`invoice_packing_size_maps`) | Supabase |
+| 송장 피킹표 동선 사전(`invoice_picking_route_presets`) | Supabase |
 | 연습 창고 세트·자리·미식별 재고·박스 ID·이력(`warehouses` + `warehouse_locations` + `warehouse_inventory_sets` + `warehouse_stock_positions` + `warehouse_boxes` + `warehouse_stock_movements`) | Supabase |
 | 송장 사은품 증정 요청 건(`invoice_prefix_requests` + `invoice_prefix_items` + `invoice_prefix_item_products`, 앱 모델명 Gift) | Supabase |
 | 송장 사은품 선착순 한도·배정 원장(`invoice_prefix_requests` 한도 필드 + `invoice_gift_quotas` + `invoice_gift_allocations`) | Supabase |
@@ -409,9 +410,10 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 
 - 회사 공통 `warehouses` / `warehouse_locations`와 브랜드 재고 행을 나눈다.
   브랜드는 `brand_id`와 `(brand_id, style_id) → styles` 복합 FK로만 연결한다.
-- `warehouse_inventory_sets`는 XLSX 가져오기 단위다. `sandbox` 활성 세트는
-  브랜드당 하나다. 새 파일을 가져오면 기존 세트는 `archived`로 두고 이력을
-  보존한다. `restore_warehouse_inventory_set`이 보관한 세트를 다시 켠다.
+- `warehouse_inventory_sets`는 XLSX 교체 결과의 전체 스냅샷이다. `sandbox`
+  활성 세트는 브랜드당 하나다. 박스창고·출고창고 중 선택한 존만 새 파일로
+  교체하고 반대 존은 직전 활성 세트에서 복사한다. 직전 전체 세트는 `archived`로
+  두며 `restore_warehouse_inventory_set`이 보관한 전체 스냅샷을 다시 켠다.
 - `warehouse_stock_positions`는 위치·M번호·입고일·박스당 수량·잔여 박스의
   미식별 묶음이다. `warehouse_boxes`는 향후 고유 박스 ID용이며 첫 적재는 비운다.
 - 읽기는 `app.can_read_brand`, 쓰기와 RPC는 `app.can_edit_brand`다. 회사 공통
@@ -421,7 +423,25 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   송장 예약·실재고 차감과 연결하지 않는다.
 - 로직: `src/lib/warehouse/stock.ts`. 저장소: `src/lib/supabase/warehouse-stock.ts`.
   화면: `WarehousePage`, `WarehouseInventoryPanel`.
-- 마이그레이션: `20260826095007_warehouse_practice.sql`.
+- 물류 상품표(`/work/logistics`)의 박스창고·출고지창고·총재고·박스재고·
+  출고지재고는 활성 sandbox 세트의 `warehouse_stock_positions`를 존별로
+  클라이언트에서 집계한 읽기 전용 값이다. 두 창고 자리는 각 존의 사용 순서
+  1번을 표시한다. `styles.values.warehouse` / `onHand`에 쓰지 않고, 송장
+  예약이나 실재고 차감과도 연결하지 않는다.
+- 송장 상품 리스트는 기존 `getActiveWarehouseInventorySet` /
+  `getWarehouseStockPositions`만 재사용한다. 클라이언트에서 존을 나눈 뒤
+  FIFO로 자리를 배분해 A4 피킹표를 만들며 재고는 차감·예약하지 않는다.
+  한 카드/구역별 분해와 다단 출력 형식(세로 1단·세로 2단·가로 3단)은
+  브라우저 화면 상태다.
+- `invoice_picking_route_presets`는 브랜드·창고 존(`picking` |
+  `box_storage`)별 이름 있는 동선 사전이다. `route_groups` JSON만 두고
+  재고·예약·송장 원장은 바꾸지 않는다. 미리보기에서 고른 동선은 지금
+  목록에 있는 구역만 카드 순서를 유지하고, 없는 현재 구역은 뒤에 붙이며
+  `미지정`은 항상 마지막이다. RLS는 `app.can_read_brand` /
+  `app.can_edit_brand`다.
+- 마이그레이션: `20260826095007_warehouse_practice.sql`,
+  `20260827045956_zone_scoped_warehouse_import.sql`,
+  `20260827075805_invoice_picking_route_presets.sql`.
 - 재고 원칙: [`INVENTORY.md`](./INVENTORY.md).
 
 ### 송장 내품명·출고구성 기준
@@ -712,7 +732,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 #### 오늘 작업 최종 행 순서
 
 ```
-파일 올리기 → 파일 확인 → 사은품 추가 → 작업 지시 → 품목명 변환 → 내품명 변환 → 최종 행
+파일 올리기 → 파일 확인 → 사은품 추가 → 작업 지시 → 품목명 변환 → 내품명 변환 → 상품 리스트 → 최종 행
 ```
 
 1. 원본 품목명으로 사은품 적격·배정과 작업 지시 매칭을 확정한다.
@@ -728,7 +748,15 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
    단계에서 전체를 소비한 내품명과 처음부터 빈 내품명은 빈 값으로 두고 검토
    목록에 넣지 않는다. 세트 구성만으로는 내품명을 바꾸거나 비우지 않는다.
    사은품 행(`kind = gift`)은 미변환 목록에서 제외한다.
-4. 다운로드 직전에 선착순 신규 배정을 원자 확정한 뒤, 실제 세트면 구성품별 CJ
+4. 상품 리스트는 브라우저 메모리의 출고구성(`buildOutgoingComponentRowsFromStages`)을
+   읽기 전용으로 집계한다. 품목·내품·세트·사은품·포장재 중 체크한 종류만 M번호로
+   중복 제거하고 수량을 합친다. 합친 수량은 활성 연습 세트의 출고창고·박스창고
+   자리에 FIFO로 나누고, 자리번호 오름차순·위치 첫 구역 탭·출력 전 동선
+   미리보기·A4 피킹표로 보여 준다. 동선 묶음·한 카드/구역별 분해와 다단
+   출력 형식은 출고창고용·박스창고용 화면 상태이며 DB에 저장하지 않는다. 주문
+   개인정보와 집계 결과도 저장하지 않으며 사은품 원장·재고도 바꾸지
+   않는다. 빈 M번호와 `unknown` 행은 합계에서 뺀다.
+5. 다운로드 직전에 선착순 신규 배정을 원자 확정한 뒤, 실제 세트면 구성품별 CJ
    행을 펼치고 각 상품 행의 최종 품목명 앞에 작업 지시 문구를 붙인다. 내품명
    규칙의 M번호는 CJ 행을 늘리지 않고 출고구성 XLSX에만 반영한다. 사은품은 그
    세트 블록 뒤에 순서대로 삽입한다. CJ 13열과 M번호 출고구성 XLSX를 따로
@@ -739,6 +767,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `gift-confirm.ts`, `work-instruction-transform.ts`, `product-name-patterns.ts`,
   `product-name-tags.ts`, `product-name-transform.ts`, `item-name-transform.ts`,
   `option-transform.ts`, `option-ledger-import.ts`, `invoice-output.ts`,
+  `product-list-summary.ts`, `product-list-warehouse.ts`,
+  `product-list-print.ts`, `product-list-route.ts`,
   `prefix-paste.ts`, `accessory-resolve.ts`.
   저장소: `invoice-prefix-requests.ts`, `invoice-gift-allocations.ts`,
   `invoice-accessory-rules.ts`,
@@ -748,7 +778,9 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   화면: `InvoicePrefixRequestPanel/Form`, `InvoiceWorkInstructionPanel/Form`,
   `InvoicePrefixStepPanel`, `InvoiceWorkInstructionStepPanel`,
   `InvoiceOptionMapRulesPanel`, `InvoiceProductNameTransformPanel`,
-  `InvoiceItemNameTransformPanel`, `InvoiceItemNameLookupKeyTable`,
+  `InvoiceItemNameTransformPanel`, `InvoiceProductListStepPanel`,
+  `InvoiceProductListPrint`, `InvoiceProductListPrintPreviewDialog`,
+  `InvoiceItemNameLookupKeyTable`,
   `InvoiceItemNameRuleForm`, `InvoiceItemNameRuleBulkPanel`,
   `InvoiceAccessoryRuleTable`,
   `InvoiceOutputStepPanel`.

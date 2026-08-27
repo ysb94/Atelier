@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createColumnHelper,
@@ -30,12 +30,15 @@ import { Card } from '@/components/ui/card'
 import { SelectFieldInput } from '@/components/fields/SelectFieldInput'
 import { Input, Select } from '@/components/ui/input'
 import {
+  getActiveWarehouseInventorySet,
   getBrandFields,
   getSeasonsByBrand,
   getStylesByBrand,
+  getWarehouseStockPositions,
   updateStyleFields,
 } from '@/lib/api'
 import { OWNER_LABEL } from '@/lib/import/fields'
+import { normalizeStyleNo } from '@/lib/import/transform'
 import {
   isImageField,
   pickImageSources,
@@ -59,6 +62,7 @@ import {
   type StyleStatus,
 } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
+import { summarizeWarehouseStockByStyle } from '@/lib/warehouse/stock'
 
 const columnHelper = createColumnHelper<Style>()
 
@@ -141,6 +145,32 @@ function isGenderField(field: BrandField) {
 
 function isSelectField(field: BrandField) {
   return field.type === 'select'
+}
+
+function isDerivedLogisticsField(field: BrandField) {
+  return field.systemKey === 'warehouse' || field.systemKey === 'onHand'
+}
+
+function DerivedStockCell({
+  pending,
+  align = 'left',
+  children,
+}: {
+  pending: boolean
+  align?: 'left' | 'right'
+  children: ReactNode
+}) {
+  return (
+    <span
+      className={cn(
+        'block',
+        align === 'right' && 'text-right tabular-nums',
+        pending && 'text-muted-foreground',
+      )}
+    >
+      {pending ? '…' : children}
+    </span>
+  )
 }
 
 /**
@@ -428,6 +458,33 @@ export function ProductsPage({
     queryFn: () => getStylesByBrand(brand.id),
   })
 
+  const needsWarehouseStock = columnPreset === 'logistics'
+  const warehouseSetQuery = useQuery({
+    queryKey: ['warehouse-inventory-set', brand.id],
+    queryFn: () => getActiveWarehouseInventorySet(brand.id),
+    enabled: needsWarehouseStock,
+  })
+  const warehousePositionsQuery = useQuery({
+    queryKey: [
+      'warehouse-stock-positions',
+      brand.id,
+      warehouseSetQuery.data?.id,
+    ],
+    queryFn: () =>
+      getWarehouseStockPositions(brand.id, warehouseSetQuery.data!.id),
+    enabled: needsWarehouseStock && Boolean(warehouseSetQuery.data?.id),
+  })
+  const stockByStyle = useMemo(
+    () =>
+      summarizeWarehouseStockByStyle(warehousePositionsQuery.data ?? []),
+    [warehousePositionsQuery.data],
+  )
+  const stockPending =
+    needsWarehouseStock &&
+    (warehouseSetQuery.isPending ||
+      (Boolean(warehouseSetQuery.data?.id) &&
+        warehousePositionsQuery.isPending))
+
   const fields = useMemo(() => fieldsQuery.data ?? [], [fieldsQuery.data])
   const seasons = useMemo(() => seasonsQuery.data ?? [], [seasonsQuery.data])
   const allStyles = useMemo(() => stylesQuery.data ?? [], [stylesQuery.data])
@@ -485,15 +542,21 @@ export function ProductsPage({
 
   /** 지금 보고 있는 범위에서 부서 항목별 미입력 건수 */
   const emptyCounts = useMemo(() => {
-    return ownerFields.map((field) => ({
-      field,
-      count: baseStyles.filter((style) => !isFieldFilled(style, field)).length,
-    }))
+    return ownerFields
+      .filter((field) => !isDerivedLogisticsField(field))
+      .map((field) => ({
+        field,
+        count: baseStyles.filter((style) => !isFieldFilled(style, field)).length,
+      }))
   }, [baseStyles, ownerFields])
 
   const activeEmptyField = useMemo(() => {
     if (!emptyFilterKey) return undefined
-    return ownerFields.find((field) => fieldValueKey(field) === emptyFilterKey)
+    return ownerFields.find(
+      (field) =>
+        fieldValueKey(field) === emptyFilterKey &&
+        !isDerivedLogisticsField(field),
+    )
   }, [ownerFields, emptyFilterKey])
 
   const filteredStyles = useMemo(() => {
@@ -673,9 +736,89 @@ export function ProductsPage({
       ]
     }
 
+    const editableFields = ownerFields.filter(
+      (field) => !isDerivedLogisticsField(field),
+    )
+    const derivedColumns =
+      columnPreset === 'logistics'
+        ? [
+            columnHelper.display({
+              id: 'derived-box-location',
+              header: '박스창고',
+              cell: ({ row }) => {
+                const stock = stockByStyle.get(
+                  normalizeStyleNo(row.original.styleNo),
+                )
+                return (
+                  <DerivedStockCell pending={stockPending}>
+                    {stock?.boxLocation || '—'}
+                  </DerivedStockCell>
+                )
+              },
+            }),
+            columnHelper.display({
+              id: 'derived-picking-location',
+              header: '출고지창고',
+              cell: ({ row }) => {
+                const stock = stockByStyle.get(
+                  normalizeStyleNo(row.original.styleNo),
+                )
+                return (
+                  <DerivedStockCell pending={stockPending}>
+                    {stock?.pickingLocation || '—'}
+                  </DerivedStockCell>
+                )
+              },
+            }),
+            columnHelper.display({
+              id: 'derived-total-qty',
+              header: '총재고',
+              cell: ({ row }) => {
+                const stock = stockByStyle.get(
+                  normalizeStyleNo(row.original.styleNo),
+                )
+                return (
+                  <DerivedStockCell pending={stockPending} align="right">
+                    {formatNumber(stock?.totalQty ?? 0)}
+                  </DerivedStockCell>
+                )
+              },
+            }),
+            columnHelper.display({
+              id: 'derived-box-qty',
+              header: '박스재고',
+              cell: ({ row }) => {
+                const stock = stockByStyle.get(
+                  normalizeStyleNo(row.original.styleNo),
+                )
+                return (
+                  <DerivedStockCell pending={stockPending} align="right">
+                    {formatNumber(stock?.boxQty ?? 0)}
+                  </DerivedStockCell>
+                )
+              },
+            }),
+            columnHelper.display({
+              id: 'derived-picking-qty',
+              header: '출고지재고',
+              cell: ({ row }) => {
+                const stock = stockByStyle.get(
+                  normalizeStyleNo(row.original.styleNo),
+                )
+                return (
+                  <DerivedStockCell pending={stockPending} align="right">
+                    {formatNumber(stock?.pickingQty ?? 0)}
+                  </DerivedStockCell>
+                )
+              },
+            }),
+          ]
+        : []
+
     return [
       ...base,
-      ...ownerFields.map((field) =>
+      ...derivedColumns,
+      ...editableFields.map((field) =>
         columnHelper.display({
           id: `field:${field.id}`,
           header: field.label,
@@ -703,6 +846,8 @@ export function ProductsPage({
     handleSaveField,
     styleNoLabel,
     nameLabel,
+    stockByStyle,
+    stockPending,
   ])
 
   const table = useReactTable({
@@ -826,7 +971,7 @@ export function ProductsPage({
         </div>
       </div>
 
-      {columnPreset !== 'all' ? (
+      {columnPreset !== 'all' && emptyCounts.length > 0 ? (
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">
             {OWNER_LABEL[columnPreset]} 미입력
@@ -855,7 +1000,9 @@ export function ProductsPage({
             )
           })}
           <span className="text-xs text-muted-foreground">
-            · 표에서 칸을 눌러 바로 입력할 수 있습니다
+            {columnPreset === 'logistics'
+              ? '· 창고·재고는 연습 세트에서 자동으로 채웁니다'
+              : '· 표에서 칸을 눌러 바로 입력할 수 있습니다'}
           </span>
         </div>
       ) : null}

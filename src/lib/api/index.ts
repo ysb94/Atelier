@@ -23,6 +23,7 @@ import type {
   InvoiceOptionMap,
   InvoicePackingSizeMap,
   InvoicePackingSizeSourceValue,
+  InvoicePickingRoutePreset,
   AiAccessoryRecommendation,
   AiItemNameRecommendation,
   InvoiceProductNameMap,
@@ -46,6 +47,7 @@ import type {
   WarehouseInventorySet,
   WarehouseStockMovement,
   WarehouseStockPosition,
+  WarehouseZone,
 } from '@/lib/types'
 import * as aiCandidateStore from '@/lib/supabase/ai-candidates'
 import * as aiGatewayStore from '@/lib/supabase/ai-gateway'
@@ -63,6 +65,7 @@ import * as invoiceItemNameRuleStore from '@/lib/supabase/invoice-item-name-rule
 import * as invoiceAccessoryRuleStore from '@/lib/supabase/invoice-accessory-rules'
 import * as invoiceOptionMapStore from '@/lib/supabase/invoice-option-maps'
 import * as invoicePackingSizeMapStore from '@/lib/supabase/invoice-packing-size-maps'
+import * as invoicePickingRoutePresetStore from '@/lib/supabase/invoice-picking-route-presets'
 import * as invoiceProductNameMapStore from '@/lib/supabase/invoice-product-name-maps'
 import * as invoiceProductNameExclusionStore from '@/lib/supabase/invoice-product-name-exclusions'
 import * as invoiceProductNameTagRoleStore from '@/lib/supabase/invoice-product-name-tag-roles'
@@ -108,6 +111,8 @@ export type {
 } from '@/lib/supabase/warehouse-stock'
 export { InvoicePackingSizeMapStoreError } from '@/lib/supabase/invoice-packing-size-maps'
 export type { InvoicePackingSizeMapInput } from '@/lib/supabase/invoice-packing-size-maps'
+export { InvoicePickingRoutePresetStoreError } from '@/lib/supabase/invoice-picking-route-presets'
+export type { InvoicePickingRoutePresetInput } from '@/lib/supabase/invoice-picking-route-presets'
 export type {
   InvoiceOptionComponentInput,
   InvoiceOptionMapInput,
@@ -436,6 +441,48 @@ export async function saveInvoicePackingSizeMaps(
   )
 }
 
+export async function getInvoicePickingRoutePresets(
+  brandId: string,
+  warehouseZone: WarehouseZone,
+): Promise<InvoicePickingRoutePreset[]> {
+  await delay()
+  return invoicePickingRoutePresetStore.listInvoicePickingRoutePresets(
+    brandId,
+    warehouseZone,
+  )
+}
+
+export async function createInvoicePickingRoutePreset(
+  brandId: string,
+  warehouseZone: WarehouseZone,
+  input: invoicePickingRoutePresetStore.InvoicePickingRoutePresetInput,
+): Promise<InvoicePickingRoutePreset> {
+  await delay()
+  return invoicePickingRoutePresetStore.createInvoicePickingRoutePreset(
+    brandId,
+    warehouseZone,
+    input,
+  )
+}
+
+export async function updateInvoicePickingRoutePreset(
+  id: string,
+  input: invoicePickingRoutePresetStore.InvoicePickingRoutePresetInput,
+): Promise<InvoicePickingRoutePreset> {
+  await delay()
+  return invoicePickingRoutePresetStore.updateInvoicePickingRoutePreset(
+    id,
+    input,
+  )
+}
+
+export async function deleteInvoicePickingRoutePreset(
+  id: string,
+): Promise<void> {
+  await delay()
+  return invoicePickingRoutePresetStore.deleteInvoicePickingRoutePreset(id)
+}
+
 export async function getWarehouseInventorySets(brandId: string) {
   await delay()
   return warehouseStockStore.listWarehouseInventorySets(brandId)
@@ -471,12 +518,14 @@ export async function importWarehouseInventorySet(
   brandId: string,
   sourceFileName: string,
   rows: PreparedWarehouseImportRow[],
+  zone: WarehouseZone,
 ): Promise<WarehouseInventorySet> {
   await delay()
   return warehouseStockStore.importWarehouseInventorySet(
     brandId,
     sourceFileName,
     rows,
+    zone,
   )
 }
 

@@ -102,7 +102,49 @@ import {
   buildOutgoingComponentRows,
   formatOptionItemName,
   transformInvoiceOptions,
+  type InvoiceOutgoingComponentRow,
 } from '@/lib/invoice/option-transform'
+import {
+  ALL_INVOICE_PRODUCT_LIST_CATEGORIES,
+  classifyInvoiceProductListRow,
+  summarizeInvoiceProductList,
+} from '@/lib/invoice/product-list-summary'
+import {
+  buildInvoiceProductListBackupRows,
+  INVOICE_PRODUCT_LIST_BACKUP_HEADERS,
+} from '@/lib/invoice/product-list-export'
+import {
+  buildInvoiceProductListPrintFitProfile,
+  buildInvoiceProductListPrintPages,
+  chooseInvoiceProductListFitRows,
+  estimateInvoiceProductListPrintPageCounts,
+  INVOICE_PRODUCT_LIST_LANDSCAPE_ROWS,
+  INVOICE_PRODUCT_LIST_MIN_FONT_PT,
+  INVOICE_PRODUCT_LIST_PRINT_ROWS,
+  maxInvoiceProductListFitRows,
+  recommendInvoiceProductListColumnMode,
+  resolveInvoiceProductListSelectedRouteGroupId,
+  scopeInvoiceProductListPrintPages,
+} from '@/lib/invoice/product-list-print'
+import {
+  addInvoiceProductListRouteGroup,
+  applyInvoiceProductListRoutePreset,
+  applyInvoiceProductListRouteSplitMode,
+  buildDefaultInvoiceProductListPrintLayout,
+  buildInvoiceProductListPrintRouteSections,
+  INVOICE_PRODUCT_LIST_UNSPECIFIED_ROUTE_ID,
+  invoiceProductListSelectableRouteGroupIds,
+  moveInvoiceProductListZonePrefix,
+  parseInvoiceProductListRoutePresetGroups,
+  reconcileInvoiceProductListPrintLayout,
+  serializeInvoiceProductListRouteGroups,
+} from '@/lib/invoice/product-list-route'
+import {
+  allocateInvoiceProductListWarehouse,
+  extractWarehouseLocationZonePrefix,
+  UNSPECIFIED_LOCATION_ZONE,
+} from '@/lib/invoice/product-list-warehouse'
+import type { WarehouseStockPosition, WarehouseZone } from '@/lib/types'
 import { PRODUCT_NAME_CASES } from '@/lib/invoice/product-name-cases'
 import {
   generateProductNameCandidates,
@@ -5272,6 +5314,1028 @@ const accessoryMappedOutgoing = buildOutgoingComponentRowsFromStages({
 assert(
   accessoryMappedOutgoing.some((item) => item.styleNo === 'M0983'),
   '부속품 사전 구성품은 출고구성에 남긴다',
+)
+
+function productListRow(
+  row: Pick<InvoiceOutgoingComponentRow, 'role' | 'styleNo' | 'quantity'> &
+    Partial<InvoiceOutgoingComponentRow>,
+): InvoiceOutgoingComponentRow {
+  return {
+    sourceRowNumber: 1,
+    customerOrderNo: '',
+    mallName: '',
+    productName: '',
+    itemName: '',
+    styleName: row.styleName ?? row.styleNo,
+    source: 'map',
+    ...row,
+  }
+}
+
+const mergedList = summarizeInvoiceProductList(
+  [
+    productListRow({ role: 'main', styleNo: 'M1000', quantity: 2 }),
+    productListRow({ role: 'main', styleNo: 'm1000', quantity: 1 }),
+    productListRow({
+      role: 'included',
+      styleNo: 'M1000',
+      styleName: '미니백',
+      quantity: 1,
+    }),
+    productListRow({ role: 'gift', styleNo: 'M1000', quantity: 2 }),
+    productListRow({ role: 'packing', styleNo: 'M1000', quantity: 1 }),
+    productListRow({ role: 'main', styleNo: 'M2000', quantity: 4 }),
+  ],
+  ALL_INVOICE_PRODUCT_LIST_CATEGORIES,
+)
+assert(mergedList.entries.length === 2, 'M번호는 전역으로 한 줄로 합친다')
+assert(
+  mergedList.entries[0]?.styleNo === 'M1000' &&
+    mergedList.entries[0]?.quantity === 7 &&
+    mergedList.entries[0]?.styleName === '미니백',
+  '같은 M번호의 품목·내품·사은품·포장재를 7개로 합친다',
+)
+assert(
+  mergedList.entries[1]?.styleNo === 'M2000' &&
+    mergedList.entries[1]?.quantity === 4,
+  '다른 M번호는 따로 두고 M번호순으로 정렬한다',
+)
+assert(mergedList.selectedStyleCount === 2, '선택 결과 상품 종류 수는 2다')
+assert(mergedList.selectedQuantity === 11, '선택 결과 총수량은 11이다')
+const backupRows = buildInvoiceProductListBackupRows(mergedList.entries)
+assert(
+  INVOICE_PRODUCT_LIST_BACKUP_HEADERS.join(',') ===
+    'M번호,공식 상품명,수량' &&
+    backupRows.length === 2 &&
+    backupRows[0]?.join(',') === 'M1000,미니백,7' &&
+    backupRows.every((row) => row.length === 3),
+  '선택 상품 백업은 M번호·공식 상품명·수량 세 열만 만든다',
+)
+
+const withoutGift = summarizeInvoiceProductList(
+  [
+    productListRow({ role: 'main', styleNo: 'M1000', quantity: 3 }),
+    productListRow({ role: 'included', styleNo: 'M1000', quantity: 1 }),
+    productListRow({ role: 'gift', styleNo: 'M1000', quantity: 2 }),
+    productListRow({ role: 'packing', styleNo: 'M1000', quantity: 1 }),
+  ],
+  ['product', 'component', 'packing'],
+)
+assert(
+  withoutGift.entries.length === 1 && withoutGift.entries[0]?.quantity === 5,
+  '사은품 체크를 끄면 같은 행의 총수량에서 뺀다',
+)
+assert(
+  withoutGift.categoryTotals.gift.quantity === 2 &&
+    withoutGift.categoryTotals.gift.styleCount === 1,
+  '체크를 꺼도 종류별 가능 수량은 유지한다',
+)
+
+const unresolvedList = summarizeInvoiceProductList(
+  [
+    productListRow({ role: 'main', styleNo: '', quantity: 2 }),
+    productListRow({
+      role: 'unknown',
+      styleNo: 'M9999',
+      quantity: 3,
+    }),
+    productListRow({ role: 'gift', styleNo: '  ', quantity: 1 }),
+    productListRow({ role: 'main', styleNo: 'M0100', quantity: 4 }),
+    productListRow({ role: 'main', styleNo: 'M0020', quantity: 1 }),
+  ],
+  ALL_INVOICE_PRODUCT_LIST_CATEGORIES,
+)
+assert(
+  classifyInvoiceProductListRow(
+    productListRow({ role: 'unknown', styleNo: 'M9999', quantity: 1 }),
+  ) === 'unresolved',
+  'unknown 역할은 미확정이다',
+)
+assert(
+  unresolvedList.unresolved.rowCount === 3 &&
+    unresolvedList.unresolved.quantity === 6,
+  '빈 M번호와 미확정 행은 목록 합계에서 뺀다',
+)
+assert(
+  unresolvedList.entries.map((item) => item.styleNo).join(',') === 'M0020,M0100',
+  '확정 M번호만 남기고 번호순으로 정렬한다',
+)
+
+function stockPosition(
+  row: Pick<WarehouseStockPosition, 'styleNo' | 'locationCode' | 'zone'> &
+    Partial<WarehouseStockPosition>,
+): WarehouseStockPosition {
+  return {
+    id: `${row.styleNo}-${row.locationCode}-${row.sourceRowNumber ?? 1}`,
+    brandId: 'brand',
+    setId: 'set',
+    warehouseId: 'wh',
+    locationId: 'loc',
+    styleId: null,
+    styleName: row.styleName ?? row.styleNo,
+    sourceStyleNo: row.styleNo,
+    sourceProductName: row.styleName ?? row.styleNo,
+    receivedOn: row.receivedOn ?? '2026-01-01',
+    receivedOnRaw: '260101',
+    isForcedPriority: false,
+    isFinalLocation: false,
+    unitsPerBox: 1,
+    remainingBoxes: row.remainingBoxes ?? 0,
+    openedUnits: row.openedUnits ?? 0,
+    reviewFlags: [],
+    sourceRowNumber: 1,
+    note: '',
+    usageRank: null,
+    createdAt: '',
+    updatedAt: '',
+    ...row,
+  }
+}
+
+assert(
+  extractWarehouseLocationZonePrefix('2-1-6') === '2',
+  '2-1-6의 구역은 2다',
+)
+assert(extractWarehouseLocationZonePrefix('A1') === 'A', 'A1의 구역은 A다')
+assert(
+  extractWarehouseLocationZonePrefix('') === UNSPECIFIED_LOCATION_ZONE,
+  '빈 자리 구역은 미지정이다',
+)
+
+const fifoLines = allocateInvoiceProductListWarehouse({
+  entries: [{ styleNo: 'M1000', styleName: '미니백', quantity: 50 }],
+  zone: 'box_storage',
+  positions: [
+    stockPosition({
+      styleNo: 'M1000',
+      zone: 'box_storage',
+      locationCode: '2-9-9',
+      isFinalLocation: true,
+      receivedOn: '2024-01-01',
+      remainingBoxes: 100,
+      sourceRowNumber: 3,
+    }),
+    stockPosition({
+      styleNo: 'M1000',
+      zone: 'box_storage',
+      locationCode: '2-1-6',
+      receivedOn: '2025-01-01',
+      remainingBoxes: 60,
+      sourceRowNumber: 2,
+    }),
+    stockPosition({
+      styleNo: 'M1000',
+      zone: 'box_storage',
+      locationCode: '2-8-3',
+      isForcedPriority: true,
+      receivedOn: null,
+      remainingBoxes: 40,
+      sourceRowNumber: 1,
+    }),
+  ],
+})
+assert(
+  fifoLines.lines.map((item) => `${item.locationLabel}:${item.quantity}`).join(',') ===
+    '2-1-6:10,2-8-3:40',
+  '강제우선 자리를 먼저 채운 뒤 표시는 자리번호순이다',
+)
+assert(
+  fifoLines.totalAllocated === 50 && fifoLines.totalShortage === 0,
+  'FIFO로 50개를 모두 채운다',
+)
+
+const splitLines = allocateInvoiceProductListWarehouse({
+  entries: [{ styleNo: 'M0048', styleName: '미니 데일리백팩 블랙', quantity: 120 }],
+  zone: 'box_storage',
+  positions: [
+    stockPosition({
+      styleNo: 'M0048',
+      zone: 'box_storage',
+      locationCode: '3-8-3',
+      receivedOn: '2026-01-15',
+      remainingBoxes: 100,
+    }),
+    stockPosition({
+      styleNo: 'M0048',
+      zone: 'box_storage',
+      locationCode: '5-1-11',
+      receivedOn: '2026-01-16',
+      remainingBoxes: 80,
+    }),
+  ],
+})
+assert(
+  splitLines.lines.map((item) => `${item.locationLabel}:${item.quantity}`).join(',') ===
+    '3-8-3:100,5-1-11:20',
+  '한 자리 재고가 부족하면 다음 자리로 나눈다',
+)
+
+const mergedLocation = allocateInvoiceProductListWarehouse({
+  entries: [{ styleNo: 'M0100', styleName: '스트랩', quantity: 50 }],
+  zone: 'box_storage',
+  positions: [
+    stockPosition({
+      styleNo: 'M0100',
+      zone: 'box_storage',
+      locationCode: '2-1-6',
+      receivedOn: '2026-01-01',
+      remainingBoxes: 30,
+      sourceRowNumber: 1,
+    }),
+    stockPosition({
+      styleNo: 'M0100',
+      zone: 'box_storage',
+      locationCode: '2-1-6',
+      receivedOn: '2026-01-02',
+      remainingBoxes: 40,
+      sourceRowNumber: 2,
+    }),
+  ],
+})
+assert(
+  mergedLocation.lines.length === 1 &&
+    mergedLocation.lines[0]?.locationLabel === '2-1-6' &&
+    mergedLocation.lines[0]?.quantity === 50,
+  '같은 자리의 여러 입고 배치는 한 행으로 합친다',
+)
+
+const pickingOnly = allocateInvoiceProductListWarehouse({
+  entries: [{ styleNo: 'M2000', styleName: '파우치', quantity: 10 }],
+  zone: 'picking',
+  positions: [
+    stockPosition({
+      styleNo: 'M2000',
+      zone: 'picking',
+      locationCode: 'A1',
+      remainingBoxes: 10,
+    }),
+    stockPosition({
+      styleNo: 'M2000',
+      zone: 'box_storage',
+      locationCode: '4-1-1',
+      remainingBoxes: 10,
+    }),
+  ],
+})
+assert(
+  pickingOnly.lines.length === 1 && pickingOnly.lines[0]?.locationLabel === 'A1',
+  '출고창고용은 picking 자리만 쓴다',
+)
+const boxOnly = allocateInvoiceProductListWarehouse({
+  entries: [{ styleNo: 'M2000', styleName: '파우치', quantity: 10 }],
+  zone: 'box_storage',
+  positions: [
+    stockPosition({
+      styleNo: 'M2000',
+      zone: 'picking',
+      locationCode: 'A1',
+      remainingBoxes: 10,
+    }),
+    stockPosition({
+      styleNo: 'M2000',
+      zone: 'box_storage',
+      locationCode: '4-1-1',
+      remainingBoxes: 10,
+    }),
+  ],
+})
+assert(
+  boxOnly.lines.length === 1 && boxOnly.lines[0]?.locationLabel === '4-1-1',
+  '박스창고용은 box_storage 자리만 쓴다',
+)
+
+const shortage = allocateInvoiceProductListWarehouse({
+  entries: [{ styleNo: 'M3000', styleName: '키링', quantity: 100 }],
+  zone: 'picking',
+  positions: [
+    stockPosition({
+      styleNo: 'M3000',
+      zone: 'picking',
+      locationCode: 'B2',
+      remainingBoxes: 30,
+    }),
+  ],
+})
+assert(
+  shortage.totalAllocated === 30 &&
+    shortage.totalShortage === 70 &&
+    shortage.stylesWithShortage === 1,
+  '창고 재고가 부족하면 남은 수량을 미지정으로 둔다',
+)
+assert(
+  shortage.lines.some(
+    (item) =>
+      item.isShortage &&
+      item.locationZonePrefix === UNSPECIFIED_LOCATION_ZONE &&
+      item.quantity === 70,
+  ),
+  '부족 수량은 미지정 행이다',
+)
+assert(
+  shortage.groups.map((item) => item.locationZonePrefix).join(',') ===
+    `B,${UNSPECIFIED_LOCATION_ZONE}`,
+  '미지정 구역은 마지막이다',
+)
+
+const grouped = allocateInvoiceProductListWarehouse({
+  entries: [
+    { styleNo: 'M0001', styleName: 'A', quantity: 1 },
+    { styleNo: 'M0002', styleName: 'B', quantity: 1 },
+    { styleNo: 'M0003', styleName: 'C', quantity: 1 },
+    { styleNo: 'M0004', styleName: 'D', quantity: 1 },
+  ],
+  zone: 'picking' satisfies WarehouseZone,
+  positions: [
+    stockPosition({
+      styleNo: 'M0001',
+      zone: 'picking',
+      locationCode: '10-1-1',
+      remainingBoxes: 1,
+    }),
+    stockPosition({
+      styleNo: 'M0002',
+      zone: 'picking',
+      locationCode: '2-8-3',
+      remainingBoxes: 1,
+    }),
+    stockPosition({
+      styleNo: 'M0003',
+      zone: 'picking',
+      locationCode: 'A1',
+      remainingBoxes: 1,
+    }),
+    stockPosition({
+      styleNo: 'M0004',
+      zone: 'picking',
+      locationCode: '4-3-9',
+      remainingBoxes: 1,
+    }),
+  ],
+})
+assert(
+  grouped.groups.map((item) => item.locationZonePrefix).join(',') === '2,4,10,A',
+  '위치 구역은 자연 오름차순이고 미지정이 아니면 숫자 다음 문자다',
+)
+assert(
+  grouped.lines.map((item) => item.locationLabel).join(',') ===
+    '2-8-3,4-3-9,10-1-1,A1',
+  '자리번호는 자연 오름차순이다',
+)
+
+const longZone = Array.from({ length: 27 }, (_, index) => ({
+  styleNo: `M${String(index + 1).padStart(4, '0')}`,
+  styleName: `상품${index + 1}`,
+  quantity: 1,
+}))
+const longAllocation = allocateInvoiceProductListWarehouse({
+  entries: longZone,
+  zone: 'picking',
+  positions: longZone.map((item, index) =>
+    stockPosition({
+      styleNo: item.styleNo,
+      zone: 'picking',
+      locationCode: `2-1-${index + 1}`,
+      remainingBoxes: 1,
+    }),
+  ),
+})
+const extraZone = allocateInvoiceProductListWarehouse({
+  entries: [{ styleNo: 'M9000', styleName: '다른구역', quantity: 1 }],
+  zone: 'picking',
+  positions: [
+    stockPosition({
+      styleNo: 'M9000',
+      zone: 'picking',
+      locationCode: '3-1-1',
+      remainingBoxes: 1,
+    }),
+  ],
+})
+const mixedGroups = [...longAllocation.groups, ...extraZone.groups]
+const defaultLayout = buildDefaultInvoiceProductListPrintLayout(
+  mixedGroups,
+  'picking',
+)
+assert(
+  defaultLayout.routeGroups.length === 1 &&
+    defaultLayout.routeGroups[0]?.zonePrefixes.join(',') === '2,3',
+  '기본 동선은 구역을 한 묶음으로 자연순 배치한다',
+)
+const printPages = buildInvoiceProductListPrintPages({
+  groups: mixedGroups,
+  warehouseLabel: '출고창고용',
+  layout: defaultLayout,
+  printedAt: new Date(2026, 7, 27),
+})
+assert(printPages.length === 2, '같은 묶음의 큰 구역 분할과 작은 구역은 2장이다')
+assert(
+  printPages[0]?.printedOn === '26.08.27' &&
+    printPages[0]?.locationZonePrefix === '2' &&
+    printPages[0]?.slots.length === INVOICE_PRODUCT_LIST_PRINT_ROWS &&
+    printPages[0]?.slots.filter((slot) => slot.kind === 'item').length === 25 &&
+    printPages[0]?.slots[0]?.kind === 'header',
+  '첫 페이지는 날짜와 구역 제목 뒤 25행을 채운다',
+)
+assert(
+  printPages[1]?.segments.map((item) => item.locationZonePrefix).join(',') ===
+    '2,3' &&
+    printPages[1]?.segments[0]?.continued === true &&
+    printPages[1]?.slots.filter((slot) => slot.kind === 'item').length === 3,
+  '큰 구역의 남은 행은 계속으로 이어지고 작은 구역을 같은 장에 붙인다',
+)
+
+const splitLayout = {
+  zone: 'picking' as const,
+  routeGroups: [
+    { id: 'a', zonePrefixes: ['2'] },
+    { id: 'b', zonePrefixes: ['3'] },
+  ],
+}
+const splitPages = buildInvoiceProductListPrintPages({
+  groups: mixedGroups,
+  warehouseLabel: '출고창고용',
+  layout: splitLayout,
+  printedAt: new Date(2026, 7, 27),
+})
+assert(splitPages.length === 3, '다른 동선 묶음은 새 페이지에서 시작한다')
+assert(
+  splitPages[2]?.locationZonePrefix === '3' &&
+    splitPages[2]?.routeGroupLabel === '3' &&
+    splitPages[2]?.globalPageIndex === 3,
+  '묶음이 바뀌면 잔여 칸이 있어도 새 장이다',
+)
+
+const tinyGroups = allocateInvoiceProductListWarehouse({
+  entries: [
+    { styleNo: 'M8001', styleName: '작은1', quantity: 2 },
+    { styleNo: 'M8002', styleName: '작은2', quantity: 2 },
+  ],
+  zone: 'picking',
+  positions: [
+    stockPosition({
+      styleNo: 'M8001',
+      zone: 'picking',
+      locationCode: '2-1-1',
+      remainingBoxes: 2,
+    }),
+    stockPosition({
+      styleNo: 'M8002',
+      zone: 'picking',
+      locationCode: '3-1-1',
+      remainingBoxes: 2,
+    }),
+  ],
+})
+const packedTiny = buildInvoiceProductListPrintPages({
+  groups: tinyGroups.groups,
+  warehouseLabel: '출고창고용',
+  layout: {
+    zone: 'picking',
+    routeGroups: [{ id: 'walk', zonePrefixes: ['2', '3'] }],
+  },
+})
+assert(
+  packedTiny.length === 1 &&
+    packedTiny[0]?.segments.length === 2 &&
+    packedTiny[0]?.slots.filter((slot) => slot.kind === 'header').length === 2,
+  '작은 구역 두 개는 한 장에 묶인다',
+)
+
+const keepTogether = buildInvoiceProductListPrintPages({
+  groups: [
+    {
+      locationZonePrefix: '2',
+      quantity: 20,
+      styleCount: 20,
+      lines: Array.from({ length: 20 }, (_, index) => ({
+        styleNo: `M8${String(index).padStart(3, '0')}`,
+        styleName: `상품${index}`,
+        locationCode: `2-1-${index + 1}`,
+        locationLabel: `2-1-${index + 1}`,
+        locationZonePrefix: '2',
+        quantity: 1,
+        isShortage: false,
+      })),
+    },
+    {
+      locationZonePrefix: '3',
+      quantity: 10,
+      styleCount: 10,
+      lines: Array.from({ length: 10 }, (_, index) => ({
+        styleNo: `M9${String(index).padStart(3, '0')}`,
+        styleName: `다음${index}`,
+        locationCode: `3-1-${index + 1}`,
+        locationLabel: `3-1-${index + 1}`,
+        locationZonePrefix: '3',
+        quantity: 1,
+        isShortage: false,
+      })),
+    },
+  ],
+  warehouseLabel: '출고창고용',
+  layout: {
+    zone: 'picking',
+    routeGroups: [{ id: 'keep', zonePrefixes: ['2', '3'] }],
+  },
+})
+assert(
+  keepTogether.length === 2 &&
+    keepTogether[0]?.segments.map((item) => item.locationZonePrefix).join(',') ===
+      '2' &&
+    keepTogether[1]?.segments.map((item) => item.locationZonePrefix).join(',') ===
+      '3',
+  '작은 구역 전체가 남은 칸에 안 들어가면 다음 장으로 통째 넘긴다',
+)
+
+const routeOrder = buildDefaultInvoiceProductListPrintLayout(
+  grouped.groups,
+  'picking',
+)
+assert(
+  routeOrder.routeGroups[0]?.zonePrefixes.join(',') === '2,4,10,A',
+  '기본 동선 순서는 위치 구역 자연순이다',
+)
+const moved = moveInvoiceProductListZonePrefix(
+  routeOrder,
+  'A',
+  routeOrder.routeGroups[0]!.id,
+  0,
+)
+assert(
+  moved.routeGroups[0]?.zonePrefixes.join(',') === 'A,2,4,10',
+  '같은 묶음 안에서 구역 순서를 바꿀 수 있다',
+)
+const reconciled = reconcileInvoiceProductListPrintLayout(
+  grouped.groups.filter((group) => group.locationZonePrefix !== '10'),
+  {
+    zone: 'picking',
+    routeGroups: [{ id: 'keep', zonePrefixes: ['2', 'X', '4'] }],
+  },
+)
+assert(
+  reconciled.routeGroups.map((item) => item.zonePrefixes.join('·')).join('|') ===
+    '2·4|A',
+  '사라진 구역은 빼고 새 구역은 뒤에 붙인다',
+)
+const reconciledEmpty = reconcileInvoiceProductListPrintLayout(
+  grouped.groups,
+  {
+    zone: 'picking',
+    routeGroups: [
+      { id: 'keep', zonePrefixes: ['2', '4'] },
+      { id: 'empty', zonePrefixes: [] },
+    ],
+  },
+)
+assert(
+  reconciledEmpty.routeGroups.some(
+    (group) => group.id === 'empty' && group.zonePrefixes.length === 0,
+  ) &&
+    reconciledEmpty.routeGroups.map((item) => item.zonePrefixes.join('·')).join('|') ===
+      '2·4||10|A',
+  '사용자가 만든 빈 카드는 유지하고 새 구역은 뒤에 붙인다',
+)
+const splitCards = addInvoiceProductListRouteGroup(routeOrder)
+const movedToCard = moveInvoiceProductListZonePrefix(
+  splitCards,
+  'A',
+  splitCards.routeGroups[1]!.id,
+)
+assert(
+  movedToCard.routeGroups[0]?.zonePrefixes.join(',') === '2,4,10' &&
+    movedToCard.routeGroups[1]?.zonePrefixes.join(',') === 'A',
+  '칩을 다른 카드로 옮기면 그 카드에만 남는다',
+)
+const splitSections = buildInvoiceProductListPrintRouteSections(
+  grouped.groups,
+  movedToCard,
+)
+assert(
+  splitSections.map((item) => item.label).join('|') === '2·4·10|A',
+  '카드에 있는 구역만 한 섹션으로 이어진다',
+)
+const perZoneLayout = applyInvoiceProductListRouteSplitMode(
+  grouped.groups,
+  routeOrder,
+  'per_zone',
+)
+assert(
+  perZoneLayout.splitMode === 'per_zone' &&
+    perZoneLayout.routeGroups.map((item) => item.zonePrefixes.join(',')).join('|') ===
+      '2|4|10|A',
+  '구역별 분해는 창고용 기본값으로 구역마다 카드를 만든다',
+)
+const groupedAgain = applyInvoiceProductListRouteSplitMode(
+  grouped.groups,
+  perZoneLayout,
+  'grouped',
+)
+assert(
+  groupedAgain.splitMode === 'grouped' &&
+    groupedAgain.routeGroups.length === 1 &&
+    groupedAgain.routeGroups[0]?.zonePrefixes.join(',') === '2,4,10,A',
+  '한 카드로 되돌리면 그 창고 구역을 다시 한 묶음으로 둔다',
+)
+const reconciledPerZone = reconcileInvoiceProductListPrintLayout(
+  grouped.groups,
+  { zone: 'picking', splitMode: 'per_zone', routeGroups: [] },
+)
+assert(
+  reconciledPerZone.splitMode === 'per_zone' &&
+    reconciledPerZone.routeGroups.length === 4,
+  '빈 레이아웃을 맞출 때도 창고용 구역별 설정을 유지한다',
+)
+const shortageLast = buildInvoiceProductListPrintPages({
+  groups: shortage.groups,
+  warehouseLabel: '출고창고용',
+  layout: {
+    zone: 'picking',
+    routeGroups: [{ id: 'front', zonePrefixes: [UNSPECIFIED_LOCATION_ZONE, 'B'] }],
+  },
+})
+assert(
+  shortageLast.at(-1)?.locationZonePrefix === UNSPECIFIED_LOCATION_ZONE &&
+    shortageLast.at(-1)?.segments.every((item) => item.isShortage),
+  '미지정은 동선 편집과 관계없이 마지막이다',
+)
+
+function printGroup(prefix: string, count: number) {
+  return {
+    locationZonePrefix: prefix,
+    quantity: count,
+    styleCount: count,
+    lines: Array.from({ length: count }, (_, index) => ({
+      styleNo: `M${prefix}${String(index).padStart(3, '0')}`,
+      styleName: `${prefix}-${index}`,
+      locationCode: `${prefix}-1-${index + 1}`,
+      locationLabel: `${prefix}-1-${index + 1}`,
+      locationZonePrefix: prefix,
+      quantity: 1,
+      isShortage: false,
+    })),
+  }
+}
+
+assert(
+  printPages[0]?.columnMode === 'vertical_1' &&
+    printPages[0]?.columns.length === 1 &&
+    printPages[0]?.columns[0]?.slots.length === INVOICE_PRODUCT_LIST_PRINT_ROWS,
+  '세로 1단은 칸 하나짜리 물리 용지로 유지한다',
+)
+
+const twoColumnKeep = buildInvoiceProductListPrintPages({
+  groups: [printGroup('2', 20), printGroup('3', 10)],
+  warehouseLabel: '출고창고용',
+  layout: {
+    zone: 'picking',
+    routeGroups: [{ id: 'keep', zonePrefixes: ['2', '3'] }],
+  },
+  columnMode: 'vertical_2',
+})
+assert(
+  twoColumnKeep.length === 1 &&
+    twoColumnKeep[0]?.orientation === 'portrait' &&
+    twoColumnKeep[0]?.columns.length === 2 &&
+    twoColumnKeep[0]?.columns[0]?.segments
+      .map((item) => item.locationZonePrefix)
+      .join(',') === '2' &&
+    twoColumnKeep[0]?.columns[1]?.segments
+      .map((item) => item.locationZonePrefix)
+      .join(',') === '3',
+  '세로 2단은 왼쪽 칸을 채운 뒤 오른쪽 칸으로 간다',
+)
+
+const threeColumnPack = buildInvoiceProductListPrintPages({
+  groups: [printGroup('2', 23), printGroup('3', 23), printGroup('4', 2)],
+  warehouseLabel: '출고창고용',
+  layout: {
+    zone: 'picking',
+    routeGroups: [{ id: 'walk', zonePrefixes: ['2', '3', '4'] }],
+  },
+  columnMode: 'horizontal_3',
+})
+assert(
+  threeColumnPack.length === 1 &&
+    threeColumnPack[0]?.orientation === 'landscape' &&
+    threeColumnPack[0]?.columns.length === 3 &&
+    threeColumnPack[0]?.columns[0]?.segments[0]?.locationZonePrefix === '2' &&
+    threeColumnPack[0]?.columns[1]?.segments[0]?.locationZonePrefix === '3' &&
+    threeColumnPack[0]?.columns[2]?.segments[0]?.locationZonePrefix === '4' &&
+    threeColumnPack[0]?.columns[0]?.slots.length ===
+      INVOICE_PRODUCT_LIST_LANDSCAPE_ROWS,
+  '가로 3단은 왼쪽부터 칸을 채우고 가로 용지 행 수를 채운다',
+)
+
+const longName72 = printGroup('2', 72)
+longName72.lines[0]!.styleName = '미니 글로시 벨티드 플랩백팩 다크그레이'
+assert(
+  chooseInvoiceProductListFitRows([longName72], 'horizontal_3') === 25 &&
+    maxInvoiceProductListFitRows('horizontal_3') >= 25,
+  '가로 3단은 7pt 한도 안에서 72종을 칸당 25행으로 맞출 수 있다',
+)
+const fitted72 = buildInvoiceProductListPrintPages({
+  groups: [longName72],
+  warehouseLabel: '박스창고용',
+  layout: {
+    zone: 'box_storage',
+    routeGroups: [{ id: 'zone-2', zonePrefixes: ['2'] }],
+  },
+  columnMode: 'horizontal_3',
+  autoFit: true,
+})
+assert(
+  fitted72.length === 1 &&
+    fitted72[0]?.fit.rowsPerColumn === 25 &&
+    fitted72[0]?.columns[0]?.slots.filter((slot) => slot.kind === 'item')
+      .length === 24 &&
+    fitted72[0]?.fit.fontPt >= INVOICE_PRODUCT_LIST_MIN_FONT_PT &&
+    fitted72[0]?.fit.columnWidthPercents[3] > 48,
+  '72종 구역은 가로 3단에서 상품명을 유지한 채 1장으로 맞춘다',
+)
+assert(
+  buildInvoiceProductListPrintPages({
+    groups: [longName72],
+    warehouseLabel: '박스창고용',
+    columnMode: 'horizontal_3',
+  }).length === 2,
+  '자동 맞춤을 끄면 72종 가로 3단은 기본 행 수로 2장이다',
+)
+const hugeZone = printGroup('2', 200)
+const fittedHuge = buildInvoiceProductListPrintPages({
+  groups: [hugeZone],
+  warehouseLabel: '박스창고용',
+  columnMode: 'horizontal_3',
+  autoFit: true,
+})
+assert(
+  fittedHuge.length > 1 &&
+    fittedHuge[0]?.fit.rowsPerColumn === INVOICE_PRODUCT_LIST_LANDSCAPE_ROWS &&
+    fittedHuge.every(
+      (page) => page.fit.fontPt >= INVOICE_PRODUCT_LIST_MIN_FONT_PT,
+    ),
+  '한 장에 못 넣는 큰 구역은 최소 글자 크기를 지키고 다음 장으로 이어간다',
+)
+const fittedSplitCards = buildInvoiceProductListPrintPages({
+  groups: [printGroup('2', 72), printGroup('3', 3)],
+  warehouseLabel: '박스창고용',
+  layout: {
+    zone: 'box_storage',
+    routeGroups: [
+      { id: 'a', zonePrefixes: ['2'] },
+      { id: 'b', zonePrefixes: ['3'] },
+    ],
+  },
+  columnMode: 'horizontal_3',
+  autoFit: true,
+})
+assert(
+  scopeInvoiceProductListPrintPages(fittedSplitCards, 'a').length === 1 &&
+    scopeInvoiceProductListPrintPages(fittedSplitCards, 'b').length === 1 &&
+    fittedSplitCards[1]?.routeGroupIndex === 2 &&
+    fittedSplitCards[1]?.routeGroupId === 'b',
+  '카드별 자동 맞춤 후에도 묶음 순번과 카드 장수가 맞는다',
+)
+const wideNameFit = buildInvoiceProductListPrintFitProfile(
+  [longName72],
+  'horizontal_3',
+  25,
+)
+assert(
+  wideNameFit.fontPt >= INVOICE_PRODUCT_LIST_MIN_FONT_PT &&
+    wideNameFit.columnWidthPercents[3] > wideNameFit.columnWidthPercents[2],
+  '상품명 열은 다른 열의 최소 폭을 남기고 넓힌다',
+)
+
+const consecutiveShort = buildInvoiceProductListPrintPages({
+  groups: [printGroup('2', 2), printGroup('3', 2)],
+  warehouseLabel: '출고창고용',
+  layout: {
+    zone: 'picking',
+    routeGroups: [{ id: 'walk', zonePrefixes: ['2', '3'] }],
+  },
+  columnMode: 'vertical_2',
+})
+assert(
+  consecutiveShort.length === 1 &&
+    consecutiveShort[0]?.columns[0]?.segments.length === 2 &&
+    consecutiveShort[0]?.columns[1]?.segments.length === 0,
+  '짧은 구역은 같은 칸에 제목행을 넣고 이어 붙인다',
+)
+
+const continuedLarge = buildInvoiceProductListPrintPages({
+  groups: [printGroup('2', 40)],
+  warehouseLabel: '출고창고용',
+  columnMode: 'vertical_2',
+})
+assert(
+  continuedLarge.length === 1 &&
+    continuedLarge[0]?.columns[0]?.segments[0]?.continued === false &&
+    continuedLarge[0]?.columns[1]?.segments[0]?.continued === true &&
+    continuedLarge[0]?.columns[1]?.slots.filter((slot) => slot.kind === 'item')
+      .length === 15,
+  '큰 구역만 다음 칸에서 계속으로 이어간다',
+)
+
+const twoColumnSplit = buildInvoiceProductListPrintPages({
+  groups: [printGroup('2', 3), printGroup('3', 3)],
+  warehouseLabel: '출고창고용',
+  layout: {
+    zone: 'picking',
+    routeGroups: [
+      { id: 'a', zonePrefixes: ['2'] },
+      { id: 'b', zonePrefixes: ['3'] },
+    ],
+  },
+  columnMode: 'vertical_2',
+})
+assert(
+  twoColumnSplit.length === 2 &&
+    twoColumnSplit[0]?.locationZonePrefix === '2' &&
+    twoColumnSplit[0]?.columns[1]?.segments.length === 0 &&
+    twoColumnSplit[1]?.locationZonePrefix === '3',
+  '다단에서도 동선 묶음이 바뀌면 새 물리 용지에서 시작한다',
+)
+assert(
+  twoColumnSplit[0]?.routeGroupId === 'a' &&
+    twoColumnSplit[1]?.routeGroupId === 'b' &&
+    twoColumnSplit[1]?.routeGroupIndex === 2 &&
+    twoColumnSplit[1]?.globalPageIndex === 2,
+  '각 출력 장은 동선 카드 ID와 묶음 순번을 유지한다',
+)
+const scopedSecondCard = scopeInvoiceProductListPrintPages(twoColumnSplit, 'b')
+assert(
+  scopedSecondCard.length === 1 &&
+    scopedSecondCard[0]?.routeGroupId === 'b' &&
+    scopedSecondCard[0]?.routeGroupIndex === 2 &&
+    scopedSecondCard[0]?.globalPageIndex === 1 &&
+    scopedSecondCard[0]?.globalPageCount === 1 &&
+    scopedSecondCard[0]?.locationZonePrefix === '3',
+  '선택한 카드만 추려 1/N으로 다시 번호를 매기고 묶음 순번은 유지한다',
+)
+const scopedFirstSplit = scopeInvoiceProductListPrintPages(splitPages, 'a')
+assert(
+  scopedFirstSplit.length === 2 &&
+    scopedFirstSplit[0]?.globalPageIndex === 1 &&
+    scopedFirstSplit[1]?.globalPageIndex === 2 &&
+    scopedFirstSplit[1]?.globalPageCount === 2 &&
+    scopedFirstSplit[0]?.routeGroupIndex === 1 &&
+    scopeInvoiceProductListPrintPages(splitPages, 'missing').length === 0,
+  '여러 장인 카드는 로컬 페이지 번호를 다시 매긴다',
+)
+assert(
+  resolveInvoiceProductListSelectedRouteGroupId({
+    preferredId: 'b',
+    availableIds: ['a', 'b'],
+    pages: twoColumnSplit,
+  }) === 'b' &&
+    resolveInvoiceProductListSelectedRouteGroupId({
+      preferredId: 'gone',
+      availableIds: ['a', 'b'],
+      pages: twoColumnSplit,
+    }) === 'a' &&
+    invoiceProductListSelectableRouteGroupIds(splitLayout, mixedGroups).join(
+      ',',
+    ) === 'a,b',
+  '없는 카드 선택은 첫 출력 가능 카드로 돌아간다',
+)
+
+const shortageLastTwoColumn = buildInvoiceProductListPrintPages({
+  groups: shortage.groups,
+  warehouseLabel: '출고창고용',
+  layout: {
+    zone: 'picking',
+    routeGroups: [
+      { id: 'front', zonePrefixes: [UNSPECIFIED_LOCATION_ZONE, 'B'] },
+    ],
+  },
+  columnMode: 'vertical_2',
+})
+assert(
+  shortageLastTwoColumn.at(-1)?.locationZonePrefix ===
+    UNSPECIFIED_LOCATION_ZONE &&
+    shortageLastTwoColumn
+      .at(-1)
+      ?.segments.every((item) => item.isShortage),
+  '다단에서도 미지정은 항상 마지막이다',
+)
+
+const pageCounts = estimateInvoiceProductListPrintPageCounts({
+  groups: [printGroup('2', 20), printGroup('3', 10)],
+  warehouseLabel: '출고창고용',
+  layout: {
+    zone: 'picking',
+    routeGroups: [{ id: 'keep', zonePrefixes: ['2', '3'] }],
+  },
+})
+assert(
+  pageCounts.vertical_1 === 2 &&
+    pageCounts.vertical_2 === 1 &&
+    pageCounts.horizontal_3 === 1,
+  '세 형식의 예상 장수를 계산한다',
+)
+assert(
+  recommendInvoiceProductListColumnMode(pageCounts) === 'vertical_2',
+  '가장 적은 장수 형식을 추천한다',
+)
+assert(
+  recommendInvoiceProductListColumnMode({
+    vertical_1: 2,
+    vertical_2: 2,
+    horizontal_3: 2,
+  }) === 'vertical_1',
+  '장수가 같으면 세로 1단을 추천한다',
+)
+
+const parsedPreset = parseInvoiceProductListRoutePresetGroups([
+  { zonePrefixes: ['2', UNSPECIFIED_LOCATION_ZONE, '4', '2', ''] },
+  { zonePrefixes: ['X'] },
+  { zonePrefixes: [] },
+  { notGroups: true },
+  'skip',
+])
+assert(
+  parsedPreset.map((item) => item.zonePrefixes.join(',')).join('|') ===
+    '2,4|X',
+  '동선 JSON은 빈 값·미지정·중복을 빼고 카드 순서를 유지한다',
+)
+assert(
+  parseInvoiceProductListRoutePresetGroups({ zonePrefixes: ['2'] }).length ===
+    0,
+  '배열이 아닌 동선 JSON은 빈 목록이다',
+)
+
+const serializedPreset = serializeInvoiceProductListRouteGroups({
+  zone: 'picking',
+  splitMode: 'grouped',
+  routeGroups: [
+    { id: 'a', zonePrefixes: ['2', UNSPECIFIED_LOCATION_ZONE, '4'] },
+    { id: 'empty', zonePrefixes: [] },
+    { id: 'b', zonePrefixes: ['10'] },
+  ],
+})
+assert(
+  serializedPreset.map((item) => item.zonePrefixes.join(',')).join('|') ===
+    '2,4|10',
+  '현재 카드에서 미지정과 빈 카드를 빼고 동선으로 저장한다',
+)
+
+const appliedPreset = applyInvoiceProductListRoutePreset(
+  grouped.groups,
+  'picking',
+  [
+    { zonePrefixes: ['4', 'X', UNSPECIFIED_LOCATION_ZONE] },
+    { zonePrefixes: ['10'] },
+  ],
+)
+assert(
+  appliedPreset.splitMode === 'grouped' &&
+    appliedPreset.routeGroups
+      .map((item) => item.zonePrefixes.join(','))
+      .join('|') === '4|10|2|A',
+  '동선에 있는 현재 구역만 카드 순서를 유지하고 나머지는 뒤에 붙인다',
+)
+
+const appliedShortage = applyInvoiceProductListRoutePreset(
+  shortage.groups,
+  'picking',
+  [{ zonePrefixes: [UNSPECIFIED_LOCATION_ZONE, 'B'] }],
+)
+assert(
+  appliedShortage.routeGroups.every(
+    (item) => !item.zonePrefixes.includes(UNSPECIFIED_LOCATION_ZONE),
+  ) &&
+    appliedShortage.routeGroups.map((item) => item.zonePrefixes.join(',')).join(
+      '|',
+    ) === 'B',
+  '미지정은 동선 카드에 넣지 않는다',
+)
+const appliedShortagePages = buildInvoiceProductListPrintPages({
+  groups: shortage.groups,
+  warehouseLabel: '출고창고용',
+  layout: appliedShortage,
+})
+assert(
+  appliedShortagePages.at(-1)?.locationZonePrefix ===
+    UNSPECIFIED_LOCATION_ZONE &&
+    appliedShortagePages.at(-1)?.routeGroupId ===
+      INVOICE_PRODUCT_LIST_UNSPECIFIED_ROUTE_ID,
+  '동선을 적용해도 미지정은 항상 마지막이다',
+)
+const scopedShortage = scopeInvoiceProductListPrintPages(
+  appliedShortagePages,
+  INVOICE_PRODUCT_LIST_UNSPECIFIED_ROUTE_ID,
+)
+assert(
+  scopedShortage.length > 0 &&
+    scopedShortage[0]?.globalPageIndex === 1 &&
+    scopedShortage.every(
+      (page) => page.routeGroupId === INVOICE_PRODUCT_LIST_UNSPECIFIED_ROUTE_ID,
+    ) &&
+    invoiceProductListSelectableRouteGroupIds(
+      appliedShortage,
+      shortage.groups,
+    ).at(-1) === INVOICE_PRODUCT_LIST_UNSPECIFIED_ROUTE_ID,
+  '미지정 카드도 선택해 그 페이지만 미리보고 출력한다',
 )
 
 console.log('option-maps verify ok')

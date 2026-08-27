@@ -1,4 +1,5 @@
 import { normalizeStyleNo } from '@/lib/import/transform'
+import { compactProductNameKey } from '@/lib/invoice/lookup-normalization'
 import type {
   StyleRef,
   WarehouseReviewFlag,
@@ -94,6 +95,15 @@ export function parseWarehouseLocation(raw: string) {
     isFinalLocation ? trimmed.slice(0, -FINAL_LOCATION_MARK.length) : trimmed
   ).trim()
   return { locationCode, locationRaw: trimmed, isFinalLocation }
+}
+
+export function formatWarehouseLocation(row: {
+  locationCode: string
+  isFinalLocation: boolean
+}) {
+  return row.isFinalLocation
+    ? `${row.locationCode}${FINAL_LOCATION_MARK}`
+    : row.locationCode
 }
 
 function isValidYmd(year: number, month: number, day: number) {
@@ -259,13 +269,33 @@ function duplicateKey(row: ParsedWarehouseSheetRow) {
   ].join('\u001f')
 }
 
+function resolveWarehouseImportStyle(
+  row: ParsedWarehouseSheetRow,
+  byStyleNo: Map<string, StyleRef>,
+  byCompactName: Map<string, StyleRef[]>,
+): StyleRef | null {
+  if (row.normalizedStyleNo) {
+    return byStyleNo.get(row.normalizedStyleNo) ?? null
+  }
+  const compactName = compactProductNameKey(row.sourceProductName)
+  if (!compactName) return null
+  const matches = byCompactName.get(compactName) ?? []
+  return matches.length === 1 ? (matches[0] ?? null) : null
+}
+
 export function prepareWarehouseImportRows(
   rows: ParsedWarehouseSheetRow[],
   styles: StyleRef[],
 ): PreparedWarehouseImportRow[] {
   const byStyleNo = new Map<string, StyleRef>()
+  const byCompactName = new Map<string, StyleRef[]>()
   for (const style of styles) {
     byStyleNo.set(normalizeStyleNo(style.styleNo), style)
+    const compactName = compactProductNameKey(style.name)
+    if (!compactName) continue
+    const matches = byCompactName.get(compactName) ?? []
+    matches.push(style)
+    byCompactName.set(compactName, matches)
   }
   const seen = new Map<string, number>()
   for (const row of rows) {
@@ -274,7 +304,7 @@ export function prepareWarehouseImportRows(
   }
 
   return rows.map((row) => {
-    const style = byStyleNo.get(row.normalizedStyleNo) ?? null
+    const style = resolveWarehouseImportStyle(row, byStyleNo, byCompactName)
     const reviewFlags: WarehouseReviewFlag[] = []
     if (!style) reviewFlags.push('missing_style')
     if (!row.dateValid) reviewFlags.push('date_review')
@@ -284,6 +314,9 @@ export function prepareWarehouseImportRows(
     }
     return {
       ...row,
+      normalizedStyleNo: style
+        ? normalizeStyleNo(style.styleNo)
+        : row.normalizedStyleNo,
       styleId: style?.styleId ?? null,
       styleName: style?.name ?? row.sourceProductName,
       reviewFlags,
@@ -383,12 +416,66 @@ export function warehousePositionQty(row: {
   return row.remainingBoxes * row.unitsPerBox + row.openedUnits
 }
 
+export type StyleWarehouseStockSummary = {
+  styleNo: string
+  boxLocation: string | null
+  pickingLocation: string | null
+  boxQty: number
+  pickingQty: number
+  totalQty: number
+}
+
+type WarehouseStockSummaryRow = Pick<
+  WarehouseStockPosition,
+  | 'styleNo'
+  | 'locationCode'
+  | 'isFinalLocation'
+  | 'isForcedPriority'
+  | 'receivedOn'
+  | 'sourceRowNumber'
+  | 'remainingBoxes'
+  | 'openedUnits'
+  | 'unitsPerBox'
+  | 'zone'
+>
+
+export function summarizeWarehouseStockByStyle(
+  positions: WarehouseStockSummaryRow[],
+): Map<string, StyleWarehouseStockSummary> {
+  const ranked = (['box_storage', 'picking'] as const).flatMap((zone) =>
+    assignWarehouseUsageRanks(positions.filter((row) => row.zone === zone)),
+  )
+  const summaries = new Map<string, StyleWarehouseStockSummary>()
+
+  for (const row of ranked) {
+    const styleNo = normalizeStyleNo(row.styleNo)
+    const current = summaries.get(styleNo) ?? {
+      styleNo,
+      boxLocation: null,
+      pickingLocation: null,
+      boxQty: 0,
+      pickingQty: 0,
+      totalQty: 0,
+    }
+    const qty = warehousePositionQty(row)
+    if (row.zone === 'picking') current.pickingQty += qty
+    else current.boxQty += qty
+    current.totalQty = current.boxQty + current.pickingQty
+    if (row.usageRank === 1) {
+      const location = formatWarehouseLocation(row) || null
+      if (row.zone === 'picking') current.pickingLocation = location
+      else current.boxLocation = location
+    }
+    summaries.set(styleNo, current)
+  }
+
+  return summaries
+}
+
 export function formatWarehouseReceivedOn(row: {
-  isForcedPriority: boolean
   receivedOn: string | null
   receivedOnRaw: string
 }) {
-  if (row.isForcedPriority) return '우선'
   if (row.receivedOn) {
     const [year, month, day] = row.receivedOn.split('-')
     return `${year?.slice(2)}.${month}.${day}`
@@ -443,7 +530,7 @@ export type WarehouseImportRpcRow = {
 
 export function toWarehouseImportRpcRows(
   rows: PreparedWarehouseImportRow[],
-  zone: WarehouseZone = 'box_storage',
+  zone: WarehouseZone,
 ): WarehouseImportRpcRow[] {
   return rows.map((row) => ({
     location_code: row.locationCode || EMPTY_WAREHOUSE_LOCATION_CODE,
@@ -462,4 +549,115 @@ export function toWarehouseImportRpcRows(
     source_row_number: row.sourceRowNumber,
     note: row.note,
   }))
+}
+
+export const WAREHOUSE_UPLOAD_SHEET_NAME = '상품업로드'
+
+export const WAREHOUSE_UPLOAD_HEADERS = [
+  'M번호',
+  '제품명',
+  '창고 관리 번호',
+  '입고일',
+  '박스당 갯수',
+  '박스 수',
+  '비고',
+] as const
+
+export const WAREHOUSE_UPLOAD_EXAMPLE_ROWS: string[][] = [
+  ['M100', '검정 티셔츠', 'A-01', '000000', '20', '2', '강제우선 예시'],
+  ['M100', '검정 티셔츠', 'A-02', '250101', '20', '3', '일반 입고일 YYMMDD'],
+  ['M0487', '슬림백 블랙', '4-3-15//', '250825', '20', '1', '마지막 위치는 끝에 //'],
+]
+
+const WAREHOUSE_TEMPLATE_GUIDE_ROWS: string[][] = [
+  ['열', '필수', '예시', '설명'],
+  ['M번호', 'Y', 'M100', '상품 마스터에 있는 품번. 연결은 이 값으로 합니다'],
+  ['제품명', 'N', '검정 티셔츠', '참고용 표시명. 없어도 가져옵니다'],
+  [
+    '창고 관리 번호',
+    'Y',
+    'A-01 또는 4-3-15//',
+    `끝의 ${FINAL_LOCATION_MARK}는 마지막 위치입니다`,
+  ],
+  [
+    '입고일',
+    'Y',
+    '250101 또는 000000',
+    `YYMMDD 또는 YYYY-MM-DD. ${FORCED_PRIORITY_DATE}은 강제우선입니다`,
+  ],
+  ['박스당 갯수', 'Y', '20', '한 박스의 입수'],
+  ['박스 수', 'Y', '2', '남은 박스 수'],
+  ['비고', 'N', '', '메모'],
+  [
+    '',
+    '',
+    '',
+    '예시 행을 지운 뒤 실제 재고를 넣고, 시트 이름 상품업로드와 첫 줄 헤더는 그대로 두세요',
+  ],
+]
+
+export function warehouseInventoryTemplateSheets() {
+  return [
+    {
+      name: WAREHOUSE_UPLOAD_SHEET_NAME,
+      rows: [
+        [...WAREHOUSE_UPLOAD_HEADERS],
+        ...WAREHOUSE_UPLOAD_EXAMPLE_ROWS.map((row) => [...row]),
+      ],
+    },
+  ]
+}
+
+function todayStamp() {
+  const d = new Date()
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}${m}${day}`
+}
+
+function safeFilePart(name: string) {
+  return name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'brand'
+}
+
+/** 선택한 창고 존 교체용 양식. 헤더와 예시 3줄을 넣는다. */
+export async function downloadWarehouseInventoryTemplate(
+  brandName: string,
+  zone: WarehouseZone = 'box_storage',
+) {
+  const XLSX = await import('xlsx')
+  const workbook = XLSX.utils.book_new()
+  const warehouseLabel = zone === 'picking' ? '출고창고' : '박스창고'
+  const uploadSheet = XLSX.utils.aoa_to_sheet(
+    warehouseInventoryTemplateSheets()[0]!.rows,
+  )
+  uploadSheet['!cols'] = [
+    { wch: 10 },
+    { wch: 22 },
+    { wch: 16 },
+    { wch: 12 },
+    { wch: 12 },
+    { wch: 10 },
+    { wch: 28 },
+  ]
+  const guideSheet = XLSX.utils.aoa_to_sheet([
+    [
+      '대상 창고',
+      '필수',
+      warehouseLabel,
+      `${warehouseLabel}만 교체하고 다른 창고는 유지합니다`,
+    ],
+    ...WAREHOUSE_TEMPLATE_GUIDE_ROWS,
+  ])
+  guideSheet['!cols'] = [{ wch: 16 }, { wch: 6 }, { wch: 22 }, { wch: 56 }]
+  XLSX.utils.book_append_sheet(
+    workbook,
+    uploadSheet,
+    WAREHOUSE_UPLOAD_SHEET_NAME,
+  )
+  XLSX.utils.book_append_sheet(workbook, guideSheet, '작성안내')
+  XLSX.writeFile(
+    workbook,
+    `${safeFilePart(brandName)}_${warehouseLabel}양식_${todayStamp()}.xlsx`,
+  )
 }

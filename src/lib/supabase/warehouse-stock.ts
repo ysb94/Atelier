@@ -355,8 +355,9 @@ export async function importWarehouseInventorySet(
   brandId: string,
   sourceFileName: string,
   rows: PreparedWarehouseImportRow[],
+  zone: WarehouseZone,
 ): Promise<WarehouseInventorySet> {
-  const payload = toWarehouseImportRpcRows(rows)
+  const payload = toWarehouseImportRpcRows(rows, zone)
   const { data, error } = await getSupabase().rpc(
     'import_warehouse_inventory_set',
     {

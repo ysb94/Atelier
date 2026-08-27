@@ -111,6 +111,7 @@ import { cn, formatNumber } from '@/lib/utils'
 import { InvoiceItemNameTransformPanel } from './InvoiceItemNameTransformPanel'
 import { InvoiceOptionMapRulesPanel } from './InvoiceOptionMapRulesPanel'
 import { InvoiceOutputStepPanel } from './InvoiceOutputStepPanel'
+import { InvoiceProductListStepPanel } from './InvoiceProductListStepPanel'
 import { InvoicePackingSizeMapPanel } from './InvoicePackingSizeMapPanel'
 import { InvoiceGiftSourceMapPanel } from './InvoiceGiftSourceMapPanel'
 import { InvoicePrefixRequestPanel } from './InvoicePrefixRequestPanel'
@@ -908,6 +909,7 @@ type TodayStep =
   | 'instruction'
   | 'product'
   | 'item'
+  | 'list'
   | 'output'
 
 const TODAY_STEPS: { value: TodayStep; label: string }[] = [
@@ -917,6 +919,7 @@ const TODAY_STEPS: { value: TodayStep; label: string }[] = [
   { value: 'instruction', label: '작업 지시' },
   { value: 'product', label: '품목명 변환' },
   { value: 'item', label: '내품명 변환' },
+  { value: 'list', label: '상품 리스트' },
   { value: 'output', label: '최종 행' },
 ]
 
@@ -1395,7 +1398,7 @@ export function InvoiceWorkPage() {
   const visitedStepsRef = useRef(new Set<TodayStep>())
   visitedStepsRef.current.add(activeStep)
   const shouldComputeItem =
-    activeStep === 'item' || activeStep === 'output'
+    activeStep === 'item' || activeStep === 'list' || activeStep === 'output'
   const baseProductTransformation = useMemo(() => {
     if (
       !inspection ||
@@ -2368,6 +2371,75 @@ export function InvoiceWorkPage() {
                   <Button
                     type="button"
                     disabled={!itemTransformation}
+                    onClick={() => setStep('list')}
+                  >
+                    상품 리스트 보기
+                    <ArrowRight className="size-4" />
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+            ) : null}
+          </TodayStepPanel>
+
+          <TodayStepPanel
+            active={activeStep === 'list'}
+            keepMounted={
+              visitedStepsRef.current.has('list') &&
+              Boolean(inspection) &&
+              headerReady
+            }
+          >
+            {inspection ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>상품 리스트</CardTitle>
+                <CardDescription>
+                  선택한 품목·내품·세트·사은품·포장재를 M번호로 합친 뒤
+                  출고창고용·박스창고용 자리로 나눕니다. 같은 M번호는
+                  강제우선 → 입고일 → 마지막 위치 순으로 자리를 채우고,
+                  자리번호 오름차순으로 보여 줍니다. 출력 전에 비슷한 위치를
+                  동선으로 묶어 A4를 미리 봅니다. 연습 창고를 읽기만 하며
+                  재고를 차감하지 않습니다.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-5">
+                {itemNameCriteriaLoading ? (
+                  <StepCriteriaLoading label="이 브랜드의 내품명 변환 기준을 불러오고 있습니다." />
+                ) : itemNameCriteriaError ? (
+                  <StepCriteriaError
+                    message={itemNameCriteriaError}
+                    onRetry={() => {
+                      void optionMapsQuery.refetch()
+                      void itemNameRulesQuery.refetch()
+                      void accessoryRulesQuery.refetch()
+                    }}
+                  />
+                ) : productTransformation &&
+                  itemTransformation &&
+                  workPlan &&
+                  giftPlan ? (
+                  <InvoiceProductListStepPanel
+                    brandId={brand.id}
+                    productTransformation={productTransformation}
+                    itemTransformation={itemTransformation}
+                    workPlan={workPlan}
+                    giftPlan={giftPlan}
+                  />
+                ) : null}
+
+                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setStep('item')}
+                  >
+                    <ArrowLeft className="size-4" />
+                    내품명 변환으로
+                  </Button>
+                  <Button
+                    type="button"
+                    disabled={!itemTransformation}
                     onClick={() => setStep('output')}
                   >
                     최종 행 보기
@@ -2445,10 +2517,10 @@ export function InvoiceWorkPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setStep('item')}
+                    onClick={() => setStep('list')}
                   >
                     <ArrowLeft className="size-4" />
-                    내품명 변환으로
+                    상품 리스트로
                   </Button>
                   <Button type="button" variant="outline" onClick={resetFile}>
                     <RotateCcw className="size-4" />

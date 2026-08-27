@@ -1,5 +1,6 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Download, Upload } from 'lucide-react'
 import { StylePicker } from '@/components/style-picker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -19,13 +20,19 @@ import {
   restoreWarehouseInventorySet,
 } from '@/lib/api'
 import { parseFile } from '@/lib/import/parse'
-import type { StyleRef, WarehouseStockPosition } from '@/lib/types'
+import type {
+  StyleRef,
+  WarehouseStockPosition,
+  WarehouseZone,
+} from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
 import {
   FINAL_LOCATION_MARK,
   FORCED_PRIORITY_DATE,
   WAREHOUSE_REVIEW_FLAG_LABEL,
   WAREHOUSE_STOCK_ACTION_LABEL,
+  downloadWarehouseInventoryTemplate,
+  formatWarehouseLocation,
   formatWarehouseReceivedOn,
   parseWarehouseLocation,
   parseWarehouseReceivedOn,
@@ -70,19 +77,25 @@ function formatImportedAt(value: string) {
 
 function uniqueStyleRefs(lookup: {
   byStyleNo: Map<string, StyleRef>
+  byName: Map<string, StyleRef[]>
 }): StyleRef[] {
   return Array.from(
     new Map(
-      [...lookup.byStyleNo.values()].map((ref) => [ref.styleId, ref]),
+      [
+        ...lookup.byStyleNo.values(),
+        ...[...lookup.byName.values()].flat(),
+      ].map((ref) => [ref.styleId, ref]),
     ).values(),
   )
 }
 
 export function WarehouseInventoryPanel({
   brandId,
+  brandName,
   view,
 }: {
   brandId: string
+  brandName: string
   view: WarehouseView
 }) {
   const queryClient = useQueryClient()
@@ -90,6 +103,25 @@ export function WarehouseInventoryPanel({
   const [filter, setFilter] = useState<ReviewFilter>('all')
   const [dialog, setDialog] = useState<DialogState>(null)
   const [error, setError] = useState<string | null>(null)
+  const [downloadingTemplate, setDownloadingTemplate] = useState(false)
+  const zone: WarehouseZone = view === 'box' ? 'box_storage' : 'picking'
+  const warehouseLabel = view === 'box' ? '박스창고' : '출고창고'
+
+  async function downloadTemplate() {
+    setDownloadingTemplate(true)
+    setError(null)
+    try {
+      await downloadWarehouseInventoryTemplate(brandName, zone)
+    } catch (reason) {
+      setError(
+        reason instanceof Error
+          ? reason.message
+          : '양식을 내려받지 못했습니다.',
+      )
+    } finally {
+      setDownloadingTemplate(false)
+    }
+  }
 
   const setQuery = useQuery({
     queryKey: ['warehouse-inventory-set', brandId],
@@ -104,7 +136,7 @@ export function WarehouseInventoryPanel({
   })
 
   const rows = positionsQuery.data ?? []
-  const zone = view === 'box' ? 'box_storage' : 'picking'
+  const zoneRowCount = rows.filter((row) => row.zone === zone).length
   const visible = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('ko-KR')
     return (positionsQuery.data ?? [])
@@ -121,7 +153,9 @@ export function WarehouseInventoryPanel({
         return (
           row.styleNo.toLocaleLowerCase('ko-KR').includes(q) ||
           row.styleName.toLocaleLowerCase('ko-KR').includes(q) ||
-          row.locationCode.toLocaleLowerCase('ko-KR').includes(q)
+          formatWarehouseLocation(row)
+            .toLocaleLowerCase('ko-KR')
+            .includes(q)
         )
       })
       .sort((left, right) => {
@@ -161,10 +195,11 @@ export function WarehouseInventoryPanel({
             {activeSet ? (
               <>
                 <span className="text-sm font-medium">
-                  {activeSet.sourceFileName}
+                  {warehouseLabel} {formatNumber(zoneRowCount)}행
                 </span>
                 <span className="text-xs text-muted-foreground">
-                  {formatImportedAt(activeSet.importedAt)} ·{' '}
+                  최근 교체 {activeSet.sourceFileName} ·{' '}
+                  {formatImportedAt(activeSet.importedAt)} · 전체{' '}
                   {formatNumber(activeSet.rowCount)}행
                 </span>
               </>
@@ -197,12 +232,27 @@ export function WarehouseInventoryPanel({
           <Button
             type="button"
             size="sm"
+            variant="outline"
+            disabled={downloadingTemplate}
+            onClick={() => {
+              void downloadTemplate()
+            }}
+          >
+            <Download className="size-3.5" />
+            {downloadingTemplate
+              ? '준비 중...'
+              : `${warehouseLabel} 양식 다운로드`}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
             onClick={() => {
               setError(null)
               setDialog({ kind: 'import' })
             }}
           >
-            최신 엑셀로 새로 초기화
+            <Upload className="size-3.5" />
+            {warehouseLabel} 엑셀 업로드
           </Button>
         </div>
       </div>
@@ -242,7 +292,7 @@ export function WarehouseInventoryPanel({
         <table className="min-w-[1100px] w-full border-collapse text-xs">
           <thead className="sticky top-0 z-10 bg-muted/90">
             <tr className="text-left text-[10px] uppercase tracking-wide text-muted-foreground">
-              <th className="border-b border-border px-2 py-2">우선</th>
+              <th className="border-b border-border px-2 py-2">순서</th>
               <th className="border-b border-border px-2 py-2">M번호</th>
               <th className="border-b border-border px-2 py-2">상품명</th>
               <th className="border-b border-border px-2 py-2">위치</th>
@@ -275,7 +325,7 @@ export function WarehouseInventoryPanel({
                 >
                   {activeSet
                     ? view === 'outbound'
-                      ? '출고창고에 충원된 박스가 없습니다. 박스창고에서 충원하세요.'
+                      ? '출고창고 재고가 없습니다. 엑셀을 올리거나 박스창고에서 충원하세요.'
                       : '조건에 맞는 자리가 없습니다.'
                     : '엑셀을 가져와 연습 데이터를 만드세요.'}
                 </td>
@@ -292,8 +342,15 @@ export function WarehouseInventoryPanel({
                       'text-muted-foreground',
                   )}
                 >
-                  <td className="px-2 py-1.5 tabular-nums">
-                    {row.usageRank ?? '—'}
+                  <td className="px-2 py-1.5">
+                    <span className="inline-flex items-center gap-1 tabular-nums">
+                      {row.usageRank ?? '—'}
+                      {row.isForcedPriority ? (
+                        <Badge variant="warning" className="px-1.5 py-0 text-[10px]">
+                          우선
+                        </Badge>
+                      ) : null}
+                    </span>
                   </td>
                   <td className="px-2 py-1.5 font-medium tabular-nums">
                     {row.styleNo || row.sourceStyleNo}
@@ -301,13 +358,21 @@ export function WarehouseInventoryPanel({
                   <td className="max-w-[220px] truncate px-2 py-1.5">
                     {row.styleName}
                   </td>
-                  <td className="px-2 py-1.5">
-                    {row.locationCode}
-                    {row.isFinalLocation ? (
-                      <span className="ml-1 text-muted-foreground">마지막</span>
-                    ) : null}
+                  <td
+                    className="px-2 py-1.5"
+                    title={row.isFinalLocation ? '마지막 위치' : undefined}
+                  >
+                    {formatWarehouseLocation(row)}
                   </td>
-                  <td className="px-2 py-1.5">
+                  <td
+                    className={cn(
+                      'px-2 py-1.5',
+                      row.isForcedPriority && 'text-muted-foreground',
+                    )}
+                    title={
+                      row.isForcedPriority ? '강제우선 (000000)' : undefined
+                    }
+                  >
                     {formatWarehouseReceivedOn(row)}
                   </td>
                   <td className="px-2 py-1.5 text-right tabular-nums">
@@ -378,6 +443,8 @@ export function WarehouseInventoryPanel({
       {dialog?.kind === 'import' ? (
         <ImportDialog
           brandId={brandId}
+          brandName={brandName}
+          zone={zone}
           hasActive={Boolean(activeSet)}
           onClose={() => setDialog(null)}
           onDone={async () => {
@@ -414,7 +481,7 @@ export function WarehouseInventoryPanel({
       {dialog?.kind === 'deplete' ? (
         <ConfirmDialog
           title="자리 소진"
-          body={`${dialog.row.styleNo} ${dialog.row.locationCode}의 잔여 박스와 개봉 낱개를 0으로 만듭니다.`}
+          body={`${dialog.row.styleNo} ${formatWarehouseLocation(dialog.row)}의 잔여 박스와 개봉 낱개를 0으로 만듭니다.`}
           confirmLabel="소진"
           onClose={() => setDialog(null)}
           onConfirm={async () => {
@@ -520,12 +587,16 @@ function Overlay({
 
 function ImportDialog({
   brandId,
+  brandName,
+  zone,
   hasActive,
   onClose,
   onDone,
   onError,
 }: {
   brandId: string
+  brandName: string
+  zone: WarehouseZone
   hasActive: boolean
   onClose: () => void
   onDone: () => Promise<void>
@@ -537,7 +608,10 @@ function ImportDialog({
   const [fileName, setFileName] = useState('')
   const [summary, setSummary] = useState<WarehouseImportSummary | null>(null)
   const [parsing, setParsing] = useState(false)
+  const [downloading, setDownloading] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const warehouseLabel = zone === 'picking' ? '출고창고' : '박스창고'
 
   const setsQuery = useQuery({
     queryKey: ['warehouse-inventory-sets', brandId],
@@ -550,7 +624,7 @@ function ImportDialog({
   const importMutation = useMutation({
     mutationFn: async () => {
       if (!prepared || !fileName) throw new Error('파일을 먼저 검수하세요.')
-      return importWarehouseInventorySet(brandId, fileName, prepared)
+      return importWarehouseInventorySet(brandId, fileName, prepared, zone)
     },
     onSuccess: async () => {
       onError(null)
@@ -589,7 +663,15 @@ function ImportDialog({
           parsed.map((row) => row.normalizedStyleNo).filter(Boolean),
         ),
       ]
-      const lookup = await listStyleRefsForLookup(brandId, { styleNos })
+      const names = [
+        ...new Set(
+          parsed
+            .filter((row) => !row.normalizedStyleNo)
+            .map((row) => row.sourceProductName)
+            .filter(Boolean),
+        ),
+      ]
+      const lookup = await listStyleRefsForLookup(brandId, { styleNos, names })
       const rows = prepareWarehouseImportRows(parsed, uniqueStyleRefs(lookup))
       setPrepared(rows)
       setSummary(summarizeWarehouseImport(rows))
@@ -606,26 +688,80 @@ function ImportDialog({
   }
 
   return (
-    <Overlay title="최신 엑셀로 새로 초기화" onClose={onClose} wide>
+    <Overlay title={`${warehouseLabel} 엑셀 교체`} onClose={onClose} wide>
       <p className="text-xs text-muted-foreground">
         {hasActive
-          ? '현재 연습 세트와 작업 이력은 삭제하지 않고 보관합니다. 새 세트가 활성화됩니다.'
-          : '상품업로드 시트를 읽어 연습 데이터로 가져옵니다.'}
+          ? `${warehouseLabel}만 새 엑셀로 교체하고 다른 창고는 그대로 유지합니다. 교체 전 전체 세트와 작업 이력은 삭제하지 않고 보관합니다.`
+          : `양식을 내려받아 예시대로 채운 뒤 올리면 ${warehouseLabel} 연습 데이터로 가져옵니다.`}{' '}
+        시트 이름 `상품업로드`와 첫 줄 헤더는 그대로 두세요. 예시 행은 지우고
+        실제 재고를 넣으면 됩니다.
       </p>
-      <label className="block">
-        <span className="mb-1 block text-xs text-muted-foreground">
-          창고 XLSX
-        </span>
-        <input
-          type="file"
-          accept=".xlsx,.xls,.xlsm,.csv"
-          disabled={parsing || importMutation.isPending}
-          onChange={(event) => {
-            const file = event.target.files?.[0]
-            if (file) void handleFile(file)
-          }}
-        />
-      </label>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-2 rounded-lg border border-border p-3">
+          <p className="text-xs font-medium">1. 예시 양식 받기</p>
+          <p className="text-[11px] text-muted-foreground">
+            처음 작성한다면 예시 3행과 작성안내가 든 양식부터 받으세요.
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={downloading || parsing || importMutation.isPending}
+            onClick={async () => {
+              setDownloading(true)
+              setLocalError(null)
+              try {
+                await downloadWarehouseInventoryTemplate(brandName, zone)
+              } catch (reason) {
+                setLocalError(
+                  reason instanceof Error
+                    ? reason.message
+                    : '양식을 내려받지 못했습니다.',
+                )
+              } finally {
+                setDownloading(false)
+              }
+            }}
+          >
+            <Download className="size-3.5" />
+            {downloading ? '준비 중...' : '예시 양식 다운로드'}
+          </Button>
+        </div>
+
+        <div className="space-y-2 rounded-lg border border-primary/30 bg-primary/5 p-3">
+          <p className="text-xs font-medium">2. 작성한 엑셀 올리기</p>
+          <p className="text-[11px] text-muted-foreground">
+            실제 {warehouseLabel} 재고를 채운 XLSX를 선택하면 먼저 내용을
+            검수합니다.
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            disabled={parsing || importMutation.isPending}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload className="size-3.5" />
+            {parsing ? '엑셀 확인 중...' : '엑셀 파일 선택'}
+          </Button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls,.xlsm,.csv"
+            className="hidden"
+            disabled={parsing || importMutation.isPending}
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              event.target.value = ''
+              if (file) void handleFile(file)
+            }}
+          />
+          {fileName ? (
+            <p className="break-all text-[11px] text-muted-foreground">
+              선택한 파일: <span className="font-medium text-foreground">{fileName}</span>
+            </p>
+          ) : null}
+        </div>
+      </div>
       {summary ? (
         <div className="grid gap-2 text-xs sm:grid-cols-5">
           <Count label="전체" value={summary.total} />
@@ -646,12 +782,19 @@ function ImportDialog({
           disabled={!prepared || importMutation.isPending || parsing}
           onClick={() => importMutation.mutate()}
         >
-          {importMutation.isPending ? '가져오는 중…' : '새 세트 활성화'}
+          {importMutation.isPending
+            ? '가져오는 중…'
+            : `${warehouseLabel}만 교체`}
         </Button>
       </div>
       {archived.length > 0 ? (
         <div className="space-y-2 border-t border-border pt-4">
-          <p className="text-xs font-medium">보관한 이전 세트</p>
+          <div>
+            <p className="text-xs font-medium">보관한 이전 전체 세트</p>
+            <p className="text-[11px] text-muted-foreground">
+              복원하면 박스창고와 출고창고가 모두 당시 상태로 돌아갑니다.
+            </p>
+          </div>
           {archived.map((set) => (
             <div
               key={set.id}
@@ -668,7 +811,7 @@ function ImportDialog({
                 disabled={restoreMutation.isPending}
                 onClick={() => restoreMutation.mutate(set.id)}
               >
-                복원
+                전체 세트 복원
               </Button>
             </div>
           ))}
@@ -845,7 +988,7 @@ function MoveDialog({
       onClose={onClose}
     >
       <p className="text-xs text-muted-foreground">
-        {row.styleNo} · {row.locationCode} · 잔여 {formatNumber(row.remainingBoxes)}박스.
+        {row.styleNo} · {formatWarehouseLocation(row)} · 잔여 {formatNumber(row.remainingBoxes)}박스.
         일부만 옮기면 원래 입고일을 유지한 새 행으로 나눕니다.
       </p>
       <label className="block space-y-1 text-xs">

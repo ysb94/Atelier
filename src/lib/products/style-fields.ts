@@ -114,6 +114,8 @@ export function ownerCompleteness(
     (f) =>
       f.owner === owner &&
       f.systemKey !== 'styleNo' &&
+      f.systemKey !== 'warehouse' &&
+      f.systemKey !== 'onHand' &&
       f.level !== 'sku',
   )
   if (owned.length === 0) return { filled: 0, total: 0, ratio: 1 }

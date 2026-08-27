@@ -110,7 +110,11 @@ export function WarehousePage() {
           <Badge variant="warning">연습 데이터</Badge>
         </CardHeader>
         <CardContent>
-          <WarehouseInventoryPanel brandId={brand.id} view={activeView} />
+          <WarehouseInventoryPanel
+            brandId={brand.id}
+            brandName={brand.name}
+            view={activeView}
+          />
         </CardContent>
       </Card>
     </div>

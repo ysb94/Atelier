@@ -547,6 +547,22 @@ export type InvoicePackingSizeMap = {
 }
 
 export type WarehouseZone = 'box_storage' | 'picking'
+
+export type InvoicePickingRoutePresetGroup = {
+  zonePrefixes: string[]
+}
+
+export type InvoicePickingRoutePreset = {
+  id: string
+  brandId: string
+  warehouseZone: WarehouseZone
+  name: string
+  sortOrder: number
+  routeGroups: InvoicePickingRoutePresetGroup[]
+  createdAt: string
+  updatedAt: string
+}
+
 export type WarehouseInventoryKind = 'sandbox' | 'live'
 export type WarehouseInventoryStatus = 'active' | 'archived'
 export type WarehouseReviewFlag =

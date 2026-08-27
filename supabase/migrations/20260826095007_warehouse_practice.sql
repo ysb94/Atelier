@@ -340,7 +340,11 @@ as $$
 declare
   v_company_id uuid;
   v_warehouse_id uuid;
+  v_previous_set public.warehouse_inventory_sets;
   v_set public.warehouse_inventory_sets;
+  v_zone text;
+  v_zone_count integer;
+  v_row_count integer;
 begin
   perform set_config('statement_timeout', '60s', true);
 
@@ -356,13 +360,14 @@ begin
   if p_rows is null or jsonb_typeof(p_rows) <> 'array' or jsonb_array_length(p_rows) = 0 then
     raise exception '가져올 창고 행이 없습니다.';
   end if;
-  if exists (
-    select 1
-    from jsonb_array_elements(p_rows) as item
-    where coalesce(nullif(btrim(item ->> 'zone'), ''), 'box_storage')
-      not in ('box_storage', 'picking')
-  ) then
-    raise exception '알 수 없는 창고 구역입니다.';
+  select
+    count(distinct coalesce(nullif(btrim(item ->> 'zone'), ''), 'box_storage')),
+    min(coalesce(nullif(btrim(item ->> 'zone'), ''), 'box_storage'))
+    into v_zone_count, v_zone
+  from jsonb_array_elements(p_rows) as item;
+
+  if v_zone_count <> 1 or v_zone not in ('box_storage', 'picking') then
+    raise exception '한 번에 한 창고 구역의 행만 가져올 수 있습니다.';
   end if;
 
   select brand.company_id
@@ -373,17 +378,28 @@ begin
     raise exception '브랜드를 찾을 수 없습니다.';
   end if;
 
-  insert into public.warehouses (company_id, name)
-  values (v_company_id, '연습 창고')
-  on conflict (company_id, name) do update
-    set name = excluded.name
-  returning id into v_warehouse_id;
-
-  update public.warehouse_inventory_sets
-  set status = 'archived'
+  select *
+    into v_previous_set
+  from public.warehouse_inventory_sets
   where brand_id = p_brand_id
     and kind = 'sandbox'
-    and status = 'active';
+    and status = 'active'
+  limit 1
+  for update;
+
+  if v_previous_set.id is null then
+    insert into public.warehouses (company_id, name)
+    values (v_company_id, '연습 창고')
+    on conflict (company_id, name) do update
+      set name = excluded.name
+    returning id into v_warehouse_id;
+  else
+    v_warehouse_id := v_previous_set.warehouse_id;
+
+    update public.warehouse_inventory_sets
+    set status = 'archived'
+    where id = v_previous_set.id;
+  end if;
 
   insert into public.warehouse_inventory_sets (
     brand_id,
@@ -400,10 +416,86 @@ begin
     'sandbox',
     'active',
     btrim(p_source_file_name),
-    jsonb_array_length(p_rows),
+    0,
     auth.uid()
   )
   returning * into v_set;
+
+  if v_previous_set.id is not null then
+    insert into public.warehouse_stock_positions (
+      brand_id,
+      set_id,
+      warehouse_id,
+      location_id,
+      style_id,
+      source_style_no,
+      normalized_style_no,
+      source_product_name,
+      received_on,
+      received_on_raw,
+      is_forced_priority,
+      is_final_location,
+      units_per_box,
+      remaining_boxes,
+      opened_units,
+      review_flags,
+      source_row_number,
+      note
+    )
+    select
+      pos.brand_id,
+      v_set.id,
+      pos.warehouse_id,
+      pos.location_id,
+      pos.style_id,
+      pos.source_style_no,
+      pos.normalized_style_no,
+      pos.source_product_name,
+      pos.received_on,
+      pos.received_on_raw,
+      pos.is_forced_priority,
+      pos.is_final_location,
+      pos.units_per_box,
+      pos.remaining_boxes,
+      pos.opened_units,
+      pos.review_flags,
+      pos.source_row_number,
+      pos.note
+    from public.warehouse_stock_positions as pos
+    join public.warehouse_locations as loc
+      on loc.id = pos.location_id
+    where pos.brand_id = p_brand_id
+      and pos.set_id = v_previous_set.id
+      and loc.zone <> v_zone;
+
+    insert into public.warehouse_boxes (
+      brand_id,
+      set_id,
+      display_code,
+      location_id,
+      style_id,
+      received_on,
+      initial_qty,
+      current_qty,
+      status
+    )
+    select
+      stock_box.brand_id,
+      v_set.id,
+      stock_box.display_code,
+      stock_box.location_id,
+      stock_box.style_id,
+      stock_box.received_on,
+      stock_box.initial_qty,
+      stock_box.current_qty,
+      stock_box.status
+    from public.warehouse_boxes as stock_box
+    join public.warehouse_locations as loc
+      on loc.id = stock_box.location_id
+    where stock_box.brand_id = p_brand_id
+      and stock_box.set_id = v_previous_set.id
+      and loc.zone <> v_zone;
+  end if;
 
   insert into public.warehouse_locations (
     company_id,
@@ -415,7 +507,7 @@ begin
     v_company_id,
     v_warehouse_id,
     coalesce(nullif(btrim(item ->> 'location_code'), ''), '(빈 자리)'),
-    coalesce(nullif(btrim(item ->> 'zone'), ''), 'box_storage')
+    v_zone
   from jsonb_array_elements(p_rows) as item
   on conflict (warehouse_id, zone, code) do nothing;
 
@@ -468,8 +560,22 @@ begin
   from jsonb_array_elements(p_rows) as item
   join public.warehouse_locations as loc
     on loc.warehouse_id = v_warehouse_id
-    and loc.zone = coalesce(nullif(btrim(item ->> 'zone'), ''), 'box_storage')
-    and loc.code = coalesce(nullif(btrim(item ->> 'location_code'), ''), '(빈 자리)');
+    and loc.zone = v_zone
+    and loc.code = coalesce(
+      nullif(btrim(item ->> 'location_code'), ''),
+      '(빈 자리)'
+    );
+
+  select count(*)::integer
+    into v_row_count
+  from public.warehouse_stock_positions
+  where brand_id = p_brand_id
+    and set_id = v_set.id;
+
+  update public.warehouse_inventory_sets
+  set row_count = v_row_count
+  where id = v_set.id
+  returning * into v_set;
 
   insert into public.warehouse_stock_movements (
     brand_id,
@@ -484,7 +590,10 @@ begin
     v_set.id,
     'import',
     jsonb_array_length(p_rows),
-    '엑셀 연습 데이터 가져오기',
+    case
+      when v_zone = 'picking' then '출고창고 엑셀 교체'
+      else '박스창고 엑셀 교체'
+    end,
     auth.uid()
   );
 
@@ -493,7 +602,7 @@ end;
 $$;
 
 comment on function public.import_warehouse_inventory_set(uuid, text, jsonb) is
-  '연습 창고 세트를 활성화하고 이전 세트는 보관한다. 송장 재고와 연결하지 않는다.';
+  '선택한 연습 창고 존만 엑셀로 교체하고 다른 존은 새 활성 스냅샷에 보존한다.';
 
 revoke all on function public.import_warehouse_inventory_set(uuid, text, jsonb)
   from public, anon;
