@@ -30,8 +30,8 @@ const KINDS: { id: UploadKind; label: string; description: string }[] = [
   },
   {
     id: 'usage',
-    label: '사용처별 바코드',
-    description: '사용처에 자사 바코드를 파일로 일괄 연결합니다.',
+    label: '출고업체별 바코드',
+    description: '출고업체에 자사 바코드를 파일로 일괄 연결합니다.',
   },
   {
     id: 'barcodes',
@@ -157,17 +157,19 @@ export function DataUploadPage() {
       {kind === 'usage' ? (
         <div className="space-y-4">
           {targetsQuery.isLoading ? (
-            <p className="text-sm text-muted-foreground">사용처를 불러오는 중...</p>
+            <p className="text-sm text-muted-foreground">
+              출고업체를 불러오는 중...
+            </p>
           ) : targets.length === 0 ? (
             <Card>
               <CardContent className="space-y-3 p-6">
-                <p className="text-sm font-medium">사용처가 없습니다</p>
+                <p className="text-sm font-medium">출고업체가 없습니다</p>
                 <p className="text-sm text-muted-foreground">
-                  사용처를 만든 뒤 자사 바코드를 일괄 연결할 수 있습니다.
+                  출고업체를 만든 뒤 자사 바코드를 일괄 연결할 수 있습니다.
                 </p>
                 <Link to={`/b/${brand.slug}/settings/usage-targets`}>
                   <Button type="button" size="sm">
-                    사용처 관리
+                    출고업체 관리
                   </Button>
                 </Link>
               </CardContent>
@@ -177,7 +179,7 @@ export function DataUploadPage() {
               <CardContent className="space-y-3 p-6">
                 <p className="text-sm font-medium">자사 바코드가 없습니다</p>
                 <p className="text-sm text-muted-foreground">
-                  사용처 연결 전에 자사 바코드 마스터를 먼저 등록하세요.
+                  출고업체 연결 전에 자사 바코드 마스터를 먼저 등록하세요.
                 </p>
                 <Link to={`/b/${brand.slug}/barcodes`}>
                   <Button type="button" size="sm">
@@ -190,7 +192,7 @@ export function DataUploadPage() {
             <>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                  사용처
+                  출고업체
                 </span>
                 <Select
                   className="h-9 max-w-xs"
@@ -200,7 +202,7 @@ export function DataUploadPage() {
                   {targets.map((target) => (
                     <option key={target.id} value={target.id}>
                       {target.name}
-                      {target.active ? '' : ' (종료)'}
+                      {target.active ? '' : ' (비활성)'}
                     </option>
                   ))}
                 </Select>
@@ -287,7 +289,7 @@ export function DataUploadPage() {
               거래처 코드 파일 업로드는 준비 중입니다
             </p>
             <p className="text-sm text-muted-foreground">
-              거래처 코드 화면에서 단건으로 등록할 수 있습니다. 상품·사용처
+              거래처 코드 화면에서 단건으로 등록할 수 있습니다. 상품·출고업체
               업로드가 먼저 준비되어 있습니다.
             </p>
             <Link to={`/b/${brand.slug}/partner-codes`}>

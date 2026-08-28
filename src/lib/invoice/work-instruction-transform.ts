@@ -9,6 +9,7 @@ import type {
   InvoiceGiftRequestStatus,
   InvoiceWorkInstruction,
   InvoiceWorkInstructionCountBasis,
+  InvoiceWorkInstructionMatchMode,
   StyleRef,
 } from '@/lib/types'
 
@@ -57,11 +58,18 @@ export type WorkInstructionPlan = {
 type IndexedItem = {
   instruction: InvoiceWorkInstruction
   itemId: string
+  itemKey: string
   productName: string
 }
 
 function productKey(value: string): string {
   return normalizeInvoiceText(value)
+}
+
+function matchModeOf(
+  instruction: InvoiceWorkInstruction,
+): InvoiceWorkInstructionMatchMode {
+  return instruction.matchMode === 'prefix' ? 'prefix' : 'exact'
 }
 
 function hasPeriod(instruction: InvoiceWorkInstruction): boolean {
@@ -98,6 +106,19 @@ function pickHit(hits: IndexedItem[]): IndexedItem | null {
   const dated = hits.filter((hit) => hasPeriod(hit.instruction))
   if (dated.length === 1) return dated[0] ?? null
   return null
+}
+
+function pickLongestPrefix(hits: IndexedItem[]): IndexedItem | null {
+  if (hits.length === 0) return null
+  let maxLen = 0
+  for (const hit of hits) {
+    if (hit.itemKey.length > maxLen) maxLen = hit.itemKey.length
+  }
+  return pickHit(hits.filter((hit) => hit.itemKey.length === maxLen))
+}
+
+function prefixHitsFor(rowKey: string, prefixes: IndexedItem[]): IndexedItem[] {
+  return prefixes.filter((hit) => rowKey.startsWith(hit.itemKey))
 }
 
 export function invoiceWorkInstructionStatus(
@@ -178,10 +199,10 @@ function filePeriod(rows: SabangnetOrderRow[]): {
 }
 
 /**
- * 활성 작업 지시를 원본 품목명 exact-match로 찾는다.
- * 적용 기간이 있으면 주문일시가 그 안일 때만 붙이고, 없으면 항상 적용한다.
- * 기간 있는 지시가 기간 없는 지시와 겹치면 기간 있는 쪽을 쓴다.
- * 같은 종류의 지시가 둘 이상 맞으면 충돌로 두고 붙이지 않는다.
+ * 활성 작업 지시를 원본 품목명으로 찾는다.
+ * exact는 완전일치, prefix는 정규화한 뒤 등록 글자로 시작할 때만 맞춘다.
+ * 완전일치가 시작어보다 앞선다. 시작어끼리는 더 긴 쪽이 이긴다.
+ * 기간 있는 지시가 항상 지시보다 앞선다. 같은 순위가 둘 이상이면 충돌이다.
  */
 export function planWorkInstructions(
   rows: SabangnetOrderRow[],
@@ -189,19 +210,27 @@ export function planWorkInstructions(
 ): WorkInstructionPlan {
   const { first, last } = filePeriod(rows)
   const active = instructions.filter((item) => item.isActive)
-  const byProduct = new Map<string, IndexedItem[]>()
+  const exactByProduct = new Map<string, IndexedItem[]>()
+  const prefixItems: IndexedItem[] = []
 
   for (const instruction of active) {
+    const mode = matchModeOf(instruction)
     for (const item of instruction.items) {
       const key = productKey(item.productName)
       if (!key) continue
-      const list = byProduct.get(key) ?? []
-      list.push({
+      const indexed: IndexedItem = {
         instruction,
         itemId: item.id,
+        itemKey: key,
         productName: item.productName,
-      })
-      byProduct.set(key, list)
+      }
+      if (mode === 'prefix') {
+        prefixItems.push(indexed)
+        continue
+      }
+      const list = exactByProduct.get(key) ?? []
+      list.push(indexed)
+      exactByProduct.set(key, list)
     }
   }
 
@@ -212,74 +241,99 @@ export function planWorkInstructions(
   let outOfPeriodRowCount = 0
   let undatedRowCount = 0
 
-  for (const row of rows) {
-    const key = productKey(row.productName)
-    if (!key) continue
-    const candidates = byProduct.get(key)
-    if (!candidates) continue
-    const orderMoment = orderMomentOf(row)
-    for (const hit of candidates) {
-      nameMatchedByInstruction.set(
-        hit.instruction.id,
-        (nameMatchedByInstruction.get(hit.instruction.id) ?? 0) + 1,
-      )
-    }
-    if (!orderMoment) {
-      const needsDate = candidates.some((hit) => hasPeriod(hit.instruction))
-      if (needsDate) undatedRowCount += 1
-      const alwaysOn = candidates.filter(
-        (hit) => !hasPeriod(hit.instruction) && hit.instruction.isActive,
-      )
-      if (alwaysOn.length === 0) continue
-      const chosen = pickHit(alwaysOn)
-      if (!chosen) continue
-      usedKeys.add(`${chosen.instruction.id}\u0000${key}`)
-      matchByRowNumber.set(row.rowNumber, {
-        instructionId: chosen.instruction.id,
-        instructionTitle: chosen.instruction.title,
-        labelText: chosen.instruction.labelText,
-        itemId: chosen.itemId,
-      })
-      continue
-    }
-
-    const hits = candidates.filter((hit) =>
-      instructionApplies(hit.instruction, orderMoment),
-    )
-    if (hits.length === 0) {
-      outOfPeriodRowCount += 1
-      continue
-    }
-
-    const chosen = pickHit(hits)
-    if (!chosen) {
-      const existing = conflictByKey.get(key)
-      if (existing) {
-        existing.rowCount += 1
-      } else {
-        const unique = new Map<string, string>()
-        for (const hit of hits) {
-          unique.set(hit.instruction.id, hit.instruction.title)
-        }
-        conflictByKey.set(key, {
-          productName: hits[0]?.productName ?? row.productName,
-          rowCount: 1,
-          candidates: [...unique].map(([instructionId, instructionTitle]) => ({
-            instructionId,
-            instructionTitle,
-          })),
-        })
-      }
-      continue
-    }
-
-    usedKeys.add(`${chosen.instruction.id}\u0000${key}`)
-    matchByRowNumber.set(row.rowNumber, {
+  function recordMatch(rowNumber: number, chosen: IndexedItem) {
+    usedKeys.add(`${chosen.instruction.id}\u0000${chosen.itemKey}`)
+    matchByRowNumber.set(rowNumber, {
       instructionId: chosen.instruction.id,
       instructionTitle: chosen.instruction.title,
       labelText: chosen.instruction.labelText,
       itemId: chosen.itemId,
     })
+  }
+
+  function recordConflict(rowKey: string, productName: string, hits: IndexedItem[]) {
+    const existing = conflictByKey.get(rowKey)
+    if (existing) {
+      existing.rowCount += 1
+      return
+    }
+    const unique = new Map<string, string>()
+    for (const hit of hits) {
+      unique.set(hit.instruction.id, hit.instruction.title)
+    }
+    conflictByKey.set(rowKey, {
+      productName,
+      rowCount: 1,
+      candidates: [...unique].map(([instructionId, instructionTitle]) => ({
+        instructionId,
+        instructionTitle,
+      })),
+    })
+  }
+
+  function chooseHits(hits: IndexedItem[], preferLongest: boolean) {
+    return preferLongest ? pickLongestPrefix(hits) : pickHit(hits)
+  }
+
+  for (const row of rows) {
+    const key = productKey(row.productName)
+    if (!key) continue
+    const exact = exactByProduct.get(key) ?? []
+    const prefixes = prefixHitsFor(key, prefixItems)
+    if (exact.length === 0 && prefixes.length === 0) continue
+
+    const orderMoment = orderMomentOf(row)
+    const counted = new Set<string>()
+    for (const hit of [...exact, ...prefixes]) {
+      if (counted.has(hit.instruction.id)) continue
+      counted.add(hit.instruction.id)
+      nameMatchedByInstruction.set(
+        hit.instruction.id,
+        (nameMatchedByInstruction.get(hit.instruction.id) ?? 0) + 1,
+      )
+    }
+
+    if (!orderMoment) {
+      const needsDate =
+        exact.some((hit) => hasPeriod(hit.instruction)) ||
+        prefixes.some((hit) => hasPeriod(hit.instruction))
+      if (needsDate) undatedRowCount += 1
+      const exactAlways = exact.filter((hit) => !hasPeriod(hit.instruction))
+      if (exactAlways.length > 0) {
+        const chosen = chooseHits(exactAlways, false)
+        if (chosen) recordMatch(row.rowNumber, chosen)
+        else recordConflict(key, row.productName, exactAlways)
+        continue
+      }
+      const prefixAlways = prefixes.filter((hit) => !hasPeriod(hit.instruction))
+      if (prefixAlways.length === 0) continue
+      const chosen = chooseHits(prefixAlways, true)
+      if (chosen) recordMatch(row.rowNumber, chosen)
+      else recordConflict(key, row.productName, prefixAlways)
+      continue
+    }
+
+    const exactHits = exact.filter((hit) =>
+      instructionApplies(hit.instruction, orderMoment),
+    )
+    if (exactHits.length > 0) {
+      const chosen = chooseHits(exactHits, false)
+      if (chosen) recordMatch(row.rowNumber, chosen)
+      else recordConflict(key, row.productName, exactHits)
+      continue
+    }
+
+    const prefixHits = prefixes.filter((hit) =>
+      instructionApplies(hit.instruction, orderMoment),
+    )
+    if (prefixHits.length > 0) {
+      const chosen = chooseHits(prefixHits, true)
+      if (chosen) recordMatch(row.rowNumber, chosen)
+      else recordConflict(key, row.productName, prefixHits)
+      continue
+    }
+
+    outOfPeriodRowCount += 1
   }
 
   const unusedProductNames: WorkInstructionPlan['unusedProductNames'] = []

@@ -30,6 +30,7 @@ import {
 import {
   INVOICE_GIFT_REQUEST_STATUS_LABEL,
   INVOICE_WORK_INSTRUCTION_COUNT_BASIS_LABEL,
+  INVOICE_WORK_INSTRUCTION_MATCH_MODE_LABEL,
   type InvoiceWorkInstruction,
 } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
@@ -88,6 +89,8 @@ export function InvoiceWorkInstructionPanel({
         instruction.title,
         instruction.labelText,
         instruction.note,
+        INVOICE_WORK_INSTRUCTION_MATCH_MODE_LABEL[instruction.matchMode ?? 'exact'],
+        instruction.startsAt && instruction.endsAt ? '기간' : '항상',
         ...instruction.items.map((item) => item.productName),
         ...(instruction.outgoingProducts ?? []).flatMap((ref) => [
           ref.styleNo,
@@ -148,8 +151,9 @@ export function InvoiceWorkInstructionPanel({
         <div>
           <CardTitle>작업 지시</CardTitle>
           <CardDescription className="mt-1">
-            원본 품목명이 일치하면 최종 품목명 앞에 표시 문구를 붙입니다.
-            Gift box 같은 나가는 제품을 고르면 오늘 작업에서 수량을 셉니다.
+            완전일치 또는 시작어로 원본 품목명을 찾아 최종 품목명 앞에 표시
+            문구를 붙입니다. 적용은 항상 또는 기간입니다. Gift box 같은
+            나가는 제품을 고르면 오늘 작업에서 수량을 셉니다.
           </CardDescription>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -282,13 +286,14 @@ export function InvoiceWorkInstructionPanel({
                         </span>
                         <span className="block text-xs text-muted-foreground">
                           {instruction.labelText}
+                          {` · ${INVOICE_WORK_INSTRUCTION_MATCH_MODE_LABEL[instruction.matchMode ?? 'exact']}`}
                           {instruction.startsAt && instruction.endsAt
-                            ? ` · ${formatPeriod(instruction.startsAt, instruction.endsAt)}`
-                            : ' · 항상 적용'}
+                            ? ` · 기간 ${formatPeriod(instruction.startsAt, instruction.endsAt)}`
+                            : ' · 항상'}
                           {instruction.outgoingProducts?.length
                             ? ` · ${INVOICE_WORK_INSTRUCTION_COUNT_BASIS_LABEL[instruction.countBasis]} · ${instruction.outgoingProducts.map((ref) => ref.name).join(', ')}`
                             : ''}
-                          {` · 대상 품목 ${formatNumber(instruction.items.length)}건`}
+                          {` · 대상 ${formatNumber(instruction.items.length)}건`}
                         </span>
                       </span>
                     </button>

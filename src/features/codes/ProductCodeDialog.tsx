@@ -343,7 +343,7 @@ export function ProductCodeDialog({
               {title}
             </h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              상품·구성까지 확정된 자사 바코드 마스터입니다. 사용처 등록은 사용처별
+              상품·구성까지 확정된 자사 바코드 마스터입니다. 출고업체 등록은 출고업체별
               바코드 메뉴에서 합니다.
             </p>
           </div>

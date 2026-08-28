@@ -2,13 +2,14 @@ import type {
   InvoiceWorkInstruction,
   InvoiceWorkInstructionCountBasis,
   InvoiceWorkInstructionItem,
+  InvoiceWorkInstructionMatchMode,
   StyleRef,
 } from '@/lib/types'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 
 const INSTRUCTION_COLUMNS =
-  'id, brand_id, title, label_text, is_active, note, starts_at, ends_at, count_basis, created_at, updated_at'
+  'id, brand_id, title, label_text, is_active, note, starts_at, ends_at, match_mode, count_basis, created_at, updated_at'
 const ITEM_COLUMNS =
   'id, instruction_id, product_name, normalized_product_name'
 const PRODUCT_EMBED =
@@ -24,6 +25,7 @@ type InstructionRow = {
   note: string
   starts_at: string | null
   ends_at: string | null
+  match_mode: string | null
   count_basis: string | null
   created_at: string
   updated_at: string
@@ -55,6 +57,12 @@ export class InvoiceWorkInstructionStoreError extends Error {
     super(message)
     this.name = 'InvoiceWorkInstructionStoreError'
   }
+}
+
+function parseMatchMode(
+  value: string | null | undefined,
+): InvoiceWorkInstructionMatchMode {
+  return value === 'prefix' ? 'prefix' : 'exact'
 }
 
 function parseCountBasis(
@@ -135,6 +143,7 @@ function toInstruction(row: InstructionRow): InvoiceWorkInstruction {
     note: row.note,
     startsAt: toOptionalMoment(row.starts_at),
     endsAt: toOptionalMoment(row.ends_at),
+    matchMode: parseMatchMode(row.match_mode),
     countBasis: parseCountBasis(row.count_basis),
     outgoingProducts: toOutgoingProducts(row.invoice_work_instruction_products),
     items: (row.invoice_work_instruction_items ?? [])
@@ -185,6 +194,7 @@ export type InvoiceWorkInstructionInput = {
   note?: string
   startsAt?: string | null
   endsAt?: string | null
+  matchMode?: InvoiceWorkInstructionMatchMode
   countBasis?: InvoiceWorkInstructionCountBasis
   outgoingStyleIds?: string[]
   items: InvoiceWorkInstructionItemInput[]
@@ -234,9 +244,13 @@ function validate(input: InvoiceWorkInstructionInput) {
     items.push({ productName })
   }
 
+  const matchMode = parseMatchMode(input.matchMode)
+
   if (items.length === 0) {
     throw new InvoiceWorkInstructionStoreError(
-      '원본 품목명을 한 개 이상 넣으세요.',
+      matchMode === 'prefix'
+        ? '시작어를 한 개 이상 넣으세요.'
+        : '원본 품목명을 한 개 이상 넣으세요.',
     )
   }
 
@@ -250,7 +264,16 @@ function validate(input: InvoiceWorkInstructionInput) {
     outgoingStyleIds.push(styleId)
   }
 
-  return { title, labelText, startsAt, endsAt, countBasis, outgoingStyleIds, items }
+  return {
+    title,
+    labelText,
+    startsAt,
+    endsAt,
+    matchMode,
+    countBasis,
+    outgoingStyleIds,
+    items,
+  }
 }
 
 async function replaceItems(
@@ -341,6 +364,7 @@ export async function saveInvoiceWorkInstruction(
     labelText,
     startsAt,
     endsAt,
+    matchMode,
     countBasis,
     outgoingStyleIds,
     items,
@@ -355,6 +379,7 @@ export async function saveInvoiceWorkInstruction(
     note: input.note?.trim() ?? '',
     starts_at: startsAt ? toDbTimestamp(startsAt) : null,
     ends_at: endsAt ? toDbTimestamp(endsAt) : null,
+    match_mode: matchMode,
     count_basis: countBasis,
   }
 

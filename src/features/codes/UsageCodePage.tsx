@@ -13,6 +13,8 @@ import {
   CodeUsageAssignmentStoreError,
   createCodeUsageAssignments,
   getCodeUsageAssignments,
+  getCodeUsageTargetAliases,
+  getCodeUsageTargetFolders,
   getCodeUsageTargets,
   getProductCodes,
   getStylesByBrand,
@@ -54,8 +56,18 @@ export function UsageCodePage() {
     queryKey: ['codeUsageAssignments', brand.id],
     queryFn: () => getCodeUsageAssignments(brand.id),
   })
+  const aliasesQuery = useQuery({
+    queryKey: ['codeUsageTargetAliases', brand.id],
+    queryFn: () => getCodeUsageTargetAliases(brand.id),
+  })
+  const foldersQuery = useQuery({
+    queryKey: ['codeUsageTargetFolders', brand.id],
+    queryFn: () => getCodeUsageTargetFolders(brand.id),
+  })
 
   const targets = useMemo(() => targetsQuery.data ?? [], [targetsQuery.data])
+  const aliases = useMemo(() => aliasesQuery.data ?? [], [aliasesQuery.data])
+  const folders = useMemo(() => foldersQuery.data ?? [], [foldersQuery.data])
   const codes = useMemo(() => codesQuery.data ?? [], [codesQuery.data])
   const styles = useMemo(() => stylesQuery.data ?? [], [stylesQuery.data])
   const assignments = useMemo(
@@ -72,7 +84,7 @@ export function UsageCodePage() {
     [styles],
   )
 
-  // 사용 중인 사용처를 우선, 없으면 첫 사용처 자동 선택
+  // 거래중인 업체를 우선, 없으면 첫 업체 자동 선택
   const activeTargets = targets.filter((t) => t.active)
   const selectedTarget =
     targets.find((t) => t.id === selectedTargetId) ??
@@ -122,6 +134,12 @@ export function UsageCodePage() {
       queryClient.invalidateQueries({
         queryKey: ['codeUsageTargets', brand.id],
       }),
+      queryClient.invalidateQueries({
+        queryKey: ['codeUsageTargetAliases', brand.id],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['codeUsageTargetFolders', brand.id],
+      }),
     ])
   }
 
@@ -139,15 +157,15 @@ export function UsageCodePage() {
   return (
     <div>
       <PageHeader
-        title="사용처별 바코드"
-        description="자사 바코드를 판매처·납품처에 등록하고, 사용중/일시중지를 관리합니다. 바코드 자체는 자사 바코드 메뉴에서 등록합니다."
+        title="출고업체별 바코드"
+        description="자사 바코드를 출고업체에 등록하고, 사용중/일시중지를 관리합니다. 바코드 자체는 자사 바코드 메뉴에서 등록합니다."
         actions={
           <Button
             type="button"
             variant="outline"
             onClick={() => setManagerOpen(true)}
           >
-            사용처 관리
+            출고업체 관리
           </Button>
         }
       />
@@ -155,7 +173,7 @@ export function UsageCodePage() {
       <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
         <Card className="h-fit overflow-hidden">
           <div className="border-b border-border px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            사용처
+            출고업체
           </div>
           {targetsQuery.isLoading ? (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">
@@ -164,7 +182,7 @@ export function UsageCodePage() {
           ) : targets.length === 0 ? (
             <div className="space-y-3 px-4 py-8 text-center">
               <p className="text-sm text-muted-foreground">
-                등록된 사용처가 없습니다.
+                등록된 출고업체가 없습니다.
               </p>
               <Button
                 type="button"
@@ -172,7 +190,7 @@ export function UsageCodePage() {
                 onClick={() => setManagerOpen(true)}
               >
                 <Plus className="size-3.5" />
-                사용처 추가
+                출고업체 추가
               </Button>
             </div>
           ) : (
@@ -210,7 +228,7 @@ export function UsageCodePage() {
                               active ? 'text-white/70' : 'text-muted-foreground',
                             )}
                           >
-                            사용 종료
+                            비활성
                           </span>
                         ) : null}
                       </span>
@@ -235,7 +253,7 @@ export function UsageCodePage() {
           {!selectedTarget ? (
             <Card>
               <CardContent className="px-6 py-12 text-center text-sm text-muted-foreground">
-                왼쪽에서 사용처를 선택하거나 먼저 사용처를 추가하세요.
+                왼쪽에서 출고업체를 선택하거나 먼저 출고업체를 추가하세요.
               </CardContent>
             </Card>
           ) : (
@@ -385,7 +403,7 @@ export function UsageCodePage() {
                             className="px-4 py-12 text-center text-muted-foreground"
                           >
                             {targetAssignments.length === 0
-                              ? '이 사용처에 등록된 바코드가 없습니다. 위에서 추가하세요.'
+                              ? '이 업체에 등록된 바코드가 없습니다. 위에서 추가하세요.'
                               : '조건에 맞는 바코드가 없습니다.'}
                           </td>
                         </tr>
@@ -491,6 +509,8 @@ export function UsageCodePage() {
         open={managerOpen}
         brandId={brand.id}
         targets={targets}
+        folders={folders}
+        aliases={aliases}
         assignments={assignments}
         onClose={() => setManagerOpen(false)}
         onChanged={invalidate}

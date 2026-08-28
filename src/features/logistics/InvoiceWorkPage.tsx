@@ -1,9 +1,11 @@
 import {
   useCallback,
   useDeferredValue,
+  useEffect,
   useMemo,
   useRef,
   useState,
+  Fragment,
   type ReactNode,
 } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -15,6 +17,7 @@ import {
   Boxes,
   CalendarClock,
   CheckCircle2,
+  ChevronDown,
   Clock3,
   Download,
   FileSpreadsheet,
@@ -53,7 +56,11 @@ import {
   getInvoiceProductNameExclusions,
   getInvoiceProductNameMaps,
   getInvoiceProductNameTagRoles,
+  getCodeUsageTargetAliases,
+  getCodeUsageTargetFolders,
+  getCodeUsageTargets,
   getInvoiceWorkInstructions,
+  getInvoiceWorkRuns,
   listAllStyleRefs,
 } from '@/lib/api'
 import { parseFile } from '@/lib/import/parse'
@@ -90,6 +97,10 @@ import {
 import { planUnifiedGifts } from '@/lib/invoice/gift-unified'
 import { planInvoicePrefixes } from '@/lib/invoice/prefix-transform'
 import {
+  isInvoiceMallReady,
+  resolveInvoiceMalls,
+} from '@/lib/invoice/mall-resolution'
+import {
   inspectSabangnetSheets,
   type SabangnetInspection,
   type SabangnetOrderRow,
@@ -117,6 +128,7 @@ import { InvoiceGiftSourceMapPanel } from './InvoiceGiftSourceMapPanel'
 import { InvoicePrefixRequestPanel } from './InvoicePrefixRequestPanel'
 import { InvoicePrefixStepPanel } from './InvoicePrefixStepPanel'
 import { InvoiceGiftSetupDialog } from './InvoiceGiftSetupDialog'
+import { InvoiceMallResolutionDialog } from './InvoiceMallResolutionDialog'
 import { InvoiceProductNameTransformPanel } from './InvoiceProductNameTransformPanel'
 import { InvoiceWorkInstructionPanel } from './InvoiceWorkInstructionPanel'
 import { InvoiceWorkInstructionStepPanel } from './InvoiceWorkInstructionStepPanel'
@@ -443,7 +455,7 @@ const RULE_VIEWS: {
   {
     value: 'prefixes',
     label: '작업 지시',
-    description: '표시 문구 · 선택 적용 기간',
+    description: '표시 문구 · 완전일치/시작어 · 항상/기간',
     icon: Tag,
   },
   {
@@ -479,7 +491,7 @@ const RULE_TABLES: Record<
   prefixes: {
     title: '작업 지시',
     description:
-      '원본 품목명과 완전 일치할 때 최종 공식명 앞에 붙일 표시 문구를 관리합니다. 적용 기간은 선택입니다.',
+      '원본 품목명이 완전일치하거나 등록한 시작어로 시작할 때 최종 공식명 앞에 붙일 표시 문구를 관리합니다. 적용은 항상 또는 기간으로 고릅니다.',
     columns: ['지시명', '표시 문구', '기간', '대상 수', '상태'],
   },
   aliases: {
@@ -766,28 +778,44 @@ function RulesPanel({
   )
 }
 
-type InvoiceHistoryItem = {
-  id: string
-  workedAt: string
-  fileName: string
-  workerLabel: string
-  sourceRows: number
-  exportedRows: number
-  waitingRows: number
-  reviewRows: number
+function formatWorkedAt(value: string): string {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
 }
 
-function HistoryPanel() {
-  const history: InvoiceHistoryItem[] = []
+function HistoryPanel({ brandId }: { brandId: string }) {
+  const [openId, setOpenId] = useState<string | null>(null)
+  const historyQuery = useQuery({
+    queryKey: ['invoiceWorkRuns', brandId],
+    queryFn: () => getInvoiceWorkRuns(brandId),
+  })
+  const history = historyQuery.data ?? []
   const exportedRows = history.reduce(
-    (total, item) => total + item.exportedRows,
+    (total, item) => total + item.exportedRowCount,
     0,
   )
-  const waitingRows = history.reduce(
-    (total, item) => total + item.waitingRows,
+  const orderCount = history.reduce(
+    (total, item) => total + item.sourceOrderCount,
     0,
   )
-  const reviewRows = history.reduce((total, item) => total + item.reviewRows, 0)
+  const reviewRows = history.reduce(
+    (total, item) => total + item.reviewRowCount,
+    0,
+  )
+  const error =
+    historyQuery.error instanceof Error
+      ? historyQuery.error.message
+      : historyQuery.error
+        ? '작업 이력을 불러오지 못했습니다.'
+        : null
 
   return (
     <div className="space-y-6">
@@ -796,11 +824,10 @@ function HistoryPanel() {
           <div>
             <CardTitle>작업 이력</CardTitle>
             <CardDescription className="mt-1">
-              어떤 파일을 누가 변환했고, 몇 건이 출력·보류·제외됐는지
-              확인합니다.
+              어떤 파일을 누가 변환했고, 사이트별로 몇 건이 나갔는지
+              확인합니다. 같은 파일은 한 작업으로 갱신됩니다.
             </CardDescription>
           </div>
-          <Badge variant="muted">DB 연결 전</Badge>
         </CardHeader>
         <CardContent>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
@@ -809,18 +836,17 @@ function HistoryPanel() {
               value={`${formatNumber(history.length)}회`}
             />
             <SummaryItem
+              label="주문 건수"
+              value={`${formatNumber(orderCount)}건`}
+            />
+            <SummaryItem
               label="CJ 출력"
-              value={`${formatNumber(exportedRows)}건`}
+              value={`${formatNumber(exportedRows)}행`}
               tone="success"
             />
             <SummaryItem
-              label="출고 대기 이동"
-              value={`${formatNumber(waitingRows)}건`}
-              tone="warning"
-            />
-            <SummaryItem
               label="확인 필요"
-              value={`${formatNumber(reviewRows)}건`}
+              value={`${formatNumber(reviewRows)}행`}
               tone="danger"
             />
           </div>
@@ -831,24 +857,29 @@ function HistoryPanel() {
         <CardHeader>
           <CardTitle>최근 작업</CardTitle>
           <CardDescription>
-            고객정보 대신 작업 단위와 처리 결과만 빠르게 확인합니다.
+            고객정보 대신 작업 단위와 사이트별 출고 수량만 보여 줍니다.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {history.length > 0 ? (
+          {historyQuery.isPending ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">
+              이력을 불러오는 중...
+            </p>
+          ) : error ? (
+            <p className="py-10 text-center text-sm text-danger">{error}</p>
+          ) : history.length > 0 ? (
             <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full min-w-200 text-left text-xs">
                 <thead className="bg-muted/60">
                   <tr>
+                    <th className="w-8 px-3 py-2.5" />
                     <th className="px-3 py-2.5 font-medium">작업 시각</th>
                     <th className="px-3 py-2.5 font-medium">원본 파일</th>
                     <th className="px-3 py-2.5 font-medium">작업자</th>
                     <th className="px-3 py-2.5 text-right font-medium">원본</th>
+                    <th className="px-3 py-2.5 text-right font-medium">주문</th>
                     <th className="px-3 py-2.5 text-right font-medium">
                       CJ 출력
-                    </th>
-                    <th className="px-3 py-2.5 text-right font-medium">
-                      출고 대기
                     </th>
                     <th className="px-3 py-2.5 text-right font-medium">
                       확인 필요
@@ -856,31 +887,101 @@ function HistoryPanel() {
                   </tr>
                 </thead>
                 <tbody>
-                  {history.map((item) => (
-                    <tr key={item.id} className="border-t border-border">
-                      <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
-                        {item.workedAt}
-                      </td>
-                      <td className="max-w-72 px-3 py-3 font-medium">
-                        {item.fileName}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-3">
-                        {item.workerLabel}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums">
-                        {formatNumber(item.sourceRows)}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-success">
-                        {formatNumber(item.exportedRows)}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-warning">
-                        {formatNumber(item.waitingRows)}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-danger">
-                        {formatNumber(item.reviewRows)}
-                      </td>
-                    </tr>
-                  ))}
+                  {history.map((item) => {
+                    const open = openId === item.id
+                    return (
+                      <Fragment key={item.id}>
+                        <tr className="border-t border-border">
+                          <td className="px-2 py-3">
+                            <button
+                              type="button"
+                              className="rounded p-1 text-muted-foreground hover:bg-muted"
+                              aria-expanded={open}
+                              onClick={() =>
+                                setOpenId(open ? null : item.id)
+                              }
+                            >
+                              <ChevronDown
+                                className={cn(
+                                  'size-4 transition-transform',
+                                  open && 'rotate-180',
+                                )}
+                              />
+                            </button>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
+                            {formatWorkedAt(item.completedAt)}
+                          </td>
+                          <td className="max-w-72 px-3 py-3 font-medium">
+                            {item.sourceFileName || '(파일명 없음)'}
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3">
+                            {item.workerLabel || '-'}
+                          </td>
+                          <td className="px-3 py-3 text-right tabular-nums">
+                            {formatNumber(item.sourceRowCount)}
+                          </td>
+                          <td className="px-3 py-3 text-right tabular-nums">
+                            {formatNumber(item.sourceOrderCount)}
+                          </td>
+                          <td className="px-3 py-3 text-right tabular-nums text-success">
+                            {formatNumber(item.exportedRowCount)}
+                          </td>
+                          <td className="px-3 py-3 text-right tabular-nums text-danger">
+                            {formatNumber(item.reviewRowCount)}
+                          </td>
+                        </tr>
+                        {open ? (
+                          <tr className="border-t border-border bg-muted/30">
+                            <td colSpan={8} className="px-3 py-3">
+                              {item.sites.length === 0 ? (
+                                <p className="text-xs text-muted-foreground">
+                                  사이트 집계가 없습니다.
+                                </p>
+                              ) : (
+                                <table className="w-full min-w-160 text-left text-xs">
+                                  <thead>
+                                    <tr className="text-muted-foreground">
+                                      <th className="py-1.5 font-medium">사이트</th>
+                                      <th className="py-1.5 font-medium">원본 표기</th>
+                                      <th className="py-1.5 text-right font-medium">주문</th>
+                                      <th className="py-1.5 text-right font-medium">원본 수량</th>
+                                      <th className="py-1.5 text-right font-medium">CJ 주문</th>
+                                      <th className="py-1.5 text-right font-medium">사은품</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {item.sites.map((site) => (
+                                      <tr key={site.id}>
+                                        <td className="py-1.5 font-medium">
+                                          {site.targetName}
+                                        </td>
+                                        <td className="py-1.5 text-muted-foreground">
+                                          {site.sourceMallNames || '-'}
+                                        </td>
+                                        <td className="py-1.5 text-right tabular-nums">
+                                          {formatNumber(site.orderCount)}
+                                        </td>
+                                        <td className="py-1.5 text-right tabular-nums">
+                                          {formatNumber(site.sourceQuantity)}
+                                        </td>
+                                        <td className="py-1.5 text-right tabular-nums">
+                                          {formatNumber(site.cjOrderQuantity)}
+                                        </td>
+                                        <td className="py-1.5 text-right tabular-nums">
+                                          {formatNumber(site.cjGiftQuantity)}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              )}
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
@@ -891,8 +992,8 @@ function HistoryPanel() {
                 아직 기록된 송장작업이 없습니다.
               </p>
               <p className="mt-1 max-w-lg text-xs leading-5 text-muted-foreground">
-                자동 변환을 연결하면 파일명·작업자·처리 건수·적용한 규칙 버전을
-                남겨 같은 결과를 다시 확인할 수 있게 합니다.
+                CJ 13열을 내려받으면 파일명·작업자·사이트별 주문·출고 수량이
+                남습니다. 수령인 정보는 저장하지 않습니다.
               </p>
             </div>
           )}
@@ -1108,6 +1209,8 @@ export function InvoiceWorkPage() {
   const [isDragging, setIsDragging] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [productSaveBlockCount, setProductSaveBlockCount] = useState(0)
+  const [mallDialogOpen, setMallDialogOpen] = useState(false)
+  const mallAutoOpenedRef = useRef<string | null>(null)
   const nameRulesQuery = useQuery({
     queryKey: ['invoice-name-rules', brand.id],
     queryFn: () => getInvoiceNameRules(brand.id),
@@ -1137,6 +1240,21 @@ export function InvoiceWorkPage() {
   const productNameTagRolesQuery = useQuery({
     queryKey: ['invoice-product-name-tag-roles', brand.id],
     queryFn: () => getInvoiceProductNameTagRoles(brand.id),
+  })
+  const usageTargetsQuery = useQuery({
+    queryKey: ['codeUsageTargets', brand.id],
+    queryFn: () => getCodeUsageTargets(brand.id),
+    enabled: Boolean(inspection),
+  })
+  const usageAliasesQuery = useQuery({
+    queryKey: ['codeUsageTargetAliases', brand.id],
+    queryFn: () => getCodeUsageTargetAliases(brand.id),
+    enabled: Boolean(inspection),
+  })
+  const usageFoldersQuery = useQuery({
+    queryKey: ['codeUsageTargetFolders', brand.id],
+    queryFn: () => getCodeUsageTargetFolders(brand.id),
+    enabled: Boolean(inspection),
   })
   const giftRequestsQuery = useQuery({
     queryKey: ['invoice-prefix-requests', brand.id],
@@ -1379,6 +1497,32 @@ export function InvoiceWorkPage() {
   const deferredProductNameMaps = useDeferredValue(productNameMaps)
   const deferredProductNameExclusions = useDeferredValue(productNameExclusions)
   const deferredProductNameTagRoles = useDeferredValue(productNameTagRoles)
+  const usageTargets = useMemo(
+    () => usageTargetsQuery.data ?? [],
+    [usageTargetsQuery.data],
+  )
+  const usageAliases = useMemo(
+    () => usageAliasesQuery.data ?? [],
+    [usageAliasesQuery.data],
+  )
+  const usageFolders = useMemo(
+    () => usageFoldersQuery.data ?? [],
+    [usageFoldersQuery.data],
+  )
+  const mallResolution = useMemo(
+    () =>
+      inspection
+        ? resolveInvoiceMalls(inspection.rows, usageTargets, usageAliases)
+        : resolveInvoiceMalls([], [], []),
+    [inspection, usageTargets, usageAliases],
+  )
+  const mallPartnersReady =
+    !usageTargetsQuery.isPending &&
+    !usageAliasesQuery.isPending &&
+    !usageTargetsQuery.error &&
+    !usageAliasesQuery.error
+  const mallsReady =
+    mallPartnersReady && isInvoiceMallReady(mallResolution)
   const headerReady = Boolean(
     inspection && inspection.missingHeaders.length === 0,
   )
@@ -1387,7 +1531,7 @@ export function InvoiceWorkPage() {
   )
   const maxStepIndex = !inspection
     ? 0
-    : headerReady
+    : headerReady && mallsReady
       ? TODAY_STEPS.length - 1
       : 1
   const stepIndex = Math.min(
@@ -1395,6 +1539,25 @@ export function InvoiceWorkPage() {
     maxStepIndex,
   )
   const activeStep = TODAY_STEPS[stepIndex]!.value
+  useEffect(() => {
+    if (!inspection || !headerReady || !mallPartnersReady) return
+    const autoKey = `${fileName}:${inspection.rowCount}:${mallResolution.unresolvedCount}`
+    if (mallResolution.unresolvedCount === 0) {
+      setMallDialogOpen(false)
+      return
+    }
+    if (activeStep === 'check' && mallAutoOpenedRef.current !== autoKey) {
+      mallAutoOpenedRef.current = autoKey
+      setMallDialogOpen(true)
+    }
+  }, [
+    activeStep,
+    fileName,
+    headerReady,
+    inspection,
+    mallPartnersReady,
+    mallResolution.unresolvedCount,
+  ])
   const visitedStepsRef = useRef(new Set<TodayStep>())
   visitedStepsRef.current.add(activeStep)
   const shouldComputeItem =
@@ -1667,6 +1830,8 @@ export function InvoiceWorkPage() {
     visitedStepsRef.current = new Set<TodayStep>(['upload'])
     itemCacheRef.current = null
     processRowsCacheRef.current = null
+    mallAutoOpenedRef.current = null
+    setMallDialogOpen(false)
     setInspection(null)
     setFileName('')
     setError(null)
@@ -1692,6 +1857,8 @@ export function InvoiceWorkPage() {
     visitedStepsRef.current = new Set<TodayStep>(['upload'])
     itemCacheRef.current = null
     processRowsCacheRef.current = null
+    mallAutoOpenedRef.current = null
+    setMallDialogOpen(false)
     setInspection(null)
     setFileName(file.name)
     setProductSaveBlockCount(0)
@@ -2016,6 +2183,49 @@ export function InvoiceWorkPage() {
                   </p>
                 ) : null}
 
+                {headerReady ? (
+                  <div className="space-y-3 rounded-lg border border-border p-4">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-medium">사이트 연결</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          고유 {formatNumber(mallResolution.uniqueCount)}곳 ·
+                          연결 완료 {formatNumber(mallResolution.matchedCount)}곳
+                          · 연결 필요{' '}
+                          {formatNumber(mallResolution.unresolvedCount)}곳
+                        </p>
+                      </div>
+                      {mallResolution.unresolvedCount > 0 ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={!mallPartnersReady}
+                          onClick={() => setMallDialogOpen(true)}
+                        >
+                          사이트 연결
+                        </Button>
+                      ) : (
+                        <Badge variant="success">연결 완료</Badge>
+                      )}
+                    </div>
+                    {!mallPartnersReady && inspection ? (
+                      <p className="text-xs text-muted-foreground">
+                        출고업체 목록을 확인하는 중...
+                      </p>
+                    ) : usageTargetsQuery.error || usageAliasesQuery.error ? (
+                      <p className="text-xs text-danger">
+                        출고업체를 불러오지 못해 사이트를 연결할 수 없습니다.
+                      </p>
+                    ) : mallResolution.unresolvedCount > 0 ? (
+                      <p className="text-xs text-warning">
+                        미등록·빈 값·비활성 사이트를 정리하기 전에는 사은품
+                        추가로 갈 수 없습니다.
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
+
                 <SabangnetOrderTable
                   rows={inspection.rows}
                   columnCount={inspection.columnCount}
@@ -2036,7 +2246,7 @@ export function InvoiceWorkPage() {
                   </div>
                   <Button
                     type="button"
-                    disabled={!headerReady}
+                    disabled={!headerReady || !mallsReady}
                     onClick={() => setStep('gift')}
                   >
                     사은품 추가로
@@ -2141,9 +2351,9 @@ export function InvoiceWorkPage() {
               <CardHeader>
                 <CardTitle>작업 지시</CardTitle>
                 <CardDescription>
-                  원본 품목명과 완전 일치하는 활성 지시를 확인합니다. 적용
-                  기간이 있으면 주문일시가 그 안인 행에만 붙습니다. 표시 문구는
-                  자체품번 변환이 끝난 최종 품목명 앞에 붙습니다.
+                  활성 지시의 완전일치·시작어를 확인합니다. 항상이면 모든
+                  주문에, 기간이면 주문일시가 그 안인 행에만 붙습니다. 표시
+                  문구는 자체품번 변환이 끝난 최종 품목명 앞에 붙습니다.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
@@ -2489,6 +2699,7 @@ export function InvoiceWorkPage() {
                   baseProductTransformation={
                     baseProductTransformation ?? undefined
                   }
+                  mallResolution={mallResolution}
                   finalizeUnified={
                     giftEligibilityPlan && baseProductTransformation
                       ? () =>
@@ -2557,8 +2768,20 @@ export function InvoiceWorkPage() {
           workInstructionsError={workInstructionsError}
         />
       ) : (
-        <HistoryPanel />
+        <HistoryPanel brandId={brand.id} />
       )}
+
+      {mallDialogOpen && inspection ? (
+        <InvoiceMallResolutionDialog
+          brandId={brand.id}
+          brandSlug={brand.slug}
+          sites={mallResolution.sites}
+          targets={usageTargets}
+          aliases={usageAliases}
+          folders={usageFolders}
+          onClose={() => setMallDialogOpen(false)}
+        />
+      ) : null}
 
       {giftSetupGroup ? (
         <InvoiceGiftSetupDialog

@@ -18,17 +18,10 @@ import {
 import type { UnresolvedProductNameCombo } from '@/lib/invoice/product-name-transform'
 import type { StyleRef } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
-import {
-  InvoiceOptionExtrasEditor,
-  type OptionExtraDraft,
-} from './InvoiceOptionExtrasEditor'
 import { InvoiceProductLookupPopover } from './InvoiceProductLookupPopover'
 import { InvoiceProductNameAiQuickSlots } from './InvoiceProductNameAiQuickSlots'
 import { InvoiceProductNameSimilarStyles } from './InvoiceProductNameSimilarStyles'
-import {
-  extrasOfProductNameAiRow,
-  useInvoiceProductNameBulkAiApply,
-} from './useInvoiceProductNameBulkAiApply'
+import { useInvoiceProductNameBulkAiApply } from './useInvoiceProductNameBulkAiApply'
 import { useInvoiceProductNameQuickEntry } from './useInvoiceProductNameQuickEntry'
 import type { ProductMapHistoryEntry } from './useInvoiceProductNameSaveQueue'
 
@@ -75,7 +68,6 @@ export function InvoiceProductNameAiApplyBar({
 }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<ProductNameAiWorkflowTab>('review')
-  const [expandedKey, setExpandedKey] = useState<string | null>(null)
   const [commitOpen, setCommitOpen] = useState(false)
   const previousPhase = useRef(bulk.phase)
 
@@ -135,13 +127,6 @@ export function InvoiceProductNameAiApplyBar({
           left.itemName.localeCompare(right.itemName, 'ko-KR'),
       )
   }, [bulk.confirmedKeys, bulk.reviewRows, filter, history, query])
-
-  useEffect(() => {
-    if (!expandedKey) return
-    if (!visibleRows.some((row) => row.key === expandedKey)) {
-      setExpandedKey(null)
-    }
-  }, [expandedKey, visibleRows])
 
   const giftGroupByKey = useMemo(() => {
     const next = new Map<string, GiftSourceGroup>()
@@ -354,7 +339,6 @@ export function InvoiceProductNameAiApplyBar({
                     slots={quick.getSlots(row)}
                     historyEntry={latestHistory(history, row.key)}
                     stageError={quick.stageErrorByKey.get(row.key) ?? null}
-                    expanded={expandedKey === row.key}
                     striped={index % 2 === 1}
                     resolving={quick.resolving || bulk.phase === 'collecting'}
                     excludePending={excludePending}
@@ -379,20 +363,12 @@ export function InvoiceProductNameAiApplyBar({
                     onTab={(slotIndex) =>
                       quick.moveRight(visibleRows, row.key, slotIndex)
                     }
-                    onToggleExpand={() =>
-                      setExpandedKey((current) =>
-                        current === row.key ? null : row.key,
-                      )
-                    }
                     pendingAi={bulk.pendingAiKeys.has(row.key)}
                     confirmed={
                       bulk.confirmedKeys.has(row.key) &&
                       productNameAiRowReadyToCommit(row)
                     }
                     onUnconfirm={() => bulk.unconfirmRow(row.key)}
-                    onExtrasChange={(next) =>
-                      bulk.updateRow(row.key, { extras: next })
-                    }
                     onExclude={onExclude}
                     giftGroup={
                       giftGroupByKey.get(
@@ -448,7 +424,6 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
   slots,
   historyEntry,
   stageError,
-  expanded,
   striped,
   resolving,
   excludePending,
@@ -459,11 +434,9 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
   onRegister,
   onEnter,
   onTab,
-  onToggleExpand,
   pendingAi,
   confirmed,
   onUnconfirm,
-  onExtrasChange,
   onExclude,
   giftGroup,
   onOpenGiftSetup,
@@ -473,7 +446,6 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
   slots: ProductNameAiQuickSlot[]
   historyEntry: ProductMapHistoryEntry | null
   stageError: string | null
-  expanded: boolean
   striped: boolean
   resolving: boolean
   excludePending: boolean
@@ -484,11 +456,9 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
   onRegister: (slotIndex: number, el: HTMLInputElement | null) => void
   onEnter: (slotIndex: number) => void
   onTab: (slotIndex: number) => void
-  onToggleExpand: () => void
   pendingAi: boolean
   confirmed: boolean
   onUnconfirm: () => void
-  onExtrasChange: (next: OptionExtraDraft[]) => void
   onExclude: (combo: UnresolvedProductNameCombo) => void
   giftGroup: GiftSourceGroup | null
   onOpenGiftSetup?: () => void
@@ -501,7 +471,7 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
       ? 'bg-muted/40'
       : 'bg-card'
   const rowClass = `border-t border-border ${tone}`
-  const lookupRowSpan = expanded ? 3 : 2
+  const lookupRowSpan = 2
   return (
     <>
       <tr className={rowClass}>
@@ -623,16 +593,6 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
               size="sm"
               variant="outline"
               className="h-6 px-2 text-[11px]"
-              disabled={resolving}
-              onClick={onToggleExpand}
-            >
-              {expanded ? '구성 접기' : '구성'}
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-6 px-2 text-[11px]"
               disabled={!row.mallName.trim() || excludePending || resolving}
               onClick={() =>
                 onExclude({
@@ -674,21 +634,6 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
           </div>
         </td>
       </tr>
-      {expanded ? (
-        <tr className={tone}>
-          <td className="px-2 pb-1.5 align-top" colSpan={2}>
-            <div className="space-y-2 rounded-md border border-border/80 bg-muted/40 px-2 py-1.5">
-              <InvoiceOptionExtrasEditor
-                brandId={brandId}
-                extras={extrasOfProductNameAiRow(row)}
-                onChange={onExtrasChange}
-                compact
-              />
-            </div>
-          </td>
-          <td className="px-2 pb-1.5" />
-        </tr>
-      ) : null}
     </>
   )
 })

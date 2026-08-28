@@ -236,7 +236,7 @@ export function BarcodePage() {
     <div>
       <PageHeader
         title="자사 바코드"
-        description={`${brand.name}이 직접 발급하는 88코드 마스터입니다. 업체 프리픽스는 ${barcodePrefix(brand.id)}입니다. 사용처 등록은 사용처별 바코드 메뉴에서 합니다.`}
+        description={`${brand.name}이 직접 발급하는 88코드 마스터입니다. 업체 프리픽스는 ${barcodePrefix(brand.id)}입니다. 출고업체 등록은 출고업체별 바코드 메뉴에서 합니다.`}
         actions={
           <>
             <Button
@@ -372,7 +372,7 @@ export function BarcodePage() {
           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               className="sm:max-w-sm"
-              placeholder="바코드, 코드명, 구성품 품번, 사용처 검색..."
+              placeholder="바코드, 코드명, 구성품 품번, 출고업체 검색..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -403,7 +403,7 @@ export function BarcodePage() {
                     <th className="w-8 px-4 py-3" />
                     <th className="px-4 py-3 font-medium">바코드</th>
                     <th className="px-4 py-3 font-medium">코드명</th>
-                    <th className="px-4 py-3 font-medium">사용처 현황</th>
+                    <th className="px-4 py-3 font-medium">출고업체 현황</th>
                     <th className="px-4 py-3 font-medium">구성</th>
                     <th className="px-4 py-3 font-medium">무게</th>
                     <th className="px-4 py-3 font-medium">규격</th>
@@ -652,7 +652,7 @@ export function BarcodePage() {
                                 {codeAssignments.length > 0 ? (
                                   <>
                                     <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                      사용처
+                                      출고업체
                                     </div>
                                     <ul className="mb-3 space-y-1">
                                       {codeAssignments.map((row) => {
@@ -666,7 +666,7 @@ export function BarcodePage() {
                                           >
                                             <span>
                                               {target?.name ??
-                                                '알 수 없는 사용처'}
+                                                '알 수 없는 업체'}
                                             </span>
                                             <Badge
                                               variant={
@@ -832,7 +832,7 @@ function UsageSummary({
     <div className="flex flex-wrap gap-1">
       {assignments.map((row) => {
         const target = targetMap.get(row.usageTargetId)
-        const label = target?.name ?? '알 수 없는 사용처'
+        const label = target?.name ?? '알 수 없는 업체'
         if (row.status === 'active') {
           return (
             <Badge key={row.id} variant="outline">

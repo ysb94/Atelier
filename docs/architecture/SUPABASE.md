@@ -36,7 +36,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 회사, 브랜드, 팀(조직도), 프로필, 브랜드 멤버 | Supabase |
 | 출시 기획(`seasons`), 브랜드 항목(`brand_fields` + `brand_field_options`), 상품(`styles`) | Supabase |
 | 기획안(`product_drafts` + `draft_colors` + `draft_options`) | Supabase |
-| 코드·사용처(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_assignments`) | Supabase |
+| 코드·출고업체(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_target_folders`, `code_usage_target_aliases`, `code_usage_assignments`) | Supabase |
 | 송장 품목명 변환 기준(`invoice_name_rules`) | Supabase |
 | 송장 품목명 exact 기준(`invoice_product_name_maps`) | Supabase |
 | 송장 품목명 제외 기준(`invoice_product_name_exclusions`) | Supabase |
@@ -51,17 +51,19 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 송장 사은품 선착순 한도·배정 원장(`invoice_prefix_requests` 한도 필드 + `invoice_gift_quotas` + `invoice_gift_allocations`) | Supabase |
 | 송장 사은품 원본행 치환 매핑(`invoice_gift_source_maps` + `invoice_gift_source_map_products` + `invoice_gift_source_allocations`) | Supabase |
 | 송장 작업 지시(`invoice_work_instructions` + `invoice_work_instruction_items`) | Supabase |
+| 송장 출고 작업 이력·사이트 집계(`invoice_work_runs` + `invoice_work_site_summaries`) | Supabase |
 | 브랜드 AI 설정·사용량(`ai_feature_routes` + `ai_usage_logs` + `ai_model_pricing`) | Supabase |
 | 품목명·내품명 확정 사례(`ai_recommendation_feedback` + `ai_item_name_recommendation_feedback`) | Supabase |
 
-- 상품·출시 기획·기획안·코드·사용처는 **0건으로 시작**한다. 자동 목업 시드를 넣지 않는다.
+- 상품·출시 기획·기획안·코드·출고업체는 **0건으로 시작**한다. 자동 목업 시드를 넣지 않는다.
 - `brand_fields`만 품번·상품명 등 실행에 필요한 시스템 항목 구조를 브랜드별로 깐다.
   목업 상품 값은 넣지 않는다.
 - 브랜드 카드의 SKU 수는 `styles` COUNT로 `src/lib/api/index.ts`가 붙인다.
 - 앱 저장소는 `src/lib/supabase/*.ts`다. 공개 API 이름은 `src/lib/api/index.ts`에 유지한다.
 - 원자 작업 RPC: `save_product_draft`, `promote_product_draft`,
   `save_product_code_with_components`, `save_brand_field_options`,
-  `save_invoice_packing_size_maps`,
+  `save_invoice_packing_size_maps`,   `save_outbound_partner_with_aliases`, `add_outbound_partner_alias`,
+  `record_invoice_work_completion`,
   `import_warehouse_inventory_set`, `apply_warehouse_stock_action`,
   `restore_warehouse_inventory_set`.
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
@@ -93,7 +95,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 앞으로 새로 기획하는 상품은 기획 단계를 거친다.
 
 ```
-출시 기획 → 기획안 → 출시 확정 상품 → 데이터 시트 / 코드·사용처
+출시 기획 → 기획안 → 출시 확정 상품 → 데이터 시트 / 코드·출고업체
 ```
 
 이미 판매 중인 기존 상품은 기획 단계를 거치지 않고 먼저 적재한다.
@@ -108,7 +110,10 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 보관용 기획은 임시 보관함이다. 실제 출시 묶음이 생기면 상품의 시즌 열을 바꿔
   옮기고, 비면 지운다.
 - 출시 기획이 없어도 일괄 업로드와 한건 등록을 막지 않는다.
-- 코드·사용처는 상품이 생기기 전까지 빈 상태와 안내만 보여 준다.
+- 코드·출고업체는 상품이 생기기 전까지 빈 상태와 안내만 보여 준다.
+- 부서별 상품 정보(`/work/:owner`)는 처음부터 비어 있다. 각 사람이 지금 필요한
+  상품만 불러 작업한다. 이 작업 목록은 브라우저 UI 상태(`localStorage`)이고
+  상품 원본은 `styles`에 그대로 둔다. 전체 상품(`/products`)은 마스터 목록이다.
 
 ### 자사 바코드 일괄 등록
 
@@ -143,6 +148,60 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   하지 않는다.
 - 로직: `src/lib/codes/barcode-import.ts`, 화면: `BarcodeBulkUploadPanel.tsx`,
   `PendingBarcodePanel.tsx`, `BarcodeInfoBulkPanel.tsx`, `BarcodeFieldManager.tsx`.
+
+### 출고업체와 별칭
+
+물건을 보내는 곳을 `code_usage_targets` 한 목록으로 관리한다. 바코드를 등록할
+판매처와 출고하는 업체는 같은 집합이라 목록을 둘로 나누지 않는다. 화면 이름은
+`출고업체`이고 테이블 이름은 기존 코드 연결을 깨지 않기 위해 그대로 둔다.
+
+- **분류는 고정 칸이 아니라 폴더 경로다.** `code_usage_target_folders`에 브랜드가
+  아는 갈래만 만든다. 일 종류가 위이고 업체 카드가 아래다. 회사 이름(무신사)으로
+  묶지 않는다. 카드를 다른 폴더로 옮기면 분류가 바뀌고, 폴더를 지워도 카드는
+  미분류로 남는다. 폴더는 네 단까지만 허용한다.
+- **업체명에 출고 방식을 붙이지 않는다.** 일하는 단위가 원래 다르면
+  `무신사 온라인`처럼 단위 이름을 쓰고, 같은 단위의 방식은 폴더와 카드 메모에
+  둔다. `channel_type` / `shipping_method` 열은 호환용으로 남기고 화면은 쓰지
+  않는다.
+- 상태는 `active`와 `is_one_time`을 조합해 `거래중`·`단발성`·`비활성` 세 가지로
+  표시한다. 비활성이 단발성보다 앞선다. 삭제 경로는 두지 않는다.
+  거래를 멈춰도 `code_usage_assignments`의 바코드 연결 이력은 보존한다.
+- 활성 카드 중 폴더가 없는 곳은 `미분류`다. 비활성 카드는 폴더 트리와 미분류에
+  섞지 않고 `비활성` 칸에 모은다. 이전 `folder_id`는 힌트로만 남긴다.
+- 비활성 업체를 다시 켤 때는 한 줄 토글이 아니라 팝업에서 업체명·둘 위치·특징을
+  다시 채워야 저장된다. 위치는 이전 값을 자동으로 쓰지 않는다.
+- 단발성을 따로 두는 이유는 목록 오염을 막기 위해서다. 상시 업체만 기본으로
+  펼치고 단발성·비활성은 접어 두므로, 20곳을 쓰는 사람은 계속 20줄만 본다.
+- 등록 필수값은 이름 하나다. 분류를 필수로 만들면 바쁠 때 등록을 건너뛰어
+  데이터가 비므로, 분류와 별칭은 나중에 채우고 목록에서 `분류 필요`로 표시한다.
+- `code_usage_target_aliases`는 부서·발주 사이트마다 다르게 부르는 이름이다.
+  정식명 1건에 별칭 N건이고 `(brand_id, normalized_alias)`가 unique다. 한 별칭이
+  두 업체를 가리키지 못한다. 정식명은 별칭에 넣지 않아도 검색되며, 앱은 입력 중에
+  이미 그 이름을 쓰는 업체를 알려 준다.
+- 비교 키는 앱 `compactOutboundPartnerKey`가 만든다. NFKC로 전각을 접고
+  소문자화한 뒤 한글·영문·숫자만 남긴다. 원문 표기는 바꾸지 않으며 DB generated
+  column을 쓰지 않는 기존 관례를 따른다. 업체 정식명도 같은 키로
+  `(brand_id, normalized_name)` 부분 unique 인덱스를 둬 띄어쓰기만 다른 중복을 막는다.
+- 이름을 바꿀 때 이전 이름을 별칭으로 남길 수 있다. 옛 표기로도 계속 검색되므로
+  이름 정리가 정보 손실이 되지 않는다.
+- `save_outbound_partner_with_aliases`는 `SECURITY INVOKER` 트랜잭션이며
+  `app.can_edit_brand`를 직접 검사한다. 별칭은 전달한 배열로 통째 교체하므로
+  호출자가 최종 목록을 보내야 한다. 여러 줄 붙여넣기는 이 RPC를 업체마다 호출해
+  한 건이 실패해도 나머지가 남게 한다.
+- 사방넷 쇼핑몰 표기 한 건만 붙일 때는 `add_outbound_partner_alias`를 쓴다.
+  기존 별칭을 지우지 않고, 같은 브랜드의 다른 정식명·별칭과 충돌하면 거절한다.
+  비활성 업체에는 연결하지 않는다.
+- 로직: `src/lib/codes/outbound-partner.ts`.
+  저장소: `src/lib/supabase/code-usage-targets.ts`.
+  화면: `UsageTargetsSettingsPage`, `UsageTargetManager`,
+  `OutboundPartnerFolderTree`, `OutboundPartnerRow`,
+  `OutboundPartnerEditForm`, `OutboundPartnerActivateDialog`,
+  `OutboundPartnerPastePanel`.
+- 회귀 검증: `npm run verify:outbound-partner`(읽기 전용 순수 함수).
+- 마이그레이션: `20260828015800_outbound_partner_aliases.sql`,
+  `20260828020500_save_outbound_partner_rpc.sql`,
+  `20260828041300_outbound_partner_folders.sql`,
+  `20260828075955_invoice_work_history.sql`.
 
 ### 상품 연결 원칙 (M번호)
 
@@ -714,13 +773,21 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 
 - 지시(`invoice_work_instructions`)와 대상 원본 품목명
   (`invoice_work_instruction_items`)으로 나눈다. 쇼핑몰 조건은 없다.
+  `match_mode`는 지시 1건에 하나다. `exact`(기본, 기존 완전일치) 또는
+  `prefix`(시작어). 시작어도 같은 대상 목록에 등록한다. 비교는
+  `normalizeInvoiceText` 한 뒤 등록 글자 전체로 `startsWith` 한다. 대괄호·공백·
+  글자를 쪼개거나 태그 안만 보지 않는다. `[선물 포장]`과 `[선물포장]`은 다른
+  시작어이고, `[선물포장]`은 `[선물포장] 울 코트`에만 맞으며
+  `[선물포장완료] 울 코트`에는 맞지 않는다.
   적용 기간(`starts_at` / `ends_at`, `timestamp` 시간대 없음)은 선택이다.
   둘 다 null이면 중지 전까지 항상 적용하고, 있으면 사은품과 같이 주문일시가
-  양끝 포함 기간 안일 때만 적용한다.
-- 활성 지시만, 원본 품목명 exact-match로 모든 쇼핑몰에 적용한다. 같은 원본
-  품목명은 한 지시 안에서만 unique이고, 기간이 겹치지 않으면 여러 지시에 둘 수
-  있다. 기간 있는 지시와 기간 없는 지시가 겹치면 기간 있는 쪽을 쓰고, 같은
-  종류의 지시가 둘 이상 맞으면 오늘 작업에서 충돌로 보여 붙이지 않는다.
+  양끝 포함 기간 안일 때만 적용한다. 폼에서 항상/기간을 고르며, 항상이면
+  기간 칸을 숨기고 둘 다 null로 저장한다.
+- 활성 지시만 모든 쇼핑몰에 적용한다. 한 행에 여러 지시가 맞으면 완전일치가
+  시작어보다 앞선다. 시작어끼리는 더 긴 시작어가 이긴다. 기간 있는 지시가
+  항상 지시보다 앞선다. 같은 순위가 둘 이상이면 오늘 작업에서 충돌로 보여
+  붙이지 않는다. 같은 원본 품목명(또는 시작어)은 한 지시 안에서만 unique이고,
+  기간이 겹치지 않으면 여러 지시에 둘 수 있다.
 - 표시 문구는 자체품번 변환이 끝난 최종 공식명 앞에 붙인다. 사은품 행에는 적용하지
   않는다. 중지(`is_active = false`)한 지시는 적용하지 않는다.
 - 나가는 포장재는 `invoice_work_instruction_products.style_id`로 연결한다.
@@ -761,18 +828,47 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
    규칙의 M번호는 CJ 행을 늘리지 않고 출고구성 XLSX에만 반영한다. 사은품은 그
    세트 블록 뒤에 순서대로 삽입한다. CJ 13열과 M번호 출고구성 XLSX를 따로
    내려받는다. 한 단계의 실패가 다른 열을 되돌리거나 비우지 않는다.
+   CJ 13열을 내려받은 뒤에는 비개인정보 작업 이력과 사이트별 집계를 저장한다.
+   이력 저장이 실패해도 파일 다운로드는 유지하고, 같은 파일 지문은 한 작업으로
+   갱신한다.
+
+#### 사방넷 사이트 연결 · 출고 집계
+
+별도 사이트 마스터는 두지 않는다. 파일의 쇼핑몰명은 기존 `code_usage_targets`
+정식명과 `code_usage_target_aliases`에 exact 매칭한다. 비교 키는
+`compactOutboundPartnerKey`다. 빈 쇼핑몰명과 미등록 값은 파일 확인 단계에서
+막고, 비활성 일치는 자동 연결하지 않으며 출고업체 재활성 규칙을 따른다.
+
+- 원본 주문 행과 수령인·전화·주소는 브라우저 메모리에만 둔다.
+- `invoice_work_runs`는 브랜드·비개인정보 파일 지문(SHA-256)·파일명·작업자
+  스냅샷·원본/주문/CJ/검토 수치만 저장한다. 고유 범위는
+  `(brand_id, file_fingerprint)`다.
+- `invoice_work_site_summaries`는 `(brand_id, run_id, usage_target_id)`마다
+  원본 쇼핑몰 표기, 주문 건수, 원본 행수·수량, CJ 주문/사은품 행수·수량을
+  둔다. 주문 지문은 메모리에서만 중복 제거하고 DB에 넣지 않는다.
+- `record_invoice_work_completion`은 `SECURITY INVOKER`이며 대상 출고업체가
+  같은 브랜드인지 검사한 뒤 작업을 upsert하고 사이트 집계를 한 트랜잭션에서
+  교체한다.
+- 로직: `src/lib/invoice/mall-resolution.ts`.
+  저장소: `src/lib/supabase/invoice-work-history.ts`.
+  화면: `InvoiceMallResolutionDialog`, `InvoiceWorkPage` 파일 확인·작업 이력,
+  `InvoiceOutputStepPanel`.
+- 회귀 검증: `npm run verify:invoice-mall`.
+- 마이그레이션: `20260828075955_invoice_work_history.sql`.
 
 - 로직: `src/lib/invoice/prefix-transform.ts`, `gift-assign.ts`,
   `gift-diversity.ts`, `gift-unified.ts`,
   `gift-confirm.ts`, `work-instruction-transform.ts`, `product-name-patterns.ts`,
   `product-name-tags.ts`, `product-name-transform.ts`, `item-name-transform.ts`,
-  `option-transform.ts`, `option-ledger-import.ts`, `invoice-output.ts`,
+  `option-transform.ts`, `option-ledger-import.ts`, `mall-resolution.ts`,
+  `invoice-output.ts`,
   `product-list-summary.ts`, `product-list-warehouse.ts`,
   `product-list-print.ts`, `product-list-route.ts`,
   `prefix-paste.ts`, `accessory-resolve.ts`.
   저장소: `invoice-prefix-requests.ts`, `invoice-gift-allocations.ts`,
   `invoice-accessory-rules.ts`,
-  `invoice-work-instructions.ts`, `invoice-product-name-maps.ts`,
+  `invoice-work-instructions.ts`, `invoice-work-history.ts`,
+  `invoice-product-name-maps.ts`,
   `invoice-product-name-tag-roles.ts`, `invoice-option-maps.ts`,
   `invoice-item-name-rules.ts`.
   화면: `InvoicePrefixRequestPanel/Form`, `InvoiceWorkInstructionPanel/Form`,
@@ -783,7 +879,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `InvoiceItemNameLookupKeyTable`,
   `InvoiceItemNameRuleForm`, `InvoiceItemNameRuleBulkPanel`,
   `InvoiceAccessoryRuleTable`,
-  `InvoiceOutputStepPanel`.
+  `InvoiceOutputStepPanel`, `InvoiceMallResolutionDialog`.
   내품명 규칙 엑셀 파싱·양식·검토 목록: `src/lib/invoice/item-name-rule-import.ts`.
 - 마이그레이션: `20260812060000_create_invoice_prefix_rules.sql`,
   `20260812070000_restructure_invoice_prefix_requests.sql`,
@@ -807,7 +903,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260824140000_invoice_gift_source_maps.sql`,
   `20260824141000_grant_fnv1a_32_utf8_authenticated.sql`,
   `20260824142000_gift_source_unique_per_recipient.sql`,
-  `20260824143000_confirm_gift_source_allocations.sql`.
+  `20260824143000_confirm_gift_source_allocations.sql`,
+  `20260828075955_invoice_work_history.sql`.
 - 재고 원칙: [`INVENTORY.md`](./INVENTORY.md).
 
 ### 수천 건 적재

@@ -626,7 +626,7 @@ export function ProductDetailDrawer() {
                           <div className="flex flex-wrap gap-1.5">
                             {codeAssignments.length === 0 ? (
                               <span className="text-xs text-muted-foreground">
-                                사용처 없음
+                                출고업체 없음
                               </span>
                             ) : (
                               codeAssignments.map((a) => {

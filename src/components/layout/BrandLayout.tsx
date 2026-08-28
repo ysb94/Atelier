@@ -125,7 +125,7 @@ const navGroups: { title: string; items: NavItem[] }[] = [
       { to: 'data/all', label: '전체 상품', icon: Table2 },
       { to: 'data/upload', label: '일괄 업로드', icon: Upload },
       { to: 'barcodes', label: '자사 바코드', icon: ScanBarcode },
-      { to: 'usage-codes', label: '사용처별 바코드', icon: Store },
+      { to: 'usage-codes', label: '출고업체별 바코드', icon: Store },
       { to: 'partner-codes', label: '거래처 코드', icon: Building2 },
     ],
   },
@@ -134,7 +134,7 @@ const navGroups: { title: string; items: NavItem[] }[] = [
     items: [
       { to: 'settings/fields', label: '업로드 항목', icon: ListChecks },
       { to: 'settings/seasons', label: '출시 기획', icon: CalendarRange },
-      { to: 'settings/usage-targets', label: '사용처', icon: Store },
+      { to: 'settings/usage-targets', label: '출고업체', icon: Store },
       { to: 'settings/members', label: '멤버', icon: Users },
       { to: 'settings/ai', label: 'AI 설정', icon: Sparkles },
       { to: 'settings/brand', label: '브랜드 정보', icon: Settings },

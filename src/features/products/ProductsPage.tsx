@@ -11,7 +11,9 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  Plus,
   RotateCcw,
+  X,
 } from 'lucide-react'
 import {
   Link,
@@ -22,6 +24,9 @@ import {
   useSearchParams,
 } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
+import { useAuth } from '@/lib/supabase/auth'
+import { DepartmentProductLoadDialog } from '@/features/products/DepartmentProductLoadDialog'
+import { useDepartmentWorkSet } from '@/features/products/useDepartmentWorkSet'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
@@ -419,6 +424,7 @@ export function ProductsPage({
   lockedOwner?: FieldOwner
 } = {}) {
   const { brand } = useBrand()
+  const { profile } = useAuth()
   const navigate = useNavigate()
   const { styleNo: activeStyleNoParam } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -438,6 +444,8 @@ export function ProductsPage({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [searchDraft, setSearchDraft] = useState(search)
   const [isSearchComposing, setIsSearchComposing] = useState(false)
+  const [loadOpen, setLoadOpen] = useState(false)
+  const workSet = useDepartmentWorkSet(profile?.id, brand.id, lockedOwner)
 
   const listBasePath = lockedOwner
     ? `/b/${brand.slug}/work/${lockedOwner}`
@@ -487,9 +495,18 @@ export function ProductsPage({
 
   const fields = useMemo(() => fieldsQuery.data ?? [], [fieldsQuery.data])
   const seasons = useMemo(() => seasonsQuery.data ?? [], [seasonsQuery.data])
-  const allStyles = useMemo(() => stylesQuery.data ?? [], [stylesQuery.data])
+  const catalogStyles = useMemo(
+    () => stylesQuery.data ?? [],
+    [stylesQuery.data],
+  )
+  const allStyles = useMemo(() => {
+    if (!lockedOwner) return catalogStyles
+    return catalogStyles.filter((style) => workSet.idSet.has(style.id))
+  }, [catalogStyles, lockedOwner, workSet.idSet])
+  const workSetEmpty = Boolean(lockedOwner && workSet.ids.length === 0)
   const listLoading =
-    stylesQuery.isLoading || fieldsQuery.isLoading || seasonsQuery.isLoading
+    !workSetEmpty &&
+    (stylesQuery.isLoading || fieldsQuery.isLoading || seasonsQuery.isLoading)
 
   const seasonMap = useMemo(
     () => new Map(seasons.map((s) => [s.id, s])),
@@ -705,6 +722,29 @@ export function ProductsPage({
       }),
     ]
 
+    const unloadColumn = lockedOwner
+      ? [
+          columnHelper.display({
+            id: 'unload',
+            header: '',
+            cell: ({ row }) => (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={(event) => {
+                  event.stopPropagation()
+                  workSet.remove(row.original.id)
+                }}
+              >
+                <X className="size-3.5" />
+                빼기
+              </Button>
+            ),
+          }),
+        ]
+      : []
+
     if (columnPreset === 'all') {
       return [
         ...base,
@@ -733,6 +773,7 @@ export function ProductsPage({
             <CompletenessDots style={row.original} fields={fields} />
           ),
         }),
+        ...unloadColumn,
       ]
     }
 
@@ -834,11 +875,13 @@ export function ProductsPage({
           ),
         }),
       ),
+      ...unloadColumn,
     ]
   }, [
     columnPreset,
     fields,
     hasImageField,
+    lockedOwner,
     ownerFields,
     seasonMap,
     seasons,
@@ -848,6 +891,7 @@ export function ProductsPage({
     nameLabel,
     stockByStyle,
     stockPending,
+    workSet.remove,
   ])
 
   const table = useReactTable({
@@ -867,11 +911,16 @@ export function ProductsPage({
         }
         description={
           lockedOwner
-            ? `${OWNER_LABEL[lockedOwner]} 부서가 채울 항목만 보입니다. 표에서 칸을 눌러 바로 입력할 수 있습니다.`
+            ? `${OWNER_LABEL[lockedOwner]} 화면은 지금 필요한 상품만 불러 채웁니다. 처음에는 비어 있고, 표에서 칸을 눌러 바로 입력할 수 있습니다.`
             : `${brand.name} 브랜드의 상품 마스터입니다. 보기를 부서로 바꾸면 그 부서 항목만 열로 보이고 표에서 바로 입력할 수 있습니다.`
         }
         actions={
-          lockedOwner ? undefined : (
+          lockedOwner ? (
+            <Button type="button" onClick={() => setLoadOpen(true)}>
+              <Plus className="size-4" />
+              상품 불러오기
+            </Button>
+          ) : (
             <Link to={`/b/${brand.slug}/data/upload?mode=single`}>
               <Button type="button">+ 상품 등록</Button>
             </Link>
@@ -879,6 +928,7 @@ export function ProductsPage({
         }
       />
 
+      {workSetEmpty ? null : (
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <Input
           className="sm:max-w-xs"
@@ -970,8 +1020,9 @@ export function ProductsPage({
             : `전체 ${formatNumber(totalCount)}건 중 ${formatNumber(rangeStart)}–${formatNumber(rangeEnd)}건`}
         </div>
       </div>
+      )}
 
-      {columnPreset !== 'all' && emptyCounts.length > 0 ? (
+      {columnPreset !== 'all' && emptyCounts.length > 0 && !workSetEmpty ? (
         <div className="mb-4 flex flex-wrap items-center gap-2">
           <span className="text-xs text-muted-foreground">
             {OWNER_LABEL[columnPreset]} 미입력
@@ -1040,6 +1091,28 @@ export function ProductsPage({
                     className="px-4 py-10 text-center text-muted-foreground"
                   >
                     불러오는 중...
+                  </td>
+                </tr>
+              ) : workSetEmpty && !hasActiveFilters ? (
+                <tr>
+                  <td colSpan={columns.length} className="px-4 py-12">
+                    <div className="mx-auto max-w-md space-y-3 text-center">
+                      <p className="text-sm font-medium">
+                        불러온 상품이 없습니다
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        이 화면은 처음부터 비어 있습니다. 지금 필요한 상품만
+                        불러오세요. 다른 부서 목록과는 섞이지 않습니다.
+                      </p>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() => setLoadOpen(true)}
+                      >
+                        <Plus className="size-4" />
+                        상품 불러오기
+                      </Button>
+                    </div>
                   </td>
                 </tr>
               ) : allStyles.length === 0 && !hasActiveFilters ? (
@@ -1204,12 +1277,23 @@ export function ProductsPage({
         ) : null}
       </Card>
 
+      {loadOpen && lockedOwner ? (
+        <DepartmentProductLoadDialog
+          owner={lockedOwner}
+          styles={catalogStyles}
+          alreadyIds={workSet.idSet}
+          loading={stylesQuery.isLoading}
+          onClose={() => setLoadOpen(false)}
+          onAdd={workSet.add}
+        />
+      ) : null}
+
       <Outlet />
     </div>
   )
 }
 
-/** 부서 화면 — 전체 상품 표를 그 부서 항목으로 고정해서 보여 준다. */
+/** 부서 화면 — 필요한 상품만 불러 그 부서 항목을 채운다. */
 export function DepartmentProductsPage() {
   const { owner } = useParams()
   if (!owner || !OWNER_PRESETS.includes(owner as (typeof OWNER_PRESETS)[number])) {

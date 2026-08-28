@@ -40,25 +40,25 @@ const shortcuts = [
   {
     to: 'work/planning',
     label: '기획 · 상품 정보',
-    description: '기획 항목 입력',
+    description: '필요한 상품만 불러 기획 항목 입력',
     icon: PenLine,
   },
   {
     to: 'work/design',
     label: '디자인 · 상품 정보',
-    description: '디자인 항목 입력',
+    description: '필요한 상품만 불러 디자인 항목 입력',
     icon: Palette,
   },
   {
     to: 'work/md',
     label: 'MD · 상품 정보',
-    description: 'MD 항목 입력',
+    description: '필요한 상품만 불러 MD 항목 입력',
     icon: LayoutGrid,
   },
   {
     to: 'work/logistics',
     label: '물류 · 상품 정보',
-    description: '물류 항목 입력',
+    description: '필요한 상품만 불러 물류 항목 입력',
     icon: Boxes,
   },
   {
@@ -69,7 +69,7 @@ const shortcuts = [
   },
   {
     to: 'usage-codes',
-    label: '사용처별 바코드',
+    label: '출고업체별 바코드',
     description: '판매처 코드 연결',
     icon: Store,
   },

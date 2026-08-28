@@ -372,12 +372,45 @@ export type BarcodeFieldInput = {
 }
 
 /** 자사 바코드가 사용되는 판매처·납품처(면세점, 무신사 등) */
+/** 판매 성격. 출고 방식과 독립된 축이라 자유롭게 조합된다. */
+export type OutboundChannelType = 'unset' | 'online' | 'offline'
+
+export type OutboundShippingMethod =
+  | 'unset'
+  | 'parcel'
+  | 'fulfillment'
+  | 'freight'
+  | 'pickup'
+
+/** `active`와 `isOneTime`을 합쳐 만드는 표시 상태. archived는 화면에서 비활성. */
+export type OutboundPartnerStatus = 'ongoing' | 'one_time' | 'archived'
+
+export type CodeUsageTargetFolder = {
+  id: string
+  brandId: string
+  parentId: string | null
+  name: string
+  normalizedName: string
+  order: number
+  createdAt: string
+  updatedAt: string
+}
+
 export type CodeUsageTarget = {
   id: string
   brandId: string
   name: string
+  /** 이름 비교용 압축 키. 띄어쓰기만 다른 중복을 막는다. */
+  normalizedName: string
   /** 사용 종료해도 기존 바코드 연결 이력은 보존한다. */
   active: boolean
+  /** 단발성 거래. 상시 업체와 섞이지 않게 목록에서 갈라 놓는다. */
+  isOneTime: boolean
+  channelType: OutboundChannelType
+  shippingMethod: OutboundShippingMethod
+  /** 분류 폴더. 비면 미분류다. */
+  folderId: string | null
+  note: string
   order: number
   createdAt: string
   updatedAt: string
@@ -385,6 +418,60 @@ export type CodeUsageTarget = {
 
 export type CodeUsageTargetInput = {
   name: string
+  channelType?: OutboundChannelType
+  shippingMethod?: OutboundShippingMethod
+  isOneTime?: boolean
+  note?: string
+  folderId?: string | null
+}
+
+/** 부서·발주 사이트마다 다르게 부르는 이름. 정식명 1건에 N건이다. */
+export type CodeUsageTargetAlias = {
+  id: string
+  brandId: string
+  targetId: string
+  alias: string
+  normalizedAlias: string
+  note: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** 사방넷 CJ 최종 다운로드 1회. 원본 주문·개인정보는 두지 않는다. */
+export type InvoiceWorkRun = {
+  id: string
+  brandId: string
+  fileFingerprint: string
+  sourceFileName: string
+  completedBy: string | null
+  workerLabel: string
+  completedAt: string
+  sourceRowCount: number
+  sourceOrderCount: number
+  exportedRowCount: number
+  reviewRowCount: number
+  createdAt: string
+  updatedAt: string
+  sites: InvoiceWorkSiteSummary[]
+}
+
+/** 공식 출고업체 1곳의 주문·출고 수량. 주문 식별값은 없다. */
+export type InvoiceWorkSiteSummary = {
+  id: string
+  brandId: string
+  runId: string
+  usageTargetId: string
+  targetName: string
+  sourceMallNames: string
+  orderCount: number
+  sourceRowCount: number
+  sourceQuantity: number
+  cjOrderRowCount: number
+  cjOrderQuantity: number
+  cjGiftRowCount: number
+  cjGiftQuantity: number
+  createdAt: string
+  updatedAt: string
 }
 
 /** 사용처에 등록된 자사 바코드의 운영 상태 */
@@ -1066,9 +1153,21 @@ export type InvoiceWorkInstructionItem = {
   normalizedProductName: string
 }
 
+/** 작업 지시 품목명 매칭. prefix는 등록 글자 그대로 앞에 있을 때만 맞춘다. */
+export type InvoiceWorkInstructionMatchMode = 'exact' | 'prefix'
+
+export const INVOICE_WORK_INSTRUCTION_MATCH_MODE_LABEL: Record<
+  InvoiceWorkInstructionMatchMode,
+  string
+> = {
+  exact: '완전일치',
+  prefix: '시작어',
+}
+
 /**
  * 포장·특이사항 작업 지시.
- * 원본 품목명 exact-match로 최종 품목명 앞에 표시 문구를 붙인다.
+ * matchMode가 exact면 원본 품목명 완전일치, prefix면 등록 글자로 시작할 때만
+ * 최종 품목명 앞에 표시 문구를 붙인다. 시작어는 대괄호·공백을 쪼개지 않는다.
  * 적용 기간(startsAt/endsAt)이 있으면 주문일시가 그 안일 때만 적용하고,
  * 비어 있으면 중지 전까지 항상 적용한다.
  * outgoingProducts는 Gift box처럼 지시가 적용될 때 나가는 포장재다.
@@ -1082,6 +1181,7 @@ export type InvoiceWorkInstruction = {
   note: string
   startsAt: string | null
   endsAt: string | null
+  matchMode: InvoiceWorkInstructionMatchMode
   countBasis: InvoiceWorkInstructionCountBasis
   outgoingProducts: StyleRef[]
   items: InvoiceWorkInstructionItem[]

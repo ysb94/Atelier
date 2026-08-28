@@ -4,7 +4,12 @@ import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Card, CardContent } from '@/components/ui/card'
 import { UsageTargetManagerPanel } from '@/features/codes/UsageTargetManager'
-import { getCodeUsageAssignments, getCodeUsageTargets } from '@/lib/api'
+import {
+  getCodeUsageAssignments,
+  getCodeUsageTargetAliases,
+  getCodeUsageTargetFolders,
+  getCodeUsageTargets,
+} from '@/lib/api'
 
 export function UsageTargetsSettingsPage() {
   const { brand } = useBrand()
@@ -14,12 +19,22 @@ export function UsageTargetsSettingsPage() {
     queryKey: ['codeUsageTargets', brand.id],
     queryFn: () => getCodeUsageTargets(brand.id),
   })
+  const aliasesQuery = useQuery({
+    queryKey: ['codeUsageTargetAliases', brand.id],
+    queryFn: () => getCodeUsageTargetAliases(brand.id),
+  })
+  const foldersQuery = useQuery({
+    queryKey: ['codeUsageTargetFolders', brand.id],
+    queryFn: () => getCodeUsageTargetFolders(brand.id),
+  })
   const assignmentsQuery = useQuery({
     queryKey: ['codeUsageAssignments', brand.id],
     queryFn: () => getCodeUsageAssignments(brand.id),
   })
 
   const targets = useMemo(() => targetsQuery.data ?? [], [targetsQuery.data])
+  const aliases = useMemo(() => aliasesQuery.data ?? [], [aliasesQuery.data])
+  const folders = useMemo(() => foldersQuery.data ?? [], [foldersQuery.data])
   const assignments = useMemo(
     () => assignmentsQuery.data ?? [],
     [assignmentsQuery.data],
@@ -31,19 +46,31 @@ export function UsageTargetsSettingsPage() {
         queryKey: ['codeUsageTargets', brand.id],
       }),
       queryClient.invalidateQueries({
+        queryKey: ['codeUsageTargetAliases', brand.id],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['codeUsageTargetFolders', brand.id],
+      }),
+      queryClient.invalidateQueries({
         queryKey: ['codeUsageAssignments', brand.id],
       }),
     ])
   }
 
+  const loading =
+    targetsQuery.isLoading ||
+    aliasesQuery.isLoading ||
+    foldersQuery.isLoading ||
+    assignmentsQuery.isLoading
+
   return (
     <div>
       <PageHeader
-        title="사용처"
-        description={`${brand.name} 바코드를 등록할 판매처·납품처를 관리합니다.`}
+        title="출고업체"
+        description={`${brand.name} 물건을 보내는 곳을 폴더로 나누고, 카드에 그 업체만의 특징을 적습니다.`}
       />
 
-      {targetsQuery.isLoading || assignmentsQuery.isLoading ? (
+      {loading ? (
         <div className="text-sm text-muted-foreground">불러오는 중...</div>
       ) : (
         <Card>
@@ -51,6 +78,8 @@ export function UsageTargetsSettingsPage() {
             <UsageTargetManagerPanel
               brandId={brand.id}
               targets={targets}
+              folders={folders}
+              aliases={aliases}
               assignments={assignments}
               onChanged={invalidate}
             />

@@ -1,14 +1,21 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { Download } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { recordInvoiceWorkCompletion } from '@/lib/api'
 import type { GiftAssignmentPlan } from '@/lib/invoice/gift-assign'
 import {
   finalizeGiftPlanForDownload,
   type FinalizeUnifiedGiftPlanResult,
 } from '@/lib/invoice/gift-confirm'
 import type { GiftSourcePlan } from '@/lib/invoice/gift-source-transform'
+import {
+  countUniqueInvoiceOrders,
+  fingerprintInvoiceWorkRows,
+  summarizeInvoiceWorkSites,
+  type InvoiceMallResolution,
+} from '@/lib/invoice/mall-resolution'
 import {
   buildInvoiceOutputRows,
   downloadInvoiceOutputRows,
@@ -46,6 +53,7 @@ export function InvoiceOutputStepPanel({
   giftPlan,
   giftSourcePlan,
   baseProductTransformation,
+  mallResolution,
   finalizeUnified,
 }: {
   brandId: string
@@ -62,6 +70,7 @@ export function InvoiceOutputStepPanel({
   giftPlan: GiftAssignmentPlan
   giftSourcePlan?: GiftSourcePlan
   baseProductTransformation?: InvoiceProductNameTransformation
+  mallResolution: InvoiceMallResolution
   finalizeUnified?: () => Promise<FinalizeUnifiedGiftPlanResult>
 }) {
   const queryClient = useQueryClient()
@@ -69,6 +78,17 @@ export function InvoiceOutputStepPanel({
   const [downloadingComponents, setDownloadingComponents] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
   const [messageIsError, setMessageIsError] = useState(false)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const [historySaving, setHistorySaving] = useState(false)
+  const lastHistoryRef = useRef<{
+    fileFingerprint: string
+    sourceFileName: string
+    sourceRowCount: number
+    sourceOrderCount: number
+    exportedRowCount: number
+    reviewRowCount: number
+    sites: ReturnType<typeof summarizeInvoiceWorkSites>
+  } | null>(null)
 
   const nameTransformation = useMemo(
     () => productNameTransformationToName(productTransformation),
@@ -174,6 +194,22 @@ export function InvoiceOutputStepPanel({
           ? `${formatNumber(outputRows.length)}행을 내려받았습니다. 한도 경합으로 ${formatNumber(finalized.skippedCount)}건은 제외됐습니다.`
           : `${formatNumber(outputRows.length)}행을 내려받았습니다.`,
       )
+
+      const historyInput = {
+        fileFingerprint: await fingerprintInvoiceWorkRows(rows),
+        sourceFileName: sourceFileName ?? '',
+        sourceRowCount: rows.length,
+        sourceOrderCount: countUniqueInvoiceOrders(rows),
+        exportedRowCount: outputRows.length,
+        reviewRowCount: reviewCount,
+        sites: summarizeInvoiceWorkSites({
+          sourceRows: rows,
+          outputRows,
+          resolution: mallResolution,
+        }),
+      }
+      lastHistoryRef.current = historyInput
+      await saveWorkHistory(historyInput)
     } catch (error) {
       setMessageIsError(true)
       setMessage(
@@ -183,6 +219,30 @@ export function InvoiceOutputStepPanel({
       )
     } finally {
       setDownloading(false)
+    }
+  }
+
+  async function saveWorkHistory(
+    input: NonNullable<typeof lastHistoryRef.current>,
+  ) {
+    setHistorySaving(true)
+    setHistoryError(null)
+    try {
+      await recordInvoiceWorkCompletion({
+        brandId,
+        ...input,
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ['invoiceWorkRuns', brandId],
+      })
+    } catch (error) {
+      setHistoryError(
+        error instanceof Error
+          ? error.message
+          : '작업 이력을 저장하지 못했습니다.',
+      )
+    } finally {
+      setHistorySaving(false)
     }
   }
 
@@ -279,6 +339,26 @@ export function InvoiceOutputStepPanel({
         >
           {message}
         </p>
+      ) : null}
+
+      {historyError ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning/40 bg-warning/5 px-3 py-2">
+          <p className="text-xs text-warning">
+            파일 다운로드 완료 / 이력 저장 실패 · {historyError}
+          </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={historySaving || !lastHistoryRef.current}
+            onClick={() => {
+              const pending = lastHistoryRef.current
+              if (pending) void saveWorkHistory(pending)
+            }}
+          >
+            {historySaving ? '다시 저장 중...' : '이력 다시 저장'}
+          </Button>
+        </div>
       ) : null}
 
       {giftPlan.unavoidableDuplicateCount > 0 ? (

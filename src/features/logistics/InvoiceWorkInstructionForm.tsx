@@ -9,8 +9,10 @@ import { parseGiftTargetPaste } from '@/lib/invoice/prefix-paste'
 import { parseMoment, suggestEndOfDay } from '@/lib/invoice/prefix-transform'
 import {
   INVOICE_WORK_INSTRUCTION_COUNT_BASIS_LABEL,
+  INVOICE_WORK_INSTRUCTION_MATCH_MODE_LABEL,
   type InvoiceWorkInstruction,
   type InvoiceWorkInstructionCountBasis,
+  type InvoiceWorkInstructionMatchMode,
   type StyleRef,
 } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
@@ -119,10 +121,17 @@ function itemsFromInstruction(instruction: InvoiceWorkInstruction): string[] {
   return instruction.items.map((item) => item.productName)
 }
 
+type ScheduleMode = 'always' | 'period'
+
+const MATCH_MODE_OPTIONS: InvoiceWorkInstructionMatchMode[] = ['exact', 'prefix']
+const SCHEDULE_MODE_OPTIONS: { value: ScheduleMode; label: string }[] = [
+  { value: 'always', label: '항상' },
+  { value: 'period', label: '기간' },
+]
+
 /**
  * 작업 지시 등록·수정 폼.
- * 원본 품목명 exact-match로 최종 품목명 앞에 표시 문구를 붙인다.
- * 적용 기간은 선택이다.
+ * 매칭은 완전일치 또는 시작어 하나이고, 적용은 항상 또는 기간이다.
  */
 export function InvoiceWorkInstructionForm({
   brandId,
@@ -139,6 +148,12 @@ export function InvoiceWorkInstructionForm({
   const [title, setTitle] = useState(editing?.title ?? '')
   const [labelText, setLabelText] = useState(editing?.labelText ?? '')
   const [note, setNote] = useState(editing?.note ?? '')
+  const [matchMode, setMatchMode] = useState<InvoiceWorkInstructionMatchMode>(
+    editing?.matchMode ?? 'exact',
+  )
+  const [scheduleMode, setScheduleMode] = useState<ScheduleMode>(
+    editing?.startsAt && editing?.endsAt ? 'period' : 'always',
+  )
   const [startsAt, setStartsAt] = useState(editing?.startsAt ?? '')
   const [endsAt, setEndsAt] = useState(editing?.endsAt ?? '')
   const [countBasis, setCountBasis] = useState<InvoiceWorkInstructionCountBasis>(
@@ -156,15 +171,17 @@ export function InvoiceWorkInstructionForm({
   const [formError, setFormError] = useState<string | null>(null)
 
   const filledItems = items.filter((item) => item.trim())
-  const periodReady = (!startsAt && !endsAt) || Boolean(startsAt && endsAt)
+  const periodReady =
+    scheduleMode === 'always' || Boolean(startsAt && endsAt)
   const canSave =
     Boolean(title.trim() && labelText.trim()) &&
     filledItems.length > 0 &&
     periodReady
+  const targetNoun = matchMode === 'prefix' ? '시작어' : '원본 품목명'
 
   const duplicateWarnings = useMemo(() => {
-    const start = parseMoment(startsAt)
-    const end = parseMoment(endsAt)
+    const start = scheduleMode === 'period' ? parseMoment(startsAt) : null
+    const end = scheduleMode === 'period' ? parseMoment(endsAt) : null
     const conflicts: { productName: string; instructionTitle: string }[] = []
     for (const productName of filledItems) {
       const key = normalizeProductName(productName)
@@ -189,7 +206,7 @@ export function InvoiceWorkInstructionForm({
       }
     }
     return conflicts
-  }, [existingInstructions, editing, filledItems, startsAt, endsAt])
+  }, [existingInstructions, editing, filledItems, scheduleMode, startsAt, endsAt])
 
   const mutation = useMutation({
     mutationFn: () =>
@@ -199,8 +216,9 @@ export function InvoiceWorkInstructionForm({
           title,
           labelText,
           note,
-          startsAt: startsAt || null,
-          endsAt: endsAt || null,
+          matchMode,
+          startsAt: scheduleMode === 'period' ? startsAt || null : null,
+          endsAt: scheduleMode === 'period' ? endsAt || null : null,
           countBasis,
           outgoingStyleIds: outgoingProducts.map((ref) => ref.styleId),
           isActive: editing?.isActive ?? true,
@@ -220,6 +238,8 @@ export function InvoiceWorkInstructionForm({
         setTitle('')
         setLabelText('')
         setNote('')
+        setMatchMode('exact')
+        setScheduleMode('always')
         setStartsAt('')
         setEndsAt('')
         setCountBasis('per_shipment')
@@ -241,7 +261,9 @@ export function InvoiceWorkInstructionForm({
     const parsed = parseGiftTargetPaste(text)
     if (parsed.rows.length === 0) {
       setPasteMessage(
-        '읽을 수 있는 줄이 없습니다. 원본 품목명을 복사해 주세요. 내품명은 대상이 아닙니다.',
+        matchMode === 'prefix'
+          ? '읽을 수 있는 줄이 없습니다. 시작어를 복사해 주세요. 내품명은 대상이 아닙니다.'
+          : '읽을 수 있는 줄이 없습니다. 원본 품목명을 복사해 주세요. 내품명은 대상이 아닙니다.',
       )
       return
     }
@@ -318,30 +340,80 @@ export function InvoiceWorkInstructionForm({
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-x-6 gap-y-3">
-        <MomentField
-          id="work-instruction-starts"
-          label="적용 시작 (선택)"
-          value={startsAt}
-          defaultTime="00:00"
-          onChange={(next) => {
-            setStartsAt(next)
-            if (next && !endsAt) setEndsAt(suggestEndOfDay(next))
-          }}
-        />
-        <MomentField
-          id="work-instruction-ends"
-          label="적용 종료 (선택)"
-          value={endsAt}
-          defaultTime="23:59"
-          onChange={setEndsAt}
-        />
+      <div className="grid gap-3 lg:grid-cols-2">
+        <fieldset className="space-y-1.5">
+          <legend className="text-xs font-medium">매칭</legend>
+          <div className="grid grid-cols-2 gap-1">
+            {MATCH_MODE_OPTIONS.map((value) => (
+              <Button
+                key={value}
+                type="button"
+                size="sm"
+                variant={matchMode === value ? 'default' : 'outline'}
+                aria-pressed={matchMode === value}
+                onClick={() => setMatchMode(value)}
+              >
+                {INVOICE_WORK_INSTRUCTION_MATCH_MODE_LABEL[value]}
+              </Button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {matchMode === 'prefix'
+              ? '등록한 글자가 원본 품목명 맨 앞에 있을 때만 붙습니다.'
+              : '원본 품목명이 등록한 글자와 완전히 같을 때만 붙습니다.'}
+          </p>
+        </fieldset>
+        <fieldset className="space-y-1.5">
+          <legend className="text-xs font-medium">적용</legend>
+          <div className="grid grid-cols-2 gap-1">
+            {SCHEDULE_MODE_OPTIONS.map((option) => (
+              <Button
+                key={option.value}
+                type="button"
+                size="sm"
+                variant={scheduleMode === option.value ? 'default' : 'outline'}
+                aria-pressed={scheduleMode === option.value}
+                onClick={() => setScheduleMode(option.value)}
+              >
+                {option.label}
+              </Button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {scheduleMode === 'always'
+              ? '중지하기 전까지 모든 주문에 적용합니다.'
+              : '주문일시가 시작·종료 안인 행에만 붙습니다.'}
+          </p>
+        </fieldset>
       </div>
-      <p className="text-xs text-muted-foreground">
-        비워 두면 중지하기 전까지 항상 적용합니다. 기간을 넣으면 주문일시가 그
-        안인 행에만 붙습니다. 날짜만 고르면 시작 00:00 · 종료 23:59로
-        채워집니다.
-      </p>
+
+      {scheduleMode === 'period' ? (
+        <>
+          <div className="flex flex-wrap gap-x-6 gap-y-3">
+            <MomentField
+              id="work-instruction-starts"
+              label="적용 시작"
+              value={startsAt}
+              defaultTime="00:00"
+              onChange={(next) => {
+                setStartsAt(next)
+                if (next && !endsAt) setEndsAt(suggestEndOfDay(next))
+              }}
+            />
+            <MomentField
+              id="work-instruction-ends"
+              label="적용 종료"
+              value={endsAt}
+              defaultTime="23:59"
+              onChange={setEndsAt}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground">
+            시작과 종료를 모두 넣으세요. 날짜만 고르면 시작 00:00 · 종료
+            23:59로 채워집니다.
+          </p>
+        </>
+      ) : null}
 
       <div className="grid gap-3 lg:grid-cols-2">
         <div>
@@ -422,7 +494,7 @@ export function InvoiceWorkInstructionForm({
           htmlFor="work-instruction-paste"
           className="mb-1.5 block text-xs font-medium"
         >
-          대상 품목명 붙여넣기
+          {matchMode === 'prefix' ? '시작어 붙여넣기' : '대상 품목명 붙여넣기'}
         </label>
         <textarea
           id="work-instruction-paste"
@@ -436,11 +508,18 @@ export function InvoiceWorkInstructionForm({
             applyPaste(text)
           }}
           className="w-full rounded-md border border-border bg-card px-2.5 py-2 text-xs"
-          placeholder="엑셀에서 원본 품목명을 복사해 붙여넣으세요. 내품명은 쓰지 않습니다."
+          placeholder={
+            matchMode === 'prefix'
+              ? '예: [선물 포장] 또는 [선물포장]. 내품명은 쓰지 않습니다.'
+              : '엑셀에서 원본 품목명을 복사해 붙여넣으세요. 내품명은 쓰지 않습니다.'
+          }
         />
         <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-muted-foreground">
-            {pasteMessage || '붙여넣으면 아래 목록이 채워집니다.'}
+            {pasteMessage ||
+              (matchMode === 'prefix'
+                ? '[선물 포장]과 [선물포장]은 다른 시작어입니다. [선물포장]은 [선물포장] 울 코트에만 맞고 [선물포장완료]에는 맞지 않습니다.'
+                : '붙여넣으면 아래 목록이 채워집니다.')}
           </p>
           <div className="flex gap-2">
             {pasteText.trim() ? (
@@ -466,11 +545,19 @@ export function InvoiceWorkInstructionForm({
         </div>
       </div>
 
+      {matchMode === 'prefix' ? (
+        <p className="text-[11px] text-muted-foreground">
+          시작어는 등록한 글자 그대로 앞에 있을 때만 맞습니다. 예: [선물
+          포장]과 [선물포장]은 따로 등록하세요. [선물포장완료] 울 코트는
+          [선물포장]에 맞지 않습니다.
+        </p>
+      ) : null}
+
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-120 text-left text-xs">
           <thead className="bg-muted/60">
             <tr>
-              <th className="px-3 py-2.5 font-medium">원본 품목명</th>
+              <th className="px-3 py-2.5 font-medium">{targetNoun}</th>
               <th className="w-16 px-3 py-2.5 font-medium">관리</th>
             </tr>
           </thead>
@@ -481,7 +568,9 @@ export function InvoiceWorkInstructionForm({
                   colSpan={2}
                   className="px-4 py-10 text-center text-muted-foreground"
                 >
-                  위에 품목명을 붙여넣거나 행 추가로 직접 입력하세요.
+                  {matchMode === 'prefix'
+                    ? '위에 시작어를 붙여넣거나 행 추가로 직접 입력하세요.'
+                    : '위에 품목명을 붙여넣거나 행 추가로 직접 입력하세요.'}
                 </td>
               </tr>
             ) : (
@@ -517,7 +606,7 @@ export function InvoiceWorkInstructionForm({
 
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
-          저장 가능한 대상 {formatNumber(filledItems.length)}건
+          저장 가능한 {targetNoun} {formatNumber(filledItems.length)}건
           {items.length !== filledItems.length
             ? ` · 빈 ${formatNumber(items.length - filledItems.length)}행은 제외됩니다`
             : ''}

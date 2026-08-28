@@ -16,6 +16,8 @@ import type {
   CodeUsageAssignmentInput,
   CodeUsageStatus,
   CodeUsageTarget,
+  CodeUsageTargetAlias,
+  CodeUsageTargetFolder,
   CodeUsageTargetInput,
   InvoiceNameRule,
   InvoiceItemNameRule,
@@ -35,6 +37,7 @@ import type {
   InvoiceGiftRequest,
   InvoicePrefixRequest,
   InvoiceWorkInstruction,
+  InvoiceWorkRun,
   ProductCode,
   ProductCodeInput,
   ProductCodeKind,
@@ -57,6 +60,11 @@ import { getMyProfile } from '@/lib/supabase/profiles'
 import * as brandFieldStore from '@/lib/supabase/brand-fields'
 import * as barcodeFieldStore from '@/lib/supabase/barcode-fields'
 import * as codeUsageTargetStore from '@/lib/supabase/code-usage-targets'
+import * as codeUsageTargetFolderStore from '@/lib/supabase/code-usage-target-folders'
+import type {
+  BulkCodeUsageTargetResult,
+  BulkCodeUsageTargetRow,
+} from '@/lib/supabase/code-usage-targets'
 import * as codeUsageAssignmentStore from '@/lib/supabase/code-usage-assignments'
 import * as invoiceGiftAllocationStore from '@/lib/supabase/invoice-gift-allocations'
 import * as invoiceGiftSourceMapStore from '@/lib/supabase/invoice-gift-source-maps'
@@ -70,6 +78,7 @@ import * as invoiceProductNameMapStore from '@/lib/supabase/invoice-product-name
 import * as invoiceProductNameExclusionStore from '@/lib/supabase/invoice-product-name-exclusions'
 import * as invoiceProductNameTagRoleStore from '@/lib/supabase/invoice-product-name-tag-roles'
 import * as invoicePrefixRequestStore from '@/lib/supabase/invoice-prefix-requests'
+import * as invoiceWorkHistoryStore from '@/lib/supabase/invoice-work-history'
 import * as invoiceWorkInstructionStore from '@/lib/supabase/invoice-work-instructions'
 import * as productCodeStore from '@/lib/supabase/product-codes'
 import * as productDraftStore from '@/lib/supabase/product-drafts'
@@ -87,6 +96,11 @@ export { BrandStoreError } from '@/lib/supabase/brands'
 export { BrandFieldStoreError } from '@/lib/supabase/brand-fields'
 export { BarcodeFieldStoreError } from '@/lib/supabase/barcode-fields'
 export { CodeUsageTargetStoreError } from '@/lib/supabase/code-usage-targets'
+export type {
+  BulkCodeUsageTargetResult,
+  BulkCodeUsageTargetRow,
+  SaveCodeUsageTargetInput,
+} from '@/lib/supabase/code-usage-targets'
 export { CodeUsageAssignmentStoreError } from '@/lib/supabase/code-usage-assignments'
 export { InvoiceNameRuleStoreError } from '@/lib/supabase/invoice-name-rules'
 export type {
@@ -145,6 +159,8 @@ export type {
   ConfirmGiftAllocationsResult,
   GiftAllocationCandidateInput,
 } from '@/lib/supabase/invoice-gift-allocations'
+export { InvoiceWorkHistoryStoreError } from '@/lib/supabase/invoice-work-history'
+export type { RecordInvoiceWorkCompletionInput } from '@/lib/supabase/invoice-work-history'
 export { InvoiceWorkInstructionStoreError } from '@/lib/supabase/invoice-work-instructions'
 export type {
   InvoiceWorkInstructionInput,
@@ -1074,7 +1090,7 @@ export async function confirmInvoiceGiftSourceAllocations(
   )
 }
 
-/** 작업 지시. 원본 품목명 exact-match로 최종 품목명 앞에 표시 문구를 붙인다. */
+/** 작업 지시. 완전일치 또는 시작어로 최종 품목명 앞에 표시 문구를 붙인다. */
 export async function getInvoiceWorkInstructions(
   brandId: string,
 ): Promise<InvoiceWorkInstruction[]> {
@@ -1109,6 +1125,26 @@ export async function setInvoiceWorkInstructionActive(
 export async function deleteInvoiceWorkInstruction(id: string): Promise<void> {
   await delay()
   return invoiceWorkInstructionStore.deleteInvoiceWorkInstruction(id)
+}
+
+export async function getInvoiceWorkRuns(
+  brandId: string,
+): Promise<InvoiceWorkRun[]> {
+  await delay()
+  return invoiceWorkHistoryStore.listInvoiceWorkRuns(brandId)
+}
+
+export async function recordInvoiceWorkCompletion(
+  input: Omit<
+    invoiceWorkHistoryStore.RecordInvoiceWorkCompletionInput,
+    'workerLabel'
+  >,
+): Promise<string> {
+  const profile = await getMyProfile()
+  return invoiceWorkHistoryStore.recordInvoiceWorkCompletion({
+    ...input,
+    workerLabel: profile?.displayName?.trim() || profile?.email || '',
+  })
 }
 
 export type BulkInvoiceRuleRow = {
@@ -1308,12 +1344,84 @@ export async function createCodeUsageTarget(
   return codeUsageTargetStore.createCodeUsageTarget(brandId, input)
 }
 
+export async function saveCodeUsageTarget(
+  brandId: string,
+  input: codeUsageTargetStore.SaveCodeUsageTargetInput,
+): Promise<CodeUsageTarget> {
+  await delay()
+  return codeUsageTargetStore.saveCodeUsageTarget(brandId, input)
+}
+
+export async function addCodeUsageTargetAlias(
+  brandId: string,
+  targetId: string,
+  alias: string,
+): Promise<void> {
+  await delay()
+  return codeUsageTargetStore.addCodeUsageTargetAlias(brandId, targetId, alias)
+}
+
 export async function updateCodeUsageTarget(
   id: string,
-  patch: Partial<Pick<CodeUsageTarget, 'name' | 'active'>>,
+  patch: Partial<
+    Pick<
+      CodeUsageTarget,
+      | 'name'
+      | 'active'
+      | 'isOneTime'
+      | 'channelType'
+      | 'shippingMethod'
+      | 'note'
+      | 'folderId'
+    >
+  > & { aliases?: readonly string[] },
 ): Promise<CodeUsageTarget> {
   await delay()
   return codeUsageTargetStore.updateCodeUsageTarget(id, patch)
+}
+
+export async function getCodeUsageTargetAliases(
+  brandId: string,
+): Promise<CodeUsageTargetAlias[]> {
+  await delay()
+  return codeUsageTargetStore.listCodeUsageTargetAliases(brandId)
+}
+
+/** 초기 목록을 여러 줄 붙여넣기로 한 번에 등록한다. */
+export async function createCodeUsageTargetsBulk(
+  brandId: string,
+  rows: readonly BulkCodeUsageTargetRow[],
+): Promise<BulkCodeUsageTargetResult> {
+  await delay()
+  return codeUsageTargetStore.createCodeUsageTargetsBulk(brandId, rows)
+}
+
+export async function getCodeUsageTargetFolders(
+  brandId: string,
+): Promise<CodeUsageTargetFolder[]> {
+  await delay()
+  return codeUsageTargetFolderStore.listCodeUsageTargetFolders(brandId)
+}
+
+export async function createCodeUsageTargetFolder(
+  brandId: string,
+  input: { name: string; parentId?: string | null },
+): Promise<CodeUsageTargetFolder> {
+  await delay()
+  return codeUsageTargetFolderStore.createCodeUsageTargetFolder(brandId, input)
+}
+
+export async function updateCodeUsageTargetFolder(
+  id: string,
+  patch: { name?: string; parentId?: string | null },
+): Promise<CodeUsageTargetFolder> {
+  await delay()
+  return codeUsageTargetFolderStore.updateCodeUsageTargetFolder(id, patch)
+}
+
+export async function deleteCodeUsageTargetFolder(id: string): Promise<void> {
+  await delay()
+  return codeUsageTargetFolderStore.deleteCodeUsageTargetFolder(id)
 }
 
 export async function getCodeUsageAssignments(

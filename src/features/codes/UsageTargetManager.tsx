@@ -1,313 +1,256 @@
-import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
-import { Check, Pencil, Plus, RotateCcw, X } from 'lucide-react'
-import {
-  CodeUsageTargetStoreError,
-  createCodeUsageTarget,
-  updateCodeUsageTarget,
-} from '@/lib/api'
-import type { CodeUsageAssignment, CodeUsageTarget } from '@/lib/types'
-import { Badge } from '@/components/ui/badge'
+import { useMemo, useState } from 'react'
+import { ClipboardPaste, X } from 'lucide-react'
+import type {
+  CodeUsageAssignment,
+  CodeUsageTarget,
+  CodeUsageTargetAlias,
+  CodeUsageTargetFolder,
+} from '@/lib/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { formatNumber } from '@/lib/utils'
+import {
+  buildFolderForest,
+  folderPath,
+  matchesFolderSearch,
+} from '@/lib/codes/outbound-folder'
+import {
+  compactOutboundPartnerKey,
+  matchesOutboundPartnerSearch,
+  outboundPartnerStatus,
+} from '@/lib/codes/outbound-partner'
+import { OutboundPartnerFolderTree } from '@/features/codes/OutboundPartnerFolderTree'
+import { OutboundPartnerPastePanel } from '@/features/codes/OutboundPartnerPastePanel'
+import type { AliasOwner } from '@/features/codes/OutboundPartnerEditForm'
 
 type SharedProps = {
   brandId: string
   targets: CodeUsageTarget[]
+  folders: CodeUsageTargetFolder[]
+  aliases: CodeUsageTargetAlias[]
   assignments: CodeUsageAssignment[]
   onChanged: () => void | Promise<void>
 }
 
-function TargetList({
-  title,
-  targets,
-  editingId,
-  editingName,
-  pending,
-  usageCount,
-  onEditingName,
-  onEdit,
-  onCancelEdit,
-  onSaveEdit,
-  onToggleActive,
-}: {
-  title: string
-  targets: CodeUsageTarget[]
-  editingId: string | null
-  editingName: string
-  pending: boolean
-  usageCount: (id: string) => number
-  onEditingName: (name: string) => void
-  onEdit: (target: CodeUsageTarget) => void
-  onCancelEdit: () => void
-  onSaveEdit: (id: string) => void
-  onToggleActive: (target: CodeUsageTarget) => void
-}) {
-  return (
-    <section className="space-y-2">
-      <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        {title}
-      </h3>
-      {targets.length === 0 ? (
-        <p className="rounded-lg border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
-          아직 없습니다.
-        </p>
-      ) : (
-        <ul className="divide-y divide-border rounded-lg border border-border">
-          {targets.map((target) => {
-            const editing = editingId === target.id
-            return (
-              <li key={target.id} className="flex items-center gap-2 px-3 py-2.5">
-                {editing ? (
-                  <>
-                    <Input
-                      className="h-8"
-                      value={editingName}
-                      autoFocus
-                      disabled={pending}
-                      onChange={(event) => onEditingName(event.target.value)}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      disabled={!editingName.trim() || pending}
-                      onClick={() => onSaveEdit(target.id)}
-                    >
-                      <Check className="size-3.5" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      onClick={onCancelEdit}
-                    >
-                      <X className="size-3.5" />
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm font-medium">
-                        {target.name}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        연결된 바코드 {formatNumber(usageCount(target.id))}건
-                      </div>
-                    </div>
-                    {!target.active ? (
-                      <Badge variant="muted">사용 종료</Badge>
-                    ) : null}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      disabled={pending}
-                      onClick={() => onEdit(target)}
-                    >
-                      <Pencil className="size-3.5" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={pending}
-                      onClick={() => onToggleActive(target)}
-                    >
-                      {target.active ? (
-                        '사용 종료'
-                      ) : (
-                        <>
-                          <RotateCcw className="size-3.5" />
-                          다시 사용
-                        </>
-                      )}
-                    </Button>
-                  </>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      )}
-    </section>
-  )
-}
+const EMPTY_ALIASES: readonly string[] = []
 
 function UsageTargetManagerContent({
   brandId,
   targets,
+  folders,
+  aliases,
   assignments,
   onChanged,
 }: SharedProps) {
-  const [newName, setNewName] = useState('')
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [editingName, setEditingName] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [keyword, setKeyword] = useState('')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [pasteOpen, setPasteOpen] = useState(false)
+  const [hideInactive, setHideInactive] = useState(true)
 
-  const createMutation = useMutation({
-    mutationFn: () => createCodeUsageTarget(brandId, { name: newName }),
-    onSuccess: async () => {
-      setNewName('')
-      setError(null)
-      await onChanged()
-    },
-    onError: showError,
-  })
+  const aliasesByTarget = useMemo(() => {
+    const map = new Map<string, string[]>()
+    aliases.forEach((alias) => {
+      const list = map.get(alias.targetId)
+      if (list) list.push(alias.alias)
+      else map.set(alias.targetId, [alias.alias])
+    })
+    return map
+  }, [aliases])
 
-  const updateMutation = useMutation({
-    mutationFn: ({
-      id,
-      patch,
-    }: {
-      id: string
-      patch: Partial<Pick<CodeUsageTarget, 'name' | 'active'>>
-    }) => updateCodeUsageTarget(id, patch),
-    onSuccess: async () => {
-      setEditingId(null)
-      setEditingName('')
-      setError(null)
-      await onChanged()
-    },
-    onError: showError,
-  })
+  const barcodeCounts = useMemo(() => {
+    const map = new Map<string, number>()
+    assignments.forEach((assignment) => {
+      map.set(
+        assignment.usageTargetId,
+        (map.get(assignment.usageTargetId) ?? 0) + 1,
+      )
+    })
+    return map
+  }, [assignments])
 
-  function showError(err: unknown) {
-    setError(
-      err instanceof CodeUsageTargetStoreError
-        ? err.message
-        : '사용처를 저장하지 못했습니다.',
-    )
-  }
+  const ownerByKey = useMemo(() => {
+    const map = new Map<string, AliasOwner>()
+    targets.forEach((target) => {
+      const key =
+        target.normalizedName || compactOutboundPartnerKey(target.name)
+      if (key) {
+        map.set(key, {
+          targetId: target.id,
+          targetName: target.name,
+          kind: 'name',
+        })
+      }
+    })
+    aliases.forEach((alias) => {
+      const owner = targets.find((target) => target.id === alias.targetId)
+      if (!owner) return
+      map.set(alias.normalizedAlias, {
+        targetId: alias.targetId,
+        targetName: owner.name,
+        kind: 'alias',
+      })
+    })
+    return map
+  }, [aliases, targets])
 
-  function usageCount(targetId: string) {
-    return assignments.filter((a) => a.usageTargetId === targetId).length
-  }
+  const visibleTargets = useMemo(() => {
+    return targets.filter((target) => {
+      if (hideInactive && outboundPartnerStatus(target) === 'archived') {
+        return false
+      }
+      if (!keyword.trim()) return true
+      const aliasesHere = aliasesByTarget.get(target.id) ?? EMPTY_ALIASES
+      if (matchesOutboundPartnerSearch(keyword, target, aliasesHere)) {
+        return true
+      }
+      const path = folderPath(folders, target.folderId)
+      return path.some((folder) => matchesFolderSearch(keyword, folder))
+    })
+  }, [aliasesByTarget, folders, hideInactive, keyword, targets])
 
-  const activeTargets = targets.filter((t) => t.active)
-  const inactiveTargets = targets.filter((t) => !t.active)
+  const visibleFolders = useMemo(() => {
+    if (!keyword.trim()) return folders
+    const keep = new Set<string>()
+    visibleTargets.forEach((target) => {
+      if (!target.active) return
+      folderPath(folders, target.folderId).forEach((folder) =>
+        keep.add(folder.id),
+      )
+    })
+    folders.forEach((folder) => {
+      if (matchesFolderSearch(keyword, folder)) {
+        keep.add(folder.id)
+        folderPath(folders, folder.id).forEach((item) => keep.add(item.id))
+      }
+    })
+    return folders.filter((folder) => keep.has(folder.id))
+  }, [folders, keyword, visibleTargets])
+
+  const forest = useMemo(
+    () => buildFolderForest(visibleFolders),
+    [visibleFolders],
+  )
+
+  const activeTargets = useMemo(
+    () => visibleTargets.filter((target) => target.active),
+    [visibleTargets],
+  )
+  const inactiveTargets = useMemo(
+    () => visibleTargets.filter((target) => !target.active),
+    [visibleTargets],
+  )
+
+  const cardsIn = useMemo(() => {
+    const map = new Map<string | null, CodeUsageTarget[]>()
+    activeTargets.forEach((target) => {
+      const key = target.folderId
+      const list = map.get(key)
+      if (list) list.push(target)
+      else map.set(key, [target])
+    })
+    return (folderId: string | null) => map.get(folderId) ?? []
+  }, [activeTargets])
+
+  const unfiled = cardsIn(null)
 
   return (
     <div className="space-y-5">
-      <form
-        className="flex gap-2"
-        onSubmit={(event) => {
-          event.preventDefault()
-          if (newName.trim()) createMutation.mutate()
-        }}
-      >
-        <Input
-          value={newName}
-          placeholder="새 사용처 이름"
-          onChange={(event) => {
-            setNewName(event.target.value)
-            setError(null)
-          }}
-        />
-        <Button
-          type="submit"
-          className="shrink-0"
-          disabled={!newName.trim() || createMutation.isPending}
-        >
-          <Plus className="size-4" />
-          추가
-        </Button>
-      </form>
-
-      <TargetList
-        title={`사용 중 · ${activeTargets.length}곳`}
-        targets={activeTargets}
-        editingId={editingId}
-        editingName={editingName}
-        pending={updateMutation.isPending}
-        usageCount={usageCount}
-        onEditingName={setEditingName}
-        onEdit={(target) => {
-          setEditingId(target.id)
-          setEditingName(target.name)
-        }}
-        onCancelEdit={() => setEditingId(null)}
-        onSaveEdit={(id) =>
-          updateMutation.mutate({ id, patch: { name: editingName } })
-        }
-        onToggleActive={(target) => {
-          if (
-            target.active &&
-            !window.confirm(
-              `"${target.name}" 사용을 종료할까요?\n기존 바코드 ${formatNumber(usageCount(target.id))}건의 연결 이력은 유지됩니다.`,
-            )
-          ) {
-            return
-          }
-          updateMutation.mutate({
-            id: target.id,
-            patch: { active: !target.active },
-          })
-        }}
-      />
-
-      {inactiveTargets.length > 0 ? (
-        <TargetList
-          title={`사용 종료 · ${inactiveTargets.length}곳`}
-          targets={inactiveTargets}
-          editingId={editingId}
-          editingName={editingName}
-          pending={updateMutation.isPending}
-          usageCount={usageCount}
-          onEditingName={setEditingName}
-          onEdit={(target) => {
-            setEditingId(target.id)
-            setEditingName(target.name)
-          }}
-          onCancelEdit={() => setEditingId(null)}
-          onSaveEdit={(id) =>
-            updateMutation.mutate({ id, patch: { name: editingName } })
-          }
-          onToggleActive={(target) =>
-            updateMutation.mutate({
-              id: target.id,
-              patch: { active: !target.active },
-            })
-          }
-        />
-      ) : null}
-
-      {error ? (
-        <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
-          {error}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">
+          아는 갈래만 폴더로 두고, 업체마다 다른 말은 카드에 적으세요.
         </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              className="size-3.5 rounded border-border"
+              checked={hideInactive}
+              onChange={(event) => setHideInactive(event.target.checked)}
+            />
+            비활성 숨기기
+          </label>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setPasteOpen((prev) => !prev)}
+          >
+            <ClipboardPaste className="size-4" />
+            붙여넣기
+          </Button>
+        </div>
+      </div>
+
+      {pasteOpen ? (
+        <OutboundPartnerPastePanel
+          brandId={brandId}
+          targets={targets}
+          folders={folders}
+          onClose={() => setPasteOpen(false)}
+          onChanged={onChanged}
+        />
       ) : null}
+
+      {targets.length > 3 || folders.length > 2 ? (
+        <div className="relative">
+          <Input
+            value={keyword}
+            placeholder="업체명, 별칭, 폴더 이름으로 검색"
+            onChange={(event) => setKeyword(event.target.value)}
+          />
+          {keyword ? (
+            <button
+              type="button"
+              aria-label="검색어 지우기"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              onClick={() => setKeyword('')}
+            >
+              <X className="size-4" />
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {keyword && visibleTargets.length === 0 && visibleFolders.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+          검색 결과가 없습니다.
+        </p>
+      ) : (
+        <OutboundPartnerFolderTree
+          brandId={brandId}
+          forest={forest}
+          folders={folders}
+          unfiled={unfiled}
+          inactive={inactiveTargets}
+          showInactive={!hideInactive}
+          cardsIn={cardsIn}
+          aliasesByTarget={aliasesByTarget}
+          barcodeCounts={barcodeCounts}
+          ownerByKey={ownerByKey}
+          expandedPartnerId={expandedId}
+          onTogglePartner={(id) =>
+            setExpandedId((prev) => (prev === id ? null : id))
+          }
+          onChanged={onChanged}
+        />
+      )}
+
       <p className="text-xs text-muted-foreground">
-        사용 종료해도 이미 등록된 바코드 연결 이력은 삭제되지 않습니다.
+        비활성화해도 이미 등록된 바코드 연결 이력은 삭제되지 않습니다. 다시 켤
+        때는 위치와 특징을 다시 적어야 합니다. 폴더를 지워도 업체는 미분류로
+        남습니다.
       </p>
     </div>
   )
 }
 
-export function UsageTargetManagerPanel({
-  brandId,
-  targets,
-  assignments,
-  onChanged,
-}: SharedProps) {
-  return (
-    <UsageTargetManagerContent
-      brandId={brandId}
-      targets={targets}
-      assignments={assignments}
-      onChanged={onChanged}
-    />
-  )
+export function UsageTargetManagerPanel(props: SharedProps) {
+  return <UsageTargetManagerContent {...props} />
 }
 
 export function UsageTargetManagerDialog({
   open,
-  brandId,
-  targets,
-  assignments,
   onClose,
-  onChanged,
+  ...props
 }: SharedProps & {
   open: boolean
   onClose: () => void
@@ -325,15 +268,16 @@ export function UsageTargetManagerDialog({
       <div
         role="dialog"
         aria-modal="true"
-        className="relative z-10 max-h-[min(90vh,720px)] w-full max-w-lg overflow-y-auto rounded-xl border border-border bg-card shadow-xl"
+        className="relative z-10 max-h-[min(90vh,800px)] w-full max-w-3xl overflow-y-auto rounded-xl border border-border bg-card shadow-xl"
       >
         <div className="sticky top-0 z-10 flex items-start justify-between border-b border-border bg-card px-5 py-4">
           <div>
             <h2 className="text-base font-semibold tracking-tight">
-              사용처 관리
+              출고업체 관리
             </h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              면세점, 무신사, 오프라인처럼 바코드를 등록할 곳을 관리합니다.
+              폴더로 일을 나누고, 맨 끝 카드에 그 업체만의 특징을 적습니다.
+              비활성 업체는 다시 켤 때 위치부터 다시 정합니다.
             </p>
           </div>
           <Button
@@ -348,12 +292,7 @@ export function UsageTargetManagerDialog({
         </div>
 
         <div className="px-5 py-5">
-          <UsageTargetManagerContent
-            brandId={brandId}
-            targets={targets}
-            assignments={assignments}
-            onChanged={onChanged}
-          />
+          <UsageTargetManagerContent {...props} />
         </div>
       </div>
     </div>

@@ -28,7 +28,7 @@ type UsageBulkUploadPanelProps = {
   onClose?: () => void
 }
 
-/** 선택한 사용처에 자사 바코드를 엑셀/CSV로 일괄 등록한다. */
+/** 선택한 출고업체에 자사 바코드를 엑셀/CSV로 일괄 등록한다. */
 export function UsageBulkUploadPanel({
   brandName,
   brandId,

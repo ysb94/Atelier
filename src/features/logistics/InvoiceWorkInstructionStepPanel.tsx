@@ -113,8 +113,9 @@ export function InvoiceWorkInstructionStepPanel({
         </p>
       ) : (
         <p className="text-xs text-muted-foreground">
-          원본 품목명이 작업 지시 대상과 같으면, 자체품번 변환이 끝난 최종
-          품목명 앞에 표시 문구를 붙입니다. 사은품 행에는 적용하지 않습니다.
+          원본 품목명이 완전일치하거나 시작어로 시작하면, 자체품번 변환이
+          끝난 최종 품목명 앞에 표시 문구를 붙입니다. 사은품 행에는 적용하지
+          않습니다.
         </p>
       )}
 
@@ -132,7 +133,7 @@ export function InvoiceWorkInstructionStepPanel({
                 {item.instructionTitle} · {formatMoment(item.startsAt)} ~{' '}
                 {formatMoment(item.endsAt)}
                 {item.nameMatchedRowCount > 0
-                  ? ` · 품목명은 ${formatNumber(item.nameMatchedRowCount)}행에서 같음`
+                  ? ` · 품목명이 맞는 행 ${formatNumber(item.nameMatchedRowCount)}건`
                   : ''}
               </li>
             ))}
@@ -249,7 +250,7 @@ export function InvoiceWorkInstructionStepPanel({
                   className="px-4 py-10 text-center text-muted-foreground"
                 >
                   {plan.periodMisses.length > 0
-                    ? '품목명이 같아도 주문일시가 적용 기간 밖이면 붙이지 않습니다.'
+                    ? '품목명이 맞아도 주문일시가 적용 기간 밖이면 붙이지 않습니다.'
                     : '이 파일에 적용할 작업 지시가 없습니다.'}
                 </td>
               </tr>
