@@ -526,8 +526,9 @@ export function BrandLayout() {
                 : 'default'
             return (
               <div
+                data-brand-page-scroll
                 className={cn(
-                  'min-h-0 flex-1',
+                  'relative min-h-0 flex-1',
                   pageLayout === 'full' ? 'overflow-hidden' : 'overflow-auto',
                 )}
               >

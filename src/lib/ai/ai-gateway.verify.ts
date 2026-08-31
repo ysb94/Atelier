@@ -215,7 +215,7 @@ const ambiguous = evaluateHybridDecision([
   },
 ])
 assert(ambiguous.action === 'ai', '애매한 후보는 AI를 부른다')
-assert(ambiguous.aiCandidates.length <= 6, 'AI에는 상위 6개만 보낸다')
+assert(ambiguous.aiCandidates.length <= 16, 'AI에는 상위 16개만 보낸다')
 
 const empty = evaluateHybridDecision([])
 assert(empty.action === 'manual', '후보가 없으면 AI를 부르지 않는다')
@@ -259,7 +259,7 @@ const tuned = tuneDecisionConfig([
     styleId: 's-ok',
   },
 ])
-assert(tuned.aiTopN === 6, '검증으로 맞춘 설정은 상위 6개')
+assert(tuned.aiTopN === 16, '검증으로 맞춘 설정은 상위 16개')
 assert(tuned.high >= 0.6, '로컬 정밀도를 지키는 임계값을 고른다')
 
 const accessoryParsed = parseAccessorySuggestJson(
@@ -423,8 +423,10 @@ const itemPrompt = buildItemNameSuggestPrompt({
   candidates,
 })
 assert(
-  itemPrompt.user.includes('"s-1"') && !itemPrompt.user.includes('"s-2"'),
-  '내품명 프롬프트에는 문맥에 허용된 후보만 넣는다',
+  itemPrompt.user.includes('"c1"') &&
+    itemPrompt.refByStyleId.get('s-1') === 'c1' &&
+    !itemPrompt.user.includes('"s-2"'),
+  '내품명 프롬프트에는 문맥에 허용된 후보만 짧은 참조로 넣는다',
 )
 const itemPromptWithCases = buildItemNameSuggestPrompt({
   contexts: [

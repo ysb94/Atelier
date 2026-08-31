@@ -423,7 +423,22 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
                   entry.itemName,
                   entry.originalItemName,
                 )
-              const extras = completedOptionExtras(entry.extras)
+              const extras = completedOptionExtras(entry.extras).reduce<
+                ReturnType<typeof completedOptionExtras>
+              >((merged, extra) => {
+                const existing = merged.find(
+                  (item) => item.style.styleId === extra.style.styleId,
+                )
+                if (existing) {
+                  existing.quantity += Math.max(1, extra.quantity)
+                  return merged
+                }
+                merged.push({
+                  ...extra,
+                  quantity: Math.max(1, extra.quantity),
+                })
+                return merged
+              }, [])
               const normalizedLookupKey = normalizeInvoiceText(entry.lookupKey)
               const identity = productMapSaveIdentity({
                 lookupKey: entry.lookupKey,
@@ -485,7 +500,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
               const saved = sharedResult.saved
               if (ownsProductMapSave) queueProductMapUpsert(saved)
               let savedOptionMap: InvoiceOptionMap | null = null
-              if (extras.length > 0) {
+              if (extras.length > 0 || previousOptionMap) {
                 savedOptionMap = await saveInvoiceOptionMap(
                   brandId,
                   {

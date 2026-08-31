@@ -4,6 +4,7 @@
  */
 import {
   generateProductNameCandidates,
+  generateProductNameRegistrationCandidates,
   similarProductSearchText,
 } from '@/lib/invoice/product-name-patterns'
 import {
@@ -12,12 +13,15 @@ import {
 } from '@/lib/invoice/product-name-tags'
 import {
   applyProductNameAiQuickSlotStyle,
+  dedupeProductNameAiCombos,
   applyProductNameAiQuickSlotText,
   applyProductNameAiRecommendation,
   applyProductNameAiRowSlots,
   applyProductNameLookupKey,
   buildProductNameAiReviewRow,
+  normalizeProductNameAiReviewLookupKey,
   countProductNameAiWorkflow,
+  countProductNameAiPendingResolve,
   decideProductNameAiConfirmedSaves,
   decideProductNameAiEnterAction,
   decideProductNameAiQuickSlotMatch,
@@ -25,13 +29,23 @@ import {
   emptyProductNameAiQuickSlot,
   isProductNameAiSaveFailed,
   markProductNameAiDuplicates,
+  clampProductNameAiReviewPage,
+  expandProductNameAiExtrasToUnitSlots,
   nextProductNameAiQuickFocus,
+  nextProductNameAiReviewPage,
+  nextProductNameAiRowMark,
+  paginateProductNameAiReviewKeys,
+  PRODUCT_NAME_AI_QUICK_SLOT_LIMIT,
+  productNameAiCandidateSearchKeys,
   productNameAiCollectFailed,
+  productNameAiSearchKeys,
   productNameAiRowReadyToCommit,
   productNameAiSlotsNeedAi,
   productNameAiWorkflowTab,
   selectLatestFailedSaveRetries,
   shouldIgnoreProductNameAiQuickKey,
+  isProductNameAiAddExtraKey,
+  removeProductNameAiQuickSlot,
   type ProductNameAiReviewRow,
 } from '@/lib/invoice/product-name-ai-review'
 import type { UnresolvedProductNameCombo } from '@/lib/invoice/product-name-transform'
@@ -95,7 +109,11 @@ const tagged = buildProductNameAiReviewRow(
     appliedRule: 'product',
   }),
 )
-assert(tagged.lookupKey === '래빗에코백', '기본 조회 키는 맞춘 후보 텍스트')
+assert(
+  tagged.lookupKey === '래빗에코백 Color: 블랙',
+  '기본 조회 키는 품목명 + 내품명',
+)
+assert(tagged.appliedRule === 'product_item', '기본 등록 규칙은 품목명 + 내품명')
 assert(tagged.candidates.length > 1, '태그 전·후 후보를 유지')
 assert(
   tagged.registrationCandidates.length === 3 &&
@@ -127,6 +145,10 @@ const filled = applyProductNameAiRecommendation(
   0.72,
 )
 assert(filled.style?.styleId === rabbit.styleId, '전체 추천이 본품 초안을 채움')
+assert(
+  filled.lookupKey === '래빗에코백 Color: 블랙',
+  '로컬 추천은 품목명 + 내품명을 유지한다',
+)
 assert(productNameAiRowReadyToCommit(filled), '확신 높은 추천은 저장 가능')
 assert(filled.source === 'local', '수정 전 추천 출처 유지')
 assert(filled.suggestedStyleId === rabbit.styleId, '최초 제안 본품을 보존')
@@ -154,6 +176,10 @@ const low = applyProductNameAiRecommendation(
 )
 assert(low.holdReason === 'low_confidence', '저확신은 검토 필요')
 assert(low.style?.styleId === rabbit.styleId, '저확신도 초안 본품은 채움')
+assert(
+  low.lookupKey === '래빗에코백 Color: 블랙',
+  '저확신 AI는 품목명 + 내품명을 고른다',
+)
 
 const conflict = applyProductNameAiRecommendation(
   buildProductNameAiReviewRow(combo({ key: 'conflict', status: 'conflict' })),
@@ -177,6 +203,42 @@ const conflict = applyProductNameAiRecommendation(
   0.72,
 )
 assert(conflict.holdReason === 'conflict', '충돌은 검토 필요')
+
+const confidentAi = applyProductNameAiRecommendation(
+  tagged,
+  {
+    lookupKey: '래빗에코백',
+    products: [
+      {
+        styleId: rabbit.styleId,
+        styleNo: rabbit.styleNo,
+        name: rabbit.name,
+        reason: '원장',
+        confidence: 0.91,
+      },
+    ],
+    source: 'ai',
+    cacheId: 'cache-ai',
+    provider: 'openai',
+    modelId: 'gpt',
+    reason: '고확신',
+  },
+  0.72,
+)
+assert(
+  confidentAi.lookupKey === '래빗에코백' &&
+    confidentAi.appliedRule === 'product',
+  '고확신 AI가 품목명으로 맞추면 그 조회 키를 유지한다',
+)
+assert(
+  normalizeProductNameAiReviewLookupKey(filled).lookupKey ===
+    '래빗에코백 Color: 블랙',
+  '이미 모은 로컬 행도 품목명 + 내품명으로 맞춘다',
+)
+assert(
+  normalizeProductNameAiReviewLookupKey(confidentAi).lookupKey === '래빗에코백',
+  '고확신 AI 행은 정규화해도 조회 키를 유지한다',
+)
 
 const other = applyProductNameAiRecommendation(
   buildProductNameAiReviewRow(
@@ -243,9 +305,9 @@ const itemPrefixRow = buildProductNameAiReviewRow(
   }),
 )
 assert(
-  itemPrefixRow.lookupKey === 'Blue / Large' &&
-    itemPrefixRow.appliedRule === 'item_full',
-  '내품명 앞부분 조회는 내품명 전체 등록 키로 변환',
+  itemPrefixRow.lookupKey === '에코백 Blue / Large' &&
+    itemPrefixRow.appliedRule === 'product_item',
+  '고확신이 없으면 내품명 앞부분 조회도 품목명 + 내품명을 고른다',
 )
 
 const reservedItemName = 'Color: [9/1예약배송]트와일라잇 블랙'
@@ -287,10 +349,15 @@ assert(
 )
 
 const conflictingStyle = style('s-other', 'M0999', '다른 본품')
-const keyConflicts = markProductNameAiDuplicates([
-  filled,
-  { ...other, style: conflictingStyle },
-])
+const sameKeyOther = {
+  ...other,
+  lookupKey: filled.lookupKey,
+  appliedRule: filled.appliedRule,
+  registrationCandidates: filled.registrationCandidates,
+  source: 'manual' as const,
+  style: conflictingStyle,
+}
+const keyConflicts = markProductNameAiDuplicates([filled, sameKeyOther])
 assert(
   keyConflicts.every(
     (row) =>
@@ -301,10 +368,7 @@ assert(
   '같은 등록 키가 서로 다른 M번호를 가리키면 모두 검토 대상으로 차단',
 )
 assert(
-  decideProductNameAiSaves([
-    filled,
-    { ...other, style: conflictingStyle },
-  ]).items.length === 0,
+  decideProductNameAiSaves([filled, sameKeyOther]).items.length === 0,
   '서로 다른 M번호의 등록 키 충돌은 저장 계획에서도 제외',
 )
 
@@ -337,6 +401,23 @@ assert(
   ]).status === 'invalid',
   '본품과 구성품 중복 M번호는 막음',
 )
+const twoSameExtras = decideProductNameAiEnterAction([
+  applyProductNameAiQuickSlotStyle(emptyProductNameAiQuickSlot(), rabbit),
+  applyProductNameAiQuickSlotStyle(emptyProductNameAiQuickSlot(), tassel),
+  applyProductNameAiQuickSlotStyle(emptyProductNameAiQuickSlot(), tassel),
+])
+assert(
+  twoSameExtras.status === 'ready' &&
+    twoSameExtras.extras.length === 1 &&
+    twoSameExtras.extras[0]?.quantity === 2,
+  '같은 구성품 두 칸은 수량 2가 아니라 1+1을 합쳐 저장한다',
+)
+assert(
+  expandProductNameAiExtrasToUnitSlots([
+    { style: tassel, role: 'included', quantity: 2 },
+  ]).length === 2,
+  '저장된 수량 2는 검수표에서 칸 두 개로 다시 펼친다',
+)
 assert(
   decideProductNameAiEnterAction([
     applyProductNameAiQuickSlotText(emptyProductNameAiQuickSlot(), '미완성'),
@@ -364,6 +445,10 @@ const plan = decideProductNameAiSaves([
   slotted.ok ? slotted.row : filled,
   {
     ...other,
+    lookupKey: filled.lookupKey,
+    appliedRule: filled.appliedRule,
+    registrationCandidates: filled.registrationCandidates,
+    source: 'manual' as const,
     style: rabbit,
     extras: [{ style: tassel, role: 'included', quantity: 1 }],
     holdReason: null,
@@ -378,7 +463,46 @@ assert(
     plan.items.every((item) => item.extras.length === 1),
   '조회 키는 합치되 조합별 구성품은 보존',
 )
+assert(
+  plan.items.every(
+    (item) =>
+      item.mallName.length > 0 &&
+      item.productName.length > 0 &&
+      item.extras.length === 1,
+  ) &&
+    new Set(
+      plan.items.map(
+        (item) =>
+          `${item.mallName}\u0000${item.productName}\u0000${item.itemName}`,
+      ),
+    ).size === plan.items.length,
+  '1:N 저장은 쇼핑몰·품목명·내품명 조합별로 구성품을 유지한다',
+)
 
+assert(
+  nextProductNameAiReviewPage(1, 3, ['a', 'b'], 'b') === 2,
+  '페이지 마지막 행 Enter는 다음 페이지',
+)
+assert(
+  nextProductNameAiReviewPage(1, 3, ['a', 'b'], 'a') === null,
+  '중간 행 Enter는 페이지를 바꾸지 않는다',
+)
+assert(
+  nextProductNameAiReviewPage(3, 3, ['a', 'b'], 'b') === null,
+  '마지막 페이지에서는 더 이상 넘기지 않는다',
+)
+assert(
+  clampProductNameAiReviewPage(9, 2) === 2,
+  '필터로 페이지가 줄면 마지막 페이지로 보정한다',
+)
+assert(
+  paginateProductNameAiReviewKeys(['a', 'b', 'c'], 2, 2).keys.join(',') === 'c',
+  '2페이지는 남은 행만 보여 준다',
+)
+assert(
+  paginateProductNameAiReviewKeys(['a', 'b', 'c'], 4, 2).page === 2,
+  '없는 페이지는 마지막 페이지로 되돌린다',
+)
 const down = nextProductNameAiQuickFocus(['a', 'b'], 'a', 0, 'down')
 assert(down?.rowKey === 'b' && down.slotIndex === 0, 'Enter는 다음 행 같은 칸')
 const right = nextProductNameAiQuickFocus(['a', 'b'], 'a', 0, 'right')
@@ -386,7 +510,12 @@ assert(
   right?.rowKey === 'a' && right.slotIndex === 1 && right.ensureCount === 2,
   'Tab은 같은 행 다음 구성 칸을 만듦',
 )
-const wrap = nextProductNameAiQuickFocus(['a', 'b'], 'a', 2, 'right')
+const wrap = nextProductNameAiQuickFocus(
+  ['a', 'b'],
+  'a',
+  PRODUCT_NAME_AI_QUICK_SLOT_LIMIT - 1,
+  'right',
+)
 assert(wrap?.rowKey === 'b', '마지막 칸 Tab은 다음 행으로')
 assert(
   shouldIgnoreProductNameAiQuickKey({ isComposing: true, key: 'Enter' }),
@@ -403,6 +532,35 @@ assert(
 assert(
   !shouldIgnoreProductNameAiQuickKey({ key: 'Tab' }),
   '완성된 Tab은 다음 구성 칸으로 이동',
+)
+assert(
+  isProductNameAiAddExtraKey({ key: '+' }),
+  '이름 칸 + 는 구성품 칸을 추가한다',
+)
+assert(
+  isProductNameAiAddExtraKey({ key: 'Add' }),
+  '숫자패드 + 도 구성품 칸을 추가한다',
+)
+assert(
+  !isProductNameAiAddExtraKey({ key: '+', isComposing: true }),
+  '한글 조합 중 + 는 글자로 남긴다',
+)
+assert(
+  !isProductNameAiAddExtraKey({ key: '+', ctrlKey: true }),
+  'Ctrl+Plus는 구성품 추가가 아니다',
+)
+const extraSlots = [
+  emptyProductNameAiQuickSlot(),
+  emptyProductNameAiQuickSlot(),
+  emptyProductNameAiQuickSlot(),
+]
+assert(
+  removeProductNameAiQuickSlot(extraSlots, 1).length === 2,
+  '추가 구성품 칸은 지울 수 있다',
+)
+assert(
+  removeProductNameAiQuickSlot(extraSlots, 0).length === 3,
+  '본품 칸은 휴지통으로 지우지 않는다',
 )
 
 assert(
@@ -537,6 +695,33 @@ assert(
   'AI 공식명칭 완성 후에도 다시 Enter하기 전에는 검토 필요',
 )
 assert(
+  nextProductNameAiRowMark('confirm', 'needs_ai') === 'pending_ai' &&
+    nextProductNameAiRowMark('resolved', 'ready') === 'keep' &&
+    nextProductNameAiRowMark('edit', 'ready') === 'unconfirm',
+  'Enter 표시는 공식명칭 완성 후에도 유지하고 칸을 고치면 푼다',
+)
+assert(
+  countProductNameAiPendingResolve(
+    new Set(['needs-ai', 'filled']),
+    new Map([
+      [
+        'needs-ai',
+        [
+          applyProductNameAiQuickSlotText(
+            emptyProductNameAiQuickSlot(),
+            '미완성',
+          ),
+        ],
+      ],
+      [
+        'filled',
+        [applyProductNameAiQuickSlotStyle(emptyProductNameAiQuickSlot(), rabbit)],
+      ],
+    ]),
+  ) === 1,
+  '공식명칭이 채워진 행은 완성 버튼 개수에서 뺀다',
+)
+assert(
   productNameAiWorkflowTab({
     confirmed: true,
     saveFailed: false,
@@ -569,7 +754,7 @@ const leftoverReview = countProductNameAiWorkflow({
 })
 assert(
   leftoverReview.reviewCount === 1 && leftoverReview.readyCount === 1,
-  '검토 필요가 남으면 일괄 등록할 수 없다',
+  '검토 필요가 남아도 준비 완료 건수는 따로 센다',
 )
 const allReady = countProductNameAiWorkflow({
   rows: [filled, other],
@@ -616,6 +801,95 @@ assert(
 assert(
   decideProductNameAiSaves([filled]).items[0]?.outcome === 'confirmed',
   '같은 본품을 채택하면 confirmed로 저장한다',
+)
+
+const comboBase = {
+  mallName: '테스트몰',
+  productName: '울 코트',
+  itemName: '블랙 / M',
+  ownProductCode: '',
+  rowCount: 1,
+  status: 'unresolved' as const,
+  appliedRule: null,
+  appliedLookupKey: null,
+  candidateStyles: [],
+  candidates: [],
+  tags: [],
+  itemTags: [],
+}
+const deduped = dedupeProductNameAiCombos([
+  { ...comboBase, key: 'row-1' },
+  { ...comboBase, key: 'row-2' },
+  { ...comboBase, key: 'row-3', itemName: '블랙 / L' },
+])
+assert(deduped.requests.length === 2, '같은 문맥만 한 번 수집한다')
+assert(
+  (deduped.mirrors.get('row-1') ?? []).join(',') === 'row-2',
+  '같은 문맥 행을 미러로 붙인다',
+)
+
+const breezeProduct =
+  '[단독선발매] [8/26예약배송]마스마룰즈 브리즈 리본 더플백 3컬러'
+const breezeClean = '마스마룰즈 브리즈 리본 더플백 3컬러'
+const beigeRow = {
+  candidates: generateProductNameCandidates({
+    productName: breezeProduct,
+    itemName: 'COLORS: 펄 베이지',
+    matchingProductName: breezeClean,
+  }),
+  registrationCandidates: generateProductNameRegistrationCandidates({
+    productName: breezeClean,
+    itemName: 'COLORS: 펄 베이지',
+  }),
+}
+const beigeSearch = productNameAiSearchKeys(beigeRow)
+const beigeCandidate = productNameAiCandidateSearchKeys(beigeRow)
+assert(
+  beigeSearch.includes('COLORS: 펄 베이지'),
+  '옵션 단독은 조회·등록 키에 남긴다',
+)
+assert(
+  !beigeCandidate.includes('COLORS: 펄 베이지'),
+  '옵션 단독은 퍼지 후보 검색에서 뺀다',
+)
+assert(
+  beigeCandidate.some((key) => key.includes('브리즈 리본 더플백') && key.includes('펄 베이지')),
+  '품목명+옵션은 퍼지 후보 검색에 남긴다',
+)
+
+const pinkRow = {
+  candidates: generateProductNameCandidates({
+    productName: breezeProduct,
+    itemName: 'COLORS: 파우더 핑크',
+    matchingProductName: breezeClean,
+  }),
+  registrationCandidates: generateProductNameRegistrationCandidates({
+    productName: breezeClean,
+    itemName: 'COLORS: 파우더 핑크',
+  }),
+}
+const pinkCandidate = productNameAiCandidateSearchKeys(pinkRow)
+assert(
+  !pinkCandidate.includes('COLORS: 파우더 핑크'),
+  '핑크 옵션 단독도 퍼지 후보 검색에서 뺀다',
+)
+assert(
+  pinkCandidate.some((key) => key.includes('브리즈 리본 더플백') && key.includes('파우더 핑크')),
+  '핑크 품목명+옵션은 퍼지 후보 검색에 남긴다',
+)
+
+const itemOnlyRow = {
+  candidates: [
+    { text: 'COLORS: 펄 베이지', rule: 'item_full' },
+  ],
+  registrationCandidates: [
+    { text: 'COLORS: 펄 베이지', rule: 'item_full' },
+  ],
+}
+assert(
+  productNameAiCandidateSearchKeys(itemOnlyRow).join('|') ===
+    productNameAiSearchKeys(itemOnlyRow).join('|'),
+  '품목 문맥 키가 없으면 기존 전체 키를 쓴다',
 )
 
 console.log('product-name-ai-review verify: ok')

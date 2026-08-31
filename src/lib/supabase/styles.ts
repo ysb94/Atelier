@@ -10,6 +10,7 @@ import {
 } from '@/lib/products/style-fields'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
+import { fetchAllPages } from '@/lib/supabase/paged-select'
 
 const COLUMNS =
   'id, brand_id, season_id, style_no, name, category, gender, colors, target_cost, planned_qty, retail_price, status, designer, planner, thumbnail_color, description, weight_g, values, custom_fields, created_at, updated_at'
@@ -159,31 +160,26 @@ export async function listStyles(
   brandId: string,
   seasonId?: string,
 ): Promise<Style[]> {
-  const rows: StyleRow[] = []
-
-  // 상품이 수천 건이면 한 번에 다 오지 않는다. 끝까지 이어 읽는다.
-  for (let page = 0; ; page += 1) {
-    let query = getSupabase()
-      .from('styles')
-      .select(COLUMNS)
-      .eq('brand_id', brandId)
-    if (seasonId) query = query.eq('season_id', seasonId)
-
-    const { data, error } = await query
-      .order('style_no', { ascending: true })
-      .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
-
-    if (error) {
-      throw new StyleStoreError(
-        errorMessage(error, '상품을 불러오지 못했습니다.'),
-        'invalid',
-      )
-    }
-
-    const batch = (data as StyleRow[]) ?? []
-    rows.push(...batch)
-    if (batch.length < PAGE_SIZE) break
-  }
+  const rows = await fetchAllPages<StyleRow>({
+    pageSize: PAGE_SIZE,
+    fetchPage: async (from, to, withCount) => {
+      let query = getSupabase()
+        .from('styles')
+        .select(COLUMNS, withCount ? { count: 'exact' } : undefined)
+        .eq('brand_id', brandId)
+      if (seasonId) query = query.eq('season_id', seasonId)
+      const { data, error, count } = await query
+        .order('style_no', { ascending: true })
+        .range(from, to)
+      if (error) {
+        throw new StyleStoreError(
+          errorMessage(error, '상품을 불러오지 못했습니다.'),
+          'invalid',
+        )
+      }
+      return { rows: (data as StyleRow[]) ?? [], count: count ?? null }
+    },
+  })
 
   return rows
     .map(toStyle)
@@ -394,29 +390,25 @@ export async function listStyleRefsForLookup(
  */
 export async function listAllStyleRefs(brandId: string): Promise<StyleRef[]> {
   const supabase = getSupabase()
-  const refs: StyleRef[] = []
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from('styles')
-      .select('id, style_no, name')
-      .eq('brand_id', brandId)
-      .order('style_no', { ascending: true })
-      .range(from, from + PAGE_SIZE - 1)
-
-    if (error) {
-      throw new StyleStoreError(
-        errorMessage(error, '상품 마스터를 불러오지 못했습니다.'),
-        'invalid',
-      )
-    }
-
-    const page = (data as StyleRefRow[]) ?? []
-    for (const row of page) {
-      refs.push(toStyleRef(row))
-    }
-    if (page.length < PAGE_SIZE) break
-  }
-  return refs
+  const rows = await fetchAllPages<StyleRefRow>({
+    pageSize: PAGE_SIZE,
+    fetchPage: async (from, to, withCount) => {
+      const { data, error, count } = await supabase
+        .from('styles')
+        .select('id, style_no, name', withCount ? { count: 'exact' } : undefined)
+        .eq('brand_id', brandId)
+        .order('style_no', { ascending: true })
+        .range(from, to)
+      if (error) {
+        throw new StyleStoreError(
+          errorMessage(error, '상품 마스터를 불러오지 못했습니다.'),
+          'invalid',
+        )
+      }
+      return { rows: (data as StyleRefRow[]) ?? [], count: count ?? null }
+    },
+  })
+  return rows.map(toStyleRef)
 }
 
 /** 엑셀 일괄 등록에서 M번호 열을 StyleRef로 해석한다. */

@@ -1,9 +1,16 @@
 import { useMemo, useRef, useState } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { recordInvoiceWorkCompletion } from '@/lib/api'
+import {
+  getActiveWarehouseInventorySet,
+  getBrandFields,
+  getInvoicePackingSizeMaps,
+  getStylesByBrand,
+  getWarehouseStockPositions,
+  recordInvoiceWorkCompletion,
+} from '@/lib/api'
 import type { GiftAssignmentPlan } from '@/lib/invoice/gift-assign'
 import {
   finalizeGiftPlanForDownload,
@@ -17,8 +24,10 @@ import {
   type InvoiceMallResolution,
 } from '@/lib/invoice/mall-resolution'
 import {
+  applyInvoiceShipmentProductLabels,
   buildInvoiceOutputRows,
   downloadInvoiceOutputRows,
+  type InvoiceOutputRow,
 } from '@/lib/invoice/invoice-output'
 import {
   buildOutgoingComponentRowsFromStages,
@@ -27,6 +36,10 @@ import type { InvoiceItemNameTransformation } from '@/lib/invoice/item-name-tran
 import {
   downloadOutgoingComponentRows,
 } from '@/lib/invoice/option-transform'
+import {
+  normalizePackingSizeValue,
+  PACKING_SIZE_SOURCE_FIELD_LABEL,
+} from '@/lib/invoice/packing-size-map'
 import { planInvoicePrefixes } from '@/lib/invoice/prefix-transform'
 import {
   overlayGiftSourceOnProductNames,
@@ -34,8 +47,14 @@ import {
   type InvoiceProductNameTransformation,
 } from '@/lib/invoice/product-name-transform'
 import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
+import {
+  buildInvoiceShipmentLocationByStyleNo,
+  buildInvoiceShipmentPackingCodeByStyleNo,
+  DEFAULT_INVOICE_SHIPMENT_LOCATION_ZONE,
+  INVOICE_SHIPMENT_LOCATION_ZONE_MODES,
+} from '@/lib/invoice/shipment-product-label'
 import type { WorkInstructionPlan } from '@/lib/invoice/work-instruction-transform'
-import type { InvoicePrefixRequest } from '@/lib/types'
+import type { InvoicePrefixRequest, WarehouseZone } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
 
 export function InvoiceOutputStepPanel({
@@ -55,6 +74,7 @@ export function InvoiceOutputStepPanel({
   baseProductTransformation,
   mallResolution,
   finalizeUnified,
+  previewRows: previewRowsProp,
 }: {
   brandId: string
   brandName: string
@@ -72,8 +92,12 @@ export function InvoiceOutputStepPanel({
   baseProductTransformation?: InvoiceProductNameTransformation
   mallResolution: InvoiceMallResolution
   finalizeUnified?: () => Promise<FinalizeUnifiedGiftPlanResult>
+  previewRows?: InvoiceOutputRow[]
 }) {
   const queryClient = useQueryClient()
+  const [locationZone, setLocationZone] = useState<WarehouseZone>(
+    DEFAULT_INVOICE_SHIPMENT_LOCATION_ZONE,
+  )
   const [downloading, setDownloading] = useState(false)
   const [downloadingComponents, setDownloadingComponents] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
@@ -90,27 +114,102 @@ export function InvoiceOutputStepPanel({
     sites: ReturnType<typeof summarizeInvoiceWorkSites>
   } | null>(null)
 
+  const fieldsQuery = useQuery({
+    queryKey: ['brand-fields', brandId],
+    queryFn: () => getBrandFields(brandId),
+  })
+  const packingField = useMemo(() => {
+    const target = normalizePackingSizeValue(PACKING_SIZE_SOURCE_FIELD_LABEL)
+    return (
+      fieldsQuery.data?.find(
+        (item) => normalizePackingSizeValue(item.label) === target,
+      ) ?? null
+    )
+  }, [fieldsQuery.data])
+  const packingMapsQuery = useQuery({
+    queryKey: ['invoice-packing-size-maps', brandId, packingField?.id ?? ''],
+    queryFn: () => getInvoicePackingSizeMaps(brandId, packingField!.id),
+    enabled: Boolean(packingField?.id),
+  })
+  const stylesQuery = useQuery({
+    queryKey: ['styles', brandId],
+    queryFn: () => getStylesByBrand(brandId),
+  })
+  const warehouseSetQuery = useQuery({
+    queryKey: ['warehouse-inventory-set', brandId],
+    queryFn: () => getActiveWarehouseInventorySet(brandId),
+  })
+  const warehousePositionsQuery = useQuery({
+    queryKey: [
+      'warehouse-stock-positions',
+      brandId,
+      warehouseSetQuery.data?.id,
+    ],
+    queryFn: () =>
+      getWarehouseStockPositions(brandId, warehouseSetQuery.data!.id),
+    enabled: Boolean(warehouseSetQuery.data?.id),
+  })
+
+  const shipmentLookups = useMemo(
+    () => ({
+      locationByStyleNo: buildInvoiceShipmentLocationByStyleNo(
+        warehousePositionsQuery.data ?? [],
+        locationZone,
+      ),
+      packingCodeByStyleNo: buildInvoiceShipmentPackingCodeByStyleNo({
+        styles: stylesQuery.data ?? [],
+        field: packingField,
+        maps: packingMapsQuery.data ?? [],
+      }),
+    }),
+    [
+      locationZone,
+      packingField,
+      packingMapsQuery.data,
+      stylesQuery.data,
+      warehousePositionsQuery.data,
+    ],
+  )
+
+  const shipmentLabelsPending =
+    stylesQuery.isPending ||
+    fieldsQuery.isPending ||
+    (Boolean(packingField?.id) && packingMapsQuery.isPending) ||
+    warehouseSetQuery.isPending ||
+    (Boolean(warehouseSetQuery.data?.id) &&
+      warehousePositionsQuery.isPending)
+
   const nameTransformation = useMemo(
     () => productNameTransformationToName(productTransformation),
     [productTransformation],
   )
 
-  const previewRows = useMemo(
+  const basePreviewRows = useMemo(
     () =>
+      previewRowsProp ??
       buildInvoiceOutputRows({
         transformedRows: nameTransformation.rows,
         workMatches: workPlan.matchByRowNumber,
         giftRowsBySource: giftPlan.giftsBySourceRowNumber,
+        giftAssignments: giftPlan.shipments.flatMap(
+          (item) => item.assignments,
+        ),
         productTransformation,
         itemTransformation,
       }),
     [
-      nameTransformation.rows,
-      workPlan.matchByRowNumber,
       giftPlan,
-      productTransformation,
       itemTransformation,
+      nameTransformation.rows,
+      previewRowsProp,
+      productTransformation,
+      workPlan.matchByRowNumber,
     ],
+  )
+
+  const previewRows = useMemo(
+    () => applyInvoiceShipmentProductLabels(basePreviewRows, shipmentLookups),
+    [basePreviewRows, shipmentLookups],
   )
 
   const orderCount = previewRows.filter((row) => row.kind === 'order').length
@@ -129,7 +228,7 @@ export function InvoiceOutputStepPanel({
     itemTransformation.conflictRowCount
 
   async function handleDownload() {
-    if (downloading || previewRows.length === 0) return
+    if (downloading || previewRows.length === 0 || shipmentLabelsPending) return
     setDownloading(true)
     setMessage(null)
     try {
@@ -175,13 +274,19 @@ export function InvoiceOutputStepPanel({
           : productTransformation
       const finalizedName = productNameTransformationToName(finalizedProduct)
 
-      const outputRows = buildInvoiceOutputRows({
-        transformedRows: finalizedName.rows,
-        workMatches: workPlan.matchByRowNumber,
-        giftRowsBySource: finalized.plan.giftsBySourceRowNumber,
-        productTransformation: finalizedProduct,
-        itemTransformation,
-      })
+      const outputRows = applyInvoiceShipmentProductLabels(
+        buildInvoiceOutputRows({
+          transformedRows: finalizedName.rows,
+          workMatches: workPlan.matchByRowNumber,
+          giftRowsBySource: finalized.plan.giftsBySourceRowNumber,
+          giftAssignments: finalized.plan.shipments.flatMap(
+            (item) => item.assignments,
+          ),
+          productTransformation: finalizedProduct,
+          itemTransformation,
+        }),
+        shipmentLookups,
+      )
 
       await downloadInvoiceOutputRows({
         brandName,
@@ -306,13 +411,35 @@ export function InvoiceOutputStepPanel({
               확정 예정 {formatNumber(giftPlan.newConfirmCandidates.length)}건
             </Badge>
           ) : null}
+          <div className="flex flex-wrap items-center gap-1">
+            {INVOICE_SHIPMENT_LOCATION_ZONE_MODES.map((item) => (
+              <button
+                key={item.value}
+                type="button"
+                aria-pressed={locationZone === item.value}
+                onClick={() => setLocationZone(item.value)}
+                className={cn(
+                  'rounded-full border px-2.5 py-1 text-xs',
+                  locationZone === item.value
+                    ? 'border-primary/40 bg-primary/10 text-foreground'
+                    : 'border-border text-muted-foreground hover:bg-muted/50',
+                )}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button
             type="button"
             size="sm"
             variant="outline"
-            disabled={downloadingComponents || previewRows.length === 0}
+            disabled={
+              downloadingComponents ||
+              previewRows.length === 0 ||
+              shipmentLabelsPending
+            }
             onClick={() => void handleComponentDownload()}
           >
             <Download className="size-3.5" />
@@ -321,7 +448,9 @@ export function InvoiceOutputStepPanel({
           <Button
             type="button"
             size="sm"
-            disabled={downloading || previewRows.length === 0}
+            disabled={
+              downloading || previewRows.length === 0 || shipmentLabelsPending
+            }
             onClick={() => void handleDownload()}
           >
             <Download className="size-3.5" />
@@ -449,57 +578,68 @@ export function InvoiceOutputStepPanel({
         </div>
       ) : null}
 
-      <div className="max-h-[36rem] overflow-auto rounded-lg border border-border">
-        <table className="w-full min-w-[980px] text-left text-xs">
-          <thead className="sticky top-0 bg-muted/80">
-            <tr>
-              <th className="px-3 py-2.5 font-medium">구분</th>
-              <th className="px-3 py-2.5 font-medium">품목명</th>
-              <th className="px-3 py-2.5 font-medium">내품명</th>
-              <th className="px-3 py-2.5 font-medium">수량</th>
-              <th className="px-3 py-2.5 font-medium">받는분</th>
-              <th className="px-3 py-2.5 font-medium">쇼핑몰명</th>
-              <th className="px-3 py-2.5 font-medium">주문일시</th>
-            </tr>
-          </thead>
-          <tbody>
-            {previewRows.slice(0, 300).map((row) => (
-              <tr
-                key={`${row.kind}-${row.rowNumber}-${row.sourceRowNumber}`}
-                className={cn(
-                  'border-t border-border',
-                  row.kind === 'gift' && 'bg-primary/5',
-                )}
-              >
-                <td className="px-3 py-2">
-                  <Badge
-                    variant={row.kind === 'gift' ? 'warning' : 'outline'}
+      {shipmentLabelsPending ? (
+        <div className="rounded-lg border border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+          창고 자리·포장 코드를 붙여 최종 품목명을 준비하고 있습니다.
+        </div>
+      ) : (
+        <>
+          <div className="max-h-[36rem] overflow-auto rounded-lg border border-border">
+            <table className="w-full min-w-[980px] text-left text-xs">
+              <thead className="sticky top-0 bg-muted/80">
+                <tr>
+                  <th className="px-3 py-2.5 font-medium">구분</th>
+                  <th className="px-3 py-2.5 font-medium">품목명</th>
+                  <th className="px-3 py-2.5 font-medium">내품명</th>
+                  <th className="px-3 py-2.5 font-medium">수량</th>
+                  <th className="px-3 py-2.5 font-medium">받는분</th>
+                  <th className="px-3 py-2.5 font-medium">쇼핑몰명</th>
+                  <th className="px-3 py-2.5 font-medium">주문일시</th>
+                </tr>
+              </thead>
+              <tbody>
+                {previewRows.slice(0, 300).map((row) => (
+                  <tr
+                    key={`${row.kind}-${row.rowNumber}-${row.sourceRowNumber}`}
+                    className={cn(
+                      'border-t border-border',
+                      row.kind === 'gift' && 'bg-primary/5',
+                    )}
                   >
-                    {row.kind === 'gift' ? '사은품' : '주문'}
-                  </Badge>
-                </td>
-                <td className="max-w-64 truncate px-3 py-2 font-medium">
-                  {row.finalProductName}
-                </td>
-                <td className="max-w-72 truncate px-3 py-2 text-muted-foreground">
-                  {row.kind === 'gift' ? '-' : row.finalItemName || '(빈 값)'}
-                </td>
-                <td className="px-3 py-2 tabular-nums">{row.quantity}</td>
-                <td className="px-3 py-2">{row.recipientName || '-'}</td>
-                <td className="px-3 py-2">{row.mallName || '-'}</td>
-                <td className="px-3 py-2 text-muted-foreground">
-                  {row.orderedAt || '-'}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {previewRows.length > 300 ? (
-        <p className="text-xs text-muted-foreground">
-          미리보기는 앞의 300행만 표시합니다. 다운로드에는 전체가 들어갑니다.
-        </p>
-      ) : null}
+                    <td className="px-3 py-2">
+                      <Badge
+                        variant={row.kind === 'gift' ? 'warning' : 'outline'}
+                      >
+                        {row.kind === 'gift' ? '사은품' : '주문'}
+                      </Badge>
+                    </td>
+                    <td className="max-w-64 truncate px-3 py-2 font-medium">
+                      {row.finalProductName}
+                    </td>
+                    <td className="max-w-72 truncate px-3 py-2 text-muted-foreground">
+                      {row.kind === 'gift'
+                        ? '-'
+                        : row.finalItemName || '(빈 값)'}
+                    </td>
+                    <td className="px-3 py-2 tabular-nums">{row.quantity}</td>
+                    <td className="px-3 py-2">{row.recipientName || '-'}</td>
+                    <td className="px-3 py-2">{row.mallName || '-'}</td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {row.orderedAt || '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {previewRows.length > 300 ? (
+            <p className="text-xs text-muted-foreground">
+              미리보기는 앞의 300행만 표시합니다. 다운로드에는 전체가
+              들어갑니다.
+            </p>
+          ) : null}
+        </>
+      )}
     </div>
   )
 }

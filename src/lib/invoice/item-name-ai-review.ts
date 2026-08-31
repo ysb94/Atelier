@@ -172,13 +172,14 @@ export function collectItemNameAiGroups(
 }
 
 /**
- * 조회 키만 다르고 옵션명·확정 본품이 같은 조합은 AI가 같은 답을 준다.
- * 대표 하나만 물어보고 나머지에 결정을 복사해 호출 수를 줄인다.
+ * 옵션명·확정 본품·조회 키가 모두 같은 조합만 같은 결정으로 본다.
+ * 조회 키가 다르면 출고 구성이 달라질 수 있어 따로 판정한다.
  */
 export function itemNameAiDecisionKey(context: ItemNameAiContext) {
   return [
     normalizeInvoiceText(context.itemName),
     context.mainStyle?.styleId ?? '',
+    normalizeInvoiceText(context.productLookupKey),
   ].join('\u0000')
 }
 
@@ -254,6 +255,33 @@ export function planItemNameAiBatches(
   }
   if (current.length > 0) batches.push(current)
   return batches
+}
+
+export const ITEM_NAME_SAFE_CANDIDATE_LIMIT = 16
+
+export function selectItemNameSafeCandidateIds(
+  candidateStyleIds: string[],
+  rankedStyleIds: string[],
+  requiredStyleIds: string[] = [],
+  limit = ITEM_NAME_SAFE_CANDIDATE_LIMIT,
+) {
+  const allowed = new Set(candidateStyleIds)
+  const required = requiredStyleIds.filter((id) => allowed.has(id))
+  const picked: string[] = []
+  for (const id of required) {
+    if (picked.length >= limit) break
+    if (!picked.includes(id)) picked.push(id)
+  }
+  for (const id of rankedStyleIds) {
+    if (picked.length >= limit) break
+    if (!allowed.has(id) || picked.includes(id)) continue
+    picked.push(id)
+  }
+  const preserved = required.every((id) => picked.includes(id))
+  if (!preserved) {
+    return { ids: candidateStyleIds, usedSafeLimit: false as const }
+  }
+  return { ids: picked, usedSafeLimit: true as const }
 }
 
 export function itemNameAiCandidateTexts(

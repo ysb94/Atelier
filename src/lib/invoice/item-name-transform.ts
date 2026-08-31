@@ -48,6 +48,10 @@ export type InvoiceItemNameTransformRow = {
   productStyle: StyleRef | null
   /** 출고구성 XLSX·화면 구성 열. 내품명 규칙/사전과 실제 세트 구성을 합친다. */
   extras: InvoiceOptionMapComponent[]
+  /** 품목명 단계 옵션맵·1:N 세트 구성. 상품 리스트에서는 품목으로 본다. */
+  productExtras: InvoiceOptionMapComponent[]
+  /** 내품명 규칙·부속품 사전 구성. 상품 리스트에서는 내품으로 본다. */
+  itemExtras: InvoiceOptionMapComponent[]
   /** CJ 13열 행 확장 전용. 실제 invoice_option_maps 세트 구성만 담는다. */
   expandableExtras: InvoiceOptionMapComponent[]
   transformedItemName: string
@@ -116,6 +120,24 @@ export function formatItemNameFromComponents(
       ),
     )
     .join(', ')
+}
+
+export type ItemNameTransformIndex = {
+  optionMaps: OptionMapIndex
+  rulesByItemName: Map<string, InvoiceItemNameRule[]>
+  styleByName: ReturnType<typeof accessoryStyleNameIndex>
+}
+
+export function buildItemNameTransformIndex(
+  maps: InvoiceOptionMap[],
+  rules: InvoiceItemNameRule[],
+  styles: StyleRef[],
+): ItemNameTransformIndex {
+  return {
+    optionMaps: indexOptionMaps(maps.filter((map) => map.isActive)),
+    rulesByItemName: indexItemNameRules(rules),
+    styleByName: accessoryStyleNameIndex(styles),
+  }
 }
 
 /** normalizedItemName별 활성 규칙 목록. 변환 시작 시 한 번만 만든다. */
@@ -221,6 +243,19 @@ function expandableExtrasOf(
   return extras.filter((item) => allowed.has(item.style.styleId))
 }
 
+function originFields(
+  productExtras: InvoiceOptionMapComponent[] = [],
+  itemExtras: InvoiceOptionMapComponent[] = [],
+) {
+  const extras = mergeExtras(itemExtras, productExtras)
+  return {
+    extras,
+    productExtras,
+    itemExtras,
+    expandableExtras: expandableExtrasOf(extras, productExtras),
+  }
+}
+
 type OptionMapIndex = {
   /** `mall\u0000product\u0000item` exact 조합 */
   exact: Map<string, InvoiceOptionMap[]>
@@ -297,16 +332,17 @@ export function transformInvoiceItemNames(
   rules: InvoiceItemNameRule[] = [],
   accessoryRules: InvoiceAccessoryRule[] = [],
   styles: StyleRef[] = [],
+  index?: ItemNameTransformIndex,
 ): InvoiceItemNameTransformation {
   const activeMaps = maps.filter((map) => map.isActive)
   const activeRules = rules.filter((rule) => rule.isActive)
-  const optionMapIndex = indexOptionMaps(activeMaps)
-  const rulesByItemName = indexItemNameRules(activeRules)
+  const optionMapIndex = index?.optionMaps ?? indexOptionMaps(activeMaps)
+  const rulesByItemName = index?.rulesByItemName ?? indexItemNameRules(activeRules)
   const productByRow = new Map(
     productRows.map((row) => [row.source.rowNumber, row]),
   )
   const unresolvedByKey = new Map<string, UnresolvedItemNameCombo>()
-  const styleByName = accessoryStyleNameIndex(styles)
+  const styleByName = index?.styleByName ?? accessoryStyleNameIndex(styles)
   const activeAccessoryRules = accessoryRules.filter((rule) => rule.isActive)
   let mappedRowCount = 0
   let passthroughRowCount = 0
@@ -392,8 +428,7 @@ export function transformInvoiceItemNames(
         mapId: null,
         ruleId: null,
         productStyle: product.style,
-        extras: [],
-        expandableExtras: [],
+        ...originFields(),
         transformedItemName: '',
         displayChanged: Boolean(source.itemName),
         resolvedBy: null,
@@ -438,8 +473,7 @@ export function transformInvoiceItemNames(
         mapId: null,
         ruleId: null,
         productStyle,
-        extras: [],
-        expandableExtras: [],
+        ...originFields(),
         transformedItemName: consumed ? '' : effectiveItemName,
         displayChanged: consumed || effectiveItemName !== source.itemName,
         resolvedBy: null,
@@ -460,8 +494,7 @@ export function transformInvoiceItemNames(
         mapId: map?.id ?? null,
         ruleId: null,
         productStyle: resolvedStyle,
-        extras: mapExtras,
-        expandableExtras: mapExtras,
+        ...originFields(mapExtras),
         transformedItemName: '',
         displayChanged: Boolean(source.itemName),
         resolvedBy: null,
@@ -477,8 +510,7 @@ export function transformInvoiceItemNames(
         mapId: map?.id ?? null,
         ruleId: rule.id,
         productStyle: resolvedStyle,
-        extras: mapExtras,
-        expandableExtras: mapExtras,
+        ...originFields(mapExtras),
         transformedItemName: '',
         displayChanged: Boolean(source.itemName) || Boolean(effectiveItemName),
         resolvedBy: 'rule',
@@ -488,7 +520,6 @@ export function transformInvoiceItemNames(
 
     if (rule?.action === 'components') {
       mappedRowCount += 1
-      const extras = mergeExtras(extrasFromRule(rule), mapExtras)
       const display = formatItemNameFromComponents(rule.components)
       return {
         source,
@@ -496,8 +527,7 @@ export function transformInvoiceItemNames(
         mapId: map?.id ?? null,
         ruleId: rule.id,
         productStyle: resolvedStyle,
-        extras,
-        expandableExtras: expandableExtrasOf(extras, mapExtras),
+        ...originFields(mapExtras, extrasFromRule(rule)),
         transformedItemName: display,
         displayChanged: display !== source.itemName,
         resolvedBy: 'rule',
@@ -515,8 +545,7 @@ export function transformInvoiceItemNames(
           mapId: map.id,
           ruleId: null,
           productStyle: resolvedStyle,
-          extras: mapExtras,
-          expandableExtras: mapExtras,
+          ...originFields(mapExtras),
           transformedItemName: display,
           displayChanged: display !== source.itemName,
           resolvedBy: 'map',
@@ -531,8 +560,7 @@ export function transformInvoiceItemNames(
           mapId: map.id,
           ruleId: null,
           productStyle: resolvedStyle,
-          extras: mapExtras,
-          expandableExtras: mapExtras,
+          ...originFields(mapExtras),
           transformedItemName: '',
           displayChanged: false,
           resolvedBy: 'map',
@@ -550,8 +578,7 @@ export function transformInvoiceItemNames(
         mapId: map.id,
         ruleId: null,
         productStyle: resolvedStyle,
-        extras: mapExtras,
-        expandableExtras: mapExtras,
+        ...originFields(mapExtras),
         transformedItemName: effectiveItemName,
         displayChanged: effectiveItemName !== source.itemName,
         resolvedBy: 'map',
@@ -567,8 +594,7 @@ export function transformInvoiceItemNames(
         mapId: null,
         ruleId: null,
         productStyle: resolvedStyle,
-        extras: [],
-        expandableExtras: [],
+        ...originFields(),
         transformedItemName: '',
         displayChanged: false,
         resolvedBy: null,
@@ -598,8 +624,7 @@ export function transformInvoiceItemNames(
         mapId: null,
         ruleId: null,
         productStyle,
-        extras: [],
-        expandableExtras: [],
+        ...originFields(),
         transformedItemName: effectiveItemName,
         displayChanged: effectiveItemName !== source.itemName,
         resolvedBy: 'dictionary',
@@ -609,7 +634,6 @@ export function transformInvoiceItemNames(
     if (resolved.unknown.length === 0 && resolved.components.length > 0) {
       mappedRowCount += 1
       autoComponentsRowCount += 1
-      const extras = extrasFromDictionary(resolved.components)
       const display = formatItemNameFromComponents(resolved.components)
       return {
         source,
@@ -617,8 +641,7 @@ export function transformInvoiceItemNames(
         mapId: null,
         ruleId: null,
         productStyle: resolvedStyle,
-        extras,
-        expandableExtras: [],
+        ...originFields([], extrasFromDictionary(resolved.components)),
         transformedItemName: display,
         displayChanged: display !== source.itemName,
         resolvedBy: 'dictionary',
@@ -634,8 +657,7 @@ export function transformInvoiceItemNames(
         mapId: null,
         ruleId: null,
         productStyle: resolvedStyle,
-        extras: [],
-        expandableExtras: [],
+        ...originFields(),
         transformedItemName: '',
         displayChanged: Boolean(source.itemName) || Boolean(effectiveItemName),
         resolvedBy: 'dictionary',
@@ -654,8 +676,7 @@ export function transformInvoiceItemNames(
       mapId: null,
       ruleId: null,
       productStyle,
-      extras: [],
-      expandableExtras: [],
+      ...originFields(),
       transformedItemName: effectiveItemName,
       displayChanged: effectiveItemName !== source.itemName,
       resolvedBy: 'dictionary',
@@ -748,6 +769,8 @@ export function buildOutgoingComponentRowsFromStages(options: {
         mapId: item?.mapId ?? product.mapId,
         main: giftMapped ? null : product.style,
         extras: giftMapped ? [] : (item?.extras ?? []),
+        productExtras: giftMapped ? [] : (item?.productExtras ?? []),
+        itemExtras: giftMapped ? [] : (item?.itemExtras ?? []),
         transformedName: product.transformedProductName,
         transformedItemName: giftMapped
           ? ''

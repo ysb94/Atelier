@@ -66,7 +66,7 @@ export type InvoicePrefixPlan = {
   mallMismatchRowCount: number
 }
 
-/** DB 생성 열과 같은 규칙으로 비교 키만 정리한다. 원문은 바꾸지 않는다. */
+/** `app.normalize_invoice_lookup_key`와 같은 규칙으로 비교 키만 정리한다. 원문은 바꾸지 않는다. */
 export function normalizeInvoiceText(value: string): string {
   return value
     .normalize('NFKC')

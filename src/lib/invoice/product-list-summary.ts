@@ -12,7 +12,7 @@ export const INVOICE_PRODUCT_LIST_CATEGORIES: {
   label: string
 }[] = [
   { value: 'product', label: '품목' },
-  { value: 'component', label: '내품·세트' },
+  { value: 'component', label: '내품' },
   { value: 'gift', label: '사은품' },
   { value: 'packing', label: '포장재' },
 ]
@@ -54,6 +54,12 @@ export function classifyInvoiceProductListRow(
   if (row.role === 'unknown' || !normalizeStyleNo(row.styleNo)) {
     return 'unresolved'
   }
+  if (row.listOrigin === 'product_main' || row.listOrigin === 'product_extra') {
+    return 'product'
+  }
+  if (row.listOrigin === 'item_extra') return 'component'
+  if (row.listOrigin === 'gift' || row.role === 'gift') return 'gift'
+  if (row.listOrigin === 'packing' || row.role === 'packing') return 'packing'
   if (row.role === 'main') return 'product'
   if (
     row.role === 'included' ||
@@ -62,8 +68,6 @@ export function classifyInvoiceProductListRow(
   ) {
     return 'component'
   }
-  if (row.role === 'gift') return 'gift'
-  if (row.role === 'packing') return 'packing'
   return 'unresolved'
 }
 

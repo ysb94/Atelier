@@ -1,6 +1,7 @@
 import {
   formatGiftProductName,
   shipmentKeyOf,
+  type GiftAssignment,
   type GiftAssignmentPlan,
 } from '@/lib/invoice/gift-assign'
 import type { InvoiceItemNameTransformation } from '@/lib/invoice/item-name-transform'
@@ -12,6 +13,11 @@ import type { InvoiceOptionTransformation } from '@/lib/invoice/option-transform
 import { resolveInvoiceOutputBundle } from '@/lib/invoice/option-transform'
 import type { InvoiceProductNameTransformation } from '@/lib/invoice/product-name-transform'
 import { productNameTransformationToName } from '@/lib/invoice/product-name-transform'
+import {
+  formatInvoiceShipmentProductName,
+  lookupInvoiceShipmentLabels,
+  type InvoiceShipmentLabelLookups,
+} from '@/lib/invoice/shipment-product-label'
 import type {
   WorkInstructionMatch,
   WorkInstructionPlan,
@@ -21,6 +27,7 @@ import {
   SABANGNET_COLUMNS,
   type SabangnetOrderRow,
 } from '@/lib/invoice/sabangnet'
+import { normalizeStyleNo } from '@/lib/import/transform'
 
 export type InvoiceOutputKind = 'order' | 'gift'
 
@@ -31,6 +38,8 @@ export type InvoiceOutputRow = SabangnetOrderRow & {
   /** 최종 송장에 쓸 내품명. 지우기·소비면 빈칸, 구성품 규칙이면 공식명 조합 */
   finalItemName: string
   sourceRowNumber: number
+  /** 자리·포장 코드를 붙일 때 쓰는 연결 M번호. 없으면 원문 유지. */
+  linkedStyleNo?: string | null
 }
 
 function canExpandInvoiceBundle(options: {
@@ -69,9 +78,10 @@ function canExpandInvoiceBundle(options: {
  * 세트·작업 지시·사은품은 상품 연결 예외 행에 붙이지 않는다.
  */
 export function buildInvoiceOutputRows(options: {
-  transformedRows: InvoiceNameTransformRow[]
+  transformedRows?: InvoiceNameTransformRow[]
   workMatches: Map<number, WorkInstructionMatch>
   giftRowsBySource: Map<number, SabangnetOrderRow[]>
+  giftAssignments?: GiftAssignment[]
   optionTransformation?: InvoiceOptionTransformation | null
   productTransformation?: InvoiceProductNameTransformation | null
   itemTransformation?: InvoiceItemNameTransformation | null
@@ -80,6 +90,10 @@ export function buildInvoiceOutputRows(options: {
 }): InvoiceOutputRow[] {
   const output: InvoiceOutputRow[] = []
   let nextRowNumber = 1
+  const sourceEntries =
+    options.productTransformation?.rows ??
+    options.transformedRows ??
+    []
   const productBySource = new Map(
     (options.productTransformation?.rows ?? []).map((row) => [
       row.source.rowNumber,
@@ -98,12 +112,22 @@ export function buildInvoiceOutputRows(options: {
       row,
     ]),
   )
+  const giftAssignmentsBySource = new Map<number, GiftAssignment[]>()
+  for (const assignment of options.giftAssignments ?? []) {
+    const list = giftAssignmentsBySource.get(assignment.sourceRowNumber) ?? []
+    list.push(assignment)
+    giftAssignmentsBySource.set(assignment.sourceRowNumber, list)
+  }
 
-  for (const transformed of options.transformedRows) {
+  for (const transformed of sourceEntries) {
     const source = transformed.source
     const product = productBySource.get(source.rowNumber)
     const item = itemBySource.get(source.rowNumber)
     const option = optionBySource.get(source.rowNumber)
+    const transformedName =
+      'transformedName' in transformed
+        ? transformed.transformedName
+        : product?.transformedProductName || source.productName
     const effectiveItemName = product?.effectiveItemName ?? source.itemName
     const finalItemName =
       item?.status === 'consumed' || item?.status === 'deleted'
@@ -128,6 +152,7 @@ export function buildInvoiceOutputRows(options: {
           productName: replacement.style.name,
           itemName: '',
           sourceRowNumber: source.rowNumber,
+          linkedStyleNo: normalizeStyleNo(replacement.style.styleNo) || null,
         })
         nextRowNumber += 1
       }
@@ -143,6 +168,7 @@ export function buildInvoiceOutputRows(options: {
         productName: source.productName,
         itemName: finalItemName,
         sourceRowNumber: source.rowNumber,
+        linkedStyleNo: null,
       })
       nextRowNumber += 1
       continue
@@ -151,7 +177,7 @@ export function buildInvoiceOutputRows(options: {
     const baseName =
       product?.transformedProductName ||
       option?.transformedName ||
-      transformed.transformedName ||
+      transformedName ||
       source.productName
     const extras = item
       ? item.expandableExtras
@@ -184,12 +210,15 @@ export function buildInvoiceOutputRows(options: {
         productName: finalProductName,
         itemName: finalItemName,
         sourceRowNumber: source.rowNumber,
+        linkedStyleNo: normalizeStyleNo(line.style?.styleNo ?? '') || null,
       })
       nextRowNumber += 1
     }
 
     const gifts = options.giftRowsBySource.get(source.rowNumber) ?? []
-    for (const gift of gifts) {
+    const giftAssignments = giftAssignmentsBySource.get(source.rowNumber) ?? []
+    for (const [index, gift] of gifts.entries()) {
+      const assignment = giftAssignments[index]
       output.push({
         ...gift,
         rowNumber: nextRowNumber,
@@ -197,6 +226,7 @@ export function buildInvoiceOutputRows(options: {
         finalProductName: gift.productName,
         finalItemName: '',
         sourceRowNumber: source.rowNumber,
+        linkedStyleNo: normalizeStyleNo(assignment?.styleNo ?? '') || null,
       })
       nextRowNumber += 1
     }
@@ -224,6 +254,33 @@ function numberGiftOutputRows(rows: InvoiceOutputRow[]) {
       ...row,
       finalProductName: label,
       productName: label,
+    }
+  })
+}
+
+/** M번호 연결 행에 창고 자리·포장 코드를 붙인다. */
+export function applyInvoiceShipmentProductLabels(
+  rows: InvoiceOutputRow[],
+  lookups: InvoiceShipmentLabelLookups,
+): InvoiceOutputRow[] {
+  return rows.map((row) => {
+    const linkedStyleNo = normalizeStyleNo(row.linkedStyleNo ?? '') || null
+    if (!linkedStyleNo) return { ...row, linkedStyleNo }
+    const labels = lookupInvoiceShipmentLabels(linkedStyleNo, lookups)
+    const labeled = formatInvoiceShipmentProductName({
+      productName: row.finalProductName,
+      locationLabel: labels.locationLabel,
+      packingCode: labels.packingCode,
+      linkedStyle: true,
+    })
+    if (labeled === row.finalProductName) {
+      return { ...row, linkedStyleNo }
+    }
+    return {
+      ...row,
+      linkedStyleNo,
+      finalProductName: labeled,
+      productName: labeled,
     }
   })
 }
@@ -319,6 +376,9 @@ export function buildInvoiceStepSnapshot(options: {
     giftRowsBySource: includeGifts
       ? (options.giftPlan?.giftsBySourceRowNumber ?? emptyGifts)
       : emptyGifts,
+    giftAssignments: includeGifts
+      ? options.giftPlan?.shipments.flatMap((item) => item.assignments)
+      : [],
     productTransformation: includeProduct
       ? options.productTransformation
       : null,

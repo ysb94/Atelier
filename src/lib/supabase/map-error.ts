@@ -18,7 +18,7 @@ export function errorMessage(
     /foreign key|violates foreign key/i.test(message)
   ) {
     if (
-      /invoice_name_rules|invoice_option_map|invoice_product_name_map|invoice_prefix_item_products|product_code_components/i.test(
+      /invoice_name_rules|invoice_option_map|invoice_product_name_map|invoice_prefix_item_products|invoice_preorder_holds|invoice_discontinued_styles|product_code_components/i.test(
         message,
       )
     ) {

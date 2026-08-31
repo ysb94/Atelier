@@ -62,6 +62,43 @@ type IndexedItem = {
   productName: string
 }
 
+export type WorkInstructionIndex = {
+  active: InvoiceWorkInstruction[]
+  exactByProduct: Map<string, IndexedItem[]>
+  prefixItems: IndexedItem[]
+}
+
+export function buildWorkInstructionIndex(
+  instructions: InvoiceWorkInstruction[],
+): WorkInstructionIndex {
+  const active = instructions.filter((item) => item.isActive)
+  const exactByProduct = new Map<string, IndexedItem[]>()
+  const prefixItems: IndexedItem[] = []
+
+  for (const instruction of active) {
+    const mode = matchModeOf(instruction)
+    for (const item of instruction.items) {
+      const key = productKey(item.productName)
+      if (!key) continue
+      const indexed: IndexedItem = {
+        instruction,
+        itemId: item.id,
+        itemKey: key,
+        productName: item.productName,
+      }
+      if (mode === 'prefix') {
+        prefixItems.push(indexed)
+        continue
+      }
+      const list = exactByProduct.get(key) ?? []
+      list.push(indexed)
+      exactByProduct.set(key, list)
+    }
+  }
+
+  return { active, exactByProduct, prefixItems }
+}
+
 function productKey(value: string): string {
   return normalizeInvoiceText(value)
 }
@@ -207,32 +244,11 @@ function filePeriod(rows: SabangnetOrderRow[]): {
 export function planWorkInstructions(
   rows: SabangnetOrderRow[],
   instructions: InvoiceWorkInstruction[],
+  index?: WorkInstructionIndex,
 ): WorkInstructionPlan {
   const { first, last } = filePeriod(rows)
-  const active = instructions.filter((item) => item.isActive)
-  const exactByProduct = new Map<string, IndexedItem[]>()
-  const prefixItems: IndexedItem[] = []
-
-  for (const instruction of active) {
-    const mode = matchModeOf(instruction)
-    for (const item of instruction.items) {
-      const key = productKey(item.productName)
-      if (!key) continue
-      const indexed: IndexedItem = {
-        instruction,
-        itemId: item.id,
-        itemKey: key,
-        productName: item.productName,
-      }
-      if (mode === 'prefix') {
-        prefixItems.push(indexed)
-        continue
-      }
-      const list = exactByProduct.get(key) ?? []
-      list.push(indexed)
-      exactByProduct.set(key, list)
-    }
-  }
+  const { active, exactByProduct, prefixItems } =
+    index ?? buildWorkInstructionIndex(instructions)
 
   const matchByRowNumber = new Map<number, WorkInstructionMatch>()
   const usedKeys = new Set<string>()

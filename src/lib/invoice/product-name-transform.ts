@@ -159,9 +159,11 @@ function comboKey(mallName: string, productName: string, itemName: string) {
   ].join('\u0000')
 }
 
-type LookupMapIndex = {
+export type ProductNameLookupIndex = {
   compact: Map<string, InvoiceProductNameMap[]>
 }
+
+type LookupMapIndex = ProductNameLookupIndex
 
 function pushMap(
   target: Map<string, InvoiceProductNameMap[]>,
@@ -194,6 +196,13 @@ function mapLookupTexts(map: InvoiceProductNameMap): string[] {
  * 조회 키 원장과 조합 원장을 같은 압축 키로 색인한다.
  * 저장된 태그 역할로 제외되는 선행 태그와 옵션 예약배송 토큰은 별칭으로도 넣는다.
  */
+export function buildProductNameLookupIndex(
+  maps: InvoiceProductNameMap[],
+  tagRoles: InvoiceProductNameTagRoleEntry[],
+): ProductNameLookupIndex {
+  return indexLookupMaps(maps, tagRoles)
+}
+
 function indexLookupMaps(
   maps: InvoiceProductNameMap[],
   tagRoles: InvoiceProductNameTagRoleEntry[],
@@ -310,10 +319,10 @@ function hasConfirmedExclusionSibling(
   )
 }
 
-function applyProductNameExclusions(
+function applyProductNameExclusionsInPlace(
   rows: InvoiceProductNameTransformRow[],
   exclusions: InvoiceProductNameExclusion[],
-): InvoiceProductNameTransformRow[] {
+) {
   const activeKeys = new Set(
     exclusions
       .filter((item) => item.isActive)
@@ -321,7 +330,7 @@ function applyProductNameExclusions(
         productExclusionKey(item.mallName, item.productName, item.itemName),
       ),
   )
-  if (activeKeys.size === 0) return rows
+  if (activeKeys.size === 0) return
 
   const confirmed = collectConfirmedExclusionSiblings(rows, (row) =>
     activeKeys.has(
@@ -333,15 +342,16 @@ function applyProductNameExclusions(
     ),
   )
 
-  return rows.map((row) => {
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]!
     const key = productExclusionKey(
       row.source.mallName,
       row.source.productName,
       row.source.itemName,
     )
-    if (!activeKeys.has(key)) return row
+    if (!activeKeys.has(key)) continue
     const excluded = hasConfirmedExclusionSibling(row.source, confirmed)
-    return {
+    rows[index] = {
       ...row,
       status: excluded ? 'excluded' : 'exclusion_guarded',
       mapId: null,
@@ -352,7 +362,7 @@ function applyProductNameExclusions(
       effectiveItemName: row.source.itemName,
       candidateStyles: [],
     }
-  })
+  }
 }
 
 function summarizeProductNameRows(rows: InvoiceProductNameTransformRow[]) {
@@ -444,9 +454,11 @@ export function transformInvoiceProductNames(
   catalog: ProductNameStyleCatalog,
   tagRoles: InvoiceProductNameTagRoleEntry[] = [],
   exclusions: InvoiceProductNameExclusion[] = [],
+  lookupIndexInput?: ProductNameLookupIndex,
 ): InvoiceProductNameTransformation {
   const activeMaps = maps.filter((map) => map.isActive)
-  const lookupIndex = indexLookupMaps(activeMaps, tagRoles)
+  const lookupIndex =
+    lookupIndexInput ?? indexLookupMaps(activeMaps, tagRoles)
 
   function matchLookupMaps(candidate: ProductNameCandidate, mallName: string) {
     const compact = compactProductNameKey(candidate.text)
@@ -575,10 +587,10 @@ export function transformInvoiceProductNames(
     }
   })
 
-  const rows = applyProductNameExclusions(matchedRows, exclusions)
+  applyProductNameExclusionsInPlace(matchedRows, exclusions)
   return {
-    rows,
-    ...summarizeProductNameRows(rows),
+    rows: matchedRows,
+    ...summarizeProductNameRows(matchedRows),
   }
 }
 
@@ -597,30 +609,36 @@ export function overlayGiftSourceOnProductNames(
       groupByRow.set(rowNumber, group.key)
     }
   }
-  const rows = transformation.rows.map((row) => {
+  let changed = false
+  const rows = transformation.rows.slice()
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]!
     const rowNumber = row.source.rowNumber
     if (plan.mappedRowNumbers.has(rowNumber)) {
       const replacements = plan.replacementsByRow.get(rowNumber) ?? []
       const first = replacements[0]?.style ?? null
-      return {
+      rows[index] = {
         ...row,
-        status: 'gift_mapped' as const,
+        status: 'gift_mapped',
         style: first,
         transformedProductName: first?.name ?? row.source.productName,
         giftSourceKey: groupByRow.get(rowNumber) ?? null,
         giftReplacements: replacements,
       }
+      changed = true
+      continue
     }
     if (plan.pendingRowNumbers.has(rowNumber)) {
-      return {
+      rows[index] = {
         ...row,
-        status: 'gift_pending' as const,
+        status: 'gift_pending',
         giftSourceKey: groupByRow.get(rowNumber) ?? null,
         giftReplacements: [],
       }
+      changed = true
     }
-    return row
-  })
+  }
+  if (!changed) return transformation
   return {
     rows,
     ...summarizeProductNameRows(rows),

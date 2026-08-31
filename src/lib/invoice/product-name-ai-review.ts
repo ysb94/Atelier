@@ -17,7 +17,7 @@ import type {
   StyleRef,
 } from '@/lib/types'
 
-export const PRODUCT_NAME_AI_QUICK_SLOT_LIMIT = 3
+export const PRODUCT_NAME_AI_QUICK_SLOT_LIMIT = 8
 
 export type ProductNameAiHoldReason =
   | 'no_lookup_key'
@@ -113,13 +113,16 @@ export type ProductNameAiSavePlan = {
   skipped: Array<{ reviewKey: string; message: string }>
 }
 
-export function productNameAiSearchKeys(row: {
-  candidates: Array<{ text: string }>
-  registrationCandidates: Array<{ text: string }>
-}) {
+type ProductNameAiSearchItem = { text: string; rule?: string }
+
+function collectProductNameAiKeys(
+  items: ProductNameAiSearchItem[],
+  predicate?: (item: ProductNameAiSearchItem) => boolean,
+) {
   const seen = new Set<string>()
   const keys: string[] = []
-  for (const item of [...row.candidates, ...row.registrationCandidates]) {
+  for (const item of items) {
+    if (predicate && !predicate(item)) continue
     const text = item.text.trim()
     const key = normalizeInvoiceText(text)
     if (!text || seen.has(key)) continue
@@ -127,6 +130,88 @@ export function productNameAiSearchKeys(row: {
     keys.push(text)
   }
   return keys
+}
+
+/** 품목명이 들어 있는 조회 키만 퍼지 후보 검색에 쓴다. */
+export function isProductNameAiContextSearchRule(rule: string | undefined) {
+  return rule === 'product' || Boolean(rule?.startsWith('product_item'))
+}
+
+export function productNameAiSearchKeys(row: {
+  candidates: ProductNameAiSearchItem[]
+  registrationCandidates: ProductNameAiSearchItem[]
+}) {
+  return collectProductNameAiKeys([
+    ...row.candidates,
+    ...row.registrationCandidates,
+  ])
+}
+
+/**
+ * 퍼지 후보 RPC용 키. 옵션 단독은 exact 원장·등록 문맥에만 남기고
+ * 색상 유사도로 다른 상품을 끌어오지 않게 한다.
+ */
+export function productNameAiCandidateSearchKeys(row: {
+  candidates: ProductNameAiSearchItem[]
+  registrationCandidates: ProductNameAiSearchItem[]
+}) {
+  const items = [...row.candidates, ...row.registrationCandidates]
+  const contextual = collectProductNameAiKeys(items, (item) =>
+    isProductNameAiContextSearchRule(item.rule),
+  )
+  return contextual.length > 0 ? contextual : productNameAiSearchKeys(row)
+}
+
+export function productNameAiCollectKey(combo: {
+  mallName: string
+  productName: string
+  itemName: string
+  candidates: Array<{ text: string }>
+  registrationCandidates?: Array<{ text: string }>
+}) {
+  return [
+    normalizeInvoiceText(combo.mallName),
+    normalizeInvoiceText(combo.productName),
+    normalizeInvoiceText(combo.itemName),
+    productNameAiSearchKeys({
+      candidates: combo.candidates,
+      registrationCandidates: combo.registrationCandidates ?? [],
+    }).join('\u0001'),
+  ].join('\u0000')
+}
+
+export function dedupeProductNameAiCombos(
+  combos: UnresolvedProductNameCombo[],
+) {
+  const requests: UnresolvedProductNameCombo[] = []
+  const mirrors = new Map<string, string[]>()
+  const representatives = new Map<string, string>()
+  for (const combo of combos) {
+    const key = productNameAiCollectKey(combo)
+    const representative = representatives.get(key)
+    if (representative) {
+      mirrors.set(representative, [
+        ...(mirrors.get(representative) ?? []),
+        combo.key,
+      ])
+      continue
+    }
+    representatives.set(key, combo.key)
+    requests.push(combo)
+  }
+  return { requests, mirrors }
+}
+
+export function mirrorProductNameAiRows<T extends { key: string }>(
+  rows: T[],
+  mirrors: Map<string, string[]>,
+  clone: (row: T, key: string) => T,
+): T[] {
+  if (mirrors.size === 0) return rows
+  return rows.flatMap((row) => [
+    row,
+    ...(mirrors.get(row.key) ?? []).map((key) => clone(row, key)),
+  ])
 }
 
 export function productNameAiSignature(row: {
@@ -148,6 +233,21 @@ export function isProductNameAiReviewDirty(row: ProductNameAiReviewRow) {
   )
 }
 
+/** AI 고확신이 아니면 등록 조회 키는 품목명+내품명을 기본으로 둔다. */
+export function pickProductNameAiReviewLookupCandidate(
+  candidates: ProductNameCandidate[],
+  matchedRule: string | null,
+  preferMatchedRule = false,
+) {
+  if (!preferMatchedRule) {
+    return (
+      candidates.find((candidate) => candidate.rule === 'product_item') ??
+      pickProductNameRegistrationCandidate(candidates, matchedRule)
+    )
+  }
+  return pickProductNameRegistrationCandidate(candidates, matchedRule)
+}
+
 export function buildProductNameAiReviewRow(
   combo: UnresolvedProductNameCombo,
 ): ProductNameAiReviewRow {
@@ -166,7 +266,7 @@ export function buildProductNameAiReviewRow(
     productName: matchingProductNameFromTags(combo.productName, combo.tags),
     itemName: matchingItemNameFromTags(combo.itemName, combo.itemTags),
   })
-  const selectedRegistration = pickProductNameRegistrationCandidate(
+  const selectedRegistration = pickProductNameAiReviewLookupCandidate(
     registrationCandidates,
     matchedCandidate?.rule ?? combo.appliedRule,
   )
@@ -252,12 +352,17 @@ export function applyProductNameAiRecommendation(
         (candidate) => candidate.text === recommendation.lookupKey,
       )
     : null
-  const selectedRegistration = pickProductNameRegistrationCandidate(
+  const top = recommendation.products[0]
+  const confidentAi =
+    Boolean(top) &&
+    top.confidence >= minConfidence &&
+    (recommendation.source === 'ai' || recommendation.source === 'cache')
+  const selectedRegistration = pickProductNameAiReviewLookupCandidate(
     row.registrationCandidates,
     matchedCandidate?.rule ?? row.appliedRule,
+    confidentAi,
   )
   const lookupKey = selectedRegistration?.text ?? row.lookupKey
-  const top = recommendation.products[0]
   if (!top) {
     return validateProductNameAiReviewRow({
       ...row,
@@ -319,16 +424,38 @@ export function markProductNameAiCollectFailure(
   })
 }
 
+export function normalizeProductNameAiReviewLookupKey(
+  row: ProductNameAiReviewRow,
+): ProductNameAiReviewRow {
+  if (row.source === 'manual' || row.holdReason === 'exclusion_guarded') {
+    return row
+  }
+  const preferMatched =
+    row.source === 'ai' && row.passesGate
+  const selected = pickProductNameAiReviewLookupCandidate(
+    row.registrationCandidates,
+    row.appliedRule,
+    preferMatched,
+  )
+  if (!selected || selected.text === row.lookupKey) return row
+  return validateProductNameAiReviewRow({
+    ...row,
+    lookupKey: selected.text,
+    appliedRule: selected.rule,
+  })
+}
+
 export function markProductNameAiDuplicates(rows: ProductNameAiReviewRow[]) {
+  const normalized = rows.map(normalizeProductNameAiReviewLookupKey)
   const rowsByKey = new Map<string, ProductNameAiReviewRow[]>()
-  for (const row of rows) {
+  for (const row of normalized) {
     const key = normalizeInvoiceText(row.lookupKey)
     if (!key || !row.style) continue
     const group = rowsByKey.get(key) ?? []
     group.push(row)
     rowsByKey.set(key, group)
   }
-  return rows.map((row) => {
+  return normalized.map((row) => {
     const key = normalizeInvoiceText(row.lookupKey)
     const group = key ? rowsByKey.get(key) ?? [] : []
     const styleIds = new Set(
@@ -376,13 +503,11 @@ export function validateProductNameAiReviewRow(
   } else if (!row.style) {
     validationError = '본품 공식명칭을 완성하세요.'
   } else {
-    const seen = new Set<string>([row.style.styleId])
     for (const extra of row.extras) {
-      if (seen.has(extra.style.styleId)) {
+      if (extra.style.styleId === row.style.styleId) {
         validationError = '본품과 추가 구성품의 M번호는 겹칠 수 없습니다.'
         break
       }
-      seen.add(extra.style.styleId)
       if (!Number.isInteger(extra.quantity) || extra.quantity < 1) {
         validationError = '구성 수량은 1 이상이어야 합니다.'
         break
@@ -556,6 +681,26 @@ export function shouldIgnoreProductNameAiQuickKey(event: {
   return Boolean(event.isComposing) || event.key === 'Process'
 }
 
+export function isProductNameAiAddExtraKey(event: {
+  isComposing?: boolean
+  key: string
+  ctrlKey?: boolean
+  metaKey?: boolean
+  altKey?: boolean
+}) {
+  if (shouldIgnoreProductNameAiQuickKey(event)) return false
+  if (event.ctrlKey || event.metaKey || event.altKey) return false
+  return event.key === '+' || event.key === 'Add'
+}
+
+export function removeProductNameAiQuickSlot(
+  slots: ProductNameAiQuickSlot[],
+  slotIndex: number,
+) {
+  if (slotIndex <= 0 || slots.length <= 1) return slots
+  return slots.filter((_, index) => index !== slotIndex)
+}
+
 export function emptyProductNameAiQuickSlot(): ProductNameAiQuickSlot {
   return {
     text: '',
@@ -565,6 +710,21 @@ export function emptyProductNameAiQuickSlot(): ProductNameAiQuickSlot {
     candidates: [],
     error: null,
   }
+}
+
+export function expandProductNameAiExtrasToUnitSlots(
+  extras: ProductNameAiExtra[],
+): ProductNameAiQuickSlot[] {
+  return extras.flatMap((item) =>
+    Array.from({ length: Math.max(1, Math.floor(item.quantity || 1)) }, () => ({
+      text: formatProductNameAiStyleLabel(item.style),
+      quantity: 1,
+      style: item.style,
+      status: 'matched' as const,
+      candidates: [],
+      error: null,
+    })),
+  )
 }
 
 export function productNameAiQuickSlotsFromRow(
@@ -591,16 +751,10 @@ export function productNameAiQuickSlotsFromRow(
           error: row.message,
         }
       : emptyProductNameAiQuickSlot()
-  const extras = row.extras
-    .slice(0, PRODUCT_NAME_AI_QUICK_SLOT_LIMIT - 1)
-    .map((item) => ({
-      text: formatProductNameAiStyleLabel(item.style),
-      quantity: item.quantity,
-      style: item.style,
-      status: 'matched' as const,
-      candidates: [],
-      error: null,
-    }))
+  const extras = expandProductNameAiExtrasToUnitSlots(row.extras).slice(
+    0,
+    PRODUCT_NAME_AI_QUICK_SLOT_LIMIT - 1,
+  )
   const slots = [main, ...extras]
   return slots.length > 0 ? slots : [emptyProductNameAiQuickSlot()]
 }
@@ -669,21 +823,58 @@ export function decideProductNameAiEnterAction(
   if (productNameAiSlotsNeedAi(slots)) return { status: 'needs_ai' }
   if (!main.style) return { status: 'needs_ai' }
   const extras: ProductNameAiExtra[] = []
-  const seen = new Set<string>([main.style.styleId])
   for (const slot of slots.slice(1)) {
     if (!slot.text.trim()) continue
     if (!slot.style) return { status: 'needs_ai' }
-    if (seen.has(slot.style.styleId)) {
+    if (slot.style.styleId === main.style.styleId) {
       return { status: 'invalid', reason: 'duplicate' }
     }
-    seen.add(slot.style.styleId)
-    extras.push({
-      style: slot.style,
-      role: 'included',
-      quantity: Math.max(1, Math.floor(slot.quantity || 1)),
-    })
+    const existing = extras.find(
+      (item) => item.style.styleId === slot.style!.styleId,
+    )
+    if (existing) existing.quantity += 1
+    else {
+      extras.push({
+        style: slot.style,
+        role: 'included',
+        quantity: 1,
+      })
+    }
   }
   return { status: 'ready', style: main.style, extras }
+}
+
+export type ProductNameAiRowMark =
+  | 'pending_ai'
+  | 'confirmed'
+  | 'unconfirm'
+  | 'keep'
+
+/** Enter 표시는 공식명칭 완성 후에도 유지하고, 칸을 고친 뒤에만 푼다. */
+export function nextProductNameAiRowMark(
+  mode: 'edit' | 'confirm' | 'resolved',
+  decisionStatus: ProductNameAiEnterDecision['status'],
+): ProductNameAiRowMark {
+  if (decisionStatus === 'invalid') return 'unconfirm'
+  if (mode === 'confirm') {
+    return decisionStatus === 'needs_ai' ? 'pending_ai' : 'confirmed'
+  }
+  if (mode === 'resolved') return 'keep'
+  return 'unconfirm'
+}
+
+export function countProductNameAiPendingResolve(
+  pendingAiKeys: ReadonlySet<string>,
+  slotsByKey: ReadonlyMap<string, ProductNameAiQuickSlot[]>,
+) {
+  let count = 0
+  for (const key of pendingAiKeys) {
+    const slots = slotsByKey.get(key)
+    if (!slots || decideProductNameAiEnterAction(slots).status === 'needs_ai') {
+      count += 1
+    }
+  }
+  return count
 }
 
 export function applyProductNameAiRowSlots(
@@ -755,6 +946,40 @@ function slotCountOf(
       ? (slotCountByKey as ReadonlyMap<string, number>).get(rowKey)
       : (slotCountByKey as Readonly<Record<string, number>>)[rowKey]
   return Math.max(1, count ?? 1)
+}
+
+export function nextProductNameAiReviewPage(
+  page: number,
+  pageCount: number,
+  pageKeys: string[],
+  rowKey: string,
+): number | null {
+  if (pageKeys[pageKeys.length - 1] !== rowKey) return null
+  if (page >= pageCount) return null
+  return page + 1
+}
+
+export function clampProductNameAiReviewPage(page: number, pageCount: number) {
+  const count = Math.max(1, pageCount)
+  if (!Number.isFinite(page)) return 1
+  return Math.min(Math.max(1, Math.trunc(page)), count)
+}
+
+export function paginateProductNameAiReviewKeys(
+  keys: string[],
+  page: number,
+  pageSize: number,
+) {
+  const size = Math.max(1, Math.trunc(pageSize) || 20)
+  const pageCount = Math.max(1, Math.ceil(keys.length / size) || 1)
+  const safePage = clampProductNameAiReviewPage(page, pageCount)
+  const start = (safePage - 1) * size
+  return {
+    page: safePage,
+    pageCount,
+    pageSize: size,
+    keys: keys.slice(start, start + size),
+  }
 }
 
 export function nextProductNameAiQuickFocus(
@@ -876,15 +1101,21 @@ export function reconcileProductNameAiReviewRow(
   row: ProductNameAiReviewRow,
 ): ProductNameAiReviewRow {
   const fresh = buildProductNameAiReviewRow(combo)
+  const keepChosenKey =
+    row.source === 'manual' ||
+    (row.source === 'ai' && row.passesGate)
   const selected =
-    fresh.registrationCandidates.find(
-      (candidate) =>
-        normalizeInvoiceText(candidate.text) ===
-        normalizeInvoiceText(row.lookupKey),
-    ) ??
-    pickProductNameRegistrationCandidate(
+    (keepChosenKey
+      ? fresh.registrationCandidates.find(
+          (candidate) =>
+            normalizeInvoiceText(candidate.text) ===
+            normalizeInvoiceText(row.lookupKey),
+        )
+      : null) ??
+    pickProductNameAiReviewLookupCandidate(
       fresh.registrationCandidates,
       row.appliedRule,
+      row.source === 'ai' && row.passesGate,
     )
   const preserveOriginalSignature = isProductNameAiReviewDirty(row)
   return validateProductNameAiReviewRow({

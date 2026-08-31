@@ -6,6 +6,7 @@ import type {
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
+import { fetchAllPages } from '@/lib/supabase/paged-select'
 
 const MAP_COLUMNS =
   'id, brand_id, mall_name, normalized_mall_name, product_name, normalized_product_name, item_name, normalized_item_name, own_product_code, normalized_own_product_code, display_item_name, is_active, note, created_at, updated_at'
@@ -229,26 +230,26 @@ export async function listInvoiceOptionMaps(
   options: { activeOnly?: boolean } = {},
 ): Promise<InvoiceOptionMap[]> {
   const supabase = getSupabase()
-  const all: InvoiceOptionMap[] = []
-  for (let from = 0; ; from += PAGE_SIZE) {
-    let query = supabase
-      .from('invoice_option_maps')
-      .select(MAP_SELECT)
-      .eq('brand_id', brandId)
-      .order('updated_at', { ascending: false })
-      .range(from, from + PAGE_SIZE - 1)
-    if (options.activeOnly) query = query.eq('is_active', true)
-    const { data, error } = await query
-    if (error) {
-      throw new InvoiceOptionMapStoreError(
-        errorMessage(error, '품목·옵션 변환 기준을 불러오지 못했습니다.'),
-      )
-    }
-    const rows = ((data as MapRow[]) ?? []).map(toMap)
-    all.push(...rows)
-    if (rows.length < PAGE_SIZE) break
-  }
-  return all
+  const rows = await fetchAllPages<MapRow>({
+    pageSize: PAGE_SIZE,
+    fetchPage: async (from, to, withCount) => {
+      let query = supabase
+        .from('invoice_option_maps')
+        .select(MAP_SELECT, withCount ? { count: 'exact' } : undefined)
+        .eq('brand_id', brandId)
+        .order('updated_at', { ascending: false })
+        .range(from, to)
+      if (options.activeOnly) query = query.eq('is_active', true)
+      const { data, error, count } = await query
+      if (error) {
+        throw new InvoiceOptionMapStoreError(
+          errorMessage(error, '품목·옵션 변환 기준을 불러오지 못했습니다.'),
+        )
+      }
+      return { rows: (data as MapRow[]) ?? [], count: count ?? null }
+    },
+  })
+  return rows.map(toMap)
 }
 
 export async function saveInvoiceOptionMap(

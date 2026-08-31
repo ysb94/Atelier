@@ -4846,30 +4846,51 @@ const aiSpeedContexts = aiSpeedGroups.flatMap((group) => group.contexts)
 const aiSpeedDedupe = dedupeItemNameAiContexts(aiSpeedContexts)
 assert(
   aiSpeedContexts.length === 4 &&
-    aiSpeedDedupe.requests.length === 3 &&
-    aiSpeedDedupe.mirrors.size === 1,
-  '옵션명과 확정 본품이 같고 조회 키만 다른 조합은 한 번만 AI에 묻는다',
+    aiSpeedDedupe.requests.length === 4 &&
+    aiSpeedDedupe.mirrors.size === 0,
+  '조회 키가 다른 조합은 각각 AI에 묻는다',
 )
-const aiSpeedRepresentative = aiSpeedDedupe.requests.find(
-  (context) => aiSpeedDedupe.mirrors.has(context.contextId),
+const aiSpeedSameContext = {
+  ...aiSpeedContexts[0]!,
+  contextId: `${aiSpeedContexts[0]!.contextId}-dup`,
+}
+const aiSpeedExactDedupe = dedupeItemNameAiContexts([
+  aiSpeedContexts[0]!,
+  aiSpeedSameContext,
+])
+assert(
+  aiSpeedExactDedupe.requests.length === 1 &&
+    (aiSpeedExactDedupe.mirrors
+      .get(aiSpeedContexts[0]!.contextId)
+      ?.includes(aiSpeedSameContext.contextId) ??
+      false),
+  '같은 옵션명·본품·조회 키만 결정을 복사한다',
 )
 const aiSpeedMirrored = mirrorItemNameAiDecisions(
   [
     {
-      contextId: aiSpeedRepresentative!.contextId,
+      contextId: aiSpeedContexts[0]!.contextId,
       action: 'delete' as const,
       components: [],
       reason: '본품 색상',
       confidence: 0.9,
     },
   ],
-  aiSpeedDedupe.mirrors,
+  aiSpeedExactDedupe.mirrors,
 )
 const aiSpeedMirroredIds = new Set(
   aiSpeedMirrored.map((decision) => decision.contextId),
 )
 const aiSpeedMirrorRows = buildItemNameAiReviewRows({
-  groups: itemNameAiGroupsForContexts(aiSpeedGroups, aiSpeedMirroredIds),
+  groups: itemNameAiGroupsForContexts(
+    [
+      {
+        ...aiSpeedGroups[0]!,
+        contexts: [aiSpeedContexts[0]!, aiSpeedSameContext],
+      },
+    ],
+    aiSpeedMirroredIds,
+  ),
   decisions: aiSpeedMirrored,
   styles: reviewStyles,
   itemNameRules: [],
@@ -4879,7 +4900,7 @@ assert(
   aiSpeedMirrored.length === 2 &&
     aiSpeedMirrorRows.length === 2 &&
     aiSpeedMirrorRows.every((row) => row.action === 'delete' && row.passesGate),
-  '대표 조합의 결정은 같은 옵션명·본품의 다른 조회 키에도 그대로 쓴다',
+  '완전히 같은 문맥만 대표 결정을 그대로 쓴다',
 )
 const aiSpeedBatches = planItemNameAiBatches(aiSpeedContexts, 2)
 assert(
@@ -5328,6 +5349,14 @@ function productListRow(
     itemName: '',
     styleName: row.styleName ?? row.styleNo,
     source: 'map',
+    listOrigin:
+      row.role === 'main'
+        ? 'product_main'
+        : row.role === 'gift'
+          ? 'gift'
+          : row.role === 'packing'
+            ? 'packing'
+            : 'item_extra',
     ...row,
   }
 }
@@ -5404,6 +5433,83 @@ const unresolvedList = summarizeInvoiceProductList(
     productListRow({ role: 'main', styleNo: 'M0020', quantity: 1 }),
   ],
   ALL_INVOICE_PRODUCT_LIST_CATEGORIES,
+)
+assert(
+  classifyInvoiceProductListRow(
+    productListRow({
+      role: 'included',
+      styleNo: 'M3000',
+      quantity: 1,
+      listOrigin: 'product_extra',
+    }),
+  ) === 'product',
+  '품목명 1:N·세트 구성은 품목이다',
+)
+assert(
+  classifyInvoiceProductListRow(
+    productListRow({
+      role: 'included',
+      styleNo: 'M3001',
+      quantity: 1,
+      listOrigin: 'item_extra',
+    }),
+  ) === 'component',
+  '내품명 규칙·사전 구성은 내품이다',
+)
+const originList = summarizeInvoiceProductList(
+  [
+    productListRow({ role: 'main', styleNo: 'M4000', quantity: 2 }),
+    productListRow({
+      role: 'included',
+      styleNo: 'M4001',
+      quantity: 3,
+      listOrigin: 'product_extra',
+    }),
+    productListRow({
+      role: 'required',
+      styleNo: 'M4002',
+      quantity: 1,
+      listOrigin: 'item_extra',
+    }),
+  ],
+  ALL_INVOICE_PRODUCT_LIST_CATEGORIES,
+)
+assert(
+  originList.categoryTotals.product.quantity === 5 &&
+    originList.categoryTotals.product.styleCount === 2,
+  '본품과 옵션맵 세트는 품목 수량에 합친다',
+)
+assert(
+  originList.categoryTotals.component.quantity === 1 &&
+    originList.categoryTotals.component.styleCount === 1,
+  '내품명 변환 구성만 내품 수량에 넣는다',
+)
+const mixedDupList = summarizeInvoiceProductList(
+  [
+    productListRow({ role: 'main', styleNo: 'M5000', quantity: 1 }),
+    productListRow({
+      role: 'included',
+      styleNo: 'M5000',
+      quantity: 2,
+      listOrigin: 'product_extra',
+    }),
+    productListRow({
+      role: 'included',
+      styleNo: 'M5000',
+      quantity: 4,
+      listOrigin: 'item_extra',
+    }),
+  ],
+  ALL_INVOICE_PRODUCT_LIST_CATEGORIES,
+)
+assert(
+  mixedDupList.entries.length === 1 && mixedDupList.entries[0]?.quantity === 7,
+  '같은 M번호는 품목·내품 출처를 합쳐 총수량을 만든다',
+)
+assert(
+  mixedDupList.categoryTotals.product.quantity === 3 &&
+    mixedDupList.categoryTotals.component.quantity === 4,
+  '중복 M번호도 품목 수량과 내품 수량을 따로 센다',
 )
 assert(
   classifyInvoiceProductListRow(

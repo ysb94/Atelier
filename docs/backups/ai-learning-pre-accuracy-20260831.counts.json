@@ -1,0 +1,56 @@
+{
+  "createdAt": "2026-08-31T05:47:38.321Z",
+  "note": "캐시는 복구 대상이 아니다. 비로그인 키는 RLS로 행이 비어 있을 수 있다.",
+  "tables": {
+    "invoice_product_name_maps": {
+      "fetched": 12095,
+      "count": 12095,
+      "error": null
+    },
+    "invoice_item_name_rules": {
+      "fetched": 971,
+      "count": 971,
+      "error": null
+    },
+    "invoice_item_name_rule_components": {
+      "fetched": 555,
+      "count": 555,
+      "error": null
+    },
+    "ai_feature_routes": {
+      "fetched": 3,
+      "count": 3,
+      "error": null
+    },
+    "ai_recommendation_feedback": {
+      "fetched": 237,
+      "count": 237,
+      "error": null
+    },
+    "ai_item_name_recommendation_feedback": {
+      "fetched": 7,
+      "count": 7,
+      "error": null
+    },
+    "ai_item_name_recommendation_feedback_components": {
+      "fetched": 0,
+      "count": 0,
+      "error": null
+    },
+    "ai_recommendation_cache": {
+      "fetched": 2381,
+      "count": 2381,
+      "error": null
+    },
+    "ai_usage_logs": {
+      "fetched": 13508,
+      "count": 13508,
+      "error": null
+    },
+    "ai_model_pricing": {
+      "fetched": 30,
+      "count": 30,
+      "error": null
+    }
+  }
+}

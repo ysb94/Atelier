@@ -10,6 +10,7 @@ import {
 } from '@/lib/invoice/product-name-tags'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
+import { fetchAllPages } from '@/lib/supabase/paged-select'
 
 const COLUMNS =
   'id, brand_id, tag_text, normalized_tag, role, is_active, note, created_at, updated_at'
@@ -82,25 +83,26 @@ export async function listInvoiceProductNameTagRoles(
   options: { activeOnly?: boolean } = {},
 ): Promise<InvoiceProductNameTagRoleEntry[]> {
   const supabase = getSupabase()
-  const all: InvoiceProductNameTagRoleEntry[] = []
-  for (let from = 0; ; from += PAGE_SIZE) {
-    let query = supabase
-      .from('invoice_product_name_tag_roles')
-      .select(COLUMNS)
-      .eq('brand_id', brandId)
-      .order('updated_at', { ascending: false })
-      .range(from, from + PAGE_SIZE - 1)
-    if (options.activeOnly) query = query.eq('is_active', true)
-    const { data, error } = await query
-    if (error) {
-      throw new InvoiceProductNameTagRoleStoreError(
-        errorMessage(error, '품목명 태그 역할을 불러오지 못했습니다.'),
-      )
-    }
-    all.push(...((data as TagRoleRow[]) ?? []).map(toEntry))
-    if ((data ?? []).length < PAGE_SIZE) break
-  }
-  return all
+  const rows = await fetchAllPages<TagRoleRow>({
+    pageSize: PAGE_SIZE,
+    fetchPage: async (from, to, withCount) => {
+      let query = supabase
+        .from('invoice_product_name_tag_roles')
+        .select(COLUMNS, withCount ? { count: 'exact' } : undefined)
+        .eq('brand_id', brandId)
+        .order('updated_at', { ascending: false })
+        .range(from, to)
+      if (options.activeOnly) query = query.eq('is_active', true)
+      const { data, error, count } = await query
+      if (error) {
+        throw new InvoiceProductNameTagRoleStoreError(
+          errorMessage(error, '품목명 태그 역할을 불러오지 못했습니다.'),
+        )
+      }
+      return { rows: (data as TagRoleRow[]) ?? [], count: count ?? null }
+    },
+  })
+  return rows.map(toEntry)
 }
 
 export async function saveInvoiceProductNameTagRole(

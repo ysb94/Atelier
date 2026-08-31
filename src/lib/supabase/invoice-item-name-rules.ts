@@ -9,6 +9,7 @@ import type {
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
+import { fetchAllPages } from '@/lib/supabase/paged-select'
 
 const RULE_COLUMNS =
   'id, brand_id, scope, main_style_id, item_name, normalized_item_name, product_lookup_key, normalized_product_lookup_key, action, is_active, note, created_at, updated_at'
@@ -313,28 +314,28 @@ export async function listInvoiceItemNameRules(
   options: { activeOnly?: boolean } = {},
 ): Promise<InvoiceItemNameRule[]> {
   const supabase = getSupabase()
-  const all: InvoiceItemNameRule[] = []
-  for (let from = 0; ; from += PAGE_SIZE) {
-    let query = supabase
-      .from('invoice_item_name_rules')
-      .select(RULE_SELECT)
-      .eq('brand_id', brandId)
-      .order('updated_at', { ascending: false })
-      .range(from, from + PAGE_SIZE - 1)
-    if (options.activeOnly) query = query.eq('is_active', true)
-    const { data, error } = await query
-    if (error) {
-      throw new InvoiceItemNameRuleStoreError(
-        errorMessage(error, '내품명 규칙을 불러오지 못했습니다.'),
-      )
-    }
-    const rows = ((data as RuleRow[]) ?? [])
-      .map(toRule)
-      .filter((item): item is InvoiceItemNameRule => Boolean(item))
-    all.push(...rows)
-    if (((data as RuleRow[]) ?? []).length < PAGE_SIZE) break
-  }
-  return all
+  const rows = await fetchAllPages<RuleRow>({
+    pageSize: PAGE_SIZE,
+    fetchPage: async (from, to, withCount) => {
+      let query = supabase
+        .from('invoice_item_name_rules')
+        .select(RULE_SELECT, withCount ? { count: 'exact' } : undefined)
+        .eq('brand_id', brandId)
+        .order('updated_at', { ascending: false })
+        .range(from, to)
+      if (options.activeOnly) query = query.eq('is_active', true)
+      const { data, error, count } = await query
+      if (error) {
+        throw new InvoiceItemNameRuleStoreError(
+          errorMessage(error, '내품명 규칙을 불러오지 못했습니다.'),
+        )
+      }
+      return { rows: (data as RuleRow[]) ?? [], count: count ?? null }
+    },
+  })
+  return rows
+    .map(toRule)
+    .filter((item): item is InvoiceItemNameRule => Boolean(item))
 }
 
 export async function saveInvoiceItemNameRule(

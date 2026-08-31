@@ -28,6 +28,13 @@ import {
   reconcileInvoiceProductListPrintLayout,
 } from '@/lib/invoice/product-list-route'
 import {
+  ALL_INVOICE_PRODUCT_LIST_ORDER_SHAPES,
+  INVOICE_PRODUCT_LIST_ORDER_SHAPES,
+  buildInvoiceProductListOrderShapeIndex,
+  filterInvoiceOutgoingRowsByOrderShapes,
+  type InvoiceProductListOrderShape,
+} from '@/lib/invoice/product-list-order-shape'
+import {
   ALL_INVOICE_PRODUCT_LIST_CATEGORIES,
   INVOICE_PRODUCT_LIST_CATEGORIES,
   summarizeInvoiceProductList,
@@ -80,16 +87,21 @@ export function InvoiceProductListStepPanel({
   itemTransformation,
   workPlan,
   giftPlan,
+  outgoingRows: outgoingRowsProp,
 }: {
   brandId: string
   productTransformation: InvoiceProductNameTransformation
   itemTransformation: InvoiceItemNameTransformation
   workPlan: WorkInstructionPlan
   giftPlan: GiftAssignmentPlan
+  outgoingRows?: ReturnType<typeof buildOutgoingComponentRowsFromStages>
 }) {
   const [selected, setSelected] = useState<Set<InvoiceProductListCategory>>(
     () => new Set(ALL_INVOICE_PRODUCT_LIST_CATEGORIES),
   )
+  const [selectedShapes, setSelectedShapes] = useState<
+    Set<InvoiceProductListOrderShape>
+  >(() => new Set(ALL_INVOICE_PRODUCT_LIST_ORDER_SHAPES))
   const [zone, setZone] = useState<WarehouseZone>('picking')
   const [locationTab, setLocationTab] = useState<string | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
@@ -108,8 +120,9 @@ export function InvoiceProductListStepPanel({
   const [backupPending, setBackupPending] = useState(false)
   const [backupError, setBackupError] = useState<string | null>(null)
 
-  const outgoingRows = useMemo(
+  const computedOutgoingRows = useMemo(
     () =>
+      outgoingRowsProp ??
       buildOutgoingComponentRowsFromStages({
         productRows: productTransformation.rows,
         itemRows: itemTransformation.rows,
@@ -117,12 +130,45 @@ export function InvoiceProductListStepPanel({
         giftAssignments: giftPlan.shipments.flatMap((item) => item.assignments),
         packingMaterials: workPlan.materialTotals,
       }),
-    [giftPlan, itemTransformation.rows, productTransformation.rows, workPlan],
+    [
+      giftPlan,
+      itemTransformation.rows,
+      outgoingRowsProp,
+      productTransformation.rows,
+      workPlan,
+    ],
+  )
+  const outgoingRows = computedOutgoingRows
+
+  const orderShapeIndex = useMemo(() => {
+    const sourceByRow = new Map(
+      productTransformation.rows.map((row) => [row.source.rowNumber, row.source]),
+    )
+    const sources = [
+      ...new Set(
+        outgoingRows
+          .filter((row) => row.sourceRowNumber > 0)
+          .map((row) => row.sourceRowNumber),
+      ),
+    ]
+      .map((rowNumber) => sourceByRow.get(rowNumber))
+      .filter((row): row is NonNullable<typeof row> => Boolean(row))
+    return buildInvoiceProductListOrderShapeIndex(sources)
+  }, [outgoingRows, productTransformation.rows])
+
+  const shapedOutgoingRows = useMemo(
+    () =>
+      filterInvoiceOutgoingRowsByOrderShapes(
+        outgoingRows,
+        orderShapeIndex,
+        selectedShapes,
+      ),
+    [orderShapeIndex, outgoingRows, selectedShapes],
   )
 
   const summary = useMemo(
-    () => summarizeInvoiceProductList(outgoingRows, selected),
-    [outgoingRows, selected],
+    () => summarizeInvoiceProductList(shapedOutgoingRows, selected),
+    [shapedOutgoingRows, selected],
   )
 
   const setQuery = useQuery({
@@ -268,6 +314,15 @@ export function InvoiceProductListStepPanel({
     })
   }
 
+  function toggleOrderShape(shape: InvoiceProductListOrderShape) {
+    setSelectedShapes((current) => {
+      const next = new Set(current)
+      if (next.has(shape)) next.delete(shape)
+      else next.add(shape)
+      return next
+    })
+  }
+
   async function handleDownloadBackup() {
     if (summary.entries.length === 0 || backupPending) return
     setBackupPending(true)
@@ -310,6 +365,36 @@ export function InvoiceProductListStepPanel({
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        {INVOICE_PRODUCT_LIST_ORDER_SHAPES.map((item) => {
+          const total = orderShapeIndex.totals[item.value]
+          const checked = selectedShapes.has(item.value)
+          return (
+            <label
+              key={item.value}
+              className={cn(
+                'inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs',
+                checked
+                  ? 'border-primary/40 bg-primary/10 text-foreground'
+                  : 'border-border text-muted-foreground',
+              )}
+            >
+              <input
+                type="checkbox"
+                className="size-3.5 accent-primary"
+                checked={checked}
+                onChange={() => toggleOrderShape(item.value)}
+              />
+              {item.label}
+              <span className="tabular-nums text-muted-foreground">
+                {formatNumber(total.orderCount)}건 ·{' '}
+                {formatNumber(total.rowCount)}행
+              </span>
+            </label>
+          )
+        })}
+      </div>
+
       <div className="flex flex-wrap items-center gap-2">
         {INVOICE_PRODUCT_LIST_CATEGORIES.map((item) => {
           const total = summary.categoryTotals[item.value]
@@ -398,8 +483,9 @@ export function InvoiceProductListStepPanel({
       </div>
 
       <p className="text-[11px] text-muted-foreground">
-        선택한 종류만 현재 창고 자리의 사용 순서대로 나눕니다. 화면 확인만 하며
-        재고를 차감하거나 예약하지 않습니다.
+        합포장·단일 행·수량 1 아님은 받는분·주문일시 기준으로 먼저 걸러지고, 그
+        안에서 선택한 종류만 현재 창고 자리의 사용 순서대로 나눕니다. 화면
+        확인만 하며 재고를 차감하거나 예약하지 않습니다.
       </p>
 
       {summary.unresolved.rowCount > 0 ? (

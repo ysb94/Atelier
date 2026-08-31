@@ -116,7 +116,7 @@ export const DEFAULT_DECISION_CONFIG: HybridDecisionConfig = {
   high: 0.72,
   margin: 0.1,
   low: 0.4,
-  aiTopN: 6,
+  aiTopN: 16,
 }
 
 export type HybridDecision = {
@@ -319,7 +319,7 @@ export function parseDecisionConfig(value: unknown): HybridDecisionConfig {
     high: clampUnit(row?.high, DEFAULT_DECISION_CONFIG.high),
     margin: clampUnit(row?.margin, DEFAULT_DECISION_CONFIG.margin),
     low: clampUnit(row?.low, DEFAULT_DECISION_CONFIG.low),
-    aiTopN: Math.max(2, Math.min(8, Math.round(Number(row?.aiTopN) || DEFAULT_DECISION_CONFIG.aiTopN))),
+    aiTopN: Math.max(2, Math.min(16, Math.round(Number(row?.aiTopN) || DEFAULT_DECISION_CONFIG.aiTopN))),
   }
 }
 
@@ -442,7 +442,7 @@ export function tuneDecisionConfig(
   for (const high of [0.6, 0.66, 0.72, 0.78, 0.85]) {
     for (const margin of [0.06, 0.1, 0.14]) {
       for (const low of [0.3, 0.4, 0.5]) {
-        const config = { high, margin, low, aiTopN: 6 }
+        const config = { high, margin, low, aiTopN: 16 }
         let local = 0
         let localCorrect = 0
         let aiCalls = 0
@@ -554,6 +554,23 @@ export function parseAccessorySuggestJson(
 
 const CONTEXT_ACTIONS = ['components', 'delete', 'hold'] as const
 
+export function itemNameCandidateRefMap(
+  candidates: ProductCandidate[],
+  usedStyleIds?: Iterable<string>,
+) {
+  const used = usedStyleIds ? new Set(usedStyleIds) : null
+  const compact = used
+    ? candidates.filter((candidate) => used.has(candidate.styleId))
+    : candidates
+  const styleIdByRef = new Map<string, string>()
+  compact.forEach((candidate, index) => {
+    const ref = `c${index + 1}`
+    styleIdByRef.set(ref, candidate.styleId)
+    styleIdByRef.set(candidate.styleId, candidate.styleId)
+  })
+  return { compact, styleIdByRef }
+}
+
 export function filterAccessoryContextDecisions(
   raw: unknown[],
   candidates: ProductCandidate[],
@@ -565,6 +582,10 @@ export function filterAccessoryContextDecisions(
     contexts.map((item) => [item.contextId, new Set(item.candidateStyleIds ?? [])]),
   )
   const globalById = new Map(candidates.map((item) => [item.styleId, item]))
+  const { styleIdByRef } = itemNameCandidateRefMap(
+    candidates,
+    contexts.flatMap((item) => item.candidateStyleIds ?? []),
+  )
   const next: AccessoryContextDecision[] = []
   const seen = new Set<string>()
   for (const item of raw) {
@@ -596,7 +617,10 @@ export function filterAccessoryContextDecisions(
     const components = (Array.isArray(row?.components) ? row.components : []).flatMap(
       (entry) => {
         const component = asRecord(entry)
-        const styleId = asString(component?.styleId || component?.style_id)
+        const rawId = asString(
+          component?.styleId || component?.style_id || component?.ref,
+        )
+        const styleId = styleIdByRef.get(rawId) ?? rawId
         if (!styleId || used.has(styleId) || !allowed.has(styleId)) return []
         const match = globalById.get(styleId)
         if (!match) return []
@@ -742,6 +766,43 @@ export function buildItemNameSuggestPrompt(input: {
   }>
   candidates: ProductCandidate[]
 }) {
+  const usedIds = input.contexts.flatMap(
+    (context) => context.candidateStyleIds ?? [],
+  )
+  const { compact, styleIdByRef } = itemNameCandidateRefMap(
+    input.candidates,
+    usedIds,
+  )
+  const refByStyleId = new Map<string, string>()
+  for (const [ref, styleId] of styleIdByRef) {
+    if (ref.startsWith('c')) refByStyleId.set(styleId, ref)
+  }
+  const candidates = compact.map((candidate) => ({
+    ref: refByStyleId.get(candidate.styleId) ?? candidate.styleId,
+    styleNo: candidate.styleNo,
+    name: candidate.name,
+    lookupKey: candidate.lookupKey,
+    source: candidate.source,
+    score: candidate.score,
+  }))
+  const contexts = input.contexts.map((context) => ({
+    contextId: context.contextId,
+    itemName: context.itemName,
+    productLookupKey: context.productLookupKey,
+    mainProduct: context.mainProduct,
+    candidateRefs: (context.candidateStyleIds ?? [])
+      .map((styleId) => refByStyleId.get(styleId))
+      .filter((ref): ref is string => Boolean(ref)),
+    priorExamples: (context.priorExamples ?? []).map((example) => ({
+      itemName: example.itemName,
+      productLookupKey: example.productLookupKey,
+      action: example.action,
+      components: example.components.map((item) => ({
+        ref: refByStyleId.get(item.styleId) ?? item.styleId,
+        quantity: item.quantity,
+      })),
+    })),
+  }))
   const system = [
     '당신은 송장 내품명을 확정 본품과 조회 키 문맥에 맞게 변환하는 어시스턴트입니다.',
     '반드시 JSON만 반환하고 제공된 모든 contextId에 정확히 한 개의 결정을 반환하세요.',
@@ -749,30 +810,17 @@ export function buildItemNameSuggestPrompt(input: {
     'components는 본품 외에 실제로 함께 출고할 상품이 있을 때만 사용하세요.',
     'delete는 색상, 사이즈, 배송 표시, 선택값처럼 본품의 속성만 있고 추가 출고 상품이 없을 때 사용하세요.',
     '확신할 수 없거나 후보가 없으면 추측하지 말고 hold를 사용하세요.',
-    'components.styleId는 해당 문맥의 candidateStyleIds 안에서만 고르고 확정 본품 자체는 구성품에 넣지 마세요.',
+    'components.styleId에는 해당 문맥의 candidateRefs 값만 넣고 확정 본품 자체는 구성품에 넣지 마세요.',
     '같은 구성품은 한 번만 쓰고 quantity로 수량을 나타내세요.',
-    'priorExamples는 사람이 확정한 과거 사례입니다. 참고만 하고 후보 밖 M번호는 쓰지 마세요.',
+    'priorExamples는 사람이 확정한 과거 사례입니다. 참고만 하고 후보 밖 참조는 쓰지 마세요.',
     'confidence는 0부터 1 사이입니다. 주문자 개인정보는 다루지 않습니다.',
-    '형식: {"reason":"","contexts":[{"contextId":"","action":"components","components":[{"styleId":"","quantity":1}],"confidence":0.0,"reason":""}]}',
+    '형식: {"reason":"","contexts":[{"contextId":"","action":"components","components":[{"styleId":"c1","quantity":1}],"confidence":0.0,"reason":""}]}',
   ].join(' ')
-  const usedIds = new Set(
-    input.contexts.flatMap((context) => context.candidateStyleIds ?? []),
-  )
-  const candidates = input.candidates
-    .filter((candidate) => usedIds.has(candidate.styleId))
-    .map((candidate) => ({
-      styleId: candidate.styleId,
-      styleNo: candidate.styleNo,
-      name: candidate.name,
-      lookupKey: candidate.lookupKey,
-      source: candidate.source,
-      score: candidate.score,
-    }))
   const user = JSON.stringify({
-    contexts: input.contexts,
+    contexts,
     candidates,
   })
-  return { system, user }
+  return { system, user, refByStyleId }
 }
 
 export function clampTextList(values: string[], maxItems: number, maxChars: number) {

@@ -4,6 +4,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
   isProductNameAiSaveFailed,
+  nextProductNameAiReviewPage,
+  paginateProductNameAiReviewKeys,
+  PRODUCT_NAME_AI_QUICK_SLOT_LIMIT,
   productNameAiMatchesWorkflowTab,
   productNameAiRowReadyToCommit,
   type ProductNameAiQuickSlot,
@@ -24,6 +27,8 @@ import { InvoiceProductNameSimilarStyles } from './InvoiceProductNameSimilarStyl
 import { useInvoiceProductNameBulkAiApply } from './useInvoiceProductNameBulkAiApply'
 import { useInvoiceProductNameQuickEntry } from './useInvoiceProductNameQuickEntry'
 import type { ProductMapHistoryEntry } from './useInvoiceProductNameSaveQueue'
+
+const PAGE_SIZES = [20, 50, 100] as const
 
 const FILTERS: Array<{ value: ProductNameAiWorkflowTab; label: string }> = [
   { value: 'review', label: '검토 필요' },
@@ -68,8 +73,11 @@ export function InvoiceProductNameAiApplyBar({
 }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<ProductNameAiWorkflowTab>('review')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(20)
   const [commitOpen, setCommitOpen] = useState(false)
   const previousPhase = useRef(bulk.phase)
+  const pendingPageFocusRef = useRef(false)
 
   useEffect(() => {
     if (previousPhase.current !== 'review' && bulk.phase === 'review') {
@@ -95,6 +103,7 @@ export function InvoiceProductNameAiApplyBar({
         const saveFailed = isProductNameAiSaveFailed(
           latestHistory(history, row.key)?.status,
         )
+        if (bulk.committedKeys.has(row.key) && !saveFailed) return false
         if (
           !productNameAiMatchesWorkflowTab(
             {
@@ -126,7 +135,39 @@ export function InvoiceProductNameAiApplyBar({
           left.productName.localeCompare(right.productName, 'ko-KR') ||
           left.itemName.localeCompare(right.itemName, 'ko-KR'),
       )
-  }, [bulk.confirmedKeys, bulk.reviewRows, filter, history, query])
+  }, [bulk.committedKeys, bulk.confirmedKeys, bulk.reviewRows, filter, history, query])
+
+  useEffect(() => {
+    setPage(1)
+  }, [filter, query, pageSize])
+
+  const paged = useMemo(
+    () =>
+      paginateProductNameAiReviewKeys(
+        visibleRows.map((row) => row.key),
+        page,
+        pageSize,
+      ),
+    [page, pageSize, visibleRows],
+  )
+
+  useEffect(() => {
+    if (paged.page !== page) setPage(paged.page)
+  }, [page, paged.page])
+
+  const pagedRows = useMemo(() => {
+    const byKey = new Map(visibleRows.map((row) => [row.key, row]))
+    return paged.keys
+      .map((key) => byKey.get(key))
+      .filter((row): row is ProductNameAiReviewRow => Boolean(row))
+  }, [paged.keys, visibleRows])
+
+  useEffect(() => {
+    if (!pendingPageFocusRef.current) return
+    pendingPageFocusRef.current = false
+    const first = pagedRows[0]
+    if (first) quick.focusSlot(first.key, 0)
+  }, [page, pagedRows, quick])
 
   const giftGroupByKey = useMemo(() => {
     const next = new Map<string, GiftSourceGroup>()
@@ -142,7 +183,7 @@ export function InvoiceProductNameAiApplyBar({
           <p className="mt-1 text-xs text-muted-foreground">
             전체 AI 추천으로 초안을 채운 뒤 맞으면 Enter로 준비 완료로 넘깁니다.
             이름을 고친 행은 Enter로 표시한 뒤 공식명칭 완성을 쓰고, 결과를
-            다시 확인한 다음 일괄 등록합니다.
+            다시 확인한 다음 준비 완료분만 먼저 등록할 수 있습니다.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -273,7 +314,7 @@ export function InvoiceProductNameAiApplyBar({
                 disabled={!bulk.canCommit}
                 onClick={() => setCommitOpen(true)}
               >
-                검토 완료 · 일괄 등록 {formatNumber(bulk.readyCount)}
+                준비 완료 등록 {formatNumber(bulk.readyCount)}
               </Button>
             ) : null}
             {filter === 'failed' ? (
@@ -317,7 +358,7 @@ export function InvoiceProductNameAiApplyBar({
                 </tr>
               </thead>
               <tbody>
-                {visibleRows.length === 0 ? (
+                {pagedRows.length === 0 ? (
                   <tr>
                     <td
                       colSpan={4}
@@ -331,7 +372,7 @@ export function InvoiceProductNameAiApplyBar({
                     </td>
                   </tr>
                 ) : null}
-                {visibleRows.map((row, index) => (
+                {pagedRows.map((row, index) => (
                   <ProductNameAiReviewTableRow
                     key={row.key}
                     brandId={bulk.brandId}
@@ -354,15 +395,41 @@ export function InvoiceProductNameAiApplyBar({
                     onClear={(slotIndex) =>
                       quick.clearSlot(row.key, slotIndex)
                     }
+                    onRemoveExtra={(slotIndex) =>
+                      quick.removeSlot(row.key, slotIndex)
+                    }
                     onRegister={(slotIndex, el) =>
                       quick.registerInput(row.key, slotIndex, el)
                     }
-                    onEnter={(slotIndex) =>
-                      quick.confirmAndMove(visibleRows, row.key, slotIndex)
-                    }
+                    onEnter={(slotIndex) => {
+                      const last = pagedRows[pagedRows.length - 1]
+                      const lastSlot = quick.getSlots(row).length - 1
+                      const nextPage = nextProductNameAiReviewPage(
+                        paged.page,
+                        paged.pageCount,
+                        paged.keys,
+                        row.key,
+                      )
+                      const isLastInput =
+                        last?.key === row.key && slotIndex === lastSlot
+                      quick.confirmAndMove(pagedRows, row.key, slotIndex)
+                      if (isLastInput && nextPage != null) {
+                        pendingPageFocusRef.current = true
+                        setPage(nextPage)
+                      }
+                    }}
                     onTab={(slotIndex) =>
-                      quick.moveRight(visibleRows, row.key, slotIndex)
+                      quick.moveRight(pagedRows, row.key, slotIndex)
                     }
+                    onAddExtra={() => {
+                      const currentCount = quick.getSlots(row).length
+                      if (currentCount >= PRODUCT_NAME_AI_QUICK_SLOT_LIMIT) {
+                        return
+                      }
+                      const nextCount = currentCount + 1
+                      quick.ensureSlotCount(row.key, nextCount, row)
+                      quick.focusSlot(row.key, nextCount - 1)
+                    }}
                     pendingAi={bulk.pendingAiKeys.has(row.key)}
                     confirmed={
                       bulk.confirmedKeys.has(row.key) &&
@@ -383,14 +450,73 @@ export function InvoiceProductNameAiApplyBar({
               </tbody>
             </table>
           </div>
+          {visibleRows.length > 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <p className="text-muted-foreground">
+                {formatNumber(visibleRows.length)}개 중{' '}
+                {formatNumber((paged.page - 1) * paged.pageSize + 1)}–
+                {formatNumber(
+                  Math.min(visibleRows.length, paged.page * paged.pageSize),
+                )}
+                행
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1 text-muted-foreground">
+                  페이지 크기
+                  <select
+                    className="h-7 rounded-md border border-border bg-card px-1 text-xs"
+                    value={pageSize}
+                    onChange={(event) =>
+                      setPageSize(
+                        Number(event.target.value) as (typeof PAGE_SIZES)[number],
+                      )
+                    }
+                  >
+                    {PAGE_SIZES.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2"
+                  disabled={paged.page <= 1}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  이전
+                </Button>
+                <span className="tabular-nums text-muted-foreground">
+                  {formatNumber(paged.page)} / {formatNumber(paged.pageCount)}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2"
+                  disabled={paged.page >= paged.pageCount}
+                  onClick={() =>
+                    setPage((current) =>
+                      Math.min(paged.pageCount, current + 1),
+                    )
+                  }
+                >
+                  다음
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </>
       ) : null}
 
       {commitOpen ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2">
           <p className="text-xs">
-            본품 공식명칭이 완성된 {formatNumber(bulk.readyCount)}개를
-            원장에 등록합니다. 미완성·후보 선택 남은 행은 건너뜁니다.
+            준비 완료 {formatNumber(bulk.readyCount)}개를 원장에 등록합니다.
+            검토 필요 {formatNumber(bulk.reviewCount)}개는 그대로 남깁니다.
           </p>
           <div className="flex gap-2">
             <Button
@@ -431,9 +557,11 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
   onTextChange,
   onPickStyle,
   onClear,
+  onRemoveExtra,
   onRegister,
   onEnter,
   onTab,
+  onAddExtra,
   pendingAi,
   confirmed,
   onUnconfirm,
@@ -453,9 +581,11 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
   onTextChange: (slotIndex: number, text: string) => void
   onPickStyle: (slotIndex: number, style: StyleRef) => void
   onClear: (slotIndex: number) => void
+  onRemoveExtra: (slotIndex: number) => void
   onRegister: (slotIndex: number, el: HTMLInputElement | null) => void
   onEnter: (slotIndex: number) => void
   onTab: (slotIndex: number) => void
+  onAddExtra: () => void
   pendingAi: boolean
   confirmed: boolean
   onUnconfirm: () => void
@@ -531,9 +661,11 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
             onTextChange={onTextChange}
             onPickStyle={onPickStyle}
             onClear={onClear}
+            onRemoveExtra={onRemoveExtra}
             onRegister={onRegister}
             onEnter={onEnter}
             onTab={onTab}
+            onAddExtra={onAddExtra}
           />
           {!row.style ? (
             <InvoiceProductNameSimilarStyles
@@ -561,7 +693,11 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
               <p className="mt-1 text-[10px] text-muted-foreground">
                 구성{' '}
                 {row.extras
-                  .map((item) => `${item.style.styleNo} · ${item.style.name}`)
+                  .flatMap((item) =>
+                    Array.from({ length: Math.max(1, item.quantity) }, () =>
+                      `${item.style.styleNo} · ${item.style.name}`,
+                    ),
+                  )
                   .join(', ')}
               </p>
             ) : null}
@@ -576,6 +712,20 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
         <td className="px-2 pb-1.5 align-top" />
         <td className="px-2 pb-1.5 align-top">
           <div className="flex flex-wrap justify-end gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-[11px]"
+              disabled={
+                saving ||
+                resolving ||
+                slots.length >= PRODUCT_NAME_AI_QUICK_SLOT_LIMIT
+              }
+              onClick={onAddExtra}
+            >
+              구성품 추가
+            </Button>
             {onOpenGiftSetup ? (
               <Button
                 type="button"

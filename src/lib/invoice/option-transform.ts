@@ -27,6 +27,10 @@ export type InvoiceOptionTransformRow = {
   mapId: string | null
   main: StyleRef | null
   extras: InvoiceOptionMapComponent[]
+  /** 품목명 단계 옵션맵·1:N 세트. 없으면 extras를 품목 구성으로 본다. */
+  productExtras?: InvoiceOptionMapComponent[]
+  /** 내품명 규칙·부속품 사전 구성. */
+  itemExtras?: InvoiceOptionMapComponent[]
   transformedName: string
   transformedItemName: string
   codeHintName: string | null
@@ -148,6 +152,8 @@ function mappedRow(
     mapId: map.id,
     main,
     extras,
+    productExtras: extras,
+    itemExtras: [],
     transformedName: main?.name ?? source.productName,
     transformedItemName: map.displayItemName.trim() || source.itemName,
     codeHintName: null,
@@ -341,6 +347,7 @@ export function parseOrderQuantity(value: string): number {
 export type InvoiceOutputBundleLine = {
   productName: string
   quantity: string
+  style: StyleRef | null
 }
 
 /**
@@ -359,6 +366,7 @@ export function resolveInvoiceOutputBundle(options: {
       {
         productName: options.baseName,
         quantity: options.sourceQuantity,
+        style: options.main,
       },
     ]
   }
@@ -367,13 +375,22 @@ export function resolveInvoiceOutputBundle(options: {
     {
       productName: options.main?.name || options.baseName,
       quantity: String(orderQty),
+      style: options.main,
     },
     ...options.extras.map((extra) => ({
       productName: extra.style.name,
       quantity: String(orderQty * extra.quantity),
+      style: extra.style,
     })),
   ]
 }
+
+export type InvoiceOutgoingComponentListOrigin =
+  | 'product_main'
+  | 'product_extra'
+  | 'item_extra'
+  | 'gift'
+  | 'packing'
 
 export type InvoiceOutgoingComponentRow = {
   sourceRowNumber: number
@@ -386,6 +403,7 @@ export type InvoiceOutgoingComponentRow = {
   styleName: string
   quantity: number
   source: 'map' | 'code' | 'gift' | 'unresolved' | 'packing'
+  listOrigin: InvoiceOutgoingComponentListOrigin
 }
 
 export type InvoiceGiftOutgoingComponent = {
@@ -423,6 +441,7 @@ export function buildOutgoingComponentRows(options: {
         styleName: row.main.name,
         quantity: orderQty,
         source: row.status === 'mapped' ? 'map' : 'code',
+        listOrigin: 'product_main',
       })
     } else if (row.status === 'mapped' || row.status === 'code_fallback') {
       output.push({
@@ -436,6 +455,7 @@ export function buildOutgoingComponentRows(options: {
         styleName: row.transformedName,
         quantity: orderQty,
         source: row.status === 'mapped' ? 'map' : 'code',
+        listOrigin: 'product_main',
       })
     } else {
       output.push({
@@ -449,10 +469,17 @@ export function buildOutgoingComponentRows(options: {
         styleName: row.transformedName,
         quantity: orderQty,
         source: 'unresolved',
+        listOrigin: 'product_main',
       })
     }
     if (!skipMain) {
-      for (const extra of row.extras) {
+      const itemExtras = row.itemExtras ?? []
+      const productExtras =
+        row.productExtras ?? (row.itemExtras ? [] : row.extras)
+      const itemStyleIds = new Set(
+        itemExtras.map((item) => item.style.styleId),
+      )
+      for (const extra of itemExtras) {
         output.push({
           sourceRowNumber: row.source.rowNumber,
           customerOrderNo: row.source.customerOrderNo,
@@ -464,6 +491,23 @@ export function buildOutgoingComponentRows(options: {
           styleName: extra.style.name,
           quantity: orderQty * extra.quantity,
           source: 'map',
+          listOrigin: 'item_extra',
+        })
+      }
+      for (const extra of productExtras) {
+        if (itemStyleIds.has(extra.style.styleId)) continue
+        output.push({
+          sourceRowNumber: row.source.rowNumber,
+          customerOrderNo: row.source.customerOrderNo,
+          mallName: row.source.mallName,
+          productName: row.source.productName,
+          itemName: row.source.itemName,
+          role: extra.role,
+          styleNo: extra.style.styleNo,
+          styleName: extra.style.name,
+          quantity: orderQty * extra.quantity,
+          source: 'map',
+          listOrigin: 'product_extra',
         })
       }
     }
@@ -480,6 +524,7 @@ export function buildOutgoingComponentRows(options: {
           styleName: gift.styleName,
           quantity: gift.quantity,
           source: 'gift',
+          listOrigin: 'gift',
         })
       }
     } else {
@@ -496,6 +541,7 @@ export function buildOutgoingComponentRows(options: {
           styleName: gift.productName,
           quantity: parseOrderQuantity(gift.quantity),
           source: 'gift',
+          listOrigin: 'gift',
         })
       }
     }
@@ -512,6 +558,7 @@ export function buildOutgoingComponentRows(options: {
       styleName: material.name,
       quantity: material.count,
       source: 'packing',
+      listOrigin: 'packing',
     })
   }
   return output

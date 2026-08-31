@@ -10,6 +10,7 @@ import {
   planGiftSourceTransform,
   type GiftSourcePlan,
   type GiftSourceSessionRule,
+  type GiftSourceSlot,
 } from '@/lib/invoice/gift-source-transform'
 import type { InvoicePrefixPlan } from '@/lib/invoice/prefix-transform'
 import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
@@ -43,6 +44,7 @@ export function planUnifiedGifts(options: {
   sessionAllocations?: ReadonlyMap<string, StyleRef>
   ignoredKeys?: ReadonlySet<string>
   appliedKeys?: ReadonlySet<string>
+  sourceSlots?: GiftSourceSlot[]
 }): UnifiedGiftPlan {
   const campaign = collectCampaignGiftClaims(
     options.campaignRows,
@@ -63,6 +65,7 @@ export function planUnifiedGifts(options: {
     sessionAllocations: options.sessionAllocations,
     ignoredKeys: options.ignoredKeys,
     appliedKeys: options.appliedKeys,
+    slots: options.sourceSlots,
   })
   const priorCounts = new Map(campaign.priorCounts)
   for (const [styleId, count] of source.priorCounts) {
@@ -98,6 +101,7 @@ export function planUnifiedGifts(options: {
           ignoredKeys: options.ignoredKeys,
           appliedKeys: options.appliedKeys,
           resolvedByAllocationKey,
+          slots: options.sourceSlots,
         })
   return {
     giftPlan: {

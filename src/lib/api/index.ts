@@ -30,6 +30,9 @@ import type {
   AiItemNameRecommendation,
   InvoiceProductNameMap,
   InvoiceProductNameExclusion,
+  InvoicePreorderHold,
+  InvoicePreorderHoldStatus,
+  InvoiceDiscontinuedStyle,
   InvoiceProductNameTagRoleEntry,
   InvoiceGiftAllocation,
   InvoiceGiftSourceAllocation,
@@ -76,6 +79,8 @@ import * as invoicePackingSizeMapStore from '@/lib/supabase/invoice-packing-size
 import * as invoicePickingRoutePresetStore from '@/lib/supabase/invoice-picking-route-presets'
 import * as invoiceProductNameMapStore from '@/lib/supabase/invoice-product-name-maps'
 import * as invoiceProductNameExclusionStore from '@/lib/supabase/invoice-product-name-exclusions'
+import * as invoicePreorderHoldStore from '@/lib/supabase/invoice-preorder-holds'
+import * as invoiceDiscontinuedStyleStore from '@/lib/supabase/invoice-discontinued-styles'
 import * as invoiceProductNameTagRoleStore from '@/lib/supabase/invoice-product-name-tag-roles'
 import * as invoicePrefixRequestStore from '@/lib/supabase/invoice-prefix-requests'
 import * as invoiceWorkHistoryStore from '@/lib/supabase/invoice-work-history'
@@ -139,6 +144,15 @@ export type {
 } from '@/lib/supabase/invoice-product-name-maps'
 export { InvoiceProductNameExclusionStoreError } from '@/lib/supabase/invoice-product-name-exclusions'
 export type { InvoiceProductNameExclusionInput } from '@/lib/supabase/invoice-product-name-exclusions'
+export { InvoicePreorderHoldStoreError } from '@/lib/supabase/invoice-preorder-holds'
+export type {
+  InvoicePreorderHoldInput,
+  InvoicePreorderHoldUpdateInput,
+  InvoicePreorderHoldExtendInput,
+  InvoicePreorderHoldEndInput,
+} from '@/lib/supabase/invoice-preorder-holds'
+export { InvoiceDiscontinuedStyleStoreError } from '@/lib/supabase/invoice-discontinued-styles'
+export type { InvoiceDiscontinuedStyleInput } from '@/lib/supabase/invoice-discontinued-styles'
 export { InvoiceProductNameTagRoleStoreError } from '@/lib/supabase/invoice-product-name-tag-roles'
 export type { InvoiceProductNameTagRoleInput } from '@/lib/supabase/invoice-product-name-tag-roles'
 export { InvoicePrefixRequestStoreError } from '@/lib/supabase/invoice-prefix-requests'
@@ -316,7 +330,6 @@ export async function getInvoiceNameRules(
   brandId: string,
   activeOnly = false,
 ): Promise<InvoiceNameRule[]> {
-  await delay()
   return invoiceNameRuleStore.listInvoiceNameRules(brandId, { activeOnly })
 }
 
@@ -340,7 +353,6 @@ export async function getInvoiceItemNameRules(
   brandId: string,
   activeOnly = false,
 ): Promise<InvoiceItemNameRule[]> {
-  await delay()
   return invoiceItemNameRuleStore.listInvoiceItemNameRules(brandId, {
     activeOnly,
   })
@@ -382,7 +394,6 @@ export async function getInvoiceAccessoryRules(
   brandId: string,
   activeOnly = false,
 ): Promise<InvoiceAccessoryRule[]> {
-  await delay()
   return invoiceAccessoryRuleStore.listInvoiceAccessoryRules(brandId, {
     activeOnly,
   })
@@ -606,7 +617,6 @@ export async function getInvoiceOptionMaps(
   brandId: string,
   activeOnly = false,
 ): Promise<InvoiceOptionMap[]> {
-  await delay()
   return invoiceOptionMapStore.listInvoiceOptionMaps(brandId, { activeOnly })
 }
 
@@ -647,7 +657,6 @@ export async function getInvoiceProductNameMaps(
   brandId: string,
   activeOnly = false,
 ): Promise<InvoiceProductNameMap[]> {
-  await delay()
   return invoiceProductNameMapStore.listInvoiceProductNameMaps(brandId, {
     activeOnly,
   })
@@ -658,7 +667,6 @@ export async function searchInvoiceProductNameMapsByLookupKey(
   search: string,
   limit = 20,
 ) {
-  await delay()
   return invoiceProductNameMapStore.searchInvoiceProductNameMapsByLookupKey(
     brandId,
     search,
@@ -742,7 +750,6 @@ export async function getInvoiceProductNameExclusions(
   brandId: string,
   activeOnly = false,
 ): Promise<InvoiceProductNameExclusion[]> {
-  await delay()
   return invoiceProductNameExclusionStore.listInvoiceProductNameExclusions(
     brandId,
     { activeOnly },
@@ -780,11 +787,96 @@ export async function deleteInvoiceProductNameExclusion(
   return invoiceProductNameExclusionStore.deleteInvoiceProductNameExclusion(id)
 }
 
+export async function getInvoicePreorderHolds(
+  brandId: string,
+  status: InvoicePreorderHoldStatus | 'all' = 'all',
+): Promise<InvoicePreorderHold[]> {
+  return invoicePreorderHoldStore.listInvoicePreorderHolds(brandId, { status })
+}
+
+export async function createInvoicePreorderHold(
+  brandId: string,
+  input: invoicePreorderHoldStore.InvoicePreorderHoldInput,
+): Promise<InvoicePreorderHold> {
+  await delay()
+  return invoicePreorderHoldStore.createInvoicePreorderHold(brandId, input)
+}
+
+export async function updateInvoicePreorderHold(
+  brandId: string,
+  holdId: string,
+  input: invoicePreorderHoldStore.InvoicePreorderHoldUpdateInput,
+): Promise<InvoicePreorderHold> {
+  await delay()
+  return invoicePreorderHoldStore.updateInvoicePreorderHold(
+    brandId,
+    holdId,
+    input,
+  )
+}
+
+export async function extendInvoicePreorderHold(
+  brandId: string,
+  holdId: string,
+  input: invoicePreorderHoldStore.InvoicePreorderHoldExtendInput,
+): Promise<InvoicePreorderHold> {
+  await delay()
+  return invoicePreorderHoldStore.extendInvoicePreorderHold(
+    brandId,
+    holdId,
+    input,
+  )
+}
+
+export async function endInvoicePreorderHold(
+  brandId: string,
+  holdId: string,
+  input: invoicePreorderHoldStore.InvoicePreorderHoldEndInput,
+): Promise<InvoicePreorderHold> {
+  await delay()
+  return invoicePreorderHoldStore.endInvoicePreorderHold(brandId, holdId, input)
+}
+
+export async function deleteInvoicePreorderHold(
+  brandId: string,
+  holdId: string,
+): Promise<void> {
+  await delay()
+  return invoicePreorderHoldStore.deleteInvoicePreorderHold(brandId, holdId)
+}
+
+export async function getInvoiceDiscontinuedStyles(
+  brandId: string,
+): Promise<InvoiceDiscontinuedStyle[]> {
+  return invoiceDiscontinuedStyleStore.listInvoiceDiscontinuedStyles(brandId)
+}
+
+export async function createInvoiceDiscontinuedStyle(
+  brandId: string,
+  input: invoiceDiscontinuedStyleStore.InvoiceDiscontinuedStyleInput,
+): Promise<InvoiceDiscontinuedStyle> {
+  await delay()
+  return invoiceDiscontinuedStyleStore.createInvoiceDiscontinuedStyle(
+    brandId,
+    input,
+  )
+}
+
+export async function deleteInvoiceDiscontinuedStyle(
+  brandId: string,
+  id: string,
+): Promise<void> {
+  await delay()
+  return invoiceDiscontinuedStyleStore.deleteInvoiceDiscontinuedStyle(
+    brandId,
+    id,
+  )
+}
+
 export async function getInvoiceProductNameTagRoles(
   brandId: string,
   activeOnly = false,
 ): Promise<InvoiceProductNameTagRoleEntry[]> {
-  await delay()
   return invoiceProductNameTagRoleStore.listInvoiceProductNameTagRoles(brandId, {
     activeOnly,
   })
@@ -941,7 +1033,6 @@ export async function recommendInvoiceItemNameRules(input: {
 export async function getInvoiceGiftRequests(
   brandId: string,
 ): Promise<InvoiceGiftRequest[]> {
-  await delay()
   return invoicePrefixRequestStore.listInvoicePrefixRequests(brandId)
 }
 
@@ -1005,7 +1096,6 @@ export async function getInvoiceGiftAllocations(
   brandId: string,
   options?: { requestId?: string; activeOnly?: boolean },
 ): Promise<InvoiceGiftAllocation[]> {
-  await delay()
   return invoiceGiftAllocationStore.listInvoiceGiftAllocations(brandId, options)
 }
 
@@ -1038,7 +1128,6 @@ export async function getInvoiceGiftSourceMaps(
   brandId: string,
   options?: { activeOnly?: boolean },
 ): Promise<InvoiceGiftSourceMap[]> {
-  await delay()
   return invoiceGiftSourceMapStore.listInvoiceGiftSourceMaps(brandId, options)
 }
 
@@ -1046,7 +1135,6 @@ export async function getInvoiceGiftSourceAllocations(
   brandId: string,
   options?: { mapIds?: string[] },
 ): Promise<InvoiceGiftSourceAllocation[]> {
-  await delay()
   return invoiceGiftSourceMapStore.listInvoiceGiftSourceAllocations(
     brandId,
     options,
@@ -1094,7 +1182,6 @@ export async function confirmInvoiceGiftSourceAllocations(
 export async function getInvoiceWorkInstructions(
   brandId: string,
 ): Promise<InvoiceWorkInstruction[]> {
-  await delay()
   return invoiceWorkInstructionStore.listInvoiceWorkInstructions(brandId)
 }
 
@@ -1130,7 +1217,6 @@ export async function deleteInvoiceWorkInstruction(id: string): Promise<void> {
 export async function getInvoiceWorkRuns(
   brandId: string,
 ): Promise<InvoiceWorkRun[]> {
-  await delay()
   return invoiceWorkHistoryStore.listInvoiceWorkRuns(brandId)
 }
 
@@ -1332,7 +1418,6 @@ export async function applyBulkBarcodeInfo(rows: BulkBarcodeUpdateRow[]) {
 export async function getCodeUsageTargets(
   brandId: string,
 ): Promise<CodeUsageTarget[]> {
-  await delay()
   return codeUsageTargetStore.listCodeUsageTargets(brandId)
 }
 
@@ -1383,7 +1468,6 @@ export async function updateCodeUsageTarget(
 export async function getCodeUsageTargetAliases(
   brandId: string,
 ): Promise<CodeUsageTargetAlias[]> {
-  await delay()
   return codeUsageTargetStore.listCodeUsageTargetAliases(brandId)
 }
 
@@ -1399,7 +1483,6 @@ export async function createCodeUsageTargetsBulk(
 export async function getCodeUsageTargetFolders(
   brandId: string,
 ): Promise<CodeUsageTargetFolder[]> {
-  await delay()
   return codeUsageTargetFolderStore.listCodeUsageTargetFolders(brandId)
 }
 
@@ -1616,7 +1699,6 @@ export async function listStyleRefsForLookup(
 }
 
 export async function listAllStyleRefs(brandId: string) {
-  await delay()
   return styleStore.listAllStyleRefs(brandId)
 }
 

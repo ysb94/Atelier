@@ -257,6 +257,13 @@ function styleFromAllocation(
   )
 }
 
+function rowsAreSortedByNumber(rows: SabangnetOrderRow[]) {
+  for (let index = 1; index < rows.length; index += 1) {
+    if (rows[index]!.rowNumber < rows[index - 1]!.rowNumber) return false
+  }
+  return true
+}
+
 export function collectGiftSourceSlots(
   rows: SabangnetOrderRow[],
   tagRoles: InvoiceProductNameTagRoleEntry[] = [],
@@ -265,7 +272,9 @@ export function collectGiftSourceSlots(
 ): GiftSourceSlot[] {
   const occurrence = new Map<string, number>()
   const slots: GiftSourceSlot[] = []
-  const ordered = [...rows].sort((left, right) => left.rowNumber - right.rowNumber)
+  const ordered = rowsAreSortedByNumber(rows)
+    ? rows
+    : [...rows].sort((left, right) => left.rowNumber - right.rowNumber)
   for (const source of ordered) {
     const groupKey = giftSourceGroupKey(source.mallName, source.productName)
     const forced = includeKeys?.has(groupKey) ?? false
@@ -331,6 +340,7 @@ export function collectSourceGiftClaims(options: {
   sessionAllocations?: ReadonlyMap<string, StyleRef>
   ignoredKeys?: ReadonlySet<string>
   appliedKeys?: ReadonlySet<string>
+  slots?: GiftSourceSlot[]
 }): SourceGiftCollectResult {
   const tagRoles = options.tagRoles ?? []
   const ignoredKeys = options.ignoredKeys
@@ -340,12 +350,14 @@ export function collectSourceGiftClaims(options: {
     appliedKeys: options.appliedKeys,
     ignoredKeys,
   })
-  const slots = collectGiftSourceSlots(
-    options.rows,
-    tagRoles,
-    ignoredKeys,
-    appliedKeys,
-  )
+  const slots =
+    options.slots ??
+    collectGiftSourceSlots(
+      options.rows,
+      tagRoles,
+      ignoredKeys,
+      appliedKeys,
+    )
   const maps = (options.maps ?? []).filter((map) => map.isActive)
   const mapByKey = new Map(
     maps.map((map) => [
@@ -429,6 +441,7 @@ export function planGiftSourceTransform(options: {
   ignoredKeys?: ReadonlySet<string>
   appliedKeys?: ReadonlySet<string>
   resolvedByAllocationKey?: ReadonlyMap<string, StyleRef>
+  slots?: GiftSourceSlot[]
 }): GiftSourcePlan {
   const tagRoles = options.tagRoles ?? []
   const ignoredKeys = options.ignoredKeys
@@ -438,12 +451,14 @@ export function planGiftSourceTransform(options: {
     appliedKeys: options.appliedKeys,
     ignoredKeys,
   })
-  const slots = collectGiftSourceSlots(
-    options.rows,
-    tagRoles,
-    ignoredKeys,
-    appliedKeys,
-  )
+  const slots =
+    options.slots ??
+    collectGiftSourceSlots(
+      options.rows,
+      tagRoles,
+      ignoredKeys,
+      appliedKeys,
+    )
   const slotsByGroup = new Map<string, GiftSourceSlot[]>()
   for (const slot of slots) {
     const list = slotsByGroup.get(slot.groupKey) ?? []

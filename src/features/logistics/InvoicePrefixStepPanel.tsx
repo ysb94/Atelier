@@ -65,12 +65,14 @@ export function InvoicePrefixStepPanel({
   onRedrawGifts,
   onToggleExcludeGift,
   sourceFileName,
+  prefixPlan: prefixPlanProp,
   giftPlan: giftPlanProp,
 }: {
   brandId: string
   rows: SabangnetOrderRow[]
   requests: InvoicePrefixRequest[]
   existingAllocations: InvoiceGiftAllocation[]
+  prefixPlan?: ReturnType<typeof planInvoicePrefixes> | null
   giftPlan?: GiftAssignmentPlan | null
   loading: boolean
   error: string | null
@@ -93,8 +95,8 @@ export function InvoicePrefixStepPanel({
   const [reviewTab, setReviewTab] = useState<GiftReviewTab>('results')
 
   const plan = useMemo(
-    () => planInvoicePrefixes(rows, requests, resolutions),
-    [rows, requests, resolutions],
+    () => prefixPlanProp ?? planInvoicePrefixes(rows, requests, resolutions),
+    [prefixPlanProp, rows, requests, resolutions],
   )
 
   const localGiftPlan = useMemo(

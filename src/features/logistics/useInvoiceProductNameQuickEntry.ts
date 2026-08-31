@@ -10,10 +10,13 @@ import {
 import {
   applyProductNameAiQuickSlotStyle,
   applyProductNameAiQuickSlotText,
+  countProductNameAiPendingResolve,
   decideProductNameAiEnterAction,
   decideProductNameAiQuickSlotMatch,
+  nextProductNameAiRowMark,
   emptyProductNameAiQuickSlot,
   formatProductNameAiStyleLabel,
+  removeProductNameAiQuickSlot,
   nextProductNameAiQuickFocus,
   PRODUCT_NAME_AI_QUICK_SLOT_LIMIT,
   productNameAiQuickSlotsFromRow,
@@ -57,10 +60,6 @@ function slotsForRow(
   row: ProductNameAiReviewRow,
 ) {
   return stored ?? productNameAiQuickSlotsFromRow(row)
-}
-
-function pendingSlotCount(pendingAiKeys: ReadonlySet<string>) {
-  return pendingAiKeys.size
 }
 
 export function useInvoiceProductNameQuickEntry({
@@ -228,12 +227,10 @@ export function useInvoiceProductNameQuickEntry({
       const staged = applySlots(rowKey, slots, mode)
       setStageError(rowKey, staged.ok ? null : staged.error ?? '반영하지 못했습니다.')
       if (!staged.ok) return decision
-      if (mode === 'confirm') {
-        if (decision.status === 'needs_ai') markPendingAi(rowKey)
-        else confirmRow(rowKey)
-      } else {
-        unconfirmRow(rowKey)
-      }
+      const mark = nextProductNameAiRowMark(mode, decision.status)
+      if (mark === 'pending_ai') markPendingAi(rowKey)
+      else if (mark === 'confirmed') confirmRow(rowKey)
+      else if (mark === 'unconfirm') unconfirmRow(rowKey)
       return decision
     },
     [applySlots, confirmRow, confirmedKeys, markPendingAi, setStageError, unconfirmRow],
@@ -321,6 +318,17 @@ export function useInvoiceProductNameQuickEntry({
     }
   }, [])
 
+  const removeSlot = useCallback(
+    (rowKey: string, slotIndex: number) => {
+      const nextSlots = writeSlots(rowKey, (slots) =>
+        removeProductNameAiQuickSlot(slots, slotIndex),
+      )
+      applyDecision(rowKey, nextSlots, 'edit')
+      focusSlot(rowKey, Math.max(0, Math.min(slotIndex, nextSlots.length) - 1))
+    },
+    [applyDecision, focusSlot, writeSlots],
+  )
+
   const moveFocus = useCallback(
     (
       visibleRows: ProductNameAiReviewRow[],
@@ -374,8 +382,8 @@ export function useInvoiceProductNameQuickEntry({
   )
 
   const pendingCount = useMemo(
-    () => pendingSlotCount(pendingAiKeys),
-    [pendingAiKeys],
+    () => countProductNameAiPendingResolve(pendingAiKeys, slotsByKey),
+    [pendingAiKeys, slotsByKey],
   )
 
   const resolve = useCallback(async () => {
@@ -598,8 +606,10 @@ export function useInvoiceProductNameQuickEntry({
     setSlotText,
     pickSlotStyle,
     clearSlot,
+    removeSlot,
     ensureSlotCount,
     registerInput,
+    focusSlot,
     confirmAndMove,
     moveRight,
     pendingCount,

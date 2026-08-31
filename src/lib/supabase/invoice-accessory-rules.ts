@@ -6,6 +6,7 @@ import type {
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
+import { fetchAllPages } from '@/lib/supabase/paged-select'
 
 const RULE_COLUMNS =
   'id, brand_id, rule_type, pattern, normalized_pattern, accessory_kind, name_prefix, color_name, target_style_id, is_active, note, created_at, updated_at'
@@ -149,30 +150,29 @@ export async function listInvoiceAccessoryRules(
   options: { activeOnly?: boolean } = {},
 ): Promise<InvoiceAccessoryRule[]> {
   const supabase = getSupabase()
-  const all: InvoiceAccessoryRule[] = []
-  for (let from = 0; ; from += PAGE_SIZE) {
-    let query = supabase
-      .from('invoice_accessory_rules')
-      .select(RULE_SELECT)
-      .eq('brand_id', brandId)
-      .order('rule_type')
-      .order('pattern')
-      .range(from, from + PAGE_SIZE - 1)
-    if (options.activeOnly) query = query.eq('is_active', true)
-    const { data, error } = await query
-    if (error) {
-      throw new InvoiceAccessoryRuleStoreError(
-        errorMessage(error, '부속품 사전을 불러오지 못했습니다.'),
-      )
-    }
-    all.push(
-      ...((data as RuleRow[]) ?? [])
-        .map(toRule)
-        .filter((item): item is InvoiceAccessoryRule => Boolean(item)),
-    )
-    if ((data ?? []).length < PAGE_SIZE) break
-  }
-  return all
+  const rows = await fetchAllPages<RuleRow>({
+    pageSize: PAGE_SIZE,
+    fetchPage: async (from, to, withCount) => {
+      let query = supabase
+        .from('invoice_accessory_rules')
+        .select(RULE_SELECT, withCount ? { count: 'exact' } : undefined)
+        .eq('brand_id', brandId)
+        .order('rule_type')
+        .order('pattern')
+        .range(from, to)
+      if (options.activeOnly) query = query.eq('is_active', true)
+      const { data, error, count } = await query
+      if (error) {
+        throw new InvoiceAccessoryRuleStoreError(
+          errorMessage(error, '부속품 사전을 불러오지 못했습니다.'),
+        )
+      }
+      return { rows: (data as RuleRow[]) ?? [], count: count ?? null }
+    },
+  })
+  return rows
+    .map(toRule)
+    .filter((item): item is InvoiceAccessoryRule => Boolean(item))
 }
 
 export async function saveInvoiceAccessoryRule(

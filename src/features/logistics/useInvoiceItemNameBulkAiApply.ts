@@ -29,6 +29,7 @@ import {
   dedupeItemNameAiContexts,
   itemNameAiCandidateTexts,
   itemNameAiGroupsForContexts,
+  selectItemNameSafeCandidateIds,
   mergeItemNameAiComponents,
   mergeItemNameAiDrafts,
   mirrorItemNameAiDecisions,
@@ -518,7 +519,22 @@ export function useInvoiceItemNameBulkAiApply({
                     })),
                   }))
                 : []
-            aiContexts.push({ ...request, priorExamples })
+            const requiredStyleIds = priorExamples.flatMap((example) =>
+              example.components.map((component) => component.styleId),
+            )
+            const rankedStyleIds = settled.value.candidates.map(
+              (item) => item.styleId,
+            )
+            const safe = selectItemNameSafeCandidateIds(
+              request.candidateStyleIds,
+              rankedStyleIds,
+              requiredStyleIds,
+            )
+            aiContexts.push({
+              ...request,
+              priorExamples,
+              candidateStyleIds: safe.ids,
+            })
           }
           if (localDecisions.length > 0) {
             publish(localDecisions, {

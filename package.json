@@ -26,10 +26,14 @@
     "verify:brand-field-select": "node scripts/verify-brand-field-select.mjs",
     "verify:brand-field-select-xlsx": "node scripts/verify-brand-field-select-xlsx.mjs",
     "verify:packing-size-map": "node scripts/verify-packing-size-map.mjs",
+    "verify:shipment-product-label": "node scripts/verify-shipment-product-label.mjs",
+    "verify:stock-hold-match": "node scripts/verify-stock-hold-match.mjs",
+    "verify:product-list-order-shape": "node scripts/verify-product-list-order-shape.mjs",
     "verify:warehouse-stock": "node scripts/verify-warehouse-stock.mjs",
     "verify:outbound-partner": "node scripts/verify-outbound-partner.mjs",
     "verify:invoice-mall": "node scripts/verify-invoice-mall.mjs",
-    "verify:work-instruction": "node scripts/verify-work-instruction.mjs"
+    "verify:work-instruction": "node scripts/verify-work-instruction.mjs",
+    "verify:invoice-work-pipeline": "node scripts/verify-invoice-work-pipeline.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",

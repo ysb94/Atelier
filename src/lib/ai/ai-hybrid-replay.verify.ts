@@ -83,13 +83,13 @@ const samples = [
 const tuned = tuneDecisionConfig(samples.filter((sample) => sample.styleId !== 'none'))
 const summary = summarizeHybridReplay(samples, tuned)
 
-assert(tuned.aiTopN === 6, 'AI 후보는 상위 6개')
+assert(tuned.aiTopN === 16, 'AI 후보는 상위 16개')
 assert(summary.localPrecision >= 0.95, '로컬 추천 정밀도는 95% 이상')
 assert(summary.aiCalls === 2, '애매한 2건만 AI를 부른다')
 assert(summary.manual === 2, '후보 없음·저신뢰 1개는 수동')
 assert(
-  evaluateHybridDecision(samples[4]!.candidates, tuned).aiCandidates.length <= 6,
-  'AI 입력은 상위 6개로 자른다',
+  evaluateHybridDecision(samples[4]!.candidates, tuned).aiCandidates.length <= 16,
+  'AI 입력은 상위 16개로 자른다',
 )
 
 console.log(

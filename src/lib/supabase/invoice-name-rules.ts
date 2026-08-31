@@ -6,6 +6,7 @@ import type {
 } from '@/lib/types'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage } from '@/lib/supabase/map-error'
+import { fetchAllPages } from '@/lib/supabase/paged-select'
 
 const COLUMNS =
   'id, brand_id, match_type, source_value, normalized_source_value, action, target_style_id, target_name, is_active, is_test, note, created_at, updated_at'
@@ -78,30 +79,31 @@ export async function listInvoiceNameRules(
   brandId: string,
   options: { activeOnly?: boolean } = {},
 ): Promise<InvoiceNameRule[]> {
-  const all: InvoiceNameRule[] = []
-  for (let from = 0; ; from += RULE_PAGE_SIZE) {
-    let query = getSupabase()
-      .from('invoice_name_rules')
-      .select(SELECT_WITH_STYLE)
-      .eq('brand_id', brandId)
-      .order('match_type', { ascending: true })
-      .order('source_value', { ascending: true })
-      .order('id', { ascending: true })
-      .range(from, from + RULE_PAGE_SIZE - 1)
-
-    if (options.activeOnly) query = query.eq('is_active', true)
-
-    const { data, error } = await query
-    if (error) {
-      throw new InvoiceNameRuleStoreError(
-        errorMessage(error, '송장 이름변경 규칙을 불러오지 못했습니다.'),
-      )
-    }
-    const rows = ((data as InvoiceNameRuleRow[]) ?? []).map(toRule)
-    all.push(...rows)
-    if (rows.length < RULE_PAGE_SIZE) break
-  }
-  return all
+  const rows = await fetchAllPages<InvoiceNameRuleRow>({
+    pageSize: RULE_PAGE_SIZE,
+    fetchPage: async (from, to, withCount) => {
+      let query = getSupabase()
+        .from('invoice_name_rules')
+        .select(SELECT_WITH_STYLE, withCount ? { count: 'exact' } : undefined)
+        .eq('brand_id', brandId)
+        .order('match_type', { ascending: true })
+        .order('source_value', { ascending: true })
+        .order('id', { ascending: true })
+        .range(from, to)
+      if (options.activeOnly) query = query.eq('is_active', true)
+      const { data, error, count } = await query
+      if (error) {
+        throw new InvoiceNameRuleStoreError(
+          errorMessage(error, '송장 이름변경 규칙을 불러오지 못했습니다.'),
+        )
+      }
+      return {
+        rows: (data as InvoiceNameRuleRow[]) ?? [],
+        count: count ?? null,
+      }
+    },
+  })
+  return rows.map(toRule)
 }
 
 export type InvoiceCodeRuleInput = {

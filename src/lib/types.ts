@@ -620,7 +620,7 @@ export type InvoicePackingSizeSourceValue = {
 
 /**
  * 포장 규격 원문에 붙인 간단 표시값.
- * 기준정보에서만 관리하며 아직 송장 변환이나 출력에는 적용하지 않는다.
+ * 기준정보에서 관리하며 송장 최종 품목명 표시·CJ 출력에 적용한다.
  */
 export type InvoicePackingSizeMap = {
   id: string
@@ -911,6 +911,52 @@ export type InvoiceProductNameExclusion = {
   itemName: string
   normalizedItemName: string
   isActive: boolean
+  note: string
+  createdAt: string
+  updatedAt: string
+}
+
+/** 예발 진행 중 / 종료 / 목록에서 뺌 */
+export type InvoicePreorderHoldStatus = 'active' | 'ended' | 'cleared'
+
+/** 예발 출고 예정일 연장(지연) 1회 */
+export type InvoicePreorderHoldExtension = {
+  id: string
+  holdId: string
+  previousShipOn: string
+  newShipOn: string
+  reason: string
+  createdAt: string
+}
+
+/** 브랜드·상품별 예발 구간. ended·cleared도 과거 참고용으로 남긴다. */
+export type InvoicePreorderHold = {
+  id: string
+  brandId: string
+  styleId: string
+  styleNo: string
+  name: string
+  startedOn: string
+  shipOn: string
+  reason: string
+  status: InvoicePreorderHoldStatus
+  /** 예발이 실제로 끝난 업무일. ended일 때 있음. 예정일보다 이를 수 있다. */
+  endedOn: string | null
+  /** 종료일이 예정일과 다를 때(조기·지연) 사유. 같으면 빈 문자열. */
+  endedReason: string
+  clearedAt: string | null
+  extensions: InvoicePreorderHoldExtension[]
+  createdAt: string
+  updatedAt: string
+}
+
+/** 송장 단종 제외 후보 리스트 */
+export type InvoiceDiscontinuedStyle = {
+  id: string
+  brandId: string
+  styleId: string
+  styleNo: string
+  name: string
   note: string
   createdAt: string
   updatedAt: string

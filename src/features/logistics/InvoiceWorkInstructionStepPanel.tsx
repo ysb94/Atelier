@@ -16,17 +16,19 @@ function formatMoment(value: string): string {
 export function InvoiceWorkInstructionStepPanel({
   rows,
   instructions,
+  workPlan,
   loading,
   error,
 }: {
   rows: SabangnetOrderRow[]
   instructions: InvoiceWorkInstruction[]
+  workPlan?: ReturnType<typeof planWorkInstructions> | null
   loading: boolean
   error: string | null
 }) {
   const plan = useMemo(
-    () => planWorkInstructions(rows, instructions),
-    [rows, instructions],
+    () => workPlan ?? planWorkInstructions(rows, instructions),
+    [instructions, rows, workPlan],
   )
 
   const previewRows = useMemo(() => {

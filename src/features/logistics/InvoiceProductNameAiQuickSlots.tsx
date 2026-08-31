@@ -1,6 +1,7 @@
-import { X } from 'lucide-react'
+import { Plus, Trash2, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import {
+  isProductNameAiAddExtraKey,
   PRODUCT_NAME_AI_QUICK_SLOT_LIMIT,
   shouldIgnoreProductNameAiQuickKey,
   type ProductNameAiQuickSlot,
@@ -14,9 +15,11 @@ export function InvoiceProductNameAiQuickSlots({
   onTextChange,
   onPickStyle,
   onClear,
+  onRemoveExtra,
   onRegister,
   onEnter,
   onTab,
+  onAddExtra,
 }: {
   rowKey: string
   slots: ProductNameAiQuickSlot[]
@@ -24,13 +27,21 @@ export function InvoiceProductNameAiQuickSlots({
   onTextChange: (slotIndex: number, text: string) => void
   onPickStyle: (slotIndex: number, style: StyleRef) => void
   onClear: (slotIndex: number) => void
+  onRemoveExtra?: (slotIndex: number) => void
   onRegister: (slotIndex: number, el: HTMLInputElement | null) => void
   onEnter: (slotIndex: number) => void
   onTab: (slotIndex: number) => void
+  onAddExtra?: () => void
 }) {
+  const visibleSlots = slots.slice(0, PRODUCT_NAME_AI_QUICK_SLOT_LIMIT)
+  const canAddExtra =
+    Boolean(onAddExtra) && visibleSlots.length < PRODUCT_NAME_AI_QUICK_SLOT_LIMIT
   return (
     <div className="flex min-w-[16rem] flex-col gap-1">
-      {slots.slice(0, PRODUCT_NAME_AI_QUICK_SLOT_LIMIT).map((slot, slotIndex) => (
+      {visibleSlots.map((slot, slotIndex) => {
+        const canRemoveExtra = Boolean(onRemoveExtra) && slotIndex > 0
+        const showAdd = canAddExtra && slotIndex === visibleSlots.length - 1
+        return (
         <div key={`${rowKey}-${slotIndex}`} className="space-y-1">
           <div className="flex min-w-0 items-stretch">
             {slot.style?.styleNo ? (
@@ -51,6 +62,20 @@ export function InvoiceProductNameAiQuickSlots({
                       key: event.key,
                     })
                   ) {
+                    return
+                  }
+                  if (
+                    canAddExtra &&
+                    isProductNameAiAddExtraKey({
+                      isComposing: event.nativeEvent.isComposing,
+                      key: event.key,
+                      ctrlKey: event.ctrlKey,
+                      metaKey: event.metaKey,
+                      altKey: event.altKey,
+                    })
+                  ) {
+                    event.preventDefault()
+                    onAddExtra?.()
                     return
                   }
                   if (event.key === 'Enter') {
@@ -74,7 +99,9 @@ export function InvoiceProductNameAiQuickSlots({
                 className={`h-7 text-[11px] ${
                   slot.style ? 'rounded-l-none' : ''
                 } ${
-                  slot.text.trim() ? 'pr-7' : ''
+                  canRemoveExtra || showAdd ? 'rounded-r-none' : ''
+                } ${
+                  slotIndex === 0 && slot.text.trim() ? 'pr-7' : ''
                 } ${
                   slot.status === 'unmatched'
                     ? 'border-danger/50'
@@ -83,7 +110,7 @@ export function InvoiceProductNameAiQuickSlots({
                       : ''
                 }`}
               />
-              {slot.text.trim() ? (
+              {slotIndex === 0 && slot.text.trim() ? (
                 <button
                   type="button"
                   className="absolute inset-y-0 right-0 flex w-7 items-center justify-center text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
@@ -95,6 +122,32 @@ export function InvoiceProductNameAiQuickSlots({
                 </button>
               ) : null}
             </div>
+            {canRemoveExtra ? (
+              <button
+                type="button"
+                className={`inline-flex shrink-0 items-center justify-center border border-l-0 border-border bg-card px-1.5 text-muted-foreground hover:bg-muted hover:text-danger disabled:pointer-events-none disabled:opacity-50 ${
+                  showAdd ? '' : 'rounded-r-md'
+                }`}
+                disabled={disabled}
+                aria-label="구성품 삭제"
+                title="구성품 삭제"
+                onClick={() => onRemoveExtra?.(slotIndex)}
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            ) : null}
+            {showAdd ? (
+              <button
+                type="button"
+                className="inline-flex shrink-0 items-center justify-center rounded-r-md border border-l-0 border-border bg-card px-1.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                disabled={disabled}
+                aria-label="구성품 추가"
+                title="구성품 추가 (+)"
+                onClick={onAddExtra}
+              >
+                <Plus className="size-3.5" />
+              </button>
+            ) : null}
           </div>
           {slot.status === 'ambiguous' && slot.candidates.length > 0 ? (
             <div className="flex flex-col gap-0.5">
@@ -115,7 +168,8 @@ export function InvoiceProductNameAiQuickSlots({
             <p className="text-[10px] text-danger">{slot.error}</p>
           ) : null}
         </div>
-      ))}
+        )
+      })}
     </div>
   )
 }

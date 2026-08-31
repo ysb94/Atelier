@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { DEFAULT_DECISION_CONFIG } from '@/lib/ai/gateway-core'
-import { withRecommendSlot } from '@/lib/ai/recommend-queue'
+import {
+  DEFAULT_DECISION_CONFIG,
+  buildLocalRecommendation,
+  evaluateHybridDecision,
+} from '@/lib/ai/gateway-core'
+import { createSlotGate, withRecommendSlot } from '@/lib/ai/recommend-queue'
 import {
   getAiFeatureRoute,
   recommendInvoiceProduct,
@@ -13,12 +17,16 @@ import {
   applyProductNameAiRowSlots,
   applyProductNameLookupKey,
   buildProductNameAiReviewRows,
+  dedupeProductNameAiCombos,
+  productNameAiCandidateSearchKeys,
   productNameAiSearchKeys,
   countProductNameAiWorkflow,
   decideProductNameAiConfirmedSaves,
   isProductNameAiSaveFailed,
   markProductNameAiCollectFailure,
   markProductNameAiDuplicates,
+  nextProductNameAiRowMark,
+  normalizeProductNameAiReviewLookupKey,
   overlayProductNameAiDrafts,
   productNameAiCollectFailed,
   productNameAiRowReadyToCommit,
@@ -31,7 +39,7 @@ import {
   type ProductNameAiReviewRow,
 } from '@/lib/invoice/product-name-ai-review'
 import type { UnresolvedProductNameCombo } from '@/lib/invoice/product-name-transform'
-import type { AiProductRecommendation } from '@/lib/types'
+import type { AiProductCandidate, AiProductRecommendation } from '@/lib/types'
 import type { OptionExtraDraft } from './InvoiceOptionExtrasEditor'
 import type {
   ProductMapEnqueueInput,
@@ -43,6 +51,8 @@ export type BulkAiApplyPhase = 'idle' | 'collecting' | 'review' | 'applied'
 
 const FEATURE_KEY = 'invoice_product_recommendation'
 const COLLECT_WORKERS = 6
+const SEARCH_WORKERS = 4
+const PUBLISH_MS = 80
 
 export function extrasOfProductNameAiRow(
   row: ProductNameAiReviewRow,
@@ -107,6 +117,9 @@ export function useInvoiceProductNameBulkAiApply({
   )
   const [appliedCount, setAppliedCount] = useState(0)
   const [applyError, setApplyError] = useState<string | null>(null)
+  const [extrasDraftByKey, setExtrasDraftByKey] = useState<
+    Map<string, OptionExtraDraft[]>
+  >(() => new Map())
   const cancelRef = useRef(false)
   const collectGenerationRef = useRef(0)
   const combosRef = useRef(combos)
@@ -146,7 +159,12 @@ export function useInvoiceProductNameBulkAiApply({
   }
 
   const fetchRecommendation = useCallback(
-    (combo: UnresolvedProductNameCombo, lookupKeys: string[]) =>
+    (
+      combo: UnresolvedProductNameCombo,
+      lookupKeys: string[],
+      search: (keys: string[]) => Promise<AiProductCandidate[]>,
+      searchKeys = lookupKeys,
+    ) =>
       queryClient.fetchQuery({
         queryKey: [
           'ai-product-recommendation',
@@ -156,25 +174,62 @@ export function useInvoiceProductNameBulkAiApply({
           route?.modelId ?? '',
           route?.recommendationPolicy ?? 'hybrid_auto',
           JSON.stringify(route?.decisionConfig ?? {}),
+          searchKeys.join('\u0001'),
         ],
         staleTime: Infinity,
         retry: false,
-        queryFn: async (): Promise<AiProductRecommendation> =>
-          withRecommendSlot(async () => {
-            const candidates = await searchInvoiceProductCandidates(
-              brandId,
+        queryFn: async (): Promise<AiProductRecommendation> => {
+          const candidates = await search(searchKeys)
+          const decision = evaluateHybridDecision(
+            candidates,
+            route?.decisionConfig ?? DEFAULT_DECISION_CONFIG,
+          )
+          const policy = route?.recommendationPolicy ?? 'hybrid_auto'
+          const action =
+            policy === 'always_ai' && decision.ranked.length >= 2
+              ? 'ai'
+              : policy === 'local_only' && decision.action === 'ai'
+                ? 'local'
+                : decision.action
+          if (action === 'manual') {
+            return {
+              lookupKey: lookupKeys[0] ?? '',
+              reason: decision.reason,
+              products: [],
+              provider: route?.provider ?? 'openai',
+              modelId: route?.modelId ?? '',
+              source: 'manual',
+              cacheId: null,
+              skippedAi: true,
+              cacheHit: false,
+            }
+          }
+          if (action === 'local') {
+            const recommendation = buildLocalRecommendation(
               lookupKeys,
-              20,
+              decision.ranked,
             )
-            return recommendInvoiceProduct({
+            return {
+              ...recommendation,
+              provider: route?.provider ?? 'openai',
+              modelId: route?.modelId ?? '',
+              source: 'local',
+              cacheId: null,
+              skippedAi: true,
+              cacheHit: false,
+            }
+          }
+          return withRecommendSlot(() =>
+            recommendInvoiceProduct({
               brandId,
               lookupKeys,
               candidates,
               productName: combo.productName,
               itemName: combo.itemName,
               mallName: combo.mallName,
-            })
-          }),
+            }),
+          )
+        },
       }),
     [
       brandId,
@@ -200,6 +255,7 @@ export function useInvoiceProductNameBulkAiApply({
     setConfirmedKeys(new Set())
     setPendingAiKeys(new Set())
     setCommittedKeys(new Set())
+    setExtrasDraftByKey(new Map())
     setAppliedCount(0)
     setApplyError(null)
     setProgress({ done: 0, total: 0 })
@@ -221,7 +277,40 @@ export function useInvoiceProductNameBulkAiApply({
     setConfirmedKeys(next.confirmedKeys)
     setPendingAiKeys(next.pendingAiKeys)
     setCommittedKeys(next.committedKeys)
+    setExtrasDraftByKey((current) => {
+      const liveKeys = new Set(next.reviewRows.map((row) => row.key))
+      let changed = false
+      const extras = new Map<string, OptionExtraDraft[]>()
+      for (const [key, draft] of current) {
+        if (liveKeys.has(key)) extras.set(key, draft)
+        else changed = true
+      }
+      return changed ? extras : current
+    })
   }, [liveComboKey])
+
+  useEffect(() => {
+    setReviewRows((current) => {
+      if (current.length === 0) return current
+      const next = markProductNameAiDuplicates(
+        current.map(normalizeProductNameAiReviewLookupKey),
+      )
+      return next.some((row, index) => row.lookupKey !== current[index]?.lookupKey)
+        ? next
+        : current
+    })
+    setDraftByKey((current) => {
+      if (current.size === 0) return current
+      let changed = false
+      const next = new Map<string, ProductNameAiReviewRow>()
+      for (const [key, row] of current) {
+        const normalized = normalizeProductNameAiReviewLookupKey(row)
+        if (normalized !== row) changed = true
+        next.set(key, normalized)
+      }
+      return changed ? next : current
+    })
+  }, [])
 
   const shownRows = useMemo(
     () =>
@@ -300,6 +389,11 @@ export function useInvoiceProductNameBulkAiApply({
         next = applyProductNameLookupKey(next, patch.lookupKey)
       }
       if (patch.extras) {
+        setExtrasDraftByKey((current) => {
+          const extras = new Map(current)
+          extras.set(key, patch.extras!)
+          return extras
+        })
         next = validateProductNameAiReviewRow({
           ...next,
           extras: extrasFromDrafts(patch.extras),
@@ -316,6 +410,18 @@ export function useInvoiceProductNameBulkAiApply({
     [draftByKey, reviewRows, unconfirmRow, writeDraft],
   )
 
+  const extrasDraftOf = useCallback(
+    (row: ProductNameAiReviewRow) =>
+      extrasDraftByKey.get(row.key) ?? extrasOfProductNameAiRow(row),
+    [extrasDraftByKey],
+  )
+
+  const setExtrasDraft = useCallback(
+    (key: string, extras: OptionExtraDraft[]) =>
+      updateRow(key, { extras }),
+    [updateRow],
+  )
+
   const applySlots = useCallback(
     (
       key: string,
@@ -328,12 +434,17 @@ export function useInvoiceProductNameBulkAiApply({
       const result = applyProductNameAiRowSlots(current, slots, mode)
       if (!result.ok) return { ok: false, error: result.error, decision: result.decision }
       writeDraft(result.row)
-      if (mode === 'confirm') {
-        if (result.decision.status === 'needs_ai') markPendingAi(key)
-        else confirmRow(key)
-      } else {
-        unconfirmRow(key)
+      if (result.decision.status === 'ready') {
+        setExtrasDraftByKey((currentDrafts) => {
+          const extras = new Map(currentDrafts)
+          extras.set(key, extrasOfProductNameAiRow(result.row))
+          return extras
+        })
       }
+      const mark = nextProductNameAiRowMark(mode, result.decision.status)
+      if (mark === 'pending_ai') markPendingAi(key)
+      else if (mark === 'confirmed') confirmRow(key)
+      else if (mark === 'unconfirm') unconfirmRow(key)
       return { ok: true, decision: result.decision }
     },
     [confirmRow, draftByKey, markPendingAi, reviewRows, unconfirmRow, writeDraft],
@@ -345,6 +456,7 @@ export function useInvoiceProductNameBulkAiApply({
     collectGenerationRef.current = generation
     cancelRef.current = false
     const targets = combosRef.current
+    const { requests, mirrors } = dedupeProductNameAiCombos(targets)
     setPhase('collecting')
     setAppliedCount(0)
     setApplyError(null)
@@ -352,17 +464,32 @@ export function useInvoiceProductNameBulkAiApply({
     setConfirmedKeys(new Set())
     setPendingAiKeys(new Set())
     setCommittedKeys(new Set())
+    setExtrasDraftByKey(new Map())
     setProgress({ done: 0, total: targets.length })
     const rows = buildProductNameAiReviewRows(targets)
     setReviewRows(rows)
     const comboByKey = new Map(targets.map((combo) => [combo.key, combo]))
+    const requestKeys = new Set(requests.map((combo) => combo.key))
     let cursor = 0
     let done = 0
+    const searchGate = createSlotGate(SEARCH_WORKERS)
+    const searchCache = new Map<string, Promise<AiProductCandidate[]>>()
+    const search = (lookupKeys: string[]) => {
+      const cacheKey = lookupKeys.map((key) => key.trim()).join('\u0000')
+      const cached = searchCache.get(cacheKey)
+      if (cached) return cached
+      const request = searchGate(() =>
+        searchInvoiceProductCandidates(brandId, lookupKeys, 20),
+      )
+      searchCache.set(cacheKey, request)
+      return request
+    }
 
     const collectOne = async (row: ProductNameAiReviewRow) => {
       if (row.holdReason === 'exclusion_guarded') return row
       const source = comboByKey.get(row.key)
       const lookupKeys = productNameAiSearchKeys(row)
+      const searchKeys = productNameAiCandidateSearchKeys(row)
       if (lookupKeys.length === 0) {
         return markProductNameAiCollectFailure(row, 'no_lookup_key', null)
       }
@@ -374,7 +501,12 @@ export function useInvoiceProductNameBulkAiApply({
         )
       }
       try {
-        const recommendation = await fetchRecommendation(source, lookupKeys)
+        const recommendation = await fetchRecommendation(
+          source,
+          lookupKeys,
+          search,
+          searchKeys,
+        )
         return applyProductNameAiRecommendation(
           row,
           recommendation,
@@ -390,32 +522,64 @@ export function useInvoiceProductNameBulkAiApply({
     }
 
     const nextRows = rows.map((row) => ({ ...row }))
+    let publishTimer: number | null = null
     const publish = () => {
       if (generation !== collectGenerationRef.current) return
       setReviewRows(nextRows.map((row) => ({ ...row })))
     }
+    const schedulePublish = () => {
+      if (publishTimer !== null) return
+      publishTimer = window.setTimeout(() => {
+        publishTimer = null
+        publish()
+      }, PUBLISH_MS)
+    }
+    const applyMirrors = (row: ProductNameAiReviewRow) => {
+      for (const key of mirrors.get(row.key) ?? []) {
+        const index = nextRows.findIndex((item) => item.key === key)
+        if (index < 0) continue
+        nextRows[index] = {
+          ...row,
+          key,
+          productName: nextRows[index]!.productName,
+          itemName: nextRows[index]!.itemName,
+          mallName: nextRows[index]!.mallName,
+          ownProductCode: nextRows[index]!.ownProductCode,
+          rowCount: nextRows[index]!.rowCount,
+        }
+      }
+    }
+    const requestIndexes = nextRows
+      .map((_, index) => index)
+      .filter((index) => requestKeys.has(nextRows[index]!.key))
     const worker = async () => {
       while (!cancelRef.current && generation === collectGenerationRef.current) {
-        const index = cursor
+        const cursorIndex = cursor
         cursor += 1
-        const row = nextRows[index]
-        if (!row) return
+        const index = requestIndexes[cursorIndex]
+        if (index === undefined) return
+        const row = nextRows[index]!
         nextRows[index] = await collectOne(row)
-        done += 1
+        applyMirrors(nextRows[index]!)
+        done += 1 + (mirrors.get(row.key)?.length ?? 0)
         setProgress({ done, total: targets.length })
-        publish()
+        schedulePublish()
       }
     }
     await Promise.all(
-      Array.from({ length: Math.min(COLLECT_WORKERS, targets.length) }, worker),
+      Array.from(
+        { length: Math.min(COLLECT_WORKERS, requestIndexes.length || 1) },
+        worker,
+      ),
     )
+    if (publishTimer !== null) window.clearTimeout(publishTimer)
     if (generation !== collectGenerationRef.current) return
     const marked = markProductNameAiDuplicates(nextRows)
     setReviewRows(marked)
     setConfirmedKeys(new Set())
     setPendingAiKeys(new Set())
     setPhase('review')
-  }, [fetchRecommendation, minConfidence, phase])
+  }, [brandId, fetchRecommendation, minConfidence, phase])
 
   const retryFailed = useCallback(async () => {
     if (phase === 'collecting') return
@@ -446,6 +610,18 @@ export function useInvoiceProductNameBulkAiApply({
     const nextRows = live.map((row) => ({ ...row }))
     let cursor = 0
     let done = 0
+    const searchGate = createSlotGate(SEARCH_WORKERS)
+    const searchCache = new Map<string, Promise<AiProductCandidate[]>>()
+    const search = (lookupKeys: string[]) => {
+      const cacheKey = lookupKeys.map((key) => key.trim()).join('\u0000')
+      const cached = searchCache.get(cacheKey)
+      if (cached) return cached
+      const request = searchGate(() =>
+        searchInvoiceProductCandidates(brandId, lookupKeys, 20),
+      )
+      searchCache.set(cacheKey, request)
+      return request
+    }
     const worker = async () => {
       while (!cancelRef.current && generation === collectGenerationRef.current) {
         const index = cursor
@@ -455,6 +631,7 @@ export function useInvoiceProductNameBulkAiApply({
         if (!failedKeys.has(row.key)) continue
         const source = comboByKey.get(row.key)
         const lookupKeys = productNameAiSearchKeys(row)
+        const searchKeys = productNameAiCandidateSearchKeys(row)
         if (!source || lookupKeys.length === 0) {
           nextRows[index] = markProductNameAiCollectFailure(
             row,
@@ -463,7 +640,12 @@ export function useInvoiceProductNameBulkAiApply({
           )
         } else {
           try {
-            const recommendation = await fetchRecommendation(source, lookupKeys)
+            const recommendation = await fetchRecommendation(
+              source,
+              lookupKeys,
+              search,
+              searchKeys,
+            )
             nextRows[index] = applyProductNameAiRecommendation(
               row,
               recommendation,
@@ -501,7 +683,7 @@ export function useInvoiceProductNameBulkAiApply({
       return next
     })
     setPhase('review')
-  }, [draftByKey, fetchRecommendation, minConfidence, phase, reviewRows])
+  }, [brandId, draftByKey, fetchRecommendation, minConfidence, phase, reviewRows])
 
   const applyReady = useCallback(() => {
     const live = markProductNameAiDuplicates(
@@ -511,21 +693,14 @@ export function useInvoiceProductNameBulkAiApply({
     for (const [key, status] of saveStatusByKey ?? []) {
       if (isProductNameAiSaveFailed(status)) saveFailedKeys.add(key)
     }
-    const counts = countProductNameAiWorkflow({
-      rows: live,
-      confirmedKeys,
-      saveFailedKeys,
-    })
-    if (counts.reviewCount > 0) {
-      setApplyError('검토 필요한 행이 남아 있습니다.')
-      return
-    }
     const ready = live.filter(
       (row) =>
         confirmedKeys.has(row.key) &&
+        !committedKeys.has(row.key) &&
         productNameAiRowReadyToCommit(row) &&
         saveStatusByKey?.get(row.key) !== 'queued' &&
-        saveStatusByKey?.get(row.key) !== 'saving',
+        saveStatusByKey?.get(row.key) !== 'saving' &&
+        saveStatusByKey?.get(row.key) !== 'saved',
     )
     const plan = decideProductNameAiConfirmedSaves(
       ready,
@@ -585,7 +760,14 @@ export function useInvoiceProductNameBulkAiApply({
         : null,
     )
     setPhase('applied')
-  }, [confirmedKeys, draftByKey, enqueue, reviewRows, saveStatusByKey])
+  }, [
+    committedKeys,
+    confirmedKeys,
+    draftByKey,
+    enqueue,
+    reviewRows,
+    saveStatusByKey,
+  ])
 
   const retrySaveFailed = useCallback(
     (history: ProductMapHistoryEntry[]) => {
@@ -629,14 +811,31 @@ export function useInvoiceProductNameBulkAiApply({
       }),
     [confirmedKeys, saveFailedKeys, shownRows],
   )
+  const readyCommitCount = useMemo(() => {
+    let count = 0
+    for (const row of shownRows) {
+      if (!confirmedKeys.has(row.key) || committedKeys.has(row.key)) continue
+      if (saveFailedKeys.has(row.key)) continue
+      if (!productNameAiRowReadyToCommit(row)) continue
+      const status = saveStatusByKey?.get(row.key)
+      if (status === 'queued' || status === 'saving' || status === 'saved') {
+        continue
+      }
+      count += 1
+    }
+    return count
+  }, [
+    committedKeys,
+    confirmedKeys,
+    saveFailedKeys,
+    saveStatusByKey,
+    shownRows,
+  ])
   const failedCollectCount = useMemo(
     () => shownRows.filter((row) => productNameAiCollectFailed(row)).length,
     [shownRows],
   )
-  const canCommit =
-    workflowCounts.reviewCount === 0 &&
-    workflowCounts.readyCount > 0 &&
-    phase !== 'collecting'
+  const canCommit = readyCommitCount > 0 && phase !== 'collecting'
 
   return {
     brandId,
@@ -651,7 +850,7 @@ export function useInvoiceProductNameBulkAiApply({
     pendingAiKeys,
     committedKeys,
     saveFailedKeys,
-    readyCount: workflowCounts.readyCount,
+    readyCount: readyCommitCount,
     reviewCount: workflowCounts.reviewCount,
     saveFailedCount: workflowCounts.saveFailedCount,
     failedCollectCount,
@@ -665,6 +864,9 @@ export function useInvoiceProductNameBulkAiApply({
     retrySaveFailed,
     cancel,
     reset,
+    extrasDraftByKey,
+    extrasDraftOf,
+    setExtrasDraft,
     updateRow,
     applySlots,
     confirmRow,

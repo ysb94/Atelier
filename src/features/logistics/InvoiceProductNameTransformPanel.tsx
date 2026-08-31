@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -88,12 +89,26 @@ const TAG_ROLES: InvoiceProductNameTagRole[] = [
 export function InvoiceProductNameTransformPanel({
   brandId,
   transformation,
+  renderUi = true,
+  autoCollect = false,
+  autoCollectKey = '',
+  onAutoCollectProgress,
+  onAutoCollectSettled,
   onBlockingSaveCountChange,
   giftGroups = [],
   onOpenGiftSetup,
 }: {
   brandId: string
   transformation: InvoiceProductNameTransformation
+  renderUi?: boolean
+  autoCollect?: boolean
+  autoCollectKey?: string
+  onAutoCollectProgress?: (progress: {
+    collecting: boolean
+    done: number
+    total: number
+  }) => void
+  onAutoCollectSettled?: () => void
   onBlockingSaveCountChange?: (count: number) => void
   giftGroups?: GiftSourceGroup[]
   onOpenGiftSetup?: (row: ProductNameAiReviewRow) => void
@@ -186,6 +201,54 @@ export function InvoiceProductNameTransformPanel({
     enqueue,
     saveStatusByKey,
   })
+  const autoCollectStartedRef = useRef(false)
+  const lastAutoCollectKeyRef = useRef(autoCollectKey)
+  if (lastAutoCollectKeyRef.current !== autoCollectKey) {
+    lastAutoCollectKeyRef.current = autoCollectKey
+    autoCollectStartedRef.current = false
+  }
+
+  useEffect(() => {
+    if (!autoCollect) return
+    onAutoCollectProgress?.({
+      collecting: bulk.phase === 'collecting',
+      done: bulk.progress.done,
+      total: bulk.progress.total,
+    })
+  }, [
+    autoCollect,
+    bulk.phase,
+    bulk.progress.done,
+    bulk.progress.total,
+    onAutoCollectProgress,
+  ])
+
+  useEffect(() => {
+    if (!autoCollect || autoCollectStartedRef.current) return
+    if (bulk.routeLoading) return
+    autoCollectStartedRef.current = true
+    if (!bulk.routeReady || bulk.targetCount === 0) {
+      onAutoCollectSettled?.()
+      return
+    }
+    void bulk.collect().catch(() => {
+      onAutoCollectSettled?.()
+    })
+  }, [
+    autoCollect,
+    bulk.collect,
+    bulk.routeLoading,
+    bulk.routeReady,
+    bulk.targetCount,
+    onAutoCollectSettled,
+  ])
+
+  useEffect(() => {
+    if (!autoCollect || !autoCollectStartedRef.current) return
+    if (bulk.phase === 'review' || bulk.phase === 'applied') {
+      onAutoCollectSettled?.()
+    }
+  }, [autoCollect, bulk.phase, onAutoCollectSettled])
 
   const fileTags = useMemo(
     () =>
@@ -425,6 +488,8 @@ export function InvoiceProductNameTransformPanel({
           left.source.rowNumber - right.source.rowNumber,
       )
   }, [query, status, transformation.rows])
+
+  if (!renderUi) return null
 
   return (
     <div className="min-w-0 space-y-5">

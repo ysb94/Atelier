@@ -40,6 +40,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 송장 품목명 변환 기준(`invoice_name_rules`) | Supabase |
 | 송장 품목명 exact 기준(`invoice_product_name_maps`) | Supabase |
 | 송장 품목명 제외 기준(`invoice_product_name_exclusions`) | Supabase |
+| 송장 출고상태 예발·단종(`invoice_preorder_holds` + `invoice_preorder_hold_extensions` + `invoice_discontinued_styles`) | Supabase |
 | 송장 품목명 태그 역할 사전(`invoice_product_name_tag_roles`) | Supabase |
 | 송장 내품명·출고구성 기준(`invoice_option_maps` + `invoice_option_map_components`) | Supabase |
 | 송장 내품명 공통·본품별·조회 키 규칙(`invoice_item_name_rules` + `invoice_item_name_rule_components`) | Supabase |
@@ -461,8 +462,12 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 읽기는 `app.can_read_brand`, 추가·수정·삭제와
   `save_invoice_packing_size_maps`는 `app.can_edit_brand`를 적용한다. 빈 간단값은
   해당 매핑만 삭제하며 상품 원문은 수정하지 않는다.
-- 현재 단계에서는 이 매핑을 송장 변환, 최종 미리보기, CJ 13열 또는 출고구성 엑셀에
-  적용하지 않는다. 적용 범위를 넓힐 때 별도 승인과 회귀 검증을 거친다.
+- 최종 미리보기와 CJ 13열 품목명은 M번호가 연결된 상품(본품·내품 구성·사은품)에
+  대해 `[창고자리] [포장코드] // 공식명 //` 형태를 붙인다. 자리는 활성 창고 재고의
+  박스창고 FIFO 1순위가 기본이고, 화면에서 출고창고로 바꿀 수 있다. 선택한 창고에
+  자리가 없으면 반대 창고 1순위를 쓴다. 포장코드는 `invoice_packing_size_maps`의
+  간단 표시값이다. 값이 없는 항목은 해당 괄호만 생략한다. M번호 미연결·제외 행은
+  원문을 유지한다.
 - 마이그레이션: `20260826070517_invoice_packing_size_maps.sql`.
 
 ### 연습 창고
@@ -530,6 +535,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   13열을 복사하고, 품목명만 해당 M번호의 현재 공식명으로 바꾼다. 변환된 내품명은
   모든 구성행에 동일하게 복사한다. 사은품은 그 세트 블록 뒤에 한 번만 삽입한다.
   M번호별 출고구성 XLSX는 본품과 규칙·세트 구성품을 모두 같은 수량 규칙으로 적는다.
+  상품 리스트는 본품과 옵션맵 세트 구성을 `품목`, 내품명 규칙·부속품 사전 결과만
+  `내품`으로 나눈다. 같은 M번호의 총수량 합산은 유지한다.
 - `품목명 변환` 단계 스냅샷부터 실제 세트 구성품을 여러 행으로 펼친다. 내품명 전체로
   본품을 찾아 소비한 행은 이 단계부터 내품명을 비우고, 앞부분만 소비한 행은 suffix를
   보여 주며, 나머지는 원문을 유지한다. `내품명 변환` 단계부터 승인된 변환 내품명을
@@ -556,8 +563,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   모델과 독립된 데이터이므로 모델을 바꿔도 다시 수동 전환할 필요가 없다.
 - 기본 정책은 `hybrid_auto`다. 확정 원장·등록 이력·유사도 1위가 충분하면
   AI를 건너뛰고, 후보가 없거나 저신뢰 1개면 수동 확인, 2개 이상이 애매할
-  때만 상위 6개를 AI에 보낸다. 임계값은 로컬 정밀도 검증으로 맞추며 일반
-  화면에서는 직접 고치지 않는다.
+  때만 상위 16개를 AI에 보낸다. `decision_config.aiTopN` 기본·상한은 16이다.
+  임계값은 로컬 정밀도 검증으로 맞추며 일반 화면에서는 직접 고치지 않는다.
 - `ai_recommendation_cache`는 브랜드·기능·모델·입력 fingerprint로 추천을 공유한다.
   fingerprint에는 후보 목록과 내품명 확정 사례가 들어간다.
 - `ai_recommendation_feedback`는 품목명 원장 저장에 성공한 사람 확정만 남긴다.
@@ -602,6 +609,15 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   로직: `src/features/logistics/useInvoiceProductNameBulkAiApply.ts`.
 - 유사 후보는 `app.search_invoice_product_candidates_core`가 브랜드 권한을
   한 번만 검사한 뒤 exact → 원장 trigram → 상품명 trigram 순으로 고른다.
+  검색 키는 앱 `normalizeInvoiceText`와 같은
+  `app.normalize_invoice_lookup_key`로 맞춘다. NFKC, 제로폭·NBSP, 대괄호·대시
+  통일, 공백 축약, `]` 뒤 공백 제거, 소문자화 후 200자로 자른다.
+  AI 피드백의 정규화 키만 새 규칙으로 다시 계산하고, 업무 원장
+  `normalized_*` 열은 앱이 쓰므로 마이그레이션에서 대량 재작성하지 않는다.
+  품목명 AI 퍼지 후보는 `product`·`product_item*`처럼 품목 문맥이 있는
+  키만 보낸다. `item_full` 같은 옵션 단독은 exact 원장·등록 후보에만
+  남기고, 색상 유사도로 다른 상품을 끌어오지 않게 한다. 품목 문맥 키가
+  없을 때만 기존 전체 키로 돌아간다.
   `public.search_invoice_product_candidates`는 기존 시그니처의 래퍼다.
 - 읽기는 `app.can_read_brand`, 설정 쓰기는
   `app.is_admin() or app.is_brand_lead(brand_id)`다. 일반 멤버는 선택된
@@ -628,8 +644,10 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 내품명 옵션 일괄추천은 `invoice_item_name_recommendation` 전용 라우트를 쓰고
   게이트웨이 `mode = item_name`으로 프롬프트와 캐시를 분리한다. 한 요청은
   최대 8개 실제 `(내품명, 확정 본품, 조회 키)` 문맥을 판정하고, 각 문맥은
-  `components | delete | hold` 중 하나만 반환한다. AI가 고를 수 있는 M번호는 해당
-  문맥에 제공한 후보로 제한하며 후보가 없거나 불확실하면 `hold`로 남긴다.
+  `components | delete | hold` 중 하나만 반환한다. 조회 키가 다르면 같은
+  내품명·본품이어도 따로 판정한다. AI가 고를 수 있는 M번호는 해당 문맥에
+  제공한 후보(문맥별 최대 16개)로 제한하며 후보가 없거나 불확실하면 `hold`로
+  남긴다.
 - 사람이 고른 추천만 `invoice_item_name_rules`에 저장한다. 같은 내품명의 여러 실제
   문맥이 모두 선택되고 고신뢰·무수정·동일 결과일 때만 `global` 한 건으로 저장한다.
   단일 문맥, 일부 선택, 저신뢰 직접 선택 또는 수정한 행은
@@ -656,7 +674,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260826034304_ai_learning_v2.sql`,
   `20260826042107_ai_learning_v2_advisor_fixes.sql`,
   `20260826044258_ai_learning_automatic_assist.sql`,
-  `20260826051756_ai_feedback_ephemeral_cache_fix.sql`.
+  `20260826051756_ai_feedback_ephemeral_cache_fix.sql`,
+  `20260831055019_invoice_ai_accuracy_foundation.sql`.
 
 ### 송장 사은품 증정 · 작업 지시
 
@@ -769,6 +788,23 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 재고·예약발송 연결 원칙은 [`INVENTORY.md`](./INVENTORY.md)를 본다. 향후
   `stock_reservations`가 allocation을 참조할 수 있게 경계를 둔다.
 
+#### 출고상태 예발·단종 (`invoice_preorder_holds`, `invoice_discontinued_styles`)
+
+- 기준정보 출고상태에서 관리한다. 브랜드·`styles` 복합 FK로 연결한다.
+- 예발은 `started_on`·`ship_on`·`reason`을 필수로 둔다. 진행 중(`active`)은
+  상품당 1건만 허용한다. 목록에서 빼면 삭제하지 않고 `cleared`로 바꿔 과거
+  참고 기록으로 남긴다. 같은 상품을 다시 예발하면 새 행을 만든다.
+- 출고 예정일 연장은 `invoice_preorder_hold_extensions`에 이전 날짜·새 날짜·
+  사유를 남기고 `ship_on`만 최종일로 갱신한다. 단순 수정은 이력에 넣지 않는다.
+- `ship_on`이 지나도 자동 종료하지 않는다. 「종료」(`ended` + `ended_on`)를
+  누르기 전까지 `active`다. 종료일은 예정일보다 이를 수 있다.
+- 종료일이 출고 예정일과 다르면(조기·지연 종료) `ended_reason`을 필수로 남긴다.
+  예정일과 같으면 사유는 비운다.
+- 「제거」는 잘못 등록한 `active` 행을 삭제한다. 경고 확인 후 지우고 과거
+  기록에 남기지 않는다. 정상 종료는 「종료」만 쓴다.
+- 단종은 `invoice_discontinued_styles`에 상품당 1행이다. 제거는 삭제다.
+- 재고부족 카드와 송장 재고·예약 단계의 자동 제외 반영은 이후 연결한다.
+
 #### 작업 지시 (`invoice_work_instructions`)
 
 - 지시(`invoice_work_instructions`)와 대상 원본 품목명
@@ -799,7 +835,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 #### 오늘 작업 최종 행 순서
 
 ```
-파일 올리기 → 파일 확인 → 사은품 추가 → 작업 지시 → 품목명 변환 → 내품명 변환 → 상품 리스트 → 최종 행
+파일 올리기 → 파일 확인 → 사은품 추가 → 작업 지시 → 품목명 변환 → 내품명 변환 → 재고·예약 → 상품 리스트 → 최종 행
 ```
 
 1. 원본 품목명으로 사은품 적격·배정과 작업 지시 매칭을 확정한다.
@@ -815,15 +851,20 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
    단계에서 전체를 소비한 내품명과 처음부터 빈 내품명은 빈 값으로 두고 검토
    목록에 넣지 않는다. 세트 구성만으로는 내품명을 바꾸거나 비우지 않는다.
    사은품 행(`kind = gift`)은 미변환 목록에서 제외한다.
-4. 상품 리스트는 브라우저 메모리의 출고구성(`buildOutgoingComponentRowsFromStages`)을
-   읽기 전용으로 집계한다. 품목·내품·세트·사은품·포장재 중 체크한 종류만 M번호로
+4. 재고·예약 단계는 단종·재고부족·예약발송 상품을 모아 이번 송장에서 제외할지
+   유지할지 고른다. 기준정보 출고상태의 예발(`invoice_preorder_holds`)·단종
+   (`invoice_discontinued_styles`)은 DB에 저장한다. 예발은 목록에서 빼도
+   `cleared`로 남겨 과거 참고 기록으로 본다. 실제 주문 제외 반영은 이후 연결한다.
+5. 상품 리스트는 브라우저 메모리의 출고구성(`buildOutgoingComponentRowsFromStages`)을
+   읽기 전용으로 집계한다. 품목(본품·옵션맵 세트 구성)·내품(내품명 규칙·부속품
+   사전)·사은품·포장재 중 체크한 종류만 M번호로
    중복 제거하고 수량을 합친다. 합친 수량은 활성 연습 세트의 출고창고·박스창고
    자리에 FIFO로 나누고, 자리번호 오름차순·위치 첫 구역 탭·출력 전 동선
    미리보기·A4 피킹표로 보여 준다. 동선 묶음·한 카드/구역별 분해와 다단
    출력 형식은 출고창고용·박스창고용 화면 상태이며 DB에 저장하지 않는다. 주문
    개인정보와 집계 결과도 저장하지 않으며 사은품 원장·재고도 바꾸지
    않는다. 빈 M번호와 `unknown` 행은 합계에서 뺀다.
-5. 다운로드 직전에 선착순 신규 배정을 원자 확정한 뒤, 실제 세트면 구성품별 CJ
+6. 다운로드 직전에 선착순 신규 배정을 원자 확정한 뒤, 실제 세트면 구성품별 CJ
    행을 펼치고 각 상품 행의 최종 품목명 앞에 작업 지시 문구를 붙인다. 내품명
    규칙의 M번호는 CJ 행을 늘리지 않고 출고구성 XLSX에만 반영한다. 사은품은 그
    세트 블록 뒤에 순서대로 삽입한다. CJ 13열과 M번호 출고구성 XLSX를 따로
