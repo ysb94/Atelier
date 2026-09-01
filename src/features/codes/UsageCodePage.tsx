@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Pause, Play, Plus, Search, Upload, X } from 'lucide-react'
+import { Pause, Play, Plus, Search, Settings2, Upload, X } from 'lucide-react'
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
@@ -23,6 +23,7 @@ import {
 import {
   CODE_USAGE_STATUS_LABEL,
   type CodeUsageStatus,
+  type CodeUsageTarget,
   type ProductCode,
   type Style,
 } from '@/lib/types'
@@ -30,6 +31,131 @@ import { cn, formatNumber } from '@/lib/utils'
 
 type StatusFilter = 'all' | CodeUsageStatus
 type AddMode = 'search' | 'bulk' | null
+
+function visibleTargetsKey(brandId: string) {
+  return `atelier:usage-codes-target-ids:${brandId}`
+}
+
+/** null = 아직 설정 안 함(목록 비움). 빈 배열 = 의도적으로 없음. */
+function readVisibleTargetIds(brandId: string): string[] | null {
+  try {
+    const raw = localStorage.getItem(visibleTargetsKey(brandId))
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return null
+    return parsed.filter((value): value is string => typeof value === 'string')
+  } catch {
+    return null
+  }
+}
+
+function writeVisibleTargetIds(brandId: string, ids: string[]) {
+  localStorage.setItem(visibleTargetsKey(brandId), JSON.stringify(ids))
+}
+
+function UsagePartnerSettingsDialog({
+  partners,
+  initialIds,
+  onClose,
+  onSave,
+}: {
+  partners: CodeUsageTarget[]
+  initialIds: Set<string>
+  onClose: () => void
+  onSave: (ids: string[]) => void
+}) {
+  const [draft, setDraft] = useState(() => new Set(initialIds))
+
+  function toggle(id: string) {
+    setDraft((current) => {
+      const next = new Set(current)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/40"
+        aria-label="닫기"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="relative z-10 flex max-h-[min(80vh,36rem)] w-full max-w-lg flex-col rounded-xl border border-border bg-card shadow-lg"
+      >
+        <div className="border-b border-border px-5 py-4">
+          <h2 className="text-base font-semibold">출고업체별 바코드 업체 설정</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            88바코드를 쓰는 출고업체만 고릅니다. 여기서 켠 업체만 왼쪽 목록에
+            나옵니다.
+          </p>
+        </div>
+        <div className="min-h-0 flex-1 space-y-1 overflow-auto px-3 py-3">
+          {partners.length === 0 ? (
+            <p className="px-2 py-8 text-center text-sm text-muted-foreground">
+              등록된 출고업체가 없습니다. 출고업체 관리에서 먼저 추가하세요.
+            </p>
+          ) : (
+            partners.map((partner) => {
+              const checked = draft.has(partner.id)
+              return (
+                <label
+                  key={partner.id}
+                  className={cn(
+                    'flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2 text-sm',
+                    checked
+                      ? 'border-primary/30 bg-primary/5'
+                      : 'border-transparent hover:bg-muted/40',
+                    !partner.active && 'opacity-60',
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    className="size-3.5 accent-primary"
+                    checked={checked}
+                    onChange={() => toggle(partner.id)}
+                  />
+                  <span className="min-w-0 flex-1 truncate font-medium">
+                    {partner.name}
+                  </span>
+                  {!partner.active ? (
+                    <span className="shrink-0 text-[11px] text-muted-foreground">
+                      비활성
+                    </span>
+                  ) : null}
+                </label>
+              )
+            })
+          )}
+        </div>
+        <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
+          <Button type="button" size="sm" variant="outline" onClick={onClose}>
+            취소
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => {
+              onSave(
+                partners
+                  .filter((item) => draft.has(item.id))
+                  .map((item) => item.id),
+              )
+              onClose()
+            }}
+          >
+            저장
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export function UsageCodePage() {
   const { brand } = useBrand()
@@ -39,6 +165,16 @@ export function UsageCodePage() {
   const [listSearch, setListSearch] = useState('')
   const [addMode, setAddMode] = useState<AddMode>(null)
   const [managerOpen, setManagerOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [visibleTargetIds, setVisibleTargetIds] = useState<string[] | null>(
+    () => readVisibleTargetIds(brand.id),
+  )
+
+  useEffect(() => {
+    setVisibleTargetIds(readVisibleTargetIds(brand.id))
+    setSelectedTargetId(null)
+    setAddMode(null)
+  }, [brand.id])
 
   const targetsQuery = useQuery({
     queryKey: ['codeUsageTargets', brand.id],
@@ -75,6 +211,34 @@ export function UsageCodePage() {
     [assignmentsQuery.data],
   )
 
+  const allPartners = useMemo(
+    () =>
+      [...targets].sort(
+        (left, right) =>
+          Number(right.active) - Number(left.active) ||
+          left.order - right.order ||
+          left.name.localeCompare(right.name, 'ko'),
+      ),
+    [targets],
+  )
+
+  const visibleTargets = useMemo(() => {
+    if (visibleTargetIds == null) return []
+    const allowed = new Set(visibleTargetIds)
+    return allPartners.filter((item) => allowed.has(item.id))
+  }, [allPartners, visibleTargetIds])
+
+  const settingsInitialIds = useMemo(() => {
+    if (visibleTargetIds == null) return new Set<string>()
+    return new Set(
+      visibleTargetIds.filter((id) =>
+        allPartners.some((partner) => partner.id === id),
+      ),
+    )
+  }, [allPartners, visibleTargetIds])
+
+  const configured = visibleTargetIds != null
+
   const codeMap = useMemo(
     () => new Map(codes.map((code) => [code.id, code])),
     [codes],
@@ -84,12 +248,10 @@ export function UsageCodePage() {
     [styles],
   )
 
-  // 거래중인 업체를 우선, 없으면 첫 업체 자동 선택
-  const activeTargets = targets.filter((t) => t.active)
   const selectedTarget =
-    targets.find((t) => t.id === selectedTargetId) ??
-    activeTargets[0] ??
-    targets[0] ??
+    visibleTargets.find((t) => t.id === selectedTargetId) ??
+    visibleTargets.find((t) => t.active) ??
+    visibleTargets[0] ??
     null
 
   const targetAssignments = useMemo(() => {
@@ -158,15 +320,27 @@ export function UsageCodePage() {
     <div>
       <PageHeader
         title="출고업체별 바코드"
-        description="자사 바코드를 출고업체에 등록하고, 사용중/일시중지를 관리합니다. 바코드 자체는 자사 바코드 메뉴에서 등록합니다."
+        description="88바코드를 출고업체에 등록하고, 사용중/일시중지를 관리합니다. 바코드 자체는 88바코드 관리 메뉴에서 등록합니다. 표시할 업체는 설정에서 고릅니다."
         actions={
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => setManagerOpen(true)}
-          >
-            출고업체 관리
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings2 className="size-3.5" />
+              업체 설정
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setManagerOpen(true)}
+            >
+              출고업체 관리
+            </Button>
+          </div>
         }
       />
 
@@ -179,7 +353,7 @@ export function UsageCodePage() {
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">
               불러오는 중...
             </p>
-          ) : targets.length === 0 ? (
+          ) : allPartners.length === 0 ? (
             <div className="space-y-3 px-4 py-8 text-center">
               <p className="text-sm text-muted-foreground">
                 등록된 출고업체가 없습니다.
@@ -193,9 +367,38 @@ export function UsageCodePage() {
                 출고업체 추가
               </Button>
             </div>
+          ) : !configured ? (
+            <div className="space-y-3 px-4 py-8 text-center">
+              <p className="text-sm text-muted-foreground">
+                아직 업체를 고르지 않았습니다.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <Settings2 className="size-3.5" />
+                업체 설정
+              </Button>
+            </div>
+          ) : visibleTargets.length === 0 ? (
+            <div className="space-y-3 px-4 py-8 text-center">
+              <p className="text-sm text-muted-foreground">
+                선택된 업체가 없습니다.
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <Plus className="size-3.5" />
+                업체 추가
+              </Button>
+            </div>
           ) : (
             <ul className="max-h-[min(70vh,560px)] overflow-y-auto p-2">
-              {targets.map((target) => {
+              {visibleTargets.map((target) => {
                 const active = selectedTarget?.id === target.id
                 const total = countForTarget(target.id)
                 const paused = countForTarget(target.id, 'paused')
@@ -253,7 +456,11 @@ export function UsageCodePage() {
           {!selectedTarget ? (
             <Card>
               <CardContent className="px-6 py-12 text-center text-sm text-muted-foreground">
-                왼쪽에서 출고업체를 선택하거나 먼저 출고업체를 추가하세요.
+                {!configured
+                  ? '업체 설정에서 88바코드를 쓰는 출고업체를 먼저 골라 주세요.'
+                  : allPartners.length === 0
+                    ? '왼쪽에서 출고업체를 선택하거나 먼저 출고업체를 추가하세요.'
+                    : '왼쪽에서 업체를 선택하세요.'}
               </CardContent>
             </Card>
           ) : (
@@ -515,6 +722,21 @@ export function UsageCodePage() {
         onClose={() => setManagerOpen(false)}
         onChanged={invalidate}
       />
+
+      {settingsOpen ? (
+        <UsagePartnerSettingsDialog
+          partners={allPartners}
+          initialIds={settingsInitialIds}
+          onClose={() => setSettingsOpen(false)}
+          onSave={(ids) => {
+            writeVisibleTargetIds(brand.id, ids)
+            setVisibleTargetIds(ids)
+            if (selectedTargetId && !ids.includes(selectedTargetId)) {
+              setSelectedTargetId(null)
+            }
+          }}
+        />
+      ) : null}
     </div>
   )
 }

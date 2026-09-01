@@ -12,6 +12,7 @@ import {
   Boxes,
   Building2,
   CalendarRange,
+  ChartColumn,
   ChevronDown,
   ClipboardList,
   FileSpreadsheet,
@@ -33,6 +34,7 @@ import {
   Shirt,
   Store,
   Table2,
+  Truck,
   Upload,
   UserRound,
   Users,
@@ -70,7 +72,18 @@ const orgNavItem: NavItem = {
   icon: Network,
 }
 
-const topNavItems: NavItem[] = [homeNavItem, profileNavItem, orgNavItem]
+const operationsNavItem: NavItem = {
+  to: 'operations',
+  label: '운영 현황',
+  icon: ChartColumn,
+}
+
+const topNavItems: NavItem[] = [
+  homeNavItem,
+  profileNavItem,
+  orgNavItem,
+  operationsNavItem,
+]
 
 const SIDEBAR_COLLAPSED_KEY = 'atelier:sidebar-collapsed'
 
@@ -112,6 +125,11 @@ const navGroups: { title: string; items: NavItem[] }[] = [
         icon: FileSpreadsheet,
       },
       {
+        to: 'logistics/bulk-outbound',
+        label: '대량출고',
+        icon: Truck,
+      },
+      {
         to: 'logistics/warehouses',
         label: '창고 관리',
         icon: Warehouse,
@@ -124,7 +142,7 @@ const navGroups: { title: string; items: NavItem[] }[] = [
     items: [
       { to: 'data/all', label: '전체 상품', icon: Table2 },
       { to: 'data/upload', label: '일괄 업로드', icon: Upload },
-      { to: 'barcodes', label: '자사 바코드', icon: ScanBarcode },
+      { to: 'barcodes', label: '88바코드 관리', icon: ScanBarcode },
       { to: 'usage-codes', label: '출고업체별 바코드', icon: Store },
       { to: 'partner-codes', label: '거래처 코드', icon: Building2 },
     ],
@@ -521,6 +539,7 @@ export function BrandLayout() {
             const pageLayout = location.pathname.includes('/design/file-manager')
               ? 'full'
               : location.pathname.includes('/logistics/invoices') ||
+                  location.pathname.includes('/logistics/bulk-outbound') ||
                   location.pathname.includes('/logistics/warehouses')
                 ? 'wide'
                 : 'default'

@@ -35,9 +35,9 @@ const KINDS: { id: UploadKind; label: string; description: string }[] = [
   },
   {
     id: 'barcodes',
-    label: '자사 바코드',
+    label: '88바코드 관리',
     description:
-      '회사에서 발급한 88코드·바코드 상품명·M번호를 파일로 일괄 등록합니다. M번호는 비워도 되고, 미지정 바코드는 자사 바코드 화면의 미지정 탭에서 채웁니다. 이미 있는 바코드는 덮어쓰지 않습니다.',
+      '회사에서 발급한 88코드·바코드 상품명·M번호를 파일로 일괄 등록합니다. M번호는 비워도 되고, 미지정 바코드는 88바코드 관리 화면의 미지정 탭에서 채웁니다. 이미 있는 바코드는 덮어쓰지 않습니다.',
   },
   {
     id: 'partner',
@@ -177,13 +177,13 @@ export function DataUploadPage() {
           ) : (codesQuery.data ?? []).length === 0 ? (
             <Card>
               <CardContent className="space-y-3 p-6">
-                <p className="text-sm font-medium">자사 바코드가 없습니다</p>
+                <p className="text-sm font-medium">88바코드가 없습니다</p>
                 <p className="text-sm text-muted-foreground">
                   출고업체 연결 전에 자사 바코드 마스터를 먼저 등록하세요.
                 </p>
                 <Link to={`/b/${brand.slug}/barcodes`}>
                   <Button type="button" size="sm">
-                    자사 바코드로 이동
+                    88바코드 관리로 이동
                   </Button>
                 </Link>
               </CardContent>
@@ -268,7 +268,7 @@ export function DataUploadPage() {
                 >
                   자사 바코드 · M번호 미지정
                 </Link>
-                탭에서 채울 수 있습니다. 엑셀 헤더는 자사 바코드 화면의{' '}
+                탭에서 채울 수 있습니다. 엑셀 헤더는 88바코드 관리 화면의{' '}
                 <Link
                   to={`/b/${brand.slug}/barcodes`}
                   className="underline underline-offset-2"

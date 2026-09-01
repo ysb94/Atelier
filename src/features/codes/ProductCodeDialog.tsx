@@ -317,7 +317,7 @@ export function ProductCodeDialog({
       ? '코드 수정'
       : source
         ? '코드 복제 등록'
-        : '자사 바코드 등록'
+        : '88바코드 등록'
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -468,7 +468,7 @@ export function ProductCodeDialog({
             {draft.components.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
                 담은 구성품이 없습니다. 비워 두면 M번호 미지정으로 저장되고,
-                자사 바코드 화면의 미지정 탭에서 나중에 채울 수 있습니다.
+                88바코드 관리 화면의 미지정 탭에서 나중에 채울 수 있습니다.
               </div>
             ) : (
               <ul className="divide-y divide-border rounded-lg border border-border">

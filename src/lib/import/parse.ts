@@ -101,6 +101,12 @@ function stringifyCell(cell: unknown): string {
     const minute = String(cell.getMinutes()).padStart(2, '0')
     return `${year}-${month}-${day} ${hour}:${minute}`
   }
+  // Excel이 바코드·SKU를 숫자로 저장하면 raw:false일 때 8.8097E+12처럼
+  // 잘려 보여 서로 다른 값이 중복으로 잡힌다.
+  if (typeof cell === 'number' && Number.isFinite(cell)) {
+    if (Number.isInteger(cell)) return String(Math.trunc(cell))
+    return String(cell)
+  }
   return String(cell ?? '').trim()
 }
 
@@ -115,7 +121,7 @@ export async function parseFile(file: File): Promise<ParsedSheet[]> {
         header: 1,
         blankrows: false,
         defval: '',
-        raw: false,
+        raw: true,
         dateNF: 'yyyy-mm-dd hh:mm',
       })
       const rows = raw

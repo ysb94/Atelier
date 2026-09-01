@@ -27,6 +27,8 @@ import { OrgChartPage } from '@/features/org/OrgChartPage'
 import { DataSheetPage } from '@/features/data/DataSheetPage'
 import { DataUploadPage } from '@/features/data/DataUploadPage'
 import { InvoiceWorkPage } from '@/features/logistics/InvoiceWorkPage'
+import { BulkOutboundPage } from '@/features/logistics/BulkOutboundPage'
+import { OutboundDataPage } from '@/features/logistics/OutboundDataPage'
 import { WarehousePage } from '@/features/logistics/WarehousePage'
 import { WorkRequestPage } from '@/features/work-requests/WorkRequestPage'
 
@@ -76,6 +78,7 @@ export function BrandWorkspaceRouteTree() {
       </Route>
       <Route path="work-requests/:owner" element={<WorkRequestPage />} />
       <Route path="logistics/invoices" element={<InvoiceWorkPage />} />
+      <Route path="logistics/bulk-outbound" element={<BulkOutboundPage />} />
       <Route path="logistics/warehouses" element={<WarehousePage />} />
       <Route path="data" element={<RedirectTo to="data/all" />} />
       <Route path="data/upload" element={<DataUploadPage />} />
@@ -87,6 +90,11 @@ export function BrandWorkspaceRouteTree() {
       <Route path="partner-codes" element={<PartnerCodePage />} />
       <Route path="settings/profile" element={<ProfileSettingsPage />} />
       <Route path="org-chart" element={<OrgChartPage />} />
+      <Route path="operations" element={<OutboundDataPage />} />
+      <Route
+        path="outbound-data"
+        element={<RedirectTo to="operations" />}
+      />
       <Route path="settings/fields" element={<FieldsSettingsPage />} />
       <Route path="settings/seasons" element={<SeasonsSettingsPage />} />
       <Route

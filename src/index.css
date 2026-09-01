@@ -89,6 +89,71 @@ html.printing-invoice-product-list .invoice-product-list-print-sheet {
   overflow: hidden;
 }
 
+.invoice-product-list-print-job {
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  height: auto;
+  padding: 0 0 1.2mm;
+  border-bottom: 0.3mm solid #111;
+  margin-bottom: 1.2mm;
+}
+
+.invoice-product-list-print-job-title {
+  margin: 0;
+  font-size: calc(11pt * var(--ipl-font-scale, 1));
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.invoice-product-list-print-job-subtitle {
+  margin: 0.4mm 0 0;
+  font-size: calc(7.5pt * var(--ipl-font-scale, 1));
+  line-height: 1.25;
+  color: #333;
+}
+
+.invoice-product-list-print-sheet--with-job {
+  display: flex;
+  flex-direction: column;
+}
+
+.invoice-product-list-print-page-no {
+  flex: 0 0 auto;
+  margin-top: auto;
+  padding-top: 1.5mm;
+  text-align: center;
+  font-size: calc(9pt * var(--ipl-font-scale, 1));
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  color: #111;
+}
+
+.invoice-product-list-print-body {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+}
+
+.invoice-product-list-print-sheet--with-job.invoice-product-list-print-sheet--vertical_1
+  .invoice-product-list-print-body {
+  grid-template-columns: 1fr;
+}
+
+.invoice-product-list-print-sheet--with-job.invoice-product-list-print-sheet--vertical_2
+  .invoice-product-list-print-body {
+  grid-template-columns: 1fr 1fr;
+  column-gap: 4mm;
+}
+
+.invoice-product-list-print-sheet--with-job.invoice-product-list-print-sheet--horizontal_3
+  .invoice-product-list-print-body {
+  grid-template-columns: 1fr 1fr 1fr;
+  column-gap: 3mm;
+}
+
 .invoice-product-list-print-sheet--vertical_1,
 .invoice-product-list-print-sheet--vertical_2 {
   grid-template-columns: 1fr;
@@ -135,10 +200,18 @@ html.printing-invoice-product-list .invoice-product-list-print-sheet {
 }
 
 .invoice-product-list-print-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 2mm;
   flex-shrink: 0;
   margin-bottom: 2pt;
   font-size: 9pt;
   font-weight: 700;
+}
+
+.invoice-product-list-print-meta > .tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 .invoice-product-list-print-table-wrap {
@@ -205,6 +278,52 @@ html.printing-invoice-product-list .invoice-product-list-print-sheet {
   width: var(--ipl-col-5, 12%);
 }
 
+.invoice-product-list-print-sheet--no-check .invoice-product-list-print-table th,
+.invoice-product-list-print-sheet--no-check .invoice-product-list-print-table td {
+  font-size: calc(9.5pt * var(--ipl-font-scale, 1));
+  padding: 0 2.5pt;
+  white-space: normal;
+  overflow: hidden;
+  text-overflow: clip;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  line-height: 1.15;
+}
+
+.invoice-product-list-print-sheet--no-check.invoice-product-list-print-sheet--vertical_2
+  .invoice-product-list-print-table
+  th,
+.invoice-product-list-print-sheet--no-check.invoice-product-list-print-sheet--vertical_2
+  .invoice-product-list-print-table
+  td,
+.invoice-product-list-print-sheet--no-check.invoice-product-list-print-sheet--horizontal_3
+  .invoice-product-list-print-table
+  th,
+.invoice-product-list-print-sheet--no-check.invoice-product-list-print-sheet--horizontal_3
+  .invoice-product-list-print-table
+  td {
+  font-size: calc(8.5pt * var(--ipl-font-scale, 1));
+  padding: 0 2pt;
+}
+
+.invoice-product-list-print-location,
+.invoice-product-list-print-sheet--no-check
+  .invoice-product-list-print-table
+  td.invoice-product-list-print-location {
+  white-space: pre-line !important;
+  line-height: 1.55;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.invoice-product-list-print-sheet--no-check .invoice-product-list-print-table td {
+  vertical-align: middle;
+}
+
+.invoice-product-list-print-sheet--no-check .invoice-product-list-print-table td:nth-child(3) {
+  text-align: left;
+}
+
 .invoice-product-list-print-sheet--vertical_2 .invoice-product-list-print-meta,
 .invoice-product-list-print-sheet--horizontal_3 .invoice-product-list-print-meta {
   font-size: 8pt;
@@ -237,6 +356,11 @@ html.printing-invoice-product-list .invoice-product-list-print-sheet {
   font-size: calc(8pt * var(--ipl-font-scale, 1));
   font-weight: 700;
   text-align: left;
+}
+
+/* 대량출고: 구역이 바뀔 때 빈 행 없이 상품 행 윗선만 굵게 */
+.invoice-product-list-print-zone-start td {
+  border-top: 1.8pt solid #111 !important;
 }
 
 .invoice-product-list-print-zone-bar {
@@ -303,8 +427,11 @@ html.printing-invoice-product-list .invoice-product-list-print-sheet {
 
   html.printing-invoice-product-list .invoice-product-list-print-sheet {
     width: 100%;
+    box-sizing: border-box;
     break-after: page;
     page-break-after: always;
+    break-inside: avoid;
+    page-break-inside: avoid;
     overflow: hidden;
   }
 
@@ -312,13 +439,35 @@ html.printing-invoice-product-list .invoice-product-list-print-sheet {
     .invoice-product-list-print-sheet--vertical_1,
   html.printing-invoice-product-list
     .invoice-product-list-print-sheet--vertical_2 {
-    height: 277mm;
+    /* A4 297mm - 위 10mm - 아래 12mm = 275mm.
+       브라우저 반올림으로 다음 용지가 생기지 않도록 1mm 여유를 둔다. */
+    height: 274mm;
+    max-height: 274mm;
   }
 
   html.printing-invoice-product-list
     .invoice-product-list-print-sheet--horizontal_3 {
     page: landscape-sheet;
     height: 194mm;
+    max-height: 194mm;
+  }
+
+  html.printing-invoice-product-list .invoice-product-list-print-sheet--with-job {
+    display: flex !important;
+    flex-direction: column;
+  }
+
+  html.printing-invoice-product-list .invoice-product-list-print-body {
+    flex: 1 1 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  html.printing-invoice-product-list .invoice-product-list-print-column {
+    break-inside: avoid;
+    page-break-inside: avoid;
+    min-height: 0;
+    overflow: hidden;
   }
 
   html.printing-invoice-product-list

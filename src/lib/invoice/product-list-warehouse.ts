@@ -26,6 +26,8 @@ export type InvoiceProductListWarehouseLine = {
   locationZonePrefix: string
   quantity: number
   isShortage: boolean
+  /** 여러 자리에 걸치면 줄바꿈 표시. 없으면 locationLabel 한 줄 */
+  locationLabels?: string[]
 }
 
 export type InvoiceProductListWarehouseGroup = {
@@ -185,6 +187,125 @@ export function allocateInvoiceProductListWarehouse(input: {
       lines: groupLines,
       quantity: groupLines.reduce((sum, line) => sum + line.quantity, 0),
       styleCount: new Set(groupLines.map((line) => line.styleNo)).size,
+    }))
+
+  return {
+    zone: input.zone,
+    groups,
+    lines,
+    totalRequested,
+    totalAllocated,
+    totalShortage,
+    stylesWithShortage: shortageStyles.size,
+  }
+}
+
+/** 대량출고용: M번호당 1행. 자리는 줄바꿈으로 모으고 수량은 총합. */
+export function allocateBulkOutboundProductListWarehouse(input: {
+  entries: InvoiceProductListEntry[]
+  positions: WarehouseStockPosition[]
+  zone: WarehouseZone
+}): InvoiceProductListWarehouseAllocation {
+  const byStyle = new Map<string, WarehouseStockPosition[]>()
+  for (const position of input.positions) {
+    if (position.zone !== input.zone) continue
+    if (warehousePositionQty(position) <= 0) continue
+    const styleNo = normalizeStyleNo(position.styleNo)
+    if (!styleNo) continue
+    const list = byStyle.get(styleNo) ?? []
+    list.push(position)
+    byStyle.set(styleNo, list)
+  }
+  for (const list of byStyle.values()) {
+    list.sort(compareWarehouseUsageOrder)
+  }
+
+  const lines: InvoiceProductListWarehouseLine[] = []
+  let totalRequested = 0
+  let totalAllocated = 0
+  let totalShortage = 0
+  const shortageStyles = new Set<string>()
+
+  for (const entry of input.entries) {
+    const styleNo = normalizeStyleNo(entry.styleNo)
+    if (!styleNo || entry.quantity <= 0) continue
+    totalRequested += entry.quantity
+
+    const locationLabels: string[] = []
+    let remaining = entry.quantity
+    let allocated = 0
+    let firstCode = ''
+    let firstLabel = ''
+
+    for (const position of byStyle.get(styleNo) ?? []) {
+      if (remaining <= 0) break
+      const take = Math.min(remaining, warehousePositionQty(position))
+      if (take <= 0) continue
+      remaining -= take
+      allocated += take
+      const label =
+        formatWarehouseLocation(position) || UNSPECIFIED_LOCATION_ZONE
+      if (!locationLabels.includes(label)) locationLabels.push(label)
+      if (!firstCode) {
+        firstCode = position.locationCode
+        firstLabel = label
+      }
+    }
+
+    if (remaining > 0) {
+      totalShortage += remaining
+      shortageStyles.add(styleNo)
+      if (!locationLabels.includes(UNSPECIFIED_LOCATION_ZONE)) {
+        locationLabels.push(UNSPECIFIED_LOCATION_ZONE)
+      }
+      if (!firstLabel) {
+        firstLabel = UNSPECIFIED_LOCATION_ZONE
+      }
+    }
+
+    totalAllocated += allocated
+    lines.push({
+      styleNo,
+      styleName: entry.styleName,
+      locationCode: firstCode,
+      locationLabel: locationLabels.join('\n') || UNSPECIFIED_LOCATION_ZONE,
+      locationLabels,
+      locationZonePrefix: extractWarehouseLocationZonePrefix(
+        firstCode || '',
+      ),
+      quantity: entry.quantity,
+      isShortage: remaining > 0,
+    })
+  }
+
+  lines.sort((left, right) => {
+    const zone = compareWarehouseLocationZones(
+      left.locationZonePrefix,
+      right.locationZonePrefix,
+    )
+    if (zone !== 0) return zone
+    if (left.isShortage !== right.isShortage) return left.isShortage ? 1 : -1
+    const location = compareWarehouseLocationCodeNatural(
+      left.locationLabels?.[0] ?? left.locationLabel,
+      right.locationLabels?.[0] ?? right.locationLabel,
+    )
+    if (location !== 0) return location
+    return left.styleNo.localeCompare(right.styleNo, 'ko-KR')
+  })
+
+  const groupMap = new Map<string, InvoiceProductListWarehouseLine[]>()
+  for (const line of lines) {
+    const list = groupMap.get(line.locationZonePrefix) ?? []
+    list.push(line)
+    groupMap.set(line.locationZonePrefix, list)
+  }
+  const groups = [...groupMap.entries()]
+    .sort(([left], [right]) => compareWarehouseLocationZones(left, right))
+    .map(([locationZonePrefix, groupLines]) => ({
+      locationZonePrefix,
+      lines: groupLines,
+      quantity: groupLines.reduce((sum, line) => sum + line.quantity, 0),
+      styleCount: groupLines.length,
     }))
 
   return {

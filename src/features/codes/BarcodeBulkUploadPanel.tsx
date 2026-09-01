@@ -113,7 +113,7 @@ export function BarcodeBulkUploadPanel({
       <CardContent className="space-y-3 p-4">
         <div className="flex items-center justify-between gap-2">
           <div>
-            <div className="text-sm font-medium">자사 바코드 일괄 등록</div>
+            <div className="text-sm font-medium">88바코드 일괄 등록</div>
             <p className="mt-0.5 text-xs text-muted-foreground">
               회사에서 발급한 88코드·바코드 상품명을 넣으세요. M번호는 비워도
               됩니다. 미지정으로 등록한 뒤 미지정 탭에서 채울 수 있습니다. 이미

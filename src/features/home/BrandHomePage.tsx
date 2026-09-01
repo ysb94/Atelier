@@ -63,8 +63,8 @@ const shortcuts = [
   },
   {
     to: 'barcodes',
-    label: '자사 바코드',
-    description: '88코드 관리',
+    label: '88바코드 관리',
+    description: '회사에서 발급한 88코드',
     icon: ScanBarcode,
   },
   {

@@ -112,6 +112,12 @@ export type InvoiceProductListPrintFitProfile = {
 export type InvoiceProductListPrintPage = {
   printedOn: string
   warehouseLabel: string
+  /** 대량출고 등에서 시트 상단에 넣는 작업 제목(업체명) */
+  jobTitle?: string
+  /** 대량출고 등에서 시트 상단에 넣는 건 요약 */
+  jobSubtitle?: string
+  /** true면 확인(체크) 열을 빼고 나머지 열을 넓힌다 */
+  hideCheckColumn?: boolean
   routeGroupId: string
   routeGroupLabel: string
   routeGroupIndex: number
@@ -145,6 +151,8 @@ export type InvoiceProductListPrintBuildInput = {
   printedAt?: Date
   rowsPerPage?: number
   zoneHeaderRows?: number
+  /** true면 작은 구역이 남은 칸에 안 들어갈 때 다음 장으로 통째 넘김. 기본 true */
+  keepZoneTogether?: boolean
   autoFit?: boolean
 }
 
@@ -323,9 +331,10 @@ function countPackedSheets(
   rowsPerColumn: number,
   columnCount: number,
   headerRows: number,
+  keepZoneTogether = true,
 ) {
   return chunkColumns(
-    packRouteSection(groups, rowsPerColumn, headerRows),
+    packRouteSection(groups, rowsPerColumn, headerRows, keepZoneTogether),
     columnCount,
   ).length
 }
@@ -334,6 +343,7 @@ export function chooseInvoiceProductListFitRows(
   groups: InvoiceProductListWarehouseGroup[],
   mode: InvoiceProductListColumnMode,
   headerRows = INVOICE_PRODUCT_LIST_ZONE_HEADER_ROWS,
+  keepZoneTogether = true,
 ) {
   const spec = INVOICE_PRODUCT_LIST_FIT_SPEC[mode]
   const baseRows = spec.baseRows
@@ -343,11 +353,17 @@ export function chooseInvoiceProductListFitRows(
     baseRows,
     spec.columnCount,
     headerRows,
+    keepZoneTogether,
   )
   for (let rows = baseRows + 1; rows <= maxRows; rows += 1) {
     if (
-      countPackedSheets(groups, rows, spec.columnCount, headerRows) <
-      baseCount
+      countPackedSheets(
+        groups,
+        rows,
+        spec.columnCount,
+        headerRows,
+        keepZoneTogether,
+      ) < baseCount
     ) {
       return rows
     }
@@ -445,12 +461,27 @@ export function defaultInvoiceProductListPrintFitProfile(
   }
 }
 
+function linePrintRowCount(line: InvoiceProductListWarehouseLine) {
+  const labels = line.locationLabels?.filter(Boolean)
+  if (labels && labels.length > 0) return labels.length
+  const parts = line.locationLabel.split('\n').filter(Boolean)
+  return Math.max(1, parts.length)
+}
+
 function padSlots(
   slots: InvoiceProductListPrintSlot[],
   rowsPerPage: number,
 ): InvoiceProductListPrintSlot[] {
   const padded = [...slots]
-  while (padded.length < rowsPerPage) padded.push({ kind: 'empty' })
+  let used = 0
+  for (const slot of padded) {
+    used +=
+      slot.kind === 'item' ? linePrintRowCount(slot.line) : 1
+  }
+  while (used < rowsPerPage) {
+    padded.push({ kind: 'empty' })
+    used += 1
+  }
   return padded
 }
 
@@ -485,20 +516,25 @@ function appendSegment(
   headerRows: number,
 ) {
   const isShortage = group.locationZonePrefix === UNSPECIFIED_LOCATION_ZONE
-  column.slots.push({
-    kind: 'header',
-    locationZonePrefix: group.locationZonePrefix,
-    zoneQuantity: group.quantity,
-    continued,
-    isShortage,
-  })
-  for (let index = 1; index < headerRows; index += 1) {
-    column.slots.push({ kind: 'empty' })
+  if (headerRows > 0) {
+    column.slots.push({
+      kind: 'header',
+      locationZonePrefix: group.locationZonePrefix,
+      zoneQuantity: group.quantity,
+      continued,
+      isShortage,
+    })
+    for (let index = 1; index < headerRows; index += 1) {
+      column.slots.push({ kind: 'empty' })
+    }
   }
+  let rowCount = headerRows
   for (const line of rows) {
+    const span = linePrintRowCount(line)
     column.slots.push({ kind: 'item', line })
+    rowCount += span
   }
-  column.usedRows += headerRows + rows.length
+  column.usedRows += rowCount
   column.segments.push({
     locationZonePrefix: group.locationZonePrefix,
     zoneQuantity: group.quantity,
@@ -513,6 +549,7 @@ function packRouteSection(
   groups: InvoiceProductListWarehouseGroup[],
   rowsPerColumn: number,
   headerRows: number,
+  keepZoneTogether = true,
 ): DraftColumn[] {
   const columns: DraftColumn[] = []
   let current = createDraftColumn()
@@ -524,19 +561,41 @@ function packRouteSection(
 
   for (const group of groups) {
     if (group.lines.length === 0) continue
+    const totalLineRows = group.lines.reduce(
+      (sum, line) => sum + linePrintRowCount(line),
+      0,
+    )
     const capacity = zoneCapacity(rowsPerColumn, headerRows)
-    const keepTogether = group.lines.length <= capacity
+    const keepTogether =
+      keepZoneTogether && totalLineRows <= capacity
     let remaining = group.lines
     let chunkIndex = 0
     while (remaining.length > 0) {
-      const needed = keepTogether
-        ? headerRows + remaining.length
-        : headerRows + 1
-      if (current.usedRows + needed > rowsPerColumn) flush()
-      const take = Math.min(
-        remaining.length,
-        rowsPerColumn - current.usedRows - headerRows,
-      )
+      const free = rowsPerColumn - current.usedRows
+      if (free < headerRows + 1) {
+        flush()
+        continue
+      }
+      if (keepTogether) {
+        const needed = headerRows + totalLineRows
+        if (current.usedRows > 0 && current.usedRows + needed > rowsPerColumn) {
+          flush()
+        }
+      }
+      let take = 0
+      let used = headerRows
+      while (take < remaining.length) {
+        const span = linePrintRowCount(remaining[take]!)
+        if (used + span > free && take > 0) break
+        if (used + span > free && take === 0) {
+          // 한 줄이 칸보다 커도 강제로 넣고 다음 칸으로
+          take = 1
+          break
+        }
+        used += span
+        take += 1
+        if (used >= free) break
+      }
       if (take <= 0) {
         flush()
         continue
@@ -626,12 +685,14 @@ export function buildInvoiceProductListPrintPages(
     input.groups,
     layout,
   )
+  const keepZoneTogether = input.keepZoneTogether !== false
   const packed = sections.map((section) => {
     const rowsPerColumn = input.autoFit
       ? chooseInvoiceProductListFitRows(
           section.groups,
           columnMode,
           capacity.zoneHeaderRows,
+          keepZoneTogether,
         )
       : capacity.rowsPerColumn
     const fit = input.autoFit
@@ -650,6 +711,7 @@ export function buildInvoiceProductListPrintPages(
           section.groups,
           rowsPerColumn,
           capacity.zoneHeaderRows,
+          keepZoneTogether,
         ),
         capacity.columnCount,
       ),
