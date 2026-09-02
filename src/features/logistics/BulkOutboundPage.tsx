@@ -2190,12 +2190,15 @@ function readBulkPartnerConfigs(brandId: string): BulkOutboundPartnerConfig[] {
           ((item as BulkOutboundPartnerConfig).barcodeSource === 'own' ||
             (item as BulkOutboundPartnerConfig).barcodeSource === 'partner'),
       )
-      .map((item) => ({
-        ...item,
-        workStatus: isPartnerWorkStatus(item.workStatus ?? '')
-          ? item.workStatus
-          : 'idle',
-      }))
+      .map((item) => {
+        const status = item.workStatus ?? ''
+        return {
+          partnerId: item.partnerId,
+          partnerName: item.partnerName,
+          barcodeSource: item.barcodeSource,
+          workStatus: isPartnerWorkStatus(status) ? status : 'idle',
+        }
+      })
   } catch {
     return []
   }
@@ -2684,6 +2687,7 @@ function NewJobDialog({
           partnerId: initial.partnerId,
           partnerName: '',
           barcodeSource: initial.barcodeSource,
+          workStatus: 'idle' as const,
         }
       : null)
   const today = todayIso()
