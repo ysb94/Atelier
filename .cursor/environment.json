@@ -1,0 +1,17 @@
+{
+  "name": "Atelier",
+  "install": "npm install",
+  "terminals": [
+    {
+      "name": "dev",
+      "command": "npm run dev -- --host 127.0.0.1 --port 5173",
+      "description": "Vite dev server for the Atelier React web app (http://127.0.0.1:5173). Needs VITE_SUPABASE_URL and VITE_SUPABASE_PUBLISHABLE_KEY to reach the hosted Supabase backend."
+    }
+  ],
+  "ports": [
+    {
+      "name": "web",
+      "port": 5173
+    }
+  ]
+}
