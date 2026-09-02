@@ -506,6 +506,8 @@ export type ProductCode = {
   id: string
   brandId: string
   kind: ProductCodeKind
+  /** 거래처 코드일 때만 출고업체. 자사 코드는 null. */
+  usageTargetId: string | null
   code: string
   name: string
   /** 포장 후 실측 무게(g). 미입력이면 null */
@@ -524,6 +526,8 @@ export type ProductCode = {
 
 export type ProductCodeInput = {
   kind: ProductCodeKind
+  /** kind='partner'이면 필수 */
+  usageTargetId?: string | null
   code: string
   name: string
   weightG: number | null

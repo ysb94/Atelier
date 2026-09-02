@@ -1,17 +1,20 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDown,
   ArrowLeft,
+  ArrowRight,
   ArrowUp,
   Check,
   Download,
   FileText,
+  GripVertical,
   Pencil,
   Plus,
   Settings2,
   Trash2,
   Upload,
+  X,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
@@ -25,21 +28,31 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Input } from '@/components/ui/input'
+import { Input, Textarea } from '@/components/ui/input'
 import { parseFile } from '@/lib/import/parse'
 import {
   getActiveWarehouseInventorySet,
+  getBulkOutboundJobs,
+  getBulkOutboundPartnerConfigs,
   getCodeUsageTargets,
+  getPartnerBarcodeFields,
   getProductCodes,
   getStylesByBrand,
   getWarehouseStockPositions,
+  replaceBulkOutboundBackup,
+  replaceBulkOutboundPartnerConfigs,
+  saveBulkOutboundJob,
 } from '@/lib/api'
 import {
   partnerBarcodeHeader,
-  readPartnerCodeFields,
-  readPartnerCodeRows,
   type PartnerCodeField,
 } from '@/features/codes/PartnerCodeListPanel'
+import { useAuth } from '@/lib/supabase/auth'
+import {
+  excelRowsFromJobLines,
+  jobLinesFromExcelRows,
+  type BulkOutboundJob,
+} from '@/lib/supabase/bulk-outbound'
 import { normalizeStyleNo } from '@/lib/import/transform'
 import {
   allocateBulkOutboundProductListWarehouse,
@@ -52,14 +65,13 @@ import type {
 } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
 import { BulkOutboundProductListPrint } from '@/features/logistics/BulkOutboundProductListPrint'
-import { applyBulkOutboundBackupToOperations } from '@/lib/outbound/product-outbound'
+import { PRODUCT_OUTBOUND_UPDATED_EVENT } from '@/lib/outbound/product-outbound'
 
 /** 한 건이 여러 날 걸쳐 있을 수 있는 상태. 순서가 강제되지 않는다. */
 type JobStatus =
   | 'draft'
   | 'converting'
   | 'backup'
-  | 'picking'
   | 'docs'
   | 'done'
 
@@ -67,8 +79,8 @@ type JobPanel =
   | 'upload'
   | 'convert'
   | 'products'
+  | 'barcode'
   | 'backup'
-  | 'adjust'
   | 'docs'
   | 'done'
 
@@ -77,6 +89,7 @@ type DemoEvidenceFile = {
   name: string
   sizeLabel: string
   attachedOn: string
+  fileSize?: number
 }
 
 /** 대량출고 건이 참조하는 바코드 데이터 출처 */
@@ -100,7 +113,6 @@ type DemoJob = {
   partnerName: string
   barcodeSource: BarcodeSource
   title: string
-  /** 데모용 담당자. 실서비스에서는 로그인 사용자와 연결. */
   assignee: string
   status: JobStatus
   startedOn: string
@@ -121,9 +133,12 @@ const BARCODE_SOURCE_LABEL: Record<BarcodeSource, string> = {
   partner: '거래처 바코드',
 }
 
-/** 목록 기본은 내 건. 다른 업체·다른 담당자 건은 숨긴다. */
-const DEMO_ME = '나'
-const DEMO_ASSIGNEES = [DEMO_ME, '김물류', '이피킹'] as const
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+function isUuid(value: string) {
+  return UUID_RE.test(value)
+}
 
 type AssigneeFilter = 'mine' | 'all' | string
 
@@ -131,8 +146,7 @@ const STATUS_LABEL: Record<JobStatus, string> = {
   draft: '작성 중',
   converting: '상품 변환',
   backup: '임시 백업',
-  picking: '피킹·조율',
-  docs: '서류·포장',
+  docs: '서류 작업',
   done: '확정',
 }
 
@@ -143,7 +157,6 @@ const STATUS_BADGE: Record<
   draft: 'muted',
   converting: 'outline',
   backup: 'warning',
-  picking: 'warning',
   docs: 'outline',
   done: 'success',
 }
@@ -152,9 +165,9 @@ const PANELS: { value: JobPanel; label: string }[] = [
   { value: 'upload', label: '엑셀' },
   { value: 'convert', label: '상품연결' },
   { value: 'products', label: '상품 리스트' },
+  { value: 'barcode', label: '바코드 출력' },
   { value: 'backup', label: '임시 백업' },
-  { value: 'adjust', label: '현장 조율' },
-  { value: 'docs', label: '서류·라벨' },
+  { value: 'docs', label: '서류 작업' },
   { value: 'done', label: '확정' },
 ]
 
@@ -167,9 +180,9 @@ const FLOW_STEPS: {
   { panel: 'upload', label: '엑셀', hint: '양식 등록' },
   { panel: 'convert', label: '상품연결', hint: '바코드 매칭' },
   { panel: 'products', label: '상품 리스트', hint: '피킹 목록' },
+  { panel: 'barcode', label: '바코드 출력', hint: '라벨 인쇄' },
   { panel: 'backup', label: '임시 백업', hint: '가재고' },
-  { panel: 'adjust', label: '현장 조율', hint: '피킹·수정' },
-  { panel: 'docs', label: '서류·라벨', hint: '출력' },
+  { panel: 'docs', label: '서류 작업', hint: '출력' },
   { panel: 'done', label: '확정', hint: '마감' },
 ]
 
@@ -180,7 +193,6 @@ function flowStepState(status: JobStatus, stepIndex: number): FlowStepState {
     if (status === 'draft') return step.panel === 'upload'
     if (status === 'converting') return step.panel === 'convert'
     if (status === 'backup') return step.panel === 'backup'
-    if (status === 'picking') return step.panel === 'adjust'
     if (status === 'docs') return step.panel === 'docs'
     if (status === 'done') return step.panel === 'done'
     return false
@@ -213,7 +225,9 @@ function BulkOutboundFlowStrip({
           const connectorDone =
             state === 'done' &&
             (nextState === 'done' || nextState === 'current')
-          const locked = step.panel === 'products' && !productListReady
+          const locked =
+            (step.panel === 'products' || step.panel === 'barcode') &&
+            !productListReady
           return (
             <li
               key={step.panel}
@@ -567,6 +581,67 @@ function findTemplateField(
   )
 }
 
+function lineFieldIds(fields: TemplateField[]) {
+  return {
+    barcode: findTemplateField(fields, [
+      '상품바코드',
+      '바코드',
+      '자체품번코드',
+    ])?.id,
+    productName: findTemplateField(fields, [
+      '상품이름',
+      '상품명',
+      '품명',
+      '공식상품명',
+    ])?.id,
+    orderQty: findTemplateField(fields, [
+      '발주수량',
+      '수량',
+      '확정수량',
+    ])?.id,
+  }
+}
+
+function jobToUi(brandId: string, job: BulkOutboundJob): DemoJob {
+  const fields = readTemplateFields(
+    brandId,
+    job.partnerId,
+    job.barcodeSource,
+  )
+  return {
+    id: job.id,
+    partnerId: job.partnerId,
+    partnerName: job.partnerName,
+    barcodeSource: job.barcodeSource,
+    title: job.title,
+    assignee: job.assignee,
+    status: job.status,
+    startedOn: job.startedOn,
+    dueOn: job.dueOn,
+    updatedOn: job.updatedOn,
+    plannedQty: job.plannedQty,
+    note: job.note,
+    evidenceFiles: job.evidenceFiles.map((file) => ({
+      id: file.id,
+      name: file.name,
+      sizeLabel: formatFileSize(file.fileSize),
+      attachedOn: file.keptOn,
+      fileSize: file.fileSize,
+    })),
+    excelRows: excelRowsFromJobLines(job.lines, lineFieldIds(fields)),
+    excelFileName: null,
+  }
+}
+
+function notifyOutboundUpdated(brandId: string) {
+  if (typeof window === 'undefined') return
+  window.dispatchEvent(
+    new CustomEvent(PRODUCT_OUTBOUND_UPDATED_EVENT, {
+      detail: { brandId },
+    }),
+  )
+}
+
 function normalizeMatchCode(value: string) {
   return value.normalize('NFC').replace(/\s+/g, '').toLowerCase()
 }
@@ -576,6 +651,966 @@ function formatComponentsLabel(components: ProductCodeComponent[]) {
   return components
     .map((item) => `${item.styleNo}${item.qty > 1 ? `×${item.qty}` : ''}`)
     .join(', ')
+}
+
+function formatOfficialStyleNames(
+  components: ProductCodeComponent[],
+  styleNameByNo: Map<string, string>,
+): string | null {
+  if (components.length === 0) return null
+  const names: string[] = []
+  const seenStyleNos = new Set<string>()
+  for (const component of components) {
+    const styleNo = normalizeStyleNo(component.styleNo)
+    if (!styleNo || seenStyleNos.has(styleNo)) continue
+    seenStyleNos.add(styleNo)
+    const name = styleNameByNo.get(styleNo)?.trim()
+    if (name) names.push(name)
+  }
+  return names.length > 0 ? names.join(' + ') : null
+}
+
+type ConvertMatchFixedColumnId =
+  | 'no'
+  | 'barcode'
+  | 'productName'
+  | 'orderQty'
+  | 'status'
+  | 'components'
+  | 'officialStyleName'
+
+type ConvertMatchColumnId = ConvertMatchFixedColumnId | `linked:${string}`
+
+type ConvertMatchColumnItem = {
+  id: ConvertMatchColumnId
+  label: string
+  visible: boolean
+}
+
+const EXCLUDED_BARCODE_MATCH_LINKED_LABELS = new Set([
+  'SKU ID',
+  '상품명',
+])
+
+const FIXED_CONVERT_CHECK_COLUMNS: {
+  id: ConvertMatchFixedColumnId
+  label: string
+}[] = [
+  { id: 'barcode', label: '상품바코드' },
+  { id: 'productName', label: '상품이름' },
+  { id: 'orderQty', label: '발주수량' },
+  { id: 'status', label: '상태' },
+  { id: 'components', label: '구성' },
+]
+
+const FIXED_BARCODE_MATCH_COLUMNS: {
+  id: ConvertMatchFixedColumnId
+  label: string
+}[] = [
+  { id: 'no', label: 'No.' },
+  { id: 'barcode', label: '상품바코드' },
+  { id: 'orderQty', label: '발주수량' },
+  { id: 'officialStyleName', label: '공식상품명' },
+]
+
+function filterBarcodeMatchLinkedFields(
+  linkedFields: PartnerCodeField[],
+): PartnerCodeField[] {
+  return linkedFields.filter(
+    (field) => !EXCLUDED_BARCODE_MATCH_LINKED_LABELS.has(field.label),
+  )
+}
+
+function buildConvertCheckColumns(
+  linkedFields: PartnerCodeField[],
+): ConvertMatchColumnItem[] {
+  return [
+    ...FIXED_CONVERT_CHECK_COLUMNS.map((column) => ({
+      ...column,
+      visible: true,
+    })),
+    ...linkedFields.map((field) => ({
+      id: `linked:${field.id}` as ConvertMatchColumnId,
+      label: field.label,
+      visible: true,
+    })),
+  ]
+}
+
+function barcodeMatchColumnsStorageKey(
+  brandId: string,
+  partnerId: string,
+  barcodeSource: BarcodeSource,
+) {
+  return `atelier:bulk-outbound-barcode-columns:${brandId}:${partnerId}:${barcodeSource}`
+}
+
+function legacyConvertMatchColumnsStorageKey(
+  brandId: string,
+  partnerId: string,
+  barcodeSource: BarcodeSource,
+) {
+  return `atelier:bulk-outbound-convert-columns:${brandId}:${partnerId}:${barcodeSource}`
+}
+
+function buildDefaultBarcodeMatchColumns(
+  linkedFields: PartnerCodeField[],
+): ConvertMatchColumnItem[] {
+  return [
+    ...FIXED_BARCODE_MATCH_COLUMNS.map((column) => ({
+      ...column,
+      visible: true,
+    })),
+    ...filterBarcodeMatchLinkedFields(linkedFields).map((field) => ({
+      id: `linked:${field.id}` as ConvertMatchColumnId,
+      label: field.label,
+      visible: true,
+    })),
+  ]
+}
+
+function mergeConvertMatchColumns(
+  defaults: ConvertMatchColumnItem[],
+  saved: ConvertMatchColumnItem[],
+): ConvertMatchColumnItem[] {
+  const defaultById = new Map(defaults.map((column) => [column.id, column]))
+  const savedValid = saved.filter(
+    (item) => typeof item?.id === 'string' && defaultById.has(item.id),
+  )
+  const hasDeprecated = saved.some(
+    (item) => typeof item?.id === 'string' && !defaultById.has(item.id),
+  )
+
+  const visibilityById = new Map<string, boolean>()
+  for (const item of savedValid) {
+    visibilityById.set(item.id, item.visible !== false)
+  }
+
+  if (hasDeprecated || savedValid.length === 0) {
+    return defaults.map((column) => ({
+      ...column,
+      visible: visibilityById.has(column.id)
+        ? visibilityById.get(column.id)!
+        : column.visible,
+    }))
+  }
+
+  const savedOrder = [
+    ...new Set(savedValid.map((item) => item.id)),
+  ] as ConvertMatchColumnId[]
+  const merged: ConvertMatchColumnItem[] = []
+  const seen = new Set<string>()
+
+  for (const id of savedOrder) {
+    const column = defaultById.get(id)
+    if (!column) continue
+    merged.push({
+      ...column,
+      visible: visibilityById.get(id) !== false,
+    })
+    seen.add(id)
+  }
+
+  for (const column of defaults) {
+    if (seen.has(column.id)) continue
+    const defaultIndex = defaults.findIndex((item) => item.id === column.id)
+    let insertAt = merged.length
+    for (let index = defaultIndex - 1; index >= 0; index -= 1) {
+      const previousId = defaults[index]!.id
+      const previousIndex = merged.findIndex((item) => item.id === previousId)
+      if (previousIndex >= 0) {
+        insertAt = previousIndex + 1
+        break
+      }
+    }
+    merged.splice(insertAt, 0, {
+      ...column,
+      visible: visibilityById.has(column.id)
+        ? visibilityById.get(column.id)!
+        : column.visible,
+    })
+  }
+
+  return merged.length > 0 ? merged : defaults
+}
+
+function readBarcodeMatchColumns(
+  brandId: string,
+  partnerId: string,
+  barcodeSource: BarcodeSource,
+  linkedFields: PartnerCodeField[],
+): ConvertMatchColumnItem[] {
+  const defaults = buildDefaultBarcodeMatchColumns(linkedFields)
+  try {
+    const storageKey = barcodeMatchColumnsStorageKey(
+      brandId,
+      partnerId,
+      barcodeSource,
+    )
+    let raw = localStorage.getItem(storageKey)
+    if (!raw) {
+      raw = localStorage.getItem(
+        legacyConvertMatchColumnsStorageKey(
+          brandId,
+          partnerId,
+          barcodeSource,
+        ),
+      )
+    }
+    if (!raw) return defaults
+    const saved = JSON.parse(raw) as ConvertMatchColumnItem[]
+    if (!Array.isArray(saved) || saved.length === 0) return defaults
+
+    const merged = mergeConvertMatchColumns(defaults, saved)
+    const hasDeprecated = saved.some(
+      (item) =>
+        typeof item?.id === 'string' &&
+        !defaults.some((column) => column.id === item.id),
+    )
+    if (hasDeprecated || !localStorage.getItem(storageKey)) {
+      writeBarcodeMatchColumns(
+        brandId,
+        partnerId,
+        barcodeSource,
+        merged,
+      )
+    }
+    return merged
+  } catch {
+    return defaults
+  }
+}
+
+function writeBarcodeMatchColumns(
+  brandId: string,
+  partnerId: string,
+  barcodeSource: BarcodeSource,
+  columns: ConvertMatchColumnItem[],
+) {
+  localStorage.setItem(
+    barcodeMatchColumnsStorageKey(brandId, partnerId, barcodeSource),
+    JSON.stringify(columns),
+  )
+}
+
+function ConvertMatchColumnSettingsDialog({
+  columns,
+  linkedFields,
+  onClose,
+  onSave,
+}: {
+  columns: ConvertMatchColumnItem[]
+  linkedFields: PartnerCodeField[]
+  onClose: () => void
+  onSave: (columns: ConvertMatchColumnItem[]) => void
+}) {
+  const [draft, setDraft] = useState(columns)
+  const [error, setError] = useState<string | null>(null)
+  const [draggingId, setDraggingId] = useState<ConvertMatchColumnId | null>(
+    null,
+  )
+  const [dropPosition, setDropPosition] = useState<{
+    beforeId: ConvertMatchColumnId | null
+  } | null>(null)
+  const draggingIdRef = useRef<ConvertMatchColumnId | null>(null)
+  const dropBeforeIdRef = useRef<
+    ConvertMatchColumnId | null | undefined
+  >(undefined)
+
+  const visibleColumns = draft.filter((column) => column.visible)
+  const hiddenColumns = draft.filter((column) => !column.visible)
+
+  function reorderVisibleColumns(
+    fromId: ConvertMatchColumnId,
+    beforeId: ConvertMatchColumnId | null,
+  ) {
+    setDraft((current) => {
+      const visible = current.filter((column) => column.visible)
+      const hidden = current.filter((column) => !column.visible)
+      const fromIndex = visible.findIndex((column) => column.id === fromId)
+      if (fromIndex < 0) return current
+
+      const moved = visible[fromIndex]!
+      const nextVisible = visible.filter((column) => column.id !== fromId)
+      const targetIndex =
+        beforeId === null
+          ? nextVisible.length
+          : nextVisible.findIndex((column) => column.id === beforeId)
+      if (targetIndex < 0) return current
+      nextVisible.splice(targetIndex, 0, moved)
+
+      return [...nextVisible, ...hidden]
+    })
+    setError(null)
+  }
+
+  function updateDropPosition(
+    clientX: number,
+    container: HTMLElement,
+  ) {
+    const fromId = draggingIdRef.current
+    if (!fromId) return
+
+    const candidates = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-convert-column-id]'),
+    )
+    const nextElement = candidates.find((element) => {
+      const rect = element.getBoundingClientRect()
+      return clientX < rect.left + rect.width / 2
+    })
+    const beforeId = nextElement
+      ? (nextElement.dataset.convertColumnId as ConvertMatchColumnId)
+      : null
+
+    if (dropBeforeIdRef.current === beforeId) return
+    dropBeforeIdRef.current = beforeId
+    setDropPosition({ beforeId })
+  }
+
+  function beginDrag(id: ConvertMatchColumnId, dataTransfer: DataTransfer) {
+    draggingIdRef.current = id
+    dropBeforeIdRef.current = undefined
+    setDraggingId(id)
+    setDropPosition(null)
+    dataTransfer.effectAllowed = 'move'
+    dataTransfer.setData('text/plain', id)
+  }
+
+  function finishDragReorder() {
+    const fromId = draggingIdRef.current
+    const beforeId = dropBeforeIdRef.current
+    if (fromId && beforeId !== undefined) {
+      reorderVisibleColumns(fromId, beforeId)
+    }
+    clearDragState()
+  }
+
+  function clearDragState() {
+    draggingIdRef.current = null
+    dropBeforeIdRef.current = undefined
+    setDraggingId(null)
+    setDropPosition(null)
+  }
+
+  function toggleVisible(id: ConvertMatchColumnId) {
+    setDraft((current) =>
+      current.map((column) =>
+        column.id === id ? { ...column, visible: !column.visible } : column,
+      ),
+    )
+    setError(null)
+  }
+
+  function handleSave() {
+    if (!draft.some((column) => column.visible)) {
+      setError('최소 한 개의 열은 표시해야 합니다.')
+      return
+    }
+    onSave(draft)
+  }
+
+  function renderInsertionSlot(beforeId: ConvertMatchColumnId | null) {
+    const active =
+      draggingId != null && dropPosition?.beforeId === beforeId
+    return (
+      <div
+        aria-hidden
+        data-convert-insert-before={beforeId ?? '__end__'}
+        data-active={active ? 'true' : 'false'}
+        className={cn(
+          'flex h-9 shrink-0 items-center justify-center transition-[width] duration-150 ease-out',
+          draggingId == null ? 'w-1' : active ? 'w-8' : 'w-1',
+        )}
+      >
+        <div
+          className={cn(
+            'rounded-full bg-primary transition-all duration-150 ease-out',
+            active
+              ? 'h-9 w-1.5 opacity-100 shadow-[0_0_0_3px_hsl(var(--primary)/0.25),0_0_12px_hsl(var(--primary)/0.55)]'
+              : 'h-0 w-0 opacity-0',
+          )}
+        />
+      </div>
+    )
+  }
+
+  function renderColumnChip(
+    column: ConvertMatchColumnItem,
+    { draggable }: { draggable: boolean },
+  ) {
+    return (
+      <div
+        data-convert-column-id={draggable ? column.id : undefined}
+        draggable={draggable}
+        onDragStart={(event) => {
+          if (!draggable) return
+          if ((event.target as HTMLElement).tagName === 'INPUT') {
+            event.preventDefault()
+            return
+          }
+          beginDrag(column.id, event.dataTransfer)
+        }}
+        onDragEnd={
+          draggable
+            ? () => {
+                clearDragState()
+              }
+            : undefined
+        }
+        className={cn(
+          'inline-flex h-7 shrink-0 select-none items-center gap-1 rounded-md border px-1.5 text-[11px] transition-[opacity,transform] duration-150 ease-out',
+          draggable && 'cursor-grab active:cursor-grabbing',
+          column.visible
+            ? 'border-primary/40 bg-primary/10 text-foreground'
+            : 'border-dashed border-border bg-muted/30 text-muted-foreground',
+          draggable && draggingId === column.id && 'scale-95 opacity-40',
+        )}
+        title={column.label}
+      >
+        {draggable ? (
+          <GripVertical className="size-3 shrink-0 text-muted-foreground/70" />
+        ) : null}
+        <input
+          type="checkbox"
+          checked={column.visible}
+          onChange={() => toggleVisible(column.id)}
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          draggable={false}
+          className="size-3 shrink-0 rounded border-border"
+          aria-label={`${column.label} 표시`}
+        />
+        <span
+          className={cn(
+            'max-w-[4.5rem] truncate',
+            !column.visible && 'line-through',
+          )}
+        >
+          {column.label}
+        </span>
+      </div>
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/40"
+        aria-label="닫기"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="relative z-10 flex w-full max-w-4xl flex-col rounded-xl border border-border bg-card shadow-lg"
+      >
+        <div className="border-b border-border px-5 py-3">
+          <h2 className="text-base font-semibold">표 열 설정</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            아래 줄이 표 헤더 순서입니다. 드래그로 순서를 바꾸고, 체크를 끄면
+            위 「숨긴 열」로 옮겨집니다.
+          </p>
+        </div>
+
+        <div className="px-5 py-3">
+          {hiddenColumns.length > 0 ? (
+            <div className="mb-3 rounded-lg border border-dashed border-border bg-muted/20 px-3 py-2">
+              <p className="mb-1.5 text-[10px] font-medium text-muted-foreground">
+                숨긴 열
+              </p>
+              <div className="flex flex-wrap gap-1">
+                {hiddenColumns.map((column) =>
+                  renderColumnChip(column, { draggable: false }),
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          <div className="mb-1.5 flex items-center justify-between text-[10px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1">
+              <ArrowLeft className="size-2.5" />
+              표 왼쪽
+            </span>
+            <span className="inline-flex items-center gap-1">
+              표 오른쪽
+              <ArrowRight className="size-2.5" />
+            </span>
+          </div>
+          <div className="overflow-x-auto pb-0.5">
+            <div
+              className="flex min-w-min flex-nowrap items-center"
+              onDragOver={(event) => {
+                if (!draggingIdRef.current) return
+                event.preventDefault()
+                event.dataTransfer.dropEffect = 'move'
+                updateDropPosition(event.clientX, event.currentTarget)
+              }}
+              onDrop={(event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                finishDragReorder()
+              }}
+            >
+              {visibleColumns.map((column) => (
+                <div key={column.id} className="flex shrink-0 items-center">
+                  {renderInsertionSlot(column.id)}
+                  {renderColumnChip(column, { draggable: true })}
+                </div>
+              ))}
+              {renderInsertionSlot(null)}
+            </div>
+          </div>
+        </div>
+
+        {error ? (
+          <p className="px-5 pb-2 text-xs text-destructive">{error}</p>
+        ) : null}
+
+        <div className="flex justify-between gap-2 border-t border-border px-5 py-3">
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setDraft(buildDefaultBarcodeMatchColumns(linkedFields))
+              setError(null)
+            }}
+          >
+            기본값
+          </Button>
+          <div className="flex gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={onClose}>
+              취소
+            </Button>
+            <Button type="button" size="sm" onClick={handleSave}>
+              저장
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function getConvertMatchCellValue(
+  column: ConvertMatchColumnItem,
+  row: ConvertMatchRow,
+  linked: boolean,
+  rowNo: number,
+  styleNameByNo: Map<string, string>,
+): string | number {
+  switch (column.id) {
+    case 'no':
+      return rowNo
+    case 'barcode':
+      return row.barcode
+    case 'orderQty':
+      return row.orderQty
+    case 'officialStyleName':
+      return row.status === 'matched'
+        ? formatOfficialStyleNames(row.components, styleNameByNo) ?? ''
+        : ''
+    default: {
+      if (!column.id.startsWith('linked:')) return ''
+      const fieldId = column.id.slice('linked:'.length)
+      return linked ? row.linkedValues[fieldId] ?? '' : ''
+    }
+  }
+}
+
+function getOfficialStyleName(
+  row: ConvertMatchRow,
+  styleNameByNo: Map<string, string>,
+): string {
+  if (row.status === 'matched') {
+    return (
+      formatOfficialStyleNames(row.components, styleNameByNo) ??
+      row.productName.trim()
+    )
+  }
+  return row.productName.trim()
+}
+
+function getBoxPackQty(
+  row: ConvertMatchRow,
+  linkedFields: PartnerCodeField[],
+): number {
+  const field = linkedFields.find((item) => item.label === '박스 포장 수량')
+  if (!field) return 0
+  const raw = row.linkedValues[field.id] ?? ''
+  const parsed = Number(raw.replace(/,/g, '').trim())
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+}
+
+function splitOrderQtyByBoxPack(total: number, boxPack: number): number[] {
+  if (total <= 0) return [0]
+  if (boxPack <= 0) return [total]
+  const chunks: number[] = []
+  let remaining = total
+  while (remaining > 0) {
+    const chunk = Math.min(remaining, boxPack)
+    chunks.push(chunk)
+    remaining -= chunk
+  }
+  return chunks
+}
+
+type ConvertMatchExportRowKind = 'list' | 'detail' | 'label'
+
+function getConvertMatchExportCellValue(
+  column: ConvertMatchColumnItem,
+  row: ConvertMatchRow,
+  linked: boolean,
+  styleNameByNo: Map<string, string>,
+  kind: ConvertMatchExportRowKind,
+  options?: {
+    rowNo?: number
+    officialName?: string
+    orderQty?: number | string
+  },
+): string | number {
+  if (kind === 'label') {
+    const officialName = options?.officialName ?? ''
+    switch (column.id) {
+      case 'no':
+      case 'officialStyleName':
+        return officialName
+      case 'orderQty':
+        return 1
+      default:
+        return ''
+    }
+  }
+
+  if (kind === 'detail') {
+    if (column.id === 'no') return ''
+    if (column.id === 'orderQty') {
+      return options?.orderQty ?? row.orderQty
+    }
+  }
+
+  return getConvertMatchCellValue(
+    column,
+    row,
+    linked,
+    options?.rowNo ?? 0,
+    styleNameByNo,
+  )
+}
+
+function buildConvertMatchListExportBody(
+  rows: ConvertMatchRow[],
+  visibleColumns: ConvertMatchColumnItem[],
+  styleNameByNo: Map<string, string>,
+): (string | number)[][] {
+  return rows.map((row, index) => {
+    const linked = row.status === 'matched' || row.status === 'no-components'
+    return visibleColumns.map((column) =>
+      getConvertMatchExportCellValue(
+        column,
+        row,
+        linked,
+        styleNameByNo,
+        'list',
+        { rowNo: index + 1 },
+      ),
+    )
+  })
+}
+
+function buildIrLabelExportBody(
+  rows: ConvertMatchRow[],
+  visibleColumns: ConvertMatchColumnItem[],
+  linkedFields: PartnerCodeField[],
+  styleNameByNo: Map<string, string>,
+): (string | number)[][] {
+  const body: (string | number)[][] = []
+  const groupOrder: string[] = []
+  const groupByBarcode = new Map<string, ConvertMatchRow[]>()
+
+  for (const row of rows) {
+    const key = row.barcode.trim() || row.id
+    if (!groupByBarcode.has(key)) {
+      groupByBarcode.set(key, [])
+      groupOrder.push(key)
+    }
+    groupByBarcode.get(key)!.push(row)
+  }
+
+  for (const key of groupOrder) {
+    const group = groupByBarcode.get(key)!
+    const referenceRow =
+      group.find((row) => row.status === 'matched') ?? group[0]!
+    const officialName = getOfficialStyleName(referenceRow, styleNameByNo)
+
+    for (const row of group) {
+      const linked = row.status === 'matched' || row.status === 'no-components'
+      const totalQty = parseOrderQty(row.orderQty)
+      const boxPack = getBoxPackQty(row, linkedFields)
+      const chunks = splitOrderQtyByBoxPack(totalQty, boxPack)
+
+      for (const chunkQty of chunks) {
+        body.push(
+          visibleColumns.map((column) =>
+            getConvertMatchExportCellValue(
+              column,
+              row,
+              linked,
+              styleNameByNo,
+              'detail',
+              {
+                orderQty: chunkQty > 0 ? chunkQty : row.orderQty,
+              },
+            ),
+          ),
+        )
+      }
+    }
+
+    if (officialName) {
+      body.push(
+        visibleColumns.map((column) =>
+          getConvertMatchExportCellValue(
+            column,
+            referenceRow,
+            referenceRow.status === 'matched' ||
+              referenceRow.status === 'no-components',
+            styleNameByNo,
+            'label',
+            { officialName },
+          ),
+        ),
+      )
+    }
+  }
+
+  return body
+}
+
+async function downloadConvertMatchExcel(options: {
+  rows: ConvertMatchRow[]
+  columns: ConvertMatchColumnItem[]
+  linkedFields: PartnerCodeField[]
+  styleNameByNo: Map<string, string>
+  partnerName: string
+  jobTitle: string
+  mode?: 'list' | 'irLabel'
+  /** 파일명 날짜 뒤에 붙는 접미사 (예: 아이라벨) */
+  fileNameSuffix?: string
+}) {
+  const XLSX = await import('xlsx')
+  const visibleColumns = options.columns.filter((column) => column.visible)
+  const headers = visibleColumns.map((column) => column.label)
+  const body =
+    options.mode === 'irLabel'
+      ? buildIrLabelExportBody(
+          options.rows,
+          visibleColumns,
+          options.linkedFields,
+          options.styleNameByNo,
+        )
+      : buildConvertMatchListExportBody(
+          options.rows,
+          visibleColumns,
+          options.styleNameByNo,
+        )
+  const sheet = XLSX.utils.aoa_to_sheet([headers, ...body])
+  const workbook = XLSX.utils.book_new()
+  XLSX.utils.book_append_sheet(workbook, sheet, '바코드출력')
+  const safePartner =
+    options.partnerName.replace(/[\\/:*?"<>|]+/g, '_').trim() || '업체'
+  const safeTitle =
+    options.jobTitle.replace(/[\\/:*?"<>|]+/g, '_').trim() || '작업'
+  const today = new Date().toISOString().slice(0, 10)
+  const suffix = options.fileNameSuffix?.trim() ?? ''
+  XLSX.writeFile(
+    workbook,
+    `대량출고_바코드출력_${safePartner}_${safeTitle}_${today}${suffix}.xlsx`,
+  )
+}
+
+function ConvertMatchTable({
+  convertMatch,
+  columns,
+  styleNameByNo,
+  showAllRows = false,
+}: {
+  convertMatch: {
+    rows: ConvertMatchRow[]
+    linkedFields: PartnerCodeField[]
+  }
+  columns: ConvertMatchColumnItem[]
+  styleNameByNo: Map<string, string>
+  /** 상품연결 확인용 — 전체 행 표시 */
+  showAllRows?: boolean
+}) {
+  const visibleColumns = columns.filter((column) => column.visible)
+  const displayRows = showAllRows
+    ? convertMatch.rows
+    : convertMatch.rows.slice(0, 100)
+
+  function renderCell(
+    column: ConvertMatchColumnItem,
+    row: ConvertMatchRow,
+    linked: boolean,
+    componentsLabel: string | null,
+    totalQty: number,
+    rowNo: number,
+  ) {
+    switch (column.id) {
+      case 'no':
+        return (
+          <td
+            key={column.id}
+            className="whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground"
+          >
+            {rowNo}
+          </td>
+        )
+      case 'barcode':
+        return (
+          <td
+            key={column.id}
+            className="whitespace-nowrap px-3 py-2 font-mono text-xs"
+          >
+            {row.barcode || (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </td>
+        )
+      case 'productName':
+        return (
+          <td key={column.id} className="max-w-[16rem] truncate px-3 py-2">
+            {row.productName || (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </td>
+        )
+      case 'orderQty':
+        return (
+          <td key={column.id} className="whitespace-nowrap px-3 py-2">
+            {row.orderQty || (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </td>
+        )
+      case 'status':
+        return (
+          <td key={column.id} className="whitespace-nowrap px-3 py-2">
+            {row.status === 'matched' ? (
+              <Badge variant="success">연결됨</Badge>
+            ) : row.status === 'no-components' ? (
+              <Badge variant="warning">구성 없음</Badge>
+            ) : row.status === 'empty' ? (
+              <Badge variant="outline">바코드 없음</Badge>
+            ) : (
+              <Badge variant="danger">미매칭</Badge>
+            )}
+          </td>
+        )
+      case 'components':
+        return (
+          <td key={column.id} className="px-3 py-2">
+            {row.status === 'matched' && componentsLabel ? (
+              <div className="space-y-0.5">
+                <Badge variant="muted">
+                  {row.components.length}종 · {formatNumber(totalQty)}개
+                </Badge>
+                <p className="text-xs text-muted-foreground">
+                  {componentsLabel}
+                </p>
+              </div>
+            ) : row.status === 'no-components' ? (
+              <Badge variant="warning">M번호 미지정</Badge>
+            ) : (
+              <span className="text-xs text-muted-foreground">—</span>
+            )}
+          </td>
+        )
+      case 'officialStyleName': {
+        const officialNames =
+          row.status === 'matched'
+            ? formatOfficialStyleNames(row.components, styleNameByNo)
+            : null
+        return (
+          <td key={column.id} className="max-w-[20rem] px-3 py-2">
+            {officialNames ? (
+              <span className="text-sm">{officialNames}</span>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )}
+          </td>
+        )
+      }
+      default: {
+        if (!column.id.startsWith('linked:')) return null
+        const fieldId = column.id.slice('linked:'.length)
+        const value = linked ? row.linkedValues[fieldId] ?? '' : ''
+        return (
+          <td
+            key={column.id}
+            className="max-w-[14rem] truncate px-3 py-2 text-xs"
+            title={value || undefined}
+          >
+            {value || <span className="text-muted-foreground">—</span>}
+          </td>
+        )
+      }
+    }
+  }
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-border">
+      <table className="w-full min-w-[960px] text-left text-sm">
+        <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+          <tr>
+            {visibleColumns.map((column) => (
+              <th
+                key={column.id}
+                className="whitespace-nowrap px-3 py-2 font-medium"
+              >
+                {column.label}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {displayRows.map((row, index) => {
+            const linked =
+              row.status === 'matched' || row.status === 'no-components'
+            const componentsLabel = formatComponentsLabel(row.components)
+            const totalQty = row.components.reduce(
+              (sum, item) => sum + item.qty,
+              0,
+            )
+            return (
+              <tr
+                key={row.id}
+                className="border-b border-border last:border-0"
+              >
+                {visibleColumns.map((column) =>
+                  renderCell(
+                    column,
+                    row,
+                    linked,
+                    componentsLabel,
+                    totalQty,
+                    index + 1,
+                  ),
+                )}
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+      {!showAllRows && convertMatch.rows.length > 100 ? (
+        <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
+          외 {formatNumber(convertMatch.rows.length - 100)}행
+        </p>
+      ) : null}
+    </div>
+  )
 }
 
 type ConvertMatchHit = {
@@ -1060,13 +2095,6 @@ function readBulkPartnerConfigs(brandId: string): BulkOutboundPartnerConfig[] {
   }
 }
 
-function writeBulkPartnerConfigs(
-  brandId: string,
-  configs: BulkOutboundPartnerConfig[],
-) {
-  localStorage.setItem(storageKey(brandId), JSON.stringify(configs))
-}
-
 function formatFileSize(bytes: number) {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
@@ -1120,115 +2148,6 @@ function DueRemainChip({ dueOn, className }: { dueOn: string; className?: string
   )
 }
 
-function demoJobsFor(partners: CodeUsageTarget[]): DemoJob[] {
-  const a = partners[0]
-  const b = partners[1] ?? partners[0]
-  const c = partners[2] ?? partners[0]
-  if (!a || !b) return []
-  const today = todayIso()
-  // 같은 업체(b)에 하루 차이 건이 동시에 열림 — 실제 쿠팡식 패턴
-  return [
-    {
-      id: 'job-b-1002',
-      partnerId: b.id,
-      partnerName: b.name,
-      barcodeSource: 'partner',
-      title: '10월 2일 건',
-      assignee: DEMO_ME,
-      status: 'picking',
-      startedOn: '2026-10-02',
-      dueOn: addDaysIso(today, 0),
-      updatedOn: '2026-10-04',
-      plannedQty: 180,
-      note: '피킹 이틀째. 3·4일 건과 같이 열려 있음.',
-      evidenceFiles: [
-        {
-          id: 'ev-1',
-          name: '쿠팡_발주서_1002.xlsx',
-          sizeLabel: '248 KB',
-          attachedOn: '2026-10-02',
-        },
-      ],
-      excelRows: [],
-      excelFileName: null,
-    },
-    {
-      id: 'job-b-1003',
-      partnerId: b.id,
-      partnerName: b.name,
-      barcodeSource: 'partner',
-      title: '10월 3일 건',
-      assignee: DEMO_ME,
-      status: 'backup',
-      startedOn: '2026-10-03',
-      dueOn: addDaysIso(today, 2),
-      updatedOn: '2026-10-03',
-      plannedQty: 95,
-      note: '가재고만 잡은 상태. 2일 건과 병행.',
-      evidenceFiles: [
-        {
-          id: 'ev-2',
-          name: '쿠팡_발주_1003.pdf',
-          sizeLabel: '1.2 MB',
-          attachedOn: '2026-10-03',
-        },
-      ],
-      excelRows: [],
-      excelFileName: null,
-    },
-    {
-      id: 'job-b-1004',
-      partnerId: b.id,
-      partnerName: b.name,
-      barcodeSource: 'partner',
-      title: '10월 4일 건',
-      assignee: DEMO_ME,
-      status: 'converting',
-      startedOn: '2026-10-04',
-      dueOn: addDaysIso(today, 5),
-      updatedOn: '2026-10-04',
-      plannedQty: 110,
-      note: '오늘 들어온 건. 상품 변환부터.',
-      evidenceFiles: [],
-      excelRows: [],
-      excelFileName: null,
-    },
-    {
-      id: 'job-a-1',
-      partnerId: a.id,
-      partnerName: a.name,
-      barcodeSource: 'own',
-      title: '9월 1차',
-      assignee: '김물류',
-      status: 'picking',
-      startedOn: '2026-08-28',
-      dueOn: addDaysIso(today, -1),
-      updatedOn: '2026-09-01',
-      plannedQty: 420,
-      note: '다른 담당자 건. 내 건 필터에선 안 보임.',
-      evidenceFiles: [],
-      excelRows: [],
-      excelFileName: null,
-    },
-    {
-      id: 'job-c-1',
-      partnerId: (c ?? a).id,
-      partnerName: (c ?? a).name,
-      barcodeSource: 'own',
-      title: '긴급 추가',
-      assignee: '이피킹',
-      status: 'converting',
-      startedOn: '2026-09-01',
-      dueOn: addDaysIso(today, 8),
-      updatedOn: '2026-09-01',
-      plannedQty: 24,
-      note: '다른 담당자 건.',
-      evidenceFiles: [],
-      excelRows: [],
-      excelFileName: null,
-    },
-  ]
-}
 
 function groupJobsByPartner(jobs: DemoJob[]) {
   const order: string[] = []
@@ -1632,18 +2551,180 @@ function NewJobDialog({
   )
 }
 
+type BackupModifiedRow = {
+  styleNo: string
+  styleName: string
+  originalQuantity: number
+  confirmedQuantity: number
+}
+
+function BackupQtyConfirmDialog({
+  rows,
+  reason,
+  error,
+  onReasonChange,
+  onClose,
+  onSave,
+}: {
+  rows: BackupModifiedRow[]
+  reason: string
+  error: string | null
+  onReasonChange: (value: string) => void
+  onClose: () => void
+  onSave: () => void
+}) {
+  const deltaTotal = rows.reduce(
+    (sum, row) => sum + (row.confirmedQuantity - row.originalQuantity),
+    0,
+  )
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
+      <button
+        type="button"
+        aria-label="닫기"
+        className="absolute inset-0 bg-black/40"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        className="relative z-10 flex max-h-[min(92vh,720px)] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div>
+            <h2 className="text-lg font-semibold">수량 확정</h2>
+            <p className="mt-1 text-xs text-muted-foreground">
+              발주 대비 수정된 수량을 확인하고 사유를 남긴 뒤 저장하세요.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            aria-label="닫기"
+          >
+            <X className="size-4" />
+          </button>
+        </div>
+
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
+          <div className="flex flex-wrap gap-2">
+            <Badge variant="muted">수정 {formatNumber(rows.length)}종</Badge>
+            {rows.length > 0 ? (
+              <Badge variant={deltaTotal >= 0 ? 'outline' : 'warning'}>
+                합계 {deltaTotal >= 0 ? '+' : ''}
+                {formatNumber(deltaTotal)}
+              </Badge>
+            ) : null}
+          </div>
+
+          {rows.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-border bg-muted/20 px-3 py-8 text-center text-sm text-muted-foreground">
+              수정된 수량이 없습니다. 그대로 확정할 수 있습니다.
+            </p>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border border-border">
+              <table className="w-full min-w-[32rem] text-left text-sm">
+                <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">M번호</th>
+                    <th className="px-3 py-2 font-medium">공식상품명</th>
+                    <th className="px-3 py-2 text-right font-medium">
+                      발주수량
+                    </th>
+                    <th className="px-3 py-2 text-right font-medium">
+                      확정수량
+                    </th>
+                    <th className="px-3 py-2 text-right font-medium">차이</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => {
+                    const diff = row.confirmedQuantity - row.originalQuantity
+                    return (
+                      <tr
+                        key={row.styleNo}
+                        className="border-b border-border last:border-0"
+                      >
+                        <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">
+                          {row.styleNo}
+                        </td>
+                        <td className="px-3 py-2">
+                          {row.styleName || (
+                            <span className="text-muted-foreground">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          {formatNumber(row.originalQuantity)}
+                        </td>
+                        <td className="px-3 py-2 text-right font-medium tabular-nums">
+                          {formatNumber(row.confirmedQuantity)}
+                        </td>
+                        <td
+                          className={cn(
+                            'px-3 py-2 text-right tabular-nums',
+                            diff > 0 && 'text-success',
+                            diff < 0 && 'text-danger',
+                          )}
+                        >
+                          {diff > 0 ? '+' : ''}
+                          {formatNumber(diff)}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <label
+              htmlFor="backup-qty-confirm-reason"
+              className="text-xs font-medium text-foreground"
+            >
+              사유
+              {rows.length > 0 ? (
+                <span className="text-danger"> *</span>
+              ) : null}
+            </label>
+            <Textarea
+              id="backup-qty-confirm-reason"
+              value={reason}
+              onChange={(event) => onReasonChange(event.target.value)}
+              placeholder="예: 현장 재고 부족으로 3종 수량 조정"
+              rows={3}
+              className="text-sm"
+            />
+            {error ? <p className="text-xs text-danger">{error}</p> : null}
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border px-5 py-4">
+          <Button type="button" size="sm" variant="outline" onClick={onClose}>
+            취소
+          </Button>
+          <Button type="button" size="sm" onClick={onSave}>
+            저장하고 다음 단계
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function BulkOutboundPage() {
   const { brand } = useBrand()
-  const [partnerConfigs, setPartnerConfigs] = useState<
-    BulkOutboundPartnerConfig[]
-  >(() => readBulkPartnerConfigs(brand.id))
+  const { profile } = useAuth()
+  const queryClient = useQueryClient()
+  const meLabel = profile?.displayName?.trim() || profile?.email || '나'
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [newJobOpen, setNewJobOpen] = useState(false)
-  const [jobs, setJobs] = useState<DemoJob[]>([])
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [panel, setPanel] = useState<JobPanel>('upload')
   const [downloading, setDownloading] = useState(false)
-  const [seeded, setSeeded] = useState(false)
+  const [jobSaving, setJobSaving] = useState(false)
   const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>('mine')
   const [templateHeaderOpen, setTemplateHeaderOpen] = useState(false)
   const [templateFields, setTemplateFields] = useState<TemplateField[]>(() =>
@@ -1657,17 +2738,27 @@ export function BulkOutboundPage() {
   const [backupQtyOverrides, setBackupQtyOverrides] = useState<
     Record<string, Record<string, number>>
   >({})
-  const [backupEditingStyleNo, setBackupEditingStyleNo] = useState<
+  const [backupEditingCell, setBackupEditingCell] = useState<{
+    styleNo: string
+    date: string
+  } | null>(null)
+  const [backupEditDraft, setBackupEditDraft] = useState('')
+  const [backupQtyConfirmOpen, setBackupQtyConfirmOpen] = useState(false)
+  const [backupQtyConfirmReason, setBackupQtyConfirmReason] = useState('')
+  const [backupQtyConfirmError, setBackupQtyConfirmError] = useState<
     string | null
   >(null)
-  const [backupEditDraft, setBackupEditDraft] = useState('')
+  const [barcodeMatchColumns, setBarcodeMatchColumns] = useState<
+    ConvertMatchColumnItem[]
+  >([])
+  const [barcodeColumnSettingsOpen, setBarcodeColumnSettingsOpen] =
+    useState(false)
+  const [downloadingConvertMatchExcel, setDownloadingConvertMatchExcel] =
+    useState(false)
 
   useEffect(() => {
-    setPartnerConfigs(readBulkPartnerConfigs(brand.id))
-    setJobs([])
     setActiveJobId(null)
     setPanel('upload')
-    setSeeded(false)
     setAssigneeFilter('mine')
     setTemplateHeaderOpen(false)
     setTemplateFields(defaultTemplateFields())
@@ -1676,8 +2767,13 @@ export function BulkOutboundPage() {
     setBackupApplyNote(null)
     setBackupSearch('')
     setBackupQtyOverrides({})
-    setBackupEditingStyleNo(null)
+    setBackupEditingCell(null)
     setBackupEditDraft('')
+    setBackupQtyConfirmOpen(false)
+    setBackupQtyConfirmReason('')
+    setBackupQtyConfirmError(null)
+    setBarcodeMatchColumns([])
+    setBarcodeColumnSettingsOpen(false)
   }, [brand.id])
 
   const partnersQuery = useQuery({
@@ -1707,21 +2803,101 @@ export function BulkOutboundPage() {
     return new Set(ids ?? [])
   }, [brand.id, settingsOpen])
 
+  const partnerNameById = useMemo(
+    () => new Map(allPartners.map((item) => [item.id, item.name])),
+    [allPartners],
+  )
+
+  const configsQuery = useQuery({
+    queryKey: ['bulkOutboundPartnerConfigs', brand.id],
+    queryFn: async () => {
+      const fromDb = await getBulkOutboundPartnerConfigs(
+        brand.id,
+        partnerNameById,
+      )
+      if (fromDb.length > 0) return fromDb
+      const local = readBulkPartnerConfigs(brand.id)
+      if (local.length === 0) return []
+      await replaceBulkOutboundPartnerConfigs(
+        brand.id,
+        local.map((item) => ({
+          partnerId: item.partnerId,
+          barcodeSource: item.barcodeSource,
+        })),
+      )
+      try {
+        localStorage.removeItem(storageKey(brand.id))
+      } catch {
+        // ignore
+      }
+      return getBulkOutboundPartnerConfigs(brand.id, partnerNameById)
+    },
+    enabled: !partnersQuery.isPending,
+  })
+
+  const jobsQuery = useQuery({
+    queryKey: ['bulkOutboundJobs', brand.id],
+    queryFn: () => getBulkOutboundJobs(brand.id, partnerNameById),
+    enabled: !partnersQuery.isPending,
+  })
+
   const visibleConfigs = useMemo(() => {
     const partnerById = new Map(allPartners.map((item) => [item.id, item]))
-    return partnerConfigs
+    return (configsQuery.data ?? [])
       .filter((item) => partnerById.has(item.partnerId))
       .map((item) => ({
         ...item,
         partnerName: partnerById.get(item.partnerId)!.name,
       }))
-  }, [allPartners, partnerConfigs])
+  }, [allPartners, configsQuery.data])
 
-  useEffect(() => {
-    if (seeded || allPartners.length === 0) return
-    setJobs(demoJobsFor(allPartners))
-    setSeeded(true)
-  }, [allPartners, seeded])
+  const jobs = useMemo(
+    () => (jobsQuery.data ?? []).map((job) => jobToUi(brand.id, job)),
+    [brand.id, jobsQuery.data],
+  )
+
+  const assigneeOptions = useMemo(() => {
+    const names = new Set<string>()
+    for (const job of jobs) {
+      if (job.assignee && job.assignee !== meLabel) names.add(job.assignee)
+    }
+    return [...names].sort((left, right) => left.localeCompare(right, 'ko'))
+  }, [jobs, meLabel])
+
+  async function persistUiJob(job: DemoJob) {
+    const fields = readTemplateFields(
+      brand.id,
+      job.partnerId,
+      job.barcodeSource,
+    )
+    setJobSaving(true)
+    try {
+      return await saveBulkOutboundJob(brand.id, {
+        id: isUuid(job.id) ? job.id : null,
+        partnerId: job.partnerId,
+        barcodeSource: job.barcodeSource,
+        title: job.title,
+        status: job.status,
+        startedOn: job.startedOn,
+        dueOn: job.dueOn,
+        assignee: job.assignee,
+        note: job.note,
+        plannedQty: job.plannedQty,
+        lines: jobLinesFromExcelRows(job.excelRows, lineFieldIds(fields)),
+        files: job.evidenceFiles.map((file) => ({
+          id: isUuid(file.id) ? file.id : undefined,
+          name: file.name,
+          fileSize: file.fileSize ?? 0,
+          keptOn: file.attachedOn,
+        })),
+      })
+    } finally {
+      setJobSaving(false)
+      await queryClient.invalidateQueries({
+        queryKey: ['bulkOutboundJobs', brand.id],
+      })
+    }
+  }
 
   const activeJob = jobs.find((job) => job.id === activeJobId) ?? null
 
@@ -1770,20 +2946,14 @@ export function BulkOutboundPage() {
         return
       }
       const today = todayIso()
-      setJobs((current) =>
-        current.map((job) =>
-          job.id === activeJob.id
-            ? {
-                ...job,
-                excelRows: parsed.excelRows,
-                excelFileName: file.name,
-                plannedQty: parsed.excelRows.length,
-                updatedOn: today,
-                status: job.status === 'draft' ? 'converting' : job.status,
-              }
-            : job,
-        ),
-      )
+      await persistUiJob({
+        ...activeJob,
+        excelRows: parsed.excelRows,
+        excelFileName: file.name,
+        plannedQty: parsed.excelRows.length,
+        updatedOn: today,
+        status: activeJob.status === 'draft' ? 'converting' : activeJob.status,
+      })
       const sheetHint =
         sheets.length > 1 || picked.headerRowIndex > 0
           ? ` · ${picked.sheetName}${picked.headerRowIndex > 0 ? ` ${picked.headerRowIndex + 1}행` : ''}`
@@ -1804,10 +2974,10 @@ export function BulkOutboundPage() {
     const open = jobs.filter((job) => job.status !== 'done')
     if (assigneeFilter === 'all') return open
     if (assigneeFilter === 'mine') {
-      return open.filter((job) => job.assignee === DEMO_ME)
+      return open.filter((job) => job.assignee === meLabel)
     }
     return open.filter((job) => job.assignee === assigneeFilter)
-  }, [jobs, assigneeFilter])
+  }, [jobs, assigneeFilter, meLabel])
   const partnerGroups = useMemo(
     () => groupJobsByPartner(openJobs),
     [openJobs],
@@ -1817,6 +2987,26 @@ export function BulkOutboundPage() {
     queryKey: ['productCodes', brand.id, 'own', 'bulk-outbound-convert'],
     queryFn: () => getProductCodes(brand.id, 'own'),
     enabled: activeJob?.barcodeSource === 'own',
+  })
+
+  const partnerCodesQuery = useQuery({
+    queryKey: [
+      'productCodes',
+      brand.id,
+      'partner',
+      activeJob?.partnerId,
+      'bulk-outbound-convert',
+    ],
+    queryFn: () => getProductCodes(brand.id, 'partner', activeJob!.partnerId),
+    enabled:
+      activeJob?.barcodeSource === 'partner' && Boolean(activeJob.partnerId),
+  })
+
+  const partnerFieldsQuery = useQuery({
+    queryKey: ['partnerBarcodeFields', brand.id, activeJob?.partnerId],
+    queryFn: () => getPartnerBarcodeFields(brand.id, activeJob!.partnerId),
+    enabled:
+      activeJob?.barcodeSource === 'partner' && Boolean(activeJob.partnerId),
   })
 
   const convertMatch = useMemo(() => {
@@ -1833,8 +3023,8 @@ export function BulkOutboundPage() {
     let linkedFields: PartnerCodeField[] = []
 
     if (activeJob.barcodeSource === 'partner') {
-      linkedFields = readPartnerCodeFields(brand.id, activeJob.partnerId)
-      for (const row of readPartnerCodeRows(brand.id, activeJob.partnerId)) {
+      linkedFields = partnerFieldsQuery.data ?? []
+      for (const row of partnerCodesQuery.data ?? []) {
         const key = normalizeMatchCode(row.code)
         if (!key || codeByBarcode.has(key)) continue
         codeByBarcode.set(key, {
@@ -1879,9 +3069,10 @@ export function BulkOutboundPage() {
     })
   }, [
     activeJob,
-    brand.id,
     templateFields,
     ownCodesQuery.data,
+    partnerCodesQuery.data,
+    partnerFieldsQuery.data,
     panel,
   ])
 
@@ -1897,11 +3088,61 @@ export function BulkOutboundPage() {
       convertMatch.emptyCount === 0,
   )
 
+  const convertMatchLinkedFieldSignature = useMemo(
+    () => convertMatch.linkedFields.map((field) => field.id).join('|'),
+    [convertMatch.linkedFields],
+  )
+
+  useEffect(() => {
+    if (!activeJob) {
+      setBarcodeMatchColumns([])
+      return
+    }
+    setBarcodeMatchColumns(
+      readBarcodeMatchColumns(
+        brand.id,
+        activeJob.partnerId,
+        activeJob.barcodeSource,
+        convertMatch.linkedFields,
+      ),
+    )
+  }, [
+    brand.id,
+    activeJob?.partnerId,
+    activeJob?.barcodeSource,
+    convertMatchLinkedFieldSignature,
+  ])
+
+  const convertCheckColumns = useMemo(
+    () => buildConvertCheckColumns(convertMatch.linkedFields),
+    [convertMatchLinkedFieldSignature],
+  )
+
+  const barcodeMatchTableColumns =
+    barcodeMatchColumns.length > 0
+      ? barcodeMatchColumns
+      : buildDefaultBarcodeMatchColumns(convertMatch.linkedFields)
+
   const stylesQuery = useQuery({
     queryKey: ['styles', brand.id, 'bulk-outbound-products'],
     queryFn: () => getStylesByBrand(brand.id),
-    enabled: Boolean(activeJob) && (panel === 'products' || productListReady),
+    enabled:
+      Boolean(activeJob) &&
+      (panel === 'products' ||
+        panel === 'barcode' ||
+        panel === 'convert' ||
+        productListReady),
   })
+
+  const styleNameByNo = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const style of stylesQuery.data ?? []) {
+      const styleNo = normalizeStyleNo(style.styleNo)
+      if (!styleNo) continue
+      map.set(styleNo, style.name)
+    }
+    return map
+  }, [stylesQuery.data])
 
   const warehouseSetQuery = useQuery({
     queryKey: ['warehouse-inventory-set', brand.id, 'bulk-outbound'],
@@ -1922,12 +3163,6 @@ export function BulkOutboundPage() {
   })
 
   const productListAllocation = useMemo(() => {
-    const styleNameByNo = new Map<string, string>()
-    for (const style of stylesQuery.data ?? []) {
-      const styleNo = normalizeStyleNo(style.styleNo)
-      if (!styleNo) continue
-      styleNameByNo.set(styleNo, style.name)
-    }
     const entries = buildBulkProductListEntries(
       convertMatch.rows,
       styleNameByNo,
@@ -1939,7 +3174,7 @@ export function BulkOutboundPage() {
     })
   }, [
     convertMatch.rows,
-    stylesQuery.data,
+    styleNameByNo,
     warehousePositionsQuery.data,
   ])
 
@@ -2012,6 +3247,26 @@ export function BulkOutboundPage() {
     [backupHoldEntries, backupQtyOverrides],
   )
 
+  const backupModifiedRows = useMemo((): BackupModifiedRow[] => {
+    return backupHoldEntries
+      .map((row) => {
+        const confirmedQuantity = backupEffectiveQuantity(
+          row.styleNo,
+          row.quantity,
+        )
+        return {
+          styleNo: row.styleNo,
+          styleName: row.styleName,
+          originalQuantity: row.quantity,
+          confirmedQuantity,
+        }
+      })
+      .filter((row) => row.confirmedQuantity !== row.originalQuantity)
+      .sort((left, right) =>
+        left.styleNo.localeCompare(right.styleNo, 'ko-KR'),
+      )
+  }, [backupHoldEntries, backupQtyOverrides])
+
   function todayIsoDateLocal() {
     const date = new Date()
     date.setHours(12, 0, 0, 0)
@@ -2027,37 +3282,95 @@ export function BulkOutboundPage() {
     return `${Number(match[2])}/${Number(match[3])}`
   }
 
-  function startBackupQtyEdit(styleNo: string, currentQty: number) {
-    setBackupEditingStyleNo(styleNo)
+  function isBackupCellEditing(styleNo: string, date: string) {
+    return (
+      backupEditingCell?.styleNo === styleNo && backupEditingCell.date === date
+    )
+  }
+
+  function startBackupQtyEdit(
+    styleNo: string,
+    date: string,
+    currentQty: number,
+  ) {
+    setBackupEditingCell({ styleNo, date })
     setBackupEditDraft(String(currentQty))
   }
 
-  function commitBackupQtyEdit(styleNo: string, originalQty: number) {
+  function cancelBackupQtyEdit() {
+    setBackupEditingCell(null)
+    setBackupEditDraft('')
+  }
+
+  function commitBackupQtyEdit(
+    styleNo: string,
+    originalQty: number,
+    currentQty: number,
+    date: string,
+  ) {
     const cleaned = backupEditDraft.replace(/,/g, '').trim()
     const next = Number(cleaned)
-    setBackupEditingStyleNo(null)
-    setBackupEditDraft('')
+    cancelBackupQtyEdit()
     if (!Number.isFinite(next) || next < 0) return
     const rounded = Math.round(next)
+    // 값을 바꾸지 않고 그대로 두면(포커스만 벗어나도) 기존 값을 유지한다.
+    if (rounded === currentQty) return
+    const targetDate = date === '__base__' ? todayIsoDateLocal() : date
     if (rounded === originalQty) {
       setBackupQtyOverrides((current) => {
-        const next = { ...current }
-        delete next[styleNo]
-        return next
+        const byDate = { ...(current[styleNo] ?? {}) }
+        delete byDate[targetDate]
+        if (Object.keys(byDate).length === 0) {
+          const nextMap = { ...current }
+          delete nextMap[styleNo]
+          return nextMap
+        }
+        return { ...current, [styleNo]: byDate }
       })
       return
     }
-    const today = todayIsoDateLocal()
     setBackupQtyOverrides((current) => ({
       ...current,
       [styleNo]: {
         ...(current[styleNo] ?? {}),
-        [today]: rounded,
+        [targetDate]: rounded,
       },
     }))
   }
 
-  function applyBackupToOperations() {
+  function renderBackupQtyInput(
+    styleNo: string,
+    date: string,
+    originalQty: number,
+    currentQty: number,
+    label: string,
+  ) {
+    return (
+      <Input
+        autoFocus
+        type="number"
+        min={0}
+        step={1}
+        value={backupEditDraft}
+        onChange={(event) => setBackupEditDraft(event.target.value)}
+        onBlur={() =>
+          commitBackupQtyEdit(styleNo, originalQty, currentQty, date)
+        }
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.currentTarget.blur()
+          }
+          if (event.key === 'Escape') {
+            cancelBackupQtyEdit()
+          }
+        }}
+        className="ml-auto h-7 w-20 text-right text-xs tabular-nums"
+        aria-label={label}
+      />
+    )
+  }
+
+  async function applyBackupToOperations() {
     if (!activeJob || backupHoldEntries.length === 0) return
     const styleIdByNo = new Map<string, string>()
     for (const style of stylesQuery.data ?? []) {
@@ -2065,43 +3378,87 @@ export function BulkOutboundPage() {
       if (!styleNo) continue
       styleIdByNo.set(styleNo, style.id)
     }
-    applyBulkOutboundBackupToOperations({
-      brandId: brand.id,
-      jobId: activeJob.id,
-      partnerId: activeJob.partnerId,
-      partnerName: activeJob.partnerName,
-      entries: backupHoldEntries.map((row) => ({
-        styleId: styleIdByNo.get(row.styleNo),
-        styleNo: row.styleNo,
-        styleName: row.styleName,
-        quantity: backupEffectiveQuantity(row.styleNo, row.quantity),
-      })),
+    const entries = backupHoldEntries.flatMap((row) => {
+      const styleId = styleIdByNo.get(row.styleNo)
+      const quantity = backupEffectiveQuantity(row.styleNo, row.quantity)
+      if (!styleId || quantity <= 0) return []
+      return [{ styleId, quantity }]
     })
-    setJobs((current) =>
-      current.map((job) =>
-        job.id === activeJob.id
-          ? {
-              ...job,
-              status: job.status === 'done' ? job.status : 'backup',
-              updatedOn: new Date().toISOString().slice(0, 10),
-              plannedQty: backupHoldTotal,
-            }
-          : job,
-      ),
-    )
+    if (entries.length === 0) {
+      setBackupApplyNote(
+        '데이터 시트에 있는 M번호만 반영됩니다. 연결된 상품이 없습니다.',
+      )
+      return
+    }
+    try {
+      const saved = await replaceBulkOutboundBackup({
+        brandId: brand.id,
+        jobId: activeJob.id,
+        partnerId: activeJob.partnerId,
+        shippedOn: todayIso(),
+        entries,
+      })
+      const nextJob = {
+        ...activeJob,
+        status:
+          activeJob.status === 'done' ? activeJob.status : ('backup' as const),
+        updatedOn: todayIso(),
+        plannedQty: backupHoldTotal,
+      }
+      await persistUiJob(nextJob)
+      notifyOutboundUpdated(brand.id)
+      await queryClient.invalidateQueries({
+        queryKey: ['outboundShipments', brand.id],
+      })
+      setBackupApplyNote(
+        `운영 현황에 ${formatNumber(saved)}종 · ${formatNumber(backupHoldTotal)}개 반영했습니다.`,
+      )
+    } catch (err) {
+      setBackupApplyNote(
+        err instanceof Error ? err.message : '운영 현황에 반영하지 못했습니다.',
+      )
+    }
+  }
+
+  function saveBackupQtyConfirm() {
+    if (!activeJob) return
+    if (
+      backupModifiedRows.length > 0 &&
+      !backupQtyConfirmReason.trim()
+    ) {
+      setBackupQtyConfirmError('수량을 수정했다면 사유를 입력하세요.')
+      return
+    }
+    const today = todayIsoDateLocal()
+    void persistUiJob({
+      ...activeJob,
+      status: activeJob.status === 'done' ? activeJob.status : 'docs',
+      updatedOn: today,
+      plannedQty: backupHoldTotal,
+      note:
+        backupModifiedRows.length > 0
+          ? `[수량확정 ${today}] ${backupQtyConfirmReason.trim()}`
+          : activeJob.note,
+    })
+    setBackupQtyConfirmOpen(false)
+    setBackupQtyConfirmReason('')
+    setBackupQtyConfirmError(null)
     setBackupApplyNote(
-      `운영 현황에 ${formatNumber(backupHoldEntries.length)}종 · ${formatNumber(backupHoldTotal)}개 반영했습니다. (UI 테스트 · DB 미저장)`,
+      backupModifiedRows.length > 0
+        ? `수량 ${formatNumber(backupModifiedRows.length)}종 확정했습니다. 서류 작업 단계로 이동합니다.`
+        : '수량 변경 없이 확정했습니다. 서류 작업 단계로 이동합니다.',
     )
+    setPanel('docs')
   }
 
   const doneJobs = useMemo(() => {
     const done = jobs.filter((job) => job.status === 'done')
     if (assigneeFilter === 'all') return done
     if (assigneeFilter === 'mine') {
-      return done.filter((job) => job.assignee === DEMO_ME)
+      return done.filter((job) => job.assignee === meLabel)
     }
     return done.filter((job) => job.assignee === assigneeFilter)
-  }, [jobs, assigneeFilter])
+  }, [jobs, assigneeFilter, meLabel])
   const showingJob = Boolean(activeJob)
 
   function openJob(jobId: string, nextPanel: JobPanel = 'upload') {
@@ -2110,13 +3467,38 @@ export function BulkOutboundPage() {
     setBackupApplyNote(null)
     setBackupSearch('')
     setBackupQtyOverrides({})
-    setBackupEditingStyleNo(null)
+    setBackupEditingCell(null)
     setBackupEditDraft('')
+    setBackupQtyConfirmOpen(false)
+    setBackupQtyConfirmReason('')
+    setBackupQtyConfirmError(null)
   }
 
   function backToList() {
     setActiveJobId(null)
     setPanel('upload')
+  }
+
+  async function handleDownloadConvertMatchExcel(options?: {
+    mode?: 'list' | 'irLabel'
+    fileNameSuffix?: string
+  }) {
+    if (!activeJob || downloadingConvertMatchExcel) return
+    setDownloadingConvertMatchExcel(true)
+    try {
+      await downloadConvertMatchExcel({
+        rows: convertMatch.rows,
+        columns: barcodeMatchTableColumns,
+        linkedFields: convertMatch.linkedFields,
+        styleNameByNo,
+        partnerName: activeJob.partnerName,
+        jobTitle: activeJob.title,
+        mode: options?.mode ?? 'list',
+        fileNameSuffix: options?.fileNameSuffix,
+      })
+    } finally {
+      setDownloadingConvertMatchExcel(false)
+    }
   }
 
   async function handleDownloadTemplate() {
@@ -2140,34 +3522,23 @@ export function BulkOutboundPage() {
       name: file.name,
       sizeLabel: formatFileSize(file.size),
       attachedOn: today,
+      fileSize: file.size,
     }))
-    setJobs((current) =>
-      current.map((job) =>
-        job.id === activeJob.id
-          ? {
-              ...job,
-              evidenceFiles: [...job.evidenceFiles, ...next],
-              updatedOn: today,
-            }
-          : job,
-      ),
-    )
+    void persistUiJob({
+      ...activeJob,
+      evidenceFiles: [...activeJob.evidenceFiles, ...next],
+      updatedOn: today,
+    })
   }
 
   function removeEvidenceFile(fileId: string) {
     if (!activeJob) return
-    setJobs((current) =>
-      current.map((job) =>
-        job.id === activeJob.id
-          ? {
-              ...job,
-              evidenceFiles: job.evidenceFiles.filter(
-                (file) => file.id !== fileId,
-              ),
-            }
-          : job,
+    void persistUiJob({
+      ...activeJob,
+      evidenceFiles: activeJob.evidenceFiles.filter(
+        (file) => file.id !== fileId,
       ),
-    )
+    })
   }
 
   return (
@@ -2239,9 +3610,10 @@ export function BulkOutboundPage() {
                 [
                   { value: 'mine' as const, label: '내 건' },
                   { value: 'all' as const, label: '전체' },
-                  ...DEMO_ASSIGNEES.filter((name) => name !== DEMO_ME).map(
-                    (name) => ({ value: name, label: name }),
-                  ),
+                  ...assigneeOptions.map((name) => ({
+                    value: name,
+                    label: name,
+                  })),
                 ] as { value: AssigneeFilter; label: string }[]
               ).map((item) => (
                 <button
@@ -2262,7 +3634,7 @@ export function BulkOutboundPage() {
             </div>
           </CardHeader>
           <CardContent>
-            {partnersQuery.isPending ? (
+            {partnersQuery.isPending || jobsQuery.isPending ? (
               <p className="py-10 text-center text-sm text-muted-foreground">
                 불러오는 중입니다.
               </p>
@@ -2393,7 +3765,8 @@ export function BulkOutboundPage() {
               <div className="flex flex-wrap gap-1.5">
                 {PANELS.map((item) => {
                   const locked =
-                    item.value === 'products' && !productListReady
+                    (item.value === 'products' || item.value === 'barcode') &&
+                    !productListReady
                   return (
                     <button
                       key={item.value}
@@ -2625,12 +3998,11 @@ export function BulkOutboundPage() {
                   상품연결
                 </CardTitle>
                 <CardDescription>
-                  엑셀 「상품바코드」를{' '}
+                  업로드한 「상품바코드」가{' '}
                   {activeJob!.barcodeSource === 'partner'
                     ? `거래처 코드 「${partnerCodeHeaderLabel}」`
                     : '88바코드'}
-                  와 맞춰 구성·연결 필드를 가져옵니다. 매칭이 덜 끝나도
-                  목록으로 돌아가 다른 건을 열 수 있습니다.
+                  와 연결됐는지, 구성(M번호)이 있는지 확인합니다.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -2710,135 +4082,12 @@ export function BulkOutboundPage() {
                       </p>
                     ) : null}
 
-                    <div className="overflow-x-auto rounded-lg border border-border">
-                      <table className="w-full min-w-[960px] text-left text-sm">
-                        <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
-                          <tr>
-                            <th className="whitespace-nowrap px-3 py-2 font-medium">
-                              상품바코드
-                            </th>
-                            <th className="whitespace-nowrap px-3 py-2 font-medium">
-                              상품이름
-                            </th>
-                            <th className="whitespace-nowrap px-3 py-2 font-medium">
-                              발주수량
-                            </th>
-                            <th className="whitespace-nowrap px-3 py-2 font-medium">
-                              상태
-                            </th>
-                            <th className="whitespace-nowrap px-3 py-2 font-medium">
-                              구성
-                            </th>
-                            {convertMatch.linkedFields.map((field) => (
-                              <th
-                                key={field.id}
-                                className="whitespace-nowrap px-3 py-2 font-medium"
-                              >
-                                {field.label}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {convertMatch.rows.slice(0, 100).map((row) => {
-                            const linked =
-                              row.status === 'matched' ||
-                              row.status === 'no-components'
-                            const componentsLabel = formatComponentsLabel(
-                              row.components,
-                            )
-                            const totalQty = row.components.reduce(
-                              (sum, item) => sum + item.qty,
-                              0,
-                            )
-                            return (
-                              <tr
-                                key={row.id}
-                                className="border-b border-border last:border-0"
-                              >
-                                <td className="whitespace-nowrap px-3 py-2 font-mono text-xs">
-                                  {row.barcode || (
-                                    <span className="text-muted-foreground">
-                                      —
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="max-w-[16rem] truncate px-3 py-2">
-                                  {row.productName || (
-                                    <span className="text-muted-foreground">
-                                      —
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-2">
-                                  {row.orderQty || (
-                                    <span className="text-muted-foreground">
-                                      —
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="whitespace-nowrap px-3 py-2">
-                                  {row.status === 'matched' ? (
-                                    <Badge variant="success">연결됨</Badge>
-                                  ) : row.status === 'no-components' ? (
-                                    <Badge variant="warning">구성 없음</Badge>
-                                  ) : row.status === 'empty' ? (
-                                    <Badge variant="outline">바코드 없음</Badge>
-                                  ) : (
-                                    <Badge variant="danger">미매칭</Badge>
-                                  )}
-                                </td>
-                                <td className="px-3 py-2">
-                                  {row.status === 'matched' &&
-                                  componentsLabel ? (
-                                    <div className="space-y-0.5">
-                                      <Badge variant="muted">
-                                        {row.components.length}종 ·{' '}
-                                        {formatNumber(totalQty)}개
-                                      </Badge>
-                                      <p className="text-xs text-muted-foreground">
-                                        {componentsLabel}
-                                      </p>
-                                    </div>
-                                  ) : row.status === 'no-components' ? (
-                                    <Badge variant="warning">
-                                      M번호 미지정
-                                    </Badge>
-                                  ) : (
-                                    <span className="text-xs text-muted-foreground">
-                                      —
-                                    </span>
-                                  )}
-                                </td>
-                                {convertMatch.linkedFields.map((field) => {
-                                  const value = linked
-                                    ? row.linkedValues[field.id] ?? ''
-                                    : ''
-                                  return (
-                                    <td
-                                      key={field.id}
-                                      className="max-w-[14rem] truncate px-3 py-2 text-xs"
-                                      title={value || undefined}
-                                    >
-                                      {value || (
-                                        <span className="text-muted-foreground">
-                                          —
-                                        </span>
-                                      )}
-                                    </td>
-                                  )
-                                })}
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                      {convertMatch.rows.length > 100 ? (
-                        <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
-                          외 {formatNumber(convertMatch.rows.length - 100)}행
-                        </p>
-                      ) : null}
-                    </div>
+                    <ConvertMatchTable
+                      convertMatch={convertMatch}
+                      columns={convertCheckColumns}
+                      styleNameByNo={styleNameByNo}
+                      showAllRows
+                    />
                   </>
                 )}
               </CardContent>
@@ -2987,6 +4236,96 @@ export function BulkOutboundPage() {
             </Card>
           ) : null}
 
+          {panel === 'barcode' ? (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">바코드 출력</CardTitle>
+                <CardDescription>
+                  상품 리스트 기준으로 바코드 라벨을 출력합니다.{' '}
+                  {activeJob
+                    ? BARCODE_SOURCE_LABEL[activeJob.barcodeSource]
+                    : null}
+                  기준입니다.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {!productListReady ? (
+                  <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
+                    상품연결에서 미매칭·빈 바코드를 없앤 뒤 열어 주세요.
+                  </div>
+                ) : activeJob!.excelRows.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
+                    먼저 「엑셀」 패널에서 우리 양식 파일을 올려 주세요.
+                  </div>
+                ) : !convertMatch.barcodeField ? (
+                  <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
+                    양식에 「상품바코드」 헤더가 없습니다.
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-2">
+                      <Badge variant="muted">
+                        전체 {formatNumber(convertMatch.rows.length)}행
+                      </Badge>
+                      <Badge variant="success">
+                        연결{' '}
+                        {formatNumber(
+                          convertMatch.matchedCount +
+                            convertMatch.noComponentsCount,
+                        )}
+                      </Badge>
+                      <div className="ml-auto flex flex-wrap items-center gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={downloadingConvertMatchExcel}
+                          onClick={() => void handleDownloadConvertMatchExcel()}
+                        >
+                          <Download className="size-3.5" />
+                          {downloadingConvertMatchExcel
+                            ? '준비 중...'
+                            : '엑셀 내려받기'}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={downloadingConvertMatchExcel}
+                          onClick={() =>
+                            void handleDownloadConvertMatchExcel({
+                              mode: 'irLabel',
+                              fileNameSuffix: '아이라벨',
+                            })
+                          }
+                        >
+                          <Download className="size-3.5" />
+                          {downloadingConvertMatchExcel
+                            ? '준비 중...'
+                            : '출력용 엑셀 내려받기'}
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setBarcodeColumnSettingsOpen(true)}
+                        >
+                          <Settings2 className="size-3.5" />
+                          열 설정
+                        </Button>
+                      </div>
+                    </div>
+                    <ConvertMatchTable
+                      convertMatch={convertMatch}
+                      columns={barcodeMatchTableColumns}
+                      styleNameByNo={styleNameByNo}
+                    />
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          ) : null}
+
           {panel === 'backup' ? (
             <Card>
               <CardHeader className="pb-3">
@@ -3039,9 +4378,21 @@ export function BulkOutboundPage() {
                         <Button
                           type="button"
                           size="sm"
-                          onClick={applyBackupToOperations}
+                          disabled={jobSaving}
+                          onClick={() => void applyBackupToOperations()}
                         >
                           임시 반영
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => {
+                            setBackupQtyConfirmError(null)
+                            setBackupQtyConfirmOpen(true)
+                          }}
+                        >
+                          수량 확정
                         </Button>
                         <Link
                           to={`/b/${brand.slug}/operations`}
@@ -3112,8 +4463,12 @@ export function BulkOutboundPage() {
                             </tr>
                           ) : (
                             backupHoldRows.map((row) => {
-                              const editing =
-                                backupEditingStyleNo === row.styleNo
+                              const hasDateOverrides = Boolean(
+                                backupQtyOverrides[row.styleNo] &&
+                                  Object.keys(
+                                    backupQtyOverrides[row.styleNo] ?? {},
+                                  ).length > 0,
+                              )
                               return (
                                 <tr
                                   key={row.styleNo}
@@ -3129,45 +4484,33 @@ export function BulkOutboundPage() {
                                       </span>
                                     )}
                                   </td>
-                                  <td className="whitespace-nowrap px-3 py-2 text-right">
-                                    {editing ? (
-                                      <Input
-                                        autoFocus
-                                        type="number"
-                                        min={0}
-                                        step={1}
-                                        value={backupEditDraft}
-                                        onChange={(event) =>
-                                          setBackupEditDraft(event.target.value)
-                                        }
-                                        onBlur={() =>
-                                          commitBackupQtyEdit(
-                                            row.styleNo,
-                                            row.quantity,
-                                          )
-                                        }
-                                        onKeyDown={(event) => {
-                                          if (event.key === 'Enter') {
-                                            event.currentTarget.blur()
-                                          }
-                                          if (event.key === 'Escape') {
-                                            setBackupEditingStyleNo(null)
-                                            setBackupEditDraft('')
-                                          }
-                                        }}
-                                        className="ml-auto h-7 w-24 text-right text-xs tabular-nums"
-                                        aria-label={`${row.styleNo} 발주수량 수정`}
-                                      />
+                                  <td className="whitespace-nowrap px-3 py-2 text-right tabular-nums">
+                                    {isBackupCellEditing(row.styleNo, '__base__') ? (
+                                      renderBackupQtyInput(
+                                        row.styleNo,
+                                        '__base__',
+                                        row.quantity,
+                                        row.effectiveQuantity,
+                                        `${row.styleNo} 발주수량 수정`,
+                                      )
+                                    ) : hasDateOverrides ? (
+                                      <span
+                                        className="inline-block cursor-not-allowed rounded px-1.5 py-0.5 text-muted-foreground/70"
+                                        title="날짜별로 수정됨. 오른쪽 날짜 칸에서 수정하세요."
+                                      >
+                                        {formatNumber(row.quantity)}
+                                      </span>
                                     ) : (
                                       <button
                                         type="button"
                                         onClick={() =>
                                           startBackupQtyEdit(
                                             row.styleNo,
+                                            '__base__',
                                             row.effectiveQuantity,
                                           )
                                         }
-                                        className="rounded px-1.5 py-0.5 tabular-nums hover:bg-muted"
+                                        className="rounded px-1.5 py-0.5 hover:bg-muted"
                                         title="클릭하여 수량 수정"
                                       >
                                         {formatNumber(row.quantity)}
@@ -3182,12 +4525,21 @@ export function BulkOutboundPage() {
                                         key={date}
                                         className="whitespace-nowrap px-3 py-2 text-right tabular-nums"
                                       >
-                                        {editedQty != null ? (
+                                        {isBackupCellEditing(row.styleNo, date) ? (
+                                          renderBackupQtyInput(
+                                            row.styleNo,
+                                            date,
+                                            row.quantity,
+                                            editedQty ?? row.quantity,
+                                            `${row.styleNo} ${date} 수량 수정`,
+                                          )
+                                        ) : editedQty != null ? (
                                           <button
                                             type="button"
                                             onClick={() =>
                                               startBackupQtyEdit(
                                                 row.styleNo,
+                                                date,
                                                 editedQty,
                                               )
                                             }
@@ -3217,27 +4569,51 @@ export function BulkOutboundPage() {
             </Card>
           ) : null}
 
-          {panel === 'adjust' ? (
-            <Card>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base">현장 조율</CardTitle>
-                <CardDescription>
-                  피킹하며 며칠에 걸쳐 수량을 고칩니다. 수정할 때마다 임시 백업
-                  버전이 올라갑니다.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
-                  변경 이력 · 타 업체 경합 메모 자리
-                </div>
-              </CardContent>
-            </Card>
+          {backupQtyConfirmOpen ? (
+            <BackupQtyConfirmDialog
+              rows={backupModifiedRows}
+              reason={backupQtyConfirmReason}
+              error={backupQtyConfirmError}
+              onReasonChange={(value) => {
+                setBackupQtyConfirmReason(value)
+                setBackupQtyConfirmError(null)
+              }}
+              onClose={() => {
+                setBackupQtyConfirmOpen(false)
+                setBackupQtyConfirmError(null)
+              }}
+              onSave={saveBackupQtyConfirm}
+            />
+          ) : null}
+
+          {barcodeColumnSettingsOpen && activeJob ? (
+            <ConvertMatchColumnSettingsDialog
+              columns={barcodeMatchTableColumns}
+              linkedFields={filterBarcodeMatchLinkedFields(
+                convertMatch.linkedFields,
+              )}
+              onClose={() => setBarcodeColumnSettingsOpen(false)}
+              onSave={(columns) => {
+                const sanitized = mergeConvertMatchColumns(
+                  buildDefaultBarcodeMatchColumns(convertMatch.linkedFields),
+                  columns,
+                )
+                setBarcodeMatchColumns(sanitized)
+                writeBarcodeMatchColumns(
+                  brand.id,
+                  activeJob.partnerId,
+                  activeJob.barcodeSource,
+                  sanitized,
+                )
+                setBarcodeColumnSettingsOpen(false)
+              }}
+            />
           ) : null}
 
           {panel === 'docs' ? (
             <Card>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">서류·라벨</CardTitle>
+                <CardTitle className="text-base">서류 작업</CardTitle>
                 <CardDescription>
                   업체·출고방식에 따라 필요한 슬롯만 씁니다. 피킹이 덜 끝나도
                   일부 서류만 먼저 뽑을 수 있습니다.
@@ -3296,8 +4672,18 @@ export function BulkOutboundPage() {
           initialConfigs={visibleConfigs}
           onClose={() => setSettingsOpen(false)}
           onSave={(configs) => {
-            writeBulkPartnerConfigs(brand.id, configs)
-            setPartnerConfigs(configs)
+            void (async () => {
+              await replaceBulkOutboundPartnerConfigs(
+                brand.id,
+                configs.map((item) => ({
+                  partnerId: item.partnerId,
+                  barcodeSource: item.barcodeSource,
+                })),
+              )
+              await queryClient.invalidateQueries({
+                queryKey: ['bulkOutboundPartnerConfigs', brand.id],
+              })
+            })()
           }}
         />
       ) : null}
@@ -3307,27 +4693,27 @@ export function BulkOutboundPage() {
           configs={visibleConfigs}
           onClose={() => setNewJobOpen(false)}
           onCreate={(config, title, dueOn) => {
-            const id = `job-${Date.now()}`
             const today = todayIso()
-            const job: DemoJob = {
-              id,
-              partnerId: config.partnerId,
-              partnerName: config.partnerName,
-              barcodeSource: config.barcodeSource,
-              title,
-              assignee: DEMO_ME,
-              status: 'draft',
-              startedOn: today,
-              dueOn,
-              updatedOn: today,
-              plannedQty: 0,
-              note: '방금 만든 건. 엑셀부터 올리면 됩니다.',
-              evidenceFiles: [],
-              excelRows: [],
-              excelFileName: null,
-            }
-            setJobs((current) => [job, ...current])
-            openJob(id, 'upload')
+            void (async () => {
+              const id = await persistUiJob({
+                id: '',
+                partnerId: config.partnerId,
+                partnerName: config.partnerName,
+                barcodeSource: config.barcodeSource,
+                title,
+                assignee: meLabel,
+                status: 'draft',
+                startedOn: today,
+                dueOn,
+                updatedOn: today,
+                plannedQty: 0,
+                note: '방금 만든 건. 엑셀부터 올리면 됩니다.',
+                evidenceFiles: [],
+                excelRows: [],
+                excelFileName: null,
+              })
+              openJob(id, 'upload')
+            })()
           }}
         />
       ) : null}

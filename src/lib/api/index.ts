@@ -86,6 +86,9 @@ import * as invoicePrefixRequestStore from '@/lib/supabase/invoice-prefix-reques
 import * as invoiceWorkHistoryStore from '@/lib/supabase/invoice-work-history'
 import * as invoiceWorkInstructionStore from '@/lib/supabase/invoice-work-instructions'
 import * as productCodeStore from '@/lib/supabase/product-codes'
+import * as partnerBarcodeFieldStore from '@/lib/supabase/partner-barcode-fields'
+import * as bulkOutboundStore from '@/lib/supabase/bulk-outbound'
+import * as outboundShipmentStore from '@/lib/supabase/outbound-shipments'
 import * as productDraftStore from '@/lib/supabase/product-drafts'
 import * as seasonStore from '@/lib/supabase/seasons'
 import * as styleStore from '@/lib/supabase/styles'
@@ -181,6 +184,19 @@ export type {
   InvoiceWorkInstructionItemInput,
 } from '@/lib/supabase/invoice-work-instructions'
 export { ProductCodeStoreError } from '@/lib/supabase/product-codes'
+export { PartnerBarcodeFieldStoreError } from '@/lib/supabase/partner-barcode-fields'
+export type { PartnerBarcodeField } from '@/lib/supabase/partner-barcode-fields'
+export { BulkOutboundStoreError } from '@/lib/supabase/bulk-outbound'
+export type {
+  BulkOutboundBarcodeSource,
+  BulkOutboundJob,
+  BulkOutboundJobFile,
+  BulkOutboundJobInput,
+  BulkOutboundJobLine,
+  BulkOutboundJobStatus,
+  BulkOutboundPartnerConfig,
+} from '@/lib/supabase/bulk-outbound'
+export { OutboundShipmentStoreError } from '@/lib/supabase/outbound-shipments'
 export {
   ProductDraftStoreError,
   emptyDraftInput,
@@ -1279,9 +1295,98 @@ export async function applyBulkInvoiceCodeRules(
 export async function getProductCodes(
   brandId: string,
   kind?: ProductCodeKind,
+  usageTargetId?: string,
 ): Promise<ProductCode[]> {
   await delay()
-  return productCodeStore.listProductCodes(brandId, kind)
+  return productCodeStore.listProductCodes(brandId, kind, usageTargetId)
+}
+
+export async function getPartnerBarcodeFields(
+  brandId: string,
+  usageTargetId: string,
+) {
+  await delay()
+  return partnerBarcodeFieldStore.listPartnerBarcodeFields(
+    brandId,
+    usageTargetId,
+  )
+}
+
+export async function replacePartnerBarcodeFields(
+  brandId: string,
+  usageTargetId: string,
+  fields: Array<{
+    id?: string
+    label: string
+    type: 'text' | 'number'
+    order: number
+  }>,
+) {
+  await delay()
+  return partnerBarcodeFieldStore.replacePartnerBarcodeFields(
+    brandId,
+    usageTargetId,
+    fields,
+  )
+}
+
+export async function replacePartnerCodes(
+  brandId: string,
+  usageTargetId: string,
+  codes: Parameters<typeof productCodeStore.replacePartnerCodes>[2],
+) {
+  await delay()
+  return productCodeStore.replacePartnerCodes(brandId, usageTargetId, codes)
+}
+
+export async function getBulkOutboundPartnerConfigs(
+  brandId: string,
+  partnerNameById: Map<string, string>,
+) {
+  await delay()
+  return bulkOutboundStore.listBulkOutboundPartnerConfigs(
+    brandId,
+    partnerNameById,
+  )
+}
+
+export async function replaceBulkOutboundPartnerConfigs(
+  brandId: string,
+  configs: Array<{
+    partnerId: string
+    barcodeSource: bulkOutboundStore.BulkOutboundBarcodeSource
+  }>,
+) {
+  await delay()
+  return bulkOutboundStore.replaceBulkOutboundPartnerConfigs(brandId, configs)
+}
+
+export async function getBulkOutboundJobs(
+  brandId: string,
+  partnerNameById: Map<string, string>,
+) {
+  await delay()
+  return bulkOutboundStore.listBulkOutboundJobs(brandId, partnerNameById)
+}
+
+export async function saveBulkOutboundJob(
+  brandId: string,
+  input: bulkOutboundStore.BulkOutboundJobInput,
+) {
+  await delay()
+  return bulkOutboundStore.saveBulkOutboundJob(brandId, input)
+}
+
+export async function replaceBulkOutboundBackup(
+  input: Parameters<typeof bulkOutboundStore.replaceBulkOutboundBackup>[0],
+) {
+  await delay()
+  return bulkOutboundStore.replaceBulkOutboundBackup(input)
+}
+
+export async function getOutboundShipments(brandId: string) {
+  await delay()
+  return outboundShipmentStore.listOutboundShipments(brandId)
 }
 
 export async function createProductCode(

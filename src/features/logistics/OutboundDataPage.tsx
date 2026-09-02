@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { ChevronRight, Search, X } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowDown, ArrowUp, ChevronRight, Search, X } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useBrand } from '@/components/layout/brand-context'
 import { Badge } from '@/components/ui/badge'
@@ -11,32 +11,31 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input, Select } from '@/components/ui/input'
-import { getCodeUsageTargets, getStylesPage } from '@/lib/api'
+import { getCodeUsageTargets, getOutboundShipments } from '@/lib/api'
 import {
   buildProductOutboundSummary,
   demoEconomicsForStyle,
-  ensureDemoProductOutboundShipments,
   filterShipmentsByRange,
   formatOutboundDateHeader,
   formatWon,
   listOutboundDateColumns,
+  listOutboundStyleRows,
   PRODUCT_OUTBOUND_UPDATED_EVENT,
+  purgeDemoProductOutboundShipments,
   quantityByShippedOn,
-  readProductOutboundShipments,
   summarizeOutboundFinance,
   summarizeOutboundFinanceByPartner,
   type OutboundPartnerFinanceRow,
+  type OutboundStyleRow,
   type ProductOutboundPartnerTotal,
   type ProductOutboundShipment,
   type ProductOutboundSummary,
 } from '@/lib/outbound/product-outbound'
-import type { CodeUsageTarget, Style } from '@/lib/types'
+import type { CodeUsageTarget } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
 
 type ViewMode = 'outbound' | 'profit'
 type DatePreset = '7d' | '30d' | 'month' | 'last_month' | 'all'
-
-const PAGE_SIZE = 80
 
 const DATE_PRESETS: { value: DatePreset; label: string }[] = [
   { value: '7d', label: '최근 7일' },
@@ -79,8 +78,11 @@ function rangeForPreset(preset: DatePreset): { from: string; to: string } {
   return { from: toIsoDate(firstPrev), to: toIsoDate(lastPrev) }
 }
 
-function emptySummary(style: Style): ProductOutboundSummary {
-  return buildProductOutboundSummary(style, [])
+function emptySummary(style: OutboundStyleRow): ProductOutboundSummary {
+  return buildProductOutboundSummary(
+    { id: style.styleId, styleNo: style.styleNo, name: style.styleName },
+    [],
+  )
 }
 
 function KpiCard({
@@ -471,7 +473,7 @@ function ProductDetailDialog({
 }: {
   mode: 'outbound' | 'profit'
   summary: ProductOutboundSummary
-  style: Style
+  style: OutboundStyleRow
   finance: ReturnType<typeof summarizeOutboundFinance> | null
   dates: string[]
   onClose: () => void
@@ -689,46 +691,56 @@ function FilterBar({
   )
 }
 
-function ProductPager({
-  page,
-  pageCount,
-  total,
-  onPrev,
-  onNext,
+type OutboundSortKey = 'name' | 'total' | `date:${string}`
+
+function OutboundSortHeader({
+  label,
+  sortKey,
+  activeKey,
+  direction,
+  onSort,
+  align = 'left',
+  title,
+  className,
 }: {
-  page: number
-  pageCount: number
-  total: number
-  onPrev: () => void
-  onNext: () => void
+  label: string
+  sortKey: OutboundSortKey
+  activeKey: OutboundSortKey
+  direction: 'asc' | 'desc'
+  onSort: (key: OutboundSortKey) => void
+  align?: 'left' | 'right'
+  title?: string
+  className?: string
 }) {
-  if (total <= PAGE_SIZE) return null
+  const active = activeKey === sortKey
   return (
-    <div className="mt-3 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-      <span>
-        {formatNumber(page * PAGE_SIZE + 1)}–
-        {formatNumber(Math.min((page + 1) * PAGE_SIZE, total))} /{' '}
-        {formatNumber(total)}
-      </span>
-      <div className="flex gap-1.5">
-        <button
-          type="button"
-          disabled={page <= 0}
-          onClick={onPrev}
-          className="rounded-md border border-border px-2.5 py-1 disabled:opacity-40"
-        >
-          이전
-        </button>
-        <button
-          type="button"
-          disabled={page >= pageCount - 1}
-          onClick={onNext}
-          className="rounded-md border border-border px-2.5 py-1 disabled:opacity-40"
-        >
-          다음
-        </button>
-      </div>
-    </div>
+    <th
+      title={title}
+      className={cn(
+        'whitespace-nowrap border-b border-border bg-muted/40 px-2 py-1.5 font-medium',
+        align === 'right' && 'text-right',
+        className,
+      )}
+    >
+      <button
+        type="button"
+        onClick={() => onSort(sortKey)}
+        className={cn(
+          'inline-flex items-center gap-0.5 rounded px-0.5 hover:text-foreground',
+          align === 'right' && 'ml-auto',
+          active ? 'text-foreground' : 'text-muted-foreground',
+        )}
+      >
+        <span>{label}</span>
+        {active ? (
+          direction === 'asc' ? (
+            <ArrowUp className="size-3 shrink-0" aria-hidden />
+          ) : (
+            <ArrowDown className="size-3 shrink-0" aria-hidden />
+          )
+        ) : null}
+      </button>
+    </th>
   )
 }
 
@@ -741,10 +753,6 @@ function ProductListCard({
   empty,
   emptyMessage,
   rows,
-  page,
-  pageCount,
-  onPrev,
-  onNext,
 }: {
   title: string
   total: number
@@ -754,10 +762,6 @@ function ProductListCard({
   empty: boolean
   emptyMessage: string
   rows: ReactNode
-  page: number
-  pageCount: number
-  onPrev: () => void
-  onNext: () => void
 }) {
   return (
     <Card>
@@ -786,13 +790,6 @@ function ProductListCard({
             {rows}
           </div>
         )}
-        <ProductPager
-          page={page}
-          pageCount={pageCount}
-          total={total}
-          onPrev={onPrev}
-          onNext={onNext}
-        />
       </CardContent>
     </Card>
   )
@@ -800,30 +797,37 @@ function ProductListCard({
 
 export function OutboundDataPage() {
   const { brand } = useBrand()
+  const queryClient = useQueryClient()
   const [view, setView] = useState<ViewMode>('outbound')
   const [search, setSearch] = useState('')
   const [onlyShipped, setOnlyShipped] = useState(true)
-  const [page, setPage] = useState(0)
   const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null)
   const [partnerFilter, setPartnerFilter] = useState<string>('')
   const [datePreset, setDatePreset] = useState<DatePreset>('30d')
   const initialRange = rangeForPreset('30d')
   const [dateFrom, setDateFrom] = useState(initialRange.from)
   const [dateTo, setDateTo] = useState(initialRange.to)
-  const [shipments, setShipments] = useState<ProductOutboundShipment[]>(() =>
-    readProductOutboundShipments(brand.id),
-  )
+  const [outboundSortKey, setOutboundSortKey] =
+    useState<OutboundSortKey>('name')
+  const [outboundSortDir, setOutboundSortDir] = useState<'asc' | 'desc'>('asc')
+
+  const shipmentsQuery = useQuery({
+    queryKey: ['outboundShipments', brand.id],
+    queryFn: () => getOutboundShipments(brand.id),
+  })
+  const shipments = shipmentsQuery.data ?? []
 
   useEffect(() => {
-    setShipments(readProductOutboundShipments(brand.id))
+    purgeDemoProductOutboundShipments(brand.id)
     setSelectedStyleId(null)
-    setPage(0)
     setSearch('')
     setPartnerFilter('')
     const range = rangeForPreset('30d')
     setDatePreset('30d')
     setDateFrom(range.from)
     setDateTo(range.to)
+    setOutboundSortKey('name')
+    setOutboundSortDir('asc')
   }, [brand.id])
 
   useEffect(() => {
@@ -832,47 +836,20 @@ export function OutboundDataPage() {
         const detail = event.detail as { brandId?: string } | undefined
         if (detail?.brandId && detail.brandId !== brand.id) return
       }
-      setShipments(readProductOutboundShipments(brand.id))
+      void queryClient.invalidateQueries({
+        queryKey: ['outboundShipments', brand.id],
+      })
     }
     window.addEventListener(PRODUCT_OUTBOUND_UPDATED_EVENT, refresh)
-    window.addEventListener('storage', refresh)
     return () => {
       window.removeEventListener(PRODUCT_OUTBOUND_UPDATED_EVENT, refresh)
-      window.removeEventListener('storage', refresh)
     }
-  }, [brand.id])
+  }, [brand.id, queryClient])
 
   const partnersQuery = useQuery({
     queryKey: ['codeUsageTargets', brand.id],
     queryFn: () => getCodeUsageTargets(brand.id),
   })
-
-  const seedStylesQuery = useQuery({
-    queryKey: ['outboundDataSeedStyles', brand.id],
-    queryFn: () => getStylesPage(brand.id, {}, 0, 40),
-  })
-
-  useEffect(() => {
-    if (!seedStylesQuery.data || partnersQuery.isPending) return
-    const next = ensureDemoProductOutboundShipments(
-      brand.id,
-      seedStylesQuery.data.rows.map((style) => ({
-        id: style.id,
-        styleNo: style.styleNo,
-        name: style.name,
-      })),
-      (partnersQuery.data ?? []).map((partner) => ({
-        id: partner.id,
-        name: partner.name,
-      })),
-    )
-    setShipments(next)
-  }, [
-    brand.id,
-    partnersQuery.data,
-    partnersQuery.isPending,
-    seedStylesQuery.data,
-  ])
 
   const filteredShipments = useMemo(
     () =>
@@ -895,29 +872,28 @@ export function OutboundDataPage() {
     [filteredShipments],
   )
 
-  const stylesQuery = useQuery({
-    queryKey: ['outboundDataStyles', brand.id, search, page],
-    queryFn: () =>
-      getStylesPage(
-        brand.id,
-        { search: search.trim() || undefined },
-        page * PAGE_SIZE,
-        PAGE_SIZE,
-      ),
-    placeholderData: keepPreviousData,
-  })
-
-  const rows = stylesQuery.data?.rows ?? []
-  const total = stylesQuery.data?.total ?? 0
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const outboundStyleRows = useMemo(
+    () => listOutboundStyleRows(filteredShipments),
+    [filteredShipments],
+  )
 
   const summaries = useMemo(() => {
     const map = new Map<string, ProductOutboundSummary>()
-    for (const style of rows) {
-      map.set(style.id, buildProductOutboundSummary(style, filteredShipments))
+    for (const style of outboundStyleRows) {
+      map.set(
+        style.styleId,
+        buildProductOutboundSummary(
+          {
+            id: style.styleId,
+            styleNo: style.styleNo,
+            name: style.styleName,
+          },
+          filteredShipments,
+        ),
+      )
     }
     return map
-  }, [filteredShipments, rows])
+  }, [filteredShipments, outboundStyleRows])
 
   const dateColumns = useMemo(
     () => listOutboundDateColumns(dateFrom, dateTo, filteredShipments),
@@ -925,26 +901,77 @@ export function OutboundDataPage() {
   )
 
   const visibleRows = useMemo(() => {
+    const query = search.trim().toLowerCase()
+    let rows = outboundStyleRows
+    if (query) {
+      rows = rows.filter(
+        (style) =>
+          style.styleNo.toLowerCase().includes(query) ||
+          style.styleName.toLowerCase().includes(query),
+      )
+    }
     if (!onlyShipped) return rows
     return rows.filter(
-      (style) => (summaries.get(style.id)?.totalQuantity ?? 0) > 0,
+      (style) => (summaries.get(style.styleId)?.totalQuantity ?? 0) > 0,
     )
-  }, [onlyShipped, rows, summaries])
+  }, [onlyShipped, outboundStyleRows, search, summaries])
+
+  function toggleOutboundSort(key: OutboundSortKey) {
+    if (outboundSortKey === key) {
+      setOutboundSortDir((current) => (current === 'asc' ? 'desc' : 'asc'))
+      return
+    }
+    setOutboundSortKey(key)
+    setOutboundSortDir(key === 'name' ? 'asc' : 'desc')
+  }
+
+  const sortedVisibleRows = useMemo(() => {
+    const rows = [...visibleRows]
+    rows.sort((left, right) => {
+      let cmp = 0
+      if (outboundSortKey === 'name') {
+        cmp = (left.styleName || left.styleNo).localeCompare(
+          right.styleName || right.styleNo,
+          'ko-KR',
+        )
+      } else if (outboundSortKey === 'total') {
+        cmp =
+          (summaries.get(left.styleId)?.totalQuantity ?? 0) -
+          (summaries.get(right.styleId)?.totalQuantity ?? 0)
+      } else if (outboundSortKey.startsWith('date:')) {
+        const date = outboundSortKey.slice(5)
+        const leftQty =
+          quantityByShippedOn(
+            summaries.get(left.styleId)?.shipments ?? [],
+          ).get(date) ?? 0
+        const rightQty =
+          quantityByShippedOn(
+            summaries.get(right.styleId)?.shipments ?? [],
+          ).get(date) ?? 0
+        cmp = leftQty - rightQty
+      }
+      if (cmp === 0) {
+        cmp = left.styleNo.localeCompare(right.styleNo, 'ko-KR')
+      }
+      return outboundSortDir === 'asc' ? cmp : -cmp
+    })
+    return rows
+  }, [outboundSortDir, outboundSortKey, summaries, visibleRows])
 
   const selectedStyle =
-    visibleRows.find((style) => style.id === selectedStyleId) ??
-    rows.find((style) => style.id === selectedStyleId) ??
+    sortedVisibleRows.find((style) => style.styleId === selectedStyleId) ??
+    visibleRows.find((style) => style.styleId === selectedStyleId) ??
     null
 
   const selectedSummary = selectedStyle
-    ? (summaries.get(selectedStyle.id) ?? emptySummary(selectedStyle))
+    ? (summaries.get(selectedStyle.styleId) ?? emptySummary(selectedStyle))
     : null
 
   const selectedFinance = useMemo(() => {
     if (!selectedStyle) return null
     const rowsForStyle = filteredShipments.filter(
       (row) =>
-        row.styleId === selectedStyle.id ||
+        row.styleId === selectedStyle.styleId ||
         row.styleNo === selectedStyle.styleNo,
     )
     return summarizeOutboundFinance(rowsForStyle)
@@ -955,19 +982,16 @@ export function OutboundDataPage() {
     const range = rangeForPreset(preset)
     setDateFrom(range.from)
     setDateTo(range.to)
-    setPage(0)
   }
 
   function setCustomFrom(value: string) {
     setDatePreset('all')
     setDateFrom(value)
-    setPage(0)
   }
 
   function setCustomTo(value: string) {
     setDatePreset('all')
     setDateTo(value)
-    setPage(0)
   }
 
   const filterBarProps = {
@@ -984,36 +1008,29 @@ export function OutboundDataPage() {
     onTo: setCustomTo,
     onPartner: (value: string) => {
       setPartnerFilter(value)
-      setPage(0)
     },
     onSearch: (value: string) => {
       setSearch(value)
-      setPage(0)
       setSelectedStyleId(null)
     },
     onOnlyShipped: () => setOnlyShipped((value) => !value),
   }
 
   const listControls = {
-    total,
-    loading: stylesQuery.isPending && rows.length === 0,
-    error: stylesQuery.isError,
+    total: visibleRows.length,
+    loading: false,
+    error: false,
     empty: visibleRows.length === 0,
     emptyMessage: onlyShipped
       ? '기간 안 출고 기록이 있는 상품이 없습니다.'
       : '표시할 상품이 없습니다.',
-    page,
-    pageCount,
-    onPrev: () => setPage((current) => Math.max(0, current - 1)),
-    onNext: () =>
-      setPage((current) => Math.min(pageCount - 1, current + 1)),
   }
 
   return (
     <div>
       <PageHeader
         title="운영 현황"
-        description="출고 실적과 손익을 나눠 봅니다. 금액은 UI 테스트용이며 DB에 저장하지 않습니다."
+        description="출고 수량은 DB 원장입니다. 손익 금액은 테스트용이며 저장하지 않습니다."
       />
 
       <div className="mb-4 flex flex-wrap gap-1.5">
@@ -1072,38 +1089,52 @@ export function OutboundDataPage() {
                     <th className="sticky left-0 z-20 w-[4.5rem] min-w-[4.5rem] max-w-[4.5rem] whitespace-nowrap border-b border-border bg-muted/40 px-2 py-1.5 font-medium">
                       M번호
                     </th>
-                    <th className="sticky left-[4.5rem] z-20 whitespace-nowrap border-b border-border bg-muted/40 px-2 py-1.5 font-medium">
-                      상품명
-                    </th>
-                    <th className="whitespace-nowrap border-b border-border bg-muted/40 px-2 py-1.5 text-right font-medium">
-                      총 출고
-                    </th>
+                    <OutboundSortHeader
+                      label="상품명"
+                      sortKey="name"
+                      activeKey={outboundSortKey}
+                      direction={outboundSortDir}
+                      onSort={toggleOutboundSort}
+                      className="sticky left-[4.5rem] z-20"
+                    />
+                    <OutboundSortHeader
+                      label="총 출고"
+                      sortKey="total"
+                      activeKey={outboundSortKey}
+                      direction={outboundSortDir}
+                      onSort={toggleOutboundSort}
+                      align="right"
+                    />
                     {dateColumns.map((date) => (
-                      <th
+                      <OutboundSortHeader
                         key={date}
+                        label={formatOutboundDateHeader(date)}
                         title={date}
-                        className="whitespace-nowrap border-b border-border bg-muted/40 px-1.5 py-1.5 text-right font-medium tabular-nums"
-                      >
-                        {formatOutboundDateHeader(date)}
-                      </th>
+                        sortKey={`date:${date}`}
+                        activeKey={outboundSortKey}
+                        direction={outboundSortDir}
+                        onSort={toggleOutboundSort}
+                        align="right"
+                        className="px-1.5 tabular-nums"
+                      />
                     ))}
                     <th className="w-6 border-b border-border bg-muted/40 px-1 py-1.5" />
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleRows.map((style) => {
+                  {sortedVisibleRows.map((style) => {
                     const summary =
-                      summaries.get(style.id) ?? emptySummary(style)
+                      summaries.get(style.styleId) ?? emptySummary(style)
                     const byDate = quantityByShippedOn(summary.shipments)
-                    const active = selectedStyleId === style.id
+                    const active = selectedStyleId === style.styleId
                     return (
                       <tr
-                        key={style.id}
+                        key={style.styleId}
                         className={cn(
                           'group cursor-pointer',
                           active && 'bg-primary/10',
                         )}
-                        onClick={() => setSelectedStyleId(style.id)}
+                        onClick={() => setSelectedStyleId(style.styleId)}
                       >
                         <td
                           className={cn(
@@ -1123,7 +1154,7 @@ export function OutboundDataPage() {
                               : 'bg-card group-hover:bg-muted/30',
                           )}
                         >
-                          {style.name || (
+                          {style.styleName || (
                             <span className="text-muted-foreground">—</span>
                           )}
                         </td>
@@ -1231,28 +1262,28 @@ export function OutboundDataPage() {
                 <tbody>
                   {visibleRows.map((style) => {
                     const summary =
-                      summaries.get(style.id) ?? emptySummary(style)
+                      summaries.get(style.styleId) ?? emptySummary(style)
                     const eco = demoEconomicsForStyle(style.styleNo)
                     const revenue = summary.totalQuantity * eco.unitPrice
                     const net =
                       revenue -
                       summary.totalQuantity * eco.unitCost -
                       summary.totalQuantity * eco.unitFee
-                    const active = selectedStyleId === style.id
+                    const active = selectedStyleId === style.styleId
                     return (
                       <tr
-                        key={style.id}
+                        key={style.styleId}
                         className={cn(
                           'cursor-pointer border-b border-border last:border-0',
                           active ? 'bg-primary/10' : 'hover:bg-muted/30',
                         )}
-                        onClick={() => setSelectedStyleId(style.id)}
+                        onClick={() => setSelectedStyleId(style.styleId)}
                       >
                         <td className="whitespace-nowrap px-3 py-2.5 font-mono text-xs">
                           {style.styleNo}
                         </td>
                         <td className="max-w-[12rem] truncate px-3 py-2.5">
-                          {style.name || (
+                          {style.styleName || (
                             <span className="text-muted-foreground">—</span>
                           )}
                         </td>

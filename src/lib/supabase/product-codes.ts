@@ -9,7 +9,7 @@ import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 
 const CODE_COLUMNS =
-  'id, brand_id, kind, code, name, weight_g, width_cm, depth_cm, height_cm, note, values, created_at, updated_at'
+  'id, brand_id, kind, usage_target_id, code, name, weight_g, width_cm, depth_cm, height_cm, note, values, created_at, updated_at'
 
 /** PostgREST 응답 상한에 걸리지 않도록 코드 목록을 나눠 읽는다. */
 const CODE_PAGE_SIZE = 1000
@@ -20,6 +20,7 @@ type CodeRow = {
   id: string
   brand_id: string
   kind: ProductCodeKind
+  usage_target_id: string | null
   code: string
   name: string
   weight_g: number | null
@@ -136,6 +137,13 @@ function validate(input: ProductCodeInput) {
     throw new ProductCodeStoreError('코드값을 입력하세요.', 'invalid')
   }
 
+  if (input.kind === 'partner' && !input.usageTargetId?.trim()) {
+    throw new ProductCodeStoreError(
+      '거래처 코드는 업체가 필요합니다.',
+      'invalid',
+    )
+  }
+
   const components = normalizeComponents(input.components)
   const values = normalizeValues(input.values)
 
@@ -147,6 +155,7 @@ function toCode(row: CodeRow, components: ProductCodeComponent[]): ProductCode {
     id: row.id,
     brandId: row.brand_id,
     kind: row.kind,
+    usageTargetId: row.usage_target_id,
     code: row.code,
     name: row.name,
     weightG: row.weight_g,
@@ -218,6 +227,8 @@ async function saveViaRpc(
       p_note: input.note.trim(),
       p_values: values,
       p_components: components,
+      p_usage_target_id:
+        input.kind === 'partner' ? input.usageTargetId?.trim() ?? null : null,
     },
   )
 
@@ -236,6 +247,7 @@ async function saveViaRpc(
 export async function listProductCodes(
   brandId: string,
   kind?: ProductCodeKind,
+  usageTargetId?: string,
 ): Promise<ProductCode[]> {
   const rows: CodeRow[] = []
 
@@ -245,6 +257,7 @@ export async function listProductCodes(
       .select(CODE_COLUMNS)
       .eq('brand_id', brandId)
     if (kind) query = query.eq('kind', kind)
+    if (usageTargetId) query = query.eq('usage_target_id', usageTargetId)
 
     const { data, error } = await query
       .order('created_at', { ascending: false })
@@ -318,6 +331,38 @@ export async function updateProductCode(
     throw new ProductCodeStoreError('코드를 저장하지 못했습니다.', 'invalid')
   }
   return updated
+}
+
+export async function replacePartnerCodes(
+  brandId: string,
+  usageTargetId: string,
+  codes: Array<{
+    id?: string
+    code: string
+    name: string
+    values: Record<string, string>
+    components: ProductCodeComponent[]
+  }>,
+): Promise<void> {
+  const { error } = await getSupabase().rpc('replace_partner_codes', {
+    p_brand_id: brandId,
+    p_usage_target_id: usageTargetId,
+    p_codes: codes.map((row) => ({
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      values: normalizeValues(row.values),
+      components: normalizeComponents(row.components),
+    })),
+  })
+  if (error) {
+    throw new ProductCodeStoreError(
+      isUniqueViolation(error)
+        ? '이미 등록된 코드입니다.'
+        : errorMessage(error, '거래처 코드를 저장하지 못했습니다.'),
+      isUniqueViolation(error) ? 'duplicate' : 'invalid',
+    )
+  }
 }
 
 export async function deleteProductCode(id: string): Promise<void> {

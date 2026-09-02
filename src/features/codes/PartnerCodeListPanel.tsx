@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDown,
   ArrowUp,
@@ -16,7 +16,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input, Select } from '@/components/ui/input'
-import { getStylesByBrand } from '@/lib/api'
+import {
+  getPartnerBarcodeFields,
+  getProductCodes,
+  getStylesByBrand,
+  replacePartnerBarcodeFields,
+  replacePartnerCodes,
+} from '@/lib/api'
 import {
   PARTNER_COMPONENT_HEADER,
   parsePartnerComponentsCell,
@@ -80,7 +86,7 @@ export function readPartnerCodeFields(
           typeof (item as PartnerCodeField).id === 'string' &&
           typeof (item as PartnerCodeField).label === 'string',
       )
-      .map((item, index) => ({
+      .map((item, index): PartnerCodeField => ({
         id: item.id,
         label: item.label,
         type: item.type === 'number' ? 'number' : 'text',
@@ -92,12 +98,43 @@ export function readPartnerCodeFields(
   }
 }
 
-function writeFields(
-  brandId: string,
-  targetId: string,
-  fields: PartnerCodeField[],
-) {
-  localStorage.setItem(fieldsKey(brandId, targetId), JSON.stringify(fields))
+function clearLocalPartnerCodes(brandId: string, targetId: string) {
+  localStorage.removeItem(fieldsKey(brandId, targetId))
+  localStorage.removeItem(rowsKey(brandId, targetId))
+}
+
+function partnerCodeName(row: PartnerCodeRow, fields: PartnerCodeField[]) {
+  const nameField = fields.find((field) =>
+    /상품명|코드명|품명/.test(field.label),
+  )
+  const fromField = nameField ? (row.values[nameField.id] ?? '').trim() : ''
+  return fromField || row.code
+}
+
+function rowsFromCodes(
+  codes: Array<{
+    id: string
+    code: string
+    values: Record<string, string>
+    components: ProductCodeComponent[]
+  }>,
+): PartnerCodeRow[] {
+  return codes.map((code) => ({
+    id: code.id,
+    code: code.code,
+    values: code.values,
+    components: code.components,
+  }))
+}
+
+function toReplaceCodes(rows: PartnerCodeRow[], fields: PartnerCodeField[]) {
+  return rows.map((row) => ({
+    id: row.id,
+    code: row.code,
+    name: partnerCodeName(row, fields),
+    values: row.values,
+    components: row.components,
+  }))
 }
 
 export function readPartnerCodeRows(
@@ -134,8 +171,21 @@ export function readPartnerCodeRows(
   }
 }
 
-function writeRows(brandId: string, targetId: string, rows: PartnerCodeRow[]) {
-  localStorage.setItem(rowsKey(brandId, targetId), JSON.stringify(rows))
+function remapRowValues(
+  rows: PartnerCodeRow[],
+  previous: PartnerCodeField[],
+  next: PartnerCodeField[],
+): PartnerCodeRow[] {
+  const nextByLabel = new Map(next.map((field) => [field.label, field.id]))
+  return rows.map((row) => {
+    const values: Record<string, string> = {}
+    for (const field of previous) {
+      const nextId = nextByLabel.get(field.label)
+      const value = row.values[field.id]
+      if (nextId && value) values[nextId] = value
+    }
+    return { ...row, values }
+  })
 }
 
 async function downloadPartnerCodeTemplate(
@@ -694,17 +744,16 @@ export function PartnerCodeListPanel({
   brandId,
   partner,
 }: PartnerCodeListPanelProps) {
-  const [fields, setFields] = useState<PartnerCodeField[]>(() =>
-    readPartnerCodeFields(brandId, partner.id),
-  )
-  const [rows, setRows] = useState<PartnerCodeRow[]>(() =>
-    readPartnerCodeRows(brandId, partner.id),
-  )
+  const queryClient = useQueryClient()
+  const [fields, setFields] = useState<PartnerCodeField[]>([])
+  const [rows, setRows] = useState<PartnerCodeRow[]>([])
   const [headerOpen, setHeaderOpen] = useState(false)
   const [downloading, setDownloading] = useState(false)
+  const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [editingRowId, setEditingRowId] = useState<string | null>(null)
+  const migratedKeyRef = useRef('')
 
   const stylesQuery = useQuery({
     queryKey: ['styles', brandId, 'partner-codes'],
@@ -712,13 +761,102 @@ export function PartnerCodeListPanel({
   })
   const styles = stylesQuery.data ?? []
 
+  const fieldsQuery = useQuery({
+    queryKey: ['partnerBarcodeFields', brandId, partner.id],
+    queryFn: () => getPartnerBarcodeFields(brandId, partner.id),
+  })
+  const codesQuery = useQuery({
+    queryKey: ['productCodes', brandId, 'partner', partner.id],
+    queryFn: () => getProductCodes(brandId, 'partner', partner.id),
+  })
+
   useEffect(() => {
-    setFields(readPartnerCodeFields(brandId, partner.id))
-    setRows(readPartnerCodeRows(brandId, partner.id))
     setSearch('')
     setError(null)
     setEditingRowId(null)
   }, [brandId, partner.id])
+
+  useEffect(() => {
+    if (!fieldsQuery.isSuccess || !codesQuery.isSuccess) return
+
+    const dbFields = fieldsQuery.data
+    const dbRows = rowsFromCodes(codesQuery.data)
+    if (dbFields.length > 0 || dbRows.length > 0) {
+      setFields(dbFields)
+      setRows(dbRows)
+      migratedKeyRef.current = `${brandId}:${partner.id}`
+      return
+    }
+
+    const migrateKey = `${brandId}:${partner.id}`
+    if (migratedKeyRef.current === migrateKey) {
+      setFields(dbFields)
+      setRows(dbRows)
+      return
+    }
+
+    const localFields = readPartnerCodeFields(brandId, partner.id)
+    const localRows = readPartnerCodeRows(brandId, partner.id)
+    if (localFields.length === 0 && localRows.length === 0) {
+      setFields([])
+      setRows([])
+      migratedKeyRef.current = migrateKey
+      return
+    }
+    migratedKeyRef.current = migrateKey
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const savedFields =
+          localFields.length > 0
+            ? await replacePartnerBarcodeFields(
+                brandId,
+                partner.id,
+                localFields,
+              )
+            : []
+        const remapped = remapRowValues(localRows, localFields, savedFields)
+        if (remapped.length > 0) {
+          await replacePartnerCodes(
+            brandId,
+            partner.id,
+            toReplaceCodes(remapped, savedFields),
+          )
+        }
+        clearLocalPartnerCodes(brandId, partner.id)
+        if (cancelled) return
+        setFields(savedFields)
+        await queryClient.invalidateQueries({
+          queryKey: ['partnerBarcodeFields', brandId, partner.id],
+        })
+        await queryClient.invalidateQueries({
+          queryKey: ['productCodes', brandId, 'partner', partner.id],
+        })
+      } catch (err) {
+        if (cancelled) return
+        setFields(localFields)
+        setRows(localRows)
+        setError(
+          err instanceof Error
+            ? err.message
+            : '브라우저에 있던 거래처 코드를 옮기지 못했습니다.',
+        )
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    brandId,
+    partner.id,
+    fieldsQuery.isSuccess,
+    codesQuery.isSuccess,
+    fieldsQuery.data,
+    codesQuery.data,
+    queryClient,
+  ])
 
   const codeHeader = partnerBarcodeHeader(partner.name)
 
@@ -740,16 +878,60 @@ export function PartnerCodeListPanel({
     })
   }, [rows, fields, search])
 
-  function persistFields(next: PartnerCodeField[]) {
-    setFields(next)
-    writeFields(brandId, partner.id, next)
+  async function persistFields(next: PartnerCodeField[]) {
+    setSaving(true)
+    setError(null)
+    try {
+      const saved = await replacePartnerBarcodeFields(
+        brandId,
+        partner.id,
+        next,
+      )
+      const remapped = remapRowValues(rows, fields, saved)
+      setFields(saved)
+      setRows(remapped)
+      await replacePartnerCodes(
+        brandId,
+        partner.id,
+        toReplaceCodes(remapped, saved),
+      )
+      await queryClient.invalidateQueries({
+        queryKey: ['partnerBarcodeFields', brandId, partner.id],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ['productCodes', brandId, 'partner', partner.id],
+      })
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : '헤더를 저장하지 못했습니다.',
+      )
+    } finally {
+      setSaving(false)
+    }
   }
 
   const editingRow = rows.find((row) => row.id === editingRowId) ?? null
 
-  function persistRows(next: PartnerCodeRow[]) {
+  async function persistRows(next: PartnerCodeRow[]) {
     setRows(next)
-    writeRows(brandId, partner.id, next)
+    setSaving(true)
+    setError(null)
+    try {
+      await replacePartnerCodes(
+        brandId,
+        partner.id,
+        toReplaceCodes(next, fields),
+      )
+      await queryClient.invalidateQueries({
+        queryKey: ['productCodes', brandId, 'partner', partner.id],
+      })
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : '거래처 코드를 저장하지 못했습니다.',
+      )
+    } finally {
+      setSaving(false)
+    }
   }
 
   function applyBulkComponents(
@@ -868,7 +1050,7 @@ export function PartnerCodeListPanel({
         })
       }
 
-      persistRows(nextRows)
+      await persistRows(nextRows)
     } catch (err) {
       setError(
         err instanceof Error ? err.message : '파일을 파싱하지 못했습니다.',
@@ -896,6 +1078,7 @@ export function PartnerCodeListPanel({
                 type="button"
                 size="sm"
                 variant="outline"
+                disabled={saving}
                 onClick={() => setHeaderOpen(true)}
               >
                 헤더 설정
@@ -937,7 +1120,7 @@ export function PartnerCodeListPanel({
                         '이 업체의 바코드 목록을 모두 지울까요?',
                       )
                     ) {
-                      persistRows([])
+                      void persistRows([])
                     }
                   }}
                 >
@@ -1067,18 +1250,7 @@ export function PartnerCodeListPanel({
           fields={fields}
           onClose={() => setHeaderOpen(false)}
           onSave={(next) => {
-            persistFields(next)
-            // 삭제된 필드 값 정리
-            const keep = new Set(next.map((field) => field.id))
-            persistRows(
-              rows.map((row) => {
-                const values: Record<string, string> = {}
-                for (const [key, value] of Object.entries(row.values)) {
-                  if (keep.has(key)) values[key] = value
-                }
-                return { ...row, values }
-              }),
-            )
+            void persistFields(next)
           }}
         />
       ) : null}

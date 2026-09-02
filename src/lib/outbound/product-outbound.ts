@@ -38,8 +38,6 @@ export type ProductOutboundSummary = {
 
 const STORAGE_PREFIX = 'atelier:product-outbound-shipments:'
 const SEED_META_PREFIX = 'atelier:product-outbound-shipments-seed:'
-/** localStorage 테스트 시드 버전. 올리면 브라우저에 다시 심는다. */
-const DEMO_SEED_VERSION = '2'
 
 function storageKey(brandId: string) {
   return `${STORAGE_PREFIX}${brandId}`
@@ -47,6 +45,10 @@ function storageKey(brandId: string) {
 
 function seedMetaKey(brandId: string) {
   return `${SEED_META_PREFIX}${brandId}`
+}
+
+function isDemoOutboundShipment(row: ProductOutboundShipment) {
+  return row.id.startsWith('demo-out-')
 }
 
 function isShipment(value: unknown): value is ProductOutboundShipment {
@@ -103,172 +105,21 @@ function notifyProductOutboundUpdated(brandId: string) {
   )
 }
 
-function todayIsoDate() {
-  const date = new Date()
-  date.setHours(12, 0, 0, 0)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-function bulkBackupNote(jobId: string) {
-  return `bulk-backup:${jobId}`
-}
-
-/**
- * 대량출고 임시 백업을 운영 현황(출고) localStorage에 반영한다. DB에는 쓰지 않는다.
- * 같은 jobId로 다시 누르면 이전 반영분을 교체한다.
- */
-export function applyBulkOutboundBackupToOperations(input: {
-  brandId: string
-  jobId: string
-  partnerId: string
-  partnerName: string
-  shippedOn?: string
-  entries: Array<{
-    styleId?: string
-    styleNo: string
-    styleName: string
-    quantity: number
-  }>
-}): ProductOutboundShipment[] {
-  const shippedOn = input.shippedOn || todayIsoDate()
-  const note = bulkBackupNote(input.jobId)
-  const existing = readProductOutboundShipments(input.brandId).filter(
-    (row) => row.note !== note,
-  )
-  const added: ProductOutboundShipment[] = []
-  for (const entry of input.entries) {
-    if (entry.quantity <= 0) continue
-    const styleNo = entry.styleNo.trim()
-    if (!styleNo) continue
-    added.push({
-      id: `bulk-${input.jobId}-${styleNo}`,
-      brandId: input.brandId,
-      styleId: (entry.styleId || styleNo).trim() || styleNo,
-      styleNo,
-      styleName: entry.styleName.trim() || styleNo,
-      partnerId: input.partnerId,
-      partnerName: input.partnerName,
-      shippedOn,
-      quantity: entry.quantity,
-      source: 'bulk',
-      note,
-    })
-  }
-  const next = [...existing, ...added]
-  writeProductOutboundShipments(input.brandId, next)
-  try {
-    localStorage.setItem(seedMetaKey(input.brandId), DEMO_SEED_VERSION)
-  } catch {
-    // ignore
-  }
-  notifyProductOutboundUpdated(input.brandId)
-  return next
-}
-
-function daysAgoIso(days: number) {
-  const date = new Date()
-  date.setHours(12, 0, 0, 0)
-  date.setDate(date.getDate() - days)
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-type SeedStyle = { id: string; styleNo: string; name: string }
-type SeedPartner = { id: string; name: string }
-
-/**
- * DB에 쓰지 않고 localStorage에만 테스트 출고 이력을 심는다.
- * 같은 시드 버전이면 기존 값을 유지한다.
- */
-export function ensureDemoProductOutboundShipments(
+/** 예전 브라우저 시드 출고를 제거한다. 업무 원본은 outbound_shipments다. */
+export function purgeDemoProductOutboundShipments(
   brandId: string,
-  styles: SeedStyle[],
-  partners: SeedPartner[],
 ): ProductOutboundShipment[] {
-  const existing = readProductOutboundShipments(brandId)
+  const kept = readProductOutboundShipments(brandId).filter(
+    (row) => !isDemoOutboundShipment(row),
+  )
+  writeProductOutboundShipments(brandId, kept)
   try {
-    if (
-      localStorage.getItem(seedMetaKey(brandId)) === DEMO_SEED_VERSION &&
-      existing.length > 0
-    ) {
-      return existing
-    }
+    localStorage.removeItem(seedMetaKey(brandId))
   } catch {
     // ignore
   }
-
-  // 대량출고 백업 등 수동 반영분이 있으면 시드로 덮지 않는다.
-  if (existing.some((row) => row.source === 'bulk')) {
-    try {
-      localStorage.setItem(seedMetaKey(brandId), DEMO_SEED_VERSION)
-    } catch {
-      // ignore
-    }
-    return existing
-  }
-
-  if (styles.length === 0) return existing
-
-  const partnerPool =
-    partners.length > 0
-      ? partners.slice(0, 6)
-      : [
-          { id: 'demo-partner-coupang', name: '쿠팡 풀필먼트' },
-          { id: 'demo-partner-ir', name: '아이라벨' },
-          { id: 'demo-partner-smart', name: '스마트스토어' },
-          { id: 'demo-partner-cafe', name: '카카오톡스토어' },
-        ]
-
-  const sources: ProductOutboundShipment['source'][] = [
-    'invoice',
-    'bulk',
-    'invoice',
-    'manual',
-  ]
-  const dayOffsets = [1, 3, 5, 8, 12, 18, 25, 32]
-  const stylePool = styles.slice(0, Math.min(24, styles.length))
-  const rows: ProductOutboundShipment[] = []
-  let seq = 0
-
-  for (let index = 0; index < stylePool.length; index += 1) {
-    const style = stylePool[index]!
-    const partnerCount = 1 + (index % Math.min(3, partnerPool.length))
-    for (let p = 0; p < partnerCount; p += 1) {
-      const partner = partnerPool[(index + p) % partnerPool.length]!
-      const hitCount = 1 + ((index + p) % 3)
-      for (let h = 0; h < hitCount; h += 1) {
-        seq += 1
-        const qtyBase = 8 + ((index * 7 + p * 5 + h * 3) % 40)
-        rows.push({
-          id: `demo-out-${brandId.slice(0, 8)}-${seq}`,
-          brandId,
-          styleId: style.id,
-          styleNo: style.styleNo,
-          styleName: style.name || style.styleNo,
-          partnerId: partner.id,
-          partnerName: partner.name,
-          shippedOn: daysAgoIso(
-            dayOffsets[(index + p + h) % dayOffsets.length]!,
-          ),
-          quantity: qtyBase * (h === 0 ? 3 : 1),
-          source: sources[(index + p + h) % sources.length]!,
-        })
-      }
-    }
-  }
-
-  writeProductOutboundShipments(brandId, rows)
-  try {
-    localStorage.setItem(seedMetaKey(brandId), DEMO_SEED_VERSION)
-  } catch {
-    // ignore
-  }
-  return rows
+  notifyProductOutboundUpdated(brandId)
+  return kept
 }
 
 export const PRODUCT_OUTBOUND_SOURCE_LABEL: Record<
@@ -491,36 +342,34 @@ export function filterShipmentsByRange(
   })
 }
 
-/** 기간 안의 날짜 헤더. 범위가 너무 길면 출고가 있는 날만. */
+/** 기간 안 모든 날짜 헤더. 출고 없는 날도 빈 칸(·)으로 표시한다. */
 export function listOutboundDateColumns(
   from: string,
   to: string,
   shipments: ProductOutboundShipment[],
-  maxDays = 62,
 ): string[] {
-  const withActivity = () => {
-    const set = new Set<string>()
+  let rangeFrom = from
+  let rangeTo = to
+
+  if (!rangeFrom || !rangeTo) {
     for (const row of shipments) {
       if (from && row.shippedOn < from) continue
       if (to && row.shippedOn > to) continue
-      set.add(row.shippedOn)
+      if (!rangeFrom || row.shippedOn < rangeFrom) rangeFrom = row.shippedOn
+      if (!rangeTo || row.shippedOn > rangeTo) rangeTo = row.shippedOn
     }
-    return [...set].sort()
   }
 
-  if (!from || !to) return withActivity()
-  if (from > to) return []
+  if (!rangeFrom || !rangeTo || rangeFrom > rangeTo) return []
+  return enumerateIsoDateRange(rangeFrom, rangeTo)
+}
 
+function enumerateIsoDateRange(from: string, to: string): string[] {
   const start = new Date(`${from}T12:00:00`)
   const end = new Date(`${to}T12:00:00`)
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
-    return withActivity()
-  }
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return []
 
   const dayMs = 24 * 60 * 60 * 1000
-  const span = Math.floor((end.getTime() - start.getTime()) / dayMs) + 1
-  if (span > maxDays) return withActivity()
-
   const dates: string[] = []
   for (let cursor = start.getTime(); cursor <= end.getTime(); cursor += dayMs) {
     const date = new Date(cursor)
@@ -530,6 +379,40 @@ export function listOutboundDateColumns(
     dates.push(`${year}-${month}-${day}`)
   }
   return dates
+}
+
+export type OutboundStyleRow = {
+  styleId: string
+  styleNo: string
+  styleName: string
+}
+
+/** 필터된 출고 이력에서 상품 행 목록을 만든다. */
+export function listOutboundStyleRows(
+  shipments: ProductOutboundShipment[],
+): OutboundStyleRow[] {
+  const map = new Map<string, OutboundStyleRow>()
+  for (const row of shipments) {
+    const styleNo = row.styleNo.trim()
+    if (!styleNo) continue
+    const styleId = (row.styleId || styleNo).trim() || styleNo
+    const key = styleId
+    const existing = map.get(key)
+    if (existing) {
+      if (!existing.styleName && row.styleName) {
+        existing.styleName = row.styleName
+      }
+      continue
+    }
+    map.set(key, {
+      styleId,
+      styleNo,
+      styleName: row.styleName,
+    })
+  }
+  return [...map.values()].sort((left, right) =>
+    left.styleNo.localeCompare(right.styleNo, 'ko-KR'),
+  )
 }
 
 export function quantityByShippedOn(

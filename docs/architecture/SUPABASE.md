@@ -37,6 +37,9 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 출시 기획(`seasons`), 브랜드 항목(`brand_fields` + `brand_field_options`), 상품(`styles`) | Supabase |
 | 기획안(`product_drafts` + `draft_colors` + `draft_options`) | Supabase |
 | 코드·출고업체(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_target_folders`, `code_usage_target_aliases`, `code_usage_assignments`) | Supabase |
+| 거래처 코드 헤더(`partner_barcode_fields`). `product_codes.kind='partner'`는 업체마다 같은 바코드 문자열을 허용 | Supabase |
+| 대량출고 작업·등록 업체(`bulk_outbound_jobs` + `bulk_outbound_job_lines` + `bulk_outbound_job_files` + `bulk_outbound_partner_configs`) | Supabase |
+| 운영 현황 출고 원장(`outbound_shipments`). 재고 차감과 분리 | Supabase |
 | 송장 품목명 변환 기준(`invoice_name_rules`) | Supabase |
 | 송장 품목명 exact 기준(`invoice_product_name_maps`) | Supabase |
 | 송장 품목명 제외 기준(`invoice_product_name_exclusions`) | Supabase |
@@ -62,7 +65,9 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 브랜드 카드의 SKU 수는 `styles` COUNT로 `src/lib/api/index.ts`가 붙인다.
 - 앱 저장소는 `src/lib/supabase/*.ts`다. 공개 API 이름은 `src/lib/api/index.ts`에 유지한다.
 - 원자 작업 RPC: `save_product_draft`, `promote_product_draft`,
-  `save_product_code_with_components`, `save_brand_field_options`,
+  `save_product_code_with_components`, `replace_partner_barcode_fields`,
+  `replace_partner_codes`, `save_bulk_outbound_job`, `replace_bulk_outbound_backup`,
+  `save_brand_field_options`,
   `save_invoice_packing_size_maps`,   `save_outbound_partner_with_aliases`, `add_outbound_partner_alias`,
   `record_invoice_work_completion`,
   `import_warehouse_inventory_set`, `apply_warehouse_stock_action`,
@@ -149,6 +154,21 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   하지 않는다.
 - 로직: `src/lib/codes/barcode-import.ts`, 화면: `BarcodeBulkUploadPanel.tsx`,
   `PendingBarcodePanel.tsx`, `BarcodeInfoBulkPanel.tsx`, `BarcodeFieldManager.tsx`.
+
+### 거래처 코드·대량출고·운영 현황 출고
+
+자사 88코드와 거래처 코드는 같은 `product_codes`에 두고 `kind`로 나눈다.
+거래처 코드는 `usage_target_id`가 있고, 업체마다 같은 바코드 문자열을 허용한다.
+업체별 헤더는 `partner_barcode_fields`이며 자사 `barcode_fields`와 섞지 않는다.
+값은 기존처럼 `product_codes.values` JSONB에 필드 id를 키로 둔다.
+
+대량출고 Job은 `bulk_outbound_jobs`에 두고, 엑셀의 비개인정보(바코드·수량·상품명)만
+`bulk_outbound_job_lines`에 남긴다. 수령인·전화·주소는 저장하지 않는다.
+「임시 반영」은 재고를 건드리지 않고 `outbound_shipments`에 `source='bulk'`로
+같은 Job의 이전 반영분을 교체한다. 운영 현황은 이 원장만 읽는다.
+
+- 화면: `PartnerCodeListPanel`, `BulkOutboundPage`, `OutboundDataPage`.
+- 마이그레이션: `20260902045417_partner_outbound_db.sql`.
 
 ### 출고업체와 별칭
 
@@ -1044,7 +1064,9 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
 - 사용자에게 보이는 번호는 고유 범위를 명시한다.
   - 브랜드별 품번: `UNIQUE (brand_id, style_no)`
   - 브랜드별 기획안 번호: `UNIQUE (brand_id, draft_no)`
-  - 브랜드별 코드값: `UNIQUE (brand_id, code)`
+  - 자사 코드: `UNIQUE (brand_id, code) WHERE kind='own'`
+  - 거래처 코드: `UNIQUE (brand_id, usage_target_id, code) WHERE kind='partner'`
+    같은 바코드 문자열을 업체마다 따로 둘 수 있다.
 - 자식 테이블은 `brand_id`를 함께 두고 `(brand_id, parent_id)` 복합 FK로
   상위·하위 브랜드가 같은지 강제한다.
 - 코드 구성품·기획안 옵션처럼 실제 상품을 가리키는 관계는 JSON 배열로 저장하지 않는다.
