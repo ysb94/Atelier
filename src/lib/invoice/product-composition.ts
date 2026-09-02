@@ -79,25 +79,80 @@ function optionMapLookupTexts(map: InvoiceOptionMap): string[] {
   return texts
 }
 
+export type ProductCompositionOptionIndexEntry = {
+  map: InvoiceOptionMap
+  lookupCompacts: Set<string>
+  lookupNormalized: Set<string>
+}
+
+export type ProductCompositionOptionIndex = {
+  byMainStyleId: Map<string, ProductCompositionOptionIndexEntry[]>
+}
+
+function optionMapLookupIndexEntry(
+  map: InvoiceOptionMap,
+): ProductCompositionOptionIndexEntry {
+  const lookupCompacts = new Set<string>()
+  const lookupNormalized = new Set<string>()
+  for (const text of optionMapLookupTexts(map)) {
+    const compact = compactProductNameKey(text)
+    if (compact) lookupCompacts.add(compact)
+    const normalized = normalizeInvoiceText(text)
+    if (normalized) lookupNormalized.add(normalized)
+  }
+  return { map, lookupCompacts, lookupNormalized }
+}
+
+export function buildProductCompositionOptionIndex(
+  optionMaps: readonly InvoiceOptionMap[],
+): ProductCompositionOptionIndex {
+  const byMainStyleId = new Map<string, ProductCompositionOptionIndexEntry[]>()
+  for (const map of optionMaps) {
+    if (!map.isActive) continue
+    const main = map.components.find((item) => item.role === 'main')
+    const styleId = main?.style.styleId
+    if (!styleId) continue
+    const list = byMainStyleId.get(styleId) ?? []
+    list.push(optionMapLookupIndexEntry(map))
+    byMainStyleId.set(styleId, list)
+  }
+  return { byMainStyleId }
+}
+
+function optionMapMatchesIndexedEntry(
+  entry: ProductCompositionOptionIndexEntry,
+  productMap: InvoiceProductNameMap,
+) {
+  const lookupCompact = compactProductNameKey(
+    productMap.lookupKey || productMap.productName,
+  )
+  const productCompact = compactProductNameKey(productMap.productName)
+  return (
+    (Boolean(lookupCompact) && entry.lookupCompacts.has(lookupCompact)) ||
+    (Boolean(productCompact) && entry.lookupCompacts.has(productCompact)) ||
+    (Boolean(productMap.normalizedLookupKey) &&
+      entry.lookupNormalized.has(productMap.normalizedLookupKey)) ||
+    (Boolean(productMap.normalizedProductName) &&
+      entry.lookupNormalized.has(productMap.normalizedProductName))
+  )
+}
+
 function optionMapMatchesProductNameMap(
   map: InvoiceOptionMap,
   productMap: InvoiceProductNameMap,
 ) {
   const main = map.components.find((item) => item.role === 'main')
   if (main?.style.styleId !== productMap.style.styleId) return false
-  const lookupCompact = compactProductNameKey(
-    productMap.lookupKey || productMap.productName,
+  return optionMapMatchesIndexedEntry(optionMapLookupIndexEntry(map), productMap)
+}
+
+function sortMatchedOptionMaps(maps: InvoiceOptionMap[]) {
+  return [...maps].sort(
+    (left, right) =>
+      left.itemName.localeCompare(right.itemName, 'ko-KR') ||
+      left.mallName.localeCompare(right.mallName, 'ko-KR') ||
+      left.id.localeCompare(right.id),
   )
-  const productCompact = compactProductNameKey(productMap.productName)
-  return optionMapLookupTexts(map).some((text) => {
-    const compact = compactProductNameKey(text)
-    return (
-      compact === lookupCompact ||
-      compact === productCompact ||
-      normalizeInvoiceText(text) === productMap.normalizedLookupKey ||
-      normalizeInvoiceText(text) === productMap.normalizedProductName
-    )
-  })
 }
 
 /**
@@ -108,26 +163,36 @@ export function findOptionMapsForProductNameMap(
   optionMaps: InvoiceOptionMap[],
   productMap: InvoiceProductNameMap,
 ): InvoiceOptionMap[] {
-  return optionMaps
-    .filter((map) => map.isActive && optionMapMatchesProductNameMap(map, productMap))
-    .sort(
-      (left, right) =>
-        left.itemName.localeCompare(right.itemName, 'ko-KR') ||
-        left.mallName.localeCompare(right.mallName, 'ko-KR') ||
-        left.id.localeCompare(right.id),
-    )
+  return sortMatchedOptionMaps(
+    optionMaps.filter(
+      (map) => map.isActive && optionMapMatchesProductNameMap(map, productMap),
+    ),
+  )
 }
 
-export function productCompositionVariantsForMap(
-  optionMaps: InvoiceOptionMap[],
+export function findOptionMapsForProductNameMapFromIndex(
+  index: ProductCompositionOptionIndex,
   productMap: InvoiceProductNameMap,
-): Array<{
+): InvoiceOptionMap[] {
+  const candidates = index.byMainStyleId.get(productMap.style.styleId) ?? []
+  return sortMatchedOptionMaps(
+    candidates
+      .filter((entry) => optionMapMatchesIndexedEntry(entry, productMap))
+      .map((entry) => entry.map),
+  )
+}
+
+export type ProductCompositionVariant = {
   key: string
   itemName: string
   mallName: string
   items: ProductCompositionItem[]
-}> {
-  const matched = findOptionMapsForProductNameMap(optionMaps, productMap)
+}
+
+function productCompositionVariantsFromMatched(
+  matched: InvoiceOptionMap[],
+  productMap: InvoiceProductNameMap,
+): ProductCompositionVariant[] {
   if (matched.length === 0) {
     return [
       {
@@ -162,6 +227,47 @@ export function productCompositionVariantsForMap(
     })
   }
   return variants
+}
+
+export function productCompositionVariantsForMap(
+  optionMaps: InvoiceOptionMap[],
+  productMap: InvoiceProductNameMap,
+): ProductCompositionVariant[] {
+  return productCompositionVariantsFromMatched(
+    findOptionMapsForProductNameMap(optionMaps, productMap),
+    productMap,
+  )
+}
+
+export function productCompositionVariantsForMapFromIndex(
+  index: ProductCompositionOptionIndex,
+  productMap: InvoiceProductNameMap,
+): ProductCompositionVariant[] {
+  return productCompositionVariantsFromMatched(
+    findOptionMapsForProductNameMapFromIndex(index, productMap),
+    productMap,
+  )
+}
+
+export function productNameMapSearchHaystack(
+  map: InvoiceProductNameMap,
+  variants: readonly ProductCompositionVariant[],
+) {
+  return [
+    map.productName,
+    map.lookupKey,
+    map.itemNameContext,
+    map.mallName,
+    map.ownProductCode,
+    map.style.styleNo,
+    map.style.name,
+    ...variants.flatMap((variant) => [
+      variant.itemName,
+      productCompositionSearchText(variant.items),
+    ]),
+  ]
+    .join(' ')
+    .toLocaleLowerCase('ko-KR')
 }
 
 export function optionMapComponentsSearchText(components: InvoiceOptionMapComponent[]) {

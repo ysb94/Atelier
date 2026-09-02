@@ -1,4 +1,12 @@
-import { useLayoutEffect, useRef, useState } from 'react'
+import {
+  createContext,
+  memo,
+  useContext,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react'
 import {
   Routes,
   useLocation,
@@ -8,6 +16,20 @@ import {
 import { Home, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { BrandWorkspaceRouteTree } from './brand-routes'
+
+const WorkspaceTabActivityContext = createContext(true)
+
+/** KeepAlive 라우트가 현재 사용자에게 보이는 작업 탭인지 반환한다. */
+export function useWorkspaceTabActivity() {
+  return useContext(WorkspaceTabActivityContext)
+}
+
+/** 비활성 KeepAlive 탭의 전역 차단 레이어는 렌더하지 않는다. */
+export function WorkspaceTabOverlay({ children }: { children: ReactNode }) {
+  const active = useWorkspaceTabActivity()
+  if (!active) return null
+  return children
+}
 
 export type WorkspaceTab = {
   id: string
@@ -163,10 +185,12 @@ export function useWorkspaceTabs(brandSlug: string) {
   const navigate = useNavigate()
   const [tabs, setTabs] = useState<WorkspaceTab[]>(() => [homeTab(brandSlug)])
   const brandRef = useRef(brandSlug)
+  const closingTabRef = useRef<string | null>(null)
 
   useLayoutEffect(() => {
     if (brandRef.current === brandSlug) return
     brandRef.current = brandSlug
+    closingTabRef.current = null
     setTabs([homeTab(brandSlug)])
   }, [brandSlug])
 
@@ -174,6 +198,8 @@ export function useWorkspaceTabs(brandSlug: string) {
 
   useLayoutEffect(() => {
     if (!active) return
+    if (closingTabRef.current === active.id) return
+    closingTabRef.current = null
     setTabs((prev) => {
       const index = prev.findIndex((tab) => tab.id === active.id)
       if (index === -1) return [...prev, active]
@@ -193,8 +219,9 @@ export function useWorkspaceTabs(brandSlug: string) {
 
   const activeId = active?.id ?? 'home'
 
+  const closingActive = active?.id === closingTabRef.current
   const displayTabs =
-    active && !tabs.some((tab) => tab.id === active.id)
+    active && !closingActive && !tabs.some((tab) => tab.id === active.id)
       ? [...tabs, active]
       : tabs.map((tab) =>
           active && tab.id === active.id
@@ -212,20 +239,19 @@ export function useWorkspaceTabs(brandSlug: string) {
   }
 
   function closeTab(tabId: string) {
-    setTabs((prev) => {
-      if (prev.length <= 1) return prev
-      const index = prev.findIndex((tab) => tab.id === tabId)
-      if (index === -1) return prev
-      const next = prev.filter((tab) => tab.id !== tabId)
+    if (tabs.length <= 1) return
+    const index = tabs.findIndex((tab) => tab.id === tabId)
+    if (index === -1) return
+    const next = tabs.filter((tab) => tab.id !== tabId)
+    closingTabRef.current = tabId
 
-      if (tabId === activeId) {
-        const fallback = next[Math.max(0, index - 1)] ?? next[0]
-        if (fallback) {
-          navigate(`${fallback.pathname}${fallback.search}`)
-        }
+    if (tabId === activeId) {
+      const fallback = next[Math.max(0, index - 1)] ?? next[0]
+      if (fallback) {
+        navigate(`${fallback.pathname}${fallback.search}`)
       }
-      return next
-    })
+    }
+    setTabs(next)
   }
 
   return {
@@ -296,6 +322,30 @@ export function WorkspaceTabBar({
   )
 }
 
+const WorkspaceTabPanel = memo(function WorkspaceTabPanel({
+  tab,
+  active,
+}: {
+  tab: WorkspaceTab
+  active: boolean
+}) {
+  return (
+    <WorkspaceTabActivityContext.Provider value={active}>
+      <div
+        hidden={!active}
+        className={cn(
+          active ? undefined : 'hidden',
+          tab.id === 'design/file-manager' && active && 'h-full min-h-0',
+        )}
+      >
+        <Routes location={toTabLocation(tab)}>
+          {BrandWorkspaceRouteTree()}
+        </Routes>
+      </div>
+    </WorkspaceTabActivityContext.Provider>
+  )
+})
+
 /**
  * 탭마다 Routes location을 고정해, 숨긴 화면의 필터·스크롤·입력 상태를 유지한다.
  * 홈만 비활성 시 언마운트해서, 다시 들어오면 일정 필터가 전체 보기로 초기화된다.
@@ -327,20 +377,7 @@ export function WorkspaceTabPanels({
         const active = tab.id === activeId
         if (tab.id === 'home' && !active) return null
         if (!activatedRef.current.has(tab.id)) return null
-        return (
-          <div
-            key={tab.id}
-            hidden={!active}
-            className={cn(
-              active ? undefined : 'hidden',
-              tab.id === 'design/file-manager' && active && 'h-full min-h-0',
-            )}
-          >
-            <Routes location={toTabLocation(tab)}>
-              {BrandWorkspaceRouteTree()}
-            </Routes>
-          </div>
-        )
+        return <WorkspaceTabPanel key={tab.id} tab={tab} active={active} />
       })}
     </>
   )

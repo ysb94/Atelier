@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, Upload } from 'lucide-react'
 import { StylePicker } from '@/components/style-picker'
@@ -57,6 +58,8 @@ type DialogState =
   | { kind: 'history'; row?: WarehouseStockPosition }
   | null
 
+const TABLE_PAGE_SIZE = 100
+
 const FILTERS: { value: ReviewFilter; label: string }[] = [
   { value: 'all', label: '전체' },
   { value: 'ok', label: '정상' },
@@ -101,6 +104,7 @@ export function WarehouseInventoryPanel({
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<ReviewFilter>('all')
+  const [tablePage, setTablePage] = useState(0)
   const [dialog, setDialog] = useState<DialogState>(null)
   const [error, setError] = useState<string | null>(null)
   const [downloadingTemplate, setDownloadingTemplate] = useState(false)
@@ -130,8 +134,8 @@ export function WarehouseInventoryPanel({
   const activeSet = setQuery.data ?? null
 
   const positionsQuery = useQuery({
-    queryKey: ['warehouse-stock-positions', brandId, activeSet?.id],
-    queryFn: () => getWarehouseStockPositions(brandId, activeSet!.id),
+    queryKey: ['warehouse-stock-positions', brandId, activeSet?.id, zone],
+    queryFn: () => getWarehouseStockPositions(brandId, activeSet!.id, zone),
     enabled: Boolean(activeSet?.id),
   })
 
@@ -168,6 +172,17 @@ export function WarehouseInventoryPanel({
         return left.sourceRowNumber - right.sourceRowNumber
       })
   }, [filter, positionsQuery.data, search, zone])
+
+  useEffect(() => {
+    setTablePage(0)
+  }, [brandId, filter, search, zone])
+
+  const tablePageCount = Math.max(1, Math.ceil(visible.length / TABLE_PAGE_SIZE))
+  const currentTablePage = Math.min(tablePage, tablePageCount - 1)
+  const pagedVisible = visible.slice(
+    currentTablePage * TABLE_PAGE_SIZE,
+    currentTablePage * TABLE_PAGE_SIZE + TABLE_PAGE_SIZE,
+  )
 
   async function invalidateStock() {
     await Promise.all([
@@ -314,7 +329,23 @@ export function WarehouseInventoryPanel({
                   colSpan={view === 'outbound' ? 11 : 10}
                   className="px-3 py-10 text-center text-muted-foreground"
                 >
-                  불러오는 중…
+                  {activeSet
+                    ? `${warehouseLabel} ${formatNumber(activeSet.rowCount)}행 중 해당 구역을 불러오는 중…`
+                    : '불러오는 중…'}
+                </td>
+              </tr>
+            ) : setQuery.isError || positionsQuery.isError ? (
+              <tr>
+                <td
+                  colSpan={view === 'outbound' ? 11 : 10}
+                  className="px-3 py-10 text-center text-danger"
+                >
+                  {(setQuery.error instanceof Error
+                    ? setQuery.error.message
+                    : null) ??
+                    (positionsQuery.error instanceof Error
+                      ? positionsQuery.error.message
+                      : '창고 재고를 불러오지 못했습니다.')}
                 </td>
               </tr>
             ) : visible.length === 0 ? (
@@ -331,7 +362,7 @@ export function WarehouseInventoryPanel({
                 </td>
               </tr>
             ) : (
-              visible.map((row) => (
+              pagedVisible.map((row) => (
                 <tr
                   key={row.id}
                   className={cn(
@@ -439,6 +470,42 @@ export function WarehouseInventoryPanel({
           </tbody>
         </table>
       </div>
+      {visible.length > TABLE_PAGE_SIZE ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+          <span>
+            {formatNumber(currentTablePage * TABLE_PAGE_SIZE + 1)}–
+            {formatNumber(
+              Math.min(
+                visible.length,
+                currentTablePage * TABLE_PAGE_SIZE + TABLE_PAGE_SIZE,
+              ),
+            )}
+            / {formatNumber(visible.length)}행
+          </span>
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={currentTablePage === 0}
+              onClick={() => setTablePage((page) => Math.max(0, page - 1))}
+            >
+              이전
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={currentTablePage >= tablePageCount - 1}
+              onClick={() =>
+                setTablePage((page) => Math.min(tablePageCount - 1, page + 1))
+              }
+            >
+              다음
+            </Button>
+          </div>
+        </div>
+      ) : null}
 
       {dialog?.kind === 'import' ? (
         <ImportDialog
@@ -558,6 +625,7 @@ function Overlay({
   wide?: boolean
 }) {
   return (
+    <WorkspaceTabOverlay>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
@@ -582,6 +650,7 @@ function Overlay({
         <div className="space-y-4 p-5">{children}</div>
       </div>
     </div>
+    </WorkspaceTabOverlay>
   )
 }
 

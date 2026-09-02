@@ -3,8 +3,10 @@
  * 실행: npm run verify:product-name-tags
  */
 import {
+  collectProductNameCandidateTexts,
   generateProductNameCandidates,
   generateProductNameRegistrationCandidates,
+  invoiceLookupTextsSig,
   pickDefaultProductNameLookupKey,
   productNameCandidateKey,
 } from '@/lib/invoice/product-name-patterns'
@@ -375,6 +377,32 @@ assert(
         '[단독] 마스마룰즈 래빗에코백 32타입 Color: 트와일라잇 블랙',
     ),
   '원문 옵션 후보를 앞에 두고 정리된 옵션 후보를 뒤에 추가',
+)
+
+const collected = collectProductNameCandidateTexts(
+  [
+    {
+      productName: '울 코트',
+      itemName: '블랙 / L',
+      mallName: '테스트몰',
+    },
+    {
+      productName: '울 코트',
+      itemName: '블랙 / M',
+      mallName: '테스트몰',
+    },
+  ],
+)
+assert(
+  collected.includes('울 코트') &&
+    collected.includes('울 코트 블랙 / L') &&
+    collected.filter((text) => normalizeInvoiceText(text) === '울 코트')
+      .length === 1,
+  '파일 후보는 정규화 키로 중복을 제거한다',
+)
+assert(
+  invoiceLookupTextsSig(collected) === invoiceLookupTextsSig([...collected].reverse()),
+  '후보 서명 순서는 결과에 영향을 주지 않는다',
 )
 
 console.log('product-name-tags verify: ok')

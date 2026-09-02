@@ -35,6 +35,7 @@ import {
   UNSPECIFIED_LOCATION_ZONE,
   type InvoiceProductListWarehouseGroup,
 } from '@/lib/invoice/product-list-warehouse'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { cn, formatNumber } from '@/lib/utils'
 
 function InvoiceProductListPrintPreviewSheet({
@@ -152,6 +153,7 @@ export function InvoiceProductListPrintPreviewDialog({
   }, [columnMode, selectedRouteGroupId])
 
   return (
+    <WorkspaceTabOverlay>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3">
       <button
         type="button"
@@ -561,5 +563,6 @@ export function InvoiceProductListPrintPreviewDialog({
         </div>
       </div>
     </div>
+    </WorkspaceTabOverlay>
   )
 }

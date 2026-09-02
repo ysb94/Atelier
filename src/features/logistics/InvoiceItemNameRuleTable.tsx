@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useDeferredValue, useMemo, useState } from 'react'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Search, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -23,6 +24,8 @@ import {
 } from '@/lib/invoice/item-name-rule-manage'
 import type { InvoiceItemNameRule } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
+import { InvoiceTablePager } from './invoice-table-page'
+import { useInvoiceTablePage } from './useInvoiceTablePage'
 import { InvoiceItemNameRuleForm } from './InvoiceItemNameRuleForm'
 
 export function InvoiceItemNameRuleTable({
@@ -36,7 +39,9 @@ export function InvoiceItemNameRuleTable({
     queryKey,
     queryFn: () => getInvoiceItemNameRules(brandId),
   })
+  const tabActive = useWorkspaceTabActivity()
   const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
@@ -44,13 +49,28 @@ export function InvoiceItemNameRuleTable({
     () => listLookupKeyItemNameRules(listQuery.data ?? []),
     [listQuery.data],
   )
+  const indexedRules = useMemo(
+    () =>
+      lookupRules.map((rule) => ({
+        rule,
+        haystack: itemNameRuleSearchText(rule).toLocaleLowerCase('ko-KR'),
+      })),
+    [lookupRules],
+  )
   const filtered = useMemo(() => {
-    const q = search.trim().toLocaleLowerCase('ko-KR')
-    if (!q) return lookupRules
-    return lookupRules.filter((rule) =>
-      itemNameRuleSearchText(rule).toLocaleLowerCase('ko-KR').includes(q),
-    )
-  }, [lookupRules, search])
+    const q = deferredSearch.trim().toLocaleLowerCase('ko-KR')
+    const list = q
+      ? indexedRules.filter((item) => item.haystack.includes(q))
+      : indexedRules
+    return list.map((item) => item.rule)
+  }, [deferredSearch, indexedRules])
+  const {
+    page,
+    setPage,
+    pageCount,
+    startIndex,
+    pageItems,
+  } = useInvoiceTablePage(filtered, deferredSearch.trim())
 
   const activeCount = lookupRules.filter((rule) => rule.isActive).length
   const pausedCount = lookupRules.length - activeCount
@@ -120,7 +140,12 @@ export function InvoiceItemNameRuleTable({
               ? '저장된 조회 키 규칙이 없습니다. 오늘 작업의 내품명 변환에서 등록하거나 아래에서 엑셀로 올립니다.'
               : '검색과 맞는 조회 키 규칙이 없습니다.'}
           </p>
+        ) : !tabActive ? (
+          <p className="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
+            {formatNumber(filtered.length)}건 · 이 탭이 다시 보이면 표를 표시합니다.
+          </p>
         ) : (
+          <div className="space-y-2">
           <div className="max-h-[36rem] overflow-auto rounded-lg border border-border">
             <table className="w-full min-w-[1080px] text-left text-xs">
               <thead className="sticky top-0 bg-muted/80">
@@ -135,7 +160,7 @@ export function InvoiceItemNameRuleTable({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((rule) => (
+                {pageItems.map((rule) => (
                   <tr
                     key={rule.id}
                     className={cn(
@@ -202,6 +227,15 @@ export function InvoiceItemNameRuleTable({
                 ))}
               </tbody>
             </table>
+          </div>
+          <InvoiceTablePager
+            page={page}
+            pageCount={pageCount}
+            total={filtered.length}
+            startIndex={startIndex}
+            pageItemCount={pageItems.length}
+            onPage={setPage}
+          />
           </div>
         )}
         {editing ? (

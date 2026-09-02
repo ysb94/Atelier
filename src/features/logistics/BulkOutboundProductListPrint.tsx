@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { ChevronLeft, ChevronRight, Printer } from 'lucide-react'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -156,6 +157,7 @@ function SimplePreviewDialog({
   }, [columnMode])
 
   return (
+    <WorkspaceTabOverlay>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3">
       <button
         type="button"
@@ -267,6 +269,7 @@ function SimplePreviewDialog({
         </div>
       </div>
     </div>
+    </WorkspaceTabOverlay>
   )
 }
 

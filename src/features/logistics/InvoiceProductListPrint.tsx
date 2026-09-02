@@ -1,5 +1,6 @@
 import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import type {
   InvoiceProductListPrintColumn,
   InvoiceProductListPrintFitProfile,
@@ -312,7 +313,14 @@ export function InvoiceProductListPrint({
 }: {
   pages: InvoiceProductListPrintPage[]
 }) {
-  if (typeof document === 'undefined' || pages.length === 0) return null
+  const workspaceActive = useWorkspaceTabActivity()
+  if (
+    !workspaceActive ||
+    typeof document === 'undefined' ||
+    pages.length === 0
+  ) {
+    return null
+  }
   return createPortal(
     <div
       className="invoice-product-list-print"

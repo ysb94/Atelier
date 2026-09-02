@@ -19,6 +19,7 @@ import {
 import { Link } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -34,6 +35,7 @@ import {
   getActiveWarehouseInventorySet,
   getBarcodePartnerDisplaySetting,
   getBulkOutboundJobs,
+  canSetBulkOutboundPartnerWorkStatus,
   getBulkOutboundPartnerConfigs,
   getBulkOutboundTemplateFields,
   getCodeUsageTargets,
@@ -47,6 +49,10 @@ import {
   replaceBulkOutboundPartnerConfigs,
   replaceBulkOutboundTemplateFields,
   saveBulkOutboundJob,
+  listStyleRefsForLookup,
+  updateBulkOutboundJobMeta,
+  deleteBulkOutboundJob,
+  getBulkOutboundBackupSummary,
 } from '@/lib/api'
 import {
   partnerBarcodeHeader,
@@ -57,7 +63,9 @@ import {
   excelRowsFromJobLines,
   jobLinesFromExcelRows,
   type BulkOutboundJob,
+  type BulkOutboundPartnerWorkStatus,
 } from '@/lib/supabase/bulk-outbound'
+import { BulkOutboundJobDeleteDialog } from '@/features/logistics/BulkOutboundJobDeleteDialog'
 import { normalizeStyleNo } from '@/lib/import/transform'
 import {
   allocateBulkOutboundProductListWarehouse,
@@ -70,6 +78,12 @@ import type {
 } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
 import { BulkOutboundProductListPrint } from '@/features/logistics/BulkOutboundProductListPrint'
+import { BulkOutboundIdleCollectPanel } from '@/features/logistics/BulkOutboundIdleCollectPanel'
+import {
+  idleCollectAllLinked,
+  idleCollectBackupEntries,
+  type IdleCollectRow,
+} from '@/lib/bulk-outbound/idle-collect'
 import { PRODUCT_OUTBOUND_UPDATED_EVENT } from '@/lib/outbound/product-outbound'
 
 /** 한 건이 여러 날 걸쳐 있을 수 있는 상태. 순서가 강제되지 않는다. */
@@ -104,6 +118,7 @@ type BulkOutboundPartnerConfig = {
   partnerId: string
   partnerName: string
   barcodeSource: BarcodeSource
+  workStatus: BulkOutboundPartnerWorkStatus
 }
 
 type DemoExcelRow = {
@@ -136,6 +151,21 @@ type DemoJob = {
 const BARCODE_SOURCE_LABEL: Record<BarcodeSource, string> = {
   own: '88바코드',
   partner: '거래처 바코드',
+}
+
+const PARTNER_WORK_STATUS_LABEL: Record<
+  BulkOutboundPartnerWorkStatus,
+  string
+> = {
+  idle: '대기',
+  working: '작업중',
+  done: '완료',
+}
+
+function isPartnerWorkStatus(
+  value: string,
+): value is BulkOutboundPartnerWorkStatus {
+  return value === 'idle' || value === 'working' || value === 'done'
 }
 
 const UUID_RE =
@@ -176,6 +206,21 @@ const PANELS: { value: JobPanel; label: string }[] = [
   { value: 'done', label: '확정' },
 ]
 
+/** 대기 업체는 출고 데이터부터 모은다. 이 단계는 작업중 이후에 연다. */
+const IDLE_LOCKED_PANELS: ReadonlySet<JobPanel> = new Set([
+  'upload',
+  'convert',
+  'backup',
+  'docs',
+])
+
+const IDLE_PANEL_LOCK_HINT =
+  '대기 업체는 출고 데이터부터 모읍니다. 업체 설정에서 작업중으로 바꾼 뒤 이 단계를 씁니다.'
+
+function isIdleLockedPanel(panel: JobPanel) {
+  return IDLE_LOCKED_PANELS.has(panel)
+}
+
 /** 진행 흐름. 실제로는 건너뛰거나 되돌아갈 수 있다. */
 const FLOW_STEPS: {
   panel: JobPanel
@@ -212,10 +257,12 @@ function flowStepState(status: JobStatus, stepIndex: number): FlowStepState {
 function BulkOutboundFlowStrip({
   status,
   productListReady,
+  partnerIdle,
   onSelect,
 }: {
   status: JobStatus
   productListReady: boolean
+  partnerIdle: boolean
   onSelect: (panel: JobPanel) => void
 }) {
   return (
@@ -230,9 +277,12 @@ function BulkOutboundFlowStrip({
           const connectorDone =
             state === 'done' &&
             (nextState === 'done' || nextState === 'current')
+          const idleLocked = partnerIdle && isIdleLockedPanel(step.panel)
           const locked =
-            (step.panel === 'products' || step.panel === 'barcode') &&
-            !productListReady
+            idleLocked ||
+            (!partnerIdle &&
+              (step.panel === 'products' || step.panel === 'barcode') &&
+              !productListReady)
           return (
             <li
               key={step.panel}
@@ -251,9 +301,11 @@ function BulkOutboundFlowStrip({
                 type="button"
                 disabled={locked}
                 title={
-                  locked
-                    ? '상품연결에서 미매칭이 없어야 열 수 있습니다.'
-                    : step.hint
+                  idleLocked
+                    ? IDLE_PANEL_LOCK_HINT
+                    : locked
+                      ? '상품연결에서 미매칭이 없어야 열 수 있습니다.'
+                      : step.hint
                 }
                 onClick={() => {
                   if (locked) return
@@ -631,7 +683,7 @@ function jobToUi(job: BulkOutboundJob, fields: TemplateField[]): DemoJob {
       attachedOn: file.keptOn,
       fileSize: file.fileSize,
     })),
-    excelRows: excelRowsFromJobLines(job.lines, lineFieldIds(fields)),
+    excelRows: excelRowsFromJobLines(job.lines, lineFieldIds(fields), fields),
     excelFileName: null,
   }
 }
@@ -1096,6 +1148,7 @@ function ConvertMatchColumnSettingsDialog({
   }
 
   return (
+    <WorkspaceTabOverlay>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
@@ -1193,6 +1246,7 @@ function ConvertMatchColumnSettingsDialog({
         </div>
       </div>
     </div>
+    </WorkspaceTabOverlay>
   )
 }
 
@@ -1871,6 +1925,7 @@ function TemplateHeaderDialog({
   }
 
   return (
+    <WorkspaceTabOverlay>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
@@ -2059,6 +2114,7 @@ function TemplateHeaderDialog({
         </div>
       </div>
     </div>
+    </WorkspaceTabOverlay>
   )
 }
 
@@ -2124,7 +2180,9 @@ function readBulkPartnerConfigs(brandId: string): BulkOutboundPartnerConfig[] {
     if (!Array.isArray(parsed)) return []
     return parsed
       .filter(
-        (item): item is BulkOutboundPartnerConfig =>
+        (item): item is Omit<BulkOutboundPartnerConfig, 'workStatus'> & {
+          workStatus?: BulkOutboundPartnerWorkStatus
+        } =>
           Boolean(item) &&
           typeof item === 'object' &&
           typeof (item as BulkOutboundPartnerConfig).partnerId === 'string' &&
@@ -2132,6 +2190,12 @@ function readBulkPartnerConfigs(brandId: string): BulkOutboundPartnerConfig[] {
           ((item as BulkOutboundPartnerConfig).barcodeSource === 'own' ||
             (item as BulkOutboundPartnerConfig).barcodeSource === 'partner'),
       )
+      .map((item) => ({
+        ...item,
+        workStatus: isPartnerWorkStatus(item.workStatus ?? '')
+          ? item.workStatus
+          : 'idle',
+      }))
   } catch {
     return []
   }
@@ -2221,6 +2285,7 @@ function PartnerSettingsDialog({
   ownPartnerIds,
   partnerCodePartnerIds,
   initialConfigs,
+  canSetWorkStatus,
   onClose,
   onSave,
 }: {
@@ -2231,17 +2296,25 @@ function PartnerSettingsDialog({
   /** 거래처 코드에 켜 둔 업체 */
   partnerCodePartnerIds: Set<string>
   initialConfigs: BulkOutboundPartnerConfig[]
+  canSetWorkStatus: boolean
   onClose: () => void
   onSave: (configs: BulkOutboundPartnerConfig[]) => void
 }) {
   const [configs, setConfigs] = useState(() => [...initialConfigs])
   const [adding, setAdding] = useState(false)
-  const [partnerId, setPartnerId] = useState(partners[0]?.id ?? '')
+  const [partnerId, setPartnerId] = useState('')
   const [barcodeSource, setBarcodeSource] = useState<BarcodeSource | null>(null)
   const [error, setError] = useState<string | null>(null)
 
+  const availablePartners = useMemo(() => {
+    const used = new Set(configs.map((item) => item.partnerId))
+    return partners.filter((item) => !used.has(item.id))
+  }, [configs, partners])
+
   const selectedPartner =
-    partners.find((item) => item.id === partnerId) ?? null
+    availablePartners.find((item) => item.id === partnerId) ??
+    availablePartners[0] ??
+    null
 
   const registryReady =
     barcodeSource === 'own'
@@ -2265,7 +2338,14 @@ function PartnerSettingsDialog({
     setAdding(false)
     setBarcodeSource(null)
     setError(null)
-    setPartnerId(partners[0]?.id ?? '')
+    setPartnerId('')
+  }
+
+  function startAdd() {
+    setAdding(true)
+    setBarcodeSource(null)
+    setError(null)
+    setPartnerId(availablePartners[0]?.id ?? '')
   }
 
   function handleAdd() {
@@ -2290,12 +2370,14 @@ function PartnerSettingsDialog({
         partnerId: selectedPartner.id,
         partnerName: selectedPartner.name,
         barcodeSource,
+        workStatus: 'idle',
       },
     ])
     resetAddForm()
   }
 
   return (
+    <WorkspaceTabOverlay>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
@@ -2312,7 +2394,8 @@ function PartnerSettingsDialog({
           <h2 className="text-base font-semibold">대량출고 업체 설정</h2>
           <p className="mt-1 text-xs text-muted-foreground">
             한 업체씩 등록합니다. 업체를 고른 뒤 자사·거래처 바코드를 선택하면,
-            해당 메뉴에 등록된 경우에만 추가됩니다.
+            해당 메뉴에 등록된 경우에만 추가됩니다. 대기·작업중·완료는 개발자만
+            바꿉니다.
           </p>
         </div>
 
@@ -2336,6 +2419,57 @@ function PartnerSettingsDialog({
                       {BARCODE_SOURCE_LABEL[item.barcodeSource]}
                     </p>
                   </div>
+                  {canSetWorkStatus ? (
+                    <select
+                      aria-label={`${item.partnerName} 상태`}
+                      className={cn(
+                        'h-8 shrink-0 rounded-md border bg-background px-2 text-xs font-medium',
+                        item.workStatus === 'working' &&
+                          'border-amber-400/50 text-amber-900 dark:text-amber-200',
+                        item.workStatus === 'done' &&
+                          'border-emerald-500/40 text-emerald-800 dark:text-emerald-200',
+                        item.workStatus === 'idle' &&
+                          'border-border text-muted-foreground',
+                      )}
+                      value={item.workStatus}
+                      onChange={(event) => {
+                        const next = event.target.value
+                        if (!isPartnerWorkStatus(next)) return
+                        setConfigs((current) =>
+                          current.map((row) =>
+                            row.partnerId === item.partnerId &&
+                            row.barcodeSource === item.barcodeSource
+                              ? { ...row, workStatus: next }
+                              : row,
+                          ),
+                        )
+                      }}
+                    >
+                      {(
+                        Object.entries(PARTNER_WORK_STATUS_LABEL) as Array<
+                          [BulkOutboundPartnerWorkStatus, string]
+                        >
+                      ).map(([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span
+                      className={cn(
+                        'inline-flex h-8 shrink-0 items-center rounded-md border px-2 text-xs font-medium',
+                        item.workStatus === 'working' &&
+                          'border-amber-400/50 text-amber-900 dark:text-amber-200',
+                        item.workStatus === 'done' &&
+                          'border-emerald-500/40 text-emerald-800 dark:text-emerald-200',
+                        item.workStatus === 'idle' &&
+                          'border-border text-muted-foreground',
+                      )}
+                    >
+                      {PARTNER_WORK_STATUS_LABEL[item.workStatus]}
+                    </span>
+                  )}
                   <Button
                     type="button"
                     size="sm"
@@ -2365,18 +2499,23 @@ function PartnerSettingsDialog({
                 <span className="text-muted-foreground">1. 업체</span>
                 <select
                   className="w-full rounded-md border border-border bg-background px-3 py-2"
-                  value={partnerId}
+                  value={selectedPartner?.id ?? ''}
+                  disabled={availablePartners.length === 0}
                   onChange={(event) => {
                     setPartnerId(event.target.value)
                     setBarcodeSource(null)
                     setError(null)
                   }}
                 >
-                  {partners.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.name}
-                    </option>
-                  ))}
+                  {availablePartners.length === 0 ? (
+                    <option value="">추가할 업체가 없습니다</option>
+                  ) : (
+                    availablePartners.map((item) => (
+                      <option key={item.id} value={item.id}>
+                        {item.name}
+                      </option>
+                    ))
+                  )}
                 </select>
               </label>
 
@@ -2455,16 +2594,23 @@ function PartnerSettingsDialog({
               </div>
             </div>
           ) : (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              disabled={partners.length === 0}
-              onClick={() => setAdding(true)}
-            >
-              <Plus className="size-3.5" />
-              업체 추가
-            </Button>
+            <>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={availablePartners.length === 0}
+                onClick={startAdd}
+              >
+                <Plus className="size-3.5" />
+                업체 추가
+              </Button>
+              {partners.length > 0 && availablePartners.length === 0 ? (
+                <p className="text-xs text-muted-foreground">
+                  등록 가능한 업체를 모두 넣었습니다.
+                </p>
+              ) : null}
+            </>
           )}
         </div>
 
@@ -2485,35 +2631,67 @@ function PartnerSettingsDialog({
         </div>
       </div>
     </div>
+    </WorkspaceTabOverlay>
   )
 }
 
 function NewJobDialog({
   configs,
+  initial,
+  saving = false,
+  error = null,
   onClose,
-  onCreate,
+  onSubmit,
 }: {
   configs: BulkOutboundPartnerConfig[]
+  initial?: {
+    title: string
+    dueOn: string
+    partnerId: string
+    barcodeSource: BarcodeSource
+    note: string
+    lockPartner?: boolean
+  } | null
+  saving?: boolean
+  error?: string | null
   onClose: () => void
-  onCreate: (
-    config: BulkOutboundPartnerConfig,
-    title: string,
-    dueOn: string,
-  ) => void
+  onSubmit: (input: {
+    config: BulkOutboundPartnerConfig
+    title: string
+    dueOn: string
+    note: string
+  }) => void
 }) {
+  const editing = Boolean(initial)
   const [configKey, setConfigKey] = useState(
-    configs[0]
-      ? `${configs[0].partnerId}:${configs[0].barcodeSource}`
-      : '',
+    initial
+      ? `${initial.partnerId}:${initial.barcodeSource}`
+      : configs[0]
+        ? `${configs[0].partnerId}:${configs[0].barcodeSource}`
+        : '',
   )
-  const [title, setTitle] = useState('')
-  const [dueOn, setDueOn] = useState(() => addDaysIso(todayIso(), 3))
+  const [title, setTitle] = useState(initial?.title ?? '')
+  const [dueOn, setDueOn] = useState(
+    () => initial?.dueOn || addDaysIso(todayIso(), 3),
+  )
+  const [note, setNote] = useState(initial?.note ?? '')
   const config =
     configs.find(
       (item) => `${item.partnerId}:${item.barcodeSource}` === configKey,
-    ) ?? null
+    ) ??
+    (initial
+      ? {
+          partnerId: initial.partnerId,
+          partnerName: '',
+          barcodeSource: initial.barcodeSource,
+        }
+      : null)
+  const today = todayIso()
+  const minDueOn =
+    initial?.dueOn && initial.dueOn < today ? initial.dueOn : today
 
   return (
+    <WorkspaceTabOverlay>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
@@ -2526,16 +2704,21 @@ function NewJobDialog({
         aria-modal="true"
         className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-lg"
       >
-        <h2 className="text-base font-semibold">새 대량출고 건</h2>
+        <h2 className="text-base font-semibold">
+          {editing ? '대량출고 건 수정' : '새 대량출고 건'}
+        </h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          기존 건이 며칠째 진행 중이어도 새 건을 동시에 만들 수 있습니다.
+          {editing
+            ? '본인이 만든 건의 이름·마감일만 바꿀 수 있습니다.'
+            : '기존 건이 며칠째 진행 중이어도 새 건을 동시에 만들 수 있습니다.'}
         </p>
         <div className="mt-4 space-y-3">
           <label className="block space-y-1 text-sm">
             <span className="text-muted-foreground">업체 · 바코드</span>
             <select
-              className="w-full rounded-md border border-border bg-background px-3 py-2"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 disabled:opacity-60"
               value={configKey}
+              disabled={Boolean(initial?.lockPartner)}
               onChange={(event) => setConfigKey(event.target.value)}
             >
               {configs.map((item) => (
@@ -2543,7 +2726,8 @@ function NewJobDialog({
                   key={`${item.partnerId}:${item.barcodeSource}`}
                   value={`${item.partnerId}:${item.barcodeSource}`}
                 >
-                  {item.partnerName} · {BARCODE_SOURCE_LABEL[item.barcodeSource]}
+                  {item.partnerName} · {BARCODE_SOURCE_LABEL[item.barcodeSource]}{' '}
+                  · {PARTNER_WORK_STATUS_LABEL[item.workStatus]}
                 </option>
               ))}
             </select>
@@ -2563,13 +2747,24 @@ function NewJobDialog({
               type="date"
               className="w-full rounded-md border border-border bg-background px-3 py-2"
               value={dueOn}
-              min={todayIso()}
+              min={minDueOn}
               onChange={(event) => setDueOn(event.target.value)}
             />
             <span className="block text-xs text-muted-foreground">
               목록에서 남은 일수로 강조 표시됩니다.
             </span>
           </label>
+          {editing ? (
+            <label className="block space-y-1 text-sm">
+              <span className="text-muted-foreground">메모</span>
+              <input
+                className="w-full rounded-md border border-border bg-background px-3 py-2"
+                value={note}
+                onChange={(event) => setNote(event.target.value)}
+              />
+            </label>
+          ) : null}
+          {error ? <p className="text-xs text-danger">{error}</p> : null}
         </div>
         <div className="mt-5 flex justify-end gap-2">
           <Button type="button" size="sm" variant="outline" onClick={onClose}>
@@ -2578,18 +2773,25 @@ function NewJobDialog({
           <Button
             type="button"
             size="sm"
-            disabled={!config || !dueOn}
+            disabled={!config || !dueOn || saving}
             onClick={() => {
               if (!config || !dueOn) return
-              onCreate(config, title.trim() || '새 작업', dueOn)
-              onClose()
+              onSubmit({
+                config,
+                title: title.trim() || '새 작업',
+                dueOn,
+                note: editing
+                  ? note
+                  : '방금 만든 건. 엑셀부터 올리면 됩니다.',
+              })
             }}
           >
-            만들기
+            {saving ? '저장 중' : editing ? '저장' : '만들기'}
           </Button>
         </div>
       </div>
     </div>
+    </WorkspaceTabOverlay>
   )
 }
 
@@ -2621,6 +2823,7 @@ function BackupQtyConfirmDialog({
   )
 
   return (
+    <WorkspaceTabOverlay>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
       <button
         type="button"
@@ -2753,16 +2956,31 @@ function BackupQtyConfirmDialog({
         </div>
       </div>
     </div>
+    </WorkspaceTabOverlay>
   )
 }
 
 export function BulkOutboundPage() {
   const { brand } = useBrand()
-  const { profile } = useAuth()
+  const { profile, email } = useAuth()
   const queryClient = useQueryClient()
   const meLabel = profile?.displayName?.trim() || profile?.email || '나'
+  const canSetWorkStatus = canSetBulkOutboundPartnerWorkStatus({
+    profileId: profile?.id,
+    email: email ?? profile?.email,
+  })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [newJobOpen, setNewJobOpen] = useState(false)
+  const [editingJob, setEditingJob] = useState<DemoJob | null>(null)
+  const [deletingJob, setDeletingJob] = useState<DemoJob | null>(null)
+  const [deleteBackup, setDeleteBackup] = useState<{
+    kinds: number
+    qty: number
+  } | null>(null)
+  const [deleteSaving, setDeleteSaving] = useState(false)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [jobMetaSaving, setJobMetaSaving] = useState(false)
+  const [jobMetaError, setJobMetaError] = useState<string | null>(null)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [panel, setPanel] = useState<JobPanel>('upload')
   const [downloading, setDownloading] = useState(false)
@@ -2887,6 +3105,7 @@ export function BulkOutboundPage() {
         local.map((item) => ({
           partnerId: item.partnerId,
           barcodeSource: item.barcodeSource,
+          workStatus: item.workStatus,
         })),
       )
       try {
@@ -2912,6 +3131,9 @@ export function BulkOutboundPage() {
       .map((item) => ({
         ...item,
         partnerName: partnerById.get(item.partnerId)!.name,
+        workStatus: isPartnerWorkStatus(item.workStatus)
+          ? item.workStatus
+          : 'idle',
       }))
   }, [allPartners, configsQuery.data])
 
@@ -2979,6 +3201,93 @@ export function BulkOutboundPage() {
     return [...names].sort((left, right) => left.localeCompare(right, 'ko'))
   }, [jobs, meLabel])
 
+  async function persistIdleCollect(
+    rows: IdleCollectRow[],
+    jobNote: string,
+    nextStatus?: JobStatus,
+    options?: { quiet?: boolean },
+  ) {
+    if (!activeJob) {
+      throw new Error('열린 작업이 없습니다.')
+    }
+    const quiet = options?.quiet === true
+    if (!quiet) setJobSaving(true)
+    try {
+      await saveBulkOutboundJob(brand.id, {
+        id: isUuid(activeJob.id) ? activeJob.id : null,
+        partnerId: activeJob.partnerId,
+        barcodeSource: activeJob.barcodeSource,
+        title: activeJob.title,
+        status: nextStatus ?? activeJob.status,
+        startedOn: activeJob.startedOn,
+        dueOn: activeJob.dueOn,
+        assignee: activeJob.assignee,
+        note: jobNote,
+        plannedQty: rows.reduce((sum, row) => sum + Math.max(0, row.qty), 0),
+        lines: rows.map((row, index) => ({
+          barcode: '',
+          orderQty: Math.max(0, row.qty),
+          productName: row.productName,
+          sourceRowNo: index + 1,
+          extraValues: {
+            ...(row.styleNo ? { M번호: row.styleNo } : {}),
+            ...(row.styleId ? { styleId: row.styleId } : {}),
+          },
+        })),
+        files: activeJob.evidenceFiles.map((file) => ({
+          id: isUuid(file.id) ? file.id : undefined,
+          name: file.name,
+          fileSize: file.fileSize ?? 0,
+          keptOn: file.attachedOn,
+        })),
+      })
+    } finally {
+      if (!quiet) {
+        setJobSaving(false)
+        await queryClient.invalidateQueries({
+          queryKey: ['bulkOutboundJobs', brand.id],
+        })
+      }
+    }
+  }
+
+  async function applyIdleCollectBackup(
+    rows: IdleCollectRow[],
+    jobNote: string,
+  ) {
+    if (!activeJob) {
+      throw new Error('열린 작업이 없습니다.')
+    }
+    if (!isUuid(activeJob.id)) {
+      throw new Error('작업을 먼저 저장하세요.')
+    }
+    if (!idleCollectAllLinked(rows)) {
+      throw new Error('연결되지 않은 상품명이 있습니다. 등록을 다시 하세요.')
+    }
+    const entries = idleCollectBackupEntries(rows)
+    if (entries.length === 0) {
+      throw new Error('백업할 수량이 없습니다.')
+    }
+    const totalQty = entries.reduce((sum, entry) => sum + entry.quantity, 0)
+    const saved = await replaceBulkOutboundBackup({
+      brandId: brand.id,
+      jobId: activeJob.id,
+      partnerId: activeJob.partnerId,
+      shippedOn: todayIso(),
+      entries,
+    })
+    await persistIdleCollect(
+      rows,
+      jobNote,
+      activeJob.status === 'done' ? 'done' : 'backup',
+    )
+    notifyOutboundUpdated(brand.id)
+    await queryClient.invalidateQueries({
+      queryKey: ['outboundShipments', brand.id],
+    })
+    return { kinds: saved, qty: totalQty }
+  }
+
   async function persistUiJob(job: DemoJob) {
     const fields = templateFields
     setJobSaving(true)
@@ -2994,7 +3303,11 @@ export function BulkOutboundPage() {
         assignee: job.assignee,
         note: job.note,
         plannedQty: job.plannedQty,
-        lines: jobLinesFromExcelRows(job.excelRows, lineFieldIds(fields)),
+        lines: jobLinesFromExcelRows(
+          job.excelRows,
+          lineFieldIds(fields),
+          fields,
+        ),
         files: job.evidenceFiles.map((file) => ({
           id: isUuid(file.id) ? file.id : undefined,
           name: file.name,
@@ -3010,9 +3323,141 @@ export function BulkOutboundPage() {
     }
   }
 
+  function isOwnJob(job: Pick<DemoJob, 'assignee'>) {
+    return Boolean(meLabel) && job.assignee === meLabel
+  }
+
+  function jobLocksPartner(job: DemoJob) {
+    return (
+      job.status !== 'draft' ||
+      job.plannedQty > 0 ||
+      job.excelRows.length > 0 ||
+      job.evidenceFiles.length > 0
+    )
+  }
+
+  async function handleUpdateOwnJob(
+    job: DemoJob,
+    input: {
+      config: BulkOutboundPartnerConfig
+      title: string
+      dueOn: string
+      note: string
+    },
+  ) {
+    if (!isOwnJob(job)) {
+      setJobMetaError('본인이 만든 건만 수정할 수 있습니다.')
+      return
+    }
+    setJobMetaSaving(true)
+    setJobMetaError(null)
+    try {
+      await updateBulkOutboundJobMeta(brand.id, job.id, meLabel, {
+        title: input.title,
+        dueOn: input.dueOn,
+        note: input.note,
+        ...(jobLocksPartner(job)
+          ? {}
+          : {
+              partnerId: input.config.partnerId,
+              barcodeSource: input.config.barcodeSource,
+            }),
+      })
+      setEditingJob(null)
+      await queryClient.invalidateQueries({
+        queryKey: ['bulkOutboundJobs', brand.id],
+      })
+    } catch (reason) {
+      setJobMetaError(
+        reason instanceof Error
+          ? reason.message
+          : '대량출고 작업을 수정하지 못했습니다.',
+      )
+    } finally {
+      setJobMetaSaving(false)
+    }
+  }
+
+  function openDeleteOwnJob(job: DemoJob) {
+    if (!isOwnJob(job)) return
+    setDeletingJob(job)
+    setDeleteBackup(null)
+    setDeleteError(null)
+    if (!isUuid(job.id)) {
+      setDeleteBackup({ kinds: 0, qty: 0 })
+      return
+    }
+    void getBulkOutboundBackupSummary(brand.id, job.id)
+      .then((summary) => {
+        setDeleteBackup(summary)
+      })
+      .catch((reason) => {
+        setDeleteError(
+          reason instanceof Error
+            ? reason.message
+            : '출고 데이터를 확인하지 못했습니다.',
+        )
+        setDeleteBackup({ kinds: 0, qty: 0 })
+      })
+  }
+
+  async function confirmDeleteOwnJob() {
+    if (!deletingJob || !isOwnJob(deletingJob)) return
+    setDeleteSaving(true)
+    setDeleteError(null)
+    try {
+      await deleteBulkOutboundJob(brand.id, deletingJob.id, meLabel)
+      if (activeJobId === deletingJob.id) setActiveJobId(null)
+      setDeletingJob(null)
+      notifyOutboundUpdated(brand.id)
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: ['bulkOutboundJobs', brand.id],
+        }),
+        queryClient.invalidateQueries({
+          queryKey: ['outboundShipments', brand.id],
+        }),
+      ])
+    } catch (reason) {
+      setDeleteError(
+        reason instanceof Error
+          ? reason.message
+          : '대량출고 작업을 삭제하지 못했습니다.',
+      )
+    } finally {
+      setDeleteSaving(false)
+    }
+  }
+
   const activeJob = rawActiveJob
     ? jobToUi(rawActiveJob, templateFields)
     : null
+  const activePartnerWorkStatus = useMemo(() => {
+    if (!activeJob) return null
+    return (
+      visibleConfigs.find(
+        (item) =>
+          item.partnerId === activeJob.partnerId &&
+          item.barcodeSource === activeJob.barcodeSource,
+      )?.workStatus ?? null
+    )
+  }, [activeJob, visibleConfigs])
+  const partnerIdle = activePartnerWorkStatus === 'idle'
+
+  useEffect(() => {
+    if (!partnerIdle || !isIdleLockedPanel(panel)) return
+    setPanel('done')
+  }, [partnerIdle, panel])
+
+  const idleCollectRows = useMemo<IdleCollectRow[]>(() => {
+    if (!rawActiveJob || !partnerIdle) return []
+    return rawActiveJob.lines.map((line) => ({
+      productName: line.productName,
+      qty: line.orderQty,
+      styleNo: line.extraValues['M번호'] ?? '',
+      styleId: line.extraValues['styleId'] ?? '',
+    }))
+  }, [partnerIdle, rawActiveJob])
 
   useEffect(() => {
     if (!hasRawActiveJob) {
@@ -3577,9 +4022,19 @@ export function BulkOutboundPage() {
     Boolean(rawActiveJob) &&
     (templateFieldsQuery.isPending || templateFieldsQuery.isError)
 
-  function openJob(jobId: string, nextPanel: JobPanel = 'upload') {
+  function openJob(jobId: string, nextPanel?: JobPanel) {
+    const job = jobs.find((item) => item.id === jobId)
+    const workStatus = job
+      ? visibleConfigs.find(
+          (item) =>
+            item.partnerId === job.partnerId &&
+            item.barcodeSource === job.barcodeSource,
+        )?.workStatus
+      : null
     setActiveJobId(jobId)
-    setPanel(nextPanel)
+    setPanel(
+      nextPanel ?? (workStatus === 'idle' ? 'done' : 'upload'),
+    )
     setBackupApplyNote(null)
     setBackupSearch('')
     setBackupQtyOverrides({})
@@ -3717,6 +4172,7 @@ export function BulkOutboundPage() {
           <BulkOutboundFlowStrip
             status={activeJob.status}
             productListReady={productListReady}
+            partnerIdle={partnerIdle}
             onSelect={setPanel}
           />
         </div>
@@ -3789,12 +4245,17 @@ export function BulkOutboundPage() {
                       </p>
                     </div>
                     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                      {group.jobs.map((job) => (
-                        <button
+                      {group.jobs.map((job) => {
+                        const own = isOwnJob(job)
+                        return (
+                        <div
                           key={job.id}
+                          className="rounded-xl border border-border bg-card transition-colors hover:border-primary/30 hover:bg-primary/[0.04]"
+                        >
+                        <button
                           type="button"
                           onClick={() => openJob(job.id)}
-                          className="rounded-xl border border-border bg-card px-4 py-3.5 text-left transition-colors hover:border-primary/30 hover:bg-primary/[0.04]"
+                          className="w-full px-4 py-3.5 text-left"
                         >
                           <div className="flex items-start justify-between gap-2">
                             <p className="min-w-0 truncate text-base font-semibold">
@@ -3818,7 +4279,37 @@ export function BulkOutboundPage() {
                             {job.note}
                           </p>
                         </button>
-                      ))}
+                        {own ? (
+                          <div className="flex justify-end gap-1 px-3 pb-2.5">
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => {
+                                setJobMetaError(null)
+                                setEditingJob(job)
+                              }}
+                            >
+                              <Pencil className="size-3.5" />
+                              수정
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="text-danger"
+                              onClick={() => {
+                                openDeleteOwnJob(job)
+                              }}
+                            >
+                              <Trash2 className="size-3.5" />
+                              삭제
+                            </Button>
+                          </div>
+                        ) : null}
+                        </div>
+                        )
+                      })}
                     </div>
                   </div>
                 ))}
@@ -3882,15 +4373,47 @@ export function BulkOutboundPage() {
                   <Badge variant={STATUS_BADGE[activeJob!.status]}>
                     {STATUS_LABEL[activeJob!.status]}
                   </Badge>
+                  {isOwnJob(activeJob!) ? (
+                    <div className="flex gap-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          setJobMetaError(null)
+                          setEditingJob(activeJob)
+                        }}
+                      >
+                        <Pencil className="size-3.5" />
+                        수정
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="text-danger"
+                        onClick={() => {
+                          openDeleteOwnJob(activeJob!)
+                        }}
+                      >
+                        <Trash2 className="size-3.5" />
+                        삭제
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </CardHeader>
             <CardContent>
               <div className="flex flex-wrap gap-1.5">
                 {PANELS.map((item) => {
+                  const idleLocked =
+                    partnerIdle && isIdleLockedPanel(item.value)
                   const locked =
-                    (item.value === 'products' || item.value === 'barcode') &&
-                    !productListReady
+                    idleLocked ||
+                    (!partnerIdle &&
+                      (item.value === 'products' || item.value === 'barcode') &&
+                      !productListReady)
                   return (
                     <button
                       key={item.value}
@@ -3898,9 +4421,11 @@ export function BulkOutboundPage() {
                       aria-pressed={panel === item.value}
                       disabled={locked}
                       title={
-                        locked
-                          ? '상품연결에서 미매칭이 없어야 열 수 있습니다.'
-                          : undefined
+                        idleLocked
+                          ? IDLE_PANEL_LOCK_HINT
+                          : locked
+                            ? '상품연결에서 미매칭이 없어야 열 수 있습니다.'
+                            : undefined
                       }
                       onClick={() => {
                         if (locked) return
@@ -3920,8 +4445,9 @@ export function BulkOutboundPage() {
                 })}
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
-                패널은 아무 순서나 열 수 있습니다. 상품 리스트만 매칭이 끝난 뒤
-                열립니다.
+                {partnerIdle
+                  ? '대기 업체는 상품 리스트·바코드로 출고 데이터부터 모읍니다. 엑셀·상품연결·임시 백업·서류는 작업중으로 바꾼 뒤 엽니다.'
+                  : '패널은 아무 순서나 열 수 있습니다. 상품 리스트만 매칭이 끝난 뒤 열립니다.'}
               </p>
             </CardContent>
           </Card>
@@ -4251,17 +4777,21 @@ export function BulkOutboundPage() {
               <CardContent className="space-y-4">
                 {!productListReady ? (
                   <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
-                    상품연결에서 미매칭·빈 바코드를 없앤 뒤 열어 주세요.
-                    <div className="mt-3">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setPanel('convert')}
-                      >
-                        상품연결로
-                      </Button>
-                    </div>
+                    {partnerIdle
+                      ? '대기 업체는 출고 데이터부터 모읍니다. 엑셀을 올리려면 업체 설정에서 작업중으로 바꾸세요.'
+                      : '상품연결에서 미매칭·빈 바코드를 없앤 뒤 열어 주세요.'}
+                    {!partnerIdle ? (
+                      <div className="mt-3">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setPanel('convert')}
+                        >
+                          상품연결로
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
                 ) : (
                   <>
@@ -4396,7 +4926,9 @@ export function BulkOutboundPage() {
               <CardContent className="space-y-4">
                 {!productListReady ? (
                   <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
-                    상품연결에서 미매칭·빈 바코드를 없앤 뒤 열어 주세요.
+                    {partnerIdle
+                      ? '대기 업체는 출고 데이터부터 모읍니다. 엑셀을 올리려면 업체 설정에서 작업중으로 바꾸세요.'
+                      : '상품연결에서 미매칭·빈 바코드를 없앤 뒤 열어 주세요.'}
                   </div>
                 ) : activeJob!.excelRows.length === 0 ? (
                   <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-10 text-center text-sm text-muted-foreground">
@@ -4794,14 +5326,30 @@ export function BulkOutboundPage() {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">포장·확정</CardTitle>
                 <CardDescription>
-                  준비가 되면 그때 확정합니다. 그 전까지는 임시 백업으로
-                  남습니다.
+                  {partnerIdle
+                    ? '대기 업체는 상품명·수량 엑셀을 올려 출고 데이터부터 모읍니다. 등록하면 M번호를 붙이고, 비고는 건 전체에 적습니다.'
+                    : '준비가 되면 그때 확정합니다. 그 전까지는 임시 백업으로 남습니다.'}
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <Button type="button" disabled>
-                  출고 확정
-                </Button>
+                {partnerIdle ? (
+                  <BulkOutboundIdleCollectPanel
+                    rows={idleCollectRows}
+                    jobNote={rawActiveJob?.note ?? activeJob?.note ?? ''}
+                    saving={jobSaving}
+                    onSave={(rows, note, options) =>
+                      persistIdleCollect(rows, note, undefined, options)
+                    }
+                    onBackup={applyIdleCollectBackup}
+                    onLookupStyles={(names) =>
+                      listStyleRefsForLookup(brand.id, { names })
+                    }
+                  />
+                ) : (
+                  <Button type="button" disabled>
+                    출고 확정
+                  </Button>
+                )}
               </CardContent>
             </Card>
           ) : null}
@@ -4815,6 +5363,7 @@ export function BulkOutboundPage() {
           ownPartnerIds={ownPartnerIds}
           partnerCodePartnerIds={partnerCodePartnerIds}
           initialConfigs={visibleConfigs}
+          canSetWorkStatus={canSetWorkStatus}
           onClose={() => setSettingsOpen(false)}
           onSave={(configs) => {
             void (async () => {
@@ -4823,6 +5372,7 @@ export function BulkOutboundPage() {
                 configs.map((item) => ({
                   partnerId: item.partnerId,
                   barcodeSource: item.barcodeSource,
+                  workStatus: item.workStatus,
                 })),
               )
               await queryClient.invalidateQueries({
@@ -4833,30 +5383,71 @@ export function BulkOutboundPage() {
         />
       ) : null}
 
-      {newJobOpen ? (
+      {deletingJob ? (
+        <BulkOutboundJobDeleteDialog
+          title={deletingJob.title}
+          backup={deleteBackup}
+          saving={deleteSaving}
+          error={deleteError}
+          onClose={() => {
+            if (deleteSaving) return
+            setDeletingJob(null)
+            setDeleteError(null)
+          }}
+          onConfirm={() => {
+            void confirmDeleteOwnJob()
+          }}
+        />
+      ) : null}
+
+      {newJobOpen || editingJob ? (
         <NewJobDialog
+          key={editingJob?.id ?? 'new'}
           configs={visibleConfigs}
-          onClose={() => setNewJobOpen(false)}
-          onCreate={(config, title, dueOn) => {
+          initial={
+            editingJob
+              ? {
+                  title: editingJob.title,
+                  dueOn: editingJob.dueOn,
+                  partnerId: editingJob.partnerId,
+                  barcodeSource: editingJob.barcodeSource,
+                  note: editingJob.note,
+                  lockPartner: jobLocksPartner(editingJob),
+                }
+              : null
+          }
+          saving={jobMetaSaving}
+          error={jobMetaError}
+          onClose={() => {
+            setNewJobOpen(false)
+            setEditingJob(null)
+            setJobMetaError(null)
+          }}
+          onSubmit={(input) => {
+            if (editingJob) {
+              void handleUpdateOwnJob(editingJob, input)
+              return
+            }
             const today = todayIso()
             void (async () => {
               const id = await persistUiJob({
                 id: '',
-                partnerId: config.partnerId,
-                partnerName: config.partnerName,
-                barcodeSource: config.barcodeSource,
-                title,
+                partnerId: input.config.partnerId,
+                partnerName: input.config.partnerName,
+                barcodeSource: input.config.barcodeSource,
+                title: input.title,
                 assignee: meLabel,
                 status: 'draft',
                 startedOn: today,
-                dueOn,
+                dueOn: input.dueOn,
                 updatedOn: today,
                 plannedQty: 0,
-                note: '방금 만든 건. 엑셀부터 올리면 됩니다.',
+                note: input.note,
                 evidenceFiles: [],
                 excelRows: [],
                 excelFileName: null,
               })
+              setNewJobOpen(false)
               openJob(id, 'upload')
             })()
           }}

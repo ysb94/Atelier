@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { AppLoadingOverlay } from './components/AppLoadingOverlay'
 import { ContextMenu } from './components/ContextMenu'
 import { ExplorerTopbar } from './components/ExplorerTopbar'
@@ -21,6 +22,7 @@ import type { SelectionEntry, ServerFileItem } from './types'
 import { useDesignFileManager } from './useDesignFileManager'
 
 export function DesignFileManagerPage() {
+  const workspaceActive = useWorkspaceTabActivity()
   const manager = useDesignFileManager()
   const [dropping, setDropping] = useState(false)
   const depth = useRef(0)
@@ -390,16 +392,19 @@ export function DesignFileManagerPage() {
         />
       </div>
       <ContextMenu
-        menu={manager.contextMenu}
+        menu={workspaceActive ? manager.contextMenu : null}
         close={() => manager.setContextMenu(null)}
       />
       <AppLoadingOverlay
-        busy={!!manager.busyCount}
+        busy={workspaceActive && !!manager.busyCount}
         message={manager.busyMessage}
       />
-      <UiDialog request={manager.dialogs[0]} onClose={manager.closeDialog} />
+      <UiDialog
+        request={workspaceActive ? manager.dialogs[0] : undefined}
+        onClose={manager.closeDialog}
+      />
       <HistoryModal
-        open={manager.historyOpen}
+        open={workspaceActive && manager.historyOpen}
         entries={manager.historyEntries}
         loading={manager.historyLoading}
         more={manager.historyMonthIndex < manager.historyMonths.length}

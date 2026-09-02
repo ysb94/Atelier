@@ -2,9 +2,11 @@ import { useEffect, useRef, useState, type MutableRefObject } from 'react'
 import {
   markInvoiceWorkStage,
   timeInvoiceWork,
+  timeInvoiceWorkAsync,
   type InvoiceWorkJob,
   type InvoiceWorkStage,
 } from '@/lib/invoice/invoice-work-perf'
+import type { CancellableCompute } from '@/lib/invoice/invoice-step-transform-worker'
 
 export type InvoiceStepComputeStatus = 'idle' | 'computing' | 'ready' | 'error'
 
@@ -12,6 +14,25 @@ export function invoiceStepDepsKey(
   parts: Array<string | number | boolean | null | undefined>,
 ) {
   return parts.map((part) => String(part ?? '')).join('\u0001')
+}
+
+function isThenable<T>(value: T | PromiseLike<T>): value is PromiseLike<T> {
+  return typeof value === 'object' && value !== null && 'then' in value
+}
+
+function cancelCompute(value: unknown) {
+  if (
+    value &&
+    typeof value === 'object' &&
+    'cancel' in value &&
+    typeof value.cancel === 'function'
+  ) {
+    value.cancel()
+  }
+}
+
+function isCancelledError(error: unknown) {
+  return error instanceof Error && error.message.includes('취소')
 }
 
 export function useInvoiceStepCompute<T>({
@@ -24,7 +45,7 @@ export function useInvoiceStepCompute<T>({
 }: {
   enabled: boolean
   depsKey: string
-  compute: () => T
+  compute: () => T | Promise<T> | CancellableCompute<T>
   label?: string
   jobRef?: MutableRefObject<InvoiceWorkJob | null>
   stage?: InvoiceWorkStage
@@ -64,14 +85,10 @@ export function useInvoiceStepCompute<T>({
     }
     setVersion((value) => value + 1)
 
+    let pending: unknown = null
     const timer = window.setTimeout(() => {
       if (generation !== generationRef.current) return
-      try {
-        const result = timeInvoiceWork(
-          label ?? 'step-compute',
-          () => computeRef.current(),
-          jobRef?.current,
-        )
+      const apply = (result: T) => {
         if (generation !== generationRef.current) return
         if (stage) markInvoiceWorkStage(jobRef?.current, stage)
         storeRef.current = {
@@ -81,8 +98,10 @@ export function useInvoiceStepCompute<T>({
           status: 'ready',
         }
         setVersion((value) => value + 1)
-      } catch (error) {
+      }
+      const fail = (error: unknown) => {
         if (generation !== generationRef.current) return
+        if (isCancelledError(error)) return
         storeRef.current = {
           key: depsKey,
           result: null,
@@ -94,10 +113,32 @@ export function useInvoiceStepCompute<T>({
         }
         setVersion((value) => value + 1)
       }
+      try {
+        const value = computeRef.current()
+        pending = value
+        if (isThenable(value)) {
+          void timeInvoiceWorkAsync(
+            label ?? 'step-compute',
+            () => Promise.resolve(value),
+            jobRef?.current,
+          ).then(apply, fail)
+          return
+        }
+        apply(
+          timeInvoiceWork(
+            label ?? 'step-compute',
+            () => value,
+            jobRef?.current,
+          ),
+        )
+      } catch (error) {
+        fail(error)
+      }
     }, 0)
 
     return () => {
       window.clearTimeout(timer)
+      cancelCompute(pending)
     }
   }, [depsKey, enabled, jobRef, label, stage])
 

@@ -3,7 +3,10 @@ import {
   matchingProductName,
 } from '@/lib/invoice/product-name-tags'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
-import type { InvoiceProductNameTagRoleEntry } from '@/lib/types'
+import type {
+  InvoiceProductNameMap,
+  InvoiceProductNameTagRoleEntry,
+} from '@/lib/types'
 
 export type ProductNameCandidate = {
   text: string
@@ -338,4 +341,31 @@ export function collectProductNameCandidateTexts(
     }
   }
   return texts
+}
+
+export function invoiceLookupTextsSig(texts: string[]): string {
+  const unique = [
+    ...new Set(texts.map((text) => normalizeInvoiceText(text)).filter(Boolean)),
+  ].sort()
+  let hash = 2166136261
+  for (const key of unique) {
+    for (let i = 0; i < key.length; i += 1) {
+      hash ^= key.charCodeAt(i)
+      hash = Math.imul(hash, 16777619)
+    }
+    hash ^= 10
+    hash = Math.imul(hash, 16777619)
+  }
+  return `${unique.length}:${(hash >>> 0).toString(16)}`
+}
+
+export function filterProductNameMapsForLookupTexts(
+  maps: InvoiceProductNameMap[],
+  texts: string[],
+): InvoiceProductNameMap[] {
+  const keys = new Set(
+    texts.map((text) => normalizeInvoiceText(text)).filter(Boolean),
+  )
+  if (keys.size === 0) return []
+  return maps.filter((map) => keys.has(map.normalizedLookupKey))
 }

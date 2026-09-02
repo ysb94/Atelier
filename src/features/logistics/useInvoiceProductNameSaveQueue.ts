@@ -129,17 +129,70 @@ function applyInvoiceOptionMapUpsert(
   return [saved, ...maps.filter((map) => map.id !== saved.id)]
 }
 
+const PRODUCT_NAME_MAPS_QUERY_KEY = 'invoice-product-name-maps'
+const PRODUCT_NAME_MAPS_WORK_QUERY_KEY = 'invoice-product-name-maps-for-work'
+
+function cachedProductNameMaps(
+  queryClient: ReturnType<typeof useQueryClient>,
+  brandId: string,
+): InvoiceProductNameMap[] {
+  const full =
+    queryClient.getQueryData<InvoiceProductNameMap[]>([
+      PRODUCT_NAME_MAPS_QUERY_KEY,
+      brandId,
+    ]) ?? []
+  const work = queryClient
+    .getQueriesData<InvoiceProductNameMap[]>({
+      queryKey: [PRODUCT_NAME_MAPS_WORK_QUERY_KEY, brandId],
+    })
+    .flatMap(([, data]) => data ?? [])
+  if (work.length === 0) return full
+  const seen = new Set(full.map((map) => map.id))
+  const merged = [...full]
+  for (const map of work) {
+    if (seen.has(map.id)) continue
+    seen.add(map.id)
+    merged.push(map)
+  }
+  return merged
+}
+
+function writeProductNameMapCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  brandId: string,
+  apply: (maps: InvoiceProductNameMap[]) => InvoiceProductNameMap[],
+) {
+  const fullKey = [PRODUCT_NAME_MAPS_QUERY_KEY, brandId] as const
+  if (queryClient.getQueryData(fullKey)) {
+    queryClient.setQueryData<InvoiceProductNameMap[]>(fullKey, (maps = []) =>
+      apply(maps),
+    )
+  } else {
+    void queryClient.invalidateQueries({ queryKey: fullKey })
+  }
+
+  const workQueries = queryClient.getQueriesData<InvoiceProductNameMap[]>({
+    queryKey: [PRODUCT_NAME_MAPS_WORK_QUERY_KEY, brandId],
+  })
+  if (workQueries.length === 0) {
+    void queryClient.invalidateQueries({
+      queryKey: [PRODUCT_NAME_MAPS_WORK_QUERY_KEY, brandId],
+    })
+    return
+  }
+  for (const [queryKey] of workQueries) {
+    queryClient.setQueryData<InvoiceProductNameMap[]>(queryKey, (maps = []) =>
+      apply(maps),
+    )
+  }
+}
+
 export function upsertInvoiceProductNameMapCache(
   queryClient: ReturnType<typeof useQueryClient>,
   brandId: string,
   saved: InvoiceProductNameMap,
 ) {
-  const queryKey = ['invoice-product-name-maps', brandId] as const
-  const current = queryClient.getQueryData<InvoiceProductNameMap[]>(queryKey)
-  if (!current) {
-    return queryClient.invalidateQueries({ queryKey })
-  }
-  queryClient.setQueryData<InvoiceProductNameMap[]>(queryKey, (maps = []) =>
+  writeProductNameMapCaches(queryClient, brandId, (maps) =>
     applyInvoiceProductNameMapUpsert(maps, saved),
   )
 }
@@ -266,18 +319,13 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
     const options = pendingOptionMapsRef.current
     pendingOptionMapsRef.current = []
     if (products.length > 0) {
-      const queryKey = ['invoice-product-name-maps', brandId] as const
-      if (!queryClient.getQueryData(queryKey)) {
-        void queryClient.invalidateQueries({ queryKey })
-      } else {
-        queryClient.setQueryData<InvoiceProductNameMap[]>(queryKey, (maps = []) => {
-          let next = maps
-          for (const saved of products) {
-            next = applyInvoiceProductNameMapUpsert(next, saved)
-          }
-          return next
-        })
-      }
+      writeProductNameMapCaches(queryClient, brandId, (maps) => {
+        let next = maps
+        for (const saved of products) {
+          next = applyInvoiceProductNameMapUpsert(next, saved)
+        }
+        return next
+      })
       logInvoiceWork('product-map-cache-flush', { count: products.length })
     }
     if (options.length > 0) {
@@ -401,11 +449,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
               ),
             )
             try {
-              const maps =
-                queryClient.getQueryData<InvoiceProductNameMap[]>([
-                  'invoice-product-name-maps',
-                  brandId,
-                ]) ?? []
+              const maps = cachedProductNameMaps(queryClient, brandId)
               const previousMap =
                 entry.previousMap ??
                 findMapByLookupKey(maps, entry.lookupKey)
@@ -620,11 +664,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
           )
       const historyId =
         input.historyId ?? existingEntry?.id ?? newHistoryId()
-      const maps =
-        queryClient.getQueryData<InvoiceProductNameMap[]>([
-          'invoice-product-name-maps',
-          brandId,
-        ]) ?? []
+      const maps = cachedProductNameMaps(queryClient, brandId)
       const previousMap =
         existingEntry?.savedMap ??
         existingEntry?.previousMap ??
@@ -742,7 +782,10 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
           )
         }
         await queryClient.invalidateQueries({
-          queryKey: ['invoice-product-name-maps', brandId],
+          queryKey: [PRODUCT_NAME_MAPS_QUERY_KEY, brandId],
+        })
+        await queryClient.invalidateQueries({
+          queryKey: [PRODUCT_NAME_MAPS_WORK_QUERY_KEY, brandId],
         })
         await queryClient.invalidateQueries({
           queryKey: ['invoice-option-maps', brandId],

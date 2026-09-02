@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import { Download } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -27,6 +27,8 @@ import {
   InvoiceItemNameLookupKeyTable,
   buildInvoiceItemNameLookupKeyRows,
 } from './InvoiceItemNameLookupKeyTable'
+import { InvoiceTablePager } from './invoice-table-page'
+import { useInvoiceTablePage } from './useInvoiceTablePage'
 import { InvoiceItemNameAiApplyBar } from './InvoiceItemNameAiApplyBar'
 import { InvoiceAccessoryRuleForm } from './InvoiceAccessoryRuleTable'
 import { InvoiceItemNameRuleForm } from './InvoiceItemNameRuleForm'
@@ -227,6 +229,7 @@ export function InvoiceItemNameTransformPanel({
   onAutoCollectSettled?: () => void
 }) {
   const [query, setQuery] = useState('')
+  const deferredQuery = useDeferredValue(query)
   const [downloading, setDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<string | null>(null)
   const [status, setStatus] = useState<'all' | InvoiceItemNameMatchStatus>(
@@ -298,7 +301,7 @@ export function InvoiceItemNameTransformPanel({
     transformation.unresolvedRowCount + transformation.conflictRowCount
 
   const groups = useMemo(() => {
-    const q = query.trim().toLocaleLowerCase('ko-KR')
+    const q = deferredQuery.trim().toLocaleLowerCase('ko-KR')
     return groupCombos(combos)
       .map((group) => {
         const nextCombos = group.combos.filter(
@@ -313,7 +316,7 @@ export function InvoiceItemNameTransformPanel({
         }
       })
       .filter((group): group is ItemReviewGroup => Boolean(group))
-  }, [combos, query, status])
+  }, [combos, deferredQuery, status])
 
   useEffect(() => {
     const next = pickNextSelection(
@@ -336,7 +339,7 @@ export function InvoiceItemNameTransformPanel({
     groups.find((group) => group.key === selectedGroupKey) ?? null
 
   const rows = useMemo(() => {
-    const q = query.trim().toLocaleLowerCase('ko-KR')
+    const q = deferredQuery.trim().toLocaleLowerCase('ko-KR')
     return transformation.rows.filter((row) => {
       if (status !== 'all' && row.status !== status) return false
       if (!q) return true
@@ -351,7 +354,11 @@ export function InvoiceItemNameTransformPanel({
         .toLocaleLowerCase('ko-KR')
         .includes(q)
     })
-  }, [query, status, transformation.rows])
+  }, [deferredQuery, status, transformation.rows])
+  const previewPage = useInvoiceTablePage(
+    rows,
+    `${deferredQuery}\u0001${status}`,
+  )
 
   /** 검색·필터에 걸린 모든 내품명의 조회 키 중 아직 규칙이 없는 건만 모은다. */
   const reviewEntries = useMemo<InvoiceItemNameReviewEntry[]>(() => {
@@ -601,6 +608,7 @@ export function InvoiceItemNameTransformPanel({
             : `전체 행 미리보기 ${formatNumber(rows.length)}`}
         </Button>
         {previewOpen ? (
+          <>
           <div className="max-h-[28rem] overflow-auto rounded-lg border border-border">
             <table className="w-full min-w-[960px] text-left text-xs">
               <thead className="sticky top-0 bg-muted/80">
@@ -614,7 +622,7 @@ export function InvoiceItemNameTransformPanel({
                 </tr>
               </thead>
               <tbody>
-                {rows.slice(0, 300).map((row) => {
+                {previewPage.pageItems.map((row) => {
                   const meta = STATUS_META[row.status]
                   return (
                     <tr
@@ -651,13 +659,16 @@ export function InvoiceItemNameTransformPanel({
                 })}
               </tbody>
             </table>
-            {rows.length > 300 ? (
-              <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">
-                미리보기는 앞의 300행만 표시합니다. 변환과 다운로드에는 전체가
-                들어갑니다.
-              </p>
-            ) : null}
           </div>
+          <InvoiceTablePager
+            page={previewPage.page}
+            pageCount={previewPage.pageCount}
+            total={rows.length}
+            startIndex={previewPage.startIndex}
+            pageItemCount={previewPage.pageItems.length}
+            onPage={previewPage.setPage}
+          />
+          </>
         ) : null}
       </div>
     </div>

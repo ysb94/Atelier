@@ -8,6 +8,7 @@ const COLUMNS =
   'id, brand_id, mall_name, normalized_mall_name, product_name, normalized_product_name, item_name_context, normalized_item_name_context, own_product_code, normalized_own_product_code, lookup_key, normalized_lookup_key, style_id, is_active, note, created_at, updated_at'
 const SELECT_WITH_STYLE = `${COLUMNS}, styles!invoice_product_name_maps_style_fkey(id, style_no, name)`
 const PAGE_SIZE = 1000
+const LOOKUP_CHUNK = 400
 
 type StyleEmbed = {
   id: string
@@ -139,26 +140,89 @@ export async function listInvoiceProductNameMaps(
   const supabase = getSupabase()
   const rows = await fetchAllPages<MapRow>({
     pageSize: PAGE_SIZE,
-    fetchPage: async (from, to, withCount) => {
+    concurrency: 1,
+    fetchPage: async (from, to) => {
       let query = supabase
         .from('invoice_product_name_maps')
-        .select(SELECT_WITH_STYLE, withCount ? { count: 'exact' } : undefined)
+        .select(SELECT_WITH_STYLE)
         .eq('brand_id', brandId)
         .order('updated_at', { ascending: false })
         .range(from, to)
       if (options.activeOnly) query = query.eq('is_active', true)
-      const { data, error, count } = await query
+      const { data, error } = await query
       if (error) {
         throw new InvoiceProductNameMapStoreError(
           errorMessage(error, '품목명 변환 기준을 불러오지 못했습니다.'),
         )
       }
-      return { rows: (data as MapRow[]) ?? [], count: count ?? null }
+      return { rows: (data as MapRow[]) ?? [], count: null }
     },
   })
   return rows
     .map(toMap)
     .filter((item): item is InvoiceProductNameMap => Boolean(item))
+}
+
+type KeyMapRow = Omit<MapRow, 'styles'> & {
+  style_no: string
+  style_name: string
+}
+
+function toMapFromKeyRow(row: KeyMapRow): InvoiceProductNameMap | null {
+  if (!row.style_id || !row.style_no || !row.style_name) return null
+  return {
+    id: row.id,
+    brandId: row.brand_id,
+    mallName: row.mall_name,
+    normalizedMallName: row.normalized_mall_name,
+    productName: row.product_name,
+    normalizedProductName: row.normalized_product_name,
+    itemNameContext: row.item_name_context,
+    normalizedItemNameContext: row.normalized_item_name_context,
+    ownProductCode: row.own_product_code,
+    normalizedOwnProductCode: row.normalized_own_product_code,
+    lookupKey: row.lookup_key ?? '',
+    normalizedLookupKey: row.normalized_lookup_key ?? '',
+    style: {
+      styleId: row.style_id,
+      styleNo: row.style_no,
+      name: row.style_name,
+    },
+    isActive: row.is_active,
+    note: row.note,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+export async function listInvoiceProductNameMapsForLookupKeys(
+  brandId: string,
+  texts: string[],
+): Promise<InvoiceProductNameMap[]> {
+  const unique = [...new Set(texts.map((text) => text.trim()).filter(Boolean))]
+  if (unique.length === 0) return []
+
+  const supabase = getSupabase()
+  const byId = new Map<string, InvoiceProductNameMap>()
+  for (const chunk of chunked(unique, LOOKUP_CHUNK)) {
+    const { data, error } = await supabase.rpc(
+      'list_invoice_product_name_maps_for_keys',
+      {
+        p_brand_id: brandId,
+        p_texts: chunk,
+      },
+    )
+    if (error) {
+      throw new InvoiceProductNameMapStoreError(
+        errorMessage(error, '품목명 변환 기준을 불러오지 못했습니다.'),
+      )
+    }
+    for (const row of (data as KeyMapRow[]) ?? []) {
+      const mapped = toMapFromKeyRow(row)
+      if (mapped) byId.set(mapped.id, mapped)
+    }
+  }
+  return [...byId.values()]
 }
 
 function sanitizeLookupSearch(raw: string) {

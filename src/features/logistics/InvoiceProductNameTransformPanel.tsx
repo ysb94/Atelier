@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -36,6 +37,8 @@ import { INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
 import type { GiftSourceGroup } from '@/lib/invoice/gift-source-transform'
 import type { ProductNameAiReviewRow } from '@/lib/invoice/product-name-ai-review'
+import { InvoiceTablePager } from './invoice-table-page'
+import { useInvoiceTablePage } from './useInvoiceTablePage'
 import { InvoiceProductNameAiApplyBar } from './InvoiceProductNameAiApplyBar'
 import { InvoiceProductNameRecentSavesPanel } from './InvoiceProductNameRecentSavesPanel'
 import { useInvoiceProductNameBulkAiApply } from './useInvoiceProductNameBulkAiApply'
@@ -115,6 +118,7 @@ export function InvoiceProductNameTransformPanel({
 }) {
   const queryClient = useQueryClient()
   const [query, setQuery] = useState('')
+  const deferredQuery = useDeferredValue(query)
   const [status, setStatus] = useState<'all' | InvoiceProductNameMatchStatus>(
     'all',
   )
@@ -460,7 +464,7 @@ export function InvoiceProductNameTransformPanel({
   }
 
   const rows = useMemo(() => {
-    const q = query.trim().toLocaleLowerCase('ko-KR')
+    const q = deferredQuery.trim().toLocaleLowerCase('ko-KR')
     return transformation.rows
       .filter((row) => {
         if (status !== 'all' && row.status !== status) return false
@@ -487,7 +491,11 @@ export function InvoiceProductNameTransformPanel({
           left.source.itemName.localeCompare(right.source.itemName, 'ko-KR') ||
           left.source.rowNumber - right.source.rowNumber,
       )
-  }, [query, status, transformation.rows])
+  }, [deferredQuery, status, transformation.rows])
+  const previewPage = useInvoiceTablePage(
+    rows,
+    `${deferredQuery}\u0001${status}`,
+  )
 
   if (!renderUi) return null
 
@@ -834,7 +842,7 @@ export function InvoiceProductNameTransformPanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.slice(0, 300).map((row) => {
+                  {previewPage.pageItems.map((row) => {
                     const meta = STATUS_META[row.status]
                     return (
                       <tr
@@ -867,12 +875,14 @@ export function InvoiceProductNameTransformPanel({
                 </tbody>
               </table>
             </div>
-            {rows.length > 300 ? (
-              <p className="text-xs text-muted-foreground">
-                미리보기는 앞의 300행만 표시합니다. 변환과 다운로드에는 전체가
-                들어갑니다.
-              </p>
-            ) : null}
+            <InvoiceTablePager
+              page={previewPage.page}
+              pageCount={previewPage.pageCount}
+              total={rows.length}
+              startIndex={previewPage.startIndex}
+              pageItemCount={previewPage.pageItems.length}
+              onPage={previewPage.setPage}
+            />
           </>
         ) : null}
       </div>

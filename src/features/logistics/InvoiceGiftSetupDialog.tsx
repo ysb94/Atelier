@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { Button } from '@/components/ui/button'
 import type {
   GiftSourceGroup,
@@ -30,7 +31,10 @@ export function InvoiceGiftSetupDialog({
   onApplySession: (rule: GiftSourceSessionRule) => void
   onApplyPersist: (rule: GiftSourceSessionRule) => void
 }) {
+  const workspaceActive = useWorkspaceTabActivity()
   const [mode, setMode] = useState<InvoiceGiftSetupMode>('replace')
+
+  if (!workspaceActive) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

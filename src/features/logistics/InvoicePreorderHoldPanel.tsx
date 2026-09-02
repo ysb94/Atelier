@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEv
 import { createPortal } from 'react-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CalendarCheck, CalendarPlus, Pencil, Plus, Trash2 } from 'lucide-react'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { StylePicker, formatStyleRef } from '@/components/style-picker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -79,6 +80,7 @@ function ShipOnWithDelayHistory({
   open: boolean
   onToggle: () => void
 }) {
+  const workspaceActive = useWorkspaceTabActivity()
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [pos, setPos] = useState<{
     left: number
@@ -114,15 +116,15 @@ function ShipOnWithDelayHistory({
   }
 
   useLayoutEffect(() => {
-    if (!open) {
+    if (!open || !workspaceActive) {
       setPos(null)
       return
     }
     updatePosition()
-  }, [open, delayCount])
+  }, [open, delayCount, workspaceActive])
 
   useEffect(() => {
-    if (!open) return
+    if (!open || !workspaceActive) return
     const onMove = () => updatePosition()
     window.addEventListener('scroll', onMove, true)
     window.addEventListener('resize', onMove)
@@ -130,7 +132,7 @@ function ShipOnWithDelayHistory({
       window.removeEventListener('scroll', onMove, true)
       window.removeEventListener('resize', onMove)
     }
-  }, [open])
+  }, [open, workspaceActive])
 
   return (
     <div className="flex flex-wrap items-center gap-1.5">
@@ -146,7 +148,7 @@ function ShipOnWithDelayHistory({
           {formatNumber(delayCount)}회 지연
         </button>
       ) : null}
-      {open && delayCount > 0 && pos
+      {workspaceActive && open && delayCount > 0 && pos
         ? createPortal(
             <>
               <button
@@ -269,6 +271,7 @@ function draftReady(row: DraftRow) {
 }
 
 export function InvoicePreorderHoldPanel({ brandId }: { brandId: string }) {
+  const workspaceActive = useWorkspaceTabActivity()
   const queryClient = useQueryClient()
   const queryKey = ['invoice-preorder-holds', brandId] as const
   const listQuery = useQuery({
@@ -1251,7 +1254,7 @@ export function InvoicePreorderHoldPanel({ brandId }: { brandId: string }) {
       </CardContent>
     </Card>
 
-    {duplicateErrors && duplicateErrors.length > 0 ? (
+    {workspaceActive && duplicateErrors && duplicateErrors.length > 0 ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <button
           type="button"
@@ -1299,7 +1302,7 @@ export function InvoicePreorderHoldPanel({ brandId }: { brandId: string }) {
       </div>
     ) : null}
 
-    {editingHold ? (
+    {workspaceActive && editingHold ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <button
           type="button"
@@ -1388,7 +1391,7 @@ export function InvoicePreorderHoldPanel({ brandId }: { brandId: string }) {
       </div>
     ) : null}
 
-    {extendingHold ? (
+    {workspaceActive && extendingHold ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <button
           type="button"
@@ -1473,7 +1476,7 @@ export function InvoicePreorderHoldPanel({ brandId }: { brandId: string }) {
       </div>
     ) : null}
 
-    {endingHold ? (
+    {workspaceActive && endingHold ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <button
           type="button"
@@ -1579,7 +1582,7 @@ export function InvoicePreorderHoldPanel({ brandId }: { brandId: string }) {
       </div>
     ) : null}
 
-    {deletingHold ? (
+    {workspaceActive && deletingHold ? (
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
         <button
           type="button"

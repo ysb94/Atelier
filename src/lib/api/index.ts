@@ -201,8 +201,10 @@ export type {
   BulkOutboundJobLine,
   BulkOutboundJobStatus,
   BulkOutboundPartnerConfig,
+  BulkOutboundPartnerWorkStatus,
   BulkOutboundTemplateField,
 } from '@/lib/supabase/bulk-outbound'
+export { canSetBulkOutboundPartnerWorkStatus } from '@/lib/supabase/bulk-outbound'
 export { OutboundShipmentStoreError } from '@/lib/supabase/outbound-shipments'
 export {
   ProductDraftStoreError,
@@ -546,9 +548,10 @@ export async function getActiveWarehouseInventorySet(brandId: string) {
 export async function getWarehouseStockPositions(
   brandId: string,
   setId: string,
+  zone?: WarehouseZone,
 ): Promise<WarehouseStockPosition[]> {
   await delay()
-  return warehouseStockStore.listWarehouseStockPositions(brandId, setId)
+  return warehouseStockStore.listWarehouseStockPositions(brandId, setId, zone)
 }
 
 export async function getWarehouseStockMovements(
@@ -683,6 +686,16 @@ export async function getInvoiceProductNameMaps(
   return invoiceProductNameMapStore.listInvoiceProductNameMaps(brandId, {
     activeOnly,
   })
+}
+
+export async function getInvoiceProductNameMapsForLookupKeys(
+  brandId: string,
+  texts: string[],
+): Promise<InvoiceProductNameMap[]> {
+  return invoiceProductNameMapStore.listInvoiceProductNameMapsForLookupKeys(
+    brandId,
+    texts,
+  )
 }
 
 export async function searchInvoiceProductNameMapsByLookupKey(
@@ -1399,6 +1412,7 @@ export async function replaceBulkOutboundPartnerConfigs(
   configs: Array<{
     partnerId: string
     barcodeSource: bulkOutboundStore.BulkOutboundBarcodeSource
+    workStatus?: bulkOutboundStore.BulkOutboundPartnerWorkStatus
   }>,
 ) {
   await delay()
@@ -1462,6 +1476,38 @@ export async function saveBulkOutboundJob(
 ) {
   await delay()
   return bulkOutboundStore.saveBulkOutboundJob(brandId, input)
+}
+
+export async function updateBulkOutboundJobMeta(
+  brandId: string,
+  jobId: string,
+  assignee: string,
+  input: Parameters<typeof bulkOutboundStore.updateBulkOutboundJobMeta>[3],
+) {
+  await delay()
+  return bulkOutboundStore.updateBulkOutboundJobMeta(
+    brandId,
+    jobId,
+    assignee,
+    input,
+  )
+}
+
+export async function getBulkOutboundBackupSummary(
+  brandId: string,
+  jobId: string,
+) {
+  await delay()
+  return bulkOutboundStore.getBulkOutboundBackupSummary(brandId, jobId)
+}
+
+export async function deleteBulkOutboundJob(
+  brandId: string,
+  jobId: string,
+  assignee: string,
+) {
+  await delay()
+  return bulkOutboundStore.deleteBulkOutboundJob(brandId, jobId, assignee)
 }
 
 export async function replaceBulkOutboundBackup(

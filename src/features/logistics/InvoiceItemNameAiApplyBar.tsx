@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { StylePicker } from '@/components/style-picker'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
@@ -68,6 +69,7 @@ export function InvoiceItemNameAiApplyBar({
 }: {
   bulk: ReturnType<typeof useInvoiceItemNameBulkAiApply>
 }) {
+  const workspaceActive = useWorkspaceTabActivity()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<ItemNameAiQueueFilter>('queue')
   const quick = useInvoiceItemNameQuickEntry({
@@ -1010,7 +1012,7 @@ export function InvoiceItemNameAiApplyBar({
         </div>
       ) : null}
 
-      {dialog ? (
+      {workspaceActive && dialog ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <button
             type="button"

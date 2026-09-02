@@ -8,6 +8,7 @@ import {
   useSearchParams,
 } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -150,6 +151,7 @@ function componentSummary(
 
 export function ProductDetailDrawer() {
   const { brand } = useBrand()
+  const workspaceActive = useWorkspaceTabActivity()
   const navigate = useNavigate()
   const location = useLocation()
   const { styleNo: styleNoParam } = useParams()
@@ -319,6 +321,8 @@ export function ProductDetailDrawer() {
     stylesQuery.isLoading ||
     fieldsQuery.isLoading ||
     seasonsQuery.isLoading
+
+  if (!workspaceActive) return null
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">

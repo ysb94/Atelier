@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, ChevronRight, Search, X } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useBrand } from '@/components/layout/brand-context'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { Badge } from '@/components/ui/badge'
 import {
   Card,
@@ -479,6 +480,7 @@ function ProductDetailDialog({
   onClose: () => void
 }) {
   return (
+    <WorkspaceTabOverlay>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
       <button
         type="button"
@@ -571,6 +573,7 @@ function ProductDetailDialog({
         </div>
       </div>
     </div>
+    </WorkspaceTabOverlay>
   )
 }
 

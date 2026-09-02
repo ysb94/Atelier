@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Search } from 'lucide-react'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { StylePicker } from '@/components/style-picker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -28,9 +29,13 @@ import type {
 } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
 import {
-  productCompositionSearchText,
-  productCompositionVariantsForMap,
+  buildProductCompositionOptionIndex,
+  productCompositionVariantsForMapFromIndex,
+  productNameMapSearchHaystack,
+  type ProductCompositionVariant,
 } from '@/lib/invoice/product-composition'
+import { InvoiceTablePager } from './invoice-table-page'
+import { useInvoiceTablePage } from './useInvoiceTablePage'
 import { InvoiceProductNameMapForm } from './InvoiceProductNameMapForm'
 import { ProductCompositionLines } from './ProductCompositionLines'
 
@@ -48,7 +53,9 @@ export function InvoiceProductNameMapTable({
   error: string | null
 }) {
   const queryClient = useQueryClient()
+  const tabActive = useWorkspaceTabActivity()
   const [search, setSearch] = useState('')
+  const deferredSearch = useDeferredValue(search)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
   const [bulkStyleOpen, setBulkStyleOpen] = useState(false)
@@ -57,37 +64,45 @@ export function InvoiceProductNameMapTable({
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const mapsQueryKey = ['invoice-product-name-maps', brandId] as const
 
+  const optionIndex = useMemo(
+    () => buildProductCompositionOptionIndex(optionMaps),
+    [optionMaps],
+  )
+  const indexedMaps = useMemo(() => {
+    return maps
+      .map((map) => {
+        const variants = productCompositionVariantsForMapFromIndex(
+          optionIndex,
+          map,
+        )
+        return {
+          map,
+          variants,
+          haystack: productNameMapSearchHaystack(map, variants),
+        }
+      })
+      .sort(
+        (left, right) =>
+          right.map.updatedAt.localeCompare(left.map.updatedAt) ||
+          left.map.productName.localeCompare(right.map.productName, 'ko-KR'),
+      )
+  }, [maps, optionIndex])
   const filtered = useMemo(() => {
-    const q = search.trim().toLocaleLowerCase('ko-KR')
-    const list = [...maps].sort(
-      (left, right) =>
-        right.updatedAt.localeCompare(left.updatedAt) ||
-        left.productName.localeCompare(right.productName, 'ko-KR'),
-    )
-    if (!q) return list
-    return list.filter((map) =>
-      [
-        map.productName,
-        map.lookupKey,
-        map.itemNameContext,
-        map.mallName,
-        map.ownProductCode,
-        map.style.styleNo,
-        map.style.name,
-        ...productCompositionVariantsForMap(optionMaps, map).flatMap((variant) => [
-          variant.itemName,
-          productCompositionSearchText(variant.items),
-        ]),
-      ]
-        .join(' ')
-        .toLocaleLowerCase('ko-KR')
-        .includes(q),
-    )
-  }, [maps, optionMaps, search])
+    const q = deferredSearch.trim().toLocaleLowerCase('ko-KR')
+    if (!q) return indexedMaps
+    return indexedMaps.filter((item) => item.haystack.includes(q))
+  }, [deferredSearch, indexedMaps])
+  const {
+    page,
+    setPage,
+    pageCount,
+    startIndex,
+    pageItems,
+  } = useInvoiceTablePage(filtered, deferredSearch.trim())
 
   const mapIds = useMemo(() => new Set(maps.map((map) => map.id)), [maps])
   const filteredIds = useMemo(
-    () => filtered.map((map) => map.id),
+    () => filtered.map((item) => item.map.id),
     [filtered],
   )
 
@@ -455,7 +470,12 @@ export function InvoiceProductNameMapTable({
         ) : null}
         {loading ? (
           <p className="text-sm text-muted-foreground">불러오는 중...</p>
+        ) : !tabActive ? (
+          <p className="rounded-lg border border-border bg-muted/20 p-4 text-sm text-muted-foreground">
+            {formatNumber(filtered.length)}건 · 이 탭이 다시 보이면 표를 표시합니다.
+          </p>
         ) : (
+          <div className="space-y-2">
           <div className="max-h-[28rem] overflow-auto rounded-lg border border-border">
             <table className="w-full min-w-[880px] text-left text-xs">
               <thead className="sticky top-0 bg-muted/80">
@@ -483,7 +503,7 @@ export function InvoiceProductNameMapTable({
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((map) => {
+                {pageItems.map(({ map, variants }) => {
                   const checked = selectedIds.has(map.id)
                   return (
                     <tr key={map.id} className="border-t border-border">
@@ -508,10 +528,7 @@ export function InvoiceProductNameMapTable({
                           : `조합 · 내품명 ${map.itemNameContext || '없음'}`}
                       </td>
                       <td className="max-w-64 px-3 py-2">
-                        <ProductNameMapComposition
-                          map={map}
-                          optionMaps={optionMaps}
-                        />
+                        <ProductNameMapComposition variants={variants} />
                       </td>
                       <td className="px-3 py-2">
                         <Badge variant={map.isActive ? 'success' : 'muted'}>
@@ -578,6 +595,15 @@ export function InvoiceProductNameMapTable({
               </tbody>
             </table>
           </div>
+          <InvoiceTablePager
+            page={page}
+            pageCount={pageCount}
+            total={filtered.length}
+            startIndex={startIndex}
+            pageItemCount={pageItems.length}
+            onPage={setPage}
+          />
+          </div>
         )}
         {editingId ? (
           <div className={cn('rounded-lg border border-border p-3')}>
@@ -596,13 +622,10 @@ export function InvoiceProductNameMapTable({
 }
 
 function ProductNameMapComposition({
-  map,
-  optionMaps,
+  variants,
 }: {
-  map: InvoiceProductNameMap
-  optionMaps: InvoiceOptionMap[]
+  variants: ProductCompositionVariant[]
 }) {
-  const variants = productCompositionVariantsForMap(optionMaps, map)
   const showLabels = variants.length > 1
   return (
     <div className="space-y-1.5">

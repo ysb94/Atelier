@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { AlertTriangle } from 'lucide-react'
@@ -60,6 +61,7 @@ export function InvoiceMallResolutionDialog({
   folders: readonly CodeUsageTargetFolder[]
   onClose: () => void
 }) {
+  const workspaceActive = useWorkspaceTabActivity()
   const queryClient = useQueryClient()
   const defaultFolderId = useMemo(
     () => findDefaultSabangnetFolderId(folders),
@@ -167,6 +169,8 @@ export function InvoiceMallResolutionDialog({
       setSavingKey(null)
     }
   }
+
+  if (!workspaceActive) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">

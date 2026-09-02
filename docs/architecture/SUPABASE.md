@@ -68,6 +68,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 원자 작업 RPC: `save_product_draft`, `promote_product_draft`,
   `save_product_code_with_components`, `replace_partner_barcode_fields`,
   `replace_partner_codes`, `save_bulk_outbound_job`, `replace_bulk_outbound_backup`,
+  `delete_bulk_outbound_job`,
   `save_brand_field_options`,
   `save_invoice_packing_size_maps`,   `save_outbound_partner_with_aliases`, `add_outbound_partner_alias`,
   `record_invoice_work_completion`,
@@ -163,11 +164,18 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 업체별 헤더는 `partner_barcode_fields`이며 자사 `barcode_fields`와 섞지 않는다.
 값은 기존처럼 `product_codes.values` JSONB에 필드 id를 키로 둔다.
 
-대량출고 Job은 `bulk_outbound_jobs`에 두고, 엑셀의 비개인정보(바코드·수량·상품명)만
-`bulk_outbound_job_lines`에 남긴다. 수령인·전화·주소는 저장하지 않는다.
+대량출고 Job은 `bulk_outbound_jobs`에 두고, 엑셀의 비개인정보만
+`bulk_outbound_job_lines`에 남긴다. 바코드·수량·상품명은 전용 컬럼이고,
+발주번호·물류센터·상품번호 같은 양식 추가 열은 `extra_values`에 둔다.
+수령인·전화·주소는 저장하지 않는다.
 「임시 반영」은 재고를 건드리지 않고 `outbound_shipments`에 `source='bulk'`로
 같은 Job의 이전 반영분을 교체한다. 운영 현황은 이 원장만 읽는다.
+대량출고 건 삭제는 `delete_bulk_outbound_job`으로 같은 Job의 `source='bulk'`
+출고 원장도 함께 지운다. 재고는 건드리지 않는다.
 
+- 대량출고에 등록한 업체는 `bulk_outbound_partner_configs.work_status`로
+  대기(`idle`)·작업중(`working`)·완료(`done`)를 팀 공용으로 표시한다.
+  상태 변경은 개발자 계정(`dev@atelier.local`)만 할 수 있다.
 - 대량출고 「우리 양식」 헤더는
   `(brand_id, usage_target_id, barcode_source)`별
   `bulk_outbound_template_fields`에 저장한다. 사용자나 브라우저별 설정이 아니며,
@@ -183,7 +191,11 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 마이그레이션: `20260902045417_partner_outbound_db.sql`,
   `20260902060531_shared_barcode_partner_settings.sql`,
   `20260902061347_shared_barcode_partner_settings_indexes.sql`,
-  `20260902061458_shared_settings_atomic_bootstrap.sql`.
+  `20260902061458_shared_settings_atomic_bootstrap.sql`,
+  `20260902064026_bulk_outbound_job_line_extra_values.sql`,
+  `20260902083550_bulk_outbound_partner_config_work_status.sql`,
+  `20260902085139_bulk_outbound_partner_work_status_dev_only.sql`,
+  `20260902100623_delete_bulk_outbound_job_and_backup.sql`.
 
 ### 출고업체와 별칭
 
@@ -332,8 +344,15 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 공식명 후보가 `styles`에 없으면 `M번호 발급 필요`, 둘 이상이면 충돌, 고를 수 없으면
   검토 필요로 남긴다.
 - RLS는 `app.can_read_brand` / `app.can_edit_brand`를 사용한다.
+- 오늘 작업 품목명 변환은 원장 12,000건을 통째로 읽지 않는다. 업로드 행에서
+  `collectProductNameCandidateTexts`로 만든 후보만
+  `list_invoice_product_name_maps_for_keys`에 보내고, 정규화 키가 맞는 활성
+  원장과 상품 참조만 받는다. 권한은
+  `app.list_invoice_product_name_maps_for_keys_core`에서 한 번 확인한다.
+  기준정보 전체 목록은 별도 캐시이며 총건수·병렬 페이지 없이 순차로 읽는다.
 - 마이그레이션: `20260813190000_invoice_product_name_maps.sql`,
-  `20260813200000_invoice_product_name_lookup_key.sql`.
+  `20260813200000_invoice_product_name_lookup_key.sql`,
+  `20260902062457_invoice_product_name_maps_file_lookup.sql`.
 
 ### 송장 품목명 제외 기준
 

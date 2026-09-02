@@ -29,7 +29,7 @@ const REVIEW_FLAGS = new Set<WarehouseReviewFlag>([
 const SET_COLUMNS =
   'id, brand_id, warehouse_id, kind, status, source_file_name, row_count, imported_at, imported_by'
 const POSITION_COLUMNS =
-  'id, brand_id, set_id, warehouse_id, location_id, style_id, source_style_no, normalized_style_no, source_product_name, received_on, received_on_raw, is_forced_priority, is_final_location, units_per_box, remaining_boxes, opened_units, review_flags, source_row_number, note, created_at, updated_at'
+  'id, brand_id, set_id, warehouse_id, location_id, style_id, source_style_no, normalized_style_no, source_product_name, received_on, received_on_raw, is_forced_priority, is_final_location, units_per_box, remaining_boxes, opened_units, review_flags, source_row_number, note, created_at, updated_at, warehouse_locations!inner(code, zone)'
 const LOCATION_COLUMNS = 'id, warehouse_id, code, zone'
 const MOVEMENT_COLUMNS =
   'id, brand_id, set_id, action, position_id, box_id, style_id, from_location_code, to_location_code, box_count, unit_count, reason, actor_id, created_at'
@@ -82,6 +82,10 @@ type PositionRow = {
   note: string
   created_at: string
   updated_at: string
+  warehouse_locations?:
+    | { code: string; zone: WarehouseZone }
+    | Array<{ code: string; zone: WarehouseZone }>
+    | null
 }
 
 type MovementRow = {
@@ -158,6 +162,19 @@ function toReviewFlags(value: string[] | null): WarehouseReviewFlag[] {
   return (value ?? []).filter((flag): flag is WarehouseReviewFlag =>
     REVIEW_FLAGS.has(flag as WarehouseReviewFlag),
   )
+}
+
+function embeddedLocation(row: PositionRow): WarehouseLocation | undefined {
+  const raw = Array.isArray(row.warehouse_locations)
+    ? row.warehouse_locations[0]
+    : row.warehouse_locations
+  if (!raw) return undefined
+  return {
+    id: row.location_id,
+    warehouseId: row.warehouse_id,
+    code: raw.code,
+    zone: raw.zone,
+  }
 }
 
 function toPosition(
@@ -274,17 +291,21 @@ export async function listWarehouseLocations(
 export async function listWarehouseStockPositions(
   brandId: string,
   setId: string,
+  zone?: WarehouseZone,
 ): Promise<WarehouseStockPosition[]> {
   const supabase = getSupabase()
   const raw: PositionRow[] = []
   for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await supabase
+    let query = supabase
       .from('warehouse_stock_positions')
       .select(POSITION_COLUMNS)
       .eq('brand_id', brandId)
       .eq('set_id', setId)
       .order('source_row_number', { ascending: true })
+      .order('id', { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
+    if (zone) query = query.eq('warehouse_locations.zone', zone)
+    const { data, error } = await query
     if (error) {
       throw new WarehouseStockStoreError(
         errorMessage(error, '창고 재고를 불러오지 못했습니다.'),
@@ -296,11 +317,6 @@ export async function listWarehouseStockPositions(
   }
   if (raw.length === 0) return []
 
-  const warehouseId = raw[0]?.warehouse_id
-  const locations = warehouseId
-    ? await listWarehouseLocations(warehouseId)
-    : []
-  const locationById = new Map(locations.map((item) => [item.id, item]))
   const ranked = assignWarehouseUsageRanks(
     raw.map((row) => ({
       styleNo: row.normalized_style_no,
@@ -314,11 +330,7 @@ export async function listWarehouseStockPositions(
   )
 
   return raw.map((row, index) =>
-    toPosition(
-      row,
-      locationById.get(row.location_id),
-      ranked[index]?.usageRank ?? null,
-    ),
+    toPosition(row, embeddedLocation(row), ranked[index]?.usageRank ?? null),
   )
 }
 

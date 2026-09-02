@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { X } from 'lucide-react'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
 import { OWNER_LABEL } from '@/lib/import/fields'
@@ -64,6 +65,7 @@ export function DepartmentProductLoadDialog({
   }
 
   return (
+    <WorkspaceTabOverlay>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         type="button"
@@ -200,5 +202,6 @@ export function DepartmentProductLoadDialog({
         </div>
       </div>
     </div>
+    </WorkspaceTabOverlay>
   )
 }

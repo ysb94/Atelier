@@ -18,9 +18,23 @@ import {
   buildItemNameTransformIndex,
 } from '@/lib/invoice/item-name-transform'
 import {
+  collectProductNameCandidateTexts,
+  filterProductNameMapsForLookupTexts,
+} from '@/lib/invoice/product-name-patterns'
+import {
   buildProductNameLookupIndex,
   catalogFromStyles,
+  transformInvoiceProductNames,
 } from '@/lib/invoice/product-name-transform'
+import {
+  runInvoiceItemNameStep,
+  runInvoiceProductNameStep,
+} from '@/lib/invoice/invoice-step-transform'
+import {
+  buildProductCompositionOptionIndex,
+  findOptionMapsForProductNameMap,
+  findOptionMapsForProductNameMapFromIndex,
+} from '@/lib/invoice/product-composition'
 import { collectGiftSourceSlots } from '@/lib/invoice/gift-source-transform'
 import { buildWorkInstructionIndex } from '@/lib/invoice/work-instruction-transform'
 
@@ -83,6 +97,36 @@ assert(
   smallFirst.result.product.rows.some((row) => row.status === 'mapped'),
   '소형 매핑 행',
 )
+const smallLookupTexts = collectProductNameCandidateTexts(
+  smallInput.rows,
+  smallInput.productNameTagRoles ?? [],
+)
+const smallScopedMaps = filterProductNameMapsForLookupTexts(
+  smallInput.productNameMaps,
+  smallLookupTexts,
+)
+const smallScoped = transformInvoiceProductNames(
+  smallInput.rows,
+  smallScopedMaps,
+  catalogFromStyles(smallInput.styles),
+  smallInput.productNameTagRoles ?? [],
+  smallInput.productNameExclusions ?? [],
+)
+assert(
+  smallScopedMaps.length > 0 &&
+    smallScopedMaps.length <= smallInput.productNameMaps.length,
+  '파일 후보로 원장 범위를 줄인다',
+)
+assert(
+  smallScoped.rows.every(
+    (row, index) =>
+      row.status === smallFirst.result.product.rows[index]?.status &&
+      row.transformedProductName ===
+        smallFirst.result.product.rows[index]?.transformedProductName &&
+      row.mapId === smallFirst.result.product.rows[index]?.mapId,
+  ),
+  '파일 범위 원장과 전체 원장의 품목명 변환이 같다',
+)
 assert(
   smallFirst.result.product.rows.some((row) => row.status === 'unresolved' || row.status === 'missing_style'),
   '소형 미해결 행',
@@ -91,6 +135,77 @@ assert(
   smallFirst.result.workPlan.matchedRowCount > 0,
   '소형 작업지시 매칭',
 )
+
+function assertSameProductStep(
+  left: typeof smallFirst.result.product,
+  right: typeof smallFirst.result.product,
+  label: string,
+) {
+  assert(left.rows.length === right.rows.length, `${label} 행 수`)
+  assert(
+    left.rows.every((row, index) => {
+      const other = right.rows[index]
+      return (
+        row.status === other?.status &&
+        row.transformedProductName === other.transformedProductName &&
+        row.mapId === other.mapId &&
+        (row.style?.styleId ?? '') === (other.style?.styleId ?? '')
+      )
+    }),
+    label,
+  )
+}
+
+function assertSameItemStep(
+  left: typeof smallFirst.result.item,
+  right: typeof smallFirst.result.item,
+  label: string,
+) {
+  assert(left.rows.length === right.rows.length, `${label} 행 수`)
+  assert(
+    left.rows.every((row, index) => {
+      const other = right.rows[index]
+      return (
+        row.status === other?.status &&
+        row.transformedItemName === other.transformedItemName &&
+        JSON.stringify(row.extras) === JSON.stringify(other?.extras)
+      )
+    }),
+    label,
+  )
+}
+
+const smallWorkerProduct = runInvoiceProductNameStep(
+  structuredClone({
+    sourceRows: smallInput.rows,
+    maps: smallInput.productNameMaps,
+    styles: smallInput.styles,
+    tagRoles: smallInput.productNameTagRoles ?? [],
+    exclusions: smallInput.productNameExclusions ?? [],
+    giftSourcePlan: smallFirst.result.unified.giftSourcePlan,
+  }),
+)
+assertSameProductStep(
+  smallWorkerProduct.base,
+  smallFirst.result.baseProduct,
+  '소형 Worker 품목명 기본 변환',
+)
+assertSameProductStep(
+  smallWorkerProduct.product,
+  smallFirst.result.product,
+  '소형 Worker 품목명 변환',
+)
+const smallWorkerItem = runInvoiceItemNameStep(
+  structuredClone({
+    sourceRows: smallInput.rows,
+    optionMaps: smallInput.optionMaps ?? [],
+    productRows: smallWorkerProduct.product.rows,
+    itemNameRules: smallInput.itemNameRules ?? [],
+    accessoryRules: smallInput.accessoryRules ?? [],
+    styles: smallInput.styles,
+  }),
+)
+assertSameItemStep(smallWorkerItem, smallFirst.result.item, '소형 Worker 내품명 변환')
 
 const largeInput = buildInvoiceWorkFixtureInput(INVOICE_WORK_LARGE_ROW_COUNT)
 const catalog = catalogFromStyles(largeInput.styles)
@@ -132,6 +247,56 @@ assert(
   largeIndexed.result.output.length >= INVOICE_WORK_LARGE_ROW_COUNT,
   '대형 최종 행 수',
 )
+
+const largeWorkerProduct = runInvoiceProductNameStep(
+  structuredClone({
+    sourceRows: largeInput.rows,
+    maps: largeInput.productNameMaps,
+    styles: largeInput.styles,
+    tagRoles: largeInput.productNameTagRoles ?? [],
+    exclusions: largeInput.productNameExclusions ?? [],
+    giftSourcePlan: largeIndexed.result.unified.giftSourcePlan,
+  }),
+)
+assertSameProductStep(
+  largeWorkerProduct.base,
+  largeIndexed.result.baseProduct,
+  '대형 Worker 품목명 기본 변환',
+)
+assertSameProductStep(
+  largeWorkerProduct.product,
+  largeIndexed.result.product,
+  '대형 Worker 품목명 변환',
+)
+const largeWorkerItem = runInvoiceItemNameStep(
+  structuredClone({
+    sourceRows: largeInput.rows,
+    optionMaps: largeInput.optionMaps ?? [],
+    productRows: largeWorkerProduct.product.rows,
+    itemNameRules: largeInput.itemNameRules ?? [],
+    accessoryRules: largeInput.accessoryRules ?? [],
+    styles: largeInput.styles,
+  }),
+)
+assertSameItemStep(largeWorkerItem, largeIndexed.result.item, '대형 Worker 내품명 변환')
+
+const compositionIndex = buildProductCompositionOptionIndex(
+  largeInput.optionMaps ?? [],
+)
+for (const map of largeInput.productNameMaps.slice(0, 80)) {
+  const direct = findOptionMapsForProductNameMap(
+    largeInput.optionMaps ?? [],
+    map,
+  ).map((item) => item.id)
+  const indexed = findOptionMapsForProductNameMapFromIndex(
+    compositionIndex,
+    map,
+  ).map((item) => item.id)
+  assert(
+    JSON.stringify(direct) === JSON.stringify(indexed),
+    `구성 색인 ${map.id}`,
+  )
+}
 
 const smallParse = measure(() =>
   inspectSabangnetSheets(buildSyntheticSheets(INVOICE_WORK_SMALL_ROW_COUNT)),
