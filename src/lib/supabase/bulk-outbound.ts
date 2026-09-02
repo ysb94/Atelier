@@ -16,6 +16,12 @@ export type BulkOutboundPartnerConfig = {
   barcodeSource: BulkOutboundBarcodeSource
 }
 
+export type BulkOutboundTemplateField = {
+  id: string
+  label: string
+  order: number
+}
+
 export type BulkOutboundJobLine = {
   barcode: string
   orderQty: number
@@ -78,6 +84,12 @@ export class BulkOutboundStoreError extends Error {
 type ConfigRow = {
   usage_target_id: string
   barcode_source: BulkOutboundBarcodeSource
+}
+
+type TemplateFieldRow = {
+  field_key: string
+  label: string
+  sort_order: number
 }
 
 type JobRow = {
@@ -228,6 +240,96 @@ export async function replaceBulkOutboundPartnerConfigs(
       errorMessage(error, '대량출고 업체를 저장하지 못했습니다.'),
     )
   }
+}
+
+export async function listBulkOutboundTemplateFields(
+  brandId: string,
+  partnerId: string,
+  barcodeSource: BulkOutboundBarcodeSource,
+): Promise<BulkOutboundTemplateField[]> {
+  const { data, error } = await getSupabase()
+    .from('bulk_outbound_template_fields')
+    .select('field_key, label, sort_order')
+    .eq('brand_id', brandId)
+    .eq('usage_target_id', partnerId)
+    .eq('barcode_source', barcodeSource)
+    .order('sort_order')
+
+  if (error) {
+    throw new BulkOutboundStoreError(
+      errorMessage(error, '대량출고 공용 양식을 불러오지 못했습니다.'),
+    )
+  }
+
+  return ((data as TemplateFieldRow[]) ?? []).map((row) => ({
+    id: row.field_key,
+    label: row.label,
+    order: row.sort_order,
+  }))
+}
+
+export async function replaceBulkOutboundTemplateFields(
+  brandId: string,
+  partnerId: string,
+  barcodeSource: BulkOutboundBarcodeSource,
+  fields: BulkOutboundTemplateField[],
+): Promise<void> {
+  const normalized = fields
+    .map((field, order) => ({
+      id: field.id.trim(),
+      label: field.label.trim(),
+      order,
+    }))
+    .filter((field) => field.id && field.label)
+
+  const { error } = await getSupabase().rpc(
+    'replace_bulk_outbound_template_fields',
+    {
+      p_brand_id: brandId,
+      p_usage_target_id: partnerId,
+      p_barcode_source: barcodeSource,
+      p_fields: normalized,
+    },
+  )
+
+  if (error) {
+    throw new BulkOutboundStoreError(
+      errorMessage(error, '대량출고 공용 양식을 저장하지 못했습니다.'),
+    )
+  }
+}
+
+export async function initializeBulkOutboundTemplateFields(
+  brandId: string,
+  partnerId: string,
+  barcodeSource: BulkOutboundBarcodeSource,
+  fields: BulkOutboundTemplateField[],
+): Promise<boolean> {
+  const normalized = fields
+    .map((field, order) => ({
+      id: field.id.trim(),
+      label: field.label.trim(),
+      order,
+    }))
+    .filter((field) => field.id && field.label)
+
+  const { data, error } = await getSupabase().rpc(
+    'initialize_bulk_outbound_template_fields',
+    {
+      p_brand_id: brandId,
+      p_usage_target_id: partnerId,
+      p_barcode_source: barcodeSource,
+      p_fields: normalized,
+    },
+  )
+
+  if (error) {
+    throw new BulkOutboundStoreError(
+      errorMessage(error, '기존 대량출고 양식을 이전하지 못했습니다.'),
+    )
+  }
+
+  return data === true
 }
 
 export async function listBulkOutboundJobs(

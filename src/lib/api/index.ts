@@ -87,6 +87,7 @@ import * as invoiceWorkHistoryStore from '@/lib/supabase/invoice-work-history'
 import * as invoiceWorkInstructionStore from '@/lib/supabase/invoice-work-instructions'
 import * as productCodeStore from '@/lib/supabase/product-codes'
 import * as partnerBarcodeFieldStore from '@/lib/supabase/partner-barcode-fields'
+import * as barcodePartnerDisplaySettingStore from '@/lib/supabase/barcode-partner-display-settings'
 import * as bulkOutboundStore from '@/lib/supabase/bulk-outbound'
 import * as outboundShipmentStore from '@/lib/supabase/outbound-shipments'
 import * as productDraftStore from '@/lib/supabase/product-drafts'
@@ -186,6 +187,11 @@ export type {
 export { ProductCodeStoreError } from '@/lib/supabase/product-codes'
 export { PartnerBarcodeFieldStoreError } from '@/lib/supabase/partner-barcode-fields'
 export type { PartnerBarcodeField } from '@/lib/supabase/partner-barcode-fields'
+export { BarcodePartnerDisplaySettingStoreError } from '@/lib/supabase/barcode-partner-display-settings'
+export type {
+  BarcodePartnerDisplayScope,
+  BarcodePartnerDisplaySetting,
+} from '@/lib/supabase/barcode-partner-display-settings'
 export { BulkOutboundStoreError } from '@/lib/supabase/bulk-outbound'
 export type {
   BulkOutboundBarcodeSource,
@@ -195,6 +201,7 @@ export type {
   BulkOutboundJobLine,
   BulkOutboundJobStatus,
   BulkOutboundPartnerConfig,
+  BulkOutboundTemplateField,
 } from '@/lib/supabase/bulk-outbound'
 export { OutboundShipmentStoreError } from '@/lib/supabase/outbound-shipments'
 export {
@@ -1339,6 +1346,43 @@ export async function replacePartnerCodes(
   return productCodeStore.replacePartnerCodes(brandId, usageTargetId, codes)
 }
 
+export async function getBarcodePartnerDisplaySetting(
+  brandId: string,
+  displayScope: barcodePartnerDisplaySettingStore.BarcodePartnerDisplayScope,
+) {
+  await delay()
+  return barcodePartnerDisplaySettingStore.getBarcodePartnerDisplaySetting(
+    brandId,
+    displayScope,
+  )
+}
+
+export async function replaceBarcodePartnerDisplayTargets(
+  brandId: string,
+  displayScope: barcodePartnerDisplaySettingStore.BarcodePartnerDisplayScope,
+  targetIds: string[],
+) {
+  await delay()
+  return barcodePartnerDisplaySettingStore.replaceBarcodePartnerDisplayTargets(
+    brandId,
+    displayScope,
+    targetIds,
+  )
+}
+
+export async function initializeBarcodePartnerDisplayTargets(
+  brandId: string,
+  displayScope: barcodePartnerDisplaySettingStore.BarcodePartnerDisplayScope,
+  targetIds: string[],
+) {
+  await delay()
+  return barcodePartnerDisplaySettingStore.initializeBarcodePartnerDisplayTargets(
+    brandId,
+    displayScope,
+    targetIds,
+  )
+}
+
 export async function getBulkOutboundPartnerConfigs(
   brandId: string,
   partnerNameById: Map<string, string>,
@@ -1359,6 +1403,49 @@ export async function replaceBulkOutboundPartnerConfigs(
 ) {
   await delay()
   return bulkOutboundStore.replaceBulkOutboundPartnerConfigs(brandId, configs)
+}
+
+export async function getBulkOutboundTemplateFields(
+  brandId: string,
+  partnerId: string,
+  barcodeSource: bulkOutboundStore.BulkOutboundBarcodeSource,
+) {
+  await delay()
+  return bulkOutboundStore.listBulkOutboundTemplateFields(
+    brandId,
+    partnerId,
+    barcodeSource,
+  )
+}
+
+export async function replaceBulkOutboundTemplateFields(
+  brandId: string,
+  partnerId: string,
+  barcodeSource: bulkOutboundStore.BulkOutboundBarcodeSource,
+  fields: bulkOutboundStore.BulkOutboundTemplateField[],
+) {
+  await delay()
+  return bulkOutboundStore.replaceBulkOutboundTemplateFields(
+    brandId,
+    partnerId,
+    barcodeSource,
+    fields,
+  )
+}
+
+export async function initializeBulkOutboundTemplateFields(
+  brandId: string,
+  partnerId: string,
+  barcodeSource: bulkOutboundStore.BulkOutboundBarcodeSource,
+  fields: bulkOutboundStore.BulkOutboundTemplateField[],
+) {
+  await delay()
+  return bulkOutboundStore.initializeBulkOutboundTemplateFields(
+    brandId,
+    partnerId,
+    barcodeSource,
+    fields,
+  )
 }
 
 export async function getBulkOutboundJobs(

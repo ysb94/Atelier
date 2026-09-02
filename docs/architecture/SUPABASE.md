@@ -39,6 +39,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 코드·출고업체(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_target_folders`, `code_usage_target_aliases`, `code_usage_assignments`) | Supabase |
 | 거래처 코드 헤더(`partner_barcode_fields`). `product_codes.kind='partner'`는 업체마다 같은 바코드 문자열을 허용 | Supabase |
 | 대량출고 작업·등록 업체(`bulk_outbound_jobs` + `bulk_outbound_job_lines` + `bulk_outbound_job_files` + `bulk_outbound_partner_configs`) | Supabase |
+| 대량출고 공용 엑셀 양식·바코드 화면 표시 업체(`bulk_outbound_template_fields` + `barcode_partner_display_settings` + `barcode_partner_display_targets`) | Supabase |
 | 운영 현황 출고 원장(`outbound_shipments`). 재고 차감과 분리 | Supabase |
 | 송장 품목명 변환 기준(`invoice_name_rules`) | Supabase |
 | 송장 품목명 exact 기준(`invoice_product_name_maps`) | Supabase |
@@ -167,8 +168,22 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 「임시 반영」은 재고를 건드리지 않고 `outbound_shipments`에 `source='bulk'`로
 같은 Job의 이전 반영분을 교체한다. 운영 현황은 이 원장만 읽는다.
 
+- 대량출고 「우리 양식」 헤더는
+  `(brand_id, usage_target_id, barcode_source)`별
+  `bulk_outbound_template_fields`에 저장한다. 사용자나 브라우저별 설정이 아니며,
+  같은 브랜드 구성원이 함께 쓴다.
+- 「출고업체별 바코드」와 「거래처 코드」의 표시 업체도
+  `barcode_partner_display_settings` + `barcode_partner_display_targets`에
+  브랜드 공용으로 저장한다. `display_scope='own'|'partner'`로 두 화면을 구분하고,
+  부모 설정 행으로 미설정과 의도적인 빈 선택을 구분한다.
+- 기존 `localStorage` 값은 공용 DB 설정이 비어 있을 때만 한 번 이전하며, DB 값이
+  있으면 로컬 값으로 덮어쓰지 않는다. 현재 선택 중인 탭·검색·필터는 개인 화면
+  상태이므로 저장하지 않는다.
 - 화면: `PartnerCodeListPanel`, `BulkOutboundPage`, `OutboundDataPage`.
-- 마이그레이션: `20260902045417_partner_outbound_db.sql`.
+- 마이그레이션: `20260902045417_partner_outbound_db.sql`,
+  `20260902060531_shared_barcode_partner_settings.sql`,
+  `20260902061347_shared_barcode_partner_settings_indexes.sql`,
+  `20260902061458_shared_settings_atomic_bootstrap.sql`.
 
 ### 출고업체와 별칭
 

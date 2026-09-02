@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Settings2 } from 'lucide-react'
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { PartnerCodeListPanel } from '@/features/codes/PartnerCodeListPanel'
-import { getCodeUsageTargets } from '@/lib/api'
+import {
+  getBarcodePartnerDisplaySetting,
+  getCodeUsageTargets,
+  initializeBarcodePartnerDisplayTargets,
+  replaceBarcodePartnerDisplayTargets,
+} from '@/lib/api'
 import type { CodeUsageTarget } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -27,8 +32,12 @@ function readEnabledTargetIds(brandId: string): string[] | null {
   }
 }
 
-function writeEnabledTargetIds(brandId: string, ids: string[]) {
-  localStorage.setItem(storageKey(brandId), JSON.stringify(ids))
+function clearLocalEnabledTargetIds(brandId: string) {
+  try {
+    localStorage.removeItem(storageKey(brandId))
+  } catch {
+    // ignore
+  }
 }
 
 function PartnerSettingsDialog({
@@ -40,9 +49,11 @@ function PartnerSettingsDialog({
   partners: CodeUsageTarget[]
   initialIds: Set<string>
   onClose: () => void
-  onSave: (ids: string[]) => void
+  onSave: (ids: string[]) => Promise<void>
 }) {
   const [draft, setDraft] = useState(() => new Set(initialIds))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   function toggle(id: string) {
     setDraft((current) => {
@@ -112,23 +123,49 @@ function PartnerSettingsDialog({
             })
           )}
         </div>
+        {error ? (
+          <p className="mx-5 mb-3 rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">
+            {error}
+          </p>
+        ) : null}
         <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
-          <Button type="button" size="sm" variant="outline" onClick={onClose}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={saving}
+            onClick={onClose}
+          >
             취소
           </Button>
           <Button
             type="button"
             size="sm"
+            disabled={saving}
             onClick={() => {
-              onSave(
-                partners
-                  .filter((item) => draft.has(item.id))
-                  .map((item) => item.id),
-              )
-              onClose()
+              void (async () => {
+                setSaving(true)
+                setError(null)
+                try {
+                  await onSave(
+                    partners
+                      .filter((item) => draft.has(item.id))
+                      .map((item) => item.id),
+                  )
+                  onClose()
+                } catch (saveError) {
+                  setError(
+                    saveError instanceof Error
+                      ? saveError.message
+                      : '업체 설정을 저장하지 못했습니다.',
+                  )
+                } finally {
+                  setSaving(false)
+                }
+              })()
             }}
           >
-            저장
+            {saving ? '저장 중...' : '저장'}
           </Button>
         </div>
       </div>
@@ -138,14 +175,11 @@ function PartnerSettingsDialog({
 
 export function PartnerCodePage() {
   const { brand } = useBrand()
-  const [enabledTargetIds, setEnabledTargetIds] = useState<string[] | null>(
-    () => readEnabledTargetIds(brand.id),
-  )
+  const queryClient = useQueryClient()
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null)
 
   useEffect(() => {
-    setEnabledTargetIds(readEnabledTargetIds(brand.id))
     setSelectedTargetId(null)
   }, [brand.id])
 
@@ -153,6 +187,40 @@ export function PartnerCodePage() {
     queryKey: ['codeUsageTargets', brand.id],
     queryFn: () => getCodeUsageTargets(brand.id),
   })
+  const settingQueryKey = [
+    'barcodePartnerDisplaySetting',
+    brand.id,
+    'partner',
+  ] as const
+  const settingQuery = useQuery({
+    queryKey: settingQueryKey,
+    queryFn: async () => {
+      const shared = await getBarcodePartnerDisplaySetting(brand.id, 'partner')
+      if (shared.configured) return shared
+
+      const local = readEnabledTargetIds(brand.id)
+      if (local == null) return shared
+
+      await initializeBarcodePartnerDisplayTargets(brand.id, 'partner', local)
+      clearLocalEnabledTargetIds(brand.id)
+      return getBarcodePartnerDisplaySetting(brand.id, 'partner')
+    },
+  })
+  const saveSettingMutation = useMutation({
+    mutationFn: (ids: string[]) =>
+      replaceBarcodePartnerDisplayTargets(brand.id, 'partner', ids),
+    onSuccess: async (_result, ids) => {
+      queryClient.setQueryData(settingQueryKey, {
+        configured: true,
+        targetIds: ids,
+      })
+      clearLocalEnabledTargetIds(brand.id)
+      await queryClient.invalidateQueries({ queryKey: settingQueryKey })
+    },
+  })
+  const enabledTargetIds = settingQuery.data?.configured
+    ? settingQuery.data.targetIds
+    : null
 
   const allPartners = useMemo(
     () =>
@@ -206,11 +274,18 @@ export function PartnerCodePage() {
       />
 
       <div className="space-y-4">
+        {settingQuery.isError ? (
+          <p className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+            {settingQuery.error instanceof Error
+              ? settingQuery.error.message
+              : '공용 업체 설정을 불러오지 못했습니다.'}
+          </p>
+        ) : null}
         <Card className="overflow-hidden">
           <div className="border-b border-border px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             미사용 업체
           </div>
-          {targetsQuery.isLoading ? (
+          {targetsQuery.isLoading || settingQuery.isLoading ? (
             <p className="px-4 py-6 text-center text-sm text-muted-foreground">
               불러오는 중...
             </p>
@@ -303,9 +378,8 @@ export function PartnerCodePage() {
           partners={allPartners}
           initialIds={settingsInitialIds}
           onClose={() => setSettingsOpen(false)}
-          onSave={(ids) => {
-            writeEnabledTargetIds(brand.id, ids)
-            setEnabledTargetIds(ids)
+          onSave={async (ids) => {
+            await saveSettingMutation.mutateAsync(ids)
             if (
               selectedTargetId &&
               !ids.includes(selectedTargetId)

@@ -32,15 +32,20 @@ import { Input, Textarea } from '@/components/ui/input'
 import { parseFile } from '@/lib/import/parse'
 import {
   getActiveWarehouseInventorySet,
+  getBarcodePartnerDisplaySetting,
   getBulkOutboundJobs,
   getBulkOutboundPartnerConfigs,
+  getBulkOutboundTemplateFields,
   getCodeUsageTargets,
   getPartnerBarcodeFields,
   getProductCodes,
   getStylesByBrand,
   getWarehouseStockPositions,
+  initializeBarcodePartnerDisplayTargets,
+  initializeBulkOutboundTemplateFields,
   replaceBulkOutboundBackup,
   replaceBulkOutboundPartnerConfigs,
+  replaceBulkOutboundTemplateFields,
   saveBulkOutboundJob,
 } from '@/lib/api'
 import {
@@ -346,21 +351,21 @@ function defaultTemplateFields(): TemplateField[] {
   }))
 }
 
-function readTemplateFields(
+function readLocalTemplateFields(
   brandId: string,
   partnerId: string,
   barcodeSource: BarcodeSource,
-): TemplateField[] {
+): TemplateField[] | null {
   try {
     const raw = localStorage.getItem(
       templateFieldsKey(brandId, partnerId, barcodeSource),
     )
-    if (!raw) return defaultTemplateFields()
+    if (!raw) return null
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed) || parsed.length === 0) {
-      return defaultTemplateFields()
+      return null
     }
-    return parsed
+    const fields = parsed
       .filter(
         (item): item is TemplateField =>
           Boolean(item) &&
@@ -374,21 +379,24 @@ function readTemplateFields(
         order: typeof item.order === 'number' ? item.order : index,
       }))
       .sort((left, right) => left.order - right.order)
+    return fields.length > 0 ? fields : null
   } catch {
-    return defaultTemplateFields()
+    return null
   }
 }
 
-function writeTemplateFields(
+function clearLocalTemplateFields(
   brandId: string,
   partnerId: string,
   barcodeSource: BarcodeSource,
-  fields: TemplateField[],
 ) {
-  localStorage.setItem(
-    templateFieldsKey(brandId, partnerId, barcodeSource),
-    JSON.stringify(fields),
-  )
+  try {
+    localStorage.removeItem(
+      templateFieldsKey(brandId, partnerId, barcodeSource),
+    )
+  } catch {
+    // ignore
+  }
 }
 
 async function downloadBulkOutboundTemplate(
@@ -602,12 +610,7 @@ function lineFieldIds(fields: TemplateField[]) {
   }
 }
 
-function jobToUi(brandId: string, job: BulkOutboundJob): DemoJob {
-  const fields = readTemplateFields(
-    brandId,
-    job.partnerId,
-    job.barcodeSource,
-  )
+function jobToUi(job: BulkOutboundJob, fields: TemplateField[]): DemoJob {
   return {
     id: job.id,
     partnerId: job.partnerId,
@@ -1801,7 +1804,7 @@ function TemplateHeaderDialog({
   partnerName: string
   fields: TemplateField[]
   onClose: () => void
-  onSave: (fields: TemplateField[]) => void
+  onSave: (fields: TemplateField[]) => Promise<void>
 }) {
   const [draft, setDraft] = useState(() =>
     fields.map((field, index) => ({ ...field, order: index })),
@@ -1810,6 +1813,7 @@ function TemplateHeaderDialog({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editLabel, setEditLabel] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
   function addField() {
     const label = newLabel.trim()
@@ -2003,13 +2007,20 @@ function TemplateHeaderDialog({
         </div>
 
         <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
-          <Button type="button" size="sm" variant="outline" onClick={onClose}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={saving}
+            onClick={onClose}
+          >
             취소
           </Button>
           <Button
             type="button"
             size="sm"
             variant="outline"
+            disabled={saving}
             onClick={() => setDraft(defaultTemplateFields())}
           >
             기본값으로
@@ -2017,17 +2028,33 @@ function TemplateHeaderDialog({
           <Button
             type="button"
             size="sm"
-            disabled={draft.length === 0}
+            disabled={draft.length === 0 || saving}
             onClick={() => {
-              if (draft.length === 0) {
-                setError('헤더를 하나 이상 두세요.')
-                return
-              }
-              onSave(draft.map((field, order) => ({ ...field, order })))
-              onClose()
+              void (async () => {
+                if (draft.length === 0) {
+                  setError('헤더를 하나 이상 두세요.')
+                  return
+                }
+                setSaving(true)
+                setError(null)
+                try {
+                  await onSave(
+                    draft.map((field, order) => ({ ...field, order })),
+                  )
+                  onClose()
+                } catch (saveError) {
+                  setError(
+                    saveError instanceof Error
+                      ? saveError.message
+                      : '공용 양식을 저장하지 못했습니다.',
+                  )
+                } finally {
+                  setSaving(false)
+                }
+              })()
             }}
           >
-            저장
+            {saving ? '저장 중...' : '저장'}
           </Button>
         </div>
       </div>
@@ -2071,6 +2098,21 @@ function readPartnerCodeEnabledIds(brandId: string): string[] | null {
     return parsed.filter((value): value is string => typeof value === 'string')
   } catch {
     return null
+  }
+}
+
+function clearLocalBarcodePartnerIds(
+  brandId: string,
+  displayScope: BarcodeSource,
+) {
+  try {
+    localStorage.removeItem(
+      displayScope === 'own'
+        ? usageCodeEnabledIdsKey(brandId)
+        : partnerCodeEnabledIdsKey(brandId),
+    )
+  } catch {
+    // ignore
   }
 }
 
@@ -2727,9 +2769,6 @@ export function BulkOutboundPage() {
   const [jobSaving, setJobSaving] = useState(false)
   const [assigneeFilter, setAssigneeFilter] = useState<AssigneeFilter>('mine')
   const [templateHeaderOpen, setTemplateHeaderOpen] = useState(false)
-  const [templateFields, setTemplateFields] = useState<TemplateField[]>(() =>
-    defaultTemplateFields(),
-  )
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [uploadNote, setUploadNote] = useState<string | null>(null)
   const [backupApplyNote, setBackupApplyNote] = useState<string | null>(null)
@@ -2761,7 +2800,6 @@ export function BulkOutboundPage() {
     setPanel('upload')
     setAssigneeFilter('mine')
     setTemplateHeaderOpen(false)
-    setTemplateFields(defaultTemplateFields())
     setUploadError(null)
     setUploadNote(null)
     setBackupApplyNote(null)
@@ -2793,15 +2831,41 @@ export function BulkOutboundPage() {
     [partnersQuery.data],
   )
 
-  const ownPartnerIds = useMemo(() => {
-    const ids = readUsageCodeEnabledIds(brand.id)
-    return new Set(ids ?? [])
-  }, [brand.id, settingsOpen])
+  const ownDisplaySettingQuery = useQuery({
+    queryKey: ['barcodePartnerDisplaySetting', brand.id, 'own'],
+    queryFn: async () => {
+      const shared = await getBarcodePartnerDisplaySetting(brand.id, 'own')
+      if (shared.configured) return shared
+      const local = readUsageCodeEnabledIds(brand.id)
+      if (local == null) return shared
+      await initializeBarcodePartnerDisplayTargets(brand.id, 'own', local)
+      clearLocalBarcodePartnerIds(brand.id, 'own')
+      return getBarcodePartnerDisplaySetting(brand.id, 'own')
+    },
+  })
 
-  const partnerCodePartnerIds = useMemo(() => {
-    const ids = readPartnerCodeEnabledIds(brand.id)
-    return new Set(ids ?? [])
-  }, [brand.id, settingsOpen])
+  const partnerDisplaySettingQuery = useQuery({
+    queryKey: ['barcodePartnerDisplaySetting', brand.id, 'partner'],
+    queryFn: async () => {
+      const shared = await getBarcodePartnerDisplaySetting(brand.id, 'partner')
+      if (shared.configured) return shared
+      const local = readPartnerCodeEnabledIds(brand.id)
+      if (local == null) return shared
+      await initializeBarcodePartnerDisplayTargets(brand.id, 'partner', local)
+      clearLocalBarcodePartnerIds(brand.id, 'partner')
+      return getBarcodePartnerDisplaySetting(brand.id, 'partner')
+    },
+  })
+
+  const ownPartnerIds = useMemo(
+    () => new Set(ownDisplaySettingQuery.data?.targetIds ?? []),
+    [ownDisplaySettingQuery.data],
+  )
+
+  const partnerCodePartnerIds = useMemo(
+    () => new Set(partnerDisplaySettingQuery.data?.targetIds ?? []),
+    [partnerDisplaySettingQuery.data],
+  )
 
   const partnerNameById = useMemo(
     () => new Map(allPartners.map((item) => [item.id, item.name])),
@@ -2852,9 +2916,60 @@ export function BulkOutboundPage() {
   }, [allPartners, configsQuery.data])
 
   const jobs = useMemo(
-    () => (jobsQuery.data ?? []).map((job) => jobToUi(brand.id, job)),
-    [brand.id, jobsQuery.data],
+    () =>
+      (jobsQuery.data ?? []).map((job) =>
+        jobToUi(job, defaultTemplateFields()),
+      ),
+    [jobsQuery.data],
   )
+  const rawActiveJob =
+    jobsQuery.data?.find((job) => job.id === activeJobId) ?? null
+  const hasRawActiveJob = Boolean(rawActiveJob)
+  const templateQueryKey = [
+    'bulkOutboundTemplateFields',
+    brand.id,
+    rawActiveJob?.partnerId ?? '',
+    rawActiveJob?.barcodeSource ?? '',
+  ] as const
+  const templateFieldsQuery = useQuery({
+    queryKey: templateQueryKey,
+    queryFn: async () => {
+      if (!rawActiveJob) return defaultTemplateFields()
+      const shared = await getBulkOutboundTemplateFields(
+        brand.id,
+        rawActiveJob.partnerId,
+        rawActiveJob.barcodeSource,
+      )
+      if (shared.length > 0) return shared
+
+      const local = readLocalTemplateFields(
+        brand.id,
+        rawActiveJob.partnerId,
+        rawActiveJob.barcodeSource,
+      )
+      if (!local) return defaultTemplateFields()
+
+      await initializeBulkOutboundTemplateFields(
+        brand.id,
+        rawActiveJob.partnerId,
+        rawActiveJob.barcodeSource,
+        local,
+      )
+      clearLocalTemplateFields(
+        brand.id,
+        rawActiveJob.partnerId,
+        rawActiveJob.barcodeSource,
+      )
+      return getBulkOutboundTemplateFields(
+        brand.id,
+        rawActiveJob.partnerId,
+        rawActiveJob.barcodeSource,
+      )
+    },
+    enabled: Boolean(rawActiveJob),
+  })
+  const templateFields =
+    templateFieldsQuery.data ?? defaultTemplateFields()
 
   const assigneeOptions = useMemo(() => {
     const names = new Set<string>()
@@ -2865,11 +2980,7 @@ export function BulkOutboundPage() {
   }, [jobs, meLabel])
 
   async function persistUiJob(job: DemoJob) {
-    const fields = readTemplateFields(
-      brand.id,
-      job.partnerId,
-      job.barcodeSource,
-    )
+    const fields = templateFields
     setJobSaving(true)
     try {
       return await saveBulkOutboundJob(brand.id, {
@@ -2899,25 +3010,25 @@ export function BulkOutboundPage() {
     }
   }
 
-  const activeJob = jobs.find((job) => job.id === activeJobId) ?? null
+  const activeJob = rawActiveJob
+    ? jobToUi(rawActiveJob, templateFields)
+    : null
 
   useEffect(() => {
-    if (!activeJob) {
-      setTemplateFields(defaultTemplateFields())
+    if (!hasRawActiveJob) {
       setTemplateHeaderOpen(false)
       return
     }
-    setTemplateFields(
-      readTemplateFields(
-        brand.id,
-        activeJob.partnerId,
-        activeJob.barcodeSource,
-      ),
-    )
     setTemplateHeaderOpen(false)
     setUploadError(null)
     setUploadNote(null)
-  }, [brand.id, activeJob?.id, activeJob?.partnerId, activeJob?.barcodeSource])
+  }, [
+    brand.id,
+    hasRawActiveJob,
+    rawActiveJob?.id,
+    rawActiveJob?.partnerId,
+    rawActiveJob?.barcodeSource,
+  ])
 
   async function handleUploadExcel(file: File) {
     if (!activeJob) return
@@ -3460,6 +3571,11 @@ export function BulkOutboundPage() {
     return done.filter((job) => job.assignee === assigneeFilter)
   }, [jobs, assigneeFilter, meLabel])
   const showingJob = Boolean(activeJob)
+  const displaySettingError =
+    ownDisplaySettingQuery.error ?? partnerDisplaySettingQuery.error
+  const templateFieldsUnavailable =
+    Boolean(rawActiveJob) &&
+    (templateFieldsQuery.isPending || templateFieldsQuery.isError)
 
   function openJob(jobId: string, nextPanel: JobPanel = 'upload') {
     setActiveJobId(jobId)
@@ -3587,6 +3703,14 @@ export function BulkOutboundPage() {
           </div>
         }
       />
+
+      {displaySettingError ? (
+        <p className="mb-4 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {displaySettingError instanceof Error
+            ? displaySettingError.message
+            : '공용 바코드 업체 설정을 불러오지 못했습니다.'}
+        </p>
+      ) : null}
 
       {showingJob && activeJob ? (
         <div className="-mt-2 mb-4">
@@ -3892,6 +4016,7 @@ export function BulkOutboundPage() {
                     <Button
                       type="button"
                       variant="outline"
+                      disabled={templateFieldsUnavailable}
                       onClick={() => setTemplateHeaderOpen(true)}
                     >
                       <Settings2 className="size-4" />
@@ -3900,7 +4025,11 @@ export function BulkOutboundPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      disabled={downloading || templateFields.length === 0}
+                      disabled={
+                        downloading ||
+                        templateFields.length === 0 ||
+                        templateFieldsUnavailable
+                      }
                       onClick={() => void handleDownloadTemplate()}
                     >
                       <Download className="size-4" />
@@ -3911,7 +4040,10 @@ export function BulkOutboundPage() {
                         type="file"
                         accept=".xlsx,.xls,.csv,.txt"
                         className="sr-only"
-                        disabled={templateFields.length === 0}
+                        disabled={
+                          templateFields.length === 0 ||
+                          templateFieldsUnavailable
+                        }
                         onChange={(event) => {
                           const file = event.target.files?.[0]
                           if (file) void handleUploadExcel(file)
@@ -3921,7 +4053,8 @@ export function BulkOutboundPage() {
                       <span
                         className={cn(
                           'inline-flex h-9 cursor-pointer items-center gap-2 rounded-md border border-border bg-card px-4 text-sm hover:bg-muted',
-                          templateFields.length === 0 &&
+                          (templateFields.length === 0 ||
+                            templateFieldsUnavailable) &&
                             'pointer-events-none opacity-50',
                         )}
                       >
@@ -3930,6 +4063,18 @@ export function BulkOutboundPage() {
                       </span>
                     </label>
                   </div>
+                  {templateFieldsQuery.isPending ? (
+                    <p className="text-xs text-muted-foreground">
+                      공용 양식을 불러오는 중...
+                    </p>
+                  ) : null}
+                  {templateFieldsQuery.isError ? (
+                    <p className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+                      {templateFieldsQuery.error instanceof Error
+                        ? templateFieldsQuery.error.message
+                        : '공용 양식을 불러오지 못했습니다.'}
+                    </p>
+                  ) : null}
                   {uploadError ? (
                     <p className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
                       {uploadError}
@@ -4723,14 +4868,20 @@ export function BulkOutboundPage() {
           partnerName={activeJob.partnerName}
           fields={templateFields}
           onClose={() => setTemplateHeaderOpen(false)}
-          onSave={(fields) => {
-            writeTemplateFields(
+          onSave={async (fields) => {
+            await replaceBulkOutboundTemplateFields(
               brand.id,
               activeJob.partnerId,
               activeJob.barcodeSource,
               fields,
             )
-            setTemplateFields(fields)
+            queryClient.setQueryData(templateQueryKey, fields)
+            clearLocalTemplateFields(
+              brand.id,
+              activeJob.partnerId,
+              activeJob.barcodeSource,
+            )
+            await queryClient.invalidateQueries({ queryKey: templateQueryKey })
           }}
         />
       ) : null}

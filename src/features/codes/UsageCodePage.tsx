@@ -12,12 +12,15 @@ import { UsageTargetManagerDialog } from '@/features/codes/UsageTargetManager'
 import {
   CodeUsageAssignmentStoreError,
   createCodeUsageAssignments,
+  getBarcodePartnerDisplaySetting,
   getCodeUsageAssignments,
   getCodeUsageTargetAliases,
   getCodeUsageTargetFolders,
   getCodeUsageTargets,
   getProductCodes,
   getStylesByBrand,
+  initializeBarcodePartnerDisplayTargets,
+  replaceBarcodePartnerDisplayTargets,
   updateCodeUsageAssignmentStatus,
 } from '@/lib/api'
 import {
@@ -49,8 +52,12 @@ function readVisibleTargetIds(brandId: string): string[] | null {
   }
 }
 
-function writeVisibleTargetIds(brandId: string, ids: string[]) {
-  localStorage.setItem(visibleTargetsKey(brandId), JSON.stringify(ids))
+function clearLocalVisibleTargetIds(brandId: string) {
+  try {
+    localStorage.removeItem(visibleTargetsKey(brandId))
+  } catch {
+    // ignore
+  }
 }
 
 function UsagePartnerSettingsDialog({
@@ -62,9 +69,11 @@ function UsagePartnerSettingsDialog({
   partners: CodeUsageTarget[]
   initialIds: Set<string>
   onClose: () => void
-  onSave: (ids: string[]) => void
+  onSave: (ids: string[]) => Promise<void>
 }) {
   const [draft, setDraft] = useState(() => new Set(initialIds))
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   function toggle(id: string) {
     setDraft((current) => {
@@ -133,23 +142,49 @@ function UsagePartnerSettingsDialog({
             })
           )}
         </div>
+        {error ? (
+          <p className="mx-5 mb-3 rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">
+            {error}
+          </p>
+        ) : null}
         <div className="flex justify-end gap-2 border-t border-border px-5 py-3">
-          <Button type="button" size="sm" variant="outline" onClick={onClose}>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={saving}
+            onClick={onClose}
+          >
             취소
           </Button>
           <Button
             type="button"
             size="sm"
+            disabled={saving}
             onClick={() => {
-              onSave(
-                partners
-                  .filter((item) => draft.has(item.id))
-                  .map((item) => item.id),
-              )
-              onClose()
+              void (async () => {
+                setSaving(true)
+                setError(null)
+                try {
+                  await onSave(
+                    partners
+                      .filter((item) => draft.has(item.id))
+                      .map((item) => item.id),
+                  )
+                  onClose()
+                } catch (saveError) {
+                  setError(
+                    saveError instanceof Error
+                      ? saveError.message
+                      : '업체 설정을 저장하지 못했습니다.',
+                  )
+                } finally {
+                  setSaving(false)
+                }
+              })()
             }}
           >
-            저장
+            {saving ? '저장 중...' : '저장'}
           </Button>
         </div>
       </div>
@@ -166,12 +201,8 @@ export function UsageCodePage() {
   const [addMode, setAddMode] = useState<AddMode>(null)
   const [managerOpen, setManagerOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [visibleTargetIds, setVisibleTargetIds] = useState<string[] | null>(
-    () => readVisibleTargetIds(brand.id),
-  )
 
   useEffect(() => {
-    setVisibleTargetIds(readVisibleTargetIds(brand.id))
     setSelectedTargetId(null)
     setAddMode(null)
   }, [brand.id])
@@ -179,6 +210,37 @@ export function UsageCodePage() {
   const targetsQuery = useQuery({
     queryKey: ['codeUsageTargets', brand.id],
     queryFn: () => getCodeUsageTargets(brand.id),
+  })
+  const settingQueryKey = [
+    'barcodePartnerDisplaySetting',
+    brand.id,
+    'own',
+  ] as const
+  const settingQuery = useQuery({
+    queryKey: settingQueryKey,
+    queryFn: async () => {
+      const shared = await getBarcodePartnerDisplaySetting(brand.id, 'own')
+      if (shared.configured) return shared
+
+      const local = readVisibleTargetIds(brand.id)
+      if (local == null) return shared
+
+      await initializeBarcodePartnerDisplayTargets(brand.id, 'own', local)
+      clearLocalVisibleTargetIds(brand.id)
+      return getBarcodePartnerDisplaySetting(brand.id, 'own')
+    },
+  })
+  const saveSettingMutation = useMutation({
+    mutationFn: (ids: string[]) =>
+      replaceBarcodePartnerDisplayTargets(brand.id, 'own', ids),
+    onSuccess: async (_result, ids) => {
+      queryClient.setQueryData(settingQueryKey, {
+        configured: true,
+        targetIds: ids,
+      })
+      clearLocalVisibleTargetIds(brand.id)
+      await queryClient.invalidateQueries({ queryKey: settingQueryKey })
+    },
   })
   const codesQuery = useQuery({
     queryKey: ['productCodes', brand.id, 'own'],
@@ -210,6 +272,9 @@ export function UsageCodePage() {
     () => assignmentsQuery.data ?? [],
     [assignmentsQuery.data],
   )
+  const visibleTargetIds = settingQuery.data?.configured
+    ? settingQuery.data.targetIds
+    : null
 
   const allPartners = useMemo(
     () =>
@@ -344,12 +409,20 @@ export function UsageCodePage() {
         }
       />
 
+      {settingQuery.isError ? (
+        <p className="mb-4 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {settingQuery.error instanceof Error
+            ? settingQuery.error.message
+            : '공용 업체 설정을 불러오지 못했습니다.'}
+        </p>
+      ) : null}
+
       <div className="grid gap-4 lg:grid-cols-[240px_minmax(0,1fr)]">
         <Card className="h-fit overflow-hidden">
           <div className="border-b border-border px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             출고업체
           </div>
-          {targetsQuery.isLoading ? (
+          {targetsQuery.isLoading || settingQuery.isLoading ? (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">
               불러오는 중...
             </p>
@@ -728,9 +801,8 @@ export function UsageCodePage() {
           partners={allPartners}
           initialIds={settingsInitialIds}
           onClose={() => setSettingsOpen(false)}
-          onSave={(ids) => {
-            writeVisibleTargetIds(brand.id, ids)
-            setVisibleTargetIds(ids)
+          onSave={async (ids) => {
+            await saveSettingMutation.mutateAsync(ids)
             if (selectedTargetId && !ids.includes(selectedTargetId)) {
               setSelectedTargetId(null)
             }
