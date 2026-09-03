@@ -20,6 +20,7 @@ import {
   parseOpenAiModels,
   parseRecommendJson,
   PROVIDER_SECRET,
+  type AccessoryContextDecision,
   type AiProvider,
   type ProductCandidate,
 } from '../_shared/ai-core.ts'
@@ -457,32 +458,80 @@ async function recommendAccessoryRules(
   }
 
   const started = Date.now()
-  const cacheKey = await recommendationCacheKey({
+  const cacheScope: ItemNameCacheScope = {
     brandId,
     featureKey,
     provider: route.provider,
     modelId: route.model_id,
     policy: String(route.recommendation_policy ?? 'always_ai'),
     config: parseDecisionConfig(route.decision_config),
-    mallName: dictionary
-      .map((item) => `${item.ruleType}:${item.pattern}`)
-      .join('|'),
-    productName: `${mode}:${unknownPiece}`,
-    itemName: [
-      itemNames.join('|'),
-      contexts
-        .map(
-          (item) =>
-            `${item.contextId}:${item.itemName}:${item.productLookupKey}:${item.candidateStyleIds.join(',')}:${(item.priorExamples ?? [])
-              .map((example) => `${example.action}:${example.itemName}`)
-              .join(',')}`,
-        )
-        .join('|'),
-    ].join('||'),
-    lookupKeys,
-    candidates,
-  })
-  const cached = await readRecommendationCache(supabase, brandId, featureKey, cacheKey)
+  }
+  const contextCache =
+    mode === 'item_name'
+      ? await readItemNameContextCache(supabase, cacheScope, contexts)
+      : null
+
+  if (contextCache && contextCache.pending.length === 0) {
+    await insertUsageLog(supabase, {
+      brandId,
+      userId,
+      featureKey,
+      provider: route.provider,
+      modelId: route.model_id,
+      action: 'recommend_item_name_rules',
+      status: 'ok',
+      usage: normalizeUsage(null, null),
+      errorCode: '',
+      resolutionSource: 'cache',
+      skippedAi: true,
+      cacheHit: true,
+      candidateCount: candidates.length,
+      latencyMs: Date.now() - started,
+    })
+    return {
+      ok: true,
+      provider: route.provider,
+      modelId: route.model_id,
+      source: 'cache',
+      cacheId: contextCache.cacheId,
+      skippedAi: true,
+      cacheHit: true,
+      recommendation: { reason: '', contexts: contextCache.decisions },
+    }
+  }
+
+  // 캐시에 없는 내품명만 모델에 묻는다.
+  const promptContexts = contextCache ? contextCache.pending : contexts
+  const cacheKey = contextCache
+    ? ''
+    : await recommendationCacheKey({
+        brandId,
+        featureKey,
+        provider: route.provider,
+        modelId: route.model_id,
+        policy: cacheScope.policy,
+        config: cacheScope.config,
+        mallName: dictionary
+          .map((item) => `${item.ruleType}:${item.pattern}`)
+          .join('|'),
+        productName: `${mode}:${unknownPiece}`,
+        itemName: [
+          itemNames.join('|'),
+          contexts
+            .map(
+              (item) =>
+                `${item.contextId}:${item.itemName}:${item.productLookupKey}:${item.candidateStyleIds.join(',')}:${(item.priorExamples ?? [])
+                  .map((example) => `${example.action}:${example.itemName}`)
+                  .join(',')}`,
+            )
+            .join('|'),
+        ].join('||'),
+        lookupKeys,
+        candidates,
+      })
+  const cached = contextCache
+    ? null
+    : await readRecommendationCache(supabase, brandId, featureKey, cacheKey)
   if (cached) {
     await insertUsageLog(supabase, {
       brandId,
@@ -517,7 +566,7 @@ async function recommendAccessoryRules(
 
   const prompt =
     mode === 'item_name'
-      ? buildItemNameSuggestPrompt({ contexts, candidates })
+      ? buildItemNameSuggestPrompt({ contexts: promptContexts, candidates })
       : buildAccessorySuggestPrompt({
           unknownPiece,
           itemNames,
@@ -537,20 +586,35 @@ async function recommendAccessoryRules(
     const rawRecommendation = extractJsonObject(completed.text)
     const recommendation =
       mode === 'item_name'
-        ? parseItemNameSuggestJson(rawRecommendation, candidates, contexts)
+        ? parseItemNameSuggestJson(rawRecommendation, candidates, promptContexts)
         : parseAccessorySuggestJson(rawRecommendation, candidates, contexts)
-    const cacheId = await writeRecommendationCache(supabase, {
-      brandId,
-      featureKey,
-      cacheKey,
-      provider: route.provider,
-      modelId: route.model_id,
-      policy: String(route.recommendation_policy ?? 'always_ai'),
-      lookupKeys,
-      candidates,
-      recommendation,
-      usage,
-    })
+    let cacheId: string | null
+    if (contextCache) {
+      cacheId = await writeItemNameContextCache(supabase, cacheScope, {
+        keyByContextId: contextCache.keyByContextId,
+        contexts: promptContexts,
+        decisions: recommendation.contexts,
+        usage,
+      })
+      recommendation.contexts = [
+        ...contextCache.decisions,
+        ...recommendation.contexts,
+      ]
+      cacheId ??= contextCache.cacheId
+    } else {
+      cacheId = await writeRecommendationCache(supabase, {
+        brandId,
+        featureKey,
+        cacheKey,
+        provider: route.provider,
+        modelId: route.model_id,
+        policy: cacheScope.policy,
+        lookupKeys,
+        candidates,
+        recommendation,
+        usage,
+      })
+    }
     await insertUsageLog(supabase, {
       brandId,
       userId,
@@ -686,10 +750,172 @@ async function recommendationCacheKey(input: {
     lookupKeys: [...input.lookupKeys].sort(),
     candidates: input.candidates.map((item) => `${item.styleId}:${item.score.toFixed(3)}`),
   })
+  return await sha256Hex(raw)
+}
+
+async function sha256Hex(raw: string) {
   const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw))
   return [...new Uint8Array(bytes)]
     .map((value) => value.toString(16).padStart(2, '0'))
     .join('')
+}
+
+type ItemNameContext = {
+  contextId: string
+  itemName: string
+  productLookupKey: string
+  mainProduct: string
+  candidateStyleIds: string[]
+  priorExamples: Array<{
+    itemName: string
+    productLookupKey: string
+    action: 'delete' | 'components'
+    components: Array<{ styleId: string; quantity: number }>
+  }>
+}
+
+type ItemNameCacheScope = {
+  brandId: string
+  featureKey: string
+  provider: AiProvider
+  modelId: string
+  policy: string
+  config: ReturnType<typeof parseDecisionConfig>
+}
+
+/**
+ * 내품명은 배치가 아니라 컨텍스트 하나를 키로 잡는다. 같이 묶인 다른 내품명이
+ * 바뀌거나 후보 점수가 미세하게 움직여도 이미 판정한 내품명은 다시 묻지 않는다.
+ */
+async function itemNameContextCacheKey(
+  scope: ItemNameCacheScope,
+  context: ItemNameContext,
+) {
+  return await sha256Hex(
+    JSON.stringify({
+      brandId: scope.brandId,
+      featureKey: scope.featureKey,
+      provider: scope.provider,
+      modelId: scope.modelId,
+      policy: scope.policy,
+      config: scope.config,
+      itemName: context.itemName.trim().toLocaleLowerCase('ko-KR'),
+      productLookupKey: context.productLookupKey
+        .trim()
+        .toLocaleLowerCase('ko-KR'),
+      mainProduct: context.mainProduct.trim().toLocaleLowerCase('ko-KR'),
+      candidateStyleIds: [...context.candidateStyleIds].sort(),
+      priorExamples: context.priorExamples
+        .map((example) =>
+          [
+            example.action,
+            example.itemName.trim().toLocaleLowerCase('ko-KR'),
+            example.components
+              .map((component) => `${component.styleId}:${component.quantity}`)
+              .sort()
+              .join(','),
+          ].join('|'),
+        )
+        .sort(),
+    }),
+  )
+}
+
+async function readItemNameContextCache(
+  supabase: ReturnType<typeof createClient>,
+  scope: ItemNameCacheScope,
+  contexts: ItemNameContext[],
+) {
+  const keyByContextId = new Map<string, string>()
+  for (const context of contexts) {
+    keyByContextId.set(
+      context.contextId,
+      await itemNameContextCacheKey(scope, context),
+    )
+  }
+  const keys = [...new Set(keyByContextId.values())]
+  const hitByKey = new Map<string, { id: string; decision: AccessoryContextDecision }>()
+  if (keys.length > 0) {
+    const { data } = await supabase
+      .from('ai_recommendation_cache')
+      .select('id, cache_key, recommendation')
+      .eq('brand_id', scope.brandId)
+      .eq('feature_key', scope.featureKey)
+      .in('cache_key', keys)
+      .gt('expires_at', new Date().toISOString())
+    for (const row of data ?? []) {
+      const decision = (row.recommendation as { decision?: AccessoryContextDecision })
+        ?.decision
+      if (decision?.action) {
+        hitByKey.set(String(row.cache_key), {
+          id: String(row.id),
+          decision,
+        })
+      }
+    }
+  }
+
+  const decisions: AccessoryContextDecision[] = []
+  const pending: ItemNameContext[] = []
+  let cacheId: string | null = null
+  for (const context of contexts) {
+    const key = keyByContextId.get(context.contextId)
+    const hit = key ? hitByKey.get(key) : undefined
+    if (!hit) {
+      pending.push(context)
+      continue
+    }
+    decisions.push({ ...hit.decision, contextId: context.contextId })
+    cacheId ??= hit.id
+  }
+  return { keyByContextId, decisions, pending, cacheId }
+}
+
+async function writeItemNameContextCache(
+  supabase: ReturnType<typeof createClient>,
+  scope: ItemNameCacheScope,
+  input: {
+    keyByContextId: Map<string, string>
+    contexts: ItemNameContext[]
+    decisions: AccessoryContextDecision[]
+    usage: ReturnType<typeof normalizeUsage>
+  },
+) {
+  const contextById = new Map(input.contexts.map((item) => [item.contextId, item]))
+  const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString()
+  const share = Math.max(1, input.decisions.length)
+  const seen = new Set<string>()
+  const rows = input.decisions.flatMap((decision) => {
+    const cacheKey = input.keyByContextId.get(decision.contextId)
+    const context = contextById.get(decision.contextId)
+    // 같은 배치에 같은 키가 두 번 들어가면 upsert가 실패한다.
+    if (!cacheKey || !context || seen.has(cacheKey)) return []
+    seen.add(cacheKey)
+    return [
+      {
+        brand_id: scope.brandId,
+        feature_key: scope.featureKey,
+        cache_key: cacheKey,
+        provider: scope.provider,
+        model_id: scope.modelId,
+        policy: scope.policy,
+        lookup_keys: [context.productLookupKey, context.itemName].filter(Boolean),
+        candidates: [],
+        recommendation: { decision },
+        source: 'ai',
+        input_tokens: Math.round(input.usage.inputTokens / share),
+        output_tokens: Math.round(input.usage.outputTokens / share),
+        expires_at: expires,
+      },
+    ]
+  })
+  if (rows.length === 0) return null
+  const { data } = await supabase
+    .from('ai_recommendation_cache')
+    .upsert(rows, { onConflict: 'brand_id,feature_key,cache_key' })
+    .select('id')
+  const first = data?.[0]?.id
+  return first ? String(first) : null
 }
 
 async function readRecommendationCache(
