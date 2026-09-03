@@ -27,6 +27,7 @@ import { OrgChartPage } from '@/features/org/OrgChartPage'
 import { DataSheetPage } from '@/features/data/DataSheetPage'
 import { DataUploadPage } from '@/features/data/DataUploadPage'
 import { InvoiceWorkPage } from '@/features/logistics/InvoiceWorkPage'
+import { InvoiceDataEntryPage } from '@/features/logistics/InvoiceDataEntryPage'
 import { BulkOutboundPage } from '@/features/logistics/BulkOutboundPage'
 import { OutboundDataPage } from '@/features/logistics/OutboundDataPage'
 import { WarehousePage } from '@/features/logistics/WarehousePage'
@@ -78,6 +79,10 @@ export function BrandWorkspaceRouteTree() {
       </Route>
       <Route path="work-requests/:owner" element={<WorkRequestPage />} />
       <Route path="logistics/invoices" element={<InvoiceWorkPage />} />
+      <Route
+        path="logistics/invoice-data-entry"
+        element={<InvoiceDataEntryPage />}
+      />
       <Route path="logistics/bulk-outbound" element={<BulkOutboundPage />} />
       <Route path="logistics/warehouses" element={<WarehousePage />} />
       <Route path="data" element={<RedirectTo to="data/all" />} />

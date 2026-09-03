@@ -15,6 +15,7 @@ import {
   ChartColumn,
   ChevronDown,
   ClipboardList,
+  ClipboardPen,
   FileSpreadsheet,
   Home,
   Images,
@@ -123,6 +124,11 @@ const navGroups: { title: string; items: NavItem[] }[] = [
         to: 'logistics/invoices',
         label: '송장작업',
         icon: FileSpreadsheet,
+      },
+      {
+        to: 'logistics/invoice-data-entry',
+        label: '(임시) 송장데이터 입력',
+        icon: ClipboardPen,
       },
       {
         to: 'logistics/bulk-outbound',
@@ -539,6 +545,7 @@ export function BrandLayout() {
             const pageLayout = location.pathname.includes('/design/file-manager')
               ? 'full'
               : location.pathname.includes('/logistics/invoices') ||
+                  location.pathname.includes('/logistics/invoice-data-entry') ||
                   location.pathname.includes('/logistics/bulk-outbound') ||
                   location.pathname.includes('/logistics/warehouses')
                 ? 'wide'
