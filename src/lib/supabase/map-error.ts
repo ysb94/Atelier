@@ -1,5 +1,15 @@
 /** Supabase/PostgREST 오류를 앱 저장소 오류 코드로 옮긴다. */
 
+export function isMissingRpc(error: { code?: string; message?: string } | null | undefined) {
+  const code = error?.code ?? ''
+  const message = error?.message ?? ''
+  return (
+    code === 'PGRST202' ||
+    code === '42883' ||
+    /could not find the function|schema cache/i.test(message)
+  )
+}
+
 export function isUniqueViolation(error: { code?: string; message?: string }) {
   return (
     error.code === '23505' ||

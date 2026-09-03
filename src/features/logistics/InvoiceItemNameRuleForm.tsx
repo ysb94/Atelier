@@ -8,6 +8,10 @@ import {
   type InvoiceItemNameRuleInput,
 } from '@/lib/api'
 import { formatItemNameFromComponents } from '@/lib/invoice/item-name-transform'
+import {
+  INVOICE_ITEM_NAME_RULES_QUERY_KEY,
+  INVOICE_ITEM_NAME_RULES_WORK_QUERY_KEY,
+} from '@/lib/invoice/invoice-work-query-keys'
 import { itemNameRuleEditSave } from '@/lib/invoice/item-name-rule-manage'
 import {
   INVOICE_ITEM_NAME_RULE_ACTION_LABEL,
@@ -117,7 +121,10 @@ export function InvoiceItemNameRuleForm({
     },
     onSuccess: async (result) => {
       await queryClient.invalidateQueries({
-        queryKey: ['invoice-item-name-rules', brandId],
+        queryKey: [INVOICE_ITEM_NAME_RULES_QUERY_KEY, brandId],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: [INVOICE_ITEM_NAME_RULES_WORK_QUERY_KEY, brandId],
       })
       onSaved?.()
       if (lockedLookupRule) {

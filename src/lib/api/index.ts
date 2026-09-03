@@ -75,6 +75,7 @@ import * as invoiceNameRuleStore from '@/lib/supabase/invoice-name-rules'
 import * as invoiceItemNameRuleStore from '@/lib/supabase/invoice-item-name-rules'
 import * as invoiceAccessoryRuleStore from '@/lib/supabase/invoice-accessory-rules'
 import * as invoiceOptionMapStore from '@/lib/supabase/invoice-option-maps'
+import type { OptionMapLookupCombo } from '@/lib/invoice/invoice-item-criteria-keys'
 import * as invoicePackingSizeMapStore from '@/lib/supabase/invoice-packing-size-maps'
 import * as invoicePickingRoutePresetStore from '@/lib/supabase/invoice-picking-route-presets'
 import * as invoiceProductNameMapStore from '@/lib/supabase/invoice-product-name-maps'
@@ -383,6 +384,16 @@ export async function getInvoiceItemNameRules(
   })
 }
 
+export async function getInvoiceItemNameRulesForItemNames(
+  brandId: string,
+  itemNames: string[],
+): Promise<InvoiceItemNameRule[]> {
+  return invoiceItemNameRuleStore.listInvoiceItemNameRulesForItemNames(
+    brandId,
+    itemNames,
+  )
+}
+
 export async function saveInvoiceItemNameRule(
   brandId: string,
   input: invoiceItemNameRuleStore.InvoiceItemNameRuleInput,
@@ -644,6 +655,13 @@ export async function getInvoiceOptionMaps(
   activeOnly = false,
 ): Promise<InvoiceOptionMap[]> {
   return invoiceOptionMapStore.listInvoiceOptionMaps(brandId, { activeOnly })
+}
+
+export async function getInvoiceOptionMapsForCombos(
+  brandId: string,
+  combos: OptionMapLookupCombo[],
+): Promise<InvoiceOptionMap[]> {
+  return invoiceOptionMapStore.listInvoiceOptionMapsForCombos(brandId, combos)
 }
 
 export async function saveInvoiceOptionMap(

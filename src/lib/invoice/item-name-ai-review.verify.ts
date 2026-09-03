@@ -8,6 +8,7 @@ import {
   dedupeItemNameAiContexts,
   itemNameAiDecisionKey,
   itemNameAiSaveFeedback,
+  paginateItemNameAiReviewKeys,
   selectItemNameSafeCandidateIds,
   type ItemNameAiContext,
 } from '@/lib/invoice/item-name-ai-review'
@@ -148,6 +149,23 @@ assert(
     (merged.mirrors.get(context.contextId)?.includes(sameLookup.contextId) ??
       false),
   '같은 문맥만 결정을 복사한다',
+)
+
+assert(
+  paginateItemNameAiReviewKeys(['a', 'b', 'c'], 2, 2).keys.join(',') === 'c',
+  '내품명 검수표 2페이지',
+)
+assert(
+  paginateItemNameAiReviewKeys(['a', 'b', 'c'], 4, 2).page === 2,
+  '내품명 검수표 페이지를 마지막까지 당긴다',
+)
+assert(
+  paginateItemNameAiReviewKeys(
+    Array.from({ length: 80 }, (_, index) => String(index)),
+    1,
+    20,
+  ).keys.length === 20,
+  '내품명 검수표는 페이지 크기만큼만 자른다',
 )
 
 console.log('item-name-ai-review verify: ok')

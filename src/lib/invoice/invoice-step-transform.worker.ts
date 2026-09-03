@@ -13,14 +13,31 @@ export type InvoiceStepTransformWorkerRequest =
   | { id: number; kind: 'item'; input: InvoiceItemNameStepInput }
 
 export type InvoiceStepTransformWorkerResponse =
-  | { id: number; ok: true; kind: 'product'; result: InvoiceProductNameStepResult }
-  | { id: number; ok: true; kind: 'item'; result: InvoiceItemNameTransformation }
+  | {
+      id: number
+      ok: true
+      kind: 'product'
+      result: InvoiceProductNameStepResult
+      elapsedMs: number
+    }
+  | {
+      id: number
+      ok: true
+      kind: 'item'
+      result: InvoiceItemNameTransformation
+      elapsedMs: number
+    }
   | { id: number; ok: false; message: string }
+
+function nowMs() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now()
+}
 
 self.onmessage = (
   event: MessageEvent<InvoiceStepTransformWorkerRequest>,
 ) => {
   const { id, kind, input } = event.data
+  const startedAt = nowMs()
   try {
     if (kind === 'product') {
       self.postMessage({
@@ -28,6 +45,7 @@ self.onmessage = (
         ok: true,
         kind,
         result: runInvoiceProductNameStep(input),
+        elapsedMs: nowMs() - startedAt,
       } satisfies InvoiceStepTransformWorkerResponse)
       return
     }
@@ -36,6 +54,7 @@ self.onmessage = (
       ok: true,
       kind,
       result: runInvoiceItemNameStep(input),
+      elapsedMs: nowMs() - startedAt,
     } satisfies InvoiceStepTransformWorkerResponse)
   } catch (error) {
     self.postMessage({

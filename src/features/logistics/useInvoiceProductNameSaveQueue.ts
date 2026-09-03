@@ -4,6 +4,10 @@ import {
   logInvoiceWork,
   timeInvoiceWorkAsync,
 } from '@/lib/invoice/invoice-work-perf'
+import {
+  INVOICE_OPTION_MAPS_QUERY_KEY,
+  INVOICE_OPTION_MAPS_WORK_QUERY_KEY,
+} from '@/lib/invoice/invoice-work-query-keys'
 import { invalidateAiRecommendationQueries } from '@/lib/ai/query-cache'
 import {
   deleteInvoiceOptionMap,
@@ -247,17 +251,68 @@ export function findOptionMapByComboPreferring(
   )
 }
 
+function cachedOptionMaps(
+  queryClient: ReturnType<typeof useQueryClient>,
+  brandId: string,
+): InvoiceOptionMap[] {
+  const full =
+    queryClient.getQueryData<InvoiceOptionMap[]>([
+      INVOICE_OPTION_MAPS_QUERY_KEY,
+      brandId,
+    ]) ?? []
+  const work = queryClient
+    .getQueriesData<InvoiceOptionMap[]>({
+      queryKey: [INVOICE_OPTION_MAPS_WORK_QUERY_KEY, brandId],
+    })
+    .flatMap(([, data]) => data ?? [])
+  if (work.length === 0) return full
+  const seen = new Set(full.map((map) => map.id))
+  const merged = [...full]
+  for (const map of work) {
+    if (seen.has(map.id)) continue
+    seen.add(map.id)
+    merged.push(map)
+  }
+  return merged
+}
+
+function writeInvoiceOptionMapCaches(
+  queryClient: ReturnType<typeof useQueryClient>,
+  brandId: string,
+  apply: (maps: InvoiceOptionMap[]) => InvoiceOptionMap[],
+) {
+  const keys = [
+    [INVOICE_OPTION_MAPS_QUERY_KEY, brandId] as const,
+    ...queryClient
+      .getQueriesData<InvoiceOptionMap[]>({
+        queryKey: [INVOICE_OPTION_MAPS_WORK_QUERY_KEY, brandId],
+      })
+      .map(([queryKey]) => queryKey),
+  ]
+  let touched = false
+  for (const queryKey of keys) {
+    if (!queryClient.getQueryData(queryKey)) continue
+    touched = true
+    queryClient.setQueryData<InvoiceOptionMap[]>(queryKey, (maps = []) =>
+      apply(maps),
+    )
+  }
+  if (!touched) {
+    void queryClient.invalidateQueries({
+      queryKey: [INVOICE_OPTION_MAPS_QUERY_KEY, brandId],
+    })
+    void queryClient.invalidateQueries({
+      queryKey: [INVOICE_OPTION_MAPS_WORK_QUERY_KEY, brandId],
+    })
+  }
+}
+
 export function upsertInvoiceOptionMapCache(
   queryClient: ReturnType<typeof useQueryClient>,
   brandId: string,
   saved: InvoiceOptionMap,
 ) {
-  const queryKey = ['invoice-option-maps', brandId] as const
-  const current = queryClient.getQueryData<InvoiceOptionMap[]>(queryKey)
-  if (!current) {
-    return queryClient.invalidateQueries({ queryKey })
-  }
-  queryClient.setQueryData<InvoiceOptionMap[]>(queryKey, (maps = []) =>
+  writeInvoiceOptionMapCaches(queryClient, brandId, (maps) =>
     applyInvoiceOptionMapUpsert(maps, saved),
   )
 }
@@ -267,12 +322,7 @@ function removeInvoiceOptionMapCache(
   brandId: string,
   mapId: string,
 ) {
-  const queryKey = ['invoice-option-maps', brandId] as const
-  const current = queryClient.getQueryData<InvoiceOptionMap[]>(queryKey)
-  if (!current) {
-    return queryClient.invalidateQueries({ queryKey })
-  }
-  queryClient.setQueryData<InvoiceOptionMap[]>(queryKey, (maps = []) =>
+  writeInvoiceOptionMapCaches(queryClient, brandId, (maps) =>
     maps.filter((map) => map.id !== mapId),
   )
 }
@@ -329,18 +379,13 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
       logInvoiceWork('product-map-cache-flush', { count: products.length })
     }
     if (options.length > 0) {
-      const queryKey = ['invoice-option-maps', brandId] as const
-      if (!queryClient.getQueryData(queryKey)) {
-        void queryClient.invalidateQueries({ queryKey })
-      } else {
-        queryClient.setQueryData<InvoiceOptionMap[]>(queryKey, (maps = []) => {
-          let next = maps
-          for (const saved of options) {
-            next = applyInvoiceOptionMapUpsert(next, saved)
-          }
-          return next
-        })
-      }
+      writeInvoiceOptionMapCaches(queryClient, brandId, (maps) => {
+        let next = maps
+        for (const saved of options) {
+          next = applyInvoiceOptionMapUpsert(next, saved)
+        }
+        return next
+      })
     }
   }, [brandId, queryClient])
 
@@ -453,11 +498,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
               const previousMap =
                 entry.previousMap ??
                 findMapByLookupKey(maps, entry.lookupKey)
-              const optionMaps =
-                queryClient.getQueryData<InvoiceOptionMap[]>([
-                  'invoice-option-maps',
-                  brandId,
-                ]) ?? []
+              const optionMaps = cachedOptionMaps(queryClient, brandId)
               const previousOptionMap =
                 entry.previousOptionMap ??
                 findOptionMapByComboPreferring(
@@ -669,11 +710,7 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
         existingEntry?.savedMap ??
         existingEntry?.previousMap ??
         findMapByLookupKey(maps, input.lookupKey)
-      const optionMaps =
-        queryClient.getQueryData<InvoiceOptionMap[]>([
-          'invoice-option-maps',
-          brandId,
-        ]) ?? []
+      const optionMaps = cachedOptionMaps(queryClient, brandId)
       const originalItemName =
         input.originalItemName ??
         existingEntry?.originalItemName ??
@@ -788,7 +825,10 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
           queryKey: [PRODUCT_NAME_MAPS_WORK_QUERY_KEY, brandId],
         })
         await queryClient.invalidateQueries({
-          queryKey: ['invoice-option-maps', brandId],
+          queryKey: [INVOICE_OPTION_MAPS_QUERY_KEY, brandId],
+        })
+        await queryClient.invalidateQueries({
+          queryKey: [INVOICE_OPTION_MAPS_WORK_QUERY_KEY, brandId],
         })
         await invalidateAiRecommendationQueries(queryClient, brandId)
         patchHistory((current) =>

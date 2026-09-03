@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -89,7 +90,7 @@ const TAG_ROLES: InvoiceProductNameTagRole[] = [
 ]
 
 
-export function InvoiceProductNameTransformPanel({
+export const InvoiceProductNameTransformPanel = memo(function InvoiceProductNameTransformPanel({
   brandId,
   transformation,
   renderUi = true,
@@ -256,23 +257,27 @@ export function InvoiceProductNameTransformPanel({
 
   const fileTags = useMemo(
     () =>
-      collectFileTagGroups(
-        transformation.rows.map((row) => ({
-          productName: row.source.productName,
-          tags: row.tags,
-        })),
-      ),
-    [transformation.rows],
+      renderUi
+        ? collectFileTagGroups(
+            transformation.rows.map((row) => ({
+              productName: row.source.productName,
+              tags: row.tags,
+            })),
+          )
+        : [],
+    [renderUi, transformation.rows],
   )
   const optionTagGroups = useMemo(
     () =>
-      collectFileOptionReservationTagGroups(
-        transformation.rows.map((row) => ({
-          itemName: row.source.itemName,
-          itemTags: row.itemTags,
-        })),
-      ),
-    [transformation.rows],
+      renderUi
+        ? collectFileOptionReservationTagGroups(
+            transformation.rows.map((row) => ({
+              itemName: row.source.itemName,
+              itemTags: row.itemTags,
+            })),
+          )
+        : [],
+    [renderUi, transformation.rows],
   )
   const visibleTagGroups = useMemo(() => {
     const groups: Array<FileTagGroup | FileOptionReservationTagGroup> = []
@@ -464,6 +469,7 @@ export function InvoiceProductNameTransformPanel({
   }
 
   const rows = useMemo(() => {
+    if (!renderUi || !previewOpen) return []
     const q = deferredQuery.trim().toLocaleLowerCase('ko-KR')
     return transformation.rows
       .filter((row) => {
@@ -491,7 +497,7 @@ export function InvoiceProductNameTransformPanel({
           left.source.itemName.localeCompare(right.source.itemName, 'ko-KR') ||
           left.source.rowNumber - right.source.rowNumber,
       )
-  }, [deferredQuery, status, transformation.rows])
+  }, [deferredQuery, previewOpen, renderUi, status, transformation.rows])
   const previewPage = useInvoiceTablePage(
     rows,
     `${deferredQuery}\u0001${status}`,
@@ -888,7 +894,7 @@ export function InvoiceProductNameTransformPanel({
       </div>
     </div>
   )
-}
+})
 
 function TagRoleSection({
   title,

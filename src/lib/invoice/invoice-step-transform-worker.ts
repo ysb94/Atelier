@@ -7,6 +7,10 @@ import {
   type InvoiceProductNameStepResult,
 } from '@/lib/invoice/invoice-step-transform'
 import type { InvoiceItemNameTransformation } from '@/lib/invoice/item-name-transform'
+import {
+  logInvoiceWork,
+  markInvoiceWorkStage,
+} from '@/lib/invoice/invoice-work-perf'
 import type {
   InvoiceStepTransformWorkerRequest,
   InvoiceStepTransformWorkerResponse,
@@ -15,6 +19,16 @@ import type {
 const COMPUTE_TIMEOUT_MS = 120_000
 
 let nextRequestId = 1
+let sharedWorker: Worker | null = null
+const pendingById = new Map<
+  number,
+  {
+    resolve: (value: unknown) => void
+    reject: (error: Error) => void
+    startedAt: number
+    timer: number
+  }
+>()
 
 export type CancellableCompute<T> = Promise<T> & { cancel: () => void }
 
@@ -24,43 +38,95 @@ function resolved<T>(value: T): CancellableCompute<T> {
   return promise
 }
 
+function nowMs() {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now()
+}
+
+function rejectPending(id: number, error: Error) {
+  const pending = pendingById.get(id)
+  if (!pending) return
+  pendingById.delete(id)
+  window.clearTimeout(pending.timer)
+  pending.reject(error)
+}
+
+function disposeWorker() {
+  if (!sharedWorker) return
+  sharedWorker.terminate()
+  sharedWorker = null
+  for (const [id, pending] of pendingById) {
+    pendingById.delete(id)
+    window.clearTimeout(pending.timer)
+    pending.reject(new Error('변환 계산이 취소되었습니다.'))
+  }
+}
+
+function getSharedWorker() {
+  if (sharedWorker) return sharedWorker
+  const worker = new Worker(
+    new URL('./invoice-step-transform.worker.ts', import.meta.url),
+    { type: 'module' },
+  )
+  worker.onmessage = (
+    event: MessageEvent<InvoiceStepTransformWorkerResponse>,
+  ) => {
+    const pending = pendingById.get(event.data.id)
+    if (!pending) return
+    pendingById.delete(event.data.id)
+    window.clearTimeout(pending.timer)
+    if (!event.data.ok) {
+      pending.reject(new Error(event.data.message))
+      return
+    }
+    const total = nowMs() - pending.startedAt
+    const computeMs = event.data.elapsedMs
+    logInvoiceWork('worker-roundtrip', {
+      kind: event.data.kind,
+      totalMs: Math.round(total),
+      computeMs: Math.round(computeMs),
+      cloneMs: Math.max(0, Math.round(total - computeMs)),
+    })
+    markInvoiceWorkStage(null, 'worker-compute', {
+      kind: event.data.kind,
+      ms: Math.round(computeMs),
+    })
+    pending.resolve(event.data.result)
+  }
+  worker.onerror = (event) => {
+    const error =
+      event.error instanceof Error
+        ? event.error
+        : new Error(event.message || '변환 계산에 실패했습니다.')
+    disposeWorker()
+    for (const [id] of [...pendingById]) {
+      rejectPending(id, error)
+    }
+  }
+  sharedWorker = worker
+  return worker
+}
+
 function runInvoiceStepInWorker<T>(
   request: InvoiceStepTransformWorkerRequest,
 ): CancellableCompute<T> {
   let cancel = () => {}
   const promise = new Promise<T>((resolve, reject) => {
-    const worker = new Worker(
-      new URL('./invoice-step-transform.worker.ts', import.meta.url),
-      { type: 'module' },
-    )
+    const worker = getSharedWorker()
+    const startedAt = nowMs()
     const timer = window.setTimeout(() => {
-      worker.terminate()
-      reject(new Error('변환 계산이 너무 오래 걸립니다.'))
+      rejectPending(request.id, new Error('변환 계산이 너무 오래 걸립니다.'))
+      disposeWorker()
     }, COMPUTE_TIMEOUT_MS)
-    const finish = () => {
-      window.clearTimeout(timer)
-      worker.terminate()
-    }
+    pendingById.set(request.id, {
+      resolve: (value) => resolve(value as T),
+      reject,
+      startedAt,
+      timer,
+    })
     cancel = () => {
-      finish()
-      reject(new Error('변환 계산이 취소되었습니다.'))
+      rejectPending(request.id, new Error('변환 계산이 취소되었습니다.'))
     }
-    worker.onmessage = (
-      event: MessageEvent<InvoiceStepTransformWorkerResponse>,
-    ) => {
-      if (event.data.id !== request.id) return
-      finish()
-      if (event.data.ok) resolve(event.data.result as T)
-      else reject(new Error(event.data.message))
-    }
-    worker.onerror = (event) => {
-      finish()
-      reject(
-        event.error instanceof Error
-          ? event.error
-          : new Error(event.message || '변환 계산에 실패했습니다.'),
-      )
-    }
+    markInvoiceWorkStage(null, 'worker-clone', { kind: request.kind })
     worker.postMessage(request)
   }) as CancellableCompute<T>
   promise.cancel = () => cancel()

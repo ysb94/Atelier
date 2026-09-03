@@ -5,7 +5,8 @@ import type {
 } from '@/lib/types'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import { getSupabase } from '@/lib/supabase/client'
-import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
+import { errorMessage, isMissingRpc, isUniqueViolation } from '@/lib/supabase/map-error'
+import type { OptionMapLookupCombo } from '@/lib/invoice/invoice-item-criteria-keys'
 import { fetchAllPages } from '@/lib/supabase/paged-select'
 
 const MAP_COLUMNS =
@@ -14,6 +15,7 @@ const COMPONENT_EMBED =
   'invoice_option_map_components(id, map_id, style_id, role, quantity, sort_order, styles!invoice_option_map_components_style_fkey(id, style_no, name))'
 const MAP_SELECT = `${MAP_COLUMNS}, ${COMPONENT_EMBED}`
 const PAGE_SIZE = 1000
+const LOOKUP_CHUNK = 400
 
 type StyleEmbed = {
   id: string
@@ -223,6 +225,79 @@ async function fetchMap(id: string): Promise<InvoiceOptionMap> {
     )
   }
   return toMap(data as MapRow)
+}
+
+function chunked<T>(items: T[], size = LOOKUP_CHUNK): T[][] {
+  const out: T[][] = []
+  for (let start = 0; start < items.length; start += size) {
+    out.push(items.slice(start, start + size))
+  }
+  return out
+}
+
+async function listInvoiceOptionMapsByIds(
+  ids: string[],
+): Promise<InvoiceOptionMap[]> {
+  if (ids.length === 0) return []
+  const supabase = getSupabase()
+  const byId = new Map<string, InvoiceOptionMap>()
+  for (const chunk of chunked(ids, 200)) {
+    const { data, error } = await supabase
+      .from('invoice_option_maps')
+      .select(MAP_SELECT)
+      .in('id', chunk)
+    if (error) {
+      throw new InvoiceOptionMapStoreError(
+        errorMessage(error, '품목·옵션 변환 기준을 불러오지 못했습니다.'),
+      )
+    }
+    for (const row of (data as MapRow[]) ?? []) {
+      byId.set(row.id, toMap(row))
+    }
+  }
+  return [...byId.values()]
+}
+
+export async function listInvoiceOptionMapsForCombos(
+  brandId: string,
+  combos: OptionMapLookupCombo[],
+): Promise<InvoiceOptionMap[]> {
+  if (combos.length === 0) return []
+  const supabase = getSupabase()
+  const byId = new Map<string, InvoiceOptionMap>()
+  try {
+    for (const chunk of chunked(combos)) {
+      const { data, error } = await supabase.rpc(
+        'list_invoice_option_map_ids_for_combos',
+        {
+          p_brand_id: brandId,
+          p_malls: chunk.map((combo) => combo.mallName),
+          p_products: chunk.map((combo) => combo.productName),
+          p_items: chunk.map((combo) => combo.itemName),
+        },
+      )
+      if (error) {
+        if (isMissingRpc(error)) {
+          return listInvoiceOptionMaps(brandId, { activeOnly: true })
+        }
+        throw new InvoiceOptionMapStoreError(
+          errorMessage(error, '품목·옵션 변환 기준을 불러오지 못했습니다.'),
+        )
+      }
+      const ids = ((data as Array<{ id: string }> | null) ?? []).map(
+        (row) => row.id,
+      )
+      for (const map of await listInvoiceOptionMapsByIds(ids)) {
+        byId.set(map.id, map)
+      }
+    }
+    return [...byId.values()]
+  } catch (error) {
+    if (isMissingRpc(error as { code?: string; message?: string })) {
+      return listInvoiceOptionMaps(brandId, { activeOnly: true })
+    }
+    throw error
+  }
 }
 
 export async function listInvoiceOptionMaps(

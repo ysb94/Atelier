@@ -9,6 +9,10 @@ import {
   pickItemNamePriorExamples,
 } from '@/lib/ai/learning-core'
 import { invalidateAiRecommendationQueries } from '@/lib/ai/query-cache'
+import {
+  INVOICE_ITEM_NAME_RULES_QUERY_KEY,
+  INVOICE_ITEM_NAME_RULES_WORK_QUERY_KEY,
+} from '@/lib/invoice/invoice-work-query-keys'
 import { createSlotGate, withRecommendSlot } from '@/lib/ai/recommend-queue'
 import {
   getAiFeatureRoute,
@@ -996,7 +1000,10 @@ export function useInvoiceItemNameBulkAiApply({
         return next
       })
       await queryClient.invalidateQueries({
-        queryKey: ['invoice-item-name-rules', brandId],
+        queryKey: [INVOICE_ITEM_NAME_RULES_QUERY_KEY, brandId],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: [INVOICE_ITEM_NAME_RULES_WORK_QUERY_KEY, brandId],
       })
       await invalidateAiRecommendationQueries(queryClient, brandId)
       if (result.failed.length === 0 && plan.blocked.length === 0) {

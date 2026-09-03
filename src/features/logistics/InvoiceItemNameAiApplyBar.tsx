@@ -4,16 +4,19 @@ import { StylePicker } from '@/components/style-picker'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import {
+  ITEM_NAME_AI_PAGE_SIZES,
   itemNameAiExpectedLines,
   itemNameAiMatchesQueueFilter,
   itemNameAiQueueProgress,
   itemNameAiQueueProgressLabel,
   itemNameAiReviewKind,
+  paginateItemNameAiReviewKeys,
   type ItemNameAiAction,
   type ItemNameAiQueueFilter,
   type ItemNameAiQuickSlot,
   type ItemNameAiReviewKind,
 } from '@/lib/invoice/item-name-ai-review'
+import { logInvoiceWork } from '@/lib/invoice/invoice-work-perf'
 import { productCompositionSearchText } from '@/lib/invoice/product-composition'
 import type { StyleRef } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
@@ -72,6 +75,9 @@ export function InvoiceItemNameAiApplyBar({
   const workspaceActive = useWorkspaceTabActivity()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<ItemNameAiQueueFilter>('queue')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] =
+    useState<(typeof ITEM_NAME_AI_PAGE_SIZES)[number]>(20)
   const quick = useInvoiceItemNameQuickEntry({
     brandId: bulk.brandId,
     rows: bulk.reviewRows,
@@ -256,10 +262,44 @@ export function InvoiceItemNameAiApplyBar({
     quick,
   ])
 
+  useEffect(() => {
+    setPage(1)
+  }, [filter, query, pageSize])
+
+  const paged = useMemo(
+    () =>
+      paginateItemNameAiReviewKeys(
+        visibleRows.map((row) => row.key),
+        page,
+        pageSize,
+      ),
+    [page, pageSize, visibleRows],
+  )
+
+  useEffect(() => {
+    if (paged.page !== page) setPage(paged.page)
+  }, [page, paged.page])
+
+  const pagedRows = useMemo(() => {
+    const byKey = new Map(visibleRows.map((row) => [row.key, row]))
+    return paged.keys
+      .map((key) => byKey.get(key))
+      .filter((row): row is (typeof visibleRows)[number] => Boolean(row))
+  }, [paged.keys, visibleRows])
+
+  useEffect(() => {
+    logInvoiceWork('ai-review-render', {
+      kind: 'item',
+      visible: visibleRows.length,
+      page: pagedRows.length,
+      pageSize,
+    })
+  }, [pageSize, pagedRows.length, visibleRows.length])
+
   function holdRow(rowKey: string) {
     if (editDraft?.key === rowKey) closeEdit()
     bulk.markDecisionNeeded(rowKey)
-    quick.moveDown(visibleRows, rowKey, 0)
+    quick.moveDown(pagedRows, rowKey, 0)
   }
 
   const selectableRows = visibleRows.filter(
@@ -268,23 +308,42 @@ export function InvoiceItemNameAiApplyBar({
       row.action !== 'hold' &&
       !row.validationError,
   )
+  const pageSelectableRows = pagedRows.filter(
+    (row) =>
+      bulk.committedKeys.has(row.key) &&
+      row.action !== 'hold' &&
+      !row.validationError,
+  )
   const selectedVisibleCount = selectableRows.filter((row) =>
+    bulk.selected.has(row.key),
+  ).length
+  const selectedPageCount = pageSelectableRows.filter((row) =>
     bulk.selected.has(row.key),
   ).length
   const allVisibleSelected =
     selectableRows.length > 0 &&
     selectedVisibleCount === selectableRows.length
+  const allPageSelected =
+    pageSelectableRows.length > 0 &&
+    selectedPageCount === pageSelectableRows.length
 
   const columnCount = bulkAppendMode ? 7 : 6
   const blockBulkAppend =
     quick.pendingCount > 0 || quick.resolving || bulk.hasDraftChanges
-  const appendTargetVisibleCount = visibleRows.filter((row) =>
+  const appendTargetPageCount = pagedRows.filter((row) =>
     appendTargets.has(row.key),
   ).length
-  const allVisibleAppendTargets =
-    visibleRows.length > 0 && appendTargetVisibleCount === visibleRows.length
+  const allPageAppendTargets =
+    pagedRows.length > 0 && appendTargetPageCount === pagedRows.length
 
-  function toggleVisible(checked: boolean) {
+  function togglePage(checked: boolean) {
+    for (const row of pageSelectableRows) {
+      const selected = bulk.selected.has(row.key)
+      if (checked !== selected) bulk.toggle(row.key)
+    }
+  }
+
+  function toggleFiltered(checked: boolean) {
     for (const row of selectableRows) {
       const selected = bulk.selected.has(row.key)
       if (checked !== selected) bulk.toggle(row.key)
@@ -300,10 +359,10 @@ export function InvoiceItemNameAiApplyBar({
     })
   }
 
-  function toggleVisibleAppendTargets(checked: boolean) {
+  function togglePageAppendTargets(checked: boolean) {
     setAppendTargets((current) => {
       const next = new Set(current)
-      for (const row of visibleRows) {
+      for (const row of pagedRows) {
         if (checked) next.add(row.key)
         else next.delete(row.key)
       }
@@ -539,6 +598,16 @@ export function InvoiceItemNameAiApplyBar({
             </button>
             <button
               type="button"
+              className="text-xs text-primary hover:underline"
+              disabled={selectableRows.length === 0}
+              onClick={() => toggleFiltered(!allVisibleSelected)}
+            >
+              {allVisibleSelected
+                ? '검색 결과 선택 해제'
+                : `검색 결과 전체 선택 ${formatNumber(selectableRows.length)}`}
+            </button>
+            <button
+              type="button"
               className="text-xs text-muted-foreground hover:underline"
               onClick={bulk.clearSelection}
             >
@@ -713,24 +782,24 @@ export function InvoiceItemNameAiApplyBar({
                   <th className="w-10 px-2 py-1.5">
                     <input
                       type="checkbox"
-                      aria-label="보이는 추천 전체 선택"
-                      checked={allVisibleSelected}
-                      disabled={selectableRows.length === 0}
-                      onChange={(event) => toggleVisible(event.target.checked)}
+                      aria-label="현재 페이지 추천 전체 선택"
+                      checked={allPageSelected}
+                      disabled={pageSelectableRows.length === 0}
+                      onChange={(event) => togglePage(event.target.checked)}
                     />
                   </th>
                   {bulkAppendMode ? (
                     <th className="min-w-24 px-2 py-1.5">
                       <div className="flex items-center gap-1">
-                        <input
-                          type="checkbox"
-                          aria-label="보이는 행 추가 대상 전체 선택"
-                          checked={allVisibleAppendTargets}
-                          disabled={visibleRows.length === 0}
-                          onChange={(event) =>
-                            toggleVisibleAppendTargets(event.target.checked)
-                          }
-                        />
+                          <input
+                            type="checkbox"
+                            aria-label="현재 페이지 추가 대상 전체 선택"
+                            checked={allPageAppendTargets}
+                            disabled={pagedRows.length === 0}
+                            onChange={(event) =>
+                              togglePageAppendTargets(event.target.checked)
+                            }
+                          />
                         <span className="font-medium">추가 대상</span>
                       </div>
                     </th>
@@ -745,7 +814,7 @@ export function InvoiceItemNameAiApplyBar({
                 </tr>
               </thead>
               <tbody>
-                {visibleRows.length === 0 ? (
+                {pagedRows.length === 0 ? (
                   <tr>
                     <td
                       colSpan={columnCount}
@@ -757,7 +826,7 @@ export function InvoiceItemNameAiApplyBar({
                     </td>
                   </tr>
                 ) : null}
-                {visibleRows.map((row, index) => {
+                {pagedRows.map((row, index) => {
                   const draft = editDraft?.key === row.key ? editDraft : null
                   const open = Boolean(draft)
                   const shown = bulk.draftByKey.get(row.key) ?? row
@@ -844,13 +913,13 @@ export function InvoiceItemNameAiApplyBar({
                             }
                             onEnter={(slotIndex) =>
                               quick.confirmAndMove(
-                                visibleRows,
+                                pagedRows,
                                 row.key,
                                 slotIndex,
                               )
                             }
                             onTab={(slotIndex) =>
-                              quick.moveRight(visibleRows, row.key, slotIndex)
+                              quick.moveRight(pagedRows, row.key, slotIndex)
                             }
                           />
                         </td>
@@ -1009,6 +1078,65 @@ export function InvoiceItemNameAiApplyBar({
               </tbody>
             </table>
           </div>
+          {visibleRows.length > 0 ? (
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+              <p className="text-muted-foreground">
+                검색 {formatNumber(visibleRows.length)}개 중{' '}
+                {formatNumber((paged.page - 1) * paged.pageSize + 1)}–
+                {formatNumber(
+                  Math.min(visibleRows.length, paged.page * paged.pageSize),
+                )}
+                행
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-1 text-muted-foreground">
+                  페이지 크기
+                  <select
+                    className="h-7 rounded-md border border-border bg-card px-1 text-xs"
+                    value={pageSize}
+                    onChange={(event) =>
+                      setPageSize(
+                        Number(event.target.value) as (typeof ITEM_NAME_AI_PAGE_SIZES)[number],
+                      )
+                    }
+                  >
+                    {ITEM_NAME_AI_PAGE_SIZES.map((size) => (
+                      <option key={size} value={size}>
+                        {size}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2"
+                  disabled={paged.page <= 1}
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                >
+                  이전
+                </Button>
+                <span className="tabular-nums text-muted-foreground">
+                  {formatNumber(paged.page)} / {formatNumber(paged.pageCount)}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2"
+                  disabled={paged.page >= paged.pageCount}
+                  onClick={() =>
+                    setPage((current) =>
+                      Math.min(paged.pageCount, current + 1),
+                    )
+                  }
+                >
+                  다음
+                </Button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 

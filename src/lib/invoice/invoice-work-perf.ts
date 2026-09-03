@@ -16,6 +16,10 @@ export type InvoiceWorkStage =
   | 'output'
   | 'product-ai'
   | 'item-ai'
+  | 'worker-clone'
+  | 'worker-compute'
+  | 'tab-commit'
+  | 'ai-review-render'
   | 'total'
 
 export type InvoiceWorkJob = {

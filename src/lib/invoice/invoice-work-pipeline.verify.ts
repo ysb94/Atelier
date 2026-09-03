@@ -8,6 +8,12 @@ import {
   snapshotInvoiceWork,
 } from '@/lib/invoice/invoice-work-pipeline'
 import {
+  collectItemNameLookupTexts,
+  collectOptionMapLookupCombos,
+  filterItemNameRulesForTexts,
+  filterOptionMapsForCombos,
+} from '@/lib/invoice/invoice-item-criteria-keys'
+import {
   INVOICE_WORK_LARGE_ROW_COUNT,
   INVOICE_WORK_SMALL_ROW_COUNT,
   buildInvoiceWorkFixtureInput,
@@ -208,21 +214,25 @@ const smallWorkerItem = runInvoiceItemNameStep(
 assertSameItemStep(smallWorkerItem, smallFirst.result.item, '소형 Worker 내품명 변환')
 
 const largeInput = buildInvoiceWorkFixtureInput(INVOICE_WORK_LARGE_ROW_COUNT)
-const catalog = catalogFromStyles(largeInput.styles)
-const productIndex = buildProductNameLookupIndex(
-  largeInput.productNameMaps,
-  largeInput.productNameTagRoles ?? [],
-)
-const itemIndex = buildItemNameTransformIndex(
-  largeInput.optionMaps ?? [],
-  largeInput.itemNameRules ?? [],
-  largeInput.styles,
-)
-const workIndex = buildWorkInstructionIndex(largeInput.workInstructions ?? [])
-const slots = collectGiftSourceSlots(
-  largeInput.rows,
-  largeInput.productNameTagRoles ?? [],
-)
+const indexBuild = measure(() => {
+  const catalog = catalogFromStyles(largeInput.styles)
+  const productIndex = buildProductNameLookupIndex(
+    largeInput.productNameMaps,
+    largeInput.productNameTagRoles ?? [],
+  )
+  const itemIndex = buildItemNameTransformIndex(
+    largeInput.optionMaps ?? [],
+    largeInput.itemNameRules ?? [],
+    largeInput.styles,
+  )
+  const workIndex = buildWorkInstructionIndex(largeInput.workInstructions ?? [])
+  const slots = collectGiftSourceSlots(
+    largeInput.rows,
+    largeInput.productNameTagRoles ?? [],
+  )
+  return { catalog, productIndex, itemIndex, workIndex, slots }
+})
+const { catalog, productIndex, itemIndex, workIndex, slots } = indexBuild.result
 const largeIndexed = measure(() =>
   runInvoiceWorkPipeline({
     ...largeInput,
@@ -246,6 +256,75 @@ assert(
 assert(
   largeIndexed.result.output.length >= INVOICE_WORK_LARGE_ROW_COUNT,
   '대형 최종 행 수',
+)
+
+const largeUiProduct = runInvoiceProductNameStep({
+  sourceRows: largeInput.rows,
+  maps: [],
+  styles: [],
+  tagRoles: largeInput.productNameTagRoles ?? [],
+  exclusions: largeInput.productNameExclusions ?? [],
+  giftSourcePlan: largeIndexed.result.unified.giftSourcePlan,
+  productLookupIndex: productIndex,
+  productCatalog: catalog,
+})
+assertSameProductStep(
+  largeUiProduct.base,
+  largeIndexed.result.baseProduct,
+  '대형 UI 색인 품목명 기본 변환',
+)
+assertSameProductStep(
+  largeUiProduct.product,
+  largeIndexed.result.product,
+  '대형 UI 색인 품목명 변환',
+)
+const largeUiItem = runInvoiceItemNameStep({
+  sourceRows: largeInput.rows,
+  optionMaps: [],
+  productRows: largeUiProduct.product.rows,
+  itemNameRules: [],
+  accessoryRules: largeInput.accessoryRules ?? [],
+  styles: [],
+  itemNameIndex: itemIndex,
+})
+assertSameItemStep(largeUiItem, largeIndexed.result.item, '대형 UI 색인 내품명 변환')
+
+const optionCombos = collectOptionMapLookupCombos(
+  largeInput.rows,
+  largeIndexed.result.product.rows,
+)
+const itemTexts = collectItemNameLookupTexts(
+  largeInput.rows,
+  largeIndexed.result.product.rows,
+)
+const scopedOptionMaps = filterOptionMapsForCombos(
+  largeInput.optionMaps ?? [],
+  optionCombos,
+)
+const scopedItemRules = filterItemNameRulesForTexts(
+  largeInput.itemNameRules ?? [],
+  itemTexts,
+)
+assert(
+  scopedOptionMaps.length <= (largeInput.optionMaps ?? []).length,
+  '파일 범위 옵션맵은 전체보다 많지 않다',
+)
+assert(
+  scopedItemRules.length <= (largeInput.itemNameRules ?? []).length,
+  '파일 범위 내품명 규칙은 전체보다 많지 않다',
+)
+const scopedItem = runInvoiceItemNameStep({
+  sourceRows: largeInput.rows,
+  optionMaps: scopedOptionMaps,
+  productRows: largeIndexed.result.product.rows,
+  itemNameRules: scopedItemRules,
+  accessoryRules: largeInput.accessoryRules ?? [],
+  styles: largeInput.styles,
+})
+assertSameItemStep(
+  scopedItem,
+  largeIndexed.result.item,
+  '파일 범위 내품명 기준과 전체 기준의 변환이 같다',
 )
 
 const largeWorkerProduct = runInvoiceProductNameStep(
@@ -328,13 +407,17 @@ const workerWouldHelp =
 console.log(
   JSON.stringify(
     {
+      rowCount: INVOICE_WORK_LARGE_ROW_COUNT,
       smallMs: Math.round(smallFirst.ms),
       smallRepeatMs: Math.round(smallSecond.ms),
+      indexBuildMs: Math.round(indexBuild.ms),
       largeIndexedMs: Math.round(largeIndexed.ms),
       largePlainMs: Math.round(largePlain.ms),
       smallParseMs: Math.round(smallParse.ms),
       largeParseMs: Math.round(largeParse.ms),
       cloneMs: Math.round(cloneCost.ms),
+      scopedOptionMaps: scopedOptionMaps.length,
+      scopedItemRules: scopedItemRules.length,
       recommendComputeWorker: workerWouldHelp,
       recommendParseWorker: largeParse.ms > 80,
     },

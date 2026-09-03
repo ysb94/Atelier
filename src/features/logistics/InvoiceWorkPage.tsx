@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -6,6 +7,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useTransition,
   type ReactNode,
 } from 'react'
 import { createPortal } from 'react-dom'
@@ -56,8 +58,10 @@ import {
   getInvoiceAccessoryRules,
   getInvoiceDiscontinuedStyles,
   getInvoiceItemNameRules,
+  getInvoiceItemNameRulesForItemNames,
   getInvoiceNameRules,
   getInvoiceOptionMaps,
+  getInvoiceOptionMapsForCombos,
   getInvoicePreorderHolds,
   getInvoiceProductNameExclusions,
   getInvoiceProductNameMaps,
@@ -95,6 +99,7 @@ import {
 } from '@/lib/invoice/invoice-output'
 import {
   buildOutgoingComponentRowsFromStages,
+  buildItemNameTransformIndex,
   type InvoiceItemNameTransformation,
 } from '@/lib/invoice/item-name-transform'
 import {
@@ -113,15 +118,31 @@ import {
 import {
   createInvoiceWorkJob,
   finishInvoiceWorkJob,
+  logInvoiceWork,
   markInvoiceWorkStage,
   timeInvoiceWork,
   type InvoiceWorkJob,
 } from '@/lib/invoice/invoice-work-perf'
 import {
+  collectItemNameLookupTexts,
+  collectOptionMapLookupCombos,
+} from '@/lib/invoice/invoice-item-criteria-keys'
+import {
+  INVOICE_ITEM_NAME_RULES_QUERY_KEY,
+  INVOICE_ITEM_NAME_RULES_WORK_QUERY_KEY,
+  INVOICE_OPTION_MAPS_QUERY_KEY,
+  INVOICE_OPTION_MAPS_WORK_QUERY_KEY,
+} from '@/lib/invoice/invoice-work-query-keys'
+import {
   collectProductNameCandidateTexts,
   invoiceLookupTextsSig,
 } from '@/lib/invoice/product-name-patterns'
-import { type InvoiceProductNameTransformation } from '@/lib/invoice/product-name-transform'
+import {
+  buildProductNameLookupIndex,
+  catalogFromStyles,
+  type InvoiceProductNameTransformation,
+} from '@/lib/invoice/product-name-transform'
+import type { ProductNameAiReviewRow } from '@/lib/invoice/product-name-ai-review'
 import {
   collectGiftSourceSlots,
   effectiveGiftSourceAppliedKeys,
@@ -198,16 +219,6 @@ function prefetchInvoiceWorkCriteria(
     queryClient.prefetchQuery({
       queryKey: ['invoice-name-rules', brandId],
       queryFn: () => getInvoiceNameRules(brandId),
-      ...options,
-    }),
-    queryClient.prefetchQuery({
-      queryKey: ['invoice-option-maps', brandId],
-      queryFn: () => getInvoiceOptionMaps(brandId),
-      ...options,
-    }),
-    queryClient.prefetchQuery({
-      queryKey: ['invoice-item-name-rules', brandId],
-      queryFn: () => getInvoiceItemNameRules(brandId),
       ...options,
     }),
     queryClient.prefetchQuery({
@@ -1050,17 +1061,24 @@ function isStepComputeSettled(status: InvoiceStepComputeStatus) {
   return status === 'ready' || status === 'error'
 }
 
+const EMPTY_STYLE_REFS: StyleRef[] = []
+
 function TodayStepProgress({
   stepIndex,
   maxStepIndex,
+  pending,
   onChange,
 }: {
   stepIndex: number
   maxStepIndex: number
+  pending?: boolean
   onChange: (step: TodayStep) => void
 }) {
   return (
-    <div className="flex items-stretch gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border pb-px">
+    <div
+      className="flex items-stretch gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border pb-px"
+      aria-busy={pending || undefined}
+    >
       {TODAY_STEPS.map((item, index) => {
         const active = index === stepIndex
         const reachable = index <= maxStepIndex
@@ -1093,6 +1111,9 @@ function TodayStepProgress({
               </span>
             )}
             {item.label}
+            {pending && active ? (
+              <span className="text-[10px] text-muted-foreground">전환 중</span>
+            ) : null}
           </button>
         )
       })}
@@ -1202,7 +1223,7 @@ function StepCriteriaError({
 }
 
 /** 한 번 열어본 단계는 숨겨만 둔다. 탭을 옮겨도 검수표·초안이 남는다. */
-function TodayStepPanel({
+const TodayStepPanel = memo(function TodayStepPanel({
   active,
   keepMounted,
   children,
@@ -1217,7 +1238,7 @@ function TodayStepPanel({
       {children}
     </div>
   )
-}
+})
 
 function StepSnapshotButton({
   stage,
@@ -1304,6 +1325,7 @@ export function InvoiceWorkPage() {
   const workJobRef = useRef<InvoiceWorkJob | null>(null)
   const [workGeneration, setWorkGeneration] = useState(0)
   const [step, setStep] = useState<TodayStep>('upload')
+  const [isStepPending, startStepTransition] = useTransition()
   const [reachedStepIndex, setReachedStepIndex] = useState(0)
   const [giftExclusionSig, setGiftExclusionSig] = useState('')
   const [inspection, setInspection] = useState<SabangnetInspection | null>(null)
@@ -1337,15 +1359,15 @@ export function InvoiceWorkPage() {
     ...criteriaQueryOptions,
   })
   const optionMapsQuery = useQuery({
-    queryKey: ['invoice-option-maps', brand.id],
+    queryKey: [INVOICE_OPTION_MAPS_QUERY_KEY, brand.id],
     queryFn: () => getInvoiceOptionMaps(brand.id),
-    enabled: rulesView || reachedItem,
+    enabled: rulesView,
     ...criteriaQueryOptions,
   })
   const itemNameRulesQuery = useQuery({
-    queryKey: ['invoice-item-name-rules', brand.id],
+    queryKey: [INVOICE_ITEM_NAME_RULES_QUERY_KEY, brand.id],
     queryFn: () => getInvoiceItemNameRules(brand.id),
-    enabled: rulesView || reachedItem,
+    enabled: rulesView,
     ...criteriaQueryOptions,
   })
   const accessoryRulesQuery = useQuery({
@@ -1520,26 +1542,6 @@ export function InvoiceWorkPage() {
     nameRulesQuery.error,
     nameRulesQuery.isSuccess,
   ])
-  const optionMaps = useMemo(
-    () => optionMapsQuery.data ?? [],
-    [optionMapsQuery.data],
-  )
-  const optionMapsError =
-    optionMapsQuery.error instanceof Error
-      ? optionMapsQuery.error.message
-      : optionMapsQuery.error
-        ? '내품명 변환 기준을 불러오지 못했습니다.'
-        : null
-  const itemNameRules = useMemo(
-    () => itemNameRulesQuery.data ?? [],
-    [itemNameRulesQuery.data],
-  )
-  const itemNameRulesError =
-    itemNameRulesQuery.error instanceof Error
-      ? itemNameRulesQuery.error.message
-      : itemNameRulesQuery.error
-        ? '내품명 규칙을 불러오지 못했습니다.'
-        : null
   const accessoryRules = useMemo(
     () => accessoryRulesQuery.data ?? [],
     [accessoryRulesQuery.data],
@@ -1550,12 +1552,6 @@ export function InvoiceWorkPage() {
       : accessoryRulesQuery.error
         ? '부속품 사전을 불러오지 못했습니다.'
         : null
-  const itemNameCriteriaError =
-    optionMapsError || itemNameRulesError || accessoryRulesError
-  const itemNameCriteriaLoading =
-    optionMapsQuery.isLoading ||
-    itemNameRulesQuery.isLoading ||
-    accessoryRulesQuery.isLoading
   const rulesProductNameMaps = useMemo(
     () => rulesProductNameMapsQuery.data ?? [],
     [rulesProductNameMapsQuery.data],
@@ -1695,8 +1691,6 @@ export function InvoiceWorkPage() {
     ...criteriaQueryOptions,
   })
   // 규칙 저장 직후 수천 행 재변환이 입력을 막지 않도록 한 박자 늦춰 계산한다.
-  const deferredOptionMaps = useDeferredValue(optionMaps)
-  const deferredItemNameRules = useDeferredValue(itemNameRules)
   const deferredAccessoryRules = useDeferredValue(accessoryRules)
   const deferredProductNameMaps = useDeferredValue(productNameMaps)
   const deferredProductNameExclusions = useDeferredValue(productNameExclusions)
@@ -1781,11 +1775,6 @@ export function InvoiceWorkPage() {
     productNameTagRolesQuery.isSuccess &&
     productStyleLookupQuery.isSuccess &&
     giftSourceCriteriaReady
-  const itemQueriesReady =
-    optionMapsQuery.isSuccess &&
-    itemNameRulesQuery.isSuccess &&
-    accessoryRulesQuery.isSuccess &&
-    productStyleLookupQuery.isSuccess
   const giftSourceSlots = useMemo(() => {
     if (!inspection) return []
     return collectGiftSourceSlots(
@@ -1931,6 +1920,45 @@ export function InvoiceWorkPage() {
       .map((group) => `${group.key}:${group.status}`)
       .join(',')
   }
+  const productMapsSig = useMemo(
+    () =>
+      invoiceLookupTextsSig(
+        deferredProductNameMaps.map(
+          (map) => `${map.id}:${map.updatedAt}:${map.style?.styleId ?? ''}`,
+        ),
+      ),
+    [deferredProductNameMaps],
+  )
+  const productExclusionContentSig = useMemo(
+    () =>
+      invoiceLookupTextsSig(
+        deferredProductNameExclusions.map(
+          (item) => `${item.id}:${item.updatedAt}`,
+        ),
+      ),
+    [deferredProductNameExclusions],
+  )
+  const productTagRoleSig = useMemo(
+    () =>
+      invoiceLookupTextsSig(
+        deferredProductNameTagRoles.map(
+          (item) => `${item.id}:${item.role}:${item.updatedAt}`,
+        ),
+      ),
+    [deferredProductNameTagRoles],
+  )
+  const productLookupIndex = useMemo(
+    () =>
+      buildProductNameLookupIndex(
+        deferredProductNameMaps,
+        deferredProductNameTagRoles,
+      ),
+    [deferredProductNameMaps, deferredProductNameTagRoles],
+  )
+  const productCatalog = useMemo(
+    () => catalogFromStyles(productStyleLookupQuery.data ?? EMPTY_STYLE_REFS),
+    [productStyleLookupQuery.data],
+  )
   const productCompute = useInvoiceStepCompute({
     enabled:
       Boolean(inspection) &&
@@ -1939,13 +1967,9 @@ export function InvoiceWorkPage() {
     depsKey: invoiceStepDepsKey([
       fileName,
       inspection?.rowCount,
-      workProductNameMapsQuery.dataUpdatedAt,
-      deferredProductNameMaps.length,
-      productNameExclusionsQuery.dataUpdatedAt,
-      deferredProductNameExclusions.length,
-      productNameTagRolesQuery.dataUpdatedAt,
-      deferredProductNameTagRoles.length,
-      productStyleLookupQuery.dataUpdatedAt,
+      productMapsSig,
+      productExclusionContentSig,
+      productTagRoleSig,
       productStyleLookupQuery.data?.length,
       giftSourceSigRef.current,
     ]),
@@ -1955,11 +1979,13 @@ export function InvoiceWorkPage() {
     compute: () =>
       computeInvoiceProductNameStep({
         sourceRows: inspection!.rows,
-        maps: deferredProductNameMaps,
-        styles: productStyleLookupQuery.data ?? [],
+        maps: [],
+        styles: [],
         tagRoles: deferredProductNameTagRoles,
         exclusions: deferredProductNameExclusions,
         giftSourcePlan: giftSourcePlanRef.current,
+        productLookupIndex,
+        productCatalog,
       }),
   })
   if (productCompute.result) {
@@ -1971,6 +1997,128 @@ export function InvoiceWorkPage() {
     productCompute.result?.base ?? productCacheRef.current?.base ?? null
   const productTransformation =
     productCompute.result?.product ?? productCacheRef.current?.product ?? null
+  const optionMapCombos = useMemo(
+    () =>
+      inspection
+        ? collectOptionMapLookupCombos(
+            inspection.rows,
+            productTransformation?.rows,
+          )
+        : [],
+    [inspection, productTransformation],
+  )
+  const optionMapComboSig = useMemo(
+    () =>
+      invoiceLookupTextsSig(
+        optionMapCombos.map(
+          (combo) =>
+            `${combo.mallName}\u0000${combo.productName}\u0000${combo.itemName}`,
+        ),
+      ),
+    [optionMapCombos],
+  )
+  const itemNameLookupTexts = useMemo(
+    () =>
+      inspection
+        ? collectItemNameLookupTexts(
+            inspection.rows,
+            productTransformation?.rows,
+          )
+        : [],
+    [inspection, productTransformation],
+  )
+  const itemNameLookupSig = useMemo(
+    () => invoiceLookupTextsSig(itemNameLookupTexts),
+    [itemNameLookupTexts],
+  )
+  const workOptionMapsQuery = useQuery({
+    queryKey: [INVOICE_OPTION_MAPS_WORK_QUERY_KEY, brand.id, optionMapComboSig],
+    queryFn: () => getInvoiceOptionMapsForCombos(brand.id, optionMapCombos),
+    enabled:
+      reachedItem && Boolean(inspection) && Boolean(productTransformation),
+    ...criteriaQueryOptions,
+  })
+  const workItemNameRulesQuery = useQuery({
+    queryKey: [
+      INVOICE_ITEM_NAME_RULES_WORK_QUERY_KEY,
+      brand.id,
+      itemNameLookupSig,
+    ],
+    queryFn: () =>
+      getInvoiceItemNameRulesForItemNames(brand.id, itemNameLookupTexts),
+    enabled:
+      reachedItem && Boolean(inspection) && Boolean(productTransformation),
+    ...criteriaQueryOptions,
+  })
+  const optionMaps = useMemo(
+    () =>
+      (rulesView ? optionMapsQuery.data : workOptionMapsQuery.data) ?? [],
+    [optionMapsQuery.data, rulesView, workOptionMapsQuery.data],
+  )
+  const itemNameRules = useMemo(
+    () =>
+      (rulesView ? itemNameRulesQuery.data : workItemNameRulesQuery.data) ??
+      [],
+    [itemNameRulesQuery.data, rulesView, workItemNameRulesQuery.data],
+  )
+  const deferredOptionMaps = useDeferredValue(optionMaps)
+  const deferredItemNameRules = useDeferredValue(itemNameRules)
+  const optionMapsError = (() => {
+    const error = rulesView ? optionMapsQuery.error : workOptionMapsQuery.error
+    if (!error) return null
+    return error instanceof Error
+      ? error.message
+      : '내품명 변환 기준을 불러오지 못했습니다.'
+  })()
+  const itemNameRulesError = (() => {
+    const error = rulesView
+      ? itemNameRulesQuery.error
+      : workItemNameRulesQuery.error
+    if (!error) return null
+    return error instanceof Error
+      ? error.message
+      : '내품명 규칙을 불러오지 못했습니다.'
+  })()
+  const itemNameCriteriaError =
+    optionMapsError || itemNameRulesError || accessoryRulesError
+  const itemNameCriteriaLoading =
+    (rulesView
+      ? optionMapsQuery.isLoading || itemNameRulesQuery.isLoading
+      : workOptionMapsQuery.isLoading || workItemNameRulesQuery.isLoading) ||
+    accessoryRulesQuery.isLoading
+  const itemQueriesReady =
+    (rulesView
+      ? optionMapsQuery.isSuccess && itemNameRulesQuery.isSuccess
+      : workOptionMapsQuery.isSuccess && workItemNameRulesQuery.isSuccess) &&
+    accessoryRulesQuery.isSuccess &&
+    productStyleLookupQuery.isSuccess
+  const optionMapsContentSig = useMemo(
+    () =>
+      invoiceLookupTextsSig(
+        deferredOptionMaps.map((map) => `${map.id}:${map.updatedAt}`),
+      ),
+    [deferredOptionMaps],
+  )
+  const itemNameRulesContentSig = useMemo(
+    () =>
+      invoiceLookupTextsSig(
+        deferredItemNameRules.map((rule) => `${rule.id}:${rule.updatedAt}`),
+      ),
+    [deferredItemNameRules],
+  )
+  const itemNameIndex = useMemo(
+    () =>
+      buildItemNameTransformIndex(
+        deferredOptionMaps,
+        deferredItemNameRules,
+        productStyleLookupQuery.data ?? EMPTY_STYLE_REFS,
+      ),
+    [
+      deferredItemNameRules,
+      deferredOptionMaps,
+      productStyleLookupQuery.data,
+    ],
+  )
   const excludedRowSignature = useMemo(() => {
     if (!baseProductTransformation) return ''
     return baseProductTransformation.rows
@@ -2037,12 +2185,14 @@ export function InvoiceWorkPage() {
       planWorkInstructions(processRows, workInstructions, workInstructionIndex),
   })
   const workPlan = workCompute.result
+  const itemCriteriaQueryError = rulesView
+    ? optionMapsQuery.error || itemNameRulesQuery.error
+    : workOptionMapsQuery.error || workItemNameRulesQuery.error
   const canComputeItemTransformation = Boolean(
     inspection &&
       productTransformation &&
       itemQueriesReady &&
-      !optionMapsQuery.error &&
-      !itemNameRulesQuery.error &&
+      !itemCriteriaQueryError &&
       !accessoryRulesQuery.error &&
       !productStyleLookupQuery.error,
   )
@@ -2056,21 +2206,20 @@ export function InvoiceWorkPage() {
         () =>
           runInvoiceItemNameStep({
             sourceRows: inspection.rows,
-            optionMaps: deferredOptionMaps,
+            optionMaps: [],
             productRows: productTransformation.rows,
-            itemNameRules: deferredItemNameRules,
+            itemNameRules: [],
             accessoryRules: deferredAccessoryRules,
-            styles: productStyleLookupQuery.data ?? [],
+            styles: [],
+            itemNameIndex,
           }),
         workJobRef.current,
       )
     }, [
       canComputeItemTransformation,
       deferredAccessoryRules,
-      deferredItemNameRules,
-      deferredOptionMaps,
       inspection,
-      productStyleLookupQuery.data,
+      itemNameIndex,
       productTransformation,
     ])
   const itemCacheRef = useRef<InvoiceItemNameTransformation | null>(null)
@@ -2086,14 +2235,10 @@ export function InvoiceWorkPage() {
       productTransformation?.unresolvedRowCount,
       productTransformation?.excludedRowCount,
       productTransformation?.giftMappedRowCount,
-      workProductNameMapsQuery.dataUpdatedAt,
-      optionMapsQuery.dataUpdatedAt,
-      deferredOptionMaps.length,
-      itemNameRulesQuery.dataUpdatedAt,
-      deferredItemNameRules.length,
+      optionMapsContentSig,
+      itemNameRulesContentSig,
       accessoryRulesQuery.dataUpdatedAt,
       deferredAccessoryRules.length,
-      productStyleLookupQuery.dataUpdatedAt,
       productStyleLookupQuery.data?.length,
     ]),
     label: 'item-transform',
@@ -2105,11 +2250,12 @@ export function InvoiceWorkPage() {
       }
       return computeInvoiceItemNameStep({
         sourceRows: inspection.rows,
-        optionMaps: deferredOptionMaps,
+        optionMaps: [],
         productRows: productTransformation.rows,
-        itemNameRules: deferredItemNameRules,
+        itemNameRules: [],
         accessoryRules: deferredAccessoryRules,
-        styles: productStyleLookupQuery.data ?? [],
+        styles: [],
+        itemNameIndex,
       })
     },
   })
@@ -2393,6 +2539,13 @@ export function InvoiceWorkPage() {
     },
     [workGeneration],
   )
+  const handleOpenGiftSetup = useCallback((row: ProductNameAiReviewRow) => {
+    setGiftSourceError(null)
+    setGiftSetupTarget({
+      mallName: row.mallName,
+      productName: row.productName,
+    })
+  }, [])
   const handleItemAiSettled = useCallback(() => {
     if (workGenerationRef.current !== workGeneration) return
     markInvoiceWorkStage(workJobRef.current, 'item-ai')
@@ -2614,7 +2767,10 @@ export function InvoiceWorkPage() {
     ) {
       return
     }
-    setStep(next)
+    logInvoiceWork('tab-commit', { from: step, to: next })
+    startStepTransition(() => {
+      setStep(next)
+    })
   }
 
   function goNextStep(next: TodayStep) {
@@ -2859,6 +3015,7 @@ export function InvoiceWorkPage() {
             <TodayStepProgress
               stepIndex={stepIndex}
               maxStepIndex={maxStepIndex}
+              pending={isStepPending}
               onChange={changeTodayStep}
             />
           </div>
@@ -3436,13 +3593,7 @@ export function InvoiceWorkPage() {
                     onAutoCollectSettled={handleProductAiSettled}
                     onBlockingSaveCountChange={setProductSaveBlockCount}
                     giftGroups={giftSourcePlan.groups}
-                    onOpenGiftSetup={(row) => {
-                      setGiftSourceError(null)
-                      setGiftSetupTarget({
-                        mallName: row.mallName,
-                        productName: row.productName,
-                      })
-                    }}
+                    onOpenGiftSetup={handleOpenGiftSetup}
                   />
                 ) : null}
 
@@ -3527,6 +3678,8 @@ export function InvoiceWorkPage() {
                     onRetry={() => {
                       void optionMapsQuery.refetch()
                       void itemNameRulesQuery.refetch()
+                      void workOptionMapsQuery.refetch()
+                      void workItemNameRulesQuery.refetch()
                       void accessoryRulesQuery.refetch()
                     }}
                   />
@@ -3538,7 +3691,7 @@ export function InvoiceWorkPage() {
                     transformation={itemTransformation}
                     itemNameRules={itemNameRules}
                     accessoryRules={accessoryRules}
-                    styles={productStyleLookupQuery.data ?? []}
+                    styles={productStyleLookupQuery.data ?? EMPTY_STYLE_REFS}
                     renderUi={activeStep === 'item' && workspaceActive}
                     autoCollect={itemAiAutoCollect}
                     autoCollectKey={`${fileName}:${workGeneration}`}
@@ -3688,6 +3841,8 @@ export function InvoiceWorkPage() {
                     onRetry={() => {
                       void optionMapsQuery.refetch()
                       void itemNameRulesQuery.refetch()
+                      void workOptionMapsQuery.refetch()
+                      void workItemNameRulesQuery.refetch()
                       void accessoryRulesQuery.refetch()
                     }}
                   />
@@ -3762,6 +3917,8 @@ export function InvoiceWorkPage() {
                     onRetry={() => {
                       void workProductNameMapsQuery.refetch()
                       void optionMapsQuery.refetch()
+                      void workOptionMapsQuery.refetch()
+                      void workItemNameRulesQuery.refetch()
                     }}
                   />
                 ) : outputCompute.result &&

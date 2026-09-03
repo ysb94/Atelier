@@ -8,7 +8,7 @@ import type {
 } from '@/lib/types'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
 import { getSupabase } from '@/lib/supabase/client'
-import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
+import { errorMessage, isMissingRpc, isUniqueViolation } from '@/lib/supabase/map-error'
 import { fetchAllPages } from '@/lib/supabase/paged-select'
 
 const RULE_COLUMNS =
@@ -20,6 +20,7 @@ const MAIN_STYLE_EMBED =
   'styles!invoice_item_name_rules_main_style_fkey(id, style_no, name)'
 const RULE_SELECT = `${RULE_COLUMNS}, ${MAIN_STYLE_EMBED}, ${COMPONENT_EMBED}`
 const PAGE_SIZE = 1000
+const LOOKUP_CHUNK = 400
 
 type StyleEmbed = {
   id: string
@@ -307,6 +308,81 @@ async function fetchRule(id: string): Promise<InvoiceItemNameRule> {
     throw new InvoiceItemNameRuleStoreError('내품명 규칙을 읽지 못했습니다.')
   }
   return rule
+}
+
+function chunked<T>(items: T[], size = LOOKUP_CHUNK): T[][] {
+  const out: T[][] = []
+  for (let start = 0; start < items.length; start += size) {
+    out.push(items.slice(start, start + size))
+  }
+  return out
+}
+
+async function listInvoiceItemNameRulesByIds(
+  ids: string[],
+): Promise<InvoiceItemNameRule[]> {
+  if (ids.length === 0) return []
+  const supabase = getSupabase()
+  const byId = new Map<string, InvoiceItemNameRule>()
+  for (const chunk of chunked(ids, 200)) {
+    const { data, error } = await supabase
+      .from('invoice_item_name_rules')
+      .select(RULE_SELECT)
+      .in('id', chunk)
+    if (error) {
+      throw new InvoiceItemNameRuleStoreError(
+        errorMessage(error, '내품명 규칙을 불러오지 못했습니다.'),
+      )
+    }
+    for (const row of (data as RuleRow[]) ?? []) {
+      const rule = toRule(row)
+      if (rule) byId.set(rule.id, rule)
+    }
+  }
+  return [...byId.values()]
+}
+
+export async function listInvoiceItemNameRulesForItemNames(
+  brandId: string,
+  itemNames: string[],
+): Promise<InvoiceItemNameRule[]> {
+  const unique = [
+    ...new Set(itemNames.map((text) => text.trim()).filter(Boolean)),
+  ]
+  if (unique.length === 0) return []
+  const supabase = getSupabase()
+  const byId = new Map<string, InvoiceItemNameRule>()
+  try {
+    for (const chunk of chunked(unique)) {
+      const { data, error } = await supabase.rpc(
+        'list_invoice_item_name_rule_ids_for_names',
+        {
+          p_brand_id: brandId,
+          p_item_names: chunk,
+        },
+      )
+      if (error) {
+        if (isMissingRpc(error)) {
+          return listInvoiceItemNameRules(brandId, { activeOnly: true })
+        }
+        throw new InvoiceItemNameRuleStoreError(
+          errorMessage(error, '내품명 규칙을 불러오지 못했습니다.'),
+        )
+      }
+      const ids = ((data as Array<{ id: string }> | null) ?? []).map(
+        (row) => row.id,
+      )
+      for (const rule of await listInvoiceItemNameRulesByIds(ids)) {
+        byId.set(rule.id, rule)
+      }
+    }
+    return [...byId.values()]
+  } catch (error) {
+    if (isMissingRpc(error as { code?: string; message?: string })) {
+      return listInvoiceItemNameRules(brandId, { activeOnly: true })
+    }
+    throw error
+  }
 }
 
 export async function listInvoiceItemNameRules(

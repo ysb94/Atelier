@@ -51,8 +51,40 @@ export function lookupKeyRowKey(
   return `${normalizeInvoiceText(productLookupKey)}\u0000${styleId ?? '__none__'}`
 }
 
-function findLookupKeyRule(
+export function lookupKeyRuleIndexKey(
+  itemName: string,
+  styleId: string | null,
+  productLookupKey: string,
+) {
+  return [
+    normalizeInvoiceText(itemName),
+    styleId ?? '',
+    normalizeInvoiceText(productLookupKey),
+  ].join('\u0000')
+}
+
+export function indexInvoiceItemNameLookupKeyRules(
   rules: InvoiceItemNameRule[],
+) {
+  const byKey = new Map<string, InvoiceItemNameRule>()
+  for (const rule of rules) {
+    if (!rule.isActive || rule.scope !== 'lookup_key') continue
+    const styleId = rule.mainStyle?.styleId ?? null
+    if (!styleId || !rule.normalizedItemName || !rule.normalizedProductLookupKey) {
+      continue
+    }
+    const key = lookupKeyRuleIndexKey(
+      rule.normalizedItemName,
+      styleId,
+      rule.normalizedProductLookupKey,
+    )
+    if (!byKey.has(key)) byKey.set(key, rule)
+  }
+  return byKey
+}
+
+function findLookupKeyRule(
+  rules: InvoiceItemNameRule[] | ReadonlyMap<string, InvoiceItemNameRule>,
   itemName: string,
   styleId: string | null,
   productLookupKey: string,
@@ -60,6 +92,10 @@ function findLookupKeyRule(
   const item = normalizeInvoiceText(itemName)
   const lookup = normalizeInvoiceText(productLookupKey)
   if (!item || !styleId || !lookup) return null
+  const key = lookupKeyRuleIndexKey(item, styleId, lookup)
+  if (rules instanceof Map || !Array.isArray(rules)) {
+    return rules.get(key) ?? null
+  }
   return (
     rules.find(
       (rule) =>
@@ -76,6 +112,7 @@ export function buildInvoiceItemNameLookupKeyRows(
   combos: UnresolvedItemNameCombo[],
   itemName: string,
   rules: InvoiceItemNameRule[],
+  ruleIndex?: ReadonlyMap<string, InvoiceItemNameRule>,
 ): InvoiceItemNameLookupKeyRow[] {
   const byKey = new Map<
     string,
@@ -113,6 +150,7 @@ export function buildInvoiceItemNameLookupKeyRows(
     })
   }
 
+  const lookupRules = ruleIndex ?? indexInvoiceItemNameLookupKeyRules(rules)
   return [...byKey.entries()]
     .map(([key, item]) => {
       const lookup = item.productLookupKey.trim()
@@ -132,7 +170,7 @@ export function buildInvoiceItemNameLookupKeyRows(
         selectable: Boolean(lookup && item.style),
         disabledReason,
         existingRule: findLookupKeyRule(
-          rules,
+          lookupRules,
           itemName,
           item.style?.styleId ?? null,
           item.productLookupKey,

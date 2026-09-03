@@ -1241,3 +1241,10 @@ export function formatItemNameAiExpected(row: ItemNameAiReviewRow) {
   if (row.action === 'delete') return '내품명을 비움'
   return formatItemNameFromComponents(row.components)
 }
+
+export const ITEM_NAME_AI_PAGE_SIZES = [20, 50, 100] as const
+
+export {
+  clampInvoiceReviewPage as clampItemNameAiReviewPage,
+  paginateInvoiceReviewKeys as paginateItemNameAiReviewKeys,
+} from '@/lib/invoice/invoice-review-page'

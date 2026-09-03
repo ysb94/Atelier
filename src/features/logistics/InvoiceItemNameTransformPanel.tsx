@@ -1,4 +1,11 @@
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  memo,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react'
 import { Download } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,6 +33,7 @@ import {
 import {
   InvoiceItemNameLookupKeyTable,
   buildInvoiceItemNameLookupKeyRows,
+  indexInvoiceItemNameLookupKeyRules,
 } from './InvoiceItemNameLookupKeyTable'
 import { InvoiceTablePager } from './invoice-table-page'
 import { useInvoiceTablePage } from './useInvoiceTablePage'
@@ -199,7 +207,33 @@ function pickNextSelection(
   }
 }
 
-export function InvoiceItemNameTransformPanel({
+function collectReviewEntries(
+  groups: ItemReviewGroup[],
+  itemNameRules: InvoiceItemNameRule[],
+): InvoiceItemNameReviewEntry[] {
+  const ruleIndex = indexInvoiceItemNameLookupKeyRules(itemNameRules)
+  const entries: InvoiceItemNameReviewEntry[] = []
+  for (const group of groups) {
+    const lookupRows = buildInvoiceItemNameLookupKeyRows(
+      group.combos,
+      group.itemName,
+      itemNameRules,
+      ruleIndex,
+    )
+    for (const row of lookupRows) {
+      if (!row.selectable || row.existingRule) continue
+      entries.push({
+        itemName: group.itemName,
+        productLookupKey: row.productLookupKey,
+        styleNo: row.style?.styleNo ?? '',
+        rowCount: row.rowCount,
+      })
+    }
+  }
+  return entries
+}
+
+export const InvoiceItemNameTransformPanel = memo(function InvoiceItemNameTransformPanel({
   brandId,
   brandName,
   transformation,
@@ -301,6 +335,7 @@ export function InvoiceItemNameTransformPanel({
     transformation.unresolvedRowCount + transformation.conflictRowCount
 
   const groups = useMemo(() => {
+    if (!renderUi) return []
     const q = deferredQuery.trim().toLocaleLowerCase('ko-KR')
     return groupCombos(combos)
       .map((group) => {
@@ -316,7 +351,7 @@ export function InvoiceItemNameTransformPanel({
         }
       })
       .filter((group): group is ItemReviewGroup => Boolean(group))
-  }, [combos, deferredQuery, status])
+  }, [combos, deferredQuery, renderUi, status])
 
   useEffect(() => {
     const next = pickNextSelection(
@@ -339,6 +374,7 @@ export function InvoiceItemNameTransformPanel({
     groups.find((group) => group.key === selectedGroupKey) ?? null
 
   const rows = useMemo(() => {
+    if (!renderUi || !previewOpen) return []
     const q = deferredQuery.trim().toLocaleLowerCase('ko-KR')
     return transformation.rows.filter((row) => {
       if (status !== 'all' && row.status !== status) return false
@@ -354,33 +390,11 @@ export function InvoiceItemNameTransformPanel({
         .toLocaleLowerCase('ko-KR')
         .includes(q)
     })
-  }, [deferredQuery, status, transformation.rows])
+  }, [deferredQuery, previewOpen, renderUi, status, transformation.rows])
   const previewPage = useInvoiceTablePage(
     rows,
     `${deferredQuery}\u0001${status}`,
   )
-
-  /** 검색·필터에 걸린 모든 내품명의 조회 키 중 아직 규칙이 없는 건만 모은다. */
-  const reviewEntries = useMemo<InvoiceItemNameReviewEntry[]>(() => {
-    const entries: InvoiceItemNameReviewEntry[] = []
-    for (const group of groups) {
-      const lookupRows = buildInvoiceItemNameLookupKeyRows(
-        group.combos,
-        group.itemName,
-        itemNameRules,
-      )
-      for (const row of lookupRows) {
-        if (!row.selectable || row.existingRule) continue
-        entries.push({
-          itemName: group.itemName,
-          productLookupKey: row.productLookupKey,
-          styleNo: row.style?.styleNo ?? '',
-          rowCount: row.rowCount,
-        })
-      }
-    }
-    return entries
-  }, [groups, itemNameRules])
 
   function selectGroup(group: ItemReviewGroup) {
     setSelectedGroupKey(group.key)
@@ -486,11 +500,19 @@ export function InvoiceItemNameTransformPanel({
                   type="button"
                   size="sm"
                   variant="outline"
-                  disabled={downloading || reviewEntries.length === 0}
+                  disabled={downloading || groups.length === 0}
                   onClick={async () => {
                     setDownloading(true)
                     setDownloadError(null)
                     try {
+                      const reviewEntries = collectReviewEntries(
+                        groups,
+                        itemNameRules,
+                      )
+                      if (reviewEntries.length === 0) {
+                        setDownloadError('내려받을 조회 키가 없습니다.')
+                        return
+                      }
                       await downloadInvoiceItemNameReviewList(
                         brandName,
                         reviewEntries,
@@ -507,9 +529,7 @@ export function InvoiceItemNameTransformPanel({
                   }}
                 >
                   <Download className="size-3.5" />
-                  {downloading
-                    ? '만드는 중...'
-                    : `검토 목록 내려받기 ${formatNumber(reviewEntries.length)}`}
+                  {downloading ? '만드는 중...' : '검토 목록 내려받기'}
                 </Button>
               </div>
 
@@ -673,7 +693,7 @@ export function InvoiceItemNameTransformPanel({
       </div>
     </div>
   )
-}
+})
 
 function ItemEditor({
   brandId,

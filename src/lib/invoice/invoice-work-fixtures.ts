@@ -272,4 +272,4 @@ export function buildInvoiceWorkFixtureInput(
 }
 
 export const INVOICE_WORK_SMALL_ROW_COUNT = 24
-export const INVOICE_WORK_LARGE_ROW_COUNT = 30_000
+export const INVOICE_WORK_LARGE_ROW_COUNT = 40_000

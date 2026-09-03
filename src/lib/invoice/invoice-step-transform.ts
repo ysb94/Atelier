@@ -3,8 +3,14 @@ import {
   catalogFromStyles,
   transformInvoiceProductNames,
   type InvoiceProductNameTransformation,
+  type ProductNameLookupIndex,
+  type ProductNameStyleCatalog,
 } from '@/lib/invoice/product-name-transform'
-import { transformInvoiceItemNames, type InvoiceItemNameTransformation } from '@/lib/invoice/item-name-transform'
+import {
+  transformInvoiceItemNames,
+  type InvoiceItemNameTransformation,
+  type ItemNameTransformIndex,
+} from '@/lib/invoice/item-name-transform'
 import type { GiftSourcePlan } from '@/lib/invoice/gift-source-transform'
 import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
 import type { InvoiceProductNameTransformRow } from '@/lib/invoice/product-name-transform'
@@ -25,6 +31,8 @@ export type InvoiceProductNameStepInput = {
   tagRoles: InvoiceProductNameTagRoleEntry[]
   exclusions: InvoiceProductNameExclusion[]
   giftSourcePlan: GiftSourcePlan
+  productLookupIndex?: ProductNameLookupIndex
+  productCatalog?: ProductNameStyleCatalog
 }
 
 export type InvoiceProductNameStepResult = {
@@ -39,17 +47,20 @@ export type InvoiceItemNameStepInput = {
   itemNameRules: InvoiceItemNameRule[]
   accessoryRules: InvoiceAccessoryRule[]
   styles: StyleRef[]
+  itemNameIndex?: ItemNameTransformIndex
 }
 
 export function runInvoiceProductNameStep(
   input: InvoiceProductNameStepInput,
 ): InvoiceProductNameStepResult {
+  const catalog = input.productCatalog ?? catalogFromStyles(input.styles)
   const base = transformInvoiceProductNames(
     input.sourceRows,
     input.maps,
-    catalogFromStyles(input.styles),
+    catalog,
     input.tagRoles,
     input.exclusions,
+    input.productLookupIndex,
   )
   return {
     base,
@@ -67,5 +78,6 @@ export function runInvoiceItemNameStep(
     input.itemNameRules,
     input.accessoryRules,
     input.styles,
+    input.itemNameIndex,
   )
 }
