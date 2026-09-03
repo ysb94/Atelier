@@ -8,6 +8,7 @@ import {
 import { createSlotGate, withRecommendSlot } from '@/lib/ai/recommend-queue'
 import {
   getAiFeatureRoute,
+  isFatalAiError,
   recommendInvoiceProduct,
   searchInvoiceProductCandidates,
 } from '@/lib/api'
@@ -472,6 +473,7 @@ export function useInvoiceProductNameBulkAiApply({
     const requestKeys = new Set(requests.map((combo) => combo.key))
     let cursor = 0
     let done = 0
+    let fatalMessage: string | null = null
     const searchGate = createSlotGate(SEARCH_WORKERS)
     const searchCache = new Map<string, Promise<AiProductCandidate[]>>()
     const search = (lookupKeys: string[]) => {
@@ -487,6 +489,10 @@ export function useInvoiceProductNameBulkAiApply({
 
     const collectOne = async (row: ProductNameAiReviewRow) => {
       if (row.holdReason === 'exclusion_guarded') return row
+      // 크레딧·키 오류가 한 번 나오면 남은 행은 묻지 않는다.
+      if (fatalMessage) {
+        return markProductNameAiCollectFailure(row, 'failed', fatalMessage)
+      }
       const source = comboByKey.get(row.key)
       const lookupKeys = productNameAiSearchKeys(row)
       const searchKeys = productNameAiCandidateSearchKeys(row)
@@ -513,10 +519,15 @@ export function useInvoiceProductNameBulkAiApply({
           minConfidence,
         )
       } catch (error) {
+        if (isFatalAiError(error)) fatalMessage = error.actionMessage
         return markProductNameAiCollectFailure(
           row,
           'failed',
-          error instanceof Error ? error.message : '추천을 받지 못했습니다.',
+          isFatalAiError(error)
+            ? error.actionMessage
+            : error instanceof Error
+              ? error.message
+              : '추천을 받지 못했습니다.',
         )
       }
     }

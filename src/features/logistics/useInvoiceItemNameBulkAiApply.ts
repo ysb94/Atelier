@@ -16,6 +16,7 @@ import {
 import { createSlotGate, withRecommendSlot } from '@/lib/ai/recommend-queue'
 import {
   getAiFeatureRoute,
+  isFatalAiError,
   recommendInvoiceItemNameRules,
   saveInvoiceItemNameRules,
   searchInvoiceItemNameCases,
@@ -338,6 +339,7 @@ export function useInvoiceItemNameBulkAiApply({
     const decidedIds = new Set<string>()
     let cursor = 0
     let done = 0
+    let fatalMessage: string | null = null
 
     const searchGate = createSlotGate(CANDIDATE_WORKERS)
     const searchCache = new Map<string, Promise<AiProductCandidate[]>>()
@@ -459,6 +461,11 @@ export function useInvoiceItemNameBulkAiApply({
         const batch = batches[index]
         if (!batch) return
         cursor += 1
+        // 크레딧·키 오류가 한 번 나오면 남은 배치는 묻지 않는다.
+        if (fatalMessage) {
+          publish(holdsFor(batch, fatalMessage))
+          continue
+        }
         const settled = await prepared[index]!
         if (cancelRef.current) return
         if (!settled.ok) {
@@ -581,12 +588,15 @@ export function useInvoiceItemNameBulkAiApply({
             },
           )
         } catch (error) {
+          if (isFatalAiError(error)) fatalMessage = error.actionMessage
           publish(
             holdsFor(
               batch,
-              error instanceof Error
-                ? error.message
-                : '추천을 받지 못했습니다.',
+              isFatalAiError(error)
+                ? error.actionMessage
+                : error instanceof Error
+                  ? error.message
+                  : '추천을 받지 못했습니다.',
             ),
           )
         }

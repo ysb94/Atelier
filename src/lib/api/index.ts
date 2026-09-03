@@ -100,7 +100,7 @@ import type { PreparedWarehouseImportRow } from '@/lib/warehouse/stock'
 const delay = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms))
 
 export { AiCandidateStoreError } from '@/lib/supabase/ai-candidates'
-export { AiGatewayError } from '@/lib/supabase/ai-gateway'
+export { AiGatewayError, isFatalAiError } from '@/lib/supabase/ai-gateway'
 export { AiSettingsStoreError } from '@/lib/supabase/ai-settings'
 export { BrandStoreError } from '@/lib/supabase/brands'
 export { BrandFieldStoreError } from '@/lib/supabase/brand-fields'

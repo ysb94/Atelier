@@ -7,6 +7,7 @@ import {
   buildLocalRecommendation,
   buildRecommendPrompt,
   clampTextList,
+  classifyProviderFailure,
   evaluateHybridDecision,
   extractJsonObject,
   isAiProvider,
@@ -125,10 +126,24 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: '지원하지 않는 action입니다.' }, 400)
   } catch (error) {
     const message = error instanceof Error ? error.message : 'AI 게이트웨이 오류'
+    const missingSecret =
+      error && typeof error === 'object' && 'missingSecret' in error
+        ? String((error as { missingSecret?: unknown }).missingSecret ?? '')
+        : ''
+    // 결제·키 오류는 남은 요청을 계속 보내도 같은 실패라 클라이언트가 바로 멈추게 한다.
+    const failureKind = classifyProviderFailure(message)
     const status = /API 키|로그인이|브랜드|설정|action|provider|모델/i.test(message)
       ? 400
       : 500
-    return json({ ok: false, error: message }, status)
+    return json(
+      {
+        ok: false,
+        error: message,
+        ...(missingSecret ? { missingSecret } : {}),
+        ...(failureKind ? { failureKind, fatal: true } : {}),
+      },
+      status,
+    )
   }
 })
 

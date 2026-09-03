@@ -140,6 +140,31 @@ export function missingKeyError(provider: AiProvider) {
   }
 }
 
+export type AiProviderFailure = 'billing' | 'auth' | 'quota'
+
+/**
+ * 다시 물어도 결과가 같은 제공자 오류. 남은 요청까지 보내면 시간만 버린다.
+ */
+export function classifyProviderFailure(
+  message: string,
+): AiProviderFailure | null {
+  const text = message.toLocaleLowerCase('en-US')
+  if (
+    /credit|billing|insufficient|payment|out of balance|prepayment/.test(text)
+  ) {
+    return 'billing'
+  }
+  if (
+    /invalid api key|api key not valid|unauthorized|permission denied|forbidden|authentication/.test(
+      text,
+    )
+  ) {
+    return 'auth'
+  }
+  if (/quota|resource[_ ]exhausted|rate limit/.test(text)) return 'quota'
+  return null
+}
+
 const OPENAI_EXCLUDE =
   /(embedding|whisper|tts|dall-e|davinci|babbage|ada|moderation|transcribe|realtime|sora|image|audio|search)/i
 
