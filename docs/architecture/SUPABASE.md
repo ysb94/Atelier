@@ -253,6 +253,9 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 
 ### 상품 연결 원칙 (M번호)
 
+- M번호는 SKU 단위다. 색상·사이즈까지 구분해 부여하므로 같은 상품이라도 색상이나
+  사이즈가 다르면 M번호가 다르다. 조회 키 하나를 확정해도 그 상품의 다른 색상·사이즈
+  조합은 따로 확정해야 한다. 옵션 축을 분해해 M번호를 짜맞추는 매칭은 쓰지 않는다.
 - 송장·접두어·바코드처럼 데이터 시트 상품을 가리킬 때는 이름 문자열을 저장하지 않는다.
   항상 `styles.id`(`style_id` / `target_style_id`)로 연결하고, 표시 이름은 읽을 때
   `styles.name`을 조인한다. 사람에게 보이는 번호는 `styles.style_no`(브랜드 UI에서는
@@ -349,6 +352,10 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `list_invoice_product_name_maps_for_keys`에 보내고, 정규화 키가 맞는 활성
   원장과 상품 참조만 받는다. 권한은
   `app.list_invoice_product_name_maps_for_keys_core`에서 한 번 확인한다.
+  오늘 작업 내품명 변환도 같은 방식으로
+  `list_invoice_option_map_ids_for_combos`와
+  `list_invoice_item_name_rule_ids_for_names`에 파일 고유 조합·내품명만 보내
+  활성 id를 받은 뒤 구성품을 읽는다. RPC가 없으면 기존 전량 조회로 폴백한다.
   기준정보 전체 목록은 별도 캐시이며 총건수·병렬 페이지 없이 순차로 읽는다.
 - 마이그레이션: `20260813190000_invoice_product_name_maps.sql`,
   `20260813200000_invoice_product_name_lookup_key.sql`,
