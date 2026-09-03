@@ -16,6 +16,7 @@ import {
   getProductCodes,
   getStylesByBrand,
 } from '@/lib/api'
+import { outboundPartnerOptionLabel } from '@/lib/codes/outbound-partner'
 import type { CodeUsageStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -201,7 +202,7 @@ export function DataUploadPage() {
                 >
                   {targets.map((target) => (
                     <option key={target.id} value={target.id}>
-                      {target.name}
+                      {outboundPartnerOptionLabel(target)}
                       {target.active ? '' : ' (비활성)'}
                     </option>
                   ))}

@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { UsageBulkUploadPanel } from '@/features/codes/UsageBulkUploadPanel'
+import { OutboundPartnerIdentity } from '@/features/codes/OutboundPartnerIdentity'
 import { UsageTargetManagerDialog } from '@/features/codes/UsageTargetManager'
 import {
   CodeUsageAssignmentStoreError,
@@ -17,12 +18,14 @@ import {
   getCodeUsageTargetAliases,
   getCodeUsageTargetFolders,
   getCodeUsageTargets,
+  getOutboundPartnerGroups,
   getProductCodes,
   getStylesByBrand,
   initializeBarcodePartnerDisplayTargets,
   replaceBarcodePartnerDisplayTargets,
   updateCodeUsageAssignmentStatus,
 } from '@/lib/api'
+import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import {
   CODE_USAGE_STATUS_LABEL,
   type CodeUsageStatus,
@@ -130,7 +133,7 @@ function UsagePartnerSettingsDialog({
                     onChange={() => toggle(partner.id)}
                   />
                   <span className="min-w-0 flex-1 truncate font-medium">
-                    {partner.name}
+                    {outboundPartnerDisplayName(partner)}
                   </span>
                   {!partner.active ? (
                     <span className="shrink-0 text-[11px] text-muted-foreground">
@@ -262,10 +265,15 @@ export function UsageCodePage() {
     queryKey: ['codeUsageTargetFolders', brand.id],
     queryFn: () => getCodeUsageTargetFolders(brand.id),
   })
+  const groupsQuery = useQuery({
+    queryKey: ['outboundPartnerGroups', brand.id],
+    queryFn: () => getOutboundPartnerGroups(brand.id),
+  })
 
   const targets = useMemo(() => targetsQuery.data ?? [], [targetsQuery.data])
   const aliases = useMemo(() => aliasesQuery.data ?? [], [aliasesQuery.data])
   const folders = useMemo(() => foldersQuery.data ?? [], [foldersQuery.data])
+  const groups = useMemo(() => groupsQuery.data ?? [], [groupsQuery.data])
   const codes = useMemo(() => codesQuery.data ?? [], [codesQuery.data])
   const styles = useMemo(() => stylesQuery.data ?? [], [stylesQuery.data])
   const assignments = useMemo(
@@ -282,7 +290,10 @@ export function UsageCodePage() {
         (left, right) =>
           Number(right.active) - Number(left.active) ||
           left.order - right.order ||
-          left.name.localeCompare(right.name, 'ko'),
+          outboundPartnerDisplayName(left).localeCompare(
+            outboundPartnerDisplayName(right),
+            'ko',
+          ),
       ),
     [targets],
   )
@@ -366,6 +377,9 @@ export function UsageCodePage() {
       }),
       queryClient.invalidateQueries({
         queryKey: ['codeUsageTargetFolders', brand.id],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['outboundPartnerGroups', brand.id],
       }),
     ])
   }
@@ -495,7 +509,10 @@ export function UsageCodePage() {
                     >
                       <span className="min-w-0">
                         <span className="block truncate font-medium">
-                          {target.name}
+                          <OutboundPartnerIdentity
+                            target={target}
+                            showUnspecified={false}
+                          />
                         </span>
                         {!target.active ? (
                           <span
@@ -541,7 +558,7 @@ export function UsageCodePage() {
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <h2 className="text-base font-semibold">
-                    {selectedTarget.name}
+                    <OutboundPartnerIdentity target={selectedTarget} />
                   </h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     등록 {formatNumber(targetAssignments.length)}건 · 사용중{' '}
@@ -790,6 +807,7 @@ export function UsageCodePage() {
         brandId={brand.id}
         targets={targets}
         folders={folders}
+        groups={groups}
         aliases={aliases}
         assignments={assignments}
         onClose={() => setManagerOpen(false)}

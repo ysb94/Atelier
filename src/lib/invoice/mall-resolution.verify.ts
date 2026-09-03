@@ -64,6 +64,14 @@ function target(
     createdAt: '2026-08-28T00:00:00Z',
     updatedAt: '2026-08-28T00:00:00Z',
     ...patch,
+    groupId: patch.groupId ?? null,
+    groupName: patch.groupName ?? '',
+    siteName: patch.siteName ?? '',
+    normalizedSiteName: patch.normalizedSiteName ?? '',
+    contactName: patch.contactName ?? '',
+    contactPhone: patch.contactPhone ?? '',
+    contactEmail: patch.contactEmail ?? '',
+    address: patch.address ?? '',
   }
 }
 

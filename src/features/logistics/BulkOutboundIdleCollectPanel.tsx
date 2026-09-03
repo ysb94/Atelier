@@ -47,7 +47,7 @@ async function downloadIdleCollectTemplate() {
   ])
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(workbook, sheet, '출고데이터')
-  XLSX.writeFile(workbook, '대량출고_대기_상품명수량.xlsx')
+  XLSX.writeFile(workbook, '바코드출고_대기_상품명수량.xlsx')
 }
 
 const IdleCollectTableRow = memo(function IdleCollectTableRow({

@@ -1,9 +1,22 @@
 import type { QueryClient } from '@tanstack/react-query'
 
+export type AiRecommendationInvalidationScope = {
+  comboKey?: string
+  lookupKey?: string
+}
+
 export function invalidateAiRecommendationQueries(
   queryClient: QueryClient,
   brandId: string,
+  scope?: AiRecommendationInvalidationScope,
 ) {
+  if (scope?.comboKey) {
+    return queryClient.invalidateQueries({
+      queryKey: ['ai-product-recommendation', brandId, scope.comboKey],
+      refetchType: 'none',
+    })
+  }
+
   return Promise.all([
     queryClient.invalidateQueries({
       queryKey: ['ai-product-recommendation', brandId],

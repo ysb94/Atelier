@@ -163,7 +163,7 @@ function InvoiceProductListPrintColumnView({
           {bodySlots.map((slot, index) => {
             if (slot.kind === 'header') {
               if (hideCheck) {
-                // 대량출고: 구역 행은 그리지 않고, 다음 상품 행에 굵은 윗선만 붙인다.
+                // 바코드 출고: 구역 행은 그리지 않고, 다음 상품 행에 굵은 윗선만 붙인다.
                 return null
               }
               return (

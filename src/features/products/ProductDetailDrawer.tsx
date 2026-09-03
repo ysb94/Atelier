@@ -25,6 +25,7 @@ import {
   updateStyleFields,
 } from '@/lib/api'
 import { OWNER_LABEL, OWNER_ORDER } from '@/lib/import/fields'
+import { outboundPartnerOptionLabel } from '@/lib/codes/outbound-partner'
 import { isImageField, pickImageSources } from '@/lib/products/product-image'
 import {
   fieldValueKey,
@@ -195,7 +196,7 @@ export function ProductDetailDrawer() {
   })
 
   const targetsQuery = useQuery({
-    queryKey: ['code-usage-targets', brand.id],
+    queryKey: ['codeUsageTargets', brand.id],
     queryFn: () => getCodeUsageTargets(brand.id),
   })
 
@@ -644,7 +645,10 @@ export function ProductDetailDrawer() {
                                         : 'muted'
                                     }
                                   >
-                                    {target?.name ?? '알 수 없음'} ·{' '}
+                                    {target
+                                      ? outboundPartnerOptionLabel(target)
+                                      : '알 수 없음'}{' '}
+                                    ·{' '}
                                     {CODE_USAGE_STATUS_LABEL[a.status]}
                                   </Badge>
                                 )

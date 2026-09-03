@@ -28,6 +28,7 @@ import { DataSheetPage } from '@/features/data/DataSheetPage'
 import { DataUploadPage } from '@/features/data/DataUploadPage'
 import { InvoiceWorkPage } from '@/features/logistics/InvoiceWorkPage'
 import { InvoiceDataEntryPage } from '@/features/logistics/InvoiceDataEntryPage'
+import { BarcodeOutboundDataEntryPage } from '@/features/logistics/BarcodeOutboundDataEntryPage'
 import { BulkOutboundPage } from '@/features/logistics/BulkOutboundPage'
 import { OutboundDataPage } from '@/features/logistics/OutboundDataPage'
 import { WarehousePage } from '@/features/logistics/WarehousePage'
@@ -82,6 +83,10 @@ export function BrandWorkspaceRouteTree() {
       <Route
         path="logistics/invoice-data-entry"
         element={<InvoiceDataEntryPage />}
+      />
+      <Route
+        path="logistics/barcode-outbound-data-entry"
+        element={<BarcodeOutboundDataEntryPage />}
       />
       <Route path="logistics/bulk-outbound" element={<BulkOutboundPage />} />
       <Route path="logistics/warehouses" element={<WarehousePage />} />

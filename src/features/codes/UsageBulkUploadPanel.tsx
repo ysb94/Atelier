@@ -8,6 +8,7 @@ import {
   type PreparedUsageRow,
 } from '@/lib/codes/usage-import'
 import { parseFile } from '@/lib/import/parse'
+import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import {
   CODE_USAGE_STATUS_LABEL,
   type CodeUsageStatus,
@@ -100,7 +101,7 @@ export function UsageBulkUploadPanel({
         <div className="flex items-center justify-between gap-2">
           <div>
             <div className="text-sm font-medium">
-              {usageTarget.name} 일괄 등록
+              {outboundPartnerDisplayName(usageTarget)} 일괄 등록
             </div>
             <p className="mt-0.5 text-xs text-muted-foreground">
               양식의 88코드 열에 자사 바코드 마스터에 있는 코드만 넣으세요.

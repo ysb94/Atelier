@@ -85,6 +85,7 @@ import {
   type IdleCollectRow,
 } from '@/lib/bulk-outbound/idle-collect'
 import { PRODUCT_OUTBOUND_UPDATED_EVENT } from '@/lib/outbound/product-outbound'
+import { outboundPartnerOptionLabel } from '@/lib/codes/outbound-partner'
 
 /** 한 건이 여러 날 걸쳐 있을 수 있는 상태. 순서가 강제되지 않는다. */
 type JobStatus =
@@ -111,7 +112,7 @@ type DemoEvidenceFile = {
   fileSize?: number
 }
 
-/** 대량출고 건이 참조하는 바코드 데이터 출처 */
+/** 바코드 출고 건이 참조하는 바코드 데이터 출처 */
 type BarcodeSource = 'own' | 'partner'
 
 type BulkOutboundPartnerConfig = {
@@ -472,9 +473,9 @@ async function downloadBulkOutboundTemplate(
   })
   const sheet = XLSX.utils.aoa_to_sheet([headers, example])
   const workbook = XLSX.utils.book_new()
-  XLSX.utils.book_append_sheet(workbook, sheet, '대량출고')
+  XLSX.utils.book_append_sheet(workbook, sheet, '바코드 출고')
   const safeName = partnerName.replace(/[\\/:*?"<>|]+/g, '_').trim() || '업체'
-  XLSX.writeFile(workbook, `대량출고_등록양식_${safeName}.xlsx`)
+  XLSX.writeFile(workbook, `바코드출고_등록양식_${safeName}.xlsx`)
 }
 
 /** 엑셀/양식 헤더 비교용. 공백·제로폭·대소문자 차이를 없앤다. */
@@ -1483,7 +1484,7 @@ async function downloadConvertMatchExcel(options: {
   const suffix = options.fileNameSuffix?.trim() ?? ''
   XLSX.writeFile(
     workbook,
-    `대량출고_바코드출력_${safePartner}_${safeTitle}_${today}${suffix}.xlsx`,
+    `바코드출고_바코드출력_${safePartner}_${safeTitle}_${today}${suffix}.xlsx`,
   )
 }
 
@@ -2118,7 +2119,7 @@ function TemplateHeaderDialog({
   )
 }
 
-/** 대량출고에 등록한 업체·바코드 출처 */
+/** 바코드 출고에 등록한 업체·바코드 출처 */
 function storageKey(brandId: string) {
   return `atelier:bulk-outbound-partners:${brandId}`
 }
@@ -2371,7 +2372,7 @@ function PartnerSettingsDialog({
       ...current,
       {
         partnerId: selectedPartner.id,
-        partnerName: selectedPartner.name,
+        partnerName: outboundPartnerOptionLabel(selectedPartner),
         barcodeSource,
         workStatus: 'idle',
       },
@@ -2394,7 +2395,7 @@ function PartnerSettingsDialog({
         className="relative z-10 flex max-h-[min(80vh,40rem)] w-full max-w-lg flex-col rounded-xl border border-border bg-card shadow-lg"
       >
         <div className="border-b border-border px-5 py-4">
-          <h2 className="text-base font-semibold">대량출고 업체 설정</h2>
+          <h2 className="text-base font-semibold">바코드 출고 업체 설정</h2>
           <p className="mt-1 text-xs text-muted-foreground">
             한 업체씩 등록합니다. 업체를 고른 뒤 자사·거래처 바코드를 선택하면,
             해당 메뉴에 등록된 경우에만 추가됩니다. 대기·작업중·완료는 개발자만
@@ -2709,7 +2710,7 @@ function NewJobDialog({
         className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-lg"
       >
         <h2 className="text-base font-semibold">
-          {editing ? '대량출고 건 수정' : '새 대량출고 건'}
+          {editing ? '바코드 출고 건 수정' : '새 바코드 출고 건'}
         </h2>
         <p className="mt-1 text-xs text-muted-foreground">
           {editing
@@ -3090,7 +3091,10 @@ export function BulkOutboundPage() {
   )
 
   const partnerNameById = useMemo(
-    () => new Map(allPartners.map((item) => [item.id, item.name])),
+    () =>
+      new Map(
+        allPartners.map((item) => [item.id, outboundPartnerOptionLabel(item)]),
+      ),
     [allPartners],
   )
 
@@ -3134,7 +3138,9 @@ export function BulkOutboundPage() {
       .filter((item) => partnerById.has(item.partnerId))
       .map((item) => ({
         ...item,
-        partnerName: partnerById.get(item.partnerId)!.name,
+        partnerName: outboundPartnerOptionLabel(
+          partnerById.get(item.partnerId)!,
+        ),
         workStatus: isPartnerWorkStatus(item.workStatus)
           ? item.workStatus
           : 'idle',
@@ -3375,7 +3381,7 @@ export function BulkOutboundPage() {
       setJobMetaError(
         reason instanceof Error
           ? reason.message
-          : '대량출고 작업을 수정하지 못했습니다.',
+          : '바코드 출고 작업을 수정하지 못했습니다.',
       )
     } finally {
       setJobMetaSaving(false)
@@ -3426,7 +3432,7 @@ export function BulkOutboundPage() {
       setDeleteError(
         reason instanceof Error
           ? reason.message
-          : '대량출고 작업을 삭제하지 못했습니다.',
+          : '바코드 출고 작업을 삭제하지 못했습니다.',
       )
     } finally {
       setDeleteSaving(false)
@@ -4119,7 +4125,7 @@ export function BulkOutboundPage() {
   return (
     <div>
       <PageHeader
-        title="대량출고"
+        title="바코드 출고"
         description={
           showingJob
             ? '선택한 건의 작업판입니다. 목록으로 돌아가 다른 건을 열 수 있습니다.'

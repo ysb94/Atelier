@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/card'
 import { Input, Select } from '@/components/ui/input'
 import { getCodeUsageTargets, getOutboundShipments } from '@/lib/api'
+import { outboundPartnerOptionLabel } from '@/lib/codes/outbound-partner'
 import {
   buildProductOutboundSummary,
   demoEconomicsForStyle,
@@ -653,7 +654,7 @@ function FilterBar({
           <option value="">전체 업체</option>
           {partners.map((partner) => (
             <option key={partner.id} value={partner.id}>
-              {partner.name}
+              {outboundPartnerOptionLabel(partner)}
             </option>
           ))}
           {extraPartners

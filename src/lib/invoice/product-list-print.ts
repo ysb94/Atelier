@@ -112,9 +112,9 @@ export type InvoiceProductListPrintFitProfile = {
 export type InvoiceProductListPrintPage = {
   printedOn: string
   warehouseLabel: string
-  /** 대량출고 등에서 시트 상단에 넣는 작업 제목(업체명) */
+  /** 바코드 출고 등에서 시트 상단에 넣는 작업 제목(업체명) */
   jobTitle?: string
-  /** 대량출고 등에서 시트 상단에 넣는 건 요약 */
+  /** 바코드 출고 등에서 시트 상단에 넣는 건 요약 */
   jobSubtitle?: string
   /** true면 확인(체크) 열을 빼고 나머지 열을 넓힌다 */
   hideCheckColumn?: boolean

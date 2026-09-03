@@ -127,7 +127,7 @@ export const PRODUCT_OUTBOUND_SOURCE_LABEL: Record<
   string
 > = {
   invoice: '송장작업',
-  bulk: '대량출고',
+  bulk: '바코드 출고',
   manual: '직접 기록',
 }
 

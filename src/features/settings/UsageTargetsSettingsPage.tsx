@@ -9,6 +9,7 @@ import {
   getCodeUsageTargetAliases,
   getCodeUsageTargetFolders,
   getCodeUsageTargets,
+  getOutboundPartnerGroups,
 } from '@/lib/api'
 
 export function UsageTargetsSettingsPage() {
@@ -27,6 +28,10 @@ export function UsageTargetsSettingsPage() {
     queryKey: ['codeUsageTargetFolders', brand.id],
     queryFn: () => getCodeUsageTargetFolders(brand.id),
   })
+  const groupsQuery = useQuery({
+    queryKey: ['outboundPartnerGroups', brand.id],
+    queryFn: () => getOutboundPartnerGroups(brand.id),
+  })
   const assignmentsQuery = useQuery({
     queryKey: ['codeUsageAssignments', brand.id],
     queryFn: () => getCodeUsageAssignments(brand.id),
@@ -35,6 +40,7 @@ export function UsageTargetsSettingsPage() {
   const targets = useMemo(() => targetsQuery.data ?? [], [targetsQuery.data])
   const aliases = useMemo(() => aliasesQuery.data ?? [], [aliasesQuery.data])
   const folders = useMemo(() => foldersQuery.data ?? [], [foldersQuery.data])
+  const groups = useMemo(() => groupsQuery.data ?? [], [groupsQuery.data])
   const assignments = useMemo(
     () => assignmentsQuery.data ?? [],
     [assignmentsQuery.data],
@@ -52,6 +58,9 @@ export function UsageTargetsSettingsPage() {
         queryKey: ['codeUsageTargetFolders', brand.id],
       }),
       queryClient.invalidateQueries({
+        queryKey: ['outboundPartnerGroups', brand.id],
+      }),
+      queryClient.invalidateQueries({
         queryKey: ['codeUsageAssignments', brand.id],
       }),
     ])
@@ -61,16 +70,17 @@ export function UsageTargetsSettingsPage() {
     targetsQuery.isLoading ||
     aliasesQuery.isLoading ||
     foldersQuery.isLoading ||
+    groupsQuery.isLoading ||
     assignmentsQuery.isLoading
 
   return (
     <div>
       <PageHeader
         title="출고업체"
-        description={`${brand.name} 물건을 보내는 곳을 폴더로 나누고, 카드에 그 업체만의 특징을 적습니다.`}
+        description={`${brand.name} 출고처를 폴더 아래 업체와 지점으로 두고, 지점이 없으면 업체를 실제 출고 단위로 관리합니다.`}
       />
 
-      {loading ? (
+      {loading && targets.length === 0 && folders.length === 0 ? (
         <div className="text-sm text-muted-foreground">불러오는 중...</div>
       ) : (
         <Card>
@@ -79,6 +89,7 @@ export function UsageTargetsSettingsPage() {
               brandId={brand.id}
               targets={targets}
               folders={folders}
+              groups={groups}
               aliases={aliases}
               assignments={assignments}
               onChanged={invalidate}

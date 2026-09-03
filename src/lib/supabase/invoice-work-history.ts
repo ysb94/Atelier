@@ -1,5 +1,6 @@
 import type { InvoiceWorkRun, InvoiceWorkSiteSummary } from '@/lib/types'
 import type { InvoiceSiteSummaryDraft } from '@/lib/invoice/mall-resolution'
+import { outboundPartnerOptionLabel } from '@/lib/codes/outbound-partner'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage } from '@/lib/supabase/map-error'
 
@@ -139,7 +140,9 @@ export async function listInvoiceWorkRuns(
   if (targetIds.length > 0) {
     const { data: targetData, error: targetError } = await getSupabase()
       .from('code_usage_targets')
-      .select('id, name')
+      .select(
+        'id, name, channel_type, site_name, outbound_partner_groups(name)',
+      )
       .eq('brand_id', brandId)
       .in('id', targetIds)
 
@@ -149,8 +152,30 @@ export async function listInvoiceWorkRuns(
       )
     }
 
-    ;((targetData as { id: string; name: string }[]) ?? []).forEach((row) => {
-      names.set(row.id, row.name)
+    ;(
+      (targetData as unknown as Array<{
+        id: string
+        name: string
+        channel_type: 'unset' | 'online' | 'offline'
+        site_name: string
+        outbound_partner_groups:
+          | { name: string }
+          | { name: string }[]
+          | null
+      }>) ?? []
+    ).forEach((row) => {
+      const group = Array.isArray(row.outbound_partner_groups)
+        ? row.outbound_partner_groups[0]
+        : row.outbound_partner_groups
+      names.set(
+        row.id,
+        outboundPartnerOptionLabel({
+          name: row.name,
+          groupName: group?.name ?? '',
+          siteName: row.site_name,
+          channelType: row.channel_type,
+        }),
+      )
     })
   }
 

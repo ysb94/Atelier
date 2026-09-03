@@ -1,19 +1,17 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { StylePicker } from '@/components/style-picker'
 import { Button } from '@/components/ui/button'
-import { Input, Select } from '@/components/ui/input'
+import { Input } from '@/components/ui/input'
 import {
   ITEM_NAME_AI_PAGE_SIZES,
+  ITEM_NAME_AI_QUICK_SLOT_LIMIT,
   itemNameAiExpectedLines,
   itemNameAiMatchesQueueFilter,
-  itemNameAiQueueProgress,
-  itemNameAiQueueProgressLabel,
   itemNameAiReviewKind,
+  nextItemNameAiReviewPage,
   paginateItemNameAiReviewKeys,
-  type ItemNameAiAction,
   type ItemNameAiQueueFilter,
-  type ItemNameAiQuickSlot,
   type ItemNameAiReviewKind,
 } from '@/lib/invoice/item-name-ai-review'
 import { logInvoiceWork } from '@/lib/invoice/invoice-work-perf'
@@ -21,50 +19,18 @@ import { productCompositionSearchText } from '@/lib/invoice/product-composition'
 import type { StyleRef } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
 import { ProductCompositionLines } from './ProductCompositionLines'
-import {
-  InvoiceOptionExtrasEditor,
-  expandOptionExtrasToUnits,
-  newOptionExtraDraft,
-  type OptionExtraDraft,
-} from './InvoiceOptionExtrasEditor'
 import { InvoiceItemNameAiQuickSlots } from './InvoiceItemNameAiQuickSlots'
-import {
-  extrasOfItemNameAiRow,
-  useInvoiceItemNameBulkAiApply,
-} from './useInvoiceItemNameBulkAiApply'
+import { useInvoiceItemNameBulkAiApply } from './useInvoiceItemNameBulkAiApply'
 import { useInvoiceItemNameQuickEntry } from './useInvoiceItemNameQuickEntry'
 
-type EditDraft = {
-  key: string
-  action: ItemNameAiAction
-  extras: OptionExtraDraft[]
-}
-
-function extrasFromQuickSlots(slots: ItemNameAiQuickSlot[]): OptionExtraDraft[] {
-  const extras = slots.flatMap((slot, index) =>
-    slot.style
-      ? expandOptionExtrasToUnits([
-          {
-            key: `${slot.style.styleId}-${index}`,
-            style: slot.style,
-            role: 'included' as const,
-            quantity: Math.max(1, Math.floor(slot.quantity || 1)),
-          },
-        ])
-      : [],
-  )
-  return extras.length > 0 ? extras : [newOptionExtraDraft()]
-}
-
 const REVIEW_FILTERS: Array<{
-  value: ItemNameAiQueueFilter
+  value: Exclude<ItemNameAiQueueFilter, 'hold'>
   label: string
 }> = [
   { value: 'queue', label: '입력 대기' },
   { value: 'delete', label: '내품명 비움' },
   { value: 'single', label: '옵션 상품 1개' },
   { value: 'bundle', label: '구성 2개 이상' },
-  { value: 'hold', label: '결정 필요' },
 ]
 
 export function InvoiceItemNameAiApplyBar({
@@ -82,14 +48,14 @@ export function InvoiceItemNameAiApplyBar({
     brandId: bulk.brandId,
     rows: bulk.reviewRows,
     confirmedKeys: bulk.confirmedKeys,
+    pendingAiKeys: bulk.pendingAiKeys,
     stageRowComponents: bulk.stageRowComponents,
     stageRowDelete: bulk.stageRowDelete,
     unstageRow: bulk.unstageRow,
     confirmRow: bulk.confirmRow,
     unconfirmRow: bulk.unconfirmRow,
+    commitRow: bulk.commitRow,
   })
-  const [editDraft, setEditDraft] = useState<EditDraft | null>(null)
-  const [editError, setEditError] = useState<string | null>(null)
   const [bulkAppendMode, setBulkAppendMode] = useState(false)
   const [appendTargets, setAppendTargets] = useState<Set<string>>(new Set())
   const [appendStyle, setAppendStyle] = useState<StyleRef | null>(null)
@@ -97,19 +63,12 @@ export function InvoiceItemNameAiApplyBar({
   const [appendError, setAppendError] = useState<string | null>(null)
   const [collapsed, setCollapsed] = useState(false)
   const [dialog, setDialog] = useState<
-    'bulk-append' | 'quick-entry' | 'commit' | 'reset' | null
+    'bulk-append' | 'quick-entry' | 'reset' | null
   >(null)
-
-  const editDraftRef = useRef(editDraft)
-  editDraftRef.current = editDraft
+  const pendingPageFocusRef = useRef(false)
 
   useEffect(() => {
     const liveKeys = new Set(bulk.reviewRows.map((row) => row.key))
-    const draft = editDraftRef.current
-    if (draft && !liveKeys.has(draft.key)) {
-      setEditDraft(null)
-      setEditError(null)
-    }
     setAppendTargets((current) => {
       let changed = false
       const next = new Set<string>()
@@ -129,8 +88,6 @@ export function InvoiceItemNameAiApplyBar({
   function resetLocalUi() {
     setQuery('')
     setFilter('queue')
-    setEditDraft(null)
-    setEditError(null)
     setBulkAppendMode(false)
     setAppendTargets(new Set())
     setAppendStyle(null)
@@ -139,82 +96,17 @@ export function InvoiceItemNameAiApplyBar({
     setCollapsed(false)
   }
 
-  function closeEdit() {
-    setEditDraft(null)
-    setEditError(null)
-  }
-
-  function openEdit(rowKey: string, action: ItemNameAiAction, extras: OptionExtraDraft[]) {
-    setEditError(null)
-    setEditDraft({
-      key: rowKey,
-      action,
-      extras: extras.length > 0 ? extras : [newOptionExtraDraft()],
-    })
-  }
-
-  function startEdit(
-    rowKey: string,
-    shown: (typeof bulk.reviewRows)[number],
-    committed: boolean,
-  ) {
-    const extras =
-      shown.components.length > 0
-        ? extrasOfItemNameAiRow(shown)
-        : extrasFromQuickSlots(quick.getSlots(shown))
-    const hasOfficial = extras.some((item) => item.style)
-    const action: ItemNameAiAction = hasOfficial
-      ? 'components'
-      : shown.action
-    if (committed) {
-      bulk.reopenRow(rowKey)
-      setFilter('queue')
-    }
-    if (hasOfficial) {
-      bulk.updateRow(rowKey, { action: 'components', extras })
-    }
-    openEdit(rowKey, action, extras)
-  }
-
-  function saveEdit() {
-    if (!editDraft) return
-    if (editDraft.action === 'components') {
-      const ready = editDraft.extras.filter((item) => item.style)
-      if (ready.length === 0) {
-        setEditError('구성품 M번호를 하나 이상 고르세요.')
-        return
-      }
-      const result = bulk.updateRow(editDraft.key, {
-        action: 'components',
-        extras: ready,
-      })
-      if (!result.ok) {
-        setEditError(result.error)
-        return
-      }
-    } else {
-      const result = bulk.updateRow(editDraft.key, {
-        action: editDraft.action,
-        extras: [],
-      })
-      if (!result.ok) {
-        setEditError(result.error)
-        return
-      }
-    }
-    closeEdit()
-  }
-
   const kindCounts = useMemo(() => {
-    const counts: Record<ItemNameAiReviewKind, number> = {
+    const counts: Record<Exclude<ItemNameAiReviewKind, 'hold'>, number> = {
       delete: 0,
       single: 0,
       bundle: 0,
-      hold: 0,
     }
     for (const row of bulk.reviewRows) {
       if (!bulk.committedKeys.has(row.key)) continue
-      counts[itemNameAiReviewKind(row)] += 1
+      const kind = itemNameAiReviewKind(row)
+      if (kind === 'hold') continue
+      counts[kind] += 1
     }
     return counts
   }, [bulk.committedKeys, bulk.reviewRows])
@@ -223,9 +115,7 @@ export function InvoiceItemNameAiApplyBar({
     return bulk.reviewRows
       .filter((row) => {
         const shown = bulk.draftByKey.get(row.key) ?? row
-        if (editDraft?.key === row.key) {
-          if (!normalized) return true
-        } else if (
+        if (
           !itemNameAiMatchesQueueFilter(shown, filter, bulk.committedKeys)
         ) {
           return false
@@ -256,7 +146,6 @@ export function InvoiceItemNameAiApplyBar({
     bulk.committedKeys,
     bulk.draftByKey,
     bulk.reviewRows,
-    editDraft?.key,
     filter,
     query,
     quick,
@@ -296,11 +185,12 @@ export function InvoiceItemNameAiApplyBar({
     })
   }, [pageSize, pagedRows.length, visibleRows.length])
 
-  function holdRow(rowKey: string) {
-    if (editDraft?.key === rowKey) closeEdit()
-    bulk.markDecisionNeeded(rowKey)
-    quick.moveDown(pagedRows, rowKey, 0)
-  }
+  useEffect(() => {
+    if (!pendingPageFocusRef.current) return
+    pendingPageFocusRef.current = false
+    const first = pagedRows[0]
+    if (first) quick.focusSlot(first.key, 0)
+  }, [page, pagedRows, quick])
 
   const selectableRows = visibleRows.filter(
     (row) =>
@@ -408,7 +298,6 @@ export function InvoiceItemNameAiApplyBar({
       bulk.discardDrafts()
       quick.reset()
     }
-    if (dialog === 'commit') bulk.commitDrafts()
     if (dialog === 'reset') {
       bulk.reset()
       quick.reset()
@@ -418,7 +307,6 @@ export function InvoiceItemNameAiApplyBar({
   }
 
   function openBulkAppendMode() {
-    closeEdit()
     setAppendError(null)
     setBulkAppendMode(true)
   }
@@ -437,7 +325,8 @@ export function InvoiceItemNameAiApplyBar({
           <p className="text-sm font-medium">AI 내품명 추천</p>
           <p className="mt-1 text-xs text-muted-foreground">
             미설정 옵션 {formatNumber(bulk.groupCount)}개를 실제 조회 키 조합별로
-            추천합니다. 예상 변환명을 고치고 선택한 행만 등록됩니다.
+            추천합니다. 구성품을 입력하고 Enter로 분류한 뒤 선택한 행만
+            등록됩니다.
           </p>
         </div>
         {bulk.phase === 'collecting' ? (
@@ -656,27 +545,14 @@ export function InvoiceItemNameAiApplyBar({
                 중단
               </button>
             ) : null}
-            {!bulkAppendMode ? (
-              <>
-                <Button
-                  type="button"
-                  size="sm"
-                  className="h-7 px-2 text-[11px]"
-                  disabled={!bulk.canCommit}
-                  onClick={() => setDialog('commit')}
-                >
-                  변경 저장
-                </Button>
-                {bulk.hasDraftChanges ? (
-                  <button
-                    type="button"
-                    className="text-xs text-muted-foreground hover:underline"
-                    onClick={() => setDialog('quick-entry')}
-                  >
-                    초안 버리기
-                  </button>
-                ) : null}
-              </>
+            {!bulkAppendMode && bulk.hasDraftChanges ? (
+              <button
+                type="button"
+                className="text-xs text-muted-foreground hover:underline"
+                onClick={() => setDialog('quick-entry')}
+              >
+                초안 버리기
+              </button>
             ) : null}
           </div>
           {quick.resolveError ||
@@ -747,14 +623,6 @@ export function InvoiceItemNameAiApplyBar({
               >
                 실행 취소
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                disabled={!bulk.canCommit}
-                onClick={() => setDialog('commit')}
-              >
-                변경 저장
-              </Button>
               {bulk.lastAppend ? (
                 <p className="text-xs text-muted-foreground">
                   추가 {formatNumber(bulk.lastAppend.addedKeys.length)}개 · 중복
@@ -765,8 +633,8 @@ export function InvoiceItemNameAiApplyBar({
                 <p className="w-full text-[11px] text-danger">{appendError}</p>
               ) : (
                 <p className="w-full text-[11px] text-muted-foreground">
-                  넣기는 초안에만 쌓입니다. 변경 저장은 검수표 반영이고 DB
-                  등록은 아닙니다.
+                  선택한 행은 바로 분류됩니다. DB 등록은 아니며 실행 취소로
+                  되돌릴 수 있습니다.
                 </p>
               )}
             </div>
@@ -807,9 +675,7 @@ export function InvoiceItemNameAiApplyBar({
                   <th className="px-2 py-1.5 font-medium">조회 키</th>
                   <th className="px-2 py-1.5 font-medium">옵션명</th>
                   <th className="px-2 py-1.5 font-medium">구성품 빠른 입력</th>
-                  <th className="px-2 py-1.5 font-medium">
-                    예상 옵션 변환명
-                  </th>
+                  <th className="px-2 py-1.5 font-medium">상태</th>
                   <th className="px-2 py-1.5 font-medium">대상 행</th>
                 </tr>
               </thead>
@@ -822,118 +688,125 @@ export function InvoiceItemNameAiApplyBar({
                     >
                       {filter === 'queue'
                         ? '입력 대기 행이 없습니다.'
-                        : '저장된 행이 없습니다.'}
+                        : '분류된 행이 없습니다.'}
                     </td>
                   </tr>
                 ) : null}
                 {pagedRows.map((row, index) => {
-                  const draft = editDraft?.key === row.key ? editDraft : null
-                  const open = Boolean(draft)
                   const shown = bulk.draftByKey.get(row.key) ?? row
                   const committed = bulk.committedKeys.has(row.key)
+                  const pendingAi = bulk.pendingAiKeys.has(row.key)
                   const disabled = Boolean(
                     !committed ||
                       shown.action === 'hold' ||
                       shown.validationError,
                   )
-                  const progressLabel = itemNameAiQueueProgressLabel(
-                    itemNameAiQueueProgress({
-                      confirmed: bulk.confirmedKeys.has(row.key),
-                      committed,
-                      pendingAi: bulk.pendingAiKeys.has(row.key),
-                      draft: bulk.draftByKey.get(row.key) ?? null,
-                      row,
-                    }),
-                  )
-                  const extras =
-                    draft?.extras ??
-                    (extrasOfItemNameAiRow(shown).length > 0
-                      ? extrasOfItemNameAiRow(shown)
-                      : [newOptionExtraDraft()])
-                  const expectedLines = itemNameAiExpectedLines(shown)
-                  const stripe =
-                    index % 2 === 1 ? 'bg-muted/40' : 'bg-card'
+                  const tone = pendingAi
+                    ? 'bg-success/10'
+                    : index % 2 === 1
+                      ? 'bg-muted/40'
+                      : 'bg-card'
                   return (
-                    <Fragment key={row.key}>
-                      <tr className={`border-t border-border ${stripe}`}>
+                    <tr
+                      key={row.key}
+                      className={`border-t border-border ${tone}`}
+                    >
+                      <td className="px-2 py-1.5">
+                        <input
+                          type="checkbox"
+                          aria-label={`${row.productLookupKey || row.itemName} 선택`}
+                          checked={committed && bulk.selected.has(row.key)}
+                          disabled={disabled}
+                          onChange={() => bulk.toggle(row.key)}
+                        />
+                      </td>
+                      {bulkAppendMode ? (
                         <td className="px-2 py-1.5">
                           <input
                             type="checkbox"
-                            aria-label={`${row.productLookupKey || row.itemName} 선택`}
-                            checked={
-                              committed && bulk.selected.has(row.key)
-                            }
-                            disabled={disabled}
-                            onChange={() => bulk.toggle(row.key)}
+                            aria-label={`${row.productLookupKey || row.itemName} 추가 대상`}
+                            checked={appendTargets.has(row.key)}
+                            onChange={() => toggleAppendTarget(row.key)}
                           />
                         </td>
-                        {bulkAppendMode ? (
-                          <td className="px-2 py-1.5">
-                            <input
-                              type="checkbox"
-                              aria-label={`${row.productLookupKey || row.itemName} 추가 대상`}
-                              checked={appendTargets.has(row.key)}
-                              onChange={() => toggleAppendTarget(row.key)}
-                            />
-                          </td>
-                        ) : null}
-                        <td className="max-w-72 break-words px-2 py-1.5">
-                          <div className="space-y-0.5">
-                            <p>{row.productLookupKey || '(조회 키 없음)'}</p>
-                            <ProductCompositionLines
-                              items={row.productComponents}
-                              className="space-y-0.5 text-[11px] text-muted-foreground"
-                            />
-                          </div>
-                        </td>
-                        <td className="max-w-56 break-words px-2 py-1.5">
-                          {row.itemName}
-                        </td>
-                        <td className="px-2 py-1.5 align-top">
-                          <InvoiceItemNameAiQuickSlots
-                            brandId={bulk.brandId}
-                            rowKey={row.key}
-                            slots={quick.getSlots(shown)}
-                            disabled={
-                              bulkAppendMode ||
-                              quick.resolving ||
-                              committed
-                            }
-                            onTextChange={(slotIndex, text) =>
-                              quick.setSlotText(row.key, slotIndex, text)
-                            }
-                            onPickStyle={(slotIndex, style) =>
-                              quick.pickSlotStyle(row.key, slotIndex, style)
-                            }
-                            onClear={(slotIndex) =>
-                              quick.clearSlot(row.key, slotIndex)
-                            }
-                            onRegister={(slotIndex, el) =>
-                              quick.registerInput(row.key, slotIndex, el)
-                            }
-                            onEnter={(slotIndex) =>
-                              quick.confirmAndMove(
-                                pagedRows,
-                                row.key,
-                                slotIndex,
-                              )
-                            }
-                            onTab={(slotIndex) =>
-                              quick.moveRight(pagedRows, row.key, slotIndex)
-                            }
+                      ) : null}
+                      <td className="max-w-72 break-words px-2 py-1.5">
+                        <div className="space-y-0.5">
+                          <p>{row.productLookupKey || '(조회 키 없음)'}</p>
+                          <ProductCompositionLines
+                            items={row.productComponents}
+                            className="space-y-0.5 text-[11px] text-muted-foreground"
                           />
-                        </td>
-                        <td className="max-w-72 px-2 py-1.5">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <p className="min-w-0 break-words">
-                                {expectedLines[0]}
-                              </p>
-                              {progressLabel ? (
-                                <span className="shrink-0 rounded-full border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                                  {progressLabel}
-                                </span>
-                              ) : null}
+                        </div>
+                      </td>
+                      <td className="max-w-56 break-words px-2 py-1.5">
+                        {row.itemName}
+                      </td>
+                      <td className="px-2 py-1.5 align-top">
+                        <InvoiceItemNameAiQuickSlots
+                          brandId={bulk.brandId}
+                          rowKey={row.key}
+                          slots={quick.getSlots(shown)}
+                          disabled={
+                            bulkAppendMode || quick.resolving || committed
+                          }
+                          showDeleteLabel={
+                            committed && shown.action === 'delete'
+                          }
+                          onTextChange={(slotIndex, text) =>
+                            quick.setSlotText(row.key, slotIndex, text)
+                          }
+                          onPickStyle={(slotIndex, style) =>
+                            quick.pickSlotStyle(row.key, slotIndex, style)
+                          }
+                          onClear={(slotIndex) =>
+                            quick.clearSlot(row.key, slotIndex)
+                          }
+                          onRemoveExtra={(slotIndex) =>
+                            quick.removeSlot(row.key, slotIndex)
+                          }
+                          onRegister={(slotIndex, el) =>
+                            quick.registerInput(row.key, slotIndex, el)
+                          }
+                          onEnter={(slotIndex) => {
+                            const last = pagedRows[pagedRows.length - 1]
+                            const lastSlot = quick.getSlots(shown).length - 1
+                            const nextPage = nextItemNameAiReviewPage(
+                              paged.page,
+                              paged.pageCount,
+                              paged.keys,
+                              row.key,
+                            )
+                            const isLastInput =
+                              last?.key === row.key && slotIndex === lastSlot
+                            quick.confirmAndMove(
+                              pagedRows,
+                              row.key,
+                              slotIndex,
+                            )
+                            if (isLastInput && nextPage != null) {
+                              pendingPageFocusRef.current = true
+                              setPage(nextPage)
+                            }
+                          }}
+                          onTab={(slotIndex) =>
+                            quick.moveRight(pagedRows, row.key, slotIndex)
+                          }
+                          onAddExtra={() => {
+                            const currentCount = quick.getSlots(shown).length
+                            if (currentCount >= ITEM_NAME_AI_QUICK_SLOT_LIMIT) {
+                              return
+                            }
+                            const nextCount = currentCount + 1
+                            quick.ensureSlotCount(row.key, nextCount, shown)
+                            quick.focusSlot(row.key, nextCount - 1)
+                          }}
+                        />
+                      </td>
+                      <td className="max-w-72 px-2 py-1.5">
+                        <div className="space-y-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            {committed ? (
                               <Button
                                 type="button"
                                 size="sm"
@@ -941,138 +814,30 @@ export function InvoiceItemNameAiApplyBar({
                                 className="h-6 shrink-0 px-2 text-[11px]"
                                 disabled={quick.resolving}
                                 onClick={() => {
-                                  if (open) {
-                                    closeEdit()
-                                    return
-                                  }
-                                  startEdit(row.key, shown, committed)
+                                  bulk.reopenRow(row.key)
+                                  setFilter('queue')
                                 }}
                               >
-                                {open ? '닫기' : '수정'}
+                                다시 입력
                               </Button>
-                              {!committed &&
-                              itemNameAiReviewKind(shown) !== 'hold' ? (
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-6 shrink-0 px-2 text-[11px]"
-                                  disabled={quick.resolving}
-                                  onClick={() => holdRow(row.key)}
-                                >
-                                  결정 필요
-                                </Button>
-                              ) : null}
-                            </div>
-                            {expectedLines.slice(1).map((line, index) => (
-                                <p key={`${line}-${index}`} className="break-words">
-                                  {line}
-                                </p>
-                              ))}
-                            {shown.validationError ? (
-                              <p className="text-[11px] text-danger">
-                                {shown.validationError}
-                              </p>
-                            ) : null}
-                            {quick.stageErrorByKey.get(row.key) ? (
-                              <p className="text-[11px] text-danger">
-                                {quick.stageErrorByKey.get(row.key)}
-                              </p>
                             ) : null}
                           </div>
-                        </td>
-                        <td className="px-2 py-1.5 tabular-nums">
-                          {formatNumber(row.rowCount)}
-                        </td>
-                      </tr>
-                      {open ? (
-                        <tr className={`border-t border-border ${stripe}`}>
-                          <td colSpan={columnCount} className="px-3 py-2">
-                            <div className="max-w-xl space-y-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <Select
-                                  value={draft?.action ?? row.action}
-                                  onChange={(event) => {
-                                    const action = event.target
-                                      .value as ItemNameAiAction
-                                    setEditError(null)
-                                    setEditDraft((current) =>
-                                      current
-                                        ? {
-                                            ...current,
-                                            action,
-                                            extras:
-                                              action === 'components' &&
-                                              current.extras.length === 0
-                                                ? [newOptionExtraDraft()]
-                                                : current.extras,
-                                          }
-                                        : current,
-                                    )
-                                  }}
-                                  className="h-8 w-48 text-xs"
-                                >
-                                  <option value="hold">결정 필요</option>
-                                  <option value="components">
-                                    내품명을 구성품으로
-                                  </option>
-                                  <option value="delete">내품명만 비움</option>
-                                </Select>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  onClick={saveEdit}
-                                >
-                                  저장
-                                </Button>
-                                <Button
-                                  type="button"
-                                  size="sm"
-                                  variant="ghost"
-                                  onClick={closeEdit}
-                                >
-                                  취소
-                                </Button>
-                              </div>
-                              {draft?.action === 'components' ? (
-                                <InvoiceOptionExtrasEditor
-                                  brandId={bulk.brandId}
-                                  extras={extras}
-                                  onChange={(next) => {
-                                    setEditError(null)
-                                    setEditDraft((current) =>
-                                      current
-                                        ? { ...current, extras: next }
-                                        : current,
-                                    )
-                                  }}
-                                  compact
-                                  unitMode
-                                />
-                              ) : draft?.action === 'delete' ? (
-                                <p className="text-[11px] text-muted-foreground">
-                                  색상·사이즈처럼 본품 속성만 있으면 내품명을
-                                  비웁니다.
-                                </p>
-                              ) : (
-                                <p className="text-[11px] text-muted-foreground">
-                                  구성품 또는 비움을 정하면 선택할 수 있습니다.
-                                </p>
-                              )}
-                              {editError ? (
-                                <p className="text-[11px] text-danger">
-                                  {editError}
-                                </p>
-                              ) : (
-                                <p className="text-[11px] text-muted-foreground">
-                                  저장하기 전에는 목록 종류가 바뀌지 않습니다.
-                                </p>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
+                          {shown.validationError ? (
+                            <p className="text-[11px] text-danger">
+                              {shown.validationError}
+                            </p>
+                          ) : null}
+                          {quick.stageErrorByKey.get(row.key) ? (
+                            <p className="text-[11px] text-danger">
+                              {quick.stageErrorByKey.get(row.key)}
+                            </p>
+                          ) : null}
+                        </div>
+                      </td>
+                      <td className="px-2 py-1.5 tabular-nums">
+                        {formatNumber(row.rowCount)}
+                      </td>
+                    </tr>
                   )
                 })}
               </tbody>
@@ -1158,20 +923,16 @@ export function InvoiceItemNameAiApplyBar({
               id="item-name-ai-dialog-title"
               className="text-sm font-semibold"
             >
-              {dialog === 'commit'
-                ? '변경을 저장할까요?'
-                : dialog === 'reset'
-                  ? '처음부터 시작할까요?'
-                  : '초안을 버릴까요?'}
+              {dialog === 'reset'
+                ? '처음부터 시작할까요?'
+                : '초안을 버릴까요?'}
             </h2>
             <p className="mt-2 text-xs text-muted-foreground">
-              {dialog === 'commit'
-                ? '확인한 행을 검수표에 반영합니다. DB 등록은 아니며, 저장한 행만 결과 탭으로 이동합니다.'
-                : dialog === 'reset'
-                  ? 'AI 추천과 입력한 검수 내용이 모두 지워지고 추천 모으기부터 다시 시작합니다.'
-                  : dialog === 'bulk-append'
-                    ? '저장하지 않은 일괄 변경을 버립니다. 검수표에는 반영되지 않습니다.'
-                    : '저장하지 않은 빠른 입력 변경을 버립니다. 검수표에는 반영되지 않습니다.'}
+              {dialog === 'reset'
+                ? 'AI 추천과 입력한 검수 내용이 모두 지워지고 추천 모으기부터 다시 시작합니다.'
+                : dialog === 'bulk-append'
+                  ? '저장하지 않은 일괄 변경을 버립니다. 검수표에는 반영되지 않습니다.'
+                  : '저장하지 않은 빠른 입력 변경을 버립니다. 검수표에는 반영되지 않습니다.'}
             </p>
             <div className="mt-4 flex justify-end gap-2">
               <Button
@@ -1185,14 +946,10 @@ export function InvoiceItemNameAiApplyBar({
               <Button
                 type="button"
                 size="sm"
-                variant={dialog === 'commit' ? 'default' : 'danger'}
+                variant="danger"
                 onClick={confirmDialog}
               >
-                {dialog === 'commit'
-                  ? '변경 저장'
-                  : dialog === 'reset'
-                    ? '처음부터'
-                    : '버리기'}
+                {dialog === 'reset' ? '처음부터' : '버리기'}
               </Button>
             </div>
           </div>

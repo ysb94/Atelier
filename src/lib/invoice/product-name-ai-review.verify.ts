@@ -42,6 +42,7 @@ import {
   productNameAiRowReadyToCommit,
   productNameAiSlotsNeedAi,
   productNameAiWorkflowTab,
+  reconcileProductNameAiReviewState,
   selectLatestFailedSaveRetries,
   shouldIgnoreProductNameAiQuickKey,
   isProductNameAiAddExtraKey,
@@ -890,6 +891,88 @@ assert(
   productNameAiCandidateSearchKeys(itemOnlyRow).join('|') ===
     productNameAiSearchKeys(itemOnlyRow).join('|'),
   '품목 문맥 키가 없으면 기존 전체 키를 쓴다',
+)
+
+const savedCombo = combo({ key: 'saved-combo', itemName: 'Color: 블랙' })
+const openCombo = combo({ key: 'open-combo', itemName: 'Color: 화이트' })
+const savedAi = applyProductNameAiRecommendation(
+  buildProductNameAiReviewRow(savedCombo),
+  {
+    lookupKey: '래빗에코백',
+    products: [
+      {
+        styleId: rabbit.styleId,
+        styleNo: rabbit.styleNo,
+        name: rabbit.name,
+        reason: '원장',
+        confidence: 0.91,
+      },
+    ],
+    source: 'ai',
+    cacheId: 'cache-saved',
+    provider: 'openai',
+    modelId: 'gpt',
+    reason: '고확신',
+  },
+  0.72,
+)
+const openAi = applyProductNameAiRecommendation(
+  buildProductNameAiReviewRow(openCombo),
+  {
+    lookupKey: '래빗에코백',
+    products: [
+      {
+        styleId: rabbit.styleId,
+        styleNo: rabbit.styleNo,
+        name: rabbit.name,
+        reason: '원장',
+        confidence: 0.88,
+      },
+    ],
+    source: 'ai',
+    cacheId: 'cache-open',
+    provider: 'openai',
+    modelId: 'gpt',
+    reason: '고확신',
+  },
+  0.72,
+)
+const openEdited = applyProductNameLookupKey(
+  openAi,
+  openAi.registrationCandidates[1]!.text,
+)
+const afterPartialSave = reconcileProductNameAiReviewState({
+  combos: [openCombo],
+  reviewRows: [savedAi, openAi],
+  drafts: new Map([[openCombo.key, openEdited]]),
+  confirmedKeys: new Set([openCombo.key]),
+  pendingAiKeys: new Set(),
+  committedKeys: new Set([savedCombo.key]),
+})
+assert(afterPartialSave.reviewRows.length === 1, '저장한 행은 검토표에서 뺀다')
+assert(
+  afterPartialSave.reviewRows[0]?.key === openCombo.key,
+  '미저장 행은 검토표에 남긴다',
+)
+assert(
+  afterPartialSave.reviewRows[0]?.lookupKey === openEdited.lookupKey,
+  '미저장 행의 수정 조회 키를 유지한다',
+)
+assert(
+  afterPartialSave.reviewRows[0]?.source === 'manual',
+  '미저장 행의 수동 수정 출처를 유지한다',
+)
+assert(
+  afterPartialSave.reviewRows[0]?.style?.styleId === rabbit.styleId,
+  '미저장 행의 AI 추천 본품을 유지한다',
+)
+assert(
+  afterPartialSave.confirmedKeys.has(openCombo.key),
+  '미저장 행의 확정 상태를 유지한다',
+)
+assert(
+  !afterPartialSave.committedKeys.has(savedCombo.key),
+  '저장한 행의 확정 대기 키는 제거한다',
 )
 
 console.log('product-name-ai-review verify: ok')

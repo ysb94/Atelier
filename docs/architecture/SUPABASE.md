@@ -38,8 +38,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 기획안(`product_drafts` + `draft_colors` + `draft_options`) | Supabase |
 | 코드·출고업체(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_target_folders`, `code_usage_target_aliases`, `code_usage_assignments`) | Supabase |
 | 거래처 코드 헤더(`partner_barcode_fields`). `product_codes.kind='partner'`는 업체마다 같은 바코드 문자열을 허용 | Supabase |
-| 대량출고 작업·등록 업체(`bulk_outbound_jobs` + `bulk_outbound_job_lines` + `bulk_outbound_job_files` + `bulk_outbound_partner_configs`) | Supabase |
-| 대량출고 공용 엑셀 양식·바코드 화면 표시 업체(`bulk_outbound_template_fields` + `barcode_partner_display_settings` + `barcode_partner_display_targets`) | Supabase |
+| 바코드 출고 작업·등록 업체(`bulk_outbound_jobs` + `bulk_outbound_job_lines` + `bulk_outbound_job_files` + `bulk_outbound_partner_configs`) | Supabase |
+| 바코드 출고 공용 엑셀 양식·바코드 화면 표시 업체(`bulk_outbound_template_fields` + `barcode_partner_display_settings` + `barcode_partner_display_targets`) | Supabase |
 | 운영 현황 출고 원장(`outbound_shipments`). 재고 차감과 분리 | Supabase |
 | 송장 품목명 변환 기준(`invoice_name_rules`) | Supabase |
 | 송장 품목명 exact 기준(`invoice_product_name_maps`) | Supabase |
@@ -67,10 +67,13 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 앱 저장소는 `src/lib/supabase/*.ts`다. 공개 API 이름은 `src/lib/api/index.ts`에 유지한다.
 - 원자 작업 RPC: `save_product_draft`, `promote_product_draft`,
   `save_product_code_with_components`, `replace_partner_barcode_fields`,
-  `replace_partner_codes`, `save_bulk_outbound_job`, `replace_bulk_outbound_backup`,
+  `replace_partner_codes`, `save_bulk_outbound_job`,   `replace_bulk_outbound_backup`,
+  `replace_barcode_data_entry_shipments`,
   `delete_bulk_outbound_job`,
   `save_brand_field_options`,
-  `save_invoice_packing_size_maps`,   `save_outbound_partner_with_aliases`, `add_outbound_partner_alias`,
+  `save_invoice_packing_size_maps`,   `save_outbound_partner_with_aliases`,
+  `save_outbound_partner_unit_with_aliases`, `add_outbound_partner_alias`,
+  `delete_outbound_partner_unit`, `outbound_partner_unit_link_labels`,
   `record_invoice_work_completion`,
   `import_warehouse_inventory_set`, `apply_warehouse_stock_action`,
   `restore_warehouse_inventory_set`.
@@ -157,26 +160,29 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 로직: `src/lib/codes/barcode-import.ts`, 화면: `BarcodeBulkUploadPanel.tsx`,
   `PendingBarcodePanel.tsx`, `BarcodeInfoBulkPanel.tsx`, `BarcodeFieldManager.tsx`.
 
-### 거래처 코드·대량출고·운영 현황 출고
+### 거래처 코드·바코드 출고·운영 현황 출고
 
 자사 88코드와 거래처 코드는 같은 `product_codes`에 두고 `kind`로 나눈다.
 거래처 코드는 `usage_target_id`가 있고, 업체마다 같은 바코드 문자열을 허용한다.
 업체별 헤더는 `partner_barcode_fields`이며 자사 `barcode_fields`와 섞지 않는다.
 값은 기존처럼 `product_codes.values` JSONB에 필드 id를 키로 둔다.
 
-대량출고 Job은 `bulk_outbound_jobs`에 두고, 엑셀의 비개인정보만
+바코드 출고 Job은 `bulk_outbound_jobs`에 두고, 엑셀의 비개인정보만
 `bulk_outbound_job_lines`에 남긴다. 바코드·수량·상품명은 전용 컬럼이고,
 발주번호·물류센터·상품번호 같은 양식 추가 열은 `extra_values`에 둔다.
 수령인·전화·주소는 저장하지 않는다.
 「임시 반영」은 재고를 건드리지 않고 `outbound_shipments`에 `source='bulk'`로
 같은 Job의 이전 반영분을 교체한다. 운영 현황은 이 원장만 읽는다.
-대량출고 건 삭제는 `delete_bulk_outbound_job`으로 같은 Job의 `source='bulk'`
+임시 바코드 출고 데이터입력은 `replace_barcode_data_entry_shipments`로
+같은 업체 그룹·출고일의 `barcode-data-entry:*` 반영분을 지점별
+`usage_target_id`로 교체한다. 재고는 건드리지 않는다.
+바코드 출고 건 삭제는 `delete_bulk_outbound_job`으로 같은 Job의 `source='bulk'`
 출고 원장도 함께 지운다. 재고는 건드리지 않는다.
 
-- 대량출고에 등록한 업체는 `bulk_outbound_partner_configs.work_status`로
+- 바코드 출고에 등록한 업체는 `bulk_outbound_partner_configs.work_status`로
   대기(`idle`)·작업중(`working`)·완료(`done`)를 팀 공용으로 표시한다.
   상태 변경은 개발자 계정(`dev@atelier.local`)만 할 수 있다.
-- 대량출고 「우리 양식」 헤더는
+- 바코드 출고 「우리 양식」 헤더는
   `(brand_id, usage_target_id, barcode_source)`별
   `bulk_outbound_template_fields`에 저장한다. 사용자나 브라우저별 설정이 아니며,
   같은 브랜드 구성원이 함께 쓴다.
@@ -199,21 +205,38 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 
 ### 출고업체와 별칭
 
-물건을 보내는 곳을 `code_usage_targets` 한 목록으로 관리한다. 바코드를 등록할
+물건을 보내는 실제 출고 단위를 `code_usage_targets` 한 목록으로 관리한다. 바코드를 등록할
 판매처와 출고하는 업체는 같은 집합이라 목록을 둘로 나누지 않는다. 화면 이름은
 `출고업체`이고 테이블 이름은 기존 코드 연결을 깨지 않기 위해 그대로 둔다.
 
+- **화면 계층은 폴더 → 업체 → 선택적 지점이다.** 분류 폴더 아래
+  `outbound_partner_groups`가 업체를 묶고, 실제 출고 단위는 항상
+  `code_usage_targets` 한 행이다. 지점이 없으면 `site_name`이 빈 그 행이 곧
+  출고 단위이고, 지점이 있으면 각 지점 행이 출고 단위다. 첫 지점은 기존 행의
+  `site_name`만 채워 승격하며 `id`와 별칭·바코드·출고 이력은 유지한다.
+- **업체 그룹·지점·채널은 별도 축이다.** `channel_type`은
+  `online|offline|unset`이며 같은 그룹·지점이라도 채널이 다르면 별도 출고 단위다.
+  온라인/오프라인은 업체·지점 추가 때 정하고 행에는 배지로만 보여 준다.
+- 화면 표시는 `업체 그룹 · 지점`과 온라인/오프라인 배지를 우선한다. 아직 구조화하지
+  않은 기존 행만 이전 `name`을 표시하고 `정리 필요`로 남긴다. 원본 쇼핑몰명처럼
+  자동 연결에 쓰는 기존 이름과 별칭은 구조화 표시와 별도로 보존한다.
+- **거래처 연락처는 실제 출고 단위에만 둔다.** `contact_name` /
+  `contact_phone` / `contact_email` / `address`는 담당 MD·출고 창고 같은 업무
+  연락처다. 송장 고객 수령인·전화·주소와 섞지 않는다. 기존 `note`는 운영 메모다.
 - **분류는 고정 칸이 아니라 폴더 경로다.** `code_usage_target_folders`에 브랜드가
   아는 갈래만 만든다. 일 종류가 위이고 업체 카드가 아래다. 회사 이름(무신사)으로
   묶지 않는다. 카드를 다른 폴더로 옮기면 분류가 바뀌고, 폴더를 지워도 카드는
   미분류로 남는다. 폴더는 네 단까지만 허용한다.
-- **업체명에 출고 방식을 붙이지 않는다.** 일하는 단위가 원래 다르면
-  `무신사 온라인`처럼 단위 이름을 쓰고, 같은 단위의 방식은 폴더와 카드 메모에
-  둔다. `channel_type` / `shipping_method` 열은 호환용으로 남기고 화면은 쓰지
-  않는다.
+- **업체명에 채널을 붙이지 않는다.** 온라인/오프라인은 `channel_type` 배지로,
+  택배·풀필먼트 같은 출고 방식은 `shipping_method`로 관리한다.
 - 상태는 `active`와 `is_one_time`을 조합해 `거래중`·`단발성`·`비활성` 세 가지로
-  표시한다. 비활성이 단발성보다 앞선다. 삭제 경로는 두지 않는다.
-  거래를 멈춰도 `code_usage_assignments`의 바코드 연결 이력은 보존한다.
+  표시한다. 비활성이 단발성보다 앞선다. 거래를 멈출 때는 비활성화해서
+  `code_usage_assignments`의 바코드 연결 이력을 보존한다. 잘못 만든 출고
+  단위는 바코드 연결·거래처 바코드·출고 이력·송장 작업·바코드 출고
+  등록이 없을 때만 지운다. 앱은 연결을 확인한 뒤 `code_usage_targets`를
+  삭제하고, 같은 규칙의 `delete_outbound_partner_unit` RPC도 둔다. 별칭은
+  함께 사라지고, 마지막 단위면 빈 업체 그룹도 지운다. 연결된 이력이
+  있으면 삭제하지 못하고 비활성화한다.
 - 활성 카드 중 폴더가 없는 곳은 `미분류`다. 비활성 카드는 폴더 트리와 미분류에
   섞지 않고 `비활성` 칸에 모은다. 이전 `folder_id`는 힌트로만 남긴다.
 - 비활성 업체를 다시 켤 때는 한 줄 토글이 아니라 팝업에서 업체명·둘 위치·특징을
@@ -232,24 +255,31 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `(brand_id, normalized_name)` 부분 unique 인덱스를 둬 띄어쓰기만 다른 중복을 막는다.
 - 이름을 바꿀 때 이전 이름을 별칭으로 남길 수 있다. 옛 표기로도 계속 검색되므로
   이름 정리가 정보 손실이 되지 않는다.
-- `save_outbound_partner_with_aliases`는 `SECURITY INVOKER` 트랜잭션이며
-  `app.can_edit_brand`를 직접 검사한다. 별칭은 전달한 배열로 통째 교체하므로
-  호출자가 최종 목록을 보내야 한다. 여러 줄 붙여넣기는 이 RPC를 업체마다 호출해
+- `save_outbound_partner_unit_with_aliases`는 기존
+  `save_outbound_partner_identity_with_aliases`를 감싼 `SECURITY INVOKER`
+  트랜잭션이며 `app.can_edit_brand`를 직접 검사한다. 별칭은 전달한 배열로 통째
+  교체하므로 호출자가 최종 목록을 보내야 한다. 이전 identity RPC는 배포 중인
+  구버전 앱을 위해 유지한다. 여러 줄 붙여넣기는 이 RPC를 업체마다 호출해
   한 건이 실패해도 나머지가 남게 한다.
 - 사방넷 쇼핑몰 표기 한 건만 붙일 때는 `add_outbound_partner_alias`를 쓴다.
   기존 별칭을 지우지 않고, 같은 브랜드의 다른 정식명·별칭과 충돌하면 거절한다.
   비활성 업체에는 연결하지 않는다.
 - 로직: `src/lib/codes/outbound-partner.ts`.
-  저장소: `src/lib/supabase/code-usage-targets.ts`.
+  저장소: `src/lib/supabase/code-usage-targets.ts`,
+  `src/lib/supabase/outbound-partner-groups.ts`.
   화면: `UsageTargetsSettingsPage`, `UsageTargetManager`,
   `OutboundPartnerFolderTree`, `OutboundPartnerRow`,
   `OutboundPartnerEditForm`, `OutboundPartnerActivateDialog`,
-  `OutboundPartnerPastePanel`.
+  `OutboundPartnerCompanyNode`, `OutboundPartnerPastePanel`.
 - 회귀 검증: `npm run verify:outbound-partner`(읽기 전용 순수 함수).
 - 마이그레이션: `20260828015800_outbound_partner_aliases.sql`,
   `20260828020500_save_outbound_partner_rpc.sql`,
   `20260828041300_outbound_partner_folders.sql`,
-  `20260828075955_invoice_work_history.sql`.
+  `20260828075955_invoice_work_history.sql`,
+  `20260903044650_outbound_partner_identity.sql`,
+  `20260903054600_outbound_partner_unit_contacts.sql`,
+  `20260903085000_delete_outbound_partner_unit.sql`,
+  `20260903085100_outbound_partner_unit_link_labels_json.sql`.
 
 ### 상품 연결 원칙 (M번호)
 

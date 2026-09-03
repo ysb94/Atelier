@@ -34,7 +34,9 @@
     "verify:invoice-mall": "node scripts/verify-invoice-mall.mjs",
     "verify:invoice-data-entry": "node scripts/verify-invoice-data-entry.mjs",
     "verify:work-instruction": "node scripts/verify-work-instruction.mjs",
-    "verify:invoice-work-pipeline": "node scripts/verify-invoice-work-pipeline.mjs"
+    "verify:invoice-work-pipeline": "node scripts/verify-invoice-work-pipeline.mjs",
+    "verify:invoice-step-compute": "node scripts/verify-invoice-step-compute.mjs",
+    "verify:barcode-outbound-data-entry": "node scripts/verify-barcode-outbound-data-entry.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",

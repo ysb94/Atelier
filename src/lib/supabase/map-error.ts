@@ -34,6 +34,13 @@ export function errorMessage(
     ) {
       return '송장 기준이나 바코드에 연결된 상품이라 삭제할 수 없습니다. 연결을 먼저 해제하세요.'
     }
+    if (
+      /code_usage_assignments|outbound_shipments|bulk_outbound|invoice_work_site_summaries|partner_barcode_fields|product_codes/i.test(
+        message,
+      )
+    ) {
+      return '바코드나 출고 이력이 연결되어 있어 삭제할 수 없습니다. 비활성화하세요.'
+    }
   }
   return message || fallback
 }

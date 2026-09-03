@@ -37,6 +37,9 @@ import {
   getInvoiceProductNameExclusions,
   getInvoiceProductNameMapsForLookupKeys,
   getInvoiceProductNameTagRoles,
+  getCodeUsageTargetAliases,
+  getCodeUsageTargetFolders,
+  getCodeUsageTargets,
   listAllStyleRefs,
 } from '@/lib/api'
 import { emptyGiftSourcePlan } from '@/lib/invoice/gift-source-transform'
@@ -64,16 +67,33 @@ import {
   catalogFromStyles,
 } from '@/lib/invoice/product-name-transform'
 import {
+  isInvoiceMallReady,
+  resolveInvoiceMalls,
+} from '@/lib/invoice/mall-resolution'
+import {
   assessSabangnetDataEntry,
   validateSabangnetUploadFile,
 } from '@/lib/invoice/sabangnet-data-entry'
 import type { SabangnetInspection } from '@/lib/invoice/sabangnet'
 import type { StyleRef } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
+import {
+  InvoiceFileCheckMallWork,
+  InvoiceFileCheckTransformWork,
+} from './InvoiceFileCheckWork'
 import { InvoiceItemNameTransformPanel } from './InvoiceItemNameTransformPanel'
+import { InvoiceMallResolutionDialog } from './InvoiceMallResolutionDialog'
 import { InvoiceProductNameTransformPanel } from './InvoiceProductNameTransformPanel'
 import { SabangnetOrderTable } from './SabangnetOrderTable'
-import { invoiceStepDepsKey, useInvoiceStepCompute } from './useInvoiceStepCompute'
+import {
+  shouldHoldInvoiceStepRecompute,
+  shouldShowInvoiceStepBlockingState,
+} from '@/lib/invoice/invoice-step-compute'
+import {
+  invoiceStepDepsKey,
+  useHeldInvoiceStepDepsKey,
+  useInvoiceStepCompute,
+} from './useInvoiceStepCompute'
 
 type DataEntryStep = 'upload' | 'check' | 'product' | 'item' | 'apply'
 
@@ -218,6 +238,26 @@ function StepCriteriaError({
   )
 }
 
+function StepCriteriaNotice({
+  message,
+  onRetry,
+}: {
+  message: string
+  onRetry: () => void
+}) {
+  return (
+    <div className="flex flex-wrap items-start justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+        <span>{message}</span>
+      </div>
+      <Button type="button" size="sm" variant="outline" onClick={onRetry}>
+        다시 시도
+      </Button>
+    </div>
+  )
+}
+
 /** 사방넷 파일을 올려 출고 데이터용으로 점검·변환하는 임시 화면. */
 export function InvoiceDataEntryPage() {
   const { brand } = useBrand()
@@ -236,9 +276,13 @@ export function InvoiceDataEntryPage() {
   )
   const [workGeneration, setWorkGeneration] = useState(0)
   const [productSaveBlockCount, setProductSaveBlockCount] = useState(0)
+  const [productCriteriaRetrying, setProductCriteriaRetrying] = useState(false)
+  const [itemCriteriaRetrying, setItemCriteriaRetrying] = useState(false)
+  const [mallDialogOpen, setMallDialogOpen] = useState(false)
   const parseGenerationRef = useRef(0)
   const productCacheRef = useRef<InvoiceProductNameStepResult | null>(null)
   const itemCacheRef = useRef<InvoiceItemNameTransformation | null>(null)
+  const mallAutoOpenedRef = useRef('')
 
   const assessment = useMemo(
     () => (inspection ? assessSabangnetDataEntry(inspection.rows) : null),
@@ -252,9 +296,59 @@ export function InvoiceDataEntryPage() {
   )
   const reachedProduct = reachedStepIndex >= DATA_ENTRY_STEP_INDEX.product
   const reachedItem = reachedStepIndex >= DATA_ENTRY_STEP_INDEX.item
+  const reachedCheck = reachedStepIndex >= DATA_ENTRY_STEP_INDEX.check
+
+  const criteriaQueryOptions = {
+    staleTime: CRITERIA_STALE_MS,
+    refetchOnWindowFocus: false,
+  }
+
+  const usageTargetsQuery = useQuery({
+    queryKey: ['codeUsageTargets', brand.id],
+    queryFn: () => getCodeUsageTargets(brand.id),
+    enabled: Boolean(inspection) && reachedCheck,
+    ...criteriaQueryOptions,
+  })
+  const usageAliasesQuery = useQuery({
+    queryKey: ['codeUsageTargetAliases', brand.id],
+    queryFn: () => getCodeUsageTargetAliases(brand.id),
+    enabled: Boolean(inspection) && reachedCheck,
+    ...criteriaQueryOptions,
+  })
+  const usageFoldersQuery = useQuery({
+    queryKey: ['codeUsageTargetFolders', brand.id],
+    queryFn: () => getCodeUsageTargetFolders(brand.id),
+    enabled: Boolean(inspection) && reachedCheck,
+    ...criteriaQueryOptions,
+  })
+  const usageTargets = useMemo(
+    () => usageTargetsQuery.data ?? [],
+    [usageTargetsQuery.data],
+  )
+  const usageAliases = useMemo(
+    () => usageAliasesQuery.data ?? [],
+    [usageAliasesQuery.data],
+  )
+  const usageFolders = useMemo(
+    () => usageFoldersQuery.data ?? [],
+    [usageFoldersQuery.data],
+  )
+  const mallResolution = useMemo(
+    () =>
+      inspection
+        ? resolveInvoiceMalls(inspection.rows, usageTargets, usageAliases)
+        : resolveInvoiceMalls([], [], []),
+    [inspection, usageTargets, usageAliases],
+  )
+  const mallPartnersReady =
+    !usageTargetsQuery.isPending &&
+    !usageAliasesQuery.isPending &&
+    !usageTargetsQuery.error &&
+    !usageAliasesQuery.error
+  const mallsReady = mallPartnersReady && isInvoiceMallReady(mallResolution)
   const maxStepIndex = !inspection
     ? 0
-    : fileReady
+    : fileReady && mallsReady
       ? reachedStepIndex
       : Math.min(reachedStepIndex, DATA_ENTRY_STEP_INDEX.check)
   const stepIndex = Math.min(
@@ -263,10 +357,25 @@ export function InvoiceDataEntryPage() {
   )
   const activeStep = DATA_ENTRY_STEPS[stepIndex]!.value
 
-  const criteriaQueryOptions = {
-    staleTime: CRITERIA_STALE_MS,
-    refetchOnWindowFocus: false,
-  }
+  useEffect(() => {
+    if (!inspection || !headerReady || !mallPartnersReady) return
+    const autoKey = `${fileName}:${inspection.rowCount}:${mallResolution.unresolvedCount}`
+    if (mallResolution.unresolvedCount === 0) {
+      setMallDialogOpen(false)
+      return
+    }
+    if (activeStep === 'check' && mallAutoOpenedRef.current !== autoKey) {
+      mallAutoOpenedRef.current = autoKey
+      setMallDialogOpen(true)
+    }
+  }, [
+    activeStep,
+    fileName,
+    headerReady,
+    inspection,
+    mallPartnersReady,
+    mallResolution.unresolvedCount,
+  ])
 
   useEffect(() => {
     if (!fileReady) return
@@ -403,17 +512,36 @@ export function InvoiceDataEntryPage() {
     () => catalogFromStyles(productStyleLookupQuery.data ?? EMPTY_STYLE_REFS),
     [productStyleLookupQuery.data],
   )
+  const fileResetKey = `${fileName}:${workGeneration}`
+  const holdProductRecompute = shouldHoldInvoiceStepRecompute({
+    saving: productSaveBlockCount > 0 || productCriteriaRetrying,
+    criteriaSettled:
+      productNameMaps === deferredProductNameMaps &&
+      productNameExclusions === deferredProductNameExclusions &&
+      productNameTagRoles === deferredProductNameTagRoles,
+  })
+  const liveProductDepsKey = invoiceStepDepsKey([
+    fileName,
+    workGeneration,
+    inspection?.rowCount,
+    productMapsSig,
+    productExclusionContentSig,
+    productTagRoleSig,
+    productStyleLookupQuery.data?.length,
+  ])
+  const productHold = useHeldInvoiceStepDepsKey(
+    liveProductDepsKey,
+    holdProductRecompute,
+    { record: productQueriesReady, resetKey: fileResetKey },
+  )
   const productCompute = useInvoiceStepCompute({
-    enabled: Boolean(inspection) && productQueriesReady && reachedProduct,
-    depsKey: invoiceStepDepsKey([
-      fileName,
-      workGeneration,
-      inspection?.rowCount,
-      productMapsSig,
-      productExclusionContentSig,
-      productTagRoleSig,
-      productStyleLookupQuery.data?.length,
-    ]),
+    enabled:
+      Boolean(inspection) &&
+      productQueriesReady &&
+      reachedProduct &&
+      productHold.holdEnabled,
+    depsKey: productHold.depsKey,
+    resetKey: fileResetKey,
     label: 'data-entry-product-transform',
     compute: () =>
       computeInvoiceProductNameStep({
@@ -429,8 +557,6 @@ export function InvoiceDataEntryPage() {
   })
   if (productCompute.result) {
     productCacheRef.current = productCompute.result
-  } else if (productCompute.status === 'error') {
-    productCacheRef.current = null
   }
   const productTransformation =
     productCompute.result?.product ?? productCacheRef.current?.product ?? null
@@ -559,24 +685,38 @@ export function InvoiceDataEntryPage() {
       ),
     [deferredItemNameRules, deferredOptionMaps, productStyleLookupQuery.data],
   )
+  const holdItemRecompute = shouldHoldInvoiceStepRecompute({
+    saving: productSaveBlockCount > 0 || itemCriteriaRetrying,
+    criteriaSettled:
+      optionMaps === deferredOptionMaps &&
+      itemNameRules === deferredItemNameRules &&
+      accessoryRules === deferredAccessoryRules,
+  })
+  const liveItemDepsKey = invoiceStepDepsKey([
+    fileName,
+    workGeneration,
+    productTransformation?.mappedRowCount,
+    productTransformation?.unresolvedRowCount,
+    productTransformation?.excludedRowCount,
+    optionMapsContentSig,
+    itemNameRulesContentSig,
+    accessoryRulesQuery.dataUpdatedAt,
+    deferredAccessoryRules.length,
+    productStyleLookupQuery.data?.length,
+  ])
+  const itemHold = useHeldInvoiceStepDepsKey(liveItemDepsKey, holdItemRecompute, {
+    record: itemQueriesReady,
+    resetKey: fileResetKey,
+  })
   const itemCompute = useInvoiceStepCompute({
     enabled:
       Boolean(inspection) &&
       itemQueriesReady &&
       productCompute.status === 'ready' &&
-      reachedItem,
-    depsKey: invoiceStepDepsKey([
-      fileName,
-      workGeneration,
-      productTransformation?.mappedRowCount,
-      productTransformation?.unresolvedRowCount,
-      productTransformation?.excludedRowCount,
-      optionMapsContentSig,
-      itemNameRulesContentSig,
-      accessoryRulesQuery.dataUpdatedAt,
-      deferredAccessoryRules.length,
-      productStyleLookupQuery.data?.length,
-    ]),
+      reachedItem &&
+      itemHold.holdEnabled,
+    depsKey: itemHold.depsKey,
+    resetKey: fileResetKey,
     label: 'data-entry-item-transform',
     compute: () => {
       if (!inspection || !productTransformation) {
@@ -595,10 +735,60 @@ export function InvoiceDataEntryPage() {
   })
   if (itemCompute.result) {
     itemCacheRef.current = itemCompute.result
-  } else if (itemCompute.status === 'error') {
-    itemCacheRef.current = null
   }
   const itemTransformation = itemCompute.result ?? itemCacheRef.current
+  const productCriteriaLoading =
+    workProductNameMapsQuery.isLoading ||
+    productNameExclusionsQuery.isLoading ||
+    productNameTagRolesQuery.isLoading ||
+    productStyleLookupQuery.isLoading
+  const productStepError =
+    productNameMapsError ||
+    productNameExclusionsError ||
+    productCompute.error ||
+    (productNameTagRolesQuery.error
+      ? '품목명 태그 역할을 불러오지 못했습니다.'
+      : productStyleLookupQuery.error instanceof Error
+        ? productStyleLookupQuery.error.message
+        : productStyleLookupQuery.error
+          ? '상품 마스터를 대조하지 못했습니다.'
+          : null)
+  const productStepBlock = shouldShowInvoiceStepBlockingState({
+    hasResult: Boolean(productTransformation),
+    computing:
+      productCriteriaLoading || productCompute.status === 'computing',
+    hasError: Boolean(productStepError),
+  })
+  const retryProductStep = () => {
+    setProductCriteriaRetrying(true)
+    void Promise.allSettled([
+      workProductNameMapsQuery.refetch(),
+      productNameExclusionsQuery.refetch(),
+      productNameTagRolesQuery.refetch(),
+      productStyleLookupQuery.refetch(),
+    ]).then(() => {
+      setProductCriteriaRetrying(false)
+      productCompute.retry()
+    })
+  }
+  const itemStepError = itemNameCriteriaError || itemCompute.error || null
+  const itemStepBlock = shouldShowInvoiceStepBlockingState({
+    hasResult: Boolean(itemTransformation),
+    computing:
+      itemNameCriteriaLoading || itemCompute.status === 'computing',
+    hasError: Boolean(itemStepError),
+  })
+  const retryItemStep = () => {
+    setItemCriteriaRetrying(true)
+    void Promise.allSettled([
+      workOptionMapsQuery.refetch(),
+      workItemNameRulesQuery.refetch(),
+      accessoryRulesQuery.refetch(),
+    ]).then(() => {
+      setItemCriteriaRetrying(false)
+      itemCompute.retry()
+    })
+  }
 
   function markVisited(next: DataEntryStep) {
     setVisitedSteps((current) => {
@@ -635,6 +825,8 @@ export function InvoiceDataEntryPage() {
     productCacheRef.current = null
     itemCacheRef.current = null
     setProductSaveBlockCount(0)
+    setProductCriteriaRetrying(false)
+    setItemCriteriaRetrying(false)
     setInspection(null)
     setFileName('')
     setError(null)
@@ -642,6 +834,8 @@ export function InvoiceDataEntryPage() {
     setReachedStepIndex(0)
     setVisitedSteps(new Set(['upload']))
     setStep('upload')
+    setMallDialogOpen(false)
+    mallAutoOpenedRef.current = ''
     if (inputRef.current) inputRef.current.value = ''
   }
 
@@ -659,6 +853,8 @@ export function InvoiceDataEntryPage() {
     productCacheRef.current = null
     itemCacheRef.current = null
     setProductSaveBlockCount(0)
+    setProductCriteriaRetrying(false)
+    setItemCriteriaRetrying(false)
     setIsParsing(true)
     setError(null)
     setInspection(null)
@@ -666,6 +862,8 @@ export function InvoiceDataEntryPage() {
     setReachedStepIndex(0)
     setVisitedSteps(new Set(['upload']))
     setStep('upload')
+    setMallDialogOpen(false)
+    mallAutoOpenedRef.current = ''
 
     try {
       const nextInspection = await parseSabangnetInvoiceFile(file)
@@ -866,9 +1064,19 @@ export function InvoiceDataEntryPage() {
                     tone="success"
                   />
                   <SummaryItem
-                    label="파일 안 업체"
-                    value={`${formatNumber(assessment.mallCount)}곳`}
-                    tone="success"
+                    label="쇼핑몰명 연결 필요"
+                    value={
+                      mallPartnersReady
+                        ? `${formatNumber(mallResolution.unresolvedCount)}곳`
+                        : '…'
+                    }
+                    tone={
+                      !mallPartnersReady
+                        ? 'default'
+                        : mallResolution.unresolvedCount > 0
+                          ? 'warning'
+                          : 'success'
+                    }
                   />
                   <SummaryItem
                     label="출고 필수값 확인 필요"
@@ -927,12 +1135,24 @@ export function InvoiceDataEntryPage() {
                   </div>
                 )}
 
-                {inspection.missingProductCodeCount > 0 && headerReady ? (
-                  <p className="text-xs text-muted-foreground">
-                    자체품번코드가 빈 행은{' '}
-                    {formatNumber(inspection.missingProductCodeCount)}행입니다.
-                    이후 품목명 변환에서 따로 맞춥니다.
-                  </p>
+                {headerReady ? (
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    <InvoiceFileCheckTransformWork
+                      missingProductCodeCount={
+                        inspection.missingProductCodeCount
+                      }
+                      nextStepLabel="다음 품목명·내품명 변환"
+                    />
+                    <InvoiceFileCheckMallWork
+                      resolution={mallResolution}
+                      partnersReady={mallPartnersReady}
+                      partnersError={Boolean(
+                        usageTargetsQuery.error || usageAliasesQuery.error,
+                      )}
+                      blockLabel="품목명 변환으로 갈 수 없습니다."
+                      onOpen={() => setMallDialogOpen(true)}
+                    />
+                  </div>
                 ) : null}
 
                 <SabangnetOrderTable
@@ -943,7 +1163,7 @@ export function InvoiceDataEntryPage() {
                 <div className="flex justify-end">
                   <Button
                     type="button"
-                    disabled={!fileReady}
+                    disabled={!fileReady || !mallsReady}
                     onClick={() => goNextStep('product')}
                   >
                     품목명 변환으로
@@ -969,11 +1189,7 @@ export function InvoiceDataEntryPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
-                {workProductNameMapsQuery.isLoading ||
-                productNameExclusionsQuery.isLoading ||
-                productNameTagRolesQuery.isLoading ||
-                productStyleLookupQuery.isLoading ||
-                productCompute.status === 'computing' ? (
+                {productStepBlock === 'loading' ? (
                   <StepCriteriaLoading
                     label={
                       productQueriesReady
@@ -981,40 +1197,37 @@ export function InvoiceDataEntryPage() {
                         : '이 브랜드의 품목명 변환 기준을 불러오고 있습니다.'
                     }
                   />
-                ) : productNameMapsError ||
-                  productNameExclusionsError ||
-                  productNameTagRolesQuery.error ||
-                  productStyleLookupQuery.error ||
-                  productCompute.error ? (
+                ) : productStepBlock === 'error' ? (
                   <StepCriteriaError
                     message={
-                      productNameMapsError ||
-                      productNameExclusionsError ||
-                      productCompute.error ||
-                      (productNameTagRolesQuery.error
-                        ? '품목명 태그 역할을 불러오지 못했습니다.'
-                        : productStyleLookupQuery.error instanceof Error
-                          ? productStyleLookupQuery.error.message
-                          : '상품 마스터를 대조하지 못했습니다.')
+                      productStepError ||
+                      '품목명 변환을 계산하지 못했습니다.'
                     }
-                    onRetry={() => {
-                      void workProductNameMapsQuery.refetch()
-                      void productNameExclusionsQuery.refetch()
-                      void productNameTagRolesQuery.refetch()
-                      void productStyleLookupQuery.refetch()
-                    }}
+                    onRetry={retryProductStep}
                   />
                 ) : productTransformation ? (
-                  <InvoiceProductNameTransformPanel
-                    key={`${fileName}:${workGeneration}`}
-                    brandId={brand.id}
-                    transformation={productTransformation}
-                    renderUi={activeStep === 'product' && workspaceActive}
-                    autoCollect={false}
-                    autoCollectKey={`${fileName}:${workGeneration}`}
-                    onBlockingSaveCountChange={setProductSaveBlockCount}
-                    giftGroups={[]}
-                  />
+                  <>
+                    {productStepError ? (
+                      <StepCriteriaNotice
+                        message={productStepError}
+                        onRetry={retryProductStep}
+                      />
+                    ) : productCompute.status === 'computing' ? (
+                      <p className="text-sm text-muted-foreground">
+                        품목명 변환을 다시 계산하고 있습니다.
+                      </p>
+                    ) : null}
+                    <InvoiceProductNameTransformPanel
+                      key={`${fileName}:${workGeneration}`}
+                      brandId={brand.id}
+                      transformation={productTransformation}
+                      renderUi={activeStep === 'product' && workspaceActive}
+                      autoCollect={false}
+                      autoCollectKey={`${fileName}:${workGeneration}`}
+                      onBlockingSaveCountChange={setProductSaveBlockCount}
+                      giftGroups={[]}
+                    />
+                  </>
                 ) : null}
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
@@ -1062,8 +1275,7 @@ export function InvoiceDataEntryPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-5">
-                {itemNameCriteriaLoading ||
-                itemCompute.status === 'computing' ? (
+                {itemStepBlock === 'loading' ? (
                   <StepCriteriaLoading
                     label={
                       itemQueriesReady
@@ -1071,32 +1283,38 @@ export function InvoiceDataEntryPage() {
                         : '이 브랜드의 내품명 변환 기준을 불러오고 있습니다.'
                     }
                   />
-                ) : itemNameCriteriaError || itemCompute.error ? (
+                ) : itemStepBlock === 'error' ? (
                   <StepCriteriaError
                     message={
-                      itemNameCriteriaError ||
-                      itemCompute.error ||
-                      '내품명 변환을 계산하지 못했습니다.'
+                      itemStepError || '내품명 변환을 계산하지 못했습니다.'
                     }
-                    onRetry={() => {
-                      void workOptionMapsQuery.refetch()
-                      void workItemNameRulesQuery.refetch()
-                      void accessoryRulesQuery.refetch()
-                    }}
+                    onRetry={retryItemStep}
                   />
                 ) : itemTransformation ? (
-                  <InvoiceItemNameTransformPanel
-                    key={`${fileName}:${workGeneration}`}
-                    brandId={brand.id}
-                    brandName={brand.name}
-                    transformation={itemTransformation}
-                    itemNameRules={itemNameRules}
-                    accessoryRules={accessoryRules}
-                    styles={productStyleLookupQuery.data ?? EMPTY_STYLE_REFS}
-                    renderUi={activeStep === 'item' && workspaceActive}
-                    autoCollect={false}
-                    autoCollectKey={`${fileName}:${workGeneration}`}
-                  />
+                  <>
+                    {itemStepError ? (
+                      <StepCriteriaNotice
+                        message={itemStepError}
+                        onRetry={retryItemStep}
+                      />
+                    ) : itemCompute.status === 'computing' ? (
+                      <p className="text-sm text-muted-foreground">
+                        내품명 변환을 다시 계산하고 있습니다.
+                      </p>
+                    ) : null}
+                    <InvoiceItemNameTransformPanel
+                      key={`${fileName}:${workGeneration}`}
+                      brandId={brand.id}
+                      brandName={brand.name}
+                      transformation={itemTransformation}
+                      itemNameRules={itemNameRules}
+                      accessoryRules={accessoryRules}
+                      styles={productStyleLookupQuery.data ?? EMPTY_STYLE_REFS}
+                      renderUi={activeStep === 'item' && workspaceActive}
+                      autoCollect={false}
+                      autoCollectKey={`${fileName}:${workGeneration}`}
+                    />
+                  </>
                 ) : null}
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
@@ -1157,6 +1375,18 @@ export function InvoiceDataEntryPage() {
           </Card>
         </DataEntryStepPanel>
       </div>
+
+      {workspaceActive && mallDialogOpen && inspection ? (
+        <InvoiceMallResolutionDialog
+          brandId={brand.id}
+          brandSlug={brand.slug}
+          sites={mallResolution.sites}
+          targets={usageTargets}
+          aliases={usageAliases}
+          folders={usageFolders}
+          onClose={() => setMallDialogOpen(false)}
+        />
+      ) : null}
     </div>
   )
 }

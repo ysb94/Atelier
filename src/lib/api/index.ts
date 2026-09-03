@@ -19,6 +19,7 @@ import type {
   CodeUsageTargetAlias,
   CodeUsageTargetFolder,
   CodeUsageTargetInput,
+  OutboundPartnerGroup,
   InvoiceNameRule,
   InvoiceItemNameRule,
   InvoiceAccessoryRule,
@@ -64,6 +65,7 @@ import * as brandFieldStore from '@/lib/supabase/brand-fields'
 import * as barcodeFieldStore from '@/lib/supabase/barcode-fields'
 import * as codeUsageTargetStore from '@/lib/supabase/code-usage-targets'
 import * as codeUsageTargetFolderStore from '@/lib/supabase/code-usage-target-folders'
+import * as outboundPartnerGroupStore from '@/lib/supabase/outbound-partner-groups'
 import type {
   BulkCodeUsageTargetResult,
   BulkCodeUsageTargetRow,
@@ -1540,6 +1542,15 @@ export async function getOutboundShipments(brandId: string) {
   return outboundShipmentStore.listOutboundShipments(brandId)
 }
 
+export async function replaceBarcodeDataEntryShipments(
+  input: Parameters<
+    typeof outboundShipmentStore.replaceBarcodeDataEntryShipments
+  >[0],
+) {
+  await delay()
+  return outboundShipmentStore.replaceBarcodeDataEntryShipments(input)
+}
+
 export async function createProductCode(
   brandId: string,
   input: ProductCodeInput,
@@ -1702,6 +1713,17 @@ export async function addCodeUsageTargetAlias(
   return codeUsageTargetStore.addCodeUsageTargetAlias(brandId, targetId, alias)
 }
 
+export async function getCodeUsageTargetLinkLabels(
+  id: string,
+): Promise<string[]> {
+  return codeUsageTargetStore.listCodeUsageTargetLinkLabels(id)
+}
+
+export async function deleteCodeUsageTarget(id: string): Promise<void> {
+  await delay()
+  return codeUsageTargetStore.deleteCodeUsageTarget(id)
+}
+
 export async function updateCodeUsageTarget(
   id: string,
   patch: Partial<
@@ -1714,6 +1736,12 @@ export async function updateCodeUsageTarget(
       | 'shippingMethod'
       | 'note'
       | 'folderId'
+      | 'groupId'
+      | 'siteName'
+      | 'contactName'
+      | 'contactPhone'
+      | 'contactEmail'
+      | 'address'
     >
   > & { aliases?: readonly string[] },
 ): Promise<CodeUsageTarget> {
@@ -1740,6 +1768,28 @@ export async function getCodeUsageTargetFolders(
   brandId: string,
 ): Promise<CodeUsageTargetFolder[]> {
   return codeUsageTargetFolderStore.listCodeUsageTargetFolders(brandId)
+}
+
+export async function getOutboundPartnerGroups(
+  brandId: string,
+): Promise<OutboundPartnerGroup[]> {
+  return outboundPartnerGroupStore.listOutboundPartnerGroups(brandId)
+}
+
+export async function createOutboundPartnerGroup(
+  brandId: string,
+  name: string,
+): Promise<OutboundPartnerGroup> {
+  await delay()
+  return outboundPartnerGroupStore.createOutboundPartnerGroup(brandId, name)
+}
+
+export async function updateOutboundPartnerGroup(
+  id: string,
+  name: string,
+): Promise<OutboundPartnerGroup> {
+  await delay()
+  return outboundPartnerGroupStore.updateOutboundPartnerGroup(id, name)
 }
 
 export async function createCodeUsageTargetFolder(

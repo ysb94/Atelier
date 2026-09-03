@@ -14,6 +14,7 @@ import {
 import {
   applyItemNameAiQuickSlotStyle,
   applyItemNameAiQuickSlotText,
+  countItemNameAiPendingResolve,
   decideItemNameAiEnterAction,
   decideItemNameAiQuickSlotMatch,
   emptyItemNameAiQuickSlot,
@@ -21,6 +22,8 @@ import {
   ITEM_NAME_AI_QUICK_SLOT_LIMIT,
   itemNameAiQuickSlotsFromComponents,
   nextItemNameAiQuickFocus,
+  nextItemNameAiRowMark,
+  removeItemNameAiQuickSlot,
   type ItemNameAiQuickSlot,
   type ItemNameAiReviewRow,
 } from '@/lib/invoice/item-name-ai-review'
@@ -68,36 +71,22 @@ function slotsForRow(
   )
 }
 
-function pendingSlotCount(slotsByKey: Map<string, ItemNameAiQuickSlot[]>) {
-  let count = 0
-  for (const slots of slotsByKey.values()) {
-    for (const slot of slots) {
-      if (
-        slot.text.trim() &&
-        (slot.status === 'draft' ||
-          slot.status === 'ambiguous' ||
-          slot.status === 'unmatched')
-      ) {
-        count += 1
-      }
-    }
-  }
-  return count
-}
-
 export function useInvoiceItemNameQuickEntry({
   brandId,
   rows,
   confirmedKeys,
+  pendingAiKeys,
   stageRowComponents,
   stageRowDelete,
   unstageRow,
   confirmRow,
   unconfirmRow,
+  commitRow,
 }: {
   brandId: string
   rows: ItemNameAiReviewRow[]
   confirmedKeys: ReadonlySet<string>
+  pendingAiKeys: ReadonlySet<string>
   stageRowComponents: (
     key: string,
     components: AccessoryLookupComponent[],
@@ -106,6 +95,7 @@ export function useInvoiceItemNameQuickEntry({
   unstageRow: (key: string) => void
   confirmRow: (key: string, pendingAi?: boolean) => void
   unconfirmRow: (key: string) => void
+  commitRow: (key: string) => void
 }) {
   const queryClient = useQueryClient()
   const routeQuery = useQuery({
@@ -232,60 +222,44 @@ export function useInvoiceItemNameQuickEntry({
       mode: 'edit' | 'confirm' | 'resolved',
     ) => {
       const decision = decideItemNameAiEnterAction(slots)
-      const confirmed = confirmedKeys.has(rowKey)
+      const mark = nextItemNameAiRowMark(mode, decision.status)
       if (decision.status === 'invalid') {
         unstageRow(rowKey)
-        if (confirmed) unconfirmRow(rowKey)
+        unconfirmRow(rowKey)
         setStageError(rowKey, '같은 구성품 M번호는 한 번만 넣을 수 있습니다.')
-        return decision
-      }
-      if (mode === 'edit') {
-        if (decision.status === 'needs_ai') {
-          unstageRow(rowKey)
-          if (confirmed) confirmRow(rowKey, true)
-          setStageError(rowKey, null)
-          return decision
-        }
-        if (confirmed) {
-          const staged =
-            decision.status === 'delete'
-              ? stageRowDelete(rowKey)
-              : stageRowComponents(rowKey, decision.components)
-          setStageError(rowKey, staged.ok ? null : staged.error ?? '반영하지 못했습니다.')
-        } else {
-          unstageRow(rowKey)
-          setStageError(rowKey, null)
-        }
         return decision
       }
       if (decision.status === 'needs_ai') {
         unstageRow(rowKey)
-        confirmRow(rowKey, true)
+        if (mark === 'pending_ai') confirmRow(rowKey, true)
+        else if (mark === 'unconfirm') unconfirmRow(rowKey)
         setStageError(rowKey, null)
         return decision
       }
-      if (decision.status === 'delete') {
-        const staged = stageRowDelete(rowKey)
-        setStageError(rowKey, staged.ok ? null : staged.error ?? '반영하지 못했습니다.')
+      const staged =
+        decision.status === 'delete'
+          ? stageRowDelete(rowKey)
+          : stageRowComponents(rowKey, decision.components)
+      if (!staged.ok) {
+        setStageError(rowKey, staged.error ?? '반영하지 못했습니다.')
         return decision
       }
-      const staged = stageRowComponents(rowKey, decision.components)
-      if (staged.ok) {
+      if (decision.status === 'components') {
         const next = new Map(slotsByKeyRef.current)
         next.set(
           rowKey,
           itemNameAiQuickSlotsFromComponents(decision.components),
         )
         replaceSlots(next)
-        setStageError(rowKey, null)
-      } else {
-        setStageError(rowKey, staged.error ?? '반영하지 못했습니다.')
       }
+      setStageError(rowKey, null)
+      if (mark === 'committed') commitRow(rowKey)
+      else if (mark === 'unconfirm') unconfirmRow(rowKey)
       return decision
     },
     [
+      commitRow,
       confirmRow,
-      confirmedKeys,
       replaceSlots,
       setStageError,
       stageRowComponents,
@@ -375,6 +349,17 @@ export function useInvoiceItemNameQuickEntry({
     }
   }, [])
 
+  const removeSlot = useCallback(
+    (rowKey: string, slotIndex: number) => {
+      const nextSlots = writeSlots(rowKey, (slots) =>
+        removeItemNameAiQuickSlot(slots, slotIndex),
+      )
+      applyDecision(rowKey, nextSlots, 'edit')
+      focusSlot(rowKey, Math.max(0, Math.min(slotIndex, nextSlots.length) - 1))
+    },
+    [applyDecision, focusSlot, writeSlots],
+  )
+
   const moveFocus = useCallback(
     (
       visibleRows: ItemNameAiReviewRow[],
@@ -432,8 +417,8 @@ export function useInvoiceItemNameQuickEntry({
   )
 
   const pendingCount = useMemo(
-    () => pendingSlotCount(slotsByKey),
-    [slotsByKey],
+    () => countItemNameAiPendingResolve(pendingAiKeys, slotsByKey),
+    [pendingAiKeys, slotsByKey],
   )
 
   const resolve = useCallback(async () => {
@@ -450,6 +435,7 @@ export function useInvoiceItemNameQuickEntry({
     for (const [rowKey, slots] of currentSlots) {
       const row = rowByKey.get(rowKey)
       if (!row) continue
+      if (!pendingAiKeys.has(rowKey)) continue
       slots.forEach((slot, slotIndex) => {
         if (
           !slot.text.trim() ||
@@ -672,6 +658,7 @@ export function useInvoiceItemNameQuickEntry({
     rowByKey,
     applyDecision,
     confirmedKeys,
+    pendingAiKeys,
     replaceSlots,
   ])
 
@@ -697,8 +684,10 @@ export function useInvoiceItemNameQuickEntry({
     setSlotText,
     pickSlotStyle,
     clearSlot,
+    removeSlot,
     ensureSlotCount,
     registerInput,
+    focusSlot,
     moveDown,
     moveRight,
     confirmAndMove,

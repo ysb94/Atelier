@@ -32,6 +32,7 @@ import {
   updateProductCode,
 } from '@/lib/api'
 import { barcodePrefix } from '@/lib/codes/ean'
+import { outboundPartnerOptionLabel } from '@/lib/codes/outbound-partner'
 import type {
   BarcodeField,
   CodeUsageAssignment,
@@ -151,7 +152,9 @@ export function BarcodePage() {
       if (
         codeAssignments.some((row) => {
           const target = targetMap.get(row.usageTargetId)
-          return target?.name.toLowerCase().includes(keyword)
+          return target
+            ? outboundPartnerOptionLabel(target).toLowerCase().includes(keyword)
+            : false
         })
       ) {
         return true
@@ -665,7 +668,11 @@ export function BarcodePage() {
                                             className="flex items-center gap-2 text-sm"
                                           >
                                             <span>
-                                              {target?.name ??
+                                              {target
+                                                ? outboundPartnerOptionLabel(
+                                                    target,
+                                                  )
+                                                :
                                                 '알 수 없는 업체'}
                                             </span>
                                             <Badge
@@ -832,7 +839,9 @@ function UsageSummary({
     <div className="flex flex-wrap gap-1">
       {assignments.map((row) => {
         const target = targetMap.get(row.usageTargetId)
-        const label = target?.name ?? '알 수 없는 업체'
+        const label = target
+          ? outboundPartnerOptionLabel(target)
+          : '알 수 없는 업체'
         if (row.status === 'active') {
           return (
             <Badge key={row.id} variant="outline">

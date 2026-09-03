@@ -16,6 +16,7 @@ import {
   compactOutboundPartnerKey,
   matchesOutboundPartnerSearch,
   normalizeOutboundPartnerName,
+  outboundPartnerOptionLabel,
 } from '@/lib/codes/outbound-partner'
 import type { InvoiceMallSite } from '@/lib/invoice/mall-resolution'
 import type {
@@ -194,7 +195,7 @@ export function InvoiceMallResolutionDialog({
                 id="invoice-mall-resolution-title"
                 className="text-base font-semibold tracking-tight"
               >
-                사이트 연결
+                쇼핑몰명 연결
               </h2>
               <p className="mt-0.5 text-sm text-muted-foreground">
                 파일의 쇼핑몰명을 출고업체에 연결해야 다음 단계로 갈 수
@@ -216,7 +217,7 @@ export function InvoiceMallResolutionDialog({
 
         <div className="space-y-4 px-5 py-4">
           {unresolved.length === 0 ? (
-            <p className="text-sm text-success">모든 사이트를 연결했습니다.</p>
+            <p className="text-sm text-success">모든 쇼핑몰명을 연결했습니다.</p>
           ) : null}
 
           {unresolved.map((site) => {
@@ -341,7 +342,7 @@ export function InvoiceMallResolutionDialog({
                           <option value="">업체를 고르세요</option>
                           {choices.map((target) => (
                             <option key={target.id} value={target.id}>
-                              {target.name}
+                              {outboundPartnerOptionLabel(target)}
                             </option>
                           ))}
                         </select>

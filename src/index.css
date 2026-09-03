@@ -358,7 +358,7 @@ html.printing-invoice-product-list .invoice-product-list-print-sheet {
   text-align: left;
 }
 
-/* 대량출고: 구역이 바뀔 때 빈 행 없이 상품 행 윗선만 굵게 */
+/* 바코드 출고: 구역이 바뀔 때 빈 행 없이 상품 행 윗선만 굵게 */
 .invoice-product-list-print-zone-start td {
   border-top: 1.8pt solid #111 !important;
 }

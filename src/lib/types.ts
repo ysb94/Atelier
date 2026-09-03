@@ -396,6 +396,17 @@ export type CodeUsageTargetFolder = {
   updatedAt: string
 }
 
+/** 여러 지점·채널 출고 단위를 묶는 업체 그룹. */
+export type OutboundPartnerGroup = {
+  id: string
+  brandId: string
+  name: string
+  normalizedName: string
+  order: number
+  createdAt: string
+  updatedAt: string
+}
+
 export type CodeUsageTarget = {
   id: string
   brandId: string
@@ -410,6 +421,18 @@ export type CodeUsageTarget = {
   shippingMethod: OutboundShippingMethod
   /** 분류 폴더. 비면 미분류다. */
   folderId: string | null
+  /** 같은 업체의 지점·채널을 묶는 그룹. */
+  groupId: string | null
+  /** 그룹명. 그룹이 없으면 빈 문자열이다. */
+  groupName: string
+  /** 그룹 안의 지점 또는 업무 단위. */
+  siteName: string
+  normalizedSiteName: string
+  /** 거래처 업무 담당자. 송장 고객 수령인이 아니다. */
+  contactName: string
+  contactPhone: string
+  contactEmail: string
+  address: string
   note: string
   order: number
   createdAt: string
@@ -423,6 +446,12 @@ export type CodeUsageTargetInput = {
   isOneTime?: boolean
   note?: string
   folderId?: string | null
+  groupId?: string | null
+  siteName?: string
+  contactName?: string
+  contactPhone?: string
+  contactEmail?: string
+  address?: string
 }
 
 /** 부서·발주 사이트마다 다르게 부르는 이름. 정식명 1건에 N건이다. */

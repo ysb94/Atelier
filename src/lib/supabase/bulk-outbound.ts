@@ -251,7 +251,7 @@ export async function listBulkOutboundPartnerConfigs(
 
   if (error) {
     throw new BulkOutboundStoreError(
-      errorMessage(error, '대량출고 업체를 불러오지 못했습니다.'),
+      errorMessage(error, '바코드 출고 업체를 불러오지 못했습니다.'),
     )
   }
 
@@ -288,7 +288,7 @@ export async function replaceBulkOutboundPartnerConfigs(
     .eq('brand_id', brandId)
   if (existingError) {
     throw new BulkOutboundStoreError(
-      errorMessage(existingError, '대량출고 업체를 저장하지 못했습니다.'),
+      errorMessage(existingError, '바코드 출고 업체를 저장하지 못했습니다.'),
     )
   }
 
@@ -321,7 +321,7 @@ export async function replaceBulkOutboundPartnerConfigs(
       )
     if (error) {
       throw new BulkOutboundStoreError(
-        errorMessage(error, '대량출고 업체를 저장하지 못했습니다.'),
+        errorMessage(error, '바코드 출고 업체를 저장하지 못했습니다.'),
       )
     }
   }
@@ -334,7 +334,7 @@ export async function replaceBulkOutboundPartnerConfigs(
       .in('usage_target_id', removed)
     if (deleteError) {
       throw new BulkOutboundStoreError(
-        errorMessage(deleteError, '대량출고 업체를 저장하지 못했습니다.'),
+        errorMessage(deleteError, '바코드 출고 업체를 저장하지 못했습니다.'),
       )
     }
   }
@@ -355,7 +355,7 @@ export async function listBulkOutboundTemplateFields(
 
   if (error) {
     throw new BulkOutboundStoreError(
-      errorMessage(error, '대량출고 공용 양식을 불러오지 못했습니다.'),
+      errorMessage(error, '바코드 출고 공용 양식을 불러오지 못했습니다.'),
     )
   }
 
@@ -392,7 +392,7 @@ export async function replaceBulkOutboundTemplateFields(
 
   if (error) {
     throw new BulkOutboundStoreError(
-      errorMessage(error, '대량출고 공용 양식을 저장하지 못했습니다.'),
+      errorMessage(error, '바코드 출고 공용 양식을 저장하지 못했습니다.'),
     )
   }
 }
@@ -423,7 +423,7 @@ export async function initializeBulkOutboundTemplateFields(
 
   if (error) {
     throw new BulkOutboundStoreError(
-      errorMessage(error, '기존 대량출고 양식을 이전하지 못했습니다.'),
+      errorMessage(error, '기존 바코드 출고 양식을 이전하지 못했습니다.'),
     )
   }
 
@@ -444,7 +444,7 @@ export async function listBulkOutboundJobs(
 
   if (error) {
     throw new BulkOutboundStoreError(
-      errorMessage(error, '대량출고 작업을 불러오지 못했습니다.'),
+      errorMessage(error, '바코드 출고 작업을 불러오지 못했습니다.'),
     )
   }
 
@@ -484,7 +484,7 @@ export async function saveBulkOutboundJob(
 
   if (error) {
     throw new BulkOutboundStoreError(
-      errorMessage(error, '대량출고 작업을 저장하지 못했습니다.'),
+      errorMessage(error, '바코드 출고 작업을 저장하지 못했습니다.'),
     )
   }
 
@@ -512,11 +512,11 @@ export async function updateBulkOutboundJobMeta(
 
   if (error) {
     throw new BulkOutboundStoreError(
-      errorMessage(error, '대량출고 작업을 확인하지 못했습니다.'),
+      errorMessage(error, '바코드 출고 작업을 확인하지 못했습니다.'),
     )
   }
   if (!data) {
-    throw new BulkOutboundStoreError('대량출고 작업을 찾지 못했습니다.')
+    throw new BulkOutboundStoreError('바코드 출고 작업을 찾지 못했습니다.')
   }
   if ((data.assignee ?? '') !== assignee) {
     throw new BulkOutboundStoreError('본인이 만든 건만 수정할 수 있습니다.')
@@ -550,7 +550,7 @@ export async function updateBulkOutboundJobMeta(
 
   if (updateError) {
     throw new BulkOutboundStoreError(
-      errorMessage(updateError, '대량출고 작업을 수정하지 못했습니다.'),
+      errorMessage(updateError, '바코드 출고 작업을 수정하지 못했습니다.'),
     )
   }
 }
@@ -592,7 +592,7 @@ export async function deleteBulkOutboundJob(
 
   if (error) {
     throw new BulkOutboundStoreError(
-      errorMessage(error, '대량출고 작업을 삭제하지 못했습니다.'),
+      errorMessage(error, '바코드 출고 작업을 삭제하지 못했습니다.'),
     )
   }
 

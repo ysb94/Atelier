@@ -414,8 +414,48 @@ export type ItemNameAiQuickSlot = {
   error: string | null
 }
 
+export const ITEM_NAME_AI_DELETE_LABEL = '내품명 비움'
+
 export function formatItemNameAiStyleLabel(style: StyleRef) {
   return `${style.styleNo} · ${style.name}`
+}
+
+export function shouldIgnoreItemNameAiQuickKey(event: {
+  isComposing?: boolean
+  key: string
+}) {
+  return Boolean(event.isComposing) || event.key === 'Process'
+}
+
+export function isItemNameAiAddExtraKey(event: {
+  isComposing?: boolean
+  key: string
+  ctrlKey?: boolean
+  metaKey?: boolean
+  altKey?: boolean
+}) {
+  if (shouldIgnoreItemNameAiQuickKey(event)) return false
+  if (event.ctrlKey || event.metaKey || event.altKey) return false
+  return event.key === '+' || event.key === 'Add'
+}
+
+export function removeItemNameAiQuickSlot(
+  slots: ItemNameAiQuickSlot[],
+  slotIndex: number,
+) {
+  if (slotIndex <= 0 || slots.length <= 1) return slots
+  return slots.filter((_, index) => index !== slotIndex)
+}
+
+export function itemNameAiQuickSlotInputValue(
+  slot: ItemNameAiQuickSlot,
+  options?: { showDeleteLabel?: boolean },
+) {
+  if (slot.style) return slot.style.name
+  if (options?.showDeleteLabel && !slot.text.trim()) {
+    return ITEM_NAME_AI_DELETE_LABEL
+  }
+  return slot.text
 }
 
 export function emptyItemNameAiQuickSlot(): ItemNameAiQuickSlot {
@@ -450,8 +490,19 @@ export function applyItemNameAiQuickSlotText(
   text: string,
 ): ItemNameAiQuickSlot {
   if (!text.trim()) return emptyItemNameAiQuickSlot()
-  if (slot.style && text === formatItemNameAiStyleLabel(slot.style)) {
-    return { ...slot, text, status: 'matched', error: null }
+  if (text.trim() === ITEM_NAME_AI_DELETE_LABEL) {
+    return emptyItemNameAiQuickSlot()
+  }
+  if (
+    slot.style &&
+    (text === formatItemNameAiStyleLabel(slot.style) || text === slot.style.name)
+  ) {
+    return {
+      ...slot,
+      text: formatItemNameAiStyleLabel(slot.style),
+      status: 'matched',
+      error: null,
+    }
   }
   return {
     text,
@@ -480,7 +531,10 @@ export function applyItemNameAiQuickSlotStyle(
 export function itemNameAiQuickRowComponents(slots: ItemNameAiQuickSlot[]):
   | { ok: true; components: AccessoryLookupComponent[] }
   | { ok: false; reason: 'empty' | 'incomplete' | 'duplicate' } {
-  const filled = slots.filter((slot) => slot.text.trim())
+  const filled = slots.filter(
+    (slot) =>
+      slot.text.trim() && slot.text.trim() !== ITEM_NAME_AI_DELETE_LABEL,
+  )
   if (filled.length === 0) return { ok: false, reason: 'empty' }
   if (filled.some((slot) => !slot.style)) {
     return { ok: false, reason: 'incomplete' }
@@ -527,23 +581,63 @@ export type ItemNameAiEnterDecision =
   | { status: 'invalid'; reason: 'duplicate' }
 
 export function itemNameAiSlotsAreAllEmpty(slots: ItemNameAiQuickSlot[]) {
-  return slots.every((slot) => !slot.text.trim())
+  return slots.every(
+    (slot) =>
+      !slot.text.trim() || slot.text.trim() === ITEM_NAME_AI_DELETE_LABEL,
+  )
 }
 
 export function itemNameAiSlotsNeedAi(slots: ItemNameAiQuickSlot[]) {
   return slots.some(
     (slot) =>
       Boolean(slot.text.trim()) &&
+      slot.text.trim() !== ITEM_NAME_AI_DELETE_LABEL &&
       (slot.status === 'draft' ||
         slot.status === 'ambiguous' ||
         slot.status === 'unmatched'),
   )
 }
 
+export type ItemNameAiRowMark =
+  | 'pending_ai'
+  | 'committed'
+  | 'unconfirm'
+  | 'keep'
+
+/** Enter 분류는 공식명칭 완성 후에도 유지하고, 칸을 고친 뒤에만 푼다. */
+export function nextItemNameAiRowMark(
+  mode: 'edit' | 'confirm' | 'resolved',
+  decisionStatus: ItemNameAiEnterDecision['status'],
+): ItemNameAiRowMark {
+  if (decisionStatus === 'invalid') return 'unconfirm'
+  if (mode === 'confirm') {
+    return decisionStatus === 'needs_ai' ? 'pending_ai' : 'committed'
+  }
+  if (mode === 'resolved') return 'keep'
+  return 'unconfirm'
+}
+
+export function countItemNameAiPendingResolve(
+  pendingAiKeys: ReadonlySet<string>,
+  slotsByKey: ReadonlyMap<string, ItemNameAiQuickSlot[]>,
+) {
+  let count = 0
+  for (const key of pendingAiKeys) {
+    const slots = slotsByKey.get(key)
+    if (!slots || decideItemNameAiEnterAction(slots).status === 'needs_ai') {
+      count += 1
+    }
+  }
+  return count
+}
+
 export function decideItemNameAiEnterAction(
   slots: ItemNameAiQuickSlot[],
 ): ItemNameAiEnterDecision {
-  const filled = slots.filter((slot) => slot.text.trim())
+  const filled = slots.filter(
+    (slot) =>
+      slot.text.trim() && slot.text.trim() !== ITEM_NAME_AI_DELETE_LABEL,
+  )
   if (filled.length === 0) return { status: 'delete' }
   if (filled.some((slot) => !slot.style)) return { status: 'needs_ai' }
   const result = itemNameAiQuickRowComponents(slots)
@@ -679,6 +773,57 @@ export function commitReadyItemNameAiDrafts(options: {
   }
 }
 
+export function revertItemNameAiAppendState(options: {
+  rows: ItemNameAiReviewRow[]
+  drafts: ReadonlyMap<string, ItemNameAiReviewRow>
+  committedKeys: ReadonlySet<string>
+  selectedKeys?: ReadonlySet<string>
+  confirmedKeys?: ReadonlySet<string>
+  pendingAiKeys?: ReadonlySet<string>
+  lastAppend: ItemNameAiLastAppend
+}) {
+  const previousByKey = new Map(
+    options.lastAppend.previous.map((row) => [row.key, row]),
+  )
+  const rows = options.rows.map((row) => previousByKey.get(row.key) ?? row)
+  const drafts = restoreItemNameAiDrafts(
+    options.drafts,
+    options.lastAppend.previous,
+    rows,
+  )
+  const committedKeys = new Set(options.committedKeys)
+  const selectedKeys = new Set(options.selectedKeys ?? [])
+  const confirmedKeys = new Set(options.confirmedKeys ?? [])
+  const pendingAiKeys = new Set(options.pendingAiKeys ?? [])
+  for (const key of options.lastAppend.addedKeys) {
+    const prev = previousByKey.get(key)
+    if (!prev) {
+      committedKeys.delete(key)
+      selectedKeys.delete(key)
+      confirmedKeys.delete(key)
+      pendingAiKeys.delete(key)
+      continue
+    }
+    const keepClassified =
+      (prev.action === 'delete' || prev.action === 'components') &&
+      !prev.validationError
+    if (!keepClassified) {
+      committedKeys.delete(key)
+      selectedKeys.delete(key)
+      confirmedKeys.delete(key)
+    }
+    pendingAiKeys.delete(key)
+  }
+  return {
+    rows,
+    drafts,
+    committedKeys,
+    selectedKeys,
+    confirmedKeys,
+    pendingAiKeys,
+  }
+}
+
 export function reopenItemNameAiCommittedRow(options: {
   committedKeys: ReadonlySet<string>
   selectedKeys?: ReadonlySet<string>
@@ -707,6 +852,17 @@ function itemNameAiQuickSlotCount(
       ? slotCountByKey.get(rowKey)
       : (slotCountByKey as Record<string, number>)[rowKey]
   return Math.max(1, count ?? 1)
+}
+
+export function nextItemNameAiReviewPage(
+  page: number,
+  pageCount: number,
+  pageKeys: string[],
+  rowKey: string,
+): number | null {
+  if (pageKeys[pageKeys.length - 1] !== rowKey) return null
+  if (page >= pageCount) return null
+  return page + 1
 }
 
 export function nextItemNameAiQuickFocus(

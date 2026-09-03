@@ -27,6 +27,7 @@ import {
   PARTNER_COMPONENT_HEADER,
   parsePartnerComponentsCell,
 } from '@/lib/codes/partner-code-import'
+import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import { parseFile } from '@/lib/import/parse'
 import type {
   CodeUsageTarget,
@@ -858,7 +859,8 @@ export function PartnerCodeListPanel({
     queryClient,
   ])
 
-  const codeHeader = partnerBarcodeHeader(partner.name)
+  const partnerLabel = outboundPartnerDisplayName(partner)
+  const codeHeader = partnerBarcodeHeader(partnerLabel)
 
   const filteredRows = useMemo(() => {
     const keyword = search.trim().toLowerCase()
@@ -959,7 +961,7 @@ export function PartnerCodeListPanel({
     setDownloading(true)
     setError(null)
     try {
-      await downloadPartnerCodeTemplate(partner.name, fields, rows)
+      await downloadPartnerCodeTemplate(partnerLabel, fields, rows)
     } catch (err) {
       setError(
         err instanceof Error ? err.message : '양식을 내려받지 못했습니다.',
@@ -1064,7 +1066,7 @@ export function PartnerCodeListPanel({
         <CardContent className="space-y-4 p-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
-              <h2 className="text-base font-semibold">{partner.name}</h2>
+              <h2 className="text-base font-semibold">{partnerLabel}</h2>
               <p className="mt-1 text-xs text-muted-foreground">
                 「{codeHeader}」·추가 헤더·「{PARTNER_COMPONENT_HEADER}」을
                 한 양식으로 내려받고 올립니다.
@@ -1246,7 +1248,7 @@ export function PartnerCodeListPanel({
 
       {headerOpen ? (
         <HeaderManagerDialog
-          partnerName={partner.name}
+          partnerName={partnerLabel}
           fields={fields}
           onClose={() => setHeaderOpen(false)}
           onSave={(next) => {

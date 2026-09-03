@@ -41,7 +41,7 @@ import {
   overlayItemNameAiDrafts,
   planItemNameAiBatches,
   reconcileItemNameAiReviewState,
-  restoreItemNameAiDrafts,
+  revertItemNameAiAppendState,
   validateItemNameAiReviewRow,
   type ItemNameAiContext,
   type ItemNameAiReviewRow,
@@ -722,10 +722,62 @@ export function useInvoiceItemNameBulkAiApply({
       const drafts = new Map(current.draftByKey)
       drafts.set(key, applied.row)
       writeDrafts(drafts)
-      confirmRow(key, false)
       return { ok: true }
     },
-    [confirmRow, knownStyleIds, writeDrafts],
+    [knownStyleIds, writeDrafts],
+  )
+
+  const applyCommitResult = useCallback(
+    (result: ReturnType<typeof commitReadyItemNameAiDrafts>) => {
+      const current = reviewStateRef.current
+      reviewStateRef.current = {
+        ...current,
+        reviewRows: result.rows,
+        draftByKey: result.drafts,
+        committedKeys: result.committedKeys,
+      }
+      setReviewRows(result.rows)
+      setDraftByKey(result.drafts)
+      setCommittedKeys(result.committedKeys)
+      if (result.selectedKeys.length > 0) {
+        setSelected((currentSelected) => {
+          const next = new Set(currentSelected)
+          for (const key of result.selectedKeys) next.add(key)
+          return next
+        })
+      }
+      setLastAppend(null)
+    },
+    [],
+  )
+
+  const commitRow = useCallback(
+    (key: string) => {
+      const current = reviewStateRef.current
+      const nextConfirmed = new Set(current.confirmedKeys)
+      nextConfirmed.add(key)
+      const nextPending = new Set(current.pendingAiKeys)
+      nextPending.delete(key)
+      reviewStateRef.current = {
+        ...current,
+        confirmedKeys: nextConfirmed,
+        pendingAiKeys: nextPending,
+      }
+      setConfirmedKeys(nextConfirmed)
+      setPendingAiKeys(nextPending)
+      const result = commitReadyItemNameAiDrafts({
+        rows: reviewStateRef.current.reviewRows,
+        drafts: reviewStateRef.current.draftByKey,
+        confirmedKeys: nextConfirmed,
+        pendingAiKeys: nextPending,
+        committedKeys: reviewStateRef.current.committedKeys,
+      })
+      if (result.committedKeys.size === reviewStateRef.current.committedKeys.size) {
+        return
+      }
+      applyCommitResult(result)
+    },
+    [applyCommitResult],
   )
 
   const updateRow = useCallback(
@@ -776,13 +828,16 @@ export function useInvoiceItemNameBulkAiApply({
         skippedKeys: appended.skippedKeys,
         previous: appended.previous,
       }
-      writeDrafts(mergeItemNameAiDrafts(current.draftByKey, appended))
+      const drafts = mergeItemNameAiDrafts(current.draftByKey, appended)
+      writeDrafts(drafts)
       setLastAppend(result)
       if (appended.addedKeys.length > 0) {
         const nextConfirmed = new Set(current.confirmedKeys)
-        for (const key of appended.addedKeys) nextConfirmed.add(key)
         const nextPending = new Set(current.pendingAiKeys)
-        for (const key of appended.addedKeys) nextPending.delete(key)
+        for (const key of appended.addedKeys) {
+          nextConfirmed.add(key)
+          nextPending.delete(key)
+        }
         reviewStateRef.current = {
           ...reviewStateRef.current,
           confirmedKeys: nextConfirmed,
@@ -790,6 +845,30 @@ export function useInvoiceItemNameBulkAiApply({
         }
         setConfirmedKeys(nextConfirmed)
         setPendingAiKeys(nextPending)
+        const committed = commitReadyItemNameAiDrafts({
+          rows: reviewStateRef.current.reviewRows,
+          drafts,
+          confirmedKeys: nextConfirmed,
+          pendingAiKeys: nextPending,
+          committedKeys: reviewStateRef.current.committedKeys,
+        })
+        reviewStateRef.current = {
+          ...reviewStateRef.current,
+          reviewRows: committed.rows,
+          draftByKey: committed.drafts,
+          committedKeys: committed.committedKeys,
+          lastAppend: result,
+        }
+        setReviewRows(committed.rows)
+        setDraftByKey(committed.drafts)
+        setCommittedKeys(committed.committedKeys)
+        if (committed.selectedKeys.length > 0) {
+          setSelected((currentSelected) => {
+            const next = new Set(currentSelected)
+            for (const key of committed.selectedKeys) next.add(key)
+            return next
+          })
+        }
       }
       return result
     },
@@ -799,22 +878,33 @@ export function useInvoiceItemNameBulkAiApply({
   const undoLastAppend = useCallback(() => {
     if (!lastAppend || lastAppend.previous.length === 0) return
     const current = reviewStateRef.current
-    writeDrafts(
-      restoreItemNameAiDrafts(
-        current.draftByKey,
-        lastAppend.previous,
-        current.reviewRows,
-      ),
-    )
-    const nextConfirmed = new Set(current.confirmedKeys)
-    for (const key of lastAppend.addedKeys) nextConfirmed.delete(key)
+    const reverted = revertItemNameAiAppendState({
+      rows: current.reviewRows,
+      drafts: current.draftByKey,
+      committedKeys: current.committedKeys,
+      selectedKeys: current.selected,
+      confirmedKeys: current.confirmedKeys,
+      pendingAiKeys: current.pendingAiKeys,
+      lastAppend,
+    })
     reviewStateRef.current = {
-      ...reviewStateRef.current,
-      confirmedKeys: nextConfirmed,
+      ...current,
+      reviewRows: reverted.rows,
+      draftByKey: reverted.drafts,
+      committedKeys: reverted.committedKeys,
+      selected: reverted.selectedKeys,
+      confirmedKeys: reverted.confirmedKeys,
+      pendingAiKeys: reverted.pendingAiKeys,
+      lastAppend: null,
     }
-    setConfirmedKeys(nextConfirmed)
+    setReviewRows(reverted.rows)
+    setDraftByKey(reverted.drafts)
+    setCommittedKeys(reverted.committedKeys)
+    setSelected(reverted.selectedKeys)
+    setConfirmedKeys(reverted.confirmedKeys)
+    setPendingAiKeys(reverted.pendingAiKeys)
     setLastAppend(null)
-  }, [lastAppend, writeDrafts])
+  }, [lastAppend])
 
   const commitDrafts = useCallback(() => {
     const result = commitReadyItemNameAiDrafts({
@@ -1115,6 +1205,7 @@ export function useInvoiceItemNameBulkAiApply({
     appendComponentToRows,
     undoLastAppend,
     commitDrafts,
+    commitRow,
     discardDrafts,
     stageRowComponents,
     stageRowDelete,

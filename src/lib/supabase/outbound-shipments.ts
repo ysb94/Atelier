@@ -1,4 +1,5 @@
 import type { ProductOutboundShipment } from '@/lib/outbound/product-outbound'
+import { outboundPartnerOptionLabel } from '@/lib/codes/outbound-partner'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage } from '@/lib/supabase/map-error'
 import { fetchAllPages } from '@/lib/supabase/paged-select'
@@ -65,7 +66,9 @@ export async function listOutboundShipments(
       .in('id', styleIds),
     getSupabase()
       .from('code_usage_targets')
-      .select('id, name')
+      .select(
+        'id, name, channel_type, site_name, outbound_partner_groups(name)',
+      )
       .eq('brand_id', brandId)
       .in('id', targetIds),
   ])
@@ -89,9 +92,31 @@ export async function listOutboundShipments(
     }>) ?? []).map((row) => [row.id, row]),
   )
   const targetById = new Map(
-    ((targetsResult.data as Array<{ id: string; name: string }>) ?? []).map(
-      (row) => [row.id, row.name],
-    ),
+    ((
+      targetsResult.data as unknown as Array<{
+        id: string
+        name: string
+        channel_type: 'unset' | 'online' | 'offline'
+        site_name: string
+        outbound_partner_groups:
+          | { name: string }
+          | { name: string }[]
+          | null
+      }>
+    ) ?? []).map((row) => {
+      const group = Array.isArray(row.outbound_partner_groups)
+        ? row.outbound_partner_groups[0]
+        : row.outbound_partner_groups
+      return [
+        row.id,
+        outboundPartnerOptionLabel({
+          name: row.name,
+          groupName: group?.name ?? '',
+          siteName: row.site_name,
+          channelType: row.channel_type,
+        }),
+      ]
+    }),
   )
 
   return rows
@@ -112,4 +137,80 @@ export async function listOutboundShipments(
         note: row.note || undefined,
       }
     })
+}
+
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/
+
+export type BarcodeDataEntryShipmentEntry = {
+  usageTargetId: string
+  styleId: string
+  quantity: number
+}
+
+/** 같은 업체 그룹·출고일의 데이터입력 반영분을 지점별로 교체한다. 재고는 건드리지 않는다. */
+export async function replaceBarcodeDataEntryShipments(input: {
+  brandId: string
+  sourceRef: string
+  shippedOn: string
+  note: string
+  partnerIds?: readonly string[]
+  entries: readonly BarcodeDataEntryShipmentEntry[]
+}): Promise<number> {
+  if (!UUID_RE.test(input.brandId)) {
+    throw new OutboundShipmentStoreError('브랜드 정보가 올바르지 않습니다.')
+  }
+  if (!ISO_DATE_RE.test(input.shippedOn)) {
+    throw new OutboundShipmentStoreError('출고일을 확인하세요.')
+  }
+  if (!input.sourceRef.trim()) {
+    throw new OutboundShipmentStoreError('출고 출처가 올바르지 않습니다.')
+  }
+
+  const rows = input.entries
+    .map((entry) => ({
+      usageTargetId: entry.usageTargetId.trim(),
+      styleId: entry.styleId.trim(),
+      quantity: Math.trunc(entry.quantity),
+    }))
+    .filter(
+      (entry) =>
+        UUID_RE.test(entry.usageTargetId) &&
+        UUID_RE.test(entry.styleId) &&
+        Number.isFinite(entry.quantity) &&
+        entry.quantity > 0,
+    )
+
+  const partnerIds = [
+    ...new Set(
+      [...(input.partnerIds ?? []), ...rows.map((row) => row.usageTargetId)].filter(
+        (id) => UUID_RE.test(id),
+      ),
+    ),
+  ]
+
+  const { data, error } = await getSupabase().rpc(
+    'replace_barcode_data_entry_shipments',
+    {
+      p_brand_id: input.brandId,
+      p_source_ref: input.sourceRef,
+      p_shipped_on: input.shippedOn,
+      p_note: input.note.trim(),
+      p_usage_target_ids: partnerIds,
+      p_entries: rows.map((entry) => ({
+        usageTargetId: entry.usageTargetId,
+        styleId: entry.styleId,
+        quantity: entry.quantity,
+      })),
+    },
+  )
+
+  if (error) {
+    throw new OutboundShipmentStoreError(
+      errorMessage(error, '출고 데이터에 반영하지 못했습니다.'),
+    )
+  }
+
+  return typeof data === 'number' ? data : rows.length
 }

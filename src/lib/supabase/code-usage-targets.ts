@@ -8,12 +8,13 @@ import type {
 import {
   compactOutboundPartnerKey,
   normalizeOutboundPartnerName,
+  outboundPartnerDeleteBlockedMessage,
 } from '@/lib/codes/outbound-partner'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 
 const COLUMNS =
-  'id, brand_id, name, normalized_name, active, is_one_time, channel_type, shipping_method, folder_id, note, sort_order, created_at, updated_at'
+  'id, brand_id, name, normalized_name, active, is_one_time, channel_type, shipping_method, folder_id, group_id, site_name, normalized_site_name, outbound_partner_groups(name), contact_name, contact_phone, contact_email, address, note, sort_order, created_at, updated_at'
 
 const ALIAS_COLUMNS =
   'id, brand_id, target_id, alias, normalized_alias, note, created_at, updated_at'
@@ -30,6 +31,14 @@ type TargetRow = {
   channel_type: string
   shipping_method: string
   folder_id: string | null
+  group_id: string | null
+  site_name: string
+  normalized_site_name: string
+  outbound_partner_groups: { name: string } | { name: string }[] | null
+  contact_name: string
+  contact_phone: string
+  contact_email: string
+  address: string
   note: string
   sort_order: number
   created_at: string
@@ -58,6 +67,9 @@ export class CodeUsageTargetStoreError extends Error {
 }
 
 function toTarget(row: TargetRow): CodeUsageTarget {
+  const group = Array.isArray(row.outbound_partner_groups)
+    ? row.outbound_partner_groups[0]
+    : row.outbound_partner_groups
   return {
     id: row.id,
     brandId: row.brand_id,
@@ -68,6 +80,14 @@ function toTarget(row: TargetRow): CodeUsageTarget {
     channelType: row.channel_type as OutboundChannelType,
     shippingMethod: row.shipping_method as OutboundShippingMethod,
     folderId: row.folder_id,
+    groupId: row.group_id,
+    groupName: group?.name ?? '',
+    siteName: row.site_name,
+    normalizedSiteName: row.normalized_site_name,
+    contactName: row.contact_name,
+    contactPhone: row.contact_phone,
+    contactEmail: row.contact_email,
+    address: row.address,
     note: row.note,
     order: row.sort_order,
     createdAt: row.created_at,
@@ -106,7 +126,7 @@ export async function listCodeUsageTargets(
       )
     }
 
-    const page = (data as TargetRow[]) ?? []
+    const page = (data as unknown as TargetRow[]) ?? []
     rows.push(...page)
     if (page.length < PAGE_SIZE) break
   }
@@ -214,8 +234,11 @@ export async function saveCodeUsageTarget(
     )
   }
 
+  const siteName = normalizeOutboundPartnerName(input.siteName ?? '')
+  const normalizedSiteName = compactOutboundPartnerKey(siteName)
+
   const { data, error } = await getSupabase().rpc(
-    'save_outbound_partner_with_aliases',
+    'save_outbound_partner_unit_with_aliases',
     {
       p_brand_id: brandId,
       p_id: input.id ?? null,
@@ -227,6 +250,13 @@ export async function saveCodeUsageTarget(
       p_active: input.active ?? null,
       p_note: input.note ?? null,
       p_folder_id: input.folderId ?? null,
+      p_group_id: input.groupId ?? null,
+      p_site_name: siteName,
+      p_normalized_site_name: normalizedSiteName,
+      p_contact_name: normalizeOutboundPartnerName(input.contactName ?? ''),
+      p_contact_phone: normalizeOutboundPartnerName(input.contactPhone ?? ''),
+      p_contact_email: (input.contactEmail ?? '').trim(),
+      p_address: normalizeOutboundPartnerName(input.address ?? ''),
       p_aliases: aliasPayload(input.aliases ?? []),
     },
   )
@@ -256,7 +286,7 @@ export async function saveCodeUsageTarget(
     )
   }
 
-  return toTarget(row as TargetRow)
+  return toTarget(row as unknown as TargetRow)
 }
 
 export async function createCodeUsageTarget(
@@ -324,6 +354,12 @@ export async function updateCodeUsageTarget(
       | 'shippingMethod'
       | 'note'
       | 'folderId'
+      | 'groupId'
+      | 'siteName'
+      | 'contactName'
+      | 'contactPhone'
+      | 'contactEmail'
+      | 'address'
     >
   > & { aliases?: readonly string[] },
 ): Promise<CodeUsageTarget> {
@@ -346,7 +382,7 @@ export async function updateCodeUsageTarget(
     )
   }
 
-  const row = existing as TargetRow
+  const row = existing as unknown as TargetRow
   const current = toTarget(row)
 
   // 별칭을 안 넘기면 기존 별칭을 그대로 유지한다. RPC가 통째 교체하기 때문이다.
@@ -365,6 +401,19 @@ export async function updateCodeUsageTarget(
     shippingMethod: patch.shippingMethod ?? current.shippingMethod,
     note: patch.note ?? current.note,
     folderId: patch.folderId !== undefined ? patch.folderId : current.folderId,
+    groupId: patch.groupId !== undefined ? patch.groupId : current.groupId,
+    siteName: patch.siteName !== undefined ? patch.siteName : current.siteName,
+    contactName:
+      patch.contactName !== undefined ? patch.contactName : current.contactName,
+    contactPhone:
+      patch.contactPhone !== undefined
+        ? patch.contactPhone
+        : current.contactPhone,
+    contactEmail:
+      patch.contactEmail !== undefined
+        ? patch.contactEmail
+        : current.contactEmail,
+    address: patch.address !== undefined ? patch.address : current.address,
     aliases,
   })
 }
@@ -396,5 +445,151 @@ export async function addCodeUsageTargetAlias(
 
   if (error) {
     throw rpcError(error, '별칭을 연결하지 못했습니다.')
+  }
+}
+
+const LINK_CHECKS = [
+  { table: 'code_usage_assignments', label: '바코드 연결' },
+  { table: 'product_codes', label: '거래처 바코드' },
+  { table: 'outbound_shipments', label: '출고 이력' },
+  { table: 'invoice_work_site_summaries', label: '송장 작업 이력' },
+  { table: 'bulk_outbound_jobs', label: '바코드 출고 작업' },
+  { table: 'bulk_outbound_partner_configs', label: '바코드 출고 등록' },
+  { table: 'partner_barcode_fields', label: '거래처 바코드 항목' },
+] as const
+
+/** 비어 있으면 이 출고 단위를 삭제할 수 있다. */
+export async function listCodeUsageTargetLinkLabels(
+  id: string,
+): Promise<string[]> {
+  const db = getSupabase()
+  const results = await Promise.all(
+    LINK_CHECKS.map(async (check) => {
+      const { count, error } = await db
+        .from(check.table)
+        .select('id', { count: 'exact', head: true })
+        .eq('usage_target_id', id)
+
+      if (error) {
+        throw new CodeUsageTargetStoreError(
+          errorMessage(error, '연결 이력을 확인하지 못했습니다.'),
+          'invalid',
+        )
+      }
+
+      return count && count > 0 ? check.label : null
+    }),
+  )
+
+  return results.filter((label) => label !== null)
+}
+
+/** 연결된 이력이 없는 출고 단위만 지운다. */
+export async function deleteCodeUsageTarget(id: string): Promise<void> {
+  const db = getSupabase()
+  const blocked = outboundPartnerDeleteBlockedMessage(
+    await listCodeUsageTargetLinkLabels(id),
+  )
+  if (blocked) {
+    throw new CodeUsageTargetStoreError(blocked, 'invalid')
+  }
+
+  const { data: existing, error: readError } = await db
+    .from('code_usage_targets')
+    .select('id, brand_id, group_id')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (readError) {
+    throw new CodeUsageTargetStoreError(
+      errorMessage(readError, '출고업체를 불러오지 못했습니다.'),
+      'invalid',
+    )
+  }
+  if (!existing) {
+    throw new CodeUsageTargetStoreError(
+      '출고업체를 찾을 수 없습니다.',
+      'not_found',
+    )
+  }
+
+  const row = existing as {
+    id: string
+    brand_id: string
+    group_id: string | null
+  }
+
+  let remainingId: string | null = null
+  if (row.group_id) {
+    const { data: remaining, error: remainingError } = await db
+      .from('code_usage_targets')
+      .select('id')
+      .eq('brand_id', row.brand_id)
+      .eq('group_id', row.group_id)
+      .eq('active', true)
+      .neq('id', id)
+
+    if (remainingError) {
+      throw new CodeUsageTargetStoreError(
+        errorMessage(remainingError, '업체를 삭제하지 못했습니다.'),
+        'invalid',
+      )
+    }
+    const leftover = (remaining as { id: string }[] | null) ?? []
+    if (leftover.length === 1) remainingId = leftover[0]?.id ?? null
+  }
+
+  const { error: deleteError } = await db
+    .from('code_usage_targets')
+    .delete()
+    .eq('id', id)
+    .eq('brand_id', row.brand_id)
+
+  if (deleteError) {
+    throw rpcError(deleteError, '업체를 삭제하지 못했습니다.')
+  }
+
+  if (!row.group_id) return
+
+  const { count, error: countError } = await db
+    .from('code_usage_targets')
+    .select('id', { count: 'exact', head: true })
+    .eq('brand_id', row.brand_id)
+    .eq('group_id', row.group_id)
+
+  if (countError) {
+    throw new CodeUsageTargetStoreError(
+      errorMessage(countError, '업체를 삭제하지 못했습니다.'),
+      'invalid',
+    )
+  }
+
+  if ((count ?? 0) === 0) {
+    const { error: groupError } = await db
+      .from('outbound_partner_groups')
+      .delete()
+      .eq('id', row.group_id)
+      .eq('brand_id', row.brand_id)
+    if (groupError) {
+      throw new CodeUsageTargetStoreError(
+        errorMessage(groupError, '빈 업체 그룹을 정리하지 못했습니다.'),
+        'invalid',
+      )
+    }
+    return
+  }
+
+  if (remainingId) {
+    const { error: collapseError } = await db
+      .from('code_usage_targets')
+      .update({ site_name: '', normalized_site_name: '' })
+      .eq('id', remainingId)
+      .eq('brand_id', row.brand_id)
+    if (collapseError) {
+      throw new CodeUsageTargetStoreError(
+        errorMessage(collapseError, '남은 업체를 정리하지 못했습니다.'),
+        'invalid',
+      )
+    }
   }
 }

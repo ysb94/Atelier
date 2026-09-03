@@ -131,8 +131,13 @@ const navGroups: { title: string; items: NavItem[] }[] = [
         icon: ClipboardPen,
       },
       {
+        to: 'logistics/barcode-outbound-data-entry',
+        label: '(임시) 바코드 출고 데이터입력',
+        icon: PenLine,
+      },
+      {
         to: 'logistics/bulk-outbound',
-        label: '대량출고',
+        label: '바코드 출고',
         icon: Truck,
       },
       {
@@ -546,6 +551,9 @@ export function BrandLayout() {
               ? 'full'
               : location.pathname.includes('/logistics/invoices') ||
                   location.pathname.includes('/logistics/invoice-data-entry') ||
+                  location.pathname.includes(
+                    '/logistics/barcode-outbound-data-entry',
+                  ) ||
                   location.pathname.includes('/logistics/bulk-outbound') ||
                   location.pathname.includes('/logistics/warehouses')
                 ? 'wide'

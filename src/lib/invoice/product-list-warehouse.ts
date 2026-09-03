@@ -200,7 +200,7 @@ export function allocateInvoiceProductListWarehouse(input: {
   }
 }
 
-/** 대량출고용: M번호당 1행. 자리는 줄바꿈으로 모으고 수량은 총합. */
+/** 바코드 출고용: M번호당 1행. 자리는 줄바꿈으로 모으고 수량은 총합. */
 export function allocateBulkOutboundProductListWarehouse(input: {
   entries: InvoiceProductListEntry[]
   positions: WarehouseStockPosition[]

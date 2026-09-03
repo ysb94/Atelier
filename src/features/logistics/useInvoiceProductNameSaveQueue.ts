@@ -612,7 +612,10 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
                 )
                 queueOptionMapUpsert(savedOptionMap)
               }
-              await invalidateAiRecommendationQueries(queryClient, brandId)
+              await invalidateAiRecommendationQueries(queryClient, brandId, {
+                comboKey: entry.comboKey,
+                lookupKey: entry.lookupKey,
+              })
               scheduleAiUsageInvalidate()
               const sharesProductMap = shared.consumerIds.size > 1
               patchHistory((current) =>
@@ -830,7 +833,10 @@ export function useInvoiceProductNameSaveQueue(brandId: string) {
         await queryClient.invalidateQueries({
           queryKey: [INVOICE_OPTION_MAPS_WORK_QUERY_KEY, brandId],
         })
-        await invalidateAiRecommendationQueries(queryClient, brandId)
+        await invalidateAiRecommendationQueries(queryClient, brandId, {
+          comboKey: entry.comboKey,
+          lookupKey: entry.lookupKey,
+        })
         patchHistory((current) =>
           current.map((item) =>
             item.id === historyId

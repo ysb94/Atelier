@@ -5,6 +5,7 @@ import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { OutboundPartnerIdentity } from '@/features/codes/OutboundPartnerIdentity'
 import { PartnerCodeListPanel } from '@/features/codes/PartnerCodeListPanel'
 import {
   getBarcodePartnerDisplaySetting,
@@ -13,6 +14,7 @@ import {
   replaceBarcodePartnerDisplayTargets,
 } from '@/lib/api'
 import type { CodeUsageTarget } from '@/lib/types'
+import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import { cn } from '@/lib/utils'
 
 function storageKey(brandId: string) {
@@ -111,7 +113,7 @@ function PartnerSettingsDialog({
                     onChange={() => toggle(partner.id)}
                   />
                   <span className="min-w-0 flex-1 truncate font-medium">
-                    {partner.name}
+                    {outboundPartnerDisplayName(partner)}
                   </span>
                   {!partner.active ? (
                     <span className="shrink-0 text-[11px] text-muted-foreground">
@@ -336,7 +338,10 @@ export function PartnerCodePage() {
                     )}
                   >
                     <span className="block max-w-[12rem] truncate font-medium">
-                      {target.name}
+                      <OutboundPartnerIdentity
+                        target={target}
+                        showUnspecified={false}
+                      />
                     </span>
                     {!target.active ? (
                       <span

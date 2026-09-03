@@ -84,8 +84,12 @@ const NAV_LABELS: {
     label: '물류 · (임시) 송장데이터 입력',
   },
   {
+    match: /^\/logistics\/barcode-outbound-data-entry(?:\/|$)/,
+    label: '물류 · (임시) 바코드 출고 데이터입력',
+  },
+  {
     match: /^\/logistics\/bulk-outbound(?:\/|$)/,
-    label: '물류 · 대량출고',
+    label: '물류 · 바코드 출고',
   },
   {
     match: /^\/logistics\/warehouses(?:\/|$)/,

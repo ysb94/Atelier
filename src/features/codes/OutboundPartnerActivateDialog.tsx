@@ -2,8 +2,9 @@ import { useMemo, useState } from 'react'
 import { useMutation } from '@tanstack/react-query'
 import { Check, Plus, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input, Select, Textarea } from '@/components/ui/input'
+import { Input, Select } from '@/components/ui/input'
 import { folderMoveOptions, folderPathLabel } from '@/lib/codes/outbound-folder'
+import { outboundChannelFromFolderPath } from '@/lib/codes/outbound-partner-browser'
 import {
   activateFolderSelectValue,
   canActivateOutboundPartner,
@@ -12,9 +13,20 @@ import {
   outboundPartnerActivateGaps,
   parseActivateFolderValue,
 } from '@/lib/codes/outbound-partner'
-import { CodeUsageTargetStoreError, updateCodeUsageTarget } from '@/lib/api'
-import type { CodeUsageTarget, CodeUsageTargetFolder } from '@/lib/types'
-import type { AliasOwner } from '@/features/codes/OutboundPartnerEditForm'
+import {
+  CodeUsageTargetStoreError,
+  createOutboundPartnerGroup,
+  updateCodeUsageTarget,
+} from '@/lib/api'
+import type {
+  CodeUsageTarget,
+  CodeUsageTargetFolder,
+  OutboundPartnerGroup,
+} from '@/lib/types'
+import {
+  OutboundPartnerContactFields,
+  type AliasOwner,
+} from '@/features/codes/OutboundPartnerEditForm'
 
 /**
  * 비활성 업체를 다시 켤 때만 연다.
@@ -31,13 +43,19 @@ export function OutboundPartnerActivateDialog({
   target: CodeUsageTarget
   aliases: readonly string[]
   folders: readonly CodeUsageTargetFolder[]
+  groups: readonly OutboundPartnerGroup[]
   ownerByKey: Map<string, AliasOwner>
   onClose: () => void
   onChanged: () => void | Promise<void>
 }) {
   const [name, setName] = useState(target.name)
+  const [groupName, setGroupName] = useState(target.groupName || target.name)
   const [folderId, setFolderId] = useState<string | null | undefined>(undefined)
   const [isOneTime, setIsOneTime] = useState(target.isOneTime)
+  const [contactName, setContactName] = useState(target.contactName)
+  const [contactPhone, setContactPhone] = useState(target.contactPhone)
+  const [contactEmail, setContactEmail] = useState(target.contactEmail)
+  const [address, setAddress] = useState(target.address)
   const [note, setNote] = useState(target.note)
   const [aliasList, setAliasList] = useState<string[]>([...aliases])
   const [keepPreviousName, setKeepPreviousName] = useState(true)
@@ -50,7 +68,9 @@ export function OutboundPartnerActivateDialog({
   const previousPath = folderPathLabel(folders, target.folderId)
   const draft = { name, folderId, note }
   const gaps = outboundPartnerActivateGaps(draft)
-  const canSave = canActivateOutboundPartner(draft)
+  const legacy = !target.groupId
+  const canSave =
+    canActivateOutboundPartner(draft) && (!legacy || Boolean(groupName.trim()))
 
   const aliasWarning = useMemo(() => {
     const value = normalizeOutboundPartnerName(aliasInput)
@@ -73,7 +93,7 @@ export function OutboundPartnerActivateDialog({
   }, [aliasInput, aliasList, name, ownerByKey, target.id])
 
   const saveMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
       if (!canActivateOutboundPartner({ name, folderId, note })) {
         throw new CodeUsageTargetStoreError(
           '업체명, 둘 위치, 이 업체의 특징을 모두 채워야 다시 켤 수 있습니다.',
@@ -89,10 +109,20 @@ export function OutboundPartnerActivateDialog({
         )
         if (previous && previousKey && !taken) nextAliases.push(previous)
       }
+      const group = legacy
+        ? await createOutboundPartnerGroup(target.brandId, groupName)
+        : null
       return updateCodeUsageTarget(target.id, {
         name,
+        groupId: group?.id ?? target.groupId,
+        siteName: legacy ? '' : target.siteName,
+        channelType: outboundChannelFromFolderPath(folders, folderId ?? null),
         folderId: folderId ?? null,
         isOneTime,
+        contactName,
+        contactPhone,
+        contactEmail,
+        address,
         note,
         aliases: nextAliases,
         active: true,
@@ -168,10 +198,24 @@ export function OutboundPartnerActivateDialog({
             이전 위치 · {previousPath}
           </p>
 
+          {legacy ? (
+            <div className="space-y-3 rounded-lg border border-border p-3">
+              <p className="text-sm font-medium">업체로 정리하고 켜기</p>
+              <label className="block space-y-1">
+                <span className="text-xs text-muted-foreground">업체명</span>
+                <Input
+                  value={groupName}
+                  disabled={pending}
+                  onChange={(event) => setGroupName(event.target.value)}
+                />
+              </label>
+            </div>
+          ) : null}
+
           <div className="grid gap-3 sm:grid-cols-2">
             <label className="block space-y-1">
               <span className="text-xs font-medium text-muted-foreground">
-                업체명
+                기존 식별명
               </span>
               <Input
                 value={name}
@@ -206,6 +250,20 @@ export function OutboundPartnerActivateDialog({
               </Select>
             </label>
           </div>
+
+          <OutboundPartnerContactFields
+            contactName={contactName}
+            contactPhone={contactPhone}
+            contactEmail={contactEmail}
+            address={address}
+            note={note}
+            pending={pending}
+            onContactName={setContactName}
+            onContactPhone={setContactPhone}
+            onContactEmail={setContactEmail}
+            onAddress={setAddress}
+            onNote={setNote}
+          />
 
           <div className="space-y-2">
             <span className="text-xs font-medium text-muted-foreground">
@@ -293,19 +351,6 @@ export function OutboundPartnerActivateDialog({
               이전 이름 &quot;{target.name}&quot;을 별칭으로 남기기
             </label>
           ) : null}
-
-          <label className="block space-y-1">
-            <span className="text-xs font-medium text-muted-foreground">
-              이 업체의 특징
-            </span>
-            <Textarea
-              rows={4}
-              value={note}
-              placeholder="담당 MD, 주문 통로, 선구매인지 위탁인지, 출고 형태, 포장 주의처럼 이 줄만의 이야기를 적습니다."
-              disabled={pending}
-              onChange={(event) => setNote(event.target.value)}
-            />
-          </label>
 
           {gaps.length > 0 ? (
             <p className="text-xs text-muted-foreground">

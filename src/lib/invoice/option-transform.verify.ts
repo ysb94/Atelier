@@ -73,6 +73,11 @@ import {
   itemNameAiReviewKind,
   markItemNameAiDecisionNeeded,
   nextItemNameAiQuickFocus,
+  nextItemNameAiReviewPage,
+  nextItemNameAiRowMark,
+  revertItemNameAiAppendState,
+  ITEM_NAME_AI_DELETE_LABEL,
+  itemNameAiQuickSlotInputValue,
   replaceItemNameAiRowComponents,
   mergeItemNameAiComponents,
   mergeItemNameAiDrafts,
@@ -4729,7 +4734,7 @@ assert(
       'delete',
       pickedCommit.committedKeys,
     ),
-  '후보를 고른 행은 변경 저장 후 옵션 상품 1개 탭으로 간다',
+  '후보를 고른 행은 Enter 직후 옵션 상품 1개 탭으로 간다',
 )
 const reopened = reopenItemNameAiCommittedRow({
   committedKeys: pickedCommit.committedKeys,
@@ -4744,6 +4749,46 @@ assert(
     !reopened.confirmedKeys.has(deletedDraft.row.key) &&
     pickedCommit.committedKeys.has(deletedDraft.row.key),
   '저장 완료 행만 검수 대기로 되돌리고 다른 상태는 유지한다',
+)
+assert(
+  nextItemNameAiReviewPage(1, 2, [aiEditedRow.key], aiEditedRow.key) === 2,
+  '내품명 표 마지막 행 Enter는 다음 페이지로 간다',
+)
+assert(
+  nextItemNameAiRowMark('confirm', 'delete') === 'committed' &&
+    nextItemNameAiRowMark('confirm', 'needs_ai') === 'pending_ai',
+  'Enter는 비움·구성을 바로 분류하고 미정 이름은 대기에 남긴다',
+)
+assert(
+  itemNameAiQuickSlotInputValue(emptyItemNameAiQuickSlot(), {
+    showDeleteLabel: true,
+  }) === ITEM_NAME_AI_DELETE_LABEL,
+  '분류된 비움 행은 입력칸에 내품명 비움을 보여 준다',
+)
+const appendThenCommit = commitReadyItemNameAiDrafts({
+  rows: aiHoldRows,
+  drafts: new Map([[aiHoldRows[0]!.key, appendGreen.rows[0]!]]),
+  confirmedKeys: new Set([aiHoldRows[0]!.key]),
+  pendingAiKeys: new Set(),
+  committedKeys: new Set(),
+})
+const appendReverted = revertItemNameAiAppendState({
+  rows: appendThenCommit.rows,
+  drafts: appendThenCommit.drafts,
+  committedKeys: appendThenCommit.committedKeys,
+  selectedKeys: new Set(appendThenCommit.selectedKeys),
+  confirmedKeys: new Set([aiHoldRows[0]!.key]),
+  lastAppend: {
+    addedKeys: [aiHoldRows[0]!.key],
+    skippedKeys: [],
+    previous: [aiHoldRows[0]!],
+  },
+})
+assert(
+  appendThenCommit.committedKeys.has(aiHoldRows[0]!.key) &&
+    !appendReverted.committedKeys.has(aiHoldRows[0]!.key) &&
+    appendReverted.rows[0]!.action === aiHoldRows[0]!.action,
+  '일괄 넣기 직후 분류를 실행 취소하면 입력 대기로 돌아간다',
 )
 assert(
   itemNameAiQueueProgress({

@@ -1,0 +1,14 @@
+{
+  "generatedAt": "2026-09-03T14:51:00+09:00",
+  "reason": "additive contact columns and hierarchy UI before applying outbound_partner_unit_contacts",
+  "code_usage_targets": 25,
+  "group_id_set": 0,
+  "outbound_partner_groups": 0,
+  "code_usage_target_aliases": 3,
+  "code_usage_target_folders": 7,
+  "bulk_outbound_partner_configs": 9,
+  "product_codes_with_usage_target": 736,
+  "product_code_target_ids": {
+    "baae4350-dabd-4822-b339-8228ecbb9a6f": 736
+  }
+}
