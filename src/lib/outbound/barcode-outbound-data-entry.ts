@@ -128,11 +128,12 @@ export function barcodeDataEntryCompanyKey(
   return target.groupId ?? `legacy:${target.id}`
 }
 
-export function barcodeDataEntrySourceRef(companyKey: string) {
-  return `${BARCODE_DATA_ENTRY_SOURCE_REF_PREFIX}${companyKey}`
+/** 등록 1건 = source_ref 1개. 같은 업체·출고일을 또 등록해도 섞이지 않는다. */
+export function barcodeDataEntryRunSourceRef(runId: string) {
+  return `${BARCODE_DATA_ENTRY_SOURCE_REF_PREFIX}${runId}`
 }
 
-export function barcodeDataEntryCompanyKeyFromSourceRef(sourceRef: string) {
+export function barcodeDataEntrySourceRefSuffix(sourceRef: string) {
   return sourceRef.startsWith(BARCODE_DATA_ENTRY_SOURCE_REF_PREFIX)
     ? sourceRef.slice(BARCODE_DATA_ENTRY_SOURCE_REF_PREFIX.length)
     : ''
@@ -149,6 +150,17 @@ export type BarcodeDataEntryLedgerRow = {
   shippedOn: string
   quantity: number
   note: string
+  createdAt: string
+}
+
+/** 등록 1건의 메타. 등록자·등록시각은 수량을 고쳐도 최초 값을 유지한다. */
+export type BarcodeDataEntryRun = {
+  id: string
+  companyKey: string
+  shippedOn: string
+  note: string
+  workerLabel: string
+  registeredAt: string
 }
 
 export type BarcodeDataEntryHistoryLine = {
@@ -163,21 +175,33 @@ export type BarcodeDataEntryHistoryLine = {
 
 export type BarcodeDataEntryHistoryJob = {
   key: string
+  /** 등록 이력 행이 없는 예전 반영분이면 null이라 수정·삭제를 막는다. */
+  runId: string | null
   companyKey: string
   shippedOn: string
   note: string
+  workerLabel: string
+  registeredAt: string
   kinds: number
   qty: number
   lines: BarcodeDataEntryHistoryLine[]
 }
 
+/**
+ * 등록 1건을 이력 한 줄로 묶는다. 같은 업체·출고일이어도 등록이 다르면 따로 남는다.
+ * 등록 이력 행을 찾지 못한 예전 반영분은 업체키·출고일로만 묶어 읽기 전용으로 둔다.
+ */
 export function groupBarcodeDataEntryHistory(
   rows: readonly BarcodeDataEntryLedgerRow[],
+  runs: readonly BarcodeDataEntryRun[] = [],
 ): BarcodeDataEntryHistoryJob[] {
+  const runById = new Map(runs.map((run) => [run.id, run]))
   const groups = new Map<string, BarcodeDataEntryHistoryJob>()
+
   for (const row of rows) {
-    const companyKey = barcodeDataEntryCompanyKeyFromSourceRef(row.sourceRef)
-    const key = `${companyKey}:${row.shippedOn}`
+    const suffix = barcodeDataEntrySourceRefSuffix(row.sourceRef)
+    const run = runById.get(suffix) ?? null
+    const key = run ? run.id : `legacy:${suffix}:${row.shippedOn}`
     const line = {
       id: row.id,
       styleId: row.styleId,
@@ -191,19 +215,26 @@ export function groupBarcodeDataEntryHistory(
     if (current) {
       current.qty += row.quantity
       if (row.note && !current.note) current.note = row.note
+      if (row.createdAt && row.createdAt < current.registeredAt) {
+        current.registeredAt = row.createdAt
+      }
       current.lines.push(line)
       continue
     }
     groups.set(key, {
       key,
-      companyKey,
+      runId: run?.id ?? null,
+      companyKey: run?.companyKey ?? suffix,
       shippedOn: row.shippedOn,
-      note: row.note,
+      note: run?.note || row.note,
+      workerLabel: run?.workerLabel ?? '',
+      registeredAt: run?.registeredAt || row.createdAt,
       kinds: 0,
       qty: row.quantity,
       lines: [line],
     })
   }
+
   return [...groups.values()]
     .map((job) => ({
       ...job,
@@ -216,22 +247,9 @@ export function groupBarcodeDataEntryHistory(
     .sort(
       (left, right) =>
         right.shippedOn.localeCompare(left.shippedOn) ||
+        right.registeredAt.localeCompare(left.registeredAt) ||
         left.companyKey.localeCompare(right.companyKey, 'ko'),
     )
-}
-
-export function barcodeDataEntryHistoryPartnerIds(
-  job: Pick<BarcodeDataEntryHistoryJob, 'lines'>,
-  extraIds: readonly string[] = [],
-) {
-  return [
-    ...new Set(
-      [
-        ...extraIds,
-        ...job.lines.map((line) => line.usageTargetId),
-      ].filter(Boolean),
-    ),
-  ]
 }
 
 export function barcodeDataEntryRowsFromHistory(

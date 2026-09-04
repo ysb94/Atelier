@@ -16,11 +16,11 @@ import { Input } from '@/components/ui/input'
 import { BarcodeOutboundDataEntryHistoryPanel } from '@/features/logistics/BarcodeOutboundDataEntryHistoryPanel'
 import { BarcodeOutboundDataEntryPanel } from '@/features/logistics/BarcodeOutboundDataEntryPanel'
 import {
-  deleteBarcodeDataEntryShipments,
+  deleteBarcodeDataEntryRun,
   getCodeUsageTargetAliases,
   getCodeUsageTargets,
   listStyleRefsForLookup,
-  replaceBarcodeDataEntryShipments,
+  saveBarcodeDataEntryRun,
 } from '@/lib/api'
 import {
   countOutboundCompanies,
@@ -32,8 +32,6 @@ import {
   barcodeDataEntryAllReady,
   barcodeDataEntryBackupEntries,
   barcodeDataEntryCompanyKey,
-  barcodeDataEntryHistoryPartnerIds,
-  barcodeDataEntrySourceRef,
   emptyBarcodeDataEntryDraft,
   filterTargetsByVisibleIds,
   isIsoDate,
@@ -360,6 +358,9 @@ export function BarcodeOutboundDataEntryPage() {
       queryClient.invalidateQueries({
         queryKey: ['barcodeDataEntryShipments', brand.id],
       }),
+      queryClient.invalidateQueries({
+        queryKey: ['barcodeDataEntryRuns', brand.id],
+      }),
     ])
   }
 
@@ -424,41 +425,26 @@ export function BarcodeOutboundDataEntryPage() {
             onSave={async (input) => {
               setSaving(true)
               try {
-                await replaceBarcodeDataEntryShipments({
+                await saveBarcodeDataEntryRun({
                   brandId: brand.id,
-                  sourceRef: barcodeDataEntrySourceRef(input.companyKey),
+                  runId: input.runId,
+                  companyKey: input.companyKey,
                   shippedOn: input.shippedOn,
                   note: input.note,
-                  partnerIds: input.partnerIds,
                   entries: input.entries,
                 })
-                if (input.previousShippedOn !== input.shippedOn) {
-                  await deleteBarcodeDataEntryShipments({
-                    brandId: brand.id,
-                    sourceRef: barcodeDataEntrySourceRef(input.companyKey),
-                    shippedOn: input.previousShippedOn,
-                    partnerIds: input.partnerIds,
-                  })
-                }
                 await refreshBarcodeDataEntryLedger()
               } finally {
                 setSaving(false)
               }
             }}
             onDelete={async (job) => {
-              const company = allCompanies.find(
-                (item) => item.key === job.companyKey,
-              )
+              if (!job.runId) return
               setSaving(true)
               try {
-                await deleteBarcodeDataEntryShipments({
+                await deleteBarcodeDataEntryRun({
                   brandId: brand.id,
-                  sourceRef: barcodeDataEntrySourceRef(job.companyKey),
-                  shippedOn: job.shippedOn,
-                  partnerIds: barcodeDataEntryHistoryPartnerIds(
-                    job,
-                    company?.units.map((unit) => unit.id) ?? [],
-                  ),
+                  runId: job.runId,
                 })
                 await refreshBarcodeDataEntryLedger()
               } finally {
@@ -650,16 +636,12 @@ export function BarcodeOutboundDataEntryPage() {
                       setSaving(true)
                       try {
                         persistDraft(rows, note)
-                        const saved = await replaceBarcodeDataEntryShipments({
+                        await saveBarcodeDataEntryRun({
                           brandId: brand.id,
-                          sourceRef: barcodeDataEntrySourceRef(
-                            selectedCompany.key,
-                          ),
+                          runId: null,
+                          companyKey: selectedCompany.key,
                           shippedOn,
                           note,
-                          partnerIds: selectedCompany.units.map(
-                            (unit) => unit.id,
-                          ),
                           entries,
                         })
                         await refreshBarcodeDataEntryLedger()
@@ -667,7 +649,7 @@ export function BarcodeOutboundDataEntryPage() {
                           (sum, entry) => sum + entry.quantity,
                           0,
                         )
-                        return { kinds: saved, qty }
+                        return { kinds: entries.length, qty }
                       } finally {
                         setSaving(false)
                       }

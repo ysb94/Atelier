@@ -10,11 +10,13 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { getBarcodeDataEntryShipments } from '@/lib/api'
+import {
+  getBarcodeDataEntryRuns,
+  getBarcodeDataEntryShipments,
+} from '@/lib/api'
 import type { OutboundCompanyInFolder } from '@/lib/codes/outbound-partner'
 import {
   barcodeDataEntryBackupEntries,
-  barcodeDataEntryHistoryPartnerIds,
   barcodeDataEntryRowsFromHistory,
   groupBarcodeDataEntryHistory,
   isIsoDate,
@@ -27,6 +29,20 @@ function formatShippedOn(value: string) {
   const [year, month, day] = value.split('-')
   if (!year || !month || !day) return value
   return `${year}. ${month}. ${day}.`
+}
+
+function formatRegisteredAt(value: string) {
+  if (!value) return '-'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return date.toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
 }
 
 function companyNameForKey(
@@ -62,6 +78,9 @@ type HistoryEditDraft = {
   lines: BarcodeDataEntryHistoryLine[]
 }
 
+const LEGACY_JOB_MESSAGE =
+  '등록 이력이 없는 예전 반영분이라 여기서 고치거나 지울 수 없습니다.'
+
 function draftFromJob(job: BarcodeDataEntryHistoryJob): HistoryEditDraft {
   return {
     key: job.key,
@@ -72,15 +91,14 @@ function draftFromJob(job: BarcodeDataEntryHistoryJob): HistoryEditDraft {
 }
 
 export type BarcodeDataEntryHistorySaveInput = {
+  runId: string
   companyKey: string
-  previousShippedOn: string
   shippedOn: string
   note: string
-  partnerIds: string[]
   entries: ReturnType<typeof barcodeDataEntryBackupEntries>
 }
 
-/** 이 화면에서 백업한 출고 등록을 업체·출고일 단위로 보여 준다. */
+/** 이 화면에서 백업한 출고 등록을 등록 1건씩 보여 준다. */
 export function BarcodeOutboundDataEntryHistoryPanel({
   brandId,
   companies,
@@ -104,17 +122,27 @@ export function BarcodeOutboundDataEntryHistoryPanel({
     queryFn: () => getBarcodeDataEntryShipments(brandId),
     enabled,
   })
+  const runsQuery = useQuery({
+    queryKey: ['barcodeDataEntryRuns', brandId],
+    queryFn: () => getBarcodeDataEntryRuns(brandId),
+    enabled,
+  })
   const jobs = useMemo(
-    () => groupBarcodeDataEntryHistory(historyQuery.data ?? []),
-    [historyQuery.data],
+    () =>
+      groupBarcodeDataEntryHistory(
+        historyQuery.data ?? [],
+        runsQuery.data ?? [],
+      ),
+    [historyQuery.data, runsQuery.data],
   )
   const companyCount = new Set(jobs.map((job) => job.companyKey)).size
   const kindTotal = jobs.reduce((sum, job) => sum + job.kinds, 0)
   const qtyTotal = jobs.reduce((sum, job) => sum + job.qty, 0)
+  const queryError = historyQuery.error ?? runsQuery.error
   const error =
-    historyQuery.error instanceof Error
-      ? historyQuery.error.message
-      : historyQuery.error
+    queryError instanceof Error
+      ? queryError.message
+      : queryError
         ? '등록 이력을 불러오지 못했습니다.'
         : null
 
@@ -142,6 +170,10 @@ export function BarcodeOutboundDataEntryHistoryPanel({
 
   async function saveEdit(job: BarcodeDataEntryHistoryJob) {
     if (!editDraft || editDraft.key !== job.key) return
+    if (!job.runId) {
+      setActionError(LEGACY_JOB_MESSAGE)
+      return
+    }
     if (!isIsoDate(editDraft.shippedOn)) {
       setActionError('출고일을 확인하세요.')
       return
@@ -153,23 +185,22 @@ export function BarcodeOutboundDataEntryHistoryPanel({
       setActionError('수량이 없습니다. 등록을 지우려면 삭제를 누르세요.')
       return
     }
-    const company = companies.find((item) => item.key === job.companyKey)
     setActionError(null)
     await onSave({
+      runId: job.runId,
       companyKey: job.companyKey,
-      previousShippedOn: job.shippedOn,
       shippedOn: editDraft.shippedOn,
       note: editDraft.note,
-      partnerIds: barcodeDataEntryHistoryPartnerIds(
-        { lines: editDraft.lines },
-        company?.units.map((unit) => unit.id) ?? [],
-      ),
       entries,
     })
     setEditDraft(null)
   }
 
   async function removeJob(job: BarcodeDataEntryHistoryJob) {
+    if (!job.runId) {
+      setActionError(LEGACY_JOB_MESSAGE)
+      return
+    }
     const companyName = companyNameForKey(companies, job.companyKey)
     if (
       !window.confirm(
@@ -220,7 +251,8 @@ export function BarcodeOutboundDataEntryHistoryPanel({
         <CardHeader>
           <CardTitle>최근 등록</CardTitle>
           <CardDescription>
-            줄을 열어 수량을 고치거나, 등록 전체를 삭제할 수 있습니다.
+            등록할 때마다 줄이 하나씩 생깁니다. 같은 업체·출고일을 또 등록해도
+            합쳐지지 않으니, 잘못 넣은 줄은 삭제로 지우세요.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -244,6 +276,8 @@ export function BarcodeOutboundDataEntryHistoryPanel({
                       <th className="px-3 py-2.5 font-medium">업체</th>
                       <th className="px-3 py-2.5 text-right font-medium">종</th>
                       <th className="px-3 py-2.5 text-right font-medium">개</th>
+                      <th className="px-3 py-2.5 font-medium">등록자</th>
+                      <th className="px-3 py-2.5 font-medium">등록시간</th>
                       <th className="px-3 py-2.5 font-medium">비고</th>
                       <th className="px-3 py-2.5 text-right font-medium">
                         작업
@@ -316,6 +350,12 @@ export function BarcodeOutboundDataEntryHistoryPanel({
                                   : job.qty,
                               )}
                             </td>
+                            <td className="whitespace-nowrap px-3 py-3">
+                              {job.workerLabel || '-'}
+                            </td>
+                            <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
+                              {formatRegisteredAt(job.registeredAt)}
+                            </td>
                             <td className="max-w-72 px-3 py-3 text-muted-foreground">
                               {editing ? (
                                 <Input
@@ -379,7 +419,16 @@ export function BarcodeOutboundDataEntryHistoryPanel({
                                       type="button"
                                       size="sm"
                                       variant="outline"
-                                      disabled={busy || Boolean(editDraft)}
+                                      title={
+                                        job.runId
+                                          ? undefined
+                                          : LEGACY_JOB_MESSAGE
+                                      }
+                                      disabled={
+                                        busy ||
+                                        Boolean(editDraft) ||
+                                        !job.runId
+                                      }
                                       onClick={() => startEdit(job)}
                                     >
                                       수정
@@ -388,7 +437,16 @@ export function BarcodeOutboundDataEntryHistoryPanel({
                                       type="button"
                                       size="sm"
                                       variant="danger"
-                                      disabled={busy || Boolean(editDraft)}
+                                      title={
+                                        job.runId
+                                          ? undefined
+                                          : LEGACY_JOB_MESSAGE
+                                      }
+                                      disabled={
+                                        busy ||
+                                        Boolean(editDraft) ||
+                                        !job.runId
+                                      }
                                       onClick={() => {
                                         void removeJob(job).catch((reason) => {
                                           setActionError(
@@ -408,7 +466,7 @@ export function BarcodeOutboundDataEntryHistoryPanel({
                           </tr>
                           {open ? (
                             <tr className="border-t border-border bg-muted/30">
-                              <td colSpan={7} className="px-3 py-3">
+                              <td colSpan={9} className="px-3 py-3">
                                 {lines.length === 0 ? (
                                   <p className="text-xs text-muted-foreground">
                                     상세 행이 없습니다.
@@ -529,8 +587,8 @@ export function BarcodeOutboundDataEntryHistoryPanel({
               </p>
               <p className="mt-1 max-w-lg text-xs leading-5 text-muted-foreground">
                 데이터 입력 탭에서 연결을 마치고 출고 데이터에 반영하면 여기에
-                남습니다. 같은 업체·출고일을 다시 반영하면 그 등록이
-                바뀝니다.
+                남습니다. 등록 1건이 한 줄이고 등록자와 등록시간도 같이
+                적힙니다.
               </p>
             </div>
           )}

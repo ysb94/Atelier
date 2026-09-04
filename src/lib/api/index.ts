@@ -1608,22 +1608,30 @@ export async function getBarcodeDataEntryShipments(brandId: string) {
   return outboundShipmentStore.listBarcodeDataEntryShipments(brandId)
 }
 
-export async function replaceBarcodeDataEntryShipments(
-  input: Parameters<
-    typeof outboundShipmentStore.replaceBarcodeDataEntryShipments
-  >[0],
-) {
+export async function getBarcodeDataEntryRuns(brandId: string) {
   await delay()
-  return outboundShipmentStore.replaceBarcodeDataEntryShipments(input)
+  return outboundShipmentStore.listBarcodeDataEntryRuns(brandId)
 }
 
-export async function deleteBarcodeDataEntryShipments(
-  input: Parameters<
-    typeof outboundShipmentStore.deleteBarcodeDataEntryShipments
-  >[0],
+export async function saveBarcodeDataEntryRun(
+  input: Omit<
+    Parameters<typeof outboundShipmentStore.saveBarcodeDataEntryRun>[0],
+    'workerLabel'
+  >,
+) {
+  const profile = await getMyProfile()
+  await delay()
+  return outboundShipmentStore.saveBarcodeDataEntryRun({
+    ...input,
+    workerLabel: profile?.displayName?.trim() || profile?.email || '',
+  })
+}
+
+export async function deleteBarcodeDataEntryRun(
+  input: Parameters<typeof outboundShipmentStore.deleteBarcodeDataEntryRun>[0],
 ) {
   await delay()
-  return outboundShipmentStore.deleteBarcodeDataEntryShipments(input)
+  return outboundShipmentStore.deleteBarcodeDataEntryRun(input)
 }
 
 export async function replaceInvoiceOutboundShipments(

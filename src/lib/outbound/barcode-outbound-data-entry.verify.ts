@@ -5,9 +5,9 @@ import {
   barcodeDataEntryAllReady,
   barcodeDataEntryBackupEntries,
   barcodeDataEntryCompanyKey,
-  barcodeDataEntryCompanyKeyFromSourceRef,
   barcodeDataEntryRowsFromHistory,
-  barcodeDataEntrySourceRef,
+  barcodeDataEntryRunSourceRef,
+  barcodeDataEntrySourceRefSuffix,
   groupBarcodeDataEntryHistory,
   barcodeDataEntryUnresolvedSites,
   filterTargetsByVisibleIds,
@@ -67,55 +67,103 @@ assert(
   '서울 날짜를 쓴다',
 )
 assert(
-  barcodeDataEntrySourceRef('kyobo') === 'barcode-data-entry:kyobo',
-  '출처 키를 만든다',
+  barcodeDataEntryRunSourceRef('run-1') === 'barcode-data-entry:run-1',
+  '등록 ID로 출처 키를 만든다',
 )
 assert(
-  barcodeDataEntryCompanyKeyFromSourceRef('barcode-data-entry:kyobo') ===
-    'kyobo',
-  '출처에서 업체 키를 되돌린다',
+  barcodeDataEntrySourceRefSuffix('barcode-data-entry:run-1') === 'run-1',
+  '출처에서 등록 ID를 되돌린다',
+)
+
+const historyLedger = [
+  {
+    id: '1',
+    sourceRef: 'barcode-data-entry:run-1',
+    styleId: 's1',
+    styleNo: 'M1',
+    styleName: '가방',
+    usageTargetId: 'u1',
+    partnerName: '강남점',
+    shippedOn: '2026-09-04',
+    quantity: 2,
+    note: '1차',
+    createdAt: '2026-09-04T01:00:00.000Z',
+  },
+  {
+    id: '2',
+    sourceRef: 'barcode-data-entry:run-1',
+    styleId: 's1',
+    styleNo: 'M1',
+    styleName: '가방',
+    usageTargetId: 'u2',
+    partnerName: '광화문점',
+    shippedOn: '2026-09-04',
+    quantity: 1,
+    note: '1차',
+    createdAt: '2026-09-04T01:00:00.000Z',
+  },
+  {
+    id: '3',
+    sourceRef: 'barcode-data-entry:run-2',
+    styleId: 's1',
+    styleNo: 'M1',
+    styleName: '가방',
+    usageTargetId: 'u1',
+    partnerName: '강남점',
+    shippedOn: '2026-09-04',
+    quantity: 5,
+    note: '2차',
+    createdAt: '2026-09-04T03:00:00.000Z',
+  },
+  {
+    id: '4',
+    sourceRef: 'barcode-data-entry:kyobo',
+    styleId: 's2',
+    styleNo: 'M2',
+    styleName: '지갑',
+    usageTargetId: 'u3',
+    partnerName: '부산대점',
+    shippedOn: '2026-09-03',
+    quantity: 4,
+    note: '',
+    createdAt: '2026-09-03T05:00:00.000Z',
+  },
+]
+const historyRuns = [
+  {
+    id: 'run-1',
+    companyKey: 'kyobo',
+    shippedOn: '2026-09-04',
+    note: '1차',
+    workerLabel: '김지선',
+    registeredAt: '2026-09-04T01:00:00.000Z',
+  },
+  {
+    id: 'run-2',
+    companyKey: 'kyobo',
+    shippedOn: '2026-09-04',
+    note: '2차',
+    workerLabel: '윤설빈',
+    registeredAt: '2026-09-04T03:00:00.000Z',
+  },
+]
+
+assert(
+  groupBarcodeDataEntryHistory(historyLedger, historyRuns)
+    .map((job) => `${job.companyKey}:${job.workerLabel || '-'}:${job.qty}`)
+    .join(',') === 'kyobo:윤설빈:5,kyobo:김지선:3,kyobo:-:4',
+  '같은 업체·출고일이어도 등록이 다르면 따로 남기고 최신 등록을 위에 둔다',
 )
 assert(
-  groupBarcodeDataEntryHistory([
-    {
-      id: '1',
-      sourceRef: 'barcode-data-entry:kyobo',
-      styleId: 's1',
-      styleNo: 'M1',
-      styleName: '가방',
-      usageTargetId: 'u1',
-      partnerName: '강남점',
-      shippedOn: '2026-09-04',
-      quantity: 2,
-      note: '1차',
-    },
-    {
-      id: '2',
-      sourceRef: 'barcode-data-entry:kyobo',
-      styleId: 's1',
-      styleNo: 'M1',
-      styleName: '가방',
-      usageTargetId: 'u2',
-      partnerName: '광화문점',
-      shippedOn: '2026-09-04',
-      quantity: 1,
-      note: '1차',
-    },
-    {
-      id: '3',
-      sourceRef: 'barcode-data-entry:young',
-      styleId: 's2',
-      styleNo: 'M2',
-      styleName: '지갑',
-      usageTargetId: 'u3',
-      partnerName: '부산대점',
-      shippedOn: '2026-09-03',
-      quantity: 4,
-      note: '',
-    },
-  ]).map((job) => `${job.companyKey}:${job.kinds}:${job.qty}`).join(',') ===
-    'kyobo:1:3,young:1:4',
-  '같은 업체·출고일을 한 등록으로 묶는다',
+  groupBarcodeDataEntryHistory(historyLedger, historyRuns)
+    .map((job) => job.runId ?? 'legacy')
+    .join(',') === 'run-2,run-1,legacy',
+  '등록 이력이 없는 예전 반영분은 runId 없이 읽기 전용으로 남긴다',
+)
+assert(
+  groupBarcodeDataEntryHistory(historyLedger, historyRuns).at(-1)
+    ?.registeredAt === '2026-09-03T05:00:00.000Z',
+  '예전 반영분의 등록시간은 원장 생성 시각으로 채운다',
 )
 assert(
   barcodeDataEntryBackupEntries(

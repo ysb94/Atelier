@@ -1,0 +1,12 @@
+{
+  "createdAt": "2026-09-04T08:35:25.016Z",
+  "note": "source_ref를 등록 ID 단위(barcode-data-entry:<run_id>)로 바꾸기 직전의 바코드 출고 데이터입력 원장 스냅샷.",
+  "tables": {
+    "outbound_shipments": {
+      "filter": "source = 'bulk' and source_ref like 'barcode-data-entry:%'",
+      "fetched": 87,
+      "count": 87,
+      "error": null
+    }
+  }
+}

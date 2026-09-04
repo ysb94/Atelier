@@ -1,6 +1,7 @@
 import {
   BARCODE_DATA_ENTRY_SOURCE_REF_PREFIX,
   type BarcodeDataEntryLedgerRow,
+  type BarcodeDataEntryRun,
 } from '@/lib/outbound/barcode-outbound-data-entry'
 import type { ProductOutboundShipment } from '@/lib/outbound/product-outbound'
 import {
@@ -155,60 +156,111 @@ export type BarcodeDataEntryShipmentEntry = {
   quantity: number
 }
 
-/** 같은 업체 그룹·출고일의 데이터입력 반영분을 지점별로 교체한다. 재고는 건드리지 않는다. */
-export async function replaceBarcodeDataEntryShipments(input: {
+/** 등록 이력 목록. 화면은 이 메타로 등록자·등록시각을 보여 준다. */
+export async function listBarcodeDataEntryRuns(
+  brandId: string,
+): Promise<BarcodeDataEntryRun[]> {
+  const rows = await fetchAllPages<{
+    id: string
+    company_key: string
+    shipped_on: string
+    note: string
+    worker_label: string
+    registered_at: string
+  }>({
+    fetchPage: async (from, to, withCount) => {
+      const { data, error, count } = await getSupabase()
+        .from('barcode_data_entry_runs')
+        .select(
+          'id, company_key, shipped_on, note, worker_label, registered_at',
+          withCount ? { count: 'exact' } : undefined,
+        )
+        .eq('brand_id', brandId)
+        .order('shipped_on', { ascending: false })
+        .order('registered_at', { ascending: false })
+        .range(from, to)
+      if (error) {
+        throw new OutboundShipmentStoreError(
+          errorMessage(error, '등록 이력을 불러오지 못했습니다.'),
+        )
+      }
+      return { rows: data ?? [], count: count ?? null }
+    },
+  })
+
+  return rows.map((row) => ({
+    id: row.id,
+    companyKey: row.company_key,
+    shippedOn: row.shipped_on.slice(0, 10),
+    note: row.note || '',
+    workerLabel: row.worker_label || '',
+    registeredAt: row.registered_at,
+  }))
+}
+
+/**
+ * 등록 1건과 그 출고 원장을 저장한다. `runId`가 없으면 새 등록으로 남기므로
+ * 같은 업체·출고일을 또 등록해도 앞 등록을 덮어쓰지 않는다. 재고는 건드리지 않는다.
+ */
+export async function saveBarcodeDataEntryRun(input: {
   brandId: string
-  sourceRef: string
+  runId?: string | null
+  companyKey: string
   shippedOn: string
   note: string
-  partnerIds?: readonly string[]
+  workerLabel: string
   entries: readonly BarcodeDataEntryShipmentEntry[]
-}): Promise<number> {
+}): Promise<string> {
   if (!UUID_RE.test(input.brandId)) {
     throw new OutboundShipmentStoreError('브랜드 정보가 올바르지 않습니다.')
+  }
+  if (input.runId != null && !UUID_RE.test(input.runId)) {
+    throw new OutboundShipmentStoreError('등록 이력을 찾지 못했습니다.')
   }
   if (!ISO_DATE_RE.test(input.shippedOn)) {
     throw new OutboundShipmentStoreError('출고일을 확인하세요.')
   }
-  if (!input.sourceRef.trim()) {
-    throw new OutboundShipmentStoreError('출고 출처가 올바르지 않습니다.')
+  if (!input.companyKey.trim()) {
+    throw new OutboundShipmentStoreError('출고업체 정보가 올바르지 않습니다.')
   }
 
-  const rows = input.entries
-    .map((entry) => ({
-      usageTargetId: entry.usageTargetId.trim(),
-      styleId: entry.styleId.trim(),
-      quantity: Math.trunc(entry.quantity),
-    }))
-    .filter(
-      (entry) =>
-        UUID_RE.test(entry.usageTargetId) &&
-        UUID_RE.test(entry.styleId) &&
-        Number.isFinite(entry.quantity) &&
-        entry.quantity > 0,
-    )
+  const merged = new Map<string, BarcodeDataEntryShipmentEntry>()
+  for (const entry of input.entries) {
+    const usageTargetId = entry.usageTargetId.trim()
+    const styleId = entry.styleId.trim()
+    const quantity = Math.trunc(entry.quantity)
+    if (
+      !UUID_RE.test(usageTargetId) ||
+      !UUID_RE.test(styleId) ||
+      !Number.isFinite(quantity) ||
+      quantity <= 0
+    ) {
+      continue
+    }
+    const key = `${usageTargetId}|${styleId}`
+    const existing = merged.get(key)
+    if (existing) {
+      existing.quantity += quantity
+      continue
+    }
+    merged.set(key, { usageTargetId, styleId, quantity })
+  }
 
-  const partnerIds = [
-    ...new Set(
-      [...(input.partnerIds ?? []), ...rows.map((row) => row.usageTargetId)].filter(
-        (id) => UUID_RE.test(id),
-      ),
-    ),
-  ]
+  const rows = [...merged.values()]
+  if (rows.length === 0) {
+    throw new OutboundShipmentStoreError('반영할 출고 행이 없습니다.')
+  }
 
   const { data, error } = await getSupabase().rpc(
-    'replace_barcode_data_entry_shipments',
+    'save_barcode_data_entry_run',
     {
       p_brand_id: input.brandId,
-      p_source_ref: input.sourceRef,
+      p_run_id: input.runId ?? null,
+      p_company_key: input.companyKey.trim(),
       p_shipped_on: input.shippedOn,
       p_note: input.note.trim(),
-      p_usage_target_ids: partnerIds,
-      p_entries: rows.map((entry) => ({
-        usageTargetId: entry.usageTargetId,
-        styleId: entry.styleId,
-        quantity: entry.quantity,
-      })),
+      p_worker_label: input.workerLabel.trim(),
+      p_entries: rows,
     },
   )
 
@@ -217,25 +269,36 @@ export async function replaceBarcodeDataEntryShipments(input: {
       errorMessage(error, '출고 데이터에 반영하지 못했습니다.'),
     )
   }
-
-  return typeof data === 'number' ? data : rows.length
+  if (typeof data !== 'string') {
+    throw new OutboundShipmentStoreError('등록 이력을 저장하지 못했습니다.')
+  }
+  return data
 }
 
-/** 같은 업체 그룹·출고일의 데이터입력 반영분을 지운다. 재고는 건드리지 않는다. */
-export async function deleteBarcodeDataEntryShipments(input: {
+/** 등록 1건과 같은 등록 ID의 출고 원장만 지운다. 재고는 건드리지 않는다. */
+export async function deleteBarcodeDataEntryRun(input: {
   brandId: string
-  sourceRef: string
-  shippedOn: string
-  partnerIds?: readonly string[]
+  runId: string
 }): Promise<number> {
-  return replaceBarcodeDataEntryShipments({
-    brandId: input.brandId,
-    sourceRef: input.sourceRef,
-    shippedOn: input.shippedOn,
-    note: '',
-    partnerIds: input.partnerIds,
-    entries: [],
-  })
+  if (!UUID_RE.test(input.brandId) || !UUID_RE.test(input.runId)) {
+    throw new OutboundShipmentStoreError('등록 이력을 찾지 못했습니다.')
+  }
+
+  const { data, error } = await getSupabase().rpc(
+    'delete_barcode_data_entry_run',
+    {
+      p_brand_id: input.brandId,
+      p_run_id: input.runId,
+    },
+  )
+
+  if (error) {
+    throw new OutboundShipmentStoreError(
+      errorMessage(error, '등록을 지우지 못했습니다.'),
+    )
+  }
+
+  return typeof data === 'number' ? data : 0
 }
 
 export type InvoiceOutboundShipmentEntry = {
@@ -312,12 +375,13 @@ export async function replaceInvoiceOutboundShipments(input: {
 export async function listBarcodeDataEntryShipments(
   brandId: string,
 ): Promise<BarcodeDataEntryLedgerRow[]> {
-  const rows = await fetchAllPages<ShipmentRow>({
+  type LedgerShipmentRow = ShipmentRow & { created_at: string }
+  const rows = await fetchAllPages<LedgerShipmentRow>({
     fetchPage: async (from, to, withCount) => {
       const { data, error, count } = await getSupabase()
         .from('outbound_shipments')
         .select(
-          'id, brand_id, style_id, usage_target_id, shipped_on, quantity, source, source_ref, note',
+          'id, brand_id, style_id, usage_target_id, shipped_on, quantity, source, source_ref, note, created_at',
           withCount ? { count: 'exact' } : undefined,
         )
         .eq('brand_id', brandId)
@@ -331,7 +395,10 @@ export async function listBarcodeDataEntryShipments(
           errorMessage(error, '등록 이력을 불러오지 못했습니다.'),
         )
       }
-      return { rows: (data as ShipmentRow[]) ?? [], count: count ?? null }
+      return {
+        rows: (data as LedgerShipmentRow[]) ?? [],
+        count: count ?? null,
+      }
     },
   })
 
@@ -404,6 +471,7 @@ export async function listBarcodeDataEntryShipments(
         shippedOn: row.shipped_on.slice(0, 10),
         quantity: row.quantity,
         note: row.note || '',
+        createdAt: row.created_at,
       }
     })
 }

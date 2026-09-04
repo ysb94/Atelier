@@ -39,6 +39,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 코드·출고업체(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_target_folders`, `code_usage_target_aliases`, `code_usage_assignments`) | Supabase |
 | 거래처 코드 헤더(`partner_barcode_fields`). `product_codes.kind='partner'`는 업체마다 같은 바코드 문자열을 허용 | Supabase |
 | 바코드 출고 작업·등록 업체(`bulk_outbound_jobs` + `bulk_outbound_job_lines` + `bulk_outbound_job_files` + `bulk_outbound_partner_configs`) | Supabase |
+| 바코드 출고 데이터입력 등록 이력(`barcode_data_entry_runs`) | Supabase |
 | 바코드 출고 공용 엑셀 양식·바코드 화면 표시 업체(`bulk_outbound_template_fields` + `barcode_partner_display_settings` + `barcode_partner_display_targets`) | Supabase |
 | 운영 현황 출고 원장(`outbound_shipments`). 재고 차감과 분리 | Supabase |
 | 송장 품목명 변환 기준(`invoice_name_rules`) | Supabase |
@@ -68,6 +69,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 원자 작업 RPC: `save_product_draft`, `promote_product_draft`,
   `save_product_code_with_components`, `replace_partner_barcode_fields`,
   `replace_partner_codes`, `save_bulk_outbound_job`,   `replace_bulk_outbound_backup`,
+  `save_barcode_data_entry_run`, `delete_barcode_data_entry_run`,
   `replace_barcode_data_entry_shipments`,
   `replace_invoice_outbound_shipments`,
   `backup_invoice_outbound_work`,
@@ -179,9 +181,17 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 수령인·전화·주소는 저장하지 않는다.
 「임시 반영」은 재고를 건드리지 않고 `outbound_shipments`에 `source='bulk'`로
 같은 Job의 이전 반영분을 교체한다. 운영 현황은 이 원장만 읽는다.
-임시 바코드 출고 데이터입력은 `replace_barcode_data_entry_shipments`로
-같은 업체 그룹·출고일의 `barcode-data-entry:*` 반영분을 지점별
-`usage_target_id`로 교체한다. 재고는 건드리지 않는다.
+임시 바코드 출고 데이터입력은 `save_barcode_data_entry_run`으로 등록 1건과 그
+출고 원장을 한 트랜잭션에서 저장한다. 등록 1건이 `barcode_data_entry_runs` 한
+행이고 `source_ref`는 `barcode-data-entry:<run_id>`다. 같은 업체·출고일을 다시
+등록해도 앞 등록을 덮어쓰지 않고 이력이 따로 남으며, 운영 현황 출고 원장에도
+등록별로 쌓여 수량이 합산된다. 잘못 넣은 등록은
+`delete_barcode_data_entry_run`으로 그 등록의 원장만 지운다. 등록자
+(`worker_label` 스냅샷 + `created_by`)와 등록시각(`registered_at`)은 최초 등록
+값을 유지하며 수량을 고쳐도 갱신하지 않는다. 재고는 건드리지 않는다.
+`replace_barcode_data_entry_shipments`는 구버전 앱 호환용으로만 남기고 같은
+`source_ref`·출고일 반영분만 교체한다. 등록 이력 행이 없는 예전 반영분은 화면에서
+읽기 전용으로 보여 주고 수정·삭제를 막는다.
 송장 오늘 작업의 `(임시) 출고반영` 백업은
 `backup_invoice_outbound_work`로 출고 원장·작업 이력·주문 키를 한
 트랜잭션에서 저장한다. 내부에서 `replace_invoice_outbound_shipments`와
@@ -217,7 +227,15 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260902064026_bulk_outbound_job_line_extra_values.sql`,
   `20260902083550_bulk_outbound_partner_config_work_status.sql`,
   `20260902085139_bulk_outbound_partner_work_status_dev_only.sql`,
-  `20260902100623_delete_bulk_outbound_job_and_backup.sql`.
+  `20260902100623_delete_bulk_outbound_job_and_backup.sql`,
+  `20260903102024_replace_barcode_data_entry_shipments.sql`,
+  `20260904084000_barcode_data_entry_runs.sql`.
+- 바코드 출고 데이터입력 로직은 `src/lib/outbound/barcode-outbound-data-entry.ts`,
+  저장소는 `src/lib/supabase/outbound-shipments.ts`, 화면은
+  `BarcodeOutboundDataEntryPage`와 `BarcodeOutboundDataEntryHistoryPanel`이다.
+  회귀 검증은 `npm run verify:barcode-outbound-data-entry`다.
+  `source_ref`를 등록 ID 단위로 바꾸기 직전 스냅샷은
+  `docs/backups/barcode-data-entry-pre-runs-20260904.xlsx`다.
 
 ### 출고업체와 별칭
 
