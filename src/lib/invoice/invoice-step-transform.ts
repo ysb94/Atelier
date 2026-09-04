@@ -2,8 +2,14 @@ import {
   overlayGiftSourceOnProductNames,
   catalogFromStyles,
   transformInvoiceProductNames,
+  buildProductNameCandidateRowIndex,
+  buildProductNameRowKeyIndex,
+  snapshotProductNameMaps,
   type InvoiceProductNameTransformation,
+  type ProductNameCandidateRowIndex,
   type ProductNameLookupIndex,
+  type ProductNameMapSnapshot,
+  type ProductNameRowKeyIndex,
   type ProductNameStyleCatalog,
 } from '@/lib/invoice/product-name-transform'
 import {
@@ -38,6 +44,9 @@ export type InvoiceProductNameStepInput = {
 export type InvoiceProductNameStepResult = {
   base: InvoiceProductNameTransformation
   product: InvoiceProductNameTransformation
+  rowKeyIndex: ProductNameRowKeyIndex
+  mapSnapshot: ProductNameMapSnapshot
+  candidateRowIndex: ProductNameCandidateRowIndex
 }
 
 export type InvoiceItemNameStepInput = {
@@ -65,6 +74,9 @@ export function runInvoiceProductNameStep(
   return {
     base,
     product: overlayGiftSourceOnProductNames(base, input.giftSourcePlan),
+    rowKeyIndex: buildProductNameRowKeyIndex(base.rows),
+    mapSnapshot: snapshotProductNameMaps(input.maps, input.tagRoles),
+    candidateRowIndex: buildProductNameCandidateRowIndex(base.rows),
   }
 }
 

@@ -19,6 +19,19 @@ import type {
 
 export const PRODUCT_NAME_AI_QUICK_SLOT_LIMIT = 8
 
+export const PRODUCT_NAME_AI_LOOKUP_KEY_MESSAGE = '조회 키를 고르세요.'
+export const PRODUCT_NAME_AI_STYLE_REQUIRED_MESSAGE =
+  '본품 공식명칭을 완성하세요.'
+export const PRODUCT_NAME_AI_MAIN_REQUIRED_MESSAGE = '본품 이름을 입력하세요.'
+export const PRODUCT_NAME_AI_EXTRA_DUPLICATE_MESSAGE =
+  '본품과 추가 구성품의 M번호는 겹칠 수 없습니다.'
+export const PRODUCT_NAME_AI_EXTRA_QUANTITY_MESSAGE =
+  '구성 수량은 1 이상이어야 합니다.'
+export const PRODUCT_NAME_AI_LOOKUP_KEY_CONFLICT_MESSAGE =
+  '같은 등록 조회 키가 서로 다른 본품 M번호를 가리킵니다. 조회 키나 본품을 맞춰 주세요.'
+export const PRODUCT_NAME_AI_EXCLUSION_GUARDED_MESSAGE =
+  '같은 주문에 본품이 없어 예외 보류입니다.'
+
 export type ProductNameAiHoldReason =
   | 'no_lookup_key'
   | 'no_product'
@@ -304,7 +317,7 @@ export function buildProductNameAiReviewRow(
           ? 'incomplete'
           : 'no_lookup_key',
     message: isGuarded
-      ? '같은 주문에 본품이 없어 예외 보류입니다.'
+      ? PRODUCT_NAME_AI_EXCLUSION_GUARDED_MESSAGE
       : combo.status === 'conflict'
         ? '본품 후보가 여러 개입니다.'
         : null,
@@ -445,10 +458,19 @@ export function normalizeProductNameAiReviewLookupKey(
   })
 }
 
-export function markProductNameAiDuplicates(rows: ProductNameAiReviewRow[]) {
+export function markProductNameAiDuplicates(
+  rows: ProductNameAiReviewRow[],
+  excludedKeys?: ReadonlySet<string>,
+) {
   const normalized = rows.map(normalizeProductNameAiReviewLookupKey)
   const rowsByKey = new Map<string, ProductNameAiReviewRow[]>()
   for (const row of normalized) {
+    if (
+      excludedKeys?.has(row.key) ||
+      row.holdReason === 'exclusion_guarded'
+    ) {
+      continue
+    }
     const key = normalizeInvoiceText(row.lookupKey)
     if (!key || !row.style) continue
     const group = rowsByKey.get(key) ?? []
@@ -456,6 +478,12 @@ export function markProductNameAiDuplicates(rows: ProductNameAiReviewRow[]) {
     rowsByKey.set(key, group)
   }
   return normalized.map((row) => {
+    if (
+      excludedKeys?.has(row.key) ||
+      row.holdReason === 'exclusion_guarded'
+    ) {
+      return row
+    }
     const key = normalizeInvoiceText(row.lookupKey)
     const group = key ? rowsByKey.get(key) ?? [] : []
     const styleIds = new Set(
@@ -486,10 +514,72 @@ export function markProductNameAiDuplicates(rows: ProductNameAiReviewRow[]) {
       lookupKeyConflict: true,
       duplicateOf: conflicting?.productName ?? null,
       holdReason: 'conflict',
-      message:
-        '같은 등록 조회 키가 서로 다른 본품 M번호를 가리킵니다. 조회 키나 본품을 맞춰 주세요.',
+      message: PRODUCT_NAME_AI_LOOKUP_KEY_CONFLICT_MESSAGE,
     })
   })
+}
+
+export type ProductNameAiLookupKeyCanonicalization = {
+  rows: ProductNameAiReviewRow[]
+  affectedKeys: string[]
+  readyKeys: string[]
+  blockedKeys: string[]
+}
+
+export function canonicalizeProductNameAiLookupKey(input: {
+  rows: readonly ProductNameAiReviewRow[]
+  confirmedRow: ProductNameAiReviewRow
+  excludedKeys?: ReadonlySet<string>
+}): ProductNameAiLookupKeyCanonicalization {
+  const lookupKey = normalizeInvoiceText(input.confirmedRow.lookupKey)
+  const style = input.confirmedRow.style
+  if (!lookupKey || !style) {
+    return {
+      rows: markProductNameAiDuplicates([...input.rows]),
+      affectedKeys: [],
+      readyKeys: [],
+      blockedKeys: [],
+    }
+  }
+
+  const affectedKeys = new Set<string>()
+  const canonicalized = input.rows.map((row) => {
+    if (
+      normalizeInvoiceText(row.lookupKey) !== lookupKey ||
+      input.excludedKeys?.has(row.key) ||
+      row.holdReason === 'exclusion_guarded'
+    ) {
+      return row
+    }
+    affectedKeys.add(row.key)
+    return validateProductNameAiReviewRow({
+      ...row,
+      style,
+      source: 'manual',
+      passesGate: true,
+      lookupKeyConflict: false,
+      duplicateOf: null,
+      holdReason: row.isConflict ? 'conflict' : null,
+      message: null,
+    })
+  })
+  const rows = markProductNameAiDuplicates(
+    canonicalized,
+    input.excludedKeys,
+  )
+  const readyKeys: string[] = []
+  const blockedKeys: string[] = []
+  for (const row of rows) {
+    if (!affectedKeys.has(row.key)) continue
+    if (productNameAiRowReadyToCommit(row)) readyKeys.push(row.key)
+    else blockedKeys.push(row.key)
+  }
+  return {
+    rows,
+    affectedKeys: [...affectedKeys],
+    readyKeys,
+    blockedKeys,
+  }
 }
 
 export function validateProductNameAiReviewRow(
@@ -499,17 +589,17 @@ export function validateProductNameAiReviewRow(
   if (row.holdReason === 'exclusion_guarded') {
     validationError = row.message
   } else if (!row.lookupKey.trim()) {
-    validationError = '조회 키를 고르세요.'
+    validationError = PRODUCT_NAME_AI_LOOKUP_KEY_MESSAGE
   } else if (!row.style) {
-    validationError = '본품 공식명칭을 완성하세요.'
+    validationError = PRODUCT_NAME_AI_STYLE_REQUIRED_MESSAGE
   } else {
     for (const extra of row.extras) {
       if (extra.style.styleId === row.style.styleId) {
-        validationError = '본품과 추가 구성품의 M번호는 겹칠 수 없습니다.'
+        validationError = PRODUCT_NAME_AI_EXTRA_DUPLICATE_MESSAGE
         break
       }
       if (!Number.isInteger(extra.quantity) || extra.quantity < 1) {
-        validationError = '구성 수량은 1 이상이어야 합니다.'
+        validationError = PRODUCT_NAME_AI_EXTRA_QUANTITY_MESSAGE
         break
       }
     }
@@ -895,8 +985,8 @@ export function applyProductNameAiRowSlots(
       ok: false,
       error:
         decision.reason === 'duplicate'
-          ? '본품과 추가 구성품의 M번호는 겹칠 수 없습니다.'
-          : '본품 이름을 입력하세요.',
+          ? PRODUCT_NAME_AI_EXTRA_DUPLICATE_MESSAGE
+          : PRODUCT_NAME_AI_MAIN_REQUIRED_MESSAGE,
       row,
       decision,
     }
@@ -936,17 +1026,124 @@ export function applyProductNameAiRowSlots(
 export function productNameAiRowConfirmError(row: ProductNameAiReviewRow) {
   if (row.validationError) return row.validationError
   if (row.lookupKeyConflict) {
-    return (
-      row.message ??
-      '같은 등록 조회 키가 서로 다른 본품 M번호를 가리킵니다. 조회 키나 본품을 맞춰 주세요.'
-    )
+    return row.message ?? PRODUCT_NAME_AI_LOOKUP_KEY_CONFLICT_MESSAGE
   }
-  if (!row.lookupKey.trim()) return '조회 키를 고르세요.'
-  if (!row.style) return '본품 공식명칭을 완성하세요.'
+  if (!row.lookupKey.trim()) return PRODUCT_NAME_AI_LOOKUP_KEY_MESSAGE
+  if (!row.style) return PRODUCT_NAME_AI_STYLE_REQUIRED_MESSAGE
   if (row.holdReason === 'exclusion_guarded') {
     return row.message ?? '예외 보류 행은 준비 완료로 넘길 수 없습니다.'
   }
   return null
+}
+
+/**
+ * 검수표 경고 등급. 색과 안내 문구를 여기 한 곳에서 정한다.
+ *
+ * - `input`: 본품 칸에 입력만 하면 풀린다. 오류가 아니라 대기 상태라서 빨간색으로
+ *   표시하지 않는다.
+ * - `review`: 검수 중에 맞추면 된다. 저장은 막지만 빨간색으로 올리지 않는다.
+ * - `blocker`: 이 행만 봐서는 못 푼다. 같은 주문의 다른 행을 확정해야 한다.
+ * - `invalid`: 사람이 넣은 값 자체가 규칙을 어겼다.
+ */
+export type ProductNameAiIssueLevel = 'input' | 'review' | 'blocker' | 'invalid'
+
+export type ProductNameAiRowIssue = {
+  level: ProductNameAiIssueLevel
+  message: string
+}
+
+function isProductNameAiLookupKeyConflictMessage(message: string) {
+  return message === PRODUCT_NAME_AI_LOOKUP_KEY_CONFLICT_MESSAGE
+}
+
+export function productNameAiRowIssue(
+  row: ProductNameAiReviewRow,
+  stageError?: string | null,
+): ProductNameAiRowIssue | null {
+  const staged = stageError?.trim()
+  if (row.lookupKeyConflict || (staged && isProductNameAiLookupKeyConflictMessage(staged))) {
+    return {
+      level: 'review',
+      message:
+        staged ||
+        row.message ||
+        PRODUCT_NAME_AI_LOOKUP_KEY_CONFLICT_MESSAGE,
+    }
+  }
+  if (staged) {
+    return {
+      level:
+        staged === PRODUCT_NAME_AI_MAIN_REQUIRED_MESSAGE ? 'input' : 'invalid',
+      message: staged,
+    }
+  }
+  if (row.holdReason === 'exclusion_guarded') {
+    return {
+      level: 'blocker',
+      message: row.message ?? PRODUCT_NAME_AI_EXCLUSION_GUARDED_MESSAGE,
+    }
+  }
+  if (!row.lookupKey.trim()) {
+    return { level: 'input', message: PRODUCT_NAME_AI_LOOKUP_KEY_MESSAGE }
+  }
+  if (!row.style) {
+    return { level: 'input', message: PRODUCT_NAME_AI_STYLE_REQUIRED_MESSAGE }
+  }
+  if (row.validationError) {
+    return { level: 'invalid', message: row.validationError }
+  }
+  return null
+}
+
+export type ProductNameAiReviewCause =
+  | 'awaiting_confirm'
+  | 'awaiting_input'
+  | 'exclusion_guarded'
+  | 'invalid'
+
+export type ProductNameAiReviewCauseFilter = 'all' | ProductNameAiReviewCause
+
+const EMPTY_CAUSE_COUNTS: Record<ProductNameAiReviewCause, number> = {
+  awaiting_confirm: 0,
+  awaiting_input: 0,
+  exclusion_guarded: 0,
+  invalid: 0,
+}
+
+export function productNameAiReviewCause(
+  row: ProductNameAiReviewRow,
+  stageError?: string | null,
+): ProductNameAiReviewCause {
+  const issue = productNameAiRowIssue(row, stageError)
+  if (!issue) return 'awaiting_confirm'
+  if (row.holdReason === 'exclusion_guarded' && issue.level === 'blocker') {
+    return 'exclusion_guarded'
+  }
+  if (issue.level === 'invalid') return 'invalid'
+  if (issue.level === 'review') return 'awaiting_confirm'
+  return 'awaiting_input'
+}
+
+export function countProductNameAiReviewCauses(
+  rows: readonly ProductNameAiReviewRow[],
+  stageErrorByKey?: ReadonlyMap<string, string>,
+): Record<ProductNameAiReviewCause, number> {
+  const counts = { ...EMPTY_CAUSE_COUNTS }
+  for (const row of rows) {
+    counts[productNameAiReviewCause(row, stageErrorByKey?.get(row.key))] += 1
+  }
+  return counts
+}
+
+export function findProductNameAiReviewPage(
+  keys: readonly string[],
+  pageSize: number,
+  rowKey: string,
+): number | null {
+  const index = keys.indexOf(rowKey)
+  if (index < 0) return null
+  const size = Math.max(1, Math.trunc(pageSize) || 20)
+  return Math.floor(index / size) + 1
 }
 
 export function decideProductNameAiRowConfirm(options: {
@@ -965,8 +1162,8 @@ export function decideProductNameAiRowConfirm(options: {
       confirmed: false,
       error:
         options.decision.reason === 'duplicate'
-          ? '본품과 추가 구성품의 M번호는 겹칠 수 없습니다.'
-          : '본품 이름을 입력하세요.',
+          ? PRODUCT_NAME_AI_EXTRA_DUPLICATE_MESSAGE
+          : PRODUCT_NAME_AI_MAIN_REQUIRED_MESSAGE,
     }
   }
   if (options.decision.status === 'needs_ai') {
@@ -996,10 +1193,15 @@ export function stageProductNameAiRowConfirm(options: {
   slots: ProductNameAiQuickSlot[]
   mode: 'edit' | 'confirm' | 'resolved'
   siblings?: readonly ProductNameAiReviewRow[]
+  excludedKeys?: ReadonlySet<string>
 }): {
   ok: boolean
   row: ProductNameAiReviewRow
   draftRow: ProductNameAiReviewRow
+  propagatedRows: ProductNameAiReviewRow[]
+  affectedKeys: string[]
+  readyKeys: string[]
+  blockedKeys: string[]
   decision: ProductNameAiEnterDecision
   mark: ProductNameAiRowMark
   confirmed: boolean
@@ -1013,8 +1215,23 @@ export function stageProductNameAiRowConfirm(options: {
   const candidates = (options.siblings ?? [options.row]).map((item) =>
     item.key === options.row.key ? applied.row : item,
   )
+  const canonicalized =
+    options.mode === 'confirm' &&
+    applied.ok &&
+    applied.decision.status === 'ready'
+      ? canonicalizeProductNameAiLookupKey({
+          rows: candidates,
+          confirmedRow: applied.row,
+          excludedKeys: options.excludedKeys,
+        })
+      : {
+          rows: markProductNameAiDuplicates(candidates, options.excludedKeys),
+          affectedKeys: [] as string[],
+          readyKeys: [] as string[],
+          blockedKeys: [] as string[],
+        }
   const latest =
-    markProductNameAiDuplicates(candidates).find(
+    canonicalized.rows.find(
       (item) => item.key === options.row.key,
     ) ?? applied.row
   const outcome = decideProductNameAiRowConfirm({
@@ -1029,7 +1246,14 @@ export function stageProductNameAiRowConfirm(options: {
   return {
     ok: applied.ok && !failedConfirm,
     row: latest,
-    draftRow: applied.row,
+    draftRow:
+      canonicalized.affectedKeys.length === 0 ? applied.row : latest,
+    propagatedRows: canonicalized.rows.filter((row) =>
+      canonicalized.affectedKeys.includes(row.key),
+    ),
+    affectedKeys: canonicalized.affectedKeys,
+    readyKeys: canonicalized.readyKeys,
+    blockedKeys: canonicalized.blockedKeys,
     decision: applied.decision,
     mark: outcome.mark,
     confirmed: outcome.confirmed,

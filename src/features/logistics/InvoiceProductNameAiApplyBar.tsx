@@ -1,16 +1,23 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { setInvoiceProductNameExclusionActive } from '@/lib/api'
 import {
+  countProductNameAiReviewCauses,
+  findProductNameAiReviewPage,
   isProductNameAiSaveFailed,
   nextProductNameAiReviewPage,
   paginateProductNameAiReviewKeys,
   PRODUCT_NAME_AI_QUICK_SLOT_LIMIT,
   productNameAiMatchesWorkflowTab,
-  productNameAiRowConfirmError,
+  productNameAiReviewCause,
+  productNameAiRowIssue,
   productNameAiRowReadyToCommit,
+  productNameAiWorkflowTab,
   type ProductNameAiQuickSlot,
+  type ProductNameAiReviewCauseFilter,
   type ProductNameAiReviewRow,
   type ProductNameAiWorkflowTab,
 } from '@/lib/invoice/product-name-ai-review'
@@ -21,12 +28,16 @@ import {
   isProtectedGiftSourceGroup,
   type GiftSourceGroup,
 } from '@/lib/invoice/gift-source-transform'
-import type { UnresolvedProductNameCombo } from '@/lib/invoice/product-name-transform'
+import type {
+  ExclusionGuardedReviewContext,
+  UnresolvedProductNameCombo,
+} from '@/lib/invoice/product-name-transform'
 import type { StyleRef } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
 import { InvoiceProductLookupPopover } from './InvoiceProductLookupPopover'
 import { InvoiceProductNameAiQuickSlots } from './InvoiceProductNameAiQuickSlots'
-import { InvoiceProductNameSimilarStyles } from './InvoiceProductNameSimilarStyles'
+import { InvoiceProductNameGuardedDialog } from './InvoiceProductNameGuardedDialog'
+import { InvoiceProductNameStyleSuggest } from './InvoiceProductNameStyleSuggest'
 import { useInvoiceProductNameBulkAiApply } from './useInvoiceProductNameBulkAiApply'
 import { useInvoiceProductNameQuickEntry } from './useInvoiceProductNameQuickEntry'
 import type { ProductMapHistoryEntry } from './useInvoiceProductNameSaveQueue'
@@ -37,6 +48,17 @@ const FILTERS: Array<{ value: ProductNameAiWorkflowTab; label: string }> = [
   { value: 'review', label: '검토 필요' },
   { value: 'ready', label: '준비 완료' },
   { value: 'failed', label: '저장 실패' },
+]
+
+const CAUSE_CHIPS: Array<{
+  value: ProductNameAiReviewCauseFilter
+  label: string
+}> = [
+  { value: 'all', label: '전체' },
+  { value: 'awaiting_input', label: '본품 입력 대기' },
+  { value: 'awaiting_confirm', label: 'Enter 대기' },
+  { value: 'exclusion_guarded', label: '예외 보류' },
+  { value: 'invalid', label: '입력값 오류' },
 ]
 
 const RULE_LABELS: Record<string, string> = {
@@ -64,6 +86,7 @@ export function InvoiceProductNameAiApplyBar({
   excludePending,
   excludeError,
   giftGroups = [],
+  guardedByKey,
   onOpenGiftSetup,
 }: {
   bulk: ReturnType<typeof useInvoiceProductNameBulkAiApply>
@@ -72,15 +95,24 @@ export function InvoiceProductNameAiApplyBar({
   excludePending: boolean
   excludeError: string | null
   giftGroups?: GiftSourceGroup[]
+  guardedByKey?: ReadonlyMap<string, ExclusionGuardedReviewContext>
   onOpenGiftSetup?: (target: { mallName: string; productName: string }) => void
 }) {
+  const queryClient = useQueryClient()
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<ProductNameAiWorkflowTab>('review')
+  const [causeFilter, setCauseFilter] =
+    useState<ProductNameAiReviewCauseFilter>('all')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(20)
   const [commitOpen, setCommitOpen] = useState(false)
+  const [guardedRow, setGuardedRow] = useState<ProductNameAiReviewRow | null>(
+    null,
+  )
   const previousPhase = useRef(bulk.phase)
   const pendingPageFocusRef = useRef(false)
+  const pendingJumpRef = useRef<string | null>(null)
+  const pendingJumpFocusRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (previousPhase.current !== 'review' && bulk.phase === 'review') {
@@ -97,7 +129,7 @@ export function InvoiceProductNameAiApplyBar({
     unconfirmRow: bulk.unconfirmRow,
   })
 
-  const visibleRows = useMemo(() => {
+  const tabRows = useMemo(() => {
     const normalized = query.trim().toLocaleLowerCase('ko-KR')
     return bulk.reviewRows
       .filter((row) => {
@@ -138,9 +170,27 @@ export function InvoiceProductNameAiApplyBar({
       )
   }, [bulk.committedKeys, bulk.confirmedKeys, bulk.reviewRows, filter, history, query])
 
+  const causeCounts = useMemo(
+    () => countProductNameAiReviewCauses(tabRows, quick.stageErrorByKey),
+    [quick.stageErrorByKey, tabRows],
+  )
+
+  const visibleRows = useMemo(() => {
+    if (filter !== 'review' || causeFilter === 'all') return tabRows
+    return tabRows.filter(
+      (row) =>
+        productNameAiReviewCause(row, quick.stageErrorByKey.get(row.key)) ===
+        causeFilter,
+    )
+  }, [causeFilter, filter, quick.stageErrorByKey, tabRows])
+
   useEffect(() => {
     setPage(1)
-  }, [filter, query, pageSize])
+  }, [causeFilter, filter, pageSize, query])
+
+  useEffect(() => {
+    setCauseFilter('all')
+  }, [filter, query])
 
   const paged = useMemo(
     () =>
@@ -170,11 +220,86 @@ export function InvoiceProductNameAiApplyBar({
     if (first) quick.focusSlot(first.key, 0)
   }, [page, pagedRows, quick])
 
+  useEffect(() => {
+    const key = pendingJumpRef.current
+    if (!key) return
+    const nextPage = findProductNameAiReviewPage(
+      visibleRows.map((row) => row.key),
+      pageSize,
+      key,
+    )
+    if (nextPage == null) return
+    pendingJumpRef.current = null
+    if (nextPage !== paged.page) {
+      pendingJumpFocusRef.current = key
+      setPage(nextPage)
+      return
+    }
+    quick.focusSlot(key, 0)
+  }, [pageSize, paged.page, quick, visibleRows])
+
+  useEffect(() => {
+    const key = pendingJumpFocusRef.current
+    if (!key) return
+    if (!pagedRows.some((row) => row.key === key)) return
+    pendingJumpFocusRef.current = null
+    quick.focusSlot(key, 0)
+  }, [pagedRows, quick])
+
   const giftGroupByKey = useMemo(() => {
     const next = new Map<string, GiftSourceGroup>()
     for (const group of giftGroups) next.set(group.key, group)
     return next
   }, [giftGroups])
+
+  const liveKeys = useMemo(
+    () =>
+      new Set(
+        bulk.reviewRows
+          .filter((row) => !bulk.committedKeys.has(row.key))
+          .map((row) => row.key),
+      ),
+    [bulk.committedKeys, bulk.reviewRows],
+  )
+
+  const deactivateExclusion = useMutation({
+    mutationFn: (id: string) => setInvoiceProductNameExclusionActive(id, false),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: ['invoice-product-name-exclusions', bulk.brandId],
+      })
+      setGuardedRow(null)
+    },
+  })
+
+  function openResolve(row: ProductNameAiReviewRow) {
+    const cause = productNameAiReviewCause(
+      row,
+      quick.stageErrorByKey.get(row.key),
+    )
+    if (cause === 'exclusion_guarded') {
+      setGuardedRow(row)
+    }
+  }
+
+  function jumpToRow(key: string) {
+    const target = bulk.reviewRows.find((row) => row.key === key)
+    if (!target || bulk.committedKeys.has(key)) return
+    const saveFailed = isProductNameAiSaveFailed(
+      latestHistory(history, key)?.status,
+    )
+    setFilter(
+      productNameAiWorkflowTab({
+        confirmed: bulk.confirmedKeys.has(key),
+        saveFailed,
+        readyToCommit: productNameAiRowReadyToCommit(target),
+      }),
+    )
+    setQuery('')
+    setCauseFilter('all')
+    pendingJumpRef.current = key
+    setGuardedRow(null)
+  }
 
   return (
     <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-3">
@@ -255,6 +380,30 @@ export function InvoiceProductNameAiApplyBar({
               </button>
             ))}
           </div>
+          {filter === 'review' ? (
+            <div className="flex flex-wrap items-center gap-2">
+              {CAUSE_CHIPS.filter(
+                (item) =>
+                  item.value === 'all' || causeCounts[item.value] > 0,
+              ).map((item) => (
+                <button
+                  key={item.value}
+                  type="button"
+                  className={`rounded-full border px-2 py-0.5 text-[11px] ${
+                    causeFilter === item.value
+                      ? 'border-foreground text-foreground'
+                      : 'border-border text-muted-foreground'
+                  }`}
+                  onClick={() => setCauseFilter(item.value)}
+                >
+                  {item.label}{' '}
+                  {item.value === 'all'
+                    ? formatNumber(tabRows.length)
+                    : formatNumber(causeCounts[item.value])}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="flex flex-wrap items-center gap-2">
             <Input
               value={query}
@@ -442,6 +591,7 @@ export function InvoiceProductNameAiApplyBar({
                     }
                     onUnconfirm={() => bulk.unconfirmRow(row.key)}
                     onExclude={onExclude}
+                    onResolve={() => openResolve(row)}
                     giftGroup={
                       giftGroupByKey.get(
                         giftSourceGroupKey(row.mallName, row.productName),
@@ -517,6 +667,42 @@ export function InvoiceProductNameAiApplyBar({
         </>
       ) : null}
 
+      {guardedRow ? (
+        <InvoiceProductNameGuardedDialog
+          row={guardedRow}
+          context={
+            guardedByKey?.get(guardedRow.key) ?? {
+              comboKey: guardedRow.key,
+              orderCount: 0,
+              ordersWithoutSibling: 0,
+              siblings: [],
+              exclusionId: null,
+            }
+          }
+          liveKeys={liveKeys}
+          pending={deactivateExclusion.isPending}
+          onClose={() => setGuardedRow(null)}
+          onJump={jumpToRow}
+          onDeactivate={
+            guardedByKey?.get(guardedRow.key)?.exclusionId
+              ? () => {
+                  const exclusionId = guardedByKey.get(guardedRow.key)
+                    ?.exclusionId
+                  if (!exclusionId) return
+                  if (
+                    !window.confirm(
+                      '이 조합의 상품 연결 예외 기준을 사용 안 함으로 내릴까요? 기준 표에는 남고, 이 조합은 다시 본품 연결 대상이 됩니다.',
+                    )
+                  ) {
+                    return
+                  }
+                  deactivateExclusion.mutate(exclusionId)
+                }
+              : undefined
+          }
+        />
+      ) : null}
+
       {commitOpen ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2">
           <p className="text-xs">
@@ -571,6 +757,7 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
   confirmed,
   onUnconfirm,
   onExclude,
+  onResolve,
   giftGroup,
   onOpenGiftSetup,
 }: {
@@ -595,12 +782,15 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
   confirmed: boolean
   onUnconfirm: () => void
   onExclude: (combo: UnresolvedProductNameCombo) => void
+  onResolve?: () => void
   giftGroup: GiftSourceGroup | null
   onOpenGiftSetup?: () => void
 }) {
+  const [focusedSlot, setFocusedSlot] = useState<number | null>(null)
   const giftProtected = Boolean(
     giftGroup && isProtectedGiftSourceGroup(giftGroup),
   )
+  const issue = productNameAiRowIssue(row, stageError)
   const saving =
     historyEntry?.status === 'queued' || historyEntry?.status === 'saving'
   const tone = pendingAi
@@ -692,23 +882,34 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
                 onEnter={onEnter}
                 onTab={onTab}
                 onAddExtra={onAddExtra}
+                onSlotFocus={setFocusedSlot}
+                onSlotBlur={(slotIndex) =>
+                  setFocusedSlot((current) =>
+                    current === slotIndex ? null : current,
+                  )
+                }
+                renderSuggest={(slotIndex) =>
+                  focusedSlot === slotIndex && !slots[slotIndex]?.style ? (
+                    <InvoiceProductNameStyleSuggest
+                      brandId={brandId}
+                      text={slots[slotIndex]?.text ?? ''}
+                      lookupKey={slotIndex === 0 ? row.lookupKey : ''}
+                      productName={slotIndex === 0 ? row.productName : ''}
+                      disabled={saving || resolving}
+                      onPick={(style) => onPickStyle(slotIndex, style)}
+                    />
+                  ) : null
+                }
               />
-              {!row.style ? (
-                <InvoiceProductNameSimilarStyles
-                  brandId={brandId}
-                  lookupKey={row.lookupKey}
-                  productName={row.productName}
-                  disabled={saving || resolving}
-                  onPick={(style) => onPickStyle(0, style)}
-                />
-              ) : null}
-              {stageError ||
-              row.validationError ||
-              (row.lookupKeyConflict && row.message) ? (
-                <p className="mt-1 text-[10px] text-danger">
-                  {stageError ??
-                    row.validationError ??
-                    productNameAiRowConfirmError(row)}
+              {issue ? (
+                <p
+                  className={`mt-1 text-[10px] leading-4 ${
+                    issue.level === 'input' || issue.level === 'review'
+                      ? 'text-muted-foreground'
+                      : 'text-danger'
+                  }`}
+                >
+                  {issue.message}
                 </p>
               ) : null}
             </>
@@ -735,11 +936,14 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
                   .join(', ')}
               </p>
             ) : null}
-            {row.lookupKeyConflict || row.validationError ? (
-              <p className="mt-1 text-[10px] text-danger">
-                {productNameAiRowConfirmError(row) ?? row.message}
+            {issue && issue.level !== 'input' && issue.level !== 'review' ? (
+              <p className="mt-1 text-[10px] leading-4 text-danger">
+                {issue.message}
               </p>
-            ) : row.message && row.holdReason !== 'low_confidence' ? (
+            ) : row.message &&
+              row.holdReason !== 'low_confidence' &&
+              row.holdReason !== 'no_product' &&
+              row.holdReason !== 'failed' ? (
               <p className="mt-1 text-[10px] text-muted-foreground">{row.message}</p>
             ) : null}
             {historyEntry?.error ? (
@@ -750,6 +954,17 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
         <td className="px-2 pb-1.5 align-top" />
         <td className="px-2 pb-1.5 align-top">
           <div className="flex flex-wrap justify-end gap-1">
+            {issue?.level === 'blocker' && onResolve ? (
+              <Button
+                type="button"
+                size="sm"
+                className="h-6 px-2 text-[11px]"
+                disabled={saving || resolving}
+                onClick={onResolve}
+              >
+                해결
+              </Button>
+            ) : null}
             <Button
               type="button"
               size="sm"

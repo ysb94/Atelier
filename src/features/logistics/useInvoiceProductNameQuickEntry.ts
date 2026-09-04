@@ -17,6 +17,8 @@ import {
   formatProductNameAiStyleLabel,
   removeProductNameAiQuickSlot,
   nextProductNameAiQuickFocus,
+  PRODUCT_NAME_AI_EXTRA_DUPLICATE_MESSAGE,
+  PRODUCT_NAME_AI_MAIN_REQUIRED_MESSAGE,
   PRODUCT_NAME_AI_QUICK_SLOT_LIMIT,
   productNameAiQuickSlotsFromRow,
   type ProductNameAiQuickSlot,
@@ -82,6 +84,7 @@ export function useInvoiceProductNameQuickEntry({
     error?: string
     decision?: { status: 'ready' | 'needs_ai' | 'invalid' }
     confirmed?: boolean
+    propagatedRows?: ProductNameAiReviewRow[]
   }
   unconfirmRow: (key: string) => void
 }) {
@@ -218,16 +221,39 @@ export function useInvoiceProductNameQuickEntry({
         setStageError(
           rowKey,
           decision.reason === 'duplicate'
-            ? '본품과 추가 구성품의 M번호는 겹칠 수 없습니다.'
-            : '본품 이름을 입력하세요.',
+            ? PRODUCT_NAME_AI_EXTRA_DUPLICATE_MESSAGE
+            : PRODUCT_NAME_AI_MAIN_REQUIRED_MESSAGE,
         )
         return { ok: false, decision, confirmed: false }
       }
       const staged = applySlots(rowKey, slots, mode)
-      setStageError(
-        rowKey,
-        staged.ok ? null : staged.error ?? '반영하지 못했습니다.',
-      )
+      if (staged.propagatedRows?.length) {
+        const nextSlots = new Map(slotsByKeyRef.current)
+        for (const row of staged.propagatedRows) {
+          const current = slotsForRow(nextSlots.get(row.key), row)
+          const main = row.style
+            ? applyProductNameAiQuickSlotStyle(
+                current[0] ?? emptyProductNameAiQuickSlot(),
+                row.style,
+              )
+            : (current[0] ?? emptyProductNameAiQuickSlot())
+          nextSlots.set(row.key, [main, ...current.slice(1)])
+        }
+        replaceSlots(nextSlots)
+        setStageErrorByKey((current) => {
+          const next = new Map(current)
+          for (const row of staged.propagatedRows ?? []) {
+            if (row.validationError) next.set(row.key, row.validationError)
+            else next.delete(row.key)
+          }
+          return next
+        })
+      } else {
+        setStageError(
+          rowKey,
+          staged.ok ? null : staged.error ?? '반영하지 못했습니다.',
+        )
+      }
       return {
         ok: staged.ok,
         decision: staged.decision ?? decision,
@@ -235,7 +261,13 @@ export function useInvoiceProductNameQuickEntry({
         error: staged.error,
       }
     },
-    [applySlots, confirmedKeys, setStageError, unconfirmRow],
+    [
+      applySlots,
+      confirmedKeys,
+      replaceSlots,
+      setStageError,
+      unconfirmRow,
+    ],
   )
 
   const setSlotText = useCallback(

@@ -1,3 +1,4 @@
+import { useState, type ReactNode } from 'react'
 import { Plus, Trash2, X } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import {
@@ -7,6 +8,31 @@ import {
   type ProductNameAiQuickSlot,
 } from '@/lib/invoice/product-name-ai-review'
 import type { StyleRef } from '@/lib/types'
+
+const NOTE_FOLD_LENGTH = 42
+
+/**
+ * AI가 연결하지 못한 이유는 문장이 길어 행 높이를 밀어낸다. 한 줄로 접고
+ * 필요할 때만 펼친다. 사람이 본품을 넣으면 끝나는 안내라서 빨간색으로 두지 않는다.
+ */
+function QuickSlotNote({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  if (text.length <= NOTE_FOLD_LENGTH) {
+    return <p className="text-[10px] leading-4 text-muted-foreground">{text}</p>
+  }
+  return (
+    <div className="text-[10px] leading-4 text-muted-foreground">
+      <p className={open ? '' : 'truncate'}>{text}</p>
+      <button
+        type="button"
+        className="text-primary hover:underline"
+        onClick={() => setOpen((current) => !current)}
+      >
+        {open ? '접기' : '왜?'}
+      </button>
+    </div>
+  )
+}
 
 export function InvoiceProductNameAiQuickSlots({
   rowKey,
@@ -20,6 +46,9 @@ export function InvoiceProductNameAiQuickSlots({
   onEnter,
   onTab,
   onAddExtra,
+  onSlotFocus,
+  onSlotBlur,
+  renderSuggest,
 }: {
   rowKey: string
   slots: ProductNameAiQuickSlot[]
@@ -32,6 +61,9 @@ export function InvoiceProductNameAiQuickSlots({
   onEnter: (slotIndex: number) => void
   onTab: (slotIndex: number) => void
   onAddExtra?: () => void
+  onSlotFocus?: (slotIndex: number) => void
+  onSlotBlur?: (slotIndex: number) => void
+  renderSuggest?: (slotIndex: number) => ReactNode
 }) {
   const visibleSlots = slots.slice(0, PRODUCT_NAME_AI_QUICK_SLOT_LIMIT)
   const canAddExtra =
@@ -55,6 +87,8 @@ export function InvoiceProductNameAiQuickSlots({
                 value={slot.style ? slot.style.name : slot.text}
                 disabled={disabled}
                 onChange={(event) => onTextChange(slotIndex, event.target.value)}
+                onFocus={() => onSlotFocus?.(slotIndex)}
+                onBlur={() => onSlotBlur?.(slotIndex)}
                 onKeyDown={(event) => {
                   if (
                     shouldIgnoreProductNameAiQuickKey({
@@ -165,8 +199,9 @@ export function InvoiceProductNameAiQuickSlots({
             </div>
           ) : null}
           {slot.status === 'unmatched' && slot.error ? (
-            <p className="text-[10px] text-danger">{slot.error}</p>
+            <QuickSlotNote text={slot.error} />
           ) : null}
+          {renderSuggest?.(slotIndex)}
         </div>
         )
       })}

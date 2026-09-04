@@ -15,6 +15,7 @@ import {
   isGiftSourceCandidate,
   isProtectedGiftSourceCombo,
   planGiftSourceTransform,
+  protectedGiftSourceComboKeys,
   protectedGiftSourceKeys,
   recommendsGiftSourceBalancedRandom,
   rejectProtectedGiftSourceSave,
@@ -955,6 +956,16 @@ assert(
       isProtectedGiftSourceCombo(row, broccoliProtectedKeys),
     ),
   '보호 사은품은 같은 검수표의 표시 행으로 만들 수 있다',
+)
+const broccoliComboKeys = protectedGiftSourceComboKeys(
+  broccoliDisplayRows,
+  broccoliProtectedKeys,
+)
+assert(
+  broccoliComboKeys.size === broccoliDisplayRows.length &&
+    broccoliDisplayRows.every((row) => broccoliComboKeys.has(row.key)) &&
+    [...broccoliProtectedKeys].every((key) => !broccoliComboKeys.has(key)),
+  '사은품 그룹 키를 검수 행 키 집합으로 변환한다',
 )
 assert(
   rejectProtectedGiftSourceSave(

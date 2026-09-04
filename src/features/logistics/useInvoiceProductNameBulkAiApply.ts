@@ -40,6 +40,7 @@ import {
 } from '@/lib/invoice/product-name-ai-review'
 import {
   isProtectedGiftSourceCombo,
+  protectedGiftSourceComboKeys,
   rejectProtectedGiftSourceSave,
 } from '@/lib/invoice/gift-source-transform'
 import type { UnresolvedProductNameCombo } from '@/lib/invoice/product-name-transform'
@@ -315,8 +316,10 @@ export function useInvoiceProductNameBulkAiApply({
   useEffect(() => {
     setReviewRows((current) => {
       if (current.length === 0) return current
+      const normalized = current.map(normalizeProductNameAiReviewLookupKey)
       const next = markProductNameAiDuplicates(
-        current.map(normalizeProductNameAiReviewLookupKey),
+        normalized,
+        protectedGiftSourceComboKeys(normalized, protectedKeysRef.current),
       )
       return next.some((row, index) => row.lookupKey !== current[index]?.lookupKey)
         ? next
@@ -341,15 +344,17 @@ export function useInvoiceProductNameBulkAiApply({
   )
 
   const shownRows = useMemo(() => {
+    const overlaid = overlayProductNameAiDrafts(reviewRows, draftByKey)
     const aiRows = markProductNameAiDuplicates(
-      overlayProductNameAiDrafts(reviewRows, draftByKey),
+      overlaid,
+      protectedGiftSourceComboKeys(overlaid, protectedKeys),
     )
     const aiKeys = new Set(aiRows.map((row) => row.key))
     return [
       ...aiRows,
       ...giftDisplayRows.filter((row) => !aiKeys.has(row.key)),
     ]
-  }, [draftByKey, giftDisplayRows, reviewRows])
+  }, [draftByKey, giftDisplayRows, protectedKeys, reviewRows])
 
   const writeDraft = useCallback((row: ProductNameAiReviewRow) => {
     setDraftByKey((current) => {
@@ -378,7 +383,13 @@ export function useInvoiceProductNameBulkAiApply({
       pendingAiKeys: current.pendingAiKeys,
       committedKeys: current.committedKeys,
     })
-    const nextRows = markProductNameAiDuplicates(reconciled.reviewRows)
+    const nextRows = markProductNameAiDuplicates(
+      reconciled.reviewRows,
+      protectedGiftSourceComboKeys(
+        reconciled.reviewRows,
+        protectedKeysRef.current,
+      ),
+    )
     setReviewRows(nextRows)
     setDraftByKey(reconciled.drafts)
     setConfirmedKeys(reconciled.confirmedKeys)
@@ -528,6 +539,7 @@ export function useInvoiceProductNameBulkAiApply({
       error?: string
       decision?: ProductNameAiEnterDecision
       confirmed?: boolean
+      propagatedRows?: ProductNameAiReviewRow[]
     } => {
       const currentState = stateRef.current
       const current =
@@ -543,23 +555,57 @@ export function useInvoiceProductNameBulkAiApply({
         slots,
         mode,
         siblings,
+        excludedKeys: protectedGiftSourceComboKeys(
+          siblings,
+          protectedKeysRef.current,
+        ),
       })
-      writeDraft(staged.draftRow)
+      if (staged.propagatedRows.length > 0) {
+        const drafts = new Map(currentState.draftByKey)
+        for (const row of staged.propagatedRows) drafts.set(row.key, row)
+        const confirmed = new Set(currentState.confirmedKeys)
+        const pendingAi = new Set(currentState.pendingAiKeys)
+        for (const key of staged.affectedKeys) {
+          confirmed.delete(key)
+          pendingAi.delete(key)
+        }
+        for (const key of staged.readyKeys) confirmed.add(key)
+        setDraftByKey(drafts)
+        setConfirmedKeys(confirmed)
+        setPendingAiKeys(pendingAi)
+        stateRef.current = {
+          ...currentState,
+          draftByKey: drafts,
+          confirmedKeys: confirmed,
+          pendingAiKeys: pendingAi,
+        }
+      } else {
+        writeDraft(staged.draftRow)
+      }
       if (staged.decision.status === 'ready') {
         setExtrasDraftByKey((currentDrafts) => {
           const extras = new Map(currentDrafts)
-          extras.set(key, extrasOfProductNameAiRow(staged.draftRow))
+          const rows =
+            staged.propagatedRows.length > 0
+              ? staged.propagatedRows
+              : [staged.draftRow]
+          for (const row of rows) {
+            extras.set(row.key, extrasOfProductNameAiRow(row))
+          }
           return extras
         })
       }
-      if (staged.mark === 'pending_ai') markPendingAi(key)
-      else if (staged.mark === 'confirmed') confirmRow(key)
-      else if (staged.mark === 'unconfirm') unconfirmRow(key)
+      if (staged.propagatedRows.length === 0) {
+        if (staged.mark === 'pending_ai') markPendingAi(key)
+        else if (staged.mark === 'confirmed') confirmRow(key)
+        else if (staged.mark === 'unconfirm') unconfirmRow(key)
+      }
       return {
         ok: staged.ok,
         error: staged.error ?? undefined,
         decision: staged.decision,
         confirmed: staged.confirmed,
+        propagatedRows: staged.propagatedRows,
       }
     },
     [confirmRow, markPendingAi, unconfirmRow, writeDraft],
@@ -843,8 +889,10 @@ export function useInvoiceProductNameBulkAiApply({
   ])
 
   const applyReady = useCallback(() => {
+    const liveOverlaid = overlayProductNameAiDrafts(reviewRows, draftByKey)
     const live = markProductNameAiDuplicates(
-      overlayProductNameAiDrafts(reviewRows, draftByKey),
+      liveOverlaid,
+      protectedGiftSourceComboKeys(liveOverlaid, protectedKeysRef.current),
     )
     const saveFailedKeys = new Set<string>()
     for (const [key, status] of saveStatusByKey ?? []) {

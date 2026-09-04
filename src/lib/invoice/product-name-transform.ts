@@ -159,6 +159,49 @@ function comboKey(mallName: string, productName: string, itemName: string) {
   ].join('\u0000')
 }
 
+export type ProductNameRowKeys = {
+  exclusionKey: string
+  orderFingerprint: string
+  shipmentOrderKey: string
+}
+
+export type ProductNameRowKeyIndex = Map<number, ProductNameRowKeys>
+
+export function buildProductNameRowKeyIndex(
+  rows: readonly InvoiceProductNameTransformRow[],
+): ProductNameRowKeyIndex {
+  const index: ProductNameRowKeyIndex = new Map()
+  for (const row of rows) {
+    index.set(row.source.rowNumber, {
+      exclusionKey: productExclusionKey(
+        row.source.mallName,
+        row.source.productName,
+        row.source.itemName,
+      ),
+      orderFingerprint: buildOrderFingerprint(row.source),
+      shipmentOrderKey: shipmentOrderKeyOf(row.source),
+    })
+  }
+  return index
+}
+
+function keysOf(
+  row: InvoiceProductNameTransformRow,
+  keyIndex?: ProductNameRowKeyIndex,
+): ProductNameRowKeys {
+  return (
+    keyIndex?.get(row.source.rowNumber) ?? {
+      exclusionKey: productExclusionKey(
+        row.source.mallName,
+        row.source.productName,
+        row.source.itemName,
+      ),
+      orderFingerprint: buildOrderFingerprint(row.source),
+      shipmentOrderKey: shipmentOrderKeyOf(row.source),
+    }
+  )
+}
+
 export type ProductNameLookupIndex = {
   compact: Map<string, InvoiceProductNameMap[]>
 }
@@ -201,6 +244,78 @@ export function buildProductNameLookupIndex(
   tagRoles: InvoiceProductNameTagRoleEntry[],
 ): ProductNameLookupIndex {
   return indexLookupMaps(maps, tagRoles)
+}
+
+export type ProductNameMapSnapshotEntry = {
+  version: string
+  keys: string[]
+}
+
+export type ProductNameMapSnapshot = Map<string, ProductNameMapSnapshotEntry>
+
+export type ProductNameCandidateRowIndex = Map<string, number[]>
+
+function productNameMapVersion(map: InvoiceProductNameMap) {
+  return `${map.updatedAt}:${map.isActive ? '1' : '0'}:${map.style.styleId}:${map.normalizedMallName}`
+}
+
+/**
+ * 원장 id별 버전과 압축 별칭 키. 키 규칙은 indexLookupMaps와 같다.
+ */
+export function snapshotProductNameMaps(
+  maps: readonly InvoiceProductNameMap[],
+  tagRoles: InvoiceProductNameTagRoleEntry[],
+): ProductNameMapSnapshot {
+  const snapshot: ProductNameMapSnapshot = new Map()
+  for (const map of maps) {
+    snapshot.set(map.id, {
+      version: productNameMapVersion(map),
+      keys: [...indexLookupMaps([map], tagRoles).compact.keys()],
+    })
+  }
+  return snapshot
+}
+
+export function buildProductNameCandidateRowIndex(
+  rows: readonly InvoiceProductNameTransformRow[],
+): ProductNameCandidateRowIndex {
+  const index: ProductNameCandidateRowIndex = new Map()
+  for (let rowIndex = 0; rowIndex < rows.length; rowIndex += 1) {
+    const seen = new Set<string>()
+    for (const candidate of rows[rowIndex]!.candidates) {
+      const compact = compactProductNameKey(candidate.text)
+      if (!compact || seen.has(compact)) continue
+      seen.add(compact)
+      const list = index.get(compact)
+      if (list) list.push(rowIndex)
+      else index.set(compact, [rowIndex])
+    }
+  }
+  return index
+}
+
+/**
+ * 추가·삭제·버전 변경된 원장의 이전·현재 압축 키 합집합.
+ */
+export function diffProductNameMapSnapshots(
+  previous: ProductNameMapSnapshot,
+  current: ProductNameMapSnapshot,
+): Set<string> {
+  const keys = new Set<string>()
+  const addKeys = (entry: ProductNameMapSnapshotEntry | undefined) => {
+    if (!entry) return
+    for (const key of entry.keys) keys.add(key)
+  }
+  for (const [id, prev] of previous) {
+    const next = current.get(id)
+    if (next && next.version === prev.version) continue
+    addKeys(prev)
+    addKeys(next)
+  }
+  for (const [id, next] of current) {
+    if (!previous.has(id)) addKeys(next)
+  }
+  return keys
 }
 
 function indexLookupMaps(
@@ -297,14 +412,16 @@ function shipmentOrderKeyOf(row: SabangnetOrderRow) {
 function collectConfirmedExclusionSiblings(
   rows: InvoiceProductNameTransformRow[],
   skip: (row: InvoiceProductNameTransformRow) => boolean,
+  keyIndex?: ProductNameRowKeyIndex,
 ) {
   const orderFingerprints = new Set<string>()
   const shipmentOrderKeys = new Set<string>()
   for (const row of rows) {
     if (skip(row)) continue
     if (row.status !== 'mapped' && row.status !== 'candidate') continue
-    orderFingerprints.add(buildOrderFingerprint(row.source))
-    shipmentOrderKeys.add(shipmentOrderKeyOf(row.source))
+    const keys = keysOf(row, keyIndex)
+    orderFingerprints.add(keys.orderFingerprint)
+    shipmentOrderKeys.add(keys.shipmentOrderKey)
   }
   return { orderFingerprints, shipmentOrderKeys }
 }
@@ -312,16 +429,137 @@ function collectConfirmedExclusionSiblings(
 function hasConfirmedExclusionSibling(
   source: SabangnetOrderRow,
   confirmed: ReturnType<typeof collectConfirmedExclusionSiblings>,
+  keys?: ProductNameRowKeys,
 ) {
   return (
-    confirmed.orderFingerprints.has(buildOrderFingerprint(source)) ||
-    confirmed.shipmentOrderKeys.has(shipmentOrderKeyOf(source))
+    confirmed.orderFingerprints.has(
+      keys?.orderFingerprint ?? buildOrderFingerprint(source),
+    ) ||
+    confirmed.shipmentOrderKeys.has(
+      keys?.shipmentOrderKey ?? shipmentOrderKeyOf(source),
+    )
   )
+}
+
+export type ExclusionGuardedSibling = {
+  key: string
+  mallName: string
+  productName: string
+  itemName: string
+  status: InvoiceProductNameMatchStatus
+  rowCount: number
+}
+
+export type ExclusionGuardedContext = {
+  comboKey: string
+  orderCount: number
+  ordersWithoutSibling: number
+  siblings: ExclusionGuardedSibling[]
+}
+
+export type ExclusionGuardedReviewContext = ExclusionGuardedContext & {
+  exclusionId: string | null
+}
+
+/**
+ * 예외 보류 조합마다 같은 주문의 다른 품목 조합을 모은다.
+ * 형제 판정은 제외 확정과 같이 주문 지문 또는 합포장+주문시각을 쓴다.
+ */
+export function collectExclusionGuardedContexts(
+  rows: readonly InvoiceProductNameTransformRow[],
+  keyIndex?: ProductNameRowKeyIndex,
+): Map<string, ExclusionGuardedContext> {
+  const guarded = rows.filter((row) => row.status === 'exclusion_guarded')
+  if (guarded.length === 0) return new Map()
+
+  const index = keyIndex ?? buildProductNameRowKeyIndex(rows)
+  const byCombo = new Map<string, InvoiceProductNameTransformRow[]>()
+  for (const row of guarded) {
+    const key = keysOf(row, index).exclusionKey
+    const group = byCombo.get(key) ?? []
+    group.push(row)
+    byCombo.set(key, group)
+  }
+
+  const byFingerprint = new Map<string, InvoiceProductNameTransformRow[]>()
+  const byShipmentKey = new Map<string, InvoiceProductNameTransformRow[]>()
+  for (const row of rows) {
+    const keys = keysOf(row, index)
+    const fingerprintGroup = byFingerprint.get(keys.orderFingerprint) ?? []
+    fingerprintGroup.push(row)
+    byFingerprint.set(keys.orderFingerprint, fingerprintGroup)
+    const shipmentGroup = byShipmentKey.get(keys.shipmentOrderKey) ?? []
+    shipmentGroup.push(row)
+    byShipmentKey.set(keys.shipmentOrderKey, shipmentGroup)
+  }
+
+  const result = new Map<string, ExclusionGuardedContext>()
+  for (const [guardedKey, comboRows] of byCombo) {
+    const orders = new Map<string, InvoiceProductNameTransformRow>()
+    for (const row of comboRows) {
+      const keys = keysOf(row, index)
+      const id = `${keys.orderFingerprint}\u0001${keys.shipmentOrderKey}`
+      if (!orders.has(id)) orders.set(id, row)
+    }
+
+    const siblings = new Map<string, ExclusionGuardedSibling>()
+    let ordersWithoutSibling = 0
+    for (const anchor of orders.values()) {
+      const keys = keysOf(anchor, index)
+      const relatedByNumber = new Map<number, InvoiceProductNameTransformRow>()
+      for (const row of byFingerprint.get(keys.orderFingerprint) ?? []) {
+        relatedByNumber.set(row.source.rowNumber, row)
+      }
+      for (const row of byShipmentKey.get(keys.shipmentOrderKey) ?? []) {
+        relatedByNumber.set(row.source.rowNumber, row)
+      }
+      let relatedCount = 0
+      for (const row of relatedByNumber.values()) {
+        const rowKeys = keysOf(row, index)
+        if (rowKeys.exclusionKey === guardedKey) continue
+        relatedCount += 1
+        const current = siblings.get(rowKeys.exclusionKey)
+        if (current) {
+          current.rowCount += 1
+          if (
+            current.status === 'mapped' ||
+            current.status === 'candidate' ||
+            current.status === 'excluded'
+          ) {
+            current.status = row.status
+          }
+          continue
+        }
+        siblings.set(rowKeys.exclusionKey, {
+          key: rowKeys.exclusionKey,
+          mallName: row.source.mallName,
+          productName: row.source.productName,
+          itemName: row.source.itemName,
+          status: row.status,
+          rowCount: 1,
+        })
+      }
+      if (relatedCount === 0) ordersWithoutSibling += 1
+    }
+
+    result.set(guardedKey, {
+      comboKey: guardedKey,
+      orderCount: orders.size,
+      ordersWithoutSibling,
+      siblings: [...siblings.values()].sort(
+        (left, right) =>
+          left.productName.localeCompare(right.productName, 'ko-KR') ||
+          left.itemName.localeCompare(right.itemName, 'ko-KR'),
+      ),
+    })
+  }
+  return result
 }
 
 function applyProductNameExclusionsInPlace(
   rows: InvoiceProductNameTransformRow[],
   exclusions: InvoiceProductNameExclusion[],
+  keyIndex?: ProductNameRowKeyIndex,
 ) {
   const activeKeys = new Set(
     exclusions
@@ -332,25 +570,17 @@ function applyProductNameExclusionsInPlace(
   )
   if (activeKeys.size === 0) return
 
-  const confirmed = collectConfirmedExclusionSiblings(rows, (row) =>
-    activeKeys.has(
-      productExclusionKey(
-        row.source.mallName,
-        row.source.productName,
-        row.source.itemName,
-      ),
-    ),
+  const confirmed = collectConfirmedExclusionSiblings(
+    rows,
+    (row) => activeKeys.has(keysOf(row, keyIndex).exclusionKey),
+    keyIndex,
   )
 
   for (let index = 0; index < rows.length; index += 1) {
     const row = rows[index]!
-    const key = productExclusionKey(
-      row.source.mallName,
-      row.source.productName,
-      row.source.itemName,
-    )
-    if (!activeKeys.has(key)) continue
-    const excluded = hasConfirmedExclusionSibling(row.source, confirmed)
+    const keys = keysOf(row, keyIndex)
+    if (!activeKeys.has(keys.exclusionKey)) continue
+    const excluded = hasConfirmedExclusionSibling(row.source, confirmed, keys)
     rows[index] = {
       ...row,
       status: excluded ? 'excluded' : 'exclusion_guarded',
@@ -362,6 +592,20 @@ function applyProductNameExclusionsInPlace(
       effectiveItemName: row.source.itemName,
       candidateStyles: [],
     }
+  }
+}
+
+export function applyProductNameExclusions(
+  base: InvoiceProductNameTransformation,
+  exclusions: InvoiceProductNameExclusion[],
+  keyIndex?: ProductNameRowKeyIndex,
+): InvoiceProductNameTransformation {
+  if (!exclusions.some((item) => item.isActive)) return base
+  const rows = base.rows.slice()
+  applyProductNameExclusionsInPlace(rows, exclusions, keyIndex)
+  return {
+    rows,
+    ...summarizeProductNameRows(rows),
   }
 }
 
@@ -448,14 +692,13 @@ function summarizeProductNameRows(rows: InvoiceProductNameTransformRow[]) {
   }
 }
 
-export function transformInvoiceProductNames(
+export function matchInvoiceProductNameRows(
   sourceRows: SabangnetOrderRow[],
   maps: InvoiceProductNameMap[],
   catalog: ProductNameStyleCatalog,
-  tagRoles: InvoiceProductNameTagRoleEntry[] = [],
-  exclusions: InvoiceProductNameExclusion[] = [],
+  tagRoles: InvoiceProductNameTagRoleEntry[],
   lookupIndexInput?: ProductNameLookupIndex,
-): InvoiceProductNameTransformation {
+): InvoiceProductNameTransformRow[] {
   const activeMaps = maps.filter((map) => map.isActive)
   const lookupIndex =
     lookupIndexInput ?? indexLookupMaps(activeMaps, tagRoles)
@@ -466,7 +709,7 @@ export function transformInvoiceProductNames(
     return preferMallMaps(lookupIndex.compact.get(compact) ?? [], mallName)
   }
 
-  const matchedRows = sourceRows.map((source): InvoiceProductNameTransformRow => {
+  return sourceRows.map((source): InvoiceProductNameTransformRow => {
     const tags = classifyLeadingTags(source.productName, tagRoles)
     const itemTags = classifyInlineReservationShippingDateTags(
       source.itemName,
@@ -586,11 +829,87 @@ export function transformInvoiceProductNames(
       itemTags,
     }
   })
+}
 
-  applyProductNameExclusionsInPlace(matchedRows, exclusions)
-  return {
+export function transformInvoiceProductNames(
+  sourceRows: SabangnetOrderRow[],
+  maps: InvoiceProductNameMap[],
+  catalog: ProductNameStyleCatalog,
+  tagRoles: InvoiceProductNameTagRoleEntry[] = [],
+  exclusions: InvoiceProductNameExclusion[] = [],
+  lookupIndexInput?: ProductNameLookupIndex,
+): InvoiceProductNameTransformation {
+  const matchedRows = matchInvoiceProductNameRows(
+    sourceRows,
+    maps,
+    catalog,
+    tagRoles,
+    lookupIndexInput,
+  )
+  const base = {
     rows: matchedRows,
     ...summarizeProductNameRows(matchedRows),
+  }
+  return applyProductNameExclusions(base, exclusions)
+}
+
+/**
+ * 베이스 스냅샷과 현재 원장의 차이 키에 걸린 행만 다시 맞춘다.
+ * 영향 행이 없으면 같은 transformation 참조를 반환한다.
+ */
+export function applyProductNameMapDelta(input: {
+  base: InvoiceProductNameTransformation
+  baseSnapshot: ProductNameMapSnapshot
+  candidateRowIndex: ProductNameCandidateRowIndex
+  maps: InvoiceProductNameMap[]
+  tagRoles: InvoiceProductNameTagRoleEntry[]
+  catalog: ProductNameStyleCatalog
+  lookupIndex?: ProductNameLookupIndex
+}): {
+  transformation: InvoiceProductNameTransformation
+  affectedRowCount: number
+} {
+  const currentSnapshot = snapshotProductNameMaps(input.maps, input.tagRoles)
+  const changedKeys = diffProductNameMapSnapshots(
+    input.baseSnapshot,
+    currentSnapshot,
+  )
+  if (changedKeys.size === 0) {
+    return { transformation: input.base, affectedRowCount: 0 }
+  }
+
+  const affected = new Set<number>()
+  for (const key of changedKeys) {
+    const positions = input.candidateRowIndex.get(key)
+    if (!positions) continue
+    for (const rowIndex of positions) affected.add(rowIndex)
+  }
+  if (affected.size === 0) {
+    return { transformation: input.base, affectedRowCount: 0 }
+  }
+
+  const positions = [...affected].sort((left, right) => left - right)
+  const rematched = matchInvoiceProductNameRows(
+    positions.map((rowIndex) => input.base.rows[rowIndex]!.source),
+    [],
+    input.catalog,
+    input.tagRoles,
+    input.lookupIndex ??
+      indexLookupMaps(
+        input.maps.filter((map) => map.isActive),
+        input.tagRoles,
+      ),
+  )
+  const rows = input.base.rows.slice()
+  for (let index = 0; index < positions.length; index += 1) {
+    rows[positions[index]!] = rematched[index]!
+  }
+  return {
+    transformation: {
+      rows,
+      ...summarizeProductNameRows(rows),
+    },
+    affectedRowCount: positions.length,
   }
 }
 
@@ -648,7 +967,9 @@ export function overlayGiftSourceOnProductNames(
 export function previewProductNameExclusion(
   rows: InvoiceProductNameTransformRow[],
   combo: { mallName: string; productName: string; itemName: string },
+  keyIndex?: ProductNameRowKeyIndex,
 ) {
+  const index = keyIndex ?? buildProductNameRowKeyIndex(rows)
   const targetKey = productExclusionKey(
     combo.mallName,
     combo.productName,
@@ -656,26 +977,18 @@ export function previewProductNameExclusion(
   )
   const confirmed = collectConfirmedExclusionSiblings(
     rows,
-    (row) =>
-      productExclusionKey(
-        row.source.mallName,
-        row.source.productName,
-        row.source.itemName,
-      ) === targetKey,
+    (row) => keysOf(row, index).exclusionKey === targetKey,
+    index,
   )
 
   let matchCount = 0
   let excludedCount = 0
   let guardedCount = 0
   for (const row of rows) {
-    const key = productExclusionKey(
-      row.source.mallName,
-      row.source.productName,
-      row.source.itemName,
-    )
-    if (key !== targetKey) continue
+    const keys = keysOf(row, index)
+    if (keys.exclusionKey !== targetKey) continue
     matchCount += 1
-    if (hasConfirmedExclusionSibling(row.source, confirmed)) {
+    if (hasConfirmedExclusionSibling(row.source, confirmed, keys)) {
       excludedCount += 1
     } else {
       guardedCount += 1

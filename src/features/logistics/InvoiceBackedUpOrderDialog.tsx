@@ -1,20 +1,24 @@
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { Button } from '@/components/ui/button'
+import { invoiceBackupConfirmButton } from '@/lib/invoice/invoice-step-compute'
 import { formatNumber } from '@/lib/utils'
 
 export function InvoiceBackedUpOrderDialog({
   orderCount,
   rowCount,
   workRowCount,
+  ready,
   onCancel,
   onConfirm,
 }: {
   orderCount: number
   rowCount: number
   workRowCount: number
+  ready: boolean
   onCancel: () => void
   onConfirm: () => void
 }) {
+  const confirm = invoiceBackupConfirmButton(ready)
   return (
     <WorkspaceTabOverlay>
       <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -46,8 +50,13 @@ export function InvoiceBackedUpOrderDialog({
             <Button type="button" size="sm" variant="outline" onClick={onCancel}>
               취소
             </Button>
-            <Button type="button" size="sm" onClick={onConfirm}>
-              제외하고 진행
+            <Button
+              type="button"
+              size="sm"
+              disabled={confirm.disabled}
+              onClick={onConfirm}
+            >
+              {confirm.label}
             </Button>
           </div>
         </div>

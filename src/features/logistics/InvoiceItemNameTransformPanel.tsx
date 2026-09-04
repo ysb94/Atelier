@@ -241,10 +241,6 @@ export const InvoiceItemNameTransformPanel = memo(function InvoiceItemNameTransf
   accessoryRules = [],
   styles = [],
   renderUi = true,
-  autoCollect = false,
-  autoCollectKey = '',
-  onAutoCollectProgress,
-  onAutoCollectSettled,
 }: {
   brandId: string
   brandName: string
@@ -253,14 +249,6 @@ export const InvoiceItemNameTransformPanel = memo(function InvoiceItemNameTransf
   accessoryRules?: InvoiceAccessoryRule[]
   styles?: StyleRef[]
   renderUi?: boolean
-  autoCollect?: boolean
-  autoCollectKey?: string
-  onAutoCollectProgress?: (progress: {
-    collecting: boolean
-    done: number
-    total: number
-  }) => void
-  onAutoCollectSettled?: () => void
 }) {
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query)
@@ -283,54 +271,6 @@ export const InvoiceItemNameTransformPanel = memo(function InvoiceItemNameTransf
     itemNameRules,
     styles,
   })
-  const autoCollectStartedRef = useRef(false)
-  const lastAutoCollectKeyRef = useRef(autoCollectKey)
-  if (lastAutoCollectKeyRef.current !== autoCollectKey) {
-    lastAutoCollectKeyRef.current = autoCollectKey
-    autoCollectStartedRef.current = false
-  }
-
-  useEffect(() => {
-    if (!autoCollect) return
-    onAutoCollectProgress?.({
-      collecting: itemNameBulk.phase === 'collecting',
-      done: itemNameBulk.progress.done,
-      total: itemNameBulk.progress.total,
-    })
-  }, [
-    autoCollect,
-    itemNameBulk.phase,
-    itemNameBulk.progress.done,
-    itemNameBulk.progress.total,
-    onAutoCollectProgress,
-  ])
-
-  useEffect(() => {
-    if (!autoCollect || autoCollectStartedRef.current) return
-    if (itemNameBulk.routeLoading) return
-    autoCollectStartedRef.current = true
-    if (!itemNameBulk.routeReady || itemNameBulk.contextCount === 0) {
-      onAutoCollectSettled?.()
-      return
-    }
-    void itemNameBulk.collect().catch(() => {
-      onAutoCollectSettled?.()
-    })
-  }, [
-    autoCollect,
-    itemNameBulk.collect,
-    itemNameBulk.contextCount,
-    itemNameBulk.routeLoading,
-    itemNameBulk.routeReady,
-    onAutoCollectSettled,
-  ])
-
-  useEffect(() => {
-    if (!autoCollect || !autoCollectStartedRef.current) return
-    if (itemNameBulk.phase === 'review' || itemNameBulk.phase === 'applied') {
-      onAutoCollectSettled?.()
-    }
-  }, [autoCollect, itemNameBulk.phase, onAutoCollectSettled])
   const reviewCount =
     transformation.unresolvedRowCount + transformation.conflictRowCount
 

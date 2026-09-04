@@ -3,19 +3,31 @@
  * 실행: npm run verify:invoice-step-compute
  */
 import {
+  canLeaveInvoiceFileCheck,
   formatInvoiceStepComputeError,
   holdInvoiceStepDepsKey,
   INVOICE_STEP_COMPUTE_CANCEL_MESSAGE,
   INVOICE_STEP_COMPUTE_TIMEOUT_MESSAGE,
+  invoiceBackedUpExcludedRowNumbers,
+  invoiceBackupConfirmButton,
   isCancelledInvoiceStepError,
+  isInvoicePreConfirmReady,
+  isInvoicePreloadFlowReady,
+  isInvoiceWorkFlowReady,
   nextInvoiceStepGeneration,
   preserveInvoiceStepResult,
   shouldApplyInvoiceStepResult,
   shouldAutoCollectInvoiceAi,
+  shouldAutoOpenInvoiceBackupDialog,
   shouldEnableHeldInvoiceStepCompute,
+  shouldFinishInvoiceUploadPipeline,
   shouldHoldInvoiceStepRecompute,
+  shouldRunDeferredInvoiceStep,
   shouldShowInvoiceStepBlockingState,
+  shouldStartInvoiceItemNameAiCollect,
 } from '@/lib/invoice/invoice-step-compute'
+import { filterRowsByExcludedNumbers } from '@/lib/invoice/invoice-order-key'
+import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
 import { INVOICE_WORK_LARGE_ROW_COUNT } from '@/lib/invoice/invoice-work-fixtures'
 import { INVOICE_COMPUTE_WORKER_MIN_ROWS } from '@/lib/invoice/invoice-work-thresholds'
 
@@ -182,6 +194,216 @@ assert(
     alreadySettled: false,
   }),
   '업로드 파이프라인이 아니면 자동 수집하지 않는다',
+)
+
+function sourceRow(rowNumber: number): SabangnetOrderRow {
+  return {
+    rowNumber,
+    productName: `상품${rowNumber}`,
+    itemName: '',
+    quantity: '1',
+    recipientName: '홍길동',
+    recipientPhone: '010-1111-2222',
+    recipientOtherPhone: '',
+    shippingType: '',
+    recipientAddress: '서울',
+    shippingMessage: '',
+    customerOrderNo: `ORD-${rowNumber}`,
+    mallName: '스마트스토어',
+    orderedAt: '2026-09-01 10:00:00',
+    ownProductCode: '',
+  }
+}
+
+const backupMatch = { rowNumbers: [1, 2] }
+const allRows = [sourceRow(1), sourceRow(2), sourceRow(3), sourceRow(4)]
+const preloadedWorkRows = filterRowsByExcludedNumbers(
+  allRows,
+  new Set(invoiceBackedUpExcludedRowNumbers({ match: backupMatch })),
+)
+assert(
+  invoiceBackedUpExcludedRowNumbers({ match: backupMatch }).join(',') === '1,2',
+  '확인 전에도 백업 행 번호를 제외 대상으로 쓴다',
+)
+assert(
+  preloadedWorkRows.map((row) => row.rowNumber).join(',') === '3,4',
+  '확인 전 계산은 제외 후 작업 행만 본다',
+)
+assert(
+  preloadedWorkRows.map((row) => row.rowNumber).join(',') ===
+    filterRowsByExcludedNumbers(
+      allRows,
+      new Set(invoiceBackedUpExcludedRowNumbers({ match: backupMatch })),
+    )
+      .map((row) => row.rowNumber)
+      .join(','),
+  '확인 후에도 같은 제외 결과를 다시 계산하지 않는다',
+)
+
+const preloadFlowReady = isInvoicePreloadFlowReady({
+  backupLookupReady: true,
+  workRowCount: preloadedWorkRows.length,
+})
+assert(preloadFlowReady, '백업 조회가 끝나면 확인 전에도 계산을 연다')
+assert(
+  !isInvoiceWorkFlowReady({
+    preloadFlowReady,
+    hasBackedUpMatch: true,
+    backedUpExclusionAccepted: false,
+  }),
+  '확인 전에는 다음 단계로 가지 못한다',
+)
+assert(
+  !canLeaveInvoiceFileCheck({
+    headerReady: true,
+    mallsReady: true,
+    workFlowReady: false,
+  }),
+  '파일 확인 이탈은 중복 제외 동의가 있어야 한다',
+)
+assert(
+  isInvoiceWorkFlowReady({
+    preloadFlowReady,
+    hasBackedUpMatch: true,
+    backedUpExclusionAccepted: true,
+  }),
+  '확인 후에는 이미 계산된 작업 행으로 다음 단계로 간다',
+)
+
+assert(
+  !isInvoicePreConfirmReady({
+    backupLookupReady: true,
+    workRowCount: 2,
+    stagesSettled: true,
+    productAiSettled: false,
+    laterStagesSettled: true,
+  }),
+  '품목명 AI가 끝나기 전에는 확인 버튼이 비활성이다',
+)
+assert(
+  invoiceBackupConfirmButton(false).disabled &&
+    invoiceBackupConfirmButton(false).label === '준비 중...',
+  '준비 전에는 확인 버튼을 비활성으로 둔다',
+)
+assert(
+  isInvoicePreConfirmReady({
+    backupLookupReady: true,
+    workRowCount: 2,
+    stagesSettled: true,
+    productAiSettled: true,
+    laterStagesSettled: true,
+  }),
+  '계산과 품목명 AI가 끝나면 확인 버튼을 연다',
+)
+assert(
+  !invoiceBackupConfirmButton(true).disabled &&
+    invoiceBackupConfirmButton(true).label === '제외하고 진행',
+  '준비가 끝나면 제외하고 진행으로 바꾼다',
+)
+assert(
+  !shouldAutoOpenInvoiceBackupDialog({
+    isParsing: true,
+    uploadPipeline: true,
+    preConfirmReady: false,
+    hasBackedUpMatch: true,
+    accepted: false,
+  }),
+  '파싱 중에는 백업 제외 창을 열지 않는다',
+)
+assert(
+  !shouldAutoOpenInvoiceBackupDialog({
+    isParsing: false,
+    uploadPipeline: true,
+    preConfirmReady: true,
+    hasBackedUpMatch: true,
+    accepted: false,
+  }),
+  '업로드 파이프라인 중에는 백업 제외 창을 열지 않는다',
+)
+assert(
+  !shouldAutoOpenInvoiceBackupDialog({
+    isParsing: false,
+    uploadPipeline: false,
+    preConfirmReady: false,
+    hasBackedUpMatch: true,
+    accepted: false,
+  }),
+  '준비가 끝나기 전에는 백업 제외 창을 열지 않는다',
+)
+assert(
+  !shouldAutoOpenInvoiceBackupDialog({
+    isParsing: false,
+    uploadPipeline: false,
+    preConfirmReady: true,
+    hasBackedUpMatch: true,
+    accepted: true,
+  }),
+  '이미 수락한 뒤에는 백업 제외 창을 다시 열지 않는다',
+)
+assert(
+  !shouldAutoOpenInvoiceBackupDialog({
+    isParsing: false,
+    uploadPipeline: false,
+    preConfirmReady: true,
+    hasBackedUpMatch: false,
+    accepted: false,
+  }),
+  '중복이 없으면 백업 제외 창을 열지 않는다',
+)
+assert(
+  shouldAutoOpenInvoiceBackupDialog({
+    isParsing: false,
+    uploadPipeline: false,
+    preConfirmReady: true,
+    hasBackedUpMatch: true,
+    accepted: false,
+  }),
+  '파이프라인이 끝나고 준비가 되면 백업 제외 창을 연다',
+)
+
+assert(
+  shouldFinishInvoiceUploadPipeline({
+    headerReady: true,
+    backupLookupReady: true,
+    workRowCount: 2,
+    exclusionSigAligned: true,
+    stagesSettled: true,
+    laterStagesSettled: true,
+    productAiSettled: true,
+  }),
+  '업로드 파이프라인은 품목명 AI까지 끝나면 닫는다',
+)
+assert(
+  !shouldStartInvoiceItemNameAiCollect({ userRequested: false }),
+  '업로드 중에는 내품명 AI를 자동으로 시작하지 않는다',
+)
+assert(
+  shouldStartInvoiceItemNameAiCollect({ userRequested: true }),
+  '내품명 AI는 추천 모으기를 눌렀을 때만 실행한다',
+)
+assert(
+  shouldRunDeferredInvoiceStep({
+    uploadPipeline: true,
+    stepIndex: 1,
+    stageIndex: 8,
+  }),
+  '업로드 파이프라인 중에는 후속 단계를 미리 계산한다',
+)
+assert(
+  !shouldRunDeferredInvoiceStep({
+    uploadPipeline: false,
+    stepIndex: 4,
+    stageIndex: 5,
+  }),
+  '품목명 단계에서는 내품명 이후를 다시 계산하지 않는다',
+)
+assert(
+  shouldRunDeferredInvoiceStep({
+    uploadPipeline: false,
+    stepIndex: 5,
+    stageIndex: 5,
+  }),
+  '해당 단계에 들어가면 후속 계산을 연다',
 )
 
 assert(

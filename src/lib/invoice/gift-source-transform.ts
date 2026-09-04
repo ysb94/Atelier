@@ -125,6 +125,20 @@ export function isProtectedGiftSourceCombo(
   return protectedKeys.has(giftSourceGroupKey(combo.mallName, combo.productName))
 }
 
+export function protectedGiftSourceComboKeys<
+  T extends { key: string; mallName: string; productName: string },
+>(
+  rows: readonly T[],
+  protectedKeys: ReadonlySet<string> | undefined,
+): Set<string> {
+  if (!protectedKeys || protectedKeys.size === 0) return new Set()
+  const keys = new Set<string>()
+  for (const row of rows) {
+    if (isProtectedGiftSourceCombo(row, protectedKeys)) keys.add(row.key)
+  }
+  return keys
+}
+
 export function filterRegularProductNameCombos<
   T extends { mallName: string; productName: string },
 >(combos: readonly T[], protectedKeys: ReadonlySet<string>): T[] {

@@ -8,21 +8,29 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import {
+  getInvoiceProductNameExclusions,
   saveInvoiceProductNameExclusion,
   saveInvoiceProductNameTagRole,
 } from '@/lib/api'
 import type {
+  ExclusionGuardedReviewContext,
   InvoiceProductNameMatchStatus,
   InvoiceProductNameTransformation,
+  InvoiceProductNameTransformRow,
+  ProductNameRowKeyIndex,
   UnresolvedProductNameCombo,
 } from '@/lib/invoice/product-name-transform'
 import { decideProductNameFeedbackOutcome } from '@/lib/ai/learning-core'
-import { previewProductNameExclusion } from '@/lib/invoice/product-name-transform'
+import {
+  collectExclusionGuardedContexts,
+  previewProductNameExclusion,
+  productExclusionKey,
+} from '@/lib/invoice/product-name-transform'
 import {
   collectFileOptionReservationTagGroups,
   collectFileTagGroups,
@@ -99,6 +107,8 @@ const TAG_ROLES: InvoiceProductNameTagRole[] = [
 export const InvoiceProductNameTransformPanel = memo(function InvoiceProductNameTransformPanel({
   brandId,
   transformation,
+  rowKeyIndex,
+  tagRows,
   renderUi = true,
   autoCollect = false,
   autoCollectKey = '',
@@ -110,6 +120,8 @@ export const InvoiceProductNameTransformPanel = memo(function InvoiceProductName
 }: {
   brandId: string
   transformation: InvoiceProductNameTransformation
+  rowKeyIndex?: ProductNameRowKeyIndex
+  tagRows?: InvoiceProductNameTransformRow[]
   renderUi?: boolean
   autoCollect?: boolean
   autoCollectKey?: string
@@ -124,6 +136,38 @@ export const InvoiceProductNameTransformPanel = memo(function InvoiceProductName
   onOpenGiftSetup?: (target: { mallName: string; productName: string }) => void
 }) {
   const queryClient = useQueryClient()
+  const exclusionsQuery = useQuery({
+    queryKey: ['invoice-product-name-exclusions', brandId],
+    queryFn: () => getInvoiceProductNameExclusions(brandId),
+  })
+  const guardedByKey = useMemo(() => {
+    if (transformation.exclusionGuardedRowCount === 0) {
+      return new Map<string, ExclusionGuardedReviewContext>()
+    }
+    const contexts = collectExclusionGuardedContexts(
+      transformation.rows,
+      rowKeyIndex,
+    )
+    const exclusionIdByKey = new Map(
+      (exclusionsQuery.data ?? []).map((item) => [
+        productExclusionKey(item.mallName, item.productName, item.itemName),
+        item.id,
+      ]),
+    )
+    const next = new Map<string, ExclusionGuardedReviewContext>()
+    for (const [key, context] of contexts) {
+      next.set(key, {
+        ...context,
+        exclusionId: exclusionIdByKey.get(key) ?? null,
+      })
+    }
+    return next
+  }, [
+    exclusionsQuery.data,
+    rowKeyIndex,
+    transformation.exclusionGuardedRowCount,
+    transformation.rows,
+  ])
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query)
   const [status, setStatus] = useState<'all' | InvoiceProductNameMatchStatus>(
@@ -213,7 +257,11 @@ export const InvoiceProductNameTransformPanel = memo(function InvoiceProductName
   const excludeCombo = useCallback(
     (combo: UnresolvedProductNameCombo) => {
       if (!combo.mallName.trim()) return
-      const impact = previewProductNameExclusion(transformation.rows, combo)
+      const impact = previewProductNameExclusion(
+        transformation.rows,
+        combo,
+        rowKeyIndex,
+      )
       const confirmed = window.confirm(
         [
           `${combo.mallName}의 품목명 "${combo.productName}", 내품명 "${combo.itemName}"만 상품 연결에서 예외 처리합니다.`,
@@ -235,7 +283,7 @@ export const InvoiceProductNameTransformPanel = memo(function InvoiceProductName
         itemName: combo.itemName,
       })
     },
-    [excludeMutation, transformation.rows],
+    [excludeMutation, rowKeyIndex, transformation.rows],
   )
   const bulk = useInvoiceProductNameBulkAiApply({
     brandId,
@@ -294,29 +342,30 @@ export const InvoiceProductNameTransformPanel = memo(function InvoiceProductName
     }
   }, [autoCollect, bulk.phase, onAutoCollectSettled])
 
+  const tagSourceRows = tagRows ?? transformation.rows
   const fileTags = useMemo(
     () =>
       renderUi
         ? collectFileTagGroups(
-            transformation.rows.map((row) => ({
+            tagSourceRows.map((row) => ({
               productName: row.source.productName,
               tags: row.tags,
             })),
           )
         : [],
-    [renderUi, transformation.rows],
+    [renderUi, tagSourceRows],
   )
   const optionTagGroups = useMemo(
     () =>
       renderUi
         ? collectFileOptionReservationTagGroups(
-            transformation.rows.map((row) => ({
+            tagSourceRows.map((row) => ({
               itemName: row.source.itemName,
               itemTags: row.itemTags,
             })),
           )
         : [],
-    [renderUi, transformation.rows],
+    [renderUi, tagSourceRows],
   )
   const visibleTagGroups = useMemo(() => {
     const groups: Array<FileTagGroup | FileOptionReservationTagGroup> = []
@@ -830,6 +879,7 @@ export const InvoiceProductNameTransformPanel = memo(function InvoiceProductName
                 : null
           }
           giftGroups={giftGroups}
+          guardedByKey={guardedByKey}
           onOpenGiftSetup={onOpenGiftSetup}
         />
       ) : (

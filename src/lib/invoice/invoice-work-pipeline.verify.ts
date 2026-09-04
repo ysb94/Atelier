@@ -8,6 +8,12 @@ import {
   snapshotInvoiceWork,
 } from '@/lib/invoice/invoice-work-pipeline'
 import {
+  isInvoicePreloadFlowReady,
+  isInvoiceWorkFlowReady,
+  shouldFinishInvoiceUploadPipeline,
+  shouldStartInvoiceItemNameAiCollect,
+} from '@/lib/invoice/invoice-step-compute'
+import {
   collectItemNameLookupTexts,
   collectOptionMapLookupCombos,
   filterItemNameRulesForTexts,
@@ -390,6 +396,32 @@ assert(
 assert(
   largeParse.result.rowCount === INVOICE_WORK_LARGE_ROW_COUNT,
   '대형 파싱 행 수',
+)
+
+assert(
+  isInvoicePreloadFlowReady({ backupLookupReady: true, workRowCount: 2 }) &&
+    !isInvoiceWorkFlowReady({
+      preloadFlowReady: true,
+      hasBackedUpMatch: true,
+      backedUpExclusionAccepted: false,
+    }),
+  '파이프라인 계산은 확인 전에 열리고 다음 단계 이동은 막힌다',
+)
+assert(
+  shouldFinishInvoiceUploadPipeline({
+    headerReady: true,
+    backupLookupReady: true,
+    workRowCount: 2,
+    exclusionSigAligned: true,
+    stagesSettled: true,
+    laterStagesSettled: true,
+    productAiSettled: true,
+  }),
+  '업로드 파이프라인은 내품명 AI 완료를 기다리지 않는다',
+)
+assert(
+  !shouldStartInvoiceItemNameAiCollect({ userRequested: false }),
+  '내품명 AI는 추천 모으기를 누르기 전에는 시작하지 않는다',
 )
 
 const cloneCost = measure(() =>

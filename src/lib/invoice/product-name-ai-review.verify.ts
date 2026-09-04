@@ -19,6 +19,7 @@ import {
   applyProductNameAiRowSlots,
   applyProductNameLookupKey,
   buildProductNameAiReviewRow,
+  canonicalizeProductNameAiLookupKey,
   normalizeProductNameAiReviewLookupKey,
   countProductNameAiWorkflow,
   countProductNameAiPendingResolve,
@@ -36,11 +37,18 @@ import {
   nextProductNameAiReviewPage,
   nextProductNameAiRowMark,
   paginateProductNameAiReviewKeys,
+  PRODUCT_NAME_AI_EXTRA_DUPLICATE_MESSAGE,
+  PRODUCT_NAME_AI_LOOKUP_KEY_CONFLICT_MESSAGE,
+  PRODUCT_NAME_AI_MAIN_REQUIRED_MESSAGE,
   PRODUCT_NAME_AI_QUICK_SLOT_LIMIT,
+  PRODUCT_NAME_AI_STYLE_REQUIRED_MESSAGE,
+  countProductNameAiReviewCauses,
+  findProductNameAiReviewPage,
   productNameAiCandidateSearchKeys,
   productNameAiCollectFailed,
+  productNameAiReviewCause,
   productNameAiSearchKeys,
-  productNameAiRowConfirmError,
+  productNameAiRowIssue,
   productNameAiRowReadyToCommit,
   productNameAiSlotsNeedAi,
   stageProductNameAiRowConfirm,
@@ -52,8 +60,36 @@ import {
   removeProductNameAiQuickSlot,
   type ProductNameAiReviewRow,
 } from '@/lib/invoice/product-name-ai-review'
-import type { UnresolvedProductNameCombo } from '@/lib/invoice/product-name-transform'
-import type { InvoiceProductNameTagRoleEntry, StyleRef } from '@/lib/types'
+import {
+  giftSourceGroupKey,
+  protectedGiftSourceComboKeys,
+} from '@/lib/invoice/gift-source-transform'
+import {
+  applyProductNameExclusions,
+  applyProductNameMapDelta,
+  buildProductNameCandidateRowIndex,
+  buildProductNameRowKeyIndex,
+  catalogFromStyles,
+  collectExclusionGuardedContexts,
+  snapshotProductNameMaps,
+  transformInvoiceProductNames,
+  type ExclusionGuardedContext,
+  type InvoiceProductNameTransformRow,
+  type UnresolvedProductNameCombo,
+} from '@/lib/invoice/product-name-transform'
+import {
+  buildOrderFingerprint,
+  orderKeyOf,
+  shipmentKeyOf,
+} from '@/lib/invoice/gift-assign'
+import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
+import type { SabangnetOrderRow } from '@/lib/invoice/sabangnet'
+import type {
+  InvoiceProductNameExclusion,
+  InvoiceProductNameMap,
+  InvoiceProductNameTagRoleEntry,
+  StyleRef,
+} from '@/lib/types'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -375,6 +411,727 @@ assert(
   decideProductNameAiSaves([filled, sameKeyOther]).items.length === 0,
   '서로 다른 M번호의 등록 키 충돌은 저장 계획에서도 제외',
 )
+
+assert(
+  productNameAiRowIssue(tagged)?.level === 'input' &&
+    productNameAiRowIssue(tagged)?.message ===
+      PRODUCT_NAME_AI_STYLE_REQUIRED_MESSAGE,
+  '본품만 채우면 되는 행은 입력 대기 등급',
+)
+assert(
+  productNameAiRowIssue(filled) === null,
+  '본품이 채워지고 충돌이 없으면 경고 없음',
+)
+assert(
+  keyConflicts.every((row) => productNameAiRowIssue(row)?.level === 'review'),
+  '등록 키 충돌은 검수 중 맞추는 회색 안내',
+)
+assert(
+  keyConflicts.every(
+    (row) =>
+      productNameAiRowIssue(row, PRODUCT_NAME_AI_LOOKUP_KEY_CONFLICT_MESSAGE)
+        ?.level === 'review',
+  ),
+  'Enter로 충돌을 확인해도 빨간 오류로 올리지 않는다',
+)
+assert(
+  keyConflicts.every((row) => !productNameAiRowReadyToCommit(row)),
+  '조회 키 충돌은 준비 완료·저장을 계속 막는다',
+)
+const guardedIssue = productNameAiRowIssue(
+  buildProductNameAiReviewRow(
+    combo({ key: 'combo-guarded', status: 'exclusion_guarded' }),
+  ),
+)
+assert(
+  guardedIssue?.level === 'blocker' &&
+    guardedIssue.message.includes('예외 보류'),
+  '예외 보류도 차단 등급으로 표시',
+)
+assert(
+  productNameAiRowIssue(tagged, PRODUCT_NAME_AI_MAIN_REQUIRED_MESSAGE)
+    ?.level === 'input',
+  '본품 칸이 비어 Enter가 막힌 것은 입력 대기 등급',
+)
+assert(
+  productNameAiRowIssue(filled, PRODUCT_NAME_AI_EXTRA_DUPLICATE_MESSAGE)
+    ?.level === 'invalid',
+  '구성품 M번호 중복은 값 자체가 틀린 등급',
+)
+assert(
+  productNameAiReviewCause(tagged) === 'awaiting_input',
+  '본품 미정은 입력 대기 원인',
+)
+assert(
+  productNameAiReviewCause(filled) === 'awaiting_confirm',
+  '본품이 채워진 행은 Enter 대기 원인',
+)
+assert(
+  keyConflicts.every(
+    (row) => productNameAiReviewCause(row) === 'awaiting_confirm',
+  ),
+  '등록 키 충돌은 전용 원인이 아니라 Enter 대기 검수로 본다',
+)
+assert(
+  productNameAiReviewCause(
+    buildProductNameAiReviewRow(
+      combo({ key: 'combo-guarded-cause', status: 'exclusion_guarded' }),
+    ),
+  ) === 'exclusion_guarded',
+  '예외 보류 원인은 그대로 유지',
+)
+assert(
+  productNameAiReviewCause(filled, PRODUCT_NAME_AI_EXTRA_DUPLICATE_MESSAGE) ===
+    'invalid',
+  '구성품 중복은 입력값 오류 원인',
+)
+const causeCounts = countProductNameAiReviewCauses(
+  [
+    tagged,
+    { ...filled, key: 'combo-filled-count' },
+    keyConflicts[0]!,
+    buildProductNameAiReviewRow(
+      combo({ key: 'combo-guarded-count', status: 'exclusion_guarded' }),
+    ),
+  ],
+  new Map([['combo-filled-count', PRODUCT_NAME_AI_EXTRA_DUPLICATE_MESSAGE]]),
+)
+assert(
+  causeCounts.awaiting_input === 1 &&
+    causeCounts.invalid === 1 &&
+    causeCounts.awaiting_confirm === 1 &&
+    causeCounts.exclusion_guarded === 1,
+  '원인별 건수는 겹치지 않게 센다',
+)
+
+assert(
+  findProductNameAiReviewPage(['a', 'b', 'c', 'd'], 2, 'c') === 2,
+  '대상 키가 있는 페이지를 찾는다',
+)
+assert(
+  findProductNameAiReviewPage(['a', 'b'], 2, 'missing') === null,
+  '없는 키는 페이지를 찾지 못한다',
+)
+assert(
+  findProductNameAiReviewPage(['only'], 20, 'only') === 1,
+  '한 페이지면 1쪽',
+)
+
+function sourceRow(input: {
+  rowNumber: number
+  productName: string
+  itemName: string
+  customerOrderNo?: string
+  orderedAt?: string
+  recipientName?: string
+  mallName?: string
+}): SabangnetOrderRow {
+  return {
+    rowNumber: input.rowNumber,
+    productName: input.productName,
+    itemName: input.itemName,
+    quantity: '1',
+    recipientName: input.recipientName ?? '홍길동',
+    recipientPhone: '010-1111-2222',
+    recipientOtherPhone: '',
+    shippingType: '',
+    recipientAddress: '서울',
+    shippingMessage: '',
+    customerOrderNo: input.customerOrderNo ?? 'ORD-1',
+    mallName: input.mallName ?? '스마트스토어',
+    orderedAt: input.orderedAt ?? '2026-09-01 10:00:00',
+    ownProductCode: '',
+  }
+}
+
+function transformRow(
+  input: Parameters<typeof sourceRow>[0] & {
+    status: InvoiceProductNameTransformRow['status']
+  },
+): InvoiceProductNameTransformRow {
+  const source = sourceRow(input)
+  return {
+    source,
+    status: input.status,
+    mapId: null,
+    style: null,
+    transformedProductName: source.productName,
+    appliedRule: input.status === 'exclusion_guarded' ? 'exclusion' : null,
+    appliedLookupKey: null,
+    itemNameConsumed: false,
+    effectiveItemName: source.itemName,
+    candidates: [],
+    candidateStyles: [],
+    tags: [],
+    itemTags: [],
+  }
+}
+
+const guardedWithSibling = collectExclusionGuardedContexts([
+  transformRow({
+    rowNumber: 1,
+    productName: '선택안함',
+    itemName: 'Tassel: 선택안함',
+    status: 'exclusion_guarded',
+  }),
+  transformRow({
+    rowNumber: 2,
+    productName: '베이직파우치',
+    itemName: 'Color: 블랙',
+    status: 'unresolved',
+  }),
+])
+const guardedCombo = [...guardedWithSibling.values()][0]
+assert(
+  guardedCombo?.orderCount === 1 &&
+    guardedCombo.ordersWithoutSibling === 0 &&
+    guardedCombo.siblings.length === 1 &&
+    guardedCombo.siblings[0]?.productName === '베이직파우치',
+  '같은 주문의 본품 후보를 형제로 모은다',
+)
+
+const guardedAlone = collectExclusionGuardedContexts([
+  transformRow({
+    rowNumber: 3,
+    productName: '선택안함',
+    itemName: 'Keyring: 선택안함',
+    customerOrderNo: 'ORD-2',
+    status: 'exclusion_guarded',
+  }),
+])
+const aloneCombo = [...guardedAlone.values()][0]
+assert(
+  aloneCombo?.orderCount === 1 &&
+    aloneCombo.ordersWithoutSibling === 1 &&
+    aloneCombo.siblings.length === 0,
+  '형제 없는 주문은 따로 센다',
+)
+
+function bruteForceExclusionGuardedContexts(
+  rows: InvoiceProductNameTransformRow[],
+): Map<string, ExclusionGuardedContext> {
+  const comboKeyOf = (row: InvoiceProductNameTransformRow) =>
+    [
+      normalizeInvoiceText(row.source.mallName),
+      normalizeInvoiceText(row.source.productName),
+      normalizeInvoiceText(row.source.itemName),
+    ].join('\u0000')
+  const shipmentOrderKeyOf = (source: SabangnetOrderRow) =>
+    `${shipmentKeyOf(source)}\u0000${orderKeyOf(source)}`
+  const sharesOrder = (left: SabangnetOrderRow, right: SabangnetOrderRow) =>
+    buildOrderFingerprint(left) === buildOrderFingerprint(right) ||
+    shipmentOrderKeyOf(left) === shipmentOrderKeyOf(right)
+  const guarded = rows.filter((row) => row.status === 'exclusion_guarded')
+  if (guarded.length === 0) return new Map()
+  const byCombo = new Map<string, InvoiceProductNameTransformRow[]>()
+  for (const row of guarded) {
+    const key = comboKeyOf(row)
+    const group = byCombo.get(key) ?? []
+    group.push(row)
+    byCombo.set(key, group)
+  }
+  const result = new Map<string, ExclusionGuardedContext>()
+  for (const [guardedKey, comboRows] of byCombo) {
+    const orders = new Map<string, InvoiceProductNameTransformRow>()
+    for (const row of comboRows) {
+      const id = `${buildOrderFingerprint(row.source)}\u0001${shipmentOrderKeyOf(row.source)}`
+      if (!orders.has(id)) orders.set(id, row)
+    }
+    const siblings = new Map<string, ExclusionGuardedContext['siblings'][number]>()
+    let ordersWithoutSibling = 0
+    for (const anchor of orders.values()) {
+      const related = rows.filter(
+        (row) =>
+          comboKeyOf(row) !== guardedKey && sharesOrder(anchor.source, row.source),
+      )
+      if (related.length === 0) {
+        ordersWithoutSibling += 1
+        continue
+      }
+      for (const row of related) {
+        const key = comboKeyOf(row)
+        const current = siblings.get(key)
+        if (current) {
+          current.rowCount += 1
+          if (
+            current.status === 'mapped' ||
+            current.status === 'candidate' ||
+            current.status === 'excluded'
+          ) {
+            current.status = row.status
+          }
+          continue
+        }
+        siblings.set(key, {
+          key,
+          mallName: row.source.mallName,
+          productName: row.source.productName,
+          itemName: row.source.itemName,
+          status: row.status,
+          rowCount: 1,
+        })
+      }
+    }
+    result.set(guardedKey, {
+      comboKey: guardedKey,
+      orderCount: orders.size,
+      ordersWithoutSibling,
+      siblings: [...siblings.values()].sort(
+        (left, right) =>
+          left.productName.localeCompare(right.productName, 'ko-KR') ||
+          left.itemName.localeCompare(right.itemName, 'ko-KR'),
+      ),
+    })
+  }
+  return result
+}
+
+function sameGuardedContexts(
+  left: Map<string, ExclusionGuardedContext>,
+  right: Map<string, ExclusionGuardedContext>,
+) {
+  if (left.size !== right.size) return false
+  for (const [key, context] of left) {
+    const other = right.get(key)
+    if (
+      !other ||
+      other.orderCount !== context.orderCount ||
+      other.ordersWithoutSibling !== context.ordersWithoutSibling ||
+      JSON.stringify(other.siblings) !== JSON.stringify(context.siblings)
+    ) {
+      return false
+    }
+  }
+  return true
+}
+
+const indexedGuarded = collectExclusionGuardedContexts(
+  [
+    transformRow({
+      rowNumber: 1,
+      productName: '선택안함',
+      itemName: 'Tassel: 선택안함',
+      status: 'exclusion_guarded',
+    }),
+    transformRow({
+      rowNumber: 2,
+      productName: '베이직파우치',
+      itemName: 'Color: 블랙',
+      status: 'unresolved',
+    }),
+  ],
+  buildProductNameRowKeyIndex([
+    transformRow({
+      rowNumber: 1,
+      productName: '선택안함',
+      itemName: 'Tassel: 선택안함',
+      status: 'exclusion_guarded',
+    }),
+    transformRow({
+      rowNumber: 2,
+      productName: '베이직파우치',
+      itemName: 'Color: 블랙',
+      status: 'unresolved',
+    }),
+  ]),
+)
+assert(
+  sameGuardedContexts(indexedGuarded, guardedWithSibling) &&
+    sameGuardedContexts(
+      guardedWithSibling,
+      bruteForceExclusionGuardedContexts([
+        transformRow({
+          rowNumber: 1,
+          productName: '선택안함',
+          itemName: 'Tassel: 선택안함',
+          status: 'exclusion_guarded',
+        }),
+        transformRow({
+          rowNumber: 2,
+          productName: '베이직파우치',
+          itemName: 'Color: 블랙',
+          status: 'unresolved',
+        }),
+      ]),
+    ),
+  '인덱스 기반 예외 보류 형제는 기존 결과와 같다',
+)
+
+const syntheticGuardedRows: InvoiceProductNameTransformRow[] = []
+for (let order = 0; order < 300; order += 1) {
+  const orderNo = order % 17 === 0 ? '' : `ORD-${order}`
+  const recipient = `수령${order % 11}`
+  const orderedAt = `2026-09-01 10:${String(order % 60).padStart(2, '0')}:00`
+  for (let combo = 0; combo < 4; combo += 1) {
+    const comboIndex = (order + combo * 7) % 40
+    const guarded = comboIndex < 5
+    syntheticGuardedRows.push(
+      transformRow({
+        rowNumber: order * 4 + combo + 1,
+        productName: guarded ? `선택안함-${comboIndex}` : `본품-${comboIndex}`,
+        itemName: guarded ? `옵션:${comboIndex}` : `Color:${comboIndex}`,
+        customerOrderNo: orderNo,
+        orderedAt,
+        recipientName: recipient,
+        status: guarded ? 'exclusion_guarded' : 'unresolved',
+      }),
+    )
+  }
+}
+const syntheticIndexed = collectExclusionGuardedContexts(
+  syntheticGuardedRows,
+  buildProductNameRowKeyIndex(syntheticGuardedRows),
+)
+assert(
+  sameGuardedContexts(
+    syntheticIndexed,
+    bruteForceExclusionGuardedContexts(syntheticGuardedRows),
+  ),
+  '합성 데이터에서 인덱스 구현이 기존 형제 판정과 같다',
+)
+
+const exclusionMatch = transformInvoiceProductNames(
+  [
+    sourceRow({
+      rowNumber: 21,
+      productName: rabbit.name,
+      itemName: '',
+    }),
+    sourceRow({
+      rowNumber: 22,
+      productName: '선택안함',
+      itemName: 'Tassel: 선택안함',
+    }),
+  ],
+  [],
+  catalogFromStyles([rabbit]),
+)
+const dummyExclusion: InvoiceProductNameExclusion = {
+  id: 'ex-1',
+  brandId: 'brand',
+  mallName: '스마트스토어',
+  normalizedMallName: '스마트스토어',
+  productName: '선택안함',
+  normalizedProductName: '선택안함',
+  itemName: 'Tassel: 선택안함',
+  normalizedItemName: 'tassel: 선택안함',
+  isActive: true,
+  note: '',
+  createdAt: '2026-09-04T00:00:00.000Z',
+  updatedAt: '2026-09-04T00:00:00.000Z',
+}
+assert(
+  applyProductNameExclusions(exclusionMatch, []) === exclusionMatch,
+  '활성 예외가 없으면 같은 참조를 반환한다',
+)
+const overlaidExclusion = applyProductNameExclusions(
+  exclusionMatch,
+  [dummyExclusion],
+  buildProductNameRowKeyIndex(exclusionMatch.rows),
+)
+assert(
+  overlaidExclusion.rows[0] === exclusionMatch.rows[0] &&
+    overlaidExclusion.rows[1] !== exclusionMatch.rows[1] &&
+    overlaidExclusion.rows[1]?.status === 'excluded',
+  '예외에 안 걸린 행은 객체 참조를 유지한다',
+)
+const fullExclusion = transformInvoiceProductNames(
+  exclusionMatch.rows.map((row) => row.source),
+  [],
+  catalogFromStyles([rabbit]),
+  [],
+  [dummyExclusion],
+)
+assert(
+  overlaidExclusion.rows.length === fullExclusion.rows.length &&
+    overlaidExclusion.rows.every(
+      (row, index) =>
+        row.status === fullExclusion.rows[index]?.status &&
+        row.source.rowNumber === fullExclusion.rows[index]?.source.rowNumber,
+    ),
+  '예외 오버레이는 전체 변환 결과와 행 단위로 같다',
+)
+
+function productMap(input: {
+  id: string
+  lookupKey: string
+  style: StyleRef
+  mallName?: string
+  isActive?: boolean
+  updatedAt?: string
+}): InvoiceProductNameMap {
+  const mallName = input.mallName ?? ''
+  return {
+    id: input.id,
+    brandId: 'brand',
+    mallName,
+    normalizedMallName: normalizeInvoiceText(mallName),
+    productName: input.lookupKey,
+    normalizedProductName: normalizeInvoiceText(input.lookupKey),
+    itemNameContext: '',
+    normalizedItemNameContext: '',
+    ownProductCode: '',
+    normalizedOwnProductCode: '',
+    lookupKey: input.lookupKey,
+    normalizedLookupKey: normalizeInvoiceText(input.lookupKey),
+    style: input.style,
+    isActive: input.isActive ?? true,
+    note: '',
+    createdAt: '2026-09-04T00:00:00.000Z',
+    updatedAt: input.updatedAt ?? '2026-09-04T00:00:00.000Z',
+  }
+}
+
+function sameProductNameMatch(
+  left: ReturnType<typeof transformInvoiceProductNames>,
+  right: ReturnType<typeof transformInvoiceProductNames>,
+) {
+  return (
+    left.mappedRowCount === right.mappedRowCount &&
+    left.candidateRowCount === right.candidateRowCount &&
+    left.missingStyleRowCount === right.missingStyleRowCount &&
+    left.conflictRowCount === right.conflictRowCount &&
+    left.unresolvedRowCount === right.unresolvedRowCount &&
+    left.rows.length === right.rows.length &&
+    left.rows.every((row, index) => {
+      const other = right.rows[index]
+      return (
+        row.status === other?.status &&
+        row.mapId === other.mapId &&
+        row.style?.styleId === other.style?.styleId &&
+        row.appliedLookupKey === other.appliedLookupKey &&
+        row.transformedProductName === other.transformedProductName
+      )
+    })
+  )
+}
+
+function applyDeltaAgainst(
+  sources: SabangnetOrderRow[],
+  baseMaps: InvoiceProductNameMap[],
+  nextMaps: InvoiceProductNameMap[],
+  styles: StyleRef[],
+) {
+  const catalog = catalogFromStyles(styles)
+  const base = transformInvoiceProductNames(sources, baseMaps, catalog)
+  return {
+    base,
+    delta: applyProductNameMapDelta({
+      base,
+      baseSnapshot: snapshotProductNameMaps(baseMaps, []),
+      candidateRowIndex: buildProductNameCandidateRowIndex(base.rows),
+      maps: nextMaps,
+      tagRoles: [],
+      catalog,
+    }),
+    full: transformInvoiceProductNames(sources, nextMaps, catalog),
+  }
+}
+
+const deltaSources = [
+  sourceRow({
+    rowNumber: 31,
+    productName: rabbit.name,
+    itemName: '',
+  }),
+  sourceRow({
+    rowNumber: 32,
+    productName: tassel.name,
+    itemName: '',
+  }),
+]
+const fox = style('s-fox', 'M0400', '폭스에코백 블랙')
+const rabbitMap = productMap({
+  id: 'map-rabbit',
+  lookupKey: rabbit.name,
+  style: rabbit,
+})
+const tasselMap = productMap({
+  id: 'map-tassel',
+  lookupKey: tassel.name,
+  style: tassel,
+})
+const unusedMap = productMap({
+  id: 'map-unused',
+  lookupKey: '완전히다른상품XYZ',
+  style: fox,
+})
+
+const addedMap = applyDeltaAgainst(
+  deltaSources,
+  [],
+  [rabbitMap],
+  [rabbit, tassel, fox],
+)
+assert(
+  sameProductNameMatch(addedMap.delta.transformation, addedMap.full) &&
+    addedMap.delta.affectedRowCount === 1 &&
+    addedMap.delta.transformation.rows[0]?.status === 'mapped',
+  '원장 추가는 해당 행만 다시 맞추고 전체 결과와 같다',
+)
+
+const removedMap = applyDeltaAgainst(
+  deltaSources,
+  [rabbitMap, tasselMap],
+  [tasselMap],
+  [rabbit, tassel],
+)
+assert(
+  sameProductNameMatch(removedMap.delta.transformation, removedMap.full) &&
+    removedMap.delta.transformation.rows[0]?.status !== 'mapped',
+  '원장 삭제는 해당 행을 풀고 전체 결과와 같다',
+)
+
+const restyledMap = applyDeltaAgainst(
+  deltaSources,
+  [rabbitMap],
+  [
+    productMap({
+      id: rabbitMap.id,
+      lookupKey: rabbit.name,
+      style: fox,
+      updatedAt: '2026-09-04T01:00:00.000Z',
+    }),
+  ],
+  [rabbit, tassel, fox],
+)
+assert(
+  sameProductNameMatch(restyledMap.delta.transformation, restyledMap.full) &&
+    restyledMap.delta.transformation.rows[0]?.style?.styleId === fox.styleId,
+  '원장 스타일 변경은 해당 행만 바꾸고 전체 결과와 같다',
+)
+
+const deactivatedMap = applyDeltaAgainst(
+  deltaSources,
+  [rabbitMap],
+  [
+    productMap({
+      id: rabbitMap.id,
+      lookupKey: rabbit.name,
+      style: rabbit,
+      isActive: false,
+      updatedAt: '2026-09-04T02:00:00.000Z',
+    }),
+  ],
+  [rabbit, tassel],
+)
+assert(
+  sameProductNameMatch(
+    deactivatedMap.delta.transformation,
+    deactivatedMap.full,
+  ) && deactivatedMap.delta.transformation.rows[0]?.status !== 'mapped',
+  '원장 비활성화는 해당 행을 풀고 전체 결과와 같다',
+)
+
+const unusedDelta = applyDeltaAgainst(
+  deltaSources,
+  [rabbitMap],
+  [rabbitMap, unusedMap],
+  [rabbit, tassel, fox],
+)
+assert(
+  unusedDelta.delta.transformation === unusedDelta.base &&
+    unusedDelta.delta.affectedRowCount === 0,
+  '파일 후보에 안 걸리는 원장만 바뀌면 같은 참조를 반환한다',
+)
+
+const mallBaseMap = productMap({
+  id: 'map-any-mall',
+  lookupKey: rabbit.name,
+  style: rabbit,
+})
+const mallExactMap = productMap({
+  id: 'map-store-mall',
+  lookupKey: rabbit.name,
+  style: fox,
+  mallName: '스마트스토어',
+})
+const mallDelta = applyDeltaAgainst(
+  [
+    sourceRow({
+      rowNumber: 41,
+      productName: rabbit.name,
+      itemName: '',
+      mallName: '스마트스토어',
+    }),
+    sourceRow({
+      rowNumber: 42,
+      productName: rabbit.name,
+      itemName: '',
+      mallName: '무신사',
+    }),
+  ],
+  [mallBaseMap],
+  [mallBaseMap, mallExactMap],
+  [rabbit, fox],
+)
+assert(
+  sameProductNameMatch(mallDelta.delta.transformation, mallDelta.full) &&
+    mallDelta.delta.transformation.rows[0]?.style?.styleId === fox.styleId &&
+    mallDelta.delta.transformation.rows[1]?.style?.styleId === rabbit.styleId,
+  '몰 우선 원장을 추가하면 해당 몰 행만 다른 본품으로 바뀐다',
+)
+
+const syntheticNames = [rabbit.name, tassel.name, fox.name, '미등록상품']
+const syntheticSources = Array.from({ length: 12 }, (_, index) =>
+  sourceRow({
+    rowNumber: 50 + index,
+    productName: syntheticNames[index % syntheticNames.length]!,
+    itemName: '',
+    mallName: index % 2 === 0 ? '스마트스토어' : '무신사',
+  }),
+)
+const syntheticStyles = [rabbit, tassel, fox]
+const syntheticMapPool = [
+  productMap({ id: 'syn-1', lookupKey: rabbit.name, style: rabbit }),
+  productMap({
+    id: 'syn-2',
+    lookupKey: tassel.name,
+    style: tassel,
+    mallName: '스마트스토어',
+  }),
+  productMap({
+    id: 'syn-3',
+    lookupKey: fox.name,
+    style: fox,
+    updatedAt: '2026-09-04T03:00:00.000Z',
+  }),
+  productMap({
+    id: 'syn-1',
+    lookupKey: rabbit.name,
+    style: fox,
+    updatedAt: '2026-09-04T04:00:00.000Z',
+  }),
+  productMap({
+    id: 'syn-2',
+    lookupKey: tassel.name,
+    style: tassel,
+    isActive: false,
+    mallName: '스마트스토어',
+    updatedAt: '2026-09-04T05:00:00.000Z',
+  }),
+]
+let syntheticMaps: InvoiceProductNameMap[] = []
+for (const next of [
+  [syntheticMapPool[0]!],
+  [syntheticMapPool[0]!, syntheticMapPool[1]!],
+  [syntheticMapPool[3]!, syntheticMapPool[1]!],
+  [syntheticMapPool[3]!, syntheticMapPool[4]!, syntheticMapPool[2]!],
+  [syntheticMapPool[2]!],
+  [],
+]) {
+  const compared = applyDeltaAgainst(
+    syntheticSources,
+    syntheticMaps,
+    next,
+    syntheticStyles,
+  )
+  assert(
+    sameProductNameMatch(compared.delta.transformation, compared.full),
+    '합성 원장 변경에서도 델타와 전체 재매칭이 같다',
+  )
+  syntheticMaps = next
+}
 
 const draftSlot = applyProductNameAiQuickSlotText(
   emptyProductNameAiQuickSlot(),
@@ -788,21 +1545,152 @@ const stagedConflict = stageProductNameAiRowConfirm({
   ],
 })
 assert(
-  !stagedConflict.ok &&
-    !stagedConflict.confirmed &&
-    stagedConflict.mark === 'unconfirm' &&
-    Boolean(stagedConflict.error) &&
-    stagedConflict.row.lookupKeyConflict &&
+  stagedConflict.ok &&
+    stagedConflict.confirmed &&
+    stagedConflict.mark === 'confirmed' &&
+    !stagedConflict.error &&
+    !stagedConflict.row.lookupKeyConflict &&
+    stagedConflict.affectedKeys.length === 2 &&
+    stagedConflict.readyKeys.length === 2 &&
+    stagedConflict.propagatedRows.every(
+      (row) =>
+        row.style?.styleId === rabbit.styleId &&
+        productNameAiRowReadyToCommit(row),
+    ) &&
     productNameAiWorkflowTab({
       confirmed: stagedConflict.confirmed,
       saveFailed: false,
       readyToCommit: productNameAiRowReadyToCommit(stagedConflict.row),
-    }) === 'review',
-  '조회 키 충돌이면 준비 완료로 넘기지 않고 이유를 남긴다',
+    }) === 'ready',
+  '조회 키 충돌에서 Enter로 고른 M번호를 같은 키 전체에 전파한다',
+)
+const propagatedPlan = decideProductNameAiSaves(
+  stagedConflict.propagatedRows,
 )
 assert(
-  productNameAiRowConfirmError(stagedConflict.row)?.includes('조회 키'),
-  '조회 키 충돌 이유를 행에 표시한다',
+  propagatedPlan.items.length === 2 &&
+    propagatedPlan.items.filter((item) => item.sharesLookupKey).length === 1 &&
+    propagatedPlan.skipped.length === 0,
+  '전파된 행은 같은 조회 키 원장을 공유하면서 모두 저장 대상이 된다',
+)
+const differentLookup = {
+  ...sameKeyOther,
+  key: 'different-lookup',
+  lookupKey: '다른 등록 조회 키',
+}
+const duplicateExtra = {
+  ...sameKeyOther,
+  key: 'duplicate-extra',
+  extras: [
+    {
+      style: rabbit,
+      role: 'included' as const,
+      quantity: 1,
+    },
+  ],
+}
+const edgeCanonicalized = canonicalizeProductNameAiLookupKey({
+  rows: [resolvedOfficial.row, differentLookup, duplicateExtra],
+  confirmedRow: resolvedOfficial.row,
+})
+assert(
+  edgeCanonicalized.affectedKeys.length === 2 &&
+    edgeCanonicalized.readyKeys.length === 1 &&
+    edgeCanonicalized.blockedKeys[0] === duplicateExtra.key &&
+    edgeCanonicalized.rows.find((row) => row.key === differentLookup.key)?.style
+      ?.styleId === conflictingStyle.styleId,
+  '다른 조회 키는 건드리지 않고 실제 구성 중복 행만 검토에 남긴다',
+)
+const guardedCanonicalRow = {
+  ...buildProductNameAiReviewRow(
+    combo({ key: 'canonical-guarded', status: 'exclusion_guarded' }),
+  ),
+  lookupKey: resolvedOfficial.row.lookupKey,
+  style: conflictingStyle,
+}
+const guardedCanonicalized = canonicalizeProductNameAiLookupKey({
+  rows: [resolvedOfficial.row, guardedCanonicalRow],
+  confirmedRow: resolvedOfficial.row,
+})
+assert(
+  guardedCanonicalized.affectedKeys.length === 1 &&
+    guardedCanonicalized.rows.find(
+      (row) => row.key === guardedCanonicalRow.key,
+    )?.style?.styleId === conflictingStyle.styleId,
+  '예외 보류 행은 같은 조회 키 확정 전파에서 제외한다',
+)
+const protectedCanonicalized = canonicalizeProductNameAiLookupKey({
+  rows: [resolvedOfficial.row, sameKeyOther],
+  confirmedRow: resolvedOfficial.row,
+  excludedKeys: new Set([sameKeyOther.key]),
+})
+assert(
+  protectedCanonicalized.affectedKeys.length === 1 &&
+    protectedCanonicalized.readyKeys[0] === resolvedOfficial.row.key &&
+    protectedCanonicalized.rows.find((row) => row.key === sameKeyOther.key)
+      ?.style?.styleId === conflictingStyle.styleId,
+  '사은품 보호 행은 전파와 충돌 판정에서 제외한다',
+)
+const markedExcluded = markProductNameAiDuplicates(
+  [filled, sameKeyOther],
+  new Set([sameKeyOther.key]),
+)
+assert(
+  markedExcluded.every((row) => !row.lookupKeyConflict) &&
+    markedExcluded.find((row) => row.key === sameKeyOther.key)?.style
+      ?.styleId === conflictingStyle.styleId,
+  '제외 행은 충돌 표시를 받지 않고 그대로 반환한다',
+)
+const stagedEditDraft = stageProductNameAiRowConfirm({
+  row: resolvedOfficial.row,
+  slots: officialSlot,
+  mode: 'edit',
+  siblings: [
+    resolvedOfficial.row,
+    {
+      ...sameKeyOther,
+      key: 'edit-conflict-sibling',
+      lookupKey: resolvedOfficial.row.lookupKey,
+    },
+  ],
+})
+assert(
+  stagedEditDraft.affectedKeys.length === 0 &&
+    stagedEditDraft.propagatedRows.length === 0 &&
+    !stagedEditDraft.draftRow.lookupKeyConflict &&
+    stagedEditDraft.draftRow.holdReason !== 'conflict',
+  '비전파 편집 초안은 충돌 플래그를 갖지 않는다',
+)
+const giftProtectedRow = {
+  ...sameKeyOther,
+  key: 'gift-protected-combo',
+  mallName: '카카오톡선물하기',
+  productName: '[브로콜리 증정] 래빗에코백',
+  lookupKey: resolvedOfficial.row.lookupKey,
+}
+const giftGroupKeys = new Set([
+  giftSourceGroupKey(giftProtectedRow.mallName, giftProtectedRow.productName),
+])
+const convertedGiftKeys = protectedGiftSourceComboKeys(
+  [resolvedOfficial.row, giftProtectedRow],
+  giftGroupKeys,
+)
+assert(
+  convertedGiftKeys.has(giftProtectedRow.key) &&
+    !convertedGiftKeys.has(resolvedOfficial.row.key) &&
+    ![...giftGroupKeys].some((key) => convertedGiftKeys.has(key)),
+  '사은품 그룹 키로 보호된 조합을 검수 행 키 집합으로 바꾼다',
+)
+const convertedCanonicalized = canonicalizeProductNameAiLookupKey({
+  rows: [resolvedOfficial.row, giftProtectedRow],
+  confirmedRow: resolvedOfficial.row,
+  excludedKeys: convertedGiftKeys,
+})
+assert(
+  convertedCanonicalized.affectedKeys.length === 1 &&
+    convertedCanonicalized.rows.find((row) => row.key === giftProtectedRow.key)
+      ?.style?.styleId === conflictingStyle.styleId,
+  '변환된 행 키로 보호된 사은품은 전파·충돌 계산에서 빠진다',
 )
 
 const stagedInvalid = stageProductNameAiRowConfirm({
