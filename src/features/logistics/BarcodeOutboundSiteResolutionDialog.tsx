@@ -10,7 +10,7 @@ import {
 } from '@/lib/codes/outbound-partner'
 import type { BarcodeDataEntrySite } from '@/lib/outbound/barcode-outbound-data-entry'
 import type { CodeUsageTarget } from '@/lib/types'
-import { formatNumber } from '@/lib/utils'
+import { cn, formatNumber } from '@/lib/utils'
 
 export function BarcodeOutboundSiteResolutionDialog({
   brandId,
@@ -19,6 +19,7 @@ export function BarcodeOutboundSiteResolutionDialog({
   sites,
   units,
   aliasesByTarget,
+  onAssignEmptySite,
   onClose,
 }: {
   brandId: string
@@ -27,6 +28,7 @@ export function BarcodeOutboundSiteResolutionDialog({
   sites: readonly BarcodeDataEntrySite[]
   units: readonly CodeUsageTarget[]
   aliasesByTarget: ReadonlyMap<string, readonly string[]>
+  onAssignEmptySite: (unit: CodeUsageTarget) => void
   onClose: () => void
 }) {
   const queryClient = useQueryClient()
@@ -47,19 +49,32 @@ export function BarcodeOutboundSiteResolutionDialog({
   const [searchByKey, setSearchByKey] = useState<Record<string, string>>({})
   const [savingKey, setSavingKey] = useState<string | null>(null)
   const [errorByKey, setErrorByKey] = useState<Record<string, string>>({})
+  const [resolvedLabel, setResolvedLabel] = useState('')
 
   const unresolved = sites.filter((site) => site.status !== 'matched')
 
+  function selectedUnit(siteKey: string) {
+    const targetId = targetByKey[siteKey] ?? ''
+    return activeUnits.find((unit) => unit.id === targetId) ?? null
+  }
+
   async function resolveSite(site: BarcodeDataEntrySite) {
-    if (savingKey || site.status !== 'unmatched') return
-    const targetId = targetByKey[site.key] ?? ''
+    if (savingKey) return
+    const unit = selectedUnit(site.key)
     setSavingKey(site.key)
     setErrorByKey((current) => ({ ...current, [site.key]: '' }))
     try {
-      if (!targetId) throw new Error('연결할 지점을 고르세요.')
+      if (!unit) throw new Error('연결할 지점을 고르세요.')
+      const label = outboundPartnerUnitLabel(unit)
+      if (site.status === 'empty') {
+        setResolvedLabel(label)
+        onAssignEmptySite(unit)
+        return
+      }
+      if (site.status !== 'unmatched') return
       const names = site.rawNames.length > 0 ? site.rawNames : [site.displayName]
       for (const name of names) {
-        await addCodeUsageTargetAlias(brandId, targetId, name)
+        await addCodeUsageTargetAlias(brandId, unit.id, name)
       }
       await Promise.all([
         queryClient.invalidateQueries({
@@ -69,6 +84,7 @@ export function BarcodeOutboundSiteResolutionDialog({
           queryKey: ['codeUsageTargetAliases', brandId],
         }),
       ])
+      setResolvedLabel(label)
     } catch (error) {
       setErrorByKey((current) => ({
         ...current,
@@ -93,7 +109,7 @@ export function BarcodeOutboundSiteResolutionDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="barcode-site-resolution-title"
-        className="relative z-10 max-h-[min(90vh,840px)] w-full max-w-2xl overflow-y-auto rounded-xl border border-border bg-card shadow-xl"
+        className="relative z-10 max-h-[min(90vh,840px)] w-full max-w-3xl overflow-y-auto rounded-xl border border-border bg-card shadow-xl"
       >
         <div className="sticky top-0 z-10 border-b border-border bg-card px-5 py-4">
           <div className="flex items-start justify-between gap-3">
@@ -124,7 +140,14 @@ export function BarcodeOutboundSiteResolutionDialog({
 
         <div className="space-y-4 px-5 py-4">
           {unresolved.length === 0 ? (
-            <p className="text-sm text-success">모든 지점명을 연결했습니다.</p>
+            <div className="py-2">
+              <p className="text-3xl font-semibold tracking-tight">
+                {resolvedLabel || '지점'}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                으로 연결 되었습니다
+              </p>
+            </div>
           ) : null}
 
           {unresolved.map((site) => {
@@ -163,12 +186,90 @@ export function BarcodeOutboundSiteResolutionDialog({
                 </div>
 
                 {site.status === 'empty' ? (
-                  <div className="flex items-start gap-2 rounded-md border border-danger/30 bg-danger/10 p-3 text-xs text-danger">
-                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                    <p>
-                      지점명이 비어 있습니다. 상품명·수량·지점명 세 칸으로
-                      다시 붙여넣으세요.
+                  <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      지점명이 비어 있습니다. {companyName} 지점 중 이{' '}
+                      {formatNumber(site.rowCount)}행에 쓸 곳 하나를 고르세요.
                     </p>
+                    {activeUnits.length === 0 ? (
+                      <p className="text-xs text-danger">
+                        활성 지점이 없습니다.{' '}
+                        <Link
+                          to={`/b/${brandSlug}/settings/usage-targets`}
+                          className="underline underline-offset-2"
+                        >
+                          출고업체 설정
+                        </Link>
+                        에서 지점을 확인하세요.
+                      </p>
+                    ) : (
+                      <>
+                        <input
+                          className="h-9 w-full rounded-md border border-border bg-background px-3 text-sm"
+                          placeholder="지점 검색"
+                          value={keyword}
+                          onChange={(event) =>
+                            setSearchByKey((current) => ({
+                              ...current,
+                              [site.key]: event.target.value,
+                            }))
+                          }
+                        />
+                        <div className="max-h-[22rem] overflow-auto">
+                          {choices.length === 0 ? (
+                            <p className="px-1 py-3 text-xs text-muted-foreground">
+                              검색과 맞는 지점이 없습니다.
+                            </p>
+                          ) : (
+                            <div className="grid grid-cols-3 gap-1.5">
+                              {choices.map((unit) => {
+                                const selected =
+                                  (targetByKey[site.key] ?? '') === unit.id
+                                return (
+                                  <button
+                                    key={unit.id}
+                                    type="button"
+                                    title={outboundPartnerUnitLabel(unit)}
+                                    disabled={Boolean(savingKey)}
+                                    className={cn(
+                                      'min-h-10 rounded-md border px-2 py-1.5 text-left text-sm leading-snug break-keep whitespace-normal',
+                                      selected
+                                        ? 'border-primary bg-primary/10'
+                                        : 'border-border hover:bg-muted/50',
+                                    )}
+                                    onClick={() =>
+                                      setTargetByKey((current) => ({
+                                        ...current,
+                                        [site.key]: unit.id,
+                                      }))
+                                    }
+                                  >
+                                    {outboundPartnerUnitLabel(unit)}
+                                  </button>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                        {errorByKey[site.key] ? (
+                          <p className="text-xs text-danger">
+                            {errorByKey[site.key]}
+                          </p>
+                        ) : null}
+                        <div className="flex justify-end">
+                          <Button
+                            type="button"
+                            size="sm"
+                            disabled={Boolean(savingKey)}
+                            onClick={() => void resolveSite(site)}
+                          >
+                            {savingKey === site.key
+                              ? '적용 중...'
+                              : '이 지점으로 적용'}
+                          </Button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 ) : null}
 

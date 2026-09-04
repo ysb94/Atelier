@@ -16,7 +16,6 @@ export function InvoiceGiftSourceQuickSetup({
   error,
   onApplySession,
   onApplyPersist,
-  onTreatAsRegular,
 }: {
   brandId: string
   group: GiftSourceGroup
@@ -24,7 +23,6 @@ export function InvoiceGiftSourceQuickSetup({
   error: string | null
   onApplySession: (rule: GiftSourceSessionRule) => void
   onApplyPersist: (rule: GiftSourceSessionRule) => void
-  onTreatAsRegular?: () => void
 }) {
   const [selected, setSelected] = useState<StyleRef[]>(group.poolStyles)
   const [mode, setMode] = useState<InvoiceGiftSourceAssignmentMode>(
@@ -63,7 +61,9 @@ export function InvoiceGiftSourceQuickSetup({
           </p>
         </div>
         <div className="flex flex-wrap gap-1">
-          {group.status === 'map_found' ? (
+          {group.status === 'map_inactive' ? (
+            <Badge variant="muted">중지된 기존 설정</Badge>
+          ) : group.status === 'map_found' ? (
             <Badge variant="warning">기존 설정 발견</Badge>
           ) : group.status === 'assigned' ? (
             <Badge variant="success">사은품 변환 완료</Badge>
@@ -84,6 +84,16 @@ export function InvoiceGiftSourceQuickSetup({
                 `${item.style.styleNo} ${formatNumber(item.count)}`,
             )
             .join(' · ')}
+        </p>
+      ) : null}
+
+      {group.status === 'map_inactive' ? (
+        <p className="text-[11px] text-muted-foreground">
+          중지된 기존 설정입니다. 자동 적용하지 않습니다.
+          {group.poolStyles.length > 0
+            ? ` 기존 후보 ${group.poolStyles.map((style) => style.styleNo).join(', ')}.`
+            : ''}
+          {' '}사은품으로 다시 쓰려면 후보를 고른 뒤 적용하세요.
         </p>
       ) : null}
 
@@ -165,18 +175,6 @@ export function InvoiceGiftSourceQuickSetup({
         >
           {applying ? '적용 중...' : '적용'}
         </Button>
-        {onTreatAsRegular ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 px-2 text-[11px]"
-            disabled={applying}
-            onClick={onTreatAsRegular}
-          >
-            일반 상품으로 처리
-          </Button>
-        ) : null}
       </div>
     </div>
   )

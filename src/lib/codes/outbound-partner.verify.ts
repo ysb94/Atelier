@@ -17,7 +17,6 @@ import {
   outboundPartnerContactPreview,
   outboundPartnerRowSummary,
   outboundPartnerDisplayName,
-  outboundPartnerOptionLabel,
   outboundPartnerStatus,
   outboundPartnerUnitLabel,
   parseActivateFolderValue,
@@ -197,10 +196,40 @@ assert(
   "업체 그룹과 지점을 공용 표시명으로 조합해야 한다",
 );
 assert(
-  outboundPartnerOptionLabel(
-    target({ groupName: "에이랜드", siteName: "", channelType: "online" }),
-  ) === "에이랜드 · 온라인",
-  "선택 목록은 채널까지 한 줄에 표시해야 한다",
+  outboundPartnerDisplayName(
+    target({
+      groupName: "쿠팡_MFS",
+      name: "쿠팡_MFS 온라인",
+      siteName: "",
+    }),
+  ) === "쿠팡_MFS",
+  "지점 없는 업체는 채널을 떼고 업체명만 보여 준다",
+);
+assert(
+  outboundPartnerDisplayName(
+    target({
+      groupName: "쿠팡_MFS",
+      name: "쿠팡 풀필먼트",
+      siteName: "",
+    }),
+  ) === "쿠팡_MFS",
+  "지점명이 비면 이름이 업체명과 달라도 업체명만 보여 준다",
+);
+assert(
+  outboundPartnerDisplayName(
+    target({
+      groupName: "신세계면세",
+      name: "신세계면세점",
+      siteName: "신세계면세점",
+    }),
+  ) === "신세계면세 · 신세계면세점",
+  "대표 줄도 지점명 칸이 채워져 있으면 업체·지점으로 보여 준다",
+);
+assert(
+  outboundPartnerDisplayName(
+    target({ groupId: null, groupName: "", name: "텐바이텐" }),
+  ) === "텐바이텐",
+  "그룹 없는 레거시 행은 정식명을 그대로 쓴다",
 );
 assert(
   outboundPartnerUnitLabel(
@@ -218,6 +247,17 @@ assert(
     }),
   ) === "신세계면세점",
   "지점 없는 줄은 업체 헤더와 다른 이름을 유지한다",
+);
+assert(
+  outboundPartnerUnitLabel(
+    target({
+      groupId: "group-1",
+      groupName: "신라면세점",
+      name: "신라면세점 온라인",
+      siteName: "",
+    }),
+  ) === "신라면세점",
+  "트리 지점 줄의 대체명에서도 채널을 뗀다",
 );
 assert(
   synthesizeOutboundPartnerName({

@@ -228,7 +228,6 @@ export function OutboundPartnerCompanyNode({
           target={unit}
           selected={selectedId === unit.id}
           identityVariant="full"
-          asCompany
           onSelect={() => onSelect(unit.id)}
         />
       </TreeLeaf>

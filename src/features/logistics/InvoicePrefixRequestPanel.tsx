@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronDown,
@@ -85,17 +85,35 @@ export function InvoicePrefixRequestPanel({
   const queryClient = useQueryClient()
   const now = nowMoment()
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<
+    'all' | InvoiceGiftRequestStatus
+  >('all')
   const [creating, setCreating] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [rowError, setRowError] = useState<string | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
 
+  const statusCounts = useMemo(() => {
+    const counts: Record<InvoiceGiftRequestStatus, number> = {
+      running: 0,
+      scheduled: 0,
+      ended: 0,
+      paused: 0,
+    }
+    for (const request of requests) {
+      counts[invoicePrefixRequestStatus(request, now)] += 1
+    }
+    return counts
+  }, [now, requests])
+
   const filtered = useMemo(() => {
     const query = search.trim().toLocaleLowerCase('ko-KR')
-    if (!query) return requests
-    return requests.filter((request) =>
-      [
+    return requests.filter((request) => {
+      const status = invoicePrefixRequestStatus(request, now)
+      if (statusFilter !== 'all' && status !== statusFilter) return false
+      if (!query) return true
+      return [
         request.title,
         request.mallName,
         request.note,
@@ -106,13 +124,9 @@ export function InvoicePrefixRequestPanel({
       ]
         .join(' ')
         .toLocaleLowerCase('ko-KR')
-        .includes(query),
-    )
-  }, [requests, search])
-
-  const runningCount = requests.filter(
-    (request) => invoicePrefixRequestStatus(request, now) === 'running',
-  ).length
+        .includes(query)
+    })
+  }, [now, requests, search, statusFilter])
 
   function invalidate() {
     return queryClient.invalidateQueries({
@@ -162,11 +176,42 @@ export function InvoicePrefixRequestPanel({
             완전히 같고 주문일시가 행사 기간 안인 주문에 사은품 행을 추가합니다.
           </CardDescription>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Badge variant="muted">{formatNumber(requests.length)}건</Badge>
-          {runningCount > 0 ? (
-            <Badge variant="success">진행중 {runningCount}</Badge>
-          ) : null}
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <StatusCountFilter
+            active={statusFilter === 'all'}
+            variant="muted"
+            onClick={() => setStatusFilter('all')}
+          >
+            전체 {formatNumber(requests.length)}
+          </StatusCountFilter>
+          <StatusCountFilter
+            active={statusFilter === 'running'}
+            variant="success"
+            onClick={() => setStatusFilter('running')}
+          >
+            진행중 {formatNumber(statusCounts.running)}
+          </StatusCountFilter>
+          <StatusCountFilter
+            active={statusFilter === 'scheduled'}
+            variant="warning"
+            onClick={() => setStatusFilter('scheduled')}
+          >
+            예정 {formatNumber(statusCounts.scheduled)}
+          </StatusCountFilter>
+          <StatusCountFilter
+            active={statusFilter === 'ended'}
+            variant="muted"
+            onClick={() => setStatusFilter('ended')}
+          >
+            종료 {formatNumber(statusCounts.ended)}
+          </StatusCountFilter>
+          <StatusCountFilter
+            active={statusFilter === 'paused'}
+            variant="muted"
+            onClick={() => setStatusFilter('paused')}
+          >
+            중지 {formatNumber(statusCounts.paused)}
+          </StatusCountFilter>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -252,7 +297,9 @@ export function InvoicePrefixRequestPanel({
           <p className="rounded-lg border border-border px-4 py-12 text-center text-xs text-muted-foreground">
             {requests.length === 0
               ? '등록된 요청 건이 없습니다. 요청 건 등록으로 요청서를 옮겨 담으세요.'
-              : '검색 결과가 없습니다.'}
+              : statusFilter !== 'all' && !search.trim()
+                ? '해당 상태의 요청 건이 없습니다.'
+                : '검색 결과가 없습니다.'}
           </p>
         ) : (
           <div className="space-y-2">
@@ -642,5 +689,33 @@ function ExpandedRequestDetails({
         </div>
       ) : null}
     </div>
+  )
+}
+
+function StatusCountFilter({
+  active,
+  variant,
+  onClick,
+  children,
+}: {
+  active: boolean
+  variant: 'muted' | 'success' | 'warning'
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-full px-2 py-0.5 text-xs font-medium',
+        variant === 'success' && 'bg-success/15 text-success',
+        variant === 'warning' && 'bg-warning/15 text-warning',
+        variant === 'muted' && 'bg-muted text-muted-foreground',
+        active && 'ring-1 ring-foreground/40',
+      )}
+    >
+      {children}
+    </button>
   )
 }

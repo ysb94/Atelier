@@ -9,11 +9,15 @@ import {
   collectGiftSourceSlots,
   collectGiftSourceSlotsForGroup,
   effectiveGiftSourceAppliedKeys,
+  filterRegularProductNameCombos,
   giftSourceGroupKey,
   inspectGiftSourceGroup,
   isGiftSourceCandidate,
+  isProtectedGiftSourceCombo,
   planGiftSourceTransform,
+  protectedGiftSourceKeys,
   recommendsGiftSourceBalancedRandom,
+  rejectProtectedGiftSourceSave,
 } from '@/lib/invoice/gift-source-transform'
 import { transformInvoiceItemNames } from '@/lib/invoice/item-name-transform'
 import { buildInvoiceOutputRows } from '@/lib/invoice/invoice-output'
@@ -341,8 +345,13 @@ const inactiveStored = planGiftSourceTransform({
 })
 assert(
   inactiveStored.mappedRowCount === 0 &&
-    inactiveStored.groups[0]?.status === 'unset',
-  '비활성 매핑은 자동 적용하지 않음',
+    inactiveStored.groups[0]?.status === 'map_inactive',
+  '비활성 매핑은 자동 적용하지 않고 중지 상태로 노출',
+)
+assert(
+  (inactiveStored.groups[0]?.poolStyles ?? []).map((style) => style.styleNo).join(',') ===
+    'M0001,M0002,M0003',
+  '중지 매핑의 기존 후보 M번호를 화면에 전달',
 )
 const mallMismatch = planGiftSourceTransform({
   rows: [row({ rowNumber: 1, mallName: '다른몰' })],
@@ -891,6 +900,122 @@ assert(
   broccoliNextFile.mappedRowCount === 1 &&
     broccoliNextFile.groups[0]?.status === 'assigned',
   '같은 활성 매핑은 다음 파일에서도 자동 완료',
+)
+
+const broccoliInactiveMap = { ...broccoliMap, isActive: false }
+const broccoliInactivePlan = planGiftSourceTransform({
+  rows: [broccoliRow],
+  maps: [broccoliInactiveMap],
+})
+assert(
+  broccoliInactivePlan.mappedRowCount === 0 &&
+    broccoliInactivePlan.groups[0]?.status === 'map_inactive',
+  '중지된 브로콜리 매핑은 자동 적용하지 않음',
+)
+assert(
+  broccoliInactivePlan.groups[0]?.poolStyles
+    .map((style) => style.styleNo)
+    .join(',') === 'M2305,M2306',
+  '중지된 브로콜리 매핑은 기존 후보 M2305/M2306을 유지',
+)
+const broccoliInactiveOverlay = overlayGiftSourceOnProductNames(
+  transformInvoiceProductNames(
+    [broccoliRow],
+    [],
+    { byName: new Map(), byCompactName: new Map() },
+  ),
+  broccoliInactivePlan,
+)
+const broccoliProtectedKeys = protectedGiftSourceKeys(broccoliInactivePlan.groups)
+assert(
+  broccoliInactiveOverlay.unresolvedCombos.some((combo) =>
+    combo.productName === broccoliRow.productName,
+  ),
+  '중지 매핑은 overlay에서 gift_mapped가 되지 않음',
+)
+assert(
+  broccoliInactiveOverlay.unresolvedCombos.every((combo) =>
+    isProtectedGiftSourceCombo(combo, broccoliProtectedKeys),
+  ),
+  '중지 매핑 조합은 일반 품목 AI 대상에서 보호',
+)
+assert(
+  filterRegularProductNameCombos(
+    broccoliInactiveOverlay.unresolvedCombos,
+    broccoliProtectedKeys,
+  ).length === 0,
+  '명시적 일반 상품 처리 전 AI 대상에서 제외',
+)
+const broccoliDisplayRows = broccoliInactiveOverlay.unresolvedCombos.map(
+  (combo) => buildProductNameAiReviewRow(combo),
+)
+assert(
+  broccoliDisplayRows.length > 0 &&
+    broccoliDisplayRows.every((row) =>
+      isProtectedGiftSourceCombo(row, broccoliProtectedKeys),
+    ),
+  '보호 사은품은 같은 검수표의 표시 행으로 만들 수 있다',
+)
+assert(
+  rejectProtectedGiftSourceSave(
+    {
+      mallName: broccoliRow.mallName,
+      productName: broccoliRow.productName,
+    },
+    broccoliProtectedKeys,
+  ) !== null,
+  '보호된 사은품 조합의 일괄 저장을 거부',
+)
+const broccoliIgnored = planGiftSourceTransform({
+  rows: [broccoliRow],
+  maps: [broccoliInactiveMap],
+  ignoredKeys: new Set([
+    giftSourceGroupKey(broccoliRow.mallName, broccoliRow.productName),
+  ]),
+})
+assert(broccoliIgnored.groups.length === 0, '일반 상품으로 처리하면 사은품 그룹에서 제거')
+const broccoliIgnoredOverlay = overlayGiftSourceOnProductNames(
+  transformInvoiceProductNames(
+    [broccoliRow],
+    [],
+    { byName: new Map(), byCompactName: new Map() },
+  ),
+  broccoliIgnored,
+)
+assert(
+  filterRegularProductNameCombos(
+    broccoliIgnoredOverlay.unresolvedCombos,
+    protectedGiftSourceKeys(broccoliIgnored.groups),
+  ).some((combo) => combo.productName === broccoliRow.productName),
+  '일반 상품으로 처리한 조합만 일반 품목 AI 표로 이동',
+)
+const broccoliSessionApply = planGiftSourceTransform({
+  rows: [broccoliRow],
+  maps: [broccoliInactiveMap],
+  sessionRules: new Map([
+    [
+      giftSourceGroupKey(broccoliRow.mallName, broccoliRow.productName),
+      { assignmentMode: 'balanced_random', poolStyles: [broccoliWhite, broccoliBlack] },
+    ],
+  ]),
+})
+const broccoliSessionOverlay = overlayGiftSourceOnProductNames(
+  transformInvoiceProductNames(
+    [broccoliRow],
+    [],
+    { byName: new Map(), byCompactName: new Map() },
+  ),
+  broccoliSessionApply,
+)
+assert(
+  broccoliSessionOverlay.rows[0]?.status === 'gift_mapped' &&
+    broccoliSessionOverlay.unresolvedCombos.length === 0,
+  '현재 파일에서 사은품 적용 후 AI 목록에서 제거',
+)
+assert(
+  broccoliSessionApply.replacementsByRow.get(1)?.[0]?.style.styleNo === 'M2305' ||
+    broccoliSessionApply.replacementsByRow.get(1)?.[0]?.style.styleNo === 'M2306',
+  '적용 후 M2305/M2306으로 배정',
 )
 
 console.log('gift-source-transform verify ok')

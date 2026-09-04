@@ -1,0 +1,21 @@
+{
+  "createdAt": "2026-09-04T02:52:06.993Z",
+  "note": "지점명이 빈 대표 줄에 지점명을 채우기 직전의 출고업체 원장 스냅샷.",
+  "tables": {
+    "code_usage_targets": {
+      "fetched": 167,
+      "count": 167,
+      "error": null
+    },
+    "outbound_partner_groups": {
+      "fetched": 23,
+      "count": 23,
+      "error": null
+    },
+    "code_usage_target_aliases": {
+      "fetched": 12,
+      "count": 12,
+      "error": null
+    }
+  }
+}

@@ -32,7 +32,7 @@ import {
   updateProductCode,
 } from '@/lib/api'
 import { barcodePrefix } from '@/lib/codes/ean'
-import { outboundPartnerOptionLabel } from '@/lib/codes/outbound-partner'
+import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import type {
   BarcodeField,
   CodeUsageAssignment,
@@ -153,7 +153,7 @@ export function BarcodePage() {
         codeAssignments.some((row) => {
           const target = targetMap.get(row.usageTargetId)
           return target
-            ? outboundPartnerOptionLabel(target).toLowerCase().includes(keyword)
+            ? outboundPartnerDisplayName(target).toLowerCase().includes(keyword)
             : false
         })
       ) {
@@ -669,7 +669,7 @@ export function BarcodePage() {
                                           >
                                             <span>
                                               {target
-                                                ? outboundPartnerOptionLabel(
+                                                ? outboundPartnerDisplayName(
                                                     target,
                                                   )
                                                 :
@@ -840,7 +840,7 @@ function UsageSummary({
       {assignments.map((row) => {
         const target = targetMap.get(row.usageTargetId)
         const label = target
-          ? outboundPartnerOptionLabel(target)
+          ? outboundPartnerDisplayName(target)
           : '알 수 없는 업체'
         if (row.status === 'active') {
           return (

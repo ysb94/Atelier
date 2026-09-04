@@ -88,9 +88,15 @@ function searchableText(row: SabangnetOrderRow): string {
 export function SabangnetOrderTable({
   rows,
   columnCount,
+  sourceRowCount,
+  excludedOrderCount = 0,
+  excludedRowCount = 0,
 }: {
   rows: SabangnetOrderRow[]
   columnCount: number
+  sourceRowCount?: number
+  excludedOrderCount?: number
+  excludedRowCount?: number
 }) {
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -127,8 +133,9 @@ export function SabangnetOrderTable({
             <Badge variant="muted">{columnCount}열 인식</Badge>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            업로드한 {formatNumber(rows.length)}행 전체를 검색하고 페이지별로
-            확인할 수 있습니다.
+            {excludedRowCount > 0
+              ? `원본 ${formatNumber(sourceRowCount ?? rows.length + excludedRowCount)}행 · 이전 백업 제외 ${formatNumber(excludedOrderCount)}건 · ${formatNumber(excludedRowCount)}행 / 작업 대상 ${formatNumber(rows.length)}행`
+              : `업로드한 ${formatNumber(rows.length)}행 전체를 검색하고 페이지별로 확인할 수 있습니다.`}
           </p>
         </div>
 

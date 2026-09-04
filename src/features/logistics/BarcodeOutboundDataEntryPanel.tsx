@@ -12,11 +12,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
 import { BarcodeOutboundSiteResolutionDialog } from '@/features/logistics/BarcodeOutboundSiteResolutionDialog'
+import { outboundPartnerUnitLabel } from '@/lib/codes/outbound-partner'
 import { parseFile } from '@/lib/import/parse'
 import {
   aliasesByTargetId,
   applyBarcodeDataEntrySiteLookup,
   applyBarcodeDataEntryStyleLookup,
+  assignBarcodeDataEntryEmptySite,
   barcodeDataEntryAllReady,
   barcodeDataEntryDisplayRows,
   barcodeDataEntrySiteLinked,
@@ -61,6 +63,77 @@ async function downloadBarcodeDataEntryTemplate() {
   const workbook = XLSX.utils.book_new()
   XLSX.utils.book_append_sheet(workbook, sheet, '출고데이터')
   XLSX.writeFile(workbook, '바코드출고_데이터입력_상품명수량지점.xlsx')
+}
+
+const EMPTY_PASTE_ROW_COUNT = 8
+
+const cellBorder = 'border-b border-r border-border/80 last:border-r-0'
+
+function EntryTableHead() {
+  return (
+    <thead className="sticky top-0 z-10 bg-muted">
+      <tr className="text-xs text-muted-foreground">
+        <th className={cn(cellBorder, 'w-24 px-3 py-2.5 font-medium')}>
+          M번호
+        </th>
+        <th className={cn(cellBorder, 'px-3 py-2.5 font-medium')}>상품명</th>
+        <th className={cn(cellBorder, 'w-20 px-3 py-2.5 text-right font-medium')}>
+          수량
+        </th>
+        <th className={cn(cellBorder, 'px-3 py-2.5 font-medium')}>지점명</th>
+        <th className={cn(cellBorder, 'px-3 py-2.5 font-medium')}>연결 지점</th>
+      </tr>
+    </thead>
+  )
+}
+
+function EmptyPasteRow({
+  index,
+  active,
+}: {
+  index: number
+  active: boolean
+}) {
+  const sample = index === 0
+  return (
+    <tr className={active && sample ? 'bg-primary/10' : undefined}>
+      <td
+        className={cn(
+          cellBorder,
+          'h-10 px-3 py-2 font-mono text-xs text-muted-foreground/50',
+        )}
+      >
+        -
+      </td>
+      <td
+        className={cn(
+          cellBorder,
+          'px-3 py-2 text-sm',
+          sample
+            ? active
+              ? 'text-primary'
+              : 'text-muted-foreground'
+            : 'text-muted-foreground/40',
+        )}
+      >
+        {sample ? (active ? '여기에 붙여넣기' : '상품명') : ''}
+      </td>
+      <td
+        className={cn(
+          cellBorder,
+          'px-3 py-2 text-right text-sm text-muted-foreground/70',
+        )}
+      >
+        {sample ? '수량' : ''}
+      </td>
+      <td className={cn(cellBorder, 'px-3 py-2 text-sm text-muted-foreground/70')}>
+        {sample ? '지점명' : ''}
+      </td>
+      <td className={cn(cellBorder, 'px-3 py-2 text-sm text-muted-foreground/50')}>
+        {sample ? '등록 후 연결' : ''}
+      </td>
+    </tr>
+  )
 }
 
 const EntryTableRow = memo(function EntryTableRow({
@@ -172,6 +245,8 @@ export function BarcodeOutboundDataEntryPanel({
   const [error, setError] = useState<string | null>(null)
   const [status, setStatus] = useState<string | null>(null)
   const [siteDialogOpen, setSiteDialogOpen] = useState(false)
+  const [pasteActive, setPasteActive] = useState(false)
+  const pasteBoxRef = useRef<HTMLDivElement>(null)
   const dirtyRef = useRef(false)
   const persistTailRef = useRef(Promise.resolve())
   const draftsRef = useRef(drafts)
@@ -471,45 +546,66 @@ export function BarcodeOutboundDataEntryPanel({
 
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_16rem]">
         <div
-          className="overflow-hidden rounded-lg border border-border focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          ref={pasteBoxRef}
+          role="grid"
+          aria-label="상품명·수량·지점명 붙여넣기 표"
+          aria-disabled={saving}
           tabIndex={saving ? -1 : 0}
+          className={cn(
+            'cursor-text overflow-hidden rounded-lg border outline-none transition-colors',
+            pasteActive
+              ? 'border-primary bg-primary/5 ring-2 ring-primary/35'
+              : 'border-border bg-card hover:border-primary/45 hover:bg-muted/15',
+            saving && 'pointer-events-none cursor-default opacity-60',
+          )}
+          onFocus={() => setPasteActive(true)}
+          onBlur={(event) => {
+            if (pasteBoxRef.current?.contains(event.relatedTarget as Node)) {
+              return
+            }
+            setPasteActive(false)
+          }}
+          onClick={() => {
+            setPasteActive(true)
+            pasteBoxRef.current?.focus()
+          }}
           onPaste={(event) => {
             void handlePaste(event)
           }}
         >
-          {drafts.length === 0 ? (
-            <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-              아직 행이 없습니다. 엑셀을 올리거나, 상품명·수량·지점명을 여기에
-              붙여넣으세요.
+          <div className="border-b border-border bg-muted/50 px-3 py-1.5">
+            <p className="text-xs text-muted-foreground">
+              {drafts.length > 0
+                ? `${formatNumber(drafts.length)}행 · 표를 누른 뒤 이어서 붙여넣을 수 있습니다.`
+                : pasteActive
+                  ? '붙여넣을 수 있습니다. Ctrl+V 또는 우클릭 → 붙여넣기'
+                  : '이 표를 누른 뒤 엑셀에서 복사한 상품명·수량·지점명을 붙여넣으세요.'}
             </p>
-          ) : (
-            <div className="max-h-[22rem] overflow-auto">
-              <table className="w-full text-left text-sm">
-                <thead className="sticky top-0 bg-card">
-                  <tr className="border-b border-border text-xs text-muted-foreground">
-                    <th className="w-24 px-3 py-2 font-medium">M번호</th>
-                    <th className="px-3 py-2 font-medium">상품명</th>
-                    <th className="w-20 px-3 py-2 text-right font-medium">
-                      수량
-                    </th>
-                    <th className="px-3 py-2 font-medium">지점명</th>
-                    <th className="px-3 py-2 font-medium">연결 지점</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayRows.map(({ row, index }) => (
-                    <EntryTableRow
-                      key={index}
-                      row={row}
-                      index={index}
-                      registered={registered}
-                      onNameChange={handleNameChange}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+          </div>
+          <div className="max-h-[22rem] overflow-auto">
+            <table className="w-full text-left text-sm">
+              <EntryTableHead />
+              <tbody>
+                {drafts.length === 0
+                  ? Array.from({ length: EMPTY_PASTE_ROW_COUNT }, (_, index) => (
+                      <EmptyPasteRow
+                        key={index}
+                        index={index}
+                        active={pasteActive}
+                      />
+                    ))
+                  : displayRows.map(({ row, index }) => (
+                      <EntryTableRow
+                        key={index}
+                        row={row}
+                        index={index}
+                        registered={registered}
+                        onNameChange={handleNameChange}
+                      />
+                    ))}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         <label className="flex min-h-[10rem] flex-col gap-1.5 rounded-lg border border-border px-3 py-3">
@@ -540,6 +636,18 @@ export function BarcodeOutboundDataEntryPanel({
           sites={unresolvedSites}
           units={units}
           aliasesByTarget={aliasesByTarget}
+          onAssignEmptySite={(unit) => {
+            const next = assignBarcodeDataEntryEmptySite(
+              draftsRef.current,
+              unit,
+            )
+            dirtyRef.current = true
+            setDrafts(next)
+            setStatus(
+              `빈 지점 행에 ${outboundPartnerUnitLabel(unit)}을 넣었습니다.`,
+            )
+            void persist(next, noteRef.current)
+          }}
           onClose={() => setSiteDialogOpen(false)}
         />
       ) : null}

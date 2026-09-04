@@ -104,6 +104,15 @@ export function isInvoiceMallReady(resolution: InvoiceMallResolution): boolean {
   return resolution.unresolvedCount === 0
 }
 
+/** 활성 출고업체로 연결된 쇼핑몰만 원장 업체로 쓴다. */
+export function usageTargetIdForMallName(
+  mallName: string,
+  resolution: InvoiceMallResolution,
+): string | null {
+  const site = resolution.sites.find((item) => item.key === mallKeyOf(mallName))
+  return site?.status === 'matched' ? site.usageTargetId : null
+}
+
 /**
  * 사방넷 행의 고유 쇼핑몰명을 활성 출고업체 정식명·별칭과 exact 매칭한다.
  * 빈 값과 미등록은 차단하고, 비활성 일치는 자동 연결하지 않는다.

@@ -36,7 +36,9 @@
     "verify:work-instruction": "node scripts/verify-work-instruction.mjs",
     "verify:invoice-work-pipeline": "node scripts/verify-invoice-work-pipeline.mjs",
     "verify:invoice-step-compute": "node scripts/verify-invoice-step-compute.mjs",
-    "verify:barcode-outbound-data-entry": "node scripts/verify-barcode-outbound-data-entry.mjs"
+    "verify:barcode-outbound-data-entry": "node scripts/verify-barcode-outbound-data-entry.mjs",
+    "verify:outbound-reflect": "node scripts/verify-outbound-reflect.mjs",
+    "verify:invoice-order-key": "node scripts/verify-invoice-order-key.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",

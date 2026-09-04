@@ -928,9 +928,113 @@ export function applyProductNameAiRowSlots(
     passesGate: true,
   })
   if (next.validationError) {
-    return { ok: false, error: next.validationError, row, decision }
+    return { ok: false, error: next.validationError, row: next, decision }
   }
   return { ok: true, row: next, decision }
+}
+
+export function productNameAiRowConfirmError(row: ProductNameAiReviewRow) {
+  if (row.validationError) return row.validationError
+  if (row.lookupKeyConflict) {
+    return (
+      row.message ??
+      '같은 등록 조회 키가 서로 다른 본품 M번호를 가리킵니다. 조회 키나 본품을 맞춰 주세요.'
+    )
+  }
+  if (!row.lookupKey.trim()) return '조회 키를 고르세요.'
+  if (!row.style) return '본품 공식명칭을 완성하세요.'
+  if (row.holdReason === 'exclusion_guarded') {
+    return row.message ?? '예외 보류 행은 준비 완료로 넘길 수 없습니다.'
+  }
+  return null
+}
+
+export function decideProductNameAiRowConfirm(options: {
+  mode: 'edit' | 'confirm' | 'resolved'
+  decision: ProductNameAiEnterDecision
+  row: ProductNameAiReviewRow
+}): {
+  mark: ProductNameAiRowMark
+  confirmed: boolean
+  error: string | null
+} {
+  const mark = nextProductNameAiRowMark(options.mode, options.decision.status)
+  if (options.decision.status === 'invalid') {
+    return {
+      mark: 'unconfirm',
+      confirmed: false,
+      error:
+        options.decision.reason === 'duplicate'
+          ? '본품과 추가 구성품의 M번호는 겹칠 수 없습니다.'
+          : '본품 이름을 입력하세요.',
+    }
+  }
+  if (options.decision.status === 'needs_ai') {
+    return { mark, confirmed: false, error: null }
+  }
+  if (options.mode === 'confirm' && options.decision.status === 'ready') {
+    if (productNameAiRowReadyToCommit(options.row)) {
+      return { mark: 'confirmed', confirmed: true, error: null }
+    }
+    return {
+      mark: 'unconfirm',
+      confirmed: false,
+      error:
+        productNameAiRowConfirmError(options.row) ??
+        '준비 완료로 넘길 수 없습니다.',
+    }
+  }
+  return {
+    mark,
+    confirmed: false,
+    error: null,
+  }
+}
+
+export function stageProductNameAiRowConfirm(options: {
+  row: ProductNameAiReviewRow
+  slots: ProductNameAiQuickSlot[]
+  mode: 'edit' | 'confirm' | 'resolved'
+  siblings?: readonly ProductNameAiReviewRow[]
+}): {
+  ok: boolean
+  row: ProductNameAiReviewRow
+  draftRow: ProductNameAiReviewRow
+  decision: ProductNameAiEnterDecision
+  mark: ProductNameAiRowMark
+  confirmed: boolean
+  error: string | null
+} {
+  const applied = applyProductNameAiRowSlots(
+    options.row,
+    options.slots,
+    options.mode,
+  )
+  const candidates = (options.siblings ?? [options.row]).map((item) =>
+    item.key === options.row.key ? applied.row : item,
+  )
+  const latest =
+    markProductNameAiDuplicates(candidates).find(
+      (item) => item.key === options.row.key,
+    ) ?? applied.row
+  const outcome = decideProductNameAiRowConfirm({
+    mode: options.mode,
+    decision: applied.decision,
+    row: latest,
+  })
+  const failedConfirm =
+    options.mode === 'confirm' &&
+    applied.decision.status === 'ready' &&
+    !outcome.confirmed
+  return {
+    ok: applied.ok && !failedConfirm,
+    row: latest,
+    draftRow: applied.row,
+    decision: applied.decision,
+    mark: outcome.mark,
+    confirmed: outcome.confirmed,
+    error: outcome.error,
+  }
 }
 
 function slotCountOf(

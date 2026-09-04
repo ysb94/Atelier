@@ -130,35 +130,39 @@ export function isOutboundPartnerIncomplete(
   return !target.groupId;
 }
 
-/** 모든 화면에서 동일하게 쓰는 업체·지점 표시명. */
+const CHANNEL_DISPLAY_LABELS = Object.values(OUTBOUND_CHANNEL_TYPE_LABEL).filter(
+  (label) => label !== "미지정",
+);
+
+/** 합성명 끝에 붙은 온라인·오프라인만 뗀다. 원문 식별명은 바꾸지 않는다. */
+function stripOutboundChannelLabel(value: string): string {
+  const trimmed = normalizeOutboundPartnerName(value);
+  for (const label of CHANNEL_DISPLAY_LABELS) {
+    const suffix = ` ${label}`;
+    if (trimmed.endsWith(suffix)) {
+      return normalizeOutboundPartnerName(trimmed.slice(0, -suffix.length));
+    }
+  }
+  return trimmed;
+}
+
+/** 모든 화면에서 동일하게 쓰는 업체·지점 표시명. 채널은 붙이지 않는다. */
 export function outboundPartnerDisplayName(
   target: Pick<CodeUsageTarget, "name" | "groupName" | "siteName">,
 ): string {
-  if (!target.groupName) return target.name;
-  return target.siteName
-    ? `${target.groupName} · ${target.siteName}`
-    : target.groupName;
-}
-
-/** 선택 목록처럼 배지를 쓸 수 없는 곳의 채널 포함 한 줄 표기. */
-export function outboundPartnerOptionLabel(
-  target: Pick<
-    CodeUsageTarget,
-    "name" | "groupName" | "siteName" | "channelType"
-  >,
-): string {
-  const name = outboundPartnerDisplayName(target);
-  return target.channelType === "unset"
-    ? name
-    : `${name} · ${OUTBOUND_CHANNEL_TYPE_LABEL[target.channelType]}`;
+  const groupName = normalizeOutboundPartnerName(target.groupName);
+  if (!groupName) return stripOutboundChannelLabel(target.name) || target.name;
+  const siteName = normalizeOutboundPartnerName(target.siteName);
+  return siteName ? `${groupName} · ${siteName}` : groupName;
 }
 
 /** 업체 노드 아래 지점 행에 쓰는 짧은 이름. 헤더 업체명과 별개다. */
 export function outboundPartnerUnitLabel(
   target: Pick<CodeUsageTarget, "name" | "groupId" | "siteName">,
 ): string {
-  if (!target.groupId) return target.name;
-  return normalizeOutboundPartnerName(target.siteName) || target.name;
+  const name = stripOutboundChannelLabel(target.name) || target.name;
+  if (!target.groupId) return name;
+  return normalizeOutboundPartnerName(target.siteName) || name;
 }
 
 export function synthesizeOutboundPartnerName(input: {

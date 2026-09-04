@@ -48,6 +48,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { InvoiceBackedUpOrderDialog } from '@/features/logistics/InvoiceBackedUpOrderDialog'
 import { InvoiceWorkHistoryPanel } from '@/features/logistics/InvoiceWorkHistoryPanel'
 import {
   getInvoiceGiftAllocations,
@@ -78,6 +79,8 @@ import {
   getInvoicePackingSizeMaps,
   getStylesByBrand,
   getWarehouseStockPositions,
+  backupInvoiceOutboundWork,
+  lookupInvoiceBackedUpOrderKeys,
 } from '@/lib/api'
 import {
   ITEM_NAME_FEATURE_KEY,
@@ -102,6 +105,11 @@ import {
   buildItemNameTransformIndex,
   type InvoiceItemNameTransformation,
 } from '@/lib/invoice/item-name-transform'
+import {
+  buildOutboundReflectLedger,
+  formatOutboundReflectBlockReasons,
+  summarizeOutboundReflectProducts,
+} from '@/lib/invoice/outbound-reflect-summary'
 import {
   computeInvoiceItemNameStep,
   computeInvoiceProductNameStep,
@@ -143,7 +151,6 @@ import {
   overlayGiftSourceOnProductNames,
   type InvoiceProductNameTransformation,
 } from '@/lib/invoice/product-name-transform'
-import type { ProductNameAiReviewRow } from '@/lib/invoice/product-name-ai-review'
 import {
   collectGiftSourceSlots,
   effectiveGiftSourceAppliedKeys,
@@ -156,9 +163,20 @@ import {
 import { planUnifiedGifts } from '@/lib/invoice/gift-unified'
 import { planInvoicePrefixes } from '@/lib/invoice/prefix-transform'
 import {
+  collectInvoiceOrderKeyGroups,
+  filterRowsByExcludedNumbers,
+  hashInvoiceOrderKeyPayloads,
+  matchBackedUpInvoiceOrderKeys,
+  type InvoiceOrderKeyMatch,
+} from '@/lib/invoice/invoice-order-key'
+import {
+  countUniqueInvoiceOrders,
+  fingerprintInvoiceWorkRows,
   isInvoiceMallReady,
   resolveInvoiceMalls,
+  summarizeInvoiceWorkSites,
 } from '@/lib/invoice/mall-resolution'
+import { PRODUCT_OUTBOUND_UPDATED_EVENT } from '@/lib/outbound/product-outbound'
 import {
   type SabangnetInspection,
   type SabangnetOrderRow,
@@ -1019,6 +1037,7 @@ type TodayStep =
   | 'instruction'
   | 'product'
   | 'item'
+  | 'outboundReflect'
   | 'stock'
   | 'list'
   | 'output'
@@ -1030,6 +1049,7 @@ const TODAY_STEPS: { value: TodayStep; label: string }[] = [
   { value: 'instruction', label: '작업 지시' },
   { value: 'product', label: '품목명 변환' },
   { value: 'item', label: '내품명 변환' },
+  { value: 'outboundReflect', label: '(임시) 출고반영' },
   { value: 'stock', label: '재고·예약' },
   { value: 'list', label: '상품 리스트' },
   { value: 'output', label: '최종 행' },
@@ -1042,9 +1062,10 @@ const TODAY_STEP_INDEX: Record<TodayStep, number> = {
   instruction: 3,
   product: 4,
   item: 5,
-  stock: 6,
-  list: 7,
-  output: 8,
+  outboundReflect: 6,
+  stock: 7,
+  list: 8,
+  output: 9,
 }
 
 type UploadAiProgress = {
@@ -1073,6 +1094,12 @@ function isStepComputeSettled(status: InvoiceStepComputeStatus) {
 }
 
 const EMPTY_STYLE_REFS: StyleRef[] = []
+const EMPTY_ORDER_KEY_MATCH: InvoiceOrderKeyMatch = {
+  orderCount: 0,
+  rowCount: 0,
+  rowNumbers: [],
+  hashes: [],
+}
 
 function TodayStepProgress({
   stepIndex,
@@ -1373,12 +1400,25 @@ export function InvoiceWorkPage() {
   const [productCriteriaRetrying, setProductCriteriaRetrying] = useState(false)
   const [itemCriteriaRetrying, setItemCriteriaRetrying] = useState(false)
   const [mallDialogOpen, setMallDialogOpen] = useState(false)
+  const [outboundBackupBusy, setOutboundBackupBusy] = useState(false)
+  const [outboundBackupMessage, setOutboundBackupMessage] = useState<
+    string | null
+  >(null)
+  const [outboundBackupIsError, setOutboundBackupIsError] = useState(false)
+  const [currentGenerationBackedUp, setCurrentGenerationBackedUp] =
+    useState(false)
+  const [backedUpExclusionAccepted, setBackedUpExclusionAccepted] =
+    useState(false)
+  const [backupDialogOpen, setBackupDialogOpen] = useState(false)
   const mallAutoOpenedRef = useRef<string | null>(null)
+  const backupDialogAutoKeyRef = useRef<string | null>(null)
   const rulesView = activeView === 'rules'
   const reachedGift = reachedStepIndex >= TODAY_STEP_INDEX.gift
   const reachedInstruction = reachedStepIndex >= TODAY_STEP_INDEX.instruction
   const reachedProduct = reachedStepIndex >= TODAY_STEP_INDEX.product
   const reachedItem = reachedStepIndex >= TODAY_STEP_INDEX.item
+  const reachedOutboundReflect =
+    reachedStepIndex >= TODAY_STEP_INDEX.outboundReflect
   const reachedStock = reachedStepIndex >= TODAY_STEP_INDEX.stock
   const criteriaSnapshot = uploadPipeline
   const criteriaQueryOptions = invoiceCriteriaQueryOptions(criteriaSnapshot)
@@ -1564,16 +1604,72 @@ export function InvoiceWorkPage() {
       ),
     [nameRules],
   )
+  const orderKeyGroups = useMemo(
+    () => collectInvoiceOrderKeyGroups(inspection?.rows ?? []),
+    [inspection],
+  )
+  const orderKeyPayloadSig = useMemo(
+    () => orderKeyGroups.map((group) => group.payload).join('\n'),
+    [orderKeyGroups],
+  )
+  const backedUpLookupQuery = useQuery({
+    queryKey: [
+      'invoiceBackedUpOrderKeys',
+      brand.id,
+      workGeneration,
+      orderKeyPayloadSig,
+    ],
+    queryFn: async () => {
+      const hashes = await hashInvoiceOrderKeyPayloads(
+        orderKeyGroups.map((group) => group.payload),
+      )
+      const hits = await lookupInvoiceBackedUpOrderKeys(brand.id, hashes)
+      return matchBackedUpInvoiceOrderKeys(orderKeyGroups, hashes, hits)
+    },
+    enabled:
+      Boolean(inspection) &&
+      orderKeyGroups.length > 0 &&
+      !currentGenerationBackedUp,
+  })
+  const backedUpMatch =
+    orderKeyGroups.length === 0
+      ? EMPTY_ORDER_KEY_MATCH
+      : (backedUpLookupQuery.data ?? null)
+  const hasBackedUpMatch = (backedUpMatch?.orderCount ?? 0) > 0
+  const backupLookupReady =
+    !inspection ||
+    orderKeyGroups.length === 0 ||
+    backedUpLookupQuery.isSuccess
+  const backupExclusionReady =
+    backupLookupReady &&
+    (!hasBackedUpMatch || backedUpExclusionAccepted)
+  const backedUpExcludedRowNumbers = useMemo(() => {
+    if (!backedUpExclusionAccepted || !backedUpMatch) {
+      return new Set<number>()
+    }
+    return new Set(backedUpMatch.rowNumbers)
+  }, [backedUpExclusionAccepted, backedUpMatch])
+  const workRows = useMemo(
+    () =>
+      inspection
+        ? filterRowsByExcludedNumbers(
+            inspection.rows,
+            backedUpExcludedRowNumbers,
+          )
+        : [],
+    [backedUpExcludedRowNumbers, inspection],
+  )
   const nameTransformation = useMemo(() => {
     if (!inspection || !nameRulesQuery.isSuccess || nameRulesQuery.error) {
       return null
     }
-    return transformInvoiceNamesByCode(inspection.rows, activeNameRules)
+    return transformInvoiceNamesByCode(workRows, activeNameRules)
   }, [
     activeNameRules,
     inspection,
     nameRulesQuery.error,
     nameRulesQuery.isSuccess,
+    workRows,
   ])
   const accessoryRules = useMemo(
     () => accessoryRulesQuery.data ?? [],
@@ -1600,10 +1696,10 @@ export function InvoiceWorkPage() {
   const productLookupTexts = useMemo(() => {
     if (!inspection) return []
     return collectProductNameCandidateTexts(
-      inspection.rows,
+      workRows,
       productNameTagRoles,
     )
-  }, [inspection, productNameTagRoles])
+  }, [inspection, productNameTagRoles, workRows])
   const productLookupTextSig = useMemo(
     () => invoiceLookupTextsSig(productLookupTexts),
     [productLookupTexts],
@@ -1637,16 +1733,14 @@ export function InvoiceWorkPage() {
   const giftSourceFileMapIds = useMemo(() => {
     if (!inspection) return []
     const keys = new Set(
-      inspection.rows.map((row) =>
-        giftSourceGroupKey(row.mallName, row.productName),
-      ),
+      workRows.map((row) => giftSourceGroupKey(row.mallName, row.productName)),
     )
     return giftSourceMaps
       .filter((map) =>
         keys.has(giftSourceGroupKey(map.mallName, map.productName)),
       )
       .map((map) => map.id)
-  }, [giftSourceMaps, inspection])
+  }, [giftSourceMaps, inspection, workRows])
   const giftSourceAllocationsQuery = useQuery({
     queryKey: ['invoice-gift-source-allocations', brand.id, giftSourceFileMapIds],
     queryFn: () =>
@@ -1741,11 +1835,8 @@ export function InvoiceWorkPage() {
     [usageFoldersQuery.data],
   )
   const mallResolution = useMemo(
-    () =>
-      inspection
-        ? resolveInvoiceMalls(inspection.rows, usageTargets, usageAliases)
-        : resolveInvoiceMalls([], [], []),
-    [inspection, usageTargets, usageAliases],
+    () => resolveInvoiceMalls(workRows, usageTargets, usageAliases),
+    [usageAliases, usageTargets, workRows],
   )
   const mallPartnersReady =
     !usageTargetsQuery.isPending &&
@@ -1760,9 +1851,11 @@ export function InvoiceWorkPage() {
   const fileReady = Boolean(
     headerReady && inspection && inspection.blockingRowCount === 0,
   )
+  const workFlowReady = backupExclusionReady && workRows.length > 0
+  const canLeaveFileCheck = Boolean(headerReady && mallsReady && workFlowReady)
   const maxStepIndex = !inspection
     ? 0
-    : headerReady && mallsReady
+    : canLeaveFileCheck
       ? reachedStepIndex
       : Math.min(reachedStepIndex, 1)
   const stepIndex = Math.min(
@@ -1779,6 +1872,7 @@ export function InvoiceWorkPage() {
     }
     if (
       !uploadPipeline &&
+      backupExclusionReady &&
       activeStep === 'check' &&
       mallAutoOpenedRef.current !== autoKey
     ) {
@@ -1793,6 +1887,32 @@ export function InvoiceWorkPage() {
     mallPartnersReady,
     mallResolution.unresolvedCount,
     uploadPipeline,
+    backupExclusionReady,
+  ])
+  useEffect(() => {
+    if (activeView !== 'today' || activeStep !== 'check' || isParsing) {
+      setBackupDialogOpen(false)
+      backupDialogAutoKeyRef.current = null
+      return
+    }
+    if (!hasBackedUpMatch || backedUpExclusionAccepted) {
+      if (backedUpExclusionAccepted) setBackupDialogOpen(false)
+      return
+    }
+    if (!backupLookupReady) return
+    const autoKey = `${fileName}:${backedUpMatch?.orderCount ?? 0}:${backedUpMatch?.rowCount ?? 0}`
+    if (backupDialogAutoKeyRef.current === autoKey) return
+    backupDialogAutoKeyRef.current = autoKey
+    setBackupDialogOpen(true)
+  }, [
+    activeStep,
+    activeView,
+    backedUpExclusionAccepted,
+    backedUpMatch,
+    backupLookupReady,
+    fileName,
+    hasBackedUpMatch,
+    isParsing,
   ])
   const visitedStepsRef = useRef(new Set<TodayStep>())
   visitedStepsRef.current.add(activeStep)
@@ -1811,7 +1931,7 @@ export function InvoiceWorkPage() {
   const giftSourceSlots = useMemo(() => {
     if (!inspection) return []
     return collectGiftSourceSlots(
-      inspection.rows,
+      workRows,
       deferredProductNameTagRoles,
       giftSourceIgnoredKeySet,
       giftSourceEffectiveAppliedKeys,
@@ -1821,6 +1941,7 @@ export function InvoiceWorkPage() {
     giftSourceEffectiveAppliedKeys,
     giftSourceIgnoredKeySet,
     inspection,
+    workRows,
   ])
   const giftSourceAppliedRowNumbers = useMemo(
     () =>
@@ -1838,7 +1959,7 @@ export function InvoiceWorkPage() {
   const giftSetupGroup = useMemo(() => {
     if (!inspection || !giftSetupTarget) return null
     return inspectGiftSourceGroup({
-      rows: inspection.rows,
+      rows: workRows,
       mallName: giftSetupTarget.mallName,
       productName: giftSetupTarget.productName,
       tagRoles: deferredProductNameTagRoles,
@@ -1859,6 +1980,7 @@ export function InvoiceWorkPage() {
     giftSourceSessionAllocationMap,
     giftSourceSessionRuleMap,
     inspection,
+    workRows,
   ])
   const processRowsCacheRef = useRef<{
     inspectionRows: SabangnetOrderRow[]
@@ -1873,19 +1995,20 @@ export function InvoiceWorkPage() {
   const fileResetKey = `${fileName}:${workGeneration}`
   const campaignRows = useMemo(
     () =>
-      (inspection?.rows ?? []).filter(
+      workRows.filter(
         (row) => !giftSourceAppliedRowNumbers.has(row.rowNumber),
       ),
-    [giftSourceAppliedRowNumbers, inspection],
+    [giftSourceAppliedRowNumbers, workRows],
   )
   const giftCompute = useInvoiceStepCompute({
     enabled:
       Boolean(inspection) &&
       giftQueriesReady &&
-      reachedGift,
+      reachedGift &&
+      workFlowReady,
     depsKey: invoiceStepDepsKey([
       fileName,
-      inspection?.rowCount,
+      workRows.length,
       campaignRows.length,
       giftSeed,
       excludedGiftStyleIds.join(','),
@@ -1911,7 +2034,7 @@ export function InvoiceWorkPage() {
           .filter(Boolean)
           .map((value) => Number(value)),
       )
-      const rows = (inspection?.rows ?? []).filter(
+      const rows = workRows.filter(
         (row) =>
           !excluded.has(row.rowNumber) &&
           !giftSourceAppliedRowNumbers.has(row.rowNumber),
@@ -1925,7 +2048,7 @@ export function InvoiceWorkPage() {
         eligibility,
         unified: planUnifiedGifts({
           campaignRows: rows,
-          sourceRows: inspection!.rows,
+          sourceRows: workRows,
           prefixPlan: eligibility,
           requests: giftRequests,
           seed: giftSeed,
@@ -2013,7 +2136,7 @@ export function InvoiceWorkPage() {
   })
   const liveProductDepsKey = invoiceStepDepsKey([
     fileName,
-    inspection?.rowCount,
+    workRows.length,
     productMapsSig,
     productExclusionContentSig,
     productTagRoleSig,
@@ -2029,7 +2152,8 @@ export function InvoiceWorkPage() {
       Boolean(inspection) &&
       productQueriesReady &&
       reachedProduct &&
-      productHold.holdEnabled,
+      productHold.holdEnabled &&
+      workFlowReady,
     depsKey: productHold.depsKey,
     resetKey: fileResetKey,
     label: 'product-transform',
@@ -2037,7 +2161,7 @@ export function InvoiceWorkPage() {
     stage: 'product',
     compute: () =>
       computeInvoiceProductNameStep({
-        sourceRows: inspection!.rows,
+        sourceRows: workRows,
         maps: [],
         styles: [],
         tagRoles: deferredProductNameTagRoles,
@@ -2066,11 +2190,11 @@ export function InvoiceWorkPage() {
     () =>
       inspection
         ? collectOptionMapLookupCombos(
-            inspection.rows,
+            workRows,
             productTransformation?.rows,
           )
         : [],
-    [inspection, productTransformation],
+    [inspection, productTransformation, workRows],
   )
   const optionMapComboSig = useMemo(
     () =>
@@ -2086,11 +2210,11 @@ export function InvoiceWorkPage() {
     () =>
       inspection
         ? collectItemNameLookupTexts(
-            inspection.rows,
+            workRows,
             productTransformation?.rows,
           )
         : [],
-    [inspection, productTransformation],
+    [inspection, productTransformation, workRows],
   )
   const itemNameLookupSig = useMemo(
     () => invoiceLookupTextsSig(itemNameLookupTexts),
@@ -2204,7 +2328,7 @@ export function InvoiceWorkPage() {
     const cached = processRowsCacheRef.current
     if (
       cached &&
-      cached.inspectionRows === inspection.rows &&
+      cached.inspectionRows === workRows &&
       cached.signature === excludedRowSignature
     ) {
       return cached.rows
@@ -2216,15 +2340,15 @@ export function InvoiceWorkPage() {
       : null
     const rows =
       !excluded || excluded.size === 0
-        ? inspection.rows
-        : inspection.rows.filter((row) => !excluded.has(row.rowNumber))
+        ? workRows
+        : workRows.filter((row) => !excluded.has(row.rowNumber))
     processRowsCacheRef.current = {
-      inspectionRows: inspection.rows,
+      inspectionRows: workRows,
       signature: excludedRowSignature,
       rows,
     }
     return rows
-  }, [excludedRowSignature, inspection])
+  }, [excludedRowSignature, inspection, workRows])
   const prefixRows = useMemo(
     () =>
       processRows.filter(
@@ -2236,7 +2360,8 @@ export function InvoiceWorkPage() {
     enabled:
       Boolean(inspection) &&
       workInstructionsQuery.isSuccess &&
-      reachedInstruction,
+      reachedInstruction &&
+      workFlowReady,
     depsKey: invoiceStepDepsKey([
       fileName,
       processRows.length,
@@ -2271,7 +2396,7 @@ export function InvoiceWorkPage() {
         'item-transform',
         () =>
           runInvoiceItemNameStep({
-            sourceRows: inspection.rows,
+            sourceRows: workRows,
             optionMaps: [],
             productRows: productTransformation.rows,
             itemNameRules: [],
@@ -2287,6 +2412,7 @@ export function InvoiceWorkPage() {
       inspection,
       itemNameIndex,
       productTransformation,
+      workRows,
     ])
   const itemCacheRef = useRef<InvoiceItemNameTransformation | null>(null)
   const holdItemRecompute = shouldHoldInvoiceStepRecompute({
@@ -2319,7 +2445,8 @@ export function InvoiceWorkPage() {
       itemQueriesReady &&
       productCompute.status === 'ready' &&
       reachedItem &&
-      itemHold.holdEnabled,
+      itemHold.holdEnabled &&
+      workFlowReady,
     depsKey: itemHold.depsKey,
     resetKey: fileResetKey,
     label: 'item-transform',
@@ -2330,7 +2457,7 @@ export function InvoiceWorkPage() {
         throw new Error('내품명 변환 기준이 아직 준비되지 않았습니다.')
       }
       return computeInvoiceItemNameStep({
-        sourceRows: inspection.rows,
+        sourceRows: workRows,
         optionMaps: [],
         productRows: productTransformation.rows,
         itemNameRules: [],
@@ -2344,10 +2471,25 @@ export function InvoiceWorkPage() {
     itemCacheRef.current = itemCompute.result
   }
   const itemTransformation = itemCompute.result ?? itemCacheRef.current
+  const outboundReflectSummary = useMemo(() => {
+    if (!productTransformation || !itemTransformation) return null
+    return summarizeOutboundReflectProducts({
+      productTransformation,
+      itemTransformation,
+    })
+  }, [itemTransformation, productTransformation])
+  const outboundReflectLedger = useMemo(() => {
+    if (!productTransformation || !itemTransformation) return null
+    return buildOutboundReflectLedger({
+      productTransformation,
+      itemTransformation,
+      mallResolution,
+    })
+  }, [itemTransformation, mallResolution, productTransformation])
   const stockHoldBundles = useMemo(() => {
     if (!inspection || !productTransformation) return []
     return buildStockHoldCandidateBundles({
-      sourceRows: inspection.rows,
+      sourceRows: workRows,
       productRows: productTransformation.rows,
       itemRows: itemTransformation?.rows ?? null,
       discontinued: discontinuedStylesQuery.data ?? [],
@@ -2359,6 +2501,7 @@ export function InvoiceWorkPage() {
     itemTransformation,
     preorderHoldsQuery.data,
     productTransformation,
+    workRows,
   ])
   const stockHoldBundleKeySig = useMemo(
     () =>
@@ -2500,6 +2643,7 @@ export function InvoiceWorkPage() {
   const laterStageSupportEnabled =
     Boolean(inspection) &&
     headerReady &&
+    workFlowReady &&
     reachedStepIndex >= TODAY_STEP_INDEX.list
   const laterWarehouseSetQuery = useQuery({
     queryKey: ['warehouse-inventory-set', brand.id],
@@ -2585,7 +2729,10 @@ export function InvoiceWorkPage() {
       headerReady &&
       giftStageSettled &&
       giftExclusionSig === excludedRowSignature,
-    computeReady: productCompute.status === 'ready',
+    computeReady:
+      productCompute.status === 'ready' &&
+      productQueriesReady &&
+      !holdProductRecompute,
     alreadySettled: productAiPipeline.settled,
   })
   const itemAiAutoCollect = shouldAutoCollectInvoiceAi({
@@ -2689,13 +2836,16 @@ export function InvoiceWorkPage() {
     },
     [workGeneration],
   )
-  const handleOpenGiftSetup = useCallback((row: ProductNameAiReviewRow) => {
-    setGiftSourceError(null)
-    setGiftSetupTarget({
-      mallName: row.mallName,
-      productName: row.productName,
-    })
-  }, [])
+  const handleOpenGiftSetup = useCallback(
+    (target: { mallName: string; productName: string }) => {
+      setGiftSourceError(null)
+      setGiftSetupTarget({
+        mallName: target.mallName,
+        productName: target.productName,
+      })
+    },
+    [],
+  )
   const handleItemAiSettled = useCallback(() => {
     if (workGenerationRef.current !== workGeneration) return
     markInvoiceWorkStage(workJobRef.current, 'item-ai')
@@ -2748,6 +2898,11 @@ export function InvoiceWorkPage() {
       setUploadPipeline(false)
       return
     }
+    if (!backupExclusionReady) return
+    if (workRows.length === 0) {
+      setUploadPipeline(false)
+      return
+    }
     if (excludedRowSignature !== giftExclusionSig) return
     if (
       !giftStageSettled ||
@@ -2778,6 +2933,8 @@ export function InvoiceWorkPage() {
     productAiPipeline.settled,
     productStageSettled,
     uploadPipeline,
+    backupExclusionReady,
+    workRows.length,
     workStageSettled,
   ])
   const nameRulesError =
@@ -2820,7 +2977,14 @@ export function InvoiceWorkPage() {
     productCacheRef.current = null
     productExclusionSigRef.current = ''
     mallAutoOpenedRef.current = null
+    backupDialogAutoKeyRef.current = null
     setMallDialogOpen(false)
+    setBackupDialogOpen(false)
+    setBackedUpExclusionAccepted(false)
+    setCurrentGenerationBackedUp(false)
+    setOutboundBackupBusy(false)
+    setOutboundBackupMessage(null)
+    setOutboundBackupIsError(false)
     setInspection(null)
     setFileName('')
     setError(null)
@@ -2863,7 +3027,14 @@ export function InvoiceWorkPage() {
     productCacheRef.current = null
     productExclusionSigRef.current = ''
     mallAutoOpenedRef.current = null
+    backupDialogAutoKeyRef.current = null
     setMallDialogOpen(false)
+    setBackupDialogOpen(false)
+    setBackedUpExclusionAccepted(false)
+    setCurrentGenerationBackedUp(false)
+    setOutboundBackupBusy(false)
+    setOutboundBackupMessage(null)
+    setOutboundBackupIsError(false)
     setInspection(null)
     setFileName(file.name)
     setProductSaveBlockCount(0)
@@ -2910,6 +3081,9 @@ export function InvoiceWorkPage() {
 
   function changeTodayStep(next: TodayStep) {
     if (TODAY_STEP_INDEX[next] > reachedStepIndex) return
+    if (TODAY_STEP_INDEX[next] > TODAY_STEP_INDEX.check && !canLeaveFileCheck) {
+      return
+    }
     if (
       step === 'product' &&
       next !== 'product' &&
@@ -2924,6 +3098,9 @@ export function InvoiceWorkPage() {
   }
 
   function goNextStep(next: TodayStep) {
+    if (TODAY_STEP_INDEX[next] > TODAY_STEP_INDEX.check && !canLeaveFileCheck) {
+      return
+    }
     if (
       step === 'product' &&
       next !== 'product' &&
@@ -2935,6 +3112,91 @@ export function InvoiceWorkPage() {
       Math.max(current, TODAY_STEP_INDEX[next]),
     )
     setStep(next)
+  }
+
+  function notifyOutboundUpdated() {
+    if (typeof window === 'undefined') return
+    window.dispatchEvent(
+      new CustomEvent(PRODUCT_OUTBOUND_UPDATED_EVENT, {
+        detail: { brandId: brand.id },
+      }),
+    )
+  }
+
+  async function backupOutboundReflect() {
+    if (
+      !inspection ||
+      !productTransformation ||
+      !itemTransformation ||
+      !outboundReflectLedger
+    ) {
+      return
+    }
+    if (!outboundReflectLedger.ok) {
+      setOutboundBackupIsError(true)
+      setOutboundBackupMessage(
+        formatOutboundReflectBlockReasons(outboundReflectLedger.reasons),
+      )
+      return
+    }
+    setOutboundBackupBusy(true)
+    setOutboundBackupIsError(false)
+    setOutboundBackupMessage(null)
+    try {
+      const sourceRef = await fingerprintInvoiceWorkRows(processRows)
+      const orderKeyHashes = await hashInvoiceOrderKeyPayloads(
+        collectInvoiceOrderKeyGroups(processRows).map((group) => group.payload),
+      )
+      await backupInvoiceOutboundWork({
+        brandId: brand.id,
+        sourceRef,
+        note: fileName ? `invoice:${fileName}` : '',
+        entries: outboundReflectLedger.entries.map((entry) => ({
+          usageTargetId: entry.usageTargetId,
+          styleId: entry.styleId,
+          shippedOn: entry.shippedOn,
+          quantity: entry.quantity,
+        })),
+        sourceFileName: fileName,
+        sourceRowCount: processRows.length,
+        sourceOrderCount: countUniqueInvoiceOrders(processRows),
+        sites: summarizeInvoiceWorkSites({
+          sourceRows: processRows,
+          outputRows: [],
+          resolution: mallResolution,
+        }),
+        orderKeyHashes,
+      })
+      setCurrentGenerationBackedUp(true)
+      setBackupDialogOpen(false)
+      notifyOutboundUpdated()
+      await queryClient.invalidateQueries({
+        queryKey: ['outboundShipments', brand.id],
+      })
+      await queryClient.invalidateQueries({
+        queryKey: ['invoiceWorkRuns', brand.id],
+      })
+      const dateRange =
+        outboundReflectLedger.firstOrderedOn &&
+        outboundReflectLedger.lastOrderedOn
+          ? outboundReflectLedger.firstOrderedOn ===
+            outboundReflectLedger.lastOrderedOn
+            ? outboundReflectLedger.firstOrderedOn
+            : `${outboundReflectLedger.firstOrderedOn} ~ ${outboundReflectLedger.lastOrderedOn}`
+          : ''
+      setOutboundBackupMessage(
+        `출고 데이터에 ${formatNumber(outboundReflectLedger.styleCount)}종 · ${formatNumber(outboundReflectLedger.totalQuantity)}개${dateRange ? ` · ${dateRange}` : ''} 반영했습니다.`,
+      )
+    } catch (reason) {
+      setOutboundBackupIsError(true)
+      setOutboundBackupMessage(
+        reason instanceof Error
+          ? reason.message
+          : '출고 데이터에 반영하지 못했습니다.',
+      )
+    } finally {
+      setOutboundBackupBusy(false)
+    }
   }
 
   function markGiftSourceApplied(key: string) {
@@ -2987,7 +3249,7 @@ export function InvoiceWorkPage() {
   const todayStepBusyLabel = ((): string | null => {
     if (activeView !== 'today') return null
     if (isParsing) return '파일을 확인하고 있습니다.'
-    if (uploadPipeline) {
+    if (uploadPipeline && backupExclusionReady && workRows.length > 0) {
       if (!giftQueriesReady && !giftStageError) {
         return '사은품 기준을 불러오고 있습니다.'
       }
@@ -3045,6 +3307,9 @@ export function InvoiceWorkPage() {
       return '업로드 작업을 마무리하고 있습니다.'
     }
     if (activeStep === 'check') {
+      if (!backupLookupReady || (hasBackedUpMatch && !backedUpExclusionAccepted)) {
+        return null
+      }
       if (
         usageTargetsQuery.isLoading ||
         usageAliasesQuery.isLoading ||
@@ -3346,6 +3611,72 @@ export function InvoiceWorkPage() {
                   />
                 </div>
 
+                {backedUpLookupQuery.isFetching && orderKeyGroups.length > 0 ? (
+                  <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/20 p-4">
+                    <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
+                    <p className="text-sm">
+                      이전 출고반영 백업과 같은 주문이 있는지 확인하고 있습니다.
+                      확인이 끝나기 전에는 다음 단계로 갈 수 없습니다.
+                    </p>
+                  </div>
+                ) : backedUpLookupQuery.isError ? (
+                  <div className="flex items-start justify-between gap-3 rounded-lg border border-danger/30 bg-danger/10 p-4">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
+                      <div>
+                        <p className="text-sm font-medium text-danger">
+                          이전 백업 주문을 확인하지 못했습니다.
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {backedUpLookupQuery.error instanceof Error
+                            ? backedUpLookupQuery.error.message
+                            : '다시 확인한 뒤에 다음 단계로 갈 수 있습니다.'}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        void backedUpLookupQuery.refetch()
+                      }}
+                    >
+                      다시 확인
+                    </Button>
+                  </div>
+                ) : hasBackedUpMatch && backedUpMatch ? (
+                  <div className="rounded-lg border border-warning/30 bg-warning/10 p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-medium">
+                          이전 백업 제외 {formatNumber(backedUpMatch.orderCount)}
+                          건 · {formatNumber(backedUpMatch.rowCount)}행
+                          {backedUpExclusionAccepted
+                            ? ` / 작업 대상 ${formatNumber(workRows.length)}행`
+                            : ` / 원본 ${formatNumber(inspection.rowCount)}행`}
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          {backedUpExclusionAccepted
+                            ? workRows.length === 0
+                              ? '이번 파일의 모든 주문이 이전 백업과 같습니다. 진행할 주문이 없습니다.'
+                              : '제외한 주문은 이후 모든 단계에서 빼 둡니다. 같은 주문의 다른 상품 행도 함께 빠집니다.'
+                            : '제외할지 확인하기 전에는 다음 단계로 갈 수 없습니다.'}
+                        </p>
+                      </div>
+                      {!backedUpExclusionAccepted ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={() => setBackupDialogOpen(true)}
+                        >
+                          제외 확인
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
                 {inspection.missingHeaders.length > 0 ? (
                   <div className="rounded-lg border border-danger/30 bg-danger/10 p-4">
                     <div className="flex items-start gap-2">
@@ -3414,8 +3745,21 @@ export function InvoiceWorkPage() {
                 ) : null}
 
                 <SabangnetOrderTable
-                  rows={inspection.rows}
+                  rows={
+                    backedUpExclusionAccepted ? workRows : inspection.rows
+                  }
                   columnCount={inspection.columnCount}
+                  sourceRowCount={inspection.rowCount}
+                  excludedOrderCount={
+                    backedUpExclusionAccepted
+                      ? (backedUpMatch?.orderCount ?? 0)
+                      : 0
+                  }
+                  excludedRowCount={
+                    backedUpExclusionAccepted
+                      ? (backedUpMatch?.rowCount ?? 0)
+                      : 0
+                  }
                 />
 
                 <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
@@ -3428,12 +3772,14 @@ export function InvoiceWorkPage() {
                       stage="check"
                       brandName={brand.name}
                       sourceFileName={fileName}
-                      sourceRows={inspection.rows}
+                      sourceRows={
+                        backedUpExclusionAccepted ? workRows : inspection.rows
+                      }
                     />
                   </div>
                   <Button
                     type="button"
-                    disabled={!headerReady || !mallsReady}
+                    disabled={!canLeaveFileCheck}
                     onClick={() => goNextStep('gift')}
                   >
                     사은품 추가로
@@ -3442,6 +3788,22 @@ export function InvoiceWorkPage() {
                 </div>
               </CardContent>
             </Card>
+            ) : null}
+
+            {backupDialogOpen && backedUpMatch ? (
+              <InvoiceBackedUpOrderDialog
+                orderCount={backedUpMatch.orderCount}
+                rowCount={backedUpMatch.rowCount}
+                workRowCount={Math.max(
+                  0,
+                  (inspection?.rowCount ?? 0) - backedUpMatch.rowCount,
+                )}
+                onCancel={() => setBackupDialogOpen(false)}
+                onConfirm={() => {
+                  setBackedUpExclusionAccepted(true)
+                  setBackupDialogOpen(false)
+                }}
+              />
             ) : null}
           </TodayStepPanel>
 
@@ -3541,7 +3903,7 @@ export function InvoiceWorkPage() {
                       stage="gift"
                       brandName={brand.name}
                       sourceFileName={fileName}
-                      sourceRows={inspection.rows}
+                      sourceRows={workRows}
                       giftPlan={giftPlan}
                     />
                   </div>
@@ -3625,7 +3987,7 @@ export function InvoiceWorkPage() {
                       stage="instruction"
                       brandName={brand.name}
                       sourceFileName={fileName}
-                      sourceRows={inspection.rows}
+                      sourceRows={workRows}
                       giftPlan={giftPlan}
                       workPlan={workPlan}
                     />
@@ -3723,7 +4085,7 @@ export function InvoiceWorkPage() {
                       stage="product"
                       brandName={brand.name}
                       sourceFileName={fileName}
-                      sourceRows={inspection.rows}
+                      sourceRows={workRows}
                       giftPlan={giftPlan}
                       workPlan={workPlan}
                       nameTransformation={nameTransformation}
@@ -3828,7 +4190,7 @@ export function InvoiceWorkPage() {
                       stage="item"
                       brandName={brand.name}
                       sourceFileName={fileName}
-                      sourceRows={inspection.rows}
+                      sourceRows={workRows}
                       giftPlan={giftPlan}
                       workPlan={workPlan}
                       nameTransformation={nameTransformation}
@@ -3842,14 +4204,170 @@ export function InvoiceWorkPage() {
                     disabled={
                       !itemTransformation || !workPlan || !giftPlan
                     }
-                    onClick={() => goNextStep('stock')}
+                    onClick={() => goNextStep('outboundReflect')}
                   >
-                    재고·예약 보기
+                    출고반영으로
                     <ArrowRight className="size-4" />
                   </Button>
                 </div>
               </CardContent>
             </Card>
+            ) : null}
+          </TodayStepPanel>
+
+          <TodayStepPanel
+            active={activeStep === 'outboundReflect'}
+            keepMounted={
+              reachedOutboundReflect && Boolean(inspection) && headerReady
+            }
+          >
+            {inspection ? (
+              <Card>
+                <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <CardTitle>(임시) 출고반영</CardTitle>
+                    <CardDescription>
+                      품목명·내품명 변환에서 나온 본품·내품을 M번호로 합친
+                      목록입니다. 백업하면 각 주문의 주문일·출고업체로 출고
+                      데이터에 넣습니다.
+                    </CardDescription>
+                  </div>
+                  <Button
+                    type="button"
+                    disabled={
+                      outboundBackupBusy ||
+                      currentGenerationBackedUp ||
+                      productSaveBlockCount > 0 ||
+                      !outboundReflectLedger?.ok
+                    }
+                    onClick={() => {
+                      void backupOutboundReflect()
+                    }}
+                  >
+                    {outboundBackupBusy ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : null}
+                    {outboundBackupBusy
+                      ? '백업 중...'
+                      : currentGenerationBackedUp
+                        ? '백업 완료'
+                        : '백업'}
+                  </Button>
+                </CardHeader>
+                <CardContent className="space-y-5">
+                  {outboundBackupMessage ? (
+                    <p
+                      className={
+                        outboundBackupIsError
+                          ? 'text-sm text-danger'
+                          : 'text-sm text-muted-foreground'
+                      }
+                    >
+                      {outboundBackupMessage}
+                    </p>
+                  ) : outboundReflectLedger && !outboundReflectLedger.ok ? (
+                    <p className="text-sm text-danger">
+                      {formatOutboundReflectBlockReasons(
+                        outboundReflectLedger.reasons,
+                      )}
+                    </p>
+                  ) : null}
+                  {!productTransformation || !itemTransformation ? (
+                    <StepCriteriaLoading label="이전 단계 결과를 기다리고 있습니다." />
+                  ) : outboundReflectSummary ? (
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                        <Badge variant="outline">
+                          {formatNumber(outboundReflectSummary.styleCount)}종
+                        </Badge>
+                        <Badge variant="outline">
+                          {formatNumber(outboundReflectSummary.totalQuantity)}개
+                        </Badge>
+                        {outboundReflectSummary.firstOrderedOn &&
+                        outboundReflectSummary.lastOrderedOn ? (
+                          <span>
+                            주문일 {outboundReflectSummary.firstOrderedOn}
+                            {outboundReflectSummary.firstOrderedOn ===
+                            outboundReflectSummary.lastOrderedOn
+                              ? null
+                              : ` ~ ${outboundReflectSummary.lastOrderedOn}`}
+                          </span>
+                        ) : null}
+                      </div>
+                      {outboundReflectSummary.entries.length === 0 ? (
+                        <div className="rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+                          변환된 상품이 없습니다.
+                        </div>
+                      ) : (
+                        <div className="max-h-[70vh] overflow-auto rounded-lg border border-border">
+                          <table className="w-full min-w-[640px] border-collapse text-xs">
+                            <thead className="sticky top-0 z-10 bg-muted/90">
+                              <tr className="text-left text-[10px] uppercase tracking-wide text-muted-foreground">
+                                <th className="border-b border-border px-3 py-2">
+                                  M번호
+                                </th>
+                                <th className="border-b border-border px-3 py-2">
+                                  공식 상품명
+                                </th>
+                                <th className="border-b border-border px-3 py-2 text-right">
+                                  총합
+                                </th>
+                                <th className="border-b border-border px-3 py-2">
+                                  주문일 첫날
+                                </th>
+                                <th className="border-b border-border px-3 py-2">
+                                  주문일 마지막
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {outboundReflectSummary.entries.map((entry) => (
+                                <tr
+                                  key={entry.styleNo}
+                                  className="border-b border-border/70"
+                                >
+                                  <td className="px-3 py-1.5 font-medium tabular-nums">
+                                    {entry.styleNo}
+                                  </td>
+                                  <td className="px-3 py-1.5">
+                                    {entry.styleName}
+                                  </td>
+                                  <td className="px-3 py-1.5 text-right tabular-nums">
+                                    {formatNumber(entry.quantity)}
+                                  </td>
+                                  <td className="px-3 py-1.5 tabular-nums">
+                                    {entry.firstOrderedOn || '—'}
+                                  </td>
+                                  <td className="px-3 py-1.5 tabular-nums">
+                                    {entry.lastOrderedOn || '—'}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-4">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setStep('item')}
+                    >
+                      <ArrowLeft className="size-4" />
+                      내품명 변환으로
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={() => goNextStep('stock')}
+                    >
+                      재고·예약 보기
+                      <ArrowRight className="size-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             ) : null}
           </TodayStepPanel>
 
@@ -3904,10 +4422,10 @@ export function InvoiceWorkPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    onClick={() => setStep('item')}
+                    onClick={() => setStep('outboundReflect')}
                   >
                     <ArrowLeft className="size-4" />
-                    내품명 변환으로
+                    출고반영으로
                   </Button>
                   <Button
                     type="button"
@@ -4064,7 +4582,7 @@ export function InvoiceWorkPage() {
                       ? () =>
                           finalizeUnifiedGiftPlanForDownload({
                             brandId: brand.id,
-                            rows: inspection.rows,
+                            rows: workRows,
                             campaignRows,
                             prefixPlan: giftEligibilityPlan,
                             requests: giftRequests,

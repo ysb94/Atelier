@@ -181,7 +181,10 @@ export type {
   GiftAllocationCandidateInput,
 } from '@/lib/supabase/invoice-gift-allocations'
 export { InvoiceWorkHistoryStoreError } from '@/lib/supabase/invoice-work-history'
-export type { RecordInvoiceWorkCompletionInput } from '@/lib/supabase/invoice-work-history'
+export type {
+  RecordInvoiceWorkBackupInput,
+  RecordInvoiceWorkCompletionInput,
+} from '@/lib/supabase/invoice-work-history'
 export { InvoiceWorkInstructionStoreError } from '@/lib/supabase/invoice-work-instructions'
 export type {
   InvoiceWorkInstructionInput,
@@ -1289,6 +1292,64 @@ export async function recordInvoiceWorkCompletion(
   })
 }
 
+export async function recordInvoiceWorkBackup(
+  input: Omit<
+    invoiceWorkHistoryStore.RecordInvoiceWorkBackupInput,
+    'workerLabel'
+  >,
+): Promise<string> {
+  const profile = await getMyProfile()
+  return invoiceWorkHistoryStore.recordInvoiceWorkBackup({
+    ...input,
+    workerLabel: profile?.displayName?.trim() || profile?.email || '',
+  })
+}
+
+export async function lookupInvoiceBackedUpOrderKeys(
+  brandId: string,
+  orderKeyHashes: readonly string[],
+): Promise<string[]> {
+  return invoiceWorkHistoryStore.lookupInvoiceBackedUpOrderKeys(
+    brandId,
+    orderKeyHashes,
+  )
+}
+
+export async function backupInvoiceOutboundWork(
+  input: Omit<
+    Parameters<typeof invoiceWorkHistoryStore.backupInvoiceOutboundWork>[0],
+    'workerLabel'
+  >,
+): Promise<number> {
+  const profile = await getMyProfile()
+  return invoiceWorkHistoryStore.backupInvoiceOutboundWork({
+    ...input,
+    workerLabel: profile?.displayName?.trim() || profile?.email || '',
+  })
+}
+
+export async function updateInvoiceWorkRun(
+  input: Parameters<typeof invoiceWorkHistoryStore.updateInvoiceWorkRun>[0],
+): Promise<void> {
+  return invoiceWorkHistoryStore.updateInvoiceWorkRun(input)
+}
+
+export async function deleteInvoiceWorkRun(
+  input: Parameters<typeof invoiceWorkHistoryStore.deleteInvoiceWorkRun>[0],
+): Promise<number> {
+  return invoiceWorkHistoryStore.deleteInvoiceWorkRun(input)
+}
+
+export async function countInvoiceOutboundForFingerprint(
+  brandId: string,
+  fileFingerprint: string,
+): Promise<{ kinds: number; quantity: number }> {
+  return invoiceWorkHistoryStore.countInvoiceOutboundForFingerprint(
+    brandId,
+    fileFingerprint,
+  )
+}
+
 export type BulkInvoiceRuleRow = {
   lineNo: number
   input: invoiceNameRuleStore.InvoiceCodeRuleInput
@@ -1542,6 +1603,11 @@ export async function getOutboundShipments(brandId: string) {
   return outboundShipmentStore.listOutboundShipments(brandId)
 }
 
+export async function getBarcodeDataEntryShipments(brandId: string) {
+  await delay()
+  return outboundShipmentStore.listBarcodeDataEntryShipments(brandId)
+}
+
 export async function replaceBarcodeDataEntryShipments(
   input: Parameters<
     typeof outboundShipmentStore.replaceBarcodeDataEntryShipments
@@ -1549,6 +1615,24 @@ export async function replaceBarcodeDataEntryShipments(
 ) {
   await delay()
   return outboundShipmentStore.replaceBarcodeDataEntryShipments(input)
+}
+
+export async function deleteBarcodeDataEntryShipments(
+  input: Parameters<
+    typeof outboundShipmentStore.deleteBarcodeDataEntryShipments
+  >[0],
+) {
+  await delay()
+  return outboundShipmentStore.deleteBarcodeDataEntryShipments(input)
+}
+
+export async function replaceInvoiceOutboundShipments(
+  input: Parameters<
+    typeof outboundShipmentStore.replaceInvoiceOutboundShipments
+  >[0],
+) {
+  await delay()
+  return outboundShipmentStore.replaceInvoiceOutboundShipments(input)
 }
 
 export async function createProductCode(

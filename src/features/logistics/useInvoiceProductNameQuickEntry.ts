@@ -13,7 +13,6 @@ import {
   countProductNameAiPendingResolve,
   decideProductNameAiEnterAction,
   decideProductNameAiQuickSlotMatch,
-  nextProductNameAiRowMark,
   emptyProductNameAiQuickSlot,
   formatProductNameAiStyleLabel,
   removeProductNameAiQuickSlot,
@@ -68,8 +67,6 @@ export function useInvoiceProductNameQuickEntry({
   confirmedKeys,
   pendingAiKeys,
   applySlots,
-  confirmRow,
-  markPendingAi,
   unconfirmRow,
 }: {
   brandId: string
@@ -80,9 +77,12 @@ export function useInvoiceProductNameQuickEntry({
     key: string,
     slots: ProductNameAiQuickSlot[],
     mode: 'edit' | 'confirm' | 'resolved',
-  ) => { ok: boolean; error?: string }
-  confirmRow: (key: string) => void
-  markPendingAi: (key: string) => void
+  ) => {
+    ok: boolean
+    error?: string
+    decision?: { status: 'ready' | 'needs_ai' | 'invalid' }
+    confirmed?: boolean
+  }
   unconfirmRow: (key: string) => void
 }) {
   const queryClient = useQueryClient()
@@ -213,27 +213,29 @@ export function useInvoiceProductNameQuickEntry({
       mode: 'edit' | 'confirm' | 'resolved',
     ) => {
       const decision = decideProductNameAiEnterAction(slots)
-      const confirmed = confirmedKeys.has(rowKey)
       if (decision.status === 'invalid') {
-        if (confirmed) unconfirmRow(rowKey)
+        if (confirmedKeys.has(rowKey)) unconfirmRow(rowKey)
         setStageError(
           rowKey,
           decision.reason === 'duplicate'
             ? '본품과 추가 구성품의 M번호는 겹칠 수 없습니다.'
             : '본품 이름을 입력하세요.',
         )
-        return decision
+        return { ok: false, decision, confirmed: false }
       }
       const staged = applySlots(rowKey, slots, mode)
-      setStageError(rowKey, staged.ok ? null : staged.error ?? '반영하지 못했습니다.')
-      if (!staged.ok) return decision
-      const mark = nextProductNameAiRowMark(mode, decision.status)
-      if (mark === 'pending_ai') markPendingAi(rowKey)
-      else if (mark === 'confirmed') confirmRow(rowKey)
-      else if (mark === 'unconfirm') unconfirmRow(rowKey)
-      return decision
+      setStageError(
+        rowKey,
+        staged.ok ? null : staged.error ?? '반영하지 못했습니다.',
+      )
+      return {
+        ok: staged.ok,
+        decision: staged.decision ?? decision,
+        confirmed: Boolean(staged.confirmed),
+        error: staged.error,
+      }
     },
-    [applySlots, confirmRow, confirmedKeys, markPendingAi, setStageError, unconfirmRow],
+    [applySlots, confirmedKeys, setStageError, unconfirmRow],
   )
 
   const setSlotText = useCallback(
@@ -363,9 +365,14 @@ export function useInvoiceProductNameQuickEntry({
       slotIndex: number,
     ) => {
       const row = rowByKey.get(rowKey)
-      if (!row) return
-      applyDecision(rowKey, getSlots(row), 'confirm')
-      moveFocus(visibleRows, rowKey, slotIndex, 'down')
+      if (!row) return false
+      const staged = applyDecision(rowKey, getSlots(row), 'confirm')
+      const shouldMove =
+        staged.confirmed || staged.decision.status === 'needs_ai'
+      if (shouldMove) {
+        moveFocus(visibleRows, rowKey, slotIndex, 'down')
+      }
+      return shouldMove
     },
     [applyDecision, getSlots, moveFocus, rowByKey],
   )

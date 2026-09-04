@@ -25,7 +25,21 @@ export type GiftSourceReplacement = {
   quantity: number
 }
 
-export type GiftSourceGroupStatus = 'unset' | 'map_found' | 'assigned'
+export type GiftSourceGroupStatus =
+  | 'unset'
+  | 'map_found'
+  | 'map_inactive'
+  | 'assigned'
+
+export const GIFT_SOURCE_GROUP_STATUS_LABEL: Record<
+  GiftSourceGroupStatus,
+  string
+> = {
+  unset: '사은품 처리 필요',
+  map_found: '기존 설정 발견',
+  map_inactive: '중지된 기존 설정',
+  assigned: '사은품 변환 완료',
+}
 
 export type GiftSourceGroup = {
   key: string
@@ -85,6 +99,61 @@ export function giftSourceGroupKey(mallName: string, productName: string) {
     normalizeInvoiceText(mallName),
     normalizeInvoiceText(productName),
   ].join('\u0000')
+}
+
+export function isProtectedGiftSourceGroup(group: GiftSourceGroup) {
+  return group.status !== 'assigned'
+}
+
+export function protectedGiftSourceKeys(
+  groups: readonly GiftSourceGroup[],
+): Set<string> {
+  return new Set(
+    groups
+      .filter((group) => isProtectedGiftSourceGroup(group))
+      .map((group) => group.key),
+  )
+}
+
+export function isProtectedGiftSourceCombo(
+  combo: Pick<GiftSourceGroup, 'mallName' | 'productName'> | {
+    mallName: string
+    productName: string
+  },
+  protectedKeys: ReadonlySet<string>,
+) {
+  return protectedKeys.has(giftSourceGroupKey(combo.mallName, combo.productName))
+}
+
+export function filterRegularProductNameCombos<
+  T extends { mallName: string; productName: string },
+>(combos: readonly T[], protectedKeys: ReadonlySet<string>): T[] {
+  if (protectedKeys.size === 0) return [...combos]
+  return combos.filter(
+    (combo) => !isProtectedGiftSourceCombo(combo, protectedKeys),
+  )
+}
+
+export function rejectProtectedGiftSourceSave(
+  combo: { mallName: string; productName: string },
+  protectedKeys: ReadonlySet<string>,
+) {
+  if (!isProtectedGiftSourceCombo(combo, protectedKeys)) return null
+  return '사은품 처리가 끝나기 전에는 품목명 원장에 등록할 수 없습니다.'
+}
+
+function indexGiftSourceMaps(maps: readonly InvoiceGiftSourceMap[]) {
+  const activeByKey = new Map<string, InvoiceGiftSourceMap>()
+  const inactiveByKey = new Map<string, InvoiceGiftSourceMap>()
+  for (const map of maps) {
+    const key = giftSourceGroupKey(map.mallName, map.productName)
+    if (map.isActive) {
+      if (!activeByKey.has(key)) activeByKey.set(key, map)
+    } else if (!inactiveByKey.has(key)) {
+      inactiveByKey.set(key, map)
+    }
+  }
+  return { activeByKey, inactiveByKey }
 }
 
 /** 활성 저장 매핑·세션 규칙·명시 적용 키를 합친 실제 적용 집합. */
@@ -466,13 +535,7 @@ export function planGiftSourceTransform(options: {
     slotsByGroup.set(slot.groupKey, list)
   }
 
-  const maps = (options.maps ?? []).filter((map) => map.isActive)
-  const mapByKey = new Map(
-    maps.map((map) => [
-      giftSourceGroupKey(map.mallName, map.productName),
-      map,
-    ]),
-  )
+  const { activeByKey, inactiveByKey } = indexGiftSourceMaps(options.maps ?? [])
   const allocationsByMap = new Map<string, InvoiceGiftSourceAllocation[]>()
   for (const allocation of options.allocations ?? []) {
     const list = allocationsByMap.get(allocation.mapId) ?? []
@@ -488,7 +551,8 @@ export function planGiftSourceTransform(options: {
   )) {
     const first = groupSlots[0]!
     const sessionRule = options.sessionRules?.get(key)
-    const storedMap = mapByKey.get(key) ?? null
+    const storedMap = activeByKey.get(key) ?? null
+    const inactiveMap = storedMap ? null : inactiveByKey.get(key) ?? null
     const rule = sessionRule ??
       (storedMap
         ? {
@@ -559,11 +623,14 @@ export function planGiftSourceTransform(options: {
       appliedKeys.has(key) &&
       assignedSlotCount === groupSlots.length &&
       groupSlots.length > 0
+    const displayMap = storedMap ?? inactiveMap
     const status: GiftSourceGroupStatus = fullyAssigned
       ? 'assigned'
       : storedMap && !sessionRule
         ? 'map_found'
-        : 'unset'
+        : inactiveMap && !sessionRule
+          ? 'map_inactive'
+          : 'unset'
 
     groups.push({
       key,
@@ -580,9 +647,10 @@ export function planGiftSourceTransform(options: {
         first.source.productName,
       ),
       status,
-      mapId: storedMap?.id ?? null,
-      assignmentMode: rule?.assignmentMode ?? storedMap?.assignmentMode ?? null,
-      poolStyles: rule?.poolStyles ?? storedMap?.poolStyles ?? [],
+      mapId: displayMap?.id ?? null,
+      assignmentMode:
+        rule?.assignmentMode ?? displayMap?.assignmentMode ?? null,
+      poolStyles: rule?.poolStyles ?? displayMap?.poolStyles ?? [],
       assignedCounts: [...assignedCounts.values()].map((item) => ({
         style: item.style,
         count: item.quantity,
@@ -614,7 +682,7 @@ export function planGiftSourceTransform(options: {
   const confirmCandidates: GiftSourceConfirmCandidate[] = []
   for (const slot of appliedSlots) {
     const style = assigned.get(slot.allocationKey)
-    const storedMap = mapByKey.get(slot.groupKey)
+    const storedMap = activeByKey.get(slot.groupKey)
     if (!style || !storedMap) continue
     const existing = (allocationsByMap.get(storedMap.id) ?? []).some(
       (allocation) => allocation.allocationKey === slot.allocationKey,
@@ -690,11 +758,10 @@ export function inspectGiftSourceGroup(options: {
     options.mallName,
     options.productName,
   )
-  const storedMap =
-    (options.maps ?? []).find(
-      (map) =>
-        map.isActive && giftSourceGroupKey(map.mallName, map.productName) === key,
-    ) ?? null
+  const { activeByKey, inactiveByKey } = indexGiftSourceMaps(options.maps ?? [])
+  const storedMap = activeByKey.get(key) ?? null
+  const inactiveMap = storedMap ? null : inactiveByKey.get(key) ?? null
+  const displayMap = storedMap ?? inactiveMap
   const sessionRule = options.sessionRules?.get(key) ?? null
   const sourceRowNumbers = [
     ...new Set(groupSlots.map((slot) => slot.source.rowNumber)),
@@ -716,11 +783,16 @@ export function inspectGiftSourceGroup(options: {
     recommendsBalancedRandom: recommendsGiftSourceBalancedRandom(
       options.productName,
     ),
-    status: storedMap && !sessionRule ? 'map_found' : 'unset',
-    mapId: storedMap?.id ?? null,
+    status:
+      storedMap && !sessionRule
+        ? 'map_found'
+        : inactiveMap && !sessionRule
+          ? 'map_inactive'
+          : 'unset',
+    mapId: displayMap?.id ?? null,
     assignmentMode:
-      sessionRule?.assignmentMode ?? storedMap?.assignmentMode ?? null,
-    poolStyles: sessionRule?.poolStyles ?? storedMap?.poolStyles ?? [],
+      sessionRule?.assignmentMode ?? displayMap?.assignmentMode ?? null,
+    poolStyles: sessionRule?.poolStyles ?? displayMap?.poolStyles ?? [],
     assignedCounts: [],
     sourceRowNumbers,
   }

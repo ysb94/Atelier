@@ -1,10 +1,14 @@
 import type { CodeUsageTarget } from '@/lib/types'
 import {
   applyBarcodeDataEntrySiteLookup,
+  assignBarcodeDataEntryEmptySite,
   barcodeDataEntryAllReady,
   barcodeDataEntryBackupEntries,
   barcodeDataEntryCompanyKey,
+  barcodeDataEntryCompanyKeyFromSourceRef,
+  barcodeDataEntryRowsFromHistory,
   barcodeDataEntrySourceRef,
+  groupBarcodeDataEntryHistory,
   barcodeDataEntryUnresolvedSites,
   filterTargetsByVisibleIds,
   isIsoDate,
@@ -67,6 +71,79 @@ assert(
   '출처 키를 만든다',
 )
 assert(
+  barcodeDataEntryCompanyKeyFromSourceRef('barcode-data-entry:kyobo') ===
+    'kyobo',
+  '출처에서 업체 키를 되돌린다',
+)
+assert(
+  groupBarcodeDataEntryHistory([
+    {
+      id: '1',
+      sourceRef: 'barcode-data-entry:kyobo',
+      styleId: 's1',
+      styleNo: 'M1',
+      styleName: '가방',
+      usageTargetId: 'u1',
+      partnerName: '강남점',
+      shippedOn: '2026-09-04',
+      quantity: 2,
+      note: '1차',
+    },
+    {
+      id: '2',
+      sourceRef: 'barcode-data-entry:kyobo',
+      styleId: 's1',
+      styleNo: 'M1',
+      styleName: '가방',
+      usageTargetId: 'u2',
+      partnerName: '광화문점',
+      shippedOn: '2026-09-04',
+      quantity: 1,
+      note: '1차',
+    },
+    {
+      id: '3',
+      sourceRef: 'barcode-data-entry:young',
+      styleId: 's2',
+      styleNo: 'M2',
+      styleName: '지갑',
+      usageTargetId: 'u3',
+      partnerName: '부산대점',
+      shippedOn: '2026-09-03',
+      quantity: 4,
+      note: '',
+    },
+  ]).map((job) => `${job.companyKey}:${job.kinds}:${job.qty}`).join(',') ===
+    'kyobo:1:3,young:1:4',
+  '같은 업체·출고일을 한 등록으로 묶는다',
+)
+assert(
+  barcodeDataEntryBackupEntries(
+    barcodeDataEntryRowsFromHistory([
+      {
+        id: '1',
+        styleId: 's1',
+        styleNo: 'M1',
+        styleName: '가방',
+        usageTargetId: 'u1',
+        partnerName: '강남점',
+        quantity: 2,
+      },
+      {
+        id: '2',
+        styleId: 's1',
+        styleNo: 'M1',
+        styleName: '가방',
+        usageTargetId: 'u1',
+        partnerName: '강남점',
+        quantity: 3,
+      },
+    ]),
+  ).map((entry) => `${entry.usageTargetId}:${entry.styleId}:${entry.quantity}`).join() ===
+    'u1:s1:5',
+  '이력 행을 백업 수량으로 다시 합친다',
+)
+assert(
   filterTargetsByVisibleIds(sample, null).map((row) => row.id).join() ===
     'a,b,c',
   '설정 전에는 전체를 보여 준다',
@@ -124,6 +201,19 @@ assert(headed.rows[0]?.siteName === '강남점', '헤더 지점명을 읽는다'
 
 const twoCol = parseBarcodeDataEntryText('가방\t3')
 assert(twoCol.rows[0]?.siteName === '', '2열은 지점명을 비운다')
+
+const assignedEmpty = assignBarcodeDataEntryEmptySite(twoCol.rows, gangnam)
+assert(
+  assignedEmpty[0]?.siteName === '강남점' &&
+    assignedEmpty[0]?.usageTargetId === 'u-gangnam' &&
+    assignedEmpty[0]?.siteStatus === 'matched',
+  '빈 지점명 행에 고른 지점을 넣는다',
+)
+assert(
+  assignBarcodeDataEntryEmptySite(pasted.rows, gangnam)[0]?.siteName ===
+    '광주터미널점',
+  '지점명이 있는 행은 그대로 둔다',
+)
 
 const resolved = applyBarcodeDataEntrySiteLookup(
   pasted.rows,

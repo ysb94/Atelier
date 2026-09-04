@@ -16,7 +16,7 @@ import {
   compactOutboundPartnerKey,
   matchesOutboundPartnerSearch,
   normalizeOutboundPartnerName,
-  outboundPartnerOptionLabel,
+  outboundPartnerDisplayName,
 } from '@/lib/codes/outbound-partner'
 import type { InvoiceMallSite } from '@/lib/invoice/mall-resolution'
 import type {
@@ -342,7 +342,7 @@ export function InvoiceMallResolutionDialog({
                           <option value="">업체를 고르세요</option>
                           {choices.map((target) => (
                             <option key={target.id} value={target.id}>
-                              {outboundPartnerOptionLabel(target)}
+                              {outboundPartnerDisplayName(target)}
                             </option>
                           ))}
                         </select>

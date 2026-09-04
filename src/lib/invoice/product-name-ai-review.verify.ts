@@ -25,6 +25,7 @@ import {
   decideProductNameAiConfirmedSaves,
   decideProductNameAiEnterAction,
   decideProductNameAiQuickSlotMatch,
+  decideProductNameAiRowConfirm,
   decideProductNameAiSaves,
   emptyProductNameAiQuickSlot,
   isProductNameAiSaveFailed,
@@ -39,8 +40,10 @@ import {
   productNameAiCandidateSearchKeys,
   productNameAiCollectFailed,
   productNameAiSearchKeys,
+  productNameAiRowConfirmError,
   productNameAiRowReadyToCommit,
   productNameAiSlotsNeedAi,
+  stageProductNameAiRowConfirm,
   productNameAiWorkflowTab,
   reconcileProductNameAiReviewState,
   selectLatestFailedSaveRetries,
@@ -731,6 +734,90 @@ assert(
   '작업자가 Enter로 확인하면 준비 완료',
 )
 
+const officialSlot = [
+  applyProductNameAiQuickSlotStyle(emptyProductNameAiQuickSlot(), rabbit),
+]
+const confirmAfterOfficial = applyProductNameAiRowSlots(
+  resolvedOfficial.row,
+  officialSlot,
+  'confirm',
+)
+assert(
+  confirmAfterOfficial.ok &&
+    confirmAfterOfficial.decision.status === 'ready' &&
+    productNameAiRowReadyToCommit(confirmAfterOfficial.row),
+  '공식명칭 완성 후 Enter는 최신 행을 준비 완료로 만든다',
+)
+const stagedReady = stageProductNameAiRowConfirm({
+  row: resolvedOfficial.row,
+  slots: officialSlot,
+  mode: 'confirm',
+})
+assert(
+  stagedReady.ok &&
+    stagedReady.confirmed &&
+    stagedReady.mark === 'confirmed' &&
+    !stagedReady.error &&
+    productNameAiWorkflowTab({
+      confirmed: stagedReady.confirmed,
+      saveFailed: false,
+      readyToCommit: productNameAiRowReadyToCommit(stagedReady.row),
+    }) === 'ready',
+  '이름 수정 → AI 완성 → Enter 전이가 준비 완료 집계로 이어진다',
+)
+assert(
+  decideProductNameAiRowConfirm({
+    mode: 'confirm',
+    decision: { status: 'ready', style: rabbit, extras: [] },
+    row: resolvedOfficial.row,
+  }).confirmed,
+  '최신 행이 준비되면 확정 마킹은 한 곳에서만 결정한다',
+)
+
+const stagedConflict = stageProductNameAiRowConfirm({
+  row: resolvedOfficial.row,
+  slots: officialSlot,
+  mode: 'confirm',
+  siblings: [
+    resolvedOfficial.row,
+    {
+      ...sameKeyOther,
+      key: 'conflict-sibling',
+      lookupKey: resolvedOfficial.row.lookupKey,
+    },
+  ],
+})
+assert(
+  !stagedConflict.ok &&
+    !stagedConflict.confirmed &&
+    stagedConflict.mark === 'unconfirm' &&
+    Boolean(stagedConflict.error) &&
+    stagedConflict.row.lookupKeyConflict &&
+    productNameAiWorkflowTab({
+      confirmed: stagedConflict.confirmed,
+      saveFailed: false,
+      readyToCommit: productNameAiRowReadyToCommit(stagedConflict.row),
+    }) === 'review',
+  '조회 키 충돌이면 준비 완료로 넘기지 않고 이유를 남긴다',
+)
+assert(
+  productNameAiRowConfirmError(stagedConflict.row)?.includes('조회 키'),
+  '조회 키 충돌 이유를 행에 표시한다',
+)
+
+const stagedInvalid = stageProductNameAiRowConfirm({
+  row: filled,
+  slots: [emptyProductNameAiQuickSlot()],
+  mode: 'confirm',
+})
+assert(
+  !stagedInvalid.ok &&
+    !stagedInvalid.confirmed &&
+    stagedInvalid.mark === 'unconfirm' &&
+    stagedInvalid.error === '본품 이름을 입력하세요.',
+  '검증 실패는 현재 행에 오류를 남긴다',
+)
+
 const unconfirmedPlan = decideProductNameAiConfirmedSaves(
   [filled, other],
   new Set(),
@@ -973,6 +1060,49 @@ assert(
 assert(
   !afterPartialSave.committedKeys.has(savedCombo.key),
   '저장한 행의 확정 대기 키는 제거한다',
+)
+
+const staleKeep = combo({ key: 'keep-live', itemName: 'Color: 유지' })
+const staleGoneA = combo({ key: 'stale-a', itemName: 'Color: 삭제A' })
+const staleGoneB = combo({ key: 'stale-b', itemName: 'Color: 삭제B' })
+const freshCombo = combo({ key: 'fresh-live', itemName: 'Color: 신규' })
+const snapshotShrink = reconcileProductNameAiReviewState({
+  combos: [staleKeep, freshCombo],
+  reviewRows: [
+    buildProductNameAiReviewRow(staleGoneA),
+    buildProductNameAiReviewRow(staleGoneB),
+    buildProductNameAiReviewRow(staleKeep),
+  ],
+  drafts: new Map(),
+  confirmedKeys: new Set([staleGoneA.key, staleKeep.key]),
+  pendingAiKeys: new Set([staleGoneB.key]),
+  committedKeys: new Set([staleGoneA.key]),
+})
+assert(snapshotShrink.reviewRows.length === 2, '수집 스냅숏은 살아 있는 조합만 남긴다')
+assert(
+  snapshotShrink.reviewRows.map((row) => row.key).sort().join(',') ===
+    [freshCombo.key, staleKeep.key].sort().join(','),
+  '사라진 키는 빼고 새 조합은 초안으로 넣는다',
+)
+assert(
+  snapshotShrink.reviewRows.find((row) => row.key === freshCombo.key)
+    ?.holdReason === 'incomplete',
+  '새 조합은 incomplete 초안이다',
+)
+assert(
+  snapshotShrink.confirmedKeys.has(staleKeep.key) &&
+    !snapshotShrink.confirmedKeys.has(staleGoneA.key) &&
+    !snapshotShrink.pendingAiKeys.has(staleGoneB.key) &&
+    !snapshotShrink.committedKeys.has(staleGoneA.key),
+  '사라진 키의 확정·대기 표시는 제거한다',
+)
+assert(
+  countProductNameAiWorkflow({
+    rows: snapshotShrink.reviewRows,
+    confirmedKeys: snapshotShrink.confirmedKeys,
+    saveFailedKeys: new Set(),
+  }).reviewCount === 2,
+  '살아 있는 조합만 검토 필요로 센다',
 )
 
 console.log('product-name-ai-review verify: ok')

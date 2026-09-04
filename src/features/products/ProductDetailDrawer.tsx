@@ -25,7 +25,7 @@ import {
   updateStyleFields,
 } from '@/lib/api'
 import { OWNER_LABEL, OWNER_ORDER } from '@/lib/import/fields'
-import { outboundPartnerOptionLabel } from '@/lib/codes/outbound-partner'
+import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import { isImageField, pickImageSources } from '@/lib/products/product-image'
 import {
   fieldValueKey,
@@ -646,7 +646,7 @@ export function ProductDetailDrawer() {
                                     }
                                   >
                                     {target
-                                      ? outboundPartnerOptionLabel(target)
+                                      ? outboundPartnerDisplayName(target)
                                       : '알 수 없음'}{' '}
                                     ·{' '}
                                     {CODE_USAGE_STATUS_LABEL[a.status]}

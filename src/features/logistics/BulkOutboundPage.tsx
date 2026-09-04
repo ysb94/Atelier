@@ -85,7 +85,7 @@ import {
   type IdleCollectRow,
 } from '@/lib/bulk-outbound/idle-collect'
 import { PRODUCT_OUTBOUND_UPDATED_EVENT } from '@/lib/outbound/product-outbound'
-import { outboundPartnerOptionLabel } from '@/lib/codes/outbound-partner'
+import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 
 /** 한 건이 여러 날 걸쳐 있을 수 있는 상태. 순서가 강제되지 않는다. */
 type JobStatus =
@@ -2372,7 +2372,7 @@ function PartnerSettingsDialog({
       ...current,
       {
         partnerId: selectedPartner.id,
-        partnerName: outboundPartnerOptionLabel(selectedPartner),
+        partnerName: outboundPartnerDisplayName(selectedPartner),
         barcodeSource,
         workStatus: 'idle',
       },
@@ -3093,7 +3093,7 @@ export function BulkOutboundPage() {
   const partnerNameById = useMemo(
     () =>
       new Map(
-        allPartners.map((item) => [item.id, outboundPartnerOptionLabel(item)]),
+        allPartners.map((item) => [item.id, outboundPartnerDisplayName(item)]),
       ),
     [allPartners],
   )
@@ -3138,7 +3138,7 @@ export function BulkOutboundPage() {
       .filter((item) => partnerById.has(item.partnerId))
       .map((item) => ({
         ...item,
-        partnerName: outboundPartnerOptionLabel(
+        partnerName: outboundPartnerDisplayName(
           partnerById.get(item.partnerId)!,
         ),
         workStatus: isPartnerWorkStatus(item.workStatus)

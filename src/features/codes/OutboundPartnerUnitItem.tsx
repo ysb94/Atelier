@@ -11,14 +11,12 @@ export function OutboundPartnerUnitItem({
   target,
   selected,
   identityVariant = 'full',
-  asCompany = false,
   layout = 'block',
   onSelect,
 }: {
   target: CodeUsageTarget
   selected: boolean
   identityVariant?: 'full' | 'unit'
-  asCompany?: boolean
   layout?: 'block' | 'chip'
   onSelect: () => void
 }) {
@@ -41,8 +39,6 @@ export function OutboundPartnerUnitItem({
         <OutboundPartnerIdentity
           target={target}
           variant={identityVariant}
-          asCompany={asCompany}
-          showChannel={false}
         />
         {status !== 'ongoing' ? (
           <Badge variant={status === 'archived' ? 'muted' : 'warning'}>

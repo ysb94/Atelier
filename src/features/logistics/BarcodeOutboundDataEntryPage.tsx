@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { Search, Settings2 } from 'lucide-react'
+import { FileSpreadsheet, History, Search, Settings2 } from 'lucide-react'
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -13,8 +13,10 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { BarcodeOutboundDataEntryHistoryPanel } from '@/features/logistics/BarcodeOutboundDataEntryHistoryPanel'
 import { BarcodeOutboundDataEntryPanel } from '@/features/logistics/BarcodeOutboundDataEntryPanel'
 import {
+  deleteBarcodeDataEntryShipments,
   getCodeUsageTargetAliases,
   getCodeUsageTargets,
   listStyleRefsForLookup,
@@ -30,13 +32,13 @@ import {
   barcodeDataEntryAllReady,
   barcodeDataEntryBackupEntries,
   barcodeDataEntryCompanyKey,
+  barcodeDataEntryHistoryPartnerIds,
   barcodeDataEntrySourceRef,
   emptyBarcodeDataEntryDraft,
   filterTargetsByVisibleIds,
   isIsoDate,
   readBarcodeDataEntryDraft,
   readBarcodeDataEntryVisibleIds,
-  todayIsoDate,
   unitIdsForCompanyKeys,
   visibleCompanyKeysFromUnitIds,
   writeBarcodeDataEntryDraft,
@@ -46,6 +48,22 @@ import {
 import { PRODUCT_OUTBOUND_UPDATED_EVENT } from '@/lib/outbound/product-outbound'
 import type { CodeUsageTarget } from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
+
+const COMPANY_RANK_COUNT = 3
+
+type PageTab = 'entry' | 'history'
+
+const PAGE_TABS: { value: PageTab; label: string; icon: typeof FileSpreadsheet }[] =
+  [
+    { value: 'entry', label: '데이터 입력', icon: FileSpreadsheet },
+    { value: 'history', label: '등록 이력', icon: History },
+  ]
+
+/** 3열 횡대: 왼쪽부터 채운 뒤 다음 줄로 가고, 줄은 최대 3개다. */
+function companyRowColumns(count: number) {
+  if (count <= COMPANY_RANK_COUNT) return Math.max(1, count)
+  return Math.ceil(count / COMPANY_RANK_COUNT)
+}
 
 function notifyOutboundUpdated(brandId: string) {
   if (typeof window === 'undefined') return
@@ -227,15 +245,26 @@ export function BarcodeOutboundDataEntryPage() {
   const [visibleIds, setVisibleIds] = useState<string[] | null>(() =>
     readBarcodeDataEntryVisibleIds(brand.id),
   )
-  const [shippedOn, setShippedOn] = useState(todayIsoDate)
+  const [shippedOn, setShippedOn] = useState('')
+  const [dateChosen, setDateChosen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [pageTab, setPageTab] = useState<PageTab>('entry')
+  const [historyVisited, setHistoryVisited] = useState(false)
 
   useEffect(() => {
     setSearch('')
     setSelectedKey(null)
     setVisibleIds(readBarcodeDataEntryVisibleIds(brand.id))
-    setShippedOn(todayIsoDate())
+    setShippedOn('')
+    setDateChosen(false)
+    setPageTab('entry')
+    setHistoryVisited(false)
   }, [brand.id])
+
+  useEffect(() => {
+    setShippedOn('')
+    setDateChosen(false)
+  }, [selectedKey])
 
   const targetsQuery = useQuery({
     queryKey: ['codeUsageTargets', brand.id],
@@ -283,6 +312,10 @@ export function BarcodeOutboundDataEntryPage() {
     () => groupOutboundPartnersInFolder(visibleTargets),
     [visibleTargets],
   )
+  const allCompanies = useMemo(
+    () => groupOutboundPartnersInFolder(targets),
+    [targets],
+  )
   const selectedCompany =
     companies.find((company) => company.key === selectedKey) ??
     groupOutboundPartnersInFolder(allowedTargets).find(
@@ -312,9 +345,22 @@ export function BarcodeOutboundDataEntryPage() {
 
   function persistDraft(rows: BarcodeDataEntryRow[], note: string) {
     if (!selectedCompany) {
+      if (rows.length === 0 && !note.trim()) return
       throw new Error('출고업체를 먼저 고르세요.')
     }
     writeBarcodeDataEntryDraft(brand.id, selectedCompany.key, { rows, note })
+  }
+
+  async function refreshBarcodeDataEntryLedger() {
+    notifyOutboundUpdated(brand.id)
+    await Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: ['outboundShipments', brand.id],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['barcodeDataEntryShipments', brand.id],
+      }),
+    ])
   }
 
   return (
@@ -336,7 +382,95 @@ export function BarcodeOutboundDataEntryPage() {
         }
       />
 
-      <div className="space-y-4">
+      <div
+        role="tablist"
+        aria-label="바코드 출고 데이터입력"
+        className="mb-4 flex items-stretch gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border bg-muted/40 px-2 pt-2"
+      >
+        {PAGE_TABS.map((item) => {
+          const Icon = item.icon
+          const selected = item.value === pageTab
+          return (
+            <button
+              key={item.value}
+              type="button"
+              role="tab"
+              aria-selected={selected}
+              onClick={() => {
+                setPageTab(item.value)
+                if (item.value === 'history') setHistoryVisited(true)
+              }}
+              className={cn(
+                'flex shrink-0 items-center gap-1.5 rounded-t-md border border-b-0 px-3 py-1.5 text-sm transition-colors',
+                selected
+                  ? 'border-border bg-background text-foreground'
+                  : 'border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground',
+              )}
+            >
+              <Icon className="size-3.5 shrink-0 opacity-70" />
+              <span>{item.label}</span>
+            </button>
+          )
+        })}
+      </div>
+
+      {historyVisited ? (
+        <div hidden={pageTab !== 'history'} className={pageTab === 'history' ? undefined : 'hidden'}>
+          <BarcodeOutboundDataEntryHistoryPanel
+            brandId={brand.id}
+            companies={allCompanies}
+            enabled={historyVisited}
+            busy={saving}
+            onSave={async (input) => {
+              setSaving(true)
+              try {
+                await replaceBarcodeDataEntryShipments({
+                  brandId: brand.id,
+                  sourceRef: barcodeDataEntrySourceRef(input.companyKey),
+                  shippedOn: input.shippedOn,
+                  note: input.note,
+                  partnerIds: input.partnerIds,
+                  entries: input.entries,
+                })
+                if (input.previousShippedOn !== input.shippedOn) {
+                  await deleteBarcodeDataEntryShipments({
+                    brandId: brand.id,
+                    sourceRef: barcodeDataEntrySourceRef(input.companyKey),
+                    shippedOn: input.previousShippedOn,
+                    partnerIds: input.partnerIds,
+                  })
+                }
+                await refreshBarcodeDataEntryLedger()
+              } finally {
+                setSaving(false)
+              }
+            }}
+            onDelete={async (job) => {
+              const company = allCompanies.find(
+                (item) => item.key === job.companyKey,
+              )
+              setSaving(true)
+              try {
+                await deleteBarcodeDataEntryShipments({
+                  brandId: brand.id,
+                  sourceRef: barcodeDataEntrySourceRef(job.companyKey),
+                  shippedOn: job.shippedOn,
+                  partnerIds: barcodeDataEntryHistoryPartnerIds(
+                    job,
+                    company?.units.map((unit) => unit.id) ?? [],
+                  ),
+                })
+                await refreshBarcodeDataEntryLedger()
+              } finally {
+                setSaving(false)
+              }
+            }}
+          />
+        </div>
+      ) : null}
+
+      <div hidden={pageTab !== 'entry'} className={pageTab === 'entry' ? 'space-y-4' : 'hidden'}>
+
         <Card>
           <CardHeader>
             <CardTitle>출고업체 선택</CardTitle>
@@ -382,21 +516,11 @@ export function BarcodeOutboundDataEntryPage() {
               </div>
             ) : (
               <>
-                {selectedCompany ? (
-                  <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
-                    <p className="text-xs text-muted-foreground">선택한 업체</p>
-                    <p className="mt-0.5 text-sm font-medium">
-                      {selectedCompany.groupName}
-                      <span className="ml-1 font-normal text-muted-foreground">
-                        {selectedCompany.units.length}곳
-                      </span>
-                    </p>
-                  </div>
-                ) : (
-                  <p className="text-sm text-muted-foreground">
-                    아래 목록에서 데이터를 넣을 업체를 고르세요.
-                  </p>
-                )}
+                <p className="text-sm text-muted-foreground">
+                  {selectedCompany
+                    ? '아래 버튼을 눌러 업체를 바꾸면 하단 입력란 위 이름이 바뀝니다.'
+                    : '아래 버튼에서 데이터를 넣을 업체를 고르세요.'}
+                </p>
 
                 <div className="relative">
                   <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -422,29 +546,37 @@ export function BarcodeOutboundDataEntryPage() {
                     검색과 맞는 출고업체가 없습니다.
                   </p>
                 ) : (
-                  <div className="max-h-[28rem] space-y-1 overflow-y-auto pr-1">
-                    {companies.map((company) => {
-                      const selected = selectedKey === company.key
-                      return (
-                        <button
-                          key={company.key}
-                          type="button"
-                          aria-selected={selected}
-                          className={cn(
-                            'flex h-8 w-full items-center rounded-md px-1.5 text-left',
-                            selected ? 'bg-muted' : 'hover:bg-muted/60',
-                          )}
-                          onClick={() => setSelectedKey(company.key)}
-                        >
-                          <span className="truncate text-sm font-medium">
-                            {company.groupName}
-                          </span>
-                          <span className="ml-1 shrink-0 text-xs text-muted-foreground">
-                            {company.units.length}곳
-                          </span>
-                        </button>
-                      )
-                    })}
+                  <div className="overflow-x-auto pr-1">
+                    <div
+                      className="grid grid-flow-row gap-2"
+                      style={{
+                        gridTemplateColumns: `repeat(${companyRowColumns(companies.length)}, minmax(7.5rem, 1fr))`,
+                        gridTemplateRows: `repeat(${Math.min(COMPANY_RANK_COUNT, companies.length)}, auto)`,
+                      }}
+                    >
+                      {companies.map((company) => {
+                        const selected = selectedKey === company.key
+                        return (
+                          <button
+                            key={company.key}
+                            type="button"
+                            aria-pressed={selected}
+                            title={`${company.groupName} ${company.units.length}곳`}
+                            className={cn(
+                              'flex min-h-11 min-w-0 items-center justify-center rounded-md border px-2 text-center',
+                              selected
+                                ? 'border-primary bg-primary/10 text-foreground'
+                                : 'border-border bg-card hover:bg-muted/60',
+                            )}
+                            onClick={() => setSelectedKey(company.key)}
+                          >
+                            <span className="truncate text-sm font-medium">
+                              {company.groupName}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
                 )}
               </>
@@ -454,6 +586,11 @@ export function BarcodeOutboundDataEntryPage() {
 
         <Card>
           <CardHeader>
+            {selectedCompany ? (
+              <p className="text-3xl font-semibold tracking-tight">
+                {selectedCompany.groupName}
+              </p>
+            ) : null}
             <CardTitle>상품명·수량·지점</CardTitle>
             <CardDescription>
               「상품명」「수량」「지점명」을 표에 붙여넣거나 엑셀로 올린 뒤
@@ -463,8 +600,7 @@ export function BarcodeOutboundDataEntryPage() {
           <CardContent>
             {!selectedCompany ? (
               <p className="text-sm text-muted-foreground">
-                위에서 출고업체를 고르면 양식 받기와 엑셀 올리기를 쓸 수
-                있습니다.
+                위에서 출고업체를 고르면 출고일을 정할 수 있습니다.
               </p>
             ) : (
               <div className="space-y-4">
@@ -473,67 +609,78 @@ export function BarcodeOutboundDataEntryPage() {
                     출고일
                   </span>
                   <Input
+                    key={selectedCompany.key}
                     type="date"
+                    autoComplete="off"
                     value={shippedOn}
-                    onChange={(event) => setShippedOn(event.target.value)}
+                    onChange={(event) => {
+                      const value = event.target.value
+                      setShippedOn(value)
+                      setDateChosen(isIsoDate(value))
+                    }}
                   />
                 </label>
-                <BarcodeOutboundDataEntryPanel
-                  key={selectedCompany.key}
-                  brandId={brand.id}
-                  brandSlug={brand.slug}
-                  companyName={selectedCompany.groupName}
-                  units={selectedCompany.units}
-                  aliases={aliases}
-                  rows={draft.rows}
-                  jobNote={draft.note}
-                  saving={saving}
-                  onSave={async (rows, note) => {
-                    persistDraft(rows, note)
-                  }}
-                  onBackup={async (rows, note) => {
-                    if (!isIsoDate(shippedOn)) {
-                      throw new Error('출고일을 확인하세요.')
-                    }
-                    if (!barcodeDataEntryAllReady(rows)) {
-                      throw new Error(
-                        '연결되지 않은 상품명이나 지점이 있습니다. 등록과 지점 연결을 다시 하세요.',
-                      )
-                    }
-                    const entries = barcodeDataEntryBackupEntries(rows)
-                    if (entries.length === 0) {
-                      throw new Error('백업할 수량이 없습니다.')
-                    }
-                    setSaving(true)
-                    try {
+                {dateChosen && isIsoDate(shippedOn) ? (
+                  <BarcodeOutboundDataEntryPanel
+                    key={selectedCompany.key}
+                    brandId={brand.id}
+                    brandSlug={brand.slug}
+                    companyName={selectedCompany.groupName}
+                    units={selectedCompany.units}
+                    aliases={aliases}
+                    rows={draft.rows}
+                    jobNote={draft.note}
+                    saving={saving}
+                    onSave={async (rows, note) => {
                       persistDraft(rows, note)
-                      const saved = await replaceBarcodeDataEntryShipments({
-                        brandId: brand.id,
-                        sourceRef: barcodeDataEntrySourceRef(
-                          selectedCompany.key,
-                        ),
-                        shippedOn,
-                        note,
-                        partnerIds: selectedCompany.units.map((unit) => unit.id),
-                        entries,
-                      })
-                      notifyOutboundUpdated(brand.id)
-                      await queryClient.invalidateQueries({
-                        queryKey: ['outboundShipments', brand.id],
-                      })
-                      const qty = entries.reduce(
-                        (sum, entry) => sum + entry.quantity,
-                        0,
-                      )
-                      return { kinds: saved, qty }
-                    } finally {
-                      setSaving(false)
+                    }}
+                    onBackup={async (rows, note) => {
+                      if (!isIsoDate(shippedOn)) {
+                        throw new Error('출고일을 확인하세요.')
+                      }
+                      if (!barcodeDataEntryAllReady(rows)) {
+                        throw new Error(
+                          '연결되지 않은 상품명이나 지점이 있습니다. 등록과 지점 연결을 다시 하세요.',
+                        )
+                      }
+                      const entries = barcodeDataEntryBackupEntries(rows)
+                      if (entries.length === 0) {
+                        throw new Error('백업할 수량이 없습니다.')
+                      }
+                      setSaving(true)
+                      try {
+                        persistDraft(rows, note)
+                        const saved = await replaceBarcodeDataEntryShipments({
+                          brandId: brand.id,
+                          sourceRef: barcodeDataEntrySourceRef(
+                            selectedCompany.key,
+                          ),
+                          shippedOn,
+                          note,
+                          partnerIds: selectedCompany.units.map(
+                            (unit) => unit.id,
+                          ),
+                          entries,
+                        })
+                        await refreshBarcodeDataEntryLedger()
+                        const qty = entries.reduce(
+                          (sum, entry) => sum + entry.quantity,
+                          0,
+                        )
+                        return { kinds: saved, qty }
+                      } finally {
+                        setSaving(false)
+                      }
+                    }}
+                    onLookupStyles={(names) =>
+                      listStyleRefsForLookup(brand.id, { names })
                     }
-                  }}
-                  onLookupStyles={(names) =>
-                    listStyleRefsForLookup(brand.id, { names })
-                  }
-                />
+                  />
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    출고일을 정하면 양식 받기와 엑셀 올리기를 쓸 수 있습니다.
+                  </p>
+                )}
               </div>
             )}
           </CardContent>

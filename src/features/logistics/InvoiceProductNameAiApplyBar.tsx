@@ -8,6 +8,7 @@ import {
   paginateProductNameAiReviewKeys,
   PRODUCT_NAME_AI_QUICK_SLOT_LIMIT,
   productNameAiMatchesWorkflowTab,
+  productNameAiRowConfirmError,
   productNameAiRowReadyToCommit,
   type ProductNameAiQuickSlot,
   type ProductNameAiReviewRow,
@@ -15,7 +16,9 @@ import {
 } from '@/lib/invoice/product-name-ai-review'
 import { productNameCandidateKey } from '@/lib/invoice/product-name-patterns'
 import {
+  GIFT_SOURCE_GROUP_STATUS_LABEL,
   giftSourceGroupKey,
+  isProtectedGiftSourceGroup,
   type GiftSourceGroup,
 } from '@/lib/invoice/gift-source-transform'
 import type { UnresolvedProductNameCombo } from '@/lib/invoice/product-name-transform'
@@ -69,7 +72,7 @@ export function InvoiceProductNameAiApplyBar({
   excludePending: boolean
   excludeError: string | null
   giftGroups?: GiftSourceGroup[]
-  onOpenGiftSetup?: (row: ProductNameAiReviewRow) => void
+  onOpenGiftSetup?: (target: { mallName: string; productName: string }) => void
 }) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<ProductNameAiWorkflowTab>('review')
@@ -91,8 +94,6 @@ export function InvoiceProductNameAiApplyBar({
     confirmedKeys: bulk.confirmedKeys,
     pendingAiKeys: bulk.pendingAiKeys,
     applySlots: bulk.applySlots,
-    confirmRow: bulk.confirmRow,
-    markPendingAi: bulk.markPendingAi,
     unconfirmRow: bulk.unconfirmRow,
   })
 
@@ -412,8 +413,12 @@ export function InvoiceProductNameAiApplyBar({
                       )
                       const isLastInput =
                         last?.key === row.key && slotIndex === lastSlot
-                      quick.confirmAndMove(pagedRows, row.key, slotIndex)
-                      if (isLastInput && nextPage != null) {
+                      const moved = quick.confirmAndMove(
+                        pagedRows,
+                        row.key,
+                        slotIndex,
+                      )
+                      if (moved && isLastInput && nextPage != null) {
                         pendingPageFocusRef.current = true
                         setPage(nextPage)
                       }
@@ -593,6 +598,9 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
   giftGroup: GiftSourceGroup | null
   onOpenGiftSetup?: () => void
 }) {
+  const giftProtected = Boolean(
+    giftGroup && isProtectedGiftSourceGroup(giftGroup),
+  )
   const saving =
     historyEntry?.status === 'queued' || historyEntry?.status === 'saving'
   const tone = pendingAi
@@ -613,13 +621,19 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
           </p>
           {giftGroup ? (
             <div className="mt-1 flex flex-wrap gap-1">
-              {giftGroup.status === 'assigned' ? (
-                <Badge variant="success">사은품 변환 완료</Badge>
-              ) : giftGroup.status === 'map_found' ? (
-                <Badge variant="warning">기존 사은품 설정</Badge>
-              ) : (
-                <Badge variant="outline">사은품 추천</Badge>
-              )}
+              <Badge
+                variant={
+                  giftGroup.status === 'assigned'
+                    ? 'success'
+                    : giftGroup.status === 'map_inactive'
+                      ? 'muted'
+                      : giftGroup.status === 'map_found'
+                        ? 'warning'
+                        : 'outline'
+                }
+              >
+                {GIFT_SOURCE_GROUP_STATUS_LABEL[giftGroup.status]}
+              </Badge>
             </div>
           ) : null}
         </td>
@@ -627,6 +641,11 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
           {row.itemName || '내품명 없음'}
         </td>
         <td className="px-2 py-1.5 align-top" rowSpan={lookupRowSpan}>
+          {giftProtected ? (
+            <p className="text-[11px] text-muted-foreground">
+              사은품 처리를 마치기 전에는 조회 키와 M번호를 입력하지 않습니다.
+            </p>
+          ) : (
           <div className="space-y-0.5">
             {row.registrationCandidates.map((candidate) => {
               const selected = row.lookupKey === candidate.text
@@ -652,33 +671,48 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
               )
             })}
           </div>
+          )}
         </td>
         <td className="px-2 py-1.5 align-top">
-          <InvoiceProductNameAiQuickSlots
-            rowKey={row.key}
-            slots={slots}
-            disabled={saving || resolving}
-            onTextChange={onTextChange}
-            onPickStyle={onPickStyle}
-            onClear={onClear}
-            onRemoveExtra={onRemoveExtra}
-            onRegister={onRegister}
-            onEnter={onEnter}
-            onTab={onTab}
-            onAddExtra={onAddExtra}
-          />
-          {!row.style ? (
-            <InvoiceProductNameSimilarStyles
-              brandId={brandId}
-              lookupKey={row.lookupKey}
-              productName={row.productName}
-              disabled={saving || resolving}
-              onPick={(style) => onPickStyle(0, style)}
-            />
-          ) : null}
-          {stageError ? (
-            <p className="mt-1 text-[10px] text-danger">{stageError}</p>
-          ) : null}
+          {giftProtected ? (
+            <p className="text-[11px] text-muted-foreground">
+              AI 추천과 일괄 확정 대상에서 빠져 있습니다.
+            </p>
+          ) : (
+            <>
+              <InvoiceProductNameAiQuickSlots
+                rowKey={row.key}
+                slots={slots}
+                disabled={saving || resolving}
+                onTextChange={onTextChange}
+                onPickStyle={onPickStyle}
+                onClear={onClear}
+                onRemoveExtra={onRemoveExtra}
+                onRegister={onRegister}
+                onEnter={onEnter}
+                onTab={onTab}
+                onAddExtra={onAddExtra}
+              />
+              {!row.style ? (
+                <InvoiceProductNameSimilarStyles
+                  brandId={brandId}
+                  lookupKey={row.lookupKey}
+                  productName={row.productName}
+                  disabled={saving || resolving}
+                  onPick={(style) => onPickStyle(0, style)}
+                />
+              ) : null}
+              {stageError ||
+              row.validationError ||
+              (row.lookupKeyConflict && row.message) ? (
+                <p className="mt-1 text-[10px] text-danger">
+                  {stageError ??
+                    row.validationError ??
+                    productNameAiRowConfirmError(row)}
+                </p>
+              ) : null}
+            </>
+          )}
         </td>
       </tr>
       <tr className={tone}>
@@ -701,7 +735,11 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
                   .join(', ')}
               </p>
             ) : null}
-            {row.message && row.holdReason !== 'low_confidence' ? (
+            {row.lookupKeyConflict || row.validationError ? (
+              <p className="mt-1 text-[10px] text-danger">
+                {productNameAiRowConfirmError(row) ?? row.message}
+              </p>
+            ) : row.message && row.holdReason !== 'low_confidence' ? (
               <p className="mt-1 text-[10px] text-muted-foreground">{row.message}</p>
             ) : null}
             {historyEntry?.error ? (
@@ -718,6 +756,7 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
               variant="outline"
               className="h-6 px-2 text-[11px]"
               disabled={
+                giftProtected ||
                 saving ||
                 resolving ||
                 slots.length >= PRODUCT_NAME_AI_QUICK_SLOT_LIMIT
@@ -743,7 +782,12 @@ const ProductNameAiReviewTableRow = memo(function ProductNameAiReviewTableRow({
               size="sm"
               variant="outline"
               className="h-6 px-2 text-[11px]"
-              disabled={!row.mallName.trim() || excludePending || resolving}
+              disabled={
+                giftProtected ||
+                !row.mallName.trim() ||
+                excludePending ||
+                resolving
+              }
               onClick={() =>
                 onExclude({
                   key: row.key,

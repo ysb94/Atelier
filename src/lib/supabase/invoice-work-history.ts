@@ -1,6 +1,7 @@
 import type { InvoiceWorkRun, InvoiceWorkSiteSummary } from '@/lib/types'
+import { isInvoiceOrderKeyHash } from '@/lib/invoice/invoice-order-key'
 import type { InvoiceSiteSummaryDraft } from '@/lib/invoice/mall-resolution'
-import { outboundPartnerOptionLabel } from '@/lib/codes/outbound-partner'
+import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage } from '@/lib/supabase/map-error'
 
@@ -169,11 +170,10 @@ export async function listInvoiceWorkRuns(
         : row.outbound_partner_groups
       names.set(
         row.id,
-        outboundPartnerOptionLabel({
+        outboundPartnerDisplayName({
           name: row.name,
           groupName: group?.name ?? '',
           siteName: row.site_name,
-          channelType: row.channel_type,
         }),
       )
     })
@@ -252,4 +252,220 @@ export async function recordInvoiceWorkCompletion(
     )
   }
   return runId
+}
+
+export type RecordInvoiceWorkBackupInput = {
+  brandId: string
+  fileFingerprint: string
+  sourceFileName: string
+  workerLabel: string
+  sourceRowCount: number
+  sourceOrderCount: number
+  sites: readonly InvoiceSiteSummaryDraft[]
+  orderKeyHashes?: readonly string[]
+}
+
+export async function recordInvoiceWorkBackup(
+  input: RecordInvoiceWorkBackupInput,
+): Promise<string> {
+  const fingerprint = input.fileFingerprint.trim()
+  if (!fingerprint) {
+    throw new InvoiceWorkHistoryStoreError('파일 지문이 필요합니다.')
+  }
+
+  const { data, error } = await getSupabase().rpc(
+    'record_invoice_work_backup',
+    {
+      p_brand_id: input.brandId,
+      p_file_fingerprint: fingerprint,
+      p_source_file_name: input.sourceFileName ?? '',
+      p_worker_label: input.workerLabel ?? '',
+      p_source_row_count: input.sourceRowCount,
+      p_source_order_count: input.sourceOrderCount,
+      p_sites: input.sites.map((site) => ({
+        usage_target_id: site.usageTargetId,
+        source_mall_names: site.sourceMallNames,
+        order_count: site.orderCount,
+        source_row_count: site.sourceRowCount,
+        source_quantity: site.sourceQuantity,
+      })),
+      p_order_key_hashes: [...(input.orderKeyHashes ?? [])],
+    },
+  )
+
+  if (error) {
+    throw new InvoiceWorkHistoryStoreError(
+      errorMessage(error, '출고 작업 이력을 저장하지 못했습니다.'),
+    )
+  }
+
+  const runId = data as string | null
+  if (!runId) {
+    throw new InvoiceWorkHistoryStoreError(
+      '출고 작업 이력을 저장하지 못했습니다.',
+    )
+  }
+  return runId
+}
+
+export async function updateInvoiceWorkRun(input: {
+  brandId: string
+  runId: string
+  sourceFileName: string
+  workerLabel: string
+  completedAt: string
+}): Promise<void> {
+  const completedAt = input.completedAt.trim()
+  if (!completedAt) {
+    throw new InvoiceWorkHistoryStoreError('작업 시각을 확인하세요.')
+  }
+
+  const { error } = await getSupabase().rpc('update_invoice_work_run', {
+    p_brand_id: input.brandId,
+    p_run_id: input.runId,
+    p_source_file_name: input.sourceFileName ?? '',
+    p_worker_label: input.workerLabel ?? '',
+    p_completed_at: completedAt,
+  })
+
+  if (error) {
+    throw new InvoiceWorkHistoryStoreError(
+      errorMessage(error, '작업 이력을 수정하지 못했습니다.'),
+    )
+  }
+}
+
+export async function deleteInvoiceWorkRun(input: {
+  brandId: string
+  runId: string
+}): Promise<number> {
+  const { data, error } = await getSupabase().rpc('delete_invoice_work_run', {
+    p_brand_id: input.brandId,
+    p_run_id: input.runId,
+  })
+
+  if (error) {
+    throw new InvoiceWorkHistoryStoreError(
+      errorMessage(error, '작업 이력을 삭제하지 못했습니다.'),
+    )
+  }
+
+  return typeof data === 'number' ? data : 0
+}
+
+export async function lookupInvoiceBackedUpOrderKeys(
+  brandId: string,
+  orderKeyHashes: readonly string[],
+): Promise<string[]> {
+  if (orderKeyHashes.length === 0) return []
+
+  const { data, error } = await getSupabase().rpc(
+    'lookup_invoice_backed_up_order_keys',
+    {
+      p_brand_id: brandId,
+      p_order_key_hashes: [...orderKeyHashes],
+    },
+  )
+
+  if (error) {
+    throw new InvoiceWorkHistoryStoreError(
+      errorMessage(error, '이전 백업 주문을 확인하지 못했습니다.'),
+    )
+  }
+
+  return ((data as string[] | null) ?? []).filter(Boolean)
+}
+
+export async function backupInvoiceOutboundWork(input: {
+  brandId: string
+  sourceRef: string
+  note?: string
+  entries: readonly {
+    usageTargetId: string
+    styleId: string
+    shippedOn: string
+    quantity: number
+  }[]
+  sourceFileName: string
+  workerLabel: string
+  sourceRowCount: number
+  sourceOrderCount: number
+  sites: readonly InvoiceSiteSummaryDraft[]
+  orderKeyHashes: readonly string[]
+}): Promise<number> {
+  const fingerprint = input.sourceRef.trim()
+  if (!fingerprint) {
+    throw new InvoiceWorkHistoryStoreError('파일 지문이 필요합니다.')
+  }
+  if (input.entries.length === 0) {
+    throw new InvoiceWorkHistoryStoreError('반영할 출고 행이 없습니다.')
+  }
+
+  const orderKeyHashes: string[] = []
+  const seenHashes = new Set<string>()
+  for (const hash of input.orderKeyHashes) {
+    if (!isInvoiceOrderKeyHash(hash)) {
+      throw new InvoiceWorkHistoryStoreError('주문 키가 올바르지 않습니다.')
+    }
+    if (seenHashes.has(hash)) continue
+    seenHashes.add(hash)
+    orderKeyHashes.push(hash)
+  }
+
+  const { data, error } = await getSupabase().rpc(
+    'backup_invoice_outbound_work',
+    {
+      p_brand_id: input.brandId,
+      p_source_ref: fingerprint,
+      p_note: (input.note ?? '').trim(),
+      p_entries: input.entries,
+      p_source_file_name: input.sourceFileName ?? '',
+      p_worker_label: input.workerLabel ?? '',
+      p_source_row_count: input.sourceRowCount,
+      p_source_order_count: input.sourceOrderCount,
+      p_sites: input.sites.map((site) => ({
+        usage_target_id: site.usageTargetId,
+        source_mall_names: site.sourceMallNames,
+        order_count: site.orderCount,
+        source_row_count: site.sourceRowCount,
+        source_quantity: site.sourceQuantity,
+      })),
+      p_order_key_hashes: orderKeyHashes,
+    },
+  )
+
+  if (error) {
+    throw new InvoiceWorkHistoryStoreError(
+      errorMessage(error, '출고 데이터에 반영하지 못했습니다.'),
+    )
+  }
+
+  return typeof data === 'number' ? data : input.entries.length
+}
+
+export async function countInvoiceOutboundForFingerprint(
+  brandId: string,
+  fileFingerprint: string,
+): Promise<{ kinds: number; quantity: number }> {
+  const fingerprint = fileFingerprint.trim()
+  if (!fingerprint) return { kinds: 0, quantity: 0 }
+
+  const { data, error } = await getSupabase()
+    .from('outbound_shipments')
+    .select('style_id, quantity')
+    .eq('brand_id', brandId)
+    .eq('source', 'invoice')
+    .eq('source_ref', fingerprint)
+
+  if (error) {
+    throw new InvoiceWorkHistoryStoreError(
+      errorMessage(error, '출고 데이터를 확인하지 못했습니다.'),
+    )
+  }
+
+  const rows = (data as Array<{ style_id: string; quantity: number }>) ?? []
+  return {
+    kinds: new Set(rows.map((row) => row.style_id)).size,
+    quantity: rows.reduce((total, row) => total + (row.quantity || 0), 0),
+  }
 }

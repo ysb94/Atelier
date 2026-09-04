@@ -178,7 +178,6 @@ export function OutboundPartnerDetailPanel({
           <div className="text-sm font-medium">
             <OutboundPartnerIdentity
               target={target}
-              asCompany={company?.mode === 'company-as-unit'}
               variant={company?.mode === 'branched' ? 'unit' : 'full'}
             />
           </div>

@@ -56,7 +56,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 송장 사은품 선착순 한도·배정 원장(`invoice_prefix_requests` 한도 필드 + `invoice_gift_quotas` + `invoice_gift_allocations`) | Supabase |
 | 송장 사은품 원본행 치환 매핑(`invoice_gift_source_maps` + `invoice_gift_source_map_products` + `invoice_gift_source_allocations`) | Supabase |
 | 송장 작업 지시(`invoice_work_instructions` + `invoice_work_instruction_items`) | Supabase |
-| 송장 출고 작업 이력·사이트 집계(`invoice_work_runs` + `invoice_work_site_summaries`) | Supabase |
+| 송장 출고 작업 이력·사이트 집계·백업 주문 키(`invoice_work_runs` + `invoice_work_site_summaries` + `invoice_work_run_order_keys`) | Supabase |
 | 브랜드 AI 설정·사용량(`ai_feature_routes` + `ai_usage_logs` + `ai_model_pricing`) | Supabase |
 | 품목명·내품명 확정 사례(`ai_recommendation_feedback` + `ai_item_name_recommendation_feedback`) | Supabase |
 
@@ -69,12 +69,18 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `save_product_code_with_components`, `replace_partner_barcode_fields`,
   `replace_partner_codes`, `save_bulk_outbound_job`,   `replace_bulk_outbound_backup`,
   `replace_barcode_data_entry_shipments`,
+  `replace_invoice_outbound_shipments`,
+  `backup_invoice_outbound_work`,
+  `lookup_invoice_backed_up_order_keys`,
   `delete_bulk_outbound_job`,
   `save_brand_field_options`,
   `save_invoice_packing_size_maps`,   `save_outbound_partner_with_aliases`,
   `save_outbound_partner_unit_with_aliases`, `add_outbound_partner_alias`,
   `delete_outbound_partner_unit`, `outbound_partner_unit_link_labels`,
   `record_invoice_work_completion`,
+  `record_invoice_work_backup`,
+  `update_invoice_work_run`,
+  `delete_invoice_work_run`,
   `import_warehouse_inventory_set`, `apply_warehouse_stock_action`,
   `restore_warehouse_inventory_set`.
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
@@ -176,6 +182,16 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 임시 바코드 출고 데이터입력은 `replace_barcode_data_entry_shipments`로
 같은 업체 그룹·출고일의 `barcode-data-entry:*` 반영분을 지점별
 `usage_target_id`로 교체한다. 재고는 건드리지 않는다.
+송장 오늘 작업의 `(임시) 출고반영` 백업은
+`backup_invoice_outbound_work`로 출고 원장·작업 이력·주문 키를 한
+트랜잭션에서 저장한다. 내부에서 `replace_invoice_outbound_shipments`와
+`record_invoice_work_backup`을 호출한다. `source='invoice'`이며
+`source_ref`는 수령인·전화·주소를 뺀 작업 대상 행 SHA-256 지문이다.
+같은 지문을 다시 백업하면 이전 반영분과 주문 키를 교체하고 중복 적재하지
+않는다. `shipped_on`은 각 원본 주문의 주문일시 날짜다. 본품·내품만 넣고
+사은품·포장재와 재고 차감은 포함하지 않는다.
+주문 키는 정규화한 고객주문번호·쇼핑몰명·주문일시의 SHA-256만 저장하고
+원문은 넣지 않는다. 배포 전 이력은 키가 없어 역산·백필하지 않는다.
 바코드 출고 건 삭제는 `delete_bulk_outbound_job`으로 같은 Job의 `source='bulk'`
 출고 원장도 함께 지운다. 재고는 건드리지 않는다.
 
@@ -926,7 +942,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 #### 오늘 작업 최종 행 순서
 
 ```
-파일 올리기 → 파일 확인 → 사은품 추가 → 작업 지시 → 품목명 변환 → 내품명 변환 → 재고·예약 → 상품 리스트 → 최종 행
+파일 올리기 → 파일 확인 → 사은품 추가 → 작업 지시 → 품목명 변환 → 내품명 변환 → (임시) 출고반영 → 재고·예약 → 상품 리스트 → 최종 행
 ```
 
 1. 원본 품목명으로 사은품 적격·배정과 작업 지시 매칭을 확정한다.
@@ -942,11 +958,19 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
    단계에서 전체를 소비한 내품명과 처음부터 빈 내품명은 빈 값으로 두고 검토
    목록에 넣지 않는다. 세트 구성만으로는 내품명을 바꾸거나 비우지 않는다.
    사은품 행(`kind = gift`)은 미변환 목록에서 제외한다.
-4. 재고·예약 단계는 단종·재고부족·예약발송 상품을 모아 이번 송장에서 제외할지
+4. (임시) 출고반영은 품목명·내품명 변환에서 나온 본품·내품만 M번호로 합쳐
+   보여 주고, 백업하면 `outbound_shipments`에 `source='invoice'`로 저장하고
+   `invoice_work_runs` 최근 작업과 `invoice_work_run_order_keys`에도 남긴다.
+   주문일·출고업체·SKU별로 수량을 나누며 사은품·포장재는 넣지 않는다.
+   미해결 품목/내품명, 주문일시 없음, 출고업체 미연결, styleId 누락이 있으면
+   부분 저장하지 않는다. 재고는 건드리지 않는다. 최근 작업에서
+   파일명·작업자·시각을 고치거나 이력과 같은 파일 지문의 출고 원장·주문
+   키를 함께 지울 수 있다.
+5. 재고·예약 단계는 단종·재고부족·예약발송 상품을 모아 이번 송장에서 제외할지
    유지할지 고른다. 기준정보 출고상태의 예발(`invoice_preorder_holds`)·단종
    (`invoice_discontinued_styles`)은 DB에 저장한다. 예발은 목록에서 빼도
    `cleared`로 남겨 과거 참고 기록으로 본다. 실제 주문 제외 반영은 이후 연결한다.
-5. 상품 리스트는 브라우저 메모리의 출고구성(`buildOutgoingComponentRowsFromStages`)을
+6. 상품 리스트는 브라우저 메모리의 출고구성(`buildOutgoingComponentRowsFromStages`)을
    읽기 전용으로 집계한다. 품목(본품·옵션맵 세트 구성)·내품(내품명 규칙·부속품
    사전)·사은품·포장재 중 체크한 종류만 M번호로
    중복 제거하고 수량을 합친다. 합친 수량은 활성 연습 세트의 출고창고·박스창고
@@ -955,7 +979,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
    출력 형식은 출고창고용·박스창고용 화면 상태이며 DB에 저장하지 않는다. 주문
    개인정보와 집계 결과도 저장하지 않으며 사은품 원장·재고도 바꾸지
    않는다. 빈 M번호와 `unknown` 행은 합계에서 뺀다.
-6. 다운로드 직전에 선착순 신규 배정을 원자 확정한 뒤, 실제 세트면 구성품별 CJ
+7. 다운로드 직전에 선착순 신규 배정을 원자 확정한 뒤, 실제 세트면 구성품별 CJ
    행을 펼치고 각 상품 행의 최종 품목명 앞에 작업 지시 문구를 붙인다. 내품명
    규칙의 M번호는 CJ 행을 늘리지 않고 출고구성 XLSX에만 반영한다. 사은품은 그
    세트 블록 뒤에 순서대로 삽입한다. CJ 13열과 M번호 출고구성 XLSX를 따로
@@ -978,15 +1002,36 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - `invoice_work_site_summaries`는 `(brand_id, run_id, usage_target_id)`마다
   원본 쇼핑몰 표기, 주문 건수, 원본 행수·수량, CJ 주문/사은품 행수·수량을
   둔다. 주문 지문은 메모리에서만 중복 제거하고 DB에 넣지 않는다.
+- `invoice_work_run_order_keys`는 `(brand_id, run_id, order_key_hash)`만
+  저장한다. 해시 원문은 정규화한 고객주문번호·쇼핑몰명·주문일시이며
+  평문은 넣지 않는다. 같은 주문의 여러 SKU 행은 한 키로 묶는다.
+- 파일 확인 직후 `lookup_invoice_backed_up_order_keys`로 과거
+  `(임시) 출고반영` 백업과 같은 키를 찾는다. 확인창에서 승인한 뒤에만
+  해당 주문의 모든 행을 이후 단계에서 제외한다. 배포 전 이력은 키가 없어
+  역산·백필하지 않고, 이후 백업부터 감지한다.
 - `record_invoice_work_completion`은 `SECURITY INVOKER`이며 대상 출고업체가
   같은 브랜드인지 검사한 뒤 작업을 upsert하고 사이트 집계를 한 트랜잭션에서
   교체한다.
-- 로직: `src/lib/invoice/mall-resolution.ts`.
+- `(임시) 출고반영` 백업은 `backup_invoice_outbound_work`로 출고 원장·이력·
+  주문 키를 한 트랜잭션에서 저장한다. 이미 CJ 13열을 내려받은 작업이면
+  출력·사은품 수치는 유지하고 원본 행수·주문 건수·사이트 원본 수량과
+  주문 키만 갱신한다.
+- `update_invoice_work_run`은 파일명·작업자·작업 시각만 고친다.
+- `delete_invoice_work_run`은 이력과 `source='invoice'`이면서 같은 파일 지문인
+  출고 원장을 한 트랜잭션에서 지운다. 주문 키는 run 삭제 CASCADE로 함께
+  빠져 해당 주문을 다시 처리할 수 있다. 재고는 건드리지 않는다.
+- 로직: `src/lib/invoice/mall-resolution.ts`,
+  `src/lib/invoice/invoice-order-key.ts`.
   저장소: `src/lib/supabase/invoice-work-history.ts`.
   화면: `InvoiceMallResolutionDialog`, `InvoiceWorkPage` 파일 확인·작업 이력,
-  `InvoiceOutputStepPanel`.
-- 회귀 검증: `npm run verify:invoice-mall`.
-- 마이그레이션: `20260828075955_invoice_work_history.sql`.
+  `InvoiceBackedUpOrderDialog`, `InvoiceOutputStepPanel`,
+  `InvoiceWorkHistoryPanel`.
+- 회귀 검증: `npm run verify:invoice-mall`, `npm run verify:outbound-reflect`,
+  `npm run verify:invoice-order-key`.
+- 마이그레이션: `20260828075955_invoice_work_history.sql`,
+  `20260904040300_replace_invoice_outbound_shipments.sql`,
+  `20260904032113_invoice_work_run_manage.sql`,
+  `20260904041000_invoice_work_run_order_keys.sql`.
 
 - 로직: `src/lib/invoice/prefix-transform.ts`, `gift-assign.ts`,
   `gift-diversity.ts`, `gift-unified.ts`,
@@ -994,19 +1039,23 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `product-name-tags.ts`, `product-name-transform.ts`, `item-name-transform.ts`,
   `option-transform.ts`, `option-ledger-import.ts`, `mall-resolution.ts`,
   `invoice-output.ts`,
+  `invoice-order-key.ts`,
   `product-list-summary.ts`, `product-list-warehouse.ts`,
   `product-list-print.ts`, `product-list-route.ts`,
-  `prefix-paste.ts`, `accessory-resolve.ts`.
+  `prefix-paste.ts`, `accessory-resolve.ts`,
+  `outbound-reflect-summary.ts`.
   저장소: `invoice-prefix-requests.ts`, `invoice-gift-allocations.ts`,
   `invoice-accessory-rules.ts`,
   `invoice-work-instructions.ts`, `invoice-work-history.ts`,
+  `outbound-shipments.ts`,
   `invoice-product-name-maps.ts`,
   `invoice-product-name-tag-roles.ts`, `invoice-option-maps.ts`,
   `invoice-item-name-rules.ts`.
   화면: `InvoicePrefixRequestPanel/Form`, `InvoiceWorkInstructionPanel/Form`,
   `InvoicePrefixStepPanel`, `InvoiceWorkInstructionStepPanel`,
   `InvoiceOptionMapRulesPanel`, `InvoiceProductNameTransformPanel`,
-  `InvoiceItemNameTransformPanel`, `InvoiceProductListStepPanel`,
+  `InvoiceItemNameTransformPanel`, `InvoiceWorkPage` 출고반영,
+  `InvoiceProductListStepPanel`,
   `InvoiceProductListPrint`, `InvoiceProductListPrintPreviewDialog`,
   `InvoiceItemNameLookupKeyTable`,
   `InvoiceItemNameRuleForm`, `InvoiceItemNameRuleBulkPanel`,
@@ -1036,7 +1085,10 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260824141000_grant_fnv1a_32_utf8_authenticated.sql`,
   `20260824142000_gift_source_unique_per_recipient.sql`,
   `20260824143000_confirm_gift_source_allocations.sql`,
-  `20260828075955_invoice_work_history.sql`.
+  `20260828075955_invoice_work_history.sql`,
+  `20260904040300_replace_invoice_outbound_shipments.sql`,
+  `20260904032113_invoice_work_run_manage.sql`,
+  `20260904041000_invoice_work_run_order_keys.sql`.
 - 재고 원칙: [`INVENTORY.md`](./INVENTORY.md).
 
 ### 수천 건 적재

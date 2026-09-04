@@ -80,10 +80,6 @@ const NAV_LABELS: {
     label: '물류 · 송장작업',
   },
   {
-    match: /^\/logistics\/invoice-data-entry(?:\/|$)/,
-    label: '물류 · (임시) 송장데이터 입력',
-  },
-  {
     match: /^\/logistics\/barcode-outbound-data-entry(?:\/|$)/,
     label: '물류 · (임시) 바코드 출고 데이터입력',
   },

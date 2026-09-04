@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight, Pencil, Plus, Search, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -38,18 +38,30 @@ export function InvoiceGiftSourceMapPanel({
 }) {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>(
+    'all',
+  )
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [rowError, setRowError] = useState<string | null>(null)
 
+  const activeCount = maps.filter((map) => map.isActive).length
+  const inactiveCount = maps.length - activeCount
+
   const filtered = useMemo(() => {
     const query = search.trim().toLocaleLowerCase('ko-KR')
-    const list = [...maps].sort(
-      (left, right) =>
-        right.updatedAt.localeCompare(left.updatedAt) ||
-        left.productName.localeCompare(right.productName, 'ko-KR'),
-    )
+    const list = [...maps]
+      .filter((map) => {
+        if (statusFilter === 'active') return map.isActive
+        if (statusFilter === 'inactive') return !map.isActive
+        return true
+      })
+      .sort(
+        (left, right) =>
+          right.updatedAt.localeCompare(left.updatedAt) ||
+          left.productName.localeCompare(right.productName, 'ko-KR'),
+      )
     if (!query) return list
     return list.filter((map) =>
       [
@@ -62,9 +74,7 @@ export function InvoiceGiftSourceMapPanel({
         .toLocaleLowerCase('ko-KR')
         .includes(query),
     )
-  }, [maps, search])
-
-  const activeCount = maps.filter((map) => map.isActive).length
+  }, [maps, search, statusFilter])
 
   function invalidate() {
     return queryClient.invalidateQueries({
@@ -120,11 +130,28 @@ export function InvoiceGiftSourceMapPanel({
             M번호를 받습니다. 사은품 행을 추가하는 위 요청 건과는 별개입니다.
           </CardDescription>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          <Badge variant="muted">{formatNumber(maps.length)}건</Badge>
-          {activeCount > 0 ? (
-            <Badge variant="success">사용중 {activeCount}</Badge>
-          ) : null}
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <StatusCountFilter
+            active={statusFilter === 'all'}
+            variant="muted"
+            onClick={() => setStatusFilter('all')}
+          >
+            전체 {formatNumber(maps.length)}
+          </StatusCountFilter>
+          <StatusCountFilter
+            active={statusFilter === 'active'}
+            variant="success"
+            onClick={() => setStatusFilter('active')}
+          >
+            사용중 {formatNumber(activeCount)}
+          </StatusCountFilter>
+          <StatusCountFilter
+            active={statusFilter === 'inactive'}
+            variant="muted"
+            onClick={() => setStatusFilter('inactive')}
+          >
+            중지 {formatNumber(inactiveCount)}
+          </StatusCountFilter>
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -210,7 +237,9 @@ export function InvoiceGiftSourceMapPanel({
           <p className="rounded-lg border border-border px-4 py-12 text-center text-xs text-muted-foreground">
             {maps.length === 0
               ? '저장된 품목명 대체 매핑이 없습니다. 오늘 작업 품목명 변환에서 사은품 처리 후 「다음 주문에도 자동 적용」을 고르면 여기에 나타납니다.'
-              : '검색 결과가 없습니다.'}
+              : statusFilter !== 'all' && !search.trim()
+                ? '해당 상태의 매핑이 없습니다.'
+                : '검색 결과가 없습니다.'}
           </p>
         ) : (
           <div className="space-y-2">
@@ -307,5 +336,32 @@ export function InvoiceGiftSourceMapPanel({
         {rowError ? <p className="text-xs text-danger">{rowError}</p> : null}
       </CardContent>
     </Card>
+  )
+}
+
+function StatusCountFilter({
+  active,
+  variant,
+  onClick,
+  children,
+}: {
+  active: boolean
+  variant: 'muted' | 'success'
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        'rounded-full px-2 py-0.5 text-xs font-medium',
+        variant === 'success' && 'bg-success/15 text-success',
+        variant === 'muted' && 'bg-muted text-muted-foreground',
+        active && 'ring-1 ring-foreground/40',
+      )}
+    >
+      {children}
+    </button>
   )
 }

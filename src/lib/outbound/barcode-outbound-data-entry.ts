@@ -132,6 +132,125 @@ export function barcodeDataEntrySourceRef(companyKey: string) {
   return `${BARCODE_DATA_ENTRY_SOURCE_REF_PREFIX}${companyKey}`
 }
 
+export function barcodeDataEntryCompanyKeyFromSourceRef(sourceRef: string) {
+  return sourceRef.startsWith(BARCODE_DATA_ENTRY_SOURCE_REF_PREFIX)
+    ? sourceRef.slice(BARCODE_DATA_ENTRY_SOURCE_REF_PREFIX.length)
+    : ''
+}
+
+export type BarcodeDataEntryLedgerRow = {
+  id: string
+  sourceRef: string
+  styleId: string
+  styleNo: string
+  styleName: string
+  usageTargetId: string
+  partnerName: string
+  shippedOn: string
+  quantity: number
+  note: string
+}
+
+export type BarcodeDataEntryHistoryLine = {
+  id: string
+  styleId: string
+  styleNo: string
+  styleName: string
+  usageTargetId: string
+  partnerName: string
+  quantity: number
+}
+
+export type BarcodeDataEntryHistoryJob = {
+  key: string
+  companyKey: string
+  shippedOn: string
+  note: string
+  kinds: number
+  qty: number
+  lines: BarcodeDataEntryHistoryLine[]
+}
+
+export function groupBarcodeDataEntryHistory(
+  rows: readonly BarcodeDataEntryLedgerRow[],
+): BarcodeDataEntryHistoryJob[] {
+  const groups = new Map<string, BarcodeDataEntryHistoryJob>()
+  for (const row of rows) {
+    const companyKey = barcodeDataEntryCompanyKeyFromSourceRef(row.sourceRef)
+    const key = `${companyKey}:${row.shippedOn}`
+    const line = {
+      id: row.id,
+      styleId: row.styleId,
+      styleNo: row.styleNo,
+      styleName: row.styleName,
+      usageTargetId: row.usageTargetId,
+      partnerName: row.partnerName,
+      quantity: row.quantity,
+    }
+    const current = groups.get(key)
+    if (current) {
+      current.qty += row.quantity
+      if (row.note && !current.note) current.note = row.note
+      current.lines.push(line)
+      continue
+    }
+    groups.set(key, {
+      key,
+      companyKey,
+      shippedOn: row.shippedOn,
+      note: row.note,
+      kinds: 0,
+      qty: row.quantity,
+      lines: [line],
+    })
+  }
+  return [...groups.values()]
+    .map((job) => ({
+      ...job,
+      kinds: new Set(job.lines.map((line) => line.styleNo || line.id)).size,
+      lines: job.lines.slice().sort((left, right) =>
+        left.styleNo.localeCompare(right.styleNo, 'ko') ||
+        left.partnerName.localeCompare(right.partnerName, 'ko'),
+      ),
+    }))
+    .sort(
+      (left, right) =>
+        right.shippedOn.localeCompare(left.shippedOn) ||
+        left.companyKey.localeCompare(right.companyKey, 'ko'),
+    )
+}
+
+export function barcodeDataEntryHistoryPartnerIds(
+  job: Pick<BarcodeDataEntryHistoryJob, 'lines'>,
+  extraIds: readonly string[] = [],
+) {
+  return [
+    ...new Set(
+      [
+        ...extraIds,
+        ...job.lines.map((line) => line.usageTargetId),
+      ].filter(Boolean),
+    ),
+  ]
+}
+
+export function barcodeDataEntryRowsFromHistory(
+  lines: readonly BarcodeDataEntryHistoryLine[],
+): BarcodeDataEntryRow[] {
+  return lines
+    .filter((line) => line.quantity > 0)
+    .map((line) => ({
+      productName: line.styleName,
+      qty: line.quantity,
+      siteName: line.partnerName,
+      styleNo: line.styleNo,
+      styleId: line.styleId,
+      usageTargetId: line.usageTargetId,
+      officialSiteName: line.partnerName,
+      siteStatus: line.usageTargetId ? 'matched' : 'unmatched',
+    }))
+}
+
 export function barcodeDataEntryVisibleKey(brandId: string) {
   return `${VISIBLE_KEY_PREFIX}${brandId}`
 }
@@ -379,6 +498,22 @@ export function applyBarcodeDataEntrySiteLookup(
     ...row,
     ...resolveBarcodeDataEntrySite(row.siteName, index, singleUnit),
   }))
+}
+
+/** 지점명 없는 행에 이 업체 지점 하나를 넣는다. */
+export function assignBarcodeDataEntryEmptySite(
+  rows: readonly BarcodeDataEntryRow[],
+  unit: CodeUsageTarget,
+): BarcodeDataEntryRow[] {
+  const siteName = outboundPartnerUnitLabel(unit)
+  const assigned = resolveBarcodeDataEntrySite(
+    siteName,
+    buildCompanySiteIndex([unit], new Map()),
+    unit,
+  )
+  return rows.map((row) =>
+    siteNameKey(row.siteName) ? row : { ...row, siteName, ...assigned },
+  )
 }
 
 export function keepBarcodeDataEntryLinks(

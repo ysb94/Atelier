@@ -36,8 +36,14 @@ import type {
 } from '@/lib/types'
 import { INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
-import type { GiftSourceGroup } from '@/lib/invoice/gift-source-transform'
-import type { ProductNameAiReviewRow } from '@/lib/invoice/product-name-ai-review'
+import {
+  filterRegularProductNameCombos,
+  isProtectedGiftSourceCombo,
+  isProtectedGiftSourceGroup,
+  protectedGiftSourceKeys,
+  rejectProtectedGiftSourceSave,
+  type GiftSourceGroup,
+} from '@/lib/invoice/gift-source-transform'
 import { InvoiceTablePager } from './invoice-table-page'
 import { useInvoiceTablePage } from './useInvoiceTablePage'
 import { InvoiceProductNameAiApplyBar } from './InvoiceProductNameAiApplyBar'
@@ -115,7 +121,7 @@ export const InvoiceProductNameTransformPanel = memo(function InvoiceProductName
   onAutoCollectSettled?: () => void
   onBlockingSaveCountChange?: (count: number) => void
   giftGroups?: GiftSourceGroup[]
-  onOpenGiftSetup?: (row: ProductNameAiReviewRow) => void
+  onOpenGiftSetup?: (target: { mallName: string; productName: string }) => void
 }) {
   const queryClient = useQueryClient()
   const [query, setQuery] = useState('')
@@ -130,6 +136,37 @@ export const InvoiceProductNameTransformPanel = memo(function InvoiceProductName
     enqueue,
     undo,
   } = useInvoiceProductNameSaveQueue(brandId)
+  const protectedGiftKeys = useMemo(
+    () => protectedGiftSourceKeys(giftGroups),
+    [giftGroups],
+  )
+  const pendingGiftGroups = useMemo(
+    () => giftGroups.filter((group) => isProtectedGiftSourceGroup(group)),
+    [giftGroups],
+  )
+  const regularCombos = useMemo(
+    () =>
+      filterRegularProductNameCombos(
+        transformation.unresolvedCombos,
+        protectedGiftKeys,
+      ),
+    [protectedGiftKeys, transformation.unresolvedCombos],
+  )
+  const giftDisplayCombos = useMemo(
+    () =>
+      transformation.unresolvedCombos.filter((combo) =>
+        isProtectedGiftSourceCombo(combo, protectedGiftKeys),
+      ),
+    [protectedGiftKeys, transformation.unresolvedCombos],
+  )
+  const enqueueGuarded = useCallback(
+    (input: Parameters<typeof enqueue>[0]) => {
+      const blocked = rejectProtectedGiftSourceSave(input, protectedGiftKeys)
+      if (blocked) return
+      enqueue(input)
+    },
+    [enqueue, protectedGiftKeys],
+  )
 
   const excludeMutation = useMutation({
     mutationFn: (input: {
@@ -202,9 +239,11 @@ export const InvoiceProductNameTransformPanel = memo(function InvoiceProductName
   )
   const bulk = useInvoiceProductNameBulkAiApply({
     brandId,
-    combos: transformation.unresolvedCombos,
-    enqueue,
+    combos: regularCombos,
+    enqueue: enqueueGuarded,
     saveStatusByKey,
+    protectedKeys: protectedGiftKeys,
+    giftDisplayCombos,
   })
   const autoCollectStartedRef = useRef(false)
   const lastAutoCollectKeyRef = useRef(autoCollectKey)
@@ -534,6 +573,11 @@ export const InvoiceProductNameTransformPanel = memo(function InvoiceProductName
             사은품 변환 완료 {formatNumber(transformation.giftMappedRowCount)}행
           </Badge>
         ) : null}
+        {pendingGiftGroups.length > 0 ? (
+          <Badge variant="danger">
+            사은품 후보 {formatNumber(pendingGiftGroups.length)}개
+          </Badge>
+        ) : null}
       </div>
 
       {showProductTags || showOptionTags ? (
@@ -739,7 +783,7 @@ export const InvoiceProductNameTransformPanel = memo(function InvoiceProductName
         onCorrect={({ historyId, lookupKey, style, extras }) => {
           const entry = history.find((item) => item.id === historyId)
           if (!entry) return
-          enqueue({
+          enqueueGuarded({
             historyId,
             comboKey: entry.comboKey,
             productName: entry.productName,
@@ -769,7 +813,8 @@ export const InvoiceProductNameTransformPanel = memo(function InvoiceProductName
         onUndo={undo}
       />
 
-      {transformation.unresolvedCombos.length > 0 ||
+      {regularCombos.length > 0 ||
+      pendingGiftGroups.length > 0 ||
       savingCount > 0 ||
       failedCount > 0 ? (
         <InvoiceProductNameAiApplyBar
