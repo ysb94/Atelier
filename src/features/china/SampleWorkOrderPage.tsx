@@ -8,6 +8,11 @@ import { Input } from '@/components/ui/input'
 import { getCompanyProductDrafts, updateProductDraft } from '@/lib/api'
 import { DEFAULT_COMPANY_ID } from '@/lib/company/capabilities'
 import {
+  colorWorkOrderFileName,
+  filledColorWorkOrders,
+  setColorWorkOrderShipped,
+} from '@/lib/drafts/draft-flow'
+import {
   draftHasSampleWorkOrder,
   draftToInput,
   filledSampleWorkOrders,
@@ -34,8 +39,59 @@ function workOrderFileName(name: string) {
   return name.trim() || '샘플 작업 지시서'
 }
 
-function isWorkOrderDone(order: { shipped?: boolean; passed?: boolean }) {
-  return Boolean(order.shipped || order.passed)
+type WorkOrderKind = 'sample' | 'color'
+
+type WorkOrderRow = {
+  draft: ProductDraft
+  kind: WorkOrderKind
+  orderId: string
+  url: string | null
+  fileName: string
+  shipped: boolean
+  shippedAt: string | null
+  passed: boolean
+  failReason: string
+  focusReason: string
+  colorName: string
+  sortRound: number
+}
+
+function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
+  const samples = filledSampleWorkOrders(draft.sampleWorkOrders).map(
+    (order) => ({
+      draft,
+      kind: 'sample' as const,
+      orderId: order.id,
+      url: order.url,
+      fileName: workOrderFileName(order.name),
+      shipped: Boolean(order.shipped),
+      shippedAt: order.shippedAt,
+      passed: Boolean(order.passed),
+      failReason: order.failReason?.trim() ?? '',
+      focusReason: previousSampleFailReason(draft.sampleWorkOrders, order.id),
+      colorName: '',
+      sortRound: order.round,
+    }),
+  )
+  const colors = filledColorWorkOrders(draft.colors).map((color, index) => ({
+    draft,
+    kind: 'color' as const,
+    orderId: color.id,
+    url: color.sampleWorkOrderUrl,
+    fileName: colorWorkOrderFileName(color),
+    shipped: Boolean(color.sampleWorkOrderShipped),
+    shippedAt: color.sampleWorkOrderShippedAt,
+    passed: false,
+    failReason: '',
+    focusReason: '',
+    colorName: color.name.trim(),
+    sortRound: index,
+  }))
+  return [...samples, ...colors]
+}
+
+function isWorkOrderDone(row: Pick<WorkOrderRow, 'kind' | 'shipped' | 'passed'>) {
+  return row.kind === 'color' ? row.shipped : Boolean(row.shipped || row.passed)
 }
 
 function formatSavedAt(value: string) {
@@ -64,12 +120,20 @@ export function CompanySampleWorkOrderPage() {
   const shipMutation = useMutation({
     mutationFn: async ({
       draft,
+      kind,
       orderId,
     }: {
       draft: ProductDraft
+      kind: WorkOrderKind
       orderId: string
     }) => {
       const input = draftToInput(draft)
+      if (kind === 'color') {
+        return updateProductDraft(draft.id, {
+          ...input,
+          colors: setColorWorkOrderShipped(input.colors, orderId, true),
+        })
+      }
       const sampleWorkOrders = setSampleWorkOrderShipped(
         input.sampleWorkOrders,
         orderId,
@@ -97,21 +161,17 @@ export function CompanySampleWorkOrderPage() {
     const keyword = search.trim().toLowerCase()
     return (draftsQuery.data ?? [])
       .filter((draft) => draftHasSampleWorkOrder(draft))
-      .flatMap((draft) =>
-        filledSampleWorkOrders(draft.sampleWorkOrders).map((order) => ({
-          draft,
-          order,
-        })),
-      )
-      .filter(({ draft, order }) => {
+      .flatMap((draft) => flattenDraftWorkOrders(draft))
+      .filter((row) => {
         if (!keyword) return true
         return [
-          draft.draftNo,
-          draft.nameKo,
-          draft.nameEn,
-          draft.owner,
-          order.name,
-          ...draft.colors.map((color) => color.name),
+          row.draft.draftNo,
+          row.draft.nameKo,
+          row.draft.nameEn,
+          row.draft.owner,
+          row.fileName,
+          row.colorName,
+          ...row.draft.colors.map((color) => color.name),
         ]
           .filter(Boolean)
           .some((text) => text.toLowerCase().includes(keyword))
@@ -119,21 +179,23 @@ export function CompanySampleWorkOrderPage() {
       .sort((left, right) => {
         const byTime = right.draft.updatedAt.localeCompare(left.draft.updatedAt)
         if (byTime !== 0) return byTime
-        return right.order.round - left.order.round
+        if (left.kind !== right.kind) return left.kind === 'sample' ? -1 : 1
+        if (left.kind === 'sample') return right.sortRound - left.sortRound
+        return left.colorName.localeCompare(right.colorName, 'ko')
       })
   }, [draftsQuery.data, search])
 
   const tabCounts = useMemo(
     () => ({
-      open: workOrders.filter(({ order }) => !isWorkOrderDone(order)).length,
-      done: workOrders.filter(({ order }) => isWorkOrderDone(order)).length,
+      open: workOrders.filter((row) => !isWorkOrderDone(row)).length,
+      done: workOrders.filter((row) => isWorkOrderDone(row)).length,
     }),
     [workOrders],
   )
   const visibleWorkOrders = useMemo(
     () =>
-      workOrders.filter(({ order }) =>
-        listTab === 'done' ? isWorkOrderDone(order) : !isWorkOrderDone(order),
+      workOrders.filter((row) =>
+        listTab === 'done' ? isWorkOrderDone(row) : !isWorkOrderDone(row),
       ),
     [listTab, workOrders],
   )
@@ -142,7 +204,7 @@ export function CompanySampleWorkOrderPage() {
     <div>
       <PageHeader
         title="작업 지시서"
-        description="기획에서 올리고 저장한 샘플 작업 지시서입니다. 다음 지시서를 올리면 새 행이 생기고, 이미 발송한 행은 그대로 완료로 남습니다."
+        description="기획에서 올리고 저장한 대표 샘플·컬러별 작업 지시서입니다. 지시서 하나마다 행이 생기고, 이미 발송한 행은 그대로 완료로 남습니다."
       />
 
       <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -203,7 +265,7 @@ export function CompanySampleWorkOrderPage() {
         <Card className="px-4 py-10 text-center text-sm text-muted-foreground">
           {search.trim()
             ? '조건에 맞는 작업 지시서가 없습니다.'
-            : '기획안에서 샘플 작업 지시서를 올리고 저장하면 여기에 나타납니다.'}
+            : '기획안에서 샘플·컬러 작업 지시서를 올리고 저장하면 여기에 나타납니다.'}
         </Card>
       ) : visibleWorkOrders.length === 0 ? (
         <Card className="px-4 py-10 text-center text-sm text-muted-foreground">
@@ -213,25 +275,27 @@ export function CompanySampleWorkOrderPage() {
         </Card>
       ) : (
         <div className="space-y-2">
-          {visibleWorkOrders.map(({ draft, order }) => {
+          {visibleWorkOrders.map((row) => {
+            const { draft } = row
             const namedColors = draft.colors.filter((color) =>
               color.name.trim(),
             )
             const sampleCount = sampleInProgressCount(draft)
-            const done = order.shipped || order.passed
-            const fileName = workOrderFileName(order.name)
-            const failReason = order.failReason?.trim() ?? ''
-            const focusReason = previousSampleFailReason(
-              draft.sampleWorkOrders,
-              order.id,
-            )
-            const note = done ? failReason : focusReason
+            const done = isWorkOrderDone(row)
+            const note = done ? row.failReason : row.focusReason
             const shippingThis =
               shipMutation.isPending &&
-              shipMutation.variables?.orderId === order.id
+              shipMutation.variables?.kind === row.kind &&
+              shipMutation.variables?.orderId === row.orderId
+            const colorLine =
+              row.kind === 'color'
+                ? row.colorName || '컬러 미정'
+                : namedColors.length === 0
+                  ? '컬러 미정'
+                  : namedColors.map((color) => color.name.trim()).join(', ')
             return (
               <Card
-                key={`${draft.id}:${order.id}`}
+                key={`${draft.id}:${row.kind}:${row.orderId}`}
                 className="flex flex-col gap-3 p-3"
               >
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -255,12 +319,8 @@ export function CompanySampleWorkOrderPage() {
                       {draft.nameKo || draft.nameEn || '이름 미정'}
                     </div>
                     <div className="truncate text-xs text-muted-foreground">
-                      {namedColors.length === 0
-                        ? '컬러 미정'
-                        : namedColors
-                            .map((color) => color.name.trim())
-                            .join(', ')}
-                      {namedColors.length > 0
+                      {colorLine}
+                      {row.kind === 'sample' && namedColors.length > 0
                         ? ` · 샘플 ${formatNumber(sampleCount)}/${formatNumber(namedColors.length)}`
                         : ''}
                       {draft.owner ? ` · ${draft.owner}` : ''}
@@ -271,22 +331,22 @@ export function CompanySampleWorkOrderPage() {
                 <div className="flex min-w-0 items-center gap-2 sm:max-w-[28rem] sm:justify-end">
                   <FileText className="size-4 shrink-0 text-muted-foreground" />
                   <div className="min-w-0">
-                    {order.url ? (
+                    {row.url ? (
                       <a
-                        href={order.url}
-                        download={fileName}
+                        href={row.url}
+                        download={row.fileName}
                         className="block truncate text-sm underline-offset-2 hover:underline"
                       >
-                        {fileName}
+                        {row.fileName}
                       </a>
                     ) : (
                       <span className="block truncate text-sm">작업 지시서</span>
                     )}
                     <div className="text-[11px] text-muted-foreground">
-                      {formatSavedAt(order.shippedAt || draft.updatedAt)}{' '}
-                      {order.passed
+                      {formatSavedAt(row.shippedAt || draft.updatedAt)}{' '}
+                      {row.passed
                         ? '합격'
-                        : failReason
+                        : row.failReason
                           ? '불합격'
                           : done
                             ? '발송'
@@ -297,12 +357,12 @@ export function CompanySampleWorkOrderPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    disabled={!order.url}
+                    disabled={!row.url}
                     onClick={() => {
-                      if (!order.url) return
+                      if (!row.url) return
                       const link = document.createElement('a')
-                      link.href = order.url
-                      link.download = fileName
+                      link.href = row.url
+                      link.download = row.fileName
                       link.rel = 'noreferrer'
                       link.click()
                     }}
@@ -315,13 +375,17 @@ export function CompanySampleWorkOrderPage() {
                     variant={done ? 'secondary' : 'outline'}
                     size="sm"
                     aria-pressed={done}
-                    disabled={!order.url || done || shippingThis}
+                    disabled={!row.url || done || shippingThis}
                     className={cn(
                       done &&
                         'border-success/40 bg-success/10 text-foreground hover:bg-success/15',
                     )}
                     onClick={() =>
-                      shipMutation.mutate({ draft, orderId: order.id })
+                      shipMutation.mutate({
+                        draft,
+                        kind: row.kind,
+                        orderId: row.orderId,
+                      })
                     }
                   >
                     {done ? <Check className="size-3.5" /> : null}

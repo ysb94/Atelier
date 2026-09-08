@@ -16,7 +16,16 @@ function newId(prefix: string) {
 }
 
 export function newColorRow(): DraftColorRow {
-  return { id: newId('color'), name: '', orderQty: null, sampleInProgress: false }
+  return {
+    id: newId('color'),
+    name: '',
+    orderQty: null,
+    sampleInProgress: false,
+    sampleWorkOrderUrl: null,
+    sampleWorkOrderName: '',
+    sampleWorkOrderShipped: false,
+    sampleWorkOrderShippedAt: null,
+  }
 }
 
 export function newOptionRow(): DraftOptionRow {

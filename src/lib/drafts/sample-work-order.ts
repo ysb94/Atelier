@@ -53,7 +53,7 @@ export function samplePhaseHint(
   orders: readonly DraftSampleWorkOrder[] | null | undefined,
 ) {
   const phase = samplePhase(orders)
-  if (phase === 'passed') return '발주로 진행'
+  if (phase === 'passed') return '컬러별 샘플로 진행'
   if (phase === 'shipped') return '도착 후 합격·불합격'
   if (phase === 'in_progress') return '중국팀 제작'
   return '작업 지시서를 올리면 시작합니다'
@@ -337,10 +337,12 @@ function parseSampleWorkOrder(value: unknown): DraftSampleWorkOrder | null {
 export function draftHasSampleWorkOrder(draft: {
   sampleWorkOrders?: DraftSampleWorkOrder[] | null
   sampleWorkOrderUrl?: string | null
+  colors?: { sampleWorkOrderUrl?: string | null }[]
 }) {
   return Boolean(
     latestFilledSampleWorkOrder(draft.sampleWorkOrders)?.url ||
-      draft.sampleWorkOrderUrl?.trim(),
+      draft.sampleWorkOrderUrl?.trim() ||
+      draft.colors?.some((color) => color.sampleWorkOrderUrl?.trim()),
   )
 }
 

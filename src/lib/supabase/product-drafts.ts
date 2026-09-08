@@ -7,6 +7,7 @@ import type {
 } from '@/lib/types'
 import { emptyDraftInput } from '@/lib/drafts/empty-draft'
 import { normalizeDraftBrandId, parseDraftNo } from '@/lib/drafts/company-draft'
+import { sanitizeColorWorkOrder } from '@/lib/drafts/draft-flow'
 import {
   isSamplePassed,
   legacyWorkOrderFields,
@@ -74,8 +75,17 @@ type ColorRow = {
   name: string
   order_qty: number | null
   sample_in_progress: boolean
+  sample_work_order_url?: string | null
+  sample_work_order_name?: string | null
+  sample_work_order_shipped?: boolean
+  sample_work_order_shipped_at?: string | null
   sort_order: number
 }
+
+const COLOR_COLUMNS =
+  'id, draft_id, name, order_qty, sample_in_progress, sample_work_order_url, sample_work_order_name, sample_work_order_shipped, sample_work_order_shipped_at, sort_order'
+const COLOR_COLUMNS_LEGACY =
+  'id, draft_id, name, order_qty, sample_in_progress, sort_order'
 
 type OptionRow = {
   id: string
@@ -122,12 +132,18 @@ function sanitize(input: ProductDraftInput): ProductDraftInput {
     orderDone: Boolean(input.orderDone),
     orderInProgress: Boolean(input.orderInProgress),
     colors: input.colors
-      .filter((color) => color.name.trim() || color.orderQty != null)
-      .map((color) => ({
-        ...color,
-        name: color.name.trim(),
-        sampleInProgress: Boolean(color.sampleInProgress),
-      })),
+      .filter(
+        (color) =>
+          color.name.trim() ||
+          color.orderQty != null ||
+          Boolean(color.sampleWorkOrderUrl?.trim()),
+      )
+      .map((color) =>
+        sanitizeColorWorkOrder({
+          ...color,
+          name: color.name.trim(),
+        }),
+      ),
     options: input.options
       .filter((row) => row.styleId || row.name.trim() || row.price != null)
       .map((row) => ({
@@ -249,19 +265,29 @@ async function loadChildren(draftIds: string[]) {
   }
 
   const supabase = getSupabase()
-  const [{ data: colorData, error: colorError }, { data: optionData, error: optionError }] =
-    await Promise.all([
-      supabase
-        .from('draft_colors')
-        .select('id, draft_id, name, order_qty, sample_in_progress, sort_order')
-        .in('draft_id', draftIds)
-        .order('sort_order', { ascending: true }),
-      supabase
-        .from('draft_options')
-        .select('id, draft_id, style_id, name, price, sort_order')
-        .in('draft_id', draftIds)
-        .order('sort_order', { ascending: true }),
-    ])
+  const [colorFirst, optionResult] = await Promise.all([
+    supabase
+      .from('draft_colors')
+      .select(COLOR_COLUMNS)
+      .in('draft_id', draftIds)
+      .order('sort_order', { ascending: true }),
+    supabase
+      .from('draft_options')
+      .select('id, draft_id, style_id, name, price, sort_order')
+      .in('draft_id', draftIds)
+      .order('sort_order', { ascending: true }),
+  ])
+  const colorResult =
+    colorFirst.error && isMissingColumn(colorFirst.error)
+      ? await supabase
+          .from('draft_colors')
+          .select(COLOR_COLUMNS_LEGACY)
+          .in('draft_id', draftIds)
+          .order('sort_order', { ascending: true })
+      : colorFirst
+  const { data: optionData, error: optionError } = optionResult
+  const colorError = colorResult.error
+  const colorData = colorResult.data
 
   if (colorError) {
     throw new ProductDraftStoreError(
@@ -279,12 +305,18 @@ async function loadChildren(draftIds: string[]) {
   const colorsByDraft = new Map<string, DraftColorRow[]>()
   for (const row of (colorData as ColorRow[]) ?? []) {
     const list = colorsByDraft.get(row.draft_id) ?? []
-    list.push({
-      id: row.id,
-      name: row.name,
-      orderQty: row.order_qty,
-      sampleInProgress: Boolean(row.sample_in_progress),
-    })
+    list.push(
+      sanitizeColorWorkOrder({
+        id: row.id,
+        name: row.name,
+        orderQty: row.order_qty,
+        sampleInProgress: Boolean(row.sample_in_progress),
+        sampleWorkOrderUrl: row.sample_work_order_url ?? null,
+        sampleWorkOrderName: row.sample_work_order_name ?? '',
+        sampleWorkOrderShipped: Boolean(row.sample_work_order_shipped),
+        sampleWorkOrderShippedAt: row.sample_work_order_shipped_at ?? null,
+      }),
+    )
     colorsByDraft.set(row.draft_id, list)
   }
 
@@ -333,6 +365,10 @@ async function saveViaRpc(
       name: color.name,
       orderQty: toJsonValue(color.orderQty),
       sampleInProgress: Boolean(color.sampleInProgress),
+      sampleWorkOrderUrl: color.sampleWorkOrderUrl ?? '',
+      sampleWorkOrderName: color.sampleWorkOrderName,
+      sampleWorkOrderShipped: Boolean(color.sampleWorkOrderShipped),
+      sampleWorkOrderShippedAt: color.sampleWorkOrderShippedAt ?? '',
     })),
     p_options: clean.options.map((option) => ({
       id: option.id,

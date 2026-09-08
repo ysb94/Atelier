@@ -697,7 +697,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   API 키는 DB·Git·브라우저에 두지 않고 Edge Function
   Secret(`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`)에만 둔다.
   기능 키는 `invoice_product_recommendation`,
-  `invoice_item_name_recommendation`, `invoice_accessory_recommendation`이다.
+  `invoice_item_name_recommendation`, `invoice_accessory_recommendation`,
+  `company_assistant`이다.
   내품명 라우트는 부속품 라우트를 한 번 복사하고 이후 독립 관리한다.
   모델 변경 시 해당 기능 캐시만 지우고 자동 누적학습은 계속 유지한다. 확정 사례는
   모델과 독립된 데이터이므로 모델을 바꿔도 다시 수동 전환할 필요가 없다.
@@ -769,6 +770,14 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   설정으로 추천만 요청한다.
 - 게이트웨이는 `supabase/functions/ai-gateway` 하나다. 앱 API는
   `src/lib/supabase/ai-settings.ts`, `ai-gateway.ts`, `ai-candidates.ts`다.
+- 회사 AI 도우미(`feature_key = company_assistant`, action
+  `company_assistant_chat`)는 앱 사용법·업무 문장 정리·일반 질문만 답한다.
+  1차 버전은 회사 DB·현재 화면·도구를 읽거나 쓰지 않는다. 대화 원문은 저장하지
+  않고 `ai_usage_logs`에 토큰·추정 비용·성공 여부만 남긴다. 사용량은 현재 단일
+  운영 브랜드 ATELIER(`b0000000-0000-4000-8000-000000000001`)에 귀속한다.
+  한도는 질문 500자, 직전 대화 1턴, 답변 300토큰, 사용자당 하루 20회, 20초
+  timeout이다. 이메일·전화·주민등록번호·API 키 패턴은 모델에 보내지 않는다.
+  초기 월 소프트 예산은 2 USD다. 쓰기·삭제·발주·출고 확정은 연동하지 않는다.
 - 부속품 사전 추천은 별도 `feature_key = invoice_accessory_recommendation`이다.
   처음에는 품목명 추천 라우트를 한 번 복사하고, 이후 AI 설정에서 따로 바꿀 수
   있다. action은 `recommend_accessory_rules`다. 미인식 조각의 후보를 모아
@@ -820,7 +829,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260826042107_ai_learning_v2_advisor_fixes.sql`,
   `20260826044258_ai_learning_automatic_assist.sql`,
   `20260826051756_ai_feedback_ephemeral_cache_fix.sql`,
-  `20260831055019_invoice_ai_accuracy_foundation.sql`.
+  `20260831055019_invoice_ai_accuracy_foundation.sql`,
+  `20260908181000_company_assistant_ai_route.sql`.
 
 ### 송장 사은품 증정 · 작업 지시
 

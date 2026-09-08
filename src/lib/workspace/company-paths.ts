@@ -89,6 +89,10 @@ export function chinaWorkOrdersPath() {
   return '/china/work-orders'
 }
 
+export function designColorSamplesPath() {
+  return '/design/color-samples'
+}
+
 export function draftNewPath(brandSlug?: string, extra: SearchPatch = {}) {
   return brandSlug
     ? withSearch('/drafts/new', { brand: brandSlug, ...extra })

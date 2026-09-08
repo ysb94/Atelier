@@ -204,6 +204,11 @@ export type DraftColorRow = {
   orderQty: number | null
   /** 이 컬러의 샘플이 진행 중인지 */
   sampleInProgress: boolean
+  /** 이 컬러 샘플 작업 지시서. data URL */
+  sampleWorkOrderUrl: string | null
+  sampleWorkOrderName: string
+  sampleWorkOrderShipped: boolean
+  sampleWorkOrderShippedAt: string | null
 }
 
 /** 기획안에서 중국팀으로 보내는 샘플 작업 지시서 한 차수 */
@@ -216,7 +221,7 @@ export type DraftSampleWorkOrder = {
   name: string
   shipped: boolean
   shippedAt: string | null
-  /** 기획이 도착 샘플을 합격했는지. 합격하면 발주로 넘어간다. */
+  /** 기획이 도착 샘플을 합격했는지. 합격하면 컬러별 샘플로 넘어간다. */
   passed: boolean
   passedAt: string | null
   /** 불합격일 때 다음 샘플에서 볼 점 */
@@ -265,10 +270,12 @@ export type ProductDraft = {
   /** 1차부터 원하는 제품이 나올 때까지 반복하는 샘플 작업 지시서 */
   sampleWorkOrders: DraftSampleWorkOrder[]
   colors: DraftColorRow[]
-  /** 컬러 샘플 진행중 표시에서 따라간다. */
+  /** 대표 샘플 합격에서 따라간다. */
   sampleDone: boolean
   orderDone: boolean
+  /** 컬러샘플 발주 완료. 디자인 촬영 목록에 올라간다. */
   orderInProgress: boolean
+  /** 디자인이 컬러샘플 촬영을 끝냈는지 */
   photoSampleDone: boolean
   /** 진척과 달리 켜지면 멈추는 표시 */
   held: boolean
@@ -1320,6 +1327,7 @@ export type AiFeatureKey =
   | 'invoice_product_recommendation'
   | 'invoice_accessory_recommendation'
   | 'invoice_item_name_recommendation'
+  | 'company_assistant'
 
 export type AiLearningMode = 'observe' | 'assist'
 

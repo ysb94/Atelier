@@ -1,8 +1,12 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import {
   ACCESSORY_FEATURE_KEY,
+  COMPANY_ASSISTANT_ACTION,
+  COMPANY_ASSISTANT_FEATURE_KEY,
+  COMPANY_ASSISTANT_LIMITS,
   ITEM_NAME_FEATURE_KEY,
   buildAccessorySuggestPrompt,
+  buildCompanyAssistantPrompt,
   buildItemNameSuggestPrompt,
   buildLocalRecommendation,
   buildRecommendPrompt,
@@ -20,9 +24,12 @@ import {
   parseGeminiModels,
   parseOpenAiModels,
   parseRecommendJson,
+  prepareCompanyAssistantInput,
+  startOfKstDayIso,
   PROVIDER_SECRET,
   type AccessoryContextDecision,
   type AiProvider,
+  type CompanyAssistantHistoryMessage,
   type ProductCandidate,
 } from '../_shared/ai-core.ts'
 import { corsHeaders } from '../_shared/cors.ts'
@@ -76,6 +83,12 @@ type GatewayRequest =
       }>
       candidates: ProductCandidate[]
     }
+  | {
+      action: 'company_assistant_chat'
+      brandId?: string
+      question: string
+      history?: CompanyAssistantHistoryMessage[]
+    }
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -122,6 +135,9 @@ Deno.serve(async (req) => {
     }
     if (body.action === 'recommend_accessory_rules') {
       return json(await recommendAccessoryRules(supabase, user.id, body))
+    }
+    if (body.action === COMPANY_ASSISTANT_ACTION || body.action === 'company_assistant_chat') {
+      return json(await companyAssistantChat(supabase, user.id, body))
     }
     return json({ ok: false, error: '지원하지 않는 action입니다.' }, 400)
   } catch (error) {
@@ -196,6 +212,124 @@ async function testConnection(provider: AiProvider, modelId: string) {
     modelId,
     latencyMs: Date.now() - started,
   }
+}
+
+const ATELIER_BRAND_ID = 'b0000000-0000-4000-8000-000000000001'
+
+async function companyAssistantChat(
+  supabase: ReturnType<typeof createClient>,
+  userId: string,
+  body: Extract<GatewayRequest, { action: 'company_assistant_chat' }>,
+) {
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('status')
+    .eq('id', userId)
+    .maybeSingle()
+  if (profileError) throw new Error(profileError.message)
+  if (profile?.status !== 'active') {
+    throw new Error('승인된 직원만 회사 AI 도우미를 사용할 수 있습니다.')
+  }
+
+  const prepared = prepareCompanyAssistantInput({
+    question: String(body.question ?? ''),
+    history: body.history,
+  })
+  const brandId = String(body.brandId ?? '').trim() || ATELIER_BRAND_ID
+  const featureKey = COMPANY_ASSISTANT_FEATURE_KEY
+
+  const { data: route, error: routeError } = await supabase
+    .from('ai_feature_routes')
+    .select('provider, model_id, is_active')
+    .eq('brand_id', brandId)
+    .eq('feature_key', featureKey)
+    .maybeSingle()
+  if (routeError) throw new Error(routeError.message)
+  if (!route || !route.is_active) {
+    throw new Error('회사 AI 도우미 모델이 아직 설정되지 않았습니다.')
+  }
+  if (!isAiProvider(route.provider)) {
+    throw new Error('지원하지 않는 provider입니다.')
+  }
+
+  const usedToday = await countCompanyAssistantUsage(supabase, {
+    brandId,
+    userId,
+    featureKey,
+  })
+  if (usedToday >= COMPANY_ASSISTANT_LIMITS.dailyCallsPerUser) {
+    throw new Error(
+      `오늘 질문 한도 ${COMPANY_ASSISTANT_LIMITS.dailyCallsPerUser}회를 넘었습니다. 내일 다시 물어보세요.`,
+    )
+  }
+
+  const prompt = buildCompanyAssistantPrompt(prepared)
+  const started = Date.now()
+  let usage = normalizeUsage(null, null)
+  try {
+    const completed = await completeText(route.provider, route.model_id, prompt, {
+      maxTokens: COMPANY_ASSISTANT_LIMITS.maxOutputTokens,
+    })
+    usage = completed.usage
+    const reply = completed.text.trim()
+    if (!reply) throw new Error('AI 응답이 비어 있습니다.')
+    await insertUsageLog(supabase, {
+      brandId,
+      userId,
+      featureKey,
+      provider: route.provider,
+      modelId: route.model_id,
+      action: COMPANY_ASSISTANT_ACTION,
+      status: 'ok',
+      usage,
+      errorCode: '',
+      resolutionSource: 'ai',
+      skippedAi: false,
+      cacheHit: false,
+      latencyMs: Date.now() - started,
+    })
+    return {
+      ok: true,
+      reply,
+      provider: route.provider,
+      modelId: route.model_id,
+      usage,
+      usedToday: usedToday + 1,
+      dailyLimit: COMPANY_ASSISTANT_LIMITS.dailyCallsPerUser,
+    }
+  } catch (error) {
+    await insertUsageLog(supabase, {
+      brandId,
+      userId,
+      featureKey,
+      provider: route.provider,
+      modelId: route.model_id,
+      action: COMPANY_ASSISTANT_ACTION,
+      status: 'error',
+      usage,
+      errorCode: error instanceof Error ? error.message.slice(0, 180) : 'unknown',
+      resolutionSource: 'ai',
+      skippedAi: false,
+      cacheHit: false,
+      latencyMs: Date.now() - started,
+    })
+    throw error
+  }
+}
+
+async function countCompanyAssistantUsage(
+  supabase: ReturnType<typeof createClient>,
+  input: { brandId: string; userId: string; featureKey: string },
+) {
+  const { count, error } = await supabase
+    .from('ai_usage_logs')
+    .select('id', { count: 'exact', head: true })
+    .eq('brand_id', input.brandId)
+    .eq('user_id', input.userId)
+    .eq('feature_key', input.featureKey)
+    .gte('created_at', startOfKstDayIso())
+  if (error) throw new Error(error.message)
+  return count ?? 0
 }
 
 async function recommendProduct(
@@ -1021,10 +1155,44 @@ async function completeJson(
   return completeGemini(key, modelId, prompt)
 }
 
+async function completeText(
+  provider: AiProvider,
+  modelId: string,
+  prompt: { system: string; user: string },
+  options: { maxTokens: number },
+) {
+  const key = requireApiKey(provider)
+  if (provider === 'openai') {
+    return completeOpenAiText(key, modelId, prompt, options.maxTokens)
+  }
+  if (provider === 'anthropic') {
+    return completeAnthropic(key, modelId, prompt, options.maxTokens)
+  }
+  return completeGeminiText(key, modelId, prompt, options.maxTokens)
+}
+
 async function completeOpenAi(
   key: string,
   modelId: string,
   prompt: { system: string; user: string },
+) {
+  return completeOpenAiRequest(key, modelId, prompt, { json: true })
+}
+
+async function completeOpenAiText(
+  key: string,
+  modelId: string,
+  prompt: { system: string; user: string },
+  maxTokens: number,
+) {
+  return completeOpenAiRequest(key, modelId, prompt, { json: false, maxTokens })
+}
+
+async function completeOpenAiRequest(
+  key: string,
+  modelId: string,
+  prompt: { system: string; user: string },
+  options: { json: boolean; maxTokens?: number },
 ) {
   const payload = await providerFetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -1034,7 +1202,8 @@ async function completeOpenAi(
     },
     body: JSON.stringify({
       model: modelId,
-      response_format: { type: 'json_object' },
+      ...(options.json ? { response_format: { type: 'json_object' } } : {}),
+      ...(options.maxTokens ? { max_completion_tokens: options.maxTokens } : {}),
       messages: [
         { role: 'system', content: prompt.system },
         { role: 'user', content: prompt.user },
@@ -1085,10 +1254,28 @@ async function completeAnthropic(
   }
 }
 
+async function completeGeminiText(
+  key: string,
+  modelId: string,
+  prompt: { system: string; user: string },
+  maxTokens: number,
+) {
+  return completeGeminiRequest(key, modelId, prompt, { json: false, maxTokens })
+}
+
 async function completeGemini(
   key: string,
   modelId: string,
   prompt: { system: string; user: string },
+) {
+  return completeGeminiRequest(key, modelId, prompt, { json: true })
+}
+
+async function completeGeminiRequest(
+  key: string,
+  modelId: string,
+  prompt: { system: string; user: string },
+  options: { json: boolean; maxTokens?: number },
 ) {
   const id = modelId.replace(/^models\//, '')
   const payload = await providerFetch(
@@ -1100,7 +1287,8 @@ async function completeGemini(
         systemInstruction: { parts: [{ text: prompt.system }] },
         contents: [{ role: 'user', parts: [{ text: prompt.user }] }],
         generationConfig: {
-          responseMimeType: 'application/json',
+          ...(options.json ? { responseMimeType: 'application/json' } : {}),
+          ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}),
         },
       }),
     },

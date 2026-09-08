@@ -1,7 +1,10 @@
 import {
   ACCESSORY_FEATURE_KEY,
+  COMPANY_ASSISTANT_ACTION,
+  COMPANY_ASSISTANT_FEATURE_KEY,
   ITEM_NAME_FEATURE_KEY,
   type AiProvider,
+  type CompanyAssistantHistoryMessage,
 } from '@/lib/ai/gateway-core'
 import type {
   AiAccessoryRecommendation,
@@ -268,4 +271,30 @@ export async function recommendInvoiceItemNameRules(input: {
     skippedAi: result.skippedAi ?? false,
     cacheHit: result.cacheHit ?? false,
   }
+}
+
+export type CompanyAssistantReply = {
+  reply: string
+  provider: AiProvider
+  modelId: string
+  usage: {
+    inputTokens: number | null
+    outputTokens: number | null
+  }
+  usedToday: number
+  dailyLimit: number
+}
+
+export async function askCompanyAssistant(input: {
+  brandId: string
+  question: string
+  history?: CompanyAssistantHistoryMessage[]
+}): Promise<CompanyAssistantReply> {
+  return invokeGateway<CompanyAssistantReply>({
+    action: COMPANY_ASSISTANT_ACTION,
+    brandId: input.brandId,
+    featureKey: COMPANY_ASSISTANT_FEATURE_KEY,
+    question: input.question,
+    history: input.history ?? [],
+  })
 }

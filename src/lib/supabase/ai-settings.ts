@@ -1,4 +1,10 @@
-import { isAiProvider, parseDecisionConfig } from '@/lib/ai/gateway-core'
+import {
+  COMPANY_ASSISTANT_FEATURE_KEY,
+  COMPANY_ASSISTANT_LIMITS,
+  isAiProvider,
+  parseDecisionConfig,
+  startOfKstDayIso,
+} from '@/lib/ai/gateway-core'
 import {
   isSoftBudgetWarning,
   parseLearningMode,
@@ -21,6 +27,7 @@ const FEATURE_KEYS = [
   'invoice_product_recommendation',
   'invoice_item_name_recommendation',
   'invoice_accessory_recommendation',
+  COMPANY_ASSISTANT_FEATURE_KEY,
 ] as const
 
 const METRIC_PAGE_SIZE = 1000
@@ -426,5 +433,27 @@ export async function getAiUsageSummary(
     top3Rate: product.top3Rate,
     editRate: product.correctionRate,
     features: FEATURE_KEYS.map((key) => features.get(key)!),
+  }
+}
+
+export async function getCompanyAssistantUsageToday(input: {
+  brandId: string
+  userId: string
+}): Promise<{ usedToday: number; dailyLimit: number }> {
+  const { count, error } = await getSupabase()
+    .from('ai_usage_logs')
+    .select('id', { count: 'exact', head: true })
+    .eq('brand_id', input.brandId)
+    .eq('user_id', input.userId)
+    .eq('feature_key', COMPANY_ASSISTANT_FEATURE_KEY)
+    .gte('created_at', startOfKstDayIso())
+  if (error) {
+    throw new AiSettingsStoreError(
+      errorMessage(error, '오늘 사용 횟수를 확인하지 못했습니다.'),
+    )
+  }
+  return {
+    usedToday: count ?? 0,
+    dailyLimit: COMPANY_ASSISTANT_LIMITS.dailyCallsPerUser,
   }
 }

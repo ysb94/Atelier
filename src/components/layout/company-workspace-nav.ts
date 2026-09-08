@@ -4,6 +4,7 @@ import {
   Building2,
   CalendarDays,
   CalendarRange,
+  Camera,
   ChartColumn,
   ClipboardList,
   FileSpreadsheet,
@@ -64,23 +65,30 @@ export const companyNavGroups: CompanyNavGroup[] = [
     items: [
       { to: '/drafts', label: '기획안', icon: Lightbulb },
       { to: '/product-work/planning', label: '상품 정보', icon: PenLine },
+      { to: '/work-requests/planning', label: '작업 요청', icon: ClipboardList },
     ],
   },
   {
     title: '디자인',
     items: [
       { to: '/product-work/design', label: '상품 정보', icon: Palette },
+      { to: '/work-requests/design', label: '작업 요청', icon: ClipboardList },
+      { to: '/design/color-samples', label: '컬러샘플 촬영', icon: Camera },
       { to: '/design/file-manager', label: '이미지 업로드', icon: Images },
     ],
   },
   {
     title: 'MD',
-    items: [{ to: '/product-work/md', label: '상품 정보', icon: LayoutGrid }],
+    items: [
+      { to: '/product-work/md', label: '상품 정보', icon: LayoutGrid },
+      { to: '/work-requests/md', label: '작업 요청', icon: ClipboardList },
+    ],
   },
   {
     title: '물류',
     items: [
       { to: '/product-work/logistics', label: '상품 정보', icon: Boxes },
+      { to: '/work-requests/logistics', label: '작업 요청', icon: ClipboardList },
       { to: '/logistics/invoices', label: '송장작업', icon: FileSpreadsheet },
       {
         to: '/logistics/barcode-outbound-data-entry',

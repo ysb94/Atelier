@@ -9,6 +9,7 @@ import {
   PanelLeftOpen,
   Settings,
 } from 'lucide-react'
+import { CompanyAiAssistant } from '@/components/ai/CompanyAiAssistant'
 import { useAuth } from '@/lib/supabase/auth'
 import { isCompanyManager } from '@/lib/company/capabilities'
 import { cn } from '@/lib/utils'
@@ -64,6 +65,7 @@ export function CompanyLayout() {
     <div className="flex h-full min-h-0">
       <CompanySidebar />
       <CompanyWorkspaceMain />
+      <CompanyAiAssistant />
     </div>
   )
 }

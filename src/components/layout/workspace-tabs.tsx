@@ -64,6 +64,7 @@ const NAV_LABELS: {
   { match: /^\/work(?:\/|$)/, label: '내 업무' },
   { match: /^\/product-work\/planning(?:\/|$)/, label: '기획 · 상품 정보' },
   { match: /^\/product-work\/design(?:\/|$)/, label: '디자인 · 상품 정보' },
+  { match: /^\/design\/color-samples(?:\/|$)/, label: '디자인 · 컬러샘플 촬영' },
   { match: /^\/design\/file-manager(?:\/|$)/, label: '디자인 · 이미지 업로드' },
   { match: /^\/product-work\/md(?:\/|$)/, label: 'MD · 상품 정보' },
   { match: /^\/product-work\/logistics(?:\/|$)/, label: '물류 · 상품 정보' },

@@ -53,6 +53,10 @@ import {
   requiresDraftBrand,
 } from '@/lib/drafts/company-draft'
 import {
+  colorWorkOrderFileName,
+  startColorSamples,
+} from '@/lib/drafts/draft-flow'
+import {
   canPassLatestSampleWorkOrder,
   failLatestSampleWorkOrder,
   isSamplePassed,
@@ -95,15 +99,21 @@ const DRAFT_FLOW_STEPS = [
     interactive: false,
   },
   {
+    key: 'colorSample',
+    label: '컬러별 샘플 진행',
+    hint: '대표 컬러 합격 뒤 컬러마다 샘플을 만듭니다',
+    interactive: false,
+  },
+  {
     key: 'orderInProgress',
-    label: '발주 진행중',
-    hint: '발주 준비',
+    label: '컬러샘플 발주 완료',
+    hint: '디자인에서 촬영할 수 있습니다',
     interactive: true,
   },
   {
     key: 'orderDone',
     label: '생산 발주 완료',
-    hint: '발주 완료',
+    hint: '본 발주',
     interactive: true,
   },
 ] as const
@@ -116,7 +126,8 @@ function draftFlowActive(
   const phase = samplePhase(form.sampleWorkOrders)
   return {
     sample: phase !== 'empty',
-    orderInProgress: form.orderInProgress || phase === 'passed',
+    colorSample: phase === 'passed',
+    orderInProgress: form.orderInProgress || form.orderDone,
     orderDone: form.orderDone,
   }
 }
@@ -132,9 +143,14 @@ function draftFlowState(
     if (phase === 'empty') return 'todo'
     return 'current'
   }
+  if (step.key === 'colorSample') {
+    if (phase !== 'passed') return 'todo'
+    if (form.orderInProgress || form.orderDone) return 'done'
+    return 'current'
+  }
   if (step.key === 'orderInProgress') {
     if (form.orderDone) return 'done'
-    if (form.orderInProgress || phase === 'passed') return 'current'
+    if (form.orderInProgress) return 'current'
     return 'todo'
   }
   return form.orderDone ? 'done' : 'todo'
@@ -150,7 +166,7 @@ function DraftProgressStrip({
   const active = draftFlowActive(form)
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-card px-3 py-2 shadow-sm">
-      <ol className="flex min-w-[28rem] items-start justify-between gap-1">
+      <ol className="flex min-w-[36rem] items-start justify-between gap-1">
         {DRAFT_FLOW_STEPS.map((step, index) => {
           const state = draftFlowState(form, index)
           const nextState =
@@ -506,6 +522,7 @@ export function DraftEditPage() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const workOrderInputRef = useRef<HTMLInputElement>(null)
   const uploadOrderIdRef = useRef<string | null>(null)
+  const uploadColorIdRef = useRef<string | null>(null)
   const companyId = profile?.companyId ?? DEFAULT_COMPANY_ID
 
   const isNew = !draftId || draftId === 'new'
@@ -631,6 +648,17 @@ export function DraftEditPage() {
     patch({
       sampleWorkOrders: next,
       ...legacyWorkOrderFields(next),
+    })
+  }
+
+  function patchColor(
+    colorId: string,
+    next: Partial<ProductDraftInput['colors'][number]>,
+  ) {
+    patch({
+      colors: form.colors.map((row) =>
+        row.id === colorId ? { ...row, ...next } : row,
+      ),
     })
   }
 
@@ -810,7 +838,11 @@ export function DraftEditPage() {
       <div className="mb-3">
         <DraftProgressStrip
           form={form}
-          onToggle={(key) => patch({ [key]: !form[key] })}
+          onToggle={(key) => {
+            const nextForm = { ...form, [key]: !form[key] }
+            patch({ [key]: nextForm[key] })
+            if (!isNew) saveMutation.mutate(nextForm)
+          }}
         />
       </div>
 
@@ -977,17 +1009,29 @@ export function DraftEditPage() {
               onChange={async (event) => {
                 const file = event.target.files?.[0]
                 const targetId = uploadOrderIdRef.current
+                const colorId = uploadColorIdRef.current
                 event.target.value = ''
                 uploadOrderIdRef.current = null
-                if (!file || !targetId) return
+                uploadColorIdRef.current = null
+                if (!file || (!targetId && !colorId)) return
                 if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) {
                   setError('작업 지시서는 8MB 이하만 올릴 수 있습니다.')
                   return
                 }
                 try {
                   const url = await readFileAsDataUrl(file)
+                  if (colorId) {
+                    patchColor(colorId, {
+                      sampleWorkOrderUrl: url,
+                      sampleWorkOrderName: file.name,
+                      sampleWorkOrderShipped: false,
+                      sampleWorkOrderShippedAt: null,
+                      sampleInProgress: true,
+                    })
+                    return
+                  }
                   patchWorkOrders(
-                    patchSampleWorkOrder(workOrders, targetId, {
+                    patchSampleWorkOrder(workOrders, targetId!, {
                       url,
                       name: file.name,
                       shipped: false,
@@ -1037,6 +1081,7 @@ export function DraftEditPage() {
                       aria-label="바꾸기"
                       title="바꾸기"
                       onClick={() => {
+                        uploadColorIdRef.current = null
                         uploadOrderIdRef.current = order.id
                         workOrderInputRef.current?.click()
                       }}
@@ -1079,6 +1124,7 @@ export function DraftEditPage() {
                   <button
                     type="button"
                     onClick={() => {
+                      uploadColorIdRef.current = null
                       uploadOrderIdRef.current = order.id
                       workOrderInputRef.current?.click()
                     }}
@@ -1117,13 +1163,15 @@ export function DraftEditPage() {
                       sampleWorkOrders: nextOrders,
                       ...legacyWorkOrderFields(nextOrders),
                       sampleDone: true,
-                      orderInProgress: true,
+                      colors: startColorSamples(form.colors),
+                      orderInProgress: false,
                     }
                     patch({
                       sampleWorkOrders: nextOrders,
                       ...legacyWorkOrderFields(nextOrders),
                       sampleDone: true,
-                      orderInProgress: true,
+                      colors: startColorSamples(form.colors),
+                      orderInProgress: false,
                     })
                     if (!isNew) saveMutation.mutate(nextForm)
                   }}
@@ -1147,7 +1195,7 @@ export function DraftEditPage() {
             ) : null}
             <p className="text-[11px] text-muted-foreground">
               {isSamplePassed(workOrders)
-                ? '샘플이 합격되어 발주 진행중으로 넘어갑니다.'
+                ? '대표 샘플이 합격되어 컬러별 샘플로 넘어갑니다.'
                 : canPassLatestSampleWorkOrder(workOrders)
                   ? '도착한 샘플이 기획과 같으면 합격, 다르면 사유를 남기고 다음 차수를 올립니다.'
                   : latestFilledSampleWorkOrder(workOrders)
@@ -1157,6 +1205,11 @@ export function DraftEditPage() {
           </div>
 
           <div className="space-y-1.5">
+            <p className="text-[11px] text-muted-foreground">
+              {isSamplePassed(workOrders)
+                ? '대표 컬러가 통과했으니 컬러마다 작업 지시서를 올리고, 발주가 나가면 위에서 컬러샘플 발주 완료를 누르세요. 디자인 촬영 목록에 바로 올라갑니다.'
+                : '컬러별 샘플은 대표 샘플 합격 뒤에 진행합니다.'}
+            </p>
             <div className="grid grid-cols-[1rem_minmax(0,1fr)_4.5rem_2.5rem_1.75rem] items-center gap-1.5 text-[11px] text-muted-foreground">
               <span />
               <span>컬러명</span>
@@ -1164,81 +1217,150 @@ export function DraftEditPage() {
               <span className="text-center">샘플</span>
               <span />
             </div>
-            <div className="space-y-1">
-              {form.colors.map((color, index) => (
-                <div
-                  key={color.id}
-                  className="grid grid-cols-[1rem_minmax(0,1fr)_4.5rem_2.5rem_1.75rem] items-center gap-1.5"
-                >
-                  <span className="text-xs tabular-nums text-muted-foreground">
-                    {index + 1}
-                  </span>
-                  <Input
-                    className="h-8 min-w-0"
-                    placeholder="Silver (실버)"
-                    value={color.name}
-                    onChange={(e) =>
-                      patch({
-                        colors: form.colors.map((row) =>
-                          row.id === color.id
-                            ? { ...row, name: e.target.value }
-                            : row,
-                        ),
-                      })
-                    }
-                  />
-                  <Input
-                    className="h-8 px-2 text-right tabular-nums"
-                    inputMode="numeric"
-                    placeholder="0"
-                    value={color.orderQty == null ? '' : String(color.orderQty)}
-                    onChange={(e) =>
-                      patch({
-                        colors: form.colors.map((row) =>
-                          row.id === color.id
-                            ? { ...row, orderQty: toNumber(e.target.value) }
-                            : row,
-                        ),
-                      })
-                    }
-                  />
-                  <label className="flex cursor-pointer items-center justify-center">
-                    <span className="sr-only">
-                      {color.name || `컬러 ${index + 1}`} 샘플 진행중
-                    </span>
-                    <input
-                      type="checkbox"
-                      className="size-3.5 accent-current"
-                      checked={color.sampleInProgress}
-                      onChange={(e) =>
-                        patch({
-                          colors: form.colors.map((row) =>
-                            row.id === color.id
-                              ? { ...row, sampleInProgress: e.target.checked }
-                              : row,
-                          ),
-                        })
-                      }
-                    />
-                  </label>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-7"
-                    aria-label="컬러 삭제"
-                    onClick={() =>
-                      patch({
-                        colors: form.colors.filter(
-                          (row) => row.id !== color.id,
-                        ),
-                      })
-                    }
-                  >
-                    <Trash2 className="size-3.5" />
-                  </Button>
-                </div>
-              ))}
+            <div className="space-y-2">
+              {form.colors.map((color, index) => {
+                const showColorWorkOrder =
+                  isSamplePassed(workOrders) ||
+                  Boolean(color.sampleWorkOrderUrl)
+                const colorFileName = colorWorkOrderFileName(color)
+                return (
+                  <div key={color.id} className="space-y-1">
+                    <div className="grid grid-cols-[1rem_minmax(0,1fr)_4.5rem_2.5rem_1.75rem] items-center gap-1.5">
+                      <span className="text-xs tabular-nums text-muted-foreground">
+                        {index + 1}
+                      </span>
+                      <Input
+                        className="h-8 min-w-0"
+                        placeholder="Silver (실버)"
+                        value={color.name}
+                        onChange={(e) =>
+                          patchColor(color.id, { name: e.target.value })
+                        }
+                      />
+                      <Input
+                        className="h-8 px-2 text-right tabular-nums"
+                        inputMode="numeric"
+                        placeholder="0"
+                        value={
+                          color.orderQty == null ? '' : String(color.orderQty)
+                        }
+                        onChange={(e) =>
+                          patchColor(color.id, {
+                            orderQty: toNumber(e.target.value),
+                          })
+                        }
+                      />
+                      <label className="flex cursor-pointer items-center justify-center">
+                        <span className="sr-only">
+                          {color.name || `컬러 ${index + 1}`} 샘플 진행중
+                        </span>
+                        <input
+                          type="checkbox"
+                          className="size-3.5 accent-current"
+                          checked={color.sampleInProgress}
+                          onChange={(e) =>
+                            patchColor(color.id, {
+                              sampleInProgress: e.target.checked,
+                            })
+                          }
+                        />
+                      </label>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="size-7"
+                        aria-label="컬러 삭제"
+                        onClick={() =>
+                          patch({
+                            colors: form.colors.filter(
+                              (row) => row.id !== color.id,
+                            ),
+                          })
+                        }
+                      >
+                        <Trash2 className="size-3.5" />
+                      </Button>
+                    </div>
+                    {showColorWorkOrder ? (
+                      color.sampleWorkOrderUrl ? (
+                        <div className="flex items-center gap-0.5 rounded-md border border-border px-2 py-1">
+                          <FileText className="size-4 shrink-0 text-muted-foreground" />
+                          <a
+                            href={color.sampleWorkOrderUrl}
+                            download={colorFileName}
+                            className="min-w-0 flex-1 truncate px-1 text-xs underline-offset-2 hover:underline"
+                          >
+                            {colorFileName}
+                          </a>
+                          {color.sampleWorkOrderShipped ? (
+                            <span className="shrink-0 rounded-md border border-success/40 bg-success/10 px-1.5 py-0.5 text-[11px] font-medium">
+                              발송 완료
+                            </span>
+                          ) : null}
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-7"
+                            aria-label="바꾸기"
+                            title="바꾸기"
+                            onClick={() => {
+                              uploadOrderIdRef.current = null
+                              uploadColorIdRef.current = color.id
+                              workOrderInputRef.current?.click()
+                            }}
+                          >
+                            <Upload className="size-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="size-7"
+                            aria-label="제거"
+                            title="제거"
+                            onClick={() =>
+                              patchColor(color.id, {
+                                sampleWorkOrderUrl: null,
+                                sampleWorkOrderName: '',
+                                sampleWorkOrderShipped: false,
+                                sampleWorkOrderShippedAt: null,
+                              })
+                            }
+                          >
+                            <Trash2 className="size-3.5" />
+                          </Button>
+                          <Button
+                            type="button"
+                            size="icon"
+                            className="size-7"
+                            aria-label="저장"
+                            title="저장"
+                            disabled={saveMutation.isPending}
+                            onClick={() => saveMutation.mutate(form)}
+                          >
+                            <Save className="size-3.5" />
+                          </Button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            uploadOrderIdRef.current = null
+                            uploadColorIdRef.current = color.id
+                            workOrderInputRef.current?.click()
+                          }}
+                          className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-muted/50"
+                        >
+                          <Upload className="size-3.5" />
+                          {color.name.trim() || `컬러 ${index + 1}`} 작업 지시서
+                        </button>
+                      )
+                    ) : null}
+                  </div>
+                )
+              })}
             </div>
             {form.colors.length < MAX_DRAFT_COLORS ? (
               <button

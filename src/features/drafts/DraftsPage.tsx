@@ -33,6 +33,16 @@ import {
 } from '@/lib/types'
 import { draftDetailPath, draftNewPath } from '@/lib/workspace/company-paths'
 import { cn, formatNumber } from '@/lib/utils'
+import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
+import {
+  RELEASE_CERTAINTY_LABEL,
+  formatReleaseGroupLabel,
+  formatTargetDate,
+  resolveReleaseSchedule,
+  seasonToPreviewGroup,
+  type PreviewReleaseAssignment,
+  type PreviewReleaseGroup,
+} from './release-schedule-preview'
 
 /** 기획 시트의 진척 체크. 서로 독립적으로 켜진다. */
 const PROGRESS_STEPS: {
@@ -40,9 +50,9 @@ const PROGRESS_STEPS: {
   label: string
   short: string
 }[] = [
-  { key: 'sampleDone', label: '샘플 진행', short: '샘플' },
-  { key: 'orderDone', label: '생산 발주', short: '발주' },
-  { key: 'orderInProgress', label: '발주 진행중', short: '발주중' },
+  { key: 'sampleDone', label: '대표 샘플', short: '대표' },
+  { key: 'orderInProgress', label: '컬러샘플 발주', short: '컬러발주' },
+  { key: 'orderDone', label: '생산 발주', short: '생산' },
 ]
 
 function sampleInProgressCount(draft: ProductDraft) {
@@ -64,6 +74,7 @@ function totalOrderQty(draft: ProductDraft) {
 function emptyMessage(
   hasAny: boolean,
   seasonFilter: string,
+  releaseFilter: string,
   brandScope: DraftBrandScope,
   ownerScope: DraftOwnerScope,
 ) {
@@ -76,6 +87,12 @@ function emptyMessage(
   }
   if (brandScope === UNASSIGNED_DRAFT_BRAND) {
     return '브랜드 미정 기획안이 없습니다. 오른쪽 위에서 추가하세요.'
+  }
+  if (releaseFilter === 'unassigned') {
+    return '출시 일정이 비어 있는 기획안이 없습니다.'
+  }
+  if (releaseFilter !== 'all') {
+    return '이 출시 묶음에 미리 반영한 기획안이 없습니다.'
   }
   if (seasonFilter === 'unassigned') {
     return '출시 기획 미정 기획안이 없습니다. 오른쪽 위에서 추가하세요.'
@@ -95,6 +112,12 @@ export function CompanyDraftsPage() {
   const [statusFilter, setStatusFilter] = useState<'all' | ProductDraftStatus>(
     'all',
   )
+  const [releaseFilter, setReleaseFilter] = useState('all')
+  const [tempGroups, setTempGroups] = useState<PreviewReleaseGroup[]>([])
+  const [assignments, setAssignments] = useState<
+    Record<string, PreviewReleaseAssignment>
+  >({})
+  const [scheduleDraftId, setScheduleDraftId] = useState<string | null>(null)
   const seasonFilter = searchParams.get('season') ?? 'all'
   const brandScope = (searchParams.get('scope') ?? 'all') as DraftBrandScope
   const canViewByOwner = canViewDraftsByOwner(profile)
@@ -133,6 +156,14 @@ export function CompanyDraftsPage() {
     () => new Map(seasons.map((season) => [season.id, season])),
     [seasons],
   )
+  const previewGroups = useMemo(() => {
+    const byId = new Map<string, PreviewReleaseGroup>()
+    for (const season of seasons) {
+      byId.set(season.id, seasonToPreviewGroup(season))
+    }
+    for (const group of tempGroups) byId.set(group.id, group)
+    return [...byId.values()]
+  }, [seasons, tempGroups])
 
   const scopedDrafts = useMemo(() => {
     return drafts.filter((draft) => {
@@ -178,30 +209,100 @@ export function CompanyDraftsPage() {
     [ownerScope, scopedDrafts],
   )
 
+  const scopedBrand =
+    brandScope !== 'all' && brandScope !== UNASSIGNED_DRAFT_BRAND
+      ? brands.find((item) => item.slug === brandScope)
+      : undefined
+
+  const scheduleByDraft = useMemo(() => {
+    const map = new Map(
+      ownerDrafts.map((draft) => [
+        draft.id,
+        resolveReleaseSchedule(draft, seasonMap, tempGroups, assignments),
+      ]),
+    )
+    return map
+  }, [assignments, ownerDrafts, seasonMap, tempGroups])
+
+  const releaseCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    let unassigned = 0
+    for (const draft of ownerDrafts) {
+      const schedule = scheduleByDraft.get(draft.id)
+      if (!schedule?.group) {
+        unassigned += 1
+        continue
+      }
+      counts.set(schedule.group.id, (counts.get(schedule.group.id) ?? 0) + 1)
+    }
+    return { counts, unassigned }
+  }, [ownerDrafts, scheduleByDraft])
+
+  const releaseChips = useMemo(() => {
+    const seen = new Set<string>()
+    const chips: PreviewReleaseGroup[] = []
+    for (const draft of ownerDrafts) {
+      const group = scheduleByDraft.get(draft.id)?.group
+      if (!group || seen.has(group.id)) continue
+      seen.add(group.id)
+      chips.push(group)
+    }
+    for (const group of tempGroups) {
+      if (seen.has(group.id)) continue
+      if (scopedBrand && group.brandId !== scopedBrand.id) continue
+      seen.add(group.id)
+      chips.push(group)
+    }
+    return chips
+  }, [ownerDrafts, scheduleByDraft, scopedBrand, tempGroups])
+
   const visible = useMemo(() => {
     const keyword = search.trim().toLowerCase()
     return ownerDrafts.filter((draft) => {
       if (statusFilter !== 'all' && draft.status !== statusFilter) return false
+      const schedule = scheduleByDraft.get(draft.id)
+      if (releaseFilter === 'unassigned' && schedule?.group) return false
+      if (
+        releaseFilter !== 'all' &&
+        releaseFilter !== 'unassigned' &&
+        schedule?.group?.id !== releaseFilter
+      ) {
+        return false
+      }
       if (!keyword) return true
+      const groupLabel = schedule?.group
+        ? formatReleaseGroupLabel(schedule.group)
+        : ''
       return [
         draft.draftNo,
         draft.nameKo,
         draft.nameEn,
         draft.owner,
         draft.releaseIssue,
+        groupLabel,
         ...draft.colors.map((color) => color.name),
       ]
         .filter(Boolean)
         .some((text) => text.toLowerCase().includes(keyword))
     })
-  }, [ownerDrafts, search, statusFilter])
+  }, [ownerDrafts, releaseFilter, scheduleByDraft, search, statusFilter])
+
+  const scheduleDraft = scheduleDraftId
+    ? (ownerDrafts.find((draft) => draft.id === scheduleDraftId) ??
+      drafts.find((draft) => draft.id === scheduleDraftId) ??
+      null)
+    : null
+  const scheduleDraftResolved = scheduleDraft
+    ? resolveReleaseSchedule(
+        scheduleDraft,
+        seasonMap,
+        tempGroups,
+        assignments,
+      )
+    : null
 
   const loading =
     draftsQuery.isLoading || seasonQueries.some((query) => query.isLoading)
-  const scopedBrand =
-    brandScope !== 'all' && brandScope !== UNASSIGNED_DRAFT_BRAND
-      ? brands.find((item) => item.slug === brandScope)
-      : undefined
 
   const newHref = draftNewPath(scopedBrand?.slug, {
     season:
@@ -250,6 +351,51 @@ export function CompanyDraftsPage() {
       },
       { replace: true },
     )
+  }
+
+  function closeScheduleDialog() {
+    setScheduleDraftId(null)
+  }
+
+  function applySchedulePreview(
+    draftId: string,
+    value: {
+      brandId: string
+      group: PreviewReleaseGroup
+      targetDate: string | null
+      certainty: PreviewReleaseAssignment['certainty']
+    },
+  ) {
+    setTempGroups((prev) =>
+      prev.some((group) => group.id === value.group.id)
+        ? prev
+        : seasonMap.has(value.group.id)
+          ? prev
+          : [...prev, value.group],
+    )
+    setAssignments((prev) => ({
+      ...prev,
+      [draftId]: {
+        brandId: value.brandId,
+        groupId: value.group.id,
+        targetDate: value.targetDate,
+        certainty: value.certainty,
+      },
+    }))
+    closeScheduleDialog()
+  }
+
+  function clearSchedulePreview(draftId: string) {
+    setAssignments((prev) => ({
+      ...prev,
+      [draftId]: {
+        brandId: prev[draftId]?.brandId ?? null,
+        groupId: null,
+        targetDate: null,
+        certainty: 'tentative',
+      },
+    }))
+    closeScheduleDialog()
   }
 
   return (
@@ -322,6 +468,38 @@ export function CompanyDraftsPage() {
         </div>
       ) : null}
 
+      <div className="mb-3">
+        <div className="mb-1.5 text-[11px] text-muted-foreground">
+          출시 일정 · UI 미리보기 · 저장되지 않음
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <ScopeChip
+            selected={releaseFilter === 'all'}
+            onSelect={() => setReleaseFilter('all')}
+          >
+            전체 {formatNumber(ownerDrafts.length)}
+          </ScopeChip>
+          <ScopeChip
+            selected={releaseFilter === 'unassigned'}
+            onSelect={() => setReleaseFilter('unassigned')}
+          >
+            출시 미정 {formatNumber(releaseCounts.unassigned)}
+          </ScopeChip>
+          {releaseChips.map((group) => (
+            <ScopeChip
+              key={group.id}
+              selected={releaseFilter === group.id}
+              onSelect={() => setReleaseFilter(group.id)}
+            >
+              <span className="truncate">{formatReleaseGroupLabel(group)}</span>
+              <span className="tabular-nums text-muted-foreground">
+                {formatNumber(releaseCounts.counts.get(group.id) ?? 0)}
+              </span>
+            </ScopeChip>
+          ))}
+        </div>
+      </div>
+
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <Input
           className="sm:max-w-xs"
@@ -371,12 +549,13 @@ export function CompanyDraftsPage() {
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[1080px] text-left text-sm">
+          <table className="w-full min-w-[1240px] text-left text-sm">
             <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">브랜드</th>
                 <th className="px-4 py-3 font-medium">PL번호</th>
                 <th className="px-4 py-3 font-medium">상품</th>
+                <th className="px-4 py-3 font-medium">출시 일정</th>
                 <th className="px-4 py-3 font-medium">담당</th>
                 <th className="px-4 py-3 font-medium">컬러 / 발주</th>
                 <th className="px-2 py-3 text-center font-medium">샘플 진행중</th>
@@ -395,7 +574,7 @@ export function CompanyDraftsPage() {
               {loading ? (
                 <tr>
                   <td
-                    colSpan={7 + PROGRESS_STEPS.length}
+                    colSpan={8 + PROGRESS_STEPS.length}
                     className="px-4 py-10 text-center text-muted-foreground"
                   >
                     불러오는 중...
@@ -404,12 +583,13 @@ export function CompanyDraftsPage() {
               ) : visible.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={7 + PROGRESS_STEPS.length}
+                    colSpan={8 + PROGRESS_STEPS.length}
                     className="px-4 py-10 text-center text-muted-foreground"
                   >
                     {emptyMessage(
                       ownerDrafts.length > 0,
                       seasonFilter,
+                      releaseFilter,
                       brandScope,
                       ownerScope,
                     )}
@@ -417,12 +597,9 @@ export function CompanyDraftsPage() {
                 </tr>
               ) : (
                 visible.map((draft) => {
-                  const season = draft.seasonId
-                    ? seasonMap.get(draft.seasonId)
-                    : undefined
-                  const brand = draft.brandId
-                    ? brandById.get(draft.brandId)
-                    : undefined
+                  const schedule = scheduleByDraft.get(draft.id)
+                  const brandId = schedule?.brandId ?? draft.brandId
+                  const brand = brandId ? brandById.get(brandId) : undefined
                   const total = totalOrderQty(draft)
                   return (
                     <tr
@@ -461,13 +638,61 @@ export function CompanyDraftsPage() {
                               {draft.nameKo || draft.nameEn || '이름 미정'}
                             </div>
                             <div className="truncate text-xs text-muted-foreground">
-                              {season
-                                ? `${formatSeasonLabel(season)} · `
-                                : '출시 기획 미정 · '}
                               {draft.nameEn || '—'}
                             </div>
                           </div>
                         </div>
+                      </td>
+                      <td
+                        className="px-4 py-2"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {schedule?.group ? (
+                          <div className="space-y-1">
+                            <div className="truncate font-medium">
+                              {formatReleaseGroupLabel(schedule.group)}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-1">
+                              {schedule.certainty ? (
+                                <Badge
+                                  variant={
+                                    schedule.certainty === 'confirmed'
+                                      ? 'success'
+                                      : 'outline'
+                                  }
+                                >
+                                  {RELEASE_CERTAINTY_LABEL[schedule.certainty]}
+                                </Badge>
+                              ) : null}
+                              {schedule.targetDate ? (
+                                <span className="text-[11px] text-muted-foreground">
+                                  {formatTargetDate(schedule.targetDate)}
+                                </span>
+                              ) : null}
+                              {schedule.isPreview ? (
+                                <span className="text-[11px] text-muted-foreground">
+                                  미리보기
+                                </span>
+                              ) : null}
+                            </div>
+                            <button
+                              type="button"
+                              className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
+                              onClick={() => setScheduleDraftId(draft.id)}
+                            >
+                              수정
+                            </button>
+                          </div>
+                        ) : (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setScheduleDraftId(draft.id)}
+                          >
+                            일정 정하기
+                          </Button>
+                        )}
                       </td>
                       <td className="px-4 py-2 text-muted-foreground">
                         {draft.owner || '—'}
@@ -517,6 +742,28 @@ export function CompanyDraftsPage() {
           </table>
         </div>
       </Card>
+
+      <DraftReleaseScheduleDialog
+        open={Boolean(scheduleDraft)}
+        draft={scheduleDraft}
+        draftLabel={
+          scheduleDraft
+            ? `${scheduleDraft.draftNo} · ${scheduleDraft.nameKo || scheduleDraft.nameEn || '이름 미정'}`
+            : ''
+        }
+        brands={brands}
+        groups={previewGroups}
+        initial={scheduleDraftResolved}
+        onClose={closeScheduleDialog}
+        onApply={(value) => {
+          if (!scheduleDraft) return
+          applySchedulePreview(scheduleDraft.id, value)
+        }}
+        onClear={() => {
+          if (!scheduleDraft) return
+          clearSchedulePreview(scheduleDraft.id)
+        }}
+      />
     </div>
   )
 }

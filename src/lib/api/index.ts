@@ -1005,6 +1005,21 @@ export async function testAiConnection(provider: AiProvider, modelId: string) {
   return aiGatewayStore.testAiConnection(provider, modelId)
 }
 
+export async function askCompanyAssistant(input: {
+  brandId: string
+  question: string
+  history?: Array<{ role: 'user' | 'assistant'; body: string }>
+}) {
+  return aiGatewayStore.askCompanyAssistant(input)
+}
+
+export async function getCompanyAssistantUsageToday(
+  brandId: string,
+  userId: string,
+) {
+  return aiSettingsStore.getCompanyAssistantUsageToday({ brandId, userId })
+}
+
 export async function searchInvoiceProductCandidates(
   brandId: string,
   texts: string[],

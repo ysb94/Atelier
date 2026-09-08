@@ -2,6 +2,9 @@
  * 멀티프로바이더 게이트웨이 정규화 검증. 실행: npm run verify:ai-gateway
  */
 import {
+  COMPANY_ASSISTANT_FEATURE_KEY,
+  COMPANY_ASSISTANT_LIMITS,
+  buildCompanyAssistantPrompt,
   buildItemNameSuggestPrompt,
   buildLocalRecommendation,
   evaluateHybridDecision,
@@ -9,6 +12,7 @@ import {
   filterAccessoryContextDecisions,
   filterHallucinatedAccessoryRules,
   filterHallucinatedProducts,
+  findCompanyAssistantSensitiveMatch,
   missingKeyError,
   parseAccessorySuggestJson,
   parseAnthropicModels,
@@ -17,7 +21,9 @@ import {
   parseOpenAiModels,
   parseRecommendJson,
   pickLookupKey,
+  prepareCompanyAssistantInput,
   rankCandidates,
+  startOfKstDayIso,
   tuneDecisionConfig,
 } from '@/lib/ai/gateway-core'
 
@@ -452,6 +458,74 @@ assert(
   itemPromptWithCases.system.includes('priorExamples') &&
     itemPromptWithCases.user.includes('priorExamples'),
   '내품명 프롬프트에 확정 사례만 참고용으로 넣는다',
+)
+
+assert(
+  COMPANY_ASSISTANT_FEATURE_KEY === 'company_assistant',
+  '회사 도우미 기능 키를 고정한다',
+)
+
+const longQuestion = '가'.repeat(COMPANY_ASSISTANT_LIMITS.maxQuestionChars + 40)
+const prepared = prepareCompanyAssistantInput({
+  question: `  ${longQuestion}  `,
+  history: [
+    { role: 'user', body: '첫 질문' },
+    { role: 'assistant', body: '첫 답' },
+    { role: 'user', body: '직전 질문' },
+    { role: 'assistant', body: '직전 답' },
+  ],
+})
+assert(
+  prepared.question.length === COMPANY_ASSISTANT_LIMITS.maxQuestionChars &&
+    prepared.history.length === 2 &&
+    prepared.history[0]?.body === '직전 질문' &&
+    prepared.history[1]?.body === '직전 답',
+  '질문은 500자로 자르고 직전 1턴만 남긴다',
+)
+
+try {
+  prepareCompanyAssistantInput({ question: '담당자 메일 team@atelier.local 알려줘' })
+  throw new Error('이메일이 있는 질문을 통과시키면 안 된다')
+} catch (error) {
+  assert(
+    error instanceof Error && error.message.includes('이메일'),
+    '이메일은 회사 도우미로 보내지 않는다',
+  )
+}
+assert(
+  findCompanyAssistantSensitiveMatch('010-1234-5678 확인') === '전화번호',
+  '전화번호는 차단한다',
+)
+assert(
+  findCompanyAssistantSensitiveMatch('900101-1234567') === '주민등록번호',
+  '주민등록번호는 차단한다',
+)
+assert(
+  findCompanyAssistantSensitiveMatch('sk-abcdefghijklmnopqrstuvwxyz123456') ===
+    'API 키',
+  'API 키는 차단한다',
+)
+assert(
+  findCompanyAssistantSensitiveMatch('기획안 화면은 어디에 있나요?') == null,
+  '일반 사용법 질문은 통과한다',
+)
+
+const assistantPrompt = buildCompanyAssistantPrompt({
+  question: '작업 요청 메뉴는 어디에 있나요?',
+})
+assert(
+  assistantPrompt.system.includes('회사 DB') &&
+    assistantPrompt.system.includes('확인 불가') &&
+    assistantPrompt.system.includes('M번호') &&
+    assistantPrompt.system.includes('공식 승인이 아닙니다') &&
+    assistantPrompt.user.includes('작업 요청 메뉴는 어디에 있나요?'),
+  '회사 도우미 지침과 질문을 고정한다',
+)
+
+const kstStart = startOfKstDayIso(Date.parse('2026-09-08T03:00:00+09:00'))
+assert(
+  kstStart === '2026-09-07T15:00:00.000Z',
+  '일일 한도는 한국 자정 기준으로 센다',
 )
 
 console.log('ai-gateway verify: ok')

@@ -93,6 +93,14 @@ assert(
 
 assert(draftHasSampleWorkOrder({ sampleWorkOrders: both }), '차수가 있으면 목록에 넣는다')
 assert(
+  draftHasSampleWorkOrder({
+    sampleWorkOrders: [],
+    sampleWorkOrderUrl: '',
+    colors: [{ sampleWorkOrderUrl: 'data:file,c' }],
+  }),
+  '컬러 지시서만 있어도 목록에 넣는다',
+)
+assert(
   !draftHasSampleWorkOrder({ sampleWorkOrders: [], sampleWorkOrderUrl: '' }),
   '없으면 목록에서 뺀다',
 )

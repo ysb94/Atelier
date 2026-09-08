@@ -15,6 +15,7 @@ import { Input, Select } from '@/components/ui/input'
 import {
   ACCESSORY_FEATURE_KEY,
   AI_PROVIDERS,
+  COMPANY_ASSISTANT_FEATURE_KEY,
   ITEM_NAME_FEATURE_KEY,
   PROVIDER_LABEL,
   PROVIDER_SECRET,
@@ -37,6 +38,7 @@ const FEATURE_LABEL: Record<AiFeatureKey, string> = {
   invoice_product_recommendation: '품목명 공식상품 추천',
   invoice_item_name_recommendation: '내품명 변환 추천',
   invoice_accessory_recommendation: '부속품 옵션 추천',
+  company_assistant: '회사 AI 도우미',
 }
 
 function formatUsd(value: number | null) {
@@ -138,7 +140,7 @@ export function AiSettingsPage() {
     <div>
       <PageHeader
         title="AI 설정"
-        description="브랜드별로 품목명·내품명·부속품 추천에 쓸 제공자와 모델을 고릅니다. API 키는 화면에 저장하지 않습니다."
+        description="브랜드별로 품목명·내품명·부속품 추천과 회사 AI 도우미에 쓸 제공자와 모델을 고릅니다. API 키는 화면에 저장하지 않습니다."
       />
 
       <div className="space-y-4">
@@ -217,7 +219,9 @@ export function AiSettingsPage() {
                 ? '내품명 변환은 전용 모델과 확정 사례를 씁니다. AI는 초안만 채우고 사람이 고른 뒤에만 저장합니다.'
                 : featureKey === ACCESSORY_FEATURE_KEY
                   ? '부속품 사전은 내품명과 분리된 모델을 씁니다. AI는 예상값만 채우고 사람이 고른 뒤에만 저장합니다.'
-                  : '송장 품목명 지정 화면에 추천 조회 키 1개와 공식상품 3개를 보여 줍니다. AI는 채우기만 하고 등록은 기존 버튼이 확정합니다.'}
+                  : featureKey === COMPANY_ASSISTANT_FEATURE_KEY
+                    ? '앱 사용법과 업무 문장 정리만 답합니다. 회사 DB는 읽지 않으며 대화 원문은 저장하지 않습니다. 질문 500자, 직전 1턴, 답변 300토큰, 하루 20회로 제한합니다.'
+                    : '송장 품목명 지정 화면에 추천 조회 키 1개와 공식상품 3개를 보여 줍니다. AI는 채우기만 하고 등록은 기존 버튼이 확정합니다.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -333,18 +337,22 @@ export function AiSettingsPage() {
                       {featureUsage.total}
                     </span>
                   </p>
-                  <p>
-                    로컬 생략{' '}
-                    <span className="font-medium text-foreground">
-                      {featureUsage.skippedAiCount}
-                    </span>
-                  </p>
-                  <p>
-                    캐시 적중{' '}
-                    <span className="font-medium text-foreground">
-                      {featureUsage.cacheCount}
-                    </span>
-                  </p>
+                  {featureKey === COMPANY_ASSISTANT_FEATURE_KEY ? null : (
+                    <>
+                      <p>
+                        로컬 생략{' '}
+                        <span className="font-medium text-foreground">
+                          {featureUsage.skippedAiCount}
+                        </span>
+                      </p>
+                      <p>
+                        캐시 적중{' '}
+                        <span className="font-medium text-foreground">
+                          {featureUsage.cacheCount}
+                        </span>
+                      </p>
+                    </>
+                  )}
                   <p>
                     AI 호출{' '}
                     <span className="font-medium text-foreground">
@@ -363,24 +371,28 @@ export function AiSettingsPage() {
                       {formatUsd(featureUsage.estimatedCostUsd)}
                     </span>
                   </p>
-                  <p>
-                    축적 사례{' '}
-                    <span className="font-medium text-foreground">
-                      {featureUsage.caseCount}
-                    </span>
-                  </p>
-                  <p>
-                    확정률{' '}
-                    <span className="font-medium text-foreground">
-                      {formatRate(featureUsage.confirmedRate)}
-                    </span>
-                  </p>
-                  <p>
-                    수정률{' '}
-                    <span className="font-medium text-foreground">
-                      {formatRate(featureUsage.correctionRate)}
-                    </span>
-                  </p>
+                  {featureKey === COMPANY_ASSISTANT_FEATURE_KEY ? null : (
+                    <>
+                      <p>
+                        축적 사례{' '}
+                        <span className="font-medium text-foreground">
+                          {featureUsage.caseCount}
+                        </span>
+                      </p>
+                      <p>
+                        확정률{' '}
+                        <span className="font-medium text-foreground">
+                          {formatRate(featureUsage.confirmedRate)}
+                        </span>
+                      </p>
+                      <p>
+                        수정률{' '}
+                        <span className="font-medium text-foreground">
+                          {formatRate(featureUsage.correctionRate)}
+                        </span>
+                      </p>
+                    </>
+                  )}
                   {featureKey === 'invoice_product_recommendation' ? (
                     <p>
                       Top-1{' '}

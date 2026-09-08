@@ -14,6 +14,7 @@ import { CompanyProductsPage } from '@/features/products/CompanyProductsPage'
 import { DepartmentProductsPage } from '@/features/products/ProductsPage'
 import { ProductDetailDrawer } from '@/features/products/ProductDetailDrawer'
 import { CompanySampleWorkOrderPage } from '@/features/china/SampleWorkOrderPage'
+import { DesignColorSamplePage } from '@/features/design/ColorSamplePage'
 import { CompanyDraftsPage } from '@/features/drafts/DraftsPage'
 import { DraftEditPage } from '@/features/drafts/DraftEditPage'
 import { CompanyBarcodePage } from '@/features/codes/BarcodePage'
@@ -115,6 +116,10 @@ export const companyWorkspaceRoutes = (
           element={<ProductDetailDrawer />}
         />
       </Route>
+      <Route
+        path="design/color-samples"
+        element={<DesignColorSamplePage />}
+      />
       <Route path="design/file-manager" element={<DesignFileManagerRoute />} />
       <Route path="logistics/invoices" element={<CompanyInvoiceWorkPage />} />
       <Route

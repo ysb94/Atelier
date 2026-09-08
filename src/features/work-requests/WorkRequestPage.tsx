@@ -57,6 +57,7 @@ import {
 import { WorkRequestAcceptDialog } from './WorkRequestAcceptDialog'
 import { WorkRequestCompletedPanel } from './WorkRequestCompletedPanel'
 import { WorkRequestChat } from './WorkRequestChat'
+import { WorkRequestScratchTodos } from './WorkRequestScratchTodos'
 import { WorkRequestTeamBoard } from './WorkRequestTeamBoard'
 import {
   compareRequestsByDeadline,
@@ -3172,116 +3173,134 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         ) : null}
 
         {allowedSection === 'mine' ? (
-          myActiveTasks.length > 0 ? (
+          myActiveTasks.length > 0 || canManage ? (
             <div className="space-y-6">
-              {(() => {
-                const mounted = myTodoTasks.find(
-                  (request) =>
-                    request.id === currentWorkByMember[LOCAL_SELF_ID],
-                )
-                return (
-                  <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
-                    <div className="mb-3 flex items-center gap-2">
-                      <Pin className="size-4 text-primary" />
-                      <h3 className="font-semibold">지금 하는 업무</h3>
-                    </div>
-                    <p className="mb-4 text-xs text-muted-foreground">
-                      여기에 장착한 업무가 오늘 하고 있는 일입니다. 다른 업무로
-                      바꾸려면 아래 목록에서 갈아 끼우면 됩니다. 팀 현황에도
-                      그대로 보입니다.
-                    </p>
-                    {mounted ? (
-                      <div className="rounded-lg border border-primary/40 bg-card p-4">
-                        <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div className="min-w-0">
-                            <Badge variant="default">장착 중</Badge>
-                            <p className="mt-2 font-semibold">
-                              {mounted.values.title}
-                            </p>
-                            <p className="mt-1 text-sm text-muted-foreground">
-                              작업 예정{' '}
-                              {mounted.plannedStart
-                                ? `${formatCompactDate(requestPlannedRange(mounted).start)} → ${formatCompactDate(requestPlannedRange(mounted).end)}`
-                                : '미정'}
-                            </p>
-                          </div>
-                          <div className="flex shrink-0 flex-wrap gap-2">
-                            {mounted.assignee === LOCAL_SELF_ID &&
-                            mounted.status === 'inProgress' ? (
+              {myActiveTasks.length > 0 ? (
+                (() => {
+                  const mounted = myTodoTasks.find(
+                    (request) =>
+                      request.id === currentWorkByMember[LOCAL_SELF_ID],
+                  )
+                  return (
+                    <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
+                      <div className="mb-3 flex items-center gap-2">
+                        <Pin className="size-4 text-primary" />
+                        <h3 className="font-semibold">지금 하는 업무</h3>
+                      </div>
+                      <p className="mb-4 text-xs text-muted-foreground">
+                        여기에 장착한 업무가 오늘 하고 있는 일입니다. 다른 업무로
+                        바꾸려면 아래 목록에서 갈아 끼우면 됩니다. 팀 현황에도
+                        그대로 보입니다.
+                      </p>
+                      {mounted ? (
+                        <div className="rounded-lg border border-primary/40 bg-card p-4">
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <Badge variant="default">장착 중</Badge>
+                              <p className="mt-2 font-semibold">
+                                {mounted.values.title}
+                              </p>
+                              <p className="mt-1 text-sm text-muted-foreground">
+                                작업 예정{' '}
+                                {mounted.plannedStart
+                                  ? `${formatCompactDate(requestPlannedRange(mounted).start)} → ${formatCompactDate(requestPlannedRange(mounted).end)}`
+                                  : '미정'}
+                              </p>
+                            </div>
+                            <div className="flex shrink-0 flex-wrap gap-2">
+                              {mounted.assignee === LOCAL_SELF_ID &&
+                              mounted.status === 'inProgress' ? (
+                                <Button
+                                  type="button"
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={() => requestCompletion(mounted)}
+                                >
+                                  완료 요청
+                                </Button>
+                              ) : null}
                               <Button
                                 type="button"
-                                variant="secondary"
+                                variant="outline"
                                 size="sm"
-                                onClick={() => requestCompletion(mounted)}
+                                onClick={unmountCurrentWork}
                               >
-                                완료 요청
+                                빼기
                               </Button>
-                            ) : null}
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={unmountCurrentWork}
-                            >
-                              빼기
-                            </Button>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ) : (
-                      <p className="rounded-lg border border-dashed border-primary/30 bg-card px-4 py-8 text-center text-sm text-muted-foreground">
-                        아직 장착한 업무가 없습니다. 아래 목록에서 장착하세요.
-                      </p>
-                    )}
-                  </section>
-                )
-              })()}
-              <section className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold">할 일</h3>
-                  <Badge variant="muted">{myTodoTasks.length}건</Badge>
-                </div>
-                {myTodoTasks.length > 0 ? (
-                  <div className="space-y-3">
-                    {myTodoTasks.map((request) =>
-                      renderRequestRow(request, 'mine'),
-                    )}
+                      ) : (
+                        <p className="rounded-lg border border-dashed border-primary/30 bg-card px-4 py-8 text-center text-sm text-muted-foreground">
+                          아직 장착한 업무가 없습니다. 아래 목록에서 장착하세요.
+                        </p>
+                      )}
+                    </section>
+                  )
+                })()
+              ) : null}
+              <div
+                className={
+                  canManage
+                    ? 'grid items-start gap-4 lg:grid-cols-[18rem_minmax(0,1fr)]'
+                    : undefined
+                }
+              >
+                {canManage ? (
+                  <WorkRequestScratchTodos
+                    owner={owner}
+                    profileId={profile?.id}
+                  />
+                ) : null}
+                <section className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold">할 일</h3>
+                    <Badge variant="muted">{myTodoTasks.length}건</Badge>
                   </div>
-                ) : (
-                  <p className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-                    지금 할 일이 없습니다.
-                  </p>
-                )}
-              </section>
-              <section className="space-y-3 border-t border-border pt-6">
-                <div className="flex items-center gap-2">
-                  <h3 className="font-semibold">완료 요청 대기</h3>
-                  <Badge variant="warning">
-                    {myCompletionPendingTasks.length}건
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  완료를 요청한 뒤 팀장 또는 요청자 확인을 기다리는 업무입니다.
-                </p>
-                {myCompletionPendingTasks.length > 0 ? (
-                  <div className="space-y-3">
-                    {myCompletionPendingTasks.map((request) =>
-                      renderRequestRow(request, 'mine'),
-                    )}
+                  {myTodoTasks.length > 0 ? (
+                    <div className="space-y-3">
+                      {myTodoTasks.map((request) =>
+                        renderRequestRow(request, 'mine'),
+                      )}
+                    </div>
+                  ) : (
+                    <p className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                      {canManage
+                        ? '배정된 요청이 없으면 왼쪽 간단 할 일에 적어두면 됩니다.'
+                        : '지금 할 일이 없습니다.'}
+                    </p>
+                  )}
+                </section>
+              </div>
+              {myActiveTasks.length > 0 ? (
+                <section className="space-y-3 border-t border-border pt-6">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold">완료 요청 대기</h3>
+                    <Badge variant="warning">
+                      {myCompletionPendingTasks.length}건
+                    </Badge>
                   </div>
-                ) : (
-                  <p className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
-                    완료 확인을 기다리는 업무가 없습니다.
+                  <p className="text-xs text-muted-foreground">
+                    완료를 요청한 뒤 팀장 또는 요청자 확인을 기다리는 업무입니다.
                   </p>
-                )}
-              </section>
+                  {myCompletionPendingTasks.length > 0 ? (
+                    <div className="space-y-3">
+                      {myCompletionPendingTasks.map((request) =>
+                        renderRequestRow(request, 'mine'),
+                      )}
+                    </div>
+                  ) : (
+                    <p className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                      완료 확인을 기다리는 업무가 없습니다.
+                    </p>
+                  )}
+                </section>
+              ) : null}
             </div>
           ) : (
             renderEmptyState(
               '현재 배정된 업무가 없습니다.',
-              canManage
-                ? '직접 맡거나 주 담당·협업으로 들어간 업무만 여기에 표시됩니다.'
-                : '관리자가 주 담당자 또는 협업자로 배정한 업무만 여기에 표시됩니다.',
+              '관리자가 주 담당자 또는 협업자로 배정한 업무만 여기에 표시됩니다.',
             )
           )
         ) : null}

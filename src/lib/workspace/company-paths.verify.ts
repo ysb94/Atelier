@@ -6,6 +6,7 @@ import {
   applySearchPatch,
   buildLegacyRedirectHref,
   chinaWorkOrdersPath,
+  designColorSamplesPath,
   dataUploadHref,
   draftDetailPath,
   draftNewPath,
@@ -36,6 +37,10 @@ assert(
 assert(
   chinaWorkOrdersPath() === '/china/work-orders',
   '중국팀 작업 지시서는 회사 경로',
+)
+assert(
+  designColorSamplesPath() === '/design/color-samples',
+  '디자인 컬러샘플 촬영은 회사 경로',
 )
 assert(
   draftNewPath('atelier', { season: 'none' }) ===
