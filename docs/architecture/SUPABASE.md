@@ -92,16 +92,31 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 ## 로그인과 계정
 
 - 로그인은 Google OAuth가 기본이다. 회사 도메인이 없어 모든 Google 계정을 받고,
-  `profiles.status`가 `active`일 때만 작업장에 들어간다.
-- 신규 사용자는 팀·직책·담당 브랜드를 직접 신청한다. 해당 브랜드 팀장 또는 관리자가
-  승인한다. 조직도의 `운영진` 팀과 관리자 권한(`profiles.is_admin`)은 별개다.
-- 팀은 Flow 조직도를 `public.departments`에 그대로 둔다. 상품 데이터 파트
-  (`planning|design|md|logistics`)와는 다른 축이다.
+  `profiles.status`가 `active`일 때만 회사 셸에 들어간다.
+- 신규 사용자는 회사 팀·직책·업무 역량을 신청한다. 관리자 또는 회사 관리자
+  (`팀장`·`이사`)가 승인한다. 담당 브랜드를 고르지 않는다.
+- 직원은 E&J `profiles` 한 명이다. `profiles.company_id`와 `departments`는 회사
+  공통 축이다. 상품 데이터 파트(`planning|design|md|logistics|data`)는
+  `profile_capabilities`로 따로 둔다. 부서와 역량은 다를 수 있다.
+- 승인된 직원은 모든 브랜드를 조회한다. 수정은 관리자이거나 업무 역량이 하나
+  이상 있어야 한다. 화면은 역량별로 쓰기 버튼을 가리지만, DB 쓰기는
+  `app.can_edit_brand`가 막는다.
 - 권한 판별 함수는 PostgREST에 노출되지 않는 `app` 스키마의 security definer로 둔다.
-  업무 행은 `app.can_read_brand` / `app.can_edit_brand`로 담당 멤버·관리자만 허용한다.
-- `brands` SELECT는 로그인 사용자 전체(신청 화면용). 브랜드 목록 화면은 앱에서
-  담당 브랜드만 걸러 보여 준다. INSERT/DELETE는 관리자, UPDATE는 관리자 또는 해당
-  브랜드 팀장이다. `companies` SELECT는 승인된 사용자만.
+  `app.can_read_brand`는 승인된 회사 직원, `app.can_edit_brand`는 승인+역량이다.
+- `brand_members`는 더 이상 입장 조건이 아니다. `is_lead`는 브랜드 책임자
+  (설정·AI) 표시용으로만 남긴다. 모든 직원에게 브랜드 멤버 행을 만들지 않는다.
+- `brands` SELECT는 로그인 사용자 전체. 승인된 직원은 앱에서 전 브랜드 데이터를
+  한 회사 셸에서 본다. INSERT/DELETE는 관리자, UPDATE는 관리자 또는 해당 브랜드
+  책임자다. `companies` SELECT는 승인된 사용자만.
+- 로그인한 활성 직원의 기본 화면은 E&J 회사 홈이다. 상품·코드·물류는
+  회사 경로에서 전 브랜드를 조회하고, 기존 행 수정은 그 행의 `brand_id`를
+  쓴다. 신규 생성·업로드·설정만 브랜드를 하나 고른다. `/b/:slug` 작업장은
+  호환 리다이렉트만 남긴다.
+- **기획안만 회사 소유 예외다.** `product_drafts.company_id`가 필수이고
+  `brand_id`는 비워 둘 수 있다. 브랜드는 처음부터, 기획 중에, 또는 출시
+  확정·상품 승격 직전에 정한다. PL번호는 회사 공통 `UNIQUE (company_id, draft_no)`
+  이며 생성 때 정하고 브랜드를 바꿔도 유지한다. `styles`·코드·물류 등 운영 행의
+  `brand_id NOT NULL` 경계는 그대로다.
 - 가입 화면은 두지 않는다. Google 신규 사용자도 Auth 가입 경로를 쓰므로 자체 가입은
   켜 두고, 외부인 차단은 승인 단계가 담당한다.
 - 개발 중에는 `DEV LOGIN` 버튼(`dev@atelier.local`)을 쓴다. 배포 전에
@@ -1184,6 +1199,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
 
 - 스키마 변경, 대량 수정 또는 삭제 전에 현재 데이터를 XLSX로 내려 스냅샷을 남긴다.
+  기획안 회사 소유 전환 직전 스냅샷은
+  `docs/backups/product-drafts-pre-company-owned-20260908.xlsx`다.
 - 스냅샷 파일명에 날짜와 작업 목적을 적고 어떤 작업 직전 상태인지 알 수 있게 한다.
 - 되돌릴 수 없는 작업(DROP, TRUNCATE, 조건 없는 UPDATE·DELETE)은 사용자 승인 없이
   실행하지 않는다.
@@ -1204,12 +1221,15 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
 ## 데이터 경계
 
 - 앱 DB에는 Supabase Organization과 별개로 `companies -> brands` 구조를 둔다.
-- 상품, SKU, 기획안, 출시 기획, 브랜드 필드, 코드 및 감사 이력 등 브랜드 소유 행에는
+- 상품, SKU, 출시 기획, 브랜드 필드, 코드 및 감사 이력 등 브랜드 소유 행에는
   `brand_id NOT NULL`을 둔다.
+- 기획안(`product_drafts` + `draft_colors` + `draft_options`)만 회사 소유 예외다.
+  `company_id NOT NULL`, `brand_id` nullable. 브랜드 미정 기획안도 같은 회사
+  직원만 조회·수정한다. 다른 회사 브랜드로는 배정할 수 없다.
 - 기본키는 프로젝트를 옮겨도 유지되는 UUID를 사용한다.
 - 사용자에게 보이는 번호는 고유 범위를 명시한다.
   - 브랜드별 품번: `UNIQUE (brand_id, style_no)`
-  - 브랜드별 기획안 번호: `UNIQUE (brand_id, draft_no)`
+  - 회사 공통 기획안 번호: `UNIQUE (company_id, draft_no)`
   - 자사 코드: `UNIQUE (brand_id, code) WHERE kind='own'`
   - 거래처 코드: `UNIQUE (brand_id, usage_target_id, code) WHERE kind='partner'`
     같은 바코드 문자열을 업체마다 따로 둘 수 있다.
@@ -1222,9 +1242,11 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
 
 ## 권한과 보안
 
-- 사용자 권한은 프로필 승인 상태와 브랜드 멤버십으로 나눈다.
-- 관리자(`is_admin`)는 전 브랜드, 브랜드 멤버는 담당 브랜드만 작업장에 들어간다.
-- 브랜드 팀장(`brand_members.is_lead`)은 그 브랜드 신청을 승인할 수 있다.
+- 사용자 권한은 프로필 승인 상태와 회사 업무 역량으로 나눈다.
+- 관리자(`is_admin`)와 승인된 직원은 전 브랜드를 조회한다. 수정은 역량이 있는
+  직원만 한다. 브랜드 멤버십이 없어도 회사 셸에서 전 브랜드를 본다.
+- 회사 관리자(`팀장`·`이사`)와 전역 관리자가 접근 신청을 승인한다.
+- 브랜드 책임자(`brand_members.is_lead`)는 그 브랜드 정보·AI 설정만 고친다.
 - 화면에서 숨기는 것은 권한 제어가 아니다. DB 정책으로 직접 접근도 차단한다.
 - 새 테이블을 만들면 `authenticated`에 필요한 GRANT를 함께 준다. RLS만으로는 부족하다.
 - 품번 발급, 기획안의 상품 승격, 대량 변경 같은 원자적 작업은 DB 함수 또는
@@ -1233,6 +1255,29 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
 - staging이 생긴 뒤에는 MCP를 기본적으로 staging에 연결한다. 그전까지는 `Atelier`에
   직접 연결하되 조회를 우선하고, 스키마 변경·삭제·대량 수정은 명시적 승인과 백업 없이
   실행하지 않는다.
+
+## 회사 중심 전환 후 브랜드 경계 감사
+
+- 업무 테이블은 `brand_id NOT NULL`을 유지한다. 예외는 기획안뿐이며, 브랜드 미정
+  작업 요청 시안과 같이 상품·코드·물류 행은 만들지 않는다.
+- React Query 키는 브랜드 데이터를 `brand.id`와 함께 둔다. 예외였던
+  `outbound-partner-links`도 `brandId`를 앞에 붙였다. 대상 UUID만으로도 실무
+  혼입 위험은 낮다.
+- 디자인 파일 매니저 R2 루트는 현재 ATELIER 별칭 `masmarulez`다.
+  `brandStorageRoot(slug)`로 표시하고, 기존 파일은 `type/...` 경로를 유지한다.
+  Worker가 `GET /list?type=&prefix=` 를 아직 지키지 않으므로 비-ATELIER 브랜드
+  파일 작업은 열지 않는다. 전체 버킷 쓰기로 우회하지 않는다.
+- 파일 매니저 `localStorage` 키(`masmarulezGridSort` 등)는 브라우저 UI 설정이다.
+- 화면은 전 브랜드를 한 목록에서 보여 준다. DB의 `brand_id NOT NULL`·고유
+  제약·RLS는 그대로다. 기존 행 쓰기는 행의 `brand_id`, 신규 생성·업로드·설정은
+  `brand` 대상으로 브랜드를 하나 고른 뒤에만 마운트한다.
+- 전환 검증:
+  - RLS: 승인 직원 전 브랜드 조회, 역량 없는 직원 쓰기 거부, 다른 `brand_id`
+    혼입 거부, 브랜드 미정 업무에서 상품 생성 거부.
+  - UI: 활성 직원은 E&J 홈 진입, 회사 사이드바 하나, 운영 목록 기본 전 브랜드,
+    브랜드 필터 복원, 교차 브랜드 행 수정, 신규 작업 브랜드 선택, 작업 중
+    브랜드 고정, `/b/:slug/*` 호환 리다이렉트. 탭 ID는 브랜드 slug를 넣지
+    않고 회사 경로만 쓴다.
 
 ## Storage와 마이그레이션
 

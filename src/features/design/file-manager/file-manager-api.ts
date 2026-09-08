@@ -1,3 +1,7 @@
+import {
+  assertKeyAllowedForBrand,
+  filterItemsForBrand,
+} from '@/lib/design/file-manager-brand'
 import { UPLOAD_WORKER_BASE } from './file-manager-config'
 import type { HistoryLogEntry, ServerFileItem, UploadConflictResult } from './types'
 import {
@@ -36,7 +40,8 @@ export async function apiRequest<T = unknown>(
   return data as T
 }
 
-export function apiDelete(key: string): Promise<unknown> {
+export function apiDelete(key: string, brandSlug?: string | null): Promise<unknown> {
+  if (brandSlug) assertKeyAllowedForBrand(key, brandSlug)
   const encodedKey = String(key)
     .split('/')
     .map((part) => encodeURIComponent(part))
@@ -44,28 +49,46 @@ export function apiDelete(key: string): Promise<unknown> {
   return apiRequest(`/${encodedKey}`, { method: 'DELETE' })
 }
 
-export function apiMove(from: string, to: string): Promise<unknown> {
+export function apiMove(
+  from: string,
+  to: string,
+  brandSlug?: string | null,
+): Promise<unknown> {
+  if (brandSlug) {
+    assertKeyAllowedForBrand(from, brandSlug)
+    assertKeyAllowedForBrand(to, brandSlug)
+  }
   return apiRequest('/move', {
     method: 'POST',
     body: JSON.stringify({ from, to }),
   })
 }
 
-export function apiMkdir(path: string): Promise<unknown> {
+export function apiMkdir(path: string, brandSlug?: string | null): Promise<unknown> {
+  if (brandSlug) assertKeyAllowedForBrand(path, brandSlug)
   return apiRequest('/mkdir', {
     method: 'POST',
     body: JSON.stringify({ path }),
   })
 }
 
-export function apiRmdir(prefix: string): Promise<unknown> {
+export function apiRmdir(prefix: string, brandSlug?: string | null): Promise<unknown> {
+  if (brandSlug) assertKeyAllowedForBrand(prefix, brandSlug)
   return apiRequest('/rmdir', {
     method: 'POST',
     body: JSON.stringify({ prefix }),
   })
 }
 
-export function apiMvdir(from: string, to: string): Promise<unknown> {
+export function apiMvdir(
+  from: string,
+  to: string,
+  brandSlug?: string | null,
+): Promise<unknown> {
+  if (brandSlug) {
+    assertKeyAllowedForBrand(from, brandSlug)
+    assertKeyAllowedForBrand(to, brandSlug)
+  }
   return apiRequest('/mvdir', {
     method: 'POST',
     body: JSON.stringify({ from, to }),
@@ -83,7 +106,10 @@ export async function fetchTopLevelFolders(): Promise<string[]> {
   return data.folders.filter((folder): folder is string => typeof folder === 'string')
 }
 
-export async function fetchServerFiles(type: string): Promise<ServerFileItem[]> {
+export async function fetchServerFiles(
+  type: string,
+  brandSlug?: string | null,
+): Promise<ServerFileItem[]> {
   const listWorkerBase = getListWorkerBase()
   const response = await fetch(
     `${listWorkerBase}/list?type=${encodeURIComponent(type)}`,
@@ -94,7 +120,7 @@ export async function fetchServerFiles(type: string): Promise<ServerFileItem[]> 
   if (!response.ok) throw new Error(`HTTP_${response.status}`)
   const data = (await response.json()) as { items?: unknown }
   if (!Array.isArray(data?.items)) throw new Error('INVALID_RESPONSE')
-  const items = data.items as ServerFileItem[]
+  const items = filterItemsForBrand(data.items as ServerFileItem[], type, brandSlug)
   serverListCache.set(`${listWorkerBase}::${type}`, items)
   return items
 }
@@ -226,7 +252,11 @@ export function uploadFilePut(
   file: File,
   targetPath: string,
   forceOverwrite = false,
+  brandSlug?: string | null,
 ): Promise<Response> {
+  if (brandSlug) {
+    assertKeyAllowedForBrand(`${targetPath}/${file.name}`, brandSlug)
+  }
   return fetch(buildUploadUrl(targetPath, file.name, forceOverwrite), {
     method: 'PUT',
     headers: { 'Content-Type': file.type || 'application/octet-stream' },

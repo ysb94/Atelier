@@ -242,15 +242,13 @@ async function withStyleCounts(
   }))
 }
 
-/** 관리자가 아니면 담당 브랜드만 보여 준다. RLS는 로그인 사용자 전체 조회를 허용한다. */
+/** 승인된 회사 직원은 전 브랜드를 본다. 멤버십으로 걸러 내지 않는다. */
 async function filterAccessibleBrands(
   brands: Omit<Brand, 'styleCount'>[],
 ): Promise<Omit<Brand, 'styleCount'>[]> {
   const profile = await getMyProfile()
   if (!profile || profile.status !== 'active') return []
-  if (profile.isAdmin) return brands
-  const allowed = new Set(profile.memberships.map((m) => m.brandId))
-  return brands.filter((brand) => allowed.has(brand.id))
+  return brands
 }
 
 export async function getBrands(): Promise<Brand[]> {
@@ -1978,6 +1976,13 @@ export async function getProductDrafts(
   return productDraftStore.listProductDrafts(brandId)
 }
 
+export async function getCompanyProductDrafts(
+  companyId: string,
+): Promise<ProductDraft[]> {
+  await delay()
+  return productDraftStore.listProductDraftsByCompany(companyId)
+}
+
 export async function getProductDraftById(
   id: string,
 ): Promise<ProductDraft | undefined> {
@@ -1986,11 +1991,11 @@ export async function getProductDraftById(
 }
 
 export async function createProductDraft(
-  brandId: string,
+  companyId: string,
   input: ProductDraftInput,
 ): Promise<ProductDraft> {
   await delay()
-  return productDraftStore.createProductDraft(brandId, input)
+  return productDraftStore.createProductDraft(companyId, input)
 }
 
 export async function updateProductDraft(
@@ -2053,6 +2058,16 @@ export async function getStylesPage(
   return styleStore.listStylesPage(brandId, filter, offset, limit)
 }
 
+export async function getStylesPageForBrands(
+  brandIds: string[],
+  filter: styleStore.StyleFilter,
+  offset: number,
+  limit: number,
+): Promise<{ rows: Style[]; total: number }> {
+  await delay()
+  return styleStore.listStylesPageForBrands(brandIds, filter, offset, limit)
+}
+
 /** 같은 조건의 전체 목록. 내보내기처럼 한 번에 다 필요할 때만 쓴다. */
 export async function getStylesFiltered(
   brandId: string,
@@ -2060,6 +2075,14 @@ export async function getStylesFiltered(
 ): Promise<Style[]> {
   await delay()
   return styleStore.listStylesFiltered(brandId, filter)
+}
+
+export async function getStylesFilteredForBrands(
+  brandIds: string[],
+  filter: styleStore.StyleFilter,
+): Promise<Style[]> {
+  await delay()
+  return styleStore.listStylesFilteredForBrands(brandIds, filter)
 }
 
 /** 송장·접두어 상품 선택용. M번호·상품명으로 검색하고 styleId를 돌려준다. */

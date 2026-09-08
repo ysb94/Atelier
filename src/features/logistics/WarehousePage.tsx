@@ -1,6 +1,8 @@
 import { Package, Truck } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
+import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
+import { CompanyWarehouseList } from '@/features/workspace/company-operation-lists'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -118,5 +120,13 @@ export function WarehousePage() {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export function CompanyWarehousePage() {
+  return (
+    <SingleBrandOrList list={<CompanyWarehouseList />}>
+      <WarehousePage />
+    </SingleBrandOrList>
   )
 }

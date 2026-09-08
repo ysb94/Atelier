@@ -244,6 +244,49 @@ export async function listStylesPage(
   }
 }
 
+/** 회사 목록용. 선택 브랜드를 한 페이지로 읽어 검색·페이지가 잘리지 않게 한다. */
+export async function listStylesPageForBrands(
+  brandIds: string[],
+  filter: StyleFilter,
+  offset: number,
+  limit: number,
+): Promise<{ rows: Style[]; total: number }> {
+  const ids = [...new Set(brandIds.filter(Boolean))]
+  if (ids.length === 0) return { rows: [], total: 0 }
+  if (ids.length === 1) {
+    return listStylesPage(ids[0], filter, offset, limit)
+  }
+
+  let query = getSupabase()
+    .from('styles')
+    .select(COLUMNS, { count: 'exact' })
+    .in('brand_id', ids)
+
+  if (filter.seasonId) query = query.eq('season_id', filter.seasonId)
+  if (filter.status) query = query.eq('status', filter.status)
+
+  const keyword = filter.search ? sanitizeSearch(filter.search) : ''
+  if (keyword) {
+    query = query.or(`style_no.ilike.%${keyword}%,name.ilike.%${keyword}%`)
+  }
+
+  const { data, error, count } = await query
+    .order('style_no', { ascending: true })
+    .range(offset, offset + Math.max(limit, 1) - 1)
+
+  if (error) {
+    throw new StyleStoreError(
+      errorMessage(error, '상품을 불러오지 못했습니다.'),
+      'invalid',
+    )
+  }
+
+  return {
+    rows: ((data as StyleRow[]) ?? []).map(toStyle),
+    total: count ?? 0,
+  }
+}
+
 type StyleRefRow = {
   id: string
   style_no: string
@@ -441,6 +484,24 @@ export async function listStylesFiltered(
   for (let offset = 0; ; offset += PAGE_SIZE) {
     const { rows, total } = await listStylesPage(
       brandId,
+      filter,
+      offset,
+      PAGE_SIZE,
+    )
+    all.push(...rows)
+    if (rows.length < PAGE_SIZE || all.length >= total) break
+  }
+  return all
+}
+
+export async function listStylesFilteredForBrands(
+  brandIds: string[],
+  filter: StyleFilter,
+): Promise<Style[]> {
+  const all: Style[] = []
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const { rows, total } = await listStylesPageForBrands(
+      brandIds,
       filter,
       offset,
       PAGE_SIZE,

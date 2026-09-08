@@ -74,7 +74,7 @@ export function ProductImportWorkspace({
   const fields = useMemo(() => fieldsQuery.data ?? [], [fieldsQuery.data])
   const activeSheet = sheets[activeSheetIndex]
   const seasons = useMemo(() => seasonsQuery.data ?? [], [seasonsQuery.data])
-  const donePath = successPath ?? `/b/${brand.slug}/data/all`
+  const donePath = successPath ?? `/data/all?brands=${encodeURIComponent(brand.slug)}`
 
   const preparedRows = useMemo(() => {
     if (!activeSheet) return []

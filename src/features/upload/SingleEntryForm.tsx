@@ -204,7 +204,7 @@ export function SingleEntryForm({
             <p className="rounded-md bg-success/10 px-3 py-2 text-sm text-success sm:col-span-2">
               {result === 'created' ? '신규 등록 완료.' : '기존 상품 갱신 완료.'}{' '}
               <Link
-                to={`/b/${brandSlug}/products`}
+                to={`/products?brands=${encodeURIComponent(brandSlug)}`}
                 className="underline underline-offset-2"
               >
                 전체 상품 보기

@@ -276,7 +276,7 @@ export function InvoiceMallResolutionDialog({
                       </span>
                       와 같습니다.{' '}
                       <Link
-                        to={`/b/${brandSlug}/settings/usage-targets`}
+                        to={`/settings/usage-targets?brand=${encodeURIComponent(brandSlug)}`}
                         className="underline underline-offset-2"
                       >
                         출고업체 설정

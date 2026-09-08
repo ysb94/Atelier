@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQueries, useQuery } from '@tanstack/react-query'
 import {
   Link,
   Navigate,
@@ -9,7 +9,8 @@ import {
   useSearchParams,
 } from 'react-router-dom'
 import { Download, Settings2, Upload } from 'lucide-react'
-import { useBrand } from '@/components/layout/brand-context'
+import { CompanyBrandFilter } from '@/components/layout/CompanyBrandFilter'
+import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -18,8 +19,8 @@ import {
   getBrandFields,
   getProductCodes,
   getSeasonsByBrand,
-  getStylesFiltered,
-  getStylesPage,
+  getStylesFilteredForBrands,
+  getStylesPageForBrands,
   type StyleFilter,
 } from '@/lib/api'
 import {
@@ -40,6 +41,12 @@ import {
   type Style,
   type StyleStatus,
 } from '@/lib/types'
+import {
+  dataSheetDetailPath,
+  dataUploadHref,
+  settingsPath,
+} from '@/lib/workspace/company-paths'
+import { companyQueryKey } from '@/lib/workspace/query-keys'
 import { cn, formatNumber } from '@/lib/utils'
 import { SheetTable, type SheetRow } from './SheetTable'
 
@@ -52,6 +59,45 @@ const DATA_OWNERS: DataSheetOwner[] = [
 ]
 
 const PAGE_SIZES = [50, 100, 200] as const
+
+const BRAND_COLUMN: BrandField = {
+  id: '_brand',
+  brandId: '',
+  label: '브랜드',
+  systemKey: 'brand',
+  type: 'text',
+  owner: 'common',
+  required: false,
+  order: -3,
+  level: 'style',
+  options: [],
+}
+
+const STYLE_NO_COLUMN: BrandField = {
+  id: '_styleNo',
+  brandId: '',
+  label: 'M번호',
+  systemKey: 'styleNo',
+  type: 'text',
+  owner: 'common',
+  required: false,
+  order: -2,
+  level: 'style',
+  options: [],
+}
+
+const NAME_COLUMN: BrandField = {
+  id: '_name',
+  brandId: '',
+  label: '상품명',
+  systemKey: 'name',
+  type: 'text',
+  owner: 'common',
+  required: false,
+  order: -1.8,
+  level: 'style',
+  options: [],
+}
 
 /** 시트 표시 전용. 항목 관리·엑셀 내보내기 대상이 아니다. */
 const OWN_BARCODE_COLUMN: BrandField = {
@@ -80,7 +126,11 @@ function withOwnBarcodeColumn(columns: BrandField[]): BrandField[] {
   ]
 }
 
-/** 구성품이 정확히 1개인 자사 바코드만 품번(스타일)에 붙인다. */
+function withBrandColumn(columns: BrandField[]): BrandField[] {
+  if (columns.some((column) => column.systemKey === 'brand')) return columns
+  return [BRAND_COLUMN, ...columns]
+}
+
 function buildOneToOneBarcodeByStyleId(
   codes: ProductCode[],
 ): Map<string, string> {
@@ -127,28 +177,34 @@ function styleToRow(
   options?: {
     seasonLabel?: string
     ownBarcode?: string
+    brandName?: string
   },
 ): SheetRow {
   const values: Record<string, string> = {}
   for (const column of columns) {
+    if (column.systemKey === 'brand') {
+      values[fieldValueKey(column)] = options?.brandName ?? ''
+      continue
+    }
     if (column.systemKey === 'ownBarcode') {
       values[fieldValueKey(column)] = options?.ownBarcode ?? ''
       continue
     }
     values[fieldValueKey(column)] = getStyleFieldDisplay(style, column, {
-      // 읽기 전용 표라서 코드보다 사람이 읽는 이름을 보여준다.
       seasonCode: options?.seasonLabel,
     })
   }
-  return { id: style.id, styleNo: style.styleNo, values }
+  return { id: `${style.brandId}:${style.id}`, styleNo: style.styleNo, values }
 }
 
 export function DataSheetPage() {
-  const { brand } = useBrand()
+  const { selectedBrands, brandById, selection } = useCompanyBrandScope()
   const navigate = useNavigate()
   const { owner: ownerParam } = useParams()
   const owner = parseOwner(ownerParam)
   const [searchParams, setSearchParams] = useSearchParams()
+  const singleBrand = selection.canEdit ? selectedBrands[0] : undefined
+  const brandIds = selectedBrands.map((item) => item.id)
 
   const search = searchParams.get('q') ?? ''
   const seasonId = searchParams.get('season') ?? 'all'
@@ -177,7 +233,6 @@ export function DataSheetPage() {
               next.set(key, value)
             }
           }
-          // 조건이 바뀌면 1페이지부터 다시 본다.
           if (!('page' in patch)) next.delete('page')
           return next
         },
@@ -187,12 +242,10 @@ export function DataSheetPage() {
     [setSearchParams],
   )
 
-  // 뒤로가기·탭 복원처럼 URL이 바뀐 경우에만 입력 초안을 맞춘다.
   useEffect(() => {
     setSearchDraft((current) => (current === search ? current : search))
   }, [search])
 
-  // 한글 IME 조합 중에는 URL을 갱신하지 않아 조합이 끊기지 않게 한다.
   useEffect(() => {
     if (isSearchComposing || searchDraft === search) return
     const timer = window.setTimeout(() => {
@@ -211,41 +264,78 @@ export function DataSheetPage() {
     [seasonId, statusFilter, search],
   )
 
-  const fieldsQuery = useQuery({
-    queryKey: ['brand-fields', brand.id],
-    queryFn: () => getBrandFields(brand.id),
+  const fieldQueries = useQueries({
+    queries: selectedBrands.map((item) => ({
+      queryKey: ['brand-fields', item.id] as const,
+      queryFn: () => getBrandFields(item.id),
+    })),
   })
-  const seasonsQuery = useQuery({
-    queryKey: ['seasons', brand.id],
-    queryFn: () => getSeasonsByBrand(brand.id),
+  const seasonQueries = useQueries({
+    queries: selectedBrands.map((item) => ({
+      queryKey: ['seasons', item.id] as const,
+      queryFn: () => getSeasonsByBrand(item.id),
+    })),
   })
-  const codesQuery = useQuery({
-    queryKey: ['productCodes', brand.id, 'own'],
-    queryFn: () => getProductCodes(brand.id, 'own'),
+  const codeQueries = useQueries({
+    queries: selectedBrands.map((item) => ({
+      queryKey: ['productCodes', item.id, 'own'] as const,
+      queryFn: () => getProductCodes(item.id, 'own'),
+    })),
   })
   const pageQuery = useQuery({
-    queryKey: ['styles-page', brand.id, filter, page, pageSize],
-    queryFn: () => getStylesPage(brand.id, filter, (page - 1) * pageSize, pageSize),
-    // 페이지를 넘길 때 표가 비면서 깜빡이지 않게 이전 결과를 유지한다.
+    queryKey: companyQueryKey(
+      'styles-page',
+      brandIds,
+      filter,
+      page,
+      pageSize,
+    ),
+    queryFn: () =>
+      getStylesPageForBrands(
+        brandIds,
+        filter,
+        (page - 1) * pageSize,
+        pageSize,
+      ),
+    enabled: brandIds.length > 0,
     placeholderData: keepPreviousData,
   })
 
-  const fields = useMemo(() => fieldsQuery.data ?? [], [fieldsQuery.data])
-  const seasons = useMemo(() => seasonsQuery.data ?? [], [seasonsQuery.data])
+  const fieldsByBrand = useMemo(() => {
+    const map = new Map<string, BrandField[]>()
+    selectedBrands.forEach((item, index) => {
+      map.set(item.id, fieldQueries[index]?.data ?? [])
+    })
+    return map
+  }, [fieldQueries, selectedBrands])
+  const fields = singleBrand ? (fieldsByBrand.get(singleBrand.id) ?? []) : []
+  const seasons = useMemo(
+    () => seasonQueries.flatMap((query) => query.data ?? []),
+    [seasonQueries],
+  )
   const hasSeasons = seasons.length > 0
-
-  const columns = useMemo(
-    () => (owner ? withOwnBarcodeColumn(columnsForSheet(fields, owner)) : []),
-    [fields, owner],
+  const codes = useMemo(
+    () => codeQueries.flatMap((query) => query.data ?? []),
+    [codeQueries],
   )
 
+  const columns = useMemo(() => {
+    if (!owner) return []
+    if (singleBrand) {
+      return withBrandColumn(withOwnBarcodeColumn(columnsForSheet(fields, owner)))
+    }
+    return withBrandColumn(
+      withOwnBarcodeColumn([STYLE_NO_COLUMN, NAME_COLUMN]),
+    )
+  }, [fields, owner, singleBrand])
+
   const seasonById = useMemo(
-    () => new Map(seasons.map((s) => [s.id, s])),
+    () => new Map(seasons.map((season) => [season.id, season])),
     [seasons],
   )
   const ownBarcodeByStyleId = useMemo(
-    () => buildOneToOneBarcodeByStyleId(codesQuery.data ?? []),
-    [codesQuery.data],
+    () => buildOneToOneBarcodeByStyleId(codes),
+    [codes],
   )
 
   const total = pageQuery.data?.total ?? 0
@@ -255,12 +345,25 @@ export function DataSheetPage() {
     () =>
       (pageQuery.data?.rows ?? []).map((style) => {
         const season = seasonById.get(style.seasonId)
-        return styleToRow(style, columns, {
+        const rowFields = singleBrand
+          ? columns
+          : withBrandColumn(
+              withOwnBarcodeColumn([STYLE_NO_COLUMN, NAME_COLUMN]),
+            )
+        return styleToRow(style, rowFields, {
           seasonLabel: season ? formatSeasonLabel(season) : undefined,
           ownBarcode: ownBarcodeByStyleId.get(style.id) ?? '',
+          brandName: brandById.get(style.brandId)?.name,
         })
       }),
-    [pageQuery.data, columns, seasonById, ownBarcodeByStyleId],
+    [
+      brandById,
+      columns,
+      ownBarcodeByStyleId,
+      pageQuery.data,
+      seasonById,
+      singleBrand,
+    ],
   )
 
   useEffect(() => {
@@ -277,15 +380,15 @@ export function DataSheetPage() {
   }, [page, totalPages, setSearchParams])
 
   async function handleExport() {
-    if (!owner) return
+    if (!owner || brandIds.length === 0) return
     try {
       setExporting(true)
       setBanner(null)
-      const styles = await getStylesFiltered(brand.id, filter)
+      const styles = await getStylesFilteredForBrands(brandIds, filter)
       await downloadStylesExport({
-        brandName: brand.name,
+        brandName: singleBrand?.name ?? 'E&J',
         owner,
-        fields,
+        fields: singleBrand ? fields : [...columns],
         styles,
         seasons,
       })
@@ -299,38 +402,46 @@ export function DataSheetPage() {
   }
 
   if (!owner) {
-    return <Navigate to="../data/all" replace />
+    return <Navigate to="/data/all" replace />
   }
 
   const loading =
-    fieldsQuery.isLoading || seasonsQuery.isLoading || pageQuery.isLoading
+    fieldQueries.some((query) => query.isLoading) ||
+    seasonQueries.some((query) => query.isLoading) ||
+    pageQuery.isLoading
   const hasFilter =
     Boolean(filter.search) || Boolean(filter.seasonId) || Boolean(filter.status)
 
   const pageTitle =
     owner === 'all' ? '전체 상품' : `${sheetOwnerLabel(owner)} 시트`
-  const pageDescription =
-    owner === 'all'
-      ? '상품 데이터를 엑셀처럼 한눈에 보는 표입니다. 행을 눌러 한 건씩 고치거나, 내보내기·일괄 업로드로 여러 건을 고칩니다.'
-      : `${sheetOwnerLabel(owner)} 항목만 모아 봅니다. 행을 눌러 한 건씩 고치거나, 내보내기로 받아 엑셀에서 고친 뒤 일괄 업로드로 되돌립니다.`
-
   const querySuffix = searchParams.toString()
   const detailQuery = querySuffix ? `?${querySuffix}` : ''
+  const uploadHref = singleBrand ? dataUploadHref(singleBrand.slug) : '/data/upload'
+  const fieldsHref = singleBrand
+    ? settingsPath('fields', singleBrand.slug)
+    : '/settings/fields'
+  const seasonsHref = singleBrand
+    ? settingsPath('seasons', singleBrand.slug)
+    : '/settings/seasons'
 
   return (
     <div className="-mx-1">
       <PageHeader
         title={pageTitle}
-        description={pageDescription}
+        description={
+          owner === 'all'
+            ? 'E&J 상품 데이터를 한 표에서 봅니다. 행을 눌러 그 행의 브랜드로 고치거나, 일괄 업로드는 브랜드를 하나 고른 뒤 합니다.'
+            : `${sheetOwnerLabel(owner)} 항목만 모아 봅니다. 여러 건은 내보내기 후 일괄 업로드로 되돌립니다.`
+        }
         actions={
           <>
-            <Link to={`/b/${brand.slug}/settings/fields`}>
+            <Link to={fieldsHref}>
               <Button type="button" variant="outline" size="sm">
                 <Settings2 className="size-3.5" />
                 항목 관리
               </Button>
             </Link>
-            <Link to={`/b/${brand.slug}/data/upload`}>
+            <Link to={uploadHref}>
               <Button type="button" variant="outline" size="sm">
                 <Upload className="size-3.5" />
                 일괄 업로드
@@ -358,7 +469,7 @@ export function DataSheetPage() {
           {DATA_OWNERS.map((item) => (
             <Link
               key={item}
-              to={`/b/${brand.slug}/data/${item}?${searchParams.toString()}`}
+              to={`/data/${item}?${searchParams.toString()}`}
               className={cn(
                 'rounded px-2.5 py-1 text-xs tabular-nums transition-colors',
                 item === owner
@@ -372,6 +483,7 @@ export function DataSheetPage() {
         </div>
         <div className="hidden h-4 w-px bg-border sm:block" />
         <div className="flex flex-wrap items-center gap-2">
+          <CompanyBrandFilter className="h-8 bg-background text-sm" />
           <Input
             className="h-8 max-w-[14rem] bg-background text-sm"
             placeholder="품번·상품명 검색"
@@ -386,20 +498,22 @@ export function DataSheetPage() {
           <Select
             className="h-8 bg-background text-sm"
             value={seasonId}
-            onChange={(e) => patchParams({ season: e.target.value })}
+            onChange={(event) => patchParams({ season: event.target.value })}
           >
             <option value="all">전체 출시 기획</option>
-            {seasons.map((s) => (
-              <option key={s.id} value={s.id}>
-                {formatSeasonLabel(s)}
-                {s.status === 'archived' ? ' · 마감' : ''}
+            {seasons.map((season) => (
+              <option key={season.id} value={season.id}>
+                {selectedBrands.length > 1
+                  ? `${brandById.get(season.brandId)?.name ?? ''} · ${formatSeasonLabel(season)}`
+                  : formatSeasonLabel(season)}
+                {season.status === 'archived' ? ' · 마감' : ''}
               </option>
             ))}
           </Select>
           <Select
             className="h-8 bg-background text-sm"
             value={statusFilter}
-            onChange={(e) => patchParams({ status: e.target.value })}
+            onChange={(event) => patchParams({ status: event.target.value })}
           >
             <option value="all">전체 상태</option>
             {(Object.keys(STYLE_STATUS_LABEL) as StyleStatus[]).map((status) => (
@@ -411,7 +525,7 @@ export function DataSheetPage() {
           <Select
             className="h-8 bg-background text-sm"
             value={String(pageSize)}
-            onChange={(e) => patchParams({ size: e.target.value })}
+            onChange={(event) => patchParams({ size: event.target.value })}
           >
             {PAGE_SIZES.map((size) => (
               <option key={size} value={size}>
@@ -428,12 +542,10 @@ export function DataSheetPage() {
       </div>
 
       <p className="mb-3 text-[11px] text-muted-foreground">
-        <b className="font-medium">행을 누르면</b> 한 상품씩 바로 고칠 수
-        있습니다. 여러 건은 <b className="font-medium">내보내기</b>로 받아
-        엑셀에서 편집한 뒤 <b className="font-medium">일괄 업로드</b>에 다시
-        올리세요. 품번이 같은 행만 덮어쓰고, <code>_작업</code> 열에
-        &quot;삭제&quot;라고 적은 행은 지워집니다. 열을 늘리거나 이름을
-        바꾸려면 <b className="font-medium">항목 관리</b>를 쓰세요.
+        <b className="font-medium">행을 누르면</b> 그 상품의 브랜드로 바로
+        고칠 수 있습니다. 여러 건은 <b className="font-medium">내보내기</b>로
+        받아 엑셀에서 편집한 뒤 <b className="font-medium">일괄 업로드</b>에
+        다시 올리세요.
       </p>
 
       {banner ? (
@@ -448,19 +560,15 @@ export function DataSheetPage() {
         <Card>
           <CardContent className="space-y-4 px-6 py-12 text-center">
             <p className="text-sm font-medium">시트에 표시할 상품이 없습니다</p>
-            <p className="mx-auto max-w-md text-sm text-muted-foreground">
-              일괄 업로드로 엑셀 파일을 올려 상품을 채우세요. 시즌 값이 없는
-              상품은 &quot;기획 미지정&quot;에 담깁니다.
-            </p>
             <div className="flex flex-wrap items-center justify-center gap-2">
-              <Link to={`/b/${brand.slug}/data/upload`}>
+              <Link to={uploadHref}>
                 <Button type="button" size="sm">
                   <Upload className="size-3.5" />
                   일괄 업로드
                 </Button>
               </Link>
               {!hasSeasons ? (
-                <Link to={`/b/${brand.slug}/settings/seasons`}>
+                <Link to={seasonsHref}>
                   <Button type="button" size="sm" variant="outline">
                     출시 기획 만들기
                   </Button>
@@ -473,12 +581,15 @@ export function DataSheetPage() {
         <SheetTable
           columns={columns}
           rows={rows}
-          showOwnerGroups={owner === 'all'}
-          onRowOpen={(row) =>
+          showOwnerGroups={Boolean(singleBrand) && owner === 'all'}
+          onRowOpen={(row) => {
+            const [rowBrandId] = row.id.split(':')
+            const rowBrand = rowBrandId ? brandById.get(rowBrandId) : undefined
+            if (!rowBrand) return
             navigate(
-              `/b/${brand.slug}/data/${owner}/${encodeURIComponent(row.styleNo)}${detailQuery}`,
+              `${dataSheetDetailPath(owner, rowBrand.slug, row.styleNo)}${detailQuery}`,
             )
-          }
+          }}
         />
       )}
 
@@ -511,4 +622,8 @@ export function DataSheetPage() {
       <Outlet />
     </div>
   )
+}
+
+export function CompanyDataSheetPage() {
+  return <DataSheetPage />
 }

@@ -6,8 +6,15 @@ import type {
   ProductDraftInput,
 } from '@/lib/types'
 import { emptyDraftInput } from '@/lib/drafts/empty-draft'
+import { normalizeDraftBrandId, parseDraftNo } from '@/lib/drafts/company-draft'
+import {
+  isSamplePassed,
+  legacyWorkOrderFields,
+  normalizeSampleWorkOrders,
+  sanitizeSampleWorkOrders,
+} from '@/lib/drafts/sample-work-order'
 import { getSupabase } from '@/lib/supabase/client'
-import { errorMessage } from '@/lib/supabase/map-error'
+import { errorMessage, isMissingColumn } from '@/lib/supabase/map-error'
 
 export {
   MAX_DRAFT_COLORS,
@@ -17,11 +24,15 @@ export {
 } from '@/lib/drafts/empty-draft'
 
 const DRAFT_COLUMNS =
-  'id, brand_id, season_id, draft_no, status, owner, name_ko, name_en, image_url, sample_done, order_done, photo_sample_done, held, hold_reason, held_at, target_cost, cost_currency, cost_confirmed, retail_price, discount_price, origin_country, register_type, open_type, open_type_detail, release_issue, specs, has_options, note, promoted_style_id, created_at, updated_at'
+  'id, company_id, brand_id, season_id, draft_no, status, owner, name_ko, name_en, image_url, sample_work_order_url, sample_work_order_name, sample_work_orders, sample_done, order_done, order_in_progress, photo_sample_done, held, hold_reason, held_at, target_cost, cost_currency, cost_confirmed, retail_price, discount_price, origin_country, register_type, open_type, open_type_detail, release_issue, specs, has_options, note, promoted_style_id, created_at, updated_at'
+
+const DRAFT_COLUMNS_LEGACY =
+  'id, company_id, brand_id, season_id, draft_no, status, owner, name_ko, name_en, image_url, sample_work_order_url, sample_work_order_name, sample_done, order_done, order_in_progress, photo_sample_done, held, hold_reason, held_at, target_cost, cost_currency, cost_confirmed, retail_price, discount_price, origin_country, register_type, open_type, open_type_detail, release_issue, specs, has_options, note, promoted_style_id, created_at, updated_at'
 
 type DraftRow = {
   id: string
-  brand_id: string
+  company_id: string
+  brand_id: string | null
   season_id: string | null
   draft_no: string
   status: ProductDraft['status']
@@ -29,8 +40,12 @@ type DraftRow = {
   name_ko: string
   name_en: string
   image_url: string | null
+  sample_work_order_url: string | null
+  sample_work_order_name: string | null
+  sample_work_orders: unknown
   sample_done: boolean
   order_done: boolean
+  order_in_progress: boolean
   photo_sample_done: boolean
   held: boolean
   hold_reason: string
@@ -58,6 +73,7 @@ type ColorRow = {
   draft_id: string
   name: string
   order_qty: number | null
+  sample_in_progress: boolean
   sort_order: number
 }
 
@@ -82,15 +98,14 @@ export class ProductDraftStoreError extends Error {
   }
 }
 
-function parseDraftNo(value: string) {
-  const match = /^PL-(\d+)$/.exec(value.trim().toUpperCase())
-  return match ? Number(match[1]) : 0
-}
-
 function sanitize(input: ProductDraftInput): ProductDraftInput {
   const held = Boolean(input.held)
+  const brandId = normalizeDraftBrandId(input.brandId)
+  const sampleWorkOrders = sanitizeSampleWorkOrders(input.sampleWorkOrders)
   return {
     ...input,
+    brandId,
+    seasonId: brandId ? input.seasonId : null,
     owner: input.owner.trim(),
     nameKo: input.nameKo.trim(),
     nameEn: input.nameEn.trim(),
@@ -101,12 +116,25 @@ function sanitize(input: ProductDraftInput): ProductDraftInput {
     releaseIssue: input.releaseIssue.trim(),
     note: input.note.trim(),
     holdReason: held ? input.holdReason.trim() : '',
+    sampleWorkOrders,
+    ...legacyWorkOrderFields(sampleWorkOrders),
+    sampleDone: isSamplePassed(sampleWorkOrders),
+    orderDone: Boolean(input.orderDone),
+    orderInProgress: Boolean(input.orderInProgress),
     colors: input.colors
       .filter((color) => color.name.trim() || color.orderQty != null)
-      .map((color) => ({ ...color, name: color.name.trim() })),
+      .map((color) => ({
+        ...color,
+        name: color.name.trim(),
+        sampleInProgress: Boolean(color.sampleInProgress),
+      })),
     options: input.options
       .filter((row) => row.styleId || row.name.trim() || row.price != null)
-      .map((row) => ({ ...row, name: row.name.trim() })),
+      .map((row) => ({
+        ...row,
+        styleId: brandId ? row.styleId : '',
+        name: row.name.trim(),
+      })),
   }
 }
 
@@ -122,8 +150,12 @@ function buildPayload(input: ProductDraftInput) {
     nameKo: input.nameKo,
     nameEn: input.nameEn,
     imageUrl: input.imageUrl ?? '',
+    sampleWorkOrderUrl: input.sampleWorkOrderUrl ?? '',
+    sampleWorkOrderName: input.sampleWorkOrderName,
+    sampleWorkOrders: input.sampleWorkOrders,
     sampleDone: input.sampleDone,
     orderDone: input.orderDone,
+    orderInProgress: input.orderInProgress,
     photoSampleDone: input.photoSampleDone,
     held: input.held,
     holdReason: input.holdReason,
@@ -162,8 +194,14 @@ function assemble(
   colors: DraftColorRow[],
   options: DraftOptionRow[],
 ): ProductDraft {
+  const sampleWorkOrders = normalizeSampleWorkOrders(
+    row.sample_work_orders,
+    row.sample_work_order_url,
+    row.sample_work_order_name ?? '',
+  )
   return {
     id: row.id,
+    companyId: row.company_id,
     brandId: row.brand_id,
     draftNo: row.draft_no,
     seasonId: row.season_id,
@@ -172,9 +210,12 @@ function assemble(
     nameKo: row.name_ko,
     nameEn: row.name_en,
     imageUrl: row.image_url,
+    sampleWorkOrders,
+    ...legacyWorkOrderFields(sampleWorkOrders),
     colors,
     sampleDone: row.sample_done,
     orderDone: row.order_done,
+    orderInProgress: Boolean(row.order_in_progress),
     photoSampleDone: row.photo_sample_done,
     held: row.held,
     holdReason: row.hold_reason,
@@ -212,7 +253,7 @@ async function loadChildren(draftIds: string[]) {
     await Promise.all([
       supabase
         .from('draft_colors')
-        .select('id, draft_id, name, order_qty, sort_order')
+        .select('id, draft_id, name, order_qty, sample_in_progress, sort_order')
         .in('draft_id', draftIds)
         .order('sort_order', { ascending: true }),
       supabase
@@ -242,6 +283,7 @@ async function loadChildren(draftIds: string[]) {
       id: row.id,
       name: row.name,
       orderQty: row.order_qty,
+      sampleInProgress: Boolean(row.sample_in_progress),
     })
     colorsByDraft.set(row.draft_id, list)
   }
@@ -262,7 +304,8 @@ async function loadChildren(draftIds: string[]) {
 }
 
 async function saveViaRpc(
-  brandId: string,
+  companyId: string,
+  brandId: string | null,
   id: string | null,
   input: ProductDraftInput,
 ): Promise<string> {
@@ -273,8 +316,15 @@ async function saveViaRpc(
       'invalid',
     )
   }
+  if (clean.status === 'confirmed' && !clean.brandId) {
+    throw new ProductDraftStoreError(
+      '출시 확정 전에 브랜드를 지정하세요.',
+      'invalid',
+    )
+  }
 
   const { data, error } = await getSupabase().rpc('save_product_draft', {
+    p_company_id: companyId,
     p_brand_id: brandId,
     p_id: id,
     p_payload: buildPayload(clean),
@@ -282,6 +332,7 @@ async function saveViaRpc(
       id: color.id,
       name: color.name,
       orderQty: toJsonValue(color.orderQty),
+      sampleInProgress: Boolean(color.sampleInProgress),
     })),
     p_options: clean.options.map((option) => ({
       id: option.id,
@@ -301,22 +352,50 @@ async function saveViaRpc(
   return data as string
 }
 
-export async function listProductDrafts(
-  brandId: string,
-): Promise<ProductDraft[]> {
-  const { data, error } = await getSupabase()
-    .from('product_drafts')
-    .select(DRAFT_COLUMNS)
-    .eq('brand_id', brandId)
-
-  if (error) {
+async function selectDraftRows(
+  apply: (
+    query: ReturnType<ReturnType<typeof getSupabase>['from']>,
+    columns: string,
+  ) => PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }>,
+) {
+  const supabase = getSupabase()
+  const first = await apply(supabase.from('product_drafts'), DRAFT_COLUMNS)
+  if (!first.error) return (first.data as DraftRow[] | DraftRow | null) ?? null
+  if (!isMissingColumn(first.error)) {
     throw new ProductDraftStoreError(
-      errorMessage(error, '기획안을 불러오지 못했습니다.'),
+      errorMessage(first.error, '기획안을 불러오지 못했습니다.'),
       'invalid',
     )
   }
+  const fallback = await apply(supabase.from('product_drafts'), DRAFT_COLUMNS_LEGACY)
+  if (fallback.error) {
+    throw new ProductDraftStoreError(
+      errorMessage(fallback.error, '기획안을 불러오지 못했습니다.'),
+      'invalid',
+    )
+  }
+  return (fallback.data as DraftRow[] | DraftRow | null) ?? null
+}
 
-  const rows = (data as DraftRow[]) ?? []
+export async function listProductDraftsByCompany(
+  companyId: string,
+): Promise<ProductDraft[]> {
+  const data = await selectDraftRows((query, columns) =>
+    query.select(columns).eq('company_id', companyId),
+  )
+  return assembleRows((Array.isArray(data) ? data : data ? [data] : []) as DraftRow[])
+}
+
+export async function listProductDrafts(
+  brandId: string,
+): Promise<ProductDraft[]> {
+  const data = await selectDraftRows((query, columns) =>
+    query.select(columns).eq('brand_id', brandId),
+  )
+  return assembleRows((Array.isArray(data) ? data : data ? [data] : []) as DraftRow[])
+}
+
+async function assembleRows(rows: DraftRow[]) {
   const { colorsByDraft, optionsByDraft } = await loadChildren(
     rows.map((row) => row.id),
   )
@@ -335,19 +414,10 @@ export async function listProductDrafts(
 export async function getProductDraftById(
   id: string,
 ): Promise<ProductDraft | undefined> {
-  const { data, error } = await getSupabase()
-    .from('product_drafts')
-    .select(DRAFT_COLUMNS)
-    .eq('id', id)
-    .maybeSingle()
-
-  if (error) {
-    throw new ProductDraftStoreError(
-      errorMessage(error, '기획안을 불러오지 못했습니다.'),
-      'invalid',
-    )
-  }
-  if (!data) return undefined
+  const data = await selectDraftRows((query, columns) =>
+    query.select(columns).eq('id', id).maybeSingle(),
+  )
+  if (!data || Array.isArray(data)) return undefined
 
   const row = data as DraftRow
   const { colorsByDraft, optionsByDraft } = await loadChildren([row.id])
@@ -359,10 +429,10 @@ export async function getProductDraftById(
 }
 
 export async function createProductDraft(
-  brandId: string,
+  companyId: string,
   input: ProductDraftInput,
 ): Promise<ProductDraft> {
-  const id = await saveViaRpc(brandId, null, input)
+  const id = await saveViaRpc(companyId, normalizeDraftBrandId(input.brandId), null, input)
   const created = await getProductDraftById(id)
   if (!created) {
     throw new ProductDraftStoreError('기획안을 저장하지 못했습니다.', 'invalid')
@@ -378,7 +448,12 @@ export async function updateProductDraft(
   if (!existing) {
     throw new ProductDraftStoreError('기획안을 찾을 수 없습니다.', 'not_found')
   }
-  await saveViaRpc(existing.brandId, id, input)
+  await saveViaRpc(
+    existing.companyId,
+    normalizeDraftBrandId(input.brandId),
+    id,
+    input,
+  )
   const updated = await getProductDraftById(id)
   if (!updated) {
     throw new ProductDraftStoreError('기획안을 저장하지 못했습니다.', 'invalid')

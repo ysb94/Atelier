@@ -1,4 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useOptionalBrand } from '@/components/layout/brand-context'
+import {
+  assertKeyAllowedForBrand,
+  brandFileCapability,
+} from '@/lib/design/file-manager-brand'
 import {
   DEFAULT_BROWSE_TYPES, GLOBAL_SEARCH_KEY, GRID_BATCH_SIZE, GRID_SORT_KEY,
   GRID_VIEW_KEY, PREVIEW_MAX_WIDTH, PREVIEW_MIN_WIDTH, PREVIEW_WIDTH_KEY,
@@ -28,6 +33,8 @@ const readNumber = (key: string, fallback: number) => {
 }
 
 export function useDesignFileManager() {
+  const brandSlug = useOptionalBrand()?.brandSlug ?? ''
+  const fileCapability = brandFileCapability(brandSlug)
   const [browseTypes, setBrowseTypes] = useState<string[]>(DEFAULT_BROWSE_TYPES)
   const [activeBrowseType, setActiveBrowseType] = useState<string | null>(null)
   const [activeFolder, setActiveFolder] = useState<string | null>(null)
@@ -89,18 +96,20 @@ export function useDesignFileManager() {
     const load = async () => {
       setSidebarStatus({ message: '서버 파일 목록을 불러오는 중...', kind: 'loading' })
       try {
-        const items = !force ? getCachedServerList(type) ?? await fetchServerFiles(type) : await fetchServerFiles(type)
+        const items = !force
+          ? getCachedServerList(type) ?? await fetchServerFiles(type, brandSlug)
+          : await fetchServerFiles(type, brandSlug)
         const groups = groupItemsByFolder(items, type)
         setCurrentGroups(groups); clearSelection()
         const count = groups.reduce((sum, group) => sum + group.items.length, 0)
-        setSidebarStatus({ message: groups.length ? `${count}개 파일 · ${groups.filter((g) => g.folder !== ROOT_FOLDER).length}개 폴더` : `masmarulez/${type}에 파일이 없습니다.`, kind: 'info' })
+        setSidebarStatus({ message: groups.length ? `${count}개 파일 · ${groups.filter((g) => g.folder !== ROOT_FOLDER).length}개 폴더` : `${type}에 파일이 없습니다.`, kind: 'info' })
       } catch (error) {
         const message = error instanceof Error ? error.message : ''
         setSidebarStatus({ message: message === 'LIST_API_NOT_READY' ? '목록 API가 아직 준비되지 않았습니다. Worker에 GET /list?type=... 를 추가해주세요.' : '목록을 불러오지 못했습니다. 네트워크 또는 CORS를 확인해주세요.', kind: 'error' })
       }
     }
     return busyCountRef.current > 0 ? load() : withBusy('서버 파일 목록을 불러오는 중...', load)
-  }, [activeBrowseType, clearSelection, withBusy])
+  }, [activeBrowseType, brandSlug, clearSelection, withBusy])
   const selectBrowseType = useCallback((type: string | null) => {
     setActiveBrowseType(type); setActiveFolder(null); setGridVisibleLimit(GRID_BATCH_SIZE); clearSelection()
     if (!type) { setCurrentGroups([]); setSidebarStatus({ message: '타입을 선택하세요.', kind: 'info' }) }
@@ -115,7 +124,7 @@ export function useDesignFileManager() {
     if (!globalSearchEnabled || !searchQuery.trim()) { setGlobalSearchMatches([]); return }
     const request = ++searchRequest.current; setGlobalSearching(true)
     void Promise.all(browseTypes.map(async (type) => {
-      try { return { type, items: getCachedServerList(type) ?? await fetchServerFiles(type) } } catch { return { type, items: [] as ServerFileItem[] } }
+      try { return { type, items: getCachedServerList(type) ?? await fetchServerFiles(type, brandSlug) } } catch { return { type, items: [] as ServerFileItem[] } }
     })).then((lists) => {
       if (request !== searchRequest.current) return
       const matches = lists.flatMap(({ type, items }) =>
@@ -131,7 +140,7 @@ export function useDesignFileManager() {
       )
       setGlobalSearchMatches(sortGlobalSearchMatches(matches, gridSortMode))
     }).finally(() => { if (request === searchRequest.current) setGlobalSearching(false) })
-  }, [browseTypes, globalSearchEnabled, gridSortMode, searchQuery])
+  }, [brandSlug, browseTypes, globalSearchEnabled, gridSortMode, searchQuery])
   const selectEntry = useCallback((key: string, entry: SelectionEntry, modifiers: { toggle?: boolean; append?: boolean } = {}) => {
     setSelectedItems((old) => {
       const next = modifiers.append || modifiers.toggle ? new Map(old) : new Map<string, SelectionEntry>()
@@ -159,13 +168,17 @@ export function useDesignFileManager() {
     else setSelectedPreview(null)
   }, [])
   const enqueueFiles = useCallback(async (files: FileList | File[], targetPath = currentUploadPath) => {
+    if (!fileCapability.canOperate) {
+      await uiAlert(fileCapability.reason ?? '이 브랜드 파일은 업로드할 수 없습니다.')
+      return
+    }
     if (!targetPath) { await uiAlert('업로드할 폴더를 먼저 선택하세요. (왼쪽 사이드바에서 폴더를 열어주세요)'); return }
     setUploadQueue((queue) => [...queue, ...Array.from(files).map((file) => ({ id: crypto.randomUUID(), file, targetPath, status: 'pending' as const }))])
-  }, [currentUploadPath, uiAlert])
+  }, [currentUploadPath, fileCapability.canOperate, fileCapability.reason, uiAlert])
   const uploadSingle = useCallback(async (job: UploadQueueItem, forceOverwrite = false, suppressConfirm = false): Promise<'success' | 'failed' | 'skipped'> => {
     setUploadQueue((queue) => queue.map((x) => x.id === job.id ? { ...x, status: 'uploading' } : x))
     try {
-      const response = await uploadFilePut(job.file, job.targetPath, forceOverwrite)
+      const response = await uploadFilePut(job.file, job.targetPath, forceOverwrite, brandSlug)
       if (response.status === 409 && !forceOverwrite && !suppressConfirm) {
         const body = await response.text(); const embed = body.includes('Embed')
         const overwrite = await uiConfirm(embed
@@ -183,7 +196,7 @@ export function useDesignFileManager() {
       if (!suppressConfirm) await uiAlert(`업로드 중 오류 발생: ${job.file.name}`)
       return 'failed'
     }
-  }, [currentUploadPath, refreshServerFiles, uiAlert, uiConfirm])
+  }, [brandSlug, currentUploadPath, refreshServerFiles, uiAlert, uiConfirm])
   const uploadAllPending = useCallback(async () => {
     const jobs = uploadQueue.filter((x) => x.status !== 'completed')
     if (!jobs.length) { await uiAlert('업로드할 파일이 없습니다.'); return }
@@ -207,38 +220,38 @@ export function useDesignFileManager() {
     setUploadQueue((queue) => queue.filter((x) => x.status !== 'completed')); await uiAlert(`일괄 업로드 완료\n성공: ${success}개\n실패: ${failed}개`)
   }, [uiAlert, uiConfirm, uploadQueue, uploadSingle, withBusy])
   const refreshAfterCrud = useCallback(async (reload = false) => { invalidateServerListCache(activeBrowseType ?? undefined); clearSelection(); if (reload) await loadBrowseTypes(); if (activeBrowseType) await refreshServerFiles(true) }, [activeBrowseType, clearSelection, loadBrowseTypes, refreshServerFiles])
-  const createFolder = useCallback(async () => { const name = sanitizeNameInput(await uiPrompt('새 폴더 이름을 입력하세요.')); if (!name) return; const path = currentUploadPath ? `${currentUploadPath}/${name}/` : `${name}/`; await withBusy('폴더 생성 중...', async () => { await apiMkdir(path); await refreshAfterCrud(!activeBrowseType) }) }, [activeBrowseType, currentUploadPath, refreshAfterCrud, uiPrompt, withBusy])
-  const renameFile = useCallback(async (item: ServerFileItem, type: string) => { const old = getItemStorageKey(item, type, activeFolder, activeBrowseType); const name = sanitizeNameInput(await uiPrompt('새 파일 이름을 입력하세요.', item.displayName || item.name || '')); if (!name) return; await withBusy('파일 이름 변경 중...', async () => { await apiMove(old, `${old.slice(0, old.lastIndexOf('/') + 1)}${name}`); await refreshAfterCrud() }) }, [activeBrowseType, activeFolder, refreshAfterCrud, uiPrompt, withBusy])
+  const createFolder = useCallback(async () => { const name = sanitizeNameInput(await uiPrompt('새 폴더 이름을 입력하세요.')); if (!name) return;     const path = currentUploadPath ? `${currentUploadPath}/${name}/` : `${name}/`; if (brandSlug) assertKeyAllowedForBrand(path, brandSlug); await withBusy('폴더 생성 중...', async () => { await apiMkdir(path, brandSlug); await refreshAfterCrud(!activeBrowseType) }) }, [activeBrowseType, brandSlug, currentUploadPath, refreshAfterCrud, uiPrompt, withBusy])
+  const renameFile = useCallback(async (item: ServerFileItem, type: string) => { const old = getItemStorageKey(item, type, activeFolder, activeBrowseType); const name = sanitizeNameInput(await uiPrompt('새 파일 이름을 입력하세요.', item.displayName || item.name || '')); if (!name) return; const next = `${old.slice(0, old.lastIndexOf('/') + 1)}${name}`; await withBusy('파일 이름 변경 중...', async () => { await apiMove(old, next, brandSlug); await refreshAfterCrud() }) }, [activeBrowseType, activeFolder, brandSlug, refreshAfterCrud, uiPrompt, withBusy])
   const deleteFile = useCallback(async (item: ServerFileItem, type: string, options: { skipConfirm?: boolean } = {}) => {
     const name = item.displayName || item.name || '파일'
     if (!options.skipConfirm && !(await uiConfirm(`"${name}" 파일을 삭제할까요?`, { title: '파일 삭제', danger: true }))) return
     await withBusy('파일 삭제 중...', async () => {
-      await apiDelete(getItemStorageKey(item, type, activeFolder, activeBrowseType))
+      await apiDelete(getItemStorageKey(item, type, activeFolder, activeBrowseType), brandSlug)
       await refreshAfterCrud()
     })
-  }, [activeBrowseType, activeFolder, refreshAfterCrud, uiConfirm, withBusy])
-  const renameFolder = useCallback(async (type: string, folder: string) => { if (folder === ROOT_FOLDER) return void await uiAlert('루트 폴더 이름은 변경할 수 없습니다.'); const name = sanitizeNameInput(await uiPrompt('새 폴더 이름을 입력하세요.', getFolderDisplayName(folder))); if (!name) return; const parent = folder.includes('/') ? `${folder.slice(0, folder.lastIndexOf('/') + 1)}` : ''; await withBusy('폴더 이름 변경 중...', async () => { await apiMvdir(buildFolderPrefix(type, folder), buildFolderPrefix(type, `${parent}${name}`)); await refreshAfterCrud() }) }, [refreshAfterCrud, uiAlert, uiPrompt, withBusy])
+  }, [activeBrowseType, activeFolder, brandSlug, refreshAfterCrud, uiConfirm, withBusy])
+  const renameFolder = useCallback(async (type: string, folder: string) => { if (folder === ROOT_FOLDER) return void await uiAlert('루트 폴더 이름은 변경할 수 없습니다.'); const name = sanitizeNameInput(await uiPrompt('새 폴더 이름을 입력하세요.', getFolderDisplayName(folder))); if (!name) return; const parent = folder.includes('/') ? `${folder.slice(0, folder.lastIndexOf('/') + 1)}` : ''; await withBusy('폴더 이름 변경 중...', async () => { await apiMvdir(buildFolderPrefix(type, folder), buildFolderPrefix(type, `${parent}${name}`), brandSlug); await refreshAfterCrud() }) }, [brandSlug, refreshAfterCrud, uiAlert, uiPrompt, withBusy])
   const deleteFolder = useCallback(async (type: string, folder: string, options: { skipConfirm?: boolean } = {}) => {
     if (folder === ROOT_FOLDER) return void await uiAlert('루트 폴더는 삭제할 수 없습니다.')
     const name = getFolderDisplayName(folder)
     if (!options.skipConfirm && !(await uiConfirm(`"${name}" 폴더와 안의 모든 파일을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`, { title: '폴더 삭제', danger: true }))) return
     await withBusy('폴더 삭제 중...', async () => {
-      await apiRmdir(buildFolderPrefix(type, folder))
+      await apiRmdir(buildFolderPrefix(type, folder), brandSlug)
       if (activeFolder === folder) setActiveFolder(null)
       await refreshAfterCrud()
     })
-  }, [activeFolder, refreshAfterCrud, uiAlert, uiConfirm, withBusy])
+  }, [activeFolder, brandSlug, refreshAfterCrud, uiAlert, uiConfirm, withBusy])
   const deleteBrowseType = useCallback(async (browseType: string, options: { skipConfirm?: boolean } = {}) => {
     if (!options.skipConfirm && !(await uiConfirm(`"${browseType}" 폴더와 안의 모든 파일을 삭제할까요?\n이 작업은 되돌릴 수 없습니다.`, { title: '폴더 삭제', danger: true }))) return
     await withBusy('폴더 삭제 중...', async () => {
-      await apiRmdir(`${browseType}/`)
+      await apiRmdir(`${browseType}/`, brandSlug)
       if (activeBrowseType === browseType) {
         setActiveBrowseType(null)
         setActiveFolder(null)
       }
       await refreshAfterCrud(true)
     })
-  }, [activeBrowseType, refreshAfterCrud, uiConfirm, withBusy])
+  }, [activeBrowseType, brandSlug, refreshAfterCrud, uiConfirm, withBusy])
   const addSelectedToTags = useCallback(() => setAccumulatedTags((tags) => [...tags, ...[...selectedItems.values()].flatMap((entry) => entry.kind === 'file' ? [{ uid: ++tagUid.current, item: entry.item, type: entry.type, url: getItemPublicUrl(entry.item, entry.type, activeFolder, activeBrowseType), tag: ensureTagBreak(buildMediaTag(entry.type, getItemPublicUrl(entry.item, entry.type, activeFolder, activeBrowseType), entry.item)) }] : [])]), [activeBrowseType, activeFolder, selectedItems])
   const copySelectedUrl = useCallback(async () => { if (!selectedPreview) return; await uiAlert(await copyText(getItemPublicUrl(selectedPreview.item, selectedPreview.type, activeFolder, activeBrowseType)) ? 'URL이 복사되었습니다.' : '복사에 실패했습니다. 브라우저 권한을 확인해주세요.') }, [activeBrowseType, activeFolder, selectedPreview, uiAlert])
   const copySelectedTag = useCallback(async () => { if (!selectedPreview) return; const url = getItemPublicUrl(selectedPreview.item, selectedPreview.type, activeFolder, activeBrowseType); await uiAlert(await copyText(ensureTagBreak(buildMediaTag(selectedPreview.type, url, selectedPreview.item))) ? '태그가 복사되었습니다.' : '복사에 실패했습니다. 브라우저 권한을 확인해주세요.') }, [activeBrowseType, activeFolder, selectedPreview, uiAlert])

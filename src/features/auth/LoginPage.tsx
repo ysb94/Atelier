@@ -24,8 +24,8 @@ export function LoginPage() {
           </p>
           <h1 className="text-2xl font-semibold tracking-tight">로그인</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            사내 상품 운영 시스템입니다. Google 계정으로 로그인한 뒤 팀과
-            담당 브랜드를 신청하세요.
+            사내 상품 운영 시스템입니다. Google 계정으로 로그인한 뒤 E&J
+            팀·직책·업무 역량을 신청하세요.
           </p>
         </div>
 
@@ -94,8 +94,8 @@ export function LoginPage() {
             ) : null}
 
             <p className="text-xs text-muted-foreground">
-              처음 로그인하면 팀·직책·담당 브랜드를 신청합니다. 해당 브랜드
-              팀장이나 운영진이 승인해야 작업장에 들어갈 수 있습니다.
+              처음 로그인하면 팀·직책·업무 역량을 신청합니다. 관리자 또는
+              팀장·이사가 승인하면 E&J 홈에 들어갑니다.
             </p>
           </div>
         )}

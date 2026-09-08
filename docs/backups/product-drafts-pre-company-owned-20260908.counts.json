@@ -1,0 +1,42 @@
+{
+  "createdAt": "2026-09-08T03:40:00.000Z",
+  "note": "기획안을 회사 소유·brand_id nullable·회사 공통 PL번호로 바꾸기 직전 스냅샷. 기존 행 1건(PL-0002, ATELIER)과 brand sequence last_value=2를 보존한다.",
+  "tables": {
+    "product_drafts": {
+      "fetched": 1,
+      "count": 1,
+      "rows": [
+        {
+          "id": "1442572c-b8b2-4d57-9807-09ba9a96accb",
+          "brand_id": "b0000000-0000-4000-8000-000000000001",
+          "season_id": null,
+          "draft_no": "PL-0002",
+          "status": "open",
+          "owner": "김기획",
+          "name_ko": "준영 레더 가방",
+          "name_en": "Joon's Leather",
+          "has_image": true,
+          "sample_done": true,
+          "order_done": false,
+          "photo_sample_done": false,
+          "held": false,
+          "promoted_style_id": null,
+          "created_at": "2026-09-07 07:13:12.447501+00"
+        }
+      ]
+    },
+    "draft_colors": { "fetched": 0, "count": 0 },
+    "draft_options": { "fetched": 0, "count": 0 },
+    "draft_sequences": {
+      "fetched": 1,
+      "count": 1,
+      "rows": [
+        {
+          "brand_id": "b0000000-0000-4000-8000-000000000001",
+          "last_value": 2,
+          "updated_at": "2026-09-07 07:13:12.447501+00"
+        }
+      ]
+    }
+  }
+}

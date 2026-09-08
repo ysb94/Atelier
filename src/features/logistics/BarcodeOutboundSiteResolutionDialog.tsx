@@ -195,7 +195,7 @@ export function BarcodeOutboundSiteResolutionDialog({
                       <p className="text-xs text-danger">
                         활성 지점이 없습니다.{' '}
                         <Link
-                          to={`/b/${brandSlug}/settings/usage-targets`}
+                          to={`/settings/usage-targets?brand=${encodeURIComponent(brandSlug)}`}
                           className="underline underline-offset-2"
                         >
                           출고업체 설정
@@ -281,7 +281,7 @@ export function BarcodeOutboundSiteResolutionDialog({
                       <span className="font-medium">{site.officialName}</span>
                       과 같습니다.{' '}
                       <Link
-                        to={`/b/${brandSlug}/settings/usage-targets`}
+                        to={`/settings/usage-targets?brand=${encodeURIComponent(brandSlug)}`}
                         className="underline underline-offset-2"
                       >
                         출고업체 설정

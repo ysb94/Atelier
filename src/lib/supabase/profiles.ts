@@ -1,3 +1,8 @@
+import { DEFAULT_COMPANY_ID } from '@/lib/supabase/brands'
+import {
+  uniqueCapabilities,
+  type WorkCapability,
+} from '@/lib/company/capabilities'
 import { getSupabase } from '@/lib/supabase/client'
 
 export type ProfileStatus = 'pending' | 'active' | 'rejected' | 'disabled'
@@ -29,6 +34,7 @@ export type Profile = {
   email: string
   displayName: string | null
   avatarUrl: string | null
+  companyId: string | null
   departmentId: string | null
   position: string | null
   isAdmin: boolean
@@ -40,6 +46,7 @@ export type Profile = {
   createdAt: string
   updatedAt: string
   departmentName?: string | null
+  capabilities: WorkCapability[]
   memberships: BrandMembership[]
 }
 
@@ -47,7 +54,7 @@ export type AccessRequestInput = {
   displayName: string
   departmentId: string
   position: string
-  brandIds: string[]
+  capabilities: WorkCapability[]
   requestNote?: string
 }
 
@@ -61,8 +68,8 @@ export type ApproveMemberInput = {
   profileId: string
   departmentId: string
   position: string
-  brandIds: string[]
-  leadBrandIds: string[]
+  capabilities: WorkCapability[]
+  leadBrandIds?: string[]
   isAdmin: boolean
   displayName?: string
 }
@@ -80,6 +87,7 @@ type ProfileRow = {
   email: string
   display_name: string | null
   avatar_url: string | null
+  company_id: string | null
   department_id: string | null
   position: string | null
   is_admin: boolean
@@ -111,7 +119,7 @@ type BrandDirectoryRow = {
 }
 
 const PROFILE_COLUMNS =
-  'id, email, display_name, avatar_url, department_id, position, is_admin, status, requested_at, approved_by, approved_at, request_note, created_at, updated_at, departments(name)'
+  'id, email, display_name, avatar_url, company_id, department_id, position, is_admin, status, requested_at, approved_by, approved_at, request_note, created_at, updated_at, departments(name)'
 
 function departmentNameFrom(
   value: ProfileRow['departments'],
@@ -124,12 +132,14 @@ function departmentNameFrom(
 function toProfile(
   row: ProfileRow,
   memberships: BrandMembership[] = [],
+  capabilities: WorkCapability[] = [],
 ): Profile {
   return {
     id: row.id,
     email: row.email,
     displayName: row.display_name,
     avatarUrl: row.avatar_url,
+    companyId: row.company_id,
     departmentId: row.department_id,
     position: row.position,
     isAdmin: row.is_admin,
@@ -141,12 +151,33 @@ function toProfile(
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     departmentName: departmentNameFrom(row.departments),
+    capabilities,
     memberships,
   }
 }
 
 function toStoreError(error: { message: string }) {
   return new Error(error.message)
+}
+
+async function hydrateProfiles(rows: ProfileRow[]): Promise<Profile[]> {
+  const ids = rows.map((row) => row.id)
+  const [memberships, capabilities] = await Promise.all([
+    membershipsFor(ids),
+    capabilitiesFor(ids),
+  ])
+  return rows.map((row) =>
+    toProfile(
+      row,
+      memberships.get(row.id) ?? [],
+      capabilities.get(row.id) ?? [],
+    ),
+  )
+}
+
+async function hydrateProfile(row: ProfileRow): Promise<Profile> {
+  const [profile] = await hydrateProfiles([row])
+  return profile
 }
 
 async function membershipsFor(
@@ -168,6 +199,71 @@ async function membershipsFor(
     map.set(row.profile_id, list)
   }
   return map
+}
+
+async function capabilitiesFor(
+  profileIds: string[],
+): Promise<Map<string, WorkCapability[]>> {
+  const map = new Map<string, WorkCapability[]>()
+  if (profileIds.length === 0) return map
+
+  const { data, error } = await getSupabase()
+    .from('profile_capabilities')
+    .select('profile_id, capability')
+    .in('profile_id', profileIds)
+
+  if (error) throw toStoreError(error)
+
+  for (const row of data ?? []) {
+    const list = map.get(row.profile_id) ?? []
+    list.push(row.capability)
+    map.set(row.profile_id, uniqueCapabilities(list))
+  }
+  return map
+}
+
+async function replaceCapabilities(
+  profileId: string,
+  capabilities: WorkCapability[],
+) {
+  const next = uniqueCapabilities(capabilities)
+  const { error: deleteError } = await getSupabase()
+    .from('profile_capabilities')
+    .delete()
+    .eq('profile_id', profileId)
+  if (deleteError) throw toStoreError(deleteError)
+  if (next.length === 0) return
+
+  const { error: insertError } = await getSupabase()
+    .from('profile_capabilities')
+    .insert(
+      next.map((capability) => ({
+        profile_id: profileId,
+        capability,
+      })),
+    )
+  if (insertError) throw toStoreError(insertError)
+}
+
+async function replaceBrandStewards(profileId: string, leadBrandIds: string[]) {
+  const next = [...new Set(leadBrandIds.filter(Boolean))]
+  const { error: deleteError } = await getSupabase()
+    .from('brand_members')
+    .delete()
+    .eq('profile_id', profileId)
+  if (deleteError) throw toStoreError(deleteError)
+  if (next.length === 0) return
+
+  const { error: insertError } = await getSupabase()
+    .from('brand_members')
+    .insert(
+      next.map((brandId) => ({
+        brand_id: brandId,
+        profile_id: profileId,
+        is_lead: true,
+      })),
+    )
+  if (insertError) throw toStoreError(insertError)
 }
 
 export async function listDepartments(
@@ -225,9 +321,7 @@ export async function getMyProfile(): Promise<Profile | null> {
 
   if (error) throw toStoreError(error)
   if (!data) return null
-
-  const memberships = await membershipsFor([userId])
-  return toProfile(data as ProfileRow, memberships.get(userId) ?? [])
+  return hydrateProfile(data as ProfileRow)
 }
 
 export async function updateMyProfile(
@@ -255,9 +349,7 @@ export async function updateMyProfile(
     .single()
 
   if (error) throw toStoreError(error)
-
-  const memberships = await membershipsFor([userId])
-  return toProfile(data as ProfileRow, memberships.get(userId) ?? [])
+  return hydrateProfile(data as ProfileRow)
 }
 
 export async function submitAccessRequest(
@@ -270,33 +362,18 @@ export async function submitAccessRequest(
 
   if (!input.departmentId) throw new Error('팀을 선택하세요.')
   if (!input.position.trim()) throw new Error('직책을 선택하세요.')
-  if (input.brandIds.length === 0) {
-    throw new Error('담당 브랜드를 하나 이상 선택하세요.')
+  const capabilities = uniqueCapabilities(input.capabilities)
+  if (capabilities.length === 0) {
+    throw new Error('업무 역량을 하나 이상 선택하세요.')
   }
 
-  const { error: deleteError } = await getSupabase()
-    .from('brand_members')
-    .delete()
-    .eq('profile_id', userId)
-
-  if (deleteError) throw toStoreError(deleteError)
-
-  const { error: insertError } = await getSupabase()
-    .from('brand_members')
-    .insert(
-      input.brandIds.map((brandId) => ({
-        brand_id: brandId,
-        profile_id: userId,
-        is_lead: false,
-      })),
-    )
-
-  if (insertError) throw toStoreError(insertError)
+  await replaceCapabilities(userId, capabilities)
 
   const { data, error } = await getSupabase()
     .from('profiles')
     .update({
       display_name: input.displayName.trim(),
+      company_id: DEFAULT_COMPANY_ID,
       department_id: input.departmentId,
       position: input.position.trim(),
       request_note: input.requestNote?.trim() || null,
@@ -310,9 +387,7 @@ export async function submitAccessRequest(
     .single()
 
   if (error) throw toStoreError(error)
-
-  const memberships = await membershipsFor([userId])
-  return toProfile(data as ProfileRow, memberships.get(userId) ?? [])
+  return hydrateProfile(data as ProfileRow)
 }
 
 /** 승인자가 볼 수 있는 멤버 목록. RLS가 범위를 걸러 준다. */
@@ -323,24 +398,15 @@ export async function listManageableProfiles(): Promise<Profile[]> {
     .order('requested_at', { ascending: false, nullsFirst: false })
 
   if (error) throw toStoreError(error)
-
-  const rows = (data ?? []) as ProfileRow[]
-  const memberships = await membershipsFor(rows.map((row) => row.id))
-  return rows.map((row) => toProfile(row, memberships.get(row.id) ?? []))
+  return hydrateProfiles((data ?? []) as ProfileRow[])
 }
 
 export async function approveMember(
   input: ApproveMemberInput,
 ): Promise<Profile> {
-  if (input.brandIds.length === 0) {
-    throw new Error('담당 브랜드를 하나 이상 지정하세요.')
-  }
-
-  const leadSet = new Set(input.leadBrandIds)
-  for (const leadId of leadSet) {
-    if (!input.brandIds.includes(leadId)) {
-      throw new Error('팀장으로 지정한 브랜드는 담당에도 포함되어야 합니다.')
-    }
+  const capabilities = uniqueCapabilities(input.capabilities)
+  if (!input.isAdmin && capabilities.length === 0) {
+    throw new Error('업무 역량을 하나 이상 지정하세요.')
   }
 
   const { data: userData, error: userError } = await getSupabase().auth.getUser()
@@ -348,26 +414,11 @@ export async function approveMember(
   const actorId = userData.user?.id
   if (!actorId) throw new Error('로그인이 필요합니다.')
 
-  const { error: deleteError } = await getSupabase()
-    .from('brand_members')
-    .delete()
-    .eq('profile_id', input.profileId)
-
-  if (deleteError) throw toStoreError(deleteError)
-
-  const { error: insertError } = await getSupabase()
-    .from('brand_members')
-    .insert(
-      input.brandIds.map((brandId) => ({
-        brand_id: brandId,
-        profile_id: input.profileId,
-        is_lead: leadSet.has(brandId),
-      })),
-    )
-
-  if (insertError) throw toStoreError(insertError)
+  await replaceCapabilities(input.profileId, capabilities)
+  await replaceBrandStewards(input.profileId, input.leadBrandIds ?? [])
 
   const patch: Record<string, unknown> = {
+    company_id: DEFAULT_COMPANY_ID,
     department_id: input.departmentId,
     position: input.position.trim(),
     status: 'active',
@@ -387,9 +438,7 @@ export async function approveMember(
     .single()
 
   if (error) throw toStoreError(error)
-
-  const memberships = await membershipsFor([input.profileId])
-  return toProfile(data as ProfileRow, memberships.get(input.profileId) ?? [])
+  return hydrateProfile(data as ProfileRow)
 }
 
 export async function rejectMember(profileId: string): Promise<Profile> {
@@ -410,9 +459,7 @@ export async function rejectMember(profileId: string): Promise<Profile> {
     .single()
 
   if (error) throw toStoreError(error)
-
-  const memberships = await membershipsFor([profileId])
-  return toProfile(data as ProfileRow, memberships.get(profileId) ?? [])
+  return hydrateProfile(data as ProfileRow)
 }
 
 export async function setMemberDisabled(
@@ -427,9 +474,7 @@ export async function setMemberDisabled(
     .single()
 
   if (error) throw toStoreError(error)
-
-  const memberships = await membershipsFor([profileId])
-  return toProfile(data as ProfileRow, memberships.get(profileId) ?? [])
+  return hydrateProfile(data as ProfileRow)
 }
 
 export async function createDepartment(name: string): Promise<Department> {
@@ -445,7 +490,7 @@ export async function createDepartment(name: string): Promise<Department> {
   const { data, error } = await getSupabase()
     .from('departments')
     .insert({
-      company_id: 'e0000000-0000-4000-8000-000000000001',
+      company_id: DEFAULT_COMPANY_ID,
       name: trimmed,
       sort_order: maxOrder + 1,
       is_active: true,

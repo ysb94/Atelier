@@ -25,7 +25,7 @@ export function Button({
           'border border-border bg-card hover:bg-muted text-foreground',
         variant === 'danger' &&
           'bg-danger text-white hover:bg-danger/90',
-        size === 'sm' && 'h-8 px-3 text-xs',
+        size === 'sm' && 'h-8 shrink-0 whitespace-nowrap px-3 text-xs',
         size === 'md' && 'h-9 px-4 text-sm',
         size === 'lg' && 'h-11 px-5 text-sm',
         size === 'icon' && 'size-8 p-0',

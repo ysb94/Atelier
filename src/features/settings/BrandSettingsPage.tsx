@@ -39,7 +39,9 @@ export function BrandSettingsPage() {
       setDialogOpen(false)
       await invalidateBrands()
       if (updated.slug !== brand.slug) {
-        navigate(`/b/${updated.slug}/settings/brand`, { replace: true })
+        navigate(`/settings/brand?brand=${encodeURIComponent(updated.slug)}`, {
+          replace: true,
+        })
       }
     },
     onError: (err) => {
@@ -73,7 +75,7 @@ export function BrandSettingsPage() {
     <div>
       <PageHeader
         title="브랜드 정보"
-        description="작업장에 표시되는 브랜드 프로필을 관리합니다."
+        description="회사 화면에 표시되는 브랜드 프로필을 관리합니다."
         actions={
           <div className="flex gap-2">
             <Button

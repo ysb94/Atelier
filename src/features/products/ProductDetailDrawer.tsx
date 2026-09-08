@@ -7,7 +7,7 @@ import {
   useParams,
   useSearchParams,
 } from 'react-router-dom'
-import { useBrand } from '@/components/layout/brand-context'
+import { useOptionalBrand } from '@/components/layout/brand-context'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { SelectFieldInput } from '@/components/fields/SelectFieldInput'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import {
+  getBrandBySlug,
   getBrandFields,
   getCodeUsageAssignments,
   getCodeUsageTargets,
@@ -151,12 +152,22 @@ function componentSummary(
 }
 
 export function ProductDetailDrawer() {
-  const { brand } = useBrand()
+  const brandContext = useOptionalBrand()
   const workspaceActive = useWorkspaceTabActivity()
   const navigate = useNavigate()
   const location = useLocation()
-  const { styleNo: styleNoParam } = useParams()
+  const { brandSlug: brandSlugParam, styleNo: styleNoParam } = useParams()
   const [searchParams] = useSearchParams()
+  const brandSlug = brandSlugParam ?? brandContext?.brandSlug ?? ''
+
+  const contextMatches = brandContext?.brandSlug === brandSlug
+  const brandQuery = useQuery({
+    queryKey: ['brand', brandSlug],
+    queryFn: () => getBrandBySlug(brandSlug),
+    enabled: Boolean(brandSlug) && !contextMatches,
+  })
+  const brand =
+    contextMatches && brandContext ? brandContext.brand : brandQuery.data
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<TabId>('info')
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -165,39 +176,50 @@ export function ProductDetailDrawer() {
   const decodedParam = styleNoParam ? decodeURIComponent(styleNoParam) : ''
   const querySuffix = searchParams.toString()
   const listQuery = querySuffix ? `?${querySuffix}` : ''
-  // 전체 상품(/products/...) · 부서 화면(/work/:owner/...) 모두에서 목록으로 돌아간다.
-  const listPath = location.pathname.replace(/\/[^/]*$/, '')
+  const productWorkMatch = location.pathname.match(/^(\/product-work\/[^/]+)/)
+  const dataSheetMatch = location.pathname.match(/^(\/data\/[^/]+)/)
+  const listPath = location.pathname.startsWith('/products')
+    ? '/products'
+    : productWorkMatch?.[1] ?? dataSheetMatch?.[1] ?? '/products'
+  const detailBasePath = `${listPath}/${brandSlug}`
 
   const close = () => navigate(`${listPath}${listQuery}`)
 
+  const brandId = brand?.id
   const stylesQuery = useQuery({
-    queryKey: ['styles', brand.id, 'products'],
-    queryFn: () => getStylesByBrand(brand.id),
+    queryKey: ['styles', brandId, 'products'],
+    queryFn: () => getStylesByBrand(brandId!),
+    enabled: Boolean(brandId),
   })
 
   const fieldsQuery = useQuery({
-    queryKey: ['brand-fields', brand.id],
-    queryFn: () => getBrandFields(brand.id),
+    queryKey: ['brand-fields', brandId],
+    queryFn: () => getBrandFields(brandId!),
+    enabled: Boolean(brandId),
   })
 
   const seasonsQuery = useQuery({
-    queryKey: ['seasons', brand.id],
-    queryFn: () => getSeasonsByBrand(brand.id),
+    queryKey: ['seasons', brandId],
+    queryFn: () => getSeasonsByBrand(brandId!),
+    enabled: Boolean(brandId),
   })
 
   const codesQuery = useQuery({
-    queryKey: ['product-codes', brand.id, 'own'],
-    queryFn: () => getProductCodes(brand.id, 'own'),
+    queryKey: ['product-codes', brandId, 'own'],
+    queryFn: () => getProductCodes(brandId!, 'own'),
+    enabled: Boolean(brandId),
   })
 
   const assignmentsQuery = useQuery({
-    queryKey: ['code-usage-assignments', brand.id],
-    queryFn: () => getCodeUsageAssignments(brand.id),
+    queryKey: ['code-usage-assignments', brandId],
+    queryFn: () => getCodeUsageAssignments(brandId!),
+    enabled: Boolean(brandId),
   })
 
   const targetsQuery = useQuery({
-    queryKey: ['codeUsageTargets', brand.id],
-    queryFn: () => getCodeUsageTargets(brand.id),
+    queryKey: ['codeUsageTargets', brandId],
+    queryFn: () => getCodeUsageTargets(brandId!),
+    enabled: Boolean(brandId),
   })
 
   const styles = stylesQuery.data ?? []
@@ -277,12 +299,12 @@ export function ProductDetailDrawer() {
     onSuccess: async (updated) => {
       setSaveError(null)
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['styles', brand.id] }),
-        queryClient.invalidateQueries({ queryKey: ['styles-page', brand.id] }),
+        queryClient.invalidateQueries({ queryKey: ['styles', brandId] }),
+        queryClient.invalidateQueries({ queryKey: ['styles-page', brandId] }),
       ])
       if (updated.styleNo !== decodedParam) {
         navigate(
-          `${listPath}/${encodeURIComponent(updated.styleNo)}${listQuery}`,
+          `${detailBasePath}/${encodeURIComponent(updated.styleNo)}${listQuery}`,
           { replace: true },
         )
       }
@@ -319,6 +341,7 @@ export function ProductDetailDrawer() {
   }
 
   const loading =
+    (!brand && brandQuery.isLoading) ||
     stylesQuery.isLoading ||
     fieldsQuery.isLoading ||
     seasonsQuery.isLoading
@@ -354,6 +377,9 @@ export function ProductDetailDrawer() {
                 <h2 className="truncate text-lg font-semibold tracking-tight">
                   {style.name}
                 </h2>
+                {brand ? (
+                  <p className="text-xs text-muted-foreground">{brand.name}</p>
+                ) : null}
               </>
             ) : (
               <h2 className="text-lg font-semibold tracking-tight">상품 상세</h2>

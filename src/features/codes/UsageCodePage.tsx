@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pause, Play, Plus, Search, Settings2, Upload, X } from 'lucide-react'
 import { useBrand } from '@/components/layout/brand-context'
+import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
+import { CompanyUsageCodeList } from '@/features/workspace/company-operation-lists'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -996,6 +998,14 @@ function SearchAddPanel({
         </div>
       </CardContent>
     </Card>
+  )
+}
+
+export function CompanyUsageCodePage() {
+  return (
+    <SingleBrandOrList list={<CompanyUsageCodeList />}>
+      <UsageCodePage />
+    </SingleBrandOrList>
   )
 }
 

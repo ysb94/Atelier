@@ -2,18 +2,26 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { FieldOwner } from '@/lib/types'
 import {
   loadDepartmentWorkSet,
+  loadDepartmentWorkSets,
   mergeStyleIds,
   saveDepartmentWorkSet,
 } from '@/lib/products/department-work-set'
 
 export function useDepartmentWorkSet(
   userId: string | null | undefined,
-  brandId: string,
+  brandIds: string | readonly string[],
   owner: FieldOwner | undefined,
 ) {
   const storageUser = userId || 'local'
+  const brandsKey = (Array.isArray(brandIds) ? brandIds : [brandIds])
+    .filter(Boolean)
+    .join(',')
+  const brands = useMemo(
+    () => brandsKey.split(',').filter(Boolean),
+    [brandsKey],
+  )
   const [ids, setIds] = useState<string[]>(() =>
-    owner ? loadDepartmentWorkSet(storageUser, brandId, owner) : [],
+    owner ? loadDepartmentWorkSets(storageUser, brands, owner) : [],
   )
 
   useEffect(() => {
@@ -21,33 +29,64 @@ export function useDepartmentWorkSet(
       setIds([])
       return
     }
-    setIds(loadDepartmentWorkSet(storageUser, brandId, owner))
-  }, [brandId, owner, storageUser])
-
-  const persist = useCallback(
-    (next: string[]) => {
-      if (!owner) return
-      saveDepartmentWorkSet(storageUser, brandId, owner, next)
-      setIds(next)
-    },
-    [brandId, owner, storageUser],
-  )
+    setIds(loadDepartmentWorkSets(storageUser, brands, owner))
+  }, [brands, brandsKey, owner, storageUser])
 
   const add = useCallback(
-    (styleIds: readonly string[]) => {
-      persist(mergeStyleIds(ids, styleIds))
+    (
+      styleIds: readonly string[],
+      brandIdByStyleId?: ReadonlyMap<string, string>,
+    ) => {
+      if (!owner) return
+      const grouped = new Map<string, string[]>()
+      for (const id of styleIds) {
+        const brandId = brandIdByStyleId?.get(id) ?? brands[0]
+        if (!brandId) continue
+        const list = grouped.get(brandId) ?? []
+        list.push(id)
+        grouped.set(brandId, list)
+      }
+      let nextAll = ids
+      for (const [brandId, added] of grouped) {
+        const current = loadDepartmentWorkSet(storageUser, brandId, owner)
+        saveDepartmentWorkSet(
+          storageUser,
+          brandId,
+          owner,
+          mergeStyleIds(current, added),
+        )
+        nextAll = mergeStyleIds(nextAll, added)
+      }
+      setIds(nextAll)
     },
-    [ids, persist],
+    [brands, ids, owner, storageUser],
   )
 
   const remove = useCallback(
-    (styleId: string) => {
-      persist(ids.filter((id) => id !== styleId))
+    (styleId: string, brandId?: string) => {
+      if (!owner) return
+      const target = brandId ?? brands[0]
+      if (target) {
+        const current = loadDepartmentWorkSet(storageUser, target, owner)
+        saveDepartmentWorkSet(
+          storageUser,
+          target,
+          owner,
+          current.filter((id) => id !== styleId),
+        )
+      }
+      setIds((current) => current.filter((id) => id !== styleId))
     },
-    [ids, persist],
+    [brands, owner, storageUser],
   )
 
-  const clear = useCallback(() => persist([]), [persist])
+  const clear = useCallback(() => {
+    if (!owner) return
+    for (const brandId of brands) {
+      saveDepartmentWorkSet(storageUser, brandId, owner, [])
+    }
+    setIds([])
+  }, [brands, owner, storageUser])
 
   const idSet = useMemo(() => new Set(ids), [ids])
 

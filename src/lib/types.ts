@@ -202,6 +202,25 @@ export type DraftColorRow = {
   id: string
   name: string
   orderQty: number | null
+  /** 이 컬러의 샘플이 진행 중인지 */
+  sampleInProgress: boolean
+}
+
+/** 기획안에서 중국팀으로 보내는 샘플 작업 지시서 한 차수 */
+export type DraftSampleWorkOrder = {
+  id: string
+  /** 1부터. 1차, 2차, 3차… */
+  round: number
+  /** data URL */
+  url: string | null
+  name: string
+  shipped: boolean
+  shippedAt: string | null
+  /** 기획이 도착 샘플을 합격했는지. 합격하면 발주로 넘어간다. */
+  passed: boolean
+  passedAt: string | null
+  /** 불합격일 때 다음 샘플에서 볼 점 */
+  failReason: string
 }
 
 /** 기획안에 함께 붙여 판매할 상품 한 줄 */
@@ -228,8 +247,10 @@ export type DraftSpecKey = 'size' | 'weight' | 'fabric' | 'coating'
 
 export type ProductDraft = {
   id: string
-  brandId: string
-  /** 회의에서 부르는 참조 번호. 품번이 아니며 품번이 되지도 않는다. */
+  companyId: string
+  /** 출시 확정 전에는 비워 둘 수 있다. 상품·코드·물류 행의 brand_id와 달리 기획안만 예외다. */
+  brandId: string | null
+  /** 회사 공통 PL번호. 생성 때 정하고 브랜드를 바꿔도 유지한다. */
   draftNo: string
   seasonId: string | null
   status: ProductDraftStatus
@@ -238,10 +259,16 @@ export type ProductDraft = {
   nameEn: string
   /** data URL. 기획 시트의 실물 사진 */
   imageUrl: string | null
+  /** 최신 차수 작업 지시서. data URL. sampleWorkOrders에서 따라간다. */
+  sampleWorkOrderUrl: string | null
+  sampleWorkOrderName: string
+  /** 1차부터 원하는 제품이 나올 때까지 반복하는 샘플 작업 지시서 */
+  sampleWorkOrders: DraftSampleWorkOrder[]
   colors: DraftColorRow[]
-  /** 진척 체크. 서로 독립적으로 켜진다. */
+  /** 컬러 샘플 진행중 표시에서 따라간다. */
   sampleDone: boolean
   orderDone: boolean
+  orderInProgress: boolean
   photoSampleDone: boolean
   /** 진척과 달리 켜지면 멈추는 표시 */
   held: boolean
@@ -271,7 +298,7 @@ export type ProductDraft = {
 
 export type ProductDraftInput = Omit<
   ProductDraft,
-  'id' | 'brandId' | 'draftNo' | 'createdAt' | 'updatedAt' | 'promotedStyleId'
+  'id' | 'companyId' | 'draftNo' | 'createdAt' | 'updatedAt' | 'promotedStyleId'
 >
 
 export const DRAFT_STATUS_LABEL: Record<ProductDraftStatus, string> = {

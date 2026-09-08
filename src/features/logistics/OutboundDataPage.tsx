@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, ChevronRight, Search, X } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useBrand } from '@/components/layout/brand-context'
+import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
+import { CompanyOutboundList } from '@/features/workspace/company-operation-lists'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -1337,5 +1339,13 @@ export function OutboundDataPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export function CompanyOutboundDataPage() {
+  return (
+    <SingleBrandOrList list={<CompanyOutboundList />}>
+      <OutboundDataPage />
+    </SingleBrandOrList>
   )
 }

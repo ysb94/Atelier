@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { Navigate } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -17,6 +18,13 @@ import {
   updateDepartment,
   type Profile,
 } from '@/lib/supabase/profiles'
+import {
+  capabilityLabel,
+  isCompanyManager,
+  WORK_CAPABILITIES,
+  WORK_CAPABILITY_LABEL,
+  type WorkCapability,
+} from '@/lib/company/capabilities'
 
 const STATUS_LABEL: Record<Profile['status'], string> = {
   pending: '승인 대기',
@@ -41,28 +49,28 @@ function MemberEditor({
   const [displayName, setDisplayName] = useState(profile.displayName ?? '')
   const [departmentId, setDepartmentId] = useState(profile.departmentId ?? '')
   const [position, setPosition] = useState(profile.position ?? '사원')
-  const [brandIds, setBrandIds] = useState(
-    profile.memberships.map((m) => m.brandId),
+  const [capabilities, setCapabilities] = useState<WorkCapability[]>(
+    profile.capabilities,
   )
   const [leadBrandIds, setLeadBrandIds] = useState(
     profile.memberships.filter((m) => m.isLead).map((m) => m.brandId),
+  )
+  const [showStewards, setShowStewards] = useState(
+    profile.memberships.some((m) => m.isLead),
   )
   const [isAdmin, setIsAdmin] = useState(profile.isAdmin)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  function toggleBrand(id: string) {
-    setBrandIds((prev) => {
-      if (prev.includes(id)) {
-        setLeadBrandIds((leads) => leads.filter((x) => x !== id))
-        return prev.filter((x) => x !== id)
-      }
-      return [...prev, id]
-    })
+  function toggleCapability(value: WorkCapability) {
+    setCapabilities((prev) =>
+      prev.includes(value)
+        ? prev.filter((item) => item !== value)
+        : [...prev, value],
+    )
   }
 
   function toggleLead(id: string) {
-    if (!brandIds.includes(id)) return
     setLeadBrandIds((prev) =>
       prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
     )
@@ -111,38 +119,51 @@ function MemberEditor({
       </div>
 
       <div className="space-y-2">
-        <p className="text-xs font-medium">담당 브랜드 / 팀장</p>
+        <p className="text-xs font-medium">업무 역량</p>
         <div className="grid gap-2 sm:grid-cols-2">
-          {brands.map((brand) => {
-            const checked = brandIds.includes(brand.id)
-            const lead = leadBrandIds.includes(brand.id)
-            return (
-              <div
-                key={brand.id}
-                className="flex items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
-              >
-                <label className="flex items-center gap-2">
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleBrand(brand.id)}
-                    disabled={busy}
-                  />
-                  {brand.name}
-                </label>
-                <label className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={lead}
-                    disabled={!checked || busy}
-                    onChange={() => toggleLead(brand.id)}
-                  />
-                  팀장
-                </label>
-              </div>
-            )
-          })}
+          {WORK_CAPABILITIES.map((capability) => (
+            <label
+              key={capability}
+              className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
+            >
+              <input
+                type="checkbox"
+                checked={capabilities.includes(capability)}
+                onChange={() => toggleCapability(capability)}
+                disabled={busy}
+              />
+              {WORK_CAPABILITY_LABEL[capability]}
+            </label>
+          ))}
         </div>
+      </div>
+
+      <div className="space-y-2">
+        <button
+          type="button"
+          className="text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
+          onClick={() => setShowStewards((prev) => !prev)}
+        >
+          {showStewards ? '브랜드 책임자 접기' : '브랜드 책임자 (선택)'}
+        </button>
+        {showStewards ? (
+          <div className="grid gap-2 sm:grid-cols-2">
+            {brands.map((brand) => (
+              <label
+                key={brand.id}
+                className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  checked={leadBrandIds.includes(brand.id)}
+                  onChange={() => toggleLead(brand.id)}
+                  disabled={busy}
+                />
+                {brand.name} 책임자
+              </label>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       {canSetAdmin ? (
@@ -172,7 +193,7 @@ function MemberEditor({
                 profileId: profile.id,
                 departmentId,
                 position,
-                brandIds,
+                capabilities,
                 leadBrandIds,
                 isAdmin: canSetAdmin ? isAdmin : false,
                 displayName,
@@ -251,18 +272,26 @@ export function MembersPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [filter, setFilter] = useState<'pending' | 'all'>('pending')
   const [newDeptName, setNewDeptName] = useState('')
+  const canManageMembers = isCompanyManager({
+    status: me?.status,
+    isAdmin: me?.isAdmin,
+    position: me?.position,
+  })
 
   const profilesQuery = useQuery({
     queryKey: ['manageable-profiles'],
     queryFn: listManageableProfiles,
+    enabled: canManageMembers,
   })
   const departmentsQuery = useQuery({
     queryKey: ['departments', 'all'],
     queryFn: () => listDepartments(false),
+    enabled: canManageMembers,
   })
   const brandsQuery = useQuery({
     queryKey: ['brand-directory'],
     queryFn: listBrandDirectory,
+    enabled: canManageMembers,
   })
 
   const profiles = useMemo(
@@ -301,11 +330,15 @@ export function MembersPage() {
   const brandName = (id: string) =>
     brands.find((b) => b.id === id)?.name ?? id.slice(0, 8)
 
+  if (!canManageMembers) {
+    return <Navigate to="/" replace />
+  }
+
   return (
     <div>
       <PageHeader
         title="멤버"
-        description="접근 신청을 승인하고 담당 브랜드·팀장을 지정합니다. 관리자는 아래 팀 목록도 관리할 수 있습니다."
+        description="접근 신청을 승인하고 회사 업무 역량을 지정합니다. 브랜드 책임자는 선택 사항입니다."
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -379,15 +412,16 @@ export function MembersPage() {
                     {member.position ? ` · ${member.position}` : ''}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    담당:{' '}
-                    {member.memberships.length === 0
+                    역량:{' '}
+                    {member.capabilities.length === 0
                       ? '-'
-                      : member.memberships
-                          .map(
-                            (m) =>
-                              `${brandName(m.brandId)}${m.isLead ? '(팀장)' : ''}`,
-                          )
-                          .join(', ')}
+                      : member.capabilities.map(capabilityLabel).join(', ')}
+                    {member.memberships.some((m) => m.isLead)
+                      ? ` · 책임자 ${member.memberships
+                          .filter((m) => m.isLead)
+                          .map((m) => brandName(m.brandId))
+                          .join(', ')}`
+                      : ''}
                   </p>
                   {member.requestNote ? (
                     <p className="mt-1 text-xs text-muted-foreground">

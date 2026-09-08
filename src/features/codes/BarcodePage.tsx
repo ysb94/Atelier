@@ -15,6 +15,8 @@ import {
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
+import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
+import { CompanyBarcodeList } from '@/features/workspace/company-operation-lists'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -286,7 +288,7 @@ export function BarcodePage() {
               </Button>
               </>
             ) : (
-              <Link to={`/b/${brand.slug}/data/upload?mode=single`}>
+              <Link to={`/data/upload?brand=${encodeURIComponent(brand.slug)}&mode=single`}>
                 <Button type="button" variant="outline">
                   상품 먼저 등록
                 </Button>
@@ -474,7 +476,7 @@ export function BarcodePage() {
                               </Button>
                             ) : (
                               <Link
-                                to={`/b/${brand.slug}/data/upload?mode=single`}
+                                to={`/data/upload?brand=${encodeURIComponent(brand.slug)}&mode=single`}
                               >
                                 <Button type="button" size="sm">
                                   상품 등록
@@ -856,5 +858,13 @@ function UsageSummary({
         )
       })}
     </div>
+  )
+}
+
+export function CompanyBarcodePage() {
+  return (
+    <SingleBrandOrList list={<CompanyBarcodeList />}>
+      <BarcodePage />
+    </SingleBrandOrList>
   )
 }

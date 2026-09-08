@@ -93,27 +93,22 @@ export function DraftSeasonPickerPage() {
   }
 
   const counts = useMemo(() => {
-    const bySeason = new Map<string, { total: number; held: number }>()
+    const bySeason = new Map<string, { total: number }>()
     let unassigned = 0
-    let unassignedHeld = 0
 
     for (const item of drafts) {
       if (!item.seasonId) {
         unassigned += 1
-        if (item.held) unassignedHeld += 1
         continue
       }
-      const current = bySeason.get(item.seasonId) ?? { total: 0, held: 0 }
+      const current = bySeason.get(item.seasonId) ?? { total: 0 }
       current.total += 1
-      if (item.held) current.held += 1
       bySeason.set(item.seasonId, current)
     }
 
     return {
       total: drafts.length,
-      held: drafts.filter((d) => d.held).length,
       unassigned,
-      unassignedHeld,
       bySeason,
     }
   }, [drafts])
@@ -398,15 +393,9 @@ export function DraftSeasonPickerPage() {
                 건
               </span>
             </p>
-            {counts.held > 0 ? (
-              <p className="mt-1 text-xs text-muted-foreground">
-                보류 {formatNumber(counts.held)}건
-              </p>
-            ) : (
-              <p className="mt-1 text-xs text-muted-foreground">
-                출시 기획 구분 없이 한 번에 봅니다.
-              </p>
-            )}
+            <p className="mt-1 text-xs text-muted-foreground">
+              출시 기획 구분 없이 한 번에 봅니다.
+            </p>
           </Link>
 
           <Link
@@ -425,9 +414,6 @@ export function DraftSeasonPickerPage() {
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
               출시 시기를 정하지 않고 먼저 잡아둔 기획
-              {counts.unassignedHeld > 0
-                ? ` · 보류 ${formatNumber(counts.unassignedHeld)}건`
-                : ''}
             </p>
           </Link>
 
@@ -440,7 +426,6 @@ export function DraftSeasonPickerPage() {
             .map((season) => {
             const stat = counts.bySeason.get(season.id) ?? {
               total: 0,
-              held: 0,
             }
             const editing = editingId === season.id && draft
             const canDelete = stat.total === 0
@@ -572,15 +557,9 @@ export function DraftSeasonPickerPage() {
                       건
                     </span>
                   </p>
-                  {stat.held > 0 ? (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      보류 {formatNumber(stat.held)}건
-                    </p>
-                  ) : (
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      이 출시 기획 열기
-                    </p>
-                  )}
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    이 출시 기획 열기
+                  </p>
                 </Link>
                 <div className="absolute right-3 top-3 flex gap-0.5">
                   <Button

@@ -133,7 +133,10 @@ export function resolveWorkRequestViewRole(
   owner: WorkRequestOwner,
   departmentName?: string | null,
   position?: string | null,
+  capabilities?: string[] | null,
 ): WorkRequestViewRole {
-  if (!isMemberOfOwnerDepartment(departmentName, owner)) return 'requester'
+  const inDepartment = isMemberOfOwnerDepartment(departmentName, owner)
+  const hasOwnerCapability = Boolean(capabilities?.includes(owner))
+  if (!inDepartment && !hasOwnerCapability) return 'requester'
   return isManagerPosition(position) ? 'manager' : 'employee'
 }

@@ -13,6 +13,8 @@ import {
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
+import { BrandTargetGate } from '@/components/layout/BrandTargetGate'
+import { CompanyInvoiceLanding } from '@/features/workspace/company-operation-lists'
 import {
   AlertTriangle,
   ArrowLeft,
@@ -4754,4 +4756,16 @@ export function InvoiceWorkPage() {
       ) : null}
     </div>
   )
+}
+
+export function CompanyInvoiceWorkPage() {
+  const [searchParams] = useSearchParams()
+  if (searchParams.get('brand')) {
+    return (
+      <BrandTargetGate lockAfterSelect title="송장작업 브랜드">
+        <InvoiceWorkPage />
+      </BrandTargetGate>
+    )
+  }
+  return <CompanyInvoiceLanding />
 }

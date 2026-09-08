@@ -86,6 +86,24 @@ export function loadDepartmentWorkSet(
   return readIds(departmentWorkSetKey(userId, brandId, owner))
 }
 
+export function loadDepartmentWorkSets(
+  userId: string,
+  brandIds: readonly string[],
+  owner: FieldOwner,
+): string[] {
+  const seen = new Set<string>()
+  const ids: string[] = []
+  for (const brandId of brandIds) {
+    if (!brandId) continue
+    for (const id of loadDepartmentWorkSet(userId, brandId, owner)) {
+      if (seen.has(id)) continue
+      seen.add(id)
+      ids.push(id)
+    }
+  }
+  return ids
+}
+
 export function saveDepartmentWorkSet(
   userId: string,
   brandId: string,

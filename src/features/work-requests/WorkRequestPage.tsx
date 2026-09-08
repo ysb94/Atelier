@@ -10,25 +10,26 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from 'react'
-import { Navigate, useParams } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
+import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   AlertCircle,
   ArrowLeft,
-  ArrowRight,
   BriefcaseBusiness,
   CheckCircle2,
   ClipboardPlus,
   Clock3,
   Eye,
   Inbox,
+  Paperclip,
   Pencil,
+  Pin,
   Plus,
   Send,
   Trash2,
-  UserRoundCheck,
   Users,
+  X,
 } from 'lucide-react'
-import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -40,7 +41,9 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input, Select, Textarea } from '@/components/ui/input'
+import { ATELIER_BRAND_ID } from '@/lib/company/capabilities'
 import { useAuth } from '@/lib/supabase/auth'
+import { listBrandDirectory } from '@/lib/supabase/profiles'
 import { cn } from '@/lib/utils'
 import {
   departmentDisplayName,
@@ -51,88 +54,56 @@ import {
   WORK_REQUEST_OWNERS,
   type WorkRequestOwner,
 } from './work-request-form-config'
-
-type TextContentBlock = {
-  id: string
-  type: 'text'
-  text: string
-}
-
-type ImageWrap = 'none' | 'left' | 'right'
-
-type ImageContentBlock = {
-  id: string
-  type: 'image'
-  file: File
-  caption: string
-  widthPercent: number
-  heightPx?: number
-  offsetY: number
-  wrap: ImageWrap
-}
-
-type FileContentBlock = {
-  id: string
-  type: 'file'
-  file: File
-}
-
-type ContentBlock = TextContentBlock | ImageContentBlock | FileContentBlock
-
-type FormValues = {
-  title: string
-  requester: string
-  deadlineType: 'preferred' | 'fixed' | ''
-  dueDate: string
-  scheduleReason: string
-  referenceUrl: string
-  blocks: ContentBlock[]
-}
-
-type FormErrors = Partial<Record<keyof FormValues, string>>
-
-type RequestStatus =
-  | 'requested'
-  | 'reviewing'
-  | 'accepted'
-  | 'inProgress'
-  | 'waiting'
-  | 'completed'
-  | 'cancelled'
-
-type ManagerPriority = 'urgent' | 'high' | 'normal' | 'low'
-
-type WorkRequestRecord = {
-  id: string
-  owner: WorkRequestOwner
-  values: FormValues
-  requesterDepartment: string
-  status: RequestStatus
-  managerPriority: ManagerPriority | ''
-  assignee: string
-  collaborators: string[]
-  confirmedDueDate: string
-  managerNote: string
-  createdAt: string
-  updatedAt: string
-}
-
-type RequestScreen =
-  | { kind: 'list' }
-  | { kind: 'form'; requestId?: string }
-  | { kind: 'detail'; requestId: string }
-
-type WorkListSection = 'inbox' | 'team' | 'mine' | 'sent' | 'completed'
-
-type LocalTeamMember = {
-  id: string
-  name: string
-  position: string
-  isSelf?: boolean
-}
-
-const LOCAL_SELF_ID = 'local-self'
-const LOCAL_CURRENT_DEPARTMENT = 'local-current-department'
+import { WorkRequestAcceptDialog } from './WorkRequestAcceptDialog'
+import { WorkRequestCompletedPanel } from './WorkRequestCompletedPanel'
+import { WorkRequestChat } from './WorkRequestChat'
+import { WorkRequestTeamBoard } from './WorkRequestTeamBoard'
+import {
+  compareRequestsByDeadline,
+  dateFromToday,
+  dateTimeFromToday,
+  deadlineLabel,
+  currentWorkElapsedMs,
+  flushWorkTime,
+  formatCompactDate,
+  formatDate,
+  formatDateTime,
+  formatSlashDate,
+  formatWorkDuration,
+  requestPlannedRange,
+  startWorkTime,
+  workTimeKey,
+  type WorkTimeLog,
+} from './work-request-schedule'
+import {
+  LOCAL_CURRENT_DEPARTMENT,
+  LOCAL_SELF_ID,
+  PRIORITY_META,
+  REQUESTER_CHAT_ROOM,
+  STATUS_META,
+  isClosedStatus,
+  isCompletionPending,
+  localTeamMembers,
+  makeMessageId,
+  nextCompletionStatus,
+  needsLeadCompletionReview,
+  brandLabelForRequest,
+  isBrandUndecided,
+  personLabel,
+  visibleChatRooms,
+  type ContentBlock,
+  type FileContentBlock,
+  type FormErrors,
+  type FormValues,
+  type ImageContentBlock,
+  type ImageWrap,
+  type RequestScreen,
+  type RequestStatus,
+  type TextContentBlock,
+  type WorkListSection,
+  type WorkRequestMessage,
+  type WorkRequestRecord,
+} from './work-request-types'
 
 function makeBlockId(): string {
   return `blk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -146,41 +117,26 @@ function createEmptyValues(): FormValues {
   return {
     title: '',
     requester: '',
+    requesterPosition: '',
     deadlineType: 'preferred',
     dueDate: '',
     scheduleReason: '',
-    referenceUrl: '',
+    referenceFiles: [],
     blocks: [emptyTextBlock()],
   }
-}
-
-function dateFromToday(days: number): string {
-  const date = new Date()
-  date.setHours(12, 0, 0, 0)
-  date.setDate(date.getDate() + days)
-  return [
-    date.getFullYear(),
-    String(date.getMonth() + 1).padStart(2, '0'),
-    String(date.getDate()).padStart(2, '0'),
-  ].join('-')
-}
-
-function dateTimeFromToday(days: number, hour: number): string {
-  const date = new Date()
-  date.setDate(date.getDate() + days)
-  date.setHours(hour, 20, 0, 0)
-  return date.toISOString()
 }
 
 function demoValues({
   title,
   requester,
+  requesterPosition = '사원',
   dueIn,
   body,
   fixed = false,
 }: {
   title: string
   requester: string
+  requesterPosition?: string
   dueIn: number
   body: string
   fixed?: boolean
@@ -188,12 +144,13 @@ function demoValues({
   return {
     title,
     requester,
+    requesterPosition,
     deadlineType: fixed ? 'fixed' : 'preferred',
     dueDate: dateFromToday(dueIn),
     scheduleReason: fixed
       ? '외부 채널 오픈 일정이 확정되어 마감일 변경이 어렵습니다.'
       : '',
-    referenceUrl: '',
+    referenceFiles: [],
     blocks: [emptyTextBlock(body)],
   }
 }
@@ -220,7 +177,18 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
   const sourceB = sourceDepartments[1] ?? 'MD'
   const sourceC = sourceDepartments[2] ?? '물류'
 
-  return [
+  const requests: Omit<
+    WorkRequestRecord,
+    | 'messages'
+    | 'assignedBy'
+    | 'assignedAt'
+    | 'completedAt'
+    | 'completionRequestedAt'
+    | 'completionRejectCount'
+    | 'brandId'
+    | 'brandDecidedAt'
+    | 'brandDecidedBy'
+  >[] = [
     {
       id: `WR-${prefix}-001`,
       owner,
@@ -228,6 +196,7 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       values: demoValues({
         title: `[긴급 확인] ${destination} 결과물 일정 검토 요청`,
         requester: '한유진',
+        requesterPosition: '과장',
         dueIn: 2,
         body: `${sourceA}에서 ${destination}으로 보낸 요청입니다. 채널 오픈 전에 필요한 결과물이니 처리 일정과 추가 자료를 알려 주세요.`,
         fixed: true,
@@ -237,7 +206,8 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       assignee: '',
       collaborators: [],
       confirmedDueDate: '',
-      managerNote: '',
+      plannedStart: '',
+      plannedEnd: '',
       createdAt: dateTimeFromToday(-1, 10),
       updatedAt: dateTimeFromToday(-1, 10),
     },
@@ -248,6 +218,7 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       values: demoValues({
         title: `[검토 요청] 26FW 프로모션 ${destination} 업무`,
         requester: '최도윤',
+        requesterPosition: '대리',
         dueIn: 5,
         body: `${sourceB}에서 ${destination}으로 보낸 요청입니다. 26FW 프로모션 오픈에 맞춰 세부 범위를 조율해 주세요.`,
       }),
@@ -256,7 +227,8 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       assignee: '',
       collaborators: [],
       confirmedDueDate: '',
-      managerNote: '요청 범위와 일정 조율 중',
+      plannedStart: '',
+      plannedEnd: '',
       createdAt: dateTimeFromToday(-2, 14),
       updatedAt: dateTimeFromToday(-1, 15),
     },
@@ -267,6 +239,7 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       values: demoValues({
         title: `[업무 요청] 신상품 출시 ${destination} 반영`,
         requester: '정하린',
+        requesterPosition: '사원',
         dueIn: 8,
         body: `${sourceC}에서 ${destination}으로 보낸 요청입니다. 접수 후 주 담당자와 협업자를 배정해 주세요.`,
       }),
@@ -275,7 +248,8 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       assignee: '',
       collaborators: [],
       confirmedDueDate: dateFromToday(7),
-      managerNote: '접수 완료, 담당자 배정 필요',
+      plannedStart: '',
+      plannedEnd: '',
       createdAt: dateTimeFromToday(-3, 9),
       updatedAt: dateTimeFromToday(-1, 11),
     },
@@ -286,6 +260,7 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       values: demoValues({
         title: `[진행 중] 주간 운영 ${destination} 수정`,
         requester: '윤서아',
+        requesterPosition: '팀장',
         dueIn: 3,
         body: `${sourceA}에서 요청한 운영 수정입니다. 주 담당자와 협업자가 함께 진행 중입니다.`,
       }),
@@ -294,7 +269,8 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       assignee: LOCAL_SELF_ID,
       collaborators: ['member-min'],
       confirmedDueDate: dateFromToday(3),
-      managerNote: '오늘 1차 결과 확인 예정',
+      plannedStart: dateFromToday(-1),
+      plannedEnd: dateFromToday(2),
       createdAt: dateTimeFromToday(-5, 11),
       updatedAt: dateTimeFromToday(-1, 17),
     },
@@ -305,6 +281,7 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       values: demoValues({
         title: `[진행 중] 시즌 캠페인 ${destination} 준비`,
         requester: '김태오',
+        requesterPosition: '대리',
         dueIn: 1,
         body: `${sourceB}에서 요청한 시즌 캠페인 준비입니다. 다른 사원에게 배정된 업무입니다.`,
       }),
@@ -313,7 +290,8 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       assignee: 'member-min',
       collaborators: [],
       confirmedDueDate: dateFromToday(1),
-      managerNote: '마감 임박',
+      plannedStart: dateFromToday(0),
+      plannedEnd: dateFromToday(1),
       createdAt: dateTimeFromToday(-6, 13),
       updatedAt: dateTimeFromToday(0, 9),
     },
@@ -324,6 +302,7 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       values: demoValues({
         title: `[보류] 협력사 확인 후 ${destination} 반영`,
         requester: '박시은',
+        requesterPosition: '사원',
         dueIn: 9,
         body: `${sourceC}에서 요청한 업무입니다. 협력사 원본 자료가 도착하면 재개합니다.`,
       }),
@@ -332,7 +311,8 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       assignee: 'member-jun',
       collaborators: [LOCAL_SELF_ID],
       confirmedDueDate: dateFromToday(9),
-      managerNote: '협력사 회신 대기',
+      plannedStart: dateFromToday(2),
+      plannedEnd: dateFromToday(6),
       createdAt: dateTimeFromToday(-7, 15),
       updatedAt: dateTimeFromToday(-2, 10),
     },
@@ -343,6 +323,7 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       values: demoValues({
         title: `[완료] 지난주 ${destination} 운영 요청`,
         requester: '이주원',
+        requesterPosition: '과장',
         dueIn: -1,
         body: `${sourceA}에서 보낸 지난주 요청으로, 다른 사원이 완료했습니다.`,
       }),
@@ -351,7 +332,8 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       assignee: 'member-seo',
       collaborators: [],
       confirmedDueDate: dateFromToday(-1),
-      managerNote: '요청 부서 확인 완료',
+      plannedStart: dateFromToday(-8),
+      plannedEnd: dateFromToday(-2),
       createdAt: dateTimeFromToday(-10, 9),
       updatedAt: dateTimeFromToday(-1, 16),
     },
@@ -362,6 +344,7 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       values: demoValues({
         title: `[요청] ${destination} 협업 일정 확인`,
         requester: '나',
+        requesterPosition: '이사',
         dueIn: 6,
         body: `현재 소속 부서에서 ${destination}으로 보낸 요청입니다. 요청자 화면에서만 목록에 함께 보입니다.`,
       }),
@@ -370,7 +353,8 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       assignee: '',
       collaborators: [],
       confirmedDueDate: '',
-      managerNote: '',
+      plannedStart: '',
+      plannedEnd: '',
       createdAt: dateTimeFromToday(-1, 16),
       updatedAt: dateTimeFromToday(-1, 16),
     },
@@ -381,6 +365,7 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       values: demoValues({
         title: `[접수] ${destination} 작업 범위 확정`,
         requester: '나',
+        requesterPosition: '이사',
         dueIn: 10,
         body: `현재 소속 부서에서 ${destination}으로 보낸 요청입니다. 접수됐지만 아직 담당자는 없습니다.`,
       }),
@@ -389,7 +374,8 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       assignee: '',
       collaborators: [],
       confirmedDueDate: dateFromToday(9),
-      managerNote: '접수 완료, 담당자 배정 예정',
+      plannedStart: '',
+      plannedEnd: '',
       createdAt: dateTimeFromToday(-4, 10),
       updatedAt: dateTimeFromToday(-2, 14),
     },
@@ -400,6 +386,7 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       values: demoValues({
         title: `[완료] 내가 맡은 ${destination} 지난 요청`,
         requester: '오하은',
+        requesterPosition: '대리',
         dueIn: -2,
         body: `${sourceB}에서 요청한 업무로, 현재 접속자에게 배정되어 완료된 임시 데이터입니다.`,
       }),
@@ -408,61 +395,127 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
       assignee: LOCAL_SELF_ID,
       collaborators: [],
       confirmedDueDate: dateFromToday(-2),
-      managerNote: '요청 부서 확인 완료',
+      plannedStart: dateFromToday(-9),
+      plannedEnd: dateFromToday(-3),
       createdAt: dateTimeFromToday(-12, 11),
       updatedAt: dateTimeFromToday(-2, 16),
     },
   ]
+
+  return requests.map((request) => {
+    const undecided =
+      request.id.endsWith('-002') || request.id.endsWith('-008')
+    return attachDemoMessages(
+      {
+        ...request,
+        brandId: undecided ? '' : ATELIER_BRAND_ID,
+        brandDecidedAt: undecided ? '' : request.createdAt,
+        brandDecidedBy: undecided ? '' : 'demo-lead',
+        assignedBy: request.assignee ? LOCAL_SELF_ID : '',
+        assignedAt: request.assignee
+          ? request.plannedStart || request.createdAt
+          : '',
+        completedAt:
+          request.status === 'completed' ? request.updatedAt : '',
+        completionRequestedAt:
+          request.status === 'completed' ? request.updatedAt : '',
+        completionRejectCount: request.id.endsWith('-010') ? 1 : 0,
+      },
+      destination,
+    )
+  })
 }
 
-function localTeamMembers(
-  _department: string,
-  selfName?: string | null,
-  selfPosition?: string | null,
-): LocalTeamMember[] {
-  return [
-    {
-      id: LOCAL_SELF_ID,
-      name: selfName?.trim() || '나',
-      position: selfPosition || '사원',
-      isSelf: true,
+function attachDemoMessages(
+  request: Omit<WorkRequestRecord, 'messages'>,
+  destination: string,
+): WorkRequestRecord {
+  if (request.id.endsWith('-002')) {
+    return {
+      ...request,
+      messages: [
+        {
+          id: `${request.id}-m1`,
+          roomId: 'requester',
+          authorId: 'member-min',
+          authorName: '김민지',
+          authorPosition: '대리',
+          body: `범위 확인 중입니다. ${destination}에서 우선 반영할 항목을 알려 주세요.`,
+          createdAt: dateTimeFromToday(-1, 16),
+        },
+        {
+          id: `${request.id}-m2`,
+          roomId: 'requester',
+          authorId: 'demo-requester',
+          authorName: request.values.requester,
+          authorPosition: request.values.requesterPosition,
+          body: '1차는 프로모션 메인 이미지와 일정 확정만 부탁드립니다.',
+          createdAt: dateTimeFromToday(-1, 17),
+        },
+      ],
+    }
+  }
+
+  if (request.id.endsWith('-004')) {
+    return {
+      ...request,
+      messages: [
+        {
+          id: `${request.id}-m1`,
+          roomId: 'member-min',
+          authorId: LOCAL_SELF_ID,
+          authorName: '나',
+          authorPosition: '이사',
+          body: '오늘 오후까지 1차 수정안을 올리겠습니다.',
+          createdAt: dateTimeFromToday(-1, 11),
+        },
+        {
+          id: `${request.id}-m2`,
+          roomId: 'member-min',
+          authorId: 'member-min',
+          authorName: '김민지',
+          authorPosition: '대리',
+          body: '확인했습니다. 컬러 가이드만 맞춰 주세요.',
+          createdAt: dateTimeFromToday(-1, 13),
+        },
+      ],
+    }
+  }
+
+  return { ...request, messages: [] }
+}
+
+function demoCurrentWork(owner: WorkRequestOwner): Record<string, string> {
+  const prefix = owner.slice(0, 2).toUpperCase()
+  return {
+    [LOCAL_SELF_ID]: `WR-${prefix}-004`,
+    'member-min': `WR-${prefix}-005`,
+  }
+}
+
+function demoWorkTime(owner: WorkRequestOwner): Record<string, WorkTimeLog> {
+  const prefix = owner.slice(0, 2).toUpperCase()
+  const now = Date.now()
+  return {
+    [workTimeKey(LOCAL_SELF_ID, `WR-${prefix}-004`)]: {
+      accumulatedMs: 18 * 60 * 1000,
+      mountedAt: now - 6 * 60 * 1000,
     },
-    { id: 'member-min', name: '김민지', position: '대리' },
-    { id: 'member-jun', name: '이준호', position: '사원' },
-    { id: 'member-seo', name: '박서연', position: '사원' },
-  ]
+    [workTimeKey('member-min', `WR-${prefix}-005`)]: {
+      accumulatedMs: 3 * 60 * 60 * 1000 + 20 * 60 * 1000,
+      mountedAt: now - 45 * 60 * 1000,
+    },
+    [workTimeKey('member-jun', `WR-${prefix}-006`)]: {
+      accumulatedMs: 52 * 60 * 1000,
+      mountedAt: null,
+    },
+  }
 }
 
 function hasRequestBody(blocks: ContentBlock[]): boolean {
   return blocks.some((block) =>
     block.type === 'text' ? block.text.trim().length > 0 : true,
   )
-}
-
-const STATUS_META: Record<
-  RequestStatus,
-  {
-    label: string
-    variant: 'default' | 'success' | 'warning' | 'danger' | 'outline' | 'muted'
-  }
-> = {
-  requested: { label: '요청됨', variant: 'outline' },
-  reviewing: { label: '검토 중', variant: 'warning' },
-  accepted: { label: '접수됨', variant: 'default' },
-  inProgress: { label: '진행 중', variant: 'default' },
-  waiting: { label: '보류', variant: 'warning' },
-  completed: { label: '완료', variant: 'success' },
-  cancelled: { label: '취소', variant: 'muted' },
-}
-
-const PRIORITY_META: Record<
-  ManagerPriority,
-  { label: string; variant: 'default' | 'warning' | 'danger' | 'muted' }
-> = {
-  urgent: { label: '긴급', variant: 'danger' },
-  high: { label: '높음', variant: 'warning' },
-  normal: { label: '보통', variant: 'default' },
-  low: { label: '낮음', variant: 'muted' },
 }
 
 function formatFileSize(size: number): string {
@@ -481,263 +534,6 @@ function fileFormatLabel(file: File): string {
   if (file.type.startsWith('audio/')) return 'AUDIO'
   if (file.type.includes('zip') || file.type.includes('compressed')) return 'ZIP'
   return 'FILE'
-}
-
-function formatDate(value: string): string {
-  if (!value) return '미정'
-  return new Intl.DateTimeFormat('ko-KR', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(new Date(`${value}T00:00:00`))
-}
-
-function formatDateTime(value: string): string {
-  return new Intl.DateTimeFormat('ko-KR', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  }).format(new Date(value))
-}
-
-function deadlineLabel(value: string): {
-  label: string
-  variant: 'outline' | 'warning' | 'danger' | 'muted'
-} {
-  if (!value) return { label: '마감 미정', variant: 'muted' }
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const target = new Date(`${value}T00:00:00`)
-  const days = Math.round((target.getTime() - today.getTime()) / 86_400_000)
-  if (days < 0) return { label: `${Math.abs(days)}일 초과`, variant: 'danger' }
-  if (days === 0) return { label: '오늘 마감', variant: 'danger' }
-  if (days <= 3) return { label: `${days}일 남음`, variant: 'warning' }
-  return { label: `${days}일 남음`, variant: 'outline' }
-}
-
-function requestDueDate(request: WorkRequestRecord): string {
-  return request.confirmedDueDate || request.values.dueDate
-}
-
-function formatCompactDate(value: string): string {
-  if (!value) return '미정'
-  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
-  return new Intl.DateTimeFormat('ko-KR', {
-    month: 'short',
-    day: 'numeric',
-  }).format(date)
-}
-
-function scheduleDurationLabel(createdAt: string, dueDate: string): string {
-  if (!dueDate) return '일정 미정'
-  const requested = new Date(createdAt)
-  requested.setHours(0, 0, 0, 0)
-  const due = new Date(`${dueDate}T00:00:00`)
-  const days = Math.max(
-    0,
-    Math.round((due.getTime() - requested.getTime()) / 86_400_000),
-  )
-  return days === 0 ? '당일 일정' : `${days}일 일정`
-}
-
-function compareRequestsByDeadline(
-  left: WorkRequestRecord,
-  right: WorkRequestRecord,
-): number {
-  const leftDueDate = requestDueDate(left)
-  const rightDueDate = requestDueDate(right)
-  if (!leftDueDate && rightDueDate) return 1
-  if (leftDueDate && !rightDueDate) return -1
-  const dueDateOrder = leftDueDate.localeCompare(rightDueDate)
-  return dueDateOrder || left.createdAt.localeCompare(right.createdAt)
-}
-
-function toCalendarDate(value: string | Date): Date {
-  const date =
-    typeof value === 'string'
-      ? new Date(value.includes('T') ? value : `${value}T00:00:00`)
-      : new Date(value)
-  date.setHours(0, 0, 0, 0)
-  return date
-}
-
-function addCalendarDays(value: Date, days: number): Date {
-  const date = new Date(value)
-  date.setDate(date.getDate() + days)
-  return date
-}
-
-function calendarDayNumber(value: Date): number {
-  return Date.UTC(value.getFullYear(), value.getMonth(), value.getDate())
-}
-
-function calendarDayDifference(left: Date, right: Date): number {
-  return Math.round(
-    (calendarDayNumber(left) - calendarDayNumber(right)) / 86_400_000,
-  )
-}
-
-function isSameCalendarDate(left: Date, right: Date): boolean {
-  return calendarDayNumber(left) === calendarDayNumber(right)
-}
-
-function buildTeamTimelineDates(requests: WorkRequestRecord[]): Date[] {
-  const today = toCalendarDate(new Date())
-  let firstDate = today
-  let lastDate = addCalendarDays(today, 27)
-
-  if (requests.length > 0) {
-    const requestedDates = requests.map((request) =>
-      toCalendarDate(request.createdAt),
-    )
-    const dueDates = requests.map((request) => {
-      const dueDate = requestDueDate(request)
-      return dueDate
-        ? toCalendarDate(dueDate)
-        : toCalendarDate(request.createdAt)
-    })
-    firstDate = addCalendarDays(
-      new Date(Math.min(...requestedDates.map((date) => date.getTime()))),
-      -1,
-    )
-    const latestDueDate = addCalendarDays(
-      new Date(Math.max(...dueDates.map((date) => date.getTime()))),
-      1,
-    )
-    lastDate = new Date(
-      Math.max(
-        latestDueDate.getTime(),
-        addCalendarDays(firstDate, 27).getTime(),
-      ),
-    )
-  }
-
-  const dateCount = calendarDayDifference(lastDate, firstDate) + 1
-  return Array.from({ length: dateCount }, (_, index) =>
-    addCalendarDays(firstDate, index),
-  )
-}
-
-type TimelineRequestPlacement = {
-  request: WorkRequestRecord
-  lane: number
-  startIndex: number
-  endIndex: number
-}
-
-function layoutTimelineRequests(
-  requests: WorkRequestRecord[],
-  timelineStart: Date,
-  timelineDayCount: number,
-): {
-  placements: TimelineRequestPlacement[]
-  laneCount: number
-} {
-  const ordered = [...requests].sort((left, right) => {
-    const leftStart = toCalendarDate(left.createdAt)
-    const rightStart = toCalendarDate(right.createdAt)
-    return (
-      calendarDayDifference(leftStart, rightStart) ||
-      compareRequestsByDeadline(left, right)
-    )
-  })
-  const laneEnds: number[] = []
-  const placements = ordered.map((request) => {
-    const requestedDate = toCalendarDate(request.createdAt)
-    const dueDateValue = requestDueDate(request)
-    const dueDate = dueDateValue
-      ? toCalendarDate(dueDateValue)
-      : requestedDate
-    const startIndex = Math.max(
-      0,
-      Math.min(
-        timelineDayCount - 1,
-        calendarDayDifference(requestedDate, timelineStart),
-      ),
-    )
-    const endIndex = Math.max(
-      startIndex,
-      Math.min(
-        timelineDayCount - 1,
-        calendarDayDifference(dueDate, timelineStart),
-      ),
-    )
-    let lane = laneEnds.findIndex((laneEnd) => laneEnd < startIndex)
-    if (lane === -1) lane = laneEnds.length
-    laneEnds[lane] = endIndex
-    return { request, lane, startIndex, endIndex }
-  })
-
-  return { placements, laneCount: Math.max(1, laneEnds.length) }
-}
-
-function timelineBarTone(request: WorkRequestRecord): string {
-  const deadline = deadlineLabel(requestDueDate(request))
-  if (request.status === 'waiting') {
-    return 'border-border bg-muted text-foreground hover:bg-muted/80'
-  }
-  if (
-    request.managerPriority === 'urgent' ||
-    deadline.variant === 'danger'
-  ) {
-    return 'border-danger/40 bg-danger/10 text-danger hover:bg-danger/15'
-  }
-  if (
-    request.managerPriority === 'high' ||
-    deadline.variant === 'warning'
-  ) {
-    return 'border-warning/40 bg-warning/10 text-foreground hover:bg-warning/15'
-  }
-  return 'border-primary/30 bg-primary/10 text-foreground hover:bg-primary/15'
-}
-
-function RequestDateComparison({
-  request,
-}: {
-  request: WorkRequestRecord
-}) {
-  const dueDate = requestDueDate(request)
-  const deadline = deadlineLabel(dueDate)
-
-  return (
-    <div className="mt-3 rounded-md border border-border/70 bg-muted/30 px-2.5 py-2">
-      <div className="grid grid-cols-[1fr_auto_1fr] items-end gap-2">
-        <div>
-          <p className="text-[10px] font-medium text-muted-foreground">
-            요청일
-          </p>
-          <p className="mt-0.5 text-xs font-semibold">
-            {formatCompactDate(request.createdAt)}
-          </p>
-        </div>
-        <ArrowRight
-          aria-hidden="true"
-          className="mb-0.5 size-3.5 text-muted-foreground"
-        />
-        <div className="text-right">
-          <p className="text-[10px] font-medium text-muted-foreground">
-            마감일
-          </p>
-          <p className="mt-0.5 text-xs font-semibold">
-            {formatCompactDate(dueDate)}
-          </p>
-        </div>
-      </div>
-      <div className="mt-2 flex items-center justify-between gap-2 border-t border-border/70 pt-2">
-        <span className="text-[10px] text-muted-foreground">
-          {scheduleDurationLabel(request.createdAt, dueDate)}
-        </span>
-        <Badge
-          variant={deadline.variant}
-          className="shrink-0 px-1.5 py-0 text-[10px]"
-        >
-          {deadline.label}
-        </Badge>
-      </div>
-    </div>
-  )
 }
 
 function makeRequestId(): string {
@@ -1354,6 +1150,88 @@ function FileAttachmentCard({
         >
           <Trash2 className="size-4" />
         </Button>
+      ) : null}
+    </div>
+  )
+}
+
+function ReferenceFilesField({
+  files,
+  onChange,
+}: {
+  files: File[]
+  onChange: (files: File[]) => void
+}) {
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  function addFiles(list: FileList | File[] | null) {
+    if (!list) return
+    const incoming = Array.from(list)
+    if (incoming.length === 0) return
+    const next = [...files]
+    for (const file of incoming) {
+      const exists = next.some(
+        (item) =>
+          item.name === file.name &&
+          item.size === file.size &&
+          item.lastModified === file.lastModified,
+      )
+      if (!exists) next.push(file)
+    }
+    onChange(next)
+  }
+
+  return (
+    <div className="space-y-2">
+      <span className="block text-sm font-medium">참고 파일 추가</span>
+      <div
+        className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-6 text-center"
+        onDragOver={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+        }}
+        onDrop={(event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          addFiles(event.dataTransfer.files)
+        }}
+      >
+        <Paperclip className="mx-auto size-5 text-muted-foreground" />
+        <p className="mt-2 text-sm text-muted-foreground">
+          파일을 끌어다 놓거나 버튼을 눌러 첨부하세요.
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="mt-3"
+          onClick={() => inputRef.current?.click()}
+        >
+          파일 선택
+        </Button>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple
+          className="hidden"
+          onChange={(event) => {
+            addFiles(event.target.files)
+            event.target.value = ''
+          }}
+        />
+      </div>
+      {files.length > 0 ? (
+        <div className="space-y-2">
+          {files.map((file, index) => (
+            <FileAttachmentCard
+              key={`${file.name}-${file.size}-${file.lastModified}`}
+              file={file}
+              onRemove={() =>
+                onChange(files.filter((_, fileIndex) => fileIndex !== index))
+              }
+            />
+          ))}
+        </div>
       ) : null}
     </div>
   )
@@ -2039,16 +1917,38 @@ function RequestBodyEditor({
 function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const config = WORK_REQUEST_CONFIG[owner]
   const { profile } = useAuth()
+  const [searchParams] = useSearchParams()
+  const brandsQuery = useQuery({
+    queryKey: ['brand-directory'],
+    queryFn: listBrandDirectory,
+  })
+  const brands = brandsQuery.data ?? []
   const pageTopRef = useRef<HTMLDivElement>(null)
   const [screen, setScreen] = useState<RequestScreen>({ kind: 'list' })
   const [requests, setRequests] = useState<WorkRequestRecord[]>(() =>
     createDemoRequests(owner),
   )
+  const [brandFilter, setBrandFilter] = useState<'all' | 'undecided' | string>(
+    () => (searchParams.get('brand') === 'undecided' ? 'undecided' : 'all'),
+  )
+  const [formBrandId, setFormBrandId] = useState('')
   const [listSection, setListSection] = useState<WorkListSection>('sent')
+  const [completedFrom, setCompletedFrom] = useState(() => dateFromToday(-30))
+  const [completedTo, setCompletedTo] = useState(() => dateFromToday(0))
   const [values, setValues] = useState<FormValues>(createEmptyValues)
   const [errors, setErrors] = useState<FormErrors>({})
   const [hasEdited, setHasEdited] = useState(false)
   const [flashMessage, setFlashMessage] = useState<string | null>(null)
+  const [detailRequestId, setDetailRequestId] = useState<string | null>(null)
+  const [acceptRequestId, setAcceptRequestId] = useState<string | null>(null)
+  const [reviewConfirmId, setReviewConfirmId] = useState<string | null>(null)
+  const [currentWorkByMember, setCurrentWorkByMember] = useState<
+    Record<string, string>
+  >(() => demoCurrentWork(owner))
+  const [workTimeByKey, setWorkTimeByKey] = useState<Record<string, WorkTimeLog>>(
+    () => demoWorkTime(owner),
+  )
+  const [workClock, setWorkClock] = useState(() => Date.now())
 
   const currentDepartment = profile?.departmentName
     ? departmentDisplayName(profile.departmentName)
@@ -2057,6 +1957,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     owner,
     profile?.departmentName,
     profile?.position,
+    profile?.capabilities,
   )
   const isDestinationMember = viewRole !== 'requester'
   const canManage = viewRole === 'manager'
@@ -2068,7 +1969,16 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
   useEffect(() => {
     setListSection(canManage ? 'inbox' : isDestinationMember ? 'mine' : 'sent')
+    setCurrentWorkByMember(demoCurrentWork(owner))
+    setWorkTimeByKey(demoWorkTime(owner))
   }, [canManage, isDestinationMember, owner])
+
+  useEffect(() => {
+    const hasMounted = Object.values(workTimeByKey).some((log) => log.mountedAt)
+    if (!hasMounted) return
+    const timer = window.setInterval(() => setWorkClock(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [workTimeByKey])
 
   useEffect(() => {
     if (screen.kind === 'form' && isDestinationMember && !screen.requestId) {
@@ -2076,14 +1986,35 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     }
   }, [isDestinationMember, screen])
 
+  useEffect(() => {
+    if (!detailRequestId && !acceptRequestId && !reviewConfirmId) return
+    function onKeyDown(event: globalThis.KeyboardEvent) {
+      if (event.key !== 'Escape') return
+      if (reviewConfirmId) {
+        setReviewConfirmId(null)
+        return
+      }
+      setFlashMessage(null)
+      setAcceptRequestId(null)
+      setDetailRequestId(null)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [acceptRequestId, detailRequestId, reviewConfirmId])
+
   const editingRequest =
     screen.kind === 'form' && screen.requestId
       ? requests.find((request) => request.id === screen.requestId)
       : undefined
-  const selectedRequest =
-    screen.kind === 'detail'
-      ? requests.find((request) => request.id === screen.requestId)
-      : undefined
+  const selectedRequest = detailRequestId
+    ? requests.find((request) => request.id === detailRequestId)
+    : undefined
+  const acceptingRequest = acceptRequestId
+    ? requests.find((request) => request.id === acceptRequestId)
+    : undefined
+  const reviewConfirmRequest = reviewConfirmId
+    ? requests.find((request) => request.id === reviewConfirmId)
+    : undefined
 
   function departmentLabel(value: string) {
     if (value === LOCAL_CURRENT_DEPARTMENT) return currentDepartment
@@ -2092,16 +2023,32 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
   function memberLabel(value: string) {
     if (!value) return '미정'
-    return teamMembers.find((member) => member.id === value)?.name ?? value
+    const member = teamMembers.find((item) => item.id === value)
+    if (!member) return value
+    return `${member.name}${member.isSelf ? ' (나)' : ''} · ${member.position}`
+  }
+
+  function requesterLabel(request: WorkRequestRecord) {
+    const position =
+      request.values.requesterPosition ||
+      (isCurrentUserRequest(
+        request.requesterDepartment,
+        profile?.departmentName,
+      )
+        ? profile?.position
+        : '')
+    return personLabel(request.values.requester, position)
   }
 
   function openForm(request?: WorkRequestRecord) {
+    setFormBrandId(request?.brandId ?? '')
     setValues(
       request
         ? { ...request.values }
         : {
             ...createEmptyValues(),
             requester: profile?.displayName ?? '',
+            requesterPosition: profile?.position ?? '',
           },
     )
     setErrors({})
@@ -2133,11 +2080,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     }
     setErrors({})
     setHasEdited(false)
-    setScreen(
-      editingRequest
-        ? { kind: 'detail', requestId: editingRequest.id }
-        : { kind: 'list' },
-    )
+    if (editingRequest) setDetailRequestId(editingRequest.id)
+    setScreen({ kind: 'list' })
   }
 
   function validate(): FormErrors {
@@ -2166,34 +2110,51 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
       setRequests((current) =>
         current.map((request) =>
           request.id === editingRequest.id
-            ? { ...request, values: { ...values }, updatedAt: now }
+            ? {
+                ...request,
+                values: { ...values },
+                brandId: request.brandId || formBrandId,
+                updatedAt: now,
+              }
             : request,
         ),
       )
       setFlashMessage('요청 내용을 수정했습니다.')
-      setScreen({ kind: 'detail', requestId: editingRequest.id })
+      setDetailRequestId(editingRequest.id)
+      setScreen({ kind: 'list' })
     } else {
       const id = makeRequestId()
       setRequests((current) => [
         {
           id,
           owner,
+          brandId: formBrandId,
+          brandDecidedAt: formBrandId ? now : '',
+          brandDecidedBy: formBrandId ? LOCAL_SELF_ID : '',
           values: { ...values },
           requesterDepartment:
             profile?.departmentName?.trim() || LOCAL_CURRENT_DEPARTMENT,
           status: 'requested',
           managerPriority: '',
           assignee: '',
+          assignedBy: '',
+          assignedAt: '',
           collaborators: [],
           confirmedDueDate: '',
-          managerNote: '',
+          plannedStart: '',
+          plannedEnd: '',
+          messages: [],
           createdAt: now,
           updatedAt: now,
+          completedAt: '',
+          completionRequestedAt: '',
+          completionRejectCount: 0,
         },
         ...current,
       ])
       setFlashMessage('작업 요청을 등록했습니다.')
-      setScreen({ kind: 'detail', requestId: id })
+      setDetailRequestId(id)
+      setScreen({ kind: 'list' })
     }
     setHasEdited(false)
   }
@@ -2205,13 +2166,13 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     }
     setRequests((current) => current.filter((item) => item.id !== request.id))
     setFlashMessage('작업 요청을 삭제했습니다.')
+    setDetailRequestId(null)
     setScreen({ kind: 'list' })
   }
 
   function cancelRequest(request: WorkRequestRecord) {
     if (
-      request.status === 'completed' ||
-      request.status === 'cancelled' ||
+      isClosedStatus(request.status) ||
       !window.confirm('이 작업 요청을 취소할까요?')
     ) {
       return
@@ -2230,47 +2191,204 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     setFlashMessage('작업 요청을 취소했습니다.')
   }
 
-  function updateManagerField(
+  function updateRequest(
     requestId: string,
-    patch: Partial<
-      Pick<
-        WorkRequestRecord,
-        | 'status'
-        | 'managerPriority'
-        | 'assignee'
-        | 'collaborators'
-        | 'confirmedDueDate'
-        | 'managerNote'
-      >
-    >,
+    patch: Partial<WorkRequestRecord>,
   ) {
+    const now = new Date().toISOString()
     setRequests((current) =>
       current.map((request) =>
         request.id === requestId
           ? {
               ...request,
               ...patch,
-              updatedAt: new Date().toISOString(),
+              assignedAt:
+                patch.assignedAt ||
+                request.assignedAt ||
+                (patch.assignee && patch.assignee !== request.assignee
+                  ? now
+                  : ''),
+              completedAt:
+                patch.completedAt ||
+                (patch.status === 'completed'
+                  ? request.completedAt || now
+                  : request.completedAt),
+              updatedAt: now,
             }
           : request,
       ),
     )
+    if (
+      (patch.status === 'completed' ||
+        patch.status === 'cancelled' ||
+        patch.status === 'rejected' ||
+        isCompletionPending(patch.status ?? 'requested')) &&
+      currentWorkByMember[LOCAL_SELF_ID] === requestId
+    ) {
+      const clock = Date.now()
+      setCurrentWorkByMember((current) => {
+        const next = { ...current }
+        delete next[LOCAL_SELF_ID]
+        return next
+      })
+      setWorkTimeByKey((current) =>
+        flushWorkTime(current, LOCAL_SELF_ID, requestId, clock),
+      )
+      setWorkClock(clock)
+    }
   }
 
-  function saveManagerDecision(requestId: string) {
-    setRequests((current) =>
-      current.map((request) =>
-        request.id === requestId
-          ? { ...request, updatedAt: new Date().toISOString() }
-          : request,
-      ),
+  function canWriteChat(request: WorkRequestRecord) {
+    const isSelfRequest = isCurrentUserRequest(
+      request.requesterDepartment,
+      profile?.departmentName,
     )
-    setFlashMessage('부서 처리 정보를 저장했습니다.')
-    pageTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    if (isSelfRequest) return true
+    if (canManage && request.owner === owner) return true
+    return (
+      request.assignee === LOCAL_SELF_ID ||
+      request.collaborators.includes(LOCAL_SELF_ID)
+    )
+  }
+
+  function addMessage(requestId: string, body: string, roomId: string) {
+    const text = body.trim()
+    if (!text) return
+    const message: WorkRequestMessage = {
+      id: makeMessageId(),
+      roomId,
+      authorId: LOCAL_SELF_ID,
+      authorName: profile?.displayName?.trim() || '나',
+      authorPosition: profile?.position ?? '',
+      body: text,
+      createdAt: new Date().toISOString(),
+    }
+    setRequests((current) =>
+      current.map((request) => {
+        if (request.id !== requestId) return request
+        const nextStatus =
+          canManage &&
+          request.owner === owner &&
+          request.status === 'requested'
+            ? 'reviewing'
+            : request.status
+        return {
+          ...request,
+          status: nextStatus,
+          messages: [...request.messages, message],
+          updatedAt: message.createdAt,
+        }
+      }),
+    )
+    if (canManage) {
+      const target = requests.find((item) => item.id === requestId)
+      if (target?.status === 'requested') {
+        setFlashMessage('첫 메시지로 검토를 시작했습니다.')
+      }
+    }
+  }
+
+  function acceptRequest(
+    request: WorkRequestRecord,
+    decision: {
+      managerPriority: WorkRequestRecord['managerPriority']
+      confirmedDueDate: string
+      collaborators: string[]
+    },
+  ) {
+    updateRequest(request.id, {
+      status: 'accepted',
+      assignee: '',
+      assignedBy: '',
+      managerPriority: decision.managerPriority,
+      confirmedDueDate: decision.confirmedDueDate,
+      collaborators: decision.collaborators,
+      plannedStart: '',
+      plannedEnd: '',
+    })
+    setAcceptRequestId(null)
+    setFlashMessage('요청을 수락했습니다. 일정표에서 담당자를 배정하세요.')
+    setListSection('team')
+  }
+
+  function rejectRequest(request: WorkRequestRecord) {
+    const reason = window.prompt(
+      '반려 사유를 입력하세요. 조율 대화에 남습니다.',
+    )
+    if (reason == null) return
+    const text = reason.trim() || '요청을 반려했습니다.'
+    const message: WorkRequestMessage = {
+      id: makeMessageId(),
+      roomId: REQUESTER_CHAT_ROOM,
+      authorId: LOCAL_SELF_ID,
+      authorName: profile?.displayName?.trim() || '나',
+      authorPosition: profile?.position ?? '',
+      body: text,
+      createdAt: new Date().toISOString(),
+    }
+    updateRequest(request.id, {
+      status: 'rejected',
+      messages: [...request.messages, message],
+    })
+    setFlashMessage('요청을 반려했습니다.')
+  }
+
+  function requestCompletion(request: WorkRequestRecord) {
+    updateRequest(request.id, {
+      status: nextCompletionStatus(request),
+      completionRequestedAt: new Date().toISOString(),
+    })
+    setFlashMessage(
+      needsLeadCompletionReview(request)
+        ? '완료를 요청했습니다. 팀장 확인을 기다립니다.'
+        : '완료를 요청했습니다. 요청자 확인을 기다립니다.',
+    )
+  }
+
+  function acceptCompletion(request: WorkRequestRecord) {
+    updateRequest(request.id, { status: 'completionConfirm' })
+    setFlashMessage('완료를 수락했습니다. 요청자 확인을 기다립니다.')
+  }
+
+  function rejectCompletion(
+    request: WorkRequestRecord,
+    roomId: string,
+  ) {
+    const reason = window.prompt(
+      '반려 사유를 입력하세요. 작업 수준이 부족하면 다시 진행하게 됩니다.',
+    )
+    if (reason == null) return
+    const text = reason.trim() || '완료 요청을 반려했습니다.'
+    const message: WorkRequestMessage = {
+      id: makeMessageId(),
+      roomId,
+      authorId: LOCAL_SELF_ID,
+      authorName: profile?.displayName?.trim() || '나',
+      authorPosition: profile?.position ?? '',
+      body: text,
+      createdAt: new Date().toISOString(),
+    }
+    updateRequest(request.id, {
+      status: 'inProgress',
+      completionRejectCount: request.completionRejectCount + 1,
+      messages: [...request.messages, message],
+    })
+    setFlashMessage('완료 요청을 반려했습니다. 다시 진행합니다.')
+  }
+
+  function confirmCompletion(request: WorkRequestRecord) {
+    updateRequest(request.id, { status: 'completed' })
+    setFlashMessage('결과를 확인했습니다. 완료되었습니다.')
+  }
+
+  function matchesBrandFilter(request: WorkRequestRecord) {
+    if (brandFilter === 'all') return true
+    if (brandFilter === 'undecided') return isBrandUndecided(request)
+    return request.brandId === brandFilter
   }
 
   const destinationRequests = requests.filter(
-    (request) => request.owner === owner,
+    (request) => request.owner === owner && matchesBrandFilter(request),
   )
   const incomingRequests = destinationRequests.filter(
     (request) =>
@@ -2280,33 +2398,33 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const sentRequests = destinationRequests.filter((request) =>
     isCurrentUserRequest(request.requesterDepartment, profile?.departmentName),
   )
-  const managerQueue = incomingRequests.filter(
-    (request) =>
-      request.status === 'requested' ||
-      request.status === 'reviewing' ||
-      (request.status === 'accepted' && !request.assignee),
-  )
+  const unreviewedRequests = incomingRequests
+    .filter((request) => request.status === 'requested')
+    .sort(compareRequestsByDeadline)
+  const reviewingRequests = incomingRequests
+    .filter((request) => request.status === 'reviewing')
+    .sort(compareRequestsByDeadline)
+  const completionReviewRequests = incomingRequests
+    .filter((request) => request.status === 'completionReview')
+    .sort(compareRequestsByDeadline)
+  const managerQueue = [
+    ...unreviewedRequests,
+    ...reviewingRequests,
+    ...completionReviewRequests,
+  ]
   const unassignedTeamRequests = incomingRequests
-    .filter(
-      (request) => request.status === 'accepted' && !request.assignee,
-    )
+    .filter((request) => request.status === 'accepted' && !request.assignee)
     .sort(compareRequestsByDeadline)
   const activeTeamRequests = incomingRequests.filter(
-    (request) =>
-      request.status !== 'completed' &&
-      request.status !== 'cancelled' &&
-      Boolean(request.assignee),
+    (request) => !isClosedStatus(request.status) && Boolean(request.assignee),
   )
-  const teamTimelineDates = buildTeamTimelineDates(activeTeamRequests)
-  const teamTimelineStart = teamTimelineDates[0]
   const myTasks = incomingRequests.filter(
     (request) =>
       request.assignee === LOCAL_SELF_ID ||
       request.collaborators.includes(LOCAL_SELF_ID),
   )
   const myActiveTasks = myTasks.filter(
-    (request) =>
-      request.status !== 'completed' && request.status !== 'cancelled',
+    (request) => !isClosedStatus(request.status),
   )
   const completedRequests = (
     canManage
@@ -2325,6 +2443,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const variant = deadlineLabel(dueDate).variant
     return variant === 'danger' || variant === 'warning'
   }).length
+  const myTodoTasks = myActiveTasks.filter(
+    (request) => !isCompletionPending(request.status),
+  )
+  const myCompletionPendingTasks = myActiveTasks.filter((request) =>
+    isCompletionPending(request.status),
+  )
 
   const listSections: {
     id: WorkListSection
@@ -2333,7 +2457,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   }[] = canManage
     ? [
         { id: 'inbox', label: '접수 대기', count: managerQueue.length },
-        { id: 'team', label: '팀 업무', count: activeTeamRequests.length },
+        {
+          id: 'team',
+          label: '팀 업무',
+          count: activeTeamRequests.length + unassignedTeamRequests.length,
+        },
+        { id: 'mine', label: '내 업무', count: myActiveTasks.length },
         { id: 'completed', label: '완료', count: completedRequests.length },
       ]
     : isDestinationMember
@@ -2344,7 +2473,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
       : [{ id: 'sent', label: '보낸 요청', count: sentRequests.length }]
 
   const allowedSection: WorkListSection = canManage
-    ? listSection === 'team' || listSection === 'completed'
+    ? listSection === 'team' ||
+      listSection === 'mine' ||
+      listSection === 'completed'
       ? listSection
       : 'inbox'
     : isDestinationMember
@@ -2354,8 +2485,76 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
       : 'sent'
 
   function openRequest(request: WorkRequestRecord) {
+    if (
+      canManage &&
+      request.owner === owner &&
+      request.status === 'requested'
+    ) {
+      setReviewConfirmId(request.id)
+      return
+    }
     setFlashMessage(null)
-    setScreen({ kind: 'detail', requestId: request.id })
+    setFormBrandId(request.brandId)
+    setDetailRequestId(request.id)
+  }
+
+  function workDurationMs(memberId: string, requestId: string) {
+    return currentWorkElapsedMs(
+      workTimeByKey[workTimeKey(memberId, requestId)],
+      workClock,
+    )
+  }
+
+  function workDurationLabel(memberId: string, requestId: string) {
+    return formatWorkDuration(workDurationMs(memberId, requestId))
+  }
+
+  function mountCurrentWork(requestId: string) {
+    const now = Date.now()
+    const previous = currentWorkByMember[LOCAL_SELF_ID]
+    setCurrentWorkByMember((current) => ({
+      ...current,
+      [LOCAL_SELF_ID]: requestId,
+    }))
+    setWorkTimeByKey((current) => {
+      let next = current
+      if (previous && previous !== requestId) {
+        next = flushWorkTime(next, LOCAL_SELF_ID, previous, now)
+      }
+      return startWorkTime(next, LOCAL_SELF_ID, requestId, now)
+    })
+    setWorkClock(now)
+    setFlashMessage('지금 하는 업무로 장착했습니다. 팀장 화면에 바로 보입니다.')
+  }
+
+  function unmountCurrentWork() {
+    const now = Date.now()
+    const previous = currentWorkByMember[LOCAL_SELF_ID]
+    setCurrentWorkByMember((current) => {
+      const next = { ...current }
+      delete next[LOCAL_SELF_ID]
+      return next
+    })
+    if (previous) {
+      setWorkTimeByKey((current) =>
+        flushWorkTime(current, LOCAL_SELF_ID, previous, now),
+      )
+    }
+    setWorkClock(now)
+    setFlashMessage('지금 하는 업무에서 뺐습니다.')
+  }
+
+  function startReview(request: WorkRequestRecord) {
+    updateRequest(request.id, { status: 'reviewing' })
+    setReviewConfirmId(null)
+    setFlashMessage(null)
+    setFormBrandId(request.brandId)
+    setDetailRequestId(request.id)
+  }
+
+  function closeRequest() {
+    setFlashMessage(null)
+    setDetailRequestId(null)
   }
 
   function renderEmptyState(title: string, description: string) {
@@ -2382,17 +2581,36 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const dueDate = request.confirmedDueDate || request.values.dueDate
     const deadline = deadlineLabel(dueDate)
     const isPrimaryAssignee = request.assignee === LOCAL_SELF_ID
+    const isMounted = currentWorkByMember[LOCAL_SELF_ID] === request.id
+    const completionPending = isCompletionPending(request.status)
+    const canStartWork =
+      isPrimaryAssignee && request.status === 'accepted'
+    const canResumeWork =
+      isPrimaryAssignee && request.status === 'waiting'
+    const canRequestCompletion =
+      isPrimaryAssignee && request.status === 'inProgress'
+    const workActionLabel = canStartWork
+      ? '업무 시작'
+      : canResumeWork
+        ? '다시 진행'
+        : '완료 요청'
     const isSelfRequest =
       !isDestinationMember &&
       isCurrentUserRequest(request.requesterDepartment, profile?.departmentName)
 
     return (
-      <Card key={request.id}>
+      <Card
+        key={request.id}
+        className={cn(detailRequestId === request.id && 'ring-2 ring-primary')}
+      >
         <CardContent className="p-5">
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_21rem_15rem] xl:items-center">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto_auto] xl:items-center">
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={status.variant}>{status.label}</Badge>
+                <Badge variant={isBrandUndecided(request) ? 'warning' : 'muted'}>
+                  {brandLabelForRequest(request, brands)}
+                </Badge>
                 {request.managerPriority ? (
                   <Badge
                     variant={PRIORITY_META[request.managerPriority].variant}
@@ -2404,6 +2622,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 {request.collaborators.includes(LOCAL_SELF_ID) &&
                 !isPrimaryAssignee ? (
                   <Badge variant="muted">협업 참여</Badge>
+                ) : null}
+                {currentWorkByMember[LOCAL_SELF_ID] === request.id ? (
+                  <Badge variant="default">지금 하는 중</Badge>
                 ) : null}
               </div>
               <h3 className="mt-2 truncate text-base font-semibold">
@@ -2418,112 +2639,191 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 ) : (
                   <>
                     {departmentLabel(request.requesterDepartment)} · 요청자{' '}
-                    {request.values.requester || '미입력'}
+                    {requesterLabel(request)}
                   </>
                 )}{' '}
                 · {formatDateTime(request.createdAt)}
               </p>
             </div>
 
-            <div className="grid min-w-0 shrink-0 grid-cols-2 gap-x-5 gap-y-3 text-sm sm:grid-cols-3">
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">확정 마감</p>
-                <p className="mt-1 truncate font-medium">
-                  {formatDate(dueDate)}
-                </p>
-              </div>
-              <div className="min-w-0">
-                <p className="text-xs text-muted-foreground">주 담당자</p>
-                <p className="mt-1 truncate font-medium">
-                  {memberLabel(request.assignee)}
-                </p>
-              </div>
-              <div className="hidden min-w-0 sm:block">
-                <p className="text-xs text-muted-foreground">협업자</p>
-                <p className="mt-1 truncate font-medium">
-                  {request.collaborators.length > 0
-                    ? request.collaborators.map(memberLabel).join(', ')
-                    : '없음'}
-                </p>
-              </div>
+            <div className="flex w-full flex-wrap gap-x-5 gap-y-2 text-sm xl:w-auto xl:flex-nowrap">
+              {context === 'queue' ? (
+                <>
+                  <div className="shrink-0">
+                    <p className="text-xs text-muted-foreground">요청 희망일</p>
+                    <p className="mt-1 font-medium tabular-nums">
+                      {formatSlashDate(request.values.dueDate)}
+                    </p>
+                  </div>
+                  <div className="shrink-0">
+                    <p className="text-xs text-muted-foreground">대화</p>
+                    <p className="mt-1 font-medium tabular-nums">
+                      {request.messages.length}건
+                    </p>
+                  </div>
+                  <div className="shrink-0">
+                    <p className="text-xs text-muted-foreground">일정 성격</p>
+                    <p className="mt-1 font-medium">
+                      {request.values.deadlineType === 'fixed'
+                        ? '변경 불가'
+                        : '희망일'}
+                    </p>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="shrink-0">
+                    <p className="text-xs text-muted-foreground">확정 마감</p>
+                    <p className="mt-1 font-medium tabular-nums">
+                      {formatSlashDate(dueDate)}
+                    </p>
+                  </div>
+                  <div className="shrink-0">
+                    <p className="text-xs text-muted-foreground">
+                      {context === 'mine' ? '작업 예정' : '주 담당자'}
+                    </p>
+                    <p className="mt-1 font-medium">
+                      {context === 'mine'
+                        ? request.plannedStart
+                          ? `${formatSlashDate(requestPlannedRange(request).start)}~${formatSlashDate(requestPlannedRange(request).end)}`
+                          : '미정'
+                        : memberLabel(request.assignee)}
+                    </p>
+                  </div>
+                  <div className="shrink-0">
+                    <p className="text-xs text-muted-foreground">
+                      {context === 'mine' ? '주 담당자' : '협업자'}
+                    </p>
+                    <p className="mt-1 font-medium">
+                      {context === 'mine'
+                        ? memberLabel(request.assignee)
+                        : request.collaborators.length > 0
+                          ? request.collaborators.map(memberLabel).join(', ')
+                          : '없음'}
+                    </p>
+                  </div>
+                </>
+              )}
             </div>
 
-            <div className="flex shrink-0 flex-wrap gap-2 xl:min-h-9 xl:flex-nowrap xl:justify-end">
-              {context === 'queue' && canManage ? (
+            <div
+              className={
+                context === 'mine'
+                  ? 'grid w-[20.75rem] shrink-0 grid-cols-[4.5rem_4.5rem_5.75rem_4.5rem] gap-2'
+                  : 'flex flex-wrap gap-2 [&_button]:shrink-0 [&_button]:whitespace-nowrap xl:flex-nowrap xl:justify-end'
+              }
+            >
+              {context === 'mine' ? (
                 <>
-                  {request.status === 'requested' ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        updateManagerField(request.id, { status: 'reviewing' })
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="w-full px-0"
+                    disabled={isMounted || completionPending}
+                    title={
+                      completionPending
+                        ? '완료 확인 중에는 장착할 수 없습니다'
+                        : isMounted
+                          ? '이미 장착한 업무입니다'
+                          : '이 업무를 지금 하는 일로 장착'
+                    }
+                    onClick={() => mountCurrentWork(request.id)}
+                  >
+                    장착
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="w-full px-0"
+                    disabled={!isMounted || completionPending}
+                    title={
+                      completionPending
+                        ? '완료 확인 중에는 뺄 수 없습니다'
+                        : isMounted
+                          ? '지금 하는 일에서 빼기'
+                          : '장착한 업무가 아닙니다'
+                    }
+                    onClick={unmountCurrentWork}
+                  >
+                    빼기
+                  </Button>
+                  <Button
+                    type="button"
+                    variant={canRequestCompletion ? 'secondary' : 'default'}
+                    size="sm"
+                    className="w-full px-0"
+                    disabled={
+                      !canStartWork && !canResumeWork && !canRequestCompletion
+                    }
+                    title={
+                      canStartWork
+                        ? '이 업무를 시작합니다'
+                        : canResumeWork
+                          ? '보류한 업무를 다시 진행합니다'
+                          : canRequestCompletion
+                            ? '완료를 요청합니다'
+                            : completionPending
+                              ? '이미 완료 확인 중입니다'
+                              : '진행 중인 주 담당 업무만 완료 요청할 수 있습니다'
+                    }
+                    onClick={() => {
+                      if (canStartWork || canResumeWork) {
+                        updateRequest(request.id, { status: 'inProgress' })
+                        return
                       }
-                    >
-                      검토 시작
-                    </Button>
-                  ) : null}
-                  {request.status === 'requested' ||
-                  request.status === 'reviewing' ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() =>
-                        updateManagerField(request.id, {
-                          status: 'accepted',
-                          confirmedDueDate:
-                            request.confirmedDueDate || request.values.dueDate,
-                        })
-                      }
-                    >
-                      접수
-                    </Button>
-                  ) : null}
+                      if (canRequestCompletion) requestCompletion(request)
+                    }}
+                  >
+                    {workActionLabel}
+                  </Button>
                 </>
               ) : null}
 
-              {context === 'mine' && isPrimaryAssignee ? (
+              {context === 'queue' &&
+              canManage &&
+              request.status === 'completionReview' ? (
                 <>
-                  {request.status === 'accepted' ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() =>
-                        updateManagerField(request.id, {
-                          status: 'inProgress',
-                        })
-                      }
-                    >
-                      업무 시작
-                    </Button>
-                  ) : null}
-                  {request.status === 'waiting' ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() =>
-                        updateManagerField(request.id, {
-                          status: 'inProgress',
-                        })
-                      }
-                    >
-                      다시 진행
-                    </Button>
-                  ) : null}
-                  {request.status === 'inProgress' ? (
-                    <Button
-                      type="button"
-                      variant="secondary"
-                      size="sm"
-                      onClick={() =>
-                        updateManagerField(request.id, {
-                          status: 'completed',
-                        })
-                      }
-                    >
-                      완료 처리
-                    </Button>
-                  ) : null}
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => acceptCompletion(request)}
+                  >
+                    완료 수락
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      rejectCompletion(request, request.assignee)
+                    }
+                  >
+                    반려
+                  </Button>
+                </>
+              ) : null}
+              {context === 'sent' &&
+              isSelfRequest &&
+              request.status === 'completionConfirm' ? (
+                <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={() => confirmCompletion(request)}
+                  >
+                    결과 확인
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      rejectCompletion(request, REQUESTER_CHAT_ROOM)
+                    }
+                  >
+                    반려
+                  </Button>
                 </>
               ) : null}
 
@@ -2531,9 +2831,10 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 type="button"
                 variant="outline"
                 size="sm"
+                className={context === 'mine' ? 'w-full px-0' : undefined}
                 onClick={() => openRequest(request)}
               >
-                <Eye className="size-3.5" />
+                {context === 'mine' ? null : <Eye className="size-3.5" />}
                 상세
               </Button>
               {context === 'sent' &&
@@ -2553,50 +2854,6 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
           </div>
         </CardContent>
       </Card>
-    )
-  }
-
-  function renderTeamRequestCard(
-    request: WorkRequestRecord,
-    unassigned = false,
-  ) {
-    const requestStatus = STATUS_META[request.status]
-
-    return (
-      <button
-        key={request.id}
-        type="button"
-        className={cn(
-          'w-full rounded-lg border bg-card p-3 text-left transition-colors hover:bg-muted',
-          unassigned
-            ? 'border-warning/40 hover:border-warning'
-            : 'border-border',
-        )}
-        onClick={() => openRequest(request)}
-      >
-        <div className="flex flex-wrap items-center gap-1.5">
-          <Badge variant={requestStatus.variant}>{requestStatus.label}</Badge>
-          {request.managerPriority ? (
-            <Badge variant={PRIORITY_META[request.managerPriority].variant}>
-              {PRIORITY_META[request.managerPriority].label}
-            </Badge>
-          ) : null}
-          {unassigned ? <Badge variant="warning">배정 필요</Badge> : null}
-        </div>
-        <p className="mt-2 line-clamp-2 text-sm font-medium">
-          {request.values.title}
-        </p>
-        <p className="mt-1 truncate text-xs text-muted-foreground">
-          {departmentLabel(request.requesterDepartment)} · 요청자{' '}
-          {request.values.requester || '미입력'}
-        </p>
-        <RequestDateComparison request={request} />
-        {request.collaborators.length > 0 ? (
-          <p className="mt-2 truncate text-xs text-muted-foreground">
-            협업 {request.collaborators.map(memberLabel).join(', ')}
-          </p>
-        ) : null}
-      </button>
     )
   }
 
@@ -2631,6 +2888,15 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
       },
     ]
     const employeeStats = [
+      {
+        label: '지금 하는 업무',
+        value: myActiveTasks.some(
+          (request) => request.id === currentWorkByMember[LOCAL_SELF_ID],
+        )
+          ? 1
+          : 0,
+        description: '오늘 장착한 업무',
+      },
       {
         label: '내 진행 업무',
         value: myActiveTasks.filter(
@@ -2721,7 +2987,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
           <div
             className={cn(
               'mb-5 grid gap-3',
-              canManage ? 'sm:grid-cols-2 xl:grid-cols-4' : 'sm:grid-cols-3',
+              canManage ? 'sm:grid-cols-2 xl:grid-cols-4' : 'sm:grid-cols-2 xl:grid-cols-4',
             )}
           >
             {stats.map((stat) => (
@@ -2739,6 +3005,36 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             ))}
           </div>
         ) : null}
+
+        <div className="mb-3 flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant={brandFilter === 'all' ? 'secondary' : 'outline'}
+            onClick={() => setBrandFilter('all')}
+          >
+            전체
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={brandFilter === 'undecided' ? 'secondary' : 'outline'}
+            onClick={() => setBrandFilter('undecided')}
+          >
+            브랜드 미정
+          </Button>
+          {brands.map((brand) => (
+            <Button
+              key={brand.id}
+              type="button"
+              size="sm"
+              variant={brandFilter === brand.id ? 'secondary' : 'outline'}
+              onClick={() => setBrandFilter(brand.id)}
+            >
+              {brand.name}
+            </Button>
+          ))}
+        </div>
 
         <div className="mb-5 flex flex-wrap gap-2 border-b border-border pb-3">
           {listSections.map((section) => (
@@ -2769,239 +3065,223 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         </div>
 
         {allowedSection === 'inbox' ? (
-          managerQueue.length > 0 ? (
-            <div className="space-y-3">
-              {managerQueue.map((request) =>
-                renderRequestRow(request, 'queue'),
-              )}
-            </div>
-          ) : (
-            renderEmptyState(
-              '접수 대기 요청이 없습니다.',
-              '새 요청이 들어오면 검토와 접수 여부를 여기에서 결정합니다.',
-            )
-          )
-        ) : null}
-
-        {allowedSection === 'team' ? (
-          <div className="space-y-5">
-            {unassignedTeamRequests.length > 0 ? (
-              <section className="rounded-xl border border-warning/30 bg-warning/5 p-4">
-                <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="space-y-8">
+              <section className="space-y-3">
+                <div className="flex flex-wrap items-end justify-between gap-2">
                   <div>
                     <div className="flex items-center gap-2">
-                      <p className="font-semibold">미배정 업무</p>
+                      <h3 className="font-semibold">아직 확인 안 함</h3>
+                      <Badge variant="outline">{unreviewedRequests.length}건</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      아직 열어보지 않은 새 요청입니다. 상세를 열면 검토 중으로
+                      넘어갑니다.
+                    </p>
+                  </div>
+                </div>
+                {unreviewedRequests.length > 0 ? (
+                  <div className="space-y-3">
+                    {unreviewedRequests.map((request) =>
+                      renderRequestRow(request, 'queue'),
+                    )}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                    아직 확인하지 않은 요청이 없습니다.
+                  </p>
+                )}
+              </section>
+
+              <section className="space-y-3 border-t border-border pt-6">
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold">검토 중</h3>
+                      <Badge variant="warning">{reviewingRequests.length}건</Badge>
+                    </div>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      대화를 시작한 요청입니다. 조율이 끝나면 수락하거나
+                      반려하세요.
+                    </p>
+                  </div>
+                </div>
+                {reviewingRequests.length > 0 ? (
+                  <div className="space-y-3">
+                    {reviewingRequests.map((request) =>
+                      renderRequestRow(request, 'queue'),
+                    )}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                    검토 중인 요청이 없습니다.
+                  </p>
+                )}
+              </section>
+
+              <section className="space-y-3 border-t border-border pt-6">
+                <div className="flex flex-wrap items-end justify-between gap-2">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-semibold">완료 확인</h3>
                       <Badge variant="warning">
-                        {unassignedTeamRequests.length}건
+                        {completionReviewRequests.length}건
                       </Badge>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      접수됐지만 주 담당자가 정해지지 않은 업무입니다. 우선
-                      배정이 필요합니다.
+                      사원이 완료를 요청한 업무입니다. 수락하면 요청자가
+                      결과를 확인합니다.
                     </p>
                   </div>
-                  <span className="rounded-md bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning">
-                    사원별 현황과 별도 관리
-                  </span>
                 </div>
-                <div className="mt-4 grid gap-3 md:grid-cols-2 2xl:grid-cols-3">
-                  {unassignedTeamRequests.map((request) =>
-                    renderTeamRequestCard(request, true),
-                  )}
-                </div>
-              </section>
-            ) : null}
-
-            <section>
-              <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Users className="size-4 text-muted-foreground" />
-                    <h3 className="font-semibold">사원별 업무 현황</h3>
+                {completionReviewRequests.length > 0 ? (
+                  <div className="space-y-3">
+                    {completionReviewRequests.map((request) =>
+                      renderRequestRow(request, 'queue'),
+                    )}
                   </div>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    업무 막대의 시작은 요청일, 끝은 마감일입니다.
+                ) : (
+                  <p className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                    완료 확인을 기다리는 업무가 없습니다.
                   </p>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  표를 좌우·상하로 스크롤할 수 있습니다.
-                </p>
-              </div>
+                )}
+              </section>
+            </div>
+        ) : null}
 
-              <div className="max-h-[44rem] overflow-auto rounded-xl border border-border bg-card">
-                <div
-                  className="grid"
-                  style={{
-                    gridTemplateColumns: `11rem repeat(${teamTimelineDates.length}, 4rem)`,
-                  }}
-                >
-                  <div
-                    className="sticky left-0 top-0 z-40 flex h-14 items-center border-b border-r border-border bg-muted px-4 text-xs font-semibold"
-                    style={{ gridColumn: '1', gridRow: '1' }}
-                  >
-                    담당자
-                  </div>
-                  {teamTimelineDates.map((date, dateIndex) => {
-                    const today = isSameCalendarDate(date, new Date())
-                    const weekend = date.getDay() === 0 || date.getDay() === 6
-                    return (
-                      <div
-                        key={date.toISOString()}
-                        className={cn(
-                          'sticky top-0 z-30 flex h-14 flex-col items-center justify-center border-b border-r border-border bg-card text-[10px]',
-                          weekend && 'bg-muted/50',
-                          today && 'bg-primary/15 text-primary',
-                        )}
-                        style={{
-                          gridColumn: `${dateIndex + 2}`,
-                          gridRow: '1',
-                        }}
-                      >
-                        <span className="font-semibold">
-                          {date.getMonth() + 1}.{date.getDate()}
-                        </span>
-                        <span className="mt-0.5 text-muted-foreground">
-                          {new Intl.DateTimeFormat('ko-KR', {
-                            weekday: 'short',
-                          }).format(date)}
-                        </span>
-                      </div>
-                    )
-                  })}
-
-                  {teamMembers.map((member, memberIndex) => {
-                    const memberRequests = activeTeamRequests
-                      .filter((request) => request.assignee === member.id)
-                      .sort(compareRequestsByDeadline)
-                    const { placements, laneCount } = layoutTimelineRequests(
-                      memberRequests,
-                      teamTimelineStart,
-                      teamTimelineDates.length,
-                    )
-                    const rowHeight = Math.max(72, laneCount * 58 + 12)
-                    const gridRow = `${memberIndex + 2}`
-
-                    return (
-                      <Fragment key={member.id}>
-                        <div
-                          className="sticky left-0 z-20 flex items-center justify-between gap-2 border-b border-r border-border bg-card px-4"
-                          style={{
-                            gridColumn: '1',
-                            gridRow,
-                            height: rowHeight,
-                          }}
-                        >
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold">
-                              {member.name}
-                              {member.isSelf ? ' (나)' : ''}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {member.position}
-                            </p>
-                          </div>
-                          <Badge variant="muted">{memberRequests.length}</Badge>
-                        </div>
-
-                        <div
-                          className="relative border-b border-border"
-                          style={{
-                            gridColumn: `2 / span ${teamTimelineDates.length}`,
-                            gridRow,
-                            height: rowHeight,
-                          }}
-                        >
-                          <div
-                            aria-hidden="true"
-                            className="pointer-events-none absolute inset-0 grid"
-                            style={{
-                              gridTemplateColumns: `repeat(${teamTimelineDates.length}, 4rem)`,
-                            }}
-                          >
-                            {teamTimelineDates.map((date) => {
-                              const today = isSameCalendarDate(
-                                date,
-                                new Date(),
-                              )
-                              const weekend =
-                                date.getDay() === 0 || date.getDay() === 6
-                              return (
-                                <div
-                                  key={date.toISOString()}
-                                  className={cn(
-                                    'border-r border-border/60',
-                                    weekend && 'bg-muted/30',
-                                    today && 'bg-primary/5',
-                                  )}
-                                />
-                              )
-                            })}
-                          </div>
-
-                          {placements.length > 0 ? (
-                            placements.map(
-                              ({ request, lane, startIndex, endIndex }) => {
-                                const requestStatus =
-                                  STATUS_META[request.status]
-                                const deadline = deadlineLabel(
-                                  requestDueDate(request),
-                                )
-                                return (
-                                  <button
-                                    key={request.id}
-                                    type="button"
-                                    title={`${request.values.title} · ${formatCompactDate(request.createdAt)} → ${formatCompactDate(requestDueDate(request))}`}
-                                    className={cn(
-                                      'absolute z-10 h-[50px] overflow-hidden rounded-md border px-2.5 py-1.5 text-left shadow-sm transition-colors',
-                                      timelineBarTone(request),
-                                    )}
-                                    style={{
-                                      left: startIndex * 64 + 4,
-                                      top: lane * 58 + 6,
-                                      width:
-                                        (endIndex - startIndex + 1) * 64 - 8,
-                                    }}
-                                    onClick={() => openRequest(request)}
-                                  >
-                                    <p className="truncate text-xs font-semibold">
-                                      {request.values.title}
-                                    </p>
-                                    <p className="mt-1 truncate text-[10px] opacity-80">
-                                      {requestStatus.label} · {deadline.label} ·{' '}
-                                      {departmentLabel(
-                                        request.requesterDepartment,
-                                      )}
-                                    </p>
-                                  </button>
-                                )
-                              },
-                            )
-                          ) : (
-                            <div className="absolute inset-y-0 left-4 z-10 flex items-center text-xs text-muted-foreground">
-                              배정된 업무가 없습니다.
-                            </div>
-                          )}
-                        </div>
-                      </Fragment>
-                    )
-                  })}
-                </div>
-              </div>
-            </section>
-          </div>
+        {allowedSection === 'team' ? (
+          <WorkRequestTeamBoard
+            unassigned={unassignedTeamRequests}
+            assigned={activeTeamRequests}
+            teamMembers={teamMembers}
+            departmentLabel={departmentLabel}
+            requesterLabel={requesterLabel}
+            memberLabel={memberLabel}
+            onOpen={openRequest}
+            currentWorkByMember={currentWorkByMember}
+            workDurationByMember={Object.fromEntries(
+              Object.entries(currentWorkByMember).map(([memberId, requestId]) => [
+                memberId,
+                workDurationLabel(memberId, requestId),
+              ]),
+            )}
+            onAssign={(requestId, patch) => {
+              updateRequest(requestId, patch)
+              setFlashMessage('작업 예정과 담당자를 반영했습니다.')
+            }}
+          />
         ) : null}
 
         {allowedSection === 'mine' ? (
           myActiveTasks.length > 0 ? (
-            <div className="space-y-3">
-              {myActiveTasks.map((request) =>
-                renderRequestRow(request, 'mine'),
-              )}
+            <div className="space-y-6">
+              {(() => {
+                const mounted = myTodoTasks.find(
+                  (request) =>
+                    request.id === currentWorkByMember[LOCAL_SELF_ID],
+                )
+                return (
+                  <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
+                    <div className="mb-3 flex items-center gap-2">
+                      <Pin className="size-4 text-primary" />
+                      <h3 className="font-semibold">지금 하는 업무</h3>
+                    </div>
+                    <p className="mb-4 text-xs text-muted-foreground">
+                      여기에 장착한 업무가 오늘 하고 있는 일입니다. 다른 업무로
+                      바꾸려면 아래 목록에서 갈아 끼우면 됩니다. 팀 현황에도
+                      그대로 보입니다.
+                    </p>
+                    {mounted ? (
+                      <div className="rounded-lg border border-primary/40 bg-card p-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <Badge variant="default">장착 중</Badge>
+                            <p className="mt-2 font-semibold">
+                              {mounted.values.title}
+                            </p>
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              작업 예정{' '}
+                              {mounted.plannedStart
+                                ? `${formatCompactDate(requestPlannedRange(mounted).start)} → ${formatCompactDate(requestPlannedRange(mounted).end)}`
+                                : '미정'}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 flex-wrap gap-2">
+                            {mounted.assignee === LOCAL_SELF_ID &&
+                            mounted.status === 'inProgress' ? (
+                              <Button
+                                type="button"
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => requestCompletion(mounted)}
+                              >
+                                완료 요청
+                              </Button>
+                            ) : null}
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={unmountCurrentWork}
+                            >
+                              빼기
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="rounded-lg border border-dashed border-primary/30 bg-card px-4 py-8 text-center text-sm text-muted-foreground">
+                        아직 장착한 업무가 없습니다. 아래 목록에서 장착하세요.
+                      </p>
+                    )}
+                  </section>
+                )
+              })()}
+              <section className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold">할 일</h3>
+                  <Badge variant="muted">{myTodoTasks.length}건</Badge>
+                </div>
+                {myTodoTasks.length > 0 ? (
+                  <div className="space-y-3">
+                    {myTodoTasks.map((request) =>
+                      renderRequestRow(request, 'mine'),
+                    )}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                    지금 할 일이 없습니다.
+                  </p>
+                )}
+              </section>
+              <section className="space-y-3 border-t border-border pt-6">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-semibold">완료 요청 대기</h3>
+                  <Badge variant="warning">
+                    {myCompletionPendingTasks.length}건
+                  </Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  완료를 요청한 뒤 팀장 또는 요청자 확인을 기다리는 업무입니다.
+                </p>
+                {myCompletionPendingTasks.length > 0 ? (
+                  <div className="space-y-3">
+                    {myCompletionPendingTasks.map((request) =>
+                      renderRequestRow(request, 'mine'),
+                    )}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed border-border px-4 py-6 text-sm text-muted-foreground">
+                    완료 확인을 기다리는 업무가 없습니다.
+                  </p>
+                )}
+              </section>
             </div>
           ) : (
             renderEmptyState(
               '현재 배정된 업무가 없습니다.',
-              '관리자가 주 담당자 또는 협업자로 배정한 업무만 여기에 표시됩니다.',
+              canManage
+                ? '직접 맡거나 주 담당·협업으로 들어간 업무만 여기에 표시됩니다.'
+                : '관리자가 주 담당자 또는 협업자로 배정한 업무만 여기에 표시됩니다.',
             )
           )
         ) : null}
@@ -3022,29 +3302,76 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         ) : null}
 
         {allowedSection === 'completed' ? (
-          completedRequests.length > 0 ? (
-            <div className="space-y-3">
-              {completedRequests.map((request) =>
-                renderRequestRow(request, 'completed'),
-              )}
-            </div>
-          ) : (
-            renderEmptyState(
-              '완료된 업무가 없습니다.',
-              '완료 처리한 업무가 이 목록에 쌓입니다.',
-            )
-          )
+          <WorkRequestCompletedPanel
+            canManage={canManage}
+            requests={completedRequests}
+            teamMembers={teamMembers}
+            from={completedFrom}
+            to={completedTo}
+            onFromChange={setCompletedFrom}
+            onToChange={setCompletedTo}
+            workDurationLabel={workDurationLabel}
+            workDurationMs={workDurationMs}
+            departmentLabel={departmentLabel}
+            requesterLabel={requesterLabel}
+            onOpen={openRequest}
+          />
         ) : null}
 
         <p className="mt-4 text-xs text-muted-foreground">
           역할별 UI 확인용 임시 데이터입니다. 변경 내용은 새로고침하면
           초기화되며 서버에는 저장되지 않습니다.
         </p>
+        {renderDetailPanel()}
+        {acceptingRequest ? (
+          <WorkRequestAcceptDialog
+            request={acceptingRequest}
+            teamMembers={teamMembers}
+            onClose={() => setAcceptRequestId(null)}
+            onConfirm={(decision) => acceptRequest(acceptingRequest, decision)}
+          />
+        ) : null}
+        {reviewConfirmRequest ? (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+            <button
+              type="button"
+              aria-label="닫기"
+              className="absolute inset-0 bg-black/40"
+              onClick={() => setReviewConfirmId(null)}
+            />
+            <div
+              role="dialog"
+              aria-modal="true"
+              className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-2xl"
+            >
+              <h2 className="text-base font-semibold">검토를 시작할까요?</h2>
+              <p className="mt-2 text-sm text-muted-foreground">
+                해당 요청건이 검토 중으로 넘어갑니다.
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setReviewConfirmId(null)}
+                >
+                  취소
+                </Button>
+                <Button
+                  type="button"
+                  onClick={() => startReview(reviewConfirmRequest)}
+                >
+                  상세 열기
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : null}
       </div>
     )
   }
 
-  if (screen.kind === 'detail' && selectedRequest) {
+  function renderDetailPanel() {
+    if (!selectedRequest) return null
     const status = STATUS_META[selectedRequest.status]
     const dueDate =
       selectedRequest.confirmedDueDate || selectedRequest.values.dueDate
@@ -3062,50 +3389,173 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const isCollaborator =
       selectedRequest.collaborators.includes(LOCAL_SELF_ID)
     const canEdit = isSelfRequest && selectedRequest.status === 'requested'
+    const chatRooms = visibleChatRooms(selectedRequest, {
+      canManage: canManageSelected,
+      isRequester: isSelfRequest,
+      selfId: LOCAL_SELF_ID,
+      teamMembers,
+      teamName: selectedConfig.teamName,
+      requesterDepartmentLabel: departmentLabel(
+        selectedRequest.requesterDepartment,
+      ),
+    })
 
     return (
-      <div ref={pageTopRef}>
-        <PageHeader
-          title={selectedRequest.values.title}
-          description={`${selectedRequest.id} · ${departmentLabel(
-            selectedRequest.requesterDepartment,
-          )} → ${selectedConfig.teamName}`}
-          actions={
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  setFlashMessage(null)
-                  setScreen({ kind: 'list' })
-                }}
-              >
-                <ArrowLeft className="size-4" />
-                목록
-              </Button>
-              {canEdit ? (
-                <Button type="button" onClick={() => openForm(selectedRequest)}>
+      <div className="fixed inset-0 z-50">
+        <button
+          type="button"
+          aria-label="상세 닫기"
+          className="absolute inset-0 bg-black/20"
+          onClick={closeRequest}
+        />
+        <aside className="absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-card shadow-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">
+              {selectedRequest.id} ·{' '}
+              {departmentLabel(selectedRequest.requesterDepartment)}{' '}
+              {requesterLabel(selectedRequest)} →{' '}
+              {selectedConfig.teamName}
+            </p>
+            <h2 className="mt-1 truncate text-lg font-semibold">
+              {selectedRequest.values.title}
+            </h2>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {isSelfRequest && canEdit ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => openForm(selectedRequest)}
+                >
                   <Pencil className="size-4" />
                   수정
                 </Button>
-              ) : null}
-            </>
-          }
-        />
+                <Button
+                  type="button"
+                  variant="danger"
+                  size="sm"
+                  onClick={() => deleteRequest(selectedRequest)}
+                >
+                  <Trash2 className="size-4" />
+                  삭제
+                </Button>
+              </>
+            ) : null}
+            {canManageSelected &&
+            (selectedRequest.status === 'requested' ||
+              selectedRequest.status === 'reviewing') ? (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => setAcceptRequestId(selectedRequest.id)}
+                >
+                  수락
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => rejectRequest(selectedRequest)}
+                >
+                  반려
+                </Button>
+              </>
+            ) : null}
+            {canManageSelected &&
+            selectedRequest.status === 'completionReview' ? (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => acceptCompletion(selectedRequest)}
+                >
+                  완료 수락
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    rejectCompletion(selectedRequest, selectedRequest.assignee)
+                  }
+                >
+                  반려
+                </Button>
+              </>
+            ) : null}
+            {isCurrentUserRequest(
+              selectedRequest.requesterDepartment,
+              profile?.departmentName,
+            ) && selectedRequest.status === 'completionConfirm' ? (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => confirmCompletion(selectedRequest)}
+                >
+                  결과 확인
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    rejectCompletion(selectedRequest, REQUESTER_CHAT_ROOM)
+                  }
+                >
+                  반려
+                </Button>
+              </>
+            ) : null}
+            {isSelfRequest &&
+            !canEdit &&
+            !isClosedStatus(selectedRequest.status) ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => cancelRequest(selectedRequest)}
+              >
+                취소
+              </Button>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              aria-label="상세 닫기"
+              onClick={closeRequest}
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+        </div>
 
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
         {flashMessage ? (
-          <div className="mb-5 flex items-start gap-3 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">
+          <div className="flex items-start gap-3 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">
             <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
             <span>{flashMessage}</span>
           </div>
         ) : null}
 
-        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="space-y-6">
           <div className="space-y-6">
             <Card>
               <CardHeader>
                 <div className="flex flex-wrap gap-2">
                   <Badge variant={status.variant}>{status.label}</Badge>
+                  <Badge
+                    variant={
+                      isBrandUndecided(selectedRequest) ? 'warning' : 'muted'
+                    }
+                  >
+                    {brandLabelForRequest(selectedRequest, brands)}
+                  </Badge>
                   {selectedRequest.managerPriority ? (
                     <Badge
                       variant={
@@ -3118,24 +3568,80 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                   ) : (
                     <Badge variant="muted">우선순위 검토 전</Badge>
                   )}
-                  <Badge variant={deadline.variant}>{deadline.label}</Badge>
-                  {selectedRequest.values.deadlineType === 'fixed' ? (
-                    <Badge variant="warning">변경 불가 일정</Badge>
-                  ) : null}
                 </div>
               </CardHeader>
               <CardContent className="space-y-5">
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-                  <div>
-                    <p className="text-xs text-muted-foreground">요청 부서</p>
-                    <p className="mt-1 text-sm font-medium">
-                      {departmentLabel(selectedRequest.requesterDepartment)}
-                    </p>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="sm:col-span-2">
+                    <p className="text-xs text-muted-foreground">브랜드</p>
+                    {isBrandUndecided(selectedRequest) ? (
+                      <div className="mt-1 space-y-2">
+                        <p className="text-sm font-medium">브랜드 미정</p>
+                        <p className="text-xs text-muted-foreground">
+                          브랜드가 정해지기 전에는 상품·기획안을 만들지 않습니다.
+                        </p>
+                        {canManageSelected ? (
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Select
+                              value={formBrandId}
+                              onChange={(e) => setFormBrandId(e.target.value)}
+                            >
+                              <option value="">브랜드 선택</option>
+                              {brands.map((brand) => (
+                                <option key={brand.id} value={brand.id}>
+                                  {brand.name}
+                                </option>
+                              ))}
+                            </Select>
+                            <Button
+                              type="button"
+                              size="sm"
+                              disabled={!formBrandId}
+                              onClick={() => {
+                                const selected = brands.find(
+                                  (brand) => brand.id === formBrandId,
+                                )
+                                if (!selected) return
+                                updateRequest(selectedRequest.id, {
+                                  brandId: selected.id,
+                                  brandDecidedAt: new Date().toISOString(),
+                                  brandDecidedBy: LOCAL_SELF_ID,
+                                })
+                                setFlashMessage(
+                                  `${selected.name} 브랜드로 확정했습니다.`,
+                                )
+                              }}
+                            >
+                              브랜드 확정
+                            </Button>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="mt-1 space-y-2">
+                        <p className="text-sm font-medium">
+                          {brandLabelForRequest(selectedRequest, brands)}
+                        </p>
+                        {brands.find((brand) => brand.id === selectedRequest.brandId) ? (
+                          <Link
+                            to={`/products?brands=${encodeURIComponent(brands.find((brand) => brand.id === selectedRequest.brandId)?.slug ?? '')}`}
+                            className="text-xs text-primary hover:underline"
+                          >
+                            브랜드 상품 보기
+                          </Link>
+                        ) : null}
+                        <p className="text-xs text-muted-foreground">
+                          연결된 데이터가 생긴 뒤에는 브랜드를 직접 바꾸지 않고
+                          잘못된 데이터를 중지한 뒤 올바른 브랜드에 새로 만듭니다.
+                        </p>
+                      </div>
+                    )}
                   </div>
-                  <div>
-                    <p className="text-xs text-muted-foreground">요청자</p>
+                  <div className="sm:col-span-2">
+                    <p className="text-xs text-muted-foreground">부서 요청자</p>
                     <p className="mt-1 text-sm font-medium">
-                      {selectedRequest.values.requester || '미입력'}
+                      {departmentLabel(selectedRequest.requesterDepartment)} ·{' '}
+                      {requesterLabel(selectedRequest)}
                     </p>
                   </div>
                   <div>
@@ -3143,12 +3649,30 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     <p className="mt-1 text-sm font-medium">
                       {formatDate(selectedRequest.values.dueDate)}
                     </p>
+                    {selectedRequest.values.deadlineType === 'fixed' ||
+                    !selectedRequest.confirmedDueDate ? (
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        {selectedRequest.values.deadlineType === 'fixed' ? (
+                          <Badge variant="danger">변경 불가</Badge>
+                        ) : null}
+                        {!selectedRequest.confirmedDueDate ? (
+                          <Badge variant={deadline.variant}>
+                            {deadline.label}
+                          </Badge>
+                        ) : null}
+                      </div>
+                    ) : null}
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">확정 마감일</p>
-                    <p className="mt-1 text-sm font-medium">
-                      {formatDate(selectedRequest.confirmedDueDate)}
-                    </p>
+                    <div className="mt-1 flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium">
+                        {formatDate(selectedRequest.confirmedDueDate)}
+                      </p>
+                      {selectedRequest.confirmedDueDate ? (
+                        <Badge variant={deadline.variant}>{deadline.label}</Badge>
+                      ) : null}
+                    </div>
                   </div>
                   <div>
                     <p className="text-xs text-muted-foreground">담당자</p>
@@ -3156,6 +3680,37 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                       {memberLabel(selectedRequest.assignee)}
                     </p>
                   </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground">작업 예정</p>
+                    <p className="mt-1 text-sm font-medium">
+                      {selectedRequest.plannedStart
+                        ? `${formatDate(requestPlannedRange(selectedRequest).start)} → ${formatDate(requestPlannedRange(selectedRequest).end)}`
+                        : '미배정'}
+                    </p>
+                  </div>
+                  {canManageSelected ? (
+                  <div>
+                    <p className="text-xs text-muted-foreground">실질 작업</p>
+                    <p className="mt-1 text-sm font-medium tabular-nums">
+                      {[
+                        selectedRequest.assignee,
+                        ...selectedRequest.collaborators,
+                      ]
+                        .filter(Boolean)
+                        .filter((id, index, list) => list.indexOf(id) === index)
+                        .map((memberId) => {
+                          const duration = workDurationLabel(
+                            memberId,
+                            selectedRequest.id,
+                          )
+                          const doing =
+                            currentWorkByMember[memberId] === selectedRequest.id
+                          return `${memberLabel(memberId)} ${duration}${doing ? ' · 지금 하는 중' : ''}`
+                        })
+                        .join(' / ') || '기록 없음'}
+                    </p>
+                  </div>
+                  ) : null}
                 </div>
                 {selectedRequest.collaborators.length > 0 ? (
                   <div>
@@ -3197,179 +3752,35 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     )
                   })}
                 </div>
-                {selectedRequest.values.referenceUrl ? (
-                  <a
-                    href={selectedRequest.values.referenceUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="block truncate text-sm text-primary underline-offset-4 hover:underline"
-                  >
-                    {selectedRequest.values.referenceUrl}
-                  </a>
+                {selectedRequest.values.referenceFiles.length > 0 ? (
+                  <div>
+                    <p className="text-xs text-muted-foreground">참고 파일</p>
+                    <div className="mt-2 space-y-2">
+                      {selectedRequest.values.referenceFiles.map((file) => (
+                        <FileAttachmentCard
+                          key={`${file.name}-${file.size}-${file.lastModified}`}
+                          file={file}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 ) : null}
               </CardContent>
             </Card>
           </div>
 
           <div className="space-y-6">
-            {canManageSelected ? (
+            {canManageSelected &&
+              selectedRequest.status === 'accepted' &&
+              !selectedRequest.assignee ? (
               <Card>
                 <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <UserRoundCheck className="size-4" />
-                    부서 관리자 처리
-                  </CardTitle>
+                  <CardTitle>미배정</CardTitle>
                   <CardDescription>
-                    요청자가 제시한 일정을 검토한 뒤 실제 처리 순서를
-                    결정하세요.
+                    팀 업무 일정표에서 사원 행으로 끌어다 놓으면 담당자와 작업
+                    예정 기간이 정해집니다.
                   </CardDescription>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <label className="block space-y-1.5">
-                    <span className="text-sm font-medium">상태</span>
-                    <Select
-                      className="w-full"
-                      value={selectedRequest.status}
-                      onChange={(event) =>
-                        updateManagerField(selectedRequest.id, {
-                          status: event.target.value as RequestStatus,
-                        })
-                      }
-                    >
-                      {Object.entries(STATUS_META).map(([value, meta]) => (
-                        <option key={value} value={value}>
-                          {meta.label}
-                        </option>
-                      ))}
-                    </Select>
-                  </label>
-                  <label className="block space-y-1.5">
-                    <span className="text-sm font-medium">부서 우선순위</span>
-                    <Select
-                      className="w-full"
-                      value={selectedRequest.managerPriority}
-                      onChange={(event) =>
-                        updateManagerField(selectedRequest.id, {
-                          managerPriority: event.target
-                            .value as ManagerPriority,
-                        })
-                      }
-                    >
-                      <option value="">검토 전</option>
-                      {Object.entries(PRIORITY_META).map(([value, meta]) => (
-                        <option key={value} value={value}>
-                          {meta.label}
-                        </option>
-                      ))}
-                    </Select>
-                    <span className="block text-xs text-muted-foreground">
-                      {selectedConfig.teamName} 작업 대기열 안에서의
-                      순서입니다.
-                    </span>
-                  </label>
-                  <label className="block space-y-1.5">
-                    <span className="text-sm font-medium">주 담당자</span>
-                    <Select
-                      className="w-full"
-                      value={selectedRequest.assignee}
-                      onChange={(event) =>
-                        updateManagerField(selectedRequest.id, {
-                          assignee: event.target.value,
-                          collaborators:
-                            selectedRequest.collaborators.filter(
-                              (id) => id !== event.target.value,
-                            ),
-                        })
-                      }
-                    >
-                      <option value="">미배정</option>
-                      {teamMembers.map((member) => (
-                        <option key={member.id} value={member.id}>
-                          {member.name}
-                          {member.isSelf ? ' (나)' : ''} · {member.position}
-                        </option>
-                      ))}
-                    </Select>
-                  </label>
-                  <fieldset className="space-y-2">
-                    <legend className="text-sm font-medium">협업자</legend>
-                    <div className="grid grid-cols-2 gap-2">
-                      {teamMembers
-                        .filter(
-                          (member) => member.id !== selectedRequest.assignee,
-                        )
-                        .map((member) => {
-                          const checked =
-                            selectedRequest.collaborators.includes(member.id)
-                          return (
-                            <label
-                              key={member.id}
-                              className={cn(
-                                'flex cursor-pointer items-center gap-2 rounded-md border px-3 py-2 text-sm',
-                                checked
-                                  ? 'border-primary bg-primary/5'
-                                  : 'border-border',
-                              )}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                className="size-4 accent-primary"
-                                onChange={() =>
-                                  updateManagerField(selectedRequest.id, {
-                                    collaborators: checked
-                                      ? selectedRequest.collaborators.filter(
-                                          (id) => id !== member.id,
-                                        )
-                                      : [
-                                          ...selectedRequest.collaborators,
-                                          member.id,
-                                        ],
-                                  })
-                                }
-                              />
-                              <span className="truncate">
-                                {member.name}
-                                {member.isSelf ? ' (나)' : ''}
-                              </span>
-                            </label>
-                          )
-                        })}
-                    </div>
-                  </fieldset>
-                  <label className="block space-y-1.5">
-                    <span className="text-sm font-medium">확정 마감일</span>
-                    <Input
-                      type="date"
-                      value={selectedRequest.confirmedDueDate}
-                      onChange={(event) =>
-                        updateManagerField(selectedRequest.id, {
-                          confirmedDueDate: event.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="block space-y-1.5">
-                    <span className="text-sm font-medium">관리자 메모</span>
-                    <Textarea
-                      rows={4}
-                      value={selectedRequest.managerNote}
-                      placeholder="일정 조정 사유나 처리 방향"
-                      onChange={(event) =>
-                        updateManagerField(selectedRequest.id, {
-                          managerNote: event.target.value,
-                        })
-                      }
-                    />
-                  </label>
-                  <Button
-                    type="button"
-                    className="w-full"
-                    onClick={() => saveManagerDecision(selectedRequest.id)}
-                  >
-                    처리 정보 저장
-                  </Button>
-                </CardContent>
               </Card>
             ) : (isPrimaryAssignee || isCollaborator) &&
               selectedRequest.owner === owner ? (
@@ -3387,30 +3798,51 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 </CardHeader>
                 {isPrimaryAssignee ? (
                   <CardContent className="space-y-3">
-                    <label className="block space-y-1.5">
-                      <span className="text-sm font-medium">진행 상태</span>
-                      <Select
-                        className="w-full"
-                        value={selectedRequest.status}
-                        onChange={(event) =>
-                          updateManagerField(selectedRequest.id, {
-                            status: event.target.value as RequestStatus,
-                          })
-                        }
-                      >
-                        <option value="accepted">시작 전</option>
-                        <option value="inProgress">진행 중</option>
-                        <option value="waiting">보류</option>
-                        <option value="completed">완료</option>
-                      </Select>
-                    </label>
-                    <p className="text-xs text-muted-foreground">
-                      완료 처리하면 내 업무 목록에서 완료 탭으로 이동합니다.
-                    </p>
+                    {isCompletionPending(selectedRequest.status) ? (
+                      <p className="text-sm text-muted-foreground">
+                        {selectedRequest.status === 'completionReview'
+                          ? '완료를 요청했습니다. 팀장 확인을 기다립니다.'
+                          : '팀장 확인이 끝났습니다. 요청자 확인을 기다립니다.'}
+                      </p>
+                    ) : (
+                      <>
+                        <label className="block space-y-1.5">
+                          <span className="text-sm font-medium">진행 상태</span>
+                          <Select
+                            className="w-full"
+                            value={selectedRequest.status}
+                            onChange={(event) =>
+                              updateRequest(selectedRequest.id, {
+                                status: event.target.value as RequestStatus,
+                              })
+                            }
+                          >
+                            <option value="accepted">시작 전</option>
+                            <option value="inProgress">진행 중</option>
+                            <option value="waiting">보류</option>
+                          </Select>
+                        </label>
+                        {selectedRequest.status === 'inProgress' ? (
+                          <Button
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => requestCompletion(selectedRequest)}
+                          >
+                            완료 요청
+                          </Button>
+                        ) : null}
+                        <p className="text-xs text-muted-foreground">
+                          완료 요청 후 팀장이 수락하고, 요청자가 결과를
+                          확인하면 완료됩니다. 팀장이 직접 맡은 일은 바로
+                          요청자 확인으로 갑니다.
+                        </p>
+                      </>
+                    )}
                   </CardContent>
                 ) : null}
               </Card>
-            ) : (
+            ) : !canManageSelected ? (
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -3418,66 +3850,29 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     부서 검토
                   </CardTitle>
                   <CardDescription>
-                    {selectedConfig.teamName} 관리자가 요청을 검토한 뒤
-                    우선순위, 담당자와 확정 마감일을 지정합니다.
+                    {selectedConfig.teamName} 관리자가 대화로 검토한 뒤
+                    수락하고 일정표에서 배정합니다.
                   </CardDescription>
                 </CardHeader>
-              </Card>
-            )}
-
-            {isSelfRequest ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle>보낸 요청 관리</CardTitle>
-                  <CardDescription>
-                    접수 전에는 내용을 수정하거나 삭제할 수 있습니다.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {canEdit ? (
-                    <>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full"
-                        onClick={() => openForm(selectedRequest)}
-                      >
-                        <Pencil className="size-4" />
-                        요청 수정
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="danger"
-                        className="w-full"
-                        onClick={() => deleteRequest(selectedRequest)}
-                      >
-                        <Trash2 className="size-4" />
-                        요청 삭제
-                      </Button>
-                    </>
-                  ) : selectedRequest.status !== 'completed' &&
-                    selectedRequest.status !== 'cancelled' ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full"
-                      onClick={() => cancelRequest(selectedRequest)}
-                    >
-                      요청 취소
-                    </Button>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">
-                      현재 상태에서는 수정하거나 삭제할 수 없습니다.
-                    </p>
-                  )}
-                  <p className="pt-2 text-xs text-muted-foreground">
-                    최종 수정 {formatDateTime(selectedRequest.updatedAt)}
-                  </p>
-                </CardContent>
               </Card>
             ) : null}
+
+            <WorkRequestChat
+              className="h-[32rem]"
+              requestId={selectedRequest.id}
+              rooms={chatRooms}
+              messages={selectedRequest.messages}
+              selfId={LOCAL_SELF_ID}
+              canWrite={canWriteChat(selectedRequest)}
+              onSend={(body, roomId) =>
+                addMessage(selectedRequest.id, body, roomId)
+              }
+            />
+
           </div>
         </div>
+        </div>
+      </aside>
       </div>
     )
   }
@@ -3509,6 +3904,26 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
         <Card>
           <CardContent className="space-y-5 p-5">
+            <label className="block space-y-1.5">
+              <span className="text-sm font-medium">브랜드 (선택)</span>
+              <Select
+                value={formBrandId}
+                onChange={(e) => setFormBrandId(e.target.value)}
+                disabled={Boolean(editingRequest?.brandId)}
+              >
+                <option value="">브랜드 미정</option>
+                {brands.map((brand) => (
+                  <option key={brand.id} value={brand.id}>
+                    {brand.name}
+                  </option>
+                ))}
+              </Select>
+              <span className="block text-xs text-muted-foreground">
+                상품·기획안은 브랜드를 확정한 뒤에만 만듭니다. 이미 연결된
+                데이터가 있으면 브랜드를 직접 바꾸지 않습니다.
+              </span>
+            </label>
+
             <label className="block space-y-1.5">
               <span className="flex items-center gap-1 text-sm font-medium">
                 요청 제목 <span className="text-danger">*</span>
@@ -3648,17 +4063,10 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               onChange={(blocks) => updateValue('blocks', blocks)}
             />
 
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium">참고 페이지 주소</span>
-              <Input
-                type="url"
-                value={values.referenceUrl}
-                placeholder="https://…"
-                onChange={(event) =>
-                  updateValue('referenceUrl', event.target.value)
-                }
-              />
-            </label>
+            <ReferenceFilesField
+              files={values.referenceFiles}
+              onChange={(files) => updateValue('referenceFiles', files)}
+            />
           </CardContent>
         </Card>
 
@@ -3682,10 +4090,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
 export function WorkRequestPage() {
   const { owner = '' } = useParams()
-  const { brandSlug } = useBrand()
 
   if (!isWorkRequestOwner(owner)) {
-    return <Navigate to={`/b/${brandSlug}`} replace />
+    return <Navigate to="/work" replace />
   }
 
   return <WorkRequestForm key={owner} owner={owner} />

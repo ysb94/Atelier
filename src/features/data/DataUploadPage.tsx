@@ -150,7 +150,7 @@ export function DataUploadPage() {
       {kind === 'products' ? (
         <ProductImportWorkspace
           embedded
-          successPath={`/b/${brand.slug}/data/all`}
+          successPath={`/data/all?brands=${encodeURIComponent(brand.slug)}`}
           successLabel="데이터 시트로 보기"
         />
       ) : null}
@@ -168,7 +168,7 @@ export function DataUploadPage() {
                 <p className="text-sm text-muted-foreground">
                   출고업체를 만든 뒤 자사 바코드를 일괄 연결할 수 있습니다.
                 </p>
-                <Link to={`/b/${brand.slug}/settings/usage-targets`}>
+                <Link to={`/settings/usage-targets?brand=${encodeURIComponent(brand.slug)}`}>
                   <Button type="button" size="sm">
                     출고업체 관리
                   </Button>
@@ -182,7 +182,7 @@ export function DataUploadPage() {
                 <p className="text-sm text-muted-foreground">
                   출고업체 연결 전에 자사 바코드 마스터를 먼저 등록하세요.
                 </p>
-                <Link to={`/b/${brand.slug}/barcodes`}>
+                <Link to={`/barcodes?brands=${encodeURIComponent(brand.slug)}`}>
                   <Button type="button" size="sm">
                     88바코드 관리로 이동
                   </Button>
@@ -240,7 +240,7 @@ export function DataUploadPage() {
                 <p className="text-sm text-muted-foreground">
                   바코드에 연결할 M번호가 필요합니다. 상품을 먼저 등록하세요.
                 </p>
-                <Link to={`/b/${brand.slug}/data/upload`}>
+                <Link to={`/data/upload?brand=${encodeURIComponent(brand.slug)}`}>
                   <Button type="button" size="sm">
                     상품 일괄 업로드
                   </Button>
@@ -264,14 +264,14 @@ export function DataUploadPage() {
               <p className="text-sm text-muted-foreground">
                 M번호 없이 올린 바코드는{' '}
                 <Link
-                  to={`/b/${brand.slug}/barcodes`}
+                  to={`/barcodes?brands=${encodeURIComponent(brand.slug)}`}
                   className="underline underline-offset-2"
                 >
                   자사 바코드 · M번호 미지정
                 </Link>
                 탭에서 채울 수 있습니다. 엑셀 헤더는 88바코드 관리 화면의{' '}
                 <Link
-                  to={`/b/${brand.slug}/barcodes`}
+                  to={`/barcodes?brands=${encodeURIComponent(brand.slug)}`}
                   className="underline underline-offset-2"
                 >
                   항목 관리
@@ -293,7 +293,7 @@ export function DataUploadPage() {
               거래처 코드 화면에서 단건으로 등록할 수 있습니다. 상품·출고업체
               업로드가 먼저 준비되어 있습니다.
             </p>
-            <Link to={`/b/${brand.slug}/partner-codes`}>
+            <Link to={`/partner-codes?brands=${encodeURIComponent(brand.slug)}`}>
               <Button type="button" size="sm">
                 거래처 코드 화면
               </Button>

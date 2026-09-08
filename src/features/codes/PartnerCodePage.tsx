@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Settings2 } from 'lucide-react'
 import { useBrand } from '@/components/layout/brand-context'
+import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
+import { CompanyPartnerCodeList } from '@/features/workspace/company-operation-lists'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -395,5 +397,13 @@ export function PartnerCodePage() {
         />
       ) : null}
     </div>
+  )
+}
+
+export function CompanyPartnerCodePage() {
+  return (
+    <SingleBrandOrList list={<CompanyPartnerCodeList />}>
+      <PartnerCodePage />
+    </SingleBrandOrList>
   )
 }

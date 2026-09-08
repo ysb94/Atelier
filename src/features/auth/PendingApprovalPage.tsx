@@ -1,10 +1,5 @@
-import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
-import {
-  listBrandDirectory,
-  type Profile,
-} from '@/lib/supabase/profiles'
+import { capabilityLabel } from '@/lib/company/capabilities'
 import { Button } from '@/components/ui/button'
 
 type PendingApprovalPageProps = {
@@ -12,26 +7,11 @@ type PendingApprovalPageProps = {
   onEditRequest?: () => void
 }
 
-function brandNames(
-  profile: Profile,
-  directory: { id: string; name: string }[],
-) {
-  const byId = new Map(directory.map((b) => [b.id, b.name]))
-  return profile.memberships
-    .map((m) => byId.get(m.brandId) ?? m.brandId.slice(0, 8))
-    .join(', ')
-}
-
 export function PendingApprovalPage({
   mode,
   onEditRequest,
 }: PendingApprovalPageProps) {
   const { profile, email, signOut, refreshProfile } = useAuth()
-  const brandsQuery = useQuery({
-    queryKey: ['brand-directory'],
-    queryFn: listBrandDirectory,
-  })
-  const brands = useMemo(() => brandsQuery.data ?? [], [brandsQuery.data])
 
   const title =
     mode === 'pending'
@@ -42,16 +22,16 @@ export function PendingApprovalPage({
 
   const description =
     mode === 'pending'
-      ? '담당 브랜드 팀장이나 운영진이 확인하면 작업장에 들어갈 수 있습니다.'
+      ? '관리자 또는 팀장·이사가 확인하면 E&J 홈에 들어갈 수 있습니다.'
       : mode === 'rejected'
         ? '내용을 수정해 다시 신청하거나, 운영진에게 문의해 주세요.'
-        : '운영진에게 문의해 주세요. 정지 해제 전에는 작업장에 들어갈 수 없습니다.'
+        : '운영진에게 문의해 주세요. 정지 해제 전에는 회사에 들어갈 수 없습니다.'
 
   return (
     <div className="flex min-h-full items-center justify-center bg-background px-6 py-12">
       <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-sm">
         <p className="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-          Atelier
+          E&J
         </p>
         <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
         <p className="mt-2 text-sm text-muted-foreground">{description}</p>
@@ -77,9 +57,11 @@ export function PendingApprovalPage({
               <dd className="text-right">{profile.position ?? '-'}</dd>
             </div>
             <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">담당 브랜드</dt>
+              <dt className="text-muted-foreground">업무 역량</dt>
               <dd className="text-right">
-                {brandNames(profile, brands) || '-'}
+                {profile.capabilities.length > 0
+                  ? profile.capabilities.map(capabilityLabel).join(', ')
+                  : '-'}
               </dd>
             </div>
             {profile.requestNote ? (

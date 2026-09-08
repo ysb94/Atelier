@@ -3,6 +3,7 @@ import type {
   DraftOptionRow,
   ProductDraftInput,
 } from '@/lib/types'
+import { newSampleWorkOrder } from '@/lib/drafts/sample-work-order'
 
 /** 기획안에서 최대 몇 색까지 잡는지. 기획 시트가 9줄이다. */
 export const MAX_DRAFT_COLORS = 9
@@ -15,7 +16,7 @@ function newId(prefix: string) {
 }
 
 export function newColorRow(): DraftColorRow {
-  return { id: newId('color'), name: '', orderQty: null }
+  return { id: newId('color'), name: '', orderQty: null, sampleInProgress: false }
 }
 
 export function newOptionRow(): DraftOptionRow {
@@ -24,15 +25,20 @@ export function newOptionRow(): DraftOptionRow {
 
 export function emptyDraftInput(): ProductDraftInput {
   return {
+    brandId: null,
     seasonId: null,
     status: 'open',
     owner: '',
     nameKo: '',
     nameEn: '',
     imageUrl: null,
+    sampleWorkOrderUrl: null,
+    sampleWorkOrderName: '',
+    sampleWorkOrders: [newSampleWorkOrder(1)],
     colors: [newColorRow()],
     sampleDone: false,
     orderDone: false,
+    orderInProgress: false,
     photoSampleDone: false,
     held: false,
     holdReason: '',

@@ -173,14 +173,12 @@ export function useAuth(): AuthState {
   return value
 }
 
-/** 담당 브랜드 여부. 관리자는 전부 통과 */
+/** 승인된 E&J 직원은 모든 브랜드 데이터를 회사 셸에서 볼 수 있다. */
 export function canAccessBrand(
   profile: Profile | null,
-  brandId: string,
+  _brandId?: string,
 ): boolean {
-  if (!profile || profile.status !== 'active') return false
-  if (profile.isAdmin) return true
-  return profile.memberships.some((m) => m.brandId === brandId)
+  return Boolean(profile && profile.status === 'active')
 }
 
 export function isBrandLead(

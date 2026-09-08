@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createColumnHelper,
   flexRender,
@@ -23,7 +23,9 @@ import {
   useParams,
   useSearchParams,
 } from 'react-router-dom'
-import { useBrand } from '@/components/layout/brand-context'
+import { useOptionalBrand } from '@/components/layout/brand-context'
+import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
+import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { useAuth } from '@/lib/supabase/auth'
 import { DepartmentProductLoadDialog } from '@/features/products/DepartmentProductLoadDialog'
 import { useDepartmentWorkSet } from '@/features/products/useDepartmentWorkSet'
@@ -60,12 +62,22 @@ import {
   SEASON_STATUS_LABEL,
   STYLE_STATUS_LABEL,
   formatSeasonLabel,
+  type Brand,
   type BrandField,
   type FieldOwner,
   type Season,
   type Style,
   type StyleStatus,
 } from '@/lib/types'
+import {
+  resolveBrandSelection,
+  serializeBrandSelection,
+} from '@/lib/products/company-brand-filter'
+import {
+  dataUploadHref,
+  productDetailPath,
+  productWorkDetailPath,
+} from '@/lib/workspace/company-paths'
 import { cn, formatNumber } from '@/lib/utils'
 import { summarizeWarehouseStockByStyle } from '@/lib/warehouse/stock'
 
@@ -420,23 +432,47 @@ function buildPageItems(
 
 export function ProductsPage({
   lockedOwner,
+  persistQueryKeys = [],
+  companyBrands,
 }: {
   lockedOwner?: FieldOwner
+  persistQueryKeys?: string[]
+  companyBrands?: Brand[]
 } = {}) {
-  const { brand } = useBrand()
+  const brandContext = useOptionalBrand()
+  const scopedBrand = brandContext?.brand
+  const isCompany = Boolean(companyBrands)
   const { profile } = useAuth()
   const navigate = useNavigate()
-  const { styleNo: activeStyleNoParam } = useParams()
+  const { brandSlug: activeBrandSlug, styleNo: activeStyleNoParam } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
   const activeStyleNo = activeStyleNoParam
     ? decodeURIComponent(activeStyleNoParam)
     : null
 
+  const availableSlugs = (companyBrands ?? []).map((item) => item.slug)
+  const brandSelection = resolveBrandSelection(
+    searchParams.get('brands'),
+    availableSlugs,
+  )
+  const selectedBrands = (companyBrands ?? []).filter((item) =>
+    brandSelection.slugs.includes(item.slug),
+  )
+  const singleCompanyBrand = brandSelection.canEdit
+    ? selectedBrands[0]
+    : undefined
+  const brandFilterValue =
+    !isCompany || brandSelection.isAll || selectedBrands.length !== 1
+      ? 'all'
+      : selectedBrands[0].slug
+
   const search = searchParams.get('q') ?? ''
   const seasonId = searchParams.get('season') ?? 'all'
   const statusFilter = searchParams.get('status') ?? 'all'
   const categoryFilter = searchParams.get('category') ?? 'all'
-  const columnPreset = lockedOwner ?? parseColumnPreset(searchParams.get('cols'))
+  const requestedPreset = lockedOwner ?? parseColumnPreset(searchParams.get('cols'))
+  const columnPreset =
+    isCompany && !singleCompanyBrand ? 'all' : requestedPreset
   const emptyFilterKey = searchParams.get('empty')
   const pageSize = parsePageSize(searchParams.get('size'))
   const page = parsePage(searchParams.get('page'))
@@ -445,41 +481,67 @@ export function ProductsPage({
   const [searchDraft, setSearchDraft] = useState(search)
   const [isSearchComposing, setIsSearchComposing] = useState(false)
   const [loadOpen, setLoadOpen] = useState(false)
-  const workSet = useDepartmentWorkSet(profile?.id, brand.id, lockedOwner)
-
-  const listBasePath = lockedOwner
-    ? `/b/${brand.slug}/work/${lockedOwner}`
-    : `/b/${brand.slug}/products`
+  const workBrandIds = isCompany
+    ? selectedBrands.map((item) => item.id)
+    : scopedBrand
+      ? [scopedBrand.id]
+      : []
+  const workSet = useDepartmentWorkSet(profile?.id, workBrandIds, lockedOwner)
 
   const fieldsQuery = useQuery({
-    queryKey: ['brand-fields', brand.id],
-    queryFn: () => getBrandFields(brand.id),
+    queryKey: ['brand-fields', scopedBrand?.id],
+    queryFn: () => getBrandFields(scopedBrand!.id),
+    enabled: !isCompany && Boolean(scopedBrand?.id),
   })
 
   const seasonsQuery = useQuery({
-    queryKey: ['seasons', brand.id],
-    queryFn: () => getSeasonsByBrand(brand.id),
+    queryKey: ['seasons', scopedBrand?.id],
+    queryFn: () => getSeasonsByBrand(scopedBrand!.id),
+    enabled: !isCompany && Boolean(scopedBrand?.id),
   })
 
   const stylesQuery = useQuery({
-    queryKey: ['styles', brand.id, 'products'],
-    queryFn: () => getStylesByBrand(brand.id),
+    queryKey: ['styles', scopedBrand?.id, 'products'],
+    queryFn: () => getStylesByBrand(scopedBrand!.id),
+    enabled: !isCompany && Boolean(scopedBrand?.id),
   })
 
-  const needsWarehouseStock = columnPreset === 'logistics'
+  const companyFieldQueries = useQueries({
+    queries: selectedBrands.map((item) => ({
+      queryKey: ['brand-fields', item.id] as const,
+      queryFn: () => getBrandFields(item.id),
+    })),
+  })
+  const companySeasonQueries = useQueries({
+    queries: selectedBrands.map((item) => ({
+      queryKey: ['seasons', item.id] as const,
+      queryFn: () => getSeasonsByBrand(item.id),
+    })),
+  })
+  const companyStyleQueries = useQueries({
+    queries: selectedBrands.map((item) => ({
+      queryKey: ['styles', item.id, 'products'] as const,
+      queryFn: () => getStylesByBrand(item.id),
+    })),
+  })
+
+  const stockBrandId = isCompany
+    ? (singleCompanyBrand?.id ?? '')
+    : (scopedBrand?.id ?? '')
+  const needsWarehouseStock = columnPreset === 'logistics' && Boolean(stockBrandId)
   const warehouseSetQuery = useQuery({
-    queryKey: ['warehouse-inventory-set', brand.id],
-    queryFn: () => getActiveWarehouseInventorySet(brand.id),
+    queryKey: ['warehouse-inventory-set', stockBrandId],
+    queryFn: () => getActiveWarehouseInventorySet(stockBrandId),
     enabled: needsWarehouseStock,
   })
   const warehousePositionsQuery = useQuery({
     queryKey: [
       'warehouse-stock-positions',
-      brand.id,
+      stockBrandId,
       warehouseSetQuery.data?.id,
     ],
     queryFn: () =>
-      getWarehouseStockPositions(brand.id, warehouseSetQuery.data!.id),
+      getWarehouseStockPositions(stockBrandId, warehouseSetQuery.data!.id),
     enabled: needsWarehouseStock && Boolean(warehouseSetQuery.data?.id),
   })
   const stockByStyle = useMemo(
@@ -493,12 +555,56 @@ export function ProductsPage({
       (Boolean(warehouseSetQuery.data?.id) &&
         warehousePositionsQuery.isPending))
 
-  const fields = useMemo(() => fieldsQuery.data ?? [], [fieldsQuery.data])
-  const seasons = useMemo(() => seasonsQuery.data ?? [], [seasonsQuery.data])
-  const catalogStyles = useMemo(
-    () => stylesQuery.data ?? [],
-    [stylesQuery.data],
+  const brandMap = useMemo(
+    () => new Map((companyBrands ?? []).map((item) => [item.id, item])),
+    [companyBrands],
   )
+  const fieldsByBrand = useMemo(() => {
+    const map = new Map<string, BrandField[]>()
+    if (isCompany) {
+      selectedBrands.forEach((item, index) => {
+        map.set(item.id, companyFieldQueries[index]?.data ?? [])
+      })
+    } else if (scopedBrand) {
+      map.set(scopedBrand.id, fieldsQuery.data ?? [])
+    }
+    return map
+  }, [
+    companyFieldQueries,
+    fieldsQuery.data,
+    isCompany,
+    scopedBrand,
+    selectedBrands,
+  ])
+  const fields = useMemo(() => {
+    if (singleCompanyBrand) {
+      return fieldsByBrand.get(singleCompanyBrand.id) ?? []
+    }
+    if (!isCompany && scopedBrand) {
+      return fieldsByBrand.get(scopedBrand.id) ?? []
+    }
+    return []
+  }, [fieldsByBrand, isCompany, scopedBrand, singleCompanyBrand])
+  const seasons = useMemo(() => {
+    if (isCompany) {
+      return companySeasonQueries.flatMap((query) => query.data ?? [])
+    }
+    return seasonsQuery.data ?? []
+  }, [companySeasonQueries, isCompany, seasonsQuery.data])
+  const catalogStyles = useMemo(() => {
+    if (isCompany) {
+      return companyStyleQueries
+        .flatMap((query) => query.data ?? [])
+        .slice()
+        .sort((left, right) => left.styleNo.localeCompare(right.styleNo, 'ko'))
+    }
+    return stylesQuery.data ?? []
+  }, [companyStyleQueries, isCompany, stylesQuery.data])
+  const failedBrandNames = isCompany
+    ? selectedBrands
+        .filter((_, index) => companyStyleQueries[index]?.isError)
+        .map((item) => item.name)
+    : []
   const allStyles = useMemo(() => {
     if (!lockedOwner) return catalogStyles
     return catalogStyles.filter((style) => workSet.idSet.has(style.id))
@@ -506,7 +612,13 @@ export function ProductsPage({
   const workSetEmpty = Boolean(lockedOwner && workSet.ids.length === 0)
   const listLoading =
     !workSetEmpty &&
-    (stylesQuery.isLoading || fieldsQuery.isLoading || seasonsQuery.isLoading)
+    (isCompany
+      ? companyStyleQueries.some((query) => query.isLoading) ||
+        companyFieldQueries.some((query) => query.isLoading) ||
+        companySeasonQueries.some((query) => query.isLoading)
+      : stylesQuery.isLoading ||
+        fieldsQuery.isLoading ||
+        seasonsQuery.isLoading)
 
   const seasonMap = useMemo(
     () => new Map(seasons.map((s) => [s.id, s])),
@@ -542,10 +654,11 @@ export function ProductsPage({
       if (categoryFilter !== 'all' && style.category !== categoryFilter) {
         return false
       }
+      const season = seasonMap.get(style.seasonId)
       return styleMatchesSearch(
         style,
         keyword,
-        seasonMap.get(style.seasonId)?.code,
+        season ? formatSeasonLabel(season) : undefined,
       )
     })
   }, [
@@ -602,7 +715,8 @@ export function ProductsPage({
     (!lockedOwner && columnPreset !== 'all') ||
     Boolean(emptyFilterKey) ||
     pageSize !== DEFAULT_PAGE_SIZE ||
-    page !== 1
+    page !== 1 ||
+    (isCompany && !brandSelection.isAll)
 
   useEffect(() => {
     if (page === safePage) return
@@ -657,7 +771,37 @@ export function ProductsPage({
   }, [isSearchComposing, patchParams, search, searchDraft])
 
   function resetFilters() {
-    setSearchParams({}, { replace: true })
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams()
+        for (const key of persistQueryKeys) {
+          const value = prev.get(key)
+          if (value != null) next.set(key, value)
+        }
+        return next
+      },
+      { replace: true },
+    )
+  }
+
+  function patchBrandFilter(slug: string) {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        const serialized =
+          slug === 'all'
+            ? serializeBrandSelection(availableSlugs, availableSlugs)
+            : serializeBrandSelection([slug], availableSlugs)
+        if (serialized == null) next.delete('brands')
+        else next.set('brands', serialized)
+        next.delete('page')
+        next.delete('season')
+        next.delete('cols')
+        next.delete('empty')
+        return next
+      },
+      { replace: true },
+    )
   }
 
   const saveMutation = useMutation({
@@ -670,7 +814,16 @@ export function ProductsPage({
     }) => updateStyleFields(styleId, patch),
     onSuccess: async () => {
       setSaveError(null)
-      await queryClient.invalidateQueries({ queryKey: ['styles', brand.id] })
+      const ids = isCompany
+        ? selectedBrands.map((item) => item.id)
+        : scopedBrand
+          ? [scopedBrand.id]
+          : []
+      await Promise.all(
+        ids.map((id) =>
+          queryClient.invalidateQueries({ queryKey: ['styles', id] }),
+        ),
+      )
     },
     onError: (error) => {
       setSaveError(
@@ -687,15 +840,41 @@ export function ProductsPage({
     [saveMutation],
   )
 
-  const styleNoLabel =
-    fields.find((field) => field.systemKey === 'styleNo')?.label || '품번'
-  const nameLabel =
-    fields.find((field) => field.systemKey === 'name')?.label || '상품명'
+  const styleNoLabel = isCompany
+    ? 'M번호'
+    : fields.find((field) => field.systemKey === 'styleNo')?.label || '품번'
+  const nameLabel = isCompany
+    ? '상품명'
+    : fields.find((field) => field.systemKey === 'name')?.label || '상품명'
 
-  const hasImageField = fields.some(isImageField)
+  const hasImageField = isCompany
+    ? Array.from(fieldsByBrand.values()).some((list) => list.some(isImageField))
+    : fields.some(isImageField)
+  const registerSlug = singleCompanyBrand?.slug ?? scopedBrand?.slug
+  const showDepartmentViews = Boolean(
+    lockedOwner || !isCompany || singleCompanyBrand,
+  )
 
   const columns = useMemo(() => {
     const base = [
+      ...(isCompany
+        ? [
+            columnHelper.display({
+              id: 'brand',
+              header: '브랜드',
+              cell: ({ row }) => {
+                const item = brandMap.get(row.original.brandId)
+                if (!item) return '—'
+                return (
+                  <span className="flex items-center gap-2">
+                    <BrandAvatar brand={item} className="size-6" />
+                    <span>{item.name}</span>
+                  </span>
+                )
+              },
+            }),
+          ]
+        : []),
       ...(hasImageField
         ? [
             columnHelper.display({
@@ -734,7 +913,7 @@ export function ProductsPage({
                 size="sm"
                 onClick={(event) => {
                   event.stopPropagation()
-                  workSet.remove(row.original.id)
+                  workSet.remove(row.original.id, row.original.brandId)
                 }}
               >
                 <X className="size-3.5" />
@@ -770,7 +949,10 @@ export function ProductsPage({
           id: 'completeness',
           header: '완성도',
           cell: ({ row }) => (
-            <CompletenessDots style={row.original} fields={fields} />
+            <CompletenessDots
+              style={row.original}
+              fields={fieldsByBrand.get(row.original.brandId) ?? fields}
+            />
           ),
         }),
         ...unloadColumn,
@@ -878,9 +1060,12 @@ export function ProductsPage({
       ...unloadColumn,
     ]
   }, [
+    brandMap,
     columnPreset,
     fields,
+    fieldsByBrand,
     hasImageField,
+    isCompany,
     lockedOwner,
     ownerFields,
     seasonMap,
@@ -898,6 +1083,7 @@ export function ProductsPage({
     data: pageStyles,
     columns,
     getCoreRowModel: getCoreRowModel(),
+    getRowId: (row) => `${row.brandId}:${row.id}`,
   })
 
   const querySuffix = searchParams.toString()
@@ -912,7 +1098,9 @@ export function ProductsPage({
         description={
           lockedOwner
             ? `${OWNER_LABEL[lockedOwner]} 화면은 지금 필요한 상품만 불러 채웁니다. 처음에는 비어 있고, 표에서 칸을 눌러 바로 입력할 수 있습니다.`
-            : `${brand.name} 브랜드의 상품 마스터입니다. 보기를 부서로 바꾸면 그 부서 항목만 열로 보이고 표에서 바로 입력할 수 있습니다.`
+            : isCompany
+              ? 'E&J 회사 상품을 한 목록에서 봅니다. 브랜드는 필터와 열로만 구분합니다.'
+              : `${scopedBrand?.name} 브랜드의 상품 마스터입니다. 보기를 부서로 바꾸면 그 부서 항목만 열로 보이고 표에서 바로 입력할 수 있습니다.`
         }
         actions={
           lockedOwner ? (
@@ -920,10 +1108,18 @@ export function ProductsPage({
               <Plus className="size-4" />
               상품 불러오기
             </Button>
-          ) : (
-            <Link to={`/b/${brand.slug}/data/upload?mode=single`}>
+          ) : registerSlug ? (
+            <Link to={dataUploadHref(registerSlug, { mode: 'single' })}>
               <Button type="button">+ 상품 등록</Button>
             </Link>
+          ) : (
+            <Button
+              type="button"
+              disabled
+              title="등록할 브랜드를 하나만 고르세요"
+            >
+              + 상품 등록
+            </Button>
           )
         }
       />
@@ -940,20 +1136,39 @@ export function ProductsPage({
             setSearchDraft(event.currentTarget.value)
             setIsSearchComposing(false)
           }}
-        />
+            />
+        {isCompany && (companyBrands?.length ?? 0) > 0 ? (
+          <Select
+            value={brandFilterValue}
+            onChange={(e) => patchBrandFilter(e.target.value)}
+          >
+            <option value="all">전체 브랜드</option>
+            {companyBrands?.map((item) => (
+              <option key={item.id} value={item.slug}>
+                {item.name}
+              </option>
+            ))}
+          </Select>
+        ) : null}
         <Select
           value={seasonId}
           onChange={(e) => patchParams({ season: e.target.value })}
         >
           <option value="all">전체 출시 기획</option>
-          {seasons.map((s) => (
-            <option key={s.id} value={s.id}>
-              {formatSeasonLabel(s)}
-              {s.status === 'archived'
-                ? ` · ${SEASON_STATUS_LABEL[s.status]}`
-                : ''}
-            </option>
-          ))}
+          {seasons.map((s) => {
+            const seasonBrand = brandMap.get(s.brandId)
+            const label = formatSeasonLabel(s)
+            return (
+              <option key={s.id} value={s.id}>
+                {isCompany && selectedBrands.length > 1 && seasonBrand
+                  ? `${seasonBrand.name} · ${label}`
+                  : label}
+                {s.status === 'archived'
+                  ? ` · ${SEASON_STATUS_LABEL[s.status]}`
+                  : ''}
+              </option>
+            )
+          })}
         </Select>
         <Select
           value={statusFilter}
@@ -977,7 +1192,7 @@ export function ProductsPage({
             </option>
           ))}
         </Select>
-        {lockedOwner ? null : (
+        {showDepartmentViews && !lockedOwner ? (
           <Select
             value={columnPreset}
             onChange={(e) =>
@@ -992,7 +1207,7 @@ export function ProductsPage({
               </option>
             ))}
           </Select>
-        )}
+        ) : null}
         <Select
           value={String(pageSize)}
           onChange={(e) => patchParams({ size: e.target.value })}
@@ -1056,6 +1271,13 @@ export function ProductsPage({
               : '· 표에서 칸을 눌러 바로 입력할 수 있습니다'}
           </span>
         </div>
+      ) : null}
+
+      {failedBrandNames.length > 0 ? (
+        <p className="mb-4 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
+          {failedBrandNames.join(', ')} 상품을 불러오지 못했습니다. 나머지
+          브랜드는 표시합니다.
+        </p>
       ) : null}
 
       {saveError ? (
@@ -1127,18 +1349,24 @@ export function ProductsPage({
                         첫 상품을 추가하세요. 기획안에서 확정한 뒤 상품으로
                         올리는 흐름도 사용할 수 있습니다.
                       </p>
-                      <div className="flex flex-wrap items-center justify-center gap-2">
-                        <Link to={`/b/${brand.slug}/data/upload?mode=single`}>
-                          <Button type="button" size="sm">
-                            한건 등록
-                          </Button>
-                        </Link>
-                        <Link to={`/b/${brand.slug}/data/upload`}>
-                          <Button type="button" size="sm" variant="outline">
-                            일괄 가져오기
-                          </Button>
-                        </Link>
-                      </div>
+                      {registerSlug ? (
+                        <div className="flex flex-wrap items-center justify-center gap-2">
+                          <Link to={dataUploadHref(registerSlug, { mode: 'single' })}>
+                            <Button type="button" size="sm">
+                              한건 등록
+                            </Button>
+                          </Link>
+                          <Link to={dataUploadHref(registerSlug)}>
+                            <Button type="button" size="sm" variant="outline">
+                              일괄 가져오기
+                            </Button>
+                          </Link>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          등록할 브랜드를 필터에서 하나만 고르세요.
+                        </p>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -1153,15 +1381,27 @@ export function ProductsPage({
                 </tr>
               ) : (
                 table.getRowModel().rows.map((row) => {
-                  const isActive = activeStyleNo === row.original.styleNo
+                  const rowBrand = brandMap.get(row.original.brandId)
+                  const rowBrandSlug = rowBrand?.slug ?? scopedBrand?.slug ?? ''
+                  const isActive =
+                    (activeBrandSlug
+                      ? activeBrandSlug === rowBrandSlug
+                      : !isCompany) &&
+                    activeStyleNo === row.original.styleNo
+                  const detailPath = lockedOwner
+                    ? productWorkDetailPath(
+                        lockedOwner,
+                        rowBrandSlug,
+                        row.original.styleNo,
+                      )
+                    : productDetailPath(rowBrandSlug, row.original.styleNo)
                   return (
                     <tr
                       key={row.id}
-                      onClick={() =>
-                        navigate(
-                          `${listBasePath}/${encodeURIComponent(row.original.styleNo)}${detailQuery}`,
-                        )
-                      }
+                      onClick={() => {
+                        if (isCompany && !rowBrand) return
+                        navigate(`${detailPath}${detailQuery}`)
+                      }}
                       className={cn(
                         'cursor-pointer border-b border-border last:border-0 transition-colors',
                         isActive ? 'bg-accent/60' : 'hover:bg-muted/40',
@@ -1284,7 +1524,12 @@ export function ProductsPage({
           alreadyIds={workSet.idSet}
           loading={stylesQuery.isLoading}
           onClose={() => setLoadOpen(false)}
-          onAdd={workSet.add}
+          onAdd={(styleIds) =>
+            workSet.add(
+              styleIds,
+              new Map(catalogStyles.map((style) => [style.id, style.brandId])),
+            )
+          }
         />
       ) : null}
 
@@ -1296,8 +1541,19 @@ export function ProductsPage({
 /** 부서 화면 — 필요한 상품만 불러 그 부서 항목을 채운다. */
 export function DepartmentProductsPage() {
   const { owner } = useParams()
+  const scope = useCompanyBrandScope()
   if (!owner || !OWNER_PRESETS.includes(owner as (typeof OWNER_PRESETS)[number])) {
-    return <Navigate to=".." replace />
+    return <Navigate to="/" replace />
   }
-  return <ProductsPage lockedOwner={owner as FieldOwner} />
+  if (scope.loading) {
+    return (
+      <p className="text-sm text-muted-foreground">브랜드를 불러오는 중...</p>
+    )
+  }
+  return (
+    <ProductsPage
+      lockedOwner={owner as FieldOwner}
+      companyBrands={scope.brands}
+    />
+  )
 }

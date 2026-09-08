@@ -9,6 +9,11 @@ import {
   isSameDepartment,
   resolveWorkRequestViewRole,
 } from './work-request-form-config'
+import {
+  needsLeadCompletionReview,
+  nextCompletionStatus,
+  type WorkRequestRecord,
+} from './work-request-types'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -62,5 +67,23 @@ assert(
   resolveWorkRequestViewRole('logistics', 'VisualTeam', '팀장') === 'requester',
   'VisualTeam이 물류 요청함에 들어가면 요청자',
 )
+assert(
+  resolveWorkRequestViewRole('design', '물류', '사원', ['design']) === 'employee',
+  '부서가 달라도 디자인 역량이 있으면 수신 부서',
+)
+
+const selfAssigned = {
+  assignee: 'local-self',
+  assignedBy: 'local-self',
+} as WorkRequestRecord
+const leadAssigned = {
+  assignee: 'member-min',
+  assignedBy: 'local-self',
+} as WorkRequestRecord
+
+assert(!needsLeadCompletionReview(selfAssigned), '팀장이 직접 맡은 일은 팀장 확인을 건너뛴다')
+assert(needsLeadCompletionReview(leadAssigned), '사원에게 준 일은 팀장 확인이 필요하다')
+assert(nextCompletionStatus(selfAssigned) === 'completionConfirm', '직접 맡은 일은 요청자 확인으로')
+assert(nextCompletionStatus(leadAssigned) === 'completionReview', '사원 일은 팀장 확인으로')
 
 console.log('work-request-roles.verify ok')

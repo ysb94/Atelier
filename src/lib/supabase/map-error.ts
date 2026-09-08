@@ -1,5 +1,15 @@
 /** Supabase/PostgREST 오류를 앱 저장소 오류 코드로 옮긴다. */
 
+export function isMissingColumn(error: { code?: string; message?: string } | null | undefined) {
+  const code = error?.code ?? ''
+  const message = error?.message ?? ''
+  return (
+    code === '42703' ||
+    code === 'PGRST204' ||
+    /column .+ does not exist|could not find .+ column|schema cache/i.test(message)
+  )
+}
+
 export function isMissingRpc(error: { code?: string; message?: string } | null | undefined) {
   const code = error?.code ?? ''
   const message = error?.message ?? ''

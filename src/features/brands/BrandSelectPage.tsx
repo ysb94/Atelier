@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { LogOut, Pencil, Plus, Trash2 } from 'lucide-react'
+import { ChevronLeft, LogOut, Pencil, Plus, Trash2 } from 'lucide-react'
 import {
   BrandStoreError,
   createBrand,
@@ -111,22 +111,35 @@ export function BrandSelectPage() {
   }
 
   return (
-    <div className="min-h-full bg-background">
-      <div className="mx-auto max-w-5xl px-6 py-12 md:py-16">
+    <div>
+      <div>
         <div className="mb-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
+            <Link
+              to="/"
+              className="mb-3 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+            >
+              <ChevronLeft className="size-3.5" />
+              E&J 홈
+            </Link>
             <p className="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
               Atelier
             </p>
             <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
-              브랜드를 선택하세요
+              브랜드 관리
             </h1>
             <p className="mt-2 max-w-xl text-muted-foreground">
-              브랜드별 작업장에서 기획, 디자인, MD, 물류를 관리합니다.
-              선택하면 해당 브랜드 데이터만 보입니다.
+              브랜드 정보와 로고를 관리합니다. 업무 화면은 E&J 회사 셸에서
+              전 브랜드를 함께 봅니다.
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            <Link
+              to="/products"
+              className="inline-flex h-9 items-center rounded-md border border-border px-3 text-sm font-medium hover:bg-muted"
+            >
+              통합 상품 보기
+            </Link>
             {profile?.displayName || email ? (
               <span className="hidden text-sm text-muted-foreground sm:inline">
                 {profile?.displayName || email}
@@ -159,8 +172,8 @@ export function BrandSelectPage() {
               <CardTitle>볼 수 있는 브랜드가 없습니다</CardTitle>
               <CardDescription>
                 {isAdmin
-                  ? '새 브랜드를 만들어 작업장을 시작해 보세요.'
-                  : '담당 브랜드가 아직 없거나 승인이 필요합니다. 운영진에게 문의해 주세요.'}
+                  ? '새 브랜드를 만들어 회사 목록에 보이게 하세요.'
+                  : '등록된 브랜드가 없습니다. 관리자에게 문의해 주세요.'}
               </CardDescription>
             </CardHeader>
             {isAdmin ? (
@@ -211,7 +224,10 @@ export function BrandSelectPage() {
                 </div>
                 ) : null}
 
-                <Link to={`/b/${brand.slug}`} className="block">
+                <Link
+                  to={`/products?brands=${encodeURIComponent(brand.slug)}`}
+                  className="block"
+                >
                   <CardHeader className="flex flex-row items-start gap-4 pr-20">
                     <BrandAvatar brand={brand} className="size-12" />
                     <div className="min-w-0 flex-1">

@@ -137,7 +137,7 @@ export function OutboundPartnerDetailPanel({
   })
 
   const linksQuery = useQuery({
-    queryKey: ['outbound-partner-links', target?.id],
+    queryKey: ['outbound-partner-links', brandId, target?.id],
     queryFn: () => getCodeUsageTargetLinkLabels(target!.id),
     enabled: Boolean(target),
   })

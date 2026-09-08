@@ -2,11 +2,17 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
 import {
-  listBrandDirectory,
   listDepartments,
   POSITION_OPTIONS,
   submitAccessRequest,
 } from '@/lib/supabase/profiles'
+import {
+  inferCapabilityFromDepartment,
+  uniqueCapabilities,
+  WORK_CAPABILITIES,
+  WORK_CAPABILITY_LABEL,
+  type WorkCapability,
+} from '@/lib/company/capabilities'
 import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
 
@@ -16,16 +22,11 @@ export function AccessRequestPage() {
     queryKey: ['departments', 'active'],
     queryFn: () => listDepartments(true),
   })
-  const brandsQuery = useQuery({
-    queryKey: ['brand-directory'],
-    queryFn: listBrandDirectory,
-  })
 
   const departments = useMemo(
     () => departmentsQuery.data ?? [],
     [departmentsQuery.data],
   )
-  const brands = useMemo(() => brandsQuery.data ?? [], [brandsQuery.data])
 
   const [displayName, setDisplayName] = useState(
     profile?.displayName ?? '',
@@ -34,17 +35,34 @@ export function AccessRequestPage() {
     profile?.departmentId ?? '',
   )
   const [position, setPosition] = useState(profile?.position ?? '사원')
-  const [brandIds, setBrandIds] = useState<string[]>(
-    profile?.memberships.map((m) => m.brandId) ?? [],
+  const [capabilities, setCapabilities] = useState<WorkCapability[]>(
+    profile?.capabilities?.length
+      ? profile.capabilities
+      : uniqueCapabilities(
+          [
+            inferCapabilityFromDepartment(profile?.departmentName),
+          ].filter((value): value is WorkCapability => Boolean(value)),
+        ),
   )
   const [requestNote, setRequestNote] = useState(profile?.requestNote ?? '')
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
-  function toggleBrand(id: string) {
-    setBrandIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+  function toggleCapability(value: WorkCapability) {
+    setCapabilities((prev) =>
+      prev.includes(value)
+        ? prev.filter((item) => item !== value)
+        : [...prev, value],
     )
+  }
+
+  function changeDepartment(nextId: string) {
+    setDepartmentId(nextId)
+    const dept = departments.find((item) => item.id === nextId)
+    const inferred = inferCapabilityFromDepartment(dept?.name)
+    if (inferred && capabilities.length === 0) {
+      setCapabilities([inferred])
+    }
   }
 
   return (
@@ -53,14 +71,14 @@ export function AccessRequestPage() {
         <div className="mb-8 flex items-start justify-between gap-4">
           <div>
             <p className="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-              Atelier
+              E&J
             </p>
             <h1 className="text-2xl font-semibold tracking-tight">
               접근 신청
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              소속 팀과 담당 브랜드를 알려 주세요. 해당 브랜드 팀장이나
-              운영진이 승인하면 작업장에 들어갈 수 있습니다.
+              회사 팀·직책·업무 역량을 알려 주세요. 관리자 또는 팀장·이사가
+              승인하면 E&J 홈에 들어갑니다. 담당 브랜드는 고르지 않습니다.
             </p>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={() => void signOut()}>
@@ -79,7 +97,7 @@ export function AccessRequestPage() {
                 displayName,
                 departmentId,
                 position,
-                brandIds,
+                capabilities,
                 requestNote,
               })
               await refreshProfile()
@@ -111,7 +129,7 @@ export function AccessRequestPage() {
               <Select
                 required
                 value={departmentId}
-                onChange={(e) => setDepartmentId(e.target.value)}
+                onChange={(e) => changeDepartment(e.target.value)}
                 disabled={submitting || departmentsQuery.isLoading}
               >
                 <option value="">선택</option>
@@ -141,37 +159,26 @@ export function AccessRequestPage() {
           </div>
 
           <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">담당 브랜드</legend>
+            <legend className="text-sm font-medium">업무 역량</legend>
             <p className="text-xs text-muted-foreground">
-              실제로 일할 브랜드를 모두 고르세요.
+              실제로 수정할 영역을 고르세요. 조회는 승인 후 전 브랜드가
+              가능합니다. 부서와 다르게 겸무할 수 있습니다.
             </p>
             <div className="grid gap-2 sm:grid-cols-2">
-              {brands.map((brand) => {
-                const checked = brandIds.includes(brand.id)
-                return (
-                  <label
-                    key={brand.id}
-                    className="flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/40"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleBrand(brand.id)}
-                      disabled={submitting}
-                    />
-                    <span
-                      className="size-2.5 rounded-full"
-                      style={{ backgroundColor: brand.color }}
-                    />
-                    <span>
-                      {brand.name}
-                      <span className="ml-1 text-muted-foreground">
-                        {brand.nameKo}
-                      </span>
-                    </span>
-                  </label>
-                )
-              })}
+              {WORK_CAPABILITIES.map((capability) => (
+                <label
+                  key={capability}
+                  className="flex cursor-pointer items-center gap-2 rounded-md border border-border px-3 py-2 text-sm hover:bg-muted/40"
+                >
+                  <input
+                    type="checkbox"
+                    checked={capabilities.includes(capability)}
+                    onChange={() => toggleCapability(capability)}
+                    disabled={submitting}
+                  />
+                  {WORK_CAPABILITY_LABEL[capability]}
+                </label>
+              ))}
             </div>
           </fieldset>
 
@@ -181,7 +188,7 @@ export function AccessRequestPage() {
               rows={3}
               value={requestNote}
               onChange={(e) => setRequestNote(e.target.value)}
-              placeholder="예: ATELIER MD로 합류했습니다."
+              placeholder="예: 기획과 물류를 겸합니다."
               disabled={submitting}
             />
           </label>

@@ -1,10 +1,7 @@
 import { lazy, Suspense } from 'react'
-import { Navigate, Route, useParams } from 'react-router-dom'
+import { Navigate, Route, useParams, useSearchParams } from 'react-router-dom'
 import { BrandHomePage } from '@/features/home/BrandHomePage'
-import {
-  DepartmentProductsPage,
-  ProductsPage,
-} from '@/features/products/ProductsPage'
+import { DepartmentProductsPage } from '@/features/products/ProductsPage'
 import { ProductDetailDrawer } from '@/features/products/ProductDetailDrawer'
 import {
   AllDraftsPage,
@@ -21,9 +18,6 @@ import { UsageTargetsSettingsPage } from '@/features/settings/UsageTargetsSettin
 import { ImportSettingsPage } from '@/features/settings/ImportSettingsPage'
 import { BrandSettingsPage } from '@/features/settings/BrandSettingsPage'
 import { AiSettingsPage } from '@/features/settings/AiSettingsPage'
-import { MembersPage } from '@/features/settings/MembersPage'
-import { ProfileSettingsPage } from '@/features/settings/ProfileSettingsPage'
-import { OrgChartPage } from '@/features/org/OrgChartPage'
 import { DataSheetPage } from '@/features/data/DataSheetPage'
 import { DataUploadPage } from '@/features/data/DataUploadPage'
 import { InvoiceWorkPage } from '@/features/logistics/InvoiceWorkPage'
@@ -31,7 +25,15 @@ import { BarcodeOutboundDataEntryPage } from '@/features/logistics/BarcodeOutbou
 import { BulkOutboundPage } from '@/features/logistics/BulkOutboundPage'
 import { OutboundDataPage } from '@/features/logistics/OutboundDataPage'
 import { WarehousePage } from '@/features/logistics/WarehousePage'
-import { WorkRequestPage } from '@/features/work-requests/WorkRequestPage'
+
+function RedirectCompany({ to }: { to: string }) {
+  return <Navigate to={to} replace />
+}
+
+function RedirectCompanyWork() {
+  const { owner } = useParams()
+  return <Navigate to={`/work-requests/${owner}`} replace />
+}
 
 const DesignFileManagerPage = lazy(async () => {
   const mod = await import('@/features/design/file-manager/DesignFileManagerPage')
@@ -57,6 +59,19 @@ function RedirectTo({ to }: { to: string }) {
   return <Navigate to={`/b/${brandSlug}/${to}`} replace />
 }
 
+function RedirectBrandProducts() {
+  const { brandSlug, styleNo } = useParams()
+  const [searchParams] = useSearchParams()
+  const next = new URLSearchParams(searchParams)
+  if (brandSlug) next.set('brands', brandSlug)
+  const path =
+    styleNo && brandSlug
+      ? `/products/${brandSlug}/${encodeURIComponent(styleNo)}`
+      : '/products'
+  const suffix = next.toString()
+  return <Navigate to={suffix ? `${path}?${suffix}` : path} replace />
+}
+
 function RedirectHome() {
   const { brandSlug } = useParams()
   return <Navigate to={`/b/${brandSlug}`} replace />
@@ -67,9 +82,8 @@ export function BrandWorkspaceRouteTree() {
   return (
     <>
       <Route index element={<BrandHomePage />} />
-      <Route path="products" element={<ProductsPage />}>
-        <Route path=":styleNo" element={<ProductDetailDrawer />} />
-      </Route>
+      <Route path="products" element={<RedirectBrandProducts />} />
+      <Route path="products/:styleNo" element={<RedirectBrandProducts />} />
       <Route path="drafts" element={<DraftSeasonPickerPage />} />
       <Route path="drafts/all" element={<AllDraftsPage />} />
       <Route path="drafts/season/:seasonCode" element={<SeasonDraftsPage />} />
@@ -77,7 +91,7 @@ export function BrandWorkspaceRouteTree() {
       <Route path="work/:owner" element={<DepartmentProductsPage />}>
         <Route path=":styleNo" element={<ProductDetailDrawer />} />
       </Route>
-      <Route path="work-requests/:owner" element={<WorkRequestPage />} />
+      <Route path="work-requests/:owner" element={<RedirectCompanyWork />} />
       <Route path="logistics/invoices" element={<InvoiceWorkPage />} />
       <Route
         path="logistics/invoice-data-entry"
@@ -97,8 +111,11 @@ export function BrandWorkspaceRouteTree() {
       <Route path="barcodes" element={<BarcodePage />} />
       <Route path="usage-codes" element={<UsageCodePage />} />
       <Route path="partner-codes" element={<PartnerCodePage />} />
-      <Route path="settings/profile" element={<ProfileSettingsPage />} />
-      <Route path="org-chart" element={<OrgChartPage />} />
+      <Route
+        path="settings/profile"
+        element={<RedirectCompany to="/settings/profile" />}
+      />
+      <Route path="org-chart" element={<RedirectCompany to="/org-chart" />} />
       <Route path="operations" element={<OutboundDataPage />} />
       <Route
         path="outbound-data"
@@ -111,7 +128,7 @@ export function BrandWorkspaceRouteTree() {
         element={<UsageTargetsSettingsPage />}
       />
       <Route path="settings/import" element={<ImportSettingsPage />} />
-      <Route path="settings/members" element={<MembersPage />} />
+      <Route path="settings/members" element={<RedirectCompany to="/members" />} />
       <Route path="settings/ai" element={<AiSettingsPage />} />
       <Route path="settings/brand" element={<BrandSettingsPage />} />
       <Route path="upload" element={<RedirectTo to="data/upload" />} />

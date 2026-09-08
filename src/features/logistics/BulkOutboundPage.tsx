@@ -18,6 +18,8 @@ import {
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
+import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
+import { CompanyBulkOutboundList } from '@/features/workspace/company-operation-lists'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { Badge } from '@/components/ui/badge'
@@ -2284,7 +2286,6 @@ function groupJobsByPartner(jobs: DemoJob[]) {
 }
 
 function PartnerSettingsDialog({
-  brandSlug,
   partners,
   ownPartnerIds,
   partnerCodePartnerIds,
@@ -2293,7 +2294,6 @@ function PartnerSettingsDialog({
   onClose,
   onSave,
 }: {
-  brandSlug: string
   partners: CodeUsageTarget[]
   /** 출고업체별 바코드(자사)에 바코드가 1건이라도 있는 업체 */
   ownPartnerIds: Set<string>
@@ -2565,7 +2565,7 @@ function PartnerSettingsDialog({
                     <p>등록된 업체가 없습니다.</p>
                     <p>{registryEmptyMessage}</p>
                     <Link
-                      to={`/b/${brandSlug}/${barcodeSource === 'own' ? 'usage-codes' : 'partner-codes'}`}
+                      to={barcodeSource === 'own' ? '/usage-codes' : '/partner-codes'}
                       className="inline-flex font-medium underline underline-offset-2"
                     >
                       {barcodeSource === 'own'
@@ -4729,13 +4729,13 @@ export function BulkOutboundPage() {
                         </Badge>
                       ) : null}
                       {activeJob!.barcodeSource === 'partner' ? (
-                        <Link to={`/b/${brand.slug}/partner-codes`}>
+                        <Link to="/partner-codes">
                           <Button type="button" size="sm" variant="outline">
                             거래처 바코드 열기
                           </Button>
                         </Link>
                       ) : (
-                        <Link to={`/b/${brand.slug}/usage-codes`}>
+                        <Link to="/usage-codes">
                           <Button type="button" size="sm" variant="outline">
                             88바코드 열기
                           </Button>
@@ -5082,7 +5082,7 @@ export function BulkOutboundPage() {
                           수량 확정
                         </Button>
                         <Link
-                          to={`/b/${brand.slug}/operations`}
+                          to="/operations"
                           className="inline-flex h-8 items-center justify-center rounded-md border border-border bg-card px-3 text-xs font-medium text-foreground hover:bg-muted"
                         >
                           운영 현황
@@ -5093,7 +5093,7 @@ export function BulkOutboundPage() {
                       <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                         {backupApplyNote}{' '}
                         <Link
-                          to={`/b/${brand.slug}/operations`}
+                          to="/operations"
                           className="font-medium text-foreground underline-offset-2 hover:underline"
                         >
                           바로가기
@@ -5368,7 +5368,6 @@ export function BulkOutboundPage() {
 
       {settingsOpen ? (
         <PartnerSettingsDialog
-          brandSlug={brand.slug}
           partners={allPartners}
           ownPartnerIds={ownPartnerIds}
           partnerCodePartnerIds={partnerCodePartnerIds}
@@ -5487,5 +5486,13 @@ export function BulkOutboundPage() {
         />
       ) : null}
     </div>
+  )
+}
+
+export function CompanyBulkOutboundPage() {
+  return (
+    <SingleBrandOrList list={<CompanyBulkOutboundList />}>
+      <BulkOutboundPage />
+    </SingleBrandOrList>
   )
 }

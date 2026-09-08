@@ -177,7 +177,11 @@ export function BrandHomePage() {
         {shortcuts.map(({ to, label, description, icon: Icon }) => (
           <Link
             key={to}
-            to={`/b/${brand.slug}/${to}`}
+            to={
+              to === 'products'
+                ? `/products?brands=${encodeURIComponent(brand.slug)}`
+                : `/b/${brand.slug}/${to}`
+            }
             className="group flex items-start gap-3 rounded-lg border border-border px-3 py-3 transition-colors hover:bg-muted/50"
           >
             <span className="mt-0.5 rounded-md bg-muted p-2 text-muted-foreground transition-colors group-hover:text-foreground">

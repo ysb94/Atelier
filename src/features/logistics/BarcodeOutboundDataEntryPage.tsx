@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
+import { BrandTargetGate } from '@/components/layout/BrandTargetGate'
+import { CompanyBarcodeEntryLanding } from '@/features/workspace/company-operation-lists'
 import { FileSpreadsheet, History, Search, Settings2 } from 'lucide-react'
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -480,7 +482,7 @@ export function BarcodeOutboundDataEntryPage() {
                   등록된 출고업체가 없습니다. 출고업체 화면에서 먼저 만들어
                   주세요.
                 </p>
-                <Link to={`/b/${brand.slug}/settings/usage-targets`}>
+                <Link to={`/settings/usage-targets?brand=${encodeURIComponent(brand.slug)}`}>
                   <Button type="button" size="sm">
                     출고업체 관리
                   </Button>
@@ -682,4 +684,16 @@ export function BarcodeOutboundDataEntryPage() {
       ) : null}
     </div>
   )
+}
+
+export function CompanyBarcodeOutboundDataEntryPage() {
+  const [searchParams] = useSearchParams()
+  if (searchParams.get('brand')) {
+    return (
+      <BrandTargetGate lockAfterSelect title="바코드 출고 데이터입력 브랜드">
+        <BarcodeOutboundDataEntryPage />
+      </BrandTargetGate>
+    )
+  }
+  return <CompanyBarcodeEntryLanding />
 }

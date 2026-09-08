@@ -1,3 +1,8 @@
+import { useBrand } from '@/components/layout/brand-context'
+import { brandStorageRoot } from '@/lib/company/capabilities'
+
 export function ExplorerTopbar({ activeType, activeFolder, search, global, busy, onSearch, onGlobal, onHistory }: { activeType: string | null; activeFolder: string | null; search: string; global: boolean; busy: boolean; onSearch: (value: string) => void; onGlobal: (value: boolean) => void; onHistory: () => void }) {
-  return <header className="topbar"><div className="breadcrumb">masmarulez{activeType && <> / <strong>{activeType}</strong></>}{activeFolder && <> / <strong>{activeFolder}</strong></>}</div><div className="topbar-actions"><button className="toolbar-button" disabled={busy} onClick={onHistory}>히스토리</button><div className="search-controls"><div className="search-box"><input type="search" placeholder="파일 검색" value={search} disabled={busy} onChange={(event) => onSearch(event.target.value)} /></div><label className="global-search-toggle"><input type="checkbox" checked={global} disabled={busy} onChange={(event) => onGlobal(event.target.checked)} />전체 검색</label></div></div></header>
+  const { brand } = useBrand()
+  const root = brandStorageRoot(brand.slug)
+  return <header className="topbar"><div className="breadcrumb">{root}{activeType && <> / <strong>{activeType}</strong></>}{activeFolder && <> / <strong>{activeFolder}</strong></>}</div><div className="topbar-actions"><button className="toolbar-button" disabled={busy} onClick={onHistory}>히스토리</button><div className="search-controls"><div className="search-box"><input type="search" placeholder="파일 검색" value={search} disabled={busy} onChange={(event) => onSearch(event.target.value)} /></div><label className="global-search-toggle"><input type="checkbox" checked={global} disabled={busy} onChange={(event) => onGlobal(event.target.checked)} />전체 검색</label></div></div></header>
 }

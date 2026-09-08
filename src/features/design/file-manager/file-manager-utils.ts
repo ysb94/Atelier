@@ -1,3 +1,4 @@
+import { brandStorageRoot } from '@/lib/company/capabilities'
 import {
   CDN_BASE,
   DEFAULT_FILE_ICON_META,
@@ -101,9 +102,18 @@ export function getItemDisplayUrl(
   return isVideoItem(item, type) ? buildWorkerAssetUrl(key) : buildPublicUrl(key)
 }
 
-export function getRelativePath(item: ServerFileItem, type: string): string {
+export function getRelativePath(
+  item: ServerFileItem,
+  type: string,
+  brandSlug?: string | null,
+): string {
   const source = item.key || `${type}/${item.name || ''}`
-  for (const prefix of [`${R2_BRAND_ROOT}/${type}/`, `${type}/`]) {
+  const roots = new Set([R2_BRAND_ROOT, brandStorageRoot(brandSlug)])
+  const prefixes = [...roots].flatMap((root) => [
+    `${root}/${type}/`,
+    `${type}/`,
+  ])
+  for (const prefix of prefixes) {
     if (source.startsWith(prefix)) return source.slice(prefix.length)
   }
   return item.name || source

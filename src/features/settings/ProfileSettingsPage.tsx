@@ -12,11 +12,11 @@ import {
 import { Input, Select } from '@/components/ui/input'
 import { useAuth } from '@/lib/supabase/auth'
 import {
-  listBrandDirectory,
   listDepartments,
   POSITION_OPTIONS,
   updateMyProfile,
 } from '@/lib/supabase/profiles'
+import { capabilityLabel } from '@/lib/company/capabilities'
 
 export function ProfileSettingsPage() {
   const { profile, email, refreshProfile } = useAuth()
@@ -24,16 +24,10 @@ export function ProfileSettingsPage() {
     queryKey: ['departments', 'active'],
     queryFn: () => listDepartments(true),
   })
-  const brandsQuery = useQuery({
-    queryKey: ['brand-directory'],
-    queryFn: listBrandDirectory,
-  })
-
   const departments = useMemo(
     () => departmentsQuery.data ?? [],
     [departmentsQuery.data],
   )
-  const brands = useMemo(() => brandsQuery.data ?? [], [brandsQuery.data])
 
   const [displayName, setDisplayName] = useState(profile?.displayName ?? '')
   const [departmentId, setDepartmentId] = useState(profile?.departmentId ?? '')
@@ -45,14 +39,6 @@ export function ProfileSettingsPage() {
     setDepartmentId(profile.departmentId ?? '')
     setPosition(profile.position ?? '사원')
   }, [profile])
-
-  const assignedBrands = useMemo(() => {
-    if (!profile) return []
-    const brandMap = new Map(brands.map((brand) => [brand.id, brand]))
-    return profile.memberships
-      .map((membership) => brandMap.get(membership.brandId))
-      .filter((brand): brand is NonNullable<typeof brand> => Boolean(brand))
-  }, [brands, profile])
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -75,7 +61,7 @@ export function ProfileSettingsPage() {
     <div>
       <PageHeader
         title="내 설정"
-        description="작업장에 표시되는 이름, 소속 팀, 직책을 수정합니다."
+        description="E&J에 표시되는 이름, 소속 팀, 직책을 수정합니다."
       />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -183,7 +169,7 @@ export function ProfileSettingsPage() {
         <Card>
           <CardHeader>
             <CardTitle>계정 정보</CardTitle>
-            <CardDescription>로그인 계정과 담당 브랜드입니다.</CardDescription>
+            <CardDescription>로그인 계정과 회사 업무 역량입니다.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4 text-sm">
             <div>
@@ -195,33 +181,25 @@ export function ProfileSettingsPage() {
 
             <div>
               <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                담당 브랜드
+                업무 역량
               </div>
-              {assignedBrands.length > 0 ? (
+              {profile?.capabilities.length ? (
                 <ul className="mt-2 space-y-2">
-                  {assignedBrands.map((brand) => (
+                  {profile.capabilities.map((capability) => (
                     <li
-                      key={brand.id}
-                      className="flex items-center gap-2 rounded-md border border-border px-3 py-2"
+                      key={capability}
+                      className="rounded-md border border-border px-3 py-2"
                     >
-                      <span
-                        className="size-2.5 rounded-full"
-                        style={{ backgroundColor: brand.color }}
-                      />
-                      <span>
-                        {brand.name}
-                        <span className="ml-1 text-muted-foreground">
-                          {brand.nameKo}
-                        </span>
-                      </span>
+                      {capabilityLabel(capability)}
                     </li>
                   ))}
                 </ul>
               ) : (
-                <p className="mt-1 text-muted-foreground">지정된 브랜드 없음</p>
+                <p className="mt-1 text-muted-foreground">지정된 역량 없음</p>
               )}
               <p className="mt-2 text-xs text-muted-foreground">
-                담당 브랜드 변경은 멤버 관리자에게 요청해 주세요.
+                역량 변경은 멤버 관리자에게 요청해 주세요. 승인된 직원은 모든
+                브랜드를 조회할 수 있습니다.
               </p>
             </div>
           </CardContent>

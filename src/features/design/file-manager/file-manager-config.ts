@@ -5,6 +5,7 @@ export const DEFAULT_LIST_WORKER_BASE =
 export const LIST_WORKER_STORAGE_KEY = 'masmarulezListWorkerBase'
 export const CDN_BASE = 'https://cdn2.auchee.com'
 export const ROOT_FOLDER = '루트 파일'
+/** ATELIER 기존 R2 루트. 새 브랜드는 brandStorageRoot(slug)를 쓴다. */
 export const R2_BRAND_ROOT = 'masmarulez'
 export const DEFAULT_BROWSE_TYPES = ['embed', 'image', 'spin360', 'video']
 export const HIDDEN_BROWSE_TYPES = new Set(['logs'])

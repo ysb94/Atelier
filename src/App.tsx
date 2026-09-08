@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrandLayout } from '@/components/layout/BrandLayout'
-import { BrandSelectPage } from '@/features/brands/BrandSelectPage'
+import { CompanyLayout } from '@/components/layout/CompanyLayout'
 import { LoginPage } from '@/features/auth/LoginPage'
 import { AccessRequestPage } from '@/features/auth/AccessRequestPage'
 import { PendingApprovalPage } from '@/features/auth/PendingApprovalPage'
@@ -40,7 +40,6 @@ function AuthGate() {
 
   if (!session) return <LoginPage />
 
-  // 프로필 행이 아직 없으면(트리거 지연) 신청 화면으로 보낸다.
   if (!profile || forceEditRequest || profile.requestedAt == null) {
     return <AccessRequestPage />
   }
@@ -74,8 +73,8 @@ function AuthGate() {
   return (
     <BrowserRouter>
       <Routes>
-        <Route path="/" element={<BrandSelectPage />} />
         <Route path="/b/:brandSlug/*" element={<BrandLayout />} />
+        <Route path="/*" element={<CompanyLayout />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

@@ -1,4 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { BrandFromSlug } from '@/components/layout/BrandTargetGate'
+import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
+import { BrandAvatar } from '@/components/brand/BrandAvatar'
+import {
+  R2_WORKER_PREFIX_CONTRACT,
+  brandFileCapability,
+  isAtelierBrandSlug,
+} from '@/lib/design/file-manager-brand'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { AppLoadingOverlay } from './components/AppLoadingOverlay'
 import { ContextMenu } from './components/ContextMenu'
@@ -411,6 +420,75 @@ export function DesignFileManagerPage() {
         onMore={() => void manager.loadMoreHistory()}
         onClose={() => manager.setHistoryOpen(false)}
       />
+    </div>
+  )
+}
+
+export function CompanyDesignFileManagerPage() {
+  const { brands, loading } = useCompanyBrandScope()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requested = searchParams.get('brand')?.trim() ?? ''
+  const fallback =
+    brands.find((item) => isAtelierBrandSlug(item.slug))?.slug ??
+    brands[0]?.slug ??
+    ''
+  const slug = requested || fallback
+  const capability = brandFileCapability(slug)
+
+  function selectBrand(next: string) {
+    setSearchParams(
+      (prev) => {
+        const params = new URLSearchParams(prev)
+        if (!next) params.delete('brand')
+        else params.set('brand', next)
+        return params
+      },
+      { replace: true },
+    )
+  }
+
+  if (loading) {
+    return (
+      <p className="p-4 text-sm text-muted-foreground">브랜드를 불러오는 중...</p>
+    )
+  }
+
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2">
+        {brands.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={`inline-flex items-center gap-2 rounded-md border px-2 py-1 text-xs ${
+              item.slug === slug
+                ? 'border-foreground bg-muted'
+                : 'border-border hover:bg-muted/50'
+            }`}
+            onClick={() => selectBrand(item.slug)}
+          >
+            <BrandAvatar brand={item} className="size-5" />
+            {item.name}
+          </button>
+        ))}
+      </div>
+      {capability.canOperate ? (
+        <div className="min-h-0 flex-1">
+          <BrandFromSlug slug={slug}>
+            <DesignFileManagerPage />
+          </BrandFromSlug>
+        </div>
+      ) : (
+        <div className="max-w-xl space-y-2 p-6 text-sm">
+          <p className="font-medium">이 브랜드 파일은 아직 열 수 없습니다.</p>
+          <p className="text-muted-foreground">
+            {capability.reason}
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Worker 계약: {R2_WORKER_PREFIX_CONTRACT}
+          </p>
+        </div>
+      )}
     </div>
   )
 }

@@ -266,7 +266,7 @@ export function BrandFormDialog({
 
           <Field
             label="URL slug"
-            hint="작업장 주소: /b/{slug}"
+            hint="브랜드 식별자. 목록 필터와 상세 URL에 씁니다."
             error={errors.slug?.message}
           >
             <Input

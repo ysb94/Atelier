@@ -1,8 +1,10 @@
 import {
   createContext,
   memo,
+  useCallback,
   useContext,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -15,7 +17,7 @@ import {
 } from 'react-router-dom'
 import { Home, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { BrandWorkspaceRouteTree } from './brand-routes'
+import { companyWorkspaceRoutes } from './company-routes'
 
 const WorkspaceTabActivityContext = createContext(true)
 
@@ -34,7 +36,6 @@ export function WorkspaceTabOverlay({ children }: { children: ReactNode }) {
 export type WorkspaceTab = {
   id: string
   label: string
-  /** 탭 클릭 시 복원할 전체 경로 (서랍 포함) */
   pathname: string
   search: string
 }
@@ -45,17 +46,10 @@ const NAV_LABELS: {
 }[] = [
   { match: /^\/?$/, label: '홈' },
   { match: /^\/products(?:\/|$)/, label: '전체 상품' },
-  { match: /^\/drafts\/all(?:\/|$)/, label: '기획안 · 전체' },
-  {
-    match: /^\/drafts\/season\/unassigned(?:\/|$)/,
-    label: '기획안 · 출시 미정',
-  },
-  {
-    match: /^\/drafts\/season\/([^/]+)/,
-    label: (m) => `기획안 · ${decodeURIComponent(m[1])}`,
-  },
+  { match: /^\/drafts\/new(?:\/|$)/, label: '기획안 추가' },
   { match: /^\/drafts\/[^/]+/, label: '기획안 편집' },
   { match: /^\/drafts(?:\/|$)/, label: '기획안' },
+  { match: /^\/china\/work-orders(?:\/|$)/, label: '중국팀 · 작업 지시서' },
   { match: /^\/data\/upload(?:\/|$)/, label: '데이터 · 일괄 업로드' },
   { match: /^\/data\/planning(?:\/|$)/, label: '데이터 · 기획' },
   { match: /^\/data\/design(?:\/|$)/, label: '데이터 · 디자인' },
@@ -67,35 +61,27 @@ const NAV_LABELS: {
   { match: /^\/work-requests\/design(?:\/|$)/, label: '디자인 · 작업 요청' },
   { match: /^\/work-requests\/md(?:\/|$)/, label: 'MD · 작업 요청' },
   { match: /^\/work-requests\/logistics(?:\/|$)/, label: '물류 · 작업 요청' },
-  { match: /^\/work\/planning(?:\/|$)/, label: '기획 · 상품 정보' },
-  { match: /^\/work\/design(?:\/|$)/, label: '디자인 · 상품 정보' },
-  {
-    match: /^\/design\/file-manager(?:\/|$)/,
-    label: '디자인 · 이미지 업로드',
-  },
-  { match: /^\/work\/md(?:\/|$)/, label: 'MD · 상품 정보' },
-  { match: /^\/work\/logistics(?:\/|$)/, label: '물류 · 상품 정보' },
-  {
-    match: /^\/logistics\/invoices(?:\/|$)/,
-    label: '물류 · 송장작업',
-  },
+  { match: /^\/work(?:\/|$)/, label: '내 업무' },
+  { match: /^\/product-work\/planning(?:\/|$)/, label: '기획 · 상품 정보' },
+  { match: /^\/product-work\/design(?:\/|$)/, label: '디자인 · 상품 정보' },
+  { match: /^\/design\/file-manager(?:\/|$)/, label: '디자인 · 이미지 업로드' },
+  { match: /^\/product-work\/md(?:\/|$)/, label: 'MD · 상품 정보' },
+  { match: /^\/product-work\/logistics(?:\/|$)/, label: '물류 · 상품 정보' },
+  { match: /^\/logistics\/invoices(?:\/|$)/, label: '물류 · 송장작업' },
   {
     match: /^\/logistics\/barcode-outbound-data-entry(?:\/|$)/,
     label: '물류 · (임시) 바코드 출고 데이터입력',
   },
-  {
-    match: /^\/logistics\/bulk-outbound(?:\/|$)/,
-    label: '물류 · 바코드 출고',
-  },
-  {
-    match: /^\/logistics\/warehouses(?:\/|$)/,
-    label: '물류 · 창고 관리',
-  },
+  { match: /^\/logistics\/bulk-outbound(?:\/|$)/, label: '물류 · 바코드 출고' },
+  { match: /^\/logistics\/warehouses(?:\/|$)/, label: '물류 · 창고 관리' },
   { match: /^\/barcodes(?:\/|$)/, label: '88바코드 관리' },
   { match: /^\/usage-codes(?:\/|$)/, label: '출고업체별 바코드' },
   { match: /^\/partner-codes(?:\/|$)/, label: '거래처 코드' },
   { match: /^\/settings\/profile(?:\/|$)/, label: '내 설정' },
   { match: /^\/org-chart(?:\/|$)/, label: '조직도' },
+  { match: /^\/schedule(?:\/|$)/, label: '일정' },
+  { match: /^\/members(?:\/|$)/, label: '멤버·권한' },
+  { match: /^\/brands(?:\/|$)/, label: '브랜드 관리' },
   { match: /^\/operations(?:\/|$)/, label: '운영 현황' },
   { match: /^\/outbound-data(?:\/|$)/, label: '운영 현황' },
   { match: /^\/settings\/fields(?:\/|$)/, label: '업로드 항목' },
@@ -107,73 +93,66 @@ const NAV_LABELS: {
   { match: /^\/settings\/brand(?:\/|$)/, label: '브랜드 정보' },
 ]
 
-/** 탭 구분용. 상품 상세 서랍은 목록 탭에 붙인다. */
-function stripDetailPath(rest: string): string {
-  const productDetail = rest.match(/^(\/products)\/[^/]+\/?$/)
+/** 탭 구분용. 상품 상세 서랍은 목록 탭에 붙인다. 브랜드 필터는 같은 탭이다. */
+function stripDetailPath(path: string): string {
+  const productDetail = path.match(/^(\/products)\/[^/]+\/[^/]+\/?$/)
   if (productDetail) return productDetail[1]
 
-  const workDetail = rest.match(/^(\/work\/[^/]+)\/[^/]+\/?$/)
+  const workDetail = path.match(/^(\/product-work\/[^/]+)\/[^/]+\/[^/]+\/?$/)
   if (workDetail) return workDetail[1]
 
-  const dataDetail = rest.match(/^(\/data\/[^/]+)\/[^/]+\/?$/)
+  const dataDetail = path.match(/^(\/data\/[^/]+)\/[^/]+\/[^/]+\/?$/)
   if (dataDetail) return dataDetail[1]
 
-  return rest.replace(/\/$/, '') || '/'
+  return path.replace(/\/$/, '') || '/'
 }
 
-function tabIdFromRest(rest: string): string {
-  const path = stripDetailPath(rest)
-  if (path === '/') return 'home'
-  return path.replace(/^\//, '')
+function tabIdFromPath(path: string): string {
+  const stripped = stripDetailPath(path)
+  if (stripped === '/') return 'home'
+  return stripped.replace(/^\//, '')
 }
 
-function labelFromRest(rest: string): string {
-  const path = stripDetailPath(rest)
-  const normalized = path === '' ? '/' : path
+function isHomeTabId(id: string) {
+  return id === 'home'
+}
+
+function isFileManagerTabId(id: string) {
+  return id === 'design/file-manager'
+}
+
+function labelFromPath(path: string): string {
+  const normalized = stripDetailPath(path)
   for (const entry of NAV_LABELS) {
-    const m = normalized.match(entry.match)
-    if (m) {
-      return typeof entry.label === 'function' ? entry.label(m) : entry.label
+    const match = normalized.match(entry.match)
+    if (match) {
+      return typeof entry.label === 'function' ? entry.label(match) : entry.label
     }
   }
   return '화면'
 }
 
 export function resolveWorkspaceTab(
-  brandSlug: string,
   location: Pick<Location, 'pathname' | 'search'>,
 ): WorkspaceTab | null {
-  const base = `/b/${brandSlug}`
-  if (location.pathname !== base && !location.pathname.startsWith(`${base}/`)) {
-    return null
-  }
-
-  const rest =
-    location.pathname === base
-      ? '/'
-      : location.pathname.slice(base.length) || '/'
-
+  if (location.pathname.startsWith('/b/')) return null
   return {
-    id: tabIdFromRest(rest),
-    label: labelFromRest(rest),
+    id: tabIdFromPath(location.pathname),
+    label: labelFromPath(location.pathname),
     pathname: location.pathname,
     search: location.search,
   }
 }
 
-function homeTab(brandSlug: string): WorkspaceTab {
+function homeTab(): WorkspaceTab {
   return {
     id: 'home',
     label: '홈',
-    pathname: `/b/${brandSlug}`,
+    pathname: '/',
     search: '',
   }
 }
 
-/**
- * 이 Routes는 /b/:brandSlug/* 부모 라우트 안에 있으므로 전체 경로가 필요하다.
- * 상대 경로를 넘기면 React Router의 부모 경로 검증에 실패한다.
- */
 function toTabLocation(tab: WorkspaceTab): Location {
   return {
     pathname: tab.pathname,
@@ -184,21 +163,17 @@ function toTabLocation(tab: WorkspaceTab): Location {
   }
 }
 
-export function useWorkspaceTabs(brandSlug: string) {
+export function useWorkspaceTabs() {
   const location = useLocation()
   const navigate = useNavigate()
-  const [tabs, setTabs] = useState<WorkspaceTab[]>(() => [homeTab(brandSlug)])
-  const brandRef = useRef(brandSlug)
+  const [tabs, setTabs] = useState<WorkspaceTab[]>(() => [homeTab()])
   const closingTabRef = useRef<string | null>(null)
-
-  useLayoutEffect(() => {
-    if (brandRef.current === brandSlug) return
-    brandRef.current = brandSlug
-    closingTabRef.current = null
-    setTabs([homeTab(brandSlug)])
-  }, [brandSlug])
-
-  const active = resolveWorkspaceTab(brandSlug, location)
+  const pathname = location.pathname
+  const search = location.search
+  const active = useMemo(
+    () => resolveWorkspaceTab({ pathname, search }),
+    [pathname, search],
+  )
 
   useLayoutEffect(() => {
     if (!active) return
@@ -222,41 +197,54 @@ export function useWorkspaceTabs(brandSlug: string) {
   }, [active])
 
   const activeId = active?.id ?? 'home'
-
   const closingActive = active?.id === closingTabRef.current
-  const displayTabs =
-    active && !closingActive && !tabs.some((tab) => tab.id === active.id)
-      ? [...tabs, active]
-      : tabs.map((tab) =>
-          active && tab.id === active.id
-            ? {
-                ...tab,
-                pathname: active.pathname,
-                search: active.search,
-                label: active.label,
-              }
-            : tab,
-        )
-
-  function openTab(tab: WorkspaceTab) {
-    navigate(`${tab.pathname}${tab.search}`)
-  }
-
-  function closeTab(tabId: string) {
-    if (tabs.length <= 1) return
-    const index = tabs.findIndex((tab) => tab.id === tabId)
-    if (index === -1) return
-    const next = tabs.filter((tab) => tab.id !== tabId)
-    closingTabRef.current = tabId
-
-    if (tabId === activeId) {
-      const fallback = next[Math.max(0, index - 1)] ?? next[0]
-      if (fallback) {
-        navigate(`${fallback.pathname}${fallback.search}`)
-      }
+  const displayTabs = useMemo(() => {
+    if (active && !closingActive && !tabs.some((tab) => tab.id === active.id)) {
+      return [...tabs, active]
     }
-    setTabs(next)
-  }
+    let changed = false
+    const next = tabs.map((tab) => {
+      if (!active || tab.id !== active.id) return tab
+      if (
+        tab.pathname === active.pathname &&
+        tab.search === active.search &&
+        tab.label === active.label
+      ) {
+        return tab
+      }
+      changed = true
+      return {
+        ...tab,
+        pathname: active.pathname,
+        search: active.search,
+        label: active.label,
+      }
+    })
+    return changed ? next : tabs
+  }, [active, closingActive, tabs])
+
+  const openTab = useCallback(
+    (tab: WorkspaceTab) => {
+      navigate(`${tab.pathname}${tab.search}`)
+    },
+    [navigate],
+  )
+
+  const closeTab = useCallback(
+    (tabId: string) => {
+      if (tabs.length <= 1) return
+      const index = tabs.findIndex((tab) => tab.id === tabId)
+      if (index === -1) return
+      const next = tabs.filter((tab) => tab.id !== tabId)
+      closingTabRef.current = tabId
+      if (tabId === activeId) {
+        const fallback = next[Math.max(0, index - 1)] ?? next[0]
+        if (fallback) navigate(`${fallback.pathname}${fallback.search}`)
+      }
+      setTabs(next)
+    },
+    [activeId, navigate, tabs],
+  )
 
   return {
     tabs: displayTabs,
@@ -298,7 +286,7 @@ export function WorkspaceTabBar({
               className="flex min-w-0 items-center gap-1.5"
               title={tab.label}
             >
-              {tab.id === 'home' ? (
+              {isHomeTabId(tab.id) ? (
                 <Home className="size-3.5 shrink-0 opacity-70" />
               ) : null}
               <span className="truncate">{tab.label}</span>
@@ -311,8 +299,8 @@ export function WorkspaceTabBar({
                   'rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100',
                   selected && 'opacity-60',
                 )}
-                onClick={(e) => {
-                  e.stopPropagation()
+                onClick={(event) => {
+                  event.stopPropagation()
                   onClose(tab.id)
                 }}
               >
@@ -339,11 +327,11 @@ const WorkspaceTabPanel = memo(function WorkspaceTabPanel({
         hidden={!active}
         className={cn(
           active ? undefined : 'hidden',
-          tab.id === 'design/file-manager' && active && 'h-full min-h-0',
+          isFileManagerTabId(tab.id) && active && 'h-full min-h-0',
         )}
       >
         <Routes location={toTabLocation(tab)}>
-          {BrandWorkspaceRouteTree()}
+          {companyWorkspaceRoutes}
         </Routes>
       </div>
     </WorkspaceTabActivityContext.Provider>
@@ -370,16 +358,17 @@ export function WorkspaceTabPanels({
       activatedRef.current.delete(id)
     }
   }
-  // 홈은 KeepAlive에서 제외한다.
-  if (activeId !== 'home') {
-    activatedRef.current.delete('home')
+  for (const id of [...activatedRef.current]) {
+    if (isHomeTabId(id) && id !== activeId) {
+      activatedRef.current.delete(id)
+    }
   }
 
   return (
     <>
       {tabs.map((tab) => {
         const active = tab.id === activeId
-        if (tab.id === 'home' && !active) return null
+        if (isHomeTabId(tab.id) && !active) return null
         if (!activatedRef.current.has(tab.id)) return null
         return <WorkspaceTabPanel key={tab.id} tab={tab} active={active} />
       })}
