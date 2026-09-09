@@ -18,7 +18,7 @@ import {
   getInvoiceDiscontinuedStyles,
 } from '@/lib/api'
 import type { InvoiceDiscontinuedStyle, StyleRef } from '@/lib/types'
-import { cn, formatNumber } from '@/lib/utils'
+import { cn, formatNumber, emptyList } from '@/lib/utils'
 
 export function InvoiceDiscontinuedListPanel({
   brandId,
@@ -38,7 +38,7 @@ export function InvoiceDiscontinuedListPanel({
   const [message, setMessage] = useState<string | null>(null)
   const [messageIsError, setMessageIsError] = useState(false)
 
-  const items = listQuery.data ?? []
+  const items = listQuery.data ?? emptyList()
 
   const visible = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('ko-KR')

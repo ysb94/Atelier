@@ -12,6 +12,7 @@ import { Download, Settings2, Upload } from 'lucide-react'
 import { CompanyBrandFilter } from '@/components/layout/CompanyBrandFilter'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input, Select } from '@/components/ui/input'
@@ -38,16 +39,19 @@ import {
   formatSeasonLabel,
   type BrandField,
   type ProductCode,
+  type Season,
   type Style,
   type StyleStatus,
 } from '@/lib/types'
+import { combineListQueries, flattenListQueries } from '@/lib/query/list-queries'
 import {
   dataSheetDetailPath,
   dataUploadHref,
   settingsPath,
 } from '@/lib/workspace/company-paths'
 import { companyQueryKey } from '@/lib/workspace/query-keys'
-import { cn, formatNumber } from '@/lib/utils'
+import { useRenderWatch } from '@/lib/diagnostics'
+import { cn, emptyList, formatNumber } from '@/lib/utils'
 import { SheetTable, type SheetRow } from './SheetTable'
 
 const DATA_OWNERS: DataSheetOwner[] = [
@@ -198,6 +202,7 @@ function styleToRow(
 }
 
 export function DataSheetPage() {
+  useRenderWatch('DataSheetPage')
   const { selectedBrands, brandById, selection } = useCompanyBrandScope()
   const navigate = useNavigate()
   const { owner: ownerParam } = useParams()
@@ -264,23 +269,27 @@ export function DataSheetPage() {
     [seasonId, statusFilter, search],
   )
 
+  // 기본 반환 배열은 매 렌더 새 참조라 아래 useMemo 가 매번 다시 돈다. list-queries.ts 참고.
   const fieldQueries = useQueries({
     queries: selectedBrands.map((item) => ({
       queryKey: ['brand-fields', item.id] as const,
       queryFn: () => getBrandFields(item.id),
     })),
+    combine: combineListQueries<BrandField>,
   })
   const seasonQueries = useQueries({
     queries: selectedBrands.map((item) => ({
       queryKey: ['seasons', item.id] as const,
       queryFn: () => getSeasonsByBrand(item.id),
     })),
+    combine: combineListQueries<Season>,
   })
   const codeQueries = useQueries({
     queries: selectedBrands.map((item) => ({
       queryKey: ['productCodes', item.id, 'own'] as const,
       queryFn: () => getProductCodes(item.id, 'own'),
     })),
+    combine: combineListQueries<ProductCode>,
   })
   const pageQuery = useQuery({
     queryKey: companyQueryKey(
@@ -304,20 +313,19 @@ export function DataSheetPage() {
   const fieldsByBrand = useMemo(() => {
     const map = new Map<string, BrandField[]>()
     selectedBrands.forEach((item, index) => {
-      map.set(item.id, fieldQueries[index]?.data ?? [])
+      map.set(item.id, fieldQueries.data[index] ?? [])
     })
     return map
-  }, [fieldQueries, selectedBrands])
-  const fields = singleBrand ? (fieldsByBrand.get(singleBrand.id) ?? []) : []
+  }, [fieldQueries.data, selectedBrands])
+  const fields =
+    (singleBrand ? fieldsByBrand.get(singleBrand.id) : undefined) ??
+    emptyList<BrandField>()
   const seasons = useMemo(
-    () => seasonQueries.flatMap((query) => query.data ?? []),
+    () => flattenListQueries(seasonQueries),
     [seasonQueries],
   )
   const hasSeasons = seasons.length > 0
-  const codes = useMemo(
-    () => codeQueries.flatMap((query) => query.data ?? []),
-    [codeQueries],
-  )
+  const codes = useMemo(() => flattenListQueries(codeQueries), [codeQueries])
 
   const columns = useMemo(() => {
     if (!owner) return []
@@ -366,7 +374,10 @@ export function DataSheetPage() {
     ],
   )
 
+  // 숨겨진 KeepAlive 탭이 주소를 고치면 보고 있던 탭이 바뀐다. 보이는 탭만 주소를 고친다.
+  const tabActive = useWorkspaceTabActivity()
   useEffect(() => {
+    if (!tabActive) return
     if (page > totalPages) {
       setSearchParams(
         (prev) => {
@@ -377,7 +388,7 @@ export function DataSheetPage() {
         { replace: true },
       )
     }
-  }, [page, totalPages, setSearchParams])
+  }, [page, tabActive, totalPages, setSearchParams])
 
   async function handleExport() {
     if (!owner || brandIds.length === 0) return
@@ -406,9 +417,7 @@ export function DataSheetPage() {
   }
 
   const loading =
-    fieldQueries.some((query) => query.isLoading) ||
-    seasonQueries.some((query) => query.isLoading) ||
-    pageQuery.isLoading
+    fieldQueries.loading || seasonQueries.loading || pageQuery.isLoading
   const hasFilter =
     Boolean(filter.search) || Boolean(filter.seasonId) || Boolean(filter.status)
 

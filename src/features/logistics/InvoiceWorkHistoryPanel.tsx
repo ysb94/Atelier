@@ -19,7 +19,7 @@ import {
 } from '@/lib/api'
 import { PRODUCT_OUTBOUND_UPDATED_EVENT } from '@/lib/outbound/product-outbound'
 import type { InvoiceWorkRun } from '@/lib/types'
-import { cn, formatNumber } from '@/lib/utils'
+import { cn, formatNumber, emptyList } from '@/lib/utils'
 
 function formatWorkedAt(value: string): string {
   const date = new Date(value)
@@ -296,7 +296,7 @@ export function InvoiceWorkHistoryPanel({ brandId }: { brandId: string }) {
     queryKey: ['invoiceWorkRuns', brandId],
     queryFn: () => getInvoiceWorkRuns(brandId),
   })
-  const history = historyQuery.data ?? []
+  const history = historyQuery.data ?? emptyList()
   const exportedRows = history.reduce(
     (total, item) => total + item.exportedRowCount,
     0,

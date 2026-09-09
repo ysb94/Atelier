@@ -78,6 +78,7 @@ import type {
   CodeUsageTarget,
   ProductCodeComponent,
 } from '@/lib/types'
+import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber } from '@/lib/utils'
 import { BulkOutboundProductListPrint } from '@/features/logistics/BulkOutboundProductListPrint'
 import { BulkOutboundIdleCollectPanel } from '@/features/logistics/BulkOutboundIdleCollectPanel'
@@ -2966,6 +2967,7 @@ function BackupQtyConfirmDialog({
 }
 
 export function BulkOutboundPage() {
+  useRenderWatch('BulkOutboundPage')
   const { brand } = useBrand()
   const { profile, email } = useAuth()
   const queryClient = useQueryClient()

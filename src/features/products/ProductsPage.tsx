@@ -30,6 +30,7 @@ import { useAuth } from '@/lib/supabase/auth'
 import { DepartmentProductLoadDialog } from '@/features/products/DepartmentProductLoadDialog'
 import { useDepartmentWorkSet } from '@/features/products/useDepartmentWorkSet'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -78,7 +79,9 @@ import {
   productDetailPath,
   productWorkDetailPath,
 } from '@/lib/workspace/company-paths'
-import { cn, formatNumber } from '@/lib/utils'
+import { useRenderWatch } from '@/lib/diagnostics'
+import { combineListQueries } from '@/lib/query/list-queries'
+import { cn, emptyList, formatNumber } from '@/lib/utils'
 import { summarizeWarehouseStockByStyle } from '@/lib/warehouse/stock'
 
 const columnHelper = createColumnHelper<Style>()
@@ -439,6 +442,7 @@ export function ProductsPage({
   persistQueryKeys?: string[]
   companyBrands?: Brand[]
 } = {}) {
+  useRenderWatch('ProductsPage')
   const brandContext = useOptionalBrand()
   const scopedBrand = brandContext?.brand
   const isCompany = Boolean(companyBrands)
@@ -450,13 +454,19 @@ export function ProductsPage({
     ? decodeURIComponent(activeStyleNoParam)
     : null
 
-  const availableSlugs = (companyBrands ?? []).map((item) => item.slug)
-  const brandSelection = resolveBrandSelection(
-    searchParams.get('brands'),
-    availableSlugs,
+  const brandList = companyBrands ?? emptyList<Brand>()
+  const availableSlugs = useMemo(
+    () => brandList.map((item) => item.slug),
+    [brandList],
   )
-  const selectedBrands = (companyBrands ?? []).filter((item) =>
-    brandSelection.slugs.includes(item.slug),
+  const brandsParam = searchParams.get('brands')
+  const brandSelection = useMemo(
+    () => resolveBrandSelection(brandsParam, availableSlugs),
+    [availableSlugs, brandsParam],
+  )
+  const selectedBrands = useMemo(
+    () => brandList.filter((item) => brandSelection.slugs.includes(item.slug)),
+    [brandList, brandSelection.slugs],
   )
   const singleCompanyBrand = brandSelection.canEdit
     ? selectedBrands[0]
@@ -511,18 +521,22 @@ export function ProductsPage({
       queryKey: ['brand-fields', item.id] as const,
       queryFn: () => getBrandFields(item.id),
     })),
+    // 기본 반환 배열은 매 렌더 새 참조라 무한 재계산을 부른다. list-queries.ts 참고.
+    combine: combineListQueries<BrandField>,
   })
   const companySeasonQueries = useQueries({
     queries: selectedBrands.map((item) => ({
       queryKey: ['seasons', item.id] as const,
       queryFn: () => getSeasonsByBrand(item.id),
     })),
+    combine: combineListQueries<Season>,
   })
   const companyStyleQueries = useQueries({
     queries: selectedBrands.map((item) => ({
       queryKey: ['styles', item.id, 'products'] as const,
       queryFn: () => getStylesByBrand(item.id),
     })),
+    combine: combineListQueries<Style>,
   })
 
   const stockBrandId = isCompany
@@ -563,14 +577,14 @@ export function ProductsPage({
     const map = new Map<string, BrandField[]>()
     if (isCompany) {
       selectedBrands.forEach((item, index) => {
-        map.set(item.id, companyFieldQueries[index]?.data ?? [])
+        map.set(item.id, companyFieldQueries.data[index] ?? [])
       })
     } else if (scopedBrand) {
       map.set(scopedBrand.id, fieldsQuery.data ?? [])
     }
     return map
   }, [
-    companyFieldQueries,
+    companyFieldQueries.data,
     fieldsQuery.data,
     isCompany,
     scopedBrand,
@@ -578,31 +592,30 @@ export function ProductsPage({
   ])
   const fields = useMemo(() => {
     if (singleCompanyBrand) {
-      return fieldsByBrand.get(singleCompanyBrand.id) ?? []
+      return fieldsByBrand.get(singleCompanyBrand.id) ?? emptyList<BrandField>()
     }
     if (!isCompany && scopedBrand) {
-      return fieldsByBrand.get(scopedBrand.id) ?? []
+      return fieldsByBrand.get(scopedBrand.id) ?? emptyList<BrandField>()
     }
-    return []
+    return emptyList<BrandField>()
   }, [fieldsByBrand, isCompany, scopedBrand, singleCompanyBrand])
   const seasons = useMemo(() => {
     if (isCompany) {
-      return companySeasonQueries.flatMap((query) => query.data ?? [])
+      return companySeasonQueries.data.flatMap((data) => data ?? [])
     }
-    return seasonsQuery.data ?? []
-  }, [companySeasonQueries, isCompany, seasonsQuery.data])
+    return seasonsQuery.data ?? emptyList<Season>()
+  }, [companySeasonQueries.data, isCompany, seasonsQuery.data])
   const catalogStyles = useMemo(() => {
     if (isCompany) {
-      return companyStyleQueries
-        .flatMap((query) => query.data ?? [])
-        .slice()
+      return companyStyleQueries.data
+        .flatMap((data) => data ?? [])
         .sort((left, right) => left.styleNo.localeCompare(right.styleNo, 'ko'))
     }
-    return stylesQuery.data ?? []
-  }, [companyStyleQueries, isCompany, stylesQuery.data])
+    return stylesQuery.data ?? emptyList<Style>()
+  }, [companyStyleQueries.data, isCompany, stylesQuery.data])
   const failedBrandNames = isCompany
     ? selectedBrands
-        .filter((_, index) => companyStyleQueries[index]?.isError)
+        .filter((_, index) => companyStyleQueries.errorIndexes.includes(index))
         .map((item) => item.name)
     : []
   const allStyles = useMemo(() => {
@@ -613,9 +626,9 @@ export function ProductsPage({
   const listLoading =
     !workSetEmpty &&
     (isCompany
-      ? companyStyleQueries.some((query) => query.isLoading) ||
-        companyFieldQueries.some((query) => query.isLoading) ||
-        companySeasonQueries.some((query) => query.isLoading)
+      ? companyStyleQueries.loading ||
+        companyFieldQueries.loading ||
+        companySeasonQueries.loading
       : stylesQuery.isLoading ||
         fieldsQuery.isLoading ||
         seasonsQuery.isLoading)
@@ -718,13 +731,15 @@ export function ProductsPage({
     page !== 1 ||
     (isCompany && !brandSelection.isAll)
 
+  // 숨겨진 KeepAlive 탭이 주소를 고치면 보고 있던 탭이 바뀐다. 보이는 탭만 주소를 고친다.
+  const tabActive = useWorkspaceTabActivity()
   useEffect(() => {
-    if (page === safePage) return
+    if (!tabActive || page === safePage) return
     const next = new URLSearchParams(searchParams)
     if (safePage <= 1) next.delete('page')
     else next.set('page', String(safePage))
     setSearchParams(next, { replace: true })
-  }, [page, safePage, searchParams, setSearchParams])
+  }, [page, safePage, searchParams, setSearchParams, tabActive])
 
   const patchParams = useCallback(
     (

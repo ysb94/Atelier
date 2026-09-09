@@ -719,11 +719,14 @@ export type InvoicePickingRoutePreset = {
 
 export type WarehouseInventoryKind = 'sandbox' | 'live'
 export type WarehouseInventoryStatus = 'active' | 'archived'
+export type WarehouseUsagePriority = 'first' | 'second' | 'fifo' | 'last'
+export type WarehouseQuantityStatus = 'known' | 'unknown'
 export type WarehouseReviewFlag =
   | 'missing_style'
   | 'date_review'
   | 'duplicate_suspect'
   | 'special_location'
+  | 'quantity_unknown'
 export type WarehouseStockAction =
   | 'import'
   | 'receive'
@@ -771,12 +774,17 @@ export type WarehouseStockPosition = {
   receivedOnRaw: string
   isForcedPriority: boolean
   isFinalLocation: boolean
-  unitsPerBox: number
-  remainingBoxes: number
+  usagePriority: WarehouseUsagePriority
+  quantityStatus: WarehouseQuantityStatus
+  unitsPerBox: number | null
+  remainingBoxes: number | null
+  unitsPerBoxRaw: string
+  remainingBoxesRaw: string
   openedUnits: number
   reviewFlags: WarehouseReviewFlag[]
   sourceRowNumber: number
   note: string
+  externalRowId: string | null
   usageRank: number | null
   createdAt: string
   updatedAt: string

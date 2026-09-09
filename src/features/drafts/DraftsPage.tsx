@@ -30,9 +30,11 @@ import {
   formatSeasonLabel,
   type ProductDraft,
   type ProductDraftStatus,
+  type Season,
 } from '@/lib/types'
+import { combineListQueries, flattenListQueries } from '@/lib/query/list-queries'
 import { draftDetailPath, draftNewPath } from '@/lib/workspace/company-paths'
-import { cn, formatNumber } from '@/lib/utils'
+import { cn, formatNumber, emptyList } from '@/lib/utils'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import {
   RELEASE_CERTAINTY_LABEL,
@@ -144,13 +146,14 @@ export function CompanyDraftsPage() {
       queryKey: ['seasons', item.id] as const,
       queryFn: () => getSeasonsByBrand(item.id),
     })),
+    // 기본 반환 배열은 매 렌더 새 참조라 아래 useMemo 가 매번 다시 돈다. list-queries.ts 참고.
+    combine: combineListQueries<Season>,
   })
 
-  const drafts = draftsQuery.data ?? []
-  const seasonData = seasonQueries.map((query) => query.data)
+  const drafts = draftsQuery.data ?? emptyList()
   const seasons = useMemo(
-    () => seasonData.flatMap((rows) => rows ?? []),
-    [seasonData],
+    () => flattenListQueries(seasonQueries),
+    [seasonQueries],
   )
   const seasonMap = useMemo(
     () => new Map(seasons.map((season) => [season.id, season])),
@@ -302,7 +305,7 @@ export function CompanyDraftsPage() {
     : null
 
   const loading =
-    draftsQuery.isLoading || seasonQueries.some((query) => query.isLoading)
+    draftsQuery.isLoading || seasonQueries.loading
 
   const newHref = draftNewPath(scopedBrand?.slug, {
     season:

@@ -29,7 +29,7 @@ import type {
   InvoicePreorderHoldExtension,
   StyleRef,
 } from '@/lib/types'
-import { cn, formatNumber } from '@/lib/utils'
+import { cn, formatNumber, emptyList } from '@/lib/utils'
 
 export const PREORDER_REASON_SUGGESTIONS = [
   '입고 지연',
@@ -303,7 +303,7 @@ export function InvoicePreorderHoldPanel({ brandId }: { brandId: string }) {
   const [message, setMessage] = useState<string | null>(null)
   const [messageIsError, setMessageIsError] = useState(false)
 
-  const items = listQuery.data ?? []
+  const items = listQuery.data ?? emptyList()
   const activeItems = useMemo(
     () => items.filter((item) => item.status === 'active'),
     [items],

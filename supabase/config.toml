@@ -2,3 +2,6 @@
 
 [functions.ai-gateway]
 verify_jwt = true
+
+[functions.warehouse-sheet-sync]
+verify_jwt = false

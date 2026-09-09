@@ -4,7 +4,7 @@ import { formatStyleRef } from '@/components/style-picker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { searchInvoiceProductNameMapsByLookupKey } from '@/lib/api'
-import { formatNumber } from '@/lib/utils'
+import { formatNumber, emptyList } from '@/lib/utils'
 
 /** 앞쪽 [태그]는 행사 표기라 검색어에서 뺀다. */
 function lookupTextFromCopied(value: string) {
@@ -128,7 +128,7 @@ export function InvoiceProductLookupPopover({ brandId }: { brandId: string }) {
     enabled: debounced.length >= 2,
     staleTime: 30_000,
   })
-  const results = resultsQuery.data ?? []
+  const results = resultsQuery.data ?? emptyList()
   const error =
     resultsQuery.error instanceof Error ? resultsQuery.error.message : null
   const badgeCount =

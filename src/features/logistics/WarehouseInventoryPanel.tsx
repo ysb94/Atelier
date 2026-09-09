@@ -1,7 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import {
+  useWorkspaceTabActivity,
+  WorkspaceTabOverlay,
+} from '@/components/layout/workspace-tabs'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Upload } from 'lucide-react'
+import { Download, RefreshCw, Upload } from 'lucide-react'
 import { StylePicker } from '@/components/style-picker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -19,22 +22,28 @@ import {
   openWarehouseStock,
   receiveWarehouseStock,
   restoreWarehouseInventorySet,
+  subscribeWarehouseInventorySetChanges,
+  type WarehouseInventorySetRealtimeStatus,
 } from '@/lib/api'
+import { useRenderWatch } from '@/lib/diagnostics'
 import { parseFile } from '@/lib/import/parse'
 import type {
   StyleRef,
   WarehouseStockPosition,
   WarehouseZone,
 } from '@/lib/types'
-import { cn, formatNumber } from '@/lib/utils'
+import { cn, formatNumber, emptyList } from '@/lib/utils'
 import {
   FINAL_LOCATION_MARK,
   FORCED_PRIORITY_DATE,
   WAREHOUSE_REVIEW_FLAG_LABEL,
   WAREHOUSE_STOCK_ACTION_LABEL,
+  WAREHOUSE_USAGE_PRIORITY_LABEL,
   downloadWarehouseInventoryTemplate,
+  formatWarehouseCount,
   formatWarehouseLocation,
   formatWarehouseReceivedOn,
+  isWarehouseQuantityKnown,
   parseWarehouseLocation,
   parseWarehouseReceivedOn,
   parseWarehouseUploadRows,
@@ -46,7 +55,14 @@ import {
 } from '@/lib/warehouse/stock'
 
 type WarehouseView = 'box' | 'outbound'
-type ReviewFilter = 'all' | 'ok' | 'forced' | 'final' | 'review'
+type ReviewFilter =
+  | 'all'
+  | 'ok'
+  | 'forced'
+  | 'final'
+  | 'review'
+  | 'unknown_qty'
+  | 'unlinked'
 type DialogState =
   | { kind: 'import' }
   | { kind: 'receive' }
@@ -66,6 +82,8 @@ const FILTERS: { value: ReviewFilter; label: string }[] = [
   { value: 'forced', label: '강제우선' },
   { value: 'final', label: '마지막위치' },
   { value: 'review', label: '검수필요' },
+  { value: 'unknown_qty', label: '수량 미확인' },
+  { value: 'unlinked', label: '상품 미연결' },
 ]
 
 function formatImportedAt(value: string) {
@@ -101,13 +119,18 @@ export function WarehouseInventoryPanel({
   brandName: string
   view: WarehouseView
 }) {
+  useRenderWatch('WarehouseInventoryPanel')
   const queryClient = useQueryClient()
+  const tabActive = useWorkspaceTabActivity()
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<ReviewFilter>('all')
   const [tablePage, setTablePage] = useState(0)
   const [dialog, setDialog] = useState<DialogState>(null)
   const [error, setError] = useState<string | null>(null)
   const [downloadingTemplate, setDownloadingTemplate] = useState(false)
+  const [liveStatus, setLiveStatus] =
+    useState<WarehouseInventorySetRealtimeStatus>('connecting')
+  const [refreshing, setRefreshing] = useState(false)
   const zone: WarehouseZone = view === 'box' ? 'box_storage' : 'picking'
   const warehouseLabel = view === 'box' ? '박스창고' : '출고창고'
 
@@ -139,23 +162,28 @@ export function WarehouseInventoryPanel({
     enabled: Boolean(activeSet?.id),
   })
 
-  const rows = positionsQuery.data ?? []
+  const rows = positionsQuery.data ?? emptyList()
   const zoneRowCount = rows.filter((row) => row.zone === zone).length
   const visible = useMemo(() => {
     const q = search.trim().toLocaleLowerCase('ko-KR')
-    return (positionsQuery.data ?? [])
+    return (positionsQuery.data ?? emptyList<WarehouseStockPosition>())
       .filter((row) => row.zone === zone)
       .filter((row) => {
         if (filter === 'ok') return row.reviewFlags.length === 0
-        if (filter === 'forced') return row.isForcedPriority
+        if (filter === 'forced') {
+          return row.usagePriority === 'first' || row.usagePriority === 'second'
+        }
         if (filter === 'final') return row.isFinalLocation
         if (filter === 'review') return row.reviewFlags.length > 0
+        if (filter === 'unknown_qty') return !isWarehouseQuantityKnown(row)
+        if (filter === 'unlinked') return !row.styleId
         return true
       })
       .filter((row) => {
         if (!q) return true
         return (
           row.styleNo.toLocaleLowerCase('ko-KR').includes(q) ||
+          row.sourceStyleNo.toLocaleLowerCase('ko-KR').includes(q) ||
           row.styleName.toLocaleLowerCase('ko-KR').includes(q) ||
           formatWarehouseLocation(row)
             .toLocaleLowerCase('ko-KR')
@@ -184,7 +212,7 @@ export function WarehouseInventoryPanel({
     currentTablePage * TABLE_PAGE_SIZE + TABLE_PAGE_SIZE,
   )
 
-  async function invalidateStock() {
+  const invalidateStock = useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({
         queryKey: ['warehouse-inventory-set', brandId],
@@ -199,6 +227,49 @@ export function WarehouseInventoryPanel({
         queryKey: ['warehouse-stock-movements', brandId],
       }),
     ])
+  }, [brandId, queryClient])
+
+  useEffect(() => {
+    if (!tabActive || !brandId) return
+    let timer: ReturnType<typeof setTimeout> | null = null
+    let seenSubscribe = false
+    const scheduleRefresh = () => {
+      if (timer != null) clearTimeout(timer)
+      timer = setTimeout(() => {
+        void invalidateStock()
+      }, 400)
+    }
+    setLiveStatus('connecting')
+    const unsubscribe = subscribeWarehouseInventorySetChanges(brandId, {
+      onChange: scheduleRefresh,
+      onStatus(status) {
+        setLiveStatus(status)
+        if (status === 'subscribed') {
+          if (seenSubscribe) scheduleRefresh()
+          seenSubscribe = true
+        }
+      },
+    })
+    return () => {
+      if (timer != null) clearTimeout(timer)
+      unsubscribe()
+    }
+  }, [brandId, invalidateStock, tabActive])
+
+  async function refreshStock() {
+    if (refreshing) return
+    setRefreshing(true)
+    setError(null)
+    try {
+      await invalidateStock()
+    } catch (reason) {
+      const message =
+        reason instanceof Error ? reason.message : '창고 목록을 새로고침하지 못했습니다.'
+      console.warn('[warehouse] 수동 새로고침 실패', { brandId, message })
+      setError(message)
+    } finally {
+      setRefreshing(false)
+    }
   }
 
   return (
@@ -217,6 +288,9 @@ export function WarehouseInventoryPanel({
                   {formatImportedAt(activeSet.importedAt)} · 전체{' '}
                   {formatNumber(activeSet.rowCount)}행
                 </span>
+                <span className="text-xs text-muted-foreground">
+                  {liveStatus === 'subscribed' ? '자동 갱신 중' : '재연결 중'}
+                </span>
               </>
             ) : (
               <span className="text-sm text-muted-foreground">
@@ -225,11 +299,26 @@ export function WarehouseInventoryPanel({
             )}
           </div>
           <p className="text-xs text-muted-foreground">
-            엑셀이 원본입니다. 사이트 숫자는 송장 예약·실재고와 연결하지 않습니다.
-            사용 순서는 강제우선 → 입고일 → 마지막 위치입니다.
+            엑셀·시트가 원본입니다. 사이트 숫자는 송장 예약·실재고와 연결하지 않습니다.
+            사용 순서는 최우선(000000) → 차순위(000001) → 입고일 → 마지막(999999·//)입니다.
+            수량 미확인 행은 총재고와 FIFO에서 빼고, 수량 작업은 하지 않습니다.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={refreshing || setQuery.isFetching || positionsQuery.isFetching}
+            onClick={() => {
+              void refreshStock()
+            }}
+          >
+            <RefreshCw className={cn('size-3.5', refreshing && 'animate-spin')} />
+            {refreshing || setQuery.isFetching || positionsQuery.isFetching
+              ? '새로고침 중...'
+              : '새로고침'}
+          </Button>
           {view === 'box' ? (
             <Button
               type="button"
@@ -368,17 +457,18 @@ export function WarehouseInventoryPanel({
                   className={cn(
                     'border-b border-border/70',
                     row.usageRank === 1 && 'bg-primary/5',
-                    row.remainingBoxes === 0 &&
+                    isWarehouseQuantityKnown(row) &&
+                      (row.remainingBoxes ?? 0) === 0 &&
                       row.openedUnits === 0 &&
                       'text-muted-foreground',
                   )}
                 >
                   <td className="px-2 py-1.5">
-                    <span className="inline-flex items-center gap-1 tabular-nums">
+                    <span className="inline-flex flex-wrap items-center gap-1 tabular-nums">
                       {row.usageRank ?? '—'}
-                      {row.isForcedPriority ? (
+                      {row.usagePriority !== 'fifo' ? (
                         <Badge variant="warning" className="px-1.5 py-0 text-[10px]">
-                          우선
+                          {WAREHOUSE_USAGE_PRIORITY_LABEL[row.usagePriority]}
                         </Badge>
                       ) : null}
                     </span>
@@ -401,16 +491,22 @@ export function WarehouseInventoryPanel({
                       row.isForcedPriority && 'text-muted-foreground',
                     )}
                     title={
-                      row.isForcedPriority ? '강제우선 (000000)' : undefined
+                      row.usagePriority === 'first'
+                        ? '최우선 (000000)'
+                        : row.usagePriority === 'second'
+                          ? '차순위 (000001)'
+                          : row.usagePriority === 'last'
+                            ? '마지막 (999999)'
+                            : undefined
                     }
                   >
                     {formatWarehouseReceivedOn(row)}
                   </td>
                   <td className="px-2 py-1.5 text-right tabular-nums">
-                    {formatNumber(row.unitsPerBox)}
+                    {formatWarehouseCount(row.unitsPerBox)}
                   </td>
                   <td className="px-2 py-1.5 text-right tabular-nums">
-                    {formatNumber(row.remainingBoxes)}
+                    {formatWarehouseCount(row.remainingBoxes)}
                   </td>
                   {view === 'outbound' ? (
                     <td className="px-2 py-1.5 text-right tabular-nums">
@@ -418,7 +514,9 @@ export function WarehouseInventoryPanel({
                     </td>
                   ) : null}
                   <td className="px-2 py-1.5 text-right tabular-nums">
-                    {formatNumber(warehousePositionQty(row))}
+                    {isWarehouseQuantityKnown(row)
+                      ? formatNumber(warehousePositionQty(row))
+                      : '미확인'}
                   </td>
                   <td className="px-2 py-1.5">
                     {row.reviewFlags.length === 0 ? (
@@ -437,21 +535,25 @@ export function WarehouseInventoryPanel({
                         <>
                           <RowAction
                             label="이동"
+                            disabled={!isWarehouseQuantityKnown(row)}
                             onClick={() => setDialog({ kind: 'move', row })}
                           />
                           <RowAction
                             label="충원"
+                            disabled={!isWarehouseQuantityKnown(row)}
                             onClick={() => setDialog({ kind: 'replenish', row })}
                           />
                         </>
                       ) : (
                         <RowAction
                           label="개봉"
+                          disabled={!isWarehouseQuantityKnown(row)}
                           onClick={() => setDialog({ kind: 'open', row })}
                         />
                       )}
                       <RowAction
                         label="소진"
+                        disabled={!isWarehouseQuantityKnown(row)}
                         onClick={() => setDialog({ kind: 'deplete', row })}
                       />
                       <RowAction
@@ -598,14 +700,17 @@ export function WarehouseInventoryPanel({
 function RowAction({
   label,
   onClick,
+  disabled,
 }: {
   label: string
   onClick: () => void
+  disabled?: boolean
 }) {
   return (
     <button
       type="button"
-      className="rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-muted"
+      disabled={disabled}
+      className="rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
       onClick={onClick}
     >
       {label}
@@ -838,6 +943,7 @@ function ImportDialog({
           <Count label="상품 미연결" value={summary.missingStyle} />
           <Count label="날짜 검수" value={summary.dateReview} />
           <Count label="중복 의심" value={summary.duplicateSuspect} />
+          <Count label="수량 미확인" value={summary.quantityUnknown} />
         </div>
       ) : null}
       {localError ? <p className="text-xs text-danger">{localError}</p> : null}
@@ -1026,7 +1132,7 @@ function MoveDialog({
   onError: (message: string | null) => void
 }) {
   const [toCode, setToCode] = useState(replenish ? row.locationCode : '')
-  const [boxCount, setBoxCount] = useState(String(row.remainingBoxes))
+  const [boxCount, setBoxCount] = useState(String(row.remainingBoxes ?? ''))
   const mutation = useMutation({
     mutationFn: async () => {
       const count = Number(boxCount)
@@ -1057,7 +1163,8 @@ function MoveDialog({
       onClose={onClose}
     >
       <p className="text-xs text-muted-foreground">
-        {row.styleNo} · {formatWarehouseLocation(row)} · 잔여 {formatNumber(row.remainingBoxes)}박스.
+        {row.styleNo} · {formatWarehouseLocation(row)} · 잔여{' '}
+        {formatWarehouseCount(row.remainingBoxes)}박스.
         일부만 옮기면 원래 입고일을 유지한 새 행으로 나눕니다.
       </p>
       <label className="block space-y-1 text-xs">
@@ -1075,7 +1182,11 @@ function MoveDialog({
         <Button
           type="button"
           size="sm"
-          disabled={mutation.isPending || row.remainingBoxes < 1}
+          disabled={
+            mutation.isPending ||
+            !isWarehouseQuantityKnown(row) ||
+            (row.remainingBoxes ?? 0) < 1
+          }
           onClick={() => mutation.mutate()}
         >
           {replenish ? '충원' : '이동'}
@@ -1098,7 +1209,8 @@ function AdjustDialog({
   onDone: () => Promise<void>
   onError: (message: string | null) => void
 }) {
-  const [boxes, setBoxes] = useState(String(row.remainingBoxes))
+  const [boxes, setBoxes] = useState(String(row.remainingBoxes ?? ''))
+  const [units, setUnits] = useState(String(row.unitsPerBox ?? ''))
   const [opened, setOpened] = useState(String(row.openedUnits))
   const mutation = useMutation({
     mutationFn: async () => {
@@ -1106,6 +1218,7 @@ function AdjustDialog({
         positionId: row.id,
         remainingBoxes: Number(boxes),
         openedUnits: Number(opened),
+        unitsPerBox: Number(units),
       })
     },
     onSuccess: async () => {
@@ -1120,6 +1233,10 @@ function AdjustDialog({
   return (
     <Overlay title="실사 수정" onClose={onClose}>
       <div className="grid grid-cols-2 gap-2">
+        <label className="block space-y-1 text-xs">
+          <span className="text-muted-foreground">박스당 수량</span>
+          <Input value={units} onChange={(e) => setUnits(e.target.value)} />
+        </label>
         <label className="block space-y-1 text-xs">
           <span className="text-muted-foreground">잔여 박스</span>
           <Input value={boxes} onChange={(e) => setBoxes(e.target.value)} />
@@ -1176,7 +1293,8 @@ function OpenDialog({
   return (
     <Overlay title="박스 개봉" onClose={onClose}>
       <p className="text-xs text-muted-foreground">
-        출고창고에서 박스를 열어 낱개로 바꿉니다. 남은 박스 {formatNumber(row.remainingBoxes)}.
+        출고창고에서 박스를 열어 낱개로 바꿉니다. 남은 박스{' '}
+        {formatWarehouseCount(row.remainingBoxes)}.
       </p>
       <label className="block space-y-1 text-xs">
         <span className="text-muted-foreground">개봉할 박스 수</span>
@@ -1189,7 +1307,11 @@ function OpenDialog({
         <Button
           type="button"
           size="sm"
-          disabled={mutation.isPending || row.remainingBoxes < 1}
+          disabled={
+            mutation.isPending ||
+            !isWarehouseQuantityKnown(row) ||
+            (row.remainingBoxes ?? 0) < 1
+          }
           onClick={() => mutation.mutate()}
         >
           개봉
@@ -1257,7 +1379,7 @@ function HistoryDialog({
     queryFn: () => getWarehouseStockMovements(brandId, setId!, row?.id),
     enabled: Boolean(setId),
   })
-  const movements = query.data ?? []
+  const movements = query.data ?? emptyList()
 
   return (
     <Overlay title={row ? `${row.styleNo} 이력` : '변경 이력'} onClose={onClose} wide>

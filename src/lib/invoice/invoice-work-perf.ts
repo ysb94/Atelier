@@ -1,9 +1,38 @@
 /**
- * 송장작업 저장·변환 경로를 개발 모드에서만 분리 계측한다.
+ * 송장작업 저장·변환 경로를 계측한다.
+ * 개발 모드에서는 항상, 배포에서는 콘솔 `atelierDebug.on()` 뒤에 켜진다.
  * 콘솔 필터: `[invoice-work]`
+ *
+ * 로그 레벨: 기본은 debug(Verbose)이고, SLOW_INFO_MS 이상이면 info,
+ * SLOW_WARN_MS 이상이면 warn 으로 올려 기본 콘솔 필터에서도 보이게 한다.
  */
+import { isDiagnosticsEnabled } from '@/lib/diagnostics/debug-flags'
 
-const ENABLED = import.meta.env.DEV
+export const INVOICE_WORK_SLOW_INFO_MS = 200
+export const INVOICE_WORK_SLOW_WARN_MS = 1_000
+
+function enabled() {
+  return isDiagnosticsEnabled()
+}
+
+export function invoiceWorkLogLevel(
+  elapsedMs: number,
+): 'debug' | 'info' | 'warn' {
+  if (elapsedMs >= INVOICE_WORK_SLOW_WARN_MS) return 'warn'
+  if (elapsedMs >= INVOICE_WORK_SLOW_INFO_MS) return 'info'
+  return 'debug'
+}
+
+function logTimed(
+  name: string,
+  elapsed: number,
+  extra?: Record<string, unknown>,
+) {
+  const level = invoiceWorkLogLevel(elapsed)
+  const message = `[invoice-work] ${name} ${elapsed}ms`
+  if (extra) console[level](message, extra)
+  else console[level](message)
+}
 
 export type InvoiceWorkStage =
   | 'parse'
@@ -42,7 +71,7 @@ export function logInvoiceWork(
   name: string,
   extra?: Record<string, unknown>,
 ) {
-  if (!ENABLED) return
+  if (!enabled()) return
   if (extra) console.debug(`[invoice-work] ${name}`, extra)
   else console.debug(`[invoice-work] ${name}`)
 }
@@ -64,7 +93,7 @@ export function markInvoiceWorkStage(
 ) {
   if (!job) return
   job.marks[stage] = nowMs()
-  if (!ENABLED) return
+  if (!enabled()) return
   console.debug(
     `[invoice-work] ${stage} ${Math.round(nowMs() - job.startedAt)}ms`,
     { jobId: job.id, ...extra },
@@ -84,15 +113,11 @@ export function timeInvoiceWork<T>(
   fn: () => T,
   job?: InvoiceWorkJob | null,
 ): T {
-  if (!ENABLED) return fn()
+  if (!enabled()) return fn()
   const start = nowMs()
   const result = fn()
   const elapsed = Math.round(nowMs() - start)
-  if (job) {
-    console.debug(`[invoice-work] ${name} ${elapsed}ms`, { jobId: job.id })
-  } else {
-    console.debug(`[invoice-work] ${name} ${elapsed}ms`)
-  }
+  logTimed(name, elapsed, job ? { jobId: job.id } : undefined)
   return result
 }
 
@@ -101,16 +126,12 @@ export async function timeInvoiceWorkAsync<T>(
   fn: () => Promise<T>,
   job?: InvoiceWorkJob | null,
 ): Promise<T> {
-  if (!ENABLED) return fn()
+  if (!enabled()) return fn()
   const start = nowMs()
   try {
     return await fn()
   } finally {
     const elapsed = Math.round(nowMs() - start)
-    if (job) {
-      console.debug(`[invoice-work] ${name} ${elapsed}ms`, { jobId: job.id })
-    } else {
-      console.debug(`[invoice-work] ${name} ${elapsed}ms`)
-    }
+    logTimed(name, elapsed, job ? { jobId: job.id } : undefined)
   }
 }

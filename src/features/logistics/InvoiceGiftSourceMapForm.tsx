@@ -14,7 +14,7 @@ import type {
   InvoiceGiftSourceMap,
   StyleRef,
 } from '@/lib/types'
-import { formatNumber } from '@/lib/utils'
+import { formatNumber, emptyList } from '@/lib/utils'
 
 export function InvoiceGiftSourceMapForm({
   brandId,
@@ -52,7 +52,7 @@ export function InvoiceGiftSourceMapForm({
       }),
     enabled: Boolean(editing?.id),
   })
-  const allocations = allocationsQuery.data ?? []
+  const allocations = allocationsQuery.data ?? emptyList()
   const allocatedByStyle = useMemo(() => {
     const counts = new Map<string, number>()
     for (const row of allocations) {

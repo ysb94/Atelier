@@ -129,9 +129,13 @@ export type {
 export { InvoiceAccessoryRuleStoreError } from '@/lib/supabase/invoice-accessory-rules'
 export type { InvoiceAccessoryRuleInput } from '@/lib/supabase/invoice-accessory-rules'
 export { InvoiceOptionMapStoreError } from '@/lib/supabase/invoice-option-maps'
-export { WarehouseStockStoreError } from '@/lib/supabase/warehouse-stock'
+export {
+  WarehouseStockStoreError,
+  subscribeWarehouseInventorySetChanges,
+} from '@/lib/supabase/warehouse-stock'
 export type {
   WarehouseAdjustInput,
+  WarehouseInventorySetRealtimeStatus,
   WarehouseMoveInput,
   WarehouseReceiveInput,
 } from '@/lib/supabase/warehouse-stock'

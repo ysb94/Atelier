@@ -34,7 +34,7 @@ import type {
   ProductCodeComponent,
   Style,
 } from '@/lib/types'
-import { cn, formatNumber } from '@/lib/utils'
+import { cn, formatNumber, emptyList } from '@/lib/utils'
 
 type FieldType = 'text' | 'number'
 
@@ -760,7 +760,7 @@ export function PartnerCodeListPanel({
     queryKey: ['styles', brandId, 'partner-codes'],
     queryFn: () => getStylesByBrand(brandId),
   })
-  const styles = stylesQuery.data ?? []
+  const styles = stylesQuery.data ?? emptyList()
 
   const fieldsQuery = useQuery({
     queryKey: ['partnerBarcodeFields', brandId, partner.id],

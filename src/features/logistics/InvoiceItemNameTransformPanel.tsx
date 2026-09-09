@@ -25,6 +25,7 @@ import {
   type InvoiceItemNameRuleScope,
   type StyleRef,
 } from '@/lib/types'
+import { useRenderWatch } from '@/lib/diagnostics'
 import { formatNumber } from '@/lib/utils'
 import {
   downloadInvoiceItemNameReviewList,
@@ -250,6 +251,7 @@ export const InvoiceItemNameTransformPanel = memo(function InvoiceItemNameTransf
   styles?: StyleRef[]
   renderUi?: boolean
 }) {
+  useRenderWatch('InvoiceItemNameTransformPanel')
   const [query, setQuery] = useState('')
   const deferredQuery = useDeferredValue(query)
   const [downloading, setDownloading] = useState(false)

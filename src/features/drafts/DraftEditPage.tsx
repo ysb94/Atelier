@@ -75,6 +75,7 @@ import {
 } from '@/lib/drafts/sample-work-order'
 import { useAuth } from '@/lib/supabase/auth'
 import { draftDetailPath } from '@/lib/workspace/company-paths'
+import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber } from '@/lib/utils'
 
 const SAMPLE_WORK_ORDER_ACCEPT =
@@ -513,6 +514,7 @@ function seasonIdFromQuery(
 }
 
 export function DraftEditPage() {
+  useRenderWatch('DraftEditPage')
   const { brands, brandById, brandBySlug } = useCompanyBrandScope()
   const { profile } = useAuth()
   const { draftId } = useParams()

@@ -52,7 +52,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 송장 내품명 부속품 사전(`invoice_accessory_rules`) | Supabase |
 | 송장 기준정보 포장 규격 간단값(`invoice_packing_size_maps`) | Supabase |
 | 송장 피킹표 동선 사전(`invoice_picking_route_presets`) | Supabase |
-| 연습 창고 세트·자리·미식별 재고·박스 ID·이력(`warehouses` + `warehouse_locations` + `warehouse_inventory_sets` + `warehouse_stock_positions` + `warehouse_boxes` + `warehouse_stock_movements`) | Supabase |
+| 연습 창고 세트·자리·미식별 재고·박스 ID·이력·출고 자리 등록(`warehouses` + `warehouse_locations` + `warehouse_inventory_sets` + `warehouse_stock_positions` + `warehouse_boxes` + `warehouse_stock_movements` + `warehouse_registered_slots`) | Supabase |
 | 송장 사은품 증정 요청 건(`invoice_prefix_requests` + `invoice_prefix_items` + `invoice_prefix_item_products`, 앱 모델명 Gift) | Supabase |
 | 송장 사은품 선착순 한도·배정 원장(`invoice_prefix_requests` 한도 필드 + `invoice_gift_quotas` + `invoice_gift_allocations`) | Supabase |
 | 송장 사은품 원본행 치환 매핑(`invoice_gift_source_maps` + `invoice_gift_source_map_products` + `invoice_gift_source_allocations`) | Supabase |
@@ -84,7 +84,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `update_invoice_work_run`,
   `delete_invoice_work_run`,
   `import_warehouse_inventory_set`, `apply_warehouse_stock_action`,
-  `restore_warehouse_inventory_set`.
+  `restore_warehouse_inventory_set`, `replace_warehouse_inventory_snapshot`.
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
 - 브랜드 로고는 지금 `logo_url`에 data URL로 저장한다. 이후 `brands/{brand_id}/...`
   Storage 경로로 옮긴다.
@@ -619,12 +619,22 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   교체하고 반대 존은 직전 활성 세트에서 복사한다. 직전 전체 세트는 `archived`로
   두며 `restore_warehouse_inventory_set`이 보관한 전체 스냅샷을 다시 켠다.
 - `warehouse_stock_positions`는 위치·M번호·입고일·박스당 수량·잔여 박스의
-  미식별 묶음이다. `warehouse_boxes`는 향후 고유 박스 ID용이며 첫 적재는 비운다.
+  미식별 묶음이다. 빈 수량은 `unknown`으로 보존하고 0/1로 추정하지 않는다.
+  `000000`은 최우선, `000001`은 차순위, 정상 날짜는 FIFO, `999999`는 마지막이다.
+  M번호가 없는 불량·자재 행은 `style_id = null`로 검색 가능하게 남기고 정상 SKU
+  합계에서는 뺀다. Google 시트 AA는 `external_row_id`다.
+- `warehouse_registered_slots`는 창고 안에서 자리번호가 속하는 구역이다.
+  등록된 `picking` 자리만 출고창고로 분류하고, 없으면 박스창고다. 기존 연습
+  세트의 존별 자리 중복은 그대로 두고, 앞으로의 자동 분류만 이 등록표를 쓴다.
+  `warehouse_boxes`는 향후 고유 박스 ID용이며 첫 적재는 비운다.
 - 읽기는 `app.can_read_brand`, 쓰기와 RPC는 `app.can_edit_brand`다. 회사 공통
   창고/자리 RLS는 같은 회사 브랜드 멤버십으로 판별한다.
 - `import_warehouse_inventory_set`과 `apply_warehouse_stock_action`은
   `SECURITY INVOKER` 트랜잭션이다. 잔여 박스는 음수가 될 수 없다. 연습 데이터는
   송장 예약·실재고 차감과 연결하지 않는다.
+- `replace_warehouse_inventory_snapshot`은 Apps Script용 전체 교체 RPC다.
+  `service_role`만 실행할 수 있고 `anon`/`authenticated` 권한은 없다.
+  호출은 HMAC 인증 `warehouse-sheet-sync` Edge Function만 한다.
 - 로직: `src/lib/warehouse/stock.ts`. 저장소: `src/lib/supabase/warehouse-stock.ts`.
   화면: `WarehousePage`, `WarehouseInventoryPanel`.
 - 물류 상품표(`/work/logistics`)의 박스창고·출고지창고·총재고·박스재고·
@@ -645,7 +655,21 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `app.can_edit_brand`다.
 - 마이그레이션: `20260826095007_warehouse_practice.sql`,
   `20260827045956_zone_scoped_warehouse_import.sql`,
-  `20260827075805_invoice_picking_route_presets.sql`.
+  `20260827075805_invoice_picking_route_presets.sql`,
+  `20260909150000_warehouse_sheet_sync.sql`,
+  `20260909150100_warehouse_sheet_sync_rpc.sql`,
+  `20260909150200_warehouse_sheet_sync_service_role_grants.sql`,
+  `20260909150300_warehouse_sheet_sync_replace_definer.sql`,
+  `20260909160400_warehouse_inventory_sets_realtime.sql`.
+- 창고 화면 자동 갱신은 `warehouse_inventory_sets` Realtime 이벤트만
+  구독한다. 재고 행(`warehouse_stock_positions`)은 전체 교체 때 수천 건이
+  생겨 넣지 않는다. 보이는 창고 탭만 듣고, 신호를 받으면 활성 세트·재고를
+  다시 읽는다. 끊기면 화면의 새로고침 버튼으로 같은 조회를 한다.
+- Edge Function: `warehouse-sheet-sync`. JWT 대신 HMAC
+  (`x-atelier-timestamp`, `x-atelier-signature`)을 검증하고 Masmarulez만
+  허용한다. `validateOnly`는 저장하지 않고 건수만 돌려준다. 함수는
+  `service_role`로 브랜드·상품·활성 세트·등록 자리만 읽고, 쓰기는
+  `replace_warehouse_inventory_snapshot` RPC만 사용한다.
 - 재고 원칙: [`INVENTORY.md`](./INVENTORY.md).
 
 ### 송장 내품명·출고구성 기준

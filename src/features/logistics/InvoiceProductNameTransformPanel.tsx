@@ -43,6 +43,7 @@ import type {
   InvoiceProductNameTagRole,
 } from '@/lib/types'
 import { INVOICE_PRODUCT_NAME_TAG_ROLE_LABEL } from '@/lib/types'
+import { useRenderWatch } from '@/lib/diagnostics'
 import { formatNumber } from '@/lib/utils'
 import {
   filterRegularProductNameCombos,
@@ -135,6 +136,7 @@ export const InvoiceProductNameTransformPanel = memo(function InvoiceProductName
   giftGroups?: GiftSourceGroup[]
   onOpenGiftSetup?: (target: { mallName: string; productName: string }) => void
 }) {
+  useRenderWatch('InvoiceProductNameTransformPanel')
   const queryClient = useQueryClient()
   const exclusionsQuery = useQuery({
     queryKey: ['invoice-product-name-exclusions', brandId],

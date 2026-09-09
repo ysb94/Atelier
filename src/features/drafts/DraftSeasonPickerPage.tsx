@@ -33,7 +33,7 @@ import {
   type SeasonInput,
   type SeasonStatus,
 } from '@/lib/types'
-import { cn, formatNumber } from '@/lib/utils'
+import { cn, formatNumber, emptyList } from '@/lib/utils'
 
 const EMPTY_FORM: SeasonInput = {
   name: '',
@@ -72,8 +72,8 @@ export function DraftSeasonPickerPage() {
     queryFn: () => getProductDrafts(brand.id),
   })
 
-  const seasons = seasonsQuery.data ?? []
-  const drafts = draftsQuery.data ?? []
+  const seasons = seasonsQuery.data ?? emptyList()
+  const drafts = draftsQuery.data ?? emptyList()
 
   const statusCounts = useMemo(() => {
     const map = new Map<SeasonStatus, number>()

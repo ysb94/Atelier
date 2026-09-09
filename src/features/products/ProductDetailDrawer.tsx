@@ -43,7 +43,7 @@ import {
   type Style,
   type StyleStatus,
 } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import { cn, emptyList } from '@/lib/utils'
 
 const COMPLETENESS_OWNERS: Exclude<FieldOwner, 'common'>[] = [
   'planning',
@@ -222,12 +222,12 @@ export function ProductDetailDrawer() {
     enabled: Boolean(brandId),
   })
 
-  const styles = stylesQuery.data ?? []
-  const fields = fieldsQuery.data ?? []
-  const seasons = seasonsQuery.data ?? []
-  const ownCodes = codesQuery.data ?? []
-  const assignments = assignmentsQuery.data ?? []
-  const targets = targetsQuery.data ?? []
+  const styles = stylesQuery.data ?? emptyList()
+  const fields = fieldsQuery.data ?? emptyList()
+  const seasons = seasonsQuery.data ?? emptyList()
+  const ownCodes = codesQuery.data ?? emptyList()
+  const assignments = assignmentsQuery.data ?? emptyList()
+  const targets = targetsQuery.data ?? emptyList()
 
   const style = useMemo(() => {
     if (!decodedParam) return undefined

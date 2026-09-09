@@ -44,7 +44,8 @@ import { Input, Select, Textarea } from '@/components/ui/input'
 import { ATELIER_BRAND_ID } from '@/lib/company/capabilities'
 import { useAuth } from '@/lib/supabase/auth'
 import { listBrandDirectory } from '@/lib/supabase/profiles'
-import { cn } from '@/lib/utils'
+import { useRenderWatch } from '@/lib/diagnostics'
+import { cn, emptyList } from '@/lib/utils'
 import {
   departmentDisplayName,
   isSameDepartment,
@@ -1916,6 +1917,7 @@ function RequestBodyEditor({
 }
 
 function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
+  useRenderWatch(`WorkRequestForm:${owner}`)
   const config = WORK_REQUEST_CONFIG[owner]
   const { profile } = useAuth()
   const [searchParams] = useSearchParams()
@@ -1923,7 +1925,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     queryKey: ['brand-directory'],
     queryFn: listBrandDirectory,
   })
-  const brands = brandsQuery.data ?? []
+  const brands = brandsQuery.data ?? emptyList()
   const pageTopRef = useRef<HTMLDivElement>(null)
   const [screen, setScreen] = useState<RequestScreen>({ kind: 'list' })
   const [requests, setRequests] = useState<WorkRequestRecord[]>(() =>

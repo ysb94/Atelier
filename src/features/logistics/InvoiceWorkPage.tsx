@@ -14,7 +14,6 @@ import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { BrandTargetGate } from '@/components/layout/BrandTargetGate'
-import { CompanyInvoiceLanding } from '@/features/workspace/company-operation-lists'
 import {
   AlertTriangle,
   ArrowLeft,
@@ -202,6 +201,7 @@ import type {
   InvoiceProductNameMap,
   InvoiceWorkInstruction,
 } from '@/lib/types'
+import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber } from '@/lib/utils'
 import { InvoiceDiscontinuedListPanel } from './InvoiceDiscontinuedListPanel'
 import { InvoicePreorderHoldPanel } from './InvoicePreorderHoldPanel'
@@ -249,9 +249,9 @@ const MAX_FILE_BYTES = 50 * 1024 * 1024
 const PRODUCT_FEATURE_KEY = 'invoice_product_recommendation'
 
 function invoiceCriteriaQueryOptions(snapshot: boolean) {
+  // 창 포커스 재조회는 전역에서 끈다(App.tsx). 작업 중 원장이 통째로 다시 맞춰지는 것을 막는다.
   return {
     staleTime: snapshot ? Infinity : 5 * 60_000,
-    refetchOnWindowFocus: !snapshot,
   }
 }
 
@@ -1386,6 +1386,7 @@ function StepSnapshotButton({
 }
 
 export function InvoiceWorkPage() {
+  useRenderWatch('InvoiceWorkPage')
   const { brand } = useBrand()
   const workspaceActive = useWorkspaceTabActivity()
   const queryClient = useQueryClient()
@@ -4759,13 +4760,9 @@ export function InvoiceWorkPage() {
 }
 
 export function CompanyInvoiceWorkPage() {
-  const [searchParams] = useSearchParams()
-  if (searchParams.get('brand')) {
-    return (
-      <BrandTargetGate lockAfterSelect title="송장작업 브랜드">
-        <InvoiceWorkPage />
-      </BrandTargetGate>
-    )
-  }
-  return <CompanyInvoiceLanding />
+  return (
+    <BrandTargetGate lockAfterSelect>
+      <InvoiceWorkPage />
+    </BrandTargetGate>
+  )
 }

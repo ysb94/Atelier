@@ -1,4 +1,10 @@
-import { createContext, createElement, useContext, type ReactNode } from 'react'
+import {
+  createContext,
+  createElement,
+  useContext,
+  useMemo,
+  type ReactNode,
+} from 'react'
 import type { Brand } from '@/lib/types'
 
 export type BrandContextValue = {
@@ -27,9 +33,10 @@ export function BrandScope({
   brand: Brand
   children: ReactNode
 }) {
-  return createElement(
-    BrandContext.Provider,
-    { value: { brand, brandSlug: brand.slug } },
-    children,
+  // value 참조가 매 렌더 바뀌면 useBrand() 를 쓰는 무거운 페이지가 전부 다시 렌더된다.
+  const value = useMemo<BrandContextValue>(
+    () => ({ brand, brandSlug: brand.slug }),
+    [brand],
   )
+  return createElement(BrandContext.Provider, { value }, children)
 }

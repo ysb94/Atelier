@@ -76,8 +76,8 @@ export function UsageTargetsSettingsPage() {
   return (
     <div>
       <PageHeader
-        title="출고업체"
-        description={`${brand.name} 출고처를 폴더 아래 업체와 지점으로 두고, 지점이 없으면 업체를 실제 출고 단위로 관리합니다.`}
+        title={`${brand.name} 출고업체`}
+        description="출고처를 폴더 아래 업체와 지점으로 두고, 지점이 없으면 업체를 실제 출고 단위로 관리합니다."
       />
 
       {loading && targets.length === 0 && folders.length === 0 ? (

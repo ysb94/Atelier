@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { parseStyleName } from '@/lib/invoice/style-name-parts'
 import { searchStyleRefs } from '@/lib/api'
 import type { StyleRef } from '@/lib/types'
-import { cn } from '@/lib/utils'
+import { cn, emptyList } from '@/lib/utils'
 
 export function formatStyleRef(ref: StyleRef): string {
   return `${ref.styleNo} · ${ref.name}`
@@ -157,7 +157,7 @@ export function StylePicker({
     staleTime: 30_000,
   })
 
-  const suggestions = suggestionsQuery.data ?? []
+  const suggestions = suggestionsQuery.data ?? emptyList()
 
   if (value) {
     return (
@@ -261,7 +261,7 @@ export function StyleMultiPicker({
     staleTime: 30_000,
   })
 
-  const suggestions = suggestionsQuery.data ?? []
+  const suggestions = suggestionsQuery.data ?? emptyList()
 
   function toggleRef(ref: StyleRef) {
     if (selectedIds.has(ref.styleId)) {

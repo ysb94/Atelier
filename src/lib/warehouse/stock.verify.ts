@@ -9,17 +9,26 @@ import {
   compareWarehouseUsageOrder,
   formatWarehouseLocation,
   formatWarehouseReceivedOn,
+  LAST_PRIORITY_DATE,
   parseWarehouseLocation,
+  parseWarehouseQuantity,
   parseWarehouseReceivedOn,
   parseWarehouseUploadRows,
   planWarehouseBoxMove,
   prepareWarehouseImportRows,
+  SECOND_PRIORITY_DATE,
   summarizeWarehouseImport,
   summarizeWarehouseStockByStyle,
   toWarehouseImportRpcRows,
   warehouseInventoryTemplateSheets,
   warehousePositionQty,
 } from './stock'
+import {
+  buildWarehouseSheetSyncFixture,
+  prepareWarehouseSheetSyncRows,
+  summarizeWarehouseSheetSync,
+  validateWarehouseSheetSyncPayload,
+} from './sheet-sync'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -44,8 +53,23 @@ assert(
 
 const forced = parseWarehouseReceivedOn('000000')
 assert(forced.isForcedPriority, '000000은 강제 우선이다')
+assert(forced.usagePriority === 'first', '000000은 최우선이다')
 assert(forced.receivedOn === null, '000000은 입고일이 아니다')
 assert(forced.dateValid, '000000은 검수 대상이 아니다')
+
+const second = parseWarehouseReceivedOn(SECOND_PRIORITY_DATE)
+assert(second.usagePriority === 'second', '000001은 차순위다')
+assert(second.dateValid, '000001은 검수 대상이 아니다')
+assert(second.receivedOn === null, '000001은 입고일이 아니다')
+
+const lastPriority = parseWarehouseReceivedOn(LAST_PRIORITY_DATE)
+assert(lastPriority.usagePriority === 'last', '999999는 마지막이다')
+assert(lastPriority.dateValid, '999999는 검수 대상이 아니다')
+assert(lastPriority.receivedOn === null, '999999는 입고일이 아니다')
+
+assert(parseWarehouseQuantity('', { min: 1 }).value === null, '빈 입수는 미확인')
+assert(parseWarehouseQuantity('20', { min: 1 }).value === 20, '입수를 숫자로 읽는다')
+assert(parseWarehouseQuantity('0', { min: 1 }).value === null, '0 입수는 미확인')
 
 const dated = parseWarehouseReceivedOn('250817')
 assert(dated.receivedOn === '2025-08-17', 'YYMMDD를 입고일로 바꿔야 한다')
@@ -96,7 +120,7 @@ const parsed = parseWarehouseUploadRows([
       ['M100', '검정 티셔츠', 'A-03//', '241201', '20', '1', ''],
       ['M0487', '슬림백 블랙', '2-8-3', '250817', '20', '4', ''],
       ['M0487', '슬림백 블랙', '4-3-15//', '250825', '20', '3', ''],
-      ['M9999', '없는 상품', 'X', '999999', '10', '1', ''],
+      ['M9999', '없는 상품', 'X', '265028', '10', '1', ''],
       ['M0487', '슬림백 블랙', '2-8-3', '250817', '20', '4', ''],
     ],
   },
@@ -405,6 +429,66 @@ assert(m400Stock?.totalQty === 20, '혼합 존 총재고를 맞춘다')
 assert(
   stockByStyle.has('M999') === false,
   '자리 없는 상품은 집계 맵에 넣지 않는다',
+)
+
+const unknownQtyStock = summarizeWarehouseStockByStyle([
+  {
+    styleNo: 'M500',
+    locationCode: 'Z-01',
+    isFinalLocation: false,
+    isForcedPriority: false,
+    receivedOn: '2026-01-01',
+    sourceRowNumber: 1,
+    remainingBoxes: null,
+    openedUnits: 0,
+    unitsPerBox: null,
+    quantityStatus: 'unknown',
+    zone: 'box_storage',
+  },
+  {
+    styleNo: '',
+    locationCode: '불량-1',
+    isFinalLocation: false,
+    isForcedPriority: false,
+    receivedOn: null,
+    sourceRowNumber: 2,
+    remainingBoxes: 1,
+    openedUnits: 0,
+    unitsPerBox: 10,
+    zone: 'box_storage',
+  },
+])
+assert(
+  unknownQtyStock.get('M500')?.totalQty === 0,
+  '수량 미확인은 총재고에서 뺀다',
+)
+assert(unknownQtyStock.has('') === false, 'M번호 없는 행은 SKU 합계에 넣지 않는다')
+
+const fixture = buildWarehouseSheetSyncFixture(2028)
+assert(fixture.rows.length === 2028, '2,028행 fixture를 만든다')
+const payloadIssues = validateWarehouseSheetSyncPayload([
+  ...fixture.rows,
+  { ...fixture.rows[0], sourceRowNumber: 9999 },
+])
+assert(
+  payloadIssues.issues.some((issue) => issue.message.includes('중복')),
+  'AA 중복을 막는다',
+)
+const preparedSheet = prepareWarehouseSheetSyncRows(
+  fixture.rows,
+  styles,
+  fixture.pickingCodes,
+)
+const sheetSummary = summarizeWarehouseSheetSync(preparedSheet)
+assert(sheetSummary.total === 2028, '시트 동기화는 전체 행을 보존한다')
+assert(sheetSummary.unlinked >= 1, 'M번호 없는 행을 보존한다')
+assert(sheetSummary.quantityUnknown >= 1, '부분 수량을 미확인으로 보존한다')
+assert(sheetSummary.second >= 1, '000001을 차순위로 읽는다')
+assert(sheetSummary.last >= 1, '999999를 마지막으로 읽는다')
+assert(sheetSummary.picking === 1, '등록된 출고 자리만 출고창고로 분류한다')
+assert(
+  preparedSheet.filter((row) => row.zone === 'box_storage').length === 2027,
+  '등록되지 않은 자리는 박스창고다',
 )
 
 console.log('warehouse-stock verify: ok')

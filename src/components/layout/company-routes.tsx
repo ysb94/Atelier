@@ -57,16 +57,19 @@ function DesignFileManagerRoute() {
 }
 
 function Gated({
-  title,
   lock,
+  autoSelectFirst,
   children,
 }: {
-  title: string
   lock?: boolean
+  autoSelectFirst?: boolean
   children: ReactNode
 }) {
   return (
-    <BrandTargetGate title={title} lockAfterSelect={lock}>
+    <BrandTargetGate
+      lockAfterSelect={lock}
+      autoSelectFirst={autoSelectFirst}
+    >
       {children}
     </BrandTargetGate>
   )
@@ -136,7 +139,7 @@ export const companyWorkspaceRoutes = (
       <Route
         path="data/upload"
         element={
-          <Gated title="일괄 업로드 브랜드">
+          <Gated>
             <DataUploadPage />
           </Gated>
         }
@@ -152,7 +155,7 @@ export const companyWorkspaceRoutes = (
       <Route
         path="settings/fields"
         element={
-          <Gated title="업로드 항목 브랜드">
+          <Gated>
             <FieldsSettingsPage />
           </Gated>
         }
@@ -160,7 +163,7 @@ export const companyWorkspaceRoutes = (
       <Route
         path="settings/seasons"
         element={
-          <Gated title="출시 기획 브랜드">
+          <Gated>
             <SeasonsSettingsPage />
           </Gated>
         }
@@ -168,7 +171,7 @@ export const companyWorkspaceRoutes = (
       <Route
         path="settings/usage-targets"
         element={
-          <Gated title="출고업체 브랜드">
+          <Gated autoSelectFirst>
             <UsageTargetsSettingsPage />
           </Gated>
         }
@@ -177,7 +180,7 @@ export const companyWorkspaceRoutes = (
       <Route
         path="settings/ai"
         element={
-          <Gated title="AI 설정 브랜드">
+          <Gated>
             <AiSettingsPage />
           </Gated>
         }
@@ -185,7 +188,7 @@ export const companyWorkspaceRoutes = (
       <Route
         path="settings/brand"
         element={
-          <Gated title="브랜드 정보">
+          <Gated>
             <BrandSettingsPage />
           </Gated>
         }

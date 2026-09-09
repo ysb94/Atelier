@@ -30,17 +30,25 @@ const CompanyBrandScopeContext = createContext<CompanyBrandScopeValue | null>(
   null,
 )
 
+/**
+ * 로딩 중 빈 배열은 매 렌더 새 참조가 되지 않게 고정한다.
+ * 이 Provider 의 value 가 바뀌면 KeepAlive 로 숨겨진 탭까지 전부 다시 렌더된다.
+ */
+const EMPTY_BRANDS: Brand[] = []
+
 export function CompanyBrandScopeProvider({ children }: { children: ReactNode }) {
   const brandsQuery = useQuery({
     queryKey: ['brands'],
     queryFn: getBrands,
   })
   const [searchParams, setSearchParams] = useSearchParams()
-  const brands = brandsQuery.data ?? []
+  const brands = brandsQuery.data ?? EMPTY_BRANDS
   const availableSlugs = useMemo(() => brands.map((item) => item.slug), [brands])
-  const selection = resolveBrandSelection(
-    searchParams.get('brands'),
-    availableSlugs,
+  const brandsParam = searchParams.get('brands')
+  // 다른 검색 파라미터(page, brand, view …)가 바뀌어도 선택이 같으면 참조를 유지한다.
+  const selection = useMemo(
+    () => resolveBrandSelection(brandsParam, availableSlugs),
+    [availableSlugs, brandsParam],
   )
   const selectedBrands = useMemo(
     () => brands.filter((item) => selection.slugs.includes(item.slug)),

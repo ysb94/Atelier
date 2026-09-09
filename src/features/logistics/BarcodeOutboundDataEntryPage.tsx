@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
+import { Link } from 'react-router-dom'
 import { BrandTargetGate } from '@/components/layout/BrandTargetGate'
-import { CompanyBarcodeEntryLanding } from '@/features/workspace/company-operation-lists'
 import { FileSpreadsheet, History, Search, Settings2 } from 'lucide-react'
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -47,6 +46,7 @@ import {
 } from '@/lib/outbound/barcode-outbound-data-entry'
 import { PRODUCT_OUTBOUND_UPDATED_EVENT } from '@/lib/outbound/product-outbound'
 import type { CodeUsageTarget } from '@/lib/types'
+import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber } from '@/lib/utils'
 
 const COMPANY_RANK_COUNT = 3
@@ -237,6 +237,7 @@ function VisiblePartnerSettingsDialog({
 
 /** (임시) 바코드 출고 데이터입력 — 업체를 고르고 지점별 상품명·수량을 넣는다. */
 export function BarcodeOutboundDataEntryPage() {
+  useRenderWatch('BarcodeOutboundDataEntryPage')
   const { brand } = useBrand()
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
@@ -687,13 +688,9 @@ export function BarcodeOutboundDataEntryPage() {
 }
 
 export function CompanyBarcodeOutboundDataEntryPage() {
-  const [searchParams] = useSearchParams()
-  if (searchParams.get('brand')) {
-    return (
-      <BrandTargetGate lockAfterSelect title="바코드 출고 데이터입력 브랜드">
-        <BarcodeOutboundDataEntryPage />
-      </BrandTargetGate>
-    )
-  }
-  return <CompanyBarcodeEntryLanding />
+  return (
+    <BrandTargetGate lockAfterSelect>
+      <BarcodeOutboundDataEntryPage />
+    </BrandTargetGate>
+  )
 }

@@ -36,7 +36,8 @@ import {
   type ProductOutboundSummary,
 } from '@/lib/outbound/product-outbound'
 import type { CodeUsageTarget } from '@/lib/types'
-import { cn, formatNumber } from '@/lib/utils'
+import { useRenderWatch } from '@/lib/diagnostics'
+import { cn, formatNumber, emptyList } from '@/lib/utils'
 
 type ViewMode = 'outbound' | 'profit'
 type DatePreset = '7d' | '30d' | 'month' | 'last_month' | 'all'
@@ -802,6 +803,7 @@ function ProductListCard({
 }
 
 export function OutboundDataPage() {
+  useRenderWatch('OutboundDataPage')
   const { brand } = useBrand()
   const queryClient = useQueryClient()
   const [view, setView] = useState<ViewMode>('outbound')
@@ -821,7 +823,7 @@ export function OutboundDataPage() {
     queryKey: ['outboundShipments', brand.id],
     queryFn: () => getOutboundShipments(brand.id),
   })
-  const shipments = shipmentsQuery.data ?? []
+  const shipments = shipmentsQuery.data ?? emptyList()
 
   useEffect(() => {
     purgeDemoProductOutboundShipments(brand.id)

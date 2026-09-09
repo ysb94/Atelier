@@ -3,10 +3,12 @@ import type {
   WarehouseInventorySet,
   WarehouseInventoryStatus,
   WarehouseLocation,
+  WarehouseQuantityStatus,
   WarehouseReviewFlag,
   WarehouseStockAction,
   WarehouseStockMovement,
   WarehouseStockPosition,
+  WarehouseUsagePriority,
   WarehouseZone,
 } from '@/lib/types'
 import { normalizeStyleNo } from '@/lib/import/transform'
@@ -24,12 +26,19 @@ const REVIEW_FLAGS = new Set<WarehouseReviewFlag>([
   'date_review',
   'duplicate_suspect',
   'special_location',
+  'quantity_unknown',
+])
+const USAGE_PRIORITIES = new Set<WarehouseUsagePriority>([
+  'first',
+  'second',
+  'fifo',
+  'last',
 ])
 
 const SET_COLUMNS =
   'id, brand_id, warehouse_id, kind, status, source_file_name, row_count, imported_at, imported_by'
 const POSITION_COLUMNS =
-  'id, brand_id, set_id, warehouse_id, location_id, style_id, source_style_no, normalized_style_no, source_product_name, received_on, received_on_raw, is_forced_priority, is_final_location, units_per_box, remaining_boxes, opened_units, review_flags, source_row_number, note, created_at, updated_at, warehouse_locations!inner(code, zone)'
+  'id, brand_id, set_id, warehouse_id, location_id, style_id, source_style_no, normalized_style_no, source_product_name, received_on, received_on_raw, is_forced_priority, is_final_location, usage_priority, quantity_status, units_per_box, remaining_boxes, units_per_box_raw, remaining_boxes_raw, opened_units, review_flags, source_row_number, note, external_row_id, created_at, updated_at, warehouse_locations!inner(code, zone)'
 const LOCATION_COLUMNS = 'id, warehouse_id, code, zone'
 const MOVEMENT_COLUMNS =
   'id, brand_id, set_id, action, position_id, box_id, style_id, from_location_code, to_location_code, box_count, unit_count, reason, actor_id, created_at'
@@ -74,12 +83,17 @@ type PositionRow = {
   received_on_raw: string
   is_forced_priority: boolean
   is_final_location: boolean
-  units_per_box: number
-  remaining_boxes: number
+  usage_priority: string | null
+  quantity_status: string | null
+  units_per_box: number | null
+  remaining_boxes: number | null
+  units_per_box_raw: string | null
+  remaining_boxes_raw: string | null
   opened_units: number
   review_flags: string[] | null
   source_row_number: number
   note: string
+  external_row_id: string | null
   created_at: string
   updated_at: string
   warehouse_locations?:
@@ -132,6 +146,7 @@ export type WarehouseAdjustInput = {
   positionId: string
   remainingBoxes: number
   openedUnits: number
+  unitsPerBox?: number
   reason?: string
 }
 
@@ -199,12 +214,26 @@ function toPosition(
     receivedOnRaw: row.received_on_raw,
     isForcedPriority: row.is_forced_priority,
     isFinalLocation: row.is_final_location,
+    usagePriority: USAGE_PRIORITIES.has(row.usage_priority as WarehouseUsagePriority)
+      ? (row.usage_priority as WarehouseUsagePriority)
+      : row.is_forced_priority
+        ? 'first'
+        : 'fifo',
+    quantityStatus:
+      row.quantity_status === 'unknown' ||
+      row.units_per_box == null ||
+      row.remaining_boxes == null
+        ? 'unknown'
+        : 'known',
     unitsPerBox: row.units_per_box,
     remainingBoxes: row.remaining_boxes,
+    unitsPerBoxRaw: row.units_per_box_raw ?? '',
+    remainingBoxesRaw: row.remaining_boxes_raw ?? '',
     openedUnits: row.opened_units,
     reviewFlags: toReviewFlags(row.review_flags),
     sourceRowNumber: row.source_row_number,
     note: row.note,
+    externalRowId: row.external_row_id,
     usageRank,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -262,6 +291,59 @@ export async function getActiveWarehouseInventorySet(
     sets.find((set) => set.kind === 'sandbox' && set.status === 'active') ??
     null
   )
+}
+
+export type WarehouseInventorySetRealtimeStatus =
+  | 'connecting'
+  | 'subscribed'
+  | 'reconnecting'
+  | 'error'
+
+export function subscribeWarehouseInventorySetChanges(
+  brandId: string,
+  handlers: {
+    onChange: () => void
+    onStatus?: (status: WarehouseInventorySetRealtimeStatus) => void
+  },
+): () => void {
+  const supabase = getSupabase()
+  handlers.onStatus?.('connecting')
+  const channel = supabase
+    .channel(`warehouse-inventory-sets:${brandId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'warehouse_inventory_sets',
+        filter: `brand_id=eq.${brandId}`,
+      },
+      () => {
+        handlers.onChange()
+      },
+    )
+    .subscribe((status, error) => {
+      if (status === 'SUBSCRIBED') {
+        handlers.onStatus?.('subscribed')
+        return
+      }
+      if (status === 'TIMED_OUT' || status === 'CHANNEL_ERROR') {
+        console.warn('[warehouse] Realtime 구독이 끊겼습니다', {
+          brandId,
+          status,
+          message: error?.message,
+        })
+        handlers.onStatus?.(status === 'TIMED_OUT' ? 'reconnecting' : 'error')
+        return
+      }
+      if (status === 'CLOSED') {
+        handlers.onStatus?.('reconnecting')
+      }
+    })
+
+  return () => {
+    void supabase.removeChannel(channel)
+  }
 }
 
 export async function listWarehouseLocations(
@@ -323,8 +405,18 @@ export async function listWarehouseStockPositions(
       isFinalLocation: row.is_final_location,
       isForcedPriority: row.is_forced_priority,
       receivedOn: row.received_on,
+      receivedOnRaw: row.received_on_raw,
+      usagePriority: USAGE_PRIORITIES.has(
+        row.usage_priority as WarehouseUsagePriority,
+      )
+        ? (row.usage_priority as WarehouseUsagePriority)
+        : undefined,
+      quantityStatus: (row.quantity_status ?? undefined) as
+        | WarehouseQuantityStatus
+        | undefined,
       sourceRowNumber: row.source_row_number,
       remainingBoxes: row.remaining_boxes,
+      unitsPerBox: row.units_per_box,
       openedUnits: row.opened_units,
     })),
   )
@@ -476,6 +568,7 @@ export async function adjustWarehouseStock(
     position_id: input.positionId,
     remaining_boxes: input.remainingBoxes,
     opened_units: input.openedUnits,
+    units_per_box: input.unitsPerBox,
     reason: input.reason,
   })
 }

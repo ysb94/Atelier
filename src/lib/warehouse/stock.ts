@@ -2,15 +2,39 @@ import { normalizeStyleNo } from '@/lib/import/transform'
 import { compactProductNameKey } from '@/lib/invoice/lookup-normalization'
 import type {
   StyleRef,
+  WarehouseQuantityStatus,
   WarehouseReviewFlag,
   WarehouseStockAction,
   WarehouseStockPosition,
+  WarehouseUsagePriority,
   WarehouseZone,
 } from '@/lib/types'
 
 export const FORCED_PRIORITY_DATE = '000000'
+export const SECOND_PRIORITY_DATE = '000001'
+export const LAST_PRIORITY_DATE = '999999'
 export const FINAL_LOCATION_MARK = '//'
 export const EMPTY_WAREHOUSE_LOCATION_CODE = '(빈 자리)'
+
+export const WAREHOUSE_USAGE_PRIORITY_ORDER: Record<
+  WarehouseUsagePriority,
+  number
+> = {
+  first: 0,
+  second: 1,
+  fifo: 2,
+  last: 3,
+}
+
+export const WAREHOUSE_USAGE_PRIORITY_LABEL: Record<
+  WarehouseUsagePriority,
+  string
+> = {
+  first: '최우선',
+  second: '차순위',
+  fifo: '입고순',
+  last: '마지막',
+}
 
 export const WAREHOUSE_REVIEW_FLAG_LABEL: Record<WarehouseReviewFlag, string> =
   {
@@ -18,6 +42,7 @@ export const WAREHOUSE_REVIEW_FLAG_LABEL: Record<WarehouseReviewFlag, string> =
     date_review: '날짜 검수',
     duplicate_suspect: '중복 의심',
     special_location: '특수 위치',
+    quantity_unknown: '수량 미확인',
   }
 
 export const WAREHOUSE_STOCK_ACTION_LABEL: Record<WarehouseStockAction, string> =
@@ -43,8 +68,12 @@ export type ParsedWarehouseSheetRow = {
   receivedOn: string | null
   receivedOnRaw: string
   isForcedPriority: boolean
-  unitsPerBox: number
-  remainingBoxes: number
+  usagePriority: WarehouseUsagePriority
+  quantityStatus: WarehouseQuantityStatus
+  unitsPerBox: number | null
+  remainingBoxes: number | null
+  unitsPerBoxRaw: string
+  remainingBoxesRaw: string
   note: string
   dateValid: boolean
 }
@@ -61,6 +90,7 @@ export type WarehouseImportSummary = {
   missingStyle: number
   dateReview: number
   duplicateSuspect: number
+  quantityUnknown: number
 }
 
 const HEADER_ALIASES: Record<
@@ -116,10 +146,25 @@ function isValidYmd(year: number, month: number, day: number) {
   )
 }
 
+export function parseWarehouseQuantity(
+  raw: string,
+  options?: { min?: number },
+): { value: number | null; raw: string } {
+  const trimmed = String(raw ?? '').trim()
+  if (!trimmed) return { value: null, raw: trimmed }
+  const parsed = Number(trimmed.replace(/[^0-9.-]/g, ''))
+  if (!Number.isFinite(parsed)) return { value: null, raw: trimmed }
+  if (options?.min != null && parsed < options.min) {
+    return { value: null, raw: trimmed }
+  }
+  return { value: parsed, raw: trimmed }
+}
+
 export function parseWarehouseReceivedOn(raw: string): {
   receivedOn: string | null
   receivedOnRaw: string
   isForcedPriority: boolean
+  usagePriority: WarehouseUsagePriority
   dateValid: boolean
 } {
   const receivedOnRaw = raw.trim()
@@ -128,6 +173,25 @@ export function parseWarehouseReceivedOn(raw: string): {
       receivedOn: null,
       receivedOnRaw: receivedOnRaw || FORCED_PRIORITY_DATE,
       isForcedPriority: true,
+      usagePriority: 'first',
+      dateValid: true,
+    }
+  }
+  if (receivedOnRaw === SECOND_PRIORITY_DATE) {
+    return {
+      receivedOn: null,
+      receivedOnRaw,
+      isForcedPriority: false,
+      usagePriority: 'second',
+      dateValid: true,
+    }
+  }
+  if (receivedOnRaw === LAST_PRIORITY_DATE) {
+    return {
+      receivedOn: null,
+      receivedOnRaw,
+      isForcedPriority: false,
+      usagePriority: 'last',
       dateValid: true,
     }
   }
@@ -144,6 +208,7 @@ export function parseWarehouseReceivedOn(raw: string): {
         : null,
       receivedOnRaw,
       isForcedPriority: false,
+      usagePriority: 'fifo',
       dateValid,
     }
   }
@@ -160,6 +225,7 @@ export function parseWarehouseReceivedOn(raw: string): {
         : null,
       receivedOnRaw,
       isForcedPriority: false,
+      usagePriority: 'fifo',
       dateValid,
     }
   }
@@ -175,6 +241,7 @@ export function parseWarehouseReceivedOn(raw: string): {
         : null,
       receivedOnRaw,
       isForcedPriority: false,
+      usagePriority: 'fifo',
       dateValid,
     }
   }
@@ -183,13 +250,9 @@ export function parseWarehouseReceivedOn(raw: string): {
     receivedOn: null,
     receivedOnRaw,
     isForcedPriority: false,
+    usagePriority: 'fifo',
     dateValid: false,
   }
-}
-
-function parseCount(raw: string) {
-  const parsed = Number(String(raw).replace(/[^0-9.-]/g, ''))
-  return Number.isFinite(parsed) ? parsed : NaN
 }
 
 export function parseWarehouseUploadRows(
@@ -231,8 +294,8 @@ export function parseWarehouseUploadRows(
     if (!sourceStyleNo && !locationRaw) return
     const location = parseWarehouseLocation(locationRaw)
     const received = parseWarehouseReceivedOn(cells[dateIdx] ?? '')
-    const unitsPerBox = parseCount(cells[unitsIdx] ?? '')
-    const remainingBoxes = parseCount(cells[boxesIdx] ?? '')
+    const units = parseWarehouseQuantity(cells[unitsIdx] ?? '', { min: 1 })
+    const boxes = parseWarehouseQuantity(cells[boxesIdx] ?? '', { min: 0 })
     parsed.push({
       sourceRowNumber: index + 2,
       sourceStyleNo,
@@ -244,10 +307,13 @@ export function parseWarehouseUploadRows(
       receivedOn: received.receivedOn,
       receivedOnRaw: received.receivedOnRaw,
       isForcedPriority: received.isForcedPriority,
-      unitsPerBox: Number.isFinite(unitsPerBox) ? Math.max(0, unitsPerBox) : 0,
-      remainingBoxes: Number.isFinite(remainingBoxes)
-        ? Math.max(0, remainingBoxes)
-        : 0,
+      usagePriority: received.usagePriority,
+      quantityStatus:
+        units.value == null || boxes.value == null ? 'unknown' : 'known',
+      unitsPerBox: units.value,
+      remainingBoxes: boxes.value,
+      unitsPerBoxRaw: units.raw,
+      remainingBoxesRaw: boxes.raw,
       note: (noteIdx >= 0 ? cells[noteIdx] : '')?.trim() ?? '',
       dateValid: received.dateValid,
     })
@@ -264,8 +330,8 @@ function duplicateKey(row: ParsedWarehouseSheetRow) {
     row.locationCode,
     row.isFinalLocation ? 'final' : 'open',
     row.receivedOnRaw,
-    String(row.unitsPerBox),
-    String(row.remainingBoxes),
+    row.unitsPerBoxRaw || String(row.unitsPerBox ?? ''),
+    row.remainingBoxesRaw || String(row.remainingBoxes ?? ''),
   ].join('\u001f')
 }
 
@@ -309,6 +375,7 @@ export function prepareWarehouseImportRows(
     if (!style) reviewFlags.push('missing_style')
     if (!row.dateValid) reviewFlags.push('date_review')
     if (!row.locationCode) reviewFlags.push('special_location')
+    if (row.quantityStatus === 'unknown') reviewFlags.push('quantity_unknown')
     if ((seen.get(duplicateKey(row)) ?? 0) > 1) {
       reviewFlags.push('duplicate_suspect')
     }
@@ -338,7 +405,25 @@ export function summarizeWarehouseImport(
     duplicateSuspect: rows.filter((row) =>
       row.reviewFlags.includes('duplicate_suspect'),
     ).length,
+    quantityUnknown: rows.filter((row) =>
+      row.reviewFlags.includes('quantity_unknown'),
+    ).length,
   }
+}
+
+export function resolveWarehouseUsagePriority(
+  row: Pick<
+    WarehouseStockPosition,
+    'isForcedPriority' | 'receivedOnRaw'
+  > & {
+    usagePriority?: WarehouseUsagePriority | null
+  },
+): WarehouseUsagePriority {
+  if (row.usagePriority) return row.usagePriority
+  if (row.isForcedPriority) return 'first'
+  if (row.receivedOnRaw === SECOND_PRIORITY_DATE) return 'second'
+  if (row.receivedOnRaw === LAST_PRIORITY_DATE) return 'last'
+  return 'fifo'
 }
 
 export function compareWarehouseUsageOrder(
@@ -348,25 +433,55 @@ export function compareWarehouseUsageOrder(
     | 'isForcedPriority'
     | 'receivedOn'
     | 'sourceRowNumber'
-  >,
+  > & {
+    usagePriority?: WarehouseUsagePriority | null
+    receivedOnRaw?: string
+  },
   right: Pick<
     WarehouseStockPosition,
     | 'isFinalLocation'
     | 'isForcedPriority'
     | 'receivedOn'
     | 'sourceRowNumber'
-  >,
+  > & {
+    usagePriority?: WarehouseUsagePriority | null
+    receivedOnRaw?: string
+  },
 ) {
   if (left.isFinalLocation !== right.isFinalLocation) {
     return left.isFinalLocation ? 1 : -1
   }
-  if (left.isForcedPriority !== right.isForcedPriority) {
-    return left.isForcedPriority ? -1 : 1
+  const leftPriority = resolveWarehouseUsagePriority({
+    isForcedPriority: left.isForcedPriority,
+    receivedOnRaw: left.receivedOnRaw ?? '',
+    usagePriority: left.usagePriority,
+  })
+  const rightPriority = resolveWarehouseUsagePriority({
+    isForcedPriority: right.isForcedPriority,
+    receivedOnRaw: right.receivedOnRaw ?? '',
+    usagePriority: right.usagePriority,
+  })
+  if (leftPriority !== rightPriority) {
+    return (
+      WAREHOUSE_USAGE_PRIORITY_ORDER[leftPriority] -
+      WAREHOUSE_USAGE_PRIORITY_ORDER[rightPriority]
+    )
   }
-  const leftDate = left.receivedOn ?? '9999-12-31'
-  const rightDate = right.receivedOn ?? '9999-12-31'
-  if (leftDate !== rightDate) return leftDate < rightDate ? -1 : 1
+  if (leftPriority === 'fifo' && rightPriority === 'fifo') {
+    const leftDate = left.receivedOn ?? '9999-12-31'
+    const rightDate = right.receivedOn ?? '9999-12-31'
+    if (leftDate !== rightDate) return leftDate < rightDate ? -1 : 1
+  }
   return left.sourceRowNumber - right.sourceRowNumber
+}
+
+export function isWarehouseQuantityKnown(row: {
+  quantityStatus?: WarehouseQuantityStatus | null
+  unitsPerBox?: number | null
+  remainingBoxes?: number | null
+}) {
+  if (row.quantityStatus === 'unknown') return false
+  return row.unitsPerBox != null && row.remainingBoxes != null
 }
 
 export function assignWarehouseUsageRanks<
@@ -379,11 +494,17 @@ export function assignWarehouseUsageRanks<
     | 'sourceRowNumber'
     | 'remainingBoxes'
     | 'openedUnits'
-  >,
+  > & {
+    usagePriority?: WarehouseUsagePriority | null
+    receivedOnRaw?: string
+    quantityStatus?: WarehouseQuantityStatus | null
+    unitsPerBox?: number | null
+  },
 >(rows: T[]): Array<T & { usageRank: number | null }> {
   const groups = new Map<string, T[]>()
   for (const row of rows) {
     const key = normalizeStyleNo(row.styleNo)
+    if (!key) continue
     const list = groups.get(key) ?? []
     list.push(row)
     groups.set(key, list)
@@ -392,7 +513,11 @@ export function assignWarehouseUsageRanks<
   const ranked = new Map<T, number | null>()
   for (const list of groups.values()) {
     const active = list
-      .filter((row) => row.remainingBoxes > 0 || row.openedUnits > 0)
+      .filter(
+        (row) =>
+          isWarehouseQuantityKnown(row) &&
+          ((row.remainingBoxes ?? 0) > 0 || row.openedUnits > 0),
+      )
       .sort(compareWarehouseUsageOrder)
     active.forEach((row, index) => {
       ranked.set(row, index + 1)
@@ -409,11 +534,13 @@ export function assignWarehouseUsageRanks<
 }
 
 export function warehousePositionQty(row: {
-  remainingBoxes: number
-  unitsPerBox: number
-  openedUnits: number
+  remainingBoxes?: number | null
+  unitsPerBox?: number | null
+  openedUnits?: number | null
+  quantityStatus?: WarehouseQuantityStatus | null
 }) {
-  return row.remainingBoxes * row.unitsPerBox + row.openedUnits
+  if (!isWarehouseQuantityKnown(row)) return 0
+  return (row.remainingBoxes ?? 0) * (row.unitsPerBox ?? 0) + (row.openedUnits ?? 0)
 }
 
 export type StyleWarehouseStockSummary = {
@@ -437,7 +564,11 @@ type WarehouseStockSummaryRow = Pick<
   | 'openedUnits'
   | 'unitsPerBox'
   | 'zone'
->
+> & {
+  usagePriority?: WarehouseUsagePriority | null
+  receivedOnRaw?: string
+  quantityStatus?: WarehouseQuantityStatus | null
+}
 
 export function summarizeWarehouseStockByStyle(
   positions: WarehouseStockSummaryRow[],
@@ -449,6 +580,7 @@ export function summarizeWarehouseStockByStyle(
 
   for (const row of ranked) {
     const styleNo = normalizeStyleNo(row.styleNo)
+    if (!styleNo) continue
     const current = summaries.get(styleNo) ?? {
       styleNo,
       boxLocation: null,
@@ -458,6 +590,10 @@ export function summarizeWarehouseStockByStyle(
       totalQty: 0,
     }
     const qty = warehousePositionQty(row)
+    if (!isWarehouseQuantityKnown(row)) {
+      summaries.set(styleNo, current)
+      continue
+    }
     if (row.zone === 'picking') current.pickingQty += qty
     else current.boxQty += qty
     current.totalQty = current.boxQty + current.pickingQty
@@ -470,6 +606,11 @@ export function summarizeWarehouseStockByStyle(
   }
 
   return summaries
+}
+
+export function formatWarehouseCount(value: number | null | undefined) {
+  if (value == null) return '미확인'
+  return String(value)
 }
 
 export function formatWarehouseReceivedOn(row: {
@@ -521,8 +662,12 @@ export type WarehouseImportRpcRow = {
   received_on_raw: string
   is_forced_priority: boolean
   is_final_location: boolean
-  units_per_box: number
-  remaining_boxes: number
+  usage_priority: WarehouseUsagePriority
+  quantity_status: WarehouseQuantityStatus
+  units_per_box: number | null
+  remaining_boxes: number | null
+  units_per_box_raw: string
+  remaining_boxes_raw: string
   review_flags: WarehouseReviewFlag[]
   source_row_number: number
   note: string
@@ -543,8 +688,12 @@ export function toWarehouseImportRpcRows(
     received_on_raw: row.receivedOnRaw,
     is_forced_priority: row.isForcedPriority,
     is_final_location: row.isFinalLocation,
-    units_per_box: Math.max(row.unitsPerBox, 1),
-    remaining_boxes: Math.max(row.remainingBoxes, 0),
+    usage_priority: row.usagePriority,
+    quantity_status: row.quantityStatus,
+    units_per_box: row.unitsPerBox,
+    remaining_boxes: row.remainingBoxes,
+    units_per_box_raw: row.unitsPerBoxRaw,
+    remaining_boxes_raw: row.remainingBoxesRaw,
     review_flags: row.reviewFlags,
     source_row_number: row.sourceRowNumber,
     note: row.note,
@@ -583,10 +732,10 @@ const WAREHOUSE_TEMPLATE_GUIDE_ROWS: string[][] = [
     '입고일',
     'Y',
     '250101 또는 000000',
-    `YYMMDD 또는 YYYY-MM-DD. ${FORCED_PRIORITY_DATE}은 강제우선입니다`,
+    `YYMMDD 또는 YYYY-MM-DD. ${FORCED_PRIORITY_DATE} 최우선, ${SECOND_PRIORITY_DATE} 차순위, ${LAST_PRIORITY_DATE} 마지막`,
   ],
-  ['박스당 갯수', 'Y', '20', '한 박스의 입수'],
-  ['박스 수', 'Y', '2', '남은 박스 수'],
+  ['박스당 갯수', 'N', '20', '한 박스의 입수. 비우면 수량 미확인'],
+  ['박스 수', 'N', '2', '남은 박스 수. 비우면 수량 미확인'],
   ['비고', 'N', '', '메모'],
   [
     '',
