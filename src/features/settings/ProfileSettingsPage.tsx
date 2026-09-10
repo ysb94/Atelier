@@ -60,8 +60,8 @@ export function ProfileSettingsPage() {
   return (
     <div>
       <PageHeader
-        title="내 설정"
-        description="E&J에 표시되는 이름, 소속 팀, 직책을 수정합니다."
+        title="마이페이지"
+        description="이름, 소속, 직책 등 나와 관련된 정보를 관리합니다."
       />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">

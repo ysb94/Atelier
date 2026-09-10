@@ -93,6 +93,10 @@ export function designColorSamplesPath() {
   return '/design/color-samples'
 }
 
+export function companyMeetingsPath() {
+  return '/meetings'
+}
+
 export function draftNewPath(brandSlug?: string, extra: SearchPatch = {}) {
   return brandSlug
     ? withSearch('/drafts/new', { brand: brandSlug, ...extra })
@@ -253,6 +257,9 @@ export function mapLegacyBrandPath(
 
   if (head === 'org-chart') {
     return { pathname: '/org-chart', searchPatch: {} }
+  }
+  if (head === 'meetings') {
+    return { pathname: '/meetings', searchPatch: {} }
   }
   if (head === 'work-requests' && tail[0]) {
     return { pathname: `/work-requests/${tail[0]}`, searchPatch: {} }

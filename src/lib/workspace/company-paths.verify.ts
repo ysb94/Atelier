@@ -6,6 +6,7 @@ import {
   applySearchPatch,
   buildLegacyRedirectHref,
   chinaWorkOrdersPath,
+  companyMeetingsPath,
   designColorSamplesPath,
   dataUploadHref,
   draftDetailPath,
@@ -42,6 +43,7 @@ assert(
   designColorSamplesPath() === '/design/color-samples',
   '디자인 컬러샘플 촬영은 회사 경로',
 )
+assert(companyMeetingsPath() === '/meetings', '회의는 회사 경로')
 assert(
   draftNewPath('atelier', { season: 'none' }) ===
     '/drafts/new?brand=atelier&season=none',
@@ -115,8 +117,11 @@ assert(
 const profile = mapLegacyBrandPath('atelier', 'settings/profile')
 assert(
   profile.pathname === '/settings/profile' && !profile.searchPatch.brand,
-  '내 설정은 회사 경로',
+  '마이페이지는 회사 경로',
 )
+
+const meetings = mapLegacyBrandPath('atelier', 'meetings')
+assert(meetings.pathname === '/meetings', '레거시 회의는 회사 경로')
 
 const href = buildLegacyRedirectHref(
   'atelier',

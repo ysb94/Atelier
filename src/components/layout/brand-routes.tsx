@@ -116,6 +116,7 @@ export function BrandWorkspaceRouteTree() {
         element={<RedirectCompany to="/settings/profile" />}
       />
       <Route path="org-chart" element={<RedirectCompany to="/org-chart" />} />
+      <Route path="meetings" element={<RedirectCompany to="/meetings" />} />
       <Route path="operations" element={<OutboundDataPage />} />
       <Route
         path="outbound-data"

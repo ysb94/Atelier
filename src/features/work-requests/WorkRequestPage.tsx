@@ -2973,7 +2973,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             을 표시하고 있습니다.
           </span>
           <span className="ml-2 text-muted-foreground">
-            내 설정에서 직급을 바꾸면 화면이 전환됩니다. 팀장·이사만 관리자
+            마이페이지에서 직급을 바꾸면 화면이 전환됩니다. 팀장·이사만 관리자
             화면이고, 사원·대리·과장은 사원 화면입니다. 다른 부서에 요청하려면
             그 부서의 작업 요청으로 이동하세요.
           </span>

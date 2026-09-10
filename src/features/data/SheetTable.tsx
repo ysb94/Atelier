@@ -13,39 +13,60 @@ export type SheetRow = {
   values: Record<string, string>
 }
 
+/** 첫 열 너비. 두 번째 열의 고정 위치와 반드시 같아야 한다. */
+const COL0_WIDTH = 140
+const STICKY_COL_COUNT = 2
+
+/** 긴 값이 열을 끝없이 넓히지 않도록 막는다. */
+const MAX_CELL_WIDTH = 260
+
 type OwnerGroup = {
   owner: FieldOwner | 'pin'
   label: string
   span: number
+  startCol: number
 }
 
+function columnOwner(column: BrandField): FieldOwner | 'pin' {
+  if (
+    column.systemKey === 'styleNo' ||
+    column.systemKey === 'name' ||
+    column.systemKey === 'ownBarcode'
+  ) {
+    return 'pin'
+  }
+  return column.owner
+}
+
+/**
+ * 소유자 그룹. 가로 고정 열과 스크롤 열을 한 칸으로 묶지 않는다.
+ * 묶으면 고정 열 헤더는 남고 그룹 라벨만 밀려 헤더가 어긋난다.
+ */
 function buildOwnerGroups(columns: BrandField[]): OwnerGroup[] {
   const groups: OwnerGroup[] = []
-  for (const column of columns) {
-    const owner: FieldOwner | 'pin' =
-      column.systemKey === 'styleNo' ||
-      column.systemKey === 'name' ||
-      column.systemKey === 'ownBarcode'
-        ? 'pin'
-        : column.owner
+  for (let i = 0; i < columns.length; i++) {
+    const owner = columnOwner(columns[i])
     const label = owner === 'pin' ? '식별' : OWNER_LABEL[owner]
     const last = groups[groups.length - 1]
-    if (last && last.owner === owner) last.span += 1
-    else groups.push({ owner, label, span: 1 })
+    const crossesFreeze =
+      last !== undefined &&
+      last.startCol < STICKY_COL_COUNT &&
+      i >= STICKY_COL_COUNT
+    if (last && last.owner === owner && !crossesFreeze) last.span += 1
+    else groups.push({ owner, label, span: 1, startCol: i })
   }
   return groups
 }
-
-/** 첫 열 너비. 두 번째 열의 고정 위치와 반드시 같아야 한다. */
-const COL0_WIDTH = 140
-
-/** 긴 값이 열을 끝없이 넓히지 않도록 막는다. */
-const MAX_CELL_WIDTH = 260
 
 function stickyLeft(colIndex: number): number | undefined {
   if (colIndex === 0) return 0
   if (colIndex === 1) return COL0_WIDTH
   return undefined
+}
+
+function groupStickyLeft(group: OwnerGroup): number | undefined {
+  if (group.startCol + group.span > STICKY_COL_COUNT) return undefined
+  return stickyLeft(group.startCol)
 }
 
 /**
@@ -78,15 +99,22 @@ export function SheetTable({
         <thead>
           {ownerGroups.length > 0 ? (
             <tr>
-              {ownerGroups.map((group, index) => (
-                <th
-                  key={`${group.owner}-${index}`}
-                  colSpan={group.span}
-                  className="sticky top-0 z-20 border-b border-border bg-muted px-2 py-1.5 text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
-                >
-                  {group.label}
-                </th>
-              ))}
+              {ownerGroups.map((group, index) => {
+                const left = groupStickyLeft(group)
+                return (
+                  <th
+                    key={`${group.owner}-${index}`}
+                    colSpan={group.span}
+                    className={cn(
+                      'sticky top-0 z-20 border-b border-border bg-muted px-2 py-1.5 text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground',
+                      left !== undefined && 'z-30',
+                    )}
+                    style={left !== undefined ? { left } : undefined}
+                  >
+                    {group.label}
+                  </th>
+                )
+              })}
               {onRowOpen ? (
                 <th
                   className="sticky top-0 z-20 border-b border-border bg-muted px-2 py-1.5 text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
@@ -104,7 +132,7 @@ export function SheetTable({
                 <th
                   key={fieldValueKey(column)}
                   className={cn(
-                    'sticky z-20 border-b border-border bg-muted/90 px-2 py-1.5 font-medium backdrop-blur',
+                    'sticky z-20 border-b border-border bg-muted px-2 py-1.5 font-medium',
                     left !== undefined && 'z-30',
                   )}
                   style={{
@@ -118,7 +146,7 @@ export function SheetTable({
               )
             })}
             {onRowOpen ? (
-              <th className="sticky top-0 z-20 w-16 border-b border-border bg-muted/90 px-2 py-1.5 text-center font-medium backdrop-blur">
+              <th className="sticky top-0 z-20 w-16 border-b border-border bg-muted px-2 py-1.5 text-center font-medium">
                 수정
               </th>
             ) : null}
@@ -155,7 +183,7 @@ export function SheetTable({
                       className={cn(
                         'border-b border-border px-0 py-0',
                         left !== undefined &&
-                          'sticky z-10 bg-card group-hover/row:bg-muted/20',
+                          'sticky z-10 bg-card group-hover/row:bg-[color-mix(in_srgb,var(--color-muted)_20%,var(--color-card))]',
                       )}
                       style={{ left }}
                     >

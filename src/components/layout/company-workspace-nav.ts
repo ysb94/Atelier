@@ -27,6 +27,7 @@ import {
   Upload,
   UserRound,
   Users,
+  Video,
   Warehouse,
 } from 'lucide-react'
 
@@ -44,6 +45,8 @@ export type CompanyNavGroup = {
 
 export const companyTopNav: CompanyNavItem[] = [
   { to: '/', label: 'E&J 홈', icon: Home, end: true },
+  { to: '/work', label: '내 업무', icon: ClipboardList },
+  { to: '/settings/profile', label: '마이페이지', icon: UserRound },
   { to: '/operations', label: '운영 현황', icon: ChartColumn },
 ]
 
@@ -51,8 +54,8 @@ export const companyNavGroups: CompanyNavGroup[] = [
   {
     title: '회사',
     items: [
-      { to: '/work', label: '내 업무', icon: ClipboardList },
       { to: '/schedule', label: '일정', icon: CalendarDays },
+      { to: '/meetings', label: '회의', icon: Video },
       { to: '/org-chart', label: '조직도', icon: Network },
     ],
   },
@@ -123,7 +126,6 @@ export const companyNavGroups: CompanyNavGroup[] = [
       { to: '/settings/usage-targets', label: '출고업체', icon: Store },
       { to: '/settings/ai', label: 'AI 설정', icon: Sparkles },
       { to: '/settings/brand', label: '브랜드 정보', icon: Settings },
-      { to: '/settings/profile', label: '내 설정', icon: UserRound },
       { to: '/brands', label: '브랜드 관리', icon: Building2 },
     ],
   },
