@@ -4,7 +4,6 @@
  */
 import {
   DEFAULT_MEETING_VISIBLE_DAYS,
-  MEETING_RANGE_STEP_DAYS,
   MEETING_ROOMS,
   MEETING_WEEKDAY_LABELS,
   addableMeetingMembers,
@@ -210,6 +209,7 @@ assert(
         startsAt: '2026-09-11T09:00',
         roomId: 'room-1',
         quarterId: 'q1',
+        ...emptyRoundNotes(),
       },
       {
         id: 'r2',
@@ -217,6 +217,7 @@ assert(
         startsAt: '2026-09-18T09:00',
         roomId: 'room-1',
         quarterId: 'q1',
+        ...emptyRoundNotes(),
       },
     ],
   }) === 3,
@@ -231,6 +232,7 @@ assert(
         startsAt: '2026-09-11T09:00',
         roomId: 'room-1',
         quarterId: 'q1',
+        ...emptyRoundNotes(),
       },
       {
         id: 'r2',
@@ -238,6 +240,7 @@ assert(
         startsAt: '2026-09-18T09:00',
         roomId: 'room-1',
         quarterId: 'q1',
+        ...emptyRoundNotes(),
       },
     ],
   }) === 2,
