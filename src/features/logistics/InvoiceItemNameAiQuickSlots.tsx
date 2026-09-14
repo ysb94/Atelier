@@ -6,6 +6,8 @@ import {
   ITEM_NAME_AI_QUICK_SLOT_LIMIT,
   isItemNameAiAddExtraKey,
   itemNameAiQuickSlotInputValue,
+  itemNameAiQuickSlotQuantityBadge,
+  itemNameAiQuickSlotQuantityLabel,
   shouldIgnoreItemNameAiQuickKey,
   type ItemNameAiQuickSlot,
 } from '@/lib/invoice/item-name-ai-review'
@@ -40,7 +42,7 @@ export function InvoiceItemNameAiQuickSlots({
   onTab: (slotIndex: number) => void
   onAddExtra?: () => void
 }) {
-  const visibleSlots = slots.slice(0, ITEM_NAME_AI_QUICK_SLOT_LIMIT)
+  const visibleSlots = slots
   const canAddExtra =
     Boolean(onAddExtra) && visibleSlots.length < ITEM_NAME_AI_QUICK_SLOT_LIMIT
   return (
@@ -53,6 +55,8 @@ export function InvoiceItemNameAiQuickSlots({
         const value = itemNameAiQuickSlotInputValue(slot, {
           showDeleteLabel: deleteLabel,
         })
+        const quantityBadge = itemNameAiQuickSlotQuantityBadge(slot.quantity)
+        const quantityLabel = itemNameAiQuickSlotQuantityLabel(slot.quantity)
         return (
           <div key={`${rowKey}-${slotIndex}`} className="space-y-1">
             <div className="flex min-w-0 items-stretch">
@@ -103,16 +107,21 @@ export function InvoiceItemNameAiQuickSlots({
                     }
                   }}
                   aria-label={
-                    slot.style
-                      ? `${slot.style.styleNo} 구성품 ${slotIndex + 1}`
-                      : `구성품 ${slotIndex + 1}`
+                    [
+                      slot.style
+                        ? `${slot.style.styleNo} 구성품 ${slotIndex + 1}`
+                        : `구성품 ${slotIndex + 1}`,
+                      quantityLabel,
+                    ]
+                      .filter(Boolean)
+                      .join(', ')
                   }
                   placeholder={
                     slotIndex === 0 ? '구성품 이름' : '추가 구성품'
                   }
                   className={`h-7 text-[11px] ${
                     slot.style ? 'rounded-l-none' : ''
-                  } ${canRemoveExtra || showAdd ? 'rounded-r-none' : ''} ${
+                  } ${canRemoveExtra || showAdd || quantityBadge ? 'rounded-r-none' : ''} ${
                     slotIndex === 0 && value.trim() ? 'pr-7' : ''
                   } ${
                     deleteLabel && value === ITEM_NAME_AI_DELETE_LABEL
@@ -138,6 +147,17 @@ export function InvoiceItemNameAiQuickSlots({
                   </button>
                 ) : null}
               </div>
+              {quantityBadge ? (
+                <span
+                  className={`inline-flex shrink-0 items-center border border-l-0 border-primary/40 bg-primary/10 px-1.5 text-[11px] font-semibold tabular-nums text-primary ${
+                    canRemoveExtra || showAdd ? '' : 'rounded-r-md'
+                  }`}
+                  title={quantityLabel}
+                  aria-label={quantityLabel}
+                >
+                  {quantityBadge}
+                </span>
+              ) : null}
               {canRemoveExtra ? (
                 <button
                   type="button"

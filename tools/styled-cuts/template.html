@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>Atelier · 연출컷 제작</title>
+<style>
+:root{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#24352f;background:#f4f5f1;font-size:14px;line-height:1.6;--green:#285948;--line:#dce3dc;--muted:#65736b}*{box-sizing:border-box}body{margin:0}header,main,footer{max-width:1120px;margin:auto;padding:24px}header{padding-top:44px;padding-bottom:12px}h1{font-size:32px;letter-spacing:-1px;margin:8px 0}h2{font-size:19px;margin:0}h3{font-size:14px;margin:0 0 12px}p{margin:8px 0}.eyebrow{font-size:11px;letter-spacing:3px;font-weight:700;color:var(--green)}.muted,small{color:var(--muted)}.card{background:white;border:1px solid var(--line);border-radius:16px;padding:26px;margin-bottom:20px}.head,.actions{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.badge{display:inline-block;border-radius:20px;background:#eef2ed;padding:4px 12px;font-size:12px}.badge.ready{background:#ddf1e4;color:#21583e}.notice{background:#f1f5ef;border-radius:9px;padding:12px 16px;color:#4c6355;font-size:13px;margin:16px 0}.photos{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:14px;margin:20px 0}.slot{min-width:0}.slot-title{display:flex;justify-content:space-between;gap:4px;font-size:12px;margin-bottom:6px}.slot-title small{white-space:nowrap}.pick{display:flex;min-height:125px;border:1px dashed #b9c9bc;border-radius:10px;background:#f8faf6;align-items:center;justify-content:center;flex-direction:column;text-align:center;padding:12px;cursor:pointer;position:relative}.pick input{position:absolute;inset:0;opacity:0;width:100%;height:100%;cursor:pointer}.pick:focus-within{outline:2px solid var(--green);outline-offset:2px}.pick b{font-size:25px;font-weight:400;color:#74907a}.thumb{width:100%;height:145px;object-fit:contain;background:#f8faf6;border:1px solid var(--line);border-radius:10px;cursor:zoom-in}.filename{font-size:12px;overflow-wrap:anywhere;margin:5px 0}.original{font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.mini{font-size:11px;padding:5px 8px}.slot-actions{display:flex;gap:5px;flex-wrap:wrap;margin-top:8px}.reference{display:grid;grid-template-columns:210px 1fr;gap:24px;margin-top:28px;padding-top:24px;border-top:1px solid var(--line)}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px}.full{grid-column:1/-1}.sizes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}label.field{display:block;font-weight:600;margin-bottom:6px}label.field small{font-weight:400;margin-left:6px}input[type=text],input[type=number],textarea,select{width:100%;border:1px solid #cdd8cf;border-radius:8px;padding:10px 12px;font:inherit;color:inherit;background:white}textarea{resize:vertical}input:focus,textarea:focus,select:focus{outline:2px solid #91b6a0;outline-offset:1px}button,.download{font:inherit;font-weight:600;border:1px solid #cdd8cf;background:white;color:var(--green);border-radius:8px;padding:9px 13px;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}button.primary{background:var(--green);color:white;border-color:var(--green)}button:disabled{opacity:.45;cursor:not-allowed}button:hover:not(:disabled),.download:hover{filter:brightness(.95)}button.mini{font-size:11px;padding:5px 8px}details{margin-top:20px}summary{cursor:pointer;color:var(--muted)}.checks{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;font-size:13px}.checks label{display:flex;align-items:center;gap:5px}#prompt{min-height:350px;font-size:12px;line-height:1.85;background:#fafbf8;margin-top:14px}#status{font-size:13px;color:var(--muted);margin-top:12px}#message{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:#243e31;color:white;border-radius:10px;padding:12px 22px;max-width:90vw;z-index:4;box-shadow:0 5px 25px #0002}#message:empty{display:none}footer{padding-top:0;padding-bottom:40px;font-size:12px;color:var(--muted)}dialog{border:0;border-radius:14px;max-width:94vw;max-height:94vh;padding:16px}dialog::backdrop{background:#0009}dialog img{display:block;max-width:85vw;max-height:75vh;object-fit:contain}dialog button{margin-top:12px}@media(max-width:760px){header,main,footer{padding:16px}.card{padding:18px}.photos{grid-template-columns:repeat(2,minmax(0,1fr))}.reference,.grid{grid-template-columns:1fr}.reference>.slot{max-width:260px}h1{font-size:26px}}
+.slot{position:relative;z-index:0}.slot:has(.guide-help:hover),.slot:has(.guide-help:focus){z-index:10000}.slot-title{position:relative;z-index:10001}.slot-label{display:inline-flex;align-items:center;gap:4px;min-width:0}.guide-help{position:relative;z-index:10002;width:18px;height:18px;padding:0;border:0;border-radius:50%;background:#edf2ed;color:var(--green);font-size:11px;line-height:1;flex:none}.guide-tip{display:none;position:absolute;z-index:2147483647;top:24px;left:50%;transform:translateX(-50%);width:min(240px,calc(100vw - 40px));padding:10px 12px;border-radius:8px;background:#24352f;color:white;text-align:left;font-weight:400;line-height:1.55;box-shadow:0 6px 20px #0003}.guide-help:hover .guide-tip,.guide-help:focus .guide-tip{display:block}
+</style>
+<style>
+[hidden]{display:none!important}.reference-modes{display:flex;flex-wrap:wrap;gap:8px;margin-top:28px}.reference-modes button[aria-pressed=true]{background:var(--green);color:#fff;border-color:var(--green)}.split-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px;margin:20px 0}.reference.split-mode{grid-template-columns:1fr}.split-grid .thumb{height:210px}@media(max-width:560px){.split-grid{grid-template-columns:1fr}.split-grid .slot{max-width:100%}}
+</style>
+</head>
+<body>
+<header><div class="eyebrow">ATELIER / PHOTO STYLING</div><h1>연출컷 제작</h1><p class="muted">제품 사진과 원하는 연출을 모아, 이미지 생성용 프롬프트를 완성하세요.</p><span class="badge">설치·로그인 없이 사용하는 개인 작업 도구</span></header>
+<main>
+<section class="card">
+ <div class="head"><h2>01 · 사진 준비</h2><span id="count" class="badge"></span></div>
+ <div class="notice">사진은 이 브라우저 안에서만 사용합니다. 원래 파일명과 각 사진의 역할을 프롬프트에 자동으로 표시합니다. 선택한 원본 사진과 프롬프트를 GPT에 함께 첨부하세요.</div>
+ <div id="photos" class="photos"></div>
+ <div class="reference-modes" role="group" aria-label="참고 사진 사용 방법"><button type="button" id="modeSingle" data-mode="single">한 장으로 전체 연출 참고</button><button type="button" id="modeSplit" data-mode="split">여러 장을 나눠서 참고</button><button type="button" id="modeExplore" data-mode="explore">여러 시안 자유롭게 만들기</button></div>
+ <div id="explorePanel" hidden>
+  <div class="notice">구도·배경·제품을 놓는 모습에 각각 여러 사진을 올려 보세요. 시안마다 어울리는 후보를 골라 자유롭게 조합하도록 안내합니다. 한 항목에 한 장만 있어도 시작할 수 있어요.</div>
+  <label class="field" for="variationCount">받아보고 싶은 시안 수</label><select id="variationCount" data-field="variationCount"><option value="2">2장</option><option value="3">3장</option><option value="4">4장</option></select>
+  <p class="muted">분할 없이 각각 한 장씩 요청합니다. 외부 이미지 생성 도구에서도 같은 장수를 선택하세요. 이 도구는 프롬프트를 작성하며 실제 출력 장수를 제어하지는 않아요.</p>
+  <div id="explorePhotos"></div>
+ </div>
+ <p class="muted">방식을 바꿔도 등록한 사진은 유지됩니다. 현재 방식의 사진만 프롬프트에 포함됩니다.</p>
+ <div id="splitPanel" hidden><p>필요한 역할만 골라 한 장 이상 등록하세요. 비워 둔 항목은 선택한 요소와 어울리게 자연스럽게 보완합니다.</p><div id="splitPhotos" class="split-grid"></div><button id="extraReferences" type="button" aria-expanded="false">다른 참고 사진 추가 · 조명·분위기 / 소품</button></div>
+ <div class="reference" id="referenceLayout"><div id="reference"></div><div>
+  <h3>참고 사진의 역할을 정해요</h3><p class="muted" id="referenceExplanation"></p>
+  <label class="field" for="referenceChanges">참고 사진에서 바꾸고 싶은 점이 있나요?<small>선택</small></label>
+  <textarea id="referenceChanges" data-field="referenceChanges" rows="3" placeholder="예: 꽃은 빼주세요 / 배경을 더 밝게 / 제품을 가운데에 놓아주세요"></textarea>
+  <small>비워 두어도 괜찮아요. 적으면 선택한 참고 방식 안에서 반영합니다.</small>
+ </div></div>
+</section>
+<section class="card"><h2>02 · 제품과 연출</h2>
+ <div class="notice">형태·색상·소재·로고·봉제선·부속 보존, 소품과의 실제 크기 관계, 자연스러운 그림자는 기본 지시문에 포함됩니다.</div>
+ <div class="grid">
+  <div><label class="field" for="productName">제품명</label><input id="productName" data-field="productName" type="text" placeholder="예: 미니 크로스백"></div>
+  <div><label class="field" for="productType">제품 종류</label><input id="productType" data-field="productType" type="text" placeholder="예: 가방 / 지갑 / 슈즈"></div>
+  <div class="full"><label class="field" for="fabricMaterial">원단 재질<small>알고 있는 경우 입력</small></label><input id="fabricMaterial" data-field="fabricMaterial" type="text" placeholder="예: 면 캔버스 / 무광 나일론 / 잔무늬 소가죽"><small>모르면 비워 두세요. 소재 디테일 사진을 기준으로 짜임·광택·주름을 보존하도록 안내합니다.</small></div>
+  <div class="full"><label class="field">실제 크기 <small>mm · 소품과의 크기 관계를 맞추는 기준</small></label><div class="sizes">
+   <div><label for="sizeWidth">가로</label><input id="sizeWidth" data-field="sizeWidth" type="number" min="0.01" step="any" placeholder="예: 200"></div>
+   <div><label for="sizeHeight">세로</label><input id="sizeHeight" data-field="sizeHeight" type="number" min="0.01" step="any" placeholder="예: 150"></div>
+   <div><label for="sizeDepth">폭</label><input id="sizeDepth" data-field="sizeDepth" type="number" min="0.01" step="any" placeholder="예: 60"></div>
+  </div></div>
+  <div class="full"><label class="field" for="modelHeightCm">크기 참고컷의 착용자 키<small>선택 · cm</small></label><input id="modelHeightCm" data-field="modelHeightCm" type="number" min="1" step="any" placeholder="실제 키를 아는 경우만 입력 · 예: 165"><small>착용컷은 크기 비교에만 사용하고 모든 결과에서 사람을 제외하도록 안내합니다. 키는 크기 참고컷이 있을 때만 적용하며 제품 실측 치수를 우선합니다.</small></div>
+  <div><label class="field" for="outputRatio">출력 비율</label><select id="outputRatio" data-field="outputRatio"></select></div>
+  <div><label class="field" for="usagePurpose">사용 목적</label><select id="usagePurpose" data-field="usagePurpose"></select></div>
+  <div id="otherWrap" class="full" hidden><label class="field" for="usageOther">기타 목적</label><input id="usageOther" data-field="usageOther" type="text"></div>
+  <div class="full"><label class="field" for="highlightDetails">특히 보여주고 싶은 부분<small>선택</small></label><textarea id="highlightDetails" data-field="highlightDetails" rows="3" placeholder="예: 앞면 로고가 잘 보이게 / 가죽 질감이 드러나게"></textarea><small>빈칸이면 제품 전체가 잘 보이도록 안내합니다. 없는 특징을 새로 만들지는 않도록 지시합니다.</small></div>
+ </div>
+ <details><summary>참고 사진에서 가져오지 않을 항목 · 추가 강조</summary><p class="muted">해제해도 제품 보존 기본 원칙은 계속 적용됩니다.</p><div id="exclusions" class="checks"></div></details>
+</section>
+<section class="card"><div class="head"><h2>03 · GPT 이미지 생성용 프롬프트</h2><div class="actions"><button id="savePrompt" type="button">TXT 저장</button><button id="copy" class="primary" type="button">전체 프롬프트 복사</button></div></div><p id="status" role="status"></p><textarea id="prompt" readonly aria-label="자동 작성된 프롬프트" placeholder="제품 사진과 참고 사진을 등록하면 미리보기가 표시됩니다."></textarea><p class="muted">등록할 때 사용한 원본 사진들을 아래 프롬프트와 함께 GPT에 첨부하세요. 프롬프트에 원본 파일명과 정면·하단·소재 디테일·참고 사진 등의 역할이 표시됩니다.</p></section>
+<div class="actions"><small>입력한 글은 이 브라우저에 임시 저장합니다. 사진은 파일을 다시 열거나 새로고침하면 재등록해야 합니다.</small><button id="reset" type="button">전체 초기화</button></div>
+</main><footer>HTML 파일을 더블클릭해서 사용하세요. 원본 파일명에 사진 역할을 연결하는 프롬프트 작성은 인터넷 없이 동작합니다.</footer>
+<div id="message" role="status" aria-live="polite"></div>
+<dialog id="preview"><img id="largeImage" alt="사진 확대"><form method="dialog"><button>닫기</button></form></dialog>
+<script>
+/* SHARED_MODEL */
+const $ = (id) => document.getElementById(id);
+let form = createInitialForm();
+let photos = {};
+let reference = null;
+let splitReferences = {};
+let exploration = {};
+let showExtraReferences = false;
+let messageTimer;
+let photoEpoch = 0;
+const storageKey = 'atelier-styled-cuts-form-v1';
+let storageFailed = false;
+function notify(message) { $('message').textContent = message; clearTimeout(messageTimer); messageTimer = setTimeout(() => { $('message').textContent = ''; }, 5000); }
+function logFailure(action, error) { console.warn('[styled-cuts]', { action, path: location.pathname, error }); }
+window.addEventListener('error', (event) => { logFailure('화면 오류', event.error); notify('오류가 발생했습니다. 입력 내용과 사진을 확인해 주세요.'); });
+window.addEventListener('unhandledrejection', (event) => { logFailure('비동기 작업 오류', event.reason); notify('작업을 마치지 못했습니다. 다시 시도해 주세요.'); });
+try {
+ const saved = JSON.parse(localStorage.getItem(storageKey) || 'null');
+ if (saved && typeof saved === 'object') {
+  for (const key of Object.keys(form)) if (typeof form[key] === 'string' && typeof saved[key] === 'string') form[key] = saved[key];
+  for (const key of REFERENCE_EXCLUDE_ITEMS) if (typeof saved.referenceExclude?.[key] === 'boolean') form.referenceExclude[key] = saved.referenceExclude[key];
+  if (!OUTPUT_RATIOS.includes(form.outputRatio)) form.outputRatio = '1:1';
+  if (!USAGE_PURPOSES.includes(form.usagePurpose)) form.usagePurpose = '상세페이지';
+  if (!['single', 'split', 'explore'].includes(form.referenceMode)) form.referenceMode = 'single';
+  if (!VARIATION_COUNTS.includes(form.variationCount)) form.variationCount = '3';
+ }
+} catch (error) { logFailure('임시 저장 복원 실패', error); notify('이전에 적은 내용을 복원하지 못했습니다.'); }
+function saveForm() {
+ try { localStorage.setItem(storageKey, JSON.stringify(form)); }
+ catch (error) { logFailure('임시 저장 실패', error); if (!storageFailed) notify('이 브라우저에서는 임시 저장을 사용할 수 없습니다. 닫기 전에 프롬프트를 저장하세요.'); storageFailed = true; }
+}
+for (const [id, values] of [['outputRatio', OUTPUT_RATIOS], ['usagePurpose', USAGE_PURPOSES]]) {
+ for (const value of values) { const option = document.createElement('option'); option.value = value; option.textContent = value; $(id).append(option); }
+}
+for (const item of REFERENCE_EXCLUDE_ITEMS) {
+ const label = document.createElement('label'); const input = document.createElement('input'); input.type = 'checkbox'; input.checked = form.referenceExclude[item]; input.dataset.exclude = item;
+ input.addEventListener('change', () => { form.referenceExclude[item] = input.checked; saveForm(); updatePrompt(); }); label.append(input, document.createTextNode(item)); $('exclusions').append(label);
+}
+function syncFields() { document.querySelectorAll('[data-field]').forEach((input) => { input.value = form[input.dataset.field]; }); document.querySelectorAll('[data-exclude]').forEach((input) => { input.checked = form.referenceExclude[input.dataset.exclude]; }); }
+document.querySelectorAll('[data-field]').forEach((input) => input.addEventListener('input', () => { form[input.dataset.field] = input.value; saveForm(); updatePrompt(); }));
+function updatePrompt() {
+ const missing = missingRequiredPhotos(photos);
+ const active = activeReferencePhotos(form.referenceMode, reference, splitReferences, exploration);
+ const ready = !missing.length && active.length > 0;
+ const validSizes = ['sizeWidth', 'sizeHeight', 'sizeDepth', 'modelHeightCm'].every((key) => $(key).validity.valid);
+ $('count').textContent = `필수 ${PRODUCT_PHOTO_MIN - missing.length}/${PRODUCT_PHOTO_MIN} · 참고 사진 ${active.length}장${form.referenceMode === 'explore' ? ` · 시안 ${form.variationCount}장 요청` : form.referenceMode === 'split' ? ' · 역할별' : '/1'}`;
+ $('count').classList.toggle('ready', ready);
+ $('prompt').value = buildStyledCutsPrompt(form, photos, reference, splitReferences, exploration);
+ $('copy').disabled = $('savePrompt').disabled = !ready || !validSizes;
+ $('otherWrap').hidden = form.usagePurpose !== '기타';
+ $('status').textContent = !validSizes ? '실제 크기는 0보다 큰 숫자로 입력하거나 비워 주세요.' : ready ? '준비되었습니다. 프롬프트에 나열된 원본 제품 사진과 참고 사진만 함께 첨부하세요.' : `등록이 필요해요: ${[...missing.map((slot) => slot.label), ...(!active.length ? ['현재 방식의 참고 사진 한 장 이상'] : [])].join(', ')}`;
+}
+function renderSlot(key, label, required, guide, parent) {
+ const isSplit = REFERENCE_ROLE_SLOTS.some((slot) => slot.key === key);
+ const photo = key === 'reference' ? reference : isSplit ? splitReferences[key] : photos[key]; parent.replaceChildren(); parent.className = 'slot';
+ const title = document.createElement('div'); title.className = 'slot-title'; const labelWrap = document.createElement('span'); labelWrap.className = 'slot-label'; const strong = document.createElement('strong'); strong.textContent = label; const help = document.createElement('button'); help.type = 'button'; help.className = 'guide-help'; help.textContent = '?'; help.title = guide; help.setAttribute('aria-label', `${label} 촬영 안내: ${guide}`); const tip = document.createElement('span'); tip.className = 'guide-tip'; tip.setAttribute('role', 'tooltip'); tip.textContent = guide; help.append(tip); labelWrap.append(strong, help); const hint = document.createElement('small'); hint.textContent = required ? '필수' : '선택'; title.append(labelWrap, hint); parent.append(title);
+ const pick = document.createElement('label'); pick.className = 'pick'; const picker = document.createElement('input'); picker.type = 'file'; picker.accept = 'image/jpeg,image/png,image/webp'; picker.setAttribute('aria-label', `${label} 사진 선택`); picker.dataset.photo = key;
+ picker.addEventListener('change', async () => {
+  const source = picker.files?.[0]; if (!source) return;
+  picker.disabled = true;
+  const requestEpoch = photoEpoch;
+  let next;
+  try {
+   next = createStyledPhoto(source, key); const probe = new Image(); probe.src = next.url; await probe.decode();
+   if (requestEpoch !== photoEpoch) { URL.revokeObjectURL(next.url); return; }
+   if (key === 'reference') { if (reference) URL.revokeObjectURL(reference.url); reference = next; }
+   else if (isSplit) { if (splitReferences[key]) URL.revokeObjectURL(splitReferences[key].url); splitReferences[key] = next; }
+   else { if (photos[key]) URL.revokeObjectURL(photos[key].url); photos[key] = next; }
+   renderSlot(key, label, required, guide, parent); updatePrompt();
+  } catch (error) { if (next) URL.revokeObjectURL(next.url); logFailure('사진 등록 실패', error); notify('사진을 열지 못했습니다. 정상적인 JPG·PNG·WEBP 파일을 선택해 주세요.'); }
+  finally { picker.disabled = false; picker.value = ''; }
+ });
+ if (!photo) { const plus = document.createElement('b'); plus.textContent = '+'; pick.append(plus, document.createTextNode('사진 선택'), picker); parent.append(pick); return; }
+ const img = document.createElement('img'); img.className = 'thumb'; img.src = photo.url; img.alt = photo.file.name; img.tabIndex = 0; img.setAttribute('role', 'button'); img.setAttribute('aria-label', `${photo.file.name} 확대`);
+ const enlarge = () => { $('largeImage').src = photo.url; $('largeImage').alt = photo.file.name; $('preview').showModal(); }; img.onclick = enlarge; img.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); enlarge(); } };
+ const name = document.createElement('p'); name.className = 'filename'; name.textContent = photo.file.name;
+ const actions = document.createElement('div'); actions.className = 'slot-actions';
+ pick.style.minHeight = '0'; pick.style.padding = '5px 8px'; pick.style.fontSize = '11px'; pick.append(document.createTextNode('교체'), picker);
+ const remove = document.createElement('button'); remove.className = 'mini'; remove.textContent = '삭제'; remove.onclick = () => { URL.revokeObjectURL(photo.url); if (key === 'reference') reference = null; else if (isSplit) delete splitReferences[key]; else delete photos[key]; renderSlot(key, label, required, guide, parent); updatePrompt(); };
+ actions.append(pick, remove); parent.append(img, name, actions);
+}
+function renderPhotos() {
+ $('photos').replaceChildren();
+ for (const slot of PRODUCT_PHOTO_SLOTS) { const container = document.createElement('div'); $('photos').append(container); renderSlot(slot.key, slot.label, slot.required, slot.guide, container); }
+ renderReferences();
+}
+function renderExploration() {
+ $('explorePhotos').replaceChildren();
+ if (form.referenceMode !== 'explore') return;
+ for (const group of EXPLORATION_SLOTS) {
+  const section = document.createElement('section'); section.style.marginTop = '24px';
+  const heading = document.createElement('h3'); heading.textContent = `${group.label} 참고 사진 · 여러 장 선택 가능`;
+  const guide = document.createElement('p'); guide.className = 'muted'; guide.textContent = group.guide;
+  const grid = document.createElement('div'); grid.className = 'photos';
+  for (const photo of exploration[group.key] || []) {
+   const tile = document.createElement('div'); tile.className = 'slot';
+   const img = document.createElement('img'); img.className = 'thumb'; img.src = photo.url; img.alt = photo.file.name; img.tabIndex = 0; img.setAttribute('role', 'button');
+   const preview = () => { $('largeImage').src = photo.url; $('preview').showModal(); };
+   img.onclick = preview; img.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); preview(); } };
+   const name = document.createElement('p'); name.className = 'filename'; name.textContent = photo.file.name;
+   const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'mini'; remove.textContent = '제거'; remove.setAttribute('aria-label', `${photo.file.name} 제거`);
+   remove.onclick = () => { exploration[group.key] = exploration[group.key].filter((item) => item !== photo); URL.revokeObjectURL(photo.url); renderExploration(); updatePrompt(); };
+   tile.append(img, name, remove); grid.append(tile);
+  }
+  const pick = document.createElement('label'); pick.className = 'pick'; pick.textContent = '＋ 사진 추가';
+  const input = document.createElement('input'); input.type = 'file'; input.multiple = true; input.accept = 'image/jpeg,image/png,image/webp'; input.dataset.explore = group.key; input.setAttribute('aria-label', `${group.label} 여러 사진 선택`);
+  input.onchange = async () => {
+   const files = Array.from(input.files || []); const epoch = photoEpoch; input.disabled = true;
+   for (const file of files) {
+    if (epoch !== photoEpoch) break;
+    let photo;
+    try {
+     photo = createStyledPhoto(file, group.key); const probe = new Image(); probe.src = photo.url; await probe.decode();
+     if (epoch !== photoEpoch) { URL.revokeObjectURL(photo.url); break; }
+     exploration[group.key] = [...(exploration[group.key] || []), photo];
+    } catch (error) { if (photo) URL.revokeObjectURL(photo.url); logFailure('시안 참고 사진 등록 실패', error); notify(`${file.name}: 정상적인 JPG·PNG·WEBP 파일을 선택해 주세요.`); }
+   }
+   input.disabled = false; input.value = ''; renderExploration(); updatePrompt();
+  };
+  pick.append(input); grid.append(pick); section.append(heading, guide, grid); $('explorePhotos').append(section);
+ }
+}
+function renderReferences() {
+ const split = form.referenceMode === 'split';
+ document.querySelectorAll('[data-mode]').forEach((button) => button.setAttribute('aria-pressed', String(button.dataset.mode === form.referenceMode)));
+ $('reference').hidden = form.referenceMode !== 'single'; $('splitPanel').hidden = !split; $('explorePanel').hidden = form.referenceMode !== 'explore'; $('referenceLayout').classList.toggle('split-mode', form.referenceMode !== 'single');
+ $('referenceExplanation').textContent = form.referenceMode === 'explore' ? '후보들을 역할별로 선택하고 자유롭게 조합해 서로 다른 시안을 구성합니다. 제품 자체와 실제 크기는 모든 시안에서 유지하도록 안내합니다.' : split ? '각 사진에서 지정한 역할만 가져와 하나의 자연스러운 장면으로 구성합니다. 제품의 형태·색상·소재·실제 크기를 항상 우선합니다.' : '배경·배치·조명·분위기는 참고 사진을 따르고 제품 자체는 제품 사진대로 유지하도록 안내합니다.';
+ $('reference').replaceChildren(); $('splitPhotos').replaceChildren();
+ renderExploration();
+ if (form.referenceMode === 'single') renderSlot('reference', '참고 사진', true, REFERENCE_PHOTO_GUIDE, $('reference'));
+ else if (split) for (const [index, slot] of REFERENCE_ROLE_SLOTS.entries()) {
+  if (index > 1 && !showExtraReferences && !splitReferences[slot.key]) continue;
+  const container = document.createElement('div'); $('splitPhotos').append(container); renderSlot(slot.key, `${slot.label} 참고 사진`, false, slot.guide, container);
+ }
+ $('extraReferences').textContent = showExtraReferences ? '빈 추가 사진 칸 접기' : '다른 참고 사진 추가 · 조명·분위기 / 소품';
+ $('extraReferences').setAttribute('aria-expanded', String(showExtraReferences));
+}
+document.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', () => { photoEpoch++; form.referenceMode = button.dataset.mode; saveForm(); renderReferences(); updatePrompt(); }));
+$('extraReferences').onclick = () => { photoEpoch++; showExtraReferences = !showExtraReferences; renderReferences(); updatePrompt(); };
+$('copy').onclick = async () => {
+ try {
+  try { if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable'); await navigator.clipboard.writeText($('prompt').value); }
+  catch (error) { logFailure('기본 복사 실패, 직접 복사 방식 시도', error); $('prompt').focus(); $('prompt').select(); if (!document.execCommand('copy')) throw new Error('Copy denied'); }
+  notify('전체 프롬프트를 복사했습니다.');
+ } catch (error) { logFailure('복사 실패', error); $('prompt').focus(); $('prompt').select(); notify('선택된 프롬프트를 Ctrl+C로 복사하거나 TXT로 저장해 주세요.'); }
+};
+$('savePrompt').onclick = () => { const url = URL.createObjectURL(new Blob([$('prompt').value], { type: 'text/plain;charset=utf-8' })); const a = document.createElement('a'); a.href = url; a.download = '연출컷-프롬프트.txt'; document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 30000); };
+$('reset').onclick = () => { if (!confirm('등록한 사진과 작성한 내용을 모두 초기화할까요?')) return; photoEpoch++; revokeProductPhotos(photos); revokeReferencePhotos(splitReferences); revokeExplorationPhotos(exploration); if (reference) URL.revokeObjectURL(reference.url); photos = {}; reference = null; splitReferences = {}; exploration = {}; showExtraReferences = false; form = createInitialForm(); saveForm(); syncFields(); renderPhotos(); updatePrompt(); };
+window.addEventListener('beforeunload', (event) => { if (Object.keys(photos).length || reference || Object.keys(splitReferences).length || Object.values(exploration).some((group) => group.length)) { event.preventDefault(); event.returnValue = ''; } });
+syncFields(); renderPhotos(); updatePrompt();
+</script>
+</body>
+</html>

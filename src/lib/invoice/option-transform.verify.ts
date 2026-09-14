@@ -4434,11 +4434,13 @@ const prefilledSlots = itemNameAiQuickSlotsFromComponents([
   { style: reviewStrap, quantity: 1 },
 ])
 assert(
-  prefilledSlots.length === 2 &&
+  prefilledSlots.length === 3 &&
     prefilledSlots[0]?.status === 'matched' &&
-    prefilledSlots[0]?.quantity === 2 &&
-    prefilledSlots[1]?.style?.styleId === reviewStrap.styleId,
-  '빠른 입력칸은 기존 구성과 수량을 미리 채운다',
+    prefilledSlots[0]?.quantity === 1 &&
+    prefilledSlots[0]?.style?.styleId === reviewShorts.styleId &&
+    prefilledSlots[1]?.style?.styleId === reviewShorts.styleId &&
+    prefilledSlots[2]?.style?.styleId === reviewStrap.styleId,
+  '빠른 입력칸은 수량만큼 단위 칸으로 펼쳐 보여 준다',
 )
 const renamedSlot = applyItemNameAiQuickSlotText(
   prefilledSlots[0]!,
@@ -4448,7 +4450,7 @@ assert(
   renamedSlot.status === 'draft' &&
     renamedSlot.style === null &&
     renamedSlot.quantity === 1,
-  '공식명을 바꾸면 미확정 초안이 되고 수량은 1이 된다',
+  '공식명을 바꾸면 미확정 초안이 되고, 기존 정상 수량 1은 유지한다',
 )
 const incompleteSlots = [renamedSlot, prefilledSlots[1]!]
 assert(
@@ -4500,7 +4502,12 @@ const duplicated = itemNameAiQuickRowComponents([
     error: null,
   },
 ])
-assert(duplicated.ok === false, '같은 M번호를 두 칸에 넣으면 반영하지 않는다')
+assert(
+  duplicated.ok &&
+    duplicated.components.length === 1 &&
+    duplicated.components[0]?.quantity === 2,
+  '같은 M번호를 두 칸에 넣으면 수량 2로 합친다',
+)
 const exactMatch = decideItemNameAiQuickSlotMatch(
   [
     {
@@ -5590,7 +5597,6 @@ function stockPosition(
     receivedOnRaw: '260101',
     isForcedPriority: false,
     isFinalLocation: false,
-    usagePriority: 'fifo',
     quantityStatus: 'known',
     unitsPerBox: 1,
     remainingBoxes: row.remainingBoxes ?? 0,
@@ -5605,6 +5611,8 @@ function stockPosition(
     createdAt: '',
     updatedAt: '',
     ...row,
+    usagePriority:
+      row.usagePriority ?? (row.isForcedPriority ? 'first' : 'fifo'),
   }
 }
 

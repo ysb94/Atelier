@@ -7,7 +7,7 @@ import {
   buildLegacyRedirectHref,
   chinaWorkOrdersPath,
   companyMeetingsPath,
-  designColorSamplesPath,
+  designStyledCutsPath,
   dataUploadHref,
   draftDetailPath,
   draftNewPath,
@@ -40,8 +40,8 @@ assert(
   '중국팀 작업 지시서는 회사 경로',
 )
 assert(
-  designColorSamplesPath() === '/design/color-samples',
-  '디자인 컬러샘플 촬영은 회사 경로',
+  designStyledCutsPath() === '/design/styled-cuts',
+  '디자인 연출 컷 제작은 회사 경로',
 )
 assert(companyMeetingsPath() === '/meetings', '회의는 회사 경로')
 assert(

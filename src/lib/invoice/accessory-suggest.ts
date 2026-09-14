@@ -643,28 +643,26 @@ export function evaluateLookupKeyDraft(
       holdMessage: '구성품 M번호를 하나 이상 고르세요.',
     }
   }
-  const seen = new Set<string>()
   for (const item of draft.components) {
-    if (allowedStyleIds && !allowedStyleIds.has(item.style.styleId)) {
-      return {
-        ok: false,
-        holdReason: 'invalid_style',
-        holdMessage: '후보에 없는 구성품입니다.',
-      }
-    }
-    if (seen.has(item.style.styleId)) {
+    if (!item.style?.styleId?.trim()) {
       return {
         ok: false,
         holdReason: 'incomplete',
-        holdMessage: '같은 구성품 M번호는 한 번만 넣을 수 있습니다.',
+        holdMessage: '구성품 M번호를 고르세요.',
       }
     }
-    seen.add(item.style.styleId)
     if (!Number.isInteger(item.quantity) || item.quantity < 1) {
       return {
         ok: false,
         holdReason: 'incomplete',
         holdMessage: '구성 수량은 1 이상이어야 합니다.',
+      }
+    }
+    if (allowedStyleIds && !allowedStyleIds.has(item.style.styleId)) {
+      return {
+        ok: false,
+        holdReason: 'invalid_style',
+        holdMessage: '후보에 없는 구성품입니다.',
       }
     }
   }
@@ -683,7 +681,7 @@ export function inputFromLookupDraft(
     note: draft.reason,
     components:
       draft.action === 'components'
-        ? draft.components.map((item) => ({
+        ? mergeLookupComponents(draft.components, []).map((item) => ({
             styleId: item.style.styleId,
             role: 'included' as const,
             quantity: item.quantity,

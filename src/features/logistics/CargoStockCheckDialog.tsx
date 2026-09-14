@@ -1,0 +1,394 @@
+import { useEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useQueries } from '@tanstack/react-query'
+import { PackageSearch, Printer, X } from 'lucide-react'
+import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import type { CargoDraftRow } from '@/features/logistics/CargoInboundAddPanel'
+import {
+  getActiveWarehouseInventorySet,
+  getWarehouseStockPositions,
+} from '@/lib/api'
+import { useRenderWatch } from '@/lib/diagnostics'
+import { normalizeStyleNo } from '@/lib/import/transform'
+import {
+  combineListQueries,
+  flattenListQueries,
+} from '@/lib/query/list-queries'
+import type { WarehouseStockPosition } from '@/lib/types'
+import { formatNumber } from '@/lib/utils'
+import { resolveLatestReceivedStockByStyle } from '@/lib/warehouse/stock'
+
+type CargoStockCheckDialogProps = {
+  lines: CargoDraftRow[]
+  onClose: () => void
+}
+
+type CargoStockPrintOrientation = 'auto' | 'portrait' | 'landscape'
+
+const PRINT_CLASS = 'printing-cargo-stock-check'
+const PRINT_STYLE_ID = 'cargo-stock-check-print-style'
+/** 이 수 이상이면 A4 가로로 뽑는다. */
+const LANDSCAPE_PRINT_MIN_ROWS = 16
+
+function formatReceivedOn(value: string | null) {
+  if (!value) return '-'
+  const date = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return value
+  const yy = String(date.getFullYear()).slice(-2)
+  const mm = String(date.getMonth() + 1).padStart(2, '0')
+  const dd = String(date.getDate()).padStart(2, '0')
+  return `${yy}${mm}${dd}`
+}
+
+function applyCargoStockCheckPrintMode(landscape: boolean) {
+  document.documentElement.classList.add(PRINT_CLASS)
+  let style = document.getElementById(PRINT_STYLE_ID)
+  if (!style) {
+    style = document.createElement('style')
+    style.id = PRINT_STYLE_ID
+    document.head.appendChild(style)
+  }
+  const pageSize = landscape ? 'A4 landscape' : 'A4 portrait'
+  const pageMargin = landscape ? '8mm 10mm' : '12mm'
+  style.textContent = `
+@page { size: ${pageSize}; margin: ${pageMargin}; }
+@media screen {
+  .cargo-stock-check-print { display: none !important; }
+}
+@media print {
+  html.printing-cargo-stock-check body * { visibility: hidden; }
+  html.printing-cargo-stock-check .cargo-stock-check-print,
+  html.printing-cargo-stock-check .cargo-stock-check-print * {
+    visibility: visible;
+  }
+  html.printing-cargo-stock-check .cargo-stock-check-print {
+    display: block !important;
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    color: #111;
+    background: #fff;
+    font-family: sans-serif;
+  }
+  html.printing-cargo-stock-check .cargo-stock-check-print h1 {
+    font-size: 18px;
+    margin: 0 0 8px;
+  }
+  html.printing-cargo-stock-check .cargo-stock-check-print p {
+    margin: 0 0 16px;
+    color: #555;
+    font-size: 13px;
+  }
+  html.printing-cargo-stock-check .cargo-stock-check-print table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  html.printing-cargo-stock-check .cargo-stock-check-print th,
+  html.printing-cargo-stock-check .cargo-stock-check-print td {
+    border: 1px solid #bbb;
+    padding: 6px 8px;
+    text-align: left;
+  }
+  html.printing-cargo-stock-check .cargo-stock-check-print th {
+    background: #f3f3f3;
+  }
+  html.printing-cargo-stock-check .cargo-stock-check-print td.num {
+    text-align: right;
+  }
+}
+`
+}
+
+function clearCargoStockCheckPrintMode() {
+  document.documentElement.classList.remove(PRINT_CLASS)
+  document.getElementById(PRINT_STYLE_ID)?.remove()
+}
+
+export function CargoStockCheckDialog({
+  lines,
+  onClose,
+}: CargoStockCheckDialogProps) {
+  useRenderWatch('CargoStockCheckDialog')
+  const { brands } = useCompanyBrandScope()
+  const [openedAt] = useState(() => Date.now())
+  const [printOrientation, setPrintOrientation] =
+    useState<CargoStockPrintOrientation>('auto')
+
+  useEffect(() => {
+    const afterPrint = () => clearCargoStockCheckPrintMode()
+    window.addEventListener('afterprint', afterPrint)
+    return () => {
+      window.removeEventListener('afterprint', afterPrint)
+      clearCargoStockCheckPrintMode()
+    }
+  }, [])
+
+  const stockQueries = useQueries({
+    queries: brands.map((brand) => ({
+      queryKey: ['cargo-inbound-stock-check', brand.id, openedAt],
+      queryFn: async (): Promise<WarehouseStockPosition[]> => {
+        const activeSet = await getActiveWarehouseInventorySet(brand.id)
+        if (!activeSet) return []
+        return getWarehouseStockPositions(brand.id, activeSet.id)
+      },
+    })),
+    combine: combineListQueries<WarehouseStockPosition>,
+  })
+
+  const positions = useMemo(
+    () => flattenListQueries(stockQueries),
+    [stockQueries],
+  )
+
+  const rows = useMemo(() => {
+    return lines
+      .map((line, index) => {
+        const styleNo = line.styleNo.trim()
+        const stock = resolveLatestReceivedStockByStyle(positions, styleNo)
+        return {
+          key: `${styleNo || 'empty'}-${index}`,
+          no: line.no || String(index + 1),
+          name: line.name.trim() || '-',
+          styleNo: normalizeStyleNo(styleNo) || styleNo || '-',
+          stock,
+        }
+      })
+      .slice()
+      .sort((left, right) => {
+        const leftKey = left.stock.found
+          ? left.stock.locationLabel ?? ''
+          : '\uffff'
+        const rightKey = right.stock.found
+          ? right.stock.locationLabel ?? ''
+          : '\uffff'
+        const byLocation = leftKey.localeCompare(rightKey, 'ko-KR')
+        if (byLocation !== 0) return byLocation
+        return left.styleNo.localeCompare(right.styleNo, 'ko-KR')
+      })
+  }, [lines, positions])
+
+  const printRows = useMemo(
+    () => rows.filter((row) => row.stock.found),
+    [rows],
+  )
+  const foundCount = printRows.length
+  const autoPrintLandscape = printRows.length >= LANDSCAPE_PRINT_MIN_ROWS
+  const autoPrintOrientationLabel = autoPrintLandscape ? '가로' : '세로'
+  const printLandscape =
+    printOrientation === 'landscape' ||
+    (printOrientation === 'auto' && autoPrintLandscape)
+  const printOrientationLabel = printLandscape ? '가로' : '세로'
+
+  function handlePrint() {
+    if (printRows.length === 0) return
+    applyCargoStockCheckPrintMode(printLandscape)
+    window.requestAnimationFrame(() =>
+      window.requestAnimationFrame(() => window.print()),
+    )
+  }
+
+  return createPortal(
+    <WorkspaceTabOverlay>
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4">
+      <button
+        type="button"
+        aria-label="재고 파악 닫기"
+        className="absolute inset-0 bg-black/60 backdrop-blur-[2px]"
+        onClick={onClose}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cargo-stock-check-title"
+        className="relative z-10 flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-lg"
+      >
+        <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+          <div>
+            <h2
+              id="cargo-stock-check-title"
+              className="text-base font-semibold tracking-tight"
+            >
+              재고 파악
+            </h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              창고 관리 기준으로, M번호마다 입고일이 가장 최신인 자리의 박스
+              합을 봅니다.
+            </p>
+          </div>
+          <Button type="button" size="icon" variant="ghost" onClick={onClose}>
+            <X className="size-4" />
+          </Button>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant="muted">대상 {formatNumber(rows.length)}종</Badge>
+            <Badge variant={foundCount > 0 ? 'success' : 'muted'}>
+              재고 확인 {formatNumber(foundCount)}
+            </Badge>
+            {stockQueries.loading ? (
+              <span className="text-xs text-muted-foreground">
+                창고 불러오는 중...
+              </span>
+            ) : null}
+            {stockQueries.errorIndexes.length > 0 ? (
+              <span className="text-xs text-danger">
+                일부 브랜드 창고를 불러오지 못했습니다.
+              </span>
+            ) : null}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <label className="sr-only" htmlFor="cargo-stock-print-orientation">
+              인쇄 방향
+            </label>
+            <select
+              id="cargo-stock-print-orientation"
+              value={printOrientation}
+              onChange={(event) =>
+                setPrintOrientation(
+                  event.target.value as CargoStockPrintOrientation,
+                )
+              }
+              className="h-8 rounded-md border border-border bg-card px-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+              title="인쇄 방향 선택"
+            >
+              <option value="auto">
+                자동 ({autoPrintOrientationLabel})
+              </option>
+              <option value="portrait">세로</option>
+              <option value="landscape">가로</option>
+            </select>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={printRows.length === 0}
+              onClick={handlePrint}
+            >
+              <Printer className="size-3.5" />
+              인쇄
+            </Button>
+          </div>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-auto">
+          {rows.length === 0 ? (
+            <p className="px-4 py-10 text-center text-sm text-muted-foreground">
+              확인할 상품이 없습니다.
+            </p>
+          ) : (
+            <table className="w-full min-w-[40rem] text-left text-sm">
+              <thead className="sticky top-0 bg-muted/90 text-xs text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">NO</th>
+                  <th className="px-3 py-2 font-medium">M번호</th>
+                  <th className="px-3 py-2 font-medium">품명</th>
+                  <th className="px-3 py-2 font-medium">최신 입고 위치</th>
+                  <th className="px-3 py-2 text-right font-medium">박스 합</th>
+                  <th className="px-3 py-2 font-medium">최신 입고일</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((row) => (
+                  <tr key={row.key} className="border-t border-border">
+                    <td className="px-3 py-2 text-muted-foreground">{row.no}</td>
+                    <td className="px-3 py-2 font-mono text-xs font-semibold">
+                      {row.styleNo}
+                    </td>
+                    <td className="px-3 py-2">{row.name}</td>
+                    <td className="px-3 py-2">
+                      {row.stock.found ? (
+                        row.stock.locationLabel ?? '-'
+                      ) : (
+                        <span className="inline-flex rounded border border-primary/40 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-primary">
+                          NEW
+                        </span>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right font-medium">
+                      {row.stock.found
+                        ? formatNumber(row.stock.totalBoxes)
+                        : '-'}
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">
+                      {row.stock.found
+                        ? formatReceivedOn(row.stock.receivedOn)
+                        : '-'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="flex justify-end border-t border-border px-4 py-3">
+          <Button type="button" variant="outline" onClick={onClose}>
+            닫기
+          </Button>
+        </div>
+      </div>
+
+      <div className="cargo-stock-check-print hidden" aria-hidden>
+        <h1>재고 파악</h1>
+        <p>
+          재고 확인 {formatNumber(printRows.length)}종 · {printOrientationLabel}
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>NO</th>
+              <th>M번호</th>
+              <th>품명</th>
+              <th>최신 입고 위치</th>
+              <th>박스 합</th>
+              <th>최신 입고일</th>
+            </tr>
+          </thead>
+          <tbody>
+            {printRows.map((row) => (
+              <tr key={`print-${row.key}`}>
+                <td>{row.no}</td>
+                <td>{row.styleNo}</td>
+                <td>{row.name}</td>
+                <td>{row.stock.locationLabel ?? '-'}</td>
+                <td className="num">{formatNumber(row.stock.totalBoxes)}</td>
+                <td>{formatReceivedOn(row.stock.receivedOn)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    </WorkspaceTabOverlay>,
+    document.body,
+  )
+}
+
+export function CargoStockCheckButton({
+  lines,
+}: {
+  lines: CargoDraftRow[]
+}) {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        onClick={() => setOpen(true)}
+      >
+        <PackageSearch className="size-3.5" />
+        재고 파악
+      </Button>
+      {open ? (
+        <CargoStockCheckDialog lines={lines} onClose={() => setOpen(false)} />
+      ) : null}
+    </>
+  )
+}

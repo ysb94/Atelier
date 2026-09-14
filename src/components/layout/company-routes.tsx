@@ -15,7 +15,7 @@ import { CompanyProductsPage } from '@/features/products/CompanyProductsPage'
 import { DepartmentProductsPage } from '@/features/products/ProductsPage'
 import { ProductDetailDrawer } from '@/features/products/ProductDetailDrawer'
 import { CompanySampleWorkOrderPage } from '@/features/china/SampleWorkOrderPage'
-import { DesignColorSamplePage } from '@/features/design/ColorSamplePage'
+import { DesignStyledCutsPage } from '@/features/design/StyledCutsPage'
 import { CompanyDraftsPage } from '@/features/drafts/DraftsPage'
 import { DraftEditPage } from '@/features/drafts/DraftEditPage'
 import { CompanyBarcodePage } from '@/features/codes/BarcodePage'
@@ -33,6 +33,7 @@ import { CompanyBarcodeOutboundDataEntryPage } from '@/features/logistics/Barcod
 import { CompanyBulkOutboundPage } from '@/features/logistics/BulkOutboundPage'
 import { CompanyOutboundDataPage } from '@/features/logistics/OutboundDataPage'
 import { CompanyWarehousePage } from '@/features/logistics/WarehousePage'
+import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
 
 function RedirectTo({ to }: { to: string }) {
   return <Navigate to={to} replace />
@@ -121,9 +122,10 @@ export const companyWorkspaceRoutes = (
           element={<ProductDetailDrawer />}
         />
       </Route>
+      <Route path="design/styled-cuts" element={<DesignStyledCutsPage />} />
       <Route
         path="design/color-samples"
-        element={<DesignColorSamplePage />}
+        element={<RedirectTo to="/design/styled-cuts" />}
       />
       <Route path="design/file-manager" element={<DesignFileManagerRoute />} />
       <Route path="logistics/invoices" element={<CompanyInvoiceWorkPage />} />
@@ -137,6 +139,10 @@ export const companyWorkspaceRoutes = (
       />
       <Route path="logistics/bulk-outbound" element={<CompanyBulkOutboundPage />} />
       <Route path="logistics/warehouses" element={<CompanyWarehousePage />} />
+      <Route
+        path="logistics/cargo-inbound"
+        element={<CompanyCargoInboundPage />}
+      />
       <Route path="data" element={<RedirectTo to="/data/all" />} />
       <Route
         path="data/upload"

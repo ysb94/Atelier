@@ -15,6 +15,7 @@ import {
   Lightbulb,
   ListChecks,
   Network,
+  PackagePlus,
   Palette,
   PenLine,
   ScanBarcode,
@@ -76,7 +77,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
     items: [
       { to: '/product-work/design', label: '상품 정보', icon: Palette },
       { to: '/work-requests/design', label: '작업 요청', icon: ClipboardList },
-      { to: '/design/color-samples', label: '컬러샘플 촬영', icon: Camera },
+      { to: '/design/styled-cuts', label: '연출 컷 제작', icon: Camera },
       { to: '/design/file-manager', label: '이미지 업로드', icon: Images },
     ],
   },
@@ -100,6 +101,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
       },
       { to: '/logistics/bulk-outbound', label: '바코드 출고', icon: Truck },
       { to: '/logistics/warehouses', label: '창고 관리', icon: Warehouse },
+      { to: '/logistics/cargo-inbound', label: '화물 입고', icon: PackagePlus },
     ],
   },
   {

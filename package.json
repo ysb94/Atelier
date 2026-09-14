@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
+    "build:styled-cuts-html": "node scripts/build-styled-cuts-html.mjs",
     "lint": "oxlint",
     "preview": "vite preview",
     "check:supabase": "node scripts/check-supabase.mjs",
@@ -40,6 +41,7 @@
     "verify:barcode-outbound-data-entry": "node scripts/verify-barcode-outbound-data-entry.mjs",
     "verify:outbound-reflect": "node scripts/verify-outbound-reflect.mjs",
     "verify:invoice-order-key": "node scripts/verify-invoice-order-key.mjs",
+    "verify:styled-cuts": "node --experimental-strip-types scripts/verify-styled-cuts.mjs",
     "verify:diagnostics": "node scripts/verify-diagnostics.mjs",
     "verify:company-capabilities": "npx tsx src/lib/company/capabilities.verify.ts",
     "verify:company-brand-filter": "npx tsx src/lib/products/company-brand-filter.verify.ts",

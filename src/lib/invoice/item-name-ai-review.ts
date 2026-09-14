@@ -339,10 +339,43 @@ export function isItemNameAiReviewDirty(row: ItemNameAiReviewRow) {
   )
 }
 
+export const ITEM_NAME_COMPONENT_QUANTITY_ERROR =
+  '구성 수량은 1 이상이어야 합니다.'
+export const ITEM_NAME_COMPONENT_STYLE_ERROR = '구성품 M번호를 고르세요.'
+
+export function isValidItemNameComponentQuantity(quantity: number) {
+  return Number.isInteger(quantity) && quantity >= 1
+}
+
+export function validateItemNameComponentQuantity(quantity: number) {
+  return isValidItemNameComponentQuantity(quantity)
+    ? null
+    : ITEM_NAME_COMPONENT_QUANTITY_ERROR
+}
+
+export function validateItemNameComponentStyleId(styleId: string | null | undefined) {
+  return styleId?.trim() ? null : ITEM_NAME_COMPONENT_STYLE_ERROR
+}
+
+export function validateAndMergeItemNameAiComponents(
+  items: AccessoryLookupComponent[],
+):
+  | { ok: true; components: AccessoryLookupComponent[] }
+  | { ok: false; error: string } {
+  for (const item of items) {
+    const styleError = validateItemNameComponentStyleId(item.style?.styleId)
+    if (styleError) return { ok: false, error: styleError }
+    const quantityError = validateItemNameComponentQuantity(item.quantity)
+    if (quantityError) return { ok: false, error: quantityError }
+  }
+  return { ok: true, components: mergeItemNameAiComponents(items) }
+}
+
 export function validateItemNameAiReviewRow(
   row: ItemNameAiReviewRow,
   knownStyleIds?: Set<string>,
 ): ItemNameAiReviewRow {
+  let components = row.components
   let validationError: string | null = null
   if (!row.itemName.trim()) {
     validationError = '옵션명이 없습니다.'
@@ -352,29 +385,23 @@ export function validateItemNameAiReviewRow(
     validationError = '비우는 행에는 구성품을 넣지 않습니다.'
   } else if (row.action === 'components' && row.components.length === 0) {
     validationError = '구성품 M번호를 하나 이상 고르세요.'
-  } else {
-    const seen = new Set<string>()
-    for (const component of row.components) {
-      if (
-        knownStyleIds &&
-        !knownStyleIds.has(component.style.styleId)
-      ) {
-        validationError = '등록되지 않은 구성품입니다.'
-        break
-      }
-      if (seen.has(component.style.styleId)) {
-        validationError = '같은 구성품 M번호는 한 번만 넣을 수 있습니다.'
-        break
-      }
-      seen.add(component.style.styleId)
-      if (!Number.isInteger(component.quantity) || component.quantity < 1) {
-        validationError = '구성 수량은 1 이상이어야 합니다.'
-        break
+  } else if (row.action === 'components') {
+    const merged = validateAndMergeItemNameAiComponents(row.components)
+    if (!merged.ok) {
+      validationError = merged.error
+    } else {
+      components = merged.components
+      for (const component of components) {
+        if (knownStyleIds && !knownStyleIds.has(component.style.styleId)) {
+          validationError = '등록되지 않은 구성품입니다.'
+          break
+        }
       }
     }
   }
   return {
     ...row,
+    components,
     validationError,
     passesGate:
       !validationError &&
@@ -469,20 +496,59 @@ export function emptyItemNameAiQuickSlot(): ItemNameAiQuickSlot {
   }
 }
 
+function matchedItemNameAiQuickSlot(
+  style: StyleRef,
+  quantity: number,
+): ItemNameAiQuickSlot {
+  return {
+    text: formatItemNameAiStyleLabel(style),
+    quantity,
+    style,
+    status: 'matched',
+    candidates: [],
+    error: null,
+  }
+}
+
 export function itemNameAiQuickSlotsFromComponents(
   components: AccessoryLookupComponent[],
 ): ItemNameAiQuickSlot[] {
-  const filled = components
-    .slice(0, ITEM_NAME_AI_QUICK_SLOT_LIMIT)
-    .map((item) => ({
-      text: formatItemNameAiStyleLabel(item.style),
-      quantity: item.quantity,
-      style: item.style,
-      status: 'matched' as const,
-      candidates: [],
-      error: null,
-    }))
-  return filled.length > 0 ? filled : [emptyItemNameAiQuickSlot()]
+  if (components.length === 0) return [emptyItemNameAiQuickSlot()]
+
+  const unitSlots: ItemNameAiQuickSlot[] = []
+  for (const item of components) {
+    if (!isValidItemNameComponentQuantity(item.quantity)) {
+      unitSlots.push(matchedItemNameAiQuickSlot(item.style, item.quantity))
+      continue
+    }
+    for (let index = 0; index < item.quantity; index += 1) {
+      unitSlots.push(matchedItemNameAiQuickSlot(item.style, 1))
+    }
+  }
+
+  if (unitSlots.length === 0) return [emptyItemNameAiQuickSlot()]
+  if (unitSlots.length <= ITEM_NAME_AI_QUICK_SLOT_LIMIT) return unitSlots
+
+  // 입력칸 제한을 넘는 저장 수량은 칸을 자르지 않고, 구성품별 수량을 유지한다.
+  return components.map((item) =>
+    matchedItemNameAiQuickSlot(item.style, item.quantity),
+  )
+}
+
+function preservedItemNameAiQuickSlotQuantity(quantity: number) {
+  return isValidItemNameComponentQuantity(quantity) ? quantity : 1
+}
+
+export function itemNameAiQuickSlotQuantityBadge(quantity: number) {
+  return isValidItemNameComponentQuantity(quantity) && quantity >= 2
+    ? `×${quantity}`
+    : ''
+}
+
+export function itemNameAiQuickSlotQuantityLabel(quantity: number) {
+  return isValidItemNameComponentQuantity(quantity) && quantity >= 2
+    ? `구성 수량 ${quantity}개`
+    : ''
 }
 
 export function applyItemNameAiQuickSlotText(
@@ -506,7 +572,7 @@ export function applyItemNameAiQuickSlotText(
   }
   return {
     text,
-    quantity: 1,
+    quantity: preservedItemNameAiQuickSlotQuantity(slot.quantity),
     style: null,
     status: 'draft',
     candidates: [],
@@ -520,7 +586,9 @@ export function applyItemNameAiQuickSlotStyle(
 ): ItemNameAiQuickSlot {
   return {
     text: formatItemNameAiStyleLabel(style),
-    quantity: Math.max(1, Math.floor(slot.quantity || 1)),
+    quantity: isValidItemNameComponentQuantity(slot.quantity)
+      ? slot.quantity
+      : 1,
     style,
     status: 'matched',
     candidates: [],
@@ -530,7 +598,10 @@ export function applyItemNameAiQuickSlotStyle(
 
 export function itemNameAiQuickRowComponents(slots: ItemNameAiQuickSlot[]):
   | { ok: true; components: AccessoryLookupComponent[] }
-  | { ok: false; reason: 'empty' | 'incomplete' | 'duplicate' } {
+  | {
+      ok: false
+      reason: 'empty' | 'incomplete' | 'invalid_quantity' | 'empty_style'
+    } {
   const filled = slots.filter(
     (slot) =>
       slot.text.trim() && slot.text.trim() !== ITEM_NAME_AI_DELETE_LABEL,
@@ -539,18 +610,23 @@ export function itemNameAiQuickRowComponents(slots: ItemNameAiQuickSlot[]):
   if (filled.some((slot) => !slot.style)) {
     return { ok: false, reason: 'incomplete' }
   }
-  const seen = new Set<string>()
-  const components: AccessoryLookupComponent[] = []
-  for (const slot of filled) {
-    const style = slot.style!
-    if (seen.has(style.styleId)) return { ok: false, reason: 'duplicate' }
-    seen.add(style.styleId)
-    components.push({
-      style,
-      quantity: Math.max(1, Math.floor(slot.quantity || 1)),
-    })
+  if (filled.some((slot) => !slot.style?.styleId.trim())) {
+    return { ok: false, reason: 'empty_style' }
   }
-  return { ok: true, components }
+  if (
+    filled.some((slot) => !isValidItemNameComponentQuantity(slot.quantity))
+  ) {
+    return { ok: false, reason: 'invalid_quantity' }
+  }
+  return {
+    ok: true,
+    components: mergeItemNameAiComponents(
+      filled.map((slot) => ({
+        style: slot.style!,
+        quantity: slot.quantity,
+      })),
+    ),
+  }
 }
 
 export function replaceItemNameAiRowComponents(
@@ -578,7 +654,7 @@ export type ItemNameAiEnterDecision =
   | { status: 'delete' }
   | { status: 'components'; components: AccessoryLookupComponent[] }
   | { status: 'needs_ai' }
-  | { status: 'invalid'; reason: 'duplicate' }
+  | { status: 'invalid'; error: string }
 
 export function itemNameAiSlotsAreAllEmpty(slots: ItemNameAiQuickSlot[]) {
   return slots.every(
@@ -642,8 +718,11 @@ export function decideItemNameAiEnterAction(
   if (filled.some((slot) => !slot.style)) return { status: 'needs_ai' }
   const result = itemNameAiQuickRowComponents(slots)
   if (result.ok) return { status: 'components', components: result.components }
-  if (result.reason === 'duplicate') {
-    return { status: 'invalid', reason: 'duplicate' }
+  if (result.reason === 'invalid_quantity') {
+    return { status: 'invalid', error: ITEM_NAME_COMPONENT_QUANTITY_ERROR }
+  }
+  if (result.reason === 'empty_style') {
+    return { status: 'invalid', error: ITEM_NAME_COMPONENT_STYLE_ERROR }
   }
   return { status: 'needs_ai' }
 }
@@ -882,6 +961,14 @@ export function nextItemNameAiQuickFocus(
       rowKey: nextKey,
       slotIndex: Math.min(slotIndex, existing - 1),
       ensureCount: existing,
+    }
+  }
+  const currentCount = itemNameAiQuickSlotCount(slotCountByKey, rowKey)
+  if (slotIndex + 1 < currentCount) {
+    return {
+      rowKey,
+      slotIndex: slotIndex + 1,
+      ensureCount: currentCount,
     }
   }
   if (slotIndex < ITEM_NAME_AI_QUICK_SLOT_LIMIT - 1) {
@@ -1361,10 +1448,14 @@ export function mergeItemNameAiComponents(
 ): AccessoryLookupComponent[] {
   const byId = new Map<string, AccessoryLookupComponent>()
   for (const item of items) {
-    const quantity = Math.max(1, Math.floor(item.quantity || 1))
     const current = byId.get(item.style.styleId)
-    if (current) current.quantity += quantity
-    else byId.set(item.style.styleId, { style: item.style, quantity })
+    if (current) current.quantity += item.quantity
+    else {
+      byId.set(item.style.styleId, {
+        style: item.style,
+        quantity: item.quantity,
+      })
+    }
   }
   return [...byId.values()]
 }

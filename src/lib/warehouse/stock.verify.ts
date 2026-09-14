@@ -19,6 +19,7 @@ import {
   SECOND_PRIORITY_DATE,
   summarizeWarehouseImport,
   summarizeWarehouseStockByStyle,
+  resolveLatestReceivedStockByStyle,
   toWarehouseImportRpcRows,
   warehouseInventoryTemplateSheets,
   warehousePositionQty,
@@ -430,6 +431,82 @@ assert(
   stockByStyle.has('M999') === false,
   '자리 없는 상품은 집계 맵에 넣지 않는다',
 )
+
+const latestM100 = resolveLatestReceivedStockByStyle(
+  [
+    {
+      styleNo: 'M100',
+      locationCode: 'A-01',
+      isFinalLocation: false,
+      receivedOn: '2025-01-01',
+      remainingBoxes: 2,
+    },
+    {
+      styleNo: 'M100',
+      locationCode: 'A-02',
+      isFinalLocation: false,
+      receivedOn: '2025-08-01',
+      remainingBoxes: 3,
+    },
+    {
+      styleNo: 'M100',
+      locationCode: 'A-03',
+      isFinalLocation: false,
+      receivedOn: '2025-08-01',
+      remainingBoxes: 1,
+    },
+    {
+      styleNo: 'M100',
+      locationCode: 'B-01',
+      isFinalLocation: false,
+      receivedOn: '2024-12-01',
+      remainingBoxes: 9,
+    },
+  ],
+  'm100',
+)
+assert(latestM100.found, '최신 입고일 자리가 있어야 한다')
+assert(latestM100.receivedOn === '2025-08-01', '가장 늦은 입고일을 고른다')
+assert(
+  latestM100.locationLabel === 'A-02, A-03',
+  '같은 최신 입고일 자리를 모두 표기한다',
+)
+assert(latestM100.totalBoxes === 4, '최신 입고일 자리 박스만 합친다')
+
+const latestSameSlot = resolveLatestReceivedStockByStyle(
+  [
+    {
+      styleNo: 'M200',
+      locationCode: '6-1-10',
+      isFinalLocation: false,
+      receivedOn: '2025-01-01',
+      remainingBoxes: 5,
+    },
+    {
+      styleNo: 'M200',
+      locationCode: '6-1-10',
+      isFinalLocation: true,
+      receivedOn: '2025-08-01',
+      remainingBoxes: 4,
+    },
+  ],
+  'M200',
+)
+assert(
+  latestSameSlot.locationLabel === '6-1-10',
+  '6-1-10 과 6-1-10// 는 같은 자리로 본다',
+)
+assert(
+  latestSameSlot.receivedOn === '2025-08-01',
+  '같은 자리의 최신 입고일을 쓴다',
+)
+assert(
+  latestSameSlot.totalBoxes === 9,
+  '같은 자리 박스는 // 표시와 관계없이 합친다',
+)
+
+const latestMissing = resolveLatestReceivedStockByStyle([], 'M999')
+assert(!latestMissing.found, '재고 없으면 found=false')
 
 const unknownQtyStock = summarizeWarehouseStockByStyle([
   {

@@ -211,30 +211,53 @@ function validateInput(input: InvoiceItemNameRuleInput) {
       '공통·본품별 규칙에는 조회 키를 넣지 않습니다.',
     )
   }
-  const components = input.components ?? []
-  if (input.action === 'components' && components.length === 0) {
-    throw new InvoiceItemNameRuleStoreError('구성품 M번호를 하나 이상 고르세요.')
-  }
-  if (input.action === 'delete' && components.length > 0) {
+  const rawComponents = input.components ?? []
+  if (input.action === 'delete' && rawComponents.length > 0) {
     throw new InvoiceItemNameRuleStoreError(
       '지우는 규칙에는 구성품을 넣지 않습니다.',
     )
   }
-  const seenStyleIds = new Set<string>()
+  if (input.action === 'components' && rawComponents.length === 0) {
+    throw new InvoiceItemNameRuleStoreError('구성품 M번호를 하나 이상 고르세요.')
+  }
+  if (input.action === 'components') {
+    prepareInvoiceItemNameRuleComponents(rawComponents)
+  }
+}
+
+export function prepareInvoiceItemNameRuleComponents(
+  components: InvoiceItemNameRuleComponentInput[],
+): InvoiceItemNameRuleComponentInput[] {
   for (const item of components) {
-    if (!item.styleId) {
+    if (!item.styleId?.trim()) {
       throw new InvoiceItemNameRuleStoreError('구성품 M번호를 고르세요.')
     }
-    if (seenStyleIds.has(item.styleId)) {
+    if (!Number.isInteger(item.quantity) || item.quantity < 1) {
       throw new InvoiceItemNameRuleStoreError(
-        '같은 구성품 M번호는 한 번만 넣을 수 있습니다.',
+        '구성 수량은 1 이상이어야 합니다.',
       )
     }
-    seenStyleIds.add(item.styleId)
-    if (!Number.isInteger(item.quantity) || item.quantity < 1) {
-      throw new InvoiceItemNameRuleStoreError('구성 수량은 1 이상이어야 합니다.')
+  }
+  return mergeItemNameRuleComponents(components)
+}
+
+function mergeItemNameRuleComponents(
+  components: InvoiceItemNameRuleComponentInput[],
+): InvoiceItemNameRuleComponentInput[] {
+  const byId = new Map<string, InvoiceItemNameRuleComponentInput>()
+  for (const item of components) {
+    const styleId = item.styleId.trim()
+    const current = byId.get(styleId)
+    if (current) current.quantity += item.quantity
+    else {
+      byId.set(styleId, {
+        styleId,
+        role: item.role,
+        quantity: item.quantity,
+      })
     }
   }
+  return [...byId.values()]
 }
 
 function payloadFromInput(brandId: string, input: InvoiceItemNameRuleInput) {
@@ -421,6 +444,10 @@ export async function saveInvoiceItemNameRule(
   feedback?: InvoiceItemNameRuleFeedback,
 ): Promise<InvoiceItemNameRule> {
   validateInput(input)
+  const components =
+    input.action === 'components'
+      ? prepareInvoiceItemNameRuleComponents(input.components ?? [])
+      : []
   const supabase = getSupabase()
   const payload = payloadFromInput(brandId, input)
   if (feedback) {
@@ -430,7 +457,7 @@ export async function saveInvoiceItemNameRule(
         p_brand_id: brandId,
         p_row: {
           ...payload,
-          components: (input.components ?? []).map((item) => ({
+          components: components.map((item) => ({
             styleId: item.styleId,
             role: item.role,
             quantity: item.quantity,
@@ -511,7 +538,7 @@ export async function saveInvoiceItemNameRule(
   }
 
   const savedId = (data as { id: string }).id
-  await replaceComponents(brandId, savedId, input.components ?? [])
+  await replaceComponents(brandId, savedId, components)
   return fetchRule(savedId)
 }
 

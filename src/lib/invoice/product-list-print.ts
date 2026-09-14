@@ -580,6 +580,7 @@ function packRouteSection(
         const needed = headerRows + totalLineRows
         if (current.usedRows > 0 && current.usedRows + needed > rowsPerColumn) {
           flush()
+          continue
         }
       }
       let take = 0

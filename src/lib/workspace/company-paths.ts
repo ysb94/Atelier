@@ -89,8 +89,8 @@ export function chinaWorkOrdersPath() {
   return '/china/work-orders'
 }
 
-export function designColorSamplesPath() {
-  return '/design/color-samples'
+export function designStyledCutsPath() {
+  return '/design/styled-cuts'
 }
 
 export function companyMeetingsPath() {
@@ -191,6 +191,12 @@ export function mapLegacyBrandPath(
       return {
         pathname: '/logistics/warehouses',
         searchPatch: { brands: brandSlug },
+      }
+    }
+    if (tail[0] === 'cargo-inbound') {
+      return {
+        pathname: '/logistics/cargo-inbound',
+        searchPatch: {},
       }
     }
     if (!tail[0]) {

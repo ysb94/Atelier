@@ -17,6 +17,11 @@ import {
   dedupeItemNameAiContexts,
   emptyItemNameAiQuickSlot,
   formatItemNameAiStyleLabel,
+  itemNameAiQuickRowComponents,
+  itemNameAiQuickSlotsFromComponents,
+  itemNameAiQuickSlotQuantityBadge,
+  itemNameAiQuickSlotQuantityLabel,
+  validateItemNameAiReviewRow,
   isItemNameAiAddExtraKey,
   itemNameAiDecisionKey,
   itemNameAiMatchesQueueFilter,
@@ -35,6 +40,10 @@ import {
   type ItemNameAiContext,
 } from '@/lib/invoice/item-name-ai-review'
 import { normalizeInvoiceText } from '@/lib/invoice/prefix-transform'
+import {
+  InvoiceItemNameRuleStoreError,
+  prepareInvoiceItemNameRuleComponents,
+} from '@/lib/supabase/invoice-item-name-rules'
 import type { InvoiceItemNameRule, StyleRef } from '@/lib/types'
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -263,8 +272,9 @@ assert(
 )
 const namedSlot = applyItemNameAiQuickSlotText(emptySlot, '키링')
 assert(
-  decideItemNameAiEnterAction([namedSlot]).status === 'needs_ai',
-  '이름만 있으면 입력 대기에 남긴다',
+  decideItemNameAiEnterAction([namedSlot]).status === 'needs_ai' &&
+    namedSlot.quantity === 1,
+  '이름만 있으면 입력 대기에 남기고 빈 칸 새 입력은 수량 1이다',
 )
 const matchedSlot = applyItemNameAiQuickSlotStyle(namedSlot, charm)
 assert(
@@ -438,6 +448,178 @@ assert(
 assert(
   formatItemNameAiStyleLabel(charm) === `${charm.styleNo} · ${charm.name}`,
   '공식 라벨 형식',
+)
+
+const sameStyleTwoSlots = decideItemNameAiEnterAction([
+  applyItemNameAiQuickSlotStyle(emptyItemNameAiQuickSlot(), charm),
+  applyItemNameAiQuickSlotStyle(emptyItemNameAiQuickSlot(), charm),
+])
+assert(
+  sameStyleTwoSlots.status === 'components' &&
+    sameStyleTwoSlots.components.length === 1 &&
+    sameStyleTwoSlots.components[0]?.style.styleId === charm.styleId &&
+    sameStyleTwoSlots.components[0]?.quantity === 2,
+  '같은 M번호 2칸은 내부에서 quantity 2로 합친다',
+)
+const qty2Row = validateItemNameAiReviewRow({
+  ...row,
+  action: 'components',
+  components: sameStyleTwoSlots.components,
+})
+assert(
+  !qty2Row.validationError && qty2Row.components[0]?.quantity === 2,
+  '검수 행도 quantity 2를 유지한다',
+)
+const qty2Plan = decideItemNameAiSaves([qty2Row], [qty2Row.key])
+assert(
+  qty2Plan.lookups[0]?.input.components?.[0]?.quantity === 2 &&
+    qty2Plan.lookups[0]?.input.components?.length === 1,
+  '저장 요청 payload도 quantity 2다',
+)
+const qty2Reloaded = itemNameAiQuickSlotsFromComponents(qty2Row.components)
+assert(
+  qty2Reloaded.length === 2 &&
+    qty2Reloaded.every((slot) => slot.style?.styleId === charm.styleId) &&
+    qty2Reloaded.every((slot) => slot.quantity === 1),
+  'quantity 2를 다시 불러오면 입력칸 두 개로 보인다',
+)
+
+const qty4Row = validateItemNameAiReviewRow({
+  ...row,
+  action: 'components',
+  components: [{ style: charm, quantity: 4 }],
+})
+assert(
+  !qty4Row.validationError && qty4Row.components[0]?.quantity === 4,
+  '기존 규칙 quantity 4는 검수에서 줄지 않는다',
+)
+const qty4Slots = itemNameAiQuickSlotsFromComponents(qty4Row.components)
+assert(
+  qty4Slots.length === 1 && qty4Slots[0]?.quantity === 4,
+  '입력칸 제한을 넘는 수량은 칸을 자르지 않고 수량을 유지한다',
+)
+const qty4FromSlots = itemNameAiQuickRowComponents(qty4Slots)
+assert(
+  qty4FromSlots.ok && qty4FromSlots.components[0]?.quantity === 4,
+  '다시 저장해도 quantity 4가 유지된다',
+)
+const qty4Resave = validateItemNameAiReviewRow({
+  ...qty4Row,
+  components: qty4FromSlots.components,
+})
+const qty4Plan = decideItemNameAiSaves([qty4Resave], [qty4Resave.key])
+assert(
+  qty4Plan.lookups[0]?.input.components?.[0]?.quantity === 4,
+  'quantity 4 재저장 payload가 줄지 않는다',
+)
+
+const orderedSlots = itemNameAiQuickSlotsFromComponents([
+  { style: charm, quantity: 1 },
+  { style: main, quantity: 1 },
+])
+assert(
+  orderedSlots[0]?.style?.styleId === charm.styleId &&
+    orderedSlots[1]?.style?.styleId === main.styleId,
+  '서로 다른 M번호 순서를 유지한다',
+)
+const orderedMerged = itemNameAiQuickRowComponents(orderedSlots)
+assert(
+  orderedMerged.ok &&
+    orderedMerged.components[0]?.style.styleId === charm.styleId &&
+    orderedMerged.components[1]?.style.styleId === main.styleId,
+  '다른 M번호는 합치지 않고 순서를 유지한다',
+)
+
+for (const quantity of [0, -1, 1.5, Number.NaN]) {
+  const invalidRow = validateItemNameAiReviewRow({
+    ...row,
+    action: 'components',
+    components: [{ style: charm, quantity }],
+  })
+  assert(
+    invalidRow.validationError === '구성 수량은 1 이상이어야 합니다.' &&
+      (Number.isNaN(quantity)
+        ? Number.isNaN(invalidRow.components[0]?.quantity)
+        : invalidRow.components[0]?.quantity === quantity),
+    `수량 ${String(quantity)}은 1로 바꾸지 않고 저장을 막는다`,
+  )
+  let thrown = false
+  try {
+    prepareInvoiceItemNameRuleComponents([
+      { styleId: charm.styleId, role: 'included', quantity },
+    ])
+  } catch (error) {
+    thrown = true
+    assert(
+      error instanceof InvoiceItemNameRuleStoreError &&
+        error.message === '구성 수량은 1 이상이어야 합니다.',
+      `저장 클라이언트가 수량 ${String(quantity)}을 거부한다`,
+    )
+  }
+  assert(thrown, `수량 ${String(quantity)} 저장은 예외여야 한다`)
+}
+
+assert(
+  prepareInvoiceItemNameRuleComponents([
+    { styleId: charm.styleId, role: 'included', quantity: 1 },
+  ])[0]?.quantity === 1,
+  '정상 수량 1은 저장 가능하다',
+)
+assert(
+  prepareInvoiceItemNameRuleComponents([
+    { styleId: charm.styleId, role: 'included', quantity: 1 },
+    { styleId: charm.styleId, role: 'included', quantity: 1 },
+  ])[0]?.quantity === 2,
+  '정상 수량 2는 같은 M번호를 합쳐 저장한다',
+)
+let emptyStyleThrown = false
+try {
+  prepareInvoiceItemNameRuleComponents([
+    { styleId: '', role: 'included', quantity: 1 },
+  ])
+} catch (error) {
+  emptyStyleThrown = true
+  assert(
+    error instanceof InvoiceItemNameRuleStoreError &&
+      error.message === '구성품 M번호를 고르세요.',
+    '빈 styleId는 조용히 제거하지 않고 저장 오류다',
+  )
+}
+assert(emptyStyleThrown, '빈 styleId 저장은 예외여야 한다')
+
+const qty4Renamed = applyItemNameAiQuickSlotText(qty4Slots[0]!, '키링 수정')
+assert(
+  qty4Renamed.status === 'draft' &&
+    qty4Renamed.style === null &&
+    qty4Renamed.quantity === 4,
+  'quantity 4 슬롯의 이름을 수정해도 수량은 4로 유지한다',
+)
+const qty4Rematched = applyItemNameAiQuickSlotStyle(qty4Renamed, charm)
+assert(
+  qty4Rematched.status === 'matched' &&
+    qty4Rematched.style?.styleId === charm.styleId &&
+    qty4Rematched.quantity === 4,
+  '수정한 이름을 공식 M번호로 다시 골라도 수량은 4다',
+)
+const qty4EditedRow = validateItemNameAiReviewRow({
+  ...qty4Row,
+  components: [{ style: charm, quantity: qty4Rematched.quantity }],
+})
+const qty4EditedPlan = decideItemNameAiSaves([qty4EditedRow], [qty4EditedRow.key])
+assert(
+  qty4EditedPlan.lookups[0]?.input.components?.[0]?.quantity === 4,
+  '이름 수정 후 다시 저장해도 payload는 quantity 4다',
+)
+assert(
+  itemNameAiQuickSlotQuantityBadge(1) === '' &&
+    itemNameAiQuickSlotQuantityLabel(1) === '',
+  'quantity 1은 수량 배지 표시 대상이 아니다',
+)
+assert(
+  itemNameAiQuickSlotQuantityBadge(2) === '×2' &&
+    itemNameAiQuickSlotQuantityBadge(4) === '×4' &&
+    itemNameAiQuickSlotQuantityLabel(4) === '구성 수량 4개',
+  'quantity 2 이상은 화면에서 ×수량으로 표시한다',
 )
 
 console.log('item-name-ai-review verify: ok')

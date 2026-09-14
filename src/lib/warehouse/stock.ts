@@ -608,6 +608,97 @@ export function summarizeWarehouseStockByStyle(
   return summaries
 }
 
+/**
+ * 품번마다 입고일(receivedOn)이 가장 최신인 자리만 모아 박스 합을 구한다.
+ * `6-1-10` 과 `6-1-10//` 는 같은 자리로 본다(//는 마지막 자리 표시).
+ * 같은 최신 입고일이 여러 자리에 있으면 자리를 모두 표기하고 박스를 합친다.
+ */
+export type LatestReceivedStockSummary = {
+  styleNo: string
+  locationCodes: string[]
+  locationLabel: string | null
+  receivedOn: string | null
+  totalBoxes: number
+  found: boolean
+}
+
+export function resolveLatestReceivedStockByStyle(
+  positions: Array<
+    Pick<
+      WarehouseStockPosition,
+      'styleNo' | 'locationCode' | 'receivedOn' | 'remainingBoxes' | 'isFinalLocation'
+    >
+  >,
+  styleNo: string,
+): LatestReceivedStockSummary {
+  const normalized = normalizeStyleNo(styleNo)
+  const empty: LatestReceivedStockSummary = {
+    styleNo: normalized || styleNo.trim(),
+    locationCodes: [],
+    locationLabel: null,
+    receivedOn: null,
+    totalBoxes: 0,
+    found: false,
+  }
+  if (!normalized) return empty
+
+  const matched = positions.filter(
+    (row) => normalizeStyleNo(row.styleNo) === normalized && row.receivedOn,
+  )
+  if (matched.length === 0) return empty
+
+  // 자리 코드 기준으로 묶는다. // 표시는 무시한다.
+  const byLocation = new Map<
+    string,
+    { latestReceivedOn: string; totalBoxes: number }
+  >()
+  for (const row of matched) {
+    const code = parseWarehouseLocation(row.locationCode).locationCode
+    if (!code) continue
+    const current = byLocation.get(code)
+    const boxes = row.remainingBoxes ?? 0
+    const receivedOn = row.receivedOn!
+    if (!current) {
+      byLocation.set(code, {
+        latestReceivedOn: receivedOn,
+        totalBoxes: boxes,
+      })
+      continue
+    }
+    current.totalBoxes += boxes
+    if (receivedOn > current.latestReceivedOn) {
+      current.latestReceivedOn = receivedOn
+    }
+  }
+
+  if (byLocation.size === 0) return empty
+
+  let latest = ''
+  for (const entry of byLocation.values()) {
+    if (!latest || entry.latestReceivedOn > latest) {
+      latest = entry.latestReceivedOn
+    }
+  }
+
+  const locationCodes = [...byLocation.entries()]
+    .filter(([, entry]) => entry.latestReceivedOn === latest)
+    .map(([code]) => code)
+    .sort((left, right) => left.localeCompare(right, 'ko-KR'))
+
+  const totalBoxes = locationCodes.reduce((sum, code) => {
+    return sum + (byLocation.get(code)?.totalBoxes ?? 0)
+  }, 0)
+
+  return {
+    styleNo: normalized,
+    locationCodes,
+    locationLabel: locationCodes.length > 0 ? locationCodes.join(', ') : null,
+    receivedOn: latest,
+    totalBoxes,
+    found: true,
+  }
+}
+
 export function formatWarehouseCount(value: number | null | undefined) {
   if (value == null) return '미확인'
   return String(value)

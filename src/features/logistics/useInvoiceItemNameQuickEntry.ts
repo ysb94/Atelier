@@ -226,7 +226,7 @@ export function useInvoiceItemNameQuickEntry({
       if (decision.status === 'invalid') {
         unstageRow(rowKey)
         unconfirmRow(rowKey)
-        setStageError(rowKey, '같은 구성품 M번호는 한 번만 넣을 수 있습니다.')
+        setStageError(rowKey, decision.error)
         return decision
       }
       if (decision.status === 'needs_ai') {
