@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState, type ClipboardEvent, type DragEvent } from 'react'
+import { createPortal } from 'react-dom'
 import {
   Boxes,
   CalendarDays,
@@ -10,6 +11,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { timeInvoiceWork } from '@/lib/invoice/invoice-work-perf'
 import { cn, formatNumber } from '@/lib/utils'
@@ -125,6 +127,97 @@ type CargoInboundAddPanelProps = {
   onRegister: (payload: CargoInboundRegisterPayload) => void
 }
 
+type CargoShipDateDialogProps = {
+  shipDate: string
+  onShipDateChange: (value: string) => void
+  onClose: () => void
+  onConfirm: () => void
+}
+
+/** 선적일은 화물 내용을 확인한 뒤, 실제 등록 직전에 한 번 더 확인한다. */
+function CargoShipDateDialog({
+  shipDate,
+  onShipDateChange,
+  onClose,
+  onConfirm,
+}: CargoShipDateDialogProps) {
+  return createPortal(
+    <WorkspaceTabOverlay>
+      <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+        <button
+          type="button"
+          aria-label="선적일 등록 취소"
+          className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
+          onClick={onClose}
+        />
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cargo-ship-date-title"
+          className="relative z-10 w-full max-w-sm rounded-xl border border-border bg-card shadow-lg"
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') onClose()
+          }}
+        >
+          <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
+            <div>
+              <h3
+                id="cargo-ship-date-title"
+                className="text-base font-semibold tracking-tight"
+              >
+                선적일 확인
+              </h3>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                선적이 완료된 날짜를 선택해 주세요.
+              </p>
+            </div>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              aria-label="선적일 등록 취소"
+              onClick={onClose}
+            >
+              <X className="size-4" />
+            </Button>
+          </div>
+
+          <div className="space-y-2 px-4 py-4">
+            <label
+              htmlFor="cargo-ship-date"
+              className="text-sm font-medium text-foreground"
+            >
+              선적일
+            </label>
+            <Input
+              id="cargo-ship-date"
+              type="date"
+              value={shipDate}
+              autoFocus
+              onChange={(event) => onShipDateChange(event.target.value)}
+            />
+          </div>
+
+          <div className="flex justify-end gap-2 border-t border-border px-4 py-3">
+            <Button type="button" size="sm" variant="outline" onClick={onClose}>
+              취소
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={!shipDate}
+              onClick={onConfirm}
+            >
+              선적됨에 등록
+            </Button>
+          </div>
+        </div>
+      </div>
+    </WorkspaceTabOverlay>,
+    document.body,
+  )
+}
+
 export function CargoInboundAddPanel({
   onCancel,
   onRegister,
@@ -132,6 +225,7 @@ export function CargoInboundAddPanel({
   useRenderWatch('CargoInboundAddPanel')
   const pasteBoxRef = useRef<HTMLDivElement>(null)
   const [shipDate, setShipDate] = useState(todayShipDateValue)
+  const [shipDateDialogOpen, setShipDateDialogOpen] = useState(false)
   const [rows, setRows] = useState<CargoDraftRow[]>([])
   const [pasteActive, setPasteActive] = useState(false)
   const [dragging, setDragging] = useState(false)
@@ -249,24 +343,7 @@ export function CargoInboundAddPanel({
           void handleDrop(event)
         }}
       >
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/25 px-3 py-3">
-          <label
-            className="flex shrink-0 items-center gap-2"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-xs font-medium text-muted-foreground">
-              <CalendarDays className="size-3.5" />
-              선적일
-            </span>
-            <Input
-              type="date"
-              aria-label="선적일"
-              value={shipDate}
-              onChange={(event) => setShipDate(event.target.value)}
-              className="h-8 w-[9.5rem] bg-card px-2 text-xs"
-            />
-          </label>
-
+        <div className="flex flex-wrap items-center justify-end gap-3 border-b border-border bg-muted/25 px-3 py-3">
           <div className="ml-auto flex flex-wrap items-center justify-end gap-x-3 gap-y-1 text-xs text-muted-foreground">
             {rows.length > 0 ? (
               <>
@@ -424,17 +501,25 @@ export function CargoInboundAddPanel({
             type="button"
             size="sm"
             disabled={rows.length === 0}
-            onClick={() => {
-              onRegister({
-                shipDate,
-                rows,
-              })
-            }}
+            onClick={() => setShipDateDialogOpen(true)}
           >
+            <CalendarDays className="size-3.5" />
             선적됨에 등록
           </Button>
         </div>
       </div>
+
+      {shipDateDialogOpen ? (
+        <CargoShipDateDialog
+          shipDate={shipDate}
+          onShipDateChange={setShipDate}
+          onClose={() => setShipDateDialogOpen(false)}
+          onConfirm={() => {
+            setShipDateDialogOpen(false)
+            onRegister({ shipDate, rows })
+          }}
+        />
+      ) : null}
     </div>
   )
 }

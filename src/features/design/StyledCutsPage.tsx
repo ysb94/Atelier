@@ -28,6 +28,7 @@ import {
 import { Input, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn } from '@/lib/utils'
+import { StyledStudio } from './StyledStudio'
 
 import {
   PRODUCT_PHOTO_MIN,
@@ -248,6 +249,19 @@ function LabeledUploadSlot({
 
 export function DesignStyledCutsPage() {
   useRenderWatch('DesignStyledCutsPage')
+  const [view, setView] = useState<'studio' | 'prompt'>('studio')
+  return <div className="space-y-4">
+    <div className="flex gap-2">
+      <ChoiceChip selected={view === 'studio'} onClick={() => setView('studio')}>연출컷 스튜디오</ChoiceChip>
+      <ChoiceChip selected={view === 'prompt'} onClick={() => setView('prompt')}>기존 프롬프트 도구</ChoiceChip>
+    </div>
+    <div hidden={view !== 'studio'}><StyledStudio /></div>
+    <div hidden={view !== 'prompt'}><StyledCutsPromptForm /></div>
+  </div>
+}
+
+function StyledCutsPromptForm() {
+  useRenderWatch('StyledCutsPromptForm')
   const formId = useId()
   const referenceInputRef = useRef<HTMLInputElement>(null)
 
