@@ -44,6 +44,7 @@
     "verify:invoice-order-key": "node scripts/verify-invoice-order-key.mjs",
     "verify:styled-cuts": "node --experimental-strip-types scripts/verify-styled-cuts.mjs",
     "verify:styled-image": "node --experimental-strip-types scripts/verify-styled-image.mjs",
+    "verify:styled-image-jobs": "node --experimental-strip-types scripts/verify-styled-image-jobs.mjs",
     "verify:styled-image-deployment": "node scripts/verify-styled-image-deployment.mjs",
     "verify:diagnostics": "node scripts/verify-diagnostics.mjs",
     "verify:company-capabilities": "npx tsx src/lib/company/capabilities.verify.ts",

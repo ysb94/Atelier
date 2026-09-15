@@ -48,7 +48,7 @@ function withMembers(groups: readonly CompanyNavGroup[], showMembers: boolean) {
 }
 
 function pageLayoutFor(pathname: string) {
-  if (pathname.includes('/design/file-manager')) return 'full' as const
+  if (pathname.includes('/design/file-manager') || pathname.includes('/design/styled-cuts')) return 'full' as const
   if (
     pathname.includes('/logistics/invoices') ||
     pathname.includes('/logistics/barcode-outbound-data-entry') ||

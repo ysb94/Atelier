@@ -1,3 +1,4 @@
+import type { StudioImageJob } from './styled-image-job.ts'
 // Shared by the browser, Edge Function and contract tests. No credentials here.
 export const STYLED_IMAGE_MODELS = [
   { id: 'gpt-image-2', label: 'GPT Image 2', provider: 'openai' },
@@ -63,10 +64,11 @@ export type StyledDirectorAvailability = { modelId: string; label: string; avail
 export type StudioCatalog = { models: StyledImageAvailability[]; directors: StyledDirectorAvailability[] }
 export type StudioImageApi = {
   models: () => Promise<StudioCatalog>
-  generate: (request: StyledImageRequest) => Promise<StyledImageResult>
+  generate: (request: StyledImageRequest, onProgress?: (message: string) => void) => Promise<StyledImageResult>
+  resume?: (job: StudioImageJob, onProgress?: (message: string) => void) => Promise<StyledImageResult>
   direct: (request: StyledImageRequest) => Promise<DirectorPlan>
 }
-export type DirectorPlan = { summary: string; prompt: string; question: string }
+export type DirectorPlan = { outputProductIds?: string[]; summary: string; prompt: string; question: string }
 
 export function imageModel(id: unknown) {
   const model = STYLED_IMAGE_MODELS.find((item) => item.id === id)
@@ -133,10 +135,10 @@ export function geminiImageBody(request: StyledImageRequest) {
     model: request.modelId,
     input: [
       { type: 'text', text: request.prompt },
-      ...request.images.flatMap((item, index) => {
+      ...request.images.flatMap((item) => {
         const { mime, base64 } = imageData(item.data)
         return [
-          { type: 'text', text: `사진 ${index + 1}: ${item.role} · ${item.name}` },
+          { type: 'text', text: `${item.name}: ${item.role}` },
           { type: 'image', mime_type: mime, data: base64 },
         ]
       }),

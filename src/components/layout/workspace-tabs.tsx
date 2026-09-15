@@ -124,6 +124,10 @@ function isFileManagerTabId(id: string) {
   return id === 'design/file-manager'
 }
 
+function isFillHeightTabId(id: string) {
+  return isFileManagerTabId(id) || id === 'design/styled-cuts'
+}
+
 function labelFromPath(path: string): string {
   const normalized = stripDetailPath(path)
   for (const entry of NAV_LABELS) {
@@ -330,7 +334,7 @@ const WorkspaceTabPanel = memo(function WorkspaceTabPanel({
         hidden={!active}
         className={cn(
           active ? undefined : 'hidden',
-          isFileManagerTabId(tab.id) && active && 'h-full min-h-0',
+          isFillHeightTabId(tab.id) && active && 'h-full min-h-0',
         )}
       >
         <Routes location={toTabLocation(tab)}>

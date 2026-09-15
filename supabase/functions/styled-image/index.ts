@@ -1,3 +1,4 @@
+import { createImageJob, readImageJob, openAiBackgroundImageBody, readBackgroundImage } from '../_shared/styled-image-job.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.2'
 import { corsHeaders } from '../_shared/cors.ts'
 import { directorBody, parseDirectorPlan } from '../_shared/styled-director.ts'
@@ -112,7 +113,16 @@ Deno.serve(async (req) => {
       ])
       return json({ ok: true, models, directors })
     }
-    if (body.action !== 'generate' && body.action !== 'direct') return json({ ok: false, error: '지원하지 않는 요청입니다.' }, 400)
+    if (body.action === 'image-status') {
+      const key = Deno.env.get('OPENAI_API_KEY')?.trim() ?? ''
+      const claims = await readImageJob(body.token, userId, key)
+      modelId = claims.modelId
+      const payload = await providerJson(`https://api.openai.com/v1/responses/${claims.id}`, { headers: { Authorization: `Bearer ${key}` } }, 30_000)
+      const result = readBackgroundImage(payload, { token: body.token, modelId: claims.modelId, startedAt: claims.startedAt })
+      console.info('[styled-image] 작업 상태', { userId, modelId, status: result.status, latencyMs: Date.now() - claims.startedAt })
+      return json({ ok: true, ...result })
+    }
+    if (body.action !== 'generate' && body.action !== 'direct' && body.action !== 'image-start') return json({ ok: false, error: '지원하지 않는 요청입니다.' }, 400)
     const request = validateImageRequest(body)
     if (body.action === 'direct') {
       modelId = directorModel(request.directorModelId).id
@@ -125,6 +135,17 @@ Deno.serve(async (req) => {
       const plan = parseDirectorPlan(payload)
       console.info('[styled-image] 디렉터 완료', { userId, modelId, latencyMs: Date.now() - started, clarification: !!plan.question })
       return json({ ok: true, plan })
+    }
+    if (body.action === 'image-start') {
+      modelId = request.modelId
+      const key = Deno.env.get('OPENAI_API_KEY')?.trim() ?? ''
+      if (!key) throw new Error('OpenAI API 키가 등록되지 않았습니다.')
+      const payload = await providerJson('https://api.openai.com/v1/responses', {
+        method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(openAiBackgroundImageBody(request)),
+      }, 60_000)
+      const job = await createImageJob(payload.id, userId, request.modelId, key, started)
+      console.info('[styled-image] 비동기 생성 접수', { userId, modelId, latencyMs: Date.now() - started })
+      return json({ ok: true, ...readBackgroundImage(payload, job) })
     }
     modelId = request.modelId
     const model = imageModel(modelId)

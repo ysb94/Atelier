@@ -1,10 +1,12 @@
 import type { DirectorPlan, ImageSettings } from '../../../supabase/functions/_shared/styled-image-core'
 import { buildStyledCutsPrompt, createInitialForm, type FormState, type ImageSlot, type ProductPhotoKey, type ExplorationKey } from './styled-cuts'
 
-export type StudioAsset = { id: string; name: string; type: string; data: string }
+export type StudioProduct = { id: string; name: string; width: string; height: string; depth: string; unit: 'cm' | 'mm'; material: string; basis: string; state: string }
+export type StudioAsset = { id: string; name: string; type: string; data: string; photoNo?: number; productIds?: string[]; note?: string }
 export type StudioWorkflow = 'preserve' | 'explore'
 // Records without modelId are legacy UI rehearsals, not generated results.
 export type StudioPreviewTurn = {
+  productSnapshot?: StudioProduct[]
   imageRoles?: string[]
   id: string; request: string; action: 'create' | 'background' | 'angle' | 'detail'
   assetIds: string[]; versionIds: string[]; parentId?: string
@@ -13,6 +15,7 @@ export type StudioPreviewTurn = {
   modelId?: string; status?: 'generating' | 'complete' | 'failed'; error?: string
 }
 export type StudioVersion = {
+  productSnapshot?: StudioProduct[]
   id: string; title: string; parentId?: string; created: string; request: string
   prompt: string; assetIds: string[]; resultId?: string; favorite: boolean
   workflow?: StudioWorkflow
@@ -23,6 +26,8 @@ export type StudioVersion = {
   productInfo?: string
 }
 export type StudioState = {
+  nextPhotoNumber?: number
+  products?: Record<string, StudioProduct>
   editInputs?: Record<string, Record<string, string>>
   schema: 1; form: FormState; assets: Record<string, StudioAsset>
   product: Partial<Record<ProductPhotoKey, string>>

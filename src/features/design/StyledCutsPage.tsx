@@ -251,13 +251,13 @@ function LabeledUploadSlot({
 export function DesignStyledCutsPage() {
   useRenderWatch('DesignStyledCutsPage')
   const [view, setView] = useState<'studio' | 'prompt'>('studio')
-  return <div className="space-y-4">
-    <div className="flex gap-2">
+  return <div className={cn('cs-cuts-page h-full min-h-0', view === 'studio' && 'is-studio')}>
+    <div className="flex gap-2 cs-cuts-switch">
       <ChoiceChip selected={view === 'studio'} onClick={() => setView('studio')}>연출컷 스튜디오</ChoiceChip>
       <ChoiceChip selected={view === 'prompt'} onClick={() => setView('prompt')}>기존 프롬프트 도구</ChoiceChip>
     </div>
-    <div hidden={view !== 'studio'}><StyledStudio api={studioImageApi} /></div>
-    <div hidden={view !== 'prompt'}><StyledCutsPromptForm /></div>
+    <div hidden={view !== 'studio'} className="cs-cuts-studio"><StyledStudio api={studioImageApi} /></div>
+    <div hidden={view !== 'prompt'} className="cs-cuts-prompt"><StyledCutsPromptForm /></div>
   </div>
 }
 
