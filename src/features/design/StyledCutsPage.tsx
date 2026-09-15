@@ -1,3 +1,4 @@
+import { studioImageApi } from '../../lib/supabase/styled-image'
 import {
   useEffect,
   useId,
@@ -255,7 +256,7 @@ export function DesignStyledCutsPage() {
       <ChoiceChip selected={view === 'studio'} onClick={() => setView('studio')}>연출컷 스튜디오</ChoiceChip>
       <ChoiceChip selected={view === 'prompt'} onClick={() => setView('prompt')}>기존 프롬프트 도구</ChoiceChip>
     </div>
-    <div hidden={view !== 'studio'}><StyledStudio /></div>
+    <div hidden={view !== 'studio'}><StyledStudio api={studioImageApi} /></div>
     <div hidden={view !== 'prompt'}><StyledCutsPromptForm /></div>
   </div>
 }

@@ -1,20 +1,29 @@
+import type { DirectorPlan, ImageSettings } from '../../../supabase/functions/_shared/styled-image-core'
 import { buildStyledCutsPrompt, createInitialForm, type FormState, type ImageSlot, type ProductPhotoKey, type ExplorationKey } from './styled-cuts'
 
 export type StudioAsset = { id: string; name: string; type: string; data: string }
 export type StudioWorkflow = 'preserve' | 'explore'
-// UI rehearsal only. These records never represent an AI call or image analysis.
+// Records without modelId are legacy UI rehearsals, not generated results.
 export type StudioPreviewTurn = {
+  imageRoles?: string[]
   id: string; request: string; action: 'create' | 'background' | 'angle' | 'detail'
   assetIds: string[]; versionIds: string[]; parentId?: string
   productName: string; material: string; dimensions: string; ratio: string
+  director?: DirectorPlan; settings?: ImageSettings
+  modelId?: string; status?: 'generating' | 'complete' | 'failed'; error?: string
 }
 export type StudioVersion = {
   id: string; title: string; parentId?: string; created: string; request: string
   prompt: string; assetIds: string[]; resultId?: string; favorite: boolean
   workflow?: StudioWorkflow
   previewOnly?: boolean
+  director?: DirectorPlan; settings?: ImageSettings
+  modelId?: string
+  inputRoles?: Record<string, string>
+  productInfo?: string
 }
 export type StudioState = {
+  editInputs?: Record<string, Record<string, string>>
   schema: 1; form: FormState; assets: Record<string, StudioAsset>
   product: Partial<Record<ProductPhotoKey, string>>
   references: Partial<Record<ExplorationKey, string[]>>
