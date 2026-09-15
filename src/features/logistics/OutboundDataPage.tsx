@@ -14,8 +14,16 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input, Select } from '@/components/ui/input'
-import { getCodeUsageTargets, getOutboundShipments } from '@/lib/api'
+import {
+  getCodeUsageTargetFolders,
+  getCodeUsageTargets,
+  getOutboundShipments,
+} from '@/lib/api'
 import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
+import {
+  chartGroupSeriesId,
+  groupPartnersForOutboundChart,
+} from '@/lib/outbound/partner-outbound-chart'
 import {
   buildProductOutboundSummary,
   demoEconomicsForStyle,
@@ -35,7 +43,7 @@ import {
   type ProductOutboundShipment,
   type ProductOutboundSummary,
 } from '@/lib/outbound/product-outbound'
-import type { CodeUsageTarget } from '@/lib/types'
+import type { CodeUsageTarget, CodeUsageTargetFolder } from '@/lib/types'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber, emptyList } from '@/lib/utils'
 
@@ -149,21 +157,41 @@ function PartnerOutboundChart({
   partners,
   shipments,
   dates,
+  targets,
+  folders,
 }: {
   partners: ProductOutboundPartnerTotal[]
   shipments: ProductOutboundShipment[]
   dates: string[]
+  targets: CodeUsageTarget[]
+  folders: CodeUsageTargetFolder[]
 }) {
+  const grouped = useMemo(
+    () => groupPartnersForOutboundChart(partners, targets, folders),
+    [folders, partners, targets],
+  )
   const [enabledIds, setEnabledIds] = useState(
     () =>
-      new Set([TOTAL_LINE_ID, ...partners.map((partner) => partner.partnerId)]),
+      new Set([
+        TOTAL_LINE_ID,
+        ...grouped.companies.map((company) => chartGroupSeriesId(company.key)),
+        ...partners.map((partner) => partner.partnerId),
+      ]),
   )
+  const [openFolderKey, setOpenFolderKey] = useState<string | null>(null)
+  const [openCompanyKey, setOpenCompanyKey] = useState<string | null>(null)
 
   useEffect(() => {
     setEnabledIds(
-      new Set([TOTAL_LINE_ID, ...partners.map((partner) => partner.partnerId)]),
+      new Set([
+        TOTAL_LINE_ID,
+        ...grouped.companies.map((company) => chartGroupSeriesId(company.key)),
+        ...partners.map((partner) => partner.partnerId),
+      ]),
     )
-  }, [partners])
+    setOpenFolderKey(null)
+    setOpenCompanyKey(null)
+  }, [grouped.companies, partners])
 
   const seriesByPartner = useMemo(() => {
     const map = new Map<string, Map<string, number>>()
@@ -188,32 +216,94 @@ function PartnerOutboundChart({
     return [...set].sort()
   }, [dates, shipments])
 
-  const totalByDate = useMemo(() => {
+  const openFolder = grouped.folders.find((item) => item.key === openFolderKey)
+  const visibleCompanies = openFolder ? openFolder.companies : grouped.companies
+  const openCompany =
+    visibleCompanies.find((item) => item.key === openCompanyKey) ??
+    grouped.companies.find((item) => item.key === openCompanyKey)
+  const showFolderFilters = grouped.folders.length > 1
+  const companyColorIndex = useMemo(() => {
     const map = new Map<string, number>()
-    for (const row of shipments) {
-      map.set(row.shippedOn, (map.get(row.shippedOn) ?? 0) + row.quantity)
+    grouped.companies.forEach((company, index) => map.set(company.key, index))
+    return map
+  }, [grouped.companies])
+  const partnerColorIndex = useMemo(() => {
+    const map = new Map<string, number>()
+    partners.forEach((partner, index) => map.set(partner.partnerId, index))
+    return map
+  }, [partners])
+
+  function sumByDate(partnerIds: readonly string[]) {
+    const map = new Map<string, number>()
+    for (const partnerId of partnerIds) {
+      const byDate = seriesByPartner.get(partnerId)
+      if (!byDate) continue
+      for (const [date, qty] of byDate) {
+        map.set(date, (map.get(date) ?? 0) + qty)
+      }
     }
     return map
-  }, [shipments])
+  }
+
+  const scopedPartnerIds = useMemo(() => {
+    if (openCompany) return openCompany.units.map((unit) => unit.partnerId)
+    if (openFolder) {
+      return openFolder.companies.flatMap((company) =>
+        company.units.map((unit) => unit.partnerId),
+      )
+    }
+    return partners.map((partner) => partner.partnerId)
+  }, [openCompany, openFolder, partners])
+
+  const totalByDate = useMemo(
+    () => sumByDate(scopedPartnerIds),
+    [scopedPartnerIds, seriesByPartner],
+  )
 
   const totalQuantity = useMemo(() => {
     let sum = 0
-    for (const partner of partners) sum += partner.quantity
+    for (const dateQty of totalByDate.values()) sum += dateQty
     return sum
-  }, [partners])
+  }, [totalByDate])
 
-  const totalEnabled = enabledIds.has(TOTAL_LINE_ID)
-  const enabledPartners = partners.filter((partner) =>
-    enabledIds.has(partner.partnerId),
+  const companySeries = useMemo(
+    () =>
+      visibleCompanies.map((company) => ({
+        company,
+        byDate: sumByDate(company.units.map((unit) => unit.partnerId)),
+      })),
+    [seriesByPartner, visibleCompanies],
   )
 
+  const visibleLines = openCompany
+    ? openCompany.units
+        .filter((unit) => enabledIds.has(unit.partnerId))
+        .map((unit) => ({
+          id: unit.partnerId,
+          label: unit.siteLabel,
+          color: partnerLineColor(partnerColorIndex.get(unit.partnerId) ?? 0),
+          byDate: seriesByPartner.get(unit.partnerId) ?? new Map<string, number>(),
+        }))
+    : companySeries
+        .filter((item) => enabledIds.has(chartGroupSeriesId(item.company.key)))
+        .map((item) => ({
+          id: chartGroupSeriesId(item.company.key),
+          label: item.company.label,
+          color: partnerLineColor(companyColorIndex.get(item.company.key) ?? 0),
+          byDate: item.byDate,
+        }))
+
+  const totalEnabled = enabledIds.has(TOTAL_LINE_ID)
   const maxQty = useMemo(() => {
     let max = 0
     for (const date of chartDates) {
-      max = Math.max(max, totalByDate.get(date) ?? 0)
+      if (totalEnabled) max = Math.max(max, totalByDate.get(date) ?? 0)
+      for (const line of visibleLines) {
+        max = Math.max(max, line.byDate.get(date) ?? 0)
+      }
     }
     return max
-  }, [chartDates, totalByDate])
+  }, [chartDates, totalByDate, totalEnabled, visibleLines])
 
   const yMax = Math.max(1, Math.ceil(maxQty * 1.1))
   const width = 640
@@ -237,10 +327,29 @@ function PartnerOutboundChart({
   function toggleSeries(seriesId: string) {
     setEnabledIds((prev) => {
       const next = new Set(prev)
-      if (next.has(seriesId)) next.delete(seriesId)
-      else next.add(seriesId)
+      const company = grouped.companies.find(
+        (item) => chartGroupSeriesId(item.key) === seriesId,
+      )
+      const turningOn = !next.has(seriesId)
+      if (turningOn) next.add(seriesId)
+      else next.delete(seriesId)
+      if (company) {
+        for (const unit of company.units) {
+          if (turningOn) next.add(unit.partnerId)
+          else next.delete(unit.partnerId)
+        }
+      }
       return next
     })
+  }
+
+  function selectFolder(folderKey: string | null) {
+    setOpenFolderKey((current) => (current === folderKey ? null : folderKey))
+    setOpenCompanyKey(null)
+  }
+
+  function selectCompany(companyKey: string) {
+    setOpenCompanyKey((current) => (current === companyKey ? null : companyKey))
   }
 
   if (partners.length === 0 || chartDates.length === 0) {
@@ -253,7 +362,7 @@ function PartnerOutboundChart({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+      <div className="space-y-2">
         <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs">
           <input
             type="checkbox"
@@ -272,45 +381,172 @@ function PartnerOutboundChart({
               !totalEnabled && 'text-muted-foreground line-through',
             )}
           >
-            총합
+            {openCompany
+              ? `${openCompany.label} 합계`
+              : openFolder
+                ? `${openFolder.label} 합계`
+                : '총합'}
           </span>
           <span className="tabular-nums text-muted-foreground">
             ({formatNumber(totalQuantity)})
           </span>
         </label>
-        {partners.map((partner, index) => {
-          const color = partnerLineColor(index)
-          const checked = enabledIds.has(partner.partnerId)
-          return (
-            <label
-              key={partner.partnerId}
-              className="inline-flex cursor-pointer items-center gap-1.5 text-xs"
-            >
-              <input
-                type="checkbox"
-                checked={checked}
-                onChange={() => toggleSeries(partner.partnerId)}
-                className="size-3.5 rounded border-border"
-              />
-              <span
-                className="size-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: color }}
-                aria-hidden
-              />
-              <span
+
+        {showFolderFilters ? (
+          <div>
+            <p className="mb-1 text-[10px] font-medium text-muted-foreground">
+              상위 분류
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                aria-pressed={openFolderKey === null}
+                onClick={() => selectFolder(null)}
                 className={cn(
-                  'text-foreground',
-                  !checked && 'text-muted-foreground line-through',
+                  'rounded-full border px-2.5 py-1 text-xs',
+                  openFolderKey === null
+                    ? 'border-primary/40 bg-primary/10 text-foreground'
+                    : 'border-border text-muted-foreground hover:bg-muted/40',
                 )}
               >
-                {partner.partnerName}
-              </span>
-              <span className="tabular-nums text-muted-foreground">
-                ({formatNumber(partner.quantity)})
-              </span>
-            </label>
-          )
-        })}
+                전체
+              </button>
+              {grouped.folders.map((folder) => (
+                <button
+                  key={folder.key}
+                  type="button"
+                  aria-pressed={openFolderKey === folder.key}
+                  onClick={() => selectFolder(folder.key)}
+                  className={cn(
+                    'rounded-full border px-2.5 py-1 text-xs',
+                    openFolderKey === folder.key
+                      ? 'border-primary/40 bg-primary/10 text-foreground'
+                      : 'border-border text-muted-foreground hover:bg-muted/40',
+                  )}
+                >
+                  {folder.label}
+                  <span className="ml-1 tabular-nums">
+                    ({formatNumber(folder.quantity)})
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
+
+        <div>
+          <p className="mb-1 text-[10px] font-medium text-muted-foreground">
+            업체
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {visibleCompanies.map((company) => {
+              const seriesId = chartGroupSeriesId(company.key)
+              const checked = enabledIds.has(seriesId)
+              const opened = openCompanyKey === company.key
+              const color = partnerLineColor(
+                companyColorIndex.get(company.key) ?? 0,
+              )
+              return (
+                <div
+                  key={company.key}
+                  className={cn(
+                    'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs',
+                    opened
+                      ? 'border-primary/40 bg-primary/10'
+                      : 'border-border bg-background',
+                  )}
+                >
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    onChange={() => toggleSeries(seriesId)}
+                    className="size-3.5 rounded border-border"
+                    aria-label={`${company.label} 선 표시`}
+                  />
+                  <button
+                    type="button"
+                    aria-expanded={opened}
+                    onClick={() => selectCompany(company.key)}
+                    className={cn(
+                      'inline-flex items-center gap-1',
+                      !checked && 'text-muted-foreground',
+                    )}
+                  >
+                    <span
+                      className="size-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: color }}
+                      aria-hidden
+                    />
+                    <span className={cn(!checked && 'line-through')}>
+                      {company.label}
+                    </span>
+                    <span className="tabular-nums text-muted-foreground">
+                      ({formatNumber(company.quantity)})
+                    </span>
+                    {company.units.length > 1 ? (
+                      <ChevronRight
+                        className={cn(
+                          'size-3 text-muted-foreground transition-transform',
+                          opened && 'rotate-90',
+                        )}
+                        aria-hidden
+                      />
+                    ) : null}
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+
+        {openCompany ? (
+          <div>
+            <p className="mb-1 text-[10px] font-medium text-muted-foreground">
+              {openCompany.label} 지점
+            </p>
+            <div className="flex flex-wrap gap-x-3 gap-y-1.5">
+              {openCompany.units.map((unit) => {
+                const checked = enabledIds.has(unit.partnerId)
+                const color = partnerLineColor(
+                  partnerColorIndex.get(unit.partnerId) ?? 0,
+                )
+                return (
+                  <label
+                    key={unit.partnerId}
+                    className="inline-flex cursor-pointer items-center gap-1.5 text-xs"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleSeries(unit.partnerId)}
+                      className="size-3.5 rounded border-border"
+                    />
+                    <span
+                      className="size-2.5 shrink-0 rounded-full"
+                      style={{ backgroundColor: color }}
+                      aria-hidden
+                    />
+                    <span
+                      className={cn(
+                        'text-foreground',
+                        !checked && 'text-muted-foreground line-through',
+                      )}
+                    >
+                      {unit.siteLabel}
+                    </span>
+                    <span className="tabular-nums text-muted-foreground">
+                      ({formatNumber(unit.quantity)})
+                    </span>
+                  </label>
+                )
+              })}
+            </div>
+          </div>
+        ) : (
+          <p className="text-[10px] text-muted-foreground">
+            업체를 누르면 지점별로 볼 수 있습니다.
+          </p>
+        )}
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-border bg-muted/10 px-1 py-2">
@@ -382,38 +618,34 @@ function PartnerOutboundChart({
             )
           })}
 
-          {partners.map((partner, partnerIndex) => {
-            if (!enabledIds.has(partner.partnerId)) return null
-            const byDate = seriesByPartner.get(partner.partnerId)
-            const color = partnerLineColor(partnerIndex)
+          {visibleLines.map((line) => {
             const points = chartDates.map((date, index) => {
-              const qty = byDate?.get(date) ?? 0
+              const qty = line.byDate.get(date) ?? 0
               return `${xAt(index)},${yAt(qty)}`
             })
             return (
-              <g key={partner.partnerId}>
+              <g key={line.id}>
                 <polyline
                   fill="none"
-                  stroke={color}
+                  stroke={line.color}
                   strokeWidth={2}
                   strokeLinejoin="round"
                   strokeLinecap="round"
                   points={points.join(' ')}
                 />
                 {chartDates.map((date, index) => {
-                  const qty = byDate?.get(date) ?? 0
+                  const qty = line.byDate.get(date) ?? 0
                   if (qty <= 0) return null
                   return (
                     <circle
-                      key={`${partner.partnerId}-${date}`}
+                      key={`${line.id}-${date}`}
                       cx={xAt(index)}
                       cy={yAt(qty)}
                       r={3}
-                      fill={color}
+                      fill={line.color}
                     >
                       <title>
-                        {partner.partnerName} · {date} ·{' '}
-                        {formatNumber(qty)}
+                        {line.label} · {date} · {formatNumber(qty)}
                       </title>
                     </circle>
                   )
@@ -449,7 +681,12 @@ function PartnerOutboundChart({
                     fill={TOTAL_LINE_COLOR}
                   >
                     <title>
-                      총합 · {date} · {formatNumber(qty)}
+                      {openCompany
+                        ? `${openCompany.label} 합계`
+                        : openFolder
+                          ? `${openFolder.label} 합계`
+                          : '총합'}{' '}
+                      · {date} · {formatNumber(qty)}
                     </title>
                   </circle>
                 )
@@ -459,7 +696,7 @@ function PartnerOutboundChart({
         </svg>
       </div>
 
-      {!totalEnabled && enabledPartners.length === 0 ? (
+      {!totalEnabled && visibleLines.length === 0 ? (
         <p className="text-center text-xs text-muted-foreground">
           표시할 선을 체크하세요.
         </p>
@@ -474,6 +711,8 @@ function ProductDetailDialog({
   style,
   finance,
   dates,
+  targets,
+  folders,
   onClose,
 }: {
   mode: 'outbound' | 'profit'
@@ -481,6 +720,8 @@ function ProductDetailDialog({
   style: OutboundStyleRow
   finance: ReturnType<typeof summarizeOutboundFinance> | null
   dates: string[]
+  targets: CodeUsageTarget[]
+  folders: CodeUsageTargetFolder[]
   onClose: () => void
 }) {
   return (
@@ -573,6 +814,8 @@ function ProductDetailDialog({
             partners={summary.partners}
             shipments={summary.shipments}
             dates={dates}
+            targets={targets}
+            folders={folders}
           />
         </div>
       </div>
@@ -858,6 +1101,12 @@ export function OutboundDataPage() {
     queryKey: ['codeUsageTargets', brand.id],
     queryFn: () => getCodeUsageTargets(brand.id),
   })
+  const foldersQuery = useQuery({
+    queryKey: ['codeUsageTargetFolders', brand.id],
+    queryFn: () => getCodeUsageTargetFolders(brand.id),
+  })
+  const partnerTargets = partnersQuery.data ?? emptyList()
+  const partnerFolders = foldersQuery.data ?? emptyList()
 
   const filteredShipments = useMemo(
     () =>
@@ -1007,7 +1256,7 @@ export function OutboundDataPage() {
     dateFrom,
     dateTo,
     partnerFilter,
-    partners: partnersQuery.data ?? [],
+    partners: partnerTargets,
     extraPartners: partnerFinance,
     search,
     onlyShipped,
@@ -1205,6 +1454,8 @@ export function OutboundDataPage() {
               style={selectedStyle}
               finance={null}
               dates={dateColumns}
+              targets={partnerTargets}
+              folders={partnerFolders}
               onClose={() => setSelectedStyleId(null)}
             />
           ) : null}
@@ -1335,6 +1586,8 @@ export function OutboundDataPage() {
               style={selectedStyle}
               finance={selectedFinance}
               dates={dateColumns}
+              targets={partnerTargets}
+              folders={partnerFolders}
               onClose={() => setSelectedStyleId(null)}
             />
           ) : null}
