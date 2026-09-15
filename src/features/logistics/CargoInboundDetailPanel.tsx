@@ -10,6 +10,7 @@ import { formatNumber } from '@/lib/utils'
 
 export type CargoInboundDetailItem = {
   id: string
+  brandId: string
   stage: 'shipped' | 'scheduled' | 'done'
   brandName: string
   shipmentNo: string
@@ -110,7 +111,10 @@ export function CargoInboundDetailPanel({
 
         {item.stage === 'scheduled' || item.stage === 'done' ? (
           <div className="flex flex-wrap gap-2">
-            <CargoStockCheckButton lines={item.lines} />
+            <CargoStockCheckButton
+              brandId={item.brandId}
+              lines={item.lines}
+            />
           </div>
         ) : null}
       </div>

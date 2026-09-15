@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useQueries } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { PackageSearch, Printer, X } from 'lucide-react'
-import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -10,18 +9,16 @@ import type { CargoDraftRow } from '@/features/logistics/CargoInboundAddPanel'
 import {
   getActiveWarehouseInventorySet,
   getWarehouseStockPositions,
+  listStyleRefsByStyleNos,
 } from '@/lib/api'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { normalizeStyleNo } from '@/lib/import/transform'
-import {
-  combineListQueries,
-  flattenListQueries,
-} from '@/lib/query/list-queries'
-import type { WarehouseStockPosition } from '@/lib/types'
-import { formatNumber } from '@/lib/utils'
+import type { StyleRef, WarehouseStockPosition } from '@/lib/types'
+import { emptyList, formatNumber } from '@/lib/utils'
 import { resolveLatestReceivedStockByStyle } from '@/lib/warehouse/stock'
 
 type CargoStockCheckDialogProps = {
+  brandId: string
   lines: CargoDraftRow[]
   onClose: () => void
 }
@@ -32,6 +29,7 @@ const PRINT_CLASS = 'printing-cargo-stock-check'
 const PRINT_STYLE_ID = 'cargo-stock-check-print-style'
 /** 이 수 이상이면 A4 가로로 뽑는다. */
 const LANDSCAPE_PRINT_MIN_ROWS = 16
+const EMPTY_STYLE_REFS = new Map<string, StyleRef>()
 
 function formatReceivedOn(value: string | null) {
   if (!value) return '-'
@@ -109,11 +107,11 @@ function clearCargoStockCheckPrintMode() {
 }
 
 export function CargoStockCheckDialog({
+  brandId,
   lines,
   onClose,
 }: CargoStockCheckDialogProps) {
   useRenderWatch('CargoStockCheckDialog')
-  const { brands } = useCompanyBrandScope()
   const [openedAt] = useState(() => Date.now())
   const [printOrientation, setPrintOrientation] =
     useState<CargoStockPrintOrientation>('auto')
@@ -127,33 +125,46 @@ export function CargoStockCheckDialog({
     }
   }, [])
 
-  const stockQueries = useQueries({
-    queries: brands.map((brand) => ({
-      queryKey: ['cargo-inbound-stock-check', brand.id, openedAt],
-      queryFn: async (): Promise<WarehouseStockPosition[]> => {
-        const activeSet = await getActiveWarehouseInventorySet(brand.id)
-        if (!activeSet) return []
-        return getWarehouseStockPositions(brand.id, activeSet.id)
-      },
-    })),
-    combine: combineListQueries<WarehouseStockPosition>,
-  })
-
-  const positions = useMemo(
-    () => flattenListQueries(stockQueries),
-    [stockQueries],
+  const styleNos = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          lines
+            .map((line) => normalizeStyleNo(line.styleNo.trim()))
+            .filter(Boolean),
+        ),
+      ),
+    [lines],
   )
+  const styleRefsQuery = useQuery({
+    queryKey: ['cargo-inbound-stock-check-styles', brandId, styleNos],
+    queryFn: () => listStyleRefsByStyleNos(brandId, styleNos),
+    enabled: Boolean(brandId) && styleNos.length > 0,
+  })
+  const stockQuery = useQuery({
+    queryKey: ['cargo-inbound-stock-check', brandId, openedAt],
+    queryFn: async (): Promise<WarehouseStockPosition[]> => {
+      const activeSet = await getActiveWarehouseInventorySet(brandId)
+      if (!activeSet) return []
+      return getWarehouseStockPositions(brandId, activeSet.id)
+    },
+    enabled: Boolean(brandId),
+  })
+  const styleRefs = styleRefsQuery.data ?? EMPTY_STYLE_REFS
+  const positions = stockQuery.data ?? emptyList<WarehouseStockPosition>()
 
   const rows = useMemo(() => {
     return lines
       .map((line, index) => {
         const styleNo = line.styleNo.trim()
+        const normalizedStyleNo = normalizeStyleNo(styleNo)
+        const styleRef = styleRefs.get(normalizedStyleNo)
         const stock = resolveLatestReceivedStockByStyle(positions, styleNo)
         return {
           key: `${styleNo || 'empty'}-${index}`,
           no: line.no || String(index + 1),
-          name: line.name.trim() || '-',
-          styleNo: normalizeStyleNo(styleNo) || styleNo || '-',
+          name: styleRef?.name.trim() || '-',
+          styleNo: normalizedStyleNo || styleNo || '-',
           stock,
         }
       })
@@ -169,7 +180,7 @@ export function CargoStockCheckDialog({
         if (byLocation !== 0) return byLocation
         return left.styleNo.localeCompare(right.styleNo, 'ko-KR')
       })
-  }, [lines, positions])
+  }, [lines, positions, styleRefs])
 
   const printRows = useMemo(
     () => rows.filter((row) => row.stock.found),
@@ -230,14 +241,19 @@ export function CargoStockCheckDialog({
             <Badge variant={foundCount > 0 ? 'success' : 'muted'}>
               재고 확인 {formatNumber(foundCount)}
             </Badge>
-            {stockQueries.loading ? (
+            {stockQuery.isLoading || styleRefsQuery.isLoading ? (
               <span className="text-xs text-muted-foreground">
-                창고 불러오는 중...
+                상품 DB와 창고 불러오는 중...
               </span>
             ) : null}
-            {stockQueries.errorIndexes.length > 0 ? (
+            {styleRefsQuery.isError ? (
               <span className="text-xs text-danger">
-                일부 브랜드 창고를 불러오지 못했습니다.
+                상품 DB를 불러오지 못했습니다.
+              </span>
+            ) : null}
+            {stockQuery.isError ? (
+              <span className="text-xs text-danger">
+                창고를 불러오지 못했습니다.
               </span>
             ) : null}
           </div>
@@ -370,8 +386,10 @@ export function CargoStockCheckDialog({
 }
 
 export function CargoStockCheckButton({
+  brandId,
   lines,
 }: {
+  brandId: string
   lines: CargoDraftRow[]
 }) {
   const [open, setOpen] = useState(false)
@@ -387,7 +405,11 @@ export function CargoStockCheckButton({
         재고 파악
       </Button>
       {open ? (
-        <CargoStockCheckDialog lines={lines} onClose={() => setOpen(false)} />
+        <CargoStockCheckDialog
+          brandId={brandId}
+          lines={lines}
+          onClose={() => setOpen(false)}
+        />
       ) : null}
     </>
   )
