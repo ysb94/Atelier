@@ -54,7 +54,8 @@
     "verify:sample-work-order": "npx tsx src/lib/drafts/sample-work-order.verify.ts",
     "verify:company-row-key": "npx tsx src/lib/workspace/company-row-key.verify.ts",
     "verify:file-manager-brand": "npx tsx src/lib/design/file-manager-brand.verify.ts",
-    "verify:work-request-roles": "npx tsx src/features/work-requests/work-request-roles.verify.ts"
+    "verify:work-request-roles": "npx tsx src/features/work-requests/work-request-roles.verify.ts",
+    "verify:warehouse-tidy": "npx tsx src/lib/cargo/warehouse-tidy.verify.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",

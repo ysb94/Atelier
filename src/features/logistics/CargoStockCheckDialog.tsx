@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
-import { PackageSearch, Printer, X } from 'lucide-react'
+import { Loader2, PackageSearch, Printer, X } from 'lucide-react'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -18,6 +18,7 @@ import { emptyList, formatNumber } from '@/lib/utils'
 import { resolveLatestReceivedStockByStyle } from '@/lib/warehouse/stock'
 
 type CargoStockCheckDialogProps = {
+  title: string
   brandId: string
   lines: CargoDraftRow[]
   onClose: () => void
@@ -50,49 +51,81 @@ function applyCargoStockCheckPrintMode(landscape: boolean) {
     document.head.appendChild(style)
   }
   const pageSize = landscape ? 'A4 landscape' : 'A4 portrait'
-  const pageMargin = landscape ? '8mm 10mm' : '12mm'
+  const pageMargin = landscape ? '8mm 8mm' : '10mm 8mm'
+  const tableFont = landscape ? '13px' : '12px'
+  const titleFont = landscape ? '18px' : '16px'
+  const metaFont = landscape ? '12px' : '11px'
+  const rowHeight = landscape ? '32px' : '30px'
+  const cellPad = landscape ? '5px 8px' : '4px 6px'
   style.textContent = `
 @page { size: ${pageSize}; margin: ${pageMargin}; }
 @media screen {
   .cargo-stock-check-print { display: none !important; }
 }
 @media print {
-  html.printing-cargo-stock-check body * { visibility: hidden; }
-  html.printing-cargo-stock-check .cargo-stock-check-print,
-  html.printing-cargo-stock-check .cargo-stock-check-print * {
-    visibility: visible;
+  html.printing-cargo-stock-check,
+  html.printing-cargo-stock-check body {
+    height: auto !important;
+    overflow: visible !important;
+    background: #fff !important;
+  }
+  html.printing-cargo-stock-check body > :not(.cargo-stock-check-print) {
+    display: none !important;
   }
   html.printing-cargo-stock-check .cargo-stock-check-print {
     display: block !important;
-    position: absolute;
-    inset: 0;
-    width: 100%;
+    position: static !important;
+    inset: auto !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
     color: #111;
     background: #fff;
     font-family: sans-serif;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
   html.printing-cargo-stock-check .cargo-stock-check-print h1 {
-    font-size: 18px;
-    margin: 0 0 8px;
+    font-size: ${titleFont};
+    margin: 0 0 4px;
   }
   html.printing-cargo-stock-check .cargo-stock-check-print p {
-    margin: 0 0 16px;
+    margin: 0 0 10px;
     color: #555;
-    font-size: 13px;
+    font-size: ${metaFont};
   }
   html.printing-cargo-stock-check .cargo-stock-check-print table {
-    width: 100%;
+    width: 100% !important;
     border-collapse: collapse;
-    font-size: 12px;
+    table-layout: fixed;
+    font-size: ${tableFont};
+  }
+  html.printing-cargo-stock-check .cargo-stock-check-print thead {
+    display: table-header-group;
+  }
+  html.printing-cargo-stock-check .cargo-stock-check-print tbody tr {
+    height: ${rowHeight};
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  html.printing-cargo-stock-check .cargo-stock-check-print tbody tr:nth-child(even) td {
+    background: #edf2f6 !important;
   }
   html.printing-cargo-stock-check .cargo-stock-check-print th,
   html.printing-cargo-stock-check .cargo-stock-check-print td {
-    border: 1px solid #bbb;
-    padding: 6px 8px;
+    border: 1px solid #9aa6b2;
+    padding: ${cellPad};
     text-align: left;
+    vertical-align: middle;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    height: ${rowHeight};
   }
   html.printing-cargo-stock-check .cargo-stock-check-print th {
-    background: #f3f3f3;
+    background: #243447;
+    color: #fff;
   }
   html.printing-cargo-stock-check .cargo-stock-check-print td.num {
     text-align: right;
@@ -107,6 +140,7 @@ function clearCargoStockCheckPrintMode() {
 }
 
 export function CargoStockCheckDialog({
+  title,
   brandId,
   lines,
   onClose,
@@ -152,6 +186,10 @@ export function CargoStockCheckDialog({
   })
   const styleRefs = styleRefsQuery.data ?? EMPTY_STYLE_REFS
   const positions = stockQuery.data ?? emptyList<WarehouseStockPosition>()
+  const waitingStyles =
+    Boolean(brandId) && styleNos.length > 0 && styleRefsQuery.isLoading
+  const waitingStock = Boolean(brandId) && stockQuery.isLoading
+  const loading = waitingStyles || waitingStock
 
   const rows = useMemo(() => {
     return lines
@@ -197,7 +235,7 @@ export function CargoStockCheckDialog({
   const printOrientationLabel = printLandscape ? '가로' : '세로'
 
   function handlePrint() {
-    if (printRows.length === 0) return
+    if (loading || printRows.length === 0) return
     applyCargoStockCheckPrintMode(printLandscape)
     window.requestAnimationFrame(() =>
       window.requestAnimationFrame(() => window.print()),
@@ -206,6 +244,7 @@ export function CargoStockCheckDialog({
 
   return createPortal(
     <WorkspaceTabOverlay>
+    <>
     <div className="fixed inset-0 z-[70] flex items-center justify-center p-3 sm:p-4">
       <button
         type="button"
@@ -243,11 +282,6 @@ export function CargoStockCheckDialog({
             <Badge variant={foundCount > 0 ? 'success' : 'muted'}>
               재고 확인 {formatNumber(foundCount)}
             </Badge>
-            {stockQuery.isLoading || styleRefsQuery.isLoading ? (
-              <span className="text-xs text-muted-foreground">
-                상품 DB와 창고 불러오는 중...
-              </span>
-            ) : null}
             {styleRefsQuery.isError ? (
               <span className="text-xs text-danger">
                 상품 DB를 불러오지 못했습니다.
@@ -284,7 +318,7 @@ export function CargoStockCheckDialog({
               type="button"
               size="sm"
               variant="outline"
-              disabled={printRows.length === 0}
+              disabled={loading || printRows.length === 0}
               onClick={handlePrint}
             >
               <Printer className="size-3.5" />
@@ -294,7 +328,14 @@ export function CargoStockCheckDialog({
         </div>
 
         <div className="min-h-0 flex-1 overflow-auto">
-          {rows.length === 0 ? (
+          {loading ? (
+            <div className="flex min-h-[16rem] flex-col items-center justify-center gap-3 px-4 py-10">
+              <Loader2 className="size-8 animate-spin text-foreground" />
+              <p className="text-sm text-muted-foreground">
+                상품 정보와 창고 재고를 불러오는 중...
+              </p>
+            </div>
+          ) : rows.length === 0 ? (
             <p className="px-4 py-10 text-center text-sm text-muted-foreground">
               확인할 상품이 없습니다.
             </p>
@@ -351,12 +392,23 @@ export function CargoStockCheckDialog({
         </div>
       </div>
 
+    </div>
       <div className="cargo-stock-check-print hidden" aria-hidden>
-        <h1>재고 파악</h1>
+        <h1>
+          {title} 재고 파악
+        </h1>
         <p>
           재고 확인 {formatNumber(printRows.length)}종 · {printOrientationLabel}
         </p>
         <table>
+          <colgroup>
+            <col style={{ width: '7%' }} />
+            <col style={{ width: '15%' }} />
+            <col style={{ width: '34%' }} />
+            <col style={{ width: '19%' }} />
+            <col style={{ width: '12%' }} />
+            <col style={{ width: '13%' }} />
+          </colgroup>
           <thead>
             <tr>
               <th>NO</th>
@@ -381,16 +433,18 @@ export function CargoStockCheckDialog({
           </tbody>
         </table>
       </div>
-    </div>
+    </>
     </WorkspaceTabOverlay>,
     document.body,
   )
 }
 
 export function CargoStockCheckButton({
+  title,
   brandId,
   lines,
 }: {
+  title: string
   brandId: string
   lines: CargoDraftRow[]
 }) {
@@ -408,6 +462,7 @@ export function CargoStockCheckButton({
       </Button>
       {open ? (
         <CargoStockCheckDialog
+          title={title}
           brandId={brandId}
           lines={lines}
           onClose={() => setOpen(false)}
