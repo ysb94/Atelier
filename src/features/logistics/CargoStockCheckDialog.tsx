@@ -163,7 +163,9 @@ export function CargoStockCheckDialog({
         return {
           key: `${styleNo || 'empty'}-${index}`,
           no: line.no || String(index + 1),
-          name: styleRef?.name.trim() || '-',
+          name: normalizedStyleNo
+            ? styleRef?.name.trim() || '-'
+            : line.name.trim() || '-',
           styleNo: normalizedStyleNo || styleNo || '-',
           stock,
         }
