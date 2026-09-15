@@ -10,8 +10,9 @@ import {
 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Input, Select } from '@/components/ui/input'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import type { CargoInboundLineDraft } from '@/lib/cargo/inbound'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { timeInvoiceWork } from '@/lib/invoice/invoice-work-perf'
 import { cn, formatNumber } from '@/lib/utils'
@@ -42,11 +43,10 @@ const CARGO_COLUMNS = [
   { key: 'note', label: '비고', widthClass: '', align: 'left' },
 ] as const
 
-type CargoColumnKey = (typeof CARGO_COLUMNS)[number]['key']
-
-export type CargoDraftRow = Record<CargoColumnKey, string>
+export type CargoDraftRow = CargoInboundLineDraft
 
 export type CargoInboundRegisterPayload = {
+  brandId: string
   shipDate: string
   rows: CargoDraftRow[]
 }
@@ -123,12 +123,14 @@ function parseCargoPasteText(text: string): CargoDraftRow[] {
 }
 
 type CargoInboundAddPanelProps = {
+  brands: Array<{ id: string; name: string }>
   onCancel: () => void
-  onRegister: (payload: CargoInboundRegisterPayload) => void
+  onRegister: (payload: CargoInboundRegisterPayload) => Promise<void>
 }
 
 type CargoShipDateDialogProps = {
   shipDate: string
+  submitting: boolean
   onShipDateChange: (value: string) => void
   onClose: () => void
   onConfirm: () => void
@@ -137,6 +139,7 @@ type CargoShipDateDialogProps = {
 /** 선적일은 화물 내용을 확인한 뒤, 실제 등록 직전에 한 번 더 확인한다. */
 function CargoShipDateDialog({
   shipDate,
+  submitting,
   onShipDateChange,
   onClose,
   onConfirm,
@@ -205,10 +208,10 @@ function CargoShipDateDialog({
             <Button
               type="button"
               size="sm"
-              disabled={!shipDate}
+              disabled={!shipDate || submitting}
               onClick={onConfirm}
             >
-              선적됨에 등록
+              {submitting ? '저장 중...' : '선적됨에 등록'}
             </Button>
           </div>
         </div>
@@ -219,17 +222,22 @@ function CargoShipDateDialog({
 }
 
 export function CargoInboundAddPanel({
+  brands,
   onCancel,
   onRegister,
 }: CargoInboundAddPanelProps) {
   useRenderWatch('CargoInboundAddPanel')
   const pasteBoxRef = useRef<HTMLDivElement>(null)
   const [shipDate, setShipDate] = useState(todayShipDateValue)
+  const [brandId, setBrandId] = useState(() =>
+    brands.length === 1 ? brands[0]!.id : '',
+  )
   const [shipDateDialogOpen, setShipDateDialogOpen] = useState(false)
   const [rows, setRows] = useState<CargoDraftRow[]>([])
   const [pasteActive, setPasteActive] = useState(false)
   const [dragging, setDragging] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
 
   const displayRows = useMemo(
     () =>
@@ -286,6 +294,32 @@ export function CargoInboundAddPanel({
     if (text.trim()) applyPasteText(text)
   }
 
+  async function handleRegister() {
+    if (!brandId) {
+      setShipDateDialogOpen(false)
+      setStatus('브랜드를 선택해 주세요.')
+      return
+    }
+    setSubmitting(true)
+    setStatus(null)
+    try {
+      await onRegister({ brandId, shipDate, rows })
+    } catch (error) {
+      console.warn('[cargo-inbound] 화물 입고 저장 실패', {
+        brandId,
+        shipDate,
+        rowCount: rows.length,
+        error,
+      })
+      setShipDateDialogOpen(false)
+      setStatus(
+        error instanceof Error ? error.message : '화물 입고 저장에 실패했습니다.',
+      )
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -305,6 +339,22 @@ export function CargoInboundAddPanel({
           </Button>
         </div>
       </div>
+
+      <label className="block max-w-xs space-y-1.5">
+        <span className="text-xs font-medium text-muted-foreground">브랜드</span>
+        <Select
+          value={brandId}
+          disabled={brands.length === 0 || submitting}
+          onChange={(event) => setBrandId(event.target.value)}
+        >
+          <option value="">브랜드 선택</option>
+          {brands.map((brand) => (
+            <option key={brand.id} value={brand.id}>
+              {brand.name}
+            </option>
+          ))}
+        </Select>
+      </label>
 
       <div
         ref={pasteBoxRef}
@@ -489,7 +539,7 @@ export function CargoInboundAddPanel({
             type="button"
             size="sm"
             variant="outline"
-            disabled={rows.length === 0}
+            disabled={rows.length === 0 || submitting}
             onClick={() => {
               setRows([])
               setStatus(null)
@@ -500,7 +550,7 @@ export function CargoInboundAddPanel({
           <Button
             type="button"
             size="sm"
-            disabled={rows.length === 0}
+            disabled={rows.length === 0 || !brandId || submitting}
             onClick={() => setShipDateDialogOpen(true)}
           >
             <CalendarDays className="size-3.5" />
@@ -512,12 +562,12 @@ export function CargoInboundAddPanel({
       {shipDateDialogOpen ? (
         <CargoShipDateDialog
           shipDate={shipDate}
+          submitting={submitting}
           onShipDateChange={setShipDate}
-          onClose={() => setShipDateDialogOpen(false)}
-          onConfirm={() => {
-            setShipDateDialogOpen(false)
-            onRegister({ shipDate, rows })
+          onClose={() => {
+            if (!submitting) setShipDateDialogOpen(false)
           }}
+          onConfirm={() => void handleRegister()}
         />
       ) : null}
     </div>

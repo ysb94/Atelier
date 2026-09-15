@@ -53,6 +53,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 송장 기준정보 포장 규격 간단값(`invoice_packing_size_maps`) | Supabase |
 | 송장 피킹표 동선 사전(`invoice_picking_route_presets`) | Supabase |
 | 연습 창고 세트·자리·미식별 재고·박스 ID·이력·출고 자리 등록(`warehouses` + `warehouse_locations` + `warehouse_inventory_sets` + `warehouse_stock_positions` + `warehouse_boxes` + `warehouse_stock_movements` + `warehouse_registered_slots`) | Supabase |
+| 화문 선적 화물·SKU별 입고 명세(`cargo_inbound_shipments` + `cargo_inbound_lines`) | Supabase |
 | 송장 사은품 증정 요청 건(`invoice_prefix_requests` + `invoice_prefix_items` + `invoice_prefix_item_products`, 앱 모델명 Gift) | Supabase |
 | 송장 사은품 선착순 한도·배정 원장(`invoice_prefix_requests` 한도 필드 + `invoice_gift_quotas` + `invoice_gift_allocations`) | Supabase |
 | 송장 사은품 원본행 치환 매핑(`invoice_gift_source_maps` + `invoice_gift_source_map_products` + `invoice_gift_source_allocations`) | Supabase |
@@ -85,6 +86,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `delete_invoice_work_run`,
   `import_warehouse_inventory_set`, `apply_warehouse_stock_action`,
   `restore_warehouse_inventory_set`, `replace_warehouse_inventory_snapshot`.
+  화문 입고 원자 등록은 `save_cargo_inbound`를 사용한다.
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
 - 브랜드 로고는 지금 `logo_url`에 data URL로 저장한다. 이후 `brands/{brand_id}/...`
   Storage 경로로 옮긴다.

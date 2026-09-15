@@ -1,16 +1,11 @@
 import { useState } from 'react'
-import {
-  ArrowLeft,
-  CalendarDays,
-  Copy,
-  FileSpreadsheet,
-  Printer,
-} from 'lucide-react'
+import { ArrowLeft, CalendarDays } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import type { CargoDraftRow } from '@/features/logistics/CargoInboundAddPanel'
 import { CargoStockCheckButton } from '@/features/logistics/CargoStockCheckDialog'
+import { formatCargoInboundTitle } from '@/features/logistics/cargo-inbound-title'
+import type { CargoInboundLineDraft } from '@/lib/cargo/inbound'
 import { formatNumber } from '@/lib/utils'
 
 export type CargoInboundDetailItem = {
@@ -26,13 +21,13 @@ export type CargoInboundDetailItem = {
   shippedAt: string
   scheduledInboundAt: string | null
   portContactNote: string | null
-  lines: CargoDraftRow[]
+  lines: CargoInboundLineDraft[]
 }
 
 type CargoInboundDetailPanelProps = {
   item: CargoInboundDetailItem
   onBack: () => void
-  onSaveInboundDate: (inboundDate: string, note: string) => void
+  onSaveInboundDate: (inboundDate: string, note: string) => Promise<void>
 }
 
 function formatDate(value: string | null) {
@@ -46,113 +41,36 @@ function formatDate(value: string | null) {
   }).format(date)
 }
 
-function buildPrintTable(item: CargoInboundDetailItem) {
-  const header = ['NO', '품명', 'M번호', '총수량', '박스 당', '박스', '비고']
-  const body = item.lines
-    .map((line, index) =>
-      [
-        line.no || String(index + 1),
-        line.name,
-        line.styleNo,
-        line.qty,
-        line.perBox,
-        line.boxes,
-        line.note,
-      ].join('\t'),
-    )
-    .join('\n')
-  return `${header.join('\t')}\n${body}`
-}
-
 export function CargoInboundDetailPanel({
   item,
   onBack,
   onSaveInboundDate,
 }: CargoInboundDetailPanelProps) {
+  const title = formatCargoInboundTitle(item.shippedAt, item.boxCount)
   const [inboundDate, setInboundDate] = useState(
     item.scheduledInboundAt ?? '',
   )
   const [note, setNote] = useState(item.portContactNote ?? '')
   const [status, setStatus] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
-  async function copyList() {
+  async function saveInboundDate() {
+    setSaving(true)
+    setStatus(null)
     try {
-      await navigator.clipboard.writeText(buildPrintTable(item))
-      setStatus('상품 리스트를 복사했습니다.')
+      await onSaveInboundDate(inboundDate, note.trim())
     } catch (error) {
-      console.warn('[cargo-inbound] 리스트 복사 실패', { error })
-      setStatus('복사에 실패했습니다.')
+      console.warn('[cargo-inbound] 입고일 저장 실패', {
+        shipmentId: item.id,
+        inboundDate,
+        error,
+      })
+      setStatus(
+        error instanceof Error ? error.message : '입고일 저장에 실패했습니다.',
+      )
+    } finally {
+      setSaving(false)
     }
-  }
-
-  function printList() {
-    const html = `
-<!doctype html>
-<html lang="ko">
-<head>
-  <meta charset="utf-8" />
-  <title>${item.shipmentNo} 화물 리스트</title>
-  <style>
-    body { font-family: sans-serif; padding: 24px; color: #111; }
-    h1 { font-size: 18px; margin: 0 0 8px; }
-    p { margin: 0 0 16px; color: #555; font-size: 13px; }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th, td { border: 1px solid #bbb; padding: 6px 8px; text-align: left; }
-    th { background: #f3f3f3; }
-    td.num { text-align: right; }
-  </style>
-</head>
-<body>
-  <h1>${item.shipmentNo}</h1>
-  <p>선적일 ${formatDate(item.shippedAt)} · 상품 ${item.productCount} · 박스 ${item.boxCount}</p>
-  <table>
-    <thead>
-      <tr>
-        <th>NO</th><th>품명</th><th>M번호</th><th>총수량</th><th>박스 당</th><th>박스</th><th>비고</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${item.lines
-        .map(
-          (line, index) => `
-        <tr>
-          <td>${line.no || index + 1}</td>
-          <td>${line.name}</td>
-          <td>${line.styleNo}</td>
-          <td class="num">${line.qty}</td>
-          <td class="num">${line.perBox}</td>
-          <td class="num">${line.boxes}</td>
-          <td>${line.note}</td>
-        </tr>`,
-        )
-        .join('')}
-    </tbody>
-  </table>
-</body>
-</html>`
-    const popup = window.open('', '_blank', 'noopener,noreferrer,width=960,height=720')
-    if (!popup) {
-      setStatus('인쇄 창을 열 수 없습니다. 팝업을 허용해 주세요.')
-      return
-    }
-    popup.document.write(html)
-    popup.document.close()
-    popup.focus()
-    popup.print()
-  }
-
-  function downloadCsv() {
-    const csv = buildPrintTable(item)
-    const blob = new Blob([`\uFEFF${csv}`], {
-      type: 'text/csv;charset=utf-8',
-    })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${item.shipmentNo}.csv`
-    link.click()
-    URL.revokeObjectURL(url)
-    setStatus('CSV 파일을 내려받았습니다.')
   }
 
   return (
@@ -166,7 +84,7 @@ export function CargoInboundDetailPanel({
           <div>
             <div className="flex flex-wrap items-center gap-2">
               <h2 className="text-base font-semibold tracking-tight">
-                {item.shipmentNo}
+                {title}
               </h2>
               <Badge variant="muted">{item.brandName}</Badge>
               {item.stage === 'shipped' ? (
@@ -190,21 +108,11 @@ export function CargoInboundDetailPanel({
           </div>
         </div>
 
-        <div className="flex flex-wrap gap-2">
-          <Button type="button" size="sm" variant="outline" onClick={copyList}>
-            <Copy className="size-3.5" />
-            리스트 복사
-          </Button>
-          <CargoStockCheckButton lines={item.lines} />
-          <Button type="button" size="sm" variant="outline" onClick={downloadCsv}>
-            <FileSpreadsheet className="size-3.5" />
-            CSV
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={printList}>
-            <Printer className="size-3.5" />
-            인쇄
-          </Button>
-        </div>
+        {item.stage === 'scheduled' || item.stage === 'done' ? (
+          <div className="flex flex-wrap gap-2">
+            <CargoStockCheckButton lines={item.lines} />
+          </div>
+        ) : null}
       </div>
 
       <div className="grid gap-3 rounded-lg border border-border bg-card p-4 md:grid-cols-[1fr_1fr_auto]">
@@ -233,13 +141,10 @@ export function CargoInboundDetailPanel({
           <Button
             type="button"
             className="w-full md:w-auto"
-            disabled={!inboundDate}
-            onClick={() => {
-              onSaveInboundDate(inboundDate, note.trim())
-              setStatus('입고일을 저장하고 협의 목록으로 옮겼습니다.')
-            }}
+            disabled={!inboundDate || saving}
+            onClick={() => void saveInboundDate()}
           >
-            입고일 확정
+            {saving ? '저장 중...' : '입고일 확정'}
           </Button>
         </div>
       </div>

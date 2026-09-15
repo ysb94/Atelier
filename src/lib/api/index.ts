@@ -97,6 +97,7 @@ import * as productDraftStore from '@/lib/supabase/product-drafts'
 import * as seasonStore from '@/lib/supabase/seasons'
 import * as styleStore from '@/lib/supabase/styles'
 import * as warehouseStockStore from '@/lib/supabase/warehouse-stock'
+import * as cargoInboundStore from '@/lib/supabase/cargo-inbound'
 import type { PreparedWarehouseImportRow } from '@/lib/warehouse/stock'
 
 const delay = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -214,6 +215,11 @@ export type {
   BulkOutboundPartnerWorkStatus,
   BulkOutboundTemplateField,
 } from '@/lib/supabase/bulk-outbound'
+export { CargoInboundStoreError } from '@/lib/supabase/cargo-inbound'
+export type {
+  CargoInboundShipment,
+  SaveCargoInboundInput,
+} from '@/lib/supabase/cargo-inbound'
 export { canSetBulkOutboundPartnerWorkStatus } from '@/lib/supabase/bulk-outbound'
 export { OutboundShipmentStoreError } from '@/lib/supabase/outbound-shipments'
 export {
@@ -654,6 +660,33 @@ export async function openWarehouseStock(
     positionId,
     boxCount,
     reason,
+  )
+}
+
+export async function getCargoInbounds(brandIds: readonly string[]) {
+  await delay()
+  return cargoInboundStore.listCargoInbounds(brandIds)
+}
+
+export async function saveCargoInbound(
+  input: cargoInboundStore.SaveCargoInboundInput,
+) {
+  await delay()
+  return cargoInboundStore.saveCargoInbound(input)
+}
+
+export async function scheduleCargoInbound(
+  brandId: string,
+  shipmentId: string,
+  inboundDate: string,
+  note: string,
+) {
+  await delay()
+  return cargoInboundStore.scheduleCargoInbound(
+    brandId,
+    shipmentId,
+    inboundDate,
+    note,
   )
 }
 

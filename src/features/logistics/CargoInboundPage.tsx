@@ -1,49 +1,43 @@
 import { useMemo, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import {
   CalendarClock,
   MapPin,
   Package,
   Plus,
-  Ship,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { CargoInboundAddPanel } from '@/features/logistics/CargoInboundAddPanel'
-import type {
-  CargoDraftRow,
-  CargoInboundRegisterPayload,
-} from '@/features/logistics/CargoInboundAddPanel'
+import type { CargoInboundRegisterPayload } from '@/features/logistics/CargoInboundAddPanel'
 import { CargoInboundDetailPanel } from '@/features/logistics/CargoInboundDetailPanel'
+import { formatCargoInboundTitle } from '@/features/logistics/cargo-inbound-title'
+import {
+  getCargoInbounds,
+  saveCargoInbound,
+  scheduleCargoInbound,
+  type CargoInboundShipment,
+} from '@/lib/api'
+import type { CargoInboundStage } from '@/lib/cargo/inbound'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { companyQueryKey } from '@/lib/workspace/query-keys'
 import { cn, formatNumber } from '@/lib/utils'
 
-type InboundStage = 'shipped' | 'scheduled' | 'done'
-
-type CargoInboundItem = {
-  id: string
-  stage: InboundStage
+type CargoInboundItem = CargoInboundShipment & {
   brandName: string
-  shipmentNo: string
-  vesselName: string
-  originPort: string
   productCount: number
   boxCount: number
   totalQty: number
-  shippedAt: string
-  scheduledInboundAt: string | null
-  portContactNote: string | null
-  warehouseSummary: string | null
-  completedAt: string | null
   previewNames: string[]
-  lines: CargoDraftRow[]
 }
 
 const INBOUND_TABS: {
-  value: InboundStage
+  value: CargoInboundStage
   label: string
   description: string
 }[] = [
@@ -69,50 +63,7 @@ function parseCount(value: string) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function buildShipmentNo(shipDate: string) {
-  const stamp = shipDate.replaceAll('-', '')
-  const suffix = String(Date.now()).slice(-4)
-  return `BL-${stamp}-${suffix}`
-}
-
-function createShippedItem(
-  payload: CargoInboundRegisterPayload,
-): CargoInboundItem {
-  const productCount = payload.rows.length
-  const boxCount = payload.rows.reduce(
-    (sum, row) => sum + parseCount(row.boxes),
-    0,
-  )
-  const totalQty = payload.rows.reduce(
-    (sum, row) => sum + parseCount(row.qty),
-    0,
-  )
-  const previewNames = payload.rows
-    .map((row) => row.name.trim() || row.styleNo.trim())
-    .filter(Boolean)
-    .slice(0, 3)
-
-  return {
-    id: `ci-${Date.now()}`,
-    stage: 'shipped',
-    brandName: '미지정',
-    shipmentNo: buildShipmentNo(payload.shipDate),
-    vesselName: '미입력',
-    originPort: '미입력',
-    productCount,
-    boxCount,
-    totalQty,
-    shippedAt: payload.shipDate,
-    scheduledInboundAt: null,
-    portContactNote: null,
-    warehouseSummary: null,
-    completedAt: null,
-    previewNames,
-    lines: payload.rows,
-  }
-}
-
-function isInboundStage(value: string | null): value is InboundStage {
+function isInboundStage(value: string | null): value is CargoInboundStage {
   return INBOUND_TABS.some((tab) => tab.value === value)
 }
 
@@ -127,7 +78,7 @@ function formatDate(value: string | null) {
   }).format(date)
 }
 
-function stageEmptyMessage(stage: InboundStage) {
+function stageEmptyMessage(stage: CargoInboundStage) {
   if (stage === 'shipped') return '선적만 끝난 화물이 없습니다.'
   if (stage === 'scheduled') return '입고 날짜가 협의된 화물이 없습니다.'
   return '정리가 끝난 화물이 없습니다.'
@@ -135,13 +86,57 @@ function stageEmptyMessage(stage: InboundStage) {
 
 export function CompanyCargoInboundPage() {
   useRenderWatch('CompanyCargoInboundPage')
+  const queryClient = useQueryClient()
+  const { brands, brandById } = useCompanyBrandScope()
   const [searchParams, setSearchParams] = useSearchParams()
   const [search, setSearch] = useState('')
   const [adding, setAdding] = useState(false)
-  const [items, setItems] = useState<CargoInboundItem[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const brandIds = useMemo(() => brands.map((brand) => brand.id), [brands])
+  const cargoQueryKey = companyQueryKey('cargo-inbounds', brandIds)
+  const cargoQuery = useQuery({
+    queryKey: cargoQueryKey,
+    queryFn: () => getCargoInbounds(brandIds),
+    enabled: brandIds.length > 0,
+  })
+  const registerMutation = useMutation({ mutationFn: saveCargoInbound })
+  const scheduleMutation = useMutation({
+    mutationFn: (input: {
+      brandId: string
+      shipmentId: string
+      inboundDate: string
+      note: string
+    }) =>
+      scheduleCargoInbound(
+        input.brandId,
+        input.shipmentId,
+        input.inboundDate,
+        input.note,
+      ),
+  })
+  const items = useMemo<CargoInboundItem[]>(
+    () =>
+      (cargoQuery.data ?? []).map((item) => ({
+        ...item,
+        brandName: brandById.get(item.brandId)?.name ?? '알 수 없는 브랜드',
+        productCount: item.lines.length,
+        boxCount: item.lines.reduce(
+          (sum, row) => sum + parseCount(row.boxes),
+          0,
+        ),
+        totalQty: item.lines.reduce(
+          (sum, row) => sum + parseCount(row.qty),
+          0,
+        ),
+        previewNames: item.lines
+          .map((row) => row.name.trim() || row.styleNo.trim())
+          .filter(Boolean)
+          .slice(0, 3),
+      })),
+    [brandById, cargoQuery.data],
+  )
   const requested = searchParams.get('tab')
-  const activeTab: InboundStage = isInboundStage(requested)
+  const activeTab: CargoInboundStage = isInboundStage(requested)
     ? requested
     : 'shipped'
   const activeMeta = INBOUND_TABS.find((tab) => tab.value === activeTab)!
@@ -151,7 +146,7 @@ export function CompanyCargoInboundPage() {
   )
 
   const tabCounts = useMemo(() => {
-    const counts: Record<InboundStage, number> = {
+    const counts: Record<CargoInboundStage, number> = {
       shipped: 0,
       scheduled: 0,
       done: 0,
@@ -167,6 +162,7 @@ export function CompanyCargoInboundPage() {
       return [
         item.brandName,
         item.shipmentNo,
+        formatCargoInboundTitle(item.shippedAt, item.boxCount),
         item.vesselName,
         item.originPort,
         item.portContactNote ?? '',
@@ -179,7 +175,7 @@ export function CompanyCargoInboundPage() {
     })
   }, [activeTab, items, search])
 
-  function selectTab(tab: InboundStage) {
+  function selectTab(tab: CargoInboundStage) {
     setAdding(false)
     setSelectedId(null)
     setSearchParams((current) => {
@@ -190,9 +186,9 @@ export function CompanyCargoInboundPage() {
     })
   }
 
-  function handleRegister(payload: CargoInboundRegisterPayload) {
-    const created = createShippedItem(payload)
-    setItems((prev) => [created, ...prev])
+  async function handleRegister(payload: CargoInboundRegisterPayload) {
+    await registerMutation.mutateAsync(payload)
+    await queryClient.invalidateQueries({ queryKey: ['cargo-inbounds'] })
     setAdding(false)
     setSelectedId(null)
     setSearchParams((current) => {
@@ -202,20 +198,15 @@ export function CompanyCargoInboundPage() {
     })
   }
 
-  function handleSaveInboundDate(inboundDate: string, note: string) {
-    if (!selectedId) return
-    setItems((prev) =>
-      prev.map((item) =>
-        item.id === selectedId
-          ? {
-              ...item,
-              stage: 'scheduled',
-              scheduledInboundAt: inboundDate,
-              portContactNote: note || null,
-            }
-          : item,
-      ),
-    )
+  async function handleSaveInboundDate(inboundDate: string, note: string) {
+    if (!selectedItem) return
+    await scheduleMutation.mutateAsync({
+      brandId: selectedItem.brandId,
+      shipmentId: selectedItem.id,
+      inboundDate,
+      note,
+    })
+    await queryClient.invalidateQueries({ queryKey: ['cargo-inbounds'] })
     setSelectedId(null)
     setSearchParams((current) => {
       const next = new URLSearchParams(current)
@@ -233,6 +224,7 @@ export function CompanyCargoInboundPage() {
 
       {adding ? (
         <CargoInboundAddPanel
+          brands={brands}
           onCancel={() => setAdding(false)}
           onRegister={handleRegister}
         />
@@ -247,7 +239,7 @@ export function CompanyCargoInboundPage() {
           <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               className="sm:max-w-xs"
-              placeholder="BL번호, 브랜드, 선박, 항구 검색..."
+              placeholder="선적일, 브랜드, 선박, 항구 검색..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -286,7 +278,17 @@ export function CompanyCargoInboundPage() {
             {activeMeta.description}
           </p>
 
-          {rows.length === 0 ? (
+          {cargoQuery.isError ? (
+            <Card className="px-4 py-10 text-center text-sm text-danger">
+              {cargoQuery.error instanceof Error
+                ? cargoQuery.error.message
+                : '화물 입고 목록을 불러오지 못했습니다.'}
+            </Card>
+          ) : cargoQuery.isLoading ? (
+            <Card className="px-4 py-10 text-center text-sm text-muted-foreground">
+              화물 입고 목록을 불러오는 중...
+            </Card>
+          ) : rows.length === 0 ? (
             <Card className="px-4 py-10 text-center text-sm text-muted-foreground">
               {search.trim()
                 ? '조건에 맞는 화물이 없습니다.'
@@ -310,6 +312,7 @@ export function CompanyCargoInboundPage() {
                 type="button"
                 variant="outline"
                 className="w-full border-dashed"
+                disabled={brands.length === 0}
                 onClick={() => setAdding(true)}
               >
                 <Plus className="size-3.5" />
@@ -340,7 +343,7 @@ function CargoInboundRow({
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold tracking-tight">
-              {item.shipmentNo}
+              {formatCargoInboundTitle(item.shippedAt, item.boxCount)}
             </p>
             <Badge variant="muted">{item.brandName}</Badge>
             {item.stage === 'shipped' ? (
@@ -356,33 +359,12 @@ function CargoInboundRow({
 
           <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
             <span className="inline-flex items-center gap-1">
-              <Ship className="size-3.5" />
-              {item.vesselName} · {item.originPort}
-            </span>
-            <span className="inline-flex items-center gap-1">
               <Package className="size-3.5" />
               상품 {formatNumber(item.productCount)} · 박스{' '}
               {formatNumber(item.boxCount)}
             </span>
             <span>선적일 {formatDate(item.shippedAt)}</span>
           </div>
-
-          {item.stage === 'shipped' ? (
-            <div className="space-y-1 text-sm text-muted-foreground">
-              <p>눌러서 입고일 입력·리스트 출력을 진행합니다.</p>
-              {item.previewNames.length > 0 ? (
-                <p>
-                  {item.previewNames.join(' · ')}
-                  {item.productCount > item.previewNames.length
-                    ? ` 외 ${formatNumber(item.productCount - item.previewNames.length)}종`
-                    : ''}
-                  {item.totalQty > 0
-                    ? ` · 총수량 ${formatNumber(item.totalQty)}`
-                    : ''}
-                </p>
-              ) : null}
-            </div>
-          ) : null}
 
           {item.stage === 'scheduled' ? (
             <div className="space-y-1 text-sm">
