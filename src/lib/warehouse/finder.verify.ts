@@ -14,10 +14,13 @@ import {
   mapSupabasePositionToParity,
   normalizeWarehouseFinderQuery,
   pushWarehouseFinderHistory,
+  removeWarehouseFinderHistory,
+  warehouseFinderHistoryForMode,
   shouldSyncAtelierWarehouseSnapshot,
   toWarehouseFinderCard,
   uniqueWarehouseFinderProductNames,
   warehouseFinderComputedQty,
+  warehouseFinderProductKindKey,
   warehouseLocationBase,
   type WarehouseFinderCard,
 } from './finder'
@@ -187,6 +190,38 @@ const productSuggestions = uniqueWarehouseFinderProductNames([
   card({ positionId: 'suggestion-2', productName: ' 셔링 아이보리 ' }),
   card({ positionId: 'suggestion-3', productName: '셔링 블랙' }),
 ])
+assert(
+  warehouseFinderProductKindKey({
+    styleNo: 'M0001',
+    sourceStyleNo: 'M0001',
+    productName: '셔링 아이보리',
+  }) ===
+    warehouseFinderProductKindKey({
+      styleNo: 'M0001',
+      sourceStyleNo: 'M0001',
+      productName: '셔링 아이보리',
+    }),
+  '같은 M번호는 자리 종류를 하나로 본다',
+)
+assert(
+  warehouseFinderProductKindKey({
+    styleNo: '',
+    sourceStyleNo: '',
+    productName: ' 셔링 아이보리 ',
+  }) ===
+    warehouseFinderProductKindKey({
+      styleNo: '',
+      sourceStyleNo: '',
+      productName: '셔링 아이보리',
+    }),
+  'M번호가 없으면 상품명으로 자리 종류를 접는다',
+)
+assert(
+  warehouseFinderProductKindKey({ styleNo: 'M0001', productName: '셔링 아이보리' }) !==
+    warehouseFinderProductKindKey({ styleNo: 'M0002', productName: '셔링 핑크' }),
+  '다른 M번호는 다른 종류다',
+)
+
 assert(productSuggestions.length === 2, '연관 검색어 상품명은 중복 제거한다')
 assert(
   productSuggestions[0] === '셔링 아이보리' &&
@@ -260,6 +295,23 @@ assert(
   pushWarehouseFinderHistory(history, { mode: 'mnumber', query: 'M0885' })[0]
     ?.query === 'M0885',
   '새 검색이 최근 기록 맨 앞',
+)
+const mixedHistory = pushWarehouseFinderHistory(history, {
+  mode: 'mnumber',
+  query: 'M0885',
+})
+assert(
+  warehouseFinderHistoryForMode(mixedHistory, 'product').every(
+    (item) => item.mode === 'product',
+  ),
+  '최근 검색은 현재 모드만 보여 준다',
+)
+assert(
+  removeWarehouseFinderHistory(mixedHistory, {
+    mode: 'product',
+    query: '하트 백',
+  }).every((item) => item.query !== '하트 백'),
+  '최근 검색은 항목만 지운다',
 )
 
 console.log('warehouse-finder.verify ok')

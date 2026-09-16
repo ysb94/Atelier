@@ -13,6 +13,9 @@ dist-ssr
 *.local
 supabase/.temp/
 tmp/
+outputs/masma-finder-snapshots/*
+!outputs/masma-finder-snapshots/.gitkeep
+scripts/masma-finder-migrate/service-account.json
 
 # Editor directories and files
 .vscode/*

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Image as ImageIcon, RefreshCw, Search } from 'lucide-react'
+import { Image as ImageIcon, RefreshCw, Search, X } from 'lucide-react'
 import { useBrand } from '@/components/layout/brand-context'
 import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
 import {
@@ -31,8 +31,9 @@ import {
   WAREHOUSE_FINDER_SUGGESTION_DEBOUNCE_MS,
   pushWarehouseFinderHistory,
   readWarehouseFinderHistory,
+  removeWarehouseFinderHistory,
   uniqueWarehouseFinderProductNames,
-  warehouseFinderPriorityLabel,
+  warehouseFinderHistoryForMode,
   warehouseFinderWarningLabels,
   writeWarehouseFinderHistory,
   type WarehouseFinderCard,
@@ -50,7 +51,13 @@ function formatImportedAt(value: string) {
   })
 }
 
-function FinderImage({ styleNo }: { styleNo: string }) {
+function FinderImage({
+  styleNo,
+  fit = 'cover',
+}: {
+  styleNo: string
+  fit?: 'cover' | 'contain'
+}) {
   const sources = useMemo(() => {
     const logistics = ruleImageUrls(styleNo, LOGISTICS_IMAGE_KEY)
     const product = ruleImageUrls(styleNo, PRODUCT_IMAGE_KEY)
@@ -69,7 +76,10 @@ function FinderImage({ styleNo }: { styleNo: string }) {
     <img
       src={src}
       alt=""
-      className="size-full object-cover"
+      className={cn(
+        'size-full',
+        fit === 'contain' ? 'object-contain' : 'object-cover',
+      )}
       onError={() => setIndex((current) => current + 1)}
     />
   )
@@ -89,15 +99,14 @@ function FinderCard({
     <article className="rounded-xl border border-border bg-card p-4 shadow-none">
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
-          <h2 className="text-base font-semibold leading-snug">{item.productName}</h2>
+          <h2 className="text-base font-semibold leading-snug">
+            {item.styleNo
+              ? `[${item.styleNo}] ${item.productName}`
+              : item.productName}
+          </h2>
           {item.officialStyleName ? (
             <p className="mt-1 text-xs text-muted-foreground">
               공식명 {item.officialStyleName}
-            </p>
-          ) : null}
-          {item.styleNo ? (
-            <p className="mt-1 text-xs font-medium text-muted-foreground">
-              {item.styleNo}
             </p>
           ) : null}
         </div>
@@ -126,7 +135,7 @@ function FinderCard({
             </button>
             {item.inboundCount > 1 ? (
               <span className="ml-1 text-xs text-muted-foreground">
-                · {item.inboundCount}건
+                · {item.inboundCount}종
               </span>
             ) : null}
           </dd>
@@ -153,22 +162,6 @@ function FinderCard({
             {item.remainingBoxes == null
               ? '미확인'
               : formatNumber(item.remainingBoxes)}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            계산 수량
-          </dt>
-          <dd className="font-semibold">
-            {item.computedQty == null ? '합산 안 함' : formatNumber(item.computedQty)}
-          </dd>
-        </div>
-        <div>
-          <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            사용 순서
-          </dt>
-          <dd className="font-semibold">
-            {warehouseFinderPriorityLabel(item.usagePriority)}
           </dd>
         </div>
       </dl>
@@ -265,6 +258,10 @@ export function WarehouseFinderPage() {
 
   const items = searchQuery.data?.items ?? emptyList<WarehouseFinderCard>()
   const inboundItems = inboundQuery.data ?? emptyList<WarehouseFinderCard>()
+  const modeHistory = useMemo(
+    () => warehouseFinderHistoryForMode(history, mode),
+    [history, mode],
+  )
   const productSuggestions = useMemo(
     () => uniqueWarehouseFinderProductNames(items),
     [items],
@@ -402,17 +399,33 @@ export function WarehouseFinderPage() {
         </Button>
       </form>
 
-      {history.length > 0 ? (
-        <div className="mb-4 flex flex-wrap gap-1.5">
-          {history.map((item) => (
-            <button
+      {modeHistory.length > 0 ? (
+        <div className="mb-4 flex flex-nowrap gap-1.5 overflow-x-auto pb-0.5">
+          {modeHistory.map((item) => (
+            <div
               key={`${item.mode}:${item.query}`}
-              type="button"
-              onClick={() => runSearch(item.mode, item.query)}
-              className="rounded-full border border-border bg-muted/30 px-2.5 py-1 text-[11px] text-muted-foreground"
+              className="inline-flex shrink-0 items-center rounded-full border border-border bg-muted/30 text-[11px] text-muted-foreground"
             >
-              {WAREHOUSE_FINDER_SEARCH_MODE_LABEL[item.mode]} · {item.query}
-            </button>
+              <button
+                type="button"
+                onClick={() => runSearch(item.mode, item.query)}
+                className="max-w-[12rem] truncate px-2.5 py-1"
+              >
+                {item.query}
+              </button>
+              <button
+                type="button"
+                aria-label={`${item.query} 삭제`}
+                onClick={() => {
+                  const nextHistory = removeWarehouseFinderHistory(history, item)
+                  setHistory(nextHistory)
+                  writeWarehouseFinderHistory(brand.id, nextHistory)
+                }}
+                className="pr-1.5 text-muted-foreground hover:text-foreground"
+              >
+                <X className="size-3" />
+              </button>
+            </div>
           ))}
         </div>
       ) : null}
@@ -492,12 +505,9 @@ export function WarehouseFinderPage() {
                   닫기
                 </Button>
               </div>
-              <div className="aspect-square overflow-hidden rounded-lg border border-border bg-muted/30">
-                <FinderImage styleNo={imageItem.styleNo} />
+              <div className="flex aspect-square items-center justify-center overflow-hidden rounded-lg border border-border bg-muted/30">
+                <FinderImage styleNo={imageItem.styleNo} fit="contain" />
               </div>
-              {imageItem.styleNo ? (
-                <p className="mt-2 text-xs text-muted-foreground">{imageItem.styleNo}</p>
-              ) : null}
             </div>
           </div>
         </WorkspaceTabOverlay>

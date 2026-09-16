@@ -7,7 +7,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 
 - Supabase Organization은 특정 브랜드나 개인이 아니라 회사가 소유한다.
 - Organization 이름은 법인 또는 변하지 않는 회사 영문명을 사용한다.
-- 프로젝트는 브랜드가 아니라 환경별로 나눈다.
+- 프로젝트는 브랜드가 아니라 환경별로 나눈다. Free 플랜 동안에는 예외로
+  `Atelier` 하나만 쓰고, 새 프로젝트를 만들지 않는다.
 - 하나의 운영 프로젝트에서 여러 브랜드를 `brand_id`로 구분한다.
 - 브랜드별 프로젝트 분리는 법적 격리, 매각, 독립 운영 등이 실제로 필요해질 때 수행한다.
 - **IndexedDB는 더 이상 업무 데이터 저장소가 아니다.** 업무 원본은 Supabase다.
@@ -18,10 +19,9 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 
 - Organization: `E&J` (Free 플랜)
 - Project: `Atelier` (ref `pmzgdqvtzwfwqmvhzcyo`, region `ap-northeast-2`, PostgreSQL 17)
-- 이 프로젝트를 앞으로의 운영(prod)으로 본다.
-- 지금은 스키마와 소량 실사용 입력 단계이므로 프로젝트 하나로 운영한다.
-- staging 프로젝트는 전체 데이터를 처음 적재하기 직전에 만든다. 그 시점부터
-  스키마 변경과 대량 작업은 staging에서 먼저 검증한다.
+- 이 프로젝트를 운영 DB로 본다. 새 테이블도 여기에 만든다. 프로젝트를 추가로 만들지 않는다.
+- Free 플랜이라 환경별 프로젝트는 쓰지 않는다. 잘못 만든 staging 프로젝트는
+  삭제했으며 앱·MCP·적재는 `Atelier`만 사용한다.
 - 앱 연결은 `VITE_SUPABASE_URL`과 `VITE_SUPABASE_PUBLISHABLE_KEY`를 `.env.local`에 두고
   `src/lib/supabase/client.ts`에서 읽는다. 연결 확인은 `npm run check:supabase`로 한다.
 - 현재 운영 브랜드는 **ATELIER 하나**다.
@@ -59,6 +59,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 송장 사은품 원본행 치환 매핑(`invoice_gift_source_maps` + `invoice_gift_source_map_products` + `invoice_gift_source_allocations`) | Supabase |
 | 송장 작업 지시(`invoice_work_instructions` + `invoice_work_instruction_items`) | Supabase |
 | 송장 출고 작업 이력·사이트 집계·백업 주문 키(`invoice_work_runs` + `invoice_work_site_summaries` + `invoice_work_run_order_keys`) | Supabase |
+| Masma Finder 전용 사용자·Works·입고·자리이동·라벨·첨부 | Supabase. 재고 수량만 Firebase `products.onhand` 프록시 |
 | 브랜드 AI 설정·사용량(`ai_feature_routes` + `ai_usage_logs` + `ai_model_pricing`) | Supabase |
 | 품목명·내품명 확정 사례(`ai_recommendation_feedback` + `ai_item_name_recommendation_feedback`) | Supabase |
 
@@ -91,6 +92,32 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
 - 브랜드 로고는 지금 `logo_url`에 data URL로 저장한다. 이후 `brands/{brand_id}/...`
   Storage 경로로 옮긴다.
+
+## Masma Finder
+
+- 앱은 Supabase Google 로그인만 쓴다. Finder 승인은 `masma_finder_users`이고
+  Atelier `profiles.status = active`와 분리한다.
+- `app.can_use_masma_finder(brand_id)`가 Works·입고·이동·라벨·첨부 Storage를 연다.
+  회사 셸 전역 `can_read_brand`는 넓히지 않는다. 창고 파인더 RPC만
+  `can_read_brand OR can_use_masma_finder`다.
+- 사전 이관된 승인 이메일은 첫 로그인에 `active`로 붙고, 신규는 `pending`이다.
+  승인·취소는 `list_masma_finder_users` / `set_masma_finder_user_status`와
+  감사 테이블 `masma_finder_access_audit`를 쓴다.
+- Works 첨부는 `masma-finder-works` 버킷의
+  `brands/{brand_id}/works/{task_id}/{kind}/...` 경로다. 파일 10MB, 종류별 3개.
+- 라벨 OCR은 `extract-label-from-image`, 재고 수량은 `firebase-product-onhand`.
+  Firebase service account와 Gemini 키는 Edge Function secret에만 둔다.
+- 스냅샷·현재 DB 백업·이메일/날짜/첨부 경로 병합·해시 대조:
+  `scripts/masma-finder-migrate/`. 적재 대상은 기존 `Atelier` 프로젝트다.
+  원본 Firebase는 전환 검증이 끝날 때까지 삭제하지 않는다.
+- Works 프론트는 `masma_finder/src/lib/works/` Provider가 Realtime을
+  채널당 한 번만 구독한다. 두 입고 패널은 같은 데이터를 필터만 한다.
+- Dashboard Authentication → Providers → Google을 `Atelier`에서만 켠다.
+  Redirect URL은 masma_finder 배포 origin과 `http://localhost:3000`을 넣는다.
+- Edge Function secret: `GEMINI_API_KEY`, `FIREBASE_SERVICE_ACCOUNT_JSON`.
+  브라우저는 Firebase 키를 갖지 않는다.
+- 롤백: masma_finder 배포를 직전 빌드로 되돌리고 Firebase 원본은 그대로 둔다.
+  Supabase Finder 테이블은 지우지 않는다.
 
 ## 로그인과 계정
 
@@ -670,7 +697,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260909150200_warehouse_sheet_sync_service_role_grants.sql`,
   `20260909150300_warehouse_sheet_sync_replace_definer.sql`,
   `20260909160400_warehouse_inventory_sets_realtime.sql`,
-  `20260916140000_warehouse_finder_search.sql`.
+  `20260916140000_warehouse_finder_search.sql`,
+  `20260916161000_warehouse_finder_location_product_kinds.sql`.
 - 창고 화면 자동 갱신은 `warehouse_inventory_sets` Realtime 이벤트만
   구독한다. 재고 행(`warehouse_stock_positions`)은 전체 교체 때 수천 건이
   생겨 넣지 않는다. 보이는 창고 탭만 듣고, 신호를 받으면 활성 세트·재고를
@@ -1296,9 +1324,8 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
 - 품번 발급, 기획안의 상품 승격, 대량 변경 같은 원자적 작업은 DB 함수 또는
   신뢰할 수 있는 서버 작업에서 트랜잭션으로 처리한다.
 - `service_role` 키와 개인 액세스 토큰을 브라우저 코드, 저장소 또는 문서에 넣지 않는다.
-- staging이 생긴 뒤에는 MCP를 기본적으로 staging에 연결한다. 그전까지는 `Atelier`에
-  직접 연결하되 조회를 우선하고, 스키마 변경·삭제·대량 수정은 명시적 승인과 백업 없이
-  실행하지 않는다.
+- MCP는 `Atelier`에 연결한다. 조회를 우선하고, 스키마 변경·삭제·대량 수정은
+  명시적 승인과 백업 없이 실행하지 않는다.
 
 ## 회사 중심 전환 후 브랜드 경계 감사
 
@@ -1328,8 +1355,8 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
 - 파일 경로는 `brands/{brand_id}/drafts/...`, `brands/{brand_id}/products/...`처럼
   브랜드 경계를 드러낸다.
 - 스키마, 함수, RLS 및 seed 변경은 재현 가능한 마이그레이션 파일로 버전 관리한다.
-- staging이 있는 시점부터는 production 변경 전 staging에서 마이그레이션과 복구를 검증한다.
-  단일 프로젝트 기간에는 위 백업 방침의 스냅샷으로 대체한다.
+- 지금은 단일 `Atelier` 프로젝트다. 마이그레이션 검증은 이 DB에서 하고,
+  파괴적 작업 전에는 위 백업 방침의 스냅샷으로 대체한다.
 - 정기 백업과 복구 절차를 마련하고, 데이터 건수·관계·파일을 검증하는 체크리스트를 둔다.
 
 ## 브랜드를 독립 프로젝트로 분리할 때

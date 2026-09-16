@@ -32,7 +32,7 @@ export const WAREHOUSE_FINDER_SEARCH_LIMITS = {
 } as const
 
 export const WAREHOUSE_FINDER_HISTORY_KEY = 'atelier:warehouse-finder-history'
-export const WAREHOUSE_FINDER_HISTORY_MAX = 10
+export const WAREHOUSE_FINDER_HISTORY_MAX = 10 // 검색 모드별 상한
 export const WAREHOUSE_FINDER_SUGGESTION_DEBOUNCE_MS = 150
 
 export const WAREHOUSE_FINDER_SEARCH_MODE_LABEL: Record<
@@ -137,6 +137,7 @@ export type WarehouseFinderCard = {
   computedQty: number | null
   reviewFlags: WarehouseReviewFlag[]
   note: string
+  /** 같은 자리 전체의 중복 제거된 제품 종류 수. 입고 건수가 아니다. */
   inboundCount: number
 }
 
@@ -450,6 +451,22 @@ export function finalizeWarehouseFinderResults(
   return sortWarehouseFinderCards(dedupeWarehouseFinderCards(source))
 }
 
+export function warehouseFinderProductKindKey(row: {
+  styleNo?: string
+  sourceStyleNo?: string
+  productName?: string
+}) {
+  const styleNo = compactText(row.styleNo ?? '')
+  if (styleNo) return styleNo
+  const sourceStyleNo = compactText(row.sourceStyleNo ?? '')
+    .replace(/\s+/g, '')
+    .toUpperCase()
+  if (sourceStyleNo) return sourceStyleNo
+  return compactText(row.productName ?? '')
+    .normalize('NFKC')
+    .toLocaleLowerCase('ko-KR')
+}
+
 export function uniqueWarehouseFinderProductNames(items: WarehouseFinderCard[]) {
   const names = new Map<string, string>()
   for (const item of items) {
@@ -563,24 +580,54 @@ export type WarehouseFinderHistoryItem = {
   query: string
 }
 
+function isWarehouseFinderHistoryItem(
+  item: unknown,
+): item is WarehouseFinderHistoryItem {
+  return (
+    Boolean(item) &&
+    typeof item === 'object' &&
+    WAREHOUSE_FINDER_SEARCH_MODES.includes(
+      (item as WarehouseFinderHistoryItem).mode,
+    ) &&
+    typeof (item as WarehouseFinderHistoryItem).query === 'string'
+  )
+}
+
+export function warehouseFinderHistoryForMode(
+  items: WarehouseFinderHistoryItem[],
+  mode: WarehouseFinderSearchMode,
+) {
+  return items.filter((item) => item.mode === mode)
+}
+
+export function capWarehouseFinderHistory(items: WarehouseFinderHistoryItem[]) {
+  const seen = new Set<string>()
+  const counts: Record<WarehouseFinderSearchMode, number> = {
+    product: 0,
+    warehouse: 0,
+    mnumber: 0,
+  }
+  const next: WarehouseFinderHistoryItem[] = []
+  for (const item of items) {
+    const query = compactText(item.query)
+    if (!query) continue
+    const key = `${item.mode}:${query}`
+    if (seen.has(key)) continue
+    if (counts[item.mode] >= WAREHOUSE_FINDER_HISTORY_MAX) continue
+    seen.add(key)
+    counts[item.mode] += 1
+    next.push({ mode: item.mode, query })
+  }
+  return next
+}
+
 export function readWarehouseFinderHistory(brandId: string) {
   try {
     const raw = localStorage.getItem(warehouseFinderHistoryStorageKey(brandId))
     if (!raw) return [] as WarehouseFinderHistoryItem[]
     const parsed = JSON.parse(raw) as unknown
     if (!Array.isArray(parsed)) return []
-    return parsed
-      .filter((item): item is WarehouseFinderHistoryItem => {
-        return (
-          Boolean(item) &&
-          typeof item === 'object' &&
-          WAREHOUSE_FINDER_SEARCH_MODES.includes(
-            (item as WarehouseFinderHistoryItem).mode,
-          ) &&
-          typeof (item as WarehouseFinderHistoryItem).query === 'string'
-        )
-      })
-      .slice(0, WAREHOUSE_FINDER_HISTORY_MAX)
+    return capWarehouseFinderHistory(parsed.filter(isWarehouseFinderHistoryItem))
   } catch {
     // 브라우저 UI 설정. 읽기 실패는 검색에 영향을 주지 않는다.
     return []
@@ -594,7 +641,7 @@ export function writeWarehouseFinderHistory(
   try {
     localStorage.setItem(
       warehouseFinderHistoryStorageKey(brandId),
-      JSON.stringify(items.slice(0, WAREHOUSE_FINDER_HISTORY_MAX)),
+      JSON.stringify(capWarehouseFinderHistory(items)),
     )
   } catch {
     // 브라우저 UI 설정. 저장 실패는 검색에 영향을 주지 않는다.
@@ -607,11 +654,18 @@ export function pushWarehouseFinderHistory(
 ) {
   const query = compactText(next.query)
   if (!query) return items
-  const filtered = items.filter(
-    (item) => !(item.mode === next.mode && item.query === query),
-  )
-  return [{ mode: next.mode, query }, ...filtered].slice(
-    0,
-    WAREHOUSE_FINDER_HISTORY_MAX,
+  return capWarehouseFinderHistory([
+    { mode: next.mode, query },
+    ...items,
+  ])
+}
+
+export function removeWarehouseFinderHistory(
+  items: WarehouseFinderHistoryItem[],
+  target: WarehouseFinderHistoryItem,
+) {
+  const query = compactText(target.query)
+  return items.filter(
+    (item) => !(item.mode === target.mode && item.query === query),
   )
 }

@@ -1,5 +1,15 @@
 # Atelier Edge Functions
 
+[auth]
+site_url = "https://atelier-6yy.pages.dev"
+additional_redirect_urls = [
+  "https://atelier-6yy.pages.dev/**",
+  "http://localhost:5173/**",
+  "https://masmafinder.netlify.app/**",
+  "https://masmarulez-md.web.app/**",
+  "http://localhost:3000/**",
+]
+
 [functions.ai-gateway]
 verify_jwt = true
 
@@ -8,3 +18,9 @@ verify_jwt = true
 
 [functions.warehouse-sheet-sync]
 verify_jwt = false
+
+[functions.extract-label-from-image]
+verify_jwt = true
+
+[functions.firebase-product-onhand]
+verify_jwt = true
