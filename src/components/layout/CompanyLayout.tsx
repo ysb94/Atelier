@@ -53,6 +53,7 @@ function pageLayoutFor(pathname: string) {
     pathname.includes('/logistics/invoices') ||
     pathname.includes('/logistics/barcode-outbound-data-entry') ||
     pathname.includes('/logistics/bulk-outbound') ||
+    pathname.includes('/logistics/finder') ||
     pathname.includes('/logistics/warehouses') ||
     pathname.includes('/logistics/cargo-inbound')
   ) {

@@ -33,6 +33,7 @@ import { CompanyBarcodeOutboundDataEntryPage } from '@/features/logistics/Barcod
 import { CompanyBulkOutboundPage } from '@/features/logistics/BulkOutboundPage'
 import { CompanyOutboundDataPage } from '@/features/logistics/OutboundDataPage'
 import { CompanyWarehousePage } from '@/features/logistics/WarehousePage'
+import { CompanyWarehouseFinderPage } from '@/features/logistics/WarehouseFinderPage'
 import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
 
 function RedirectTo({ to }: { to: string }) {
@@ -138,6 +139,7 @@ export const companyWorkspaceRoutes = (
         element={<CompanyBarcodeOutboundDataEntryPage />}
       />
       <Route path="logistics/bulk-outbound" element={<CompanyBulkOutboundPage />} />
+      <Route path="logistics/finder" element={<CompanyWarehouseFinderPage />} />
       <Route path="logistics/warehouses" element={<CompanyWarehousePage />} />
       <Route
         path="logistics/cargo-inbound"

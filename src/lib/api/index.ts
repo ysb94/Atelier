@@ -98,7 +98,9 @@ import * as seasonStore from '@/lib/supabase/seasons'
 import * as styleStore from '@/lib/supabase/styles'
 import * as warehouseStockStore from '@/lib/supabase/warehouse-stock'
 import * as cargoInboundStore from '@/lib/supabase/cargo-inbound'
+import * as warehouseFinderStore from '@/lib/supabase/warehouse-finder'
 import type { PreparedWarehouseImportRow } from '@/lib/warehouse/stock'
+import type { WarehouseFinderSearchMode } from '@/lib/warehouse/finder'
 
 const delay = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -140,6 +142,7 @@ export type {
   WarehouseMoveInput,
   WarehouseReceiveInput,
 } from '@/lib/supabase/warehouse-stock'
+export type { WarehouseFinderSearchMode } from '@/lib/warehouse/finder'
 export { InvoicePackingSizeMapStoreError } from '@/lib/supabase/invoice-packing-size-maps'
 export type { InvoicePackingSizeMapInput } from '@/lib/supabase/invoice-packing-size-maps'
 export { InvoicePickingRoutePresetStoreError } from '@/lib/supabase/invoice-picking-route-presets'
@@ -688,6 +691,21 @@ export async function scheduleCargoInbound(
     inboundDate,
     note,
   )
+}
+
+export async function searchWarehouseFinder(
+  brandId: string,
+  mode: WarehouseFinderSearchMode,
+  query: string,
+) {
+  return warehouseFinderStore.searchWarehouseFinder(brandId, mode, query)
+}
+
+export async function listWarehouseFinderInbounds(
+  brandId: string,
+  locationBase: string,
+) {
+  return warehouseFinderStore.listWarehouseFinderInbounds(brandId, locationBase)
 }
 
 export async function getInvoiceOptionMaps(

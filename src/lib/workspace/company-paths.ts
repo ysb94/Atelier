@@ -187,6 +187,12 @@ export function mapLegacyBrandPath(
         searchPatch: { brands: brandSlug },
       }
     }
+    if (tail[0] === 'finder') {
+      return {
+        pathname: '/logistics/finder',
+        searchPatch: { brands: brandSlug },
+      }
+    }
     if (tail[0] === 'warehouses') {
       return {
         pathname: '/logistics/warehouses',

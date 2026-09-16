@@ -85,7 +85,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `update_invoice_work_run`,
   `delete_invoice_work_run`,
   `import_warehouse_inventory_set`, `apply_warehouse_stock_action`,
-  `restore_warehouse_inventory_set`, `replace_warehouse_inventory_snapshot`.
+  `restore_warehouse_inventory_set`, `replace_warehouse_inventory_snapshot`,
+  `search_warehouse_finder_rows`, `list_warehouse_finder_inbounds`.
   화문 입고 원자 등록은 `save_cargo_inbound`를 사용한다.
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
 - 브랜드 로고는 지금 `logo_url`에 data URL로 저장한다. 이후 `brands/{brand_id}/...`
@@ -639,6 +640,12 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   호출은 HMAC 인증 `warehouse-sheet-sync` Edge Function만 한다.
 - 로직: `src/lib/warehouse/stock.ts`. 저장소: `src/lib/supabase/warehouse-stock.ts`.
   화면: `WarehousePage`, `WarehouseInventoryPanel`.
+- 창고 파인더는 같은 활성 sandbox 세트를 읽기 전용으로 검색한다. Firebase
+  `warehouses_product_search`를 기본 조회로 쓰지 않는다. 상품명 prefix,
+  자리 prefix, M번호 exact는 `search_warehouse_finder_rows`가 DB에서 걸러
+  주고, 자리 입고 이력은 `list_warehouse_finder_inbounds`다. 화면은
+  `/logistics/finder`. 필드 대응·전환 검증·시트 동기화 분리는
+  [`WAREHOUSE_FINDER.md`](./WAREHOUSE_FINDER.md).
 - 물류 상품표(`/work/logistics`)의 박스창고·출고지창고·총재고·박스재고·
   출고지재고는 활성 sandbox 세트의 `warehouse_stock_positions`를 존별로
   클라이언트에서 집계한 읽기 전용 값이다. 두 창고 자리는 각 존의 사용 순서
@@ -662,7 +669,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260909150100_warehouse_sheet_sync_rpc.sql`,
   `20260909150200_warehouse_sheet_sync_service_role_grants.sql`,
   `20260909150300_warehouse_sheet_sync_replace_definer.sql`,
-  `20260909160400_warehouse_inventory_sets_realtime.sql`.
+  `20260909160400_warehouse_inventory_sets_realtime.sql`,
+  `20260916140000_warehouse_finder_search.sql`.
 - 창고 화면 자동 갱신은 `warehouse_inventory_sets` Realtime 이벤트만
   구독한다. 재고 행(`warehouse_stock_positions`)은 전체 교체 때 수천 건이
   생겨 넣지 않는다. 보이는 창고 탭만 듣고, 신호를 받으면 활성 세트·재고를

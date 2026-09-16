@@ -1,0 +1,4 @@
+[submodule "masma_finder"]
+	path = masma_finder
+	url = https://github.com/ysb94/masmafinder.git
+	branch = 260916

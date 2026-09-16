@@ -25,6 +25,7 @@ import { BarcodeOutboundDataEntryPage } from '@/features/logistics/BarcodeOutbou
 import { BulkOutboundPage } from '@/features/logistics/BulkOutboundPage'
 import { OutboundDataPage } from '@/features/logistics/OutboundDataPage'
 import { WarehousePage } from '@/features/logistics/WarehousePage'
+import { WarehouseFinderPage } from '@/features/logistics/WarehouseFinderPage'
 
 function RedirectCompany({ to }: { to: string }) {
   return <Navigate to={to} replace />
@@ -102,6 +103,7 @@ export function BrandWorkspaceRouteTree() {
         element={<BarcodeOutboundDataEntryPage />}
       />
       <Route path="logistics/bulk-outbound" element={<BulkOutboundPage />} />
+      <Route path="logistics/finder" element={<WarehouseFinderPage />} />
       <Route path="logistics/warehouses" element={<WarehousePage />} />
       <Route path="data" element={<RedirectTo to="data/all" />} />
       <Route path="data/upload" element={<DataUploadPage />} />

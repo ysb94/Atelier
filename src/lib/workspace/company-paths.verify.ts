@@ -114,6 +114,13 @@ assert(
   '레거시 송장은 작업 세션 브랜드',
 )
 
+const finder = mapLegacyBrandPath('atelier', 'logistics/finder')
+assert(
+  finder.pathname === '/logistics/finder' &&
+    finder.searchPatch.brands === 'atelier',
+  '레거시 창고 파인더는 브랜드 필터',
+)
+
 const profile = mapLegacyBrandPath('atelier', 'settings/profile')
 assert(
   profile.pathname === '/settings/profile' && !profile.searchPatch.brand,

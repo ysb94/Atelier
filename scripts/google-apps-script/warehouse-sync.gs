@@ -9,6 +9,7 @@
  *  - WPS_DOCUMENT_SECRET          (기존 Firebase secretPass)
  *  - ATELIER_WAREHOUSE_SYNC_URL   (https://<project>.supabase.co/functions/v1/warehouse-sheet-sync)
  *  - ATELIER_WAREHOUSE_SYNC_SECRET
+ *  - ATELIER_WAREHOUSE_SYNC_INDEPENDENT  (true면 Firebase 성공과 무관하게 사이트 DB 동기화)
  * ========================================================== */
 
 /***** =========================================================
@@ -230,6 +231,30 @@ const WPS_CURSOR_KEY   = 'WPS_UPSERT_CURSOR';
 const WPS_SOFT_MS      = 3.5 * 60 * 1000;
 const WPS_FLUSH_EVERY  = 20;
 const ATELIER_SYNC_FAIL_KEY = 'ATELIER_WAREHOUSE_SYNC_LAST_ERROR';
+const ATELIER_SYNC_INDEPENDENT_KEY = 'ATELIER_WAREHOUSE_SYNC_INDEPENDENT';
+
+function atelierWarehouseSyncIndependent() {
+  const value = String(
+    PropertiesService.getScriptProperties().getProperty(ATELIER_SYNC_INDEPENDENT_KEY) || ''
+  ).trim().toLowerCase();
+  return value === 'true' || value === '1';
+}
+
+function enableAtelierWarehouseSyncIndependent() {
+  PropertiesService.getScriptProperties().setProperty(ATELIER_SYNC_INDEPENDENT_KEY, 'true');
+  SpreadsheetApp.getActive().toast('사이트 단독 동기화를 켰습니다. Firebase 실패와 무관하게 시트 원본을 사이트 DB에 보냅니다.');
+}
+
+function disableAtelierWarehouseSyncIndependent() {
+  PropertiesService.getScriptProperties().setProperty(ATELIER_SYNC_INDEPENDENT_KEY, 'false');
+  SpreadsheetApp.getActive().toast('사이트 단독 동기화를 껐습니다. Firebase가 전 행 성공한 뒤에만 사이트 DB를 갱신합니다.');
+}
+
+function shouldSyncAtelierWarehouseSnapshot(finishedAll, firebaseFailures) {
+  if (!finishedAll) return false;
+  if (atelierWarehouseSyncIndependent()) return true;
+  return firebaseFailures === 0;
+}
 
 function _buildPatchWithDeletes(collection, docId, setObj, deleteKeys){
   const fields = {};
@@ -541,15 +566,19 @@ function upsertWPS_WhenRowDiff_resume(){
   const finishedAll = startRow > endRow;
   _wpsSaveCursor(finishedAll ? ROW_START : startRow);
 
-  if (finishedAll && firebaseFailures === 0) {
+  if (shouldSyncAtelierWarehouseSnapshot(finishedAll, firebaseFailures)) {
     try {
       const result = syncAtelierWarehouseSnapshot_({ validateOnly: false });
+      const extra = firebaseFailures > 0
+        ? ` · Firebase 실패 ${firebaseFailures}건은 무시하고 시트 원본을 보냄`
+        : '';
       SpreadsheetApp.getActive().toast(
-        '마지막까지 처리 완료 · 사이트 DB ' + (result.total || 0) + '행 동기화'
+        '마지막까지 처리 완료 · 사이트 DB ' + (result.total || 0) + '행 동기화' + extra
       );
     } catch (error) {
       SpreadsheetApp.getActive().toast(
-        'Firebase는 완료. 사이트 동기화 실패: ' + error.message + ' → 메뉴에서 재시도'
+        (firebaseFailures === 0 ? 'Firebase는 완료. ' : '') +
+        '사이트 동기화 실패: ' + error.message + ' → 메뉴에서 재시도'
       );
     }
   } else {
@@ -567,5 +596,7 @@ function onOpen_wpsRunnerMenu(){
     .addItem('진행저장 러너 실행', 'upsertWPS_WhenRowDiff_resume')
     .addItem('커서 초기화', 'resetWpsCursor')
     .addItem('사이트 DB 전체 동기화 재시도', 'retryAtelierWarehouseSync')
+    .addItem('사이트 단독 동기화 켜기', 'enableAtelierWarehouseSyncIndependent')
+    .addItem('사이트 단독 동기화 끄기', 'disableAtelierWarehouseSyncIndependent')
     .addToUi();
 }

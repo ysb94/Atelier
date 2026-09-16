@@ -32,6 +32,7 @@
     "verify:stock-hold-match": "node scripts/verify-stock-hold-match.mjs",
     "verify:product-list-order-shape": "node scripts/verify-product-list-order-shape.mjs",
     "verify:warehouse-stock": "node scripts/verify-warehouse-stock.mjs",
+    "verify:warehouse-finder": "node scripts/verify-warehouse-finder.mjs",
     "verify:warehouse-sheet-sync": "node scripts/verify-warehouse-sheet-sync.mjs",
     "verify:outbound-partner": "node scripts/verify-outbound-partner.mjs",
     "verify:invoice-mall": "node scripts/verify-invoice-mall.mjs",
