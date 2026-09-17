@@ -1,10 +1,10 @@
 import { useState } from 'react'
-import { createPortal } from 'react-dom'
-import { ArrowLeft, CalendarDays, ClipboardCheck, MessageSquareText, X } from 'lucide-react'
-import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import { ArrowLeft, CalendarDays, MessageSquareText } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { CargoInboundRequestDialog } from '@/features/logistics/CargoInboundRequestDialog'
+import { CargoInspectionButton } from '@/features/logistics/CargoInspectionDialog'
 import { CargoStockCheckButton } from '@/features/logistics/CargoStockCheckDialog'
 import {
   CargoUnloadListButton,
@@ -35,6 +35,9 @@ type CargoInboundDetailPanelProps = {
   item: CargoInboundDetailItem
   onBack: () => void
   onSaveInboundDate: (inboundDate: string, note: string) => Promise<void>
+  onSaveRequestNotes: (
+    notes: Array<{ lineId: string; requestNote: string }>,
+  ) => Promise<void>
 }
 
 function formatDate(value: string | null) {
@@ -48,70 +51,11 @@ function formatDate(value: string | null) {
   }).format(date)
 }
 
-function CargoInboundRequestDialog({
-  title,
-  onClose,
-}: {
-  title: string
-  onClose: () => void
-}) {
-  return createPortal(
-    <WorkspaceTabOverlay>
-      <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
-        <button
-          type="button"
-          aria-label="요청 사항 닫기"
-          className="absolute inset-0 bg-black/50 backdrop-blur-[2px]"
-          onClick={onClose}
-        />
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="cargo-inbound-request-title"
-          className="relative z-10 flex max-h-[min(36rem,calc(100vh-2rem))] w-full max-w-lg flex-col rounded-xl border border-border bg-card shadow-lg"
-          onKeyDown={(event) => {
-            if (event.key === 'Escape') onClose()
-          }}
-        >
-          <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3">
-            <div>
-              <h3
-                id="cargo-inbound-request-title"
-                className="text-base font-semibold tracking-tight"
-              >
-                요청 사항
-              </h3>
-              <p className="mt-0.5 text-xs text-muted-foreground">{title}</p>
-            </div>
-            <Button
-              type="button"
-              size="icon"
-              variant="ghost"
-              aria-label="요청 사항 닫기"
-              onClick={onClose}
-            >
-              <X className="size-4" />
-            </Button>
-          </div>
-          <div className="min-h-40 flex-1 px-4 py-8 text-center text-sm text-muted-foreground">
-            등록된 요청 사항이 없습니다.
-          </div>
-          <div className="flex justify-end border-t border-border px-4 py-3">
-            <Button type="button" size="sm" variant="outline" onClick={onClose}>
-              닫기
-            </Button>
-          </div>
-        </div>
-      </div>
-    </WorkspaceTabOverlay>,
-    document.body,
-  )
-}
-
 export function CargoInboundDetailPanel({
   item,
   onBack,
   onSaveInboundDate,
+  onSaveRequestNotes,
 }: CargoInboundDetailPanelProps) {
   const title = formatCargoInboundTitle(item.shippedAt, item.boxCount)
   const [inboundDate, setInboundDate] = useState(
@@ -151,10 +95,11 @@ export function CargoInboundDetailPanel({
           </Button>
           {item.stage === 'scheduled' || item.stage === 'done' ? (
             <div className="flex flex-wrap gap-2">
-              <Button type="button" size="sm" variant="outline">
-                <ClipboardCheck className="size-3.5" />
-                검수용
-              </Button>
+              <CargoInspectionButton
+                title={title}
+                brandName={item.brandName}
+                lines={item.lines}
+              />
               <CargoStockCheckButton
                 title={title}
                 brandId={item.brandId}
@@ -309,7 +254,10 @@ export function CargoInboundDetailPanel({
       {requestOpen ? (
         <CargoInboundRequestDialog
           title={title}
+          brandName={item.brandName}
+          lines={item.lines}
           onClose={() => setRequestOpen(false)}
+          onSave={onSaveRequestNotes}
         />
       ) : null}
     </div>

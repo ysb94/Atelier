@@ -20,6 +20,7 @@ import { formatCargoInboundTitle } from '@/features/logistics/cargo-inbound-titl
 import {
   getCargoInbounds,
   saveCargoInbound,
+  saveCargoInboundRequestNotes,
   scheduleCargoInbound,
   type CargoInboundShipment,
 } from '@/lib/api'
@@ -113,6 +114,12 @@ export function CompanyCargoInboundPage() {
         input.inboundDate,
         input.note,
       ),
+  })
+  const requestNotesMutation = useMutation({
+    mutationFn: (input: {
+      brandId: string
+      notes: Array<{ lineId: string; requestNote: string }>
+    }) => saveCargoInboundRequestNotes(input.brandId, input.notes),
   })
   const items = useMemo<CargoInboundItem[]>(
     () =>
@@ -215,6 +222,17 @@ export function CompanyCargoInboundPage() {
     })
   }
 
+  async function handleSaveRequestNotes(
+    notes: Array<{ lineId: string; requestNote: string }>,
+  ) {
+    if (!selectedItem) return
+    await requestNotesMutation.mutateAsync({
+      brandId: selectedItem.brandId,
+      notes,
+    })
+    await queryClient.invalidateQueries({ queryKey: ['cargo-inbounds'] })
+  }
+
   return (
     <div>
       <PageHeader
@@ -233,6 +251,7 @@ export function CompanyCargoInboundPage() {
           item={selectedItem}
           onBack={() => setSelectedId(null)}
           onSaveInboundDate={handleSaveInboundDate}
+          onSaveRequestNotes={handleSaveRequestNotes}
         />
       ) : (
         <>

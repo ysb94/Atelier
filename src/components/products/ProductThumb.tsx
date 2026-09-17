@@ -12,12 +12,14 @@ export function ProductThumb({
   alt,
   size = 24,
   className,
+  loading = 'lazy',
   onCurrentSourceChange,
 }: {
   sources: string[]
   alt: string
   size?: number
   className?: string
+  loading?: 'lazy' | 'eager'
   onCurrentSourceChange?: (url: string | null) => void
 }) {
   const key = sources.join('|')
@@ -64,7 +66,7 @@ export function ProductThumb({
       key={current}
       src={current}
       alt={alt}
-      loading="lazy"
+      loading={loading}
       decoding="async"
       className={shell}
       style={box}

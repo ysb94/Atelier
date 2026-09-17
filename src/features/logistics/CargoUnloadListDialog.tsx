@@ -13,6 +13,7 @@ import {
 import type { CargoInboundLineDraft } from '@/lib/cargo/inbound'
 import {
   cargoLineHasContent,
+  formatCargoWarehouseNote,
   parseUnloadBoxCount,
   splitUnloadStackRows,
 } from '@/lib/cargo/inbound'
@@ -180,10 +181,15 @@ function applyUnloadPrintMode(
     color: #fff;
     font-weight: 600;
   }
-  html.${printClass} .${printNodeClass} td.name,
-  html.${printClass} .${printNodeClass} td.note {
+  html.${printClass} .${printNodeClass} td.name {
     text-align: left;
     text-overflow: ellipsis;
+  }
+  html.${printClass} .${printNodeClass} td.note {
+    text-align: left;
+    white-space: pre-line;
+    height: auto;
+    overflow: visible;
   }
   html.${printClass} .${printNodeClass} td.photo img,
   html.${printClass} .${printNodeClass} td.photo .photo-thumb {
@@ -238,6 +244,9 @@ export function CargoUnloadListDialog({
   const [openedAt] = useState(() => Date.now())
   const [printOrientation, setPrintOrientation] =
     useState<PrintOrientation>('auto')
+  const [uncheckedKeys, setUncheckedKeys] = useState<Set<string>>(
+    () => new Set(),
+  )
 
   useEffect(() => {
     const afterPrint = () =>
@@ -284,7 +293,12 @@ export function CargoUnloadListDialog({
           qty: first ? line.qty.trim() : '',
           perBox: line.perBox.trim(),
           boxes: part.incomingBoxes > 0 ? formatNumber(part.incomingBoxes) : '',
-          note: first ? line.note.trim() : '',
+          note:
+            purpose === 'warehouse'
+              ? formatCargoWarehouseNote(line.note, line.requestNote)
+              : first
+                ? line.note.trim()
+                : '',
           stow: '',
           slot: '',
           shippedAt:
@@ -330,9 +344,28 @@ export function CargoUnloadListDialog({
   const printLandscape =
     printOrientation === 'landscape' || printOrientation === 'auto'
   const printOrientationLabel = printLandscape ? '가로' : '세로'
+  const printRows = useMemo(
+    () => rows.filter((row) => !uncheckedKeys.has(row.key)),
+    [rows, uncheckedKeys],
+  )
+  const allPrintSelected = rows.length > 0 && printRows.length === rows.length
+  const somePrintSelected = printRows.length > 0 && !allPrintSelected
+
+  function togglePrintRow(key: string) {
+    setUncheckedKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
+  function toggleAllPrintRows(checked: boolean) {
+    setUncheckedKeys(checked ? new Set() : new Set(rows.map((row) => row.key)))
+  }
 
   function handlePrint() {
-    if (loading || rows.length === 0) return
+    if (loading || printRows.length === 0) return
     applyUnloadPrintMode(
       printLandscape,
       copy.printClass,
@@ -385,6 +418,9 @@ export function CargoUnloadListDialog({
               <Badge variant={productCount > 0 ? 'success' : 'muted'}>
                 {formatNumber(productCount)}종
               </Badge>
+              <Badge variant={printRows.length > 0 ? 'outline' : 'muted'}>
+                인쇄 {formatNumber(printRows.length)}행
+              </Badge>
               {stockQuery.isError ? (
                 <span className="text-xs text-danger">
                   최신 자리를 불러오지 못했습니다.
@@ -415,7 +451,7 @@ export function CargoUnloadListDialog({
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={loading || rows.length === 0}
+                disabled={loading || printRows.length === 0}
                 onClick={handlePrint}
               >
                 <Printer className="size-3.5" />
@@ -437,14 +473,29 @@ export function CargoUnloadListDialog({
                 하차할 상품이 없습니다.
               </p>
             ) : (
-              <table className="w-full min-w-[72rem] table-fixed border-separate border-spacing-0 text-sm">
+              <table className="w-full min-w-[74rem] table-fixed border-separate border-spacing-0 text-sm">
                 <colgroup>
+                  <col className="w-10" />
                   {UNLOAD_COLUMNS.map((column) => (
                     <col key={column.key} className={column.widthClass} />
                   ))}
                 </colgroup>
                 <thead className="sticky top-0 z-20">
                   <tr>
+                    <th className="border-b border-r border-border bg-foreground px-1 py-1.5 text-center">
+                      <input
+                        type="checkbox"
+                        className="size-3.5 accent-primary"
+                        aria-label="인쇄할 행 전체 선택"
+                        checked={allPrintSelected}
+                        ref={(element) => {
+                          if (element) element.indeterminate = somePrintSelected
+                        }}
+                        onChange={(event) =>
+                          toggleAllPrintRows(event.target.checked)
+                        }
+                      />
+                    </th>
                     {UNLOAD_COLUMNS.map((column) => (
                       <th
                         key={column.key}
@@ -459,11 +510,22 @@ export function CargoUnloadListDialog({
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((row) => (
+                  {rows.map((row) => {
+                    const printSelected = !uncheckedKeys.has(row.key)
+                    return (
                     <tr
                       key={row.key}
                       className="odd:bg-card even:bg-muted/20"
                     >
+                      <td className="h-11 border-b border-r border-border px-1 text-center align-middle">
+                        <input
+                          type="checkbox"
+                          className="size-3.5 accent-primary"
+                          aria-label={`${row.no} ${row.name || row.styleNo} 인쇄 선택`}
+                          checked={printSelected}
+                          onChange={() => togglePrintRow(row.key)}
+                        />
+                      </td>
                       {UNLOAD_COLUMNS.map((column) => {
                         if (column.key === 'photo') {
                           return (
@@ -480,11 +542,15 @@ export function CargoUnloadListDialog({
                         }
 
                         const value = row[column.key]
+                        const isNote = column.key === 'note'
                         return (
                           <td
                             key={`${row.key}-${column.key}`}
                             className={cn(
-                              'h-11 overflow-hidden whitespace-nowrap border-b border-r border-border px-1 align-middle text-sm leading-tight text-foreground last:border-r-0',
+                              'border-b border-r border-border px-1 align-middle text-sm leading-tight text-foreground last:border-r-0',
+                              isNote
+                                ? 'min-h-11 whitespace-pre-line'
+                                : 'h-11 overflow-hidden whitespace-nowrap',
                               column.align === 'left'
                                 ? 'text-left'
                                 : 'text-center',
@@ -504,7 +570,8 @@ export function CargoUnloadListDialog({
                         )
                       })}
                     </tr>
-                  ))}
+                    )
+                  })}
                 </tbody>
               </table>
             )}
@@ -522,7 +589,7 @@ export function CargoUnloadListDialog({
             {title} {copy.label}
           </h1>
           <p>
-            {brandName} · {title} · {formatNumber(productCount)}종 ·{' '}
+            {brandName} · {title} · {formatNumber(printRows.length)}행 ·{' '}
             {printOrientationLabel}
           </p>
           <table>
@@ -538,8 +605,8 @@ export function CargoUnloadListDialog({
                 ))}
               </tr>
             </thead>
-            <tbody>
-              {rows.map((row) => (
+            <tbody key={printRows.map((row) => row.key).join('|')}>
+              {printRows.map((row) => (
                 <tr key={`print-${row.key}`}>
                   {UNLOAD_COLUMNS.map((column) => {
                     if (column.key === 'photo') {

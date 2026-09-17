@@ -10,7 +10,7 @@ import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage } from '@/lib/supabase/map-error'
 
 const SHIPMENT_COLUMNS =
-  'id, brand_id, shipment_no, stage, shipped_on, scheduled_inbound_on, port_contact_note, vessel_name, origin_port, warehouse_summary, completed_at, created_at, updated_at, cargo_inbound_lines(id, source_row_no, item_no, product_name, source_style_no, quantity, units_per_box, box_count, photo_ref, note)'
+  'id, brand_id, shipment_no, stage, shipped_on, scheduled_inbound_on, port_contact_note, vessel_name, origin_port, warehouse_summary, completed_at, created_at, updated_at, cargo_inbound_lines(id, source_row_no, item_no, product_name, source_style_no, quantity, units_per_box, box_count, photo_ref, note, request_note)'
 
 type CargoInboundLineRow = {
   id: string
@@ -23,6 +23,7 @@ type CargoInboundLineRow = {
   box_count: number | null
   photo_ref: string
   note: string
+  request_note: string
 }
 
 type CargoInboundShipmentRow = {
@@ -80,6 +81,7 @@ function toShipment(row: CargoInboundShipmentRow): CargoInboundShipment {
   const lines = [...(row.cargo_inbound_lines ?? [])]
     .sort((left, right) => left.source_row_no - right.source_row_no)
     .map((line) => ({
+      id: line.id,
       no: line.item_no,
       name: line.product_name,
       photo: line.photo_ref,
@@ -88,6 +90,7 @@ function toShipment(row: CargoInboundShipmentRow): CargoInboundShipment {
       perBox: formatOptionalInteger(line.units_per_box),
       boxes: formatOptionalInteger(line.box_count),
       note: line.note,
+      requestNote: line.request_note,
     }))
 
   return {
@@ -205,6 +208,36 @@ export async function scheduleCargoInbound(
   if (error || !data) {
     throw new CargoInboundStoreError(
       errorMessage(error, '화물 입고일을 저장하지 못했습니다.'),
+    )
+  }
+}
+
+export async function saveCargoInboundRequestNotes(
+  brandId: string,
+  notes: ReadonlyArray<{ lineId: string; requestNote: string }>,
+): Promise<void> {
+  if (!brandId.trim()) {
+    throw new CargoInboundStoreError('브랜드를 선택하세요.')
+  }
+  const rows = notes.filter((note) => note.lineId.trim())
+  if (rows.length === 0) return
+
+  const results = await Promise.all(
+    rows.map((note) =>
+      getSupabase()
+        .from('cargo_inbound_lines')
+        .update({ request_note: note.requestNote.trim() })
+        .eq('brand_id', brandId)
+        .eq('id', note.lineId)
+        .select('id')
+        .maybeSingle(),
+    ),
+  )
+
+  const failed = results.find((result) => result.error || !result.data)
+  if (failed) {
+    throw new CargoInboundStoreError(
+      errorMessage(failed.error, '요청 사항을 저장하지 못했습니다.'),
     )
   }
 }

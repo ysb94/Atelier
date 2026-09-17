@@ -1,6 +1,7 @@
 export type CargoInboundStage = 'shipped' | 'scheduled' | 'done'
 
 export type CargoInboundLineDraft = {
+  id: string
   no: string
   name: string
   photo: string
@@ -9,6 +10,7 @@ export type CargoInboundLineDraft = {
   perBox: string
   boxes: string
   note: string
+  requestNote: string
 }
 
 export function parseCargoInteger(
@@ -25,7 +27,27 @@ export function parseCargoInteger(
 }
 
 export function cargoLineHasContent(row: CargoInboundLineDraft): boolean {
-  return Object.values(row).some((value) => value.trim().length > 0)
+  return [
+    row.no,
+    row.name,
+    row.photo,
+    row.styleNo,
+    row.qty,
+    row.perBox,
+    row.boxes,
+    row.note,
+  ].some((value) => value.trim().length > 0)
+}
+
+/** 등록 비고를 유지하고, 요청 사항은 그 아래 줄에 붙인다. */
+export function formatCargoWarehouseNote(
+  note: string,
+  requestNote: string,
+): string {
+  const original = note.trim()
+  const request = requestNote.trim()
+  if (original && request) return `${original}\n${request}`
+  return request || original
 }
 
 /** 하차용 한 칸에 올릴 수 있는 박스수+최신박스수 한도 */

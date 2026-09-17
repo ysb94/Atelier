@@ -78,6 +78,7 @@ function parseCount(value: string) {
 
 function emptyDraftRow(): CargoDraftRow {
   return {
+    id: '',
     no: '',
     name: '',
     photo: '',
@@ -86,6 +87,7 @@ function emptyDraftRow(): CargoDraftRow {
     perBox: '',
     boxes: '',
     note: '',
+    requestNote: '',
   }
 }
 
@@ -110,6 +112,7 @@ function parseCargoPasteText(text: string): CargoDraftRow[] {
     // 엑셀 사진 열은 셀 이미지/수식이라 붙여넣기 값이 비거나 쓸모없다.
     // M번호(모델명 열)로 물류 이미지를 따로 불러온다.
     return {
+      id: '',
       no: (cells[0] ?? '').trim() || String(index + 1),
       name: (cells[1] ?? '').trim(),
       photo: '',
@@ -118,6 +121,7 @@ function parseCargoPasteText(text: string): CargoDraftRow[] {
       perBox: (cells[5] ?? '').trim(),
       boxes: (cells[6] ?? '').trim(),
       note: (cells[7] ?? '').trim(),
+      requestNote: '',
     }
   })
 }

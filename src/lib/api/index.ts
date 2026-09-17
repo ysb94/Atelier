@@ -693,6 +693,14 @@ export async function scheduleCargoInbound(
   )
 }
 
+export async function saveCargoInboundRequestNotes(
+  brandId: string,
+  notes: ReadonlyArray<{ lineId: string; requestNote: string }>,
+) {
+  await delay()
+  return cargoInboundStore.saveCargoInboundRequestNotes(brandId, notes)
+}
+
 export async function searchWarehouseFinder(
   brandId: string,
   mode: WarehouseFinderSearchMode,
