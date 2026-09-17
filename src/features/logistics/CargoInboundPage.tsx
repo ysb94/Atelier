@@ -18,6 +18,7 @@ import type { CargoInboundRegisterPayload } from '@/features/logistics/CargoInbo
 import { CargoInboundDetailPanel } from '@/features/logistics/CargoInboundDetailPanel'
 import { formatCargoInboundTitle } from '@/features/logistics/cargo-inbound-title'
 import {
+  completeCargoInbound,
   getCargoInbounds,
   saveCargoInbound,
   saveCargoInboundRequestNotes,
@@ -120,6 +121,10 @@ export function CompanyCargoInboundPage() {
       brandId: string
       notes: Array<{ lineId: string; requestNote: string }>
     }) => saveCargoInboundRequestNotes(input.brandId, input.notes),
+  })
+  const completeMutation = useMutation({
+    mutationFn: (input: { brandId: string; shipmentId: string }) =>
+      completeCargoInbound(input.brandId, input.shipmentId),
   })
   const items = useMemo<CargoInboundItem[]>(
     () =>
@@ -233,6 +238,21 @@ export function CompanyCargoInboundPage() {
     await queryClient.invalidateQueries({ queryKey: ['cargo-inbounds'] })
   }
 
+  async function handleComplete() {
+    if (!selectedItem) return
+    await completeMutation.mutateAsync({
+      brandId: selectedItem.brandId,
+      shipmentId: selectedItem.id,
+    })
+    await queryClient.invalidateQueries({ queryKey: ['cargo-inbounds'] })
+    setSelectedId(null)
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current)
+      next.set('tab', 'done')
+      return next
+    })
+  }
+
   return (
     <div>
       <PageHeader
@@ -252,6 +272,7 @@ export function CompanyCargoInboundPage() {
           onBack={() => setSelectedId(null)}
           onSaveInboundDate={handleSaveInboundDate}
           onSaveRequestNotes={handleSaveRequestNotes}
+          onComplete={handleComplete}
         />
       ) : (
         <>
@@ -401,7 +422,7 @@ function CargoInboundRow({
             <div className="space-y-1 text-sm">
               <p className="inline-flex items-center gap-1.5 font-medium">
                 <MapPin className="size-3.5 text-primary" />
-                {item.warehouseSummary ?? '창고 자리 입력 완료'}
+                {item.warehouseSummary.trim() || '창고 자리 입력 완료'}
               </p>
               <p className="text-muted-foreground">
                 입고 {formatDate(item.scheduledInboundAt)} · 정리 완료{' '}

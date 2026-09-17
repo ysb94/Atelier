@@ -585,3 +585,91 @@ export async function openWarehouseStock(
     reason,
   })
 }
+
+export type WarehouseRegisteredSlot = {
+  warehouseId: string
+  code: string
+  zone: WarehouseZone
+}
+
+type RegisteredSlotRow = {
+  warehouse_id: string
+  code: string
+  zone: WarehouseZone
+}
+
+export async function listWarehouseRegisteredSlots(
+  warehouseId: string,
+): Promise<WarehouseRegisteredSlot[]> {
+  if (!warehouseId.trim()) return []
+  const { data, error } = await getSupabase()
+    .from('warehouse_registered_slots')
+    .select('warehouse_id, code, zone')
+    .eq('warehouse_id', warehouseId)
+    .order('code', { ascending: true })
+  if (error) {
+    throw new WarehouseStockStoreError(
+      errorMessage(error, '창고 자리 등록을 불러오지 못했습니다.'),
+    )
+  }
+  return ((data as RegisteredSlotRow[]) ?? []).map((row) => ({
+    warehouseId: row.warehouse_id,
+    code: row.code,
+    zone: row.zone,
+  }))
+}
+
+export async function saveWarehouseRegisteredSlots(
+  warehouseId: string,
+  zone: WarehouseZone,
+  codes: readonly string[],
+): Promise<void> {
+  if (!warehouseId.trim()) {
+    throw new WarehouseStockStoreError('창고를 확인하세요.')
+  }
+  const nextCodes = [
+    ...new Set(codes.map((code) => code.trim()).filter(Boolean)),
+  ]
+  const existing = await listWarehouseRegisteredSlots(warehouseId)
+  const currentZoneCodes = existing
+    .filter((slot) => slot.zone === zone)
+    .map((slot) => slot.code)
+  const currentZoneSet = new Set(currentZoneCodes)
+  const nextSet = new Set(nextCodes)
+  const toDelete = currentZoneCodes.filter((code) => !nextSet.has(code))
+  const toUpsert = nextCodes.filter((code) => {
+    const current = existing.find((slot) => slot.code === code)
+    return !currentZoneSet.has(code) || current?.zone !== zone
+  })
+
+  if (toDelete.length > 0) {
+    const { error } = await getSupabase()
+      .from('warehouse_registered_slots')
+      .delete()
+      .eq('warehouse_id', warehouseId)
+      .eq('zone', zone)
+      .in('code', toDelete)
+    if (error) {
+      throw new WarehouseStockStoreError(
+        errorMessage(error, '창고 자리를 저장하지 못했습니다.'),
+      )
+    }
+  }
+
+  if (toUpsert.length === 0) return
+  const { error } = await getSupabase()
+    .from('warehouse_registered_slots')
+    .upsert(
+      toUpsert.map((code) => ({
+        warehouse_id: warehouseId,
+        code,
+        zone,
+      })),
+      { onConflict: 'warehouse_id,code' },
+    )
+  if (error) {
+    throw new WarehouseStockStoreError(
+      errorMessage(error, '창고 자리를 저장하지 못했습니다.'),
+    )
+  }
+}

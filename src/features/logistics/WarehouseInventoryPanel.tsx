@@ -275,7 +275,7 @@ export function WarehouseInventoryPanel({
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
+        <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="warning">연습 데이터</Badge>
             {activeSet ? (
@@ -298,11 +298,6 @@ export function WarehouseInventoryPanel({
               </span>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">
-            엑셀·시트가 원본입니다. 사이트 숫자는 송장 예약·실재고와 연결하지 않습니다.
-            사용 순서는 최우선(000000) → 차순위(000001) → 입고일 → 마지막(999999·//)입니다.
-            수량 미확인 행은 총재고와 FIFO에서 빼고, 수량 작업은 하지 않습니다.
-          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <Button

@@ -594,6 +594,24 @@ export async function getWarehouseStockMovements(
   )
 }
 
+export async function getWarehouseRegisteredSlots(warehouseId: string) {
+  await delay()
+  return warehouseStockStore.listWarehouseRegisteredSlots(warehouseId)
+}
+
+export async function saveWarehouseRegisteredSlots(
+  warehouseId: string,
+  zone: WarehouseZone,
+  codes: readonly string[],
+) {
+  await delay()
+  return warehouseStockStore.saveWarehouseRegisteredSlots(
+    warehouseId,
+    zone,
+    codes,
+  )
+}
+
 export async function importWarehouseInventorySet(
   brandId: string,
   sourceFileName: string,
@@ -699,6 +717,14 @@ export async function saveCargoInboundRequestNotes(
 ) {
   await delay()
   return cargoInboundStore.saveCargoInboundRequestNotes(brandId, notes)
+}
+
+export async function completeCargoInbound(
+  brandId: string,
+  shipmentId: string,
+) {
+  await delay()
+  return cargoInboundStore.completeCargoInbound(brandId, shipmentId)
 }
 
 export async function searchWarehouseFinder(

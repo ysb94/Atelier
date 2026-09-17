@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ArrowLeft, CalendarDays, MessageSquareText } from 'lucide-react'
+import { ArrowLeft, CalendarDays, CheckCircle2, MessageSquareText } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -38,6 +38,7 @@ type CargoInboundDetailPanelProps = {
   onSaveRequestNotes: (
     notes: Array<{ lineId: string; requestNote: string }>,
   ) => Promise<void>
+  onComplete: () => Promise<void>
 }
 
 function formatDate(value: string | null) {
@@ -56,6 +57,7 @@ export function CargoInboundDetailPanel({
   onBack,
   onSaveInboundDate,
   onSaveRequestNotes,
+  onComplete,
 }: CargoInboundDetailPanelProps) {
   const title = formatCargoInboundTitle(item.shippedAt, item.boxCount)
   const [inboundDate, setInboundDate] = useState(
@@ -64,6 +66,7 @@ export function CargoInboundDetailPanel({
   const [note, setNote] = useState(item.portContactNote ?? '')
   const [status, setStatus] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [completing, setCompleting] = useState(false)
   const [requestOpen, setRequestOpen] = useState(false)
 
   async function saveInboundDate() {
@@ -82,6 +85,24 @@ export function CargoInboundDetailPanel({
       )
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function completeShipment() {
+    setCompleting(true)
+    setStatus(null)
+    try {
+      await onComplete()
+    } catch (error) {
+      console.warn('[cargo-inbound] 완료 처리 실패', {
+        shipmentId: item.id,
+        error,
+      })
+      setStatus(
+        error instanceof Error ? error.message : '완료 처리에 실패했습니다.',
+      )
+    } finally {
+      setCompleting(false)
     }
   }
 
@@ -148,15 +169,30 @@ export function CargoInboundDetailPanel({
                 : ''}
             </p>
           </div>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            onClick={() => setRequestOpen(true)}
-          >
-            <MessageSquareText className="size-3.5" />
-            요청 사항
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setRequestOpen(true)}
+            >
+              <MessageSquareText className="size-3.5" />
+              요청 사항
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              disabled={item.stage !== 'scheduled' || completing}
+              onClick={() => void completeShipment()}
+            >
+              <CheckCircle2 className="size-3.5" />
+              {item.stage === 'done'
+                ? '완료됨'
+                : completing
+                  ? '완료 중...'
+                  : '완료'}
+            </Button>
+          </div>
         </div>
       </div>
 
