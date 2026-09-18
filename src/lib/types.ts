@@ -737,6 +737,13 @@ export type WarehouseStockAction =
   | 'open'
   | 'label'
 export type WarehouseBoxStatus = 'sealed' | 'opened' | 'depleted'
+export type WarehouseBoxAction =
+  | 'create'
+  | 'update'
+  | 'move'
+  | 'open'
+  | 'deplete'
+  | 'archive'
 
 export type WarehouseInventorySet = {
   id: string
@@ -793,7 +800,7 @@ export type WarehouseStockPosition = {
 export type WarehouseBox = {
   id: string
   brandId: string
-  setId: string
+  setId: string | null
   displayCode: string
   locationId: string
   locationCode: string
@@ -805,6 +812,31 @@ export type WarehouseBox = {
   initialQty: number
   currentQty: number
   status: WarehouseBoxStatus
+  usagePriority: WarehouseUsagePriority
+  note: string
+  sourcePositionId: string | null
+  createdBy: string | null
+  archivedAt: string | null
+  archivedBy: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type WarehouseBoxMovement = {
+  id: string
+  brandId: string
+  boxId: string
+  action: WarehouseBoxAction
+  fromLocationId: string | null
+  fromLocationCode: string | null
+  fromZone: WarehouseZone | null
+  toLocationId: string | null
+  toLocationCode: string | null
+  toZone: WarehouseZone | null
+  fromQty: number | null
+  toQty: number | null
+  reason: string
+  actorId: string | null
   createdAt: string
 }
 

@@ -55,6 +55,7 @@ function pageLayoutFor(pathname: string) {
     pathname.includes('/logistics/bulk-outbound') ||
     pathname.includes('/logistics/finder') ||
     pathname.includes('/logistics/warehouses') ||
+    pathname.includes('/logistics/temporary-warehouse') ||
     pathname.includes('/logistics/cargo-inbound')
   ) {
     return 'wide' as const

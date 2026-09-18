@@ -51,6 +51,8 @@ import type {
   SeasonInput,
   Style,
   StyleInput,
+  WarehouseBox,
+  WarehouseBoxMovement,
   WarehouseInventorySet,
   WarehouseStockMovement,
   WarehouseStockPosition,
@@ -138,6 +140,9 @@ export {
 } from '@/lib/supabase/warehouse-stock'
 export type {
   WarehouseAdjustInput,
+  WarehouseBoxCreateInput,
+  WarehouseBoxMoveInput,
+  WarehouseBoxUpdateInput,
   WarehouseInventorySetRealtimeStatus,
   WarehouseMoveInput,
   WarehouseReceiveInput,
@@ -682,6 +687,57 @@ export async function openWarehouseStock(
     boxCount,
     reason,
   )
+}
+
+export async function getWarehouseBoxes(
+  brandId: string,
+  options?: { includeArchived?: boolean },
+): Promise<WarehouseBox[]> {
+  await delay()
+  return warehouseStockStore.listWarehouseBoxes(brandId, options)
+}
+
+export async function getWarehouseBoxMovements(
+  brandId: string,
+  boxId?: string,
+): Promise<WarehouseBoxMovement[]> {
+  await delay()
+  return warehouseStockStore.listWarehouseBoxMovements(brandId, boxId)
+}
+
+export async function createWarehouseBox(
+  brandId: string,
+  input: warehouseStockStore.WarehouseBoxCreateInput,
+): Promise<WarehouseBox> {
+  await delay()
+  return warehouseStockStore.createWarehouseBox(brandId, input)
+}
+
+export async function updateWarehouseBox(
+  brandId: string,
+  boxId: string,
+  input: warehouseStockStore.WarehouseBoxUpdateInput,
+): Promise<WarehouseBox> {
+  await delay()
+  return warehouseStockStore.updateWarehouseBox(brandId, boxId, input)
+}
+
+export async function moveWarehouseBox(
+  brandId: string,
+  boxId: string,
+  input: warehouseStockStore.WarehouseBoxMoveInput,
+): Promise<WarehouseBox> {
+  await delay()
+  return warehouseStockStore.moveWarehouseBox(brandId, boxId, input)
+}
+
+export async function archiveWarehouseBox(
+  brandId: string,
+  boxId: string,
+  reason?: string,
+): Promise<WarehouseBox> {
+  await delay()
+  return warehouseStockStore.archiveWarehouseBox(brandId, boxId, reason)
 }
 
 export async function getCargoInbounds(brandIds: readonly string[]) {

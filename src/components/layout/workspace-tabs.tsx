@@ -76,6 +76,10 @@ const NAV_LABELS: {
   { match: /^\/logistics\/bulk-outbound(?:\/|$)/, label: '물류 · 바코드 출고' },
   { match: /^\/logistics\/finder(?:\/|$)/, label: '물류 · 창고 파인더' },
   { match: /^\/logistics\/warehouses(?:\/|$)/, label: '물류 · 창고 관리' },
+  {
+    match: /^\/logistics\/temporary-warehouse(?:\/|$)/,
+    label: '물류 · 임시 창고관리',
+  },
   { match: /^\/logistics\/cargo-inbound(?:\/|$)/, label: '물류 · 화물 입고' },
   { match: /^\/barcodes(?:\/|$)/, label: '88바코드 관리' },
   { match: /^\/usage-codes(?:\/|$)/, label: '출고업체별 바코드' },

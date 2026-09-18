@@ -52,7 +52,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 송장 내품명 부속품 사전(`invoice_accessory_rules`) | Supabase |
 | 송장 기준정보 포장 규격 간단값(`invoice_packing_size_maps`) | Supabase |
 | 송장 피킹표 동선 사전(`invoice_picking_route_presets`) | Supabase |
-| 연습 창고 세트·자리·미식별 재고·박스 ID·이력·출고 자리 등록(`warehouses` + `warehouse_locations` + `warehouse_inventory_sets` + `warehouse_stock_positions` + `warehouse_boxes` + `warehouse_stock_movements` + `warehouse_registered_slots`) | Supabase |
+| 연습 창고 세트·자리·미식별 재고·박스 ID·이력·출고 자리 등록(`warehouses` + `warehouse_locations` + `warehouse_inventory_sets` + `warehouse_stock_positions` + `warehouse_boxes` + `warehouse_stock_movements` + `warehouse_box_movements` + `warehouse_registered_slots`) | Supabase |
 | 화문 선적 화물·SKU별 입고 명세(`cargo_inbound_shipments` + `cargo_inbound_lines`) | Supabase |
 | 송장 사은품 증정 요청 건(`invoice_prefix_requests` + `invoice_prefix_items` + `invoice_prefix_item_products`, 앱 모델명 Gift) | Supabase |
 | 송장 사은품 선착순 한도·배정 원장(`invoice_prefix_requests` 한도 필드 + `invoice_gift_quotas` + `invoice_gift_allocations`) | Supabase |
@@ -87,6 +87,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `delete_invoice_work_run`,
   `import_warehouse_inventory_set`, `apply_warehouse_stock_action`,
   `restore_warehouse_inventory_set`, `replace_warehouse_inventory_snapshot`,
+  `create_warehouse_box`, `update_warehouse_box`, `move_warehouse_box`,
+  `archive_warehouse_box`,
   `search_warehouse_finder_rows`, `list_warehouse_finder_inbounds`.
   화문 입고 원자 등록은 `save_cargo_inbound`를 사용한다.
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
@@ -656,7 +658,18 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - `warehouse_registered_slots`는 창고 안에서 자리번호가 속하는 구역이다.
   등록된 `picking` 자리만 출고창고로 분류하고, 없으면 박스창고다. 기존 연습
   세트의 존별 자리 중복은 그대로 두고, 앞으로의 자동 분류만 이 등록표를 쓴다.
-  `warehouse_boxes`는 향후 고유 박스 ID용이며 첫 적재는 비운다.
+  `warehouse_boxes`는 고유 박스 ID 원장이다. 연습 스냅샷에 묶이지 않게
+  `set_id`를 비울 수 있고, 브랜드 안 박스번호는 하나여야 한다.
+  `0 <= current_qty <= initial_qty` 와 브랜드·상품·자리 경계를 제약으로
+  강제한다. 1차 범위의 임시 창고관리는 이 테이블에만 등록·수정·이동·보관하며
+  `warehouse_stock_positions` 차감이나 라벨 전환은 하지 않는다.
+  이력은 `warehouse_box_movements`에 남기고 hard delete 대신 `archived_at`을
+  쓴다. RPC는 `create_warehouse_box` / `update_warehouse_box` /
+  `move_warehouse_box` / `archive_warehouse_box`다.
+  박스창고(`box_storage`)의 개별 박스는 항상 밀봉 상태
+  (`current_qty = initial_qty`)여야 한다. 개봉·수량 차감·소진은 먼저
+  출고창고(`picking`)의 택배 포장 또는 대량 출고 자리로 이동한 뒤에만
+  허용하며, 트리거가 직접 테이블 쓰기와 모든 RPC 경로에 이 규칙을 강제한다.
 - 읽기는 `app.can_read_brand`, 쓰기와 RPC는 `app.can_edit_brand`다. 회사 공통
   창고/자리 RLS는 같은 회사 브랜드 멤버십으로 판별한다.
 - `import_warehouse_inventory_set`과 `apply_warehouse_stock_action`은

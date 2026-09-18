@@ -35,6 +35,7 @@ import { CompanyOutboundDataPage } from '@/features/logistics/OutboundDataPage'
 import { CompanyWarehousePage } from '@/features/logistics/WarehousePage'
 import { CompanyWarehouseFinderPage } from '@/features/logistics/WarehouseFinderPage'
 import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
+import { CompanyTemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
 
 function RedirectTo({ to }: { to: string }) {
   return <Navigate to={to} replace />
@@ -141,6 +142,10 @@ export const companyWorkspaceRoutes = (
       <Route path="logistics/bulk-outbound" element={<CompanyBulkOutboundPage />} />
       <Route path="logistics/finder" element={<CompanyWarehouseFinderPage />} />
       <Route path="logistics/warehouses" element={<CompanyWarehousePage />} />
+      <Route
+        path="logistics/temporary-warehouse"
+        element={<CompanyTemporaryWarehousePage />}
+      />
       <Route
         path="logistics/cargo-inbound"
         element={<CompanyCargoInboundPage />}

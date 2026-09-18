@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
-import { Loader2, Package, Printer, Warehouse, X } from 'lucide-react'
+import {
+  Download,
+  Loader2,
+  Package,
+  Printer,
+  Warehouse,
+  X,
+} from 'lucide-react'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
@@ -208,6 +215,14 @@ function clearUnloadPrintMode(printClass: string, printStyleId: string) {
   document.getElementById(printStyleId)?.remove()
 }
 
+function safeExcelFileName(value: string) {
+  const safe = value
+    .trim()
+    .replace(/[\\/:*?"<>|]+/g, '_')
+    .replace(/\s+/g, '_')
+  return safe || '화물입고'
+}
+
 function UnloadPhoto({
   styleNo,
   name,
@@ -244,6 +259,8 @@ export function CargoUnloadListDialog({
   const [openedAt] = useState(() => Date.now())
   const [printOrientation, setPrintOrientation] =
     useState<PrintOrientation>('auto')
+  const [downloadingExcel, setDownloadingExcel] = useState(false)
+  const [excelError, setExcelError] = useState<string | null>(null)
   const [uncheckedKeys, setUncheckedKeys] = useState<Set<string>>(
     () => new Set(),
   )
@@ -377,6 +394,70 @@ export function CargoUnloadListDialog({
     )
   }
 
+  async function handleDownloadExcel() {
+    if (loading || downloadingExcel || printRows.length === 0) return
+    setDownloadingExcel(true)
+    setExcelError(null)
+    try {
+      const XLSX = await import('xlsx')
+      const headers = UNLOAD_COLUMNS.map((column) =>
+        column.key === 'photo' ? '사진 URL' : column.label,
+      )
+      const body = printRows.map((row) =>
+        UNLOAD_COLUMNS.map((column) => {
+          if (column.key === 'photo') {
+            return (
+              ruleImageUrls(row.styleNo, LOGISTICS_IMAGE_KEY)[0] ?? ''
+            )
+          }
+          return row[column.key]
+        }),
+      )
+      const sheet = XLSX.utils.aoa_to_sheet([headers, ...body])
+      sheet['!cols'] = [
+        { wch: 7 },
+        { wch: 30 },
+        { wch: 48 },
+        { wch: 14 },
+        { wch: 12 },
+        { wch: 10 },
+        { wch: 10 },
+        { wch: 12 },
+        { wch: 14 },
+        { wch: 32 },
+        { wch: 12 },
+        { wch: 18 },
+        { wch: 12 },
+      ]
+      if (sheet['!ref']) {
+        sheet['!autofilter'] = { ref: sheet['!ref'] }
+      }
+      const workbook = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(
+        workbook,
+        sheet,
+        purpose === 'warehouse' ? '창고정리용' : '하차용',
+      )
+      XLSX.writeFile(
+        workbook,
+        `${safeExcelFileName(title)}_${copy.label}.xlsx`,
+      )
+    } catch (error) {
+      console.warn('[cargo-inbound] 목록 엑셀 다운로드 실패', {
+        purpose,
+        title,
+        error,
+      })
+      setExcelError(
+        error instanceof Error
+          ? error.message
+          : '엑셀을 만들지 못했습니다.',
+      )
+    } finally {
+      setDownloadingExcel(false)
+    }
+  }
+
   return createPortal(
     <WorkspaceTabOverlay>
       <>
@@ -426,6 +507,9 @@ export function CargoUnloadListDialog({
                   최신 자리를 불러오지 못했습니다.
                 </span>
               ) : null}
+              {excelError ? (
+                <span className="text-xs text-danger">{excelError}</span>
+              ) : null}
             </div>
             <div className="flex items-center gap-1.5">
               <label
@@ -457,6 +541,24 @@ export function CargoUnloadListDialog({
                 <Printer className="size-3.5" />
                 인쇄
               </Button>
+              {purpose === 'warehouse' ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={
+                    loading || downloadingExcel || printRows.length === 0
+                  }
+                  onClick={() => void handleDownloadExcel()}
+                >
+                  {downloadingExcel ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Download className="size-3.5" />
+                  )}
+                  {downloadingExcel ? '엑셀 생성 중...' : '엑셀 다운로드'}
+                </Button>
+              ) : null}
             </div>
           </div>
 

@@ -1,4 +1,8 @@
 import type {
+  WarehouseBox,
+  WarehouseBoxAction,
+  WarehouseBoxMovement,
+  WarehouseBoxStatus,
   WarehouseInventoryKind,
   WarehouseInventorySet,
   WarehouseInventoryStatus,
@@ -18,7 +22,7 @@ import {
   type PreparedWarehouseImportRow,
 } from '@/lib/warehouse/stock'
 import { getSupabase } from '@/lib/supabase/client'
-import { errorMessage } from '@/lib/supabase/map-error'
+import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 
 const PAGE_SIZE = 1000
 const REVIEW_FLAGS = new Set<WarehouseReviewFlag>([
@@ -42,6 +46,23 @@ const POSITION_COLUMNS =
 const LOCATION_COLUMNS = 'id, warehouse_id, code, zone'
 const MOVEMENT_COLUMNS =
   'id, brand_id, set_id, action, position_id, box_id, style_id, from_location_code, to_location_code, box_count, unit_count, reason, actor_id, created_at'
+const BOX_COLUMNS =
+  'id, brand_id, set_id, display_code, location_id, style_id, received_on, initial_qty, current_qty, status, usage_priority, note, source_position_id, created_by, archived_at, archived_by, created_at, updated_at, warehouse_locations!warehouse_boxes_location_fkey(code, zone), styles!warehouse_boxes_style_fkey(style_no, name)'
+const BOX_MOVEMENT_COLUMNS =
+  'id, brand_id, box_id, action, from_location_id, from_location_code, from_zone, to_location_id, to_location_code, to_zone, from_qty, to_qty, reason, actor_id, created_at'
+const BOX_STATUSES = new Set<WarehouseBoxStatus>([
+  'sealed',
+  'opened',
+  'depleted',
+])
+const BOX_ACTIONS = new Set<WarehouseBoxAction>([
+  'create',
+  'update',
+  'move',
+  'open',
+  'deplete',
+  'archive',
+])
 
 export class WarehouseStockStoreError extends Error {
   constructor(message: string) {
@@ -148,6 +169,77 @@ export type WarehouseAdjustInput = {
   openedUnits: number
   unitsPerBox?: number
   reason?: string
+}
+
+export type WarehouseBoxCreateInput = {
+  displayCode: string
+  styleId: string
+  locationCode: string
+  zone: WarehouseZone
+  receivedOn: string
+  initialQty: number
+  currentQty: number
+  usagePriority?: WarehouseUsagePriority
+  note?: string
+  sourcePositionId?: string | null
+}
+
+export type WarehouseBoxUpdateInput = {
+  currentQty?: number
+  usagePriority?: WarehouseUsagePriority
+  note?: string
+}
+
+export type WarehouseBoxMoveInput = {
+  locationCode: string
+  zone: WarehouseZone
+}
+
+type BoxRow = {
+  id: string
+  brand_id: string
+  set_id: string | null
+  display_code: string
+  location_id: string
+  style_id: string
+  received_on: string | null
+  initial_qty: number
+  current_qty: number
+  status: string
+  usage_priority: string | null
+  note: string | null
+  source_position_id: string | null
+  created_by: string | null
+  archived_at: string | null
+  archived_by: string | null
+  created_at: string
+  updated_at: string
+  warehouse_locations?:
+    | { code: string; zone: WarehouseZone }
+    | Array<{ code: string; zone: WarehouseZone }>
+    | null
+  styles?:
+    | { style_no: string; name: string }
+    | Array<{ style_no: string; name: string }>
+    | null
+}
+
+type BoxMovementRow = {
+  id: string
+  brand_id: string
+  box_id: string
+  action: string
+  from_location_id: string | null
+  from_location_code: string | null
+  from_zone: string | null
+  to_location_id: string | null
+  to_location_code: string | null
+  to_zone: string | null
+  from_qty: number | null
+  to_qty: number | null
+  reason: string
+  actor_id: string | null
+  created_at: string
 }
 
 function toSet(row: InventorySetRow): WarehouseInventorySet {
@@ -257,6 +349,87 @@ function toMovement(row: MovementRow): WarehouseStockMovement {
     actorId: row.actor_id,
     createdAt: row.created_at,
   }
+}
+
+function firstEmbed<T>(value: T | T[] | null | undefined): T | undefined {
+  if (!value) return undefined
+  return Array.isArray(value) ? value[0] : value
+}
+
+function toBoxStatus(value: string): WarehouseBoxStatus {
+  return BOX_STATUSES.has(value as WarehouseBoxStatus)
+    ? (value as WarehouseBoxStatus)
+    : 'sealed'
+}
+
+function toBoxAction(value: string): WarehouseBoxAction {
+  return BOX_ACTIONS.has(value as WarehouseBoxAction)
+    ? (value as WarehouseBoxAction)
+    : 'update'
+}
+
+function toBoxZone(value: string | null | undefined): WarehouseZone {
+  return value === 'picking' ? 'picking' : 'box_storage'
+}
+
+function toBox(row: BoxRow): WarehouseBox {
+  const location = firstEmbed(row.warehouse_locations)
+  const style = firstEmbed(row.styles)
+  return {
+    id: row.id,
+    brandId: row.brand_id,
+    setId: row.set_id,
+    displayCode: row.display_code,
+    locationId: row.location_id,
+    locationCode: location?.code ?? '',
+    zone: toBoxZone(location?.zone),
+    styleId: row.style_id,
+    styleNo: style?.style_no ?? '',
+    styleName: style?.name ?? '',
+    receivedOn: row.received_on,
+    initialQty: row.initial_qty,
+    currentQty: row.current_qty,
+    status: toBoxStatus(row.status),
+    usagePriority: USAGE_PRIORITIES.has(
+      row.usage_priority as WarehouseUsagePriority,
+    )
+      ? (row.usage_priority as WarehouseUsagePriority)
+      : 'fifo',
+    note: row.note ?? '',
+    sourcePositionId: row.source_position_id,
+    createdBy: row.created_by,
+    archivedAt: row.archived_at,
+    archivedBy: row.archived_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function toBoxMovement(row: BoxMovementRow): WarehouseBoxMovement {
+  return {
+    id: row.id,
+    brandId: row.brand_id,
+    boxId: row.box_id,
+    action: toBoxAction(row.action),
+    fromLocationId: row.from_location_id,
+    fromLocationCode: row.from_location_code,
+    fromZone: row.from_zone ? toBoxZone(row.from_zone) : null,
+    toLocationId: row.to_location_id,
+    toLocationCode: row.to_location_code,
+    toZone: row.to_zone ? toBoxZone(row.to_zone) : null,
+    fromQty: row.from_qty,
+    toQty: row.to_qty,
+    reason: row.reason,
+    actorId: row.actor_id,
+    createdAt: row.created_at,
+  }
+}
+
+function boxRpcError(error: { code?: string; message?: string } | null, fallback: string) {
+  if (error && isUniqueViolation(error)) {
+    return '이미 등록된 박스 고유번호입니다.'
+  }
+  return errorMessage(error, fallback)
 }
 
 export async function listWarehouseInventorySets(
@@ -602,21 +775,30 @@ export async function listWarehouseRegisteredSlots(
   warehouseId: string,
 ): Promise<WarehouseRegisteredSlot[]> {
   if (!warehouseId.trim()) return []
-  const { data, error } = await getSupabase()
-    .from('warehouse_registered_slots')
-    .select('warehouse_id, code, zone')
-    .eq('warehouse_id', warehouseId)
-    .order('code', { ascending: true })
-  if (error) {
-    throw new WarehouseStockStoreError(
-      errorMessage(error, '창고 자리 등록을 불러오지 못했습니다.'),
+  const all: WarehouseRegisteredSlot[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await getSupabase()
+      .from('warehouse_registered_slots')
+      .select('warehouse_id, code, zone')
+      .eq('warehouse_id', warehouseId)
+      .order('code', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) {
+      throw new WarehouseStockStoreError(
+        errorMessage(error, '창고 자리 등록을 불러오지 못했습니다.'),
+      )
+    }
+    const rows = (data as RegisteredSlotRow[]) ?? []
+    all.push(
+      ...rows.map((row) => ({
+        warehouseId: row.warehouse_id,
+        code: row.code,
+        zone: row.zone,
+      })),
     )
+    if (rows.length < PAGE_SIZE) break
   }
-  return ((data as RegisteredSlotRow[]) ?? []).map((row) => ({
-    warehouseId: row.warehouse_id,
-    code: row.code,
-    zone: row.zone,
-  }))
+  return all
 }
 
 export async function saveWarehouseRegisteredSlots(
@@ -672,4 +854,142 @@ export async function saveWarehouseRegisteredSlots(
       errorMessage(error, '창고 자리를 저장하지 못했습니다.'),
     )
   }
+}
+
+export async function listWarehouseBoxes(
+  brandId: string,
+  options?: { includeArchived?: boolean },
+): Promise<WarehouseBox[]> {
+  const supabase = getSupabase()
+  const all: WarehouseBox[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    let query = supabase
+      .from('warehouse_boxes')
+      .select(BOX_COLUMNS)
+      .eq('brand_id', brandId)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, from + PAGE_SIZE - 1)
+    if (!options?.includeArchived) query = query.is('archived_at', null)
+    const { data, error } = await query
+    if (error) {
+      throw new WarehouseStockStoreError(
+        errorMessage(error, '개별 박스를 불러오지 못했습니다.'),
+      )
+    }
+    const rows = (data as BoxRow[]) ?? []
+    all.push(...rows.map(toBox))
+    if (rows.length < PAGE_SIZE) break
+  }
+  return all
+}
+
+export async function listWarehouseBoxMovements(
+  brandId: string,
+  boxId?: string,
+): Promise<WarehouseBoxMovement[]> {
+  const supabase = getSupabase()
+  const all: WarehouseBoxMovement[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    let query = supabase
+      .from('warehouse_box_movements')
+      .select(BOX_MOVEMENT_COLUMNS)
+      .eq('brand_id', brandId)
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false })
+      .range(from, from + PAGE_SIZE - 1)
+    if (boxId) query = query.eq('box_id', boxId)
+    const { data, error } = await query
+    if (error) {
+      throw new WarehouseStockStoreError(
+        errorMessage(error, '개별 박스 이력을 불러오지 못했습니다.'),
+      )
+    }
+    const rows = (data as BoxMovementRow[]) ?? []
+    all.push(...rows.map(toBoxMovement))
+    if (rows.length < PAGE_SIZE) break
+  }
+  return all
+}
+
+export async function createWarehouseBox(
+  brandId: string,
+  input: WarehouseBoxCreateInput,
+): Promise<WarehouseBox> {
+  const { data, error } = await getSupabase().rpc('create_warehouse_box', {
+    p_brand_id: brandId,
+    p_display_code: input.displayCode,
+    p_style_id: input.styleId,
+    p_location_code: input.locationCode,
+    p_zone: input.zone,
+    p_received_on: input.receivedOn,
+    p_initial_qty: input.initialQty,
+    p_current_qty: input.currentQty,
+    p_usage_priority: input.usagePriority ?? 'fifo',
+    p_note: input.note ?? '',
+    p_source_position_id: input.sourcePositionId ?? null,
+  })
+  if (error || !data) {
+    throw new WarehouseStockStoreError(
+      boxRpcError(error, '개별 박스를 등록하지 못했습니다.'),
+    )
+  }
+  return toBox(data as BoxRow)
+}
+
+export async function updateWarehouseBox(
+  brandId: string,
+  boxId: string,
+  input: WarehouseBoxUpdateInput,
+): Promise<WarehouseBox> {
+  const { data, error } = await getSupabase().rpc('update_warehouse_box', {
+    p_brand_id: brandId,
+    p_box_id: boxId,
+    p_current_qty: input.currentQty ?? null,
+    p_usage_priority: input.usagePriority ?? null,
+    p_note: input.note ?? null,
+  })
+  if (error || !data) {
+    throw new WarehouseStockStoreError(
+      boxRpcError(error, '개별 박스를 수정하지 못했습니다.'),
+    )
+  }
+  return toBox(data as BoxRow)
+}
+
+export async function moveWarehouseBox(
+  brandId: string,
+  boxId: string,
+  input: WarehouseBoxMoveInput,
+): Promise<WarehouseBox> {
+  const { data, error } = await getSupabase().rpc('move_warehouse_box', {
+    p_brand_id: brandId,
+    p_box_id: boxId,
+    p_location_code: input.locationCode,
+    p_zone: input.zone,
+  })
+  if (error || !data) {
+    throw new WarehouseStockStoreError(
+      boxRpcError(error, '개별 박스를 이동하지 못했습니다.'),
+    )
+  }
+  return toBox(data as BoxRow)
+}
+
+export async function archiveWarehouseBox(
+  brandId: string,
+  boxId: string,
+  reason?: string,
+): Promise<WarehouseBox> {
+  const { data, error } = await getSupabase().rpc('archive_warehouse_box', {
+    p_brand_id: brandId,
+    p_box_id: boxId,
+    p_reason: reason ?? '',
+  })
+  if (error || !data) {
+    throw new WarehouseStockStoreError(
+      boxRpcError(error, '개별 박스를 보관하지 못했습니다.'),
+    )
+  }
+  return toBox(data as BoxRow)
 }
