@@ -75,7 +75,7 @@ export function revokeProductPhotos(photos: ProductPhotoMap) {
   }
 }
 
-export const OUTPUT_RATIOS = ['1:1', '4:5', '3:4', '16:9'] as const
+export const OUTPUT_RATIOS = ['1:1', '4:5', '3:4', '2:3', '9:16', '16:9'] as const
 
 export const USAGE_PURPOSES = [
   '상세페이지',

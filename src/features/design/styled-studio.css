@@ -11,14 +11,15 @@
 @media(min-width:1600px){.cs-workspace{gap:20px}.cs-chat{min-height:840px}.cs-welcome{min-height:445px}.cs-messages{max-height:720px}}
 @media(max-width:1200px){.conversation-studio{padding:20px}.cs-workspace{gap:14px}.cs-chat{min-height:730px}.cs-sources{padding:14px 16px}}
 @media(max-width:700px){.conversation-studio{padding:14px 10px}.cs-header{align-items:start;margin-bottom:16px}.cs-header-right{flex-direction:column;align-items:end;gap:6px}.cs-save{font-size:8px;max-width:110px;text-align:right}.conversation-studio h1{font-size:19px}.cs-logo{width:34px;height:38px;border-radius:10px}.cs-brand{gap:8px}.cs-eyebrow{font-size:8px;letter-spacing:1.5px}.cs-prototype{align-items:start;font-size:10px;margin-bottom:16px}.cs-prototype strong{display:block}.cs-prototype button{font-size:10px}.cs-workspace{display:flex;flex-direction:column}.cs-workspace>*{width:100%}.cs-photo-grid{grid-template-columns:repeat(3,minmax(0,1fr))}.cs-reference>img{height:180px}.cs-chat{min-height:660px}.cs-chat-header{padding:16px}.cs-tool-details{padding:10px 14px}.cs-tool-details summary small{font-size:8px}.cs-messages{padding:18px 12px;max-height:560px;min-height:360px}.cs-welcome{min-height:360px}.cs-welcome h2{font-size:20px}.cs-welcome>p{font-size:11px}.cs-starter{font-size:10px!important;padding:12px!important}.cs-composer-wrap{padding:12px}.cs-composer-bottom label{display:block}.cs-composer-bottom select{display:block;margin-top:3px}.cs-primary{padding:9px!important;font-size:10px!important}.cs-example>div{grid-template-columns:1fr}.cs-example{padding:14px}.cs-example p{font-size:10px}.cs-tool-grid{gap:4px}.cs-tool-grid>div{padding:7px}.cs-tool-grid strong{font-size:9px;overflow-wrap:anywhere}.cs-tool-grid span{font-size:9px}.cs-footer{text-align:center}.cs-context small{font-size:9px}}
-.cs-model-picker { border-bottom: 1px solid #e3e6de; background: #f7f8f4; }
-.conversation-studio .cs-model-picker-toggle { width: 100%; justify-content: flex-start; gap: 10px; padding: 12px 22px; border: 0; border-radius: 0; background: transparent; text-align: left; }
-.conversation-studio .cs-model-picker-toggle:hover:not(:disabled) { background: #eef2e9; border-color: transparent; }
-.cs-model-picker-toggle > span { font-size: 12px; font-weight: 600; color: #304c38; }
-.cs-model-picker-toggle > small { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: #6a7764; }
+.cs-header-right { position: relative; }
+.cs-header-right .cs-model-picker { position: relative; }
+.conversation-studio .cs-header-right .cs-model-picker-toggle { width: auto; max-width: min(420px, 48vw); justify-content: flex-start; gap: 8px; padding: 4px 9px; border: 1px solid #dde3d2; border-radius: 5px; background: #edf0e5; color: #6e7a5f; text-align: left; }
+.conversation-studio .cs-header-right .cs-model-picker-toggle:hover:not(:disabled) { background: #e4e9d8; border-color: #cfd6c0; }
+.cs-model-picker-toggle > span { font-size: 10px; font-weight: 600; color: #304c38; white-space: nowrap; }
+.cs-model-picker-toggle > small { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: #6a7764; }
 .cs-model-picker-toggle > svg { flex: none; color: #6a7764; transition: transform .15s; }
 .cs-model-picker.is-open .cs-model-picker-toggle > svg { transform: rotate(90deg); }
-.cs-model-picker-body { padding: 0 22px 16px; }
+.cs-header-right .cs-model-picker-body { position: absolute; right: 0; top: calc(100% + 6px); z-index: 30; width: min(420px, 92vw); padding: 14px 16px 16px; background: #fff; border: 1px solid var(--cs-line); border-radius: 12px; box-shadow: 0 10px 28px #3a4a3518; }
 .cs-model-row { display: flex; align-items: flex-end; gap: 10px; }
 .cs-model-row > .cs-field { flex: 1; min-width: 0; margin-top: 0; }
 .cs-model-picker select { width: 100%; padding: 10px 12px; border: 1px solid #d6dcd0; border-radius: 8px; background: white; color: #253c2b; }
@@ -111,16 +112,12 @@
 .cs-generation-error{margin:12px 0;padding:13px;border:1px solid #d9a89c;background:#fff3ed;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere}.cs-generation-error p{color:#783d30}.cs-generation-error small{display:block;margin-top:8px;color:#795e50}.cs-request-notice{margin:10px 18px;padding:12px;background:#fff8e8;border:1px solid #eaddb8;border-radius:8px;white-space:pre-wrap}
 .cs-cuts-page{height:100%;min-height:0}
 .cs-cuts-page.is-studio{display:flex;flex-direction:column;overflow:hidden;padding:6px 12px 0}
-.cs-cuts-page.is-studio .cs-cuts-switch{flex:none;margin-bottom:6px}
 .cs-cuts-studio{flex:1;min-height:0;display:flex;flex-direction:column}
-.cs-cuts-studio[hidden],.cs-cuts-prompt[hidden]{display:none}
-.cs-cuts-page:not(.is-studio){overflow:auto;padding:24px 32px}
 .conversation-studio.cs-docked{height:100%;min-height:0;max-width:none;margin:0;padding:0;display:flex;flex-direction:column;overflow:hidden}
 .conversation-studio.cs-docked .cs-header{margin-bottom:4px}
 .conversation-studio.cs-docked .cs-logo{width:34px;height:34px;border-radius:10px}
 .conversation-studio.cs-docked h1{font-size:18px}
-.conversation-studio.cs-docked .cs-prototype{margin-bottom:4px;padding:6px 0}
-.conversation-studio.cs-docked .cs-example{max-height:120px;overflow:auto;margin-bottom:6px;padding:10px}
+.conversation-studio.cs-docked .cs-header-right .cs-model-picker-toggle{padding:4px 9px}
 .conversation-studio.cs-docked .cs-workspace{flex:1;min-height:0;display:flex;flex-direction:row;gap:8px;position:relative}
 .conversation-studio.cs-docked .cs-workspace-main{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;gap:8px}
 .conversation-studio.cs-docked .cs-sources{flex:none;padding:8px 10px}
@@ -136,9 +133,8 @@
 .conversation-studio.cs-docked .cs-library-photo .cs-thumb-only img{height:52px}
 .conversation-studio.cs-docked .cs-library-filename{display:none}
 .conversation-studio.cs-docked .cs-info-open{padding:3px 4px;font-size:10px}
-.conversation-studio.cs-docked .cs-workspace-main > .cs-model-picker,
 .conversation-studio.cs-docked .cs-workspace-main > .cs-tool-details{flex:none;overflow:hidden}
-.conversation-studio.cs-docked .cs-model-picker-body{max-height:min(240px,32vh);overflow:auto}
+.conversation-studio.cs-docked .cs-header-right .cs-model-picker-body{max-height:min(70vh,480px);overflow:auto}
 .conversation-studio.cs-docked .cs-chat-column{flex:1;min-height:0;display:flex;flex-direction:column;gap:0;padding-top:0}
 .conversation-studio.cs-docked .cs-chat{flex:1;min-height:0;display:flex;flex-direction:column;overflow:hidden}
 .conversation-studio.cs-docked .cs-messages{flex:1;min-height:0;max-height:none;overflow:auto;display:flex;flex-direction:column}
@@ -160,7 +156,6 @@
 .conversation-studio.cs-docked .cs-footer{display:none}
 .conversation-studio.cs-docked .cs-request-notice{margin:8px 12px}
 .conversation-studio.cs-docked .cs-director-review{padding:12px 16px}
-.conversation-studio.cs-docked .cs-model-picker-toggle{padding:8px 12px}
 .conversation-studio.cs-docked .cs-generation-progress{margin:8px 12px;padding:12px}
 .cs-library-filters{display:flex;gap:6px;flex-wrap:wrap}
 .cs-library-filters button{font-size:11px;padding:5px 9px;border-radius:16px;background:#f7f8f3;color:#66725f}

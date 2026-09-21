@@ -37,8 +37,8 @@ function directorFamily(id: string) {
   const match = /^gpt-(\d+(?:\.\d+)?)/.exec(id)
   return match ? Number(match[1]) : 0
 }
-export const IMAGE_SIZES = { '1:1': '1024x1024', '4:5': '1024x1280', '3:4': '960x1280', '16:9': '1536x864' } as const
-export const HIGH_IMAGE_SIZES = { '1:1': '2048x2048', '4:5': '2048x2560', '3:4': '1920x2560', '16:9': '3072x1728' } as const
+export const IMAGE_SIZES = { '1:1': '1024x1024', '4:5': '1024x1280', '3:4': '960x1280', '2:3': '1024x1536', '9:16': '864x1536', '16:9': '1536x864' } as const
+export const HIGH_IMAGE_SIZES = { '1:1': '2048x2048', '4:5': '2048x2560', '3:4': '1920x2560', '2:3': '2048x3072', '9:16': '1728x3072', '16:9': '3072x1728' } as const
 export type ImageSettings = { resolution: '1K' | '2K' | '4K'; quality: 'low' | 'medium' | 'high' | 'xhigh' | 'max' }
 export const DEFAULT_IMAGE_SETTINGS: ImageSettings = { resolution: '2K', quality: 'high' }
 export function imageQualities(modelId: StyledImageModelId): ImageSettings['quality'][] {
