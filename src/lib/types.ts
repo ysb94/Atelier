@@ -737,6 +737,7 @@ export type WarehouseStockAction =
   | 'open'
   | 'label'
 export type WarehouseBoxStatus = 'sealed' | 'opened' | 'depleted'
+export type WarehouseBoxCompletionKind = 'depleted' | 'box_outbound'
 export type WarehouseBoxAction =
   | 'create'
   | 'update'
@@ -744,6 +745,7 @@ export type WarehouseBoxAction =
   | 'open'
   | 'deplete'
   | 'archive'
+  | 'box_outbound'
 
 export type WarehouseInventorySet = {
   id: string
@@ -818,6 +820,9 @@ export type WarehouseBox = {
   createdBy: string | null
   archivedAt: string | null
   archivedBy: string | null
+  completedAt: string | null
+  completedBy: string | null
+  completionKind: WarehouseBoxCompletionKind | null
   createdAt: string
   updatedAt: string
 }

@@ -1,6 +1,7 @@
 import type {
   WarehouseBox,
   WarehouseBoxAction,
+  WarehouseBoxCompletionKind,
   WarehouseBoxMovement,
   WarehouseBoxStatus,
   WarehouseInventoryKind,
@@ -47,7 +48,7 @@ const LOCATION_COLUMNS = 'id, warehouse_id, code, zone'
 const MOVEMENT_COLUMNS =
   'id, brand_id, set_id, action, position_id, box_id, style_id, from_location_code, to_location_code, box_count, unit_count, reason, actor_id, created_at'
 const BOX_COLUMNS =
-  'id, brand_id, set_id, display_code, location_id, style_id, received_on, initial_qty, current_qty, status, usage_priority, note, source_position_id, created_by, archived_at, archived_by, created_at, updated_at, warehouse_locations!warehouse_boxes_location_fkey(code, zone), styles!warehouse_boxes_style_fkey(style_no, name)'
+  'id, brand_id, set_id, display_code, location_id, style_id, received_on, initial_qty, current_qty, status, usage_priority, note, source_position_id, created_by, archived_at, archived_by, completed_at, completed_by, completion_kind, created_at, updated_at, warehouse_locations!warehouse_boxes_location_fkey(code, zone), styles!warehouse_boxes_style_fkey(style_no, name)'
 const BOX_MOVEMENT_COLUMNS =
   'id, brand_id, box_id, action, from_location_id, from_location_code, from_zone, to_location_id, to_location_code, to_zone, from_qty, to_qty, reason, actor_id, created_at'
 const BOX_STATUSES = new Set<WarehouseBoxStatus>([
@@ -62,6 +63,11 @@ const BOX_ACTIONS = new Set<WarehouseBoxAction>([
   'open',
   'deplete',
   'archive',
+  'box_outbound',
+])
+const BOX_COMPLETION_KINDS = new Set<WarehouseBoxCompletionKind>([
+  'depleted',
+  'box_outbound',
 ])
 
 export class WarehouseStockStoreError extends Error {
@@ -212,6 +218,9 @@ type BoxRow = {
   created_by: string | null
   archived_at: string | null
   archived_by: string | null
+  completed_at: string | null
+  completed_by: string | null
+  completion_kind: string | null
   created_at: string
   updated_at: string
   warehouse_locations?:
@@ -362,6 +371,14 @@ function toBoxStatus(value: string): WarehouseBoxStatus {
     : 'sealed'
 }
 
+function toBoxCompletionKind(
+  value: string | null,
+): WarehouseBoxCompletionKind | null {
+  return value && BOX_COMPLETION_KINDS.has(value as WarehouseBoxCompletionKind)
+    ? (value as WarehouseBoxCompletionKind)
+    : null
+}
+
 function toBoxAction(value: string): WarehouseBoxAction {
   return BOX_ACTIONS.has(value as WarehouseBoxAction)
     ? (value as WarehouseBoxAction)
@@ -400,6 +417,9 @@ function toBox(row: BoxRow): WarehouseBox {
     createdBy: row.created_by,
     archivedAt: row.archived_at,
     archivedBy: row.archived_by,
+    completedAt: row.completed_at ?? null,
+    completedBy: row.completed_by ?? null,
+    completionKind: toBoxCompletionKind(row.completion_kind),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -858,9 +878,12 @@ export async function saveWarehouseRegisteredSlots(
 
 export async function listWarehouseBoxes(
   brandId: string,
-  options?: { includeArchived?: boolean },
+  options?: { includeClosed?: boolean; includeArchived?: boolean },
 ): Promise<WarehouseBox[]> {
   const supabase = getSupabase()
+  const includeClosed = Boolean(
+    options?.includeClosed || options?.includeArchived,
+  )
   const all: WarehouseBox[] = []
   for (let from = 0; ; from += PAGE_SIZE) {
     let query = supabase
@@ -870,7 +893,9 @@ export async function listWarehouseBoxes(
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
       .range(from, from + PAGE_SIZE - 1)
-    if (!options?.includeArchived) query = query.is('archived_at', null)
+    if (!includeClosed) {
+      query = query.is('archived_at', null).is('completed_at', null)
+    }
     const { data, error } = await query
     if (error) {
       throw new WarehouseStockStoreError(
@@ -976,19 +1001,22 @@ export async function moveWarehouseBox(
   return toBox(data as BoxRow)
 }
 
-export async function archiveWarehouseBox(
+export async function completeWarehouseBoxOutbound(
   brandId: string,
   boxId: string,
   reason?: string,
 ): Promise<WarehouseBox> {
-  const { data, error } = await getSupabase().rpc('archive_warehouse_box', {
-    p_brand_id: brandId,
-    p_box_id: boxId,
-    p_reason: reason ?? '',
-  })
+  const { data, error } = await getSupabase().rpc(
+    'complete_warehouse_box_outbound',
+    {
+      p_brand_id: brandId,
+      p_box_id: boxId,
+      p_reason: reason ?? '',
+    },
+  )
   if (error || !data) {
     throw new WarehouseStockStoreError(
-      boxRpcError(error, '개별 박스를 보관하지 못했습니다.'),
+      boxRpcError(error, '박스를 출고하지 못했습니다.'),
     )
   }
   return toBox(data as BoxRow)

@@ -88,7 +88,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `import_warehouse_inventory_set`, `apply_warehouse_stock_action`,
   `restore_warehouse_inventory_set`, `replace_warehouse_inventory_snapshot`,
   `create_warehouse_box`, `update_warehouse_box`, `move_warehouse_box`,
-  `archive_warehouse_box`,
+  `complete_warehouse_box_outbound`,
   `search_warehouse_finder_rows`, `list_warehouse_finder_inbounds`.
   화문 입고 원자 등록은 `save_cargo_inbound`를 사용한다.
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
@@ -661,15 +661,19 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `warehouse_boxes`는 고유 박스 ID 원장이다. 연습 스냅샷에 묶이지 않게
   `set_id`를 비울 수 있고, 브랜드 안 박스번호는 하나여야 한다.
   `0 <= current_qty <= initial_qty` 와 브랜드·상품·자리 경계를 제약으로
-  강제한다. 1차 범위의 임시 창고관리는 이 테이블에만 등록·수정·이동·보관하며
+  강제한다. 1차 범위의 임시 창고관리는 이 테이블에만 등록·수정·이동·종료하며
   `warehouse_stock_positions` 차감이나 라벨 전환은 하지 않는다.
-  이력은 `warehouse_box_movements`에 남기고 hard delete 대신 `archived_at`을
-  쓴다. RPC는 `create_warehouse_box` / `update_warehouse_box` /
-  `move_warehouse_box` / `archive_warehouse_box`다.
+  이력은 `warehouse_box_movements`에 남긴다. 종료 경로는 출고창고 수량 0
+  소진(`completion_kind=depleted`)과 밀봉 박스 단위 출고
+  (`complete_warehouse_box_outbound`, `completion_kind=box_outbound`)뿐이다.
+  `archive_warehouse_box`는 일반 사용자 실행을 막고 새 보관을 만들지 않는다.
+  기존 `archived_at` 행은 확인 필요 이력으로만 읽는다.
+  RPC는 `create_warehouse_box` / `update_warehouse_box` /
+  `move_warehouse_box` / `complete_warehouse_box_outbound`다.
   박스창고(`box_storage`)의 개별 박스는 항상 밀봉 상태
   (`current_qty = initial_qty`)여야 한다. 개봉·수량 차감·소진은 먼저
   출고창고(`picking`)의 택배 포장 또는 대량 출고 자리로 이동한 뒤에만
-  허용하며, 트리거가 직접 테이블 쓰기와 모든 RPC 경로에 이 규칙을 강제한다.
+  허용한다. 밀봉 박스 통째 출고만 박스창고에서도 수량을 0으로 만들 수 있다.
 - 읽기는 `app.can_read_brand`, 쓰기와 RPC는 `app.can_edit_brand`다. 회사 공통
   창고/자리 RLS는 같은 회사 브랜드 멤버십으로 판별한다.
 - `import_warehouse_inventory_set`과 `apply_warehouse_stock_action`은

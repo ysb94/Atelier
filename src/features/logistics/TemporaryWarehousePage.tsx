@@ -20,7 +20,7 @@ export function TemporaryWarehousePage() {
     <div>
       <PageHeader
         title="임시 창고관리"
-        description="박스창고에는 밀봉 박스만 두고, 출고창고로 이동한 뒤 개봉·수량 차감을 시험합니다."
+        description="박스창고에는 밀봉 박스만 두고, 출고창고로 이동한 뒤 개봉합니다. 종료는 낱개 소진 또는 밀봉 박스 출고만 가능합니다."
       />
 
       <Card className="shadow-none">
@@ -30,7 +30,7 @@ export function TemporaryWarehousePage() {
             박스창고·출고창고 자리 리스트는 창고관리 자리 설정과 같은 DB를
             읽습니다. 제품 입력은 개별 박스 원장에 저장되며 기존 묶음 재고는
             건드리지 않습니다. 개봉은 택배 포장 또는 대량 출고 자리에서만
-            가능합니다.
+            가능하고, 잔여가 있는 박스는 목록에서 임의로 내릴 수 없습니다.
           </CardDescription>
         </CardHeader>
         <CardContent>

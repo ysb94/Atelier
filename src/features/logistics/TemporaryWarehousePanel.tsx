@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Archive,
   FlaskConical,
   History,
   Package,
@@ -14,7 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
-  archiveWarehouseBox,
+  completeWarehouseBoxOutbound,
   createWarehouseBox,
   getActiveWarehouseInventorySet,
   getWarehouseBoxMovements,
@@ -33,6 +32,14 @@ import type {
   WarehouseUsagePriority,
   WarehouseZone,
 } from '@/lib/types'
+import {
+  canCompleteWarehouseBoxOutbound,
+  isClosedWarehouseBox,
+  warehouseBoxClosedAt,
+  warehouseBoxClosedKind,
+  warehouseBoxClosedKindLabel,
+  warehouseBoxOutboundConfirmText,
+} from '@/lib/warehouse/warehouse-box-lifecycle'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
 
 type TemporaryWarehouseTab = 'input' | 'box_slots' | 'picking_slots' | 'history'
@@ -49,7 +56,7 @@ const ZONES: Array<{
   {
     value: 'box_storage',
     label: '박스창고',
-    description: '밀봉 박스만 보관 · 개봉 불가',
+    description: '밀봉 박스만 둘 수 있음 · 개봉 불가',
   },
   {
     value: 'picking',
@@ -86,8 +93,25 @@ function boxActionLabel(action: WarehouseBoxAction) {
   if (action === 'update') return '수량 수정'
   if (action === 'move') return '자리 이동'
   if (action === 'open') return '개봉'
-  if (action === 'deplete') return '소진'
-  return '보관'
+  if (action === 'deplete') return '낱개 소진'
+  if (action === 'box_outbound') return '박스 단위 출고'
+  return '기존 보관'
+}
+
+function movementReasonText(movement: WarehouseBoxMovement) {
+  if (movement.action === 'archive') return '기존 보관·확인 필요'
+  return movement.reason
+}
+
+function locationChanged(movement: WarehouseBoxMovement) {
+  return (
+    locationText(movement.fromZone, movement.fromLocationCode) !==
+    locationText(movement.toZone, movement.toLocationCode)
+  )
+}
+
+function qtyChanged(movement: WarehouseBoxMovement) {
+  return movement.fromQty !== movement.toQty
 }
 
 function formatDateTime(value: string | null) {
@@ -301,9 +325,13 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
       updateWarehouseBox(brandId, input.boxId, {
         currentQty: input.currentQty,
       }),
-    onSuccess: () => {
+    onSuccess: (box) => {
       setFormError(null)
-      setFormSuccess('수량을 수정했습니다.')
+      setFormSuccess(
+        box.completionKind === 'depleted'
+          ? '수량을 0으로 소진해 박스를 종료했습니다.'
+          : '수량을 수정했습니다.',
+      )
       invalidateBoxes()
     },
     onError: (error) => {
@@ -337,19 +365,19 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
     },
   })
 
-  const archiveMutation = useMutation({
+  const outboundMutation = useMutation({
     mutationFn: (boxId: string) =>
-      archiveWarehouseBox(brandId, boxId, '임시 창고관리 보관'),
+      completeWarehouseBoxOutbound(brandId, boxId, '밀봉 박스 단위 출고'),
     onSuccess: () => {
       setFormError(null)
-      setFormSuccess('박스를 보관했습니다. 보관 이력 탭에서 다시 볼 수 있습니다.')
+      setFormSuccess('박스를 통째로 출고해 종료했습니다. 박스 이력에서 다시 볼 수 있습니다.')
       invalidateBoxes()
     },
     onError: (error) => {
-      const message = mutationErrorMessage(error, '박스를 보관하지 못했습니다.')
+      const message = mutationErrorMessage(error, '박스를 출고하지 못했습니다.')
       setFormSuccess(null)
       setFormError(message)
-      console.warn('[임시창고] 박스 보관 실패', { brandId, error })
+      console.warn('[임시창고] 박스 출고 실패', { brandId, error })
     },
   })
 
@@ -357,7 +385,7 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
     createMutation.isPending ||
     updateMutation.isPending ||
     moveMutation.isPending ||
-    archiveMutation.isPending
+    outboundMutation.isPending
   const listError = boxesQuery.error
     ? mutationErrorMessage(boxesQuery.error, '개별 박스를 불러오지 못했습니다.')
     : null
@@ -396,7 +424,7 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
             label: '출고창고 자리 리스트',
             icon: Truck,
           },
-          { value: 'history' as const, label: '보관 이력', icon: History },
+          { value: 'history' as const, label: '박스 이력', icon: History },
         ].map((tab) => {
           const Icon = tab.icon
           const selected = tab.value === activeTab
@@ -634,7 +662,9 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
                 <h3 className="text-sm font-semibold">등록 박스 목록</h3>
                 <p className="mt-1 text-xs text-muted-foreground">
                   박스창고의 밀봉 박스를 출고창고로 이동한 뒤 수량을 수정해
-                  개봉합니다. 삭제는 이력을 남기는 보관 처리입니다.
+                  개봉합니다. 잔여가 있는 박스는 목록에서 임의로 내릴 수
+                  없습니다. 밀봉 박스는 박스 출고, 개봉 박스는 수량을 0으로
+                  소진해야 종료됩니다.
                 </p>
               </div>
               <label className="relative block w-full sm:w-72">
@@ -665,7 +695,7 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
                     <th className="px-3 py-2 font-medium">상태</th>
                     <th className="px-3 py-2 font-medium">순서</th>
                     <th className="px-3 py-2 font-medium">자리 이동</th>
-                    <th className="w-12 px-3 py-2" />
+                    <th className="px-3 py-2 font-medium">종료</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -685,15 +715,11 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
                           zone: next.zone,
                         })
                       }
-                      onArchive={() => {
-                        if (
-                          !window.confirm(
-                            `${box.displayCode} 박스를 보관할까요? 목록에서 사라지고 이력은 남습니다.`,
-                          )
-                        ) {
+                      onOutbound={() => {
+                        if (!window.confirm(warehouseBoxOutboundConfirmText(box))) {
                           return
                         }
-                        archiveMutation.mutate(box.id)
+                        outboundMutation.mutate(box.id)
                       }}
                     />
                   ))}
@@ -763,8 +789,8 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
   const pageSize = 50
 
   const boxesQuery = useQuery({
-    queryKey: ['warehouse-boxes', brandId, { includeArchived: true }],
-    queryFn: () => getWarehouseBoxes(brandId, { includeArchived: true }),
+    queryKey: ['warehouse-boxes', brandId, { includeClosed: true }],
+    queryFn: () => getWarehouseBoxes(brandId, { includeClosed: true }),
   })
   const movementsQuery = useQuery({
     queryKey: ['warehouse-box-movements', brandId],
@@ -773,7 +799,7 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
 
   useEffect(() => {
     if (!boxesQuery.error) return
-    console.warn('[임시창고] 보관 박스를 불러오지 못함', {
+    console.warn('[임시창고] 종료 박스를 불러오지 못함', {
       brandId,
       error: boxesQuery.error,
     })
@@ -787,8 +813,16 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
     })
   }, [brandId, movementsQuery.error])
 
-  const archivedBoxes = useMemo(
-    () => (boxesQuery.data ?? emptyList()).filter((box) => box.archivedAt),
+  const closedBoxes = useMemo(
+    () =>
+      (boxesQuery.data ?? emptyList())
+        .filter(isClosedWarehouseBox)
+        .slice()
+        .sort((left, right) => {
+          const leftAt = warehouseBoxClosedAt(left) ?? left.updatedAt
+          const rightAt = warehouseBoxClosedAt(right) ?? right.updatedAt
+          return rightAt.localeCompare(leftAt)
+        }),
     [boxesQuery.data],
   )
   const movementsByBoxId = useMemo(() => {
@@ -803,7 +837,7 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
 
   const filtered = useMemo(() => {
     const query = search.trim().toLocaleLowerCase('ko-KR')
-    return archivedBoxes.filter((box) => {
+    return closedBoxes.filter((box) => {
       if (style && box.styleId !== style.styleId) return false
       if (!query) return true
       return [
@@ -815,7 +849,7 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
         box.note,
       ].some((value) => value.toLocaleLowerCase('ko-KR').includes(query))
     })
-  }, [archivedBoxes, search, style])
+  }, [closedBoxes, search, style])
 
   useEffect(() => {
     setPage(0)
@@ -828,7 +862,7 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
     safePage * pageSize + pageSize,
   )
   const error = boxesQuery.error
-    ? mutationErrorMessage(boxesQuery.error, '보관 이력을 불러오지 못했습니다.')
+    ? mutationErrorMessage(boxesQuery.error, '박스 이력을 불러오지 못했습니다.')
     : movementsQuery.error
       ? mutationErrorMessage(
           movementsQuery.error,
@@ -841,12 +875,16 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
     <section className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
         <Summary
-          label="보관 박스"
-          value={`${formatNumber(archivedBoxes.length)}개`}
+          label="종료 박스"
+          value={`${formatNumber(closedBoxes.length)}개`}
         />
         <Summary
-          label="검색 결과"
-          value={`${formatNumber(filtered.length)}개`}
+          label="확인 필요"
+          value={`${formatNumber(
+            closedBoxes.filter(
+              (box) => warehouseBoxClosedKind(box) === 'legacy_archive',
+            ).length,
+          )}개`}
         />
         <Summary
           label="선택 제품"
@@ -856,10 +894,11 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
 
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold">보관 이력</h3>
+          <h3 className="text-sm font-semibold">박스 이력</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            제품 입력에서 보관한 박스를 M번호로 다시 찾습니다. 등록·이동·수량
-            변경·보관 기록이 함께 보입니다.
+            낱개 소진·박스 단위 출고로 종료된 박스와, 예전 보관으로 남은 확인
+            필요 건을 구분해서 봅니다. 기존 보관 4건은 실제 처분을 알 수 없어
+            자동으로 바꾸지 않습니다.
           </p>
         </div>
         <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto">
@@ -896,9 +935,9 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
               <th className="px-3 py-2 font-medium">마지막 자리</th>
               <th className="px-3 py-2 font-medium">입고일</th>
               <th className="px-3 py-2 text-right font-medium">최초 입수</th>
-              <th className="px-3 py-2 text-right font-medium">보관 시 수량</th>
-              <th className="px-3 py-2 font-medium">보관일</th>
-              <th className="px-3 py-2 font-medium">상태</th>
+              <th className="px-3 py-2 text-right font-medium">잔여 수량</th>
+              <th className="px-3 py-2 font-medium">종료일</th>
+              <th className="px-3 py-2 font-medium">종료 종류</th>
             </tr>
           </thead>
           <tbody>
@@ -928,10 +967,10 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
                   {error
                     ? error
                     : loading
-                      ? '보관 이력을 불러오는 중...'
-                      : archivedBoxes.length === 0
-                        ? '아직 보관한 박스가 없습니다. 제품 입력에서 박스를 보관하면 여기에 남습니다.'
-                        : '검색 조건에 맞는 보관 이력이 없습니다.'}
+                      ? '박스 이력을 불러오는 중...'
+                      : closedBoxes.length === 0
+                        ? '아직 종료된 박스가 없습니다. 수량을 0으로 소진하거나 밀봉 박스를 출고하면 여기에 남습니다.'
+                        : '검색 조건에 맞는 박스 이력이 없습니다.'}
                 </td>
               </tr>
             ) : null}
@@ -1014,9 +1053,19 @@ function TemporaryWarehouseHistoryRow({
           {formatNumber(box.currentQty)}
         </td>
         <td className="px-3 py-2 tabular-nums">
-          {formatDateTime(box.archivedAt)}
+          {formatDateTime(warehouseBoxClosedAt(box))}
         </td>
-        <td className="px-3 py-2">{boxStatusLabel(box.status)}</td>
+        <td className="px-3 py-2">
+          <Badge
+            variant={
+              warehouseBoxClosedKind(box) === 'legacy_archive'
+                ? 'outline'
+                : 'muted'
+            }
+          >
+            {warehouseBoxClosedKindLabel(warehouseBoxClosedKind(box))}
+          </Badge>
+        </td>
       </tr>
       {open ? (
         <tr className="border-t border-border bg-muted/20">
@@ -1027,7 +1076,14 @@ function TemporaryWarehouseHistoryRow({
               </p>
             ) : (
               <ol className="space-y-2">
-                {movements.map((movement) => (
+                {movements.map((movement) => {
+                  const reason = movementReasonText(movement)
+                  const showLocation =
+                    movement.action !== 'archive' || locationChanged(movement)
+                  const showQty =
+                    (movement.fromQty != null || movement.toQty != null) &&
+                    (movement.action !== 'archive' || qtyChanged(movement))
+                  return (
                   <li
                     key={movement.id}
                     className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs"
@@ -1035,13 +1091,28 @@ function TemporaryWarehouseHistoryRow({
                     <span className="tabular-nums text-muted-foreground">
                       {formatDateTime(movement.createdAt)}
                     </span>
-                    <Badge variant="muted">{boxActionLabel(movement.action)}</Badge>
-                    <span>
-                      {locationText(movement.fromZone, movement.fromLocationCode)}
-                      {' → '}
-                      {locationText(movement.toZone, movement.toLocationCode)}
-                    </span>
-                    {movement.fromQty != null || movement.toQty != null ? (
+                    <Badge
+                      variant={
+                        movement.action === 'archive' ||
+                        movement.action === 'box_outbound' ||
+                        movement.action === 'deplete'
+                          ? 'outline'
+                          : 'muted'
+                      }
+                    >
+                      {boxActionLabel(movement.action)}
+                    </Badge>
+                    {showLocation ? (
+                      <span>
+                        {locationText(
+                          movement.fromZone,
+                          movement.fromLocationCode,
+                        )}
+                        {' → '}
+                        {locationText(movement.toZone, movement.toLocationCode)}
+                      </span>
+                    ) : null}
+                    {showQty ? (
                       <span className="tabular-nums text-muted-foreground">
                         {movement.fromQty == null
                           ? '—'
@@ -1052,13 +1123,12 @@ function TemporaryWarehouseHistoryRow({
                           : formatNumber(movement.toQty)}
                       </span>
                     ) : null}
-                    {movement.reason ? (
-                      <span className="text-muted-foreground">
-                        {movement.reason}
-                      </span>
+                    {reason ? (
+                      <span className="text-muted-foreground">{reason}</span>
                     ) : null}
                   </li>
-                ))}
+                  )
+                })}
               </ol>
             )}
           </td>
@@ -1074,20 +1144,21 @@ function TemporaryWarehouseBoxRow({
   disabled,
   onUpdateQty,
   onMove,
-  onArchive,
+  onOutbound,
 }: {
   box: WarehouseBox
   sharedLocationCodes: string[]
   disabled: boolean
   onUpdateQty: (currentQty: number) => void
   onMove: (input: { locationCode: string; zone: WarehouseZone }) => void
-  onArchive: () => void
+  onOutbound: () => void
 }) {
   const [qty, setQty] = useState(String(box.currentQty))
   const [moveZone, setMoveZone] = useState<WarehouseZone>(box.zone)
   const [moveLocation, setMoveLocation] = useState(box.locationCode)
   const canChangeQuantity = box.zone === 'picking'
   const canMoveToBoxStorage = box.status === 'sealed'
+  const canOutbound = canCompleteWarehouseBoxOutbound(box)
 
   useEffect(() => {
     setQty(String(box.currentQty))
@@ -1192,13 +1263,18 @@ function TemporaryWarehouseBoxRow({
       <td className="px-3 py-2 text-right">
         <Button
           type="button"
-          size="icon"
-          variant="ghost"
-          disabled={disabled}
-          aria-label={`${box.displayCode} 박스 보관`}
-          onClick={onArchive}
+          size="sm"
+          variant="outline"
+          disabled={disabled || !canOutbound}
+          title={
+            canOutbound
+              ? '밀봉 박스를 통째로 출고하고 종료합니다.'
+              : '개봉 박스는 남은 수량을 0으로 소진하세요.'
+          }
+          aria-label={`${box.displayCode} 박스 출고`}
+          onClick={onOutbound}
         >
-          <Archive className="size-4" />
+          박스 출고
         </Button>
       </td>
     </tr>

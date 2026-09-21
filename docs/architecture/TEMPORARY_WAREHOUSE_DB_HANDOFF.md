@@ -14,6 +14,8 @@ Supabase 데이터에 연결하기 위한 구현 기준이다.
 - 읽기는 테이블 조회를 사용하고, 쓰기는 반드시 제공된 RPC를 사용한다.
 - 박스창고에서는 박스를 개봉하거나 수량을 차감하지 않는다.
 - 개봉하려면 박스 전체를 출고창고의 택배 포장 또는 대량 출고 자리로 먼저 옮긴다.
+- 잔여가 있는 박스는 목록에서 임의로 내릴 수 없다. 종료는 출고창고 수량 0
+  소진 또는 밀봉 박스 단위 출고만 허용한다.
 - 기존 묶음 재고인 `warehouse_stock_positions`는 이 기능에서 변경하지 않는다.
 
 ## 2. Supabase 연결
@@ -93,10 +95,18 @@ SKU(M번호)와 하나의 입고일만 들어간다.
 - `created_by uuid null`
   - 등록 사용자
 - `archived_at timestamptz null`
-  - `null`이면 활성 박스
-  - 값이 있으면 보관된 박스
+  - 과거 임의 보관 시각. 새 보관은 만들지 않는다.
+  - 값이 있으면 확인 필요 이력이다.
 - `archived_by uuid null`
-  - 보관 처리 사용자
+  - 과거 보관 처리 사용자
+- `completed_at timestamptz null`
+  - 소진 또는 박스 단위 출고로 종료한 시각
+- `completed_by uuid null`
+  - 종료 작업자
+- `completion_kind text null`
+  - `depleted`: 출고창고 낱개 수량 0
+  - `box_outbound`: 밀봉 박스 통째 출고
+  - 종료된 박스의 `current_qty`는 0이다
 - `created_at`, `updated_at`
   - 생성·수정 시각
 
@@ -123,8 +133,9 @@ SKU(M번호)와 하나의 입고일만 들어간다.
 - `update`: 수량·사용 순서·비고 수정
 - `move`: 자리 또는 창고 구역 이동
 - `open`: 최초 개봉
-- `deplete`: 수량 소진
-- `archive`: 보관 처리
+- `deplete`: 낱개 소진
+- `archive`: 과거 임의 보관. 새 기록은 만들지 않는다
+- `box_outbound`: 밀봉 박스 단위 출고
 
 이력은 수정·삭제하지 않고 조회용으로 사용한다.
 
@@ -200,8 +211,10 @@ status = sealed
 - 현재 수량은 최초 입수보다 많을 수 없다.
 - 브랜드 안에서 박스 고유번호는 중복될 수 없다.
 - 다른 브랜드의 상품이나 박스를 현재 브랜드 요청에 사용할 수 없다.
-- 보관된 박스는 다시 수정하거나 이동할 수 없다.
-- 삭제 대신 보관 처리를 사용한다.
+- 보관되었거나 종료된 박스는 다시 수정하거나 이동할 수 없다.
+- 잔여가 있는 박스를 목록에서 내리는 보관 처리는 쓰지 않는다.
+- 출고창고에서 수량을 0으로 저장하면 소진으로 종료한다.
+- 밀봉 박스는 `complete_warehouse_box_outbound`로 통째 출고해 종료한다.
 
 ## 5. 권한과 RLS
 
@@ -245,6 +258,9 @@ export async function listWarehouseBoxes(brandId: string) {
         created_by,
         archived_at,
         archived_by,
+        completed_at,
+        completed_by,
+        completion_kind,
         created_at,
         updated_at,
         warehouse_locations!warehouse_boxes_location_fkey(code, zone),
@@ -252,6 +268,7 @@ export async function listWarehouseBoxes(brandId: string) {
       `)
       .eq('brand_id', brandId)
       .is('archived_at', null)
+      .is('completed_at', null)
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
       .range(from, from + PAGE_SIZE - 1)
@@ -267,7 +284,8 @@ export async function listWarehouseBoxes(brandId: string) {
 }
 ```
 
-보관 박스까지 조회해야 하는 관리 화면에서만 `archived_at is null` 필터를 제거한다.
+종료·기존 보관 박스까지 조회해야 하는 이력 화면에서만 `archived_at is null`과
+`completed_at is null` 필터를 제거한다.
 
 ### 박스 이력
 
@@ -356,7 +374,8 @@ if (error) throw error
 - 전달하지 않는 수정값은 `null`로 보낸다.
 - 수량 차감은 박스가 `picking` 구역에 있을 때만 가능하다.
 - 최초 차감이면 `update` 이력과 `open` 이력이 함께 남는다.
-- 수량이 0이 되면 `deplete` 이력이 추가된다.
+- 수량이 0이 되면 `deplete` 이력이 추가되고 `completion_kind=depleted`로
+  종료된다.
 
 ### 7.3 자리·구역 이동
 
@@ -376,23 +395,28 @@ if (error) throw error
 - 등록되지 않은 유효한 자리는 서버가 같은 회사 창고에 생성·등록한다.
 - 개봉·소진 박스에 `p_zone: 'box_storage'`를 보내면 거절된다.
 
-### 7.4 보관 처리
+### 7.4 밀봉 박스 단위 출고
 
-RPC: `public.archive_warehouse_box`
+RPC: `public.complete_warehouse_box_outbound`
 
 ```ts
-const { data, error } = await supabase.rpc('archive_warehouse_box', {
-  p_brand_id: brandId,
-  p_box_id: boxId,
-  p_reason: '작업자 프로그램 보관',
-})
+const { data, error } = await supabase.rpc(
+  'complete_warehouse_box_outbound',
+  {
+    p_brand_id: brandId,
+    p_box_id: boxId,
+    p_reason: '밀봉 박스 단위 출고',
+  },
+)
 
 if (error) throw error
 ```
 
-- 실제 행을 삭제하지 않는다.
-- `archived_at`, `archived_by`를 채우고 `archive` 이력을 남긴다.
-- 성공 후 활성 목록에서는 사라져야 한다.
+- 밀봉 박스(`current_qty = initial_qty > 0`)만 허용한다.
+- 박스창고와 출고창고 모두에서 실행할 수 있다.
+- 개봉 박스는 거절되며, 남은 수량을 0으로 소진해야 한다.
+- 성공하면 수량이 0이 되고 `completion_kind=box_outbound`로 종료된다.
+- `archive_warehouse_box`는 일반 사용자가 실행할 수 없다.
 
 ## 8. 작업자 화면 요구사항
 
@@ -407,13 +431,17 @@ if (error) throw error
 
 ### 박스 목록
 
-- 기본 목록은 `archived_at is null`인 박스만 표시한다.
+- 기본 목록은 `archived_at is null`이고 `completed_at is null`인 박스만
+  표시한다.
 - 박스번호, 창고 구역, M번호, 상품명, 자리, 입고일, 최초 입수, 현재 수량,
   상태와 사용 순서를 표시한다.
 - 박스창고 행에서는 수량 수정 버튼을 비활성화한다.
 - 버튼 문구는 `출고창고 이동 후 개봉`처럼 작업 순서를 알려준다.
 - 출고창고 행에서만 수량 수정 UI를 활성화한다.
 - 개봉 또는 소진 박스는 박스창고 이동 선택을 비활성화한다.
+- 밀봉 박스 행에만 `박스 출고`를 제공한다. 실행 전 박스번호·M번호·전체
+  수량을 확인한다.
+- 개봉 박스는 박스 출고를 쓰지 않고 수량 0 소진으로만 종료한다.
 
 ### 저장 후 동기화
 
@@ -436,6 +464,9 @@ if (error) throw error
 - `박스창고에서는 개봉하거나 수량을 차감할 수 없습니다. 택배 포장 또는 대량 출고 자리로 먼저 이동하세요.`
 - `현재 수량은 최초 입수보다 많을 수 없습니다.`
 - `보관된 박스는 수정할 수 없습니다.`
+- `종료된 박스는 수정할 수 없습니다.`
+- `개봉된 박스는 박스 단위로 출고할 수 없습니다. 남은 수량을 0으로 소진하세요.`
+- `보관 처리는 더 이상 사용할 수 없습니다. 소진 또는 박스 출고로 종료하세요.`
 - `박스 자리가 브랜드 창고와 맞지 않습니다.`
 - `박스를 찾지 못했습니다.`
 
@@ -453,16 +484,19 @@ if (error) throw error
 6. 박스를 출고창고의 택배 포장 또는 대량 출고 자리로 이동한다.
 7. 이동 후 현재 수량을 줄이면 상태가 `opened`로 바뀐다.
 8. 개봉 박스를 박스창고로 돌려보내면 거절된다.
-9. 현재 수량을 0으로 수정하면 상태가 `depleted`로 바뀐다.
-10. 보관 처리 후 활성 목록에서 사라진다.
-11. 이력에 `create`, `move`, `update`, `open`, `deplete`, `archive`가 순서대로 남는다.
-12. 위 작업 동안 `warehouse_stock_positions` 값은 바뀌지 않는다.
+9. 현재 수량을 0으로 수정하면 상태가 `depleted`가 되고 소진으로 종료된다.
+10. 밀봉 박스 출고 후 활성 목록에서 사라지고 `box_outbound` 이력이 남는다.
+11. 개봉 박스에 박스 출고를 요청하면 거절된다.
+12. 박스창고에서 수량을 줄이면 거절된다.
+13. 과거 `archive` 이력과 `archived_at` 행은 확인 필요 상태로 읽을 수 있다.
+14. 위 작업 동안 `warehouse_stock_positions` 값은 바뀌지 않는다.
 
 ## 11. 현재 Atelier 구현 참고 파일
 
 - Supabase 클라이언트: `src/lib/supabase/client.ts`
 - 타입: `src/lib/types.ts`
 - 개별 박스 저장소: `src/lib/supabase/warehouse-stock.ts`
+- 종료 규칙: `src/lib/warehouse/warehouse-box-lifecycle.ts`
 - 공개 API 래퍼: `src/lib/api/index.ts`
 - 작업 화면: `src/features/logistics/TemporaryWarehousePanel.tsx`
 - 페이지: `src/features/logistics/TemporaryWarehousePage.tsx`

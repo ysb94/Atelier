@@ -691,7 +691,7 @@ export async function openWarehouseStock(
 
 export async function getWarehouseBoxes(
   brandId: string,
-  options?: { includeArchived?: boolean },
+  options?: { includeClosed?: boolean; includeArchived?: boolean },
 ): Promise<WarehouseBox[]> {
   await delay()
   return warehouseStockStore.listWarehouseBoxes(brandId, options)
@@ -731,13 +731,17 @@ export async function moveWarehouseBox(
   return warehouseStockStore.moveWarehouseBox(brandId, boxId, input)
 }
 
-export async function archiveWarehouseBox(
+export async function completeWarehouseBoxOutbound(
   brandId: string,
   boxId: string,
   reason?: string,
 ): Promise<WarehouseBox> {
   await delay()
-  return warehouseStockStore.archiveWarehouseBox(brandId, boxId, reason)
+  return warehouseStockStore.completeWarehouseBoxOutbound(
+    brandId,
+    boxId,
+    reason,
+  )
 }
 
 export async function getCargoInbounds(brandIds: readonly string[]) {

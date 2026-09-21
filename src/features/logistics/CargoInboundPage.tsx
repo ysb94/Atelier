@@ -16,7 +16,11 @@ import { Input } from '@/components/ui/input'
 import { CargoInboundAddPanel } from '@/features/logistics/CargoInboundAddPanel'
 import type { CargoInboundRegisterPayload } from '@/features/logistics/CargoInboundAddPanel'
 import { CargoInboundDetailPanel } from '@/features/logistics/CargoInboundDetailPanel'
-import { formatCargoInboundTitle } from '@/features/logistics/cargo-inbound-title'
+import {
+  formatCargoInboundTitle,
+  formatInboundBoxJob,
+  thisWeekWorkdays,
+} from '@/features/logistics/cargo-inbound-title'
 import {
   completeCargoInbound,
   getCargoInbounds,
@@ -78,6 +82,34 @@ function formatDate(value: string | null) {
     month: 'numeric',
     day: 'numeric',
   }).format(date)
+}
+
+function formatGroupDate(value: string) {
+  const date = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+  }).format(date)
+}
+
+function groupByInboundDate(items: CargoInboundItem[]) {
+  const sorted = [...items].sort((a, b) => {
+    const dateA = a.scheduledInboundAt ?? ''
+    const dateB = b.scheduledInboundAt ?? ''
+    if (dateA !== dateB) return dateA.localeCompare(dateB)
+    return (a.shippedAt ?? '').localeCompare(b.shippedAt ?? '')
+  })
+  const groups: Array<{ date: string; items: CargoInboundItem[] }> = []
+  for (const item of sorted) {
+    const date = item.scheduledInboundAt ?? ''
+    const last = groups.at(-1)
+    if (last && last.date === date) last.items.push(item)
+    else groups.push({ date, items: [item] })
+  }
+  return groups
 }
 
 function stageEmptyMessage(stage: CargoInboundStage) {
@@ -186,6 +218,20 @@ export function CompanyCargoInboundPage() {
         .includes(keyword)
     })
   }, [activeTab, items, search])
+  const inboundGroups = useMemo(
+    () =>
+      activeTab === 'shipped' ? null : groupByInboundDate(rows),
+    [activeTab, rows],
+  )
+  const weekDays = useMemo(() => thisWeekWorkdays(), [])
+  const weekInbound = useMemo(() => {
+    const map = new Map(weekDays.map((day) => [day.key, [] as CargoInboundItem[]]))
+    for (const item of items) {
+      if (item.stage !== 'scheduled' || !item.scheduledInboundAt) continue
+      map.get(item.scheduledInboundAt)?.push(item)
+    }
+    return map
+  }, [items, weekDays])
 
   function selectTab(tab: CargoInboundStage) {
     setAdding(false)
@@ -314,9 +360,55 @@ export function CompanyCargoInboundPage() {
               )
             })}
           </div>
-          <p className="mb-4 text-xs text-muted-foreground">
+          <p className="mb-3 text-xs text-muted-foreground">
             {activeMeta.description}
           </p>
+          <div
+            className="mb-4 grid grid-cols-5 gap-2"
+            aria-label="이번 주 입고 예정"
+          >
+            {weekDays.map((day) => {
+              const jobs = weekInbound.get(day.key) ?? []
+              return (
+                <div
+                  key={day.key}
+                  aria-label={`${day.weekday} ${day.day}일 ${jobs.length ? jobs.map((item) => formatInboundBoxJob(item.boxCount)).join(', ') : '없음'}`}
+                  className={cn(
+                    'rounded-xl border border-border bg-card px-3 py-2.5',
+                    day.isToday && 'border-success',
+                  )}
+                >
+                  <div className="flex items-baseline justify-between gap-1">
+                    <span className="text-xs text-muted-foreground">
+                      {day.weekday}
+                    </span>
+                    <span className="text-sm font-semibold tabular-nums">
+                      {day.day}
+                    </span>
+                  </div>
+                  {jobs.length ? (
+                    <ul className="mt-1.5 space-y-1">
+                      {jobs.map((item) => (
+                        <li key={item.id} className="min-w-0">
+                          <p className="text-[11px] leading-4 text-muted-foreground">
+                            입고 확정
+                          </p>
+                          <p className="truncate text-lg font-semibold leading-6 tabular-nums tracking-tight">
+                            {formatNumber(item.boxCount)}
+                            <span className="ml-0.5 text-xs font-medium text-muted-foreground">
+                              박스
+                            </span>
+                          </p>
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="mt-1.5 text-xs text-muted-foreground">없음</p>
+                  )}
+                </div>
+              )
+            })}
+          </div>
 
           {cargoQuery.isError ? (
             <Card className="px-4 py-10 text-center text-sm text-danger">
@@ -334,6 +426,31 @@ export function CompanyCargoInboundPage() {
                 ? '조건에 맞는 화물이 없습니다.'
                 : stageEmptyMessage(activeTab)}
             </Card>
+          ) : inboundGroups ? (
+            <div className="space-y-6">
+              {inboundGroups.map((group) => (
+                <section key={group.date || 'undated'} className="space-y-2">
+                  <h3 className="flex items-center gap-3 text-sm font-semibold">
+                    <span className="inline-flex items-center gap-1.5">
+                      <CalendarClock className="size-4 text-primary" />
+                      {activeTab === 'done' ? '입고' : '입고 예정'}{' '}
+                      {group.date ? formatGroupDate(group.date) : '미정'}
+                    </span>
+                    <span className="h-px min-w-8 flex-1 bg-border" aria-hidden />
+                    <span className="shrink-0 text-xs font-normal text-muted-foreground">
+                      {formatNumber(group.items.length)}건
+                    </span>
+                  </h3>
+                  {group.items.map((item) => (
+                    <CargoInboundRow
+                      key={item.id}
+                      item={item}
+                      onOpen={() => setSelectedId(item.id)}
+                    />
+                  ))}
+                </section>
+              ))}
+            </div>
           ) : (
             <div className="space-y-2">
               {rows.map((item) => (

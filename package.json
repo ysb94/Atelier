@@ -58,6 +58,7 @@
     "verify:file-manager-brand": "npx tsx src/lib/design/file-manager-brand.verify.ts",
     "verify:work-request-roles": "npx tsx src/features/work-requests/work-request-roles.verify.ts",
     "verify:warehouse-tidy": "npx tsx src/lib/cargo/warehouse-tidy.verify.ts",
+    "verify:warehouse-box-lifecycle": "npx tsx src/lib/warehouse/warehouse-box-lifecycle.verify.ts",
     "verify:studio-library": "npx tsx src/lib/design/studio-library.verify.ts",
     "verify:masma-finder": "node scripts/verify-masma-finder.mjs"
   },
