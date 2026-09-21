@@ -1088,6 +1088,9 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 4. (임시) 출고반영은 품목명·내품명 변환에서 나온 본품·내품만 M번호로 합쳐
    보여 주고, 백업하면 `outbound_shipments`에 `source='invoice'`로 저장하고
    `invoice_work_runs` 최근 작업과 `invoice_work_run_order_keys`에도 남긴다.
+   출고 원장·파일 지문은 상품 연결 예외 제거 후 `processRows`를 쓰고, 주문
+   키는 예외 제거 전 `workRows`를 기록한다. 그래서 같은 합포장의 예외 행도
+   다음 재등록에서 중복으로 잡힌다.
    주문일·출고업체·SKU별로 수량을 나누며 사은품·포장재는 넣지 않는다.
    미해결 품목/내품명, 주문일시 없음, 출고업체 미연결, styleId 누락이 있으면
    부분 저장하지 않는다. 재고는 건드리지 않는다. 최근 작업에서
@@ -1132,10 +1135,17 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - `invoice_work_run_order_keys`는 `(brand_id, run_id, order_key_hash)`만
   저장한다. 해시 원문은 정규화한 고객주문번호·쇼핑몰명·주문일시이며
   평문은 넣지 않는다. 같은 주문의 여러 SKU 행은 한 키로 묶는다.
+  기록 범위는 상품 연결 예외 제거 전 `workRows`다. 출고 원장·파일 지문은
+  예외 제거 후 `processRows`를 유지한다.
 - 파일 확인 직후 `lookup_invoice_backed_up_order_keys`로 과거
   `(임시) 출고반영` 백업과 같은 키를 찾는다. 확인창에서 승인한 뒤에만
   해당 주문의 모든 행을 이후 단계에서 제외한다. 배포 전 이력은 키가 없어
   역산·백필하지 않고, 이후 백업부터 감지한다.
+- 과거 백업이 상품 연결 예외 행 키를 남기지 않은 경우, 현재 파일의 엄격한
+  주문키 일치 행을 기준으로 활성 `invoice_product_name_exclusions`와 같은
+  합포장·주문시각인 예외 행만 호환 제외한다. 미일치 주문키 묶음은 전체가
+  예외 행일 때만 빼고, 일반 상품·다른 주소/시각·비활성 예외는 남긴다.
+  주문키가 없는 예외 행은 같은 묶음에 엄격 일치 본품이 있을 때만 뺀다.
 - `record_invoice_work_completion`은 `SECURITY INVOKER`이며 대상 출고업체가
   같은 브랜드인지 검사한 뒤 작업을 upsert하고 사이트 집계를 한 트랜잭션에서
   교체한다.

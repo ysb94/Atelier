@@ -322,47 +322,6 @@ export function CompanyCargoInboundPage() {
         />
       ) : (
         <>
-          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Input
-              className="sm:max-w-xs"
-              placeholder="선적일, 브랜드, 선박, 항구 검색..."
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-            />
-            <div className="text-sm text-muted-foreground sm:ml-auto">
-              {activeMeta.label} {formatNumber(rows.length)}건
-            </div>
-          </div>
-
-          <div
-            role="tablist"
-            aria-label="화물 입고 단계"
-            className="mb-2 flex items-stretch gap-0.5 border-b border-border"
-          >
-            {INBOUND_TABS.map((tab) => {
-              const selected = tab.value === activeTab
-              return (
-                <button
-                  key={tab.value}
-                  type="button"
-                  role="tab"
-                  aria-selected={selected}
-                  onClick={() => selectTab(tab.value)}
-                  className={cn(
-                    '-mb-px border-b-2 px-3 py-1.5 text-sm transition-colors',
-                    selected
-                      ? 'border-foreground font-medium text-foreground'
-                      : 'border-transparent text-muted-foreground hover:text-foreground',
-                  )}
-                >
-                  {tab.label} {formatNumber(tabCounts[tab.value])}
-                </button>
-              )
-            })}
-          </div>
-          <p className="mb-3 text-xs text-muted-foreground">
-            {activeMeta.description}
-          </p>
           <div
             className="mb-4 grid grid-cols-5 gap-2"
             aria-label="이번 주 입고 예정"
@@ -409,6 +368,48 @@ export function CompanyCargoInboundPage() {
               )
             })}
           </div>
+
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              className="sm:max-w-xs"
+              placeholder="선적일, 브랜드, 선박, 항구 검색..."
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            <div className="text-sm text-muted-foreground sm:ml-auto">
+              {activeMeta.label} {formatNumber(rows.length)}건
+            </div>
+          </div>
+
+          <div
+            role="tablist"
+            aria-label="화물 입고 단계"
+            className="mb-2 flex items-stretch gap-0.5 border-b border-border"
+          >
+            {INBOUND_TABS.map((tab) => {
+              const selected = tab.value === activeTab
+              return (
+                <button
+                  key={tab.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => selectTab(tab.value)}
+                  className={cn(
+                    '-mb-px border-b-2 px-3 py-1.5 text-sm transition-colors',
+                    selected
+                      ? 'border-foreground font-medium text-foreground'
+                      : 'border-transparent text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  {tab.label} {formatNumber(tabCounts[tab.value])}
+                </button>
+              )
+            })}
+          </div>
+          <p className="mb-3 text-xs text-muted-foreground">
+            {activeMeta.description}
+          </p>
 
           {cargoQuery.isError ? (
             <Card className="px-4 py-10 text-center text-sm text-danger">

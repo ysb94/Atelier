@@ -11,6 +11,7 @@ import {
   invoiceBackedUpExcludedRowNumbers,
   invoiceBackupConfirmButton,
   isCancelledInvoiceStepError,
+  isInvoiceBackupLookupReady,
   isInvoicePreConfirmReady,
   isInvoicePreloadFlowReady,
   isInvoiceWorkFlowReady,
@@ -214,6 +215,52 @@ function sourceRow(rowNumber: number): SabangnetOrderRow {
     ownProductCode: '',
   }
 }
+
+assert(
+  isInvoiceBackupLookupReady({
+    hasInspection: false,
+    lookupNeeded: false,
+    lookupSuccess: false,
+    exclusionCriteriaSuccess: false,
+  }),
+  '파일이 없으면 백업 조회를 기다리지 않는다',
+)
+assert(
+  !isInvoiceBackupLookupReady({
+    hasInspection: true,
+    lookupNeeded: true,
+    lookupSuccess: true,
+    exclusionCriteriaSuccess: false,
+  }),
+  '상품 연결 예외 기준이 끝나기 전에는 파일 확인을 끝내지 않는다',
+)
+assert(
+  !isInvoiceBackupLookupReady({
+    hasInspection: true,
+    lookupNeeded: true,
+    lookupSuccess: false,
+    exclusionCriteriaSuccess: true,
+  }),
+  '주문키 조회가 끝나기 전에는 파일 확인을 끝내지 않는다',
+)
+assert(
+  isInvoiceBackupLookupReady({
+    hasInspection: true,
+    lookupNeeded: false,
+    lookupSuccess: false,
+    exclusionCriteriaSuccess: true,
+  }),
+  '주문키가 없어도 예외 기준이 끝나면 조회를 끝낸다',
+)
+assert(
+  isInvoiceBackupLookupReady({
+    hasInspection: true,
+    lookupNeeded: true,
+    lookupSuccess: true,
+    exclusionCriteriaSuccess: true,
+  }),
+  '주문키와 예외 기준이 모두 끝나면 조회를 끝낸다',
+)
 
 const backupMatch = { rowNumbers: [1, 2] }
 const allRows = [sourceRow(1), sourceRow(2), sourceRow(3), sourceRow(4)]

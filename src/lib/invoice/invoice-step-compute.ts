@@ -74,6 +74,17 @@ export function invoiceBackedUpExcludedRowNumbers(input: {
   return [...input.match.rowNumbers]
 }
 
+export function isInvoiceBackupLookupReady(input: {
+  hasInspection: boolean
+  lookupNeeded: boolean
+  lookupSuccess: boolean
+  exclusionCriteriaSuccess: boolean
+}) {
+  if (!input.hasInspection) return true
+  if (!input.exclusionCriteriaSuccess) return false
+  return !input.lookupNeeded || input.lookupSuccess
+}
+
 export function isInvoicePreloadFlowReady(input: {
   backupLookupReady: boolean
   workRowCount: number

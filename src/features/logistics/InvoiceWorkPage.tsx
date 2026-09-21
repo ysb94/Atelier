@@ -170,6 +170,7 @@ import { planUnifiedGifts } from '@/lib/invoice/gift-unified'
 import { planInvoicePrefixes } from '@/lib/invoice/prefix-transform'
 import {
   collectInvoiceOrderKeyGroups,
+  expandBackedUpExclusionWithProductNameExceptions,
   filterRowsByExcludedNumbers,
   hashInvoiceOrderKeyPayloads,
   matchBackedUpInvoiceOrderKeys,
@@ -202,7 +203,7 @@ import type {
   InvoiceWorkInstruction,
 } from '@/lib/types'
 import { useRenderWatch } from '@/lib/diagnostics'
-import { cn, formatNumber } from '@/lib/utils'
+import { cn, emptyList, formatNumber } from '@/lib/utils'
 import { InvoiceDiscontinuedListPanel } from './InvoiceDiscontinuedListPanel'
 import { InvoicePreorderHoldPanel } from './InvoicePreorderHoldPanel'
 import { InvoiceItemNameTransformPanel } from './InvoiceItemNameTransformPanel'
@@ -228,6 +229,7 @@ import {
   canLeaveInvoiceFileCheck,
   INVOICE_BACKUP_LOOKUP_BUSY_LABEL,
   invoiceBackedUpExcludedRowNumbers,
+  isInvoiceBackupLookupReady,
   isInvoicePreConfirmReady,
   isInvoicePreloadFlowReady,
   isInvoiceWorkFlowReady,
@@ -1473,7 +1475,7 @@ export function InvoiceWorkPage() {
   const productNameExclusionsQuery = useQuery({
     queryKey: ['invoice-product-name-exclusions', brand.id],
     queryFn: () => getInvoiceProductNameExclusions(brand.id),
-    enabled: reachedProduct,
+    enabled: rulesView || Boolean(inspection),
     ...criteriaQueryOptions,
   })
   const productNameTagRolesQuery = useQuery({
@@ -1646,18 +1648,44 @@ export function InvoiceWorkPage() {
       orderKeyGroups.length > 0 &&
       !currentGenerationBackedUp,
   })
-  const backedUpMatch =
+  const backedUpLookupMatch =
     orderKeyGroups.length === 0
       ? EMPTY_ORDER_KEY_MATCH
       : (backedUpLookupQuery.data ?? null)
+  const backedUpMatch = useMemo(() => {
+    if (!backedUpLookupMatch) return null
+    if (
+      !inspection ||
+      backedUpLookupMatch.rowCount === 0 ||
+      !productNameExclusionsQuery.isSuccess
+    ) {
+      return backedUpLookupMatch
+    }
+    return expandBackedUpExclusionWithProductNameExceptions({
+      rows: inspection.rows,
+      match: backedUpLookupMatch,
+      exclusions: productNameExclusionsQuery.data ?? emptyList(),
+    })
+  }, [
+    backedUpLookupMatch,
+    inspection,
+    productNameExclusionsQuery.data,
+    productNameExclusionsQuery.isSuccess,
+  ])
   const hasBackedUpMatch = (backedUpMatch?.orderCount ?? 0) > 0
-  const backupLookupReady =
-    !inspection ||
-    orderKeyGroups.length === 0 ||
-    backedUpLookupQuery.isSuccess
+  const backupLookupReady = isInvoiceBackupLookupReady({
+    hasInspection: Boolean(inspection),
+    lookupNeeded: orderKeyGroups.length > 0 && !currentGenerationBackedUp,
+    lookupSuccess: backedUpLookupQuery.isSuccess,
+    exclusionCriteriaSuccess: productNameExclusionsQuery.isSuccess,
+  })
   const backupExclusionReady =
     backupLookupReady &&
     (!hasBackedUpMatch || backedUpExclusionAccepted)
+  const backupLookupBusy =
+    Boolean(inspection) &&
+    !backupLookupReady &&
+    (backedUpLookupQuery.isFetching || productNameExclusionsQuery.isFetching)
   const backedUpExcludedRowNumbers = useMemo(
     () =>
       new Set(invoiceBackedUpExcludedRowNumbers({ match: backedUpMatch })),
@@ -3219,7 +3247,7 @@ export function InvoiceWorkPage() {
     try {
       const sourceRef = await fingerprintInvoiceWorkRows(processRows)
       const orderKeyHashes = await hashInvoiceOrderKeyPayloads(
-        collectInvoiceOrderKeyGroups(processRows).map((group) => group.payload),
+        collectInvoiceOrderKeyGroups(workRows).map((group) => group.payload),
       )
       await backupInvoiceOutboundWork({
         brandId: brand.id,
@@ -3685,12 +3713,14 @@ export function InvoiceWorkPage() {
                   />
                 </div>
 
-                {backedUpLookupQuery.isFetching && orderKeyGroups.length > 0 ? (
+                {backupLookupBusy ? (
                   <div className="flex items-start gap-2 rounded-lg border border-border bg-muted/20 p-4">
                     <Loader2 className="mt-0.5 size-4 shrink-0 animate-spin text-muted-foreground" />
                     <p className="text-sm">
-                      이전 출고반영 백업과 같은 주문이 있는지 확인하고 있습니다.
-                      확인이 끝나기 전에는 다음 단계로 갈 수 없습니다.
+                      {productNameExclusionsQuery.isFetching &&
+                      !backedUpLookupQuery.isFetching
+                        ? '상품 연결 예외 기준을 확인하고 있습니다. 확인이 끝나기 전에는 다음 단계로 갈 수 없습니다.'
+                        : '이전 출고반영 백업과 같은 주문이 있는지 확인하고 있습니다. 확인이 끝나기 전에는 다음 단계로 갈 수 없습니다.'}
                     </p>
                   </div>
                 ) : backedUpLookupQuery.isError ? (
@@ -3719,6 +3749,32 @@ export function InvoiceWorkPage() {
                       다시 확인
                     </Button>
                   </div>
+                ) : productNameExclusionsQuery.isError ? (
+                  <div className="flex items-start justify-between gap-3 rounded-lg border border-danger/30 bg-danger/10 p-4">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle className="mt-0.5 size-4 shrink-0 text-danger" />
+                      <div>
+                        <p className="text-sm font-medium text-danger">
+                          상품 연결 예외 기준을 확인하지 못했습니다.
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {productNameExclusionsQuery.error instanceof Error
+                            ? productNameExclusionsQuery.error.message
+                            : '다시 확인한 뒤에 다음 단계로 갈 수 있습니다.'}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        void productNameExclusionsQuery.refetch()
+                      }}
+                    >
+                      다시 확인
+                    </Button>
+                  </div>
                 ) : hasBackedUpMatch && backedUpMatch ? (
                   <div className="rounded-lg border border-warning/30 bg-warning/10 p-4">
                     <div className="flex items-start justify-between gap-3">
@@ -3734,7 +3790,7 @@ export function InvoiceWorkPage() {
                           {backedUpExclusionAccepted
                             ? workRows.length === 0
                               ? '이번 파일의 모든 주문이 이전 백업과 같습니다. 진행할 주문이 없습니다.'
-                              : '제외한 주문은 이후 모든 단계에서 빼 둡니다. 같은 주문의 다른 상품 행도 함께 빠집니다.'
+                              : '제외한 주문은 이후 모든 단계에서 빼 둡니다. 같은 주문의 다른 상품 행과 같은 합포장의 상품 연결 예외 행도 함께 빠집니다.'
                             : '제외할지 확인하기 전에는 다음 단계로 갈 수 없습니다.'}
                         </p>
                       </div>

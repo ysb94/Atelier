@@ -1,7 +1,22 @@
-import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react'
+import {
+  startTransition,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, ChevronRight, Search, X } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowUp,
+  ChevronRight,
+  Loader2,
+  Search,
+  X,
+} from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useBrand } from '@/components/layout/brand-context'
 import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
@@ -1150,6 +1165,88 @@ function OutboundSortHeader({
   )
 }
 
+function timeOutboundData<T>(name: string, fn: () => T): T {
+  const start = performance.now()
+  const result = fn()
+  const elapsed = Math.round(performance.now() - start)
+  if (elapsed >= 1_000) {
+    console.warn(`[outbound-data] ${name} ${elapsed}ms`, {
+      path: `${location.pathname}${location.search}`,
+    })
+  } else if (elapsed >= 200) {
+    console.info(`[outbound-data] ${name} ${elapsed}ms`, {
+      path: `${location.pathname}${location.search}`,
+    })
+  }
+  return result
+}
+
+function measurePageScrollBox() {
+  const host = document.querySelector<HTMLElement>('[data-brand-page-scroll]')
+  if (!host) return null
+  const rect = host.getBoundingClientRect()
+  return {
+    top: rect.top,
+    left: rect.left,
+    width: rect.width,
+    height: rect.height,
+  }
+}
+
+function OutboundBusyOverlay({
+  label,
+  hint,
+}: {
+  label: string
+  hint?: string
+}) {
+  const [box, setBox] = useState(measurePageScrollBox)
+
+  useLayoutEffect(() => {
+    const host = document.querySelector<HTMLElement>('[data-brand-page-scroll]')
+    if (!host) return
+    const sync = () => {
+      setBox(measurePageScrollBox())
+    }
+    sync()
+    const observer = new ResizeObserver(sync)
+    observer.observe(host)
+    window.addEventListener('resize', sync)
+    window.addEventListener('scroll', sync, true)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', sync)
+      window.removeEventListener('scroll', sync, true)
+    }
+  }, [])
+
+  if (!box) return null
+  return createPortal(
+    <div
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      className="fixed z-[80] flex flex-col items-center justify-center gap-3 bg-background/80 backdrop-blur-sm"
+      style={{
+        top: box.top,
+        left: box.left,
+        width: box.width,
+        height: box.height,
+      }}
+    >
+      <Loader2 className="size-10 animate-spin text-foreground" />
+      <p className="text-2xl font-semibold tracking-wide">불러오는 중</p>
+      <p className="text-sm text-muted-foreground">{label}</p>
+      {hint ? (
+        <p className="max-w-md px-6 text-center text-xs text-muted-foreground/80">
+          {hint}
+        </p>
+      ) : null}
+    </div>,
+    document.body,
+  )
+}
+
 function ProductListCard({
   title,
   total,
@@ -1223,6 +1320,39 @@ export function OutboundDataPage() {
     queryFn: () => getOutboundShipments(brand.id),
   })
   const shipments = shipmentsQuery.data ?? emptyList()
+  const loadingShipments =
+    shipmentsQuery.isPending ||
+    (!shipmentsQuery.data && shipmentsQuery.isFetching)
+  const refreshingShipments =
+    shipmentsQuery.isFetching && Boolean(shipmentsQuery.data)
+  const [readyBrandId, setReadyBrandId] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (loadingShipments) {
+      if (readyBrandId !== null) setReadyBrandId(null)
+      return
+    }
+    if (readyBrandId === brand.id) return
+    const frame = window.requestAnimationFrame(() => {
+      startTransition(() => {
+        setReadyBrandId(brand.id)
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [brand.id, loadingShipments, readyBrandId, shipmentsQuery.dataUpdatedAt])
+
+  useEffect(() => {
+    if (!shipmentsQuery.error) return
+    console.warn('[운영현황] 출고 원장을 불러오지 못함', {
+      brandId: brand.id,
+      error: shipmentsQuery.error,
+    })
+  }, [brand.id, shipmentsQuery.error])
+
+  const readyToRender = readyBrandId === brand.id && !loadingShipments
+  const visibleShipments = readyToRender ? shipments : emptyList()
+  const showLoadingOverlay =
+    !shipmentsQuery.isError && (loadingShipments || !readyToRender)
 
   useEffect(() => {
     purgeDemoProductOutboundShipments(brand.id)
@@ -1266,47 +1396,62 @@ export function OutboundDataPage() {
 
   const filteredShipments = useMemo(
     () =>
-      filterShipmentsByRange(
-        shipments,
-        dateFrom,
-        dateTo,
-        partnerFilter || null,
+      timeOutboundData('기간 필터', () =>
+        filterShipmentsByRange(
+          visibleShipments,
+          dateFrom,
+          dateTo,
+          partnerFilter || null,
+        ),
       ),
-    [dateFrom, dateTo, partnerFilter, shipments],
+    [dateFrom, dateTo, partnerFilter, visibleShipments],
   )
 
   const finance = useMemo(
-    () => summarizeOutboundFinance(filteredShipments),
+    () =>
+      timeOutboundData('손익 합계', () =>
+        summarizeOutboundFinance(filteredShipments),
+      ),
     [filteredShipments],
   )
 
   const partnerFinance = useMemo(
-    () => summarizeOutboundFinanceByPartner(filteredShipments),
+    () =>
+      timeOutboundData('업체별 손익', () =>
+        summarizeOutboundFinanceByPartner(filteredShipments),
+      ),
     [filteredShipments],
   )
 
   const outboundStyleRows = useMemo(
-    () => listOutboundStyleRows(filteredShipments),
+    () =>
+      timeOutboundData('상품 목록', () =>
+        listOutboundStyleRows(filteredShipments),
+      ),
     [filteredShipments],
   )
 
-  const summaries = useMemo(() => {
-    const map = new Map<string, ProductOutboundSummary>()
-    for (const style of outboundStyleRows) {
-      map.set(
-        style.styleId,
-        buildProductOutboundSummary(
-          {
-            id: style.styleId,
-            styleNo: style.styleNo,
-            name: style.styleName,
-          },
-          filteredShipments,
-        ),
-      )
-    }
-    return map
-  }, [filteredShipments, outboundStyleRows])
+  const summaries = useMemo(
+    () =>
+      timeOutboundData('상품별 집계', () => {
+        const map = new Map<string, ProductOutboundSummary>()
+        for (const style of outboundStyleRows) {
+          map.set(
+            style.styleId,
+            buildProductOutboundSummary(
+              {
+                id: style.styleId,
+                styleNo: style.styleNo,
+                name: style.styleName,
+              },
+              filteredShipments,
+            ),
+          )
+        }
+        return map
+      }),
+    [filteredShipments, outboundStyleRows],
+  )
 
   const dateColumns = useMemo(
     () => listOutboundDateColumns(dateFrom, dateTo, filteredShipments),
@@ -1431,16 +1576,40 @@ export function OutboundDataPage() {
 
   const listControls = {
     total: visibleRows.length,
-    loading: false,
-    error: false,
+    loading: showLoadingOverlay,
+    error: shipmentsQuery.isError,
     empty: visibleRows.length === 0,
     emptyMessage: onlyShipped
       ? '기간 안 출고 기록이 있는 상품이 없습니다.'
       : '표시할 상품이 없습니다.',
   }
+  const kpiQuantity = showLoadingOverlay
+    ? '—'
+    : `${formatNumber(finance.quantity)}개`
+  const kpiShipments = showLoadingOverlay
+    ? '—'
+    : `${formatNumber(finance.shipmentCount)}건`
+  const kpiStyles = showLoadingOverlay
+    ? '—'
+    : `${formatNumber(finance.styleCount)}종`
+  const kpiPartners = showLoadingOverlay
+    ? '—'
+    : `${formatNumber(finance.partnerCount)}곳`
 
   return (
     <div>
+      {showLoadingOverlay ? (
+        <WorkspaceTabOverlay>
+          <OutboundBusyOverlay
+            label={
+              loadingShipments
+                ? '출고 원장을 불러오는 중'
+                : '출고 현황을 집계하는 중'
+            }
+            hint="건수가 많으면 몇 초 걸릴 수 있습니다. 멈춘 것이 아닙니다."
+          />
+        </WorkspaceTabOverlay>
+      ) : null}
       <PageHeader
         title="운영 현황"
         description="출고 수량은 DB 원장입니다. 손익 금액은 테스트용이며 저장하지 않습니다."
@@ -1470,24 +1639,31 @@ export function OutboundDataPage() {
         ))}
       </div>
 
+      {refreshingShipments ? (
+        <p className="mb-3 flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 className="size-4 animate-spin" />
+          출고 원장을 다시 불러오는 중…
+        </p>
+      ) : null}
+
       {view === 'outbound' ? (
         <div className="space-y-4">
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <KpiCard
               label="출고 수량"
-              value={`${formatNumber(finance.quantity)}개`}
+              value={kpiQuantity}
             />
             <KpiCard
               label="출고 건수"
-              value={`${formatNumber(finance.shipmentCount)}건`}
+              value={kpiShipments}
             />
             <KpiCard
               label="출고 상품"
-              value={`${formatNumber(finance.styleCount)}종`}
+              value={kpiStyles}
             />
             <KpiCard
               label="출고 업체"
-              value={`${formatNumber(finance.partnerCount)}곳`}
+              value={kpiPartners}
             />
           </div>
 
@@ -1621,37 +1797,51 @@ export function OutboundDataPage() {
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
             <KpiCard
               label="출고 수량"
-              value={`${formatNumber(finance.quantity)}개`}
-              hint={`${formatNumber(finance.shipmentCount)}건`}
+              value={kpiQuantity}
+              hint={showLoadingOverlay ? undefined : kpiShipments}
             />
             <KpiCard
               label="추정 매출"
-              value={formatWon(finance.revenue)}
+              value={showLoadingOverlay ? '—' : formatWon(finance.revenue)}
               hint="판매가 × 출고수량 (테스트)"
             />
             <KpiCard
               label="매출원가"
-              value={formatWon(finance.cogs)}
+              value={showLoadingOverlay ? '—' : formatWon(finance.cogs)}
               hint="제품 원가 합"
               tone="muted"
             />
             <KpiCard
               label="물류·수수료"
-              value={formatWon(finance.fees)}
+              value={showLoadingOverlay ? '—' : formatWon(finance.fees)}
               hint="배송·플랫폼 수수료 가정"
               tone="muted"
             />
             <KpiCard
               label="반품·손실"
-              value={formatWon(finance.returnLoss)}
-              hint={`가정 반품 ${formatNumber(finance.returnQuantity)}개`}
+              value={showLoadingOverlay ? '—' : formatWon(finance.returnLoss)}
+              hint={
+                showLoadingOverlay
+                  ? undefined
+                  : `가정 반품 ${formatNumber(finance.returnQuantity)}개`
+              }
               tone="danger"
             />
             <KpiCard
               label="순이익"
-              value={formatWon(finance.netProfit)}
-              hint={`마진 ${finance.marginRate.toFixed(1)}%`}
-              tone={finance.netProfit >= 0 ? 'success' : 'danger'}
+              value={showLoadingOverlay ? '—' : formatWon(finance.netProfit)}
+              hint={
+                showLoadingOverlay
+                  ? undefined
+                  : `마진 ${finance.marginRate.toFixed(1)}%`
+              }
+              tone={
+                showLoadingOverlay
+                  ? 'muted'
+                  : finance.netProfit >= 0
+                    ? 'success'
+                    : 'danger'
+              }
             />
           </div>
 
