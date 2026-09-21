@@ -384,7 +384,7 @@ export function StyledStudio({ api }: { api?: StudioImageApi }) {
   )
   if (!ready) return <div className="conversation-studio cs-docked"><p role="status">저장된 작업을 불러오고 있습니다…</p></div>
   return <div className={'conversation-studio cs-docked' + (hasConversation ? ' is-threaded' : ' is-empty') + (dropping ? ' is-dropping' : '')} onDragEnter={onStudioDragEnter} onDragOver={onStudioDragOver} onDragLeave={onStudioDragLeave} onDrop={onStudioDrop}>
-    <header className="cs-header"><div className="cs-brand"><span className="cs-logo"><Layers3 size={23} /></span><div><span className="cs-eyebrow">ATELIER CREATIVE</span><h1>연출컷 스튜디오</h1></div></div>{api ? <div className="cs-header-right"><div className={"cs-model-picker" + (pickerOpen ? " is-open" : "")}>
+    <header className="cs-header"><div className="cs-brand"><span className="cs-logo"><Layers3 size={23} /></span><div><span className="cs-eyebrow">ATELIER CREATIVE</span><h1>연출컷 스튜디오</h1></div></div><div className="cs-header-right"><span className="cs-save" role="status">{saveStatus}</span>{api ? <div className={"cs-model-picker" + (pickerOpen ? " is-open" : "")}>
         <button type="button" className="cs-model-picker-toggle" aria-expanded={pickerOpen} onClick={() => setPickerOpen((value) => !value)}>
           <span>모델 · 출력 설정</span>
           <small>{imageModelLabel} · 디렉터 {directorLabel}</small>
@@ -404,7 +404,7 @@ export function StyledStudio({ api }: { api?: StudioImageApi }) {
           <label className="cs-review-toggle"><input type="checkbox" disabled={busy} checked={reviewFirst} onChange={(event) => setReviewFirst(event.target.checked)} />생성 전에 디렉터 지시문 확인·수정</label>
           <p className="cs-help">Flare: 빠른 생성 · Sunburst: 정밀 편집 · 나노바나나 Pro: Google 모델<br />출력 크기와 품질이 높을수록 비용과 생성 시간이 늘어납니다.</p>
         </div> : null}
-      </div></div> : null}</header>
+      </div> : null}</div></header>
     <div className="cs-workspace">
       {hasConversation ? <div className="cs-workspace-main">
       {api ? null : <details className="cs-tool-details cs-panel"><summary><span>요청 이해 <ChevronRight size={12} /> 자료 선택 <ChevronRight size={12} /> 도구 연결</span><small>작동 방식 보기</small></summary><p>담당 AI가 요청과 사진을 해석하고, 필요한 작업 도구를 선택하는 구성입니다.</p><div className="cs-tool-grid">{(['background', 'create', 'detail'] as const).map((key) => <div key={key}><strong>{ACTIONS[key].tool}</strong><span>{ACTIONS[key].title}</span><small>미연결</small></div>)}</div><p className="cs-help">아래 체험에서는 요청의 일부 단어와 사진 역할로 정해진 예시를 표시합니다. 실제 AI 판단이나 전송이 아닙니다.</p></details>}
