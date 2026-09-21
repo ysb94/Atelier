@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Archive,
   FlaskConical,
+  History,
   Package,
   Plus,
   Search,
@@ -16,6 +17,7 @@ import {
   archiveWarehouseBox,
   createWarehouseBox,
   getActiveWarehouseInventorySet,
+  getWarehouseBoxMovements,
   getWarehouseBoxes,
   getWarehouseRegisteredSlots,
   moveWarehouseBox,
@@ -26,12 +28,14 @@ import { compareWarehouseLocationCodeNatural } from '@/lib/invoice/product-list-
 import type {
   StyleRef,
   WarehouseBox,
+  WarehouseBoxAction,
+  WarehouseBoxMovement,
   WarehouseUsagePriority,
   WarehouseZone,
 } from '@/lib/types'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
 
-type TemporaryWarehouseTab = 'input' | 'box_slots' | 'picking_slots'
+type TemporaryWarehouseTab = 'input' | 'box_slots' | 'picking_slots' | 'history'
 type TemporaryWarehousePriority = Extract<
   WarehouseUsagePriority,
   'fifo' | 'first' | 'last'
@@ -75,6 +79,35 @@ function boxStatusLabel(status: WarehouseBox['status']) {
   if (status === 'depleted') return '소진'
   if (status === 'opened') return '개봉'
   return '밀봉'
+}
+
+function boxActionLabel(action: WarehouseBoxAction) {
+  if (action === 'create') return '등록'
+  if (action === 'update') return '수량 수정'
+  if (action === 'move') return '자리 이동'
+  if (action === 'open') return '개봉'
+  if (action === 'deplete') return '소진'
+  return '보관'
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: 'numeric',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function locationText(zone: WarehouseZone | null, code: string | null) {
+  const parts = [zone ? zoneLabel(zone) : null, code?.trim() || null].filter(
+    Boolean,
+  )
+  return parts.length > 0 ? parts.join(' ') : '—'
 }
 
 function mutationErrorMessage(error: unknown, fallback: string) {
@@ -194,6 +227,9 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
   function invalidateBoxes() {
     void queryClient.invalidateQueries({ queryKey: ['warehouse-boxes', brandId] })
     void queryClient.invalidateQueries({
+      queryKey: ['warehouse-box-movements', brandId],
+    })
+    void queryClient.invalidateQueries({
       queryKey: ['warehouse-registered-slots', warehouseId],
     })
   }
@@ -306,7 +342,7 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
       archiveWarehouseBox(brandId, boxId, '임시 창고관리 보관'),
     onSuccess: () => {
       setFormError(null)
-      setFormSuccess('박스를 보관했습니다. 이력은 DB에 남습니다.')
+      setFormSuccess('박스를 보관했습니다. 보관 이력 탭에서 다시 볼 수 있습니다.')
       invalidateBoxes()
     },
     onError: (error) => {
@@ -360,6 +396,7 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
             label: '출고창고 자리 리스트',
             icon: Truck,
           },
+          { value: 'history' as const, label: '보관 이력', icon: History },
         ].map((tab) => {
           const Icon = tab.icon
           const selected = tab.value === activeTab
@@ -681,6 +718,8 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
             </div>
           </section>
         </>
+      ) : activeTab === 'history' ? (
+        <TemporaryWarehouseHistoryList brandId={brandId} />
       ) : (
         <TemporaryWarehouseSlotList
           zone={activeTab === 'box_slots' ? 'box_storage' : 'picking'}
@@ -713,6 +752,319 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
         />
       )}
     </div>
+  )
+}
+
+function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
+  const [style, setStyle] = useState<StyleRef | null>(null)
+  const [search, setSearch] = useState('')
+  const [openBoxId, setOpenBoxId] = useState<string | null>(null)
+  const [page, setPage] = useState(0)
+  const pageSize = 50
+
+  const boxesQuery = useQuery({
+    queryKey: ['warehouse-boxes', brandId, { includeArchived: true }],
+    queryFn: () => getWarehouseBoxes(brandId, { includeArchived: true }),
+  })
+  const movementsQuery = useQuery({
+    queryKey: ['warehouse-box-movements', brandId],
+    queryFn: () => getWarehouseBoxMovements(brandId),
+  })
+
+  useEffect(() => {
+    if (!boxesQuery.error) return
+    console.warn('[임시창고] 보관 박스를 불러오지 못함', {
+      brandId,
+      error: boxesQuery.error,
+    })
+  }, [boxesQuery.error, brandId])
+
+  useEffect(() => {
+    if (!movementsQuery.error) return
+    console.warn('[임시창고] 박스 이력을 불러오지 못함', {
+      brandId,
+      error: movementsQuery.error,
+    })
+  }, [brandId, movementsQuery.error])
+
+  const archivedBoxes = useMemo(
+    () => (boxesQuery.data ?? emptyList()).filter((box) => box.archivedAt),
+    [boxesQuery.data],
+  )
+  const movementsByBoxId = useMemo(() => {
+    const grouped = new Map<string, WarehouseBoxMovement[]>()
+    for (const movement of movementsQuery.data ?? emptyList()) {
+      const rows = grouped.get(movement.boxId)
+      if (rows) rows.push(movement)
+      else grouped.set(movement.boxId, [movement])
+    }
+    return grouped
+  }, [movementsQuery.data])
+
+  const filtered = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase('ko-KR')
+    return archivedBoxes.filter((box) => {
+      if (style && box.styleId !== style.styleId) return false
+      if (!query) return true
+      return [
+        box.displayCode,
+        box.styleNo,
+        box.styleName,
+        box.locationCode,
+        zoneLabel(box.zone),
+        box.note,
+      ].some((value) => value.toLocaleLowerCase('ko-KR').includes(query))
+    })
+  }, [archivedBoxes, search, style])
+
+  useEffect(() => {
+    setPage(0)
+  }, [search, style?.styleId])
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const safePage = Math.min(page, pageCount - 1)
+  const paged = filtered.slice(
+    safePage * pageSize,
+    safePage * pageSize + pageSize,
+  )
+  const error = boxesQuery.error
+    ? mutationErrorMessage(boxesQuery.error, '보관 이력을 불러오지 못했습니다.')
+    : movementsQuery.error
+      ? mutationErrorMessage(
+          movementsQuery.error,
+          '박스 이력을 불러오지 못했습니다.',
+        )
+      : null
+  const loading = boxesQuery.isLoading || movementsQuery.isLoading
+
+  return (
+    <section className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-3">
+        <Summary
+          label="보관 박스"
+          value={`${formatNumber(archivedBoxes.length)}개`}
+        />
+        <Summary
+          label="검색 결과"
+          value={`${formatNumber(filtered.length)}개`}
+        />
+        <Summary
+          label="선택 제품"
+          value={style ? style.styleNo : '전체'}
+        />
+      </div>
+
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold">보관 이력</h3>
+          <p className="mt-1 text-xs text-muted-foreground">
+            제품 입력에서 보관한 박스를 M번호로 다시 찾습니다. 등록·이동·수량
+            변경·보관 기록이 함께 보입니다.
+          </p>
+        </div>
+        <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto">
+          <div className="w-full sm:w-72">
+            <StylePicker
+              brandId={brandId}
+              value={style}
+              onChange={setStyle}
+              placeholder="M번호 또는 상품명 검색"
+              inputClassName="h-9"
+            />
+          </div>
+          <label className="relative block w-full sm:w-72">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="M번호·상품명·박스번호 검색"
+              className="pl-8"
+            />
+          </label>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <table className="w-full min-w-[1080px] text-left text-xs">
+          <thead className="bg-muted/50 text-muted-foreground">
+            <tr>
+              <th className="px-3 py-2 font-semibold text-foreground">
+                박스 고유번호
+              </th>
+              <th className="px-3 py-2 font-medium">M번호</th>
+              <th className="px-3 py-2 font-medium">상품명</th>
+              <th className="px-3 py-2 font-medium">마지막 자리</th>
+              <th className="px-3 py-2 font-medium">입고일</th>
+              <th className="px-3 py-2 text-right font-medium">최초 입수</th>
+              <th className="px-3 py-2 text-right font-medium">보관 시 수량</th>
+              <th className="px-3 py-2 font-medium">보관일</th>
+              <th className="px-3 py-2 font-medium">상태</th>
+            </tr>
+          </thead>
+          <tbody>
+            {paged.map((box) => {
+              const movements = movementsByBoxId.get(box.id) ?? emptyList()
+              const open = openBoxId === box.id
+              return (
+                <TemporaryWarehouseHistoryRow
+                  key={box.id}
+                  box={box}
+                  movements={movements}
+                  open={open}
+                  onToggle={() =>
+                    setOpenBoxId((current) =>
+                      current === box.id ? null : box.id,
+                    )
+                  }
+                />
+              )
+            })}
+            {paged.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={9}
+                  className="px-3 py-10 text-center text-muted-foreground"
+                >
+                  {error
+                    ? error
+                    : loading
+                      ? '보관 이력을 불러오는 중...'
+                      : archivedBoxes.length === 0
+                        ? '아직 보관한 박스가 없습니다. 제품 입력에서 박스를 보관하면 여기에 남습니다.'
+                        : '검색 조건에 맞는 보관 이력이 없습니다.'}
+                </td>
+              </tr>
+            ) : null}
+          </tbody>
+        </table>
+      </div>
+
+      {filtered.length > pageSize ? (
+        <div className="flex items-center justify-end gap-2">
+          <span className="text-xs text-muted-foreground">
+            {formatNumber(safePage * pageSize + 1)}–
+            {formatNumber(Math.min((safePage + 1) * pageSize, filtered.length))}
+            /{formatNumber(filtered.length)}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={safePage === 0}
+            onClick={() => setPage((current) => Math.max(0, current - 1))}
+          >
+            이전
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={safePage >= pageCount - 1}
+            onClick={() =>
+              setPage((current) => Math.min(pageCount - 1, current + 1))
+            }
+          >
+            다음
+          </Button>
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+function TemporaryWarehouseHistoryRow({
+  box,
+  movements,
+  open,
+  onToggle,
+}: {
+  box: WarehouseBox
+  movements: WarehouseBoxMovement[]
+  open: boolean
+  onToggle: () => void
+}) {
+  return (
+    <>
+      <tr className="border-t border-border">
+        <td className="px-3 py-2">
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={open}
+            className="inline-flex items-center gap-2 text-left"
+          >
+            <Badge variant="outline" className="font-mono font-semibold">
+              {box.displayCode}
+            </Badge>
+            <span className="text-[11px] text-muted-foreground">
+              {open ? '이력 접기' : `이력 ${formatNumber(movements.length)}건`}
+            </span>
+          </button>
+        </td>
+        <td className="px-3 py-2 font-medium">{box.styleNo || '—'}</td>
+        <td className="max-w-52 truncate px-3 py-2">{box.styleName || '—'}</td>
+        <td className="px-3 py-2">
+          {locationText(box.zone, box.locationCode)}
+        </td>
+        <td className="px-3 py-2 tabular-nums">{box.receivedOn || '—'}</td>
+        <td className="px-3 py-2 text-right tabular-nums">
+          {formatNumber(box.initialQty)}
+        </td>
+        <td className="px-3 py-2 text-right tabular-nums">
+          {formatNumber(box.currentQty)}
+        </td>
+        <td className="px-3 py-2 tabular-nums">
+          {formatDateTime(box.archivedAt)}
+        </td>
+        <td className="px-3 py-2">{boxStatusLabel(box.status)}</td>
+      </tr>
+      {open ? (
+        <tr className="border-t border-border bg-muted/20">
+          <td colSpan={9} className="px-3 py-3">
+            {movements.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                이 박스의 상세 이력이 없습니다.
+              </p>
+            ) : (
+              <ol className="space-y-2">
+                {movements.map((movement) => (
+                  <li
+                    key={movement.id}
+                    className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs"
+                  >
+                    <span className="tabular-nums text-muted-foreground">
+                      {formatDateTime(movement.createdAt)}
+                    </span>
+                    <Badge variant="muted">{boxActionLabel(movement.action)}</Badge>
+                    <span>
+                      {locationText(movement.fromZone, movement.fromLocationCode)}
+                      {' → '}
+                      {locationText(movement.toZone, movement.toLocationCode)}
+                    </span>
+                    {movement.fromQty != null || movement.toQty != null ? (
+                      <span className="tabular-nums text-muted-foreground">
+                        {movement.fromQty == null
+                          ? '—'
+                          : formatNumber(movement.fromQty)}
+                        {' → '}
+                        {movement.toQty == null
+                          ? '—'
+                          : formatNumber(movement.toQty)}
+                      </span>
+                    ) : null}
+                    {movement.reason ? (
+                      <span className="text-muted-foreground">
+                        {movement.reason}
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </td>
+        </tr>
+      ) : null}
+    </>
   )
 }
 

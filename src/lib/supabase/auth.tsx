@@ -135,7 +135,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const signOut = useCallback(async () => {
-    const { error } = await getSupabase().auth.signOut()
+    const { error } = await getSupabase().auth.signOut({ scope: 'local' })
     if (error) throw new Error(error.message)
     setProfile(null)
   }, [])

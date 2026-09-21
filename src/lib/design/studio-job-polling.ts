@@ -24,6 +24,10 @@ export async function waitForStudioImage(job: StudioImageJob, read: (job: Studio
     try { result = await read(job); readFailures = 0 }
     catch (error) {
       if (error instanceof StudioApiError && (error.status === 400 || error.status === 404)) throw error
+      if (error instanceof StudioApiError && (error.status === 401 || error.status === 403)) {
+        console.warn('[styled-image] 기존 작업 조회 실패', { path: typeof location === 'undefined' ? 'verification' : location.pathname, input: '기존 이미지 결과 확인', modelId: job.modelId, attempt: 1, name: error.name, status: error.status })
+        throw new PendingStudioImageError(error.message, job)
+      }
       readFailures++
       console.warn('[styled-image] 기존 작업 조회 실패', { path: typeof location === 'undefined' ? 'verification' : location.pathname, input: '기존 이미지 결과 확인', modelId: job.modelId, attempt: readFailures, name: error instanceof Error ? error.name : 'unknown' })
       if (readFailures >= 3) throw new PendingStudioImageError('기존 이미지 작업의 상태를 확인하지 못했습니다. 결과 확인을 다시 누르면 같은 작업을 조회합니다.', job)

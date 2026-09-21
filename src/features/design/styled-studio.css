@@ -247,3 +247,61 @@
   .conversation-studio.cs-docked .cs-messages{max-height:none;min-height:0}
   .conversation-studio.cs-docked .cs-welcome{min-height:0}
 }
+
+.conversation-studio.cs-docked.is-empty .cs-workspace{flex-direction:column;align-items:center;justify-content:center;overflow:auto}
+.cs-empty-stage{width:min(760px,calc(100% - 24px));display:flex;flex-direction:column;align-items:center;gap:18px;padding:8px 0 28px}
+.cs-empty-stage>h2{font-size:28px;font-weight:550;letter-spacing:-1px;text-align:center;line-height:1.35;color:#2d3c31}
+.conversation-studio.cs-docked.is-empty .cs-dock{width:100%;max-height:none;background:transparent;border:0;box-shadow:none;overflow:visible}
+.conversation-studio.cs-docked.is-empty .cs-composer-wrap{padding:0;border:0;background:transparent}
+.conversation-studio.cs-docked.is-empty .cs-composer{border-radius:22px;padding:14px 16px 12px;box-shadow:0 10px 32px #3a4a3514}
+.conversation-studio.cs-docked.is-empty .cs-composer textarea{min-height:72px;max-height:180px}
+.conversation-studio.cs-docked.is-empty .cs-composer-note{display:block;padding-top:10px}
+.conversation-studio.cs-docked.is-threaded .cs-workspace{flex-direction:row}
+.conversation-studio.cs-docked.is-threaded .cs-dock{flex:0 0 auto;max-height:45%}
+.cs-composer-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+.conversation-studio .cs-composer-action{position:relative;display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;font-size:11px;color:#5d6b56;background:#f7f8f3;border-color:#dce4d4}
+.conversation-studio .cs-composer-action:hover:not(:disabled){background:#eef2e9}
+.cs-composer-action input[type=file]{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:pointer}
+.cs-composer-action:has(input:disabled){opacity:.45}
+.cs-request-attachments{display:flex;flex-direction:column;align-items:stretch;gap:8px;white-space:normal}
+.cs-attach-thumbs{display:flex;gap:8px;overflow-x:auto;padding:2px 4px 4px;scrollbar-width:thin}
+.cs-attach-thumbs figure{position:relative;margin:0;width:64px;flex:none}
+.cs-attach-thumbs img{width:64px;height:64px;object-fit:contain;border-radius:8px;background:#f4f5ef;display:block}
+.cs-attach-thumbs figcaption{display:block;font-size:10px;text-align:center;color:#5f6d58;margin-top:4px}
+.conversation-studio .cs-attach-thumbs button{position:absolute;top:-4px;right:-4px;width:18px;height:18px;padding:0;border-radius:50%;background:#fff;border:1px solid #d5ddd0;color:#5d6b56}
+.cs-drop-overlay{position:absolute;inset:8px;z-index:40;display:grid;place-items:center;pointer-events:none;border:2px dashed #4c684d;border-radius:18px;background:#f5f5efd8;color:#35543a;font-size:16px;font-weight:550;letter-spacing:-.3px}
+.cs-library-backdrop{position:absolute;inset:0;border:0;background:#18201940;z-index:20}
+.cs-library-drawer{position:absolute;top:0;right:0;bottom:0;width:min(520px,100%);z-index:21;display:flex;flex-direction:column;min-height:0;box-shadow:-8px 0 24px #0002}
+.cs-library-drawer:focus{outline:none}
+.cs-library-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px;border-bottom:1px solid var(--cs-line)}
+.cs-library-drawer-head h2{font-size:15px}
+.conversation-studio .cs-library-drawer-close{border:0;background:transparent;padding:6px;min-width:40px;min-height:40px}
+.cs-library-drawer-body{flex:1;min-height:0;overflow:auto;padding:12px 14px 18px}
+.cs-library-drawer .cs-library-toolbar{align-items:flex-start}
+.cs-library-drawer .cs-library-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(132px,1fr));overflow:visible;flex-wrap:unset;max-height:none}
+.cs-library-drawer .cs-library-photo{width:auto;min-width:0}
+.conversation-studio.cs-docked .cs-library-drawer .cs-library-photo{width:auto;min-width:0}
+.conversation-studio.cs-docked .cs-library-drawer .cs-library-photo .cs-thumb-only img{height:78px}
+.conversation-studio.cs-docked .cs-library-drawer .cs-library-filename{display:block}
+.conversation-studio.cs-docked .cs-library-drawer .cs-storage-note{display:flex;margin-top:16px}
+.conversation-studio.cs-docked .cs-info-backdrop{display:block;position:absolute;inset:0;z-index:24;border:0;background:#18201940}
+.conversation-studio.cs-docked .cs-info-panel{position:absolute;top:0;right:0;bottom:0;width:min(360px,92vw);min-width:0;flex:none;z-index:25;box-shadow:-8px 0 24px #0002}
+@media(max-width:900px){
+  .cs-empty-stage>h2{font-size:22px}
+  .conversation-studio.cs-docked.is-empty .cs-header{align-items:flex-start}
+  .cs-library-drawer{width:100%}
+  .cs-composer-bottom{align-items:stretch}
+  .cs-composer-tools{flex:1}
+}
+@media(max-width:700px){
+  .cs-empty-stage{width:calc(100% - 8px);gap:14px}
+  .cs-empty-stage>h2{font-size:20px}
+  .conversation-studio .cs-composer-action span{display:none}
+  .conversation-studio.cs-docked.is-empty .cs-composer{border-radius:18px;padding:12px}
+  .conversation-studio.cs-docked h1{font-size:15px;white-space:nowrap}
+  .conversation-studio.cs-docked .cs-header-right .cs-model-picker-toggle{max-width:min(220px,58vw)}
+  .conversation-studio.cs-docked.is-threaded .cs-dock{overflow:auto}
+  .conversation-studio.cs-docked .cs-request-notice{margin:6px 8px;padding:8px}
+  .cs-attach-thumbs figure{width:48px}
+  .cs-attach-thumbs img{width:48px;height:48px}
+}

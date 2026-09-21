@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createImageJob, readImageJob, openAiBackgroundImageBody, readBackgroundImage } from '../supabase/functions/_shared/styled-image-job.ts'
-import { PendingStudioImageError, waitForStudioImage } from '../src/lib/design/studio-job-polling.ts'
+import { PendingStudioImageError, StudioApiError, waitForStudioImage } from '../src/lib/design/studio-job-polling.ts'
 const secret='local-test-secret-not-an-api-key'
 const job=await createImageJob('resp_test123','user-a','gpt-image-2',secret,1000)
 assert.equal((await readImageJob(job.token,'user-a',secret,2000)).id,'resp_test123')
@@ -24,8 +24,23 @@ const result=await waitForStudioImage(job,async()=>{calls++;return now<180000?{s
 assert.equal(result.data,finished.result.data);assert.ok(now>=180000,'generation survives old 120-second limit')
 assert.ok(calls>30)
 let failure
-try { await waitForStudioImage(job,async()=>{throw new Error('network lost')},{sleep:async()=>{}}) } catch(e){failure=e}
+let networkCalls=0
+try { await waitForStudioImage(job,async()=>{networkCalls++;throw new Error('network lost')},{sleep:async()=>{}}) } catch(e){failure=e}
+assert.equal(networkCalls,3,'transient network errors keep the existing 3-attempt recovery')
 assert.ok(failure instanceof PendingStudioImageError);assert.equal(failure.job.token,job.token)
 assert.equal((await waitForStudioImage(failure.job,async()=>finished)).data,finished.result.data,'resume reads existing job')
+let authCalls=0
+let authFailure
+try {
+  await waitForStudioImage(job,async()=>{
+    authCalls++
+    throw new StudioApiError('로그인 세션이 종료되어 기존 이미지 결과 조회를 할 수 없습니다. 다시 로그인한 뒤 결과 확인을 누르면 이미 접수된 작업을 조회합니다.',401)
+  },{sleep:async()=>{throw new Error('401 must not retry')}})
+} catch(e){authFailure=e}
+assert.equal(authCalls,1,'expired sessions stop polling immediately')
+assert.ok(authFailure instanceof PendingStudioImageError)
+assert.equal(authFailure.job.token,job.token)
+assert.match(authFailure.message,/다시 로그인/)
+assert.equal((await waitForStudioImage(authFailure.job,async()=>finished)).data,finished.result.data,'relogin resumes the same job')
 await assert.rejects(waitForStudioImage(job,async()=>({status:'failed',error:'provider stopped'})),/provider stopped/)
-console.log('styled-image jobs: authenticated tokens, unchanged model/quality, 3-minute polling, recovery without generation and terminal failure passed')
+console.log('styled-image jobs: authenticated tokens, unchanged model/quality, 3-minute polling, 401 session recovery and terminal failure passed')

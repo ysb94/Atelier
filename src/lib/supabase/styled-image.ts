@@ -14,9 +14,11 @@ async function invoke<T>(body: { action: string; [key: string]: unknown }): Prom
     const status = error.context instanceof Response ? error.context.status : undefined
     let message = /Abort|Timeout/.test(contextName) || status === 504
       ? phase + ' 응답 대기 시간이 초과되었습니다. 생성 요청을 자동으로 반복하지 않습니다.'
-      : phase + ' 서버에 연결하지 못했습니다. 네트워크와 로그인 상태를 확인해 주세요.'
+      : status === 401
+        ? '로그인 세션이 종료되어 ' + phase + '를 할 수 없습니다. 다시 로그인한 뒤 결과 확인을 누르면 이미 접수된 작업을 조회합니다.'
+        : phase + ' 서버에 연결하지 못했습니다. 네트워크와 로그인 상태를 확인해 주세요.'
     console.warn('[styled-image] 서버 응답 실패', { path: location.pathname, input: phase, action: body.action, status, name: error.name, contextName })
-    if (error.context instanceof Response) {
+    if (error.context instanceof Response && status !== 401) {
       try { const payload = await error.context.json(); if (payload.error) message = payload.error }
       catch (parseError) { console.warn('[styled-image] 오류 응답 해석 실패', { path: location.pathname, error: parseError }) }
     }

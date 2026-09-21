@@ -1,4 +1,5 @@
 import type { StudioAsset, StudioProduct, StudioState } from './styled-studio'
+export const REQUEST_ATTACH_LIMIT = 14
 export function normalizeLibrary(state: StudioState): StudioState {
   let next = Math.max(state.nextPhotoNumber ?? 1, ...Object.values(state.assets).map(a => (a.photoNo ?? 0) + 1))
   const assets = Object.fromEntries(Object.values(state.assets).map(a => [a.id, a.photoNo ? a : { ...a, photoNo: next++ }]))
@@ -19,6 +20,16 @@ export function addLibraryAssets(state: StudioState, additions: StudioAsset[]): 
   const next = normalizeLibrary(state)
   for (const asset of additions) { next.assets[asset.id] = { ...asset, photoNo: next.nextPhotoNumber! }; next.nextPhotoNumber! += 1 }
   return next
+}
+export function attachAssetsToRequest(state: StudioState, selectionKey: string, assetIds: string[]) {
+  const current = { ...state.editInputs?.[selectionKey] }
+  let leftover = 0
+  for (const id of assetIds) {
+    if (current[id]) continue
+    if (Object.keys(current).length >= REQUEST_ATTACH_LIMIT) { leftover += 1; continue }
+    current[id] = '이번 요청에서 용도 해석'
+  }
+  return { leftover, editInputs: { ...state.editInputs, [selectionKey]: current } }
 }
 export function photoLabel(asset: StudioAsset) { return `사진 ${asset.photoNo ?? '?'}` }
 export function photoNote(asset?: StudioAsset) { return asset?.note?.trim() ?? '' }
