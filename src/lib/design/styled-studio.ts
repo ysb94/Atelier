@@ -1,5 +1,6 @@
 import type { DirectorPlan, ImageSettings } from '../../../supabase/functions/_shared/styled-image-core'
 import { buildStyledCutsPrompt, createInitialForm, type FormState, type ImageSlot, type ProductPhotoKey, type ExplorationKey } from './styled-cuts'
+import { normalizeStudioUpload } from './studio-image-processing'
 
 export type StudioProduct = { id: string; name: string; width: string; height: string; depth: string; unit: 'cm' | 'mm'; material: string; basis: string; state: string }
 export type StudioAsset = { id: string; name: string; type: string; data: string; photoNo?: number; productIds?: string[]; note?: string }
@@ -12,7 +13,7 @@ export type StudioPreviewTurn = {
   assetIds: string[]; versionIds: string[]; parentId?: string
   productName: string; material: string; dimensions: string; ratio: string
   director?: DirectorPlan; settings?: ImageSettings
-  modelId?: string; status?: 'generating' | 'complete' | 'failed'; error?: string
+  modelId?: string; status?: 'generating' | 'complete' | 'failed' | 'paused'; error?: string
 }
 export type StudioVersion = {
   productSnapshot?: StudioProduct[]
@@ -75,16 +76,8 @@ export function reviseStudio(state: StudioState, request: string): StudioState {
 
 // Original files stay on this device; no network or account storage is involved.
 export async function readStudioAsset(file: File): Promise<StudioAsset> {
-  if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) throw new Error('JPG·PNG·WEBP 사진을 선택해 주세요.')
-  if (file.size > 25 * 1024 * 1024) throw new Error('사진 한 장은 25MB 이하로 선택해 주세요.')
-  const data = await new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onload = () => resolve(String(reader.result))
-    reader.onerror = () => reject(reader.error ?? new Error('사진을 읽지 못했습니다.'))
-    reader.readAsDataURL(file)
-  })
-  const probe = new Image(); probe.src = data; await probe.decode()
-  return { id: crypto.randomUUID(), name: file.name, type: file.type, data }
+  const processed = await normalizeStudioUpload(file)
+  return { id: crypto.randomUUID(), name: file.name, type: processed.type, data: processed.data }
 }
 
 const DB_NAME = 'atelier-styled-studio-v1'

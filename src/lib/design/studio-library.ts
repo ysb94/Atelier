@@ -1,5 +1,63 @@
 import type { StudioAsset, StudioProduct, StudioState } from './styled-studio'
 export const REQUEST_ATTACH_LIMIT = 14
+export function assetHistoryUsage(state: StudioState, assetId: string) {
+  const versions = state.versions.filter((item) => item.assetIds.includes(assetId) || item.resultId === assetId)
+  const turns = (state.conversationUi?.turns ?? []).filter((item) => item.assetIds.includes(assetId))
+  return {
+    used: versions.length > 0 || turns.length > 0,
+    versions: versions.map((item) => ({ id: item.id, title: item.title })),
+    turns: turns.map((item) => ({ id: item.id, request: item.request })),
+  }
+}
+export function assetUsageMessage(state: StudioState, assetId: string) {
+  const usage = assetHistoryUsage(state, assetId)
+  const label = state.assets[assetId] ? photoLabel(state.assets[assetId]) : '이 사진'
+  const names = [...new Set([
+    ...usage.versions.map((item) => item.title),
+    ...usage.turns.map((item) => {
+      const text = item.request.trim().replace(/\s+/g, ' ')
+      const clipped = text.length > 24 ? `${text.slice(0, 24)}…` : text
+      return clipped ? `「${clipped}」` : '이전 대화'
+    }),
+  ])]
+  return names.length
+    ? `${label}은 과거 생성 이력에서 사용 중이라 삭제할 수 없습니다. ${names.join(', ')}에서 쓰였습니다.`
+    : `${label}은 과거 생성 이력에서 사용 중이라 삭제할 수 없습니다.`
+}
+export function removeLibraryAsset(state: StudioState, assetId: string) {
+  if (!state.assets[assetId]) return { removed: true as const, state }
+  if (assetHistoryUsage(state, assetId).used) return { removed: false as const, message: assetUsageMessage(state, assetId), state }
+  const assets = { ...state.assets }
+  delete assets[assetId]
+  const product = { ...state.product }
+  for (const key of Object.keys(product) as (keyof typeof product)[]) {
+    if (product[key] === assetId) delete product[key]
+  }
+  const references = Object.fromEntries(
+    Object.entries(state.references).map(([key, ids]) => [key, (ids ?? []).filter((id) => id !== assetId)]),
+  )
+  const editInputs = Object.fromEntries(Object.entries(state.editInputs ?? {}).map(([key, current]) => {
+    const next = { ...current }
+    delete next[assetId]
+    return [key, next]
+  }))
+  const ui = state.conversationUi
+  return {
+    removed: true as const,
+    state: {
+      ...state,
+      assets,
+      product,
+      references,
+      editInputs,
+      conversationUi: ui ? {
+        ...ui,
+        sampleIds: ui.sampleIds.filter((id) => id !== assetId),
+        roles: Object.fromEntries(Object.entries(ui.roles).filter(([id]) => id !== assetId)),
+      } : ui,
+    },
+  }
+}
 export function normalizeLibrary(state: StudioState): StudioState {
   let next = Math.max(state.nextPhotoNumber ?? 1, ...Object.values(state.assets).map(a => (a.photoNo ?? 0) + 1))
   const assets = Object.fromEntries(Object.values(state.assets).map(a => [a.id, a.photoNo ? a : { ...a, photoNo: next++ }]))

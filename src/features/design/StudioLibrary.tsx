@@ -1,12 +1,12 @@
-import { ArrowUp, ImagePlus } from 'lucide-react'
+import { ArrowUp, ImagePlus, X } from 'lucide-react'
 import { StudioImagePreview } from './StudioImagePreview'
 import { photoLabel, photoNote, REQUEST_ATTACH_LIMIT } from '../../lib/design/studio-library'
 import type { StudioState } from '../../lib/design/styled-studio'
 
-export function StudioLibrary({ state, selected, busy, editingId, onSelect, onMention, onUpload, onEdit, filter, onFilter, compact = false, onExpand }: {
+export function StudioLibrary({ state, selected, busy, editingId, onSelect, onMention, onUpload, onEdit, onDelete, filter, onFilter, compact = false, onExpand }: {
   state: StudioState; selected: Record<string, string> | undefined; busy: boolean; editingId?: string | null
   onSelect: (id: string, checked: boolean) => void; onMention: (name: string) => void
-  onUpload: (files: FileList | null) => void; onEdit: (id: string) => void
+  onUpload: (files: FileList | null) => void; onEdit: (id: string) => void; onDelete: (id: string) => void
   filter: 'all' | 'attached'; onFilter: (filter: 'all' | 'attached') => void
   compact?: boolean; onExpand?: () => void
 }) {
@@ -20,11 +20,12 @@ export function StudioLibrary({ state, selected, busy, editingId, onSelect, onMe
         <button type="button" className={filter === 'all' ? 'is-active' : ''} aria-pressed={filter === 'all'} onClick={() => onFilter('all')}>전체 사진</button>
         <button type="button" className={filter === 'attached' ? 'is-active' : ''} aria-pressed={filter === 'attached'} onClick={() => onFilter('attached')}>{compact ? '첨부한 사진' : '이번 요청에 첨부한 사진'}</button>
       </div>
-      <label className="cs-upload cs-upload-add"><ImagePlus size={16} /><strong>사진 추가</strong><small>여러 장 · JPG, PNG, WEBP</small><input aria-label="사진 추가" type="file" multiple accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => { onUpload(e.target.files); e.target.value = '' }} /></label>
+      <label className="cs-upload cs-upload-add"><ImagePlus size={16} /><strong>사진 추가</strong><small>여러 장 · 큰 이미지는 고화질로 자동 최적화</small><input aria-label="사진 추가" type="file" multiple accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={e => { onUpload(e.target.files); e.target.value = '' }} /></label>
       {compact && <button type="button" className="cs-library-expand" onClick={onExpand} aria-label="작업 사진 목록 펼쳐 보기"><ArrowUp size={14} />펼치기</button>}
     </div>
     <p className="cs-help">체크한 사진만 보냅니다. 사진 번호를 누르면 요청창 커서 위치에 들어갑니다. 자동으로 첨부하지 않습니다.</p>
     <div className="cs-library-grid">{visible.map(asset => <article key={asset.id} title={photoNote(asset) || asset.name} className={'cs-library-photo' + (selectedIds[asset.id] ? ' is-checked' : '') + (editingId === asset.id ? ' is-editing' : '')}>
+      <button type="button" className="cs-library-delete" disabled={busy} aria-label={`${photoLabel(asset)} 삭제`} onClick={() => onDelete(asset.id)}><X size={12} /></button>
       <div className="cs-library-meta">
         <label className="cs-library-check"><input type="checkbox" aria-label={`${photoLabel(asset)} 첨부`} checked={!!selectedIds[asset.id]} disabled={busy || (!selectedIds[asset.id] && Object.keys(selectedIds).length >= REQUEST_ATTACH_LIMIT)} onChange={e => onSelect(asset.id, e.target.checked)} /></label>
         <button type="button" className="cs-photo-no" disabled={busy} onMouseDown={event => event.preventDefault()} onClick={() => onMention(photoLabel(asset))}>{photoLabel(asset)}</button>

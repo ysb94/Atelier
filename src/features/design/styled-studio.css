@@ -270,8 +270,7 @@
 .cs-attach-thumbs figcaption{display:block;font-size:10px;text-align:center;color:#5f6d58;margin-top:4px}
 .conversation-studio .cs-attach-thumbs button{position:absolute;top:-4px;right:-4px;width:18px;height:18px;padding:0;border-radius:50%;background:#fff;border:1px solid #d5ddd0;color:#5d6b56}
 .cs-drop-overlay{position:absolute;inset:8px;z-index:40;display:grid;place-items:center;pointer-events:none;border:2px dashed #4c684d;border-radius:18px;background:#f5f5efd8;color:#35543a;font-size:16px;font-weight:550;letter-spacing:-.3px}
-.cs-library-backdrop{position:absolute;inset:0;border:0;background:#18201940;z-index:20}
-.cs-library-drawer{position:absolute;top:0;right:0;bottom:0;width:min(520px,100%);z-index:21;display:flex;flex-direction:column;min-height:0;box-shadow:-8px 0 24px #0002}
+.cs-library-drawer{position:absolute;top:0;right:0;bottom:0;width:min(520px,100%);z-index:21;display:flex;flex-direction:column;min-height:0;border-left:1px solid var(--cs-line);border-radius:14px 0 0 14px;box-shadow:-12px 0 28px #18201918;pointer-events:auto}
 .cs-library-drawer:focus{outline:none}
 .cs-library-drawer-head{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:12px 14px;border-bottom:1px solid var(--cs-line)}
 .cs-library-drawer-head h2{font-size:15px}
@@ -304,4 +303,10 @@
   .conversation-studio.cs-docked .cs-request-notice{margin:6px 8px;padding:8px}
   .cs-attach-thumbs figure{width:48px}
   .cs-attach-thumbs img{width:48px;height:48px}
+}
+.cs-library-photo{position:relative}
+.conversation-studio .cs-library-photo .cs-library-delete{position:absolute;top:4px;right:4px;z-index:2;width:18px;height:18px;padding:0;border-radius:50%;background:#fff;border:1px solid #d5ddd0;color:#5d6b56}
+.cs-library-compact .cs-library-delete{display:none}
+@media(max-width:700px){
+  .conversation-studio .cs-library-photo .cs-library-delete{width:22px;height:22px}
 }

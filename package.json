@@ -46,6 +46,7 @@
     "verify:styled-cuts": "node --experimental-strip-types scripts/verify-styled-cuts.mjs",
     "verify:styled-image": "node --experimental-strip-types scripts/verify-styled-image.mjs",
     "verify:styled-image-jobs": "node --experimental-strip-types scripts/verify-styled-image-jobs.mjs",
+    "verify:studio-batch": "node --experimental-strip-types scripts/verify-studio-batch.mjs",
     "verify:styled-image-deployment": "node scripts/verify-styled-image-deployment.mjs",
     "verify:diagnostics": "node scripts/verify-diagnostics.mjs",
     "verify:company-capabilities": "npx tsx src/lib/company/capabilities.verify.ts",
@@ -57,6 +58,7 @@
     "verify:file-manager-brand": "npx tsx src/lib/design/file-manager-brand.verify.ts",
     "verify:work-request-roles": "npx tsx src/features/work-requests/work-request-roles.verify.ts",
     "verify:warehouse-tidy": "npx tsx src/lib/cargo/warehouse-tidy.verify.ts",
+    "verify:studio-library": "npx tsx src/lib/design/studio-library.verify.ts",
     "verify:masma-finder": "node scripts/verify-masma-finder.mjs"
   },
   "dependencies": {

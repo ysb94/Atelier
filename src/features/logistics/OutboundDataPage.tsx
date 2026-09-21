@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type MouseEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, ChevronRight, Search, X } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -323,6 +324,105 @@ function PartnerOutboundChart({
 
   const yTicks = 4
   const labelStep = Math.max(1, Math.ceil(chartDates.length / 8))
+  const [hover, setHover] = useState<{
+    id: string
+    label: string
+    color: string
+    date: string
+    qty: number
+    svgX: number
+    svgY: number
+    mouseX: number
+    mouseY: number
+  } | null>(null)
+
+  const totalLineLabel = openCompany
+    ? `${openCompany.label} 합계`
+    : openFolder
+      ? `${openFolder.label} 합계`
+      : '총합'
+
+  function pointerToSvg(event: MouseEvent<SVGElement>) {
+    const svg =
+      event.currentTarget.ownerSVGElement ??
+      (event.currentTarget as SVGSVGElement)
+    const rect = svg.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0) return null
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * width,
+      y: ((event.clientY - rect.top) / rect.height) * height,
+    }
+  }
+
+  function updateHover(event: MouseEvent<SVGElement>) {
+    const point = pointerToSvg(event)
+    if (!point || chartDates.length === 0) {
+      setHover(null)
+      return
+    }
+    let nearestIndex = 0
+    let nearestDx = Infinity
+    chartDates.forEach((_, index) => {
+      const dx = Math.abs(xAt(index) - point.x)
+      if (dx < nearestDx) {
+        nearestDx = dx
+        nearestIndex = index
+      }
+    })
+    const date = chartDates[nearestIndex]
+    const x = xAt(nearestIndex)
+    const candidates = [
+      ...visibleLines.map((line) => ({
+        id: line.id,
+        label: line.label,
+        color: line.color,
+        qty: line.byDate.get(date) ?? 0,
+      })),
+      ...(totalEnabled
+        ? [
+            {
+              id: TOTAL_LINE_ID,
+              label: totalLineLabel,
+              color: TOTAL_LINE_COLOR,
+              qty: totalByDate.get(date) ?? 0,
+            },
+          ]
+        : []),
+    ]
+    if (candidates.length === 0) {
+      setHover((prev) => (prev ? null : prev))
+      return
+    }
+    const withQty = candidates.filter((item) => item.qty > 0)
+    const pool = withQty.length > 0 ? withQty : candidates
+    let best = pool[0]
+    let bestDist = Math.abs(yAt(best.qty) - point.y)
+    for (const item of pool.slice(1)) {
+      const dist = Math.abs(yAt(item.qty) - point.y)
+      if (dist < bestDist) {
+        bestDist = dist
+        best = item
+      }
+    }
+    const next = {
+      ...best,
+      date,
+      svgX: x,
+      svgY: yAt(best.qty),
+      mouseX: event.clientX,
+      mouseY: event.clientY,
+    }
+    setHover((prev) =>
+      prev &&
+      prev.id === next.id &&
+      prev.date === next.date &&
+      prev.qty === next.qty &&
+      prev.mouseX === next.mouseX &&
+      prev.mouseY === next.mouseY
+        ? prev
+        : next,
+    )
+  }
 
   function toggleSeries(seriesId: string) {
     setEnabledIds((prev) => {
@@ -550,12 +650,15 @@ function PartnerOutboundChart({
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-border bg-muted/10 px-1 py-2">
-        <svg
-          viewBox={`0 0 ${width} ${height}`}
-          className="h-[240px] w-full min-w-[28rem]"
-          role="img"
-          aria-label="업체별 일자 출고 수량 그래프"
-        >
+        <div className="relative min-w-[28rem]">
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            className="h-[240px] w-full"
+            role="img"
+            aria-label="업체별 일자 출고 수량 그래프"
+            onMouseMove={updateHover}
+            onMouseLeave={() => setHover(null)}
+          >
           {Array.from({ length: yTicks + 1 }, (_, i) => {
             const value = (yMax / yTicks) * i
             const y = yAt(value)
@@ -623,12 +726,16 @@ function PartnerOutboundChart({
               const qty = line.byDate.get(date) ?? 0
               return `${xAt(index)},${yAt(qty)}`
             })
+            const active = hover?.id === line.id
             return (
-              <g key={line.id}>
+              <g
+                key={line.id}
+                opacity={hover && !active ? 0.22 : 1}
+              >
                 <polyline
                   fill="none"
                   stroke={line.color}
-                  strokeWidth={2}
+                  strokeWidth={active ? 3 : 2}
                   strokeLinejoin="round"
                   strokeLinecap="round"
                   points={points.join(' ')}
@@ -641,13 +748,9 @@ function PartnerOutboundChart({
                       key={`${line.id}-${date}`}
                       cx={xAt(index)}
                       cy={yAt(qty)}
-                      r={3}
+                      r={active && hover?.date === date ? 5 : 3}
                       fill={line.color}
-                    >
-                      <title>
-                        {line.label} · {date} · {formatNumber(qty)}
-                      </title>
-                    </circle>
+                    />
                   )
                 })}
               </g>
@@ -655,11 +758,11 @@ function PartnerOutboundChart({
           })}
 
           {totalEnabled ? (
-            <g>
+            <g opacity={hover && hover.id !== TOTAL_LINE_ID ? 0.22 : 1}>
               <polyline
                 fill="none"
                 stroke={TOTAL_LINE_COLOR}
-                strokeWidth={2.5}
+                strokeWidth={hover?.id === TOTAL_LINE_ID ? 3.5 : 2.5}
                 strokeLinejoin="round"
                 strokeLinecap="round"
                 points={chartDates
@@ -677,23 +780,76 @@ function PartnerOutboundChart({
                     key={`total-${date}`}
                     cx={xAt(index)}
                     cy={yAt(qty)}
-                    r={3.5}
+                    r={
+                      hover?.id === TOTAL_LINE_ID && hover.date === date
+                        ? 5.5
+                        : 3.5
+                    }
                     fill={TOTAL_LINE_COLOR}
-                  >
-                    <title>
-                      {openCompany
-                        ? `${openCompany.label} 합계`
-                        : openFolder
-                          ? `${openFolder.label} 합계`
-                          : '총합'}{' '}
-                      · {date} · {formatNumber(qty)}
-                    </title>
-                  </circle>
+                  />
                 )
               })}
             </g>
           ) : null}
+
+          {hover ? (
+            <g pointerEvents="none">
+              <line
+                x1={hover.svgX}
+                x2={hover.svgX}
+                y1={pad.top}
+                y2={height - pad.bottom}
+                stroke={hover.color}
+                strokeDasharray="3 3"
+                strokeWidth={1}
+                opacity={0.55}
+              />
+              <circle
+                cx={hover.svgX}
+                cy={hover.svgY}
+                r={6}
+                fill={hover.color}
+                stroke="white"
+                strokeWidth={2}
+              />
+            </g>
+          ) : null}
+
+          <rect
+            x={pad.left}
+            y={pad.top}
+            width={plotW}
+            height={plotH}
+            fill="rgba(255,255,255,0.01)"
+            onMouseMove={updateHover}
+            onMouseLeave={() => setHover(null)}
+          />
         </svg>
+        {hover
+          ? createPortal(
+              <div
+                className="pointer-events-none fixed z-[80] min-w-36 -translate-x-1/2 -translate-y-[calc(100%+12px)] rounded-md border border-border bg-card px-2.5 py-1.5 text-xs shadow-md"
+                style={{
+                  left: hover.mouseX,
+                  top: hover.mouseY,
+                }}
+              >
+            <p className="flex items-center gap-1.5 font-medium text-foreground">
+              <span
+                className="size-2.5 shrink-0 rounded-full"
+                style={{ backgroundColor: hover.color }}
+                aria-hidden
+              />
+              {hover.label}
+            </p>
+            <p className="mt-0.5 tabular-nums text-muted-foreground">
+              {formatOutboundDateHeader(hover.date)} · {formatNumber(hover.qty)}
+            </p>
+          </div>,
+              document.body,
+            )
+          : null}
+        </div>
       </div>
 
       {!totalEnabled && visibleLines.length === 0 ? (

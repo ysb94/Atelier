@@ -2,7 +2,7 @@ import type { StudioState, StudioVersion } from './styled-studio'
 import { missingPhotoMentions, normalizeLibrary, photoLabel, photoNote, productDescription, selectedProducts } from './studio-library.ts'
 import { validateImageRequest, type StyledDirectorModelId, type StyledImageModelId, type StyledImageRequest } from '../../../supabase/functions/_shared/styled-image-core.ts'
 
-export function prepareStudioGeneration(input: {
+export function buildStudioGenerationRequest(input: {
   state: StudioState; modelId: StyledImageModelId; directorModelId?: StyledDirectorModelId; request: string
   products: string[]; references: string[]; roles: Record<string, string>; parent?: StudioVersion; additionalImages?: Record<string, string>
 }): StyledImageRequest {
@@ -34,7 +34,10 @@ export function prepareStudioGeneration(input: {
     `출력 비율: ${state.form.outputRatio}`,
     `이번 요청:\n${input.request.trim()}`,
   ].join('\n\n')
-  return validateImageRequest({ modelId: input.modelId, directorModelId: input.directorModelId, prompt, ratio: state.form.outputRatio, images })
+  return { modelId: input.modelId, directorModelId: input.directorModelId, prompt, ratio: state.form.outputRatio, images }
+}
+export function prepareStudioGeneration(input: Parameters<typeof buildStudioGenerationRequest>[0]): StyledImageRequest {
+  return validateImageRequest(buildStudioGenerationRequest(input))
 }
 export function generationAssetIds(input: { state: StudioState; products: string[]; references: string[]; parent?: StudioVersion; additionalImages?: Record<string, string> }) {
   return Object.keys(input.additionalImages ?? {})
