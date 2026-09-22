@@ -93,6 +93,10 @@ export function designStyledCutsPath() {
   return '/design/styled-cuts'
 }
 
+export function mdPriceComparePath() {
+  return '/md/price-compare'
+}
+
 export function companyMeetingsPath() {
   return '/meetings'
 }

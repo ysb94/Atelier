@@ -147,11 +147,13 @@
 .conversation-studio.cs-docked .cs-starter{margin:12px 0 8px}
 .conversation-studio.cs-docked .cs-dock{flex:0 0 auto;min-height:0;max-height:45%;display:flex;flex-direction:column;overflow:hidden}
 .conversation-studio.cs-docked .cs-dock-scroll{flex:none;min-height:0;max-height:none;overflow:visible}
-.conversation-studio.cs-docked .cs-composer-wrap{flex:none;border-top:1px solid #edf0e6;padding:8px 12px 6px}
+.conversation-studio.cs-docked .cs-composer-wrap{flex:none;min-height:0;max-height:100%;display:flex;flex-direction:column;border-top:1px solid #edf0e6;padding:8px 12px 6px}
 .conversation-studio.cs-docked .cs-request-attachments{margin-bottom:6px}
 .conversation-studio.cs-docked .cs-quick-prompts{margin-bottom:6px}
-.conversation-studio.cs-docked .cs-composer{padding:8px}
-.conversation-studio.cs-docked .cs-composer textarea{min-height:44px;max-height:120px;overflow-y:auto;resize:none;padding-bottom:4px;line-height:1.45}
+.conversation-studio.cs-docked .cs-composer{display:flex;flex-direction:column;min-height:0;max-height:var(--cs-composer-max,220px);overflow-x:hidden;overflow-y:auto;overscroll-behavior:contain;padding:8px;transition:max-height .28s ease,min-height .22s ease,height .28s ease,box-shadow .25s ease}
+.conversation-studio.cs-docked .cs-composer.is-expanded{height:var(--cs-composer-max,220px)}
+.conversation-studio.cs-docked .cs-composer textarea{flex:1 0 auto;min-height:44px;max-height:none;overflow:hidden;resize:none;padding-bottom:4px;line-height:1.45;field-sizing:content}
+.conversation-studio.cs-docked .cs-composer-bottom{position:sticky;bottom:0;z-index:1;background:#fff;padding-top:6px}
 .conversation-studio.cs-docked .cs-composer-note{display:none}
 .conversation-studio.cs-docked .cs-footer{display:none}
 .conversation-studio.cs-docked .cs-request-notice{margin:8px 12px}
@@ -197,7 +199,7 @@
 .conversation-studio.cs-docked .cs-library-compact .cs-upload{flex:none;min-width:0;margin:0;padding:2px 6px;flex-direction:row;min-height:0}
 .conversation-studio.cs-docked .cs-library-compact .cs-library-expand{padding:2px 6px;white-space:nowrap;font-size:10px}
 .conversation-studio.cs-docked .cs-library-compact .cs-library-filters button{padding:2px 5px}
-.conversation-studio.cs-docked .cs-dock{overflow:auto}
+.conversation-studio.cs-docked .cs-dock{overflow:hidden}
 .cs-docked .cs-request-attachments{flex-wrap:nowrap;overflow-x:auto;white-space:nowrap}
 .cs-docked .cs-request-attachments>*{flex:none}
 .cs-library-empty{font-size:11px;color:var(--cs-muted);padding:5px 0}
@@ -226,7 +228,8 @@
   .cs-info-backdrop{display:block;position:absolute;inset:0;border:0;background:#18201955;z-index:2}
   .cs-info-panel{position:absolute;top:0;right:0;bottom:0;width:min(360px,92vw);min-width:0;box-shadow:-8px 0 24px #0002}
   .cs-info-close{min-width:40px;min-height:40px}
-  .conversation-studio.cs-docked .cs-dock{max-height:45%}
+  .conversation-studio.cs-docked.is-threaded:not(.is-composer-open) .cs-dock{max-height:min(42%,320px)}
+  .conversation-studio.cs-docked.is-threaded.is-composer-open .cs-dock{max-height:min(72vh,78%)}
   .cs-composer-bottom{flex-wrap:wrap}
   .conversation-studio .cs-primary{min-height:40px}
 }
@@ -248,16 +251,21 @@
   .conversation-studio.cs-docked .cs-welcome{min-height:0}
 }
 
-.conversation-studio.cs-docked.is-empty .cs-workspace{flex-direction:column;align-items:center;justify-content:center;overflow:auto}
-.cs-empty-stage{width:min(760px,calc(100% - 24px));display:flex;flex-direction:column;align-items:center;gap:18px;padding:8px 0 28px}
-.cs-empty-stage>h2{font-size:28px;font-weight:550;letter-spacing:-1px;text-align:center;line-height:1.35;color:#2d3c31}
-.conversation-studio.cs-docked.is-empty .cs-dock{width:100%;max-height:none;background:transparent;border:0;box-shadow:none;overflow:visible}
-.conversation-studio.cs-docked.is-empty .cs-composer-wrap{padding:0;border:0;background:transparent}
-.conversation-studio.cs-docked.is-empty .cs-composer{border-radius:22px;padding:14px 16px 12px;box-shadow:0 10px 32px #3a4a3514}
-.conversation-studio.cs-docked.is-empty .cs-composer textarea{min-height:72px;max-height:180px}
-.conversation-studio.cs-docked.is-empty .cs-composer-note{display:block;padding-top:10px}
+.conversation-studio.cs-docked.is-empty .cs-workspace{flex-direction:column;align-items:center;justify-content:center;overflow:hidden;min-height:0}
+.cs-empty-stage{width:min(760px,calc(100% - 24px));max-height:100%;min-height:0;display:flex;flex-direction:column;align-items:center;gap:18px;padding:8px 0 16px;overflow:hidden}
+.cs-empty-stage>h2{flex:none;font-size:28px;font-weight:550;letter-spacing:-1px;text-align:center;line-height:1.35;color:#2d3c31}
+.conversation-studio.cs-docked.is-empty .cs-dock{width:100%;max-height:100%;min-height:0;background:transparent;border:0;box-shadow:none;overflow:hidden}
+.conversation-studio.cs-docked.is-empty .cs-composer-wrap{flex:1 1 auto;min-height:0;padding:0;border:0;background:transparent}
+.conversation-studio.cs-docked.is-empty.is-composer-open .cs-empty-stage{height:100%;justify-content:flex-start}
+.conversation-studio.cs-docked.is-empty .cs-composer{border-radius:22px;padding:14px 16px 12px;min-height:148px;box-shadow:0 10px 32px #3a4a3514}
+.conversation-studio.cs-docked.is-empty .cs-composer.is-expanded{min-height:220px;box-shadow:0 16px 40px #3a4a351c}
+.conversation-studio.cs-docked.is-empty .cs-composer textarea{min-height:72px;max-height:none}
+.conversation-studio.cs-docked.is-empty .cs-composer-note{display:block;flex:none;padding-top:10px}
 .conversation-studio.cs-docked.is-threaded .cs-workspace{flex-direction:row}
-.conversation-studio.cs-docked.is-threaded .cs-dock{flex:0 0 auto;max-height:45%}
+.conversation-studio.cs-docked.is-threaded .cs-dock{flex:0 0 auto;max-height:min(38%,280px);transition:max-height .28s ease}
+.conversation-studio.cs-docked.is-threaded.is-composer-open .cs-dock{max-height:min(62%,72vh)}
+.conversation-studio.cs-docked.is-threaded .cs-composer:not(.is-expanded){min-height:0}
+.conversation-studio.cs-docked.is-threaded .cs-composer.is-expanded{min-height:160px}
 .cs-composer-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
 .conversation-studio .cs-composer-action{position:relative;display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;font-size:11px;color:#5d6b56;background:#f7f8f3;border-color:#dce4d4}
 .conversation-studio .cs-composer-action:hover:not(:disabled){background:#eef2e9}
@@ -299,7 +307,7 @@
   .conversation-studio.cs-docked.is-empty .cs-composer{border-radius:18px;padding:12px}
   .conversation-studio.cs-docked h1{font-size:15px;white-space:nowrap}
   .conversation-studio.cs-docked .cs-header-right .cs-model-picker-toggle{max-width:min(220px,58vw)}
-  .conversation-studio.cs-docked.is-threaded .cs-dock{overflow:auto}
+  .conversation-studio.cs-docked.is-threaded .cs-dock{overflow:hidden}
   .conversation-studio.cs-docked .cs-request-notice{margin:6px 8px;padding:8px}
   .cs-attach-thumbs figure{width:48px}
   .cs-attach-thumbs img{width:48px;height:48px}
@@ -309,4 +317,8 @@
 .cs-library-compact .cs-library-delete{display:none}
 @media(max-width:700px){
   .conversation-studio .cs-library-photo .cs-library-delete{width:22px;height:22px}
+}
+@media(prefers-reduced-motion:reduce){
+  .conversation-studio.cs-docked .cs-composer,
+  .conversation-studio.cs-docked.is-threaded .cs-dock{transition:none}
 }

@@ -87,6 +87,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
     title: 'MD',
     items: [
       { to: '/product-work/md', label: '상품 정보', icon: LayoutGrid },
+      { to: '/md/price-compare', label: '가격 비교', icon: ChartColumn },
       { to: '/work-requests/md', label: '작업 요청', icon: ClipboardList },
     ],
   },

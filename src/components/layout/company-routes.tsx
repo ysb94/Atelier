@@ -36,6 +36,7 @@ import { CompanyWarehousePage } from '@/features/logistics/WarehousePage'
 import { CompanyWarehouseFinderPage } from '@/features/logistics/WarehouseFinderPage'
 import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
 import { CompanyTemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
+import { PriceComparePage } from '@/features/md/PriceComparePage'
 
 function RedirectTo({ to }: { to: string }) {
   return <Navigate to={to} replace />
@@ -215,6 +216,7 @@ export const companyWorkspaceRoutes = (
         element={<RedirectTo to="/product-work/planning" />}
       />
       <Route path="design" element={<RedirectTo to="/product-work/design" />} />
+      <Route path="md/price-compare" element={<PriceComparePage />} />
       <Route path="md" element={<RedirectTo to="/product-work/md" />} />
       <Route
         path="logistics"

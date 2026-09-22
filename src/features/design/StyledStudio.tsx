@@ -62,6 +62,7 @@ export function StyledStudio({ api }: { api?: StudioImageApi }) {
   const [photoFilter, setPhotoFilter] = useState<'all' | 'attached'>('all')
   const [libraryOpen, setLibraryOpen] = useState(false)
   const [dropping, setDropping] = useState(false)
+  const [composerExpanded, setComposerExpanded] = useState(false)
   const [director, setDirector] = useState<{ key: string; plan: DirectorPlan; failure?: string } | null>(null)
   const [batches, setBatches] = useState<Record<string, StudioBatch>>({})
   const generationLock = useRef(false)
@@ -71,8 +72,12 @@ export function StyledStudio({ api }: { api?: StudioImageApi }) {
   const input = useRef<HTMLTextAreaElement>(null)
   const latest = useRef<HTMLDivElement>(null)
   const libraryPanel = useRef<HTMLElement>(null)
+  const workspaceRef = useRef<HTMLDivElement>(null)
+  const emptyStageRef = useRef<HTMLDivElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
   const caret = useRef(0)
   const dragDepth = useRef(0)
+  const [composerMaxPx, setComposerMaxPx] = useState(220)
 
   useEffect(() => {
     alive.current = true
@@ -136,6 +141,17 @@ export function StyledStudio({ api }: { api?: StudioImageApi }) {
   useEffect(() => {
     if (libraryOpen) libraryPanel.current?.focus()
   }, [libraryOpen])
+  useEffect(() => {
+    if (!composerExpanded) return
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (!(target instanceof Node)) return
+      if (composerRef.current?.contains(target)) return
+      setComposerExpanded(false)
+    }
+    document.addEventListener('pointerdown', onPointerDown, true)
+    return () => document.removeEventListener('pointerdown', onPointerDown, true)
+  }, [composerExpanded])
   const ui = conversation(state)
   const generating = busy && !!progress
   const products = productIds(state)
@@ -161,6 +177,35 @@ export function StyledStudio({ api }: { api?: StudioImageApi }) {
   const currentDirector = director?.key === directorKey ? director.plan : undefined
   const showWorkspace = hasConversation || !!currentDirector || generating
   const isGemini = modelId === 'gemini-3-pro-image'
+  useEffect(() => {
+    const workspace = workspaceRef.current
+    if (!workspace) return
+    const update = () => {
+      const workspaceH = workspace.clientHeight
+      if (workspaceH <= 0) return
+      const composer = composerRef.current
+      const wrap = composer?.closest('.cs-composer-wrap') as HTMLElement | undefined
+      let reserved = 8
+      if (!showWorkspace) {
+        const title = emptyStageRef.current?.querySelector(':scope > h2') as HTMLElement | undefined
+        reserved += (title?.offsetHeight ?? 40) + 18
+      }
+      if (wrap) {
+        for (const child of Array.from(wrap.children)) {
+          if (child === composer) continue
+          reserved += (child as HTMLElement).offsetHeight
+        }
+      }
+      const available = Math.max(140, workspaceH - reserved)
+      const compact = showWorkspace ? 120 : Math.min(220, available)
+      const next = composerExpanded ? available : compact
+      setComposerMaxPx((prev) => (prev === next ? prev : next))
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    observer.observe(workspace)
+    return () => observer.disconnect()
+  }, [ready, showWorkspace, composerExpanded, notice, attachedIds.length, parent, missingMentions.length, generating])
   function field<K extends keyof FormState>(key: K, value: FormState[K]) { setState((prev) => ({ ...prev, form: { ...prev.form, [key]: value } })) }
   async function upload(files: FileList | File[] | null, target: 'product' | 'reference' | 'result' | 'edit', versionId?: string, attach = false) {
     const picked = files ? Array.from(files) : []
@@ -251,6 +296,18 @@ export function StyledStudio({ api }: { api?: StudioImageApi }) {
   function rememberCaret() {
     const el = input.current
     if (el) caret.current = el.selectionStart ?? el.value.length
+  }
+  function expandComposer() {
+    setComposerExpanded(true)
+  }
+  function collapseComposer() {
+    setComposerExpanded(false)
+  }
+  function onComposerPointerDown(event: { target: EventTarget | null }) {
+    const el = event.target as HTMLElement | null
+    if (!el) return
+    if (el.closest('button, select, input, label.cs-composer-action')) return
+    expandComposer()
   }
   function mentionPhoto(name: string) {
     if (busy || generationLock.current) return
@@ -351,6 +408,7 @@ export function StyledStudio({ api }: { api?: StudioImageApi }) {
       setNotice(invalidNumbers ? '연결된 제품의 크기를 양수로 입력하거나 비워 주세요.' : editSelectionEmpty ? '이번 요청에 사용할 이미지를 체크해 주세요.' : '요청 내용을 입력해 주세요.')
       return
     }
+    collapseComposer()
     generationLock.current = true
     setBusy(true); setProgress('참고자료 준비 중…'); setNotice('')
     const started = performance.now()
@@ -411,6 +469,7 @@ export function StyledStudio({ api }: { api?: StudioImageApi }) {
     const turn: StudioPreviewTurn = { id: turnId, request: request.trim(), action, assetIds, versionIds, parentId: parent?.id, productName: state.form.productName, material: state.form.fabricMaterial, dimensions: [state.form.sizeWidth, state.form.sizeHeight, state.form.sizeDepth].map((value) => value || '미입력').join(' × '), ratio: state.form.outputRatio }
     const versions: StudioVersion[] = versionIds.map((id, index) => ({ id, title: parent ? '수정 ' + (ui.turns.filter((item) => item.parentId).length + 1) : '시안 ' + (state.versions.filter((item) => !item.parentId).length + index + 1), parentId: parent?.id, created: new Date().toISOString(), request: request.trim(), prompt: '', assetIds, favorite: false, previewOnly: true }))
     setState((prev) => ({ ...prev, conversationUi: { ...conversation(prev), turns: [...conversation(prev).turns, turn] }, versions: [...prev.versions, ...versions], selectedId: versionIds[0] }))
+    collapseComposer()
     setRequest(''); setContinueSelected(false)
     requestAnimationFrame(() => latest.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }))
   }
@@ -424,8 +483,8 @@ export function StyledStudio({ api }: { api?: StudioImageApi }) {
         <div className="cs-attach-thumbs">{attachedIds.map((id) => state.assets[id] && <figure key={id}><img src={state.assets[id].data} alt={photoLabel(state.assets[id])} /><figcaption>{photoLabel(state.assets[id])}</figcaption><button type="button" aria-label={`${photoLabel(state.assets[id])} 첨부 해제`} onClick={() => selectPhoto(id, false)}><X size={12} /></button></figure>)}</div>
       </div>}
       {missingMentions.length > 0 && <p role="alert" className="cs-help">요청에 적은 {missingMentions.map((n) => '사진 ' + n).join(', ')}이 첨부되지 않았습니다. 보관함에서 체크하거나 번호를 수정해 주세요.</p>}
-      <div className="cs-composer">
-        <textarea ref={input} disabled={busy} aria-label="AI에게 요청" rows={hasConversation ? 2 : 3} value={request} onChange={(event) => { setRequest(event.target.value); caret.current = event.target.selectionStart ?? event.target.value.length }} onSelect={rememberCaret} onClick={rememberCaret} onKeyUp={rememberCaret} onBlur={rememberCaret} placeholder={parent ? '이 컷에서 바꾸고 싶은 부분을 말해 주세요.' : '이 제품으로 레퍼런스처럼 연출컷을 만들어줘.'} />
+      <div ref={composerRef} className={'cs-composer' + (composerExpanded ? ' is-expanded' : '')} onPointerDown={onComposerPointerDown} onClick={onComposerPointerDown}>
+        <textarea ref={input} disabled={busy} aria-label="AI에게 요청" rows={hasConversation ? 2 : 3} value={request} onChange={(event) => { setRequest(event.target.value); caret.current = event.target.selectionStart ?? event.target.value.length }} onSelect={rememberCaret} onClick={(event) => { rememberCaret(); expandComposer(); event.stopPropagation() }} onFocus={expandComposer} onKeyUp={rememberCaret} onBlur={rememberCaret} placeholder={parent ? '이 컷에서 바꾸고 싶은 부분을 말해 주세요.' : '이 제품으로 레퍼런스처럼 연출컷을 만들어줘.'} />
         <div className="cs-composer-bottom">
           <div className="cs-composer-tools">
             <label className="cs-composer-action"><ImagePlus size={16} /><span>사진 추가</span><input aria-label="사진 추가" type="file" multiple accept="image/jpeg,image/png,image/webp" disabled={busy} onChange={(event) => { void upload(event.target.files, 'edit', undefined, true); event.target.value = '' }} /></label>
@@ -440,7 +499,7 @@ export function StyledStudio({ api }: { api?: StudioImageApi }) {
     </fieldset>
   )
   if (!ready) return <div className="conversation-studio cs-docked"><p role="status">저장된 작업을 불러오고 있습니다…</p></div>
-  return <div className={'conversation-studio cs-docked' + (showWorkspace ? ' is-threaded' : ' is-empty') + (dropping ? ' is-dropping' : '')} onDragEnter={onStudioDragEnter} onDragOver={onStudioDragOver} onDragLeave={onStudioDragLeave} onDrop={onStudioDrop}>
+  return <div className={'conversation-studio cs-docked' + (showWorkspace ? ' is-threaded' : ' is-empty') + (composerExpanded ? ' is-composer-open' : '') + (dropping ? ' is-dropping' : '')} style={{ ['--cs-composer-max' as string]: `${composerMaxPx}px` }} onPointerDown={(event) => { if (!composerExpanded) return; if ((event.target as HTMLElement | null)?.closest('.cs-composer')) return; collapseComposer() }} onDragEnter={onStudioDragEnter} onDragOver={onStudioDragOver} onDragLeave={onStudioDragLeave} onDrop={onStudioDrop}>
     <header className="cs-header"><div className="cs-brand"><span className="cs-logo"><Layers3 size={23} /></span><div><span className="cs-eyebrow">ATELIER CREATIVE</span><h1>연출컷 스튜디오</h1></div></div><div className="cs-header-right"><span className="cs-save" role="status">{saveStatus}</span>{api ? <div className={"cs-model-picker" + (pickerOpen ? " is-open" : "")}>
         <button type="button" className="cs-model-picker-toggle" aria-expanded={pickerOpen} onClick={() => setPickerOpen((value) => !value)}>
           <span>모델 · 출력 설정</span>
@@ -462,12 +521,12 @@ export function StyledStudio({ api }: { api?: StudioImageApi }) {
           <p className="cs-help">Flare: 빠른 생성 · Sunburst: 정밀 편집 · 나노바나나 Pro: Google 모델<br />출력 크기와 품질이 높을수록 비용과 생성 시간이 늘어납니다.</p>
         </div> : null}
       </div> : null}</div></header>
-    <div className="cs-workspace">
+    <div ref={workspaceRef} className="cs-workspace">
       {showWorkspace ? <div className="cs-workspace-main">
       {api ? null : <details className="cs-tool-details cs-panel"><summary><span>요청 이해 <ChevronRight size={12} /> 자료 선택 <ChevronRight size={12} /> 도구 연결</span><small>작동 방식 보기</small></summary><p>담당 AI가 요청과 사진을 해석하고, 필요한 작업 도구를 선택하는 구성입니다.</p><div className="cs-tool-grid">{(['background', 'create', 'detail'] as const).map((key) => <div key={key}><strong>{ACTIONS[key].tool}</strong><span>{ACTIONS[key].title}</span><small>미연결</small></div>)}</div><p className="cs-help">아래 체험에서는 요청의 일부 단어와 사진 역할로 정해진 예시를 표시합니다. 실제 AI 판단이나 전송이 아닙니다.</p></details>}
       <div className="cs-chat-column">
       <main className="cs-chat cs-panel">
-        {!!state.versions.length && <div className="cs-thread-bar" aria-label="작업 이력"><button type="button" disabled={busy} onClick={() => { setContinueSelected(false); setRequest(''); input.current?.focus() }}><Plus size={13} />새 연출</button>{[...state.versions].reverse().map((version) => <button type="button" disabled={busy} className={'cs-thread-thumb' + (selected?.id === version.id ? ' is-selected' : '')} key={version.id} aria-label={version.title + ' 선택'} aria-pressed={selected?.id === version.id} onClick={() => { setState((prev) => ({ ...prev, selectedId: version.id })); setContinueSelected(true) }}>{version.resultId ? <img src={state.assets[version.resultId].data} alt="" /> : <Images size={14} />}<span>{version.resultId ? photoLabel(state.assets[version.resultId]) + " · " : ""}{version.title}{version.favorite ? ' ★' : ''}</span></button>)}</div>}
+        {!!state.versions.length && <div className="cs-thread-bar" aria-label="작업 이력"><button type="button" disabled={busy} onClick={() => { setContinueSelected(false); setRequest(''); expandComposer(); input.current?.focus() }}><Plus size={13} />새 연출</button>{[...state.versions].reverse().map((version) => <button type="button" disabled={busy} className={'cs-thread-thumb' + (selected?.id === version.id ? ' is-selected' : '')} key={version.id} aria-label={version.title + ' 선택'} aria-pressed={selected?.id === version.id} onClick={() => { setState((prev) => ({ ...prev, selectedId: version.id })); setContinueSelected(true) }}>{version.resultId ? <img src={state.assets[version.resultId].data} alt="" /> : <Images size={14} />}<span>{version.resultId ? photoLabel(state.assets[version.resultId]) + " · " : ""}{version.title}{version.favorite ? ' ★' : ''}</span></button>)}</div>}
         <div className="cs-messages">
           {ui.turns.map((turn) => <section className="cs-turn" key={turn.id}><div className="cs-user-message">{turn.parentId && <small>↳ {state.versions.find((item) => item.id === turn.parentId)?.title ?? '선택한 컷'}에서 이어서</small>}<p>{turn.request}</p>{turn.imageRoles && <div className="cs-sent-images" aria-label="이번 요청에 전달한 이미지">{turn.assetIds.map((id) => state.assets[id] && <figure key={id}><img src={state.assets[id].data} alt={photoLabel(state.assets[id])} /><figcaption>{photoLabel(state.assets[id])}</figcaption></figure>)}</div>}</div><div className="cs-assistant-message"><span className="cs-mini-avatar"><Sparkles size={14} /></span><div><div className="cs-reply-title"><strong>{ACTIONS[turn.action].title}</strong><span>{turn.modelId ? STYLED_IMAGE_MODELS.find((model) => model.id === turn.modelId)?.label ?? turn.modelId : "응답 예시"}</span></div><p>{turn.modelId ? turn.status === "generating" ? progress || "생성 중…" : (turn.status === "failed" || turn.status === "paused") ? turn.error : "생성이 완료되었습니다. 결과를 선택해 이어서 수정할 수 있습니다." : ACTIONS[turn.action].description + "이에요. 연결 후에는 이곳에서 결과를 받고 이어서 수정할 수 있습니다."}</p>{turn.director && <div className="cs-director-summary"><strong>디렉터의 연출 계획</strong><p>{turn.director.summary}</p><details><summary>사용한 상세 지시문</summary><p className="cs-director-text">{turn.director.prompt}</p></details><small>{turn.settings?.resolution} · {turn.modelId === "gemini-3-pro-image" ? "JPEG" : turn.settings?.quality}</small></div>}<div className="cs-keep"><Check size={13} />{turn.parentId && turn.imageRoles ? turn.imageRoles.includes("편집 대상") ? "체크한 편집 대상과 참고 사진으로 작업" : "체크한 참고 사진과 이번 요청으로 작업" : ACTIONS[turn.action].keep}</div><details className="cs-packet"><summary><Paperclip size={13} /> 참고자료 {turn.assetIds.length}장 · {turn.modelId ? STYLED_IMAGE_MODELS.find((model) => model.id === turn.modelId)?.label : ACTIONS[turn.action].tool}<ChevronRight size={13} /></summary><p className="cs-help">{turn.modelId ? "생성 요청에 사용한 참고자료입니다." : "전달 구성 예시 · 실제로 전송되지 않았습니다."}</p><div className="cs-packet-photos">{turn.assetIds.map((id) => state.assets[id] && <figure key={id}><img src={state.assets[id].data} alt="" /><figcaption>{photoLabel(state.assets[id])}</figcaption></figure>)}</div><p className="cs-help">{turn.assetIds.some(id => photoNote(state.assets[id])) ? turn.assetIds.map(id => photoNote(state.assets[id]) && <span key={id}>{photoLabel(state.assets[id])}: {photoNote(state.assets[id])}<br /></span>) : turn.productSnapshot?.length ? turn.productSnapshot.map(p => <span key={p.id}>{productDescription(p)}<br /></span>) : '사진 설명 없음'} · 비율: {turn.ratio}</p></details><div className="cs-inline-results">{turn.versionIds.map((id) => { const version = state.versions.find((item) => item.id === id); return version && (version.resultId ? <StudioImagePreview key={id} asset={state.assets[version.resultId]} title={`${photoLabel(state.assets[version.resultId])} · ${version.title}`} disabled={busy} selected={state.selectedId === id} onSelect={() => { setState((prev) => ({ ...prev, selectedId: id })); setContinueSelected(true) }} /> : <button key={id} disabled={busy} aria-label={version.title + ' 선택'} onClick={() => { setState((prev) => ({ ...prev, selectedId: id })); setContinueSelected(true) }}><span className="cs-mini-placeholder"><Images size={22} /><small>이미지 미생성</small></span><strong>{version.title}</strong></button>) })}</div>{selected && turn.versionIds.includes(selected.id) ? resultActions(selected) : null}{batchActions(turn.id)}<small className="cs-help">{turn.modelId ? "마음에 드는 컷을 고르면 이 대화에서 이어서 수정할 수 있습니다. 원단·로고·끈 연결·비율을 원본과 비교해 주세요." : "결과 자리만 표시했습니다. 고른 컷에 테스트 사진을 올릴 수 있어요."}</small></div></div></section>)}
           {generating && <div className="cs-assistant-message cs-generation-turn"><span className="cs-mini-avatar"><Sparkles size={14} /></span><div><StudioGenerationProgress model={progress.startsWith('디렉터') ? directorLabel : imageModelLabel} progress={progress} /></div></div>}
@@ -486,7 +545,7 @@ export function StyledStudio({ api }: { api?: StudioImageApi }) {
       </main>
       </div>
       <div className="cs-dock cs-panel">{composer}</div>
-      </div> : <div className="cs-empty-stage">
+      </div> : <div ref={emptyStageRef} className="cs-empty-stage">
         <h2>어떤 연출컷을 만들어볼까요?</h2>
         <div className="cs-dock cs-panel is-centered">{composer}</div>
       </div>}

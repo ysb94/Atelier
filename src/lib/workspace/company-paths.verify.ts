@@ -8,6 +8,7 @@ import {
   chinaWorkOrdersPath,
   companyMeetingsPath,
   designStyledCutsPath,
+  mdPriceComparePath,
   dataUploadHref,
   draftDetailPath,
   draftNewPath,
@@ -42,6 +43,10 @@ assert(
 assert(
   designStyledCutsPath() === '/design/styled-cuts',
   '디자인 연출 컷 제작은 회사 경로',
+)
+assert(
+  mdPriceComparePath() === '/md/price-compare',
+  'MD 가격 비교는 회사 경로',
 )
 assert(companyMeetingsPath() === '/meetings', '회의는 회사 경로')
 assert(

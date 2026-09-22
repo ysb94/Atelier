@@ -67,6 +67,7 @@ const NAV_LABELS: {
   { match: /^\/design\/styled-cuts(?:\/|$)/, label: '디자인 · 연출 컷 제작' },
   { match: /^\/design\/file-manager(?:\/|$)/, label: '디자인 · 이미지 업로드' },
   { match: /^\/product-work\/md(?:\/|$)/, label: 'MD · 상품 정보' },
+  { match: /^\/md\/price-compare(?:\/|$)/, label: 'MD · 가격 비교' },
   { match: /^\/product-work\/logistics(?:\/|$)/, label: '물류 · 상품 정보' },
   { match: /^\/logistics\/invoices(?:\/|$)/, label: '물류 · 송장작업' },
   {
