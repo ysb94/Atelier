@@ -1,4 +1,5 @@
 import { describeEan13Problem } from '@/lib/codes/ean'
+import { parseStyleNoList } from '@/lib/codes/style-no-list'
 import { normalizeStyleNo } from '@/lib/import/transform'
 import {
   barcodeFieldLabel,
@@ -102,13 +103,7 @@ export type PreparedBarcodeRow = {
   message: string
 }
 
-/** 쉼표·슬래시·줄바꿈·세미콜론으로 나눈 뒤 빈 칸을 버린다. */
-export function parseStyleNoList(raw: string): string[] {
-  return raw
-    .split(/[\n\r,;/|]+/)
-    .map((part) => part.trim())
-    .filter(Boolean)
-}
+export { parseStyleNoList } from '@/lib/codes/style-no-list'
 
 function customValuesFromRow(
   row: string[],

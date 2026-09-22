@@ -12,6 +12,8 @@ import type {
   BrandFieldOptionInput,
   BarcodeField,
   BarcodeFieldInput,
+  SabangnetField,
+  SabangnetFieldInput,
   CodeUsageAssignment,
   CodeUsageAssignmentInput,
   CodeUsageStatus,
@@ -45,6 +47,10 @@ import type {
   ProductCode,
   ProductCodeInput,
   ProductCodeKind,
+  ProductCategory,
+  ProductCategoryInput,
+  SabangnetProduct,
+  SabangnetProductInput,
   ProductDraft,
   ProductDraftInput,
   Season,
@@ -65,6 +71,7 @@ import * as brandStore from '@/lib/supabase/brands'
 import { getMyProfile } from '@/lib/supabase/profiles'
 import * as brandFieldStore from '@/lib/supabase/brand-fields'
 import * as barcodeFieldStore from '@/lib/supabase/barcode-fields'
+import * as sabangnetFieldStore from '@/lib/supabase/sabangnet-fields'
 import * as codeUsageTargetStore from '@/lib/supabase/code-usage-targets'
 import * as codeUsageTargetFolderStore from '@/lib/supabase/code-usage-target-folders'
 import * as outboundPartnerGroupStore from '@/lib/supabase/outbound-partner-groups'
@@ -95,6 +102,8 @@ import * as partnerBarcodeFieldStore from '@/lib/supabase/partner-barcode-fields
 import * as barcodePartnerDisplaySettingStore from '@/lib/supabase/barcode-partner-display-settings'
 import * as bulkOutboundStore from '@/lib/supabase/bulk-outbound'
 import * as outboundShipmentStore from '@/lib/supabase/outbound-shipments'
+import * as productCategoryStore from '@/lib/supabase/product-categories'
+import * as sabangnetProductStore from '@/lib/supabase/sabangnet-products'
 import * as productDraftStore from '@/lib/supabase/product-drafts'
 import * as seasonStore from '@/lib/supabase/seasons'
 import * as styleStore from '@/lib/supabase/styles'
@@ -112,6 +121,7 @@ export { AiSettingsStoreError } from '@/lib/supabase/ai-settings'
 export { BrandStoreError } from '@/lib/supabase/brands'
 export { BrandFieldStoreError } from '@/lib/supabase/brand-fields'
 export { BarcodeFieldStoreError } from '@/lib/supabase/barcode-fields'
+export { SabangnetFieldStoreError } from '@/lib/supabase/sabangnet-fields'
 export { CodeUsageTargetStoreError } from '@/lib/supabase/code-usage-targets'
 export type {
   BulkCodeUsageTargetResult,
@@ -230,6 +240,8 @@ export type {
 } from '@/lib/supabase/cargo-inbound'
 export { canSetBulkOutboundPartnerWorkStatus } from '@/lib/supabase/bulk-outbound'
 export { OutboundShipmentStoreError } from '@/lib/supabase/outbound-shipments'
+export { ProductCategoryStoreError } from '@/lib/supabase/product-categories'
+export { SabangnetProductStoreError } from '@/lib/supabase/sabangnet-products'
 export {
   ProductDraftStoreError,
   emptyDraftInput,
@@ -370,6 +382,42 @@ export async function moveBarcodeField(
 ): Promise<void> {
   await delay()
   return barcodeFieldStore.moveBarcodeField(id, direction)
+}
+
+export async function getSabangnetFields(
+  brandId: string,
+): Promise<SabangnetField[]> {
+  await delay()
+  return sabangnetFieldStore.listSabangnetFields(brandId)
+}
+
+export async function createSabangnetField(
+  brandId: string,
+  input: SabangnetFieldInput,
+): Promise<SabangnetField> {
+  await delay()
+  return sabangnetFieldStore.createSabangnetField(brandId, input)
+}
+
+export async function updateSabangnetField(
+  id: string,
+  input: SabangnetFieldInput,
+): Promise<SabangnetField> {
+  await delay()
+  return sabangnetFieldStore.updateSabangnetField(id, input)
+}
+
+export async function deleteSabangnetField(id: string): Promise<void> {
+  await delay()
+  return sabangnetFieldStore.deleteSabangnetField(id)
+}
+
+export async function moveSabangnetField(
+  id: string,
+  direction: 'up' | 'down',
+): Promise<void> {
+  await delay()
+  return sabangnetFieldStore.moveSabangnetField(id, direction)
 }
 
 /** 송장 변환과 기준정보 화면이 같은 이름변경 원본을 사용한다. */
@@ -2173,6 +2221,194 @@ export async function updateProductDraft(
 export async function deleteProductDraft(id: string): Promise<void> {
   await delay()
   return productDraftStore.deleteProductDraft(id)
+}
+
+export async function getProductCategories(
+  brandId: string,
+): Promise<ProductCategory[]> {
+  return productCategoryStore.listProductCategories(brandId)
+}
+
+export async function createProductCategory(
+  brandId: string,
+  input: ProductCategoryInput,
+): Promise<ProductCategory> {
+  await delay()
+  return productCategoryStore.createProductCategory(brandId, input)
+}
+
+export async function updateProductCategory(
+  brandId: string,
+  categoryId: string,
+  input: Pick<ProductCategoryInput, 'name' | 'isActive'>,
+): Promise<ProductCategory> {
+  await delay()
+  return productCategoryStore.updateProductCategory(
+    brandId,
+    categoryId,
+    input,
+  )
+}
+
+export async function deleteProductCategory(
+  brandId: string,
+  categoryId: string,
+): Promise<void> {
+  await delay()
+  return productCategoryStore.deleteProductCategory(brandId, categoryId)
+}
+
+export async function moveProductCategory(
+  brandId: string,
+  categoryId: string,
+  direction: -1 | 1,
+): Promise<void> {
+  await delay()
+  return productCategoryStore.moveProductCategory(
+    brandId,
+    categoryId,
+    direction,
+  )
+}
+
+export async function getSabangnetProducts(
+  brandId: string,
+): Promise<SabangnetProduct[]> {
+  return sabangnetProductStore.listSabangnetProducts(brandId)
+}
+
+/** M번호(style id)가 들어 있는 사방넷 코드. 시트 표시용. */
+export async function getSabangnetStyleCodes(brandId: string) {
+  return sabangnetProductStore.listSabangnetStyleCodes(brandId)
+}
+
+export async function createSabangnetProduct(
+  brandId: string,
+  input: SabangnetProductInput,
+): Promise<SabangnetProduct> {
+  return sabangnetProductStore.createSabangnetProduct(brandId, input)
+}
+
+export async function updateSabangnetProduct(
+  id: string,
+  input: SabangnetProductInput,
+): Promise<SabangnetProduct> {
+  return sabangnetProductStore.updateSabangnetProduct(id, input)
+}
+
+export async function deleteSabangnetProduct(id: string): Promise<void> {
+  return sabangnetProductStore.deleteSabangnetProduct(id)
+}
+
+export type BulkSabangnetApplyRow = {
+  lineNo: number
+  productId?: string
+  input: SabangnetProductInput
+}
+
+export type BulkSabangnetFailure = {
+  lineNo: number
+  code: string
+  message: string
+}
+
+const SABANGNET_BULK_CHUNK = 200
+
+/**
+ * 사방넷 코드 일괄 등록·수정. 없는 코드는 만들고 있는 코드는 상품명·M번호를
+ * 파일 내용으로 바꾼다. 미리보기에서 통과한 행만 200행 단위 RPC로 저장한다.
+ */
+export async function applyBulkSabangnetProducts(
+  brandId: string,
+  rows: BulkSabangnetApplyRow[],
+): Promise<{
+  created: number
+  updated: number
+  skipped: number
+  failures: BulkSabangnetFailure[]
+}> {
+  if (rows.length === 0) {
+    return { created: 0, updated: 0, skipped: 0, failures: [] }
+  }
+
+  let created = 0
+  let updated = 0
+  let skipped = 0
+  const failures: BulkSabangnetFailure[] = []
+
+  for (let start = 0; start < rows.length; start += SABANGNET_BULK_CHUNK) {
+    const chunk = rows.slice(start, start + SABANGNET_BULK_CHUNK)
+    try {
+      const result = await sabangnetProductStore.createSabangnetProductsBulk(
+        brandId,
+        chunk.map((row) => row.input),
+      )
+      created += result.created
+      updated += result.updated
+      skipped += result.skipped
+    } catch (error) {
+      await mapPool(chunk, 5, async (row) => {
+        try {
+          if (row.productId) {
+            await sabangnetProductStore.updateSabangnetProduct(
+              row.productId,
+              row.input,
+            )
+            updated += 1
+            return
+          }
+          await sabangnetProductStore.createSabangnetProduct(brandId, row.input)
+          created += 1
+        } catch (rowError) {
+          failures.push({
+            lineNo: row.lineNo,
+            code: row.input.code,
+            message:
+              rowError instanceof Error
+                ? rowError.message
+                : error instanceof Error
+                  ? error.message
+                  : '저장에 실패했습니다.',
+          })
+        }
+      })
+    }
+  }
+
+  return { created, updated, skipped, failures }
+}
+
+export type BulkSabangnetFillRow = {
+  lineNo: number
+  productId: string
+  input: SabangnetProductInput
+}
+
+/** 미연결 사방넷 코드에 M번호만 채운다. */
+export async function applyBulkSabangnetStyles(rows: BulkSabangnetFillRow[]) {
+  if (rows.length === 0) return { updated: 0, failures: [] as BulkSabangnetFailure[] }
+
+  const failures: BulkSabangnetFailure[] = []
+  let updated = 0
+
+  await mapPool(rows, 5, async (row) => {
+    try {
+      await sabangnetProductStore.updateSabangnetProduct(
+        row.productId,
+        row.input,
+      )
+      updated += 1
+    } catch (error) {
+      failures.push({
+        lineNo: row.lineNo,
+        code: row.input.code,
+        message:
+          error instanceof Error ? error.message : '저장에 실패했습니다.',
+      })
+    }
+  })
+
+  return { updated, failures }
 }
 
 export async function getSeasonsByBrand(brandId: string): Promise<Season[]> {

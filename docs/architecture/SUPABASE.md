@@ -34,9 +34,10 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 데이터 | 현재 위치 |
 | --- | --- |
 | 회사, 브랜드, 팀(조직도), 프로필, 브랜드 멤버 | Supabase |
-| 출시 기획(`seasons`), 브랜드 항목(`brand_fields` + `brand_field_options`), 상품(`styles`) | Supabase |
+| 출시 기획(`seasons`), 내부 상품 카테고리(`product_categories`), 브랜드 항목(`brand_fields` + `brand_field_options`), 상품(`styles`) | Supabase |
 | 기획안(`product_drafts` + `draft_colors` + `draft_options`) | Supabase |
 | 코드·출고업체(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_target_folders`, `code_usage_target_aliases`, `code_usage_assignments`) | Supabase |
+| 사방넷 상품·M번호 연결(`sabangnet_products` + `sabangnet_product_styles`) | Supabase |
 | 거래처 코드 헤더(`partner_barcode_fields`). `product_codes.kind='partner'`는 업체마다 같은 바코드 문자열을 허용 | Supabase |
 | 바코드 출고 작업·등록 업체(`bulk_outbound_jobs` + `bulk_outbound_job_lines` + `bulk_outbound_job_files` + `bulk_outbound_partner_configs`) | Supabase |
 | 바코드 출고 데이터입력 등록 이력(`barcode_data_entry_runs`) | Supabase |
@@ -69,7 +70,9 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 브랜드 카드의 SKU 수는 `styles` COUNT로 `src/lib/api/index.ts`가 붙인다.
 - 앱 저장소는 `src/lib/supabase/*.ts`다. 공개 API 이름은 `src/lib/api/index.ts`에 유지한다.
 - 원자 작업 RPC: `save_product_draft`, `promote_product_draft`,
-  `save_product_code_with_components`, `replace_partner_barcode_fields`,
+  `save_product_code_with_components`,
+  `save_sabangnet_product`, `create_sabangnet_products_bulk`,
+  `replace_partner_barcode_fields`,
   `replace_partner_codes`, `save_bulk_outbound_job`,   `replace_bulk_outbound_backup`,
   `save_barcode_data_entry_run`, `delete_barcode_data_entry_run`,
   `replace_barcode_data_entry_shipments`,
@@ -181,6 +184,22 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   상품만 불러 작업한다. 이 작업 목록은 브라우저 UI 상태(`localStorage`)이고
   상품 원본은 `styles`에 그대로 둔다. 전체 상품(`/products`)은 마스터 목록이다.
 
+### 내부 상품 카테고리
+
+- `product_categories`는 브랜드별 내부 상품 분류 트리다. UUID와 `brand_id`,
+  같은 브랜드 안의 자기참조 `parent_id`, 형제 순서, 사용 상태를 둔다.
+- 카페24 카테고리 번호와 `ALL` 노드는 저장하지 않는다. 상위 분류의 전체 상품은
+  이후 상품 연결에서 하위 최종 분류를 재귀 집계해 만든다.
+- 설정의 `상품 설정 → 카테고리 관리`에서 생성·조회·이름/상태 수정·형제 순서
+  변경·삭제를 수행한다. 하위 분류가 있는 노드는 FK `RESTRICT`로 삭제를 막는다.
+- 최초 Masmarulez 트리는 `BAG`, `POUCH`, `APPAREL`, `ACCESSORIES` 아래에 합의한
+  실제 분류만 넣는다. 상품 연결은 별도 후속 단계이며, 연결 시에는 하위 항목이
+  없는 최하위 분류만 선택하게 한다.
+- RLS는 조회에 `app.can_read_brand`, 쓰기에 `app.can_edit_brand`를 사용한다.
+- 로직: `src/lib/supabase/product-categories.ts`.
+  화면: `src/features/settings/ProductCategorySettingsPage.tsx`.
+- 마이그레이션: `20260922092435_product_categories.sql`.
+
 ### 자사 바코드 일괄 등록
 
 회사에서 이미 발급한 13자리 88코드를 엑셀로 올려 자사 바코드 마스터를 채운다.
@@ -214,6 +233,64 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   하지 않는다.
 - 로직: `src/lib/codes/barcode-import.ts`, 화면: `BarcodeBulkUploadPanel.tsx`,
   `PendingBarcodePanel.tsx`, `BarcodeInfoBulkPanel.tsx`, `BarcodeFieldManager.tsx`.
+
+### 사방넷 코드 관리
+
+사방넷 상품은 바코드·출고 코드가 아니다. `product_codes.kind`를 늘리지 않고
+전용 부모·연결 테이블에 둔다. M번호는 함께 출고되는 수량형 구성품이 아니라
+색상·사이즈 SKU 목록이며 수량은 저장하지 않는다. 이번 범위는 명시된 M번호와
+미연결 상태만 관리하고, 송장 품목명 자동 추론·원장 등록은 연결하지 않는다.
+
+- `sabangnet_products`: UUID, `brand_id`, 사방넷 코드, 상품명, `values` jsonb,
+  타임스탬프. `UNIQUE (brand_id, code)`, `UNIQUE (brand_id, id)`.
+  `values`는 항목 관리에서 추가한 헤더 값이고 키는 `sabangnet_fields.id`다.
+- `sabangnet_fields`: 브랜드별 엑셀 헤더. `system_key`는 `code`·`name`·`styles`.
+  사방넷 코드와 상품명은 앱에서 삭제하지 않고 이름만 바꾼다. M번호 리스트는
+  양식에서 숨길 수 있다. 사용자 추가 항목은 텍스트 또는 숫자다.
+- `sabangnet_product_styles`: `brand_id`, 부모 ID, `styles.id`, 표시 순서.
+  `UNIQUE (product_id, style_id)`. 부모·상품 모두 `(brand_id, id)` 복합 FK로
+  브랜드 혼입을 막는다. 상품(`styles`) 삭제는 `ON DELETE RESTRICT`다.
+  사방넷 부모를 지우면 연결만 `CASCADE`로 같이 지운다.
+- RLS는 조회에 `app.can_read_brand`, 쓰기에 `app.can_edit_brand`를 쓰고
+  `authenticated`에만 테이블 GRANT를 준다.
+- 단건은 `save_sabangnet_product`, 일괄은
+  `create_sabangnet_products_bulk`(최대 200행)다. 둘 다 `SECURITY INVOKER`다.
+  일괄은 사방넷 코드를 키로 보고, 파일에 있는 헤더 열만 반영한다. 상품명 열이
+  없으면 기존 상품명을 유지하고, M번호 열이 없으면 기존 연결을 유지한다.
+  M번호 열은 있는데 칸이 비면 미연결이 된다. 추가 항목 열이 없으면 `values`를
+  바꾸지 않고, 칸이 비어 있으면 그 항목의 기존 값을 유지한다. 내용이 같은 행은
+  저장하지 않는다. 단건 `save_sabangnet_product`는 `p_values`를 함께 저장한다.
+- 엑셀 양식 헤더는 `sabangnet_fields`의 현재 이름·순서다. 기본은
+  `사방넷 코드 | 사방넷 상품명 | M번호 리스트`와 작성안내 시트다.
+  M번호는 선택이며 쉼표·줄바꿈을 허용하고 선행 0을 보존한다.
+  사방넷 공식 대량수정 파일의 제목 1행·헤더 2행·안내 3행과
+  `품번코드 / [수정불가]`, `상품명`, `M번호 리스트` 별칭도 읽는다.
+  항목 관리에 없는 열은 저장하지 않는다.
+- HCell 등 `x:` OOXML 접두어 파일은 SheetJS가 빈 시트로 읽는다.
+  `src/lib/import/ooxml-spreadsheet.ts`가 zip+deflate-raw+shared strings로
+  읽고, 빈 C열 self-closing 셀을 D열로 삼키지 않게 파싱한다.
+- 파일 안 코드 중복, 기존 DB 코드, 행 안 M번호 중복, 존재하지 않는 M번호는
+  미리보기 오류다. M번호 공란은 정상 `미연결` 등록이다.
+- 화면: `/sabangnet-codes`. 전체·연결 완료·M번호 미연결 탭, 행 펼침
+  (`M번호 N종`), 단건 CRUD, 일괄 등록, 미연결 인라인 입력.
+  로직: `src/lib/codes/sabangnet-import.ts`,
+  `src/lib/codes/sabangnet-fields.ts`,
+  `src/lib/supabase/sabangnet-products.ts`,
+  `src/lib/supabase/sabangnet-fields.ts`.
+  헤더 관리 화면은 `SabangnetFieldManager.tsx`다.
+  회귀: `npm run verify:sabangnet-codes`.
+- 마이그레이션: `20260922121227_sabangnet_products.sql`
+  (원격 적용명 `sabangnet_products`),
+  `20260922124337_sabangnet_products_upsert.sql`,
+  `20260922163000_sabangnet_fields.sql`(원격 적용명 `sabangnet_fields`),
+  `20260922163100_sabangnet_field_values.sql`(원격 적용명 `sabangnet_field_values`).
+- 초기 적재(2026-09-22): Masmarulez
+  (`brand_id` `b0000000-0000-4000-8000-000000000001`)에
+  `사방넷상품대량수정_수정파일 (2).xlsx`
+  (SHA-256 `9dc56764cf6ca3f546222cb1233c51e95b265063aef76d020e4fc201660cfd8b`)를
+  신규 등록했다. 모든 M번호가 당시 `styles`에 있음을 먼저 확인했고,
+  기존 행은 없었다. 결과: 부모 1,642건, 연결 완료 1,169건, 미연결 473건,
+  다중 연결 150건, 연결 관계 1,636건(고유 M번호 1,636).
 
 ### 거래처 코드·바코드 출고·운영 현황 출고
 

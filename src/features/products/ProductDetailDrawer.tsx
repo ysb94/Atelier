@@ -20,6 +20,7 @@ import {
   getCodeUsageAssignments,
   getCodeUsageTargets,
   getProductCodes,
+  getSabangnetStyleCodes,
   getSeasonsByBrand,
   getStylesByBrand,
   StyleStoreError,
@@ -27,6 +28,10 @@ import {
 } from '@/lib/api'
 import { OWNER_LABEL, OWNER_ORDER } from '@/lib/import/fields'
 import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
+import {
+  isSabangnetCodeField,
+  sabangnetCodeByStyleId,
+} from '@/lib/codes/sabangnet-style-codes'
 import { isImageField, pickImageSources } from '@/lib/products/product-image'
 import {
   fieldValueKey,
@@ -209,6 +214,26 @@ export function ProductDetailDrawer() {
     queryFn: () => getProductCodes(brandId!, 'own'),
     enabled: Boolean(brandId),
   })
+
+  const sabangnetCodeQuery = useQuery({
+    queryKey: ['sabangnetProducts', brandId, 'styleCodes'],
+    queryFn: async () => {
+      try {
+        return await getSabangnetStyleCodes(brandId!)
+      } catch (error) {
+        console.warn('[product-detail] 사방넷 코드를 불러오지 못했습니다', {
+          brandId,
+          error,
+        })
+        throw error
+      }
+    },
+    enabled: Boolean(brandId),
+  })
+  const sabangnetCodeByStyle = useMemo(
+    () => sabangnetCodeByStyleId(sabangnetCodeQuery.data ?? emptyList()),
+    [sabangnetCodeQuery.data],
+  )
 
   const assignmentsQuery = useQuery({
     queryKey: ['code-usage-assignments', brandId],
@@ -451,9 +476,17 @@ export function ProductDetailDrawer() {
                       </h3>
                       <div className="space-y-3">
                         {ownerFields.map((field) => {
-                          const filled = isFieldFilled(style, field)
+                          const sabangnetLinked = isSabangnetCodeField(field)
+                          const sabangnetCode = sabangnetLinked
+                            ? (sabangnetCodeByStyle.get(style.id) ?? '')
+                            : ''
+                          const filled = sabangnetLinked
+                            ? sabangnetCode.trim().length > 0
+                            : isFieldFilled(style, field)
                           const key = fieldValueKey(field)
-                          const value = draftValue(field)
+                          const value = sabangnetLinked
+                            ? sabangnetCode
+                            : draftValue(field)
 
                           return (
                             <label key={field.id} className="block space-y-1.5">
@@ -469,7 +502,25 @@ export function ProductDetailDrawer() {
                                 ) : null}
                               </span>
 
-                              {isImageField(field) ? (
+                              {sabangnetLinked ? (
+                                <>
+                                  <Input
+                                    type="text"
+                                    value={
+                                      sabangnetCodeQuery.isError ? '' : value
+                                    }
+                                    readOnly
+                                    disabled
+                                  />
+                                  <p className="text-xs text-muted-foreground">
+                                    {sabangnetCodeQuery.isError
+                                      ? '사방넷 코드를 불러오지 못했습니다.'
+                                      : sabangnetCodeQuery.isLoading
+                                        ? '사방넷 코드 관리에서 불러오는 중...'
+                                        : '사방넷 코드 관리에서 이 M번호에 연결된 코드입니다.'}
+                                  </p>
+                                </>
+                              ) : isImageField(field) ? (
                                 <>
                                   <ProductImagePreview
                                     sources={pickImageSources(

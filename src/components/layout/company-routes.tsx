@@ -19,9 +19,11 @@ import { DesignStyledCutsPage } from '@/features/design/StyledCutsPage'
 import { CompanyDraftsPage } from '@/features/drafts/DraftsPage'
 import { DraftEditPage } from '@/features/drafts/DraftEditPage'
 import { CompanyBarcodePage } from '@/features/codes/BarcodePage'
+import { SabangnetCodePage } from '@/features/codes/SabangnetCodePage'
 import { CompanyUsageCodePage } from '@/features/codes/UsageCodePage'
 import { CompanyPartnerCodePage } from '@/features/codes/PartnerCodePage'
 import { FieldsSettingsPage } from '@/features/settings/FieldsSettingsPage'
+import { ProductCategorySettingsPage } from '@/features/settings/ProductCategorySettingsPage'
 import { SeasonsSettingsPage } from '@/features/settings/SeasonsSettingsPage'
 import { UsageTargetsSettingsPage } from '@/features/settings/UsageTargetsSettingsPage'
 import { BrandSettingsPage } from '@/features/settings/BrandSettingsPage'
@@ -164,6 +166,14 @@ export const companyWorkspaceRoutes = (
         <Route path=":brandSlug/:styleNo" element={<ProductDetailDrawer />} />
       </Route>
       <Route path="barcodes" element={<CompanyBarcodePage />} />
+      <Route
+        path="sabangnet-codes"
+        element={
+          <Gated autoSelectFirst>
+            <SabangnetCodePage />
+          </Gated>
+        }
+      />
       <Route path="usage-codes" element={<CompanyUsageCodePage />} />
       <Route path="partner-codes" element={<CompanyPartnerCodePage />} />
       <Route path="operations" element={<CompanyOutboundDataPage />} />
@@ -173,6 +183,14 @@ export const companyWorkspaceRoutes = (
         element={
           <Gated>
             <FieldsSettingsPage />
+          </Gated>
+        }
+      />
+      <Route
+        path="settings/product-categories"
+        element={
+          <Gated>
+            <ProductCategorySettingsPage />
           </Gated>
         }
       />

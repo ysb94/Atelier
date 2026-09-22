@@ -25,6 +25,25 @@ export type BrandInput = {
   logoUrl?: string | null
 }
 
+/** 브랜드별 내부 상품 카테고리. 카페24 번호와 분리한 계층형 마스터다. */
+export type ProductCategory = {
+  id: string
+  brandId: string
+  parentId: string | null
+  name: string
+  depth: number
+  sortOrder: number
+  isActive: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export type ProductCategoryInput = {
+  name: string
+  parentId?: string | null
+  isActive?: boolean
+}
+
 /**
  * 출시 기획 묶음은 기획팀 관점만 본다.
  * 생산·판매·단종은 묶음이 아니라 상품 하나하나의 상태다.
@@ -405,6 +424,26 @@ export type BarcodeFieldInput = {
   type: BarcodeFieldType
 }
 
+/**
+ * 사방넷 일괄 등록 헤더. code·name은 삭제할 수 없다.
+ * styles는 양식에서 숨길 수 있고, 추가 항목 값은 상품 values에 둔다.
+ */
+export type SabangnetFieldSystemKey = 'code' | 'name' | 'styles'
+
+export type SabangnetField = {
+  id: string
+  brandId: string
+  label: string
+  systemKey: SabangnetFieldSystemKey | null
+  type: BarcodeFieldType
+  order: number
+}
+
+export type SabangnetFieldInput = {
+  label: string
+  type: BarcodeFieldType
+}
+
 /** 자사 바코드가 사용되는 판매처·납품처(면세점, 무신사 등) */
 /** 판매 성격. 출고 방식과 독립된 축이라 자유롭게 조합된다. */
 export type OutboundChannelType = 'unset' | 'online' | 'offline'
@@ -614,6 +653,30 @@ export type StyleRef = {
   styleId: string
   styleNo: string
   name: string
+}
+
+/**
+ * 사방넷 판매 상품. 출고 구성품이 아니라 색상·사이즈 SKU(M번호) 연결이다.
+ * 수량은 저장하지 않는다.
+ */
+export type SabangnetProduct = {
+  id: string
+  brandId: string
+  code: string
+  name: string
+  createdAt: string
+  updatedAt: string
+  /** sabangnet_fields id -> 값. 시스템 항목은 여기 두지 않는다. */
+  values: Record<string, string>
+  styles: StyleRef[]
+}
+
+export type SabangnetProductInput = {
+  code: string
+  name: string
+  styleIds: string[]
+  /** 없으면 수정 시 기존 추가 항목을 유지한다. */
+  values?: Record<string, string>
 }
 
 /** 품목·옵션 조합에서 나가는 구성의 역할 */

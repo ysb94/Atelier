@@ -10,6 +10,8 @@ import {
   FlaskConical,
   FileSpreadsheet,
   FileText,
+  FolderTree,
+  Hash,
   Home,
   Images,
   LayoutGrid,
@@ -125,6 +127,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
       { to: '/data/all', label: '전체 상품', icon: Table2 },
       { to: '/data/upload', label: '일괄 업로드', icon: Upload },
       { to: '/barcodes', label: '88바코드 관리', icon: ScanBarcode },
+      { to: '/sabangnet-codes', label: '사방넷 코드 관리', icon: Hash },
       { to: '/usage-codes', label: '출고업체별 바코드', icon: Store },
       { to: '/partner-codes', label: '거래처 코드', icon: Building2 },
     ],
@@ -132,6 +135,11 @@ export const companyNavGroups: CompanyNavGroup[] = [
   {
     title: '설정',
     items: [
+      {
+        to: '/settings/product-categories',
+        label: '상품 설정',
+        icon: FolderTree,
+      },
       { to: '/settings/fields', label: '업로드 항목', icon: ListChecks },
       { to: '/settings/seasons', label: '출시 기획', icon: CalendarRange },
       { to: '/settings/usage-targets', label: '출고업체', icon: Store },

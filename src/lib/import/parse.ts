@@ -1,3 +1,8 @@
+import {
+  canUsePrefixedOfficeOpenXmlFallback,
+  readPrefixedOfficeOpenXml,
+} from '@/lib/import/ooxml-spreadsheet'
+
 export type ParsedSheet = {
   name: string
   rows: string[][]
@@ -115,8 +120,9 @@ export async function parseFile(file: File): Promise<ParsedSheet[]> {
     const XLSX = await import('xlsx')
     const buffer = await file.arrayBuffer()
     const workbook = XLSX.read(buffer, { type: 'array', cellDates: true })
-    return workbook.SheetNames.map((sheetName) => {
+    const sheets = workbook.SheetNames.flatMap((sheetName) => {
       const sheet = workbook.Sheets[sheetName]
+      if (!sheet) return []
       const raw = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
         header: 1,
         blankrows: false,
@@ -127,8 +133,13 @@ export async function parseFile(file: File): Promise<ParsedSheet[]> {
       const rows = raw
         .map((cells) => cells.map((cell) => stringifyCell(cell)))
         .filter((cells) => cells.some((cell) => cell !== ''))
-      return { name: sheetName, rows }
-    }).filter((sheet) => sheet.rows.length > 0)
+      return rows.length > 0 ? [{ name: sheetName, rows }] : []
+    })
+    if (canUsePrefixedOfficeOpenXmlFallback(sheets)) {
+      const fallback = await readPrefixedOfficeOpenXml(buffer)
+      if (fallback.length > 0) return fallback
+    }
+    return sheets
   }
 
   const text = await file.text()

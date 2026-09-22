@@ -19,11 +19,17 @@ import { Input, Select } from '@/components/ui/input'
 import {
   getBrandFields,
   getProductCodes,
+  getSabangnetStyleCodes,
   getSeasonsByBrand,
   getStylesFilteredForBrands,
   getStylesPageForBrands,
   type StyleFilter,
 } from '@/lib/api'
+import {
+  applySabangnetCodesToStyles,
+  isSabangnetCodeField,
+  sabangnetCodeByStyleId,
+} from '@/lib/codes/sabangnet-style-codes'
 import {
   columnsForSheet,
   downloadStylesExport,
@@ -53,6 +59,12 @@ import { companyQueryKey } from '@/lib/workspace/query-keys'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
 import { SheetTable, type SheetRow } from './SheetTable'
+import {
+  compareSheetRows,
+  isSheetCellBlank,
+  timeDataSheet,
+  type SheetSort,
+} from './sheet-sort'
 
 const DATA_OWNERS: DataSheetOwner[] = [
   'planning',
@@ -181,6 +193,7 @@ function styleToRow(
   options?: {
     seasonLabel?: string
     ownBarcode?: string
+    sabangnetCode?: string
     brandName?: string
   },
 ): SheetRow {
@@ -194,6 +207,10 @@ function styleToRow(
       values[fieldValueKey(column)] = options?.ownBarcode ?? ''
       continue
     }
+    if (isSabangnetCodeField(column)) {
+      values[fieldValueKey(column)] = options?.sabangnetCode ?? ''
+      continue
+    }
     values[fieldValueKey(column)] = getStyleFieldDisplay(style, column, {
       seasonCode: options?.seasonLabel,
     })
@@ -203,7 +220,12 @@ function styleToRow(
 
 export function DataSheetPage() {
   useRenderWatch('DataSheetPage')
-  const { selectedBrands, brandById, selection } = useCompanyBrandScope()
+  const {
+    selectedBrands,
+    brandById,
+    selection,
+    loading: brandsLoading,
+  } = useCompanyBrandScope()
   const navigate = useNavigate()
   const { owner: ownerParam } = useParams()
   const owner = parseOwner(ownerParam)
@@ -291,6 +313,27 @@ export function DataSheetPage() {
     })),
     combine: combineListQueries<ProductCode>,
   })
+  const sabangnetQueries = useQueries({
+    queries: selectedBrands.map((item) => ({
+      queryKey: ['sabangnetProducts', item.id, 'styleCodes'] as const,
+      queryFn: async () => {
+        try {
+          return await getSabangnetStyleCodes(item.id)
+        } catch (error) {
+          console.warn('[data-sheet] 사방넷 코드를 불러오지 못했습니다', {
+            brandId: item.id,
+            error,
+          })
+          throw error
+        }
+      },
+    })),
+    combine: combineListQueries<{ styleId: string; code: string }>,
+  })
+  const sortParam = searchParams.get('sort')
+  const sortDirection = searchParams.get('dir') === 'desc' ? 'desc' : 'asc'
+  const blankParam = searchParams.get('blank')
+  const needsCatalog = Boolean(sortParam || blankParam)
   const pageQuery = useQuery({
     queryKey: companyQueryKey(
       'styles-page',
@@ -306,7 +349,23 @@ export function DataSheetPage() {
         (page - 1) * pageSize,
         pageSize,
       ),
-    enabled: brandIds.length > 0,
+    enabled: brandIds.length > 0 && !needsCatalog,
+    placeholderData: keepPreviousData,
+  })
+  const sortedQuery = useQuery({
+    queryKey: companyQueryKey('styles-sorted', brandIds, filter),
+    queryFn: async () => {
+      try {
+        return await getStylesFilteredForBrands(brandIds, filter)
+      } catch (error) {
+        console.warn('[data-sheet] 상품 목록을 불러오지 못했습니다', {
+          brandIds,
+          error,
+        })
+        throw error
+      }
+    },
+    enabled: brandIds.length > 0 && needsCatalog,
     placeholderData: keepPreviousData,
   })
 
@@ -345,39 +404,128 @@ export function DataSheetPage() {
     () => buildOneToOneBarcodeByStyleId(codes),
     [codes],
   )
-
-  const total = pageQuery.data?.total ?? 0
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
-
-  const rows = useMemo(
-    () =>
-      (pageQuery.data?.rows ?? []).map((style) => {
-        const season = seasonById.get(style.seasonId)
-        const rowFields = singleBrand
-          ? columns
-          : withBrandColumn(
-              withOwnBarcodeColumn([STYLE_NO_COLUMN, NAME_COLUMN]),
-            )
-        return styleToRow(style, rowFields, {
-          seasonLabel: season ? formatSeasonLabel(season) : undefined,
-          ownBarcode: ownBarcodeByStyleId.get(style.id) ?? '',
-          brandName: brandById.get(style.brandId)?.name,
-        })
-      }),
-    [
-      brandById,
-      columns,
-      ownBarcodeByStyleId,
-      pageQuery.data,
-      seasonById,
-      singleBrand,
-    ],
+  const sabangnetCodeByStyle = useMemo(
+    () => sabangnetCodeByStyleId(flattenListQueries(sabangnetQueries)),
+    [sabangnetQueries],
   )
+
+  const sort = useMemo<SheetSort | null>(() => {
+    if (!sortParam) return null
+    const column = columns.find((item) => fieldValueKey(item) === sortParam)
+    if (!column) return null
+    return { key: fieldValueKey(column), direction: sortDirection }
+  }, [columns, sortDirection, sortParam])
+  const blankKey = useMemo(() => {
+    if (!blankParam) return null
+    const column = columns.find((item) => fieldValueKey(item) === blankParam)
+    return column ? fieldValueKey(column) : null
+  }, [blankParam, columns])
+
+  const orderedRows = useMemo(() => {
+    const source = needsCatalog ? sortedQuery.data : pageQuery.data?.rows
+    if (!source) return emptyList<SheetRow>()
+    const rowFields = singleBrand
+      ? columns
+      : withBrandColumn(
+          withOwnBarcodeColumn([STYLE_NO_COLUMN, NAME_COLUMN]),
+        )
+    return timeDataSheet(
+      blankKey ? '빈칸 필터' : sort ? '헤더 정렬' : '시트 행',
+      () => {
+        const mapped = source.map((style) => {
+          const season = seasonById.get(style.seasonId)
+          return styleToRow(style, rowFields, {
+            seasonLabel: season ? formatSeasonLabel(season) : undefined,
+            ownBarcode: ownBarcodeByStyleId.get(style.id) ?? '',
+            sabangnetCode: sabangnetCodeByStyle.get(style.id) ?? '',
+            brandName: brandById.get(style.brandId)?.name,
+          })
+        })
+        const filtered = blankKey
+          ? mapped.filter((row) => isSheetCellBlank(row, blankKey))
+          : mapped
+        if (!sort) return filtered
+        return [...filtered].sort((left, right) =>
+          compareSheetRows(left, right, sort),
+        )
+      },
+    )
+  }, [
+    blankKey,
+    brandById,
+    columns,
+    needsCatalog,
+    ownBarcodeByStyleId,
+    pageQuery.data,
+    sabangnetCodeByStyle,
+    seasonById,
+    singleBrand,
+    sort,
+    sortedQuery.data,
+  ])
+
+  const total = needsCatalog
+    ? sortedQuery.data
+      ? orderedRows.length
+      : 0
+    : (pageQuery.data?.total ?? 0)
+  const totalPages = Math.max(1, Math.ceil(total / pageSize))
+  const rows = useMemo(() => {
+    if (!needsCatalog) return orderedRows
+    const start = (page - 1) * pageSize
+    return orderedRows.slice(start, start + pageSize)
+  }, [needsCatalog, orderedRows, page, pageSize])
 
   // 숨겨진 KeepAlive 탭이 주소를 고치면 보고 있던 탭이 바뀐다. 보이는 탭만 주소를 고친다.
   const tabActive = useWorkspaceTabActivity()
+  const handleSort = useCallback(
+    (key: string) => {
+      const nextDirection =
+        sort?.key === key && sort.direction === 'asc' ? 'desc' : 'asc'
+      patchParams({
+        sort: key,
+        dir: nextDirection === 'desc' ? 'desc' : null,
+      })
+    },
+    [patchParams, sort],
+  )
+  useEffect(() => {
+    if (
+      !tabActive ||
+      brandsLoading ||
+      fieldQueries.loading ||
+      columns.length === 0
+    ) {
+      return
+    }
+    const patch: Record<string, string | null> = {}
+    if (
+      sortParam &&
+      !columns.some((column) => fieldValueKey(column) === sortParam)
+    ) {
+      patch.sort = null
+      patch.dir = null
+    }
+    if (
+      blankParam &&
+      !columns.some((column) => fieldValueKey(column) === blankParam)
+    ) {
+      patch.blank = null
+    }
+    if (Object.keys(patch).length === 0) return
+    patchParams(patch)
+  }, [
+    blankParam,
+    brandsLoading,
+    columns,
+    fieldQueries.loading,
+    patchParams,
+    sortParam,
+    tabActive,
+  ])
   useEffect(() => {
     if (!tabActive) return
+    if (needsCatalog && !sortedQuery.data) return
     if (page > totalPages) {
       setSearchParams(
         (prev) => {
@@ -388,7 +536,7 @@ export function DataSheetPage() {
         { replace: true },
       )
     }
-  }, [page, tabActive, totalPages, setSearchParams])
+  }, [needsCatalog, page, sortedQuery.data, tabActive, totalPages, setSearchParams])
 
   async function handleExport() {
     if (!owner || brandIds.length === 0) return
@@ -396,11 +544,32 @@ export function DataSheetPage() {
       setExporting(true)
       setBanner(null)
       const styles = await getStylesFilteredForBrands(brandIds, filter)
+      const exportFields = singleBrand ? fields : [...columns]
+      const links = (
+        await Promise.all(brandIds.map((id) => getSabangnetStyleCodes(id)))
+      ).flat()
+      const codeByStyle = sabangnetCodeByStyleId(links)
+      const visibleStyles = blankKey
+        ? styles.filter((style) => {
+            const season = seasonById.get(style.seasonId)
+            const row = styleToRow(style, columns, {
+              seasonLabel: season ? formatSeasonLabel(season) : undefined,
+              ownBarcode: ownBarcodeByStyleId.get(style.id) ?? '',
+              sabangnetCode: codeByStyle.get(style.id) ?? '',
+              brandName: brandById.get(style.brandId)?.name,
+            })
+            return isSheetCellBlank(row, blankKey)
+          })
+        : styles
       await downloadStylesExport({
         brandName: singleBrand?.name ?? 'E&J',
         owner,
-        fields: singleBrand ? fields : [...columns],
-        styles,
+        fields: exportFields,
+        styles: applySabangnetCodesToStyles(
+          visibleStyles,
+          exportFields,
+          codeByStyle,
+        ),
         seasons,
       })
     } catch (error) {
@@ -417,9 +586,16 @@ export function DataSheetPage() {
   }
 
   const loading =
-    fieldQueries.loading || seasonQueries.loading || pageQuery.isLoading
+    fieldQueries.loading ||
+    seasonQueries.loading ||
+    codeQueries.loading ||
+    sabangnetQueries.loading ||
+    (needsCatalog ? sortedQuery.isLoading : pageQuery.isLoading)
   const hasFilter =
-    Boolean(filter.search) || Boolean(filter.seasonId) || Boolean(filter.status)
+    Boolean(filter.search) ||
+    Boolean(filter.seasonId) ||
+    Boolean(filter.status) ||
+    Boolean(blankKey)
 
   const pageTitle =
     owner === 'all' ? '전체 상품' : `${sheetOwnerLabel(owner)} 시트`
@@ -533,6 +709,21 @@ export function DataSheetPage() {
           </Select>
           <Select
             className="h-8 bg-background text-sm"
+            value={blankKey ?? 'all'}
+            onChange={(event) => patchParams({ blank: event.target.value })}
+          >
+            <option value="all">빈칸 필터 없음</option>
+            {columns.map((column) => {
+              const key = fieldValueKey(column)
+              return (
+                <option key={key} value={key}>
+                  {column.label} 빈칸
+                </option>
+              )
+            })}
+          </Select>
+          <Select
+            className="h-8 bg-background text-sm"
             value={String(pageSize)}
             onChange={(event) => patchParams({ size: event.target.value })}
           >
@@ -546,7 +737,11 @@ export function DataSheetPage() {
         <span className="ml-auto text-xs tabular-nums text-muted-foreground">
           {formatNumber(total)}건
           {columns.length > 0 ? ` · ${columns.length}열` : ''}
-          {pageQuery.isFetching ? ' · 불러오는 중' : ''}
+          {needsCatalog && sortedQuery.isFetching
+            ? ' · 불러오는 중'
+            : pageQuery.isFetching
+              ? ' · 불러오는 중'
+              : ''}
         </span>
       </div>
 
@@ -559,6 +754,16 @@ export function DataSheetPage() {
 
       {banner ? (
         <p className="mb-3 text-sm text-muted-foreground">{banner}</p>
+      ) : null}
+      {sabangnetQueries.errorIndexes.length > 0 ? (
+        <p className="mb-3 text-sm text-danger">
+          사방넷 코드를 불러오지 못했습니다.
+        </p>
+      ) : null}
+      {sortedQuery.isError ? (
+        <p className="mb-3 text-sm text-danger">
+          상품 목록을 불러오지 못했습니다.
+        </p>
       ) : null}
 
       {loading ? (
@@ -590,6 +795,8 @@ export function DataSheetPage() {
         <SheetTable
           columns={columns}
           rows={rows}
+          sort={sort}
+          onSort={handleSort}
           showOwnerGroups={Boolean(singleBrand) && owner === 'all'}
           onRowOpen={(row) => {
             const [rowBrandId] = row.id.split(':')

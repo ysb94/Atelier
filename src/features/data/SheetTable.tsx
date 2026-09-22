@@ -1,10 +1,12 @@
 import { useMemo } from 'react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
 import { ProductThumb } from '@/components/products/ProductThumb'
 import { OWNER_LABEL } from '@/lib/import/fields'
 import { pickImageSources } from '@/lib/products/product-image'
 import { fieldValueKey } from '@/lib/products/style-fields'
 import type { BrandField, FieldOwner } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import type { SheetSort } from './sheet-sort'
 
 export type SheetRow = {
   id: string
@@ -80,12 +82,18 @@ export function SheetTable({
   rows,
   showOwnerGroups = false,
   onRowOpen,
+  sort = null,
+  onSort,
 }: {
   columns: BrandField[]
   rows: SheetRow[]
   showOwnerGroups?: boolean
   /** 행을 누르면 단건 수정 화면으로 연다. */
   onRowOpen?: (row: SheetRow) => void
+  /** 지금 정렬 중인 열. 없으면 서버가 주는 M번호 순이다. */
+  sort?: SheetSort | null
+  /** 헤더를 누르면 그 열을 오름차순, 한 번 더 누르면 내림차순으로 바꾼다. */
+  onSort?: (key: string) => void
 }) {
   const ownerGroups = useMemo(
     () => (showOwnerGroups ? buildOwnerGroups(columns) : []),
@@ -128,11 +136,22 @@ export function SheetTable({
           <tr>
             {columns.map((column, colIndex) => {
               const left = stickyLeft(colIndex)
+              const key = fieldValueKey(column)
+              const active = sort?.key === key
+              const nextDirection =
+                active && sort.direction === 'asc' ? '내림차순' : '오름차순'
               return (
                 <th
-                  key={fieldValueKey(column)}
+                  key={key}
+                  aria-sort={
+                    active
+                      ? sort.direction === 'asc'
+                        ? 'ascending'
+                        : 'descending'
+                      : 'none'
+                  }
                   className={cn(
-                    'sticky z-20 border-b border-border bg-muted px-2 py-1.5 font-medium',
+                    'sticky z-20 border-b border-border bg-muted p-0 font-medium',
                     left !== undefined && 'z-30',
                   )}
                   style={{
@@ -141,7 +160,21 @@ export function SheetTable({
                     minWidth: colIndex === 0 ? COL0_WIDTH : 96,
                   }}
                 >
-                  <span className="whitespace-nowrap">{column.label}</span>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-1 px-2 py-1.5 text-left hover:bg-foreground/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    title={`${column.label} ${nextDirection}`}
+                    onClick={() => onSort?.(key)}
+                  >
+                    <span className="whitespace-nowrap">{column.label}</span>
+                    {active ? (
+                      sort.direction === 'asc' ? (
+                        <ChevronUp className="size-3.5 shrink-0" aria-hidden />
+                      ) : (
+                        <ChevronDown className="size-3.5 shrink-0" aria-hidden />
+                      )
+                    ) : null}
+                  </button>
                 </th>
               )
             })}
