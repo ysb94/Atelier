@@ -1319,7 +1319,8 @@ export function OutboundDataPage() {
     queryKey: ['outboundShipments', brand.id],
     queryFn: () => getOutboundShipments(brand.id),
   })
-  const shipments = shipmentsQuery.data ?? emptyList()
+  const shipments =
+    shipmentsQuery.data ?? emptyList<ProductOutboundShipment>()
   const loadingShipments =
     shipmentsQuery.isPending ||
     (!shipmentsQuery.data && shipmentsQuery.isFetching)
@@ -1350,7 +1351,9 @@ export function OutboundDataPage() {
   }, [brand.id, shipmentsQuery.error])
 
   const readyToRender = readyBrandId === brand.id && !loadingShipments
-  const visibleShipments = readyToRender ? shipments : emptyList()
+  const visibleShipments = readyToRender
+    ? shipments
+    : emptyList<ProductOutboundShipment>()
   const showLoadingOverlay =
     !shipmentsQuery.isError && (loadingShipments || !readyToRender)
 
