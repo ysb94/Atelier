@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { CargoLinePhoto } from '@/features/logistics/CargoUnloadListDialog'
 import {
-  CARGO_LINE_LIST_COLUMNS,
+  CARGO_WAREHOUSE_LINE_LIST_COLUMNS,
   type CargoLineListColumnKey,
 } from '@/features/logistics/cargo-line-list-columns'
 import {
@@ -119,7 +119,7 @@ export function CargoWarehouseSlotDialog({
     setError(null)
     try {
       const XLSX = await import('xlsx')
-      const headers = CARGO_LINE_LIST_COLUMNS.map((column) =>
+      const headers = CARGO_WAREHOUSE_LINE_LIST_COLUMNS.map((column) =>
         column.key === 'photo' ? '사진 URL' : column.label,
       )
       const body = rows.map((row) => {
@@ -127,7 +127,7 @@ export function CargoWarehouseSlotDialog({
           ...storedRowToCargoLineListValues(row),
           warehouseSlot: slotValue(row),
         })
-        return CARGO_LINE_LIST_COLUMNS.map((column) => {
+        return CARGO_WAREHOUSE_LINE_LIST_COLUMNS.map((column) => {
           if (column.key === 'photo') {
             return ruleImageUrls(cells.styleNo, LOGISTICS_IMAGE_KEY)[0] ?? ''
           }
@@ -288,13 +288,13 @@ export function CargoWarehouseSlotDialog({
             ) : (
               <table className="w-full min-w-[74rem] table-fixed border-separate border-spacing-0 text-sm">
                 <colgroup>
-                  {CARGO_LINE_LIST_COLUMNS.map((column) => (
+                  {CARGO_WAREHOUSE_LINE_LIST_COLUMNS.map((column) => (
                     <col key={column.key} className={column.widthClass} />
                   ))}
                 </colgroup>
                 <thead className="sticky top-0 z-20">
                   <tr>
-                    {CARGO_LINE_LIST_COLUMNS.map((column) => (
+                    {CARGO_WAREHOUSE_LINE_LIST_COLUMNS.map((column) => (
                       <th
                         key={column.key}
                         className={cn(
@@ -310,7 +310,7 @@ export function CargoWarehouseSlotDialog({
                 <tbody>
                   {displayRows.map(({ row, cells }, index) => (
                     <tr key={row.id} className="odd:bg-card even:bg-muted/20">
-                      {CARGO_LINE_LIST_COLUMNS.map((column) => {
+                      {CARGO_WAREHOUSE_LINE_LIST_COLUMNS.map((column) => {
                         if (column.key === 'photo') {
                           return (
                             <td

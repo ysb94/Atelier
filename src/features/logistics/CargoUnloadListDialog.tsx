@@ -14,7 +14,10 @@ import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { CARGO_LINE_LIST_COLUMNS } from '@/features/logistics/cargo-line-list-columns'
+import {
+  CARGO_LINE_LIST_COLUMNS,
+  CARGO_WAREHOUSE_LINE_LIST_COLUMNS,
+} from '@/features/logistics/cargo-line-list-columns'
 import type { CargoLineListColumnKey } from '@/features/logistics/cargo-line-list-columns'
 import {
   getActiveWarehouseInventorySet,
@@ -45,6 +48,15 @@ import {
   compareUnloadStowLabel,
   compareUnloadStyleNo,
 } from '@/lib/cargo/unload-stow'
+import {
+  buildCargoLineListPrintLayout,
+  CARGO_LINE_LIST_PRINT_LINE_HEIGHT,
+  CARGO_LINE_LIST_PRINT_META_PT,
+  CARGO_LINE_LIST_PRINT_TITLE_PT,
+  formatCargoLineListPrintOptionLabel,
+  resolveCargoLineListPrintOrientation,
+  type CargoLineListPrintLayout,
+} from '@/lib/cargo/line-list-print'
 import { resolveWarehouseTidyShippedOn } from '@/lib/cargo/warehouse-tidy'
 import { useRenderWatch } from '@/lib/diagnostics'
 import {
@@ -121,7 +133,7 @@ function listCell(row: CargoListDisplayRow, key: CargoLineListColumnKey) {
 }
 
 function applyUnloadPrintMode(
-  landscape: boolean,
+  layout: CargoLineListPrintLayout,
   printClass: string,
   printStyleId: string,
   printNodeClass: string,
@@ -133,16 +145,9 @@ function applyUnloadPrintMode(
     style.id = printStyleId
     document.head.appendChild(style)
   }
-  const pageSize = landscape ? 'A4 landscape' : 'A4 portrait'
-  const pageMargin = landscape ? '7mm 8mm' : '8mm 7mm'
-  const tableFont = landscape ? '11px' : '9.5px'
-  const titleFont = landscape ? '16px' : '14px'
-  const metaFont = landscape ? '11px' : '10px'
-  const rowHeight = landscape ? '26px' : '22px'
-  const cellPad = landscape ? '3px 4px' : '2px 3px'
-  const imgSize = landscape ? '20px' : '16px'
+  const lineHeight = CARGO_LINE_LIST_PRINT_LINE_HEIGHT
   style.textContent = `
-@page { size: ${pageSize}; margin: ${pageMargin}; }
+@page { size: ${layout.pageSize}; margin: ${layout.pageMargin}; }
 @media screen {
   .${printNodeClass} { display: none !important; }
 }
@@ -170,23 +175,27 @@ function applyUnloadPrintMode(
     -webkit-print-color-adjust: exact;
     print-color-adjust: exact;
   }
+  html.${printClass} .${printNodeClass} .print-page + .print-page {
+    break-before: page;
+    page-break-before: always;
+  }
   html.${printClass} .${printNodeClass} h1 {
-    font-size: ${titleFont};
-    margin: 0 0 2px;
+    font-size: ${CARGO_LINE_LIST_PRINT_TITLE_PT}pt;
+    line-height: 1.15;
+    margin: 0 0 0.5mm;
   }
   html.${printClass} .${printNodeClass} p {
-    margin: 0 0 6px;
+    margin: 0 0 1mm;
     color: #555;
-    font-size: ${metaFont};
+    font-size: ${CARGO_LINE_LIST_PRINT_META_PT}pt;
+    line-height: 1.2;
   }
   html.${printClass} .${printNodeClass} table {
     width: 100% !important;
+    height: ${layout.tableHeightMm}mm;
     table-layout: fixed;
     border-collapse: collapse;
-    font-size: ${tableFont};
-  }
-  html.${printClass} .${printNodeClass} tbody tr {
-    height: ${rowHeight};
+    font-size: ${layout.fontPt}pt;
   }
   html.${printClass} .${printNodeClass} tbody tr:nth-child(even) td {
     background: #edf2f6 !important;
@@ -200,34 +209,49 @@ function applyUnloadPrintMode(
   }
   html.${printClass} .${printNodeClass} th,
   html.${printClass} .${printNodeClass} td {
-    border: 1px solid #9aa6b2;
-    padding: ${cellPad};
+    box-sizing: border-box;
+    border: 0.2mm solid #9aa6b2;
+    padding: 0 0.55mm;
     text-align: center;
     vertical-align: middle;
     overflow: hidden;
-    height: ${rowHeight};
-    line-height: 1.15;
+    line-height: ${lineHeight};
     white-space: nowrap;
   }
   html.${printClass} .${printNodeClass} th {
+    height: ${layout.headerHeightMm}mm;
     background: #243447;
     color: #fff;
+    font-size: ${layout.headerFontPt}pt;
     font-weight: 600;
+    white-space: normal;
+    word-break: keep-all;
+  }
+  html.${printClass} .${printNodeClass} td.style-no {
+    font-weight: 700;
   }
   html.${printClass} .${printNodeClass} td.name {
     text-align: left;
-    text-overflow: ellipsis;
+    white-space: normal;
+  }
+  html.${printClass} .${printNodeClass} td.name .name-clamp {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: ${layout.nameLines};
+    overflow: hidden;
+    word-break: break-all;
+    line-height: ${lineHeight};
+    text-align: left;
   }
   html.${printClass} .${printNodeClass} td.note {
     text-align: left;
     white-space: pre-line;
-    height: auto;
-    overflow: visible;
+    word-break: break-all;
   }
   html.${printClass} .${printNodeClass} td.photo img,
   html.${printClass} .${printNodeClass} td.photo .photo-thumb {
-    width: ${imgSize} !important;
-    height: ${imgSize} !important;
+    width: ${layout.photoMm}mm !important;
+    height: ${layout.photoMm}mm !important;
     object-fit: cover;
     display: block;
     margin: 0 auto;
@@ -285,6 +309,10 @@ export function CargoUnloadListDialog({
   onClose,
 }: CargoUnloadListDialogProps) {
   const copy = PURPOSE_COPY[purpose]
+  const listColumns =
+    purpose === 'warehouse'
+      ? CARGO_WAREHOUSE_LINE_LIST_COLUMNS
+      : CARGO_LINE_LIST_COLUMNS
   useRenderWatch(copy.watchName)
   const [openedAt] = useState(() => Date.now())
   const [listSource, setListSource] = useState<'saved' | 'live'>(() =>
@@ -294,7 +322,7 @@ export function CargoUnloadListDialog({
   const [savingList, setSavingList] = useState(false)
   const [listError, setListError] = useState<string | null>(null)
   const [printOrientation, setPrintOrientation] =
-    useState<PrintOrientation>('auto')
+    useState<PrintOrientation>('portrait')
   const [downloadingExcel, setDownloadingExcel] = useState(false)
   const [excelError, setExcelError] = useState<string | null>(null)
   const [uncheckedKeys, setUncheckedKeys] = useState<Set<string>>(
@@ -445,13 +473,48 @@ export function CargoUnloadListDialog({
     [savedData],
   )
   const rows = listSource === 'saved' ? savedRows : liveRows
-  const printLandscape =
-    printOrientation === 'landscape' || printOrientation === 'auto'
-  const printOrientationLabel = printLandscape ? '가로' : '세로'
   const printRows = useMemo(
     () => rows.filter((row) => !uncheckedKeys.has(row.key)),
     [rows, uncheckedKeys],
   )
+  const printCells = useMemo(
+    () => printRows.map((row) => row.cells),
+    [printRows],
+  )
+  const portraitPrintLayout = useMemo(
+    () =>
+      buildCargoLineListPrintLayout(
+        printCells,
+        'portrait',
+        listColumns,
+      ),
+    [listColumns, printCells],
+  )
+  const landscapePrintLayout = useMemo(
+    () =>
+      buildCargoLineListPrintLayout(
+        printCells,
+        'landscape',
+        listColumns,
+      ),
+    [listColumns, printCells],
+  )
+  const autoPrintOrientation = resolveCargoLineListPrintOrientation(
+    portraitPrintLayout,
+    landscapePrintLayout,
+  )
+  const printLayout =
+    printOrientation === 'landscape' ||
+    (printOrientation === 'auto' && autoPrintOrientation === 'landscape')
+      ? landscapePrintLayout
+      : portraitPrintLayout
+  const printDirectionLabel =
+    printLayout.orientation === 'landscape' ? '가로' : '세로'
+  const autoPrintLayout =
+    autoPrintOrientation === 'landscape'
+      ? landscapePrintLayout
+      : portraitPrintLayout
+  const printPhotoPx = Math.round((printLayout.photoMm * 96) / 25.4)
   const allPrintSelected = rows.length > 0 && printRows.length === rows.length
   const somePrintSelected = printRows.length > 0 && !allPrintSelected
 
@@ -522,7 +585,7 @@ export function CargoUnloadListDialog({
     const saved = await ensureWarehouseListSaved()
     if (!saved) return
     applyUnloadPrintMode(
-      printLandscape,
+      printLayout,
       copy.printClass,
       copy.printStyleId,
       copy.printNodeClass,
@@ -540,11 +603,11 @@ export function CargoUnloadListDialog({
     setExcelError(null)
     try {
       const XLSX = await import('xlsx')
-      const headers = CARGO_LINE_LIST_COLUMNS.map((column) =>
+      const headers = listColumns.map((column) =>
         column.key === 'photo' ? '사진 URL' : column.label,
       )
       const body = printRows.map((row) =>
-        CARGO_LINE_LIST_COLUMNS.map((column) => {
+        listColumns.map((column) => {
           if (column.key === 'photo') {
             return (
               ruleImageUrls(row.cells.styleNo, LOGISTICS_IMAGE_KEY)[0] ?? ''
@@ -690,12 +753,22 @@ export function CargoUnloadListDialog({
                 onChange={(event) =>
                   setPrintOrientation(event.target.value as PrintOrientation)
                 }
-                className="h-8 rounded-md border border-border bg-card px-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
+                className="h-8 min-w-44 rounded-md border border-border bg-card px-2 text-xs text-foreground outline-none focus:ring-2 focus:ring-ring"
                 title="인쇄 방향 선택"
               >
-                <option value="auto">자동 (가로)</option>
-                <option value="portrait">세로</option>
-                <option value="landscape">가로</option>
+                <option value="portrait">
+                  {formatCargoLineListPrintOptionLabel('세로', portraitPrintLayout)}
+                </option>
+                <option value="landscape">
+                  {formatCargoLineListPrintOptionLabel('가로', landscapePrintLayout)}
+                </option>
+                <option value="auto">
+                  {`자동 (${autoPrintOrientation === 'landscape' ? '가로' : '세로'})${
+                    autoPrintLayout.pages.length > 1
+                      ? ` · ${autoPrintLayout.pages.length}장`
+                      : ''
+                  }`}
+                </option>
               </select>
               {purpose === 'warehouse' &&
               stage === 'scheduled' &&
@@ -774,7 +847,7 @@ export function CargoUnloadListDialog({
               <table className="w-full min-w-[74rem] table-fixed border-separate border-spacing-0 text-sm">
                 <colgroup>
                   <col className="w-10" />
-                  {CARGO_LINE_LIST_COLUMNS.map((column) => (
+                  {listColumns.map((column) => (
                     <col key={column.key} className={column.widthClass} />
                   ))}
                 </colgroup>
@@ -794,7 +867,7 @@ export function CargoUnloadListDialog({
                         }
                       />
                     </th>
-                    {CARGO_LINE_LIST_COLUMNS.map((column) => (
+                    {listColumns.map((column) => (
                       <th
                         key={column.key}
                         className={cn(
@@ -824,7 +897,7 @@ export function CargoUnloadListDialog({
                           onChange={() => togglePrintRow(row.key)}
                         />
                       </td>
-                      {CARGO_LINE_LIST_COLUMNS.map((column) => {
+                      {listColumns.map((column) => {
                         if (column.key === 'photo') {
                           return (
                             <td
@@ -854,6 +927,7 @@ export function CargoUnloadListDialog({
                                 : 'text-center',
                               column.key === 'no' && 'text-muted-foreground',
                               column.key === 'name' && 'font-medium',
+                              column.key === 'styleNo' && 'font-bold',
                               [
                                 'qty',
                                 'perBox',
@@ -883,65 +957,92 @@ export function CargoUnloadListDialog({
         </div>
       </div>
       <div className={`${copy.printNodeClass} hidden`} aria-hidden>
-          <h1>
-            {title} {copy.label}
-          </h1>
-          <p>
-            {brandName} · {title} · {formatNumber(printRows.length)}행 ·{' '}
-            {printOrientationLabel}
-          </p>
-          <table>
-            <colgroup>
-              {CARGO_LINE_LIST_COLUMNS.map((column) => (
-                <col key={`print-col-${column.key}`} style={{ width: column.printWidth }} />
-              ))}
-            </colgroup>
-            <thead>
-              <tr>
-                {CARGO_LINE_LIST_COLUMNS.map((column) => (
-                  <th key={`print-h-${column.key}`}>{column.label}</th>
+        {printLayout.pages.map((page, pageIndex) => (
+          <section className="print-page" key={`print-page-${page.start}`}>
+            <h1>
+              {title} {copy.label}
+            </h1>
+            <p>
+              {brandName} · {title} · {formatNumber(printRows.length)}행 ·{' '}
+              {printDirectionLabel}
+              {printLayout.pages.length > 1
+                ? ` · ${pageIndex + 1}/${printLayout.pages.length}장`
+                : ''}
+            </p>
+            <table>
+              <colgroup>
+                {listColumns.map((column) => (
+                  <col
+                    key={`print-col-${page.start}-${column.key}`}
+                    style={{
+                      width: `${
+                        printLayout.columns.find((item) => item.key === column.key)
+                          ?.widthPercent ?? 0
+                      }%`,
+                    }}
+                  />
                 ))}
-              </tr>
-            </thead>
-            <tbody key={printRows.map((row) => row.key).join('|')}>
-              {printRows.map((row) => (
-                <tr key={`print-${row.key}`}>
-                  {CARGO_LINE_LIST_COLUMNS.map((column) => {
-                    if (column.key === 'photo') {
+              </colgroup>
+              <thead>
+                <tr>
+                  {listColumns.map((column) => (
+                    <th key={`print-h-${page.start}-${column.key}`}>
+                      {column.printLabel}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {printRows.slice(page.start, page.end).map((row, rowIndex) => (
+                  <tr
+                    key={`print-${page.start}-${row.key}`}
+                    style={{ height: `${page.rowHeightsMm[rowIndex] ?? 0}mm` }}
+                  >
+                    {listColumns.map((column) => {
+                      if (column.key === 'photo') {
+                        return (
+                          <td key={`print-${row.key}-photo`} className="photo">
+                            {row.cells.styleNo ? (
+                              <CargoLinePhoto
+                                styleNo={row.cells.styleNo}
+                                name={row.cells.name}
+                                size={printPhotoPx}
+                              />
+                            ) : (
+                              '—'
+                            )}
+                          </td>
+                        )
+                      }
+                      const text = listCell(row, column.key)
                       return (
-                        <td key={`print-${row.key}-photo`} className="photo">
-                          {row.cells.styleNo ? (
-                            <CargoLinePhoto
-                              styleNo={row.cells.styleNo}
-                              name={row.cells.name}
-                              size={printLandscape ? 20 : 16}
-                            />
+                        <td
+                          key={`print-${row.key}-${column.key}`}
+                          className={
+                            column.key === 'styleNo'
+                              ? 'style-no'
+                              : column.align === 'left'
+                                ? column.key === 'name'
+                                  ? 'name'
+                                  : 'note'
+                                : undefined
+                          }
+                        >
+                          {column.key === 'name' ? (
+                            <div className="name-clamp">{text}</div>
                           ) : (
-                            '—'
+                            text
                           )}
                         </td>
                       )
-                    }
-                    return (
-                      <td
-                        key={`print-${row.key}-${column.key}`}
-                        className={
-                          column.align === 'left'
-                            ? column.key === 'name'
-                              ? 'name'
-                              : 'note'
-                            : undefined
-                        }
-                      >
-                        {listCell(row, column.key)}
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </section>
+        ))}
+      </div>
       </>
     </WorkspaceTabOverlay>,
     document.body,
