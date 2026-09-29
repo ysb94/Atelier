@@ -3,6 +3,7 @@ import { ArrowLeft, CalendarDays, CheckCircle2, MessageSquareText } from 'lucide
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import type { CargoInboundTidySlotInput } from '@/lib/api'
 import { CargoInboundRequestDialog } from '@/features/logistics/CargoInboundRequestDialog'
 import { CargoInspectionButton } from '@/features/logistics/CargoInspectionDialog'
 import { CargoStockCheckButton } from '@/features/logistics/CargoStockCheckDialog'
@@ -10,8 +11,10 @@ import {
   CargoUnloadListButton,
   CargoWarehouseTidyButton,
 } from '@/features/logistics/CargoUnloadListDialog'
+import { CargoWarehouseSlotDialog } from '@/features/logistics/CargoWarehouseSlotDialog'
 import { formatCargoInboundTitle } from '@/features/logistics/cargo-inbound-title'
 import type { CargoInboundLineDraft } from '@/lib/cargo/inbound'
+import type { CargoLineListValues } from '@/lib/cargo/line-list'
 import { formatNumber } from '@/lib/utils'
 
 export type CargoInboundDetailItem = {
@@ -28,6 +31,7 @@ export type CargoInboundDetailItem = {
   shippedAt: string
   scheduledInboundAt: string | null
   portContactNote: string | null
+  tidySavedAt: string | null
   lines: CargoInboundLineDraft[]
 }
 
@@ -38,7 +42,11 @@ type CargoInboundDetailPanelProps = {
   onSaveRequestNotes: (
     notes: Array<{ lineId: string; requestNote: string }>,
   ) => Promise<void>
-  onComplete: () => Promise<void>
+  onSaveTidyRows: (rows: readonly CargoLineListValues[]) => Promise<void>
+  onSaveTidySlots: (
+    slots: readonly CargoInboundTidySlotInput[],
+    complete: boolean,
+  ) => Promise<void>
 }
 
 function formatDate(value: string | null) {
@@ -57,7 +65,8 @@ export function CargoInboundDetailPanel({
   onBack,
   onSaveInboundDate,
   onSaveRequestNotes,
-  onComplete,
+  onSaveTidyRows,
+  onSaveTidySlots,
 }: CargoInboundDetailPanelProps) {
   const title = formatCargoInboundTitle(item.shippedAt, item.boxCount)
   const [inboundDate, setInboundDate] = useState(
@@ -66,8 +75,8 @@ export function CargoInboundDetailPanel({
   const [note, setNote] = useState(item.portContactNote ?? '')
   const [status, setStatus] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
-  const [completing, setCompleting] = useState(false)
   const [requestOpen, setRequestOpen] = useState(false)
+  const [slotOpen, setSlotOpen] = useState(false)
 
   async function saveInboundDate() {
     setSaving(true)
@@ -88,22 +97,15 @@ export function CargoInboundDetailPanel({
     }
   }
 
-  async function completeShipment() {
-    setCompleting(true)
-    setStatus(null)
-    try {
-      await onComplete()
-    } catch (error) {
-      console.warn('[cargo-inbound] 완료 처리 실패', {
-        shipmentId: item.id,
-        error,
-      })
+  function openSlotEntry() {
+    if (!item.tidySavedAt) {
       setStatus(
-        error instanceof Error ? error.message : '완료 처리에 실패했습니다.',
+        '창고정리용을 먼저 인쇄하세요. 인쇄할 때 목록이 저장됩니다.',
       )
-    } finally {
-      setCompleting(false)
+      return
     }
+    setStatus(null)
+    setSlotOpen(true)
   }
 
   return (
@@ -139,6 +141,13 @@ export function CargoInboundDetailPanel({
                 brandName={item.brandName}
                 shippedAt={item.shippedAt}
                 lines={item.lines}
+                shipmentId={item.id}
+                stage={item.stage}
+                tidySavedAt={item.tidySavedAt}
+                onSaveRows={async (rows) => {
+                  await onSaveTidyRows(rows)
+                  setStatus(null)
+                }}
               />
             </div>
           ) : null}
@@ -182,15 +191,11 @@ export function CargoInboundDetailPanel({
             <Button
               type="button"
               size="sm"
-              disabled={item.stage !== 'scheduled' || completing}
-              onClick={() => void completeShipment()}
+              disabled={item.stage !== 'scheduled'}
+              onClick={openSlotEntry}
             >
               <CheckCircle2 className="size-3.5" />
-              {item.stage === 'done'
-                ? '완료됨'
-                : completing
-                  ? '완료 중...'
-                  : '완료'}
+              {item.stage === 'done' ? '완료됨' : '완료'}
             </Button>
           </div>
         </div>
@@ -294,6 +299,16 @@ export function CargoInboundDetailPanel({
           lines={item.lines}
           onClose={() => setRequestOpen(false)}
           onSave={onSaveRequestNotes}
+        />
+      ) : null}
+      {slotOpen ? (
+        <CargoWarehouseSlotDialog
+          title={title}
+          brandId={item.brandId}
+          brandName={item.brandName}
+          shipmentId={item.id}
+          onClose={() => setSlotOpen(false)}
+          onSave={onSaveTidySlots}
         />
       ) : null}
     </div>

@@ -6,6 +6,7 @@ import {
   Loader2,
   Package,
   Printer,
+  RefreshCw,
   Warehouse,
   X,
 } from 'lucide-react'
@@ -13,17 +14,32 @@ import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
 import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { CARGO_LINE_LIST_COLUMNS } from '@/features/logistics/cargo-line-list-columns'
+import type { CargoLineListColumnKey } from '@/features/logistics/cargo-line-list-columns'
 import {
   getActiveWarehouseInventorySet,
+  getCargoInboundTidyRows,
   getWarehouseStockPositions,
+  type CargoInboundTidyRow,
 } from '@/lib/api'
-import type { CargoInboundLineDraft } from '@/lib/cargo/inbound'
+import type {
+  CargoInboundLineDraft,
+  CargoInboundStage,
+} from '@/lib/cargo/inbound'
 import {
   cargoLineHasContent,
   formatCargoWarehouseNote,
   parseUnloadBoxCount,
+  queueUnloadSplitRows,
   splitUnloadStackRows,
 } from '@/lib/cargo/inbound'
+import {
+  formatCargoLineListCells,
+  parseCargoLineListInteger,
+  storedRowToCargoLineListValues,
+  type CargoLineListCells,
+  type CargoLineListValues,
+} from '@/lib/cargo/line-list'
 import {
   assignUnloadStowLabels,
   compareUnloadStowLabel,
@@ -48,7 +64,17 @@ type CargoUnloadListDialogProps = {
   shippedAt: string
   lines: CargoInboundLineDraft[]
   purpose?: CargoLineListPurpose
+  shipmentId?: string
+  stage?: CargoInboundStage
+  tidySavedAt?: string | null
+  onSaveRows?: (rows: readonly CargoLineListValues[]) => Promise<void>
   onClose: () => void
+}
+
+type CargoListDisplayRow = {
+  key: string
+  values: CargoLineListValues
+  cells: CargoLineListCells
 }
 
 type PrintOrientation = 'auto' | 'portrait' | 'landscape'
@@ -78,21 +104,21 @@ const PURPOSE_COPY = {
   },
 } as const
 
-const UNLOAD_COLUMNS = [
-  { key: 'no', label: 'NO', widthClass: 'w-12', align: 'center', printWidth: '4%' },
-  { key: 'name', label: '품명', widthClass: 'w-56', align: 'left', printWidth: '18%' },
-  { key: 'photo', label: '사진', widthClass: 'w-16', align: 'center', printWidth: '6%' },
-  { key: 'styleNo', label: '모델명', widthClass: 'w-24', align: 'center', printWidth: '9%' },
-  { key: 'qty', label: '총수량', widthClass: 'w-20', align: 'center', printWidth: '6%' },
-  { key: 'perBox', label: '박스당', widthClass: 'w-16', align: 'center', printWidth: '5%' },
-  { key: 'boxes', label: '박스수', widthClass: 'w-16', align: 'center', printWidth: '5%' },
-  { key: 'stow', label: '적재방식', widthClass: 'w-20', align: 'center', printWidth: '8%' },
-  { key: 'slot', label: '창고자리', widthClass: 'w-20', align: 'center', printWidth: '6%' },
-  { key: 'note', label: '비고', widthClass: 'w-24', align: 'left', printWidth: '8%' },
-  { key: 'shippedAt', label: '선적일', widthClass: 'w-20', align: 'center', printWidth: '6%' },
-  { key: 'latestSlot', label: '최신자리', widthClass: 'w-24', align: 'center', printWidth: '10%' },
-  { key: 'latestBoxes', label: '최신박스수', widthClass: 'w-20', align: 'center', printWidth: '9%' },
-] as const
+function formatTidySavedAt(value: string) {
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('ko-KR', {
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date)
+}
+
+function listCell(row: CargoListDisplayRow, key: CargoLineListColumnKey) {
+  if (key === 'photo') return ''
+  return row.cells[key]
+}
 
 function applyUnloadPrintMode(
   landscape: boolean,
@@ -223,7 +249,7 @@ function safeExcelFileName(value: string) {
   return safe || '화물입고'
 }
 
-function UnloadPhoto({
+export function CargoLinePhoto({
   styleNo,
   name,
   size = 36,
@@ -252,11 +278,21 @@ export function CargoUnloadListDialog({
   shippedAt,
   lines,
   purpose = 'unload',
+  shipmentId = '',
+  stage,
+  tidySavedAt = null,
+  onSaveRows,
   onClose,
 }: CargoUnloadListDialogProps) {
   const copy = PURPOSE_COPY[purpose]
   useRenderWatch(copy.watchName)
   const [openedAt] = useState(() => Date.now())
+  const [listSource, setListSource] = useState<'saved' | 'live'>(() =>
+    purpose === 'warehouse' && tidySavedAt ? 'saved' : 'live',
+  )
+  const [listPersisted, setListPersisted] = useState(false)
+  const [savingList, setSavingList] = useState(false)
+  const [listError, setListError] = useState<string | null>(null)
   const [printOrientation, setPrintOrientation] =
     useState<PrintOrientation>('auto')
   const [downloadingExcel, setDownloadingExcel] = useState(false)
@@ -275,6 +311,13 @@ export function CargoUnloadListDialog({
     }
   }, [copy.printClass, copy.printStyleId])
 
+  const savedQuery = useQuery({
+    queryKey: ['cargo-inbound-tidy', brandId, shipmentId],
+    queryFn: () => getCargoInboundTidyRows(brandId, shipmentId),
+    enabled:
+      purpose === 'warehouse' && Boolean(brandId && shipmentId && tidySavedAt),
+  })
+  const savedData = savedQuery.data ?? emptyList<CargoInboundTidyRow>()
   const stockQuery = useQuery({
     queryKey: [copy.queryKey, brandId, openedAt],
     queryFn: async (): Promise<WarehouseStockPosition[]> => {
@@ -282,61 +325,73 @@ export function CargoUnloadListDialog({
       if (!activeSet) return []
       return getWarehouseStockPositions(brandId, activeSet.id)
     },
-    enabled: Boolean(brandId),
+    enabled: listSource === 'live' && Boolean(brandId),
   })
   const positions = stockQuery.data ?? emptyList<WarehouseStockPosition>()
-  const loading = Boolean(brandId) && stockQuery.isLoading
+  const loading =
+    listSource === 'saved'
+      ? savedQuery.isLoading
+      : Boolean(brandId) && stockQuery.isLoading
+  const savedSlotCount = useMemo(
+    () => savedData.filter((row) => row.warehouseSlot.trim()).length,
+    [savedData],
+  )
 
   const productCount = useMemo(
     () => lines.filter(cargoLineHasContent).length,
     [lines],
   )
-  const rows = useMemo(() => {
-    const built = lines.filter(cargoLineHasContent).flatMap((line, index) => {
-      const styleNo = line.styleNo.trim()
-      const stock = resolveLatestReceivedStockByStyle(positions, styleNo)
-      const incomingBoxes = parseUnloadBoxCount(line.boxes)
-      const latestBoxes = stock.found ? stock.totalBoxes : 0
-      const latestSlot = stock.found ? stock.locationLabel ?? '' : ''
-      const parts = splitUnloadStackRows(incomingBoxes, latestBoxes)
-      return parts.map((part, partIndex) => {
-        const first = partIndex === 0
-        const boxSum = part.incomingBoxes + part.latestBoxes
-        return {
-          key: `${styleNo || line.name || 'line'}-${index}-${partIndex}`,
-          no: line.no.trim() || String(index + 1),
-          name: line.name.trim(),
-          styleNo,
-          qty: first ? line.qty.trim() : '',
-          perBox: line.perBox.trim(),
-          boxes: part.incomingBoxes > 0 ? formatNumber(part.incomingBoxes) : '',
-          note:
-            purpose === 'warehouse'
-              ? formatCargoWarehouseNote(line.note, line.requestNote)
-              : first
-                ? line.note.trim()
+  const liveRows = useMemo(() => {
+    const splitGroups = lines
+      .filter(cargoLineHasContent)
+      .map((line, index) => {
+        const styleNo = line.styleNo.trim()
+        const stock = resolveLatestReceivedStockByStyle(positions, styleNo)
+        const incomingBoxes = parseUnloadBoxCount(line.boxes)
+        const latestBoxes = stock.found ? stock.totalBoxes : 0
+        const latestSlot = stock.found ? stock.locationLabel ?? '' : ''
+        const parts = splitUnloadStackRows(incomingBoxes, latestBoxes)
+        const latestFull =
+          incomingBoxes > 0 && parts[0]?.incomingBoxes === 0
+        return parts.map((part, partIndex) => {
+          if (latestFull && partIndex === 0) return null
+          const first = partIndex === 0
+          const firstVisible = latestFull ? partIndex === 1 : partIndex === 0
+          const boxSum = part.incomingBoxes + part.latestBoxes
+          return {
+            key: `${styleNo || line.name || 'line'}-${index}-${partIndex}`,
+            lineId: line.id,
+            partIndex,
+            no: line.no.trim() || String(index + 1),
+            name: line.name.trim(),
+            styleNo,
+            quantity: parseCargoLineListInteger(line.qty),
+            unitsPerBox: parseCargoLineListInteger(line.perBox),
+            boxCount: part.incomingBoxes > 0 ? part.incomingBoxes : null,
+            note:
+              purpose === 'warehouse'
+                ? formatCargoWarehouseNote(line.note, line.requestNote)
+                : firstVisible
+                  ? line.note.trim()
+                  : '',
+            shippedAt:
+              purpose === 'warehouse'
+                ? resolveWarehouseTidyShippedOn({
+                    shippedAt,
+                    boxSum,
+                    partIndex,
+                    partCount: parts.length,
+                  })
                 : '',
-          stow: '',
-          slot: '',
-          shippedAt:
-            purpose === 'warehouse'
-              ? resolveWarehouseTidyShippedOn({
-                  shippedAt,
-                  boxSum,
-                  partIndex,
-                  partCount: parts.length,
-                })
-              : '',
-          latestSlot: first ? latestSlot.trim() || 'NEW' : '+NEW',
-          latestBoxes:
-            first && part.latestBoxes > 0
-              ? formatNumber(part.latestBoxes)
-              : '',
-          incomingBoxes: part.incomingBoxes,
-          boxSum,
-        }
+            latestSlot: first ? latestSlot.trim() || 'NEW' : '+NEW',
+            latestBoxCount:
+              first && part.latestBoxes > 0 ? part.latestBoxes : null,
+            incomingBoxes: part.incomingBoxes,
+            boxSum,
+          }
+        })
       })
-    })
+    const built = queueUnloadSplitRows(splitGroups).map((row) => row.value)
     const stowByKey = assignUnloadStowLabels(
       built.map((row) => ({
         key: row.key,
@@ -346,18 +401,50 @@ export function CargoUnloadListDialog({
       })),
     )
     return built
-      .map((row) => ({
-        ...row,
-        stow: stowByKey.get(row.key) ?? '',
-      }))
+      .map((row) => {
+        const values: CargoLineListValues = {
+          lineId: row.lineId,
+          partIndex: row.partIndex,
+          no: row.no,
+          name: row.name,
+          styleNo: row.styleNo,
+          quantity: row.quantity,
+          unitsPerBox: row.unitsPerBox,
+          boxCount: row.boxCount,
+          stow: stowByKey.get(row.key) ?? '',
+          note: row.note,
+          shippedAt: row.shippedAt,
+          latestSlot: row.latestSlot,
+          latestBoxCount: row.latestBoxCount,
+          warehouseSlot: '',
+        }
+        return {
+          key: row.key,
+          values,
+          cells: formatCargoLineListCells(values),
+        }
+      })
       .sort((left, right) => {
         if (purpose === 'warehouse') {
-          const byStow = compareUnloadStowLabel(left.stow, right.stow)
+          const byStow = compareUnloadStowLabel(left.cells.stow, right.cells.stow)
           if (byStow !== 0) return byStow
         }
-        return compareUnloadStyleNo(left.styleNo, right.styleNo)
+        return compareUnloadStyleNo(left.cells.styleNo, right.cells.styleNo)
       })
   }, [lines, positions, purpose, shippedAt])
+  const savedRows = useMemo(
+    () =>
+      savedData.map((row) => {
+        const values = storedRowToCargoLineListValues(row)
+        return {
+          key: row.id,
+          values,
+          cells: formatCargoLineListCells(values),
+        }
+      }),
+    [savedData],
+  )
+  const rows = listSource === 'saved' ? savedRows : liveRows
   const printLandscape =
     printOrientation === 'landscape' || printOrientation === 'auto'
   const printOrientationLabel = printLandscape ? '가로' : '세로'
@@ -381,8 +468,59 @@ export function CargoUnloadListDialog({
     setUncheckedKeys(checked ? new Set() : new Set(rows.map((row) => row.key)))
   }
 
-  function handlePrint() {
-    if (loading || printRows.length === 0) return
+  function showCurrentStock() {
+    setListSource('live')
+    setListPersisted(false)
+    setUncheckedKeys(new Set())
+    setListError(null)
+  }
+
+  async function ensureWarehouseListSaved() {
+    if (
+      purpose !== 'warehouse' ||
+      stage !== 'scheduled' ||
+      listSource !== 'live' ||
+      listPersisted
+    ) {
+      return true
+    }
+    if (!onSaveRows) {
+      setListError('목록을 저장할 수 없습니다.')
+      return false
+    }
+    if (tidySavedAt) {
+      const message =
+        savedSlotCount > 0
+          ? `저장된 목록을 바꿉니다. 입력한 창고자리 ${savedSlotCount}개도 지워집니다.`
+          : '저장된 목록을 현재 재고 목록으로 바꿉니다.'
+      if (!window.confirm(message)) return false
+    }
+    setSavingList(true)
+    setListError(null)
+    try {
+      await onSaveRows(rows.map((row) => row.values))
+      setListPersisted(true)
+      return true
+    } catch (error) {
+      console.warn('[cargo-inbound] 창고정리용 목록 저장 실패', {
+        shipmentId,
+        error,
+      })
+      setListError(
+        error instanceof Error
+          ? error.message
+          : '창고정리용 목록을 저장하지 못했습니다.',
+      )
+      return false
+    } finally {
+      setSavingList(false)
+    }
+  }
+
+  async function handlePrint() {
+    if (loading || savingList || printRows.length === 0) return
+    const saved = await ensureWarehouseListSaved()
+    if (!saved) return
     applyUnloadPrintMode(
       printLandscape,
       copy.printClass,
@@ -395,22 +533,24 @@ export function CargoUnloadListDialog({
   }
 
   async function handleDownloadExcel() {
-    if (loading || downloadingExcel || printRows.length === 0) return
+    if (loading || downloadingExcel || savingList || printRows.length === 0) return
+    const saved = await ensureWarehouseListSaved()
+    if (!saved) return
     setDownloadingExcel(true)
     setExcelError(null)
     try {
       const XLSX = await import('xlsx')
-      const headers = UNLOAD_COLUMNS.map((column) =>
+      const headers = CARGO_LINE_LIST_COLUMNS.map((column) =>
         column.key === 'photo' ? '사진 URL' : column.label,
       )
       const body = printRows.map((row) =>
-        UNLOAD_COLUMNS.map((column) => {
+        CARGO_LINE_LIST_COLUMNS.map((column) => {
           if (column.key === 'photo') {
             return (
-              ruleImageUrls(row.styleNo, LOGISTICS_IMAGE_KEY)[0] ?? ''
+              ruleImageUrls(row.cells.styleNo, LOGISTICS_IMAGE_KEY)[0] ?? ''
             )
           }
-          return row[column.key]
+          return listCell(row, column.key)
         }),
       )
       const sheet = XLSX.utils.aoa_to_sheet([headers, ...body])
@@ -485,6 +625,10 @@ export function CargoUnloadListDialog({
               <p className="mt-0.5 text-xs text-muted-foreground">
                 박스 합 9~16은 A(1종류), 5~8은 C(2종류), 그 이하는 B(4종류)로
                 적재합니다. 박스수가 비면 섞여 온 것이라 적재방식은 비웁니다.
+                최신자리가 이미 16박스면 바로 +NEW로 보냅니다.
+                {listSource === 'saved'
+                  ? ' 이 목록은 인쇄할 때 저장한 내용입니다.'
+                  : ''}
               </p>
             </div>
             <Button type="button" size="icon" variant="ghost" onClick={onClose}>
@@ -502,10 +646,32 @@ export function CargoUnloadListDialog({
               <Badge variant={printRows.length > 0 ? 'outline' : 'muted'}>
                 인쇄 {formatNumber(printRows.length)}행
               </Badge>
-              {stockQuery.isError ? (
+              {listSource === 'saved' && tidySavedAt ? (
+                <Badge variant="outline">
+                  저장된 목록 · {formatTidySavedAt(tidySavedAt)}
+                </Badge>
+              ) : null}
+              {listPersisted ? (
+                <Badge variant="success">이 목록을 저장했습니다</Badge>
+              ) : null}
+              {purpose === 'warehouse' &&
+              stage === 'scheduled' &&
+              listSource === 'live' &&
+              !listPersisted ? (
+                <Badge variant="warning">인쇄하면 이 목록이 저장됩니다</Badge>
+              ) : null}
+              {listSource === 'live' && stockQuery.isError ? (
                 <span className="text-xs text-danger">
                   최신 자리를 불러오지 못했습니다.
                 </span>
+              ) : null}
+              {listSource === 'saved' && savedQuery.isError ? (
+                <span className="text-xs text-danger">
+                  저장된 목록을 불러오지 못했습니다.
+                </span>
+              ) : null}
+              {listError ? (
+                <span className="text-xs text-danger">{listError}</span>
               ) : null}
               {excelError ? (
                 <span className="text-xs text-danger">{excelError}</span>
@@ -531,15 +697,34 @@ export function CargoUnloadListDialog({
                 <option value="portrait">세로</option>
                 <option value="landscape">가로</option>
               </select>
+              {purpose === 'warehouse' &&
+              stage === 'scheduled' &&
+              tidySavedAt &&
+              listSource === 'saved' ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!savedQuery.isSuccess}
+                  onClick={showCurrentStock}
+                >
+                  <RefreshCw className="size-3.5" />
+                  현재 재고로 다시 만들기
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={loading || printRows.length === 0}
-                onClick={handlePrint}
+                disabled={loading || savingList || printRows.length === 0}
+                onClick={() => void handlePrint()}
               >
-                <Printer className="size-3.5" />
-                인쇄
+                {savingList ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : (
+                  <Printer className="size-3.5" />
+                )}
+                {savingList ? '저장 중...' : '인쇄'}
               </Button>
               {purpose === 'warehouse' ? (
                 <Button
@@ -547,7 +732,10 @@ export function CargoUnloadListDialog({
                   size="sm"
                   variant="outline"
                   disabled={
-                    loading || downloadingExcel || printRows.length === 0
+                    loading ||
+                    savingList ||
+                    downloadingExcel ||
+                    printRows.length === 0
                   }
                   onClick={() => void handleDownloadExcel()}
                 >
@@ -567,18 +755,26 @@ export function CargoUnloadListDialog({
               <div className="flex min-h-[16rem] flex-col items-center justify-center gap-3 px-4 py-10">
                 <Loader2 className="size-8 animate-spin text-foreground" />
                 <p className="text-sm text-muted-foreground">
-                  최신 자리와 박스 수를 불러오는 중...
+                  {listSource === 'saved'
+                    ? '저장된 목록을 불러오는 중...'
+                    : '최신 자리와 박스 수를 불러오는 중...'}
                 </p>
               </div>
+            ) : listSource === 'saved' && savedQuery.isError ? (
+              <p className="px-4 py-10 text-center text-sm text-danger">
+                저장된 목록을 불러오지 못했습니다.
+              </p>
             ) : rows.length === 0 ? (
               <p className="px-4 py-10 text-center text-sm text-muted-foreground">
-                하차할 상품이 없습니다.
+                {listSource === 'saved'
+                  ? '저장된 창고정리용 목록이 없습니다.'
+                  : '하차할 상품이 없습니다.'}
               </p>
             ) : (
               <table className="w-full min-w-[74rem] table-fixed border-separate border-spacing-0 text-sm">
                 <colgroup>
                   <col className="w-10" />
-                  {UNLOAD_COLUMNS.map((column) => (
+                  {CARGO_LINE_LIST_COLUMNS.map((column) => (
                     <col key={column.key} className={column.widthClass} />
                   ))}
                 </colgroup>
@@ -598,7 +794,7 @@ export function CargoUnloadListDialog({
                         }
                       />
                     </th>
-                    {UNLOAD_COLUMNS.map((column) => (
+                    {CARGO_LINE_LIST_COLUMNS.map((column) => (
                       <th
                         key={column.key}
                         className={cn(
@@ -623,27 +819,27 @@ export function CargoUnloadListDialog({
                         <input
                           type="checkbox"
                           className="size-3.5 accent-primary"
-                          aria-label={`${row.no} ${row.name || row.styleNo} 인쇄 선택`}
+                          aria-label={`${row.cells.no} ${row.cells.name || row.cells.styleNo} 인쇄 선택`}
                           checked={printSelected}
                           onChange={() => togglePrintRow(row.key)}
                         />
                       </td>
-                      {UNLOAD_COLUMNS.map((column) => {
+                      {CARGO_LINE_LIST_COLUMNS.map((column) => {
                         if (column.key === 'photo') {
                           return (
                             <td
                               key={`${row.key}-photo`}
                               className="h-11 border-b border-r border-border px-0.5 align-middle last:border-r-0"
                             >
-                              <UnloadPhoto
-                                styleNo={row.styleNo}
-                                name={row.name}
+                              <CargoLinePhoto
+                                styleNo={row.cells.styleNo}
+                                name={row.cells.name}
                               />
                             </td>
                           )
                         }
 
-                        const value = row[column.key]
+                        const value = listCell(row, column.key)
                         const isNote = column.key === 'note'
                         return (
                           <td
@@ -696,13 +892,13 @@ export function CargoUnloadListDialog({
           </p>
           <table>
             <colgroup>
-              {UNLOAD_COLUMNS.map((column) => (
+              {CARGO_LINE_LIST_COLUMNS.map((column) => (
                 <col key={`print-col-${column.key}`} style={{ width: column.printWidth }} />
               ))}
             </colgroup>
             <thead>
               <tr>
-                {UNLOAD_COLUMNS.map((column) => (
+                {CARGO_LINE_LIST_COLUMNS.map((column) => (
                   <th key={`print-h-${column.key}`}>{column.label}</th>
                 ))}
               </tr>
@@ -710,14 +906,14 @@ export function CargoUnloadListDialog({
             <tbody key={printRows.map((row) => row.key).join('|')}>
               {printRows.map((row) => (
                 <tr key={`print-${row.key}`}>
-                  {UNLOAD_COLUMNS.map((column) => {
+                  {CARGO_LINE_LIST_COLUMNS.map((column) => {
                     if (column.key === 'photo') {
                       return (
                         <td key={`print-${row.key}-photo`} className="photo">
-                          {row.styleNo ? (
-                            <UnloadPhoto
-                              styleNo={row.styleNo}
-                              name={row.name}
+                          {row.cells.styleNo ? (
+                            <CargoLinePhoto
+                              styleNo={row.cells.styleNo}
+                              name={row.cells.name}
                               size={printLandscape ? 20 : 16}
                             />
                           ) : (
@@ -737,7 +933,7 @@ export function CargoUnloadListDialog({
                             : undefined
                         }
                       >
-                        {row[column.key]}
+                        {listCell(row, column.key)}
                       </td>
                     )
                   })}
@@ -759,6 +955,10 @@ function CargoLineListButton({
   shippedAt,
   lines,
   purpose,
+  shipmentId,
+  stage,
+  tidySavedAt,
+  onSaveRows,
 }: {
   title: string
   brandId: string
@@ -766,6 +966,10 @@ function CargoLineListButton({
   shippedAt: string
   lines: CargoInboundLineDraft[]
   purpose: CargoLineListPurpose
+  shipmentId?: string
+  stage?: CargoInboundStage
+  tidySavedAt?: string | null
+  onSaveRows?: (rows: readonly CargoLineListValues[]) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
   const copy = PURPOSE_COPY[purpose]
@@ -789,6 +993,10 @@ function CargoLineListButton({
           shippedAt={shippedAt}
           lines={lines}
           purpose={purpose}
+          shipmentId={shipmentId}
+          stage={stage}
+          tidySavedAt={tidySavedAt}
+          onSaveRows={onSaveRows}
           onClose={() => setOpen(false)}
         />
       ) : null}
@@ -827,12 +1035,20 @@ export function CargoWarehouseTidyButton({
   brandName,
   shippedAt,
   lines,
+  shipmentId,
+  stage,
+  tidySavedAt,
+  onSaveRows,
 }: {
   title: string
   brandId: string
   brandName: string
   shippedAt: string
   lines: CargoInboundLineDraft[]
+  shipmentId: string
+  stage: CargoInboundStage
+  tidySavedAt: string | null
+  onSaveRows?: (rows: readonly CargoLineListValues[]) => Promise<void>
 }) {
   return (
     <CargoLineListButton
@@ -842,6 +1058,10 @@ export function CargoWarehouseTidyButton({
       shippedAt={shippedAt}
       lines={lines}
       purpose="warehouse"
+      shipmentId={shipmentId}
+      stage={stage}
+      tidySavedAt={tidySavedAt}
+      onSaveRows={onSaveRows}
     />
   )
 }

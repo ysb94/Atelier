@@ -54,7 +54,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 송장 기준정보 포장 규격 간단값(`invoice_packing_size_maps`) | Supabase |
 | 송장 피킹표 동선 사전(`invoice_picking_route_presets`) | Supabase |
 | 연습 창고 세트·자리·미식별 재고·박스 ID·이력·출고 자리 등록(`warehouses` + `warehouse_locations` + `warehouse_inventory_sets` + `warehouse_stock_positions` + `warehouse_boxes` + `warehouse_stock_movements` + `warehouse_box_movements` + `warehouse_registered_slots`) | Supabase |
-| 화문 선적 화물·SKU별 입고 명세(`cargo_inbound_shipments` + `cargo_inbound_lines`) | Supabase |
+| 화문 선적 화물·SKU별 입고 명세·창고정리용 인쇄본(`cargo_inbound_shipments` + `cargo_inbound_lines` + `cargo_inbound_tidy_rows`) | Supabase |
 | 송장 사은품 증정 요청 건(`invoice_prefix_requests` + `invoice_prefix_items` + `invoice_prefix_item_products`, 앱 모델명 Gift) | Supabase |
 | 송장 사은품 선착순 한도·배정 원장(`invoice_prefix_requests` 한도 필드 + `invoice_gift_quotas` + `invoice_gift_allocations`) | Supabase |
 | 송장 사은품 원본행 치환 매핑(`invoice_gift_source_maps` + `invoice_gift_source_map_products` + `invoice_gift_source_allocations`) | Supabase |
@@ -94,6 +94,13 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `complete_warehouse_box_outbound`,
   `search_warehouse_finder_rows`, `list_warehouse_finder_inbounds`.
   화문 입고 원자 등록은 `save_cargo_inbound`를 사용한다.
+  창고정리용 인쇄본 저장은 `save_cargo_inbound_tidy_rows`, 창고자리 저장과
+  완료는 `save_cargo_inbound_tidy_slots`를 사용한다.
+  창고정리용 목록은 첫 인쇄 또는 엑셀 다운로드 내용 그대로 `cargo_inbound_tidy_rows`에
+  고정한다. 다시 열거나 다시 인쇄해도 그 목록을 쓰고, 바꿀 때는 현재 재고로 다시
+  만들어 저장본을 교체한다. 저장본이 없으면 완료할 수 없다. 창고 재고는 바꾸지
+  않는다. 추가 직전 스냅샷은
+  `docs/backups/cargo-inbound-pre-tidy-rows-20260929.xlsx`다.
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
 - 브랜드 로고는 지금 `logo_url`에 data URL로 저장한다. 이후 `brands/{brand_id}/...`
   Storage 경로로 옮긴다.

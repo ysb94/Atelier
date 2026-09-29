@@ -1,4 +1,4 @@
-import { normalizeStyleNo } from '@/lib/import/transform'
+import { normalizeStyleNo } from '../import/transform'
 
 export type UnloadStowKind = 'A' | 'B' | 'C'
 
@@ -63,56 +63,47 @@ export function compareUnloadStowLabel(left: string, right: string) {
 
 /**
  * A는 파렛트당 1종류(A1, A2).
- * C는 합이 비슷한 것끼리 2종류(C1 C1, C2 C2). 짝이 없으면 B.
+ * C는 현재 행 순서대로 2종류(C1 C1, C2 C2). 하나 남아도 C를 유지한다.
  * B는 파렛트당 4종류(1B1~1B4, 2B1…).
+ *
+ * Google Sheets `markSequenceInAB_Mixed_ABC_Sorted_ClearAJ`와 동일하게
+ * 번호를 먼저 붙이고, 화면 정렬은 호출부에서 나중에 한다.
  */
 export function assignUnloadStowLabels(
   rows: UnloadStowInput[],
 ): Map<string, string> {
   const labels = new Map<string, string>()
-  const aRows: UnloadStowInput[] = []
-  const cRows: UnloadStowInput[] = []
-  const bRows: UnloadStowInput[] = []
+  let countA = 1
+  let groupB = 1
+  let subCountB = 1
+  let countC = 1
+  let repeatC = 0
 
   for (const row of rows) {
     // 박스수가 없으면 다른 박스에 섞여 온 것이라 여기서 적재방식을 정하지 않는다.
     if (row.incomingBoxes <= 0) continue
     const kind = classifyUnloadStowKind(row.boxSum)
-    if (kind === 'A') aRows.push(row)
-    else if (kind === 'C') cRows.push(row)
-    else bRows.push(row)
-  }
-
-  aRows.sort((left, right) => compareUnloadStyleNo(left.styleNo, right.styleNo))
-  aRows.forEach((row, index) => {
-    labels.set(row.key, `A${index + 1}`)
-  })
-
-  cRows.sort((left, right) => {
-    if (left.boxSum !== right.boxSum) return left.boxSum - right.boxSum
-    return compareUnloadStyleNo(left.styleNo, right.styleNo)
-  })
-  let cPallet = 1
-  for (let index = 0; index < cRows.length; ) {
-    const first = cRows[index]
-    const second = cRows[index + 1]
-    if (first && second) {
-      labels.set(first.key, `C${cPallet}`)
-      labels.set(second.key, `C${cPallet}`)
-      cPallet += 1
-      index += 2
+    if (kind === 'A') {
+      labels.set(row.key, `A${countA}`)
+      countA += 1
       continue
     }
-    if (first) bRows.push(first)
-    break
+    if (kind === 'C') {
+      labels.set(row.key, `C${countC}`)
+      repeatC += 1
+      if (repeatC >= 2) {
+        countC += 1
+        repeatC = 0
+      }
+      continue
+    }
+    labels.set(row.key, `${groupB}B${subCountB}`)
+    subCountB += 1
+    if (subCountB > 4) {
+      subCountB = 1
+      groupB += 1
+    }
   }
-
-  bRows.sort((left, right) => compareUnloadStyleNo(left.styleNo, right.styleNo))
-  bRows.forEach((row, index) => {
-    const pallet = Math.floor(index / 4) + 1
-    const slot = (index % 4) + 1
-    labels.set(row.key, `${pallet}B${slot}`)
-  })
 
   return labels
 }

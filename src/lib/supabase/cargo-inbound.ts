@@ -2,6 +2,7 @@ import type {
   CargoInboundLineDraft,
   CargoInboundStage,
 } from '@/lib/cargo/inbound'
+import type { CargoLineListValues } from '@/lib/cargo/line-list'
 import {
   cargoLineHasContent,
   parseCargoInteger,
@@ -10,7 +11,10 @@ import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage } from '@/lib/supabase/map-error'
 
 const SHIPMENT_COLUMNS =
-  'id, brand_id, shipment_no, stage, shipped_on, scheduled_inbound_on, port_contact_note, vessel_name, origin_port, warehouse_summary, completed_at, created_at, updated_at, cargo_inbound_lines(id, source_row_no, item_no, product_name, source_style_no, quantity, units_per_box, box_count, photo_ref, note, request_note)'
+  'id, brand_id, shipment_no, stage, shipped_on, scheduled_inbound_on, port_contact_note, vessel_name, origin_port, warehouse_summary, tidy_saved_at, completed_at, created_at, updated_at, cargo_inbound_lines(id, source_row_no, item_no, product_name, source_style_no, quantity, units_per_box, box_count, photo_ref, note, request_note)'
+
+const TIDY_ROW_COLUMNS =
+  'id, brand_id, shipment_id, line_id, row_no, part_index, item_no, product_name, style_no, quantity, units_per_box, box_count, stow_label, note, shipped_code, latest_slot, latest_box_count, warehouse_slot'
 
 type CargoInboundLineRow = {
   id: string
@@ -37,6 +41,7 @@ type CargoInboundShipmentRow = {
   vessel_name: string
   origin_port: string
   warehouse_summary: string
+  tidy_saved_at: string | null
   completed_at: string | null
   created_at: string
   updated_at: string
@@ -54,6 +59,7 @@ export type CargoInboundShipment = {
   vesselName: string
   originPort: string
   warehouseSummary: string
+  tidySavedAt: string | null
   completedAt: string | null
   createdAt: string
   updatedAt: string
@@ -104,6 +110,7 @@ function toShipment(row: CargoInboundShipmentRow): CargoInboundShipment {
     vesselName: row.vessel_name,
     originPort: row.origin_port,
     warehouseSummary: row.warehouse_summary,
+    tidySavedAt: row.tidy_saved_at,
     completedAt: row.completed_at,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -212,29 +219,164 @@ export async function scheduleCargoInbound(
   }
 }
 
-export async function completeCargoInbound(
+export type CargoInboundTidyRow = {
+  id: string
+  brandId: string
+  shipmentId: string
+  lineId: string | null
+  rowNo: number
+  partIndex: number
+  no: string
+  name: string
+  styleNo: string
+  quantity: number | null
+  unitsPerBox: number | null
+  boxCount: number | null
+  stow: string
+  note: string
+  shippedAt: string
+  latestSlot: string
+  latestBoxCount: number | null
+  warehouseSlot: string
+}
+
+export type CargoInboundTidySlotInput = {
+  id: string
+  warehouseSlot: string
+}
+
+type CargoInboundTidyRowRecord = {
+  id: string
+  brand_id: string
+  shipment_id: string
+  line_id: string | null
+  row_no: number
+  part_index: number
+  item_no: string
+  product_name: string
+  style_no: string
+  quantity: number | null
+  units_per_box: number | null
+  box_count: number | null
+  stow_label: string
+  note: string
+  shipped_code: string
+  latest_slot: string
+  latest_box_count: number | null
+  warehouse_slot: string
+}
+
+function toTidyRow(row: CargoInboundTidyRowRecord): CargoInboundTidyRow {
+  return {
+    id: row.id,
+    brandId: row.brand_id,
+    shipmentId: row.shipment_id,
+    lineId: row.line_id,
+    rowNo: row.row_no,
+    partIndex: row.part_index,
+    no: row.item_no,
+    name: row.product_name,
+    styleNo: row.style_no,
+    quantity: row.quantity,
+    unitsPerBox: row.units_per_box,
+    boxCount: row.box_count,
+    stow: row.stow_label,
+    note: row.note,
+    shippedAt: row.shipped_code,
+    latestSlot: row.latest_slot,
+    latestBoxCount: row.latest_box_count,
+    warehouseSlot: row.warehouse_slot,
+  }
+}
+
+export async function listCargoInboundTidyRows(
   brandId: string,
   shipmentId: string,
-): Promise<void> {
-  if (!brandId.trim() || !shipmentId.trim()) {
-    throw new CargoInboundStoreError('완료할 화물을 확인하세요.')
-  }
+): Promise<CargoInboundTidyRow[]> {
+  if (!brandId.trim() || !shipmentId.trim()) return []
 
   const { data, error } = await getSupabase()
-    .from('cargo_inbound_shipments')
-    .update({
-      stage: 'done',
-      completed_at: new Date().toISOString(),
-    })
+    .from('cargo_inbound_tidy_rows')
+    .select(TIDY_ROW_COLUMNS)
     .eq('brand_id', brandId)
-    .eq('id', shipmentId)
-    .eq('stage', 'scheduled')
-    .select('id')
-    .maybeSingle()
+    .eq('shipment_id', shipmentId)
+    .order('row_no', { ascending: true })
 
-  if (error || !data) {
+  if (error) {
     throw new CargoInboundStoreError(
-      errorMessage(error, '화물 정리를 완료하지 못했습니다.'),
+      errorMessage(error, '창고정리용 목록을 불러오지 못했습니다.'),
+    )
+  }
+  return ((data as CargoInboundTidyRowRecord[]) ?? []).map(toTidyRow)
+}
+
+export async function saveCargoInboundTidyRows(
+  brandId: string,
+  shipmentId: string,
+  rows: readonly CargoLineListValues[],
+): Promise<string> {
+  if (!brandId.trim() || !shipmentId.trim()) {
+    throw new CargoInboundStoreError('화물을 확인하세요.')
+  }
+  if (rows.length === 0) {
+    throw new CargoInboundStoreError('저장할 창고정리용 목록이 없습니다.')
+  }
+
+  const payload = rows.map((row) => ({
+    line_id: row.lineId.trim() || null,
+    part_index: row.partIndex,
+    item_no: row.no,
+    product_name: row.name,
+    style_no: row.styleNo,
+    quantity: row.quantity,
+    units_per_box: row.unitsPerBox,
+    box_count: row.boxCount,
+    stow_label: row.stow,
+    note: row.note,
+    shipped_code: row.shippedAt,
+    latest_slot: row.latestSlot,
+    latest_box_count: row.latestBoxCount,
+  }))
+
+  const { data, error } = await getSupabase().rpc('save_cargo_inbound_tidy_rows', {
+    p_brand_id: brandId,
+    p_shipment_id: shipmentId,
+    p_rows: payload,
+  })
+
+  if (error || typeof data !== 'string') {
+    throw new CargoInboundStoreError(
+      errorMessage(error, '창고정리용 목록을 저장하지 못했습니다.'),
+    )
+  }
+  return data
+}
+
+export async function saveCargoInboundTidySlots(
+  brandId: string,
+  shipmentId: string,
+  slots: readonly CargoInboundTidySlotInput[],
+  complete: boolean,
+): Promise<void> {
+  if (!brandId.trim() || !shipmentId.trim()) {
+    throw new CargoInboundStoreError('화물을 확인하세요.')
+  }
+
+  const payload = slots.map((slot) => ({
+    id: slot.id,
+    warehouse_slot: slot.warehouseSlot,
+  }))
+
+  const { error } = await getSupabase().rpc('save_cargo_inbound_tidy_slots', {
+    p_brand_id: brandId,
+    p_shipment_id: shipmentId,
+    p_slots: payload,
+    p_complete: complete,
+  })
+
+  if (error) {
+    throw new CargoInboundStoreError(
+      errorMessage(error, '창고자리를 저장하지 못했습니다.'),
     )
   }
 }

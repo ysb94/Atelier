@@ -37,6 +37,39 @@ function isSource(
   return value === 'invoice' || value === 'bulk' || value === 'manual'
 }
 
+/** UUID를 한 요청에 많이 넣으면 주소가 길어져 API가 400을 돌려준다. */
+const ID_LOOKUP_CHUNK = 100
+const ID_LOOKUP_CONCURRENCY = 4
+
+async function selectByIds<T>(
+  ids: readonly string[],
+  fetchChunk: (chunk: readonly string[]) => Promise<T[]>,
+): Promise<T[]> {
+  const chunks: string[][] = []
+  for (let start = 0; start < ids.length; start += ID_LOOKUP_CHUNK) {
+    chunks.push(ids.slice(start, start + ID_LOOKUP_CHUNK))
+  }
+  if (chunks.length === 0) return []
+
+  const rows: T[] = []
+  let cursor = 0
+  async function worker() {
+    while (cursor < chunks.length) {
+      const chunk = chunks[cursor]
+      cursor += 1
+      if (!chunk) continue
+      rows.push(...(await fetchChunk(chunk)))
+    }
+  }
+  await Promise.all(
+    Array.from(
+      { length: Math.min(ID_LOOKUP_CONCURRENCY, chunks.length) },
+      () => worker(),
+    ),
+  )
+  return rows
+}
+
 export async function listOutboundShipments(
   brandId: string,
 ): Promise<ProductOutboundShipment[]> {
@@ -66,42 +99,38 @@ export async function listOutboundShipments(
   const styleIds = [...new Set(rows.map((row) => row.style_id))]
   const targetIds = [...new Set(rows.map((row) => row.usage_target_id))]
 
-  const [stylesResult, targetsResult] = await Promise.all([
-    getSupabase()
-      .from('styles')
-      .select('id, style_no, name')
-      .eq('brand_id', brandId)
-      .in('id', styleIds),
-    getSupabase()
-      .from('code_usage_targets')
-      .select(
-        'id, name, channel_type, site_name, outbound_partner_groups(name)',
-      )
-      .eq('brand_id', brandId)
-      .in('id', targetIds),
-  ])
-
-  if (stylesResult.error) {
-    throw new OutboundShipmentStoreError(
-      errorMessage(stylesResult.error, '출고 상품을 불러오지 못했습니다.'),
-    )
-  }
-  if (targetsResult.error) {
-    throw new OutboundShipmentStoreError(
-      errorMessage(targetsResult.error, '출고업체를 불러오지 못했습니다.'),
-    )
-  }
-
-  const styleById = new Map(
-    ((stylesResult.data as Array<{
-      id: string
-      style_no: string
-      name: string
-    }>) ?? []).map((row) => [row.id, row]),
-  )
-  const targetById = new Map(
-    ((
-      targetsResult.data as unknown as Array<{
+  const [styleRows, targetRows] = await Promise.all([
+    selectByIds(styleIds, async (chunk) => {
+      const { data, error } = await getSupabase()
+        .from('styles')
+        .select('id, style_no, name')
+        .eq('brand_id', brandId)
+        .in('id', chunk)
+      if (error) {
+        throw new OutboundShipmentStoreError(
+          errorMessage(error, '출고 상품을 불러오지 못했습니다.'),
+        )
+      }
+      return (data as Array<{
+        id: string
+        style_no: string
+        name: string
+      }>) ?? []
+    }),
+    selectByIds(targetIds, async (chunk) => {
+      const { data, error } = await getSupabase()
+        .from('code_usage_targets')
+        .select(
+          'id, name, channel_type, site_name, outbound_partner_groups(name)',
+        )
+        .eq('brand_id', brandId)
+        .in('id', chunk)
+      if (error) {
+        throw new OutboundShipmentStoreError(
+          errorMessage(error, '출고업체를 불러오지 못했습니다.'),
+        )
+      }
+      return (data as unknown as Array<{
         id: string
         name: string
         channel_type: 'unset' | 'online' | 'offline'
@@ -110,8 +139,13 @@ export async function listOutboundShipments(
           | { name: string }
           | { name: string }[]
           | null
-      }>
-    ) ?? []).map((row) => {
+      }>) ?? []
+    }),
+  ])
+
+  const styleById = new Map(styleRows.map((row) => [row.id, row]))
+  const targetById = new Map(
+    targetRows.map((row) => {
       const group = Array.isArray(row.outbound_partner_groups)
         ? row.outbound_partner_groups[0]
         : row.outbound_partner_groups
@@ -407,46 +441,47 @@ export async function listBarcodeDataEntryShipments(
   const styleIds = [...new Set(rows.map((row) => row.style_id))]
   const targetIds = [...new Set(rows.map((row) => row.usage_target_id))]
 
-  const [stylesResult, targetsResult] = await Promise.all([
-    getSupabase()
-      .from('styles')
-      .select('id, style_no, name')
-      .eq('brand_id', brandId)
-      .in('id', styleIds),
-    getSupabase()
-      .from('code_usage_targets')
-      .select('id, name, group_id, site_name')
-      .eq('brand_id', brandId)
-      .in('id', targetIds),
-  ])
-
-  if (stylesResult.error) {
-    throw new OutboundShipmentStoreError(
-      errorMessage(stylesResult.error, '출고 상품을 불러오지 못했습니다.'),
-    )
-  }
-  if (targetsResult.error) {
-    throw new OutboundShipmentStoreError(
-      errorMessage(targetsResult.error, '출고업체를 불러오지 못했습니다.'),
-    )
-  }
-
-  const styleById = new Map(
-    ((stylesResult.data as Array<{
-      id: string
-      style_no: string
-      name: string
-    }>) ?? []).map((row) => [row.id, row]),
-  )
-  const targetById = new Map(
-    ((
-      targetsResult.data as Array<{
+  const [styleRows, targetRows] = await Promise.all([
+    selectByIds(styleIds, async (chunk) => {
+      const { data, error } = await getSupabase()
+        .from('styles')
+        .select('id, style_no, name')
+        .eq('brand_id', brandId)
+        .in('id', chunk)
+      if (error) {
+        throw new OutboundShipmentStoreError(
+          errorMessage(error, '출고 상품을 불러오지 못했습니다.'),
+        )
+      }
+      return (data as Array<{
+        id: string
+        style_no: string
+        name: string
+      }>) ?? []
+    }),
+    selectByIds(targetIds, async (chunk) => {
+      const { data, error } = await getSupabase()
+        .from('code_usage_targets')
+        .select('id, name, group_id, site_name')
+        .eq('brand_id', brandId)
+        .in('id', chunk)
+      if (error) {
+        throw new OutboundShipmentStoreError(
+          errorMessage(error, '출고업체를 불러오지 못했습니다.'),
+        )
+      }
+      return (data as Array<{
         id: string
         name: string
         group_id: string | null
         site_name: string
-      }>
-    ) ?? []).map((row) => [
+      }>) ?? []
+    }),
+  ])
+
+  const styleById = new Map(styleRows.map((row) => [row.id, row]))
+  const targetById = new Map(
+    targetRows.map((row) => [
       row.id,
       outboundPartnerUnitLabel({
         name: row.name,

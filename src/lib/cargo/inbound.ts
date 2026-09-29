@@ -98,3 +98,53 @@ export function splitUnloadStackRows(
 
   return rows
 }
+
+export type UnloadSplitQueueRow<T> = {
+  value: T
+  sourceIndex: number
+  partIndex: number
+  partCount: number
+}
+
+/**
+ * Google Sheets 분할 함수처럼 원본 행은 제자리에 두고 분할된 다음 행은
+ * 목록 맨 아래에 추가한다. 추가된 행도 다시 분할되면 그 나머지는 다시
+ * 맨 아래로 간다. 그룹의 null은 순서 자리만 차지하고 결과에서는 빠진다.
+ */
+export function queueUnloadSplitRows<T>(
+  groups: ReadonlyArray<ReadonlyArray<T | null>>,
+): UnloadSplitQueueRow<T>[] {
+  type QueuedPart = {
+    value: T | null
+    sourceIndex: number
+    partIndex: number
+    partCount: number
+  }
+  const queue: QueuedPart[] = []
+  groups.forEach((group, sourceIndex) => {
+    if (group.length === 0) return
+    queue.push({
+      value: group[0] ?? null,
+      sourceIndex,
+      partIndex: 0,
+      partCount: group.length,
+    })
+  })
+
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    const current = queue[cursor]
+    const nextPartIndex = current.partIndex + 1
+    const next = groups[current.sourceIndex]?.[nextPartIndex]
+    if (next === undefined) continue
+    queue.push({
+      value: next,
+      sourceIndex: current.sourceIndex,
+      partIndex: nextPartIndex,
+      partCount: current.partCount,
+    })
+  }
+
+  return queue.filter(
+    (row): row is UnloadSplitQueueRow<T> => row.value !== null,
+  )
+}
