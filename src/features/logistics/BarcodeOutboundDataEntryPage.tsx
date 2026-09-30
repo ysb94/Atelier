@@ -248,6 +248,7 @@ export function BarcodeOutboundDataEntryPage() {
   )
   const [shippedOn, setShippedOn] = useState('')
   const [dateChosen, setDateChosen] = useState(false)
+  const [backupNotice, setBackupNotice] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [pageTab, setPageTab] = useState<PageTab>('entry')
   const [historyVisited, setHistoryVisited] = useState(false)
@@ -258,6 +259,7 @@ export function BarcodeOutboundDataEntryPage() {
     setVisibleIds(readBarcodeDataEntryVisibleIds(brand.id))
     setShippedOn('')
     setDateChosen(false)
+    setBackupNotice(null)
     setPageTab('entry')
     setHistoryVisited(false)
   }, [brand.id])
@@ -265,6 +267,7 @@ export function BarcodeOutboundDataEntryPage() {
   useEffect(() => {
     setShippedOn('')
     setDateChosen(false)
+    setBackupNotice(null)
   }, [selectedKey])
 
   const targetsQuery = useQuery({
@@ -606,9 +609,13 @@ export function BarcodeOutboundDataEntryPage() {
                       const value = event.target.value
                       setShippedOn(value)
                       setDateChosen(isIsoDate(value))
+                      setBackupNotice(null)
                     }}
                   />
                 </label>
+                {backupNotice ? (
+                  <p className="text-sm text-success">{backupNotice}</p>
+                ) : null}
                 {dateChosen && isIsoDate(shippedOn) ? (
                   <BarcodeOutboundDataEntryPanel
                     key={selectedCompany.key}
@@ -652,6 +659,12 @@ export function BarcodeOutboundDataEntryPage() {
                           (sum, entry) => sum + entry.quantity,
                           0,
                         )
+                        persistDraft([], '')
+                        setBackupNotice(
+                          `${shippedOn} 출고 ${formatNumber(entries.length)}종 · ${formatNumber(qty)}개를 저장했습니다. 다음 출고일을 고르세요.`,
+                        )
+                        setShippedOn('')
+                        setDateChosen(false)
                         return { kinds: entries.length, qty }
                       } finally {
                         setSaving(false)

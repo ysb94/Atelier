@@ -7,7 +7,7 @@ import {
   useState,
   type ClipboardEvent,
 } from 'react'
-import { Download, Upload } from 'lucide-react'
+import { Download, Upload, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
@@ -82,6 +82,7 @@ function EntryTableHead() {
         </th>
         <th className={cn(cellBorder, 'px-3 py-2.5 font-medium')}>지점명</th>
         <th className={cn(cellBorder, 'px-3 py-2.5 font-medium')}>연결 지점</th>
+        <th className={cn(cellBorder, 'w-12 px-2 py-2.5 font-medium')} />
       </tr>
     </thead>
   )
@@ -132,6 +133,7 @@ function EmptyPasteRow({
       <td className={cn(cellBorder, 'px-3 py-2 text-sm text-muted-foreground/50')}>
         {sample ? '등록 후 연결' : ''}
       </td>
+      <td className={cn(cellBorder, 'w-12 px-2 py-2')} />
     </tr>
   )
 }
@@ -140,12 +142,16 @@ const EntryTableRow = memo(function EntryTableRow({
   row,
   index,
   registered,
+  saving,
   onNameChange,
+  onRemove,
 }: {
   row: BarcodeDataEntryRow
   index: number
   registered: boolean
+  saving: boolean
   onNameChange: (index: number, value: string) => void
+  onRemove: (index: number) => void
 }) {
   const styleLinked = barcodeDataEntryStyleLinked(row)
   const siteLinked = barcodeDataEntrySiteLinked(row)
@@ -191,6 +197,24 @@ const EntryTableRow = memo(function EntryTableRow({
         ) : (
           <span className="text-danger">미연결</span>
         )}
+      </td>
+      <td className="px-2 py-2 text-right">
+        {registered ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="size-7 text-danger hover:bg-danger/10"
+            disabled={saving}
+            aria-label={`${row.productName || '이 행'} 제외`}
+            onClick={(event) => {
+              event.stopPropagation()
+              onRemove(index)
+            }}
+          >
+            <X className="size-3.5" />
+          </Button>
+        ) : null}
       </td>
     </tr>
   )
@@ -417,7 +441,7 @@ export function BarcodeOutboundDataEntryPanel({
       setStatus(
         missed === 0
           ? `${formatNumber(linked)}행 연결했습니다.`
-          : `${formatNumber(linked)}행 연결, ${formatNumber(missed)}행은 상품명을 고쳐 다시 등록하세요.`,
+          : `${formatNumber(linked)}행 연결, ${formatNumber(missed)}행은 상품명을 고쳐 다시 등록하거나 제외하세요.`,
       )
       if (barcodeDataEntryUnresolvedSites(next).length > 0) {
         setSiteDialogOpen(true)
@@ -426,6 +450,24 @@ export function BarcodeOutboundDataEntryPanel({
       setError(
         reason instanceof Error ? reason.message : 'M번호를 찾지 못했습니다.',
       )
+    }
+  }
+
+  async function handleRemoveRow(index: number) {
+    const current = draftsRef.current
+    const removed = current[index]
+    if (!removed || saving) return
+    const next = current.filter((_, rowIndex) => rowIndex !== index)
+    setError(null)
+    dirtyRef.current = true
+    setDrafts(next)
+    if (next.length === 0) setRegistered(false)
+    try {
+      await persist(next, noteRef.current)
+      const label = removed.productName.trim() || '이 행'
+      setStatus(`「${label}」 행을 제외했습니다.`)
+    } catch (reason) {
+      console.warn('[barcode-data-entry] 행 제외 저장 실패', { index, reason })
     }
   }
 
@@ -536,7 +578,7 @@ export function BarcodeOutboundDataEntryPanel({
           title={
             canBackup
               ? '출고 데이터에 저장'
-              : 'M번호와 지점을 모두 연결하면 백업할 수 있습니다.'
+              : 'M번호와 지점을 모두 연결하거나 제외하면 백업할 수 있습니다.'
           }
           onClick={() => void handleBackup()}
         >
@@ -600,7 +642,9 @@ export function BarcodeOutboundDataEntryPanel({
                         row={row}
                         index={index}
                         registered={registered}
+                        saving={saving}
                         onNameChange={handleNameChange}
+                        onRemove={handleRemoveRow}
                       />
                     ))}
               </tbody>

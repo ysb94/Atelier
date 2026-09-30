@@ -1,5 +1,11 @@
 import { useState } from 'react'
-import { ArrowLeft, CalendarDays, CheckCircle2, MessageSquareText } from 'lucide-react'
+import {
+  ArrowLeft,
+  CalendarDays,
+  CheckCircle2,
+  MessageSquareText,
+  Trash2,
+} from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -33,7 +39,9 @@ export type CargoInboundDetailItem = {
 
 type CargoInboundDetailPanelProps = {
   item: CargoInboundDetailItem
+  deleting?: boolean
   onBack: () => void
+  onDelete: () => void
   onSaveInboundDate: (inboundDate: string, note: string) => Promise<void>
   onSaveRequestNotes: (
     notes: Array<{ lineId: string; requestNote: string }>,
@@ -54,7 +62,9 @@ function formatDate(value: string | null) {
 
 export function CargoInboundDetailPanel({
   item,
+  deleting = false,
   onBack,
+  onDelete,
   onSaveInboundDate,
   onSaveRequestNotes,
   onComplete,
@@ -110,10 +120,23 @@ export function CargoInboundDetailPanel({
     <div className="space-y-4">
       <div className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <Button type="button" size="sm" variant="outline" onClick={onBack}>
-            <ArrowLeft className="size-3.5" />
-            목록으로
-          </Button>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={onBack}>
+              <ArrowLeft className="size-3.5" />
+              목록으로
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="text-danger hover:bg-danger/10"
+              disabled={deleting}
+              onClick={onDelete}
+            >
+              <Trash2 className="size-3.5" />
+              {deleting ? '삭제 중' : '삭제'}
+            </Button>
+          </div>
           {item.stage === 'scheduled' || item.stage === 'done' ? (
             <div className="flex flex-wrap gap-2">
               <CargoInspectionButton

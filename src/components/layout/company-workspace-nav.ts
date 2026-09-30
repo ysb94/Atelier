@@ -128,7 +128,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
       { to: '/data/upload', label: '일괄 업로드', icon: Upload },
       { to: '/barcodes', label: '88바코드 관리', icon: ScanBarcode },
       { to: '/sabangnet-codes', label: '사방넷 코드 관리', icon: Hash },
-      { to: '/usage-codes', label: '출고업체별 바코드', icon: Store },
+      { to: '/usage-codes', label: '업체별 코드 관리', icon: Store },
       { to: '/partner-codes', label: '거래처 코드', icon: Building2 },
     ],
   },

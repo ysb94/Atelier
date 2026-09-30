@@ -62,9 +62,14 @@ export function UsageBulkUploadPanel({
       await onApplied()
     },
     onError: (err) => {
-      setError(
-        err instanceof Error ? err.message : '일괄 등록에 실패했습니다.',
-      )
+      const message =
+        err instanceof Error ? err.message : '일괄 등록에 실패했습니다.'
+      console.warn('[usage-codes] 일괄 등록 실패', {
+        brandId,
+        usageTargetId: usageTarget.id,
+        message,
+      })
+      setError(message)
     },
   })
 

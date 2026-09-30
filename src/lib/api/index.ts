@@ -15,6 +15,7 @@ import type {
   SabangnetField,
   SabangnetFieldInput,
   CodeUsageAssignment,
+  CodeUsageAssignmentChange,
   CodeUsageAssignmentInput,
   CodeUsageStatus,
   CodeUsageTarget,
@@ -833,6 +834,11 @@ export async function completeCargoInbound(
 ) {
   await delay()
   return cargoInboundStore.completeCargoInbound(brandId, shipmentId)
+}
+
+export async function deleteCargoInbound(brandId: string, shipmentId: string) {
+  await delay()
+  return cargoInboundStore.deleteCargoInbound(brandId, shipmentId)
 }
 
 export async function searchWarehouseFinder(
@@ -2142,17 +2148,22 @@ export async function createCodeUsageAssignments(
   status: CodeUsageStatus = 'active',
 ): Promise<CodeUsageAssignment[]> {
   await delay()
-  const results: CodeUsageAssignment[] = []
-  for (const productCodeId of productCodeIds) {
-    results.push(
-      await codeUsageAssignmentStore.createCodeUsageAssignment(brandId, {
-        productCodeId,
-        usageTargetId,
-        status,
-      }),
-    )
-  }
-  return results
+  return codeUsageAssignmentStore.saveCodeUsageAssignments(
+    brandId,
+    productCodeIds.map((productCodeId) => ({
+      productCodeId,
+      usageTargetId,
+      status,
+    })),
+  )
+}
+
+export async function saveCodeUsageAssignments(
+  brandId: string,
+  changes: CodeUsageAssignmentChange[],
+): Promise<CodeUsageAssignment[]> {
+  await delay()
+  return codeUsageAssignmentStore.saveCodeUsageAssignments(brandId, changes)
 }
 
 export async function updateCodeUsageAssignmentStatus(

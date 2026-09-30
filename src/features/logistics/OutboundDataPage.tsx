@@ -3,6 +3,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
   type MouseEvent,
   type ReactNode,
@@ -21,7 +22,10 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { useBrand } from '@/components/layout/brand-context'
 import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
 import { CompanyOutboundList } from '@/features/workspace/company-operation-lists'
-import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import {
+  useWorkspaceTabActivity,
+  WorkspaceTabOverlay,
+} from '@/components/layout/workspace-tabs'
 import { Badge } from '@/components/ui/badge'
 import {
   Card,
@@ -37,8 +41,16 @@ import {
 } from '@/lib/api'
 import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import {
-  chartGroupSeriesId,
+  bucketTotalsByPeriod,
+  companySeriesId,
   groupPartnersForOutboundChart,
+  limitCompaniesWithOther,
+  niceTicks,
+  OTHER_COMPANY_KEY,
+  resolveChartSeries,
+  siteSeriesId,
+  type PartnerChartCompany,
+  type PeriodQuantity,
 } from '@/lib/outbound/partner-outbound-chart'
 import {
   buildProductOutboundSummary,
@@ -55,7 +67,6 @@ import {
   summarizeOutboundFinanceByPartner,
   type OutboundPartnerFinanceRow,
   type OutboundStyleRow,
-  type ProductOutboundPartnerTotal,
   type ProductOutboundShipment,
   type ProductOutboundSummary,
 } from '@/lib/outbound/product-outbound'
@@ -149,289 +160,158 @@ function KpiCard({
   )
 }
 
-const PARTNER_LINE_COLORS = [
-  '#0f766e',
-  '#b45309',
-  '#1d4ed8',
-  '#be123c',
-  '#15803d',
-  '#c2410c',
-  '#0e7490',
-  '#a16207',
-  '#1e3a8a',
-  '#9f1239',
-]
+const SERIES_COLORS = [
+  '#0072B2',
+  '#E69F00',
+  '#009E73',
+  '#CC79A7',
+  '#56B4E9',
+  '#D55E00',
+] as const
+const TOTAL_SERIES_ID = '__total__'
+const TOTAL_COLOR = '#171717'
+const MAX_PICKED = 6
+const AUTO_PICK_COUNT = 3
+const SITE_PREVIEW = 5
+const TREND_HEIGHT = 200
+const TREND_PAD = { top: 12, right: 28, bottom: 28, left: 44 }
 
-const TOTAL_LINE_ID = '__total__'
-const TOTAL_LINE_COLOR = '#171717'
+type PickedSeries = { id: string; color: string }
 
-function partnerLineColor(index: number) {
-  return PARTNER_LINE_COLORS[index % PARTNER_LINE_COLORS.length]!
+type TrendLine = {
+  id: string
+  label: string
+  color: string
+  quantity: number
+  values: number[]
 }
 
-function PartnerOutboundChart({
-  partners,
-  shipments,
-  dates,
-  targets,
-  folders,
-}: {
-  partners: ProductOutboundPartnerTotal[]
-  shipments: ProductOutboundShipment[]
-  dates: string[]
-  targets: CodeUsageTarget[]
-  folders: CodeUsageTargetFolder[]
-}) {
-  const grouped = useMemo(
-    () => groupPartnersForOutboundChart(partners, targets, folders),
-    [folders, partners, targets],
-  )
-  const [enabledIds, setEnabledIds] = useState(
-    () =>
-      new Set([
-        TOTAL_LINE_ID,
-        ...grouped.companies.map((company) => chartGroupSeriesId(company.key)),
-        ...partners.map((partner) => partner.partnerId),
-      ]),
-  )
-  const [openFolderKey, setOpenFolderKey] = useState<string | null>(null)
-  const [openCompanyKey, setOpenCompanyKey] = useState<string | null>(null)
+function prefersReducedMotion() {
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
 
-  useEffect(() => {
-    setEnabledIds(
-      new Set([
-        TOTAL_LINE_ID,
-        ...grouped.companies.map((company) => chartGroupSeriesId(company.key)),
-        ...partners.map((partner) => partner.partnerId),
-      ]),
-    )
-    setOpenFolderKey(null)
-    setOpenCompanyKey(null)
-  }, [grouped.companies, partners])
-
-  const seriesByPartner = useMemo(() => {
-    const map = new Map<string, Map<string, number>>()
-    for (const partner of partners) {
-      map.set(partner.partnerId, new Map())
-    }
-    for (const row of shipments) {
-      let byDate = map.get(row.partnerId)
-      if (!byDate) {
-        byDate = new Map()
-        map.set(row.partnerId, byDate)
-      }
-      byDate.set(row.shippedOn, (byDate.get(row.shippedOn) ?? 0) + row.quantity)
-    }
-    return map
-  }, [partners, shipments])
-
-  const chartDates = useMemo(() => {
-    if (dates.length > 0) return dates
-    const set = new Set<string>()
-    for (const row of shipments) set.add(row.shippedOn)
-    return [...set].sort()
-  }, [dates, shipments])
-
-  const openFolder = grouped.folders.find((item) => item.key === openFolderKey)
-  const visibleCompanies = openFolder ? openFolder.companies : grouped.companies
-  const openCompany =
-    visibleCompanies.find((item) => item.key === openCompanyKey) ??
-    grouped.companies.find((item) => item.key === openCompanyKey)
-  const showFolderFilters = grouped.folders.length > 1
-  const companyColorIndex = useMemo(() => {
-    const map = new Map<string, number>()
-    grouped.companies.forEach((company, index) => map.set(company.key, index))
-    return map
-  }, [grouped.companies])
-  const partnerColorIndex = useMemo(() => {
-    const map = new Map<string, number>()
-    partners.forEach((partner, index) => map.set(partner.partnerId, index))
-    return map
-  }, [partners])
-
-  function sumByDate(partnerIds: readonly string[]) {
-    const map = new Map<string, number>()
-    for (const partnerId of partnerIds) {
-      const byDate = seriesByPartner.get(partnerId)
-      if (!byDate) continue
-      for (const [date, qty] of byDate) {
-        map.set(date, (map.get(date) ?? 0) + qty)
-      }
-    }
-    return map
+function formatShare(quantity: number, total: number) {
+  if (!Number.isFinite(quantity) || !Number.isFinite(total) || total <= 0) {
+    return '—'
   }
+  const share = (quantity / total) * 100
+  if (!Number.isFinite(share)) return '—'
+  if (share >= 10) return `${Math.round(share)}%`
+  return `${share.toFixed(1)}%`
+}
 
-  const scopedPartnerIds = useMemo(() => {
-    if (openCompany) return openCompany.units.map((unit) => unit.partnerId)
-    if (openFolder) {
-      return openFolder.companies.flatMap((company) =>
-        company.units.map((unit) => unit.partnerId),
-      )
+function barWidth(quantity: number, widthTotal: number, grown: boolean) {
+  if (
+    !grown ||
+    !Number.isFinite(quantity) ||
+    !Number.isFinite(widthTotal) ||
+    widthTotal <= 0
+  ) {
+    return 0
+  }
+  return (quantity / widthTotal) * 100
+}
+
+function linePath(points: { x: number; y: number }[]) {
+  return points
+    .map((point, index) => `${index === 0 ? 'M' : 'L'}${point.x} ${point.y}`)
+    .join(' ')
+}
+
+function OutboundTrendChart({
+  buckets,
+  showTotal,
+  totalLabel,
+  series,
+  hoverSeriesId,
+  unit,
+  onUnit,
+}: {
+  buckets: PeriodQuantity[]
+  showTotal: boolean
+  totalLabel: string
+  series: TrendLine[]
+  hoverSeriesId: string | null
+  unit: 'day' | 'week'
+  onUnit: (unit: 'day' | 'week') => void
+}) {
+  const hostRef = useRef<HTMLDivElement>(null)
+  const [plotWidth, setPlotWidth] = useState(360)
+  const [hover, setHover] = useState<{
+    index: number
+    mouseX: number
+    mouseY: number
+  } | null>(null)
+
+  useLayoutEffect(() => {
+    const host = hostRef.current
+    if (!host) return
+    const sync = () => {
+      const next = Math.max(280, Math.round(host.clientWidth))
+      setPlotWidth((prev) => (prev === next ? prev : next))
     }
-    return partners.map((partner) => partner.partnerId)
-  }, [openCompany, openFolder, partners])
+    sync()
+    const observer = new ResizeObserver(sync)
+    observer.observe(host)
+    return () => observer.disconnect()
+  }, [])
 
-  const totalByDate = useMemo(
-    () => sumByDate(scopedPartnerIds),
-    [scopedPartnerIds, seriesByPartner],
-  )
-
-  const totalQuantity = useMemo(() => {
-    let sum = 0
-    for (const dateQty of totalByDate.values()) sum += dateQty
-    return sum
-  }, [totalByDate])
-
-  const companySeries = useMemo(
-    () =>
-      visibleCompanies.map((company) => ({
-        company,
-        byDate: sumByDate(company.units.map((unit) => unit.partnerId)),
-      })),
-    [seriesByPartner, visibleCompanies],
-  )
-
-  const visibleLines = openCompany
-    ? openCompany.units
-        .filter((unit) => enabledIds.has(unit.partnerId))
-        .map((unit) => ({
-          id: unit.partnerId,
-          label: unit.siteLabel,
-          color: partnerLineColor(partnerColorIndex.get(unit.partnerId) ?? 0),
-          byDate: seriesByPartner.get(unit.partnerId) ?? new Map<string, number>(),
-        }))
-    : companySeries
-        .filter((item) => enabledIds.has(chartGroupSeriesId(item.company.key)))
-        .map((item) => ({
-          id: chartGroupSeriesId(item.company.key),
-          label: item.company.label,
-          color: partnerLineColor(companyColorIndex.get(item.company.key) ?? 0),
-          byDate: item.byDate,
-        }))
-
-  const totalEnabled = enabledIds.has(TOTAL_LINE_ID)
-  const maxQty = useMemo(() => {
-    let max = 0
-    for (const date of chartDates) {
-      if (totalEnabled) max = Math.max(max, totalByDate.get(date) ?? 0)
-      for (const line of visibleLines) {
-        max = Math.max(max, line.byDate.get(date) ?? 0)
-      }
-    }
-    return max
-  }, [chartDates, totalByDate, totalEnabled, visibleLines])
-
-  const yMax = Math.max(1, Math.ceil(maxQty * 1.1))
-  const width = 640
-  const height = 280
-  const pad = { top: 16, right: 16, bottom: 36, left: 40 }
+  const width = plotWidth
+  const height = TREND_HEIGHT
+  const pad = TREND_PAD
   const plotW = width - pad.left - pad.right
   const plotH = height - pad.top - pad.bottom
+  const maxQty = useMemo(() => {
+    let max = 0
+    if (showTotal) {
+      for (const bucket of buckets) max = Math.max(max, bucket.quantity)
+    }
+    for (const line of series) {
+      for (const value of line.values) max = Math.max(max, value)
+    }
+    return max
+  }, [buckets, series, showTotal])
+  const ticks = useMemo(() => niceTicks(maxQty, 4), [maxQty])
+  const yMax = Math.max(1, ticks[ticks.length - 1] ?? 1)
 
   function xAt(index: number) {
-    if (chartDates.length <= 1) return pad.left + plotW / 2
-    return pad.left + (index / (chartDates.length - 1)) * plotW
+    if (buckets.length <= 1) return pad.left + plotW / 2
+    return pad.left + (index / (buckets.length - 1)) * plotW
   }
 
   function yAt(value: number) {
     return pad.top + plotH - (value / yMax) * plotH
   }
 
-  const yTicks = 4
-  const labelStep = Math.max(1, Math.ceil(chartDates.length / 8))
-  const [hover, setHover] = useState<{
-    id: string
-    label: string
-    color: string
-    date: string
-    qty: number
-    svgX: number
-    svgY: number
-    mouseX: number
-    mouseY: number
-  } | null>(null)
+  const labelStep = Math.max(
+    1,
+    Math.ceil(buckets.length / Math.max(4, Math.floor(width / 56))),
+  )
 
-  const totalLineLabel = openCompany
-    ? `${openCompany.label} 합계`
-    : openFolder
-      ? `${openFolder.label} 합계`
-      : '총합'
-
-  function pointerToSvg(event: MouseEvent<SVGElement>) {
-    const svg =
-      event.currentTarget.ownerSVGElement ??
-      (event.currentTarget as SVGSVGElement)
-    const rect = svg.getBoundingClientRect()
-    if (rect.width === 0 || rect.height === 0) return null
-    return {
-      x: ((event.clientX - rect.left) / rect.width) * width,
-      y: ((event.clientY - rect.top) / rect.height) * height,
-    }
-  }
-
-  function updateHover(event: MouseEvent<SVGElement>) {
-    const point = pointerToSvg(event)
-    if (!point || chartDates.length === 0) {
+  function updateHover(event: MouseEvent<SVGSVGElement>) {
+    const rect = event.currentTarget.getBoundingClientRect()
+    if (rect.width === 0 || rect.height === 0 || buckets.length === 0) {
       setHover(null)
       return
     }
+    const x = ((event.clientX - rect.left) / rect.width) * width
     let nearestIndex = 0
     let nearestDx = Infinity
-    chartDates.forEach((_, index) => {
-      const dx = Math.abs(xAt(index) - point.x)
+    buckets.forEach((_, index) => {
+      const dx = Math.abs(xAt(index) - x)
       if (dx < nearestDx) {
         nearestDx = dx
         nearestIndex = index
       }
     })
-    const date = chartDates[nearestIndex]
-    const x = xAt(nearestIndex)
-    const candidates = [
-      ...visibleLines.map((line) => ({
-        id: line.id,
-        label: line.label,
-        color: line.color,
-        qty: line.byDate.get(date) ?? 0,
-      })),
-      ...(totalEnabled
-        ? [
-            {
-              id: TOTAL_LINE_ID,
-              label: totalLineLabel,
-              color: TOTAL_LINE_COLOR,
-              qty: totalByDate.get(date) ?? 0,
-            },
-          ]
-        : []),
-    ]
-    if (candidates.length === 0) {
-      setHover((prev) => (prev ? null : prev))
-      return
-    }
-    const withQty = candidates.filter((item) => item.qty > 0)
-    const pool = withQty.length > 0 ? withQty : candidates
-    let best = pool[0]
-    let bestDist = Math.abs(yAt(best.qty) - point.y)
-    for (const item of pool.slice(1)) {
-      const dist = Math.abs(yAt(item.qty) - point.y)
-      if (dist < bestDist) {
-        bestDist = dist
-        best = item
-      }
-    }
     const next = {
-      ...best,
-      date,
-      svgX: x,
-      svgY: yAt(best.qty),
+      index: nearestIndex,
       mouseX: event.clientX,
       mouseY: event.clientY,
     }
     setHover((prev) =>
       prev &&
-      prev.id === next.id &&
-      prev.date === next.date &&
-      prev.qty === next.qty &&
+      prev.index === next.index &&
       prev.mouseX === next.mouseX &&
       prev.mouseY === next.mouseY
         ? prev
@@ -439,102 +319,602 @@ function PartnerOutboundChart({
     )
   }
 
-  function toggleSeries(seriesId: string) {
-    setEnabledIds((prev) => {
+  const hoverRows = useMemo(() => {
+    if (!hover) return []
+    const rows = [
+      ...(showTotal
+        ? [
+            {
+              id: TOTAL_SERIES_ID,
+              label: totalLabel,
+              color: TOTAL_COLOR,
+              qty: buckets[hover.index]?.quantity ?? 0,
+            },
+          ]
+        : []),
+      ...series.map((line) => ({
+        id: line.id,
+        label: line.label,
+        color: line.color,
+        qty: line.values[hover.index] ?? 0,
+      })),
+    ]
+    rows.sort((left, right) => right.qty - left.qty)
+    return rows
+  }, [buckets, hover, series, showTotal, totalLabel])
+
+  const tipLeft = hover ? Math.min(hover.mouseX, window.innerWidth - 12) : 0
+  const tipAbove = hover ? hover.mouseY > 120 : true
+  const tipFlip = hover ? hover.mouseX > window.innerWidth - 200 : false
+
+  return (
+    <section>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">출고 추이</h3>
+        <div className="flex rounded-full border border-border p-0.5 text-xs">
+          {(
+            [
+              { value: 'day' as const, label: '일' },
+              { value: 'week' as const, label: '주' },
+            ] as const
+          ).map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              aria-pressed={unit === item.value}
+              onClick={() => onUnit(item.value)}
+              className={cn(
+                'rounded-full px-2.5 py-0.5',
+                unit === item.value
+                  ? 'bg-primary/10 text-foreground'
+                  : 'text-muted-foreground hover:bg-muted/40',
+              )}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {buckets.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border bg-muted/20 px-3 py-8 text-center text-xs text-muted-foreground">
+          선택한 기간에 이 상품 출고가 없습니다.
+        </p>
+      ) : (
+        <div
+          ref={hostRef}
+          className="rounded-lg border border-border bg-muted/10 px-1 py-2"
+        >
+          <svg
+            viewBox={`0 0 ${width} ${height}`}
+            className="h-[200px] w-full"
+            role="img"
+            aria-label="출고 수량 추이"
+            onMouseMove={updateHover}
+            onMouseLeave={() => setHover(null)}
+          >
+            {ticks.map((tick) => {
+              const y = yAt(tick)
+              return (
+                <g key={tick}>
+                  <line
+                    x1={pad.left}
+                    x2={width - pad.right}
+                    y1={y}
+                    y2={y}
+                    stroke="currentColor"
+                    className="text-border"
+                    strokeWidth={1}
+                  />
+                  <text
+                    x={pad.left - 8}
+                    y={y + 4}
+                    textAnchor="end"
+                    fontSize={11}
+                    className="fill-muted-foreground"
+                  >
+                    {formatNumber(tick)}
+                  </text>
+                </g>
+              )
+            })}
+            <line
+              x1={pad.left}
+              x2={pad.left}
+              y1={pad.top}
+              y2={height - pad.bottom}
+              stroke="currentColor"
+              className="text-foreground/40"
+              strokeWidth={1.25}
+            />
+            <line
+              x1={pad.left}
+              x2={width - pad.right}
+              y1={height - pad.bottom}
+              y2={height - pad.bottom}
+              stroke="currentColor"
+              className="text-foreground/40"
+              strokeWidth={1.25}
+            />
+            {buckets.map((bucket, index) => {
+              if (index % labelStep !== 0 && index !== buckets.length - 1) {
+                return null
+              }
+              return (
+                <text
+                  key={bucket.key}
+                  x={xAt(index)}
+                  y={height - 8}
+                  textAnchor="middle"
+                  fontSize={11}
+                  className="fill-muted-foreground"
+                >
+                  {formatOutboundDateHeader(bucket.key)}
+                </text>
+              )
+            })}
+            {showTotal && buckets.length > 1 ? (
+              <path
+                d={`${linePath(buckets.map((bucket, index) => ({ x: xAt(index), y: yAt(bucket.quantity) })))} L${xAt(buckets.length - 1)} ${yAt(0)} L${xAt(0)} ${yAt(0)} Z`}
+                fill={TOTAL_COLOR}
+                fillOpacity={hoverSeriesId && hoverSeriesId !== TOTAL_SERIES_ID ? 0.03 : 0.08}
+              />
+            ) : null}
+            {series.map((line) => {
+              const points = line.values.map((value, index) => ({
+                x: xAt(index),
+                y: yAt(value),
+              }))
+              const dim =
+                hoverSeriesId != null && hoverSeriesId !== line.id
+              if (points.length <= 1 && points[0]) {
+                return (
+                  <circle
+                    key={`${unit}:${line.id}`}
+                    cx={points[0].x}
+                    cy={points[0].y}
+                    r={4}
+                    fill={line.color}
+                    opacity={dim ? 0.2 : 1}
+                  />
+                )
+              }
+              return (
+                <path
+                  key={`${unit}:${line.id}`}
+                  d={linePath(points)}
+                  fill="none"
+                  stroke={line.color}
+                  strokeWidth={dim ? 1.5 : 2.25}
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  pathLength={1}
+                  strokeDasharray={1}
+                  className="animate-line-draw"
+                  opacity={dim ? 0.2 : 1}
+                />
+              )
+            })}
+            {showTotal && buckets.length > 1 ? (
+              <path
+                key={`${unit}:total`}
+                d={linePath(
+                  buckets.map((bucket, index) => ({
+                    x: xAt(index),
+                    y: yAt(bucket.quantity),
+                  })),
+                )}
+                fill="none"
+                stroke={TOTAL_COLOR}
+                strokeWidth={hoverSeriesId === TOTAL_SERIES_ID ? 2.75 : 2}
+                strokeLinejoin="round"
+                strokeLinecap="round"
+                opacity={
+                  hoverSeriesId != null && hoverSeriesId !== TOTAL_SERIES_ID
+                    ? 0.25
+                    : 1
+                }
+              />
+            ) : null}
+            {hover ? (
+              <line
+                x1={xAt(hover.index)}
+                x2={xAt(hover.index)}
+                y1={pad.top}
+                y2={height - pad.bottom}
+                stroke={TOTAL_COLOR}
+                strokeDasharray="3 3"
+                strokeWidth={1}
+                opacity={0.45}
+                pointerEvents="none"
+              />
+            ) : null}
+          </svg>
+          {hover && buckets[hover.index]
+            ? createPortal(
+                <div
+                  className="pointer-events-none fixed z-[80] min-w-36 rounded-md border border-border bg-card px-2.5 py-1.5 text-xs shadow-md"
+                  style={{
+                    left: tipLeft,
+                    top: hover.mouseY,
+                    transform: `${tipFlip ? 'translateX(calc(-100% - 12px))' : 'translateX(12px)'} ${tipAbove ? 'translateY(calc(-100% - 8px))' : 'translateY(12px)'}`,
+                  }}
+                >
+                  <p className="font-medium text-foreground">
+                    {formatOutboundDateHeader(buckets[hover.index].key)}
+                    {unit === 'week' ? ' 주' : ''}
+                  </p>
+                  <ul className="mt-1 space-y-0.5">
+                    {hoverRows.map((row) => (
+                      <li
+                        key={row.id}
+                        className="flex items-center justify-between gap-3"
+                      >
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span
+                            className="size-2 shrink-0 rounded-full"
+                            style={{ backgroundColor: row.color }}
+                          />
+                          <span className="truncate text-muted-foreground">
+                            {row.label}
+                          </span>
+                        </span>
+                        <span className="tabular-nums text-foreground">
+                          {formatNumber(row.qty)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>,
+                document.body,
+              )
+            : null}
+          {!showTotal && series.length === 0 ? (
+            <p className="px-2 py-6 text-center text-xs text-muted-foreground">
+              표시할 선을 고르세요.
+            </p>
+          ) : null}
+        </div>
+      )}
+    </section>
+  )
+}
+
+function SeriesLegend({
+  showTotal,
+  totalLabel,
+  totalQuantity,
+  series,
+  limitHit,
+  onToggleTotal,
+  onRemove,
+  onResetTop,
+  onClear,
+  onHover,
+}: {
+  showTotal: boolean
+  totalLabel: string
+  totalQuantity: number
+  series: TrendLine[]
+  limitHit: boolean
+  onToggleTotal: () => void
+  onRemove: (id: string) => void
+  onResetTop: () => void
+  onClear: () => void
+  onHover: (id: string | null) => void
+}) {
+  return (
+    <div className="mb-3 space-y-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          aria-pressed={showTotal}
+          onClick={onToggleTotal}
+          onMouseEnter={() => onHover(TOTAL_SERIES_ID)}
+          onMouseLeave={() => onHover(null)}
+          className={cn(
+            'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs',
+            showTotal
+              ? 'border-foreground/25 bg-muted/50 text-foreground'
+              : 'border-border text-muted-foreground line-through',
+          )}
+        >
+          <span className="size-2 rounded-full" style={{ backgroundColor: TOTAL_COLOR }} />
+          {totalLabel}
+          <span className="tabular-nums text-muted-foreground">
+            {formatNumber(totalQuantity)}
+          </span>
+        </button>
+        {series.map((item) => (
+          <span
+            key={item.id}
+            className="inline-flex items-center gap-1 rounded-full border bg-card px-2 py-0.5 text-xs"
+            style={{ borderColor: item.color }}
+            onMouseEnter={() => onHover(item.id)}
+            onMouseLeave={() => onHover(null)}
+          >
+            <span
+              className="size-2 rounded-full"
+              style={{ backgroundColor: item.color }}
+            />
+            <span className="max-w-[7.5rem] truncate">{item.label}</span>
+            <span className="tabular-nums text-muted-foreground">
+              {formatNumber(item.quantity)}
+            </span>
+            <button
+              type="button"
+              aria-label={`${item.label} 끄기`}
+              onClick={() => onRemove(item.id)}
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-3" />
+            </button>
+          </span>
+        ))}
+      </div>
+      <div className="flex gap-3 text-[11px]">
+        <button
+          type="button"
+          onClick={onResetTop}
+          className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+        >
+          상위 3개로
+        </button>
+        <button
+          type="button"
+          onClick={onClear}
+          className="text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+        >
+          모두 끄기
+        </button>
+      </div>
+      {limitHit ? (
+        <p className="text-[11px] text-muted-foreground">
+          한 번에 6개까지 겹쳐 볼 수 있습니다.
+        </p>
+      ) : null}
+    </div>
+  )
+}
+
+function PartnerRankBars({
+  companies,
+  folders,
+  folderKey,
+  activeIds,
+  colorById,
+  hoverSeriesId,
+  onFolder,
+  onToggle,
+  onHover,
+}: {
+  companies: PartnerChartCompany[]
+  folders: { key: string; label: string; quantity: number }[]
+  folderKey: string | null
+  activeIds: ReadonlySet<string>
+  colorById: ReadonlyMap<string, string>
+  hoverSeriesId: string | null
+  onFolder: (key: string | null) => void
+  onToggle: (id: string) => void
+  onHover: (id: string | null) => void
+}) {
+  const [openKeys, setOpenKeys] = useState<ReadonlySet<string>>(() => new Set())
+  const [expandedKeys, setExpandedKeys] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  )
+  const [grown, setGrown] = useState(() => prefersReducedMotion())
+  const total = useMemo(
+    () => companies.reduce((sum, company) => sum + company.quantity, 0),
+    [companies],
+  )
+
+  useEffect(() => {
+    if (prefersReducedMotion()) {
+      setGrown(true)
+      return
+    }
+    setGrown(false)
+    const frame = window.requestAnimationFrame(() => setGrown(true))
+    return () => window.cancelAnimationFrame(frame)
+  }, [companies])
+
+  function toggleOpen(key: string) {
+    setOpenKeys((prev) => {
       const next = new Set(prev)
-      const company = grouped.companies.find(
-        (item) => chartGroupSeriesId(item.key) === seriesId,
-      )
-      const turningOn = !next.has(seriesId)
-      if (turningOn) next.add(seriesId)
-      else next.delete(seriesId)
-      if (company) {
-        for (const unit of company.units) {
-          if (turningOn) next.add(unit.partnerId)
-          else next.delete(unit.partnerId)
-        }
-      }
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
 
-  function selectFolder(folderKey: string | null) {
-    setOpenFolderKey((current) => (current === folderKey ? null : folderKey))
-    setOpenCompanyKey(null)
+  function toggleExpanded(key: string) {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
   }
 
-  function selectCompany(companyKey: string) {
-    setOpenCompanyKey((current) => (current === companyKey ? null : companyKey))
-  }
-
-  if (partners.length === 0 || chartDates.length === 0) {
+  function renderToggleRow({
+    seriesId,
+    label,
+    quantity,
+    widthTotal,
+    shareTotal,
+  }: {
+    seriesId: string
+    label: string
+    quantity: number
+    widthTotal: number
+    shareTotal: number
+  }) {
+    const active = activeIds.has(seriesId)
+    const color = colorById.get(seriesId) ?? '#a3a3a3'
+    const hovered = hoverSeriesId === seriesId
     return (
-      <p className="rounded-lg border border-dashed border-border bg-muted/20 px-3 py-8 text-center text-xs text-muted-foreground">
-        선택한 기간에 이 상품 출고가 없습니다.
-      </p>
+      <button
+        type="button"
+        aria-pressed={active}
+        onClick={() => onToggle(seriesId)}
+        onMouseEnter={() => onHover(seriesId)}
+        onMouseLeave={() => onHover(null)}
+        className={cn(
+          'grid min-w-0 flex-1 grid-cols-[0.7rem_minmax(0,1fr)_minmax(3.5rem,1.1fr)_2.6rem_2.4rem] items-center gap-1.5 rounded-md px-1 py-1 text-left text-xs',
+          hovered ? 'bg-muted/70' : 'hover:bg-muted/40',
+        )}
+      >
+        <span
+          className="size-2.5 rounded-[2px]"
+          style={{ backgroundColor: active ? color : '#d6d3cd' }}
+          aria-hidden
+        />
+        <span className={cn('truncate', active ? 'text-foreground' : 'text-muted-foreground')}>
+          {label}
+        </span>
+        <span className="h-2 overflow-hidden rounded-full bg-muted">
+          <span
+            className="partner-rank-bar block h-full rounded-full transition-[width] duration-500 ease-out"
+            style={{
+              width: `${barWidth(quantity, widthTotal, grown)}%`,
+              backgroundColor: active ? color : '#a3a3a3',
+              opacity: active ? 0.9 : 0.45,
+            }}
+          />
+        </span>
+        <span className="text-right tabular-nums text-foreground">
+          {formatNumber(quantity)}
+        </span>
+        <span className="text-right tabular-nums text-muted-foreground">
+          {formatShare(quantity, shareTotal)}
+        </span>
+      </button>
+    )
+  }
+
+  function renderCompany(company: PartnerChartCompany, depth: number): ReactNode {
+    const members = company.members ?? []
+    const sites = members.length > 0 ? [] : company.units
+    const expandable = members.length > 0 || sites.length > 1
+    const opened = openKeys.has(company.key)
+    const showAll = expandedKeys.has(company.key)
+    const childCompanies = showAll ? members : members.slice(0, SITE_PREVIEW)
+    const childSites = showAll ? sites : sites.slice(0, SITE_PREVIEW)
+    const hiddenCount =
+      members.length > 0
+        ? members.length - childCompanies.length
+        : sites.length - childSites.length
+    return (
+      <div key={company.key} className={depth > 0 ? 'pl-4' : undefined}>
+        <div className="flex items-center gap-0.5">
+          {expandable ? (
+            <button
+              type="button"
+              aria-expanded={opened}
+              aria-label={`${company.label} 펼치기`}
+              onClick={() => toggleOpen(company.key)}
+              className="rounded p-1 text-muted-foreground hover:bg-muted/50"
+            >
+              <ChevronRight
+                className={cn(
+                  'size-3 transition-transform duration-200 motion-reduce:transition-none',
+                  opened && 'rotate-90',
+                )}
+              />
+            </button>
+          ) : (
+            <span className="w-5 shrink-0" aria-hidden />
+          )}
+          {renderToggleRow({
+            seriesId: companySeriesId(company.key),
+            label: company.label,
+            quantity: company.quantity,
+            widthTotal: total,
+            shareTotal: total,
+          })}
+        </div>
+        {expandable ? (
+          <div
+            className={cn(
+              'partner-rank-expand grid transition-[grid-template-rows] duration-200 ease-out',
+              opened ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]',
+            )}
+          >
+            <div className="overflow-hidden">
+              <div className="space-y-0.5 py-0.5 pl-5">
+                {childCompanies.map((member) => renderCompany(member, depth + 1))}
+                {childSites.map((unit) => (
+                  <div key={unit.partnerId} className="pl-5">
+                    {renderToggleRow({
+                      seriesId: siteSeriesId(unit.partnerId),
+                      label: unit.siteLabel,
+                      quantity: unit.quantity,
+                      widthTotal: company.quantity,
+                      shareTotal: total,
+                    })}
+                  </div>
+                ))}
+                {hiddenCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleExpanded(company.key)}
+                    className="px-1 py-1 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  >
+                    나머지 {formatNumber(hiddenCount)}곳 더보기
+                  </button>
+                ) : null}
+                {showAll && (members.length > SITE_PREVIEW || sites.length > SITE_PREVIEW) ? (
+                  <button
+                    type="button"
+                    onClick={() => toggleExpanded(company.key)}
+                    className="px-1 py-1 text-[11px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                  >
+                    접기
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        ) : null}
+      </div>
     )
   }
 
   return (
-    <div className="space-y-3">
-      <div className="space-y-2">
-        <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs">
-          <input
-            type="checkbox"
-            checked={totalEnabled}
-            onChange={() => toggleSeries(TOTAL_LINE_ID)}
-            className="size-3.5 rounded border-border"
-          />
-          <span
-            className="size-2.5 shrink-0 rounded-full"
-            style={{ backgroundColor: TOTAL_LINE_COLOR }}
-            aria-hidden
-          />
-          <span
-            className={cn(
-              'font-medium text-foreground',
-              !totalEnabled && 'text-muted-foreground line-through',
-            )}
-          >
-            {openCompany
-              ? `${openCompany.label} 합계`
-              : openFolder
-                ? `${openFolder.label} 합계`
-                : '총합'}
-          </span>
-          <span className="tabular-nums text-muted-foreground">
-            ({formatNumber(totalQuantity)})
-          </span>
-        </label>
-
-        {showFolderFilters ? (
-          <div>
-            <p className="mb-1 text-[10px] font-medium text-muted-foreground">
-              상위 분류
-            </p>
-            <div className="flex flex-wrap gap-1.5">
+    <section className="mt-5">
+      <h3 className="text-sm font-semibold">업체별 출고</h3>
+      <p className="mb-2 mt-0.5 text-[11px] text-muted-foreground">
+        막대를 누르면 추이 그래프에 선이 추가됩니다.
+      </p>
+      {companies.length === 0 ? (
+        <p className="rounded-lg border border-dashed border-border bg-muted/20 px-3 py-8 text-center text-xs text-muted-foreground">
+          선택한 기간에 이 상품 출고가 없습니다.
+        </p>
+      ) : (
+        <>
+          {folders.length > 1 ? (
+            <div className="mb-2 flex flex-wrap gap-1.5">
               <button
                 type="button"
-                aria-pressed={openFolderKey === null}
-                onClick={() => selectFolder(null)}
+                aria-pressed={folderKey === null}
+                onClick={() => onFolder(null)}
                 className={cn(
                   'rounded-full border px-2.5 py-1 text-xs',
-                  openFolderKey === null
+                  folderKey === null
                     ? 'border-primary/40 bg-primary/10 text-foreground'
                     : 'border-border text-muted-foreground hover:bg-muted/40',
                 )}
               >
                 전체
               </button>
-              {grouped.folders.map((folder) => (
+              {folders.map((folder) => (
                 <button
                   key={folder.key}
                   type="button"
-                  aria-pressed={openFolderKey === folder.key}
-                  onClick={() => selectFolder(folder.key)}
+                  aria-pressed={folderKey === folder.key}
+                  onClick={() => onFolder(folder.key)}
                   className={cn(
                     'rounded-full border px-2.5 py-1 text-xs',
-                    openFolderKey === folder.key
+                    folderKey === folder.key
                       ? 'border-primary/40 bg-primary/10 text-foreground'
                       : 'border-border text-muted-foreground hover:bg-muted/40',
                   )}
@@ -546,337 +926,44 @@ function PartnerOutboundChart({
                 </button>
               ))}
             </div>
-          </div>
-        ) : null}
-
-        <div>
-          <p className="mb-1 text-[10px] font-medium text-muted-foreground">
-            업체
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            {visibleCompanies.map((company) => {
-              const seriesId = chartGroupSeriesId(company.key)
-              const checked = enabledIds.has(seriesId)
-              const opened = openCompanyKey === company.key
-              const color = partnerLineColor(
-                companyColorIndex.get(company.key) ?? 0,
-              )
-              return (
-                <div
-                  key={company.key}
-                  className={cn(
-                    'inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs',
-                    opened
-                      ? 'border-primary/40 bg-primary/10'
-                      : 'border-border bg-background',
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    checked={checked}
-                    onChange={() => toggleSeries(seriesId)}
-                    className="size-3.5 rounded border-border"
-                    aria-label={`${company.label} 선 표시`}
-                  />
-                  <button
-                    type="button"
-                    aria-expanded={opened}
-                    onClick={() => selectCompany(company.key)}
-                    className={cn(
-                      'inline-flex items-center gap-1',
-                      !checked && 'text-muted-foreground',
-                    )}
-                  >
-                    <span
-                      className="size-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: color }}
-                      aria-hidden
-                    />
-                    <span className={cn(!checked && 'line-through')}>
-                      {company.label}
-                    </span>
-                    <span className="tabular-nums text-muted-foreground">
-                      ({formatNumber(company.quantity)})
-                    </span>
-                    {company.units.length > 1 ? (
-                      <ChevronRight
-                        className={cn(
-                          'size-3 text-muted-foreground transition-transform',
-                          opened && 'rotate-90',
-                        )}
-                        aria-hidden
-                      />
-                    ) : null}
-                  </button>
-                </div>
-              )
-            })}
-          </div>
-        </div>
-
-        {openCompany ? (
-          <div>
-            <p className="mb-1 text-[10px] font-medium text-muted-foreground">
-              {openCompany.label} 지점
-            </p>
-            <div className="flex flex-wrap gap-x-3 gap-y-1.5">
-              {openCompany.units.map((unit) => {
-                const checked = enabledIds.has(unit.partnerId)
-                const color = partnerLineColor(
-                  partnerColorIndex.get(unit.partnerId) ?? 0,
-                )
-                return (
-                  <label
-                    key={unit.partnerId}
-                    className="inline-flex cursor-pointer items-center gap-1.5 text-xs"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleSeries(unit.partnerId)}
-                      className="size-3.5 rounded border-border"
-                    />
-                    <span
-                      className="size-2.5 shrink-0 rounded-full"
-                      style={{ backgroundColor: color }}
-                      aria-hidden
-                    />
-                    <span
-                      className={cn(
-                        'text-foreground',
-                        !checked && 'text-muted-foreground line-through',
-                      )}
-                    >
-                      {unit.siteLabel}
-                    </span>
-                    <span className="tabular-nums text-muted-foreground">
-                      ({formatNumber(unit.quantity)})
-                    </span>
-                  </label>
-                )
-              })}
-            </div>
-          </div>
-        ) : (
-          <p className="text-[10px] text-muted-foreground">
-            업체를 누르면 지점별로 볼 수 있습니다.
-          </p>
-        )}
-      </div>
-
-      <div className="overflow-x-auto rounded-lg border border-border bg-muted/10 px-1 py-2">
-        <div className="relative min-w-[28rem]">
-          <svg
-            viewBox={`0 0 ${width} ${height}`}
-            className="h-[240px] w-full"
-            role="img"
-            aria-label="업체별 일자 출고 수량 그래프"
-            onMouseMove={updateHover}
-            onMouseLeave={() => setHover(null)}
-          >
-          {Array.from({ length: yTicks + 1 }, (_, i) => {
-            const value = (yMax / yTicks) * i
-            const y = yAt(value)
-            return (
-              <g key={i}>
-                <line
-                  x1={pad.left}
-                  x2={width - pad.right}
-                  y1={y}
-                  y2={y}
-                  stroke="currentColor"
-                  className="text-border"
-                  strokeWidth={1}
-                />
-                <text
-                  x={pad.left - 6}
-                  y={y + 3}
-                  textAnchor="end"
-                  className="fill-muted-foreground text-[10px]"
-                >
-                  {Math.round(value)}
-                </text>
-              </g>
-            )
-          })}
-
-          <line
-            x1={pad.left}
-            x2={pad.left}
-            y1={pad.top}
-            y2={height - pad.bottom}
-            stroke="currentColor"
-            className="text-foreground/40"
-            strokeWidth={1.25}
-          />
-          <line
-            x1={pad.left}
-            x2={width - pad.right}
-            y1={height - pad.bottom}
-            y2={height - pad.bottom}
-            stroke="currentColor"
-            className="text-foreground/40"
-            strokeWidth={1.25}
-          />
-
-          {chartDates.map((date, index) => {
-            if (index % labelStep !== 0 && index !== chartDates.length - 1) {
-              return null
-            }
-            return (
-              <text
-                key={date}
-                x={xAt(index)}
-                y={height - 12}
-                textAnchor="middle"
-                className="fill-muted-foreground text-[10px]"
-              >
-                {formatOutboundDateHeader(date)}
-              </text>
-            )
-          })}
-
-          {visibleLines.map((line) => {
-            const points = chartDates.map((date, index) => {
-              const qty = line.byDate.get(date) ?? 0
-              return `${xAt(index)},${yAt(qty)}`
-            })
-            const active = hover?.id === line.id
-            return (
-              <g
-                key={line.id}
-                opacity={hover && !active ? 0.22 : 1}
-              >
-                <polyline
-                  fill="none"
-                  stroke={line.color}
-                  strokeWidth={active ? 3 : 2}
-                  strokeLinejoin="round"
-                  strokeLinecap="round"
-                  points={points.join(' ')}
-                />
-                {chartDates.map((date, index) => {
-                  const qty = line.byDate.get(date) ?? 0
-                  if (qty <= 0) return null
-                  return (
-                    <circle
-                      key={`${line.id}-${date}`}
-                      cx={xAt(index)}
-                      cy={yAt(qty)}
-                      r={active && hover?.date === date ? 5 : 3}
-                      fill={line.color}
-                    />
-                  )
-                })}
-              </g>
-            )
-          })}
-
-          {totalEnabled ? (
-            <g opacity={hover && hover.id !== TOTAL_LINE_ID ? 0.22 : 1}>
-              <polyline
-                fill="none"
-                stroke={TOTAL_LINE_COLOR}
-                strokeWidth={hover?.id === TOTAL_LINE_ID ? 3.5 : 2.5}
-                strokeLinejoin="round"
-                strokeLinecap="round"
-                points={chartDates
-                  .map((date, index) => {
-                    const qty = totalByDate.get(date) ?? 0
-                    return `${xAt(index)},${yAt(qty)}`
-                  })
-                  .join(' ')}
-              />
-              {chartDates.map((date, index) => {
-                const qty = totalByDate.get(date) ?? 0
-                if (qty <= 0) return null
-                return (
-                  <circle
-                    key={`total-${date}`}
-                    cx={xAt(index)}
-                    cy={yAt(qty)}
-                    r={
-                      hover?.id === TOTAL_LINE_ID && hover.date === date
-                        ? 5.5
-                        : 3.5
-                    }
-                    fill={TOTAL_LINE_COLOR}
-                  />
-                )
-              })}
-            </g>
           ) : null}
-
-          {hover ? (
-            <g pointerEvents="none">
-              <line
-                x1={hover.svgX}
-                x2={hover.svgX}
-                y1={pad.top}
-                y2={height - pad.bottom}
-                stroke={hover.color}
-                strokeDasharray="3 3"
-                strokeWidth={1}
-                opacity={0.55}
-              />
-              <circle
-                cx={hover.svgX}
-                cy={hover.svgY}
-                r={6}
-                fill={hover.color}
-                stroke="white"
-                strokeWidth={2}
-              />
-            </g>
-          ) : null}
-
-          <rect
-            x={pad.left}
-            y={pad.top}
-            width={plotW}
-            height={plotH}
-            fill="rgba(255,255,255,0.01)"
-            onMouseMove={updateHover}
-            onMouseLeave={() => setHover(null)}
-          />
-        </svg>
-        {hover
-          ? createPortal(
-              <div
-                className="pointer-events-none fixed z-[80] min-w-36 -translate-x-1/2 -translate-y-[calc(100%+12px)] rounded-md border border-border bg-card px-2.5 py-1.5 text-xs shadow-md"
-                style={{
-                  left: hover.mouseX,
-                  top: hover.mouseY,
-                }}
-              >
-            <p className="flex items-center gap-1.5 font-medium text-foreground">
-              <span
-                className="size-2.5 shrink-0 rounded-full"
-                style={{ backgroundColor: hover.color }}
-                aria-hidden
-              />
-              {hover.label}
-            </p>
-            <p className="mt-0.5 tabular-nums text-muted-foreground">
-              {formatOutboundDateHeader(hover.date)} · {formatNumber(hover.qty)}
-            </p>
-          </div>,
-              document.body,
-            )
-          : null}
-        </div>
-      </div>
-
-      {!totalEnabled && visibleLines.length === 0 ? (
-        <p className="text-center text-xs text-muted-foreground">
-          표시할 선을 체크하세요.
-        </p>
-      ) : null}
-    </div>
+          <div className="space-y-0.5">
+            {companies.map((company) => renderCompany(company, 0))}
+          </div>
+        </>
+      )}
+    </section>
   )
 }
 
-function ProductDetailDialog({
+function usePageScrollBox() {
+  const [box, setBox] = useState(measurePageScrollBox)
+
+  useLayoutEffect(() => {
+    const host = document.querySelector<HTMLElement>('[data-brand-page-scroll]')
+    if (!host) return
+    const sync = () => setBox(measurePageScrollBox())
+    sync()
+    const observer = new ResizeObserver(sync)
+    observer.observe(host)
+    window.addEventListener('resize', sync)
+    return () => {
+      observer.disconnect()
+      window.removeEventListener('resize', sync)
+    }
+  }, [])
+
+  return box
+}
+
+function materializeAuto(ids: readonly string[]): PickedSeries[] {
+  return ids.map((id, index) => ({
+    id,
+    color: SERIES_COLORS[index % SERIES_COLORS.length] ?? SERIES_COLORS[0],
+  }))
+}
+
+function ProductDetailPanel({
   mode,
   summary,
   style,
@@ -895,28 +982,197 @@ function ProductDetailDialog({
   folders: CodeUsageTargetFolder[]
   onClose: () => void
 }) {
+  const box = usePageScrollBox()
+  const [picked, setPicked] = useState<PickedSeries[] | null>(null)
+  const [showTotal, setShowTotal] = useState(true)
+  const [unit, setUnit] = useState<'day' | 'week'>('day')
+  const [folderKey, setFolderKey] = useState<string | null>(null)
+  const [hoverSeriesId, setHoverSeriesId] = useState<string | null>(null)
+  const [limitHit, setLimitHit] = useState(false)
+
+  const grouped = useMemo(
+    () => groupPartnersForOutboundChart(summary.partners, targets, folders),
+    [folders, summary.partners, targets],
+  )
+  const folder =
+    grouped.folders.find((item) => item.key === folderKey) ?? null
+  const scopeCompanies = folder ? folder.companies : grouped.companies
+  const ranked = useMemo(
+    () => limitCompaniesWithOther(scopeCompanies),
+    [scopeCompanies],
+  )
+  const resolveScope = useMemo(
+    () => ({
+      companies: scopeCompanies,
+      other: ranked.find((company) => company.key === OTHER_COMPANY_KEY) ?? null,
+    }),
+    [ranked, scopeCompanies],
+  )
+  const productScope = useMemo(() => {
+    const rankedAll = limitCompaniesWithOther(grouped.companies)
+    return {
+      companies: grouped.companies,
+      other:
+        rankedAll.find((company) => company.key === OTHER_COMPANY_KEY) ?? null,
+    }
+  }, [grouped.companies])
+  const productScopeRef = useRef(productScope)
+  productScopeRef.current = productScope
+
+  const autoIds = useMemo(
+    () =>
+      scopeCompanies
+        .filter((company) => company.key !== OTHER_COMPANY_KEY)
+        .slice(0, AUTO_PICK_COUNT)
+        .map((company) => companySeriesId(company.key)),
+    [scopeCompanies],
+  )
+  const activePicked = useMemo(
+    () => (picked === null ? materializeAuto(autoIds) : picked),
+    [autoIds, picked],
+  )
+  const visibleSeries = useMemo(
+    () =>
+      activePicked.flatMap((item) => {
+        const resolved = resolveChartSeries(item.id, resolveScope)
+        if (!resolved) return []
+        return [{ ...resolved, color: item.color }]
+      }),
+    [activePicked, resolveScope],
+  )
+  const scopePartnerIds = useMemo(() => {
+    const ids = new Set<string>()
+    for (const company of scopeCompanies) {
+      for (const unit of company.units) ids.add(unit.partnerId)
+    }
+    return ids
+  }, [scopeCompanies])
+  const scopeShipments = useMemo(
+    () => summary.shipments.filter((row) => scopePartnerIds.has(row.partnerId)),
+    [scopePartnerIds, summary.shipments],
+  )
+  const totalBuckets = useMemo(
+    () => bucketTotalsByPeriod(scopeShipments, dates, unit),
+    [dates, scopeShipments, unit],
+  )
+  const chartSeries = useMemo<TrendLine[]>(
+    () =>
+      visibleSeries.map((series) => {
+        const ids = new Set(series.partnerIds)
+        const rows = scopeShipments.filter((row) => ids.has(row.partnerId))
+        const byKey = new Map(
+          bucketTotalsByPeriod(rows, dates, unit).map((bucket) => [
+            bucket.key,
+            bucket.quantity,
+          ]),
+        )
+        return {
+          id: series.id,
+          label: series.label,
+          color: series.color,
+          quantity: series.quantity,
+          values: totalBuckets.map((bucket) => byKey.get(bucket.key) ?? 0),
+        }
+      }),
+    [dates, scopeShipments, totalBuckets, unit, visibleSeries],
+  )
+  const colorById = useMemo(
+    () => new Map(visibleSeries.map((series) => [series.id, series.color])),
+    [visibleSeries],
+  )
+  const activeIds = useMemo(
+    () => new Set(visibleSeries.map((series) => series.id)),
+    [visibleSeries],
+  )
+  const totalQuantity = useMemo(
+    () => scopeCompanies.reduce((sum, company) => sum + company.quantity, 0),
+    [scopeCompanies],
+  )
+  const totalLabel = folder ? `${folder.label} 합계` : '총합'
+  const topCompany = grouped.companies[0] ?? null
+
+  useEffect(() => {
+    setPicked((prev) => {
+      if (prev === null || prev.length === 0) return prev
+      const next = prev.filter((item) =>
+        resolveChartSeries(item.id, productScopeRef.current),
+      )
+      if (next.length === prev.length) return prev
+      return next.length > 0 ? next : null
+    })
+    setLimitHit(false)
+    setHoverSeriesId(null)
+  }, [style.styleId])
+
+  useEffect(() => {
+    const count = summary.shipments.filter(
+      (row) => !Number.isFinite(row.quantity),
+    ).length
+    if (count === 0) return
+    console.warn('[운영현황] 수량이 숫자가 아닌 출고 기록', {
+      styleNo: summary.styleNo,
+      count,
+    })
+  }, [summary.shipments, summary.styleNo])
+
+  useEffect(() => {
+    if (!limitHit) return
+    const timer = window.setTimeout(() => setLimitHit(false), 2500)
+    return () => window.clearTimeout(timer)
+  }, [limitHit])
+
+  function toggleSeries(id: string) {
+    const base = picked ?? materializeAuto(autoIds)
+    if (base.some((item) => item.id === id)) {
+      setPicked(base.filter((item) => item.id !== id))
+      setLimitHit(false)
+      return
+    }
+    if (base.length >= MAX_PICKED) {
+      setLimitHit(true)
+      return
+    }
+    const used = new Set(base.map((item) => item.color))
+    const color =
+      SERIES_COLORS.find((item) => !used.has(item)) ?? SERIES_COLORS[0]
+    setPicked([...base, { id, color }])
+    setLimitHit(false)
+  }
+
   return (
     <WorkspaceTabOverlay>
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4">
-      <button
-        type="button"
-        aria-label="닫기"
-        className="absolute inset-0 bg-black/40"
-        onClick={onClose}
-      />
-      <div
+      <aside
         role="dialog"
-        aria-modal="true"
-        className="relative z-10 flex max-h-[min(92vh,880px)] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl"
+        aria-label={`${summary.styleNo} 출고 상세`}
+        className={cn(
+          'animate-panel-in fixed right-0 z-30 flex w-[min(440px,100vw)] flex-col border-l border-border bg-card shadow-xl',
+          !box && 'inset-y-0',
+        )}
+        style={box ? { top: box.top, height: box.height } : undefined}
       >
-        <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
-          <div className="min-w-0">
-            <p className="font-mono text-xs text-muted-foreground">
-              {summary.styleNo}
-            </p>
-            <h2 className="truncate text-lg font-semibold leading-snug">
-              {summary.styleName || '이름 없음'}
-            </h2>
+        <div
+          key={style.styleId}
+          className="animate-fade-in flex min-h-0 flex-1 flex-col"
+        >
+          <div className="border-b border-border px-5 py-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-mono text-xs text-muted-foreground">
+                  {summary.styleNo}
+                </p>
+                <h2 className="truncate text-lg font-semibold leading-snug">
+                  {summary.styleName || '이름 없음'}
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={onClose}
+                className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="닫기"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
             <div className="mt-2 flex flex-wrap gap-1.5">
               <Badge variant="muted">
                 출고 {formatNumber(summary.totalQuantity)}
@@ -926,9 +1182,12 @@ function ProductDetailDialog({
                   <Badge variant="muted">
                     업체 {formatNumber(summary.partnerCount)}
                   </Badge>
-                  <Badge variant="outline">
-                    기록 {formatNumber(summary.shipmentCount)}
-                  </Badge>
+                  {topCompany ? (
+                    <Badge variant="outline">
+                      {topCompany.label}{' '}
+                      {formatShare(topCompany.quantity, summary.totalQuantity)}
+                    </Badge>
+                  ) : null}
                 </>
               ) : finance ? (
                 <>
@@ -942,7 +1201,7 @@ function ProductDetailDialog({
               ) : null}
             </div>
             {mode === 'profit' && finance ? (
-              <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                 <div className="rounded-md border border-border bg-muted/20 px-2.5 py-2">
                   <p className="text-muted-foreground">단가</p>
                   <p className="mt-0.5 font-medium tabular-nums">
@@ -964,37 +1223,65 @@ function ProductDetailDialog({
                 <div className="rounded-md border border-border bg-muted/20 px-2.5 py-2">
                   <p className="text-muted-foreground">마진</p>
                   <p className="mt-0.5 font-medium tabular-nums">
-                    {finance.marginRate.toFixed(1)}%
+                    {Number.isFinite(finance.marginRate)
+                      ? `${finance.marginRate.toFixed(1)}%`
+                      : '—'}
                   </p>
                 </div>
               </div>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={onClose}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            aria-label="닫기"
-          >
-            <X className="size-4" />
-          </button>
+          <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+            <SeriesLegend
+              showTotal={showTotal}
+              totalLabel={totalLabel}
+              totalQuantity={totalQuantity}
+              series={chartSeries}
+              limitHit={limitHit}
+              onToggleTotal={() => setShowTotal((value) => !value)}
+              onRemove={toggleSeries}
+              onResetTop={() => {
+                setPicked(null)
+                setLimitHit(false)
+              }}
+              onClear={() => {
+                setPicked([])
+                setLimitHit(false)
+              }}
+              onHover={setHoverSeriesId}
+            />
+            <OutboundTrendChart
+              buckets={totalBuckets}
+              showTotal={showTotal}
+              totalLabel={totalLabel}
+              series={chartSeries}
+              hoverSeriesId={hoverSeriesId}
+              unit={unit}
+              onUnit={(next) => {
+                setUnit(next)
+              }}
+            />
+            <PartnerRankBars
+              key={style.styleId}
+              companies={ranked}
+              folders={grouped.folders}
+              folderKey={folder ? folder.key : null}
+              activeIds={activeIds}
+              colorById={colorById}
+              hoverSeriesId={hoverSeriesId}
+              onFolder={setFolderKey}
+              onToggle={toggleSeries}
+              onHover={setHoverSeriesId}
+            />
+          </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          <h3 className="mb-3 text-sm font-semibold">업체별 출고 추이</h3>
-          <PartnerOutboundChart
-            partners={summary.partners}
-            shipments={summary.shipments}
-            dates={dates}
-            targets={targets}
-            folders={folders}
-          />
+        <div className="flex h-20 shrink-0 items-center border-t border-border px-5 text-[11px] leading-4 text-muted-foreground">
+          위·아래 방향키로 이전·다음 상품 · Esc로 닫기
         </div>
-      </div>
-    </div>
+      </aside>
     </WorkspaceTabOverlay>
   )
 }
-
 function FilterBar({
   datePreset,
   dateFrom,
@@ -1256,6 +1543,7 @@ function ProductListCard({
   empty,
   emptyMessage,
   rows,
+  className,
 }: {
   title: string
   total: number
@@ -1265,9 +1553,10 @@ function ProductListCard({
   empty: boolean
   emptyMessage: string
   rows: ReactNode
+  className?: string
 }) {
   return (
-    <Card>
+    <Card className={className}>
       <CardHeader className="space-y-3 border-b border-border pb-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <CardTitle className="text-base">{title}</CardTitle>
@@ -1300,6 +1589,7 @@ function ProductListCard({
 
 export function OutboundDataPage() {
   useRenderWatch('OutboundDataPage')
+  const tabActive = useWorkspaceTabActivity()
   const { brand } = useBrand()
   const queryClient = useQueryClient()
   const [view, setView] = useState<ViewMode>('outbound')
@@ -1538,6 +1828,43 @@ export function OutboundDataPage() {
     return summarizeOutboundFinance(rowsForStyle)
   }, [filteredShipments, selectedStyle])
 
+  const detailRows = view === 'outbound' ? sortedVisibleRows : visibleRows
+
+  useEffect(() => {
+    if (!selectedStyleId || !tabActive) return
+    function onKey(event: KeyboardEvent) {
+      const target = event.target
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT')
+      ) {
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setSelectedStyleId(null)
+        return
+      }
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+      const index = detailRows.findIndex(
+        (row) => row.styleId === selectedStyleId,
+      )
+      if (index < 0) return
+      const next = detailRows[event.key === 'ArrowDown' ? index + 1 : index - 1]
+      if (!next) return
+      event.preventDefault()
+      setSelectedStyleId(next.styleId)
+      document
+        .querySelector(`[data-style-id="${CSS.escape(next.styleId)}"]`)
+        ?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [detailRows, selectedStyleId, tabActive])
+
   function applyPreset(preset: DatePreset) {
     setDatePreset(preset)
     const range = rangeForPreset(preset)
@@ -1672,6 +1999,10 @@ export function OutboundDataPage() {
 
           <ProductListCard
             {...listControls}
+            className={cn(
+              'transition-[padding] duration-200',
+              selectedStyle && 'lg:pr-[440px]',
+            )}
             title="상품 출고"
             filters={<FilterBar {...filterBarProps} />}
             rows={
@@ -1722,6 +2053,7 @@ export function OutboundDataPage() {
                     return (
                       <tr
                         key={style.styleId}
+                        data-style-id={style.styleId}
                         className={cn(
                           'group cursor-pointer',
                           active && 'bg-primary/10',
@@ -1783,7 +2115,7 @@ export function OutboundDataPage() {
           />
 
           {selectedSummary && selectedStyle ? (
-            <ProductDetailDialog
+            <ProductDetailPanel
               mode="outbound"
               summary={selectedSummary}
               style={selectedStyle}
@@ -1850,6 +2182,10 @@ export function OutboundDataPage() {
 
           <ProductListCard
             {...listControls}
+            className={cn(
+              'transition-[padding] duration-200',
+              selectedStyle && 'lg:pr-[440px]',
+            )}
             title="상품 손익"
             filters={<FilterBar {...filterBarProps} />}
             rows={
@@ -1881,6 +2217,7 @@ export function OutboundDataPage() {
                     return (
                       <tr
                         key={style.styleId}
+                        data-style-id={style.styleId}
                         className={cn(
                           'cursor-pointer border-b border-border last:border-0',
                           active ? 'bg-primary/10' : 'hover:bg-muted/30',
@@ -1929,7 +2266,7 @@ export function OutboundDataPage() {
           />
 
           {selectedSummary && selectedStyle && selectedFinance ? (
-            <ProductDetailDialog
+            <ProductDetailPanel
               mode="profit"
               summary={selectedSummary}
               style={selectedStyle}

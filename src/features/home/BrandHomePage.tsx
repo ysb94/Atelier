@@ -69,7 +69,7 @@ const shortcuts = [
   },
   {
     to: 'usage-codes',
-    label: '출고업체별 바코드',
+    label: '업체별 코드 관리',
     description: '판매처 코드 연결',
     icon: Store,
   },

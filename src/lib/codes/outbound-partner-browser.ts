@@ -175,13 +175,11 @@ export function collectOutboundUnitSections(input: {
   if (!input.includeDescendants || !input.folderId) return sections
 
   descendantIdsInTreeOrder(input.folders, input.folderId).forEach((id) => {
-    const companies = groupOutboundPartnersInFolder(input.cardsIn(id))
-    if (companies.length === 0) return
     sections.push({
       folderId: id,
       pathLabel: outboundSectionPathLabel(input.folders, input.folderId, id),
       depth: folderDepth(input.folders, id),
-      companies,
+      companies: groupOutboundPartnersInFolder(input.cardsIn(id)),
     })
   })
   return sections

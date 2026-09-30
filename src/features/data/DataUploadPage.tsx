@@ -31,7 +31,7 @@ const KINDS: { id: UploadKind; label: string; description: string }[] = [
   },
   {
     id: 'usage',
-    label: '출고업체별 바코드',
+    label: '업체별 코드 관리의 88코드',
     description: '출고업체에 자사 바코드를 파일로 일괄 연결합니다.',
   },
   {

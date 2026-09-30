@@ -1,10 +1,18 @@
+import {
+  compactCodeUsageChanges,
+  planCodeUsageChanges,
+} from '@/lib/codes/code-usage'
 import type {
   CodeUsageAssignment,
+  CodeUsageAssignmentChange,
   CodeUsageAssignmentInput,
   CodeUsageStatus,
 } from '@/lib/types'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
+import { fetchAllPages } from '@/lib/supabase/paged-select'
+
+const SAVE_CHUNK = 500
 
 const COLUMNS =
   'id, brand_id, product_code_id, usage_target_id, status, created_at, updated_at'
@@ -49,19 +57,28 @@ function toAssignment(row: AssignmentRow): CodeUsageAssignment {
 }
 
 async function readAll(brandId: string): Promise<CodeUsageAssignment[]> {
-  const { data, error } = await getSupabase()
-    .from('code_usage_assignments')
-    .select(COLUMNS)
-    .eq('brand_id', brandId)
-
-  if (error) {
-    throw new CodeUsageAssignmentStoreError(
-      errorMessage(error, '사용처 연결을 불러오지 못했습니다.'),
-      'invalid',
-    )
-  }
-
-  return ((data as AssignmentRow[]) ?? []).map(toAssignment)
+  const rows = await fetchAllPages<AssignmentRow>({
+    fetchPage: async (from, to, withCount) => {
+      const { data, error, count } = await getSupabase()
+        .from('code_usage_assignments')
+        .select(COLUMNS, withCount ? { count: 'exact' } : undefined)
+        .eq('brand_id', brandId)
+        .order('updated_at', { ascending: false })
+        .order('id', { ascending: false })
+        .range(from, to)
+      if (error) {
+        throw new CodeUsageAssignmentStoreError(
+          errorMessage(error, '사용처 연결을 불러오지 못했습니다.'),
+          'invalid',
+        )
+      }
+      return {
+        rows: (data as AssignmentRow[]) ?? [],
+        count: count ?? null,
+      }
+    },
+  })
+  return rows.map(toAssignment)
 }
 
 export async function listCodeUsageAssignments(
@@ -87,7 +104,11 @@ export async function listCodeUsageAssignments(
       if (options?.status && row.status !== options.status) return false
       return true
     })
-    .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+    .sort((left, right) => {
+      const byUpdated = right.updatedAt.localeCompare(left.updatedAt)
+      if (byUpdated !== 0) return byUpdated
+      return right.id.localeCompare(left.id)
+    })
 }
 
 export async function getCodeUsageAssignment(
@@ -113,12 +134,21 @@ async function findExisting(
   productCodeId: string,
   usageTargetId: string,
 ): Promise<CodeUsageAssignment | undefined> {
-  const rows = await readAll(brandId)
-  return rows.find(
-    (row) =>
-      row.productCodeId === productCodeId &&
-      row.usageTargetId === usageTargetId,
-  )
+  const { data, error } = await getSupabase()
+    .from('code_usage_assignments')
+    .select(COLUMNS)
+    .eq('brand_id', brandId)
+    .eq('product_code_id', productCodeId)
+    .eq('usage_target_id', usageTargetId)
+    .maybeSingle()
+
+  if (error) {
+    throw new CodeUsageAssignmentStoreError(
+      errorMessage(error, '사용처 연결을 불러오지 못했습니다.'),
+      'invalid',
+    )
+  }
+  return data ? toAssignment(data as AssignmentRow) : undefined
 }
 
 export async function createCodeUsageAssignment(
@@ -165,6 +195,38 @@ export async function createCodeUsageAssignment(
   return toAssignment(data as AssignmentRow)
 }
 
+export async function saveCodeUsageAssignments(
+  brandId: string,
+  changes: readonly CodeUsageAssignmentChange[],
+): Promise<CodeUsageAssignment[]> {
+  const rows = compactCodeUsageChanges(changes).map((change) => ({
+    brand_id: brandId,
+    product_code_id: change.productCodeId,
+    usage_target_id: change.usageTargetId,
+    status: change.status,
+  }))
+  if (rows.length === 0) return []
+
+  const saved: CodeUsageAssignment[] = []
+  for (let index = 0; index < rows.length; index += SAVE_CHUNK) {
+    const chunk = rows.slice(index, index + SAVE_CHUNK)
+    const { data, error } = await getSupabase()
+      .from('code_usage_assignments')
+      .upsert(chunk, {
+        onConflict: 'brand_id,product_code_id,usage_target_id',
+      })
+      .select(COLUMNS)
+    if (error) {
+      throw new CodeUsageAssignmentStoreError(
+        errorMessage(error, '사용처 연결을 저장하지 못했습니다.'),
+        'invalid',
+      )
+    }
+    saved.push(...((data as AssignmentRow[]) ?? []).map(toAssignment))
+  }
+  return saved
+}
+
 export async function updateCodeUsageAssignmentStatus(
   id: string,
   status: CodeUsageStatus,
@@ -177,21 +239,21 @@ export async function updateCodeUsageAssignmentStatus(
     )
   }
 
-  const { data, error } = await getSupabase()
-    .from('code_usage_assignments')
-    .update({ status: normalizeStatus(status) })
-    .eq('id', id)
-    .select(COLUMNS)
-    .single()
-
-  if (error) {
+  const saved = await saveCodeUsageAssignments(existing.brandId, [
+    {
+      productCodeId: existing.productCodeId,
+      usageTargetId: existing.usageTargetId,
+      status,
+    },
+  ])
+  const row = saved[0]
+  if (!row) {
     throw new CodeUsageAssignmentStoreError(
-      errorMessage(error, '상태를 저장하지 못했습니다.'),
+      '상태를 저장하지 못했습니다.',
       'invalid',
     )
   }
-
-  return toAssignment(data as AssignmentRow)
+  return row
 }
 
 export type BulkUsageApplyRow = {
@@ -210,32 +272,21 @@ export async function applyBulkUsageAssignments(
   usageTargetId: string,
   rows: BulkUsageApplyRow[],
 ): Promise<BulkUsageApplyResult> {
-  let created = 0
-  let updated = 0
-  let skipped = 0
-
-  for (const row of rows) {
-    const existing = await findExisting(
-      brandId,
-      row.productCodeId,
-      usageTargetId,
-    )
-    if (existing) {
-      if (existing.status === row.status) {
-        skipped += 1
-        continue
-      }
-      await updateCodeUsageAssignmentStatus(existing.id, row.status)
-      updated += 1
-      continue
-    }
-    await createCodeUsageAssignment(brandId, {
+  const existing = await readAll(brandId)
+  const plan = planCodeUsageChanges(
+    existing.filter((row) => row.usageTargetId === usageTargetId),
+    rows.map((row) => ({
       productCodeId: row.productCodeId,
       usageTargetId,
       status: row.status,
-    })
-    created += 1
+    })),
+  )
+  if (plan.changes.length > 0) {
+    await saveCodeUsageAssignments(brandId, plan.changes)
   }
-
-  return { created, updated, skipped }
+  return {
+    created: plan.created,
+    updated: plan.updated,
+    skipped: plan.skipped,
+  }
 }

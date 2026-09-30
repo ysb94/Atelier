@@ -139,16 +139,29 @@ function SectionList({
   onSelect,
   onRenamed,
   onError,
+  allowAdd = false,
+  addingFolderId = null,
+  addPending = false,
+  onAddCompany,
+  onSubmitCompany,
+  onCancelAdd,
 }: {
   sections: readonly OutboundUnitSection[]
   selectedId: string | null
   onSelect: (id: string) => void
   onRenamed?: () => void | Promise<void>
   onError?: (message: string | null) => void
+  allowAdd?: boolean
+  addingFolderId?: string | null
+  addPending?: boolean
+  onAddCompany?: (folderId: string) => void
+  onSubmitCompany?: (draft: { groupName: string }) => void
+  onCancelAdd?: () => void
 }) {
   const visible = sections.filter(
     (section, index) =>
       section.companies.length > 0 ||
+      (allowAdd && Boolean(section.pathLabel) && Boolean(section.folderId)) ||
       (index === 0 && sections.length === 1),
   )
   if (visible.length === 0) {
@@ -158,7 +171,11 @@ function SectionList({
       </p>
     )
   }
-  if (visible.length === 1 && visible[0]?.companies.length === 0) {
+  if (
+    visible.length === 1 &&
+    visible[0]?.companies.length === 0 &&
+    !visible[0]?.pathLabel
+  ) {
     return (
       <p className="px-2 py-6 text-sm text-muted-foreground">
         아직 업체가 없습니다. 업체를 넣거나 하위 폴더를 만드세요.
@@ -174,22 +191,52 @@ function SectionList({
             <TreeBranch
               root
               label={
-                <p className="truncate px-1 text-xs font-semibold text-muted-foreground">
-                  {section.pathLabel}
-                </p>
+                <div className="flex min-w-0 items-center gap-1">
+                  <p className="min-w-0 flex-1 truncate px-1 text-xs font-semibold text-muted-foreground">
+                    {section.pathLabel}
+                  </p>
+                  {allowAdd && section.folderId ? (
+                    <button
+                      type="button"
+                      className="inline-flex size-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                      aria-label={`${section.pathLabel} 에 업체 추가`}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onAddCompany?.(section.folderId!)
+                      }}
+                    >
+                      <Plus className="size-3" />
+                    </button>
+                  ) : null}
+                </div>
               }
             >
-              {section.companies.map((company, index) => (
-                <OutboundPartnerCompanyNode
-                  key={company.key}
-                  company={company}
-                  selectedId={selectedId}
-                  last={index === section.companies.length - 1}
-                  onSelect={onSelect}
-                  onRenamed={onRenamed}
-                  onError={onError}
-                />
-              ))}
+              {addingFolderId === section.folderId ? (
+                <div className="py-1 pr-1">
+                  <CompanyCreateForm
+                    pending={addPending}
+                    onSubmit={(draft) => onSubmitCompany?.(draft)}
+                    onCancel={() => onCancelAdd?.()}
+                  />
+                </div>
+              ) : null}
+              {section.companies.length === 0 ? (
+                <p className="px-1 py-2 text-xs text-muted-foreground">
+                  아직 업체가 없습니다.
+                </p>
+              ) : (
+                section.companies.map((company, index) => (
+                  <OutboundPartnerCompanyNode
+                    key={company.key}
+                    company={company}
+                    selectedId={selectedId}
+                    last={index === section.companies.length - 1}
+                    onSelect={onSelect}
+                    onRenamed={onRenamed}
+                    onError={onError}
+                  />
+                ))
+              )}
             </TreeBranch>
           ) : (
             section.companies.map((company, index) => (
@@ -248,6 +295,7 @@ export function OutboundPartnerBrowser({
   const [creatingRoot, setCreatingRoot] = useState(false)
   const [creatingFolder, setCreatingFolder] = useState(false)
   const [creatingPartner, setCreatingPartner] = useState(false)
+  const [addingFolderId, setAddingFolderId] = useState<string | null>(null)
   const [renaming, setRenaming] = useState(false)
   const [rename, setRename] = useState('')
   const [moving, setMoving] = useState(false)
@@ -414,10 +462,10 @@ export function OutboundPartnerBrowser({
   })
 
   const createPartnerMutation = useMutation({
-    mutationFn: async (draft: { groupName: string }) => {
+    mutationFn: async (draft: { groupName: string; folderId: string | null }) => {
       const channelType = outboundChannelFromFolderPath(
         folders,
-        activeFolderId ?? null,
+        draft.folderId,
       )
       const group = await createOutboundPartnerGroup(brandId, draft.groupName)
       return createCodeUsageTarget(brandId, {
@@ -428,11 +476,12 @@ export function OutboundPartnerBrowser({
         groupId: group.id,
         siteName: '',
         channelType,
-        folderId: activeFolderId ?? null,
+        folderId: draft.folderId,
       })
     },
     onSuccess: async (created) => {
       setCreatingPartner(false)
+      setAddingFolderId(null)
       setError(null)
       await onChanged()
       onSelect(created.id)
@@ -523,6 +572,22 @@ export function OutboundPartnerBrowser({
     <SectionList
       sections={sections}
       selectedId={selectedId}
+      allowAdd
+      addingFolderId={addingFolderId}
+      addPending={createPartnerMutation.isPending}
+      onAddCompany={(folderId) => {
+        setAddingFolderId(folderId)
+        setCreatingPartner(false)
+        setCreatingFolder(false)
+      }}
+      onSubmitCompany={(draft) => {
+        if (!addingFolderId) return
+        createPartnerMutation.mutate({
+          groupName: draft.groupName,
+          folderId: addingFolderId,
+        })
+      }}
+      onCancelAdd={() => setAddingFolderId(null)}
       onSelect={(id) => onSelect(id === selectedId ? null : id)}
       onRenamed={onChanged}
       onError={setError}
@@ -555,6 +620,7 @@ export function OutboundPartnerBrowser({
             onClick={() => {
               setCreatingFolder(true)
               setCreatingPartner(false)
+              setAddingFolderId(null)
             }}
           >
             <FolderPlus className="size-3" />
@@ -571,6 +637,7 @@ export function OutboundPartnerBrowser({
             onClick={() => {
               setCreatingPartner(true)
               setCreatingFolder(false)
+              setAddingFolderId(null)
             }}
           >
             <Plus className="size-3" />
@@ -635,7 +702,12 @@ export function OutboundPartnerBrowser({
         <div className="mb-2">
           <CompanyCreateForm
             pending={createPartnerMutation.isPending}
-            onSubmit={(draft) => createPartnerMutation.mutate(draft)}
+            onSubmit={(draft) =>
+              createPartnerMutation.mutate({
+                groupName: draft.groupName,
+                folderId: activeFolderId ?? null,
+              })
+            }
             onCancel={() => setCreatingPartner(false)}
           />
         </div>
@@ -752,6 +824,7 @@ export function OutboundPartnerBrowser({
                     setRequestedChildTabId(ALL_CHILD_TAB_ID)
                     setCreatingFolder(false)
                     setCreatingPartner(false)
+                    setAddingFolderId(null)
                     setRenaming(false)
                     setMoving(false)
                   }}
@@ -777,6 +850,7 @@ export function OutboundPartnerBrowser({
                       setRequestedChildTabId(tab.id)
                       setCreatingFolder(false)
                       setCreatingPartner(false)
+                      setAddingFolderId(null)
                       setRenaming(false)
                       setMoving(false)
                     }}

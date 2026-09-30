@@ -212,6 +212,28 @@ export async function scheduleCargoInbound(
   }
 }
 
+export async function deleteCargoInbound(
+  brandId: string,
+  shipmentId: string,
+): Promise<void> {
+  if (!brandId.trim() || !shipmentId.trim()) {
+    throw new CargoInboundStoreError('삭제할 화물을 확인하세요.')
+  }
+
+  const { data, error } = await getSupabase()
+    .from('cargo_inbound_shipments')
+    .delete()
+    .eq('brand_id', brandId)
+    .eq('id', shipmentId)
+    .select('id')
+
+  if (error || !data?.length) {
+    throw new CargoInboundStoreError(
+      errorMessage(error, '화물 선적을 삭제하지 못했습니다.'),
+    )
+  }
+}
+
 export async function completeCargoInbound(
   brandId: string,
   shipmentId: string,

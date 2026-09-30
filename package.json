@@ -61,7 +61,8 @@
     "verify:warehouse-box-lifecycle": "npx tsx src/lib/warehouse/warehouse-box-lifecycle.verify.ts",
     "verify:studio-library": "npx tsx src/lib/design/studio-library.verify.ts",
     "verify:masma-finder": "node scripts/verify-masma-finder.mjs",
-    "verify:sabangnet-codes": "npx tsx --tsconfig tsconfig.app.json src/lib/codes/sabangnet-import.verify.ts"
+    "verify:sabangnet-codes": "npx tsx --tsconfig tsconfig.app.json src/lib/codes/sabangnet-import.verify.ts",
+    "verify:code-usage": "npx tsx --tsconfig tsconfig.app.json src/lib/codes/code-usage.verify.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",

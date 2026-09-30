@@ -6,6 +6,7 @@ import {
   MapPin,
   Package,
   Plus,
+  Trash2,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
@@ -23,6 +24,7 @@ import {
 } from '@/features/logistics/cargo-inbound-title'
 import {
   completeCargoInbound,
+  deleteCargoInbound,
   getCargoInbounds,
   saveCargoInbound,
   saveCargoInboundRequestNotes,
@@ -126,6 +128,8 @@ export function CompanyCargoInboundPage() {
   const [search, setSearch] = useState('')
   const [adding, setAdding] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
   const brandIds = useMemo(() => brands.map((brand) => brand.id), [brands])
   const cargoQueryKey = companyQueryKey('cargo-inbounds', brandIds)
   const cargoQuery = useQuery({
@@ -284,6 +288,42 @@ export function CompanyCargoInboundPage() {
     await queryClient.invalidateQueries({ queryKey: ['cargo-inbounds'] })
   }
 
+  async function handleDelete(item: CargoInboundItem) {
+    const title = formatCargoInboundTitle(item.shippedAt, item.boxCount)
+    const extra =
+      item.stage === 'shipped'
+        ? ''
+        : '\n입고일과 정리 기록도 함께 지워집니다.'
+    if (
+      !window.confirm(
+        `"${title}" (${item.brandName})을 삭제할까요?\n상품 ${formatNumber(item.productCount)}개, 박스 ${formatNumber(item.boxCount)}개가 함께 지워지며 되돌릴 수 없습니다.${extra}`,
+      )
+    ) {
+      return
+    }
+
+    setDeleteError(null)
+    setDeletingId(item.id)
+    try {
+      await deleteCargoInbound(item.brandId, item.id)
+      if (selectedId === item.id) setSelectedId(null)
+      await queryClient.invalidateQueries({ queryKey: ['cargo-inbounds'] })
+    } catch (error) {
+      console.warn('[cargo-inbound] 선적 삭제 실패', {
+        shipmentId: item.id,
+        brandId: item.brandId,
+        error,
+      })
+      setDeleteError(
+        error instanceof Error
+          ? error.message
+          : '화물 선적을 삭제하지 못했습니다.',
+      )
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
   async function handleComplete() {
     if (!selectedItem) return
     await completeMutation.mutateAsync({
@@ -315,7 +355,9 @@ export function CompanyCargoInboundPage() {
       ) : selectedItem ? (
         <CargoInboundDetailPanel
           item={selectedItem}
+          deleting={deletingId === selectedItem.id}
           onBack={() => setSelectedId(null)}
+          onDelete={() => handleDelete(selectedItem)}
           onSaveInboundDate={handleSaveInboundDate}
           onSaveRequestNotes={handleSaveRequestNotes}
           onComplete={handleComplete}
@@ -410,6 +452,11 @@ export function CompanyCargoInboundPage() {
           <p className="mb-3 text-xs text-muted-foreground">
             {activeMeta.description}
           </p>
+          {deleteError ? (
+            <p className="mb-3 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
+              {deleteError}
+            </p>
+          ) : null}
 
           {cargoQuery.isError ? (
             <Card className="px-4 py-10 text-center text-sm text-danger">
@@ -446,7 +493,9 @@ export function CompanyCargoInboundPage() {
                     <CargoInboundRow
                       key={item.id}
                       item={item}
+                      deleting={deletingId === item.id}
                       onOpen={() => setSelectedId(item.id)}
+                      onDelete={() => handleDelete(item)}
                     />
                   ))}
                 </section>
@@ -458,7 +507,9 @@ export function CompanyCargoInboundPage() {
                 <CargoInboundRow
                   key={item.id}
                   item={item}
+                  deleting={deletingId === item.id}
                   onOpen={() => setSelectedId(item.id)}
+                  onDelete={() => handleDelete(item)}
                 />
               ))}
             </div>
@@ -486,17 +537,22 @@ export function CompanyCargoInboundPage() {
 
 function CargoInboundRow({
   item,
+  deleting,
   onOpen,
+  onDelete,
 }: {
   item: CargoInboundItem
+  deleting: boolean
   onOpen: () => void
+  onDelete: () => void
 }) {
   return (
     <Card className="shadow-none">
+      <div className="flex w-full flex-col gap-3 px-4 py-3 lg:flex-row lg:items-start lg:justify-between">
       <button
         type="button"
         onClick={onOpen}
-        className="flex w-full flex-col gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/30 lg:flex-row lg:items-start lg:justify-between"
+        className="flex min-w-0 flex-1 flex-col gap-3 text-left transition-colors hover:bg-muted/30 lg:flex-row lg:items-start lg:justify-between"
       >
         <div className="min-w-0 space-y-2">
           <div className="flex flex-wrap items-center gap-2">
@@ -558,6 +614,18 @@ function CargoInboundRow({
               : '완료'}
         </div>
       </button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className="shrink-0 text-danger hover:bg-danger/10"
+        disabled={deleting}
+        onClick={onDelete}
+      >
+        <Trash2 className="size-3.5" />
+        {deleting ? '삭제 중' : '삭제'}
+      </Button>
+      </div>
     </Card>
   )
 }

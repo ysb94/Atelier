@@ -84,7 +84,7 @@ const NAV_LABELS: {
   { match: /^\/logistics\/cargo-inbound(?:\/|$)/, label: '물류 · 화물 입고' },
   { match: /^\/barcodes(?:\/|$)/, label: '88바코드 관리' },
   { match: /^\/sabangnet-codes(?:\/|$)/, label: '사방넷 코드 관리' },
-  { match: /^\/usage-codes(?:\/|$)/, label: '출고업체별 바코드' },
+  { match: /^\/usage-codes(?:\/|$)/, label: '업체별 코드 관리' },
   { match: /^\/partner-codes(?:\/|$)/, label: '거래처 코드' },
   { match: /^\/settings\/profile(?:\/|$)/, label: '마이페이지' },
   { match: /^\/org-chart(?:\/|$)/, label: '조직도' },

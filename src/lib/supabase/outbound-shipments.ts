@@ -31,6 +31,49 @@ type ShipmentRow = {
   note: string
 }
 
+type StyleEmbed = {
+  style_no: string
+  name: string
+}
+
+type PartnerGroupEmbed = {
+  name: string
+}
+
+type PartnerTargetEmbed = {
+  name: string
+  site_name: string
+  outbound_partner_groups: PartnerGroupEmbed | PartnerGroupEmbed[] | null
+}
+
+type PartnerUnitEmbed = {
+  name: string
+  group_id: string | null
+  site_name: string
+}
+
+type OutboundShipmentJoinedRow = ShipmentRow & {
+  style: StyleEmbed | StyleEmbed[] | null
+  target: PartnerTargetEmbed | PartnerTargetEmbed[] | null
+}
+
+type BarcodeLedgerJoinedRow = ShipmentRow & {
+  created_at: string
+  style: StyleEmbed | StyleEmbed[] | null
+  target: PartnerUnitEmbed | PartnerUnitEmbed[] | null
+}
+
+function firstEmbed<T>(value: T | T[] | null | undefined): T | null {
+  if (!value) return null
+  return Array.isArray(value) ? (value[0] ?? null) : value
+}
+
+const OUTBOUND_SHIPMENT_SELECT =
+  'id, brand_id, style_id, usage_target_id, shipped_on, quantity, source, source_ref, note, style:styles!outbound_shipments_style_fkey(style_no, name), target:code_usage_targets!outbound_shipments_target_fkey(name, site_name, outbound_partner_groups(name))'
+
+const BARCODE_LEDGER_SELECT =
+  'id, brand_id, style_id, usage_target_id, shipped_on, quantity, source, source_ref, note, created_at, style:styles!outbound_shipments_style_fkey(style_no, name), target:code_usage_targets!outbound_shipments_target_fkey(name, group_id, site_name)'
+
 function isSource(
   value: string,
 ): value is ProductOutboundShipment['source'] {
@@ -40,12 +83,12 @@ function isSource(
 export async function listOutboundShipments(
   brandId: string,
 ): Promise<ProductOutboundShipment[]> {
-  const rows = await fetchAllPages<ShipmentRow>({
+  const rows = await fetchAllPages<OutboundShipmentJoinedRow>({
     fetchPage: async (from, to, withCount) => {
       const { data, error, count } = await getSupabase()
         .from('outbound_shipments')
         .select(
-          'id, brand_id, style_id, usage_target_id, shipped_on, quantity, source, source_ref, note',
+          OUTBOUND_SHIPMENT_SELECT,
           withCount ? { count: 'exact' } : undefined,
         )
         .eq('brand_id', brandId)
@@ -57,79 +100,19 @@ export async function listOutboundShipments(
           errorMessage(error, '출고 원장을 불러오지 못했습니다.'),
         )
       }
-      return { rows: (data as ShipmentRow[]) ?? [], count: count ?? null }
+      return {
+        rows: (data as OutboundShipmentJoinedRow[]) ?? [],
+        count: count ?? null,
+      }
     },
   })
-
-  if (rows.length === 0) return []
-
-  const styleIds = [...new Set(rows.map((row) => row.style_id))]
-  const targetIds = [...new Set(rows.map((row) => row.usage_target_id))]
-
-  const [stylesResult, targetsResult] = await Promise.all([
-    getSupabase()
-      .from('styles')
-      .select('id, style_no, name')
-      .eq('brand_id', brandId)
-      .in('id', styleIds),
-    getSupabase()
-      .from('code_usage_targets')
-      .select(
-        'id, name, channel_type, site_name, outbound_partner_groups(name)',
-      )
-      .eq('brand_id', brandId)
-      .in('id', targetIds),
-  ])
-
-  if (stylesResult.error) {
-    throw new OutboundShipmentStoreError(
-      errorMessage(stylesResult.error, '출고 상품을 불러오지 못했습니다.'),
-    )
-  }
-  if (targetsResult.error) {
-    throw new OutboundShipmentStoreError(
-      errorMessage(targetsResult.error, '출고업체를 불러오지 못했습니다.'),
-    )
-  }
-
-  const styleById = new Map(
-    ((stylesResult.data as Array<{
-      id: string
-      style_no: string
-      name: string
-    }>) ?? []).map((row) => [row.id, row]),
-  )
-  const targetById = new Map(
-    ((
-      targetsResult.data as unknown as Array<{
-        id: string
-        name: string
-        channel_type: 'unset' | 'online' | 'offline'
-        site_name: string
-        outbound_partner_groups:
-          | { name: string }
-          | { name: string }[]
-          | null
-      }>
-    ) ?? []).map((row) => {
-      const group = Array.isArray(row.outbound_partner_groups)
-        ? row.outbound_partner_groups[0]
-        : row.outbound_partner_groups
-      return [
-        row.id,
-        outboundPartnerDisplayName({
-          name: row.name,
-          groupName: group?.name ?? '',
-          siteName: row.site_name,
-        }),
-      ]
-    }),
-  )
 
   return rows
     .filter((row) => isSource(row.source) && row.quantity > 0)
     .map((row) => {
-      const style = styleById.get(row.style_id)
+      const style = firstEmbed(row.style)
+      const target = firstEmbed(row.target)
+      const group = firstEmbed(target?.outbound_partner_groups)
       return {
         id: row.id,
         brandId: row.brand_id,
@@ -137,7 +120,13 @@ export async function listOutboundShipments(
         styleNo: style?.style_no ?? '',
         styleName: style?.name ?? '',
         partnerId: row.usage_target_id,
-        partnerName: targetById.get(row.usage_target_id) ?? '',
+        partnerName: target
+          ? outboundPartnerDisplayName({
+              name: target.name,
+              groupName: group?.name ?? '',
+              siteName: target.site_name,
+            })
+          : '',
         shippedOn: row.shipped_on.slice(0, 10),
         quantity: row.quantity,
         source: row.source,
@@ -375,13 +364,12 @@ export async function replaceInvoiceOutboundShipments(input: {
 export async function listBarcodeDataEntryShipments(
   brandId: string,
 ): Promise<BarcodeDataEntryLedgerRow[]> {
-  type LedgerShipmentRow = ShipmentRow & { created_at: string }
-  const rows = await fetchAllPages<LedgerShipmentRow>({
+  const rows = await fetchAllPages<BarcodeLedgerJoinedRow>({
     fetchPage: async (from, to, withCount) => {
       const { data, error, count } = await getSupabase()
         .from('outbound_shipments')
         .select(
-          'id, brand_id, style_id, usage_target_id, shipped_on, quantity, source, source_ref, note, created_at',
+          BARCODE_LEDGER_SELECT,
           withCount ? { count: 'exact' } : undefined,
         )
         .eq('brand_id', brandId)
@@ -396,70 +384,17 @@ export async function listBarcodeDataEntryShipments(
         )
       }
       return {
-        rows: (data as LedgerShipmentRow[]) ?? [],
+        rows: (data as BarcodeLedgerJoinedRow[]) ?? [],
         count: count ?? null,
       }
     },
   })
 
-  if (rows.length === 0) return []
-
-  const styleIds = [...new Set(rows.map((row) => row.style_id))]
-  const targetIds = [...new Set(rows.map((row) => row.usage_target_id))]
-
-  const [stylesResult, targetsResult] = await Promise.all([
-    getSupabase()
-      .from('styles')
-      .select('id, style_no, name')
-      .eq('brand_id', brandId)
-      .in('id', styleIds),
-    getSupabase()
-      .from('code_usage_targets')
-      .select('id, name, group_id, site_name')
-      .eq('brand_id', brandId)
-      .in('id', targetIds),
-  ])
-
-  if (stylesResult.error) {
-    throw new OutboundShipmentStoreError(
-      errorMessage(stylesResult.error, '출고 상품을 불러오지 못했습니다.'),
-    )
-  }
-  if (targetsResult.error) {
-    throw new OutboundShipmentStoreError(
-      errorMessage(targetsResult.error, '출고업체를 불러오지 못했습니다.'),
-    )
-  }
-
-  const styleById = new Map(
-    ((stylesResult.data as Array<{
-      id: string
-      style_no: string
-      name: string
-    }>) ?? []).map((row) => [row.id, row]),
-  )
-  const targetById = new Map(
-    ((
-      targetsResult.data as Array<{
-        id: string
-        name: string
-        group_id: string | null
-        site_name: string
-      }>
-    ) ?? []).map((row) => [
-      row.id,
-      outboundPartnerUnitLabel({
-        name: row.name,
-        groupId: row.group_id,
-        siteName: row.site_name,
-      }),
-    ]),
-  )
-
   return rows
     .filter((row) => row.quantity > 0 && row.source_ref)
     .map((row) => {
-      const style = styleById.get(row.style_id)
+      const style = firstEmbed(row.style)
+      const target = firstEmbed(row.target)
       return {
         id: row.id,
         sourceRef: row.source_ref ?? '',
@@ -467,7 +402,13 @@ export async function listBarcodeDataEntryShipments(
         styleNo: style?.style_no ?? '',
         styleName: style?.name ?? '',
         usageTargetId: row.usage_target_id,
-        partnerName: targetById.get(row.usage_target_id) ?? '',
+        partnerName: target
+          ? outboundPartnerUnitLabel({
+              name: target.name,
+              groupId: target.group_id,
+              siteName: target.site_name,
+            })
+          : '',
         shippedOn: row.shipped_on.slice(0, 10),
         quantity: row.quantity,
         note: row.note || '',

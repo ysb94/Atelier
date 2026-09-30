@@ -91,7 +91,7 @@ function PartnerSettingsDialog({
         <div className="min-h-0 flex-1 space-y-1 overflow-auto px-3 py-3">
           {partners.length === 0 ? (
             <p className="px-2 py-8 text-center text-sm text-muted-foreground">
-              등록된 출고업체가 없습니다. 출고업체별 바코드의 업체 관리에서 먼저
+              등록된 출고업체가 없습니다. 업체별 코드 관리의 88코드 탭에서 먼저
               추가하세요.
             </p>
           ) : (

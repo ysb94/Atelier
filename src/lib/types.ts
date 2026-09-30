@@ -599,6 +599,13 @@ export type CodeUsageAssignmentInput = {
   status?: CodeUsageStatus
 }
 
+/** 사용처 연결을 만들거나 상태를 바꿀 때의 한 줄. 같은 키는 마지막 값이 이긴다. */
+export type CodeUsageAssignmentChange = {
+  productCodeId: string
+  usageTargetId: string
+  status: CodeUsageStatus
+}
+
 /**
  * 출고 거래 단위. 재고를 갖지 않고 "이 구성으로 묶어 이 라벨을 붙인다"를 정의한다.
  * 단품 하나만 나가는 경우도 구성 1줄인 코드로 취급한다.

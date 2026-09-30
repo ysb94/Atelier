@@ -143,7 +143,7 @@ export function CompanyBarcodeList() {
       </Card>
       {brands.length > 1 ? (
         <p className="mt-3 text-xs text-muted-foreground">
-          출고업체별 바코드·거래처 코드의 업체 트리와 헤더는 브랜드를 하나만
+          업체별 코드 관리의 88코드·거래처 코드의 업체 트리와 헤더는 브랜드를 하나만
           고른 뒤에 엽니다.
         </p>
       ) : null}
@@ -154,7 +154,7 @@ export function CompanyBarcodeList() {
 export function CompanyUsageCodeList() {
   return (
     <ListShell
-      title="출고업체별 바코드"
+      title="업체별 코드 관리"
       description="업체 헤더와 폴더 트리는 브랜드마다 다릅니다. 브랜드를 하나만 고르면 기존 관리 화면이 열립니다."
     >
       <Card className="px-4 py-8 text-center text-sm text-muted-foreground">

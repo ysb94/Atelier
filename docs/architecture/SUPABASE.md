@@ -93,7 +93,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `create_warehouse_box`, `update_warehouse_box`, `move_warehouse_box`,
   `complete_warehouse_box_outbound`,
   `search_warehouse_finder_rows`, `list_warehouse_finder_inbounds`.
-  화문 입고 원자 등록은 `save_cargo_inbound`를 사용한다.
+  화문 입고 원자 등록은 `save_cargo_inbound`를 사용한다. 잘못 올린 선적은
+  `cargo_inbound_shipments` 삭제로 지우고, 품목 행은 `ON DELETE CASCADE`로 같이 지운다.
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
 - 브랜드 로고는 지금 `logo_url`에 data URL로 저장한다. 이후 `brands/{brand_id}/...`
   Storage 경로로 옮긴다.

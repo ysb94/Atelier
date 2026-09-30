@@ -237,65 +237,63 @@ export function BarcodePage() {
     setDialog({ mode: 'create', source: code })
   }
 
+  const headerActions = (
+    <>
+      <Button
+        type="button"
+        variant="outline"
+        disabled={fieldsQuery.isLoading}
+        onClick={() =>
+          setBulkPanel((current) => (current === 'fields' ? null : 'fields'))
+        }
+      >
+        <Settings2 className="size-3.5" />
+        {bulkPanel === 'fields' ? '항목 관리 닫기' : '항목 관리'}
+      </Button>
+      {hasStyles ? (
+        <>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() =>
+              setBulkPanel((current) => (current === 'info' ? null : 'info'))
+            }
+          >
+            <FileSpreadsheet className="size-3.5" />
+            {bulkPanel === 'info' ? '정보 수정 닫기' : '정보 일괄 수정'}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() =>
+              setBulkPanel((current) =>
+                current === 'create' ? null : 'create',
+              )
+            }
+          >
+            <Upload className="size-3.5" />
+            {bulkPanel === 'create' ? '일괄 등록 닫기' : '일괄 등록'}
+          </Button>
+          <Button type="button" onClick={openCreate}>
+            + 바코드 등록
+          </Button>
+        </>
+      ) : (
+        <Link to={`/data/upload?brand=${encodeURIComponent(brand.slug)}&mode=single`}>
+          <Button type="button" variant="outline">
+            상품 먼저 등록
+          </Button>
+        </Link>
+      )}
+    </>
+  )
+
   return (
     <div>
       <PageHeader
         title="88바코드 관리"
-        description={`${brand.name}이 직접 발급하는 88코드 마스터입니다. 업체 프리픽스는 ${barcodePrefix(brand.id)}입니다. 출고업체 등록은 출고업체별 바코드 메뉴에서 합니다.`}
-        actions={
-          <>
-            <Button
-              type="button"
-              variant="outline"
-              disabled={fieldsQuery.isLoading}
-              onClick={() =>
-                setBulkPanel((current) =>
-                  current === 'fields' ? null : 'fields',
-                )
-              }
-            >
-              <Settings2 className="size-3.5" />
-              {bulkPanel === 'fields' ? '항목 관리 닫기' : '항목 관리'}
-            </Button>
-            {hasStyles ? (
-              <>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() =>
-                  setBulkPanel((current) =>
-                    current === 'info' ? null : 'info',
-                  )
-                }
-              >
-                <FileSpreadsheet className="size-3.5" />
-                {bulkPanel === 'info' ? '정보 수정 닫기' : '정보 일괄 수정'}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() =>
-                  setBulkPanel((current) =>
-                    current === 'create' ? null : 'create',
-                  )
-                }
-              >
-                <Upload className="size-3.5" />
-                {bulkPanel === 'create' ? '일괄 등록 닫기' : '일괄 등록'}
-              </Button>
-              <Button type="button" onClick={openCreate}>
-                + 바코드 등록
-              </Button>
-              </>
-            ) : (
-              <Link to={`/data/upload?brand=${encodeURIComponent(brand.slug)}&mode=single`}>
-                <Button type="button" variant="outline">
-                  상품 먼저 등록
-                </Button>
-              </Link>
-            )}
-          </>
-        }
+        description={`${brand.name}이 직접 발급하는 88코드 마스터입니다. 업체 프리픽스는 ${barcodePrefix(brand.id)}입니다. 출고업체 연결은 업체별 코드 관리의 88코드 탭에서 합니다.`}
+        actions={headerActions}
       />
 
       {bulkPanel === 'fields' ? (

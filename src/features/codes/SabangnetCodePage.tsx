@@ -62,6 +62,22 @@ function formatUpdatedAt(value: string) {
   }).format(date)
 }
 
+function fieldCell(field: SabangnetField, product: SabangnetProduct) {
+  if (field.systemKey === 'code') return product.code
+  if (field.systemKey === 'name') return product.name
+  if (field.systemKey === 'styles') {
+    if (product.styles.length === 0) return null
+    return product.styles.map((style) => style.styleNo).join(', ')
+  }
+  const raw = product.values[field.id]?.trim() ?? ''
+  if (!raw) return ''
+  if (field.type === 'number') {
+    const numeric = Number(raw.replace(/,/g, ''))
+    return Number.isFinite(numeric) ? formatNumber(numeric) : raw
+  }
+  return raw
+}
+
 function buildPageItems(
   current: number,
   total: number,
@@ -113,6 +129,7 @@ export function SabangnetCodePage() {
   const products = productsQuery.data ?? emptyList<SabangnetProduct>()
   const styles = stylesQuery.data ?? emptyList<StyleRef>()
   const fields = fieldsQuery.data ?? emptyList<SabangnetField>()
+  const listColumnCount = 1 + fields.length + 2
 
   const linkedCount = useMemo(
     () => products.filter((product) => product.styles.length > 0).length,
@@ -137,6 +154,13 @@ export function SabangnetCodePage() {
     return scoped.filter((product) => {
       if (product.code.toLowerCase().includes(keyword)) return true
       if (product.name.toLowerCase().includes(keyword)) return true
+      if (
+        Object.values(product.values).some((value) =>
+          value.toLowerCase().includes(keyword),
+        )
+      ) {
+        return true
+      }
       return product.styles.some(
         (style) =>
           style.styleNo.toLowerCase().includes(keyword) ||
@@ -328,7 +352,7 @@ export function SabangnetCodePage() {
           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               className="sm:max-w-sm"
-              placeholder="사방넷 코드, 상품명, M번호 검색..."
+              placeholder="등록 항목, M번호 검색..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -357,9 +381,11 @@ export function SabangnetCodePage() {
                 <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
                   <tr>
                     <th className="w-8 px-4 py-3" />
-                    <th className="px-4 py-3 font-medium">사방넷 코드</th>
-                    <th className="px-4 py-3 font-medium">상품명</th>
-                    <th className="px-4 py-3 font-medium">연결 M번호</th>
+                    {fields.map((field) => (
+                      <th key={field.id} className="px-4 py-3 font-medium">
+                        {field.label}
+                      </th>
+                    ))}
                     <th className="px-4 py-3 font-medium">수정일</th>
                     <th className="w-20 px-4 py-3 font-medium">작업</th>
                   </tr>
@@ -368,7 +394,7 @@ export function SabangnetCodePage() {
                   {productsQuery.isLoading ? (
                     <tr>
                       <td
-                        colSpan={6}
+                        colSpan={listColumnCount}
                         className="px-4 py-10 text-center text-muted-foreground"
                       >
                         불러오는 중...
@@ -376,7 +402,7 @@ export function SabangnetCodePage() {
                     </tr>
                   ) : productsQuery.isError ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-12 text-center">
+                      <td colSpan={listColumnCount} className="px-4 py-12 text-center">
                         <div className="mx-auto max-w-md space-y-3">
                           <p className="text-sm font-medium text-danger">
                             사방넷 코드 목록을 불러오지 못했습니다
@@ -399,7 +425,7 @@ export function SabangnetCodePage() {
                     </tr>
                   ) : totalCount === 0 ? (
                     <tr>
-                      <td colSpan={6} className="px-4 py-16 text-center">
+                      <td colSpan={listColumnCount} className="px-4 py-16 text-center">
                         <div className="mx-auto flex max-w-md flex-col items-center">
                           <div className="mb-3 flex size-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
                             <Link2 className="size-5" />
@@ -439,19 +465,28 @@ export function SabangnetCodePage() {
                                 )}
                               />
                             </td>
-                            <td className="px-4 py-3 font-medium tabular-nums">
-                              {product.code}
-                            </td>
-                            <td className="px-4 py-3">{product.name}</td>
-                            <td className="px-4 py-3">
-                              {product.styles.length === 0 ? (
-                                <Badge variant="warning">미연결</Badge>
-                              ) : (
-                                <Badge variant="muted">
-                                  M번호 {formatNumber(product.styles.length)}종
-                                </Badge>
-                              )}
-                            </td>
+                            {fields.map((field) => {
+                              const value = fieldCell(field, product)
+                              return (
+                                <td
+                                  key={field.id}
+                                  className={cn(
+                                    'max-w-64 px-4 py-3',
+                                    field.systemKey === 'code' &&
+                                      'font-medium tabular-nums',
+                                    field.type === 'number' && 'tabular-nums',
+                                  )}
+                                >
+                                  {field.systemKey === 'styles' && !value ? (
+                                    <Badge variant="warning">미연결</Badge>
+                                  ) : (
+                                    <span className="line-clamp-2" title={value || undefined}>
+                                      {value || '—'}
+                                    </span>
+                                  )}
+                                </td>
+                              )
+                            })}
                             <td className="px-4 py-3 tabular-nums text-muted-foreground">
                               {formatUpdatedAt(product.updatedAt)}
                             </td>
@@ -494,7 +529,7 @@ export function SabangnetCodePage() {
                           {isExpanded ? (
                             <tr className="border-b border-border bg-muted/20">
                               <td />
-                              <td colSpan={5} className="px-4 py-4">
+                              <td colSpan={listColumnCount - 1} className="px-4 py-4">
                                 <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                   연결 M번호
                                 </div>

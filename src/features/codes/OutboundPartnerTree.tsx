@@ -54,7 +54,7 @@ export function TreeBranch({
   }
 
   function onLabelClick(event: MouseEvent) {
-    if ((event.target as HTMLElement).closest('input')) return
+    if ((event.target as HTMLElement).closest('input, button')) return
     if (event.detail > 1) {
       clearToggleTimer()
       return

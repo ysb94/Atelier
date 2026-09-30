@@ -2334,7 +2334,7 @@ function PartnerSettingsDialog({
 
   const registryEmptyMessage =
     barcodeSource === 'own'
-      ? '출고업체별 바코드에 이 업체가 등록되어 있지 않습니다.'
+      ? '업체별 코드 관리의 88코드에 이 업체가 등록되어 있지 않습니다.'
       : barcodeSource === 'partner'
         ? '거래처 코드에 이 업체가 등록되어 있지 않습니다.'
         : null
@@ -2570,7 +2570,7 @@ function PartnerSettingsDialog({
                       className="inline-flex font-medium underline underline-offset-2"
                     >
                       {barcodeSource === 'own'
-                        ? '출고업체별 바코드로 이동'
+                        ? '업체별 코드 관리의 88코드로 이동'
                         : '거래처 코드로 이동'}
                     </Link>
                   </div>
