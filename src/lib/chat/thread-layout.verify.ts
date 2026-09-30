@@ -17,6 +17,9 @@ function message(patch: Partial<ChatMessage> & Pick<ChatMessage, 'id' | 'created
     kind: 'text',
     body: '안녕',
     deletedAt: null,
+    replyToMessageId: null,
+    replyTo: null,
+    reactions: [],
     mine: false,
     ...patch,
   }

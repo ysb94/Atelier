@@ -41,6 +41,11 @@ export function useChatRealtime(enabled: boolean) {
         { event: '*', schema: 'public', table: 'chat_attachments' },
         () => refresh(),
       )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'chat_message_reactions' },
+        () => refresh(),
+      )
       .subscribe((status) => {
         if (status === 'SUBSCRIBED') {
           if (seenSubscribed && dropped) {

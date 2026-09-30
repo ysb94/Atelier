@@ -134,7 +134,7 @@ export function ChatPanel({
               })
             }
             onClose={onClose}
-            onSend={(body) => sending.send(view.roomId, body)}
+            onSend={(body, replyTo) => sending.send(view.roomId, body, replyTo)}
             onFiles={(files) => sending.sendFiles(view.roomId, files)}
             uploads={sending.uploads.filter((item) => item.roomId === view.roomId)}
             onRetry={sending.retry}

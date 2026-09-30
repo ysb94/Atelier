@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, Menu, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { layoutChatThread } from '@/lib/chat/thread-layout'
-import type { ChatMessage, ChatRoom } from '@/lib/inbox/types'
-import { markChatRoomRead } from '@/lib/supabase/chat'
+import type { ChatMessage, ChatReactionEmoji, ChatReplyPreview, ChatRoom } from '@/lib/inbox/types'
+import { markChatRoomRead, setChatReaction } from '@/lib/supabase/chat'
 import { emptyList } from '@/lib/utils'
 import { ChatRoomAvatar } from './ChatAvatar'
 import { ChatComposer, type ChatUploadItem } from './ChatComposer'
@@ -42,7 +42,7 @@ export function ChatThread({
   onBack?: () => void
   onOpenInfo: () => void
   onClose?: () => void
-  onSend: (body: string) => void
+  onSend: (body: string, replyTo: ChatReplyPreview | null) => void
   onFiles: (files: File[]) => void
   uploads: readonly ChatUploadItem[]
   onRetry: (messageId: string) => void
@@ -52,6 +52,9 @@ export function ChatThread({
   const queryClient = useQueryClient()
   const listRef = useRef<HTMLDivElement>(null)
   const stickRef = useRef(true)
+  const [replyTarget, setReplyTarget] = useState<ChatReplyPreview | null>(null)
+  const [reactionBusyId, setReactionBusyId] = useState<string | null>(null)
+  const [reactionError, setReactionError] = useState<string | null>(null)
   const messagesQuery = useChatMessages(roomId, userId)
   const { hasNextPage, isFetchingNextPage, fetchNextPage } = messagesQuery
   const pages = messagesQuery.data?.pages ?? emptyList<ChatMessage[]>()
@@ -72,6 +75,9 @@ export function ChatThread({
         body: item.body,
         createdAt: item.createdAt,
         deletedAt: null,
+        replyToMessageId: item.replyToMessageId,
+        replyTo: item.replyTo,
+        reactions: [],
         mine: true,
         pending: item.state === 'pending',
         failed: item.state === 'failed',
@@ -84,6 +90,30 @@ export function ChatThread({
 
   const entries = useMemo(() => layoutChatThread(thread), [thread])
   const newestId = thread[thread.length - 1]?.id ?? ''
+
+  async function reactToMessage(message: ChatMessage, emoji: ChatReactionEmoji) {
+    if (reactionBusyId) return
+    setReactionError(null)
+    setReactionBusyId(message.id)
+    try {
+      await setChatReaction({
+        messageId: message.id,
+        profileId: userId,
+        emoji,
+        currentEmoji: message.reactions.find((reaction) => reaction.profileId === userId)?.emoji ?? null,
+      })
+      await queryClient.invalidateQueries({ queryKey: chatKeys.messages(roomId, userId) })
+    } catch (error) {
+      console.warn('[chat] 반응 저장 실패', {
+        roomId,
+        messageId: message.id,
+        message: error instanceof Error ? error.message : String(error),
+      })
+      setReactionError(error instanceof Error ? error.message : '반응을 저장하지 못했습니다.')
+    } finally {
+      setReactionBusyId(null)
+    }
+  }
 
   useEffect(() => {
     const ids = new Set<string>()
@@ -248,6 +278,9 @@ export function ChatThread({
         {errorText ? (
           <p className="text-center text-sm text-danger">{errorText}</p>
         ) : null}
+        {reactionError ? (
+          <p role="alert" className="text-center text-xs text-danger">{reactionError}</p>
+        ) : null}
         {messagesQuery.isLoading ? (
           <p className="py-8 text-center text-sm text-muted-foreground">
             대화를 불러오는 중입니다.
@@ -269,12 +302,24 @@ export function ChatThread({
                 key={entry.message.id}
                 message={entry.message}
                 showIdentity={entry.showIdentity}
+                userId={userId}
+                reactionBusy={reactionBusyId === entry.message.id}
                 canDelete={
                   !entry.message.deletedAt &&
                   entry.message.kind !== 'system' &&
                   (entry.message.mine || isManager)
                 }
                 onDelete={onDelete}
+                onReply={(message) => {
+                  setReplyTarget({
+                    id: message.id,
+                    authorName: message.authorName,
+                    kind: message.kind,
+                    body: message.body,
+                    deletedAt: message.deletedAt,
+                  })
+                }}
+                onReact={(message, emoji) => { void reactToMessage(message, emoji) }}
                 onRetry={onRetry}
                 onAttachmentChanged={() => {
                   void queryClient.invalidateQueries({
@@ -290,13 +335,16 @@ export function ChatThread({
       </div>
       <ChatComposer
         uploads={uploads}
+        replyTo={replyTarget}
+        onCancelReply={() => setReplyTarget(null)}
         onFiles={(files) => {
           stickRef.current = true
           onFiles(files)
         }}
         onSend={(body) => {
           stickRef.current = true
-          onSend(body)
+          onSend(body, replyTarget)
+          setReplyTarget(null)
         }}
       />
     </>

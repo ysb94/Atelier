@@ -6,7 +6,7 @@ import {
   type DragEvent as ReactDragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react'
-import { Paperclip } from 'lucide-react'
+import { Paperclip, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/input'
 import {
@@ -14,6 +14,7 @@ import {
   chatFileBlockReason,
 } from '@/lib/chat/file-rules'
 import { CHAT_MESSAGE_MAX_LENGTH } from '@/lib/supabase/chat'
+import type { ChatReplyPreview } from '@/lib/inbox/types'
 
 export type ChatUploadItem = {
   id: string
@@ -27,11 +28,15 @@ export function ChatComposer({
   onFiles,
   uploads,
   disabled,
+  replyTo,
+  onCancelReply,
 }: {
   onSend: (body: string) => void
   onFiles: (files: File[]) => void
   uploads: readonly ChatUploadItem[]
   disabled?: boolean
+  replyTo: ChatReplyPreview | null
+  onCancelReply: () => void
 }) {
   const [draft, setDraft] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
@@ -47,6 +52,10 @@ export function ChatComposer({
     })
     return () => window.cancelAnimationFrame(timer)
   }, [])
+
+  useEffect(() => {
+    if (replyTo) inputRef.current?.focus()
+  }, [replyTo])
 
   function send() {
     if (!text || tooLong || disabled) return
@@ -111,6 +120,19 @@ export function ChatComposer({
         고객 정보가 든 파일은 올리지 마세요.
       </p>
       {notice ? <p className="mb-2 text-[11px] text-danger">{notice}</p> : null}
+      {replyTo ? (
+        <div className="mb-2 flex items-start gap-2 rounded-lg border-l-2 border-primary bg-muted px-3 py-2 text-xs">
+          <div className="min-w-0 flex-1">
+            <p className="font-semibold">{replyTo.authorName}님에게 답장</p>
+            <p className="truncate text-muted-foreground">
+              {replyTo.deletedAt ? '삭제된 메시지' : replyTo.kind === 'file' ? `파일: ${replyTo.body}` : replyTo.body}
+            </p>
+          </div>
+          <button type="button" aria-label="답장 취소" onClick={onCancelReply}>
+            <X className="size-4" />
+          </button>
+        </div>
+      ) : null}
       {uploads.length > 0 ? (
         <ul className="mb-2 space-y-1">
           {uploads.map((item) => (

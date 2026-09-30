@@ -45,6 +45,22 @@ export type ChatRoom = {
 
 export type ChatMessageKind = 'text' | 'file' | 'system'
 
+export const CHAT_REACTION_EMOJIS = ['❤️', '👍', '✅', '😍', '😮', '😭'] as const
+export type ChatReactionEmoji = (typeof CHAT_REACTION_EMOJIS)[number]
+
+export type ChatReplyPreview = {
+  id: string
+  authorName: string
+  kind: ChatMessageKind
+  body: string
+  deletedAt: string | null
+}
+
+export type ChatReaction = {
+  profileId: string
+  emoji: ChatReactionEmoji
+}
+
 export type ChatAttachmentStatus =
   | 'uploading'
   | 'ready'
@@ -74,6 +90,9 @@ export type ChatMessage = {
   body: string
   createdAt: string
   deletedAt: string | null
+  replyToMessageId: string | null
+  replyTo: ChatReplyPreview | null
+  reactions: ChatReaction[]
   mine: boolean
   /** 서버 저장 전 표시. */
   pending?: boolean

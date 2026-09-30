@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { sendChatFile } from '@/lib/chat/send-file'
+import type { ChatReplyPreview } from '@/lib/inbox/types'
 import { deleteChatMessage, sendChatMessage } from '@/lib/supabase/chat'
 import type { ChatUploadItem } from './ChatComposer'
 import type { OutgoingChatMessage } from './outgoing'
@@ -29,23 +30,27 @@ export function useChatSending(userId: string) {
   }, [])
 
   const deliver = useCallback(
-    (roomId: string, messageId: string, body: string) => {
+    (roomId: string, messageId: string, body: string, replyTo: ChatReplyPreview | null) => {
       const createdAt = new Date().toISOString()
       setOutgoing((current) => {
         const without = current.filter((item) => item.id !== messageId)
         return [
           ...without,
-          { id: messageId, roomId, body, createdAt, state: 'pending' },
+          { id: messageId, roomId, body, replyToMessageId: replyTo?.id ?? null, replyTo, createdAt, state: 'pending' },
         ]
       })
-      void sendChatMessage({ id: messageId, roomId, body })
+      void sendChatMessage({ id: messageId, roomId, body, replyToMessageId: replyTo?.id })
         .then(() => {
           void queryClient.invalidateQueries({
             queryKey: chatKeys.messages(roomId, userId),
           })
           void queryClient.invalidateQueries({ queryKey: chatKeys.rooms })
         })
-        .catch(() => {
+        .catch((caught: unknown) => {
+          console.warn('[chat] 메시지 전송 실패', {
+            roomId,
+            message: caught instanceof Error ? caught.message : String(caught),
+          })
           setOutgoing((current) =>
             current.map((item) =>
               item.id === messageId ? { ...item, state: 'failed' } : item,
@@ -57,8 +62,8 @@ export function useChatSending(userId: string) {
   )
 
   const send = useCallback(
-    (roomId: string, body: string) => {
-      deliver(roomId, newMessageId(), body)
+    (roomId: string, body: string, replyTo: ChatReplyPreview | null = null) => {
+      deliver(roomId, newMessageId(), body, replyTo)
     },
     [deliver],
   )
@@ -106,7 +111,7 @@ export function useChatSending(userId: string) {
     (messageId: string) => {
       const item = outgoing.find((message) => message.id === messageId)
       if (!item) return
-      deliver(item.roomId, item.id, item.body)
+      deliver(item.roomId, item.id, item.body, item.replyTo)
     },
     [deliver, outgoing],
   )
@@ -125,6 +130,11 @@ export function useChatSending(userId: string) {
         })
         await queryClient.invalidateQueries({ queryKey: chatKeys.rooms })
       } catch (caught) {
+        console.warn('[chat] 메시지 삭제 실패', {
+          roomId,
+          messageId,
+          message: caught instanceof Error ? caught.message : String(caught),
+        })
         setActionError(
           caught instanceof Error ? caught.message : '메시지를 삭제하지 못했습니다.',
         )

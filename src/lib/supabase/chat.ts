@@ -6,6 +6,8 @@ import type {
   ChatDownloadRecord,
   ChatMessage,
   ChatMessageKind,
+  ChatReactionEmoji,
+  ChatReplyPreview,
   ChatRoom,
   ChatRoomListMember,
   ChatRoomMember,
@@ -58,7 +60,22 @@ type MessageRow = {
   body: string
   created_at: string
   deleted_at: string | null
+  reply_to_message_id: string | null
   chat_attachments?: AttachmentRow[] | AttachmentRow | null
+}
+
+type ReplyRow = {
+  id: string
+  author_name: string
+  kind: ChatMessageKind
+  body: string
+  deleted_at: string | null
+}
+
+type ReactionRow = {
+  message_id: string
+  profile_id: string
+  emoji: ChatReactionEmoji
 }
 
 type AttachmentRow = {
@@ -167,7 +184,12 @@ function toAttachment(row: AttachmentRow): ChatAttachment {
   }
 }
 
-function toMessage(row: MessageRow, userId: string): ChatMessage {
+function toMessage(
+  row: MessageRow,
+  userId: string,
+  replies: Map<string, ChatReplyPreview>,
+  reactions: Map<string, ReactionRow[]>,
+): ChatMessage {
   const raw = row.chat_attachments
   const attachmentRow = Array.isArray(raw) ? raw[0] : raw
   return {
@@ -179,6 +201,14 @@ function toMessage(row: MessageRow, userId: string): ChatMessage {
     body: row.body,
     createdAt: row.created_at,
     deletedAt: row.deleted_at,
+    replyToMessageId: row.reply_to_message_id,
+    replyTo: row.reply_to_message_id
+      ? replies.get(row.reply_to_message_id) ?? null
+      : null,
+    reactions: (reactions.get(row.id) ?? []).map((reaction) => ({
+      profileId: reaction.profile_id,
+      emoji: reaction.emoji,
+    })),
     mine: row.author_id === userId && row.kind !== 'system',
     attachment: attachmentRow ? toAttachment(attachmentRow) : null,
   }
@@ -217,7 +247,7 @@ export async function listChatMessages(
   let query = getSupabase()
     .from('chat_messages')
     .select(
-      'id, room_id, author_id, author_name, kind, body, created_at, deleted_at, chat_attachments(id, message_id, file_name, mime_type, size_bytes, object_path, thumb_path, has_macro, status)',
+      'id, room_id, author_id, author_name, kind, body, created_at, deleted_at, reply_to_message_id, chat_attachments(id, message_id, file_name, mime_type, size_bytes, object_path, thumb_path, has_macro, status)',
     )
     .eq('room_id', roomId)
     .order('created_at', { ascending: false })
@@ -225,13 +255,49 @@ export async function listChatMessages(
   if (before) query = query.lt('created_at', before)
   const { data, error } = await query
   if (error) fail(error, { fn: 'list_chat_messages', roomId })
-  return ((data ?? []) as MessageRow[]).map((row) => toMessage(row, userId))
+  const rows = (data ?? []) as MessageRow[]
+  if (rows.length === 0) return []
+  const replyIds = [...new Set(rows.map((row) => row.reply_to_message_id).filter((id): id is string => Boolean(id)))]
+  const messageIds = rows.map((row) => row.id)
+  const [replyResult, reactionResult] = await Promise.all([
+    replyIds.length > 0
+      ? getSupabase()
+          .from('chat_messages')
+          .select('id, author_name, kind, body, deleted_at')
+          .eq('room_id', roomId)
+          .in('id', replyIds)
+      : Promise.resolve({ data: [] as ReplyRow[], error: null }),
+    getSupabase()
+      .from('chat_message_reactions')
+      .select('message_id, profile_id, emoji')
+      .in('message_id', messageIds),
+  ])
+  if (replyResult.error) fail(replyResult.error, { fn: 'list_chat_reply_previews', roomId })
+  if (reactionResult.error) fail(reactionResult.error, { fn: 'list_chat_reactions', roomId })
+  const replies = new Map<string, ChatReplyPreview>()
+  for (const row of (replyResult.data ?? []) as ReplyRow[]) {
+    replies.set(row.id, {
+      id: row.id,
+      authorName: row.author_name,
+      kind: row.kind,
+      body: row.body,
+      deletedAt: row.deleted_at,
+    })
+  }
+  const reactions = new Map<string, ReactionRow[]>()
+  for (const row of (reactionResult.data ?? []) as ReactionRow[]) {
+    const list = reactions.get(row.message_id) ?? []
+    list.push(row)
+    reactions.set(row.message_id, list)
+  }
+  return rows.map((row) => toMessage(row, userId, replies, reactions))
 }
 
 export async function sendChatMessage(input: {
   id: string
   roomId: string
   body: string
+  replyToMessageId?: string | null
 }): Promise<void> {
   const { error } = await getSupabase()
     .from('chat_messages')
@@ -240,11 +306,41 @@ export async function sendChatMessage(input: {
       room_id: input.roomId,
       kind: 'text',
       body: input.body,
+      reply_to_message_id: input.replyToMessageId ?? null,
     })
   if (error) {
     if (isDuplicate(error)) return
     fail(error, { fn: 'send_chat_message', roomId: input.roomId })
   }
+}
+
+export async function setChatReaction(input: {
+  messageId: string
+  profileId: string
+  emoji: ChatReactionEmoji
+  currentEmoji: ChatReactionEmoji | null
+}): Promise<void> {
+  const relation = getSupabase().from('chat_message_reactions')
+  if (input.currentEmoji === input.emoji) {
+    const { error } = await relation.delete()
+      .eq('message_id', input.messageId)
+      .eq('profile_id', input.profileId)
+    if (error) fail(error, { fn: 'remove_chat_reaction', messageId: input.messageId })
+    return
+  }
+  if (input.currentEmoji) {
+    const { error } = await relation.update({ emoji: input.emoji })
+      .eq('message_id', input.messageId)
+      .eq('profile_id', input.profileId)
+    if (error) fail(error, { fn: 'update_chat_reaction', messageId: input.messageId })
+    return
+  }
+  const { error } = await relation.insert({
+    message_id: input.messageId,
+    profile_id: input.profileId,
+    emoji: input.emoji,
+  })
+  if (error) fail(error, { fn: 'add_chat_reaction', messageId: input.messageId })
 }
 
 export async function openDirectChat(otherProfileId: string): Promise<string> {

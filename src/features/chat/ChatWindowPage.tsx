@@ -89,7 +89,7 @@ export function ChatWindowPage() {
             outgoing={sending.outgoing}
             titleId={titleId}
             onOpenInfo={() => setInfo(true)}
-            onSend={(body) => sending.send(room.id, body)}
+            onSend={(body, replyTo) => sending.send(room.id, body, replyTo)}
             onFiles={(files) => sending.sendFiles(room.id, files)}
             uploads={sending.uploads.filter((item) => item.roomId === room.id)}
             onRetry={sending.retry}
