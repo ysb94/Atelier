@@ -23,14 +23,17 @@ import {
   thisWeekWorkdays,
 } from '@/features/logistics/cargo-inbound-title'
 import {
-  completeCargoInbound,
   deleteCargoInbound,
   getCargoInbounds,
   saveCargoInbound,
   saveCargoInboundRequestNotes,
+  saveCargoInboundTidyRows,
+  saveCargoInboundTidySlots,
   scheduleCargoInbound,
   type CargoInboundShipment,
+  type CargoInboundTidySlotInput,
 } from '@/lib/api'
+import type { CargoLineListValues } from '@/lib/cargo/line-list'
 import type { CargoInboundStage } from '@/lib/cargo/inbound'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { companyQueryKey } from '@/lib/workspace/query-keys'
@@ -158,9 +161,27 @@ export function CompanyCargoInboundPage() {
       notes: Array<{ lineId: string; requestNote: string }>
     }) => saveCargoInboundRequestNotes(input.brandId, input.notes),
   })
-  const completeMutation = useMutation({
-    mutationFn: (input: { brandId: string; shipmentId: string }) =>
-      completeCargoInbound(input.brandId, input.shipmentId),
+  const saveTidyRowsMutation = useMutation({
+    mutationFn: (input: {
+      brandId: string
+      shipmentId: string
+      rows: readonly CargoLineListValues[]
+    }) =>
+      saveCargoInboundTidyRows(input.brandId, input.shipmentId, input.rows),
+  })
+  const saveTidySlotsMutation = useMutation({
+    mutationFn: (input: {
+      brandId: string
+      shipmentId: string
+      slots: readonly CargoInboundTidySlotInput[]
+      complete: boolean
+    }) =>
+      saveCargoInboundTidySlots(
+        input.brandId,
+        input.shipmentId,
+        input.slots,
+        input.complete,
+      ),
   })
   const items = useMemo<CargoInboundItem[]>(
     () =>
@@ -324,13 +345,31 @@ export function CompanyCargoInboundPage() {
     }
   }
 
-  async function handleComplete() {
+  async function handleSaveTidyRows(rows: readonly CargoLineListValues[]) {
     if (!selectedItem) return
-    await completeMutation.mutateAsync({
+    await saveTidyRowsMutation.mutateAsync({
       brandId: selectedItem.brandId,
       shipmentId: selectedItem.id,
+      rows,
     })
     await queryClient.invalidateQueries({ queryKey: ['cargo-inbounds'] })
+    await queryClient.invalidateQueries({ queryKey: ['cargo-inbound-tidy'] })
+  }
+
+  async function handleSaveTidySlots(
+    slots: readonly CargoInboundTidySlotInput[],
+    complete: boolean,
+  ) {
+    if (!selectedItem) return
+    await saveTidySlotsMutation.mutateAsync({
+      brandId: selectedItem.brandId,
+      shipmentId: selectedItem.id,
+      slots,
+      complete,
+    })
+    await queryClient.invalidateQueries({ queryKey: ['cargo-inbounds'] })
+    await queryClient.invalidateQueries({ queryKey: ['cargo-inbound-tidy'] })
+    if (!complete) return
     setSelectedId(null)
     setSearchParams((current) => {
       const next = new URLSearchParams(current)
@@ -360,7 +399,8 @@ export function CompanyCargoInboundPage() {
           onDelete={() => handleDelete(selectedItem)}
           onSaveInboundDate={handleSaveInboundDate}
           onSaveRequestNotes={handleSaveRequestNotes}
-          onComplete={handleComplete}
+          onSaveTidyRows={handleSaveTidyRows}
+          onSaveTidySlots={handleSaveTidySlots}
         />
       ) : (
         <>

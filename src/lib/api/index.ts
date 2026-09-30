@@ -237,6 +237,8 @@ export type {
 export { CargoInboundStoreError } from '@/lib/supabase/cargo-inbound'
 export type {
   CargoInboundShipment,
+  CargoInboundTidyRow,
+  CargoInboundTidySlotInput,
   SaveCargoInboundInput,
 } from '@/lib/supabase/cargo-inbound'
 export { canSetBulkOutboundPartnerWorkStatus } from '@/lib/supabase/bulk-outbound'
@@ -828,12 +830,36 @@ export async function saveCargoInboundRequestNotes(
   return cargoInboundStore.saveCargoInboundRequestNotes(brandId, notes)
 }
 
-export async function completeCargoInbound(
+export async function getCargoInboundTidyRows(
   brandId: string,
   shipmentId: string,
 ) {
   await delay()
-  return cargoInboundStore.completeCargoInbound(brandId, shipmentId)
+  return cargoInboundStore.listCargoInboundTidyRows(brandId, shipmentId)
+}
+
+export async function saveCargoInboundTidyRows(
+  brandId: string,
+  shipmentId: string,
+  rows: Parameters<typeof cargoInboundStore.saveCargoInboundTidyRows>[2],
+) {
+  await delay()
+  return cargoInboundStore.saveCargoInboundTidyRows(brandId, shipmentId, rows)
+}
+
+export async function saveCargoInboundTidySlots(
+  brandId: string,
+  shipmentId: string,
+  slots: readonly cargoInboundStore.CargoInboundTidySlotInput[],
+  complete: boolean,
+) {
+  await delay()
+  return cargoInboundStore.saveCargoInboundTidySlots(
+    brandId,
+    shipmentId,
+    slots,
+    complete,
+  )
 }
 
 export async function deleteCargoInbound(brandId: string, shipmentId: string) {
