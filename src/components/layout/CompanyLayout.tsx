@@ -183,9 +183,6 @@ function CompanySidebar() {
                   Company
                 </div>
                 <div className="truncate text-sm font-semibold">E&J</div>
-                <div className="truncate text-xs text-white/50">
-                  전 브랜드 작업
-                </div>
               </div>
             ) : null}
           </button>
