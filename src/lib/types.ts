@@ -45,6 +45,29 @@ export type ProductCategoryInput = {
 }
 
 /**
+ * M번호(SKU)와 최하위 카테고리 연결. M번호마다 대표 1개(sortOrder 0)와
+ * 자사몰처럼 여러 칸에 진열하는 추가 분류를 둔다.
+ */
+export type StyleCategoryLink = {
+  styleId: string
+  categoryId: string
+  isPrimary: boolean
+  sortOrder: number
+}
+
+/** 사방넷 코드별 카테고리를 연결된 M번호 전체에 적용한 결과 */
+export type SabangnetCategoryApplyResult = {
+  /** 적용한 사방넷 코드 수 */
+  applied: number
+  /** 카테고리를 바꾼 M번호 수 */
+  styles: number
+  /** M번호가 연결되지 않아 건너뛴 코드 수 */
+  noStyles: number
+  /** DB에 없는 코드 수 */
+  missing: number
+}
+
+/**
  * 출시 기획 묶음은 기획팀 관점만 본다.
  * 생산·판매·단종은 묶음이 아니라 상품 하나하나의 상태다.
  */

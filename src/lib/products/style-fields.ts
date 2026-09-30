@@ -20,19 +20,32 @@ export const STYLE_TYPED_KEYS = new Set([
   'status',
 ])
 
+export type StyleFieldOptions = {
+  seasonCode?: string
+  /**
+   * 브랜드 카테고리 트리에서 온 연결 경로(`style_categories`). 미분류면 빈 문자열이다.
+   * 넘기지 않으면(undefined) 예전 `styles.category` 글자를 쓴다.
+   */
+  categoryLabel?: string
+}
+
 export function fieldValueKey(field: BrandField): string {
   return field.systemKey ?? field.id
 }
 
-export function isFieldFilled(style: Style, field: BrandField): boolean {
-  const text = getStyleFieldDisplay(style, field).trim()
+export function isFieldFilled(
+  style: Style,
+  field: BrandField,
+  options?: StyleFieldOptions,
+): boolean {
+  const text = getStyleFieldDisplay(style, field, options).trim()
   return text.length > 0 && text !== '—'
 }
 
 export function getStyleFieldDisplay(
   style: Style,
   field: BrandField,
-  options?: { seasonCode?: string },
+  options?: StyleFieldOptions,
 ): string {
   const key = field.systemKey
   if (!key) {
@@ -51,7 +64,7 @@ export function getStyleFieldDisplay(
     case 'seasonId':
       return options?.seasonCode ?? ''
     case 'category':
-      return applySelectDisplay(field, style.category)
+      return options?.categoryLabel ?? applySelectDisplay(field, style.category)
     case 'gender':
       return style.gender === 'W'
         ? '여성'
@@ -89,7 +102,7 @@ export function getStyleFieldDisplay(
 export function getStyleFieldRaw(
   style: Style,
   field: BrandField,
-  options?: { seasonCode?: string },
+  options?: StyleFieldOptions,
 ): string {
   const key = field.systemKey
   if (!key) {
@@ -109,6 +122,7 @@ export function ownerCompleteness(
   style: Style,
   fields: BrandField[],
   owner: FieldOwner,
+  options?: StyleFieldOptions,
 ): { filled: number; total: number; ratio: number } {
   const owned = fields.filter(
     (f) =>
@@ -119,7 +133,7 @@ export function ownerCompleteness(
       f.level !== 'sku',
   )
   if (owned.length === 0) return { filled: 0, total: 0, ratio: 1 }
-  const filled = owned.filter((f) => isFieldFilled(style, f)).length
+  const filled = owned.filter((f) => isFieldFilled(style, f, options)).length
   return {
     filled,
     total: owned.length,

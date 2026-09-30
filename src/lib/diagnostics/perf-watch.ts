@@ -139,6 +139,6 @@ export function installPerfWatch() {
   watchFrameStalls()
   watchErrors()
   console.info(
-    '[perf] 진단 감시 시작. 필터: [perf] [render-storm] [query-storm] [app-error] [invoice-work]',
+    '[perf] 진단 감시 시작. 필터: [perf] [render-storm] [query-storm] [app-error] [invoice-work] [chat-work]',
   )
 }

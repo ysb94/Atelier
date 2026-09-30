@@ -1,11 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
-import {
-  listDepartments,
-  POSITION_OPTIONS,
-  submitAccessRequest,
-} from '@/lib/supabase/profiles'
+import { listDepartments, submitAccessRequest } from '@/lib/supabase/profiles'
 import {
   inferCapabilityFromDepartment,
   uniqueCapabilities,
@@ -13,6 +9,7 @@ import {
   WORK_CAPABILITY_LABEL,
   type WorkCapability,
 } from '@/lib/company/capabilities'
+import { personNameError } from '@/lib/company/person-name'
 import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
 
@@ -29,12 +26,11 @@ export function AccessRequestPage() {
   )
 
   const [displayName, setDisplayName] = useState(
-    profile?.displayName ?? '',
+    profile?.nameConfirmedAt ? (profile.displayName ?? '') : '',
   )
   const [departmentId, setDepartmentId] = useState(
     profile?.departmentId ?? '',
   )
-  const [position, setPosition] = useState(profile?.position ?? '사원')
   const [capabilities, setCapabilities] = useState<WorkCapability[]>(
     profile?.capabilities?.length
       ? profile.capabilities
@@ -45,8 +41,10 @@ export function AccessRequestPage() {
         ),
   )
   const [requestNote, setRequestNote] = useState(profile?.requestNote ?? '')
+  const [sameAsRoster, setSameAsRoster] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const liveNameError = displayName.trim() ? personNameError(displayName) : null
 
   function toggleCapability(value: WorkCapability) {
     setCapabilities((prev) =>
@@ -77,8 +75,9 @@ export function AccessRequestPage() {
               접근 신청
             </h1>
             <p className="mt-2 text-sm text-muted-foreground">
-              회사 팀·직책·업무 역량을 알려 주세요. 관리자 또는 팀장·이사가
-              승인하면 E&J 홈에 들어갑니다. 담당 브랜드는 고르지 않습니다.
+              사내 인사 정보의 본명을 직접 입력하고, 팀과 업무 역량을 알려
+              주세요. 직책은 승인할 때 운영지원팀이 정합니다. 담당 브랜드는
+              고르지 않습니다.
             </p>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={() => void signOut()}>
@@ -91,12 +90,15 @@ export function AccessRequestPage() {
           onSubmit={async (event) => {
             event.preventDefault()
             setError(null)
+            if (!sameAsRoster) {
+              setError('사내 인사 정보와 같은 본명인지 확인해 주세요.')
+              return
+            }
             setSubmitting(true)
             try {
               await submitAccessRequest({
                 displayName,
                 departmentId,
-                position,
                 capabilities,
                 requestNote,
               })
@@ -113,50 +115,52 @@ export function AccessRequestPage() {
           }}
         >
           <label className="block space-y-1.5">
-            <span className="text-sm font-medium">이름</span>
+            <span className="text-sm font-medium">본명</span>
             <Input
               required
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="홍길동"
+              placeholder="사내 인사 정보의 본명"
               disabled={submitting}
+              autoComplete="name"
             />
+            <p className="text-xs text-muted-foreground">
+              별명이나 영문 계정명 대신, 한글·영문 등 인사 정보의 본명을
+              입력하세요. 2~50자이며 숫자와 이메일은 쓸 수 없습니다.
+            </p>
+            {liveNameError ? (
+              <p className="text-xs text-danger">{liveNameError}</p>
+            ) : null}
           </label>
 
-          <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium">팀</span>
-              <Select
-                required
-                value={departmentId}
-                onChange={(e) => changeDepartment(e.target.value)}
-                disabled={submitting || departmentsQuery.isLoading}
-              >
-                <option value="">선택</option>
-                {departments.map((dept) => (
-                  <option key={dept.id} value={dept.id}>
-                    {dept.name}
-                  </option>
-                ))}
-              </Select>
-            </label>
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={sameAsRoster}
+              onChange={(e) => setSameAsRoster(e.target.checked)}
+              disabled={submitting}
+              required
+            />
+            <span>사내 인사 정보와 동일한 본명입니다.</span>
+          </label>
 
-            <label className="block space-y-1.5">
-              <span className="text-sm font-medium">직책</span>
-              <Select
-                required
-                value={position}
-                onChange={(e) => setPosition(e.target.value)}
-                disabled={submitting}
-              >
-                {POSITION_OPTIONS.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </Select>
-            </label>
-          </div>
+          <label className="block space-y-1.5">
+            <span className="text-sm font-medium">팀</span>
+            <Select
+              required
+              value={departmentId}
+              onChange={(e) => changeDepartment(e.target.value)}
+              disabled={submitting || departmentsQuery.isLoading}
+            >
+              <option value="">선택</option>
+              {departments.map((dept) => (
+                <option key={dept.id} value={dept.id}>
+                  {dept.name}
+                </option>
+              ))}
+            </Select>
+          </label>
 
           <fieldset className="space-y-2">
             <legend className="text-sm font-medium">업무 역량</legend>
@@ -199,7 +203,16 @@ export function AccessRequestPage() {
             </p>
           ) : null}
 
-          <Button type="submit" className="w-full" disabled={submitting}>
+          <Button
+            type="submit"
+            className="w-full"
+            disabled={
+              submitting ||
+              !sameAsRoster ||
+              !displayName.trim() ||
+              liveNameError !== null
+            }
+          >
             {submitting ? '신청 중...' : '승인 요청'}
           </Button>
         </form>

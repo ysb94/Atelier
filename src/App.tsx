@@ -4,7 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrandLayout } from '@/components/layout/BrandLayout'
 import { CompanyLayout } from '@/components/layout/CompanyLayout'
 import { LoginPage } from '@/features/auth/LoginPage'
+import { ChatWindowPage } from '@/features/chat/ChatWindowPage'
 import { AccessRequestPage } from '@/features/auth/AccessRequestPage'
+import { LegalNameConfirmationPage } from '@/features/auth/LegalNameConfirmationPage'
 import { PendingApprovalPage } from '@/features/auth/PendingApprovalPage'
 import { AuthProvider, useAuth } from '@/lib/supabase/auth'
 import {
@@ -83,9 +85,14 @@ function AuthGate() {
     return <PendingApprovalPage mode="disabled" />
   }
 
+  if (!profile.nameConfirmedAt) {
+    return <LegalNameConfirmationPage />
+  }
+
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/chat/room/:roomId" element={<ChatWindowPage />} />
         <Route path="/b/:brandSlug/*" element={<BrandLayout />} />
         <Route path="/*" element={<CompanyLayout />} />
         <Route path="*" element={<Navigate to="/" replace />} />

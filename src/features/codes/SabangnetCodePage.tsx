@@ -8,6 +8,7 @@ import {
   ChevronsRight,
   CircleCheck,
   FileSpreadsheet,
+  FolderTree,
   Link2,
   Pencil,
   Plus,
@@ -15,6 +16,7 @@ import {
   Trash2,
   Unlink,
   Upload,
+  X,
 } from 'lucide-react'
 import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -29,9 +31,27 @@ import {
   getSabangnetFields,
   getSabangnetProducts,
   listAllStyleRefs,
+  setStyleCategories,
   updateSabangnetProduct,
 } from '@/lib/api'
+import {
+  summarizeSabangnetCategories,
+  type SabangnetCategorySummary,
+} from '@/lib/codes/sabangnet-category-import'
 import { useRenderWatch } from '@/lib/diagnostics'
+import {
+  UNCATEGORIZED_FILTER,
+  categoryListLabel,
+  categoryPathLabel,
+  createStyleCategoryFilter,
+  listCategoryFilterOptions,
+  styleCategoryIds,
+  type CategoryTree,
+} from '@/lib/products/product-categories'
+import {
+  invalidateStyleCategories,
+  useStyleCategoryIndex,
+} from '@/lib/products/use-style-category-index'
 import type {
   SabangnetField,
   SabangnetProduct,
@@ -41,13 +61,22 @@ import type {
 import { cn, emptyList, formatNumber } from '@/lib/utils'
 import { PendingSabangnetPanel } from './PendingSabangnetPanel'
 import { SabangnetBulkUploadPanel } from './SabangnetBulkUploadPanel'
+import { SabangnetCategoryImportPanel } from './SabangnetCategoryImportPanel'
 import { SabangnetFieldManager } from './SabangnetFieldManager'
-import { SabangnetProductDialog } from './SabangnetProductDialog'
+import {
+  SabangnetProductDialog,
+  type SabangnetCategoryDraft,
+} from './SabangnetProductDialog'
 
 type ListTab = 'all' | 'linked' | 'unlinked'
 type DialogState = {
   mode: 'create' | 'edit'
   source: SabangnetProduct | null
+  categorySummary: SabangnetCategorySummary | null
+}
+type SaveRequest = {
+  input: SabangnetProductInput
+  categories: SabangnetCategoryDraft
 }
 
 const PAGE_SIZE_OPTIONS = [20, 50, 100] as const
@@ -76,6 +105,46 @@ function fieldCell(field: SabangnetField, product: SabangnetProduct) {
     return Number.isFinite(numeric) ? formatNumber(numeric) : raw
   }
   return raw
+}
+
+function CategoryCell({
+  summary,
+  tree,
+}: {
+  summary: SabangnetCategorySummary
+  tree: CategoryTree
+}) {
+  if (summary.kind === 'noStyles') {
+    return <span className="text-muted-foreground">—</span>
+  }
+  if (summary.kind === 'none') return <Badge variant="muted">미분류</Badge>
+  const labels = summary.categoryIds.map(
+    (id) => categoryPathLabel(tree, id) || '삭제된 카테고리',
+  )
+  if (summary.kind === 'mixed') {
+    return (
+      <span className="flex min-w-0 items-center gap-1.5" title={labels.join('\n')}>
+        <Badge variant="warning">혼합</Badge>
+        <span className="truncate text-xs text-muted-foreground">
+          M번호마다 다름
+        </span>
+      </span>
+    )
+  }
+  return (
+    <span className="flex min-w-0 items-center gap-1.5" title={labels.join('\n')}>
+      <span className="truncate">{labels[0]}</span>
+      {labels.length > 1 ? (
+        <Badge variant="outline" className="shrink-0">
+          +{labels.length - 1}
+        </Badge>
+      ) : null}
+    </span>
+  )
+}
+
+function sameIdSet(left: readonly string[], right: readonly string[]) {
+  return left.length === right.length && left.every((id) => right.includes(id))
 }
 
 function buildPageItems(
@@ -110,8 +179,13 @@ export function SabangnetCodePage() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [dialog, setDialog] = useState<DialogState | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
+  const [categoryOpen, setCategoryOpen] = useState(false)
+  const [categoryFilter, setCategoryFilter] = useState('all')
   const [fieldsOpen, setFieldsOpen] = useState(false)
+  const { index: categoryIndex, loading: categoryLoading } =
+    useStyleCategoryIndex(brand.id)
 
   const productsQuery = useQuery({
     queryKey: ['sabangnetProducts', brand.id],
@@ -129,7 +203,24 @@ export function SabangnetCodePage() {
   const products = productsQuery.data ?? emptyList<SabangnetProduct>()
   const styles = stylesQuery.data ?? emptyList<StyleRef>()
   const fields = fieldsQuery.data ?? emptyList<SabangnetField>()
-  const listColumnCount = 1 + fields.length + 2
+  const listColumnCount = 1 + fields.length + 3
+  const categoryOptions = useMemo(
+    () => (categoryIndex ? listCategoryFilterOptions(categoryIndex.tree) : []),
+    [categoryIndex],
+  )
+  const categoryMatcher = useMemo(() => {
+    if (!categoryIndex || categoryFilter === 'all') return null
+    if (categoryFilter === UNCATEGORIZED_FILTER) {
+      return (product: SabangnetProduct) =>
+        product.styles.some(
+          (style) => styleCategoryIds(categoryIndex, style.styleId).length === 0,
+        )
+    }
+    const matchesStyle = createStyleCategoryFilter(categoryIndex, categoryFilter)
+    if (!matchesStyle) return null
+    return (product: SabangnetProduct) =>
+      product.styles.some((style) => matchesStyle(style.styleId))
+  }, [categoryIndex, categoryFilter])
 
   const linkedCount = useMemo(
     () => products.filter((product) => product.styles.length > 0).length,
@@ -150,8 +241,11 @@ export function SabangnetCodePage() {
 
   const filtered = useMemo(() => {
     const keyword = search.trim().toLowerCase()
-    if (!keyword) return scoped
-    return scoped.filter((product) => {
+    const inCategory = categoryMatcher
+      ? scoped.filter(categoryMatcher)
+      : scoped
+    if (!keyword) return inCategory
+    return inCategory.filter((product) => {
       if (product.code.toLowerCase().includes(keyword)) return true
       if (product.name.toLowerCase().includes(keyword)) return true
       if (
@@ -164,10 +258,17 @@ export function SabangnetCodePage() {
       return product.styles.some(
         (style) =>
           style.styleNo.toLowerCase().includes(keyword) ||
-          style.name.toLowerCase().includes(keyword),
+          style.name.toLowerCase().includes(keyword) ||
+          (categoryIndex !== null &&
+            categoryListLabel(
+              categoryIndex.tree,
+              styleCategoryIds(categoryIndex, style.styleId),
+            )
+              .toLowerCase()
+              .includes(keyword)),
       )
     })
-  }, [scoped, search])
+  }, [scoped, search, categoryMatcher, categoryIndex])
 
   const totalCount = filtered.length
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize) || 1)
@@ -190,7 +291,7 @@ export function SabangnetCodePage() {
   useEffect(() => {
     setPage(1)
     setExpandedId(null)
-  }, [search, pageSize, tab])
+  }, [search, pageSize, tab, categoryFilter])
 
   const invalidate = async () => {
     await queryClient.invalidateQueries({
@@ -199,16 +300,49 @@ export function SabangnetCodePage() {
   }
 
   const saveMutation = useMutation({
-    mutationFn: async (input: SabangnetProductInput) => {
-      if (dialog?.mode === 'edit' && dialog.source) {
-        return updateSabangnetProduct(dialog.source.id, input)
+    mutationFn: async ({ input, categories }: SaveRequest) => {
+      const source = dialog?.mode === 'edit' ? dialog.source : null
+      const saved = source
+        ? await updateSabangnetProduct(source.id, input)
+        : await createSabangnetProduct(brand.id, input)
+      const styleIds = saved.styles.map((style) => style.styleId)
+      const stylesChanged = !sameIdSet(
+        source?.styles.map((style) => style.styleId) ?? [],
+        styleIds,
+      )
+      const shouldApply =
+        styleIds.length > 0 &&
+        (categories.dirty ||
+          (stylesChanged && !categories.mixed && categories.ids.length > 0))
+      if (!shouldApply) return { categoryError: null }
+      try {
+        await setStyleCategories(brand.id, styleIds, categories.ids)
+        return { categoryError: null }
+      } catch (error) {
+        console.warn('[sabangnet] 카테고리 저장 실패', {
+          code: saved.code,
+          error,
+        })
+        return {
+          categoryError:
+            error instanceof Error
+              ? error.message
+              : '카테고리를 저장하지 못했습니다.',
+        }
       }
-      return createSabangnetProduct(brand.id, input)
     },
-    onSuccess: async () => {
+    onSuccess: async ({ categoryError }) => {
       setDialog(null)
       setSaveError(null)
-      await invalidate()
+      setNotice(
+        categoryError
+          ? `사방넷 코드는 저장했지만 카테고리는 저장하지 못했습니다. ${categoryError}`
+          : null,
+      )
+      await Promise.all([
+        invalidate(),
+        invalidateStyleCategories(queryClient, brand.id),
+      ])
     },
     onError: (error) => {
       setSaveError(
@@ -226,12 +360,18 @@ export function SabangnetCodePage() {
 
   function openCreate() {
     setSaveError(null)
-    setDialog({ mode: 'create', source: null })
+    setDialog({ mode: 'create', source: null, categorySummary: null })
   }
 
   function openEdit(product: SabangnetProduct) {
     setSaveError(null)
-    setDialog({ mode: 'edit', source: product })
+    setDialog({
+      mode: 'edit',
+      source: product,
+      categorySummary: categoryIndex
+        ? summarizeSabangnetCategories(product, categoryIndex.byStyle)
+        : null,
+    })
   }
 
   return (
@@ -249,6 +389,14 @@ export function SabangnetCodePage() {
             >
               <Settings2 className="size-3.5" />
               {fieldsOpen ? '항목 관리 닫기' : '항목 관리'}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCategoryOpen((current) => !current)}
+            >
+              <FolderTree className="size-4" />
+              {categoryOpen ? '카테고리 가져오기 닫기' : '카테고리 가져오기'}
             </Button>
             <Button
               type="button"
@@ -287,6 +435,34 @@ export function SabangnetCodePage() {
             onManageFields={() => setFieldsOpen((current) => !current)}
             onClose={() => setBulkOpen(false)}
           />
+        </div>
+      ) : null}
+
+      {categoryOpen ? (
+        <div className="mb-4">
+          <SabangnetCategoryImportPanel
+            brandId={brand.id}
+            brandName={brand.name}
+            products={products}
+            index={categoryIndex}
+            indexLoading={categoryLoading}
+            onApplied={() => invalidateStyleCategories(queryClient, brand.id)}
+            onClose={() => setCategoryOpen(false)}
+          />
+        </div>
+      ) : null}
+
+      {notice ? (
+        <div className="mb-4 flex items-start justify-between gap-3 rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
+          <span>{notice}</span>
+          <button
+            type="button"
+            className="shrink-0"
+            aria-label="알림 닫기"
+            onClick={() => setNotice(null)}
+          >
+            <X className="size-4" />
+          </button>
         </div>
       ) : null}
 
@@ -352,10 +528,27 @@ export function SabangnetCodePage() {
           <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
             <Input
               className="sm:max-w-sm"
-              placeholder="등록 항목, M번호 검색..."
+              placeholder="등록 항목, M번호, 카테고리 검색..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
+            <Select
+              className="sm:w-52"
+              value={categoryFilter}
+              aria-label="카테고리 필터"
+              disabled={!categoryIndex}
+              onChange={(event) => setCategoryFilter(event.target.value)}
+            >
+              <option value="all">
+                {categoryLoading ? '카테고리 불러오는 중...' : '전체 카테고리'}
+              </option>
+              <option value={UNCATEGORIZED_FILTER}>미분류 M번호 있음</option>
+              {categoryOptions.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
             <Select
               className="sm:w-auto"
               value={String(pageSize)}
@@ -386,6 +579,7 @@ export function SabangnetCodePage() {
                         {field.label}
                       </th>
                     ))}
+                    <th className="px-4 py-3 font-medium">카테고리</th>
                     <th className="px-4 py-3 font-medium">수정일</th>
                     <th className="w-20 px-4 py-3 font-medium">작업</th>
                   </tr>
@@ -487,6 +681,19 @@ export function SabangnetCodePage() {
                                 </td>
                               )
                             })}
+                            <td className="max-w-72 px-4 py-3">
+                              {categoryIndex ? (
+                                <CategoryCell
+                                  summary={summarizeSabangnetCategories(
+                                    product,
+                                    categoryIndex.byStyle,
+                                  )}
+                                  tree={categoryIndex.tree}
+                                />
+                              ) : (
+                                <span className="text-muted-foreground">…</span>
+                              )}
+                            </td>
                             <td className="px-4 py-3 tabular-nums text-muted-foreground">
                               {formatUpdatedAt(product.updatedAt)}
                             </td>
@@ -540,19 +747,39 @@ export function SabangnetCodePage() {
                                   </p>
                                 ) : (
                                   <ul className="space-y-1">
-                                    {product.styles.map((style) => (
-                                      <li
-                                        key={style.styleId}
-                                        className="flex items-center gap-3"
-                                      >
-                                        <span className="font-medium tabular-nums">
-                                          {style.styleNo}
-                                        </span>
-                                        <span className="text-muted-foreground">
-                                          {style.name}
-                                        </span>
-                                      </li>
-                                    ))}
+                                    {product.styles.map((style) => {
+                                      const categoryLabel = categoryIndex
+                                        ? categoryListLabel(
+                                            categoryIndex.tree,
+                                            styleCategoryIds(
+                                              categoryIndex,
+                                              style.styleId,
+                                            ),
+                                          )
+                                        : ''
+                                      return (
+                                        <li
+                                          key={style.styleId}
+                                          className="flex flex-wrap items-center gap-x-3 gap-y-0.5"
+                                        >
+                                          <span className="font-medium tabular-nums">
+                                            {style.styleNo}
+                                          </span>
+                                          <span className="text-muted-foreground">
+                                            {style.name}
+                                          </span>
+                                          {categoryIndex ? (
+                                            categoryLabel ? (
+                                              <span className="text-xs text-muted-foreground">
+                                                · {categoryLabel}
+                                              </span>
+                                            ) : (
+                                              <Badge variant="muted">미분류</Badge>
+                                            )
+                                          ) : null}
+                                        </li>
+                                      )
+                                    })}
                                   </ul>
                                 )}
                               </td>
@@ -648,13 +875,17 @@ export function SabangnetCodePage() {
         existingProducts={products}
         styles={styles}
         fields={fields}
+        categoryTree={categoryIndex?.tree ?? null}
+        categorySummary={dialog?.categorySummary ?? null}
         isSubmitting={saveMutation.isPending}
         errorMessage={saveError}
         onClose={() => {
           setDialog(null)
           setSaveError(null)
         }}
-        onSubmit={(input) => saveMutation.mutate(input)}
+        onSubmit={(input, categories) =>
+          saveMutation.mutate({ input, categories })
+        }
       />
     </div>
   )

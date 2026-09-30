@@ -34,11 +34,18 @@ import {
 } from '@/lib/codes/sabangnet-style-codes'
 import { isImageField, pickImageSources } from '@/lib/products/product-image'
 import {
+  hasCategoryTree,
+  styleCategoryFieldLabel,
+  styleCategoryIds,
+} from '@/lib/products/product-categories'
+import { useStyleCategoryIndex } from '@/lib/products/use-style-category-index'
+import {
   fieldValueKey,
   getStyleFieldRaw,
   isFieldFilled,
   ownerCompleteness,
 } from '@/lib/products/style-fields'
+import { StyleCategoryEditor } from '@/features/products/StyleCategoryEditor'
 import {
   CODE_USAGE_STATUS_LABEL,
   STYLE_STATUS_LABEL,
@@ -79,14 +86,18 @@ function statusVariant(
 function CompletenessDots({
   style,
   fields,
+  categoryLabel,
 }: {
   style: Style
   fields: BrandField[]
+  categoryLabel?: string
 }) {
   return (
     <div className="flex items-center gap-1">
       {COMPLETENESS_OWNERS.map((owner) => {
-        const { ratio } = ownerCompleteness(style, fields, owner)
+        const { ratio } = ownerCompleteness(style, fields, owner, {
+          categoryLabel,
+        })
         const pct = Math.round(ratio * 100)
         return (
           <span
@@ -234,6 +245,8 @@ export function ProductDetailDrawer() {
     () => sabangnetCodeByStyleId(sabangnetCodeQuery.data ?? emptyList()),
     [sabangnetCodeQuery.data],
   )
+  const { index: categoryIndex, loading: categoryLoading } =
+    useStyleCategoryIndex(brandId)
 
   const assignmentsQuery = useQuery({
     queryKey: ['code-usage-assignments', brandId],
@@ -397,7 +410,14 @@ export function ProductDetailDrawer() {
                   <Badge variant={statusVariant(style.status)}>
                     {STYLE_STATUS_LABEL[style.status]}
                   </Badge>
-                  <CompletenessDots style={style} fields={fields} />
+                  <CompletenessDots
+                    style={style}
+                    fields={fields}
+                    categoryLabel={styleCategoryFieldLabel(
+                      categoryIndex,
+                      style.id,
+                    )}
+                  />
                 </div>
                 <h2 className="truncate text-lg font-semibold tracking-tight">
                   {style.name}
@@ -476,6 +496,46 @@ export function ProductDetailDrawer() {
                       </h3>
                       <div className="space-y-3">
                         {ownerFields.map((field) => {
+                          if (
+                            field.systemKey === 'category' &&
+                            (hasCategoryTree(categoryIndex) || categoryLoading)
+                          ) {
+                            const categoryIds = hasCategoryTree(categoryIndex)
+                              ? styleCategoryIds(categoryIndex, style.id)
+                              : []
+                            return (
+                              <div key={field.id} className="space-y-1.5">
+                                <span className="flex items-center gap-2 text-sm font-medium">
+                                  {field.label}
+                                  {field.required ? (
+                                    <span className="text-danger">*</span>
+                                  ) : null}
+                                  {hasCategoryTree(categoryIndex) &&
+                                  categoryIds.length === 0 ? (
+                                    <Badge variant="muted">
+                                      {OWNER_LABEL[owner]}
+                                    </Badge>
+                                  ) : null}
+                                </span>
+                                {brandId && hasCategoryTree(categoryIndex) ? (
+                                  <StyleCategoryEditor
+                                    key={style.id}
+                                    brandId={brandId}
+                                    styleId={style.id}
+                                    tree={categoryIndex.tree}
+                                    savedIds={categoryIds}
+                                    sabangnetCode={sabangnetCodeByStyle.get(
+                                      style.id,
+                                    )}
+                                  />
+                                ) : (
+                                  <p className="text-xs text-muted-foreground">
+                                    카테고리를 불러오는 중...
+                                  </p>
+                                )}
+                              </div>
+                            )
+                          }
                           const sabangnetLinked = isSabangnetCodeField(field)
                           const sabangnetCode = sabangnetLinked
                             ? (sabangnetCodeByStyle.get(style.id) ?? '')

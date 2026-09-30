@@ -15,6 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { getBrands } from '@/lib/api'
 import {
   capabilityLabel,
+  canManagePersonnel,
   isCompanyManager,
   profileCapabilities,
 } from '@/lib/company/capabilities'
@@ -32,6 +33,12 @@ export function CompanyHomePage() {
     status: profile?.status,
     isAdmin: profile?.isAdmin,
     position: profile?.position,
+  })
+  const personnelManager = canManagePersonnel({
+    status: profile?.status,
+    isAdmin: profile?.isAdmin,
+    position: profile?.position,
+    departmentPersonnelScope: profile?.departmentPersonnelScope,
   })
   const capabilities = profileCapabilities({
     capabilities: profile?.capabilities,
@@ -190,7 +197,7 @@ export function CompanyHomePage() {
             <span className="text-xs text-muted-foreground">E&J 팀 구조</span>
           </span>
         </Link>
-        {manager ? (
+        {personnelManager ? (
           <Link
             to="/members"
             className="flex items-start gap-3 rounded-lg border border-border px-3 py-3 hover:bg-muted/50"

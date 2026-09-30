@@ -40,6 +40,8 @@ import {
   fieldValueKey,
   getStyleFieldDisplay,
 } from '@/lib/products/style-fields'
+import { styleCategoryFieldLabel } from '@/lib/products/product-categories'
+import { useStyleCategoryIndexes } from '@/lib/products/use-style-category-index'
 import {
   STYLE_STATUS_LABEL,
   formatSeasonLabel,
@@ -195,6 +197,7 @@ function styleToRow(
     ownBarcode?: string
     sabangnetCode?: string
     brandName?: string
+    categoryLabel?: string
   },
 ): SheetRow {
   const values: Record<string, string> = {}
@@ -213,6 +216,7 @@ function styleToRow(
     }
     values[fieldValueKey(column)] = getStyleFieldDisplay(style, column, {
       seasonCode: options?.seasonLabel,
+      categoryLabel: options?.categoryLabel,
     })
   }
   return { id: `${style.brandId}:${style.id}`, styleNo: style.styleNo, values }
@@ -330,6 +334,7 @@ export function DataSheetPage() {
     })),
     combine: combineListQueries<{ styleId: string; code: string }>,
   })
+  const { indexes: categoryIndexes } = useStyleCategoryIndexes(brandIds)
   const sortParam = searchParams.get('sort')
   const sortDirection = searchParams.get('dir') === 'desc' ? 'desc' : 'asc'
   const blankParam = searchParams.get('blank')
@@ -439,6 +444,10 @@ export function DataSheetPage() {
             ownBarcode: ownBarcodeByStyleId.get(style.id) ?? '',
             sabangnetCode: sabangnetCodeByStyle.get(style.id) ?? '',
             brandName: brandById.get(style.brandId)?.name,
+            categoryLabel: styleCategoryFieldLabel(
+              categoryIndexes.get(style.brandId),
+              style.id,
+            ),
           })
         })
         const filtered = blankKey
@@ -453,6 +462,7 @@ export function DataSheetPage() {
   }, [
     blankKey,
     brandById,
+    categoryIndexes,
     columns,
     needsCatalog,
     ownBarcodeByStyleId,
@@ -549,6 +559,14 @@ export function DataSheetPage() {
         await Promise.all(brandIds.map((id) => getSabangnetStyleCodes(id)))
       ).flat()
       const codeByStyle = sabangnetCodeByStyleId(links)
+      const categoryLabels = new Map<string, string>()
+      for (const style of styles) {
+        const label = styleCategoryFieldLabel(
+          categoryIndexes.get(style.brandId),
+          style.id,
+        )
+        if (label !== undefined) categoryLabels.set(style.id, label)
+      }
       const visibleStyles = blankKey
         ? styles.filter((style) => {
             const season = seasonById.get(style.seasonId)
@@ -557,6 +575,7 @@ export function DataSheetPage() {
               ownBarcode: ownBarcodeByStyleId.get(style.id) ?? '',
               sabangnetCode: codeByStyle.get(style.id) ?? '',
               brandName: brandById.get(style.brandId)?.name,
+              categoryLabel: categoryLabels.get(style.id),
             })
             return isSheetCellBlank(row, blankKey)
           })
@@ -571,6 +590,7 @@ export function DataSheetPage() {
           codeByStyle,
         ),
         seasons,
+        categoryLabels,
       })
     } catch (error) {
       setBanner(

@@ -124,6 +124,7 @@ function buildExportGrid(options: {
   styles: Style[]
   seasons: Season[]
   editable: boolean
+  categoryLabels?: ReadonlyMap<string, string>
 }) {
   const columns = columnsForSheet(options.fields, options.owner)
   if (columns.length === 0) {
@@ -142,6 +143,7 @@ function buildExportGrid(options: {
       }
       return getStyleFieldDisplay(style, field, {
         seasonCode: season ? formatSeasonLabel(season) : undefined,
+        categoryLabel: options.categoryLabels?.get(style.id),
       })
     })
     return options.editable ? [style.id, '', ...values] : values
@@ -178,6 +180,8 @@ export async function downloadStylesExport(options: {
   seasons: Season[]
   /** _id·_작업 열을 넣어 다시 올릴 수 있게 한다. 기본값은 넣는다. */
   editable?: boolean
+  /** style id → 카테고리 트리 연결 경로(` | ` 구분). 없는 M번호는 예전 카테고리 글자를 쓴다. */
+  categoryLabels?: ReadonlyMap<string, string>
 }) {
   const editable = options.editable !== false
   const grid = buildExportGrid({
@@ -186,6 +190,7 @@ export async function downloadStylesExport(options: {
     styles: options.styles,
     seasons: options.seasons,
     editable,
+    categoryLabels: options.categoryLabels,
   })
   const columns = columnsForSheet(options.fields, options.owner)
   const workbook = await createProductWorkbook({

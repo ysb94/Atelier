@@ -52,6 +52,11 @@ function categoryError(
       '같은 상위 분류에 같은 이름의 카테고리가 이미 있습니다.',
     )
   }
+  if (/style_categories_category_fkey/i.test(error?.message ?? '')) {
+    return new ProductCategoryStoreError(
+      '상품이 연결된 카테고리라 삭제할 수 없습니다. 연결된 상품을 다른 카테고리로 옮긴 뒤 삭제하세요.',
+    )
+  }
   if (
     error?.code === '23503' ||
     /product_categories_parent_fkey/i.test(error?.message ?? '')

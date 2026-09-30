@@ -36,6 +36,8 @@ import {
   updateProductCategory,
 } from '@/lib/api'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { countStylesByCategory } from '@/lib/products/product-categories'
+import { useStyleCategoryIndex } from '@/lib/products/use-style-category-index'
 import type { ProductCategory } from '@/lib/types'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
 
@@ -115,6 +117,42 @@ export function ProductCategorySettingsPage() {
   const selectedChildren = selectedCategory
     ? (childrenByParent.get(selectedCategory.id) ?? emptyList<ProductCategory>())
     : emptyList<ProductCategory>()
+
+  const { index: linkIndex, loading: linksLoading } = useStyleCategoryIndex(
+    brand.id,
+  )
+  /** 카테고리 id → 하위까지 합친 연결 M번호 수 */
+  const linkedCounts = useMemo(
+    () => (linkIndex ? countStylesByCategory(linkIndex) : null),
+    [linkIndex],
+  )
+  /** 상품은 최하위에만 연결되므로 최하위의 수가 곧 직접 연결 수다. */
+  function directLinkCount(category: ProductCategory) {
+    if ((childrenByParent.get(category.id)?.length ?? 0) > 0) return 0
+    return linkedCounts?.get(category.id) ?? 0
+  }
+  const selectedLinked = selectedCategory
+    ? (linkedCounts?.get(selectedCategory.id) ?? 0)
+    : 0
+  const selectedDirectLinked = selectedCategory
+    ? directLinkCount(selectedCategory)
+    : 0
+  const deleteBlockedReason = !selectedCategory
+    ? null
+    : selectedChildren.length > 0
+      ? '하위 카테고리부터 삭제하세요.'
+      : selectedDirectLinked > 0
+        ? `M번호 ${formatNumber(selectedDirectLinked)}개가 연결되어 있어 삭제할 수 없습니다. 연결을 다른 카테고리로 옮긴 뒤 삭제하세요.`
+        : linksLoading
+          ? '연결된 상품 수를 확인하는 중입니다.'
+          : null
+  const addChildBlockedReason = !selectedCategory
+    ? null
+    : !selectedCategory.isActive
+      ? '사용 안 함 카테고리에는 하위를 만들 수 없습니다.'
+      : selectedDirectLinked > 0
+        ? `M번호 ${formatNumber(selectedDirectLinked)}개가 연결된 최하위 카테고리라 하위를 만들 수 없습니다. 연결을 다른 카테고리로 옮긴 뒤 추가하세요.`
+        : null
 
   useEffect(() => {
     if (categories.length === 0) {
@@ -257,6 +295,8 @@ export function ProductCategorySettingsPage() {
       childrenByParent.get(category.parentId) ?? emptyList<ProductCategory>()
     const siblingIndex = siblings.findIndex((item) => item.id === category.id)
     const selected = category.id === selectedId
+    const linked = linkedCounts?.get(category.id) ?? 0
+    const directLinked = directLinkCount(category)
 
     return (
       <li key={category.id}>
@@ -302,6 +342,14 @@ export function ProductCategorySettingsPage() {
           >
             <span className="truncate font-medium">{category.name}</span>
           </button>
+          {linked > 0 ? (
+            <span
+              className="shrink-0 px-1 text-xs tabular-nums text-muted-foreground"
+              title={`연결된 M번호 ${formatNumber(linked)}개(하위 포함)`}
+            >
+              {formatNumber(linked)}
+            </span>
+          ) : null}
           {!category.isActive ? <Badge variant="muted">중지</Badge> : null}
           {!hasChildren ? <Badge variant="outline">최하위</Badge> : null}
           <div className="hidden items-center gap-0.5 group-hover:flex group-focus-within:flex">
@@ -337,7 +385,12 @@ export function ProductCategorySettingsPage() {
               size="icon"
               className="size-7"
               aria-label={`${category.name} 하위 카테고리 추가`}
-              disabled={pending || !category.isActive}
+              disabled={pending || !category.isActive || directLinked > 0}
+              title={
+                directLinked > 0
+                  ? '상품이 연결된 카테고리 아래에는 하위를 만들 수 없습니다.'
+                  : undefined
+              }
               onClick={() => openCreate(category.id)}
             >
               <Plus className="size-3.5" />
@@ -369,8 +422,9 @@ export function ProductCategorySettingsPage() {
       />
 
       <div className="mb-4 rounded-lg border border-border bg-muted/20 px-4 py-3 text-sm text-muted-foreground">
-        이번 단계는 카테고리 구성만 관리합니다. 상품 등록 연결은 다음 단계에서
-        추가하며, 그때는 하위 항목이 없는 최하위 카테고리만 선택하게 됩니다.
+        상품(M번호)은 하위가 없는 최하위 카테고리에만 연결합니다. 연결은 사방넷
+        코드 관리(카테고리 가져오기·수정 창)나 상품 상세에서 합니다. 트리 옆
+        숫자는 하위를 포함해 연결된 M번호 수입니다.
       </div>
 
       {error ? (
@@ -537,21 +591,25 @@ export function ProductCategorySettingsPage() {
                   />
                   신규 분류에서 사용
                 </label>
+                {selectedDirectLinked > 0 && !draftActive ? (
+                  <p className="text-xs text-warning">
+                    사용 안 함으로 바꿔도 이미 연결된 M번호는 그대로 남지만, 새로
+                    고르거나 다시 저장할 때는 고를 수 없습니다.
+                  </p>
+                ) : null}
                 <div className="rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
                   {selectedChildren.length > 0
-                    ? `하위 카테고리 ${formatNumber(selectedChildren.length)}개가 있어 상위 분류로 사용됩니다.`
-                    : '현재 최하위 카테고리입니다. 상품 연결 단계에서는 이 분류를 선택할 수 있습니다.'}
+                    ? `하위 카테고리 ${formatNumber(selectedChildren.length)}개가 있어 상위 분류로 사용됩니다. 하위까지 연결된 M번호 ${formatNumber(selectedLinked)}개.`
+                    : selectedDirectLinked > 0
+                      ? `최하위 카테고리입니다. M번호 ${formatNumber(selectedDirectLinked)}개가 연결되어 있어 삭제하거나 하위를 만들 수 없습니다. 연결을 다른 카테고리로 옮긴 뒤 진행하세요.`
+                      : '최하위 카테고리입니다. 사방넷 코드 관리나 상품 상세에서 이 분류를 고를 수 있습니다.'}
                 </div>
                 <div className="flex flex-wrap justify-between gap-2">
                   <Button
                     type="button"
                     variant="danger"
-                    disabled={pending || selectedChildren.length > 0}
-                    title={
-                      selectedChildren.length > 0
-                        ? '하위 카테고리부터 삭제하세요.'
-                        : undefined
-                    }
+                    disabled={pending || deleteBlockedReason !== null}
+                    title={deleteBlockedReason ?? undefined}
                     onClick={() => {
                       const ok = window.confirm(
                         `"${selectedCategory.name}" 카테고리를 삭제할까요?`,
@@ -566,7 +624,8 @@ export function ProductCategorySettingsPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      disabled={pending || !selectedCategory.isActive}
+                      disabled={pending || addChildBlockedReason !== null}
+                      title={addChildBlockedReason ?? undefined}
                       onClick={() => openCreate(selectedCategory.id)}
                     >
                       <Plus className="size-4" />
@@ -605,6 +664,8 @@ export function ProductCategorySettingsPage() {
             <CardContent className="space-y-2 text-xs leading-5 text-muted-foreground">
               <p>• ALL은 저장하지 않고 각 상위 분류의 전체 보기로 계산합니다.</p>
               <p>• 카페24 카테고리 번호는 저장하거나 관리하지 않습니다.</p>
+              <p>• 상품(M번호)은 최하위 카테고리에만 연결합니다. 여러 개를 고를 수 있고 첫 번째가 대표입니다.</p>
+              <p>• 상품이 연결된 카테고리는 삭제하거나 그 아래에 하위를 만들 수 없습니다. 연결을 다른 카테고리로 옮긴 뒤 진행하세요.</p>
               <p>• 하위 분류가 있는 카테고리는 하위 항목을 먼저 삭제해야 합니다.</p>
             </CardContent>
           </Card>

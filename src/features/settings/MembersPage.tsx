@@ -19,12 +19,14 @@ import {
   type Profile,
 } from '@/lib/supabase/profiles'
 import {
+  canManagePersonnel,
   capabilityLabel,
-  isCompanyManager,
   WORK_CAPABILITIES,
   WORK_CAPABILITY_LABEL,
+  type PersonnelScope,
   type WorkCapability,
 } from '@/lib/company/capabilities'
+import { personNameError } from '@/lib/company/person-name'
 
 const STATUS_LABEL: Record<Profile['status'], string> = {
   pending: '승인 대기',
@@ -48,7 +50,7 @@ function MemberEditor({
 }) {
   const [displayName, setDisplayName] = useState(profile.displayName ?? '')
   const [departmentId, setDepartmentId] = useState(profile.departmentId ?? '')
-  const [position, setPosition] = useState(profile.position ?? '사원')
+  const [position, setPosition] = useState(profile.position ?? '')
   const [capabilities, setCapabilities] = useState<WorkCapability[]>(
     profile.capabilities,
   )
@@ -61,6 +63,7 @@ function MemberEditor({
   const [isAdmin, setIsAdmin] = useState(profile.isAdmin)
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const nameError = personNameError(displayName)
 
   function toggleCapability(value: WorkCapability) {
     setCapabilities((prev) =>
@@ -80,12 +83,16 @@ function MemberEditor({
     <div className="mt-3 space-y-3 rounded-lg border border-border bg-muted/20 p-4">
       <div className="grid gap-3 sm:grid-cols-3">
         <label className="block space-y-1">
-          <span className="text-xs font-medium">이름</span>
+          <span className="text-xs font-medium">본명</span>
           <Input
             value={displayName}
             onChange={(e) => setDisplayName(e.target.value)}
             disabled={busy}
           />
+          <p className="text-xs text-muted-foreground">
+            사내 명단의 본명과 같은지 확인한 뒤 저장하세요.
+          </p>
+          {nameError ? <p className="text-xs text-danger">{nameError}</p> : null}
         </label>
         <label className="block space-y-1">
           <span className="text-xs font-medium">팀</span>
@@ -109,6 +116,7 @@ function MemberEditor({
             onChange={(e) => setPosition(e.target.value)}
             disabled={busy}
           >
+            <option value="">선택</option>
             {POSITION_OPTIONS.map((option) => (
               <option key={option} value={option}>
                 {option}
@@ -184,7 +192,7 @@ function MemberEditor({
         <Button
           type="button"
           size="sm"
-          disabled={busy}
+          disabled={busy || !position.trim() || nameError !== null}
           onClick={async () => {
             setBusy(true)
             setError(null)
@@ -272,10 +280,11 @@ export function MembersPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [filter, setFilter] = useState<'pending' | 'all'>('pending')
   const [newDeptName, setNewDeptName] = useState('')
-  const canManageMembers = isCompanyManager({
+  const canManageMembers = canManagePersonnel({
     status: me?.status,
     isAdmin: me?.isAdmin,
     position: me?.position,
+    departmentPersonnelScope: me?.departmentPersonnelScope,
   })
 
   const profilesQuery = useQuery({
@@ -338,7 +347,7 @@ export function MembersPage() {
     <div>
       <PageHeader
         title="멤버"
-        description="접근 신청을 승인하고 회사 업무 역량을 지정합니다. 브랜드 책임자는 선택 사항입니다."
+        description="접근 신청을 승인하고 본명과 회사 업무 역량을 확인합니다. 본명은 사내 명단과 같아야 합니다."
       />
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
@@ -409,7 +418,11 @@ export function MembersPage() {
                     {member.departmentName
                       ? ` · ${member.departmentName}`
                       : ''}
-                    {member.position ? ` · ${member.position}` : ''}
+                    {member.position
+                      ? ` · ${member.position}`
+                      : member.status === 'pending'
+                        ? ' · 직책 미정'
+                        : ''}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     역량:{' '}
@@ -510,6 +523,28 @@ export function MembersPage() {
                 <Badge variant={dept.isActive ? 'outline' : 'muted'}>
                   {dept.isActive ? '사용 중' : '중지'}
                 </Badge>
+                {dept.personnelScope ? (
+                  <Badge variant="muted">직책 관리</Badge>
+                ) : null}
+                <Select
+                  className="max-w-[9rem]"
+                  aria-label={`${dept.name} 직책 관리`}
+                  value={dept.personnelScope ?? ''}
+                  onChange={async (event) => {
+                    const next = event.target.value
+                    await updateDepartment(dept.id, {
+                      personnelScope:
+                        next === 'leaders' || next === 'members'
+                          ? (next as PersonnelScope)
+                          : null,
+                    })
+                    await invalidate()
+                  }}
+                >
+                  <option value="">안 함</option>
+                  <option value="leaders">팀장·이사만</option>
+                  <option value="members">소속 전원</option>
+                </Select>
                 <div className="ml-auto flex gap-1">
                   <Button
                     type="button"

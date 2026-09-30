@@ -24,3 +24,6 @@ verify_jwt = true
 
 [functions.firebase-product-onhand]
 verify_jwt = true
+
+[functions.chat-files-cleanup]
+verify_jwt = false

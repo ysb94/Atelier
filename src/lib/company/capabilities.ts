@@ -18,6 +18,10 @@ export const WORK_CAPABILITY_LABEL: Record<WorkCapability, string> = {
 
 export const COMPANY_MANAGER_POSITIONS = ['팀장', '이사'] as const
 
+export const PERSONNEL_SCOPES = ['leaders', 'members'] as const
+
+export type PersonnelScope = (typeof PERSONNEL_SCOPES)[number]
+
 export const DEFAULT_COMPANY_ID = 'e0000000-0000-4000-8000-000000000001'
 export const ATELIER_BRAND_ID = 'b0000000-0000-4000-8000-000000000001'
 
@@ -64,6 +68,7 @@ export type CapabilityProfile = {
   isAdmin?: boolean
   position?: string | null
   capabilities?: string[]
+  departmentPersonnelScope?: PersonnelScope | null
 }
 
 export function isApprovedCompanyMember(profile: CapabilityProfile | null) {
@@ -78,6 +83,17 @@ export function isCompanyManager(profile: CapabilityProfile | null) {
   return (
     isApprovedCompanyMember(profile) &&
     (isCompanyAdmin(profile) || isCompanyManagerPosition(profile?.position))
+  )
+}
+
+/** 가입 승인과 직책·소속 변경. DB `app.can_manage_personnel`과 같은 조건이다. */
+export function canManagePersonnel(profile: CapabilityProfile | null) {
+  if (!isApprovedCompanyMember(profile)) return false
+  if (isCompanyAdmin(profile)) return true
+  if (profile?.departmentPersonnelScope === 'members') return true
+  return (
+    profile?.departmentPersonnelScope === 'leaders' &&
+    isCompanyManagerPosition(profile.position)
   )
 }
 

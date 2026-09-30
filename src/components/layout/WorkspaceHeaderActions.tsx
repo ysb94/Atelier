@@ -10,30 +10,32 @@ import {
 } from 'react'
 import { Bell, MessageCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { ChatPanel } from '@/features/chat/ChatPanel'
+import { useChatRealtime } from '@/features/chat/use-chat-realtime'
+import { useChatRooms } from '@/features/chat/use-chat'
+import { COMPANY_MANAGER_POSITIONS } from '@/lib/company/capabilities'
+import { useRenderWatch } from '@/lib/diagnostics/render-watch'
 import { inboxBadgeLabel } from '@/lib/inbox/format'
-import {
-  MOCK_CHAT_MESSAGES,
-  MOCK_CHAT_ROOMS,
-  MOCK_NOTIFICATIONS,
-} from '@/lib/inbox/mock'
-import type { ChatMessage, ChatRoom, InboxNotification } from '@/lib/inbox/types'
+import { MOCK_NOTIFICATIONS } from '@/lib/inbox/mock'
+import type { ChatRoom, InboxNotification } from '@/lib/inbox/types'
 import { useAuth } from '@/lib/supabase/auth'
-import { cn } from '@/lib/utils'
-import { ChatPanel } from './ChatPanel'
+import { cn, emptyList } from '@/lib/utils'
 import { NotificationPanel } from './NotificationPanel'
 
 type OpenPanel = 'chat' | 'notifications'
 
-function newMessageId() {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return crypto.randomUUID()
-  }
-  return `msg-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+function isManagerPosition(position: string | null | undefined) {
+  return COMPANY_MANAGER_POSITIONS.some((item) => item === position)
 }
 
 export function WorkspaceHeaderActions() {
+  useRenderWatch('WorkspaceHeaderActions')
   const navigate = useNavigate()
   const { profile } = useAuth()
+  const chatEnabled = profile?.status === 'active'
+  const roomsQuery = useChatRooms(chatEnabled)
+  useChatRealtime(chatEnabled)
+  const rooms = roomsQuery.data ?? emptyList<ChatRoom>()
   const rootRef = useRef<HTMLDivElement>(null)
   const chatButtonRef = useRef<HTMLButtonElement>(null)
   const bellButtonRef = useRef<HTMLButtonElement>(null)
@@ -43,10 +45,6 @@ export function WorkspaceHeaderActions() {
   const [open, setOpen] = useState<OpenPanel | null>(null)
   const [notifications, setNotifications] = useState<InboxNotification[]>(
     () => MOCK_NOTIFICATIONS,
-  )
-  const [rooms, setRooms] = useState<ChatRoom[]>(() => MOCK_CHAT_ROOMS)
-  const [messages, setMessages] = useState<ChatMessage[]>(
-    () => MOCK_CHAT_MESSAGES,
   )
 
   const notificationCount = useMemo(
@@ -114,39 +112,17 @@ export function WorkspaceHeaderActions() {
     navigate(item.href)
   }
 
-  function openRoom(roomId: string) {
-    setRooms((prev) =>
-      prev.map((room) => (room.id === roomId ? { ...room, unread: 0 } : room)),
-    )
-  }
-
-  function sendMessage(roomId: string, body: string) {
-    const text = body.trim()
-    if (!text) return
-    const createdAt = new Date().toISOString()
-    const message: ChatMessage = {
-      id: newMessageId(),
-      roomId,
-      authorName: profile?.displayName || '나',
-      body: text,
-      createdAt,
-      mine: true,
-      pending: false,
-    }
-    setMessages((prev) => [...prev, message])
-    setRooms((prev) =>
-      prev.map((room) =>
-        room.id === roomId
-          ? { ...room, lastMessage: text, lastAt: createdAt }
-          : room,
-      ),
-    )
-  }
+  const roomsError =
+    roomsQuery.error instanceof Error
+      ? roomsQuery.error.message
+      : roomsQuery.error
+        ? '채팅방을 불러오지 못했습니다.'
+        : null
 
   return (
     <div
       ref={rootRef}
-      className="relative flex shrink-0 items-center gap-0.5 px-1.5 pt-2"
+      className="relative mr-10 flex shrink-0 items-center gap-0.5 px-1.5 pt-2"
     >
       <HeaderIconButton
         buttonRef={chatButtonRef}
@@ -171,17 +147,20 @@ export function WorkspaceHeaderActions() {
         <Bell className="size-4" />
       </HeaderIconButton>
 
-      {open === 'chat' ? (
+      {open === 'chat' && profile ? (
         <div
           id="workspace-chat-panel"
           className="fixed top-12 right-3 bottom-24 z-30 flex w-[min(24rem,calc(100vw-1.5rem))] flex-col"
         >
           <ChatPanel
             rooms={rooms}
-            messages={messages}
+            loading={roomsQuery.isLoading}
+            error={roomsError}
+            userId={profile.id}
+            myName={profile.displayName?.trim() || '나'}
+            isManager={isManagerPosition(profile.position)}
+            isAdmin={profile.isAdmin}
             titleId={chatTitleId}
-            onOpenRoom={openRoom}
-            onSend={sendMessage}
             onClose={closePanel}
           />
         </div>

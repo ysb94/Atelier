@@ -11,6 +11,8 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
+  LayoutGrid,
+  List,
   Plus,
   RotateCcw,
   X,
@@ -28,6 +30,7 @@ import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { useAuth } from '@/lib/supabase/auth'
 import { DepartmentProductLoadDialog } from '@/features/products/DepartmentProductLoadDialog'
+import { ProductCategoryBrowse } from '@/features/products/ProductCategoryBrowse'
 import { useDepartmentWorkSet } from '@/features/products/useDepartmentWorkSet'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
@@ -59,6 +62,17 @@ import {
   isFieldFilled,
   ownerCompleteness,
 } from '@/lib/products/style-fields'
+import {
+  UNCATEGORIZED_FILTER,
+  categoryPathLabel,
+  createStyleCategoryFilter,
+  hasCategoryTree,
+  listCategoryFilterOptions,
+  styleCategoryFieldLabel,
+  styleCategoryIds,
+  type StyleCategoryIndex,
+} from '@/lib/products/product-categories'
+import { useStyleCategoryIndexes } from '@/lib/products/use-style-category-index'
 import {
   SEASON_STATUS_LABEL,
   STYLE_STATUS_LABEL,
@@ -118,9 +132,11 @@ function statusVariant(
 function CompletenessDots({
   style,
   fields,
+  categoryLabel,
 }: {
   style: Style
   fields: BrandField[]
+  categoryLabel?: string
 }) {
   return (
     <div
@@ -128,7 +144,9 @@ function CompletenessDots({
       onClick={(e) => e.stopPropagation()}
     >
       {OWNER_PRESETS.map((owner) => {
-        const { ratio } = ownerCompleteness(style, fields, owner)
+        const { ratio } = ownerCompleteness(style, fields, owner, {
+          categoryLabel,
+        })
         const pct = Math.round(ratio * 100)
         return (
           <span
@@ -169,6 +187,43 @@ function isSelectField(field: BrandField) {
 
 function isDerivedLogisticsField(field: BrandField) {
   return field.systemKey === 'warehouse' || field.systemKey === 'onHand'
+}
+
+/**
+ * M번호에 연결된 카테고리. 대표 경로와 추가 분류 수만 보이고 전체는 툴팁으로 본다.
+ * 트리가 없는 브랜드는 예전 카테고리 글자를 그대로 보인다.
+ */
+function StyleCategoryCell({
+  style,
+  index,
+  pending,
+}: {
+  style: Style
+  index: StyleCategoryIndex | undefined
+  pending: boolean
+}) {
+  if (!hasCategoryTree(index)) {
+    if (pending) return <span className="text-muted-foreground">…</span>
+    return <span>{style.category || '—'}</span>
+  }
+  const ids = styleCategoryIds(index, style.id)
+  if (ids.length === 0) return <Badge variant="muted">미분류</Badge>
+  const paths = ids.map(
+    (id) => categoryPathLabel(index.tree, id) || '삭제된 카테고리',
+  )
+  return (
+    <span
+      className="flex max-w-72 items-center gap-1.5"
+      title={paths.join('\n')}
+    >
+      <span className="truncate">{paths[0]}</span>
+      {paths.length > 1 ? (
+        <Badge variant="outline" className="shrink-0">
+          +{paths.length - 1}
+        </Badge>
+      ) : null}
+    </span>
+  )
 }
 
 function DerivedStockCell({
@@ -388,13 +443,14 @@ function styleMatchesSearch(
   style: Style,
   keyword: string,
   seasonCode?: string,
+  categoryLabel?: string,
 ): boolean {
   if (!keyword) return true
 
   const haystack = [
     style.styleNo,
     style.name,
-    style.category,
+    categoryLabel ?? style.category,
     style.gender,
     style.status,
     STYLE_STATUS_LABEL[style.status],
@@ -480,11 +536,15 @@ export function ProductsPage({
   const seasonId = searchParams.get('season') ?? 'all'
   const statusFilter = searchParams.get('status') ?? 'all'
   const categoryFilter = searchParams.get('category') ?? 'all'
+  const categoryView = !lockedOwner && searchParams.get('view') === 'categories'
   const requestedPreset = lockedOwner ?? parseColumnPreset(searchParams.get('cols'))
   const columnPreset =
     isCompany && !singleCompanyBrand ? 'all' : requestedPreset
   const emptyFilterKey = searchParams.get('empty')
-  const pageSize = parsePageSize(searchParams.get('size'))
+  const pageSize =
+    categoryView && !searchParams.has('size')
+      ? 20
+      : parsePageSize(searchParams.get('size'))
   const page = parsePage(searchParams.get('page'))
   const queryClient = useQueryClient()
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -497,6 +557,8 @@ export function ProductsPage({
       ? [scopedBrand.id]
       : []
   const workSet = useDepartmentWorkSet(profile?.id, workBrandIds, lockedOwner)
+  const { indexes: categoryIndexes, loading: categoryLoading, failed: categoryFailed } =
+    useStyleCategoryIndexes(workBrandIds)
 
   const fieldsQuery = useQuery({
     queryKey: ['brand-fields', scopedBrand?.id],
@@ -570,8 +632,14 @@ export function ProductsPage({
         warehousePositionsQuery.isPending))
 
   const brandMap = useMemo(
-    () => new Map((companyBrands ?? []).map((item) => [item.id, item])),
-    [companyBrands],
+    () =>
+      new Map(
+        (companyBrands ?? (scopedBrand ? [scopedBrand] : [])).map((item) => [
+          item.id,
+          item,
+        ]),
+      ),
+    [companyBrands, scopedBrand],
   )
   const fieldsByBrand = useMemo(() => {
     const map = new Map<string, BrandField[]>()
@@ -638,14 +706,40 @@ export function ProductsPage({
     [seasons],
   )
 
-  const categories = useMemo(() => {
-    const set = new Set<string>()
-    for (const style of allStyles) {
-      const category = style.category.trim()
-      if (category) set.add(category)
+  /** 트리가 있는 브랜드의 M번호만 담는다. 없는 M번호는 예전 카테고리 글자를 쓴다. */
+  const categoryLabels = useMemo(() => {
+    const labels = new Map<string, string>()
+    for (const style of catalogStyles) {
+      const label = styleCategoryFieldLabel(
+        categoryIndexes.get(style.brandId),
+        style.id,
+      )
+      if (label !== undefined) labels.set(style.id, label)
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'ko'))
-  }, [allStyles])
+    return labels
+  }, [catalogStyles, categoryIndexes])
+
+  const categoryFilterGroups = useMemo(
+    () =>
+      Array.from(categoryIndexes, ([brandId, index]) => ({
+        brandId,
+        brandName: brandMap.get(brandId)?.name ?? scopedBrand?.name ?? '',
+        options: listCategoryFilterOptions(index.tree),
+      })).filter((group) => group.options.length > 0),
+    [brandMap, categoryIndexes, scopedBrand?.name],
+  )
+
+  /** 고른 카테고리의 하위까지 포함한다. 어느 트리에도 없는 값(예전 주소)은 거르지 않는다. */
+  const categoryMatcher = useMemo(() => {
+    if (categoryFilter === 'all') return null
+    const byBrand = new Map<string, (styleId: string) => boolean>()
+    for (const [brandId, index] of categoryIndexes) {
+      const matches = createStyleCategoryFilter(index, categoryFilter)
+      if (matches) byBrand.set(brandId, matches)
+    }
+    if (byBrand.size === 0) return null
+    return (style: Style) => byBrand.get(style.brandId)?.(style.id) ?? false
+  }, [categoryFilter, categoryIndexes])
 
   const ownerFields = useMemo(() => {
     if (columnPreset === 'all') return [] as BrandField[]
@@ -664,14 +758,13 @@ export function ProductsPage({
     return allStyles.filter((style) => {
       if (seasonId !== 'all' && style.seasonId !== seasonId) return false
       if (statusFilter !== 'all' && style.status !== statusFilter) return false
-      if (categoryFilter !== 'all' && style.category !== categoryFilter) {
-        return false
-      }
+      if (categoryMatcher && !categoryMatcher(style)) return false
       const season = seasonMap.get(style.seasonId)
       return styleMatchesSearch(
         style,
         keyword,
         season ? formatSeasonLabel(season) : undefined,
+        categoryLabels.get(style.id),
       )
     })
   }, [
@@ -679,7 +772,8 @@ export function ProductsPage({
     search,
     seasonId,
     statusFilter,
-    categoryFilter,
+    categoryMatcher,
+    categoryLabels,
     seasonMap,
   ])
 
@@ -689,9 +783,14 @@ export function ProductsPage({
       .filter((field) => !isDerivedLogisticsField(field))
       .map((field) => ({
         field,
-        count: baseStyles.filter((style) => !isFieldFilled(style, field)).length,
+        count: baseStyles.filter(
+          (style) =>
+            !isFieldFilled(style, field, {
+              categoryLabel: categoryLabels.get(style.id),
+            }),
+        ).length,
       }))
-  }, [baseStyles, ownerFields])
+  }, [baseStyles, categoryLabels, ownerFields])
 
   const activeEmptyField = useMemo(() => {
     if (!emptyFilterKey) return undefined
@@ -704,8 +803,13 @@ export function ProductsPage({
 
   const filteredStyles = useMemo(() => {
     if (!activeEmptyField) return baseStyles
-    return baseStyles.filter((style) => !isFieldFilled(style, activeEmptyField))
-  }, [baseStyles, activeEmptyField])
+    return baseStyles.filter(
+      (style) =>
+        !isFieldFilled(style, activeEmptyField, {
+          categoryLabel: categoryLabels.get(style.id),
+        }),
+    )
+  }, [baseStyles, activeEmptyField, categoryLabels])
 
   const totalCount = filteredStyles.length
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize) || 1)
@@ -727,7 +831,7 @@ export function ProductsPage({
     categoryFilter !== 'all' ||
     (!lockedOwner && columnPreset !== 'all') ||
     Boolean(emptyFilterKey) ||
-    pageSize !== DEFAULT_PAGE_SIZE ||
+    pageSize !== (categoryView ? 20 : DEFAULT_PAGE_SIZE) ||
     page !== 1 ||
     (isCompany && !brandSelection.isAll)
 
@@ -793,6 +897,7 @@ export function ProductsPage({
           const value = prev.get(key)
           if (value != null) next.set(key, value)
         }
+        if (categoryView) next.set('view', 'categories')
         return next
       },
       { replace: true },
@@ -949,8 +1054,16 @@ export function ProductsPage({
             return season ? formatSeasonLabel(season) : '—'
           },
         }),
-        columnHelper.accessor('category', {
+        columnHelper.display({
+          id: 'category',
           header: '카테고리',
+          cell: ({ row }) => (
+            <StyleCategoryCell
+              style={row.original}
+              index={categoryIndexes.get(row.original.brandId)}
+              pending={categoryLoading}
+            />
+          ),
         }),
         columnHelper.accessor('status', {
           header: '상태',
@@ -967,6 +1080,7 @@ export function ProductsPage({
             <CompletenessDots
               style={row.original}
               fields={fieldsByBrand.get(row.original.brandId) ?? fields}
+              categoryLabel={categoryLabels.get(row.original.id)}
             />
           ),
         }),
@@ -1060,22 +1174,49 @@ export function ProductsPage({
         columnHelper.display({
           id: `field:${field.id}`,
           header: field.label,
-          cell: ({ row }) => (
-            <EditableFieldCell
-              style={row.original}
-              field={field}
-              seasonCode={seasonMap.get(row.original.seasonId)?.code}
-              seasons={seasons}
-              disabled={saveMutation.isPending}
-              onSave={handleSaveField}
-            />
-          ),
+          cell: ({ row }) => {
+            // 트리가 있는 브랜드의 카테고리는 여러 분류를 고를 수 있어 상품 상세에서만 고친다.
+            const categoryIndex =
+              field.systemKey === 'category'
+                ? categoryIndexes.get(row.original.brandId)
+                : undefined
+            if (
+              field.systemKey === 'category' &&
+              (hasCategoryTree(categoryIndex) || categoryLoading)
+            ) {
+              return (
+                <span
+                  className="block px-2 py-1"
+                  title="상품을 눌러 상세에서 카테고리를 고칩니다"
+                >
+                  <StyleCategoryCell
+                    style={row.original}
+                    index={categoryIndex}
+                    pending={categoryLoading}
+                  />
+                </span>
+              )
+            }
+            return (
+              <EditableFieldCell
+                style={row.original}
+                field={field}
+                seasonCode={seasonMap.get(row.original.seasonId)?.code}
+                seasons={seasons}
+                disabled={saveMutation.isPending}
+                onSave={handleSaveField}
+              />
+            )
+          },
         }),
       ),
       ...unloadColumn,
     ]
   }, [
     brandMap,
+    categoryIndexes,
+    categoryLabels,
+    categoryLoading,
     columnPreset,
     fields,
     fieldsByBrand,
@@ -1139,6 +1280,32 @@ export function ProductsPage({
         }
       />
 
+      {!lockedOwner ? (
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
+          <div className="inline-flex rounded-lg border border-border bg-muted/40 p-1" role="group" aria-label="상품 보기 방식">
+            <Button
+              type="button"
+              variant={categoryView ? 'ghost' : 'secondary'}
+              size="sm"
+              aria-pressed={!categoryView}
+              onClick={() => patchParams({ view: null, size: null })}
+            >
+              <List className="size-4" /> 목록 보기
+            </Button>
+            <Button
+              type="button"
+              variant={categoryView ? 'secondary' : 'ghost'}
+              size="sm"
+              aria-pressed={categoryView}
+              onClick={() => patchParams({ view: 'categories', cols: null, empty: null, size: '20' })}
+            >
+              <LayoutGrid className="size-4" /> 카테고리 보기
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">카테고리로 찾고, 상품 카드를 눌러 상세 정보를 확인하세요.</p>
+        </div>
+      ) : null}
+
       {workSetEmpty ? null : (
       <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <Input
@@ -1197,17 +1364,32 @@ export function ProductsPage({
           ))}
         </Select>
         <Select
-          value={categoryFilter}
+          value={categoryMatcher ? categoryFilter : 'all'}
+          aria-label="카테고리 필터"
+          className={categoryView ? 'lg:hidden' : undefined}
           onChange={(e) => patchParams({ category: e.target.value })}
         >
-          <option value="all">전체 카테고리</option>
-          {categories.map((category) => (
-            <option key={category} value={category}>
-              {category}
-            </option>
-          ))}
+          <option value="all">
+            {categoryLoading ? '카테고리 불러오는 중...' : '전체 카테고리'}
+          </option>
+          <option value={UNCATEGORIZED_FILTER}>미분류</option>
+          {categoryFilterGroups.length > 1
+            ? categoryFilterGroups.map((group) => (
+                <optgroup key={group.brandId} label={group.brandName}>
+                  {group.options.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </optgroup>
+              ))
+            : categoryFilterGroups[0]?.options.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {option.label}
+                </option>
+              ))}
         </Select>
-        {showDepartmentViews && !lockedOwner ? (
+        {showDepartmentViews && !lockedOwner && !categoryView ? (
           <Select
             value={columnPreset}
             onChange={(e) =>
@@ -1295,12 +1477,39 @@ export function ProductsPage({
         </p>
       ) : null}
 
+      {categoryFailed ? (
+        <p className="mb-4 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
+          카테고리를 불러오지 못했습니다. 잠시 뒤 새로고침해 주세요.
+        </p>
+      ) : null}
+
       {saveError ? (
         <p className="mb-4 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
           {saveError}
         </p>
       ) : null}
 
+      {categoryView ? (
+        <ProductCategoryBrowse
+          styles={pageStyles}
+          allStyles={allStyles}
+          indexes={categoryIndexes}
+          brands={brandMap}
+          selectedCategory={categoryMatcher ? categoryFilter : 'all'}
+          loading={listLoading}
+          categoryLoading={categoryLoading}
+          page={safePage}
+          totalPages={totalPages}
+          totalCount={totalCount}
+          onSelectCategory={(categoryId) => patchParams({ category: categoryId })}
+          onOpenStyle={(style) => {
+            const slug = brandMap.get(style.brandId)?.slug ?? scopedBrand?.slug
+            if (!slug) return
+            navigate(`${productDetailPath(slug, style.styleNo)}${detailQuery}`)
+          }}
+          onPage={(nextPage) => patchParams({ page: String(nextPage) }, { resetPage: false })}
+        />
+      ) : (
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-sm">
@@ -1531,11 +1740,13 @@ export function ProductsPage({
           </div>
         ) : null}
       </Card>
+      )}
 
       {loadOpen && lockedOwner ? (
         <DepartmentProductLoadDialog
           owner={lockedOwner}
           styles={catalogStyles}
+          categoryLabels={categoryLabels}
           alreadyIds={workSet.idSet}
           loading={stylesQuery.isLoading}
           onClose={() => setLoadOpen(false)}

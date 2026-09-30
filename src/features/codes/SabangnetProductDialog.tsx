@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import { X } from 'lucide-react'
+import { CategoryPicker } from '@/components/products/CategoryPicker'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
+import type { SabangnetCategorySummary } from '@/lib/codes/sabangnet-category-import'
 import {
   parseSabangnetNumber,
   sabangnetFieldLabel,
 } from '@/lib/codes/sabangnet-fields'
 import { resolveStyleNosToIds } from '@/lib/codes/sabangnet-import'
+import {
+  findUnsavableCategoryIds,
+  type CategoryTree,
+} from '@/lib/products/product-categories'
 import type {
   SabangnetField,
   SabangnetProduct,
@@ -16,6 +22,13 @@ import type {
 
 export type SabangnetProductDialogMode = 'create' | 'edit'
 
+/** 수정 창에서 고른 카테고리. dirty가 아니면 기존 M번호별 값을 건드리지 않는다. */
+export type SabangnetCategoryDraft = {
+  ids: string[]
+  dirty: boolean
+  mixed: boolean
+}
+
 type SabangnetProductDialogProps = {
   open: boolean
   mode: SabangnetProductDialogMode
@@ -23,10 +36,17 @@ type SabangnetProductDialogProps = {
   existingProducts: SabangnetProduct[]
   styles: StyleRef[]
   fields?: SabangnetField[]
+  /** null이면 아직 불러오는 중 */
+  categoryTree: CategoryTree | null
+  /** 창을 연 순간의 값. 목록이 새로 고쳐져도 고르던 값을 덮지 않도록 호출측이 고정해 넘긴다. */
+  categorySummary?: SabangnetCategorySummary | null
   isSubmitting?: boolean
   errorMessage?: string | null
   onClose: () => void
-  onSubmit: (input: SabangnetProductInput) => void | Promise<void>
+  onSubmit: (
+    input: SabangnetProductInput,
+    categories: SabangnetCategoryDraft,
+  ) => void | Promise<void>
 }
 
 export function SabangnetProductDialog({
@@ -36,6 +56,8 @@ export function SabangnetProductDialog({
   existingProducts,
   styles,
   fields = [],
+  categoryTree,
+  categorySummary,
   isSubmitting,
   errorMessage,
   onClose,
@@ -45,7 +67,10 @@ export function SabangnetProductDialog({
   const [name, setName] = useState('')
   const [styleText, setStyleText] = useState('')
   const [extras, setExtras] = useState<Record<string, string>>({})
+  const [categoryIds, setCategoryIds] = useState<string[]>([])
+  const [categoryDirty, setCategoryDirty] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
+  const mixed = categorySummary?.kind === 'mixed'
   const customFields = useMemo(
     () => fields.filter((field) => field.systemKey === null),
     [fields],
@@ -67,6 +92,16 @@ export function SabangnetProductDialog({
     setExtras(nextExtras)
     setLocalError(null)
   }, [open, source, fields])
+
+  useEffect(() => {
+    if (!open) return
+    setCategoryIds(
+      categorySummary?.kind === 'same' || categorySummary?.kind === 'mixed'
+        ? [...categorySummary.categoryIds]
+        : [],
+    )
+    setCategoryDirty(false)
+  }, [open, categorySummary])
 
   const duplicate = useMemo(() => {
     const trimmed = code.trim()
@@ -116,9 +151,25 @@ export function SabangnetProductDialog({
       values[field.id] = rawValue
     }
 
+    if (categoryDirty && categoryTree) {
+      const unsavable = findUnsavableCategoryIds(categoryTree, categoryIds)
+      if (unsavable.length > 0) {
+        setLocalError('저장할 수 없는 카테고리가 있습니다. 빨간 항목을 빼고 다시 고르세요.')
+        return
+      }
+    }
+    const categories: SabangnetCategoryDraft = {
+      ids: categoryIds,
+      dirty: categoryDirty,
+      mixed,
+    }
+
     const raw = styleText.trim()
     if (!raw) {
-      void onSubmit({ code: nextCode, name: nextName, styleIds: [], values })
+      void onSubmit(
+        { code: nextCode, name: nextName, styleIds: [], values },
+        categories,
+      )
       return
     }
 
@@ -127,13 +178,18 @@ export function SabangnetProductDialog({
       setLocalError(resolved.error)
       return
     }
-    void onSubmit({
-      code: nextCode,
-      name: nextName,
-      styleIds: resolved.styleIds,
-      values,
-    })
+    void onSubmit(
+      {
+        code: nextCode,
+        name: nextName,
+        styleIds: resolved.styleIds,
+        values,
+      },
+      categories,
+    )
   }
+
+  const hasStyles = styleText.trim().length > 0
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -148,7 +204,7 @@ export function SabangnetProductDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="sabangnet-product-title"
-        className="relative z-10 w-full max-w-lg overflow-hidden rounded-xl border border-border bg-card shadow-xl"
+        className="relative z-10 flex max-h-[calc(100dvh-2rem)] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl"
       >
         <div className="flex items-start justify-between border-b border-border px-5 py-4">
           <div>
@@ -175,7 +231,7 @@ export function SabangnetProductDialog({
           </Button>
         </div>
 
-        <div className="space-y-4 px-5 py-5">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-5">
           <label className="block space-y-1.5">
             <span className="text-sm font-medium">{codeLabel}</span>
             <Input
@@ -216,6 +272,37 @@ export function SabangnetProductDialog({
               쉼표 또는 줄바꿈. 비우면 미연결로 등록합니다.
             </span>
           </label>
+          <div className="space-y-1.5">
+            <span className="block text-sm font-medium">카테고리</span>
+            {mixed && !categoryDirty ? (
+              <p className="rounded-md bg-warning/10 px-3 py-2 text-xs leading-5 text-warning">
+                M번호마다 카테고리가 다릅니다(혼합). 그대로 두면 M번호별 값을
+                유지하고, 여기서 바꾸면 연결된 M번호 전체가 같은 카테고리로
+                바뀝니다.
+              </p>
+            ) : null}
+            {categoryTree ? (
+              <CategoryPicker
+                tree={categoryTree}
+                value={categoryIds}
+                disabled={isSubmitting || !hasStyles}
+                onChange={(next) => {
+                  setCategoryIds(next)
+                  setCategoryDirty(true)
+                  setLocalError(null)
+                }}
+              />
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                카테고리를 불러오는 중...
+              </p>
+            )}
+            <span className="block text-xs text-muted-foreground">
+              {hasStyles
+                ? '카테고리는 M번호에 저장합니다. 이 코드에 연결된 M번호 전체에 같은 카테고리를 넣고, 새로 연결한 M번호에도 적용합니다.'
+                : 'M번호를 연결하면 카테고리를 고를 수 있습니다.'}
+            </span>
+          </div>
           {customFields.map((field) => (
             <label key={field.id} className="block space-y-1.5">
               <span className="text-sm font-medium">

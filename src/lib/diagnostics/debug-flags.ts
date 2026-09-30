@@ -7,7 +7,7 @@
  *   끄려면 `atelierDebug.off()`.
  *
  * 모든 진단 로그는 `[perf]`, `[render-storm]`, `[query-storm]`, `[app-error]`,
- * `[invoice-work]` 접두어를 쓴다. 콘솔 필터에 접두어를 넣으면 해당 항목만 본다.
+ * `[invoice-work]`, `[chat-work]` 접두어를 쓴다. 콘솔 필터에 접두어를 넣으면 해당 항목만 본다.
  */
 
 const STORAGE_KEY = 'atelier:debug'

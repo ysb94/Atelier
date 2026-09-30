@@ -1,0 +1,21 @@
+{
+  "createdAt": "2026-09-30T07:05:28.112Z",
+  "note": "직책·소속 변경 권한을 운영지원팀으로 좁히기 직전 스냅샷. 이메일·이름·남길 말은 넣지 않는다.",
+  "tables": {
+    "profiles": {
+      "fetched": 7,
+      "count": 7,
+      "error": null
+    },
+    "departments": {
+      "fetched": 12,
+      "count": 12,
+      "error": null
+    },
+    "profile_capabilities": {
+      "fetched": 5,
+      "count": 5,
+      "error": null
+    }
+  }
+}

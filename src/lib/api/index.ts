@@ -50,8 +50,10 @@ import type {
   ProductCodeKind,
   ProductCategory,
   ProductCategoryInput,
+  SabangnetCategoryApplyResult,
   SabangnetProduct,
   SabangnetProductInput,
+  StyleCategoryLink,
   ProductDraft,
   ProductDraftInput,
   Season,
@@ -104,6 +106,8 @@ import * as barcodePartnerDisplaySettingStore from '@/lib/supabase/barcode-partn
 import * as bulkOutboundStore from '@/lib/supabase/bulk-outbound'
 import * as outboundShipmentStore from '@/lib/supabase/outbound-shipments'
 import * as productCategoryStore from '@/lib/supabase/product-categories'
+import * as styleCategoryStore from '@/lib/supabase/style-categories'
+import type { SabangnetCategoryRowInput } from '@/lib/supabase/style-categories'
 import * as sabangnetProductStore from '@/lib/supabase/sabangnet-products'
 import * as productDraftStore from '@/lib/supabase/product-drafts'
 import * as seasonStore from '@/lib/supabase/seasons'
@@ -116,6 +120,32 @@ import type { WarehouseFinderSearchMode } from '@/lib/warehouse/finder'
 
 const delay = (ms = 120) => new Promise((resolve) => setTimeout(resolve, ms))
 
+export {
+  ChatStoreError,
+  addChatRoomMembers,
+  beginChatAttachment,
+  cancelChatAttachment,
+  chatStorageUsage,
+  completeChatAttachment,
+  createChatThumbUrl,
+  createGroupChat,
+  deleteChatMessage,
+  downloadChatAttachment,
+  leaveChatRoom,
+  listChatAttachmentDownloads,
+  listChatDirectory,
+  listChatMessages,
+  listChatRoomMembers,
+  listMyChatRooms,
+  markChatRoomRead,
+  openDirectChat,
+  purgeChatAttachment,
+  removeChatObjects,
+  renameChatRoom,
+  restoreChatAttachment,
+  sendChatMessage,
+  trashChatAttachment,
+} from '@/lib/supabase/chat'
 export { AiCandidateStoreError } from '@/lib/supabase/ai-candidates'
 export { AiGatewayError, isFatalAiError } from '@/lib/supabase/ai-gateway'
 export { AiSettingsStoreError } from '@/lib/supabase/ai-settings'
@@ -244,6 +274,11 @@ export type {
 export { canSetBulkOutboundPartnerWorkStatus } from '@/lib/supabase/bulk-outbound'
 export { OutboundShipmentStoreError } from '@/lib/supabase/outbound-shipments'
 export { ProductCategoryStoreError } from '@/lib/supabase/product-categories'
+export {
+  SABANGNET_CATEGORY_CHUNK_SIZE,
+  StyleCategoryStoreError,
+} from '@/lib/supabase/style-categories'
+export type { SabangnetCategoryRowInput } from '@/lib/supabase/style-categories'
 export { SabangnetProductStoreError } from '@/lib/supabase/sabangnet-products'
 export {
   ProductDraftStoreError,
@@ -2305,6 +2340,34 @@ export async function moveProductCategory(
     brandId,
     categoryId,
     direction,
+  )
+}
+
+export async function getStyleCategories(
+  brandId: string,
+): Promise<StyleCategoryLink[]> {
+  return styleCategoryStore.listStyleCategories(brandId)
+}
+
+/** M번호들의 카테고리를 같은 최하위 카테고리 목록으로 교체한다. 첫 번째가 대표다. */
+export async function setStyleCategories(
+  brandId: string,
+  styleIds: string[],
+  categoryIds: string[],
+): Promise<number> {
+  await delay()
+  return styleCategoryStore.setStyleCategories(brandId, styleIds, categoryIds)
+}
+
+export async function applySabangnetStyleCategories(
+  brandId: string,
+  rows: SabangnetCategoryRowInput[],
+  onProgress?: (done: number, total: number) => void,
+): Promise<SabangnetCategoryApplyResult> {
+  return styleCategoryStore.applySabangnetStyleCategories(
+    brandId,
+    rows,
+    onProgress,
   )
 }
 

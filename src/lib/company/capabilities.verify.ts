@@ -8,6 +8,7 @@ import {
   hasAnyCapability,
   hasCapability,
   inferCapabilityFromDepartment,
+  canManagePersonnel,
   canViewDraftsByOwner,
   isCompanyManager,
   uniqueCapabilities,
@@ -48,6 +49,60 @@ const manager = {
 }
 assert(isCompanyManager(manager), '팀장은 회사 관리자')
 assert(!isCompanyManager(employee), '사원은 회사 관리자가 아님')
+assert(
+  canManagePersonnel({
+    status: 'active',
+    isAdmin: false,
+    position: '팀장',
+    departmentPersonnelScope: 'leaders',
+  }),
+  '직책 관리 부서의 팀장은 인사 담당',
+)
+assert(
+  !canManagePersonnel({
+    status: 'active',
+    isAdmin: false,
+    position: '사원',
+    departmentPersonnelScope: 'leaders',
+  }),
+  '팀장·이사만 설정된 부서의 사원은 인사 담당이 아님',
+)
+assert(
+  canManagePersonnel({
+    status: 'active',
+    isAdmin: false,
+    position: '사원',
+    departmentPersonnelScope: 'members',
+  }),
+  '소속 전원으로 설정된 부서의 사원은 인사 담당',
+)
+assert(
+  !canManagePersonnel({
+    status: 'active',
+    isAdmin: false,
+    position: '팀장',
+    departmentPersonnelScope: null,
+  }),
+  '다른 팀 팀장은 인사 담당이 아님',
+)
+assert(
+  !canManagePersonnel({
+    status: 'pending',
+    isAdmin: false,
+    position: '팀장',
+    departmentPersonnelScope: 'leaders',
+  }),
+  '승인 대기 중에는 인사 담당이 아님',
+)
+assert(
+  canManagePersonnel({
+    status: 'active',
+    isAdmin: true,
+    position: '사원',
+    departmentPersonnelScope: null,
+  }),
+  '관리자는 인사 담당',
+)
 assert(canViewDraftsByOwner(manager), '팀장은 직원별 기획안을 본다')
 assert(!canViewDraftsByOwner(employee), '사원은 직원별 기획안을 못 본다')
 assert(

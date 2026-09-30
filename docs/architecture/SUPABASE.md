@@ -34,7 +34,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 데이터 | 현재 위치 |
 | --- | --- |
 | 회사, 브랜드, 팀(조직도), 프로필, 브랜드 멤버 | Supabase |
-| 출시 기획(`seasons`), 내부 상품 카테고리(`product_categories`), 브랜드 항목(`brand_fields` + `brand_field_options`), 상품(`styles`) | Supabase |
+| 출시 기획(`seasons`), 내부 상품 카테고리(`product_categories`) + M번호 연결(`style_categories`), 브랜드 항목(`brand_fields` + `brand_field_options`), 상품(`styles`) | Supabase |
 | 기획안(`product_drafts` + `draft_colors` + `draft_options`) | Supabase |
 | 코드·출고업체(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_target_folders`, `code_usage_target_aliases`, `code_usage_assignments`) | Supabase |
 | 사방넷 상품·M번호 연결(`sabangnet_products` + `sabangnet_product_styles`) | Supabase |
@@ -72,6 +72,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 원자 작업 RPC: `save_product_draft`, `promote_product_draft`,
   `save_product_code_with_components`,
   `save_sabangnet_product`, `create_sabangnet_products_bulk`,
+  `set_style_categories`, `apply_sabangnet_style_categories`,
   `replace_partner_barcode_fields`,
   `replace_partner_codes`, `save_bulk_outbound_job`,   `replace_bulk_outbound_backup`,
   `save_barcode_data_entry_run`, `delete_barcode_data_entry_run`,
@@ -137,11 +138,22 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 
 - 로그인은 Google OAuth가 기본이다. 회사 도메인이 없어 모든 Google 계정을 받고,
   `profiles.status`가 `active`일 때만 회사 셸에 들어간다.
-- 신규 사용자는 회사 팀·직책·업무 역량을 신청한다. 관리자 또는 회사 관리자
-  (`팀장`·`이사`)가 승인한다. 담당 브랜드를 고르지 않는다.
+- 신규 사용자는 회사 팀·업무 역량을 신청한다. 직책은 신청하지 않는다.
+  승인과 직책 지정은 관리자 또는 직책 관리 부서만 한다. 처음에는
+  `운영지원팀`의 `팀장`·`이사`다. 담당 브랜드를 고르지 않는다.
+- Google 계정의 표시 이름이나 이메일 앞부분은 본명 원본으로 쓰지 않는다.
+  `app.handle_new_user()`는 `display_name`을 비워 두고, 신청자가 직접 입력한다.
+  이름은 2~50자의 문자이며 공백·하이픈·아포스트로피·가운데점·마침표만 허용한다.
+  `profiles.name_confirmed_at`이 비어 있는 활성 직원은 다음 로그인 때 한 번
+  본명을 다시 입력한다. 확인한 뒤에는 본인이 이름을 바꾸지 못하고, 운영지원팀
+  또는 관리자만 멤버 화면에서 고친다. 과거 작업 이력의 이름 스냅샷은 소급하지
+  않는다.
 - 직원은 E&J `profiles` 한 명이다. `profiles.company_id`와 `departments`는 회사
   공통 축이다. 상품 데이터 파트(`planning|design|md|logistics|data`)는
   `profile_capabilities`로 따로 둔다. 부서와 역량은 다를 수 있다.
+- 조직도 명단은 `list_org_chart_members()`다. 재직 중인 직원만 호출할 수 있고,
+  재직자 이름·직책·소속만 반환한다. 프로필 행 전체 조회는 본인 또는
+  `app.can_view_members()`로 그대로 둔다.
 - 승인된 직원은 모든 브랜드를 조회한다. 수정은 관리자이거나 업무 역량이 하나
   이상 있어야 한다. 화면은 역량별로 쓰기 버튼을 가리지만, DB 쓰기는
   `app.can_edit_brand`가 막는다.
@@ -156,11 +168,11 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   회사 경로에서 전 브랜드를 조회하고, 기존 행 수정은 그 행의 `brand_id`를
   쓴다. 신규 생성·업로드·설정만 브랜드를 하나 고른다. `/b/:slug` 작업장은
   호환 리다이렉트만 남긴다.
-- **기획안만 회사 소유 예외다.** `product_drafts.company_id`가 필수이고
-  `brand_id`는 비워 둘 수 있다. 브랜드는 처음부터, 기획 중에, 또는 출시
+- **기획안과 사내 채팅이 회사 소유 예외다.** 기획안은 `product_drafts.company_id`가
+  필수이고 `brand_id`는 비워 둘 수 있다. 브랜드는 처음부터, 기획 중에, 또는 출시
   확정·상품 승격 직전에 정한다. PL번호는 회사 공통 `UNIQUE (company_id, draft_no)`
-  이며 생성 때 정하고 브랜드를 바꿔도 유지한다. `styles`·코드·물류 등 운영 행의
-  `brand_id NOT NULL` 경계는 그대로다.
+  이며 생성 때 정하고 브랜드를 바꿔도 유지한다. 채팅은 아래 「사내 채팅」을
+  따른다. `styles`·코드·물류 등 운영 행의 `brand_id NOT NULL` 경계는 그대로다.
 - 가입 화면은 두지 않는다. Google 신규 사용자도 Auth 가입 경로를 쓰므로 자체 가입은
   켜 두고, 외부인 차단은 승인 단계가 담당한다.
 - 개발 중에는 `DEV LOGIN` 버튼(`dev@atelier.local`)을 쓴다. 배포 전에
@@ -202,12 +214,46 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 설정의 `상품 설정 → 카테고리 관리`에서 생성·조회·이름/상태 수정·형제 순서
   변경·삭제를 수행한다. 하위 분류가 있는 노드는 FK `RESTRICT`로 삭제를 막는다.
 - 최초 Masmarulez 트리는 `BAG`, `POUCH`, `APPAREL`, `ACCESSORIES` 아래에 합의한
-  실제 분류만 넣는다. 상품 연결은 별도 후속 단계이며, 연결 시에는 하위 항목이
-  없는 최하위 분류만 선택하게 한다.
+  실제 분류만 넣는다.
+- 상품 연결은 `style_categories`다. M번호가 색상·사이즈 SKU 단위이므로 사방넷
+  상품이나 기획안이 아니라 `styles.id`에 붙인다. 열은 UUID, `brand_id`,
+  `style_id`, `category_id`, `is_primary`, `sort_order`다.
+  - 최하위 카테고리에만 연결한다(`style_categories_prepare` 트리거). 상위 분류의
+    상품은 하위 연결을 재귀로 모아 계산하고 따로 저장하지 않는다.
+  - M번호마다 대표 1개(`is_primary`, 부분 고유 인덱스)와 추가 분류 여러 개를 둔다.
+    자사몰처럼 한 상품을 일부러 여러 칸에 진열하는 경우가 있어서다. 카테고리별
+    집계는 대표 기준으로 한다.
+  - `styles`와 `product_categories` 모두 `(brand_id, id)` 복합 FK다. M번호를 지우면
+    연결도 `CASCADE`로 지우고, 상품이 연결된 카테고리는 `RESTRICT`로 삭제를 막는다.
+  - 상품이 연결된 카테고리 아래에는 하위를 만들 수 없다
+    (`product_categories_guard_linked_parent`). 만들면 그 상품이 중간 분류에 남는다.
+  - 저장은 `set_style_categories(p_brand_id, p_style_ids, p_category_ids)`로만 한다.
+    넘긴 M번호들의 연결을 같은 목록으로 통째로 교체하고 첫 번째가 대표다. 빈 목록은
+    연결 해제다. 사용 중인 최하위 카테고리만 받으며 `SECURITY INVOKER`다.
+  - 기존 `styles.category` 글자 칸은 그대로 두었다(도입 시점에 전부 `미분류`).
+    브랜드에 카테고리 트리가 있으면 화면의 `카테고리` 항목은 이 글자 대신 연결을
+    보여 주고, 글자 칸을 직접 고치는 입력은 막는다. 열 삭제는 별도 승인 뒤에 한다.
+    - 상품 목록·데이터 시트·상품 내보내기의 `카테고리` 열은 연결 경로를 ` | `로
+      이어 쓴다. 자사몰·사방넷 가져오기와 같은 형식이다.
+    - 상품 일괄 업로드의 `카테고리` 열은 아직 `styles.category` 글자만 고치고,
+      연결은 바꾸지 않는다(후속 과제).
+- 설정 화면은 노드마다 연결된 M번호 수(하위 합산)를 보여 주고, 삭제·하위 추가가
+  막히는 이유를 미리 안내한다.
 - RLS는 조회에 `app.can_read_brand`, 쓰기에 `app.can_edit_brand`를 사용한다.
-- 로직: `src/lib/supabase/product-categories.ts`.
-  화면: `src/features/settings/ProductCategorySettingsPage.tsx`.
-- 마이그레이션: `20260922092435_product_categories.sql`.
+- 로직: `src/lib/supabase/product-categories.ts`,
+  `src/lib/supabase/style-categories.ts`,
+  `src/lib/products/product-categories.ts`(경로·하위 집계·자사몰 문자열 해석).
+  화면: `src/features/settings/ProductCategorySettingsPage.tsx`,
+  `src/features/codes/SabangnetCodePage.tsx`,
+  `src/features/codes/SabangnetCategoryImportPanel.tsx`,
+  `src/features/products/ProductsPage.tsx`,
+  `src/features/products/ProductDetailDrawer.tsx`,
+  `src/features/products/StyleCategoryEditor.tsx`.
+  공용 선택기: `src/components/products/CategoryPicker.tsx`.
+  조회 훅: `src/lib/products/use-style-category-index.ts`.
+  회귀: `npm run verify:product-categories`.
+- 마이그레이션: `20260922092435_product_categories.sql`,
+  `20260930191500_style_categories.sql`(원격 적용명 `style_categories`).
 
 ### 자사 바코드 일괄 등록
 
@@ -288,6 +334,24 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `src/lib/supabase/sabangnet-fields.ts`.
   헤더 관리 화면은 `SabangnetFieldManager.tsx`다.
   회귀: `npm run verify:sabangnet-codes`.
+- 카테고리는 사방넷 상품이 아니라 연결된 M번호(`style_categories`)에 저장한다.
+  사방넷 화면은 입력 창구다.
+  - `카테고리` 열은 연결 M번호의 대표 경로와 추가 분류 수를 보여 주고, M번호마다
+    다르면 `혼합`으로 표시한다. 카테고리 필터는 고른 분류의 하위까지 포함하며
+    `미분류`도 고를 수 있다.
+  - 수정 창에서 최하위 카테고리 여러 개와 대표를 고르면 연결된 M번호 전체에 같은
+    목록을 저장한다.
+  - `카테고리 가져오기`는 `사방넷 코드 | 카테고리` 2열 파일을 읽는다. 카테고리 칸은
+    카페24 자사몰 표기(` | `로 경로, ` > `로 단계 구분)를 그대로 받는다. `ALL`,
+    `홈 메뉴 ALL`, `NEW ARRIVAL`, `… > All`과 더 깊은 경로가 있는 상위 경로는 버리고,
+    남은 경로를 파일 순서대로 쓴다. 첫 번째가 대표이고 이름은 대소문자·공백을
+    무시해 비교한다.
+  - 미리보기는 적용 가능, 카테고리 없음, 중간 분류에서 멈춤, 트리에 없음, 사용 안 함,
+    M번호 미연결, 없는 사방넷 코드로 나눈다. 적용 가능한 행만
+    `apply_sabangnet_style_categories`(최대 200행, `SECURITY INVOKER`)로 저장한다.
+    파일에 있는 코드의 M번호만 교체하고, 카테고리 칸이 빈 행과 파일에 없는 코드는
+    기존 값을 유지한다. 같은 파일을 다시 올려도 결과가 같다.
+  - `현재 카테고리 내려받기`는 같은 2열 형식(참고용 상품명·확인 열 추가)이다.
 - 마이그레이션: `20260922121227_sabangnet_products.sql`
   (원격 적용명 `sabangnet_products`),
   `20260922124337_sabangnet_products_upsert.sql`,
@@ -1430,7 +1494,15 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
 - 사용자 권한은 프로필 승인 상태와 회사 업무 역량으로 나눈다.
 - 관리자(`is_admin`)와 승인된 직원은 전 브랜드를 조회한다. 수정은 역량이 있는
   직원만 한다. 브랜드 멤버십이 없어도 회사 셸에서 전 브랜드를 본다.
-- 회사 관리자(`팀장`·`이사`)와 전역 관리자가 접근 신청을 승인한다.
+- 접근 신청 승인과 직책·소속 변경은 전역 관리자 또는
+  `departments.personnel_scope`가 켜진 부서만 한다.
+  `leaders`는 그 부서의 `팀장`·`이사`, `members`는 소속 전원이다.
+  처음 값은 회사 `운영지원팀`의 `leaders`다. 부서 설정은 관리자만 바꾼다.
+  본인은 승인 뒤 직책과 소속을 바꿀 수 없다. 소속은 승인 대기 중에만
+  본인이 고친다. 직원 목록 조회는 관리자·`팀장`·`이사`·인사 담당이다.
+  다른 팀의 `팀장`·`이사`는 승인 권한 없이 직원별 기획안과 회의 참석자
+  조회만 유지한다.
+  마이그레이션: `20260930100000_personnel_position_governance.sql`.
 - 브랜드 책임자(`brand_members.is_lead`)는 그 브랜드 정보·AI 설정만 고친다.
 - 화면에서 숨기는 것은 권한 제어가 아니다. DB 정책으로 직접 접근도 차단한다.
 - 새 테이블을 만들면 `authenticated`에 필요한 GRANT를 함께 준다. RLS만으로는 부족하다.
@@ -1471,6 +1543,38 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
 - 지금은 단일 `Atelier` 프로젝트다. 마이그레이션 검증은 이 DB에서 하고,
   파괴적 작업 전에는 위 백업 방침의 스냅샷으로 대체한다.
 - 정기 백업과 복구 절차를 마련하고, 데이터 건수·관계·파일을 검증하는 체크리스트를 둔다.
+- 사내 채팅 파일만 `companies/{company_id}/chat/{room_id}/{attachment_id}/` 다.
+  브랜드 폴더를 쓰지 않는다. 자세한 한도와 권한은 「사내 채팅」에 둔다.
+
+## 사내 채팅
+
+채팅은 E&J 회사 소유다. `chat_rooms`, `chat_messages`, `chat_attachments`에는
+`brand_id`가 없다. 상품·코드·물류의 브랜드 경계는 바꾸지 않는다.
+
+- 볼 수 있는 사람은 그 방 멤버뿐이다. 관리자도 멤버가 아닌 방은 보지 못한다.
+  새로 들어온 멤버는 이전 대화와 파일을 본다. 나가거나 승인이 해제되면 바로
+  못 본다.
+- 동료 명단은 `list_chat_directory()`만 쓴다. 이름, 부서, 직책만 반환하고
+  이메일과 승인 상태는 주지 않는다. `profiles` 조회 정책(`can_view_members`)은
+  그대로다.
+- 파일 버킷은 비공개 `company-chat`이다. 경로는
+  `companies/{company_id}/chat/{room_id}/{attachment_id}/original.{ext}`와
+  `thumb.jpg`다. 한글 파일 이름은 DB `file_name`에 둔다. 받을 때는 1시간짜리
+  주소로 파일을 읽은 뒤, 브라우저가 그 이름으로 저장하게 한다. 저장소가
+  붙이는 이름 정보는 한글을 깨뜨리므로 쓰지 않는다. 누가 받았는지는
+  `chat_attachment_downloads`에 남긴다.
+- 파일당 한도는 지금 50MB다. Free 플랜의 버킷 `file_size_limit`(52428800)와
+  `src/lib/chat/file-rules.ts`의 `CHAT_FILE_MAX_BYTES`를 함께 쓴다. 유료 전환
+  때는 이 두 곳을 100MB(104857600)로 같이 올린다. 화면의 사용량 분모 1GB는
+  Free 용량이고, 유료 전환 후 표시는 100GB로 바꾼다.
+- 실행 파일은 화면과 `begin_chat_attachment`에서 같이 막는다. 매크로 문서는
+  허용하고 `has_macro`로 표시한다.
+- 일반 삭제는 30일 휴지통이다. 보낸 사람 또는 그 방에 있는 팀장·이사가
+  되돌릴 수 있다. 「고객 정보 포함」 삭제는 `purge_reason = pii`로 바로
+  지우고, 그 전에 받은 사람 목록을 보여 준다.
+- 보관은 무기한이다. 매일 한국시간 04:00(UTC 19:00)에 `pg_cron`이 `pg_net`으로
+  Edge Function `chat-files-cleanup`을 호출한다. 입력값은 없고, 30일이 지난
+  휴지통, 24시간이 지난 미완료 업로드, 지우다 남은 파일만 지운다.
 
 ## 브랜드를 독립 프로젝트로 분리할 때
 

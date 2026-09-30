@@ -14,6 +14,7 @@ import { formatNumber } from '@/lib/utils'
 export function DepartmentProductLoadDialog({
   owner,
   styles,
+  categoryLabels,
   alreadyIds,
   loading,
   onClose,
@@ -21,6 +22,8 @@ export function DepartmentProductLoadDialog({
 }: {
   owner: FieldOwner
   styles: readonly Style[]
+  /** style id → 카테고리 트리 연결 경로. 없는 M번호는 예전 카테고리 글자를 쓴다. */
+  categoryLabels?: ReadonlyMap<string, string>
   alreadyIds: ReadonlySet<string>
   loading: boolean
   onClose: () => void
@@ -30,14 +33,18 @@ export function DepartmentProductLoadDialog({
   const [paste, setPaste] = useState('')
   const [picked, setPicked] = useState<Set<string>>(new Set())
 
+  const categoryOf = (style: Style) =>
+    categoryLabels?.get(style.id) ?? style.category
+
   const filtered = useMemo(() => {
     const key = keyword.trim().toLowerCase()
     if (!key) return styles
     return styles.filter((style) => {
-      const hay = `${style.styleNo} ${style.name} ${style.category}`.toLowerCase()
+      const category = categoryLabels?.get(style.id) ?? style.category
+      const hay = `${style.styleNo} ${style.name} ${category}`.toLowerCase()
       return hay.includes(key)
     })
-  }, [keyword, styles])
+  }, [categoryLabels, keyword, styles])
 
   const pasted = useMemo(() => {
     const nos = parseStyleNoList(paste)
@@ -157,7 +164,7 @@ export function DepartmentProductLoadDialog({
                         </span>
                         <span className="block truncate text-xs text-muted-foreground">
                           {style.name || '이름 없음'}
-                          {style.category ? ` · ${style.category}` : ''}
+                          {categoryOf(style) ? ` · ${categoryOf(style)}` : ''}
                         </span>
                       </span>
                       {already ? (

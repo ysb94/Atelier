@@ -3,9 +3,12 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import {
   CalendarClock,
-  MapPin,
-  Package,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  MessageSquareText,
   Plus,
+  Ship,
   Trash2,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -80,13 +83,20 @@ function isInboundStage(value: string | null): value is CargoInboundStage {
 
 function formatDate(value: string | null) {
   if (!value) return '-'
-  const date = new Date(`${value}T00:00:00`)
+  const hasTime = value.includes('T')
+  const date = new Date(hasTime ? value : `${value}T00:00:00`)
   if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('ko-KR', {
-    year: 'numeric',
+  const day = new Intl.DateTimeFormat('ko-KR', {
     month: 'numeric',
     day: 'numeric',
   }).format(date)
+  if (!hasTime) return day
+  const time = new Intl.DateTimeFormat('ko-KR', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).format(date)
+  return `${day} ${time}`
 }
 
 function formatGroupDate(value: string) {
@@ -100,12 +110,47 @@ function formatGroupDate(value: string) {
   }).format(date)
 }
 
-function groupByInboundDate(items: CargoInboundItem[]) {
+function formatMonthLabel(value: string) {
+  const date = new Date(`${value.slice(0, 7)}-01T00:00:00`)
+  if (Number.isNaN(date.getTime())) return value.slice(0, 7) || '입고일 미정'
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: 'long',
+  }).format(date)
+}
+
+function groupByMonth(groups: Array<{ date: string; items: CargoInboundItem[] }>) {
+  const months: Array<{
+    key: string
+    label: string
+    count: number
+    groups: Array<{ date: string; items: CargoInboundItem[] }>
+  }> = []
+  for (const group of groups) {
+    const key = group.date.slice(0, 7)
+    const last = months.at(-1)
+    if (last && last.key === key) {
+      last.groups.push(group)
+      last.count += group.items.length
+    } else {
+      months.push({
+        key,
+        label: group.date ? formatMonthLabel(group.date) : '입고일 미정',
+        count: group.items.length,
+        groups: [group],
+      })
+    }
+  }
+  return months
+}
+
+function groupByInboundDate(items: CargoInboundItem[], newestFirst = false) {
+  const direction = newestFirst ? -1 : 1
   const sorted = [...items].sort((a, b) => {
     const dateA = a.scheduledInboundAt ?? ''
     const dateB = b.scheduledInboundAt ?? ''
-    if (dateA !== dateB) return dateA.localeCompare(dateB)
-    return (a.shippedAt ?? '').localeCompare(b.shippedAt ?? '')
+    if (dateA !== dateB) return dateA.localeCompare(dateB) * direction
+    return (a.shippedAt ?? '').localeCompare(b.shippedAt ?? '') * direction
   })
   const groups: Array<{ date: string; items: CargoInboundItem[] }> = []
   for (const item of sorted) {
@@ -133,6 +178,9 @@ export function CompanyCargoInboundPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [collapsedMonths, setCollapsedMonths] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  )
   const brandIds = useMemo(() => brands.map((brand) => brand.id), [brands])
   const cargoQueryKey = companyQueryKey('cargo-inbounds', brandIds)
   const cargoQuery = useQuery({
@@ -245,15 +293,33 @@ export function CompanyCargoInboundPage() {
   }, [activeTab, items, search])
   const inboundGroups = useMemo(
     () =>
-      activeTab === 'shipped' ? null : groupByInboundDate(rows),
+      activeTab === 'shipped' ? null : groupByInboundDate(rows, activeTab === 'done'),
     [activeTab, rows],
   )
+  const monthGroups = useMemo(
+    () => (inboundGroups ? groupByMonth(inboundGroups) : null),
+    [inboundGroups],
+  )
+  function toggleMonth(key: string) {
+    setCollapsedMonths((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
   const weekDays = useMemo(() => thisWeekWorkdays(), [])
   const weekInbound = useMemo(() => {
     const map = new Map(weekDays.map((day) => [day.key, [] as CargoInboundItem[]]))
     for (const item of items) {
-      if (item.stage !== 'scheduled' || !item.scheduledInboundAt) continue
+      if (item.stage === 'shipped' || !item.scheduledInboundAt) continue
       map.get(item.scheduledInboundAt)?.push(item)
+    }
+    for (const jobs of map.values()) {
+      jobs.sort((left, right) => {
+        if (left.stage === right.stage) return 0
+        return left.stage === 'done' ? 1 : -1
+      })
     }
     return map
   }, [items, weekDays])
@@ -410,38 +476,71 @@ export function CompanyCargoInboundPage() {
           >
             {weekDays.map((day) => {
               const jobs = weekInbound.get(day.key) ?? []
+              const totalBoxes = jobs.reduce((sum, item) => sum + item.boxCount, 0)
+              const summary = jobs.length
+                ? jobs
+                    .map((item) =>
+                      item.stage === 'done'
+                        ? `완료 ${formatNumber(item.boxCount)}박스`
+                        : formatInboundBoxJob(item.boxCount),
+                    )
+                    .join(', ')
+                : '없음'
               return (
                 <div
                   key={day.key}
-                  aria-label={`${day.weekday} ${day.day}일 ${jobs.length ? jobs.map((item) => formatInboundBoxJob(item.boxCount)).join(', ') : '없음'}`}
+                  aria-label={`${day.weekday} ${day.day}일 ${summary}${totalBoxes ? `, 총 ${formatNumber(totalBoxes)}박스` : ''}`}
                   className={cn(
                     'rounded-xl border border-border bg-card px-3 py-2.5',
                     day.isToday && 'border-success',
                   )}
                 >
                   <div className="flex items-baseline justify-between gap-1">
-                    <span className="text-xs text-muted-foreground">
-                      {day.weekday}
-                    </span>
                     <span className="text-sm font-semibold tabular-nums">
+                      <span className="mr-1 text-xs font-normal text-muted-foreground">
+                        {day.weekday}
+                      </span>
                       {day.day}
                     </span>
+                    {totalBoxes > 0 ? (
+                      <span className="text-xs font-medium tabular-nums text-muted-foreground">
+                        총 {formatNumber(totalBoxes)}박스
+                      </span>
+                    ) : null}
                   </div>
                   {jobs.length ? (
-                    <ul className="mt-1.5 space-y-1">
-                      {jobs.map((item) => (
-                        <li key={item.id} className="min-w-0">
-                          <p className="text-[11px] leading-4 text-muted-foreground">
-                            입고 확정
-                          </p>
-                          <p className="truncate text-lg font-semibold leading-6 tabular-nums tracking-tight">
-                            {formatNumber(item.boxCount)}
-                            <span className="ml-0.5 text-xs font-medium text-muted-foreground">
-                              박스
-                            </span>
-                          </p>
-                        </li>
-                      ))}
+                    <ul className="mt-1.5 space-y-1.5">
+                      {jobs.map((item) => {
+                        const done = item.stage === 'done'
+                        return (
+                          <li
+                            key={item.id}
+                            className={cn(
+                              'flex min-w-0 items-baseline justify-between gap-2 rounded-lg border px-2 py-1.5',
+                              done
+                                ? 'border-success/40 bg-success/10'
+                                : 'border-border bg-background shadow-sm',
+                            )}
+                          >
+                            <p className="truncate text-lg font-semibold leading-6 tabular-nums tracking-tight">
+                              {formatNumber(item.boxCount)}
+                              <span className="ml-0.5 text-xs font-medium text-muted-foreground">
+                                박스
+                              </span>
+                            </p>
+                            <p
+                              className={cn(
+                                'shrink-0 text-[11px] leading-4',
+                                done
+                                  ? 'font-medium text-success'
+                                  : 'text-muted-foreground',
+                              )}
+                            >
+                              {done ? '완료' : '입고 확정'}
+                            </p>
+                          </li>
+                        )
+                      })}
                     </ul>
                   ) : (
                     <p className="mt-1.5 text-xs text-muted-foreground">없음</p>
@@ -514,32 +613,86 @@ export function CompanyCargoInboundPage() {
                 ? '조건에 맞는 화물이 없습니다.'
                 : stageEmptyMessage(activeTab)}
             </Card>
-          ) : inboundGroups ? (
+          ) : monthGroups ? (
             <div className="space-y-6">
-              {inboundGroups.map((group) => (
-                <section key={group.date || 'undated'} className="space-y-2">
-                  <h3 className="flex items-center gap-3 text-sm font-semibold">
-                    <span className="inline-flex items-center gap-1.5">
-                      <CalendarClock className="size-4 text-primary" />
-                      {activeTab === 'done' ? '입고' : '입고 예정'}{' '}
-                      {group.date ? formatGroupDate(group.date) : '미정'}
-                    </span>
-                    <span className="h-px min-w-8 flex-1 bg-border" aria-hidden />
-                    <span className="shrink-0 text-xs font-normal text-muted-foreground">
-                      {formatNumber(group.items.length)}건
-                    </span>
-                  </h3>
-                  {group.items.map((item) => (
-                    <CargoInboundRow
-                      key={item.id}
-                      item={item}
-                      deleting={deletingId === item.id}
-                      onOpen={() => setSelectedId(item.id)}
-                      onDelete={() => handleDelete(item)}
-                    />
-                  ))}
-                </section>
-              ))}
+              {monthGroups.map((month) => {
+                const monthKey = `${activeTab}:${month.key || 'undated'}`
+                const collapsed =
+                  !search.trim() && collapsedMonths.has(monthKey)
+                return (
+                  <section key={monthKey}>
+                    <h3>
+                      <button
+                        type="button"
+                        aria-expanded={!collapsed}
+                        onClick={() => toggleMonth(monthKey)}
+                        className="flex w-full items-center gap-2 text-left"
+                      >
+                        <ChevronDown
+                          className={cn(
+                            'size-4 shrink-0 text-muted-foreground transition-transform duration-200 ease-out motion-reduce:transition-none',
+                            collapsed && '-rotate-90',
+                          )}
+                        />
+                        <span className="text-sm font-semibold">
+                          {month.label}
+                        </span>
+                        <span className="h-px min-w-8 flex-1 bg-border" aria-hidden />
+                        <span className="shrink-0 text-xs font-normal text-muted-foreground">
+                          {formatNumber(month.count)}건
+                        </span>
+                      </button>
+                    </h3>
+                    <div
+                      className={cn(
+                        'grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none',
+                        collapsed
+                          ? 'grid-rows-[0fr] opacity-0'
+                          : 'grid-rows-[1fr] opacity-100',
+                      )}
+                    >
+                      <div
+                        className="overflow-hidden"
+                        inert={collapsed ? true : undefined}
+                        aria-hidden={collapsed}
+                      >
+                        <div className="space-y-6 pt-4">
+                        {month.groups.map((group) => (
+                          <section
+                            key={group.date || 'undated'}
+                            className="space-y-2"
+                          >
+                            <h4 className="flex items-center gap-3 text-sm font-semibold">
+                              <span className="inline-flex items-center gap-1.5">
+                                <CalendarClock className="size-4 text-primary" />
+                                {activeTab === 'done' ? '입고' : '입고 예정'}{' '}
+                                {group.date ? formatGroupDate(group.date) : '미정'}
+                              </span>
+                              <span
+                                className="h-px min-w-8 flex-1 bg-border"
+                                aria-hidden
+                              />
+                              <span className="shrink-0 text-xs font-normal text-muted-foreground">
+                                {formatNumber(group.items.length)}건
+                              </span>
+                            </h4>
+                            {group.items.map((item) => (
+                              <CargoInboundRow
+                                key={item.id}
+                                item={item}
+                                deleting={deletingId === item.id}
+                                onOpen={() => setSelectedId(item.id)}
+                                onDelete={() => handleDelete(item)}
+                              />
+                            ))}
+                          </section>
+                        ))}
+                        </div>
+                      </div>
+                    </div>
+                  </section>
+                )
+              })}
             </div>
           ) : (
             <div className="space-y-2">
@@ -575,6 +728,131 @@ export function CompanyCargoInboundPage() {
   )
 }
 
+const STAGE_ACCENT: Record<CargoInboundStage, string> = {
+  shipped: 'bg-warning',
+  scheduled: 'bg-primary',
+  done: 'bg-success',
+}
+
+function parseWarehouseProgress(summary: string) {
+  const match = summary.match(/(\d+)\s*\/\s*(\d+)/)
+  if (!match) return null
+  const filled = Number(match[1])
+  const total = Number(match[2])
+  if (!Number.isFinite(filled) || !Number.isFinite(total) || total <= 0) return null
+  return { filled, total }
+}
+
+function previewLabel(item: CargoInboundItem) {
+  const names: string[] = []
+  for (const name of item.previewNames) {
+    if (!names.includes(name)) names.push(name)
+  }
+  if (names.length === 0) return null
+  const more = item.productCount > item.previewNames.length
+  return more ? `${names.join(', ')} 등` : names.join(', ')
+}
+
+function RowFigure({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[11px] leading-4 text-muted-foreground">{label}</p>
+      <p className="text-lg font-semibold leading-6 tracking-tight tabular-nums">
+        {value}
+      </p>
+    </div>
+  )
+}
+
+function WarehouseProgress({
+  filled,
+  total,
+}: {
+  filled: number
+  total: number
+}) {
+  const complete = filled >= total
+  const ratio = Math.min(100, Math.max(0, (filled / total) * 100))
+  return (
+    <div className="flex min-w-0 items-center gap-2">
+      <span className="shrink-0 text-[11px] text-muted-foreground">창고 자리</span>
+      <span
+        className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted"
+        role="progressbar"
+        aria-valuenow={filled}
+        aria-valuemin={0}
+        aria-valuemax={total}
+        aria-label={`창고 자리 ${formatNumber(filled)}/${formatNumber(total)}`}
+      >
+        <span
+          className={cn(
+            'block h-full rounded-full transition-[width] duration-500 motion-reduce:transition-none',
+            complete ? 'bg-success' : 'bg-warning',
+          )}
+          style={{ width: `${ratio}%` }}
+        />
+      </span>
+      <span
+        className={cn(
+          'shrink-0 text-xs font-medium tabular-nums',
+          complete ? 'text-success' : 'text-warning',
+        )}
+      >
+        {formatNumber(filled)}/{formatNumber(total)}
+      </span>
+    </div>
+  )
+}
+
+function CargoInboundStageStatus({ item }: { item: CargoInboundItem }) {
+  if (item.stage === 'done') {
+    const progress = parseWarehouseProgress(item.warehouseSummary)
+    return (
+      <div className="min-w-0 space-y-1.5">
+        <p className="flex min-w-0 items-center gap-1.5 text-sm text-success">
+          <CheckCircle2 className="size-4 shrink-0" />
+          <span className="truncate">
+            정리 완료 · {formatDate(item.completedAt)}
+          </span>
+        </p>
+        {progress ? (
+          <WarehouseProgress filled={progress.filled} total={progress.total} />
+        ) : (
+          <p className="truncate text-xs text-muted-foreground">
+            {item.warehouseSummary.trim() || '입력 완료'}
+          </p>
+        )}
+      </div>
+    )
+  }
+  if (item.stage === 'scheduled') {
+    return (
+      <div className="min-w-0 space-y-1">
+        <p className="truncate text-sm font-medium">
+          다음: 제품 정리 · 창고 자리 입력
+        </p>
+        {item.portContactNote ? (
+          <p className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            <MessageSquareText className="size-3.5 shrink-0" />
+            <span className="truncate">{item.portContactNote}</span>
+          </p>
+        ) : null}
+      </div>
+    )
+  }
+  return (
+    <div className="min-w-0 space-y-1">
+      <p className="flex items-center gap-1.5 text-sm text-warning">
+        <Ship className="size-4 shrink-0" />
+        입고일 미정
+      </p>
+      <p className="text-xs text-muted-foreground">
+        항구 연락 오면 열어서 입고일 입력
+      </p>
+    </div>
+  )
+}
+
 function CargoInboundRow({
   item,
   deleting,
@@ -586,85 +864,51 @@ function CargoInboundRow({
   onOpen: () => void
   onDelete: () => void
 }) {
+  const preview = previewLabel(item)
   return (
-    <Card className="shadow-none">
-      <div className="flex w-full flex-col gap-3 px-4 py-3 lg:flex-row lg:items-start lg:justify-between">
-      <button
-        type="button"
-        onClick={onOpen}
-        className="flex min-w-0 flex-1 flex-col gap-3 text-left transition-colors hover:bg-muted/30 lg:flex-row lg:items-start lg:justify-between"
-      >
-        <div className="min-w-0 space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-sm font-semibold tracking-tight">
-              {formatCargoInboundTitle(item.shippedAt, item.boxCount)}
-            </p>
-            <Badge variant="muted">{item.brandName}</Badge>
-            {item.stage === 'shipped' ? (
-              <Badge variant="warning">입고일 미정</Badge>
-            ) : null}
-            {item.stage === 'scheduled' ? (
-              <Badge variant="outline">입고일 확정</Badge>
-            ) : null}
-            {item.stage === 'done' ? (
-              <Badge variant="success">정리 완료</Badge>
-            ) : null}
-          </div>
-
-          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1">
-              <Package className="size-3.5" />
-              상품 {formatNumber(item.productCount)} · 박스{' '}
-              {formatNumber(item.boxCount)}
-            </span>
-            <span>선적일 {formatDate(item.shippedAt)}</span>
-          </div>
-
-          {item.stage === 'scheduled' ? (
-            <div className="space-y-1 text-sm">
-              <p className="inline-flex items-center gap-1.5 font-medium">
-                <CalendarClock className="size-3.5 text-primary" />
-                입고 예정 {formatDate(item.scheduledInboundAt)}
+    <Card className="group relative overflow-hidden shadow-none transition-[border-color,box-shadow] duration-200 hover:border-foreground/20 hover:shadow-md motion-reduce:transition-none">
+      <span
+        aria-hidden
+        className={cn('absolute inset-y-0 left-0 w-1', STAGE_ACCENT[item.stage])}
+      />
+      <div className="flex items-center gap-1 py-3 pr-2 pl-4">
+        <button
+          type="button"
+          onClick={onOpen}
+          className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <div className="grid min-w-0 flex-1 gap-x-6 gap-y-2 md:grid-cols-[minmax(0,1fr)_8rem_15rem] md:items-center">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold tracking-tight">
+                {formatCargoInboundTitle(item.shippedAt, item.boxCount)}
               </p>
-              {item.portContactNote ? (
-                <p className="text-muted-foreground">{item.portContactNote}</p>
-              ) : null}
-            </div>
-          ) : null}
-
-          {item.stage === 'done' ? (
-            <div className="space-y-1 text-sm">
-              <p className="inline-flex items-center gap-1.5 font-medium">
-                <MapPin className="size-3.5 text-primary" />
-                {item.warehouseSummary.trim() || '창고 자리 입력 완료'}
-              </p>
-              <p className="text-muted-foreground">
-                입고 {formatDate(item.scheduledInboundAt)} · 정리 완료{' '}
-                {formatDate(item.completedAt)}
+              <p className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+                <Badge variant="muted" className="shrink-0">
+                  {item.brandName}
+                </Badge>
+                {preview ? <span className="truncate">{preview}</span> : null}
               </p>
             </div>
-          ) : null}
-        </div>
-
-        <div className="shrink-0 text-xs text-muted-foreground lg:text-right">
-          {item.stage === 'shipped'
-            ? '작업 열기'
-            : item.stage === 'scheduled'
-              ? '다음: 제품 정리·자리 입력'
-              : '완료'}
-        </div>
-      </button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="shrink-0 text-danger hover:bg-danger/10"
-        disabled={deleting}
-        onClick={onDelete}
-      >
-        <Trash2 className="size-3.5" />
-        {deleting ? '삭제 중' : '삭제'}
-      </Button>
+            <div className="flex gap-4">
+              <RowFigure label="상품" value={formatNumber(item.productCount)} />
+              <RowFigure label="박스" value={formatNumber(item.boxCount)} />
+            </div>
+            <CargoInboundStageStatus item={item} />
+          </div>
+          <ChevronRight className="size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 motion-reduce:transition-none" />
+        </button>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          aria-label={deleting ? '삭제 중' : '삭제'}
+          title="삭제"
+          className="shrink-0 text-muted-foreground hover:bg-danger/10 hover:text-danger"
+          disabled={deleting}
+          onClick={onDelete}
+        >
+          <Trash2 className="size-4" />
+        </Button>
       </div>
     </Card>
   )

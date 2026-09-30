@@ -1,8 +1,10 @@
 import { DEFAULT_COMPANY_ID } from '@/lib/supabase/brands'
 import {
   uniqueCapabilities,
+  type PersonnelScope,
   type WorkCapability,
 } from '@/lib/company/capabilities'
+import { validatePersonName } from '@/lib/company/person-name'
 import { getSupabase } from '@/lib/supabase/client'
 
 export type ProfileStatus = 'pending' | 'active' | 'rejected' | 'disabled'
@@ -13,6 +15,7 @@ export type Department = {
   name: string
   sortOrder: number
   isActive: boolean
+  personnelScope: PersonnelScope | null
 }
 
 export type BrandDirectoryItem = {
@@ -33,6 +36,7 @@ export type Profile = {
   id: string
   email: string
   displayName: string | null
+  nameConfirmedAt: string | null
   avatarUrl: string | null
   companyId: string | null
   departmentId: string | null
@@ -46,6 +50,7 @@ export type Profile = {
   createdAt: string
   updatedAt: string
   departmentName?: string | null
+  departmentPersonnelScope: PersonnelScope | null
   capabilities: WorkCapability[]
   memberships: BrandMembership[]
 }
@@ -53,15 +58,8 @@ export type Profile = {
 export type AccessRequestInput = {
   displayName: string
   departmentId: string
-  position: string
   capabilities: WorkCapability[]
   requestNote?: string
-}
-
-export type MyProfileUpdateInput = {
-  displayName: string
-  departmentId: string
-  position: string
 }
 
 export type ApproveMemberInput = {
@@ -86,6 +84,7 @@ type ProfileRow = {
   id: string
   email: string
   display_name: string | null
+  name_confirmed_at: string | null
   avatar_url: string | null
   company_id: string | null
   department_id: string | null
@@ -98,7 +97,13 @@ type ProfileRow = {
   request_note: string | null
   created_at: string
   updated_at: string
-  departments?: { name: string } | { name: string }[] | null
+  departments?: DepartmentEmbed | DepartmentEmbed[] | null
+}
+
+type DepartmentEmbed = {
+  name: string
+  personnel_scope: PersonnelScope | null
+  is_active: boolean
 }
 
 type DepartmentRow = {
@@ -107,6 +112,7 @@ type DepartmentRow = {
   name: string
   sort_order: number
   is_active: boolean
+  personnel_scope: PersonnelScope | null
 }
 
 type BrandDirectoryRow = {
@@ -119,14 +125,14 @@ type BrandDirectoryRow = {
 }
 
 const PROFILE_COLUMNS =
-  'id, email, display_name, avatar_url, company_id, department_id, position, is_admin, status, requested_at, approved_by, approved_at, request_note, created_at, updated_at, departments(name)'
+  'id, email, display_name, name_confirmed_at, avatar_url, company_id, department_id, position, is_admin, status, requested_at, approved_by, approved_at, request_note, created_at, updated_at, departments(name, personnel_scope, is_active)'
 
-function departmentNameFrom(
+function departmentEmbedFrom(
   value: ProfileRow['departments'],
-): string | null {
+): DepartmentEmbed | null {
   if (!value) return null
-  if (Array.isArray(value)) return value[0]?.name ?? null
-  return value.name ?? null
+  if (Array.isArray(value)) return value[0] ?? null
+  return value
 }
 
 function toProfile(
@@ -134,10 +140,12 @@ function toProfile(
   memberships: BrandMembership[] = [],
   capabilities: WorkCapability[] = [],
 ): Profile {
+  const department = departmentEmbedFrom(row.departments)
   return {
     id: row.id,
     email: row.email,
     displayName: row.display_name,
+    nameConfirmedAt: row.name_confirmed_at,
     avatarUrl: row.avatar_url,
     companyId: row.company_id,
     departmentId: row.department_id,
@@ -150,7 +158,10 @@ function toProfile(
     requestNote: row.request_note,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    departmentName: departmentNameFrom(row.departments),
+    departmentName: department?.name ?? null,
+    departmentPersonnelScope: department?.is_active
+      ? department.personnel_scope
+      : null,
     capabilities,
     memberships,
   }
@@ -266,12 +277,38 @@ async function replaceBrandStewards(profileId: string, leadBrandIds: string[]) {
   if (insertError) throw toStoreError(insertError)
 }
 
+export type OrgChartMember = {
+  id: string
+  displayName: string | null
+  position: string | null
+  departmentId: string | null
+}
+
+type OrgChartMemberRow = {
+  id: string
+  display_name: string | null
+  position: string | null
+  department_id: string | null
+}
+
+/** 재직 중인 직원의 이름·직책·소속. 이메일 등 다른 프로필 칸은 없다. */
+export async function listOrgChartMembers(): Promise<OrgChartMember[]> {
+  const { data, error } = await getSupabase().rpc('list_org_chart_members')
+  if (error) throw toStoreError(error)
+  return ((data ?? []) as OrgChartMemberRow[]).map((row) => ({
+    id: row.id,
+    displayName: row.display_name,
+    position: row.position,
+    departmentId: row.department_id,
+  }))
+}
+
 export async function listDepartments(
   activeOnly = true,
 ): Promise<Department[]> {
   let query = getSupabase()
     .from('departments')
-    .select('id, company_id, name, sort_order, is_active')
+    .select('id, company_id, name, sort_order, is_active, personnel_scope')
     .order('sort_order', { ascending: true })
 
   if (activeOnly) query = query.eq('is_active', true)
@@ -285,6 +322,7 @@ export async function listDepartments(
     name: row.name,
     sortOrder: row.sort_order,
     isActive: row.is_active,
+    personnelScope: row.personnel_scope,
   }))
 }
 
@@ -324,25 +362,18 @@ export async function getMyProfile(): Promise<Profile | null> {
   return hydrateProfile(data as ProfileRow)
 }
 
-export async function updateMyProfile(
-  input: MyProfileUpdateInput,
-): Promise<Profile> {
+export async function confirmMyProfileName(name: string): Promise<Profile> {
   const { data: userData, error: userError } = await getSupabase().auth.getUser()
   if (userError) throw toStoreError(userError)
   const userId = userData.user?.id
   if (!userId) throw new Error('로그인이 필요합니다.')
 
-  const displayName = input.displayName.trim()
-  if (!displayName) throw new Error('이름을 입력하세요.')
-  if (!input.departmentId) throw new Error('팀을 선택하세요.')
-  if (!input.position.trim()) throw new Error('직책을 선택하세요.')
-
+  const displayName = validatePersonName(name)
   const { data, error } = await getSupabase()
     .from('profiles')
     .update({
       display_name: displayName,
-      department_id: input.departmentId,
-      position: input.position.trim(),
+      name_confirmed_at: new Date().toISOString(),
     })
     .eq('id', userId)
     .select(PROFILE_COLUMNS)
@@ -361,7 +392,7 @@ export async function submitAccessRequest(
   if (!userId) throw new Error('로그인이 필요합니다.')
 
   if (!input.departmentId) throw new Error('팀을 선택하세요.')
-  if (!input.position.trim()) throw new Error('직책을 선택하세요.')
+  const displayName = validatePersonName(input.displayName)
   const capabilities = uniqueCapabilities(input.capabilities)
   if (capabilities.length === 0) {
     throw new Error('업무 역량을 하나 이상 선택하세요.')
@@ -372,10 +403,10 @@ export async function submitAccessRequest(
   const { data, error } = await getSupabase()
     .from('profiles')
     .update({
-      display_name: input.displayName.trim(),
+      display_name: displayName,
+      name_confirmed_at: new Date().toISOString(),
       company_id: DEFAULT_COMPANY_ID,
       department_id: input.departmentId,
-      position: input.position.trim(),
       request_note: input.requestNote?.trim() || null,
       requested_at: new Date().toISOString(),
       status: 'pending',
@@ -404,6 +435,8 @@ export async function listManageableProfiles(): Promise<Profile[]> {
 export async function approveMember(
   input: ApproveMemberInput,
 ): Promise<Profile> {
+  if (!input.position.trim()) throw new Error('직책을 선택하세요.')
+  const displayName = validatePersonName(input.displayName ?? '')
   const capabilities = uniqueCapabilities(input.capabilities)
   if (!input.isAdmin && capabilities.length === 0) {
     throw new Error('업무 역량을 하나 이상 지정하세요.')
@@ -425,9 +458,7 @@ export async function approveMember(
     approved_by: actorId,
     approved_at: new Date().toISOString(),
     is_admin: input.isAdmin,
-  }
-  if (input.displayName?.trim()) {
-    patch.display_name = input.displayName.trim()
+    display_name: displayName,
   }
 
   const { data, error } = await getSupabase()
@@ -495,7 +526,7 @@ export async function createDepartment(name: string): Promise<Department> {
       sort_order: maxOrder + 1,
       is_active: true,
     })
-    .select('id, company_id, name, sort_order, is_active')
+    .select('id, company_id, name, sort_order, is_active, personnel_scope')
     .single()
 
   if (error) throw toStoreError(error)
@@ -506,23 +537,32 @@ export async function createDepartment(name: string): Promise<Department> {
     name: row.name,
     sortOrder: row.sort_order,
     isActive: row.is_active,
+    personnelScope: row.personnel_scope,
   }
 }
 
 export async function updateDepartment(
   id: string,
-  patch: { name?: string; sortOrder?: number; isActive?: boolean },
+  patch: {
+    name?: string
+    sortOrder?: number
+    isActive?: boolean
+    personnelScope?: PersonnelScope | null
+  },
 ): Promise<Department> {
   const payload: Record<string, unknown> = {}
   if (patch.name !== undefined) payload.name = patch.name.trim()
   if (patch.sortOrder !== undefined) payload.sort_order = patch.sortOrder
   if (patch.isActive !== undefined) payload.is_active = patch.isActive
+  if (patch.personnelScope !== undefined) {
+    payload.personnel_scope = patch.personnelScope
+  }
 
   const { data, error } = await getSupabase()
     .from('departments')
     .update(payload)
     .eq('id', id)
-    .select('id, company_id, name, sort_order, is_active')
+    .select('id, company_id, name, sort_order, is_active, personnel_scope')
     .single()
 
   if (error) throw toStoreError(error)
@@ -533,5 +573,6 @@ export async function updateDepartment(
     name: row.name,
     sortOrder: row.sort_order,
     isActive: row.is_active,
+    personnelScope: row.personnel_scope,
   }
 }

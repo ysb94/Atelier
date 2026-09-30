@@ -1,7 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
@@ -9,59 +6,17 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Input, Select } from '@/components/ui/input'
 import { useAuth } from '@/lib/supabase/auth'
-import {
-  listDepartments,
-  POSITION_OPTIONS,
-  updateMyProfile,
-} from '@/lib/supabase/profiles'
 import { capabilityLabel } from '@/lib/company/capabilities'
 
 export function ProfileSettingsPage() {
-  const { profile, email, refreshProfile } = useAuth()
-  const departmentsQuery = useQuery({
-    queryKey: ['departments', 'active'],
-    queryFn: () => listDepartments(true),
-  })
-  const departments = useMemo(
-    () => departmentsQuery.data ?? [],
-    [departmentsQuery.data],
-  )
-
-  const [displayName, setDisplayName] = useState(profile?.displayName ?? '')
-  const [departmentId, setDepartmentId] = useState(profile?.departmentId ?? '')
-  const [position, setPosition] = useState(profile?.position ?? '사원')
-
-  useEffect(() => {
-    if (!profile) return
-    setDisplayName(profile.displayName ?? '')
-    setDepartmentId(profile.departmentId ?? '')
-    setPosition(profile.position ?? '사원')
-  }, [profile])
-
-  const saveMutation = useMutation({
-    mutationFn: () =>
-      updateMyProfile({
-        displayName,
-        departmentId,
-        position,
-      }),
-    onSuccess: async () => {
-      await refreshProfile()
-    },
-  })
-
-  const dirty =
-    displayName !== (profile?.displayName ?? '') ||
-    departmentId !== (profile?.departmentId ?? '') ||
-    position !== (profile?.position ?? '사원')
+  const { profile, email } = useAuth()
 
   return (
     <div>
       <PageHeader
         title="마이페이지"
-        description="이름, 소속, 직책 등 나와 관련된 정보를 관리합니다."
+        description="본명, 팀, 직책은 운영지원팀 또는 관리자에게 변경을 요청합니다."
       />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
@@ -69,100 +24,35 @@ export function ProfileSettingsPage() {
           <CardHeader>
             <CardTitle>프로필</CardTitle>
             <CardDescription>
-              변경 사항은 저장 후 사이드바와 멤버 목록에 반영됩니다.
+              확인한 본명은 직접 바꿀 수 없습니다. 개명이나 오타는 운영지원팀
+              또는 관리자에게 요청해 주세요.
             </CardDescription>
           </CardHeader>
-          <CardContent>
-            <form
-              className="space-y-4"
-              onSubmit={(event) => {
-                event.preventDefault()
-                saveMutation.mutate()
-              }}
-            >
-              <label className="block space-y-1.5">
-                <span className="text-sm font-medium">이름</span>
-                <Input
-                  required
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="홍길동"
-                  disabled={saveMutation.isPending}
-                />
-              </label>
+          <CardContent className="space-y-4">
+            <div className="space-y-1.5">
+              <p className="text-sm font-medium">본명</p>
+              <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                {profile?.displayName?.trim() || '본명 미입력'}
+              </p>
+            </div>
 
-              <div className="grid gap-4 sm:grid-cols-2">
-                <label className="block space-y-1.5">
-                  <span className="text-sm font-medium">팀</span>
-                  <Select
-                    required
-                    value={departmentId}
-                    onChange={(e) => setDepartmentId(e.target.value)}
-                    disabled={
-                      saveMutation.isPending || departmentsQuery.isLoading
-                    }
-                  >
-                    <option value="">선택</option>
-                    {departments.map((dept) => (
-                      <option key={dept.id} value={dept.id}>
-                        {dept.name}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-
-                <label className="block space-y-1.5">
-                  <span className="text-sm font-medium">직책</span>
-                  <Select
-                    required
-                    value={position}
-                    onChange={(e) => setPosition(e.target.value)}
-                    disabled={saveMutation.isPending}
-                  >
-                    {POSITION_OPTIONS.map((option) => (
-                      <option key={option} value={option}>
-                        {option}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-              </div>
-
-              {saveMutation.isError ? (
-                <p className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
-                  {saveMutation.error instanceof Error
-                    ? saveMutation.error.message
-                    : '저장하지 못했습니다.'}
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium">팀</p>
+                <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                  {profile?.departmentName || '팀 미정'}
                 </p>
-              ) : null}
-
-              {saveMutation.isSuccess && !dirty ? (
-                <p className="text-sm text-muted-foreground">저장되었습니다.</p>
-              ) : null}
-
-              <div className="flex items-center gap-2">
-                <Button
-                  type="submit"
-                  disabled={!dirty || saveMutation.isPending}
-                >
-                  {saveMutation.isPending ? '저장 중...' : '저장'}
-                </Button>
-                {dirty ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={saveMutation.isPending}
-                    onClick={() => {
-                      setDisplayName(profile?.displayName ?? '')
-                      setDepartmentId(profile?.departmentId ?? '')
-                      setPosition(profile?.position ?? '사원')
-                    }}
-                  >
-                    되돌리기
-                  </Button>
-                ) : null}
               </div>
-            </form>
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium">직책</p>
+                <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                  {profile?.position?.trim() || '직책 미정'}
+                </p>
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              본명, 팀, 직책 변경은 운영지원팀 또는 관리자에게 요청해 주세요.
+            </p>
           </CardContent>
         </Card>
 
