@@ -22,6 +22,7 @@ import {
   type CompanyNavGroup,
   type CompanyNavItem,
 } from './company-workspace-nav'
+import { WorkspaceHeaderActions } from './WorkspaceHeaderActions'
 import {
   WorkspaceTabBar,
   WorkspaceTabPanels,
@@ -332,12 +333,15 @@ function CompanyWorkspaceMain() {
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
-      <WorkspaceTabBar
-        tabs={tabs}
-        activeId={activeId}
-        onOpen={openTab}
-        onClose={closeTab}
-      />
+      <div className="relative z-20 flex shrink-0 items-end border-b border-border bg-muted/40">
+        <WorkspaceTabBar
+          tabs={tabs}
+          activeId={activeId}
+          onOpen={openTab}
+          onClose={closeTab}
+        />
+        <WorkspaceHeaderActions />
+      </div>
       <div
         data-brand-page-scroll
         className={cn(

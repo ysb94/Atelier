@@ -284,7 +284,7 @@ export function WorkspaceTabBar({
   onClose: (tabId: string) => void
 }) {
   return (
-    <div className="flex shrink-0 items-stretch gap-0.5 overflow-x-auto border-b border-border bg-muted/40 px-2 pt-2">
+    <div className="flex min-w-0 flex-1 items-stretch gap-0.5 overflow-x-auto px-2 pt-2">
       {tabs.map((tab) => {
         const selected = tab.id === activeId
         const closable = tabs.length > 1
