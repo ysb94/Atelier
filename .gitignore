@@ -14,6 +14,7 @@ dist-ssr
 supabase/.temp/
 tmp/
 .tmp/
+.cursor/coordinator-state/
 outputs/masma-finder-snapshots/*
 !outputs/masma-finder-snapshots/.gitkeep
 scripts/masma-finder-migrate/service-account.json

@@ -1,0 +1,12 @@
+{
+  "name": "atelier-cursor-coordinator",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "status": "node coordinator.mjs status",
+    "models": "node coordinator.mjs models",
+    "test": "node --test policy.test.mjs"
+  },
+  "dependencies": { "@cursor/sdk": "1.0.35" }
+}

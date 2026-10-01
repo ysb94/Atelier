@@ -1,0 +1,68 @@
+Atelier Cursor 역할 연결
+
+이 도구는 Cursor SDK의 로컬 실행을 사용한다. 실제 모델 요청은 로그인한 Cursor
+계정을 통해 실행된다. SDK 사용량은 Cursor 요금제에 반영되며 무제한을 뜻하지 않는다.
+기존 Cursor 창의 채팅 기록과 이 도구의 대화 기록은 별개다.
+
+사용자: 이 Codex 채팅에 요구사항을 전달한다.
+조정 담당: 계획을 세우고 아래 명령으로 Cursor 역할에 지시하고 결과를 읽는다.
+Cursor 역할: 같은 Atelier 폴더에서 허용된 도구로 실제 작업한다.
+
+Atelier 루트에서 실행:
+  node tools/cursor-coordinator/coordinator.mjs status
+  node tools/cursor-coordinator/coordinator.mjs models
+  node tools/cursor-coordinator/coordinator.mjs send RESEARCH .tmp/task.json
+
+task.json 형식:
+  {
+    "id": "TASK_001",
+    "prompt": "목적, 요구사항, 완료 기준, 검증 항목을 명시한다.",
+    "allowedFiles": [],
+    "checks": []
+  }
+
+역할:
+  RESEARCH  코드 읽기·검색, 변경 영향 조사. 수정·명령 실행 없음.
+  IMPLEMENT allowedFiles에 정확히 지정한 파일만 쓰기·교체. 일반 셸 없음.
+  VERIFY    읽기·검색 및 checks로 지정한 고정 검사만 실행. 소스 수정 없음.
+  REVIEW    읽기·검색으로 누락·오류 검토. 수정·명령 실행 없음.
+
+고정 검사 ID:
+  connection  연결 시험용 JSON 세 필드 검증
+  monitor     역할 모니터의 상태 API와 HTTP 동작 검증 (서버 실행 필요)
+  lint        npm run lint
+  diagnostics npm run verify:diagnostics
+  build       npm run build
+검사를 허용하기 전에 해당 프로젝트 스크립트와 데이터 변경 여부를 검토한다.
+build는 빌드 산출물을 만들며, 검사에 필요한 런타임은 프로젝트 규칙을 따른다.
+브라우저 화면 확인, DB 작업, 배포 등은 이 도구의 기본 기능 범위에 포함되지 않는다.
+
+작업 순서: RESEARCH → IMPLEMENT → VERIFY → REVIEW.
+추가 수정이 필요하면 IMPLEMENT로 돌아가고 영향을 받은 검사를 다시 실행한다.
+동시 실행은 active.lock으로 막는다. 네 역할은 각자의 대화 ID를 계속 이어받는다.
+SDK 도구 권한은 대화 ID와 별개로 매 실행 때 다시 설정한다.
+
+기본 모델: Composer 2.5 (fast=false).
+모델 변경: task.json에 "model": { "id": "models 명령에서 확인한 ID", "params": [] }
+모델과 매개변수는 실제 계정 카탈로그로 검증하며 사용 불가 모델을 자동 대체하지 않는다.
+
+대화 ID·이력·검사 결과: .cursor/coordinator-state/ (Git 제외).
+인증: Cursor.auth.login()이 관리하는 사용자 프로필의 SDK 저장소. 키는 소스에 넣지 않는다.
+세션 중단: Ctrl+C는 현재 Cursor 실행을 취소한다. 비정상 종료 후 active.lock이 남으면
+해당 PID가 종료됐는지 확인한 뒤 잠금 파일만 제거한다. 실행 중 잠금은 제거하지 않는다.
+작업 연결은 Codex가 명령을 실행하는 동안 작동한다. 별도 작업 상주 서비스·예약 작업은 없다.
+
+역할 모니터:
+  node tools/cursor-coordinator/monitor.mjs
+  브라우저 주소: http://127.0.0.1:5181/
+  실행중 역할·작업 ID와 최근 완료 결과를 2초마다 표시한다.
+  기존 Cursor 앱 채팅 창과 별개이며 이 화면에서 작업을 지시하거나 파일을 수정하지 않는다.
+  모니터 자체는 SDK/모델을 호출하지 않는다. 켜놓는 것만으로 모델 요청이 생기지 않는다.
+  PC 재시작 후에는 위 명령으로 모니터를 다시 실행한다.
+
+도구 자체 검사:
+  node --test tools/cursor-coordinator/policy.test.mjs
+재설치:
+  npm.cmd ci --prefix tools/cursor-coordinator --ignore-scripts
+
+공식 참고: https://cursor.com/docs/sdk/typescript

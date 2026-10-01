@@ -8,6 +8,7 @@ import {
   hasAnyCapability,
   hasCapability,
   inferCapabilityFromDepartment,
+  canEditOrgAssignment,
   canManagePersonnel,
   canViewDraftsByOwner,
   isCompanyManager,
@@ -102,6 +103,42 @@ assert(
     departmentPersonnelScope: null,
   }),
   '관리자는 인사 담당',
+)
+assert(
+  canEditOrgAssignment({
+    status: 'active',
+    email: 'dev@atelier.local',
+    departmentName: '물류팀',
+  }),
+  '개발자 계정은 조직 배치를 수정한다',
+)
+assert(
+  canEditOrgAssignment({
+    status: 'active',
+    email: 'ops@example.com',
+    departmentName: '운영지원팀',
+    position: '사원',
+  }),
+  '운영지원팀 소속은 조직 배치를 수정한다',
+)
+assert(
+  !canEditOrgAssignment({
+    status: 'active',
+    isAdmin: true,
+    email: 'lead@example.com',
+    departmentName: '물류팀',
+    position: '팀장',
+  }),
+  '다른 관리자는 조직 배치를 수정하지 못한다',
+)
+assert(
+  !canEditOrgAssignment({
+    status: 'active',
+    email: 'staff@example.com',
+    departmentName: '기획팀',
+    position: '팀장',
+  }),
+  '다른 팀 팀장은 조직 배치를 수정하지 못한다',
 )
 assert(canViewDraftsByOwner(manager), '팀장은 직원별 기획안을 본다')
 assert(!canViewDraftsByOwner(employee), '사원은 직원별 기획안을 못 본다')

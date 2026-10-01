@@ -41,6 +41,7 @@ export type Profile = {
   companyId: string | null
   departmentId: string | null
   position: string | null
+  jobGrade: string | null
   isAdmin: boolean
   status: ProfileStatus
   requestedAt: string | null
@@ -66,6 +67,7 @@ export type ApproveMemberInput = {
   profileId: string
   departmentId: string
   position: string
+  jobGrade?: string | null
   capabilities: WorkCapability[]
   leadBrandIds?: string[]
   isAdmin: boolean
@@ -89,6 +91,7 @@ type ProfileRow = {
   company_id: string | null
   department_id: string | null
   position: string | null
+  job_grade: string | null
   is_admin: boolean
   status: ProfileStatus
   requested_at: string | null
@@ -125,7 +128,7 @@ type BrandDirectoryRow = {
 }
 
 const PROFILE_COLUMNS =
-  'id, email, display_name, name_confirmed_at, avatar_url, company_id, department_id, position, is_admin, status, requested_at, approved_by, approved_at, request_note, created_at, updated_at, departments(name, personnel_scope, is_active)'
+  'id, email, display_name, name_confirmed_at, avatar_url, company_id, department_id, position, job_grade, is_admin, status, requested_at, approved_by, approved_at, request_note, created_at, updated_at, departments(name, personnel_scope, is_active)'
 
 function departmentEmbedFrom(
   value: ProfileRow['departments'],
@@ -150,6 +153,7 @@ function toProfile(
     companyId: row.company_id,
     departmentId: row.department_id,
     position: row.position,
+    jobGrade: row.job_grade,
     isAdmin: row.is_admin,
     status: row.status,
     requestedAt: row.requested_at,
@@ -281,6 +285,7 @@ export type OrgChartMember = {
   id: string
   displayName: string | null
   position: string | null
+  jobGrade: string | null
   departmentId: string | null
 }
 
@@ -288,7 +293,18 @@ type OrgChartMemberRow = {
   id: string
   display_name: string | null
   position: string | null
+  job_grade: string | null
   department_id: string | null
+}
+
+export type PersonnelTitleKind = 'duty' | 'grade'
+
+export type PersonnelTitle = {
+  id: string
+  companyId: string
+  kind: PersonnelTitleKind
+  name: string
+  sortOrder: number
 }
 
 /** 재직 중인 직원의 이름·직책·소속. 이메일 등 다른 프로필 칸은 없다. */
@@ -299,8 +315,125 @@ export async function listOrgChartMembers(): Promise<OrgChartMember[]> {
     id: row.id,
     displayName: row.display_name,
     position: row.position,
+    jobGrade: row.job_grade,
     departmentId: row.department_id,
   }))
+}
+
+/** 개발자 계정과 운영지원팀만 다른 직원의 부서·직책·직급을 바꾼다. */
+export async function updateOrgAssignment(
+  profileId: string,
+  input: {
+    departmentId: string | null
+    position: string | null
+    jobGrade: string | null
+  },
+): Promise<void> {
+  const { error } = await getSupabase()
+    .from('profiles')
+    .update({
+      department_id: input.departmentId,
+      position: input.position?.trim() || null,
+      job_grade: input.jobGrade?.trim() || null,
+    })
+    .eq('id', profileId)
+  if (error) {
+    console.warn('[org-chart] 부서·직책 저장 실패', {
+      profileId,
+      message: error.message,
+    })
+    throw toStoreError(error)
+  }
+}
+
+type PersonnelTitleRow = {
+  id: string
+  company_id: string
+  kind: PersonnelTitleKind
+  name: string
+  sort_order: number
+}
+
+/** 회사에 등록된 직책·직급 목록. 직원 배치와 별개다. */
+export async function listPersonnelTitles(): Promise<PersonnelTitle[]> {
+  const { data, error } = await getSupabase()
+    .from('personnel_titles')
+    .select('id, company_id, kind, name, sort_order')
+    .eq('company_id', DEFAULT_COMPANY_ID)
+    .order('sort_order', { ascending: true })
+    .order('name', { ascending: true })
+  if (error) throw toStoreError(error)
+  return ((data ?? []) as PersonnelTitleRow[]).map((row) => ({
+    id: row.id,
+    companyId: row.company_id,
+    kind: row.kind,
+    name: row.name,
+    sortOrder: row.sort_order,
+  }))
+}
+
+export async function createPersonnelTitle(
+  kind: PersonnelTitleKind,
+  name: string,
+): Promise<void> {
+  const trimmed = name.trim()
+  if (!trimmed || trimmed.length > 30) {
+    throw new Error('이름은 1자 이상 30자 이하로 입력하세요.')
+  }
+  const { data: last, error: lastError } = await getSupabase()
+    .from('personnel_titles')
+    .select('sort_order')
+    .eq('company_id', DEFAULT_COMPANY_ID)
+    .eq('kind', kind)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+  if (lastError) throw toStoreError(lastError)
+  const sortOrder =
+    ((last?.[0] as { sort_order: number } | undefined)?.sort_order ?? 0) + 1
+  const { error } = await getSupabase().from('personnel_titles').insert({
+    company_id: DEFAULT_COMPANY_ID,
+    kind,
+    name: trimmed,
+    sort_order: sortOrder,
+  })
+  if (error) {
+    console.warn('[org-chart] 직책·직급 추가 실패', { kind, message: error.message })
+    throw new Error(
+      /duplicate|unique/i.test(error.message)
+        ? '이미 등록된 이름입니다.'
+        : error.message,
+    )
+  }
+}
+
+export async function renamePersonnelTitle(
+  id: string,
+  name: string,
+): Promise<void> {
+  const { error } = await getSupabase().rpc('rename_personnel_title', {
+    title_id: id,
+    new_name: name.trim(),
+  })
+  if (error) {
+    console.warn('[org-chart] 직책·직급 이름 변경 실패', {
+      id,
+      message: error.message,
+    })
+    throw toStoreError(error)
+  }
+}
+
+export async function deletePersonnelTitle(id: string): Promise<void> {
+  const { error } = await getSupabase().rpc('delete_personnel_title', {
+    title_id: id,
+  })
+  if (error) {
+    console.warn('[org-chart] 직책·직급 삭제 실패', {
+      id,
+      message: error.message,
+    })
+    throw toStoreError(error)
+  }
 }
 
 export async function listDepartments(
@@ -435,7 +568,6 @@ export async function listManageableProfiles(): Promise<Profile[]> {
 export async function approveMember(
   input: ApproveMemberInput,
 ): Promise<Profile> {
-  if (!input.position.trim()) throw new Error('직책을 선택하세요.')
   const displayName = validatePersonName(input.displayName ?? '')
   const capabilities = uniqueCapabilities(input.capabilities)
   if (!input.isAdmin && capabilities.length === 0) {
@@ -453,7 +585,8 @@ export async function approveMember(
   const patch: Record<string, unknown> = {
     company_id: DEFAULT_COMPANY_ID,
     department_id: input.departmentId,
-    position: input.position.trim(),
+    position: input.position.trim() || null,
+    job_grade: input.jobGrade?.trim() || null,
     status: 'active',
     approved_by: actorId,
     approved_at: new Date().toISOString(),

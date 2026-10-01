@@ -25,6 +25,10 @@ export type PersonnelScope = (typeof PERSONNEL_SCOPES)[number]
 export const DEFAULT_COMPANY_ID = 'e0000000-0000-4000-8000-000000000001'
 export const ATELIER_BRAND_ID = 'b0000000-0000-4000-8000-000000000001'
 
+/** 조직도의 부서·직책·직급을 고칠 수 있는 개발자 계정. DB 함수와 같다. */
+export const ORG_ASSIGNMENT_EDITOR_EMAIL = 'dev@atelier.local'
+export const OPERATIONS_SUPPORT_DEPARTMENT = '운영지원팀'
+
 export function isWorkCapability(value: string): value is WorkCapability {
   return (WORK_CAPABILITIES as readonly string[]).includes(value)
 }
@@ -84,6 +88,23 @@ export function isCompanyManager(profile: CapabilityProfile | null) {
     isApprovedCompanyMember(profile) &&
     (isCompanyAdmin(profile) || isCompanyManagerPosition(profile?.position))
   )
+}
+
+/**
+ * 조직도에서 다른 직원의 부서·직책·직급을 고친다.
+ * 개발자 계정과 운영지원팀 소속만 해당한다. 다른 관리자는 해당하지 않는다.
+ * DB `app.can_edit_org_assignment`과 같은 조건이다.
+ */
+export function canEditOrgAssignment(
+  profile: (CapabilityProfile & {
+    email?: string | null
+    departmentName?: string | null
+  }) | null,
+) {
+  if (!isApprovedCompanyMember(profile)) return false
+  const email = profile?.email?.trim().toLowerCase()
+  if (email === ORG_ASSIGNMENT_EDITOR_EMAIL) return true
+  return profile?.departmentName === OPERATIONS_SUPPORT_DEPARTMENT
 }
 
 /** 가입 승인과 직책·소속 변경. DB `app.can_manage_personnel`과 같은 조건이다. */

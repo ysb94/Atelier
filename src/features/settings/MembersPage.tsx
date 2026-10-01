@@ -12,13 +12,15 @@ import {
   listBrandDirectory,
   listDepartments,
   listManageableProfiles,
-  POSITION_OPTIONS,
+  listPersonnelTitles,
+  type PersonnelTitle,
   rejectMember,
   setMemberDisabled,
   updateDepartment,
   type Profile,
 } from '@/lib/supabase/profiles'
 import {
+  canEditOrgAssignment,
   canManagePersonnel,
   capabilityLabel,
   WORK_CAPABILITIES,
@@ -27,6 +29,13 @@ import {
   type WorkCapability,
 } from '@/lib/company/capabilities'
 import { personNameError } from '@/lib/company/person-name'
+
+const emptyTitles: PersonnelTitle[] = []
+
+function withCurrent(options: string[], current: string) {
+  if (current && !options.includes(current)) return [current, ...options]
+  return options
+}
 
 const STATUS_LABEL: Record<Profile['status'], string> = {
   pending: '승인 대기',
@@ -39,18 +48,25 @@ function MemberEditor({
   profile,
   departments,
   brands,
+  duties,
+  grades,
   canSetAdmin,
+  canEditAssignment,
   onDone,
 }: {
   profile: Profile
   departments: { id: string; name: string }[]
   brands: { id: string; name: string; nameKo: string }[]
+  duties: string[]
+  grades: string[]
   canSetAdmin: boolean
+  canEditAssignment: boolean
   onDone: () => void
 }) {
   const [displayName, setDisplayName] = useState(profile.displayName ?? '')
   const [departmentId, setDepartmentId] = useState(profile.departmentId ?? '')
   const [position, setPosition] = useState(profile.position ?? '')
+  const [jobGrade, setJobGrade] = useState(profile.jobGrade ?? '')
   const [capabilities, setCapabilities] = useState<WorkCapability[]>(
     profile.capabilities,
   )
@@ -99,7 +115,7 @@ function MemberEditor({
           <Select
             value={departmentId}
             onChange={(e) => setDepartmentId(e.target.value)}
-            disabled={busy}
+            disabled={busy || !canEditAssignment}
           >
             <option value="">선택</option>
             {departments.map((dept) => (
@@ -114,15 +130,35 @@ function MemberEditor({
           <Select
             value={position}
             onChange={(e) => setPosition(e.target.value)}
-            disabled={busy}
+            disabled={busy || !canEditAssignment}
           >
-            <option value="">선택</option>
-            {POSITION_OPTIONS.map((option) => (
+            <option value="">미설정</option>
+            {withCurrent(duties, position).map((option) => (
               <option key={option} value={option}>
                 {option}
               </option>
             ))}
           </Select>
+        </label>
+        <label className="block space-y-1">
+          <span className="text-xs font-medium">직급</span>
+          <Select
+            value={jobGrade}
+            onChange={(e) => setJobGrade(e.target.value)}
+            disabled={busy || !canEditAssignment}
+          >
+            <option value="">미설정</option>
+            {withCurrent(grades, jobGrade).map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </Select>
+          {canEditAssignment ? null : (
+            <p className="text-xs text-muted-foreground">
+              부서와 직책·직급은 개발자와 운영지원팀만 바꿉니다.
+            </p>
+          )}
         </label>
       </div>
 
@@ -192,7 +228,7 @@ function MemberEditor({
         <Button
           type="button"
           size="sm"
-          disabled={busy || !position.trim() || nameError !== null}
+          disabled={busy || nameError !== null}
           onClick={async () => {
             setBusy(true)
             setError(null)
@@ -201,6 +237,7 @@ function MemberEditor({
                 profileId: profile.id,
                 departmentId,
                 position,
+                jobGrade,
                 capabilities,
                 leadBrandIds,
                 isAdmin: canSetAdmin ? isAdmin : false,
@@ -286,6 +323,7 @@ export function MembersPage() {
     position: me?.position,
     departmentPersonnelScope: me?.departmentPersonnelScope,
   })
+  const canEditAssignment = canEditOrgAssignment(me)
 
   const profilesQuery = useQuery({
     queryKey: ['manageable-profiles'],
@@ -302,6 +340,11 @@ export function MembersPage() {
     queryFn: listBrandDirectory,
     enabled: canManageMembers,
   })
+  const titlesQuery = useQuery({
+    queryKey: ['personnelTitles'],
+    queryFn: listPersonnelTitles,
+    enabled: canManageMembers,
+  })
 
   const profiles = useMemo(
     () => profilesQuery.data ?? [],
@@ -312,6 +355,16 @@ export function MembersPage() {
     [departmentsQuery.data],
   )
   const brands = useMemo(() => brandsQuery.data ?? [], [brandsQuery.data])
+  const titles = useMemo(
+    () => titlesQuery.data ?? emptyTitles,
+    [titlesQuery.data],
+  )
+  const duties = titles
+    .filter((title) => title.kind === 'duty')
+    .map((title) => title.name)
+  const grades = titles
+    .filter((title) => title.kind === 'grade')
+    .map((title) => title.name)
 
   const visible = useMemo(() => {
     const others = profiles.filter((p) => p.id !== me?.id)
@@ -461,7 +514,10 @@ export function MembersPage() {
                   profile={member}
                   departments={departments.filter((d) => d.isActive || d.id === member.departmentId)}
                   brands={brands}
+                  duties={duties}
+                  grades={grades}
                   canSetAdmin={Boolean(me?.isAdmin)}
+                  canEditAssignment={canEditAssignment}
                   onDone={async () => {
                     setEditingId(null)
                     await invalidate()
