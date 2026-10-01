@@ -1,4 +1,23 @@
-import { UNLOAD_STACK_BOX_LIMIT } from './inbound'
+import { formatCargoWarehouseNote, UNLOAD_STACK_BOX_LIMIT } from './inbound'
+
+/** 원본 행 ID로만 요청 사항을 연결한다. 분할 행과 기존 목록 순서를 유지한다. */
+export function refreshWarehouseTidyRequestNotes<
+  T extends { lineId: string | null; note: string },
+>(
+  rows: readonly T[],
+  lines: readonly { id: string; note: string; requestNote: string }[],
+): T[] {
+  const notesByLineId = new Map(
+    lines.filter((line) => line.id).map((line) => [
+      line.id,
+      formatCargoWarehouseNote(line.note, line.requestNote),
+    ]),
+  )
+  return rows.map((row) => {
+    const note = row.lineId ? notesByLineId.get(row.lineId) : undefined
+    return note === undefined || note === row.note ? row : { ...row, note }
+  })
+}
 
 export type WarehouseTidyShippedOnInput = {
   shippedAt: string

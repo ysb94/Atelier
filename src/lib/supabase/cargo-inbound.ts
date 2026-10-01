@@ -3,6 +3,7 @@ import type {
   CargoInboundStage,
 } from '@/lib/cargo/inbound'
 import type { CargoLineListValues } from '@/lib/cargo/line-list'
+import { refreshWarehouseTidyRequestNotes } from '@/lib/cargo/warehouse-tidy'
 import {
   cargoLineHasContent,
   parseCargoInteger,
@@ -330,6 +331,55 @@ export async function listCargoInboundTidyRows(
     )
   }
   return ((data as CargoInboundTidyRowRecord[]) ?? []).map(toTidyRow)
+}
+
+/** 저장본을 교체하지 않고 최신 요청 사항이 달라진 행의 비고만 수정한다. */
+export async function refreshCargoInboundTidyRequestNotes(
+  brandId: string,
+  shipmentId: string,
+): Promise<number> {
+  if (!brandId.trim() || !shipmentId.trim()) {
+    throw new CargoInboundStoreError('화물을 확인하세요.')
+  }
+  const { data, error } = await getSupabase()
+    .from('cargo_inbound_shipments')
+    .select(SHIPMENT_COLUMNS)
+    .eq('brand_id', brandId)
+    .eq('id', shipmentId)
+    .maybeSingle()
+  if (error || !data) {
+    throw new CargoInboundStoreError(
+      errorMessage(error, '현재 요청 사항을 불러오지 못했습니다.'),
+    )
+  }
+  const shipment = toShipment(data as CargoInboundShipmentRow)
+  if (shipment.stage !== 'scheduled' || !shipment.tidySavedAt) {
+    throw new CargoInboundStoreError('입고 예정 화물의 저장된 목록에서 불러오세요.')
+  }
+  const rows = await listCargoInboundTidyRows(brandId, shipmentId)
+  const refreshed = refreshWarehouseTidyRequestNotes(rows, shipment.lines)
+  let changedCount = 0
+  for (let index = 0; index < rows.length; index += 1) {
+    const row = rows[index]!
+    const next = refreshed[index]!
+    if (next.note === row.note) continue
+    const result = await getSupabase()
+      .from('cargo_inbound_tidy_rows')
+      .update({ note: next.note })
+      .eq('brand_id', brandId)
+      .eq('shipment_id', shipmentId)
+      .eq('id', row.id)
+      .eq('note', row.note)
+      .select('id')
+      .maybeSingle()
+    if (result.error || !result.data) {
+      throw new CargoInboundStoreError(
+        errorMessage(result.error, '요청 사항 반영 중 목록이 바뀌었거나 저장에 실패했습니다. 다시 불러오세요.'),
+      )
+    }
+    changedCount += 1
+  }
+  return changedCount
 }
 
 export async function saveCargoInboundTidyRows(

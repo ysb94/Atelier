@@ -8,7 +8,7 @@ import {
   type CargoLineListCells,
   type CargoLineListValues,
 } from './line-list'
-import { resolveWarehouseTidyShippedOn } from './warehouse-tidy'
+import { refreshWarehouseTidyRequestNotes, resolveWarehouseTidyShippedOn } from './warehouse-tidy'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -169,5 +169,33 @@ function sameCells(left: CargoLineListCells, right: CargoLineListCells) {
   const keys = Object.keys(left) as Array<keyof CargoLineListCells>
   return keys.every((key) => left[key] === right[key])
 }
+
+const requestRows = [
+  { ...sampleValues, id: 'saved-1', rowNo: 1, note: '등록 비고\n이전 요청' },
+  { ...sampleValues, id: 'saved-2', rowNo: 2, partIndex: 2, stow: 'B1', note: '등록 비고\n이전 요청' },
+  { ...sampleValues, id: 'saved-3', rowNo: 3, lineId: 'other-line', note: '다른 등록 비고\n다른 요청' },
+  { ...sampleValues, id: 'saved-4', rowNo: 4, lineId: null, note: '연결 없는 비고' },
+]
+const currentNotes = [
+  { id: 'line-1', note: '등록 비고', requestNote: '새 요청\n둘째 줄' },
+  { id: 'other-line', note: '다른 등록 비고', requestNote: '다른 요청' },
+  { id: 'new-line', note: '', requestNote: '새 행은 목록에 추가하지 않음' },
+]
+const refreshedNotes = refreshWarehouseTidyRequestNotes(requestRows, currentNotes)
+assert(refreshedNotes.length === requestRows.length, '새 원본 행이 있어도 저장 목록 행 수를 유지한다')
+for (let index = 0; index < requestRows.length; index += 1) {
+  const { note: beforeNote, ...before } = requestRows[index]!
+  const { note: afterNote, ...after } = refreshedNotes[index]!
+  assert(JSON.stringify(before) === JSON.stringify(after), '비고 외 ID·순서·분할·모든 열을 유지한다')
+  assert(index < 2 ? afterNote === '등록 비고\n새 요청\n둘째 줄' : afterNote === beforeNote, '같은 원본의 분할 행만 요청 사항을 반영한다')
+}
+assert(refreshedNotes[2] === requestRows[2], '같은 M번호의 다른 원본 행은 그대로 유지한다')
+assert(refreshedNotes[3] === requestRows[3], '연결이 없는 행은 그대로 유지한다')
+const repeatNotes = refreshWarehouseTidyRequestNotes(refreshedNotes, currentNotes)
+assert(repeatNotes.every((row, index) => row === refreshedNotes[index]), '반복 불러오기는 중복 추가나 재변경을 하지 않는다')
+const clearedNotes = refreshWarehouseTidyRequestNotes(refreshedNotes, [
+  { id: 'line-1', note: '등록 비고', requestNote: '' },
+])
+assert(clearedNotes[0]?.note === '등록 비고' && clearedNotes[1]?.note === '등록 비고', '요청 삭제는 등록 비고를 유지하며 분할 행에도 반영한다')
 
 console.log('warehouse-tidy.verify ok')

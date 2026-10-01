@@ -873,6 +873,14 @@ export async function getCargoInboundTidyRows(
   return cargoInboundStore.listCargoInboundTidyRows(brandId, shipmentId)
 }
 
+export async function refreshCargoInboundTidyRequestNotes(
+  brandId: string,
+  shipmentId: string,
+) {
+  await delay()
+  return cargoInboundStore.refreshCargoInboundTidyRequestNotes(brandId, shipmentId)
+}
+
 export async function saveCargoInboundTidyRows(
   brandId: string,
   shipmentId: string,

@@ -101,7 +101,9 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   완료는 `save_cargo_inbound_tidy_slots`를 사용한다.
   창고정리용 목록은 첫 인쇄 또는 엑셀 다운로드 내용 그대로 `cargo_inbound_tidy_rows`에
   고정한다. 다시 열거나 다시 인쇄해도 그 목록을 쓰고, 바꿀 때는 현재 재고로 다시
-  만들어 저장본을 교체한다. 저장본이 없으면 완료할 수 없다. 창고 재고는 바꾸지
+  만들어 저장본을 교체한다. 「현재 요청 사항만 불러오기」는 원본 `line_id`로 최신
+  요청 사항을 연결하고 달라진 `note`만 수정한다. 저장 행 ID·순서·분할·수량·선적일·
+  적재방식·최신 재고·창고자리는 유지한다. 저장본이 없으면 완료할 수 없다. 창고 재고는 바꾸지
   않는다. 추가 직전 스냅샷은
   `docs/backups/cargo-inbound-pre-tidy-rows-20260929.xlsx`다.
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.

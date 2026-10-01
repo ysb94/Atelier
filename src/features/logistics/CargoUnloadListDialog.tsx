@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Download,
   Loader2,
@@ -23,6 +23,7 @@ import {
   getActiveWarehouseInventorySet,
   getCargoInboundTidyRows,
   getWarehouseStockPositions,
+  refreshCargoInboundTidyRequestNotes,
   type CargoInboundTidyRow,
 } from '@/lib/api'
 import type {
@@ -32,6 +33,7 @@ import type {
 import {
   cargoLineHasContent,
   formatCargoWarehouseNote,
+  hasSavedCargoRequestNote,
   parseUnloadBoxCount,
   queueUnloadSplitRows,
   splitUnloadStackRows,
@@ -314,12 +316,15 @@ export function CargoUnloadListDialog({
       ? CARGO_WAREHOUSE_LINE_LIST_COLUMNS
       : CARGO_LINE_LIST_COLUMNS
   useRenderWatch(copy.watchName)
+  const queryClient = useQueryClient()
   const [openedAt] = useState(() => Date.now())
   const [listSource, setListSource] = useState<'saved' | 'live'>(() =>
     purpose === 'warehouse' && tidySavedAt ? 'saved' : 'live',
   )
   const [listPersisted, setListPersisted] = useState(false)
   const [savingList, setSavingList] = useState(false)
+  const [refreshingRequests, setRefreshingRequests] = useState(false)
+  const [requestRefreshStatus, setRequestRefreshStatus] = useState<string | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [printOrientation, setPrintOrientation] =
     useState<PrintOrientation>('portrait')
@@ -536,6 +541,34 @@ export function CargoUnloadListDialog({
     setListPersisted(false)
     setUncheckedKeys(new Set())
     setListError(null)
+    setRequestRefreshStatus(null)
+  }
+
+  async function handleRefreshRequestNotes() {
+    if (refreshingRequests || savingList || loading) return
+    setRefreshingRequests(true)
+    setListError(null)
+    setRequestRefreshStatus(null)
+    try {
+      const count = await refreshCargoInboundTidyRequestNotes(brandId, shipmentId)
+      await queryClient.invalidateQueries({
+        queryKey: ['cargo-inbound-tidy', brandId, shipmentId],
+      })
+      setRequestRefreshStatus(
+        count > 0
+          ? `현재 요청 사항을 ${formatNumber(count)}행에 반영했습니다.`
+          : '현재 요청 사항이 이미 반영되어 있습니다.',
+      )
+    } catch (error) {
+      console.warn('[cargo-inbound] 현재 요청 사항 불러오기 실패', { shipmentId, error })
+      setListError(error instanceof Error ? error.message : '현재 요청 사항을 불러오지 못했습니다.')
+      // 일부 행까지 반영된 경우에도 화면은 실제 저장본을 표시한다.
+      await queryClient.invalidateQueries({
+        queryKey: ['cargo-inbound-tidy', brandId, shipmentId],
+      })
+    } finally {
+      setRefreshingRequests(false)
+    }
   }
 
   async function ensureWarehouseListSaved() {
@@ -580,8 +613,16 @@ export function CargoUnloadListDialog({
     }
   }
 
+  function requestNotesReady() {
+    if (purpose !== 'warehouse' || listSource === 'saved') return true
+    if (hasSavedCargoRequestNote(lines)) return true
+    setListError('요청 사항을 먼저 저장한 뒤 출력하세요.')
+    return false
+  }
+
   async function handlePrint() {
-    if (loading || savingList || printRows.length === 0) return
+    if (loading || savingList || refreshingRequests || printRows.length === 0) return
+    if (!requestNotesReady()) return
     const saved = await ensureWarehouseListSaved()
     if (!saved) return
     applyUnloadPrintMode(
@@ -596,7 +637,8 @@ export function CargoUnloadListDialog({
   }
 
   async function handleDownloadExcel() {
-    if (loading || downloadingExcel || savingList || printRows.length === 0) return
+    if (loading || downloadingExcel || savingList || refreshingRequests || printRows.length === 0) return
+    if (!requestNotesReady()) return
     const saved = await ensureWarehouseListSaved()
     if (!saved) return
     setDownloadingExcel(true)
@@ -736,11 +778,16 @@ export function CargoUnloadListDialog({
               {listError ? (
                 <span className="text-xs text-danger">{listError}</span>
               ) : null}
+              {requestRefreshStatus ? (
+                <span role="status" className="text-xs text-muted-foreground">
+                  {requestRefreshStatus}
+                </span>
+              ) : null}
               {excelError ? (
                 <span className="text-xs text-danger">{excelError}</span>
               ) : null}
             </div>
-            <div className="flex items-center gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               <label
                 className="sr-only"
                 htmlFor={copy.printOrientationId}
@@ -774,22 +821,42 @@ export function CargoUnloadListDialog({
               stage === 'scheduled' &&
               tidySavedAt &&
               listSource === 'saved' ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={!savedQuery.isSuccess}
-                  onClick={showCurrentStock}
-                >
-                  <RefreshCw className="size-3.5" />
-                  현재 재고로 다시 만들기
-                </Button>
+                <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={
+                      !savedQuery.isSuccess || refreshingRequests || savingList ||
+                      downloadingExcel || rows.length === 0
+                    }
+                    onClick={() => void handleRefreshRequestNotes()}
+                    title="저장된 목록의 비고에 현재 저장된 요청 사항만 반영합니다."
+                  >
+                    {refreshingRequests ? (
+                      <Loader2 className="size-3.5 animate-spin" />
+                    ) : (
+                      <RefreshCw className="size-3.5" />
+                    )}
+                    {refreshingRequests ? '불러오는 중...' : '현재 요청 사항만 불러오기'}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={!savedQuery.isSuccess || refreshingRequests || savingList || downloadingExcel}
+                    onClick={showCurrentStock}
+                  >
+                    <RefreshCw className="size-3.5" />
+                    현재 재고로 다시 만들기
+                  </Button>
+                </>
               ) : null}
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={loading || savingList || printRows.length === 0}
+                disabled={loading || savingList || refreshingRequests || printRows.length === 0}
                 onClick={() => void handlePrint()}
               >
                 {savingList ? (
@@ -807,6 +874,7 @@ export function CargoUnloadListDialog({
                   disabled={
                     loading ||
                     savingList ||
+                    refreshingRequests ||
                     downloadingExcel ||
                     printRows.length === 0
                   }
@@ -1060,6 +1128,7 @@ function CargoLineListButton({
   stage,
   tidySavedAt,
   onSaveRows,
+  beforeOpen,
 }: {
   title: string
   brandId: string
@@ -1071,6 +1140,7 @@ function CargoLineListButton({
   stage?: CargoInboundStage
   tidySavedAt?: string | null
   onSaveRows?: (rows: readonly CargoLineListValues[]) => Promise<void>
+  beforeOpen?: () => boolean
 }) {
   const [open, setOpen] = useState(false)
   const copy = PURPOSE_COPY[purpose]
@@ -1081,7 +1151,10 @@ function CargoLineListButton({
         type="button"
         size="sm"
         variant="outline"
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          if (beforeOpen && !beforeOpen()) return
+          setOpen(true)
+        }}
       >
         <Icon className="size-3.5" />
         {copy.label}
@@ -1140,6 +1213,7 @@ export function CargoWarehouseTidyButton({
   stage,
   tidySavedAt,
   onSaveRows,
+  beforeOpen,
 }: {
   title: string
   brandId: string
@@ -1150,6 +1224,7 @@ export function CargoWarehouseTidyButton({
   stage: CargoInboundStage
   tidySavedAt: string | null
   onSaveRows?: (rows: readonly CargoLineListValues[]) => Promise<void>
+  beforeOpen?: () => boolean
 }) {
   return (
     <CargoLineListButton
@@ -1163,6 +1238,7 @@ export function CargoWarehouseTidyButton({
       stage={stage}
       tidySavedAt={tidySavedAt}
       onSaveRows={onSaveRows}
+      beforeOpen={beforeOpen}
     />
   )
 }

@@ -39,6 +39,13 @@ export function cargoLineHasContent(row: CargoInboundLineDraft): boolean {
   ].some((value) => value.trim().length > 0)
 }
 
+/** 한 줄이라도 저장된 요청 사항이 있으면 창고정리용을 출력할 수 있다. */
+export function hasSavedCargoRequestNote(
+  lines: readonly { requestNote: string }[],
+): boolean {
+  return lines.some((line) => line.requestNote.trim().length > 0)
+}
+
 /** 등록 비고를 유지하고, 요청 사항은 그 아래 줄에 붙인다. */
 export function formatCargoWarehouseNote(
   note: string,

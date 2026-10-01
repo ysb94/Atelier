@@ -19,7 +19,10 @@ import {
 } from '@/features/logistics/CargoUnloadListDialog'
 import { CargoWarehouseSlotDialog } from '@/features/logistics/CargoWarehouseSlotDialog'
 import { formatCargoInboundTitle } from '@/features/logistics/cargo-inbound-title'
-import type { CargoInboundLineDraft } from '@/lib/cargo/inbound'
+import {
+  hasSavedCargoRequestNote,
+  type CargoInboundLineDraft,
+} from '@/lib/cargo/inbound'
 import type { CargoLineListValues } from '@/lib/cargo/line-list'
 import { formatNumber } from '@/lib/utils'
 
@@ -84,6 +87,7 @@ export function CargoInboundDetailPanel({
   )
   const [note, setNote] = useState(item.portContactNote ?? '')
   const [status, setStatus] = useState<string | null>(null)
+  const [statusWarning, setStatusWarning] = useState(false)
   const [saving, setSaving] = useState(false)
   const [requestOpen, setRequestOpen] = useState(false)
   const [slotOpen, setSlotOpen] = useState(false)
@@ -99,6 +103,7 @@ export function CargoInboundDetailPanel({
         inboundDate,
         error,
       })
+      setStatusWarning(false)
       setStatus(
         error instanceof Error ? error.message : '입고일 저장에 실패했습니다.',
       )
@@ -109,13 +114,36 @@ export function CargoInboundDetailPanel({
 
   function openSlotEntry() {
     if (!item.tidySavedAt) {
+      setStatusWarning(false)
       setStatus(
         '창고정리용을 먼저 인쇄하세요. 인쇄할 때 목록이 저장됩니다.',
       )
       return
     }
+    setStatusWarning(false)
     setStatus(null)
     setSlotOpen(true)
+  }
+
+  function openWarehouseTidy() {
+    if (!item.tidySavedAt && !hasSavedCargoRequestNote(item.lines)) {
+      setStatusWarning(true)
+      setStatus('요청 사항을 먼저 저장한 뒤 창고정리용을 출력하세요.')
+      return false
+    }
+    setStatusWarning(false)
+    setStatus(null)
+    return true
+  }
+
+  function openRequests() {
+    if (item.tidySavedAt) {
+      const proceed = window.confirm(
+        '창고정리용이 이미 출력되었습니다. 요청 사항을 저장한 뒤 창고정리용에서 「현재 요청 사항만 불러오기」를 누르면 저장된 목록에 반영됩니다. 그래도 열까요?',
+      )
+      if (!proceed) return
+    }
+    setRequestOpen(true)
   }
 
   return (
@@ -167,8 +195,10 @@ export function CargoInboundDetailPanel({
                 shipmentId={item.id}
                 stage={item.stage}
                 tidySavedAt={item.tidySavedAt}
+                beforeOpen={openWarehouseTidy}
                 onSaveRows={async (rows) => {
                   await onSaveTidyRows(rows)
+                  setStatusWarning(false)
                   setStatus(null)
                 }}
               />
@@ -206,7 +236,7 @@ export function CargoInboundDetailPanel({
               type="button"
               size="sm"
               variant="outline"
-              onClick={() => setRequestOpen(true)}
+              onClick={openRequests}
             >
               <MessageSquareText className="size-3.5" />
               요청 사항
@@ -259,7 +289,14 @@ export function CargoInboundDetailPanel({
       </div>
 
       {status ? (
-        <p className="text-xs text-muted-foreground" role="status">
+        <p
+          className={
+            statusWarning
+              ? 'text-xs text-warning'
+              : 'text-xs text-muted-foreground'
+          }
+          role="status"
+        >
           {status}
         </p>
       ) : null}
