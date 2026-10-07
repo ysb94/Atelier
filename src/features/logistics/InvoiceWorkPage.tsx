@@ -41,6 +41,12 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { useBrand } from '@/components/layout/brand-context'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { Badge } from '@/components/ui/badge'
+import { Select } from '@/components/ui/input'
+import {
+  buildFolderForest,
+  filterOutboundPartnersByCategory,
+  OUTBOUND_UNFILED_CATEGORY,
+} from '@/lib/codes/outbound-folder'
 import { Button } from '@/components/ui/button'
 import {
   Card,
@@ -1417,6 +1423,8 @@ export function InvoiceWorkPage() {
   const [productCriteriaRetrying, setProductCriteriaRetrying] = useState(false)
   const [itemCriteriaRetrying, setItemCriteriaRetrying] = useState(false)
   const [mallDialogOpen, setMallDialogOpen] = useState(false)
+  const [mallCategoryKey, setMallCategoryKey] = useState('')
+  const [mallCategoryLocked, setMallCategoryLocked] = useState(false)
   const [outboundBackupBusy, setOutboundBackupBusy] = useState(false)
   const [outboundBackupMessage, setOutboundBackupMessage] = useState<
     string | null
@@ -1878,17 +1886,48 @@ export function InvoiceWorkPage() {
     () => usageFoldersQuery.data ?? [],
     [usageFoldersQuery.data],
   )
+  const mallCategories = useMemo(() => [
+    ...buildFolderForest(usageFolders).map((folder) => ({ key: folder.id, name: folder.name })),
+    { key: OUTBOUND_UNFILED_CATEGORY, name: '미분류' },
+  ], [usageFolders])
+  const mallCategory = mallCategories.find((category) => category.key === mallCategoryKey)
+  const scopedUsageTargets = useMemo(
+    () => filterOutboundPartnersByCategory(usageTargets, usageFolders, mallCategoryKey),
+    [usageTargets, usageFolders, mallCategoryKey],
+  )
   const mallResolution = useMemo(
-    () => resolveInvoiceMalls(workRows, usageTargets, usageAliases),
-    [usageAliases, usageTargets, workRows],
+    () => timeInvoiceWork('쇼핑몰명 연결', () => resolveInvoiceMalls(workRows, scopedUsageTargets, usageAliases)),
+    [usageAliases, scopedUsageTargets, workRows],
   )
   const mallPartnersReady =
     !usageTargetsQuery.isPending &&
     !usageAliasesQuery.isPending &&
+    !usageFoldersQuery.isPending &&
     !usageTargetsQuery.error &&
-    !usageAliasesQuery.error
+    !usageAliasesQuery.error &&
+    !usageFoldersQuery.error
   const mallsReady =
-    mallPartnersReady && isInvoiceMallReady(mallResolution)
+    Boolean(mallCategory) && mallPartnersReady && isInvoiceMallReady(mallResolution)
+  const mallCategorySelect = (
+    <label className="block max-w-sm space-y-1.5 text-sm">
+      <span className="font-medium">출고업체 분류</span>
+      <Select
+        className="w-full"
+        aria-label="출고업체 분류"
+        value={mallCategoryKey}
+        disabled={isParsing || mallCategoryLocked || mallDialogOpen || outboundBackupBusy}
+        onChange={(event) => setMallCategoryKey(event.target.value)}
+      >
+        <option value="">분류를 선택하세요</option>
+        {mallCategories.map((category) => (
+          <option key={category.key} value={category.key}>{category.name}</option>
+        ))}
+      </Select>
+      <span className="block text-xs text-muted-foreground">
+        선택한 분류의 업체·지점·별칭으로 쇼핑몰명을 연결합니다.
+      </span>
+    </label>
+  )
   const headerReady = Boolean(
     inspection && inspection.missingHeaders.length === 0,
   )
@@ -1920,8 +1959,8 @@ export function InvoiceWorkPage() {
   )
   const activeStep = TODAY_STEPS[stepIndex]!.value
   useEffect(() => {
-    if (!inspection || !headerReady || !mallPartnersReady) return
-    const autoKey = `${fileName}:${inspection.rowCount}:${mallResolution.unresolvedCount}`
+    if (!inspection || !headerReady || !mallPartnersReady || !mallCategoryKey) return
+    const autoKey = `${mallCategoryKey}:${fileName}:${inspection.rowCount}:${mallResolution.unresolvedCount}`
     if (mallResolution.unresolvedCount === 0) {
       setMallDialogOpen(false)
       return
@@ -1941,6 +1980,7 @@ export function InvoiceWorkPage() {
     headerReady,
     inspection,
     mallPartnersReady,
+    mallCategoryKey,
     mallResolution.unresolvedCount,
     uploadPipeline,
     backupExclusionReady,
@@ -3088,6 +3128,8 @@ export function InvoiceWorkPage() {
     setBackupDialogOpen(false)
     setBackedUpExclusionAccepted(false)
     setCurrentGenerationBackedUp(false)
+    setMallCategoryKey('')
+    setMallCategoryLocked(false)
     setOutboundBackupBusy(false)
     setOutboundBackupMessage(null)
     setOutboundBackupIsError(false)
@@ -3116,6 +3158,8 @@ export function InvoiceWorkPage() {
       setError('파일이 50MB를 넘습니다. 주문 기간을 나눠서 내려받아 주세요.')
       return
     }
+    if (inspection) setMallCategoryKey('')
+    setMallCategoryLocked(false)
 
     workGenerationRef.current += 1
     setWorkGeneration(workGenerationRef.current)
@@ -3194,6 +3238,7 @@ export function InvoiceWorkPage() {
       return
     }
     logInvoiceWork('tab-commit', { from: step, to: next })
+    if (TODAY_STEP_INDEX[next] > TODAY_STEP_INDEX.check) setMallCategoryLocked(true)
     startStepTransition(() => {
       setStep(next)
     })
@@ -3213,6 +3258,7 @@ export function InvoiceWorkPage() {
     setReachedStepIndex((current) =>
       Math.max(current, TODAY_STEP_INDEX[next]),
     )
+    if (TODAY_STEP_INDEX[next] > TODAY_STEP_INDEX.check) setMallCategoryLocked(true)
     setStep(next)
   }
 
@@ -3552,6 +3598,7 @@ export function InvoiceWorkPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
+                {mallCategorySelect}
                 <div
                   role="button"
                   tabIndex={0}
@@ -3679,6 +3726,7 @@ export function InvoiceWorkPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-5">
+                {mallCategorySelect}
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <SummaryItem
                     label="불러온 상품 행"
@@ -3854,7 +3902,7 @@ export function InvoiceWorkPage() {
                   </div>
                 )}
 
-                {headerReady ? (
+                {headerReady && mallCategory ? (
                   <div className="grid gap-3 lg:grid-cols-2">
                     <InvoiceFileCheckTransformWork
                       missingProductCodeCount={
@@ -3866,12 +3914,14 @@ export function InvoiceWorkPage() {
                       resolution={mallResolution}
                       partnersReady={mallPartnersReady}
                       partnersError={Boolean(
-                        usageTargetsQuery.error || usageAliasesQuery.error,
+                        usageTargetsQuery.error || usageAliasesQuery.error || usageFoldersQuery.error,
                       )}
                       blockLabel="사은품 추가로 갈 수 없습니다."
                       onOpen={() => setMallDialogOpen(true)}
                     />
                   </div>
+                ) : headerReady ? (
+                  <p className="text-sm text-warning">출고업체 분류를 선택해야 다음 단계로 갈 수 있습니다.</p>
                 ) : null}
 
                 <SabangnetOrderTable
@@ -4781,12 +4831,15 @@ export function InvoiceWorkPage() {
         <InvoiceWorkHistoryPanel brandId={brand.id} />
       )}
 
-      {workspaceActive && mallDialogOpen && inspection ? (
+      {workspaceActive && mallDialogOpen && inspection && mallCategory ? (
         <InvoiceMallResolutionDialog
+          key={mallCategoryKey}
+          categoryKey={mallCategoryKey}
+          categoryName={mallCategory.name}
           brandId={brand.id}
           brandSlug={brand.slug}
           sites={mallResolution.sites}
-          targets={usageTargets}
+          targets={scopedUsageTargets}
           aliases={usageAliases}
           folders={usageFolders}
           onClose={() => setMallDialogOpen(false)}

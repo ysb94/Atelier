@@ -35,7 +35,9 @@ function toGroup(row: GroupRow): OutboundPartnerGroup {
 function groupError(error: { code?: string; message?: string } | null) {
   if (error && isUniqueViolation(error)) {
     return new CodeUsageTargetStoreError(
-      '같은 이름의 업체 그룹이 이미 있습니다.',
+      error.message?.includes('이름이 다른 출고업체')
+        ? error.message
+        : '같은 이름의 업체 그룹이 이미 있습니다.',
       'duplicate',
     )
   }

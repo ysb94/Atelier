@@ -4,6 +4,9 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "setup:md-price": "node scripts/setup-md-price.mjs",
+    "verify:md-price": "node --experimental-strip-types scripts/verify-md-price.mjs",
+    "verify:sabangnet-urls": "node scripts/verify-sabangnet-urls.mjs",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "build:styled-cuts-html": "node scripts/build-styled-cuts-html.mjs",
@@ -73,6 +76,7 @@
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",
+    "@hyunbinseo/holidays-kr": "^5.2027.2",
     "@supabase/supabase-js": "^2.112.2",
     "@tanstack/react-query": "^5.101.4",
     "@tanstack/react-table": "^8.21.3",

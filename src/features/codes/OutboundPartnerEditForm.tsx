@@ -11,9 +11,7 @@ import {
 } from "@/lib/codes/outbound-partner";
 import {
   CodeUsageTargetStoreError,
-  createOutboundPartnerGroup,
   updateCodeUsageTarget,
-  updateOutboundPartnerGroup,
 } from "@/lib/api";
 import type {
   CodeUsageTarget,
@@ -190,10 +188,18 @@ export function OutboundPartnerEditForm({
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      if (editGroupName && target.groupId) {
-        await updateOutboundPartnerGroup(target.groupId, groupName);
+      const draftAlias = normalizeOutboundPartnerName(aliasInput);
+      const draftKey = compactOutboundPartnerKey(draftAlias);
+      const alreadyIncluded = draftKey === compactOutboundPartnerKey(name) ||
+        aliasList.some((alias) => compactOutboundPartnerKey(alias) === draftKey);
+      if (draftAlias && !alreadyIncluded && aliasWarning) {
+        throw new CodeUsageTargetStoreError(aliasWarning, "invalid");
       }
+      const savedAliases = draftAlias && !alreadyIncluded
+        ? [...aliasList, draftAlias]
+        : aliasList;
       return updateCodeUsageTarget(target.id, {
+        groupName: editGroupName ? groupName : undefined,
         name: legacy || (branched && !namedBranch) ? groupName : name,
         folderId: target.folderId,
         channelType: outboundChannelFromFolderPath(folders, target.folderId),
@@ -204,7 +210,7 @@ export function OutboundPartnerEditForm({
         contactEmail,
         address,
         note,
-        aliases: aliasList,
+        aliases: savedAliases,
       });
     },
     onSuccess: async () => {
@@ -227,12 +233,8 @@ export function OutboundPartnerEditForm({
         target.folderId,
       );
       if (organizeMode === "company") {
-        const group = await createOutboundPartnerGroup(
-          target.brandId,
-          organizeGroupName,
-        );
         return updateCodeUsageTarget(target.id, {
-          groupId: group.id,
+          groupName: organizeGroupName,
           siteName: "",
           channelType,
         });

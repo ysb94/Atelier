@@ -27,3 +27,6 @@ verify_jwt = true
 
 [functions.chat-files-cleanup]
 verify_jwt = false
+
+[functions.md-price-refresh]
+verify_jwt = true

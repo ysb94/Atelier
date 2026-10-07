@@ -59,8 +59,6 @@ export type Profile = {
 export type AccessRequestInput = {
   displayName: string
   departmentId: string
-  capabilities: WorkCapability[]
-  requestNote?: string
 }
 
 export type ApproveMemberInput = {
@@ -524,14 +522,8 @@ export async function submitAccessRequest(
   const userId = userData.user?.id
   if (!userId) throw new Error('로그인이 필요합니다.')
 
-  if (!input.departmentId) throw new Error('팀을 선택하세요.')
+  if (!input.departmentId) throw new Error('부서를 선택하세요.')
   const displayName = validatePersonName(input.displayName)
-  const capabilities = uniqueCapabilities(input.capabilities)
-  if (capabilities.length === 0) {
-    throw new Error('업무 역량을 하나 이상 선택하세요.')
-  }
-
-  await replaceCapabilities(userId, capabilities)
 
   const { data, error } = await getSupabase()
     .from('profiles')
@@ -540,7 +532,7 @@ export async function submitAccessRequest(
       name_confirmed_at: new Date().toISOString(),
       company_id: DEFAULT_COMPANY_ID,
       department_id: input.departmentId,
-      request_note: input.requestNote?.trim() || null,
+      request_note: null,
       requested_at: new Date().toISOString(),
       status: 'pending',
       approved_by: null,

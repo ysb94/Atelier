@@ -19,22 +19,21 @@ import { BarcodeOutboundDataEntryPanel } from '@/features/logistics/BarcodeOutbo
 import {
   deleteBarcodeDataEntryRun,
   getCodeUsageTargetAliases,
+  getCodeUsageTargetFolders,
   getCodeUsageTargets,
   listStyleRefsForLookup,
   saveBarcodeDataEntryRun,
 } from '@/lib/api'
 import {
-  countOutboundCompanies,
   groupOutboundPartnersInFolder,
   matchesOutboundPartnerSearch,
-  type OutboundCompanyInFolder,
 } from '@/lib/codes/outbound-partner'
 import {
   barcodeDataEntryAllReady,
   barcodeDataEntryBackupEntries,
-  barcodeDataEntryCompanyKey,
   emptyBarcodeDataEntryDraft,
   filterTargetsByVisibleIds,
+  groupBarcodeDataEntryCompaniesByCategory,
   isIsoDate,
   readBarcodeDataEntryDraft,
   readBarcodeDataEntryVisibleIds,
@@ -43,9 +42,10 @@ import {
   writeBarcodeDataEntryDraft,
   writeBarcodeDataEntryVisibleIds,
   type BarcodeDataEntryRow,
+  type BarcodeDataEntryCompanySelection,
 } from '@/lib/outbound/barcode-outbound-data-entry'
 import { PRODUCT_OUTBOUND_UPDATED_EVENT } from '@/lib/outbound/product-outbound'
-import type { CodeUsageTarget } from '@/lib/types'
+import type { CodeUsageTarget, CodeUsageTargetFolder } from '@/lib/types'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber } from '@/lib/utils'
 
@@ -76,11 +76,13 @@ function notifyOutboundUpdated(brandId: string) {
 
 function VisiblePartnerSettingsDialog({
   partners,
+  folders,
   initialCompanyKeys,
   onClose,
   onSave,
 }: {
   partners: CodeUsageTarget[]
+  folders: CodeUsageTargetFolder[]
   initialCompanyKeys: Set<string>
   onClose: () => void
   onSave: (ids: string[]) => void
@@ -90,25 +92,26 @@ function VisiblePartnerSettingsDialog({
   draftRef.current = draft
   const [search, setSearch] = useState('')
 
-  const companies = useMemo(
-    () => groupOutboundPartnersInFolder(partners),
-    [partners],
+  const categories = useMemo(
+    () => groupBarcodeDataEntryCompaniesByCategory(partners, folders),
+    [partners, folders],
   )
-  const visibleCompanies = useMemo(() => {
+  const visibleCategories = useMemo(() => {
     const keyword = search.trim()
-    if (!keyword) return companies
-    return companies.filter((company) =>
-      company.units.some((unit) =>
-        matchesOutboundPartnerSearch(keyword, unit, []),
+    return categories.map((category) => ({
+      ...category,
+      companies: category.companies.filter((company) => !keyword ||
+        company.units.some((unit) => matchesOutboundPartnerSearch(keyword, unit, [])),
       ),
-    )
-  }, [companies, search])
+    })).filter((category) => category.companies.length > 0)
+  }, [categories, search])
+  const visibleCompanies = visibleCategories.flatMap((category) => category.companies)
 
-  function toggleCompany(company: OutboundCompanyInFolder) {
+  function toggleCompany(company: BarcodeDataEntryCompanySelection) {
     setDraft((current) => {
       const next = new Set(current)
-      if (next.has(company.key)) next.delete(company.key)
-      else next.add(company.key)
+      if (next.has(company.selectionKey)) next.delete(company.selectionKey)
+      else next.add(company.selectionKey)
       return next
     })
   }
@@ -129,8 +132,8 @@ function VisiblePartnerSettingsDialog({
         <div className="border-b border-border px-5 py-4">
           <h2 className="text-base font-semibold">표시할 출고업체</h2>
           <p className="mt-1 text-xs text-muted-foreground">
-            체크한 업체만 선택 목록에 나옵니다. 지점이 있는 업체는 업체 단위로
-            고릅니다.
+            분류별로 체크한 업체만 선택 목록에 나옵니다. 지점이 있는 업체는
+            해당 분류의 지점을 함께 고릅니다.
           </p>
         </div>
         <div className="border-b border-border px-5 py-3">
@@ -153,7 +156,7 @@ function VisiblePartnerSettingsDialog({
               onClick={() => {
                 setDraft((current) => {
                   const next = new Set(current)
-                  for (const company of visibleCompanies) next.add(company.key)
+                  for (const company of visibleCompanies) next.add(company.selectionKey)
                   return next
                 })
               }}
@@ -181,33 +184,36 @@ function VisiblePartnerSettingsDialog({
               검색과 맞는 출고업체가 없습니다.
             </p>
           ) : (
-            visibleCompanies.map((company) => {
-              const checked = draft.has(company.key)
-              return (
-                <label
-                  key={company.key}
-                  className={cn(
-                    'flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2 text-sm',
-                    checked
-                      ? 'border-primary/30 bg-primary/5'
-                      : 'border-transparent hover:bg-muted/40',
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    className="size-3.5 accent-primary"
-                    checked={checked}
-                    onChange={() => toggleCompany(company)}
-                  />
-                  <span className="min-w-0 flex-1 truncate font-medium">
-                    {company.groupName}
-                  </span>
-                  <span className="shrink-0 text-[11px] text-muted-foreground">
-                    {company.units.length}곳
-                  </span>
-                </label>
-              )
-            })
+            visibleCategories.map((category) => (
+              <section key={category.key} className="mb-3 space-y-1">
+                <h3 className="sticky top-0 bg-card px-2 py-2 text-xs font-semibold text-muted-foreground">
+                  {category.name}
+                </h3>
+                {category.companies.map((company) => {
+                  const checked = draft.has(company.selectionKey)
+                  return (
+                    <label
+                      key={company.selectionKey}
+                      className={cn(
+                        'flex cursor-pointer items-center gap-2.5 rounded-lg border px-3 py-2 text-sm',
+                        checked
+                          ? 'border-primary/30 bg-primary/5'
+                          : 'border-transparent hover:bg-muted/40',
+                      )}
+                    >
+                      <input
+                        type="checkbox"
+                        className="size-3.5 accent-primary"
+                        checked={checked}
+                        onChange={() => toggleCompany(company)}
+                      />
+                      <span className="min-w-0 flex-1 truncate font-medium">{company.groupName}</span>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">{company.units.length}곳</span>
+                    </label>
+                  )
+                })}
+              </section>
+            ))
           )}
         </div>
         <div className="flex items-center justify-between gap-2 border-t border-border px-5 py-3">
@@ -222,7 +228,7 @@ function VisiblePartnerSettingsDialog({
               type="button"
               size="sm"
               onClick={() => {
-                onSave(unitIdsForCompanyKeys(partners, draftRef.current))
+                onSave(unitIdsForCompanyKeys(partners, draftRef.current, folders))
                 onClose()
               }}
             >
@@ -242,6 +248,8 @@ export function BarcodeOutboundDataEntryPage() {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
+  const [categoryKey, setCategoryKey] = useState<string | null>(null)
+  const [draftVersion, setDraftVersion] = useState(0)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [visibleIds, setVisibleIds] = useState<string[] | null>(() =>
     readBarcodeDataEntryVisibleIds(brand.id),
@@ -256,6 +264,7 @@ export function BarcodeOutboundDataEntryPage() {
   useEffect(() => {
     setSearch('')
     setSelectedKey(null)
+    setCategoryKey(null)
     setVisibleIds(readBarcodeDataEntryVisibleIds(brand.id))
     setShippedOn('')
     setDateChosen(false)
@@ -278,6 +287,10 @@ export function BarcodeOutboundDataEntryPage() {
     queryKey: ['codeUsageTargetAliases', brand.id],
     queryFn: () => getCodeUsageTargetAliases(brand.id),
   })
+  const foldersQuery = useQuery({
+    queryKey: ['codeUsageTargetFolders', brand.id],
+    queryFn: () => getCodeUsageTargetFolders(brand.id),
+  })
 
   const targets = useMemo(
     () => targetsQuery.data ?? [],
@@ -286,6 +299,10 @@ export function BarcodeOutboundDataEntryPage() {
   const aliases = useMemo(
     () => aliasesQuery.data ?? [],
     [aliasesQuery.data],
+  )
+  const folders = useMemo(
+    () => foldersQuery.data ?? [],
+    [foldersQuery.data],
   )
   const aliasesByTarget = useMemo(() => {
     const map = new Map<string, string[]>()
@@ -298,61 +315,70 @@ export function BarcodeOutboundDataEntryPage() {
   }, [aliases])
 
   const allowedTargets = useMemo(
-    () => filterTargetsByVisibleIds(targets, visibleIds),
-    [targets, visibleIds],
+    () => filterTargetsByVisibleIds(targets, visibleIds, folders),
+    [targets, visibleIds, folders],
   )
-  const visibleTargets = useMemo(
-    () =>
-      allowedTargets.filter((target) =>
-        matchesOutboundPartnerSearch(
-          search,
-          target,
-          aliasesByTarget.get(target.id) ?? [],
-        ),
-      ),
-    [aliasesByTarget, allowedTargets, search],
+  const categories = useMemo(
+    () => groupBarcodeDataEntryCompaniesByCategory(allowedTargets, folders),
+    [allowedTargets, folders],
   )
+  const activeCategory = categories.find((category) => category.key === categoryKey) ??
+    categories.find((category) => category.companies.length > 0) ?? categories[0]
   const companies = useMemo(
-    () => groupOutboundPartnersInFolder(visibleTargets),
-    [visibleTargets],
+    () => (activeCategory?.companies ?? []).filter((company) =>
+      company.units.some((target) => matchesOutboundPartnerSearch(
+        search, target, aliasesByTarget.get(target.id) ?? [],
+      )),
+    ),
+    [activeCategory, aliasesByTarget, search],
   )
   const allCompanies = useMemo(
     () => groupOutboundPartnersInFolder(targets),
     [targets],
   )
   const selectedCompany =
-    companies.find((company) => company.key === selectedKey) ??
-    groupOutboundPartnersInFolder(allowedTargets).find(
-      (company) => company.key === selectedKey,
-    ) ??
-    null
+    activeCategory?.companies.find((company) => company.selectionKey === selectedKey) ?? null
 
   useEffect(() => {
     if (
       selectedKey &&
-      !allowedTargets.some(
-        (target) => barcodeDataEntryCompanyKey(target) === selectedKey,
-      )
+      !categories.some((category) => category.companies.some((company) => company.selectionKey === selectedKey))
     ) {
       setSelectedKey(null)
     }
-  }, [allowedTargets, selectedKey])
+  }, [categories, selectedKey])
 
   const configured = visibleIds != null
-  const loading = targetsQuery.isPending || aliasesQuery.isPending
-  const loadError = targetsQuery.error || aliasesQuery.error
-  const draft = selectedCompany
+  const loading = targetsQuery.isPending || aliasesQuery.isPending || foldersQuery.isPending
+  const loadError = targetsQuery.error || aliasesQuery.error || foldersQuery.error
+  const allCategories = useMemo(
+    () => groupBarcodeDataEntryCompaniesByCategory(targets, folders),
+    [targets, folders],
+  )
+  const legacyDraft = selectedCompany
     ? readBarcodeDataEntryDraft(brand.id, selectedCompany.key)
     : emptyBarcodeDataEntryDraft()
+  const scopedDraft = selectedCompany
+    ? readBarcodeDataEntryDraft(brand.id, selectedCompany.selectionKey)
+    : emptyBarcodeDataEntryDraft()
+  const sharedAcrossCategories = Boolean(selectedCompany && allCategories.filter((category) =>
+    category.companies.some((company) => company.key === selectedCompany.key),
+  ).length > 1)
+  const hasLegacyDraft = legacyDraft.rows.length > 0 || Boolean(legacyDraft.note.trim())
+  const hasScopedDraft = scopedDraft.rows.length > 0 || Boolean(scopedDraft.note.trim())
+  const draft = !hasScopedDraft && !sharedAcrossCategories ? legacyDraft : scopedDraft
   const settingsCompanyKeys =
-    visibleCompanyKeysFromUnitIds(targets, visibleIds) ?? new Set<string>()
+    visibleCompanyKeysFromUnitIds(targets, visibleIds, folders) ?? new Set<string>()
 
   function persistDraft(rows: BarcodeDataEntryRow[], note: string) {
     if (!selectedCompany) {
       if (rows.length === 0 && !note.trim()) return
       throw new Error('출고업체를 먼저 고르세요.')
     }
-    writeBarcodeDataEntryDraft(brand.id, selectedCompany.key, { rows, note })
+    writeBarcodeDataEntryDraft(brand.id, selectedCompany.selectionKey, { rows, note })
+    if (!sharedAcrossCategories) {
+      writeBarcodeDataEntryDraft(brand.id, selectedCompany.key, emptyBarcodeDataEntryDraft())
+    }
   }
 
   async function refreshBarcodeDataEntryLedger() {
@@ -381,7 +407,7 @@ export function BarcodeOutboundDataEntryPage() {
             size="sm"
             variant="outline"
             onClick={() => setSettingsOpen(true)}
-            disabled={loading || targets.length === 0}
+            disabled={loading || targets.length === 0 || saving}
           >
             <Settings2 className="size-3.5" />
             업체 설정
@@ -467,8 +493,8 @@ export function BarcodeOutboundDataEntryPage() {
           <CardHeader>
             <CardTitle>출고업체 선택</CardTitle>
             <CardDescription>
-              업체를 고른 뒤 상품명·수량·지점명을 넣습니다. 지점 칩은 숨기고
-              업체 줄만 선택합니다.
+              큰 분류를 고른 뒤 출고업체를 선택합니다. 지점은 선택한 분류 안에서
+              연결합니다.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -508,6 +534,31 @@ export function BarcodeOutboundDataEntryPage() {
               </div>
             ) : (
               <>
+                <div role="group" aria-label="출고업체 최상위 분류" className="flex flex-wrap gap-2">
+                  {categories.map((category) => (
+                    <button
+                      key={category.key}
+                      type="button"
+                      aria-pressed={category.key === activeCategory?.key}
+                      disabled={saving}
+                      onClick={() => {
+                        if (category.key === activeCategory?.key) return
+                        setCategoryKey(category.key)
+                        setSelectedKey(null)
+                        setSearch('')
+                      }}
+                      className={cn(
+                        'flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors disabled:opacity-50',
+                        category.key === activeCategory?.key
+                          ? 'border-primary bg-primary/10 font-semibold text-primary'
+                          : 'border-border bg-card text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                      )}
+                    >
+                      {category.name}
+                      <span className="text-xs tabular-nums opacity-70">{category.companies.length}</span>
+                    </button>
+                  ))}
+                </div>
                 <p className="text-sm text-muted-foreground">
                   {selectedCompany
                     ? '아래 버튼을 눌러 업체를 바꾸면 하단 입력란 위 이름이 바뀝니다.'
@@ -521,16 +572,17 @@ export function BarcodeOutboundDataEntryPage() {
                     onChange={(event) => setSearch(event.target.value)}
                     placeholder="업체 그룹, 지점, 별칭으로 검색"
                     aria-label="출고업체 검색"
+                    disabled={saving}
                     className="pl-8"
                   />
                 </div>
 
                 <p className="text-xs text-muted-foreground">
-                  {formatNumber(countOutboundCompanies(visibleTargets))}개 업체 ·{' '}
-                  {formatNumber(visibleTargets.length)}곳
+                  {activeCategory?.name} · {formatNumber(companies.length)}개 업체 ·{' '}
+                  {formatNumber(companies.reduce((sum, company) => sum + company.units.length, 0))}곳
                   {configured
-                    ? ` · 설정 ${formatNumber(countOutboundCompanies(allowedTargets))}개`
-                    : ' · 아직 설정 전이라 전체가 보입니다'}
+                    ? ` · 설정 ${formatNumber(categories.reduce((sum, category) => sum + category.companies.length, 0))}개`
+                    : ' · 업체 설정에서 표시할 업체를 고를 수 있습니다'}
                 </p>
 
                 {companies.length === 0 ? (
@@ -547,12 +599,13 @@ export function BarcodeOutboundDataEntryPage() {
                       }}
                     >
                       {companies.map((company) => {
-                        const selected = selectedKey === company.key
+                        const selected = selectedKey === company.selectionKey
                         return (
                           <button
-                            key={company.key}
+                            key={company.selectionKey}
                             type="button"
                             aria-pressed={selected}
+                            disabled={saving}
                             title={`${company.groupName} ${company.units.length}곳`}
                             className={cn(
                               'flex min-h-11 min-w-0 items-center justify-center rounded-md border px-2 text-center',
@@ -560,7 +613,7 @@ export function BarcodeOutboundDataEntryPage() {
                                 ? 'border-primary bg-primary/10 text-foreground'
                                 : 'border-border bg-card hover:bg-muted/60',
                             )}
-                            onClick={() => setSelectedKey(company.key)}
+                            onClick={() => setSelectedKey(company.selectionKey)}
                           >
                             <span className="truncate text-sm font-medium">
                               {company.groupName}
@@ -579,9 +632,10 @@ export function BarcodeOutboundDataEntryPage() {
         <Card>
           <CardHeader>
             {selectedCompany ? (
-              <p className="text-3xl font-semibold tracking-tight">
-                {selectedCompany.groupName}
-              </p>
+              <div className="space-y-1">
+                <p className="text-sm font-semibold text-primary">{selectedCompany.categoryName}</p>
+                <p className="text-3xl font-semibold tracking-tight">{selectedCompany.groupName}</p>
+              </div>
             ) : null}
             <CardTitle>상품명·수량·지점</CardTitle>
             <CardDescription>
@@ -601,7 +655,7 @@ export function BarcodeOutboundDataEntryPage() {
                     출고일
                   </span>
                   <Input
-                    key={selectedCompany.key}
+                    key={selectedCompany.selectionKey}
                     type="date"
                     autoComplete="off"
                     value={shippedOn}
@@ -616,9 +670,30 @@ export function BarcodeOutboundDataEntryPage() {
                 {backupNotice ? (
                   <p className="text-sm text-success">{backupNotice}</p>
                 ) : null}
+                {sharedAcrossCategories && hasLegacyDraft && !hasScopedDraft ? (
+                  <div className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-muted/30 p-3">
+                    <p className="flex-1 text-sm text-muted-foreground">
+                      이전 임시 입력 {formatNumber(legacyDraft.rows.length)}행이 있습니다.
+                      {selectedCompany.categoryName} 자료인지 확인한 뒤 불러오세요.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={saving}
+                      onClick={() => {
+                        persistDraft(legacyDraft.rows, legacyDraft.note)
+                        writeBarcodeDataEntryDraft(brand.id, selectedCompany.key, emptyBarcodeDataEntryDraft())
+                        setDraftVersion((version) => version + 1)
+                      }}
+                    >
+                      현재 분류로 불러오기
+                    </Button>
+                  </div>
+                ) : null}
                 {dateChosen && isIsoDate(shippedOn) ? (
                   <BarcodeOutboundDataEntryPanel
-                    key={selectedCompany.key}
+                    key={`${selectedCompany.selectionKey}:${draftVersion}`}
                     brandId={brand.id}
                     brandSlug={brand.slug}
                     companyName={selectedCompany.groupName}
@@ -640,6 +715,10 @@ export function BarcodeOutboundDataEntryPage() {
                         )
                       }
                       const entries = barcodeDataEntryBackupEntries(rows)
+                      const allowedIds = new Set(selectedCompany.units.map((unit) => unit.id))
+                      if (entries.some((entry) => !allowedIds.has(entry.usageTargetId))) {
+                        throw new Error('선택한 분류의 출고업체와 지점을 다시 확인하세요.')
+                      }
                       if (entries.length === 0) {
                         throw new Error('백업할 수량이 없습니다.')
                       }
@@ -688,6 +767,7 @@ export function BarcodeOutboundDataEntryPage() {
       {settingsOpen ? (
         <VisiblePartnerSettingsDialog
           partners={targets}
+          folders={folders}
           initialCompanyKeys={settingsCompanyKeys}
           onClose={() => setSettingsOpen(false)}
           onSave={(ids) => {

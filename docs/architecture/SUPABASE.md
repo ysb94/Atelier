@@ -38,6 +38,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 기획안(`product_drafts` + `draft_colors` + `draft_options`) | Supabase |
 | 코드·출고업체(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_target_folders`, `code_usage_target_aliases`, `code_usage_assignments`) | Supabase |
 | 사방넷 상품·M번호 연결(`sabangnet_products` + `sabangnet_product_styles`) | Supabase |
+| 사방넷 코드별 온라인 쇼핑몰 URL(`sabangnet_mall_urls`) | Supabase |
 | 거래처 코드 헤더(`partner_barcode_fields`). `product_codes.kind='partner'`는 업체마다 같은 바코드 문자열을 허용 | Supabase |
 | 바코드 출고 작업·등록 업체(`bulk_outbound_jobs` + `bulk_outbound_job_lines` + `bulk_outbound_job_files` + `bulk_outbound_partner_configs`) | Supabase |
 | 바코드 출고 데이터입력 등록 이력(`barcode_data_entry_runs`) | Supabase |
@@ -70,6 +71,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 브랜드 카드의 SKU 수는 `styles` COUNT로 `src/lib/api/index.ts`가 붙인다.
 - 앱 저장소는 `src/lib/supabase/*.ts`다. 공개 API 이름은 `src/lib/api/index.ts`에 유지한다.
 - 원자 작업 RPC: `save_product_draft`, `promote_product_draft`,
+  `import_sabangnet_mall_urls`,
   `save_product_code_with_components`,
   `save_sabangnet_product`, `create_sabangnet_products_bulk`,
   `set_style_categories`, `apply_sabangnet_style_categories`,
@@ -83,7 +85,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `delete_bulk_outbound_job`,
   `save_brand_field_options`,
   `save_invoice_packing_size_maps`,   `save_outbound_partner_with_aliases`,
-  `save_outbound_partner_unit_with_aliases`, `add_outbound_partner_alias`,
+  `save_outbound_partner_unit_with_aliases`, `save_outbound_partner_unit_atomic`, `add_outbound_partner_alias`,
   `delete_outbound_partner_unit`, `outbound_partner_unit_link_labels`,
   `record_invoice_work_completion`,
   `record_invoice_work_backup`,
@@ -109,6 +111,134 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
 - 브랜드 로고는 지금 `logo_url`에 data URL로 저장한다. 이후 `brands/{brand_id}/...`
   Storage 경로로 옮긴다.
+
+## 사방넷 쇼핑몰 URL
+
+- `sabangnet_mall_urls`는 브랜드·사방넷 상품 UUID·출고업체 UUID 조합당 URL 하나다.
+  업체명 변경에도 연결을 유지하며, M번호 연결이 없어도 코드에 저장한다.
+- 온라인 최상위 폴더의 활성 업체만 등록한다. 이름·별칭은 공통 업체 매처로
+  연결하고 오프라인 동명 업체를 선택하지 않는다.
+- 쇼핑몰 다운로드의 `쇼핑몰명`·`품번코드`·`쇼핑몰상품코드 URL`을 사용한다.
+  원본 파일명·행 번호·쇼핑몰상품코드도 보존한다. 없는 사방넷 코드는 생성하지 않는다.
+- 동일 업체·코드의 서로 다른 URL은 조합 전체 보류한다. 기존 URL이 다르면
+  덮어쓰지 않는다. 동일 재업로드는 건너뛴다. 원자 RPC는 기존 상품·M번호를 수정하지 않는다.
+  파일 전체 충돌 판정 후 200행씩 원자 등록하고 진행 건수를 보여준다. 도중 실패하면
+  완료분을 유지하고 목록을 최신화하며, 같은 파일 재시도로 나머지만 이어서 저장한다.
+- 브랜드별 복합 FK·RLS·기존 `app.can_read_brand`/`app.can_edit_brand`를 유지한다.
+  RPC는 security invoker이고 anon 실행을 금지한다. UI 표는 코드·상품명과 헤더를
+  고정하고 추가 항목/업체별 URL 열은 표시 열 선택으로 펼친다.
+- 마이그레이션: `20261006064542_sabangnet_mall_urls.sql`.
+  대량 처리 반복 권한·폴더 조회 최적화: `20261006065155_sabangnet_mall_urls_batch_performance.sql`.
+  엑셀 읽기는 Web Worker로 처리하며 기존 조회·수정 권한은 동일하다.
+  등록 직전 원본 스냅샷: `docs/backups/sabangnet-pre-url-20261006.xlsx`.
+  검증: `npm run verify:sabangnet-urls`.
+- `mall_product_name`에 원본 다운로드의 `상품명(송신)`을 업체별로 보존한다.
+  MD 상품명은 이 값을 표시하며, 없으면 `업체 상품명 미등록`으로 표시한다.
+  사이트의 실시간 상품명 수집 값은 아니다. 추가 마이그레이션:
+  `20261006080935_sabangnet_mall_product_names.sql`.
+  기존 URL은 원본 파일명·행 번호·업체명·쇼핑몰 코드·URL이 모두 일치하는 행에만
+  빈 상품명을 채웠다. URL·사방넷 상품·M번호 연결은 변경하지 않는다.
+  같은 사방넷 상품 UUID의 다른 업체 URL은 개인 탭 표시 설정과 관계없이 비교 링크로 제공한다.
+
+## MD 업체별 상품 보기
+
+- 2026-10-07 `AI 웹 검색 · 시험` 수집 방식을 추가했다. 개발/배포 모두 동일한 인증된
+  `md-price-refresh`에 `mode='web-search'`로 요청하며 직원용 확장 설치가 필요 없다.
+  기존 AI 모델/서버 키로 Responses API의 `web_search`를 사용한다. 등록 업체 도메인으로
+  검색을 제한하고 링크당 도구 최대 3회·55초, 같은 방식의 1분 이내 기록을 재사용한다.
+  모델 설정이나 원본 URL/상품 데이터, RLS를 바꾸지 않는다. 상품명은 검색 힌트이며 일치 조건이 아니다.
+  `rule_state='web-search-v1'`, `evidence`의 버전 있는 JSON에 참고가·AI 인용·실제 도구 출처·호출 수를 보존한다.
+  업체/상품 ID 및 스마트스토어 판매자 경로를 검사하고 검색 출처를 클릭할 수 있게 표시한다.
+  전체 출처 본문을 독립 검증할 수 없으므로 검색 가격은 `status='unknown', price=null`을 유지한다.
+  참고가는 최신 판매가나 판매 중 상태를 보장하지 않으며 자동 가격 비교/최근 성공가에 들어가지 않는다.
+  사용량은 `action='web_search_price'`로 토큰/시간을 기록한다. 웹 검색 호출료는 토큰 요금과 별도다.
+  검증은 `npm run verify:md-price`, 실검증은 `scripts/verify-md-price-live.mjs --web-search`로 한다.
+- MD 이벤트 시안의 `가격 최신화`는 선택한 샘플 이벤트의 현재 업체·비교 업체 URL만 조회한다.
+  이벤트 참여·정상가·협의 가격은 예시이며, 실제 이벤트 계약 판정 기능은 아니다.
+- `md-price-refresh`는 JWT + 기존 URL의 사용자 RLS + `md_price_can_refresh`의
+  `app.can_edit_brand`를 확인한다. 브라우저는 가격·규칙 테이블을 읽기만 한다.
+  서버 쓰기는 확인된 브랜드와 URL UUID로 한정한다. 원본 URL·상품·M번호는 변경하지 않는다.
+- 2026-10-07 로컬 개발 화면은 **Python Playwright 렌더 → 상품 영역의 표시 본문 → 서버 AI 가격 판독**을 쓴다.
+  `npm run setup:md-price`로 Python 가상 환경/Chromium을 한 번 설치하고 `npm run dev`로 실행한다.
+  Vite의 인증된 `/__md-price-refresh`가 비공개 stdin/stdout Python worker를 필요할 때 시작한다.
+  별도 포트·로그인 계정·개인 브라우저 쿠키·추가 API 키는 사용하지 않는다. Python에는 상품 URL만 전달한다.
+  현재 배포 빌드에는 로컬 worker가 없으므로 기존 HTTP 본문 수집을 유지한다. 배포 사이트에서 같은 방식을
+  쓰려면 별도 실행 서버 연결이 필요하다. 야간 자동 실행은 없다.
+  `md_price_rules`의 기존 규칙은 보존하지만 이 경로에서는 읽거나 갱신하지 않는다.
+  렌더 관찰은 `rule_state='browser-text-v1'`, HTTP 관찰은 `text-v1`로 구분한다.
+- 로컬 요청도 JWT 검증, URL RLS, 브랜드 편집 권한, 업체 활성 여부를 검사한 뒤 수집한다.
+  Edge에서 같은 검사를 반복하고 수집 본문은 비신뢰 자료로 취급한다. 클라이언트가 준 가격은 받지 않는다.
+  본문 크기·업체 도메인·등록 상품 ID 이동·원문 인용·금액을 서버에서 검사한다. 확인 이력은
+  인증된 사용자가 제출한 수집 근거이며 사이트에서 서명한 가격/계약 위반의 확정 증거가 아니다.
+- 스크립트·스타일·메뉴·추천/리뷰와 명시적 숨김 영역을 제외하고 가격 주변 문맥을 최대 18,000자로 보낸다.
+  상품 JSON-LD는 보조 정보일 뿐, 본문에 없는 가격을 채택하지 않는다. 수집 HTML은 비신뢰 자료이고
+  AI는 실행 코드나 CSS 대신 정형 JSON의 가격·상품명·판매 상태·조건·원문 인용을 반환한다.
+  기존 `md_price_rule_discovery` AI 설정과 서버 Secret을 재사용하며, 기존 사용량 로그에
+  `action='read_crawled_price_text'`로 입력/출력 토큰과 AI 시간을 기록한다. 모델 설정은 바꾸지 않는다.
+- 명시된 판매가 또는 일반 상품 쿠폰 적용가를 조건과 함께 표시한다. 회원 등급·카드·첫구매·앱 전용
+  혜택과 원문에 없는 계산 가격은 비교에서 제외한다. 상품명·가격·판매 상태 인용의 원문 존재와
+  금액 일치를 서버에서 검사한다. 상품은 등록 URL과 이동 후 업체/상품 ID로 식별하며,
+  2026-10-07부터 직접 수집 시 등록 상품명은 AI에 전달하거나 유사도 비교하지 않는다. 번역·홍보 문구·색상 개수 등
+  업체 상품명 변경이나 등록 상품명 누락만으로 수집을 보류하지 않는다. 페이지 본상품의 표시 가격을
+  읽고, 페이지 상품명 자체의 원문 근거는 확인한다. 옵션 목록에서 최저가를 임의 선택하지 않는다.
+  동일 SKU/옵션의 실물 검증은 아니므로
+  `option_verified=false`를 유지한다. AI 해석 오류 가능성은 남으며 실제 화면 대조가 필요하다.
+  상품 쿠폰의 조건도 원문의 연속 구절 그대로 반환하도록 요청하고 검증한다. 요약 문장을 원문
+  인용으로 인정하지 않는다. AI가 성공으로 판단했어도 검증에서 보류되면 이유와 해당 공개 근거를
+  `[md-price] 가격 근거 검증 보류`로 남겨 접속 실패와 구분한다.
+- URL 존재만으로 판매 중이라 하지 않는다. InStock/활성 구매 근거가 필요하다.
+  품절·페이지 없음·접근 차단·불명·연결 실패를 구분한다. 가격 없는 결과를 0원/정상으로 처리하지 않는다.
+- `md_price_checks`는 실제 확인 이력, invoker 뷰 `md_price_latest_checks`는 링크별 최신 결과와
+  마지막 성공 가격을 반환한다. 이전 가격은 과거 값으로 표시하고 현재 비교에 쓰지 않는다.
+- 요청은 현재 이벤트의 DB 링크 UUID별로 최대 3개 동시 실행하며 같은 호스트는 순차 처리한다.
+  Python 브라우저는 최대 2개 페이지, 요청마다 새 비로그인 세션으로 실행하며 본문이 안정화될 때까지 기다린다.
+  SSG는 2026-10-07 동일 상품/설정 비교에서 headless 403, 창을 띄운 모드 200을 확인하여 로컬에서만
+  별도 Chromium 창으로 읽는다. 창은 수집 완료 시 닫으며 로그인·개인 쿠키를 가져오지 않는다.
+  화면을 표시할 수 있는 PC가 필요하며, 다른 환경이나 모든 상품에서의 성공을 보장하지 않는다.
+  29CM·무신사·자사몰·SSG는 본상품 패널을 읽고 추천/리뷰/숨김 요소와 그 구매 버튼을 제외한다.
+  SSG 패널이 없으면 빈 근거로 반환해 추천 상품으로 대체하지 않는다. 가격 선택은 AI와 서버 검증이 담당한다.
+  일반 회원 구매 필요 조건과 회원 등급/첫구매 전용 할인은 구분한다. 옵션 미검증 표시는 유지한다.
+  중지는 진행 중 요청 완료 후 남은 요청을 시작하지 않는다. 1분 이내 **새 방식** 관찰만 재사용하고,
+  서버 lease는 같은 URL UUID의 중복 실행을 막는다. 서버에서도 브랜드별 업체 활성 여부를 확인한다.
+  도메인 허용 목록·동일 업체 리다이렉트 검사·상품 ID 이동 검사를 유지한다. 브라우저의 내부망/로컬주소 요청과
+  이미지/영상/폰트 로드는 차단한다. 접근 제한/CAPTCHA는 우회하거나 로그인하지 않는다. 실제 등록 주소인
+  `masmarulez001.cafe24.com`, `gift.kakao.com`을 추가하며 임의 cafe24 호스트 전체를 허용하지 않는다.
+- 응답은 수집·텍스트 추출·AI·전체 처리 시간, 입력 글자와 토큰 수를 반환한다. UI는 총 경과 시간,
+  실제 새 가격/분석/재사용 건수와 링크별 수집·AI·응답 시간을 표시한다. 재사용은 평균에서 제외한다.
+  실행 속도 요약은 현재 화면 세션용이며 `[md-price]` 로그에도 경로·마지막 입력과 함께 남는다.
+- 렌더 후에도 상품 근거가 없거나 접근이 제한되면 미확인/차단으로 남긴다.
+  메타데이터 가격만으로 대신 채우지 않는다. 스마트스토어 등의 접속 제한은 별도 문제로 남을 수 있다.
+- 일반 Chrome 스마트스토어 확장 실험은 `scripts/md-price-extension/README.md`를 따른다.
+  현재는 사용자가 누른 상품 탭의 표시 본문을 loopback 수신기와 `.tmp`에 저장하는 시험 도구다.
+  실제 Chrome의 수집 성공을 확인하기 전까지 기존 가격 최신화에 연결하지 않는다.
+  Supabase/AI 호출이나 가격 저장은 하지 않으며, 합성 DOM 통과를 실사이트 성공으로 간주하지 않는다.
+- 마이그레이션: `20261006084559_md_price_collection.sql`, `20261006085625_md_price_latest_view.sql`.
+  검증: `npm run verify:md-price`; 실제 수집 검증은
+  `node scripts/verify-md-price-live.mjs <등록된 업체 도메인> --browser`로 명시적으로 실행하며 실제 확인 이력이 남는다.
+  렌더 회귀 검증은 `PLAYWRIGHT_BROWSERS_PATH=.tmp/md-price-browsers` 환경에서 가상 환경 Python으로
+  `scripts/md-price-browser/verify.py`를 실행한다. 쇼핑몰 접속 없이 합성 DOM으로 검사한다.
+  본문 추출 회귀 검증은 `scripts/verify-md-price-document.ts`를 Deno에서 실행한다.
+  상품 내부 header 보존, Cafe24 `displaynone` 품절 버튼 제외, 추천 상품 제거,
+  메타데이터와 본문 분리를 검사한다. 실행 예:
+  `npm exec --yes --package=deno -- deno run --node-modules-dir=none --no-config --no-lock --allow-env scripts/verify-md-price-document.ts`.
+
+- `/product-work/md`의 업체 탭은 `sabangnet_mall_urls`에 저장된 활성 업체와
+  사방넷 상품을 UUID로 연결한다. M번호 미연결 상품도 표시하고, 연결된 M번호는
+  모두 표시한다. 업체별 50행 페이지와 검색·M번호 연결 상태 필터를 제공한다.
+- MD URL 조회는 같은 브랜드의 `code_usage_targets.active=true`인 업체만 조인해
+  가져온다. 업체 활성 목록을 쿼리 키에 포함해 활성/비활성 변경 때 다시 조회하며,
+  다른 업체 비교 링크·개수·가격 최신화 대상도 이 목록을 사용한다. 개인 표시 설정으로
+  숨긴 활성 업체는 비교에 포함한다. 사방넷 코드 관리의 원본 URL 조회는 전체를 유지한다.
+- 기존 MD 작업 표는 `내 상품` 탭에 유지한다. 업체별 상품 목록은 상품 불러오기
+  작업 목록과 별개이며, 상품·URL·M번호 연결 원본을 수정하지 않는다.
+- `md_mall_display_preferences`는 사용자·브랜드별 UI 표시 설정이다.
+  설정이 없으면 해당 브랜드의 등록 업체 탭 전체, 빈 배열을 저장하면 모두 숨긴다.
+  직원 본인이 표시 업체를 선택하며 계정별 DB 저장으로 다른 컴퓨터에도 적용된다.
+  이는 담당 업체 배정이나 업체 데이터 접근 제한 기능이 아니다.
+- RLS는 본인 UUID와 기존 `app.can_read_brand`를 확인한다. 타인의 설정은 읽거나
+  수정할 수 없다. 같은 브랜드에 실제 등록된 업체 UUID만 저장하도록 트리거로
+  검증한다. 여러 브랜드의 설정은 단일 upsert로 원자 저장한다.
+- 마이그레이션: `20261006075425_md_mall_display_preferences.sql`.
 
 ## Masma Finder
 
@@ -140,8 +270,9 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 
 - 로그인은 Google OAuth가 기본이다. 회사 도메인이 없어 모든 Google 계정을 받고,
   `profiles.status`가 `active`일 때만 회사 셸에 들어간다.
-- 신규 사용자는 회사 팀·업무 역량을 신청한다. 직책은 신청하지 않는다.
-  승인과 직책 지정은 관리자 또는 직책 관리 부서만 한다. 처음에는
+- 신규 사용자는 이름과 회사 부서만 입력해 승인을 요청한다. 업무 역량과 직책은
+  신청 화면에서 고르지 않고, 승인자가 승인할 때 지정한다. 승인 전에는 회사 셸에
+  들어가지 못한다. 승인과 직책 지정은 관리자 또는 직책 관리 부서만 한다. 처음에는
   `운영지원팀`의 `팀장`·`이사`다. 담당 브랜드를 고르지 않는다.
 - Google 계정의 표시 이름이나 이메일 앞부분은 본명 원본으로 쓰지 않는다.
   `app.handle_new_user()`는 `display_name`을 비워 두고, 신청자가 직접 입력한다.
@@ -448,8 +579,9 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   출고 단위이고, 지점이 있으면 각 지점 행이 출고 단위다. 첫 지점은 기존 행의
   `site_name`만 채워 승격하며 `id`와 별칭·바코드·출고 이력은 유지한다.
 - **업체 그룹·지점·채널은 별도 축이다.** `channel_type`은
-  `online|offline|unset`이며 같은 그룹·지점이라도 채널이 다르면 별도 출고 단위다.
-  온라인/오프라인은 업체·지점 추가 때 정하고 행에는 배지로만 보여 준다.
+  `online|offline|unset`이며 분류 정보다. 같은 업체·지점을 채널이나 폴더가 다르다는
+  이유로 다른 출고 단위로 만들지 않는다. 업체명·업체와 지점의 전체 이름은 브랜드
+  안에서 중복 없이 사용하며 온라인/오프라인은 배지로만 보여 준다.
 - 화면 표시는 `업체 그룹 · 지점`과 온라인/오프라인 배지를 우선한다. 아직 구조화하지
   않은 기존 행만 이전 `name`을 표시하고 `정리 필요`로 남긴다. 원본 쇼핑몰명처럼
   자동 연결에 쓰는 기존 이름과 별칭은 구조화 표시와 별도로 보존한다.
@@ -462,6 +594,23 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   미분류로 남는다. 폴더는 네 단까지만 허용한다.
 - **업체명에 채널을 붙이지 않는다.** 온라인/오프라인은 `channel_type` 배지로,
   택배·풀필먼트 같은 출고 방식은 `shipping_method`로 관리한다.
+- **엑셀 연결은 등록된 업체명·업체와 지점의 전체 이름·별칭을 공통으로 사용한다.**
+  `outbound-partner-matching.ts`를 송장작업과 바코드 출고데이터 입력에서 함께 쓴다.
+  과거 채널이 붙은 저장 이름도 계속 인식하며 업체 ID와 출고 이력은 유지한다.
+  지점명만 쓴 입력은 선택한 업체 안에서 유일한 경우에 연결한다. 기존 이름이 실제로
+  여러 출고 단위를 가리키면 임의로 연결하지 않고 명시적인 별칭 연결을 사용한다.
+  업체 편집 시 별칭 입력칸에 남아 있는 유효한 값도 저장 버튼으로 함께 저장한다.
+- **임시 바코드 출고 데이터입력은 최상위 폴더별로 업체를 선택한다.** 온라인·오프라인·
+  해외 등 등록된 최상위 분류만 탭으로 보이고 하위 폴더의 지점은 해당 분류 안에서
+  묶는다. 같은 업체 그룹이라도 분류별 연결 후보·표시 설정·임시 입력을 구분한다.
+  새 등록 직전에 모든 출고 대상 ID가 선택한 분류의 업체에 속하는지 확인한다.
+  DB에 저장하는 `company_key`와 출고 대상 ID는 그대로 유지해 기존 등록 이력을
+  읽는다. 이전 임시 입력은 분류가 하나인 업체에 이어서 표시하고, 여러 분류에 걸친
+  업체는 사용자가 분류를 확인한 뒤 불러온다.
+- **송장작업도 최상위 출고업체 분류를 먼저 선택한다.** 선택한 분류의 하위 폴더까지
+  연결 후보로 쓰며 범위 밖 별칭은 연결하지 않는다. 분류 미선택 상태에서는 다음 단계로
+  진행하지 못하고, 업체 신규 등록과 수동 연결도 선택한 분류 안에서 한다. 다음 단계로
+  진행한 뒤에는 새 파일 작업에서 분류를 바꾼다.
 - 상태는 `active`와 `is_one_time`을 조합해 `거래중`·`단발성`·`비활성` 세 가지로
   표시한다. 비활성이 단발성보다 앞선다. 거래를 멈출 때는 비활성화해서
   `code_usage_assignments`의 바코드 연결 이력을 보존한다. 잘못 만든 출고
@@ -494,6 +643,16 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   교체하므로 호출자가 최종 목록을 보내야 한다. 이전 identity RPC는 배포 중인
   구버전 앱을 위해 유지한다. 여러 줄 붙여넣기는 이 RPC를 업체마다 호출해
   한 건이 실패해도 나머지가 남게 한다.
+- 앱의 업체 편집은 `save_outbound_partner_unit_atomic`을 호출한다. 업체 그룹 이름
+  변경·출고 단위·연락처·별칭 저장을 한 트랜잭션에서 처리하며, 기존 행을 새 업체로
+  정리할 때의 그룹 생성도 함께 처리한다. 저장에 실패하면 그룹 변경도 취소한다.
+- 업체·지점 이름 변경과 별칭 등록은 같은 브랜드 안의 전체 정식명·기존 저장 이름·별칭과
+  충돌하는지 앱과 DB에서 검사한다. DB는 브랜드별 쓰기 잠금과 지연 제약 트리거로 최종
+  상태를 검사하므로 직접 수정·구버전 RPC에도 적용된다. 기존 중복 이름은 소급 변경하지
+  않고, 새로 도입하는 충돌을 막는다. 기존 중복 행의 연락처·메모 수정은 허용한다.
+  수정 직전 백업은 `docs/backups/outbound-partners-pre-atomic-20261006.xlsx`이고,
+  DB 원자 저장·중복 거절·전체 취소 검증은 `scripts/verify-outbound-partner-atomic.sql`이다.
+  검증 스크립트의 모든 행과 변경은 마지막 `ROLLBACK`으로 취소한다.
 - 사방넷 쇼핑몰 표기 한 건만 붙일 때는 `add_outbound_partner_alias`를 쓴다.
   기존 별칭을 지우지 않고, 같은 브랜드의 다른 정식명·별칭과 충돌하면 거절한다.
   비활성 업체에는 연결하지 않는다.
@@ -512,7 +671,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `20260903044650_outbound_partner_identity.sql`,
   `20260903054600_outbound_partner_unit_contacts.sql`,
   `20260903085000_delete_outbound_partner_unit.sql`,
-  `20260903085100_outbound_partner_unit_link_labels_json.sql`.
+  `20260903085100_outbound_partner_unit_link_labels_json.sql`,
+  `20261006060652_outbound_partner_atomic_identity.sql`.
 
 ### 상품 연결 원칙 (M번호)
 
@@ -1506,9 +1666,13 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
   목록은 `personnel_titles`이고, 직원 직책은 `profiles.position`, 직급은
   `profiles.job_grade`다. 직원이 쓰는 이름은 지우지 못한다.
   마이그레이션: `20261001160000_org_assignment_editors.sql`,
-  `20261001170000_personnel_titles.sql`.
-  본인은 승인 뒤 직책과 소속을 바꿀 수 없다. 소속은 승인 대기 중에만
-  본인이 고친다. 직원 목록 조회는 관리자·`팀장`·`이사`·인사 담당이다.
+  `20261001170000_personnel_titles.sql`,
+  `20261002120000_simple_access_request.sql`.
+  변경 직전 프로필·부서·역량 스냅샷은
+  `docs/backups/access-request-pre-20261002.xlsx`다.
+  본인은 승인 뒤 직책과 소속을 바꿀 수 없다. 승인 대기·거절 상태에서는
+  E&J의 활성 부서만 골라 신청·재신청할 수 있고, 승인 없이 활성화할 수 없다.
+  직원 목록 조회는 관리자·`팀장`·`이사`·인사 담당이다.
   다른 팀의 `팀장`·`이사`는 승인 권한 없이 직원별 기획안과 회의 참석자
   조회만 유지한다.
   마이그레이션: `20260930100000_personnel_position_governance.sql`.
@@ -1530,6 +1694,9 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
   혼입 위험은 낮다.
 - 디자인 파일 매니저 R2 루트는 현재 ATELIER 별칭 `masmarulez`다.
   `brandStorageRoot(slug)`로 표시하고, 기존 파일은 `type/...` 경로를 유지한다.
+  기존 최상위 폴더 `Prod_Images`·`all`·`common`·`product`·`renew`도
+  Masmarulez 허용 경로에 포함한다.
+  서버에서 발견한 임의 최상위 폴더를 자동으로 허용하지 않는다.
   Worker가 `GET /list?type=&prefix=` 를 아직 지키지 않으므로 비-ATELIER 브랜드
   파일 작업은 열지 않는다. 전체 버킷 쓰기로 우회하지 않는다.
 - 파일 매니저 `localStorage` 키(`masmarulezGridSort` 등)는 브라우저 UI 설정이다.

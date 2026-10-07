@@ -56,7 +56,7 @@ function AuthGate() {
   if (!session) return <LoginPage />
 
   if (!profile || forceEditRequest || profile.requestedAt == null) {
-    return <AccessRequestPage />
+    return <AccessRequestPage onSubmitted={() => setForceEditRequest(false)} />
   }
 
   if (profile.status === 'pending') {

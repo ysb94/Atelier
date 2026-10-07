@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Atelier 스마트스토어 읽기 테스트",
+  "version": "0.1.0",
+  "description": "클릭한 스마트스토어 상품 탭의 표시 본문을 이 PC의 테스트 수신기로 보냅니다.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": ["http://127.0.0.1/*"],
+  "action": {"default_title": "스마트스토어 본문 읽기 테스트", "default_popup": "popup.html"},
+  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self' http://127.0.0.1:*"}
+}

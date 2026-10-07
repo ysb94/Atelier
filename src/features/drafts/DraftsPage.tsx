@@ -1,15 +1,11 @@
-import { useMemo, useState } from 'react'
-import { useQueries, useQuery } from '@tanstack/react-query'
+import { useMemo, useRef, useState } from 'react'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
-import { Check, ImageOff, Plus } from 'lucide-react'
+import { Plus } from 'lucide-react'
 import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
-import { PageHeader } from '@/components/layout/PageHeader'
-import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
-import { Card } from '@/components/ui/card'
-import { Input, Select } from '@/components/ui/input'
-import { getCompanyProductDrafts, getSeasonsByBrand } from '@/lib/api'
+import { useRenderWatch } from '@/lib/diagnostics'
+import { getCompanyProductDrafts, getSeasonsByBrand, updateProductDraft } from '@/lib/api'
 import {
   DEFAULT_COMPANY_ID,
   canViewDraftsByOwner,
@@ -17,66 +13,46 @@ import {
 import {
   UNASSIGNED_DRAFT_BRAND,
   UNASSIGNED_DRAFT_OWNER,
-  collectDraftOwnerNames,
   matchesDraftBrandScope,
   matchesDraftOwnerScope,
   type DraftBrandScope,
   type DraftOwnerScope,
 } from '@/lib/drafts/company-draft'
+import { newColorRow } from '@/lib/drafts/empty-draft'
+import { draftToInput } from '@/lib/drafts/sample-work-order'
 import { useAuth } from '@/lib/supabase/auth'
-import { listManageableProfiles } from '@/lib/supabase/profiles'
 import {
-  DRAFT_STATUS_LABEL,
-  formatSeasonLabel,
+  type Brand,
   type ProductDraft,
-  type ProductDraftStatus,
+  type ProductDraftInput,
   type Season,
 } from '@/lib/types'
 import { combineListQueries, flattenListQueries } from '@/lib/query/list-queries'
 import { draftDetailPath, draftNewPath } from '@/lib/workspace/company-paths'
 import { cn, formatNumber, emptyList } from '@/lib/utils'
+import { DraftFolderBar } from './DraftFolderBar'
+import { matchesDraftFolder } from './draft-folder-filter'
+import { DraftSheetRow } from './DraftSheetRow'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import {
-  RELEASE_CERTAINTY_LABEL,
   formatReleaseGroupLabel,
-  formatTargetDate,
   resolveReleaseSchedule,
   seasonToPreviewGroup,
   type PreviewReleaseAssignment,
   type PreviewReleaseGroup,
+  type ResolvedReleaseSchedule,
 } from './release-schedule-preview'
 
-/** 기획 시트의 진척 체크. 서로 독립적으로 켜진다. */
-const PROGRESS_STEPS: {
-  key: 'sampleDone' | 'orderDone' | 'orderInProgress'
-  label: string
-  short: string
-}[] = [
-  { key: 'sampleDone', label: '대표 샘플', short: '대표' },
-  { key: 'orderInProgress', label: '컬러샘플 발주', short: '컬러발주' },
-  { key: 'orderDone', label: '생산 발주', short: '생산' },
-]
+type BoardFilter = 'all' | 'unassigned' | 'scheduled'
 
-function sampleInProgressCount(draft: ProductDraft) {
-  return draft.colors.filter((color) => color.sampleInProgress).length
-}
-
-function statusVariant(
-  status: ProductDraftStatus,
-): 'success' | 'outline' | 'muted' {
-  if (status === 'confirmed') return 'success'
-  if (status === 'dropped') return 'muted'
-  return 'outline'
-}
-
-function totalOrderQty(draft: ProductDraft) {
-  return draft.colors.reduce((sum, color) => sum + (color.orderQty ?? 0), 0)
+function hasReleaseGroup(schedule: ResolvedReleaseSchedule | undefined) {
+  return Boolean(schedule?.group)
 }
 
 function emptyMessage(
   hasAny: boolean,
-  seasonFilter: string,
-  releaseFilter: string,
+  folderFilter: string,
+  boardFilter: BoardFilter,
   brandScope: DraftBrandScope,
   ownerScope: DraftOwnerScope,
 ) {
@@ -90,37 +66,32 @@ function emptyMessage(
   if (brandScope === UNASSIGNED_DRAFT_BRAND) {
     return '브랜드 미정 기획안이 없습니다. 오른쪽 위에서 추가하세요.'
   }
-  if (releaseFilter === 'unassigned') {
+  if (boardFilter === 'unassigned') {
     return '출시 일정이 비어 있는 기획안이 없습니다.'
   }
-  if (releaseFilter !== 'all') {
-    return '이 출시 묶음에 미리 반영한 기획안이 없습니다.'
+  if (boardFilter === 'scheduled') {
+    return '출시 일정이 잡힌 기획안이 없습니다.'
   }
-  if (seasonFilter === 'unassigned') {
-    return '출시 기획 미정 기획안이 없습니다. 오른쪽 위에서 추가하세요.'
-  }
-  if (seasonFilter !== 'all') {
-    return '이 출시 기획에 묶인 기획안이 없습니다. 오른쪽 위에서 추가하세요.'
-  }
+  if (folderFilter === 'unassigned') return '폴더가 지정되지 않은 기획안이 없습니다.'
+  if (folderFilter !== 'all') return '이 폴더에 담긴 기획안이 없습니다.'
   return '아직 기획안이 없습니다. 오른쪽 위에서 추가하세요.'
 }
 
 export function CompanyDraftsPage() {
+  useRenderWatch('CompanyDraftsPage')
   const { brands, brandById } = useCompanyBrandScope()
   const { profile } = useAuth()
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<'all' | ProductDraftStatus>(
-    'all',
-  )
-  const [releaseFilter, setReleaseFilter] = useState('all')
+  const [boardFilter, setBoardFilter] = useState<BoardFilter>('all')
   const [tempGroups, setTempGroups] = useState<PreviewReleaseGroup[]>([])
   const [assignments, setAssignments] = useState<
     Record<string, PreviewReleaseAssignment>
   >({})
   const [scheduleDraftId, setScheduleDraftId] = useState<string | null>(null)
-  const seasonFilter = searchParams.get('season') ?? 'all'
+  const folderParam = searchParams.get('folder')
+  const folderFilter = folderParam ?? searchParams.get('season') ?? 'all'
   const brandScope = (searchParams.get('scope') ?? 'all') as DraftBrandScope
   const canViewByOwner = canViewDraftsByOwner(profile)
   const ownerScope = (
@@ -136,11 +107,6 @@ export function CompanyDraftsPage() {
     queryKey: ['product-drafts', 'company', companyId],
     queryFn: () => getCompanyProductDrafts(companyId),
   })
-  const membersQuery = useQuery({
-    queryKey: ['profiles', 'manageable'],
-    queryFn: listManageableProfiles,
-    enabled: canViewByOwner,
-  })
   const seasonQueries = useQueries({
     queries: brands.map((item) => ({
       queryKey: ['seasons', item.id] as const,
@@ -150,7 +116,52 @@ export function CompanyDraftsPage() {
     combine: combineListQueries<Season>,
   })
 
-  const drafts = draftsQuery.data ?? emptyList()
+  const drafts = draftsQuery.data ?? emptyList<ProductDraft>()
+  const draftsRef = useRef(drafts)
+  draftsRef.current = drafts
+  const savedDraftRef = useRef(new Map<string, ProductDraft>())
+  const saveChainRef = useRef(new Map<string, Promise<void>>())
+
+  function currentDraft(draftId: string) {
+    const listed = draftsRef.current.find((item) => item.id === draftId)
+    const saved = savedDraftRef.current.get(draftId)
+    if (!listed) return saved
+    if (!saved) return listed
+    return saved.updatedAt >= listed.updatedAt ? saved : listed
+  }
+
+  function saveDraftChange(
+    draftId: string,
+    change: (current: ProductDraft) => ProductDraftInput,
+  ) {
+    const previous = saveChainRef.current.get(draftId) ?? Promise.resolve()
+    // 앞선 저장 실패는 그 호출을 기다린 쪽에 이미 전달됐다. 다음 수정은 이어서 저장한다.
+    const task = previous.catch(() => undefined).then(async () => {
+      const current = currentDraft(draftId)
+      if (!current) throw new Error('기획안을 찾지 못했습니다.')
+      const input = change(current)
+      try {
+        const updated = await updateProductDraft(draftId, input)
+        savedDraftRef.current.set(draftId, updated)
+        await queryClient.invalidateQueries({ queryKey: ['product-drafts'] })
+        return updated
+      } catch (err) {
+        console.warn('[drafts] 기획안 저장 실패', {
+          draftId,
+          message: err instanceof Error ? err.message : String(err),
+        })
+        throw err
+      }
+    })
+    saveChainRef.current.set(
+      draftId,
+      task.then(
+        () => undefined,
+        () => undefined,
+      ),
+    )
+    return task
+  }
   const seasons = useMemo(
     () => flattenListQueries(seasonQueries),
     [seasonQueries],
@@ -169,40 +180,18 @@ export function CompanyDraftsPage() {
   }, [seasons, tempGroups])
 
   const scopedDrafts = useMemo(() => {
-    return drafts.filter((draft) => {
-      if (!matchesDraftBrandScope(draft.brandId, brandScope, brandIdBySlug)) {
-        return false
-      }
-      if (seasonFilter === 'all') return true
-      if (seasonFilter === 'unassigned') return !draft.seasonId
-      const season = draft.seasonId ? seasonMap.get(draft.seasonId) : undefined
-      return season?.code.toUpperCase() === seasonFilter.toUpperCase()
-    })
-  }, [brandIdBySlug, brandScope, drafts, seasonFilter, seasonMap])
+    return drafts.filter((draft) =>
+      matchesDraftBrandScope(draft.brandId, brandScope, brandIdBySlug),
+    )
+  }, [brandIdBySlug, brandScope, drafts])
 
-  const ownerNames = useMemo(
+  const ownerAllDrafts = useMemo(
     () =>
-      collectDraftOwnerNames(
-        scopedDrafts,
-        (membersQuery.data ?? [])
-          .filter((member) => member.status === 'active')
-          .map((member) => member.displayName ?? ''),
+      drafts.filter((draft) =>
+        matchesDraftOwnerScope(draft.owner, ownerScope),
       ),
-    [membersQuery.data, scopedDrafts],
+    [ownerScope, drafts],
   )
-  const ownerCounts = useMemo(() => {
-    const counts = new Map<string, number>()
-    let unassigned = 0
-    for (const draft of scopedDrafts) {
-      const name = draft.owner.trim()
-      if (!name) {
-        unassigned += 1
-        continue
-      }
-      counts.set(name, (counts.get(name) ?? 0) + 1)
-    }
-    return { counts, unassigned }
-  }, [scopedDrafts])
 
   const ownerDrafts = useMemo(
     () =>
@@ -219,76 +208,86 @@ export function CompanyDraftsPage() {
 
   const scheduleByDraft = useMemo(() => {
     const map = new Map(
-      ownerDrafts.map((draft) => [
+      ownerAllDrafts.map((draft) => [
         draft.id,
         resolveReleaseSchedule(draft, seasonMap, tempGroups, assignments),
       ]),
     )
     return map
-  }, [assignments, ownerDrafts, seasonMap, tempGroups])
+  }, [assignments, ownerAllDrafts, seasonMap, tempGroups])
 
-  const releaseCounts = useMemo(() => {
-    const counts = new Map<string, number>()
-    let unassigned = 0
-    for (const draft of ownerDrafts) {
-      const schedule = scheduleByDraft.get(draft.id)
-      if (!schedule?.group) {
-        unassigned += 1
-        continue
+  const brandCards = useMemo(() => {
+    return brands.map((brand) => {
+      const rows = ownerAllDrafts.filter((draft) => draft.brandId === brand.id)
+      let pending = 0
+      let scheduled = 0
+      for (const draft of rows) {
+        if (hasReleaseGroup(scheduleByDraft.get(draft.id))) scheduled += 1
+        else pending += 1
       }
-      counts.set(schedule.group.id, (counts.get(schedule.group.id) ?? 0) + 1)
-    }
-    return { counts, unassigned }
-  }, [ownerDrafts, scheduleByDraft])
+      return { brand, total: rows.length, pending, scheduled }
+    })
+  }, [brands, ownerAllDrafts, scheduleByDraft])
 
-  const releaseChips = useMemo(() => {
-    const seen = new Set<string>()
-    const chips: PreviewReleaseGroup[] = []
+  const unassignedBrandCount = useMemo(
+    () => ownerAllDrafts.filter((draft) => !draft.brandId).length,
+    [ownerAllDrafts],
+  )
+
+  const folderDrafts = useMemo(() => ownerDrafts.filter(draft => {
+    const groupId = scheduleByDraft.get(draft.id)?.group?.id
+    return matchesDraftFolder(groupId, folderFilter, !folderParam && groupId ? seasonMap.get(groupId)?.code : undefined)
+  }), [ownerDrafts, scheduleByDraft, folderFilter, folderParam, seasonMap])
+
+  const folderItems = useMemo(() => {
+    const counts = new Map<string, number>()
     for (const draft of ownerDrafts) {
-      const group = scheduleByDraft.get(draft.id)?.group
-      if (!group || seen.has(group.id)) continue
-      seen.add(group.id)
-      chips.push(group)
+      const id = scheduleByDraft.get(draft.id)?.group?.id
+      if (id) counts.set(id, (counts.get(id) ?? 0) + 1)
     }
-    for (const group of tempGroups) {
-      if (seen.has(group.id)) continue
-      if (scopedBrand && group.brandId !== scopedBrand.id) continue
-      seen.add(group.id)
-      chips.push(group)
+    return previewGroups
+      .filter(group => matchesDraftBrandScope(group.brandId, brandScope, brandIdBySlug))
+      .map(group => ({
+        id: group.id,
+        label: formatReleaseGroupLabel(group),
+        brandName: scopedBrand ? undefined : brandById.get(group.brandId)?.name,
+        total: counts.get(group.id) ?? 0,
+      }))
+  }, [ownerDrafts, scheduleByDraft, previewGroups, brandScope, brandIdBySlug, scopedBrand, brandById])
+  const selectedFolderIds = folderFilter === 'all' || folderFilter === 'unassigned'
+    ? [folderFilter]
+    : folderItems.filter(folder => matchesDraftFolder(folder.id, folderFilter, !folderParam ? seasonMap.get(folder.id)?.code : undefined)).map(folder => folder.id)
+  const unassignedFolderCount = ownerDrafts.filter(draft => !scheduleByDraft.get(draft.id)?.group).length
+
+  const sheetCounts = useMemo(() => {
+    let pending = 0
+    let scheduled = 0
+    let planningOpen = 0
+    let mdOpen = 0
+    for (const draft of folderDrafts) {
+      const schedule = scheduleByDraft.get(draft.id)
+      if (hasReleaseGroup(schedule)) scheduled += 1
+      else pending += 1
+      if (draft.status === 'open') planningOpen += 1
+      if (!schedule?.group || schedule.certainty !== 'confirmed') mdOpen += 1
     }
-    return chips
-  }, [ownerDrafts, scheduleByDraft, scopedBrand, tempGroups])
+    return {
+      total: folderDrafts.length,
+      pending,
+      scheduled,
+      planningOpen,
+      mdOpen,
+    }
+  }, [folderDrafts, scheduleByDraft])
 
   const visible = useMemo(() => {
-    const keyword = search.trim().toLowerCase()
-    return ownerDrafts.filter((draft) => {
-      if (statusFilter !== 'all' && draft.status !== statusFilter) return false
-      const schedule = scheduleByDraft.get(draft.id)
-      if (releaseFilter === 'unassigned' && schedule?.group) return false
-      if (
-        releaseFilter !== 'all' &&
-        releaseFilter !== 'unassigned' &&
-        schedule?.group?.id !== releaseFilter
-      ) {
-        return false
-      }
-      if (!keyword) return true
-      const groupLabel = schedule?.group
-        ? formatReleaseGroupLabel(schedule.group)
-        : ''
-      return [
-        draft.draftNo,
-        draft.nameKo,
-        draft.nameEn,
-        draft.owner,
-        draft.releaseIssue,
-        groupLabel,
-        ...draft.colors.map((color) => color.name),
-      ]
-        .filter(Boolean)
-        .some((text) => text.toLowerCase().includes(keyword))
+    return folderDrafts.filter((draft) => {
+      const scheduled = hasReleaseGroup(scheduleByDraft.get(draft.id))
+      if (boardFilter === 'unassigned' && scheduled) return false
+      if (boardFilter === 'scheduled' && !scheduled) return false
+      return true
     })
-  }, [ownerDrafts, releaseFilter, scheduleByDraft, search, statusFilter])
+  }, [boardFilter, folderDrafts, scheduleByDraft])
 
   const scheduleDraft = scheduleDraftId
     ? (ownerDrafts.find((draft) => draft.id === scheduleDraftId) ??
@@ -307,49 +306,35 @@ export function CompanyDraftsPage() {
   const loading =
     draftsQuery.isLoading || seasonQueries.loading
 
-  const newHref = draftNewPath(scopedBrand?.slug, {
-    season:
-      seasonFilter === 'unassigned'
-        ? 'none'
-        : seasonFilter === 'all'
-          ? null
-          : seasons.find(
-              (season) =>
-                season.brandId === scopedBrand?.id &&
-                season.code.toUpperCase() === seasonFilter.toUpperCase(),
-            )?.id ?? null,
+  const selectedSeason = seasons.find(season =>
+    (!scopedBrand || season.brandId === scopedBrand.id) &&
+    matchesDraftFolder(season.id, folderFilter, !folderParam ? season.code : undefined) &&
+    folderFilter !== 'all' && folderFilter !== 'unassigned',
+  )
+  const newHref = draftNewPath(scopedBrand?.slug ?? (selectedSeason ? brandById.get(selectedSeason.brandId)?.slug : undefined), {
+    season: folderFilter === 'unassigned' ? 'none' : selectedSeason?.id ?? null,
   })
 
-  function setSeasonFilter(value: string) {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev)
-        if (!value || value === 'all') next.delete('season')
-        else next.set('season', value)
-        return next
-      },
-      { replace: true },
-    )
+  function setFolderFilter(value: string) {
+    setBoardFilter('all')
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev)
+      next.delete('season')
+      if (value === 'all') next.delete('folder')
+      else next.set('folder', value)
+      return next
+    }, { replace: true })
   }
 
   function setBrandScope(value: DraftBrandScope) {
+    setBoardFilter('all')
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
+        next.delete('folder')
+        next.delete('season')
         if (!value || value === 'all') next.delete('scope')
         else next.set('scope', value)
-        return next
-      },
-      { replace: true },
-    )
-  }
-
-  function setOwnerScope(value: DraftOwnerScope) {
-    setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev)
-        if (!value || value === 'all') next.delete('owner')
-        else next.set('owner', value)
         return next
       },
       { replace: true },
@@ -403,146 +388,72 @@ export function CompanyDraftsPage() {
 
   return (
     <div>
-      <PageHeader
-        title="기획안"
-        description="회사 기획안입니다. 브랜드는 처음부터 비워 두거나 기획 중에 정할 수 있습니다. 출시 확정 전에는 브랜드가 필요합니다."
-        actions={
-          <Link to={newHref}>
-            <Button type="button">
-              <Plus className="size-4" />
-              기획안 추가
-            </Button>
-          </Link>
-        }
-      />
-
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <ScopeChip
-          selected={brandScope === 'all'}
-          onSelect={() => setBrandScope('all')}
-        >
-          전체
-        </ScopeChip>
-        <ScopeChip
-          selected={brandScope === UNASSIGNED_DRAFT_BRAND}
-          onSelect={() => setBrandScope(UNASSIGNED_DRAFT_BRAND)}
-        >
-          브랜드 미정
-        </ScopeChip>
-        {brands.map((item) => (
-          <ScopeChip
-            key={item.id}
-            selected={brandScope === item.slug}
-            onSelect={() => setBrandScope(item.slug)}
-          >
-            <BrandAvatar brand={item} className="size-5" />
-            <span className="truncate">{item.name}</span>
-          </ScopeChip>
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        {brandCards.map((card) => (
+          <BrandStatCard
+            key={card.brand.id}
+            brand={card.brand}
+            total={card.total}
+            pending={card.pending}
+            scheduled={card.scheduled}
+            selected={brandScope === card.brand.slug}
+            onSelect={() =>
+              setBrandScope(
+                brandScope === card.brand.slug ? 'all' : card.brand.slug,
+              )
+            }
+          />
         ))}
+        {unassignedBrandCount > 0 ? (
+          <ScopeChip
+            selected={brandScope === UNASSIGNED_DRAFT_BRAND}
+            onSelect={() =>
+              setBrandScope(
+                brandScope === UNASSIGNED_DRAFT_BRAND
+                  ? 'all'
+                  : UNASSIGNED_DRAFT_BRAND,
+              )
+            }
+          >
+            브랜드 미정 {formatNumber(unassignedBrandCount)}
+          </ScopeChip>
+        ) : null}
+        <Link
+          to={newHref}
+          title="기획안 추가"
+          className="inline-flex size-9 items-center justify-center rounded-md border border-border bg-white text-foreground hover:bg-muted"
+        >
+          <Plus className="size-4" />
+        </Link>
       </div>
 
-      {canViewByOwner ? (
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="text-xs text-muted-foreground">직원</span>
-          <ScopeChip
-            selected={ownerScope === 'all'}
-            onSelect={() => setOwnerScope('all')}
-          >
-            전체 {formatNumber(scopedDrafts.length)}
-          </ScopeChip>
-          <ScopeChip
-            selected={ownerScope === UNASSIGNED_DRAFT_OWNER}
-            onSelect={() => setOwnerScope(UNASSIGNED_DRAFT_OWNER)}
-          >
-            담당 미정 {formatNumber(ownerCounts.unassigned)}
-          </ScopeChip>
-          {ownerNames.map((name) => (
-            <ScopeChip
-              key={name}
-              selected={ownerScope === name}
-              onSelect={() => setOwnerScope(name)}
-            >
-              <span className="truncate">{name}</span>
-              <span className="tabular-nums text-muted-foreground">
-                {formatNumber(ownerCounts.counts.get(name) ?? 0)}
-              </span>
-            </ScopeChip>
-          ))}
+      <div className="mb-3 flex flex-col gap-3 border-b border-[#ead7b0] pb-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-wrap items-center gap-1.5 lg:pb-2">
+          <BoardFilterChip
+            selected={boardFilter === 'all'}
+            onSelect={() => setBoardFilter('all')}
+            label="전체"
+            count={sheetCounts.total}
+          />
+          <BoardFilterChip
+            selected={boardFilter === 'unassigned'}
+            onSelect={() => setBoardFilter('unassigned')}
+            label="출시 미정"
+            count={sheetCounts.pending}
+          />
+          <BoardFilterChip
+            selected={boardFilter === 'scheduled'}
+            onSelect={() => setBoardFilter('scheduled')}
+            label="출시 확정"
+            count={sheetCounts.scheduled}
+          />
         </div>
-      ) : null}
-
-      <div className="mb-3">
-        <div className="mb-1.5 text-[11px] text-muted-foreground">
-          출시 일정 · UI 미리보기 · 저장되지 않음
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <ScopeChip
-            selected={releaseFilter === 'all'}
-            onSelect={() => setReleaseFilter('all')}
-          >
-            전체 {formatNumber(ownerDrafts.length)}
-          </ScopeChip>
-          <ScopeChip
-            selected={releaseFilter === 'unassigned'}
-            onSelect={() => setReleaseFilter('unassigned')}
-          >
-            출시 미정 {formatNumber(releaseCounts.unassigned)}
-          </ScopeChip>
-          {releaseChips.map((group) => (
-            <ScopeChip
-              key={group.id}
-              selected={releaseFilter === group.id}
-              onSelect={() => setReleaseFilter(group.id)}
-            >
-              <span className="truncate">{formatReleaseGroupLabel(group)}</span>
-              <span className="tabular-nums text-muted-foreground">
-                {formatNumber(releaseCounts.counts.get(group.id) ?? 0)}
-              </span>
-            </ScopeChip>
-          ))}
-        </div>
-      </div>
-
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
-        <Input
-          className="sm:max-w-xs"
-          placeholder="PL번호, 이름, 담당자, 컬러 검색..."
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-        />
-        <Select
-          value={seasonFilter}
-          onChange={(event) => setSeasonFilter(event.target.value)}
-        >
-          <option value="all">전체 출시 기획</option>
-          <option value="unassigned">출시 기획 미정</option>
-          {seasons
-            .filter((season) => !scopedBrand || season.brandId === scopedBrand.id)
-            .map((season) => (
-              <option key={season.id} value={season.code}>
-                {!scopedBrand
-                  ? `${brandById.get(season.brandId)?.name ?? ''} · ${formatSeasonLabel(season)}`
-                  : formatSeasonLabel(season)}
-              </option>
-            ))}
-        </Select>
-        <Select
-          value={statusFilter}
-          onChange={(event) =>
-            setStatusFilter(event.target.value as 'all' | ProductDraftStatus)
-          }
-        >
-          <option value="all">전체 상태</option>
-          {(Object.keys(DRAFT_STATUS_LABEL) as ProductDraftStatus[]).map(
-            (status) => (
-              <option key={status} value={status}>
-                {DRAFT_STATUS_LABEL[status]}
-              </option>
-            ),
-          )}
-        </Select>
-        <div className="text-sm text-muted-foreground sm:ml-auto">
-          {formatNumber(visible.length)}건
+        <div className="min-w-0 flex-1">
+          <div className="mb-1.5 text-[11px] leading-4 text-[#b8860b]">
+            <div>미확정 : 기획 {formatNumber(sheetCounts.planningOpen)}건</div>
+            <div>미확정 : MD {formatNumber(sheetCounts.mdOpen)}건</div>
+          </div>
+          <DraftFolderBar folders={folderItems} selectedIds={selectedFolderIds} unassignedCount={unassignedFolderCount} onSelect={setFolderFilter} />
         </div>
       </div>
 
@@ -550,201 +461,113 @@ export function CompanyDraftsPage() {
         <p className="mb-3 text-sm text-danger">기획안을 불러오지 못했습니다.</p>
       ) : null}
 
-      <Card className="overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1240px] text-left text-sm">
-            <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-4 py-3 font-medium">브랜드</th>
-                <th className="px-4 py-3 font-medium">PL번호</th>
-                <th className="px-4 py-3 font-medium">상품</th>
-                <th className="px-4 py-3 font-medium">출시 일정</th>
-                <th className="px-4 py-3 font-medium">담당</th>
-                <th className="px-4 py-3 font-medium">컬러 / 발주</th>
-                <th className="px-2 py-3 text-center font-medium">샘플 진행중</th>
-                {PROGRESS_STEPS.map((step) => (
+      <div className="draft-board-scroll" role="region" aria-label="기획안 목록" tabIndex={0}>
+        <table className="draft-board-table">
+          <caption className="sr-only">기획안별 샘플, 상품 정보 및 MD 진행 현황</caption>
+          <colgroup>{Array.from({ length: 6 }, (_, index) => <col key={index} />)}</colgroup>
+          <thead>
+            <tr>
+              {(['BRAND', 'IMAGE', 'PRICE', 'COLOR', 'INFORMATION'] as const).map(
+                (label) => (
                   <th
-                    key={step.key}
-                    className="px-2 py-3 text-center font-medium"
+                    key={label}
+                    scope="col"
                   >
-                    {step.short}
+                    {label}
                   </th>
-                ))}
-                <th className="px-4 py-3 font-medium">상태</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td
-                    colSpan={8 + PROGRESS_STEPS.length}
-                    className="px-4 py-10 text-center text-muted-foreground"
-                  >
-                    불러오는 중...
-                  </td>
-                </tr>
-              ) : visible.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={8 + PROGRESS_STEPS.length}
-                    className="px-4 py-10 text-center text-muted-foreground"
-                  >
-                    {emptyMessage(
-                      ownerDrafts.length > 0,
-                      seasonFilter,
-                      releaseFilter,
-                      brandScope,
-                      ownerScope,
-                    )}
-                  </td>
-                </tr>
-              ) : (
-                visible.map((draft) => {
-                  const schedule = scheduleByDraft.get(draft.id)
-                  const brandId = schedule?.brandId ?? draft.brandId
-                  const brand = brandId ? brandById.get(brandId) : undefined
-                  const total = totalOrderQty(draft)
-                  return (
-                    <tr
-                      key={draft.id}
-                      className="cursor-pointer border-b border-border last:border-0 hover:bg-muted/30"
-                      onClick={() => navigate(draftDetailPath(draft.id))}
-                    >
-                      <td className="px-4 py-2">
-                        {brand ? (
-                          <span className="flex items-center gap-2">
-                            <BrandAvatar brand={brand} className="size-6" />
-                            <span>{brand.name}</span>
-                          </span>
-                        ) : (
-                          <Badge variant="outline">브랜드 미정</Badge>
-                        )}
-                      </td>
-                      <td className="px-4 py-2 font-mono text-xs tabular-nums text-muted-foreground">
-                        {draft.draftNo}
-                      </td>
-                      <td className="px-4 py-2">
-                        <div className="flex items-center gap-3">
-                          <div className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded border border-border bg-muted">
-                            {draft.imageUrl ? (
-                              <img
-                                src={draft.imageUrl}
-                                alt=""
-                                className="size-full object-cover"
-                              />
-                            ) : (
-                              <ImageOff className="size-4 text-muted-foreground" />
-                            )}
-                          </div>
-                          <div className="min-w-0">
-                            <div className="truncate font-medium">
-                              {draft.nameKo || draft.nameEn || '이름 미정'}
-                            </div>
-                            <div className="truncate text-xs text-muted-foreground">
-                              {draft.nameEn || '—'}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td
-                        className="px-4 py-2"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        {schedule?.group ? (
-                          <div className="space-y-1">
-                            <div className="truncate font-medium">
-                              {formatReleaseGroupLabel(schedule.group)}
-                            </div>
-                            <div className="flex flex-wrap items-center gap-1">
-                              {schedule.certainty ? (
-                                <Badge
-                                  variant={
-                                    schedule.certainty === 'confirmed'
-                                      ? 'success'
-                                      : 'outline'
-                                  }
-                                >
-                                  {RELEASE_CERTAINTY_LABEL[schedule.certainty]}
-                                </Badge>
-                              ) : null}
-                              {schedule.targetDate ? (
-                                <span className="text-[11px] text-muted-foreground">
-                                  {formatTargetDate(schedule.targetDate)}
-                                </span>
-                              ) : null}
-                              {schedule.isPreview ? (
-                                <span className="text-[11px] text-muted-foreground">
-                                  미리보기
-                                </span>
-                              ) : null}
-                            </div>
-                            <button
-                              type="button"
-                              className="text-[11px] text-muted-foreground underline-offset-2 hover:underline"
-                              onClick={() => setScheduleDraftId(draft.id)}
-                            >
-                              수정
-                            </button>
-                          </div>
-                        ) : (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setScheduleDraftId(draft.id)}
-                          >
-                            일정 정하기
-                          </Button>
-                        )}
-                      </td>
-                      <td className="px-4 py-2 text-muted-foreground">
-                        {draft.owner || '—'}
-                      </td>
-                      <td className="px-4 py-2">
-                        {draft.colors.length === 0 ? (
-                          <span className="text-muted-foreground">—</span>
-                        ) : (
-                          <span>
-                            {draft.colors.length}컬러
-                            {total > 0 ? ` · 총 ${formatNumber(total)}EA` : ''}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-2 py-2 text-center text-xs tabular-nums text-muted-foreground">
-                        {draft.colors.length === 0
-                          ? '—'
-                          : `${formatNumber(sampleInProgressCount(draft))}/${formatNumber(draft.colors.length)}`}
-                      </td>
-                      {PROGRESS_STEPS.map((step) => (
-                        <td key={step.key} className="px-2 py-2 text-center">
-                          {draft[step.key] ? (
-                            <Check
-                              className="inline-block size-4 text-success"
-                              aria-label={`${step.label} 완료`}
-                            />
-                          ) : (
-                            <span
-                              className="inline-block size-4 rounded-sm border border-border"
-                              aria-label={`${step.label} 미완료`}
-                            />
-                          )}
-                        </td>
-                      ))}
-                      <td className="px-4 py-2">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <Badge variant={statusVariant(draft.status)}>
-                            {DRAFT_STATUS_LABEL[draft.status]}
-                          </Badge>
-                        </div>
-                      </td>
-                    </tr>
-                  )
-                })
+                ),
               )}
-            </tbody>
-          </table>
-        </div>
-      </Card>
+              <th
+                scope="col"
+              >
+                MD TEAM
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="bg-white px-4 py-10 text-center text-sm text-muted-foreground"
+                >
+                  불러오는 중...
+                </td>
+              </tr>
+            ) : visible.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="bg-white px-4 py-10 text-center text-sm text-muted-foreground"
+                >
+                  {emptyMessage(
+                    folderDrafts.length > 0,
+                    folderFilter,
+                    boardFilter,
+                    brandScope,
+                    ownerScope,
+                  )}
+                </td>
+              </tr>
+            ) : (
+              visible.map((draft) => {
+                const schedule = scheduleByDraft.get(draft.id)
+                const brandId = schedule?.brandId ?? draft.brandId
+                const brand = brandId ? brandById.get(brandId) : undefined
+                return (
+                  <DraftSheetRow
+                    key={draft.id}
+                    draft={draft}
+                    schedule={schedule}
+                    brand={brand}
+                    onOpen={() => navigate(draftDetailPath(draft.id))}
+                    onSchedule={() => setScheduleDraftId(draft.id)}
+                    onAddColor={async (name) => {
+                      await saveDraftChange(draft.id, (current) => {
+                        const input = draftToInput(current)
+                        return {
+                          ...input,
+                          colors: [...input.colors, { ...newColorRow(), name }],
+                        }
+                      })
+                    }}
+                    onRenameProduct={async (name) => {
+                      await saveDraftChange(draft.id, (current) => {
+                        const input = draftToInput(current)
+                        const field = current.nameEn.trim() ? 'nameEn' : 'nameKo'
+                        const other =
+                          field === 'nameEn'
+                            ? current.nameKo.trim()
+                            : current.nameEn.trim()
+                        if (!name && !other) {
+                          throw new Error('상품 이름을 비울 수 없습니다.')
+                        }
+                        return { ...input, [field]: name }
+                      })
+                    }}
+                    onRenameColor={async (colorId, name) => {
+                      const next = name.trim()
+                      if (!next) throw new Error('컬러 이름을 입력하세요.')
+                      await saveDraftChange(draft.id, (current) => {
+                        const input = draftToInput(current)
+                        if (!input.colors.some((color) => color.id === colorId)) {
+                          throw new Error('컬러를 찾지 못했습니다.')
+                        }
+                        return {
+                          ...input,
+                          colors: input.colors.map((color) =>
+                            color.id === colorId ? { ...color, name: next } : color,
+                          ),
+                        }
+                      })
+                    }}
+                  />
+                )
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
 
       <DraftReleaseScheduleDialog
         open={Boolean(scheduleDraft)}
@@ -768,6 +591,84 @@ export function CompanyDraftsPage() {
         }}
       />
     </div>
+  )
+}
+
+function BrandStatCard({
+  brand,
+  total,
+  pending,
+  scheduled,
+  selected,
+  onSelect,
+}: {
+  brand: Brand
+  total: number
+  pending: number
+  scheduled: number
+  selected: boolean
+  onSelect: () => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      title={selected ? '다시 누르면 전체 브랜드' : brand.name}
+      onClick={onSelect}
+      className={cn(
+        'inline-flex min-w-[168px] items-center gap-2 rounded-full border bg-white px-1.5 py-1 text-left',
+        selected
+          ? 'border-foreground shadow-sm'
+          : 'border-[#ead7c8] hover:border-[#d7c2ae]',
+      )}
+    >
+      <BrandAvatar
+        brand={brand}
+        className="size-9 rounded-full text-[10px]"
+        textClassName="text-[10px]"
+      />
+      <span className="min-w-0">
+        <span className="block truncate text-[11px] font-semibold tracking-wide">
+          {brand.name}
+        </span>
+        <span className="mt-0.5 flex items-baseline gap-1.5 text-[10px] text-muted-foreground">
+          <span className="text-sm font-semibold tabular-nums text-foreground">
+            {formatNumber(total)}
+          </span>
+          <span className="tabular-nums">미정 {formatNumber(pending)}</span>
+          <span className="tabular-nums">확정 {formatNumber(scheduled)}</span>
+        </span>
+      </span>
+    </button>
+  )
+}
+
+function BoardFilterChip({
+  selected,
+  onSelect,
+  label,
+  count,
+}: {
+  selected: boolean
+  onSelect: () => void
+  label: string
+  count: number
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onSelect}
+      className={cn(
+        'rounded border px-2 py-1 text-[11px]',
+        selected
+          ? 'border-foreground bg-white font-semibold text-foreground'
+          : 'border-border bg-white/70 text-muted-foreground hover:text-foreground',
+      )}
+    >
+      {label}{' '}
+      <span className="tabular-nums">{formatNumber(count)}</span>
+    </button>
   )
 }
 

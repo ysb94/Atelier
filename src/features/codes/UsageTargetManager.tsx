@@ -10,9 +10,9 @@ import type {
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
-  compactOutboundPartnerKey,
   outboundPartnerDisplayName,
 } from '@/lib/codes/outbound-partner'
+import { buildOutboundPartnerNameIndex, outboundPartnerNameKeys } from '@/lib/codes/outbound-partner-matching'
 import { OutboundPartnerBrowser } from '@/features/codes/OutboundPartnerBrowser'
 import type { AliasOwner } from '@/features/codes/OutboundPartnerEditForm'
 
@@ -62,24 +62,11 @@ function UsageTargetManagerContent({
 
   const ownerByKey = useMemo(() => {
     const map = new Map<string, AliasOwner>()
-    targets.forEach((target) => {
-      const key =
-        target.normalizedName || compactOutboundPartnerKey(target.name)
-      if (key) {
-        map.set(key, {
-          targetId: target.id,
-          targetName: outboundPartnerDisplayName(target),
-          kind: 'name',
-        })
-      }
-    })
-    aliases.forEach((alias) => {
-      const owner = targets.find((target) => target.id === alias.targetId)
-      if (!owner) return
-      map.set(alias.normalizedAlias, {
-        targetId: alias.targetId,
-        targetName: outboundPartnerDisplayName(owner),
-        kind: 'alias',
+    buildOutboundPartnerNameIndex(targets, aliases).forEach((target, key) => {
+      map.set(key, {
+        targetId: target.id,
+        targetName: outboundPartnerDisplayName(target),
+        kind: outboundPartnerNameKeys(target).includes(key) ? 'name' : 'alias',
       })
     })
     return map

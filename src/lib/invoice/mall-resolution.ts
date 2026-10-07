@@ -1,4 +1,5 @@
-import { compactOutboundPartnerKey, normalizeOutboundPartnerName } from '@/lib/codes/outbound-partner'
+import { compactOutboundPartnerKey, normalizeOutboundPartnerName, outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
+import { buildOutboundPartnerNameIndex } from '@/lib/codes/outbound-partner-matching'
 import { buildOrderFingerprint } from '@/lib/invoice/gift-assign'
 import { normalizeInvoiceText, orderMomentOf } from '@/lib/invoice/prefix-transform'
 import type { InvoiceOutputRow } from '@/lib/invoice/invoice-output'
@@ -44,40 +45,12 @@ export type InvoiceSiteSummaryDraft = {
   cjGiftQuantity: number
 }
 
-type PartnerHit = {
-  target: CodeUsageTarget
-  via: 'name' | 'alias'
-}
-
 function mallKeyOf(value: string): string {
   return compactOutboundPartnerKey(normalizeOutboundPartnerName(value))
 }
 
 function displayMallName(rawNames: readonly string[]): string {
   return rawNames[0] || '(빈 값)'
-}
-
-function buildPartnerIndex(
-  targets: readonly CodeUsageTarget[],
-  aliases: readonly CodeUsageTargetAlias[],
-): Map<string, PartnerHit> {
-  const byId = new Map(targets.map((target) => [target.id, target]))
-  const index = new Map<string, PartnerHit>()
-
-  targets.forEach((target) => {
-    const key = target.normalizedName || mallKeyOf(target.name)
-    if (!key || index.has(key)) return
-    index.set(key, { target, via: 'name' })
-  })
-
-  aliases.forEach((alias) => {
-    const key = alias.normalizedAlias || mallKeyOf(alias.alias)
-    const target = byId.get(alias.targetId)
-    if (!key || !target || index.has(key)) return
-    index.set(key, { target, via: 'alias' })
-  })
-
-  return index
 }
 
 export function parseInvoiceQuantity(value: string): number {
@@ -122,7 +95,7 @@ export function resolveInvoiceMalls(
   targets: readonly CodeUsageTarget[],
   aliases: readonly CodeUsageTargetAlias[],
 ): InvoiceMallResolution {
-  const index = buildPartnerIndex(targets, aliases)
+  const index = buildOutboundPartnerNameIndex(targets, aliases)
   const groups = new Map<
     string,
     { rawNames: Set<string>; rowCount: number }
@@ -169,15 +142,15 @@ export function resolveInvoiceMalls(
         officialName: null,
       }
     }
-    if (!hit.target.active) {
+    if (!hit.active) {
       return {
         key,
         rawNames,
         displayName: displayMallName(rawNames),
         rowCount: group.rowCount,
         status: 'inactive',
-        usageTargetId: hit.target.id,
-        officialName: hit.target.name,
+        usageTargetId: hit.id,
+        officialName: outboundPartnerDisplayName(hit),
       }
     }
     return {
@@ -186,8 +159,8 @@ export function resolveInvoiceMalls(
       displayName: displayMallName(rawNames),
       rowCount: group.rowCount,
       status: 'matched',
-      usageTargetId: hit.target.id,
-      officialName: hit.target.name,
+      usageTargetId: hit.id,
+      officialName: outboundPartnerDisplayName(hit),
     }
   })
 

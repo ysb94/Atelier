@@ -33,6 +33,35 @@ assert(
 )
 assert(!isKeyAllowedForBrand('embed/foo.html', 'bbb'), '다른 브랜드는 작업 불가')
 
+for (const [type, name] of [
+  ['Prod_Images', 'Clean/M0001.jpg'],
+  ['all', 'ACC/ballcap/00_ballcap.jpg'],
+  ['common', 'bottom/a-bottom.jpg'],
+  ['product', 'Acc/keyring/AlohaBB/01_AlohaBB_keyring.jpg'],
+  ['renew', '1.jpg'],
+]) {
+  const key = `${type}/${name}`
+  assert(isKeyAllowedForBrand(key, 'atelier'), `${type} 기존 파일 경로 허용`)
+  assert(isKeyAllowedForBrand(key, 'masmarulez'), `${type} 브랜드 별칭 허용`)
+  assert(!isKeyAllowedForBrand(key, 'bbb'), `${type} 다른 브랜드 작업 차단`)
+  const legacyItems = filterItemsForBrand(
+    [
+      { key, name },
+      { name: 'fallback.jpg' },
+      { key: `bbb/${key}`, name: 'other.jpg' },
+      { key: 'unknown/file.jpg', name: 'unknown.jpg' },
+    ],
+    type,
+    'atelier',
+  )
+  assert(
+    legacyItems.length === 2 && legacyItems[0]?.key === key,
+    `${type} 실제 키와 이름 기반 목록을 복원하고 교차 브랜드 파일은 제외`,
+  )
+}
+
+assert(!isKeyAllowedForBrand('unknown/file.jpg', 'atelier'), '임의 최상위 경로는 차단')
+
 assert(
   buildBrandUploadPath('atelier', 'image', 'bags') === 'image/bags',
   'ATELIER 업로드는 기존 type/folder',

@@ -11,6 +11,8 @@ import {
 import {
   findDefaultSabangnetFolderId,
   folderMoveOptions,
+  outboundPartnerCategoryKey,
+  OUTBOUND_UNFILED_CATEGORY,
 } from '@/lib/codes/outbound-folder'
 import {
   compactOutboundPartnerKey,
@@ -46,6 +48,8 @@ function defaultDraft(
 }
 
 export function InvoiceMallResolutionDialog({
+  categoryKey,
+  categoryName,
   brandId,
   brandSlug,
   sites,
@@ -54,6 +58,8 @@ export function InvoiceMallResolutionDialog({
   folders,
   onClose,
 }: {
+  categoryKey: string
+  categoryName: string
   brandId: string
   brandSlug: string
   sites: InvoiceMallSite[]
@@ -65,10 +71,14 @@ export function InvoiceMallResolutionDialog({
   const workspaceActive = useWorkspaceTabActivity()
   const queryClient = useQueryClient()
   const defaultFolderId = useMemo(
-    () => findDefaultSabangnetFolderId(folders),
-    [folders],
+    () => findDefaultSabangnetFolderId(folders.filter((folder) =>
+      outboundPartnerCategoryKey(folders, folder.id) === categoryKey,
+    )) ?? (categoryKey === OUTBOUND_UNFILED_CATEGORY ? null : categoryKey),
+    [folders, categoryKey],
   )
-  const folderOptions = useMemo(() => folderMoveOptions(folders), [folders])
+  const folderOptions = useMemo(() => folderMoveOptions(folders).filter((option) =>
+    outboundPartnerCategoryKey(folders, option.id) === categoryKey,
+  ), [folders, categoryKey])
   const activeTargets = useMemo(
     () =>
       targets
@@ -138,7 +148,7 @@ export function InvoiceMallResolutionDialog({
     setErrorByKey((current) => ({ ...current, [site.key]: '' }))
     try {
       if (draft.mode === 'existing') {
-        if (!draft.targetId) {
+        if (!activeTargets.some((target) => target.id === draft.targetId)) {
           throw new Error('연결할 출고업체를 고르세요.')
         }
         const names =
@@ -149,6 +159,9 @@ export function InvoiceMallResolutionDialog({
       } else {
         const name = normalizeOutboundPartnerName(draft.name)
         if (!name) throw new Error('업체 이름을 입력하세요.')
+        if (outboundPartnerCategoryKey(folders, draft.folderId) !== categoryKey) {
+          throw new Error('선택한 출고업체 분류 안의 위치를 고르세요.')
+        }
         const extra = site.rawNames.filter(
           (raw) =>
             compactOutboundPartnerKey(raw) !== compactOutboundPartnerKey(name),
@@ -195,10 +208,10 @@ export function InvoiceMallResolutionDialog({
                 id="invoice-mall-resolution-title"
                 className="text-base font-semibold tracking-tight"
               >
-                쇼핑몰명 연결
+                쇼핑몰명 연결 · {categoryName}
               </h2>
               <p className="mt-0.5 text-sm text-muted-foreground">
-                파일의 쇼핑몰명을 출고업체에 연결해야 다음 단계로 갈 수
+                파일의 쇼핑몰명을 {categoryName} 출고업체에 연결해야 다음 단계로 갈 수
                 있습니다. 연결 필요 {formatNumber(unresolved.length)}곳.
               </p>
             </div>
@@ -252,7 +265,7 @@ export function InvoiceMallResolutionDialog({
                       ? '빈 값'
                       : site.status === 'inactive'
                         ? '비활성'
-                        : '미등록'}
+                        : '선택 분류에 없음'}
                   </span>
                 </div>
 
@@ -288,6 +301,9 @@ export function InvoiceMallResolutionDialog({
 
                 {site.status === 'unmatched' ? (
                   <div className="space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      다른 분류의 업체에는 자동 연결하지 않습니다. 지점 출고라면 엑셀에 업체명과 지점명이 함께 있는지 확인하세요.
+                    </p>
                     <div className="flex flex-wrap gap-2">
                       <button
                         type="button"

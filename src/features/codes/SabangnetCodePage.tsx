@@ -59,6 +59,11 @@ import type {
   StyleRef,
 } from '@/lib/types'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
+import { getCodeUsageTargets } from '@/lib/api'
+import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
+import { listSabangnetMallUrls } from '@/lib/supabase/sabangnet-mall-urls'
+import type { SabangnetMallUrl } from '@/lib/codes/sabangnet-url-import'
+import { SabangnetUrlUploadPanel } from './SabangnetUrlUploadPanel'
 import { PendingSabangnetPanel } from './PendingSabangnetPanel'
 import { SabangnetBulkUploadPanel } from './SabangnetBulkUploadPanel'
 import { SabangnetCategoryImportPanel } from './SabangnetCategoryImportPanel'
@@ -184,6 +189,11 @@ export function SabangnetCodePage() {
   const [categoryOpen, setCategoryOpen] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState('all')
   const [fieldsOpen, setFieldsOpen] = useState(false)
+  const [urlOpen, setUrlOpen] = useState(false)
+  const [urlBusy, setUrlBusy] = useState(false)
+  const [columnsOpen, setColumnsOpen] = useState(false)
+  const [columnSearch, setColumnSearch] = useState('')
+  const [selectedColumns, setSelectedColumns] = useState<string[] | null>(null)
   const { index: categoryIndex, loading: categoryLoading } =
     useStyleCategoryIndex(brand.id)
 
@@ -203,7 +213,34 @@ export function SabangnetCodePage() {
   const products = productsQuery.data ?? emptyList<SabangnetProduct>()
   const styles = stylesQuery.data ?? emptyList<StyleRef>()
   const fields = fieldsQuery.data ?? emptyList<SabangnetField>()
-  const listColumnCount = 1 + fields.length + 3
+  const urlsQuery = useQuery({ queryKey: ['sabangnetMallUrls', brand.id], queryFn: () => listSabangnetMallUrls(brand.id) })
+  const targetsQuery = useQuery({ queryKey: ['codeUsageTargets', brand.id], queryFn: () => getCodeUsageTargets(brand.id) })
+  const urls = urlsQuery.data ?? emptyList<SabangnetMallUrl>()
+  const targets = targetsQuery.data ?? emptyList<Awaited<ReturnType<typeof getCodeUsageTargets>>[number]>()
+  const targetLabels = useMemo(() => new Map(targets.map(t => [t.id, outboundPartnerDisplayName(t)])), [targets])
+  const urlsByProduct = useMemo(() => {
+    const map = new Map<string, Map<string, SabangnetMallUrl>>()
+    for (const url of urls) { const list = map.get(url.productId) ?? new Map<string, SabangnetMallUrl>(); list.set(url.targetId, url); map.set(url.productId, list) }
+    return map
+  }, [urls])
+  const urlColumns = useMemo(() => [...new Set(urls.map(u => u.targetId))].map(id => ({ id: `url:${id}`, targetId: id, label: `${targetLabels.get(id) ?? '업체'} URL` })).sort((a, b) => a.label.localeCompare(b.label, 'ko')), [urls, targetLabels])
+  const fixedFields = useMemo(() => ['code', 'name'].flatMap(key => fields.filter(f => f.systemKey === key)), [fields])
+  const optionalColumns = useMemo(() => [
+    ...fields.filter(f => !['code', 'name'].includes(f.systemKey ?? '')).map(f => ({ id: f.id, label: f.label })),
+    { id: 'category', label: '카테고리' }, { id: 'urls', label: '쇼핑몰 URL 요약' }, { id: 'updated', label: '수정일' }, ...urlColumns,
+  ], [fields, urlColumns])
+  const defaults = useMemo(() => [...fields.filter(f => f.systemKey === 'styles').map(f => f.id), 'category', 'urls'], [fields])
+  const visible = useMemo(() => new Set(selectedColumns ?? defaults), [selectedColumns, defaults])
+  const visibleFields = useMemo(() => [...fixedFields, ...fields.filter(f => !fixedFields.includes(f) && visible.has(f.id))], [fixedFields, fields, visible])
+  const visibleUrlColumns = useMemo(() => urlColumns.filter(c => visible.has(c.id)), [urlColumns, visible])
+  const listColumnCount = 2 + visibleFields.length + Number(visible.has('category')) + Number(visible.has('urls')) + Number(visible.has('updated')) + visibleUrlColumns.length
+  function toggleColumn(id: string) {
+    setSelectedColumns(current => { const set = new Set(current ?? defaults); if (set.has(id)) set.delete(id); else set.add(id); return [...set] })
+  }
+  function fieldWidth(field: SabangnetField) { return field.systemKey === 'code' ? 140 : field.systemKey === 'name' ? 300 : 200 }
+  function fixedClass(field: SabangnetField, header = false) {
+    return field.systemKey === 'code' ? `sticky left-[40px] ${header ? 'z-30 bg-muted' : 'z-10 bg-inherit'}` : field.systemKey === 'name' ? `sticky left-[180px] border-r border-border ${header ? 'z-30 bg-muted' : 'z-10 bg-inherit'}` : ''
+  }
   const categoryOptions = useMemo(
     () => (categoryIndex ? listCategoryFilterOptions(categoryIndex.tree) : []),
     [categoryIndex],
@@ -298,6 +335,7 @@ export function SabangnetCodePage() {
       queryKey: ['sabangnetProducts', brand.id],
     })
   }
+  const invalidateUrls = async () => { await queryClient.invalidateQueries({ queryKey: ['sabangnetMallUrls', brand.id] }) }
 
   const saveMutation = useMutation({
     mutationFn: async ({ input, categories }: SaveRequest) => {
@@ -379,8 +417,11 @@ export function SabangnetCodePage() {
       <PageHeader
         title="사방넷 코드 관리"
         description={`${brand.name}의 사방넷 코드와 SKU 단위 M번호 연결을 관리합니다.`}
-        actions={
-          <>
+      />
+      <div className="mb-4 flex flex-wrap items-center gap-2 [&>button]:shrink-0 [&>button]:whitespace-nowrap">
+            <Button type="button" variant="outline" disabled={urlBusy} onClick={() => setUrlOpen(current => !current)}>
+              <Link2 className="size-4" />{urlOpen ? 'URL 가져오기 닫기' : '쇼핑몰 URL 가져오기'}
+            </Button>
             <Button
               type="button"
               variant="outline"
@@ -410,9 +451,10 @@ export function SabangnetCodePage() {
               <Plus className="size-4" />
               코드 등록
             </Button>
-          </>
-        }
-      />
+      </div>
+
+      {urlOpen ? <div className="mb-4"><SabangnetUrlUploadPanel brandId={brand.id} products={products} existing={urls} onBusyChange={setUrlBusy} onApplied={invalidateUrls} onClose={() => setUrlOpen(false)} /></div> : null}
+      {urlsQuery.isError ? <div className="mb-4 flex items-center gap-3 text-sm text-danger">업체별 URL을 불러오지 못했습니다.<Button variant="outline" size="sm" onClick={() => void urlsQuery.refetch()}>다시 시도</Button></div> : null}
 
       {fieldsOpen ? (
         <SabangnetFieldManager
@@ -568,19 +610,30 @@ export function SabangnetCodePage() {
             </span>
           </div>
 
-          <Card className="overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[860px] text-left text-sm">
-                <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+            <p className="text-xs text-muted-foreground">코드·상품명 고정 · 행을 누르면 전체 항목과 쇼핑몰 링크 확인</p>
+            <Button variant="outline" size="sm" onClick={() => setColumnsOpen(current => !current)}><Settings2 className="size-3.5" />표시 열 {visibleFields.length + visibleUrlColumns.length + Number(visible.has('category')) + Number(visible.has('urls')) + Number(visible.has('updated'))}</Button>
+          </div>
+          {columnsOpen ? <div className="mb-3 rounded-lg border border-border bg-background p-3">
+            <div className="mb-3 flex items-center gap-2"><Input className="max-w-xs" placeholder="열 이름 검색..." value={columnSearch} onChange={e => setColumnSearch(e.target.value)} /><Button variant="ghost" size="sm" onClick={() => setSelectedColumns(null)}>기본 보기</Button><Button variant="ghost" size="sm" onClick={() => setSelectedColumns(optionalColumns.map(c => c.id))}>전체 열</Button><Button variant="ghost" size="sm" onClick={() => setSelectedColumns([])}>코드·상품명만</Button></div>
+            <div className="grid max-h-56 gap-2 overflow-auto sm:grid-cols-3 lg:grid-cols-4">{optionalColumns.filter(c => c.label.toLowerCase().includes(columnSearch.toLowerCase())).map(c => <label key={c.id} className="flex items-center gap-2 text-xs"><input type="checkbox" checked={visible.has(c.id)} onChange={() => toggleColumn(c.id)} />{c.label}</label>)}</div>
+          </div> : null}
+          <Card className="min-w-0 overflow-hidden">
+            <div className="max-h-[65vh] overflow-auto" role="region" aria-label="사방넷 코드 표" tabIndex={0}>
+              <table className="w-full table-fixed text-left text-sm" style={{ minWidth: 140 + visibleFields.reduce((sum, f) => sum + fieldWidth(f), 0) + (listColumnCount - visibleFields.length - 2) * 200 }}>
+                <colgroup><col style={{ width: 40 }} />{visibleFields.map(f => <col key={f.id} style={{ width: fieldWidth(f) }} />)}{Array.from({ length: listColumnCount - visibleFields.length - 2 }, (_, i) => <col key={`extra-${i}`} style={{ width: 200 }} />)}<col style={{ width: 100 }} /></colgroup>
+                <thead className="sticky top-0 z-20 border-b border-border bg-muted text-xs text-muted-foreground">
                   <tr>
-                    <th className="w-8 px-4 py-3" />
-                    {fields.map((field) => (
-                      <th key={field.id} className="px-4 py-3 font-medium">
+                    <th className="sticky left-0 z-30 bg-muted px-2 py-3" />
+                    {visibleFields.map((field) => (
+                      <th key={field.id} className={cn('truncate px-4 py-3 font-medium', fixedClass(field, true))} title={field.label}>
                         {field.label}
                       </th>
                     ))}
-                    <th className="px-4 py-3 font-medium">카테고리</th>
-                    <th className="px-4 py-3 font-medium">수정일</th>
+                    {visible.has('category') ? <th className="px-4 py-3 font-medium">카테고리</th> : null}
+                    {visible.has('urls') ? <th className="px-4 py-3 font-medium">쇼핑몰 URL</th> : null}
+                    {visibleUrlColumns.map(c => <th key={c.id} className="truncate px-4 py-3 font-medium" title={c.label}>{c.label}</th>)}
+                    {visible.has('updated') ? <th className="px-4 py-3 font-medium">수정일</th> : null}
                     <th className="w-20 px-4 py-3 font-medium">작업</th>
                   </tr>
                 </thead>
@@ -638,7 +691,7 @@ export function SabangnetCodePage() {
                       </td>
                     </tr>
                   ) : (
-                    paged.map((product) => {
+                    paged.map((product, rowIndex) => {
                       const isExpanded = expandedId === product.id
                       return (
                         <Fragment key={product.id}>
@@ -648,10 +701,10 @@ export function SabangnetCodePage() {
                             }
                             className={cn(
                               'cursor-pointer border-b border-border transition-colors',
-                              isExpanded ? 'bg-accent/50' : 'hover:bg-muted/40',
+                              isExpanded ? 'bg-accent' : rowIndex % 2 ? 'bg-muted hover:bg-accent' : 'bg-background hover:bg-accent',
                             )}
                           >
-                            <td className="px-4 py-3">
+                            <td className="sticky left-0 z-10 bg-inherit px-2 py-2">
                               <ChevronDown
                                 className={cn(
                                   'size-4 text-muted-foreground transition-transform',
@@ -659,13 +712,13 @@ export function SabangnetCodePage() {
                                 )}
                               />
                             </td>
-                            {fields.map((field) => {
+                            {visibleFields.map((field) => {
                               const value = fieldCell(field, product)
                               return (
                                 <td
                                   key={field.id}
                                   className={cn(
-                                    'max-w-64 px-4 py-3',
+                                    'h-12 px-4 py-2', fixedClass(field),
                                     field.systemKey === 'code' &&
                                       'font-medium tabular-nums',
                                     field.type === 'number' && 'tabular-nums',
@@ -674,14 +727,14 @@ export function SabangnetCodePage() {
                                   {field.systemKey === 'styles' && !value ? (
                                     <Badge variant="warning">미연결</Badge>
                                   ) : (
-                                    <span className="line-clamp-2" title={value || undefined}>
+                                    <span className="block truncate" title={value || undefined}>
                                       {value || '—'}
                                     </span>
                                   )}
                                 </td>
                               )
                             })}
-                            <td className="max-w-72 px-4 py-3">
+                            {visible.has('category') ? <td className="px-4 py-2">
                               {categoryIndex ? (
                                 <CategoryCell
                                   summary={summarizeSabangnetCategories(
@@ -693,10 +746,12 @@ export function SabangnetCodePage() {
                               ) : (
                                 <span className="text-muted-foreground">…</span>
                               )}
-                            </td>
-                            <td className="px-4 py-3 tabular-nums text-muted-foreground">
+                            </td> : null}
+                            {visible.has('urls') ? <td className="px-4 py-2"><span className="text-xs">{urlsQuery.isLoading ? '불러오는 중...' : urlsByProduct.get(product.id)?.size ? `${urlsByProduct.get(product.id)!.size}개 쇼핑몰 · 펼쳐보기` : '—'}</span></td> : null}
+                            {visibleUrlColumns.map(c => { const link = urlsByProduct.get(product.id)?.get(c.targetId); return <td key={c.id} className="px-4 py-2">{link ? <a className="inline-flex items-center gap-1 text-xs text-primary hover:underline" href={link.url} target="_blank" rel="noopener noreferrer" title={link.url} onClick={e => e.stopPropagation()}><Link2 className="size-3" />상품 보기</a> : '—'}</td> })}
+                            {visible.has('updated') ? <td className="truncate px-4 py-2 tabular-nums text-muted-foreground">
                               {formatUpdatedAt(product.updatedAt)}
-                            </td>
+                            </td> : null}
                             <td className="px-4 py-3">
                               <div className="flex items-center justify-end gap-1">
                                 <Button
@@ -721,7 +776,7 @@ export function SabangnetCodePage() {
                                     event.stopPropagation()
                                     if (
                                       window.confirm(
-                                        `"${product.name}" (${product.code}) 코드를 삭제할까요?`,
+                                        `"${product.name}" (${product.code}) 코드를 삭제할까요? 저장된 쇼핑몰 URL도 함께 삭제됩니다.`,
                                       )
                                     ) {
                                       deleteMutation.mutate(product.id)
@@ -737,6 +792,8 @@ export function SabangnetCodePage() {
                             <tr className="border-b border-border bg-muted/20">
                               <td />
                               <td colSpan={listColumnCount - 1} className="px-4 py-4">
+                                <details className="mb-4 max-w-5xl"><summary className="cursor-pointer text-xs font-medium text-muted-foreground">추가 항목 전체 ({fields.filter(f => !f.systemKey).length})</summary><div className="mt-3 grid gap-3 sm:grid-cols-3">{fields.filter(f => !f.systemKey).map(f => <div key={f.id}><p className="text-xs text-muted-foreground">{f.label}</p><p className="mt-1 break-words text-sm">{fieldCell(f, product) || '—'}</p></div>)}</div></details>
+                                <div className="mb-4"><p className="mb-2 text-xs font-semibold text-muted-foreground">쇼핑몰 URL</p><div className="flex max-w-5xl flex-wrap gap-2">{[...urlsByProduct.get(product.id)?.values() ?? []].map(link => <a key={link.id} href={link.url} target="_blank" rel="noopener noreferrer" title={link.url} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-2 text-xs hover:bg-accent"><Link2 className="size-3" />{targetLabels.get(link.targetId) ?? link.sourceMall}</a>)}{!urlsByProduct.get(product.id)?.size ? <span className="text-xs text-muted-foreground">등록된 URL이 없습니다.</span> : null}</div></div>
                                 <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                   연결 M번호
                                 </div>

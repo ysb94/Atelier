@@ -32,6 +32,7 @@ import { useAuth } from '@/lib/supabase/auth'
 import { DepartmentProductLoadDialog } from '@/features/products/DepartmentProductLoadDialog'
 import { ProductCategoryBrowse } from '@/features/products/ProductCategoryBrowse'
 import { useDepartmentWorkSet } from '@/features/products/useDepartmentWorkSet'
+import { MdProductsPage } from '@/features/products/MdProductsPage'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { ProductThumb } from '@/components/products/ProductThumb'
@@ -493,10 +494,14 @@ export function ProductsPage({
   lockedOwner,
   persistQueryKeys = [],
   companyBrands,
+  headerAddon,
+  contentOverride,
 }: {
   lockedOwner?: FieldOwner
   persistQueryKeys?: string[]
   companyBrands?: Brand[]
+  headerAddon?: ReactNode
+  contentOverride?: ReactNode
 } = {}) {
   useRenderWatch('ProductsPage')
   const brandContext = useOptionalBrand()
@@ -1245,21 +1250,22 @@ export function ProductsPage({
   const querySuffix = searchParams.toString()
   const detailQuery = querySuffix ? `?${querySuffix}` : ''
 
-  return (
-    <div>
+  const header = (
       <PageHeader
         title={
           lockedOwner ? `${OWNER_LABEL[lockedOwner]} · 상품 정보` : '전체 상품'
         }
         description={
-          lockedOwner
+          contentOverride
+            ? '등록한 업체별 상품과 쇼핑몰 링크를 확인하고, 내 계정에 표시할 업체를 설정합니다.'
+            : lockedOwner
             ? `${OWNER_LABEL[lockedOwner]} 화면은 지금 필요한 상품만 불러 채웁니다. 처음에는 비어 있고, 표에서 칸을 눌러 바로 입력할 수 있습니다.`
             : isCompany
               ? 'E&J 회사 상품을 한 목록에서 봅니다. 브랜드는 필터와 열로만 구분합니다.'
               : `${scopedBrand?.name} 브랜드의 상품 마스터입니다. 보기를 부서로 바꾸면 그 부서 항목만 열로 보이고 표에서 바로 입력할 수 있습니다.`
         }
         actions={
-          lockedOwner ? (
+          contentOverride ? null : lockedOwner ? (
             <Button type="button" onClick={() => setLoadOpen(true)}>
               <Plus className="size-4" />
               상품 불러오기
@@ -1279,6 +1285,14 @@ export function ProductsPage({
           )
         }
       />
+  )
+
+  if (contentOverride) return <div>{header}{headerAddon}{contentOverride}<Outlet /></div>
+
+  return (
+    <div>
+      {header}
+      {headerAddon}
 
       {!lockedOwner ? (
         <div className="mb-5 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
@@ -1776,6 +1790,7 @@ export function DepartmentProductsPage() {
       <p className="text-sm text-muted-foreground">브랜드를 불러오는 중...</p>
     )
   }
+  if (owner === 'md') return <MdProductsPage brands={scope.brands} />
   return (
     <ProductsPage
       lockedOwner={owner as FieldOwner}

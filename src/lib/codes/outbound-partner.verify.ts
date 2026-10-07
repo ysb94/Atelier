@@ -49,6 +49,7 @@ import {
   wouldCreateFolderCycle,
 } from "./outbound-folder";
 import type { CodeUsageTarget, CodeUsageTargetFolder } from "@/lib/types";
+import { buildOutboundPartnerNameIndex, outboundPartnerNameKeys, outboundPartnerSaveConflict } from "./outbound-partner-matching";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);
@@ -264,9 +265,40 @@ assert(
     groupName: "에이랜드",
     siteName: "강남점",
     channelType: "offline",
-  }) === "에이랜드 강남점 오프라인",
-  "신규 지점 식별명은 업체·지점·채널을 이어 만든다",
+  }) === "에이랜드 강남점",
+  "신규 지점 이름에는 업체·지점만 쓰고 분류를 붙이지 않는다",
 );
+assert(
+  synthesizeOutboundPartnerName({ groupName: " 텐바이텐 ", channelType: "online" }) ===
+    synthesizeOutboundPartnerName({ groupName: "텐바이텐", channelType: "offline" }),
+  "같은 등록 업체명은 채널이 달라도 같은 이름이다",
+);
+
+const legacyOnline = target({ id: "ten-online", name: "텐바이텐 온라인", normalizedName: "텐바이텐온라인", groupName: "텐바이텐" });
+const daehakro = target({ id: "ten-daehakro", name: "텐바이텐 대학로점 오프라인", normalizedName: "텐바이텐대학로점오프라인", groupName: "텐바이텐", siteName: "대학로점" });
+const nameIndex = buildOutboundPartnerNameIndex([legacyOnline, daehakro], []);
+assert(nameIndex.get("텐바이텐")?.id === "ten-online", "지점 없는 업체명을 기존 온라인 업체 ID에 연결한다");
+assert(nameIndex.get("텐바이텐대학로점")?.id === "ten-daehakro", "업체·지점 이름에는 분류가 없어도 같은 ID에 연결한다");
+assert(nameIndex.get("텐바이텐대학로점오프라인")?.id === "ten-daehakro", "기존 합성명을 쓰는 자료도 계속 연결한다");
+assert(!buildOutboundPartnerNameIndex([daehakro], []).has("텐바이텐"), "지점 이름을 생략한 업체명으로 지점을 임의 선택하지 않는다");
+assert(outboundPartnerNameKeys(legacyOnline).includes("텐바이텐"), "새 업체 중복 검사도 분류 없는 등록명을 인식한다");
+
+const artOnline = target({ id: "art-online", name: "아트박스 온라인", normalizedName: "아트박스온라인", groupName: "아트박스" });
+const artOffline = target({ id: "art-offline", name: "아트박스 오프라인", normalizedName: "아트박스오프라인", groupName: "아트박스" });
+assert(outboundPartnerSaveConflict([artOnline, artOffline], [artOnline, {...artOffline, contactName: "새 담당"}], [], artOffline.id, []) === null, "기존 중복 업체의 연락처 수정은 허용한다");
+const competitor = target({id: "competitor", name: "별도 업체", normalizedName: "별도업체", groupName: "별도 업체"});
+assert(Boolean(outboundPartnerSaveConflict([legacyOnline, competitor], [legacyOnline, {...competitor, groupName: "텐바이텐"}], [], competitor.id, [])), "업체명 수정으로 기존 공식명과 겹치면 막는다");
+assert(Boolean(outboundPartnerSaveConflict([daehakro, competitor], [daehakro, {...competitor, groupName: "텐바이텐", siteName: "대학로점"}], [], competitor.id, [])), "지점 정리도 전체 업체·지점 이름으로 검사한다");
+assert(Boolean(outboundPartnerSaveConflict([legacyOnline, competitor], [legacyOnline, {...competitor, groupName: "새 업체"}], [{targetId: legacyOnline.id, alias: "새업체"}], competitor.id, [])), "정식명 변경으로 다른 업체 별칭과 겹치면 막는다");
+assert(Boolean(outboundPartnerSaveConflict([legacyOnline, competitor], [legacyOnline, competitor], [], competitor.id, ["텐바이텐"])), "다른 업체의 구조화된 공식명도 별칭으로 가져올 수 없다");
+assert(outboundPartnerSaveConflict([legacyOnline, competitor], [legacyOnline, competitor], [], legacyOnline.id, ["텐바이텐"]) === null, "자기 업체명과 같은 별칭은 다른 업체 충돌이 아니다");
+assert(!buildOutboundPartnerNameIndex([artOnline, artOffline], []).has("아트박스"), "기존에 같은 등록명이 두 개면 순서대로 임의 연결하지 않는다");
+assert(buildOutboundPartnerNameIndex([artOffline, artOnline], [{ targetId: artOnline.id, alias: "아트박스" }]).get("아트박스")?.id === artOnline.id, "중복 등록명은 명시적 별칭으로 한 후보를 지정할 수 있다");
+assert(buildOutboundPartnerNameIndex([legacyOnline, daehakro], [{ targetId: daehakro.id, alias: "텐바이텐" }]).get("텐바이텐")?.id === legacyOnline.id, "유일한 등록 업체명을 다른 지점의 별칭이 빼앗지 않는다");
+assert(!buildOutboundPartnerNameIndex([legacyOnline], [{ targetId: "다른-브랜드-업체", alias: "외부업체" }]).has("외부업체"), "조회 범위 밖 업체의 별칭은 연결하지 않는다");
+assert(!buildOutboundPartnerNameIndex([
+  target({ id: "gvg", name: "GVG 온라인", groupName: "GVG" }),
+], []).has("gvg스토어"), "실제 다른 표기는 추측하지 않고 별칭으로 연결한다");
 assert(
   outboundPartnerContactPreview(
     target({ contactName: "김담당", contactPhone: "010-0000-0000" }),

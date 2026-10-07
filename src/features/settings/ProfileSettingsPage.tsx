@@ -8,17 +8,28 @@ import {
 } from '@/components/ui/card'
 import { useAuth } from '@/lib/supabase/auth'
 import { capabilityLabel } from '@/lib/company/capabilities'
+import { useState } from 'react'
+import { useRenderWatch } from '@/lib/diagnostics'
+import { PersonalRequestsPanel } from './PersonalRequestsPanel'
 
 export function ProfileSettingsPage() {
+  useRenderWatch('ProfileSettingsPage')
   const { profile, email } = useAuth()
+  const [part, setPart] = useState<'requests' | 'profile'>('requests')
 
   return (
     <div>
       <PageHeader
         title="마이페이지"
-        description="본명, 팀, 직책은 운영지원팀 또는 관리자에게 변경을 요청합니다."
+        description="내 휴가·근무 신청과 승인 상태, 개인 정보를 확인합니다."
       />
 
+      <div className="personal-page-tabs" role="tablist" aria-label="마이페이지 메뉴">
+        <button type="button" role="tab" id="personal-requests-tab" aria-selected={part === 'requests'} aria-controls="personal-requests-panel" onClick={() => setPart('requests')}>근태·신청</button>
+        <button type="button" role="tab" id="personal-profile-tab" aria-selected={part === 'profile'} aria-controls="personal-profile-panel" onClick={() => setPart('profile')}>내 정보</button>
+      </div>
+      <div id="personal-requests-panel" role="tabpanel" aria-labelledby="personal-requests-tab" hidden={part !== 'requests'}><PersonalRequestsPanel /></div>
+      <div id="personal-profile-panel" role="tabpanel" aria-labelledby="personal-profile-tab" hidden={part !== 'profile'}>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card>
           <CardHeader>
@@ -94,6 +105,7 @@ export function ProfileSettingsPage() {
             </div>
           </CardContent>
         </Card>
+      </div>
       </div>
     </div>
   )

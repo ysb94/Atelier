@@ -5,6 +5,8 @@
 import {
   findDefaultSabangnetFolderId,
   folderPathLabel,
+  filterOutboundPartnersByCategory,
+  OUTBOUND_UNFILED_CATEGORY,
 } from '@/lib/codes/outbound-folder'
 import {
   countUniqueInvoiceOrders,
@@ -144,6 +146,33 @@ const rows = [
 
 const resolution = resolveInvoiceMalls(rows, partners, aliases)
 
+const categoryFolders = [
+  folder({id:'online-root', name:'온라인', parentId:null}),
+  folder({id:'sabang-child', name:'사방넷', parentId:'online-root'}),
+  folder({id:'offline-root', name:'오프라인', parentId:null}),
+  folder({id:'overseas-root', name:'해외', parentId:null}),
+]
+const categoryPartners = [
+  target({id:'online-ten', name:'텐바이텐 온라인', groupName:'텐바이텐', folderId:'sabang-child'}),
+  target({id:'offline-ten', name:'텐바이텐 대학로점 오프라인', groupName:'텐바이텐', siteName:'대학로점', folderId:'offline-root'}),
+  target({id:'overseas', name:'해외 거래처', folderId:'overseas-root', channelType:'unset'}),
+  target({id:'unfiled', name:'미분류 업체', folderId:null}),
+]
+const categoryAliases=[alias({targetId:'online-ten', alias:'10x10'})]
+assert(filterOutboundPartnersByCategory(categoryPartners,categoryFolders,'').length===0, '분류 미선택 시 전체 업체로 연결하지 않는다')
+const onlinePartners=filterOutboundPartnersByCategory(categoryPartners,categoryFolders,'online-root')
+assert(onlinePartners.length===1 && onlinePartners[0]!.id==='online-ten','하위 사방넷 업체는 온라인 분류에 포함한다')
+const offlinePartners=filterOutboundPartnersByCategory(categoryPartners,categoryFolders,'offline-root')
+const offlineResolution=resolveInvoiceMalls([
+  row({rowNumber:2,mallName:'텐바이텐'}),
+  row({rowNumber:3,mallName:'텐바이텐 대학로점'}),
+  row({rowNumber:4,mallName:'10x10'}),
+],offlinePartners,categoryAliases)
+assert(offlineResolution.matchedCount===1 && offlineResolution.unmatchedCount===2,'오프라인 분류에서는 지점 생략과 온라인 별칭을 자동 연결하지 않는다')
+assert(offlineResolution.sites.find(site=>site.status==='matched')?.usageTargetId==='offline-ten','분류 없는 업체·지점 전체 이름은 선택한 오프라인 지점에 연결한다')
+assert(filterOutboundPartnersByCategory(categoryPartners,categoryFolders,'overseas-root')[0]?.id==='overseas','해외는 channel_type이 아닌 실제 최상위 폴더로 구분한다')
+assert(filterOutboundPartnersByCategory(categoryPartners,categoryFolders,OUTBOUND_UNFILED_CATEGORY)[0]?.id==='unfiled','미분류를 별도 범위로 처리한다')
+
 assert(resolution.uniqueCount === 7, '고유 쇼핑몰 수가 맞아야 한다')
 assert(resolution.matchedCount === 4, '정식명·별칭·띄어쓰기 그룹이 연결돼야 한다')
 assert(resolution.unmatchedCount === 1, '미등록 사이트는 차단해야 한다')
@@ -187,6 +216,45 @@ assert(
   officialWins.sites[0]?.usageTargetId === 't-29cm',
   '정식명이 같은 키의 별칭보다 앞서야 한다',
 )
+
+const registeredNames = resolveInvoiceMalls(
+  [
+    row({ rowNumber: 2, mallName: '텐바이텐' }),
+    row({ rowNumber: 3, mallName: '텐바이텐 대학로점' }),
+    row({ rowNumber: 4, mallName: '텐바이텐 · 대학로점' }),
+    row({ rowNumber: 5, mallName: '텐바이텐 대학로점 오프라인' }),
+    row({ rowNumber: 6, mallName: '영풍문고' }),
+  ],
+  [
+    target({ id: 'ten-online', name: '텐바이텐 온라인', groupName: '텐바이텐', channelType: 'online' }),
+    target({ id: 'ten-daehakro', name: '텐바이텐 대학로점 오프라인', groupName: '텐바이텐', siteName: '대학로점', channelType: 'offline' }),
+    target({ id: 'young-jongro', name: '영풍문고 종로점 오프라인', groupName: '영풍문고', siteName: '종로점' }),
+  ],
+  [],
+)
+assert(registeredNames.matchedCount === 3, '업체명·전체 지점명·기존 합성명을 모두 인식한다')
+assert(registeredNames.sites.find((site) => site.key === '텐바이텐')?.usageTargetId === 'ten-online', '지점 없는 텐바이텐은 온라인 등록 ID에 연결한다')
+assert(registeredNames.sites.find((site) => site.key === '텐바이텐대학로점')?.usageTargetId === 'ten-daehakro', '대학로점은 온라인 업체와 별개인 기존 지점 ID에 연결한다')
+assert(registeredNames.sites.find((site) => site.key === '텐바이텐대학로점')?.rowCount === 2, '표시 구분자만 다른 업체·지점 입력은 같은 키로 합친다')
+assert(registeredNames.sites.find((site) => site.key === '텐바이텐대학로점')?.officialName === '텐바이텐 · 대학로점', '송장 연결 결과는 등록된 업체·지점명으로 표시한다')
+assert(registeredNames.sites.find((site) => site.key === '영풍문고')?.status === 'unmatched', '지점이 있는 업체는 업체명만으로 특정 지점에 연결하지 않는다')
+
+const ambiguousRegisteredNames = resolveInvoiceMalls(
+  [row({ rowNumber: 2, mallName: '아트박스' })],
+  [
+    target({ id: 'art-online', name: '아트박스 온라인', groupName: '아트박스' }),
+    target({ id: 'art-offline', name: '아트박스 오프라인', groupName: '아트박스', channelType: 'offline' }),
+  ],
+  [],
+)
+assert(ambiguousRegisteredNames.sites[0]?.status === 'unmatched', '실제 중복 등록된 업체는 임의 선택을 차단한다')
+
+const registeredInactive = resolveInvoiceMalls(
+  [row({ rowNumber: 2, mallName: '티몬' })],
+  [target({ id: 't-tmon', name: '티몬 온라인', groupName: '티몬', active: false })],
+  [],
+)
+assert(registeredInactive.sites[0]?.status === 'inactive', '새 등록명 연결 기준에서도 비활성 업체 출고를 차단한다')
 
 const ready = resolveInvoiceMalls(
   rows.filter((item) => ['무신사', '무 신사', 'MUSINSA', '29CM', '29CM 스토어'].includes(item.mallName)),

@@ -5,13 +5,18 @@ export const ATELIER_STORAGE_ROOT = 'masmarulez'
 
 const ATELIER_SLUGS = new Set(['atelier', 'masmarulez'])
 
-/** Worker가 prefix 없이 type 전체만 돌려주는 현재 계약에서 쓰는 최상위 폴더. */
+/** Worker의 type 목록 중 Masmarulez가 이미 쓰는 최상위 폴더만 허용한다. */
 export const R2_BROWSE_TYPES = new Set([
   'embed',
   'image',
   'spin360',
   'video',
   'logs',
+  'Prod_Images',
+  'all',
+  'common',
+  'product',
+  'renew',
 ])
 
 export type BrandFileCapability = {

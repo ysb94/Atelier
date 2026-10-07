@@ -173,6 +173,13 @@ export function useAuth(): AuthState {
   return value
 }
 
+/** 회사 화면 안에서만 표시 프로필을 바꾼다. AuthGate와 실제 세션은 부모 값을 쓴다. */
+export function AuthDisplayProvider({ profile, children }: { profile: Profile | null; children: ReactNode }) {
+  const auth = useAuth()
+  const value = useMemo(() => ({ ...auth, profile }), [auth, profile])
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+}
+
 /** 승인된 E&J 직원은 모든 브랜드 데이터를 회사 셸에서 볼 수 있다. */
 export function canAccessBrand(
   profile: Profile | null,

@@ -23,6 +23,7 @@ import {
   type CompanyNavItem,
 } from './company-workspace-nav'
 import { WorkspaceHeaderActions } from './WorkspaceHeaderActions'
+import { DeveloperPreviewBar, DeveloperPreviewProvider } from './DeveloperPreview'
 import {
   WorkspaceTabBar,
   WorkspaceTabPanels,
@@ -51,6 +52,13 @@ function withMembers(groups: readonly CompanyNavGroup[], showMembers: boolean) {
 function pageLayoutFor(pathname: string) {
   if (pathname.includes('/design/file-manager') || pathname.includes('/design/styled-cuts')) return 'full' as const
   if (
+    pathname === '/drafts' ||
+    /\/drafts\/all\/?$/.test(pathname) ||
+    /\/drafts\/season\/[^/]+\/?$/.test(pathname)
+  ) {
+    return 'wide' as const
+  }
+  if (
     pathname.includes('/logistics/invoices') ||
     pathname.includes('/logistics/barcode-outbound-data-entry') ||
     pathname.includes('/logistics/bulk-outbound') ||
@@ -66,11 +74,13 @@ function pageLayoutFor(pathname: string) {
 
 export function CompanyLayout() {
   return (
+    <DeveloperPreviewProvider>
     <div className="flex h-full min-h-0">
       <CompanySidebar />
       <CompanyWorkspaceMain />
       <CompanyAiAssistant />
     </div>
+    </DeveloperPreviewProvider>
   )
 }
 
@@ -340,6 +350,7 @@ function CompanyWorkspaceMain() {
         />
         <WorkspaceHeaderActions />
       </div>
+      <DeveloperPreviewBar />
       <div
         data-brand-page-scroll
         className={cn(

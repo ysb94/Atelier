@@ -4,6 +4,27 @@ import { compactOutboundPartnerKey } from '@/lib/codes/outbound-partner'
 /** 온라인 > 직접배송 > 사방넷 > (한 단 더) 까지만 허용한다. */
 export const OUTBOUND_FOLDER_MAX_DEPTH = 4
 
+export const OUTBOUND_UNFILED_CATEGORY = '__unfiled'
+
+/** 분류의 식별자는 채널 표기가 아니라 실제 최상위 폴더다. */
+export function outboundPartnerCategoryKey(
+  folders: readonly CodeUsageTargetFolder[],
+  folderId: string | null | undefined,
+): string {
+  return folderPath(folders, folderId)[0]?.id ?? OUTBOUND_UNFILED_CATEGORY
+}
+
+export function filterOutboundPartnersByCategory<T extends { folderId: string | null }>(
+  targets: readonly T[],
+  folders: readonly CodeUsageTargetFolder[],
+  categoryKey: string,
+): T[] {
+  if (!categoryKey) return []
+  return targets.filter((target) =>
+    outboundPartnerCategoryKey(folders, target.folderId) === categoryKey,
+  )
+}
+
 export type OutboundFolderNode = CodeUsageTargetFolder & {
   children: OutboundFolderNode[]
   depth: number

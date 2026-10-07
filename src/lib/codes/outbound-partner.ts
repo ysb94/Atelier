@@ -170,11 +170,8 @@ export function synthesizeOutboundPartnerName(input: {
   siteName?: string;
   channelType: OutboundChannelType;
 }): string {
-  const channelLabel =
-    input.channelType === "unset"
-      ? ""
-      : OUTBOUND_CHANNEL_TYPE_LABEL[input.channelType];
-  return [input.groupName, input.siteName?.trim(), channelLabel]
+  return [input.groupName, input.siteName]
+    .map((value) => normalizeOutboundPartnerName(value ?? ""))
     .filter(Boolean)
     .join(" ");
 }

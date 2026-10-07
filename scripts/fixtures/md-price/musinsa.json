@@ -1,0 +1,141 @@
+{
+  "props": {
+    "pageProps": {
+      "shared": {
+        "loggedIn": false
+      },
+      "isGlobalRequest": false,
+      "hasDetail": true,
+      "dehydratedState": {
+        "queries": [
+          {
+            "queryKey": [
+              "Detail",
+              2850453
+            ],
+            "state": {
+              "data": {
+                "meta": {
+                  "result": "SUCCESS",
+                  "errorCode": "",
+                  "message": "성공적으로 처리하였습니다."
+                },
+                "data": {
+                  "goodsNo": 2850453,
+                  "goodsNm": "Handle string bag_Solid Purple blue",
+                  "isOutOfStock": false,
+                  "goodsSaleType": "SALE",
+                  "isBuyForMember": false,
+                  "isAppGoods": false,
+                  "isOfflineGoods": false,
+                  "isOnlyGlobalGoods": false,
+                  "hasOptionPrice": false,
+                  "goodsPrice": {
+                    "salePrice": 33000,
+                    "normalPrice": 38000,
+                    "discountRate": 13,
+                    "type": "DEFAULT",
+                    "isSale": true,
+                    "savePoint": 0,
+                    "savePointPercent": 0,
+                    "partnerInformation": null,
+                    "memberDiscountRate": 0,
+                    "memberSavePointRate": 0,
+                    "memberSaveMoneyRate": 0,
+                    "partnerDiscountOn": false,
+                    "couponPrice": 33000,
+                    "totalDiscount": 13,
+                    "couponDiscount": true,
+                    "extraDiscountAmount": 0,
+                    "finalPrice": 33000,
+                    "finalDiscount": 13,
+                    "isLowestPrice": false,
+                    "currency": "KRW",
+                    "isOptimalPrice": false,
+                    "optionPrices": {}
+                  }
+                }
+              }
+            }
+          },
+          {
+            "queryKey": [
+              "Options",
+              2850453
+            ],
+            "state": {
+              "data": {
+                "meta": {
+                  "result": "SUCCESS",
+                  "errorCode": "",
+                  "message": "성공적으로 처리하였습니다."
+                },
+                "data": {
+                  "basic": [
+                    {
+                      "no": 4881078,
+                      "type": "basic",
+                      "displayType": "DROPDOWN",
+                      "name": "컬러",
+                      "standardOptionNo": 1,
+                      "sequence": 0,
+                      "isDeleted": false,
+                      "optionValues": [
+                        {
+                          "no": 5638816,
+                          "optionNo": 4881078,
+                          "name": "FREE",
+                          "code": "FREE",
+                          "sequence": 0,
+                          "standardOptionValueNo": null,
+                          "color": null,
+                          "isDeleted": false,
+                          "imageUrl": ""
+                        }
+                      ]
+                    }
+                  ],
+                  "extra": [],
+                  "optionItems": [
+                    {
+                      "no": 11707338,
+                      "goodsNo": 2850453,
+                      "optionValueNos": [
+                        5638816
+                      ],
+                      "managedCode": "FREE",
+                      "price": 0,
+                      "activated": true,
+                      "isDeleted": false,
+                      "optionValues": [
+                        {
+                          "no": 5638816,
+                          "name": "FREE",
+                          "code": "FREE",
+                          "optionNo": 4881078,
+                          "optionName": "C",
+                          "imageUrl": ""
+                        }
+                      ],
+                      "colors": [
+                        {
+                          "optionItemNo": 11707338,
+                          "colorCode": "39",
+                          "colorType": "MUSINSA"
+                        }
+                      ]
+                    }
+                  ],
+                  "isAppGoods": false,
+                  "isOfflineGoods": false,
+                  "isBuyForMember": false
+                },
+                "error": null
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

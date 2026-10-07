@@ -10,6 +10,7 @@ import {
   normalizeOutboundPartnerName,
   outboundPartnerDeleteBlockedMessage,
 } from '@/lib/codes/outbound-partner'
+import { outboundPartnerSaveConflict } from '@/lib/codes/outbound-partner-matching'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 
@@ -196,6 +197,9 @@ type PostgrestErrorLike = {
 function rpcError(error: PostgrestErrorLike, fallback: string) {
   if (error && isUniqueViolation(error)) {
     const context = `${error.message ?? ''} ${error.details ?? ''}`
+    if (context.includes('이름이 다른 출고업체')) {
+      return new CodeUsageTargetStoreError(error.message ?? fallback, 'duplicate')
+    }
     if (context.includes('brand_alias_key')) {
       return new CodeUsageTargetStoreError(
         '이미 다른 업체에 등록된 별칭입니다.',
@@ -215,6 +219,7 @@ export type SaveCodeUsageTargetInput = CodeUsageTargetInput & {
   active?: boolean
   aliases?: readonly string[]
   folderId?: string | null
+  groupName?: string
 }
 
 /** 업체와 별칭을 한 트랜잭션으로 저장한다. 별칭 배열이 곧 최종 상태다. */
@@ -237,8 +242,38 @@ export async function saveCodeUsageTarget(
   const siteName = normalizeOutboundPartnerName(input.siteName ?? '')
   const normalizedSiteName = compactOutboundPartnerKey(siteName)
 
+  const [previous, existingAliases] = await Promise.all([
+    listCodeUsageTargets(brandId),
+    listCodeUsageTargetAliases(brandId),
+  ])
+  let groupName = input.groupName !== undefined
+    ? normalizeOutboundPartnerName(input.groupName)
+    : previous.find((target) => target.groupId === input.groupId)?.groupName ?? ''
+  if (input.groupId && !groupName && input.groupName === undefined) {
+    const { data: group, error: groupError } = await getSupabase()
+      .from('outbound_partner_groups').select('name').eq('id', input.groupId)
+      .eq('brand_id', brandId).single()
+    if (groupError) throw rpcError(groupError, '업체 그룹을 불러오지 못했습니다.')
+    groupName = group.name
+  }
+  const proposedId = input.id ?? '__new_partner'
+  const proposed: Array<Parameters<typeof outboundPartnerSaveConflict>[1][number]> = previous.filter((target) => target.id !== proposedId).map((target) =>
+    input.groupName !== undefined && input.groupId && target.groupId === input.groupId
+      ? { ...target, groupName }
+      : target,
+  )
+  proposed.push({
+    id: proposedId, brandId, name, normalizedName, groupName, siteName,
+  })
+  const savedAliases = input.aliases ?? []
+  const proposedAliases = existingAliases.filter((alias) => alias.targetId !== proposedId)
+    .map((alias) => ({ targetId: alias.targetId, alias: alias.alias }))
+  proposedAliases.push(...savedAliases.map((alias) => ({ targetId: proposedId, alias })))
+  const conflict = outboundPartnerSaveConflict(previous, proposed, proposedAliases, proposedId, savedAliases)
+  if (conflict) throw new CodeUsageTargetStoreError(conflict, 'duplicate')
+
   const { data, error } = await getSupabase().rpc(
-    'save_outbound_partner_unit_with_aliases',
+    'save_outbound_partner_unit_atomic',
     {
       p_brand_id: brandId,
       p_id: input.id ?? null,
@@ -251,6 +286,7 @@ export async function saveCodeUsageTarget(
       p_note: input.note ?? null,
       p_folder_id: input.folderId ?? null,
       p_group_id: input.groupId ?? null,
+      p_group_name: input.groupName === undefined ? null : groupName,
       p_site_name: siteName,
       p_normalized_site_name: normalizedSiteName,
       p_contact_name: normalizeOutboundPartnerName(input.contactName ?? ''),
@@ -361,7 +397,7 @@ export async function updateCodeUsageTarget(
       | 'contactEmail'
       | 'address'
     >
-  > & { aliases?: readonly string[] },
+  > & { aliases?: readonly string[]; groupName?: string },
 ): Promise<CodeUsageTarget> {
   const { data: existing, error: readError } = await getSupabase()
     .from('code_usage_targets')
@@ -402,6 +438,7 @@ export async function updateCodeUsageTarget(
     note: patch.note ?? current.note,
     folderId: patch.folderId !== undefined ? patch.folderId : current.folderId,
     groupId: patch.groupId !== undefined ? patch.groupId : current.groupId,
+    groupName: patch.groupName,
     siteName: patch.siteName !== undefined ? patch.siteName : current.siteName,
     contactName:
       patch.contactName !== undefined ? patch.contactName : current.contactName,

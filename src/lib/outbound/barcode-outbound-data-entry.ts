@@ -5,11 +5,15 @@ import {
 } from '@/lib/bulk-outbound/idle-collect'
 import {
   compactOutboundPartnerKey,
+  groupOutboundPartnersInFolder,
   normalizeOutboundPartnerName,
   outboundPartnerUnitLabel,
+  type OutboundCompanyInFolder,
 } from '@/lib/codes/outbound-partner'
+import { buildFolderForest, folderPath } from '@/lib/codes/outbound-folder'
 import type { ParsedSheet } from '@/lib/import/parse'
-import type { CodeUsageTarget, CodeUsageTargetAlias, StyleRef } from '@/lib/types'
+import type { CodeUsageTarget, CodeUsageTargetAlias, CodeUsageTargetFolder, StyleRef } from '@/lib/types'
+import { buildOutboundPartnerNameIndex } from '@/lib/codes/outbound-partner-matching'
 
 const VISIBLE_KEY_PREFIX = 'atelier:barcode-outbound-data-entry-target-ids:'
 const DRAFT_KEY_PREFIX = 'atelier:barcode-outbound-data-entry-draft:'
@@ -126,6 +130,58 @@ export function barcodeDataEntryCompanyKey(
   target: Pick<CodeUsageTarget, 'id' | 'groupId'>,
 ) {
   return target.groupId ?? `legacy:${target.id}`
+}
+
+export type BarcodeDataEntryCompanySelection = OutboundCompanyInFolder & {
+  selectionKey: string
+  categoryKey: string
+  categoryName: string
+}
+
+export type BarcodeDataEntryCompanyCategory = {
+  key: string
+  name: string
+  companies: BarcodeDataEntryCompanySelection[]
+}
+
+/** 最上位 폴더 안에서만 업체를 묶는다. 온라인·오프라인의 같은 그룹 ID도 선택은 별개다. */
+export function groupBarcodeDataEntryCompaniesByCategory(
+  targets: readonly CodeUsageTarget[],
+  folders: readonly CodeUsageTargetFolder[],
+): BarcodeDataEntryCompanyCategory[] {
+  const unfiledKey = '__unfiled'
+  const roots = buildFolderForest(folders).map((folder) => ({ key: folder.id, name: folder.name }))
+  const buckets = new Map<string, CodeUsageTarget[]>()
+  const categoryByFolder = new Map<string | null, string>()
+  targets.forEach((target) => {
+    let categoryKey = categoryByFolder.get(target.folderId)
+    if (categoryKey === undefined) {
+      categoryKey = folderPath(folders, target.folderId)[0]?.id ?? unfiledKey
+      categoryByFolder.set(target.folderId, categoryKey)
+    }
+    const bucket = buckets.get(categoryKey)
+    if (bucket) bucket.push(target)
+    else buckets.set(categoryKey, [target])
+  })
+  if (buckets.has(unfiledKey)) roots.push({ key: unfiledKey, name: '미분류' })
+  return roots.map((category) => ({
+    ...category,
+    companies: groupOutboundPartnersInFolder(buckets.get(category.key) ?? []).map((company) => ({
+      ...company,
+      selectionKey: `category:${category.key}|company:${company.key}`,
+      categoryKey: category.key,
+      categoryName: category.name,
+    })),
+  }))
+}
+
+function scopedCompanyKeysByUnit(
+  targets: readonly CodeUsageTarget[],
+  folders: readonly CodeUsageTargetFolder[],
+): Map<string, string> {
+  return new Map(groupBarcodeDataEntryCompaniesByCategory(targets, folders).flatMap((category) =>
+    category.companies.flatMap((company) => company.units.map((unit) => [unit.id, company.selectionKey] as const)),
+  ))
 }
 
 /** 등록 1건 = source_ref 1개. 같은 업체·출고일을 또 등록해도 섞이지 않는다. */
@@ -326,13 +382,16 @@ export function writeBarcodeDataEntryVisibleIds(
 export function visibleCompanyKeysFromUnitIds(
   targets: readonly CodeUsageTarget[],
   visibleIds: string[] | null,
+  folders?: readonly CodeUsageTargetFolder[],
 ): Set<string> | null {
   if (visibleIds == null) return null
   const byId = new Map(targets.map((target) => [target.id, target]))
   const keys = new Set<string>()
+  const scopedKeys = folders ? scopedCompanyKeysByUnit(targets, folders) : null
   for (const id of visibleIds) {
     const target = byId.get(id)
-    if (target) keys.add(barcodeDataEntryCompanyKey(target))
+    const key = target ? (scopedKeys?.get(target.id) ?? barcodeDataEntryCompanyKey(target)) : null
+    if (key) keys.add(key)
   }
   return keys
 }
@@ -340,20 +399,24 @@ export function visibleCompanyKeysFromUnitIds(
 export function unitIdsForCompanyKeys(
   targets: readonly CodeUsageTarget[],
   companyKeys: ReadonlySet<string>,
+  folders?: readonly CodeUsageTargetFolder[],
 ) {
+  const scopedKeys = folders ? scopedCompanyKeysByUnit(targets, folders) : null
   return targets
-    .filter((target) => companyKeys.has(barcodeDataEntryCompanyKey(target)))
+    .filter((target) => companyKeys.has(scopedKeys?.get(target.id) ?? barcodeDataEntryCompanyKey(target)))
     .map((target) => target.id)
 }
 
 export function filterTargetsByVisibleIds(
   targets: readonly CodeUsageTarget[],
   visibleIds: string[] | null,
+  folders?: readonly CodeUsageTargetFolder[],
 ): CodeUsageTarget[] {
-  const companyKeys = visibleCompanyKeysFromUnitIds(targets, visibleIds)
+  const companyKeys = visibleCompanyKeysFromUnitIds(targets, visibleIds, folders)
   if (companyKeys == null) return [...targets]
+  const scopedKeys = folders ? scopedCompanyKeysByUnit(targets, folders) : null
   return targets.filter((target) =>
-    companyKeys.has(barcodeDataEntryCompanyKey(target)),
+    companyKeys.has(scopedKeys?.get(target.id) ?? barcodeDataEntryCompanyKey(target)),
   )
 }
 
@@ -453,24 +516,10 @@ export function buildCompanySiteIndex(
   units: readonly CodeUsageTarget[],
   aliasesByTarget: ReadonlyMap<string, readonly string[]>,
 ): Map<string, CodeUsageTarget> {
-  const index = new Map<string, CodeUsageTarget>()
-
-  function add(key: string, unit: CodeUsageTarget) {
-    if (!key || index.has(key)) return
-    index.set(key, unit)
-  }
-
-  for (const unit of units) {
-    add(siteNameKey(unit.siteName), unit)
-    add(siteNameKey(outboundPartnerUnitLabel(unit)), unit)
-    add(siteNameKey(unit.name), unit)
-    add(unit.normalizedSiteName, unit)
-    add(unit.normalizedName, unit)
-    for (const alias of aliasesByTarget.get(unit.id) ?? []) {
-      add(siteNameKey(alias), unit)
-    }
-  }
-  return index
+  const aliases = units.flatMap((unit) =>
+    (aliasesByTarget.get(unit.id) ?? []).map((alias) => ({ targetId: unit.id, alias })),
+  )
+  return buildOutboundPartnerNameIndex(units, aliases, { includeShortSiteNames: true })
 }
 
 export function resolveBarcodeDataEntrySite(

@@ -39,6 +39,8 @@ import { CompanyWarehouseFinderPage } from '@/features/logistics/WarehouseFinder
 import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
 import { CompanyTemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
 import { PriceComparePage } from '@/features/md/PriceComparePage'
+import { OperationsSupportPage } from '@/features/operations-support/OperationsSupportPage'
+import { DeveloperPreviewPage } from './DeveloperPreview'
 
 function RedirectTo({ to }: { to: string }) {
   return <Navigate to={to} replace />
@@ -85,7 +87,9 @@ function Gated({
 function CompanyScopeLayout() {
   return (
     <CompanyBrandScopeProvider>
+      <DeveloperPreviewPage>
       <Outlet />
+      </DeveloperPreviewPage>
     </CompanyBrandScopeProvider>
   )
 }
@@ -176,6 +180,7 @@ export const companyWorkspaceRoutes = (
       />
       <Route path="usage-codes" element={<CompanyUsageCodePage />} />
       <Route path="partner-codes" element={<CompanyPartnerCodePage />} />
+      <Route path="operations-support" element={<OperationsSupportPage />} />
       <Route path="operations" element={<CompanyOutboundDataPage />} />
       <Route path="outbound-data" element={<RedirectTo to="/operations" />} />
       <Route

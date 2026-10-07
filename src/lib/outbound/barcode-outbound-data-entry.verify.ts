@@ -1,4 +1,4 @@
-import type { CodeUsageTarget } from '@/lib/types'
+import type { CodeUsageTarget, CodeUsageTargetFolder } from '@/lib/types'
 import {
   applyBarcodeDataEntrySiteLookup,
   assignBarcodeDataEntryEmptySite,
@@ -9,6 +9,7 @@ import {
   barcodeDataEntryRunSourceRef,
   barcodeDataEntrySourceRefSuffix,
   groupBarcodeDataEntryHistory,
+  groupBarcodeDataEntryCompaniesByCategory,
   barcodeDataEntryUnresolvedSites,
   filterTargetsByVisibleIds,
   isIsoDate,
@@ -25,6 +26,7 @@ function assert(condition: unknown, message: string): asserts condition {
 function unit(input: {
   id: string
   groupId?: string | null
+  groupName?: string
   name: string
   siteName?: string
   active?: boolean
@@ -39,8 +41,8 @@ function unit(input: {
     channelType: 'offline',
     shippingMethod: 'unset',
     folderId: null,
-    groupId: input.groupId ?? 'kyobo',
-    groupName: '교보문고',
+    groupId: input.groupId === undefined ? 'kyobo' : input.groupId,
+    groupName: input.groupName ?? '교보문고',
     siteName: input.siteName ?? '',
     normalizedSiteName: (input.siteName ?? '').replace(/\s+/g, ''),
     contactName: '',
@@ -223,6 +225,7 @@ const gwanghwamun = unit({
 const otherCompany = unit({
   id: 'u-young',
   groupId: 'youngpoong',
+  groupName: '영풍문고',
   name: '영풍문고 부산대점 오프라인',
   siteName: '부산대점',
 })
@@ -284,6 +287,29 @@ assert(
     ?.siteStatus === 'matched',
   '다른 업체에서는 그 지점명이 연결된다',
 )
+
+const fullNameRows = applyBarcodeDataEntrySiteLookup(
+  parseBarcodeDataEntryText('가방\t1\t교보문고 강남점\n지갑\t2\t교보문고 · 부산점\n가방\t1\t교보문고 강남점 오프라인').rows,
+  companyUnits,
+  new Map(),
+)
+assert(fullNameRows.map((item) => item.usageTargetId).join(',') === 'u-gangnam,u-busan,u-gangnam', '업체와 지점의 전체 이름을 분류 없이 연결하고 기존 합성명도 유지한다')
+const tenOnline = unit({ id: 'ten-online', groupId: 'ten', groupName: '텐바이텐', name: '텐바이텐 온라인' })
+const tenRows = applyBarcodeDataEntrySiteLookup(
+  parseBarcodeDataEntryText('가방\t1\t텐바이텐').rows,
+  [tenOnline],
+  new Map(),
+)
+assert(tenRows[0]?.usageTargetId === 'ten-online', '지점 없는 업체도 분류 없는 등록명으로 연결한다')
+
+const duplicateSite = unit({ id: 'other-gangnam', groupId: 'another', groupName: '다른업체', name: '다른업체 강남점 오프라인', siteName: '강남점' })
+const ambiguousSites = applyBarcodeDataEntrySiteLookup(
+  parseBarcodeDataEntryText('가방\t1\t강남점\n지갑\t1\t교보문고 강남점').rows,
+  [duplicateSite, gangnam],
+  new Map(),
+)
+assert(ambiguousSites[0]?.siteStatus === 'unmatched', '조회 범위에 같은 지점명 두 개가 있으면 첫 업체로 임의 연결하지 않는다')
+assert(ambiguousSites[1]?.usageTargetId === 'u-gangnam', '전체 업체·지점명은 같은 지점명 충돌에도 정확히 연결한다')
 
 const unresolved = barcodeDataEntryUnresolvedSites(resolved)
 assert(
@@ -352,5 +378,60 @@ assert(
   barcodeDataEntryCompanyKey(gangnam) === 'kyobo',
   '업체 키는 그룹 id다',
 )
+
+function folder(id: string, name: string, parentId: string | null, order: number): CodeUsageTargetFolder {
+  return { id, name, parentId, order, brandId: 'brand', normalizedName: name, createdAt: '', updatedAt: '' }
+}
+const categoryFolders = [
+  folder('offline', '오프라인', null, 1),
+  folder('sabang', '사방넷', 'online', 0),
+  folder('retail', '위탁', 'offline', 0),
+  folder('online', '온라인', null, 0),
+  folder('overseas', '해외', null, 2),
+]
+const scopedTenOnline = { ...tenOnline, folderId: 'sabang', channelType: 'online' as const }
+const scopedDaehakro = {
+  ...unit({ id: 'ten-daehakro', groupId: 'ten', groupName: '텐바이텐', name: '텐바이텐 대학로점 오프라인', siteName: '대학로점' }),
+  folderId: 'retail',
+}
+const scopedWarehouse = {
+  ...unit({ id: 'ten-warehouse', groupId: 'ten', groupName: '텐바이텐', name: '텐바이텐 물류센터 오프라인', siteName: '물류센터' }),
+  folderId: 'offline',
+}
+const scopedOverseas = {
+  ...unit({ id: 'ten-overseas', groupId: 'ten', groupName: '텐바이텐', name: '텐바이텐 일본', siteName: '일본' }),
+  folderId: 'overseas', channelType: 'unset' as const,
+}
+const missingFolder = {
+  ...unit({ id: 'unknown-folder', groupId: null, groupName: '', name: '미분류업체' }),
+  folderId: 'missing',
+}
+const scopedTargets = [scopedTenOnline, scopedDaehakro, scopedWarehouse, scopedOverseas, missingFolder]
+const categorySelections = groupBarcodeDataEntryCompaniesByCategory(scopedTargets, categoryFolders)
+assert(categorySelections.map((category) => category.name).join(',') === '온라인,오프라인,해외,미분류', '최상위 폴더만 설정 순서대로 보여 주고 사방넷·위탁은 하위 분류로 펼치지 않는다')
+const onlineCompany = categorySelections[0]!.companies[0]!
+const offlineCompany = categorySelections[1]!.companies[0]!
+const overseasCompany = categorySelections[2]!.companies[0]!
+assert(onlineCompany.units.map((item) => item.id).join() === 'ten-online', '온라인 업체 선택에는 온라인 대상만 포함한다')
+assert(offlineCompany.units.map((item) => item.id).sort().join() === 'ten-daehakro,ten-warehouse', '오프라인 하위 폴더와 루트의 지점은 같은 큰 분류로 묶는다')
+assert(overseasCompany.units[0]?.id === 'ten-overseas', '해외는 채널 속성 대신 실제 최상위 폴더로 구분한다')
+assert(new Set([onlineCompany.selectionKey, offlineCompany.selectionKey, overseasCompany.selectionKey]).size === 3, '같은 업체 그룹이라도 분류별 선택 키와 임시 입력 키는 다르다')
+assert([onlineCompany.key, offlineCompany.key, overseasCompany.key].every((key) => key === 'ten'), 'DB 등록과 기존 이력에 쓰는 그룹 ID는 그대로 유지한다')
+assert(categorySelections.reduce((sum, category) => sum + category.companies.reduce((total, company) => total + company.units.length, 0), 0) === scopedTargets.length, '모든 출고 대상은 한 최상위 분류에만 포함된다')
+assert(categorySelections[3]!.companies[0]!.units[0]?.id === missingFolder.id, '분류가 없거나 사라진 폴더의 업체도 목록에서 빠지지 않는다')
+
+const offlineOnlyKeys = visibleCompanyKeysFromUnitIds(scopedTargets, [scopedDaehakro.id], categoryFolders)!
+assert(offlineOnlyKeys.has(offlineCompany.selectionKey) && !offlineOnlyKeys.has(onlineCompany.selectionKey), '지점 표시 설정은 같은 그룹의 다른 분류로 확대하지 않는다')
+assert(unitIdsForCompanyKeys(scopedTargets, offlineOnlyKeys, categoryFolders).sort().join() === 'ten-daehakro,ten-warehouse', '오프라인 업체 체크는 해당 분류의 지점만 저장한다')
+assert(filterTargetsByVisibleIds(scopedTargets, [scopedDaehakro.id], categoryFolders).map((item) => item.id).sort().join() === 'ten-daehakro,ten-warehouse', '기존 지점 ID 기반 표시 설정도 현재 분류의 업체 범위로 유지한다')
+
+const categoryPasted = parseBarcodeDataEntryText('가방\t1\t텐바이텐\n지갑\t1\t텐바이텐 대학로점\n가방\t1\t온라인몰').rows
+const allCategoryAliases = new Map([[scopedTenOnline.id, ['온라인몰']]])
+const offlineResolved = applyBarcodeDataEntrySiteLookup(categoryPasted, offlineCompany.units, allCategoryAliases)
+assert(offlineResolved[0]?.siteStatus === 'unmatched', '오프라인에서 지점을 생략한 텐바이텐 입력을 온라인으로 연결하지 않는다')
+assert(offlineResolved[1]?.usageTargetId === scopedDaehakro.id, '오프라인 전체 지점명은 기존 지점 ID에 연결한다')
+assert(offlineResolved[2]?.siteStatus === 'unmatched', '온라인에 등록된 별칭도 오프라인 작업 후보에 들어오지 않는다')
+assert(applyBarcodeDataEntrySiteLookup(categoryPasted, onlineCompany.units, allCategoryAliases)[0]?.usageTargetId === scopedTenOnline.id, '온라인 작업에서는 텐바이텐 업체명 그대로 연결한다')
+assert(applyBarcodeDataEntrySiteLookup(twoCol.rows, offlineCompany.units, new Map())[0]?.siteStatus === 'empty', '오프라인 지점이 여러 개면 빈 지점 입력도 특정 대상에 자동 연결하지 않는다')
 
 console.log('barcode-outbound-data-entry.verify ok')

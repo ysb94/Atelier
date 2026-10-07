@@ -12,6 +12,7 @@ import {
   FileText,
   FolderTree,
   Hash,
+  Headset,
   Home,
   Images,
   LayoutGrid,
@@ -119,6 +120,12 @@ export const companyNavGroups: CompanyNavGroup[] = [
     title: '중국팀',
     items: [
       { to: '/china/work-orders', label: '작업 지시서', icon: FileText },
+    ],
+  },
+  {
+    title: '운영지원',
+    items: [
+      { to: '/operations-support', label: '운영지원', icon: Headset },
     ],
   },
   {

@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  Building2,
   Users,
   Network,
   Search,
   Settings2,
   SlidersHorizontal,
-  ChevronDown,
   Pencil,
   CircleAlert,
   Check,
@@ -17,7 +15,10 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
-import { canEditOrgAssignment } from '@/lib/company/capabilities'
+import {
+  canEditOrgAssignment,
+  OPERATIONS_SUPPORT_DEPARTMENT,
+} from '@/lib/company/capabilities'
 import { personInitials } from '@/lib/company/person-name'
 import { useAuth } from '@/lib/supabase/auth'
 import {
@@ -34,6 +35,7 @@ import {
   type PersonnelTitleKind,
 } from '@/lib/supabase/profiles'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
+import { OrgDirectory } from './OrgDirectory'
 
 const TEAM_TONES = [
   'bg-[#f1e7d6] text-[#7a5a2b]',
@@ -74,12 +76,19 @@ function compareMembers(
   )
 }
 
-export function OrgChartPage() {
-  useRenderWatch('OrgChartPage')
+export function OrgChartPage({
+  mode = 'chart',
+  showHeading = true,
+}: {
+  mode?: 'chart' | 'manage'
+  showHeading?: boolean
+} = {}) {
+  useRenderWatch(mode === 'manage' ? 'OrgChartManage' : 'OrgChartPage')
   const { profile } = useAuth()
   const queryClient = useQueryClient()
-  const canEdit = canEditOrgAssignment(profile)
-  const [view, setView] = useState<OrgView>('chart')
+  const canEdit = mode === 'manage' && canEditOrgAssignment(profile)
+  const [view, setView] = useState<OrgView>(mode === 'manage' ? 'members' : 'chart')
+  const pinnedSupportFilter = useRef(mode !== 'manage')
   const [search, setSearch] = useState('')
   const [departmentFilter, setDepartmentFilter] = useState('all')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -134,7 +143,7 @@ export function OrgChartPage() {
     () => new Map(grades.map((t) => [t.name, t.sortOrder])),
     [grades],
   )
-  const { staffed, empty, unsetMembers } = useMemo(() => {
+  const { staffed, unsetMembers } = useMemo(() => {
     const activeIds = new Set(departments.map((dept) => dept.id))
     const byDepartment = new Map<string, OrgChartMember[]>()
     const unassigned: OrgChartMember[] = []
@@ -161,7 +170,11 @@ export function OrgChartPage() {
         compareMembers(a, b, dutyOrder, gradeOrder),
       ),
     }))
-    const populated = teams.filter((team) => team.members.length > 0)
+    const populated = teams.filter(
+      (team) =>
+        team.members.length > 0 ||
+        mode === 'chart',
+    )
     if (unassigned.length)
       populated.push({
         id: 'unassigned',
@@ -173,13 +186,12 @@ export function OrgChartPage() {
       })
     return {
       staffed: populated,
-      empty: teams.filter((team) => team.members.length === 0),
       unsetMembers: unset,
     }
-  }, [departments, members, dutyOrder, gradeOrder])
+  }, [departments, members, dutyOrder, gradeOrder, mode])
 
   const needle = search.trim().toLocaleLowerCase('ko')
-  const { visibleTeams, visibleEmpty, visibleMembers } = useMemo(() => {
+  const { visibleMembers } = useMemo(() => {
     const matches = (member: OrgChartMember, teamName: string) =>
       [memberName(member), member.position, member.jobGrade, teamName]
         .filter(Boolean)
@@ -194,22 +206,35 @@ export function OrgChartPage() {
         ...team,
         members: team.members.filter((member) => matches(member, team.name)),
       }))
-      .filter((team) => team.members.length > 0)
+      .filter((team) => {
+        if (team.members.length > 0) return true
+        if (
+          mode !== 'chart' ||
+          team.name.trim() !== OPERATIONS_SUPPORT_DEPARTMENT
+        ) {
+          return false
+        }
+        return !needle || team.name.toLocaleLowerCase('ko').includes(needle)
+      })
     return {
       visibleTeams: filteredTeams,
-      visibleEmpty: empty.filter(
-        (team) =>
-          (departmentFilter === 'all' || departmentFilter === team.id) &&
-          team.name.toLocaleLowerCase('ko').includes(needle),
-      ),
       visibleMembers: filteredTeams
         .flatMap((team) => team.members)
         .sort((a, b) => compareMembers(a, b, dutyOrder, gradeOrder)),
     }
-  }, [staffed, empty, departmentFilter, needle, dutyOrder, gradeOrder])
+  }, [staffed, departmentFilter, needle, dutyOrder, gradeOrder, mode])
   const editingMember =
     members.find((member) => member.id === editingId) ?? null
-  const activeView = canEdit ? view : 'chart'
+  const activeView = mode === 'chart' ? 'chart' : view
+  useEffect(() => {
+    if (pinnedSupportFilter.current || mode !== 'manage') return
+    const support = departments.find(
+      (dept) => dept.name.trim() === OPERATIONS_SUPPORT_DEPARTMENT,
+    )
+    if (!support) return
+    pinnedSupportFilter.current = true
+    setDepartmentFilter(support.id)
+  }, [departments, mode])
   const loading =
     departmentsQuery.isPending ||
     membersQuery.isPending ||
@@ -223,61 +248,80 @@ export function OrgChartPage() {
       queryClient.invalidateQueries({ queryKey: ['personnelTitles'] }),
     ])
   }
-  function clearFilters() {
-    setSearch('')
-    setDepartmentFilter('all')
+
+  if (mode === 'chart') {
+    return (
+      <OrgDirectory
+        teams={staffed}
+        loading={loading}
+        failed={Boolean(directoryError)}
+        titlesFailed={Boolean(titlesQuery.error)}
+        onRetry={() => {
+          void departmentsQuery.refetch()
+          void membersQuery.refetch()
+        }}
+        onRetryTitles={() => { void titlesQuery.refetch() }}
+      />
+    )
   }
 
   return (
     <div className="space-y-5">
-      <PageHeader
-        title="조직도"
-        description="E&J의 부서와 직원 배치를 한눈에 확인합니다."
-      />
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        <OrgStat
-          icon={<Users className="size-4" />}
-          label="전체 직원"
-          value={
-            loading || membersQuery.isError
-              ? '—'
-              : `${formatNumber(members.length)}명`
+      {showHeading ? (
+        <PageHeader
+          title={mode === 'manage' ? '운영지원' : '조직도'}
+          description={
+            mode === 'manage'
+              ? '운영지원팀의 직원 배치와 직책·직급을 관리합니다.'
+              : 'E&J의 부서와 직원 배치를 한눈에 확인합니다.'
           }
-          detail="재직 중인 직원"
         />
-        <OrgStat
-          icon={<Network className="size-4" />}
-          label="직원이 있는 부서"
-          value={
-            loading || directoryError
-              ? '—'
-              : `${formatNumber(
-                  staffed.filter((t) => t.id !== 'unassigned').length,
-                )}개`
-          }
-          detail={`전체 ${formatNumber(departments.length)}개 부서`}
-        />
-        <OrgStat
-          icon={<SlidersHorizontal className="size-4" />}
-          label="설정 확인"
-          value={
-            loading || directoryError
-              ? '—'
-              : `${formatNumber(unsetMembers.length)}명`
-          }
-          detail="소속 또는 직책·직급 확인"
-          className="col-span-2 sm:col-span-1"
-        />
-      </div>
+      ) : null}
+      {mode === 'manage' ? (
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <OrgStat
+            icon={<Users className="size-4" />}
+            label="전체 직원"
+            value={
+              loading || membersQuery.isError
+                ? '—'
+                : `${formatNumber(members.length)}명`
+            }
+            detail="재직 중인 직원"
+          />
+          <OrgStat
+            icon={<Network className="size-4" />}
+            label="직원이 있는 부서"
+            value={
+              loading || directoryError
+                ? '—'
+                : `${formatNumber(
+                    staffed.filter((t) => t.id !== 'unassigned').length,
+                  )}개`
+            }
+            detail={`전체 ${formatNumber(departments.length)}개 부서`}
+          />
+          <OrgStat
+            icon={<SlidersHorizontal className="size-4" />}
+            label="설정 확인"
+            value={
+              loading || directoryError
+                ? '—'
+                : `${formatNumber(unsetMembers.length)}명`
+            }
+            detail="소속 또는 직책·직급 확인"
+            className="col-span-2 sm:col-span-1"
+          />
+        </div>
+      ) : null}
 
-      {canEdit ? (
+      {mode === 'manage' ? (
         <nav
-          aria-label="조직도 보기 방식"
+          aria-label="운영지원 보기 방식"
           className="flex flex-wrap gap-1 rounded-xl border border-border bg-muted/60 p-1"
         >
           {(
             [
-              { id: 'chart', label: '조직도', icon: Network },
               { id: 'members', label: '직원 배치', icon: Users },
               { id: 'titles', label: '직책·직급 설정', icon: Settings2 },
             ] as const
@@ -299,7 +343,9 @@ export function OrgChartPage() {
             </button>
           ))}
           <span className="ml-auto hidden items-center px-3 text-xs text-muted-foreground lg:flex">
-            수정 권한 · 개발자 / 운영지원팀
+            {canEdit
+              ? '배치와 직책·직급을 수정할 수 있습니다'
+              : '조회만 할 수 있습니다'}
           </span>
         </nav>
       ) : null}
@@ -346,7 +392,7 @@ export function OrgChartPage() {
         </div>
       ) : null}
 
-      {activeView !== 'titles' ? (
+      {mode === 'manage' && activeView !== 'titles' ? (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="relative min-w-0 flex-1 sm:max-w-sm">
             <Search
@@ -402,108 +448,14 @@ export function OrgChartPage() {
         </div>
       ) : null}
 
-      {activeView === 'chart' ? (
-        <section
-          aria-label="부서별 조직도"
-          className="overflow-hidden rounded-2xl border border-border bg-card"
-        >
-          <header className="flex flex-wrap items-center justify-between gap-4 border-b border-border bg-muted/25 px-5 py-5 sm:px-6">
-            <div className="flex items-center gap-3">
-              <span className="flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
-                <Building2 className="size-6" />
-              </span>
-              <div>
-                <h2 className="text-lg font-semibold tracking-tight">E&J</h2>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  회사 공통 조직 · 부서별 직원 현황
-                </p>
-              </div>
-            </div>
-            <span className="rounded-full border border-border bg-card px-3 py-1.5 text-xs text-muted-foreground">
-              {canEdit
-                ? '직원을 선택하면 배치를 수정할 수 있습니다'
-                : '재직 중인 직원의 소속과 직책을 확인합니다'}
-            </span>
-          </header>
-          <div className="p-4 sm:p-6">
-            {loading ? (
-              <TeamSkeletons />
-            ) : directoryError ? (
-              <p className="py-10 text-center text-sm text-muted-foreground">
-                조직 정보를 불러오면 부서별 직원이 표시됩니다.
-              </p>
-            ) : visibleTeams.length || visibleEmpty.length ? (
-              <>
-                {visibleTeams.length ? (
-                  <ul className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">
-                    {visibleTeams.map((team) => (
-                      <TeamCard
-                        key={team.id}
-                        team={team}
-                        onEdit={
-                          canEdit && !titlesQuery.isError
-                            ? setEditingId
-                            : undefined
-                        }
-                      />
-                    ))}
-                  </ul>
-                ) : null}
-                {visibleEmpty.length ? (
-                  <details
-                    className={cn(
-                      'group rounded-xl border border-dashed border-border bg-muted/20',
-                      visibleTeams.length > 0 && 'mt-5',
-                    )}
-                    open={hasFilter || undefined}
-                  >
-                    <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-3 text-sm font-medium [&::-webkit-details-marker]:hidden">
-                      <Building2 className="size-4 text-muted-foreground" />
-                      직원이 없는 부서
-                      <span className="rounded-md bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                        {formatNumber(visibleEmpty.length)}
-                      </span>
-                      <ChevronDown className="ml-auto size-4 text-muted-foreground transition-transform group-open:rotate-180" />
-                    </summary>
-                    <ul className="flex flex-wrap gap-2 border-t border-border/60 px-4 py-4">
-                      {visibleEmpty.map((team) => (
-                        <li
-                          key={team.id}
-                          className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-muted-foreground"
-                        >
-                          {team.name}
-                          <span className="ml-3 text-muted-foreground/60">
-                            0명
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </details>
-                ) : null}
-              </>
-            ) : (
-              <div className="flex flex-col items-center gap-3 py-12 text-center">
-                <Search className="size-7 text-muted-foreground/50" />
-                <p className="text-sm text-muted-foreground">
-                  {hasFilter
-                    ? '검색 조건에 맞는 직원이나 부서가 없습니다.'
-                    : '등록된 부서와 직원이 없습니다.'}
-                </p>
-                {hasFilter ? (
-                  <Button size="sm" variant="outline" onClick={clearFilters}>
-                    검색 초기화
-                  </Button>
-                ) : null}
-              </div>
-            )}
-          </div>
-        </section>
-      ) : activeView === 'members' ? (
+      {activeView === 'members' ? (
         <div className="space-y-4">
           {!loading && !directoryError ? (
             <AssignmentStatus
               members={unsetMembers}
-              onEdit={!titlesQuery.isError ? setEditingId : undefined}
+              onEdit={
+                canEdit && !titlesQuery.isError ? setEditingId : undefined
+              }
             />
           ) : null}
           <MemberAssignmentTable
@@ -514,7 +466,7 @@ export function OrgChartPage() {
             grades={grades}
             departmentName={departmentName}
             onSaved={refreshAssignments}
-            canChange={!directoryError && !titlesQuery.isError}
+            canChange={canEdit && !directoryError && !titlesQuery.isError}
             filtered={hasFilter}
           />
         </div>
@@ -596,136 +548,6 @@ function OrgStat({
         <p className="text-xs text-muted-foreground">{detail}</p>
       </div>
     </div>
-  )
-}
-
-function TeamCard({
-  team,
-  onEdit,
-}: {
-  team: TeamGroup
-  onEdit?: (memberId: string) => void
-}) {
-  return (
-    <li className="min-w-0">
-      <article className="overflow-hidden rounded-xl border border-border bg-card">
-        <header className="flex items-center gap-3 border-b border-border/70 bg-muted/20 px-4 py-4">
-          <span
-            aria-hidden
-            className={cn(
-              'flex size-10 shrink-0 items-center justify-center rounded-xl text-sm font-semibold',
-              team.tone,
-            )}
-          >
-            {team.name.trim().slice(0, 1).toUpperCase()}
-          </span>
-          <h3 className="min-w-0 flex-1 text-sm font-semibold">{team.name}</h3>
-          <span className="rounded-full bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground ring-1 ring-border">
-            {formatNumber(team.members.length)}명
-          </span>
-        </header>
-        <ul className="divide-y divide-border/60 px-3 py-1">
-          {team.members.map((member) => {
-            const content = (
-              <>
-                <span
-                  aria-hidden
-                  className={cn(
-                    'flex size-9 shrink-0 items-center justify-center rounded-full text-xs font-semibold',
-                    team.tone,
-                  )}
-                >
-                  {personInitials(member.displayName)}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-medium">
-                    {memberName(member)}
-                  </span>
-                  <TitlePills duty={member.position} grade={member.jobGrade} />
-                </span>
-                {onEdit ? (
-                  <Pencil className="size-3.5 shrink-0 text-muted-foreground/40 transition-colors group-hover:text-foreground" />
-                ) : null}
-              </>
-            )
-            return (
-              <li key={member.id}>
-                {onEdit ? (
-                  <button
-                    type="button"
-                    aria-label={`${memberName(member)} 배치 수정`}
-                    onClick={() => onEdit(member.id)}
-                    className="group flex w-full items-center gap-3 rounded-lg px-2 py-3 text-left transition-colors hover:bg-muted/60 focus-visible:outline-2 focus-visible:outline-ring"
-                  >
-                    {content}
-                  </button>
-                ) : (
-                  <div className="flex items-center gap-3 px-2 py-3">
-                    {content}
-                  </div>
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      </article>
-    </li>
-  )
-}
-
-function TitlePills({
-  duty,
-  grade,
-}: {
-  duty: string | null
-  grade: string | null
-}) {
-  const dutyLabel = duty?.trim(),
-    gradeLabel = grade?.trim()
-  if (!dutyLabel && !gradeLabel)
-    return (
-      <span className="mt-1 block text-xs text-muted-foreground">
-        직책·직급 미설정
-      </span>
-    )
-  return (
-    <span className="mt-1 flex flex-wrap gap-1">
-      {dutyLabel ? (
-        <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium text-foreground">
-          {dutyLabel}
-        </span>
-      ) : null}
-      {gradeLabel ? (
-        <span className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground">
-          {gradeLabel}
-        </span>
-      ) : null}
-    </span>
-  )
-}
-
-function TeamSkeletons() {
-  return (
-    <ul
-      aria-label="조직도 불러오는 중"
-      className="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
-    >
-      {[0, 1, 2].map((key) => (
-        <li
-          key={key}
-          className="animate-pulse rounded-xl border border-border p-4"
-        >
-          <div className="flex items-center gap-3">
-            <span className="size-10 rounded-xl bg-muted" />
-            <span className="h-3 w-24 rounded bg-muted" />
-          </div>
-          <div className="mt-5 space-y-4 border-t border-border pt-4">
-            <span className="block h-4 w-32 rounded bg-muted" />
-            <span className="block h-4 w-24 rounded bg-muted" />
-          </div>
-        </li>
-      ))}
-    </ul>
   )
 }
 

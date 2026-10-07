@@ -14,6 +14,8 @@ dist-ssr
 supabase/.temp/
 tmp/
 .tmp/
+.venv-md-price/
+__pycache__/
 .cursor/coordinator-state/
 outputs/masma-finder-snapshots/*
 !outputs/masma-finder-snapshots/.gitkeep

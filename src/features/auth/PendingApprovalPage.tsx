@@ -1,5 +1,4 @@
 import { useAuth } from '@/lib/supabase/auth'
-import { capabilityLabel } from '@/lib/company/capabilities'
 import { Button } from '@/components/ui/button'
 
 type PendingApprovalPageProps = {
@@ -22,7 +21,7 @@ export function PendingApprovalPage({
 
   const description =
     mode === 'pending'
-      ? '운영지원팀 또는 관리자가 본명과 신청 내용을 확인하면 E&J 홈에 들어갈 수 있습니다.'
+      ? '운영지원팀 또는 관리자가 이름과 부서를 확인하고 승인하면 E&J 홈에 들어갈 수 있습니다.'
       : mode === 'rejected'
         ? '내용을 수정해 다시 신청하거나, 운영진에게 문의해 주세요.'
         : '운영진에게 문의해 주세요. 정지 해제 전에는 회사에 들어갈 수 없습니다.'
@@ -39,7 +38,7 @@ export function PendingApprovalPage({
         {profile ? (
           <dl className="mt-6 space-y-3 rounded-lg bg-muted/40 p-4 text-sm">
             <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">본명</dt>
+              <dt className="text-muted-foreground">이름</dt>
               <dd className="text-right font-medium">
                 {profile.displayName || email}
               </dd>
@@ -49,31 +48,9 @@ export function PendingApprovalPage({
               <dd className="text-right">{email}</dd>
             </div>
             <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">팀</dt>
+              <dt className="text-muted-foreground">부서</dt>
               <dd className="text-right">{profile.departmentName ?? '-'}</dd>
             </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">직책</dt>
-              <dd className="text-right">
-                {profile.position?.trim()
-                  ? profile.position
-                  : '승인할 때 정해집니다'}
-              </dd>
-            </div>
-            <div className="flex justify-between gap-4">
-              <dt className="text-muted-foreground">업무 역량</dt>
-              <dd className="text-right">
-                {profile.capabilities.length > 0
-                  ? profile.capabilities.map(capabilityLabel).join(', ')
-                  : '-'}
-              </dd>
-            </div>
-            {profile.requestNote ? (
-              <div className="flex justify-between gap-4">
-                <dt className="text-muted-foreground">남긴 말</dt>
-                <dd className="text-right">{profile.requestNote}</dd>
-              </div>
-            ) : null}
           </dl>
         ) : null}
 

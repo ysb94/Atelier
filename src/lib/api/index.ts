@@ -2120,7 +2120,7 @@ export async function updateCodeUsageTarget(
       | 'contactEmail'
       | 'address'
     >
-  > & { aliases?: readonly string[] },
+  > & { aliases?: readonly string[]; groupName?: string },
 ): Promise<CodeUsageTarget> {
   await delay()
   return codeUsageTargetStore.updateCodeUsageTarget(id, patch)

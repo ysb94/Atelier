@@ -47,7 +47,7 @@ function rememberInteraction(event: Event) {
   }
 }
 
-function interactionContext() {
+export function interactionContext() {
   return {
     path: `${location.pathname}${location.search}`,
     lastInput: lastInteraction
