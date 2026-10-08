@@ -4,6 +4,7 @@ import { Input, Select } from '@/components/ui/input'
 import { formatNumber } from '@/lib/utils'
 import { DraftNotice, memberLabel, OpsPanelFrame, OpsStat } from './OpsStat'
 import { useOpsDirectory } from './ops-directory'
+import { LeaveApprovalPanel } from './LeaveApprovalPanel'
 
 type LeaveDraft = { granted: string; used: string; note: string }
 
@@ -20,13 +21,32 @@ function formatDays(value: number) {
   return Number.isInteger(value) ? String(value) : value.toFixed(1)
 }
 
+const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
+
+function hireLabel(date: string | null) {
+  if (!date) return '없음'
+  const weekday = WEEKDAYS[new Date(`${date}T12:00:00`).getDay()]
+  return weekday ? `${date} (${weekday})` : date
+}
+
 export function LeavePanel() {
+  const [view, setView] = useState('requests')
+  return <div className="space-y-4">
+    <div className="flex gap-2" role="group" aria-label="연차관리 보기">
+      <Button variant={view === 'requests' ? 'default' : 'outline'} aria-pressed={view === 'requests'} onClick={() => setView('requests')}>신청 현황</Button>
+      <Button variant={view === 'balance' ? 'default' : 'outline'} aria-pressed={view === 'balance'} onClick={() => setView('balance')}>연차 현황 · 시안</Button>
+    </div>
+    {view === 'requests' ? <LeaveApprovalPanel readOnly/> : <LeaveBalancePanel/>}
+  </div>
+}
+
+function LeaveBalancePanel() {
   const directory = useOpsDirectory()
   const year = new Date().getFullYear()
   const [selectedYear, setSelectedYear] = useState(String(year))
   const [departmentId, setDepartmentId] = useState('all')
   const [draftsByYear, setDraftsByYear] = useState<Record<string, Record<string, LeaveDraft>>>({})
-  const drafts = draftsByYear[selectedYear] ?? {}
+  const drafts = useMemo(() => draftsByYear[selectedYear] ?? {}, [draftsByYear, selectedYear])
 
   const visible = useMemo(() => {
     return directory.members
@@ -101,11 +121,12 @@ export function LeavePanel() {
       </div>
       <article className="overflow-hidden rounded-2xl border border-border bg-card">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-left text-sm">
+          <table className="w-full min-w-[860px] text-left text-sm">
             <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
               <tr>
                 <th className="px-4 py-2.5 font-medium">이름</th>
                 <th className="px-4 py-2.5 font-medium">부서</th>
+                <th className="px-4 py-2.5 font-medium">입사일</th>
                 <th className="px-4 py-2.5 font-medium">부여</th>
                 <th className="px-4 py-2.5 font-medium">사용</th>
                 <th className="px-4 py-2.5 font-medium">잔여</th>
@@ -114,16 +135,16 @@ export function LeavePanel() {
             </thead>
             <tbody>
               {directory.loading ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">불러오는 중...</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">불러오는 중...</td></tr>
               ) : directory.error ? (
                 <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center">
+                  <td colSpan={7} className="px-4 py-8 text-center">
                     <p className="text-sm text-danger">직원 목록을 불러오지 못했습니다.</p>
                     <Button className="mt-3" size="sm" variant="outline" onClick={directory.refetch}>다시 불러오기</Button>
                   </td>
                 </tr>
               ) : visible.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-8 text-center text-muted-foreground">표시할 직원이 없습니다.</td></tr>
+                <tr><td colSpan={7} className="px-4 py-8 text-center text-muted-foreground">표시할 직원이 없습니다.</td></tr>
               ) : visible.map((member) => {
                 const draft = drafts[member.id] ?? EMPTY_DRAFT
                 const granted = parseDays(draft.granted)
@@ -133,6 +154,7 @@ export function LeavePanel() {
                   <tr key={member.id} className="border-b border-border/70 last:border-0">
                     <td className="px-4 py-3 font-medium">{memberLabel(member.displayName)}</td>
                     <td className="px-4 py-3 text-muted-foreground">{directory.departmentName(member.departmentId)}</td>
+                    <td className="px-4 py-3 tabular-nums text-muted-foreground">{hireLabel(member.hireDate)}</td>
                     <td className="px-4 py-2">
                       <Input
                         aria-label={`${memberLabel(member.displayName)} 부여 일수`}

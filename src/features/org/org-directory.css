@@ -57,6 +57,18 @@
 .org-team-card>header{display:flex;align-items:center;gap:10px;padding:14px 15px;background:#f1f5f9;border-bottom:1px solid #e1e8ef;border-top:3px solid var(--org-blue)}
 .org-team-symbol{display:grid;place-items:center;width:30px;height:30px;flex:none;background:#e1eaf4;color:#477097;border-radius:8px;font-size:12px;font-weight:600}
 .org-team-card h3{font-size:13px;font-weight:600;flex:1;min-width:0;overflow-wrap:anywhere}
+.org-team-heading{display:flex;align-items:center;flex-wrap:wrap;gap:5px 8px;flex:1;min-width:0}
+.org-team-heading h3{flex:initial}
+.org-team-approvers{display:inline-flex;align-items:center;flex-wrap:wrap;gap:4px 6px;max-width:100%}
+.org-team-approver{font-size:10px!important;font-weight:400;color:#647a8b!important;background:#fff9;border:1px solid #dce5ed;padding:2px 6px;border-radius:5px;overflow-wrap:anywhere}
+.org-my-team-label,.org-directory-results-heading .org-my-team-label{display:inline-block;font-size:10px!important;font-weight:500;color:var(--org-red)!important;white-space:nowrap}
+.org-department-list .org-my-team-label{margin-left:6px}
+.org-team-card.is-my-team,.org-people-scroll.is-my-team{border:2px solid var(--org-red)}
+.org-team-card.is-my-team>header{border-top-color:var(--org-red)}
+.org-department-list>button.is-my-team{border-color:var(--org-red)}
+.org-team-card li.is-me{background:#fff0f1;margin:4px -7px;padding:10px 7px;border-radius:7px;border-bottom-color:transparent}
+.org-people-table tr.is-me{background:#fff0f1}
+.org-me-label{display:inline-block;margin-left:7px;border-radius:4px;padding:1px 5px;background:#f8dfe3;color:var(--org-red);font-size:10px;font-weight:500;white-space:nowrap}
 .org-team-card>header>span:last-child{font-size:11px;color:#718292;flex:none}
 .org-team-card>ul{padding:0 14px}
 .org-team-card li{display:flex;align-items:center;gap:10px;min-height:61px;padding:10px 0;border-bottom:1px solid #f0f0eb}

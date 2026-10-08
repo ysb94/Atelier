@@ -1,4 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
+import { canAccessOperationsSupport, canManagePersonnel, isCompanyReviewer } from '../../lib/company/capabilities.ts'
 import {
   Boxes,
   Building2,
@@ -161,6 +162,18 @@ export const membersNavItem: CompanyNavItem = {
   to: '/members',
   label: '멤버·권한',
   icon: Users,
+}
+
+export function companyNavGroupsForProfile(
+  profile: Parameters<typeof canAccessOperationsSupport>[0],
+) {
+  const showOperationsSupport = canAccessOperationsSupport(profile)
+  const showMembers = canManagePersonnel(profile) || isCompanyReviewer(profile)
+  return companyNavGroups
+    .filter(group => showOperationsSupport || !group.items.some(item => item.to === '/operations-support'))
+    .map(group => group.title === '회사' && showMembers
+      ? { ...group, items: [...group.items, membersNavItem] }
+      : group)
 }
 
 export function companyNavItemActive(to: string, pathname: string, end?: boolean) {

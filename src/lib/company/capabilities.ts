@@ -83,6 +83,11 @@ export function isCompanyAdmin(profile: CapabilityProfile | null) {
   return isApprovedCompanyMember(profile) && Boolean(profile?.isAdmin)
 }
 
+/** 대표이사는 제작 중인 전체 화면을 검수한다. 업무 저장·승인 권한과 분리한다. */
+export function isCompanyReviewer(profile: CapabilityProfile | null) {
+  return isApprovedCompanyMember(profile) && profile?.position === '대표이사'
+}
+
 export function isCompanyManager(profile: CapabilityProfile | null) {
   return (
     isApprovedCompanyMember(profile) &&
@@ -107,6 +112,13 @@ export function canEditOrgAssignment(
   return profile?.departmentName === OPERATIONS_SUPPORT_DEPARTMENT
 }
 
+/** 운영지원 담당자와 대표이사의 검수용 조회. 저장은 canEditOrgAssignment로 판별한다. */
+export function canAccessOperationsSupport(
+  profile: Parameters<typeof canEditOrgAssignment>[0],
+) {
+  return canEditOrgAssignment(profile) || isCompanyReviewer(profile)
+}
+
 /** 가입 승인과 직책·소속 변경. DB `app.can_manage_personnel`과 같은 조건이다. */
 export function canManagePersonnel(profile: CapabilityProfile | null) {
   if (!isApprovedCompanyMember(profile)) return false
@@ -118,11 +130,11 @@ export function canManagePersonnel(profile: CapabilityProfile | null) {
   )
 }
 
-/** 기획안을 직원별로 보는 권한. 관리자여도 직급이 팀장·이사여야 한다. */
+/** 직원별 기획안 조회는 팀장·이사와 대표이사 검수자에게 허용한다. */
 export function canViewDraftsByOwner(profile: CapabilityProfile | null) {
   return (
     isApprovedCompanyMember(profile) &&
-    isCompanyManagerPosition(profile?.position)
+    (isCompanyManagerPosition(profile?.position) || isCompanyReviewer(profile))
   )
 }
 

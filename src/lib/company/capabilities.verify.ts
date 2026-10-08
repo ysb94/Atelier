@@ -13,7 +13,7 @@ import {
   canViewDraftsByOwner,
   isCompanyManager,
   uniqueCapabilities,
-} from './capabilities'
+} from './capabilities.ts'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)

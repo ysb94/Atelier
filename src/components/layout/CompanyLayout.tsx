@@ -11,15 +11,12 @@ import {
 } from 'lucide-react'
 import { CompanyAiAssistant } from '@/components/ai/CompanyAiAssistant'
 import { useAuth } from '@/lib/supabase/auth'
-import { canManagePersonnel } from '@/lib/company/capabilities'
 import { cn } from '@/lib/utils'
 import {
   companyGroupIsActive,
-  companyNavGroups,
+  companyNavGroupsForProfile,
   companyNavItemActive,
   companyTopNav,
-  membersNavItem,
-  type CompanyNavGroup,
   type CompanyNavItem,
 } from './company-workspace-nav'
 import { WorkspaceHeaderActions } from './WorkspaceHeaderActions'
@@ -38,15 +35,6 @@ function readCollapsed(): boolean {
   } catch {
     return false
   }
-}
-
-function withMembers(groups: readonly CompanyNavGroup[], showMembers: boolean) {
-  if (!showMembers) return groups
-  return groups.map((group) =>
-    group.title === '회사'
-      ? { ...group, items: [...group.items, membersNavItem] }
-      : group,
-  )
 }
 
 function pageLayoutFor(pathname: string) {
@@ -89,15 +77,9 @@ function CompanySidebar() {
   const { email, profile, signOut } = useAuth()
   const [openTitles, setOpenTitles] = useState<Set<string>>(() => new Set())
   const [collapsed, setCollapsed] = useState(readCollapsed)
-  const showMembers = canManagePersonnel({
-    status: profile?.status,
-    isAdmin: profile?.isAdmin,
-    position: profile?.position,
-    departmentPersonnelScope: profile?.departmentPersonnelScope,
-  })
   const navGroups = useMemo(
-    () => withMembers(companyNavGroups, showMembers),
-    [showMembers],
+    () => companyNavGroupsForProfile(profile),
+    [profile],
   )
   const flatNavItems = useMemo(
     () => [

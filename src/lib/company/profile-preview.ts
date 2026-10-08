@@ -1,14 +1,15 @@
 import type { Department, Profile } from '../supabase/profiles'
-import { ORG_ASSIGNMENT_EDITOR_EMAIL, inferCapabilityFromDepartment, type WorkCapability } from './capabilities.ts'
+import { ORG_ASSIGNMENT_EDITOR_EMAIL, isCompanyReviewer, inferCapabilityFromDepartment, type WorkCapability } from './capabilities.ts'
 
 export type PreviewSettings = Pick<Profile,
   'departmentId' | 'departmentName' | 'departmentPersonnelScope' | 'position' |
   'jobGrade' | 'isAdmin' | 'status' | 'capabilities' | 'memberships'>
 
 export function canPreviewProfile(profile: Profile | null, sessionEmail: string | null) {
-  return profile?.status === 'active' &&
-    profile.email.trim().toLowerCase() === ORG_ASSIGNMENT_EDITOR_EMAIL &&
-    sessionEmail?.trim().toLowerCase() === ORG_ASSIGNMENT_EDITOR_EMAIL
+  if (!profile || profile.status !== 'active' || !sessionEmail) return false
+  const email = profile.email.trim().toLowerCase()
+  return email === sessionEmail.trim().toLowerCase() &&
+    (email === ORG_ASSIGNMENT_EDITOR_EMAIL || isCompanyReviewer(profile))
 }
 
 export function initialPreview(profile: Profile): PreviewSettings {

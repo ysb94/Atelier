@@ -42,6 +42,7 @@ export type Profile = {
   departmentId: string | null
   position: string | null
   jobGrade: string | null
+  hireDate: string | null
   isAdmin: boolean
   status: ProfileStatus
   requestedAt: string | null
@@ -66,6 +67,7 @@ export type ApproveMemberInput = {
   departmentId: string
   position: string
   jobGrade?: string | null
+  hireDate?: string | null
   capabilities: WorkCapability[]
   leadBrandIds?: string[]
   isAdmin: boolean
@@ -90,6 +92,7 @@ type ProfileRow = {
   department_id: string | null
   position: string | null
   job_grade: string | null
+  hire_date: string | null
   is_admin: boolean
   status: ProfileStatus
   requested_at: string | null
@@ -126,7 +129,7 @@ type BrandDirectoryRow = {
 }
 
 const PROFILE_COLUMNS =
-  'id, email, display_name, name_confirmed_at, avatar_url, company_id, department_id, position, job_grade, is_admin, status, requested_at, approved_by, approved_at, request_note, created_at, updated_at, departments(name, personnel_scope, is_active)'
+  'id, email, display_name, name_confirmed_at, avatar_url, company_id, department_id, position, job_grade, hire_date, is_admin, status, requested_at, approved_by, approved_at, request_note, created_at, updated_at, departments(name, personnel_scope, is_active)'
 
 function departmentEmbedFrom(
   value: ProfileRow['departments'],
@@ -152,6 +155,7 @@ function toProfile(
     departmentId: row.department_id,
     position: row.position,
     jobGrade: row.job_grade,
+    hireDate: row.hire_date,
     isAdmin: row.is_admin,
     status: row.status,
     requestedAt: row.requested_at,
@@ -285,6 +289,7 @@ export type OrgChartMember = {
   position: string | null
   jobGrade: string | null
   departmentId: string | null
+  hireDate: string | null
 }
 
 type OrgChartMemberRow = {
@@ -293,6 +298,25 @@ type OrgChartMemberRow = {
   position: string | null
   job_grade: string | null
   department_id: string | null
+  hire_date: string | null
+}
+
+const HIRE_DATE_MIN = '1950-01-01'
+
+export function todayDateKey(now = new Date()) {
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+}
+
+export function normalizeHireDate(value: string | null | undefined, today = todayDateKey()) {
+  const trimmed = value?.trim() ?? ''
+  if (!trimmed) return null
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) throw new Error('입사일은 날짜로 입력하세요.')
+  const parsed = new Date(`${trimmed}T12:00:00`)
+  const roundTrip = Number.isNaN(parsed.getTime()) ? '' : todayDateKey(parsed)
+  if (roundTrip !== trimmed || trimmed < HIRE_DATE_MIN || trimmed > today) {
+    throw new Error('입사일은 1950-01-01부터 오늘까지 입력할 수 있습니다.')
+  }
+  return trimmed
 }
 
 export type PersonnelTitleKind = 'duty' | 'grade'
@@ -315,16 +339,18 @@ export async function listOrgChartMembers(): Promise<OrgChartMember[]> {
     position: row.position,
     jobGrade: row.job_grade,
     departmentId: row.department_id,
+    hireDate: row.hire_date,
   }))
 }
 
-/** 개발자 계정과 운영지원팀만 다른 직원의 부서·직책·직급을 바꾼다. */
+/** 개발자 계정과 운영지원팀만 다른 직원의 부서·직책·직급·입사일을 바꾼다. */
 export async function updateOrgAssignment(
   profileId: string,
   input: {
     departmentId: string | null
     position: string | null
     jobGrade: string | null
+    hireDate: string | null
   },
 ): Promise<void> {
   const { error } = await getSupabase()
@@ -333,6 +359,7 @@ export async function updateOrgAssignment(
       department_id: input.departmentId,
       position: input.position?.trim() || null,
       job_grade: input.jobGrade?.trim() || null,
+      hire_date: normalizeHireDate(input.hireDate),
     })
     .eq('id', profileId)
   if (error) {
@@ -579,6 +606,7 @@ export async function approveMember(
     department_id: input.departmentId,
     position: input.position.trim() || null,
     job_grade: input.jobGrade?.trim() || null,
+    ...(input.hireDate !== undefined ? { hire_date: normalizeHireDate(input.hireDate) } : {}),
     status: 'active',
     approved_by: actorId,
     approved_at: new Date().toISOString(),

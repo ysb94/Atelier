@@ -6,8 +6,10 @@ import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/lib/supabase/auth'
+import { useRenderWatch } from '@/lib/diagnostics'
 import {
   approveMember,
+  todayDateKey,
   createDepartment,
   listBrandDirectory,
   listDepartments,
@@ -22,6 +24,7 @@ import {
 import {
   canEditOrgAssignment,
   canManagePersonnel,
+  isCompanyReviewer,
   capabilityLabel,
   WORK_CAPABILITIES,
   WORK_CAPABILITY_LABEL,
@@ -67,6 +70,7 @@ function MemberEditor({
   const [departmentId, setDepartmentId] = useState(profile.departmentId ?? '')
   const [position, setPosition] = useState(profile.position ?? '')
   const [jobGrade, setJobGrade] = useState(profile.jobGrade ?? '')
+  const [hireDate, setHireDate] = useState(profile.hireDate ?? '')
   const [capabilities, setCapabilities] = useState<WorkCapability[]>(
     profile.capabilities,
   )
@@ -160,6 +164,23 @@ function MemberEditor({
             </p>
           )}
         </label>
+        {profile.status === 'pending' ? (
+          <label className="block space-y-1">
+            <span className="text-xs font-medium">입사일</span>
+            <Input
+              type="date"
+              aria-label="입사일"
+              value={hireDate}
+              min="1950-01-01"
+              max={todayDateKey()}
+              onChange={(event) => setHireDate(event.target.value)}
+              disabled={busy}
+            />
+            <p className="text-xs text-muted-foreground">
+              비워 두면 없음입니다. 승인 후 수정은 조직도에서 합니다.
+            </p>
+          </label>
+        ) : null}
       </div>
 
       <div className="space-y-2">
@@ -238,6 +259,7 @@ function MemberEditor({
                 departmentId,
                 position,
                 jobGrade,
+                ...(profile.status === 'pending' ? { hireDate: hireDate || null } : {}),
                 capabilities,
                 leadBrandIds,
                 isAdmin: canSetAdmin ? isAdmin : false,
@@ -312,6 +334,7 @@ function MemberEditor({
 }
 
 export function MembersPage() {
+  useRenderWatch('MembersPage')
   const { profile: me } = useAuth()
   const queryClient = useQueryClient()
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -324,26 +347,27 @@ export function MembersPage() {
     departmentPersonnelScope: me?.departmentPersonnelScope,
   })
   const canEditAssignment = canEditOrgAssignment(me)
+  const canViewMembers = canManageMembers || isCompanyReviewer(me)
 
   const profilesQuery = useQuery({
     queryKey: ['manageable-profiles'],
     queryFn: listManageableProfiles,
-    enabled: canManageMembers,
+    enabled: canViewMembers,
   })
   const departmentsQuery = useQuery({
     queryKey: ['departments', 'all'],
     queryFn: () => listDepartments(false),
-    enabled: canManageMembers,
+    enabled: canViewMembers,
   })
   const brandsQuery = useQuery({
     queryKey: ['brand-directory'],
     queryFn: listBrandDirectory,
-    enabled: canManageMembers,
+    enabled: canViewMembers,
   })
   const titlesQuery = useQuery({
     queryKey: ['personnelTitles'],
     queryFn: listPersonnelTitles,
-    enabled: canManageMembers,
+    enabled: canViewMembers,
   })
 
   const profiles = useMemo(
@@ -392,7 +416,7 @@ export function MembersPage() {
   const brandName = (id: string) =>
     brands.find((b) => b.id === id)?.name ?? id.slice(0, 8)
 
-  if (!canManageMembers) {
+  if (!canViewMembers) {
     return <Navigate to="/" replace />
   }
 
@@ -402,6 +426,8 @@ export function MembersPage() {
         title="멤버"
         description="접근 신청을 승인하고 본명과 회사 업무 역량을 확인합니다. 본명은 사내 명단과 같아야 합니다."
       />
+
+      {!canManageMembers && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">제작 화면 검수 · 멤버 정보는 조회할 수 있습니다. 변경·승인은 기존 업무 권한을 따릅니다.</p>}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Button
@@ -499,6 +525,7 @@ export function MembersPage() {
                   type="button"
                   size="sm"
                   variant="outline"
+                  disabled={!canManageMembers}
                   onClick={() =>
                     setEditingId((prev) =>
                       prev === member.id ? null : member.id,
@@ -509,7 +536,7 @@ export function MembersPage() {
                 </Button>
               </div>
 
-              {editingId === member.id ? (
+              {editingId === member.id && canManageMembers ? (
                 <MemberEditor
                   profile={member}
                   departments={departments.filter((d) => d.isActive || d.id === member.departmentId)}

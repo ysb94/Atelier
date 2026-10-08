@@ -28,10 +28,12 @@ export function pagePreviewCases(pathname: string, real: Profile): PagePreviewCa
   if (path === '/operations-support') return [
     item('editor', '운영지원팀', { departmentName: '운영지원팀', departmentPersonnelScope: 'leaders' }),
     item('viewer', '다른 부서', { departmentName: '기획팀' }),
+    item('reviewer', '대표이사 · 검수', { position: '대표이사', departmentName: '운영진' }),
   ]
   if (path === '/members') return [
     item('editor', '인사 관리 가능', { departmentName: '운영지원팀', departmentPersonnelScope: 'leaders', position: '팀장' }),
     item('viewer', '인사 관리 불가'),
+    item('reviewer', '대표이사 · 검수', { position: '대표이사', departmentName: '운영진' }),
   ]
   if (path === '/meetings') return [item('admin', '관리자', { isAdmin: true }), item('employee', '일반 직원')]
   if (path === '/settings/ai') return [item('editor', '편집 가능', { isAdmin: true }), item('viewer', '조회 전용')]

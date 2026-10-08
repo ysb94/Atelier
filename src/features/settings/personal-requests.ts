@@ -19,6 +19,8 @@ export const DEFAULT_REMINDER_BASIS: ReminderBasis = { start: '09:00', end: '18:
 export function requestLabel(kind: RequestKind) { return REQUEST_KINDS.find(item => item.id === kind)!.label }
 export function isFullLeave(kind: RequestKind) { return kind === 'annual' }
 export function isPartialLeave(kind: RequestKind) { return kind === 'half' || kind === 'quarter' }
+export function isLeaveRequest(kind: RequestKind) { return isFullLeave(kind) || isPartialLeave(kind) }
+export function isSavedRequest(kind: RequestKind) { return isLeaveRequest(kind) || kind === 'overtime' }
 export function minuteOf(value: string) {
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null
   const [h, m] = value.split(':').map(Number)

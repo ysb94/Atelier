@@ -8,6 +8,13 @@ assert.equal(canPreviewProfile(real, real.email), true)
 assert.equal(canPreviewProfile({ ...real, email: 'staff@example.com' }, real.email), false)
 assert.equal(canPreviewProfile(real, 'staff@example.com'), false)
 assert.equal(canPreviewProfile({ ...real, status: 'disabled' }, real.email), false)
+const ceo = { ...real, email: 'ceo@example.com', isAdmin: false, position: '대표이사', departmentName: '운영진', departmentPersonnelScope: null } as Profile
+assert.equal(canPreviewProfile(ceo, ceo.email), true)
+assert.equal(canPreviewProfile(ceo, real.email), false, '세션과 프로필이 다른 경우 검수 불가')
+assert.equal(canPreviewProfile({ ...ceo, status: 'pending' }, ceo.email), false)
+assert.equal(canPreviewProfile({ ...ceo, position: '이사' }, ceo.email), false, '일반 이사에게 확대하지 않음')
+assert.equal(canEditOrgAssignment(ceo), false)
+assert.equal(canManagePersonnel(ceo), false)
 const settings = { ...initialPreview(real), position: '사원', isAdmin: false, ...previewDepartment({ id: 'planning', name: '기획팀', personnelScope: null } as never) }
 const employee = previewProfile(real, settings)
 assert.equal(employee.id, real.id)

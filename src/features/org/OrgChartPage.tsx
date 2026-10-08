@@ -28,6 +28,7 @@ import {
   listPersonnelTitles,
   renamePersonnelTitle,
   createPersonnelTitle,
+  todayDateKey,
   updateOrgAssignment,
   type Department,
   type OrgChartMember,
@@ -88,7 +89,6 @@ export function OrgChartPage({
   const queryClient = useQueryClient()
   const canEdit = mode === 'manage' && canEditOrgAssignment(profile)
   const [view, setView] = useState<OrgView>(mode === 'manage' ? 'members' : 'chart')
-  const pinnedSupportFilter = useRef(mode !== 'manage')
   const [search, setSearch] = useState('')
   const [departmentFilter, setDepartmentFilter] = useState('all')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -226,15 +226,6 @@ export function OrgChartPage({
   const editingMember =
     members.find((member) => member.id === editingId) ?? null
   const activeView = mode === 'chart' ? 'chart' : view
-  useEffect(() => {
-    if (pinnedSupportFilter.current || mode !== 'manage') return
-    const support = departments.find(
-      (dept) => dept.name.trim() === OPERATIONS_SUPPORT_DEPARTMENT,
-    )
-    if (!support) return
-    pinnedSupportFilter.current = true
-    setDepartmentFilter(support.id)
-  }, [departments, mode])
   const loading =
     departmentsQuery.isPending ||
     membersQuery.isPending ||
@@ -659,11 +650,13 @@ function MemberAssignmentTable({
       departmentId: string | null
       position: string | null
       jobGrade: string | null
+      hireDate: string | null
     }) =>
       updateOrgAssignment(input.memberId, {
         departmentId: input.departmentId,
         position: input.position,
         jobGrade: input.jobGrade,
+        hireDate: input.hireDate,
       }),
     onSuccess: async () => {
       setError(null)
@@ -677,19 +670,22 @@ function MemberAssignmentTable({
 
   function commit(
     member: OrgChartMember,
-    field: 'department' | 'duty' | 'grade',
+    field: 'department' | 'duty' | 'grade' | 'hire',
     value: string,
   ) {
     const departmentId = member.departmentId ?? ''
     const position = member.position?.trim() ?? ''
     const jobGrade = member.jobGrade?.trim() ?? ''
+    const hireDate = member.hireDate ?? ''
     const nextDepartment = field === 'department' ? value : departmentId
     const nextPosition = field === 'duty' ? value : position
     const nextGrade = field === 'grade' ? value : jobGrade
+    const nextHire = field === 'hire' ? value : hireDate
     if (
       nextDepartment === departmentId &&
       nextPosition === position &&
-      nextGrade === jobGrade
+      nextGrade === jobGrade &&
+      nextHire === hireDate
     ) {
       return
     }
@@ -699,6 +695,7 @@ function MemberAssignmentTable({
       departmentId: nextDepartment || null,
       position: nextPosition || null,
       jobGrade: nextGrade || null,
+      hireDate: nextHire || null,
     })
   }
 
@@ -712,26 +709,27 @@ function MemberAssignmentTable({
           </span>
         </h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          부서·직책·직급을 선택하면 바로 저장됩니다. 직책과 직급은 각각 설정할
-          수 있습니다.
+          부서·직책·직급·입사일을 바꾸면 바로 저장됩니다. 입사일이 없는 직원은
+          비워 두면 됩니다.
         </p>
         {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
       </div>
       <div className="mt-3 overflow-x-auto">
-        <table className="w-full min-w-[640px] text-left text-sm">
+        <table className="w-full min-w-[820px] text-left text-sm">
           <thead className="border-y border-border bg-muted/50 text-xs text-muted-foreground">
             <tr>
               <th className="px-4 py-2.5 font-medium">이름</th>
               <th className="px-4 py-2.5 font-medium">부서</th>
               <th className="px-4 py-2.5 font-medium">직책</th>
               <th className="px-4 py-2.5 font-medium">직급</th>
+              <th className="px-4 py-2.5 font-medium">입사일</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={5}
                   className="px-4 py-8 text-center text-muted-foreground"
                 >
                   불러오는 중...
@@ -740,7 +738,7 @@ function MemberAssignmentTable({
             ) : members.length === 0 ? (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={5}
                   className="px-4 py-8 text-center text-muted-foreground"
                 >
                   {filtered
@@ -795,6 +793,21 @@ function MemberAssignmentTable({
                       options={titleChoices(grades, member.jobGrade)}
                       onChange={(value) => commit(member, 'grade', value)}
                     />
+                  </td>
+                  <td className="px-4 py-2">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="date"
+                        aria-label={`${memberName(member)} 입사일`}
+                        value={member.hireDate ?? ''}
+                        min="1950-01-01"
+                        max={todayDateKey()}
+                        disabled={mutation.isPending || !canChange}
+                        className="h-9 w-40 border-border/60 bg-card px-3 disabled:cursor-wait disabled:opacity-50"
+                        onChange={(event) => commit(member, 'hire', event.target.value)}
+                      />
+                      {member.hireDate ? null : <span className="text-xs text-muted-foreground">없음</span>}
+                    </div>
                   </td>
                 </tr>
               ))
@@ -863,12 +876,14 @@ function AssignmentEditor({
   const [departmentId, setDepartmentId] = useState(member.departmentId ?? '')
   const [position, setPosition] = useState(member.position ?? '')
   const [jobGrade, setJobGrade] = useState(member.jobGrade ?? '')
+  const [hireDate, setHireDate] = useState(member.hireDate ?? '')
   const mutation = useMutation({
     mutationFn: () =>
       updateOrgAssignment(member.id, {
         departmentId: departmentId || null,
         position: position || null,
         jobGrade: jobGrade || null,
+        hireDate: hireDate || null,
       }),
     onSuccess: () => {
       void onSaved()
@@ -906,7 +921,7 @@ function AssignmentEditor({
               {memberName(member)} 배치 수정
             </h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              소속 부서와 맡은 역할을 설정합니다.
+              소속 부서, 맡은 역할, 입사일을 설정합니다. 입사일이 없으면 비워 둡니다.
             </p>
           </div>
           <Button
@@ -968,6 +983,19 @@ function AssignmentEditor({
                 </option>
               ))}
             </Select>
+          </label>
+          <label className="block space-y-1 sm:col-span-3">
+            <span className="text-xs font-medium">입사일</span>
+            <Input
+              type="date"
+              aria-label="입사일"
+              className="w-full sm:max-w-xs"
+              value={hireDate}
+              min="1950-01-01"
+              max={todayDateKey()}
+              onChange={(event) => setHireDate(event.target.value)}
+              disabled={mutation.isPending}
+            />
           </label>
         </div>
         {errorMessage ? (

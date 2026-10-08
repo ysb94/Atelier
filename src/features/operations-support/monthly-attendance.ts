@@ -1,4 +1,4 @@
-import { koreanHolidayNames } from './korean-holidays'
+import { koreanHolidayNames } from './korean-holidays.ts'
 
 export const ATTENDANCE_STATUSES = [
   { id: 'unset', label: '미기록' }, { id: 'present', label: '출근' },
