@@ -2,6 +2,10 @@ import { getSupabase } from './client'
 import { DEFAULT_COMPANY_ID } from './brands'
 
 export type ApprovalType = 'leave' | 'overtime'
+export function assignedDepartmentIds(settings: DepartmentApprover[], userId: string | undefined) {
+  if (!userId) return [] as string[]
+  return [...new Set(settings.flatMap(item => item.approverId === userId || item.substituteId === userId ? [item.departmentId] : []))]
+}
 export type DepartmentApprover = {
   departmentId: string; type: ApprovalType; approverId: string | null; substituteId: string | null
   updatedAt: string

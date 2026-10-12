@@ -7,9 +7,10 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
 import { listAttendanceStartSettings, saveAttendanceStartSettings, type SaveAttendanceStart } from '@/lib/supabase/attendance-start-settings'
 import { attendanceStartIndex, type AttendanceStartSetting } from './attendance-start-settings'
 
-export function useAttendanceStartSettings() {
+export function useAttendanceStartSettings(options?: { assigned?: boolean }) {
   const { profile, session } = useAuth()
-  const allowed = canAccessOperationsSupport(profile)
+  const assigned = options?.assigned === true
+  const allowed = canAccessOperationsSupport(profile) || (assigned && profile?.status === 'active')
   const canEdit = canEditOrgAssignment(profile)
   const active = useWorkspaceTabActivity()
   const client = useQueryClient()
@@ -19,7 +20,8 @@ export function useAttendanceStartSettings() {
   const settings = allowed ? query.data ?? emptyList<AttendanceStartSetting>() : emptyList<AttendanceStartSetting>()
   const index = useMemo(() => attendanceStartIndex(settings), [settings])
   const save = useMutation({ mutationFn: (input: SaveAttendanceStart) => {
-    if (!canEdit) throw new Error('운영지원팀만 출근시간을 저장할 수 있습니다.')
+    if (assigned && !input.employeeId) throw new Error('직원별로 출근시간을 저장해 주세요.')
+    if (!canEdit && !assigned) throw new Error('담당 부서 승인자만 출근시간을 저장할 수 있습니다.')
     return saveAttendanceStartSettings(input)
   }, onSuccess: () => client.invalidateQueries({queryKey:['attendance-start-settings']}) })
   return { settings, index, save, allowed, canEdit, loading: allowed && query.isPending, error: query.error, refresh: () => query.refetch() }

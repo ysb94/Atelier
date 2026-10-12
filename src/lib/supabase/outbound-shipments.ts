@@ -1,3 +1,4 @@
+import type { SupabaseClient } from '@supabase/supabase-js'
 import {
   BARCODE_DATA_ENTRY_SOURCE_REF_PREFIX,
   type BarcodeDataEntryLedgerRow,
@@ -11,6 +12,7 @@ import {
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage } from '@/lib/supabase/map-error'
 import { fetchAllPages } from '@/lib/supabase/paged-select'
+import { timeBarcodeHistoryAsync } from '@/lib/outbound/barcode-history-perf'
 
 export class OutboundShipmentStoreError extends Error {
   constructor(message: string) {
@@ -57,10 +59,8 @@ type OutboundShipmentJoinedRow = ShipmentRow & {
   target: PartnerTargetEmbed | PartnerTargetEmbed[] | null
 }
 
-type BarcodeLedgerJoinedRow = ShipmentRow & {
+type BarcodeLedgerRow = ShipmentRow & {
   created_at: string
-  style: StyleEmbed | StyleEmbed[] | null
-  target: PartnerUnitEmbed | PartnerUnitEmbed[] | null
 }
 
 function firstEmbed<T>(value: T | T[] | null | undefined): T | null {
@@ -72,7 +72,41 @@ const OUTBOUND_SHIPMENT_SELECT =
   'id, brand_id, style_id, usage_target_id, shipped_on, quantity, source, source_ref, note, style:styles!outbound_shipments_style_fkey(style_no, name), target:code_usage_targets!outbound_shipments_target_fkey(name, site_name, outbound_partner_groups(name))'
 
 const BARCODE_LEDGER_SELECT =
-  'id, brand_id, style_id, usage_target_id, shipped_on, quantity, source, source_ref, note, created_at, style:styles!outbound_shipments_style_fkey(style_no, name), target:code_usage_targets!outbound_shipments_target_fkey(name, group_id, site_name)'
+  'id, brand_id, style_id, usage_target_id, shipped_on, quantity, source, source_ref, note, created_at'
+
+/** IN 목록과 응답을 200건 이하로 제한하고, 동일 ID는 한 번만 조회한다. */
+async function barcodeLedgerReferences<T extends { id: string }>(
+  supabase: SupabaseClient,
+  brandId: string,
+  table: 'styles' | 'code_usage_targets',
+  select: string,
+  ids: readonly string[],
+): Promise<Map<string, T>> {
+  const uniqueIds = [...new Set(ids)]
+  const result = new Map<string, T>()
+  for (let from = 0; from < uniqueIds.length; from += 200) {
+    const batch = uniqueIds.slice(from, from + 200)
+    const rows = await timeBarcodeHistoryAsync(
+      `참조 조회 ${table}`,
+      async () => {
+        const { data, error } = await supabase
+          .from(table)
+          .select(select)
+          .eq('brand_id', brandId)
+          .in('id', batch)
+        if (error) {
+          throw new OutboundShipmentStoreError(
+            errorMessage(error, '등록 이력의 상품·업체 정보를 불러오지 못했습니다.'),
+          )
+        }
+        return (data as unknown as T[]) ?? []
+      },
+      { brandId, from, size: batch.length },
+    )
+    for (const row of rows) result.set(row.id, row)
+  }
+  return result
+}
 
 function isSource(
   value: string,
@@ -363,56 +397,74 @@ export async function replaceInvoiceOutboundShipments(input: {
 
 export async function listBarcodeDataEntryShipments(
   brandId: string,
+  supabase: SupabaseClient = getSupabase(),
 ): Promise<BarcodeDataEntryLedgerRow[]> {
-  const rows = await fetchAllPages<BarcodeLedgerJoinedRow>({
-    fetchPage: async (from, to, withCount) => {
-      const { data, error, count } = await getSupabase()
-        .from('outbound_shipments')
-        .select(
-          BARCODE_LEDGER_SELECT,
-          withCount ? { count: 'exact' } : undefined,
-        )
-        .eq('brand_id', brandId)
-        .eq('source', 'bulk')
-        .like('source_ref', `${BARCODE_DATA_ENTRY_SOURCE_REF_PREFIX}%`)
-        .order('shipped_on', { ascending: false })
-        .order('id', { ascending: false })
-        .range(from, to)
-      if (error) {
-        throw new OutboundShipmentStoreError(
-          errorMessage(error, '등록 이력을 불러오지 못했습니다.'),
-        )
-      }
-      return {
-        rows: (data as BarcodeLedgerJoinedRow[]) ?? [],
-        count: count ?? null,
-      }
-    },
+  // 조인 후 전체 정렬·권한 검사가 페이지마다 반복되지 않도록 원장부터 읽는다.
+  // exact COUNT도 생략한다. 마지막 페이지까지 순차 조회하므로 1000행 상한에 잘리지 않는다.
+  const rows = await fetchAllPages<BarcodeLedgerRow>({
+    concurrency: 1,
+    fetchPage: (from, to) =>
+      timeBarcodeHistoryAsync(
+        '출고 상세 페이지',
+        async () => {
+          const { data, error } = await supabase
+            .from('outbound_shipments')
+            .select(BARCODE_LEDGER_SELECT)
+            .eq('brand_id', brandId)
+            .eq('source', 'bulk')
+            .like('source_ref', `${BARCODE_DATA_ENTRY_SOURCE_REF_PREFIX}%`)
+            .order('shipped_on', { ascending: false })
+            .order('id', { ascending: false })
+            .range(from, to)
+          if (error) {
+            throw new OutboundShipmentStoreError(
+              errorMessage(error, '등록 이력을 불러오지 못했습니다.'),
+            )
+          }
+          return { rows: (data as BarcodeLedgerRow[]) ?? [], count: null }
+        },
+        { brandId, from, to },
+      ),
   })
 
-  return rows
-    .filter((row) => row.quantity > 0 && row.source_ref)
-    .map((row) => {
-      const style = firstEmbed(row.style)
-      const target = firstEmbed(row.target)
-      return {
-        id: row.id,
-        sourceRef: row.source_ref ?? '',
-        styleId: row.style_id,
-        styleNo: style?.style_no ?? '',
-        styleName: style?.name ?? '',
-        usageTargetId: row.usage_target_id,
-        partnerName: target
-          ? outboundPartnerUnitLabel({
-              name: target.name,
-              groupId: target.group_id,
-              siteName: target.site_name,
-            })
-          : '',
-        shippedOn: row.shipped_on.slice(0, 10),
-        quantity: row.quantity,
-        note: row.note || '',
-        createdAt: row.created_at,
-      }
-    })
+  const ledgerRows = rows.filter((row) => row.quantity > 0 && row.source_ref)
+  // 모든 조회에 기존 사용자 클라이언트와 brand_id 필터를 사용해 각 테이블의 RLS를 유지한다.
+  const styles = await barcodeLedgerReferences<StyleEmbed & { id: string }>(
+    supabase,
+    brandId,
+    'styles',
+    'id, style_no, name',
+    ledgerRows.map((row) => row.style_id),
+  )
+  const targets = await barcodeLedgerReferences<PartnerUnitEmbed & { id: string }>(
+    supabase,
+    brandId,
+    'code_usage_targets',
+    'id, name, group_id, site_name',
+    ledgerRows.map((row) => row.usage_target_id),
+  )
+
+  return ledgerRows.map((row) => {
+    const style = styles.get(row.style_id)
+    const target = targets.get(row.usage_target_id)
+    return {
+      id: row.id,
+      sourceRef: row.source_ref ?? '',
+      styleId: row.style_id,
+      styleNo: style?.style_no ?? '',
+      styleName: style?.name ?? '',
+      usageTargetId: row.usage_target_id,
+      partnerName: target
+        ? outboundPartnerUnitLabel({
+            name: target.name,
+            groupId: target.group_id,
+            siteName: target.site_name,
+          })
+        : '',
+      shippedOn: row.shipped_on.slice(0, 10),
+      quantity: row.quantity,
+      note: row.note || '',
+      createdAt: row.created_at,
+    }
+  })
 }

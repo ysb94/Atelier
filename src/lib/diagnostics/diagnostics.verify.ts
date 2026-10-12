@@ -24,10 +24,15 @@ import {
   INVOICE_WORK_SLOW_WARN_MS,
   invoiceWorkLogLevel,
 } from '@/lib/invoice/invoice-work-perf'
+import { barcodeHistoryLogLevel } from '@/lib/outbound/barcode-history-perf'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
 }
+
+assert(barcodeHistoryLogLevel(199) === 'debug', '바코드 이력 200ms 미만은 debug')
+assert(barcodeHistoryLogLevel(200) === 'info', '바코드 이력 200ms 이상은 info')
+assert(barcodeHistoryLogLevel(1_000) === 'warn', '바코드 이력 1초 이상은 warn')
 
 assert(classifyRenderStorm(RENDER_STORM_WARN_COUNT - 1) === 'ok', '경고 미만은 ok')
 assert(classifyRenderStorm(RENDER_STORM_WARN_COUNT) === 'warn', '경고 임계는 warn')

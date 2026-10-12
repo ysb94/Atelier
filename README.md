@@ -6,6 +6,18 @@ Before any Supabase, PostgreSQL, Auth, Storage, RLS or database migration work,
 read [`docs/architecture/SUPABASE.md`](docs/architecture/SUPABASE.md).
 AI assistants must also follow [`AGENTS.md`](AGENTS.md).
 
+## Production build
+
+Run `npm run build` for the TypeScript check and the production Vite build.
+On Windows, `scripts/vite-windows-output-cleanup.ts` uses asynchronous removal
+to clear existing build output. In this Node 24 Windows environment, recursive
+`fs.rmSync` terminates the process, including Vite's normal output cleanup.
+The workaround applies only to build output inside the project, checks resolved
+paths, and preserves `.git`. Other platforms retain Vite's normal cleanup.
+Build arguments still work, for example `npm run build -- --outDir dist-preview`.
+This changes only the local build process; application data, authentication,
+RLS, dependencies, and production minification are unchanged.
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:

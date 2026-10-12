@@ -1,4 +1,5 @@
 import type { CodeUsageTarget, CodeUsageTargetFolder } from '@/lib/types'
+import { verifyBarcodeHistoryRead } from '@/lib/supabase/barcode-history-read.verify'
 import {
   applyBarcodeDataEntrySiteLookup,
   assignBarcodeDataEntryEmptySite,
@@ -435,3 +436,4 @@ assert(applyBarcodeDataEntrySiteLookup(categoryPasted, onlineCompany.units, allC
 assert(applyBarcodeDataEntrySiteLookup(twoCol.rows, offlineCompany.units, new Map())[0]?.siteStatus === 'empty', '오프라인 지점이 여러 개면 빈 지점 입력도 특정 대상에 자동 연결하지 않는다')
 
 console.log('barcode-outbound-data-entry.verify ok')
+await verifyBarcodeHistoryRead()

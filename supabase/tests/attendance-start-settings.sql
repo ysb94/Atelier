@@ -1,8 +1,8 @@
 begin;
 do $$
-declare employee uuid; department uuid; reviewer uuid; company uuid; blocked boolean;
+declare employee uuid; department uuid; reviewer uuid; company uuid; blocked boolean; outsider uuid; other_department uuid;
 begin
-  select id,department_id,company_id into employee,department,company from public.profiles where status='active' and department_id is not null and email<>'dev@atelier.local' order by id limit 1;
+  select id,department_id,company_id into employee,department,company from public.profiles p where status='active' and department_id is not null and email<>'dev@atelier.local' and not exists(select 1 from public.department_request_approvers a where a.department_id=p.department_id and (a.approver_id=p.id or a.substitute_id=p.id)) order by id limit 1;
   select id into reviewer from public.profiles where status='active' and email='dev@atelier.local';
   if employee is null or reviewer is null then raise exception 'Need active employee and developer reviewer'; end if;
   execute 'set local role authenticated';
@@ -26,6 +26,27 @@ begin
   exception when others then if SQLERRM like '%운영지원팀만%' then blocked:=true; else raise; end if; end;
   if not blocked then raise exception 'Other department can save settings'; end if;
   perform set_config('request.jwt.claim.sub',reviewer::text,true);
+  insert into public.department_request_approvers(company_id,department_id,request_type,approver_id)
+  values(company,department,'leave',employee)
+  on conflict(company_id,department_id,request_type) do update set approver_id=excluded.approver_id,substitute_id=null;
+  select id,department_id into outsider,other_department from public.profiles
+  where company_id=company and status='active' and department_id is not null and department_id<>department order by id limit 1;
+  if outsider is null then raise exception 'Need an employee in another department'; end if;
+  perform public.save_attendance_start_settings('2098-08-01','2098-08-01',other_department,outsider,'09:00',5);
+  perform set_config('request.jwt.claim.sub',employee::text,true);
+  perform public.save_attendance_start_settings('2098-11-01','2098-11-01',department,employee,'10:00',5);
+  if not exists(select 1 from public.attendance_start_settings where employee_id=employee and month='2098-11-01' and start_time='10:00' and source='individual') then raise exception 'Approver cannot save own department employee'; end if;
+  if not exists(select 1 from public.attendance_start_settings where employee_id is null and department_id=department and month='2098-09-01') then raise exception 'Approver cannot read own department default'; end if;
+  if exists(select 1 from public.attendance_start_settings where employee_id=outsider and month='2098-08-01') then raise exception 'Approver can read another department'; end if;
+  blocked:=false;
+  begin perform public.save_attendance_start_settings('2098-11-01','2098-11-01',department,null,'09:00',5);
+  exception when others then if SQLERRM like '%운영지원팀만%' then blocked:=true; else raise; end if; end;
+  if not blocked then raise exception 'Approver can save a department batch'; end if;
+  blocked:=false;
+  begin perform public.save_attendance_start_settings('2098-08-01','2098-08-01',other_department,outsider,'10:00',5);
+  exception when others then if SQLERRM like '%운영지원팀만%' then blocked:=true; else raise; end if; end;
+  if not blocked then raise exception 'Approver can save another department'; end if;
+  perform set_config('request.jwt.claim.sub',reviewer::text,true);
   blocked:=false;
   begin update public.attendance_start_settings set start_time='11:00' where month='2098-09-01';
   exception when insufficient_privilege then blocked:=true; end;
@@ -39,4 +60,4 @@ begin
 end;
 $$;
 rollback;
-select 'attendance start persistence, batch, exceptions, reset, month isolation, permissions: ok (rolled back)' as result;
+select 'attendance start persistence, batch, exceptions, reset, month isolation, approver scope, permissions: ok (rolled back)' as result;

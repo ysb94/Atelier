@@ -24,6 +24,8 @@ import {
   type BarcodeDataEntryHistoryLine,
 } from '@/lib/outbound/barcode-outbound-data-entry'
 import { cn, formatNumber } from '@/lib/utils'
+import { useRenderWatch } from '@/lib/diagnostics'
+import { timeBarcodeHistory } from '@/lib/outbound/barcode-history-perf'
 
 function formatShippedOn(value: string) {
   const [year, month, day] = value.split('-')
@@ -114,6 +116,7 @@ export function BarcodeOutboundDataEntryHistoryPanel({
   onSave: (input: BarcodeDataEntryHistorySaveInput) => Promise<void>
   onDelete: (job: BarcodeDataEntryHistoryJob) => Promise<void>
 }) {
+  useRenderWatch('BarcodeOutboundDataEntryHistoryPanel')
   const [openKey, setOpenKey] = useState<string | null>(null)
   const [editDraft, setEditDraft] = useState<HistoryEditDraft | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -129,9 +132,11 @@ export function BarcodeOutboundDataEntryHistoryPanel({
   })
   const jobs = useMemo(
     () =>
-      groupBarcodeDataEntryHistory(
-        historyQuery.data ?? [],
-        runsQuery.data ?? [],
+      timeBarcodeHistory('등록 이력 묶기', () =>
+        groupBarcodeDataEntryHistory(
+          historyQuery.data ?? [],
+          runsQuery.data ?? [],
+        ),
       ),
     [historyQuery.data, runsQuery.data],
   )
@@ -145,6 +150,8 @@ export function BarcodeOutboundDataEntryHistoryPanel({
       : queryError
         ? '등록 이력을 불러오지 못했습니다.'
         : null
+  const loading = historyQuery.isPending || runsQuery.isPending
+  const summaryReady = !loading && !error
 
   function startEdit(job: BarcodeDataEntryHistoryJob) {
     setActionError(null)
@@ -229,19 +236,19 @@ export function BarcodeOutboundDataEntryHistoryPanel({
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <SummaryItem
               label="등록"
-              value={`${formatNumber(jobs.length)}회`}
+              value={summaryReady ? `${formatNumber(jobs.length)}회` : '—'}
             />
             <SummaryItem
               label="업체"
-              value={`${formatNumber(companyCount)}곳`}
+              value={summaryReady ? `${formatNumber(companyCount)}곳` : '—'}
             />
             <SummaryItem
               label="종"
-              value={`${formatNumber(kindTotal)}종`}
+              value={summaryReady ? `${formatNumber(kindTotal)}종` : '—'}
             />
             <SummaryItem
               label="개"
-              value={`${formatNumber(qtyTotal)}개`}
+              value={summaryReady ? `${formatNumber(qtyTotal)}개` : '—'}
             />
           </div>
         </CardContent>
@@ -256,12 +263,29 @@ export function BarcodeOutboundDataEntryHistoryPanel({
           </CardDescription>
         </CardHeader>
         <CardContent>
-          {historyQuery.isPending ? (
+          {error ? (
+            <div className="space-y-3 py-10 text-center">
+              <p className="text-sm text-danger">
+                {error.includes('statement timeout')
+                  ? '서버 조회 시간이 초과되었습니다. 잠시 후 다시 불러오세요.'
+                  : error}
+              </p>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={historyQuery.isFetching || runsQuery.isFetching}
+                onClick={() => {
+                  void historyQuery.refetch()
+                  void runsQuery.refetch()
+                }}
+              >
+                다시 불러오기
+              </Button>
+            </div>
+          ) : loading ? (
             <p className="py-10 text-center text-sm text-muted-foreground">
               이력을 불러오는 중...
             </p>
-          ) : error ? (
-            <p className="py-10 text-center text-sm text-danger">{error}</p>
           ) : jobs.length > 0 ? (
             <div className="space-y-3">
               {actionError ? (

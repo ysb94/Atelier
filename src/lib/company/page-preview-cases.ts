@@ -43,6 +43,7 @@ export function pagePreviewCases(pathname: string, real: Profile): PagePreviewCa
     item('employee', '일반 직원'),
   ]
   if (path === '/') return [
+    item('reviewer', '대표이사', { position: '대표이사', departmentName: '운영진' }),
     item('manager', '팀장급 이상', { position: '팀장', capabilities: ['planning'] }),
     item('employee', '사원급', { capabilities: ['planning'] }),
     item('personnel', '인사 담당', { position: '팀장', departmentName: '운영지원팀', departmentPersonnelScope: 'leaders', capabilities: ['planning'] }),

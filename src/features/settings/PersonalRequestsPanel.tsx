@@ -183,7 +183,7 @@ export function PersonalRequestsPanel({ today = localDateKey(new Date()), initia
             const visibleItems = items.slice(0, holiday ? 2 : 3)
             const hidden = items.length - visibleItems.length
             const outside = date.slice(0, 7) !== month
-            return <div key={date} role="gridcell" className={`agenda-day${outside ? ' is-outside' : ''}${date === today ? ' is-today' : ''}${selectedDate === date ? ' is-selected' : ''}`}>
+            return <div key={date} role="gridcell" className={`agenda-day${outside ? ' is-outside' : ''}${date === today ? ' is-today' : ''}${selectedDate === date ? ' is-selected' : ''}`} onClick={() => pickDate(date)}>
               <button type="button" className="agenda-num" aria-pressed={selectedDate === date} aria-label={`${date} ${holiday || '일정'} ${items.length}건`} onClick={() => pickDate(date)}>{Number(date.slice(8))}</button>
               {holiday && <span className="agenda-bar is-holiday">{holiday}</span>}
               {visibleItems.map(item => <button key={item.id} type="button" className={`agenda-bar is-${requestLayer(item.kind)} is-${item.status}`} onClick={() => { pickDate(date); setDetailId(item.id) }}>{requestLabel(item.kind)}{item.status === 'approved' ? '' : ` · ${STATUS_LABELS[item.status]}`}</button>)}
