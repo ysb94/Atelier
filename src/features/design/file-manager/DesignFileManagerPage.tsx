@@ -8,7 +8,7 @@ import {
   brandFileCapability,
   isAtelierBrandSlug,
 } from '@/lib/design/file-manager-brand'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { AppLoadingOverlay } from './components/AppLoadingOverlay'
 import { ContextMenu } from './components/ContextMenu'
 import { ExplorerTopbar } from './components/ExplorerTopbar'

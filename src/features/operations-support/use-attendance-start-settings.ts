@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
 import { canAccessOperationsSupport, canEditOrgAssignment } from '@/lib/company/capabilities'
 import { emptyList } from '@/lib/utils'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { listAttendanceStartSettings, saveAttendanceStartSettings, type SaveAttendanceStart } from '@/lib/supabase/attendance-start-settings'
 import { attendanceStartIndex, type AttendanceStartSetting } from './attendance-start-settings'
 

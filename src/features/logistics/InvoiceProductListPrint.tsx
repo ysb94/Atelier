@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react'
 import { createPortal } from 'react-dom'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import type {
   InvoiceProductListPrintColumn,
   InvoiceProductListPrintFitProfile,

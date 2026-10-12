@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { ChevronLeft, ChevronRight, Printer } from 'lucide-react'
-import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {

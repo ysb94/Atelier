@@ -13,7 +13,10 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowDown,
   ArrowUp,
+  ChevronLeft,
   ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
   Loader2,
   Search,
   X,
@@ -22,11 +25,10 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { useBrand } from '@/components/layout/brand-context'
 import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
 import { CompanyOutboundList } from '@/features/workspace/company-operation-lists'
-import {
-  useWorkspaceTabActivity,
-  WorkspaceTabOverlay,
-} from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   Card,
   CardContent,
@@ -37,7 +39,7 @@ import { Input, Select } from '@/components/ui/input'
 import {
   getCodeUsageTargetFolders,
   getCodeUsageTargets,
-  getOutboundShipments,
+  getFilteredOutboundShipments,
 } from '@/lib/api'
 import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import {
@@ -1291,12 +1293,15 @@ function FilterBar({
   extraPartners,
   search,
   onlyShipped,
+  pageSize,
   onPreset,
   onFrom,
   onTo,
   onPartner,
   onSearch,
   onOnlyShipped,
+  onPageSize,
+  onApply,
 }: {
   datePreset: DatePreset
   dateFrom: string
@@ -1307,11 +1312,14 @@ function FilterBar({
   search: string
   onlyShipped: boolean
   onPreset: (preset: DatePreset) => void
+  pageSize: OutboundPageSize
   onFrom: (value: string) => void
   onTo: (value: string) => void
   onPartner: (value: string) => void
   onSearch: (value: string) => void
   onOnlyShipped: () => void
+  onPageSize: (value: OutboundPageSize) => void
+  onApply: () => void
 }) {
   return (
     <div className="space-y-2">
@@ -1379,6 +1387,9 @@ function FilterBar({
             onChange={(event) => onSearch(event.target.value)}
             placeholder="M번호·상품명"
             className="h-8 pl-8 text-xs"
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') onApply()
+            }}
           />
         </div>
         <button
@@ -1394,6 +1405,24 @@ function FilterBar({
         >
           출고 있음만
         </button>
+        <Select
+          value={String(pageSize)}
+          onChange={(event) => {
+            const next = Number(event.target.value)
+            if (next === 20 || next === 50 || next === 100) onPageSize(next)
+          }}
+          aria-label="페이지당 행 수"
+          className="h-8 w-[5.75rem] text-xs"
+        >
+          {OUTBOUND_PAGE_SIZES.map((size) => (
+            <option key={size} value={size}>
+              {size}행씩
+            </option>
+          ))}
+        </Select>
+        <Button type="button" size="sm" className="h-8" onClick={onApply}>
+          검색
+        </Button>
       </div>
     </div>
   )
@@ -1401,6 +1430,33 @@ function FilterBar({
 
 type OutboundSortKey = 'name' | 'total' | `date:${string}`
 
+const OUTBOUND_PAGE_SIZES = [20, 50, 100] as const
+type OutboundPageSize = (typeof OUTBOUND_PAGE_SIZES)[number]
+
+type AppliedOutboundFilters = {
+  dateFrom: string
+  dateTo: string
+  partnerFilter: string
+  search: string
+  onlyShipped: boolean
+}
+
+function outboundPageItems(
+  current: number,
+  total: number,
+): Array<number | 'ellipsis'> {
+  if (total <= 7) {
+    return Array.from({ length: total }, (_, index) => index + 1)
+  }
+  const items: Array<number | 'ellipsis'> = [1]
+  const start = Math.max(2, current - 1)
+  const end = Math.min(total - 1, current + 1)
+  if (start > 2) items.push('ellipsis')
+  for (let page = start; page <= end; page += 1) items.push(page)
+  if (end < total - 1) items.push('ellipsis')
+  items.push(total)
+  return items
+}
 function OutboundSortHeader({
   label,
   sortKey,
@@ -1534,6 +1590,99 @@ function OutboundBusyOverlay({
   )
 }
 
+function OutboundPager({
+  page,
+  pageSize,
+  total,
+  onPage,
+}: {
+  page: number
+  pageSize: number
+  total: number
+  onPage: (page: number) => void
+}) {
+  if (total <= 0) return null
+  const pages = Math.max(1, Math.ceil(total / pageSize))
+  const safePage = Math.min(page, pages)
+  const start = (safePage - 1) * pageSize + 1
+  const end = Math.min(safePage * pageSize, total)
+  const items = outboundPageItems(safePage, pages)
+  return (
+    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-xs text-muted-foreground">
+        {formatNumber(start)}–{formatNumber(end)} / {formatNumber(total)}종
+      </p>
+      <div className="flex flex-wrap items-center gap-1">
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="size-8"
+          aria-label="첫 페이지"
+          disabled={safePage <= 1}
+          onClick={() => onPage(1)}
+        >
+          <ChevronsLeft className="size-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="size-8"
+          aria-label="이전 페이지"
+          disabled={safePage <= 1}
+          onClick={() => onPage(safePage - 1)}
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        {items.map((item, index) =>
+          item === 'ellipsis' ? (
+            <span
+              key={`ellipsis-${index}`}
+              className="px-1 text-xs text-muted-foreground"
+            >
+              …
+            </span>
+          ) : (
+            <Button
+              key={item}
+              type="button"
+              variant={item === safePage ? 'default' : 'outline'}
+              size="sm"
+              className="h-8 min-w-8 px-2"
+              onClick={() => onPage(item)}
+            >
+              {item}
+            </Button>
+          ),
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="size-8"
+          aria-label="다음 페이지"
+          disabled={safePage >= pages}
+          onClick={() => onPage(safePage + 1)}
+        >
+          <ChevronRight className="size-4" />
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="icon"
+          className="size-8"
+          aria-label="마지막 페이지"
+          disabled={safePage >= pages}
+          onClick={() => onPage(pages)}
+        >
+          <ChevronsRight className="size-4" />
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 function ProductListCard({
   title,
   total,
@@ -1543,6 +1692,7 @@ function ProductListCard({
   empty,
   emptyMessage,
   rows,
+  footer,
   className,
 }: {
   title: string
@@ -1553,6 +1703,7 @@ function ProductListCard({
   empty: boolean
   emptyMessage: string
   rows: ReactNode
+  footer?: ReactNode
   className?: string
 }) {
   return (
@@ -1578,9 +1729,12 @@ function ProductListCard({
             {emptyMessage}
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-border">
-            {rows}
-          </div>
+          <>
+            <div className="overflow-x-auto rounded-lg border border-border">
+              {rows}
+            </div>
+            {footer}
+          </>
         )}
       </CardContent>
     </Card>
@@ -1603,23 +1757,48 @@ export function OutboundDataPage() {
   const [dateTo, setDateTo] = useState(initialRange.to)
   const [outboundSortKey, setOutboundSortKey] =
     useState<OutboundSortKey>('name')
+  const [pageSize, setPageSize] = useState<OutboundPageSize>(20)
+  const [page, setPage] = useState(1)
   const [outboundSortDir, setOutboundSortDir] = useState<'asc' | 'desc'>('asc')
 
+  const [hasSearched, setHasSearched] = useState(false)
+  const [applied, setApplied] = useState<AppliedOutboundFilters | null>(null)
+
   const shipmentsQuery = useQuery({
-    queryKey: ['outboundShipments', brand.id],
-    queryFn: () => getOutboundShipments(brand.id),
+    queryKey: [
+      'outboundShipments',
+      brand.id,
+      applied?.dateFrom ?? '',
+      applied?.dateTo ?? '',
+      applied?.partnerFilter ?? '',
+      applied?.search ?? '',
+    ],
+    queryFn: () => {
+      if (!applied) {
+        throw new Error('검색 조건이 없습니다.')
+      }
+      return getFilteredOutboundShipments({
+        brandId: brand.id,
+        dateFrom: applied.dateFrom,
+        dateTo: applied.dateTo,
+        partnerId: applied.partnerFilter,
+        search: applied.search,
+      })
+    },
+    enabled: hasSearched && applied !== null,
   })
   const shipments =
     shipmentsQuery.data ?? emptyList<ProductOutboundShipment>()
   const loadingShipments =
-    shipmentsQuery.isPending ||
-    (!shipmentsQuery.data && shipmentsQuery.isFetching)
+    hasSearched &&
+    (shipmentsQuery.isPending ||
+      (!shipmentsQuery.data && shipmentsQuery.isFetching))
   const refreshingShipments =
-    shipmentsQuery.isFetching && Boolean(shipmentsQuery.data)
+    hasSearched && shipmentsQuery.isFetching && Boolean(shipmentsQuery.data)
   const [readyBrandId, setReadyBrandId] = useState<string | null>(null)
 
   useEffect(() => {
-    if (loadingShipments) {
+    if (!hasSearched || loadingShipments) {
       if (readyBrandId !== null) setReadyBrandId(null)
       return
     }
@@ -1630,8 +1809,7 @@ export function OutboundDataPage() {
       })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [brand.id, loadingShipments, readyBrandId, shipmentsQuery.dataUpdatedAt])
-
+  }, [brand.id, hasSearched, loadingShipments, readyBrandId, shipmentsQuery.dataUpdatedAt])
   useEffect(() => {
     if (!shipmentsQuery.error) return
     console.warn('[운영현황] 출고 원장을 불러오지 못함', {
@@ -1640,13 +1818,15 @@ export function OutboundDataPage() {
     })
   }, [brand.id, shipmentsQuery.error])
 
-  const readyToRender = readyBrandId === brand.id && !loadingShipments
+  const readyToRender =
+    hasSearched && readyBrandId === brand.id && !loadingShipments
   const visibleShipments = readyToRender
     ? shipments
     : emptyList<ProductOutboundShipment>()
   const showLoadingOverlay =
-    !shipmentsQuery.isError && (loadingShipments || !readyToRender)
-
+    hasSearched &&
+    !shipmentsQuery.isError &&
+    (loadingShipments || !readyToRender)
   useEffect(() => {
     purgeDemoProductOutboundShipments(brand.id)
     setSelectedStyleId(null)
@@ -1658,8 +1838,10 @@ export function OutboundDataPage() {
     setDateTo(range.to)
     setOutboundSortKey('name')
     setOutboundSortDir('asc')
+    setHasSearched(false)
+    setApplied(null)
+    setPage(1)
   }, [brand.id])
-
   useEffect(() => {
     function refresh(event?: Event) {
       if (event instanceof CustomEvent) {
@@ -1688,18 +1870,19 @@ export function OutboundDataPage() {
   const partnerFolders = foldersQuery.data ?? emptyList()
 
   const filteredShipments = useMemo(
-    () =>
-      timeOutboundData('기간 필터', () =>
+    () => {
+      if (!applied || !readyToRender) return emptyList<ProductOutboundShipment>()
+      return timeOutboundData('기간 필터', () =>
         filterShipmentsByRange(
           visibleShipments,
-          dateFrom,
-          dateTo,
-          partnerFilter || null,
+          applied.dateFrom,
+          applied.dateTo,
+          applied.partnerFilter || null,
         ),
-      ),
-    [dateFrom, dateTo, partnerFilter, visibleShipments],
+      )
+    },
+    [applied, readyToRender, visibleShipments],
   )
-
   const finance = useMemo(
     () =>
       timeOutboundData('손익 합계', () =>
@@ -1747,12 +1930,14 @@ export function OutboundDataPage() {
   )
 
   const dateColumns = useMemo(
-    () => listOutboundDateColumns(dateFrom, dateTo, filteredShipments),
-    [dateFrom, dateTo, filteredShipments],
+    () =>
+      applied
+        ? listOutboundDateColumns(applied.dateFrom, applied.dateTo, filteredShipments)
+        : [],
+    [applied, filteredShipments],
   )
-
   const visibleRows = useMemo(() => {
-    const query = search.trim().toLowerCase()
+    const query = applied?.search.trim().toLowerCase() ?? ''
     let rows = outboundStyleRows
     if (query) {
       rows = rows.filter(
@@ -1761,13 +1946,13 @@ export function OutboundDataPage() {
           style.styleName.toLowerCase().includes(query),
       )
     }
-    if (!onlyShipped) return rows
+    if (!applied?.onlyShipped) return rows
     return rows.filter(
       (style) => (summaries.get(style.styleId)?.totalQuantity ?? 0) > 0,
     )
-  }, [onlyShipped, outboundStyleRows, search, summaries])
-
+  }, [applied, outboundStyleRows, summaries])
   function toggleOutboundSort(key: OutboundSortKey) {
+    setPage(1)
     if (outboundSortKey === key) {
       setOutboundSortDir((current) => (current === 'asc' ? 'desc' : 'asc'))
       return
@@ -1828,8 +2013,14 @@ export function OutboundDataPage() {
     return summarizeOutboundFinance(rowsForStyle)
   }, [filteredShipments, selectedStyle])
 
-  const detailRows = view === 'outbound' ? sortedVisibleRows : visibleRows
-
+  const listRows = view === 'outbound' ? sortedVisibleRows : visibleRows
+  const pageCount = Math.max(1, Math.ceil(listRows.length / pageSize) || 1)
+  const safePage = Math.min(page, pageCount)
+  const pageRows = listRows.slice(
+    (safePage - 1) * pageSize,
+    safePage * pageSize,
+  )
+  const detailRows = pageRows
   useEffect(() => {
     if (!selectedStyleId || !tabActive) return
     function onKey(event: KeyboardEvent) {
@@ -1882,6 +2073,24 @@ export function OutboundDataPage() {
     setDateTo(value)
   }
 
+  function runSearch() {
+    setApplied({
+      dateFrom,
+      dateTo,
+      partnerFilter,
+      search,
+      onlyShipped,
+    })
+    setPage(1)
+    setHasSearched(true)
+    setSelectedStyleId(null)
+  }
+
+  function changePageSize(next: OutboundPageSize) {
+    setPageSize(next)
+    setPage(1)
+  }
+
   const filterBarProps = {
     datePreset,
     dateFrom,
@@ -1893,6 +2102,7 @@ export function OutboundDataPage() {
     onlyShipped,
     onPreset: applyPreset,
     onFrom: setCustomFrom,
+    pageSize,
     onTo: setCustomTo,
     onPartner: (value: string) => {
       setPartnerFilter(value)
@@ -1902,27 +2112,40 @@ export function OutboundDataPage() {
       setSelectedStyleId(null)
     },
     onOnlyShipped: () => setOnlyShipped((value) => !value),
+    onPageSize: changePageSize,
+    onApply: runSearch,
   }
 
+  const pager = (
+    <OutboundPager
+      page={safePage}
+      pageSize={pageSize}
+      total={listRows.length}
+      onPage={setPage}
+    />
+  )
   const listControls = {
     total: visibleRows.length,
     loading: showLoadingOverlay,
     error: shipmentsQuery.isError,
     empty: visibleRows.length === 0,
-    emptyMessage: onlyShipped
-      ? '기간 안 출고 기록이 있는 상품이 없습니다.'
-      : '표시할 상품이 없습니다.',
+    emptyMessage: !hasSearched
+      ? '기간·업체·상품을 고른 뒤 검색해 주세요.'
+      : applied?.onlyShipped
+        ? '기간 안 출고 기록이 있는 상품이 없습니다.'
+        : '표시할 상품이 없습니다.',
   }
-  const kpiQuantity = showLoadingOverlay
+  const kpiPending = !hasSearched || showLoadingOverlay
+  const kpiQuantity = kpiPending
     ? '—'
     : `${formatNumber(finance.quantity)}개`
-  const kpiShipments = showLoadingOverlay
+  const kpiShipments = kpiPending
     ? '—'
     : `${formatNumber(finance.shipmentCount)}건`
-  const kpiStyles = showLoadingOverlay
+  const kpiStyles = kpiPending
     ? '—'
     : `${formatNumber(finance.styleCount)}종`
-  const kpiPartners = showLoadingOverlay
+  const kpiPartners = kpiPending
     ? '—'
     : `${formatNumber(finance.partnerCount)}곳`
 
@@ -2005,6 +2228,7 @@ export function OutboundDataPage() {
             )}
             title="상품 출고"
             filters={<FilterBar {...filterBarProps} />}
+            footer={pager}
             rows={
               <table className="w-full min-w-max border-separate border-spacing-0 text-left text-xs">
                 <thead className="text-[11px] text-muted-foreground">
@@ -2018,7 +2242,7 @@ export function OutboundDataPage() {
                       activeKey={outboundSortKey}
                       direction={outboundSortDir}
                       onSort={toggleOutboundSort}
-                      className="sticky left-[4.5rem] z-20"
+                      className="sticky left-[4.5rem] z-20 w-0"
                     />
                     <OutboundSortHeader
                       label="총 출고"
@@ -2027,6 +2251,7 @@ export function OutboundDataPage() {
                       direction={outboundSortDir}
                       onSort={toggleOutboundSort}
                       align="right"
+                      className="border-r-2 border-border"
                     />
                     {dateColumns.map((date) => (
                       <OutboundSortHeader
@@ -2041,13 +2266,12 @@ export function OutboundDataPage() {
                         className="px-1.5 tabular-nums"
                       />
                     ))}
-                    <th className="w-6 border-b border-border bg-muted/40 px-1 py-1.5" />
+                    <th className="w-full border-b border-border bg-muted/40 px-1 py-1.5" />
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedVisibleRows.map((style) => {
-                    const summary =
-                      summaries.get(style.styleId) ?? emptySummary(style)
+                  {pageRows.map((style) => {
+                    const summary = summaries.get(style.styleId) ?? emptySummary(style)
                     const byDate = quantityByShippedOn(summary.shipments)
                     const active = selectedStyleId === style.styleId
                     return (
@@ -2072,7 +2296,7 @@ export function OutboundDataPage() {
                         </td>
                         <td
                           className={cn(
-                            'sticky left-[4.5rem] z-10 whitespace-nowrap border-b border-border px-2 py-1',
+                            'sticky left-[4.5rem] z-10 w-0 whitespace-nowrap border-b border-border px-2 py-1',
                             active
                               ? 'bg-primary/10'
                               : 'bg-card group-hover:bg-muted/30',
@@ -2082,7 +2306,7 @@ export function OutboundDataPage() {
                             <span className="text-muted-foreground">—</span>
                           )}
                         </td>
-                        <td className="whitespace-nowrap border-b border-border px-2 py-1 text-right font-medium tabular-nums group-hover:bg-muted/30">
+                        <td className="whitespace-nowrap border-b border-r-2 border-border px-2 py-1 text-right font-medium tabular-nums group-hover:bg-muted/30">
                           {summary.totalQuantity > 0
                             ? formatNumber(summary.totalQuantity)
                             : '—'}
@@ -2103,7 +2327,7 @@ export function OutboundDataPage() {
                             </td>
                           )
                         })}
-                        <td className="border-b border-border px-1 py-1 text-muted-foreground group-hover:bg-muted/30">
+                        <td className="w-full border-b border-border px-1 py-1 text-muted-foreground group-hover:bg-muted/30">
                           <ChevronRight className="size-3.5" />
                         </td>
                       </tr>
@@ -2133,30 +2357,30 @@ export function OutboundDataPage() {
             <KpiCard
               label="출고 수량"
               value={kpiQuantity}
-              hint={showLoadingOverlay ? undefined : kpiShipments}
+              hint={kpiPending ? undefined : kpiShipments}
             />
             <KpiCard
               label="추정 매출"
-              value={showLoadingOverlay ? '—' : formatWon(finance.revenue)}
+              value={kpiPending ? '—' : formatWon(finance.revenue)}
               hint="판매가 × 출고수량 (테스트)"
             />
             <KpiCard
               label="매출원가"
-              value={showLoadingOverlay ? '—' : formatWon(finance.cogs)}
+              value={kpiPending ? '—' : formatWon(finance.cogs)}
               hint="제품 원가 합"
               tone="muted"
             />
             <KpiCard
               label="물류·수수료"
-              value={showLoadingOverlay ? '—' : formatWon(finance.fees)}
+              value={kpiPending ? '—' : formatWon(finance.fees)}
               hint="배송·플랫폼 수수료 가정"
               tone="muted"
             />
             <KpiCard
               label="반품·손실"
-              value={showLoadingOverlay ? '—' : formatWon(finance.returnLoss)}
+              value={kpiPending ? '—' : formatWon(finance.returnLoss)}
               hint={
-                showLoadingOverlay
+                kpiPending
                   ? undefined
                   : `가정 반품 ${formatNumber(finance.returnQuantity)}개`
               }
@@ -2164,16 +2388,14 @@ export function OutboundDataPage() {
             />
             <KpiCard
               label="순이익"
-              value={showLoadingOverlay ? '—' : formatWon(finance.netProfit)}
+              value={kpiPending ? '—' : formatWon(finance.netProfit)}
               hint={
-                showLoadingOverlay
+                kpiPending
                   ? undefined
                   : `마진 ${finance.marginRate.toFixed(1)}%`
               }
               tone={
-                showLoadingOverlay
-                  ? 'muted'
-                  : finance.netProfit >= 0
+                kpiPending ? undefined : finance.netProfit >= 0
                     ? 'success'
                     : 'danger'
               }
@@ -2188,6 +2410,7 @@ export function OutboundDataPage() {
             )}
             title="상품 손익"
             filters={<FilterBar {...filterBarProps} />}
+            footer={pager}
             rows={
               <table className="w-full min-w-[42rem] text-left text-sm">
                 <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
@@ -2204,9 +2427,8 @@ export function OutboundDataPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {visibleRows.map((style) => {
-                    const summary =
-                      summaries.get(style.styleId) ?? emptySummary(style)
+                  {pageRows.map((style) => {
+                    const summary = summaries.get(style.styleId) ?? emptySummary(style)
                     const eco = demoEconomicsForStyle(style.styleNo)
                     const revenue = summary.totalQuantity * eco.unitPrice
                     const net =

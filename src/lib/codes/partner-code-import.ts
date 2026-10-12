@@ -1,48 +1,9 @@
-import { parseStyleNoList } from '@/lib/codes/barcode-import'
+import { resolveComponents } from '@/lib/codes/style-components'
+import { parseStyleNoList } from '@/lib/codes/style-no-list'
 import { normalizeStyleNo } from '@/lib/import/transform'
 import type { ProductCodeComponent, Style } from '@/lib/types'
 
 export const PARTNER_COMPONENT_HEADER = '구성'
-
-function resolveComponents(options: {
-  styleTokens: string[]
-  styleByNo: Map<string, Style>
-}): {
-  styleNos: string[]
-  components: ProductCodeComponent[]
-  missing: string[]
-  duplicates: string[]
-} {
-  const { styleTokens, styleByNo } = options
-  const seenInRow = new Set<string>()
-  const components: ProductCodeComponent[] = []
-  const styleNos: string[] = []
-  const missing: string[] = []
-  const duplicates: string[] = []
-
-  for (const token of styleTokens) {
-    const key = normalizeStyleNo(token)
-    if (!key) continue
-    if (seenInRow.has(key)) {
-      duplicates.push(token)
-      continue
-    }
-    seenInRow.add(key)
-    const style = styleByNo.get(key)
-    if (!style) {
-      missing.push(token)
-      continue
-    }
-    styleNos.push(style.styleNo)
-    components.push({
-      styleId: style.id,
-      styleNo: style.styleNo,
-      qty: 1,
-    })
-  }
-
-  return { styleNos, components, missing, duplicates }
-}
 
 /** 엑셀 구성 셀 → ProductCodeComponent[]. error가 있으면 components는 비어 있다. */
 export function parsePartnerComponentsCell(

@@ -11,7 +11,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
-import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import type { CargoInboundLineDraft } from '@/lib/cargo/inbound'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { timeInvoiceWork } from '@/lib/invoice/invoice-work-perf'

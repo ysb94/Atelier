@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
-import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

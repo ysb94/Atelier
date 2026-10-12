@@ -1,0 +1,21 @@
+{
+  "dataSourceId": "b8d45fa9-d067-48d0-b549-930c582f0e38",
+  "port": 4319,
+  "pollMs": 30000,
+  "maxAttempts": 3,
+  "agentTimeoutMs": 1200000,
+  "excludedMcpServers": ["cloudflare"],
+  "verificationScripts": ["lint", "build", "verify:diagnostics", "verify:structure-map"],
+  "properties": {
+    "title": "할 일",
+    "progress": "진행",
+    "enabled": "AI 자동 실행",
+    "state": "AI 상태",
+    "order": "AI 실행 순서",
+    "attempt": "AI 반복 횟수",
+    "request": "AI 요청",
+    "criteria": "AI 완료 기준",
+    "files": "AI 허용 파일",
+    "result": "AI 결과"
+  }
+}

@@ -34,7 +34,7 @@ import { ProductCategoryBrowse } from '@/features/products/ProductCategoryBrowse
 import { useDepartmentWorkSet } from '@/features/products/useDepartmentWorkSet'
 import { MdProductsPage } from '@/features/products/MdProductsPage'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

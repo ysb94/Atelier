@@ -1,5 +1,5 @@
 import { useDeferredValue, useMemo, useState } from 'react'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Pencil, Search, X } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'

@@ -35,7 +35,7 @@ import {
   UNSPECIFIED_LOCATION_ZONE,
   type InvoiceProductListWarehouseGroup,
 } from '@/lib/invoice/product-list-warehouse'
-import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { cn, formatNumber } from '@/lib/utils'
 
 function InvoiceProductListPrintPreviewSheet({

@@ -1,13 +1,10 @@
 import {
-  createContext,
   memo,
   useCallback,
-  useContext,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type ReactNode,
 } from 'react'
 import {
   Routes,
@@ -18,20 +15,7 @@ import {
 import { Home, X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { companyWorkspaceRoutes } from './company-routes'
-
-const WorkspaceTabActivityContext = createContext(true)
-
-/** KeepAlive 라우트가 현재 사용자에게 보이는 작업 탭인지 반환한다. */
-export function useWorkspaceTabActivity() {
-  return useContext(WorkspaceTabActivityContext)
-}
-
-/** 비활성 KeepAlive 탭의 전역 차단 레이어는 렌더하지 않는다. */
-export function WorkspaceTabOverlay({ children }: { children: ReactNode }) {
-  const active = useWorkspaceTabActivity()
-  if (!active) return null
-  return children
-}
+import { WorkspaceTabActivityContext } from './workspace-tab-activity'
 
 export type WorkspaceTab = {
   id: string

@@ -11,7 +11,14 @@ import {
   type PointerEvent,
 } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, Navigate, useParams, useSearchParams } from 'react-router-dom'
+import {
+  Link,
+  Navigate,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from 'react-router-dom'
 import {
   AlertCircle,
   ArrowLeft,
@@ -31,6 +38,7 @@ import {
   X,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -99,13 +107,25 @@ import {
   type FormValues,
   type ImageContentBlock,
   type ImageWrap,
-  type RequestScreen,
   type RequestStatus,
   type TextContentBlock,
   type WorkListSection,
   type WorkRequestMessage,
   type WorkRequestRecord,
 } from './work-request-types'
+import {
+  dropWorkRequestDraft,
+  isWorkRequestDraftDirty,
+  resolveWorkRequestView,
+  shouldListenWorkRequestEscape,
+  switchWorkRequestDraft,
+  workRequestDraftKey,
+  workRequestNavigation,
+  workRequestRecoverySearch,
+  workRequestScreenKey,
+  type WorkRequestAccess,
+  type WorkRequestNavAction,
+} from './work-request-navigation'
 
 function makeBlockId(): string {
   return `blk-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -1916,18 +1936,35 @@ function RequestBodyEditor({
   )
 }
 
+type FormDraft = {
+  values: FormValues
+  formBrandId: string
+  errors: FormErrors
+  hasEdited: boolean
+}
+
 function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   useRenderWatch(`WorkRequestForm:${owner}`)
   const config = WORK_REQUEST_CONFIG[owner]
-  const { profile } = useAuth()
+  const { profile, ready } = useAuth()
   const [searchParams] = useSearchParams()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const tabActive = useWorkspaceTabActivity()
   const brandsQuery = useQuery({
     queryKey: ['brand-directory'],
     queryFn: listBrandDirectory,
   })
   const brands = brandsQuery.data ?? emptyList()
   const pageTopRef = useRef<HTMLDivElement>(null)
-  const [screen, setScreen] = useState<RequestScreen>({ kind: 'list' })
+  const [formDrafts, setFormDrafts] = useState<
+    Readonly<Record<string, FormDraft>>
+  >({})
+  const [loadedScreen, setLoadedScreen] = useState<{
+    screenKey: string
+    draftKey: string | null
+    baseBrandId: string
+  }>({ screenKey: '', draftKey: null, baseBrandId: '' })
   const [requests, setRequests] = useState<WorkRequestRecord[]>(() =>
     createDemoRequests(owner),
   )
@@ -1942,7 +1979,6 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const [errors, setErrors] = useState<FormErrors>({})
   const [hasEdited, setHasEdited] = useState(false)
   const [flashMessage, setFlashMessage] = useState<string | null>(null)
-  const [detailRequestId, setDetailRequestId] = useState<string | null>(null)
   const [acceptRequestId, setAcceptRequestId] = useState<string | null>(null)
   const [reviewConfirmId, setReviewConfirmId] = useState<string | null>(null)
   const [currentWorkByMember, setCurrentWorkByMember] = useState<
@@ -1983,14 +2019,60 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     return () => window.clearInterval(timer)
   }, [workTimeByKey])
 
-  useEffect(() => {
-    if (screen.kind === 'form' && isDestinationMember && !screen.requestId) {
-      setScreen({ kind: 'list' })
+  function navigationAccess(requestId: string): WorkRequestAccess | null {
+    const request = requests.find((item) => item.id === requestId)
+    if (!request || request.owner !== owner) return null
+    const isIncoming =
+      !isDestinationMember ||
+      request.requesterDepartment !== LOCAL_CURRENT_DEPARTMENT
+    const isSelfRequest =
+      !isDestinationMember &&
+      isCurrentUserRequest(request.requesterDepartment, profile?.departmentName)
+    const visible = canManage
+      ? isIncoming
+      : isDestinationMember
+        ? isIncoming &&
+          (request.assignee === LOCAL_SELF_ID ||
+            request.collaborators.includes(LOCAL_SELF_ID))
+        : isSelfRequest
+    if (!visible) return null
+    return {
+      needsReviewStart: canManage && request.status === 'requested',
+      editable: isSelfRequest && request.status === 'requested',
     }
-  }, [isDestinationMember, screen])
+  }
+
+  const locationPathname = location.pathname
+  const locationSearch = location.search
+  const resolvedView = resolveWorkRequestView(locationSearch, {
+    canCreate: !isDestinationMember,
+    accessOf: navigationAccess,
+  })
+  const view = resolvedView.view
+  const detailRequestId = view.kind === 'detail' ? view.requestId : null
+  const recoverySearch = workRequestRecoverySearch(locationSearch, resolvedView, {
+    active: tabActive && ready,
+  })
 
   useEffect(() => {
-    if (!detailRequestId && !acceptRequestId && !reviewConfirmId) return
+    if (recoverySearch === null) return
+    navigate(
+      { pathname: locationPathname, search: recoverySearch },
+      { replace: true },
+    )
+  }, [locationPathname, navigate, recoverySearch])
+
+  useEffect(() => {
+    if (
+      !shouldListenWorkRequestEscape({
+        tabActive,
+        detailOpen: Boolean(detailRequestId),
+        acceptOpen: Boolean(acceptRequestId),
+        reviewConfirmOpen: Boolean(reviewConfirmId),
+      })
+    ) {
+      return
+    }
     function onKeyDown(event: globalThis.KeyboardEvent) {
       if (event.key !== 'Escape') return
       if (reviewConfirmId) {
@@ -1999,19 +2081,95 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
       }
       setFlashMessage(null)
       setAcceptRequestId(null)
-      setDetailRequestId(null)
+      if (!detailRequestId) return
+      const next = workRequestNavigation(
+        locationSearch,
+        { kind: 'detail', requestId: detailRequestId },
+        { type: 'closeDetail' },
+      )
+      navigate(
+        { pathname: locationPathname, search: next.search },
+        { replace: next.replace },
+      )
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [acceptRequestId, detailRequestId, reviewConfirmId])
+  }, [
+    acceptRequestId,
+    detailRequestId,
+    locationPathname,
+    locationSearch,
+    navigate,
+    reviewConfirmId,
+    tabActive,
+  ])
 
   const editingRequest =
-    screen.kind === 'form' && screen.requestId
-      ? requests.find((request) => request.id === screen.requestId)
+    view.kind === 'edit'
+      ? requests.find((request) => request.id === view.requestId)
       : undefined
   const selectedRequest = detailRequestId
     ? requests.find((request) => request.id === detailRequestId)
     : undefined
+
+  function initialFormDraft(request?: WorkRequestRecord): FormDraft {
+    return {
+      values: request
+        ? { ...request.values }
+        : {
+            ...createEmptyValues(),
+            requester: profile?.displayName ?? '',
+            requesterPosition: profile?.position ?? '',
+          },
+      formBrandId: request?.brandId ?? '',
+      errors: {},
+      hasEdited: false,
+    }
+  }
+
+  const screenKey = workRequestScreenKey(view)
+  const draftKey = workRequestDraftKey(view)
+  if (screenKey !== loadedScreen.screenKey) {
+    // 단계가 바뀌는 렌더에서 바로 양식 상태를 맞춘다. effect로 미루면 이전 단계의
+    // 입력이 한 프레임 보이거나 다른 요청 초안에 섞인다.
+    const switched = switchWorkRequestDraft(formDrafts, {
+      fromKey: loadedScreen.draftKey,
+      toKey: draftKey,
+      current: { values, formBrandId, errors, hasEdited },
+      dirty: isWorkRequestDraftDirty({
+        hasEdited,
+        brandId: formBrandId,
+        baseBrandId: loadedScreen.baseBrandId,
+      }),
+      initial: () => initialFormDraft(editingRequest),
+    })
+    setLoadedScreen({
+      screenKey,
+      draftKey,
+      baseBrandId: editingRequest?.brandId ?? '',
+    })
+    setFormDrafts(switched.drafts)
+    setAcceptRequestId(null)
+    setReviewConfirmId(null)
+    if (switched.loaded) {
+      setValues(switched.loaded.values)
+      setFormBrandId(switched.loaded.formBrandId)
+      setErrors(switched.loaded.errors)
+      setHasEdited(switched.loaded.hasEdited)
+    } else if (selectedRequest) {
+      setFormBrandId(selectedRequest.brandId)
+    }
+  }
+
+  function goToView(action: WorkRequestNavAction) {
+    if (!tabActive) return
+    const next = workRequestNavigation(locationSearch, view, action)
+    navigate(
+      { pathname: locationPathname, search: next.search },
+      { replace: next.replace },
+    )
+  }
+
   const acceptingRequest = acceptRequestId
     ? requests.find((request) => request.id === acceptRequestId)
     : undefined
@@ -2044,20 +2202,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   }
 
   function openForm(request?: WorkRequestRecord) {
-    setFormBrandId(request?.brandId ?? '')
-    setValues(
-      request
-        ? { ...request.values }
-        : {
-            ...createEmptyValues(),
-            requester: profile?.displayName ?? '',
-            requesterPosition: profile?.position ?? '',
-          },
-    )
-    setErrors({})
-    setHasEdited(false)
     setFlashMessage(null)
-    setScreen({ kind: 'form', requestId: request?.id })
+    goToView(
+      request
+        ? { type: 'openEdit', requestId: request.id }
+        : { type: 'openNew' },
+    )
   }
 
   function updateValue<K extends keyof FormValues>(
@@ -2083,8 +2233,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     }
     setErrors({})
     setHasEdited(false)
-    if (editingRequest) setDetailRequestId(editingRequest.id)
-    setScreen({ kind: 'list' })
+    setLoadedScreen((current) => ({ ...current, draftKey: null }))
+    setFormDrafts((current) => dropWorkRequestDraft(current, draftKey))
+    goToView({ type: 'cancelForm' })
   }
 
   function validate(): FormErrors {
@@ -2123,8 +2274,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         ),
       )
       setFlashMessage('요청 내용을 수정했습니다.')
-      setDetailRequestId(editingRequest.id)
-      setScreen({ kind: 'list' })
+      setFormDrafts((current) => dropWorkRequestDraft(current, draftKey))
+      goToView({ type: 'saved', requestId: editingRequest.id })
     } else {
       const id = makeRequestId()
       setRequests((current) => [
@@ -2156,10 +2307,11 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         ...current,
       ])
       setFlashMessage('작업 요청을 등록했습니다.')
-      setDetailRequestId(id)
-      setScreen({ kind: 'list' })
+      setFormDrafts((current) => dropWorkRequestDraft(current, draftKey))
+      goToView({ type: 'saved', requestId: id })
     }
     setHasEdited(false)
+    setLoadedScreen((current) => ({ ...current, draftKey: null }))
   }
 
   function deleteRequest(request: WorkRequestRecord) {
@@ -2169,8 +2321,13 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     }
     setRequests((current) => current.filter((item) => item.id !== request.id))
     setFlashMessage('작업 요청을 삭제했습니다.')
-    setDetailRequestId(null)
-    setScreen({ kind: 'list' })
+    setFormDrafts((current) =>
+      dropWorkRequestDraft(
+        current,
+        workRequestDraftKey({ kind: 'edit', requestId: request.id }),
+      ),
+    )
+    goToView({ type: 'deleted' })
   }
 
   function cancelRequest(request: WorkRequestRecord) {
@@ -2497,8 +2654,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
       return
     }
     setFlashMessage(null)
-    setFormBrandId(request.brandId)
-    setDetailRequestId(request.id)
+    goToView({ type: 'openDetail', requestId: request.id })
   }
 
   function workDurationMs(memberId: string, requestId: string) {
@@ -2551,13 +2707,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     updateRequest(request.id, { status: 'reviewing' })
     setReviewConfirmId(null)
     setFlashMessage(null)
-    setFormBrandId(request.brandId)
-    setDetailRequestId(request.id)
+    goToView({ type: 'openDetail', requestId: request.id })
   }
 
   function closeRequest() {
     setFlashMessage(null)
-    setDetailRequestId(null)
+    goToView({ type: 'closeDetail' })
   }
 
   function renderEmptyState(title: string, description: string) {
@@ -2860,7 +3015,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     )
   }
 
-  if (screen.kind === 'list') {
+  if (view.kind === 'list' || view.kind === 'detail') {
     const managerStats = [
       {
         label: '신규·검토',

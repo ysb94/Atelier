@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { X } from 'lucide-react'
-import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
 import { OWNER_LABEL } from '@/lib/import/fields'

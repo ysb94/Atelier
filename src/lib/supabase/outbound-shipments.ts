@@ -71,6 +71,19 @@ function firstEmbed<T>(value: T | T[] | null | undefined): T | null {
 const OUTBOUND_SHIPMENT_SELECT =
   'id, brand_id, style_id, usage_target_id, shipped_on, quantity, source, source_ref, note, style:styles!outbound_shipments_style_fkey(style_no, name), target:code_usage_targets!outbound_shipments_target_fkey(name, site_name, outbound_partner_groups(name))'
 
+const OUTBOUND_SHIPMENT_SELECT_INNER =
+  'id, brand_id, style_id, usage_target_id, shipped_on, quantity, source, source_ref, note, style:styles!inner(style_no, name), target:code_usage_targets!outbound_shipments_target_fkey(name, site_name, outbound_partner_groups(name))'
+
+const OUTBOUND_SOURCES = ['invoice', 'bulk', 'manual'] as const
+
+export type OutboundShipmentListQuery = {
+  brandId: string
+  dateFrom: string
+  dateTo: string
+  partnerId: string
+  search: string
+}
+
 const BARCODE_LEDGER_SELECT =
   'id, brand_id, style_id, usage_target_id, shipped_on, quantity, source, source_ref, note, created_at'
 
@@ -141,32 +154,99 @@ export async function listOutboundShipments(
     },
   })
 
-  return rows
-    .filter((row) => isSource(row.source) && row.quantity > 0)
-    .map((row) => {
-      const style = firstEmbed(row.style)
-      const target = firstEmbed(row.target)
-      const group = firstEmbed(target?.outbound_partner_groups)
-      return {
-        id: row.id,
-        brandId: row.brand_id,
-        styleId: row.style_id,
-        styleNo: style?.style_no ?? '',
-        styleName: style?.name ?? '',
-        partnerId: row.usage_target_id,
-        partnerName: target
-          ? outboundPartnerDisplayName({
-              name: target.name,
-              groupName: group?.name ?? '',
-              siteName: target.site_name,
-            })
-          : '',
-        shippedOn: row.shipped_on.slice(0, 10),
-        quantity: row.quantity,
-        source: row.source,
-        note: row.note || undefined,
+  return rows.flatMap((row) => {
+    const mapped = mapOutboundShipment(row)
+    return mapped ? [mapped] : []
+  })
+}
+
+function mapOutboundShipment(
+  row: OutboundShipmentJoinedRow,
+): ProductOutboundShipment | null {
+  if (!isSource(row.source) || row.quantity <= 0) return null
+  const style = firstEmbed(row.style)
+  const target = firstEmbed(row.target)
+  const group = firstEmbed(target?.outbound_partner_groups)
+  return {
+    id: row.id,
+    brandId: row.brand_id,
+    styleId: row.style_id,
+    styleNo: style?.style_no ?? '',
+    styleName: style?.name ?? '',
+    partnerId: row.usage_target_id,
+    partnerName: target
+      ? outboundPartnerDisplayName({
+          name: target.name,
+          groupName: group?.name ?? '',
+          siteName: target.site_name,
+        })
+      : '',
+    shippedOn: row.shipped_on.slice(0, 10),
+    quantity: row.quantity,
+    source: row.source,
+    note: row.note || undefined,
+  }
+}
+
+function styleSearchOr(raw: string): string | null {
+  const text = raw.trim()
+  if (!text) return null
+  const escaped = text
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '')
+    .replace(/[%_]/g, (char) => `\\${char}`)
+    .replace(/[(),]/g, ' ')
+    .trim()
+  if (!escaped) return null
+  const pattern = `"%${escaped}%"`
+  return `style_no.ilike.${pattern},name.ilike.${pattern}`
+}
+
+/** 기간·업체·상품 조건에 맞는 출고를 모두 읽는다. 화면에서는 이 결과를 페이지로 나눈다. */
+export async function listFilteredOutboundShipments(
+  query: OutboundShipmentListQuery,
+): Promise<ProductOutboundShipment[]> {
+  const rows = await fetchAllPages<OutboundShipmentJoinedRow>({
+    fetchPage: async (from, to, withCount) => {
+      let request = getSupabase()
+        .from('outbound_shipments')
+        .select(
+          OUTBOUND_SHIPMENT_SELECT_INNER,
+          withCount ? { count: 'exact' } : undefined,
+        )
+        .eq('brand_id', query.brandId)
+        .gt('quantity', 0)
+        .in('source', [...OUTBOUND_SOURCES])
+        .order('shipped_on', { ascending: false })
+        .order('id', { ascending: false })
+
+      if (query.dateFrom) request = request.gte('shipped_on', query.dateFrom)
+      if (query.dateTo) request = request.lte('shipped_on', query.dateTo)
+      if (query.partnerId) {
+        request = request.eq('usage_target_id', query.partnerId)
       }
-    })
+      const searchFilter = styleSearchOr(query.search)
+      if (searchFilter) {
+        request = request.or(searchFilter, { referencedTable: 'style' })
+      }
+
+      const { data, error, count } = await request.range(from, to)
+      if (error) {
+        throw new OutboundShipmentStoreError(
+          errorMessage(error, '출고 원장을 불러오지 못했습니다.'),
+        )
+      }
+      return {
+        rows: (data as OutboundShipmentJoinedRow[]) ?? [],
+        count: count ?? null,
+      }
+    },
+  })
+
+  return rows.flatMap((row) => {
+    const mapped = mapOutboundShipment(row)
+    return mapped ? [mapped] : []
+  })
 }
 
 const UUID_RE =

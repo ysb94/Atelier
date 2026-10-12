@@ -1,4 +1,4 @@
-import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { Button } from '@/components/ui/button'
 import { invoiceBackupConfirmButton } from '@/lib/invoice/invoice-step-compute'
 import { formatNumber } from '@/lib/utils'

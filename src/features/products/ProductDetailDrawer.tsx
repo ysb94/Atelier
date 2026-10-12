@@ -8,7 +8,7 @@ import {
   useSearchParams,
 } from 'react-router-dom'
 import { useOptionalBrand } from '@/components/layout/brand-context'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

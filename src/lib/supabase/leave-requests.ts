@@ -23,11 +23,15 @@ function fail(action: string, error: { message: string }): never {
   console.warn('[leave-requests] ' + action, { message: error.message })
   throw new Error(error.message)
 }
-export async function listLeaveRequests(employeeId?: string, approvals = false): Promise<LeaveRequest[]> {
+export async function listLeaveRequests(employeeId?: string, approvals = false, period?: { from: string; to: string; approvedOnly?: boolean }): Promise<LeaveRequest[]> {
   const rows: LeaveRequest[] = []
   for (let offset = 0; ; offset += 500) {
     let query = (approvals ? getSupabase().rpc('list_my_approval_requests') : getSupabase().from('company_leave_requests').select('*')).order('created_at', { ascending: false }).order('id').range(offset, offset + 499)
     if (employeeId) query = query.eq('employee_id', employeeId)
+    if (period) {
+      query = query.lte('from_date', period.to).gte('to_date', period.from)
+      if (period.approvedOnly) query = query.eq('status', 'approved')
+    }
     const { data, error } = await query
     if (error) fail('신청 목록 조회 실패', error)
     rows.push(...(data as LeaveRow[]).map(mapRow))

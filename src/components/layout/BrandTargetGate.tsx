@@ -5,7 +5,7 @@ import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { BrandScope } from './brand-context'
 import { BrandSelectedChip } from './brand-pick'
 import { useCompanyBrandScope } from './company-brand-scope'
-import { useWorkspaceTabActivity } from './workspace-tabs'
+import { useWorkspaceTabActivity } from './workspace-tab-activity'
 import { cn } from '@/lib/utils'
 import type { Brand } from '@/lib/types'
 

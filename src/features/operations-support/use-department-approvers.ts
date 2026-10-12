@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
 import { canEditOrgAssignment } from '@/lib/company/capabilities'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { emptyList } from '@/lib/utils'
 import { listDepartmentApprovers, saveDepartmentApprovers, type DepartmentApprover } from '@/lib/supabase/department-approvers'
 

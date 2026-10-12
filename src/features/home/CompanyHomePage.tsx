@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowUpRight, CalendarDays, ClipboardList, Network, Users } from 'lucide-react'
 import { primaryWorkOwner } from '@/components/layout/company-nav'
@@ -6,6 +7,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
 import { HomeCalendar } from './HomeCalendar'
 import { useMyClockIn } from './use-my-clock-in'
+import { Button } from '@/components/ui/button'
 import './company-home.css'
 
 export function CompanyHomePage() {
@@ -20,6 +22,7 @@ export function CompanyHomePage() {
   const roleDescription = reviewer ? '회사 일정과 제작 중인 화면을 둘러보세요.' : operations ? '근태와 승인자 설정을 한곳에서 확인하세요.' : manager ? '팀 요청을 확인하고 담당자를 배정하세요.' : '요청한 업무와 나에게 배정된 일을 확인하세요.'
   const roleHref = reviewer ? '/org-chart' : operations ? '/operations-support' : workHref
   const clock = useMyClockIn()
+  const [clockOutOpen, setClockOutOpen] = useState(false)
 
   return <div className="company-home">
     <header className="home-heading">
@@ -27,13 +30,27 @@ export function CompanyHomePage() {
       <section className="home-attendance-summary" aria-label="내 근태 현황">
         <div className="home-section-heading"><h2>내 근태 현황</h2><Link to="/settings/profile" className="home-text-link">내 기록 보기<ArrowUpRight size={12} /></Link></div>
         <dl><div><dt>이번 달 지각</dt><dd>— <span>회</span></dd></div><div><dt>남은 연차</dt><dd>— <span>일</span></dd></div><div><dt>이번 달 야근</dt><dd>— <span>시간</span></dd></div></dl>
-        <p>실제 근태·연차 기록 연결 예정</p>
+        <p>월별 출퇴근 기록은 마이페이지에서 확인하세요.</p>
       </section>
     </header>
     <HomeCalendar clockIns={clock.byDate} needsClockIn={clock.needsClockIn} clocking={clock.saving} clockError={clock.error} onClockIn={() => { void clock.clockIn().catch(() => { /* 실패 로그는 clockInToday에 있고, 버튼 아래에 이유를 보여 준다. */ }) }} sidebar={<>
       <section className="home-side-card home-role-card"><div className="home-section-heading"><h2>{roleLabel}</h2><ClipboardList size={16} /></div><p>{roleDescription}</p><Link to={roleHref} className="home-action-link">{reviewer ? '조직 현황 보기' : operations ? '운영지원 열기' : manager ? '팀 업무판 열기' : '내 업무 열기'}<ArrowUpRight size={15} /></Link></section>
-      <section className="home-side-card"><div className="home-section-heading"><h2>오늘의 근무</h2></div><div className="home-attendance"><span>출근 <b className={clock.todayClock ? 'is-recorded' : ''}>{clock.todayClock || '—'}</b></span><span>퇴근 <b>—</b></span></div>{!clock.todayClock && <p className="home-clock-hint">출근 전입니다. 캘린더 가운데 출근하기를 누르면 지금 시각이 기록됩니다.</p>}<Link to="/settings/profile" className="home-text-link">휴가·야근 신청과 내 기록 보기 <ArrowUpRight size={12} /></Link></section>
+      <section className="home-side-card"><div className="home-section-heading"><h2>오늘의 근무</h2></div><div className="home-attendance"><span>출근 <b className={clock.todayClock ? 'is-recorded' : ''}>{clock.todayClock || '—'}</b></span><span>퇴근 <b className={clock.todayClockOut ? 'is-recorded' : ''}>{clock.todayClockOut || '—'}</b></span></div>{!clock.todayClock && <p className="home-clock-hint">출근 전입니다. 캘린더 가운데 출근하기를 누르면 지금 시각이 기록됩니다.</p>}{clock.needsClockOut && <Button className="my-3 w-full" variant="outline" disabled={clock.saving} onClick={() => setClockOutOpen(true)}>{clock.saving ? '저장 중…' : '퇴근하기'}</Button>}{clock.todayClockOut && <Button className="my-3 w-full" variant="outline" disabled={clock.saving} onClick={() => { void clock.undoClockOut().catch(error => console.warn('[attendance-clock] 홈 퇴근 취소 실패', error)) }}>{clock.saving ? '저장 중…' : '퇴근 무르기'}</Button>}{clock.todayClock && clock.error && <p role="alert" className="text-sm text-danger">{clock.error}</p>}<Link to="/settings/profile" className="home-text-link">휴가·야근 신청과 내 기록 보기 <ArrowUpRight size={12} /></Link></section>
       <nav className="home-shortcuts" aria-label="홈 업무 바로가기"><Link to="/work"><ClipboardList size={16} />업무 허브<ArrowUpRight size={13} /></Link><Link to="/meetings"><CalendarDays size={16} />회의<ArrowUpRight size={13} /></Link><Link to="/org-chart"><Network size={16} />조직도<ArrowUpRight size={13} /></Link>{personnel && <Link to="/members"><Users size={16} />멤버·권한<ArrowUpRight size={13} /></Link>}</nav>
     </>} />
+    <ClockOutDialog open={clockOutOpen} saving={clock.saving} error={clock.error} onCancel={() => setClockOutOpen(false)} onConfirm={() => { void clock.clockOut().then(() => setClockOutOpen(false)).catch(error => console.warn('[attendance-clock] 홈 퇴근 버튼 저장 실패', error)) }} />
   </div>
+}
+
+function ClockOutDialog({ open, saving, error, onCancel, onConfirm }: { open: boolean, saving: boolean, error: string, onCancel: () => void, onConfirm: () => void }) {
+  useEffect(() => {
+    if (!open) return
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') onCancel()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open, onCancel])
+  if (!open) return null
+  return <div className="home-clock-out-dialog" role="presentation"><button type="button" className="home-clock-out-backdrop" aria-label="닫기" onClick={onCancel} /><section className="home-clock-out-panel" role="dialog" aria-modal="true" aria-labelledby="home-clock-out-title"><h2 id="home-clock-out-title">퇴근하기</h2><p>퇴근 시각을 기록할까요?</p>{error && <p role="alert">{error}</p>}<div className="home-clock-out-actions"><Button type="button" variant="outline" onClick={onCancel}>취소</Button><Button type="button" disabled={saving} onClick={onConfirm}>{saving ? '저장 중…' : '퇴근 기록'}</Button></div></section></div>
 }

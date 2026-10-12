@@ -1,0 +1,23 @@
+{
+  "domains": [
+    { "id": "home", "label": "홈 · 일정", "description": "회사 홈, 개인 출근 기록과 일정", "features": ["home"], "libs": [], "stores": ["attendance-clocks"] },
+    { "id": "products", "label": "상품 · SKU", "description": "M번호는 색상·사이즈별 SKU. 상품 조회, 편집, 분류와 이미지", "features": ["products"], "libs": ["products", "seasons"], "stores": ["styles", "style-", "product-categories", "seasons"] },
+    { "id": "drafts", "label": "기획안", "description": "회사 소유 기획안과 브랜드 상품 승격", "features": ["drafts"], "libs": ["drafts"], "stores": ["product-drafts", "draft-"] },
+    { "id": "logistics", "label": "물류 · 송장 · 창고", "description": "송장 변환, 바코드 출고, 출고 원장, 창고와 입고. 출고 원장과 재고 차감은 별도", "features": ["logistics"], "libs": ["invoice", "warehouse", "outbound", "cargo", "bulk-outbound"], "stores": ["invoice-", "warehouse-", "warehouses", "cargo-", "outbound-shipments", "bulk-outbound", "barcode-data-entry"], "functions": ["warehouse-sheet-sync"] },
+    { "id": "design", "label": "디자인 · 이미지", "description": "연출 컷 제작, 스튜디오와 R2 파일 관리", "features": ["design"], "libs": ["design"], "stores": ["styled-", "studio-"], "functions": ["styled-image"], "shared": ["styled-"] },
+    { "id": "codes", "label": "바코드 · 사방넷 · 업체", "description": "88코드 구성품, 사방넷 SKU 연결, 출고업체와 별칭", "features": ["codes"], "libs": ["codes"], "stores": ["product-codes", "barcode-", "sabangnet-", "partner-", "code-usage-", "outbound-partner-"] },
+    { "id": "data", "label": "데이터 · 업로드", "description": "읽기 전용 데이터 시트, 업로드 미리보기와 일괄 반영", "features": ["data", "upload"], "libs": ["import", "export"], "stores": [] },
+    { "id": "work-requests", "label": "업무 · 작업 요청", "description": "부서별 요청, 배정, 수락, 완료와 작업 대화", "features": ["work-requests"], "libs": [], "stores": ["work-request", "work-"] },
+    { "id": "chat", "label": "사내 채팅 · 알림", "description": "회사 소유 채팅방, 메시지, 첨부와 받은 알림", "features": ["chat"], "libs": ["chat", "inbox"], "stores": ["chat", "inbox", "notification"], "functions": ["chat-files-cleanup"] },
+    { "id": "md", "label": "MD · 가격 비교", "description": "업체별 상품 URL과 가격 수집·확인", "features": ["md"], "libs": [], "stores": ["md-"], "functions": ["md-price-refresh"], "shared": ["md-price-"] },
+    { "id": "operations-support", "label": "운영지원 · 근태", "description": "휴가·야근 신청, 부서별 승인자와 출근 기준. 실제 연결 여부는 코드에서 확인", "features": ["operations-support"], "libs": [], "stores": ["leave-", "attendance-start-", "department-request-"] },
+    { "id": "company", "label": "조직 · 회의 · 브랜드", "description": "회사 공통 조직, 멤버, 회의와 브랜드 관리", "features": ["org", "meetings", "brands"], "libs": ["company"], "stores": ["profiles", "brands", "companies", "departments", "personnel-", "meetings", "company-schedule"] },
+    { "id": "settings", "label": "설정 · 마이페이지", "description": "프로필, 개인 신청·근태, 상품 항목과 브랜드 설정", "features": ["settings"], "libs": [], "stores": ["brand-fields", "brand-field-options"] },
+    { "id": "china", "label": "중국팀 · 작업 지시서", "description": "샘플 작업 지시서와 기획안 연결", "features": ["china"], "libs": [], "stores": ["sample-"] },
+    { "id": "auth", "label": "로그인 · 승인", "description": "세션, 접근 신청, 승인 대기와 본명 확인", "features": ["auth"], "libs": [], "stores": ["auth", "access-"] },
+    { "id": "ai", "label": "공통 AI", "description": "AI 라우트, 추천 후보, 확정 피드백과 게이트웨이", "features": [], "libs": ["ai"], "stores": ["ai-", "company-assistant"], "functions": ["ai-gateway"], "shared": ["ai-", "cors"] },
+    { "id": "shell", "label": "앱 셸 · 탭 · 공통 UI", "description": "회사 라우팅, 브랜드 선택, KeepAlive 작업 탭과 공통 UI", "features": ["workspace"], "libs": ["workspace", "query", "diagnostics"], "stores": ["client"], "infrastructure": true },
+    { "id": "api", "label": "공개 API 허브", "description": "src/lib/api의 공개 API. 이 허브 전체를 거친 간접 의존은 실제 호출 범위보다 넓음", "features": [], "libs": ["api"], "stores": [], "infrastructure": true },
+    { "id": "other", "label": "미분류 · 기타 서버", "description": "새 폴더와 분류 규칙에 없는 파일. domains.json에서 분류를 보완할 수 있음", "features": [], "libs": [], "stores": [], "infrastructure": true }
+  ]
+}

@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
 import { canAccessOperationsSupport } from '@/lib/company/capabilities'
 import { listLeaveRequests, submitLeaveRequest, transitionLeaveRequest, type LeaveRequest } from '@/lib/supabase/leave-requests'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { emptyList } from '@/lib/utils'
 import type { RequestForm } from '@/features/settings/personal-requests'
 

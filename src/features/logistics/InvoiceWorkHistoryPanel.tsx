@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, History, Pencil, Trash2 } from 'lucide-react'
-import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { Button } from '@/components/ui/button'
 import {
   Card,

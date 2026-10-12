@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import type {
   GiftSourceGroup,

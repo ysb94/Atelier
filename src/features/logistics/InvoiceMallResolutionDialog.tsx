@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { useQueryClient } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { AlertTriangle } from 'lucide-react'

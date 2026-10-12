@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ClipboardEv
 import { createPortal } from 'react-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CalendarCheck, CalendarPlus, Pencil, Plus, Trash2 } from 'lucide-react'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { StylePicker, formatStyleRef } from '@/components/style-picker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

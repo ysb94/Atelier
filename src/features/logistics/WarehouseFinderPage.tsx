@@ -3,10 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Image as ImageIcon, RefreshCw, Search, X } from 'lucide-react'
 import { useBrand } from '@/components/layout/brand-context'
 import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
-import {
-  useWorkspaceTabActivity,
-  WorkspaceTabOverlay,
-} from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

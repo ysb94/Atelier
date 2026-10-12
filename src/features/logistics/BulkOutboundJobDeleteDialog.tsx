@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatNumber } from '@/lib/utils'

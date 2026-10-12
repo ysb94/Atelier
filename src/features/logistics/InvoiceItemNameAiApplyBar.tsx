@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { StylePicker } from '@/components/style-picker'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'

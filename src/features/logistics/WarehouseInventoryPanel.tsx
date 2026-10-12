@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import {
-  useWorkspaceTabActivity,
-  WorkspaceTabOverlay,
-} from '@/components/layout/workspace-tabs'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Download, RefreshCw, Upload } from 'lucide-react'
 import { StylePicker } from '@/components/style-picker'

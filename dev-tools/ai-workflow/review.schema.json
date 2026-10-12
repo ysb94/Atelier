@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "properties": {
+    "decision": { "type": "string", "enum": ["pass", "revise", "needs_input"] },
+    "summary": { "type": "string" },
+    "criteriaResults": { "type": "array", "items": { "type": "object", "properties": { "criterion": { "type": "string" }, "passed": { "type": "boolean" }, "evidence": { "type": "string" } }, "required": ["criterion", "passed", "evidence"], "additionalProperties": false } },
+    "issues": { "type": "array", "items": { "type": "string" } },
+    "nextPrompt": { "type": "string" }
+  },
+  "required": ["decision", "summary", "criteriaResults", "issues", "nextPrompt"],
+  "additionalProperties": false
+}

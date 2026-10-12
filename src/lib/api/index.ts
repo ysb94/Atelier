@@ -1888,6 +1888,13 @@ export async function getOutboundShipments(brandId: string) {
   return outboundShipmentStore.listOutboundShipments(brandId)
 }
 
+export async function getFilteredOutboundShipments(
+  query: Parameters<typeof outboundShipmentStore.listFilteredOutboundShipments>[0],
+) {
+  await delay()
+  return outboundShipmentStore.listFilteredOutboundShipments(query)
+}
+
 export async function getBarcodeDataEntryShipments(brandId: string) {
   await delay()
   return outboundShipmentStore.listBarcodeDataEntryShipments(brandId)

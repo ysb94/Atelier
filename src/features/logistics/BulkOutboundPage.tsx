@@ -21,7 +21,7 @@ import { useBrand } from '@/components/layout/brand-context'
 import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
 import { CompanyBulkOutboundList } from '@/features/workspace/company-operation-lists'
 import { PageHeader } from '@/components/layout/PageHeader'
-import { WorkspaceTabOverlay } from '@/components/layout/workspace-tabs'
+import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {

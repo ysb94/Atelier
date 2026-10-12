@@ -26,6 +26,13 @@
 .home-clock-in-overlay p { position: absolute; bottom: 18px; margin: 0; padding: 8px 12px; border-radius: 8px; background: white; color: var(--home-red); font-size: 12px; pointer-events: none; }
 .home-clock-mark { display: inline-flex; margin: 4px 4px 0; padding: 2px 6px; border-radius: 4px; background: #edf4ed; color: #3d6b40; font-size: 10px; font-weight: 650; }
 .home-clock-hint { margin: 0 0 12px; font-size: 11px; color: #7d8086; line-height: 1.45; }
+.home-clock-out-dialog { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; }
+.home-clock-out-backdrop { position: absolute; inset: 0; background: rgba(40, 43, 50, .35); }
+.home-clock-out-panel { position: relative; z-index: 1; width: min(22rem, calc(100% - 32px)); background: white; border: 1px solid var(--home-line); border-radius: 13px; padding: 20px; }
+.home-clock-out-panel h2 { margin: 0; font-size: 16px; font-weight: 650; }
+.home-clock-out-panel p { margin: 10px 0 0; font-size: 13px; color: #626771; line-height: 1.5; }
+.home-clock-out-panel p[role='alert'] { color: var(--home-red); }
+.home-clock-out-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .home-calendar-top { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 17px 20px; background: #fbf9f6; border-bottom: 1px solid var(--home-line); }
 .home-section-heading { display: flex; align-items: center; gap: 9px; }
 .home-section-heading h2 { font-size: 13px; font-weight: 650; margin: 0; }

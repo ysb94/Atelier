@@ -1,3 +1,4 @@
+import { DateTimeField } from '@/components/ui/DateTimeField'
 import { useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Save, Trash2, X } from 'lucide-react'
@@ -24,13 +25,6 @@ const COUNT_BASIS_OPTIONS: InvoiceWorkInstructionCountBasis[] = [
   'per_quantity',
 ]
 
-const HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) =>
-  String(hour).padStart(2, '0'),
-)
-const MINUTE_OPTIONS = Array.from({ length: 60 }, (_, minute) =>
-  String(minute).padStart(2, '0'),
-)
-
 function periodsOverlap(
   aStart: string | null,
   aEnd: string | null,
@@ -39,78 +33,6 @@ function periodsOverlap(
 ): boolean {
   if (!aStart || !aEnd || !bStart || !bEnd) return true
   return aStart <= bEnd && bStart <= aEnd
-}
-
-function MomentField({
-  id,
-  label,
-  value,
-  defaultTime,
-  onChange,
-}: {
-  id: string
-  label: string
-  value: string
-  defaultTime: string
-  onChange: (next: string) => void
-}) {
-  const date = value.slice(0, 10)
-  const time = value.length >= 16 ? value.slice(11, 16) : defaultTime
-  const [hour = '00', minute = '00'] = time.split(':')
-
-  function commit(nextDate: string, nextHour: string, nextMinute: string) {
-    if (!nextDate) {
-      onChange('')
-      return
-    }
-    onChange(`${nextDate} ${nextHour}:${nextMinute}`)
-  }
-
-  return (
-    <div className="w-fit">
-      <label htmlFor={id} className="mb-1.5 block text-xs font-medium">
-        {label}
-      </label>
-      <div className="flex w-fit items-center gap-1">
-        <Input
-          id={id}
-          type="date"
-          value={date}
-          onChange={(event) => commit(event.target.value, hour, minute)}
-          className="w-[9.75rem] shrink-0 px-2"
-        />
-        <Select
-          aria-label={`${label} 시`}
-          value={hour}
-          disabled={!date}
-          onChange={(event) => commit(date, event.target.value, minute)}
-          className="w-[3.25rem] shrink-0 px-1"
-        >
-          {HOUR_OPTIONS.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </Select>
-        <span className="text-xs text-muted-foreground" aria-hidden>
-          :
-        </span>
-        <Select
-          aria-label={`${label} 분`}
-          value={minute}
-          disabled={!date}
-          onChange={(event) => commit(date, hour, event.target.value)}
-          className="w-[3.25rem] shrink-0 px-1"
-        >
-          {MINUTE_OPTIONS.map((option) => (
-            <option key={option} value={option}>
-              {option}
-            </option>
-          ))}
-        </Select>
-      </div>
-    </div>
-  )
 }
 
 function normalizeProductName(value: string): string {
@@ -390,7 +312,7 @@ export function InvoiceWorkInstructionForm({
       {scheduleMode === 'period' ? (
         <>
           <div className="flex flex-wrap gap-x-6 gap-y-3">
-            <MomentField
+            <DateTimeField
               id="work-instruction-starts"
               label="적용 시작"
               value={startsAt}
@@ -400,7 +322,7 @@ export function InvoiceWorkInstructionForm({
                 if (next && !endsAt) setEndsAt(suggestEndOfDay(next))
               }}
             />
-            <MomentField
+            <DateTimeField
               id="work-instruction-ends"
               label="적용 종료"
               value={endsAt}

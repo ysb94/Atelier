@@ -15,6 +15,6 @@ export default defineConfig(({mode}) => ({
   server: {
     host: true,
     port: 5173,
-    watch: { ignored: ['**/.venv-md-price/**', '**/.tmp/**'] },
+    watch: { ignored: ['**/.venv-md-price/**', '**/.tmp/**', '**/dev-tools/structure-map/**', '**/dev-tools/ai-workflow/**'] },
   },
 }))
