@@ -16,8 +16,10 @@ export function settings() {
   for (const key of ['NOTION_TOKEN', 'ATELIER_CURSOR_BIN', 'ATELIER_CODEX_BIN']) if (process.env[key]) env[key] = process.env[key]
   if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) throw new Error('자동화 포트는 1~65535 정수여야 합니다.')
   if (!Number.isInteger(config.maxAttempts) || config.maxAttempts < 1 || config.maxAttempts > 3) throw new Error('maxAttempts는 1~3이어야 합니다.')
+  if(config.maxParallelTasks!==undefined&&(!Number.isInteger(config.maxParallelTasks)||config.maxParallelTasks<1||config.maxParallelTasks>2))throw new Error('maxParallelTasks는 1~2여야 합니다.')
   if (!Number.isFinite(config.pollMs) || config.pollMs < 10000) throw new Error('pollMs는 10000 이상이어야 합니다.')
   if(config.excludedMcpServers!==undefined&&(!Array.isArray(config.excludedMcpServers)||config.excludedMcpServers.some(name=>typeof name!=='string')))throw new Error('excludedMcpServers는 제외할 MCP 이름 배열이어야 합니다.')
+  if(config.mode==='memo-board'&&(!config.positions||['queued','working','needsInput','done'].some(k=>typeof config.positions[k]!=='string'||!config.positions[k].trim())))throw new Error('메모 보드의 대기·작업·확인·완료 위치 설정이 필요합니다.')
   return { ...config, env }
 }
 

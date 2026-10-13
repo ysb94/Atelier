@@ -32,12 +32,24 @@ export class Store {
   enqueue(job, update) {
     this.data.outbox.push({ pageId: job.task.id, update: { ...update, eventId: `${job.runId}:${this.data.outbox.length}:${randomUUID()}` } }); this.save()
   }
-  async flush(notion) {
-    while (this.data.outbox.length) {
-      const event = this.data.outbox[0]
-      await notion.publish(event.pageId, event.update)
-      this.data.outbox.shift(); this.save()
+  async flush(notion, pageId) {
+    const run=async()=>{
+    for (;;) {
+      const index=this.data.outbox.findIndex(event=>!pageId||event.pageId===pageId)
+      if(index<0)return
+      const event = this.data.outbox[index]
+      try {await notion.publish(event.pageId, event.update)}catch(error){
+        // A confirmed cancellation is discarded and delivered to the runner;
+        // connection failures retain the event for a later safe retry.
+        if(error.discardUpdate){this.data.outbox.splice(index,1);this.save()}
+        throw error
+      }
+      this.data.outbox.splice(index,1); this.save()
     }
+    }
+    const result=(this.flushTail??Promise.resolve()).then(run,run)
+    this.flushTail=result.catch(()=>{})
+    return result
   }
   runDir(job) { const dir = path.join(this.dir,'runs',job.runId); fs.mkdirSync(dir,{recursive:true}); return dir }
 }

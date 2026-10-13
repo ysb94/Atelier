@@ -5,8 +5,22 @@
     "summary": { "type": "string" },
     "criteriaResults": { "type": "array", "items": { "type": "object", "properties": { "criterion": { "type": "string" }, "passed": { "type": "boolean" }, "evidence": { "type": "string" } }, "required": ["criterion", "passed", "evidence"], "additionalProperties": false } },
     "issues": { "type": "array", "items": { "type": "string" } },
-    "nextPrompt": { "type": "string" }
+    "nextPrompt": { "type": "string" },
+    "report": {
+      "anyOf": [
+        { "type": "null" },
+        { "type": "object", "properties": {
+          "deployment": { "type": "string", "enum": ["development", "verification"] },
+          "location": { "type": "string" },
+          "summary": { "type": "string" },
+          "changes": { "type": "array", "items": { "type": "string" } },
+          "howToUse": { "type": "string" },
+          "checked": { "type": "array", "items": { "type": "string" } },
+          "remaining": { "type": "string" }
+        }, "required": ["deployment", "location", "summary", "changes", "howToUse", "checked", "remaining"], "additionalProperties": false }
+      ]
+    }
   },
-  "required": ["decision", "summary", "criteriaResults", "issues", "nextPrompt"],
+  "required": ["decision", "summary", "criteriaResults", "issues", "nextPrompt", "report"],
   "additionalProperties": false
 }
