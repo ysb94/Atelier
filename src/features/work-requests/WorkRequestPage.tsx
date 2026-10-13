@@ -48,7 +48,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Input, Select } from '@/components/ui/input'
+import { Input, Select, Textarea } from '@/components/ui/input'
 import { ATELIER_BRAND_ID } from '@/lib/company/capabilities'
 import { useAuth } from '@/lib/supabase/auth'
 import { listBrandDirectory } from '@/lib/supabase/profiles'
@@ -142,7 +142,9 @@ function createEmptyValues(): FormValues {
     title: '',
     requester: '',
     requesterPosition: '',
+    deadlineType: 'preferred',
     dueDate: '',
+    scheduleReason: '',
     referenceFiles: [],
     blocks: [emptyTextBlock()],
   }
@@ -154,18 +156,24 @@ function demoValues({
   requesterPosition = '사원',
   dueIn,
   body,
+  fixed = false,
 }: {
   title: string
   requester: string
   requesterPosition?: string
   dueIn: number
   body: string
+  fixed?: boolean
 }): FormValues {
   return {
     title,
     requester,
     requesterPosition,
+    deadlineType: fixed ? 'fixed' : 'preferred',
     dueDate: dateFromToday(dueIn),
+    scheduleReason: fixed
+      ? '외부 채널 오픈 일정이 확정되어 마감일 변경이 어렵습니다.'
+      : '',
     referenceFiles: [],
     blocks: [emptyTextBlock(body)],
   }
@@ -215,6 +223,7 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
         requesterPosition: '과장',
         dueIn: 2,
         body: `${sourceA}에서 ${destination}으로 보낸 요청입니다. 채널 오픈 전에 필요한 결과물이니 처리 일정과 추가 자료를 알려 주세요.`,
+        fixed: true,
       }),
       status: 'requested',
       managerPriority: '',
@@ -2253,7 +2262,11 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   function validate(): FormErrors {
     const nextErrors: FormErrors = {}
     if (!values.title.trim()) nextErrors.title = '요청 제목을 입력하세요.'
+    if (!values.deadlineType) nextErrors.deadlineType = '일정 성격을 선택하세요.'
     if (!values.dueDate) nextErrors.dueDate = '희망 마감일을 선택하세요.'
+    if (values.deadlineType === 'fixed' && !values.scheduleReason.trim()) {
+      nextErrors.scheduleReason = '변경할 수 없는 일정의 사유를 입력하세요.'
+    }
     if (!hasRequestBody(values.blocks)) {
       nextErrors.blocks = '요청 내용을 입력하거나 이미지를 넣어 주세요.'
     }
@@ -2825,6 +2838,14 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     <p className="text-xs text-muted-foreground">대화</p>
                     <p className="mt-1 font-medium tabular-nums">
                       {request.messages.length}건
+                    </p>
+                  </div>
+                  <div className="shrink-0">
+                    <p className="text-xs text-muted-foreground">일정 성격</p>
+                    <p className="mt-1 font-medium">
+                      {request.values.deadlineType === 'fixed'
+                        ? '변경 불가'
+                        : '희망일'}
                     </p>
                   </div>
                 </>
@@ -3825,11 +3846,17 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     <p className="mt-1 text-sm font-medium">
                       {formatDate(selectedRequest.values.dueDate)}
                     </p>
-                    {!selectedRequest.confirmedDueDate ? (
+                    {selectedRequest.values.deadlineType === 'fixed' ||
+                    !selectedRequest.confirmedDueDate ? (
                       <div className="mt-1.5 flex items-center gap-1.5">
-                        <Badge variant={deadline.variant}>
-                          {deadline.label}
-                        </Badge>
+                        {selectedRequest.values.deadlineType === 'fixed' ? (
+                          <Badge variant="danger">변경 불가</Badge>
+                        ) : null}
+                        {!selectedRequest.confirmedDueDate ? (
+                          <Badge variant={deadline.variant}>
+                            {deadline.label}
+                          </Badge>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>
@@ -3889,6 +3916,14 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                       {selectedRequest.collaborators
                         .map(memberLabel)
                         .join(', ')}
+                    </p>
+                  </div>
+                ) : null}
+                {selectedRequest.values.scheduleReason ? (
+                  <div>
+                    <p className="text-xs text-muted-foreground">일정 사유</p>
+                    <p className="mt-1 whitespace-pre-wrap text-sm">
+                      {selectedRequest.values.scheduleReason}
                     </p>
                   </div>
                 ) : null}
@@ -4114,23 +4149,115 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               ) : null}
             </label>
 
-            <label className="block space-y-1.5">
-              <span className="flex items-center gap-1 text-sm font-medium">
-                희망 마감일 <span className="text-danger">*</span>
-              </span>
-              <Input
-                type="date"
-                value={values.dueDate}
-                aria-invalid={Boolean(errors.dueDate)}
-                onChange={(event) => updateValue('dueDate', event.target.value)}
-                className={cn(
-                  errors.dueDate && 'border-danger focus-visible:ring-danger',
-                )}
-              />
-              {errors.dueDate ? (
-                <span className="block text-xs text-danger">{errors.dueDate}</span>
-              ) : null}
-            </label>
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">
+                일정 <span className="text-danger">*</span>
+              </legend>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(
+                  [
+                    {
+                      value: 'preferred' as const,
+                      label: '희망 일정',
+                      description: '부서 상황에 따라 협의할 수 있는 날짜',
+                    },
+                    {
+                      value: 'fixed' as const,
+                      label: '변경 불가 일정',
+                      description: '출시·행사·출고처럼 반드시 지켜야 하는 날짜',
+                    },
+                  ] as const
+                ).map((option) => {
+                  const checked = values.deadlineType === option.value
+                  return (
+                    <div
+                      key={option.value}
+                      className={cn(
+                        'rounded-lg border px-3 py-3 transition-colors',
+                        checked
+                          ? 'border-primary bg-primary/5'
+                          : 'border-border hover:bg-muted/40',
+                        errors.deadlineType && 'border-danger',
+                      )}
+                    >
+                      <label className="block cursor-pointer">
+                        <span className="flex items-center gap-2 text-sm font-medium">
+                          <input
+                            type="radio"
+                            name={`${owner}-deadline-type`}
+                            value={option.value}
+                            checked={checked}
+                            className="size-4 accent-primary"
+                            onChange={() =>
+                              updateValue('deadlineType', option.value)
+                            }
+                          />
+                          {option.label}
+                        </span>
+                        <span className="mt-1 block pl-6 text-xs text-muted-foreground">
+                          {option.description}
+                        </span>
+                      </label>
+                      {checked ? (
+                        <div className="mt-3 space-y-3 border-t border-border/70 pt-3">
+                          <label className="block space-y-1.5">
+                            <span className="flex items-center gap-1 text-sm font-medium">
+                              희망 마감일 <span className="text-danger">*</span>
+                            </span>
+                            <Input
+                              type="date"
+                              value={values.dueDate}
+                              aria-invalid={Boolean(errors.dueDate)}
+                              onChange={(event) =>
+                                updateValue('dueDate', event.target.value)
+                              }
+                              className={cn(
+                                errors.dueDate &&
+                                  'border-danger focus-visible:ring-danger',
+                              )}
+                            />
+                            {errors.dueDate ? (
+                              <span className="block text-xs text-danger">
+                                {errors.dueDate}
+                              </span>
+                            ) : null}
+                          </label>
+                          {option.value === 'fixed' ? (
+                            <label className="block space-y-1.5">
+                              <span className="flex items-center gap-1 text-sm font-medium">
+                                변경할 수 없는 일정의 사유
+                                <span className="text-danger">*</span>
+                              </span>
+                              <Textarea
+                                rows={3}
+                                value={values.scheduleReason}
+                                placeholder="예: 9월 15일 29CM 기획전 오픈이 확정되어 9월 12일까지 결과물이 필요합니다."
+                                aria-invalid={Boolean(errors.scheduleReason)}
+                                onChange={(event) =>
+                                  updateValue(
+                                    'scheduleReason',
+                                    event.target.value,
+                                  )
+                                }
+                                className={cn(
+                                  errors.scheduleReason &&
+                                    'border-danger focus-visible:ring-danger',
+                                )}
+                              />
+                              {errors.scheduleReason ? (
+                                <span className="block text-xs text-danger">
+                                  {errors.scheduleReason}
+                                </span>
+                              ) : null}
+                            </label>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </div>
+                  )
+                })}
+              </div>
+            </fieldset>
 
             <RequestBodyEditor
               blocks={values.blocks}
