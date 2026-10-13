@@ -20,7 +20,8 @@ export function requestLabel(kind: RequestKind) { return REQUEST_KINDS.find(item
 export function isFullLeave(kind: RequestKind) { return kind === 'annual' }
 export function isPartialLeave(kind: RequestKind) { return kind === 'half' || kind === 'quarter' }
 export function isLeaveRequest(kind: RequestKind) { return isFullLeave(kind) || isPartialLeave(kind) }
-export function isSavedRequest(kind: RequestKind) { return isLeaveRequest(kind) || kind === 'overtime' }
+export function isLocationRequest(kind: RequestKind) { return kind === 'offsite' || kind === 'remote' }
+export function approvalTypeOf(kind: RequestKind): 'leave' | 'overtime' { return kind === 'overtime' ? 'overtime' : 'leave' }
 export function minuteOf(value: string) {
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null
   const [h, m] = value.split(':').map(Number)
@@ -36,8 +37,9 @@ function validDate(value: string) {
 function interval(form: RequestForm | PersonalRequest) {
   return [form.from + (isFullLeave(form.kind) ? 'T00:00' : `T${form.start}`), form.to + (isFullLeave(form.kind) ? 'T24:00' : `T${form.end}`)]
 }
-export function validateRequest(form: RequestForm, requests: PersonalRequest[], basis: ReminderBasis) {
+export function validateRequest(form: RequestForm, requests: PersonalRequest[], basis: ReminderBasis, today?: string) {
   if (!validDate(form.from) || !validDate(form.to) || form.to < form.from) return '신청 시작일과 종료일을 확인해 주세요.'
+  if (form.kind === 'correction' && today && form.from > today) return '앞으로의 날짜는 출퇴근 정정을 신청할 수 없습니다.'
   if (!isFullLeave(form.kind)) {
     const start = minuteOf(form.start), end = minuteOf(form.end)
     if (start == null || end == null || end <= start) return '시작·종료 시각을 확인해 주세요. 자정을 넘기는 일정은 날짜별로 나눠 신청해 주세요.'
@@ -54,12 +56,15 @@ export function validateRequest(form: RequestForm, requests: PersonalRequest[], 
   }
   if (form.kind === 'offsite' && !form.place.trim()) return '외근 장소를 입력해 주세요.'
   if ((form.kind === 'overtime' || form.kind === 'correction') && !form.note.trim()) return '신청 사유를 입력해 주세요.'
-  if (form.kind !== 'correction') {
+  if (form.kind === 'correction') {
+    if (requests.some(item => item.kind === 'correction' && item.status === 'pending' && item.from === form.from)) return '같은 날짜에 승인 대기 중인 출퇴근 정정 신청이 있습니다.'
+  } else {
     const [from, to] = interval(form)
+    const timed = (kind: RequestKind) => isPartialLeave(kind) || kind === 'overtime'
     const conflict = requests.some(item => {
       if (!['pending','approved'].includes(item.status) || item.kind === 'correction') return false
-      const locationWithPartialLeave = (isPartialLeave(form.kind) && ['remote','offsite'].includes(item.kind)) || (isPartialLeave(item.kind) && ['remote','offsite'].includes(form.kind))
-      if (locationWithPartialLeave) return false
+      // 근무 장소(외근·재택)는 반차·반반차·야근과 같은 시간에 둘 수 있다. DB 트리거와 같은 규칙을 유지한다.
+      if ((isLocationRequest(form.kind) && timed(item.kind)) || (isLocationRequest(item.kind) && timed(form.kind))) return false
       const [itemFrom, itemTo] = interval(item)
       // A full-day leave conflicts with any work request. Time intervals use strict boundaries.
       return from < itemTo && to > itemFrom

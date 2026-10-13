@@ -23,4 +23,13 @@ assert.match(validateRequest({...form,kind:'annual'},[{...pending,kind:'remote',
 assert.equal(validateRequest({...form,kind:'overtime',start:'18:00',end:'21:00',note:'작업'},[pending],basis),'')
 assert.match(validateRequest(form,[],{...basis,breakStart:'19:00',breakEnd:'20:00'}),/근무·휴게/)
 assert.match(reminderPreview({...form,kind:'correction'},basis)[0],/변경하지 않습니다/)
-console.log('personal requests verify: ok (leave durations, break time, reminders, schedule conflicts, correction)')
+const remoteWeek: PersonalRequest = {...pending,id:'remote',kind:'remote',from:'2026-10-07',to:'2026-10-09',start:'09:00',end:'18:00'}
+assert.equal(validateRequest({...form,kind:'overtime',from:'2026-10-08',to:'2026-10-08',start:'18:00',end:'21:00',note:'마감'},[remoteWeek],basis),'')
+assert.match(validateRequest({...form,kind:'offsite',from:'2026-10-08',to:'2026-10-08',start:'13:00',end:'15:00',place:'거래처'},[remoteWeek],basis),/같은 시간/)
+assert.equal(validateRequest({...form,kind:'offsite',from:'2026-10-12',to:'2026-10-13',start:'10:00',end:'17:00',place:'거래처'},[remoteWeek],basis),'')
+const correction: RequestForm = {...form,kind:'correction',from:'2026-10-12',to:'2026-10-12',start:'09:00',end:'18:00',note:'퇴근 누락'}
+assert.equal(validateRequest(correction,[remoteWeek],basis,'2026-10-13'),'')
+assert.match(validateRequest({...correction,from:'2026-10-14',to:'2026-10-14'},[],basis,'2026-10-13'),/앞으로의 날짜/)
+assert.match(validateRequest(correction,[{...pending,...correction,id:'fix',status:'pending'}],basis,'2026-10-13'),/승인 대기 중인 출퇴근 정정/)
+assert.equal(validateRequest(correction,[{...pending,...correction,id:'fix',status:'approved'}],basis,'2026-10-13'),'')
+console.log('personal requests verify: ok (leave durations, break time, reminders, schedule conflicts, location overlaps, correction rules)')

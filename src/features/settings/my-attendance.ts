@@ -1,7 +1,8 @@
 import type { PersonalRequest } from './personal-requests'
 
 export type AttendanceClock = { date: string; clockIn: string; clockOutAt: string | null }
-export type AttendanceDay = AttendanceClock & { leaves: PersonalRequest[]; future: boolean }
+export type AttendanceDay = AttendanceClock & { requests: PersonalRequest[]; correction: PersonalRequest | null; future: boolean }
+export type DayClock = { start: string; end: string; corrected: boolean }
 const koreaDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' })
 const koreaTime = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 
@@ -19,10 +20,17 @@ export function attendanceMonthDates(month: string): string[] {
 }
 export function buildMyAttendance(month: string, clocks: AttendanceClock[], requests: PersonalRequest[], today: string): AttendanceDay[] {
   const index = new Map(clocks.map(clock => [clock.date, clock]))
-  const leaves = requests.filter(request => request.status === 'approved' && ['annual', 'half', 'quarter'].includes(request.kind))
+  const corrections = requests.filter(request => request.kind === 'correction' && request.status === 'approved')
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
   return attendanceMonthDates(month).map(date => ({
     ...(index.get(date) ?? { date, clockIn: '', clockOutAt: null }),
-    leaves: leaves.filter(request => request.from <= date && date <= request.to),
+    requests: requests.filter(request => request.from <= date && date <= request.to),
+    correction: corrections.find(request => request.from === date) ?? null,
     future: date > today,
   }))
+}
+/** 승인된 정정은 표시에만 덮어쓴다. 출퇴근 원본은 바꾸지 않는다. */
+export function dayClock(day: AttendanceDay): DayClock {
+  if (day.correction) return { start: day.correction.start, end: day.correction.end, corrected: true }
+  return { start: day.clockIn, end: clockOutLabel(day.clockOutAt), corrected: false }
 }

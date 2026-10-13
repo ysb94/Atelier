@@ -142,7 +142,7 @@ export function OrgDirectory({ teams, loading, failed, titlesFailed, onRetry, on
 function ApprovalLabels({ settings, names, loading, failed }: {
   settings?: DepartmentApprover[]; names: ReadonlyMap<string, string>; loading: boolean; failed: boolean
 }) {
-  return <span className="org-team-approvers" aria-label="부서 승인자">{([{ type: 'leave', label: '연차' }, { type: 'overtime', label: '야근' }] as const).map(({ type, label }) => {
+  return <span className="org-team-approvers" aria-label="부서 승인자">{([{ type: 'leave', label: '근태' }, { type: 'overtime', label: '야근' }] as const).map(({ type, label }) => {
     const setting = settings?.find(item => item.type === type)
     const primary = setting?.approverId ? names.get(setting.approverId) ?? '재직 확인 필요' : '미지정'
     const substitute = setting?.substituteId ? names.get(setting.substituteId) ?? '재직 확인 필요' : ''
