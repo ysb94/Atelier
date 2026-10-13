@@ -5,6 +5,7 @@ import { toolDir, redact } from './settings.mjs'
 import { validateCompletionReport } from './report.mjs'
 import { requireSubscriptionLogin, subscriptionCommand } from './codex-subscription.mjs'
 import { reviewBundle } from './review-bundle.mjs'
+import { readFile } from './workspace.mjs'
 
 export function validateReview(value, {requireReport=false} = {}) {
   if (!value || !['pass', 'revise', 'needs_input'].includes(value.decision) || typeof value.summary !== 'string' || !Array.isArray(value.issues) || !Array.isArray(value.criteriaResults) || typeof value.nextPrompt !== 'string') throw new Error('검토 결과 형식이 잘못되었습니다.')
@@ -24,7 +25,8 @@ export async function runReview({ config, root, task, evidence, checks, cursor, 
   const outputFile = path.join(runDir, 'review.json')
   const bundled=config.reviewTransport==='source-bundle'
   const source=bundled?reviewBundle(root,task,evidence):undefined
-  const context=JSON.stringify({ task, changes: evidence.changes, checks, source, cursorReport: cursor.report })
+  const execution={nodeVersion:process.version,requiredNodeVersion:readFile(root,'.nvmrc'),operatingSystem:process.platform}
+  const context=JSON.stringify({ task, changes: evidence.changes, scope:evidence.scope, execution, checks, source, cursorReport: cursor.report })
   if(context.length>(bundled?750000:180000))throw new Error('검토 자료가 너무 큽니다. 업무와 허용 파일 범위를 줄여야 합니다. 자료를 잘라서 합격 판정하지 않습니다.')
   if(bundled)fs.writeFileSync(path.join(runDir,'review-source.json'),context)
   const prompt = `Atelier 작업의 독립 검토자입니다. 코드 수정은 하지 마세요. AGENTS.md의 도메인·진단 규칙을 따릅니다.

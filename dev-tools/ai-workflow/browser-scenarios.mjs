@@ -49,7 +49,17 @@ async function imageScenario({page,origin}) {
     assert.ok(size.width<initial[0].width-30,`Resize failed: ${name}`)
     resized.push({name,...size})
   }
-  await page.locator('input[type=file]').setInputFiles({name:'regression.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from('fixture')})
+  await page.locator('input[type=file]').locator('..').evaluate(element=>{
+    const file=new File(['fixture'],'regression.xlsx',{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',lastModified:1})
+    const data=new DataTransfer();data.items.add(file)
+    element.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data}))
+  })
+  await page.getByText('regression.xlsx',{exact:true}).waitFor()
+  await page.locator('input[type=file]').locator('..').evaluate(element=>{
+    const data=new DataTransfer();data.items.add(new File(['fixture'],'regression.xlsx',{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',lastModified:1}))
+    element.dispatchEvent(new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data}))
+  })
+  assert.equal(await page.getByText('regression.xlsx',{exact:true}).count(),1,'Duplicate file was added')
   await page.getByRole('button',{name:'regression.xlsx 제거',exact:true}).click()
   assert.equal(await page.getByText('regression.xlsx',{exact:true}).count(),0)
   await page.getByRole('button',{name:'작업 요청 등록',exact:true}).click()
@@ -60,11 +70,42 @@ async function imageScenario({page,origin}) {
     assert.ok(Math.abs(size.width-item.width)<=2,`Saved width changed: ${JSON.stringify({item,size})}`)
     saved.push({name:item.name,...size})
   }
+  const detailAvailableWidth=await page.locator('aside').getByRole('img',{name:names[0],exact:true}).evaluate(img=>img.closest('[data-flow-frame]').getBoundingClientRect().width)
+  assert.equal(await page.locator('aside').getByRole('button',{name:/너비만 조절|높이만 조절|비율 유지/}).count(),0,'Detail has resize controls')
   await page.locator('aside').getByRole('button',{name:'수정',exact:true}).click()
-  for(const item of resized)assert.ok(Math.abs((await dimensions(page.getByRole('img',{name:item.name,exact:true}))).width-item.width)<=2,'Edit width changed')
+  const reopenedEdit=[]
+  for(const item of resized){const size=await dimensions(page.getByRole('img',{name:item.name,exact:true}));assert.ok(Math.abs(size.width-item.width)<=2,'Edit width changed');reopenedEdit.push({name:item.name,...size})}
   await page.getByRole('button',{name:'수정 내용 저장',exact:true}).click()
   await page.locator('aside').waitFor()
-  return {initial,resized,saved,checked:['four upload paths','body and reference resize','register and reopen edit','edit save','ordinary attachment add/delete']}
+  await page.locator('aside').getByRole('button',{name:'수정',exact:true}).click()
+  const image=page.getByRole('img',{name:names[0],exact:true}),box=image.locator('..')
+  await image.hover()
+  await box.getByRole('button',{name:'글이 이미지 옆을 감싸게',exact:true}).click()
+  const wrapped=await image.evaluate(img=>{const floats=[];for(let node=img.parentElement;node&&!node.hasAttribute('data-flow-frame');node=node.parentElement)floats.push(getComputedStyle(node).float);return {floats}})
+  assert.ok(wrapped.floats.some(value=>value==='left'||value==='right'),'Text wrapping was not enabled')
+  await box.getByRole('button',{name:'이미지를 위아래로만 배치',exact:true}).click()
+  const beforeMove=await image.boundingBox()
+  await page.mouse.move(beforeMove.x+beforeMove.width/2,beforeMove.y+beforeMove.height/2);await page.mouse.down()
+  await page.mouse.move(beforeMove.x+beforeMove.width/2+60,beforeMove.y+beforeMove.height/2+80,{steps:12});await page.mouse.up()
+  const afterMove=await image.boundingBox()
+  assert.ok(Math.abs(afterMove.x-beforeMove.x)>10||Math.abs(afterMove.y-beforeMove.y)>10,'Image did not move')
+  const handle=box.getByRole('button',{name:'너비만 조절',exact:true}).first();await handle.scrollIntoViewIfNeeded()
+  const h=await handle.boundingBox();await page.mouse.move(h.x+h.width/2,h.y+h.height/2);await page.mouse.down()
+  await page.mouse.move(1439,h.y+h.height/2,{steps:15});await page.mouse.up()
+  const expansion=await image.evaluate(img=>({width:img.getBoundingClientRect().width,available:img.closest('[data-flow-frame]').getBoundingClientRect().width}))
+  assert.ok(expansion.width<=expansion.available+2,'Expanded image overflows its frame')
+  const remove=box.getByRole('button',{name:/제거|삭제/});await remove.click()
+  assert.equal(await page.getByRole('img',{name:names[0],exact:true}).count(),0,'Image deletion failed')
+  const warnings=[];const listener=message=>{if(message.type()==='warning')warnings.push(message.text())};page.on('console',listener)
+  await page.locator('input[type=file]').setInputFiles({name:'broken-image.png',mimeType:'image/png',buffer:Buffer.from('invalid image bytes')})
+  await page.getByText('broken-image.png',{exact:true}).waitFor()
+  assert.equal(await page.getByRole('img',{name:'broken-image.png',exact:true}).count(),0)
+  assert.ok(warnings.some(w=>w.includes('broken-image.png')&&w.includes('image/png')),'Missing image decode warning')
+  page.off('console',listener)
+  assert.match(await page.locator('body').innerText(),/새로고침하면 초기화/)
+  return {initial,resized,saved,reopenedEdit,detailAvailableWidth,wrapped,movement:{before:beforeMove,after:afterMove},expansion,corruptImage:{fallback:true,warnings},
+    originalFilePickerReport:'Valid PNG previews worked in this synthetic fixture; the original user file and deployed version were not supplied, so their failure cause is not established.',
+    checked:['four upload paths','body and reference resize','register and reopen edit','edit save','ordinary attachment add/duplicate prevention/delete','image wrap/stack/move/delete','expansion constrained to frame','unreadable image fallback and warning']}
 }
 async function deadlineScenario({page,origin}) {
   const owners=['planning','design','md','logistics'],checked=[]

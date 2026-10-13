@@ -49,5 +49,10 @@ export async function evidence(root, baseline, files, runDir) {
     const diff = await runCommand('git', ['diff', '--no-index', '--no-ext-diff', '--', left, right], { cwd: root, acceptedCodes: [0,1] })
     changes.push({ file, beforeHash: baseline.all[file] ?? null, afterHash: after[file] ?? null, deleted: current === null, diff: diff.output })
   }
-  return { changes, outside, snapshot: after }
+  const verificationFiles=Object.keys(baseline.all).filter(file=>file.startsWith('scripts/')||file.startsWith('dev-tools/ai-workflow/browser-')||/\.(?:test|verify)\.[cm]?[jt]sx?$/.test(file))
+  return { changes, outside, snapshot: after, scope: {
+    inventoryMethod:'git ls-files tracked and non-ignored untracked files, compared with task-start hashes',
+    changedPaths:changedPaths(baseline.all,after),outsideAllowed:outside,
+    verificationFiles:verificationFiles.map(file=>({file,beforeHash:baseline.all[file],afterHash:after[file]??null}))
+  } }
 }
