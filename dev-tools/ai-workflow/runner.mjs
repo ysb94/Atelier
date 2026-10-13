@@ -54,7 +54,7 @@ ${nextPrompt ? `이전 검토에서 요구한 수정:\n${nextPrompt}` : ''}
 
 export function selectedJob(store, task, config) {
   return store.job(task,{retry:config.mode==='memo-board'&&task.location===config.positions.queued
-    &&['확인 필요','오류','완료'].includes(task.state)})
+    &&task.state!=='중지'})
 }
 
 export class Runner {
