@@ -15,6 +15,9 @@ export function needsInputFeedback(task,message,explicitQuestion='') {
     executorAction=true
     reason='자동화가 저장된 답변에 맞는 작업 지시를 준비하지 못해 멈췄어요.'
     question=explicitQuestion||'내 답변은 저장되어 있어 다시 작성할 필요가 없습니다. 자동화의 지시 준비 단계를 확인한 뒤 다시 진행해야 합니다.'
+  }else if(/(?:데이터베이스|\bDB\b|스키마|RLS|권한)[\s\S]{0,120}(?:승인|백업)/i.test(`${raw}\n${explicitQuestion}`)){
+    reason='요청한 기능을 실제로 저장하려면 회사 데이터베이스와 접근 권한을 바꿔야 해서, 변경 승인과 사전 백업이 필요해요.'
+    question=explicitQuestion||'기능을 저장할 공간과 열람·작성 규칙을 데이터베이스에 추가해도 되는지 알려주세요. 승인 범위를 확인하고 변경 전에 백업해야 합니다.'
   }else if(/면제|직책|회사\s*정책|출.?퇴근.*기준|정책.*미정/.test(raw)){
     reason='회사에서 정해야 하는 기준이 아직 확정되지 않아 자동으로 결정할 수 없어요.'
     question=explicitQuestion||'적용할 대상과 기준을 알려주세요. 예를 들어 어떤 직책·팀에 적용하고, 누가 제외되는지 적어주세요.'

@@ -8,7 +8,7 @@ import { validatePlan, planningPrompt, prepareMemo } from './planner.mjs'
 import { completionReportBlock, validateCompletionReport } from './report.mjs'
 import { taskFiles, redact, projectRoot, cursorServers, cursorPlugins, settings } from './settings.mjs'
 import { permissionDecision } from './acp.mjs'
-import { validateReview } from './reviewer.mjs'
+import { validateReview, reviewEnvironmentProblem } from './reviewer.mjs'
 import { Store, acquireLock } from './store.mjs'
 import { Runner } from './runner.mjs'
 import { runCommand, childEnv } from './process.mjs'
@@ -73,6 +73,10 @@ test('pass needs all criteria and real evidence; revision needs next prompt',()=
   assert.throws(()=>validateReview({...pass,criteriaResults:[{passed:false,evidence:'미충족'}]}))
   assert.throws(()=>validateReview({...pass,issues:['오류']}))
   assert.throws(()=>validateReview({...pass,decision:'revise',nextPrompt:''}))
+})
+test('reviewer infrastructure failures are distinguished from code defects',()=>{
+  assert.match(reviewEnvironmentProblem({...pass,decision:'revise',summary:'검토 실패',issues:['app-server socket directory must be a user-owned directory with mode 0700']}),/socket directory/)
+  assert.equal(reviewEnvironmentProblem({...pass,decision:'revise',issues:['이미지 기본 너비 계산이 잘못되었습니다.']}),undefined)
 })
 test('actual baseline diff, revision, re-review, completion and duplicate suppression',async t=>{
   const f=await fixture(t);let works=0,reviews=0
@@ -153,6 +157,60 @@ const memoConfig={mode:'memo-board',positions:{queued:'자동화 할 일',workin
 function memoPage(location='자동화 할 일') {
   return {id:'memo-1',created_time:'2026-10-12T12:00:00Z',properties:{메모:{title:[{plain_text:'내 업무 안내를 정리한다'}]},위치:{select:{name:location}},화면:{select:{name:'내 업무'}},영역:{select:{name:'공용'}}}}
 }
+function noticeFixture(){
+  const page=memoPage('자동화 작업 중')
+  page.properties['자동화 단계']={select:{name:'작업 중'}}
+  page.properties['내 답변']={rich_text:[{text:{content:'기존 답변'}}]}
+  const original={id:'original',type:'paragraph',paragraph:{rich_text:[{text:{content:'원문 설명'}}]}}
+  const old={id:'old-notice',type:'callout',has_children:true,callout:{rich_text:[{text:{content:'Atelier AI 확인 필요 안내'}}],children:[{id:'old-question',type:'numbered_list_item',numbered_list_item:{rich_text:[{text:{content:'예전 질문'}}]}}]}}
+  const roots=[original,old],blocks=new Map([[old.id,old]]);let appends=0,loseAppend=false
+  const client=new Notion({...memoConfig,env:{NOTION_TOKEN:'fixture'}},async(url,options)=>{
+    let data
+    if(url.includes('/pages/')){
+      if(options.method==='PATCH')Object.assign(page.properties,JSON.parse(options.body).properties)
+      data=page
+    }else if(url.includes('/children')){
+      const id=url.match(/\/blocks\/([^/]+)\/children/)[1]
+      if(options.method==='PATCH'){
+        appends++
+        for(const child of JSON.parse(options.body).children){
+          child.id=`notice-${appends}`;child.has_children=!!child[child.type].children
+          roots.push(child);blocks.set(child.id,child)
+        }
+        if(loseAppend){loseAppend=false;throw new Error('저장 후 응답 유실')}
+      }
+      data={results:id===page.id?roots.filter(block=>!block.archived):(blocks.get(id)?.callout.children??[]),has_more:false}
+    }else if(options.method==='PATCH'){
+      const id=url.split('/').at(-1),block=blocks.get(id)
+      Object.assign(block,JSON.parse(options.body));data=block
+    }else throw new Error('지원하지 않는 검사 요청: '+url)
+    return{ok:true,json:async()=>structuredClone(data)}
+  })
+  return{client,page,original,roots,getAppends:()=>appends,loseNextAppend:()=>{loseAppend=true}}
+}
+test('resuming clears the old generated question and preserves source and answer',async()=>{
+  const f=noticeFixture(),before=await f.client.task(f.page.id)
+  f.page.properties.위치={select:{name:'자동화 할 일'}}
+  await f.client.publish(f.page.id,{state:'구조 확인'})
+  assert.equal(f.roots.filter(block=>!block.archived&&block.type==='callout').length,0)
+  const after=await f.client.task(f.page.id)
+  assert.equal(after.version,before.version);assert.equal(after.source.answer,'기존 답변')
+  assert.equal(f.original.archived,undefined)
+})
+test('a stopped notice mirrors current feedback and retries a lost append without duplicates',async()=>{
+  const f=noticeFixture(),before=await f.client.task(f.page.id)
+  const update={state:'확인 필요',summary:'새 중단 이유',question:'새 확인 항목',expectedVersion:before.version}
+  f.loseNextAppend()
+  await assert.rejects(f.client.publish(f.page.id,update),/응답 유실/)
+  await f.client.publish(f.page.id,update)
+  const notices=f.roots.filter(block=>!block.archived&&block.type==='callout')
+  assert.equal(notices.length,1);assert.equal(f.getAppends(),1)
+  assert.deepEqual(notices[0].callout.children.map(block=>block.paragraph.rich_text[0].text.content),['새 중단 이유','새 확인 항목'])
+  assert.equal((await f.client.task(f.page.id)).version,before.version)
+  f.page.properties.위치={select:{name:'자동화 할 일'}}
+  await f.client.publish(f.page.id,update)
+  assert.equal(f.page.properties.위치.select.name,'자동화 할 일');assert.equal(f.getAppends(),1)
+})
 const memoPlan={decision:'execute',executionKind:'implementation',request:'안내를 정리한다',criteria:'기존 내용을 유지한 정확한 안내',files:['note.md'],verificationScripts:['verify:fixture'],reason:'실제 안내 파일과 연결을 확인함'}
 
 async function memoFixture(t) {
@@ -162,6 +220,14 @@ async function memoFixture(t) {
   f.config={...f.config,...memoConfig,verificationScripts:[]}
   f.notion.queue=async()=>current.location==='자동화 할 일'?[current]:[]
   f.notion.task=async()=>({...current})
+  const publish=f.notion.publish
+  f.notion.publish=async(id,update)=>{
+    await publish(id,update)
+    if(!['자동화 할 일','자동화 작업 중'].includes(current.location)||current.state==='중지')return
+    const location=update.state==='완료'?'완료':['확인 필요','오류','중지'].includes(update.state)?'확인 필요'
+      :['구조 확인','대기'].includes(update.state)?'자동화 할 일':['작업 중','검토 중','수정 중'].includes(update.state)?'자동화 작업 중':current.location
+    current={...current,state:update.state??current.state,location,enabled:['자동화 할 일','자동화 작업 중'].includes(location)}
+  }
   f.notion.savePlan=async(id,plan)=>{
     const page=memoPage(current.location)
     for(const [name,value] of Object.entries({'내 답변':current.source.answer,'작업 결과':current.previousResult,'확인 질문':current.previousQuestion}))page.properties[name]={rich_text:[{plain_text:value??''}]}
@@ -272,10 +338,24 @@ test('explicitly requeueing a stopped memo refreshes it without requiring edits 
   assert.ok(Object.values(f.store.data.jobs).some(job=>job.runId===old.runId&&job.phase==='needs_input'))
 })
 
+test('a requeued stopped memo with a waiting stage refreshes once and preserves its old run',async t=>{
+  const f=await memoFixture(t),current=f.getCurrent(),old=f.store.job(current)
+  old.phase='needs_input';old.error='서비스 연결 일시 중단';f.store.save()
+  f.setCurrent({...current,state:'대기'})
+  const publish=f.notion.publish
+  f.notion.publish=async(id,update)=>{await publish(id,update);f.setCurrent({...f.getCurrent(),state:update.state,location:update.state==='완료'?'완료':update.state==='작업 중'?'자동화 작업 중':'자동화 할 일'})}
+  let plans=0,edits=0
+  const runner=new Runner({...f,plan:async()=>{plans++;return memoPlan},cursor:async()=>{edits++;fs.writeFileSync(path.join(f.root,'note.md'),'완료');return{report:'완료'}},review:async()=>pass})
+  await runner.tick();await runner.tick()
+  assert.equal(plans,1);assert.equal(edits,1);assert.equal(old.error,'서비스 연결 일시 중단')
+  assert.ok(Object.values(f.store.data.jobs).some(job=>job.runId===old.runId&&job.phase==='needs_input'))
+})
+
 test('preparation remains in automation todo until the implementation publication',async()=>{
   const page=memoPage(),patches=[]
   const client=new Notion({...memoConfig,env:{NOTION_TOKEN:'fixture'}},async(url,options)=>({ok:true,json:async()=>{
     if(options.method==='PATCH'){const properties=JSON.parse(options.body).properties;patches.push(properties);Object.assign(page.properties,properties);return page}
+    if(url.includes('/children'))return{results:[],has_more:false}
     return page
   }}))
   await client.publish(page.id,{state:'구조 확인'})
