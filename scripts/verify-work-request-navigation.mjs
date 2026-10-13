@@ -550,3 +550,57 @@ console.info('PASS: 삭제·존재하지 않는 ID·잘못된 mode·생성/수�
   assert.match(page, /window\.confirm\(`"\$\{request\.values\.title\}" 요청을 삭제할까요\?`\)/)
 }
 console.info('PASS: 숨겨진 탭 URL·Escape 보호, 같은 업무 탭 유지, 기존 확인 창·편집 조건 유지')
+
+// ── 이미지 업로드 기본 크기·참고 파일 이미지 크기 조절 ─────────────
+{
+  const page = fs.readFileSync(path.join(root, 'src/features/work-requests/WorkRequestPage.tsx'), 'utf8')
+  const types = fs.readFileSync(path.join(root, 'src/features/work-requests/work-request-types.ts'), 'utf8')
+  const between = (start, end) => {
+    const from = page.indexOf(start)
+    assert.ok(from >= 0, `${start} 없음`)
+    const to = page.indexOf(end, from + start.length)
+    assert.ok(to > from, `${end} 없음`)
+    return page.slice(from, to)
+  }
+
+  assert.match(types, /export const DEFAULT_IMAGE_WIDTH_PERCENT = 100\n/, '본문 기존 기본 너비(100%)가 공용 상수로 남아야 함')
+  assert.match(types, /referenceFiles: ReferenceFile\[\]/)
+  assert.match(types, /export type ReferenceFile = \{[^}]*widthPercent: number[^}]*heightPx\?: number[^}]*\}/, '참고 파일에 표시 크기를 보관해야 함')
+  assert.doesNotMatch(page, /widthPercent: 100\b/, '기본 너비를 공용 상수 대신 숫자로 넣음')
+
+  const createImages = between('function createImageBlocks(', 'type ResizeHandle')
+  assert.match(createImages, /widthPercent: DEFAULT_IMAGE_WIDTH_PERCENT,/, '본문 드롭·붙여넣기 기본 너비가 공용 상수를 쓰지 않음')
+  assert.match(createImages, /wrap: 'none'/)
+  const insertFlow = between('function insertFilesAtFlow(', 'function ')
+  assert.match(insertFlow, /createImageBlocks\(files, offsetY\)/, '본문 이미지 입력이 createImageBlocks를 거치지 않음')
+
+  const referenceField = between('function ReferenceFilesField(', 'function AutoGrowEditable(')
+  assert.match(
+    referenceField,
+    /item\.name === file\.name &&\s*item\.size === file\.size &&\s*item\.lastModified === file\.lastModified/,
+    '참고 파일 중복 제거 기준이 바뀜',
+  )
+  assert.match(referenceField, /next\.push\(\{ id: makeBlockId\(\), file, widthPercent: DEFAULT_IMAGE_WIDTH_PERCENT \}\)/, '참고 파일 기본 너비가 공용 상수를 쓰지 않음')
+  assert.match(referenceField, /addFiles\(event\.dataTransfer\.files\)/, '참고 파일 드롭이 같은 추가 경로를 쓰지 않음')
+  assert.match(referenceField, /addFiles\(event\.target\.files\)/, '참고 파일 선택이 같은 추가 경로를 쓰지 않음')
+  assert.match(referenceField, /data-flow-frame/, '크기 조절 기준 너비(data-flow-frame)가 없음')
+  assert.match(referenceField, /isImageFile\(item\.file\) \? \(\s*<ResizableImage[\s\S]*?onSizeChange=\{[\s\S]*?onRemove=\{remove\}[\s\S]*?\) : \(\s*<FileAttachmentCard key=\{item\.id\} file=\{item\.file\} onRemove=\{remove\} \/>/, '참고 파일 이미지 미리보기·크기 조절 또는 일반 파일 카드가 빠짐')
+  assert.match(referenceField, /removeLabel=\{`\$\{item\.file\.name\} 제거`\}/, '참고 이미지 삭제 버튼 문구가 기존 `${파일명} 제거`와 다름')
+  const resizableImage = between('function ResizableImage(', 'function FileAttachmentCard(')
+  assert.match(resizableImage, /removeLabel = '이미지 삭제',/, '본문 이미지 삭제 버튼 기본 문구가 바뀜')
+  assert.match(resizableImage, /aria-label=\{removeLabel\}/)
+  assert.match(page, /aria-label=\{`\$\{file\.name\} 제거`\}/, '일반 파일 카드 삭제 문구가 바뀜')
+  assert.match(referenceField, /widthPercent: size\.widthPercent, heightPx: size\.heightPx/, '조절한 크기를 상태에 남기지 않음')
+  assert.match(referenceField, /files\.filter\(\(file\) => file\.id !== item\.id\)/, '참고 파일 삭제 동작이 빠짐')
+  assert.match(referenceField, /파일을 끌어다 놓거나 버튼을 눌러 첨부하세요\./)
+
+  const detailFiles = page.slice(page.indexOf('selectedRequest.values.referenceFiles.map('))
+  const detailBlock = detailFiles.slice(0, detailFiles.indexOf('</div>'))
+  assert.match(detailBlock, /<ResizableImage[\s\S]*?widthPercent=\{item\.widthPercent\}\s*heightPx=\{item\.heightPx\}\s*\/>/, '상세 보기 참고 이미지가 저장 크기로 보이지 않음')
+  assert.doesNotMatch(detailBlock, /onSizeChange|onRemove/, '상세 보기 참고 이미지는 읽기 전용이어야 함')
+  assert.match(detailBlock, /<FileAttachmentCard key=\{item\.id\} file=\{item\.file\} \/>/)
+
+  assert.doesNotMatch(page, /localStorage|sessionStorage/, '작업 요청은 로컬 상태로만 유지해야 함')
+  assert.match(page, /UI 시안 단계입니다\. 요청은 새로고침하면 초기화됩니다\./)
+}
+console.info('PASS: 모든 이미지 업로드 경로의 공용 기본 너비, 참고 파일 이미지 미리보기·크기 조절·상세 읽기 전용 표시')

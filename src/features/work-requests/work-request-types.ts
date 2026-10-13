@@ -11,6 +11,9 @@ export type TextContentBlock = {
 
 export type ImageWrap = 'none' | 'left' | 'right'
 
+/** 본문 드롭·붙여넣기와 참고 파일 추가 모두 이 너비(%)로 이미지를 처음 표시한다. */
+export const DEFAULT_IMAGE_WIDTH_PERCENT = 100
+
 export type ImageContentBlock = {
   id: string
   type: 'image'
@@ -33,6 +36,14 @@ export type ContentBlock =
   | ImageContentBlock
   | FileContentBlock
 
+export type ReferenceFile = {
+  id: string
+  file: File
+  /** 이미지 파일일 때만 쓰는 표시 크기 */
+  widthPercent: number
+  heightPx?: number
+}
+
 export type FormValues = {
   title: string
   requester: string
@@ -40,7 +51,7 @@ export type FormValues = {
   deadlineType: 'preferred' | 'fixed' | ''
   dueDate: string
   scheduleReason: string
-  referenceFiles: File[]
+  referenceFiles: ReferenceFile[]
   blocks: ContentBlock[]
 }
 

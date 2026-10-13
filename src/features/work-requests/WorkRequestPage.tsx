@@ -86,6 +86,7 @@ import {
   type WorkTimeLog,
 } from './work-request-schedule'
 import {
+  DEFAULT_IMAGE_WIDTH_PERCENT,
   LOCAL_CURRENT_DEPARTMENT,
   LOCAL_SELF_ID,
   PRIORITY_META,
@@ -107,6 +108,7 @@ import {
   type FormValues,
   type ImageContentBlock,
   type ImageWrap,
+  type ReferenceFile,
   type RequestStatus,
   type TextContentBlock,
   type WorkListSection,
@@ -851,7 +853,7 @@ function createImageBlocks(files: File[], offsetY: number): ImageContentBlock[] 
     type: 'image' as const,
     file,
     caption: '',
-    widthPercent: 100,
+    widthPercent: DEFAULT_IMAGE_WIDTH_PERCENT,
     offsetY,
     wrap: 'none' as const,
   }))
@@ -940,6 +942,7 @@ function ResizableImage({
   onHeightChange,
   isMoving,
   onRemove,
+  removeLabel = '이미지 삭제',
 }: {
   file: File
   widthPercent: number
@@ -952,6 +955,7 @@ function ResizableImage({
   onHeightChange?: (height: number) => void
   isMoving?: boolean
   onRemove?: () => void
+  removeLabel?: string
 }) {
   const boxRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{
@@ -1132,7 +1136,7 @@ function ResizableImage({
             variant="secondary"
             size="icon"
             className="absolute right-2 top-2 opacity-0 shadow-sm group-hover:opacity-100"
-            aria-label="이미지 삭제"
+            aria-label={removeLabel}
             onClick={onRemove}
           >
             <Trash2 className="size-4" />
@@ -1181,8 +1185,8 @@ function ReferenceFilesField({
   files,
   onChange,
 }: {
-  files: File[]
-  onChange: (files: File[]) => void
+  files: ReferenceFile[]
+  onChange: (files: ReferenceFile[]) => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -1193,12 +1197,14 @@ function ReferenceFilesField({
     const next = [...files]
     for (const file of incoming) {
       const exists = next.some(
-        (item) =>
+        ({ file: item }) =>
           item.name === file.name &&
           item.size === file.size &&
           item.lastModified === file.lastModified,
       )
-      if (!exists) next.push(file)
+      if (!exists) {
+        next.push({ id: makeBlockId(), file, widthPercent: DEFAULT_IMAGE_WIDTH_PERCENT })
+      }
     }
     onChange(next)
   }
@@ -1243,16 +1249,31 @@ function ReferenceFilesField({
         />
       </div>
       {files.length > 0 ? (
-        <div className="space-y-2">
-          {files.map((file, index) => (
-            <FileAttachmentCard
-              key={`${file.name}-${file.size}-${file.lastModified}`}
-              file={file}
-              onRemove={() =>
-                onChange(files.filter((_, fileIndex) => fileIndex !== index))
-              }
-            />
-          ))}
+        <div data-flow-frame className="space-y-2">
+          {files.map((item) => {
+            const remove = () => onChange(files.filter((file) => file.id !== item.id))
+            return isImageFile(item.file) ? (
+              <ResizableImage
+                key={item.id}
+                file={item.file}
+                widthPercent={item.widthPercent}
+                heightPx={item.heightPx}
+                onSizeChange={(size) =>
+                  onChange(
+                    files.map((file) =>
+                      file.id === item.id
+                        ? { ...file, widthPercent: size.widthPercent, heightPx: size.heightPx }
+                        : file,
+                    ),
+                  )
+                }
+                onRemove={remove}
+                removeLabel={`${item.file.name} 제거`}
+              />
+            ) : (
+              <FileAttachmentCard key={item.id} file={item.file} onRemove={remove} />
+            )
+          })}
         </div>
       ) : null}
     </div>
@@ -3932,12 +3953,18 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                   <div>
                     <p className="text-xs text-muted-foreground">참고 파일</p>
                     <div className="mt-2 space-y-2">
-                      {selectedRequest.values.referenceFiles.map((file) => (
-                        <FileAttachmentCard
-                          key={`${file.name}-${file.size}-${file.lastModified}`}
-                          file={file}
-                        />
-                      ))}
+                      {selectedRequest.values.referenceFiles.map((item) =>
+                        isImageFile(item.file) ? (
+                          <ResizableImage
+                            key={item.id}
+                            file={item.file}
+                            widthPercent={item.widthPercent}
+                            heightPx={item.heightPx}
+                          />
+                        ) : (
+                          <FileAttachmentCard key={item.id} file={item.file} />
+                        ),
+                      )}
                     </div>
                   </div>
                 ) : null}

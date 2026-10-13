@@ -1,21 +1,37 @@
 {
-  "dataSourceId": "b8d45fa9-d067-48d0-b549-930c582f0e38",
+  "mode": "memo-board",
+  "dataSourceId": "a55f8836-85b1-42e7-b156-521e621d3ee7",
+  "positions": {
+    "queued": "자동화 할 일",
+    "working": "자동화 작업 중",
+    "needsInput": "확인 필요",
+    "done": "완료"
+  },
   "port": 4319,
   "pollMs": 30000,
   "maxAttempts": 3,
+  "maxParallelTasks": 2,
   "agentTimeoutMs": 1200000,
   "excludedMcpServers": ["cloudflare"],
   "verificationScripts": ["lint", "build", "verify:diagnostics", "verify:structure-map"],
   "properties": {
-    "title": "할 일",
-    "progress": "진행",
-    "enabled": "AI 자동 실행",
-    "state": "AI 상태",
-    "order": "AI 실행 순서",
-    "attempt": "AI 반복 횟수",
+    "title": "메모",
+    "progress": null,
+    "enabled": null,
+    "state": "자동화 단계",
+    "location": "위치",
+    "screen": "화면",
+    "area": "영역",
+    "question": "확인 질문",
+    "answer": "내 답변",
+    "order": "실행 순서",
+    "attempt": "실행 회차",
     "request": "AI 요청",
     "criteria": "AI 완료 기준",
     "files": "AI 허용 파일",
-    "result": "AI 결과"
+    "result": "작업 결과",
+    "completedAt": "자동화 완료 시각",
+    "completedDay": "완료일",
+    "category": null
   }
 }

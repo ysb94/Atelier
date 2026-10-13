@@ -1,18 +1,54 @@
 import { createHash } from 'node:crypto'
+import { completionReportBlock } from './report.mjs'
+import { NeedsInput } from './acp.mjs'
 
 const plain = items => (items ?? []).map(v => v.plain_text ?? v.text?.content ?? '').join('')
 export function taskFromPage(page, props) {
   const p = page.properties
   const text = key => plain(p[props[key]]?.rich_text)
   const task = { id: page.id, url: page.url, title: plain(p[props.title]?.title), enabled: p[props.enabled]?.checkbox === true,
-    state: p[props.state]?.select?.name, request: text('request'), criteria: text('criteria'), files: text('files'), order: p[props.order]?.number ?? 999999 }
+    state: p[props.state]?.select?.name, category: p[props.category]?.select?.name, request: text('request'), criteria: text('criteria'), files: text('files'), order: p[props.order]?.number ?? 999999 }
   task.version = createHash('sha256').update(JSON.stringify([task.title, task.request, task.criteria, task.files])).digest('hex')
   return task
+}
+
+export function memoTaskFromPage(page, config, body = '') {
+  const p = page.properties, props = config.properties
+  const text = key => plain(p[props[key]]?.rich_text)
+  const location = p[props.location]?.select?.name
+  const source = { title: plain(p[props.title]?.title), body,
+    screen: p[props.screen]?.select?.name ?? '', area: p[props.area]?.select?.name ?? '', answer: text('answer') }
+  const task = { id: page.id, url: page.url, title: source.title, source, location,
+    enabled: [config.positions.queued, config.positions.working].includes(location),
+    state: p[props.state]?.select?.name ?? '대기', request: text('request'), criteria: text('criteria'), files: text('files'),
+    order: p[props.order]?.number ?? 999999, createdAt: page.created_time,
+    previousResult: text('result'), previousQuestion: text('question') }
+  // Reports, planner outputs and status changes must not create another job.
+  task.version = createHash('sha256').update(JSON.stringify(source)).digest('hex')
+  task.planVersion = createHash('sha256').update(JSON.stringify([task.request, task.criteria, task.files])).digest('hex')
+  return task
+}
+
+export function completionDay(instant) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(instant))
+}
+
+function sameCompletionMinute(stored, actual) {
+  // Notion date properties normalize seconds to the minute; the report keeps
+  // the original precise completion instant from the durable local journal.
+  const a=Date.parse(stored),b=Date.parse(actual)
+  return Number.isFinite(a)&&Number.isFinite(b)&&Math.floor(a/60000)===Math.floor(b/60000)
 }
 
 export class Notion {
   constructor(config, fetcher = fetch) { this.config = config; this.fetch = fetcher }
   async api(endpoint, method = 'GET', body) {
+    if((this.config.maxParallelTasks??1)>1){
+      // Both workers share this manager connection. Stay below Notion's
+      // average three requests/second instead of treating quota as task errors.
+      const at=Math.max(Date.now(),this.nextApiAt??0);this.nextApiAt=at+350
+      if(at>Date.now())await new Promise(resolve=>setTimeout(resolve,at-Date.now()))
+    }
     const response = await this.fetch(`https://api.notion.com/v1/${endpoint}`, {
       method, headers: { Authorization: `Bearer ${this.config.env.NOTION_TOKEN}`, 'Notion-Version': '2025-09-03', 'Content-Type': 'application/json' },
       body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000)
@@ -23,24 +59,135 @@ export class Notion {
   }
   async ready() {
     const schema = await this.api(`data_sources/${this.config.dataSourceId}`)
-    for (const name of Object.values(this.config.properties)) if (!schema.properties[name]) throw new Error(`노션 속성이 없습니다: ${name}`)
+    for (const name of Object.values(this.config.properties).filter(Boolean)) if (!schema.properties[name]) throw new Error(`노션 속성이 없습니다: ${name}`)
     return true
   }
   async queue() {
     const p = this.config.properties
+    if (this.config.mode === 'memo-board') {
+      const result = [], body = { filter: { property: p.location, select: { equals: this.config.positions.queued } },
+        sorts: [{ property: p.order, direction: 'ascending' }, { timestamp: 'created_time', direction: 'ascending' }], page_size: 100 }
+      let cursor
+      do {
+        const data = await this.api(`data_sources/${this.config.dataSourceId}/query`, 'POST', { ...body, ...(cursor ? { start_cursor: cursor } : {}) })
+        for (const page of data.results) result.push(memoTaskFromPage(page, this.config, await this.memoBody(page.id)))
+        cursor = data.has_more ? data.next_cursor : undefined
+      } while (cursor)
+      return result
+    }
     const body = { filter: { and: [{ property: p.enabled, checkbox: { equals: true } }, { property: p.state, select: { equals: '대기' } }] },
       sorts: [{ property: p.order, direction: 'ascending' }], page_size: 100 }
     const result = await this.api(`data_sources/${this.config.dataSourceId}/query`, 'POST', body)
     return result.results.map(page => taskFromPage(page, p))
   }
-  async task(id) { return taskFromPage(await this.api(`pages/${id}`), this.config.properties) }
+  async memoBody(id, depth = 0) {
+    if (depth > 5) throw new Error('메모의 중첩이 너무 깊어 읽을 수 없습니다.')
+    const parts = []; let cursor
+    do {
+      const data = await this.api(`blocks/${id}/children?page_size=100${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ''}`)
+      for (const block of data.results) {
+        const text = plain(block[block.type]?.rich_text)
+        if (text.startsWith('Atelier AI ') || block.type==='callout'&&text.startsWith('완료 보고서 · ')) continue
+        if (text === '필요한 설명이나 참고 자료를 여기에 이어 적을 수 있습니다.') continue
+        if (text) parts.push(text)
+        const detail=structuredClone(block[block.type]??{})
+        delete detail.rich_text
+        const references=(block[block.type]?.rich_text??[]).flatMap(item=>item.text?.link?[item.text.link]:item.mention?[item.mention]:item.equation?[item.equation]:[])
+        if(references.length)detail.references=references
+        // Signed file URLs expire on reads. The stable path identifies the file.
+        if(detail.file){delete detail.file.expiry_time;if(detail.file.url)detail.file.url=detail.file.url.split('?')[0]}
+        if(Object.keys(detail).length)parts.push(JSON.stringify({type:block.type,...detail}))
+        if (block.has_children && !['child_page', 'child_database'].includes(block.type)) parts.push(await this.memoBody(block.id, depth + 1))
+      }
+      cursor = data.has_more ? data.next_cursor : undefined
+      if (parts.join('\n').length > 16000) throw new Error('메모가 너무 큽니다. 관련 내용만 한 카드에 묶어 주세요.')
+    } while (cursor)
+    return parts.filter(Boolean).join('\n')
+  }
+  async task(id) {
+    if(this.config.mode!=='memo-board')return taskFromPage(await this.api(`pages/${id}`),this.config.properties)
+    const snapshot=await this.memoSnapshot(id,true)
+    if(snapshot.unstable)throw new NeedsInput('메모를 읽는 동안 내용이나 설정이 변경되었습니다.')
+    return snapshot.task
+  }
+  async memoSnapshot(id, withBody, retry=0) {
+    const first=await this.api(`pages/${id}`),edited=first.last_edited_time
+    if(first.properties[this.config.properties.state]?.select?.name==='중지')return{page:first,task:memoTaskFromPage(first,this.config),unstable:false}
+    const body=withBody?await this.memoBody(id):''
+    // Properties read before block traversal can be stale after slow API reads.
+    const page=withBody?await this.api(`pages/${id}`):first
+    if(withBody&&edited&&page.last_edited_time&&edited!==page.last_edited_time&&retry<2)return this.memoSnapshot(id,withBody,retry+1)
+    return{page,task:memoTaskFromPage(page,this.config,body),unstable:!!(edited&&page.last_edited_time&&edited!==page.last_edited_time)}
+  }
+  async savePlan(id, plan, expected) {
+    const current=await this.task(id)
+    if(expected&&(!current.enabled||current.state==='중지'||current.version!==expected.version||current.planVersion!==expected.planVersion))throw new NeedsInput('구조 조사 중 사용자가 메모나 실행 설정을 변경했습니다. 준비된 계획으로 덮어쓰지 않습니다.')
+    const p = this.config.properties, rich = content => ({ rich_text: [{ type: 'text', text: { content } }] })
+    await this.api(`pages/${id}`, 'PATCH', { properties: { [p.request]: rich(plan.request), [p.criteria]: rich(plan.criteria), [p.files]: rich(plan.files.join('\n')) } })
+  }
   async publish(id, update) {
     const p = this.config.properties, properties = {}
+    const reportBlock = this.config.mode==='memo-board'&&update.state==='완료'
+      ? completionReportBlock({source:update.source},update.report,update.completedAt) : null
     if (update.state) properties[p.state] = { select: { name: update.state } }
-    if (update.progress) properties[p.progress] = { select: { name: update.progress } }
+    if (update.progress && p.progress) properties[p.progress] = { select: { name: update.progress } }
     if (update.attempt !== undefined) properties[p.attempt] = { number: update.attempt }
-    if (update.summary !== undefined) properties[p.result] = { rich_text: [{ type: 'text', text: { content: update.summary.slice(0,1900) } }] }
+    if (update.completedAt !== undefined && p.completedAt) properties[p.completedAt] = { date: update.completedAt ? { start: update.completedAt } : null }
+    if (update.completedAt && p.completedDay) properties[p.completedDay] = { date: { start: completionDay(update.completedAt) } }
+    if (update.question !== undefined && p.question) properties[p.question] = { rich_text: update.question ? [{ type: 'text', text: { content: update.question.slice(0,1900) } }] : [] }
+    if (this.config.mode === 'memo-board' && update.state) {
+      const progressing=['구조 확인','작업 중','검토 중','수정 중'].includes(update.state)
+      const cancelled=()=>{throw Object.assign(new NeedsInput('사용자가 자동 실행을 중지했습니다.'),{stopped:true,discardUpdate:true})}
+      // Check the latest properties AFTER reading the original memo blocks.
+      const snapshot=await this.memoSnapshot(id,!!update.expectedVersion),page=snapshot.page,current=page.properties[p.location]?.select?.name
+      if(page.properties[p.state]?.select?.name==='중지'){if(progressing)cancelled();return}
+      if(current===this.config.positions.queued&&page.properties[p.state]?.select?.name===update.state
+        &&(['확인 필요','오류'].includes(update.state)||update.state==='완료'&&sameCompletionMinute(page.properties[p.completedAt]?.date?.start,update.completedAt))) {
+        // This terminal result is already visible and the user requeued it.
+        // A response-lost retry must not undo that new selection.
+        return
+      }
+      if(![this.config.positions.queued,this.config.positions.working].includes(current)&&update.state!=='완료'){if(progressing)cancelled();return}
+      if(snapshot.unstable&&!['확인 필요','오류','중지'].includes(update.state))throw new Error('노션 조회 중 변경을 감지했습니다. 최신 상태로 기록을 재시도합니다.')
+      if(update.expectedVersion||update.expectedPlanVersion) {
+        const actual=snapshot.task
+        const changed=(update.expectedVersion&&actual.version!==update.expectedVersion)||(update.expectedPlanVersion&&actual.planVersion!==update.expectedPlanVersion)
+        if(changed&&!['확인 필요','오류','중지'].includes(update.state)) return
+      }
+      if ([this.config.positions.queued, this.config.positions.working].includes(current)) {
+        const position = update.state === '완료' ? this.config.positions.done
+          : ['확인 필요', '오류', '중지'].includes(update.state) ? this.config.positions.needsInput
+          : ['대기', '구조 확인'].includes(update.state) ? this.config.positions.queued
+          : ['작업 중', '검토 중', '수정 중'].includes(update.state) ? this.config.positions.working : null
+        if (position) properties[p.location] = { select: { name: position } }
+      } else if (update.state === '완료' && (current!==this.config.positions.done||!sameCompletionMinute(page.properties[p.completedAt]?.date?.start,update.completedAt))) {
+        // A delayed completion write must not replace a manual cancellation.
+        return
+      }
+    }
+    if (update.summary !== undefined&&(this.config.mode!=='memo-board'||['완료','확인 필요','오류','중지'].includes(update.state))) properties[p.result] = { rich_text: [{ type: 'text', text: { content: update.summary.slice(0,1900) } }] }
     if (Object.keys(properties).length) await this.api(`pages/${id}`, 'PATCH', { properties })
+    if(this.config.mode==='memo-board') {
+      // Prompt, feedback, logs and reviewer JSON stay in the local run journal.
+      if(!reportBlock)return
+      const title=plain(reportBlock.callout.rich_text);let cursor,found=false
+      do {
+        const data=await this.api(`blocks/${id}/children?page_size=100${cursor?`&start_cursor=${encodeURIComponent(cursor)}`:''}`)
+        found=data.results.some(block=>block.type==='callout'&&plain(block.callout.rich_text)===title)
+        cursor=data.has_more?data.next_cursor:undefined
+      }while(cursor&&!found)
+      if(!found){
+        // Completion properties and the report are separate Notion writes.
+        const final=await this.memoSnapshot(id,!!update.expectedVersion),actual=final.task
+        if(final.unstable)throw new Error('완료 보고서 저장 전 노션 변경을 감지했습니다. 최신 상태로 재시도합니다.')
+        if(actual.location!==this.config.positions.done||actual.state==='중지'
+          ||!sameCompletionMinute(final.page.properties[p.completedAt]?.date?.start,update.completedAt)
+          ||update.expectedVersion&&actual.version!==update.expectedVersion
+          ||update.expectedPlanVersion&&actual.planVersion!==update.expectedPlanVersion)return
+        await this.api(`blocks/${id}/children`,'PATCH',{children:[reportBlock]})
+      }
+      return
+    }
     if (update.note) {
       // A stable marker prevents duplicate reports after a write succeeded but its response was lost.
       const marker = `Atelier AI ${update.eventId}`
@@ -53,7 +200,9 @@ export class Notion {
       if (!found) {
         const note=update.note.length>80000?`${update.note.slice(0,80000)}\n긴 기록의 전체 내용은 로컬 실행 기록에 보관했습니다.`:update.note
         const lines = [`${marker}\n${note}`].flatMap(s => s.match(/[\s\S]{1,1800}/g) ?? [])
-        await this.api(`blocks/${id}/children`, 'PATCH', { children: lines.map(content => ({ object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content } }] } })) })
+        const children = lines.map(content => ({ object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content } }] } }))
+        await this.api(`blocks/${id}/children`, 'PATCH', { children: this.config.mode === 'memo-board'
+          ? [{ object: 'block', type: 'toggle', toggle: { rich_text: [{ type: 'text', text: { content: marker } }], children } }] : children })
       }
     }
   }

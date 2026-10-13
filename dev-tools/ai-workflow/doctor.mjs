@@ -4,6 +4,7 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { settings, cursorCommand, cursorPlugins, projectRoot } from './settings.mjs'
 import { runCommand } from './process.mjs'
+import { requireSubscriptionLogin } from './codex-subscription.mjs'
 
 export async function doctor(config=settings()) {
   const problems=[],mcp=[]
@@ -27,8 +28,9 @@ export async function doctor(config=settings()) {
     cursorAuthenticated=!/not logged in|not authenticated|unauthenticated/i.test(r.output+r.stderr)&&/logged in|authenticated|email|account/i.test(r.output+r.stderr)
     if(!cursorAuthenticated)problems.push('Cursor CLI 로그인 필요: npm run ai:login')
   }catch(error){problems.push(`Cursor CLI 확인 실패: ${error.message}`)}
-  try{await runCommand(config.env.ATELIER_CODEX_BIN??'codex',['--version'],{cwd:projectRoot,timeoutMs:10000})}catch(error){problems.push(`Codex CLI 확인 실패: ${error.message}`)}
+  let codexBilling
+  try{codexBilling=await requireSubscriptionLogin(config,{root:projectRoot})}catch(error){problems.push(error.message)}
   if(!mcp.length)problems.push('Cursor MCP 설정/플러그인을 찾지 못했습니다.')
-  return {ready:problems.length===0,problems,mcp,cursorAuthenticated,plugins}
+  return {ready:problems.length===0,problems,mcp,cursorAuthenticated,codexBilling,plugins}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))console.log(JSON.stringify(await doctor(),null,2))
