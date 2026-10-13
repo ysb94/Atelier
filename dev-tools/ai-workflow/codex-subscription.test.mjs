@@ -6,9 +6,36 @@ import path from 'node:path'
 import {requireSubscriptionLogin} from './codex-subscription.mjs'
 import {runReview} from './reviewer.mjs'
 import {needsInputFeedback} from './feedback.mjs'
+import {reviewBundle} from './review-bundle.mjs'
+import {digest} from './workspace.mjs'
 
 const config={env:{ATELIER_CODEX_BIN:'fixture-codex'},agentTimeoutMs:1000}
 const review={decision:'pass',summary:'확인됨',criteriaResults:[{criterion:'내용',passed:true,evidence:'파일 확인'}],issues:[],nextPrompt:''}
+
+test('source bundle verifies source hashes and keeps the reviewer tool-free and subscription-only',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'atelier-review-bundle-'))
+  t.after(()=>fs.rmSync(root,{recursive:true,force:true}))
+  const content='export const sum=(a,b)=>a+b;'
+  fs.writeFileSync(path.join(root,'example.js'),content)
+  const task={files:'example.js'},evidence={changes:[{file:'example.js',afterHash:digest(content),diff:'-a-b\n+a+b'}],snapshot:{'example.js':digest(content)}}
+  let inferences=0
+  const value=await runReview({config:{...config,reviewTransport:'source-bundle'},root,runDir:root,task,evidence,checks:[],cursor:{report:'untrusted success'},run:async(command,args,options)=>{
+    if(args[0]==='login')return{output:'Logged in using ChatGPT',stderr:''}
+    inferences++
+    assert.equal(args[args.indexOf('--sandbox')+1],'read-only')
+    assert.ok(args.includes('features.shell_tool=false'))
+    assert.ok(args.includes('features.unified_exec=false'))
+    assert.ok(args.includes('forced_login_method="chatgpt"'))
+    assert.ok(options.input.includes(content))
+    fs.writeFileSync(args[args.indexOf('-o')+1],JSON.stringify(review))
+    return{output:'',stderr:''}
+  }})
+  assert.equal(value.decision,'pass');assert.equal(inferences,1)
+  fs.writeFileSync(path.join(root,'example.js'),'changed after validation')
+  assert.throws(()=>reviewBundle(root,task,evidence),/검증 이후 파일/)
+  assert.throws(()=>reviewBundle(root,{files:'../outside.js'},evidence),/폴더 밖/)
+  assert.throws(()=>reviewBundle(root,{files:'.env.local'},evidence),/인증·환경/)
+})
 
 test('subscription auth accepts ChatGPT status from stderr without making a model call',async()=>{
   const calls=[]

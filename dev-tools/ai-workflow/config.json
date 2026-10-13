@@ -11,6 +11,7 @@
   "pollMs": 30000,
   "maxAttempts": 3,
   "maxParallelTasks": 2,
+  "reviewTransport": "source-bundle",
   "agentTimeoutMs": 1200000,
   "excludedMcpServers": ["cloudflare"],
   "verificationScripts": ["lint", "build", "verify:diagnostics", "verify:structure-map"],
