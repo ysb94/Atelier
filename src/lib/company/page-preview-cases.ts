@@ -14,6 +14,11 @@ export function pagePreviewCases(pathname: string, real: Profile): PagePreviewCa
   }
   const item = (id: string, label: string, settings: Partial<PreviewSettings> = {}): PagePreviewCase => ({ id, label, settings: { ...base, ...settings } })
   const owner = /^\/work-requests\/([^/]+)$/.exec(path)?.[1]
+  if (path === '/work') return [
+    item('employee', '사원 화면', { departmentName: '디자인팀', capabilities: ['design'] }),
+    item('manager', '팀장 화면', { departmentName: '디자인팀', capabilities: ['design'], position: '팀장' }),
+    item('unassigned', '소속 미지정'),
+  ]
   if (owner && isWorkRequestOwner(owner)) {
     const team = { departmentName: WORK_REQUEST_CONFIG[owner].teamName, capabilities: [owner] }
     return [

@@ -170,9 +170,9 @@ export function companyNavGroupsForProfile(
   const showOperationsSupport = canAccessOperationsSupport(profile)
   const showMembers = canManagePersonnel(profile) || isCompanyReviewer(profile)
   return companyNavGroups
-    .filter(group => showOperationsSupport || !group.items.some(item => item.to === '/operations-support'))
-    .map(group => group.title === '회사' && showMembers
-      ? { ...group, items: [...group.items, membersNavItem] }
+    .filter(group => group.title !== '운영지원' || showOperationsSupport || showMembers)
+    .map(group => group.title === '운영지원'
+      ? { ...group, items: [...(showOperationsSupport ? group.items : []), ...(showMembers ? [membersNavItem] : [])] }
       : group)
 }
 
