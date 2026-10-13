@@ -48,7 +48,9 @@ export type FormValues = {
   title: string
   requester: string
   requesterPosition: string
+  deadlineType: 'preferred' | 'fixed' | ''
   dueDate: string
+  scheduleReason: string
   referenceFiles: ReferenceFile[]
   blocks: ContentBlock[]
 }
