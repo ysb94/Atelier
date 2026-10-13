@@ -2,10 +2,18 @@
   "mode": "memo-board",
   "dataSourceId": "a55f8836-85b1-42e7-b156-521e621d3ee7",
   "positions": {
+    "memo": "메모",
+    "manual": "직접 할 일",
     "queued": "자동화 할 일",
     "working": "자동화 작업 중",
     "needsInput": "확인 필요",
     "done": "완료"
+  },
+  "memoIntake": {
+    "enabled": true,
+    "maxPerTick": 3,
+    "retryMinutes": 15,
+    "maxRetryMinutes": 360
   },
   "port": 4319,
   "pollMs": 30000,

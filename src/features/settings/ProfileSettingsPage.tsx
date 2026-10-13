@@ -8,7 +8,7 @@ import {
 } from '@/components/ui/card'
 import { useAuth } from '@/lib/supabase/auth'
 import { capabilityLabel } from '@/lib/company/capabilities'
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { PersonalRequestsPanel } from './PersonalRequestsPanel'
 import { LeaveApprovalPanel } from '@/features/operations-support/LeaveApprovalPanel'
@@ -16,6 +16,7 @@ import { useDepartmentApprovers } from '@/features/operations-support/use-depart
 import { assignedDepartmentIds } from '@/lib/supabase/department-approvers'
 import { MyAttendanceStartPanel } from './MyAttendanceStartPanel'
 import { MyAttendancePanel } from './MyAttendancePanel'
+import './personal-requests.css'
 
 export function ProfileSettingsPage() {
   useRenderWatch('ProfileSettingsPage')
@@ -23,7 +24,8 @@ export function ProfileSettingsPage() {
   const approvals = useDepartmentApprovers()
   const departments = useMemo(() => assignedDepartmentIds(approvals.settings, profile?.id), [approvals.settings, profile?.id])
   const [part, setPart] = useState<'requests' | 'my-attendance' | 'attendance' | 'approvals' | 'profile'>('my-attendance')
-  useEffect(() => { if (part === 'attendance' && !approvals.loading && departments.length === 0) setPart('requests') }, [part, approvals.loading, departments.length])
+  const hasDepartments = departments.length > 0
+  const noDepartments = !hasDepartments && !approvals.loading && !approvals.error
 
   return (
     <div>
@@ -37,12 +39,23 @@ export function ProfileSettingsPage() {
         <button type="button" role="tab" id="personal-requests-tab" aria-selected={part === 'requests'} aria-controls="personal-requests-panel" onClick={() => setPart('requests')}>근태·신청</button>
         <button type="button" role="tab" id="personal-profile-tab" aria-selected={part === 'profile'} aria-controls="personal-profile-panel" onClick={() => setPart('profile')}>내 정보</button>
         <button type="button" role="tab" id="personal-approvals-tab" aria-selected={part === 'approvals'} aria-controls="personal-approvals-panel" onClick={() => setPart('approvals')}>승인할 신청</button>
-        {departments.length > 0 && <button type="button" role="tab" id="personal-attendance-tab" className="is-department" aria-selected={part === 'attendance'} aria-controls="personal-attendance-panel" onClick={() => setPart('attendance')}>부서 출근시간</button>}
+        <button type="button" role="tab" id="personal-attendance-tab" className="is-department" aria-selected={part === 'attendance'} aria-controls="personal-attendance-panel" onClick={() => setPart('attendance')}>부서 출근시간</button>
       </div>
       {part === 'my-attendance' && <div id="personal-my-attendance-panel" role="tabpanel" aria-labelledby="personal-my-attendance-tab"><MyAttendancePanel /></div>}
       <div id="personal-requests-panel" role="tabpanel" aria-labelledby="personal-requests-tab" hidden={part !== 'requests'}><PersonalRequestsPanel /></div>
-      {part === 'attendance' && departments.length > 0 && <div id="personal-attendance-panel" role="tabpanel" aria-labelledby="personal-attendance-tab"><MyAttendanceStartPanel departmentIds={departments} /></div>}
-      {part === 'approvals' && <div id="personal-approvals-panel" role="tabpanel" aria-labelledby="personal-approvals-tab"><LeaveApprovalPanel /></div>}
+      {part === 'attendance' && <div id="personal-attendance-panel" role="tabpanel" aria-labelledby="personal-attendance-tab">
+        {approvals.error && <p className="personal-page-notice is-error" role="alert">
+          {hasDepartments ? '담당 부서 정보를 다시 불러오지 못했습니다. 아래 내용이 최신이 아닐 수 있으니 잠시 후 다시 확인해 주세요.'
+            : '담당 부서 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'}
+        </p>}
+        {hasDepartments ? <MyAttendanceStartPanel departmentIds={departments} />
+          : approvals.loading ? <p className="personal-page-notice" role="status">담당 부서 정보를 불러오는 중입니다.</p>
+          : noDepartments && <p className="personal-page-notice">지정된 담당 부서가 없어 설정할 직원이 없습니다. 담당 지정은 운영지원팀에 요청해 주세요.</p>}
+      </div>}
+      {part === 'approvals' && <div id="personal-approvals-panel" role="tabpanel" aria-labelledby="personal-approvals-tab">
+        {noDepartments && <p className="personal-page-notice">지정된 승인 담당이 아니면 목록이 비어 있을 수 있습니다.</p>}
+        <LeaveApprovalPanel />
+      </div>}
       <div id="personal-profile-panel" role="tabpanel" aria-labelledby="personal-profile-tab" hidden={part !== 'profile'}>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card>

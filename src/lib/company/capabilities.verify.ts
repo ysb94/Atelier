@@ -8,6 +8,9 @@ import {
   hasAnyCapability,
   hasCapability,
   inferCapabilityFromDepartment,
+  isAttendanceExempt,
+  isAttendanceExemptPosition,
+  ATTENDANCE_EXEMPT_POSITIONS,
   canEditOrgAssignment,
   canManagePersonnel,
   canViewDraftsByOwner,
@@ -160,6 +163,50 @@ const admin = {
 }
 assert(hasCapability(admin, 'data'), '관리자는 모든 역량')
 assert(canEditBrandData(admin, 'md'), '관리자는 전 영역 수정')
+
+assert(
+  ATTENDANCE_EXEMPT_POSITIONS.join(',') === '대표이사,부사장,전무,상무,이사',
+  '출퇴근 제외 직책은 대표이사·부사장·전무·상무·이사',
+)
+for (const position of ['대표이사', '부사장', '전무', '상무', '이사', ' 이사 ', '대표이사\t']) {
+  assert(isAttendanceExemptPosition(position), `${JSON.stringify(position)}는 출퇴근 제외 직책`)
+  assert(
+    isAttendanceExempt({ status: 'active', isAdmin: false, position }),
+    `활성 ${JSON.stringify(position)}는 출퇴근 제외 대상`,
+  )
+}
+for (const position of ['본부장', '실장', '팀장', '사원', '', '   ', null, undefined, '이사대우', '부이사', '대표 이사']) {
+  assert(!isAttendanceExemptPosition(position), `${JSON.stringify(position)}는 출퇴근 제외 직책이 아님`)
+  assert(
+    !isAttendanceExempt({ status: 'active', isAdmin: false, position }),
+    `활성 ${JSON.stringify(position)}는 출퇴근 측정 대상`,
+  )
+}
+for (const status of ['pending', 'inactive', 'disabled', null]) {
+  assert(
+    !isAttendanceExempt({ status, isAdmin: false, position: '대표이사' }),
+    `${status} 계정은 직책이 대표이사여도 제외 대상이 아님`,
+  )
+}
+assert(!isAttendanceExempt(null), '프로필이 없으면 제외 대상이 아님')
+assert(
+  !isAttendanceExempt({
+    status: 'active',
+    isAdmin: true,
+    position: '사원',
+    jobGrade: '이사',
+  } as Parameters<typeof isAttendanceExempt>[0]),
+  '직급만 임원급이고 직책이 사원이면 제외 대상이 아님',
+)
+assert(
+  !isAttendanceExempt({
+    status: 'active',
+    isAdmin: false,
+    position: '팀장',
+    jobGrade: '상무',
+  } as Parameters<typeof isAttendanceExempt>[0]),
+  '직급만 임원급이고 직책이 팀장이면 제외 대상이 아님',
+)
 
 assert(brandStorageRoot('atelier') === 'masmarulez', 'ATELIER는 기존 R2 루트')
 assert(brandStorageRoot('new-brand') === 'new-brand', '새 브랜드는 slug 루트')
