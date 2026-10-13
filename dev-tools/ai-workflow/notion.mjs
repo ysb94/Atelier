@@ -21,7 +21,8 @@ export function memoTaskFromPage(page, config, body = '') {
   const task = { id: page.id, url: page.url, title: source.title, source, location,
     enabled: [config.positions.queued, config.positions.working].includes(location),
     state: p[props.state]?.select?.name ?? '대기', request: text('request'), criteria: text('criteria'), files: text('files'),
-    order: p[props.order]?.number ?? 999999, createdAt: page.created_time }
+    order: p[props.order]?.number ?? 999999, createdAt: page.created_time,
+    previousResult: text('result'), previousQuestion: text('question') }
   // Reports, planner outputs and status changes must not create another job.
   task.version = createHash('sha256').update(JSON.stringify(source)).digest('hex')
   task.planVersion = createHash('sha256').update(JSON.stringify([task.request, task.criteria, task.files])).digest('hex')
@@ -140,6 +141,12 @@ export class Notion {
       // Check the latest properties AFTER reading the original memo blocks.
       const snapshot=await this.memoSnapshot(id,!!update.expectedVersion),page=snapshot.page,current=page.properties[p.location]?.select?.name
       if(page.properties[p.state]?.select?.name==='중지'){if(progressing)cancelled();return}
+      if(current===this.config.positions.queued&&page.properties[p.state]?.select?.name===update.state
+        &&(['확인 필요','오류'].includes(update.state)||update.state==='완료'&&sameCompletionMinute(page.properties[p.completedAt]?.date?.start,update.completedAt))) {
+        // This terminal result is already visible and the user requeued it.
+        // A response-lost retry must not undo that new selection.
+        return
+      }
       if(![this.config.positions.queued,this.config.positions.working].includes(current)&&update.state!=='완료'){if(progressing)cancelled();return}
       if(snapshot.unstable&&!['확인 필요','오류','중지'].includes(update.state))throw new Error('노션 조회 중 변경을 감지했습니다. 최신 상태로 기록을 재시도합니다.')
       if(update.expectedVersion||update.expectedPlanVersion) {
@@ -150,7 +157,8 @@ export class Notion {
       if ([this.config.positions.queued, this.config.positions.working].includes(current)) {
         const position = update.state === '완료' ? this.config.positions.done
           : ['확인 필요', '오류', '중지'].includes(update.state) ? this.config.positions.needsInput
-          : ['구조 확인', '작업 중', '검토 중', '수정 중'].includes(update.state) ? this.config.positions.working : null
+          : ['대기', '구조 확인'].includes(update.state) ? this.config.positions.queued
+          : ['작업 중', '검토 중', '수정 중'].includes(update.state) ? this.config.positions.working : null
         if (position) properties[p.location] = { select: { name: position } }
       } else if (update.state === '완료' && (current!==this.config.positions.done||!sameCompletionMinute(page.properties[p.completedAt]?.date?.start,update.completedAt))) {
         // A delayed completion write must not replace a manual cancellation.

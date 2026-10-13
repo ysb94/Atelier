@@ -3,12 +3,17 @@ const readable=value=>String(value??'').replace(/`[^`]+`/g,'관련 기능').repl
 export function needsInputFeedback(task,message,explicitQuestion='') {
   const raw=String(message??''),title=String(task.title??'이 작업').slice(0,300)
   let reason,question
-  if(/면제|직책|회사\s*정책|출.?퇴근.*기준|정책.*미정/.test(raw)){
+  if(/최신.*(?:답변|사용자 답변).*(?:계획|조사 결과)|검증 전용으로 되돌리는 계획/.test(raw)){
+    reason='자동화가 저장된 답변에 맞는 작업 지시를 준비하지 못해 멈췄어요.'
+    question=explicitQuestion||'내 답변은 저장되어 있어 다시 작성할 필요가 없습니다. 자동화의 지시 준비 단계를 확인한 뒤 다시 진행해야 합니다.'
+  }else if(/면제|직책|회사\s*정책|출.?퇴근.*기준|정책.*미정/.test(raw)){
     reason='회사에서 정해야 하는 기준이 아직 확정되지 않아 자동으로 결정할 수 없어요.'
     question=explicitQuestion||'적용할 대상과 기준을 알려주세요. 예를 들어 어떤 직책·팀에 적용하고, 누가 제외되는지 적어주세요.'
   }else if(/브라우저|실제.*(?:화면|로그인|증거)|로그인한.*화면|화면.*(?:검증|확인).*(?:부족|없)/.test(raw)){
     reason='자동 검사만으로는 실제 로그인한 화면의 동작을 확인할 수 없어 멈췄어요.'
-    question=explicitQuestion||`실제 사이트에서 다음 동작을 확인하고, 확인한 화면·계정·결과를 적어주세요.\n작업: ${title}`
+    question=explicitQuestion||(task.source?.answer?.trim()
+      ? '이미 적은 화면 동작의 답변은 저장되어 있습니다. 같은 결과를 다시 적을 필요는 없습니다. 자동화가 확인할 화면의 사이트 주소와 개발 화면인지 운영 사이트인지 알려주세요. 접근 또는 화면 검사 도구가 부족하면 실행기에서 먼저 해결해야 합니다.'
+      : `실제 사이트에서 다음 동작을 확인하고, 확인한 화면·계정·결과를 적어주세요.\n작업: ${title}`)
   }else if(/(?:DB|데이터베이스|스키마|RLS|권한).*(?:변경|승인)|(?:승인|변경).*(?:DB|권한)/i.test(raw)){
     reason='데이터나 접근 권한의 변경이 필요해 자동으로 처리할 수 있는 범위를 넘어요.'
     question=explicitQuestion||'누가 어떤 내용을 볼 수 있어야 하는지 적용 범위를 적어주세요. 설정을 직접 변경했다면 바꾼 내용도 알려주세요.'
