@@ -169,11 +169,14 @@ export function companyNavGroupsForProfile(
 ) {
   const showOperationsSupport = canAccessOperationsSupport(profile)
   const showMembers = canManagePersonnel(profile) || isCompanyReviewer(profile)
-  return companyNavGroups
-    .filter(group => showOperationsSupport || !group.items.some(item => item.to === '/operations-support'))
-    .map(group => group.title === '회사' && showMembers
-      ? { ...group, items: [...group.items, membersNavItem] }
-      : group)
+  return companyNavGroups.flatMap((group) => {
+    if (group.title !== '운영지원') return [group]
+    const items = [
+      ...(showOperationsSupport ? group.items : []),
+      ...(showMembers ? [membersNavItem] : []),
+    ]
+    return items.length > 0 ? [{ ...group, items }] : []
+  })
 }
 
 export function companyNavItemActive(to: string, pathname: string, end?: boolean) {
