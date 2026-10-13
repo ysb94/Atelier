@@ -10,7 +10,6 @@ import { useAuth } from '@/lib/supabase/auth'
 import { capabilityLabel } from '@/lib/company/capabilities'
 import { useEffect, useMemo, useState } from 'react'
 import { useRenderWatch } from '@/lib/diagnostics'
-import { PersonalRequestsPanel } from './PersonalRequestsPanel'
 import { LeaveApprovalPanel } from '@/features/operations-support/LeaveApprovalPanel'
 import { useDepartmentApprovers } from '@/features/operations-support/use-department-approvers'
 import { assignedDepartmentIds } from '@/lib/supabase/department-approvers'
@@ -22,25 +21,23 @@ export function ProfileSettingsPage() {
   const { profile, email } = useAuth()
   const approvals = useDepartmentApprovers()
   const departments = useMemo(() => assignedDepartmentIds(approvals.settings, profile?.id), [approvals.settings, profile?.id])
-  const [part, setPart] = useState<'requests' | 'my-attendance' | 'attendance' | 'approvals' | 'profile'>('my-attendance')
-  useEffect(() => { if (part === 'attendance' && !approvals.loading && departments.length === 0) setPart('requests') }, [part, approvals.loading, departments.length])
+  const [part, setPart] = useState<'my-attendance' | 'attendance' | 'approvals' | 'profile'>('my-attendance')
+  useEffect(() => { if (part === 'attendance' && !approvals.loading && departments.length === 0) setPart('my-attendance') }, [part, approvals.loading, departments.length])
 
   return (
     <div>
       <PageHeader
         title="마이페이지"
-        description="내 월별 출퇴근 기록과 휴가·근무 신청을 확인합니다."
+        description="내 출퇴근 기록과 휴가·근무·정정 신청을 한 달력에서 확인합니다."
       />
 
       <div className="personal-page-tabs" role="tablist" aria-label="마이페이지 메뉴">
         <button type="button" role="tab" id="personal-my-attendance-tab" aria-selected={part === 'my-attendance'} aria-controls="personal-my-attendance-panel" onClick={() => setPart('my-attendance')}>내 근태</button>
-        <button type="button" role="tab" id="personal-requests-tab" aria-selected={part === 'requests'} aria-controls="personal-requests-panel" onClick={() => setPart('requests')}>근태·신청</button>
         <button type="button" role="tab" id="personal-profile-tab" aria-selected={part === 'profile'} aria-controls="personal-profile-panel" onClick={() => setPart('profile')}>내 정보</button>
         <button type="button" role="tab" id="personal-approvals-tab" aria-selected={part === 'approvals'} aria-controls="personal-approvals-panel" onClick={() => setPart('approvals')}>승인할 신청</button>
         {departments.length > 0 && <button type="button" role="tab" id="personal-attendance-tab" className="is-department" aria-selected={part === 'attendance'} aria-controls="personal-attendance-panel" onClick={() => setPart('attendance')}>부서 출근시간</button>}
       </div>
-      {part === 'my-attendance' && <div id="personal-my-attendance-panel" role="tabpanel" aria-labelledby="personal-my-attendance-tab"><MyAttendancePanel /></div>}
-      <div id="personal-requests-panel" role="tabpanel" aria-labelledby="personal-requests-tab" hidden={part !== 'requests'}><PersonalRequestsPanel /></div>
+      <div id="personal-my-attendance-panel" role="tabpanel" aria-labelledby="personal-my-attendance-tab" hidden={part !== 'my-attendance'}><MyAttendancePanel /></div>
       {part === 'attendance' && departments.length > 0 && <div id="personal-attendance-panel" role="tabpanel" aria-labelledby="personal-attendance-tab"><MyAttendanceStartPanel departmentIds={departments} /></div>}
       {part === 'approvals' && <div id="personal-approvals-panel" role="tabpanel" aria-labelledby="personal-approvals-tab"><LeaveApprovalPanel /></div>}
       <div id="personal-profile-panel" role="tabpanel" aria-labelledby="personal-profile-tab" hidden={part !== 'profile'}>

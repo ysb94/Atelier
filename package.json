@@ -66,6 +66,7 @@
     "verify:styled-image-deployment": "node scripts/verify-styled-image-deployment.mjs",
     "verify:diagnostics": "node scripts/verify-diagnostics.mjs",
     "verify:my-attendance": "node --experimental-strip-types src/features/settings/my-attendance.verify.ts",
+    "verify:personal-requests": "node --experimental-strip-types src/features/settings/personal-requests.verify.ts",
     "verify:chat-files": "npx tsx src/lib/chat/file-rules.verify.ts",
     "verify:chat-list": "npx tsx src/lib/inbox/format.verify.ts",
     "verify:chat-thread": "npx tsx --tsconfig tsconfig.app.json src/lib/chat/thread-layout.verify.ts",
