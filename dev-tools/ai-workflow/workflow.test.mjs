@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { taskFromPage, memoTaskFromPage, completionDay, Notion } from './notion.mjs'
-import { validatePlan } from './planner.mjs'
+import { validatePlan, planningPrompt, prepareMemo } from './planner.mjs'
 import { completionReportBlock, validateCompletionReport } from './report.mjs'
 import { taskFiles, redact, projectRoot, cursorServers, cursorPlugins, settings } from './settings.mjs'
 import { permissionDecision } from './acp.mjs'
@@ -164,6 +164,7 @@ async function memoFixture(t) {
   f.notion.task=async()=>({...current})
   f.notion.savePlan=async(id,plan)=>{
     const page=memoPage(current.location)
+    for(const [name,value] of Object.entries({'내 답변':current.source.answer,'작업 결과':current.previousResult,'확인 질문':current.previousQuestion}))page.properties[name]={rich_text:[{plain_text:value??''}]}
     for(const [name,value] of Object.entries({'AI 요청':plan.request,'AI 완료 기준':plan.criteria,'AI 허용 파일':plan.files.join('\n')}))page.properties[name]={rich_text:[{plain_text:value}]}
     current=memoTaskFromPage(page,memoConfig,current.source.body)
   }
@@ -178,10 +179,124 @@ test('memo identity retains source, answer and body but ignores reports and prep
   page.properties['AI 요청']={rich_text:[{plain_text:'조사로 준비한 지시'}]}
   const prepared=memoTaskFromPage(page,memoConfig,'원문')
   assert.equal(prepared.version,a.version);assert.notEqual(prepared.planVersion,a.planVersion);assert.equal(prepared.enabled,true)
+  page.properties['작업 결과']={rich_text:[{plain_text:'이전 작업 결과'}]}
+  page.properties['확인 질문']={rich_text:[{plain_text:'앞서 물어본 질문'}]}
+  const history=memoTaskFromPage(page,memoConfig,'원문')
+  assert.equal(history.version,a.version);assert.equal(history.previousResult,'이전 작업 결과');assert.equal(history.previousQuestion,'앞서 물어본 질문')
   assert.notEqual(memoTaskFromPage(page,memoConfig,'추가된 원문').version,a.version)
   page.properties['내 답변']={rich_text:[{plain_text:'면제 직책은 대표만'}]}
   assert.notEqual(memoTaskFromPage(page,memoConfig,'원문').version,a.version)
   page.properties.위치.select.name='직접 할 일';assert.equal(memoTaskFromPage(page,memoConfig).enabled,false)
+})
+
+test('new answers refresh stale queue and generated instructions before editing',async t=>{
+  const f=await memoFixture(t),stale=f.getCurrent(),order=[]
+  const page=memoPage()
+  for(const [name,value] of Object.entries({'내 답변':'아직 이미지 크기가 제각각입니다. 고쳐 주세요.','AI 요청':'소스를 고치지 말고 검증만 하라','AI 완료 기준':'검증 단계에서는 수정 금지','AI 허용 파일':'other.md','작업 결과':'로그인한 화면 증거가 없어 멈춤','확인 질문':'이미지 크기가 같은가요?'}))page.properties[name]={rich_text:[{plain_text:value}]}
+  f.setCurrent(memoTaskFromPage(page,memoConfig,'본문 요구사항'))
+  f.notion.queue=async()=>[stale]
+  const save=f.notion.savePlan
+  f.notion.savePlan=async(...args)=>{order.push('save');await save(...args)}
+  const refreshed={...memoPlan,request:'사용자가 확인한 이미지 크기 오류의 원인을 조사하고 수정한다',feedback:{kind:'problem_reported',summary:'이미지 크기가 다르다는 사용자 관찰을 수정 요청으로 반영'}}
+  const runner=new Runner({...f,plan:async({task})=>{
+    order.push('plan');assert.match(task.source.answer,/제각각/);assert.match(task.previousResult,/화면 증거/);assert.match(task.previousQuestion,/크기/)
+    const prompt=planningPrompt(task,{})
+    assert.match(prompt,/과거 참고 자료/);assert.match(prompt,/제약으로 보존하지 말 것/);assert.doesNotMatch(prompt,/있으면 제약으로 보존하세요/)
+    return refreshed
+  },cursor:async({prompt,files})=>{
+    order.push('edit');assert.deepEqual(files,['note.md']);assert.match(prompt,/원인을 조사하고 수정/);assert.doesNotMatch(prompt,/소스를 고치지 말고 검증만 하라/)
+    assert.equal(f.getCurrent().request,refreshed.request);fs.writeFileSync(path.join(f.root,'note.md'),'완료');return{report:'수정됨'}
+  },review:async()=>pass})
+  await runner.tick()
+  assert.deepEqual(order,['plan','save','edit']);assert.equal(f.updates.at(-1).state,'완료')
+  assert.equal(f.getCurrent().source.answer,page.properties['내 답변'].rich_text[0].plain_text)
+})
+
+test('a reported failure cannot be dispatched as verification-only or omit answer handling',async t=>{
+  const f=await memoFixture(t),answered={...f.getCurrent(),source:{...f.getCurrent().source,answer:'아직 크기가 달라요'}}
+  assert.throws(()=>validatePlan(memoPlan,f.root,answered),/최신 사용자 답변/)
+  const feedback={kind:'problem_reported',summary:'크기 오류를 고쳐야 함'}
+  assert.throws(()=>validatePlan({...memoPlan,executionKind:'verification',feedback},f.root,answered),/검증 전용으로 되돌리는/)
+  assert.equal(validatePlan({...memoPlan,feedback},f.root,answered).executionKind,'implementation')
+})
+
+test('fresh investigation may replace obsolete generated file scopes without editing during planning',async t=>{
+  const f=await memoFixture(t),dir=path.join(f.root,'dev-tools/structure-map/generated')
+  fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,'structure.json'),JSON.stringify({nodes:[],domains:[],nav:[],routes:[],edges:[]}))
+  const task={...f.getCurrent(),request:'옛 검증 전용 지시',files:'other.md'}
+  const plan=await prepareMemo({config:f.config,root:f.root,task,runDir:f.store.runDir(f.store.job(task)),investigate:async({files,prompt})=>{
+    assert.deepEqual(files,[]);assert.match(prompt,/이전 AI 요청.*과거 참고 자료/);return{report:JSON.stringify(memoPlan)}
+  }})
+  assert.deepEqual(plan.files,['note.md'])
+})
+
+test('stale answer handling is corrected internally before dispatch',async t=>{
+  const f=await memoFixture(t),dir=path.join(f.root,'dev-tools/structure-map/generated')
+  fs.mkdirSync(dir,{recursive:true});fs.writeFileSync(path.join(dir,'structure.json'),JSON.stringify({nodes:[],domains:[],nav:[],routes:[],edges:[]}))
+  const task={...f.getCurrent(),source:{...f.getCurrent().source,answer:'아직 크기가 달라요'}}
+  const feedback={kind:'problem_reported',summary:'크기 오류를 수정해야 함'};let calls=0
+  const plan=await prepareMemo({config:f.config,root:f.root,task,runDir:f.store.runDir(f.store.job(task)),investigate:async({prompt})=>{
+    calls++;if(calls===2)assert.match(prompt,/검증 전용으로 되돌리는 계획/)
+    return{report:JSON.stringify({...memoPlan,executionKind:calls===1?'verification':'implementation',feedback})}
+  }})
+  assert.equal(calls,2);assert.equal(plan.executionKind,'implementation')
+})
+
+test('a stale source discovered before investigation waits for the new selection without publishing a stop',async t=>{
+  const f=await memoFixture(t),old=f.store.job(f.getCurrent());let planned=0,edited=0
+  f.setCurrent({...f.getCurrent(),version:'latest-answer',source:{...f.getCurrent().source,body:'최신 본문'}})
+  await new Runner({...f,plan:async()=>{planned++;return memoPlan},cursor:async()=>{edited++}}).execute(old)
+  assert.equal(old.phase,'superseded');assert.equal(planned,0);assert.equal(edited,0);assert.equal(f.updates.length,0)
+})
+
+test('conflicting work stays queued and refreshes its plan again when dispatched',async t=>{
+  const f=await memoFixture(t);let admitted=false,plans=0,edits=0
+  const runner=new Runner({...f,plan:async()=>{plans++;return memoPlan},beforeImplementation:async()=>admitted,
+    cursor:async()=>{edits++;fs.writeFileSync(path.join(f.root,'note.md'),'완료');return{report:'완료'}},review:async()=>pass})
+  const job=f.store.job(f.getCurrent());await runner.execute(job)
+  assert.equal(job.phase,'waiting');assert.equal(f.updates.at(-1).state,'대기');assert.equal(edits,0)
+  admitted=true;await runner.execute(job)
+  assert.equal(plans,2);assert.equal(edits,1);assert.equal(f.updates.at(-1).state,'완료')
+})
+
+test('explicitly requeueing a stopped memo refreshes it without requiring edits to AI properties',async t=>{
+  const f=await memoFixture(t),current=f.getCurrent(),old=f.store.job(current)
+  old.phase='needs_input';old.error='서비스 연결 일시 중단';f.store.save()
+  f.setCurrent({...current,state:'확인 필요'})
+  const publish=f.notion.publish
+  f.notion.publish=async(id,update)=>{await publish(id,update);f.setCurrent({...f.getCurrent(),state:update.state,location:update.state==='완료'?'완료':update.state==='작업 중'?'자동화 작업 중':'자동화 할 일'})}
+  let plans=0,edits=0
+  const runner=new Runner({...f,plan:async()=>{plans++;return memoPlan},cursor:async()=>{edits++;fs.writeFileSync(path.join(f.root,'note.md'),'완료');return{report:'완료'}},review:async()=>pass})
+  await runner.tick();await runner.tick()
+  assert.equal(plans,1);assert.equal(edits,1);assert.equal(old.error,'서비스 연결 일시 중단')
+  assert.ok(Object.values(f.store.data.jobs).some(job=>job.runId===old.runId&&job.phase==='needs_input'))
+})
+
+test('preparation remains in automation todo until the implementation publication',async()=>{
+  const page=memoPage(),patches=[]
+  const client=new Notion({...memoConfig,env:{NOTION_TOKEN:'fixture'}},async(url,options)=>({ok:true,json:async()=>{
+    if(options.method==='PATCH'){const properties=JSON.parse(options.body).properties;patches.push(properties);Object.assign(page.properties,properties);return page}
+    return page
+  }}))
+  await client.publish(page.id,{state:'구조 확인'})
+  assert.equal(patches.at(-1)['위치'].select.name,'자동화 할 일')
+  await client.publish(page.id,{state:'작업 중'})
+  assert.equal(patches.at(-1)['위치'].select.name,'자동화 작업 중')
+  await client.publish(page.id,{state:'대기'})
+  assert.equal(patches.at(-1)['위치'].select.name,'자동화 할 일')
+})
+
+test('a delayed terminal write cannot undo a deliberate requeue of its already visible result',async()=>{
+  for(const state of ['확인 필요','오류','완료']){
+    const page=memoPage();page.properties['자동화 단계']={select:{name:state}}
+    page.properties['자동화 완료 시각']={date:{start:'2026-10-13T05:00:00Z'}};let writes=0
+    const client=new Notion({...memoConfig,env:{NOTION_TOKEN:'fixture'}},async(url,options)=>({ok:true,json:async()=>{
+      if(options.method==='PATCH')writes++
+      return page
+    }}))
+    await client.publish(page.id,{state,completedAt:'2026-10-13T05:00:30Z',summary:'이전 결과',report:easyReport,source:{screen:'내 업무',area:'공용'}})
+    assert.equal(writes,0);assert.equal(page.properties['위치'].select.name,'자동화 할 일')
+  }
 })
 
 test('memo API queries only selected work and ignores nested execution records in source versions',async()=>{

@@ -24,8 +24,16 @@ export class Store {
       }
     }
   }
-  job(task) {
+  job(task, {retry=false} = {}) {
     const key = `${task.id}:${task.version}`
+    const previous=this.data.jobs[key]
+    if(retry&&previous&&['done','needs_input','superseded'].includes(previous.phase)) {
+      // Moving a terminal card back to the queue explicitly requests another
+      // investigation. Preserve its journal; never reuse its prepared plan.
+      const historyKey=`${key}:run:${previous.runId}`
+      this.data.jobs[historyKey]={...previous,key:historyKey}
+      delete this.data.jobs[key]
+    }
     if (!this.data.jobs[key]) this.data.jobs[key] = { key, task, attempt: 0, phase: 'new', runId: randomUUID(), createdAt: new Date().toISOString() }
     this.save(); return this.data.jobs[key]
   }

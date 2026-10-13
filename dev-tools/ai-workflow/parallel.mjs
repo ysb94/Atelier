@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
-import { Runner, verification } from './runner.mjs'
+import { Runner, verification, selectedJob } from './runner.mjs'
 import { runReview, validateReview } from './reviewer.mjs'
 import { createIsolatedWorkspace } from './isolation.mjs'
 import { snapshot, changedPaths, readFile, digest, evidence } from './workspace.mjs'
@@ -79,11 +79,13 @@ export class ParallelRunner {
         }
         queue.push(fresh)
       }
-      for(const task of queue){
+      for(const queuedTask of queue){
         if(this.active.size>=(this.config.maxParallelTasks??2)||this.stopping)break
+        const task=this.config.mode==='memo-board'?await this.notion.task(queuedTask.id):queuedTask
+        if(this.config.mode==='memo-board'&&(!task.enabled||task.state==='중지'||task.location!==this.config.positions.queued))continue
         const key=`${task.id}:${task.version}`
         if([...this.active.values()].some(entry=>entry.job.task.id===task.id))continue
-        const job=this.store.job(task)
+        const job=selectedJob(this.store,task,this.config)
         if(['done','needs_input','superseded'].includes(job.phase))continue
         if(job.phase==='waiting'&&job.waitingFootprint&&[...this.active.values()].some(entry=>entry.footprint&&footprintsConflict(job.waitingFootprint,entry.footprint)))continue
         if(!['new','waiting'].includes(job.phase)){

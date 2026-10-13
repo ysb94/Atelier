@@ -121,14 +121,33 @@ test('a slower memo investigation waits for an in-flight integration without tre
  const f=await fixture(t,['a.md','b.md']);let applied,release
  const whenApplied=new Promise(resolve=>{applied=resolve}),continueReview=new Promise(resolve=>{release=resolve})
  fs.writeFileSync(path.join(f.root,'package.json'),JSON.stringify({scripts:{'verify:fixture':'node check.mjs'}}))
- for(const task of f.tasks){task.source={area:'공용',screen:'메모',body:'독립 문구 작업'};task.planVersion='unprepared'}
- f.runner.config.mode='memo-board';f.runner.notion.savePlan=async(id,plan)=>{Object.assign(f.tasks.find(task=>task.id===id),{request:plan.request,criteria:plan.criteria,files:plan.files.join('\n'),planVersion:'prepared'})}
+ for(const task of f.tasks){task.source={area:'공용',screen:'메모',body:'독립 문구 작업'};task.planVersion='unprepared';task.location='자동화 할 일'}
+ f.runner.config.mode='memo-board';f.runner.config.positions={queued:'자동화 할 일'};f.runner.notion.savePlan=async(id,plan)=>{Object.assign(f.tasks.find(task=>task.id===id),{request:plan.request,criteria:plan.criteria,files:plan.files.join('\n'),planVersion:'prepared'})}
  f.runner.plan=async({task})=>{if(task.id==='job-1'){await whenApplied;release()}return{decision:'execute',executionKind:'implementation',request:task.request,criteria:task.criteria,files:[task.files],verificationScripts:['verify:fixture'],reason:'실제 임시 파일'}}
  f.runner.cursor=async({root,files})=>{fs.writeFileSync(path.join(root,files[0]),'완료 '+files[0]);return{report:'완료'}}
  f.runner.verify=async(config,root)=>{if(root===f.root&&fs.readFileSync(path.join(root,'a.md'),'utf8').startsWith('완료')&&!fs.readFileSync(path.join(root,'b.md'),'utf8').startsWith('완료')){applied();await continueReview}return[{name:'read-fixture',passed:true,output:'실제 임시 파일 읽기'}]}
  const report={deployment:'development',location:'공용 → 메모',summary:'임시 문구를 정리했습니다.',changes:['임시 파일 문구를 바꿨습니다.'],howToUse:'별도 사용자 조작은 필요 없습니다.',checked:['임시 파일 문구를 확인했습니다.'],remaining:'개발 환경의 임시 검사입니다.'}
  f.runner.review=async()=>({...pass,report})
  await settle(f,2);assert.equal(f.updates.filter(u=>u.state==='완료').length,2);assert.equal(f.updates.filter(u=>u.state==='확인 필요').length,0)
+})
+
+test('a queued memo edited while isolating is replanned from its latest answer before Cursor',async t=>{
+ const f=await fixture(t,['a.md']);let isolatedOnce=false,plans=0,edits=0
+ fs.writeFileSync(path.join(f.root,'package.json'),JSON.stringify({scripts:{'verify:fixture':'node check.mjs'}}))
+ Object.assign(f.tasks[0],{location:'자동화 할 일',source:{area:'공용',screen:'메모',body:'이미지 크기 통일',answer:''},planVersion:'old-plan'})
+ f.runner.config.mode='memo-board';f.runner.config.positions={queued:'자동화 할 일'}
+ const isolate=f.runner.isolate
+ f.runner.isolate=async args=>{const result=await isolate(args);if(!isolatedOnce){isolatedOnce=true;f.tasks[0]={...f.tasks[0],version:'v2',source:{...f.tasks[0].source,answer:'아직 크기가 제각각입니다'}}}return result}
+ f.runner.notion.savePlan=async(id,plan)=>{Object.assign(f.tasks[0],{request:plan.request,criteria:plan.criteria,files:plan.files.join('\n'),planVersion:'fresh-plan'})}
+ f.runner.plan=async({task})=>{
+  plans++;assert.match(task.source.answer,/제각각/)
+  return{decision:'execute',executionKind:'implementation',request:'남은 이미지 오류를 수정',criteria:'같은 너비',files:['a.md'],verificationScripts:['verify:fixture'],reason:'최신 답변과 실제 소스 확인',feedback:{kind:'problem_reported',summary:'크기 오류를 수정 요청으로 반영'}}
+ }
+ f.runner.cursor=async({root,prompt})=>{edits++;assert.match(prompt,/남은 이미지 오류를 수정/);fs.writeFileSync(path.join(root,'a.md'),'완료');return{report:'완료'}}
+ f.runner.review=async()=>({...pass,report:{deployment:'development',location:'공용 → 메모',summary:'임시 내용을 고쳤습니다.',changes:['임시 내용 변경'],howToUse:'추가 조작이 없습니다.',checked:['파일 내용 확인'],remaining:'개발 환경 검사입니다.'}})
+ await settle(f,2)
+ assert.equal(plans,1);assert.equal(edits,1);assert.equal(f.updates.filter(u=>u.state==='확인 필요').length,0)
+ assert.equal(f.updates.filter(u=>u.state==='완료').length,1)
 })
 
 test('input feedback explains policy, actual screen checks and connection failures without raw development logs',()=>{
@@ -139,6 +158,11 @@ test('input feedback explains policy, actual screen checks and connection failur
  assert.match(screen.summary,/실제 로그인한 화면/);assert.match(screen.question,/화면·계정·결과/);assert.match(screen.question,/이미지 크기/);assert.doesNotMatch(screen.summary,/src\/|Codex/)
  const connection=needsInputFeedback(task,'명령 실패 (1): Selected model is at capacity. raw JSON')
  assert.match(connection.summary,/실행 응답/);assert.doesNotMatch(connection.summary,/raw JSON|at capacity/)
+ const answered={...task,source:{answer:'이미지 크기가 아직 다릅니다'}}
+ const repeat=needsInputFeedback(answered,'실제 로그인한 화면 검증 증거 없음')
+ assert.match(repeat.question,/같은 결과를 다시 적을 필요는 없습니다/);assert.match(repeat.question,/사이트 주소/)
+ const stale=needsInputFeedback(answered,'자동화가 최신 답변에 맞는 실행 계획을 준비하지 못했습니다')
+ assert.match(stale.summary,/작업 지시를 준비하지 못해/);assert.match(stale.question,/다시 작성할 필요가 없습니다/)
 })
 
 test('interrupted task recovery retries after a transient source lookup failure',async t=>{

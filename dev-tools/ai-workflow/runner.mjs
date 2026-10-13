@@ -52,6 +52,11 @@ ${nextPrompt ? `이전 검토에서 요구한 수정:\n${nextPrompt}` : ''}
 끝나면 변경 파일, 변경 이유, 수행한 검증, 남은 문제를 한글로 보고하세요.`
 }
 
+export function selectedJob(store, task, config) {
+  return store.job(task,{retry:config.mode==='memo-board'&&task.location===config.positions.queued
+    &&['확인 필요','오류','완료'].includes(task.state)})
+}
+
 export class Runner {
   constructor({config,notion,store,root=projectRoot,cursor=runCursor,review=runReview,verify=verification,plan=prepareMemo,refreshMap=refreshStructure,beforeImplementation,onStatus=()=>{}}) {
     Object.assign(this,{config,notion,store,root,cursor,review,verify,plan,refreshMap,beforeImplementation,onStatus});this.busy=false;this.controller=null
@@ -70,8 +75,10 @@ export class Runner {
     try {
       await this.store.flush(this.notion)
       const queue=await this.notion.queue()
-      for(const task of queue) {
-        const job=this.store.job(task)
+      for(const queuedTask of queue) {
+        const task=this.config.mode==='memo-board'?await this.notion.task(queuedTask.id):queuedTask
+        if(this.config.mode==='memo-board'&&(!task.enabled||task.state==='중지'||task.location!==this.config.positions.queued))continue
+        const job=selectedJob(this.store,task,this.config)
         if(job.phase==='done')continue
         if(job.phase!=='new') {
           await this.publish(job,{state:'확인 필요',summary:'이전 실행 기록이 있습니다. 변경 내용과 중단 원인을 확인하고 AI 요청을 갱신한 뒤 대기로 지정하세요.'});continue
@@ -92,14 +99,20 @@ export class Runner {
     },10000)
     try {
       if (this.config.mode === 'memo-board') {
+        // Queue scans and workspace isolation can take time. Generated fields
+        // are refreshed from the card immediately before investigation.
+        const latest=await this.notion.task(task.id)
+        if(!latest.enabled||latest.state==='중지')throw Object.assign(new NeedsInput('사용자가 자동 실행을 중지했습니다.'),{stopped:true})
+        if(latest.version!==task.version){job.phase='superseded';this.store.save();return}
+        task={...latest,prepared:false};job.task=task;this.store.save()
         if(!task.source?.screen||!task.source?.area)throw new NeedsInput('메모의 화면과 영역을 지정해야 연결 관계를 조사할 수 있습니다.')
         await this.assertCurrent(task)
         job.phase='planning';this.store.save()
-        await this.publish(job,{state:'구조 확인',question:'',summary:'메모의 화면·연결 기능·실제 코드를 조사합니다.'})
+        await this.publish(job,{state:'구조 확인',summary:'최신 메모·답변·이전 결과를 읽고 작업 지시를 다시 준비합니다.'})
         this.onStatus({state:'구조 확인',task:task.title})
         await this.refreshMap(this.root,signal)
         planningBaseline=await snapshot(this.root)
-        const plan=validatePlan(await this.plan({config:this.config,root:this.root,task,signal,runDir}),this.root)
+        const plan=validatePlan(await this.plan({config:this.config,root:this.root,task,signal,runDir}),this.root,task)
         if(changedPaths(planningBaseline,await snapshot(this.root)).length)throw new NeedsInput('읽기 전용 조사 중 코드가 변경되었습니다. 변경을 자동으로 되돌리지 않습니다.')
         await this.assertCurrent(task)
         if((await this.notion.task(task.id)).planVersion!==task.planVersion)throw new NeedsInput('구조 조사 중 실행 요청·완료 기준·허용 파일이 변경되었습니다.')
@@ -113,12 +126,16 @@ export class Runner {
         const ready=await this.notion.task(task.id)
         if(ready.version!==task.version||!ready.enabled)throw new NeedsInput('구조 조사 중 메모 또는 작업 선택이 변경되었습니다.')
         if(ready.request!==plan.request||ready.criteria!==plan.criteria||ready.files!==plan.files.join('\n'))throw new NeedsInput('계획 저장 직후 실행 요청·완료 기준·허용 파일이 변경되었습니다. 사용자 설정을 그대로 보존합니다.')
-        task={...ready,prepared:true,executionKind:plan.executionKind,verificationScripts:plan.verificationScripts}
+        task={...ready,prepared:true,executionKind:plan.executionKind,verificationScripts:plan.verificationScripts,feedback:plan.feedback}
         job.task=task;this.store.save()
       }
       if(!task.request.trim()||!task.criteria.trim())throw new NeedsInput('AI 요청과 AI 완료 기준을 입력하세요.')
       const files=taskFiles(task.files)
-      if(this.beforeImplementation&&await this.beforeImplementation({job,task,files,signal})===false){job.phase='waiting';this.store.save();return}
+      if(this.beforeImplementation&&await this.beforeImplementation({job,task,files,signal})===false){
+        job.phase='waiting';this.store.save()
+        if(this.config.mode==='memo-board')await this.publish(job,{state:'대기',summary:'관련 작업이 끝나기를 기다립니다. 시작 전에 최신 카드와 코드로 지시를 다시 준비합니다.'})
+        return
+      }
       const verificationOnly=task.executionKind==='verification'
       job.phase='preparing';this.store.save()
       const baseline={all:await snapshot(this.root),contents:Object.fromEntries(files.map(file=>[file,readFile(this.root,file)]))}
@@ -130,7 +147,7 @@ export class Runner {
         job.phase='cursor';this.store.save()
         const prompt=workerPrompt(task,files,mapContext(files,this.root),nextPrompt,this.root)
         fs.writeFileSync(path.join(runDir,`prompt-${attempt}.txt`),prompt)
-        await this.publish(job,{state:attempt===1?'작업 중':'수정 중',progress:'진행 중',attempt,summary:`Cursor ${attempt}회차 작업`,note:prompt})
+        await this.publish(job,{state:attempt===1?'작업 중':'수정 중',progress:'진행 중',attempt,question:'',summary:`Cursor ${attempt}회차 작업`,note:prompt})
         await this.assertCurrent(task)
         this.onStatus({state:'작업 중',task:task.title,attempt})
         const cursor=await this.cursor({config:this.config,root:this.root,files:verificationOnly?[]:files,prompt,signal,onEvent:event=>{
