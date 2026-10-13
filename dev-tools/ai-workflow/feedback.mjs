@@ -3,7 +3,10 @@ const readable=value=>String(value??'').replace(/`[^`]+`/g,'관련 기능').repl
 export function needsInputFeedback(task,message,explicitQuestion='') {
   const raw=String(message??''),title=String(task.title??'이 작업').slice(0,300)
   let reason,question
-  if(/최신.*(?:답변|사용자 답변).*(?:계획|조사 결과)|검증 전용으로 되돌리는 계획/.test(raw)){
+  if(/Codex.*(?:구독|API 키|과금)/.test(raw)){
+    reason='추가 API 과금을 막기 위해 구독 계정 로그인 확인에서 멈췄어요.'
+    question=explicitQuestion||'내 답변을 다시 적을 필요는 없습니다. 실행기가 있는 작업장에서 Codex를 ChatGPT 구독 계정으로 로그인한 뒤 이어서 진행해야 합니다. API 키로 전환하거나 유료 크레딧을 구매하지 않습니다.'
+  }else if(/최신.*(?:답변|사용자 답변).*(?:계획|조사 결과)|검증 전용으로 되돌리는 계획/.test(raw)){
     reason='자동화가 저장된 답변에 맞는 작업 지시를 준비하지 못해 멈췄어요.'
     question=explicitQuestion||'내 답변은 저장되어 있어 다시 작성할 필요가 없습니다. 자동화의 지시 준비 단계를 확인한 뒤 다시 진행해야 합니다.'
   }else if(/면제|직책|회사\s*정책|출.?퇴근.*기준|정책.*미정/.test(raw)){
