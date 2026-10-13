@@ -3,6 +3,7 @@ import path from 'node:path'
 import { runCommand } from './process.mjs'
 import { toolDir, redact } from './settings.mjs'
 import { validateCompletionReport } from './report.mjs'
+import { requireSubscriptionLogin, subscriptionCommand } from './codex-subscription.mjs'
 
 export function validateReview(value, {requireReport=false} = {}) {
   if (!value || !['pass', 'revise', 'needs_input'].includes(value.decision) || typeof value.summary !== 'string' || !Array.isArray(value.issues) || !Array.isArray(value.criteriaResults) || typeof value.nextPrompt !== 'string') throw new Error('검토 결과 형식이 잘못되었습니다.')
@@ -12,7 +13,8 @@ export function validateReview(value, {requireReport=false} = {}) {
   return value
 }
 
-export async function runReview({ config, root, task, evidence, checks, cursor, runDir, signal }) {
+export async function runReview({ config, root, task, evidence, checks, cursor, runDir, signal, run=runCommand }) {
+  await requireSubscriptionLogin(config,{root,signal,run})
   const outputFile = path.join(runDir, 'review.json')
   const context=JSON.stringify({ task, changes: evidence.changes, checks, cursorReport: cursor.report })
   if(context.length>180000)throw new Error('검토 자료가 너무 큽니다. 업무와 허용 파일 범위를 줄여야 합니다. 자료를 잘라서 합격 판정하지 않습니다.')
@@ -25,6 +27,7 @@ pass일 때 report에 비전공자용 한국어 완료 보고서를 작성하세
 report.deployment는 구현 작업이면 development, 파일 편집 없는 검증 전용이면 verification입니다. 이 실행에서는 운영 사이트에 게시하지 않았습니다.
 ${context}
 주어진 JSON 스키마로 판정하세요.`
-  await runCommand(config.env.ATELIER_CODEX_BIN ?? 'codex', ['exec', '--sandbox', 'read-only', '--json', '--output-schema', path.join(toolDir,'review.schema.json'), '-o', outputFile, '-'], { cwd: root, input: prompt, timeoutMs: config.agentTimeoutMs, signal })
+  const cli=subscriptionCommand(config,['exec', '--sandbox', 'read-only', '--json', '--output-schema', path.join(toolDir,'review.schema.json'), '-o', outputFile, '-'])
+  await run(cli.command,cli.args,{cwd:root,input:prompt,timeoutMs:config.agentTimeoutMs,signal})
   return validateReview(JSON.parse(redact(fs.readFileSync(outputFile,'utf8'), config.env)), {requireReport:config.mode==='memo-board'})
 }

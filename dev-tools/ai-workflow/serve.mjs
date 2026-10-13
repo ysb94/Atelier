@@ -14,7 +14,7 @@ export async function startManager() {
   const server=http.createServer((request,response)=>{
     if(request.method!=='GET'||!['/','/health'].includes(request.url)){response.writeHead(404);response.end();return}
     response.setHeader('Cache-Control','no-store');response.setHeader('Content-Type','application/json; charset=utf-8')
-    response.end(JSON.stringify({tool:'atelier-ai-workflow',root:projectRoot,watch:true,...status},null,2))
+    response.end(JSON.stringify({tool:'atelier-ai-workflow',root:projectRoot,watch:true,codexBillingPolicy:'chatgpt-subscription-only',...status},null,2))
   })
   const tick=async()=>{
     if(stopping||ticking)return;ticking=true
