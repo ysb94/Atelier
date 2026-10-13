@@ -17,7 +17,10 @@ for (const owner of WORK_REQUEST_OWNERS) {
 assert.deepEqual(pagePreviewCases('/drafts', real).map(item => canViewDraftsByOwner(item.settings)), [true, false])
 assert.deepEqual(pagePreviewCases('/operations-support', real).map(item => canEditOrgAssignment(item.settings)), [true, false, false])
 assert.deepEqual(pagePreviewCases('/operations-support', real).map(item => canAccessOperationsSupport(item.settings)), [true, false, true])
-for (const path of ['/org-chart', '/work', '/products', '/drafts/new', '/design/styled-cuts']) {
+assert.deepEqual(pagePreviewCases('/work', real).map(item => item.id), ['employee', 'manager', 'unassigned'])
+assert.equal(pagePreviewCases('/work', real)[1].settings.position, '팀장')
+assert.equal(pagePreviewCases('/work', real)[2].settings.departmentName, null)
+for (const path of ['/org-chart', '/products', '/drafts/new', '/design/styled-cuts']) {
   assert.equal(pagePreviewCases(path, real).length, 0, `${path}: 역할 분기 없음`)
 }
 assert.equal(pagePreviewCases('/drafts/', real).length, 2)
