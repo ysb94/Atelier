@@ -5,9 +5,10 @@ import type {
   ProductDraft,
   ProductDraftInput,
 } from '@/lib/types'
+import { normalizeColorSpecs } from '@/lib/drafts/color-spec'
 import { emptyDraftInput } from '@/lib/drafts/empty-draft'
 import { normalizeDraftBrandId, parseDraftNo } from '@/lib/drafts/company-draft'
-import { sanitizeColorWorkOrder } from '@/lib/drafts/draft-flow'
+import { sanitizeColorWorkOrder, normalizeColorSampleRounds } from '@/lib/drafts/draft-flow'
 import {
   isSamplePassed,
   legacyWorkOrderFields,
@@ -202,6 +203,15 @@ function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined) {
       note: spec?.note ?? '',
     }
   }
+  base.colorSpecs = normalizeColorSpecs(raw?.colorSpecs)
+  base.nameConfirmed = Boolean(raw?.nameConfirmed)
+  base.colorsConfirmed = Boolean(raw?.colorsConfirmed)
+  base.colorNamesConfirmed = Boolean(raw?.colorNamesConfirmed)
+  base.colorSampleRequestedAt =
+    typeof raw?.colorSampleRequestedAt === 'string' && raw.colorSampleRequestedAt.trim()
+      ? raw.colorSampleRequestedAt
+      : null
+  base.colorSampleRounds = normalizeColorSampleRounds(raw?.colorSampleRounds)
   return base
 }
 

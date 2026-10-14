@@ -28,8 +28,8 @@ type DraftReleaseScheduleDialogProps = {
   groups: PreviewReleaseGroup[]
   initial: ResolvedReleaseSchedule | null
   onClose: () => void
-  onApply: (value: ReleaseScheduleApplyValue) => void
-  onClear: () => void
+  onApply: (value: ReleaseScheduleApplyValue) => void | Promise<void>
+  onClear: () => void | Promise<void>
 }
 
 const NEW_GROUP_VALUE = '__new__'
@@ -47,6 +47,8 @@ export function DraftReleaseScheduleDialog({
 }: DraftReleaseScheduleDialogProps) {
   const titleId = useId()
   const lastFocusRef = useRef<HTMLElement | null>(null)
+  const wasOpenRef = useRef(false)
+  const savingRef = useRef(false)
   const [brandId, setBrandId] = useState('')
   const [groupId, setGroupId] = useState('')
   const [newName, setNewName] = useState('')
@@ -54,6 +56,7 @@ export function DraftReleaseScheduleDialog({
   const [targetDate, setTargetDate] = useState('')
   const [certainty, setCertainty] = useState<ReleaseCertainty>('tentative')
   const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
   const brandGroups = useMemo(
     () => groups.filter((group) => group.brandId === brandId),
@@ -61,7 +64,12 @@ export function DraftReleaseScheduleDialog({
   )
 
   useEffect(() => {
-    if (!open) return
+    if (!open) {
+      wasOpenRef.current = false
+      return
+    }
+    if (wasOpenRef.current) return
+    wasOpenRef.current = true
     const active = document.activeElement
     if (active instanceof HTMLElement) lastFocusRef.current = active
     setBrandId(initial?.brandId ?? draft?.brandId ?? '')
@@ -101,42 +109,79 @@ export function DraftReleaseScheduleDialog({
     onClose()
   }
 
-  function apply() {
+  async function apply() {
+    if (savingRef.current) return
     if (!brandId) {
       setError('브랜드를 먼저 고르세요.')
       return
     }
-    if (groupId === NEW_GROUP_VALUE) {
-      if (!newName.trim()) {
-        setError('새 출시 묶음 이름을 입력하세요.')
-        return
-      }
-      onApply({
-        brandId,
-        group: {
-          id: newTempGroupId(),
-          brandId,
-          name: newName.trim(),
-          releaseTiming: newTiming.trim(),
-        },
-        targetDate: targetDate || null,
-        certainty,
-      })
+    const next: ReleaseScheduleApplyValue | null =
+      groupId === NEW_GROUP_VALUE
+        ? newName.trim()
+          ? {
+              brandId,
+              group: {
+                id: newTempGroupId(),
+                brandId,
+                name: newName.trim(),
+                releaseTiming: newTiming.trim(),
+              },
+              targetDate: targetDate || null,
+              certainty,
+            }
+          : null
+        : (() => {
+            const group = brandGroups.find((item) => item.id === groupId)
+            if (!group) return null
+            return {
+              brandId,
+              group,
+              targetDate: targetDate || null,
+              certainty,
+            }
+          })()
+    if (!next) {
+      setError(
+        groupId === NEW_GROUP_VALUE
+          ? '새 출시 묶음 이름을 입력하세요.'
+          : '출시 묶음을 고르거나 새로 만드세요.',
+      )
+      return
+    }
+    savingRef.current = true
+    setSaving(true)
+    setError(null)
+    try {
+      await onApply(next)
       restoreFocus()
-      return
+    } catch (err) {
+      console.warn('[drafts] 출시 일정 저장 실패', {
+        message: err instanceof Error ? err.message : String(err),
+      })
+      setError(err instanceof Error ? err.message : '일정을 저장하지 못했습니다.')
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
-    const group = brandGroups.find((item) => item.id === groupId)
-    if (!group) {
-      setError('출시 묶음을 고르거나 새로 만드세요.')
-      return
+  }
+
+  async function clear() {
+    if (savingRef.current) return
+    savingRef.current = true
+    setSaving(true)
+    setError(null)
+    try {
+      await onClear()
+      restoreFocus()
+    } catch (err) {
+      console.warn('[drafts] 출시 일정 해제 실패', {
+        message: err instanceof Error ? err.message : String(err),
+      })
+      setError(err instanceof Error ? err.message : '일정을 해제하지 못했습니다.')
+    } finally {
+      savingRef.current = false
+      setSaving(false)
     }
-    onApply({
-      brandId,
-      group,
-      targetDate: targetDate || null,
-      certainty,
-    })
-    restoreFocus()
   }
 
   if (!open || !draft) return null
@@ -164,7 +209,7 @@ export function DraftReleaseScheduleDialog({
               {draftLabel}
             </p>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              UI 미리보기 · 저장되지 않음
+              출시 기획과 브랜드가 기획안에 저장됩니다. 목표일과 확정 여부는 아직 저장되지 않습니다.
             </p>
           </div>
           <Button
@@ -279,18 +324,18 @@ export function DraftReleaseScheduleDialog({
           <Button
             type="button"
             variant="ghost"
+            disabled={saving}
             onClick={() => {
-              restoreFocus()
-              onClear()
+              void clear()
             }}
           >
             일정 해제
           </Button>
-          <Button type="button" variant="outline" onClick={close}>
+          <Button type="button" variant="outline" disabled={saving} onClick={close}>
             취소
           </Button>
-          <Button type="button" onClick={apply}>
-            미리 반영
+          <Button type="button" disabled={saving} onClick={() => void apply()}>
+            {saving ? '저장 중' : '저장'}
           </Button>
         </div>
       </div>

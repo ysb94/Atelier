@@ -8,6 +8,10 @@ import {
   filledColorWorkOrders,
   isColorSampleOrdered,
   isColorSampleReadyForPhoto,
+  markLatestColorSampleReturned,
+  passLatestColorSampleRound,
+  requestNextColorSampleRound,
+  resolveColorSampleRounds,
   sanitizeColorWorkOrder,
   setColorWorkOrderShipped,
   startColorSamples,
@@ -76,5 +80,19 @@ assert(
   setColorWorkOrderShipped(shipped, 'c3', false)[0]?.sampleWorkOrderShipped === false,
   '발송을 되돌릴 수 있다',
 )
+
+const legacyRounds = resolveColorSampleRounds({
+  specs: { colorSampleRequestedAt: '2026-10-14T00:00:00.000Z', colorSampleRounds: [] },
+  colors: [withFile],
+})
+assert(legacyRounds.length === 1 && legacyRounds[0]?.round === 1, '파일이 있으면 1차로 본다')
+const returned = markLatestColorSampleReturned(legacyRounds, '2026-10-14T03:00:00.000Z')
+assert(returned[0]?.returnedAt === '2026-10-14T03:00:00.000Z', '회신일을 최신 차수에 남긴다')
+const passed = passLatestColorSampleRound(returned)
+assert(passed[0]?.passed === true, '돌아온 컬러 샘플만 합격한다')
+const again = requestNextColorSampleRound(returned, '2026-10-15T00:00:00.000Z')
+assert(again.length === 2 && again[1]?.round === 2, '같은 파일로 2차를 연다')
+assert(again[1]?.returnedAt === null && again[0]?.returnedAt, '이전 차수 회신일은 남긴다')
+assert(passLatestColorSampleRound(again)[1]?.passed !== true, '회신 전 차수는 합격하지 않는다')
 
 console.log('draft-flow.verify ok')

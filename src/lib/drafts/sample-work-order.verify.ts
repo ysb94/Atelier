@@ -4,6 +4,7 @@
  */
 import {
   addNextSampleWorkOrder,
+  attachSampleWorkOrderFile,
   canAddNextSampleWorkOrder,
   canPassLatestSampleWorkOrder,
   draftHasSampleWorkOrder,
@@ -12,6 +13,7 @@ import {
   legacyWorkOrderFields,
   normalizeSampleWorkOrders,
   previousSampleFailReason,
+  requestNextSampleRound,
   samplePhase,
   samplePhaseLabel,
   sampleWorkOrderLabel,
@@ -27,6 +29,20 @@ function assert(condition: unknown, message: string): asserts condition {
 }
 
 assert(sampleWorkOrderLabel(2) === '2차', '차수 라벨')
+
+const attached = attachSampleWorkOrderFile(
+  [],
+  { url: 'data:file,attached', name: 'attached.xlsx' },
+  '2026-05-27T00:00:00.000Z',
+)
+assert(
+  attached[0]?.url === 'data:file,attached' &&
+    attached[0]?.name === 'attached.xlsx' &&
+    attached[0]?.shipped === false &&
+    attached[0]?.shippedAt === '2026-05-27T00:00:00.000Z' &&
+    attached[0]?.returnedAt == null,
+  '업로드하면 요청일을 남기고 반송일은 비운다',
+)
 
 const first = normalizeSampleWorkOrders(null, 'data:file,a', 'a.xlsx')
 assert(first.length === 1 && first[0]?.url === 'data:file,a', '예전 1차 파일을 차수로 옮긴다')
@@ -77,7 +93,7 @@ assert(
 
 const both = sanitizeSampleWorkOrders([
   ...shipped,
-  { id: 'swo-2', round: 2, url: 'data:file,b', name: 'b.xlsx', shipped: false, shippedAt: null, passed: false, passedAt: null, failReason: '' },
+  { id: 'swo-2', round: 2, url: 'data:file,b', name: 'b.xlsx', shipped: false, shippedAt: null, returnedAt: null, passed: false, passedAt: null, failReason: '', assigneeId: null, assigneeName: '', fileCheckedAt: null },
 ])
 assert(both.length === 2 && both[1]?.round === 2, '2차까지 저장한다')
 assert(legacyWorkOrderFields(both).sampleWorkOrderName === 'b.xlsx', '레거시 필드는 최신 차수')
@@ -89,6 +105,69 @@ assert(samplePhaseLabel(both) === '2차 샘플 진행중', '2차 진행 라벨')
 assert(
   setSampleWorkOrderShipped(both, 'swo-2', true)[1]?.shipped === true,
   '특정 행만 발송 완료한다',
+)
+
+const pendingWithUploadDate = sanitizeSampleWorkOrders([
+  {
+    id: 'swo-upload',
+    round: 1,
+    url: 'data:file,old',
+    name: 'old.xlsx',
+    shipped: false,
+    shippedAt: '2026-09-08T00:00:00.000Z',
+    returnedAt: null,
+    passed: false,
+    passedAt: null,
+    failReason: '',
+    assigneeId: null,
+    assigneeName: '',
+    fileCheckedAt: null,
+  },
+])
+const marked = setSampleWorkOrderShipped(
+  pendingWithUploadDate,
+  'swo-upload',
+  true,
+  '2026-10-14T10:08:00.000Z',
+)
+assert(
+  marked[0]?.shipped === true &&
+    marked[0]?.shippedAt === '2026-09-08T00:00:00.000Z' &&
+    marked[0]?.returnedAt === '2026-10-14T10:08:00.000Z',
+  '발송 완료는 요청일을 유지하고 반송일만 기록한다',
+)
+const kept = setSampleWorkOrderShipped(
+  marked,
+  'swo-upload',
+  true,
+  '2026-10-15T00:00:00.000Z',
+)
+assert(
+  kept[0]?.shippedAt === '2026-09-08T00:00:00.000Z' &&
+    kept[0]?.returnedAt === '2026-10-14T10:08:00.000Z',
+  '이미 기록한 요청일과 반송일은 유지한다',
+)
+const legacyShipped = sanitizeSampleWorkOrders([
+  {
+    id: 'swo-legacy',
+    round: 1,
+    url: 'data:file,legacy',
+    name: 'legacy.xlsx',
+    shipped: true,
+    shippedAt: '2026-09-08T00:00:00.000Z',
+    returnedAt: null,
+    passed: false,
+    passedAt: null,
+    failReason: '',
+    assigneeId: null,
+    assigneeName: '',
+    fileCheckedAt: null,
+  },
+])
+assert(
+  legacyShipped[0]?.shippedAt === '2026-09-08T00:00:00.000Z' &&
+    legacyShipped[0]?.returnedAt == null,
+  '반송일이 없는 예전 기록에는 반송일을 만들지 않는다',
 )
 
 assert(draftHasSampleWorkOrder({ sampleWorkOrders: both }), '차수가 있으면 목록에 넣는다')
@@ -103,6 +182,36 @@ assert(
 assert(
   !draftHasSampleWorkOrder({ sampleWorkOrders: [], sampleWorkOrderUrl: '' }),
   '없으면 목록에서 뺀다',
+)
+
+const rerequested = requestNextSampleRound(
+  [
+    {
+      id: 'swo-back',
+      round: 1,
+      url: 'data:file,same',
+      name: 'same.xlsx',
+      shipped: true,
+      shippedAt: '2026-10-14T08:00:00.000Z',
+      returnedAt: '2026-10-14T10:00:00.000Z',
+      passed: false,
+      passedAt: null,
+      failReason: '',
+      assigneeId: 'staff-1',
+      assigneeName: '중국담당',
+      fileCheckedAt: '2026-10-14T09:00:00.000Z',
+    },
+  ],
+  '2026-10-14T11:00:00.000Z',
+)
+assert(rerequested.length === 2 && rerequested[1]?.round === 2, '재요청은 2차로 넘긴다')
+assert(
+  rerequested[1]?.url === 'data:file,same' &&
+    rerequested[1]?.name === 'same.xlsx' &&
+    rerequested[1]?.shippedAt === '2026-10-14T11:00:00.000Z' &&
+    rerequested[1]?.returnedAt == null &&
+    rerequested[0]?.returnedAt === '2026-10-14T10:00:00.000Z',
+  '재요청은 같은 작업지시서를 유지하고 새 요청일만 연다',
 )
 
 console.log('sample-work-order.verify ok')
