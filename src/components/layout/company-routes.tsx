@@ -236,9 +236,9 @@ export const companyWorkspaceRoutes = (
       <Route path="import" element={<RedirectTo to="/data/upload" />} />
       <Route
         path="planning"
-        element={<RedirectTo to="/product-work/planning" />}
+        element={<RedirectTo to="/products" />}
       />
-      <Route path="design" element={<RedirectTo to="/product-work/design" />} />
+      <Route path="design" element={<RedirectTo to="/products" />} />
       <Route path="md/price-compare" element={<PriceComparePage />} />
       <Route path="md" element={<RedirectTo to="/product-work/md" />} />
       <Route

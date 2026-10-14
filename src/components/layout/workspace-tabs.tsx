@@ -47,8 +47,6 @@ const NAV_LABELS: {
   { match: /^\/work-requests\/md(?:\/|$)/, label: 'MD · 작업 요청' },
   { match: /^\/work-requests\/logistics(?:\/|$)/, label: '물류 · 작업 요청' },
   { match: /^\/work(?:\/|$)/, label: '내 업무' },
-  { match: /^\/product-work\/planning(?:\/|$)/, label: '기획 · 상품 정보' },
-  { match: /^\/product-work\/design(?:\/|$)/, label: '디자인 · 상품 정보' },
   { match: /^\/design\/styled-cuts(?:\/|$)/, label: '디자인 · 연출 컷 제작' },
   { match: /^\/design\/file-manager(?:\/|$)/, label: '디자인 · 이미지 업로드' },
   { match: /^\/product-work\/md(?:\/|$)/, label: 'MD · 상품 정보' },
@@ -135,14 +133,24 @@ function labelFromPath(path: string): string {
   return '화면'
 }
 
+function isRemovedProductInfoPath(pathname: string): boolean {
+  return (
+    /^\/product-work\/(?:planning|design)(?:\/|$)/.test(pathname) ||
+    /^\/(?:planning|design)\/?$/.test(pathname)
+  )
+}
+
 export function resolveWorkspaceTab(
   location: Pick<Location, 'pathname' | 'search'>,
 ): WorkspaceTab | null {
   if (location.pathname.startsWith('/b/')) return null
+  const pathname = isRemovedProductInfoPath(location.pathname)
+    ? '/products'
+    : location.pathname
   return {
-    id: tabIdFromPath(location.pathname),
-    label: labelFromPath(location.pathname),
-    pathname: location.pathname,
+    id: tabIdFromPath(pathname),
+    label: labelFromPath(pathname),
+    pathname,
     search: location.search,
   }
 }
@@ -179,34 +187,45 @@ export function useWorkspaceTabs() {
   )
 
   useLayoutEffect(() => {
+    if (isRemovedProductInfoPath(pathname)) {
+      navigate({ pathname: '/products', search }, { replace: true })
+    }
     if (!active) return
     if (closingTabRef.current === active.id) return
     closingTabRef.current = null
     setTabs((prev) => {
-      const index = prev.findIndex((tab) => tab.id === active.id)
-      if (index === -1) return [...prev, active]
-      const current = prev[index]
+      const removed = prev.some((tab) => isRemovedProductInfoPath(tab.pathname))
+      const kept = removed
+        ? prev.filter((tab) => !isRemovedProductInfoPath(tab.pathname))
+        : prev
+      const index = kept.findIndex((tab) => tab.id === active.id)
+      if (index === -1) return [...kept, active]
+      const current = kept[index]
       if (
         current.pathname === active.pathname &&
         current.search === active.search &&
         current.label === active.label
       ) {
-        return prev
+        return removed ? kept : prev
       }
-      const next = [...prev]
+      const next = [...kept]
       next[index] = active
       return next
     })
-  }, [active])
+  }, [active, navigate, pathname, search])
 
   const activeId = active?.id ?? 'home'
   const closingActive = active?.id === closingTabRef.current
   const displayTabs = useMemo(() => {
-    if (active && !closingActive && !tabs.some((tab) => tab.id === active.id)) {
-      return [...tabs, active]
+    const hasRemoved = tabs.some((tab) => isRemovedProductInfoPath(tab.pathname))
+    const source = hasRemoved
+      ? tabs.filter((tab) => !isRemovedProductInfoPath(tab.pathname))
+      : tabs
+    if (active && !closingActive && !source.some((tab) => tab.id === active.id)) {
+      return [...source, active]
     }
     let changed = false
-    const next = tabs.map((tab) => {
+    const next = source.map((tab) => {
       if (!active || tab.id !== active.id) return tab
       if (
         tab.pathname === active.pathname &&
@@ -223,7 +242,7 @@ export function useWorkspaceTabs() {
         label: active.label,
       }
     })
-    return changed ? next : tabs
+    return changed ? next : source
   }, [active, closingActive, tabs])
 
   const openTab = useCallback(

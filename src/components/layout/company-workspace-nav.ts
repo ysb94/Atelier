@@ -21,7 +21,6 @@ import {
   ListChecks,
   Network,
   PackagePlus,
-  Palette,
   PenLine,
   ScanBarcode,
   Search,
@@ -74,14 +73,12 @@ export const companyNavGroups: CompanyNavGroup[] = [
     title: '기획',
     items: [
       { to: '/drafts', label: '기획안', icon: Lightbulb },
-      { to: '/product-work/planning', label: '상품 정보', icon: PenLine },
       { to: '/work-requests/planning', label: '작업 요청', icon: ClipboardList },
     ],
   },
   {
     title: '디자인',
     items: [
-      { to: '/product-work/design', label: '상품 정보', icon: Palette },
       { to: '/work-requests/design', label: '작업 요청', icon: ClipboardList },
       { to: '/design/styled-cuts', label: '연출 컷 제작', icon: Camera },
       { to: '/design/file-manager', label: '이미지 업로드', icon: Images },
