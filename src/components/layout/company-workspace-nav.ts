@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { canAccessOperationsSupport, canManagePersonnel, isCompanyReviewer } from '../../lib/company/capabilities.ts'
+import { canAccessBrandManagement, canAccessOperationsSupport, canManagePersonnel, isCompanyReviewer } from '../../lib/company/capabilities.ts'
 import {
   Boxes,
   Building2,
@@ -169,11 +169,18 @@ export function companyNavGroupsForProfile(
 ) {
   const showOperationsSupport = canAccessOperationsSupport(profile)
   const showMembers = canManagePersonnel(profile) || isCompanyReviewer(profile)
+  const showBrandManagement = canAccessBrandManagement(profile)
   return companyNavGroups
     .filter(group => showOperationsSupport || !group.items.some(item => item.to === '/operations-support'))
-    .map(group => group.title === '회사' && showMembers
-      ? { ...group, items: [...group.items, membersNavItem] }
-      : group)
+    .map(group => {
+      const items = showBrandManagement || !group.items.some(item => item.to === '/brands')
+        ? group.items
+        : group.items.filter(item => item.to !== '/brands')
+      if (group.title === '회사' && showMembers) {
+        return { ...group, items: [...items, membersNavItem] }
+      }
+      return items === group.items ? group : { ...group, items }
+    })
 }
 
 export function companyNavItemActive(to: string, pathname: string, end?: boolean) {

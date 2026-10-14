@@ -25,13 +25,43 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { isBrandLead, useAuth } from '@/lib/supabase/auth'
+import { canAccessBrandManagement } from '@/lib/company/capabilities'
+import { useRenderWatch } from '@/lib/diagnostics'
+import { emptyList } from '@/lib/utils'
 
 export function BrandSelectPage() {
+  useRenderWatch('BrandSelectPage')
+  const { profile } = useAuth()
+  if (!canAccessBrandManagement(profile)) {
+    return (
+      <div>
+        <Link
+          to="/"
+          className="mb-3 inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <ChevronLeft className="size-3.5" />
+          E&J 홈
+        </Link>
+        <Card>
+          <CardHeader>
+            <CardTitle>브랜드 관리</CardTitle>
+            <CardDescription>
+              브랜드 관리는 대표이사와 개발자만 볼 수 있습니다.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      </div>
+    )
+  }
+  return <BrandSelectPageContent />
+}
+
+function BrandSelectPageContent() {
   const queryClient = useQueryClient()
   const { email, profile, signOut } = useAuth()
   const isAdmin = Boolean(profile?.isAdmin)
   const {
-    data: brands = [],
+    data,
     isLoading,
     isError,
     error,
@@ -39,6 +69,7 @@ export function BrandSelectPage() {
     queryKey: ['brands'],
     queryFn: getBrands,
   })
+  const brands = data ?? emptyList<Brand>()
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [dialogMode, setDialogMode] = useState<'create' | 'edit'>('create')

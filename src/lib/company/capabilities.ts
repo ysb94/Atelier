@@ -100,6 +100,17 @@ export function isCompanyReviewer(profile: CapabilityProfile | null) {
   return isApprovedCompanyMember(profile) && profile?.position === '대표이사'
 }
 
+/** 브랜드 관리 화면 열람. 활성 대표이사 또는 개발자 계정만 해당하며 저장 권한은 주지 않는다. */
+export function canAccessBrandManagement(
+  profile: (CapabilityProfile & { email?: string | null }) | null,
+) {
+  if (!isApprovedCompanyMember(profile)) return false
+  return (
+    isCompanyReviewer(profile) ||
+    profile?.email?.trim().toLowerCase() === ORG_ASSIGNMENT_EDITOR_EMAIL
+  )
+}
+
 export function isAttendanceExemptPosition(position?: string | null) {
   const normalized = position?.trim()
   return Boolean(normalized && ATTENDANCE_EXEMPT_POSITIONS.includes(normalized))
