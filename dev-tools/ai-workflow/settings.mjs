@@ -26,6 +26,7 @@ export function settings() {
 
 function validateV2(config) {
   const v2=config.v2,text=value=>typeof value==='string'&&value.trim().length>0
+  if(v2.sourceReader?.enabled)for(const [key,max] of [['chunkChars',10000],['totalChars',160000],['maxCalls',40]])if(!Number.isInteger(v2.sourceReader[key])||v2.sourceReader[key]<1||v2.sourceReader[key]>max)throw new Error(`읽기 수집기 ${key}는 1~${max}이어야 합니다.`)
   if(v2.cursorPull?.enabled&&(!text(config.positions.preparing)||!Number.isInteger(v2.cursorPull.pollMs)||v2.cursorPull.pollMs<5000))throw new Error('Cursor 목록 조회에는 GPT 준비 위치와 5초 이상의 pollMs가 필요합니다.')
   if (v2.pipeline?.enabled) {
     if(v2.pipeline.gptWorkers!==undefined&&(!Number.isInteger(v2.pipeline.gptWorkers)||v2.pipeline.gptWorkers<1||v2.pipeline.gptWorkers>2))throw new Error('GPT 공용 실행 자리는 1~2개여야 합니다.')

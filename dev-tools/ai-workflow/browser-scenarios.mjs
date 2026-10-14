@@ -159,8 +159,76 @@ async function attendanceScenario({page,origin}) {
   }
   return {checked}
 }
+async function navigationScenario({page,origin}) {
+  const query='?fixture=navigation&position='+encodeURIComponent('대표이사')+'&brand=fixture&probe=keep'
+  await page.goto(origin+'/products'+query)
+  await page.getByText('검증 직원',{exact:false}).first().waitFor()
+  for(const title of ['기획','디자인']) {
+    const button=page.locator('nav').getByRole('button',{name:title,exact:true})
+    await button.click()
+  }
+  const links=await page.locator('nav a').evaluateAll(items=>items.map(item=>({text:item.textContent,href:item.getAttribute('href')})))
+  assert.ok(links.some(item=>item.href?.includes('/work-requests/planning')),'Planning work requests missing')
+  assert.ok(links.some(item=>item.href?.includes('/work-requests/design')),'Design work requests missing')
+  assert.ok(!links.some(item=>/^\/(?:product-work\/(?:planning|design)|planning|design)$/.test(item.href??'')),'Removed product menu remains')
+  const routes=['/product-work/planning','/product-work/design','/product-work/planning/fixture-item','/product-work/design/fixture-item','/planning','/design','/b/fixture/work/planning','/b/fixture/work/design','/b/fixture/planning','/b/fixture/design']
+  const redirects=[]
+  for(const route of routes){
+    await page.goto(origin+route+query)
+    await page.waitForURL(url=>url.pathname==='/products')
+    assert.equal(new URL(page.url()).searchParams.get('probe'),'keep','Search parameters lost')
+    redirects.push({from:route,to:new URL(page.url()).pathname,searchPreserved:true})
+  }
+  await page.goto(origin+'/__brand-home'+query)
+  await page.getByText('검증 브랜드',{exact:true}).first().waitFor()
+  const shortcuts=await page.locator('a').evaluateAll(items=>items.map(item=>({text:item.textContent,href:item.getAttribute('href')})))
+  assert.ok(!shortcuts.some(item=>/\/(?:work\/(?:planning|design)|product-work\/(?:planning|design))$/.test(item.href??'')),'Removed brand shortcut remains')
+  return {links,redirects,shortcuts,checked:['Actual company navigation','Actual company and legacy brand route redirects','Query preservation','Actual brand home shortcuts']}
+}
+async function brandAccessScenario({page,origin}) {
+  const checked=[]
+  for(const [position,email,allowed,admin,status] of [['대표이사','fixture@example.invalid',true,false,'active'],['사원','dev@atelier.local',true,false,'active'],['팀장','fixture@example.invalid',false,true,'active'],['사원','fixture@example.invalid',false,false,'active'],['대표이사','fixture@example.invalid',false,false,'pending']]){
+    const query='?'+new URLSearchParams({fixture:'brand-access',position,email,admin:String(admin),status})
+    await page.goto(origin+'/__brand-management'+query)
+    if(allowed)await page.getByText('검증 브랜드',{exact:true}).first().waitFor()
+    else{await page.getByText('브랜드 관리는 대표이사와 개발자만 볼 수 있습니다.',{exact:true}).waitFor();assert.equal(await page.getByText('검증 브랜드',{exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:/브랜드 추가|브랜드 생성/}).count(),0)}
+    const observers=await page.evaluate(()=>window.__brandQueryObservers());assert.equal(observers,allowed?1:0,'Restricted management query hook mounted')
+    await page.goto(origin+'/brands'+query)
+    const expand=page.getByRole('button',{name:'사이드바 펼치기',exact:true});if(await expand.isVisible())await expand.click()
+    const settings=page.locator('nav').getByRole('button',{name:'설정',exact:true});if(await settings.getAttribute('aria-expanded')!=='true')await settings.click()
+    assert.equal(await page.locator('nav a[href="/brands"]').count(),allowed?1:0)
+    await page.getByRole('button',{name:'사이드바 접기',exact:true}).click()
+    assert.equal(await page.locator('nav a[href="/brands"]').count(),allowed?1:0)
+    const reads=await page.evaluate(()=>window.__atelierFixtureReads??[])
+    if(!allowed)assert.ok(!reads.includes('brands'),'Restricted brand management fetched brands')
+    checked.push({position,email,admin,status,allowed,expandedAndCollapsed:true,queryObservers:observers,reads})
+  }
+  return {checked,note:'Synthetic profiles; permissions and actual components tested without live authentication.'}
+}
+async function attachmentScenario({page,origin}) {
+  await openForm(page,origin);await fillForm(page,'본문 파일 선택 검증')
+  const body=page.locator('form .min-h-72'),encoded=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=800;c.height=600;return c.toDataURL('image/png').split(',')[1]})
+  const png=name=>({name,mimeType:'image/png',buffer:Buffer.from(encoded,'base64')})
+  await page.locator('input[type=file]').setInputFiles([png('ordered-a.png'),{name:'ordered-b.txt',mimeType:'text/plain',buffer:Buffer.from('fixture')},{name:'ordered-c.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from('fixture')}])
+  await body.getByRole('img',{name:'ordered-a.png',exact:true}).waitFor();await body.getByText('ordered-c.xlsx',{exact:true}).waitFor()
+  const nodes=await Promise.all([body.getByRole('img',{name:'ordered-a.png',exact:true}).elementHandle(),body.getByText('ordered-b.txt',{exact:true}).elementHandle(),body.getByText('ordered-c.xlsx',{exact:true}).elementHandle()])
+  assert.equal(await page.evaluate(([a,b,c])=>!!(a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING)&&!!(b.compareDocumentPosition(c)&Node.DOCUMENT_POSITION_FOLLOWING),nodes),true,'File selection order changed')
+  const picker=page.locator('input[type=file]').locator('..');assert.equal(await picker.getByText('ordered-b.txt',{exact:true}).count(),0,'Separate picker list remains')
+  await body.getByRole('button',{name:'ordered-b.txt 제거',exact:true}).click();assert.equal(await page.getByText('ordered-b.txt',{exact:true}).count(),0)
+  await page.getByRole('button',{name:'작업 요청 등록',exact:true}).click();await page.locator('aside').getByText('ordered-c.xlsx',{exact:true}).waitFor()
+  await page.locator('aside').getByRole('button',{name:'수정',exact:true}).click()
+  await page.locator('input[type=file]').setInputFiles(png('edit-d.png'));await body.getByRole('img',{name:'edit-d.png',exact:true}).waitFor()
+  const editImage=body.getByRole('img',{name:'edit-d.png',exact:true});await dimensions(editImage);await editImage.scrollIntoViewIfNeeded()
+  const handle=editImage.locator('..').getByRole('button',{name:'너비만 조절',exact:true}).first(),rect=await handle.boundingBox(),before=await dimensions(editImage)
+  await page.mouse.move(rect.x+rect.width/2,rect.y+rect.height/2);await page.mouse.down();await page.mouse.move(rect.x+rect.width/2-60,rect.y+rect.height/2,{steps:8});await page.mouse.up();const resized=await dimensions(editImage);assert.ok(resized.width<before.width-20)
+  for(const type of ['paste','drop']){
+    await body.locator('[contenteditable=true]').last().evaluate((el,{encoded,type})=>{const data=new DataTransfer();data.items.add(new File([Uint8Array.from(atob(encoded),c=>c.charCodeAt(0))],type+'.png',{type:'image/png'}));el.dispatchEvent(type==='paste'?new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:data}):new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data,clientX:el.getBoundingClientRect().x+10,clientY:el.getBoundingClientRect().y+10}))},{encoded,type});await body.getByRole('img',{name:type+'.png',exact:true}).waitFor()
+  }
+  await page.getByRole('button',{name:'수정 내용 저장',exact:true}).click();await page.locator('aside').getByRole('img',{name:'edit-d.png',exact:true}).waitFor();await page.locator('aside').getByText('ordered-c.xlsx',{exact:true}).waitFor()
+  return {checked:['File picker appends mixed files into body in order','No separate picker attachment list','Individual file removal','Register and reopen edit','Additional files saved in detail','Image resize, paste and drop'],resized}
+}
 export async function runScenario(name,fixture) {
-  const scenarios={images:imageScenario,deadline:deadlineScenario,attendance:attendanceScenario}
+  const scenarios={images:imageScenario,deadline:deadlineScenario,attendance:attendanceScenario,navigation:navigationScenario,'brand-access':brandAccessScenario,attachments:attachmentScenario}
   if(!scenarios[name])throw new Error(`Unknown browser scenario: ${name}`)
   const startedAt=new Date().toISOString(),results=await scenarios[name](fixture)
   assert.deepEqual(fixture.errors,[],'Browser runtime errors')

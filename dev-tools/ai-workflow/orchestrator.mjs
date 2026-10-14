@@ -50,7 +50,7 @@ function reviewInstructions(job) {
   return `게시 규칙: 이 작업은 기준 브랜치 ${ws.baseBranch}의 고정 커밋 ${ws.baseSha}에서 만든 독립 작업 브랜치 ${job.branch}에서 수행했습니다. changes는 기준 커밋 대비 작업 브랜치의 전체 변경(이전 회차 변경 포함)입니다. 합격하면 관리자가 허용 파일만 커밋해 이 브랜치를 푸시하고 통합 브랜치 ${ws.integrationBranch} 대상 PR을 만듭니다. 개발 화면에 합치거나 운영 사이트에 게시하지 않으며, 통합 브랜치와 main 반영은 사용자가 PR을 선택·승인한 뒤 별도로 진행합니다.
 headChanges는 현재 HEAD 대비 아직 커밋하지 않은 변경이며, 이전 커밋을 기준 내용으로 되돌린 파일도 포함합니다. headChanges가 있으면 changes가 비어 있어도 구현 결과입니다.
 report.deployment는 changes 또는 headChanges가 있으면 development, 둘 다 없으면 verification입니다. report.remaining에는 PR 통합 대기, 운영 미게시와 남은 확인을 증거대로 쓰고 '개발 환경에 적용했다'고 쓰지 마세요.
-needs_input은 사용자만 답할 수 있는 결정·자료·직접 처리가 필요할 때만 사용하세요. 이때 summary는 비전공자가 이해할 멈춘 이유, issues는 사용자가 답하거나 직접 처리할 항목을 쉬운 한국어로 쓰세요. 검토 자료가 부족하면 사용자 질문 대신 sourceRequests를 사용하세요.
+needs_input은 사용자만 답할 수 있는 결정·자료·직접 처리가 필요할 때만 사용하세요. 이때 summary는 비전공자가 이해할 멈춘 이유, issues는 사용자가 답하거나 직접 처리할 항목을 쉬운 한국어로 쓰세요. 검토 자료가 부족하면 사용자 질문 대신 제공된 읽기 도구로 필요한 소스를 확인하세요. 읽기 도구가 없는 이전 전송 방식만 sourceRequests를 사용합니다.
 revise의 nextPrompt는 빠른 구현 담당이 판단 없이 그대로 따를 새롭고 완결된 실행 지시입니다. 파일별 수정 내용과 지켜야 할 범위를 구체적으로 쓰세요.`
 }
 
@@ -190,7 +190,11 @@ export class Orchestrator {
     for (const lane of [...new Set([...recoveryLanes, ...planningLanes].filter(Boolean))]) {
       if (this.stopping || this.active.size >= this.residentLimit()) return
       const pending = new Set(this.store.data.outbox.map(event => event.pageId))
-      for (const page of recovered.get(lane) ?? await this.board.list(lane)) {
+      const pages=recovered.get(lane) ?? await this.board.list(lane)
+      // Environment failures live in GPT 준비 too. Recover their durable
+      // review/publication phases before new plans acquire the shared slots.
+      if(this.pipeline)pages.sort((a,b)=>{const priority=page=>['checking','reviewing','publishing'].includes(this.journal().jobs[page.id]?.cycle?.phase)?0:1;return priority(a)-priority(b)})
+      for (const page of pages) {
         if (this.stopping || this.active.size >= this.residentLimit()) return
         if (this.active.has(page.id) || pending.has(page.id)) continue
         try { await this.consider(page, lane, values) }
@@ -497,21 +501,25 @@ export class Orchestrator {
     const changed = [...new Set([...await this.git.changedFiles(ws, job.workspace.baseSha), ...await this.git.dirtyPaths(ws)])].filter(file => !isManagerArtifact(file))
     const previous = { branch: job.branch, baseBranch: job.workspace.baseBranch, baseCommit: job.workspace.baseSha, files: changed,
       diff: await this.git.diffSinceBase(ws, job.workspace.baseSha, changed) }
-    if (previous.diff.length > 200000) throw new EnvironmentError('이전 회차 변경이 너무 커서 계획 자료로 전달할 수 없습니다. 자료를 잘라서 계획하지 않습니다.', { retry: false, code: 'plan_bundle' })
+    const reader=this.config.v2?.sourceReader?.enabled===true
+    if (!reader&&previous.diff.length > 200000) throw new EnvironmentError('이전 회차 변경이 너무 커서 계획 자료로 전달할 수 없습니다. 자료를 잘라서 계획하지 않습니다.', { retry: false, code: 'plan_bundle' })
     const scripts = verificationScriptNames(ws)
     let requested = [], invalid = '', rounds = 0, plan, drifted = false
     await this.assertFresh(entry)
     for (let call = 0; call < maxRounds + 3 && !plan; call++) {
       this.alive(entry)
       const baseline = sourceFingerprint(await snapshot(ws))
-      const bundle = planningSources(ws, task, { changed, requested })
-      const prompt = gptPlanPrompt({ task, trigger: c.trigger, history: job.history, previous, bundle, scripts, invalid, remainingSourceRounds: maxRounds - rounds })
+      const bundle = planningSources(ws, task, { changed, requested,reader })
+      const inlinePrevious=reader&&previous.diff.length>16000?{...previous,diff:'큰 이전 변경은 read_diff(index=0) 도구로 나눠 읽으세요.',diffChars:previous.diff.length}:previous
+      const prompt = gptPlanPrompt({ task, trigger: c.trigger, history: job.history, previous:inlinePrevious, bundle, scripts, invalid, remainingSourceRounds: maxRounds - rounds })
       // Reuse identical source/model/prompt across cycles and restarts. The full
       // workspace digest still invalidates cached plans when any code changes.
       const key = createHash('sha256').update(JSON.stringify([c.settings.gpt, prompt, baseline.digest])).digest('hex').slice(0, 24)
       const outputFile = path.join(runDir, `plan-${key}.json`)
       fs.writeFileSync(path.join(runDir, `plan-${key}.prompt.txt`), prompt)
-      const { report } = await this.gpt({ config: this.config, root: ws, gpt: c.settings.gpt, prompt, schemaFile: path.join(toolDir, 'gpt-plan.schema.json'), outputFile, signal, cacheContext:baseline.digest })
+      const sourceManifest=reader?{root:ws,stage:'plan',snapshot:baseline.files,taskFiles:[...new Set([...changed,...bundle.structure.matchedFiles])],limits:this.config.v2.sourceReader,
+        changes:previous.diff?[{file:null,diff:previous.diff}]:[],includedDiffs:previous.diff.length<=16000?[0]:[]}:undefined
+      const { report } = await this.gpt({ config: this.config, root: ws, gpt: c.settings.gpt, prompt, schemaFile: path.join(toolDir, 'gpt-plan.schema.json'), outputFile, signal, cacheContext:baseline.digest,sourceManifest })
       let value
       try { value = validateGptPlan(JSON.parse(report), ws, task, { changed }) }
       catch (error) {
@@ -520,6 +528,7 @@ export class Orchestrator {
         invalid = error.message; continue
       }
       invalid = ''
+      if(reader&&value.decision==='need_sources')throw new EnvironmentError('GPT가 읽기 도구 대신 외부 소스 요청을 반환했습니다. 같은 자료를 반복 전송하지 않습니다.',{retry:false,code:'source_reader_incomplete'})
       if (value.decision !== 'need_sources') {
         const after = sourceFingerprint(await snapshot(ws))
         if (after.digest !== baseline.digest) {
@@ -624,7 +633,7 @@ export class Orchestrator {
     let checks, proof
     for (let round = 0; round < 3; round++) {
       const start = await snapshot(ws)
-      checks = await this.verify({ ...this.config, verificationScripts: [...new Set([...(this.config.verificationScripts ?? []), ...plan.verificationScripts])] }, ws, signal)
+      checks = await this.verify({ ...this.config,reviewPlan:plan, verificationScripts: [...new Set([...(this.config.verificationScripts ?? []), ...plan.verificationScripts])] }, ws, signal)
       const contents = {}
       for (const file of plan.files) contents[file] = await this.git.fileAtBase(ws, base, file)
       const evidenceDir = path.join(runDir, `evidence-${tag}-${round}`); fs.mkdirSync(evidenceDir, { recursive: true })
@@ -688,7 +697,7 @@ export class Orchestrator {
       let diff = ''
       if (!inBase) {
         const result = await this.git.git(['diff', '--no-ext-diff', '--no-renames', 'HEAD', '--', file], { cwd: dir, acceptedCodes: [0, 1] })
-        diff = String(result.output ?? '').slice(0, 12000)
+        diff = String(result.output ?? '')
       }
       changes.push({ file, afterHash: content === null ? null : digest(content), reverted: !inBase, diff })
     }

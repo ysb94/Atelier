@@ -61,20 +61,37 @@ export class Notion {
     return false
   }
   async api(endpoint, method = 'GET', body) {
-    if((this.config.maxParallelTasks??1)>1){
-      // Both workers share this manager connection. Stay below Notion's
-      // average three requests/second instead of treating quota as task errors.
-      const at=Math.max(Date.now(),this.nextApiAt??0);this.nextApiAt=at+350
-      if(at>Date.now())await new Promise(resolve=>setTimeout(resolve,at-Date.now()))
+    // Queries and property replacement are idempotent. Block append/creation
+    // retains its journal-based recovery rather than risking duplicate writes.
+    const safeRetry=method==='GET'||method==='PATCH'&&!endpoint.endsWith('/children')||method==='POST'&&endpoint.endsWith('/query')
+    for(let attempt=0;attempt<3;attempt++){
+      if((this.config.maxParallelTasks??1)>1){
+        const at=Math.max(Date.now(),this.nextApiAt??0);this.nextApiAt=at+350
+        if(at>Date.now())await this.apiDelay(at-Date.now())
+      }
+      let response,data
+      try {
+        response=await this.fetch(`https://api.notion.com/v1/${endpoint}`,{
+          method,headers:{Authorization:`Bearer ${this.config.env.NOTION_TOKEN}`,'Notion-Version':'2025-09-03','Content-Type':'application/json'},
+          body:body?JSON.stringify(body):undefined,signal:AbortSignal.timeout(20000)
+        })
+        try{data=await response.json()}catch{data={code:'invalid_response'}}
+      }catch(error){
+        if(!safeRetry||attempt===2)throw error
+        console.warn('[ai-workflow] Notion 연결 재시도',{method,attempt:attempt+1})
+        await this.apiDelay(1000*2**attempt);continue
+      }
+      if(response.ok)return data
+      const retry=response.status===429||safeRetry&&[502,503,504].includes(response.status)
+      if(retry&&attempt<2){
+        const after=Number(response.headers?.get?.('Retry-After'))
+        console.warn('[ai-workflow] Notion 일시 오류 재시도',{method,status:response.status,attempt:attempt+1})
+        await this.apiDelay(Math.min(10000,Math.max(1000*2**attempt,Number.isFinite(after)?after*1000:0)));continue
+      }
+      throw new Error(`Notion ${response.status}: ${data.code??'API 오류'}`)
     }
-    const response = await this.fetch(`https://api.notion.com/v1/${endpoint}`, {
-      method, headers: { Authorization: `Bearer ${this.config.env.NOTION_TOKEN}`, 'Notion-Version': '2025-09-03', 'Content-Type': 'application/json' },
-      body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(20000)
-    })
-    const data = await response.json()
-    if (!response.ok) throw new Error(`Notion ${response.status}: ${data.code ?? 'API 오류'}`)
-    return data
   }
+  apiDelay(ms){return new Promise(resolve=>setTimeout(resolve,ms))}
   async ready() {
     const schema = await this.api(`data_sources/${this.config.dataSourceId}`)
     for (const name of Object.values(this.config.properties).filter(Boolean)) if (!schema.properties[name]) throw new Error(`노션 속성이 없습니다: ${name}`)

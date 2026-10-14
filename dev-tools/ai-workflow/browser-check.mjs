@@ -6,8 +6,9 @@ import tailwindcss from '@tailwindcss/vite'
 import { chromium } from 'playwright-core'
 import { runScenario } from './browser-scenarios.mjs'
 
-export async function openFixture(root = process.cwd()) {
-  const fixture = path.join(root,'dev-tools/ai-workflow/browser-fixture')
+export async function openFixture(root = process.cwd(),{scenario}={}) {
+  const fixture = path.join(path.dirname(fileURLToPath(import.meta.url)),'browser-fixture')
+  const entry=['navigation','brand-access'].includes(scenario)?'navigation-entry.tsx':'entry.tsx'
   const server = await createServer({ root, configFile:false, envFile:false, logLevel:'error',
     plugins:[{name:'fixture-html',enforce:'pre',resolveId(source,importer){
       if(importer&&source.startsWith('.'))for(const name of ['auth','client']){
@@ -16,11 +17,11 @@ export async function openFixture(root = process.cwd()) {
       }
     },configureServer(server){server.middlewares.use((req,res,next)=>{
       if(req.headers.accept?.includes('text/html')){
-        server.transformIndexHtml(req.url,'<!doctype html><html><head></head><body><div id="root"></div><script type="module" src="/dev-tools/ai-workflow/browser-fixture/entry.tsx"></script></body></html>').then(html=>{res.setHeader('Content-Type','text/html');res.end(html)}).catch(next);return
+        server.transformIndexHtml(req.url,`<!doctype html><html><head></head><body><div id="root"></div><script type="module" src="/@fs/${fixture}/${entry}"></script></body></html>`).then(html=>{res.setHeader('Content-Type','text/html');res.end(html)}).catch(next);return
       }next()
     })}},react(),tailwindcss()],
     resolve:{alias:[{find:'@/lib/supabase/auth',replacement:path.join(fixture,'auth.ts')},{find:'@/lib/supabase/client',replacement:path.join(fixture,'client.ts')},{find:'@',replacement:path.join(root,'src')}]},
-    server:{host:'127.0.0.1',port:0},
+    server:{host:'127.0.0.1',port:0,fs:{allow:[root,path.resolve(fixture,'..','..','..')]}},
   })
   await server.listen()
   let browser
@@ -37,7 +38,7 @@ export async function openFixture(root = process.cwd()) {
 }
 
 if(process.argv[1]===fileURLToPath(import.meta.url)) {
-  const fixture=await openFixture()
+  const fixture=await openFixture(process.argv[3]||process.cwd(),{scenario:process.argv[2]})
   try {
     if(process.argv[2]) {
       await runScenario(process.argv[2],fixture)

@@ -8,7 +8,7 @@ import { EnvironmentError } from './errors.mjs'
 
 // Read source under the manager's existing permissions, without a nested shell.
 // `requested` are reviewer-requested extra files; unavailable ones are reported, never guessed.
-export function reviewBundle(root, task, evidence, requested = [], bundleFiles) {
+export function reviewBundle(root, task, evidence, requested = [], bundleFiles,{reader=false}={}) {
   const required = bundleFiles ?? taskFiles(task.files)
   if (bundleFiles && (!bundleFiles.length || bundleFiles.length > 200 || bundleFiles.some(file => typeof file !== 'string'))) throw new Error('통합 검수 파일 목록이 올바르지 않습니다.')
   const selected = new Set(['AGENTS.md', ...required]), requests = requested.slice(0,40).map(sourceRequest)
@@ -44,9 +44,10 @@ export function reviewBundle(root, task, evidence, requested = [], bundleFiles) 
     const changes = [...evidence.changes,...(evidence.headChanges ?? [])].filter(change=>change.file===file)
     const ranges = changes.flatMap(change=>diffRanges(change.diff)).map(([a,b])=>[Math.min(a,count),Math.min(b,count)]).filter(([a])=>a>0)
     ranges.push(...requests.filter(item=>item.path===file && item.range).map(item=>item.range))
-    const item = sourceSlice(file,content,{ranges,query:[task.title,task.request,task.criteria].join('\n'),maxChars:file==='AGENTS.md'?12000:24000})
+    const item = sourceSlice(file,content,{ranges:reader?[]:ranges,query:[task.title,task.request,task.criteria].join('\n'),maxChars:file==='AGENTS.md'?12000:reader?2000:24000})
     total += sourceChars(item)
-    if(total>80000)throw new EnvironmentError('검토 소스 구간이 80,000자를 넘었습니다. 추가 GPT 호출 전에 멈췄습니다. 작업을 작은 범위로 나눠야 합니다.',{retry:false,code:'review_bundle'})
+    if(reader&&total>18000){files.push({path:file,sha256,complete:false,totalLines:count,note:'원문은 read_source로 필요한 줄을 읽으세요.'});continue}
+    if(!reader&&total>80000)throw new EnvironmentError('검토 소스 구간이 80,000자를 넘었습니다. 추가 GPT 호출 전에 멈췄습니다. 작업을 작은 범위로 나눠야 합니다.',{retry:false,code:'review_bundle'})
     files.push(item)
   }
   for (const change of evidence.changes) {
@@ -54,7 +55,7 @@ export function reviewBundle(root, task, evidence, requested = [], bundleFiles) 
     if (!current || current.sha256 !== change.afterHash)
       throw new Error(`변경 증거와 실제 파일이 다릅니다: ${change.file}`)
   }
-  return { method: 'manager-read-source', capturedAt: new Date().toISOString(),
+  return { method: reader?'paged-read-only-tools':'manager-read-source', capturedAt: new Date().toISOString(),
     scope: 'Complete small task files, changed hunks with context, and explicit requested line ranges. complete=false means omitted code is NOT reviewed; request missing evidence before passing.', files, dependencies,
     ...(requested.length ? { unavailable } : {}) }
 }

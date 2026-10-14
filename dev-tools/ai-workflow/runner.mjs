@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { taskFiles, redact, projectRoot } from './settings.mjs'
+import { taskFiles, redact, projectRoot,toolDir } from './settings.mjs'
 import { snapshot, readFile, mapContext, evidence, changedPaths } from './workspace.mjs'
 import { runCursor, NeedsInput } from './acp.mjs'
 import { runReview, validateReview } from './reviewer.mjs'
@@ -16,6 +16,17 @@ function npmCli() {
   }
   throw new Error('npm CLI를 찾지 못했습니다. npm run dev에서 실행하거나 Node.js 설치를 확인하세요.')
 }
+export function browserScenariosFor({files=[],request='',criteria=''}={}) {
+  const text=request+'\n'+criteria,scenarios=[]
+  if(files.includes('src/features/brands/BrandSelectPage.tsx')&&files.includes('src/lib/company/capabilities.ts'))scenarios.push('brand-access')
+  if(files.includes('src/components/layout/workspace-tabs.tsx')&&/기획/.test(text)&&/디자인/.test(text)&&/(?:제거|삭제)/.test(text))scenarios.push('navigation')
+  if(files.includes('src/features/work-requests/WorkRequestPage.tsx')&&/파일 선택/.test(text)&&/(?:본문|요청 내용)/.test(text))scenarios.push('attachments')
+  return scenarios
+}
+export function checkFailureOutput(error,env) {
+  const result=error.commandResult,raw=result?result.output+'\n'+result.stderr:error.message
+  return redact(raw.length>8000?raw.slice(0,2000)+'\n[중간 로그 생략; 실패 시작과 마지막 진단을 보존]\n'+raw.slice(-6000):raw,env)
+}
 export async function verification(config, root, signal) {
   const scripts=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).scripts
   const checks=[]
@@ -26,8 +37,13 @@ export async function verification(config, root, signal) {
       checks.push({name,passed:true,output:(result.output+'\n'+result.stderr).slice(-18000)})
     } catch(error) {
       if(signal?.aborted)throw error
-      checks.push({name,passed:false,output:redact(error.message,config.env)})
+      checks.push({name,passed:false,output:checkFailureOutput(error,config.env)})
     }
+  }
+  for(const scenario of browserScenariosFor(config.reviewPlan)){
+    const name=`verify:browser-${scenario}`
+    try{const result=await runCommand(process.execPath,[path.join(toolDir,'browser-check.mjs'),scenario,root],{cwd:root,signal,timeoutMs:120000});checks.push({name,passed:true,output:result.output+'\n'+result.stderr})}
+    catch(error){if(signal?.aborted)throw error;checks.push({name,passed:false,output:checkFailureOutput(error,config.env)})}
   }
   return checks
 }
