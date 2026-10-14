@@ -3,17 +3,30 @@
   "dataSourceId": "a55f8836-85b1-42e7-b156-521e621d3ee7",
   "positions": {
     "memo": "메모",
-    "manual": "직접 할 일",
+    "answered": "답변 완료",
     "queued": "자동화 할 일",
     "working": "자동화 작업 중",
+    "reviewing": "검토 중",
     "needsInput": "확인 필요",
     "done": "완료"
   },
-  "memoIntake": {
+  "v2": {
     "enabled": true,
-    "maxPerTick": 3,
-    "retryMinutes": 15,
-    "maxRetryMinutes": 360
+    "controlPageId": "3f963ce0-dccd-813c-8ece-d173d7df5ad3",
+    "remoteUrl": "https://github.com/ysb94/Atelier.git",
+    "mainBranch": "main",
+    "defaults": {
+      "gptModel": "gpt-6.1-sol",
+      "gptEffort": "high",
+      "cursorModel": "grok-4.7-xhigh-fast",
+      "baseBranch": "save/automation-progress-20261013",
+      "integrationBranch": "integration/automation-review"
+    },
+    "workspaceRoot": "/workspace/.atelier-task-worktrees",
+    "retryMinutes": 5,
+    "maxRetryMinutes": 120,
+    "reconcileMinutes": 10,
+    "maxSourceRounds": 2
   },
   "port": 4319,
   "pollMs": 30000,
@@ -41,6 +54,11 @@
     "result": "작업 결과",
     "completedAt": "자동화 완료 시각",
     "completedDay": "완료일",
-    "category": null
+    "category": null,
+    "branch": "GitHub 브랜치",
+    "pr": "GitHub PR",
+    "reflection": "반영 상태",
+    "model": "실행 모델",
+    "baseCommit": "기준 커밋"
   }
 }

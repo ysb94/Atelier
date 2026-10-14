@@ -8,7 +8,6 @@ import { snapshot, changedPaths, readFile, digest, evidence } from './workspace.
 import { projectRoot, taskFiles, inside, redact } from './settings.mjs'
 import { NeedsInput } from './acp.mjs'
 import { needsInputFeedback } from './feedback.mjs'
-import { intakeSettings, nextAutomatableMemo } from './intake.mjs'
 
 export function taskFootprint(files, root) {
   const reads=new Set([...files,'package.json','AGENTS.md'])
@@ -36,36 +35,18 @@ function safeTarget(root,file) {
 }
 
 export class ParallelRunner {
-  constructor({config,notion,store,root=projectRoot,onStatus=()=>{},cursor,review=runReview,verify=verification,plan,refreshMap,isolate=createIsolatedWorkspace,classify}) {
-    Object.assign(this,{config,notion,store,root,onStatus,cursor,review,verify,plan,refreshMap,isolate,classify})
+  constructor({config,notion,store,root=projectRoot,onStatus=()=>{},cursor,review=runReview,verify=verification,plan,refreshMap,isolate=createIsolatedWorkspace}) {
+    Object.assign(this,{config,notion,store,root,onStatus,cursor,review,verify,plan,refreshMap,isolate})
     this.active=new Map();this.accepted=new Map();this.scanning=false;this.stopping=false;this.integrationTail=Promise.resolve();this.recovered=false;this.pendingIntegration=null
-    this.intakeController=null;this.intake=null;this.classifying=null;this.scan=null
+    this.scan=null
   }
   get busy(){return this.active.size>0}
   status(){
     const tasks=[...this.active.values()].map(entry=>({slot:entry.slot,task:entry.job.task.title,...entry.status}))
-    this.onStatus({state:tasks.length>1?'병렬 작업 중':tasks[0]?.state??(this.classifying?'메모 분류':'대기'),activeCount:tasks.length,limit:this.config.maxParallelTasks??2,tasks,
-      ...(this.classifying?{classifying:this.classifying}:{}),
+    this.onStatus({state:tasks.length>1?'병렬 작업 중':tasks[0]?.state??'대기',activeCount:tasks.length,limit:this.config.maxParallelTasks??2,tasks,
       waiting:Object.values(this.store.data.jobs).filter(job=>job.phase==='waiting').map(job=>job.task.title)})
   }
-  async stop(){this.stopping=true;this.intakeController?.abort();for(const entry of this.active.values())entry.runner?.stop();await Promise.allSettled([this.scan,this.intake,...[...this.active.values()].map(entry=>entry.promise)])}
-  // stop() awaits this whole promise, including Notion requests that were already in flight.
-  classifyMemos(){
-    const controller=new AbortController();this.intakeController=controller
-    const run=(async()=>{
-      try{
-        return await nextAutomatableMemo({config:this.config,notion:this.notion,store:this.store,root:this.root,signal:controller.signal,
-          canContinue:()=>!this.stopping&&this.active.size<(this.config.maxParallelTasks??2),
-          onClassify:task=>{this.classifying=task.title;this.status()},...(this.classify?{classify:this.classify}:{})})
-      }finally{
-        if(this.intakeController===controller)this.intakeController=null
-        if(this.classifying){this.classifying=null;this.status()}
-        if(this.intake===run)this.intake=null
-      }
-    })()
-    this.intake=run
-    return run
-  }
+  async stop(){this.stopping=true;for(const entry of this.active.values())entry.runner?.stop();await Promise.allSettled([this.scan,...[...this.active.values()].map(entry=>entry.promise)])}
   // stop() awaits the whole scan, including outbox flushes already sent to Notion.
   async tick(){
     if(this.scanning||this.stopping||this.active.size>=(this.config.maxParallelTasks??2))return
@@ -108,8 +89,6 @@ export class ParallelRunner {
       }
       queue.push(fresh)
     }
-    // A queued card waiting on a file conflict blocks memo intake so the queue cannot grow unbounded.
-    let deferred=false
     const admit=async queuedTask=>{
       const task=this.config.mode==='memo-board'?await this.notion.task(queuedTask.id):queuedTask
       if(this.stopping)return
@@ -118,7 +97,7 @@ export class ParallelRunner {
       if([...this.active.values()].some(entry=>entry.job.task.id===task.id))return
       const job=selectedJob(this.store,task,this.config)
       if(['done','needs_input','superseded'].includes(job.phase))return
-      if(job.phase==='waiting'&&job.waitingFootprint&&[...this.active.values()].some(entry=>entry.footprint&&footprintsConflict(job.waitingFootprint,entry.footprint))){deferred=true;return}
+      if(job.phase==='waiting'&&job.waitingFootprint&&[...this.active.values()].some(entry=>entry.footprint&&footprintsConflict(job.waitingFootprint,entry.footprint)))return
       if(!['new','waiting'].includes(job.phase)){
         job.phase='needs_input';job.error='중단된 실행 기록을 확인해야 합니다. 자동으로 편집을 반복하지 않습니다.';this.store.save()
         this.store.enqueue(job,{state:'확인 필요',...needsInputFeedback(job.task,job.error),expectedVersion:task.version});await this.store.flush(this.notion,task.id);return
@@ -141,11 +120,6 @@ export class ParallelRunner {
     for(const queuedTask of queue){
       if(this.active.size>=(this.config.maxParallelTasks??2)||this.stopping)break
       await admit(queuedTask)
-    }
-    // The automation queue has priority. Classify memos only for a free slot.
-    if(!deferred&&intakeSettings(this.config)&&!this.stopping&&this.active.size<(this.config.maxParallelTasks??2)){
-      const memo=await this.classifyMemos()
-      if(memo&&!this.stopping&&this.active.size<(this.config.maxParallelTasks??2))await admit(memo)
     }
   }
   async launch(entry){

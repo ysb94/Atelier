@@ -6,6 +6,7 @@
     "criteriaResults": { "type": "array", "items": { "type": "object", "properties": { "criterion": { "type": "string" }, "passed": { "type": "boolean" }, "evidence": { "type": "string" } }, "required": ["criterion", "passed", "evidence"], "additionalProperties": false } },
     "issues": { "type": "array", "items": { "type": "string" } },
     "nextPrompt": { "type": "string" },
+    "sourceRequests": { "type": "array", "items": { "type": "string" } },
     "report": {
       "anyOf": [
         { "type": "null" },
@@ -21,6 +22,6 @@
       ]
     }
   },
-  "required": ["decision", "summary", "criteriaResults", "issues", "nextPrompt", "report"],
+  "required": ["decision", "summary", "criteriaResults", "issues", "nextPrompt", "sourceRequests", "report"],
   "additionalProperties": false
 }

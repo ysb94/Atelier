@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { provenanceSpan } from './generated-blocks.mjs'
 import fs from 'node:fs'
 import path from 'node:path'
 import { runCursor } from './acp.mjs'
@@ -79,26 +80,27 @@ function noticeLines(entry, config) {
 // Replaces only the generated notice; returns false when the same notice already exists
 // and null when stopped before the update is complete.
 async function syncNotice(notion, id, lines, signal) {
-  const notices = []; let cursor
-  do {
-    const data = await notion.api(`blocks/${id}/children?page_size=100${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ''}`)
-    notices.push(...data.results.filter(block => block.type === 'callout' && plain(block.callout.rich_text) === MEMO_INTAKE_NOTICE))
-    cursor = data.has_more ? data.next_cursor : undefined
-  } while (cursor)
-  if (lines && notices.length === 1) {
-    const children = await notion.api(`blocks/${notices[0].id}/children?page_size=100`)
+  const ledger = notion.blockLedger
+  if (!ledger) throw new Error('생성 블록 원장이 없습니다.')
+  const eventId = `intake:${id}`
+  const owned = await ledger.blocksOf(notion, id, 'intake')
+  if (lines && owned.length === 1 && owned[0].block?.id) {
+    const children = await notion.api(`blocks/${owned[0].block.id}/children?page_size=100`)
     if (!children.has_more && children.results.length === lines.length
       && children.results.every((block, i) => block.type === 'paragraph' && plain(block.paragraph.rich_text) === lines[i])) return false
   }
-  for (const block of notices) {
+  for (const item of owned) {
     if (signal?.aborted) return null
-    await notion.api(`blocks/${block.id}`, 'PATCH', { archived: true })
+    if (item.block?.id) await notion.api(`blocks/${item.block.id}`, 'PATCH', { archived: true })
+    ledger.release(id, item.record)
   }
   if (lines) {
     if (signal?.aborted) return null
-    await notion.api(`blocks/${id}/children`, 'PATCH', { children: [{ object: 'block', type: 'callout', callout: {
-      rich_text: [{ type: 'text', text: { content: MEMO_INTAKE_NOTICE } }], icon: { type: 'emoji', emoji: '🗂️' },
+    const record = ledger.begin(id, { kind: 'intake', eventId, runId: null, cycleId: null })
+    const created = await notion.api(`blocks/${id}/children`, 'PATCH', { children: [{ object: 'block', type: 'callout', callout: {
+      rich_text: [{ type: 'text', text: { content: MEMO_INTAKE_NOTICE } }, provenanceSpan(record.nonce)], icon: { type: 'emoji', emoji: '🗂️' },
       children: lines.map(content => ({ object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content } }] } })) } }] })
+    await ledger.adoptResponse(notion, id, record, created)
   }
   return true
 }

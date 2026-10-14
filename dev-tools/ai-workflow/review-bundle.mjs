@@ -1,12 +1,14 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { digest, readFile } from './workspace.mjs'
-import { taskFiles } from './settings.mjs'
+import { taskFiles, inside } from './settings.mjs'
 import { excludedFromWorkspace } from './isolation.mjs'
 
 // Read source under the manager's existing permissions, without a nested shell.
-export function reviewBundle(root, task, evidence) {
-  const required = taskFiles(task.files)
+// `requested` are reviewer-requested extra files; unavailable ones are reported, never guessed.
+export function reviewBundle(root, task, evidence, requested = [], bundleFiles) {
+  const required = bundleFiles ?? taskFiles(task.files)
+  if (bundleFiles && (!bundleFiles.length || bundleFiles.length > 200 || bundleFiles.some(file => typeof file !== 'string'))) throw new Error('통합 검수 파일 목록이 올바르지 않습니다.')
   const selected = new Set(['AGENTS.md', ...required])
   const mapPath = path.join(root, 'dev-tools/structure-map/generated/structure.json')
   if (fs.existsSync(mapPath)) {
@@ -16,6 +18,16 @@ export function reviewBundle(root, task, evidence) {
       if (required.includes(from) && typeof to === 'string' && /\.[cm]?[jt]sx?$/.test(to)
         && !excludedFromWorkspace(to)) selected.add(to)
     }
+  }
+  const unavailable = []
+  for (const raw of requested.slice(0, 40)) {
+    const file = String(raw).trim().replaceAll('\\', '/')
+    let problem = null
+    try { inside(root, file) } catch { problem = '작업 폴더 밖 경로' }
+    if (!problem && excludedFromWorkspace(file)) problem = '비공개 경로'
+    if (!problem && readFile(root, file) === null) problem = '파일 없음'
+    if (!problem && evidence.snapshot && !(file in evidence.snapshot)) problem = 'Git 추적 대상이 아닌 생성 파일'
+    if (problem) unavailable.push({ path: file, reason: problem }); else selected.add(file)
   }
   const files = []
   for (const file of selected) {
@@ -32,5 +44,6 @@ export function reviewBundle(root, task, evidence) {
       throw new Error(`변경 증거와 실제 파일이 다릅니다: ${change.file}`)
   }
   return { method: 'manager-read-source', capturedAt: new Date().toISOString(),
-    scope: 'Full task files and direct source dependencies; not the whole repository. Missing evidence must not be assumed.', files }
+    scope: 'Full task files and direct source dependencies; not the whole repository. Missing evidence must not be assumed.', files,
+    ...(requested.length ? { unavailable } : {}) }
 }

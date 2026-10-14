@@ -32,7 +32,7 @@ export async function verification(config, root, signal) {
   return checks
 }
 
-async function refreshStructure(root, signal) {
+export async function refreshStructure(root, signal) {
   return runCommand(process.execPath, [npmCli(), 'run', 'structure:map'], { cwd: root, signal, timeoutMs: 300000 })
 }
 

@@ -1,4 +1,4 @@
-const readable=value=>String(value??'').replace(/`[^`]+`/g,'관련 기능').replace(/(?:src|dev-tools|supabase)\/[\w./-]+/g,'관련 기능').replace(/\b(?:MCP|SQL|API|RLS|Cursor|Codex)\b/gi,'연결 기능').trim()
+export const readable=value=>String(value??'').replace(/`[^`]+`/g,'관련 기능').replace(/(?:src|dev-tools|supabase)\/[\w./-]+/g,'관련 기능').replace(/\b(?:MCP|SQL|API|RLS|Cursor|Codex)\b/gi,'연결 기능').trim()
 
 export function needsInputFeedback(task,message,explicitQuestion='') {
   const raw=String(message??''),title=String(task.title??'이 작업').slice(0,300)
@@ -44,13 +44,13 @@ export function needsInputFeedback(task,message,explicitQuestion='') {
     question=explicitQuestion||'반드시 충족해야 하는 동작과 우선순위를 구체적으로 적어주세요. 직접 수정했다면 수정한 내용도 알려주세요.'
   }else if(/at capacity|명령 실패|connection|Notion\s*\d|시간 제한|응답|ECONN|HTTP/i.test(raw)){
     reason='작업에 필요한 연결이나 실행 응답에 문제가 생겨 진행을 멈췄어요.'
-    question=explicitQuestion||'다시 진행할 작업이면 메모에 재시도 요청을 적고 자동화 할 일로 옮겨 주세요. 직접 처리했다면 처리 결과를 적어주세요.'
+    question=explicitQuestion||'다시 진행할 작업이면 내 답변에 재시도 요청을 적고 위치를 답변 완료로 옮겨 주세요. 직접 처리했다면 처리 결과를 적어주세요.'
   }else{
     reason=/[가-힣]/.test(raw)?readable(raw).slice(0,700):'자동으로 판단하기에 필요한 정보가 부족해요.'
     question=explicitQuestion||'진행 방향이나 직접 처리한 내용을 알려주세요. 부족한 자료가 있다면 원래 메모에 이어 적어주세요.'
   }
   const how=executorAction&&!explicitQuestion
     ? '현재는 자동화 실행기의 준비가 필요한 상태입니다. 기존 내 답변은 보존되어 있습니다. 실행 환경과 검증 수단을 준비한 뒤 재개해야 하며, 위치만 반복해서 옮겨도 이 원인은 해결되지 않습니다.'
-    : '내 답변에 내용을 적거나 직접 처리한 결과를 남겨 주세요. 이어서 자동 작업이 필요하면 위치를 자동화 할 일로 옮겨 주세요.'
+    : '내 답변에 내용을 적거나 직접 처리한 결과를 남긴 뒤 위치를 답변 완료로 옮겨 주세요. 자동화가 최신 원문과 답변으로 다시 판단해 이어서 진행합니다.'
   return {summary:`멈춘 이유: ${reason}\n\n처리 방법: ${how}`.slice(0,1800),question:`${readable(question).slice(0,1300)}\n\n${how}`.slice(0,1800)}
 }

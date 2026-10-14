@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import { completionReportBlock } from './report.mjs'
 import { NeedsInput } from './acp.mjs'
+import { GeneratedBlockLedger, nonceInBlock, provenanceSpan, stampCallout } from './generated-blocks.mjs'
 
 const plain = items => (items ?? []).map(v => v.plain_text ?? v.text?.content ?? '').join('')
 export function taskFromPage(page, props) {
@@ -41,7 +42,24 @@ function sameCompletionMinute(stored, actual) {
 }
 
 export class Notion {
-  constructor(config, fetcher = fetch) { this.config = config; this.fetch = fetcher }
+  constructor(config, fetcher = fetch) {
+    this.config = config
+    this.fetch = fetcher
+    this.blockLedger = new GeneratedBlockLedger()
+  }
+  async isGeneratedBlock(pageId, block) {
+    const ledger = this.blockLedger
+    if (!ledger || !block) return false
+    if (block.id && ledger.hasId(pageId, block.id)) return true
+    const nonce = nonceInBlock(block)
+    if (nonce && ledger.hasNonce(pageId, nonce)) {
+      if (block.id) ledger.adoptNonce(pageId, nonce, block.id)
+      return true
+    }
+    if (ledger.hasPending(pageId) && block.has_children && (block.type === 'callout' || block.type === 'toggle'))
+      return ledger.claimPendingChild(this, pageId, block)
+    return false
+  }
   async api(endpoint, method = 'GET', body) {
     if((this.config.maxParallelTasks??1)>1){
       // Both workers share this manager connection. Stay below Notion's
@@ -80,14 +98,15 @@ export class Notion {
     const result = await this.api(`data_sources/${this.config.dataSourceId}/query`, 'POST', body)
     return result.results.map(page => taskFromPage(page, p))
   }
-  async memoBody(id, depth = 0) {
+  async memoBody(id, depth = 0, rootId = id) {
     if (depth > 5) throw new Error('메모의 중첩이 너무 깊어 읽을 수 없습니다.')
     const parts = []; let cursor
     do {
       const data = await this.api(`blocks/${id}/children?page_size=100${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ''}`)
       for (const block of data.results) {
         const text = plain(block[block.type]?.rich_text)
-        if (text.startsWith('Atelier AI ') || block.type==='callout'&&text.startsWith('완료 보고서 · ')) continue
+        // Owned generated blocks stay out of the source. Title and block type do not decide ownership.
+        if (await this.isGeneratedBlock(rootId, block)) continue
         if (text === '필요한 설명이나 참고 자료를 여기에 이어 적을 수 있습니다.') continue
         if (text) parts.push(text)
         const detail=structuredClone(block[block.type]??{})
@@ -97,7 +116,7 @@ export class Notion {
         // Signed file URLs expire on reads. The stable path identifies the file.
         if(detail.file){delete detail.file.expiry_time;if(detail.file.url)detail.file.url=detail.file.url.split('?')[0]}
         if(Object.keys(detail).length)parts.push(JSON.stringify({type:block.type,...detail}))
-        if (block.has_children && !['child_page', 'child_database'].includes(block.type)) parts.push(await this.memoBody(block.id, depth + 1))
+        if (block.has_children && !['child_page', 'child_database'].includes(block.type)) parts.push(await this.memoBody(block.id, depth + 1, rootId))
       }
       cursor = data.has_more ? data.next_cursor : undefined
       if (parts.join('\n').length > 16000) throw new Error('메모가 너무 큽니다. 관련 내용만 한 카드에 묶어 주세요.')
@@ -134,26 +153,29 @@ export class Notion {
     const expectedLocation=stopped?this.config.positions.needsInput:update.state==='완료'?this.config.positions.done
       :update.state==='작업 중'?this.config.positions.working:this.config.positions.queued
     if(snapshot.task.location!==expectedLocation)return
-    const notices=[];let cursor
-    do {
-      const data=await this.api(`blocks/${id}/children?page_size=100${cursor?`&start_cursor=${encodeURIComponent(cursor)}`:''}`)
-      notices.push(...data.results.filter(block=>block.type==='callout'&&plain(block.callout.rich_text)==='Atelier AI 확인 필요 안내'))
-      cursor=data.has_more?data.next_cursor:undefined
-    }while(cursor)
+    const eventId = `v1:${update.state}:${update.summary ?? ''}:${update.question ?? ''}`
     const lines=[update.summary||'자동화가 중단되었습니다.',update.question||'현재 작업 결과를 확인해 주세요.'].map(line=>line.slice(0,1900))
-    if(stopped&&notices.length===1){
-      const children=await this.api(`blocks/${notices[0].id}/children?page_size=100`)
-      if(!children.has_more&&children.results.length===lines.length
-        &&children.results.every((block,i)=>block.type==='paragraph'&&plain(block.paragraph.rich_text)===lines[i]))return
+    const owned = (await this.blockLedger.blocksOf(this, id, 'notice')).filter(item => String(item.record.eventId).startsWith('v1:'))
+    if (stopped && owned.length === 1 && owned[0].record.eventId === eventId) {
+      const children = await this.api(`blocks/${owned[0].block.id}/children?page_size=100`)
+      if (!children.has_more && children.results.length === lines.length
+        && children.results.every((block, i) => block.type === 'paragraph' && plain(block.paragraph.rich_text) === lines[i])) return
     }
-    // Only replace the generated notice. Original memo blocks and answers remain source data.
-    for(const block of notices)await this.api(`blocks/${block.id}`,'PATCH',{archived:true})
-    if(stopped)await this.api(`blocks/${id}/children`,'PATCH',{children:[{
-      object:'block',type:'callout',callout:{
-        rich_text:[{type:'text',text:{content:'Atelier AI 확인 필요 안내'}}],icon:{type:'emoji',emoji:'❓'},
-        children:lines.map(content=>({object:'block',type:'paragraph',paragraph:{rich_text:[{type:'text',text:{content}}]}}))
-      }
-    }]})
+    for (const item of owned) {
+      if (!item.block?.id) continue
+      await this.api(`blocks/${item.block.id}`, 'PATCH', { archived: true })
+      this.blockLedger.release(id, item.record)
+    }
+    if (!stopped) return
+    const record = this.blockLedger.begin(id, { kind: 'notice', eventId, runId: update.runId ?? null, cycleId: update.cycleId ?? null })
+    const created = await this.api(`blocks/${id}/children`, 'PATCH', { children: [{
+      object: 'block', type: 'callout', callout: {
+        rich_text: [{ type: 'text', text: { content: 'Atelier AI 확인 필요 안내' } }, provenanceSpan(record.nonce)],
+        icon: { type: 'emoji', emoji: '❓' },
+        children: lines.map(content => ({ object: 'block', type: 'paragraph', paragraph: { rich_text: [{ type: 'text', text: { content } }] } })),
+      },
+    }] })
+    await this.blockLedger.adoptResponse(this, id, record, created)
   }
   async publish(id, update) {
     const p = this.config.properties, properties = {}
@@ -205,13 +227,9 @@ export class Notion {
       await this.syncMemoNotice(id,update)
       // Prompt, feedback, logs and reviewer JSON stay in the local run journal.
       if(!reportBlock)return
-      const title=plain(reportBlock.callout.rich_text);let cursor,found=false
-      do {
-        const data=await this.api(`blocks/${id}/children?page_size=100${cursor?`&start_cursor=${encodeURIComponent(cursor)}`:''}`)
-        found=data.results.some(block=>block.type==='callout'&&plain(block.callout.rich_text)===title)
-        cursor=data.has_more?data.next_cursor:undefined
-      }while(cursor&&!found)
-      if(!found){
+      const eventId = update.eventId ?? `v1-report:${update.completedAt ?? ''}:${update.expectedVersion ?? ''}`
+      const owned = (await this.blockLedger.blocksOf(this, id, 'report')).some(item => item.record.eventId === eventId)
+      if(!owned){
         // Completion properties and the report are separate Notion writes.
         const final=await this.memoSnapshot(id,!!update.expectedVersion),actual=final.task
         if(final.unstable)throw new Error('완료 보고서 저장 전 노션 변경을 감지했습니다. 최신 상태로 재시도합니다.')
@@ -219,7 +237,10 @@ export class Notion {
           ||!sameCompletionMinute(final.page.properties[p.completedAt]?.date?.start,update.completedAt)
           ||update.expectedVersion&&actual.version!==update.expectedVersion
           ||update.expectedPlanVersion&&actual.planVersion!==update.expectedPlanVersion)return
-        await this.api(`blocks/${id}/children`,'PATCH',{children:[reportBlock]})
+        const record = this.blockLedger.begin(id, { kind: 'report', eventId, runId: update.runId ?? null, cycleId: update.cycleId ?? null })
+        stampCallout(reportBlock, record.nonce)
+        const created = await this.api(`blocks/${id}/children`,'PATCH',{children:[reportBlock]})
+        await this.blockLedger.adoptResponse(this, id, record, created)
       }
       return
     }

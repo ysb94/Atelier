@@ -54,7 +54,8 @@ async function inventory(root) {
   return { all, identities, entries }
 }
 
-function dependencies(root, workspace) {
+// Reuses installed packages through per-package links while build caches stay private.
+export function linkDependencies(root, workspace) {
   const source = path.join(root, 'node_modules')
   if (!fs.existsSync(source)) return
   const dependencyRoot = fs.realpathSync(source)
@@ -119,7 +120,7 @@ export async function createIsolatedWorkspace({ root, dir }) {
       fs.chmodSync(destination, mode)
       if (digest(fs.readFileSync(destination)) !== before.all[file]) throw new Error(`격리 파일 복사 검증 실패: ${file}`)
     }
-    dependencies(source, workspace)
+    linkDependencies(source, workspace)
     await runCommand('git', ['init', '--quiet'], { cwd: workspace })
     // Depend on our own exclusion file even when a fixture has no .gitignore.
     fs.appendFileSync(path.join(workspace, '.git/info/exclude'), '\nnode_modules/\n')

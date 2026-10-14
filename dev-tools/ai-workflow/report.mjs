@@ -11,19 +11,29 @@ export function validateCompletionReport(report) {
   return report
 }
 
-export function completionReportBlock(task, report, completedAt) {
+function publicationLines(publication) {
+  if(!publication.prUrl)return ['코드 변경 없이 확인 작업만 수행했습니다. 브랜치 게시나 검토 요청(PR)을 만들지 않았고 운영 사이트를 변경하지 않았습니다.']
+  return [`작업 브랜치 ${publication.branch}에 저장하고 통합 브랜치 ${publication.integrationBranch} 대상 검토 요청(PR)을 만들었습니다: ${publication.prUrl}`,
+    `기준: ${publication.baseBranch} @ ${publication.baseCommit.slice(0,12)} · 반영 상태: ${publication.reflection}`,
+    '코드 작업은 완료되었고 사용자의 통합 선택을 기다립니다. 통합 브랜치와 main 반영은 사용자가 선택·승인한 뒤 진행하며 운영 사이트에는 게시하지 않았습니다.']
+}
+
+// `publication` (v2) describes the real branch/PR state instead of a development-screen merge.
+export function completionReportBlock(task, report, completedAt, publication) {
   validateCompletionReport(report)
-  if(!task.source?.screen||!task.source?.area||!Number.isFinite(Date.parse(completedAt)))throw new Error('완료 보고서에 실제 출처와 완료 시각이 필요합니다.')
+  if(!task.source?.screen||!Number.isFinite(Date.parse(completedAt)))throw new Error('완료 보고서에 실제 출처와 완료 시각이 필요합니다.')
   const rich = content => [{type:'text',text:{content}}]
   const paragraph = content => ({object:'block',type:'paragraph',paragraph:{rich_text:rich(content)}})
   const heading = content => ({object:'block',type:'heading_3',heading_3:{rich_text:rich(content)}})
   const bullet = content => ({object:'block',type:'bulleted_list_item',bulleted_list_item:{rich_text:rich(content)}})
   const header = `완료 보고서 · ${koreanTime(completedAt)}`
   return {object:'block',type:'callout',callout:{icon:{type:'emoji',emoji:'✅'},rich_text:rich(header),children:[
-    paragraph(`메모 출처: ${task.source.area} → ${task.source.screen}`),
+    paragraph(`메모 출처: ${task.source.area?`${task.source.area} → `:''}${task.source.screen}`),
     paragraph(`작업한 곳: ${report.location}`),paragraph(`완료 시각: ${koreanTime(completedAt)} (한국시간)`),
     paragraph(report.summary),heading('바뀐 점'),...report.changes.map(bullet),
     heading('사용 방법'),paragraph(report.howToUse),heading('확인한 결과'),...report.checked.map(bullet),
-    heading('적용 상태와 남은 확인'),paragraph(report.deployment==='development'?'개발 환경에 적용했습니다. 운영 사이트에 게시하지 않았습니다.':'확인 작업만 수행했습니다. 운영 사이트를 변경하지 않았습니다.'),paragraph(report.remaining)
+    heading('적용 상태와 남은 확인'),
+    ...(publication?publicationLines(publication).map(paragraph):[paragraph(report.deployment==='development'?'개발 환경에 적용했습니다. 운영 사이트에 게시하지 않았습니다.':'확인 작업만 수행했습니다. 운영 사이트를 변경하지 않았습니다.')]),
+    paragraph(report.remaining)
   ]}}
 }

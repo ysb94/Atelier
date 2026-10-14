@@ -7,6 +7,8 @@ import { Store, acquireLock } from './store.mjs'
 import { Notion } from './notion.mjs'
 import { Runner } from './runner.mjs'
 import { ParallelRunner } from './parallel.mjs'
+import { Board } from './board.mjs'
+import { Orchestrator } from './orchestrator.mjs'
 
 export async function startManager() {
   const release=acquireLock(stateDir),store=new Store(stateDir)
@@ -14,7 +16,7 @@ export async function startManager() {
   const server=http.createServer((request,response)=>{
     if(request.method!=='GET'||!['/','/health'].includes(request.url)){response.writeHead(404);response.end();return}
     response.setHeader('Cache-Control','no-store');response.setHeader('Content-Type','application/json; charset=utf-8')
-    response.end(JSON.stringify({tool:'atelier-ai-workflow',root:projectRoot,watch:true,codexBillingPolicy:'chatgpt-subscription-only',...status},null,2))
+    response.end(JSON.stringify({tool:'atelier-ai-workflow',root:projectRoot,watch:true,workflow:config.v2?.enabled?'v2':'legacy',codexBillingPolicy:'chatgpt-subscription-only',...status},null,2))
   })
   const tick=async()=>{
     if(stopping||ticking)return;ticking=true
@@ -24,8 +26,13 @@ export async function startManager() {
         const check=await doctor(config)
         if(!check.ready){status={state:'설정 대기',problems:check.problems,mcp:check.mcp.map(v=>v.name)};return}
         const notion=new Notion(config);await notion.ready()
-        const Worker=config.maxParallelTasks===2?ParallelRunner:Runner
-        runner=new Worker({config,notion,store,onStatus:value=>{status=value}})
+        if(config.v2?.enabled){
+          const board=new Board(config,notion);await board.ready()
+          runner=new Orchestrator({config,notion,board,store,onStatus:value=>{status=value}})
+        }else{
+          const Worker=config.maxParallelTasks===2?ParallelRunner:Runner
+          runner=new Worker({config,notion,store,onStatus:value=>{status=value}})
+        }
         status={state:'대기',mcp:check.mcp.map(v=>v.name)}
       }
       runner.config=config;runner.notion.config=config
