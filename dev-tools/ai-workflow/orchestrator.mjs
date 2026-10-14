@@ -392,6 +392,7 @@ export class Orchestrator {
     }
     if (c.phase === 'publishing') {
       const live = [this.config.positions.working, this.config.positions.reviewing].filter(Boolean)
+      if(entry.publicationRecoveryLocation)live.push(entry.publicationRecoveryLocation)
       if (!live.includes(task.location)) this.abort(entry, 'stopped', '게시 중 카드 위치가 바뀌었습니다.')
     }
   }
@@ -417,8 +418,16 @@ export class Orchestrator {
   }
 
   async run(entry) {
-    const c = entry.job.cycle, monitor = this.watch(entry)
+    const c = entry.job.cycle
+    // The manager itself parks publication failures in GPT 준비. Restore the
+    // live lane before checking publication guards; retain the passed review.
+    entry.publicationRecoveryLocation=c.phase==='publishing'&&entry.job.task.location===this.config.positions.preparing?this.config.positions.preparing:null
+    const monitor = this.watch(entry)
     try {
+      if(entry.publicationRecoveryLocation){
+        await this.progress(entry,{state:'검토 중',location:this.config.positions.reviewing??this.config.positions.working})
+        entry.publicationRecoveryLocation=null
+      }
       while (!c.outcome && IN_FLIGHT.includes(c.phase)) {
         if (c.phase === 'planning') {
           await this.inStage(entry, 'planning', async () => { await this.ensureWorkspace(entry); await this.plan(entry) })

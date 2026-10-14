@@ -71,6 +71,22 @@ test('two GPT slots admit a second planning job while the first is active',()=>{
   assert.equal(o.residentLimit(),8)
 })
 
+test('publication recovery restores its live lane without replanning or losing the passed review',async()=>{
+  const o=setup();o.config={...config,positions:{...config.positions,preparing:'GPT 준비'}};o.board.config=o.config
+  const task={id:'p',version:'v1',location:'GPT 준비',state:'대기'},values={gptModel:'gpt-6-sol',gptEffort:'medium',cursorModel:'composer-2.5',baseBranch:'saved',integrationBranch:'integration/test'}
+  const original={id:'passed-cycle',phase:'publishing',sourceVersion:'v1',outcome:'error',review:{decision:'pass'},settings:{gpt:{model:'gpt-6.1-sol',effort:'high'}}}
+  const job={key:'p',phase:'error',errorKind:'operator',errorCode:'review_environment',cycle:original,task,history:[],workspace:{baseBranch:'saved',integrationBranch:'integration/test'}}
+  const resumed=o.prepare(job,task,'GPT 준비',values,'대기');assert.equal(resumed.cycle,original);assert.equal(original.outcome,null)
+  const entry={job:resumed,controller:new AbortController()},calls=[];let location='GPT 준비'
+  o.board.read=async()=>({unstable:false,task:{...task,location}})
+  o.progress=async(e,update)=>{await o.assertFresh(e);calls.push('restore');location=update.location}
+  o.ensureWorkspace=async()=>{calls.push('workspace')}
+  o.publishResult=async(e)=>{await o.assertFresh(e);assert.equal(location,config.positions.reviewing);assert.equal(e.publicationRecoveryLocation,null);calls.push('publish');original.outcome='done';return 'applied'}
+  o.plan=async()=>assert.fail('passed publication must not plan again');o.implement=async()=>assert.fail('passed publication must not implement again');o.check=async()=>assert.fail('passed publication must not review again')
+  await o.run(entry);assert.deepEqual(calls,['restore','workspace','publish']);assert.equal(original.review.decision,'pass');assert.equal(original.settings.gpt.model,'gpt-6.1-sol')
+  const moved={...entry,controller:new AbortController()};o.inspect(moved,{...task,location:'GPT 준비'});assert.equal(moved.controller.signal.aborted,true)
+})
+
 test('Cursor readiness requires completed instructions and the latest source, never an active or failed implementation',()=>{
   const job={phase:'active',cycle:{phase:'planned',sourceVersion:'v1',plan:{decision:'execute'},writeBase:{digest:'code'}}}
   assert.equal(readyForCursor(job,{version:'v1'}),true)
