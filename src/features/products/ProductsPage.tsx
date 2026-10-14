@@ -1780,8 +1780,14 @@ export function ProductsPage({
 
 /** 부서 화면 — 필요한 상품만 불러 그 부서 항목을 채운다. */
 export function DepartmentProductsPage() {
+  useRenderWatch('DepartmentProductsPage')
+  const tabActive = useWorkspaceTabActivity()
   const { owner } = useParams()
   const scope = useCompanyBrandScope()
+  if (owner === 'planning' || owner === 'design') {
+    if (!tabActive) return null
+    return <Navigate to="/products" replace />
+  }
   if (!owner || !OWNER_PRESETS.includes(owner as (typeof OWNER_PRESETS)[number])) {
     return <Navigate to="/" replace />
   }
