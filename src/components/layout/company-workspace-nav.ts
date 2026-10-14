@@ -138,16 +138,16 @@ export const companyNavGroups: CompanyNavGroup[] = [
       { to: '/sabangnet-codes', label: '사방넷 코드 관리', icon: Hash },
       { to: '/usage-codes', label: '업체별 코드 관리', icon: Store },
       { to: '/partner-codes', label: '거래처 코드', icon: Building2 },
+      {
+        to: '/settings/product-categories',
+        label: '카테고리 관리',
+        icon: FolderTree,
+      },
     ],
   },
   {
     title: '설정',
     items: [
-      {
-        to: '/settings/product-categories',
-        label: '상품 설정',
-        icon: FolderTree,
-      },
       { to: '/settings/fields', label: '업로드 항목', icon: ListChecks },
       { to: '/settings/seasons', label: '출시 기획', icon: CalendarRange },
       { to: '/settings/usage-targets', label: '출고업체', icon: Store },
