@@ -4,7 +4,7 @@ import { randomUUID, createHash } from 'node:crypto'
 import { projectRoot, toolDir, redact } from './settings.mjs'
 import { snapshot, readFile, mapContext, evidence, changedPaths, digest, isManagerArtifact, sourceFingerprint } from './workspace.mjs'
 import { runCursor, NeedsInput } from './acp.mjs'
-import { runReview, validateReview, REVIEW_ENVIRONMENT_PREFIX } from './reviewer.mjs'
+import { runReview, validateReview, REVIEW_ENVIRONMENT_PREFIX, reviewEnvironmentProblem } from './reviewer.mjs'
 import { verification, refreshStructure } from './runner.mjs'
 import { runGptReadOnly } from './gpt.mjs'
 import { planningSources, validateGptPlan, gptPlanPrompt, verificationScriptNames, PlanInvalid, criteriaItemsOf } from './gpt-planner.mjs'
@@ -352,6 +352,8 @@ export class Orchestrator {
       return this.outboxEvent(job, this.completionUpdate(job))
     if (job.phase === 'needs_input' && cycle.outcome === 'needs_input' && cycle.notice)
       return this.outboxEvent(job, this.needsInputUpdate(job, cycle.notice))
+    if(job.phase==='deferred'&&cycle.outcome==='deferred'&&cycle.notice)
+      return this.outboxEvent(job,this.deferredUpdate(job,cycle.notice))
     return null
   }
   needsInputUpdate(job, notice, endedAt = job.cycle?.endedAt ?? iso()) {
@@ -359,6 +361,9 @@ export class Orchestrator {
     return { kind: 'needs_input', expectLocations: [...this.board.automationLocations(), this.config.positions.needsInput].filter(Boolean),
       summary: `확인 필요: ${notice.summary}`.slice(0, 1800), attempt: job.cycle?.attempt,
       question: `${items.map((item, i) => `${i + 1}. ${item}`).join('\n')}\n\n${ANSWER_GUIDE}`.slice(0, 1800), lines: noticeLines(notice, new Date(endedAt)) }
+  }
+  deferredUpdate(job,notice) {
+    return {kind:'deferred',expectLocations:this.board.automationLocations(),summary:`보류: ${notice.summary}`.slice(0,1800)}
   }
   completionUpdate(job, { endedAt = job.cycle?.endedAt, publication = job.publication } = {}) {
     const cycle = job.cycle, at = this.config.positions
@@ -559,12 +564,21 @@ export class Orchestrator {
     fs.writeFileSync(path.join(runDir, `plan-${c.id}.json`), JSON.stringify(plan, null, 2))
     c.plan = plan; this.store.save()
     await this.assertFresh(entry)
+    if(plan.decision==='defer')return this.defer(entry,plan.notice)
     if (plan.decision === 'needs_input') return this.askUser(entry, plan.notice)
     c.phase = 'planned'; this.store.save()
     this.enqueue(job, { kind: 'plan', plan: { request: plan.request, criteria: plan.criteria, files: plan.files }, modelText: this.modelText(c, true), branch: job.branch, baseCommit: job.workspace.baseSha })
-    await this.progress(entry, { state: '대기', location: at.queued, clearNotice: true })
+    await this.progress(entry, { state: '대기', location: at.queued, clearNotice: true,clearQuestion:true })
+  }
+  async defer(entry,notice) {
+    const {job}=entry,c=job.cycle
+    this.stageDelivery(job,this.deferredUpdate(job,notice),()=>{Object.assign(c,{outcome:'deferred',phase:'deferred',endedAt:iso(),notice});job.phase='deferred';job.failures=0})
+    await this.flush(job);this.setStatus(entry,'보류')
   }
   async askUser(entry, notice) {
+    const problem=reviewEnvironmentProblem({summary:notice.summary,issues:[...notice.questions,...notice.actions]})
+    if(problem)throw new EnvironmentError(`자동화 담당자가 처리할 검증 문제: ${problem}`,{retry:false,code:'review_environment'})
+    if(![...notice.questions,...notice.actions].some(item=>String(item).trim()))throw new EnvironmentError('사용자 질문·직접 처리할 일이 없는 확인 필요 결과를 거부했습니다.',{retry:false,code:'input_missing'})
     const { job } = entry, c = job.cycle
     const endedAt = iso()
     this.stageDelivery(job, this.needsInputUpdate(job, notice, endedAt), () => {
@@ -666,7 +680,8 @@ export class Orchestrator {
     const review = validateReview(await this.review({ config: this.config, root: ws, task: reviewTask, evidence: proof, checks, cursor: c.cursor, runDir: reviewDir, signal,
       gpt: c.settings.gpt, instructions: reviewInstructions(job), maxSourceRounds: this.config.v2?.maxSourceRounds ?? 2 }), { requireReport: true, criteria })
     fs.writeFileSync(path.join(runDir, `review-${tag}.json`), JSON.stringify(review, null, 2))
-    if (review.decision === 'needs_input' && review.summary.startsWith(REVIEW_ENVIRONMENT_PREFIX)) throw new EnvironmentError(review.summary, { retry: false, code: 'review_environment' })
+    if (review.decision === 'needs_input' && (review.summary.startsWith(REVIEW_ENVIRONMENT_PREFIX)||reviewEnvironmentProblem(review))) throw new EnvironmentError(review.summary, { retry: false, code: 'review_environment' })
+    if(review.decision==='needs_input'&&!review.issues.length)throw new EnvironmentError('검토가 사용자에게 필요한 구체적인 질문 없이 확인 필요를 반환했습니다.',{retry:false,code:'input_missing'})
     if (changedPaths(proof.snapshot, await snapshot(ws)).some(file => !isManagerArtifact(file))) throw new EnvironmentError('검토 중 작업 공간이 바뀌었습니다. 최신 상태로 다시 검사합니다.', { code: 'workspace_changed' })
     await this.assertFresh(entry)
     c.lastReview = { decision: review.decision, summary: review.summary, issues: review.issues }

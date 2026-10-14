@@ -147,7 +147,7 @@ export class Notion {
   }
   async memoSnapshot(id, withBody, retry=0) {
     const first=await this.api(`pages/${id}`),edited=first.last_edited_time
-    if(first.properties[this.config.properties.state]?.select?.name==='중지')return{page:first,task:memoTaskFromPage(first,this.config),unstable:false}
+    if(!withBody&&first.properties[this.config.properties.state]?.select?.name==='중지')return{page:first,task:memoTaskFromPage(first,this.config),unstable:false}
     const body=withBody?await this.memoBody(id):''
     // Properties read before block traversal can be stale after slow API reads.
     const page=withBody?await this.api(`pages/${id}`):first

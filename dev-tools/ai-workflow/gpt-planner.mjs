@@ -73,9 +73,14 @@ export function verificationScriptNames(root) {
 const technical = /(?:\b(?:src|dev-tools|supabase)\/|\.(?:tsx?|mjs)\b|\b(?:MCP|SQL|Cursor|Codex)\b)/
 export function validateGptPlan(value, root, task, { changed = [] } = {}) {
   const fail = message => { throw new PlanInvalid(message) }
-  if (!value || !['execute', 'needs_input', 'need_sources'].includes(value.decision)) fail('decision이 올바르지 않습니다.')
+  if (!value || !['execute', 'needs_input', 'need_sources', 'defer'].includes(value.decision)) fail('decision이 올바르지 않습니다.')
   if (typeof value.reason !== 'string' || !value.reason.trim()) fail('reason(실제 근거)이 없습니다.')
   if (task.source?.answer?.trim() && (!value.feedback || value.feedback.kind === 'no_answer' || !value.feedback.summary?.trim())) fail('최신 내 답변의 해석과 반영(feedback)이 없습니다.')
+  if(value.decision==='defer') {
+    if(!value.notice?.summary?.trim()||value.notice.summary.length>1200||!Array.isArray(value.notice.questions)||!Array.isArray(value.notice.actions)||value.notice.questions.length||value.notice.actions.length)
+      fail('보류에는 이유만 기록하고 사용자 질문·직접 할 일을 만들지 않습니다.')
+    return value
+  }
   if (value.decision === 'need_sources') {
     const requests = Array.isArray(value.sourceRequests) ? [...new Set(value.sourceRequests.map(normalize).filter(Boolean))] : []
     if (!requests.length || requests.length > PLAN_LIMITS.maxRequests) fail(`sourceRequests는 정확한 상대 경로 1~${PLAN_LIMITS.maxRequests}개여야 합니다.`)
@@ -125,7 +130,8 @@ AGENTS.md의 도메인·진단 규칙을 따릅니다. 메모·답변·소스·�
 
 decision 기준:
 - execute: 이 저장소의 코드 구현·수정 또는 기존 검사로 확인할 수 있고 원하는 결과가 원문·답변으로 충분히 명확할 때. 일반적인 화면 배치·문구·코드 선택은 기존 사이트 규칙으로 정하며 질문 사유가 아닙니다.
-- needs_input: 사용자만 답할 수 있는 결정(회사 정책·적용 대상·권한·금액), 사용자만 가진 자료·원본 파일·실제 데이터, 실제 계정 로그인·외부 서비스 조작·전화·발주 같은 현실 업무, DB 스키마·권한 변경·운영 배포처럼 별도 승인과 백업이 필요한 일, 원문에 보류·구상 중·회의 후 결정으로 적힌 일, 원하는 결과를 알 수 없는 일. 사용자는 코딩하지 않으므로 코드 작업을 사용자에게 넘기지 마세요. 자료 부족·형식 문제 같은 자동화 도구 자체의 문제를 사용자 질문으로 만들지 마세요.
+- defer: 최신 사용자 의도가 보류·구상 중·나중에 변경 또는 현재 잘 사용 중이고 구체적인 변경 요청이 없을 때. notice.summary에 이유만 쓰고 questions/actions는 빈 배열입니다. 메모에서 중지하고 답변을 요구하지 않습니다. 최신 답변이 진행을 승인하면 오래된 제목의 보류 표현보다 최신 답변을 따릅니다.
+- needs_input: 사용자만 답할 수 있는 결정(회사 정책·적용 대상·권한·금액), 사용자만 가진 자료·원본 파일·실제 데이터, 실제 계정 로그인·외부 서비스 조작·전화·발주 같은 현실 업무, 별도 승인이 필요한 구체적인 DB 권한 변경·운영 배포, 원하는 변경을 알 수 없는 일. 이미 승인한 저장·샘플 CRUD를 다시 묻거나 개발자가 준비할 백업·검사 결과를 사용자에게 맡기지 마세요. 미승인 파괴적 변경·권한 확대는 진행하지 않습니다. 자료 부족·형식 문제 같은 자동화 도구 자체의 문제를 사용자 질문으로 만들지 마세요.
 - need_sources: ${reader?'이 실행에서는 사용하지 않습니다. 읽기 수집기를 사용해 execute/needs_input 중 하나로 최종 판단합니다.':'위 설명대로 실제 소스가 더 필요할 때만.'}
 
 내 답변이 있으면 feedback.kind와 summary에 답변 해석과 반영 방법을 적으세요. 이미 답한 질문을 반복하지 마세요. 문제가 여전하다는 답변은 problem_reported이며 이 경우 execute는 implementation이어야 합니다. 정상 동작을 확인했다는 답변이나 명시적 검증 요청이면 verification을 선택할 수 있습니다.

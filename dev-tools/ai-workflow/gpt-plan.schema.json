@@ -1,7 +1,7 @@
 {
   "type": "object",
   "properties": {
-    "decision": { "type": "string", "enum": ["execute", "needs_input", "need_sources"] },
+    "decision": { "type": "string", "enum": ["execute", "needs_input", "need_sources", "defer"] },
     "reason": { "type": "string" },
     "feedback": {
       "type": "object",

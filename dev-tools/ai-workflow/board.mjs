@@ -94,6 +94,7 @@ export class Board {
     }
     if (update.kind === 'complete') return this.complete(id, update)
     if (update.kind === 'needs_input') return this.recordNeedsInput(id, update)
+    if(update.kind==='deferred')return this.recordDeferred(id,update)
     if (update.kind === 'error') return this.recordError(id, snap, update)
     const stopped = task.state === '중지', placed = !update.expectLocations || update.expectLocations.includes(task.location)
     if (stopped || !placed) {
@@ -127,8 +128,16 @@ export class Board {
     const stored = plain(page.properties[p.result]?.rich_text)
     // Only the same failure delivery is a retry. A new failure in this cycle must be visible.
     if (stored === summary) return
-    await this.patch(id, { [p.state]: select('오류'), [p.result]: rich(summary),
+    await this.patch(id, { [p.state]: select('오류'), [p.result]: rich(summary),...(p.question?{[p.question]:rich('')}:{ }),
       ...(this.config.v2?.cursorPull?.enabled&&at.preparing ? { [p.location]: select(at.preparing) } : [at.working, at.reviewing].filter(Boolean).includes(task.location) ? { [p.location]: select(at.queued) } : {}) })
+    if(this.ledger)await this.notice(id,[summary,'사용자 답변을 기다리는 상태가 아닙니다. 자동화 담당자가 실행·검증 문제를 해결한 뒤 같은 작업을 재개합니다.'],{expectVersion:update.expectVersion,locations:[at.preparing,at.queued,task.location].filter(Boolean),state:'오류',runId:update.runId,cycleId:update.cycleId,eventId:update.eventId,title:'Atelier AI 자동화 오류 안내',icon:'⚠️'})
+  }
+  async recordDeferred(id,update) {
+    const snap=await this.requireStable(id,update.expectVersion),{task}=snap,p=this.props
+    if(!this.ownsExecution(id,update)||update.expectVersion&&task.version!==update.expectVersion)return
+    if(update.expectLocations&&!update.expectLocations.includes(task.location))return
+    await this.patch(id,{[p.location]:select(this.at.memo),[p.state]:select('중지'),[p.result]:rich(this.resultText(update)),[p.question]:rich('')})
+    await this.notice(id,[update.summary,'사용자 답변 요청이 아닙니다. 보류·구상 메모를 유지하며 자동 실행하지 않습니다. 진행할 내용이 정해지면 자동화 단계를 대기로 바꾸고 GPT 준비로 옮기면 됩니다.'],{expectVersion:update.expectVersion,locations:[this.at.memo],state:'중지',runId:update.runId,cycleId:update.cycleId,eventId:update.eventId,title:'Atelier AI 보류 안내',icon:'⏸️'})
   }
   async recordNeedsInput(id, update) {
     if (!this.ownsExecution(id, update)) return
@@ -366,8 +375,8 @@ export class Board {
     if (!(await allow())) return 'stale'
     const record = ledger.begin(id, { kind: 'notice', runId: guard.runId ?? null, cycleId: guard.cycleId ?? null, eventId })
     const created = await this.notion.api(`blocks/${id}/children`, 'PATCH', { children: [{ object: 'block', type: 'callout', callout: {
-      rich_text: [{ type: 'text', text: { content: noticeTitle(guard.runId) } }, provenanceSpan(record.nonce)],
-      icon: { type: 'emoji', emoji: '❓' }, children: lines.map(paragraph) } }] })
+      rich_text: [{ type: 'text', text: { content: guard.title??noticeTitle(guard.runId) } }, provenanceSpan(record.nonce)],
+      icon: { type: 'emoji', emoji: guard.icon??'❓' }, children: lines.map(paragraph) } }] })
     await ledger.adoptResponse(this.notion, id, record, created)
     if (!(await allow())) return 'stale'
     const written = (await owned()).filter(item => item.record.eventId === eventId && item.block?.id)

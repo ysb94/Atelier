@@ -13,6 +13,7 @@ import { runCommand } from './process.mjs'
 import { reviewIntegration } from './integration-review.mjs'
 import { CONTROL_PROPERTIES, REFLECTION } from './control.mjs'
 import { Pipeline } from './pipeline.mjs'
+import {validateGptPlan} from './gpt-planner.mjs'
 
 const config = {
   positions: {memo:'메모', answered:'답변 완료', queued:'자동화 할 일', working:'자동화 작업 중', reviewing:'검토 중', needsInput:'확인 필요', done:'완료'},
@@ -69,6 +70,24 @@ test('two GPT slots admit a second planning job while the first is active',()=>{
   o.active.set('one',{job:{cycle:{phase:'planning'}}});assert.equal(o.planningFull(),false)
   o.active.set('two',{job:{cycle:{phase:'planning'}}});assert.equal(o.planningFull(),true)
   assert.equal(o.residentLimit(),8)
+})
+
+test('deferral parks a memo with a reason and no user question, with durable delivery recovery',async()=>{
+  const o=setup(),f=fakeBoard();o.board=f.board;o.board.ledger=new GeneratedBlockLedger(o.store)
+  const notice={summary:'창고 개편 전까지 보류한다는 요청을 유지합니다.',questions:[],actions:[]}
+  assert.equal(validateGptPlan({decision:'defer',reason:'사용자 보류',notice},'.',{}).decision,'defer')
+  assert.throws(()=>validateGptPlan({decision:'defer',reason:'보류',notice:{...notice,questions:['진행할까요?']}},'.',{}))
+  const job={key:'p',task:{id:'p'},runId:'r',cycle:{id:'c',sourceVersion:'v1',phase:'planning'}};o.journal().jobs.p=job
+  o.setStatus=()=>{};await o.defer({job,controller:new AbortController()},notice)
+  assert.equal(job.phase,'deferred');assert.equal(job.cycle.outcome,'deferred');assert.equal(f.page.properties.location.select.name,config.positions.memo);assert.equal(f.page.properties.state.select.name,'중지');assert.deepEqual(f.page.properties.question.rich_text,[])
+  assert.equal(o.recoverableDelivery(job).update.kind,'deferred')
+})
+
+test('operator verification requests and empty questions cannot enter user confirmation',async()=>{
+  const o=setup(),entry={job:{cycle:{}},controller:new AbortController()}
+  await assert.rejects(o.askUser(entry,{summary:'서류 출력 화면 검사 결과가 없어 완료할 수 없습니다.',questions:['합성 브라우저 결과가 필요합니다.'],actions:[]}),/자동화 담당자/)
+  await assert.rejects(o.askUser(entry,{summary:'대기',questions:[],actions:[]}),/질문.*없는/)
+  assert.equal(o.store.data.outbox.length,0)
 })
 
 test('publication recovery restores its live lane without replanning or losing the passed review',async()=>{
