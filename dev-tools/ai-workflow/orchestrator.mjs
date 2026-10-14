@@ -234,7 +234,7 @@ export class Orchestrator {
   summarize(c) {
     return { id: c.id, trigger: c.trigger, outcome: c.outcome ?? 'interrupted', startedAt: c.startedAt, endedAt: c.endedAt ?? null, settings: c.settings,
       plan: c.plan ? { decision: c.plan.decision, executionKind: c.plan.executionKind, request: c.plan.request, criteria: c.plan.criteria, files: c.plan.files, feedback: c.plan.feedback } : null,
-      notice: c.notice ?? null, attempts: c.attempt, lastReview: c.lastReview ?? null, restored: c.restored ?? [], error: c.error?.message ?? null,
+      notice: c.notice ?? null, attempts: c.attempt, lastReview: c.lastReview ?? null, restored: c.restored ?? [], error: c.error?.message ?? null, sourceChange:c.sourceChange ?? null,
       reviewedAnchor: c.reviewedAnchor ?? null, commitSha: c.commitSha ?? null, publishedSha: c.publishedSha ?? null, pr: c.pr ? { number: c.pr.number, url: c.pr.url, headSha: c.pr.headSha } : null }
   }
   launch(job) {
@@ -342,7 +342,11 @@ export class Orchestrator {
     const c = entry.job.cycle
     if (task.state === '중지') return this.abort(entry, 'stopped', '사용자가 자동 실행을 중지했습니다.')
     if (!this.board.automationLocations().includes(task.location)) return this.abort(entry, 'stopped', '사용자가 카드를 자동화 밖으로 옮겼습니다.')
-    if (task.version !== c.sourceVersion) return this.abort(entry, 'superseded', '작업 중 원문이 바뀌어 최신 내용으로 다시 계획합니다.')
+    if (task.version !== c.sourceVersion) {
+      c.sourceChange = {at:iso(),before:c.sourceVersion,after:task.version,
+        fields:Object.keys(task.source ?? {}).filter(key=>JSON.stringify(task.source[key])!==JSON.stringify(entry.job.task.source?.[key]))}
+      return this.abort(entry, 'superseded', '작업 중 원문이 바뀌어 최신 내용으로 다시 계획합니다.')
+    }
     if (c.phase === 'publishing') {
       const live = [this.config.positions.working, this.config.positions.reviewing].filter(Boolean)
       if (!live.includes(task.location)) this.abort(entry, 'stopped', '게시 중 카드 위치가 바뀌었습니다.')
@@ -451,15 +455,12 @@ export class Orchestrator {
       const baseline = sourceFingerprint(await snapshot(ws))
       const bundle = planningSources(ws, task, { changed, requested })
       const prompt = gptPlanPrompt({ task, trigger: c.trigger, history: job.history, previous, bundle, scripts, invalid, remainingSourceRounds: maxRounds - rounds })
-      // Durable output per exact input, including the workspace snapshot the plan was allowed to use.
-      const key = createHash('sha256').update(JSON.stringify([c.id, task.version, invalid, previous.diff, baseline.digest, bundle.files.map(file => [file.path, file.sha256]), bundle.unavailable])).digest('hex').slice(0, 16)
+      // Reuse identical source/model/prompt across cycles and restarts. The full
+      // workspace digest still invalidates cached plans when any code changes.
+      const key = createHash('sha256').update(JSON.stringify([c.settings.gpt, prompt, baseline.digest])).digest('hex').slice(0, 24)
       const outputFile = path.join(runDir, `plan-${key}.json`)
-      let report
-      if (fs.existsSync(outputFile)) report = redact(fs.readFileSync(outputFile, 'utf8'), this.config.env)
-      else {
-        fs.writeFileSync(path.join(runDir, `plan-${key}.prompt.txt`), prompt)
-        report = (await this.gpt({ config: this.config, root: ws, gpt: c.settings.gpt, prompt, schemaFile: path.join(toolDir, 'gpt-plan.schema.json'), outputFile, signal })).report
-      }
+      fs.writeFileSync(path.join(runDir, `plan-${key}.prompt.txt`), prompt)
+      const { report } = await this.gpt({ config: this.config, root: ws, gpt: c.settings.gpt, prompt, schemaFile: path.join(toolDir, 'gpt-plan.schema.json'), outputFile, signal, cacheContext:baseline.digest })
       let value
       try { value = validateGptPlan(JSON.parse(report), ws, task, { changed }) }
       catch (error) {
@@ -481,7 +482,9 @@ export class Orchestrator {
         break
       }
       if (rounds >= maxRounds) throw new EnvironmentError('GPT가 허용 횟수를 넘겨 추가 소스를 요청했습니다. 근거 없이 계획하지 않습니다.', { retry: false, code: 'plan_sources' })
-      rounds++; requested = [...new Set([...requested, ...value.sourceRequests])]
+      const extra = value.sourceRequests.filter(item => !requested.includes(item) && !bundle.files.some(file=>file.path===item && file.complete))
+      if (!extra.length) throw new EnvironmentError('GPT가 이미 받은 소스만 다시 요청하여 중복 호출을 막았습니다. 미제공 줄 구간을 지정해야 합니다.', { retry:false, code:'plan_sources' })
+      rounds++; requested = [...new Set([...requested, ...extra])]
     }
     if (!plan) throw new EnvironmentError('GPT 실행 계획을 받지 못했습니다.', { retry: false, code: 'plan_invalid' })
     fs.writeFileSync(path.join(runDir, `plan-${c.id}.json`), JSON.stringify(plan, null, 2))

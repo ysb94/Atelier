@@ -20,9 +20,9 @@ export function runCommand(command, args, { cwd, input, timeoutMs = 120000, sign
     child.once('error', error => { clearTimeout(timer); signal?.removeEventListener('abort', stop); reject(error) })
     child.once('close', code => {
       clearTimeout(timer); signal?.removeEventListener('abort', stop)
-      if (timedOut || signal?.aborted) return reject(new Error(timedOut ? '실행 시간 제한 초과' : '작업 중지됨'))
       const result = { code, output: redact(output, env), stderr: redact(errorOutput, env) }
-      if (!acceptedCodes.includes(code)) return reject(new Error(`명령 실패 (${code}): ${result.stderr.slice(-1800) || result.output.slice(-1800)}`))
+      if (timedOut || signal?.aborted) return reject(Object.assign(new Error(timedOut ? '실행 시간 제한 초과' : '작업 중지됨'), {commandResult:result}))
+      if (!acceptedCodes.includes(code)) return reject(Object.assign(new Error(`명령 실패 (${code}): ${result.stderr.slice(-1800) || result.output.slice(-1800)}`), {commandResult:result}))
       resolve(result)
     })
     child.stdin.on('error', error => { if (error.code !== 'EPIPE') console.warn('[ai-workflow] 입력 전달 실패', error.message) })

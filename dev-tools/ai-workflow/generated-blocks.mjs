@@ -7,7 +7,9 @@ export const GENERATED_BLOCK_KINDS = Object.freeze(['notice', 'report', 'toggle'
 const NONCE = new RegExp(`${PROVENANCE_PREFIX}([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})`, 'i')
 
 export function provenanceSpan(nonce) {
-  return { type: 'text', text: { content: '\u200b', link: { url: `https://atelier.invalid/#${PROVENANCE_PREFIX}${nonce}` } } }
+  // Notion removes zero-width-only rich text, including its link. Keep a visible
+  // label so a lost append response can still be recovered by the nonce.
+  return { type: 'text', text: { content: ' · 자동화 기록', link: { url: `https://atelier.invalid/#${PROVENANCE_PREFIX}${nonce}` } } }
 }
 
 export function stampCallout(block, nonce) {
@@ -143,7 +145,11 @@ export class GeneratedBlockLedger {
   async adoptResponse(notion, pageId, record, response) {
     if (record.retired) return null
     if (record.blockId) return record.blockId
-    const direct = (response?.results ?? []).find(block => block?.id && nonceInBlock(block) === record.nonce)
+    const results = response?.results ?? []
+    const direct = results.find(block => block?.id && nonceInBlock(block) === record.nonce)
+      // All callers append exactly one generated block. The response to our own
+      // write is authoritative even when Notion normalizes its rich text.
+      ?? (results.length === 1 && results[0]?.id && !nonceInBlock(results[0]) && ['callout', 'toggle'].includes(results[0].type) ? results[0] : null)
     if (direct?.id) {
       record.blockId = direct.id
       this.save()
