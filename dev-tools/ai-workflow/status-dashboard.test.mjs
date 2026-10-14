@@ -6,6 +6,15 @@ const controls={ok:true,values:{enabled:true,gptModel:'gpt-6-luna',gptEffort:'me
 const health={tool:'atelier-ai-workflow',activeCount:2,tasks:[{phase:'reviewing',branch:'a',waitingStage:null},{phase:'implementing',branch:'b',waitingStage:null}],pipeline:{planning:{running:0,waiting:0},implementation:{running:1,waiting:0},review:{running:1,waiting:1}}}
 const jobs={a:{branch:'a',cycle:{settings:{gpt:{model:'gpt-6-sol',effort:'high'}}}},b:{branch:'b',cycle:{settings:{cursorModel:'grok-4.7-xhigh-fast'}}}}
 
+test('shared GPT workers display their current role instead of fixed planning and review columns',()=>{
+  const h={...health,gptWorkers:{limit:2},tasks:[{branch:'a',task:'회의 검수',phase:'reviewing',gptStage:'review',gptSlot:1},{branch:'c',task:'일정 지시서',phase:'planning',gptStage:'planning',gptSlot:2}]}
+  const view=dashboardSnapshot({health:h,controls,jobs})
+  assert.match(view.rows.gpt1,/검사·검수 중.*gpt-6-sol \/ high/)
+  assert.match(view.rows.gpt2,/계획 중/)
+  assert.match(view.content,/GPT 1:/);assert.match(view.content,/GPT 2:/)
+  assert.doesNotMatch(view.content,/GPT 계획:/);assert.doesNotMatch(view.content,/GPT 검수:/)
+})
+
 test('dashboard shows actual pinned models separately from settings and leaves an idle stage waiting',()=>{
   const view=dashboardSnapshot({health,controls,jobs})
   assert.match(view.content,/자동화 켜짐/)

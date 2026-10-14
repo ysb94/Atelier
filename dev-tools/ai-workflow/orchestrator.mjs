@@ -96,7 +96,8 @@ export class Orchestrator {
   }
   get busy() { return this.active.size > 0 }
   limit() { return this.config.maxParallelTasks ?? 2 }
-  residentLimit() { return this.pipeline ? this.pipeline.readyLimit + Object.values(this.pipeline.limits).reduce((sum, count) => sum + count, 0) : this.limit() }
+  residentLimit() { return this.pipeline ? this.pipeline.readyLimit + (this.pipeline.gptWorkers ? this.pipeline.gptWorkers+this.pipeline.limits.implementation : Object.values(this.pipeline.limits).reduce((sum, count) => sum + count, 0)) : this.limit() }
+  planningFull() { return [...this.active.values()].filter(entry=>entry.job.cycle?.phase==='planning'&&!entry.job.cycle?.outcome).length >= (this.pipeline?.limits.planning??1) }
   journal() { return this.store.data.v2 ??= { jobs: {}, history: [], block: null, reconcileAt: 0 } }
   runDir(job) { return this.store.runDir(job) }
 
@@ -207,7 +208,7 @@ export class Orchestrator {
       const c = job?.cycle
       const unprepared = !c || job?.phase === 'done' || c.phase === 'planning' || !IN_FLIGHT.includes(c.phase) ||
         ['needs_input', 'superseded', 'done', 'stopped'].includes(c.outcome)
-      const planningBusy = [...this.active.values()].some(entry => entry.job.cycle?.phase === 'planning' && !entry.job.cycle?.outcome)
+      const planningBusy = this.planningFull()
       if (unprepared && (!this.pipeline.canPlan() || planningBusy)) return
     }
     const snap = await this.board.read(page.id)
@@ -222,7 +223,7 @@ export class Orchestrator {
       const resumes = !mustReplan && job?.phase !== 'done' && c && IN_FLIGHT.includes(c.phase) &&
         !['needs_input', 'superseded', 'done', 'stopped'].includes(c.outcome) && c.sourceVersion === snap.task.version
       const needsPlanning = !resumes || c.phase === 'planning'
-      if (needsPlanning && (!this.pipeline.canPlan() || [...this.active.values()].some(entry => entry.job.cycle?.phase === 'planning' && !entry.job.cycle?.outcome))) return
+      if (needsPlanning && (!this.pipeline.canPlan() || this.planningFull())) return
       // Already prepared instructions can still enter Cursor's bounded queue.
       if (!needsPlanning && (c.phase === 'planned' || c.phase === 'implementing' && c.implementationStarted === false) && this.pipeline.queued('implementation') >= this.pipeline.readyLimit) return
     }
@@ -453,6 +454,9 @@ export class Orchestrator {
     this.setStatus(entry, label)
     const release = await this.pipeline.acquire(stage, { key: entry.job.key, files: entry.job.cycle.plan?.files ?? [], signal: entry.controller.signal })
     delete entry.waitingStage
+    entry.gptSlot=this.pipeline.running.get(entry.job.key)?.gptSlot??null
+    entry.gptStage=entry.gptSlot?stage:null
+    this.status()
     const started = this.now()
     try { this.alive(entry); await this.assertFresh(entry); return await work() }
     finally {
@@ -460,6 +464,8 @@ export class Orchestrator {
       c.stageTimeMs ??= {}
       c.stageTimeMs[stage] = (c.stageTimeMs[stage] ?? 0) + this.now() - started
       try { this.store.save() } finally {
+        delete entry.gptSlot
+        delete entry.gptStage
         release()
         // Hand off the prepared plan, then immediately revisit reviews and the next memo.
         if (stage === 'planning' && !this.stopping) Promise.resolve(this.tick()).catch(error => console.warn('[ai-workflow] 계획 후 다음 작업 확인 실패', redact(error.message, this.config.env)))
@@ -958,11 +964,12 @@ export class Orchestrator {
     } catch (error) { console.warn('[ai-workflow] 통합 브랜치 확인 실패', redact(error.message, this.config.env)) }
   }
   status() {
-    const tasks = [...this.active.values()].map(entry => ({ task: entry.job.task.title, state: entry.status.state, phase: entry.job.cycle?.phase, waitingStage: entry.waitingStage ?? null, attempt: entry.job.cycle?.attempt ?? 0, branch: entry.job.branch }))
+    const tasks = [...this.active.values()].map(entry => ({ task: entry.job.task.title, state: entry.status.state, phase: entry.job.cycle?.phase, waitingStage: entry.waitingStage ?? null,gptSlot:entry.gptSlot??null,gptStage:entry.gptStage??null, attempt: entry.job.cycle?.attempt ?? 0, branch: entry.job.branch }))
     const values = this.controls?.values
     this.onStatus({ state: tasks.length > 1 ? '병렬 작업 중' : tasks[0]?.state ?? (this.admission ? (this.admission.paused ? '일시 중지' : '중지') : '대기'),
       workflow: 'v2', activeCount: tasks.length, limit: this.limit(), residentLimit: this.residentLimit(), ...(this.pipeline ? { pipeline: this.pipeline.status() } : {}), tasks,
       cursorQueue:{enabled:this.config.v2?.cursorPull?.enabled===true,source:this.config.positions.queued,pollMs:this.config.v2?.cursorPull?.pollMs??null},
+      gptWorkers:this.pipeline?.gptWorkers?{limit:this.pipeline.gptWorkers,running:this.pipeline.gptCount(),waiting:this.pipeline.queued('planning')+this.pipeline.queued('review')}:null,
       controls: values ? { gptModel: values.gptModel, gptEffort: values.gptEffort, cursorModel: values.cursorModel, enabled: values.enabled, baseBranch: values.baseBranch, integrationBranch: values.integrationBranch } : null,
       ...(this.admission ? { admission: this.admission } : {}),
       integrationReview: integrationReviewLine(readLatestIntegrationReview(), this.journal().integrationHead) || null,
@@ -972,7 +979,7 @@ export class Orchestrator {
     const count = this.active.size, admission = this.admission
     const tasks = [...this.active.values()].map(entry => `${oneLine(entry.job.task.title).slice(0, 40)}: ${entry.status.state}`).join(' / ')
     const stages = this.pipeline?.status()
-    const flow = stages ? `GPT 계획 ${stages.planning.running}/${stages.planning.limit} · Cursor ${stages.implementation.running}/${stages.implementation.limit} · 검사·GPT 검수 ${stages.review.running}/${stages.review.limit}\n준비 지시서 대기 ${stages.implementation.waiting} · 검수 대기 ${stages.review.waiting} · 계획 대기 ${stages.planning.waiting}` : null
+    const flow = stages ? `${this.pipeline.gptWorkers?`GPT 공용 실행 ${this.pipeline.gptCount()}/${this.pipeline.gptWorkers} · 계획 ${stages.planning.running} · 검수 ${stages.review.running}`:`GPT 계획 ${stages.planning.running}/${stages.planning.limit} · 검사·GPT 검수 ${stages.review.running}/${stages.review.limit}`} · Cursor ${stages.implementation.running}/${stages.implementation.limit}\n준비 지시서 대기 ${stages.implementation.waiting} · 검수 대기 ${stages.review.waiting} · 계획 대기 ${stages.planning.waiting}` : null
     const head = admission ? (admission.paused ? `일시 중지 · 진행 중 ${count}건은 끝까지 진행` : `중지: ${admission.reason}`) : flow ?? `실행 중 · 작업 ${count}/${this.limit()}`
     const reviewLine = integrationReviewLine(readLatestIntegrationReview(), this.journal().integrationHead)
     const text = `${head}${tasks ? `\n${tasks}` : ''}${reviewLine ? `\n${reviewLine}` : ''}`

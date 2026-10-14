@@ -12,6 +12,7 @@ import { TaskGit } from './git-task.mjs'
 import { runCommand } from './process.mjs'
 import { reviewIntegration } from './integration-review.mjs'
 import { CONTROL_PROPERTIES, REFLECTION } from './control.mjs'
+import { Pipeline } from './pipeline.mjs'
 
 const config = {
   positions: {memo:'메모', answered:'답변 완료', queued:'자동화 할 일', working:'자동화 작업 중', reviewing:'검토 중', needsInput:'확인 필요', done:'완료'},
@@ -43,6 +44,32 @@ function fakeBoard() {
   return {board:new Board(config,notion),page,setVersion:v=>{version=v},onPatch:fn=>{onPatch=fn}}
 }
 const question={v2:true,kind:'needs_input',runId:'run',cycleId:'cycle',eventId:'question-event',expectVersion:'v1',expectLocations:[config.positions.working],summary:'확인해 주세요',question:'적용 대상은?',lines:['적용 대상은?']}
+
+test('two shared GPT workers switch between planning and review, prioritizing waiting reviews without exceeding two',async()=>{
+  const p=new Pipeline({planning:2,review:2,gptWorkers:2}),signal=new AbortController().signal
+  const first=await p.acquire('planning',{key:'p1',signal}),second=await p.acquire('planning',{key:'p2',signal})
+  assert.equal(p.gptCount(),2);assert.deepEqual([...p.running.values()].map(item=>item.gptSlot),[1,2])
+  let planned=false,reviewed=false
+  const pendingPlan=p.acquire('planning',{key:'p3',signal}).then(release=>{planned=true;return release})
+  const pendingReview=p.acquire('review',{key:'r1',signal}).then(release=>{reviewed=true;return release})
+  first();const review=await pendingReview
+  assert.equal(reviewed,true);assert.equal(planned,false);assert.equal(p.gptCount(),2)
+  second();const plan=await pendingPlan
+  assert.equal(p.count('review'),1);assert.equal(p.count('planning'),1);assert.equal(p.gptCount(),2)
+  review();plan()
+  const r1=await p.acquire('review',{key:'r2',signal}),r2=await p.acquire('review',{key:'r3',signal})
+  assert.equal(p.count('review'),2);assert.equal(p.canPlan(),false)
+  const c1=await p.acquire('implementation',{key:'c1',signal}),c2=await p.acquire('implementation',{key:'c2',signal})
+  assert.equal(p.gptCount(),2);assert.equal(p.count('implementation'),2)
+  c1();c2();r1();r2();assert.equal(p.gptCount(),0)
+})
+
+test('two GPT slots admit a second planning job while the first is active',()=>{
+  const o=setup();o.pipeline=new Pipeline({planning:2,review:2,gptWorkers:2})
+  o.active.set('one',{job:{cycle:{phase:'planning'}}});assert.equal(o.planningFull(),false)
+  o.active.set('two',{job:{cycle:{phase:'planning'}}});assert.equal(o.planningFull(),true)
+  assert.equal(o.residentLimit(),8)
+})
 
 test('Cursor readiness requires completed instructions and the latest source, never an active or failed implementation',()=>{
   const job={phase:'active',cycle:{phase:'planned',sourceVersion:'v1',plan:{decision:'execute'},writeBase:{digest:'code'}}}

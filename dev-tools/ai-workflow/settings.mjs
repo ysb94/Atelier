@@ -28,7 +28,8 @@ function validateV2(config) {
   const v2=config.v2,text=value=>typeof value==='string'&&value.trim().length>0
   if(v2.cursorPull?.enabled&&(!text(config.positions.preparing)||!Number.isInteger(v2.cursorPull.pollMs)||v2.cursorPull.pollMs<5000))throw new Error('Cursor 목록 조회에는 GPT 준비 위치와 5초 이상의 pollMs가 필요합니다.')
   if (v2.pipeline?.enabled) {
-    for (const [key, max] of [['planning', 1], ['implementation', 2], ['review', 1], ['readyLimit', 4], ['reviewBacklog', 3]]) {
+    if(v2.pipeline.gptWorkers!==undefined&&(!Number.isInteger(v2.pipeline.gptWorkers)||v2.pipeline.gptWorkers<1||v2.pipeline.gptWorkers>2))throw new Error('GPT 공용 실행 자리는 1~2개여야 합니다.')
+    for (const [key, max] of [['planning', v2.pipeline.gptWorkers??1], ['implementation', 2], ['review', v2.pipeline.gptWorkers??1], ['readyLimit', 4], ['reviewBacklog', 3]]) {
       const value = v2.pipeline[key]
       if (!Number.isInteger(value) || value < 1 || value > max) throw new Error(`v2.pipeline.${key}는 1~${max} 정수여야 합니다.`)
     }

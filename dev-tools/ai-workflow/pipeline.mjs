@@ -1,7 +1,8 @@
 // Stage permits are transient; durable job phases reconstruct queues after restart.
 export class Pipeline {
-  constructor({ planning = 1, implementation = 2, review = 1, readyLimit = 4, reviewBacklog = 3, onChange = () => {} } = {}) {
+  constructor({ planning = 1, implementation = 2, review = 1, gptWorkers = null, readyLimit = 4, reviewBacklog = 3, onChange = () => {} } = {}) {
     this.limits = { planning, implementation, review }
+    this.gptWorkers = gptWorkers
     this.readyLimit = readyLimit
     this.reviewBacklog = reviewBacklog
     this.onChange = onChange
@@ -11,8 +12,9 @@ export class Pipeline {
   }
   count(stage) { return [...this.running.values()].filter(item => item.stage === stage).length }
   queued(stage) { return this.waiters.filter(item => item.stage === stage).length }
+  gptCount() { return this.count('planning')+this.count('review') }
   canPlan() {
-    return this.count('planning') < this.limits.planning && this.queued('planning') === 0 &&
+    return (!this.gptWorkers||this.gptCount()<this.gptWorkers) && this.count('planning') < this.limits.planning && this.queued('planning') === 0 &&
       this.queued('review') === 0 && this.queued('implementation') < this.readyLimit &&
       this.queued('review') + this.count('review') < this.reviewBacklog
   }
@@ -36,6 +38,7 @@ export class Pipeline {
   }
   eligible(item) {
     if (this.count(item.stage) >= this.limits[item.stage]) return false
+    if(this.gptWorkers&&['planning','review'].includes(item.stage)&&this.gptCount()>=this.gptWorkers)return false
     if (item.stage === 'planning' && (this.queued('review') > 0 || this.queued('implementation') >= this.readyLimit ||
       this.queued('review') + this.count('review') >= this.reviewBacklog)) return false
     if (item.stage === 'implementation') {
@@ -52,6 +55,10 @@ export class Pipeline {
       if (!this.eligible(item)) { i++; continue }
       this.waiters.splice(i, 1)
       item.signal.removeEventListener('abort', item.abort)
+      if(this.gptWorkers&&['planning','review'].includes(item.stage)){
+        const used=new Set([...this.running.values()].map(run=>run.gptSlot))
+        item.gptSlot=Array.from({length:this.gptWorkers},(_,i)=>i+1).find(slot=>!used.has(slot))
+      }
       this.running.set(item.key, item)
       if (item.stage === 'implementation') {
         const files = this.reservations.get(item.key) ?? new Set()
