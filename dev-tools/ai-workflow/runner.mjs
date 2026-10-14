@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { taskFiles, redact, projectRoot,toolDir } from './settings.mjs'
-import { snapshot, readFile, mapContext, evidence, changedPaths } from './workspace.mjs'
+import { snapshot, readFile, mapContext, evidence, changedPaths, digest } from './workspace.mjs'
 import { runCursor, NeedsInput } from './acp.mjs'
 import { runReview, validateReview } from './reviewer.mjs'
 import { runCommand } from './process.mjs'
@@ -27,6 +27,16 @@ export function checkFailureOutput(error,env) {
   const result=error.commandResult,raw=result?result.output+'\n'+result.stderr:error.message
   return redact(raw.length>8000?raw.slice(0,2000)+'\n[중간 로그 생략; 실패 시작과 마지막 진단을 보존]\n'+raw.slice(-6000):raw,env)
 }
+export async function navigationCheckProvenance(root, args, signal, run=runCommand) {
+  const relative='scripts/verify-work-request-navigation.mjs',script=path.join(projectRoot,relative),taskScript=path.join(root,relative)
+  const source=fs.readFileSync(script,'utf8'),taskSource=fs.readFileSync(taskScript,'utf8')
+  const comparison=await run('git',['diff','--no-index','--no-ext-diff','--',taskScript,script],{cwd:root,signal,acceptedCodes:[0,1]})
+  return {kind:'manager-validator',command:[process.execPath,...args],cwd:root,targetRoot:fs.realpathSync(root),
+    script:{path:script,sha256:digest(source)},taskScript:{path:taskScript,sha256:digest(taskSource)},
+    difference:comparison.output.length<=6000?comparison.output:null,differenceChars:comparison.output.length,
+    proofValidator:fs.readFileSync(path.join(toolDir,'navigation-proof.mjs'),'utf8'),
+    reason:'관리자 검사는 이 작업 폴더의 앱 소스를 읽습니다. 코드 문장 일치 대신 현재 소스 해시와 일치하는 브라우저 결과로 4개 부서 × 5개 URL의 탭 식별자·query 계약을 확인합니다. 기존 URL·초안·권한·뒤로가기·이미지 검사는 그대로 실행합니다. 작업 브랜치의 검사 스크립트를 수정한 것이 아닙니다.'}
+}
 export async function verification(config, root, signal) {
   const scripts=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).scripts
   const checks=[],scenarios=browserScenariosFor(config.reviewPlan)
@@ -40,8 +50,9 @@ export async function verification(config, root, signal) {
     try {
       const browserIdentity=name==='verify:work-request-navigation'&&checks.some(check=>check.name==='verify:browser-navigation'&&check.passed)
       const args=browserIdentity?['--experimental-strip-types',path.join(projectRoot,'scripts/verify-work-request-navigation.mjs'),root,path.join(root,'dev-tools/ai-workflow/.state/browser/navigation.json')]:[npmCli(),'run',name]
+      const provenance=browserIdentity?await navigationCheckProvenance(root,args,signal):undefined
       const result=await runCommand(process.execPath,args,{cwd:root,signal,timeoutMs:300000})
-      checks.push({name,passed:true,output:(result.output+'\n'+result.stderr).slice(-18000)})
+      checks.push({name,passed:true,output:(result.output+'\n'+result.stderr).slice(-18000),...(provenance?{provenance}:{})})
     } catch(error) {
       if(signal?.aborted)throw error
       checks.push({name,passed:false,output:checkFailureOutput(error,config.env)})

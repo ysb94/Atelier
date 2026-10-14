@@ -10,7 +10,7 @@ import { taskFiles, redact, projectRoot, cursorServers, cursorPlugins, settings 
 import { permissionDecision } from './acp.mjs'
 import { validateReview, reviewEnvironmentProblem } from './reviewer.mjs'
 import { Store, acquireLock } from './store.mjs'
-import { Runner } from './runner.mjs'
+import { Runner, navigationCheckProvenance } from './runner.mjs'
 import { runCommand, childEnv } from './process.mjs'
 import { publicMcpConfig } from './mcp.mjs'
 
@@ -76,7 +76,21 @@ test('pass needs all criteria and real evidence; revision needs next prompt',()=
 })
 test('reviewer infrastructure failures are distinguished from code defects',()=>{
   assert.match(reviewEnvironmentProblem({...pass,decision:'revise',summary:'검토 실패',issues:['app-server socket directory must be a user-owned directory with mode 0700']}),/socket directory/)
+  assert.match(reviewEnvironmentProblem({...pass,decision:'needs_input',issues:['검증 실행 담당자가 현재 검사 내용과 성공 기록이 일치하는지 확인해야 합니다.']}),/검증 실행 담당자/)
   assert.equal(reviewEnvironmentProblem({...pass,decision:'revise',issues:['이미지 기본 너비 계산이 잘못되었습니다.']}),undefined)
+})
+test('manager navigation checks identify the executed script and unchanged task workspace',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'atelier-validator-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}))
+  fs.mkdirSync(path.join(root,'scripts'));const script=path.join(root,'scripts/verify-work-request-navigation.mjs');fs.writeFileSync(script,'original task validator')
+  const args=['--experimental-strip-types',path.join(projectRoot,'scripts/verify-work-request-navigation.mjs'),root,'proof.json']
+  const proof=await navigationCheckProvenance(root,args,undefined,async(command,passed,options)=>{
+    assert.equal(command,'git');assert.deepEqual(options.acceptedCodes,[0,1]);assert.equal(options.cwd,root);assert.equal(passed.at(-2),script)
+    return {output:'exact script comparison'}
+  })
+  assert.equal(proof.kind,'manager-validator');assert.equal(proof.targetRoot,fs.realpathSync(root));assert.deepEqual(proof.command,[process.execPath,...args])
+  assert.notEqual(proof.script.sha256,proof.taskScript.sha256);assert.equal(proof.difference,'exact script comparison')
+  assert.match(proof.proofValidator,/sourceHashes/);assert.match(proof.proofValidator,/owners.length\*searches.length/)
+  assert.equal(fs.readFileSync(script,'utf8'),'original task validator')
 })
 test('actual baseline diff, revision, re-review, completion and duplicate suppression',async t=>{
   const f=await fixture(t);let works=0,reviews=0
