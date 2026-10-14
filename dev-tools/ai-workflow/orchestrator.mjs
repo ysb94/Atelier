@@ -140,19 +140,15 @@ export class Orchestrator {
     const at = this.config.positions
     const recovered = new Map()
     if (this.pipeline) {
-      const lanes = [...new Set([at.working, at.reviewing].filter(Boolean))]
+      const lanes = [...new Set([at.reviewing, at.working].filter(Boolean))]
       const lists = await Promise.all(lanes.map(lane => this.board.list(lane)))
-      const pending = new Set(this.store.data.outbox.map(event => event.pageId))
       for (let i = 0; i < lanes.length; i++) {
-        recovered.set(lanes[i], lists[i])
-        for (const page of lists[i]) {
-          const job = this.journal().jobs[page.id], c = job?.cycle, state = this.board.stateOf(page)
-          if (!this.active.has(page.id) && !pending.has(page.id) && !['중지', '오류'].includes(state) && !c?.outcome &&
-            ['checking', 'reviewing', 'publishing'].includes(c?.phase)) this.pipeline.reserve(page.id, c.plan?.files ?? [])
-        }
+        const priority = page => ['checking', 'reviewing', 'publishing'].includes(this.journal().jobs[page.id]?.cycle?.phase) ? 0 : 1
+        recovered.set(lanes[i], lists[i].sort((a, b) => priority(a) - priority(b)))
       }
     }
-    for (const lane of [...new Set([at.working, at.reviewing, at.answered, at.queued, at.memo].filter(Boolean))]) {
+    const recoveryLanes = this.pipeline ? [at.reviewing, at.working] : [at.working, at.reviewing]
+    for (const lane of [...new Set([...recoveryLanes, at.answered, at.queued, at.memo].filter(Boolean))]) {
       if (this.stopping || this.active.size >= this.residentLimit()) return
       const pending = new Set(this.store.data.outbox.map(event => event.pageId))
       for (const page of recovered.get(lane) ?? await this.board.list(lane)) {
