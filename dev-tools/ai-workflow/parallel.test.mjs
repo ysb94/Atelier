@@ -18,7 +18,16 @@ async function fixture(t,files=['a.md','b.md','c.md']){
  fs.writeFileSync(path.join(root,'package.json'),'{}')
  for(const file of new Set(files))fs.writeFileSync(path.join(root,file),'사용자 기존 내용')
  const tasks=files.map((file,i)=>({id:'job-'+i,version:'v1',enabled:true,title:'작업 '+i,request:'문구 정리',criteria:'기존 내용 보존',files:file}))
- const updates=[],store=new Store(path.join(root,'.state')),notion={queue:async()=>tasks,task:async id=>({...tasks.find(task=>task.id===id)}),publish:async(id,u)=>{updates.push({id,...u})}}
+ const updates=[],store=new Store(path.join(root,'.state')),notion={queue:async()=>config.mode==='memo-board'?tasks.filter(task=>task.location==='자동화 할 일'):tasks,task:async id=>({...tasks.find(task=>task.id===id)}),publish:async(id,u)=>{
+  updates.push({id,...u})
+  if(config.mode!=='memo-board')return
+  const task=tasks.find(task=>task.id===id)
+  if(!['자동화 할 일','자동화 작업 중'].includes(task.location)||task.state==='중지')return
+  task.state=u.state??task.state
+  task.location=u.state==='완료'?'완료':['확인 필요','오류','중지'].includes(u.state)?'확인 필요'
+   :['구조 확인','대기'].includes(u.state)?'자동화 할 일':['작업 중','검토 중','수정 중'].includes(u.state)?'자동화 작업 중':task.location
+  task.enabled=['자동화 할 일','자동화 작업 중'].includes(task.location)
+ }}
  const config={maxParallelTasks:2,maxAttempts:2,env:{},verificationScripts:[]}
  const statuses=[],runner=new ParallelRunner({root,notion,store,config,refreshMap:async()=>{},verify:async()=>[{name:'actual-fixture',passed:true,output:'실제 파일 읽기'}],review:async()=>pass,onStatus:s=>statuses.push(s)})
  t.after(async()=>runner.stop())
@@ -35,11 +44,15 @@ test('write/read dependencies block overlap while shared reads remain independen
 })
 test('two real workers overlap in separate roots; a third waits; integration and reports finish once',async t=>{
  const f=await fixture(t);let running=0,peak=0,reviews=0,reviewPeak=0,reviewRunning=0
+ let releasePair;const pairReady=new Promise(resolve=>{releasePair=resolve})
  const roots=[]
  f.runner.cursor=async({root,files,prompt})=>{
   running++;peak=Math.max(peak,running);roots.push(root);assert.ok(prompt.includes(root));assert.ok(!prompt.includes('작업 폴더: '+f.root+'.'))
   assert.equal(fs.readFileSync(path.join(f.root,files[0]),'utf8'),'사용자 기존 내용')
-  fs.writeFileSync(path.join(root,files[0]),'완료 '+files[0]);await new Promise(resolve=>setTimeout(resolve,30));running--;return{report:'완료'}
+  fs.writeFileSync(path.join(root,files[0]),'완료 '+files[0])
+  if(roots.length===2)releasePair()
+  if(roots.length<=2)await pairReady
+  running--;return{report:'완료'}
  }
  f.runner.review=async({root,task,evidence})=>{reviewRunning++;reviewPeak=Math.max(reviewPeak,reviewRunning);reviews++;assert.equal(root,f.root);assert.equal(evidence.outside.length,0);assert.ok(fs.readFileSync(path.join(root,task.files),'utf8').startsWith('완료'));await new Promise(resolve=>setTimeout(resolve,10));reviewRunning--;return pass}
  await settle(f,3)
@@ -155,14 +168,16 @@ test('input feedback explains policy, actual screen checks and connection failur
  const policy=needsInputFeedback(task,'회사 정책 미정','어떤 직책을 출퇴근 기록에서 제외하나요?')
  assert.match(policy.summary,/회사에서 정해야/);assert.match(policy.question,/어떤 직책/);assert.match(policy.question,/내 답변/)
  const screen=needsInputFeedback(task,'총 3회 후 실제 로그인 브라우저 증거 부족: src/App.tsx Codex 검토')
- assert.match(screen.summary,/실제 로그인한 화면/);assert.match(screen.question,/화면·계정·결과/);assert.match(screen.question,/이미지 크기/);assert.doesNotMatch(screen.summary,/src\/|Codex/)
+ assert.match(screen.summary,/실제 로그인한 화면/);assert.match(screen.question,/자동화 실행기/);assert.match(screen.question,/이미지 크기/);assert.doesNotMatch(screen.summary,/src\/|Codex/)
  const connection=needsInputFeedback(task,'명령 실패 (1): Selected model is at capacity. raw JSON')
  assert.match(connection.summary,/실행 응답/);assert.doesNotMatch(connection.summary,/raw JSON|at capacity/)
  const answered={...task,source:{answer:'이미지 크기가 아직 다릅니다'}}
  const repeat=needsInputFeedback(answered,'실제 로그인한 화면 검증 증거 없음')
- assert.match(repeat.question,/같은 결과를 다시 적을 필요는 없습니다/);assert.match(repeat.question,/사이트 주소/)
+ assert.match(repeat.question,/같은 결과를 다시 적을 필요는 없습니다/);assert.match(repeat.question,/화면 검사 수단/)
  const stale=needsInputFeedback(answered,'자동화가 최신 답변에 맞는 실행 계획을 준비하지 못했습니다')
  assert.match(stale.summary,/작업 지시를 준비하지 못해/);assert.match(stale.question,/다시 작성할 필요가 없습니다/)
+ const database=needsInputFeedback(task,'로그인 화면과 실제 직원 정보, 팀장 직책을 확인했습니다. 데이터베이스 저장 공간 추가는 별도 승인과 백업이 필요합니다.','데이터베이스 저장 공간 추가를 승인하시나요?')
+ assert.match(database.summary,/데이터베이스와 접근 권한/);assert.doesNotMatch(database.summary,/실제 로그인한 화면|회사에서 정해야/)
 })
 
 test('interrupted task recovery retries after a transient source lookup failure',async t=>{

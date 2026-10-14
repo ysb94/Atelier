@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronLeft, ChevronRight, Download, LayoutGrid, List, Printer, Search, Settings2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
-import { canEditOrgAssignment } from '@/lib/company/capabilities'
+import { canEditOrgAssignment, isAttendanceExemptPosition } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { interactionContext } from '@/lib/diagnostics/perf-watch'
 import { useAuth } from '@/lib/supabase/auth'
@@ -28,7 +28,12 @@ function timeAttendanceWork<T>(fn: () => T): T {
 }
 
 export function AttendancePanel() {
-  const directory = useOpsDirectory()
+  const source = useOpsDirectory()
+  const { departments, members: allMembers, departmentName, loading, error } = source
+  const refetchRef = useRef(source.refetch)
+  useEffect(() => { refetchRef.current = source.refetch })
+  const members = useMemo(() => allMembers.filter(member => !isAttendanceExemptPosition(member.position)), [allMembers])
+  const directory = useMemo<ReturnType<typeof useOpsDirectory>>(() => ({ departments, members, departmentName, loading, error, refetch: () => refetchRef.current() }), [departments, members, departmentName, loading, error])
   const { profile } = useAuth()
   const saved = useAttendanceStartSettings()
   const [part, setPart] = useState<'all' | 'settings'>('all')

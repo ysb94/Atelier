@@ -172,8 +172,8 @@ export function MyAttendancePanel() {
     <div className="personal-request-overview">
       <article className="personal-attendance-today">
         <Clock3 size={17}/><span>오늘 · {today.slice(5).replace('-', '.')} ({WEEKDAYS[dayOfWeek(today)]})</span>
-        <div className="personal-attendance-today-times"><span>출근<b>{clock.loading || clock.queryError ? '—' : clock.todayClock || '미기록'}</b></span><span>퇴근<b>{clock.loading || clock.queryError ? '—' : clock.todayClockOut || '미기록'}</b></span></div>
-        {(clock.needsClockIn || clock.needsClockOut || clock.todayClockOut) && <div className="personal-attendance-today-actions">
+        <div className="personal-attendance-today-times"><span>출근<b>{clock.loading || clock.queryError ? '—' : clock.todayClock || (clock.exempt ? '제외' : '미기록')}</b></span><span>퇴근<b>{clock.loading || clock.queryError ? '—' : clock.todayClockOut || (clock.exempt ? '제외' : '미기록')}</b></span></div>
+        {clock.exempt ? <p className="personal-request-helper">출퇴근 기록 제외 직책입니다. 출근·퇴근을 기록하지 않습니다.</p> : (clock.needsClockIn || clock.needsClockOut || clock.todayClockOut) && <div className="personal-attendance-today-actions">
           {clock.needsClockIn && <Button size="sm" disabled={clock.saving} onClick={() => record('in')}>{clock.saving ? '저장 중…' : '출근하기'}</Button>}
           {clock.needsClockOut && <Button size="sm" disabled={clock.saving} onClick={() => record('out')}>{clock.saving ? '저장 중…' : '퇴근하기'}</Button>}
           {clock.todayClockOut && <Button size="sm" variant="outline" disabled={clock.saving} onClick={() => record('undo')}>{clock.saving ? '저장 중…' : '퇴근 무르기'}</Button>}

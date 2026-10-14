@@ -18,6 +18,18 @@ export const WORK_CAPABILITY_LABEL: Record<WorkCapability, string> = {
 
 export const COMPANY_MANAGER_POSITIONS = ['팀장', '이사'] as const
 
+/**
+ * 출퇴근 기록과 근태 집계에서 빼는 직책. 직급(jobGrade)은 보지 않는다.
+ * 비우면 모든 직원을 다시 측정한다.
+ */
+export const ATTENDANCE_EXEMPT_POSITIONS: readonly string[] = [
+  '대표이사',
+  '부사장',
+  '전무',
+  '상무',
+  '이사',
+]
+
 export const PERSONNEL_SCOPES = ['leaders', 'members'] as const
 
 export type PersonnelScope = (typeof PERSONNEL_SCOPES)[number]
@@ -86,6 +98,19 @@ export function isCompanyAdmin(profile: CapabilityProfile | null) {
 /** 대표이사는 제작 중인 전체 화면을 검수한다. 업무 저장·승인 권한과 분리한다. */
 export function isCompanyReviewer(profile: CapabilityProfile | null) {
   return isApprovedCompanyMember(profile) && profile?.position === '대표이사'
+}
+
+export function isAttendanceExemptPosition(position?: string | null) {
+  const normalized = position?.trim()
+  return Boolean(normalized && ATTENDANCE_EXEMPT_POSITIONS.includes(normalized))
+}
+
+/** 활성 계정이면서 출퇴근 제외 직책인 사람. 출근·퇴근 버튼과 근태 집계에서 뺀다. */
+export function isAttendanceExempt(profile: CapabilityProfile | null) {
+  return (
+    isApprovedCompanyMember(profile) &&
+    isAttendanceExemptPosition(profile?.position)
+  )
 }
 
 export function isCompanyManager(profile: CapabilityProfile | null) {

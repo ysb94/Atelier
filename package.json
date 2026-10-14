@@ -87,7 +87,10 @@
     "verify:masma-finder": "node scripts/verify-masma-finder.mjs",
     "verify:sabangnet-codes": "npx tsx --tsconfig tsconfig.app.json src/lib/codes/sabangnet-import.verify.ts",
     "verify:product-categories": "npx tsx --tsconfig tsconfig.app.json src/lib/products/product-categories.verify.ts",
-    "verify:code-usage": "npx tsx --tsconfig tsconfig.app.json src/lib/codes/code-usage.verify.ts"
+    "verify:code-usage": "npx tsx --tsconfig tsconfig.app.json src/lib/codes/code-usage.verify.ts",
+    "verify:browser-images": "node dev-tools/ai-workflow/browser-check.mjs images",
+    "verify:browser-deadline": "node dev-tools/ai-workflow/browser-check.mjs deadline",
+    "verify:browser-attendance": "node dev-tools/ai-workflow/browser-check.mjs attendance"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",
@@ -116,6 +119,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.0.4",
     "oxlint": "^1.75.0",
+    "playwright-core": "^1.64.0",
     "tailwindcss": "^4.3.3",
     "typescript": "~6.0.2",
     "vite": "^8.2.0"

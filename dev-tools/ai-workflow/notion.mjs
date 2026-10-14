@@ -125,6 +125,36 @@ export class Notion {
     const p = this.config.properties, rich = content => ({ rich_text: [{ type: 'text', text: { content } }] })
     await this.api(`pages/${id}`, 'PATCH', { properties: { [p.request]: rich(plan.request), [p.criteria]: rich(plan.criteria), [p.files]: rich(plan.files.join('\n')) } })
   }
+  async syncMemoNotice(id, update) {
+    const stopped=['확인 필요','오류','중지'].includes(update.state)
+    if(!stopped&&!['대기','구조 확인','작업 중','완료'].includes(update.state))return
+    const snapshot=await this.memoSnapshot(id,!!update.expectedVersion),p=this.config.properties
+    if(snapshot.unstable||snapshot.page.properties[p.state]?.select?.name!==update.state)return
+    if(update.expectedVersion&&snapshot.task.version!==update.expectedVersion)return
+    const expectedLocation=stopped?this.config.positions.needsInput:update.state==='완료'?this.config.positions.done
+      :update.state==='작업 중'?this.config.positions.working:this.config.positions.queued
+    if(snapshot.task.location!==expectedLocation)return
+    const notices=[];let cursor
+    do {
+      const data=await this.api(`blocks/${id}/children?page_size=100${cursor?`&start_cursor=${encodeURIComponent(cursor)}`:''}`)
+      notices.push(...data.results.filter(block=>block.type==='callout'&&plain(block.callout.rich_text)==='Atelier AI 확인 필요 안내'))
+      cursor=data.has_more?data.next_cursor:undefined
+    }while(cursor)
+    const lines=[update.summary||'자동화가 중단되었습니다.',update.question||'현재 작업 결과를 확인해 주세요.'].map(line=>line.slice(0,1900))
+    if(stopped&&notices.length===1){
+      const children=await this.api(`blocks/${notices[0].id}/children?page_size=100`)
+      if(!children.has_more&&children.results.length===lines.length
+        &&children.results.every((block,i)=>block.type==='paragraph'&&plain(block.paragraph.rich_text)===lines[i]))return
+    }
+    // Only replace the generated notice. Original memo blocks and answers remain source data.
+    for(const block of notices)await this.api(`blocks/${block.id}`,'PATCH',{archived:true})
+    if(stopped)await this.api(`blocks/${id}/children`,'PATCH',{children:[{
+      object:'block',type:'callout',callout:{
+        rich_text:[{type:'text',text:{content:'Atelier AI 확인 필요 안내'}}],icon:{type:'emoji',emoji:'❓'},
+        children:lines.map(content=>({object:'block',type:'paragraph',paragraph:{rich_text:[{type:'text',text:{content}}]}}))
+      }
+    }]})
+  }
   async publish(id, update) {
     const p = this.config.properties, properties = {}
     const reportBlock = this.config.mode==='memo-board'&&update.state==='완료'
@@ -147,7 +177,11 @@ export class Notion {
         // A response-lost retry must not undo that new selection.
         return
       }
-      if(![this.config.positions.queued,this.config.positions.working].includes(current)&&update.state!=='완료'){if(progressing)cancelled();return}
+      const sameTerminalStored=['확인 필요','오류'].includes(update.state)&&current===this.config.positions.needsInput
+        &&page.properties[p.state]?.select?.name===update.state&&update.summary!==undefined
+        &&plain(page.properties[p.result]?.rich_text)===update.summary.slice(0,1900)
+        &&(update.question===undefined||plain(page.properties[p.question]?.rich_text)===(update.question||'').slice(0,1900))
+      if(![this.config.positions.queued,this.config.positions.working].includes(current)&&update.state!=='완료'&&!sameTerminalStored){if(progressing)cancelled();return}
       if(snapshot.unstable&&!['확인 필요','오류','중지'].includes(update.state))throw new Error('노션 조회 중 변경을 감지했습니다. 최신 상태로 기록을 재시도합니다.')
       if(update.expectedVersion||update.expectedPlanVersion) {
         const actual=snapshot.task
@@ -168,6 +202,7 @@ export class Notion {
     if (update.summary !== undefined&&(this.config.mode!=='memo-board'||['완료','확인 필요','오류','중지'].includes(update.state))) properties[p.result] = { rich_text: [{ type: 'text', text: { content: update.summary.slice(0,1900) } }] }
     if (Object.keys(properties).length) await this.api(`pages/${id}`, 'PATCH', { properties })
     if(this.config.mode==='memo-board') {
+      await this.syncMemoNotice(id,update)
       // Prompt, feedback, logs and reviewer JSON stay in the local run journal.
       if(!reportBlock)return
       const title=plain(reportBlock.callout.rich_text);let cursor,found=false

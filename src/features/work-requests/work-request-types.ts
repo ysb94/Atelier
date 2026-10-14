@@ -11,7 +11,15 @@ export type TextContentBlock = {
 
 export type ImageWrap = 'none' | 'left' | 'right'
 
-/** 본문 드롭·붙여넣기와 참고 파일 추가 모두 이 너비(%)로 이미지를 처음 표시한다. */
+/**
+ * 작업 요청 이미지의 공용 기준 표시 너비(px). widthPercent 는 이 값에 대한 % 로 해석한다.
+ * 1440px 화면 상세 패널(max-w-xl 576px)의 본문 폭은 테두리·패딩을 빼면 493px,
+ * 세로 스크롤바(최대 약 17px)까지 빼면 약 476px 이므로 그 안에 들어가는 값으로 정한다.
+ * 양식과 상세가 같은 px 로 보이도록 감싸는 영역 폭에 의존하지 않는다.
+ */
+export const IMAGE_BASE_WIDTH_PX = 440
+
+/** 본문 드롭·붙여넣기와 참고 파일 추가 모두 이 너비(기준 px 대비 %)로 이미지를 처음 표시한다. */
 export const DEFAULT_IMAGE_WIDTH_PERCENT = 100
 
 export type ImageContentBlock = {
@@ -48,9 +56,7 @@ export type FormValues = {
   title: string
   requester: string
   requesterPosition: string
-  deadlineType: 'preferred' | 'fixed' | ''
   dueDate: string
-  scheduleReason: string
   referenceFiles: ReferenceFile[]
   blocks: ContentBlock[]
 }

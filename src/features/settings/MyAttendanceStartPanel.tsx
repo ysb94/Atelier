@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { isAttendanceExemptPosition } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useOpsDirectory } from '@/features/operations-support/ops-directory'
 import { useAttendanceStartSettings } from '@/features/operations-support/use-attendance-start-settings'
@@ -26,7 +27,7 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
   const validYear = /^\d{4}$/.test(year) && Number(year) >= 2000 && Number(year) <= 2100
   const months = Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`)
   const departmentSet = useMemo(() => new Set(departmentIds), [departmentIds])
-  const members = useMemo(() => directory.members.filter(member => member.departmentId && departmentSet.has(member.departmentId) && (!search.trim() || `${memberLabel(member.displayName)} ${directory.departmentName(member.departmentId)}`.toLowerCase().includes(search.trim().toLowerCase()))).sort((a, b) => directory.departmentName(a.departmentId).localeCompare(directory.departmentName(b.departmentId), 'ko') || memberLabel(a.displayName).localeCompare(memberLabel(b.displayName), 'ko')), [directory.members, directory.departmentName, departmentSet, search])
+  const members = useMemo(() => directory.members.filter(member => member.departmentId && departmentSet.has(member.departmentId) && !isAttendanceExemptPosition(member.position) && (!search.trim() || `${memberLabel(member.displayName)} ${directory.departmentName(member.departmentId)}`.toLowerCase().includes(search.trim().toLowerCase()))).sort((a, b) => directory.departmentName(a.departmentId).localeCompare(directory.departmentName(b.departmentId), 'ko') || memberLabel(a.displayName).localeCompare(memberLabel(b.displayName), 'ko')), [directory.members, directory.departmentName, departmentSet, search])
   const visibleIds = members.map(member => member.id)
   const checkedVisible = visibleIds.filter(id => checked.includes(id))
   const allVisible = visibleIds.length > 0 && checkedVisible.length === visibleIds.length

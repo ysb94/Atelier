@@ -8,6 +8,7 @@ import { snapshot, changedPaths, readFile, digest, evidence } from './workspace.
 import { projectRoot, taskFiles, inside, redact } from './settings.mjs'
 import { NeedsInput } from './acp.mjs'
 import { needsInputFeedback } from './feedback.mjs'
+import { intakeSettings, nextAutomatableMemo } from './intake.mjs'
 
 export function taskFootprint(files, root) {
   const reads=new Set([...files,'package.json','AGENTS.md'])
@@ -35,79 +36,117 @@ function safeTarget(root,file) {
 }
 
 export class ParallelRunner {
-  constructor({config,notion,store,root=projectRoot,onStatus=()=>{},cursor,review=runReview,verify=verification,plan,refreshMap,isolate=createIsolatedWorkspace}) {
-    Object.assign(this,{config,notion,store,root,onStatus,cursor,review,verify,plan,refreshMap,isolate})
+  constructor({config,notion,store,root=projectRoot,onStatus=()=>{},cursor,review=runReview,verify=verification,plan,refreshMap,isolate=createIsolatedWorkspace,classify}) {
+    Object.assign(this,{config,notion,store,root,onStatus,cursor,review,verify,plan,refreshMap,isolate,classify})
     this.active=new Map();this.accepted=new Map();this.scanning=false;this.stopping=false;this.integrationTail=Promise.resolve();this.recovered=false;this.pendingIntegration=null
+    this.intakeController=null;this.intake=null;this.classifying=null;this.scan=null
   }
   get busy(){return this.active.size>0}
   status(){
     const tasks=[...this.active.values()].map(entry=>({slot:entry.slot,task:entry.job.task.title,...entry.status}))
-    this.onStatus({state:tasks.length>1?'병렬 작업 중':tasks[0]?.state??'대기',activeCount:tasks.length,limit:this.config.maxParallelTasks??2,tasks,
+    this.onStatus({state:tasks.length>1?'병렬 작업 중':tasks[0]?.state??(this.classifying?'메모 분류':'대기'),activeCount:tasks.length,limit:this.config.maxParallelTasks??2,tasks,
+      ...(this.classifying?{classifying:this.classifying}:{}),
       waiting:Object.values(this.store.data.jobs).filter(job=>job.phase==='waiting').map(job=>job.task.title)})
   }
-  async stop(){this.stopping=true;for(const entry of this.active.values())entry.runner?.stop();await Promise.allSettled([...this.active.values()].map(entry=>entry.promise))}
+  async stop(){this.stopping=true;this.intakeController?.abort();for(const entry of this.active.values())entry.runner?.stop();await Promise.allSettled([this.scan,this.intake,...[...this.active.values()].map(entry=>entry.promise)])}
+  // stop() awaits this whole promise, including Notion requests that were already in flight.
+  classifyMemos(){
+    const controller=new AbortController();this.intakeController=controller
+    const run=(async()=>{
+      try{
+        return await nextAutomatableMemo({config:this.config,notion:this.notion,store:this.store,root:this.root,signal:controller.signal,
+          canContinue:()=>!this.stopping&&this.active.size<(this.config.maxParallelTasks??2),
+          onClassify:task=>{this.classifying=task.title;this.status()},...(this.classify?{classify:this.classify}:{})})
+      }finally{
+        if(this.intakeController===controller)this.intakeController=null
+        if(this.classifying){this.classifying=null;this.status()}
+        if(this.intake===run)this.intake=null
+      }
+    })()
+    this.intake=run
+    return run
+  }
+  // stop() awaits the whole scan, including outbox flushes already sent to Notion.
   async tick(){
     if(this.scanning||this.stopping||this.active.size>=(this.config.maxParallelTasks??2))return
     this.scanning=true
-    try{
-      if(!this.recovered){
-        for(const job of Object.values(this.store.data.jobs))if(!['new','waiting','done','needs_input','superseded'].includes(job.phase)){
-          const fresh=await this.notion.task(job.task.id)
-          if(fresh.version!==job.task.version){job.phase='superseded';this.store.save();continue}
-          job.phase='needs_input';job.error='이전 실행이 중단되었습니다. 남은 변경을 확인해야 하며 편집을 자동으로 반복하지 않습니다.';this.store.save()
-          this.store.enqueue(job,{state:'확인 필요',...needsInputFeedback(job.task,job.error),expectedVersion:job.task.version})
-        }
-        this.recovered=true
-      }
-      // Each active worker flushes only its own records. Idle records retry here.
-      const activeIds=new Set([...this.active.values()].map(entry=>entry.job.task.id))
-      const queue=await this.notion.queue(),queued=new Map(queue.map(task=>[task.id,task]))
-      const obsolete=event=>event.update.expectedVersion&&['확인 필요','중지','오류'].includes(event.update.state)
-        &&((queued.has(event.pageId)&&queued.get(event.pageId).version!==event.update.expectedVersion)
-        ||[...this.active.values()].some(entry=>entry.job.task.id===event.pageId&&entry.job.task.version!==event.update.expectedVersion))
-      if(this.store.data.outbox.some(obsolete)){this.store.data.outbox=this.store.data.outbox.filter(event=>!obsolete(event));this.store.save()}
-      for(const id of new Set(this.store.data.outbox.map(event=>event.pageId)))if(!activeIds.has(id))await this.store.flush(this.notion,id)
-      for(const job of Object.values(this.store.data.jobs).filter(job=>job.phase==='waiting')){
-        if((queued.has(job.task.id)&&queued.get(job.task.id).version!==job.task.version)||[...this.active.values()].some(entry=>entry.job.task.id===job.task.id&&entry.job.task.version!==job.task.version)){
-          job.phase='superseded';this.store.save();continue
-        }
-        if(queued.has(job.task.id)||activeIds.has(job.task.id))continue
+    const run=this.scanOnce().finally(()=>{this.scanning=false;if(this.scan===run)this.scan=null})
+    this.scan=run
+    return run
+  }
+  async scanOnce(){
+    if(!this.recovered){
+      for(const job of Object.values(this.store.data.jobs))if(!['new','waiting','done','needs_input','superseded'].includes(job.phase)){
         const fresh=await this.notion.task(job.task.id)
-        if(!fresh.enabled||fresh.state==='중지'||fresh.version!==job.task.version||fresh.planVersion!==job.task.planVersion){
-          job.phase='needs_input';job.error='대기 중 메모나 실행 설정이 변경되어 중단했습니다.';this.store.save()
-          this.store.enqueue(job,{state:'확인 필요',...needsInputFeedback(job.task,job.error),expectedVersion:job.task.version});await this.store.flush(this.notion,job.task.id);continue
-        }
-        queue.push(fresh)
+        if(this.stopping)return
+        if(fresh.version!==job.task.version){job.phase='superseded';this.store.save();continue}
+        job.phase='needs_input';job.error='이전 실행이 중단되었습니다. 남은 변경을 확인해야 하며 편집을 자동으로 반복하지 않습니다.';this.store.save()
+        this.store.enqueue(job,{state:'확인 필요',...needsInputFeedback(job.task,job.error),expectedVersion:job.task.version})
       }
-      for(const queuedTask of queue){
-        if(this.active.size>=(this.config.maxParallelTasks??2)||this.stopping)break
-        const task=this.config.mode==='memo-board'?await this.notion.task(queuedTask.id):queuedTask
-        if(this.config.mode==='memo-board'&&(!task.enabled||task.state==='중지'||task.location!==this.config.positions.queued))continue
-        const key=`${task.id}:${task.version}`
-        if([...this.active.values()].some(entry=>entry.job.task.id===task.id))continue
-        const job=selectedJob(this.store,task,this.config)
-        if(['done','needs_input','superseded'].includes(job.phase))continue
-        if(job.phase==='waiting'&&job.waitingFootprint&&[...this.active.values()].some(entry=>entry.footprint&&footprintsConflict(job.waitingFootprint,entry.footprint)))continue
-        if(!['new','waiting'].includes(job.phase)){
-          job.phase='needs_input';job.error='중단된 실행 기록을 확인해야 합니다. 자동으로 편집을 반복하지 않습니다.';this.store.save()
-          this.store.enqueue(job,{state:'확인 필요',...needsInputFeedback(job.task,job.error),expectedVersion:task.version});await this.store.flush(this.notion,task.id);continue
-        }
-        job.task=task;job.phase='isolating';this.store.save()
-        const occupied=new Set([...this.active.values()].map(entry=>entry.slot)),slot=[1,2].find(value=>!occupied.has(value))
-        const entry={job,slot,status:{state:'구조 확인'}};this.active.set(key,entry);this.status()
-        entry.promise=this.launch(entry).catch(async error=>{
-          if(job.phase!=='done'){
-            job.phase='needs_input';job.error=redact(error.message,this.config.env);this.store.save()
-            this.store.enqueue(job,{state:'확인 필요',...needsInputFeedback(job.task,job.error),expectedVersion:job.task.version})
-            try{await this.store.flush(this.notion,job.task.id)}catch(publishError){console.warn('[ai-workflow] 병렬 기록 재시도',redact(publishError.message,this.config.env))}
-          }
-          console.warn('[ai-workflow] 병렬 작업 확인 필요',{task:job.task.title,message:redact(error.message,this.config.env)})
-        }).finally(()=>{
-          this.active.delete(key);this.status()
-          if(!this.stopping)void this.tick().catch(error=>console.warn('[ai-workflow] 다음 병렬 작업 확인',redact(error.message,this.config.env)))
-        })
+      this.recovered=true
+    }
+    // Each active worker flushes only its own records. Idle records retry here.
+    const activeIds=new Set([...this.active.values()].map(entry=>entry.job.task.id))
+    const queue=await this.notion.queue(),queued=new Map(queue.map(task=>[task.id,task]))
+    if(this.stopping)return
+    const obsolete=event=>event.update.expectedVersion&&['확인 필요','중지','오류'].includes(event.update.state)
+      &&((queued.has(event.pageId)&&queued.get(event.pageId).version!==event.update.expectedVersion)
+      ||[...this.active.values()].some(entry=>entry.job.task.id===event.pageId&&entry.job.task.version!==event.update.expectedVersion))
+    if(this.store.data.outbox.some(obsolete)){this.store.data.outbox=this.store.data.outbox.filter(event=>!obsolete(event));this.store.save()}
+    for(const id of new Set(this.store.data.outbox.map(event=>event.pageId))){if(this.stopping)return;if(!activeIds.has(id))await this.store.flush(this.notion,id)}
+    for(const job of Object.values(this.store.data.jobs).filter(job=>job.phase==='waiting')){
+      if(this.stopping)return
+      if((queued.has(job.task.id)&&queued.get(job.task.id).version!==job.task.version)||[...this.active.values()].some(entry=>entry.job.task.id===job.task.id&&entry.job.task.version!==job.task.version)){
+        job.phase='superseded';this.store.save();continue
       }
-    }finally{this.scanning=false}
+      if(queued.has(job.task.id)||activeIds.has(job.task.id))continue
+      const fresh=await this.notion.task(job.task.id)
+      if(this.stopping)return
+      if(!fresh.enabled||fresh.state==='중지'||fresh.version!==job.task.version||fresh.planVersion!==job.task.planVersion){
+        job.phase='needs_input';job.error='대기 중 메모나 실행 설정이 변경되어 중단했습니다.';this.store.save()
+        this.store.enqueue(job,{state:'확인 필요',...needsInputFeedback(job.task,job.error),expectedVersion:job.task.version});await this.store.flush(this.notion,job.task.id);continue
+      }
+      queue.push(fresh)
+    }
+    // A queued card waiting on a file conflict blocks memo intake so the queue cannot grow unbounded.
+    let deferred=false
+    const admit=async queuedTask=>{
+      const task=this.config.mode==='memo-board'?await this.notion.task(queuedTask.id):queuedTask
+      if(this.stopping)return
+      if(this.config.mode==='memo-board'&&(!task.enabled||task.state==='중지'||task.location!==this.config.positions.queued))return
+      const key=`${task.id}:${task.version}`
+      if([...this.active.values()].some(entry=>entry.job.task.id===task.id))return
+      const job=selectedJob(this.store,task,this.config)
+      if(['done','needs_input','superseded'].includes(job.phase))return
+      if(job.phase==='waiting'&&job.waitingFootprint&&[...this.active.values()].some(entry=>entry.footprint&&footprintsConflict(job.waitingFootprint,entry.footprint))){deferred=true;return}
+      if(!['new','waiting'].includes(job.phase)){
+        job.phase='needs_input';job.error='중단된 실행 기록을 확인해야 합니다. 자동으로 편집을 반복하지 않습니다.';this.store.save()
+        this.store.enqueue(job,{state:'확인 필요',...needsInputFeedback(job.task,job.error),expectedVersion:task.version});await this.store.flush(this.notion,task.id);return
+      }
+      job.task=task;job.phase='isolating';this.store.save()
+      const occupied=new Set([...this.active.values()].map(entry=>entry.slot)),slot=[1,2].find(value=>!occupied.has(value))
+      const entry={job,slot,status:{state:'구조 확인'}};this.active.set(key,entry);this.status()
+      entry.promise=this.launch(entry).catch(async error=>{
+        if(job.phase!=='done'){
+          job.phase='needs_input';job.error=redact(error.message,this.config.env);this.store.save()
+          this.store.enqueue(job,{state:'확인 필요',...needsInputFeedback(job.task,job.error),expectedVersion:job.task.version})
+          try{await this.store.flush(this.notion,job.task.id)}catch(publishError){console.warn('[ai-workflow] 병렬 기록 재시도',redact(publishError.message,this.config.env))}
+        }
+        console.warn('[ai-workflow] 병렬 작업 확인 필요',{task:job.task.title,message:redact(error.message,this.config.env)})
+      }).finally(()=>{
+        this.active.delete(key);this.status()
+        if(!this.stopping)void this.tick().catch(error=>console.warn('[ai-workflow] 다음 병렬 작업 확인',redact(error.message,this.config.env)))
+      })
+    }
+    for(const queuedTask of queue){
+      if(this.active.size>=(this.config.maxParallelTasks??2)||this.stopping)break
+      await admit(queuedTask)
+    }
+    // The automation queue has priority. Classify memos only for a free slot.
+    if(!deferred&&intakeSettings(this.config)&&!this.stopping&&this.active.size<(this.config.maxParallelTasks??2)){
+      const memo=await this.classifyMemos()
+      if(memo&&!this.stopping&&this.active.size<(this.config.maxParallelTasks??2))await admit(memo)
+    }
   }
   async launch(entry){
     const {job}=entry,runDir=this.store.runDir(job),generation=(job.workspaceGeneration??0)+1;job.workspaceGeneration=generation;this.store.save()
