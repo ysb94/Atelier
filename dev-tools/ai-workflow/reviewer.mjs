@@ -35,20 +35,37 @@ export function reviewEnvironmentProblem(review) {
   return messages.find(message=>/app-server socket directory|bubblewrap.*(?:오류|실패)|실행 환경 오류|검토 환경 오류|검토 도구 실행 환경|(?:읽기|검토) 도구.{0,50}(?:없|연결.{0,10}필요)|검토.{0,20}환경.{0,20}(?:문제|중단)|브라우저.{0,30}(?:환경|실행|도구).{0,30}(?:없|준비|필요)|(?:검토|검증)(?: 실행)? 담당자|관리자가.{0,80}(?:검사|검증).{0,40}확인/i.test(message))
 }
 
-export function reusableInspection(runDir,root,task,evidence,gpt) {
+function inspectionAt(runDir,root,task,evidence,gpt) {
   const output=path.join(runDir,'review.json')
   try{
     const raw=fs.readFileSync(output,'utf8'),auditRaw=fs.readFileSync(`${output}.read-audit.json`,'utf8'),audit=JSON.parse(auditRaw),cache=JSON.parse(fs.readFileSync(`${output}.cache.json`,'utf8'))
     const manifest=JSON.parse(fs.readFileSync(`${output}.sources.json`,'utf8')),old=JSON.parse(fs.readFileSync(path.join(runDir,'review-source.json'),'utf8')),review=validateReview(JSON.parse(raw))
     const groundedReads=audit.calls||(old.previousInspection?.sourceDigest===sourceFingerprint(evidence.snapshot).digest?old.previousInspection.codeReadCalls:0)
     const usage=fs.readFileSync(path.join(runDir,'gpt-usage.jsonl'),'utf8').trim().split('\n').map(line=>JSON.parse(line)).filter(v=>v.status==='completed').at(-1)
-    if(review.decision!=='needs_input'||review.sourceRequests?.length||!groundedReads||audit.exhausted||audit.invalidated||manifest.root!==root||cache.outputHash!==digest(raw)||cache.auditHash!==digest(auditRaw))return null
+    if(review.decision!=='needs_input'||review.sourceRequests?.length)return false
+    if(!groundedReads||audit.exhausted||audit.invalidated||manifest.root!==root||cache.outputHash!==digest(raw)||cache.auditHash!==digest(auditRaw))return null
     if(usage?.model!==gpt?.model||usage?.effort!==gpt?.effort)return null
     if(sourceFingerprint(manifest.snapshot).digest!==sourceFingerprint(evidence.snapshot).digest)return null
     if(JSON.stringify(stableContext(old.task))!==JSON.stringify(stableContext(task)))return null
     return {reviewHash:digest(raw),sourceDigest:sourceFingerprint(evidence.snapshot).digest,criteriaResults:review.criteriaResults,summary:review.summary,issues:review.issues,codeReadCalls:groundedReads,
       note:'동일한 모델·요구사항·소스 해시에 대해 이미 수행한 독립 코드 검수. 새 검사·화면 증거를 함께 확인해야 하며 예전 needs_input을 합격으로 간주하지 않습니다.'}
   }catch(error){if(error.code!=='ENOENT')console.warn('[ai-workflow] 이전 검수 재사용 제외',{reason:error.message});return null}
+}
+
+export function reusableInspection(runDir,root,task,evidence,gpt) {
+  const current=inspectionAt(runDir,root,task,evidence,gpt)
+  if(current===false)return null
+  return current||inspectionAt(path.join(runDir,'.inspection-backup'),root,task,evidence,gpt)||null
+}
+
+export function preserveInspection(runDir,root,task,evidence,gpt) {
+  if(!inspectionAt(runDir,root,task,evidence,gpt))return false
+  const backup=path.join(runDir,'.inspection-backup'),temporary=backup+'.tmp'
+  fs.mkdirSync(temporary,{recursive:true})
+  for(const name of ['review.json','review.json.read-audit.json','review.json.cache.json','review.json.sources.json','review-source.json','gpt-usage.jsonl'])
+    fs.copyFileSync(path.join(runDir,name),path.join(temporary,name))
+  fs.rmSync(backup,{recursive:true,force:true});fs.renameSync(temporary,backup)
+  return true
 }
 
 // `gpt` selects the Codex model/effort; `instructions` adds caller-specific rules.
@@ -60,6 +77,7 @@ export async function runReview({ config, root, task, evidence, checks, cursor, 
   const criteria = Array.isArray(task.criteriaItems) && task.criteriaItems.length ? task.criteriaItems : criteriaItemsOf(task.criteria)
   const execution={nodeVersion:process.version,requiredNodeVersion:readFile(root,'.nvmrc'),operatingSystem:process.platform}
   const previousInspection=reader?reusableInspection(runDir,root,task,evidence,gpt):null
+  if(previousInspection)preserveInspection(runDir,root,task,evidence,gpt)
   let requested=[]
   for(let round=0;;round++) {
     const outputFile = path.join(runDir, round?`review-sources-${round}.json`:'review.json')

@@ -129,7 +129,7 @@ test('manager selects scoped UI evidence and preserves assertion headers instead
 })
 
 test('prior code inspection is reused only with matching source, task, model and recorded output hashes',async t=>{
- const {root,write}=fixture(t),{reusableInspection}=await import('./reviewer.mjs'),file='src/a.ts',hash=write(file,'export const a=1'),task={title:'fixture',request:'check UI',criteria:'button exists',files:file},gpt={model:'selected',effort:'medium'}
+ const {root,write}=fixture(t),{reusableInspection,preserveInspection}=await import('./reviewer.mjs'),file='src/a.ts',hash=write(file,'export const a=1'),task={title:'fixture',request:'check UI',criteria:'button exists',files:file},gpt={model:'selected',effort:'medium'}
  const review={decision:'needs_input',summary:'UI proof missing',criteriaResults:[],issues:['Need UI proof'],nextPrompt:'',sourceRequests:[]},raw=JSON.stringify(review),audit=JSON.stringify({calls:2,reads:[],diffReads:[]}),out=path.join(root,'review.json')
  fs.writeFileSync(out,raw);fs.writeFileSync(`${out}.read-audit.json`,audit);fs.writeFileSync(`${out}.cache.json`,JSON.stringify({outputHash:digest(raw),auditHash:digest(audit)}));fs.writeFileSync(`${out}.sources.json`,JSON.stringify({root,snapshot:{[file]:hash}}));fs.writeFileSync(path.join(root,'review-source.json'),JSON.stringify({task}));fs.writeFileSync(path.join(root,'gpt-usage.jsonl'),JSON.stringify({status:'completed',model:gpt.model,effort:gpt.effort})+'\n')
  assert.ok(reusableInspection(root,root,task,{snapshot:{[file]:hash}},gpt))
@@ -137,6 +137,17 @@ test('prior code inspection is reused only with matching source, task, model and
  assert.equal(reusableInspection(root,root,task,{snapshot:{[file]:'changed'}},gpt),null)
  assert.equal(reusableInspection(root,root,task,{snapshot:{[file]:hash}},{...gpt,model:'other'}),null)
  fs.writeFileSync(out,raw+' ');assert.equal(reusableInspection(root,root,task,{snapshot:{[file]:hash}},gpt),null)
+ fs.writeFileSync(out,raw);assert.equal(preserveInspection(root,root,task,{snapshot:{[file]:hash}},gpt),true)
+ // A cancelled retry may overwrite the live audit and source context before
+ // producing a result. Its earlier verified inspection must remain reusable.
+ fs.writeFileSync(`${out}.read-audit.json`,JSON.stringify({calls:0}));fs.writeFileSync(path.join(root,'review-source.json'),JSON.stringify({task,previousInspection:null}))
+ assert.ok(reusableInspection(root,root,task,{snapshot:{[file]:hash}},gpt))
+ assert.equal(preserveInspection(root,root,task,{snapshot:{[file]:hash}},gpt),false)
+ assert.equal(reusableInspection(root,root,{...task,request:'changed'},{snapshot:{[file]:hash}},gpt),null)
+ assert.equal(reusableInspection(root,root,task,{snapshot:{[file]:'changed'}},gpt),null)
+ assert.equal(reusableInspection(root,root,task,{snapshot:{[file]:hash}},{...gpt,model:'other'}),null)
+ fs.writeFileSync(out,JSON.stringify({...review,decision:'revise',issues:['new code defect'],nextPrompt:'fix it'}))
+ assert.equal(reusableInspection(root,root,task,{snapshot:{[file]:hash}},gpt),null)
 })
 
 test('behavioral tab proof rejects stale source, query-dependent identities, missing views and department collisions',async t=>{
