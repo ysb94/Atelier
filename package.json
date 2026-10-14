@@ -14,7 +14,7 @@
     "ai:mcp:login": "node dev-tools/ai-workflow/mcp.mjs login",
     "ai:watch": "node dev-tools/ai-workflow/serve.mjs",
     "ai:smoke": "node dev-tools/ai-workflow/smoke.mjs",
-    "verify:ai-workflow": "node --test dev-tools/ai-workflow/workflow.test.mjs dev-tools/ai-workflow/parallel.test.mjs dev-tools/ai-workflow/isolation.test.mjs dev-tools/ai-workflow/codex-subscription.test.mjs",
+    "verify:ai-workflow": "node --test dev-tools/ai-workflow/workflow.test.mjs dev-tools/ai-workflow/parallel.test.mjs dev-tools/ai-workflow/isolation.test.mjs dev-tools/ai-workflow/codex-subscription.test.mjs dev-tools/ai-workflow/v2.test.mjs",
     "structure:map": "node dev-tools/structure-map/build.mjs",
     "structure:map:watch": "node dev-tools/structure-map/serve.mjs",
     "verify:structure-map": "node --test dev-tools/structure-map/analyze.test.mjs",

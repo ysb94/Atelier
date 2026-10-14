@@ -107,7 +107,6 @@ export class Notion {
         const text = plain(block[block.type]?.rich_text)
         // Owned generated blocks stay out of the source. Title and block type do not decide ownership.
         if (await this.isGeneratedBlock(rootId, block)) continue
-        if (text === '필요한 설명이나 참고 자료를 여기에 이어 적을 수 있습니다.') continue
         if (text) parts.push(text)
         const detail=structuredClone(block[block.type]??{})
         delete detail.rich_text

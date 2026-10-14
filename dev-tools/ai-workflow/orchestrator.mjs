@@ -222,7 +222,7 @@ export class Orchestrator {
     this.store.enqueue(job, { v2: true, runId: job.runId, cycleId: job.cycle?.id, expectVersion: job.cycle?.sourceVersion, expectLocations: this.board.automationLocations(), ...update })
   }
   outboxEvent(job, update) {
-    const eventId = `${job.runId}:${job.cycle?.id}:${update.kind}`
+    const eventId = update.eventId ?? `${job.runId}:${job.cycle?.id}:${update.kind}${update.kind === 'error' ? ':' + randomUUID() : ''}`
     return { pageId: job.task.id, update: { v2: true, expectVersion: job.cycle?.sourceVersion, expectLocations: this.board.automationLocations(), ...update, runId: job.runId, cycleId: job.cycle?.id, eventId } }
   }
   // Terminal state and the matching outbox event share one journal write.
@@ -373,7 +373,7 @@ export class Orchestrator {
     this.setStatus(entry, '계획 중')
     await this.progress(entry, { state: '구조 확인' })
     await this.refreshMap(ws, signal)
-    const changed = await this.git.changedFiles(ws, job.workspace.baseSha)
+    const changed = [...new Set([...await this.git.changedFiles(ws, job.workspace.baseSha), ...await this.git.dirtyPaths(ws)])].filter(file => !isManagerArtifact(file))
     const previous = { branch: job.branch, baseBranch: job.workspace.baseBranch, baseCommit: job.workspace.baseSha, files: changed,
       diff: await this.git.diffSinceBase(ws, job.workspace.baseSha, changed) }
     if (previous.diff.length > 200000) throw new EnvironmentError('이전 회차 변경이 너무 커서 계획 자료로 전달할 수 없습니다. 자료를 잘라서 계획하지 않습니다.', { retry: false, code: 'plan_bundle' })
@@ -681,7 +681,7 @@ export class Orchestrator {
     try { await this.store.flush(this.board, pageId) }
     catch (error) {
       const event = error.delivery?.update
-      const same = Boolean(job && event?.kind === 'complete' && event.runId === job.runId && event.cycleId === job.cycle?.id)
+      const same = Boolean(job && ['complete', 'needs_input'].includes(event?.kind) && event.runId === job.runId && event.cycleId === job.cycle?.id)
       if (job && error.discardUpdate && event?.eventId && event.eventId === job.delivery?.event?.update?.eventId) {
         job.delivery.acked = true
         this.store.save()
@@ -711,6 +711,18 @@ export class Orchestrator {
     this.store.save()
     const dir = job.workspace?.dir
     if (!dir || !fs.existsSync(dir)) return
+    const state = await this.git.headState(dir)
+    const expected = pending.publication.headSha ?? job.cycle.reviewedHead
+    if (state.dirty.length || (expected && state.head !== expected)) {
+      job.workspace.edits = state.dirty.length > 0
+      job.workspace.cleanupWarning = '완료 후 작업 공간이 바뀌어 정리하지 않았습니다. 로컬 편집을 보존했습니다.'
+      this.store.save()
+      console.warn('[ai-workflow] 작업 공간 정리 보류', {dir, dirty: state.dirty})
+      return
+    }
+    job.workspace.edits = false
+    delete job.workspace.cleanupWarning
+    this.store.save()
     await this.git.removeWorktree(dir).catch(error => console.warn('[ai-workflow] 완료된 작업 브랜치 공간 정리 실패; 수동 확인 가능', { dir, message: redact(error.message, this.config.env) }))
   }
   markSuperseded(job, message) {
@@ -769,7 +781,7 @@ export class Orchestrator {
     journal.reconcileAt = this.now() + every; this.store.save()
     await this.noteIntegrationHead()
     const tracked = [...Object.values(journal.jobs), ...journal.history]
-      .filter(job => job.publication?.prNumber && job.publication.reflection !== REFLECTION.main && job.publication.prState !== 'CLOSED')
+      .filter(job => job.publication?.prNumber && job.publication.reflection !== REFLECTION.main)
     if (!tracked.length) return
     const main = this.config.v2.mainBranch, mainRef = `refs/remotes/origin/${main}`
     await this.git.fetchBranch(main, { role: 'base' })
@@ -811,12 +823,7 @@ export class Orchestrator {
       let mergeInIntegration = false
       if (!reviewedInIntegration && integrationRef && mergeCorresponds && mergeOid) mergeInIntegration = await this.git.contains(integrationRef, mergeOid)
       const reflectedIntegration = reviewedInIntegration || mergeInIntegration
-      let next = job.publication.reflection
-      if (pr.state === 'OPEN') next = reflectedMain ? REFLECTION.main : reflectedIntegration ? REFLECTION.reviewing : REFLECTION.waiting
-      if (pr.state === 'MERGED') {
-        if (reflectedMain) next = REFLECTION.main
-        else if (reflectedIntegration || mergeCorresponds) next = REFLECTION.reviewing
-      }
+      const next = reflectedMain ? REFLECTION.main : reflectedIntegration ? REFLECTION.reviewing : REFLECTION.waiting
       Object.assign(job.publication, { prState: pr.state, checkedAt: iso() })
       if (next === job.publication.reflection) { this.store.save(); continue }
       job.publication.reflection = next; this.store.save()

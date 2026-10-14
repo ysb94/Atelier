@@ -4,7 +4,7 @@ import { stateDir } from './settings.mjs'
 import { Notion } from './notion.mjs'
 import { readControls, writeRunStatus } from './control.mjs'
 import { TaskGit, validateBranchName } from './git-task.mjs'
-import { snapshot, evidence, isManagerArtifact } from './workspace.mjs'
+import { snapshot, evidence, isManagerArtifact, sourceFingerprint } from './workspace.mjs'
 import { verification } from './runner.mjs'
 import { runReview } from './reviewer.mjs'
 import { excludedFromWorkspace } from './isolation.mjs'
@@ -26,14 +26,13 @@ export function integrationReviewLine(latest, head) {
   return `통합 검수 합격 · ${latest.branch} @ ${latest.sha.slice(0, 12)} · main 미병합`
 }
 
-function writeReview(record) {
-  const dir = reviewDir()
+function writeReview(record, dir = reviewDir()) {
   fs.mkdirSync(dir, { recursive: true })
   const file = path.join(dir, `${record.sha}.json`)
   fs.writeFileSync(file, JSON.stringify(record, null, 2))
   const latest = { branch: record.branch, sha: record.sha, baseBranch: record.baseBranch, baseSha: record.baseSha,
     approved: record.approved, summary: record.summary, decision: record.decision, checkedAt: record.checkedAt, file }
-  fs.writeFileSync(latestPath(), JSON.stringify(latest, null, 2))
+  fs.writeFileSync(path.join(dir, 'latest.json'), JSON.stringify(latest, null, 2))
   return latest
 }
 
@@ -51,7 +50,7 @@ export async function selectedIntegrationBranch({ config, notion, integration })
 }
 
 // Read-only detached checkout of the pinned integration SHA. Does not merge to main.
-export async function reviewIntegration({ config, git = new TaskGit({ config }), notion, integration, verify = verification, review = runReview, signal } = {}) {
+export async function reviewIntegration({ config, git = new TaskGit({ config }), notion, integration, verify = verification, review = runReview, signal, recordsDir = reviewDir() } = {}) {
   const { client, controls } = await liveControls(config, notion)
   const branch = validateBranchName(integration ?? controls.values.integrationBranch, { role: 'integration' })
   const baseBranch = validateBranchName(controls.values.baseBranch, { role: 'base' })
@@ -62,25 +61,32 @@ export async function reviewIntegration({ config, git = new TaskGit({ config }),
   await git.detachedWorktree(dir, sha)
   const checkedAt = new Date().toISOString()
   try {
+    const start = await snapshot(dir)
+    const pinned = sourceFingerprint(start)
+    const assertPinned = async () => {
+      const state = await git.headState(dir)
+      const dirty = state.dirty.filter(file => !isManagerArtifact(file))
+      if (state.head !== sha || dirty.length || sourceFingerprint(await snapshot(dir)).digest !== pinned.digest)
+        throw new Error('통합 검수 중 고정 커밋의 소스가 바뀌었습니다. 이전 검사 기록으로 합격 처리하지 않습니다.')
+    }
+    await assertPinned()
     const checks = await verify(config, dir, signal)
-    const head = (await git.git(['rev-parse', 'HEAD'], { cwd: dir })).output.trim()
-    if (head !== sha) throw new Error(`검사 중 HEAD가 ${sha}에서 ${head}로 바뀌었습니다. 이 SHA는 합격하지 않습니다.`)
-    const dirty = await git.dirtyPaths(dir)
-    if (dirty.length) throw new Error(`검사가 고정 커밋의 소스를 수정했습니다: ${dirty.slice(0, 8).join(', ')}. 이 SHA는 합격하지 않습니다.`)
+    await assertPinned()
     const changed = (await git.changedFiles(dir, baseSha)).filter(file => !isManagerArtifact(file))
     if (changed.length > 200) throw new Error(`기준 대비 변경이 ${changed.length}개라 소스를 자르지 않고는 검수할 수 없습니다. 이 SHA는 합격하지 않습니다.`)
     for (const file of changed) if (excludedFromWorkspace(file)) throw new Error(`통합 검수 변경에 비공개 경로가 있습니다: ${file}`)
     const files = changed.length ? changed : ['AGENTS.md']
-    const start = await snapshot(dir)
     const contents = {}
     for (const file of files) contents[file] = await git.fileAtBase(dir, baseSha, file)
-    const evidenceDir = path.join(reviewDir(), `${sha}-evidence`)
+    const evidenceDir = path.join(recordsDir, `${sha}-evidence`)
     fs.mkdirSync(evidenceDir, { recursive: true })
     const proof = await evidence(dir, { all: start, contents }, files, evidenceDir)
+    if (sourceFingerprint(proof.snapshot).digest !== pinned.digest)
+      throw new Error('통합 검수 증거의 소스가 검사 시작 시점과 다릅니다.')
     const outside = proof.outside.filter(file => !isManagerArtifact(file))
     if (outside.length) throw new Error(`검사 중 통합 범위 밖 파일이 바뀌었습니다: ${outside.slice(0, 10).join(', ')}`)
     const passed = checks.length > 0 && checks.every(check => check.passed)
-    const reviewDirPath = path.join(reviewDir(), `${sha}-gpt`)
+    const reviewDirPath = path.join(recordsDir, `${sha}-gpt`)
     fs.mkdirSync(reviewDirPath, { recursive: true })
     const criteria = '설정된 검사가 통과하고, 기준 대비 변경이 그 검사와 맞아야 합니다. main 병합은 이 검수의 합격 조건이 아닙니다.'
     const task = {
@@ -95,12 +101,13 @@ export async function reviewIntegration({ config, git = new TaskGit({ config }),
     const instructions = `통합 검수입니다. 통합 브랜치 ${branch}의 고정 커밋 ${sha}를 기준 ${baseBranch} @ ${baseSha}와 비교합니다. 이 실행은 읽기 전용이며 main에 병합하지 않습니다. 합격은 이 SHA에만 유효하고 브랜치가 움직이면 무효입니다. report.deployment는 verification입니다. 운영 게시나 main 반영을 완료했다고 쓰지 마세요.`
     const gptReview = await review({ config, root: dir, task, evidence: proof, checks, cursor: { report: '통합 검수는 구현 세션 없이 고정 커밋과 검사 기록만 봅니다.' },
       runDir: reviewDirPath, signal, gpt, instructions, maxSourceRounds: config.v2?.maxSourceRounds ?? 2, bundleFiles: files })
+    await assertPinned()
     const approved = passed && gptReview.decision === 'pass'
     const summary = `${approved ? '합격' : '불합격'}: ${gptReview.summary}`.slice(0, 900)
     const record = { branch, sha, baseBranch, baseSha, approved, summary, decision: gptReview.decision, checkedAt,
-      gpt, checks: checks.map(({ name, passed: ok }) => ({ name, passed: ok })), review: gptReview,
+      gpt, sourceDigest: pinned.digest, checks: checks.map(({ name, passed: ok }) => ({ name, passed: ok })), review: gptReview,
       changed: files, note: 'main 병합은 하지 않았습니다. 이 기록은 위 SHA에만 유효합니다.' }
-    const latest = writeReview(record)
+    const latest = writeReview(record, recordsDir)
     let statusError = null
     try { await writeRunStatus(client, config, integrationReviewLine(latest)) } catch (error) { statusError = error.message }
     return { ...latest, statusError }

@@ -186,6 +186,7 @@ function noticeFixture(){
     }else throw new Error('지원하지 않는 검사 요청: '+url)
     return{ok:true,json:async()=>structuredClone(data)}
   })
+  client.blockLedger.claim({pageId:page.id,blockId:old.id,kind:'notice',eventId:'v1:legacy:old-notice'})
   return{client,page,original,roots,getAppends:()=>appends,loseNextAppend:()=>{loseAppend=true}}
 }
 test('resuming clears the old generated question and preserves source and answer',async()=>{
@@ -386,6 +387,7 @@ test('memo API queries only selected work and ignores nested execution records i
     if(url.includes('/query'))return{results:[page],has_more:false}
     return{results:[{type:'paragraph',paragraph:{rich_text:[{plain_text:'직접 적은 설명'}]}},{id:'report',type:'toggle',has_children:true,toggle:{rich_text:[{plain_text:'Atelier AI event-1'}]}}],has_more:false}
   }}))
+  client.blockLedger.claim({pageId:page.id,blockId:'report',kind:'toggle',eventId:'legacy:report'})
   const tasks=await client.queue()
   assert.equal(seen[0].body.filter.select.equals,'자동화 할 일')
   assert.equal(tasks[0].source.body,'직접 적은 설명')

@@ -71,7 +71,7 @@ export async function runCursor({ config, root, files, prompt, signal, onEvent =
   }
   const respond = (id, result) => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n')
   const failAll = error => { for (const p of pending.values()) p.reject(error); pending.clear() }
-  const stop = () => { if (!closed) { closed = true; child.stdin.end(); child.kill('SIGTERM'); failAll(new Error('Cursor 실행 종료')) } }
+  const stop = () => { if (!closed) { closed = true; child.stdin.end(); child.kill('SIGTERM'); failAll(new Error(inputNeeded || (signal?.aborted ? '작업 중지됨' : 'Cursor 실행 종료'))) } }
   const timer = setTimeout(() => { inputNeeded = 'Cursor 실행 시간 제한 초과'; stop() }, config.agentTimeoutMs)
   signal?.addEventListener('abort', stop, { once: true })
   child.once('error', failAll)

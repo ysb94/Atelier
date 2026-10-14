@@ -74,14 +74,15 @@ export class Board {
   resultText(update) {
     const summary = String(update.summary ?? '')
     if (!update.runId || !update.cycleId) return summary.slice(0, 1900)
-    return `${executionMarker(update.runId, update.cycleId)}\n${summary}`.slice(0, 1900)
+    const failure = update.kind === 'error' && update.eventId ? `\n오류 식별: ${update.eventId}` : ''
+    return `${executionMarker(update.runId, update.cycleId)}${failure}\n${summary}`.slice(0, 1900)
   }
   // Outbox consumer. Events recorded by the legacy runner keep their original handling.
   async publish(id, update) {
     if (!update.v2) return this.notion.publish(id, update)
     if (!this.ownsExecution(id, update)) {
       console.warn('[ai-workflow] 이전 실행 기록은 현재 카드에 적용하지 않습니다.', { page: id, kind: update.kind, runId: update.runId })
-      if (update.kind === 'complete') throw cancelled('이전 실행의 완료 기록입니다.', 'superseded')
+      if (['complete', 'needs_input'].includes(update.kind)) throw cancelled('이전 실행의 기록입니다.', 'superseded')
       return
     }
     const p = this.props, at = this.at
@@ -124,10 +125,8 @@ export class Board {
     if (update.expectLocations && !update.expectLocations.includes(task.location)) return
     const summary = this.resultText(update)
     const stored = plain(page.properties[p.result]?.rich_text)
-    const marker = update.runId && update.cycleId ? executionMarker(update.runId, update.cycleId) : ''
-    // The same run/cycle result is already on the card, including after the user reset it to 대기.
+    // Only the same failure delivery is a retry. A new failure in this cycle must be visible.
     if (stored === summary) return
-    if (task.state === '대기' && marker && stored.startsWith(marker)) return
     await this.patch(id, { [p.state]: select('오류'), [p.result]: rich(summary),
       ...([at.working, at.reviewing].filter(Boolean).includes(task.location) ? { [p.location]: select(at.queued) } : {}) })
   }
@@ -136,7 +135,10 @@ export class Board {
     const snap = await this.requireStable(id, update.expectVersion)
     const { task, page } = snap, at = this.at, p = this.props
     if (task.state === '중지') return
-    if (update.expectVersion && task.version !== update.expectVersion) return
+    if (update.expectVersion && task.version !== update.expectVersion) {
+      await this.revertSupersededQuestion(id, update)
+      throw cancelled('질문 기록 중 원문이 바뀌어 다시 계획합니다.', 'superseded')
+    }
     const question = String(update.question ?? '').slice(0, 1900)
     const summary = this.resultText(update)
     const storedQuestion = plain(page.properties[p.question]?.rich_text)
@@ -154,13 +156,30 @@ export class Board {
       const posted = await this.requireStable(id, update.expectVersion)
       const visible = posted.task.location === at.needsInput && posted.task.state === '확인 필요' && (!update.expectVersion || posted.task.version === update.expectVersion)
       if (!visible) {
-        if (posted.task.state === '중지' || (update.expectVersion && posted.task.version !== update.expectVersion)) return
+        if (update.expectVersion && posted.task.version !== update.expectVersion) {
+          await this.revertSupersededQuestion(id, update)
+          throw cancelled('질문 기록 후 원문 변경을 감지했습니다.', 'superseded')
+        }
+        if (posted.task.state === '중지') throw cancelled('사용자가 자동 실행을 중지했습니다.', 'stopped')
         if (posted.task.location !== at.needsInput && update.expectLocations && !update.expectLocations.includes(posted.task.location)) return
         throw unstable()
       }
     }
     const guard = { expectVersion: update.expectVersion, locations: [at.needsInput], state: '확인 필요', runId: update.runId, cycleId: update.cycleId, eventId: update.eventId ?? `${update.runId}:${update.cycleId}:needs_input` }
     if (await this.notice(id, update.lines, guard) === 'stale') throw unstable()
+    const final = await this.requireStable(id, update.expectVersion)
+    if (update.expectVersion && final.task.version !== update.expectVersion) {
+      await this.revertSupersededQuestion(id, update)
+      throw cancelled('질문 안내 기록 중 원문 변경을 감지했습니다.', 'superseded')
+    }
+  }
+  async revertSupersededQuestion(id, update) {
+    const {task, page} = await this.requireStable(id, true)
+    if (!this.ownsExecution(id, update) || !update.expectVersion || task.version === update.expectVersion) return
+    if (task.state !== '확인 필요' || task.location !== this.at.needsInput) return
+    if (plain(page.properties[this.props.result]?.rich_text) !== this.resultText(update)) return
+    await this.patch(id, {[this.props.location]: select(this.at.queued), [this.props.state]: select('대기'),
+      [this.props.result]: rich('원문이 바뀌어 이전 질문 기록을 취소했습니다. 최신 내용으로 다시 계획합니다.')})
   }
   branchText(page) { return plain(page.properties[this.props.branch]?.rich_text) }
   sameCompletion(snap, update) {
@@ -260,6 +279,12 @@ export class Board {
       throw cancelled('완료 보고서 기록 후 원문 변경을 감지했습니다.', 'superseded')
     }
     if (reported === 'stopped') throw cancelled('완료 보고서 기록 중 카드가 자동화 밖으로 옮겨졌습니다.', 'stopped')
+    const final = await this.classifyCompletion(id, update)
+    if (final === 'superseded') {
+      await this.revertSupersededCompletion(id, update)
+      throw cancelled('완료 확정 전 원문 변경을 감지했습니다.', 'superseded')
+    }
+    if (final === 'stopped') throw cancelled('완료 확정 전 사용자가 카드를 옮겼습니다.', 'stopped')
     return 'applied'
   }
   async ensureReport(id, update) {
@@ -267,7 +292,7 @@ export class Board {
     if (!ledger) throw new Error('생성 블록 원장이 없습니다.')
     const eventId = this.reportEventId(update)
     const mine = (await ledger.blocksOf(this.notion, id, 'report')).filter(item => item.record.eventId === eventId)
-    if (mine.length === 1) return 'ready'
+    if (mine.length === 1) return this.classifyCompletion(id, update)
     const fresh = await this.classifyCompletion(id, update)
     if (fresh !== 'ready') return fresh
     const record = ledger.begin(id, { kind: 'report', runId: update.runId, cycleId: update.cycleId, eventId })
@@ -326,7 +351,7 @@ export class Board {
     }
     if (!(await allow())) return 'stale'
     const eventId = guard.eventId ?? (guard.runId && guard.cycleId ? `${guard.runId}:${guard.cycleId}:notice` : null)
-    const owned = async () => (await ledger.blocksOf(this.notion, id, 'notice')).filter(item => !String(item.record.eventId).startsWith('v1:'))
+    const owned = async () => (await ledger.blocksOf(this.notion, id)).filter(item => ['notice', 'intake'].includes(item.record.kind) && !String(item.record.eventId).startsWith('v1:'))
     if (lines && eventId) {
       const same = (await owned()).filter(item => item.record.eventId === eventId && item.block?.id)
       if (same.length === 1 && await this.noticeBodyMatches(same[0].block, lines)) return 'ready'

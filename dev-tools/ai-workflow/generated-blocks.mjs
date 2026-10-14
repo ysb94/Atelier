@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 
-// Ownership is the block id plus a nonce carried on the callout itself.
+// A bound block id is authoritative. Nonces recover only unbound pending writes.
 // A matching title is not ownership. User callouts with the same title stay in the source.
 export const PROVENANCE_PREFIX = 'atelier-owned:'
 export const GENERATED_BLOCK_KINDS = Object.freeze(['notice', 'report', 'toggle', 'intake'])
@@ -73,10 +73,10 @@ export class GeneratedBlockLedger {
     return Boolean(blockId) && this.list(pageId).some(item => item.blockId === blockId)
   }
   hasNonce(pageId, nonce) {
-    return Boolean(nonce) && this.list(pageId).some(item => item.nonce === nonce)
+    return Boolean(nonce) && this.list(pageId).some(item => !item.retired && !item.blockId && item.nonce === nonce)
   }
   hasPending(pageId) {
-    return this.list(pageId).some(item => item.nonce && !item.blockId)
+    return this.list(pageId).some(item => !item.retired && item.nonce && !item.blockId)
   }
   claim(entry) {
     const list = this.records(entry.pageId)
@@ -88,7 +88,7 @@ export class GeneratedBlockLedger {
     if (!eventId) throw new Error('생성 블록의 실행 식별이 없습니다.')
     if (!GENERATED_BLOCK_KINDS.includes(kind)) throw new Error(`생성 블록 종류가 올바르지 않습니다: ${kind}`)
     const list = this.records(pageId)
-    let record = list.find(item => item.eventId === eventId && item.kind === kind)
+    let record = list.find(item => !item.retired && item.eventId === eventId && item.kind === kind)
     if (!record) {
       record = { kind, runId, cycleId, eventId, nonce: randomUUID(), blockId: null, createdAt: new Date().toISOString() }
       list.push(record)
@@ -98,15 +98,15 @@ export class GeneratedBlockLedger {
   }
   adoptNonce(pageId, nonce, blockId) {
     if (!blockId || !nonce) return
-    const record = this.list(pageId).find(item => item.nonce === nonce)
-    if (!record || record.blockId === blockId) return
+    const record = this.list(pageId).find(item => !item.retired && !item.blockId && item.nonce === nonce)
+    if (!record) return
     record.blockId = blockId
     this.save()
   }
   release(pageId, record) {
-    const found = this.list(pageId).find(item => item === record || (item.eventId === record?.eventId && item.kind === record?.kind))
+    const found = this.list(pageId).find(item => item === record || (item.nonce === record?.nonce && item.blockId === record?.blockId && item.eventId === record?.eventId))
     if (!found) return
-    found.blockId = null
+    found.retired = true
     this.save()
   }
   async blocksOf(notion, pageId, kind) {
@@ -116,7 +116,7 @@ export class GeneratedBlockLedger {
       const data = await notion.api(`blocks/${pageId}/children?page_size=100${cursor ? `&start_cursor=${encodeURIComponent(cursor)}` : ''}`)
       for (const block of data.results ?? []) {
         const nonce = nonceInBlock(block)
-        const record = this.list(pageId).find(item => (block.id && item.blockId === block.id) || (nonce && item.nonce === nonce))
+        const record = this.list(pageId).find(item => !item.retired && ((block.id && item.blockId === block.id) || (!item.blockId && nonce && item.nonce === nonce)))
         if (!record) continue
         if (block.id && record.blockId !== block.id) {
           record.blockId = block.id
@@ -130,7 +130,7 @@ export class GeneratedBlockLedger {
     return found
   }
   async claimPendingChild(notion, pageId, block) {
-    const pending = this.list(pageId).filter(item => item.nonce && !item.blockId)
+    const pending = this.list(pageId).filter(item => !item.retired && item.nonce && !item.blockId)
     if (!pending.length || !block?.id || !block.has_children) return false
     const children = await notion.api(`blocks/${block.id}/children?page_size=100`)
     const blob = JSON.stringify(children.results ?? [])
@@ -141,6 +141,8 @@ export class GeneratedBlockLedger {
     return true
   }
   async adoptResponse(notion, pageId, record, response) {
+    if (record.retired) return null
+    if (record.blockId) return record.blockId
     const direct = (response?.results ?? []).find(block => block?.id && nonceInBlock(block) === record.nonce)
     if (direct?.id) {
       record.blockId = direct.id
