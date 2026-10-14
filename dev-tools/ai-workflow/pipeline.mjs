@@ -11,6 +11,11 @@ export class Pipeline {
   }
   count(stage) { return [...this.running.values()].filter(item => item.stage === stage).length }
   queued(stage) { return this.waiters.filter(item => item.stage === stage).length }
+  canPlan() {
+    return this.count('planning') < this.limits.planning && this.queued('planning') === 0 &&
+      this.queued('review') === 0 && this.queued('implementation') < this.readyLimit &&
+      this.queued('review') + this.count('review') < this.reviewBacklog
+  }
   acquire(stage, { key, files = [], signal }) {
     if (!this.limits[stage]) return Promise.reject(new Error(`알 수 없는 실행 단계: ${stage}`))
     if (signal.aborted) return Promise.reject(new Error('작업 중지됨'))
@@ -31,7 +36,7 @@ export class Pipeline {
   }
   eligible(item) {
     if (this.count(item.stage) >= this.limits[item.stage]) return false
-    if (item.stage === 'planning' && (this.queued('implementation') >= this.readyLimit ||
+    if (item.stage === 'planning' && (this.queued('review') > 0 || this.queued('implementation') >= this.readyLimit ||
       this.queued('review') + this.count('review') >= this.reviewBacklog)) return false
     if (item.stage === 'implementation') {
       for (const [key, files] of this.reservations) {

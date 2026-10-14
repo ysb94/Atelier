@@ -135,7 +135,7 @@ export class Orchestrator {
     if (!controls.values.enabled) return { paused: true, reason: '자동화 실행이 꺼져 있어 새 작업을 받지 않습니다. 진행 중인 작업은 끝까지 진행합니다.' }
     return null
   }
-  // Recovery lanes first, then answered cards, the queue and new memos. 확인 필요 cards are never scanned.
+  // Recover reviews first. Plan one memo, answer or stale queued card at a time.
   async admit(values) {
     const at = this.config.positions
     const recovered = new Map()
@@ -148,7 +148,8 @@ export class Orchestrator {
       }
     }
     const recoveryLanes = this.pipeline ? [at.reviewing, at.working] : [at.working, at.reviewing]
-    for (const lane of [...new Set([...recoveryLanes, at.answered, at.queued, at.memo].filter(Boolean))]) {
+    const planningLanes = this.pipeline ? [at.memo, at.answered, at.queued] : [at.answered, at.queued, at.memo]
+    for (const lane of [...new Set([...recoveryLanes, ...planningLanes].filter(Boolean))]) {
       if (this.stopping || this.active.size >= this.residentLimit()) return
       const pending = new Set(this.store.data.outbox.map(event => event.pageId))
       for (const page of recovered.get(lane) ?? await this.board.list(lane)) {
@@ -165,11 +166,28 @@ export class Orchestrator {
     if (state === '중지') return
     // Retryable environment errors wait for their backoff; operator errors wait for 자동화 단계 to be reset.
     if (state === '오류' && !(job?.errorKind === 'retry' && (job.retryAt ?? 0) <= this.now())) return
+    if (this.pipeline) {
+      const c = job?.cycle
+      const unprepared = !c || job?.phase === 'done' || c.phase === 'planning' || !IN_FLIGHT.includes(c.phase) ||
+        ['needs_input', 'superseded', 'done', 'stopped'].includes(c.outcome)
+      const planningBusy = [...this.active.values()].some(entry => entry.job.cycle?.phase === 'planning' && !entry.job.cycle?.outcome)
+      if (unprepared && (!this.pipeline.canPlan() || planningBusy)) return
+    }
     const snap = await this.board.read(page.id)
     if (snap.unstable || snap.task.location !== lane || snap.task.state === '중지') return
     // Selecting 화면 is the user's signal that a memo is ready; drafts are never planned.
     if (lane === this.config.positions.memo && !job && !String(snap.task.source?.screen ?? '').trim()) return
     if (this.stopping || this.active.has(page.id) || this.active.size >= this.residentLimit()) return
+    if (this.pipeline) {
+      const c = job?.cycle, acknowledged = job?.errorKind === 'operator' && state !== '오류'
+      const mustReplan = acknowledged && ['scope_violation', 'attempts_exhausted', 'workspace_lost'].includes(job?.errorCode)
+      const resumes = !mustReplan && job?.phase !== 'done' && c && IN_FLIGHT.includes(c.phase) &&
+        !['needs_input', 'superseded', 'done', 'stopped'].includes(c.outcome) && c.sourceVersion === snap.task.version
+      const needsPlanning = !resumes || c.phase === 'planning'
+      if (needsPlanning && (!this.pipeline.canPlan() || [...this.active.values()].some(entry => entry.job.cycle?.phase === 'planning' && !entry.job.cycle?.outcome))) return
+      // Already prepared instructions can still enter Cursor's bounded queue.
+      if (!needsPlanning && (c.phase === 'planned' || c.phase === 'implementing' && c.implementationStarted === false) && this.pipeline.queued('implementation') >= this.pipeline.readyLimit) return
+    }
     const prepared = this.prepare(job, snap.task, lane, values, state)
     if (prepared) this.launch(prepared)
   }
@@ -392,7 +410,11 @@ export class Orchestrator {
       const c = entry.job.cycle
       c.stageTimeMs ??= {}
       c.stageTimeMs[stage] = (c.stageTimeMs[stage] ?? 0) + this.now() - started
-      try { this.store.save() } finally { release() }
+      try { this.store.save() } finally {
+        release()
+        // Hand off the prepared plan, then immediately revisit reviews and the next memo.
+        if (stage === 'planning' && !this.stopping) Promise.resolve(this.tick()).catch(error => console.warn('[ai-workflow] 계획 후 다음 작업 확인 실패', redact(error.message, this.config.env)))
+      }
     }
   }
   async ensureWorkspace(entry) {
