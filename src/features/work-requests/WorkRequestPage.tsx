@@ -529,6 +529,7 @@ function demoWorkTime(owner: WorkRequestOwner): Record<string, WorkTimeLog> {
 }
 
 function hasRequestBody(blocks: ContentBlock[]): boolean {
+  // 참고 파일만 있는 초안은 요청 내용을 쓴 것이 아니다. 본문 블록만 필수값으로 본다.
   return blocks.some((block) =>
     block.type === 'text' ? block.text.trim().length > 0 : true,
   )
@@ -559,6 +560,20 @@ function makeRequestId(): string {
 function isImageFile(file: File): boolean {
   if (file.type.startsWith('image/')) return true
   return /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(file.name)
+}
+
+function sameStoredFile(left: File, right: File) {
+  return (
+    left.name === right.name &&
+    left.size === right.size &&
+    left.lastModified === right.lastModified
+  )
+}
+
+function blockHasFile(blocks: ContentBlock[], file: File) {
+  return blocks.some(
+    (block) => block.type !== 'text' && sameStoredFile(block.file, file),
+  )
 }
 
 function ImagePreview({
@@ -852,6 +867,90 @@ function createImageBlocks(files: File[], offsetY: number): ImageContentBlock[] 
     offsetY,
     wrap: 'none' as const,
   }))
+}
+
+function appendFilesToBlocks(
+  blocks: ContentBlock[],
+  files: File[],
+  endOffsetY: number,
+): ContentBlock[] {
+  // 파일 선택은 본문 맨 끝이다. 고른 순서를 유지하고, 마지막 글 뒤에 붙인다.
+  // 일반 파일 뒤의 빈 텍스트는 partsToBlocks가 이어서 쓸 칸으로 남긴다.
+  if (files.length === 0) return blocks
+
+  const next: BodyPart[] = splitBodyParts(blocks).map((part) =>
+    part.type === 'file' ? part : { ...part, images: [...part.images] },
+  )
+
+  let tail: FlowPart | undefined
+  const lastPart = next[next.length - 1]
+  if (
+    next.length > 1 &&
+    lastPart?.type === 'flow' &&
+    lastPart.text.text.length === 0 &&
+    lastPart.images.length === 0
+  ) {
+    tail = lastPart
+    next.pop()
+  }
+
+  const anchor = next[next.length - 1]
+  let pendingFiles: File[] = []
+  const appended: BodyPart[] = []
+
+  const flushPending = () => {
+    if (pendingFiles.length === 0) return
+    const batch = pendingFiles
+    pendingFiles = []
+    const flowAnchor = appended.length === 0 && anchor?.type === 'flow' ? anchor : undefined
+    const placeAtTop =
+      flowAnchor != null &&
+      flowAnchor.text.text.length === 0 &&
+      flowAnchor.images.length === 0
+    const images = createImageBlocks(
+      batch,
+      placeAtTop ? 0 : flowAnchor ? Math.max(0, endOffsetY) : 0,
+    )
+    if (images.length !== batch.length) {
+      console.warn('[work-request] 일부 이미지 파일을 요청 내용에 넣지 못했습니다.', {
+        fileNames: batch.map((file) => file.name),
+        created: images.length,
+      })
+    }
+    if (images.length === 0) return
+    if (flowAnchor) {
+      flowAnchor.images = [...flowAnchor.images, ...images]
+      return
+    }
+    appended.push({ type: 'flow', text: emptyTextBlock(), images })
+  }
+
+  for (const file of files) {
+    if (isImageFile(file)) {
+      pendingFiles.push(file)
+      continue
+    }
+    flushPending()
+    appended.push({
+      type: 'file',
+      file: { id: makeBlockId(), type: 'file', file },
+    })
+  }
+  flushPending()
+
+  const anchorIsEmpty =
+    anchor?.type === 'flow' &&
+    anchor.text.text.length === 0 &&
+    anchor.images.length === 0
+  if (anchorIsEmpty && appended.length > 0 && next[next.length - 1] === anchor) {
+    next.pop()
+    next.push(...appended, anchor)
+  } else {
+    next.push(...appended)
+    if (tail) next.push(tail)
+  }
+
+  return partsToBlocks(next)
 }
 
 type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w'
@@ -1231,34 +1330,74 @@ function FileAttachmentCard({
 
 function ReferenceFilesField({
   files,
+  contentBlocks,
   onChange,
+  onAddFiles,
 }: {
   files: ReferenceFile[]
+  contentBlocks: ContentBlock[]
   onChange: (files: ReferenceFile[]) => void
+  onAddFiles: (files: File[]) => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const hasVisibleReference = files.some((item) => !blockHasFile(contentBlocks, item.file))
 
   function addFiles(list: FileList | File[] | null) {
     if (!list) return
     const incoming = Array.from(list)
     if (incoming.length === 0) return
-    const next = [...files]
+    // 기존 참고 파일과 같다는 이유만으로 건너뛰지 않는다. 다시 고르면 요청 내용 끝에 붙인다.
+    // next는 이번 선택 안의 중복만 기억하고, 이미 본문에 있는 파일은 아래에서 뺀다.
+    const next: ReferenceFile[] = []
+    const added: File[] = []
     for (const file of incoming) {
-      const exists = next.some(
-        ({ file: item }) =>
-          item.name === file.name &&
-          item.size === file.size &&
-          item.lastModified === file.lastModified,
-      )
+      const exists =
+        next.some(
+          ({ file: item }) =>
+            item.name === file.name &&
+            item.size === file.size &&
+            item.lastModified === file.lastModified,
+        ) || blockHasFile(contentBlocks, file)
       if (!exists) {
         next.push({ id: makeBlockId(), file, widthPercent: DEFAULT_IMAGE_WIDTH_PERCENT })
+        added.push(file)
       }
     }
-    onChange(next)
+    if (added.length === 0) return
+    onAddFiles(added)
   }
 
   return (
     <div className="space-y-2">
+      {hasVisibleReference ? (
+        <div data-flow-frame className="space-y-2">
+          {files.map((item) => {
+            if (blockHasFile(contentBlocks, item.file)) return null
+            const remove = () => onChange(files.filter((file) => file.id !== item.id))
+            return isImageFile(item.file) ? (
+              <ResizableImage
+                key={item.id}
+                file={item.file}
+                widthPercent={item.widthPercent}
+                heightPx={item.heightPx}
+                onSizeChange={(size) =>
+                  onChange(
+                    files.map((file) =>
+                      file.id === item.id
+                        ? { ...file, widthPercent: size.widthPercent, heightPx: size.heightPx }
+                        : file,
+                    ),
+                  )
+                }
+                onRemove={remove}
+                removeLabel={`${item.file.name} 제거`}
+              />
+            ) : (
+              <FileAttachmentCard key={item.id} file={item.file} onRemove={remove} />
+            )
+          })}
+        </div>
+      ) : null}
       <span className="block text-sm font-medium">참고 파일 추가</span>
       <div
         className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-6 text-center"
@@ -1296,34 +1435,6 @@ function ReferenceFilesField({
           }}
         />
       </div>
-      {files.length > 0 ? (
-        <div data-flow-frame className="space-y-2">
-          {files.map((item) => {
-            const remove = () => onChange(files.filter((file) => file.id !== item.id))
-            return isImageFile(item.file) ? (
-              <ResizableImage
-                key={item.id}
-                file={item.file}
-                widthPercent={item.widthPercent}
-                heightPx={item.heightPx}
-                onSizeChange={(size) =>
-                  onChange(
-                    files.map((file) =>
-                      file.id === item.id
-                        ? { ...file, widthPercent: size.widthPercent, heightPx: size.heightPx }
-                        : file,
-                    ),
-                  )
-                }
-                onRemove={remove}
-                removeLabel={`${item.file.name} 제거`}
-              />
-            ) : (
-              <FileAttachmentCard key={item.id} file={item.file} onRemove={remove} />
-            )
-          })}
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -1540,11 +1651,13 @@ function RequestBodyEditor({
   error,
   placeholder,
   onChange,
+  appendFilesRef,
 }: {
   blocks: ContentBlock[]
   error?: string
   placeholder: string
   onChange: (blocks: ContentBlock[]) => void
+  appendFilesRef: { current: (files: File[]) => void }
 }) {
   const editorRef = useRef<HTMLDivElement>(null)
   const blocksRef = useRef(blocks)
@@ -1574,6 +1687,20 @@ function RequestBodyEditor({
   onChangeRef.current = onChange
   dropTargetRef.current = dropTarget
   movingRef.current = moving
+  appendFilesRef.current = (incoming) => {
+    const editor = editorRef.current
+    if (!editor) {
+      console.warn('[work-request] 요청 내용 편집 영역을 찾지 못해 파일 위치를 측정하지 못했습니다.', {
+        fileCount: incoming.length,
+      })
+    }
+    const flows = editor?.querySelectorAll<HTMLElement>('[data-flow-index]')
+    const lastFlow = flows && flows.length > 0 ? flows[flows.length - 1] : undefined
+    const endOffsetY = lastFlow
+      ? Math.max(0, Math.round(lastFlow.getBoundingClientRect().height))
+      : 0
+    onChangeRef.current(appendFilesToBlocks(blocksRef.current, incoming, endOffsetY))
+  }
 
   const parts = splitBodyParts(blocks)
   const onlyEmptyText =
@@ -2030,6 +2157,11 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   })
   const brands = brandsQuery.data ?? emptyList()
   const pageTopRef = useRef<HTMLDivElement>(null)
+  const appendBodyFilesRef = useRef<(files: File[]) => void>(() => {
+    console.warn('[work-request] 요청 내용에 파일을 넣지 못했습니다.', {
+      reason: '편집기가 연결되지 않음',
+    })
+  })
   const [formDrafts, setFormDrafts] = useState<
     Readonly<Record<string, FormDraft>>
   >({})
@@ -3975,12 +4107,15 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     )
                   })}
                 </div>
-                {selectedRequest.values.referenceFiles.length > 0 ? (
+                {selectedRequest.values.referenceFiles.some(
+                  (item) => !blockHasFile(selectedRequest.values.blocks, item.file),
+                ) ? (
                   <div>
                     <p className="text-xs text-muted-foreground">참고 파일</p>
                     <div className="mt-2 space-y-2">
-                      {selectedRequest.values.referenceFiles.map((item) =>
-                        isImageFile(item.file) ? (
+                      {selectedRequest.values.referenceFiles.map((item) => {
+                        if (blockHasFile(selectedRequest.values.blocks, item.file)) return null
+                        return isImageFile(item.file) ? (
                           <ResizableImage
                             key={item.id}
                             file={item.file}
@@ -3989,8 +4124,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                           />
                         ) : (
                           <FileAttachmentCard key={item.id} file={item.file} />
-                        ),
-                      )}
+                        )
+                      })}
                     </div>
                   </div>
                 ) : null}
@@ -4200,11 +4335,14 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               error={errors.blocks}
               placeholder={config.bodyPlaceholder}
               onChange={(blocks) => updateValue('blocks', blocks)}
+              appendFilesRef={appendBodyFilesRef}
             />
 
             <ReferenceFilesField
               files={values.referenceFiles}
+              contentBlocks={values.blocks}
               onChange={(files) => updateValue('referenceFiles', files)}
+              onAddFiles={(incoming) => appendBodyFilesRef.current(incoming)}
             />
           </CardContent>
         </Card>
