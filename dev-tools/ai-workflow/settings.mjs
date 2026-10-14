@@ -26,6 +26,12 @@ export function settings() {
 
 function validateV2(config) {
   const v2=config.v2,text=value=>typeof value==='string'&&value.trim().length>0
+  if (v2.pipeline?.enabled) {
+    for (const [key, max] of [['planning', 1], ['implementation', 2], ['review', 1], ['readyLimit', 4], ['reviewBacklog', 3]]) {
+      const value = v2.pipeline[key]
+      if (!Number.isInteger(value) || value < 1 || value > max) throw new Error(`v2.pipeline.${key}는 1~${max} 정수여야 합니다.`)
+    }
+  }
   if(config.mode!=='memo-board')throw new Error('v2 자동화는 memo-board 모드에서만 사용합니다.')
   if(['memo','answered','queued','working','needsInput','done'].some(k=>!text(config.positions[k])))throw new Error('v2에는 메모·답변 완료·자동화 할 일·작업 중·확인 필요·완료 위치가 모두 필요합니다.')
   if(config.positions.reviewing!==undefined&&config.positions.reviewing!==null&&!text(config.positions.reviewing))throw new Error('positions.reviewing은 위치 이름 또는 null이어야 합니다.')

@@ -16,6 +16,7 @@ import { EnvironmentError, ModelUnavailable, classifyFailure } from './errors.mj
 import { readable } from './feedback.mjs'
 import { koreanTime } from './report.mjs'
 import { readLatestIntegrationReview, integrationReviewLine } from './integration-review.mjs'
+import { Pipeline } from './pipeline.mjs'
 
 const IN_FLIGHT = ['planning', 'planned', 'implementing', 'checking', 'reviewing', 'publishing']
 const iso = () => new Date().toISOString()
@@ -74,6 +75,7 @@ export class Orchestrator {
     this.git = git ?? new TaskGit({ config, root })
     this.active = new Map(); this.scanning = false; this.stopping = false; this.scan = null
     this.controls = null; this.admission = null; this.lastRunStatus = null
+    this.pipeline = config.v2?.pipeline?.enabled ? new Pipeline({ ...config.v2.pipeline, onChange: () => this.status() }) : null
     this.bindBoard()
   }
   bindBoard() {
@@ -88,6 +90,7 @@ export class Orchestrator {
   }
   get busy() { return this.active.size > 0 }
   limit() { return this.config.maxParallelTasks ?? 2 }
+  residentLimit() { return this.pipeline ? this.pipeline.readyLimit + Object.values(this.pipeline.limits).reduce((sum, count) => sum + count, 0) : this.limit() }
   journal() { return this.store.data.v2 ??= { jobs: {}, history: [], block: null, reconcileAt: 0 } }
   runDir(job) { return this.store.runDir(job) }
 
@@ -135,14 +138,29 @@ export class Orchestrator {
   // Recovery lanes first, then answered cards, the queue and new memos. 확인 필요 cards are never scanned.
   async admit(values) {
     const at = this.config.positions
-    for (const lane of [...new Set([at.working, at.reviewing, at.answered, at.queued, at.memo].filter(Boolean))]) {
-      if (this.stopping || this.active.size >= this.limit()) return
+    const recovered = new Map()
+    if (this.pipeline) {
+      const lanes = [...new Set([at.working, at.reviewing].filter(Boolean))]
+      const lists = await Promise.all(lanes.map(lane => this.board.list(lane)))
       const pending = new Set(this.store.data.outbox.map(event => event.pageId))
-      for (const page of await this.board.list(lane)) {
-        if (this.stopping || this.active.size >= this.limit()) return
+      for (let i = 0; i < lanes.length; i++) {
+        recovered.set(lanes[i], lists[i])
+        for (const page of lists[i]) {
+          const job = this.journal().jobs[page.id], c = job?.cycle, state = this.board.stateOf(page)
+          if (!this.active.has(page.id) && !pending.has(page.id) && !['중지', '오류'].includes(state) && !c?.outcome &&
+            ['checking', 'reviewing', 'publishing'].includes(c?.phase)) this.pipeline.reserve(page.id, c.plan?.files ?? [])
+        }
+      }
+    }
+    for (const lane of [...new Set([at.working, at.reviewing, at.answered, at.queued, at.memo].filter(Boolean))]) {
+      if (this.stopping || this.active.size >= this.residentLimit()) return
+      const pending = new Set(this.store.data.outbox.map(event => event.pageId))
+      for (const page of recovered.get(lane) ?? await this.board.list(lane)) {
+        if (this.stopping || this.active.size >= this.residentLimit()) return
         if (this.active.has(page.id) || pending.has(page.id)) continue
         try { await this.consider(page, lane, values) }
         catch (error) { console.warn('[ai-workflow] 카드 확인 실패', { page: page.id, message: redact(error.message, this.config.env) }) }
+        finally { if (!this.active.has(page.id)) this.pipeline?.finish(page.id) }
       }
     }
   }
@@ -155,7 +173,7 @@ export class Orchestrator {
     if (snap.unstable || snap.task.location !== lane || snap.task.state === '중지') return
     // Selecting 화면 is the user's signal that a memo is ready; drafts are never planned.
     if (lane === this.config.positions.memo && !job && !String(snap.task.source?.screen ?? '').trim()) return
-    if (this.stopping || this.active.has(page.id) || this.active.size >= this.limit()) return
+    if (this.stopping || this.active.has(page.id) || this.active.size >= this.residentLimit()) return
     const prepared = this.prepare(job, snap.task, lane, values, state)
     if (prepared) this.launch(prepared)
   }
@@ -180,7 +198,7 @@ export class Orchestrator {
     job.task = task; job.errorKind = null; job.errorCode = null; job.retryAt = null
     if (resumable) {
       c.outcome = null; c.error = null; c.resumedAt = iso()
-      if (c.phase === 'implementing') { c.cursor = { report: '관리자 재시작 또는 오류로 이전 구현 보고가 없습니다. 작업 공간의 실제 변경으로 검토합니다.', model: null }; c.phase = 'checking' }
+      if (c.phase === 'implementing' && c.implementationStarted !== false) { c.cursor = { report: '관리자 재시작 또는 오류로 이전 구현 보고가 없습니다. 작업 공간의 실제 변경으로 검토합니다.', model: null }; c.phase = 'checking' }
       if (c.phase === 'reviewing') c.phase = 'checking'
       // Active tasks keep their snapshot; only an operator-resumed model failure picks up the corrected models.
       if (modelFix) c.settings = { ...c.settings, gpt: { model: values.gptModel, effort: values.gptEffort }, cursorModel: values.cursorModel }
@@ -208,10 +226,13 @@ export class Orchestrator {
   launch(job) {
     const entry = { job, controller: new AbortController(), status: { state: '준비' } }
     this.active.set(job.key, entry); this.status()
+    // Recovered checks already own edits. Reserve them before any new Cursor starts.
+    if (this.pipeline && ['checking', 'reviewing', 'publishing'].includes(job.cycle?.phase)) this.pipeline.reserve(job.key, job.cycle.plan?.files ?? [])
     entry.promise = this.run(entry).catch(error => this.fail(entry, error))
       .catch(error => console.warn('[ai-workflow] 실패 기록 오류', redact(error.message, this.config.env)))
       .finally(() => {
         this.active.delete(job.key); this.status()
+        this.pipeline?.finish(job.key)
         if (!this.stopping) Promise.resolve(this.tick()).catch(error => console.warn('[ai-workflow] 다음 작업 확인 실패', redact(error.message, this.config.env)))
       })
   }
@@ -337,19 +358,46 @@ export class Orchestrator {
   async run(entry) {
     const c = entry.job.cycle, monitor = this.watch(entry)
     try {
-      await this.ensureWorkspace(entry)
-      while (!c.outcome && ['planning', 'planned', 'implementing', 'checking', 'publishing'].includes(c.phase)) {
-        if (c.phase === 'planning') await this.plan(entry)
-        if (c.outcome) return
-        if (c.phase === 'planned') { c.attempt = 0; c.nextPrompt = ''; c.phase = 'implementing'; this.store.save() }
-        if (c.phase === 'implementing') await this.implement(entry)
-        if (c.phase === 'checking') await this.check(entry)
+      while (!c.outcome && IN_FLIGHT.includes(c.phase)) {
+        if (c.phase === 'planning') {
+          await this.inStage(entry, 'planning', async () => { await this.ensureWorkspace(entry); await this.plan(entry) })
+          continue
+        }
+        if (['planned', 'implementing'].includes(c.phase)) {
+          await this.inStage(entry, 'implementation', async () => {
+            await this.ensureWorkspace(entry)
+            if (c.phase === 'planned') { c.attempt = 0; c.nextPrompt = ''; c.phase = 'implementing'; c.implementationStarted = false; this.store.save() }
+            await this.implement(entry)
+          })
+          continue
+        }
+        if (['checking', 'reviewing'].includes(c.phase)) {
+          await this.inStage(entry, 'review', async () => { await this.ensureWorkspace(entry); await this.check(entry) })
+          continue
+        }
         if (c.phase === 'publishing') {
+          await this.ensureWorkspace(entry)
           const posted = await this.publishResult(entry)
           if (posted !== 'applied') return
         }
       }
     } finally { clearInterval(monitor) }
+  }
+  async inStage(entry, stage, work) {
+    if (!this.pipeline) return work()
+    const label = { planning: 'GPT 계획 대기', implementation: 'Cursor 구현 대기', review: 'GPT 검사·검수 대기' }[stage]
+    entry.waitingStage = stage
+    this.setStatus(entry, label)
+    const release = await this.pipeline.acquire(stage, { key: entry.job.key, files: entry.job.cycle.plan?.files ?? [], signal: entry.controller.signal })
+    delete entry.waitingStage
+    const started = this.now()
+    try { this.alive(entry); await this.assertFresh(entry); return await work() }
+    finally {
+      const c = entry.job.cycle
+      c.stageTimeMs ??= {}
+      c.stageTimeMs[stage] = (c.stageTimeMs[stage] ?? 0) + this.now() - started
+      try { this.store.save() } finally { release() }
+    }
   }
   async ensureWorkspace(entry) {
     const { job } = entry, c = job.cycle
@@ -458,6 +506,7 @@ export class Orchestrator {
       return
     }
     c.attempt++; this.store.save()
+    c.implementationStarted = true; this.store.save()
     if (plan.executionKind !== 'implementation') {
       c.cursor = { report: '검증 전용 회차입니다. 구현 담당을 호출하지 않았고 파일을 편집하지 않았습니다.', model: null }
       c.sourceReplans = 0
@@ -487,6 +536,7 @@ export class Orchestrator {
     }
     c.cursor = { report: result?.report ?? '', model: result?.model ?? null, incomplete: !!result?.incomplete }
     c.sourceReplans = 0
+    c.implementationStarted = false
     c.phase = 'checking'; this.store.save()
   }
   async check(entry) {
@@ -554,7 +604,7 @@ export class Orchestrator {
     // The reviewer found a code defect in a verification plan; the next attempt implements within the same files.
     if (plan.executionKind === 'verification') c.plan = { ...plan, executionKind: 'implementation' }
     pinWriteBase()
-    c.phase = 'implementing'; this.store.save()
+    c.phase = 'implementing'; c.implementationStarted = false; this.store.save()
   }
   async headDeltas(dir, files, proof) {
     const dirty = await this.git.dirtyPaths(dir)
@@ -841,10 +891,10 @@ export class Orchestrator {
     } catch (error) { console.warn('[ai-workflow] 통합 브랜치 확인 실패', redact(error.message, this.config.env)) }
   }
   status() {
-    const tasks = [...this.active.values()].map(entry => ({ task: entry.job.task.title, state: entry.status.state, phase: entry.job.cycle?.phase, attempt: entry.job.cycle?.attempt ?? 0, branch: entry.job.branch }))
+    const tasks = [...this.active.values()].map(entry => ({ task: entry.job.task.title, state: entry.status.state, phase: entry.job.cycle?.phase, waitingStage: entry.waitingStage ?? null, attempt: entry.job.cycle?.attempt ?? 0, branch: entry.job.branch }))
     const values = this.controls?.values
     this.onStatus({ state: tasks.length > 1 ? '병렬 작업 중' : tasks[0]?.state ?? (this.admission ? (this.admission.paused ? '일시 중지' : '중지') : '대기'),
-      workflow: 'v2', activeCount: tasks.length, limit: this.limit(), tasks,
+      workflow: 'v2', activeCount: tasks.length, limit: this.limit(), residentLimit: this.residentLimit(), ...(this.pipeline ? { pipeline: this.pipeline.status() } : {}), tasks,
       controls: values ? { gptModel: values.gptModel, gptEffort: values.gptEffort, cursorModel: values.cursorModel, enabled: values.enabled, baseBranch: values.baseBranch, integrationBranch: values.integrationBranch } : null,
       ...(this.admission ? { admission: this.admission } : {}),
       integrationReview: integrationReviewLine(readLatestIntegrationReview(), this.journal().integrationHead) || null,
@@ -853,7 +903,9 @@ export class Orchestrator {
   async reportRunStatus() {
     const count = this.active.size, admission = this.admission
     const tasks = [...this.active.values()].map(entry => `${oneLine(entry.job.task.title).slice(0, 40)}: ${entry.status.state}`).join(' / ')
-    const head = admission ? (admission.paused ? `일시 중지 · 진행 중 ${count}건은 끝까지 진행` : `중지: ${admission.reason}`) : `실행 중 · 작업 ${count}/${this.limit()}`
+    const stages = this.pipeline?.status()
+    const flow = stages ? `GPT 계획 ${stages.planning.running}/${stages.planning.limit} · Cursor ${stages.implementation.running}/${stages.implementation.limit} · 검사·GPT 검수 ${stages.review.running}/${stages.review.limit}\n준비 지시서 대기 ${stages.implementation.waiting} · 검수 대기 ${stages.review.waiting} · 계획 대기 ${stages.planning.waiting}` : null
+    const head = admission ? (admission.paused ? `일시 중지 · 진행 중 ${count}건은 끝까지 진행` : `중지: ${admission.reason}`) : flow ?? `실행 중 · 작업 ${count}/${this.limit()}`
     const reviewLine = integrationReviewLine(readLatestIntegrationReview(), this.journal().integrationHead)
     const text = `${head}${tasks ? `\n${tasks}` : ''}${reviewLine ? `\n${reviewLine}` : ''}`
     if (text === this.lastRunStatus) return

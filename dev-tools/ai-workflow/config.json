@@ -12,6 +12,7 @@
   },
   "v2": {
     "enabled": true,
+    "pipeline": { "enabled": true, "planning": 1, "implementation": 2, "review": 1, "readyLimit": 4, "reviewBacklog": 3 },
     "controlPageId": "3f963ce0-dccd-813c-8ece-d173d7df5ad3",
     "remoteUrl": "https://github.com/ysb94/Atelier.git",
     "mainBranch": "main",
