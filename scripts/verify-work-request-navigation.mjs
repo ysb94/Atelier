@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import {
+import { validateTabIdentityProof } from '../dev-tools/ai-workflow/navigation-proof.mjs'
+import { fileURLToPath,pathToFileURL } from 'node:url'
+const root=process.argv[2]?fs.realpathSync(process.argv[2]):path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..')
+const {
   buildWorkRequestSearch,
   dropWorkRequestDraft,
   isSameWorkRequestSearch,
@@ -15,9 +17,8 @@ import {
   workRequestNavigation,
   workRequestRecoverySearch,
   workRequestScreenKey,
-} from '../src/features/work-requests/work-request-navigation.ts'
+}=await import(pathToFileURL(path.join(root,'src/features/work-requests/work-request-navigation.ts')).href)
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PATHNAME = '/work-requests/planning'
 
 function params(search) {
@@ -517,7 +518,10 @@ console.info('PASS: 삭제·존재하지 않는 ID·잘못된 mode·생성/수�
 {
   const page = fs.readFileSync(path.join(root, 'src/features/work-requests/WorkRequestPage.tsx'), 'utf8')
   const tabs = fs.readFileSync(path.join(root, 'src/components/layout/workspace-tabs.tsx'), 'utf8')
-  assert.match(tabs, /id: tabIdFromPath\(location\.pathname\)/, '업무 탭 식별자는 pathname만 사용해야 함')
+  if(process.argv[3]) {
+    const proof=JSON.parse(fs.readFileSync(process.argv[3],'utf8'))
+    validateTabIdentityProof(proof,root,tabs)
+  }else assert.match(tabs, /id: tabIdFromPath\(location\.pathname\)/, '업무 탭 식별자는 pathname만 사용해야 함')
   assert.match(page, /const tabActive = useWorkspaceTabActivity\(\)/)
   assert.match(page, /workRequestRecoverySearch\(locationSearch, resolvedView, \{\s*active: tabActive && ready,/)
   assert.match(page, /shouldListenWorkRequestEscape\(\{\s*tabActive,/)

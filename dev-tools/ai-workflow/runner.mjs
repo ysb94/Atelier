@@ -29,21 +29,23 @@ export function checkFailureOutput(error,env) {
 }
 export async function verification(config, root, signal) {
   const scripts=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).scripts
-  const checks=[]
+  const checks=[],scenarios=browserScenariosFor(config.reviewPlan)
+  for(const scenario of scenarios){
+    const name=`verify:browser-${scenario}`
+    try{const result=await runCommand(process.execPath,[path.join(toolDir,'browser-check.mjs'),scenario,root],{cwd:root,signal,timeoutMs:120000});checks.push({name,passed:true,output:result.output+'\n'+result.stderr})}
+    catch(error){if(signal?.aborted)throw error;checks.push({name,passed:false,output:checkFailureOutput(error,config.env)})}
+  }
   for(const name of ['structure:map', ...config.verificationScripts]) {
     if(!scripts[name])throw new Error(`검증 스크립트 없음: ${name}`)
     try {
-      const result=await runCommand(process.execPath,[npmCli(),'run',name],{cwd:root,signal,timeoutMs:300000})
+      const browserIdentity=name==='verify:work-request-navigation'&&checks.some(check=>check.name==='verify:browser-navigation'&&check.passed)
+      const args=browserIdentity?['--experimental-strip-types',path.join(projectRoot,'scripts/verify-work-request-navigation.mjs'),root,path.join(root,'dev-tools/ai-workflow/.state/browser/navigation.json')]:[npmCli(),'run',name]
+      const result=await runCommand(process.execPath,args,{cwd:root,signal,timeoutMs:300000})
       checks.push({name,passed:true,output:(result.output+'\n'+result.stderr).slice(-18000)})
     } catch(error) {
       if(signal?.aborted)throw error
       checks.push({name,passed:false,output:checkFailureOutput(error,config.env)})
     }
-  }
-  for(const scenario of browserScenariosFor(config.reviewPlan)){
-    const name=`verify:browser-${scenario}`
-    try{const result=await runCommand(process.execPath,[path.join(toolDir,'browser-check.mjs'),scenario,root],{cwd:root,signal,timeoutMs:120000});checks.push({name,passed:true,output:result.output+'\n'+result.stderr})}
-    catch(error){if(signal?.aborted)throw error;checks.push({name,passed:false,output:checkFailureOutput(error,config.env)})}
   }
   return checks
 }

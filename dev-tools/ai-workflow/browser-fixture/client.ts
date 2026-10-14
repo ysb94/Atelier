@@ -2,6 +2,7 @@
 export const isSupabaseConfigured = () => true
 export function getSupabase() {
   return {
+    auth:{getUser:async()=>({data:{user:{id:'fixture-user'}},error:null})},
     // Offline realtime subscriptions never emit events or open a connection.
     channel() {const channel={on:()=>channel,subscribe:()=>channel};return channel},
     removeChannel:async()=> 'ok',

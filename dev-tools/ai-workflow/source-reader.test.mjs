@@ -138,3 +138,12 @@ test('prior code inspection is reused only with matching source, task, model and
  assert.equal(reusableInspection(root,root,task,{snapshot:{[file]:hash}},{...gpt,model:'other'}),null)
  fs.writeFileSync(out,raw+' ');assert.equal(reusableInspection(root,root,task,{snapshot:{[file]:hash}},gpt),null)
 })
+
+test('behavioral tab proof rejects stale source, query-dependent identities, missing views and department collisions',async t=>{
+ const {root}=fixture(t),{validateTabIdentityProof}=await import('./navigation-proof.mjs'),tabs='fixture source',owners=['planning','design','md','logistics'],searches=['','?mode=new','?requestId=R1','?requestId=R1&mode=edit','?brand=fixture&requestId=R2']
+ const proof={passed:true,sourceRoot:root,sourceHashes:{'src/components/layout/workspace-tabs.tsx':digest(tabs)},results:{workRequestTabIdentity:owners.flatMap(owner=>searches.map(search=>({pathname:'/work-requests/'+owner,search,result:{id:owner,pathname:'/work-requests/'+owner,search}})))}}
+ validateTabIdentityProof(proof,root,tabs);assert.throws(()=>validateTabIdentityProof(proof,root,'changed'),/현재 코드/)
+ let bad=structuredClone(proof);bad.results.workRequestTabIdentity[1].result.id='different-view';assert.throws(()=>validateTabIdentityProof(bad,root,tabs))
+ bad=structuredClone(proof);bad.results.workRequestTabIdentity.pop();assert.throws(()=>validateTabIdentityProof(bad,root,tabs))
+ bad=structuredClone(proof);for(const v of bad.results.workRequestTabIdentity)v.result.id='same';assert.throws(()=>validateTabIdentityProof(bad,root,tabs),/충돌/)
+})

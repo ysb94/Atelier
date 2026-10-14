@@ -1,7 +1,8 @@
-import React from 'react'
+import React,{useEffect} from 'react'
 import {createRoot} from 'react-dom/client'
 import {QueryClient,QueryClientProvider} from '@tanstack/react-query'
-import {BrowserRouter,Routes,Route} from 'react-router-dom'
+import {BrowserRouter,Routes,Route,useNavigate} from 'react-router-dom'
+import {resolveWorkspaceTab} from '@/components/layout/workspace-tabs'
 import {CompanyLayout} from '@/components/layout/CompanyLayout'
 import {BrandLayout} from '@/components/layout/BrandLayout'
 import {BrandScope} from '@/components/layout/brand-context'
@@ -12,7 +13,9 @@ const brand={id:'fixture-brand',slug:'fixture',name:'검증 브랜드',nameKo:'�
 const client=new QueryClient({defaultOptions:{queries:{retry:false,staleTime:Infinity}}})
 client.setQueryData(['brands'],[brand])
 ;(window as unknown as {__brandQueryObservers:()=>number}).__brandQueryObservers=()=>client.getQueryCache().find({queryKey:['brands']})?.getObserversCount()??0
-createRoot(document.getElementById('root')!).render(<QueryClientProvider client={client}><BrowserRouter><Routes>
+;(window as unknown as {__fixtureResolveTab:typeof resolveWorkspaceTab}).__fixtureResolveTab=resolveWorkspaceTab
+function FixtureNavigation(){const navigate=useNavigate();useEffect(()=>{(window as unknown as {__fixtureNavigate:(to:string)=>void}).__fixtureNavigate=to=>navigate(to)},[navigate]);return null}
+createRoot(document.getElementById('root')!).render(<QueryClientProvider client={client}><BrowserRouter><FixtureNavigation/><Routes>
  <Route path="/__brand-management" element={<BrandSelectPage/>}/>
  <Route path="/__brand-home" element={<BrandScope brand={brand}><BrandHomePage/></BrandScope>}/>
  <Route path="/b/:brandSlug/*" element={<BrandLayout/>}/>

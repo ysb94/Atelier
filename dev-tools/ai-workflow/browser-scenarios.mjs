@@ -179,11 +179,31 @@ async function navigationScenario({page,origin}) {
     assert.equal(new URL(page.url()).searchParams.get('probe'),'keep','Search parameters lost')
     redirects.push({from:route,to:new URL(page.url()).pathname,searchPreserved:true})
   }
+  await page.goto(origin+'/products'+query)
+  await page.getByRole('button',{name:'전체 상품',exact:true}).waitFor()
+  const retained=['/product-work/md','/product-work/logistics','/products/fixture-item','/drafts','/work-requests/planning','/work-requests/design','/design/styled-cuts','/design/file-manager'],entered=[]
+  for(const route of retained){await page.evaluate(to=>window.__fixtureNavigate(to),route+query);await page.waitForURL(url=>url.pathname===route);await page.locator('main').first().waitFor();entered.push(route)}
+  await page.evaluate(to=>window.__fixtureNavigate(to),'/products'+query);await page.waitForURL(url=>url.pathname==='/products')
+  await page.evaluate(to=>window.__fixtureNavigate(to),'/work-requests/planning'+query);await page.waitForURL(url=>url.pathname==='/work-requests/planning');await page.goBack();await page.waitForURL(url=>url.pathname==='/products')
+  const workRequestTabIdentity=await page.evaluate(()=>{
+    const owners=['planning','design','md','logistics'],searches=['','?mode=new','?requestId=R1','?requestId=R1&mode=edit','?brand=fixture&requestId=R2'],cases=[]
+    for(const owner of owners)for(const search of searches){const pathname='/work-requests/'+owner;cases.push({pathname,search,result:window.__fixtureResolveTab({pathname,search})})}
+    return cases
+  })
+  const ownerIds=new Set()
+  for(const owner of ['planning','design','md','logistics']){const cases=workRequestTabIdentity.filter(v=>v.pathname==='/work-requests/'+owner),ids=new Set(cases.map(v=>v.result?.id));assert.equal(ids.size,1,'Work request view created another tab');assert.ok(!ids.has(undefined));ownerIds.add(cases[0].result.id);for(const item of cases){assert.equal(item.result.pathname,item.pathname);assert.equal(item.result.search,item.search)}}
+  assert.equal(ownerIds.size,4,'Department tab identifiers collided')
+  const productTabsBefore=await page.getByRole('button',{name:'전체 상품',exact:true}).count()
+  const existingProductTab=await page.locator('div.border-border.bg-background > button[title="전체 상품"]').first().elementHandle()
+  for(const route of ['/product-work/planning','/product-work/design']){await page.evaluate(to=>window.__fixtureNavigate(to),route+query);await page.waitForURL(url=>url.pathname==='/products');assert.equal(await page.getByRole('button',{name:'전체 상품',exact:true}).count(),productTabsBefore,'Removed route created another product tab');assert.equal(new URL(page.url()).searchParams.get('probe'),'keep')}
+  assert.equal(await existingProductTab.evaluate(el=>el.isConnected),true,'Existing product tab was replaced')
+  await page.waitForTimeout(250)
+  assert.equal(new URL(page.url()).pathname,'/products','Hidden tab changed the active address')
   await page.goto(origin+'/__brand-home'+query)
   await page.getByText('검증 브랜드',{exact:true}).first().waitFor()
   const shortcuts=await page.locator('a').evaluateAll(items=>items.map(item=>({text:item.textContent,href:item.getAttribute('href')})))
   assert.ok(!shortcuts.some(item=>/\/(?:work\/(?:planning|design)|product-work\/(?:planning|design))$/.test(item.href??'')),'Removed brand shortcut remains')
-  return {links,redirects,shortcuts,checked:['Actual company navigation','Actual company and legacy brand route redirects','Query preservation','Actual brand home shortcuts']}
+  return {links,redirects,shortcuts,workRequestTabIdentity,retainedRoutesEntered:entered,backNavigation:true,productTabReused:true,hiddenTabsDidNotChangeAddress:true,checked:['Actual company navigation','Actual company and legacy brand route redirects','Query preservation','Actual brand home shortcuts']}
 }
 async function brandAccessScenario({page,origin}) {
   const checked=[]
@@ -237,7 +257,7 @@ export async function runScenario(name,fixture) {
   await fixture.page.screenshot({path:screenshot,fullPage:true})
   const report={scenario:name,startedAt,finishedAt:new Date().toISOString(),passed:true,
     method:'Real app components in Chromium; synthetic profile and offline data; no actual login, production DB access or deployment.',
-    results,screenshot,screenshotSha256:createHash('sha256').update(fs.readFileSync(screenshot)).digest('hex')}
+    results,sourceRoot:fixture.root,sourceHashes:fixture.root?{'src/components/layout/workspace-tabs.tsx':createHash('sha256').update(fs.readFileSync(path.join(fixture.root,'src/components/layout/workspace-tabs.tsx'))).digest('hex')}:undefined,screenshot,screenshotSha256:createHash('sha256').update(fs.readFileSync(screenshot)).digest('hex')}
   fs.writeFileSync(path.join(dir,`${name}.json`),JSON.stringify(report,null,2))
   console.log(JSON.stringify(report))
 }

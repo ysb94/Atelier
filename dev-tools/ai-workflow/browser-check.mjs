@@ -33,7 +33,7 @@ export async function openFixture(root = process.cwd(),{scenario}={}) {
     await context.route('**/*',route=>route.request().url().startsWith(origin+'/')?route.continue():route.abort())
     const page=await context.newPage(),errors=[]
     page.on('pageerror',error=>errors.push(error.message))
-    return {page,origin,errors,close:async()=>{await browser.close();await server.close()}}
+    return {page,origin,errors,root,close:async()=>{await browser.close();await server.close()}}
   } catch(error){await browser?.close();await server.close();throw error}
 }
 
