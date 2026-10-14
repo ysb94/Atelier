@@ -5,8 +5,6 @@ import {
   CalendarRange,
   LayoutGrid,
   Lightbulb,
-  Palette,
-  PenLine,
   ScanBarcode,
   Shirt,
   Store,
@@ -36,18 +34,6 @@ const shortcuts = [
     label: '기획안',
     description: '출시 전 기획 시트',
     icon: Lightbulb,
-  },
-  {
-    to: 'work/planning',
-    label: '기획 · 상품 정보',
-    description: '필요한 상품만 불러 기획 항목 입력',
-    icon: PenLine,
-  },
-  {
-    to: 'work/design',
-    label: '디자인 · 상품 정보',
-    description: '필요한 상품만 불러 디자인 항목 입력',
-    icon: Palette,
   },
   {
     to: 'work/md',

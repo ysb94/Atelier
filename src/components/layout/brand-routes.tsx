@@ -28,8 +28,16 @@ import { WarehousePage } from '@/features/logistics/WarehousePage'
 import { WarehouseFinderPage } from '@/features/logistics/WarehouseFinderPage'
 import { TemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
 
-function RedirectCompany({ to }: { to: string }) {
-  return <Navigate to={to} replace />
+function RedirectCompany({
+  to,
+  preserveSearch = false,
+}: {
+  to: string
+  preserveSearch?: boolean
+}) {
+  const [searchParams] = useSearchParams()
+  const search = preserveSearch ? searchParams.toString() : ''
+  return <Navigate to={search ? `${to}?${search}` : to} replace />
 }
 
 function RedirectCompanyWork() {
@@ -90,6 +98,14 @@ export function BrandWorkspaceRouteTree() {
       <Route path="drafts/all" element={<AllDraftsPage />} />
       <Route path="drafts/season/:seasonCode" element={<SeasonDraftsPage />} />
       <Route path="drafts/:draftId" element={<DraftEditPage />} />
+      <Route
+        path="work/planning/*"
+        element={<RedirectCompany to="/products" preserveSearch />}
+      />
+      <Route
+        path="work/design/*"
+        element={<RedirectCompany to="/products" preserveSearch />}
+      />
       <Route path="work/:owner" element={<DepartmentProductsPage />}>
         <Route path=":styleNo" element={<ProductDetailDrawer />} />
       </Route>
@@ -141,12 +157,18 @@ export function BrandWorkspaceRouteTree() {
       <Route path="settings/brand" element={<BrandSettingsPage />} />
       <Route path="upload" element={<RedirectTo to="data/upload" />} />
       <Route path="import" element={<RedirectTo to="data/upload" />} />
-      <Route path="planning" element={<RedirectTo to="work/planning" />} />
+      <Route
+        path="planning"
+        element={<RedirectCompany to="/products" preserveSearch />}
+      />
       <Route
         path="design/file-manager"
         element={<DesignFileManagerRoute />}
       />
-      <Route path="design" element={<RedirectTo to="work/design" />} />
+      <Route
+        path="design"
+        element={<RedirectCompany to="/products" preserveSearch />}
+      />
       <Route path="md" element={<RedirectTo to="work/md" />} />
       <Route path="logistics" element={<RedirectTo to="work/logistics" />} />
       <Route path="*" element={<RedirectHome />} />
