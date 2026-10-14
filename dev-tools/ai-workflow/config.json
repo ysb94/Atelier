@@ -3,6 +3,7 @@
   "dataSourceId": "a55f8836-85b1-42e7-b156-521e621d3ee7",
   "positions": {
     "memo": "메모",
+    "preparing": "GPT 준비",
     "answered": "답변 완료",
     "queued": "자동화 할 일",
     "working": "자동화 작업 중",
@@ -12,6 +13,7 @@
   },
   "v2": {
     "enabled": true,
+    "cursorPull": { "enabled": true, "pollMs": 5000 },
     "statusDashboard": { "blockId": "3f963ce0-dccd-8115-b368-c59f2f8b8dde" },
     "pipeline": { "enabled": true, "planning": 1, "implementation": 2, "review": 1, "readyLimit": 4, "reviewBacklog": 3 },
     "controlPageId": "3f963ce0-dccd-813c-8ece-d173d7df5ad3",

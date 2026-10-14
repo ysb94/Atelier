@@ -28,7 +28,7 @@ export class Board {
   set ledger(value) { this._ledger = value }
   get props() { return this.config.properties }
   get at() { return this.config.positions }
-  automationLocations() { const at = this.at; return [at.memo, at.answered, at.queued, at.working, at.reviewing].filter(Boolean) }
+  automationLocations() { const at = this.at; return [at.memo, at.preparing, at.answered, at.queued, at.working, at.reviewing].filter(Boolean) }
   stateOf(page) { return page.properties[this.props.state]?.select?.name ?? '대기' }
 
   async ready() {
@@ -128,7 +128,7 @@ export class Board {
     // Only the same failure delivery is a retry. A new failure in this cycle must be visible.
     if (stored === summary) return
     await this.patch(id, { [p.state]: select('오류'), [p.result]: rich(summary),
-      ...([at.working, at.reviewing].filter(Boolean).includes(task.location) ? { [p.location]: select(at.queued) } : {}) })
+      ...(this.config.v2?.cursorPull?.enabled&&at.preparing ? { [p.location]: select(at.preparing) } : [at.working, at.reviewing].filter(Boolean).includes(task.location) ? { [p.location]: select(at.queued) } : {}) })
   }
   async recordNeedsInput(id, update) {
     if (!this.ownsExecution(id, update)) return

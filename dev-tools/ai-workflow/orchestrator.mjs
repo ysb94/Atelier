@@ -21,6 +21,12 @@ import { Pipeline } from './pipeline.mjs'
 const IN_FLIGHT = ['planning', 'planned', 'implementing', 'checking', 'reviewing', 'publishing']
 const iso = () => new Date().toISOString()
 
+export function readyForCursor(job,task) {
+  const c=job?.cycle
+  return !!(job?.phase!=='error' && c && !c.outcome && c.plan?.decision==='execute' && (c.writeBase?.digest||c.planSource?.digest)
+    && c.sourceVersion===task.version && (c.phase==='planned'||c.phase==='implementing'&&c.implementationStarted===false))
+}
+
 export function noticeLines(notice, at = new Date()) {
   return [`멈춘 이유: ${notice.summary}`, ...notice.questions.map((item, i) => `질문 ${i + 1}. ${item}`),
     ...notice.actions.map((item, i) => `사용자 작업 ${i + 1}. ${item}`), `다음 단계: ${ANSWER_GUIDE}`, `확인 시각: ${koreanTime(at)} (한국시간)`]
@@ -98,7 +104,38 @@ export class Orchestrator {
   async stop() {
     this.stopping = true
     for (const entry of this.active.values()) entry.controller.abort()
-    await Promise.allSettled([this.scan, ...[...this.active.values()].map(entry => entry.promise)])
+    await Promise.allSettled([this.scan, this.cursorScan, ...[...this.active.values()].map(entry => entry.promise)])
+  }
+  // Cursor execution polls the durable, visible ready list independently of GPT
+  // planning. No model participates in queue discovery or claiming work.
+  async dispatchCursor() {
+    if(!this.config.v2?.cursorPull?.enabled||this.stopping||this.cursorScan)return
+    this.cursorScan=(async()=>{
+      const controls=await readControls(this.notion,this.config)
+      if(this.admissionProblem(controls))return
+      const pages=await this.board.list(this.config.positions.queued)
+      for(const key of this.pipeline?.reservations.keys()??[])if(!this.active.has(key)&&!pages.some(page=>page.id===key))this.pipeline.finish(key)
+      const candidate=page=>{const c=this.journal().jobs[page.id]?.cycle;return c?.plan?.decision==='execute'&&(c.phase==='planned'||c.phase==='implementing'&&c.implementationStarted===false)?0:1}
+      pages.sort((a,b)=>candidate(a)-candidate(b))
+      let returned=0
+      for(const page of pages) {
+        if(this.stopping)return
+        if(this.active.has(page.id)||this.store.data.outbox.some(event=>event.pageId===page.id)||this.board.stateOf(page)==='중지')continue
+        const snap=await this.board.read(page.id)
+        if(snap.unstable||snap.task.location!==this.config.positions.queued)continue
+        const job=this.journal().jobs[page.id]
+        if(!readyForCursor(job,snap.task)) {
+          if(returned>=2)continue
+          const current=await this.board.read(page.id)
+          if(!current.unstable&&current.task.version===snap.task.version&&current.task.location===this.config.positions.queued&&current.task.state!=='중지')
+            {await this.board.patch(page.id,{[this.config.properties.location]:{select:{name:this.config.positions.preparing}}});returned++}
+          continue
+        }
+        if(this.active.size>=this.residentLimit()||(this.pipeline&&this.pipeline.queued('implementation')>=this.pipeline.readyLimit))continue
+        await this.consider(page,this.config.positions.queued,controls.values)
+      }
+    })().finally(()=>{this.cursorScan=null})
+    return this.cursorScan
   }
   tick() {
     if (this.scanning || this.stopping) return
@@ -148,7 +185,7 @@ export class Orchestrator {
       }
     }
     const recoveryLanes = this.pipeline ? [at.reviewing, at.working] : [at.working, at.reviewing]
-    const planningLanes = this.pipeline ? [at.memo, at.answered, at.queued] : [at.answered, at.queued, at.memo]
+    const planningLanes = this.config.v2?.cursorPull?.enabled ? [at.queued,at.preparing,at.answered,at.memo] : this.pipeline ? [at.memo, at.answered, at.queued] : [at.answered, at.queued, at.memo]
     for (const lane of [...new Set([...recoveryLanes, ...planningLanes].filter(Boolean))]) {
       if (this.stopping || this.active.size >= this.residentLimit()) return
       const pending = new Set(this.store.data.outbox.map(event => event.pageId))
@@ -157,7 +194,7 @@ export class Orchestrator {
         if (this.active.has(page.id) || pending.has(page.id)) continue
         try { await this.consider(page, lane, values) }
         catch (error) { console.warn('[ai-workflow] 카드 확인 실패', { page: page.id, message: redact(error.message, this.config.env) }) }
-        finally { if (!this.active.has(page.id)) this.pipeline?.finish(page.id) }
+        finally { if (!this.active.has(page.id)&&!(this.config.v2?.cursorPull?.enabled&&readyForCursor(this.journal().jobs[page.id],this.journal().jobs[page.id]?.task??{}))) this.pipeline?.finish(page.id) }
       }
     }
   }
@@ -175,6 +212,7 @@ export class Orchestrator {
     }
     const snap = await this.board.read(page.id)
     if (snap.unstable || snap.task.location !== lane || snap.task.state === '중지') return
+    if(this.config.v2?.cursorPull?.enabled&&lane===this.config.positions.queued&&!readyForCursor(job,snap.task))return
     // Selecting 화면 is the user's signal that a memo is ready; drafts are never planned.
     if (lane === this.config.positions.memo && !job && !String(snap.task.source?.screen ?? '').trim()) return
     if (this.stopping || this.active.has(page.id) || this.active.size >= this.residentLimit()) return
@@ -246,7 +284,7 @@ export class Orchestrator {
       .catch(error => console.warn('[ai-workflow] 실패 기록 오류', redact(error.message, this.config.env)))
       .finally(() => {
         this.active.delete(job.key); this.status()
-        this.pipeline?.finish(job.key)
+        if(!(this.config.v2?.cursorPull?.enabled&&readyForCursor(job,job.task)))this.pipeline?.finish(job.key)
         if (!this.stopping) Promise.resolve(this.tick()).catch(error => console.warn('[ai-workflow] 다음 작업 확인 실패', redact(error.message, this.config.env)))
       })
   }
@@ -379,9 +417,13 @@ export class Orchestrator {
       while (!c.outcome && IN_FLIGHT.includes(c.phase)) {
         if (c.phase === 'planning') {
           await this.inStage(entry, 'planning', async () => { await this.ensureWorkspace(entry); await this.plan(entry) })
+          if(this.config.v2?.cursorPull?.enabled&&c.phase==='planned')return
           continue
         }
         if (['planned', 'implementing'].includes(c.phase)) {
+          if(this.config.v2?.cursorPull?.enabled&&entry.job.task.location!==this.config.positions.queued&&(c.phase==='planned'||c.implementationStarted===false)){
+            await this.progress(entry,{state:'대기',location:this.config.positions.queued});return
+          }
           await this.inStage(entry, 'implementation', async () => {
             await this.ensureWorkspace(entry)
             if (c.phase === 'planned') { c.attempt = 0; c.nextPrompt = ''; c.phase = 'implementing'; c.implementationStarted = false; this.store.save() }
@@ -391,6 +433,9 @@ export class Orchestrator {
         }
         if (['checking', 'reviewing'].includes(c.phase)) {
           await this.inStage(entry, 'review', async () => { await this.ensureWorkspace(entry); await this.check(entry) })
+          if(this.config.v2?.cursorPull?.enabled&&c.phase==='implementing'&&c.implementationStarted===false){
+            await this.progress(entry,{state:'대기',location:this.config.positions.queued});return
+          }
           continue
         }
         if (c.phase === 'publishing') {
@@ -441,7 +486,7 @@ export class Orchestrator {
     const { job } = entry, c = job.cycle, task = job.task, ws = job.workspace.dir, signal = entry.controller.signal, at = this.config.positions
     const runDir = this.runDir(job), maxRounds = this.config.v2?.maxSourceRounds ?? 2
     this.setStatus(entry, '계획 중')
-    await this.progress(entry, { state: '구조 확인' })
+    await this.progress(entry, { state: '구조 확인', ...(this.config.v2?.cursorPull?.enabled?{location:at.preparing}:{}) })
     await this.refreshMap(ws, signal)
     const changed = [...new Set([...await this.git.changedFiles(ws, job.workspace.baseSha), ...await this.git.dirtyPaths(ws)])].filter(file => !isManagerArtifact(file))
     const previous = { branch: job.branch, baseBranch: job.workspace.baseBranch, baseCommit: job.workspace.baseSha, files: changed,
@@ -524,6 +569,7 @@ export class Orchestrator {
       c.sourceReplans = (c.sourceReplans ?? 0) + 1
       if (c.sourceReplans > 2) throw new EnvironmentError('계획에 사용한 작업 공간과 현재 파일이 계속 다릅니다. 편집은 보존했습니다.', { retry: true, code: 'plan_stale', action: '자동으로 다시 계획합니다. 작업 공간의 편집은 지우지 않습니다.' })
       c.phase = 'planning'; c.plan = null; c.planSource = null; c.writeBase = null; this.store.save()
+      if(this.config.v2?.cursorPull?.enabled)await this.progress(entry,{state:'구조 확인',location:at.preparing})
       return
     }
     c.attempt++; this.store.save()
@@ -916,6 +962,7 @@ export class Orchestrator {
     const values = this.controls?.values
     this.onStatus({ state: tasks.length > 1 ? '병렬 작업 중' : tasks[0]?.state ?? (this.admission ? (this.admission.paused ? '일시 중지' : '중지') : '대기'),
       workflow: 'v2', activeCount: tasks.length, limit: this.limit(), residentLimit: this.residentLimit(), ...(this.pipeline ? { pipeline: this.pipeline.status() } : {}), tasks,
+      cursorQueue:{enabled:this.config.v2?.cursorPull?.enabled===true,source:this.config.positions.queued,pollMs:this.config.v2?.cursorPull?.pollMs??null},
       controls: values ? { gptModel: values.gptModel, gptEffort: values.gptEffort, cursorModel: values.cursorModel, enabled: values.enabled, baseBranch: values.baseBranch, integrationBranch: values.integrationBranch } : null,
       ...(this.admission ? { admission: this.admission } : {}),
       integrationReview: integrationReviewLine(readLatestIntegrationReview(), this.journal().integrationHead) || null,

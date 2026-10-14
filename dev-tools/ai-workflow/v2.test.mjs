@@ -6,7 +6,7 @@ import path from 'node:path'
 import { GeneratedBlockLedger, stampCallout } from './generated-blocks.mjs'
 import { Notion } from './notion.mjs'
 import { Board } from './board.mjs'
-import { Orchestrator } from './orchestrator.mjs'
+import { Orchestrator,readyForCursor } from './orchestrator.mjs'
 import { Store } from './store.mjs'
 import { TaskGit } from './git-task.mjs'
 import { runCommand } from './process.mjs'
@@ -43,6 +43,42 @@ function fakeBoard() {
   return {board:new Board(config,notion),page,setVersion:v=>{version=v},onPatch:fn=>{onPatch=fn}}
 }
 const question={v2:true,kind:'needs_input',runId:'run',cycleId:'cycle',eventId:'question-event',expectVersion:'v1',expectLocations:[config.positions.working],summary:'확인해 주세요',question:'적용 대상은?',lines:['적용 대상은?']}
+
+test('Cursor readiness requires completed instructions and the latest source, never an active or failed implementation',()=>{
+  const job={phase:'active',cycle:{phase:'planned',sourceVersion:'v1',plan:{decision:'execute'},writeBase:{digest:'code'}}}
+  assert.equal(readyForCursor(job,{version:'v1'}),true)
+  assert.equal(readyForCursor(job,{version:'v2'}),false)
+  assert.equal(readyForCursor({...job,phase:'error'},{version:'v1'}),false)
+  assert.equal(readyForCursor({...job,cycle:{...job.cycle,phase:'implementing',implementationStarted:true}},{version:'v1'}),false)
+  assert.equal(readyForCursor({...job,cycle:{...job.cycle,plan:{decision:'needs_input'}}},{version:'v1'}),false)
+})
+
+test('Cursor polls ready cards while the GPT scan is busy and returns unprepared cards without calling a model',async()=>{
+  const o=setup(),ready={id:'ready',version:'v1',location:config.positions.queued,state:'대기'},raw={id:'raw',version:'raw',location:config.positions.queued,state:'대기'}
+  o.config={...config,positions:{...config.positions,preparing:'GPT 준비'},v2:{...config.v2,cursorPull:{enabled:true,pollMs:5000}}}
+  o.scanning=true
+  const values={gptModel:'gpt-6-sol',gptEffort:'medium',cursorModel:'composer-2.5',enabled:true,baseBranch:'saved',integrationBranch:'integration/test'}
+  o.notion.api=async()=>({properties:Object.fromEntries(Object.entries(CONTROL_PROPERTIES).map(([key,spec])=>[spec.name,{type:spec.type,...(spec.type==='select'?{select:{name:values[key]}}:spec.type==='checkbox'?{checkbox:values[key]}:{rich_text:[{text:{content:values[key]??''}}]})}]))})
+  o.journal().jobs.ready={task:ready,phase:'active',cycle:{phase:'planned',sourceVersion:'v1',plan:{decision:'execute'},writeBase:{digest:'code'}}}
+  const pages=[{id:'raw',properties:{state:{select:{name:'대기'}}}},{id:'ready',properties:{state:{select:{name:'대기'}}}}],taken=[],writes=[]
+  o.board.list=async()=>pages;o.board.read=async id=>({unstable:false,task:id==='ready'?ready:raw})
+  o.board.patch=async(id,p)=>writes.push({id,p})
+  o.consider=async page=>taken.push(page.id)
+  o.gpt=async()=>{throw Error('queue discovery must not invoke GPT')}
+  await o.dispatchCursor()
+  assert.deepEqual(taken,['ready'])
+  assert.equal(writes[0].id,'raw');assert.equal(writes[0].p.location.select.name,'GPT 준비')
+  assert.equal(o.scanning,true)
+})
+
+test('a completed GPT plan is handed off to the visible queue before any Cursor invocation',async()=>{
+  const o=setup();o.config={...config,v2:{...config.v2,cursorPull:{enabled:true,pollMs:5000}}}
+  const job={cycle:{phase:'planning'}},entry={job,controller:new AbortController()};let calls=0
+  o.watch=()=>null;o.inStage=async(entry,stage,work)=>work();o.ensureWorkspace=async()=>{}
+  o.plan=async()=>{job.cycle.phase='planned'};o.implement=async()=>{calls++}
+  await o.run(entry)
+  assert.equal(job.cycle.phase,'planned');assert.equal(calls,0)
+})
 
 test('copied provenance never takes ownership away from the original block',async()=>{
   const ledger=new GeneratedBlockLedger(), record=ledger.begin('p',{kind:'notice',eventId:'e'})
@@ -200,7 +236,9 @@ test('memo → question → answer → two implementation rounds → reviewed co
   git.ensureIntegrationBranch=async()=>{};git.push=async()=>{pushes++};git.removeWorktree=async()=>{}
   const pr=async()=>({number:1,url:'https://example.invalid/pr',state:'OPEN',headRefName:'auto/p',baseRefName:'integration/test',headRefOid:await f.git(['rev-parse','HEAD']),isCrossRepository:false,headRepository:{name:'Atelier'},headRepositoryOwner:{login:'ysb94'}})
   git.ensurePullRequest=pr;git.pullRequest=pr
-  const store=memory(),o=new Orchestrator({config:{...config,maxAttempts:3},notion:boardFixture.board.notion,board:boardFixture.board,store,git,refreshMap:async()=>{}})
+  const pullConfig={...config,maxAttempts:3,positions:{...config.positions,preparing:'GPT 준비'},v2:{...config.v2,cursorPull:{enabled:true,pollMs:5000}}}
+  boardFixture.board.config=pullConfig
+  const store=memory(),o=new Orchestrator({config:pullConfig,notion:boardFixture.board.notion,board:boardFixture.board,store,git,refreshMap:async()=>{}})
   const runDir=path.join(f.dir,'run');fs.mkdirSync(runDir);o.runDir=()=>runDir
   let plans=0,cursors=0,reviews=0
   o.gpt=async()=>{plans++;return {report:JSON.stringify(plans===1
@@ -221,6 +259,14 @@ test('memo → question → answer → two implementation rounds → reviewed co
   boardFixture.setVersion('v2');boardFixture.page.properties.location={select:{name:config.positions.answered}}
   const resumed=o.prepare(job,{...initial,version:'v2',source:{...initial.source,answer:'모두 적용'}},config.positions.answered,values,'확인 필요')
   assert.equal(resumed.branch,'auto/p');assert.equal(resumed.workspace.baseSha,f.base)
+  await o.run({job:resumed,controller:new AbortController()})
+  assert.equal(resumed.cycle.phase,'planned');assert.equal(cursors,0)
+  assert.equal(boardFixture.page.properties.location.select.name,config.positions.queued)
+  resumed.task.location=config.positions.queued
+  await o.run({job:resumed,controller:new AbortController()})
+  assert.equal(cursors,1);assert.equal(reviews,1)
+  assert.equal(boardFixture.page.properties.location.select.name,config.positions.queued)
+  assert.equal(readyForCursor(resumed,resumed.task),true)
   await o.run({job:resumed,controller:new AbortController()})
   assert.equal(plans,2);assert.equal(cursors,2);assert.equal(reviews,2);assert.equal(job.cycle.attempt,2)
   assert.equal(job.phase,'done');assert.equal(boardFixture.page.properties.location.select.name,config.positions.done)

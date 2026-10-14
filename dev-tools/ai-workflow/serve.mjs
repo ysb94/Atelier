@@ -50,7 +50,8 @@ export async function startManager() {
   console.info(`[ai-workflow] 개발 전용 관리자: http://127.0.0.1:${config.port}/health`)
   const dashboard=startStatusDashboard({config})
   const interval=setInterval(tick,config.pollMs);void tick()
-  const stop=async()=>{if(stopping)return;stopping=true;clearInterval(interval);await runner?.stop();await new Promise(resolve=>server.close(resolve));await dashboard?.tick();await dashboard?.stop();release()}
+  const cursorInterval=setInterval(()=>{if(!stopping&&runner?.dispatchCursor)void runner.dispatchCursor().catch(error=>console.warn('[ai-workflow] Cursor 할 일 조회 실패',redact(error.message,config.env)))},config.v2?.cursorPull?.pollMs??5000)
+  const stop=async()=>{if(stopping)return;stopping=true;clearInterval(interval);clearInterval(cursorInterval);await runner?.stop();await new Promise(resolve=>server.close(resolve));await dashboard?.tick();await dashboard?.stop();release()}
   return {server,stop,getStatus:()=>status}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
