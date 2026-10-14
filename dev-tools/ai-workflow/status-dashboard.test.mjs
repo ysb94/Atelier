@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { dashboardSnapshot,writeDashboard } from './status-dashboard.mjs'
+import { dashboardSnapshot,writeDashboard,cursorSlots } from './status-dashboard.mjs'
 
 const controls={ok:true,values:{enabled:true,gptModel:'gpt-6-luna',gptEffort:'medium',cursorModel:'composer-2.5'}}
 const health={tool:'atelier-ai-workflow',activeCount:2,tasks:[{phase:'reviewing',branch:'a',waitingStage:null},{phase:'implementing',branch:'b',waitingStage:null}],pipeline:{planning:{running:0,waiting:0},implementation:{running:1,waiting:0},review:{running:1,waiting:1}}}
@@ -35,4 +35,28 @@ test('HTTP health with missing authentication shows the block reason instead of 
   assert.match(view.content,/자동화 실행 차단/)
   assert.match(view.content,/멈춘 이유: Cursor CLI 로그인 필요/)
   assert.match(view.rows.implementation,/실행 차단/)
+})
+
+test('two Cursor slots show separate assignments and keep slot numbers when the task order changes',()=>{
+  const h={...health,tasks:[{phase:'implementing',branch:'b',task:'첨부파일 수정',state:'구현 중'},{phase:'implementing',branch:'c',task:'일정 표시',state:'구현 중'}],pipeline:{...health.pipeline,implementation:{running:2,waiting:1}}}
+  const view=dashboardSnapshot({health:h,controls,jobs,previousCursorSlots:['c','b']})
+  assert.deepEqual(view.cursorSlots,['c','b'])
+  assert.match(view.rows.cursor1,/업무: 일정 표시/)
+  assert.match(view.rows.cursor2,/업무: 첨부파일 수정/)
+  assert.match(view.rows.cursor2,/grok-4.7-xhigh-fast/)
+  assert.match(view.content,/Cursor 1:/);assert.match(view.content,/Cursor 2:/)
+  assert.match(view.content,/지시서 대기: 1건/)
+  const one={...h,tasks:[h.tasks[0]],pipeline:{...h.pipeline,implementation:{running:1,waiting:0}}}
+  assert.deepEqual(cursorSlots(one,view.cursorSlots),[null,'b'])
+  const freed=dashboardSnapshot({health:one,controls,jobs,previousCursorSlots:view.cursorSlots})
+  assert.match(freed.rows.cursor1,/대기.*맡은 업무 없음/)
+  assert.match(freed.rows.cursor2,/첨부파일 수정/)
+})
+
+test('queued work and GPT review never appear as active Cursor workers',()=>{
+  const h={...health,tasks:[{phase:'implementing',branch:'queued',waitingStage:'implementation'},{phase:'reviewing',branch:'review'}],pipeline:{...health.pipeline,implementation:{running:0,waiting:1}}}
+  const view=dashboardSnapshot({health:h,controls,jobs,previousCursorSlots:['review','queued']})
+  assert.deepEqual(view.cursorSlots,[null,null])
+  assert.match(view.rows.cursor1,/대기.*맡은 업무 없음/)
+  assert.match(view.rows.cursor2,/대기.*맡은 업무 없음/)
 })

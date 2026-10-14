@@ -7,13 +7,28 @@ import { readControls } from './control.mjs'
 import { acquireLock } from './store.mjs'
 import { koreanTime } from './report.mjs'
 
-export const DASHBOARD_PROPERTIES = Object.freeze({planning:'GPT 계획 상태',implementation:'Cursor 구현 상태',review:'GPT 검수 상태',heartbeat:'최근 연결'})
+export const DASHBOARD_PROPERTIES = Object.freeze({planning:'GPT 계획 상태',implementation:'Cursor 구현 상태',cursor1:'Cursor 1 상태',cursor2:'Cursor 2 상태',review:'GPT 검수 상태',heartbeat:'최근 연결'})
 const stageOf = phase => ['planning'].includes(phase) ? 'planning' : ['planned','implementing'].includes(phase) ? 'implementation' : ['checking','reviewing','publishing'].includes(phase) ? 'review' : null
 const text = content => ({rich_text:[{type:'text',text:{content:String(content).slice(0,1900)}}]})
 
+// Slot numbers stay attached to the same active branch across polling order
+// changes. Queued work and work already in GPT review do not occupy Cursor.
+export function cursorSlots(health,previous=[]) {
+  if(health?.tool!=='atelier-ai-workflow')return previous
+  const candidates=(health.tasks??[]).filter(task=>stageOf(task.phase)==='implementation'&&!task.waitingStage)
+    .slice(0,Math.min(2,health.pipeline?.implementation?.running??2))
+  const active=new Set(candidates.map(task=>task.branch))
+  const slots=Array.from({length:2},(_,i)=>active.has(previous[i])?previous[i]:null)
+  for(const task of candidates)if(!slots.includes(task.branch)){
+    const empty=slots.indexOf(null)
+    if(empty>=0)slots[empty]=task.branch
+  }
+  return slots
+}
+
 // Health supplies live occupancy; the durable journal supplies each admitted
 // task's pinned model. Selected settings must not impersonate an older session.
-export function dashboardSnapshot({health,controls,jobs={},at=new Date()}) {
+export function dashboardSnapshot({health,controls,jobs={},at=new Date(),previousCursorSlots=[]}) {
   const online=health?.tool==='atelier-ai-workflow',values=controls?.values??health?.controls??{}
   const enabled=values.enabled===true,rows={}
   const blocked=health?.admission&&!health.admission.paused?health.admission.reason:health?.problems?.length?health.problems.join(' / '):null
@@ -33,13 +48,22 @@ export function dashboardSnapshot({health,controls,jobs={},at=new Date()}) {
     rows[stage]=`${state} · ${modelLine}${waiting?` · 대기 ${waiting}개`:''}${activeModels.size&&[...activeModels.keys()].some(model=>model!==configured)?`\n새 작업 설정: ${configured}`:''}`
     rows[stage]=rows[stage].slice(0,1200)
   }
+  const slots=cursorSlots(health,previousCursorSlots)
+  for(let i=0;i<2;i++) {
+    const task=online?(health.tasks??[]).find(task=>task.branch===slots[i]&&stageOf(task.phase)==='implementation'&&!task.waitingStage):null
+    const job=task?Object.values(jobs).find(job=>job.branch===task.branch):null
+    const model=task?(job?.cycle?.settings?.cursorModel??'실행 모델 확인 중'):(values.cursorModel??'설정 확인 필요')
+    const state=!online?'🔴 연결 확인 필요':task?'🟢 작업 중':!controls?.ok?'🟠 설정 확인 필요':blocked?'🟠 실행 차단':!enabled?'⚪ 일시정지':'🟡 대기'
+    rows[`cursor${i+1}`]=`${state} · ${model}${task?`\n업무: ${String(task.task??'업무 확인 중').replace(/\s+/g,' ').slice(0,140)}\n진행: ${task.state??'구현 중'}`:' · 맡은 업무 없음'}`
+  }
   const active=health?.activeCount??0
   const overall=!online?`🔴 실행기 연결 확인 필요 · 자동화 설정 ${typeof values.enabled!=='boolean'?'미확인':enabled?'ON':'OFF'}`:!controls?.ok?'🟠 설정 확인 필요':blocked?'🟠 자동화 실행 차단':enabled?'🟢 자동화 켜짐 · 실행기 연결됨':`⚪ 자동화 일시정지${active?` · 진행 중 ${active}건 마무리`:''}`
   const reason=!controls?.ok?controls?.problems?.join(' / '):blocked
-  const content=['자동화 실행 현황',overall,...Object.entries(rows).map(([stage,value])=>`${{planning:'GPT 계획',implementation:'Cursor 구현',review:'GPT 검수'}[stage]}: ${value}`),
+  const content=['자동화 실행 현황',overall,...['planning','cursor1','cursor2','review'].map(stage=>`${{planning:'GPT 계획',cursor1:'Cursor 1',cursor2:'Cursor 2',review:'GPT 검수'}[stage]}: ${rows[stage]}`),
+    health?.pipeline?.implementation?.waiting?`Cursor 지시서 대기: ${health.pipeline.implementation.waiting}건`:null,
     reason?`멈춘 이유: ${reason}`:null,`상태 확인: ${koreanTime(at)} (한국시간)`,
     '대기는 작업을 기다리는 상태예요. 최근 연결이 2분 넘게 갱신되지 않으면 실행기 연결을 확인해 주세요.'].filter(Boolean).join('\n').slice(0,1900)
-  return {online,rows,content}
+  return {online,rows,content,cursorSlots:slots}
 }
 
 export async function writeDashboard(notion,config,snapshot,at=new Date()) {
@@ -57,6 +81,8 @@ export function startStatusDashboard({config=settings(),notion=new Notion(config
   try{release=acquireLock(path.join(stateDir,'status-dashboard'))}
   catch(error){if(/이미 실행 중/.test(error.message))return null;throw error}
   let stopped=false,pending=null
+  const slotsFile=path.join(stateDir,'status-dashboard','cursor-slots.json')
+  let previousCursorSlots=fs.existsSync(slotsFile)?JSON.parse(fs.readFileSync(slotsFile,'utf8')):[]
   const tick=()=>{
     if(stopped||pending)return pending
     pending=(async()=>{
@@ -69,7 +95,8 @@ export function startStatusDashboard({config=settings(),notion=new Notion(config
       catch(error){controls={ok:false,problems:[redact(error.message,config.env)]}}
       let jobs={}
       if(fs.existsSync(journalFile))jobs=JSON.parse(fs.readFileSync(journalFile,'utf8')).v2?.jobs??{}
-      const at=new Date(),snapshot=dashboardSnapshot({health,controls,jobs,at})
+      const at=new Date(),snapshot=dashboardSnapshot({health,controls,jobs,at,previousCursorSlots})
+      if(snapshot.online){previousCursorSlots=snapshot.cursorSlots;fs.writeFileSync(slotsFile,JSON.stringify(previousCursorSlots))}
       await writeDashboard(notion,config,snapshot,at)
     })().catch(error=>console.warn('[ai-workflow] 노션 상태 표시 갱신 실패',redact(error.message,config.env))).finally(()=>{pending=null})
     return pending
