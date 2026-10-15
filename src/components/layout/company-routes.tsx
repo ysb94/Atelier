@@ -24,7 +24,6 @@ import { CompanyUsageCodePage } from '@/features/codes/UsageCodePage'
 import { CompanyPartnerCodePage } from '@/features/codes/PartnerCodePage'
 import { FieldsSettingsPage } from '@/features/settings/FieldsSettingsPage'
 import { ProductCategorySettingsPage } from '@/features/settings/ProductCategorySettingsPage'
-import { SeasonsSettingsPage } from '@/features/settings/SeasonsSettingsPage'
 import { UsageTargetsSettingsPage } from '@/features/settings/UsageTargetsSettingsPage'
 import { BrandSettingsPage } from '@/features/settings/BrandSettingsPage'
 import { AiSettingsPage } from '@/features/settings/AiSettingsPage'
@@ -199,14 +198,7 @@ export const companyWorkspaceRoutes = (
           </Gated>
         }
       />
-      <Route
-        path="settings/seasons"
-        element={
-          <Gated>
-            <SeasonsSettingsPage />
-          </Gated>
-        }
-      />
+      <Route path="settings/seasons" element={<Navigate to="/drafts" replace />} />
       <Route
         path="settings/usage-targets"
         element={
