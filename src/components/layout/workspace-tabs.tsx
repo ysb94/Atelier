@@ -89,7 +89,6 @@ const NAV_LABELS: {
   { match: /^\/settings\/import(?:\/|$)/, label: '가져오기' },
   { match: /^\/settings\/members(?:\/|$)/, label: '멤버' },
   { match: /^\/settings\/ai(?:\/|$)/, label: 'AI 설정' },
-  { match: /^\/settings\/brand(?:\/|$)/, label: '브랜드 정보' },
 ]
 
 /** 탭 구분용. 상품 상세 서랍은 목록 탭에 붙인다. 브랜드 필터는 같은 탭이다. */
@@ -103,7 +102,10 @@ function stripDetailPath(path: string): string {
   const dataDetail = path.match(/^(\/data\/[^/]+)\/[^/]+\/[^/]+\/?$/)
   if (dataDetail) return dataDetail[1]
 
-  return path.replace(/\/$/, '') || '/'
+  const normalized = path.replace(/\/$/, '') || '/'
+  // 예전 브랜드 정보 주소는 브랜드 관리 탭으로 붙인다.
+  if (normalized === '/settings/brand') return '/brands'
+  return normalized
 }
 
 function tabIdFromPath(path: string): string {
