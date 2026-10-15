@@ -101,6 +101,9 @@ test('native deletion allows only an existing scoped regular file and never comm
   assert.equal(permissionDecision(request('src/old.tsx','Delete `'+path.join(root,'src/old.tsx')+'`'),['src/old.tsx'],root),true)
   assert.equal(permissionDecision(request('src/old.tsx','Delete other.tsx'),['src/old.tsx'],root),false)
   assert.equal(permissionDecision({toolCall:{title:'Delete `'+path.join(root,'src/old.tsx')+'`',kind:'delete'}},['src/old.tsx'],root),true)
+  // Cursor ACP formats native Delete as kind=edit and omits locations/content.
+  assert.equal(permissionDecision({toolCall:{toolCallId:'delete-native',title:'Delete `'+path.join(root,'src/old.tsx')+'`',kind:'edit',status:'pending'}},['src/old.tsx'],root),true)
+  assert.equal(permissionDecision({toolCall:{title:'Delete `'+path.join(root,'src/old.tsx')+'`',kind:'execute'}},['src/old.tsx'],root),false)
   for(const title of ['Delete File','Delete ../outside.tsx','Delete src/missing.tsx','Delete src/link.tsx','Delete Database','Delete src/old.tsx and src/other.tsx'])assert.equal(permissionDecision({toolCall:{title,kind:'delete'}},['src/old.tsx'],root),false)
   for(const file of ['src','src/link.tsx','../outside.tsx','src/missing.tsx'])assert.equal(permissionDecision(request(file),[file],root),false)
   assert.equal(permissionDecision(request('src/old.tsx'),[],root),false)
