@@ -38,6 +38,7 @@ import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
 import { CompanyTemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
 import { PriceComparePage } from '@/features/md/PriceComparePage'
 import { OperationsSupportPage } from '@/features/operations-support/OperationsSupportPage'
+import { MamamIdeaInboxPage } from '@/features/mamam/MamamIdeaInboxPage'
 import { DeveloperPreviewPage } from './DeveloperPreview'
 
 function RedirectTo({
@@ -203,6 +204,7 @@ export const companyWorkspaceRoutes = (
       <Route path="usage-codes" element={<CompanyUsageCodePage />} />
       <Route path="partner-codes" element={<CompanyPartnerCodePage />} />
       <Route path="operations-support" element={<OperationsSupportPage />} />
+      <Route path="idea-contest" element={<MamamIdeaInboxPage />} />
       <Route path="operations" element={<CompanyOutboundDataPage />} />
       <Route path="outbound-data" element={<RedirectTo to="/operations" />} />
       <Route

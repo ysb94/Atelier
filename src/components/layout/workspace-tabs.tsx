@@ -75,6 +75,7 @@ const NAV_LABELS: {
   { match: /^\/schedule(?:\/|$)/, label: '일정' },
   { match: /^\/members(?:\/|$)/, label: '멤버·권한' },
   { match: /^\/brands(?:\/|$)/, label: '브랜드 관리' },
+  { match: /^\/idea-contest(?:\/|$)/, label: '아이디어 공모전' },
   { match: /^\/operations(?:\/|$)/, label: '운영 현황' },
   { match: /^\/outbound-data(?:\/|$)/, label: '운영 현황' },
   {

@@ -111,6 +111,17 @@ export function canAccessBrandManagement(
   )
 }
 
+/** Mamam 공모전 접수함 조회. 활성 대표이사와 개발자 계정만 해당한다. */
+export function canAccessMamamIdeaInbox(
+  profile: (CapabilityProfile & { email?: string | null }) | null,
+) {
+  if (!isApprovedCompanyMember(profile)) return false
+  return (
+    isCompanyReviewer(profile) ||
+    profile?.email?.trim().toLowerCase() === ORG_ASSIGNMENT_EDITOR_EMAIL
+  )
+}
+
 export function isAttendanceExemptPosition(position?: string | null) {
   const normalized = position?.trim()
   return Boolean(normalized && ATTENDANCE_EXEMPT_POSITIONS.includes(normalized))

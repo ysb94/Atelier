@@ -1,5 +1,11 @@
 import type { LucideIcon } from 'lucide-react'
-import { canAccessBrandManagement, canAccessOperationsSupport, canManagePersonnel, isCompanyReviewer } from '../../lib/company/capabilities.ts'
+import {
+  canAccessBrandManagement,
+  canAccessMamamIdeaInbox,
+  canAccessOperationsSupport,
+  canManagePersonnel,
+  isCompanyReviewer,
+} from '../../lib/company/capabilities.ts'
 import {
   Boxes,
   Building2,
@@ -15,6 +21,7 @@ import {
   Headset,
   Home,
   Images,
+  Inbox,
   LayoutGrid,
   Lightbulb,
   ListChecks,
@@ -154,13 +161,18 @@ export const membersNavItem: CompanyNavItem = {
   icon: Users,
 }
 
+const mamamInboxGroup: CompanyNavGroup = {
+  title: '아이디어 공모전',
+  items: [{ to: '/idea-contest', label: '접수 리스트', icon: Inbox }],
+}
+
 export function companyNavGroupsForProfile(
   profile: Parameters<typeof canAccessOperationsSupport>[0],
 ) {
   const showOperationsSupport = canAccessOperationsSupport(profile)
   const showMembers = canManagePersonnel(profile) || isCompanyReviewer(profile)
   const showBrandManagement = canAccessBrandManagement(profile)
-  return companyNavGroups.flatMap((group) => {
+  const visibleGroups = companyNavGroups.flatMap((group) => {
     if (group.title !== '운영지원') {
       const items = showBrandManagement
         ? group.items
@@ -173,6 +185,9 @@ export function companyNavGroupsForProfile(
     ]
     return items.length > 0 ? [{ ...group, items }] : []
   })
+  return canAccessMamamIdeaInbox(profile)
+    ? [...visibleGroups, mamamInboxGroup]
+    : visibleGroups
 }
 
 export function companyNavItemActive(to: string, pathname: string, end?: boolean) {
