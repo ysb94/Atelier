@@ -82,7 +82,6 @@ const NAV_LABELS: {
     label: '데이터 · 카테고리 관리',
   },
   { match: /^\/settings\/fields(?:\/|$)/, label: '업로드 항목' },
-  { match: /^\/settings\/seasons(?:\/|$)/, label: '출시 기획' },
   { match: /^\/settings\/usage-targets(?:\/|$)/, label: '출고업체' },
   { match: /^\/settings\/import(?:\/|$)/, label: '가져오기' },
   { match: /^\/settings\/members(?:\/|$)/, label: '멤버' },

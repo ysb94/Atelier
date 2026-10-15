@@ -4,7 +4,6 @@ import {
   Boxes,
   Building2,
   CalendarDays,
-  CalendarRange,
   Camera,
   ChartColumn,
   ClipboardList,
@@ -142,7 +141,6 @@ export const companyNavGroups: CompanyNavGroup[] = [
     title: '설정',
     items: [
       { to: '/settings/fields', label: '업로드 항목', icon: ListChecks },
-      { to: '/settings/seasons', label: '출시 기획', icon: CalendarRange },
       { to: '/settings/usage-targets', label: '출고업체', icon: Store },
       { to: '/settings/ai', label: 'AI 설정', icon: Sparkles },
       { to: '/brands', label: '브랜드 관리', icon: Building2 },
