@@ -21,10 +21,19 @@ export function readonlyMcpTool(title) {
   return notion.has(tool)&&(provider==='notion'||provider===`notion-${tool}`)||supabase.has(tool)&&(provider==='supabase'||provider===`supabase-${tool}`)
 }
 
+function deletionLocations(call) {
+  if(call.locations?.length)return call.locations
+  // ACP permission requests omit locations, but name the exact file in title.
+  const title=String(call.title??'')
+  if(call.kind!=='delete'||title==='Delete File'||!/^Delete(?: File)?\s+/.test(title))return []
+  const named=title.replace(/^Delete(?: File)?\s+/,'').replace(/^[`'"]|[`'"]$/g,'')
+  return named?[{path:named}]:[]
+}
+
 export function permissionDecision(params, files, root) {
   const call = params.toolCall ?? {}, title = String(call.title ?? ''), kind = call.kind
   if(kind==='delete'&&/^Delete(?: File)?(?:\s|$)/.test(title)) {
-    const locations=call.locations??[]
+    const locations=deletionLocations(call)
     return locations.length>0&&locations.every(item=>{
       try {
         const target=inside(root,item.path),relative=path.relative(root,target).replaceAll('\\','/')
@@ -138,8 +147,9 @@ export async function runCursor({ config, root, files, prompt, signal, onEvent =
       if (msg.method === 'session/request_permission') {
         let allowed = permissionDecision(msg.params, files, root)
         if(msg.params.toolCall?.kind==='delete'||/^Delete(?: File)?(?:\s|$)/.test(msg.params.toolCall?.title??'')) {
-          if(allowed)allowed=(msg.params.toolCall.locations??[]).every(item=>{try{const file=path.relative(root,inside(root,item.path)).replaceAll('\\','/');return expected.has(file)&&readFile(root,file)===expected.get(file)}catch{return false}})
-          onEvent({type:'cursor-delete-permission',allowed,paths:(msg.params.toolCall.locations??[]).map(item=>path.relative(root,item.path)),metadataKeys:Object.keys(msg.params.toolCall),inputKeys:Object.keys(msg.params.toolCall.rawInput??{})})
+          const locations=deletionLocations(msg.params.toolCall)
+          if(allowed)allowed=locations.length>0&&locations.every(item=>{try{const file=path.relative(root,inside(root,item.path)).replaceAll('\\','/');return expected.has(file)&&readFile(root,file)===expected.get(file)}catch{return false}})
+          onEvent({type:'cursor-delete-permission',allowed,paths:locations.map(item=>path.relative(root,item.path)),metadataKeys:Object.keys(msg.params.toolCall),inputKeys:Object.keys(msg.params.toolCall.rawInput??{})})
         }
         const option = msg.params.options?.find(o => o.kind === (allowed ? 'allow_once' : 'reject_once'))
         if (!allowed) inputNeeded = `도구 확인 필요: ${msg.params.toolCall?.title ?? msg.params.toolCall?.kind ?? '알 수 없는 요청'}`
