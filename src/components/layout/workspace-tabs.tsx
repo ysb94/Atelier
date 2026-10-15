@@ -81,7 +81,7 @@ const NAV_LABELS: {
   { match: /^\/outbound-data(?:\/|$)/, label: '운영 현황' },
   {
     match: /^\/settings\/product-categories(?:\/|$)/,
-    label: '상품 설정 · 카테고리 관리',
+    label: '데이터 · 카테고리 관리',
   },
   { match: /^\/settings\/fields(?:\/|$)/, label: '업로드 항목' },
   { match: /^\/settings\/seasons(?:\/|$)/, label: '출시 기획' },
