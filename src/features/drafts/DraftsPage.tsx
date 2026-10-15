@@ -20,7 +20,6 @@ import {
 } from '@/lib/drafts/company-draft'
 import { newColorRow } from '@/lib/drafts/empty-draft'
 import {
-  markLatestColorSampleReturned,
   newColorSampleRound,
   passLatestColorSampleRound,
   requestNextColorSampleRound,
