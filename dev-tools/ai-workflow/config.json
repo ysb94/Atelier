@@ -27,7 +27,6 @@
       "baseBranch": "save/automation-progress-20261013",
       "integrationBranch": "integration/automation-review"
     },
-    "workspaceRoot": "/workspace/.atelier-task-worktrees",
     "retryMinutes": 5,
     "maxRetryMinutes": 120,
     "reconcileMinutes": 10,

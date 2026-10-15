@@ -9,6 +9,7 @@
     "verify:sabangnet-urls": "node scripts/verify-sabangnet-urls.mjs",
     "dev": "node dev-tools/structure-map/dev.mjs",
     "ai:doctor": "node dev-tools/ai-workflow/doctor.mjs",
+    "ai:connect": "node dev-tools/ai-workflow/connect.mjs",
     "ai:login": "node dev-tools/ai-workflow/login.mjs",
     "ai:mcp:status": "node dev-tools/ai-workflow/mcp.mjs status",
     "ai:mcp:login": "node dev-tools/ai-workflow/mcp.mjs login",

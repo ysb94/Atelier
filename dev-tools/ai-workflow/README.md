@@ -50,6 +50,26 @@ Cloudflare는 사용자 요청으로 `excludedMcpServers`에 등록해 플러그
 공식 Cursor Windows CLI를 `.runtime/cursor/package/dist-package`에 설치하면 자동 발견한다.
 다른 실행 파일은 `.env.local`의 `ATELIER_CURSOR_BIN`, `ATELIER_CODEX_BIN`으로 지정한다.
 
+### 다른 PC·Windows에서 이어서 연결하기
+
+클라우드에서 로그인한 계정은 다른 PC에 복사하지 않는다. 최신 브랜치를 받은 뒤
+프로젝트 터미널에서 `npm run ai:connect`를 실행한다. 작업 폴더를 만들고 Codex의
+ChatGPT 구독 로그인, GitHub 로그인, 필요한 경우 Cursor 로그인을 순서대로 안내한다.
+CLI가 설치되지 않았으면 설치 명령을 표시한다. 이 명령은 모델 호출·업무 실행·노션 쓰기를 하지 않는다.
+완료 후 실행 중인 개발 서버·관리자를 종료하고 다시 시작한다. 노션의 자동화 실행 체크박스는 별도로 유지된다.
+
+공유 `config.json`에는 PC 전용 작업 폴더를 넣지 않는다. 기본값은 사용자 홈의
+`.atelier-ai-workflow/worktrees/<프로젝트 식별자>`이며 없는 폴더는 자동 생성한다.
+별도 위치가 필요한 PC만 Git에서 제외되는 `config.local.json`에 지정한다:
+
+```json
+{ "v2": { "workspaceRoot": "C:/Users/실제사용자이름/.atelier-task-worktrees" } }
+```
+
+로컬 `v2` 설정은 공유 `v2`의 나머지 항목을 유지하면서 덮어쓴다. Windows의 npm Codex
+`.cmd`는 Node 진입 파일로 직접 실행하므로 셸 실행이나 인자 문자열 조립이 필요 없다.
+실행 파일을 못 찾는 오류와 로그인이 필요한 오류는 별도로 표시한다.
+
 ## 노션 준비
 
 ### 설정 페이지 (`v2.controlPageId`)
@@ -224,7 +244,7 @@ GPT 공용 실행을 사용하면 상단은 `GPT 1`, `GPT 2`로 표시한다. �
 
 - 작업마다 브랜치 `auto/<페이지 ID 앞 8자>-<runId 앞 8자>`를 만든다. 이 이름은 실행이 바뀌기 전까지 고정된다.
 - 첫 회차에서 `origin`의 기준 브랜치를 가져와(fetch) 그 커밋 SHA를 `기준 커밋`으로 고정한다. 사용자의 현재 작업 폴더·미커밋 변경은 쓰지도 바꾸지도 않는다.
-- 작업 공간은 프로젝트 밖 Git worktree다. 이 저장소의 `v2.workspaceRoot`는 `/workspace/.atelier-task-worktrees`다.
+- 작업 공간은 프로젝트 밖 Git worktree다. PC별 사용자 홈을 기본으로 쓰고, 전용 위치는 `config.local.json`의 `v2.workspaceRoot`로 지정한다.
   설치된 `node_modules`는 링크로 재사용한다. 확인 필요 → 답변 완료 → 재계획 동안 같은 브랜치·작업 공간·이전 편집을 유지한다.
 - 검사와 GPT 검토는 작업 공간 안에서 한다. 허용 파일 밖 변경은 지우거나 되돌리지 않는다.
   `자동화 단계 오류`로 파일 목록을 남기고, 단계를 대기로 바꾸면 GPT가 그 파일을 계획에 넣어 유지 또는 되돌림을 지시한다.
