@@ -18,6 +18,15 @@ import { MyAttendanceStartPanel } from './MyAttendanceStartPanel'
 import { MyAttendancePanel } from './MyAttendancePanel'
 import './personal-requests.css'
 
+function formatHireDate(value: string | null | undefined) {
+  const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value?.trim() ?? '')
+  if (!matched) return '입사일 미등록'
+  const month = Number(matched[2])
+  const day = Number(matched[3])
+  if (month < 1 || month > 12 || day < 1 || day > 31) return '입사일 미등록'
+  return `${matched[1]}년 ${month}월 ${day}일`
+}
+
 export function ProfileSettingsPage() {
   useRenderWatch('ProfileSettingsPage')
   const { profile, email } = useAuth()
@@ -62,8 +71,8 @@ export function ProfileSettingsPage() {
           <CardHeader>
             <CardTitle>프로필</CardTitle>
             <CardDescription>
-              확인한 본명은 직접 바꿀 수 없습니다. 개명이나 오타는 운영지원팀
-              또는 관리자에게 요청해 주세요.
+              확인한 본명은 직접 바꿀 수 없습니다. 개명이나 오타, 직급·입사일
+              변경은 운영지원팀 또는 담당자에게 요청해 주세요.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -87,9 +96,21 @@ export function ProfileSettingsPage() {
                   {profile?.position?.trim() || '직책 미정'}
                 </p>
               </div>
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium">직급</p>
+                <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                  {profile?.jobGrade?.trim() || '직급 미정'}
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <p className="text-sm font-medium">입사일</p>
+                <p className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
+                  {formatHireDate(profile?.hireDate)}
+                </p>
+              </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              본명, 팀, 직책 변경은 운영지원팀 또는 관리자에게 요청해 주세요.
+              본명, 팀, 직책, 직급, 입사일 변경은 운영지원팀 또는 담당자에게 요청해 주세요.
             </p>
           </CardContent>
         </Card>
