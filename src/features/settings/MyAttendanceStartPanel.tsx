@@ -6,7 +6,7 @@ import { isAttendanceExemptPosition } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useOpsDirectory } from '@/features/operations-support/ops-directory'
 import { useAttendanceStartSettings } from '@/features/operations-support/use-attendance-start-settings'
-import { forgivenClock, resolveAttendanceStart, startTone, SUGGESTED_START } from '@/features/operations-support/attendance-start-settings'
+import { ATTENDANCE_GRACE_MINUTES, forgivenClock, resolveAttendanceStart, startTone, SUGGESTED_START } from '@/features/operations-support/attendance-start-settings'
 import { memberLabel } from '@/features/operations-support/OpsStat'
 import '@/features/operations-support/attendance-start-settings.css'
 
@@ -21,7 +21,6 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
   const [search, setSearch] = useState('')
   const [checked, setChecked] = useState<string[]>([])
   const [start, setStart] = useState(SUGGESTED_START)
-  const [grace, setGrace] = useState(5)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const validYear = /^\d{4}$/.test(year) && Number(year) >= 2000 && Number(year) <= 2100
@@ -31,7 +30,7 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
   const visibleIds = members.map(member => member.id)
   const checkedVisible = visibleIds.filter(id => checked.includes(id))
   const allVisible = visibleIds.length > 0 && checkedVisible.length === visibleIds.length
-  const graceUntil = forgivenClock(start, grace)
+  const graceUntil = forgivenClock(start, ATTENDANCE_GRACE_MINUTES)
   const tone = startTone(start)
   const busy = saving || schedules.save.isPending
   const unavailable = schedules.loading || directory.loading || Boolean(schedules.error || directory.error)
@@ -51,7 +50,7 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
     setMessage('')
     try {
       for (const member of targets) {
-        await schedules.save.mutateAsync({ month, until: month, departmentId: member.departmentId, employeeId: member.id, start, grace })
+        await schedules.save.mutateAsync({ month, until: month, departmentId: member.departmentId, employeeId: member.id, start, grace: ATTENDANCE_GRACE_MINUTES })
       }
       setMessage(`${Number(monthNo)}월 · ${targets.length}명에게 ${tone.label}를 적용했습니다.`)
       setChecked([])
@@ -81,7 +80,7 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
         <Button type="button" size="sm" variant={start === '09:00' ? 'default' : 'outline'} aria-pressed={start === '09:00'} disabled={busy} onClick={() => setStart('09:00')}>9시</Button>
         <Button type="button" size="sm" variant={start === '10:00' ? 'default' : 'outline'} aria-pressed={start === '10:00'} disabled={busy} onClick={() => setStart('10:00')}>10시</Button>
       </div>
-      <label className="grid gap-1 text-xs text-muted-foreground">봐주는 분<Input aria-label="출근 후 봐주는 분" className="h-9 w-20" type="number" min={0} max={60} value={grace} disabled={busy} onChange={event => setGrace(Math.min(60, Math.max(0, Number(event.target.value) || 0)))} /></label>
+      <p className="pb-2 text-xs text-muted-foreground">정해진 출근시간에서 {ATTENDANCE_GRACE_MINUTES}분까지 인정합니다.</p>
       <Button type="button" disabled={busy || unavailable || !validYear || checkedVisible.length === 0} onClick={() => void apply()}><Check size={14} />{busy ? '적용 중…' : `${Number(monthNo)}월 · ${checkedVisible.length}명 적용`}</Button>
       {graceUntil && <p className="pb-2 text-xs text-muted-foreground">{graceUntil}까지는 기준 초과로 보지 않습니다.</p>}
     </div>
