@@ -10,7 +10,7 @@ import { taskFiles, redact, projectRoot, cursorServers, cursorPlugins, settings 
 import { permissionDecision } from './acp.mjs'
 import { validateReview, reviewEnvironmentProblem } from './reviewer.mjs'
 import { Store, acquireLock } from './store.mjs'
-import { Runner } from './runner.mjs'
+import { Runner, navigationCheckProvenance } from './runner.mjs'
 import { runCommand, childEnv } from './process.mjs'
 import { publicMcpConfig } from './mcp.mjs'
 
@@ -76,7 +76,52 @@ test('pass needs all criteria and real evidence; revision needs next prompt',()=
 })
 test('reviewer infrastructure failures are distinguished from code defects',()=>{
   assert.match(reviewEnvironmentProblem({...pass,decision:'revise',summary:'검토 실패',issues:['app-server socket directory must be a user-owned directory with mode 0700']}),/socket directory/)
+  assert.match(reviewEnvironmentProblem({...pass,decision:'needs_input',issues:['검증 실행 담당자가 현재 검사 내용과 성공 기록이 일치하는지 확인해야 합니다.']}),/검증 실행 담당자/)
+  for(const text of ['화면 구성과 5분 저장값은 코드에서 확인했지만, 제공된 브라우저 검사 기록에는 해당 화면의 표시·선택·저장 결과가 보이지 않습니다.','서류 출력 화면의 코드는 확인됐지만, 요청된 화면 검사 결과가 없어 완료로 판정할 수 없습니다.','합성 브라우저 결과가 필요합니다.'])assert.ok(reviewEnvironmentProblem({...pass,decision:'needs_input',summary:text,issues:[]}))
+  assert.ok(reviewEnvironmentProblem({...pass,decision:'needs_input',blockerKind:'automation',summary:'실행 증거를 관리자가 준비해야 합니다.'}))
+  assert.equal(reviewEnvironmentProblem({...pass,decision:'revise',blockerKind:'none',summary:'브라우저 검사 결과에서 운영지원의 5분 안내가 없는 것으로 확인됐습니다.',issues:['상시 안내 문구를 추가하세요.']}),undefined)
+  assert.equal(reviewEnvironmentProblem({...pass,decision:'needs_input',blockerKind:'user_decision',summary:'회의 전체를 볼 직책을 알려 주세요.',issues:['이사 이상인가요?']}),undefined)
   assert.equal(reviewEnvironmentProblem({...pass,decision:'revise',issues:['이미지 기본 너비 계산이 잘못되었습니다.']}),undefined)
+})
+test('explicit source reads retain a paused memo body and version',async()=>{
+  const cfg=settings(),page={id:'paused',properties:{
+    [cfg.properties.state]:{select:{name:'중지'}},[cfg.properties.location]:{select:{name:'메모'}},
+    [cfg.properties.title]:{title:[{text:{content:'보류'}}]},
+  }}
+  const n=new Notion(cfg);n.api=async()=>page;n.memoBody=async()=>{return 'original memo body'}
+  const full=await n.memoSnapshot('paused',true);assert.equal(full.task.source.body,'original memo body')
+  const before=memoTaskFromPage(page,cfg,'original memo body');assert.equal(full.task.version,before.version)
+  assert.equal((await n.memoSnapshot('paused',false)).task.source.body,'')
+})
+test('native deletion allows only an existing scoped regular file and never commands, directories or symlinks',t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'atelier-delete-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}))
+  fs.mkdirSync(path.join(root,'src'));fs.writeFileSync(path.join(root,'src/old.tsx'),'old');fs.symlinkSync('old.tsx',path.join(root,'src/link.tsx'))
+  const request=(path,title='Delete File',kind='delete')=>({toolCall:{title,kind,locations:[{path}]}})
+  assert.equal(permissionDecision(request('src/old.tsx'),['src/old.tsx'],root),true)
+  assert.equal(permissionDecision(request('src/old.tsx','Delete `'+path.join(root,'src/old.tsx')+'`'),['src/old.tsx'],root),true)
+  assert.equal(permissionDecision(request('src/old.tsx','Delete other.tsx'),['src/old.tsx'],root),false)
+  assert.equal(permissionDecision({toolCall:{title:'Delete `'+path.join(root,'src/old.tsx')+'`',kind:'delete'}},['src/old.tsx'],root),true)
+  // Cursor ACP formats native Delete as kind=edit and omits locations/content.
+  assert.equal(permissionDecision({toolCall:{toolCallId:'delete-native',title:'Delete `'+path.join(root,'src/old.tsx')+'`',kind:'edit',status:'pending'}},['src/old.tsx'],root),true)
+  assert.equal(permissionDecision({toolCall:{title:'Delete `'+path.join(root,'src/old.tsx')+'`',kind:'execute'}},['src/old.tsx'],root),false)
+  for(const title of ['Delete File','Delete ../outside.tsx','Delete src/missing.tsx','Delete src/link.tsx','Delete Database','Delete src/old.tsx and src/other.tsx'])assert.equal(permissionDecision({toolCall:{title,kind:'delete'}},['src/old.tsx'],root),false)
+  for(const file of ['src','src/link.tsx','../outside.tsx','src/missing.tsx'])assert.equal(permissionDecision(request(file),[file],root),false)
+  assert.equal(permissionDecision(request('src/old.tsx'),[],root),false)
+  assert.equal(permissionDecision(request('src/old.tsx','delete_database'),['src/old.tsx'],root),false)
+  assert.equal(permissionDecision(request('src/old.tsx','rm src/old.tsx','execute'),['src/old.tsx'],root),false)
+})
+test('manager navigation checks identify the executed script and unchanged task workspace',async t=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'atelier-validator-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}))
+  fs.mkdirSync(path.join(root,'scripts'));const script=path.join(root,'scripts/verify-work-request-navigation.mjs');fs.writeFileSync(script,'original task validator')
+  const args=['--experimental-strip-types',path.join(projectRoot,'scripts/verify-work-request-navigation.mjs'),root,'proof.json']
+  const proof=await navigationCheckProvenance(root,args,undefined,async(command,passed,options)=>{
+    assert.equal(command,'git');assert.deepEqual(options.acceptedCodes,[0,1]);assert.equal(options.cwd,root);assert.equal(passed.at(-2),script)
+    return {output:'exact script comparison'}
+  })
+  assert.equal(proof.kind,'manager-validator');assert.equal(proof.targetRoot,fs.realpathSync(root));assert.deepEqual(proof.command,[process.execPath,...args])
+  assert.notEqual(proof.script.sha256,proof.taskScript.sha256);assert.equal(proof.difference,'exact script comparison')
+  assert.match(proof.proofValidator,/sourceHashes/);assert.match(proof.proofValidator,/owners.length\*searches.length/)
+  assert.equal(fs.readFileSync(script,'utf8'),'original task validator')
 })
 test('actual baseline diff, revision, re-review, completion and duplicate suppression',async t=>{
   const f=await fixture(t);let works=0,reviews=0
@@ -186,6 +231,7 @@ function noticeFixture(){
     }else throw new Error('지원하지 않는 검사 요청: '+url)
     return{ok:true,json:async()=>structuredClone(data)}
   })
+  client.blockLedger.claim({pageId:page.id,blockId:old.id,kind:'notice',eventId:'v1:legacy:old-notice'})
   return{client,page,original,roots,getAppends:()=>appends,loseNextAppend:()=>{loseAppend=true}}
 }
 test('resuming clears the old generated question and preserves source and answer',async()=>{
@@ -386,6 +432,7 @@ test('memo API queries only selected work and ignores nested execution records i
     if(url.includes('/query'))return{results:[page],has_more:false}
     return{results:[{type:'paragraph',paragraph:{rich_text:[{plain_text:'직접 적은 설명'}]}},{id:'report',type:'toggle',has_children:true,toggle:{rich_text:[{plain_text:'Atelier AI event-1'}]}}],has_more:false}
   }}))
+  client.blockLedger.claim({pageId:page.id,blockId:'report',kind:'toggle',eventId:'legacy:report'})
   const tasks=await client.queue()
   assert.equal(seen[0].body.filter.select.equals,'자동화 할 일')
   assert.equal(tasks[0].source.body,'직접 적은 설명')

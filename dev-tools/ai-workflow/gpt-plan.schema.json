@@ -1,0 +1,35 @@
+{
+  "type": "object",
+  "properties": {
+    "decision": { "type": "string", "enum": ["execute", "needs_input", "need_sources", "defer"] },
+    "reason": { "type": "string" },
+    "feedback": {
+      "type": "object",
+      "properties": {
+        "kind": { "type": "string", "enum": ["no_answer", "problem_reported", "confirmed", "direction", "needs_clarification"] },
+        "summary": { "type": "string" }
+      },
+      "required": ["kind", "summary"],
+      "additionalProperties": false
+    },
+    "notice": {
+      "type": "object",
+      "properties": {
+        "summary": { "type": "string" },
+        "questions": { "type": "array", "items": { "type": "string" } },
+        "actions": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["summary", "questions", "actions"],
+      "additionalProperties": false
+    },
+    "executionKind": { "type": "string", "enum": ["implementation", "verification"] },
+    "request": { "type": "string" },
+    "criteria": { "type": "string" },
+    "files": { "type": "array", "items": { "type": "string" } },
+    "verificationScripts": { "type": "array", "items": { "type": "string" } },
+    "instructions": { "type": "string" },
+    "sourceRequests": { "type": "array", "items": { "type": "string" } }
+  },
+  "required": ["decision", "reason", "feedback", "notice", "executionKind", "request", "criteria", "files", "verificationScripts", "instructions", "sourceRequests"],
+  "additionalProperties": false
+}
