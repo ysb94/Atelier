@@ -686,6 +686,11 @@ export function BarcodePage() {
                                                 ? '사용중'
                                                 : '일시중지'}
                                             </Badge>
+                                            {target && !target.active ? (
+                                              <span className="shrink-0 text-[11px] text-muted-foreground">
+                                                비활성
+                                              </span>
+                                            ) : null}
                                           </li>
                                         )
                                       })}
@@ -842,17 +847,17 @@ function UsageSummary({
         const label = target
           ? outboundPartnerDisplayName(target)
           : '알 수 없는 업체'
-        if (row.status === 'active') {
-          return (
-            <Badge key={row.id} variant="outline">
-              {label}
-            </Badge>
-          )
-        }
         return (
-          <Badge key={row.id} variant="muted">
-            {label} · 중지
-          </Badge>
+          <span key={row.id} className="inline-flex items-center gap-1">
+            {row.status === 'active' ? (
+              <Badge variant="outline">{label}</Badge>
+            ) : (
+              <Badge variant="muted">{label} · 중지</Badge>
+            )}
+            {target && !target.active ? (
+              <span className="text-[11px] text-muted-foreground">비활성</span>
+            ) : null}
+          </span>
         )
       })}
     </div>

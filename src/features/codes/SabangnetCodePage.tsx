@@ -218,12 +218,26 @@ export function SabangnetCodePage() {
   const urls = urlsQuery.data ?? emptyList<SabangnetMallUrl>()
   const targets = targetsQuery.data ?? emptyList<Awaited<ReturnType<typeof getCodeUsageTargets>>[number]>()
   const targetLabels = useMemo(() => new Map(targets.map(t => [t.id, outboundPartnerDisplayName(t)])), [targets])
+  const inactiveTargetIds = useMemo(() => new Set(targets.filter(t => !t.active).map(t => t.id)), [targets])
   const urlsByProduct = useMemo(() => {
     const map = new Map<string, Map<string, SabangnetMallUrl>>()
     for (const url of urls) { const list = map.get(url.productId) ?? new Map<string, SabangnetMallUrl>(); list.set(url.targetId, url); map.set(url.productId, list) }
     return map
   }, [urls])
-  const urlColumns = useMemo(() => [...new Set(urls.map(u => u.targetId))].map(id => ({ id: `url:${id}`, targetId: id, label: `${targetLabels.get(id) ?? '업체'} URL` })).sort((a, b) => a.label.localeCompare(b.label, 'ko')), [urls, targetLabels])
+  const urlColumns = useMemo(() => [...new Set(urls.map(u => u.targetId))].map(id => {
+    const name = targetLabels.get(id) ?? '업체'
+    const label = inactiveTargetIds.has(id) ? `${name} URL · 비활성` : `${name} URL`
+    return { id: `url:${id}`, targetId: id, label }
+  }).sort((a, b) => `${targetLabels.get(a.targetId) ?? '업체'} URL`.localeCompare(`${targetLabels.get(b.targetId) ?? '업체'} URL`, 'ko')), [urls, targetLabels, inactiveTargetIds])
+  function mallUrlSummary(productId: string) {
+    if (urlsQuery.isLoading) return '불러오는 중...'
+    const links = urlsByProduct.get(productId)
+    if (!links?.size) return '—'
+    const inactiveCount = [...links.values()].filter(link => inactiveTargetIds.has(link.targetId)).length
+    return inactiveCount > 0
+      ? `${links.size}개 쇼핑몰 · 비활성 ${inactiveCount} · 펼쳐보기`
+      : `${links.size}개 쇼핑몰 · 펼쳐보기`
+  }
   const fixedFields = useMemo(() => ['code', 'name'].flatMap(key => fields.filter(f => f.systemKey === key)), [fields])
   const optionalColumns = useMemo(() => [
     ...fields.filter(f => !['code', 'name'].includes(f.systemKey ?? '')).map(f => ({ id: f.id, label: f.label })),
@@ -747,7 +761,7 @@ export function SabangnetCodePage() {
                                 <span className="text-muted-foreground">…</span>
                               )}
                             </td> : null}
-                            {visible.has('urls') ? <td className="px-4 py-2"><span className="text-xs">{urlsQuery.isLoading ? '불러오는 중...' : urlsByProduct.get(product.id)?.size ? `${urlsByProduct.get(product.id)!.size}개 쇼핑몰 · 펼쳐보기` : '—'}</span></td> : null}
+                            {visible.has('urls') ? <td className="px-4 py-2"><span className="text-xs">{mallUrlSummary(product.id)}</span></td> : null}
                             {visibleUrlColumns.map(c => { const link = urlsByProduct.get(product.id)?.get(c.targetId); return <td key={c.id} className="px-4 py-2">{link ? <a className="inline-flex items-center gap-1 text-xs text-primary hover:underline" href={link.url} target="_blank" rel="noopener noreferrer" title={link.url} onClick={e => e.stopPropagation()}><Link2 className="size-3" />상품 보기</a> : '—'}</td> })}
                             {visible.has('updated') ? <td className="truncate px-4 py-2 tabular-nums text-muted-foreground">
                               {formatUpdatedAt(product.updatedAt)}
@@ -793,7 +807,7 @@ export function SabangnetCodePage() {
                               <td />
                               <td colSpan={listColumnCount - 1} className="px-4 py-4">
                                 <details className="mb-4 max-w-5xl"><summary className="cursor-pointer text-xs font-medium text-muted-foreground">추가 항목 전체 ({fields.filter(f => !f.systemKey).length})</summary><div className="mt-3 grid gap-3 sm:grid-cols-3">{fields.filter(f => !f.systemKey).map(f => <div key={f.id}><p className="text-xs text-muted-foreground">{f.label}</p><p className="mt-1 break-words text-sm">{fieldCell(f, product) || '—'}</p></div>)}</div></details>
-                                <div className="mb-4"><p className="mb-2 text-xs font-semibold text-muted-foreground">쇼핑몰 URL</p><div className="flex max-w-5xl flex-wrap gap-2">{[...urlsByProduct.get(product.id)?.values() ?? []].map(link => <a key={link.id} href={link.url} target="_blank" rel="noopener noreferrer" title={link.url} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-2 text-xs hover:bg-accent"><Link2 className="size-3" />{targetLabels.get(link.targetId) ?? link.sourceMall}</a>)}{!urlsByProduct.get(product.id)?.size ? <span className="text-xs text-muted-foreground">등록된 URL이 없습니다.</span> : null}</div></div>
+                                <div className="mb-4"><p className="mb-2 text-xs font-semibold text-muted-foreground">쇼핑몰 URL</p><div className="flex max-w-5xl flex-wrap gap-2">{[...urlsByProduct.get(product.id)?.values() ?? []].map(link => <a key={link.id} href={link.url} target="_blank" rel="noopener noreferrer" title={link.url} className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-3 py-2 text-xs hover:bg-accent"><Link2 className="size-3" />{targetLabels.get(link.targetId) ?? link.sourceMall}{inactiveTargetIds.has(link.targetId) ? <span className="text-muted-foreground">비활성</span> : null}</a>)}{!urlsByProduct.get(product.id)?.size ? <span className="text-xs text-muted-foreground">등록된 URL이 없습니다.</span> : null}</div></div>
                                 <div className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                   연결 M번호
                                 </div>
