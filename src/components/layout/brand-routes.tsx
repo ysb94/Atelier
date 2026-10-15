@@ -13,7 +13,6 @@ import { BarcodePage } from '@/features/codes/BarcodePage'
 import { UsageCodePage } from '@/features/codes/UsageCodePage'
 import { PartnerCodePage } from '@/features/codes/PartnerCodePage'
 import { FieldsSettingsPage } from '@/features/settings/FieldsSettingsPage'
-import { SeasonsSettingsPage } from '@/features/settings/SeasonsSettingsPage'
 import { UsageTargetsSettingsPage } from '@/features/settings/UsageTargetsSettingsPage'
 import { ImportSettingsPage } from '@/features/settings/ImportSettingsPage'
 import { BrandSettingsPage } from '@/features/settings/BrandSettingsPage'
@@ -130,7 +129,7 @@ export function BrandWorkspaceRouteTree() {
         element={<RedirectTo to="operations" />}
       />
       <Route path="settings/fields" element={<FieldsSettingsPage />} />
-      <Route path="settings/seasons" element={<SeasonsSettingsPage />} />
+      <Route path="settings/seasons" element={<RedirectTo to="drafts" />} />
       <Route
         path="settings/usage-targets"
         element={<UsageTargetsSettingsPage />}
