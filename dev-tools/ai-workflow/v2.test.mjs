@@ -173,6 +173,13 @@ test('terminal Cursor transport errors cannot masquerade as completed reports',(
   assert.equal(cursorTransportProblem('Error: RetriableError: Premature close\n위 오류를 재현하고 처리했습니다.'),false)
 })
 
+test('Notion authentication failures are operator errors and do not reach paid work',async()=>{
+  const n=new Notion({env:{NOTION_TOKEN:'fixture'}},async()=>({ok:false,status:401,json:async()=>({code:'unauthorized'})}))
+  await assert.rejects(n.api('pages/p'),error=>error.code==='notion_auth'&&error.retry===false)
+  const o=setup();o.enqueue=()=>{};o.store.flush=async()=>{await n.api('pages/p')}
+  await assert.rejects(o.progress({job:{key:'p'},controller:new AbortController()},{state:'작업 중'}),error=>error.code==='notion_auth')
+})
+
 test('a completed GPT plan is handed off to the visible queue before any Cursor invocation',async()=>{
   const o=setup();o.config={...config,v2:{...config.v2,cursorPull:{enabled:true,pollMs:5000}}}
   const job={cycle:{phase:'planning'}},entry={job,controller:new AbortController()};let calls=0

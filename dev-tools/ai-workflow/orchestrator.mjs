@@ -393,6 +393,7 @@ export class Orchestrator {
     try { await this.store.flush(this.board, entry.job.key) }
     catch (error) {
       if (error.stopped || error.superseded) { this.abort(entry, error.stopped ? 'stopped' : 'superseded', error.message); throw error }
+      if(error instanceof EnvironmentError&&error.code==='notion_auth')throw error
       console.warn('[ai-workflow] 진행 상태 기록 재시도 대기', { task: entry.job.task.title, message: redact(error.message, this.config.env) })
     }
   }
@@ -419,7 +420,12 @@ export class Orchestrator {
       if (checking || entry.controller.signal.aborted || c.outcome) return
       checking = true
       try { const snap = await this.board.read(entry.job.key); if (!snap.unstable && !c.outcome) this.inspect(entry, snap.task) }
-      catch (error) { console.warn('[ai-workflow] 작업 중 카드 확인 실패', { task: entry.job.task.title, message: redact(error.message, this.config.env) }) }
+      catch (error) {
+        if(error instanceof EnvironmentError&&error.code==='notion_auth'){
+          entry.operatorError=error;entry.controller.abort()
+        }
+        console.warn('[ai-workflow] 작업 중 카드 확인 실패', { task: entry.job.task.title, message: redact(error.message, this.config.env) })
+      }
       finally { checking = false }
     }, 10000)
   }
@@ -916,6 +922,7 @@ export class Orchestrator {
     console.info('[ai-workflow] 완료 전달 중 사용자가 카드를 옮겼습니다.', { task: job.task?.title, message })
   }
   async fail(entry, error) {
+    error=entry.operatorError??error
     const { job } = entry, c = job.cycle
     if (['done', 'needs_input'].includes(c?.outcome)) { console.warn('[ai-workflow] 완료 기록 이후 오류', redact(error.message, this.config.env)); return }
     if (entry.abortReason) {
