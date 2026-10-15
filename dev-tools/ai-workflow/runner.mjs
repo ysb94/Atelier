@@ -21,6 +21,12 @@ export function browserScenariosFor({files=[],request='',criteria=''}={}) {
   if(files.includes('src/features/brands/BrandSelectPage.tsx')&&files.includes('src/lib/company/capabilities.ts'))scenarios.push('brand-access')
   if(files.includes('src/components/layout/workspace-tabs.tsx')&&/기획/.test(text)&&/디자인/.test(text)&&/(?:제거|삭제)/.test(text))scenarios.push('navigation')
   if(files.includes('src/features/work-requests/WorkRequestPage.tsx')&&/파일 선택/.test(text)&&/(?:본문|요청 내용)/.test(text))scenarios.push('attachments')
+  if(files.includes('src/features/operations-support/DocumentOutputPanel.tsx'))scenarios.push('documents')
+  if(files.includes('src/features/settings/ProfileSettingsPage.tsx'))scenarios.push('profile')
+  if(files.includes('src/features/operations-support/attendance-start-settings.ts')&&/5분/.test(text))scenarios.push('attendance-policy')
+  if(files.includes('src/features/data/DataSheetPage.tsx')&&files.includes('src/components/layout/company-workspace-nav.ts'))scenarios.push('data-menu')
+  if(files.includes('src/features/brands/BrandSelectPage.tsx')&&files.includes('src/features/settings/BrandSettingsPage.tsx'))scenarios.push('brand-info')
+  if(files.includes('src/features/settings/SeasonsSettingsPage.tsx')&&files.includes('src/components/layout/company-routes.tsx'))scenarios.push('seasons-removal')
   return scenarios
 }
 export function checkFailureOutput(error,env) {
@@ -43,6 +49,11 @@ export async function verification(config, root, signal) {
   for(const scenario of scenarios){
     const name=`verify:browser-${scenario}`
     try{const result=await runCommand(process.execPath,[path.join(toolDir,'browser-check.mjs'),scenario,root],{cwd:root,signal,timeoutMs:120000});checks.push({name,passed:true,output:result.output+'\n'+result.stderr})}
+    catch(error){if(signal?.aborted)throw error;checks.push({name,passed:false,output:checkFailureOutput(error,config.env)})}
+  }
+  if(scenarios.includes('attendance-policy')){
+    const name='verify:attendance-start-policy'
+    try{const result=await runCommand(process.execPath,['--experimental-strip-types',path.join(toolDir,'attendance-policy-check.mjs'),root],{cwd:root,signal,timeoutMs:30000});checks.push({name,passed:true,output:result.output+'\n'+result.stderr})}
     catch(error){if(signal?.aborted)throw error;checks.push({name,passed:false,output:checkFailureOutput(error,config.env)})}
   }
   for(const name of ['structure:map', ...config.verificationScripts]) {

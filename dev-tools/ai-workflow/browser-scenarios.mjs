@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
+import {documentsScenario,profileScenario,attendancePolicyScenario} from './browser-operations-scenarios.mjs'
+import {dataMenuScenario,brandInfoScenario,seasonsRemovalScenario} from './browser-navigation-scenarios.mjs'
 
 async function openForm(page,origin,owner='design') {
   await page.goto(`${origin}/work-requests/${owner}?mode=new`)
@@ -248,7 +250,7 @@ async function attachmentScenario({page,origin}) {
   return {checked:['File picker appends mixed files into body in order','No separate picker attachment list','Individual file removal','Register and reopen edit','Additional files saved in detail','Image resize, paste and drop'],resized}
 }
 export async function runScenario(name,fixture) {
-  const scenarios={images:imageScenario,deadline:deadlineScenario,attendance:attendanceScenario,navigation:navigationScenario,'brand-access':brandAccessScenario,attachments:attachmentScenario}
+  const scenarios={images:imageScenario,deadline:deadlineScenario,attendance:attendanceScenario,navigation:navigationScenario,'brand-access':brandAccessScenario,attachments:attachmentScenario,documents:documentsScenario,profile:profileScenario,'attendance-policy':attendancePolicyScenario,'data-menu':dataMenuScenario,'brand-info':brandInfoScenario,'seasons-removal':seasonsRemovalScenario}
   if(!scenarios[name])throw new Error(`Unknown browser scenario: ${name}`)
   const startedAt=new Date().toISOString(),results=await scenarios[name](fixture)
   assert.deepEqual(fixture.errors,[],'Browser runtime errors')

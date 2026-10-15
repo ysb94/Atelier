@@ -110,6 +110,14 @@ test('independent file pages can be batched without more than 10000 chars per fi
  const value=r.call('read_sources',{requests:paths.map(path=>({path}))})
  assert.equal(value.files.length,3);assert.equal(r.audit.calls,1);assert.equal(r.audit.reads.length,3);assert.ok(value.files.every(v=>v.content.length<=10000));assert.equal(value.budget.callsRemaining,39)
 })
+test('reported remaining budget includes the delivered response and a near-limit batch shrinks its pages',t=>{
+ const {root,write}=fixture(t),body=Array.from({length:100},(_,i)=>`const value${i} = '${'x'.repeat(45)}'`).join('\n'),paths=['src/a.ts','src/b.ts']
+ const r=new SourceReader({root,snapshot:Object.fromEntries(paths.map(p=>[p,write(p,body)])),limits:{totalChars:10000}})
+ const value=r.call('read_sources',{requests:paths.map(path=>({path}))})
+ assert.equal(value.budget.readCharsRemaining,r.limits.totalChars-r.audit.responseChars)
+ assert.ok(value.files.every(v=>v.content.length&&v.nextLine));assert.equal(r.audit.exhausted,undefined)
+ assert.ok(r.audit.responseChars<=10000);assert.equal(r.audit.calls,1)
+})
 
 test('review recovery in GPT 준비 is admitted before planning cards in that same lane',async()=>{
  const {Orchestrator}=await import('./orchestrator.mjs'),seen=[],positions={reviewing:'검토 중',working:'작업 중',queued:'자동화 할 일',preparing:'GPT 준비',answered:'답변 완료',memo:'메모'}
@@ -123,6 +131,9 @@ test('manager selects scoped UI evidence and preserves assertion headers instead
  const {browserScenariosFor,checkFailureOutput}=await import('./runner.mjs')
  assert.deepEqual(browserScenariosFor({files:['src/components/layout/workspace-tabs.tsx'],criteria:'기획·디자인 상품 정보 제거'}),['navigation'])
  assert.deepEqual(browserScenariosFor({files:['src/features/work-requests/WorkRequestPage.tsx'],criteria:'파일 선택은 요청 내용 끝에 추가'}),['attachments'])
+ assert.deepEqual(browserScenariosFor({files:['src/features/operations-support/DocumentOutputPanel.tsx']}),['documents'])
+ assert.deepEqual(browserScenariosFor({files:['src/features/settings/ProfileSettingsPage.tsx']}),['profile'])
+ assert.deepEqual(browserScenariosFor({files:['src/features/operations-support/attendance-start-settings.ts'],criteria:'5분 안내'}),['attendance-policy'])
  assert.deepEqual(browserScenariosFor({files:['src/components/layout/workspace-tabs.tsx'],criteria:'상품 설정을 데이터 관리로 이동'}),[])
  const output=checkFailureOutput({commandResult:{output:'AssertionError required contract\n'+'x'.repeat(10000),stderr:'Expected tab identifier'}},{})
  assert.match(output,/AssertionError required contract/);assert.match(output,/Expected tab identifier/);assert.ok(output.length<8100)

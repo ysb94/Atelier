@@ -8,7 +8,7 @@ import { runScenario } from './browser-scenarios.mjs'
 
 export async function openFixture(root = process.cwd(),{scenario}={}) {
   const fixture = path.join(path.dirname(fileURLToPath(import.meta.url)),'browser-fixture')
-  const entry=['navigation','brand-access'].includes(scenario)?'navigation-entry.tsx':'entry.tsx'
+  const entry=['navigation','brand-access','data-menu','brand-info','seasons-removal'].includes(scenario)?'navigation-entry.tsx':['documents','attendance-policy','profile'].includes(scenario)?'operations-entry.tsx':'entry.tsx'
   const server = await createServer({ root, configFile:false, envFile:false, logLevel:'error',
     plugins:[{name:'fixture-html',enforce:'pre',resolveId(source,importer){
       if(importer&&source.startsWith('.'))for(const name of ['auth','client']){
@@ -29,6 +29,7 @@ export async function openFixture(root = process.cwd(),{scenario}={}) {
     browser=await chromium.launch({executablePath:process.env.ATELIER_CHROMIUM_BIN||'/usr/bin/chromium',headless:true})
     const context=await browser.newContext({viewport:{width:1440,height:1100}})
     context.setDefaultTimeout(15000)
+    context.setDefaultNavigationTimeout(60000)
     const origin=`http://127.0.0.1:${server.httpServer.address().port}`
     await context.route('**/*',route=>route.request().url().startsWith(origin+'/')?route.continue():route.abort())
     const page=await context.newPage(),errors=[]
@@ -47,5 +48,8 @@ if(process.argv[1]===fileURLToPath(import.meta.url)) {
     await fixture.page.locator('#work-request-title').waitFor()
     console.log(JSON.stringify({method:'offline actual-component browser fixture',text:(await fixture.page.locator('body').innerText()).slice(0,1800),errors:fixture.errors}))
     }
+  } catch(error) {
+    console.error(JSON.stringify({scenario:process.argv[2],url:fixture.page.url(),runtimeErrors:fixture.errors,screenText:(await fixture.page.locator('body').innerText().catch(()=>'' )).slice(-3500)}))
+    throw error
   } finally {await fixture.close()}
 }

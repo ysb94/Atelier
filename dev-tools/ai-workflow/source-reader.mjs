@@ -34,6 +34,9 @@ export class SourceReader {
   }
   page(lines,start,end,maxChars=this.limits.chunkChars) {
     if(start>lines.length)return {start,totalLines:lines.length,content:'',nextLine:null,outOfRange:true}
+    const remaining=this.limits.totalChars-this.audit.responseChars-(this.pendingChars??0)
+    if(remaining<1024){this.audit.exhausted=true;throw Error('자료 읽기 한도에 도달했습니다. 근거 없이 합격시키지 마세요.')}
+    maxChars=Math.min(maxChars,Math.floor((remaining-768)/2))
     const parts=[];let chars=0,last=start-1
     for(let i=start-1;i<Math.min(end,lines.length);i++){
       const line=lines[i]
@@ -118,7 +121,12 @@ export class SourceReader {
     try {
     let result
     if(name==='read_source')result=this.readSource(args)
-    else if(name==='read_sources'){if(!Array.isArray(args.requests)||!args.requests.length||args.requests.length>6)throw Error('묶음 조회는 독립된 소스 요청 1~6개여야 합니다.');result={files:args.requests.map(request=>this.readSource(request))}}
+    else if(name==='read_sources'){
+      if(!Array.isArray(args.requests)||!args.requests.length||args.requests.length>6)throw Error('묶음 조회는 독립된 소스 요청 1~6개여야 합니다.')
+      const files=[];this.pendingChars=0
+      try{for(const request of args.requests){const value=this.readSource(request);files.push(value);this.pendingChars+=JSON.stringify(value).length+64}}finally{this.pendingChars=0}
+      result={files}
+    }
     else if(name==='find_sources')result=this.findSource(args)
     else if(name==='search_source')result=this.searchSource(args)
     else if(name==='source_outline'){
@@ -130,9 +138,10 @@ export class SourceReader {
     else if(name==='review_coverage')result=this.coverage()
     else throw Error('지원하지 않는 읽기 도구입니다.')
     result.budget={callsRemaining:this.limits.maxCalls-this.audit.calls,readCharsRemaining:this.limits.totalChars-this.audit.responseChars}
-    const output=JSON.stringify(result)
+    let output=JSON.stringify(result)
+    for(let i=0;i<3;i++){result.budget.readCharsRemaining=this.limits.totalChars-this.audit.responseChars-output.length;output=JSON.stringify(result)}
     if(output.length>(name==='read_sources'?64000:20000))throw Error('조회 결과가 큽니다. 경로·검색어 또는 페이지 범위를 더 좁혀 주세요.')
-    if(this.audit.responseChars+output.length>this.limits.totalChars){this.audit.exhausted=true;throw Error('이 세션의 자료 읽기 한도에 도달했습니다. 근거 없이 합격시키지 마세요.')}
+    if(this.audit.responseChars+output.length>this.limits.totalChars){if(this.limits.totalChars-this.audit.responseChars<1024)this.audit.exhausted=true;throw Error('조회 결과가 남은 자료 읽기 한도보다 큽니다. 더 좁은 줄 범위를 요청하세요.')}
     this.audit.responseChars+=output.length;this.save()
     return result
     } catch(error){

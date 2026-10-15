@@ -23,6 +23,17 @@ export function readonlyMcpTool(title) {
 
 export function permissionDecision(params, files, root) {
   const call = params.toolCall ?? {}, title = String(call.title ?? ''), kind = call.kind
+  if(kind==='delete'&&title==='Delete File') {
+    const locations=call.locations??[]
+    return locations.length>0&&locations.every(item=>{
+      try {
+        const target=inside(root,item.path),relative=path.relative(root,target).replaceAll('\\','/')
+        const realRelative=path.relative(fs.realpathSync(root),fs.realpathSync(target))
+        return files.includes(relative)&&fs.lstatSync(target).isFile()&&!fs.lstatSync(target).isSymbolicLink()
+          &&!realRelative.startsWith('..')&&!path.isAbsolute(realRelative)
+      }catch{return false}
+    })
+  }
   if (/execute_sql|apply_migration|deploy|delete|insert|update.*database|create.*project/i.test(title)) return false
   // Never infer SQL read-only safety from a tool name/title. Writes and unknown tools require input.
   if (kind === 'read' || kind === 'search') return true
@@ -123,7 +134,11 @@ export async function runCursor({ config, root, files, prompt, signal, onEvent =
         onEvent({ type: 'cursor-write', file, hash: digest(msg.params.content) }); respond(msg.id, {}); return
       }
       if (msg.method === 'session/request_permission') {
-        const allowed = permissionDecision(msg.params, files, root)
+        let allowed = permissionDecision(msg.params, files, root)
+        if(allowed&&msg.params.toolCall?.kind==='delete') {
+          allowed=(msg.params.toolCall.locations??[]).every(item=>{try{const file=path.relative(root,inside(root,item.path)).replaceAll('\\','/');return expected.has(file)&&readFile(root,file)===expected.get(file)}catch{return false}})
+          onEvent({type:'cursor-delete-permission',allowed,paths:(msg.params.toolCall.locations??[]).map(item=>path.relative(root,item.path)),metadataKeys:Object.keys(msg.params.toolCall),inputKeys:Object.keys(msg.params.toolCall.rawInput??{})})
+        }
         const option = msg.params.options?.find(o => o.kind === (allowed ? 'allow_once' : 'reject_once'))
         if (!allowed) inputNeeded = `도구 확인 필요: ${msg.params.toolCall?.title ?? msg.params.toolCall?.kind ?? '알 수 없는 요청'}`
         respond(msg.id, option ? { outcome: { outcome: 'selected', optionId: option.optionId } } : { outcome: { outcome: 'cancelled' } }); return
