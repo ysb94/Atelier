@@ -43,9 +43,10 @@ export function pagePreviewCases(pathname: string, real: Profile): PagePreviewCa
   if (path === '/meetings') return [item('admin', '관리자', { isAdmin: true }), item('employee', '일반 직원')]
   if (path === '/settings/ai') return [item('editor', '편집 가능', { isAdmin: true }), item('viewer', '조회 전용')]
   if (path === '/brands') return [
-    item('admin', '관리자', { isAdmin: true }),
-    item('lead', '브랜드 책임자', { memberships: real.memberships.map(member => ({ ...member, isLead: true })) }),
-    item('employee', '일반 직원'),
+    item('reviewer', '대표이사 · 허용', { position: '대표이사', status: 'active' }),
+    item('admin', '관리자 · 제한', { isAdmin: true }),
+    item('lead', '브랜드 책임자 · 제한', { memberships: real.memberships.map(member => ({ ...member, isLead: true })) }),
+    item('employee', '일반 직원 · 제한'),
   ]
   if (path === '/') return [
     item('reviewer', '대표이사', { position: '대표이사', departmentName: '운영진' }),

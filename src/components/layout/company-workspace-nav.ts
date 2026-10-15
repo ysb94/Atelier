@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react'
-import { canAccessOperationsSupport, canManagePersonnel, isCompanyReviewer } from '../../lib/company/capabilities.ts'
+import { canAccessBrandManagement, canAccessOperationsSupport, canManagePersonnel, isCompanyReviewer } from '../../lib/company/capabilities.ts'
 import {
   Boxes,
   Building2,
@@ -169,8 +169,14 @@ export function companyNavGroupsForProfile(
 ) {
   const showOperationsSupport = canAccessOperationsSupport(profile)
   const showMembers = canManagePersonnel(profile) || isCompanyReviewer(profile)
+  const showBrandManagement = canAccessBrandManagement(profile)
   return companyNavGroups.flatMap((group) => {
-    if (group.title !== '운영지원') return [group]
+    if (group.title !== '운영지원') {
+      const items = showBrandManagement
+        ? group.items
+        : group.items.filter(item => item.to !== '/brands')
+      return items.length > 0 ? [{ ...group, items }] : []
+    }
     const items = [
       ...(showOperationsSupport ? group.items : []),
       ...(showMembers ? [membersNavItem] : []),
