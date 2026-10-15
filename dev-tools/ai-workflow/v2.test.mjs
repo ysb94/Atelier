@@ -204,6 +204,35 @@ test('unrelated Notion errors do not trigger an authentication circuit break',as
   assert.equal(o.notionFailure,undefined)
 })
 
+test('authentication hold survives restart and skips the fast Cursor poll without any API or model calls',async()=>{
+  const store=memory(),notion=new Notion({env:{}},async()=>({ok:false,status:401,json:async()=>({code:'unauthorized',message:'API token is invalid. Private upstream body must not be stored.'})}))
+  const o=new Orchestrator({config,notion,store,git:{}})
+  await assert.rejects(notion.api('pages/settings?private=query'),error=>error.notionAuth.invalidToken===true)
+  assert.deepEqual(store.data.v2.connectionBlock.diagnostic,{status:401,apiCode:'unauthorized',invalidToken:true,method:'GET',endpoint:'pages/settings'})
+  assert.doesNotMatch(JSON.stringify(store.data.v2.connectionBlock),/Private upstream|private=query/)
+  const fresh=new Orchestrator({config:{...config,v2:{...config.v2,cursorPull:{enabled:true}}},notion:{api:()=>assert.fail('no fast polling while latched')},store,git:{},gpt:()=>assert.fail('no model call'),cursor:()=>assert.fail('no model call')})
+  assert.equal(fresh.admissionProblem({ok:true,values:{enabled:true}}).code,'notion_auth')
+  await fresh.dispatchCursor()
+  assert.equal(fresh.active.size,0)
+})
+
+test('authentication diagnostics never persist unknown remote codes or raw response text',async()=>{
+  const n=new Notion({env:{}},async()=>({ok:false,status:403,json:async()=>({code:'private-upstream-content',message:'secret upstream body'})}))
+  await assert.rejects(n.api('pages/p'),error=>{
+    assert.deepEqual(error.notionAuth,{status:403,apiCode:'unknown',invalidToken:false,method:'GET',endpoint:'pages/p'})
+    assert.doesNotMatch(error.message,/secret upstream/)
+    return error.code==='notion_auth'
+  })
+})
+
+test('a failed journal write cannot keep model workers alive after lost authorization',async()=>{
+  const o=setup(),entry={controller:new AbortController()};o.active.set('p',entry)
+  o.store.save=()=>{throw new Error('journal unavailable')}
+  assert.throws(()=>o.blockNotion(Object.assign(new Error('Notion unauthorized'),{code:'notion_auth'})),/journal unavailable/)
+  assert.equal(entry.controller.signal.aborted,true)
+  assert.equal(o.admissionProblem({ok:true,values:{enabled:true}}).code,'notion_auth')
+})
+
 test('health identifies live pipeline ownership independently from the durable phase',()=>{
   const o=setup();o.pipeline=new Pipeline();let health;o.onStatus=h=>{health=h}
   const job={key:'p',task:{title:'one'},branch:'branch',cycle:{phase:'implementing'}}

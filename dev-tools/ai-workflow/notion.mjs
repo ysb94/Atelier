@@ -85,6 +85,10 @@ export class Notion {
       if(response.ok)return data
       if([401,403].includes(response.status)) {
         const error=new EnvironmentError(`Notion ${response.status}: 인증·접근 권한을 확인할 수 없어 모델 작업을 중단합니다. 실행기 연결을 복구한 뒤 기존 기록으로 재개합니다.`,{retry:false,code:'notion_auth'})
+        // Keep only an allowlisted diagnosis, never the upstream body, headers,
+        // credentials or arbitrary message. Persisted locally for operator repair.
+        error.notionAuth={status:response.status,apiCode:['unauthorized','restricted_resource'].includes(data.code)?data.code:'unknown',
+          invalidToken:data.code==='unauthorized'&&/token.{0,20}invalid|invalid.{0,20}token/i.test(String(data.message??'')),method,endpoint:endpoint.split('?')[0]}
         this.onAuthFailure?.(error)
         throw error
       }

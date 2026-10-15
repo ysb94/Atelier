@@ -84,6 +84,7 @@ export class Orchestrator {
     this.git = git ?? new TaskGit({ config, root })
     this.active = new Map(); this.scanning = false; this.stopping = false; this.scan = null
     this.controls = null; this.admission = null; this.lastRunStatus = null
+    if(this.journal().connectionBlock?.code==='notion_auth')this.notionFailure=new EnvironmentError('노션 인증 오류로 안전 차단 중입니다. 운영자가 지속적인 연결 복구를 확인한 뒤 기존 기록에서 재개합니다.',{retry:false,code:'notion_auth'})
     this.notion.onAuthFailure = error => this.blockNotion(error)
     this.pipeline = config.v2?.pipeline?.enabled ? new Pipeline({ ...config.v2.pipeline, onChange: () => this.status() }) : null
     this.bindBoard()
@@ -114,7 +115,7 @@ export class Orchestrator {
   // Cursor execution polls the durable, visible ready list independently of GPT
   // planning. No model participates in queue discovery or claiming work.
   async dispatchCursor() {
-    if(!this.config.v2?.cursorPull?.enabled||this.stopping||this.cursorScan)return
+    if(!this.config.v2?.cursorPull?.enabled||this.stopping||this.cursorScan||this.notionFailure)return
     this.cursorScan=(async()=>{
       const controls=await readControls(this.notion,this.config)
       if(this.admissionProblem(controls))return
@@ -184,12 +185,18 @@ export class Orchestrator {
   }
   blockNotion(error) {
     // Any failed authorization means we cannot reliably observe user stops.
-    // Latch until operator recovery/restart, even if a different page still reads.
-    this.notionFailure ??= error
+    // Latch until the operator clears the durable hold and restarts, even if a
+    // different page still reads. Abort before persistence can fail.
+    const first=!this.notionFailure
+    this.notionFailure??=error
     this.admission = this.admissionProblem(this.controls)
     for (const entry of this.active.values()) {
       entry.operatorError ??= this.notionFailure
       entry.controller.abort()
+    }
+    if(first){
+      this.journal().connectionBlock={code:'notion_auth',at:iso(),diagnostic:error.notionAuth??null}
+      this.store.save()
     }
     this.status()
   }
