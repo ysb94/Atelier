@@ -55,6 +55,7 @@ export const companyTopNav: CompanyNavItem[] = [
   { to: '/work', label: '내 업무', icon: ClipboardList },
   { to: '/settings/profile', label: '마이페이지', icon: UserRound },
   { to: '/operations', label: '운영 현황', icon: ChartColumn },
+  { to: '/products', label: '전체 상품', icon: Shirt },
 ]
 
 export const companyNavGroups: CompanyNavGroup[] = [
@@ -65,10 +66,6 @@ export const companyNavGroups: CompanyNavGroup[] = [
       { to: '/meetings', label: '회의', icon: Video },
       { to: '/org-chart', label: '조직도', icon: Network },
     ],
-  },
-  {
-    title: '상품',
-    items: [{ to: '/products', label: '전체 상품', icon: Shirt }],
   },
   {
     title: '기획',
@@ -132,7 +129,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
   {
     title: '데이터',
     items: [
-      { to: '/data/all', label: '전체 상품', icon: Table2 },
+      { to: '/data/all', label: '상품 데이터', icon: Table2 },
       { to: '/data/upload', label: '일괄 업로드', icon: Upload },
       { to: '/barcodes', label: '88바코드 관리', icon: ScanBarcode },
       { to: '/sabangnet-codes', label: '사방넷 코드 관리', icon: Hash },
