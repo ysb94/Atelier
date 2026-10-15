@@ -26,7 +26,6 @@ import { FieldsSettingsPage } from '@/features/settings/FieldsSettingsPage'
 import { ProductCategorySettingsPage } from '@/features/settings/ProductCategorySettingsPage'
 import { SeasonsSettingsPage } from '@/features/settings/SeasonsSettingsPage'
 import { UsageTargetsSettingsPage } from '@/features/settings/UsageTargetsSettingsPage'
-import { BrandSettingsPage } from '@/features/settings/BrandSettingsPage'
 import { AiSettingsPage } from '@/features/settings/AiSettingsPage'
 import { CompanyDataSheetPage } from '@/features/data/DataSheetPage'
 import { DataUploadPage } from '@/features/data/DataUploadPage'
@@ -224,14 +223,7 @@ export const companyWorkspaceRoutes = (
           </Gated>
         }
       />
-      <Route
-        path="settings/brand"
-        element={
-          <Gated>
-            <BrandSettingsPage />
-          </Gated>
-        }
-      />
+      <Route path="settings/brand" element={<RedirectTo to="/brands" />} />
       <Route path="upload" element={<RedirectTo to="/data/upload" />} />
       <Route path="import" element={<RedirectTo to="/data/upload" />} />
       <Route
