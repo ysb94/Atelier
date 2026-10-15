@@ -119,6 +119,17 @@ test('reported remaining budget includes the delivered response and a near-limit
  assert.ok(r.audit.responseChars<=10000);assert.equal(r.audit.calls,1)
 })
 
+test('a six-file near-budget batch delivers collected pages and explicitly leaves unread requests pending',t=>{
+ const {root,write}=fixture(t),body=Array.from({length:100},(_,i)=>`const value${i} = '${'x'.repeat(45)}'`).join('\n'),paths=Array.from({length:6},(_,i)=>`src/file${i}.ts`)
+ const r=new SourceReader({root,snapshot:Object.fromEntries(paths.map(p=>[p,write(p,body)])),limits:{totalChars:10000}})
+ const value=r.call('read_sources',{requests:paths.map(path=>({path}))})
+ assert.ok(value.files.length>0&&value.files.length<6);assert.equal(value.budgetLimited,true)
+ assert.deepEqual(value.pendingRequests,paths.slice(value.files.length).map(path=>({path})))
+ assert.deepEqual(r.audit.reads.map(v=>v.path),value.files.map(v=>v.path))
+ assert.equal(r.audit.exhausted,undefined);assert.ok(r.audit.responseChars<=10000)
+ assert.equal(value.budget.readCharsRemaining,10000-r.audit.responseChars)
+})
+
 test('review recovery in GPT 준비 is admitted before planning cards in that same lane',async()=>{
  const {Orchestrator}=await import('./orchestrator.mjs'),seen=[],positions={reviewing:'검토 중',working:'작업 중',queued:'자동화 할 일',preparing:'GPT 준비',answered:'답변 완료',memo:'메모'}
  const store={data:{outbox:[],v2:{jobs:{raw:{cycle:{phase:'planning'}},review:{cycle:{phase:'reviewing'}}}}}}

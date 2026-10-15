@@ -23,11 +23,13 @@ export function readonlyMcpTool(title) {
 
 export function permissionDecision(params, files, root) {
   const call = params.toolCall ?? {}, title = String(call.title ?? ''), kind = call.kind
-  if(kind==='delete'&&title==='Delete File') {
+  if(kind==='delete'&&/^Delete(?: File)?(?:\s|$)/.test(title)) {
     const locations=call.locations??[]
     return locations.length>0&&locations.every(item=>{
       try {
         const target=inside(root,item.path),relative=path.relative(root,target).replaceAll('\\','/')
+        const named=title.replace(/^Delete(?: File)?\s*/,'').replace(/^[`'"]|[`'"]$/g,'').replaceAll('\\','/')
+        if(title!=='Delete File'&&![item.path.replaceAll('\\','/'),target.replaceAll('\\','/'),relative].includes(named))return false
         const realRelative=path.relative(fs.realpathSync(root),fs.realpathSync(target))
         return files.includes(relative)&&fs.lstatSync(target).isFile()&&!fs.lstatSync(target).isSymbolicLink()
           &&!realRelative.startsWith('..')&&!path.isAbsolute(realRelative)
@@ -135,8 +137,8 @@ export async function runCursor({ config, root, files, prompt, signal, onEvent =
       }
       if (msg.method === 'session/request_permission') {
         let allowed = permissionDecision(msg.params, files, root)
-        if(allowed&&msg.params.toolCall?.kind==='delete') {
-          allowed=(msg.params.toolCall.locations??[]).every(item=>{try{const file=path.relative(root,inside(root,item.path)).replaceAll('\\','/');return expected.has(file)&&readFile(root,file)===expected.get(file)}catch{return false}})
+        if(msg.params.toolCall?.kind==='delete'||/^Delete(?: File)?(?:\s|$)/.test(msg.params.toolCall?.title??'')) {
+          if(allowed)allowed=(msg.params.toolCall.locations??[]).every(item=>{try{const file=path.relative(root,inside(root,item.path)).replaceAll('\\','/');return expected.has(file)&&readFile(root,file)===expected.get(file)}catch{return false}})
           onEvent({type:'cursor-delete-permission',allowed,paths:(msg.params.toolCall.locations??[]).map(item=>path.relative(root,item.path)),metadataKeys:Object.keys(msg.params.toolCall),inputKeys:Object.keys(msg.params.toolCall.rawInput??{})})
         }
         const option = msg.params.options?.find(o => o.kind === (allowed ? 'allow_once' : 'reject_once'))

@@ -27,8 +27,9 @@ export async function documentsScenario({page,origin}) {
       await page.getByRole('button',{name:'다시 불러오기',exact:true}).waitFor();assert.equal(await select.isDisabled(),true)
       await page.evaluate(()=>{window.__fixtureDirectoryMode='ready'})
       await page.getByRole('button',{name:'다시 불러오기',exact:true}).click();await select.selectOption('member-0');assert.equal(await select.isDisabled(),false)
+      await page.getByRole('button',{name:'다시 불러오기',exact:true}).waitFor({state:'hidden'})
     }
-    states.push({mode,checked:true})
+    states.push({mode,checked:true,...(mode==='error'?{retryClicked:true,loadingFinished:true,memberListRecovered:true,recoveredSelection:await select.inputValue()}: {})})
   }
   await page.goto(base)
   for(const tab of ['조직도','근태','연차관리','승인자 설정','서류 출력']){await page.getByRole('tab',{name:tab,exact:true}).click();await page.getByRole('tab',{name:tab,exact:true,selected:true}).waitFor()}

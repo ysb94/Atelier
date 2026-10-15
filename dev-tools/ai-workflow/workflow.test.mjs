@@ -98,6 +98,8 @@ test('native deletion allows only an existing scoped regular file and never comm
   fs.mkdirSync(path.join(root,'src'));fs.writeFileSync(path.join(root,'src/old.tsx'),'old');fs.symlinkSync('old.tsx',path.join(root,'src/link.tsx'))
   const request=(path,title='Delete File',kind='delete')=>({toolCall:{title,kind,locations:[{path}]}})
   assert.equal(permissionDecision(request('src/old.tsx'),['src/old.tsx'],root),true)
+  assert.equal(permissionDecision(request('src/old.tsx','Delete `'+path.join(root,'src/old.tsx')+'`'),['src/old.tsx'],root),true)
+  assert.equal(permissionDecision(request('src/old.tsx','Delete other.tsx'),['src/old.tsx'],root),false)
   for(const file of ['src','src/link.tsx','../outside.tsx','src/missing.tsx'])assert.equal(permissionDecision(request(file),[file],root),false)
   assert.equal(permissionDecision(request('src/old.tsx'),[],root),false)
   assert.equal(permissionDecision(request('src/old.tsx','delete_database'),['src/old.tsx'],root),false)

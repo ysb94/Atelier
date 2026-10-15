@@ -123,9 +123,17 @@ export class SourceReader {
     if(name==='read_source')result=this.readSource(args)
     else if(name==='read_sources'){
       if(!Array.isArray(args.requests)||!args.requests.length||args.requests.length>6)throw Error('묶음 조회는 독립된 소스 요청 1~6개여야 합니다.')
-      const files=[];this.pendingChars=0
-      try{for(const request of args.requests){const value=this.readSource(request);files.push(value);this.pendingChars+=JSON.stringify(value).length+64}}finally{this.pendingChars=0}
-      result={files}
+      const files=[];let pendingRequests=[];this.pendingChars=0
+      try{for(let i=0;i<args.requests.length;i++){
+        const remaining=this.limits.totalChars-this.audit.responseChars-this.pendingChars
+        // Keep already collected pages when a later file cannot fit. Only
+        // delivered files count as read; the caller can request the rest.
+        if(files.length&&remaining<Math.max(2048,JSON.stringify(args.requests.slice(i)).length+1024)){
+          pendingRequests=args.requests.slice(i);break
+        }
+        const value=this.readSource(args.requests[i]);files.push(value);this.pendingChars+=JSON.stringify(value).length+64
+      }}finally{this.pendingChars=0}
+      result={files,...(pendingRequests.length?{pendingRequests,budgetLimited:true}: {})}
     }
     else if(name==='find_sources')result=this.findSource(args)
     else if(name==='search_source')result=this.searchSource(args)
@@ -155,7 +163,7 @@ const schema=properties=>({type:'object',properties,additionalProperties:false})
 const str={type:'string'},num={type:'integer',minimum:0}
 export const SOURCE_TOOLS=[
   {name:'read_source',description:'작업 브랜치의 실제 소스를 10,000자 이하 페이지로 읽습니다. 큰 요청은 nextLine으로 이어 읽으세요. #L시작-L끝 또는 startLine/endLine 지원. 구조도 생성 파일은 필터된 연결 근거로 변환합니다.',inputSchema:{...schema({path:str,startLine:num,endLine:num}),required:['path']}},
-  {name:'read_sources',description:'서로 독립인 파일 구간 1~6개를 한 번에 조회하여 반복 입력 소모를 줄입니다. 각 파일 최대 10,000자이며 nextLine이 있으면 필요한 파일만 이어 읽으세요.',inputSchema:{...schema({requests:{type:'array',minItems:1,maxItems:6,items:{...schema({path:str,startLine:num,endLine:num}),required:['path']}}}),required:['requests']}},
+  {name:'read_sources',description:'서로 독립인 파일 구간 1~6개를 한 번에 조회하여 반복 입력 소모를 줄입니다. 각 파일 최대 10,000자입니다. nextLine은 이어 읽을 줄이며, pendingRequests는 잔여 한도 때문에 아직 제공하지 않은 파일입니다.',inputSchema:{...schema({requests:{type:'array',minItems:1,maxItems:6,items:{...schema({path:str,startLine:num,endLine:num}),required:['path']}}}),required:['requests']}},
   {name:'find_sources',description:'검증 시점의 실제 파일 경로 목록에서 검색합니다. 없는 경로를 추측하지 마세요.',inputSchema:schema({query:str,pathPrefix:str,offset:num,limit:num})},
   {name:'search_source',description:'실제 코드·문서에서 문자열 위치를 찾습니다. 결과의 정확한 줄을 read_source로 확인하세요.',inputSchema:{...schema({query:str,path:str,pathPrefix:str,offset:num,lineOffset:num}),required:['query']}},
   {name:'source_outline',description:'큰 파일의 함수·타입 위치를 찾습니다. 원문 검토를 대신하지 않습니다.',inputSchema:{...schema({path:str}),required:['path']}},
