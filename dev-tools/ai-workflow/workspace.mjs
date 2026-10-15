@@ -5,6 +5,14 @@ import { runCommand } from './process.mjs'
 import { inside, projectRoot } from './settings.mjs'
 
 export const digest = content => createHash('sha256').update(content).digest('hex')
+// Structure-map output is rewritten by the manager (timestamped). It is not a user edit.
+export const isManagerArtifact = file => String(file ?? '').replaceAll('\\', '/').startsWith('dev-tools/structure-map/generated/')
+
+// Plan and implement compare this digest. Generated structure-map files are not user edits.
+export function sourceFingerprint(snap) {
+  const files = Object.fromEntries(Object.entries(snap ?? {}).filter(([file]) => !isManagerArtifact(file)).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))
+  return { files, digest: digest(Object.entries(files).map(([file, hash]) => `${file}:${hash}`).join('\n')) }
+}
 export function readFile(root, file) {
   const absolute = inside(root, file)
   if (!fs.existsSync(absolute)) return null
@@ -47,11 +55,12 @@ export async function evidence(root, baseline, files, runDir) {
     fs.writeFileSync(left, baseline.contents[file] ?? '')
     fs.writeFileSync(right, current ?? '')
     const diff = await runCommand('git', ['diff', '--no-index', '--no-ext-diff', '--', left, right], { cwd: root, acceptedCodes: [0,1] })
-    changes.push({ file, beforeHash: baseline.all[file] ?? null, afterHash: after[file] ?? null, deleted: current === null, diff: diff.output })
+    const beforeBody = baseline.contents?.[file]
+    changes.push({ file, beforeHash: beforeBody == null ? null : digest(beforeBody), afterHash: after[file] ?? null, deleted: current === null, diff: diff.output })
   }
   const verificationFiles=Object.keys(baseline.all).filter(file=>file.startsWith('scripts/')||file.startsWith('dev-tools/ai-workflow/browser-')||/\.(?:test|verify)\.[cm]?[jt]sx?$/.test(file))
   return { changes, outside, snapshot: after, scope: {
-    inventoryMethod:'git ls-files tracked and non-ignored untracked files, compared with task-start hashes',
+    inventoryMethod:'check-start snapshot (baseline.all) detects drift during checks; beforeHash is the base file content',
     changedPaths:changedPaths(baseline.all,after),outsideAllowed:outside,
     verificationFiles:verificationFiles.map(file=>({file,beforeHash:baseline.all[file],afterHash:after[file]??null}))
   } }

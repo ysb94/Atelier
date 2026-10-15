@@ -40,16 +40,25 @@ export class Store {
   enqueue(job, update) {
     this.data.outbox.push({ pageId: job.task.id, update: { ...update, eventId: `${job.runId}:${this.data.outbox.length}:${randomUUID()}` } }); this.save()
   }
+  // One journal replacement for a terminal transition and its outbox event.
+  update(mutator) {
+    mutator(this.data)
+    this.save()
+  }
   async flush(notion, pageId) {
     const run=async()=>{
     for (;;) {
       const index=this.data.outbox.findIndex(event=>!pageId||event.pageId===pageId)
       if(index<0)return
       const event = this.data.outbox[index]
-      try {await notion.publish(event.pageId, event.update)}catch(error){
+      try {
+        const outcome = await notion.publish(event.pageId, event.update)
+        if (outcome === 'retry') throw Object.assign(new Error('노션 기록을 다시 시도합니다.'), { retryDelivery: true, delivery: event })
+      } catch (error) {
         // A confirmed cancellation is discarded and delivered to the runner;
         // connection failures retain the event for a later safe retry.
-        if(error.discardUpdate){this.data.outbox.splice(index,1);this.save()}
+        error.delivery ??= event
+        if (error.discardUpdate) { this.data.outbox.splice(index, 1); this.save() }
         throw error
       }
       this.data.outbox.splice(index,1); this.save()

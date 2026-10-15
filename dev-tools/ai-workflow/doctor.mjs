@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url'
 import { settings, cursorCommand, cursorPlugins, projectRoot } from './settings.mjs'
 import { runCommand } from './process.mjs'
 import { requireSubscriptionLogin } from './codex-subscription.mjs'
+import { TaskGit } from './git-task.mjs'
+import { setupSchema } from './control.mjs'
 
 export async function doctor(config=settings()) {
   const problems=[],mcp=[]
@@ -31,6 +33,13 @@ export async function doctor(config=settings()) {
   let codexBilling
   try{codexBilling=await requireSubscriptionLogin(config,{root:projectRoot})}catch(error){problems.push(error.message)}
   if(!mcp.length)problems.push('Cursor MCP 설정/플러그인을 찾지 못했습니다.')
-  return {ready:problems.length===0,problems,mcp,cursorAuthenticated,codexBilling,plugins}
+  if(config.v2?.enabled){
+    if(!config.v2.controlPageId)problems.push('설정 페이지 미지정: config.json의 v2.controlPageId에 노션 설정 페이지 ID를 입력한 뒤 관리자를 다시 시작하세요.')
+    const git=new TaskGit({config})
+    try{await git.verifyOrigin()}catch(error){problems.push(error.message)}
+    try{git.workspaceRoot()}catch(error){problems.push(error.message)}
+    try{await git.gh(['auth','status','--hostname=github.com'],{timeoutMs:15000})}catch{problems.push('GitHub CLI 로그인 필요: gh auth login (작업 브랜치 PR 생성·상태 확인에 사용)')}
+  }
+  return {ready:problems.length===0,problems,mcp,cursorAuthenticated,codexBilling,plugins,...(config.v2?.enabled?{v2Setup:setupSchema(config)}:{})}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))console.log(JSON.stringify(await doctor(),null,2))

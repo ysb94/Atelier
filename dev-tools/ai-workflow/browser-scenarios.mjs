@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
+import {documentsScenario,profileScenario,attendancePolicyScenario} from './browser-operations-scenarios.mjs'
+import {dataMenuScenario,brandInfoScenario,seasonsRemovalScenario} from './browser-navigation-scenarios.mjs'
 
 async function openForm(page,origin,owner='design') {
   await page.goto(`${origin}/work-requests/${owner}?mode=new`)
@@ -159,8 +161,96 @@ async function attendanceScenario({page,origin}) {
   }
   return {checked}
 }
+async function navigationScenario({page,origin}) {
+  const query='?fixture=navigation&position='+encodeURIComponent('대표이사')+'&brand=fixture&probe=keep'
+  await page.goto(origin+'/products'+query)
+  await page.getByText('검증 직원',{exact:false}).first().waitFor()
+  for(const title of ['기획','디자인']) {
+    const button=page.locator('nav').getByRole('button',{name:title,exact:true})
+    await button.click()
+  }
+  const links=await page.locator('nav a').evaluateAll(items=>items.map(item=>({text:item.textContent,href:item.getAttribute('href')})))
+  assert.ok(links.some(item=>item.href?.includes('/work-requests/planning')),'Planning work requests missing')
+  assert.ok(links.some(item=>item.href?.includes('/work-requests/design')),'Design work requests missing')
+  assert.ok(!links.some(item=>/^\/(?:product-work\/(?:planning|design)|planning|design)$/.test(item.href??'')),'Removed product menu remains')
+  const routes=['/product-work/planning','/product-work/design','/product-work/planning/fixture-item','/product-work/design/fixture-item','/planning','/design','/b/fixture/work/planning','/b/fixture/work/design','/b/fixture/planning','/b/fixture/design']
+  const redirects=[]
+  for(const route of routes){
+    await page.goto(origin+route+query)
+    await page.waitForURL(url=>url.pathname==='/products')
+    assert.equal(new URL(page.url()).searchParams.get('probe'),'keep','Search parameters lost')
+    redirects.push({from:route,to:new URL(page.url()).pathname,searchPreserved:true})
+  }
+  await page.goto(origin+'/products'+query)
+  await page.getByRole('button',{name:'전체 상품',exact:true}).waitFor()
+  const retained=['/product-work/md','/product-work/logistics','/products/fixture-item','/drafts','/work-requests/planning','/work-requests/design','/design/styled-cuts','/design/file-manager'],entered=[]
+  for(const route of retained){await page.evaluate(to=>window.__fixtureNavigate(to),route+query);await page.waitForURL(url=>url.pathname===route);await page.locator('main').first().waitFor();entered.push(route)}
+  await page.evaluate(to=>window.__fixtureNavigate(to),'/products'+query);await page.waitForURL(url=>url.pathname==='/products')
+  await page.evaluate(to=>window.__fixtureNavigate(to),'/work-requests/planning'+query);await page.waitForURL(url=>url.pathname==='/work-requests/planning');await page.goBack();await page.waitForURL(url=>url.pathname==='/products')
+  const workRequestTabIdentity=await page.evaluate(()=>{
+    const owners=['planning','design','md','logistics'],searches=['','?mode=new','?requestId=R1','?requestId=R1&mode=edit','?brand=fixture&requestId=R2'],cases=[]
+    for(const owner of owners)for(const search of searches){const pathname='/work-requests/'+owner;cases.push({pathname,search,result:window.__fixtureResolveTab({pathname,search})})}
+    return cases
+  })
+  const ownerIds=new Set()
+  for(const owner of ['planning','design','md','logistics']){const cases=workRequestTabIdentity.filter(v=>v.pathname==='/work-requests/'+owner),ids=new Set(cases.map(v=>v.result?.id));assert.equal(ids.size,1,'Work request view created another tab');assert.ok(!ids.has(undefined));ownerIds.add(cases[0].result.id);for(const item of cases){assert.equal(item.result.pathname,item.pathname);assert.equal(item.result.search,item.search)}}
+  assert.equal(ownerIds.size,4,'Department tab identifiers collided')
+  const productTabsBefore=await page.getByRole('button',{name:'전체 상품',exact:true}).count()
+  const existingProductTab=await page.locator('div.border-border.bg-background > button[title="전체 상품"]').first().elementHandle()
+  for(const route of ['/product-work/planning','/product-work/design']){await page.evaluate(to=>window.__fixtureNavigate(to),route+query);await page.waitForURL(url=>url.pathname==='/products');assert.equal(await page.getByRole('button',{name:'전체 상품',exact:true}).count(),productTabsBefore,'Removed route created another product tab');assert.equal(new URL(page.url()).searchParams.get('probe'),'keep')}
+  assert.equal(await existingProductTab.evaluate(el=>el.isConnected),true,'Existing product tab was replaced')
+  await page.waitForTimeout(250)
+  assert.equal(new URL(page.url()).pathname,'/products','Hidden tab changed the active address')
+  await page.goto(origin+'/__brand-home'+query)
+  await page.getByText('검증 브랜드',{exact:true}).first().waitFor()
+  const shortcuts=await page.locator('a').evaluateAll(items=>items.map(item=>({text:item.textContent,href:item.getAttribute('href')})))
+  assert.ok(!shortcuts.some(item=>/\/(?:work\/(?:planning|design)|product-work\/(?:planning|design))$/.test(item.href??'')),'Removed brand shortcut remains')
+  return {links,redirects,shortcuts,workRequestTabIdentity,retainedRoutesEntered:entered,backNavigation:true,productTabReused:true,hiddenTabsDidNotChangeAddress:true,checked:['Actual company navigation','Actual company and legacy brand route redirects','Query preservation','Actual brand home shortcuts']}
+}
+async function brandAccessScenario({page,origin}) {
+  const checked=[]
+  for(const [position,email,allowed,admin,status] of [['대표이사','fixture@example.invalid',true,false,'active'],['사원','dev@atelier.local',true,false,'active'],['팀장','fixture@example.invalid',false,true,'active'],['사원','fixture@example.invalid',false,false,'active'],['대표이사','fixture@example.invalid',false,false,'pending']]){
+    const query='?'+new URLSearchParams({fixture:'brand-access',position,email,admin:String(admin),status})
+    await page.goto(origin+'/__brand-management'+query)
+    if(allowed)await page.getByText('검증 브랜드',{exact:true}).first().waitFor()
+    else{await page.getByText('브랜드 관리는 대표이사와 개발자만 볼 수 있습니다.',{exact:true}).waitFor();assert.equal(await page.getByText('검증 브랜드',{exact:true}).count(),0);assert.equal(await page.getByRole('button',{name:/브랜드 추가|브랜드 생성/}).count(),0)}
+    const observers=await page.evaluate(()=>window.__brandQueryObservers());assert.equal(observers,allowed?1:0,'Restricted management query hook mounted')
+    await page.goto(origin+'/brands'+query)
+    const expand=page.getByRole('button',{name:'사이드바 펼치기',exact:true});if(await expand.isVisible())await expand.click()
+    const settings=page.locator('nav').getByRole('button',{name:'설정',exact:true});if(await settings.getAttribute('aria-expanded')!=='true')await settings.click()
+    assert.equal(await page.locator('nav a[href="/brands"]').count(),allowed?1:0)
+    await page.getByRole('button',{name:'사이드바 접기',exact:true}).click()
+    assert.equal(await page.locator('nav a[href="/brands"]').count(),allowed?1:0)
+    const reads=await page.evaluate(()=>window.__atelierFixtureReads??[])
+    if(!allowed)assert.ok(!reads.includes('brands'),'Restricted brand management fetched brands')
+    checked.push({position,email,admin,status,allowed,expandedAndCollapsed:true,queryObservers:observers,reads})
+  }
+  return {checked,note:'Synthetic profiles; permissions and actual components tested without live authentication.'}
+}
+async function attachmentScenario({page,origin}) {
+  await openForm(page,origin);await fillForm(page,'본문 파일 선택 검증')
+  const body=page.locator('form .min-h-72'),encoded=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=800;c.height=600;return c.toDataURL('image/png').split(',')[1]})
+  const png=name=>({name,mimeType:'image/png',buffer:Buffer.from(encoded,'base64')})
+  await page.locator('input[type=file]').setInputFiles([png('ordered-a.png'),{name:'ordered-b.txt',mimeType:'text/plain',buffer:Buffer.from('fixture')},{name:'ordered-c.xlsx',mimeType:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',buffer:Buffer.from('fixture')}])
+  await body.getByRole('img',{name:'ordered-a.png',exact:true}).waitFor();await body.getByText('ordered-c.xlsx',{exact:true}).waitFor()
+  const nodes=await Promise.all([body.getByRole('img',{name:'ordered-a.png',exact:true}).elementHandle(),body.getByText('ordered-b.txt',{exact:true}).elementHandle(),body.getByText('ordered-c.xlsx',{exact:true}).elementHandle()])
+  assert.equal(await page.evaluate(([a,b,c])=>!!(a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING)&&!!(b.compareDocumentPosition(c)&Node.DOCUMENT_POSITION_FOLLOWING),nodes),true,'File selection order changed')
+  const picker=page.locator('input[type=file]').locator('..');assert.equal(await picker.getByText('ordered-b.txt',{exact:true}).count(),0,'Separate picker list remains')
+  await body.getByRole('button',{name:'ordered-b.txt 제거',exact:true}).click();assert.equal(await page.getByText('ordered-b.txt',{exact:true}).count(),0)
+  await page.getByRole('button',{name:'작업 요청 등록',exact:true}).click();await page.locator('aside').getByText('ordered-c.xlsx',{exact:true}).waitFor()
+  await page.locator('aside').getByRole('button',{name:'수정',exact:true}).click()
+  await page.locator('input[type=file]').setInputFiles(png('edit-d.png'));await body.getByRole('img',{name:'edit-d.png',exact:true}).waitFor()
+  const editImage=body.getByRole('img',{name:'edit-d.png',exact:true});await dimensions(editImage);await editImage.scrollIntoViewIfNeeded()
+  const handle=editImage.locator('..').getByRole('button',{name:'너비만 조절',exact:true}).first(),rect=await handle.boundingBox(),before=await dimensions(editImage)
+  await page.mouse.move(rect.x+rect.width/2,rect.y+rect.height/2);await page.mouse.down();await page.mouse.move(rect.x+rect.width/2-60,rect.y+rect.height/2,{steps:8});await page.mouse.up();const resized=await dimensions(editImage);assert.ok(resized.width<before.width-20)
+  for(const type of ['paste','drop']){
+    await body.locator('[contenteditable=true]').last().evaluate((el,{encoded,type})=>{const data=new DataTransfer();data.items.add(new File([Uint8Array.from(atob(encoded),c=>c.charCodeAt(0))],type+'.png',{type:'image/png'}));el.dispatchEvent(type==='paste'?new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:data}):new DragEvent('drop',{bubbles:true,cancelable:true,dataTransfer:data,clientX:el.getBoundingClientRect().x+10,clientY:el.getBoundingClientRect().y+10}))},{encoded,type});await body.getByRole('img',{name:type+'.png',exact:true}).waitFor()
+  }
+  await page.getByRole('button',{name:'수정 내용 저장',exact:true}).click();await page.locator('aside').getByRole('img',{name:'edit-d.png',exact:true}).waitFor();await page.locator('aside').getByText('ordered-c.xlsx',{exact:true}).waitFor()
+  return {checked:['File picker appends mixed files into body in order','No separate picker attachment list','Individual file removal','Register and reopen edit','Additional files saved in detail','Image resize, paste and drop'],resized}
+}
 export async function runScenario(name,fixture) {
-  const scenarios={images:imageScenario,deadline:deadlineScenario,attendance:attendanceScenario}
+  const scenarios={images:imageScenario,deadline:deadlineScenario,attendance:attendanceScenario,navigation:navigationScenario,'brand-access':brandAccessScenario,attachments:attachmentScenario,documents:documentsScenario,profile:profileScenario,'attendance-policy':attendancePolicyScenario,'data-menu':dataMenuScenario,'brand-info':brandInfoScenario,'seasons-removal':seasonsRemovalScenario}
   if(!scenarios[name])throw new Error(`Unknown browser scenario: ${name}`)
   const startedAt=new Date().toISOString(),results=await scenarios[name](fixture)
   assert.deepEqual(fixture.errors,[],'Browser runtime errors')
@@ -169,7 +259,7 @@ export async function runScenario(name,fixture) {
   await fixture.page.screenshot({path:screenshot,fullPage:true})
   const report={scenario:name,startedAt,finishedAt:new Date().toISOString(),passed:true,
     method:'Real app components in Chromium; synthetic profile and offline data; no actual login, production DB access or deployment.',
-    results,screenshot,screenshotSha256:createHash('sha256').update(fs.readFileSync(screenshot)).digest('hex')}
+    results,sourceRoot:fixture.root,sourceHashes:fixture.root?{'src/components/layout/workspace-tabs.tsx':createHash('sha256').update(fs.readFileSync(path.join(fixture.root,'src/components/layout/workspace-tabs.tsx'))).digest('hex')}:undefined,screenshot,screenshotSha256:createHash('sha256').update(fs.readFileSync(screenshot)).digest('hex')}
   fs.writeFileSync(path.join(dir,`${name}.json`),JSON.stringify(report,null,2))
   console.log(JSON.stringify(report))
 }

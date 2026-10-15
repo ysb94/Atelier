@@ -1,7 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { taskFiles, redact, projectRoot } from './settings.mjs'
-import { snapshot, readFile, mapContext, evidence, changedPaths } from './workspace.mjs'
+import { taskFiles, redact, projectRoot,toolDir } from './settings.mjs'
+import { snapshot, readFile, mapContext, evidence, changedPaths, digest } from './workspace.mjs'
 import { runCursor, NeedsInput } from './acp.mjs'
 import { runReview, validateReview } from './reviewer.mjs'
 import { runCommand } from './process.mjs'
@@ -16,23 +16,63 @@ function npmCli() {
   }
   throw new Error('npm CLI를 찾지 못했습니다. npm run dev에서 실행하거나 Node.js 설치를 확인하세요.')
 }
+export function browserScenariosFor({files=[],request='',criteria=''}={}) {
+  const text=request+'\n'+criteria,scenarios=[]
+  if(files.includes('src/features/brands/BrandSelectPage.tsx')&&files.includes('src/lib/company/capabilities.ts'))scenarios.push('brand-access')
+  if(files.includes('src/components/layout/workspace-tabs.tsx')&&/기획/.test(text)&&/디자인/.test(text)&&/(?:제거|삭제)/.test(text))scenarios.push('navigation')
+  if(files.includes('src/features/work-requests/WorkRequestPage.tsx')&&/파일 선택/.test(text)&&/(?:본문|요청 내용)/.test(text))scenarios.push('attachments')
+  if(files.includes('src/features/operations-support/DocumentOutputPanel.tsx'))scenarios.push('documents')
+  if(files.includes('src/features/settings/ProfileSettingsPage.tsx'))scenarios.push('profile')
+  if(files.includes('src/features/operations-support/attendance-start-settings.ts')&&/5분/.test(text))scenarios.push('attendance-policy')
+  if(files.includes('src/features/data/DataSheetPage.tsx')&&files.includes('src/components/layout/company-workspace-nav.ts'))scenarios.push('data-menu')
+  if(files.includes('src/features/brands/BrandSelectPage.tsx')&&files.includes('src/features/settings/BrandSettingsPage.tsx'))scenarios.push('brand-info')
+  if(files.includes('src/features/settings/SeasonsSettingsPage.tsx')&&files.includes('src/components/layout/company-routes.tsx'))scenarios.push('seasons-removal')
+  return scenarios
+}
+export function checkFailureOutput(error,env) {
+  const result=error.commandResult,raw=result?result.output+'\n'+result.stderr:error.message
+  return redact(raw.length>8000?raw.slice(0,2000)+'\n[중간 로그 생략; 실패 시작과 마지막 진단을 보존]\n'+raw.slice(-6000):raw,env)
+}
+export async function navigationCheckProvenance(root, args, signal, run=runCommand) {
+  const relative='scripts/verify-work-request-navigation.mjs',script=path.join(projectRoot,relative),taskScript=path.join(root,relative)
+  const source=fs.readFileSync(script,'utf8'),taskSource=fs.readFileSync(taskScript,'utf8')
+  const comparison=await run('git',['diff','--no-index','--no-ext-diff','--',taskScript,script],{cwd:root,signal,acceptedCodes:[0,1]})
+  return {kind:'manager-validator',command:[process.execPath,...args],cwd:root,targetRoot:fs.realpathSync(root),
+    script:{path:script,sha256:digest(source)},taskScript:{path:taskScript,sha256:digest(taskSource)},
+    difference:comparison.output.length<=6000?comparison.output:null,differenceChars:comparison.output.length,
+    proofValidator:fs.readFileSync(path.join(toolDir,'navigation-proof.mjs'),'utf8'),
+    reason:'관리자 검사는 이 작업 폴더의 앱 소스를 읽습니다. 코드 문장 일치 대신 현재 소스 해시와 일치하는 브라우저 결과로 4개 부서 × 5개 URL의 탭 식별자·query 계약을 확인합니다. 기존 URL·초안·권한·뒤로가기·이미지 검사는 그대로 실행합니다. 작업 브랜치의 검사 스크립트를 수정한 것이 아닙니다.'}
+}
 export async function verification(config, root, signal) {
   const scripts=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).scripts
-  const checks=[]
+  const checks=[],scenarios=browserScenariosFor(config.reviewPlan)
+  for(const scenario of scenarios){
+    const name=`verify:browser-${scenario}`
+    try{const result=await runCommand(process.execPath,[path.join(toolDir,'browser-check.mjs'),scenario,root],{cwd:root,signal,timeoutMs:120000});checks.push({name,passed:true,output:result.output+'\n'+result.stderr})}
+    catch(error){if(signal?.aborted)throw error;checks.push({name,passed:false,output:checkFailureOutput(error,config.env)})}
+  }
+  if(scenarios.includes('attendance-policy')){
+    const name='verify:attendance-start-policy'
+    try{const result=await runCommand(process.execPath,['--experimental-strip-types',path.join(toolDir,'attendance-policy-check.mjs'),root],{cwd:root,signal,timeoutMs:30000});checks.push({name,passed:true,output:result.output+'\n'+result.stderr})}
+    catch(error){if(signal?.aborted)throw error;checks.push({name,passed:false,output:checkFailureOutput(error,config.env)})}
+  }
   for(const name of ['structure:map', ...config.verificationScripts]) {
     if(!scripts[name])throw new Error(`검증 스크립트 없음: ${name}`)
     try {
-      const result=await runCommand(process.execPath,[npmCli(),'run',name],{cwd:root,signal,timeoutMs:300000})
-      checks.push({name,passed:true,output:(result.output+'\n'+result.stderr).slice(-18000)})
+      const browserIdentity=name==='verify:work-request-navigation'&&checks.some(check=>check.name==='verify:browser-navigation'&&check.passed)
+      const args=browserIdentity?['--experimental-strip-types',path.join(projectRoot,'scripts/verify-work-request-navigation.mjs'),root,path.join(root,'dev-tools/ai-workflow/.state/browser/navigation.json')]:[npmCli(),'run',name]
+      const provenance=browserIdentity?await navigationCheckProvenance(root,args,signal):undefined
+      const result=await runCommand(process.execPath,args,{cwd:root,signal,timeoutMs:300000})
+      checks.push({name,passed:true,output:(result.output+'\n'+result.stderr).slice(-18000),...(provenance?{provenance}:{})})
     } catch(error) {
       if(signal?.aborted)throw error
-      checks.push({name,passed:false,output:redact(error.message,config.env)})
+      checks.push({name,passed:false,output:checkFailureOutput(error,config.env)})
     }
   }
   return checks
 }
 
-async function refreshStructure(root, signal) {
+export async function refreshStructure(root, signal) {
   return runCommand(process.execPath, [npmCli(), 'run', 'structure:map'], { cwd: root, signal, timeoutMs: 300000 })
 }
 
