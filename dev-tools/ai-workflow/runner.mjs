@@ -16,6 +16,14 @@ function npmCli() {
   }
   throw new Error('npm CLI를 찾지 못했습니다. npm run dev에서 실행하거나 Node.js 설치를 확인하세요.')
 }
+// Older isolated branches have per-package dependency links created before tsx
+// was installed. Execute their unchanged TS check with the manager's pinned
+// runner instead of letting npx fetch a package or depend on a missing link.
+export function localTypeScriptArgs(script) {
+  const match=String(script??'').match(/^(?:npx\s+)?tsx\s+(?:(--tsconfig)\s+([\w./-]+)\s+)?([\w./-]+\.ts)$/)
+  if(!match)return null
+  return [path.join(projectRoot,'node_modules/tsx/dist/cli.mjs'),...(match[1]?[match[1],match[2]]:[]),match[3]]
+}
 export function browserScenariosFor({files=[],request='',criteria=''}={}) {
   const text=request+'\n'+criteria,scenarios=[]
   if(files.includes('src/features/brands/BrandSelectPage.tsx')&&files.includes('src/lib/company/capabilities.ts'))scenarios.push('brand-access')
@@ -64,7 +72,8 @@ export async function verification(config, root, signal) {
     if(!scripts[name])throw new Error(`검증 스크립트 없음: ${name}`)
     try {
       const browserIdentity=name==='verify:work-request-navigation'&&checks.some(check=>check.name==='verify:browser-navigation'&&check.passed)
-      const args=browserIdentity?['--experimental-strip-types',path.join(projectRoot,'scripts/verify-work-request-navigation.mjs'),root,path.join(root,'dev-tools/ai-workflow/.state/browser/navigation.json')]:[npmCli(),'run',name]
+      const typescript=localTypeScriptArgs(scripts[name])
+      const args=browserIdentity?['--experimental-strip-types',path.join(projectRoot,'scripts/verify-work-request-navigation.mjs'),root,path.join(root,'dev-tools/ai-workflow/.state/browser/navigation.json')]:typescript??[npmCli(),'run',name]
       const provenance=browserIdentity?await navigationCheckProvenance(root,args,signal):undefined
       const result=await runCommand(process.execPath,args,{cwd:root,signal,env,timeoutMs:300000})
       checks.push({name,passed:true,output:(result.output+'\n'+result.stderr).slice(-18000),...(provenance?{provenance}:{})})

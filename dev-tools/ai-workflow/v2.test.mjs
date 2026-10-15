@@ -15,6 +15,7 @@ import { CONTROL_PROPERTIES, REFLECTION } from './control.mjs'
 import { Pipeline } from './pipeline.mjs'
 import {validateGptPlan} from './gpt-planner.mjs'
 import {cursorTransportProblem} from './acp.mjs'
+import {localTypeScriptArgs} from './runner.mjs'
 
 const config = {
   positions: {memo:'메모', answered:'답변 완료', queued:'자동화 할 일', working:'자동화 작업 중', reviewing:'검토 중', needsInput:'확인 필요', done:'완료'},
@@ -178,6 +179,15 @@ test('Notion authentication failures are operator errors and do not reach paid w
   await assert.rejects(n.api('pages/p'),error=>error.code==='notion_auth'&&error.retry===false)
   const o=setup();o.enqueue=()=>{};o.store.flush=async()=>{await n.api('pages/p')}
   await assert.rejects(o.progress({job:{key:'p'},controller:new AbortController()},{state:'작업 중'}),error=>error.code==='notion_auth')
+})
+
+test('legacy TypeScript checks use the pinned local tool with unchanged task arguments',()=>{
+  const direct=localTypeScriptArgs('tsx src/features/work-requests/work-request-roles.verify.ts')
+  const legacy=localTypeScriptArgs('npx tsx src/features/work-requests/work-request-roles.verify.ts')
+  assert.deepEqual(direct,legacy)
+  assert.match(direct[0],/node_modules[\\/]tsx[\\/]dist[\\/]cli\.mjs$/)
+  assert.deepEqual(localTypeScriptArgs('npx tsx --tsconfig tsconfig.app.json src/lib/chat/thread-layout.verify.ts').slice(1),['--tsconfig','tsconfig.app.json','src/lib/chat/thread-layout.verify.ts'])
+  assert.equal(localTypeScriptArgs('npx tsx file.ts; echo skipped'),null)
 })
 
 test('a completed GPT plan is handed off to the visible queue before any Cursor invocation',async()=>{
