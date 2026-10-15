@@ -20,6 +20,28 @@ import { attendanceMonthDates, buildMyAttendance, clockOutLabel, dayClock, korea
 import './personal-requests.css'
 
 const STATUS_LABELS = { pending: '승인 대기', approved: '승인', rejected: '반려', cancelled: '취소' }
+const LEAVE_USE_NOTICE = `직원 여러분의 근무 편의성과 휴가 활용의 유연성을 높이기 위해
+기존 휴가 제도에 반반차(¼차) 사용 방식을 추가 운영합니다.
+
+■ 시행일
+2026년 2월 24일 ~
+■ 휴가 사용 단위
+연차 : 1일
+반차 : 0.5일
+반반차 : 0.25일 (추가 도입)
+
+■ 반반차 사용 기준
+1회 사용 시 근무시간의 ¼ (약 2시간) 사용
+당일 업무 인수인계 및 팀 일정에 지장이 없도록 사전 협의 필수
+■ 사용 예시
+병원 방문, 은행 업무 등 단시간 외출
+등·하원, 가족 일정 등 개인 용무 처리
+■ 신청 방법
+기존 휴가 신청 방식과 동일
+최소 2일 전 신청 원칙 (긴급 상황 시 팀장 협의)
+
+직원 여러분이 보다 효율적으로 시간을 활용할 수 있도록 도입된 제도이니,
+업무 공백이 발생하지 않도록 서로 배려하며 사용해 주시기 바랍니다.`
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
 const LAYERS = [['clock', '출퇴근'], ['leave', '휴가'], ['work', '근무'], ['fix', '정정'], ['holiday', '공휴일'], ['closed', '반려·취소']] as const
 type Layer = typeof LAYERS[number][0]
@@ -168,6 +190,11 @@ export function MyAttendancePanel() {
       <div className="personal-request-draft"><strong>근태 신청 · 부서별 지정 승인자</strong><span>휴가·외근·재택·출퇴근 정정은 부서 근태 승인자가, 야근은 야근 승인자가 승인합니다. 알림은 시안이며 잔여일 자동 차감은 미적용입니다.</span></div>
       <Button type="button" variant="outline" size="sm" className="personal-request-settings-button" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(true)}><Settings2 size={14}/>알림 설정</Button>
     </div>
+    <details open className="mb-4 rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">
+      <summary className="cursor-pointer font-medium">공지] 휴가 사용 제도 안내</summary>
+      <p className="mt-2 whitespace-pre-line text-muted-foreground">{LEAVE_USE_NOTICE}</p>
+      <p className="mt-2 text-muted-foreground">연차 부여 일수·입사일·연도 계산 기준은 보류 중입니다.</p>
+    </details>
     {!allowed && <p role="status" className="personal-request-error">활성 직원 계정으로 로그인해 주세요.</p>}
     <div className="personal-request-overview">
       <article className="personal-attendance-today">
