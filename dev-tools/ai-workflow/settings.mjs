@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { isMigrationDraft } from './migration-drafts.mjs'
 
 export const toolDir = path.dirname(fileURLToPath(import.meta.url))
 export const projectRoot = path.resolve(toolDir, '../..')
@@ -68,13 +69,13 @@ export function inside(root, relative) {
   return resolved
 }
 
-export function taskFiles(value) {
+export function taskFiles(value, { allowMigrationDrafts = false } = {}) {
   const files = value.split(/[\n,]/).map(s => s.trim().replaceAll('\\', '/')).filter(Boolean)
   if (!files.length || files.length > 30) throw new Error('AI 허용 파일에 정확한 파일 경로 1~30개를 입력하세요.')
   for (const file of files) {
     inside(projectRoot, file)
     if (/^(?:[A-Za-z]:|\/)|(?:^|\/)(?:\.git|\.cursor|node_modules|\.env[^/]*|\.runtime|\.state)(?:\/|$)|(?:auth|credentials|service-account)\.json$/i.test(file)) throw new Error('인증·환경·Git 내부 파일은 자동화 대상으로 사용할 수 없습니다.')
-    if (/^(?:supabase\/|docs\/backups\/)/i.test(file)) throw new Error('DB·백업 작업은 별도 승인과 백업 확인이 필요합니다.')
+    if (/^(?:supabase\/|docs\/backups\/)/i.test(file)&&!(allowMigrationDrafts&&isMigrationDraft(file))) throw new Error('DB·백업 작업은 별도 승인과 백업 확인이 필요합니다.')
   }
   return [...new Set(files)]
 }
