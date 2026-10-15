@@ -15,6 +15,7 @@
     "enabled": true,
     "cursorPull": { "enabled": true, "pollMs": 5000 },
     "sourceReader": { "enabled": true, "chunkChars": 10000, "totalChars": 160000, "maxCalls": 40 },
+    "migrationDrafts": { "enabled": true, "approvalId": "atelier-20261015-preserve-existing-data-db-consent-v1" },
     "statusDashboard": { "blockId": "3f963ce0-dccd-8115-b368-c59f2f8b8dde" },
     "pipeline": { "enabled": true, "gptWorkers": 2, "planning": 2, "implementation": 2, "review": 2, "readyLimit": 4, "reviewBacklog": 3 },
     "controlPageId": "3f963ce0-dccd-813c-8ece-d173d7df5ad3",
@@ -27,7 +28,6 @@
       "baseBranch": "save/automation-progress-20261013",
       "integrationBranch": "integration/automation-review"
     },
-    "workspaceRoot": "/workspace/.atelier-task-worktrees",
     "retryMinutes": 5,
     "maxRetryMinutes": 120,
     "reconcileMinutes": 10,

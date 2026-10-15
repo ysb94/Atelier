@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process'
 import { redact } from './settings.mjs'
+import { cliCommand } from './cli-command.mjs'
 
 // Agents receive only their own credentials, not the parent shell's unrelated secrets.
 export function childEnv(extra = {}) {
@@ -10,7 +11,8 @@ export function childEnv(extra = {}) {
 
 export function runCommand(command, args, { cwd, input, timeoutMs = 120000, signal, env = childEnv(), acceptedCodes = [0], stopCheck } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false })
+    const cli = cliCommand(command, args, { cwd, env })
+    const child = spawn(cli.command, cli.args, { cwd, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, shell: false })
     let output = '', errorOutput = '', timedOut = false, stopReason=''
     const stop = () => child.kill('SIGTERM')
     const timer = setTimeout(() => { timedOut = true; stop() }, timeoutMs)

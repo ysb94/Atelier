@@ -107,11 +107,29 @@ export class TaskGit {
       : path.join(os.homedir(), '.atelier-ai-workflow', 'worktrees', createHash('sha256').update(realRoot).digest('hex').slice(0, 12))
     const relative = path.relative(realRoot, base)
     if (!relative || (!relative.startsWith('..') && !path.isAbsolute(relative))) throw new EnvironmentError('작업 브랜치 공간은 프로젝트 폴더 밖에 있어야 합니다.', { retry: false, code: 'workspace_root' })
-    const parent = path.dirname(base)
-    try { fs.accessSync(parent, fs.constants.W_OK) } catch {
-      throw new EnvironmentError(`작업 브랜치 공간의 상위 폴더에 쓸 수 없습니다: ${parent}`, { retry: false, code: 'workspace_root' })
+    let canonical
+    try {
+      // Resolve existing ancestors before creating directories: a symlink must
+      // not turn an apparently external workspace into a project subfolder.
+      let ancestor=base
+      while(!fs.existsSync(ancestor)){
+        const parent=path.dirname(ancestor)
+        if(parent===ancestor)throw new Error('접근 가능한 상위 폴더가 없습니다.')
+        ancestor=parent
+      }
+      canonical=path.resolve(fs.realpathSync(ancestor),path.relative(ancestor,base))
+    } catch {
+      throw new EnvironmentError(`작업 브랜치 폴더의 경로를 확인할 수 없습니다: ${base}`, { retry: false, code: 'workspace_root' })
     }
-    return base
+    const canonicalRelative=path.relative(realRoot,canonical)
+    if(!canonicalRelative||(!canonicalRelative.startsWith('..')&&!path.isAbsolute(canonicalRelative)))throw new EnvironmentError('작업 브랜치 공간은 프로젝트 폴더 밖에 있어야 합니다.', {retry:false,code:'workspace_root'})
+    try {
+      fs.mkdirSync(canonical,{recursive:true})
+      fs.accessSync(canonical,fs.constants.W_OK)
+    } catch {
+      throw new EnvironmentError(`작업 브랜치 폴더를 만들거나 쓸 수 없습니다: ${canonical}. 사용자 계정에 쓰기 가능한 프로젝트 밖 경로를 config.local.json의 v2.workspaceRoot로 지정하세요.`, {retry:false,code:'workspace_root'})
+    }
+    return canonical
   }
   workspaceDir(branch) { return path.join(this.workspaceRoot(), validateBranchName(branch, { role: 'task' }).replaceAll('/', '__')) }
 

@@ -2,6 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 import { fileURLToPath } from 'node:url'
+import { isMigrationDraft } from './migration-drafts.mjs'
 
 export const toolDir = path.dirname(fileURLToPath(import.meta.url))
 export const projectRoot = path.resolve(toolDir, '../..')
@@ -10,7 +11,8 @@ export const stateDir = path.join(toolDir, '.state')
 export function settings() {
   const base = JSON.parse(fs.readFileSync(path.join(toolDir, 'config.json'), 'utf8'))
   const local = path.join(toolDir, 'config.local.json')
-  const config = fs.existsSync(local) ? { ...base, ...JSON.parse(fs.readFileSync(local, 'utf8')) } : base
+  const override = fs.existsSync(local) ? JSON.parse(fs.readFileSync(local, 'utf8')) : {}
+  const config = { ...base, ...override, v2: { ...base.v2, ...override.v2 } }
   const envPath = path.join(toolDir, '.env.local')
   const env = fs.existsSync(envPath) ? readEnv(envPath) : {}
   for (const key of ['NOTION_TOKEN', 'ATELIER_CURSOR_BIN', 'ATELIER_CODEX_BIN', 'ATELIER_GH_BIN']) if (process.env[key]) env[key] = process.env[key]
@@ -47,6 +49,7 @@ function validateV2(config) {
   if(v2.maxSourceRounds!==undefined&&(!Number.isInteger(v2.maxSourceRounds)||v2.maxSourceRounds<0||v2.maxSourceRounds>5))throw new Error('v2.maxSourceRounds는 0~5 정수여야 합니다.')
   if(v2.workspaceRoot!=null){
     if(typeof v2.workspaceRoot!=='string'||!path.isAbsolute(v2.workspaceRoot))throw new Error('v2.workspaceRoot는 프로젝트 밖의 절대 경로여야 합니다.')
+    if(process.platform==='win32'&&!/^(?:[A-Za-z]:[\\/]|\\\\)/.test(v2.workspaceRoot))throw new Error('Windows 작업 폴더는 드라이브가 포함된 절대 경로여야 합니다. config.local.json의 클라우드용 workspaceRoot를 제거하거나 Windows 경로로 바꾸세요.')
     const relative=path.relative(projectRoot,path.resolve(v2.workspaceRoot))
     if(!relative||(!relative.startsWith('..')&&!path.isAbsolute(relative)))throw new Error('v2.workspaceRoot는 프로젝트 폴더 밖에 있어야 합니다.')
   }
@@ -66,13 +69,13 @@ export function inside(root, relative) {
   return resolved
 }
 
-export function taskFiles(value) {
+export function taskFiles(value, { allowMigrationDrafts = false } = {}) {
   const files = value.split(/[\n,]/).map(s => s.trim().replaceAll('\\', '/')).filter(Boolean)
   if (!files.length || files.length > 30) throw new Error('AI 허용 파일에 정확한 파일 경로 1~30개를 입력하세요.')
   for (const file of files) {
     inside(projectRoot, file)
     if (/^(?:[A-Za-z]:|\/)|(?:^|\/)(?:\.git|\.cursor|node_modules|\.env[^/]*|\.runtime|\.state)(?:\/|$)|(?:auth|credentials|service-account)\.json$/i.test(file)) throw new Error('인증·환경·Git 내부 파일은 자동화 대상으로 사용할 수 없습니다.')
-    if (/^(?:supabase\/|docs\/backups\/)/i.test(file)) throw new Error('DB·백업 작업은 별도 승인과 백업 확인이 필요합니다.')
+    if (/^(?:supabase\/|docs\/backups\/)/i.test(file)&&!(allowMigrationDrafts&&isMigrationDraft(file))) throw new Error('DB·백업 작업은 별도 승인과 백업 확인이 필요합니다.')
   }
   return [...new Set(files)]
 }

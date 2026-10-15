@@ -38,7 +38,11 @@ export async function doctor(config=settings()) {
     const git=new TaskGit({config})
     try{await git.verifyOrigin()}catch(error){problems.push(error.message)}
     try{git.workspaceRoot()}catch(error){problems.push(error.message)}
-    try{await git.gh(['auth','status','--hostname=github.com'],{timeoutMs:15000})}catch{problems.push('GitHub CLI 로그인 필요: gh auth login (작업 브랜치 PR 생성·상태 확인에 사용)')}
+    try{await git.gh(['auth','status','--hostname=github.com'],{timeoutMs:15000})}catch(error){
+      problems.push(['ENOENT','EACCES','EPERM','ENOEXEC'].includes(error.code)
+        ? `GitHub CLI를 실행할 수 없습니다 (${error.code}). gh 설치 및 ATELIER_GH_BIN 경로를 확인하세요.`
+        : 'GitHub CLI 인증 확인 실패: npm run ai:connect (같은 PC·실행기 계정으로 로그인)')
+    }
   }
   return {ready:problems.length===0,problems,mcp,cursorAuthenticated,codexBilling,plugins,...(config.v2?.enabled?{v2Setup:setupSchema(config)}:{})}
 }
