@@ -1,10 +1,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { taskFiles, redact, projectRoot,toolDir } from './settings.mjs'
+import { taskFiles, redact, projectRoot,toolDir,stateDir } from './settings.mjs'
 import { snapshot, readFile, mapContext, evidence, changedPaths, digest } from './workspace.mjs'
 import { runCursor, NeedsInput } from './acp.mjs'
 import { runReview, validateReview } from './reviewer.mjs'
-import { runCommand } from './process.mjs'
+import { runCommand, childEnv } from './process.mjs'
 import { prepareMemo, validatePlan } from './planner.mjs'
 import { needsInputFeedback } from './feedback.mjs'
 
@@ -22,6 +22,7 @@ export function browserScenariosFor({files=[],request='',criteria=''}={}) {
   if(files.includes('src/components/layout/workspace-tabs.tsx')&&/기획/.test(text)&&/디자인/.test(text)&&/(?:제거|삭제)/.test(text))scenarios.push('navigation')
   if(files.includes('src/features/work-requests/WorkRequestPage.tsx')&&/파일 선택/.test(text)&&/(?:본문|요청 내용)/.test(text))scenarios.push('attachments')
   if(files.includes('src/features/operations-support/DocumentOutputPanel.tsx'))scenarios.push('documents')
+  if(files.includes('src/features/settings/MembersPage.tsx')&&/(?:부서.*추가|추가.*부서)/.test(text))scenarios.push('members-department')
   if(files.includes('src/features/settings/ProfileSettingsPage.tsx'))scenarios.push('profile')
   if(files.includes('src/features/operations-support/attendance-start-settings.ts')&&/5분/.test(text))scenarios.push('attendance-policy')
   if(files.includes('src/features/data/DataSheetPage.tsx')&&files.includes('src/components/layout/company-workspace-nav.ts'))scenarios.push('data-menu')
@@ -45,15 +46,18 @@ export async function navigationCheckProvenance(root, args, signal, run=runComma
 }
 export async function verification(config, root, signal) {
   const scripts=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8')).scripts
+  const cache=path.join(stateDir,'npm-cache')
+  fs.mkdirSync(cache,{recursive:true})
+  const env=childEnv({npm_config_cache:cache,npm_config_update_notifier:'false'})
   const checks=[],scenarios=browserScenariosFor(config.reviewPlan)
   for(const scenario of scenarios){
     const name=`verify:browser-${scenario}`
-    try{const result=await runCommand(process.execPath,[path.join(toolDir,'browser-check.mjs'),scenario,root],{cwd:root,signal,timeoutMs:120000});checks.push({name,passed:true,output:result.output+'\n'+result.stderr})}
+    try{const result=await runCommand(process.execPath,[path.join(toolDir,'browser-check.mjs'),scenario,root],{cwd:root,signal,env,timeoutMs:120000});checks.push({name,passed:true,output:result.output+'\n'+result.stderr})}
     catch(error){if(signal?.aborted)throw error;checks.push({name,passed:false,output:checkFailureOutput(error,config.env)})}
   }
   if(scenarios.includes('attendance-policy')){
     const name='verify:attendance-start-policy'
-    try{const result=await runCommand(process.execPath,['--experimental-strip-types',path.join(toolDir,'attendance-policy-check.mjs'),root],{cwd:root,signal,timeoutMs:30000});checks.push({name,passed:true,output:result.output+'\n'+result.stderr})}
+    try{const result=await runCommand(process.execPath,['--experimental-strip-types',path.join(toolDir,'attendance-policy-check.mjs'),root],{cwd:root,signal,env,timeoutMs:30000});checks.push({name,passed:true,output:result.output+'\n'+result.stderr})}
     catch(error){if(signal?.aborted)throw error;checks.push({name,passed:false,output:checkFailureOutput(error,config.env)})}
   }
   for(const name of ['structure:map', ...config.verificationScripts]) {
@@ -62,7 +66,7 @@ export async function verification(config, root, signal) {
       const browserIdentity=name==='verify:work-request-navigation'&&checks.some(check=>check.name==='verify:browser-navigation'&&check.passed)
       const args=browserIdentity?['--experimental-strip-types',path.join(projectRoot,'scripts/verify-work-request-navigation.mjs'),root,path.join(root,'dev-tools/ai-workflow/.state/browser/navigation.json')]:[npmCli(),'run',name]
       const provenance=browserIdentity?await navigationCheckProvenance(root,args,signal):undefined
-      const result=await runCommand(process.execPath,args,{cwd:root,signal,timeoutMs:300000})
+      const result=await runCommand(process.execPath,args,{cwd:root,signal,env,timeoutMs:300000})
       checks.push({name,passed:true,output:(result.output+'\n'+result.stderr).slice(-18000),...(provenance?{provenance}:{})})
     } catch(error) {
       if(signal?.aborted)throw error

@@ -11,6 +11,13 @@ import { EnvironmentError, ModelUnavailable, modelProblem } from './errors.mjs'
 
 export class NeedsInput extends Error {}
 
+// The CLI sometimes emits a terminal transport error as an end_turn message.
+// That is not a completed implementation and must not reach a paid code review.
+export function cursorTransportProblem(report) {
+  const last=String(report??'').trim().split(/\r?\n/).at(-1)??''
+  return /^Error:\s*(?:RetriableError:|TransportError:|StreamDisconnectedError:|.*\b(?:ECONNRESET|ETIMEDOUT|Premature close|socket hang up)\b)/i.test(last)
+}
+
 const sameModel = (id, model) => id === model || String(id).startsWith(`${model}[`)
 
 export function readonlyMcpTool(title) {
@@ -206,6 +213,7 @@ export async function runCursor({ config, root, files, prompt, signal, onEvent =
     const result = await send('session/prompt', { sessionId, prompt: [{ type: 'text', text: prompt }] })
     if (inputNeeded) throw new NeedsInput(inputNeeded)
     if (result.stopReason !== 'end_turn') throw new NeedsInput(`Cursor가 완료하지 못했습니다: ${result.stopReason}`)
+    if(cursorTransportProblem(text))throw new EnvironmentError('Cursor 연결 응답이 중간에 끊겼습니다. 구현 완료로 보지 않고 편집을 보존해 재시도합니다.',{retry:true,code:'cursor_transport'})
     return { sessionId, report: redact(text, config.env), model: modelInfo }
   } catch (error) {
     if (model && !signal?.aborted && !(error instanceof ModelUnavailable) && modelProblem(`${error.message}\n${stderrTail}`))

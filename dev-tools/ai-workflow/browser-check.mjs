@@ -8,7 +8,7 @@ import { runScenario } from './browser-scenarios.mjs'
 
 export async function openFixture(root = process.cwd(),{scenario}={}) {
   const fixture = path.join(path.dirname(fileURLToPath(import.meta.url)),'browser-fixture')
-  const entry=['navigation','brand-access','data-menu','brand-info','seasons-removal'].includes(scenario)?'navigation-entry.tsx':['documents','attendance-policy','profile'].includes(scenario)?'operations-entry.tsx':'entry.tsx'
+  const entry=scenario==='members-department'?'members-entry.tsx':['navigation','brand-access','data-menu','brand-info','seasons-removal'].includes(scenario)?'navigation-entry.tsx':['documents','attendance-policy','profile'].includes(scenario)?'operations-entry.tsx':'entry.tsx'
   const server = await createServer({ root, configFile:false, envFile:false, logLevel:'error',
     plugins:[{name:'fixture-html',enforce:'pre',resolveId(source,importer){
       if(importer&&source.startsWith('.'))for(const name of ['auth','client']){
@@ -21,7 +21,7 @@ export async function openFixture(root = process.cwd(),{scenario}={}) {
       }next()
     })}},react(),tailwindcss()],
     resolve:{alias:[{find:'@/lib/supabase/auth',replacement:path.join(fixture,'auth.ts')},{find:'@/lib/supabase/client',replacement:path.join(fixture,'client.ts')},{find:'@',replacement:path.join(root,'src')}]},
-    server:{host:'127.0.0.1',port:0,fs:{allow:[root,path.resolve(fixture,'..','..','..')]}},
+    server:{host:'127.0.0.1',port:0,hmr:false,watch:{ignored:['**/dev-tools/ai-workflow/.state/**']},fs:{allow:[root,path.resolve(fixture,'..','..','..')]}},
   })
   await server.listen()
   let browser

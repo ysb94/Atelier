@@ -135,7 +135,11 @@ export class Orchestrator {
             {await this.board.patch(page.id,{[this.config.properties.location]:{select:{name:this.config.positions.preparing}}});returned++}
           continue
         }
-        if(this.active.size>=this.residentLimit()||(this.pipeline&&this.pipeline.queued('implementation')>=this.pipeline.readyLimit))continue
+        if(this.active.size>=this.residentLimit())continue
+        // A full conflict queue must not strand a free Cursor when a later
+        // prepared task can run immediately without touching reserved files.
+        if(this.pipeline&&this.pipeline.queued('implementation')>=this.pipeline.readyLimit
+          &&!this.pipeline.eligible({stage:'implementation',key:page.id,files:new Set(job.cycle.plan.files??[])}))continue
         await this.consider(page,this.config.positions.queued,controls.values)
       }
     })().finally(()=>{this.cursorScan=null})
@@ -292,7 +296,10 @@ export class Orchestrator {
       .catch(error => console.warn('[ai-workflow] 실패 기록 오류', redact(error.message, this.config.env)))
       .finally(() => {
         this.active.delete(job.key); this.status()
-        if(!(this.config.v2?.cursorPull?.enabled&&readyForCursor(job,job.task)))this.pipeline?.finish(job.key)
+        // No live worker owns this permit after handoff. Keep branch edits and
+        // their hashes, but release transient reservations to avoid mutual
+        // waits between prepared follow-up jobs. Admission rechecks the hashes.
+        this.pipeline?.finish(job.key)
         if (!this.stopping) Promise.resolve(this.tick()).catch(error => console.warn('[ai-workflow] 다음 작업 확인 실패', redact(error.message, this.config.env)))
       })
   }
@@ -638,6 +645,11 @@ export class Orchestrator {
       result = await this.cursor({ config: this.config, root: ws, files: plan.files, prompt, signal, model: c.settings.cursorModel, expectedHashes,
         onEvent: event => fs.appendFileSync(path.join(runDir, `cursor-${tag}.jsonl`), redact(JSON.stringify(event), this.config.env) + '\n') })
     } catch (error) {
+      if(error instanceof EnvironmentError&&error.code==='cursor_transport'){
+        // Transport retries are not code-repair rounds; normal failure backoff
+        // still caps retries and prevents repeated immediate model calls.
+        c.attempt=Math.max(0,c.attempt-1);this.store.save();throw error
+      }
       if (error instanceof EnvironmentError && error.code === 'plan_stale') {
         c.sourceReplans = (c.sourceReplans ?? 0) + 1
         if (c.sourceReplans > 2) throw error

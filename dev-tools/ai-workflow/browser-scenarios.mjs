@@ -4,6 +4,7 @@ import path from 'node:path'
 import { createHash } from 'node:crypto'
 import {documentsScenario,profileScenario,attendancePolicyScenario} from './browser-operations-scenarios.mjs'
 import {dataMenuScenario,brandInfoScenario,seasonsRemovalScenario} from './browser-navigation-scenarios.mjs'
+import {membersDepartmentScenario} from './browser-members-scenario.mjs'
 
 async function openForm(page,origin,owner='design') {
   await page.goto(`${origin}/work-requests/${owner}?mode=new`)
@@ -250,16 +251,17 @@ async function attachmentScenario({page,origin}) {
   return {checked:['File picker appends mixed files into body in order','No separate picker attachment list','Individual file removal','Register and reopen edit','Additional files saved in detail','Image resize, paste and drop'],resized}
 }
 export async function runScenario(name,fixture) {
-  const scenarios={images:imageScenario,deadline:deadlineScenario,attendance:attendanceScenario,navigation:navigationScenario,'brand-access':brandAccessScenario,attachments:attachmentScenario,documents:documentsScenario,profile:profileScenario,'attendance-policy':attendancePolicyScenario,'data-menu':dataMenuScenario,'brand-info':brandInfoScenario,'seasons-removal':seasonsRemovalScenario}
+  const scenarios={images:imageScenario,deadline:deadlineScenario,attendance:attendanceScenario,navigation:navigationScenario,'brand-access':brandAccessScenario,attachments:attachmentScenario,documents:documentsScenario,profile:profileScenario,'attendance-policy':attendancePolicyScenario,'data-menu':dataMenuScenario,'brand-info':brandInfoScenario,'seasons-removal':seasonsRemovalScenario,'members-department':membersDepartmentScenario}
   if(!scenarios[name])throw new Error(`Unknown browser scenario: ${name}`)
   const startedAt=new Date().toISOString(),results=await scenarios[name](fixture)
   assert.deepEqual(fixture.errors,[],'Browser runtime errors')
   const dir=path.resolve('dev-tools/ai-workflow/.state/browser');fs.mkdirSync(dir,{recursive:true})
   const screenshot=path.join(dir,`${name}.png`)
   await fixture.page.screenshot({path:screenshot,fullPage:true})
+  const sourceFiles=name==='members-department'?['src/features/settings/MembersPage.tsx','src/lib/supabase/profiles.ts','src/lib/company/capabilities.ts']:['src/components/layout/workspace-tabs.tsx']
   const report={scenario:name,startedAt,finishedAt:new Date().toISOString(),passed:true,
     method:'Real app components in Chromium; synthetic profile and offline data; no actual login, production DB access or deployment.',
-    results,sourceRoot:fixture.root,sourceHashes:fixture.root?{'src/components/layout/workspace-tabs.tsx':createHash('sha256').update(fs.readFileSync(path.join(fixture.root,'src/components/layout/workspace-tabs.tsx'))).digest('hex')}:undefined,screenshot,screenshotSha256:createHash('sha256').update(fs.readFileSync(screenshot)).digest('hex')}
+    results,sourceRoot:fixture.root,sourceHashes:fixture.root?Object.fromEntries(sourceFiles.map(file=>[file,createHash('sha256').update(fs.readFileSync(path.join(fixture.root,file))).digest('hex')])):undefined,screenshot,screenshotSha256:createHash('sha256').update(fs.readFileSync(screenshot)).digest('hex')}
   fs.writeFileSync(path.join(dir,`${name}.json`),JSON.stringify(report,null,2))
   console.log(JSON.stringify(report))
 }

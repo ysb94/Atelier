@@ -14,6 +14,7 @@ import { reviewIntegration } from './integration-review.mjs'
 import { CONTROL_PROPERTIES, REFLECTION } from './control.mjs'
 import { Pipeline } from './pipeline.mjs'
 import {validateGptPlan} from './gpt-planner.mjs'
+import {cursorTransportProblem} from './acp.mjs'
 
 const config = {
   positions: {memo:'메모', answered:'답변 완료', queued:'자동화 할 일', working:'자동화 작업 중', reviewing:'검토 중', needsInput:'확인 필요', done:'완료'},
@@ -131,6 +132,45 @@ test('Cursor polls ready cards while the GPT scan is busy and returns unprepared
   assert.deepEqual(taken,['ready'])
   assert.equal(writes[0].id,'raw');assert.equal(writes[0].p.location.select.name,'GPT 준비')
   assert.equal(o.scanning,true)
+})
+
+test('a full conflict queue still admits independent ready work to an idle Cursor',async t=>{
+  const o=setup(),abort=new AbortController(),taken=[]
+  o.config={...config,positions:{...config.positions,preparing:'GPT 준비'},v2:{...config.v2,cursorPull:{enabled:true,pollMs:5000}}}
+  o.pipeline=new Pipeline({implementation:2,planning:2,review:2,gptWorkers:2,readyLimit:4})
+  const release=await o.pipeline.acquire('implementation',{key:'busy',files:['shared.ts'],signal:abort.signal})
+  o.active.set('busy',{})
+  for(let i=0;i<4;i++)void o.pipeline.acquire('implementation',{key:'waiting'+i,files:['shared.ts'],signal:abort.signal}).catch(()=>{})
+  t.after(()=>{abort.abort();release();o.pipeline.finish('busy')})
+  assert.equal(o.pipeline.queued('implementation'),4)
+  const values={gptModel:'gpt-6-sol',gptEffort:'medium',cursorModel:'composer-2.5',enabled:true,baseBranch:'saved',integrationBranch:'integration/test'}
+  o.notion.api=async()=>({properties:Object.fromEntries(Object.entries(CONTROL_PROPERTIES).map(([key,spec])=>[spec.name,{type:spec.type,...(spec.type==='select'?{select:{name:values[key]}}:spec.type==='checkbox'?{checkbox:values[key]}:{rich_text:[{text:{content:values[key]??''}}]})}]))})
+  const tasks=['blocked','independent'].map(id=>({id,version:'v1',location:config.positions.queued,state:'대기'}))
+  for(const task of tasks)o.journal().jobs[task.id]={task,phase:'active',cycle:{phase:'planned',sourceVersion:'v1',plan:{decision:'execute',files:[task.id==='blocked'?'shared.ts':'other.ts']},writeBase:{digest:'code'}}}
+  const pages=tasks.map(task=>({id:task.id,properties:{state:{select:{name:'대기'}}}}))
+  o.board.list=async()=>pages;o.board.read=async id=>({unstable:false,task:tasks.find(task=>task.id===id)})
+  o.consider=async page=>taken.push(page.id)
+  await o.dispatchCursor()
+  assert.deepEqual(taken,['independent'])
+})
+
+test('handoff releases transient reservations while preserving prepared edits and hashes',async()=>{
+  const o=setup();o.config={...config,v2:{...config.v2,cursorPull:{enabled:true,pollMs:5000}}}
+  o.pipeline=new Pipeline();o.stopping=true;o.status=()=>{};o.run=async()=>{}
+  const task={id:'p',version:'v1'},writeBase={digest:'preserved-edits',files:{'shared.ts':'hash'}}
+  const job={key:'p',task,phase:'active',cycle:{phase:'implementing',sourceVersion:'v1',implementationStarted:false,plan:{decision:'execute',files:['shared.ts']},writeBase}}
+  o.pipeline.reserve(job.key,['shared.ts']);o.launch(job)
+  await o.active.get(job.key).promise
+  assert.equal(o.pipeline.reservations.has(job.key),false)
+  assert.equal(job.cycle.writeBase,writeBase)
+  assert.equal(readyForCursor(job,task),true)
+})
+
+test('terminal Cursor transport errors cannot masquerade as completed reports',()=>{
+  assert.equal(cursorTransportProblem('확인 중입니다.\n\nError: RetriableError: [unknown] Premature close'),true)
+  assert.equal(cursorTransportProblem('Error: ECONNRESET'),true)
+  assert.equal(cursorTransportProblem('연결 오류 처리를 구현했습니다.'),false)
+  assert.equal(cursorTransportProblem('Error: RetriableError: Premature close\n위 오류를 재현하고 처리했습니다.'),false)
 })
 
 test('a completed GPT plan is handed off to the visible queue before any Cursor invocation',async()=>{
