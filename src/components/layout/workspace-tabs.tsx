@@ -47,8 +47,6 @@ const NAV_LABELS: {
   { match: /^\/work-requests\/md(?:\/|$)/, label: 'MD · 작업 요청' },
   { match: /^\/work-requests\/logistics(?:\/|$)/, label: '물류 · 작업 요청' },
   { match: /^\/work(?:\/|$)/, label: '내 업무' },
-  { match: /^\/product-work\/planning(?:\/|$)/, label: '기획 · 상품 정보' },
-  { match: /^\/product-work\/design(?:\/|$)/, label: '디자인 · 상품 정보' },
   { match: /^\/design\/styled-cuts(?:\/|$)/, label: '디자인 · 연출 컷 제작' },
   { match: /^\/design\/file-manager(?:\/|$)/, label: '디자인 · 이미지 업로드' },
   { match: /^\/product-work\/md(?:\/|$)/, label: 'MD · 상품 정보' },
@@ -135,14 +133,36 @@ function labelFromPath(path: string): string {
   return '화면'
 }
 
+/** 기획·디자인 상품 정보로 이어지던 회사 경로. 연출 컷·이미지 업로드는 제외한다. */
+function isRemovedPlanningDesignProductPath(pathname: string) {
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+  if (path === '/planning' || path === '/design') return true
+  return (
+    path === '/product-work/planning' ||
+    path.startsWith('/product-work/planning/') ||
+    path === '/product-work/design' ||
+    path.startsWith('/product-work/design/')
+  )
+}
+
+function omitRemovedPlanningDesignProductTabs(tabs: WorkspaceTab[]) {
+  if (!tabs.some((tab) => isRemovedPlanningDesignProductPath(tab.pathname))) {
+    return tabs
+  }
+  return tabs.filter((tab) => !isRemovedPlanningDesignProductPath(tab.pathname))
+}
+
 export function resolveWorkspaceTab(
   location: Pick<Location, 'pathname' | 'search'>,
 ): WorkspaceTab | null {
   if (location.pathname.startsWith('/b/')) return null
+  const pathname = isRemovedPlanningDesignProductPath(location.pathname)
+    ? '/products'
+    : location.pathname
   return {
-    id: tabIdFromPath(location.pathname),
-    label: labelFromPath(location.pathname),
-    pathname: location.pathname,
+    id: tabIdFromPath(pathname),
+    label: labelFromPath(pathname),
+    pathname,
     search: location.search,
   }
 }
@@ -179,34 +199,43 @@ export function useWorkspaceTabs() {
   )
 
   useLayoutEffect(() => {
+    if (isRemovedPlanningDesignProductPath(pathname)) {
+      navigate({ pathname: '/products', search }, { replace: true })
+    }
     if (!active) return
     if (closingTabRef.current === active.id) return
     closingTabRef.current = null
     setTabs((prev) => {
-      const index = prev.findIndex((tab) => tab.id === active.id)
-      if (index === -1) return [...prev, active]
-      const current = prev[index]
+      const currentTabs = omitRemovedPlanningDesignProductTabs(prev)
+      const index = currentTabs.findIndex((tab) => tab.id === active.id)
+      if (index === -1) return [...currentTabs, active]
+      const current = currentTabs[index]
       if (
         current.pathname === active.pathname &&
         current.search === active.search &&
         current.label === active.label
       ) {
-        return prev
+        return currentTabs
       }
-      const next = [...prev]
+      const next = [...currentTabs]
       next[index] = active
       return next
     })
-  }, [active])
+  }, [active, navigate, pathname, search])
 
   const activeId = active?.id ?? 'home'
   const closingActive = active?.id === closingTabRef.current
   const displayTabs = useMemo(() => {
-    if (active && !closingActive && !tabs.some((tab) => tab.id === active.id)) {
-      return [...tabs, active]
+    const visibleTabs = omitRemovedPlanningDesignProductTabs(tabs)
+    if (
+      active &&
+      !closingActive &&
+      !visibleTabs.some((tab) => tab.id === active.id)
+    ) {
+      return [...visibleTabs, active]
     }
     let changed = false
-    const next = tabs.map((tab) => {
+    const next = visibleTabs.map((tab) => {
       if (!active || tab.id !== active.id) return tab
       if (
         tab.pathname === active.pathname &&
@@ -223,7 +252,8 @@ export function useWorkspaceTabs() {
         label: active.label,
       }
     })
-    return changed ? next : tabs
+    if (!changed) return visibleTabs
+    return next
   }, [active, closingActive, tabs])
 
   const openTab = useCallback(
