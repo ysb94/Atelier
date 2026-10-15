@@ -84,6 +84,7 @@ export class Orchestrator {
     this.git = git ?? new TaskGit({ config, root })
     this.active = new Map(); this.scanning = false; this.stopping = false; this.scan = null
     this.controls = null; this.admission = null; this.lastRunStatus = null
+    this.notion.onAuthFailure = error => this.blockNotion(error)
     this.pipeline = config.v2?.pipeline?.enabled ? new Pipeline({ ...config.v2.pipeline, onChange: () => this.status() }) : null
     this.bindBoard()
   }
@@ -171,6 +172,7 @@ export class Orchestrator {
     await this.reportRunStatus()
   }
   admissionProblem(controls) {
+    if (this.notionFailure) return { paused: false, code: 'notion_auth', reason: this.notionFailure.message }
     if (!controls?.ok) return { paused: false, reason: controls?.problems?.join(' / ') ?? '설정 확인 중' }
     const journal = this.journal()
     if (journal.block) {
@@ -179,6 +181,17 @@ export class Orchestrator {
     }
     if (!controls.values.enabled) return { paused: true, reason: '자동화 실행이 꺼져 있어 새 작업을 받지 않습니다. 진행 중인 작업은 끝까지 진행합니다.' }
     return null
+  }
+  blockNotion(error) {
+    // Any failed authorization means we cannot reliably observe user stops.
+    // Latch until operator recovery/restart, even if a different page still reads.
+    this.notionFailure ??= error
+    this.admission = this.admissionProblem(this.controls)
+    for (const entry of this.active.values()) {
+      entry.operatorError ??= this.notionFailure
+      entry.controller.abort()
+    }
+    this.status()
   }
   // Recover reviews first. Plan one memo, answer or stale queued card at a time.
   async admit(values) {
@@ -1024,7 +1037,7 @@ export class Orchestrator {
     } catch (error) { console.warn('[ai-workflow] 통합 브랜치 확인 실패', redact(error.message, this.config.env)) }
   }
   status() {
-    const tasks = [...this.active.values()].map(entry => ({ task: entry.job.task.title, state: entry.status.state, phase: entry.job.cycle?.phase, waitingStage: entry.waitingStage ?? null,gptSlot:entry.gptSlot??null,gptStage:entry.gptStage??null, attempt: entry.job.cycle?.attempt ?? 0, branch: entry.job.branch }))
+    const tasks = [...this.active.values()].map(entry => ({ task: entry.job.task.title, state: entry.status.state, phase: entry.job.cycle?.phase, ...(this.pipeline?{runningStage:this.pipeline.running.get(entry.job.key)?.stage??null}:{}), waitingStage: entry.waitingStage ?? null,gptSlot:entry.gptSlot??null,gptStage:entry.gptStage??null, attempt: entry.job.cycle?.attempt ?? 0, branch: entry.job.branch }))
     const values = this.controls?.values
     this.onStatus({ state: tasks.length > 1 ? '병렬 작업 중' : tasks[0]?.state ?? (this.admission ? (this.admission.paused ? '일시 중지' : '중지') : '대기'),
       workflow: 'v2', activeCount: tasks.length, limit: this.limit(), residentLimit: this.residentLimit(), ...(this.pipeline ? { pipeline: this.pipeline.status() } : {}), tasks,

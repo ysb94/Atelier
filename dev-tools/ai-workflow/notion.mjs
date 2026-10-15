@@ -83,7 +83,11 @@ export class Notion {
         await this.apiDelay(1000*2**attempt);continue
       }
       if(response.ok)return data
-      if([401,403].includes(response.status))throw new EnvironmentError(`Notion ${response.status}: 인증·접근 권한을 확인할 수 없어 모델 작업을 중단합니다. 실행기 연결을 복구한 뒤 기존 기록으로 재개합니다.`,{retry:false,code:'notion_auth'})
+      if([401,403].includes(response.status)) {
+        const error=new EnvironmentError(`Notion ${response.status}: 인증·접근 권한을 확인할 수 없어 모델 작업을 중단합니다. 실행기 연결을 복구한 뒤 기존 기록으로 재개합니다.`,{retry:false,code:'notion_auth'})
+        this.onAuthFailure?.(error)
+        throw error
+      }
       const retry=response.status===429||safeRetry&&[502,503,504].includes(response.status)
       if(retry&&attempt<2){
         const after=Number(response.headers?.get?.('Retry-After'))

@@ -181,6 +181,38 @@ test('Notion authentication failures are operator errors and do not reach paid w
   await assert.rejects(o.progress({job:{key:'p'},controller:new AbortController()},{state:'작업 중'}),error=>error.code==='notion_auth')
 })
 
+test('one Notion authorization failure stops every worker and blocks new admission until recovery',async()=>{
+  let failing=true
+  const notion=new Notion({env:{NOTION_TOKEN:'fixture'}},async()=>({ok:!failing,status:failing?401:200,json:async()=>({})}))
+  const o=new Orchestrator({config,notion,store:memory(),git:{}})
+  o.status=()=>{}
+  const entries=[{controller:new AbortController()},{controller:new AbortController()}]
+  entries.forEach((entry,i)=>o.active.set(String(i),entry))
+  await assert.rejects(notion.api('pages/p'),error=>error.code==='notion_auth')
+  assert.ok(entries.every(entry=>entry.controller.signal.aborted&&entry.operatorError.code==='notion_auth'))
+  assert.equal(o.admission.code,'notion_auth')
+  failing=false;await notion.api('pages/settings')
+  assert.equal(o.admissionProblem({ok:true,values:{enabled:true}}).code,'notion_auth')
+  const fresh=new Orchestrator({config,notion:new Notion({env:{}}),store:memory(),git:{}})
+  assert.equal(fresh.admissionProblem({ok:true,values:{enabled:true}}),null)
+})
+
+test('unrelated Notion errors do not trigger an authentication circuit break',async()=>{
+  const notion=new Notion({env:{}},async()=>({ok:false,status:400,json:async()=>({code:'validation_error'})}))
+  const o=new Orchestrator({config,notion,store:memory(),git:{}})
+  await assert.rejects(notion.api('pages/p'),/Notion 400/)
+  assert.equal(o.notionFailure,undefined)
+})
+
+test('health identifies live pipeline ownership independently from the durable phase',()=>{
+  const o=setup();o.pipeline=new Pipeline();let health;o.onStatus=h=>{health=h}
+  const job={key:'p',task:{title:'one'},branch:'branch',cycle:{phase:'implementing'}}
+  o.active.set('p',{job,status:{state:'준비'}});o.status()
+  assert.equal(health.tasks[0].runningStage,null)
+  o.pipeline.running.set('p',{stage:'review'});o.status()
+  assert.equal(health.tasks[0].runningStage,'review')
+})
+
 test('legacy TypeScript checks use the pinned local tool with unchanged task arguments',()=>{
   const direct=localTypeScriptArgs('tsx src/features/work-requests/work-request-roles.verify.ts')
   const legacy=localTypeScriptArgs('npx tsx src/features/work-requests/work-request-roles.verify.ts')

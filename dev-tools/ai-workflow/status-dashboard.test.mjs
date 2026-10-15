@@ -69,3 +69,19 @@ test('queued work and GPT review never appear as active Cursor workers',()=>{
   assert.match(view.rows.cursor1,/대기.*맡은 업무 없음/)
   assert.match(view.rows.cursor2,/대기.*맡은 업무 없음/)
 })
+
+test('released or not yet acquired permits never inflate model counts or occupy Cursor slots',()=>{
+  const h={...health,tasks:[
+    {phase:'implementing',branch:'stale',runningStage:null},
+    {phase:'implementing',branch:'b',runningStage:'implementation'},
+    {phase:'checking',branch:'c',runningStage:'implementation'}
+  ],pipeline:{...health.pipeline,implementation:{running:2,waiting:0}}}
+  const pinned={...jobs,stale:{branch:'stale',cycle:{settings:{cursorModel:'stale-model'}}},c:{branch:'c',cycle:{settings:{cursorModel:'grok-4.7-xhigh-fast'}}}}
+  const view=dashboardSnapshot({health:h,controls,jobs:pinned,previousCursorSlots:['stale','b']})
+  assert.deepEqual(view.cursorSlots,['c','b'])
+  assert.match(view.rows.implementation,/grok-4.7-xhigh-fast ×2/)
+  assert.doesNotMatch(view.rows.implementation,/stale-model|×3/)
+  const idle=dashboardSnapshot({health:{...h,pipeline:{...h.pipeline,implementation:{running:0,waiting:0}},tasks:[h.tasks[0]]},controls,jobs:pinned})
+  assert.doesNotMatch(idle.rows.implementation,/stale-model/)
+  assert.match(idle.rows.cursor1,/맡은 업무 없음/)
+})
