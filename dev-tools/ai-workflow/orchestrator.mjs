@@ -651,16 +651,19 @@ export class Orchestrator {
       if(this.config.v2?.cursorPull?.enabled)await this.progress(entry,{state:'구조 확인',location:at.preparing})
       return
     }
-    c.attempt++; this.store.save()
-    c.implementationStarted = true; this.store.save()
+    const nextAttempt=c.attempt+1
     if (plan.executionKind !== 'implementation') {
+      c.attempt=nextAttempt
       c.cursor = { report: '검증 전용 회차입니다. 구현 담당을 호출하지 않았고 파일을 편집하지 않았습니다.', model: null }
       c.sourceReplans = 0
       c.phase = 'checking'; this.store.save(); return
     }
-    const runDir = this.runDir(job), tag = `${c.id.slice(0, 8)}-${c.attempt}`
-    await this.progress(entry, { state: c.attempt === 1 ? '작업 중' : '수정 중', location: at.working, attempt: c.attempt, clearQuestion: c.attempt === 1 })
-    this.setStatus(entry, c.attempt === 1 ? '작업 중' : '수정 중')
+    // A failed Notion progress write has not started Cursor. Preserve the
+    // unstarted phase/counter so recovery cannot mistake it for implementation.
+    await this.progress(entry, { state: nextAttempt === 1 ? '작업 중' : '수정 중', location: at.working, attempt: nextAttempt, clearQuestion: nextAttempt === 1 })
+    this.alive(entry)
+    const runDir = this.runDir(job), tag = `${c.id.slice(0, 8)}-${nextAttempt}`
+    this.setStatus(entry, nextAttempt === 1 ? '작업 중' : '수정 중')
     const prompt = cursorPrompt({ job, plan, context: mapContext(plan.files, ws), nextPrompt: c.nextPrompt })
     fs.writeFileSync(path.join(runDir, `cursor-${tag}.prompt.txt`), prompt)
     job.workspace.edits = true; this.store.save()
@@ -668,6 +671,10 @@ export class Orchestrator {
     try {
       const writeBase = c.writeBase ?? c.planSource
       const expectedHashes = Object.fromEntries(plan.files.map(file => [file, writeBase.files[file] ?? null]))
+      this.alive(entry)
+      c.attempt=nextAttempt
+      c.implementationStarted=true
+      this.store.save()
       result = await this.cursor({ config: this.config, root: ws, files: plan.files, prompt, signal, model: c.settings.cursorModel, expectedHashes,
         onEvent: event => fs.appendFileSync(path.join(runDir, `cursor-${tag}.jsonl`), redact(JSON.stringify(event), this.config.env) + '\n') })
     } catch (error) {

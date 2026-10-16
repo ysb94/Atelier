@@ -10,6 +10,9 @@ import { isManagerArtifact } from './workspace.mjs'
 import { EnvironmentError } from './errors.mjs'
 
 const ROLE_LABEL = { base: '기준 브랜치', integration: '통합 브랜치', task: '작업 브랜치' }
+// Git's existing gh credential helper needs the same GitHub-only credentials
+// as gh itself. Keep unrelated model/Notion secrets out of these processes.
+const githubAuth = () => Object.fromEntries(['GH_TOKEN','GITHUB_TOKEN','GH_HOST'].filter(key=>process.env[key]).map(key=>[key,process.env[key]]))
 
 // Mirrors `git check-ref-format --branch` plus the automation's own boundaries.
 export function validateBranchName(name, { role = 'task' } = {}) {
@@ -92,14 +95,13 @@ export class TaskGit {
     this.tail = result.catch(() => {})
     return result
   }
-  gitEnv() { return childEnv({ GIT_TERMINAL_PROMPT: '0' }) }
+  gitEnv() { return childEnv({ GIT_TERMINAL_PROMPT: '0', ...githubAuth() }) }
   git(args, { cwd = this.root, acceptedCodes, timeoutMs = 180000, signal } = {}) {
     return this.run('git', args, { cwd, acceptedCodes, timeoutMs, signal, env: this.gitEnv() })
   }
   gh(args, { timeoutMs = 120000, signal } = {}) {
-    const auth = Object.fromEntries(['GH_TOKEN', 'GITHUB_TOKEN', 'GH_HOST'].filter(key => process.env[key]).map(key => [key, process.env[key]]))
     return this.run(this.config.env?.ATELIER_GH_BIN ?? 'gh', args, { cwd: this.root, timeoutMs, signal,
-      env: childEnv({ GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0', ...auth }) })
+      env: childEnv({ GH_PROMPT_DISABLED: '1', GIT_TERMINAL_PROMPT: '0', ...githubAuth() }) })
   }
   workspaceRoot() {
     const realRoot = fs.realpathSync(this.root)

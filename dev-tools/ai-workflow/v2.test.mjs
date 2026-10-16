@@ -9,13 +9,14 @@ import { Board } from './board.mjs'
 import { Orchestrator,readyForCursor } from './orchestrator.mjs'
 import { Store } from './store.mjs'
 import { TaskGit } from './git-task.mjs'
-import { runCommand } from './process.mjs'
+import { runCommand,childEnv } from './process.mjs'
 import { reviewIntegration } from './integration-review.mjs'
 import { CONTROL_PROPERTIES, REFLECTION } from './control.mjs'
 import { Pipeline } from './pipeline.mjs'
 import {validateGptPlan} from './gpt-planner.mjs'
 import {cursorTransportProblem} from './acp.mjs'
 import {localTypeScriptArgs} from './runner.mjs'
+import {verifyGitAccess} from './doctor.mjs'
 
 const config = {
   positions: {memo:'메모', answered:'답변 완료', queued:'자동화 할 일', working:'자동화 작업 중', reviewing:'검토 중', needsInput:'확인 필요', done:'완료'},
@@ -23,6 +24,44 @@ const config = {
   v2: {mainBranch:'main', controlPageId:'settings', remoteUrl:'https://github.com/ysb94/Atelier.git'}, env:{}
 }
 const text = content => ({rich_text:[{text:{content}}]})
+
+test('Git and gh receive only their GitHub credentials, while agents retain secret filtering',async()=>{
+  const keys=['GH_TOKEN','GITHUB_TOKEN','NOTION_TOKEN','OPENAI_API_KEY'],saved=Object.fromEntries(keys.map(k=>[k,process.env[k]]))
+  try{
+    for(const k of keys)process.env[k]='fixture-'+k
+    let ghEnv;const git=new TaskGit({config,run:async(command,args,options)=>{ghEnv=options.env;return{}}}),env=git.gitEnv()
+    assert.equal(env.GH_TOKEN,'fixture-GH_TOKEN');assert.equal(env.GITHUB_TOKEN,'fixture-GITHUB_TOKEN')
+    assert.equal(env.NOTION_TOKEN,undefined);assert.equal(env.OPENAI_API_KEY,undefined)
+    assert.equal(env.GIT_TERMINAL_PROMPT,'0')
+    await git.gh(['auth','status'])
+    assert.equal(ghEnv.GH_TOKEN,env.GH_TOKEN);assert.equal(ghEnv.NOTION_TOKEN,undefined)
+    assert.equal(childEnv().GH_TOKEN,undefined)
+  }finally{for(const k of keys)if(saved[k]===undefined)delete process.env[k];else process.env[k]=saved[k]}
+})
+
+test('Git preflight reads the verified remote rather than trusting local origin and gh login',async()=>{
+  const calls=[]
+  await verifyGitAccess({verifyOrigin:async()=>calls.push('origin'),git:async(args,options)=>{calls.push({args,options})}})
+  assert.deepEqual(calls,['origin',{args:['ls-remote','--exit-code','origin','HEAD'],options:{timeoutMs:15000}}])
+  await assert.rejects(verifyGitAccess({verifyOrigin:async()=>{},git:async()=>{throw new Error('terminal prompts disabled')}}),/terminal prompts disabled/)
+})
+
+test('an origin mismatch prevents the Git authentication probe from reaching a different repository',async()=>{
+  await assert.rejects(verifyGitAccess({verifyOrigin:async()=>{throw new Error('origin mismatch')},git:async()=>assert.fail('must not probe mismatched origin')}),/origin mismatch/)
+})
+
+test('a failed Notion progress write cannot consume a Cursor attempt or turn an unstarted task into review',async()=>{
+  const o=setup(),task={id:'p',version:'v1',state:'대기',location:'자동화 할 일'}
+  const cycle={id:'c',sourceVersion:'v1',phase:'implementing',attempt:1,implementationStarted:false,plan:{executionKind:'implementation'},settings:{}}
+  const job={key:'p',task,cycle,workspace:{dir:'/unused',baseBranch:'saved',integrationBranch:'integration/test'},history:[]}
+  o.assertFresh=async()=>{};o.samePlanSource=async()=>true
+  o.progress=async()=>{throw new Error('Notion unauthorized')}
+  o.runDir=()=>assert.fail('must not prepare a Cursor run before progress succeeds')
+  o.cursor=()=>assert.fail('must not call Cursor')
+  await assert.rejects(o.implement({job,controller:new AbortController()}),/Notion unauthorized/)
+  assert.equal(cycle.attempt,1);assert.equal(cycle.implementationStarted,false)
+  assert.equal(o.prepare(job,task,task.location,{},'대기').cycle.phase,'implementing')
+})
 const memory = () => ({data:{jobs:{},outbox:[]},save(){},update(fn){fn()},flush:Store.prototype.flush,enqueue:Store.prototype.enqueue})
 function setup({git={}}={}) {
   const store=memory(), notion={}, board=new Board(config, notion)

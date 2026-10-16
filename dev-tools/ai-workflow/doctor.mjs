@@ -8,6 +8,12 @@ import { requireSubscriptionLogin } from './codex-subscription.mjs'
 import { TaskGit } from './git-task.mjs'
 import { setupSchema } from './control.mjs'
 
+export async function verifyGitAccess(git) {
+  await git.verifyOrigin()
+  // Local URL checks and gh login alone do not prove Git can authenticate.
+  await git.git(['ls-remote','--exit-code','origin','HEAD'],{timeoutMs:15000})
+}
+
 export async function doctor(config=settings()) {
   const problems=[],mcp=[]
   const configFiles=[path.join(os.homedir(),'.cursor/mcp.json'),path.join(projectRoot,'.cursor/mcp.json')]
@@ -36,7 +42,7 @@ export async function doctor(config=settings()) {
   if(config.v2?.enabled){
     if(!config.v2.controlPageId)problems.push('설정 페이지 미지정: config.json의 v2.controlPageId에 노션 설정 페이지 ID를 입력한 뒤 관리자를 다시 시작하세요.')
     const git=new TaskGit({config})
-    try{await git.verifyOrigin()}catch(error){problems.push(error.message)}
+    try{await verifyGitAccess(git)}catch(error){problems.push(`Git 원격 조회 확인 실패: ${error.message}`)}
     try{git.workspaceRoot()}catch(error){problems.push(error.message)}
     try{await git.gh(['auth','status','--hostname=github.com'],{timeoutMs:15000})}catch(error){
       problems.push(['ENOENT','EACCES','EPERM','ENOEXEC'].includes(error.code)
