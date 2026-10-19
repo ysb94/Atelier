@@ -8,6 +8,17 @@ import {runReview} from './reviewer.mjs'
 import {needsInputFeedback} from './feedback.mjs'
 import {reviewBundle} from './review-bundle.mjs'
 import {digest} from './workspace.mjs'
+import {cliCommand} from './cli-command.mjs'
+
+test('Windows official npm launcher resolves to its Node entry without a shell',{skip:process.platform!=='win32'},t=>{
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'atelier-npm-launcher-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}))
+ const script=path.join(root,'node_modules/npm/bin/npm-cli.js');fs.mkdirSync(path.dirname(script),{recursive:true});fs.writeFileSync(script,'')
+ const launcher=path.join(root,'npm.cmd')
+ fs.writeFileSync(launcher,'SET "NPM_CLI_JS=%~dp0\\node_modules\\npm\\bin\\npm-cli.js"\r\n"%NODE_EXE%" "%NPM_CLI_JS%" %*\r\n')
+ assert.deepEqual(cliCommand(launcher,['run','build']),{command:process.execPath,args:[script,'run','build']})
+ fs.writeFileSync(launcher,'echo unrecognized launcher\r\n')
+ assert.throws(()=>cliCommand(launcher,['run','build']),{code:'ENOEXEC'})
+})
 
 const config={env:{ATELIER_CODEX_BIN:'fixture-codex'},agentTimeoutMs:1000}
 const review={decision:'pass',summary:'확인됨',criteriaResults:[{criterion:'내용',passed:true,evidence:'파일 확인'}],issues:[],nextPrompt:''}

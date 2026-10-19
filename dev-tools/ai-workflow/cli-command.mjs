@@ -20,7 +20,11 @@ export function cliCommand(command, args = [], { env = process.env, cwd = proces
   if (!executable) return { command, args }
   if (!/\.(?:cmd|bat)$/i.test(executable)) return { command: executable, args }
   const source = fs.readFileSync(executable, 'utf8')
-  const entry = source.match(/"%_prog%"\s+"(?:%dp0%|%~dp0)[\\/]*([^"\r\n]+\.(?:js|cjs|mjs))"\s+%\*/i)?.[1]
+  const npmEntry = path.basename(executable).toLowerCase() === 'npm.cmd'
+    && /"%NODE_EXE%"\s+"%NPM_CLI_JS%"\s+%\*/i.test(source)
+    ? source.match(/SET\s+"NPM_CLI_JS=%~dp0[\\/]+(node_modules[\\/]npm[\\/]bin[\\/]npm-cli\.js)"/i)?.[1]
+    : undefined
+  const entry = source.match(/"%_prog%"\s+"(?:%dp0%|%~dp0)[\\/]*([^"\r\n]+\.(?:js|cjs|mjs))"\s+%\*/i)?.[1] ?? npmEntry
   const script = entry && path.resolve(path.dirname(executable), entry)
   if (!script || !fs.existsSync(script)) {
     const error = new Error('Windows CLI 실행기는 표준 npm Node 실행 파일 또는 .exe 경로여야 합니다. ATELIER_CODEX_BIN 또는 ATELIER_GH_BIN 설정을 확인하세요.')

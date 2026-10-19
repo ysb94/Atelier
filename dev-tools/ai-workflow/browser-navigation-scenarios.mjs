@@ -27,7 +27,7 @@ export async function dataMenuScenario({page,origin}) {
 export async function brandInfoScenario({page,origin}) {
   const checked=[]
   for(const [admin,lead] of [[true,false],[false,true],[false,false]]) {
-    const query='?'+new URLSearchParams({fixture:'brand-info',admin:String(admin),lead:String(lead)})
+    const query='?'+new URLSearchParams({fixture:'brand-info',admin:String(admin),lead:String(lead),position:'대표이사'})
     await page.goto(origin+'/__brand-management'+query)
     const card=page.locator('button[aria-controls="selected-brand-info"]').first();await card.click()
     const info=page.locator('#selected-brand-info');await info.waitFor()
@@ -39,6 +39,11 @@ export async function brandInfoScenario({page,origin}) {
     if(admin){await page.getByRole('button',{name:'새 브랜드',exact:true}).click();await page.getByRole('dialog').waitFor();await page.getByRole('button',{name:'취소',exact:true}).click()}
     await info.getByRole('link',{name:/상품/}).click();await page.waitForURL(/\/products\?brands=fixture/)
     checked.push({admin,lead,infoOpened:true,edit:admin||lead,delete:admin,productLink:true,formsRetained:true})
+  }
+  for(const [admin,lead] of [[true,false],[false,true],[false,false]]){
+    await page.goto(origin+'/__brand-management?'+new URLSearchParams({fixture:'brand-info',admin:String(admin),lead:String(lead),position:'사원'}))
+    await page.getByText('브랜드 관리는 대표이사와 개발자만 볼 수 있습니다.',{exact:true}).waitFor()
+    assert.equal(await page.locator('button[aria-controls="selected-brand-info"]').count(),0)
   }
   for(const route of ['/settings/brand','/b/fixture/settings/brand']){
     await page.goto(origin+route+'?fixture=brand-info');await page.waitForURL(/\/brands/)

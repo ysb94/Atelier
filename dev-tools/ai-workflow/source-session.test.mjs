@@ -7,10 +7,11 @@ import {runSourceSession} from './source-session.mjs'
 import {digest} from './workspace.mjs'
 
 test('subscription app-server forwards only scoped read tools and captures usage, without a model call',async t=>{
- const root=fs.mkdtempSync(path.join(os.tmpdir(),'atelier-session-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}))
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'atelier-session-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true,maxRetries:10,retryDelay:50}))
  fs.mkdirSync(path.join(root,'src'));const source='export const expected = 42;';fs.writeFileSync(path.join(root,'src/a.ts'),source)
- const fixture=path.join(root,'fake-server'),log=path.join(root,'requests.jsonl')
- fs.writeFileSync(fixture,`#!${process.execPath}
+ const fixture=path.join(root,process.platform==='win32'?'fake-server.cmd':'fake-server.cjs'),script=path.join(root,'fake-server.cjs'),log=path.join(root,'requests.jsonl')
+ if(process.platform==='win32')fs.writeFileSync(fixture,'@"%_prog%" "%~dp0\\fake-server.cjs" %*\r\n')
+ fs.writeFileSync(script,`#!${process.execPath}
 const fs=require('node:fs'),rl=require('node:readline').createInterface({input:process.stdin});
 const send=v=>process.stdout.write(JSON.stringify(v)+'\\n');
 rl.on('line',line=>{const q=JSON.parse(line);fs.appendFileSync(${JSON.stringify(log)},line+'\\n');

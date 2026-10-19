@@ -38,7 +38,7 @@ async function fixture(t, { dependencies = false } = {}) {
     fs.mkdirSync(path.join(installed, '.tmp'))
     fs.writeFileSync(path.join(installed, '.tmp/original'), 'original cache')
     fs.symlinkSync(installed, path.join(root, 'node_modules'), 'dir')
-    write('package.json', JSON.stringify({ scripts: { build: 'build-tool' } }))
+    write('package.json', JSON.stringify({ scripts: { build: 'node node_modules/build-tool/bin/build.js' } }))
   }
   return { dir, root, write }
 }

@@ -47,7 +47,7 @@ export async function profileScenario({page,origin}) {
     for(const text of values.expected)await panel.getByText(text,{exact:true}).waitFor()
     assert.equal(await panel.locator('input,textarea,select').count(),0)
     await panel.getByText('계정 정보',{exact:true}).waitFor()
-    await page.getByRole('tab',{name:'근태·신청',exact:true}).click();assert.equal(await panel.isVisible(),false)
+    await page.getByRole('tab',{name:'내 근태',exact:true}).click();assert.equal(await panel.isVisible(),false)
     await page.getByRole('tab',{name:'내 정보',exact:true}).click();await panel.waitFor()
     checked.push({grade:values.grade,hire:values.hire,dateNotShifted:true,readOnly:true,tabsRetained:true})
   }
@@ -74,12 +74,12 @@ export async function attendancePolicyScenario({page,origin,root}) {
     const calls=await page.evaluate(()=>window.__fixtureRpcCalls)
     assert.ok(calls.every(v=>v.name==='save_attendance_start_settings'&&v.args.p_grace===5))
   }
-  await page.goto(origin+'/__fixture/profile');await page.getByRole('tab',{name:'근태·신청',exact:true}).click()
+  await page.goto(origin+'/__fixture/profile');await page.getByRole('tab',{name:'내 근태',exact:true}).click()
   const noticeDetails=page.locator('details').filter({has:page.getByText('공지] 휴가 사용 제도 안내',{exact:true})})
   if(await noticeDetails.getAttribute('open')===null)await page.getByText('공지] 휴가 사용 제도 안내',{exact:true}).click()
-  const source=fs.readFileSync(path.join(root,'src/features/settings/PersonalRequestsPanel.tsx'),'utf8'),notice=source.match(/const LEAVE_USE_NOTICE = `([\s\S]*?)`/)[1]
+  const source=fs.readFileSync(path.join(root,'src/features/settings/MyAttendancePanel.tsx'),'utf8').replace(/\r\n/g,'\n'),notice=source.match(/const LEAVE_USE_NOTICE = `([\s\S]*?)`/)[1]
   assert.ok((await page.locator('body').innerText()).includes(notice),'Full confirmed leave notice missing')
-  await page.getByText('연차 부여 일수·입사일·연도 계산 기준 보류 중',{exact:true}).waitFor()
+  await page.getByText('연차 부여 일수·입사일·연도 계산 기준은 보류 중입니다.',{exact:true}).waitFor()
   await page.goto(origin+'/__fixture/operations?part=leave');await page.getByRole('button',{name:'연차 현황 · 시안',exact:true}).click()
   assert.match(await page.locator('body').innerText(),/계산 기준은 보류 중/)
   const results={operationsReadOnlyNotice:missing.length===0,departmentSaveGrace:5,employeeSaveGrace:5,noGraceInput:true,fullLeaveNotice:true,personalBalanceDeferred:true,operationsBalanceDeferred:true}

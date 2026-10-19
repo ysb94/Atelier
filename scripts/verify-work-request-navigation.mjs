@@ -558,7 +558,7 @@ console.info('PASS: 숨겨진 탭 URL·Escape 보호, 같은 업무 탭 유지, 
 // ── 이미지 업로드 기본 크기·참고 파일 이미지 크기 조절 ─────────────
 {
   const page = fs.readFileSync(path.join(root, 'src/features/work-requests/WorkRequestPage.tsx'), 'utf8')
-  const types = fs.readFileSync(path.join(root, 'src/features/work-requests/work-request-types.ts'), 'utf8')
+  const types = fs.readFileSync(path.join(root, 'src/features/work-requests/work-request-types.ts'), 'utf8').replace(/\r\n/g, '\n')
   const between = (start, end) => {
     const from = page.indexOf(start)
     assert.ok(from >= 0, `${start} 없음`)

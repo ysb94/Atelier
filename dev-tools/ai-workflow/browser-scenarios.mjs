@@ -77,7 +77,7 @@ async function imageScenario({page,origin}) {
   assert.equal(await page.locator('aside').getByRole('button',{name:/너비만 조절|높이만 조절|비율 유지/}).count(),0,'Detail has resize controls')
   await page.locator('aside').getByRole('button',{name:'수정',exact:true}).click()
   const reopenedEdit=[]
-  for(const item of resized){const size=await dimensions(page.getByRole('img',{name:item.name,exact:true}));assert.ok(Math.abs(size.width-item.width)<=2,'Edit width changed');reopenedEdit.push({name:item.name,...size})}
+  for(const item of resized){const size=await dimensions(page.getByRole('img',{name:item.name,exact:true}));assert.ok(Math.abs(size.width-item.width)<=2,'Edit width changed: '+JSON.stringify({item,size}));reopenedEdit.push({name:item.name,...size})}
   await page.getByRole('button',{name:'수정 내용 저장',exact:true}).click()
   await page.locator('aside').waitFor()
   await page.locator('aside').getByRole('button',{name:'수정',exact:true}).click()
@@ -139,7 +139,7 @@ async function attendanceScenario({page,origin}) {
     for(const route of ['/home','/my-attendance']) {
       console.log(JSON.stringify({checking:'attendance fixture',position,route}))
       await page.goto(`${origin}${route}?position=${encodeURIComponent(position)}`)
-      await page.getByText(route==='/home'?'오늘의 근무':'월별 근태',{exact:true}).waitFor()
+      await page.getByText(route==='/home'?'오늘의 근무':'근태 신청 · 부서별 지정 승인자',{exact:true}).waitFor()
       if(excluded.includes(position)) {
         await page.getByText(/출퇴근.*제외|근태.*제외/).first().waitFor()
         assert.equal(await page.getByRole('button',{name:/출근하기|퇴근하기|퇴근 무르기/}).count(),0)
