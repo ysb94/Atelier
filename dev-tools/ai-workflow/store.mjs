@@ -24,20 +24,49 @@ export class Store {
       }
     }
   }
-  job(task) {
+  job(task, {retry=false} = {}) {
     const key = `${task.id}:${task.version}`
+    const previous=this.data.jobs[key]
+    if(retry&&previous&&['done','needs_input','superseded'].includes(previous.phase)) {
+      // Moving a terminal card back to the queue explicitly requests another
+      // investigation. Preserve its journal; never reuse its prepared plan.
+      const historyKey=`${key}:run:${previous.runId}`
+      this.data.jobs[historyKey]={...previous,key:historyKey}
+      delete this.data.jobs[key]
+    }
     if (!this.data.jobs[key]) this.data.jobs[key] = { key, task, attempt: 0, phase: 'new', runId: randomUUID(), createdAt: new Date().toISOString() }
     this.save(); return this.data.jobs[key]
   }
   enqueue(job, update) {
     this.data.outbox.push({ pageId: job.task.id, update: { ...update, eventId: `${job.runId}:${this.data.outbox.length}:${randomUUID()}` } }); this.save()
   }
-  async flush(notion) {
-    while (this.data.outbox.length) {
-      const event = this.data.outbox[0]
-      await notion.publish(event.pageId, event.update)
-      this.data.outbox.shift(); this.save()
+  // One journal replacement for a terminal transition and its outbox event.
+  update(mutator) {
+    mutator(this.data)
+    this.save()
+  }
+  async flush(notion, pageId) {
+    const run=async()=>{
+    for (;;) {
+      const index=this.data.outbox.findIndex(event=>!pageId||event.pageId===pageId)
+      if(index<0)return
+      const event = this.data.outbox[index]
+      try {
+        const outcome = await notion.publish(event.pageId, event.update)
+        if (outcome === 'retry') throw Object.assign(new Error('노션 기록을 다시 시도합니다.'), { retryDelivery: true, delivery: event })
+      } catch (error) {
+        // A confirmed cancellation is discarded and delivered to the runner;
+        // connection failures retain the event for a later safe retry.
+        error.delivery ??= event
+        if (error.discardUpdate) { this.data.outbox.splice(index, 1); this.save() }
+        throw error
+      }
+      this.data.outbox.splice(index,1); this.save()
     }
+    }
+    const result=(this.flushTail??Promise.resolve()).then(run,run)
+    this.flushTail=result.catch(()=>{})
+    return result
   }
   runDir(job) { const dir = path.join(this.dir,'runs',job.runId); fs.mkdirSync(dir,{recursive:true}); return dir }
 }

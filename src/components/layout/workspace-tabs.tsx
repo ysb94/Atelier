@@ -40,15 +40,13 @@ const NAV_LABELS: {
   { match: /^\/data\/design(?:\/|$)/, label: '데이터 · 디자인' },
   { match: /^\/data\/md(?:\/|$)/, label: '데이터 · MD' },
   { match: /^\/data\/logistics(?:\/|$)/, label: '데이터 · 물류' },
-  { match: /^\/data\/all(?:\/|$)/, label: '데이터 · 전체 상품' },
-  { match: /^\/data(?:\/|$)/, label: '데이터 · 전체 상품' },
+  { match: /^\/data\/all(?:\/|$)/, label: '상품 데이터' },
+  { match: /^\/data(?:\/|$)/, label: '상품 데이터' },
   { match: /^\/work-requests\/planning(?:\/|$)/, label: '기획 · 작업 요청' },
   { match: /^\/work-requests\/design(?:\/|$)/, label: '디자인 · 작업 요청' },
   { match: /^\/work-requests\/md(?:\/|$)/, label: 'MD · 작업 요청' },
   { match: /^\/work-requests\/logistics(?:\/|$)/, label: '물류 · 작업 요청' },
   { match: /^\/work(?:\/|$)/, label: '내 업무' },
-  { match: /^\/product-work\/planning(?:\/|$)/, label: '기획 · 상품 정보' },
-  { match: /^\/product-work\/design(?:\/|$)/, label: '디자인 · 상품 정보' },
   { match: /^\/design\/styled-cuts(?:\/|$)/, label: '디자인 · 연출 컷 제작' },
   { match: /^\/design\/file-manager(?:\/|$)/, label: '디자인 · 이미지 업로드' },
   { match: /^\/product-work\/md(?:\/|$)/, label: 'MD · 상품 정보' },
@@ -77,19 +75,18 @@ const NAV_LABELS: {
   { match: /^\/schedule(?:\/|$)/, label: '일정' },
   { match: /^\/members(?:\/|$)/, label: '멤버·권한' },
   { match: /^\/brands(?:\/|$)/, label: '브랜드 관리' },
+  { match: /^\/idea-contest(?:\/|$)/, label: '아이디어 공모전' },
   { match: /^\/operations(?:\/|$)/, label: '운영 현황' },
   { match: /^\/outbound-data(?:\/|$)/, label: '운영 현황' },
   {
     match: /^\/settings\/product-categories(?:\/|$)/,
-    label: '상품 설정 · 카테고리 관리',
+    label: '데이터 · 카테고리 관리',
   },
   { match: /^\/settings\/fields(?:\/|$)/, label: '업로드 항목' },
-  { match: /^\/settings\/seasons(?:\/|$)/, label: '출시 기획' },
   { match: /^\/settings\/usage-targets(?:\/|$)/, label: '출고업체' },
   { match: /^\/settings\/import(?:\/|$)/, label: '가져오기' },
   { match: /^\/settings\/members(?:\/|$)/, label: '멤버' },
   { match: /^\/settings\/ai(?:\/|$)/, label: 'AI 설정' },
-  { match: /^\/settings\/brand(?:\/|$)/, label: '브랜드 정보' },
 ]
 
 /** 탭 구분용. 상품 상세 서랍은 목록 탭에 붙인다. 브랜드 필터는 같은 탭이다. */
@@ -103,7 +100,10 @@ function stripDetailPath(path: string): string {
   const dataDetail = path.match(/^(\/data\/[^/]+)\/[^/]+\/[^/]+\/?$/)
   if (dataDetail) return dataDetail[1]
 
-  return path.replace(/\/$/, '') || '/'
+  const normalized = path.replace(/\/$/, '') || '/'
+  // 예전 브랜드 정보 주소는 브랜드 관리 탭으로 붙인다.
+  if (normalized === '/settings/brand') return '/brands'
+  return normalized
 }
 
 function tabIdFromPath(path: string): string {
@@ -135,14 +135,36 @@ function labelFromPath(path: string): string {
   return '화면'
 }
 
+/** 기획·디자인 상품 정보로 이어지던 회사 경로. 연출 컷·이미지 업로드는 제외한다. */
+function isRemovedPlanningDesignProductPath(pathname: string) {
+  const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
+  if (path === '/planning' || path === '/design') return true
+  return (
+    path === '/product-work/planning' ||
+    path.startsWith('/product-work/planning/') ||
+    path === '/product-work/design' ||
+    path.startsWith('/product-work/design/')
+  )
+}
+
+function omitRemovedPlanningDesignProductTabs(tabs: WorkspaceTab[]) {
+  if (!tabs.some((tab) => isRemovedPlanningDesignProductPath(tab.pathname))) {
+    return tabs
+  }
+  return tabs.filter((tab) => !isRemovedPlanningDesignProductPath(tab.pathname))
+}
+
 export function resolveWorkspaceTab(
   location: Pick<Location, 'pathname' | 'search'>,
 ): WorkspaceTab | null {
   if (location.pathname.startsWith('/b/')) return null
+  const pathname = isRemovedPlanningDesignProductPath(location.pathname)
+    ? '/products'
+    : location.pathname
   return {
-    id: tabIdFromPath(location.pathname),
-    label: labelFromPath(location.pathname),
-    pathname: location.pathname,
+    id: tabIdFromPath(pathname),
+    label: labelFromPath(pathname),
+    pathname,
     search: location.search,
   }
 }
@@ -179,34 +201,43 @@ export function useWorkspaceTabs() {
   )
 
   useLayoutEffect(() => {
+    if (isRemovedPlanningDesignProductPath(pathname)) {
+      navigate({ pathname: '/products', search }, { replace: true })
+    }
     if (!active) return
     if (closingTabRef.current === active.id) return
     closingTabRef.current = null
     setTabs((prev) => {
-      const index = prev.findIndex((tab) => tab.id === active.id)
-      if (index === -1) return [...prev, active]
-      const current = prev[index]
+      const currentTabs = omitRemovedPlanningDesignProductTabs(prev)
+      const index = currentTabs.findIndex((tab) => tab.id === active.id)
+      if (index === -1) return [...currentTabs, active]
+      const current = currentTabs[index]
       if (
         current.pathname === active.pathname &&
         current.search === active.search &&
         current.label === active.label
       ) {
-        return prev
+        return currentTabs
       }
-      const next = [...prev]
+      const next = [...currentTabs]
       next[index] = active
       return next
     })
-  }, [active])
+  }, [active, navigate, pathname, search])
 
   const activeId = active?.id ?? 'home'
   const closingActive = active?.id === closingTabRef.current
   const displayTabs = useMemo(() => {
-    if (active && !closingActive && !tabs.some((tab) => tab.id === active.id)) {
-      return [...tabs, active]
+    const visibleTabs = omitRemovedPlanningDesignProductTabs(tabs)
+    if (
+      active &&
+      !closingActive &&
+      !visibleTabs.some((tab) => tab.id === active.id)
+    ) {
+      return [...visibleTabs, active]
     }
     let changed = false
-    const next = tabs.map((tab) => {
+    const next = visibleTabs.map((tab) => {
       if (!active || tab.id !== active.id) return tab
       if (
         tab.pathname === active.pathname &&
@@ -223,7 +254,8 @@ export function useWorkspaceTabs() {
         label: active.label,
       }
     })
-    return changed ? next : tabs
+    if (!changed) return visibleTabs
+    return next
   }, [active, closingActive, tabs])
 
   const openTab = useCallback(

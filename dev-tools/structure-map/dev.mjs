@@ -57,9 +57,9 @@ export async function startDevelopment(viteArgs = [], structurePort = Number(pro
   const vite = launch(viteCli, viteArgs, true)
   const url = `http://127.0.0.1:${structurePort}/`
   let structure = null
-  if (await existingViewer(structurePort)) console.info(`[dev] 기존 개발 구조도 사용: ${url}`)
+  if (await existingViewer(structurePort)) console.info(`[dev] 기존 AI 구조 목차 감시 재사용`)
   else if (!stopping) structure = launch(path.join(toolDir, 'serve.mjs'), [`--port=${structurePort}`], false)
-  console.info(`[dev] 개발 구조도: ${url} · 전체 총람에서 모든 기능·파일 확인`)
+  console.info(`[dev] AI 전용 목차: dev-tools/structure-map/generated/ai-index.md`)
   let automation = null
   try {
     const { settings } = await import('../ai-workflow/settings.mjs')

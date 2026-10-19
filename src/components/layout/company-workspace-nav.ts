@@ -1,10 +1,15 @@
 import type { LucideIcon } from 'lucide-react'
-import { canAccessOperationsSupport, canManagePersonnel, isCompanyReviewer } from '../../lib/company/capabilities.ts'
+import {
+  canAccessBrandManagement,
+  canAccessMamamIdeaInbox,
+  canAccessOperationsSupport,
+  canManagePersonnel,
+  isCompanyReviewer,
+} from '../../lib/company/capabilities.ts'
 import {
   Boxes,
   Building2,
   CalendarDays,
-  CalendarRange,
   Camera,
   ChartColumn,
   ClipboardList,
@@ -16,16 +21,15 @@ import {
   Headset,
   Home,
   Images,
+  Inbox,
   LayoutGrid,
   Lightbulb,
   ListChecks,
   Network,
   PackagePlus,
-  Palette,
   PenLine,
   ScanBarcode,
   Search,
-  Settings,
   Shirt,
   Sparkles,
   Store,
@@ -55,6 +59,7 @@ export const companyTopNav: CompanyNavItem[] = [
   { to: '/work', label: '내 업무', icon: ClipboardList },
   { to: '/settings/profile', label: '마이페이지', icon: UserRound },
   { to: '/operations', label: '운영 현황', icon: ChartColumn },
+  { to: '/products', label: '전체 상품', icon: Shirt },
 ]
 
 export const companyNavGroups: CompanyNavGroup[] = [
@@ -67,21 +72,15 @@ export const companyNavGroups: CompanyNavGroup[] = [
     ],
   },
   {
-    title: '상품',
-    items: [{ to: '/products', label: '전체 상품', icon: Shirt }],
-  },
-  {
     title: '기획',
     items: [
       { to: '/drafts', label: '기획안', icon: Lightbulb },
-      { to: '/product-work/planning', label: '상품 정보', icon: PenLine },
       { to: '/work-requests/planning', label: '작업 요청', icon: ClipboardList },
     ],
   },
   {
     title: '디자인',
     items: [
-      { to: '/product-work/design', label: '상품 정보', icon: Palette },
       { to: '/work-requests/design', label: '작업 요청', icon: ClipboardList },
       { to: '/design/styled-cuts', label: '연출 컷 제작', icon: Camera },
       { to: '/design/file-manager', label: '이미지 업로드', icon: Images },
@@ -132,27 +131,25 @@ export const companyNavGroups: CompanyNavGroup[] = [
   {
     title: '데이터',
     items: [
-      { to: '/data/all', label: '전체 상품', icon: Table2 },
+      { to: '/data/all', label: '상품 데이터', icon: Table2 },
       { to: '/data/upload', label: '일괄 업로드', icon: Upload },
       { to: '/barcodes', label: '88바코드 관리', icon: ScanBarcode },
       { to: '/sabangnet-codes', label: '사방넷 코드 관리', icon: Hash },
       { to: '/usage-codes', label: '업체별 코드 관리', icon: Store },
       { to: '/partner-codes', label: '거래처 코드', icon: Building2 },
+      {
+        to: '/settings/product-categories',
+        label: '카테고리 관리',
+        icon: FolderTree,
+      },
     ],
   },
   {
     title: '설정',
     items: [
-      {
-        to: '/settings/product-categories',
-        label: '상품 설정',
-        icon: FolderTree,
-      },
       { to: '/settings/fields', label: '업로드 항목', icon: ListChecks },
-      { to: '/settings/seasons', label: '출시 기획', icon: CalendarRange },
       { to: '/settings/usage-targets', label: '출고업체', icon: Store },
       { to: '/settings/ai', label: 'AI 설정', icon: Sparkles },
-      { to: '/settings/brand', label: '브랜드 정보', icon: Settings },
       { to: '/brands', label: '브랜드 관리', icon: Building2 },
     ],
   },
@@ -164,16 +161,33 @@ export const membersNavItem: CompanyNavItem = {
   icon: Users,
 }
 
+const mamamInboxGroup: CompanyNavGroup = {
+  title: '아이디어 공모전',
+  items: [{ to: '/idea-contest', label: '접수 리스트', icon: Inbox }],
+}
+
 export function companyNavGroupsForProfile(
   profile: Parameters<typeof canAccessOperationsSupport>[0],
 ) {
   const showOperationsSupport = canAccessOperationsSupport(profile)
   const showMembers = canManagePersonnel(profile) || isCompanyReviewer(profile)
-  return companyNavGroups
-    .filter(group => showOperationsSupport || !group.items.some(item => item.to === '/operations-support'))
-    .map(group => group.title === '회사' && showMembers
-      ? { ...group, items: [...group.items, membersNavItem] }
-      : group)
+  const showBrandManagement = canAccessBrandManagement(profile)
+  const visibleGroups = companyNavGroups.flatMap((group) => {
+    if (group.title !== '운영지원') {
+      const items = showBrandManagement
+        ? group.items
+        : group.items.filter(item => item.to !== '/brands')
+      return items.length > 0 ? [{ ...group, items }] : []
+    }
+    const items = [
+      ...(showOperationsSupport ? group.items : []),
+      ...(showMembers ? [membersNavItem] : []),
+    ]
+    return items.length > 0 ? [{ ...group, items }] : []
+  })
+  return canAccessMamamIdeaInbox(profile)
+    ? [...visibleGroups, mamamInboxGroup]
+    : visibleGroups
 }
 
 export function companyNavItemActive(to: string, pathname: string, end?: boolean) {

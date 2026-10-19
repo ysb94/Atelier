@@ -11,7 +11,6 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
-import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -23,7 +22,6 @@ import {
   deleteProductDraft,
   emptyDraftInput,
   getProductDraftById,
-  getCompanyProductDrafts,
   getSeasonsByBrand,
   getStylesByBrand,
   newColorRow,
@@ -36,7 +34,6 @@ import {
   DRAFT_OPEN_DETAIL_OPTIONS,
   DRAFT_OPEN_TYPE_OPTIONS,
   DRAFT_ORIGIN_OPTIONS,
-  DRAFT_OWNER_OPTIONS,
   DRAFT_REGISTER_TYPE_OPTIONS,
   DRAFT_SPEC_LABEL,
   type CostCurrency,
@@ -47,9 +44,6 @@ import {
 } from '@/lib/types'
 import { DEFAULT_COMPANY_ID } from '@/lib/company/capabilities'
 import {
-  applyDraftBrandChange,
-  canChangeDraftBrand,
-  draftBrandChangeMessage,
   requiresDraftBrand,
 } from '@/lib/drafts/company-draft'
 import {
@@ -60,20 +54,19 @@ import {
   canPassLatestSampleWorkOrder,
   failLatestSampleWorkOrder,
   isSamplePassed,
-  latestFilledSampleWorkOrder,
   legacyWorkOrderFields,
   patchSampleWorkOrder,
-  previousSampleFailReason,
-  removeSampleWorkOrder,
   samplePhase,
   samplePhaseHint,
   samplePhaseLabel,
-  sampleWorkOrderFileName,
-  sampleWorkOrderLabel,
   setLatestSampleWorkOrderPassed,
   withPendingNextSampleWorkOrder,
 } from '@/lib/drafts/sample-work-order'
 import { useAuth } from '@/lib/supabase/auth'
+import {
+  formatSizeSpec,
+  parseSizeSpec,
+} from '@/lib/drafts/spec-format'
 import { draftDetailPath } from '@/lib/workspace/company-paths'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber } from '@/lib/utils'
@@ -451,43 +444,6 @@ function UnitInput({
   )
 }
 
-type SizeParts = {
-  width: string
-  depth: string
-  height: string
-  strap: string
-}
-
-function parseSizeSpec(value: string): SizeParts {
-  function labeled(label: string) {
-    const match = value.match(
-      new RegExp(`(?:\\[${label}\\]|${label}\\s*=?)\\s*([\\d.]+)`, 'i'),
-    )
-    return match?.[1] ?? ''
-  }
-  const width = labeled('W')
-  const depth = labeled('D')
-  const height = labeled('H')
-  const strap = value.match(/(?:STRAP|어깨끈)[^\d]*([\d.]+)/i)?.[1] ?? ''
-
-  if (width || depth || height || strap) {
-    return { width, depth, height, strap }
-  }
-
-  const numbers = value.match(/\d+(?:\.\d+)?/g) ?? []
-  return {
-    width: numbers[0] ?? '',
-    depth: numbers[1] ?? '',
-    height: numbers[2] ?? '',
-    strap: numbers[3] ?? '',
-  }
-}
-
-function formatSizeSpec(parts: SizeParts) {
-  if (!Object.values(parts).some(Boolean)) return ''
-  return `W=${parts.width};D=${parts.depth};H=${parts.height};STRAP=${parts.strap};UNIT=mm`
-}
-
 function parseWeightSpec(value: string) {
   return value.match(/\d+(?:\.\d+)?/)?.[0] ?? ''
 }
@@ -515,7 +471,7 @@ function seasonIdFromQuery(
 
 export function DraftEditPage() {
   useRenderWatch('DraftEditPage')
-  const { brands, brandById, brandBySlug } = useCompanyBrandScope()
+  const { brands, brandBySlug } = useCompanyBrandScope()
   const { profile } = useAuth()
   const { draftId } = useParams()
   const [searchParams] = useSearchParams()
@@ -536,8 +492,6 @@ export function DraftEditPage() {
   const [failOpen, setFailOpen] = useState(false)
   const [failReason, setFailReason] = useState('')
 
-  const selectedBrand = form.brandId ? brandById.get(form.brandId) : undefined
-
   const draftQuery = useQuery({
     queryKey: ['product-draft', draftId],
     queryFn: () => getProductDraftById(draftId ?? ''),
@@ -554,11 +508,6 @@ export function DraftEditPage() {
     ? (seasonsQuery.data ?? EMPTY_SEASONS)
     : EMPTY_SEASONS
 
-  const draftsQuery = useQuery({
-    queryKey: ['product-drafts', 'company', companyId],
-    queryFn: () => getCompanyProductDrafts(companyId),
-  })
-
   const stylesQuery = useQuery({
     queryKey: ['styles', form.brandId],
     queryFn: () => getStylesByBrand(form.brandId ?? ''),
@@ -567,15 +516,6 @@ export function DraftEditPage() {
   const styles = form.brandId
     ? (stylesQuery.data ?? EMPTY_STYLES)
     : EMPTY_STYLES
-
-  const ownerOptions = useMemo(() => {
-    const fromDrafts = (draftsQuery.data ?? [])
-      .map((d) => d.owner.trim())
-      .filter(Boolean)
-    return Array.from(new Set([...DRAFT_OWNER_OPTIONS, ...fromDrafts])).sort(
-      (a, b) => a.localeCompare(b, 'ko'),
-    )
-  }, [draftsQuery.data])
 
   const loaded = draftQuery.data
   useEffect(() => {
@@ -627,7 +567,6 @@ export function DraftEditPage() {
     seasonsQuery.isLoading,
   ])
 
-  const brandLocked = !canChangeDraftBrand(loaded?.status ?? form.status)
   const listPath = listPathForSeason(form.seasonId, seasons)
 
   const totalQty = useMemo(
@@ -664,35 +603,14 @@ export function DraftEditPage() {
     })
   }
 
-  function selectBrand(nextBrandId: string | null) {
-    if (brandLocked) return
-    const styleBrandById = new Map(
-      styles.map((style) => [style.id, style.brandId]),
-    )
-    const currentSeason = form.seasonId
-      ? seasons.find((season) => season.id === form.seasonId)
-      : undefined
-    const result = applyDraftBrandChange({
-      nextBrandId,
-      seasonId: form.seasonId,
-      seasonBrandId: currentSeason?.brandId ?? form.brandId,
-      options: form.options,
-      styleBrandById,
-    })
-    if (result.needsConfirm) {
-      const message = draftBrandChangeMessage(result)
-      if (message && !window.confirm(message)) return
-    }
-    patch({
-      brandId: result.brandId,
-      seasonId: result.seasonId,
-      options: result.options,
-    })
-  }
-
   const saveMutation = useMutation({
     mutationFn: async (next?: ProductDraftInput) => {
-      const payload = next ?? form
+      const source = next ?? form
+      const creator = profile?.displayName?.trim() ?? ''
+      const payload =
+        isNew && !source.owner.trim() && creator
+          ? { ...source, owner: creator }
+          : source
       if (requiresDraftBrand(payload.status) && !payload.brandId) {
         throw new Error('출시 확정 전에 브랜드를 지정하세요.')
       }
@@ -923,73 +841,6 @@ export function DraftEditPage() {
             </div>
           </div>
 
-          <Field label="담당자">
-            <OptionSelect
-              className="h-8"
-              value={form.owner}
-              options={ownerOptions}
-              placeholder="담당자 선택"
-              onChange={(owner) => patch({ owner })}
-            />
-          </Field>
-
-          <div className="space-y-1">
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="text-xs font-medium text-muted-foreground">
-                브랜드
-              </span>
-              <span className="truncate text-[11px] text-muted-foreground">
-                {brandLocked
-                  ? '확정 후 변경 불가'
-                  : selectedBrand
-                    ? '기존 상품 연결 가능'
-                    : '고르면 상품 연결 가능'}
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              <button
-                type="button"
-                aria-pressed={!form.brandId}
-                disabled={brandLocked}
-                onClick={() => selectBrand(null)}
-                className={cn(
-                  'inline-flex items-center rounded-md border px-2 py-1 text-xs transition-colors',
-                  !form.brandId
-                    ? 'border-foreground bg-background font-medium text-foreground'
-                    : 'border-border bg-background/60 text-muted-foreground hover:bg-muted/70 hover:text-foreground',
-                  brandLocked &&
-                    form.brandId &&
-                    'cursor-not-allowed opacity-50',
-                )}
-              >
-                미정
-              </button>
-              {brands.map((item) => {
-                const selected = item.id === form.brandId
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    aria-pressed={selected}
-                    disabled={brandLocked && !selected}
-                    onClick={() => selectBrand(item.id)}
-                    className={cn(
-                      'inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors',
-                      selected
-                        ? 'border-foreground bg-background font-medium text-foreground'
-                        : 'border-border bg-background/60 text-muted-foreground hover:bg-muted/70 hover:text-foreground',
-                      brandLocked &&
-                        !selected &&
-                        'cursor-not-allowed opacity-50',
-                    )}
-                  >
-                    <BrandAvatar brand={item} className="size-4" />
-                    <span className="truncate">{item.name}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
         </SectionCard>
 
         {/* 1차 샘플 작업 지시서 + 컬러 */}
@@ -1037,7 +888,8 @@ export function DraftEditPage() {
                       url,
                       name: file.name,
                       shipped: false,
-                      shippedAt: null,
+                      shippedAt: new Date().toISOString(),
+                      returnedAt: null,
                     }),
                   )
                 } catch {
@@ -1045,111 +897,6 @@ export function DraftEditPage() {
                 }
               }}
             />
-            {workOrders.map((order) => (
-              <div key={order.id} className="space-y-1">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {sampleWorkOrderLabel(order.round)} 샘플 작업 지시서
-                  </span>
-                  {order.passed ? (
-                    <span className="rounded-md border border-success/40 bg-success/10 px-1.5 py-0.5 text-[11px] font-medium">
-                      합격
-                    </span>
-                  ) : order.failReason?.trim() ? (
-                    <span className="rounded-md border border-danger/40 bg-danger/10 px-1.5 py-0.5 text-[11px] font-medium">
-                      불합격
-                    </span>
-                  ) : order.shipped ? (
-                    <span className="rounded-md border border-success/40 bg-success/10 px-1.5 py-0.5 text-[11px] font-medium">
-                      발송 완료
-                    </span>
-                  ) : null}
-                </div>
-                {order.url ? (
-                  <div className="flex items-center gap-0.5 rounded-md border border-border px-2 py-1">
-                    <FileText className="size-4 shrink-0 text-muted-foreground" />
-                    <a
-                      href={order.url}
-                      download={sampleWorkOrderFileName(order)}
-                      className="min-w-0 flex-1 truncate px-1 text-xs underline-offset-2 hover:underline"
-                    >
-                      {sampleWorkOrderFileName(order)}
-                    </a>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      aria-label="바꾸기"
-                      title="바꾸기"
-                      onClick={() => {
-                        uploadColorIdRef.current = null
-                        uploadOrderIdRef.current = order.id
-                        workOrderInputRef.current?.click()
-                      }}
-                    >
-                      <Upload className="size-3.5" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-7"
-                      aria-label="제거"
-                      title="제거"
-                      onClick={() =>
-                        patchWorkOrders(
-                          order.round > 1
-                            ? removeSampleWorkOrder(workOrders, order.id)
-                            : patchSampleWorkOrder(workOrders, order.id, {
-                                url: null,
-                                name: '',
-                              }),
-                        )
-                      }
-                    >
-                      <Trash2 className="size-3.5" />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      className="size-7"
-                      aria-label="저장"
-                      title="저장"
-                      disabled={saveMutation.isPending}
-                      onClick={() => saveMutation.mutate(form)}
-                    >
-                      <Save className="size-3.5" />
-                    </Button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      uploadColorIdRef.current = null
-                      uploadOrderIdRef.current = order.id
-                      workOrderInputRef.current?.click()
-                    }}
-                    className="flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-muted/50"
-                  >
-                    <Upload className="size-3.5" />
-                    업로드
-                  </button>
-                )}
-                {order.failReason?.trim() ? (
-                  <p className="rounded-md bg-muted/70 px-2 py-1.5 text-xs whitespace-pre-wrap">
-                    불합격 사유: {order.failReason.trim()}
-                  </p>
-                ) : null}
-                {!order.failReason?.trim() &&
-                previousSampleFailReason(workOrders, order.id) ? (
-                  <p className="rounded-md border border-border bg-muted/40 px-2 py-1.5 text-xs whitespace-pre-wrap">
-                    다음 샘플 중점:{' '}
-                    {previousSampleFailReason(workOrders, order.id)}
-                  </p>
-                ) : null}
-              </div>
-            ))}
             {canPassLatestSampleWorkOrder(workOrders) ? (
               <div className="grid grid-cols-2 gap-1.5">
                 <Button
@@ -1195,23 +942,9 @@ export function DraftEditPage() {
                 </Button>
               </div>
             ) : null}
-            <p className="text-[11px] text-muted-foreground">
-              {isSamplePassed(workOrders)
-                ? '대표 샘플이 합격되어 컬러별 샘플로 넘어갑니다.'
-                : canPassLatestSampleWorkOrder(workOrders)
-                  ? '도착한 샘플이 기획과 같으면 합격, 다르면 사유를 남기고 다음 차수를 올립니다.'
-                  : latestFilledSampleWorkOrder(workOrders)
-                    ? '중국팀이 발송 완료하면 합격·불합격을 고릅니다.'
-                    : '작업 지시서를 올리면 1차 샘플 진행중이 됩니다.'}
-            </p>
           </div>
 
           <div className="space-y-1.5">
-            <p className="text-[11px] text-muted-foreground">
-              {isSamplePassed(workOrders)
-                ? '대표 컬러가 통과했으니 컬러마다 작업 지시서를 올리고, 발주가 나가면 위에서 컬러샘플 발주 완료를 누르세요. 디자인 촬영 목록에 바로 올라갑니다.'
-                : '컬러별 샘플은 대표 샘플 합격 뒤에 진행합니다.'}
-            </p>
             <div className="grid grid-cols-[1rem_minmax(0,1fr)_4.5rem_2.5rem_1.75rem] items-center gap-1.5 text-[11px] text-muted-foreground">
               <span />
               <span>컬러명</span>
@@ -1643,6 +1376,47 @@ export function DraftEditPage() {
                 </div>
               )
             })}
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="block space-y-1">
+              <span className="text-xs font-medium text-muted-foreground">
+                샘플 상태 메모
+              </span>
+              <Textarea
+                className="p-2"
+                rows={2}
+                placeholder="예: 1차 샘플 원단 결 확인 완료"
+                value={form.specs.fabric.note}
+                onChange={(e) =>
+                  patch({
+                    specs: {
+                      ...form.specs,
+                      fabric: { ...form.specs.fabric, note: e.target.value },
+                    },
+                  })
+                }
+              />
+            </label>
+            <label className="block space-y-1">
+              <span className="text-xs font-medium text-muted-foreground">
+                스펙 문서 메모
+              </span>
+              <Textarea
+                className="p-2"
+                rows={2}
+                placeholder="예: 원단·부자재 스펙서 v1"
+                value={form.specs.coating.note}
+                onChange={(e) =>
+                  patch({
+                    specs: {
+                      ...form.specs,
+                      coating: { ...form.specs.coating, note: e.target.value },
+                    },
+                  })
+                }
+              />
+            </label>
           </div>
         </SectionCard>
 

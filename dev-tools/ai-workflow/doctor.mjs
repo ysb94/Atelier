@@ -4,6 +4,15 @@ import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { settings, cursorCommand, cursorPlugins, projectRoot } from './settings.mjs'
 import { runCommand } from './process.mjs'
+import { requireSubscriptionLogin } from './codex-subscription.mjs'
+import { TaskGit } from './git-task.mjs'
+import { setupSchema } from './control.mjs'
+
+export async function verifyGitAccess(git) {
+  await git.verifyOrigin()
+  // Local URL checks and gh login alone do not prove Git can authenticate.
+  await git.git(['ls-remote','--exit-code','origin','HEAD'],{timeoutMs:15000})
+}
 
 export async function doctor(config=settings()) {
   const problems=[],mcp=[]
@@ -27,8 +36,20 @@ export async function doctor(config=settings()) {
     cursorAuthenticated=!/not logged in|not authenticated|unauthenticated/i.test(r.output+r.stderr)&&/logged in|authenticated|email|account/i.test(r.output+r.stderr)
     if(!cursorAuthenticated)problems.push('Cursor CLI 로그인 필요: npm run ai:login')
   }catch(error){problems.push(`Cursor CLI 확인 실패: ${error.message}`)}
-  try{await runCommand(config.env.ATELIER_CODEX_BIN??'codex',['--version'],{cwd:projectRoot,timeoutMs:10000})}catch(error){problems.push(`Codex CLI 확인 실패: ${error.message}`)}
+  let codexBilling
+  try{codexBilling=await requireSubscriptionLogin(config,{root:projectRoot})}catch(error){problems.push(error.message)}
   if(!mcp.length)problems.push('Cursor MCP 설정/플러그인을 찾지 못했습니다.')
-  return {ready:problems.length===0,problems,mcp,cursorAuthenticated,plugins}
+  if(config.v2?.enabled){
+    if(!config.v2.controlPageId)problems.push('설정 페이지 미지정: config.json의 v2.controlPageId에 노션 설정 페이지 ID를 입력한 뒤 관리자를 다시 시작하세요.')
+    const git=new TaskGit({config})
+    try{await verifyGitAccess(git)}catch(error){problems.push(`Git 원격 조회 확인 실패: ${error.message}`)}
+    try{git.workspaceRoot()}catch(error){problems.push(error.message)}
+    try{await git.gh(['auth','status','--hostname=github.com'],{timeoutMs:15000})}catch(error){
+      problems.push(['ENOENT','EACCES','EPERM','ENOEXEC'].includes(error.code)
+        ? `GitHub CLI를 실행할 수 없습니다 (${error.code}). gh 설치 및 ATELIER_GH_BIN 경로를 확인하세요.`
+        : 'GitHub CLI 인증 확인 실패: npm run ai:connect (같은 PC·실행기 계정으로 로그인)')
+    }
+  }
+  return {ready:problems.length===0,problems,mcp,cursorAuthenticated,codexBilling,plugins,...(config.v2?.enabled?{v2Setup:setupSchema(config)}:{})}
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))console.log(JSON.stringify(await doctor(),null,2))

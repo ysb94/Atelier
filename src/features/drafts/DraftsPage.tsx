@@ -1,11 +1,11 @@
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { useRenderWatch } from '@/lib/diagnostics'
-import { getCompanyProductDrafts, getSeasonsByBrand, updateProductDraft } from '@/lib/api'
+import { createSeason, deleteSeason, getCompanyProductDrafts, getSeasonsByBrand, updateProductDraft, updateSeason } from '@/lib/api'
 import {
   DEFAULT_COMPANY_ID,
   canViewDraftsByOwner,
@@ -19,7 +19,15 @@ import {
   type DraftOwnerScope,
 } from '@/lib/drafts/company-draft'
 import { newColorRow } from '@/lib/drafts/empty-draft'
-import { draftToInput } from '@/lib/drafts/sample-work-order'
+import {
+  newColorSampleRound,
+  passLatestColorSampleRound,
+  requestNextColorSampleRound,
+  resolveColorSampleRounds,
+} from '@/lib/drafts/draft-flow'
+import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields, requestNextSampleRound, setLatestSampleWorkOrderPassed } from '@/lib/drafts/sample-work-order'
+import { parseSizeSpecInput } from '@/lib/drafts/spec-format'
+import { writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
 import {
   type Brand,
@@ -30,9 +38,9 @@ import {
 import { combineListQueries, flattenListQueries } from '@/lib/query/list-queries'
 import { draftDetailPath, draftNewPath } from '@/lib/workspace/company-paths'
 import { cn, formatNumber, emptyList } from '@/lib/utils'
-import { DraftFolderBar } from './DraftFolderBar'
+import { DraftFolderBar, DraftFolderHeading } from './DraftFolderBar'
 import { matchesDraftFolder } from './draft-folder-filter'
-import { DraftSheetRow } from './DraftSheetRow'
+import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import {
   formatReleaseGroupLabel,
@@ -47,6 +55,19 @@ type BoardFilter = 'all' | 'unassigned' | 'scheduled'
 
 function hasReleaseGroup(schedule: ResolvedReleaseSchedule | undefined) {
   return Boolean(schedule?.group)
+}
+
+function countScheduleRows(
+  rows: ProductDraft[],
+  scheduleByDraft: Map<string, ResolvedReleaseSchedule>,
+) {
+  let pending = 0
+  let scheduled = 0
+  for (const draft of rows) {
+    if (hasReleaseGroup(scheduleByDraft.get(draft.id))) scheduled += 1
+    else pending += 1
+  }
+  return { total: rows.length, pending, scheduled }
 }
 
 function emptyMessage(
@@ -143,7 +164,13 @@ export function CompanyDraftsPage() {
       try {
         const updated = await updateProductDraft(draftId, input)
         savedDraftRef.current.set(draftId, updated)
+        queryClient.setQueryData<ProductDraft[]>(
+          ['product-drafts', 'company', companyId],
+          (current) =>
+            current?.map((item) => (item.id === updated.id ? updated : item)),
+        )
         await queryClient.invalidateQueries({ queryKey: ['product-drafts'] })
+        await queryClient.invalidateQueries({ queryKey: ['product-draft', draftId] })
         return updated
       } catch (err) {
         console.warn('[drafts] 기획안 저장 실패', {
@@ -162,6 +189,25 @@ export function CompanyDraftsPage() {
     )
     return task
   }
+
+  const ownerFillRef = useRef(new Set<string>())
+  useEffect(() => {
+    const creator = profile?.displayName?.trim()
+    if (!creator) return
+    for (const draft of drafts) {
+      if (draft.owner.trim() || ownerFillRef.current.has(draft.id)) continue
+      ownerFillRef.current.add(draft.id)
+      void saveDraftChange(draft.id, (current) => {
+        const input = draftToInput(current)
+        if (input.owner.trim()) return input
+        return { ...input, owner: creator }
+      }).catch((err: unknown) => {
+        ownerFillRef.current.delete(draft.id)
+        console.warn('[drafts] 기획안 작성자 저장 실패', err)
+      })
+    }
+  }, [drafts, profile?.displayName])
+
   const seasons = useMemo(
     () => flattenListQueries(seasonQueries),
     [seasonQueries],
@@ -216,22 +262,24 @@ export function CompanyDraftsPage() {
     return map
   }, [assignments, ownerAllDrafts, seasonMap, tempGroups])
 
+  const allScopeCounts = useMemo(
+    () => countScheduleRows(ownerAllDrafts, scheduleByDraft),
+    [ownerAllDrafts, scheduleByDraft],
+  )
   const brandCards = useMemo(() => {
     return brands.map((brand) => {
       const rows = ownerAllDrafts.filter((draft) => draft.brandId === brand.id)
-      let pending = 0
-      let scheduled = 0
-      for (const draft of rows) {
-        if (hasReleaseGroup(scheduleByDraft.get(draft.id))) scheduled += 1
-        else pending += 1
-      }
-      return { brand, total: rows.length, pending, scheduled }
+      return { brand, ...countScheduleRows(rows, scheduleByDraft) }
     })
   }, [brands, ownerAllDrafts, scheduleByDraft])
 
-  const unassignedBrandCount = useMemo(
-    () => ownerAllDrafts.filter((draft) => !draft.brandId).length,
-    [ownerAllDrafts],
+  const unassignedScopeCounts = useMemo(
+    () =>
+      countScheduleRows(
+        ownerAllDrafts.filter((draft) => !draft.brandId),
+        scheduleByDraft,
+      ),
+    [ownerAllDrafts, scheduleByDraft],
   )
 
   const folderDrafts = useMemo(() => ownerDrafts.filter(draft => {
@@ -247,16 +295,26 @@ export function CompanyDraftsPage() {
     }
     return previewGroups
       .filter(group => matchesDraftBrandScope(group.brandId, brandScope, brandIdBySlug))
-      .map(group => ({
-        id: group.id,
-        label: formatReleaseGroupLabel(group),
-        brandName: scopedBrand ? undefined : brandById.get(group.brandId)?.name,
-        total: counts.get(group.id) ?? 0,
-      }))
-  }, [ownerDrafts, scheduleByDraft, previewGroups, brandScope, brandIdBySlug, scopedBrand, brandById])
+      .filter(group => seasonMap.get(group.id)?.code !== 'UNASSIGNED')
+      .map(group => {
+        const season = seasonMap.get(group.id)
+        return {
+          id: group.id,
+          label: formatReleaseGroupLabel(group),
+          brandId: group.brandId,
+          brandName: scopedBrand ? undefined : brandById.get(group.brandId)?.name,
+          name: group.name,
+          total: counts.get(group.id) ?? 0,
+          editable: Boolean(season && season.code !== 'UNASSIGNED'),
+        }
+      })
+  }, [ownerDrafts, scheduleByDraft, previewGroups, brandScope, brandIdBySlug, scopedBrand, brandById, seasonMap])
   const selectedFolderIds = folderFilter === 'all' || folderFilter === 'unassigned'
     ? [folderFilter]
     : folderItems.filter(folder => matchesDraftFolder(folder.id, folderFilter, !folderParam ? seasonMap.get(folder.id)?.code : undefined)).map(folder => folder.id)
+  const activeFolder = folderFilter === 'all' || folderFilter === 'unassigned'
+    ? null
+    : folderItems.find((folder) => selectedFolderIds.includes(folder.id)) ?? null
   const unassignedFolderCount = ownerDrafts.filter(draft => !scheduleByDraft.get(draft.id)?.group).length
 
   const sheetCounts = useMemo(() => {
@@ -345,7 +403,7 @@ export function CompanyDraftsPage() {
     setScheduleDraftId(null)
   }
 
-  function applySchedulePreview(
+  async function applySchedule(
     draftId: string,
     value: {
       brandId: string
@@ -354,45 +412,68 @@ export function CompanyDraftsPage() {
       certainty: PreviewReleaseAssignment['certainty']
     },
   ) {
-    setTempGroups((prev) =>
-      prev.some((group) => group.id === value.group.id)
-        ? prev
-        : seasonMap.has(value.group.id)
-          ? prev
-          : [...prev, value.group],
-    )
-    setAssignments((prev) => ({
-      ...prev,
-      [draftId]: {
-        brandId: value.brandId,
-        groupId: value.group.id,
-        targetDate: value.targetDate,
-        certainty: value.certainty,
-      },
+    let seasonId = value.group.id
+    if (seasonId.startsWith('temp-')) {
+      const season = await createSeason(value.brandId, {
+        name: value.group.name,
+        releaseTiming: value.group.releaseTiming,
+      })
+      seasonId = season.id
+      queryClient.setQueryData<Season[]>(
+        ['seasons', value.brandId],
+        (current) =>
+          current?.some((item) => item.id === season.id)
+            ? current
+            : [...(current ?? []), season],
+      )
+      await queryClient.invalidateQueries({ queryKey: ['seasons', value.brandId] })
+    }
+    await saveDraftChange(draftId, (current) => ({
+      ...draftToInput(current),
+      brandId: value.brandId,
+      seasonId,
     }))
+    setTempGroups((prev) => prev.filter((group) => group.id !== value.group.id))
+    setAssignments((prev) => {
+      if (!prev[draftId]) return prev
+      const next = { ...prev }
+      delete next[draftId]
+      return next
+    })
     closeScheduleDialog()
   }
 
-  function clearSchedulePreview(draftId: string) {
-    setAssignments((prev) => ({
-      ...prev,
-      [draftId]: {
-        brandId: prev[draftId]?.brandId ?? null,
-        groupId: null,
-        targetDate: null,
-        certainty: 'tentative',
-      },
+  async function clearSchedule(draftId: string) {
+    await saveDraftChange(draftId, (current) => ({
+      ...draftToInput(current),
+      seasonId: null,
     }))
+    setAssignments((prev) => {
+      if (!prev[draftId]) return prev
+      const next = { ...prev }
+      delete next[draftId]
+      return next
+    })
     closeScheduleDialog()
   }
 
   return (
     <div>
       <div className="mb-4 flex flex-wrap items-center gap-2">
+        <BrandStatCard
+          label="전체"
+          badge={{ name: 'ALL', color: '#343a40', logoUrl: null }}
+          total={allScopeCounts.total}
+          pending={allScopeCounts.pending}
+          scheduled={allScopeCounts.scheduled}
+          selected={brandScope === 'all'}
+          onSelect={() => setBrandScope('all')}
+        />
         {brandCards.map((card) => (
           <BrandStatCard
             key={card.brand.id}
-            brand={card.brand}
+            label={card.brand.name}
+            badge={card.brand}
             total={card.total}
             pending={card.pending}
             scheduled={card.scheduled}
@@ -404,8 +485,13 @@ export function CompanyDraftsPage() {
             }
           />
         ))}
-        {unassignedBrandCount > 0 ? (
-          <ScopeChip
+        {unassignedScopeCounts.total > 0 ? (
+          <BrandStatCard
+            label="브랜드 미정"
+            badge={{ name: '미정', color: '#8a8e94', logoUrl: null }}
+            total={unassignedScopeCounts.total}
+            pending={unassignedScopeCounts.pending}
+            scheduled={unassignedScopeCounts.scheduled}
             selected={brandScope === UNASSIGNED_DRAFT_BRAND}
             onSelect={() =>
               setBrandScope(
@@ -414,17 +500,8 @@ export function CompanyDraftsPage() {
                   : UNASSIGNED_DRAFT_BRAND,
               )
             }
-          >
-            브랜드 미정 {formatNumber(unassignedBrandCount)}
-          </ScopeChip>
+          />
         ) : null}
-        <Link
-          to={newHref}
-          title="기획안 추가"
-          className="inline-flex size-9 items-center justify-center rounded-md border border-border bg-white text-foreground hover:bg-muted"
-        >
-          <Plus className="size-4" />
-        </Link>
       </div>
 
       <div className="mb-3 flex flex-col gap-3 border-b border-[#ead7b0] pb-3 lg:flex-row lg:items-end lg:justify-between">
@@ -453,12 +530,56 @@ export function CompanyDraftsPage() {
             <div>미확정 : 기획 {formatNumber(sheetCounts.planningOpen)}건</div>
             <div>미확정 : MD {formatNumber(sheetCounts.mdOpen)}건</div>
           </div>
-          <DraftFolderBar folders={folderItems} selectedIds={selectedFolderIds} unassignedCount={unassignedFolderCount} onSelect={setFolderFilter} />
+          <DraftFolderBar
+            folders={folderItems}
+            brands={brands.map((brand) => ({ id: brand.id, name: brand.name }))}
+            defaultBrandId={scopedBrand?.id}
+            selectedIds={selectedFolderIds}
+            unassignedCount={unassignedFolderCount}
+            onSelect={setFolderFilter}
+            onCreate={async (value) => {
+              await createSeason(value.brandId, {
+                name: value.name,
+                releaseTiming: '',
+              })
+              await queryClient.invalidateQueries({ queryKey: ['seasons', value.brandId] })
+            }}
+          />
         </div>
+        <Link
+          to={newHref}
+          className="inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-md bg-[#c60920] px-3 text-xs font-medium text-white hover:bg-[#b30920] lg:mb-1 lg:self-end"
+        >
+          <Plus className="size-3.5" />
+          기획안 추가
+        </Link>
       </div>
 
       {draftsQuery.isError ? (
         <p className="mb-3 text-sm text-danger">기획안을 불러오지 못했습니다.</p>
+      ) : null}
+
+      {activeFolder ? (
+        <DraftFolderHeading
+          folder={activeFolder}
+          onUpdate={async (id, name) => {
+            const season = seasonMap.get(id)
+            const updated = await updateSeason(id, {
+              name,
+              releaseTiming: '',
+              status: season?.status,
+            })
+            await queryClient.invalidateQueries({ queryKey: ['seasons', updated.brandId] })
+          }}
+          onDelete={async (id) => {
+            const season = seasonMap.get(id)
+            await deleteSeason(id)
+            if (folderFilter === id) setFolderFilter('all')
+            if (season) {
+              await queryClient.invalidateQueries({ queryKey: ['seasons', season.brandId] })
+            }
+          }}
+        />
       ) : null}
 
       <div className="draft-board-scroll" role="region" aria-label="기획안 목록" tabIndex={0}>
@@ -531,18 +652,146 @@ export function CompanyDraftsPage() {
                         }
                       })
                     }}
-                    onRenameProduct={async (name) => {
+                    onRenameProduct={async (field, name) => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
-                        const field = current.nameEn.trim() ? 'nameEn' : 'nameKo'
-                        const other =
-                          field === 'nameEn'
-                            ? current.nameKo.trim()
-                            : current.nameEn.trim()
+                        const other = field === 'nameKo' ? current.nameEn.trim() : current.nameKo.trim()
                         if (!name && !other) {
                           throw new Error('상품 이름을 비울 수 없습니다.')
                         }
                         return { ...input, [field]: name }
+                      })
+                    }}
+                    onSaveSheetValue={async (colorId, field, value, applyAll) => {
+                      await saveDraftChange(draft.id, (current) => {
+                        const input = draftToInput(current)
+                        const ids = applyAll
+                          ? input.colors.map((color) => color.id)
+                          : [colorId]
+                        if (!ids.length || (!applyAll && !input.colors.some((color) => color.id === colorId))) {
+                          throw new Error('컬러를 찾지 못했습니다.')
+                        }
+                        const stored = field === 'size' ? parseSizeSpecInput(value) : value.trim()
+                        return {
+                          ...input,
+                          specs: writeColorSpec(input.specs, ids, field, stored),
+                        }
+                      })
+                    }}
+                    onUploadSampleWorkOrder={async (file) => {
+                      await saveDraftChange(draft.id, (current) => {
+                        const input = draftToInput(current)
+                        const sampleWorkOrders = attachSampleWorkOrderFile(
+                          input.sampleWorkOrders,
+                          file,
+                        )
+                        return {
+                          ...input,
+                          sampleWorkOrders,
+                          ...legacyWorkOrderFields(sampleWorkOrders),
+                        }
+                      })
+                    }}
+                    onPassColorSample={async () => {
+                      await saveDraftChange(draft.id, (current) => {
+                        const input = draftToInput(current)
+                        const rounds = resolveColorSampleRounds(current)
+                        const next = passLatestColorSampleRound(rounds)
+                        if (!next[next.length - 1]?.passed) {
+                          throw new Error('돌아온 컬러 샘플만 합격할 수 있습니다.')
+                        }
+                        return {
+                          ...input,
+                          specs: { ...input.specs, colorSampleRounds: next },
+                        }
+                      })
+                    }}
+                    onRequestNextColorSampleRound={async () => {
+                      await saveDraftChange(draft.id, (current) => {
+                        const input = draftToInput(current)
+                        const rounds = resolveColorSampleRounds(current)
+                        const before = rounds[rounds.length - 1]?.round
+                        const next = requestNextColorSampleRound(rounds)
+                        const latest = next[next.length - 1]
+                        if (!latest || latest.round === before) {
+                          throw new Error('다음 차수로 넘기지 못했습니다.')
+                        }
+                        return {
+                          ...input,
+                          specs: {
+                            ...input.specs,
+                            colorSampleRounds: next,
+                          },
+                        }
+                      })
+                    }}
+                    onUploadColorWorkOrder={async (file) => {
+                      await saveDraftChange(draft.id, (current) => {
+                        const input = draftToInput(current)
+                        const colors = input.colors.length > 0 ? input.colors : [newColorRow()]
+                        const requestedAt = new Date().toISOString()
+                        return {
+                          ...input,
+                          specs: {
+                            ...input.specs,
+                            colorSampleRequestedAt: requestedAt,
+                            colorSampleRounds: [
+                              newColorSampleRound(1, file, requestedAt),
+                            ],
+                          },
+                          colors: colors.map((color) => ({
+                            ...color,
+                            sampleWorkOrderUrl: file.url,
+                            sampleWorkOrderName: file.name,
+                            sampleWorkOrderShipped: false,
+                            sampleWorkOrderShippedAt: null,
+                            sampleInProgress: true,
+                          })),
+                        }
+                      })
+                    }}
+                    onRequestNextSampleRound={async () => {
+                      await saveDraftChange(draft.id, (current) => {
+                        const input = draftToInput(current)
+                        const before = latestFilledSampleWorkOrder(input.sampleWorkOrders)?.round
+                        const sampleWorkOrders = requestNextSampleRound(input.sampleWorkOrders)
+                        if (latestFilledSampleWorkOrder(sampleWorkOrders)?.round === before) {
+                          throw new Error('다음 차수로 넘기지 못했습니다.')
+                        }
+                        return {
+                          ...input,
+                          sampleWorkOrders,
+                          ...legacyWorkOrderFields(sampleWorkOrders),
+                          sampleDone: false,
+                        }
+                      })
+                    }}
+                    onPassSample={async () => {
+                      await saveDraftChange(draft.id, (current) => {
+                        const input = draftToInput(current)
+                        const sampleWorkOrders = setLatestSampleWorkOrderPassed(
+                          input.sampleWorkOrders,
+                          true,
+                        )
+                        if (!latestFilledSampleWorkOrder(sampleWorkOrders)?.passed) {
+                          throw new Error('돌아온 샘플만 합격할 수 있습니다.')
+                        }
+                        return {
+                          ...input,
+                          sampleWorkOrders,
+                          ...legacyWorkOrderFields(sampleWorkOrders),
+                          sampleDone: true,
+                          orderInProgress: false,
+                        }
+                      })
+                    }}
+                    onToggleConfirm={async (flag: DraftConfirmFlag, next) => {
+                      await saveDraftChange(draft.id, (current) => {
+                        const input = draftToInput(current)
+                        return {
+                          ...input,
+                          specs: { ...input.specs, [flag]: next },
+                        }
                       })
                     }}
                     onRenameColor={async (colorId, name) => {
@@ -581,13 +830,13 @@ export function CompanyDraftsPage() {
         groups={previewGroups}
         initial={scheduleDraftResolved}
         onClose={closeScheduleDialog}
-        onApply={(value) => {
+        onApply={async (value) => {
           if (!scheduleDraft) return
-          applySchedulePreview(scheduleDraft.id, value)
+          await applySchedule(scheduleDraft.id, value)
         }}
-        onClear={() => {
+        onClear={async () => {
           if (!scheduleDraft) return
-          clearSchedulePreview(scheduleDraft.id)
+          await clearSchedule(scheduleDraft.id)
         }}
       />
     </div>
@@ -595,14 +844,16 @@ export function CompanyDraftsPage() {
 }
 
 function BrandStatCard({
-  brand,
+  label,
+  badge,
   total,
   pending,
   scheduled,
   selected,
   onSelect,
 }: {
-  brand: Brand
+  label: string
+  badge: Pick<Brand, 'name' | 'color' | 'logoUrl'>
   total: number
   pending: number
   scheduled: number
@@ -613,7 +864,7 @@ function BrandStatCard({
     <button
       type="button"
       aria-pressed={selected}
-      title={selected ? '다시 누르면 전체 브랜드' : brand.name}
+      title={selected && label !== '전체' ? '다시 누르면 전체 브랜드' : label}
       onClick={onSelect}
       className={cn(
         'inline-flex min-w-[168px] items-center gap-2 rounded-full border bg-white px-1.5 py-1 text-left',
@@ -623,13 +874,13 @@ function BrandStatCard({
       )}
     >
       <BrandAvatar
-        brand={brand}
+        brand={badge}
         className="size-9 rounded-full text-[10px]"
         textClassName="text-[10px]"
       />
       <span className="min-w-0">
         <span className="block truncate text-[11px] font-semibold tracking-wide">
-          {brand.name}
+          {label}
         </span>
         <span className="mt-0.5 flex items-baseline gap-1.5 text-[10px] text-muted-foreground">
           <span className="text-sm font-semibold tabular-nums text-foreground">
@@ -668,32 +919,6 @@ function BoardFilterChip({
     >
       {label}{' '}
       <span className="tabular-nums">{formatNumber(count)}</span>
-    </button>
-  )
-}
-
-function ScopeChip({
-  selected,
-  onSelect,
-  children,
-}: {
-  selected: boolean
-  onSelect: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      onClick={onSelect}
-      className={cn(
-        'inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-xs transition-colors',
-        selected
-          ? 'border-foreground bg-background font-medium text-foreground'
-          : 'border-border bg-background/60 text-muted-foreground hover:bg-muted/70 hover:text-foreground',
-      )}
-    >
-      {children}
     </button>
   )
 }

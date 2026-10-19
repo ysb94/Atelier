@@ -13,10 +13,8 @@ import { BarcodePage } from '@/features/codes/BarcodePage'
 import { UsageCodePage } from '@/features/codes/UsageCodePage'
 import { PartnerCodePage } from '@/features/codes/PartnerCodePage'
 import { FieldsSettingsPage } from '@/features/settings/FieldsSettingsPage'
-import { SeasonsSettingsPage } from '@/features/settings/SeasonsSettingsPage'
 import { UsageTargetsSettingsPage } from '@/features/settings/UsageTargetsSettingsPage'
 import { ImportSettingsPage } from '@/features/settings/ImportSettingsPage'
-import { BrandSettingsPage } from '@/features/settings/BrandSettingsPage'
 import { AiSettingsPage } from '@/features/settings/AiSettingsPage'
 import { DataSheetPage } from '@/features/data/DataSheetPage'
 import { DataUploadPage } from '@/features/data/DataUploadPage'
@@ -28,8 +26,16 @@ import { WarehousePage } from '@/features/logistics/WarehousePage'
 import { WarehouseFinderPage } from '@/features/logistics/WarehouseFinderPage'
 import { TemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
 
-function RedirectCompany({ to }: { to: string }) {
-  return <Navigate to={to} replace />
+function RedirectCompany({
+  to,
+  preserveSearch = false,
+}: {
+  to: string
+  preserveSearch?: boolean
+}) {
+  const [searchParams] = useSearchParams()
+  const search = preserveSearch ? searchParams.toString() : ''
+  return <Navigate to={search ? `${to}?${search}` : to} replace />
 }
 
 function RedirectCompanyWork() {
@@ -90,6 +96,14 @@ export function BrandWorkspaceRouteTree() {
       <Route path="drafts/all" element={<AllDraftsPage />} />
       <Route path="drafts/season/:seasonCode" element={<SeasonDraftsPage />} />
       <Route path="drafts/:draftId" element={<DraftEditPage />} />
+      <Route
+        path="work/planning/*"
+        element={<RedirectCompany to="/products" preserveSearch />}
+      />
+      <Route
+        path="work/design/*"
+        element={<RedirectCompany to="/products" preserveSearch />}
+      />
       <Route path="work/:owner" element={<DepartmentProductsPage />}>
         <Route path=":styleNo" element={<ProductDetailDrawer />} />
       </Route>
@@ -130,7 +144,7 @@ export function BrandWorkspaceRouteTree() {
         element={<RedirectTo to="operations" />}
       />
       <Route path="settings/fields" element={<FieldsSettingsPage />} />
-      <Route path="settings/seasons" element={<SeasonsSettingsPage />} />
+      <Route path="settings/seasons" element={<RedirectTo to="drafts" />} />
       <Route
         path="settings/usage-targets"
         element={<UsageTargetsSettingsPage />}
@@ -138,15 +152,24 @@ export function BrandWorkspaceRouteTree() {
       <Route path="settings/import" element={<ImportSettingsPage />} />
       <Route path="settings/members" element={<RedirectCompany to="/members" />} />
       <Route path="settings/ai" element={<AiSettingsPage />} />
-      <Route path="settings/brand" element={<BrandSettingsPage />} />
+      <Route
+        path="settings/brand"
+        element={<RedirectCompany to="/brands" />}
+      />
       <Route path="upload" element={<RedirectTo to="data/upload" />} />
       <Route path="import" element={<RedirectTo to="data/upload" />} />
-      <Route path="planning" element={<RedirectTo to="work/planning" />} />
+      <Route
+        path="planning"
+        element={<RedirectCompany to="/products" preserveSearch />}
+      />
       <Route
         path="design/file-manager"
         element={<DesignFileManagerRoute />}
       />
-      <Route path="design" element={<RedirectTo to="work/design" />} />
+      <Route
+        path="design"
+        element={<RedirectCompany to="/products" preserveSearch />}
+      />
       <Route path="md" element={<RedirectTo to="work/md" />} />
       <Route path="logistics" element={<RedirectTo to="work/logistics" />} />
       <Route path="*" element={<RedirectHome />} />

@@ -11,6 +11,52 @@ function newId() {
   return `swo-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+export function sheetDay(value: string | null) {
+  if (!value) return ''
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`
+}
+
+export function sampleElapsedDays(value: string | null, now = new Date()) {
+  if (!value) return null
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return null
+  const start = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  return Math.max(0, Math.round((today.getTime() - start.getTime()) / 86_400_000))
+}
+
+export function sampleElapsedDaysLabel(value: string | null, now = new Date()) {
+  const days = sampleElapsedDays(value, now)
+  if (days == null) return ''
+  return `${days}일 경과`
+}
+
+export function draftStatePercent(draft: {
+  nameKo: string
+  nameEn: string
+  colors: readonly unknown[]
+  sampleDone: boolean
+  orderInProgress: boolean
+  orderDone: boolean
+  photoSampleDone: boolean
+  costConfirmed: boolean
+  retailPrice: number | null
+}) {
+  const flags = [
+    Boolean(draft.nameKo.trim() || draft.nameEn.trim()),
+    draft.colors.length > 0,
+    draft.sampleDone,
+    draft.orderInProgress,
+    draft.orderDone,
+    draft.photoSampleDone,
+    draft.costConfirmed,
+    draft.retailPrice != null,
+  ]
+  return Math.round((flags.filter(Boolean).length / flags.length) * 100)
+}
+
 export function newSampleWorkOrder(round = 1): DraftSampleWorkOrder {
   return {
     id: newId(),
@@ -19,9 +65,13 @@ export function newSampleWorkOrder(round = 1): DraftSampleWorkOrder {
     name: '',
     shipped: false,
     shippedAt: null,
+    returnedAt: null,
     passed: false,
     passedAt: null,
     failReason: '',
+    assigneeId: null,
+    assigneeName: '',
+    fileCheckedAt: null,
   }
 }
 
@@ -166,7 +216,9 @@ export function sanitizeSampleWorkOrders(
     round: index + 1,
     name: order.name.trim(),
     shipped: Boolean(order.shipped),
-    shippedAt: order.shipped ? (order.shippedAt ?? new Date().toISOString()) : null,
+    shippedAt: order.url?.trim() ? (order.shippedAt ?? null) : null,
+    returnedAt:
+      order.shipped && order.returnedAt ? order.returnedAt : null,
     passed: Boolean(order.shipped && order.passed),
     passedAt:
       order.shipped && order.passed
@@ -193,18 +245,19 @@ export function setSampleWorkOrderShipped(
   shipped: boolean,
   at = new Date().toISOString(),
 ) {
-  return orders.map((order) =>
-    order.id === id
-      ? {
-          ...order,
-          shipped,
-          shippedAt: shipped ? (order.shippedAt ?? at) : null,
-          passed: shipped ? order.passed : false,
-          passedAt: shipped ? order.passedAt : null,
-          failReason: shipped ? order.failReason : '',
-        }
-      : order,
-  )
+  return orders.map((order) => {
+    if (order.id !== id) return order
+    return {
+      ...order,
+      shipped,
+      returnedAt: shipped
+        ? (order.returnedAt ?? (order.shipped ? null : at))
+        : null,
+      passed: shipped ? order.passed : false,
+      passedAt: shipped ? order.passedAt : null,
+      failReason: shipped ? order.failReason : '',
+    }
+  })
 }
 
 export function setLatestSampleWorkOrderShipped(
@@ -236,6 +289,90 @@ export function setLatestSampleWorkOrderPassed(
   )
 }
 
+export function attachSampleWorkOrderFile(
+  orders: readonly DraftSampleWorkOrder[] | null | undefined,
+  file: { url: string; name: string },
+  sentAt = new Date().toISOString(),
+): DraftSampleWorkOrder[] {
+  const url = file.url.trim()
+  const name = file.name.trim()
+  const list = orders?.length ? orders.map((order) => ({ ...order })) : [newSampleWorkOrder(1)]
+  if (!url) return list
+  const pendingIndex = list.findIndex((order) => !order.url?.trim())
+  const attached = {
+    url,
+    name,
+    shipped: false,
+    shippedAt: sentAt,
+    returnedAt: null,
+    passed: false,
+    passedAt: null,
+    failReason: '',
+    assigneeId: null,
+    assigneeName: '',
+    fileCheckedAt: null,
+  }
+  const pending = pendingIndex >= 0 ? list[pendingIndex] : undefined
+  if (pending) {
+    list[pendingIndex] = { ...pending, ...attached }
+    return list
+  }
+  const round = Math.max(0, ...list.map((order) => order.round)) + 1
+  return [...list, { ...newSampleWorkOrder(round), ...attached }]
+}
+
+/** 같은 작업지시서로 다음 차수를 다시 요청한다. 파일은 바꾸지 않는다. */
+export function requestNextSampleRound(
+  orders: readonly DraftSampleWorkOrder[] | null | undefined,
+  at = new Date().toISOString(),
+): DraftSampleWorkOrder[] {
+  const list = orders?.length ? orders.map((order) => ({ ...order })) : []
+  const latest = latestFilledSampleWorkOrder(list)
+  if (!latest?.url || !latest.returnedAt || latest.passed || latest.failReason.trim()) return list
+  if (list.some((order) => !order.url?.trim())) return list
+  const round = Math.max(0, ...list.map((order) => order.round)) + 1
+  return [
+    ...list,
+    {
+      ...newSampleWorkOrder(round),
+      url: latest.url,
+      name: latest.name,
+      shippedAt: at,
+      assigneeId: latest.assigneeId,
+      assigneeName: latest.assigneeName,
+    },
+  ]
+}
+
+export function setSampleWorkOrderAssignee(
+  orders: DraftSampleWorkOrder[],
+  id: string,
+  assigneeId: string | null,
+  assigneeName: string,
+) {
+  return orders.map((order) =>
+    order.id === id
+      ? {
+          ...order,
+          assigneeId,
+          assigneeName: assigneeId ? assigneeName.trim() : '',
+        }
+      : order,
+  )
+}
+
+export function setSampleWorkOrderFileChecked(
+  orders: DraftSampleWorkOrder[],
+  id: string,
+  at = new Date().toISOString(),
+) {
+  return orders.map((order) =>
+    order.id === id && !order.fileCheckedAt
+      ? { ...order, fileCheckedAt: at }
+      : order,
+  )
+}
+
 export function patchSampleWorkOrder(
   orders: DraftSampleWorkOrder[],
   id: string,
@@ -249,6 +386,7 @@ export function patchSampleWorkOrder(
       next.name = ''
       next.shipped = false
       next.shippedAt = null
+      next.returnedAt = null
       next.passed = false
       next.passedAt = null
       next.failReason = ''
@@ -298,9 +436,13 @@ export function normalizeSampleWorkOrders(
         name: fallbackName?.trim() ?? '',
         shipped: false,
         shippedAt: null,
+        returnedAt: null,
         passed: false,
         passedAt: null,
         failReason: '',
+        assigneeId: null,
+        assigneeName: '',
+        fileCheckedAt: null,
       },
     ]
   }
@@ -319,8 +461,15 @@ function parseSampleWorkOrder(value: unknown): DraftSampleWorkOrder | null {
     name: typeof row.name === 'string' ? row.name : '',
     shipped: Boolean(url && row.shipped),
     shippedAt:
-      url && row.shipped && typeof row.shippedAt === 'string'
+      url && typeof row.shippedAt === 'string' && row.shippedAt
         ? row.shippedAt
+        : null,
+    returnedAt:
+      url &&
+      row.shipped &&
+      typeof row.returnedAt === 'string' &&
+      row.returnedAt
+        ? row.returnedAt
         : null,
     passed: Boolean(url && row.shipped && row.passed),
     passedAt:
@@ -331,6 +480,16 @@ function parseSampleWorkOrder(value: unknown): DraftSampleWorkOrder | null {
       url && !row.passed && typeof row.failReason === 'string'
         ? row.failReason
         : '',
+    assigneeId:
+      url && typeof row.assigneeId === 'string' && row.assigneeId
+        ? row.assigneeId
+        : null,
+    assigneeName:
+      url && typeof row.assigneeName === 'string' ? row.assigneeName.trim() : '',
+    fileCheckedAt:
+      url && typeof row.fileCheckedAt === 'string' && row.fileCheckedAt
+        ? row.fileCheckedAt
+        : null,
   }
 }
 

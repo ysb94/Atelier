@@ -11,7 +11,7 @@
     { "id": "chat", "label": "사내 채팅 · 알림", "description": "회사 소유 채팅방, 메시지, 첨부와 받은 알림", "features": ["chat"], "libs": ["chat", "inbox"], "stores": ["chat", "inbox", "notification"], "functions": ["chat-files-cleanup"] },
     { "id": "md", "label": "MD · 가격 비교", "description": "업체별 상품 URL과 가격 수집·확인", "features": ["md"], "libs": [], "stores": ["md-"], "functions": ["md-price-refresh"], "shared": ["md-price-"] },
     { "id": "operations-support", "label": "운영지원 · 근태", "description": "휴가·야근 신청, 부서별 승인자와 출근 기준. 실제 연결 여부는 코드에서 확인", "features": ["operations-support"], "libs": [], "stores": ["leave-", "attendance-start-", "department-request-"] },
-    { "id": "company", "label": "조직 · 회의 · 브랜드", "description": "회사 공통 조직, 멤버, 회의와 브랜드 관리", "features": ["org", "meetings", "brands"], "libs": ["company"], "stores": ["profiles", "brands", "companies", "departments", "personnel-", "meetings", "company-schedule"] },
+    { "id": "company", "label": "조직 · 회의 · 브랜드", "description": "회사 공통 조직, 멤버, 회의, 브랜드 관리와 사내 공모 접수함", "features": ["org", "meetings", "brands", "mamam"], "libs": ["company"], "stores": ["profiles", "brands", "companies", "departments", "personnel-", "meetings", "company-schedule", "mamam-"] },
     { "id": "settings", "label": "설정 · 마이페이지", "description": "프로필, 개인 신청·근태, 상품 항목과 브랜드 설정", "features": ["settings"], "libs": [], "stores": ["brand-fields", "brand-field-options"] },
     { "id": "china", "label": "중국팀 · 작업 지시서", "description": "샘플 작업 지시서와 기획안 연결", "features": ["china"], "libs": [], "stores": ["sample-"] },
     { "id": "auth", "label": "로그인 · 승인", "description": "세션, 접근 신청, 승인 대기와 본명 확인", "features": ["auth"], "libs": [], "stores": ["auth", "access-"] },

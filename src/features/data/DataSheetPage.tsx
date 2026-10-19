@@ -618,7 +618,7 @@ export function DataSheetPage() {
     Boolean(blankKey)
 
   const pageTitle =
-    owner === 'all' ? '전체 상품' : `${sheetOwnerLabel(owner)} 시트`
+    owner === 'all' ? '상품 데이터' : `${sheetOwnerLabel(owner)} 시트`
   const querySuffix = searchParams.toString()
   const detailQuery = querySuffix ? `?${querySuffix}` : ''
   const uploadHref = singleBrand ? dataUploadHref(singleBrand.slug) : '/data/upload'

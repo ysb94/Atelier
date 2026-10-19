@@ -262,12 +262,20 @@ export type DraftSampleWorkOrder = {
   url: string | null
   name: string
   shipped: boolean
+  /** 작업지시서를 올려 중국팀에 요청한 시각 */
   shippedAt: string | null
+  /** 중국팀이 발송 완료를 누른 시각. 예전 기록에는 없을 수 있다. */
+  returnedAt: string | null
   /** 기획이 도착 샘플을 합격했는지. 합격하면 컬러별 샘플로 넘어간다. */
   passed: boolean
   passedAt: string | null
   /** 불합격일 때 다음 샘플에서 볼 점 */
   failReason: string
+  /** 중국팀 담당 직원 */
+  assigneeId: string | null
+  assigneeName: string
+  /** 작업 지시서 파일을 받아 확인한 시각 */
+  fileCheckedAt: string | null
 }
 
 /** 기획안에 함께 붙여 판매할 상품 한 줄 */
@@ -291,6 +299,42 @@ export type DraftSpec = {
 }
 
 export type DraftSpecKey = 'size' | 'weight' | 'fabric' | 'coating'
+
+/** 시트 INFORMATION 칸의 컬러 한 줄. 상품 공통 스펙과 따로 저장한다. */
+export type DraftColorSpec = {
+  size: string
+  fabric: string
+  weight: string
+  specDoc: string
+}
+
+export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
+  colorSpecs: Record<string, DraftColorSpec>
+  /** 상품명 최종 확정. 출시 전에도 이름은 고칠 수 있다. */
+  nameConfirmed?: boolean
+  /** 컬러 종류 확정. 컬러 샘플 작업지시서를 보내는 조건이다. */
+  colorsConfirmed?: boolean
+  /** 컬러명 최종 확정. 다른 부서가 이 이름을 보고 일한다. */
+  colorNamesConfirmed?: boolean
+  /** 컬러 샘플 작업지시서를 올린 시각. 대표 샘플 확정 뒤의 요청일이다. */
+  colorSampleRequestedAt?: string | null
+  /** 컬러 샘플 차수. 파일은 같고, 요청·회신·합격만 차수마다 남긴다. */
+  colorSampleRounds?: DraftColorSampleRound[]
+}
+
+/** 컬러 샘플 작업지시서 한 차수. 대표 샘플과 같이 회신 뒤에 합격 또는 다음 차수로 간다. */
+export type DraftColorSampleRound = {
+  id: string
+  /** 1부터. 1차, 2차, 3차… */
+  round: number
+  url: string
+  name: string
+  /** 작업지시서를 올려 중국팀에 요청한 시각 */
+  shippedAt: string | null
+  /** 중국팀이 발송 완료를 누른 시각 */
+  returnedAt: string | null
+  passed: boolean
+}
 
 export type ProductDraft = {
   id: string
@@ -335,7 +379,7 @@ export type ProductDraft = {
   openType: string
   openTypeDetail: string
   releaseIssue: string
-  specs: Record<DraftSpecKey, DraftSpec>
+  specs: DraftSpecs
   hasOptions: boolean
   options: DraftOptionRow[]
   note: string

@@ -1,5 +1,5 @@
 import { lazy, Suspense, type ReactNode } from 'react'
-import { Navigate, Outlet, Route, useParams } from 'react-router-dom'
+import { Navigate, Outlet, Route, useParams, useSearchParams } from 'react-router-dom'
 import { BrandTargetGate } from '@/components/layout/BrandTargetGate'
 import { CompanyBrandScopeProvider } from '@/components/layout/company-brand-scope'
 import { CompanyHomePage } from '@/features/home/CompanyHomePage'
@@ -24,9 +24,7 @@ import { CompanyUsageCodePage } from '@/features/codes/UsageCodePage'
 import { CompanyPartnerCodePage } from '@/features/codes/PartnerCodePage'
 import { FieldsSettingsPage } from '@/features/settings/FieldsSettingsPage'
 import { ProductCategorySettingsPage } from '@/features/settings/ProductCategorySettingsPage'
-import { SeasonsSettingsPage } from '@/features/settings/SeasonsSettingsPage'
 import { UsageTargetsSettingsPage } from '@/features/settings/UsageTargetsSettingsPage'
-import { BrandSettingsPage } from '@/features/settings/BrandSettingsPage'
 import { AiSettingsPage } from '@/features/settings/AiSettingsPage'
 import { CompanyDataSheetPage } from '@/features/data/DataSheetPage'
 import { DataUploadPage } from '@/features/data/DataUploadPage'
@@ -40,10 +38,19 @@ import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
 import { CompanyTemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
 import { PriceComparePage } from '@/features/md/PriceComparePage'
 import { OperationsSupportPage } from '@/features/operations-support/OperationsSupportPage'
+import { MamamIdeaInboxPage } from '@/features/mamam/MamamIdeaInboxPage'
 import { DeveloperPreviewPage } from './DeveloperPreview'
 
-function RedirectTo({ to }: { to: string }) {
-  return <Navigate to={to} replace />
+function RedirectTo({
+  to,
+  preserveSearch = false,
+}: {
+  to: string
+  preserveSearch?: boolean
+}) {
+  const [searchParams] = useSearchParams()
+  const search = preserveSearch ? searchParams.toString() : ''
+  return <Navigate to={search ? `${to}?${search}` : to} replace />
 }
 
 const DesignFileManagerPage = lazy(async () => {
@@ -125,6 +132,22 @@ export const companyWorkspaceRoutes = (
         path="drafts/:legacyBrandSlug/:draftId"
         element={<LegacyDraftRedirect />}
       />
+      <Route
+        path="product-work/planning/:brandSlug/:styleNo"
+        element={<RedirectTo to="/products" preserveSearch />}
+      />
+      <Route
+        path="product-work/planning/*"
+        element={<RedirectTo to="/products" preserveSearch />}
+      />
+      <Route
+        path="product-work/design/:brandSlug/:styleNo"
+        element={<RedirectTo to="/products" preserveSearch />}
+      />
+      <Route
+        path="product-work/design/*"
+        element={<RedirectTo to="/products" preserveSearch />}
+      />
       <Route path="product-work/:owner" element={<DepartmentProductsPage />}>
         <Route
           path=":brandSlug/:styleNo"
@@ -181,6 +204,7 @@ export const companyWorkspaceRoutes = (
       <Route path="usage-codes" element={<CompanyUsageCodePage />} />
       <Route path="partner-codes" element={<CompanyPartnerCodePage />} />
       <Route path="operations-support" element={<OperationsSupportPage />} />
+      <Route path="idea-contest" element={<MamamIdeaInboxPage />} />
       <Route path="operations" element={<CompanyOutboundDataPage />} />
       <Route path="outbound-data" element={<RedirectTo to="/operations" />} />
       <Route
@@ -199,14 +223,7 @@ export const companyWorkspaceRoutes = (
           </Gated>
         }
       />
-      <Route
-        path="settings/seasons"
-        element={
-          <Gated>
-            <SeasonsSettingsPage />
-          </Gated>
-        }
-      />
+      <Route path="settings/seasons" element={<Navigate to="/drafts" replace />} />
       <Route
         path="settings/usage-targets"
         element={
@@ -224,21 +241,17 @@ export const companyWorkspaceRoutes = (
           </Gated>
         }
       />
-      <Route
-        path="settings/brand"
-        element={
-          <Gated>
-            <BrandSettingsPage />
-          </Gated>
-        }
-      />
+      <Route path="settings/brand" element={<RedirectTo to="/brands" />} />
       <Route path="upload" element={<RedirectTo to="/data/upload" />} />
       <Route path="import" element={<RedirectTo to="/data/upload" />} />
       <Route
         path="planning"
-        element={<RedirectTo to="/product-work/planning" />}
+        element={<RedirectTo to="/products" preserveSearch />}
       />
-      <Route path="design" element={<RedirectTo to="/product-work/design" />} />
+      <Route
+        path="design"
+        element={<RedirectTo to="/products" preserveSearch />}
+      />
       <Route path="md/price-compare" element={<PriceComparePage />} />
       <Route path="md" element={<RedirectTo to="/product-work/md" />} />
       <Route

@@ -2,12 +2,23 @@ import fs from 'node:fs'
 import path from 'node:path'
 import readline from 'node:readline'
 import { spawn } from 'node:child_process'
-import { cursorCommand, inside, redact } from './settings.mjs'
+import { cursorCommand, inside, redact, toolDir } from './settings.mjs'
+import { applyCursorModel, configOptionsOf, resolveCursorSelection } from './cursor-model.mjs'
 import { childEnv } from './process.mjs'
 import { digest, readFile } from './workspace.mjs'
 import { prepareProbe } from './mcp.mjs'
+import { EnvironmentError, ModelUnavailable, modelProblem } from './errors.mjs'
 
 export class NeedsInput extends Error {}
+
+// The CLI sometimes emits a terminal transport error as an end_turn message.
+// That is not a completed implementation and must not reach a paid code review.
+export function cursorTransportProblem(report) {
+  const last=String(report??'').trim().split(/\r?\n/).at(-1)??''
+  return /^Error:\s*(?:RetriableError:|TransportError:|StreamDisconnectedError:|.*\b(?:ECONNRESET|ETIMEDOUT|Premature close|socket hang up)\b)/i.test(last)
+}
+
+const sameModel = (id, model) => id === model || String(id).startsWith(`${model}[`)
 
 export function readonlyMcpTool(title) {
   const [provider,tool,...rest]=title.split(':').map(value=>value.trim())
@@ -17,8 +28,30 @@ export function readonlyMcpTool(title) {
   return notion.has(tool)&&(provider==='notion'||provider===`notion-${tool}`)||supabase.has(tool)&&(provider==='supabase'||provider===`supabase-${tool}`)
 }
 
+function deletionLocations(call) {
+  if(call.locations?.length)return call.locations
+  // ACP permission requests omit locations, but name the exact file in title.
+  const title=String(call.title??'')
+  if(!['delete','edit'].includes(call.kind)||title==='Delete File'||!/^Delete(?: File)?\s+/.test(title))return []
+  const named=title.replace(/^Delete(?: File)?\s+/,'').replace(/^[`'"]|[`'"]$/g,'')
+  return named?[{path:named}]:[]
+}
+
 export function permissionDecision(params, files, root) {
   const call = params.toolCall ?? {}, title = String(call.title ?? ''), kind = call.kind
+  if(['delete','edit'].includes(kind)&&/^Delete(?: File)?(?:\s|$)/.test(title)) {
+    const locations=deletionLocations(call)
+    return locations.length>0&&locations.every(item=>{
+      try {
+        const target=inside(root,item.path),relative=path.relative(root,target).replaceAll('\\','/')
+        const named=title.replace(/^Delete(?: File)?\s*/,'').replace(/^[`'"]|[`'"]$/g,'').replaceAll('\\','/')
+        if(title!=='Delete File'&&![item.path.replaceAll('\\','/'),target.replaceAll('\\','/'),relative].includes(named))return false
+        const realRelative=path.relative(fs.realpathSync(root),fs.realpathSync(target))
+        return files.includes(relative)&&fs.lstatSync(target).isFile()&&!fs.lstatSync(target).isSymbolicLink()
+          &&!realRelative.startsWith('..')&&!path.isAbsolute(realRelative)
+      }catch{return false}
+    })
+  }
   if (/execute_sql|apply_migration|deploy|delete|insert|update.*database|create.*project/i.test(title)) return false
   // Never infer SQL read-only safety from a tool name/title. Writes and unknown tools require input.
   if (kind === 'read' || kind === 'search') return true
@@ -34,13 +67,31 @@ export function permissionDecision(params, files, root) {
   return false
 }
 
-export async function runCursor({ config, root, files, prompt, signal, onEvent = () => {} }) {
+// `model` is pinned with the CLI startup flag. Session metadata is checked only when the
+// server reports it; the returned `model` record never claims an unreported confirmation.
+export async function runCursor({ config, root, files, prompt, signal, onEvent = () => {}, model, expectedHashes = null }) {
+  if (model !== undefined && (typeof model !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(model))) throw new ModelUnavailable(`Cursor 모델 값이 올바르지 않습니다: ${String(model)}`, { provider: 'cursor', model })
   const executable = cursorCommand(config)
+  const expected = new Map(), hashState = new Map()
+  for (const file of files) {
+    const content = readFile(root, file)
+    const actual = content === null ? null : digest(content)
+    if (expectedHashes && Object.prototype.hasOwnProperty.call(expectedHashes, file) && actual !== expectedHashes[file])
+      throw new EnvironmentError(`계획에 사용한 파일 내용과 다릅니다: ${file}. 편집은 유지하고 다시 계획합니다.`, { retry: true, code: 'plan_stale' })
+    expected.set(file, content)
+    hashState.set(file, expectedHashes && Object.prototype.hasOwnProperty.call(expectedHashes, file) ? expectedHashes[file] : actual)
+  }
   const {probe}=await prepareProbe(config)
-  const env = childEnv(Object.fromEntries(['CURSOR_API_KEY', 'CURSOR_AUTH_TOKEN'].filter(k => config.env[k] || process.env[k]).map(k => [k, config.env[k] || process.env[k]])))
-  const child = spawn(executable.command, [...executable.args, '--workspace',probe,'--add-dir',root,'--sandbox', 'enabled','acp'], { cwd: probe, env, windowsHide: true, stdio: ['pipe','pipe','pipe'] })
-  const pending = new Map(), expected = new Map(files.map(file => [file, readFile(root, file)]))
-  let nextId = 1, text = '', inputNeeded = '', sessionId, closed = false
+  const sandboxPolicyDir = path.join(toolDir, '.runtime', 'cursor-sandbox-policy')
+  fs.mkdirSync(sandboxPolicyDir, { recursive: true })
+  const env = childEnv({
+    CURSOR_SANDBOX_POLICY_DIR: sandboxPolicyDir,
+    ...Object.fromEntries(['CURSOR_API_KEY', 'CURSOR_AUTH_TOKEN'].filter(k => config.env[k] || process.env[k]).map(k => [k, config.env[k] || process.env[k]])),
+  })
+  const child = spawn(executable.command, [...executable.args, ...(model ? ['--model', model] : []), '--workspace',probe,'--add-dir',root,'--sandbox', 'enabled','acp'], { cwd: probe, env, windowsHide: true, stdio: ['pipe','pipe','pipe'] })
+  const pending = new Map()
+  const modelInfo = { requested: model ?? null, startupFlag: !!model, sessionReported: null, sessionAvailableCount: null, setModel: 'not-needed' }
+  let nextId = 1, text = '', inputNeeded = '', sessionId, closed = false, stderrTail = ''
   function send(method, params) {
     return new Promise((resolve, reject) => {
       const id = nextId++; pending.set(id, { resolve, reject, method })
@@ -49,13 +100,17 @@ export async function runCursor({ config, root, files, prompt, signal, onEvent =
   }
   const respond = (id, result) => child.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\n')
   const failAll = error => { for (const p of pending.values()) p.reject(error); pending.clear() }
-  const stop = () => { if (!closed) { closed = true; child.stdin.end(); child.kill('SIGTERM'); failAll(new Error('Cursor 실행 종료')) } }
+  const stop = () => { if (!closed) { closed = true; child.stdin.end(); child.kill('SIGTERM'); failAll(new Error(inputNeeded || (signal?.aborted ? '작업 중지됨' : 'Cursor 실행 종료'))) } }
   const timer = setTimeout(() => { inputNeeded = 'Cursor 실행 시간 제한 초과'; stop() }, config.agentTimeoutMs)
   signal?.addEventListener('abort', stop, { once: true })
   child.once('error', failAll)
-  child.once('exit', code => failAll(new Error(`Cursor 프로세스 종료 (${code})`)))
+  child.once('exit', code => failAll(new Error(`Cursor 프로세스 종료 (${code}) ${stderrTail.slice(-600)}`.trim())))
   child.stdin.on('error', error => { if (error.code !== 'EPIPE') failAll(error) })
-  child.stderr.on('data', data => onEvent({ type: 'cursor-log', message: redact(String(data), config.env).slice(-2000) }))
+  child.stderr.on('data', data => {
+    const message = redact(String(data), config.env)
+    stderrTail = (stderrTail + message).slice(-2000)
+    onEvent({ type: 'cursor-log', message: message.slice(-2000) })
+  })
   const rl = readline.createInterface({ input: child.stdout })
   rl.on('line', line => {
     let msg
@@ -87,15 +142,22 @@ export async function runCursor({ config, root, files, prompt, signal, onEvent =
       if (msg.method === 'fs/write_text_file') {
         const file = path.relative(root, inside(root, msg.params.path)).replaceAll('\\','/')
         if (!files.includes(file)) throw new NeedsInput(`허용 범위 밖 수정 요청: ${file}`)
-        if (readFile(root, file) !== expected.get(file)) throw new NeedsInput(`작업 중 다른 변경 발견: ${file}`)
+        const current = readFile(root, file)
+        const currentHash = current === null ? null : digest(current)
+        if (current !== expected.get(file) || (hashState.has(file) && currentHash !== hashState.get(file))) throw new NeedsInput(`작업 중 다른 변경 발견: ${file}`)
         const parent = path.dirname(inside(root, file)); fs.mkdirSync(parent, { recursive: true })
         // Check the resolved parent too, to reject writes through directory symlinks.
         if (fs.realpathSync(root) !== fs.realpathSync(parent)) inside(fs.realpathSync(root), path.relative(fs.realpathSync(root), fs.realpathSync(parent)))
-        fs.writeFileSync(inside(root, file), msg.params.content, 'utf8'); expected.set(file, msg.params.content)
+        fs.writeFileSync(inside(root, file), msg.params.content, 'utf8'); expected.set(file, msg.params.content); hashState.set(file, digest(msg.params.content))
         onEvent({ type: 'cursor-write', file, hash: digest(msg.params.content) }); respond(msg.id, {}); return
       }
       if (msg.method === 'session/request_permission') {
-        const allowed = permissionDecision(msg.params, files, root)
+        let allowed = permissionDecision(msg.params, files, root)
+        if(msg.params.toolCall?.kind==='delete'||/^Delete(?: File)?(?:\s|$)/.test(msg.params.toolCall?.title??'')) {
+          const locations=deletionLocations(msg.params.toolCall)
+          if(allowed)allowed=locations.length>0&&locations.every(item=>{try{const file=path.relative(root,inside(root,item.path)).replaceAll('\\','/');return expected.has(file)&&readFile(root,file)===expected.get(file)}catch{return false}})
+          onEvent({type:'cursor-delete-permission',allowed,title:msg.params.toolCall.title,kind:msg.params.toolCall.kind,paths:locations.map(item=>path.relative(root,item.path)),metadataKeys:Object.keys(msg.params.toolCall),inputKeys:Object.keys(msg.params.toolCall.rawInput??{})})
+        }
         const option = msg.params.options?.find(o => o.kind === (allowed ? 'allow_once' : 'reject_once'))
         if (!allowed) inputNeeded = `도구 확인 필요: ${msg.params.toolCall?.title ?? msg.params.toolCall?.kind ?? '알 수 없는 요청'}`
         respond(msg.id, option ? { outcome: { outcome: 'selected', optionId: option.optionId } } : { outcome: { outcome: 'cancelled' } }); return
@@ -112,15 +174,50 @@ export async function runCursor({ config, root, files, prompt, signal, onEvent =
   })
   try {
     if (signal?.aborted) throw new Error('작업 중지됨')
-    await send('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: false }, clientInfo: { name: 'atelier-ai-workflow', version: '1.0.0' } })
+    await send('initialize', { protocolVersion: 1, clientCapabilities: { fs: { readTextFile: true, writeTextFile: true }, terminal: false, _meta: { parameterizedModelPicker: true } }, clientInfo: { name: 'atelier-ai-workflow', version: '1.0.0' } })
     await send('authenticate', { methodId: 'cursor_login' })
     // Session-provided HTTP MCPs use a different, project-scoped OAuth cache key.
     // Keep the already-authenticated CLI lease instead of replacing its clients.
     const session = await send('session/new', { cwd: root, mcpServers: [] }); sessionId = session.sessionId
-    onEvent({ type: 'cursor-session', sessionId })
+    const available = Array.isArray(session.models?.availableModels) ? session.models.availableModels.map(item => item?.modelId).filter(Boolean) : []
+    const sessionOptions = configOptionsOf(session)
+    modelInfo.sessionReported = session.models?.currentModelId ?? null
+    modelInfo.sessionAvailableCount = Array.isArray(session.models?.availableModels) ? available.length : null
+    modelInfo.effective = null
+    if (model) {
+      const selection = resolveCursorSelection(model, sessionOptions)
+      if (!selection.legacy) {
+        const confirmed = await applyCursorModel({ send, sessionId, options: sessionOptions, selection, alias: model })
+        modelInfo.effective = confirmed.effective
+        modelInfo.setModel = confirmed.applied.length ? `session/set_config_option ${confirmed.applied.join(',')}` : 'configOptions matched'
+      } else {
+        const reported = modelInfo.sessionReported
+        const mismatch = Boolean(reported) && !sameModel(reported, model)
+        if (mismatch && !available.some(id => sameModel(id, model)))
+          throw new ModelUnavailable(`Cursor 세션 모델 ${reported}이(가) 요청 ${model}과 다릅니다. 사용 가능 목록이 비어 있거나 그 모델이 없어 진행하지 않습니다.`, { provider: 'cursor', model })
+        if (available.length && !available.some(id => sameModel(id, model)))
+          throw new ModelUnavailable(`Cursor 세션이 보고한 사용 가능 모델에 ${model}이(가) 없습니다.`, { provider: 'cursor', model })
+        if (mismatch) {
+          const modelId = available.find(id => sameModel(id, model))
+          const updated = await send('session/set_model', { sessionId, modelId })
+          const nextReported = updated?.models?.currentModelId ?? updated?.currentModelId ?? updated?.modelId ?? null
+          modelInfo.sessionReported = nextReported
+          modelInfo.setModel = 'session/set_model'
+          if (!nextReported || !sameModel(nextReported, model))
+            throw new ModelUnavailable(`Cursor 모델을 ${model}로 바꾼 뒤 일치를 확인하지 못했습니다 (세션 보고: ${nextReported ?? '없음'}).`, { provider: 'cursor', model })
+        }
+      }
+      console.info('[ai-workflow] Cursor 유효 모델', { requested: model, model: modelInfo.effective?.model ?? null, reasoning: modelInfo.effective?.reasoning_effort ?? null, fast: modelInfo.effective?.fast ?? null })
+    }
+    onEvent({ type: 'cursor-session', sessionId, model: modelInfo })
     const result = await send('session/prompt', { sessionId, prompt: [{ type: 'text', text: prompt }] })
     if (inputNeeded) throw new NeedsInput(inputNeeded)
     if (result.stopReason !== 'end_turn') throw new NeedsInput(`Cursor가 완료하지 못했습니다: ${result.stopReason}`)
-    return { sessionId, report: redact(text, config.env) }
+    if(cursorTransportProblem(text))throw new EnvironmentError('Cursor 연결 응답이 중간에 끊겼습니다. 구현 완료로 보지 않고 편집을 보존해 재시도합니다.',{retry:true,code:'cursor_transport'})
+    return { sessionId, report: redact(text, config.env), model: modelInfo }
+  } catch (error) {
+    if (model && !signal?.aborted && !(error instanceof ModelUnavailable) && modelProblem(`${error.message}\n${stderrTail}`))
+      throw new ModelUnavailable(`Cursor 모델 ${model}을(를) 사용할 수 없습니다: ${redact(error.message, config.env).slice(0, 600)}`, { provider: 'cursor', model })
+    throw error
   } finally { clearTimeout(timer); signal?.removeEventListener('abort', stop); rl.close(); stop() }
 }

@@ -48,7 +48,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Input, Select, Textarea } from '@/components/ui/input'
+import { Input, Select } from '@/components/ui/input'
 import { ATELIER_BRAND_ID } from '@/lib/company/capabilities'
 import { useAuth } from '@/lib/supabase/auth'
 import { listBrandDirectory } from '@/lib/supabase/profiles'
@@ -86,6 +86,8 @@ import {
   type WorkTimeLog,
 } from './work-request-schedule'
 import {
+  DEFAULT_IMAGE_WIDTH_PERCENT,
+  IMAGE_BASE_WIDTH_PX,
   LOCAL_CURRENT_DEPARTMENT,
   LOCAL_SELF_ID,
   PRIORITY_META,
@@ -107,6 +109,7 @@ import {
   type FormValues,
   type ImageContentBlock,
   type ImageWrap,
+  type ReferenceFile,
   type RequestStatus,
   type TextContentBlock,
   type WorkListSection,
@@ -140,9 +143,7 @@ function createEmptyValues(): FormValues {
     title: '',
     requester: '',
     requesterPosition: '',
-    deadlineType: 'preferred',
     dueDate: '',
-    scheduleReason: '',
     referenceFiles: [],
     blocks: [emptyTextBlock()],
   }
@@ -154,24 +155,18 @@ function demoValues({
   requesterPosition = '사원',
   dueIn,
   body,
-  fixed = false,
 }: {
   title: string
   requester: string
   requesterPosition?: string
   dueIn: number
   body: string
-  fixed?: boolean
 }): FormValues {
   return {
     title,
     requester,
     requesterPosition,
-    deadlineType: fixed ? 'fixed' : 'preferred',
     dueDate: dateFromToday(dueIn),
-    scheduleReason: fixed
-      ? '외부 채널 오픈 일정이 확정되어 마감일 변경이 어렵습니다.'
-      : '',
     referenceFiles: [],
     blocks: [emptyTextBlock(body)],
   }
@@ -221,7 +216,6 @@ function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
         requesterPosition: '과장',
         dueIn: 2,
         body: `${sourceA}에서 ${destination}으로 보낸 요청입니다. 채널 오픈 전에 필요한 결과물이니 처리 일정과 추가 자료를 알려 주세요.`,
-        fixed: true,
       }),
       status: 'requested',
       managerPriority: '',
@@ -535,6 +529,7 @@ function demoWorkTime(owner: WorkRequestOwner): Record<string, WorkTimeLog> {
 }
 
 function hasRequestBody(blocks: ContentBlock[]): boolean {
+  // 참고 파일만 있는 초안은 요청 내용을 쓴 것이 아니다. 본문 블록만 필수값으로 본다.
   return blocks.some((block) =>
     block.type === 'text' ? block.text.trim().length > 0 : true,
   )
@@ -567,14 +562,30 @@ function isImageFile(file: File): boolean {
   return /\.(avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(file.name)
 }
 
+function sameStoredFile(left: File, right: File) {
+  return (
+    left.name === right.name &&
+    left.size === right.size &&
+    left.lastModified === right.lastModified
+  )
+}
+
+function blockHasFile(blocks: ContentBlock[], file: File) {
+  return blocks.some(
+    (block) => block.type !== 'text' && sameStoredFile(block.file, file),
+  )
+}
+
 function ImagePreview({
   file,
   className,
   style,
+  onError,
 }: {
   file: File
   className?: string
   style?: CSSProperties
+  onError?: () => void
 }) {
   const [url, setUrl] = useState<string | null>(null)
 
@@ -599,6 +610,7 @@ function ImagePreview({
       draggable={false}
       className={className}
       style={style}
+      onError={onError}
       onDragStart={(event) => {
         event.preventDefault()
         event.stopPropagation()
@@ -851,10 +863,94 @@ function createImageBlocks(files: File[], offsetY: number): ImageContentBlock[] 
     type: 'image' as const,
     file,
     caption: '',
-    widthPercent: 100,
+    widthPercent: DEFAULT_IMAGE_WIDTH_PERCENT,
     offsetY,
     wrap: 'none' as const,
   }))
+}
+
+function appendFilesToBlocks(
+  blocks: ContentBlock[],
+  files: File[],
+  endOffsetY: number,
+): ContentBlock[] {
+  // 파일 선택은 본문 맨 끝이다. 고른 순서를 유지하고, 마지막 글 뒤에 붙인다.
+  // 일반 파일 뒤의 빈 텍스트는 partsToBlocks가 이어서 쓸 칸으로 남긴다.
+  if (files.length === 0) return blocks
+
+  const next: BodyPart[] = splitBodyParts(blocks).map((part) =>
+    part.type === 'file' ? part : { ...part, images: [...part.images] },
+  )
+
+  let tail: FlowPart | undefined
+  const lastPart = next[next.length - 1]
+  if (
+    next.length > 1 &&
+    lastPart?.type === 'flow' &&
+    lastPart.text.text.length === 0 &&
+    lastPart.images.length === 0
+  ) {
+    tail = lastPart
+    next.pop()
+  }
+
+  const anchor = next[next.length - 1]
+  let pendingFiles: File[] = []
+  const appended: BodyPart[] = []
+
+  const flushPending = () => {
+    if (pendingFiles.length === 0) return
+    const batch = pendingFiles
+    pendingFiles = []
+    const flowAnchor = appended.length === 0 && anchor?.type === 'flow' ? anchor : undefined
+    const placeAtTop =
+      flowAnchor != null &&
+      flowAnchor.text.text.length === 0 &&
+      flowAnchor.images.length === 0
+    const images = createImageBlocks(
+      batch,
+      placeAtTop ? 0 : flowAnchor ? Math.max(0, endOffsetY) : 0,
+    )
+    if (images.length !== batch.length) {
+      console.warn('[work-request] 일부 이미지 파일을 요청 내용에 넣지 못했습니다.', {
+        fileNames: batch.map((file) => file.name),
+        created: images.length,
+      })
+    }
+    if (images.length === 0) return
+    if (flowAnchor) {
+      flowAnchor.images = [...flowAnchor.images, ...images]
+      return
+    }
+    appended.push({ type: 'flow', text: emptyTextBlock(), images })
+  }
+
+  for (const file of files) {
+    if (isImageFile(file)) {
+      pendingFiles.push(file)
+      continue
+    }
+    flushPending()
+    appended.push({
+      type: 'file',
+      file: { id: makeBlockId(), type: 'file', file },
+    })
+  }
+  flushPending()
+
+  const anchorIsEmpty =
+    anchor?.type === 'flow' &&
+    anchor.text.text.length === 0 &&
+    anchor.images.length === 0
+  if (anchorIsEmpty && appended.length > 0 && next[next.length - 1] === anchor) {
+    next.pop()
+    next.push(...appended, anchor)
+  } else {
+    next.push(...appended)
+    if (tail) next.push(tail)
+  }
+
+  return partsToBlocks(next)
 }
 
 type ResizeHandle = 'nw' | 'ne' | 'sw' | 'se' | 'n' | 's' | 'e' | 'w'
@@ -928,6 +1024,14 @@ const MIN_IMAGE_WIDTH = 15
 const MIN_IMAGE_HEIGHT = 40
 const MAX_IMAGE_HEIGHT = 2400
 
+function imageWidthPx(widthPercent: number): number {
+  return (IMAGE_BASE_WIDTH_PX * widthPercent) / 100
+}
+
+function pxToImageWidthPercent(px: number): number {
+  return (px * 100) / IMAGE_BASE_WIDTH_PX
+}
+
 function ResizableImage({
   file,
   widthPercent,
@@ -940,6 +1044,7 @@ function ResizableImage({
   onHeightChange,
   isMoving,
   onRemove,
+  removeLabel = '이미지 삭제',
 }: {
   file: File
   widthPercent: number
@@ -952,6 +1057,7 @@ function ResizableImage({
   onHeightChange?: (height: number) => void
   isMoving?: boolean
   onRemove?: () => void
+  removeLabel?: string
 }) {
   const boxRef = useRef<HTMLDivElement>(null)
   const drag = useRef<{
@@ -960,11 +1066,15 @@ function ResizableImage({
     startY: number
     startWidth: number
     startHeight: number
-    frameWidth: number
+    maxWidth: number
     lockHeight: boolean
   } | null>(null)
+  const [failed, setFailed] = useState(false)
   const wrapped = wrap !== 'none'
-  const width = clamp(widthPercent || (wrapped ? 40 : 100), MIN_IMAGE_WIDTH, 100)
+  const width = Math.max(
+    MIN_IMAGE_WIDTH,
+    widthPercent || (wrapped ? 40 : DEFAULT_IMAGE_WIDTH_PERCENT),
+  )
   const lockedHeight = heightPx != null ? clamp(heightPx, MIN_IMAGE_HEIGHT, MAX_IMAGE_HEIGHT) : undefined
 
   useEffect(() => {
@@ -975,7 +1085,16 @@ function ResizableImage({
     const observer = new ResizeObserver(notify)
     observer.observe(box)
     return () => observer.disconnect()
-  }, [onHeightChange, lockedHeight, width])
+  }, [onHeightChange, lockedHeight, width, failed])
+
+  function handleImageError() {
+    console.warn('[work-request] 브라우저가 표시하지 못한 이미지를 일반 파일로 표시합니다.', {
+      fileName: file.name,
+      format: fileFormatLabel(file),
+      mimeType: file.type || '(없음)',
+    })
+    setFailed(true)
+  }
 
   function applyResize(event: PointerEvent<HTMLButtonElement>) {
     const current = drag.current
@@ -988,25 +1107,40 @@ function ResizableImage({
     const isCorner = current.handle === 'nw' || current.handle === 'ne' || current.handle === 'sw' || current.handle === 'se'
 
     if (isCorner) {
-      const scaleX = (current.startWidth + (signX * dx * 100) / current.frameWidth) / current.startWidth
+      const scaleX = (current.startWidth + signX * pxToImageWidthPercent(dx)) / current.startWidth
       const scaleY = (current.startHeight + signY * dy) / current.startHeight
-      const scale = Math.abs(dx) >= Math.abs(dy) ? scaleX : scaleY
-      const nextWidth = clamp(current.startWidth * scale, MIN_IMAGE_WIDTH, 100)
+      const rawScale = Math.abs(dx) >= Math.abs(dy) ? scaleX : scaleY
+      let minScale = MIN_IMAGE_WIDTH / current.startWidth
+      let maxScale = current.maxWidth / current.startWidth
+      if (current.lockHeight) {
+        minScale = Math.max(minScale, MIN_IMAGE_HEIGHT / current.startHeight)
+        maxScale = Math.min(maxScale, MAX_IMAGE_HEIGHT / current.startHeight)
+      }
+      // 너비·높이 한도를 모두 반영한 배율 하나로 두 치수를 계산해 비율을 유지한다.
+      const scale = Math.min(Math.max(rawScale, minScale), maxScale)
+      const nextWidth = Math.min(
+        Math.round(current.startWidth * scale),
+        Math.max(MIN_IMAGE_WIDTH, Math.floor(current.maxWidth)),
+      )
       if (current.lockHeight) {
         onSizeChange({
-          widthPercent: Math.round(nextWidth),
-          heightPx: Math.round(clamp(current.startHeight * scale, MIN_IMAGE_HEIGHT, MAX_IMAGE_HEIGHT)),
+          widthPercent: nextWidth,
+          heightPx: Math.round(current.startHeight * (nextWidth / current.startWidth)),
         })
         return
       }
-      onSizeChange({ widthPercent: Math.round(nextWidth) })
+      onSizeChange({ widthPercent: nextWidth })
       return
     }
 
     if (current.handle === 'e' || current.handle === 'w') {
       onSizeChange({
         widthPercent: Math.round(
-          clamp(current.startWidth + (signX * dx * 100) / current.frameWidth, MIN_IMAGE_WIDTH, 100),
+          clamp(
+            current.startWidth + signX * pxToImageWidthPercent(dx),
+            MIN_IMAGE_WIDTH,
+            current.maxWidth,
+          ),
         ),
         heightPx: Math.round(current.startHeight),
       })
@@ -1014,7 +1148,7 @@ function ResizableImage({
     }
 
     onSizeChange({
-      widthPercent: current.startWidth,
+      widthPercent: Math.round(current.startWidth),
       heightPx: Math.round(clamp(current.startHeight + signY * dy, MIN_IMAGE_HEIGHT, MAX_IMAGE_HEIGHT)),
     })
   }
@@ -1026,19 +1160,30 @@ function ResizableImage({
     event.stopPropagation()
     const boxRect = box.getBoundingClientRect()
     const frame = box.closest('[data-flow-frame]')
+    const frameWidth = Math.max(frame?.getBoundingClientRect().width ?? boxRect.width, 1)
+    const displayScale = Math.min(1, boxRect.width / imageWidthPx(width))
     drag.current = {
       handle,
       startX: event.clientX,
       startY: event.clientY,
-      startWidth: width,
-      startHeight: lockedHeight ?? boxRect.height,
-      frameWidth: Math.max(frame?.getBoundingClientRect().width ?? boxRect.width, 1),
+      // 영역 폭(max-width 100%)에 눌려 작게 보이는 경우에도 보이는 크기에서 조절을 시작한다.
+      startWidth: Math.max(MIN_IMAGE_WIDTH, pxToImageWidthPercent(boxRect.width)),
+      startHeight: lockedHeight != null ? lockedHeight * displayScale : boxRect.height,
+      maxWidth: Math.max(MIN_IMAGE_WIDTH, pxToImageWidthPercent(frameWidth)),
       lockHeight: lockedHeight != null,
     }
     event.currentTarget.setPointerCapture(event.pointerId)
   }
 
   const layout = wrapLayoutOf(wrap)
+
+  if (failed) {
+    return (
+      <div ref={boxRef} className="flow-root">
+        <FileAttachmentCard file={file} onRemove={onRemove} />
+      </div>
+    )
+  }
 
   return (
     <div
@@ -1048,7 +1193,11 @@ function ResizableImage({
         onMoveStart && 'cursor-grab',
         isMoving && 'cursor-grabbing opacity-40',
       )}
-      style={{ width: fillParent ? '100%' : `${width}%` }}
+      style={
+        fillParent
+          ? { width: '100%' }
+          : { width: `${imageWidthPx(width)}px`, maxWidth: '100%' }
+      }
       onPointerDown={(event) => {
         if (!onMoveStart) return
         if ((event.target as HTMLElement).closest('button')) return
@@ -1059,10 +1208,12 @@ function ResizableImage({
         <ImagePreview
           file={file}
           className={cn(
-            'block w-full rounded-md bg-muted/30',
-            lockedHeight ? 'object-fill' : 'h-auto object-contain',
+            'block h-auto w-full rounded-md bg-muted/30',
+            lockedHeight ? 'object-fill' : 'object-contain',
           )}
-          style={lockedHeight ? { height: `${lockedHeight}px` } : undefined}
+          // 영역 폭에 눌려 너비가 줄면 고정 높이도 같은 배율로 줄도록 비율로 지정한다.
+          style={lockedHeight ? { aspectRatio: `${imageWidthPx(width)} / ${lockedHeight}` } : undefined}
+          onError={handleImageError}
         />
         {onSizeChange || onWrapChange ? (
           <>
@@ -1132,7 +1283,7 @@ function ResizableImage({
             variant="secondary"
             size="icon"
             className="absolute right-2 top-2 opacity-0 shadow-sm group-hover:opacity-100"
-            aria-label="이미지 삭제"
+            aria-label={removeLabel}
             onClick={onRemove}
           >
             <Trash2 className="size-4" />
@@ -1179,32 +1330,74 @@ function FileAttachmentCard({
 
 function ReferenceFilesField({
   files,
+  contentBlocks,
   onChange,
+  onAddFiles,
 }: {
-  files: File[]
-  onChange: (files: File[]) => void
+  files: ReferenceFile[]
+  contentBlocks: ContentBlock[]
+  onChange: (files: ReferenceFile[]) => void
+  onAddFiles: (files: File[]) => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
+  const hasVisibleReference = files.some((item) => !blockHasFile(contentBlocks, item.file))
 
   function addFiles(list: FileList | File[] | null) {
     if (!list) return
     const incoming = Array.from(list)
     if (incoming.length === 0) return
-    const next = [...files]
+    // 기존 참고 파일과 같다는 이유만으로 건너뛰지 않는다. 다시 고르면 요청 내용 끝에 붙인다.
+    // next는 이번 선택 안의 중복만 기억하고, 이미 본문에 있는 파일은 아래에서 뺀다.
+    const next: ReferenceFile[] = []
+    const added: File[] = []
     for (const file of incoming) {
-      const exists = next.some(
-        (item) =>
-          item.name === file.name &&
-          item.size === file.size &&
-          item.lastModified === file.lastModified,
-      )
-      if (!exists) next.push(file)
+      const exists =
+        next.some(
+          ({ file: item }) =>
+            item.name === file.name &&
+            item.size === file.size &&
+            item.lastModified === file.lastModified,
+        ) || blockHasFile(contentBlocks, file)
+      if (!exists) {
+        next.push({ id: makeBlockId(), file, widthPercent: DEFAULT_IMAGE_WIDTH_PERCENT })
+        added.push(file)
+      }
     }
-    onChange(next)
+    if (added.length === 0) return
+    onAddFiles(added)
   }
 
   return (
     <div className="space-y-2">
+      {hasVisibleReference ? (
+        <div data-flow-frame className="space-y-2">
+          {files.map((item) => {
+            if (blockHasFile(contentBlocks, item.file)) return null
+            const remove = () => onChange(files.filter((file) => file.id !== item.id))
+            return isImageFile(item.file) ? (
+              <ResizableImage
+                key={item.id}
+                file={item.file}
+                widthPercent={item.widthPercent}
+                heightPx={item.heightPx}
+                onSizeChange={(size) =>
+                  onChange(
+                    files.map((file) =>
+                      file.id === item.id
+                        ? { ...file, widthPercent: size.widthPercent, heightPx: size.heightPx }
+                        : file,
+                    ),
+                  )
+                }
+                onRemove={remove}
+                removeLabel={`${item.file.name} 제거`}
+              />
+            ) : (
+              <FileAttachmentCard key={item.id} file={item.file} onRemove={remove} />
+            )
+          })}
+        </div>
+      ) : null}
       <span className="block text-sm font-medium">참고 파일 추가</span>
       <div
         className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-6 text-center"
@@ -1242,19 +1435,6 @@ function ReferenceFilesField({
           }}
         />
       </div>
-      {files.length > 0 ? (
-        <div className="space-y-2">
-          {files.map((file, index) => (
-            <FileAttachmentCard
-              key={`${file.name}-${file.size}-${file.lastModified}`}
-              file={file}
-              onRemove={() =>
-                onChange(files.filter((_, fileIndex) => fileIndex !== index))
-              }
-            />
-          ))}
-        </div>
-      ) : null}
     </div>
   )
 }
@@ -1339,7 +1519,8 @@ type ImageDropTarget = {
 }
 
 function applyImageWrapSize(image: ImageContentBlock, wrap: ImageWrap): ImageContentBlock {
-  const nextWidth = wrap !== 'none' && image.widthPercent > 70 ? 40 : image.widthPercent
+  const tooWideToWrap = imageWidthPx(image.widthPercent) > imageWidthPx(70)
+  const nextWidth = wrap !== 'none' && tooWideToWrap ? 40 : image.widthPercent
   const nextHeight =
     image.heightPx != null && nextWidth !== image.widthPercent
       ? Math.round(image.heightPx * (nextWidth / image.widthPercent))
@@ -1392,10 +1573,9 @@ function BodyFlow({
     <div data-flow-frame data-flow-index={flowIndex} className="flow-root min-h-7">
       {placed.map(({ image, column, spacer }) => {
         const around = column !== 'full'
-        const width = clamp(
-          image.widthPercent || (around ? 40 : 100),
+        const width = Math.max(
           MIN_IMAGE_WIDTH,
-          100,
+          image.widthPercent || (around ? 40 : DEFAULT_IMAGE_WIDTH_PERCENT),
         )
         return (
           <Fragment key={image.id}>
@@ -1412,7 +1592,11 @@ function BodyFlow({
                 column === 'right' && 'ml-4',
                 column === 'full' && 'w-full',
               )}
-              style={around ? { width: `${width}%` } : undefined}
+              style={
+                around
+                  ? { width: `${imageWidthPx(width)}px`, maxWidth: 'calc(100% - 1rem)' }
+                  : undefined
+              }
             >
               <ResizableImage
                 file={image.file}
@@ -1467,11 +1651,13 @@ function RequestBodyEditor({
   error,
   placeholder,
   onChange,
+  appendFilesRef,
 }: {
   blocks: ContentBlock[]
   error?: string
   placeholder: string
   onChange: (blocks: ContentBlock[]) => void
+  appendFilesRef: { current: (files: File[]) => void }
 }) {
   const editorRef = useRef<HTMLDivElement>(null)
   const blocksRef = useRef(blocks)
@@ -1501,6 +1687,20 @@ function RequestBodyEditor({
   onChangeRef.current = onChange
   dropTargetRef.current = dropTarget
   movingRef.current = moving
+  appendFilesRef.current = (incoming) => {
+    const editor = editorRef.current
+    if (!editor) {
+      console.warn('[work-request] 요청 내용 편집 영역을 찾지 못해 파일 위치를 측정하지 못했습니다.', {
+        fileCount: incoming.length,
+      })
+    }
+    const flows = editor?.querySelectorAll<HTMLElement>('[data-flow-index]')
+    const lastFlow = flows && flows.length > 0 ? flows[flows.length - 1] : undefined
+    const endOffsetY = lastFlow
+      ? Math.max(0, Math.round(lastFlow.getBoundingClientRect().height))
+      : 0
+    onChangeRef.current(appendFilesToBlocks(blocksRef.current, incoming, endOffsetY))
+  }
 
   const parts = splitBodyParts(blocks)
   const onlyEmptyText =
@@ -1957,6 +2157,11 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   })
   const brands = brandsQuery.data ?? emptyList()
   const pageTopRef = useRef<HTMLDivElement>(null)
+  const appendBodyFilesRef = useRef<(files: File[]) => void>(() => {
+    console.warn('[work-request] 요청 내용에 파일을 넣지 못했습니다.', {
+      reason: '편집기가 연결되지 않음',
+    })
+  })
   const [formDrafts, setFormDrafts] = useState<
     Readonly<Record<string, FormDraft>>
   >({})
@@ -2241,11 +2446,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   function validate(): FormErrors {
     const nextErrors: FormErrors = {}
     if (!values.title.trim()) nextErrors.title = '요청 제목을 입력하세요.'
-    if (!values.deadlineType) nextErrors.deadlineType = '일정 성격을 선택하세요.'
     if (!values.dueDate) nextErrors.dueDate = '희망 마감일을 선택하세요.'
-    if (values.deadlineType === 'fixed' && !values.scheduleReason.trim()) {
-      nextErrors.scheduleReason = '변경할 수 없는 일정의 사유를 입력하세요.'
-    }
     if (!hasRequestBody(values.blocks)) {
       nextErrors.blocks = '요청 내용을 입력하거나 이미지를 넣어 주세요.'
     }
@@ -2817,14 +3018,6 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     <p className="text-xs text-muted-foreground">대화</p>
                     <p className="mt-1 font-medium tabular-nums">
                       {request.messages.length}건
-                    </p>
-                  </div>
-                  <div className="shrink-0">
-                    <p className="text-xs text-muted-foreground">일정 성격</p>
-                    <p className="mt-1 font-medium">
-                      {request.values.deadlineType === 'fixed'
-                        ? '변경 불가'
-                        : '희망일'}
                     </p>
                   </div>
                 </>
@@ -3825,17 +4018,11 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     <p className="mt-1 text-sm font-medium">
                       {formatDate(selectedRequest.values.dueDate)}
                     </p>
-                    {selectedRequest.values.deadlineType === 'fixed' ||
-                    !selectedRequest.confirmedDueDate ? (
+                    {!selectedRequest.confirmedDueDate ? (
                       <div className="mt-1.5 flex items-center gap-1.5">
-                        {selectedRequest.values.deadlineType === 'fixed' ? (
-                          <Badge variant="danger">변경 불가</Badge>
-                        ) : null}
-                        {!selectedRequest.confirmedDueDate ? (
-                          <Badge variant={deadline.variant}>
-                            {deadline.label}
-                          </Badge>
-                        ) : null}
+                        <Badge variant={deadline.variant}>
+                          {deadline.label}
+                        </Badge>
                       </div>
                     ) : null}
                   </div>
@@ -3898,14 +4085,6 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     </p>
                   </div>
                 ) : null}
-                {selectedRequest.values.scheduleReason ? (
-                  <div>
-                    <p className="text-xs text-muted-foreground">일정 사유</p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm">
-                      {selectedRequest.values.scheduleReason}
-                    </p>
-                  </div>
-                ) : null}
                 <div className="space-y-5">
                   {splitBodyParts(selectedRequest.values.blocks).map((part, index) => {
                     if (part.type === 'file') {
@@ -3928,16 +4107,25 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     )
                   })}
                 </div>
-                {selectedRequest.values.referenceFiles.length > 0 ? (
+                {selectedRequest.values.referenceFiles.some(
+                  (item) => !blockHasFile(selectedRequest.values.blocks, item.file),
+                ) ? (
                   <div>
                     <p className="text-xs text-muted-foreground">참고 파일</p>
                     <div className="mt-2 space-y-2">
-                      {selectedRequest.values.referenceFiles.map((file) => (
-                        <FileAttachmentCard
-                          key={`${file.name}-${file.size}-${file.lastModified}`}
-                          file={file}
-                        />
-                      ))}
+                      {selectedRequest.values.referenceFiles.map((item) => {
+                        if (blockHasFile(selectedRequest.values.blocks, item.file)) return null
+                        return isImageFile(item.file) ? (
+                          <ResizableImage
+                            key={item.id}
+                            file={item.file}
+                            widthPercent={item.widthPercent}
+                            heightPx={item.heightPx}
+                          />
+                        ) : (
+                          <FileAttachmentCard key={item.id} file={item.file} />
+                        )
+                      })}
                     </div>
                   </div>
                 ) : null}
@@ -4122,126 +4310,39 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               ) : null}
             </label>
 
-            <fieldset className="space-y-2">
-              <legend className="text-sm font-medium">
-                일정 <span className="text-danger">*</span>
-              </legend>
-              <div className="grid gap-2 sm:grid-cols-2">
-                {(
-                  [
-                    {
-                      value: 'preferred' as const,
-                      label: '희망 일정',
-                      description: '부서 상황에 따라 협의할 수 있는 날짜',
-                    },
-                    {
-                      value: 'fixed' as const,
-                      label: '변경 불가 일정',
-                      description: '출시·행사·출고처럼 반드시 지켜야 하는 날짜',
-                    },
-                  ] as const
-                ).map((option) => {
-                  const checked = values.deadlineType === option.value
-                  return (
-                    <div
-                      key={option.value}
-                      className={cn(
-                        'rounded-lg border px-3 py-3 transition-colors',
-                        checked
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:bg-muted/40',
-                        errors.deadlineType && 'border-danger',
-                      )}
-                    >
-                      <label className="block cursor-pointer">
-                        <span className="flex items-center gap-2 text-sm font-medium">
-                          <input
-                            type="radio"
-                            name={`${owner}-deadline-type`}
-                            value={option.value}
-                            checked={checked}
-                            className="size-4 accent-primary"
-                            onChange={() =>
-                              updateValue('deadlineType', option.value)
-                            }
-                          />
-                          {option.label}
-                        </span>
-                        <span className="mt-1 block pl-6 text-xs text-muted-foreground">
-                          {option.description}
-                        </span>
-                      </label>
-                      {checked ? (
-                        <div className="mt-3 space-y-3 border-t border-border/70 pt-3">
-                          <label className="block space-y-1.5">
-                            <span className="flex items-center gap-1 text-sm font-medium">
-                              희망 마감일 <span className="text-danger">*</span>
-                            </span>
-                            <Input
-                              type="date"
-                              value={values.dueDate}
-                              aria-invalid={Boolean(errors.dueDate)}
-                              onChange={(event) =>
-                                updateValue('dueDate', event.target.value)
-                              }
-                              className={cn(
-                                errors.dueDate &&
-                                  'border-danger focus-visible:ring-danger',
-                              )}
-                            />
-                            {errors.dueDate ? (
-                              <span className="block text-xs text-danger">
-                                {errors.dueDate}
-                              </span>
-                            ) : null}
-                          </label>
-                          {option.value === 'fixed' ? (
-                            <label className="block space-y-1.5">
-                              <span className="flex items-center gap-1 text-sm font-medium">
-                                변경할 수 없는 일정의 사유
-                                <span className="text-danger">*</span>
-                              </span>
-                              <Textarea
-                                rows={3}
-                                value={values.scheduleReason}
-                                placeholder="예: 9월 15일 29CM 기획전 오픈이 확정되어 9월 12일까지 결과물이 필요합니다."
-                                aria-invalid={Boolean(errors.scheduleReason)}
-                                onChange={(event) =>
-                                  updateValue(
-                                    'scheduleReason',
-                                    event.target.value,
-                                  )
-                                }
-                                className={cn(
-                                  errors.scheduleReason &&
-                                    'border-danger focus-visible:ring-danger',
-                                )}
-                              />
-                              {errors.scheduleReason ? (
-                                <span className="block text-xs text-danger">
-                                  {errors.scheduleReason}
-                                </span>
-                              ) : null}
-                            </label>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  )
-                })}
-              </div>
-            </fieldset>
+            <label className="block space-y-1.5">
+              <span className="flex items-center gap-1 text-sm font-medium">
+                희망 마감일 <span className="text-danger">*</span>
+              </span>
+              <Input
+                type="date"
+                value={values.dueDate}
+                aria-invalid={Boolean(errors.dueDate)}
+                onChange={(event) => updateValue('dueDate', event.target.value)}
+                className={cn(
+                  errors.dueDate && 'border-danger focus-visible:ring-danger',
+                )}
+              />
+              {errors.dueDate ? (
+                <span className="block text-xs text-danger">
+                  {errors.dueDate}
+                </span>
+              ) : null}
+            </label>
 
             <RequestBodyEditor
               blocks={values.blocks}
               error={errors.blocks}
               placeholder={config.bodyPlaceholder}
               onChange={(blocks) => updateValue('blocks', blocks)}
+              appendFilesRef={appendBodyFilesRef}
             />
 
             <ReferenceFilesField
               files={values.referenceFiles}
+              contentBlocks={values.blocks}
               onChange={(files) => updateValue('referenceFiles', files)}
+              onAddFiles={(incoming) => appendBodyFilesRef.current(incoming)}
             />
           </CardContent>
         </Card>

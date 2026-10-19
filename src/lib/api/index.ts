@@ -146,6 +146,15 @@ export {
   sendChatMessage,
   trashChatAttachment,
 } from '@/lib/supabase/chat'
+export {
+  MamamIdeaStoreError,
+  getMamamIdeaImageUrls,
+  listMamamIdeaSubmissions,
+} from '@/lib/supabase/mamam-ideas'
+export type {
+  MamamIdeaImage,
+  MamamIdeaSubmission,
+} from '@/lib/supabase/mamam-ideas'
 export { AiCandidateStoreError } from '@/lib/supabase/ai-candidates'
 export { AiGatewayError, isFatalAiError } from '@/lib/supabase/ai-gateway'
 export { AiSettingsStoreError } from '@/lib/supabase/ai-settings'

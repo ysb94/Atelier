@@ -47,6 +47,13 @@ const STATUS_LABEL: Record<Profile['status'], string> = {
   disabled: '정지',
 }
 
+function departmentCreateErrorText(error: unknown) {
+  if (error instanceof Error && error.message === '부서 이름을 입력하세요.') {
+    return error.message
+  }
+  return '부서를 저장하지 못했습니다. 이름을 확인한 뒤 다시 시도해 주세요.'
+}
+
 function MemberEditor({
   profile,
   departments,
@@ -411,6 +418,11 @@ export function MembersPage() {
       setNewDeptName('')
       await invalidate()
     },
+    onError: (error) => {
+      console.warn('[members] 부서 저장 실패', {
+        message: error instanceof Error ? error.message : String(error),
+      })
+    },
   })
 
   const brandName = (id: string) =>
@@ -559,33 +571,52 @@ export function MembersPage() {
       {me?.isAdmin ? (
         <section className="mt-10 space-y-4">
           <div>
-            <h2 className="text-lg font-semibold tracking-tight">팀 관리</h2>
+            <h2 className="text-lg font-semibold tracking-tight">회사 부서 추가</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              Flow 조직도 팀을 추가하거나 이름을 바꾸고, 쓰지 않는 팀은 중지할
-              수 있습니다.
+              새 부서 이름을 입력하고 저장하면 아래 목록에 표시됩니다.
             </p>
           </div>
 
-          <form
-            className="flex flex-wrap gap-2"
-            onSubmit={(event) => {
-              event.preventDefault()
-              createDeptMutation.mutate()
-            }}
-          >
-            <Input
-              className="max-w-xs"
-              placeholder="새 팀 이름"
-              value={newDeptName}
-              onChange={(e) => setNewDeptName(e.target.value)}
-            />
-            <Button
-              type="submit"
-              disabled={!newDeptName.trim() || createDeptMutation.isPending}
+          <div>
+            <form
+              className="flex flex-wrap gap-2"
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (!newDeptName.trim() || createDeptMutation.isPending) return
+                createDeptMutation.mutate()
+              }}
             >
-              팀 추가
-            </Button>
-          </form>
+              <Input
+                className="max-w-xs"
+                placeholder="새 부서 이름"
+                aria-label="회사 부서 추가"
+                value={newDeptName}
+                aria-invalid={createDeptMutation.isError || undefined}
+                aria-describedby={
+                  createDeptMutation.isError ? 'new-department-error' : undefined
+                }
+                onChange={(e) => {
+                  setNewDeptName(e.target.value)
+                  if (createDeptMutation.isError) createDeptMutation.reset()
+                }}
+              />
+              <Button
+                type="submit"
+                disabled={!newDeptName.trim() || createDeptMutation.isPending}
+              >
+                저장
+              </Button>
+            </form>
+            {createDeptMutation.isError ? (
+              <p
+                id="new-department-error"
+                role="alert"
+                className="mt-2 text-sm text-danger"
+              >
+                {departmentCreateErrorText(createDeptMutation.error)}
+              </p>
+            ) : null}
+          </div>
 
           <div className="space-y-2">
             {departments.map((dept, index) => (

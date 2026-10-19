@@ -1,4 +1,5 @@
 export const SUGGESTED_START = '10:00'
+export const ATTENDANCE_GRACE_MINUTES = 5
 export function startTone(start: string) {
   if (start === '09:00') return { tone: 'is-nine', label: '9시' }
   if (start === '10:00') return { tone: 'is-ten', label: '10시' }
@@ -21,5 +22,5 @@ export function attendanceStartIndex(settings: AttendanceStartSetting[]) {
 }
 export function resolveAttendanceStart(index: ReturnType<typeof attendanceStartIndex>, employeeId: string, departmentId: string | null, month: string) {
   const setting = index.get(`${month}:employee:${employeeId}`) ?? index.get(`${month}:department:${departmentId}`)
-  return { start: setting?.start ?? '', grace: setting?.grace ?? 5, source: setting?.source ?? 'department', configured: Boolean(setting?.start) }
+  return { start: setting?.start ?? '', grace: ATTENDANCE_GRACE_MINUTES, source: setting?.source ?? 'department', configured: Boolean(setting?.start) }
 }

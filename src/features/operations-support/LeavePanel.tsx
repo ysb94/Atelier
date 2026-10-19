@@ -89,6 +89,8 @@ function LeaveBalancePanel() {
     <OpsPanelFrame>
       <DraftNotice>
         {selectedYear}년 연차 숫자는 이 화면에서만 바뀝니다. 아직 저장되지 않으며 새로고침하면 사라집니다.
+        <br />
+        연차 부여 일수·입사일·연도 계산 기준은 보류 중입니다. 자동 부여·잔여일 계산·차감은 적용하지 않습니다.
       </DraftNotice>
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
         <Select

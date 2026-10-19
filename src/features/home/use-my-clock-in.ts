@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { isAttendanceExempt } from '@/lib/company/capabilities'
 import { useAuth } from '@/lib/supabase/auth'
 import { getSupabase } from '@/lib/supabase/client'
 import { emptyList } from '@/lib/utils'
@@ -17,6 +18,7 @@ export function useMyClockIn() {
   const { profile, session } = useAuth()
   const userId = session?.user.id
   const allowed = profile?.status === 'active' && Boolean(userId)
+  const exempt = isAttendanceExempt(profile)
   const active = useWorkspaceTabActivity()
   const client = useQueryClient()
   const query = useQuery({ queryKey: ['attendance-clock-ins', userId, allowed], queryFn: () => listMyAttendanceClocks(userId!), enabled: allowed, refetchInterval: allowed && active ? 30_000 : false })
@@ -32,8 +34,9 @@ export function useMyClockIn() {
     byDate,
     todayClock: byDate[today] ?? '',
     todayClockOut: clockOutLabel(todayRecord?.clockOutAt ?? null),
-    needsClockIn: allowed && !query.isPending && !query.error && !byDate[today],
-    needsClockOut: allowed && !query.isPending && !query.error && Boolean(todayRecord?.clockIn) && !todayRecord?.clockOutAt,
+    exempt,
+    needsClockIn: allowed && !exempt && !query.isPending && !query.error && !byDate[today],
+    needsClockOut: allowed && !exempt && !query.isPending && !query.error && Boolean(todayRecord?.clockIn) && !todayRecord?.clockOutAt,
     clockIn: () => save.mutateAsync(),
     clockOut: () => departure.mutateAsync(),
     undoClockOut: () => undoDeparture.mutateAsync(),

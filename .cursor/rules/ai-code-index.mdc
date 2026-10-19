@@ -1,0 +1,18 @@
+---
+description: 모든 AI 모델이 코드 탐색 시 토큰 절감을 위해 AI 전용 목차(ai-index.md)를 우선 참조하고 최신 상태를 유지하는 규칙
+alwaysApply: true
+---
+
+# AI 전용 코드 목차 (`ai-index.md`) 활용 규칙
+
+어떤 모델(Grok, Composer, Gemini, GPT, Claude 등)이든 코드 조사·수정 작업을 할 때 토큰 낭비를 줄이기 위해 아래 순서를 따른다.
+
+1. **전체 검색(`Grep`/`Glob`)보다 목차 우선 조회**:
+   - 파일 위치나 함수 줄 번호를 찾을 때 먼저 `dev-tools/structure-map/generated/ai-index.md`의 `offset: 1, limit: 85`를 `Read`한다.
+   - `Section 0`의 도메인별 줄 번호(`L시작-L끝`) 또는 `Section 1. Routes`를 확인한 뒤, 필요한 도메인 구간만 추가로 `Read`한다.
+2. **필요한 줄 구간(`offset`/`limit`)만 정밀 읽기**:
+   - `ai-index.md`에 표시된 `파일경로 (총줄수)`와 `exp: 심볼명:줄번호`, `db: 테이블/RPC@L줄번호`를 보고 해당 파일의 필요한 줄 구간만 `Read`한다.
+   - `dev-tools/structure-map/generated/structure.json` 전체를 통째로 읽거나 출력하지 않는다.
+3. **코드 변경 후 목차 최신화**:
+   - `npm run dev` 실행 중에는 감시 프로세스가 2초마다 `ai-index.md`와 `structure.json`을 자동 갱신한다.
+   - 감시 프로세스가 꺼져 있거나 파일/심볼/라우트 변경 후 즉시 목차를 갱신해야 하면 `npm run structure:map`을 실행한다.
