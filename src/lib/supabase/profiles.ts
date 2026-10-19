@@ -663,7 +663,7 @@ export async function setMemberDisabled(
 
 export async function createDepartment(name: string): Promise<Department> {
   const trimmed = name.trim()
-  if (!trimmed) throw new Error('팀 이름을 입력하세요.')
+  if (!trimmed) throw new Error('부서 이름을 입력하세요.')
 
   const existing = await listDepartments(false)
   const maxOrder = existing.reduce(
