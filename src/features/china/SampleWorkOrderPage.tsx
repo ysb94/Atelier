@@ -91,6 +91,7 @@ function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
   )
   const colorRounds = resolveColorSampleRounds(draft)
   const latestColorRound = colorRounds[colorRounds.length - 1]
+  const sentColorRound = [...colorRounds].reverse().find((round) => round.shippedAt) ?? latestColorRound
   const colors = filledColorWorkOrders(draft.colors)
     .filter((color, index, list) => {
       const url = color.sampleWorkOrderUrl?.trim()
@@ -103,12 +104,12 @@ function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
     url: color.sampleWorkOrderUrl,
     fileName: colorWorkOrderFileName(color),
     shipped: Boolean(color.sampleWorkOrderShipped),
-    shippedAt: latestColorRound?.shippedAt ?? draft.specs.colorSampleRequestedAt ?? null,
+    shippedAt: sentColorRound?.shippedAt ?? draft.specs.colorSampleRequestedAt ?? null,
     passed: Boolean(latestColorRound?.passed),
     failReason: '',
     focusReason: '',
     colorName: color.name.trim(),
-    sortRound: latestColorRound?.round ?? 1,
+    sortRound: sentColorRound?.round ?? 1,
     assigneeId: null,
     assigneeName: '',
     fileCheckedAt: null,

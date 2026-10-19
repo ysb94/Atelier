@@ -4,7 +4,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { test } from 'node:test'
 import { analyze } from './analyze.mjs'
-import { replaceGeneratedFile } from './build.mjs'
+import { replaceGeneratedFile, formatAiIndex } from './build.mjs'
 
 const config = { domains: [
   { id: 'products', label: '상품', features: ['products'], libs: ['products'], stores: ['styles'] },
@@ -161,3 +161,17 @@ test('atomic output replacement retries transient locks and reports permanent fa
   }, () => {}), /missing/)
   assert.equal(attempts, 1)
 })
+
+test('formatAiIndex produces a compact AI table of contents with line ranges, routes, exports and DB callers', () => fixture({
+  'src/components/layout/company-routes.tsx': "import { Page } from '@/features/products/Page'; export const routes = <Route path=\"products\" element={<Page />} />",
+  'src/features/products/Page.tsx': "import { listStyles } from '@/lib/supabase/styles'; export function Page() { return listStyles() }",
+  'src/lib/supabase/styles.ts': "export function listStyles() { return getSupabase().from('styles').select('*') }",
+}, root => {
+  const result = analyze(root, config)
+  const index = formatAiIndex(result)
+  assert.match(index, /## 0\. Section Line Map/)
+  assert.match(index, /products\(상품\):L\d+-\d+/)
+  assert.match(index, /- `\/products` -> src\/features\/products\/Page\.tsx/)
+  assert.match(index, /`src\/features\/products\/Page\.tsx` \(\d+L\).*exp: Page:1/)
+  assert.match(index, /- `table:styles` <- src\/lib\/supabase\/styles\.ts:1/)
+}))

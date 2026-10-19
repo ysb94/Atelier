@@ -721,18 +721,7 @@ export function CompanyDraftsPage() {
                           specs: {
                             ...input.specs,
                             colorSampleRounds: next,
-                            colorSampleRequestedAt: latest.shippedAt,
                           },
-                          colors: input.colors.map((color) =>
-                            color.sampleWorkOrderUrl?.trim()
-                              ? {
-                                  ...color,
-                                  sampleWorkOrderShipped: false,
-                                  sampleWorkOrderShippedAt: null,
-                                  sampleInProgress: true,
-                                }
-                              : color,
-                          ),
                         }
                       })
                     }}

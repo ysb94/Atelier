@@ -153,10 +153,9 @@ export function passLatestColorSampleRound(
   )
 }
 
-/** 같은 컬러 샘플 작업지시서로 다음 차수를 다시 요청한다. 파일은 바꾸지 않는다. */
+/** 같은 컬러 샘플 파일로 다음 차수를 연다. 작업지시서는 다시 보내지 않는다. */
 export function requestNextColorSampleRound(
   rounds: readonly DraftColorSampleRound[],
-  at = new Date().toISOString(),
 ): DraftColorSampleRound[] {
   const list = rounds.map((round) => ({ ...round }))
   const latest = list[list.length - 1]
@@ -164,7 +163,7 @@ export function requestNextColorSampleRound(
   const round = Math.max(0, ...list.map((item) => item.round)) + 1
   return [
     ...list,
-    newColorSampleRound(round, { url: latest.url, name: latest.name }, at),
+    newColorSampleRound(round, { url: latest.url, name: latest.name }, null),
   ]
 }
 

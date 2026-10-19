@@ -90,9 +90,11 @@ const returned = markLatestColorSampleReturned(legacyRounds, '2026-10-14T03:00:0
 assert(returned[0]?.returnedAt === '2026-10-14T03:00:00.000Z', '회신일을 최신 차수에 남긴다')
 const passed = passLatestColorSampleRound(returned)
 assert(passed[0]?.passed === true, '돌아온 컬러 샘플만 합격한다')
-const again = requestNextColorSampleRound(returned, '2026-10-15T00:00:00.000Z')
+const again = requestNextColorSampleRound(returned)
 assert(again.length === 2 && again[1]?.round === 2, '같은 파일로 2차를 연다')
-assert(again[1]?.returnedAt === null && again[0]?.returnedAt, '이전 차수 회신일은 남긴다')
+assert(again[1]?.url === returned[0]?.url, '2차도 같은 작업지시서 파일을 쓴다')
+assert(again[1]?.shippedAt === null && again[1]?.returnedAt === null, '2차는 작업지시서를 다시 보내지 않는다')
+assert(again[0]?.returnedAt, '이전 차수 회신일은 남긴다')
 assert(passLatestColorSampleRound(again)[1]?.passed !== true, '회신 전 차수는 합격하지 않는다')
 
 console.log('draft-flow.verify ok')

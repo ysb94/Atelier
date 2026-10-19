@@ -47,6 +47,8 @@ import {
   getSeasonsByBrand,
   getStylesByBrand,
   getWarehouseStockPositions,
+  UNASSIGNED_SEASON_CODE,
+  UNASSIGNED_SEASON_NAME,
   updateStyleFields,
 } from '@/lib/api'
 import { OWNER_LABEL } from '@/lib/import/fields'
@@ -168,6 +170,17 @@ function CompletenessDots({
       })}
     </div>
   )
+}
+
+function seasonListLabel(season: Season | undefined): string {
+  if (!season) return '—'
+  if (
+    season.code === UNASSIGNED_SEASON_CODE ||
+    season.name.trim() === UNASSIGNED_SEASON_NAME
+  ) {
+    return '-'
+  }
+  return formatSeasonLabel(season)
 }
 
 function isSeasonField(field: BrandField) {
@@ -1054,10 +1067,7 @@ export function ProductsPage({
         ...base,
         columnHelper.accessor('seasonId', {
           header: '출시 기획',
-          cell: (info) => {
-            const season = seasonMap.get(info.getValue())
-            return season ? formatSeasonLabel(season) : '—'
-          },
+          cell: (info) => seasonListLabel(seasonMap.get(info.getValue())),
         }),
         columnHelper.display({
           id: 'category',
