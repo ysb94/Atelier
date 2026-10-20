@@ -1,6 +1,9 @@
 import type { CodeUsageStatus, ProductCode } from '@/lib/types'
 import { CODE_USAGE_STATUS_LABEL } from '@/lib/types'
-import { normalizeHeader } from '@/lib/import/fields'
+import {
+  usageCodeHeaderIndex,
+  type UsageCodeColumn,
+} from '@/lib/codes/usage-code-columns'
 
 function todayStamp() {
   const d = new Date()
@@ -21,19 +24,26 @@ function safeFilePart(name: string) {
 export async function downloadUsageCodeTemplate(options: {
   brandName: string
   usageTargetName: string
+  columns?: UsageCodeColumn[]
 }) {
   const XLSX = await import('xlsx')
-  const headers = ['88코드', '상태']
+  const codeLabel =
+    options.columns?.find((column) => column.sourceKey === 'code')?.label ??
+    '88코드'
+  const statusLabel =
+    options.columns?.find((column) => column.sourceKey === 'status')?.label ??
+    '상태'
+  const headers = [codeLabel, statusLabel]
   const guideRows = [
     ['항목명', '필수', '예시', '설명'],
     [
-      '88코드',
+      codeLabel,
       'Y',
       '8801234000015',
       '자사 바코드 마스터에 이미 등록된 13자리 바코드',
     ],
     [
-      '상태',
+      statusLabel,
       'N',
       '사용중',
       '사용중 또는 일시중지. 비우면 사용중으로 처리',
@@ -96,32 +106,25 @@ export function prepareUsageRows(options: {
   ownCodes: ProductCode[]
   /** 이미 해당 사용처에 등록된 productCodeId → 현재 상태 */
   existingByCodeId: Map<string, CodeUsageStatus>
+  columns?: UsageCodeColumn[]
 }): PreparedUsageRow[] {
   const { rows, ownCodes, existingByCodeId } = options
   if (rows.length === 0) return []
 
-  const header = rows[0].map((cell) => normalizeHeader(cell))
-  const codeIdx = header.findIndex(
-    (h) =>
-      h === '88코드' ||
-      h === '바코드' ||
-      h === '코드' ||
-      h === 'ean' ||
-      h === 'barcode' ||
-      h === 'code',
-  )
-  const statusIdx = header.findIndex(
-    (h) => h === '상태' || h === 'status' || h === '사용상태',
+  const codeIdx = usageCodeHeaderIndex(rows[0], options.columns ?? [], 'code')
+  const statusIdx = usageCodeHeaderIndex(
+    rows[0],
+    options.columns ?? [],
+    'status',
   )
 
-  // 헤더 인식 실패 시 첫 열을 바코드, 둘째 열을 상태로 본다.
-  const resolvedCodeIdx = codeIdx >= 0 ? codeIdx : 0
-  const resolvedStatusIdx = statusIdx >= 0 ? statusIdx : 1
+  // 업체 설정이 없던 호출만 기존 열 위치를 유지한다. 설정이 있으면 잘못된 헤더를 추측하지 않는다.
+  const resolvedCodeIdx = codeIdx >= 0 ? codeIdx : options.columns ? -1 : 0
+  const resolvedStatusIdx =
+    statusIdx >= 0 ? statusIdx : options.columns ? -1 : 1
 
   const codeMap = new Map(
-    ownCodes
-      .filter((c) => c.kind === 'own')
-      .map((c) => [c.code, c] as const),
+    ownCodes.filter((c) => c.kind === 'own').map((c) => [c.code, c] as const),
   )
   const seenCodes = new Set<string>()
   const prepared: PreparedUsageRow[] = []
@@ -174,7 +177,8 @@ export function prepareUsageRows(options: {
         code: rawCode,
         status,
         statusLabel: 'error',
-        message: '자사 바코드 마스터에 없는 코드입니다. 먼저 바코드를 등록하세요.',
+        message:
+          '자사 바코드 마스터에 없는 코드입니다. 먼저 바코드를 등록하세요.',
       })
       continue
     }

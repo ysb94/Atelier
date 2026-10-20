@@ -7,6 +7,11 @@ import { CompanyUsageCodeList } from '@/features/workspace/company-operation-lis
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { UsageAssignedCodes } from '@/features/codes/UsageAssignedCodes'
+import { UsageCodeColumnDialog } from '@/features/codes/UsageCodeColumnDialog'
+import { UsageCodeValuesDialog } from '@/features/codes/UsageCodeValuesDialog'
+import { UsageCodeManagersDialog } from '@/features/codes/UsageCodeManagersDialog'
+import { useUsagePartnerSettings } from '@/features/codes/useUsagePartnerSettings'
+import { DEFAULT_USAGE_CODE_COLUMNS } from '@/lib/codes/usage-code-columns'
 import { UsageBulkUploadPanel } from '@/features/codes/UsageBulkUploadPanel'
 import { UsageCodeFinder } from '@/features/codes/UsageCodeFinder'
 import { UsageCodePartnersDialog } from '@/features/codes/UsageCodePartnersDialog'
@@ -217,11 +222,20 @@ export function UsageCodePage() {
   const [managerOpen, setManagerOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [dialogCodeId, setDialogCodeId] = useState<string | null>(null)
+  const [headerTargetId, setHeaderTargetId] = useState<string | null>(null)
+  const [managerTargetId, setManagerTargetId] = useState<string | null>(null)
+  const [valueEditor, setValueEditor] = useState<{
+    target: string
+    codeId: string
+  } | null>(null)
 
   useEffect(() => {
     setSelectedTargetId(null)
     setBulkOpen(false)
     setDialogCodeId(null)
+    setHeaderTargetId(null)
+    setManagerTargetId(null)
+    setValueEditor(null)
   }, [brand.id])
 
   const targetsQuery = useQuery({
@@ -385,6 +399,24 @@ export function UsageCodePage() {
     if (!selectedTarget) return emptyList<CodeUsageAssignment>()
     return assignments.filter((row) => row.usageTargetId === selectedTarget.id)
   }, [assignments, selectedTarget])
+  const partnerSettings = useUsagePartnerSettings(
+    brand.id,
+    selectedTarget?.id ?? null,
+  )
+  const usageColumns =
+    partnerSettings.settings.data?.columns ?? DEFAULT_USAGE_CODE_COLUMNS
+  const previewRows = useMemo(
+    () =>
+      targetAssignments.slice(0, 3).flatMap((row) => {
+        const code = codeMap.get(row.productCodeId)
+        return code ? [{ code, status: row.status }] : []
+      }),
+    [targetAssignments, codeMap],
+  )
+  const editingCode =
+    valueEditor?.target === selectedTarget?.id
+      ? codeMap.get(valueEditor?.codeId ?? '')
+      : undefined
 
   const existingByCodeId = useMemo(() => {
     const map = new Map<string, CodeUsageStatus>()
@@ -392,7 +424,7 @@ export function UsageCodePage() {
     return map
   }, [targetAssignments])
 
-  const dialogCode = dialogCodeId ? codeMap.get(dialogCodeId) ?? null : null
+  const dialogCode = dialogCodeId ? (codeMap.get(dialogCodeId) ?? null) : null
   const dialogPartners = useMemo(() => {
     if (!dialogCode) return emptyList<CodeUsageTarget>()
     const ids = new Set(visibleTargets.map((target) => target.id))
@@ -543,6 +575,25 @@ export function UsageCodePage() {
           {saveError}
         </p>
       ) : null}
+      {selectedTarget &&
+      partnerSettings.settings.data &&
+      !partnerSettings.settings.data.ready ? (
+        <p className="mb-4 rounded border border-border bg-muted/40 px-3 py-2 text-sm">
+          업체별 설정 저장 준비가 필요합니다. 기존 헤더와 코드 연결은 그대로
+          표시하며, 새 전용 값 저장은 준비 후 사용할 수 있습니다.
+        </p>
+      ) : null}
+      {partnerSettings.settings.isError || partnerSettings.values.isError ? (
+        <p
+          role="alert"
+          className="mb-4 rounded border border-danger/30 px-3 py-2 text-sm text-danger"
+        >
+          {String(
+            partnerSettings.settings.error ?? partnerSettings.values.error,
+          )}{' '}
+          · 업체 전용 값은 조회 성공 후 수정할 수 있습니다.
+        </p>
+      ) : null}
 
       <div className="grid items-stretch gap-4 lg:grid-cols-[220px_minmax(0,1fr)] xl:h-[clamp(520px,calc(100vh-260px),900px)] xl:grid-cols-[220px_minmax(0,1fr)_minmax(280px,340px)]">
         <UsagePartnerList
@@ -591,6 +642,31 @@ export function UsageCodePage() {
               codeMap={codeMap}
               styleNames={styleNames}
               searchTextById={searchTextById}
+              columns={usageColumns}
+              privateValues={partnerSettings.valueMap}
+              valuesReady={partnerSettings.values.isSuccess}
+              valuesFailed={partnerSettings.values.isError}
+              canEditValues={
+                Boolean(
+                  partnerSettings.settings.data?.ready &&
+                  partnerSettings.settings.data.access.canEdit,
+                ) && !partnerSettings.valuesMutation.isPending
+              }
+              metaLoading={!partnerSettings.settings.isSuccess}
+              onManageColumns={() => {
+                if (selectedTarget) setHeaderTargetId(selectedTarget.id)
+              }}
+              onManageEditors={
+                partnerSettings.settings.data?.access.canManage
+                  ? () => {
+                      if (selectedTarget) setManagerTargetId(selectedTarget.id)
+                    }
+                  : undefined
+              }
+              onEditValues={(code) => {
+                if (selectedTarget)
+                  setValueEditor({ target: selectedTarget.id, codeId: code.id })
+              }}
               counts={
                 selectedTarget
                   ? (countsByTarget.get(selectedTarget.id) ??
@@ -607,11 +683,13 @@ export function UsageCodePage() {
               bulk={
                 bulkOpen && selectedTarget ? (
                   <UsageBulkUploadPanel
+                    key={`${brand.id}-${selectedTarget.id}`}
                     brandName={brand.name}
                     brandId={brand.id}
                     usageTarget={selectedTarget}
                     codes={codes}
                     existingByCodeId={existingByCodeId}
+                    columns={usageColumns}
                     onApplied={async () => {
                       setBulkOpen(false)
                       await Promise.all([
@@ -643,6 +721,85 @@ export function UsageCodePage() {
         onClose={() => setManagerOpen(false)}
         onChanged={refreshPartners}
       />
+      {selectedTarget &&
+      headerTargetId === selectedTarget.id &&
+      partnerSettings.settings.isSuccess ? (
+        <UsageCodeColumnDialog
+          key={`columns-${brand.id}-${selectedTarget.id}`}
+          partnerLabel={outboundPartnerDisplayName(selectedTarget)}
+          columns={usageColumns}
+          previewRows={previewRows}
+          styleNames={styleNames}
+          valueMap={partnerSettings.valueMap}
+          readOnly={
+            !partnerSettings.settings.data.ready ||
+            !partnerSettings.settings.data.access.canEdit
+          }
+          saving={partnerSettings.columnsMutation.isPending}
+          onClose={() => setHeaderTargetId(null)}
+          onSave={async (columns) => {
+            const target = selectedTarget.id
+            await partnerSettings.columnsMutation.mutateAsync({
+              target,
+              columns,
+              previous: usageColumns,
+            })
+            setHeaderTargetId((current) =>
+              current === target ? null : current,
+            )
+          }}
+        />
+      ) : null}
+      {selectedTarget &&
+      editingCode &&
+      partnerSettings.settings.data?.access.canEdit &&
+      partnerSettings.values.isSuccess ? (
+        <UsageCodeValuesDialog
+          key={`values-${brand.id}-${selectedTarget.id}-${editingCode.id}`}
+          partnerLabel={outboundPartnerDisplayName(selectedTarget)}
+          code={editingCode}
+          columns={usageColumns}
+          values={partnerSettings.valueMap.get(editingCode.id) ?? {}}
+          saving={partnerSettings.valuesMutation.isPending}
+          onClose={() => setValueEditor(null)}
+          onSave={async (values) => {
+            const target = selectedTarget.id,
+              codeId = editingCode.id
+            await partnerSettings.valuesMutation.mutateAsync({
+              target,
+              codeId,
+              values,
+            })
+            setValueEditor((current) =>
+              current?.target === target && current.codeId === codeId
+                ? null
+                : current,
+            )
+          }}
+        />
+      ) : null}
+      {selectedTarget &&
+      managerTargetId === selectedTarget.id &&
+      partnerSettings.settings.data?.access.canManage ? (
+        <UsageCodeManagersDialog
+          key={`managers-${brand.id}-${selectedTarget.id}`}
+          brandId={brand.id}
+          partnerLabel={outboundPartnerDisplayName(selectedTarget)}
+          initialIds={partnerSettings.settings.data.access.editorIds}
+          saving={partnerSettings.editorsMutation.isPending}
+          onClose={() => setManagerTargetId(null)}
+          onSave={async (profileIds) => {
+            const target = selectedTarget.id
+            await partnerSettings.editorsMutation.mutateAsync({
+              target,
+              profileIds,
+            })
+            setManagerTargetId((current) =>
+              current === target ? null : current,
+            )
+          }}
+        />
+      ) : null}
 
       {settingsOpen ? (
         <UsagePartnerSettingsDialog
@@ -664,7 +821,10 @@ export function UsageCodePage() {
           styleNames={styleNames}
           partners={dialogPartners}
           folders={folders}
-          assignments={assignmentsByCode.get(dialogCode.id) ?? emptyList<CodeUsageAssignment>()}
+          assignments={
+            assignmentsByCode.get(dialogCode.id) ??
+            emptyList<CodeUsageAssignment>()
+          }
           saving={saveMutation.isPending}
           error={saveError}
           onClose={() => setDialogCodeId(null)}
