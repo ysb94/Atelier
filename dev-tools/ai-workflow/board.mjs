@@ -28,7 +28,8 @@ export class Board {
   set ledger(value) { this._ledger = value }
   get props() { return this.config.properties }
   get at() { return this.config.positions }
-  automationLocations() { const at = this.at; return [at.memo, at.preparing, at.answered, at.queued, at.working, at.reviewing].filter(Boolean) }
+  manualMemo(task) { return this.config.v2?.manualMemoIntake === true && task.location === this.at.memo }
+  automationLocations() { const at = this.at; return [this.config.v2?.manualMemoIntake === true ? null : at.memo, at.preparing, at.answered, at.queued, at.working, at.reviewing].filter(Boolean) }
   stateOf(page) { return page.properties[this.props.state]?.select?.name ?? '대기' }
 
   async ready() {
@@ -47,6 +48,7 @@ export class Board {
     return true
   }
   async list(location) {
+    if (this.config.v2?.manualMemoIntake === true && location === this.at.memo) return []
     const pages = [], body = { filter: { property: this.props.location, select: { equals: location } },
       sorts: [{ property: this.props.order, direction: 'ascending' }, { timestamp: 'created_time', direction: 'ascending' }], page_size: 100 }
     let cursor
@@ -60,6 +62,7 @@ export class Board {
   async requireStable(id, expectVersion) {
     const snap = await this.notion.memoSnapshot(id, !!expectVersion)
     if (snap.unstable) throw unstable()
+    if (this.manualMemo(snap.task)) throw cancelled('메모는 사용자와 대화로 작업서를 정리하는 공간입니다. 자동화 기록을 적용하지 않습니다.', 'stopped')
     return snap
   }
 
@@ -79,7 +82,10 @@ export class Board {
   }
   // Outbox consumer. Events recorded by the legacy runner keep their original handling.
   async publish(id, update) {
-    if (!update.v2) return this.notion.publish(id, update)
+    if (!update.v2) {
+      if (this.config.v2?.manualMemoIntake === true) await this.requireStable(id, update.expectVersion)
+      return this.notion.publish(id, update)
+    }
     if (!this.ownsExecution(id, update)) {
       console.warn('[ai-workflow] 이전 실행 기록은 현재 카드에 적용하지 않습니다.', { page: id, kind: update.kind, runId: update.runId })
       if (['complete', 'needs_input'].includes(update.kind)) throw cancelled('이전 실행의 기록입니다.', 'superseded')
@@ -88,6 +94,7 @@ export class Board {
     const p = this.props, at = this.at
     const snap = await this.notion.memoSnapshot(id, !!update.expectVersion), { task, page } = snap
     if (snap.unstable) throw unstable()
+    if (this.manualMemo(task)) throw cancelled('사용자가 카드를 메모로 옮겼으므로 자동화 기록을 적용하지 않습니다.', 'stopped')
     if (update.kind === 'reflection') {
       if ((page.properties[p.pr]?.url ?? null) !== update.prUrl) return
       return this.patch(id, { [p.reflection]: select(update.value) })
@@ -136,8 +143,9 @@ export class Board {
     const snap=await this.requireStable(id,update.expectVersion),{task}=snap,p=this.props
     if(!this.ownsExecution(id,update)||update.expectVersion&&task.version!==update.expectVersion)return
     if(update.expectLocations&&!update.expectLocations.includes(task.location))return
-    await this.patch(id,{[p.location]:select(this.at.memo),[p.state]:select('중지'),[p.result]:rich(this.resultText(update)),[p.question]:rich('')})
-    await this.notice(id,[update.summary,'사용자 답변 요청이 아닙니다. 보류·구상 메모를 유지하며 자동 실행하지 않습니다. 진행할 내용이 정해지면 자동화 단계를 대기로 바꾸고 GPT 준비로 옮기면 됩니다.'],{expectVersion:update.expectVersion,locations:[this.at.memo],state:'중지',runId:update.runId,cycleId:update.cycleId,eventId:update.eventId,title:'Atelier AI 보류 안내',icon:'⏸️'})
+    const location = this.config.v2?.manualMemoIntake === true ? this.at.preparing : this.at.memo
+    await this.patch(id,{[p.location]:select(location),[p.state]:select('중지'),[p.result]:rich(this.resultText(update)),[p.question]:rich('')})
+    await this.notice(id,[update.summary,'사용자 답변 요청이 아닙니다. 보류 상태로 자동 실행하지 않습니다. 대화로 작업서를 정리한 뒤 자동화 단계를 대기로 바꾸고 GPT 준비에서 재개합니다.'],{expectVersion:update.expectVersion,locations:[location],state:'중지',runId:update.runId,cycleId:update.cycleId,eventId:update.eventId,title:'Atelier AI 보류 안내',icon:'⏸️'})
   }
   async recordNeedsInput(id, update) {
     if (!this.ownsExecution(id, update)) return
