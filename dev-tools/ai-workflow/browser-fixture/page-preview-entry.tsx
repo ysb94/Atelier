@@ -15,10 +15,26 @@ import { useAuth } from '@/lib/supabase/auth'
 import { useUsagePartnerSettings } from '@/features/codes/useUsagePartnerSettings'
 import { useHeaderPreview, useNavigationPreviewProfile } from '@/lib/company/developer-preview-context'
 import { companyNavGroupsForProfile } from '@/components/layout/company-workspace-nav'
+import { WorkspaceHeaderActions } from '@/components/layout/WorkspaceHeaderActions'
+import { ChatWindowPage } from '@/features/chat/ChatWindowPage'
+import { chatKeys } from '@/features/chat/use-chat'
+import type { ChatRoom, ChatMessage } from '@/lib/inbox/types'
 import '@/index.css'
 
 const brand = { id: '20000000-0000-4000-8000-000000000001', slug: 'fixture', name: '검증 브랜드', color: '#333' } as any
 const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity, refetchOnWindowFocus: false } } })
+queryClient.setQueryData<ChatRoom[]>(chatKeys.rooms, [{
+  id: 'fixture-room', kind: 'group', name: '검증 대화방', title: '검증 대화방', lastMessage: '동료 메시지', lastAt: null, unread: 0,
+  peerProfileId: null, peerName: null, peerPosition: null, members: [], lastKind: 'text', lastIsImage: false, memberCount: 2,
+}])
+queryClient.setQueryData(chatKeys.messages('fixture-room', 'fixture-user'), {
+  pages: [[true, false].map((mine, index): ChatMessage => ({
+    id: `fixture-message-${index}`, roomId: 'fixture-room', authorId: mine ? 'fixture-user' : 'other-user', authorName: mine ? '나' : '동료',
+    kind: 'text', body: mine ? '본인 메시지' : '동료 메시지', createdAt: `2026-10-20T01:0${index}:00Z`, deletedAt: null,
+    replyToMessageId: null, replyTo: null, reactions: [], mine,
+  }))], pageParams: [null],
+})
+queryClient.setQueryData(chatKeys.usage, { usedBytes: 1024, fileCount: 1 })
 function HiddenProfile() { const { profile } = useAuth(); return <output data-testid="hidden-profile">{profile?.email}</output> }
 function NavigationProbe() {
   const { profile } = useAuth()
@@ -30,9 +46,12 @@ function MutationProbe() {
   const state = useUsagePartnerSettings(brand.id, '20000000-0000-4000-8000-000000000002')
   return <button onClick={() => void state.editorsMutation.mutateAsync({ target: '20000000-0000-4000-8000-000000000002', profileIds: [] }).catch(error => { document.querySelector('#guard-result')!.textContent = error.message })}>검증용 저장 시도</button>
 }
-createRoot(document.getElementById('root')!).render(<QueryClientProvider client={queryClient}><BrowserRouter><DeveloperPreviewProvider>
+createRoot(document.getElementById('root')!).render(<QueryClientProvider client={queryClient}><BrowserRouter>{location.pathname.startsWith('/chat/room/')
+  ? <Routes><Route path="/chat/room/:roomId" element={<ChatWindowPage />} /></Routes>
+  : <DeveloperPreviewProvider>
   <DeveloperPreviewBar />
   <NavigationProbe />
+  <WorkspaceHeaderActions />
   <DeveloperPreviewPage><CompanyBrandScopeProvider><BrandScope brand={brand}><Routes>
     <Route path="/" element={<CompanyHomePage />} />
     <Route path="/settings/profile" element={<ProfileSettingsPage />} />
@@ -43,4 +62,4 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
     <Route path="/usage-codes" element={<><UsageCodePage /><MutationProbe /><output id="guard-result" /></>} />
   </Routes></BrandScope></CompanyBrandScopeProvider></DeveloperPreviewPage>
   <Routes location="/hidden"><Route path="/hidden" element={<DeveloperPreviewPage><HiddenProfile /></DeveloperPreviewPage>} /></Routes>
-</DeveloperPreviewProvider></BrowserRouter></QueryClientProvider>)
+</DeveloperPreviewProvider>}</BrowserRouter></QueryClientProvider>)

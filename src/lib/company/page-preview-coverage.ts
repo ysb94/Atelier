@@ -82,7 +82,7 @@ export function completePagePreviewCases(pathname: string, real: Profile): Compl
     add('partner-editor', '업체 담당자 · 전용 값 수정', {}, { usageAccess: 'editor' })
     add('partner-viewer', '일반 직원 · 조회 전용', {}, { usageAccess: 'viewer' })
   }
-  // 채팅은 모든 페이지의 상단과 별도 창에 있어 페이지별 역할과 독립적으로 시험한다.
+  // 채팅 패널과 별도 채팅 창 안에서만 노출하며 페이지의 역할 선택과 독립적으로 시험한다.
   add('chat-manager', '채팅 · 팀장', {}, { chatRole: 'manager' })
   add('chat-admin', '채팅 · 관리자', {}, { chatRole: 'admin' })
   add('chat-employee', '채팅 · 사원', {}, { chatRole: 'employee' })

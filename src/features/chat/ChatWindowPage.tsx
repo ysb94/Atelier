@@ -15,7 +15,7 @@ import { DeveloperPreviewBar, DeveloperPreviewPage, DeveloperPreviewProvider } f
 import { usePagePreview } from '@/lib/company/page-preview-context'
 
 export function ChatWindowPage() {
-  return <DeveloperPreviewProvider><div className="flex h-full min-h-0 flex-col"><DeveloperPreviewBar /><DeveloperPreviewPage><ChatWindowContent /></DeveloperPreviewPage></div></DeveloperPreviewProvider>
+  return <DeveloperPreviewProvider><div className="flex h-full min-h-0 flex-col"><DeveloperPreviewBar scope="chat" /><DeveloperPreviewPage><ChatWindowContent /></DeveloperPreviewPage></div></DeveloperPreviewProvider>
 }
 
 function ChatWindowContent() {

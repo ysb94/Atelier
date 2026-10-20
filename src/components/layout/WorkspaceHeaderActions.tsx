@@ -7,6 +7,7 @@ import {
   useState,
   type ReactNode,
   type Ref,
+  type ComponentProps,
 } from 'react'
 import { Bell, MessageCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
@@ -22,6 +23,7 @@ import { useAuth } from '@/lib/supabase/auth'
 import { useHeaderPreview } from '@/lib/company/developer-preview-context'
 import { cn, emptyList } from '@/lib/utils'
 import { NotificationPanel } from './NotificationPanel'
+import { DeveloperPreviewBar, DeveloperPreviewProvider } from './DeveloperPreview'
 
 type OpenPanel = 'chat' | 'notifications'
 
@@ -33,7 +35,6 @@ export function WorkspaceHeaderActions() {
   useRenderWatch('WorkspaceHeaderActions')
   const navigate = useNavigate()
   const { profile } = useAuth()
-  const preview = useHeaderPreview()
   const chatEnabled = profile?.status === 'active'
   const roomsQuery = useChatRooms(chatEnabled)
   useChatRealtime(chatEnabled)
@@ -154,17 +155,17 @@ export function WorkspaceHeaderActions() {
           id="workspace-chat-panel"
           className="fixed top-12 right-3 bottom-24 z-30 flex w-[min(24rem,calc(100vw-1.5rem))] flex-col"
         >
-          <ChatPanel
+          <DeveloperPreviewProvider><ChatPanelPreview
             rooms={rooms}
             loading={roomsQuery.isLoading}
             error={roomsError}
             userId={profile.id}
             myName={profile.displayName?.trim() || '나'}
-            isManager={preview?.chatRole ? preview.chatRole === 'manager' : isManagerPosition(profile.position)}
-            isAdmin={preview?.chatRole ? preview.chatRole === 'admin' : profile.isAdmin}
+            isManager={isManagerPosition(profile.position)}
+            isAdmin={profile.isAdmin}
             titleId={chatTitleId}
             onClose={closePanel}
-          />
+          /></DeveloperPreviewProvider>
         </div>
       ) : null}
       {open === 'notifications' ? (
@@ -183,6 +184,17 @@ export function WorkspaceHeaderActions() {
       ) : null}
     </div>
   )
+}
+
+function ChatPanelPreview(props: ComponentProps<typeof ChatPanel>) {
+  const preview = useHeaderPreview()
+  return <>
+    <DeveloperPreviewBar scope="chat" />
+    <div className="min-h-0 flex-1"><ChatPanel {...props}
+      isManager={preview?.chatRole ? preview.chatRole === 'manager' : props.isManager}
+      isAdmin={preview?.chatRole ? preview.chatRole === 'admin' : props.isAdmin}
+    /></div>
+  </>
 }
 
 function HeaderIconButton({

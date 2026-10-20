@@ -39,14 +39,17 @@ export function DeveloperPreviewPage({ children }: { children: ReactNode }) {
   return <PagePreviewContext.Provider value={preview}><AuthDisplayProvider profile={displayed}>{children}</AuthDisplayProvider></PagePreviewContext.Provider>
 }
 
-export function DeveloperPreviewBar() {
+export function DeveloperPreviewBar({ scope = 'page' }: { scope?: 'page' | 'chat' }) {
   useRenderWatch('DeveloperPreviewBar')
   const context = useContext(PreviewContext)
   if (!context?.allowed) return null
-  const { cases, selected, apply } = context
-  return <section aria-label="개발자 화면 미리보기" className="shrink-0 border-b border-border bg-muted/30 px-4 py-2 text-xs">
+  const { apply } = context
+  const chat = scope === 'chat'
+  const cases = context.cases.filter(item => Boolean(item.facts?.chatRole) === chat)
+  const selected = Boolean(context.selected?.facts?.chatRole) === chat ? context.selected : null
+  return <section aria-label={chat ? '채팅 화면 미리보기' : '개발자 화면 미리보기'} className="shrink-0 border-b border-border bg-muted/30 px-4 py-2 text-xs">
     <div className="flex flex-wrap items-center gap-2">
-      <span className="mr-1 flex items-center gap-1.5 text-muted-foreground"><FlaskConical size={13} />화면 테스트</span>
+      <span className="mr-1 flex items-center gap-1.5 text-muted-foreground"><FlaskConical size={13} />{chat ? '채팅 화면 테스트' : '화면 테스트'}</span>
       {context.reviewer && <span className="rounded-md bg-card px-2 py-1 text-muted-foreground">대표이사 · 제작 화면 검수</span>}
       <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto py-1" aria-label="화면 테스트 항목">
       {cases.length ? cases.map(item => <button key={item.id} type="button" aria-pressed={selected?.id === item.id} onClick={() => apply(item.id)} className={`shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 transition-colors ${selected?.id === item.id ? 'border-amber-400 bg-amber-100 font-medium text-amber-950' : 'border-border bg-card text-foreground hover:bg-muted'}`}>{item.label}</button>) : <span className="text-muted-foreground">구분 없음</span>}
