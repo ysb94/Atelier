@@ -7,6 +7,7 @@ import { AttendancePanel } from './AttendancePanel'
 import { LeavePanel } from './LeavePanel'
 import { DepartmentApproversPanel } from './DepartmentApproversPanel'
 import { DocumentOutputPanel } from './DocumentOutputPanel'
+import { CompanyNoticesPanel } from './CompanyNoticesPanel'
 import { useAuth } from '@/lib/supabase/auth'
 import { canAccessOperationsSupport, canEditOrgAssignment } from '@/lib/company/capabilities'
 
@@ -16,6 +17,7 @@ const PARTS = [
   { id: 'leave', label: '연차관리', description: '직원 휴가 신청과 연차 현황을 확인합니다.' },
   { id: 'approvers', label: '승인자 설정', description: '부서별 근태(휴가·외근·재택·정정)·야근 승인 담당자를 지정합니다.' },
   { id: 'documents', label: '서류 출력', description: '관련 서류의 출력 조건과 양식 준비 상태를 확인합니다.' },
+  { id: 'notices', label: '공지', description: '화면 위치별로 회사 전체 공지를 올리고 내립니다.' },
 ] as const
 
 type PartId = (typeof PARTS)[number]['id']
@@ -76,6 +78,7 @@ export function OperationsSupportPage() {
       {part === 'leave' ? <LeavePanel /> : null}
       {part === 'approvers' ? <DepartmentApproversPanel /> : null}
       {part === 'documents' ? <DocumentOutputPanel /> : null}
+      {part === 'notices' ? <CompanyNoticesPanel /> : null}
     </div>
   )
 }

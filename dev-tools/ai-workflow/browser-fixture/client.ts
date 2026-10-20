@@ -1,4 +1,5 @@
 // Offline data adapter. Unexpected mutations fail; there is no remote client.
+import { DEFAULT_MY_ATTENDANCE_NOTICE } from '@/lib/company/company-notices'
 export const isSupabaseConfigured = () => true
 const navigationFixture=['data-menu','brand-info'].includes(new URLSearchParams(location.search).get('fixture')??'')
 const styleRow={id:'fixture-style',brand_id:'fixture-brand',season_id:null,style_no:'F-M001',name:'검증 상품',category:'상의',gender:'U',colors:[],target_cost:null,planned_qty:null,retail_price:null,status:'draft',thumbnail_color:'#222222',description:'합성 상품',values:{},custom_fields:{},created_at:'2020-01-01',updated_at:'2020-01-01'}
@@ -13,7 +14,9 @@ export function getSupabase() {
       ;(audit.__atelierFixtureReads??=[]).push(table)
       const memberFixture=location.pathname==='/__fixture/members'
       const local=window as unknown as {__fixtureDepartments:Record<string,unknown>[];__fixtureDepartmentCalls:unknown[];__fixtureDepartmentFailure:boolean}
-      const data = table === 'departments'&&memberFixture?local.__fixtureDepartments:table === 'brands' ? [{ id: 'fixture-brand', slug: 'fixture', name: '검증 브랜드', name_ko: '검증 브랜드', color: '#222', founded_year: 2020 }] : table==='styles'&&navigationFixture?[styleRow]:[]
+      const data = table === 'company_notices'
+        ? [{ id: 'fixture-notice', slot: 'my-attendance', department_id: null, title: DEFAULT_MY_ATTENDANCE_NOTICE.title, body: DEFAULT_MY_ATTENDANCE_NOTICE.body, starts_on: null, ends_on: null, published: true, updated_at: '2026-02-24T00:00:00.000Z' }]
+        : table === 'departments'&&memberFixture?local.__fixtureDepartments:table === 'brands' ? [{ id: 'fixture-brand', slug: 'fixture', name: '검증 브랜드', name_ko: '검증 브랜드', color: '#222', founded_year: 2020 }] : table==='styles'&&navigationFixture?[styleRow]:[]
       const chain: Record<string, unknown> = {}
       let single=false
       for (const name of ['select','eq','in','gte','lte','gt','lt','order','limit','is','neq','range','or']) chain[name] = () => chain

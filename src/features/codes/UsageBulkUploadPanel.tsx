@@ -15,6 +15,7 @@ import {
   type CodeUsageTarget,
   type ProductCode,
 } from '@/lib/types'
+import type { UsageCodeColumn } from '@/lib/codes/usage-code-columns'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { cn, formatNumber } from '@/lib/utils'
@@ -24,6 +25,7 @@ type UsageBulkUploadPanelProps = {
   brandId: string
   usageTarget: CodeUsageTarget
   codes: ProductCode[]
+  columns: UsageCodeColumn[]
   existingByCodeId: Map<string, CodeUsageStatus>
   onApplied: () => void | Promise<void>
   onClose?: () => void
@@ -35,6 +37,7 @@ export function UsageBulkUploadPanel({
   brandId,
   usageTarget,
   codes,
+  columns,
   existingByCodeId,
   onApplied,
   onClose,
@@ -87,6 +90,7 @@ export function UsageBulkUploadPanel({
           rows: sheet.rows,
           ownCodes: codes,
           existingByCodeId,
+          columns,
         }),
       )
     } catch (err) {
@@ -130,6 +134,7 @@ export function UsageBulkUploadPanel({
                 await downloadUsageCodeTemplate({
                   brandName,
                   usageTargetName: usageTarget.name,
+                  columns,
                 })
               } catch (err) {
                 setError(

@@ -2643,6 +2643,7 @@ function PartnerSettingsDialog({
 function NewJobDialog({
   configs,
   initial,
+  lockedConfigKey = null,
   saving = false,
   error = null,
   onClose,
@@ -2657,6 +2658,7 @@ function NewJobDialog({
     note: string
     lockPartner?: boolean
   } | null
+  lockedConfigKey?: string | null
   saving?: boolean
   error?: string | null
   onClose: () => void
@@ -2671,9 +2673,11 @@ function NewJobDialog({
   const [configKey, setConfigKey] = useState(
     initial
       ? `${initial.partnerId}:${initial.barcodeSource}`
-      : configs[0]
-        ? `${configs[0].partnerId}:${configs[0].barcodeSource}`
-        : '',
+      : lockedConfigKey
+        ? lockedConfigKey
+        : configs[0]
+          ? `${configs[0].partnerId}:${configs[0].barcodeSource}`
+          : '',
   )
   const [title, setTitle] = useState(initial?.title ?? '')
   const [dueOn, setDueOn] = useState(
@@ -2724,7 +2728,7 @@ function NewJobDialog({
             <select
               className="w-full rounded-md border border-border bg-background px-3 py-2 disabled:opacity-60"
               value={configKey}
-              disabled={Boolean(initial?.lockPartner)}
+              disabled={Boolean(initial?.lockPartner) || Boolean(lockedConfigKey)}
               onChange={(event) => setConfigKey(event.target.value)}
             >
               {configs.map((item) => (
@@ -2966,6 +2970,151 @@ function BackupQtyConfirmDialog({
   )
 }
 
+function partnerCompanyName(
+  partner: Pick<CodeUsageTarget, 'groupName' | 'name' | 'siteName'> | undefined,
+  fallback: string,
+) {
+  const group = partner?.groupName?.trim()
+  if (group) return group
+  const head = fallback.split(' · ')[0]?.trim()
+  return head || fallback
+}
+
+function partnerCompanyKey(
+  partner: Pick<CodeUsageTarget, 'groupId' | 'groupName' | 'name' | 'siteName'> | undefined,
+  fallback: { partnerId: string; partnerName: string },
+) {
+  if (partner?.groupId) return `group:${partner.groupId}`
+  return `name:${partnerCompanyName(partner, fallback.partnerName)}`
+}
+
+function PartnerAddForm({
+  partners,
+  usedCompanyKeys,
+  ownPartnerIds,
+  partnerCodePartnerIds,
+  saving,
+  onAdd,
+}: {
+  partners: CodeUsageTarget[]
+  usedCompanyKeys: Set<string>
+  ownPartnerIds: Set<string>
+  partnerCodePartnerIds: Set<string>
+  saving: boolean
+  onAdd: (config: BulkOutboundPartnerConfig) => void
+}) {
+  const companies = useMemo(() => {
+    const map = new Map<string, { key: string; name: string; units: CodeUsageTarget[] }>()
+    for (const partner of partners) {
+      const key = partnerCompanyKey(partner, {
+        partnerId: partner.id,
+        partnerName: outboundPartnerDisplayName(partner),
+      })
+      const name = partnerCompanyName(partner, outboundPartnerDisplayName(partner))
+      const current = map.get(key)
+      if (current) current.units.push(partner)
+      else map.set(key, { key, name, units: [partner] })
+    }
+    return [...map.values()]
+      .filter((company) => !usedCompanyKeys.has(company.key))
+      .sort((left, right) => left.name.localeCompare(right.name, 'ko'))
+  }, [partners, usedCompanyKeys])
+  const [companyKey, setCompanyKey] = useState(companies[0]?.key ?? '')
+  const [barcodeSource, setBarcodeSource] = useState<BarcodeSource | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const selected = companies.find((item) => item.key === companyKey) ?? companies[0] ?? null
+  const representative = selected
+    ? [...selected.units].sort((left, right) => Number(Boolean(right.siteName?.trim())) - Number(Boolean(left.siteName?.trim())))
+        .find((unit) =>
+          barcodeSource === 'own'
+            ? ownPartnerIds.has(unit.id)
+            : barcodeSource === 'partner'
+              ? partnerCodePartnerIds.has(unit.id)
+              : false,
+        ) ?? null
+    : null
+  const registryEmptyMessage =
+    barcodeSource === 'own'
+      ? '업체별 코드 관리의 88코드에 이 업체가 등록되어 있지 않습니다.'
+      : barcodeSource === 'partner'
+        ? '거래처 코드에 이 업체가 등록되어 있지 않습니다.'
+        : null
+
+  return (
+    <div className="mx-auto flex w-full max-w-md flex-col gap-3 text-left">
+      {companies.length === 0 ? (
+        <p className="text-center text-sm text-muted-foreground">
+          더 추가할 업체가 없습니다.
+        </p>
+      ) : (
+        <>
+          <label className="block space-y-1 text-sm">
+            <span className="text-muted-foreground">업체</span>
+            <select
+              aria-label="추가할 업체"
+              className="h-9 w-full rounded-md border border-border bg-background px-3"
+              value={selected?.key ?? ''}
+              disabled={saving}
+              onChange={(event) => {
+                setCompanyKey(event.target.value)
+                setError(null)
+              }}
+            >
+              {companies.map((item) => (
+                <option key={item.key} value={item.key}>
+                  {item.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex flex-wrap gap-2">
+            {(['own', 'partner'] as const).map((source) => (
+              <button
+                key={source}
+                type="button"
+                aria-pressed={barcodeSource === source}
+                disabled={saving}
+                onClick={() => {
+                  setBarcodeSource(source)
+                  setError(null)
+                }}
+                className={cn(
+                  'rounded-md border px-3 py-1.5 text-sm',
+                  barcodeSource === source
+                    ? 'border-primary bg-primary/10'
+                    : 'border-border text-muted-foreground',
+                )}
+              >
+                {BARCODE_SOURCE_LABEL[source]}
+              </button>
+            ))}
+          </div>
+          {error ? <p className="text-sm text-danger">{error}</p> : null}
+          <Button
+            type="button"
+            disabled={saving || !selected || !barcodeSource}
+            onClick={() => {
+              if (!selected || !barcodeSource || !representative) {
+                setError(registryEmptyMessage)
+                return
+              }
+              onAdd({
+                partnerId: representative.id,
+                partnerName: partnerCompanyName(representative, outboundPartnerDisplayName(representative)),
+                barcodeSource,
+                workStatus: 'idle',
+              })
+            }}
+          >
+            <Plus className="size-4" />
+            {saving ? '추가 중...' : '이 업체 추가'}
+          </Button>
+        </>
+      )}
+    </div>
+  )
+}
+
 export function BulkOutboundPage() {
   useRenderWatch('BulkOutboundPage')
   const { brand } = useBrand()
@@ -2978,6 +3127,10 @@ export function BulkOutboundPage() {
   })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [newJobOpen, setNewJobOpen] = useState(false)
+  const [partnerTabKey, setPartnerTabKey] = useState<string | null>(null)
+  const [partnerAddOpen, setPartnerAddOpen] = useState(false)
+  const [partnerSaving, setPartnerSaving] = useState(false)
+  const [partnerSaveError, setPartnerSaveError] = useState<string | null>(null)
   const [editingJob, setEditingJob] = useState<DemoJob | null>(null)
   const [deletingJob, setDeletingJob] = useState<DemoJob | null>(null)
   const [deleteBackup, setDeleteBackup] = useState<{
@@ -3037,6 +3190,9 @@ export function BulkOutboundPage() {
     setBackupQtyConfirmError(null)
     setBarcodeMatchColumns([])
     setBarcodeColumnSettingsOpen(false)
+    setPartnerTabKey(null)
+    setPartnerAddOpen(false)
+    setPartnerSaveError(null)
   }, [brand.id])
 
   const partnersQuery = useQuery({
@@ -3546,10 +3702,56 @@ export function BulkOutboundPage() {
     }
     return open.filter((job) => job.assignee === assigneeFilter)
   }, [jobs, assigneeFilter, meLabel])
-  const partnerGroups = useMemo(
-    () => groupJobsByPartner(openJobs),
-    [openJobs],
-  )
+  const partnerCompanies = useMemo(() => {
+    const partnerById = new Map(allPartners.map((item) => [item.id, item]))
+    const map = new Map<string, { key: string; name: string; configs: BulkOutboundPartnerConfig[] }>()
+    for (const config of visibleConfigs) {
+      const partner = partnerById.get(config.partnerId)
+      const key = partnerCompanyKey(partner, config)
+      const name = partnerCompanyName(partner, config.partnerName)
+      const current = map.get(key)
+      if (current) current.configs.push(config)
+      else map.set(key, { key, name, configs: [config] })
+    }
+    return [...map.values()].sort((left, right) => left.name.localeCompare(right.name, 'ko'))
+  }, [allPartners, visibleConfigs])
+  const selectedPartnerCompany =
+    partnerCompanies.find((item) => item.key === partnerTabKey) ?? null
+
+  useEffect(() => {
+    if (partnerCompanies.length === 0) {
+      if (partnerTabKey) setPartnerTabKey(null)
+      return
+    }
+    if (!partnerCompanies.some((item) => item.key === partnerTabKey)) {
+      setPartnerTabKey(partnerCompanies[0].key)
+    }
+  }, [partnerCompanies, partnerTabKey])
+
+  async function persistPartnerConfigs(next: BulkOutboundPartnerConfig[]) {
+    setPartnerSaving(true)
+    setPartnerSaveError(null)
+    try {
+      await replaceBulkOutboundPartnerConfigs(
+        brand.id,
+        next.map((item) => ({
+          partnerId: item.partnerId,
+          barcodeSource: item.barcodeSource,
+          workStatus: item.workStatus,
+        })),
+      )
+      await queryClient.invalidateQueries({
+        queryKey: ['bulkOutboundPartnerConfigs', brand.id],
+      })
+    } catch (error) {
+      console.warn('[bulk-outbound] 업체 탭 저장 실패', error)
+      setPartnerSaveError(
+        error instanceof Error ? error.message : '업체를 저장하지 못했습니다.',
+      )
+    } finally {
+      setPartnerSaving(false)
+    }
+  }
 
   const ownCodesQuery = useQuery({
     queryKey: ['productCodes', brand.id, 'own', 'bulk-outbound-convert'],
@@ -4027,6 +4229,24 @@ export function BulkOutboundPage() {
     }
     return done.filter((job) => job.assignee === assigneeFilter)
   }, [jobs, assigneeFilter, meLabel])
+  const tabOpenJobs = selectedPartnerCompany
+    ? openJobs.filter((job) =>
+        selectedPartnerCompany.configs.some(
+          (config) =>
+            config.partnerId === job.partnerId &&
+            config.barcodeSource === job.barcodeSource,
+        ),
+      )
+    : []
+  const tabDoneJobs = selectedPartnerCompany
+    ? doneJobs.filter((job) =>
+        selectedPartnerCompany.configs.some(
+          (config) =>
+            config.partnerId === job.partnerId &&
+            config.barcodeSource === job.barcodeSource,
+        ),
+      )
+    : []
   const showingJob = Boolean(activeJob)
   const displaySettingError =
     ownDisplaySettingQuery.error ?? partnerDisplaySettingQuery.error
@@ -4130,44 +4350,21 @@ export function BulkOutboundPage() {
         title="바코드 출고"
         description={
           showingJob
-            ? '선택한 건의 작업판입니다. 목록으로 돌아가 다른 건을 열 수 있습니다.'
-            : '내 건만 보고, 같은 업체 동시 건은 묶어서 고릅니다.'
+            ? '선택한 건의 작업판입니다. 목록으로 돌아가 다른 업체를 볼 수 있습니다.'
+            : '업체를 추가하면 탭이 생깁니다. 탭에서 그 업체의 출고 현황과 기록을 봅니다.'
         }
         actions={
-          <div className="flex flex-wrap gap-2">
-            {showingJob ? (
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                onClick={backToList}
-              >
-                <ArrowLeft className="size-3.5" />
-                목록
-              </Button>
-            ) : (
-              <>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setSettingsOpen(true)}
-                >
-                  <Settings2 className="size-3.5" />
-                  업체 설정
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  disabled={visibleConfigs.length === 0}
-                  onClick={() => setNewJobOpen(true)}
-                >
-                  <Plus className="size-3.5" />
-                  새 건
-                </Button>
-              </>
-            )}
-          </div>
+          showingJob ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={backToList}
+            >
+              <ArrowLeft className="size-3.5" />
+              목록
+            </Button>
+          ) : null
         }
       />
 
@@ -4190,230 +4387,236 @@ export function BulkOutboundPage() {
         </div>
       ) : null}
       {!showingJob ? (
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">진행 중 건</CardTitle>
-            <CardDescription>
-              기본은 내 건만 보입니다. 같은 업체는 묶어 두어, 하루 차이로 동시에
-              열린 건을 헷갈리지 않게 합니다.
-            </CardDescription>
-            <div className="flex flex-wrap gap-1.5 pt-2">
-              {(
-                [
-                  { value: 'mine' as const, label: '내 건' },
-                  { value: 'all' as const, label: '전체' },
-                  ...assigneeOptions.map((name) => ({
-                    value: name,
-                    label: name,
-                  })),
-                ] as { value: AssigneeFilter; label: string }[]
-              ).map((item) => (
-                <button
-                  key={item.value}
-                  type="button"
-                  aria-pressed={assigneeFilter === item.value}
-                  onClick={() => setAssigneeFilter(item.value)}
-                  className={cn(
-                    'rounded-full border px-2.5 py-1 text-xs',
-                    assigneeFilter === item.value
-                      ? 'border-primary/40 bg-primary/10 text-foreground'
-                      : 'border-border text-muted-foreground hover:bg-muted/40',
-                  )}
-                >
-                  {item.label}
-                </button>
-              ))}
-            </div>
-          </CardHeader>
-          <CardContent>
-            {partnersQuery.isPending || jobsQuery.isPending ? (
-              <p className="py-10 text-center text-sm text-muted-foreground">
-                불러오는 중입니다.
-              </p>
-            ) : openJobs.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 py-12 text-center">
-                <p className="text-sm text-muted-foreground">
-                  {assigneeFilter === 'mine'
-                    ? '내 진행 중 건이 없습니다.'
-                    : '진행 중 건이 없습니다.'}
-                </p>
-                <Button
-                  type="button"
-                  disabled={visibleConfigs.length === 0}
-                  onClick={() => setNewJobOpen(true)}
-                >
-                  <Plus className="size-4" />
-                  새 건 추가
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-5">
-                {partnerGroups.map((group) => (
-                  <div key={group.partnerId} className="space-y-2">
-                    <div className="flex items-baseline justify-between gap-2 px-0.5">
-                      <p className="text-sm font-semibold">{group.partnerName}</p>
-                      <p className="text-xs text-muted-foreground">
-                        동시 {group.jobs.length}건
-                      </p>
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                      {group.jobs.map((job) => {
-                        const own = isOwnJob(job)
-                        return (
-                        <div
-                          key={job.id}
-                          className="rounded-xl border border-border bg-card transition-colors hover:border-primary/30 hover:bg-primary/[0.04]"
-                        >
-                        <button
-                          type="button"
-                          onClick={() => openJob(job.id)}
-                          className="w-full px-4 py-3.5 text-left"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <p className="min-w-0 truncate text-base font-semibold">
-                              {job.title}
-                            </p>
-                            <div className="flex shrink-0 flex-col items-end gap-1">
-                              <DueRemainChip dueOn={job.dueOn} />
-                              <Badge variant={STATUS_BADGE[job.status]}>
-                                {STATUS_LABEL[job.status]}
-                              </Badge>
-                            </div>
-                          </div>
-                          <p className="mt-2 text-xs text-muted-foreground">
-                            {job.startedOn} 시작 · 마감 {job.dueOn} · 예정{' '}
-                            {job.plannedQty}개
-                            {assigneeFilter !== 'mine' ? (
-                              <> · {job.assignee}</>
-                            ) : null}
-                          </p>
-                          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">
-                            {job.note}
-                          </p>
-                        </button>
-                        {own ? (
-                          <div className="flex justify-end gap-1 px-3 pb-2.5">
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              onClick={() => {
-                                setJobMetaError(null)
-                                setEditingJob(job)
-                              }}
-                            >
-                              <Pencil className="size-3.5" />
-                              수정
-                            </Button>
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              className="text-danger"
-                              onClick={() => {
-                                openDeleteOwnJob(job)
-                              }}
-                            >
-                              <Trash2 className="size-3.5" />
-                              삭제
-                            </Button>
-                          </div>
-                        ) : null}
-                        </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => setNewJobOpen(true)}
-                  disabled={visibleConfigs.length === 0}
-                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-border px-4 py-4 text-sm text-muted-foreground transition-colors hover:border-primary/30 hover:bg-muted/20 hover:text-foreground disabled:opacity-50"
-                >
-                  <Plus className="size-4" />
-                  새 건 추가
-                </button>
-              </div>
-            )}
+        <div className="space-y-4">
+          {partnersQuery.isPending || jobsQuery.isPending || configsQuery.isPending ? (
+            <p className="py-10 text-center text-sm text-muted-foreground">불러오는 중입니다.</p>
+          ) : visibleConfigs.length === 0 || partnerAddOpen ? (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">
+                  {visibleConfigs.length === 0 ? '출고할 업체를 고르세요' : '업체 추가'}
+                </CardTitle>
+                <CardDescription>
+                  고른 업체는 탭으로 추가됩니다. 탭을 누르면 그 업체의 바코드 출고 현황과 기록을 봅니다.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="flex flex-col items-center gap-3 py-8">
+                <PartnerAddForm
+                  partners={allPartners}
+                  usedCompanyKeys={new Set(partnerCompanies.map((item) => item.key))}
+                  ownPartnerIds={ownPartnerIds}
+                  partnerCodePartnerIds={partnerCodePartnerIds}
+                  saving={partnerSaving}
+                  onAdd={(config) => {
+                    void (async () => {
+                      await persistPartnerConfigs([...visibleConfigs, config])
+                      setPartnerTabKey(
+                        partnerCompanyKey(
+                          allPartners.find((item) => item.id === config.partnerId),
+                          config,
+                        ),
+                      )
+                      setPartnerAddOpen(false)
+                    })()
+                  }}
+                />
+                {partnerSaveError ? <p className="text-sm text-danger">{partnerSaveError}</p> : null}
+                {visibleConfigs.length > 0 ? (
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setPartnerAddOpen(false)}>
+                    닫기
+                  </Button>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
 
-            {doneJobs.length > 0 ? (
-              <div className="mt-6 border-t border-border pt-4">
-                <p className="mb-2 text-xs font-medium text-muted-foreground">
-                  최근 확정
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {doneJobs.map((job) => (
+          {visibleConfigs.length > 0 ? (
+            <Card>
+              <CardHeader className="pb-3">
+                <div role="tablist" aria-label="바코드 출고 업체" className="flex items-center gap-2 overflow-x-auto">
+                  {partnerCompanies.map((company) => {
+                    const selected = company.key === partnerTabKey
+                    return (
+                      <button
+                        key={company.key}
+                        type="button"
+                        role="tab"
+                        aria-selected={selected}
+                        onClick={() => {
+                          setPartnerTabKey(company.key)
+                          setPartnerAddOpen(false)
+                        }}
+                        className={cn(
+                          'shrink-0 rounded-lg border px-4 py-2 text-sm transition-colors',
+                          selected
+                            ? 'border-primary bg-primary font-semibold text-primary-foreground shadow-sm'
+                            : 'border-border bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground',
+                        )}
+                      >
+                        {company.name}
+                      </button>
+                    )
+                  })}
+                  <button
+                    type="button"
+                    aria-label="업체 추가"
+                    className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg border border-dashed border-border text-muted-foreground hover:bg-muted hover:text-foreground"
+                    onClick={() => setPartnerAddOpen(true)}
+                  >
+                    <Plus className="size-4" />
+                  </button>
+                </div>
+                {selectedPartnerCompany ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-3">
+                    <CardTitle className="text-base">{selectedPartnerCompany.name}</CardTitle>
+                    <Button type="button" size="sm" onClick={() => setNewJobOpen(true)}>
+                      <Plus className="size-3.5" />
+                      새 건
+                    </Button>
+                  </div>
+                ) : null}
+                <div className="flex flex-wrap gap-1.5 pt-2">
+                  {(
+                    [
+                      { value: 'mine' as const, label: '내 건' },
+                      { value: 'all' as const, label: '전체' },
+                      ...assigneeOptions.map((name) => ({ value: name, label: name })),
+                    ] as { value: AssigneeFilter; label: string }[]
+                  ).map((item) => (
                     <button
-                      key={job.id}
+                      key={item.value}
                       type="button"
-                      onClick={() => openJob(job.id)}
-                      className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted/40"
+                      aria-pressed={assigneeFilter === item.value}
+                      onClick={() => setAssigneeFilter(item.value)}
+                      className={cn(
+                        'rounded-full border px-2.5 py-1 text-xs',
+                        assigneeFilter === item.value
+                          ? 'border-primary/40 bg-primary/10 text-foreground'
+                          : 'border-border text-muted-foreground hover:bg-muted/40',
+                      )}
                     >
-                      {job.partnerName} · {job.title}
+                      {item.label}
                     </button>
                   ))}
                 </div>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+              </CardHeader>
+              {selectedPartnerCompany ? (
+                <CardContent>
+                  <p className="mb-2 text-xs font-medium text-muted-foreground">진행 중</p>
+                  {tabOpenJobs.length === 0 ? (
+                    <p className="py-8 text-center text-sm text-muted-foreground">이 업체에 진행 중 건이 없습니다.</p>
+                  ) : (
+                    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                      {tabOpenJobs.map((job) => {
+                        const own = isOwnJob(job)
+                        return (
+                          <div key={job.id} className="rounded-xl border border-border bg-card">
+                            <button type="button" onClick={() => openJob(job.id)} className="w-full px-4 py-3.5 text-left">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="min-w-0 truncate text-base font-semibold">{job.title}</p>
+                                <div className="flex shrink-0 flex-col items-end gap-1">
+                                  <DueRemainChip dueOn={job.dueOn} />
+                                  <Badge variant={STATUS_BADGE[job.status]}>{STATUS_LABEL[job.status]}</Badge>
+                                </div>
+                              </div>
+                              <p className="mt-2 text-xs text-muted-foreground">
+                                {job.startedOn} 시작 · 마감 {job.dueOn} · 예정 {job.plannedQty}개
+                                {assigneeFilter !== 'mine' ? <> · {job.assignee}</> : null}
+                              </p>
+                            </button>
+                            {own ? (
+                              <div className="flex justify-end gap-1 px-3 pb-2.5">
+                                <Button type="button" size="sm" variant="ghost" onClick={() => { setJobMetaError(null); setEditingJob(job) }}>
+                                  <Pencil className="size-3.5" />
+                                  수정
+                                </Button>
+                                <Button type="button" size="sm" variant="ghost" className="text-danger" onClick={() => openDeleteOwnJob(job)}>
+                                  <Trash2 className="size-3.5" />
+                                  삭제
+                                </Button>
+                              </div>
+                            ) : null}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                  <div className="mt-6 border-t border-border pt-4">
+                    <p className="mb-2 text-xs font-medium text-muted-foreground">기록 · 확정</p>
+                    {tabDoneJobs.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">확정된 기록이 없습니다.</p>
+                    ) : (
+                      <div className="flex flex-wrap gap-2">
+                        {tabDoneJobs.map((job) => (
+                          <button
+                            key={job.id}
+                            type="button"
+                            onClick={() => openJob(job.id)}
+                            className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:bg-muted/40"
+                          >
+                            {job.title} · {job.updatedOn}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              ) : null}
+            </Card>
+          ) : null}
+        </div>
       ) : (
         <div className="space-y-4">
           <Card>
             <CardHeader className="pb-3">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">작업 건</p>
-                  <CardTitle className="truncate text-2xl">
-                    {activeJob!.partnerName}
-                  </CardTitle>
-                  <CardDescription className="mt-1">
-                    {activeJob!.title} ·{' '}
-                    {BARCODE_SOURCE_LABEL[activeJob!.barcodeSource]} ·{' '}
-                    {activeJob!.startedOn}부터 · 마감 {activeJob!.dueOn} · 최근{' '}
-                    {activeJob!.updatedOn} · 담당 {activeJob!.assignee}
-                  </CardDescription>
-                  {activeJob!.note ? (
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {activeJob!.note}
-                    </p>
-                  ) : null}
-                </div>
-                <div className="flex flex-col items-end gap-2">
-                  <DueRemainChip dueOn={activeJob!.dueOn} />
-                  <Badge variant={STATUS_BADGE[activeJob!.status]}>
-                    {STATUS_LABEL[activeJob!.status]}
-                  </Badge>
-                  {isOwnJob(activeJob!) ? (
-                    <div className="flex gap-1">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setJobMetaError(null)
-                          setEditingJob(activeJob)
-                        }}
-                      >
-                        <Pencil className="size-3.5" />
-                        수정
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        className="text-danger"
-                        onClick={() => {
-                          openDeleteOwnJob(activeJob!)
-                        }}
-                      >
-                        <Trash2 className="size-3.5" />
-                        삭제
-                      </Button>
-                    </div>
-                  ) : null}
-                </div>
+                <dl className="grid min-w-0 flex-1 gap-3 sm:grid-cols-3">
+                  <div>
+                    <dt className="text-xs text-muted-foreground">업체</dt>
+                    <dd className="mt-1 truncate text-sm font-medium">
+                      {partnerCompanyName(
+                        allPartners.find((item) => item.id === activeJob!.partnerId),
+                        activeJob!.partnerName,
+                      )}
+                    </dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">제목</dt>
+                    <dd className="mt-1 truncate text-sm font-medium">{activeJob!.title}</dd>
+                  </div>
+                  <div>
+                    <dt className="text-xs text-muted-foreground">요청일</dt>
+                    <dd className="mt-1 text-sm font-medium tabular-nums">{activeJob!.startedOn}</dd>
+                  </div>
+                </dl>
+                {isOwnJob(activeJob!) ? (
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setJobMetaError(null)
+                        setEditingJob(activeJob)
+                      }}
+                    >
+                      <Pencil className="size-3.5" />
+                      수정
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="text-danger"
+                      onClick={() => {
+                        openDeleteOwnJob(activeJob!)
+                      }}
+                    >
+                      <Trash2 className="size-3.5" />
+                      삭제
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             </CardHeader>
             <CardContent>
@@ -5413,8 +5616,13 @@ export function BulkOutboundPage() {
 
       {newJobOpen || editingJob ? (
         <NewJobDialog
-          key={editingJob?.id ?? 'new'}
+          key={editingJob?.id ?? selectedPartnerCompany?.key ?? 'new'}
           configs={visibleConfigs}
+          lockedConfigKey={
+            editingJob || !selectedPartnerCompany
+              ? null
+              : `${selectedPartnerCompany.configs[0].partnerId}:${selectedPartnerCompany.configs[0].barcodeSource}`
+          }
           initial={
             editingJob
               ? {

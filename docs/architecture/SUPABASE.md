@@ -36,7 +36,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 회사, 브랜드, 팀(조직도), 프로필, 브랜드 멤버 | Supabase |
 | 출시 기획(`seasons`), 내부 상품 카테고리(`product_categories`) + M번호 연결(`style_categories`), 브랜드 항목(`brand_fields` + `brand_field_options`), 상품(`styles`) | Supabase |
 | 기획안(`product_drafts` + `draft_colors` + `draft_options`) | Supabase |
-| 코드·출고업체(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_target_folders`, `code_usage_target_aliases`, `code_usage_assignments`) | Supabase |
+| 코드·출고업체(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_target_folders`, `code_usage_target_aliases`, `code_usage_assignments`, `usage_code_columns`) | Supabase |
 | 사방넷 상품·M번호 연결(`sabangnet_products` + `sabangnet_product_styles`) | Supabase |
 | 사방넷 코드별 온라인 쇼핑몰 URL(`sabangnet_mall_urls`) | Supabase |
 | 거래처 코드 헤더(`partner_barcode_fields`). `product_codes.kind='partner'`는 업체마다 같은 바코드 문자열을 허용 | Supabase |
@@ -410,6 +410,17 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `npm run verify:my-attendance`는 한국시간 경계·윤년·월을 넘긴 신청·미래 표시·최근 승인 정정 표시와 원본 불변을 검증한다.
   `npm run verify:personal-requests`는 휴가 시간·겹침·외근/재택 예외·정정 규칙을 검증한다.
 
+## 화면 위치별 회사 공지
+
+- `company_notices`는 회사 소유 안내 글이다. 브랜드가 아니라 `company_id`로 구분하고,
+  `slot`은 공지가 보이는 화면 자리다. 첫 자리는 `my-attendance`(마이페이지 · 내 근태 상단)다.
+  `department_id`가 비어 있으면 회사 전체, 있으면 그 부서만 본다.
+- 재직 직원은 게시 중이고 한국시간 기간 안인 회사 전체 공지와 자기 부서 공지만 읽는다.
+  운영지원의 저장·삭제는 `app.can_edit_org_assignment()`만 가능하고, 직접 insert/update/delete는 없다.
+  공개 함수 `save_company_notice`, `delete_company_notice`가 비공개 함수에 위임한다.
+- 마이그레이션: `20261020021000_company_notices.sql`. 기존 휴가 사용 제도 안내를 회사 전체 공지로 한 번 넣는다.
+  `npm run verify:company-notices`는 게시 기간·대상 정렬과 위치 이름 일치를 검증한다.
+
 ## 첫 입력 흐름
 
 앞으로 새로 기획하는 상품은 기획 단계를 거친다.
@@ -735,6 +746,13 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   정식명 1건에 별칭 N건이고 `(brand_id, normalized_alias)`가 unique다. 한 별칭이
   두 업체를 가리키지 못한다. 정식명은 별칭에 넣지 않아도 검색되며, 앱은 입력 중에
   이미 그 이름을 쓰는 업체를 알려 준다.
+- `usage_code_columns`는 업체별 88코드 목록과 등록 양식이 같이 쓰는 헤더다.
+  브랜드 단위이고 업체마다 나누지 않는다. `system_key`가 `code`·`status`인 헤더는
+  빼지 않고 이름만 바꿀 수 있다. 그 외 기본 헤더와 직접 추가한 헤더는 지울 수 있다.
+  직접 추가한 헤더는 목록에 빈 칸으로 보이고, 양식에는 나오지만 등록 값으로 쓰지 않는다.
+  등록에 쓰는 열은 `code`와 `status`다. 저장은 `replace_usage_code_columns` 한 번에
+  바꾸고, 실패하면 기존 헤더가 남는다. 마이그레이션은
+  `20261020061000_usage_code_columns.sql`이다.
 - 비교 키는 앱 `compactOutboundPartnerKey`가 만든다. NFKC로 전각을 접고
   소문자화한 뒤 한글·영문·숫자만 남긴다. 원문 표기는 바꾸지 않으며 DB generated
   column을 쓰지 않는 기존 관례를 따른다. 업체 정식명도 같은 키로

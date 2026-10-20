@@ -1,6 +1,11 @@
 import type { CodeUsageStatus, ProductCode } from '@/lib/types'
 import { CODE_USAGE_STATUS_LABEL } from '@/lib/types'
-import { normalizeHeader } from '@/lib/import/fields'
+import {
+  DEFAULT_USAGE_CODE_COLUMNS,
+  usageCodeHeaderIndex,
+  type UsageCodeColumn,
+  type UsageCodeSystemKey,
+} from '@/lib/codes/usage-code-columns'
 
 function todayStamp() {
   const d = new Date()
@@ -14,37 +19,72 @@ function safeFilePart(name: string) {
   return name.replace(/[\\/:*?"<>|]/g, '_').trim() || 'brand'
 }
 
+const COLUMN_GUIDE: Record<
+  UsageCodeSystemKey,
+  { required: string; example: string; description: string }
+> = {
+  code: {
+    required: 'Y',
+    example: '8801234000015',
+    description: '자사 바코드 마스터에 이미 등록된 13자리 바코드',
+  },
+  name: {
+    required: 'N',
+    example: '',
+    description: '참고용입니다. 등록에는 쓰지 않고 마스터의 코드명을 보여 줍니다.',
+  },
+  status: {
+    required: 'N',
+    example: '사용중',
+    description: '사용중 또는 일시중지. 비우면 사용중으로 처리',
+  },
+  productName: {
+    required: 'N',
+    example: '',
+    description: '참고용입니다. 등록에는 쓰지 않고 구성 상품명을 보여 줍니다.',
+  },
+  styleNo: {
+    required: 'N',
+    example: '',
+    description: '참고용입니다. 등록에는 쓰지 않고 M번호를 보여 줍니다.',
+  },
+}
+
 /**
  * 선택한 사용처에 바코드를 일괄 등록할 빈 양식 xlsx를 내려받는다.
- * 사용처는 화면에서 이미 선택되어 있으므로 파일에는 88코드·상태만 넣는다.
+ * 화면에서 정한 헤더를 모두 첫 줄에 넣는다.
  */
 export async function downloadUsageCodeTemplate(options: {
   brandName: string
   usageTargetName: string
+  columns?: Array<Pick<UsageCodeColumn, 'systemKey' | 'label'>>
 }) {
   const XLSX = await import('xlsx')
-  const headers = ['88코드', '상태']
+  const columns =
+    options.columns && options.columns.length > 0
+      ? options.columns
+      : DEFAULT_USAGE_CODE_COLUMNS
+  const headers = columns.map((column) => column.label)
   const guideRows = [
     ['항목명', '필수', '예시', '설명'],
-    [
-      '88코드',
-      'Y',
-      '8801234000015',
-      '자사 바코드 마스터에 이미 등록된 13자리 바코드',
-    ],
-    [
-      '상태',
-      'N',
-      '사용중',
-      '사용중 또는 일시중지. 비우면 사용중으로 처리',
-    ],
+    ...columns.map((column) => {
+      const guide = column.systemKey ? COLUMN_GUIDE[column.systemKey] : null
+      return [
+        column.label,
+        guide?.required ?? 'N',
+        guide?.example ?? '',
+        guide?.description ?? '참고용 헤더입니다. 등록에는 쓰지 않습니다.',
+      ]
+    }),
   ]
 
   const workbook = XLSX.utils.book_new()
   const uploadSheet = XLSX.utils.aoa_to_sheet([headers])
   const guideSheet = XLSX.utils.aoa_to_sheet(guideRows)
-  uploadSheet['!cols'] = [{ wch: 18 }, { wch: 12 }]
-  guideSheet['!cols'] = [{ wch: 12 }, { wch: 6 }, { wch: 18 }, { wch: 40 }]
+  uploadSheet['!cols'] = headers.map((label) => ({
+    wch: Math.max(12, label.length * 2),
+  }))
+  guideSheet['!cols'] = [{ wch: 16 }, { wch: 6 }, { wch: 18 }, { wch: 48 }]
 
   XLSX.utils.book_append_sheet(workbook, uploadSheet, '사용처등록')
   XLSX.utils.book_append_sheet(workbook, guideSheet, '작성안내')
@@ -89,30 +129,21 @@ function parseStatus(raw: string): CodeUsageStatus | null {
 }
 
 /**
- * 양식 헤더(88코드, 상태)를 인식해 사용처 일괄 등록 행을 준비한다.
+ * 양식 헤더를 인식해 사용처 일괄 등록 행을 준비한다.
+ * 등록에 쓰는 열은 88코드와 상태이고, 헤더 설정에서 바꾼 이름도 찾는다.
  */
 export function prepareUsageRows(options: {
   rows: string[][]
   ownCodes: ProductCode[]
   /** 이미 해당 사용처에 등록된 productCodeId → 현재 상태 */
   existingByCodeId: Map<string, CodeUsageStatus>
+  columns?: Array<Pick<UsageCodeColumn, 'systemKey' | 'label'>>
 }): PreparedUsageRow[] {
   const { rows, ownCodes, existingByCodeId } = options
   if (rows.length === 0) return []
 
-  const header = rows[0].map((cell) => normalizeHeader(cell))
-  const codeIdx = header.findIndex(
-    (h) =>
-      h === '88코드' ||
-      h === '바코드' ||
-      h === '코드' ||
-      h === 'ean' ||
-      h === 'barcode' ||
-      h === 'code',
-  )
-  const statusIdx = header.findIndex(
-    (h) => h === '상태' || h === 'status' || h === '사용상태',
-  )
+  const codeIdx = usageCodeHeaderIndex(rows[0], options.columns, 'code')
+  const statusIdx = usageCodeHeaderIndex(rows[0], options.columns, 'status')
 
   // 헤더 인식 실패 시 첫 열을 바코드, 둘째 열을 상태로 본다.
   const resolvedCodeIdx = codeIdx >= 0 ? codeIdx : 0

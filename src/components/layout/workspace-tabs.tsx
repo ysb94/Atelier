@@ -52,7 +52,7 @@ const NAV_LABELS: {
   { match: /^\/product-work\/md(?:\/|$)/, label: 'MD · 상품 정보' },
   { match: /^\/md\/price-compare(?:\/|$)/, label: 'MD · 가격 비교' },
   { match: /^\/product-work\/logistics(?:\/|$)/, label: '물류 · 상품 정보' },
-  { match: /^\/logistics\/invoices(?:\/|$)/, label: '물류 · 송장작업' },
+  { match: /^\/logistics\/invoices(?:\/|$)/, label: '물류 · 온라인 송장작업' },
   {
     match: /^\/logistics\/barcode-outbound-data-entry(?:\/|$)/,
     label: '물류 · (임시) 바코드 출고 데이터입력',

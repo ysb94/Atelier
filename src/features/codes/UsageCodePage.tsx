@@ -8,11 +8,16 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { UsageAssignedCodes } from '@/features/codes/UsageAssignedCodes'
 import { UsageBulkUploadPanel } from '@/features/codes/UsageBulkUploadPanel'
-import { UsageCodeFinder } from '@/features/codes/UsageCodeFinder'
+import { UsageCodeColumnDialog } from '@/features/codes/UsageCodeColumnDialog'
 import { UsageCodePartnersDialog } from '@/features/codes/UsageCodePartnersDialog'
 import { UsagePartnerList } from '@/features/codes/UsagePartnerList'
 import { UsageTargetManagerDialog } from '@/features/codes/UsageTargetManager'
 import { useRenderWatch } from '@/lib/diagnostics/render-watch'
+import type { UsageCodeColumn } from '@/lib/codes/usage-code-columns'
+import {
+  listUsageCodeColumns,
+  saveUsageCodeColumns,
+} from '@/lib/supabase/usage-code-columns'
 import {
   EMPTY_ASSIGNMENT_COUNTS,
   codeSearchText,
@@ -213,20 +218,33 @@ export function UsageCodePage() {
   const queryClient = useQueryClient()
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
-  const [finderOpen, setFinderOpen] = useState(false)
   const [managerOpen, setManagerOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [columnDialogOpen, setColumnDialogOpen] = useState(false)
   const [dialogCodeId, setDialogCodeId] = useState<string | null>(null)
 
   useEffect(() => {
     setSelectedTargetId(null)
     setBulkOpen(false)
+    setColumnDialogOpen(false)
     setDialogCodeId(null)
   }, [brand.id])
 
   const targetsQuery = useQuery({
     queryKey: ['codeUsageTargets', brand.id],
     queryFn: () => getCodeUsageTargets(brand.id),
+  })
+  const columnsQuery = useQuery({
+    queryKey: ['usageCodeColumns', brand.id],
+    queryFn: () => listUsageCodeColumns(brand.id),
+  })
+  const saveColumnsMutation = useMutation({
+    mutationFn: (columns: UsageCodeColumn[]) =>
+      saveUsageCodeColumns(brand.id, columns),
+    onSuccess: (columns) => {
+      queryClient.setQueryData(['usageCodeColumns', brand.id], columns)
+      setColumnDialogOpen(false)
+    },
   })
   const settingQueryKey = [
     'barcodePartnerDisplaySetting',
@@ -464,17 +482,6 @@ export function UsageCodePage() {
     saveMutation.mutate(plan.changes)
   }
 
-  function registerCodes(productCodeIds: string[]) {
-    if (!selectedTarget) return
-    saveChanges(
-      productCodeIds.map((productCodeId) => ({
-        productCodeId,
-        usageTargetId: selectedTarget.id,
-        status: 'active',
-      })),
-    )
-  }
-
   function changeStatus(assignmentIds: string[], status: CodeUsageStatus) {
     const ids = new Set(assignmentIds)
     saveChanges(
@@ -538,13 +545,20 @@ export function UsageCodePage() {
             : '공용 업체 설정을 불러오지 못했습니다.'}
         </p>
       ) : null}
+      {columnsQuery.isError ? (
+        <p className="mb-4 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
+          {columnsQuery.error instanceof Error
+            ? columnsQuery.error.message
+            : '표 헤더를 불러오지 못했습니다.'}
+        </p>
+      ) : null}
       {saveError ? (
         <p className="mb-4 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
           {saveError}
         </p>
       ) : null}
 
-      <div className="grid items-stretch gap-4 lg:grid-cols-[220px_minmax(0,1fr)] xl:h-[clamp(520px,calc(100vh-260px),900px)] xl:grid-cols-[220px_minmax(0,1fr)_minmax(280px,340px)]">
+      <div className="grid items-stretch gap-4 lg:grid-cols-[220px_minmax(0,1fr)] xl:h-[clamp(520px,calc(100vh-260px),900px)]">
         <UsagePartnerList
           targets={visibleTargets}
           folders={folders}
@@ -560,29 +574,8 @@ export function UsageCodePage() {
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenManager={() => setManagerOpen(true)}
         />
-        <div className="flex min-h-0 min-w-0 flex-col gap-3 xl:contents">
-          <div
-            className={cn(
-              'min-h-0',
-              finderOpen ? 'block' : 'hidden',
-              'xl:col-start-3 xl:row-start-1 xl:block',
-            )}
-          >
-            <UsageCodeFinder
-              targetLabel={
-                selectedTarget ? outboundPartnerDisplayName(selectedTarget) : ''
-              }
-              usageTargetId={selectedTarget?.id ?? null}
-              codes={codes}
-              searchTextById={searchTextById}
-              styleNames={styleNames}
-              existingByCodeId={existingByCodeId}
-              saving={saveMutation.isPending}
-              canRegister={Boolean(selectedTarget)}
-              onRegister={registerCodes}
-            />
-          </div>
-          <div className="min-h-0 min-w-0 xl:col-start-2 xl:row-start-1 xl:h-full">
+        <div className="flex min-h-0 min-w-0 flex-col gap-3">
+          <div className="min-h-0 min-w-0 xl:h-full">
             <UsageAssignedCodes
               target={selectedTarget}
               configured={configured}
@@ -599,8 +592,8 @@ export function UsageCodePage() {
               }
               saving={saveMutation.isPending}
               bulkOpen={bulkOpen}
-              finderOpen={finderOpen}
-              onToggleFinder={() => setFinderOpen((current) => !current)}
+              columns={columnsQuery.data ?? []}
+              onManageColumns={() => setColumnDialogOpen(true)}
               onToggleBulk={() => setBulkOpen((current) => !current)}
               onOpenCode={(code) => setDialogCodeId(code.id)}
               onChangeStatus={changeStatus}
@@ -611,6 +604,7 @@ export function UsageCodePage() {
                     brandId={brand.id}
                     usageTarget={selectedTarget}
                     codes={codes}
+                    columns={columnsQuery.data ?? []}
                     existingByCodeId={existingByCodeId}
                     onApplied={async () => {
                       setBulkOpen(false)
@@ -655,6 +649,22 @@ export function UsageCodePage() {
               setSelectedTargetId(null)
             }
           }}
+        />
+      ) : null}
+
+      {columnDialogOpen ? (
+        <UsageCodeColumnDialog
+          columns={columnsQuery.data ?? []}
+          saving={saveColumnsMutation.isPending}
+          saveError={
+            saveColumnsMutation.isError
+              ? saveColumnsMutation.error instanceof Error
+                ? saveColumnsMutation.error.message
+                : '헤더를 저장하지 못했습니다.'
+              : null
+          }
+          onClose={() => setColumnDialogOpen(false)}
+          onSave={(columns) => saveColumnsMutation.mutate(columns)}
         />
       ) : null}
 

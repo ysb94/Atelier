@@ -17,6 +17,7 @@ import {
   getStylesByBrand,
 } from '@/lib/api'
 import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
+import { listUsageCodeColumns } from '@/lib/supabase/usage-code-columns'
 import type { CodeUsageStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -67,6 +68,11 @@ export function DataUploadPage() {
   const codesQuery = useQuery({
     queryKey: ['productCodes', brand.id, 'own'],
     queryFn: () => getProductCodes(brand.id, 'own'),
+    enabled: kind === 'usage',
+  })
+  const usageColumnsQuery = useQuery({
+    queryKey: ['usageCodeColumns', brand.id],
+    queryFn: () => listUsageCodeColumns(brand.id),
     enabled: kind === 'usage',
   })
   const allCodesQuery = useQuery({
@@ -214,6 +220,7 @@ export function DataUploadPage() {
                   brandId={brand.id}
                   usageTarget={selectedTarget}
                   codes={codesQuery.data ?? []}
+                  columns={usageColumnsQuery.data ?? []}
                   existingByCodeId={existingByCodeId}
                   onApplied={async () => {
                     await queryClient.invalidateQueries({
