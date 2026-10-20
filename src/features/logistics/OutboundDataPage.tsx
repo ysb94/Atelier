@@ -41,13 +41,15 @@ import {
   getCodeUsageTargets,
   getFilteredOutboundShipments,
 } from '@/lib/api'
-import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import {
   bucketTotalsByPeriod,
   companySeriesId,
   groupPartnersForOutboundChart,
   limitCompaniesWithOther,
   niceTicks,
+  operationsOutboundCompanyLabel,
+  operationsOutboundTargetLabel,
+  operationsOutboundUnitLabel,
   OTHER_COMPANY_KEY,
   resolveChartSeries,
   siteSeriesId,
@@ -828,7 +830,7 @@ function PartnerRankBars({
           )}
           {renderToggleRow({
             seriesId: companySeriesId(company.key),
-            label: company.label,
+            label: operationsOutboundCompanyLabel(company),
             quantity: company.quantity,
             widthTotal: total,
             shareTotal: total,
@@ -848,7 +850,11 @@ function PartnerRankBars({
                   <div key={unit.partnerId} className="pl-5">
                     {renderToggleRow({
                       seriesId: siteSeriesId(unit.partnerId),
-                      label: unit.siteLabel,
+                      label: operationsOutboundUnitLabel({
+                        companyLabel: company.label,
+                        siteLabel: unit.siteLabel,
+                        channelType: unit.channelType,
+                      }),
                       quantity: unit.quantity,
                       widthTotal: company.quantity,
                       shareTotal: total,
@@ -1186,7 +1192,7 @@ function ProductDetailPanel({
                   </Badge>
                   {topCompany ? (
                     <Badge variant="outline">
-                      {topCompany.label}{' '}
+                      {operationsOutboundCompanyLabel(topCompany)}{' '}
                       {formatShare(topCompany.quantity, summary.totalQuantity)}
                     </Badge>
                   ) : null}
@@ -1366,7 +1372,7 @@ function FilterBar({
           <option value="">전체 업체</option>
           {partners.map((partner) => (
             <option key={partner.id} value={partner.id}>
-              {outboundPartnerDisplayName(partner)}
+              {operationsOutboundTargetLabel(partner)}
             </option>
           ))}
           {extraPartners
