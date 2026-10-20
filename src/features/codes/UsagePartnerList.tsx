@@ -1,20 +1,58 @@
 import { useDeferredValue, useMemo, useState } from 'react'
-import { ChevronDown, Plus, Search, Settings2 } from 'lucide-react'
+import { Plus, Search, Settings2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import {
-  EMPTY_ASSIGNMENT_COUNTS,
   type AssignmentCounts,
 } from '@/lib/codes/code-usage'
 import { folderPathLabel } from '@/lib/codes/outbound-folder'
 import {
   outboundPartnerDisplayName,
   outboundPartnerUnitLabel,
+  type OutboundCompanyInFolder,
 } from '@/lib/codes/outbound-partner'
 import { groupOutboundSearchSections } from '@/lib/codes/outbound-partner-browser'
-import type { CodeUsageTarget, CodeUsageTargetFolder } from '@/lib/types'
+import type {
+  CodeUsageAssignment,
+  CodeUsageStatus,
+  CodeUsageTarget,
+  CodeUsageTargetFolder,
+} from '@/lib/types'
 import { cn, formatNumber } from '@/lib/utils'
+
+export function usagePartnerCompanyKey(folderId: string | null, companyKey: string) {
+  return `${folderId ?? 'unfiled'}:${companyKey}`
+}
+
+function companyLabel(company: OutboundCompanyInFolder) {
+  const name = company.groupName.trim()
+  if (name) return name
+  const unit = company.units[0]
+  return unit ? outboundPartnerDisplayName(unit) : '업체'
+}
+
+function companyAssignmentCounts(
+  units: readonly CodeUsageTarget[],
+  assignments: readonly CodeUsageAssignment[],
+): AssignmentCounts {
+  const ids = new Set(units.map((unit) => unit.id))
+  const statusByCode = new Map<string, CodeUsageStatus>()
+  for (const row of assignments) {
+    if (!ids.has(row.usageTargetId)) continue
+    const current = statusByCode.get(row.productCodeId)
+    if (!current || row.status === 'paused') {
+      statusByCode.set(row.productCodeId, row.status)
+    }
+  }
+  let active = 0
+  let paused = 0
+  for (const status of statusByCode.values()) {
+    if (status === 'paused') paused += 1
+    else active += 1
+  }
+  return { total: statusByCode.size, active, paused }
+}
 
 function countLabel(counts: AssignmentCounts) {
   const total = formatNumber(counts.total)
@@ -25,8 +63,8 @@ function countLabel(counts: AssignmentCounts) {
 export function UsagePartnerList({
   targets,
   folders,
-  counts,
-  selectedId,
+  assignments,
+  selectedKey,
   loading,
   configured,
   hasPartners,
@@ -36,17 +74,16 @@ export function UsagePartnerList({
 }: {
   targets: CodeUsageTarget[]
   folders: CodeUsageTargetFolder[]
-  counts: Map<string, AssignmentCounts>
-  selectedId: string | null
+  assignments: CodeUsageAssignment[]
+  selectedKey: string | null
   loading: boolean
   configured: boolean
   hasPartners: boolean
-  onSelect: (targetId: string) => void
+  onSelect: (companyKey: string) => void
   onOpenSettings: () => void
   onOpenManager: () => void
 }) {
   const [search, setSearch] = useState('')
-  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const deferredSearch = useDeferredValue(search)
   const keyword = deferredSearch.trim().toLowerCase()
 
@@ -75,15 +112,6 @@ export function UsagePartnerList({
       }),
     [filteredTargets, folders],
   )
-
-  function toggleCompany(key: string) {
-    setCollapsed((current) => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }
 
   return (
     <Card className="flex max-h-[70vh] min-h-[280px] flex-col overflow-hidden xl:h-full xl:max-h-none xl:min-h-0">
@@ -164,74 +192,17 @@ export function UsagePartnerList({
               </p>
               <ul className="space-y-0.5">
                 {section.companies.map((company) => {
-                  const companyKey = `${section.folderId ?? 'unfiled'}:${company.key}`
-                  const branched = company.mode === 'branched'
-                  const expanded = keyword.length > 0 || !collapsed.has(companyKey)
-                  if (!branched) {
-                    const unit = company.units[0]
-                    if (!unit) return null
-                    return (
-                      <li key={company.key}>
-                        <PartnerButton
-                          target={unit}
-                          selected={selectedId === unit.id}
-                          counts={
-                            counts.get(unit.id) ?? EMPTY_ASSIGNMENT_COUNTS
-                          }
-                          onSelect={onSelect}
-                        />
-                      </li>
-                    )
-                  }
-                  const companyCounts = company.units.reduce(
-                    (sum, unit) => {
-                      const item = counts.get(unit.id) ?? EMPTY_ASSIGNMENT_COUNTS
-                      return {
-                        total: sum.total + item.total,
-                        active: sum.active + item.active,
-                        paused: sum.paused + item.paused,
-                      }
-                    },
-                    { total: 0, active: 0, paused: 0 },
-                  )
+                  const companyKey = usagePartnerCompanyKey(section.folderId, company.key)
+                  const inactive = company.units.every((unit) => !unit.active)
                   return (
                     <li key={company.key}>
-                      <button
-                        type="button"
-                        className="flex w-full items-start gap-1 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"
-                        aria-expanded={expanded}
-                        onClick={() => toggleCompany(companyKey)}
-                      >
-                        <ChevronDown
-                          className={cn(
-                            'mt-0.5 size-3.5 shrink-0 text-muted-foreground transition-transform',
-                            !expanded && '-rotate-90',
-                          )}
-                        />
-                        <span className="min-w-0 flex-1 break-words font-medium">
-                          {company.groupName}
-                        </span>
-                        <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums text-muted-foreground">
-                          {countLabel(companyCounts)}
-                        </span>
-                      </button>
-                      {expanded ? (
-                        <ul className="space-y-0.5 pl-4">
-                          {company.units.map((unit) => (
-                            <li key={unit.id}>
-                              <PartnerButton
-                                target={unit}
-                                selected={selectedId === unit.id}
-                                counts={
-                                  counts.get(unit.id) ?? EMPTY_ASSIGNMENT_COUNTS
-                                }
-                                unitLabel
-                                onSelect={onSelect}
-                              />
-                            </li>
-                          ))}
-                        </ul>
-                      ) : null}
+                      <CompanyButton
+                        label={companyLabel(company)}
+                        inactive={inactive}
+                        selected={selectedKey === companyKey}
+                        counts={companyAssignmentCounts(company.units, assignments)}
+                        onSelect={() => onSelect(companyKey)}
+                      />
                     </li>
                   )
                 })}
@@ -244,34 +215,32 @@ export function UsagePartnerList({
   )
 }
 
-function PartnerButton({
-  target,
+function CompanyButton({
+  label,
+  inactive,
   selected,
   counts,
-  unitLabel = false,
   onSelect,
 }: {
-  target: CodeUsageTarget
+  label: string
+  inactive: boolean
   selected: boolean
   counts: AssignmentCounts
-  unitLabel?: boolean
-  onSelect: (targetId: string) => void
+  onSelect: () => void
 }) {
   return (
     <button
       type="button"
-      onClick={() => onSelect(target.id)}
+      onClick={onSelect}
       className={cn(
         'flex w-full items-start justify-between gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors',
         selected ? 'bg-primary text-primary-foreground' : 'hover:bg-muted',
-        !target.active && !selected && 'opacity-60',
+        inactive && !selected && 'opacity-60',
       )}
     >
       <span className="min-w-0 break-words font-medium">
-        {unitLabel
-          ? outboundPartnerUnitLabel(target)
-          : outboundPartnerDisplayName(target)}
-        {!target.active ? (
+        {label}
+        {inactive ? (
           <span
             className={cn(
               'mt-0.5 block text-[11px] font-normal',

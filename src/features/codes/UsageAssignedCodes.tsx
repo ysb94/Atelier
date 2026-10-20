@@ -1,12 +1,15 @@
 import { useDeferredValue, useMemo, useState, type ReactNode } from 'react'
-import { Search, Upload } from 'lucide-react'
+import { Settings2, Search, Upload } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { OutboundPartnerIdentity } from '@/features/codes/OutboundPartnerIdentity'
 import {
-  codeComponentSummary,
+  DEFAULT_USAGE_CODE_COLUMNS,
+  type UsageCodeColumn,
+} from '@/lib/codes/usage-code-columns'
+import {
   type AssignmentCounts,
 } from '@/lib/codes/code-usage'
 import {
@@ -20,8 +23,48 @@ import { cn, formatNumber } from '@/lib/utils'
 
 type StatusFilter = 'all' | CodeUsageStatus
 
+function renderUsageColumn(
+  systemKey: UsageCodeColumn['systemKey'],
+  code: ProductCode | undefined,
+  status: CodeUsageStatus,
+  styleNames: ReadonlyMap<string, string>,
+  openCode: () => void,
+) {
+  if (!systemKey) return '—'
+  if (systemKey === 'code') {
+    return (
+      <button type="button" className="font-medium tabular-nums hover:underline" disabled={!code} onClick={openCode}>
+        {code?.code ?? '—'}
+      </button>
+    )
+  }
+  if (systemKey === 'name') return code?.name ?? '삭제된 바코드'
+  if (systemKey === 'status') {
+    return (
+      <Badge variant={status === 'active' ? 'success' : 'muted'}>
+        {CODE_USAGE_STATUS_LABEL[status]}
+      </Badge>
+    )
+  }
+  const components = code?.components ?? []
+  if (components.length === 0) return '—'
+  if (systemKey === 'productName') {
+    return components.map((component) => (
+      <div key={component.styleId}>{styleNames.get(component.styleId)?.trim() || '—'}</div>
+    ))
+  }
+  return components.map((component) => (
+    <div key={component.styleId} className="tabular-nums">
+      {component.styleNo}
+      {component.qty > 1 ? `×${component.qty}` : ''}
+    </div>
+  ))
+}
+
 export function UsageAssignedCodes({
   target,
+  title,
+  selectionKey,
   configured,
   hasPartners,
   assignments,
@@ -31,14 +74,16 @@ export function UsageAssignedCodes({
   counts,
   saving,
   bulkOpen,
-  finderOpen,
-  onToggleFinder,
+  columns,
+  onManageColumns,
   onToggleBulk,
   onOpenCode,
   onChangeStatus,
   bulk,
 }: {
   target: CodeUsageTarget | null
+  title?: string
+  selectionKey?: string | null
   configured: boolean
   hasPartners: boolean
   assignments: CodeUsageAssignment[]
@@ -48,8 +93,8 @@ export function UsageAssignedCodes({
   counts: AssignmentCounts
   saving: boolean
   bulkOpen: boolean
-  finderOpen: boolean
-  onToggleFinder: () => void
+  columns: UsageCodeColumn[]
+  onManageColumns: () => void
   onToggleBulk: () => void
   onOpenCode: (code: ProductCode) => void
   onChangeStatus: (assignmentIds: string[], status: CodeUsageStatus) => void
@@ -59,10 +104,10 @@ export function UsageAssignedCodes({
   const [listSearch, setListSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const deferredSearch = useDeferredValue(listSearch)
-  const targetId = target?.id ?? null
-  const [seenTargetId, setSeenTargetId] = useState(targetId)
-  if (targetId !== seenTargetId) {
-    setSeenTargetId(targetId)
+  const resetKey = selectionKey ?? target?.id ?? null
+  const [seenTargetId, setSeenTargetId] = useState(resetKey)
+  if (resetKey !== seenTargetId) {
+    setSeenTargetId(resetKey)
     setSelectedIds([])
     setStatusFilter('all')
     setListSearch('')
@@ -83,6 +128,9 @@ export function UsageAssignedCodes({
   )
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
   const selectedCount = selectedIds.filter((id) => assignmentIds.has(id)).length
+  const tableColumns = columns.length > 0
+    ? columns
+    : DEFAULT_USAGE_CODE_COLUMNS.map((column, index) => ({ ...column, id: `default-${index}` }))
   const allVisibleSelected =
     filtered.length > 0 && filtered.every((row) => selectedSet.has(row.id))
 
@@ -125,7 +173,7 @@ export function UsageAssignedCodes({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <h2 className="break-words text-base font-semibold">
-                <OutboundPartnerIdentity target={target} />
+                {title?.trim() ? title : <OutboundPartnerIdentity target={target} />}
               </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 등록 {formatNumber(counts.total)}건 · 사용중{' '}
@@ -134,14 +182,9 @@ export function UsageAssignedCodes({
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                className="xl:hidden"
-                variant={finderOpen ? 'default' : 'outline'}
-                onClick={onToggleFinder}
-              >
-                <Search className="size-4" />
-                코드 찾기
+              <Button type="button" variant="outline" disabled={columns.length === 0} onClick={onManageColumns}>
+                <Settings2 className="size-4" />
+                헤더 설정
               </Button>
               <Button
                 type="button"
@@ -219,72 +262,61 @@ export function UsageAssignedCodes({
           ) : null}
 
           <Card className="flex min-h-[240px] flex-1 flex-col overflow-hidden">
-            {filtered.length > 0 ? (
-              <label className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
-                <input
-                  type="checkbox"
-                  className="size-3.5 accent-primary"
-                  checked={allVisibleSelected}
-                  onChange={toggleVisible}
-                />
-                보이는 항목 선택
-              </label>
-            ) : null}
             {filtered.length === 0 ? (
               <p className="px-4 py-12 text-center text-sm text-muted-foreground">
                 {assignments.length === 0
-                  ? '이 업체에 등록된 바코드가 없습니다. 코드 찾기에서 추가하세요.'
+                  ? '이 업체에 등록된 바코드가 없습니다. 일괄 등록으로 추가하세요.'
                   : '조건에 맞는 바코드가 없습니다.'}
               </p>
             ) : (
-              <ul className="min-h-0 flex-1 overflow-y-auto">
-                {filtered.map((row) => {
-                  const code = codeMap.get(row.productCodeId)
-                  return (
-                    <li
-                      key={row.id}
-                      className="flex items-start gap-2 border-b border-border px-3 py-2.5 last:border-0"
-                    >
-                      <input
-                        type="checkbox"
-                        className="mt-1 size-3.5 accent-primary"
-                        checked={selectedSet.has(row.id)}
-                        aria-label={`${code?.code ?? '바코드'} 선택`}
-                        onChange={() => toggle(row.id)}
-                      />
-                      <button
-                        type="button"
-                        className="min-w-0 flex-1 text-left"
-                        onClick={() => {
-                          if (code) onOpenCode(code)
-                        }}
-                        disabled={!code}
-                      >
-                        <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <span className="font-medium tabular-nums">
-                            {code?.code ?? '—'}
-                          </span>
-                          <span className="break-words">
-                            {code?.name ?? '삭제된 바코드'}
-                          </span>
-                          <Badge
-                            variant={
-                              row.status === 'active' ? 'success' : 'muted'
-                            }
-                          >
-                            {CODE_USAGE_STATUS_LABEL[row.status]}
-                          </Badge>
-                        </span>
-                        <span className="mt-0.5 block text-xs text-muted-foreground">
-                          {code
-                            ? codeComponentSummary(code, styleNames)
-                            : '—'}
-                        </span>
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
+              <div className="min-h-0 flex-1 overflow-auto">
+                <table className="w-full min-w-[960px] border-collapse text-left text-sm">
+                  <thead className="sticky top-0 z-10 border-b border-border bg-muted/80 text-xs text-muted-foreground">
+                    <tr>
+                      <th className="w-10 px-3 py-2">
+                        <input
+                          type="checkbox"
+                          className="size-3.5 accent-primary"
+                          checked={allVisibleSelected}
+                          aria-label="보이는 항목 선택"
+                          onChange={toggleVisible}
+                        />
+                      </th>
+                      {tableColumns.map((column) => (
+                        <th key={column.id} className="px-3 py-2 font-medium">{column.label}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((row) => {
+                      const code = codeMap.get(row.productCodeId)
+                      return (
+                        <tr
+                          key={row.id}
+                          className="border-b border-border last:border-0 hover:bg-muted/30"
+                        >
+                          <td className="px-3 py-2 align-top">
+                            <input
+                              type="checkbox"
+                              className="mt-0.5 size-3.5 accent-primary"
+                              checked={selectedSet.has(row.id)}
+                              aria-label={`${code?.code ?? '바코드'} 선택`}
+                              onChange={() => toggle(row.id)}
+                            />
+                          </td>
+                          {tableColumns.map((column) => (
+                            <td key={column.id} className="px-3 py-2 align-top">
+                              {renderUsageColumn(column.systemKey, code, row.status, styleNames, () => {
+                                if (code) onOpenCode(code)
+                              })}
+                            </td>
+                          ))}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Card>
         </>

@@ -200,7 +200,7 @@ export class Orchestrator {
     }
     this.status()
   }
-  // Recover reviews first. Plan one memo, answer or stale queued card at a time.
+  // Recover reviews first. Manual intake keeps memos outside automation.
   async admit(values) {
     const at = this.config.positions
     const recovered = new Map()
@@ -213,7 +213,8 @@ export class Orchestrator {
       }
     }
     const recoveryLanes = this.pipeline ? [at.reviewing, at.working] : [at.working, at.reviewing]
-    const planningLanes = this.config.v2?.cursorPull?.enabled ? [at.queued,at.preparing,at.answered,at.memo] : this.pipeline ? [at.memo, at.answered, at.queued] : [at.answered, at.queued, at.memo]
+    const memo = this.config.v2?.manualMemoIntake === true ? null : at.memo
+    const planningLanes = this.config.v2?.cursorPull?.enabled ? [at.queued,at.preparing,at.answered,memo] : this.pipeline ? [at.preparing,memo,at.answered,at.queued] : [at.preparing,at.answered,at.queued,memo]
     for (const lane of [...new Set([...recoveryLanes, ...planningLanes].filter(Boolean))]) {
       if (this.stopping || this.active.size >= this.residentLimit()) return
       const pending = new Set(this.store.data.outbox.map(event => event.pageId))
@@ -231,6 +232,7 @@ export class Orchestrator {
     }
   }
   async consider(page, lane, values) {
+    if (this.config.v2?.manualMemoIntake === true && lane === this.config.positions.memo) return
     const state = this.board.stateOf(page), job = this.journal().jobs[page.id]
     if (state === '중지') return
     // Retryable environment errors wait for their backoff; operator errors wait for 자동화 단계 to be reset.
@@ -263,10 +265,11 @@ export class Orchestrator {
   }
   prepare(job, task, lane, values, state) {
     const journal = this.journal(), at = this.config.positions
+    if (this.config.v2?.manualMemoIntake === true && task.location === at.memo) return null
     if (job?.phase === 'done') {
-      if (![at.memo, at.answered, at.queued].includes(lane)) return null
-      // Returning a finished card to 메모 starts an independent run. Answered and requeue keep the branch.
-      if (lane === at.memo) job = this.startIndependentRun(job)
+      if (![at.preparing, at.memo, at.answered, at.queued].includes(lane)) return null
+      // A finalized new brief starts an independent run. Answered and requeue keep the branch.
+      if (lane === at.memo || lane === at.preparing) job = this.startIndependentRun(job)
     }
     if (!job) {
       const runId = randomUUID()
@@ -291,7 +294,7 @@ export class Orchestrator {
         if (c.phase === 'publishing' && c.sourceVersion !== task.version && !c.outcome) c.outcome = 'superseded'
         job.history.push(this.summarize(c))
       }
-      const trigger = lane === at.answered ? 'answered' : lane === at.memo ? 'memo' : lane === at.queued ? 'queued' : 'resume'
+      const trigger = lane === at.preparing ? 'prepared' : lane === at.answered ? 'answered' : lane === at.memo ? 'memo' : lane === at.queued ? 'queued' : 'resume'
       const settings = snapshotSettings(values)
       // Branch choices are fixed by the task's existing workspace; only new tasks see new branch settings.
       if (job.workspace) Object.assign(settings, { baseBranch: job.workspace.baseBranch, integrationBranch: job.workspace.integrationBranch })
@@ -399,7 +402,7 @@ export class Orchestrator {
     const cycle = job.cycle, at = this.config.positions
     const summary = cycle.pr ? `${cycle.review.report.summary}\n브랜치 ${job.branch} → PR ${cycle.pr.url}\n반영 상태: ${REFLECTION.waiting} (통합과 main 반영은 사용자 선택·승인 후)`
       : `${cycle.review.report.summary}\n코드 변경이 없는 확인 작업이라 브랜치 게시나 PR을 만들지 않았습니다.`
-    return { kind: 'complete', expectLocations: [at.memo, at.answered, at.queued, at.working, at.reviewing, at.done].filter(Boolean),
+    return { kind: 'complete', expectLocations: [...this.board.automationLocations(), at.done].filter(Boolean),
       completedAt: endedAt, summary, report: cycle.review.report, source: job.task.source, publication, modelText: this.modelText(cycle), attempt: cycle.attempt }
   }
   async flush(job) {

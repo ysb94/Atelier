@@ -32,7 +32,7 @@ export async function documentsScenario({page,origin}) {
     states.push({mode,checked:true,...(mode==='error'?{retryClicked:true,loadingFinished:true,memberListRecovered:true,recoveredSelection:await select.inputValue()}: {})})
   }
   await page.goto(base)
-  for(const tab of ['조직도','근태','연차관리','승인자 설정','서류 출력']){await page.getByRole('tab',{name:tab,exact:true}).click();await page.getByRole('tab',{name:tab,exact:true,selected:true}).waitFor()}
+  for(const tab of ['조직도','근태','연차관리','승인자 설정','서류 출력','공지']){await page.getByRole('tab',{name:tab,exact:true}).click();await page.getByRole('tab',{name:tab,exact:true,selected:true}).waitFor()}
   await page.goto(base+'&department='+encodeURIComponent('디자인팀'))
   await page.getByText('운영지원팀 전용 화면입니다.',{exact:true}).waitFor();assert.equal(await page.locator('#document-output-member').count(),0)
   return {directEntry:true,kindYearMonthMemberSummary:true,disabledPrint:true,previewPlaceholder:true,states,existingTabs:true,deniedSubtreeNotMounted:true}
@@ -77,7 +77,7 @@ export async function attendancePolicyScenario({page,origin,root}) {
   await page.goto(origin+'/__fixture/profile');await page.getByRole('tab',{name:'내 근태',exact:true}).click()
   const noticeDetails=page.locator('details').filter({has:page.getByText('공지] 휴가 사용 제도 안내',{exact:true})})
   if(await noticeDetails.getAttribute('open')===null)await page.getByText('공지] 휴가 사용 제도 안내',{exact:true}).click()
-  const source=fs.readFileSync(path.join(root,'src/features/settings/MyAttendancePanel.tsx'),'utf8').replace(/\r\n/g,'\n'),notice=source.match(/const LEAVE_USE_NOTICE = `([\s\S]*?)`/)[1]
+  const source=fs.readFileSync(path.join(root,'src/lib/company/company-notices.ts'),'utf8').replace(/\r\n/g,'\n'),notice=source.match(/body: `([\s\S]*?)`,/)[1]
   assert.ok((await page.locator('body').innerText()).includes(notice),'Full confirmed leave notice missing')
   await page.getByText('연차 부여 일수·입사일·연도 계산 기준은 보류 중입니다.',{exact:true}).waitFor()
   await page.goto(origin+'/__fixture/operations?part=leave');await page.getByRole('button',{name:'연차 현황 · 시안',exact:true}).click()

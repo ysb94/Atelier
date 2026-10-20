@@ -56,7 +56,6 @@ export type CompanyNavGroup = {
 
 export const companyTopNav: CompanyNavItem[] = [
   { to: '/', label: 'E&J 홈', icon: Home, end: true },
-  { to: '/work', label: '내 업무', icon: ClipboardList },
   { to: '/settings/profile', label: '마이페이지', icon: UserRound },
   { to: '/operations', label: '운영 현황', icon: ChartColumn },
   { to: '/products', label: '전체 상품', icon: Shirt },
@@ -99,7 +98,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
     items: [
       { to: '/product-work/logistics', label: '상품 정보', icon: Boxes },
       { to: '/work-requests/logistics', label: '작업 요청', icon: ClipboardList },
-      { to: '/logistics/invoices', label: '송장작업', icon: FileSpreadsheet },
+      { to: '/logistics/invoices', label: '온라인 송장작업', icon: FileSpreadsheet },
       {
         to: '/logistics/barcode-outbound-data-entry',
         label: '(임시) 바코드 출고 데이터입력',

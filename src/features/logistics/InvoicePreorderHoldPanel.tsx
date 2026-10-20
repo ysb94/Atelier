@@ -270,7 +270,13 @@ function draftReady(row: DraftRow) {
   )
 }
 
-export function InvoicePreorderHoldPanel({ brandId }: { brandId: string }) {
+export function InvoicePreorderHoldPanel({
+  brandId,
+  openEditId = null,
+}: {
+  brandId: string
+  openEditId?: string | null
+}) {
   const workspaceActive = useWorkspaceTabActivity()
   const queryClient = useQueryClient()
   const queryKey = ['invoice-preorder-holds', brandId] as const
@@ -664,6 +670,15 @@ export function InvoicePreorderHoldPanel({ brandId }: { brandId: string }) {
     setEditShipOn(hold.shipOn)
     setEditReason(hold.reason)
   }
+
+  const openedEditId = useRef<string | null>(null)
+  useEffect(() => {
+    if (!openEditId || openedEditId.current === openEditId) return
+    const hold = items.find((item) => item.id === openEditId)
+    if (!hold) return
+    openedEditId.current = openEditId
+    openEdit(hold)
+  }, [items, openEditId])
 
   function openExtend(hold: InvoicePreorderHold) {
     setExtendingHold(hold)

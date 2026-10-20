@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ChevronDown,
@@ -76,11 +76,15 @@ export function InvoicePrefixRequestPanel({
   requests,
   loading,
   error,
+  openCreate = false,
+  openEditId = null,
 }: {
   brandId: string
   requests: InvoiceGiftRequest[]
   loading: boolean
   error: string | null
+  openCreate?: boolean
+  openEditId?: string | null
 }) {
   const queryClient = useQueryClient()
   const now = nowMoment()
@@ -93,6 +97,19 @@ export function InvoicePrefixRequestPanel({
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [rowError, setRowError] = useState<string | null>(null)
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const openedManage = useRef<string | null>(null)
+  useEffect(() => {
+    const key = openCreate ? 'new' : openEditId ?? ''
+    if (!key || openedManage.current === key) return
+    openedManage.current = key
+    if (openCreate) {
+      setEditingId(null)
+      setCreating(true)
+      return
+    }
+    setCreating(false)
+    setEditingId(openEditId)
+  }, [openCreate, openEditId])
 
   const statusCounts = useMemo(() => {
     const counts: Record<InvoiceGiftRequestStatus, number> = {

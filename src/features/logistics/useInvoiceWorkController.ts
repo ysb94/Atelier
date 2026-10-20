@@ -492,6 +492,14 @@ export function useInvoiceWorkController() {
     { key: OUTBOUND_UNFILED_CATEGORY, name: '미분류' },
   ], [usageFolders])
   const mallCategory = mallCategories.find((category) => category.key === mallCategoryKey)
+  const onlineCategoryKey = useMemo(
+    () => mallCategories.find((category) => category.name === '온라인')?.key ?? '',
+    [mallCategories],
+  )
+  useEffect(() => {
+    if (!onlineCategoryKey || mallCategoryKey === onlineCategoryKey) return
+    setMallCategoryKey(onlineCategoryKey)
+  }, [mallCategoryKey, onlineCategoryKey])
   const scopedUsageTargets = useMemo(
     () => filterOutboundPartnersByCategory(usageTargets, usageFolders, mallCategoryKey),
     [usageTargets, usageFolders, mallCategoryKey],
@@ -1639,7 +1647,6 @@ export function useInvoiceWorkController() {
     setBackupDialogOpen(false)
     setBackedUpExclusionAccepted(false)
     setCurrentGenerationBackedUp(false)
-    setMallCategoryKey('')
     setMallCategoryLocked(false)
     setOutboundBackupBusy(false)
     setOutboundBackupMessage(null)
@@ -1668,7 +1675,6 @@ export function useInvoiceWorkController() {
       setError('파일이 50MB를 넘습니다. 주문 기간을 나눠서 내려받아 주세요.')
       return
     }
-    if (inspection) setMallCategoryKey('')
     setMallCategoryLocked(false)
 
     workGenerationRef.current += 1

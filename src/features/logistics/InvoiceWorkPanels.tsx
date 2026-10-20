@@ -1,5 +1,6 @@
 import { memo, useLayoutEffect, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import { useSearchParams } from 'react-router-dom'
 
 import {
   AlertTriangle,
@@ -460,13 +461,24 @@ export function RulesPanel({
   workInstructionsLoading: boolean
   workInstructionsError: string | null
 }) {
-  const [activeRule, setActiveRule] = useState<RuleView>('gifts')
+  const [searchParams] = useSearchParams()
+  const manage = searchParams.get('manage')
+  const edit = searchParams.get('edit')
+  const [activeRule, setActiveRule] = useState<RuleView>(
+    manage === 'preorder' || manage === 'discontinued' ? 'holds' : 'gifts',
+  )
   const [activePackingCard, setActivePackingCard] = useState<'size' | null>(
     null,
   )
   const [activeHoldCard, setActiveHoldCard] = useState<
     'preorder' | 'stockout' | 'discontinued' | null
-  >(null)
+  >(
+    manage === 'preorder'
+      ? 'preorder'
+      : manage === 'discontinued'
+        ? 'discontinued'
+        : null,
+  )
   const table = RULE_TABLES[activeRule]
 
   return (
@@ -660,6 +672,8 @@ export function RulesPanel({
             requests={giftRequests}
             loading={giftRequestsLoading}
             error={giftRequestsError}
+            openCreate={manage === 'gifts' && edit === 'new'}
+            openEditId={manage === 'gifts' && edit && edit !== 'new' ? edit : null}
           />
           <InvoiceGiftSourceMapPanel
             brandId={brandId}
@@ -692,9 +706,15 @@ export function RulesPanel({
       ) : activeRule === 'packing' && activePackingCard === 'size' ? (
         <InvoicePackingSizeMapPanel brandId={brandId} />
       ) : activeRule === 'holds' && activeHoldCard === 'preorder' ? (
-        <InvoicePreorderHoldPanel brandId={brandId} />
+        <InvoicePreorderHoldPanel
+          brandId={brandId}
+          openEditId={manage === 'preorder' ? edit : null}
+        />
       ) : activeRule === 'holds' && activeHoldCard === 'discontinued' ? (
-        <InvoiceDiscontinuedListPanel brandId={brandId} />
+        <InvoiceDiscontinuedListPanel
+          brandId={brandId}
+          focusId={manage === 'discontinued' ? edit : null}
+        />
       ) : (
         <Card>
           <CardHeader>
