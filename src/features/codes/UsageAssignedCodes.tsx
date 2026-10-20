@@ -63,6 +63,8 @@ function renderUsageColumn(
 
 export function UsageAssignedCodes({
   target,
+  title,
+  selectionKey,
   configured,
   hasPartners,
   assignments,
@@ -80,6 +82,8 @@ export function UsageAssignedCodes({
   bulk,
 }: {
   target: CodeUsageTarget | null
+  title?: string
+  selectionKey?: string | null
   configured: boolean
   hasPartners: boolean
   assignments: CodeUsageAssignment[]
@@ -100,10 +104,10 @@ export function UsageAssignedCodes({
   const [listSearch, setListSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const deferredSearch = useDeferredValue(listSearch)
-  const targetId = target?.id ?? null
-  const [seenTargetId, setSeenTargetId] = useState(targetId)
-  if (targetId !== seenTargetId) {
-    setSeenTargetId(targetId)
+  const resetKey = selectionKey ?? target?.id ?? null
+  const [seenTargetId, setSeenTargetId] = useState(resetKey)
+  if (resetKey !== seenTargetId) {
+    setSeenTargetId(resetKey)
     setSelectedIds([])
     setStatusFilter('all')
     setListSearch('')
@@ -169,7 +173,7 @@ export function UsageAssignedCodes({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <h2 className="break-words text-base font-semibold">
-                <OutboundPartnerIdentity target={target} />
+                {title?.trim() ? title : <OutboundPartnerIdentity target={target} />}
               </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 등록 {formatNumber(counts.total)}건 · 사용중{' '}

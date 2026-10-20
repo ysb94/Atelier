@@ -10,7 +10,7 @@ import { UsageAssignedCodes } from '@/features/codes/UsageAssignedCodes'
 import { UsageBulkUploadPanel } from '@/features/codes/UsageBulkUploadPanel'
 import { UsageCodeColumnDialog } from '@/features/codes/UsageCodeColumnDialog'
 import { UsageCodePartnersDialog } from '@/features/codes/UsageCodePartnersDialog'
-import { UsagePartnerList } from '@/features/codes/UsagePartnerList'
+import { UsagePartnerList, usagePartnerCompanyKey } from '@/features/codes/UsagePartnerList'
 import { UsageTargetManagerDialog } from '@/features/codes/UsageTargetManager'
 import { useRenderWatch } from '@/lib/diagnostics/render-watch'
 import type { UsageCodeColumn } from '@/lib/codes/usage-code-columns'
@@ -19,13 +19,12 @@ import {
   saveUsageCodeColumns,
 } from '@/lib/supabase/usage-code-columns'
 import {
-  EMPTY_ASSIGNMENT_COUNTS,
   codeSearchText,
-  countAssignmentsByTarget,
   mergeCodeUsageAssignments,
   planCodeUsageChanges,
 } from '@/lib/codes/code-usage'
 import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
+import { groupOutboundSearchSections } from '@/lib/codes/outbound-partner-browser'
 import {
   getBarcodePartnerDisplaySetting,
   getCodeUsageAssignments,
@@ -216,7 +215,7 @@ export function UsageCodePage() {
   useRenderWatch('UsageCodePage')
   const { brand } = useBrand()
   const queryClient = useQueryClient()
-  const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null)
+  const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(null)
   const [bulkOpen, setBulkOpen] = useState(false)
   const [managerOpen, setManagerOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -224,7 +223,7 @@ export function UsageCodePage() {
   const [dialogCodeId, setDialogCodeId] = useState<string | null>(null)
 
   useEffect(() => {
-    setSelectedTargetId(null)
+    setSelectedCompanyKey(null)
     setBulkOpen(false)
     setColumnDialogOpen(false)
     setDialogCodeId(null)
@@ -379,10 +378,6 @@ export function UsageCodePage() {
     for (const code of codes) map.set(code.id, codeSearchText(code, styleNames))
     return map
   }, [codes, styleNames])
-  const countsByTarget = useMemo(
-    () => countAssignmentsByTarget(assignments),
-    [assignments],
-  )
   const assignmentsByCode = useMemo(() => {
     const map = new Map<string, CodeUsageAssignment[]>()
     for (const row of assignments) {
@@ -393,22 +388,64 @@ export function UsageCodePage() {
     return map
   }, [assignments])
 
-  const selectedTarget =
-    visibleTargets.find((target) => target.id === selectedTargetId) ??
-    visibleTargets.find((target) => target.active) ??
-    visibleTargets[0] ??
-    null
+  const partnerSections = useMemo(
+    () => groupOutboundSearchSections({ folders, hits: visibleTargets }),
+    [folders, visibleTargets],
+  )
+  const selectedCompany = useMemo(() => {
+    for (const section of partnerSections) {
+      for (const company of section.companies) {
+        const key = usagePartnerCompanyKey(section.folderId, company.key)
+        if (key === selectedCompanyKey) return { key, company }
+      }
+    }
+    const section = partnerSections[0]
+    const company = section?.companies[0]
+    if (!section || !company) return null
+    return {
+      key: usagePartnerCompanyKey(section.folderId, company.key),
+      company,
+    }
+  }, [partnerSections, selectedCompanyKey])
+  const selectedUnits = selectedCompany?.company.units ?? emptyList<CodeUsageTarget>()
+  const selectedTarget = selectedUnits[0] ?? null
+  const selectedUnitIds = useMemo(
+    () => new Set(selectedUnits.map((unit) => unit.id)),
+    [selectedUnits],
+  )
 
   const targetAssignments = useMemo(() => {
-    if (!selectedTarget) return emptyList<CodeUsageAssignment>()
-    return assignments.filter((row) => row.usageTargetId === selectedTarget.id)
-  }, [assignments, selectedTarget])
+    if (selectedUnitIds.size === 0) return emptyList<CodeUsageAssignment>()
+    const byCode = new Map<string, CodeUsageAssignment>()
+    for (const row of assignments) {
+      if (!selectedUnitIds.has(row.usageTargetId)) continue
+      const current = byCode.get(row.productCodeId)
+      if (!current || row.status === 'paused') byCode.set(row.productCodeId, row)
+    }
+    return [...byCode.values()]
+  }, [assignments, selectedUnitIds])
 
   const existingByCodeId = useMemo(() => {
     const map = new Map<string, CodeUsageStatus>()
-    for (const row of targetAssignments) map.set(row.productCodeId, row.status)
+    if (selectedUnits.length === 0) return map
+    const statuses = new Map<string, { status: CodeUsageStatus; count: number; mixed: boolean }>()
+    for (const row of assignments) {
+      if (!selectedUnitIds.has(row.usageTargetId)) continue
+      const current = statuses.get(row.productCodeId)
+      if (!current) {
+        statuses.set(row.productCodeId, { status: row.status, count: 1, mixed: false })
+      } else {
+        current.count += 1
+        if (current.status !== row.status) current.mixed = true
+      }
+    }
+    for (const [codeId, item] of statuses) {
+      if (!item.mixed && item.count === selectedUnits.length) {
+        map.set(codeId, item.status)
+      }
+    }
     return map
-  }, [targetAssignments])
+  }, [assignments, selectedUnitIds, selectedUnits.length])
 
   const dialogCode = dialogCodeId ? codeMap.get(dialogCodeId) ?? null : null
   const dialogPartners = useMemo(() => {
@@ -484,9 +521,18 @@ export function UsageCodePage() {
 
   function changeStatus(assignmentIds: string[], status: CodeUsageStatus) {
     const ids = new Set(assignmentIds)
-    saveChanges(
+    const codeIds = new Set(
       assignments
         .filter((row) => ids.has(row.id))
+        .map((row) => row.productCodeId),
+    )
+    saveChanges(
+      assignments
+        .filter(
+          (row) =>
+            selectedUnitIds.has(row.usageTargetId) &&
+            codeIds.has(row.productCodeId),
+        )
         .map((row) => ({
           productCodeId: row.productCodeId,
           usageTargetId: row.usageTargetId,
@@ -523,21 +569,6 @@ export function UsageCodePage() {
         }
       />
 
-      <div
-        role="tablist"
-        aria-label="업체별 코드"
-        className="mb-4 flex items-stretch gap-0.5 overflow-x-auto overflow-y-hidden border-b border-border bg-muted/40 px-2 pt-2"
-      >
-        <button
-          type="button"
-          role="tab"
-          aria-selected="true"
-          className="shrink-0 rounded-t-md border border-b-0 border-border bg-background px-3 py-1.5 text-sm text-foreground"
-        >
-          88코드
-        </button>
-      </div>
-
       {settingQuery.isError ? (
         <p className="mb-4 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
           {settingQuery.error instanceof Error
@@ -562,13 +593,13 @@ export function UsageCodePage() {
         <UsagePartnerList
           targets={visibleTargets}
           folders={folders}
-          counts={countsByTarget}
-          selectedId={selectedTarget?.id ?? null}
+          assignments={assignments}
+          selectedKey={selectedCompany?.key ?? null}
           loading={targetsQuery.isLoading || settingQuery.isLoading}
           configured={configured}
           hasPartners={allPartners.length > 0}
-          onSelect={(targetId) => {
-            setSelectedTargetId(targetId)
+          onSelect={(companyKey) => {
+            setSelectedCompanyKey(companyKey)
             setBulkOpen(false)
           }}
           onOpenSettings={() => setSettingsOpen(true)}
@@ -578,18 +609,19 @@ export function UsageCodePage() {
           <div className="min-h-0 min-w-0 xl:h-full">
             <UsageAssignedCodes
               target={selectedTarget}
+              title={selectedCompany?.company.groupName.trim() || undefined}
+              selectionKey={selectedCompany?.key ?? null}
               configured={configured}
               hasPartners={allPartners.length > 0}
               assignments={targetAssignments}
               codeMap={codeMap}
               styleNames={styleNames}
               searchTextById={searchTextById}
-              counts={
-                selectedTarget
-                  ? (countsByTarget.get(selectedTarget.id) ??
-                    EMPTY_ASSIGNMENT_COUNTS)
-                  : EMPTY_ASSIGNMENT_COUNTS
-              }
+              counts={{
+                total: targetAssignments.length,
+                active: targetAssignments.filter((row) => row.status === 'active').length,
+                paused: targetAssignments.filter((row) => row.status === 'paused').length,
+              }}
               saving={saveMutation.isPending}
               bulkOpen={bulkOpen}
               columns={columnsQuery.data ?? []}
@@ -598,11 +630,13 @@ export function UsageCodePage() {
               onOpenCode={(code) => setDialogCodeId(code.id)}
               onChangeStatus={changeStatus}
               bulk={
-                bulkOpen && selectedTarget ? (
+                bulkOpen && selectedTarget && selectedCompany ? (
                   <UsageBulkUploadPanel
                     brandName={brand.name}
                     brandId={brand.id}
                     usageTarget={selectedTarget}
+                    usageTargets={selectedUnits}
+                    companyName={selectedCompany.company.groupName.trim() || undefined}
                     codes={codes}
                     columns={columnsQuery.data ?? []}
                     existingByCodeId={existingByCodeId}
@@ -645,8 +679,11 @@ export function UsageCodePage() {
           onClose={() => setSettingsOpen(false)}
           onSave={async (ids) => {
             await saveSettingMutation.mutateAsync(ids)
-            if (selectedTargetId && !ids.includes(selectedTargetId)) {
-              setSelectedTargetId(null)
+            if (
+              selectedCompany &&
+              selectedCompany.company.units.every((unit) => !ids.includes(unit.id))
+            ) {
+              setSelectedCompanyKey(null)
             }
           }}
         />

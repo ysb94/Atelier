@@ -24,6 +24,8 @@ type UsageBulkUploadPanelProps = {
   brandName: string
   brandId: string
   usageTarget: CodeUsageTarget
+  usageTargets?: CodeUsageTarget[]
+  companyName?: string
   codes: ProductCode[]
   columns: UsageCodeColumn[]
   existingByCodeId: Map<string, CodeUsageStatus>
@@ -36,6 +38,8 @@ export function UsageBulkUploadPanel({
   brandName,
   brandId,
   usageTarget,
+  usageTargets,
+  companyName,
   codes,
   columns,
   existingByCodeId,
@@ -57,7 +61,17 @@ export function UsageBulkUploadPanel({
       if (rows.length === 0) {
         throw new Error('반영할 행이 없습니다.')
       }
-      return applyBulkUsageAssignments(brandId, usageTarget.id, rows)
+      const targets = usageTargets && usageTargets.length > 0 ? usageTargets : [usageTarget]
+      let created = 0
+      let updated = 0
+      let skipped = 0
+      for (const target of targets) {
+        const result = await applyBulkUsageAssignments(brandId, target.id, rows)
+        created += result.created
+        updated += result.updated
+        skipped += result.skipped
+      }
+      return { created, updated, skipped }
     },
     onSuccess: async () => {
       setError(null)
@@ -110,7 +124,7 @@ export function UsageBulkUploadPanel({
         <div className="flex items-center justify-between gap-2">
           <div>
             <div className="text-sm font-medium">
-              {outboundPartnerDisplayName(usageTarget)} 일괄 등록
+              {companyName?.trim() || outboundPartnerDisplayName(usageTarget)} 일괄 등록
             </div>
             <p className="mt-0.5 text-xs text-muted-foreground">
               양식의 88코드 열에 자사 바코드 마스터에 있는 코드만 넣으세요.

@@ -292,7 +292,7 @@ export function BarcodePage() {
     <div>
       <PageHeader
         title="88바코드 관리"
-        description={`${brand.name}이 직접 발급하는 88코드 마스터입니다. 업체 프리픽스는 ${barcodePrefix(brand.id)}입니다. 출고업체 연결은 업체별 코드 관리의 88코드 탭에서 합니다.`}
+        description={`${brand.name}이 직접 발급하는 88코드 마스터입니다. 업체 프리픽스는 ${barcodePrefix(brand.id)}입니다. 출고업체 연결은 업체별 코드 관리에서 합니다.`}
         actions={headerActions}
       />
 

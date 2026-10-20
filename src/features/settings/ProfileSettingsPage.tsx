@@ -8,9 +8,11 @@ import {
 } from '@/components/ui/card'
 import { useAuth } from '@/lib/supabase/auth'
 import { capabilityLabel } from '@/lib/company/capabilities'
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { LeaveApprovalPanel } from '@/features/operations-support/LeaveApprovalPanel'
+import { WorkRequestHubPage } from '@/features/work-requests/WorkRequestHubPage'
 import { useDepartmentApprovers } from '@/features/operations-support/use-department-approvers'
 import { assignedDepartmentIds } from '@/lib/supabase/department-approvers'
 import { MyAttendanceStartPanel } from './MyAttendanceStartPanel'
@@ -26,12 +28,33 @@ function formatHireDate(value: string | null | undefined) {
   return `${matched[1]}년 ${month}월 ${day}일`
 }
 
+type PersonalPart = 'work' | 'my-attendance' | 'profile' | 'approvals' | 'attendance'
+
+function personalPart(value: string | null): PersonalPart {
+  if (
+    value === 'work' ||
+    value === 'profile' ||
+    value === 'approvals' ||
+    value === 'attendance'
+  ) {
+    return value
+  }
+  return 'my-attendance'
+}
+
 export function ProfileSettingsPage() {
   useRenderWatch('ProfileSettingsPage')
   const { profile, email } = useAuth()
   const approvals = useDepartmentApprovers()
   const departments = useMemo(() => assignedDepartmentIds(approvals.settings, profile?.id), [approvals.settings, profile?.id])
-  const [part, setPart] = useState<'my-attendance' | 'attendance' | 'approvals' | 'profile'>('my-attendance')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const part = personalPart(searchParams.get('part'))
+  function selectPart(next: PersonalPart) {
+    const params = new URLSearchParams(searchParams)
+    if (next === 'my-attendance') params.delete('part')
+    else params.set('part', next)
+    setSearchParams(params, { replace: true })
+  }
   const hasDepartments = departments.length > 0
   const noDepartments = !hasDepartments && !approvals.loading && !approvals.error
 
@@ -43,11 +66,13 @@ export function ProfileSettingsPage() {
       />
 
       <div className="personal-page-tabs" role="tablist" aria-label="마이페이지 메뉴">
-        <button type="button" role="tab" id="personal-my-attendance-tab" aria-selected={part === 'my-attendance'} aria-controls="personal-my-attendance-panel" onClick={() => setPart('my-attendance')}>내 근태</button>
-        <button type="button" role="tab" id="personal-profile-tab" aria-selected={part === 'profile'} aria-controls="personal-profile-panel" onClick={() => setPart('profile')}>내 정보</button>
-        <button type="button" role="tab" id="personal-approvals-tab" aria-selected={part === 'approvals'} aria-controls="personal-approvals-panel" onClick={() => setPart('approvals')}>승인할 신청</button>
-        <button type="button" role="tab" id="personal-attendance-tab" className="is-department" aria-selected={part === 'attendance'} aria-controls="personal-attendance-panel" onClick={() => setPart('attendance')}>부서 출근시간</button>
+        <button type="button" role="tab" id="personal-work-tab" aria-selected={part === 'work'} aria-controls="personal-work-panel" onClick={() => selectPart('work')}>내 업무</button>
+        <button type="button" role="tab" id="personal-my-attendance-tab" aria-selected={part === 'my-attendance'} aria-controls="personal-my-attendance-panel" onClick={() => selectPart('my-attendance')}>내 근태</button>
+        <button type="button" role="tab" id="personal-profile-tab" aria-selected={part === 'profile'} aria-controls="personal-profile-panel" onClick={() => selectPart('profile')}>내 정보</button>
+        <button type="button" role="tab" id="personal-approvals-tab" aria-selected={part === 'approvals'} aria-controls="personal-approvals-panel" onClick={() => selectPart('approvals')}>승인할 신청</button>
+        <button type="button" role="tab" id="personal-attendance-tab" className="is-department" aria-selected={part === 'attendance'} aria-controls="personal-attendance-panel" onClick={() => selectPart('attendance')}>부서 출근시간</button>
       </div>
+      {part === 'work' && <div id="personal-work-panel" role="tabpanel" aria-labelledby="personal-work-tab"><WorkRequestHubPage /></div>}
       <div id="personal-my-attendance-panel" role="tabpanel" aria-labelledby="personal-my-attendance-tab" hidden={part !== 'my-attendance'}><MyAttendancePanel /></div>
       {part === 'attendance' && <div id="personal-attendance-panel" role="tabpanel" aria-labelledby="personal-attendance-tab">
         {approvals.error && <p className="personal-page-notice is-error" role="alert">
