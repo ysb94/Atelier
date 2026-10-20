@@ -190,7 +190,7 @@ try {
   const before = await fingerprint()
   await db.exec(
     await fs.readFile(
-      'supabase/migrations/20261020065641_usage_partner_headers.sql',
+      'supabase/migrations/20261020091506_usage_partner_headers.sql',
       'utf8',
     ),
   )
