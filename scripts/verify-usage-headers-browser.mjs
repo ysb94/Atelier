@@ -36,10 +36,10 @@ const server = await createServer({
           vite
             .transformIndexHtml(
               req.url,
-              `<!doctype html><html><body><div id="root"></div><script type="module" src="/@fs/${fixture.replaceAll('\\', '/')}/usage-headers-entry.tsx"></script></body></html>`,
+              '<!doctype html><html><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module" src="/dev-tools/ai-workflow/browser-fixture/usage-headers-entry.tsx"></script></body></html>',
             )
             .then((html) => {
-              res.setHeader('Content-Type', 'text/html')
+              res.setHeader('Content-Type', 'text/html; charset=utf-8')
               res.end(html)
             })
             .catch(next)

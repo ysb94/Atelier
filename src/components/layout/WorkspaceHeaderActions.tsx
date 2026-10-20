@@ -19,6 +19,7 @@ import { inboxBadgeLabel } from '@/lib/inbox/format'
 import { MOCK_NOTIFICATIONS } from '@/lib/inbox/mock'
 import type { ChatRoom, InboxNotification } from '@/lib/inbox/types'
 import { useAuth } from '@/lib/supabase/auth'
+import { useHeaderPreview } from '@/lib/company/developer-preview-context'
 import { cn, emptyList } from '@/lib/utils'
 import { NotificationPanel } from './NotificationPanel'
 
@@ -32,6 +33,7 @@ export function WorkspaceHeaderActions() {
   useRenderWatch('WorkspaceHeaderActions')
   const navigate = useNavigate()
   const { profile } = useAuth()
+  const preview = useHeaderPreview()
   const chatEnabled = profile?.status === 'active'
   const roomsQuery = useChatRooms(chatEnabled)
   useChatRealtime(chatEnabled)
@@ -158,8 +160,8 @@ export function WorkspaceHeaderActions() {
             error={roomsError}
             userId={profile.id}
             myName={profile.displayName?.trim() || '나'}
-            isManager={isManagerPosition(profile.position)}
-            isAdmin={profile.isAdmin}
+            isManager={preview?.chatRole ? preview.chatRole === 'manager' : isManagerPosition(profile.position)}
+            isAdmin={preview?.chatRole ? preview.chatRole === 'admin' : profile.isAdmin}
             titleId={chatTitleId}
             onClose={closePanel}
           />

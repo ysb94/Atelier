@@ -33,6 +33,7 @@ import {
   testAiConnection,
 } from '@/lib/api'
 import { isBrandLead, useAuth } from '@/lib/supabase/auth'
+import { usePagePreview } from '@/lib/company/page-preview-context'
 
 const FEATURE_LABEL: Record<AiFeatureKey, string> = {
   invoice_product_recommendation: '품목명 공식상품 추천',
@@ -53,8 +54,10 @@ function formatRate(value: number | null) {
 export function AiSettingsPage() {
   const { brand } = useBrand()
   const { profile } = useAuth()
+  const preview = usePagePreview()
   const queryClient = useQueryClient()
-  const canEdit = isBrandLead(profile, brand.id)
+  const canEdit = Boolean(preview?.facts?.brandLead) || isBrandLead(profile, brand.id)
+  const actualCanEdit = isBrandLead(preview ? preview.realProfile : profile, brand.id)
   const [featureKey, setFeatureKey] = useState<AiFeatureKey>(
     'invoice_product_recommendation',
   )
@@ -94,15 +97,17 @@ export function AiSettingsPage() {
   )
 
   const saveMutation = useMutation({
-    mutationFn: () =>
-      saveAiFeatureRoute(brand.id, {
+    mutationFn: () => {
+      if (!actualCanEdit) throw new Error('로그인 계정에 AI 설정을 변경할 권한이 없습니다.')
+      return saveAiFeatureRoute(brand.id, {
         featureKey,
         provider,
         modelId,
         monthlyBudgetUsd: monthlyBudgetUsd.trim()
           ? Number(monthlyBudgetUsd)
           : null,
-      }),
+      })
+    },
     onSuccess: async () => {
       setMessage('선택한 제공자와 모델을 저장했습니다.')
       await queryClient.invalidateQueries({
@@ -119,7 +124,10 @@ export function AiSettingsPage() {
   })
 
   const testMutation = useMutation({
-    mutationFn: () => testAiConnection(provider, modelId),
+    mutationFn: () => {
+      if (!actualCanEdit) throw new Error('로그인 계정에 연결을 시험할 권한이 없습니다.')
+      return testAiConnection(provider, modelId)
+    },
     onSuccess: (result) => {
       setMessage(`연결 테스트 성공 · ${result.latencyMs}ms`)
     },

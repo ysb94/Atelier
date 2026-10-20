@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { CompanyAiAssistant } from '@/components/ai/CompanyAiAssistant'
 import { useAuth } from '@/lib/supabase/auth'
+import { useNavigationPreviewProfile } from '@/lib/company/developer-preview-context'
 import { cn } from '@/lib/utils'
 import {
   companyGroupIsActive,
@@ -75,11 +76,12 @@ export function CompanyLayout() {
 function CompanySidebar() {
   const location = useLocation()
   const { email, profile, signOut } = useAuth()
+  const navigationProfile = useNavigationPreviewProfile(profile)
   const [openTitles, setOpenTitles] = useState<Set<string>>(() => new Set())
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const navGroups = useMemo(
-    () => companyNavGroupsForProfile(profile),
-    [profile],
+    () => companyNavGroupsForProfile(navigationProfile),
+    [navigationProfile],
   )
   const flatNavItems = useMemo(
     () => [

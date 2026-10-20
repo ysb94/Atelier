@@ -6,6 +6,8 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { requestLabel, isFullLeave, type PersonalRequest } from '@/features/settings/personal-requests'
 import { useLeaveRequests } from './use-leave-requests'
 import { OpsPanelFrame, OpsStat } from './OpsStat'
+import { usePagePreview } from '@/lib/company/page-preview-context'
+import { previewRequestIsSelf } from '@/lib/company/relationship-preview'
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
 const LABELS = { pending: '승인 대기', approved: '승인', rejected: '반려', cancelled: '취소' }
@@ -26,6 +28,7 @@ function leaveTimeLabel(item: PersonalRequest) {
 const STATUS_CLASS = { pending: 'bg-warning/10 text-warning', approved: 'bg-success/10 text-success', rejected: 'bg-danger/10 text-danger', cancelled: 'bg-muted text-muted-foreground' }
 export function LeaveApprovalPanel({ readOnly = false }: { readOnly?: boolean }) {
   useRenderWatch('LeaveApprovalPanel')
+  const preview = usePagePreview()
   const leave = useLeaveRequests(readOnly ? 'all' : 'approvals')
   const [status, setStatus] = useState('pending')
   const [department, setDepartment] = useState('all')
@@ -45,8 +48,13 @@ export function LeaveApprovalPanel({ readOnly = false }: { readOnly?: boolean })
   const currentPage = Math.min(page, pages)
   const rows = visible.slice((currentPage - 1) * 10, currentPage * 10)
   const detail = leave.requests.find(item => item.id === selected)
+  const selfRequest = previewRequestIsSelf(detail?.employeeId === leave.userId, preview?.facts?.requestOwner)
   async function decide(next: 'approved' | 'rejected') {
-    if (readOnly || !detail || detail.status !== 'pending' || leave.busy) return
+    if (readOnly || !detail || detail.status !== 'pending' || leave.busy || selfRequest) return
+    if (detail.employeeId === leave.userId) {
+      setMessage('실제 본인 신청은 화면 테스트에서도 승인·반려할 수 없습니다. 다른 지정 승인자가 처리해야 합니다.')
+      return
+    }
     if (next === 'rejected' && !note.trim()) { setMessage('반려 사유를 입력해 주세요.'); return }
     try {
       await leave.transition.mutateAsync({ id: detail.id, status: next, note })
@@ -73,8 +81,8 @@ export function LeaveApprovalPanel({ readOnly = false }: { readOnly?: boolean })
       <p className="my-4 whitespace-pre-wrap rounded-lg bg-muted/40 p-3 text-sm">{detail.note || '신청 메모가 없습니다.'}</p>
       {detail.status === 'pending' && !readOnly ? <>
         <label className="block text-sm">처리 의견 <span className="text-muted-foreground">· 반려 시 필수</span><Textarea aria-label="신청 처리 의견" maxLength={2000} rows={2} value={note} disabled={leave.busy} onChange={event => setNote(event.target.value)} className="mt-2" placeholder="반려 사유 또는 전달할 의견을 적어 주세요."/></label>
-        {detail.employeeId === leave.userId && <p className="mt-3 text-sm text-warning">본인 신청은 다른 지정 승인자가 처리해야 합니다.</p>}
-        <div className="mt-4 flex justify-end gap-2"><Button variant="outline" disabled={leave.busy || detail.employeeId === leave.userId} onClick={() => void decide('rejected')}><X size={14}/>{leave.busy ? '처리 중…' : '반려'}</Button><Button disabled={leave.busy || detail.employeeId === leave.userId} onClick={() => void decide('approved')}><Check size={14}/>{leave.busy ? '처리 중…' : '승인'}</Button></div>
+        {selfRequest && <p className="mt-3 text-sm text-warning">본인 신청은 다른 지정 승인자가 처리해야 합니다.</p>}
+        <div className="mt-4 flex justify-end gap-2"><Button variant="outline" disabled={leave.busy || selfRequest} onClick={() => void decide('rejected')}><X size={14}/>{leave.busy ? '처리 중…' : '반려'}</Button><Button disabled={leave.busy || selfRequest} onClick={() => void decide('approved')}><Check size={14}/>{leave.busy ? '처리 중…' : '승인'}</Button></div>
       </> : detail.status === 'pending' ? <p className="text-sm text-muted-foreground">부서별 지정 승인자의 검토를 기다리고 있습니다.</p> : <p className="text-sm">{LABELS[detail.status]} · {detail.decidedByName || '처리자 미확인'}{detail.decidedAt ? ` · ${new Date(detail.decidedAt).toLocaleString('ko-KR')}` : ''}{detail.decisionNote && <span className="mt-2 block whitespace-pre-wrap">{detail.decisionNote}</span>}</p>}
     </article>}
     <article className="overflow-hidden rounded-2xl border border-border bg-card">

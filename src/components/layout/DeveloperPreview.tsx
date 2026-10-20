@@ -1,21 +1,13 @@
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
+import { useCallback, useContext, useMemo, useState, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { FlaskConical, RotateCcw } from 'lucide-react'
 import { AuthDisplayProvider, useAuth } from '@/lib/supabase/auth'
 import { canPreviewProfile, previewProfile } from '@/lib/company/profile-preview'
-import { pagePreviewCases, type PagePreviewCase } from '@/lib/company/page-preview-cases'
+import { completePagePreviewCases } from '@/lib/company/page-preview-coverage'
+import { PagePreviewContext } from '@/lib/company/page-preview-context'
+import { PreviewContext } from '@/lib/company/developer-preview-context'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { isCompanyReviewer } from '@/lib/company/capabilities'
-
-type PreviewContextValue = {
-  allowed: boolean
-  reviewer: boolean
-  pathname: string
-  cases: PagePreviewCase[]
-  selected: PagePreviewCase | null
-  apply: (id: string | null) => void
-}
-const PreviewContext = createContext<PreviewContextValue | null>(null)
 
 export function DeveloperPreviewProvider({ children }: { children: ReactNode }) {
   const auth = useAuth()
@@ -23,7 +15,7 @@ export function DeveloperPreviewProvider({ children }: { children: ReactNode }) 
   const allowed = Boolean(canPreviewProfile(auth.profile, auth.session?.user.email ?? null))
   const reviewer = isCompanyReviewer(auth.profile)
   const [selection, setSelection] = useState<{ owner: string; pathname: string; id: string } | null>(null)
-  const cases = useMemo(() => allowed && auth.profile ? pagePreviewCases(pathname, auth.profile) : [], [allowed, pathname, auth.profile])
+  const cases = useMemo(() => allowed && auth.profile ? completePagePreviewCases(pathname, auth.profile) : [], [allowed, pathname, auth.profile])
   const selected = allowed && selection?.owner === auth.profile?.id && selection?.pathname === pathname
     ? cases.find(item => item.id === selection?.id) ?? null : null
   const apply = useCallback((id: string | null) => {
@@ -40,9 +32,11 @@ export function DeveloperPreviewPage({ children }: { children: ReactNode }) {
   const { profile } = useAuth()
   const { pathname } = useLocation()
   const context = useContext(PreviewContext)
-  const settings = context?.pathname === pathname ? context.selected?.settings : null
+  const facts = context?.pathname === pathname ? context.selected?.facts : undefined
+  const settings = context?.pathname === pathname && !facts?.chatRole ? context.selected?.settings : null
   const displayed = useMemo(() => profile && settings ? previewProfile(profile, settings) : profile, [profile, settings])
-  return <AuthDisplayProvider profile={displayed}>{children}</AuthDisplayProvider>
+  const preview = useMemo(() => ({ facts, realProfile: profile, active: Boolean(settings || facts) }), [facts, profile, settings])
+  return <PagePreviewContext.Provider value={preview}><AuthDisplayProvider profile={displayed}>{children}</AuthDisplayProvider></PagePreviewContext.Provider>
 }
 
 export function DeveloperPreviewBar() {
@@ -54,7 +48,9 @@ export function DeveloperPreviewBar() {
     <div className="flex flex-wrap items-center gap-2">
       <span className="mr-1 flex items-center gap-1.5 text-muted-foreground"><FlaskConical size={13} />화면 테스트</span>
       {context.reviewer && <span className="rounded-md bg-card px-2 py-1 text-muted-foreground">대표이사 · 제작 화면 검수</span>}
-      {cases.length ? cases.map(item => <button key={item.id} type="button" aria-pressed={selected?.id === item.id} onClick={() => apply(item.id)} className={`rounded-md border px-3 py-1.5 transition-colors ${selected?.id === item.id ? 'border-amber-400 bg-amber-100 font-medium text-amber-950' : 'border-border bg-card text-foreground hover:bg-muted'}`}>{item.label}</button>) : <span className="text-muted-foreground">구분 없음</span>}
+      <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto py-1" aria-label="화면 테스트 항목">
+      {cases.length ? cases.map(item => <button key={item.id} type="button" aria-pressed={selected?.id === item.id} onClick={() => apply(item.id)} className={`shrink-0 whitespace-nowrap rounded-md border px-3 py-1.5 transition-colors ${selected?.id === item.id ? 'border-amber-400 bg-amber-100 font-medium text-amber-950' : 'border-border bg-card text-foreground hover:bg-muted'}`}>{item.label}</button>) : <span className="text-muted-foreground">구분 없음</span>}
+      </div>
       {context.reviewer && <span className="text-[11px] text-muted-foreground">변경·승인은 로그인 계정의 기존 권한을 따릅니다.</span>}
       {selected && <><span className="text-[11px] text-amber-800">{context.reviewer ? '표시 역할 변경 중 · 실제 권한은 유지' : '실제 저장 · 로그인 계정으로 실행'}</span><button type="button" onClick={() => apply(null)} aria-label="미리보기 종료" title="내 계정으로 돌아가기" className="ml-auto flex items-center gap-1 text-muted-foreground hover:text-foreground"><RotateCcw size={12} />종료</button></>}
     </div>

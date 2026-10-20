@@ -17,6 +17,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
+import { usePagePreview } from '@/lib/company/page-preview-context'
+import { previewMeetingActor } from '@/lib/company/relationship-preview'
 import {
   listDepartments,
   listManageableProfiles,
@@ -230,6 +232,7 @@ export function CompanyMeetingsPage() {
   useRenderWatch('CompanyMeetingsPage')
 
   const { profile } = useAuth()
+  const preview = usePagePreview()
   const topicRef = useRef<HTMLInputElement>(null)
   const durationRef = useRef<HTMLSelectElement>(null)
   const composeSectionRef = useRef<HTMLDivElement>(null)
@@ -259,8 +262,8 @@ export function CompanyMeetingsPage() {
 
   const host = useMemo<MeetingPerson>(() => {
     if (!profile) return LOCAL_HOST
-    return profileToMeetingPerson(profile)
-  }, [profile])
+    return previewMeetingActor(profileToMeetingPerson(profile), series, preview?.facts?.meetingRole)
+  }, [profile, series, preview?.facts?.meetingRole])
   const isAdmin = isCompanyAdmin(profile)
 
   const membersQuery = useQuery({

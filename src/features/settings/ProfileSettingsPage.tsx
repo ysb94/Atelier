@@ -7,7 +7,8 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { useAuth } from '@/lib/supabase/auth'
-import { capabilityLabel } from '@/lib/company/capabilities'
+import { capabilityLabel, isCompanyManager } from '@/lib/company/capabilities'
+import { usePagePreview } from '@/lib/company/page-preview-context'
 import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -45,6 +46,7 @@ function personalPart(value: string | null): PersonalPart {
 export function ProfileSettingsPage() {
   useRenderWatch('ProfileSettingsPage')
   const { profile, email } = useAuth()
+  const preview = usePagePreview()
   const approvals = useDepartmentApprovers()
   const departments = useMemo(() => assignedDepartmentIds(approvals.settings, profile?.id), [approvals.settings, profile?.id])
   const [searchParams, setSearchParams] = useSearchParams()
@@ -57,6 +59,9 @@ export function ProfileSettingsPage() {
   }
   const hasDepartments = departments.length > 0
   const noDepartments = !hasDepartments && !approvals.loading && !approvals.error
+  const rolePreview = Boolean(preview?.active && !preview.facts?.chatRole)
+  const showDepartmentTab = preview?.facts?.departmentApprover ?? (isCompanyManager(profile) || (!rolePreview && hasDepartments))
+  const visiblePart = part === 'attendance' && !showDepartmentTab ? 'my-attendance' : part
 
   return (
     <div>
@@ -66,15 +71,20 @@ export function ProfileSettingsPage() {
       />
 
       <div className="personal-page-tabs" role="tablist" aria-label="마이페이지 메뉴">
-        <button type="button" role="tab" id="personal-work-tab" aria-selected={part === 'work'} aria-controls="personal-work-panel" onClick={() => selectPart('work')}>내 업무</button>
-        <button type="button" role="tab" id="personal-my-attendance-tab" aria-selected={part === 'my-attendance'} aria-controls="personal-my-attendance-panel" onClick={() => selectPart('my-attendance')}>내 근태</button>
-        <button type="button" role="tab" id="personal-profile-tab" aria-selected={part === 'profile'} aria-controls="personal-profile-panel" onClick={() => selectPart('profile')}>내 정보</button>
-        <button type="button" role="tab" id="personal-approvals-tab" aria-selected={part === 'approvals'} aria-controls="personal-approvals-panel" onClick={() => selectPart('approvals')}>승인할 신청</button>
-        <button type="button" role="tab" id="personal-attendance-tab" className="is-department" aria-selected={part === 'attendance'} aria-controls="personal-attendance-panel" onClick={() => selectPart('attendance')}>부서 출근시간</button>
+        <button type="button" role="tab" id="personal-work-tab" aria-selected={visiblePart === 'work'} aria-controls="personal-work-panel" onClick={() => selectPart('work')}>내 업무</button>
+        <button type="button" role="tab" id="personal-my-attendance-tab" aria-selected={visiblePart === 'my-attendance'} aria-controls="personal-my-attendance-panel" onClick={() => selectPart('my-attendance')}>내 근태</button>
+        <button type="button" role="tab" id="personal-profile-tab" aria-selected={visiblePart === 'profile'} aria-controls="personal-profile-panel" onClick={() => selectPart('profile')}>내 정보</button>
+        <button type="button" role="tab" id="personal-approvals-tab" aria-selected={visiblePart === 'approvals'} aria-controls="personal-approvals-panel" onClick={() => selectPart('approvals')}>승인할 신청</button>
+        {showDepartmentTab ? (
+          <button type="button" role="tab" id="personal-attendance-tab" className="is-department" aria-selected={visiblePart === 'attendance'} aria-controls="personal-attendance-panel" onClick={() => selectPart('attendance')}>
+            부서 출근시간
+            <small>관리자</small>
+          </button>
+        ) : null}
       </div>
       {part === 'work' && <div id="personal-work-panel" role="tabpanel" aria-labelledby="personal-work-tab"><WorkRequestHubPage /></div>}
-      <div id="personal-my-attendance-panel" role="tabpanel" aria-labelledby="personal-my-attendance-tab" hidden={part !== 'my-attendance'}><MyAttendancePanel /></div>
-      {part === 'attendance' && <div id="personal-attendance-panel" role="tabpanel" aria-labelledby="personal-attendance-tab">
+      <div id="personal-my-attendance-panel" role="tabpanel" aria-labelledby="personal-my-attendance-tab" hidden={visiblePart !== 'my-attendance'}><MyAttendancePanel /></div>
+      {visiblePart === 'attendance' && showDepartmentTab && <div id="personal-attendance-panel" role="tabpanel" aria-labelledby="personal-attendance-tab">
         {approvals.error && <p className="personal-page-notice is-error" role="alert">
           {hasDepartments ? '담당 부서 정보를 다시 불러오지 못했습니다. 아래 내용이 최신이 아닐 수 있으니 잠시 후 다시 확인해 주세요.'
             : '담당 부서 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'}
@@ -83,11 +93,11 @@ export function ProfileSettingsPage() {
           : approvals.loading ? <p className="personal-page-notice" role="status">담당 부서 정보를 불러오는 중입니다.</p>
           : noDepartments && <p className="personal-page-notice">지정된 담당 부서가 없어 설정할 직원이 없습니다. 담당 지정은 운영지원팀에 요청해 주세요.</p>}
       </div>}
-      {part === 'approvals' && <div id="personal-approvals-panel" role="tabpanel" aria-labelledby="personal-approvals-tab">
+      {visiblePart === 'approvals' && <div id="personal-approvals-panel" role="tabpanel" aria-labelledby="personal-approvals-tab">
         {noDepartments && <p className="personal-page-notice">지정된 승인 담당이 아니면 목록이 비어 있을 수 있습니다.</p>}
         <LeaveApprovalPanel />
       </div>}
-      <div id="personal-profile-panel" role="tabpanel" aria-labelledby="personal-profile-tab" hidden={part !== 'profile'}>
+      <div id="personal-profile-panel" role="tabpanel" aria-labelledby="personal-profile-tab" hidden={visiblePart !== 'profile'}>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card>
           <CardHeader>

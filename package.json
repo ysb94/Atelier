@@ -74,6 +74,8 @@
     "verify:chat-list": "tsx src/lib/inbox/format.verify.ts",
     "verify:chat-thread": "tsx --tsconfig tsconfig.app.json src/lib/chat/thread-layout.verify.ts",
     "verify:company-capabilities": "tsx src/lib/company/capabilities.verify.ts",
+    "verify:page-preview": "tsx --tsconfig tsconfig.app.json src/lib/company/profile-preview.verify.ts && tsx --tsconfig tsconfig.app.json src/lib/company/page-preview-cases.verify.ts && tsx --tsconfig tsconfig.app.json src/lib/company/page-preview-coverage.verify.ts",
+    "verify:page-preview-browser": "node scripts/verify-page-preview-browser.mjs",
     "verify:person-name": "tsx src/lib/company/person-name.verify.ts",
     "verify:company-brand-filter": "tsx src/lib/products/company-brand-filter.verify.ts",
     "verify:company-paths": "tsx src/lib/workspace/company-paths.verify.ts",
