@@ -2,8 +2,13 @@ import { folderPath } from '../codes/outbound-folder'
 import {
   compactOutboundPartnerKey,
   normalizeOutboundPartnerName,
+  OUTBOUND_CHANNEL_TYPE_LABEL,
 } from '../codes/outbound-partner'
-import type { CodeUsageTarget, CodeUsageTargetFolder } from '../types'
+import type {
+  CodeUsageTarget,
+  CodeUsageTargetFolder,
+  OutboundChannelType,
+} from '../types'
 import type { ProductOutboundPartnerTotal } from './product-outbound'
 
 export const UNFILED_CHART_FOLDER_KEY = '__unfiled__'
@@ -37,13 +42,17 @@ export function parsePartnerChartLabel(name: string): {
 export type PartnerChartTarget = Pick<
   CodeUsageTarget,
   'id' | 'groupId' | 'groupName' | 'siteName' | 'folderId'
->
+> & {
+  /** 없으면 채널을 붙이지 않는다. `unset`은 온라인/오프라인으로 보지 않는다. */
+  channelType?: OutboundChannelType
+}
 
 export type PartnerChartUnit = {
   partnerId: string
   partnerName: string
   siteLabel: string
   quantity: number
+  channelType?: OutboundChannelType
 }
 
 export type PartnerChartCompany = {
@@ -100,8 +109,13 @@ export function groupPartnersForOutboundChart(
     const parsed = parsePartnerChartLabel(partner.partnerName)
     const groupLabel =
       normalizeOutboundPartnerName(target?.groupName ?? '') || parsed.group
-    const siteLabel =
-      normalizeOutboundPartnerName(target?.siteName ?? '') || parsed.site
+    const namedSite = normalizeOutboundPartnerName(target?.siteName ?? '')
+    // 등록된 지점명이 비어 있으면 출고명에서 지점을 추측하지 않는다.
+    const siteLabel = target ? namedSite : parsed.site
+    const channelType =
+      target?.channelType === 'online' || target?.channelType === 'offline'
+        ? target.channelType
+        : undefined
     const groupKey =
       target?.groupId ?? `name:${compactOutboundPartnerKey(groupLabel)}`
     const folder = topFolderOf(folders, target?.folderId)
@@ -111,6 +125,7 @@ export function groupPartnersForOutboundChart(
       partnerName: partner.partnerName,
       siteLabel,
       quantity: partner.quantity,
+      channelType,
     }
     if (current) {
       current.quantity += partner.quantity
@@ -140,6 +155,7 @@ export function groupPartnersForOutboundChart(
         partnerName: unit.partnerName,
         siteLabel: unit.siteLabel,
         quantity: unit.quantity,
+        channelType: unit.channelType,
       }))
       return {
         key: company.key,
@@ -296,6 +312,82 @@ function realCompanies(scope: {
   return list
 }
 
+function operationsChannelPhrase(
+  channelType: OutboundChannelType | null | undefined,
+): string {
+  if (channelType !== 'online' && channelType !== 'offline') return ''
+  return OUTBOUND_CHANNEL_TYPE_LABEL[channelType]
+}
+
+function sameOperationsName(left: string, right: string): boolean {
+  const a = normalizeOutboundPartnerName(left)
+  const b = normalizeOutboundPartnerName(right)
+  if (!a || !b) return false
+  if (a === b) return true
+  const aKey = compactOutboundPartnerKey(a)
+  const bKey = compactOutboundPartnerKey(b)
+  return aKey.length > 0 && aKey === bKey
+}
+
+function labelHasChannelPhrase(value: string, phrase: string): boolean {
+  if (!phrase) return false
+  return normalizeOutboundPartnerName(value).includes(phrase)
+}
+
+/**
+ * 운영 현황 전용 업체·지점·채널 표시.
+ * 공통 출고처 이름은 채널을 떼므로 여기서만 붙인다.
+ * 채널이 없거나 미지정이면 온라인/오프라인으로 추측하지 않는다.
+ */
+export function operationsOutboundUnitLabel(input: {
+  companyLabel: string
+  siteLabel?: string | null
+  channelType?: OutboundChannelType | null
+}): string {
+  const company = normalizeOutboundPartnerName(input.companyLabel)
+  const site = normalizeOutboundPartnerName(input.siteLabel ?? '')
+  const channel = operationsChannelPhrase(input.channelType)
+  const showSite = site.length > 0 && !sameOperationsName(company, site)
+  const parts: string[] = []
+  if (company) parts.push(company)
+  if (showSite) parts.push(site)
+  const channelHost = showSite ? site : company
+  if (channel && !labelHasChannelPhrase(channelHost, channel)) {
+    parts.push(channel)
+  }
+  return parts.join(' · ') || '미분류'
+}
+
+/** 지점이 하나면 첫 줄에 지점·채널을 붙인다. 여러 지점과 기타는 묶음 이름을 유지한다. */
+export function operationsOutboundCompanyLabel(
+  company: Pick<PartnerChartCompany, 'label' | 'units' | 'members'>,
+): string {
+  if ((company.members?.length ?? 0) > 0 || company.units.length !== 1) {
+    return company.label
+  }
+  const unit = company.units[0]
+  if (!unit) return company.label
+  return operationsOutboundUnitLabel({
+    companyLabel: company.label,
+    siteLabel: unit.siteLabel,
+    channelType: unit.channelType,
+  })
+}
+
+/** 출고처 선택 목록. 그룹이 없으면 식별명에 채널만 더한다. */
+export function operationsOutboundTargetLabel(
+  target: Pick<CodeUsageTarget, 'name' | 'groupName' | 'siteName'> & {
+    channelType?: OutboundChannelType | null
+  },
+): string {
+  const groupName = normalizeOutboundPartnerName(target.groupName)
+  return operationsOutboundUnitLabel({
+    companyLabel: groupName || target.name,
+    siteLabel: groupName ? target.siteName : '',
+    channelType: target.channelType,
+  })
+}
+
 /** 그래프 선 id를 업체·지점 수량으로 푼다. 현재 범위에 없으면 null. */
 export function resolveChartSeries(
   id: string,
@@ -319,7 +411,7 @@ export function resolveChartSeries(
     if (!company) return null
     return {
       id,
-      label: company.label,
+      label: operationsOutboundCompanyLabel(company),
       partnerIds: partnerIdsOf(company),
       quantity: company.quantity,
     }
@@ -329,13 +421,13 @@ export function resolveChartSeries(
     for (const company of realCompanies(scope)) {
       const unit = company.units.find((item) => item.partnerId === partnerId)
       if (!unit) continue
-      const label =
-        company.label === unit.siteLabel
-          ? company.label
-          : `${company.label} · ${unit.siteLabel}`
       return {
         id,
-        label,
+        label: operationsOutboundUnitLabel({
+          companyLabel: company.label,
+          siteLabel: unit.siteLabel,
+          channelType: unit.channelType,
+        }),
         partnerIds: [unit.partnerId],
         quantity: unit.quantity,
       }
