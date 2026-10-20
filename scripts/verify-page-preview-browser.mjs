@@ -49,6 +49,38 @@ try {
     assert.equal(await button.getAttribute('aria-pressed'), 'true')
     assert.equal(await page.getByTestId('hidden-profile').textContent(), 'dev@atelier.local', '비활성 탭의 프로필은 바뀌지 않음')
   }
+  await page.goto(origin + '/data/all')
+  await page.getByRole('columnheader', { name: '상품명', exact: true }).waitFor()
+  await page.getByRole('button', { name: '채팅', exact: true }).click()
+  const assertAboveHeaders = async panelId => {
+    const result = await page.evaluate(id => {
+      const panel = document.getElementById(id)
+      const p = panel.getBoundingClientRect()
+      const samples = [...document.querySelectorAll('[data-testid="sheet-layering"] th')].flatMap(header => {
+        const h = header.getBoundingClientRect()
+        const left = Math.max(h.left, p.left, 0), right = Math.min(h.right, p.right, innerWidth)
+        const top = Math.max(h.top, p.top, 0), bottom = Math.min(h.bottom, p.bottom, innerHeight)
+        if (right - left < 4 || bottom - top < 4) return []
+        const hit = document.elementFromPoint((left + right) / 2, (top + bottom) / 2)
+        return [{ header: header.textContent, above: panel.contains(hit), hit: hit?.tagName }]
+      })
+      return samples
+    }, panelId)
+    assert.ok(result.length > 0, '표 헤더와 패널이 실제 겹치는 좌표를 검사')
+    assert.ok(result.every(sample => sample.above), `${panelId}: 상품 데이터 헤더가 패널을 가립니다: ${JSON.stringify(result)}`)
+  }
+  await assertAboveHeaders('workspace-chat-panel')
+  await page.locator('[data-testid="sheet-layering"] > div').evaluate(element => { element.scrollLeft = 240; element.scrollTop = 160 })
+  await assertAboveHeaders('workspace-chat-panel')
+  await page.getByRole('region', { name: '채팅 화면 미리보기' }).getByRole('button', { name: '채팅 · 팀장', exact: true }).click()
+  await page.getByRole('region', { name: '채팅 화면 미리보기' }).waitFor()
+  await page.getByRole('button', { name: /^알림(?:,|$)/ }).click()
+  await page.locator('#workspace-notification-panel').waitFor()
+  await assertAboveHeaders('workspace-notification-panel')
+  await page.keyboard.press('Escape')
+  if (process.argv.includes('--layering-only')) {
+    console.log('page-preview-layering: 실제 SheetTable 고정 헤더 위에서 채팅/알림 표시·스크롤·내부 클릭·닫기 통과')
+  } else {
   await page.goto(origin + '/')
   await choose('운영지원 · 사원')
   await page.getByRole('heading', { name: '운영지원 업무', exact: true }).waitFor()
@@ -169,9 +201,10 @@ try {
   await page.goto(origin + '/chat/room/fixture-room?identity=employee')
   await page.getByText('동료 메시지', { exact: true }).waitFor()
   assert.equal(await chatBar().count(), 0)
+  }
   assert.deepEqual(errors, [])
   assert.deepEqual(remote, [])
-  console.log('page-preview-browser: 실제 화면 전환·개발자/대표 노출·일반 직원 비노출·탭 격리·저장 권한 보존 통과 (외부 요청 0)')
+  console.log('page-preview-browser: 고정 표 헤더 위 채팅/알림 표시·스크롤·클릭·화면 전환·테스트 노출·탭 격리·저장 권한 보존 통과 (외부 요청 0)')
 } catch (error) {
   console.error(JSON.stringify({ runtimeErrors: errors, url: diagnosticPage?.url(), text: (await diagnosticPage?.locator('body').innerText().catch(() => ''))?.slice(0, 4500) }))
   throw error

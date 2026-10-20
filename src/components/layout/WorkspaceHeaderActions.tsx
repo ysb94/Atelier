@@ -9,6 +9,7 @@ import {
   type Ref,
   type ComponentProps,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { Bell, MessageCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { ChatPanel } from '@/features/chat/ChatPanel'
@@ -27,6 +28,9 @@ import { DeveloperPreviewBar, DeveloperPreviewProvider } from './DeveloperPrevie
 
 type OpenPanel = 'chat' | 'notifications'
 
+// 페이지의 고정 헤더·서랍과 상단 탭의 stacking context 밖에서 공통 패널을 표시한다.
+const HEADER_PANEL_CLASS = 'fixed top-12 right-3 bottom-24 z-[200] flex w-[min(24rem,calc(100vw-1.5rem))] flex-col'
+
 function isManagerPosition(position: string | null | undefined) {
   return COMPANY_MANAGER_POSITIONS.some((item) => item === position)
 }
@@ -40,6 +44,7 @@ export function WorkspaceHeaderActions() {
   useChatRealtime(chatEnabled)
   const rooms = roomsQuery.data ?? emptyList<ChatRoom>()
   const rootRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const chatButtonRef = useRef<HTMLButtonElement>(null)
   const bellButtonRef = useRef<HTMLButtonElement>(null)
   const openedBy = useRef<OpenPanel | null>(null)
@@ -80,7 +85,8 @@ export function WorkspaceHeaderActions() {
   useEffect(() => {
     if (!open) return
     function onPointerDown(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) closePanel()
+      const target = event.target as Node
+      if (!rootRef.current?.contains(target) && !panelRef.current?.contains(target)) closePanel()
     }
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== 'Escape') return
@@ -150,10 +156,11 @@ export function WorkspaceHeaderActions() {
         <Bell className="size-4" />
       </HeaderIconButton>
 
-      {open === 'chat' && profile ? (
+      {open === 'chat' && profile ? createPortal(
         <div
+          ref={panelRef}
           id="workspace-chat-panel"
-          className="fixed top-12 right-3 bottom-24 z-30 flex w-[min(24rem,calc(100vw-1.5rem))] flex-col"
+          className={HEADER_PANEL_CLASS}
         >
           <DeveloperPreviewProvider><ChatPanelPreview
             rooms={rooms}
@@ -166,12 +173,13 @@ export function WorkspaceHeaderActions() {
             titleId={chatTitleId}
             onClose={closePanel}
           /></DeveloperPreviewProvider>
-        </div>
+        </div>, document.body,
       ) : null}
-      {open === 'notifications' ? (
+      {open === 'notifications' ? createPortal(
         <div
+          ref={panelRef}
           id="workspace-notification-panel"
-          className="fixed top-12 right-3 bottom-24 z-30 flex w-[min(24rem,calc(100vw-1.5rem))] flex-col"
+          className={HEADER_PANEL_CLASS}
         >
           <NotificationPanel
             items={notifications}
@@ -180,7 +188,7 @@ export function WorkspaceHeaderActions() {
             onOpen={openNotification}
             onClose={closePanel}
           />
-        </div>
+        </div>, document.body,
       ) : null}
     </div>
   )

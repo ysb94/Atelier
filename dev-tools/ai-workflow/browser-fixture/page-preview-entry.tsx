@@ -19,6 +19,8 @@ import { WorkspaceHeaderActions } from '@/components/layout/WorkspaceHeaderActio
 import { ChatWindowPage } from '@/features/chat/ChatWindowPage'
 import { chatKeys } from '@/features/chat/use-chat'
 import type { ChatRoom, ChatMessage } from '@/lib/inbox/types'
+import { SheetTable } from '@/features/data/SheetTable'
+import type { BrandField } from '@/lib/types'
 import '@/index.css'
 
 const brand = { id: '20000000-0000-4000-8000-000000000001', slug: 'fixture', name: '검증 브랜드', color: '#333' } as any
@@ -46,12 +48,22 @@ function MutationProbe() {
   const state = useUsagePartnerSettings(brand.id, '20000000-0000-4000-8000-000000000002')
   return <button onClick={() => void state.editorsMutation.mutateAsync({ target: '20000000-0000-4000-8000-000000000002', profileIds: [] }).catch(error => { document.querySelector('#guard-result')!.textContent = error.message })}>검증용 저장 시도</button>
 }
+function DataHeaderLayeringFixture() {
+  const columns = Array.from({ length: 14 }, (_, index) => ({
+    id: `column-${index}`, label: index === 0 ? 'M번호' : index === 1 ? '상품명' : `상품 항목 ${index}`,
+    systemKey: index === 0 ? 'styleNo' : index === 1 ? 'name' : null,
+    key: `field-${index}`, owner: 'planning', type: 'text',
+  })) as BrandField[]
+  return <div data-testid="sheet-layering" className="[&>div]:max-h-[360px]">
+    <SheetTable columns={columns} rows={Array.from({ length: 50 }, (_, index) => ({ id: `sku-${index}`, styleNo: `M-${index}`, values: {} }))} showOwnerGroups />
+  </div>
+}
 createRoot(document.getElementById('root')!).render(<QueryClientProvider client={queryClient}><BrowserRouter>{location.pathname.startsWith('/chat/room/')
   ? <Routes><Route path="/chat/room/:roomId" element={<ChatWindowPage />} /></Routes>
   : <DeveloperPreviewProvider>
   <DeveloperPreviewBar />
   <NavigationProbe />
-  <WorkspaceHeaderActions />
+  <div className="relative z-20 flex shrink-0 items-end border-b border-border bg-muted/40"><WorkspaceHeaderActions /></div>
   <DeveloperPreviewPage><CompanyBrandScopeProvider><BrandScope brand={brand}><Routes>
     <Route path="/" element={<CompanyHomePage />} />
     <Route path="/settings/profile" element={<ProfileSettingsPage />} />
@@ -59,6 +71,7 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
     <Route path="/settings/ai" element={<AiSettingsPage />} />
     <Route path="/idea-contest" element={<MamamIdeaInboxPage />} />
     <Route path="/meetings" element={<CompanyMeetingsPage />} />
+    <Route path="/data/all" element={<DataHeaderLayeringFixture />} />
     <Route path="/usage-codes" element={<><UsageCodePage /><MutationProbe /><output id="guard-result" /></>} />
   </Routes></BrandScope></CompanyBrandScopeProvider></DeveloperPreviewPage>
   <Routes location="/hidden"><Route path="/hidden" element={<DeveloperPreviewPage><HiddenProfile /></DeveloperPreviewPage>} /></Routes>
