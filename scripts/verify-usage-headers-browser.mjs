@@ -5,6 +5,7 @@ import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { chromium } from 'playwright-core'
+import * as XLSX from 'xlsx'
 
 const root = process.cwd(),
   fixture = path.join(root, 'dev-tools/ai-workflow/browser-fixture')
@@ -144,6 +145,18 @@ try {
     .click()
   await valuesDialog.waitFor({ state: 'hidden' })
   await page.getByText('무신사 판매상품명 검증', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '일괄 등록', exact: true }).click()
+  const downloadedFile = page.waitForEvent('download')
+  await page.getByRole('button', { name: '양식 다운로드', exact: true }).click()
+  const template = await downloadedFile
+  const workbook = XLSX.read(await fs.readFile(await template.path()),{type:'buffer'})
+  assert.deepEqual(
+    XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], {
+      header: 1,
+    })[0],
+    ['88코드', '코드명', '상태', '물류상품명', 'M번호', '상품명'],
+  )
+  await page.getByRole('button', { name: '일괄 등록', exact: true }).click()
   await openHeaders()
   await page.getByLabel('상품명 표시', { exact: true }).uncheck()
   await saveHeaders()
@@ -221,6 +234,83 @@ try {
       .getByRole('button', { name: '이 업체에 설정 저장', exact: true })
       .count(),
     0,
+  )
+  assert.deepEqual(errors, [])
+  await page.goto(origin + '/usage-codes?grouped=1')
+  await page.getByRole('heading', { name: '무신사', exact: true }).waitFor()
+  assert.equal(
+    await page.getByRole('tab', { name: '88코드', exact: true }).count(),
+    0,
+  )
+  assert.equal(await page.getByText('88코드 찾기', { exact: true }).count(), 0)
+  await openHeaders()
+  const targets = await page.evaluate(() => ({
+    a: window.__usageFixture.a,
+    b: window.__usageFixture.b,
+  }))
+  await page
+    .getByLabel('헤더 저장 연결', { exact: true })
+    .selectOption(targets.a)
+  await page.getByLabel('상품명 표시 이름', { exact: true }).fill('물류상품명')
+  await page
+    .getByRole('button', { name: '업체 전용 항목', exact: true })
+    .click()
+  await page.getByLabel('새 헤더 이름', { exact: true }).fill('상품명')
+  await page
+    .getByLabel('새 항목의 의미', { exact: true })
+    .fill('강남 연결 전용 상품명')
+  await page.getByRole('button', { name: '항목 추가', exact: true }).click()
+  await saveHeaders()
+  assert.equal(
+    await page
+      .getByRole('button', {
+        name: '8801234000022 업체 전용 값 수정',
+        exact: true,
+      })
+      .isEnabled(),
+    false,
+  )
+  await page
+    .getByRole('button', {
+      name: '8801234000015 업체 전용 값 수정',
+      exact: true,
+    })
+    .click()
+  await page
+    .getByLabel('상품명 업체 전용 값', { exact: true })
+    .fill('연결 A 전용 값')
+  await page
+    .getByRole('button', { name: '업체 전용 값 저장', exact: true })
+    .click()
+  await page.getByText('연결 A 전용 값', { exact: true }).waitFor()
+  await openHeaders()
+  await page
+    .getByLabel('헤더 저장 연결', { exact: true })
+    .selectOption(targets.b)
+  await page.getByLabel('상품명 표시 이름', { exact: true }).waitFor()
+  assert.equal(
+    await page.getByLabel('상품명 표시 이름', { exact: true }).inputValue(),
+    '상품명',
+  )
+  assert.equal(
+    await page.getByLabel('상품명 업체 전용 값', { exact: true }).count(),
+    0,
+  )
+  await page
+    .getByLabel('헤더 저장 연결', { exact: true })
+    .selectOption(targets.a)
+  await page.getByLabel('물류상품명 표시 이름', { exact: true }).waitFor()
+  await page
+    .getByRole('dialog', { name: '표시 항목 및 연결 설정' })
+    .getByRole('button', { name: '닫기', exact: true })
+    .click()
+  await page.getByText('연결 A 전용 값', { exact: true }).waitFor()
+  assert.equal(
+    await page.evaluate(
+      () =>
+        window.__usageFixture.fingerprint() === window.__usageFixture.baseline,
+    ),
+    true,
   )
   assert.deepEqual(errors, [])
   console.log(

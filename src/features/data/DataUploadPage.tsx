@@ -219,6 +219,16 @@ export function DataUploadPage() {
                   ))}
                 </Select>
               </div>
+              {usageColumnsQuery.isError ? (
+                <p role="alert" className="text-sm text-danger">
+                  {String(usageColumnsQuery.error)}
+                </p>
+              ) : null}
+              {selectedTarget && usageColumnsQuery.isLoading ? (
+                <p className="text-sm text-muted-foreground">
+                  업체 헤더를 불러오는 중입니다.
+                </p>
+              ) : null}
               {selectedTarget && usageColumnsQuery.isSuccess ? (
                 <UsageBulkUploadPanel
                   key={`${brand.id}-${selectedTarget.id}`}

@@ -111,6 +111,28 @@ const data: Record<string, any[]> = {
   usage_partner_columns: [],
   usage_partner_values: [],
 }
+if (new URLSearchParams(location.search).has('grouped')) {
+  data.code_usage_targets.forEach((target, index) =>
+    Object.assign(target, {
+      name: '무신사',
+      group_id: uuid(80),
+      outbound_partner_groups: { name: '무신사' },
+      site_name: index ? '홍대' : '강남',
+      normalized_site_name: index ? '홍대' : '강남',
+    }),
+  )
+  data.product_codes.push({
+    ...data.product_codes[0],
+    id: uuid(44),
+    code: '8801234000022',
+    name: '두 번째 연결 전용 코드',
+  })
+  data.code_usage_assignments.push({
+    ...data.code_usage_assignments[1],
+    id: uuid(45),
+    product_code_id: uuid(44),
+  })
+}
 const audit: any[] = []
 const fingerprint = () =>
   JSON.stringify(

@@ -8,6 +8,9 @@ import {
   groupPartnersForOutboundChart,
   limitCompaniesWithOther,
   niceTicks,
+  operationsOutboundUnitLabel,
+  operationsOutboundCompanyLabel,
+  operationsOutboundTargetLabel,
   OTHER_COMPANY_KEY,
   parsePartnerChartLabel,
   resolveChartSeries,
@@ -277,4 +280,11 @@ assert.equal(
 assert.equal(resolveChartSeries('company:missing', scope), null)
 assert.equal(resolveChartSeries(companySeriesId(OTHER_COMPANY_KEY), { companies: [kyobo] }), null)
 
+const oneUnit={label:'무신사',units:[{partnerId:'gangnam',partnerName:'무신사',siteLabel:'강남점',quantity:5,channelType:'offline' as const}]}
+assert.equal(operationsOutboundCompanyLabel(oneUnit),'무신사 · 강남점 · 오프라인')
+assert.equal(operationsOutboundCompanyLabel({...oneUnit,units:[...oneUnit.units,{...oneUnit.units[0]!,partnerId:'hongdae',siteLabel:'홍대점'}]}),'무신사')
+assert.equal(operationsOutboundUnitLabel({companyLabel:'무신사',siteLabel:'무신사',channelType:'online'}),'무신사 · 온라인')
+assert.equal(operationsOutboundUnitLabel({companyLabel:'무신사',siteLabel:'강남점',channelType:'unset'}),'무신사 · 강남점')
+assert.equal(operationsOutboundTargetLabel({name:'무신사 강남',groupName:'무신사',siteName:'강남점',channelType:'offline'}),'무신사 · 강남점 · 오프라인')
+assert.equal(oneUnit.units[0]?.partnerId,'gangnam')
 console.log('partner-outbound-chart.verify ok')
