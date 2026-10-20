@@ -228,7 +228,7 @@ function createDemoMeetingSeries(
   ]
 }
 
-export function CompanyMeetingsPage() {
+export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: boolean } = {}) {
   useRenderWatch('CompanyMeetingsPage')
 
   const { profile } = useAuth()
@@ -256,6 +256,7 @@ export function CompanyMeetingsPage() {
     roundId: string
   } | null>(null)
   const [composePrompt, setComposePrompt] = useState<string | null>(null)
+  const [composeOpen, setComposeOpen] = useState(false)
   const [deleteSeriesId, setDeleteSeriesId] = useState<string | null>(null)
   const [selectedRoomId, setSelectedRoomId] = useState(MEETING_ROOMS[0].id)
   const demoSeeded = useRef(false)
@@ -403,23 +404,28 @@ export function CompanyMeetingsPage() {
     setSchedulingSeriesId(null)
     setComposePrompt(null)
     setPicker(null)
+    setComposeOpen(false)
+  }
+
+  function openCreate() {
+    if (schedulingSeries) resetCompose()
+    setComposeOpen(true)
   }
 
   function showComposeGaps() {
     setComposePrompt(composeGapMessage)
-    composeSectionRef.current?.scrollIntoView({
-      block: 'start',
-      behavior: 'smooth',
-    })
-    if (composeGaps.title) {
-      topicRef.current?.focus()
-      return
-    }
-    if (composeGaps.duration) {
-      durationRef.current?.focus()
-      return
-    }
-    if (composeGaps.members) setMemberPickerOpen(true)
+    setComposeOpen(true)
+    window.setTimeout(() => {
+      if (composeGaps.title) {
+        topicRef.current?.focus()
+        return
+      }
+      if (composeGaps.duration) {
+        durationRef.current?.focus()
+        return
+      }
+      if (composeGaps.members) setMemberPickerOpen(true)
+    }, 0)
   }
 
   function bookSlot(nextRoomId: string, dateKey: string, startClock: string) {
@@ -506,11 +512,8 @@ export function CompanyMeetingsPage() {
     setMembers(item.members)
     setComposePrompt(null)
     setMemberPickerOpen(false)
+    setComposeOpen(true)
     window.setTimeout(() => {
-      composeSectionRef.current?.scrollIntoView({
-        block: 'start',
-        behavior: 'smooth',
-      })
       durationRef.current?.focus()
     }, 0)
   }
@@ -557,12 +560,15 @@ export function CompanyMeetingsPage() {
 
   return (
     <div className="space-y-4">
-      <PageHeader title="회의" />
+      {showHeading ? <PageHeader title="회의" /> : null}
 
       <Card>
         <CardContent className="space-y-3 p-4">
-          <div>
+          <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-medium">진행 회의</p>
+            <Button type="button" size="sm" onClick={openCreate}>
+              회의 생성
+            </Button>
           </div>
           <div
             role="tablist"
@@ -599,7 +605,7 @@ export function CompanyMeetingsPage() {
           {boardSeries.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
               {boardTab === 'in_progress'
-                ? '진행 중인 회의가 없습니다. 아래에서 주제, 회의 시간, 멤버를 정한 뒤 날짜를 누르세요.'
+                ? '진행 중인 회의가 없습니다. 회의 생성을 누른 뒤 날짜를 고르세요.'
                 : '완료한 회의가 없습니다.'}
             </p>
           ) : (
@@ -739,9 +745,29 @@ export function CompanyMeetingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="space-y-4 p-4">
-          <div ref={composeSectionRef} className="space-y-3">
+      {composeOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/40"
+            aria-label="회의 생성 닫기"
+            onClick={() => setComposeOpen(false)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="meeting-create-title"
+            className="relative z-10 max-h-[min(80vh,40rem)] w-full max-w-3xl overflow-auto rounded-xl border border-border bg-card p-5 shadow-lg"
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 id="meeting-create-title" className="text-base font-semibold">
+                {schedulingSeries ? '다음 회의 잡기' : '회의 생성'}
+              </h2>
+              <Button type="button" size="sm" variant="outline" onClick={() => setComposeOpen(false)}>
+                닫기
+              </Button>
+            </div>
+            <div ref={composeSectionRef} className="space-y-3">
             <div className="flex flex-wrap items-end gap-3">
               <label className="min-w-[16rem] flex-1 space-y-1">
                 <span className="text-xs font-medium">회의 주제</span>
@@ -940,7 +966,12 @@ export function CompanyMeetingsPage() {
               </div>
             </div>
           </div>
+        </div>
+      </div>
+      ) : null}
 
+      <Card>
+        <CardContent className="space-y-4 p-4">
           <div>
             <p className="text-sm font-medium">회의실 일정</p>
           </div>

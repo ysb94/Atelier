@@ -37,6 +37,10 @@ export function previewProfile(profile: Profile, settings: PreviewSettings): Pro
   return { ...profile, ...settings, email: 'ui-preview@example.invalid' }
 }
 
+export function isPreviewProfile(profile: { email?: string | null } | null) {
+  return profile?.email === 'ui-preview@example.invalid'
+}
+
 export const PREVIEW_PRESETS: { label: string; settings: Partial<PreviewSettings> }[] = [
   { label: '일반 직원', settings: { position: '사원', isAdmin: false, status: 'active' } },
   { label: '팀장', settings: { position: '팀장', isAdmin: false, status: 'active' } },

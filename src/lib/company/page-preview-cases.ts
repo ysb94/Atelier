@@ -48,6 +48,10 @@ export function pagePreviewCases(pathname: string, real: Profile): PagePreviewCa
     item('lead', '브랜드 책임자 · 제한', { memberships: real.memberships.map(member => ({ ...member, isLead: true })) }),
     item('employee', '일반 직원 · 제한'),
   ]
+  if (path === '/settings/profile') return [
+    item('manager', '팀장급', { position: '팀장', jobGrade: '과장', departmentName: '디자인팀', capabilities: ['design'] }),
+    item('employee', '사원급', { position: '사원', jobGrade: '사원', departmentName: '디자인팀', capabilities: ['design'] }),
+  ]
   if (path === '/') return [
     item('reviewer', '대표이사', { position: '대표이사', departmentName: '운영진' }),
     item('manager', '팀장급 이상', { position: '팀장', capabilities: ['planning'] }),

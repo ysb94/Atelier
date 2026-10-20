@@ -4,7 +4,6 @@ import { BrandTargetGate } from '@/components/layout/BrandTargetGate'
 import { CompanyBrandScopeProvider } from '@/components/layout/company-brand-scope'
 import { CompanyHomePage } from '@/features/home/CompanyHomePage'
 import { CompanySchedulePage } from '@/features/home/CompanySchedulePage'
-import { CompanyMeetingsPage } from '@/features/meetings/CompanyMeetingsPage'
 import { WorkRequestPage } from '@/features/work-requests/WorkRequestPage'
 import { OrgChartPage } from '@/features/org/OrgChartPage'
 import { MembersPage } from '@/features/settings/MembersPage'
@@ -112,7 +111,7 @@ export const companyWorkspaceRoutes = (
       <Route path="work" element={<Navigate to="/settings/profile?part=work" replace />} />
       <Route path="work-requests/:owner" element={<WorkRequestPage />} />
       <Route path="schedule" element={<CompanySchedulePage />} />
-      <Route path="meetings" element={<CompanyMeetingsPage />} />
+      <Route path="meetings" element={<Navigate to="/settings/profile?part=meetings" replace />} />
       <Route path="org-chart" element={<OrgChartPage />} />
       <Route path="members" element={<MembersPage />} />
       <Route path="settings/profile" element={<ProfileSettingsPage />} />

@@ -413,12 +413,13 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 ## 화면 위치별 회사 공지
 
 - `company_notices`는 회사 소유 안내 글이다. 브랜드가 아니라 `company_id`로 구분하고,
-  `slot`은 공지가 보이는 화면 자리다. 첫 자리는 `my-attendance`(마이페이지 · 내 근태 상단)다.
+  `slot`은 공지가 보이는 화면 자리다. `my-attendance`는 내 근태 상단,
+  `company`는 My home 회사 공지, `department`는 My home 부서 공지다.
   `department_id`가 비어 있으면 회사 전체, 있으면 그 부서만 본다.
 - 재직 직원은 게시 중이고 한국시간 기간 안인 회사 전체 공지와 자기 부서 공지만 읽는다.
   운영지원의 저장·삭제는 `app.can_edit_org_assignment()`만 가능하고, 직접 insert/update/delete는 없다.
   공개 함수 `save_company_notice`, `delete_company_notice`가 비공개 함수에 위임한다.
-- 마이그레이션: `20261020021000_company_notices.sql`. 기존 휴가 사용 제도 안내를 회사 전체 공지로 한 번 넣는다.
+- 마이그레이션: `20261020021000_company_notices.sql`, `20261020110000_company_notice_boards.sql`.
   `npm run verify:company-notices`는 게시 기간·대상 정렬과 위치 이름 일치를 검증한다.
 
 ## 첫 입력 흐름

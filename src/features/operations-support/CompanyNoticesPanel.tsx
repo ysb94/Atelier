@@ -125,6 +125,10 @@ export function CompanyNoticesPanel() {
       setFormError('내용은 1자에서 4000자까지 입력해 주세요.')
       return
     }
+    if (draft.slot === 'department' && !draft.departmentId) {
+      setFormError('부서 공지는 대상 부서를 선택해 주세요.')
+      return
+    }
     if (draft.startsOn && draft.endsOn && draft.endsOn < draft.startsOn) {
       setFormError('종료일은 시작일보다 빠를 수 없습니다.')
       return
@@ -133,7 +137,7 @@ export function CompanyNoticesPanel() {
     save.mutate({
       id: draft.id,
       slot: draft.slot,
-      departmentId: draft.departmentId || null,
+      departmentId: draft.slot === 'company' ? null : draft.departmentId || null,
       title,
       body,
       startsOn: draft.startsOn || null,
@@ -294,6 +298,9 @@ export function CompanyNoticesPanel() {
           </div>
           <label className="block text-xs text-muted-foreground">
             대상
+            {draft.slot === 'company' ? (
+              <p className="mt-2 text-sm text-foreground">회사 전체</p>
+            ) : (
             <Select
               className="mt-2"
               aria-label="공지 대상"
@@ -301,11 +308,12 @@ export function CompanyNoticesPanel() {
               disabled={!canEdit || busy}
               onChange={(event) => setDraft({ ...draft, departmentId: event.target.value })}
             >
-              <option value="">회사 전체</option>
+              {draft.slot === 'department' ? null : <option value="">회사 전체</option>}
               {directory.departments.map((department) => (
                 <option key={department.id} value={department.id}>{department.name}</option>
               ))}
             </Select>
+            )}
           </label>
           <label className="flex items-center gap-2 text-sm">
             <input

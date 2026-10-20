@@ -2,8 +2,18 @@
 export const COMPANY_NOTICE_SLOTS = [
   {
     id: 'my-attendance',
-    label: '마이페이지 · 내 근태 상단',
+    label: 'My home · 내 근태 상단',
     detail: '내 근태에서 접힌 안내로 보입니다.',
+  },
+  {
+    id: 'company',
+    label: 'My home · 회사 공지',
+    detail: '회사 전체 공지 탭에 보입니다. 부서는 고르지 않습니다.',
+  },
+  {
+    id: 'department',
+    label: 'My home · 부서 공지',
+    detail: '고른 부서 소속만 부서 공지 탭에서 봅니다.',
   },
 ] as const
 

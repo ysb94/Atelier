@@ -40,7 +40,10 @@ const shown = visibleCompanyNotices(
 )
 assert.deepEqual(shown.map((item) => item.id), ['company-new', 'company-old', 'dept-old'])
 
-const migration = fs.readFileSync(new URL('../../../supabase/migrations/20261020021000_company_notices.sql', import.meta.url), 'utf8')
+const migration = [
+  new URL('../../../supabase/migrations/20261020021000_company_notices.sql', import.meta.url),
+  new URL('../../../supabase/migrations/20261020110000_company_notice_boards.sql', import.meta.url),
+].map((url) => fs.readFileSync(url, 'utf8')).join('\n')
 for (const slot of COMPANY_NOTICE_SLOTS) {
   assert.ok(migration.includes(`'${slot.id}'`), `${slot.label} 위치가 저장 검사에 없습니다.`)
 }

@@ -1,6 +1,6 @@
 import { useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, Check, ChevronRight, Clock3, LayoutGrid, List, MessageCircle, Plus, Search, Sparkles, Users, X } from 'lucide-react'
+import { ArrowRight, Check, ChevronRight, Clock3, LayoutGrid, List, MessageCircle, Plus, Search, Users, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -68,8 +68,7 @@ export function MyWorkDashboard({ name = '나', department = '소속 미지정',
     </button>
   }
   return <div className="mw-dashboard">
-    <header className="mw-header"><div><div className="mw-eyebrow">MY WORKSPACE</div><h1>내 업무<span>오늘의 흐름을 한눈에</span></h1><p>{name}님, {role==='lead'?'나와 팀의 업무를 함께 살펴보세요.':'지금 할 일과 기다리는 피드백을 확인하세요.'}</p></div><div className="mw-header-actions"><Button onClick={()=>{setNewTitle('');setNewDate('');addDialog.current?.showModal()}}><Plus size={15}/>업무 추가</Button></div></header>
-    <div className="mw-preview-note"><Sparkles size={13}/><span>화면 구성 미리보기 · 예시 업무로 구성되어 있으며, 변경 내용은 새로고침하면 초기화됩니다.</span></div>
+    <header className="mw-header"><div className="mw-header-actions"><Button onClick={()=>{setNewTitle('');setNewDate('');addDialog.current?.showModal()}}><Plus size={15}/>업무 추가</Button></div></header>
     <section className="mw-notices" aria-label="회사와 팀 공지">{PREVIEW_NOTICES.map(item=><button key={item.id} className="mw-notice" onClick={()=>{setNoticeId(item.id);noticeDialog.current?.showModal()}}><span className="mw-notice-kind">{item.kind}</span><strong>{item.title}</strong><span className={cn('mw-read',readNotices.includes(item.id)&&'mw-read-done')}>{readNotices.includes(item.id)?'확인했어요':'미확인'}</span><ChevronRight size={14}/></button>)}</section>
     <section className="mw-stats" aria-label="업무 요약"><button onClick={()=>{changeSection(role==='lead'?'team':'mine');setStatus('doing')}}><span className="mw-stat-icon mw-stat-green"><LayoutGrid size={18}/></span><div><span>{role==='lead'?'팀 진행 중':'진행 중'}</span><strong>{counts.doing}<small>건</small></strong></div><span className="mw-stat-hint">지금 이어갈 업무<ArrowRight size={13}/></span></button><button onClick={()=>changeSection('feedback')}><span className="mw-stat-icon mw-stat-amber"><MessageCircle size={18}/></span><div><span>피드백 대기</span><strong>{counts.feedback}<small>건</small></strong></div><span className="mw-stat-hint">확인과 답변이 필요한 일<ArrowRight size={13}/></span></button><button onClick={()=>{changeSection(role==='lead'?'team':'mine');setTodayOnly(true)}}><span className="mw-stat-icon mw-stat-purple"><Clock3 size={18}/></span><div><span>오늘 마감</span><strong>{counts.today}<small>건</small></strong></div><span className="mw-stat-hint">오늘 마무리할 업무<ArrowRight size={13}/></span></button></section>
     <nav className="mw-tabs" aria-label="업무 영역"><button aria-current={section==='mine'?'page':undefined} onClick={()=>changeSection('mine')}>내 업무<span>{mine.filter(item=>item.status!=='done').length}</span></button>{role==='lead'&&<button aria-current={section==='team'?'page':undefined} onClick={()=>changeSection('team')}><Users size={15}/>팀 업무</button>}<button aria-current={section==='feedback'?'page':undefined} onClick={()=>changeSection('feedback')}>피드백<span>{counts.feedback}</span></button>{role==='lead'&&<button aria-current={section==='conversations'?'page':undefined} onClick={()=>changeSection('conversations')}>부서 간 대화</button>}</nav>

@@ -59,7 +59,7 @@ export function completePagePreviewCases(pathname: string, real: Profile): Compl
     add('request-self', '신청 검토 · 본인 신청', settings, { requestOwner: 'self' })
     add('request-other', '신청 검토 · 다른 직원 신청', settings, { requestOwner: 'other' })
   }
-  if (path === '/meetings') {
+  if (path === '/meetings' || path === '/settings/profile') {
     add('meeting-host', '회의 · 주최자', {}, { meetingRole: 'host' })
     add('meeting-participant', '회의 · 참여자', {}, { meetingRole: 'participant' })
     add('meeting-outsider', '회의 · 비참여자', {}, { meetingRole: 'outsider' })
