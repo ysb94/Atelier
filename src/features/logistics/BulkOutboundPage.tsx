@@ -2262,30 +2262,6 @@ function DueRemainChip({ dueOn, className }: { dueOn: string; className?: string
 }
 
 
-function groupJobsByPartner(jobs: DemoJob[]) {
-  const order: string[] = []
-  const map = new Map<string, DemoJob[]>()
-  for (const job of jobs) {
-    const list = map.get(job.partnerId)
-    if (list) {
-      list.push(job)
-    } else {
-      order.push(job.partnerId)
-      map.set(job.partnerId, [job])
-    }
-  }
-  return order.map((partnerId) => {
-    const items = map.get(partnerId)!
-    return {
-      partnerId,
-      partnerName: items[0]!.partnerName,
-      jobs: items.sort((left, right) =>
-        left.startedOn.localeCompare(right.startedOn),
-      ),
-    }
-  })
-}
-
 function PartnerSettingsDialog({
   partners,
   ownPartnerIds,

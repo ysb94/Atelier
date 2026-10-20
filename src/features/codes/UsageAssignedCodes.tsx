@@ -1,17 +1,17 @@
 import { useDeferredValue, useMemo, useState, type ReactNode } from 'react'
-import { Settings2, Search, Upload } from 'lucide-react'
+import { Search, Upload, Settings2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { OutboundPartnerIdentity } from '@/features/codes/OutboundPartnerIdentity'
+import { type AssignmentCounts } from '@/lib/codes/code-usage'
 import {
   DEFAULT_USAGE_CODE_COLUMNS,
   type UsageCodeColumn,
+  type UsagePrivateValue,
 } from '@/lib/codes/usage-code-columns'
-import {
-  type AssignmentCounts,
-} from '@/lib/codes/code-usage'
+import { usageColumnText } from '@/lib/codes/usage-code-display'
 import {
   CODE_USAGE_STATUS_LABEL,
   type CodeUsageAssignment,
@@ -23,48 +23,11 @@ import { cn, formatNumber } from '@/lib/utils'
 
 type StatusFilter = 'all' | CodeUsageStatus
 
-function renderUsageColumn(
-  systemKey: UsageCodeColumn['systemKey'],
-  code: ProductCode | undefined,
-  status: CodeUsageStatus,
-  styleNames: ReadonlyMap<string, string>,
-  openCode: () => void,
-) {
-  if (!systemKey) return '—'
-  if (systemKey === 'code') {
-    return (
-      <button type="button" className="font-medium tabular-nums hover:underline" disabled={!code} onClick={openCode}>
-        {code?.code ?? '—'}
-      </button>
-    )
-  }
-  if (systemKey === 'name') return code?.name ?? '삭제된 바코드'
-  if (systemKey === 'status') {
-    return (
-      <Badge variant={status === 'active' ? 'success' : 'muted'}>
-        {CODE_USAGE_STATUS_LABEL[status]}
-      </Badge>
-    )
-  }
-  const components = code?.components ?? []
-  if (components.length === 0) return '—'
-  if (systemKey === 'productName') {
-    return components.map((component) => (
-      <div key={component.styleId}>{styleNames.get(component.styleId)?.trim() || '—'}</div>
-    ))
-  }
-  return components.map((component) => (
-    <div key={component.styleId} className="tabular-nums">
-      {component.styleNo}
-      {component.qty > 1 ? `×${component.qty}` : ''}
-    </div>
-  ))
-}
-
 export function UsageAssignedCodes({
   target,
   title,
   selectionKey,
+  valueCodeIds,
   configured,
   hasPartners,
   assignments,
@@ -74,16 +37,24 @@ export function UsageAssignedCodes({
   counts,
   saving,
   bulkOpen,
-  columns,
-  onManageColumns,
   onToggleBulk,
   onOpenCode,
   onChangeStatus,
   bulk,
+  columns = DEFAULT_USAGE_CODE_COLUMNS,
+  privateValues,
+  valuesReady,
+  valuesFailed,
+  canEditValues,
+  metaLoading,
+  onManageColumns,
+  onManageEditors,
+  onEditValues,
 }: {
   target: CodeUsageTarget | null
   title?: string
   selectionKey?: string | null
+  valueCodeIds?: ReadonlySet<string>
   configured: boolean
   hasPartners: boolean
   assignments: CodeUsageAssignment[]
@@ -93,21 +64,28 @@ export function UsageAssignedCodes({
   counts: AssignmentCounts
   saving: boolean
   bulkOpen: boolean
-  columns: UsageCodeColumn[]
-  onManageColumns: () => void
   onToggleBulk: () => void
   onOpenCode: (code: ProductCode) => void
   onChangeStatus: (assignmentIds: string[], status: CodeUsageStatus) => void
   bulk: ReactNode
+  columns?: UsageCodeColumn[]
+  privateValues: Map<string, Record<string, UsagePrivateValue>>
+  valuesReady: boolean
+  valuesFailed: boolean
+  canEditValues: boolean
+  metaLoading: boolean
+  onManageColumns: () => void
+  onManageEditors?: () => void
+  onEditValues: (code: ProductCode) => void
 }) {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [listSearch, setListSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const deferredSearch = useDeferredValue(listSearch)
-  const resetKey = selectionKey ?? target?.id ?? null
-  const [seenTargetId, setSeenTargetId] = useState(resetKey)
-  if (resetKey !== seenTargetId) {
-    setSeenTargetId(resetKey)
+  const targetId = selectionKey ?? target?.id ?? null
+  const [seenTargetId, setSeenTargetId] = useState(targetId)
+  if (targetId !== seenTargetId) {
+    setSeenTargetId(targetId)
     setSelectedIds([])
     setStatusFilter('all')
     setListSearch('')
@@ -118,9 +96,19 @@ export function UsageAssignedCodes({
     return assignments.filter((row) => {
       if (statusFilter !== 'all' && row.status !== statusFilter) return false
       if (!keyword) return true
-      return (searchTextById.get(row.productCodeId) ?? '').includes(keyword)
+      const privateText = Object.values(
+        privateValues.get(row.productCodeId) ?? {},
+      )
+        .map((value) => (value == null ? '' : String(value)))
+        .join(' ')
+        .toLowerCase()
+      return `${searchTextById.get(row.productCodeId) ?? ''} ${privateText}`.includes(
+        keyword,
+      )
     })
-  }, [assignments, deferredSearch, searchTextById, statusFilter])
+  }, [assignments, deferredSearch, searchTextById, statusFilter, privateValues])
+  const visibleColumns = columns.filter((column) => column.visible)
+  const hasPrivate = visibleColumns.some((column) => column.kind === 'private')
 
   const assignmentIds = useMemo(
     () => new Set(assignments.map((row) => row.id)),
@@ -128,9 +116,6 @@ export function UsageAssignedCodes({
   )
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds])
   const selectedCount = selectedIds.filter((id) => assignmentIds.has(id)).length
-  const tableColumns = columns.length > 0
-    ? columns
-    : DEFAULT_USAGE_CODE_COLUMNS.map((column, index) => ({ ...column, id: `default-${index}` }))
   const allVisibleSelected =
     filtered.length > 0 && filtered.every((row) => selectedSet.has(row.id))
 
@@ -173,7 +158,7 @@ export function UsageAssignedCodes({
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
               <h2 className="break-words text-base font-semibold">
-                {title?.trim() ? title : <OutboundPartnerIdentity target={target} />}
+                {title?.trim() || <OutboundPartnerIdentity target={target} />}
               </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 등록 {formatNumber(counts.total)}건 · 사용중{' '}
@@ -182,13 +167,29 @@ export function UsageAssignedCodes({
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" disabled={columns.length === 0} onClick={onManageColumns}>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={metaLoading}
+                onClick={onManageColumns}
+              >
                 <Settings2 className="size-4" />
                 헤더 설정
               </Button>
+              {onManageEditors ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={metaLoading}
+                  onClick={onManageEditors}
+                >
+                  담당자 설정
+                </Button>
+              ) : null}
               <Button
                 type="button"
                 variant={bulkOpen ? 'default' : 'outline'}
+                disabled={metaLoading}
                 onClick={onToggleBulk}
               >
                 <Upload className="size-4" />
@@ -239,7 +240,9 @@ export function UsageAssignedCodes({
 
           {selectedCount > 0 ? (
             <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted/40 px-3 py-2">
-              <span className="text-sm">선택 {formatNumber(selectedCount)}건</span>
+              <span className="text-sm">
+                선택 {formatNumber(selectedCount)}건
+              </span>
               <Button
                 type="button"
                 size="sm"
@@ -262,6 +265,17 @@ export function UsageAssignedCodes({
           ) : null}
 
           <Card className="flex min-h-[240px] flex-1 flex-col overflow-hidden">
+            {filtered.length > 0 ? (
+              <label className="flex items-center gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
+                <input
+                  type="checkbox"
+                  className="size-3.5 accent-primary"
+                  checked={allVisibleSelected}
+                  onChange={toggleVisible}
+                />
+                보이는 항목 선택
+              </label>
+            ) : null}
             {filtered.length === 0 ? (
               <p className="px-4 py-12 text-center text-sm text-muted-foreground">
                 {assignments.length === 0
@@ -270,21 +284,33 @@ export function UsageAssignedCodes({
               </p>
             ) : (
               <div className="min-h-0 flex-1 overflow-auto">
-                <table className="w-full min-w-[960px] border-collapse text-left text-sm">
-                  <thead className="sticky top-0 z-10 border-b border-border bg-muted/80 text-xs text-muted-foreground">
+                <table className="w-full min-w-[850px] text-left text-sm">
+                  <thead className="sticky top-0 bg-muted">
                     <tr>
-                      <th className="w-10 px-3 py-2">
-                        <input
-                          type="checkbox"
-                          className="size-3.5 accent-primary"
-                          checked={allVisibleSelected}
-                          aria-label="보이는 항목 선택"
-                          onChange={toggleVisible}
-                        />
-                      </th>
-                      {tableColumns.map((column) => (
-                        <th key={column.id} className="px-3 py-2 font-medium">{column.label}</th>
+                      <th className="w-10 px-3 py-2">선택</th>
+                      {visibleColumns.map((column) => (
+                        <th
+                          key={column.id}
+                          className="min-w-32 px-3 py-2"
+                          title={
+                            column.sourceKey && column.kind === 'common'
+                              ? '공통 원본 · 이 화면에서 값 수정 불가'
+                              : column.description
+                          }
+                        >
+                          {column.label}{' '}
+                          {column.kind === 'common'
+                            ? '🔒'
+                            : column.kind === 'private'
+                              ? '✏️'
+                              : column.kind === 'legacy'
+                                ? '⚠️'
+                                : ''}
+                        </th>
                       ))}
+                      {hasPrivate ? (
+                        <th className="px-3 py-2">업체 전용 값</th>
+                      ) : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -293,24 +319,103 @@ export function UsageAssignedCodes({
                       return (
                         <tr
                           key={row.id}
-                          className="border-b border-border last:border-0 hover:bg-muted/30"
+                          className="border-b border-border align-top last:border-0"
                         >
-                          <td className="px-3 py-2 align-top">
+                          <td className="px-3 py-2">
                             <input
                               type="checkbox"
-                              className="mt-0.5 size-3.5 accent-primary"
+                              className="mt-1 size-3.5 accent-primary"
                               checked={selectedSet.has(row.id)}
                               aria-label={`${code?.code ?? '바코드'} 선택`}
                               onChange={() => toggle(row.id)}
                             />
                           </td>
-                          {tableColumns.map((column) => (
-                            <td key={column.id} className="px-3 py-2 align-top">
-                              {renderUsageColumn(column.systemKey, code, row.status, styleNames, () => {
-                                if (code) onOpenCode(code)
-                              })}
+                          {visibleColumns.map((column) => (
+                            <td
+                              key={column.id}
+                              className="whitespace-pre-line px-3 py-2"
+                              title={
+                                column.kind === 'common'
+                                  ? '공통 연결 · 읽기 전용'
+                                  : column.description
+                              }
+                            >
+                              {column.sourceKey === 'code' ? (
+                                <button
+                                  type="button"
+                                  className="font-medium underline-offset-2 hover:underline"
+                                  title="이 코드를 사용하는 업체 연결 확인"
+                                  disabled={!code}
+                                  onClick={() => {
+                                    if (code) onOpenCode(code)
+                                  }}
+                                >
+                                  {code?.code ?? '원본 연결 없음'}
+                                </button>
+                              ) : column.sourceKey === 'status' ? (
+                                <Badge
+                                  variant={
+                                    row.status === 'active'
+                                      ? 'success'
+                                      : 'muted'
+                                  }
+                                >
+                                  {CODE_USAGE_STATUS_LABEL[row.status]}
+                                </Badge>
+                              ) : column.kind === 'private' &&
+                                valueCodeIds &&
+                                !valueCodeIds.has(row.productCodeId) ? (
+                                '다른 저장 연결'
+                              ) : column.kind === 'private' && !valuesReady ? (
+                                valuesFailed ? (
+                                  '조회 실패'
+                                ) : (
+                                  '조회 중…'
+                                )
+                              ) : (
+                                usageColumnText(
+                                  column,
+                                  code,
+                                  row.status,
+                                  styleNames,
+                                  privateValues.get(row.productCodeId),
+                                )
+                              )}
                             </td>
                           ))}
+                          {hasPrivate ? (
+                            <td className="px-3 py-2">
+                              {canEditValues ? (
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={
+                                    !code ||
+                                    !valuesReady ||
+                                    (valueCodeIds != null &&
+                                      !valueCodeIds.has(row.productCodeId))
+                                  }
+                                  title={
+                                    valueCodeIds &&
+                                    !valueCodeIds.has(row.productCodeId)
+                                      ? '헤더 설정에서 이 코드가 등록된 저장 연결을 선택하세요.'
+                                      : undefined
+                                  }
+                                  aria-label={`${code?.code ?? ''} 업체 전용 값 수정`}
+                                  onClick={() => {
+                                    if (code) onEditValues(code)
+                                  }}
+                                >
+                                  수정
+                                </Button>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">
+                                  담당자만 수정
+                                </span>
+                              )}
+                            </td>
+                          ) : null}
                         </tr>
                       )
                     })}

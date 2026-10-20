@@ -91,10 +91,13 @@
     "verify:sabangnet-codes": "tsx --tsconfig tsconfig.app.json src/lib/codes/sabangnet-import.verify.ts",
     "verify:product-categories": "tsx --tsconfig tsconfig.app.json src/lib/products/product-categories.verify.ts",
     "verify:code-usage": "tsx --tsconfig tsconfig.app.json src/lib/codes/code-usage.verify.ts",
-    "verify:usage-code-columns": "node --experimental-strip-types src/lib/codes/usage-code-columns.verify.ts",
+    "verify:usage-code-columns": "tsx --tsconfig tsconfig.app.json src/lib/codes/usage-code-columns.verify.ts",
     "verify:browser-images": "node dev-tools/ai-workflow/browser-check.mjs images",
     "verify:browser-deadline": "node dev-tools/ai-workflow/browser-check.mjs deadline",
-    "verify:browser-attendance": "node dev-tools/ai-workflow/browser-check.mjs attendance"
+    "verify:browser-attendance": "node dev-tools/ai-workflow/browser-check.mjs attendance",
+    "verify:usage-headers": "tsx --tsconfig tsconfig.app.json src/lib/codes/usage-code-columns.verify.ts && tsx --tsconfig tsconfig.app.json src/lib/codes/usage-partner-import.verify.ts",
+    "verify:usage-headers-db": "node scripts/verify-usage-partner-db.mjs",
+    "verify:usage-headers-browser": "node scripts/verify-usage-headers-browser.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.7.1",

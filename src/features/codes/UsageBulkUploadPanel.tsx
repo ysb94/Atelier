@@ -9,6 +9,7 @@ import {
 } from '@/lib/codes/usage-import'
 import { parseFile } from '@/lib/import/parse'
 import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
+
 import {
   CODE_USAGE_STATUS_LABEL,
   type CodeUsageStatus,
@@ -27,8 +28,8 @@ type UsageBulkUploadPanelProps = {
   usageTargets?: CodeUsageTarget[]
   companyName?: string
   codes: ProductCode[]
-  columns: UsageCodeColumn[]
   existingByCodeId: Map<string, CodeUsageStatus>
+  columns?: UsageCodeColumn[]
   onApplied: () => void | Promise<void>
   onClose?: () => void
 }
@@ -61,7 +62,8 @@ export function UsageBulkUploadPanel({
       if (rows.length === 0) {
         throw new Error('반영할 행이 없습니다.')
       }
-      const targets = usageTargets && usageTargets.length > 0 ? usageTargets : [usageTarget]
+      const targets =
+        usageTargets && usageTargets.length > 0 ? usageTargets : [usageTarget]
       let created = 0
       let updated = 0
       let skipped = 0
@@ -124,10 +126,12 @@ export function UsageBulkUploadPanel({
         <div className="flex items-center justify-between gap-2">
           <div>
             <div className="text-sm font-medium">
-              {companyName?.trim() || outboundPartnerDisplayName(usageTarget)} 일괄 등록
+              {companyName?.trim() || outboundPartnerDisplayName(usageTarget)}{' '}
+              일괄 등록
             </div>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              양식의 88코드 열에 자사 바코드 마스터에 있는 코드만 넣으세요.
+              코드 연결·상태만 반영합니다. 공통 값은 수정하지 않으며 전용 값은
+              목록에서 입력하세요.
             </p>
           </div>
           {onClose ? (
@@ -206,9 +210,7 @@ export function UsageBulkUploadPanel({
                     <td className="px-3 py-2 font-medium tabular-nums">
                       {row.code || '—'}
                     </td>
-                    <td className="px-3 py-2">
-                      {row.productCodeName ?? '—'}
-                    </td>
+                    <td className="px-3 py-2">{row.productCodeName ?? '—'}</td>
                     <td className="px-3 py-2">
                       {CODE_USAGE_STATUS_LABEL[row.status]}
                     </td>

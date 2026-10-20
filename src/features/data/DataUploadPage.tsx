@@ -17,7 +17,7 @@ import {
   getStylesByBrand,
 } from '@/lib/api'
 import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
-import { listUsageCodeColumns } from '@/lib/supabase/usage-code-columns'
+import { getUsagePartnerSettings } from '@/lib/supabase/usage-partner-settings'
 import type { CodeUsageStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
 
@@ -70,11 +70,6 @@ export function DataUploadPage() {
     queryFn: () => getProductCodes(brand.id, 'own'),
     enabled: kind === 'usage',
   })
-  const usageColumnsQuery = useQuery({
-    queryKey: ['usageCodeColumns', brand.id],
-    queryFn: () => listUsageCodeColumns(brand.id),
-    enabled: kind === 'usage',
-  })
   const allCodesQuery = useQuery({
     queryKey: ['productCodes', brand.id, 'all'],
     queryFn: () => getProductCodes(brand.id),
@@ -104,6 +99,12 @@ export function DataUploadPage() {
     targets[0] ??
     null
 
+  const usageColumnsQuery = useQuery({
+    queryKey: ['usagePartnerSettings', brand.id, selectedTarget?.id],
+    enabled: kind === 'usage' && Boolean(selectedTarget),
+    retry: false,
+    queryFn: () => getUsagePartnerSettings(brand.id, selectedTarget!.id),
+  })
   const existingByCodeId = useMemo(() => {
     const map = new Map<string, CodeUsageStatus>()
     if (!selectedTarget) return map
@@ -151,7 +152,9 @@ export function DataUploadPage() {
         ))}
       </div>
 
-      <p className="mb-6 text-sm text-muted-foreground">{current.description}</p>
+      <p className="mb-6 text-sm text-muted-foreground">
+        {current.description}
+      </p>
 
       {kind === 'products' ? (
         <ProductImportWorkspace
@@ -174,7 +177,9 @@ export function DataUploadPage() {
                 <p className="text-sm text-muted-foreground">
                   출고업체를 만든 뒤 자사 바코드를 일괄 연결할 수 있습니다.
                 </p>
-                <Link to={`/settings/usage-targets?brand=${encodeURIComponent(brand.slug)}`}>
+                <Link
+                  to={`/settings/usage-targets?brand=${encodeURIComponent(brand.slug)}`}
+                >
                   <Button type="button" size="sm">
                     출고업체 관리
                   </Button>
@@ -214,13 +219,14 @@ export function DataUploadPage() {
                   ))}
                 </Select>
               </div>
-              {selectedTarget ? (
+              {selectedTarget && usageColumnsQuery.isSuccess ? (
                 <UsageBulkUploadPanel
+                  key={`${brand.id}-${selectedTarget.id}`}
                   brandName={brand.name}
                   brandId={brand.id}
                   usageTarget={selectedTarget}
                   codes={codesQuery.data ?? []}
-                  columns={usageColumnsQuery.data ?? []}
+                  columns={usageColumnsQuery.data?.columns ?? []}
                   existingByCodeId={existingByCodeId}
                   onApplied={async () => {
                     await queryClient.invalidateQueries({
@@ -247,7 +253,9 @@ export function DataUploadPage() {
                 <p className="text-sm text-muted-foreground">
                   바코드에 연결할 M번호가 필요합니다. 상품을 먼저 등록하세요.
                 </p>
-                <Link to={`/data/upload?brand=${encodeURIComponent(brand.slug)}`}>
+                <Link
+                  to={`/data/upload?brand=${encodeURIComponent(brand.slug)}`}
+                >
                   <Button type="button" size="sm">
                     상품 일괄 업로드
                   </Button>
@@ -300,7 +308,9 @@ export function DataUploadPage() {
               거래처 코드 화면에서 단건으로 등록할 수 있습니다. 상품·출고업체
               업로드가 먼저 준비되어 있습니다.
             </p>
-            <Link to={`/partner-codes?brands=${encodeURIComponent(brand.slug)}`}>
+            <Link
+              to={`/partner-codes?brands=${encodeURIComponent(brand.slug)}`}
+            >
               <Button type="button" size="sm">
                 거래처 코드 화면
               </Button>

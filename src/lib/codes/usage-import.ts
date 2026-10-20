@@ -4,7 +4,7 @@ import {
   DEFAULT_USAGE_CODE_COLUMNS,
   usageCodeHeaderIndex,
   type UsageCodeColumn,
-  type UsageCodeSystemKey,
+  type UsageSourceKey,
 } from '@/lib/codes/usage-code-columns'
 
 function todayStamp() {
@@ -20,7 +20,7 @@ function safeFilePart(name: string) {
 }
 
 const COLUMN_GUIDE: Record<
-  UsageCodeSystemKey,
+  UsageSourceKey,
   { required: string; example: string; description: string }
 > = {
   code: {
@@ -31,7 +31,8 @@ const COLUMN_GUIDE: Record<
   name: {
     required: 'N',
     example: '',
-    description: '참고용입니다. 등록에는 쓰지 않고 마스터의 코드명을 보여 줍니다.',
+    description:
+      '참고용입니다. 등록에는 쓰지 않고 마스터의 코드명을 보여 줍니다.',
   },
   status: {
     required: 'N',
@@ -57,18 +58,18 @@ const COLUMN_GUIDE: Record<
 export async function downloadUsageCodeTemplate(options: {
   brandName: string
   usageTargetName: string
-  columns?: Array<Pick<UsageCodeColumn, 'systemKey' | 'label'>>
+  columns?: UsageCodeColumn[]
 }) {
   const XLSX = await import('xlsx')
   const columns =
     options.columns && options.columns.length > 0
-      ? options.columns
+      ? options.columns.filter((column) => column.visible)
       : DEFAULT_USAGE_CODE_COLUMNS
   const headers = columns.map((column) => column.label)
   const guideRows = [
     ['항목명', '필수', '예시', '설명'],
     ...columns.map((column) => {
-      const guide = column.systemKey ? COLUMN_GUIDE[column.systemKey] : null
+      const guide = column.sourceKey ? COLUMN_GUIDE[column.sourceKey] : null
       return [
         column.label,
         guide?.required ?? 'N',
@@ -137,22 +138,21 @@ export function prepareUsageRows(options: {
   ownCodes: ProductCode[]
   /** 이미 해당 사용처에 등록된 productCodeId → 현재 상태 */
   existingByCodeId: Map<string, CodeUsageStatus>
-  columns?: Array<Pick<UsageCodeColumn, 'systemKey' | 'label'>>
+  columns?: UsageCodeColumn[]
 }): PreparedUsageRow[] {
   const { rows, ownCodes, existingByCodeId } = options
   if (rows.length === 0) return []
 
-  const codeIdx = usageCodeHeaderIndex(rows[0], options.columns, 'code')
-  const statusIdx = usageCodeHeaderIndex(rows[0], options.columns, 'status')
+  const codeIdx = usageCodeHeaderIndex(rows[0], options.columns ?? [], 'code')
+  const statusIdx = usageCodeHeaderIndex(rows[0], options.columns ?? [], 'status')
 
-  // 헤더 인식 실패 시 첫 열을 바코드, 둘째 열을 상태로 본다.
-  const resolvedCodeIdx = codeIdx >= 0 ? codeIdx : 0
-  const resolvedStatusIdx = statusIdx >= 0 ? statusIdx : 1
+  // 업체 설정이 없던 호출만 기존 열 위치를 유지한다. 설정이 있으면 헤더를 추측하지 않는다.
+  const resolvedCodeIdx = codeIdx >= 0 ? codeIdx : options.columns ? -1 : 0
+  const resolvedStatusIdx =
+    statusIdx >= 0 ? statusIdx : options.columns ? -1 : 1
 
   const codeMap = new Map(
-    ownCodes
-      .filter((c) => c.kind === 'own')
-      .map((c) => [c.code, c] as const),
+    ownCodes.filter((c) => c.kind === 'own').map((c) => [c.code, c] as const),
   )
   const seenCodes = new Set<string>()
   const prepared: PreparedUsageRow[] = []
@@ -205,7 +205,8 @@ export function prepareUsageRows(options: {
         code: rawCode,
         status,
         statusLabel: 'error',
-        message: '자사 바코드 마스터에 없는 코드입니다. 먼저 바코드를 등록하세요.',
+        message:
+          '자사 바코드 마스터에 없는 코드입니다. 먼저 바코드를 등록하세요.',
       })
       continue
     }

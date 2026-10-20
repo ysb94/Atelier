@@ -10,14 +10,16 @@ import { UsageAssignedCodes } from '@/features/codes/UsageAssignedCodes'
 import { UsageBulkUploadPanel } from '@/features/codes/UsageBulkUploadPanel'
 import { UsageCodeColumnDialog } from '@/features/codes/UsageCodeColumnDialog'
 import { UsageCodePartnersDialog } from '@/features/codes/UsageCodePartnersDialog'
-import { UsagePartnerList, usagePartnerCompanyKey } from '@/features/codes/UsagePartnerList'
+import {
+  UsagePartnerList,
+  usagePartnerCompanyKey,
+} from '@/features/codes/UsagePartnerList'
 import { UsageTargetManagerDialog } from '@/features/codes/UsageTargetManager'
 import { useRenderWatch } from '@/lib/diagnostics/render-watch'
-import type { UsageCodeColumn } from '@/lib/codes/usage-code-columns'
-import {
-  listUsageCodeColumns,
-  saveUsageCodeColumns,
-} from '@/lib/supabase/usage-code-columns'
+import { DEFAULT_USAGE_CODE_COLUMNS } from '@/lib/codes/usage-code-columns'
+import { UsageCodeValuesDialog } from '@/features/codes/UsageCodeValuesDialog'
+import { UsageCodeManagersDialog } from '@/features/codes/UsageCodeManagersDialog'
+import { useUsagePartnerSettings } from '@/features/codes/useUsagePartnerSettings'
 import {
   codeSearchText,
   mergeCodeUsageAssignments,
@@ -215,35 +217,37 @@ export function UsageCodePage() {
   useRenderWatch('UsageCodePage')
   const { brand } = useBrand()
   const queryClient = useQueryClient()
-  const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(null)
+  const [selectedCompanyKey, setSelectedCompanyKey] = useState<string | null>(
+    null,
+  )
   const [bulkOpen, setBulkOpen] = useState(false)
   const [managerOpen, setManagerOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
-  const [columnDialogOpen, setColumnDialogOpen] = useState(false)
+  const [headerTargetId, setHeaderTargetId] = useState<string | null>(null)
+  const [managerTargetId, setManagerTargetId] = useState<string | null>(null)
+  const [valueEditor, setValueEditor] = useState<{
+    target: string
+    codeId: string
+  } | null>(null)
+  const [settingsScope, setSettingsScope] = useState<{
+    companyKey: string
+    targetId: string
+  } | null>(null)
   const [dialogCodeId, setDialogCodeId] = useState<string | null>(null)
 
   useEffect(() => {
     setSelectedCompanyKey(null)
     setBulkOpen(false)
-    setColumnDialogOpen(false)
+    setHeaderTargetId(null)
+    setManagerTargetId(null)
+    setValueEditor(null)
+    setSettingsScope(null)
     setDialogCodeId(null)
   }, [brand.id])
 
   const targetsQuery = useQuery({
     queryKey: ['codeUsageTargets', brand.id],
     queryFn: () => getCodeUsageTargets(brand.id),
-  })
-  const columnsQuery = useQuery({
-    queryKey: ['usageCodeColumns', brand.id],
-    queryFn: () => listUsageCodeColumns(brand.id),
-  })
-  const saveColumnsMutation = useMutation({
-    mutationFn: (columns: UsageCodeColumn[]) =>
-      saveUsageCodeColumns(brand.id, columns),
-    onSuccess: (columns) => {
-      queryClient.setQueryData(['usageCodeColumns', brand.id], columns)
-      setColumnDialogOpen(false)
-    },
   })
   const settingQueryKey = [
     'barcodePartnerDisplaySetting',
@@ -407,8 +411,14 @@ export function UsageCodePage() {
       company,
     }
   }, [partnerSections, selectedCompanyKey])
-  const selectedUnits = selectedCompany?.company.units ?? emptyList<CodeUsageTarget>()
-  const selectedTarget = selectedUnits[0] ?? null
+  const selectedUnits =
+    selectedCompany?.company.units ?? emptyList<CodeUsageTarget>()
+  const selectedTarget =
+    (settingsScope?.companyKey === selectedCompany?.key
+      ? selectedUnits.find((unit) => unit.id === settingsScope?.targetId)
+      : null) ??
+    selectedUnits[0] ??
+    null
   const selectedUnitIds = useMemo(
     () => new Set(selectedUnits.map((unit) => unit.id)),
     [selectedUnits],
@@ -420,20 +430,56 @@ export function UsageCodePage() {
     for (const row of assignments) {
       if (!selectedUnitIds.has(row.usageTargetId)) continue
       const current = byCode.get(row.productCodeId)
-      if (!current || row.status === 'paused') byCode.set(row.productCodeId, row)
+      if (!current || row.status === 'paused')
+        byCode.set(row.productCodeId, row)
     }
     return [...byCode.values()]
   }, [assignments, selectedUnitIds])
 
+  const partnerSettings = useUsagePartnerSettings(
+    brand.id,
+    selectedTarget?.id ?? null,
+  )
+  const usageColumns =
+    partnerSettings.settings.data?.columns ?? DEFAULT_USAGE_CODE_COLUMNS
+  const previewRows = useMemo(
+    () =>
+      targetAssignments.slice(0, 3).flatMap((row) => {
+        const code = codeMap.get(row.productCodeId)
+        return code ? [{ code, status: row.status }] : []
+      }),
+    [targetAssignments, codeMap],
+  )
+  const editingCode =
+    valueEditor?.target === selectedTarget?.id
+      ? codeMap.get(valueEditor?.codeId ?? '')
+      : undefined
+
+  const valueCodeIds = useMemo(
+    () =>
+      new Set(
+        assignments
+          .filter((row) => row.usageTargetId === selectedTarget?.id)
+          .map((row) => row.productCodeId),
+      ),
+    [assignments, selectedTarget?.id],
+  )
   const existingByCodeId = useMemo(() => {
     const map = new Map<string, CodeUsageStatus>()
     if (selectedUnits.length === 0) return map
-    const statuses = new Map<string, { status: CodeUsageStatus; count: number; mixed: boolean }>()
+    const statuses = new Map<
+      string,
+      { status: CodeUsageStatus; count: number; mixed: boolean }
+    >()
     for (const row of assignments) {
       if (!selectedUnitIds.has(row.usageTargetId)) continue
       const current = statuses.get(row.productCodeId)
       if (!current) {
-        statuses.set(row.productCodeId, { status: row.status, count: 1, mixed: false })
+        statuses.set(row.productCodeId, {
+          status: row.status,
+          count: 1,
+          mixed: false,
+        })
       } else {
         current.count += 1
         if (current.status !== row.status) current.mixed = true
@@ -447,7 +493,7 @@ export function UsageCodePage() {
     return map
   }, [assignments, selectedUnitIds, selectedUnits.length])
 
-  const dialogCode = dialogCodeId ? codeMap.get(dialogCodeId) ?? null : null
+  const dialogCode = dialogCodeId ? (codeMap.get(dialogCodeId) ?? null) : null
   const dialogPartners = useMemo(() => {
     if (!dialogCode) return emptyList<CodeUsageTarget>()
     const ids = new Set(visibleTargets.map((target) => target.id))
@@ -576,16 +622,29 @@ export function UsageCodePage() {
             : '공용 업체 설정을 불러오지 못했습니다.'}
         </p>
       ) : null}
-      {columnsQuery.isError ? (
-        <p className="mb-4 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
-          {columnsQuery.error instanceof Error
-            ? columnsQuery.error.message
-            : '표 헤더를 불러오지 못했습니다.'}
-        </p>
-      ) : null}
       {saveError ? (
         <p className="mb-4 rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">
           {saveError}
+        </p>
+      ) : null}
+
+      {selectedTarget &&
+      partnerSettings.settings.data &&
+      !partnerSettings.settings.data.ready ? (
+        <p className="mb-4 rounded border border-border bg-muted/40 px-3 py-2 text-sm">
+          업체별 설정 저장 준비가 필요합니다. 기존 헤더와 코드 연결은 그대로
+          표시하며, 새 전용 값 저장은 준비 후 사용할 수 있습니다.
+        </p>
+      ) : null}
+      {partnerSettings.settings.isError || partnerSettings.values.isError ? (
+        <p
+          role="alert"
+          className="mb-4 rounded border border-danger/30 px-3 py-2 text-sm text-danger"
+        >
+          {String(
+            partnerSettings.settings.error ?? partnerSettings.values.error,
+          )}{' '}
+          · 업체 전용 값은 조회 성공 후 수정할 수 있습니다.
         </p>
       ) : null}
 
@@ -619,26 +678,57 @@ export function UsageCodePage() {
               searchTextById={searchTextById}
               counts={{
                 total: targetAssignments.length,
-                active: targetAssignments.filter((row) => row.status === 'active').length,
-                paused: targetAssignments.filter((row) => row.status === 'paused').length,
+                active: targetAssignments.filter(
+                  (row) => row.status === 'active',
+                ).length,
+                paused: targetAssignments.filter(
+                  (row) => row.status === 'paused',
+                ).length,
               }}
               saving={saveMutation.isPending}
               bulkOpen={bulkOpen}
-              columns={columnsQuery.data ?? []}
-              onManageColumns={() => setColumnDialogOpen(true)}
+              columns={usageColumns}
+              privateValues={partnerSettings.valueMap}
+              valuesReady={partnerSettings.values.isSuccess}
+              valuesFailed={partnerSettings.values.isError}
+              valueCodeIds={valueCodeIds}
+              canEditValues={
+                Boolean(
+                  partnerSettings.settings.data?.ready &&
+                  partnerSettings.settings.data.access.canEdit,
+                ) && !partnerSettings.valuesMutation.isPending
+              }
+              metaLoading={!partnerSettings.settings.isSuccess}
+              onManageColumns={() => {
+                if (selectedTarget) setHeaderTargetId(selectedTarget.id)
+              }}
+              onManageEditors={
+                partnerSettings.settings.data?.access.canManage
+                  ? () => {
+                      if (selectedTarget) setManagerTargetId(selectedTarget.id)
+                    }
+                  : undefined
+              }
+              onEditValues={(code) => {
+                if (selectedTarget)
+                  setValueEditor({ target: selectedTarget.id, codeId: code.id })
+              }}
               onToggleBulk={() => setBulkOpen((current) => !current)}
               onOpenCode={(code) => setDialogCodeId(code.id)}
               onChangeStatus={changeStatus}
               bulk={
                 bulkOpen && selectedTarget && selectedCompany ? (
                   <UsageBulkUploadPanel
+                    key={`${brand.id}-${selectedCompany.key}`}
                     brandName={brand.name}
                     brandId={brand.id}
                     usageTarget={selectedTarget}
                     usageTargets={selectedUnits}
-                    companyName={selectedCompany.company.groupName.trim() || undefined}
+                    companyName={
+                      selectedCompany.company.groupName.trim() || undefined
+                    }
                     codes={codes}
-                    columns={columnsQuery.data ?? []}
+                    columns={usageColumns}
                     existingByCodeId={existingByCodeId}
                     onApplied={async () => {
                       setBulkOpen(false)
@@ -681,7 +771,9 @@ export function UsageCodePage() {
             await saveSettingMutation.mutateAsync(ids)
             if (
               selectedCompany &&
-              selectedCompany.company.units.every((unit) => !ids.includes(unit.id))
+              selectedCompany.company.units.every(
+                (unit) => !ids.includes(unit.id),
+              )
             ) {
               setSelectedCompanyKey(null)
             }
@@ -689,19 +781,104 @@ export function UsageCodePage() {
         />
       ) : null}
 
-      {columnDialogOpen ? (
+      {selectedTarget &&
+      headerTargetId === selectedTarget.id &&
+      partnerSettings.settings.isSuccess ? (
         <UsageCodeColumnDialog
-          columns={columnsQuery.data ?? []}
-          saving={saveColumnsMutation.isPending}
-          saveError={
-            saveColumnsMutation.isError
-              ? saveColumnsMutation.error instanceof Error
-                ? saveColumnsMutation.error.message
-                : '헤더를 저장하지 못했습니다.'
-              : null
+          key={`columns-${brand.id}-${selectedTarget.id}`}
+          partnerLabel={
+            selectedCompany?.company.groupName.trim() ||
+            outboundPartnerDisplayName(selectedTarget)
           }
-          onClose={() => setColumnDialogOpen(false)}
-          onSave={(columns) => saveColumnsMutation.mutate(columns)}
+          scopeOptions={selectedUnits.map((unit) => ({
+            id: unit.id,
+            label: outboundPartnerDisplayName(unit),
+          }))}
+          scopeId={selectedTarget.id}
+          onChangeScope={(targetId) => {
+            if (selectedCompany) {
+              setSettingsScope({ companyKey: selectedCompany.key, targetId })
+              setBulkOpen(false)
+              setHeaderTargetId(targetId)
+            }
+          }}
+          columns={usageColumns}
+          previewRows={previewRows}
+          styleNames={styleNames}
+          valueMap={partnerSettings.valueMap}
+          readOnly={
+            !partnerSettings.settings.data.ready ||
+            !partnerSettings.settings.data.access.canEdit
+          }
+          saving={partnerSettings.columnsMutation.isPending}
+          onClose={() => setHeaderTargetId(null)}
+          onSave={async (columns) => {
+            const target = selectedTarget.id
+            await partnerSettings.columnsMutation.mutateAsync({
+              target,
+              columns,
+              previous: usageColumns,
+            })
+            setHeaderTargetId((current) =>
+              current === target ? null : current,
+            )
+          }}
+        />
+      ) : null}
+      {selectedTarget &&
+      editingCode &&
+      partnerSettings.settings.data?.access.canEdit &&
+      partnerSettings.values.isSuccess ? (
+        <UsageCodeValuesDialog
+          key={`values-${brand.id}-${selectedTarget.id}-${editingCode.id}`}
+          partnerLabel={
+            selectedCompany?.company.groupName.trim() ||
+            outboundPartnerDisplayName(selectedTarget)
+          }
+          code={editingCode}
+          columns={usageColumns}
+          values={partnerSettings.valueMap.get(editingCode.id) ?? {}}
+          saving={partnerSettings.valuesMutation.isPending}
+          onClose={() => setValueEditor(null)}
+          onSave={async (values) => {
+            const target = selectedTarget.id,
+              codeId = editingCode.id
+            await partnerSettings.valuesMutation.mutateAsync({
+              target,
+              codeId,
+              values,
+            })
+            setValueEditor((current) =>
+              current?.target === target && current.codeId === codeId
+                ? null
+                : current,
+            )
+          }}
+        />
+      ) : null}
+      {selectedTarget &&
+      managerTargetId === selectedTarget.id &&
+      partnerSettings.settings.data?.access.canManage ? (
+        <UsageCodeManagersDialog
+          key={`managers-${brand.id}-${selectedTarget.id}`}
+          brandId={brand.id}
+          partnerLabel={
+            selectedCompany?.company.groupName.trim() ||
+            outboundPartnerDisplayName(selectedTarget)
+          }
+          initialIds={partnerSettings.settings.data.access.editorIds}
+          saving={partnerSettings.editorsMutation.isPending}
+          onClose={() => setManagerTargetId(null)}
+          onSave={async (profileIds) => {
+            const target = selectedTarget.id
+            await partnerSettings.editorsMutation.mutateAsync({
+              target,
+              profileIds,
+            })
+            setManagerTargetId((current) =>
+              current === target ? null : current,
+            )
+          }}
         />
       ) : null}
 
@@ -711,7 +888,10 @@ export function UsageCodePage() {
           styleNames={styleNames}
           partners={dialogPartners}
           folders={folders}
-          assignments={assignmentsByCode.get(dialogCode.id) ?? emptyList<CodeUsageAssignment>()}
+          assignments={
+            assignmentsByCode.get(dialogCode.id) ??
+            emptyList<CodeUsageAssignment>()
+          }
           saving={saveMutation.isPending}
           error={saveError}
           onClose={() => setDialogCodeId(null)}
