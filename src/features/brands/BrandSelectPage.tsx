@@ -48,7 +48,7 @@ export function BrandSelectPage() {
           <CardHeader>
             <CardTitle>브랜드 관리</CardTitle>
             <CardDescription>
-              브랜드 관리는 대표이사와 개발자만 볼 수 있습니다.
+              브랜드 관리 권한이 지정된 담당자만 볼 수 있습니다.
             </CardDescription>
           </CardHeader>
         </Card>

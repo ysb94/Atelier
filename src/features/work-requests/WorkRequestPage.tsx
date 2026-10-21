@@ -2702,7 +2702,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     })
     setFlashMessage(
       needsLeadCompletionReview(request)
-        ? '완료를 요청했습니다. 팀장 확인을 기다립니다.'
+        ? '완료를 요청했습니다. 업무 관리 담당자 확인을 기다립니다.'
         : '완료를 요청했습니다. 요청자 확인을 기다립니다.',
     )
   }
@@ -2885,7 +2885,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
       return startWorkTime(next, LOCAL_SELF_ID, requestId, now)
     })
     setWorkClock(now)
-    setFlashMessage('지금 하는 업무로 장착했습니다. 팀장 화면에 바로 보입니다.')
+    setFlashMessage('지금 하는 업무로 장착했습니다. 업무 관리 담당자 화면에 바로 보입니다.')
   }
 
   function unmountCurrentWork() {
@@ -3296,9 +3296,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             <>
               <Badge variant={canManage ? 'default' : 'muted'}>
                 {canManage
-                  ? `관리자 화면 · ${profile?.position || '관리자'}`
+                  ? '업무 관리 담당자 화면'
                   : isDestinationMember
-                    ? `사원 화면 · ${profile?.position || '사원'}`
+                    ? '배정받은 직원 화면'
                     : `${currentDepartment} 요청자 화면`}
               </Badge>
               {isDestinationMember ? null : (
@@ -3313,17 +3313,17 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
         <div className="mb-5 rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm">
           <span className="font-medium">
-            현재 {currentDepartment} · {profile?.position || '직급 미설정'} 기준으로{' '}
+            현재 {currentDepartment} 소속과 지정된 권한을 기준으로{' '}
             {canManage
-              ? `${config.teamName} 관리자용 접수·배정 화면`
+              ? `${config.teamName} 업무 관리 담당자의 접수·배정 화면`
               : isDestinationMember
-                ? `${config.teamName} 사원용 개인 업무 화면`
+                ? `${config.teamName} 배정 업무를 확인하는 개인 업무 화면`
                 : `${config.teamName}으로 요청하는 화면`}
             을 표시하고 있습니다.
           </span>
           <span className="ml-2 text-muted-foreground">
-            My home에서 직급을 바꾸면 화면이 전환됩니다. 팀장·이사만 관리자
-            화면이고, 사원·대리·과장은 사원 화면입니다. 다른 부서에 요청하려면
+            접수·배정 화면은 직책·직급이 아니라 지정된 업무 관리 권한에 따라 표시됩니다.
+            배정받은 직원은 자신의 업무를 확인합니다. 다른 부서에 요청하려면
             그 부서의 작업 요청으로 이동하세요.
           </span>
         </div>
@@ -3480,7 +3480,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                       </Badge>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      사원이 완료를 요청한 업무입니다. 수락하면 요청자가
+                      배정받은 직원이 완료를 요청한 업무입니다. 수락하면 요청자가
                       결과를 확인합니다.
                     </p>
                   </div>
@@ -3632,7 +3632,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    완료를 요청한 뒤 팀장 또는 요청자 확인을 기다리는 업무입니다.
+                    완료를 요청한 뒤 업무 관리 담당자 또는 요청자 확인을 기다리는 업무입니다.
                   </p>
                   {myCompletionPendingTasks.length > 0 ? (
                     <div className="space-y-3">
@@ -3651,7 +3651,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
           ) : (
             renderEmptyState(
               '현재 배정된 업무가 없습니다.',
-              '관리자가 주 담당자 또는 협업자로 배정한 업무만 여기에 표시됩니다.',
+              '업무 관리 담당자가 주 담당자 또는 협업자로 배정한 업무만 여기에 표시됩니다.',
             )
           )
         ) : null}
@@ -4142,7 +4142,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 <CardHeader>
                   <CardTitle>미배정</CardTitle>
                   <CardDescription>
-                    팀 업무 일정표에서 사원 행으로 끌어다 놓으면 담당자와 작업
+                    팀 업무 일정표에서 구성원 행으로 끌어다 놓으면 담당자와 작업
                     예정 기간이 정해집니다.
                   </CardDescription>
                 </CardHeader>
@@ -4166,8 +4166,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     {isCompletionPending(selectedRequest.status) ? (
                       <p className="text-sm text-muted-foreground">
                         {selectedRequest.status === 'completionReview'
-                          ? '완료를 요청했습니다. 팀장 확인을 기다립니다.'
-                          : '팀장 확인이 끝났습니다. 요청자 확인을 기다립니다.'}
+                          ? '완료를 요청했습니다. 업무 관리 담당자 확인을 기다립니다.'
+                          : '업무 관리 담당자 확인이 끝났습니다. 요청자 확인을 기다립니다.'}
                       </p>
                     ) : (
                       <>
@@ -4198,8 +4198,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                           </Button>
                         ) : null}
                         <p className="text-xs text-muted-foreground">
-                          완료 요청 후 팀장이 수락하고, 요청자가 결과를
-                          확인하면 완료됩니다. 팀장이 직접 맡은 일은 바로
+                          완료 요청 후 업무 관리 담당자가 수락하고, 요청자가 결과를
+                          확인하면 완료됩니다. 업무 관리 담당자가 직접 맡은 일은 바로
                           요청자 확인으로 갑니다.
                         </p>
                       </>
@@ -4215,7 +4215,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     부서 검토
                   </CardTitle>
                   <CardDescription>
-                    {selectedConfig.teamName} 관리자가 대화로 검토한 뒤
+                    {selectedConfig.teamName} 업무 관리 담당자가 대화로 검토한 뒤
                     수락하고 일정표에서 배정합니다.
                   </CardDescription>
                 </CardHeader>

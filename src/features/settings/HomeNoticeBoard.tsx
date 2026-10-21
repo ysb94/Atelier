@@ -125,7 +125,7 @@ export function HomeNoticeBoard({
         >
           <div>
             <h2 className="text-sm font-semibold">{editingId ? '부서 공지 수정' : '부서 공지 등록'}</h2>
-            <p className="mt-1 text-xs text-muted-foreground">{departmentName} 팀장만 이 부서 공지를 등록합니다.</p>
+            <p className="mt-1 text-xs text-muted-foreground">{departmentName} 공지 등록 권한을 지정받은 담당자가 이 부서 공지를 등록합니다.</p>
           </div>
           <label className="block text-xs text-muted-foreground">
             제목

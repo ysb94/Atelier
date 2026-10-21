@@ -68,7 +68,7 @@ export async function verifyPagePreviewRoles(page,origin){
  await page.goto(origin+'/brands')
  await choose('전체 관리');await page.getByRole('button',{name:'새 브랜드',exact:true}).waitFor()
  await choose('담당자');assert.equal(await page.getByRole('button',{name:'새 브랜드',exact:true}).count(),0)
- await choose('일반');await page.getByText('브랜드 관리는 대표이사와 개발자만 볼 수 있습니다.',{exact:true}).waitFor()
+ await choose('일반');await page.getByText('브랜드 관리 권한이 지정된 담당자만 볼 수 있습니다.',{exact:true}).waitFor()
  await page.goto(origin+'/settings/ai?reader')
  assert.equal(await roles().getByRole('button').count(),2)
  await choose('담당자');await page.getByRole('button',{name:'이 모델 사용',exact:true}).waitFor()

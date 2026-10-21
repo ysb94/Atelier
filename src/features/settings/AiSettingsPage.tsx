@@ -205,7 +205,7 @@ export function AiSettingsPage() {
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
-                모델 변경은 브랜드 팀장 또는 관리자만 할 수 있습니다.
+                모델 변경은 AI 설정 권한이 지정된 담당자만 할 수 있습니다.
               </p>
             )}
             {providerError ? (
@@ -441,7 +441,7 @@ export function AiSettingsPage() {
             ) : null}
             {saveMutation.error instanceof AiSettingsStoreError ? (
               <p className="text-xs text-muted-foreground">
-                권한 오류면 브랜드 팀장 또는 관리자 계정으로 다시 시도하세요.
+                권한 오류가 발생하면 AI 설정 권한이 지정된 담당자에게 확인을 요청하세요.
               </p>
             ) : null}
           </CardContent>

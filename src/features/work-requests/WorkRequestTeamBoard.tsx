@@ -247,7 +247,7 @@ export function WorkRequestTeamBoard({
                 <Badge variant="warning">{unassigned.length}건</Badge>
               </div>
               <p className="mt-1 text-xs text-muted-foreground">
-                카드를 누르면 부서 구성원이 나옵니다. 팀장이 직접 하거나,
+                카드를 누르면 부서 구성원이 나옵니다. 업무 관리 담당자가 직접 하거나,
                 난이도에 맞는 사람에게 맡기세요.
               </p>
             </div>
@@ -296,7 +296,7 @@ export function WorkRequestTeamBoard({
           <div>
             <div className="flex items-center gap-2">
               <Users className="size-4 text-muted-foreground" />
-              <h3 className="font-semibold">사원별 업무 현황</h3>
+              <h3 className="font-semibold">구성원별 업무 현황</h3>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
               {boardView === 'timeline'

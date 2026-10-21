@@ -68,7 +68,7 @@ export function MamamIdeaInboxPage() {
   })
 
   if (!allowed) return preview?.active
-    ? <p role="status" className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">접근 제한 화면 · 아이디어 공모전 접수함은 대표이사와 개발자만 볼 수 있습니다.</p>
+    ? <p role="status" className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground">접근 제한 화면 · 아이디어 공모전 접수함 조회 권한이 지정된 담당자만 볼 수 있습니다.</p>
     : <Navigate to="/" replace />
 
   return (
