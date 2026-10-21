@@ -9,7 +9,7 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
   const published=series.phase!=='preparing',confirmed=published && Boolean(round?.confirmed ?? round?.startsAt)
   const participant=series.host.id===actorId || series.members.some(person=>person.id===actorId)
   const myStatus=round?.responses?.find(response=>response.profileId===actorId)?.status ?? 'pending'
-  return <div className="space-y-2">
+  return <div className={compact?'flex flex-wrap items-center gap-2':'space-y-2'}>
     <div className="flex flex-wrap items-center gap-1">
       {[series.host,...series.members].map(person=>{
         const isHost=person.id===series.host.id
@@ -24,7 +24,7 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
         </button>
       })}
     </div>
-    {!compact&&published&&participant ? <Button size="sm" variant="outline" disabled={simulating} onClick={onGroup}>전체 멤버와 대화</Button> : null}
+    {published&&participant ? <Button size="sm" variant="outline" disabled={simulating} onClick={onGroup}>전체 멤버와 대화</Button> : null}
     {!compact&&confirmed&&series.members.some(person=>person.id===actorId)&&onRespond ? <div className="rounded-lg border border-border p-3">
       <p className="mb-2 text-xs">확정된 일정에 참석할 수 있나요? · {myStatus==='available'?'참석 가능':myStatus==='unavailable'?'참석 불가':'응답 대기'}</p>
       <div className="flex gap-2"><Button size="sm" variant={myStatus==='available'?'default':'outline'} onClick={()=>onRespond('available')}>참석 가능</Button><Button size="sm" variant={myStatus==='unavailable'?'default':'outline'} onClick={()=>onRespond('unavailable')}>참석 불가</Button></div>
