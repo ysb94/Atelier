@@ -30,7 +30,7 @@ try {
   create table public.brand_members(profile_id uuid,brand_id uuid,is_lead boolean);
   create table public.code_usage_targets(id uuid primary key,brand_id uuid,name text);
   create table public.usage_partner_editors(profile_id uuid,brand_id uuid,usage_target_id uuid);
-  create table public.chat_rooms(id uuid primary key,company_id uuid,title text);
+  create table public.chat_rooms(id uuid primary key,company_id uuid,name text);
   create table public.department_request_approvers(company_id uuid,department_id uuid,request_type text,approver_id uuid,substitute_id uuid,updated_by uuid,updated_at timestamptz,primary key(company_id,department_id,request_type));
   create table public.company_notices(id uuid primary key default gen_random_uuid(),company_id uuid,slot text,department_id uuid,title text,body text,starts_on date,ends_on date,published boolean,updated_by uuid,updated_at timestamptz default now());
   create table public.attendance_start_settings(company_id uuid,month date,department_id uuid,employee_id uuid,source text,start_time time,grace_minutes integer,updated_by uuid,updated_at timestamptz default now());
@@ -53,6 +53,7 @@ try {
   ` .replace('create policy approver_write', () => "create function app.can_edit_org_assignment() returns boolean language sql as $$ select false $$; create policy approver_write"))
   const before = await db.query('select * from public.department_request_approvers order by department_id,request_type')
   const migration = await fs.readFile('supabase/migrations/20261021033319_assigned_permissions.sql','utf8')
+  await db.exec("set atelier.permission_rollout_phase='local-rehearsal';")
   await db.exec(migration)
   await db.exec(`alter table public.profiles enable row level security;
     grant update on public.profiles to authenticated;

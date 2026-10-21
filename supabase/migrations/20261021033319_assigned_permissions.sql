@@ -1,4 +1,12 @@
 -- 기존 승인자 테이블과 업무 데이터를 유지한다. 운영 적용 전 별도 검토가 필요하다.
+-- BEGIN LOCAL REHEARSAL GUARD
+-- 운영에서는 이 통합 파일을 직접 실행하지 않는다. 점검 도구의 단계별 패키지만 검토한다.
+do $guard$ begin
+ if current_setting('atelier.permission_rollout_phase',true) is distinct from 'local-rehearsal' then
+  raise exception '권한 전환은 아직 승인되지 않았습니다. 개발용 단계별 적용·복구 패키지를 먼저 검토하세요.';
+ end if;
+end $guard$;
+-- END LOCAL REHEARSAL GUARD
 create table app.permission_catalog (code text primary key, scope_kinds text[] not null);
 create table public.permission_grants (
   id uuid primary key default gen_random_uuid(),
@@ -73,7 +81,7 @@ begin
  union all select 'department',d.id,d.name from public.departments d where d.company_id=company and d.is_active and full_access
  union all select 'brand',b.id,b.name from public.brands b where b.company_id=company and full_access
  union all select 'partner',t.id,t.name from public.code_usage_targets t join public.brands b on b.id=t.brand_id where b.company_id=company and (full_access or app.permission_allowed('partner.manage','brand',b.id))
- union all select 'chat_room',r.id,coalesce(r.title,'대화방') from public.chat_rooms r where r.company_id=company and full_access and app.is_chat_room_member(r.id)
+ union all select 'chat_room',r.id,coalesce(r.name,'대화방') from public.chat_rooms r where r.company_id=company and full_access and app.is_chat_room_member(r.id)
  ) s),
  'grants',(select coalesce(jsonb_agg(jsonb_build_object('id',g.id,'profileId',g.profile_id,'permission',g.permission,'scopeKind',g.scope_kind,'scopeId',g.scope_id,'updatedAt',g.updated_at)),'[]') from public.permission_grants g where g.company_id=company and (full_access or (g.permission='partner.edit' and g.scope_kind='partner' and exists(select 1 from public.code_usage_targets t join public.brands b on b.id=t.brand_id where t.id=g.scope_id and b.company_id=company and app.permission_allowed('partner.manage','brand',b.id))))),
  'events',(select coalesce(jsonb_agg(events order by events.id::bigint desc),'[]') from (select e.id::text as id,coalesce(a.display_name,'직원') as actor,coalesce(p.display_name,'직원') as person,e.permission,e.scope_kind as "scopeKind",e.scope_id as "scopeId",e.enabled,e.created_at as "createdAt" from public.permission_grant_events e join public.profiles a on a.id=e.actor_id join public.profiles p on p.id=e.profile_id where e.company_id=company and (full_access or (e.permission='partner.edit' and e.scope_kind='partner' and exists(select 1 from public.code_usage_targets t join public.brands b on b.id=t.brand_id where t.id=e.scope_id and b.company_id=company and app.permission_allowed('partner.manage','brand',b.id)))) order by e.id desc limit 30) events),
@@ -160,7 +168,7 @@ select p.company_id,p.id,'basic.use','company',p.company_id from public.profiles
 insert into public.permission_grants(company_id,profile_id,permission,scope_kind,scope_id)
 select p.company_id,p.id,c.code,'company',p.company_id from public.profiles p cross join app.permission_catalog c
 where p.status='active' and p.company_id is not null and p.is_admin
-and c.code in ('permissions.manage','system.manage','personnel.manage','brand.manage','brand.edit','ai.manage','partner.manage','partner.edit','data.planning','data.design','data.md','data.logistics','data.data') on conflict do nothing;
+and c.code in ('permissions.manage','system.manage','personnel.manage','brand.manage','brand.edit','ai.manage','partner.manage','partner.edit','meeting.manage','data.planning','data.design','data.md','data.logistics','data.data') on conflict do nothing;
 insert into public.permission_grants(company_id,profile_id,permission,scope_kind,scope_id)
 select p.company_id,p.id,'data.'||pc.capability,'company',p.company_id from public.profiles p join public.profile_capabilities pc on pc.profile_id=p.id
 where p.status='active' and p.company_id is not null on conflict do nothing;
