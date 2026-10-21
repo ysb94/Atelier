@@ -1,11 +1,14 @@
 import { getSupabase as general } from './client'
 import { getSupabase as usage } from './usage-headers-client'
 import { permissionFixtureRpc } from './permission-settings-client'
+import { meetingFixtureRpc,meetingFixtureRooms,meetingFixtureStorage } from './meetings-client'
 export const isSupabaseConfigured = () => true
 export function getSupabase() {
   const base = general()
   if (location.pathname === '/usage-codes') return { ...usage(), channel: base.channel, removeChannel: base.removeChannel }
-  return { ...base, rpc(name: string, args?: Record<string, unknown>) {
+  return { ...base,storage:{...(base as any).storage,from:(name:string)=>name==='company-meetings'?meetingFixtureStorage.from():(base as any).storage.from(name)},from:(name:string)=>name==='meeting_rooms'?meetingFixtureRooms():base.from(name),rpc(name: string, args?: Record<string, unknown>) {
+    const meetings=meetingFixtureRpc(name,args)
+    if(meetings)return meetings
     const permissions = permissionFixtureRpc(name,args)
     if (permissions) return permissions
     if (name === 'mark_chat_room_read') return Promise.resolve({ data: null, error: null })

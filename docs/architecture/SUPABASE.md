@@ -1866,6 +1866,30 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
 - 사내 채팅 파일만 `companies/{company_id}/chat/{room_id}/{attachment_id}/` 다.
   브랜드 폴더를 쓰지 않는다. 자세한 한도와 권한은 「사내 채팅」에 둔다.
 
+## 회의 저장과 공유
+
+- `20261021064611_company_meetings.sql` 적용. `meeting_rooms`, `meeting_series`,
+  `meeting_members`, `meeting_rounds`, `meeting_files`만 추가했다. 기존 사용자·로그인·승인자·
+  권한 함수와 정책은 변경하지 않았다. 회사 공통 데이터이므로 `company_id`로 격리한다.
+- 주최자·참석자와 기존 회의 운영자만 회의 내용·결과·자료를 읽고 저장한다. 기존 화면과
+  동일하게 운영자는 `app.is_admin()`이며 미적용된 새 지정 권한을 활성화하지 않는다.
+  회의 삭제는 주최자/운영자, 예약 취소는 주최자, 개별 파일 삭제는 업로더만 가능하다.
+- 비참석자에게는 같은 회사 회의실의 예약 시간만 공개한다. 제목·참석자·회의록은 제외한다.
+  `list_meeting_directory()`도 같은 회사의 재직자 이름·부서·직책만 돌려준다.
+- 저장 API는 회차·참석자를 원자적으로 저장하며 revision으로 동시 수정 덮어쓰기를 막는다.
+  회사별 예약 잠금으로 같은 회의실의 중복 시간 예약을 차단한다. 한국 시간으로 저장·표시한다.
+  `meeting_booking_limits` 추가 제약으로 평일 09~19시·30분 단위를 테이블에서도 검사한다.
+- 비공개 `company-meetings` 버킷, 파일당 50MB. 경로는
+  `companies/{company_id}/meetings/{series_id}/{round_id}/{file_id}/original`이다.
+  한글 원본 이름은 DB에 보관하고, 업로드 완료·실제 용량을 검증한 파일만 공유한다.
+  받기는 로그인 권한을 매번 검사한다. 삭제 메타데이터를 먼저 숨긴 뒤 Storage API로 정리한다.
+  정리에 실패하면 오류를 표시하고 다음 실제 회의 탭 진입 때 재시도한다. DB 행은 삭제 표식을 남긴다.
+  `20261021065519_meeting_file_cleanup.sql`은 Storage 삭제에 필요한 SELECT를 기존 읽기 권한자 중
+  정리 가능한 사람에게만 허용한다. 객체가 실제로 사라진 뒤에만 정리 완료를 기록한다.
+- 활성 회의 탭은 15초마다 공유 데이터를 갱신한다. 화면 테스트는 별도 메모리에서만 변경한다.
+  검증: `npm run verify:meetings-db`, `npm run verify:meetings-browser`.
+  `scripts/verify-meetings-live.mjs`는 명시적으로 실행하는 실제 API 점검이며 생성한 검증 UUID만 정리한다.
+
 ## 사내 채팅
 
 채팅은 E&J 회사 소유다. `chat_rooms`, `chat_messages`, `chat_attachments`에는

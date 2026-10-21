@@ -21,10 +21,10 @@ import { usePagePreview } from '@/lib/company/page-preview-context'
 import { previewMeetingActor } from '@/lib/company/relationship-preview'
 import {
   listDepartments,
-  listManageableProfiles,
   type Department,
-  type Profile,
 } from '@/lib/supabase/profiles'
+import { listMeetingDirectory, uploadMeetingFile, removeMeetingFile, downloadMeetingFile } from '@/lib/supabase/meetings'
+import { useCompanyMeetings } from './useCompanyMeetings'
 import { hasPermission } from '@/lib/company/permissions'
 import { cn, emptyList } from '@/lib/utils'
 import {
@@ -71,7 +71,6 @@ import {
   revokeMeetingSeriesFiles,
   profileToMeetingPerson,
   roomDayKey,
-  seriesToDrafts,
   shiftMeetingFromKey,
   timeFromDateTime,
   toDateKey,
@@ -95,7 +94,7 @@ import {
   type AttendanceEntry,
 } from './meeting-slots'
 
-const EMPTY_PROFILES = emptyList<Profile>()
+const EMPTY_PEOPLE = emptyList<MeetingPerson>()
 const EMPTY_DEPARTMENTS = emptyList<Department>()
 const EMPTY_ATTENDANCE = emptyList<AttendanceEntry>()
 const EMPTY_DRAFTS = emptyList<MeetingDraft>()
@@ -142,90 +141,7 @@ function newMeetingId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID()
   }
-  return `meeting-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-}
-
-const DEMO_MEMBERS: MeetingPerson[] = [
-  { id: 'demo-member-1', name: '김민지', position: '대리' },
-  { id: 'demo-member-2', name: '이준호', position: '사원' },
-]
-
-function createDemoMeetingSeries(
-  host: MeetingPerson,
-  todayKey: string,
-): MeetingSeries[] {
-  const days = listMeetingDays(todayKey, 10, todayKey)
-  const first = days[0]?.key ?? todayKey
-  const second = days[2]?.key ?? first
-  const third = days[4]?.key ?? second
-  return [
-    {
-      id: 'demo-series-ops',
-      title: '주간 운영 점검',
-      host,
-      members: DEMO_MEMBERS,
-      status: 'in_progress',
-      durationMinutes: 90,
-      rounds: [
-        {
-          id: 'demo-r1',
-          round: 1,
-          startsAt: combineDateTime(first, '16:30'),
-          roomId: 'room-1',
-          quarterId: quarterFromTime('16:30'),
-          prepMaterials: [],
-          content: '재고 마감 요일과 샘플 일정을 다시 맞출지 논의했다.',
-          result: '재고 기준을 금요일로 맞춘다. 샘플은 기획이 목록을 올린다.',
-        },
-        {
-          id: 'demo-r2',
-          round: 2,
-          startsAt: combineDateTime(second, '10:00'),
-          roomId: 'room-2',
-          quarterId: quarterFromTime('10:00'),
-          prepMaterials: [],
-          content: '샘플 목록을 보고 촬영 일정을 잡았다.',
-          result: '샘플 촬영은 다음 주 화요일. 담당은 디자인.',
-        },
-        {
-          id: 'demo-r3',
-          round: 3,
-          startsAt: combineDateTime(third, '14:30'),
-          roomId: 'room-1',
-          quarterId: quarterFromTime('14:30'),
-          ...emptyRoundNotes(),
-        },
-      ],
-    },
-    {
-      id: 'demo-series-done',
-      title: '시즌 킥오프',
-      host,
-      members: DEMO_MEMBERS.slice(0, 1),
-      status: 'done',
-      durationMinutes: 60,
-      rounds: [
-        {
-          id: 'demo-d1',
-          round: 1,
-          startsAt: combineDateTime(first, '09:00'),
-          roomId: 'room-2',
-          quarterId: quarterFromTime('09:00'),
-          prepMaterials: [],
-          content: '시즌 콘셉트와 일정 초안을 공유했다.',
-          result: '콘셉트는 A안. 런칭 주는 10월 둘째 주.',
-        },
-        {
-          id: 'demo-d2',
-          round: 2,
-          startsAt: combineDateTime(second, '13:00'),
-          roomId: 'room-1',
-          quarterId: quarterFromTime('13:00'),
-          ...emptyRoundNotes(),
-        },
-      ],
-    },
-  ]
+  throw new Error('회의를 저장하려면 보안 연결을 지원하는 브라우저가 필요합니다.')
 }
 
 export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: boolean } = {}) {
@@ -236,7 +152,6 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   const topicRef = useRef<HTMLInputElement>(null)
   const durationRef = useRef<HTMLSelectElement>(null)
   const composeSectionRef = useRef<HTMLDivElement>(null)
-  const [series, setSeries] = useState<MeetingSeries[]>([])
   const [boardTab, setBoardTab] = useState<MeetingSeriesStatus>('in_progress')
   const [schedulingSeriesId, setSchedulingSeriesId] = useState<string | null>(
     null,
@@ -259,7 +174,11 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   const [composeOpen, setComposeOpen] = useState(false)
   const [deleteSeriesId, setDeleteSeriesId] = useState<string | null>(null)
   const [selectedRoomId, setSelectedRoomId] = useState(MEETING_ROOMS[0].id)
-  const demoSeeded = useRef(false)
+  const todayKey = toDateKey(new Date())
+  const fromKey = rangeFromKey ?? todayKey
+  const days = useMemo(() => listMeetingDays(fromKey, visibleDays, todayKey),[fromKey,todayKey,visibleDays])
+  const meetings=useCompanyMeetings(days[0]?.key ?? todayKey,days[days.length-1]?.key ?? todayKey)
+  const {series,setSeries,rooms,saving,simulating}=meetings
 
   const host = useMemo<MeetingPerson>(() => {
     if (!profile) return LOCAL_HOST
@@ -268,14 +187,14 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   const isAdmin = hasPermission(profile, 'meeting.manage')
 
   const membersQuery = useQuery({
-    queryKey: ['profiles', 'manageable'],
-    queryFn: listManageableProfiles,
+    queryKey: ['meeting-directory', preview?.realProfile?.companyId ?? profile?.companyId],
+    queryFn: listMeetingDirectory,
   })
   const departmentsQuery = useQuery({
     queryKey: ['departments', 'active'],
     queryFn: () => listDepartments(true),
   })
-  const profiles = membersQuery.data ?? EMPTY_PROFILES
+  const people = membersQuery.data ?? EMPTY_PEOPLE
   const departments = departmentsQuery.data ?? EMPTY_DEPARTMENTS
 
   useEffect(() => {
@@ -286,12 +205,9 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   }, [membersQuery.error, membersQuery.isError])
 
   const directory = useMemo(() => {
-    const people = profiles
-      .filter((row) => row.status === 'active')
-      .map(profileToMeetingPerson)
     if (people.some((person) => person.id === host.id)) return people
     return [host, ...people]
-  }, [host, profiles])
+  }, [host, people])
 
   const selectedMemberIds = useMemo(
     () => members.map((person) => person.id),
@@ -302,21 +218,8 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     [departments, directory, host.id],
   )
 
-  const todayKey = toDateKey(new Date())
-
-  useEffect(() => {
-    if (demoSeeded.current) return
-    demoSeeded.current = true
-    setSeries(createDemoMeetingSeries(host, todayKey))
-  }, [host, todayKey])
-
-  const fromKey = rangeFromKey ?? todayKey
-  const days = useMemo(
-    () => listMeetingDays(fromKey, visibleDays, todayKey),
-    [fromKey, todayKey, visibleDays],
-  )
   const weeks = useMemo(() => chunkMeetingDays(days), [days])
-  const items = useMemo(() => seriesToDrafts(series), [series])
+  const items = meetings.bookings
   const occupants = useMemo(() => groupMeetingsByRoomDay(items), [items])
   const pickerDay = useMemo(
     () => (picker ? days.find((day) => day.key === picker.dateKey) : undefined),
@@ -428,7 +331,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     }, 0)
   }
 
-  function bookSlot(nextRoomId: string, dateKey: string, startClock: string) {
+  async function bookSlot(nextRoomId: string, dateKey: string, startClock: string) {
     if (!composeReady) return
     const startsAt = combineDateTime(dateKey, startClock)
     setVisibleDays((current) =>
@@ -440,11 +343,13 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
       startsAt,
       roomId: nextRoomId,
       quarterId: quarterFromTime(startClock),
+      durationMinutes: slotDurationMinutes,
       ...emptyRoundNotes(),
     }
+    let saved: boolean
     if (schedulingSeries) {
       const pending = findPendingRound(schedulingSeries)
-      setSeries((prev) =>
+      saved=await setSeries((prev) =>
         prev.map((item) => {
           if (item.id !== schedulingSeries.id) return item
           if (!pending) {
@@ -466,6 +371,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                     startsAt: round.startsAt,
                     roomId: round.roomId,
                     quarterId: round.quarterId,
+                    durationMinutes: round.durationMinutes,
                   }
                 : row,
             ),
@@ -473,7 +379,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
         }),
       )
     } else {
-      setSeries((prev) => [
+      saved=await setSeries((prev) => [
         {
           id: newMeetingId(),
           title: composeTitle,
@@ -486,7 +392,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
         ...prev,
       ])
     }
-    resetCompose()
+    if(saved) resetCompose()
   }
 
   function removeRound(roundId: string) {
@@ -518,49 +424,55 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     }, 0)
   }
 
-  function planNextRound(item: MeetingSeries): string {
+  async function planNextRound(item: MeetingSeries): Promise<boolean> {
     const existing = findPendingRound(item)
-    if (existing) return existing.id
+    if (existing) return true
     const nextId = newMeetingId()
-    setSeries((prev) =>
+    return setSeries((prev) =>
       prev.map((row) =>
         row.id === item.id ? appendPendingRound(row, nextId) : row,
       ),
     )
-    return nextId
   }
 
-  function markDone(seriesId: string) {
-    setSeries((prev) =>
+  async function markDone(seriesId: string) {
+    const saved=await setSeries((prev) =>
       prev.map((item) =>
         item.id === seriesId ? { ...item, status: 'done' } : item,
       ),
     )
-    if (schedulingSeriesId === seriesId) resetCompose()
-    setBoardTab('done')
+    if(saved){if (schedulingSeriesId === seriesId) resetCompose();setBoardTab('done')}
+    return saved
   }
 
-  function markInProgress(seriesId: string) {
-    setSeries((prev) =>
+  async function markInProgress(seriesId: string) {
+    const saved=await setSeries((prev) =>
       prev.map((item) =>
         item.id === seriesId ? { ...item, status: 'in_progress' } : item,
       ),
     )
-    setBoardTab('in_progress')
+    if(saved) setBoardTab('in_progress')
+    return saved
   }
 
-  function deleteSeriesForever(item: MeetingSeries) {
+  async function deleteSeriesForever(item: MeetingSeries) {
     if (!canDeleteMeetingSeries(item, host, isAdmin)) return
-    revokeMeetingSeriesFiles(item)
-    setSeries((prev) => prev.filter((row) => row.id !== item.id))
+    const saved=await setSeries((prev) => prev.filter((row) => row.id !== item.id))
+    if(!saved) return
+    if(simulating) revokeMeetingSeriesFiles(item)
     if (schedulingSeriesId === item.id) resetCompose()
     if (detail?.seriesId === item.id) setDetail(null)
     setDeleteSeriesId(null)
   }
 
+  if(meetings.loading) return <p role="status" className="p-4 text-sm text-muted-foreground">회의를 불러오는 중입니다.</p>
+  if(!rooms.length) return <div role="alert" className="space-y-2 p-4 text-sm"><p>{meetings.error ?? '등록된 회의실이 없습니다.'}</p><Button onClick={()=>void meetings.refresh()}>다시 불러오기</Button></div>
   return (
-    <div className="space-y-4">
+    <fieldset disabled={saving} className="min-w-0 space-y-4" aria-busy={saving}>
       {showHeading ? <PageHeader title="회의" /> : null}
+      {simulating ? <p role="status" className="text-xs text-amber-800">화면 테스트 중입니다. 변경 내용은 실제 회의에 저장되지 않습니다.</p> : <p role="status" className="text-xs text-muted-foreground">{saving?'회의를 저장하는 중입니다.':'공유 회의 · 저장한 내용은 참석자에게 공유됩니다.'}</p>}
+      {meetings.error ? <p role="alert" className="rounded-lg border border-danger/30 p-3 text-sm text-danger">{meetings.error}</p> : null}
+      {membersQuery.error ? <p role="alert" className="text-sm text-danger">참석자 목록을 불러오지 못했습니다. {membersQuery.error.message}</p> : null}
 
       <Card>
         <CardContent className="space-y-3 p-4">
@@ -977,7 +889,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
           </div>
 
           <RoomScheduleBlock
-            rooms={MEETING_ROOMS}
+            rooms={rooms}
             roomId={selectedRoomId}
             weeks={weeks}
             occupants={occupants}
@@ -1006,10 +918,13 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
           series={detailSeries}
           round={detailRound}
           uploader={host}
+          simulating={simulating}
+          onRefresh={meetings.refresh}
+          saveError={meetings.error}
           onClose={() => setDetail(null)}
-          onSave={(notes) => {
+          onSave={async (notes,revision) => {
             const roundId = detailRound.id
-            setSeries((prev) =>
+            const saved=await setSeries((prev) =>
               prev.map((item) =>
                 item.id === detailSeries.id
                   ? {
@@ -1020,23 +935,21 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                     }
                   : item,
               ),
-            )
+            {id:detailSeries.id,revision})
+            return saved ? meetings.currentRevision(detailSeries.id) : null
           }}
-          onScheduleNext={() => {
-            planNextRound(detailSeries)
-            setDetail(null)
+          onScheduleNext={async () => {
+            if(await planNextRound(detailSeries)) setDetail(null)
           }}
           onBookTime={() => {
             scheduleNextRound(detailSeries)
             setDetail(null)
           }}
-          onMarkDone={() => {
-            markDone(detailSeries.id)
-            setDetail(null)
+          onMarkDone={async () => {
+            if(await markDone(detailSeries.id)) setDetail(null)
           }}
-          onReopen={() => {
-            markInProgress(detailSeries.id)
-            setDetail(null)
+          onReopen={async () => {
+            if(await markInProgress(detailSeries.id)) setDetail(null)
           }}
         />
       ) : null}
@@ -1064,7 +977,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
           onConfirm={() => deleteSeriesForever(deleteSeries)}
         />
       ) : null}
-    </div>
+    </fieldset>
   )
 }
 
@@ -1689,6 +1602,9 @@ function MeetingDetailDrawer({
   series,
   round,
   uploader,
+  simulating,
+  onRefresh,
+  saveError,
   onClose,
   onSave,
   onScheduleNext,
@@ -1699,22 +1615,28 @@ function MeetingDetailDrawer({
   series: MeetingSeries
   round: MeetingRound
   uploader: MeetingPerson
+  simulating: boolean
+  onRefresh: () => Promise<void>
+  saveError?: string | null
   onClose: () => void
   onSave: (notes: {
     prepMaterials: MeetingPrepFile[]
     content: string
     result: string
-  }) => void
-  onScheduleNext: () => void
+  },revision:number) => Promise<number|null>
+  onScheduleNext: () => Promise<void>
   onBookTime: () => void
-  onMarkDone: () => void
-  onReopen: () => void
+  onMarkDone: () => Promise<void>
+  onReopen: () => Promise<void>
 }) {
   const pending = isPendingRound(round)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [prepMaterials, setPrepMaterials] = useState(round.prepMaterials)
   const [content, setContent] = useState(round.content)
   const [result, setResult] = useState(round.result)
+  const [busy,setBusy]=useState(false),[operationError,setOperationError]=useState<string|null>(null)
+  const editRevision=useRef(series.revision ?? 0)
+  useEffect(()=>setPrepMaterials(round.prepMaterials),[round.prepMaterials])
   const previousRounds = useMemo(
     () =>
       [...series.rounds]
@@ -1727,45 +1649,61 @@ function MeetingDetailDrawer({
     [prepMaterials],
   )
 
-  function persistNotes(
+  async function persistNotes(
     notes?: {
       prepMaterials: MeetingPrepFile[]
       content: string
       result: string
     },
   ) {
-    onSave(notes ?? { prepMaterials, content, result })
+    const revision=await onSave(notes ?? { prepMaterials, content, result },editRevision.current)
+    if(revision===null) {setOperationError('회의를 저장하지 못했습니다. 입력 내용은 유지됩니다.');return false}
+    editRevision.current=revision
+    return true
   }
 
+  async function run(action:()=>Promise<void>) {
+    if(busy) return
+    setBusy(true);setOperationError(null)
+    try{await action()}catch(error){
+      console.warn('[meetings] 회의 상세 작업 실패',{error})
+      setOperationError(error instanceof Error?error.message:'회의 작업에 실패했습니다.')
+    }finally{setBusy(false)}
+  }
   function closeDrawer() {
-    persistNotes()
-    onClose()
+    void run(async()=>{if(await persistNotes()) onClose()})
   }
 
-  function addPrepFiles(fileList: FileList | null) {
+  async function addPrepFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return
-    const next = Array.from(fileList).map((file) => ({
-      id: newMeetingId(),
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      url: URL.createObjectURL(file),
-      uploadedBy: uploader,
-    }))
-    const updated = [...prepMaterials, ...next]
-    setPrepMaterials(updated)
-    persistNotes({ prepMaterials: updated, content, result })
+    const files=Array.from(fileList)
+    await run(async()=>{
+      const next:MeetingPrepFile[]=[]
+      try {
+        for(const file of files) next.push(simulating
+          ? {id:newMeetingId(),name:file.name,size:file.size,type:file.type,url:URL.createObjectURL(file),uploadedBy:uploader}
+          : await uploadMeetingFile(round.id,file,uploader))
+      }finally{
+        // 여러 파일 중 일부만 성공해도 성공한 자료는 재조회해 보여 준다.
+        if(!simulating) await onRefresh()
+        const updated=[...prepMaterials,...next]
+        setPrepMaterials(updated)
+        if(simulating) await persistNotes({prepMaterials:updated,content,result})
+      }
+    })
   }
 
   function removePrepFile(fileId: string) {
     const found = prepMaterials.find((file) => file.id === fileId)
     if (!found || !canRemovePrepFile(found, uploader)) return
-    if (found.url.startsWith('blob:')) {
-      URL.revokeObjectURL(found.url)
-    }
-    const updated = prepMaterials.filter((file) => file.id !== fileId)
-    setPrepMaterials(updated)
-    persistNotes({ prepMaterials: updated, content, result })
+    void run(async()=>{
+      if(!simulating) await removeMeetingFile(fileId)
+      if (found.url.startsWith('blob:')) URL.revokeObjectURL(found.url)
+      const updated=prepMaterials.filter(file=>file.id!==fileId)
+      setPrepMaterials(updated)
+      if(simulating) await persistNotes({prepMaterials:updated,content,result})
+      else await onRefresh()
+    })
   }
 
   return (
@@ -1773,6 +1711,7 @@ function MeetingDetailDrawer({
       <button
         type="button"
         aria-label="닫기"
+        disabled={busy}
         className="absolute inset-0 bg-black/40"
         onClick={closeDrawer}
       />
@@ -1780,13 +1719,16 @@ function MeetingDetailDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="meeting-detail-title"
+        aria-busy={busy}
         className="relative z-10 flex h-full w-full max-w-lg flex-col border-l border-border bg-card shadow-xl"
       >
+        <fieldset disabled={busy} className="contents">
+        {operationError || saveError ? <div className="shrink-0 space-y-2 p-3"><p role="alert" className="text-sm text-danger">{saveError ?? operationError}</p><Button variant="outline" onClick={onClose}>저장하지 않고 닫기</Button></div> : null}
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div className="min-w-0 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">
-                {formatMeetingDuration(series.durationMinutes)}
+                {formatMeetingDuration(round.durationMinutes ?? series.durationMinutes)}
               </Badge>
               <Badge variant={series.status === 'done' ? 'muted' : 'default'}>
                 {series.status === 'done'
@@ -1873,7 +1815,7 @@ function MeetingDetailDrawer({
                 multiple
                 className="sr-only"
                 onChange={(event) => {
-                  addPrepFiles(event.target.files)
+                  void addPrepFiles(event.target.files)
                   event.target.value = ''
                 }}
               />
@@ -1906,14 +1848,17 @@ function MeetingDetailDrawer({
                               {formatPrepFileSize(file.size)}
                             </p>
                           </div>
-                          <a
-                            href={file.url}
-                            download={file.name}
+                          <button
+                            type="button"
+                            onClick={()=>void run(async()=>{
+                              if(file.storagePath) await downloadMeetingFile(file)
+                              else {const link=document.createElement('a');link.href=file.url;link.download=file.name;link.click()}
+                            })}
                             className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted"
                             aria-label={`${file.name} 받기`}
                           >
                             <Download className="size-3.5" />
-                          </a>
+                          </button>
                           {canRemovePrepFile(file, uploader) ? (
                             <button
                               type="button"
@@ -1968,10 +1913,7 @@ function MeetingDetailDrawer({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => {
-                  persistNotes()
-                  onBookTime()
-                }}
+                onClick={() => void run(async()=>{if(await persistNotes()) onBookTime()})}
               >
                 회의 시간 잡기
               </Button>
@@ -1979,10 +1921,7 @@ function MeetingDetailDrawer({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => {
-                  persistNotes()
-                  onScheduleNext()
-                }}
+                onClick={() => void run(async()=>{if(await persistNotes()) await onScheduleNext()})}
               >
                 저장하고 다음 회의 진행
               </Button>
@@ -1990,10 +1929,7 @@ function MeetingDetailDrawer({
             <Button
               type="button"
               variant="secondary"
-              onClick={() => {
-                persistNotes()
-                onMarkDone()
-              }}
+              onClick={() => void run(async()=>{if(await persistNotes()) await onMarkDone()})}
             >
               <Check className="size-3.5" />
               회의건 종료
@@ -2004,15 +1940,13 @@ function MeetingDetailDrawer({
             <Button
               type="button"
               variant="outline"
-              onClick={() => {
-                persistNotes()
-                onReopen()
-              }}
+              onClick={() => void run(async()=>{if(await persistNotes()) await onReopen()})}
             >
               다시 진행중으로
             </Button>
           </div>
         )}
+        </fieldset>
       </div>
     </div>
   )

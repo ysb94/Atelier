@@ -1,4 +1,4 @@
-/** 회사 회의실 일정 UI용 모델. 저장 없이 화면만 쓴다. */
+/** 회사 회의실 일정과 저장 데이터의 공통 화면 모델. */
 
 export const MEETING_WEEKDAY_LABELS = ['월', '화', '수', '목', '금'] as const
 export const MEETING_WEEKDAY_COUNT = MEETING_WEEKDAY_LABELS.length
@@ -83,6 +83,7 @@ export type DayQuarterId = 'q1' | 'q2' | 'q3' | 'q4'
 
 export type MeetingRound = {
   id: string
+  durationMinutes?: number
   round: number
   startsAt: string
   roomId: string
@@ -190,6 +191,7 @@ export type MeetingDurationMinutes = (typeof MEETING_DURATION_MINUTES)[number]
 
 export type MeetingPrepFile = {
   id: string
+  storagePath?: string
   name: string
   size: number
   type: string
@@ -260,6 +262,7 @@ export function groupPrepMaterialsByUploader(
 
 export type MeetingSeries = {
   id: string
+  revision?: number
   title: string
   host: MeetingPerson
   members: MeetingPerson[]
@@ -533,7 +536,7 @@ export function seriesToDrafts(
         seriesId: item.id,
         round: round.round,
         quarterId: round.quarterId,
-        durationMinutes: item.durationMinutes,
+        durationMinutes: round.durationMinutes ?? item.durationMinutes,
       })
     }
   }
