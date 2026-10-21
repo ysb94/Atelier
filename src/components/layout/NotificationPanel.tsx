@@ -21,6 +21,7 @@ const KIND_ICON: Record<
   barcode_pending: { icon: CircleAlert, label: '미지정' },
   outbound_changed: { icon: Truck, label: '출고 변경' },
   mention: { icon: AtSign, label: '언급' },
+  meeting_invitation: { icon: Check, label: '참석 요청' },
 }
 
 export function NotificationPanel({

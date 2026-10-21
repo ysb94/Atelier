@@ -7,7 +7,7 @@ const profile = {
   permissionMode: params.has('permissions-legacy') ? 'legacy' : 'assigned',
   companyId: 'e0000000-0000-4000-8000-000000000001',
   permissionGrants: params.get('identity') === 'employee' ? [] : params.get('identity') === 'partner' ? [{ permission:'partner.manage',scopeKind:'brand',scopeId:'brand-a' }] : PERMISSION_CATALOG.filter(([code]) => params.get('identity') !== 'ceo' || ['basic.use','company.review','preview.use','ideas.read'].includes(code)).map(([permission]) => ({ permission, scopeKind: 'company', scopeId: 'e0000000-0000-4000-8000-000000000001' })),
-  id: 'fixture-user', email: params.get('identity') === 'employee' ? 'staff@example.invalid' : params.get('identity') === 'ceo' ? 'ceo@example.invalid' : 'dev@atelier.local',
+  id: params.has('meeting-member') ? 'other-user' : 'fixture-user', email: params.get('identity') === 'employee' ? 'staff@example.invalid' : params.get('identity') === 'ceo' ? 'ceo@example.invalid' : 'dev@atelier.local',
   displayName: '화면 검수', status: 'active', isAdmin: !params.has('reader') && !params.has('identity'), position: params.get('identity') === 'ceo' ? '대표이사' : '사원', jobGrade: '사원',
   departmentId: null, departmentName: null, departmentPersonnelScope: null, capabilities: [], memberships: [],
 } as unknown as Profile

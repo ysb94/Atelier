@@ -4,7 +4,7 @@ import { useAuth } from '@/lib/supabase/auth'
 import { usePagePreview } from '@/lib/company/page-preview-context'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { emptyList } from '@/lib/utils'
-import { cleanupMeetingFiles, deleteCompanyMeeting, listCompanyMeetings, listMeetingCalendar, listMeetingRooms, saveCompanyMeeting } from '@/lib/supabase/meetings'
+import { cleanupMeetingFiles, confirmCompanyMeeting, deleteCompanyMeeting, listCompanyMeetings, listMeetingCalendar, listMeetingRooms, saveCompanyMeeting } from '@/lib/supabase/meetings'
 import { type MeetingSeries, seriesToDrafts } from './meeting-schedule'
 
 /** 실제 저장과 화면 테스트를 분리한다. 실패·충돌 시 입력 화면을 유지한다. */
@@ -32,9 +32,9 @@ export function useCompanyMeetings(from:string,to:string) {
   const series=simulating?(simulation ?? query.data ?? emptyList<MeetingSeries>()):(query.data ?? emptyList<MeetingSeries>())
   const seriesRef=useRef(series);seriesRef.current=series
   async function refresh() {
-    await Promise.all([cache.invalidateQueries({queryKey:key}),cache.invalidateQueries({queryKey:['meeting-calendar']}),cache.invalidateQueries({queryKey:['meeting-rooms']})])
+    await Promise.all([cache.invalidateQueries({queryKey:key}),cache.invalidateQueries({queryKey:['meeting-calendar']}),cache.invalidateQueries({queryKey:['meeting-rooms']}),cache.invalidateQueries({queryKey:['meeting-invitations']})])
   }
-  function setSeries(update:(previous:MeetingSeries[])=>MeetingSeries[],expected?:{id:string;revision:number}):Promise<boolean> {
+  function setSeries(update:(previous:MeetingSeries[])=>MeetingSeries[],expected?:{id:string;revision:number;confirmRound?:string}):Promise<boolean> {
     const simulationMode=simulating,owner=real?.id
     const task=async()=>{
       if(account.current!==owner || mode.current!==simulationMode) return false
@@ -49,8 +49,8 @@ export function useCompanyMeetings(from:string,to:string) {
         for(const previous of before) if(!after.some(item=>item.id===previous.id)) await deleteCompanyMeeting(previous)
         for(const next of after) {
           const previous=before.find(item=>item.id===next.id)
-          if(previous && JSON.stringify(previous)===JSON.stringify(next)) continue
-          await saveCompanyMeeting(next,previous?.revision ?? 0)
+          if(expected?.id===next.id && expected.confirmRound) await confirmCompanyMeeting(next,previous?.revision ?? 0,expected.confirmRound)
+          else if(!previous || JSON.stringify(previous)!==JSON.stringify(next)) await saveCompanyMeeting(next,previous?.revision ?? 0)
         }
         await refresh()
         return true
@@ -66,11 +66,18 @@ export function useCompanyMeetings(from:string,to:string) {
     tail.current=pending
     return pending
   }
+  async function perform(action:()=>Promise<void>) {
+    if(simulating) return false
+    setSaving(true);setError(null)
+    try {await action();await refresh();return true}
+    catch(cause){console.warn('[meetings] 회의 작업 실패',{error:cause});setError(cause instanceof Error?cause.message:'회의 작업에 실패했습니다.');await refresh();return false}
+    finally{setSaving(false)}
+  }
   const bookings=useMemo(()=>{
     const own=seriesToDrafts(series),ids=new Set(own.map(item=>item.id))
     return [...own,...(calendar.data ?? emptyList()).filter(item=>!ids.has(item.id))]
   },[series,calendar.data])
-  return {series,setSeries,rooms:roomsQuery.data ?? emptyList(),bookings,saving,error:error ?? query.error?.message ?? roomsQuery.error?.message ?? calendar.error?.message,
+  return {series,setSeries,perform,rooms:roomsQuery.data ?? emptyList(),bookings,saving,error:error ?? query.error?.message ?? roomsQuery.error?.message ?? calendar.error?.message,
     loading:query.isPending||roomsQuery.isPending||calendar.isPending,simulating,refresh,
     currentRevision:(id:string)=>cache.getQueryData<MeetingSeries[]>(key)?.find(item=>item.id===id)?.revision ?? 0}
 }

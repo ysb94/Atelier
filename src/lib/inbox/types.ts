@@ -5,6 +5,7 @@ export type InboxNotificationKind =
   | 'barcode_pending'
   | 'outbound_changed'
   | 'mention'
+  | 'meeting_invitation'
 
 export type InboxNotification = {
   id: string

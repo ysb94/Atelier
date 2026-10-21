@@ -12,6 +12,9 @@ import {
 import { createPortal } from 'react-dom'
 import { Bell, MessageCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { OPEN_CONVERSATION_EVENT, type RequestedConversation } from '@/lib/chat/open-conversation'
+import { listMeetingInvitations, readMeetingInvitation } from '@/lib/supabase/meetings'
 import { ChatPanel } from '@/features/chat/ChatPanel'
 import { useChatRealtime } from '@/features/chat/use-chat-realtime'
 import { useChatRooms } from '@/features/chat/use-chat'
@@ -48,10 +51,25 @@ export function WorkspaceHeaderActions() {
   const chatTitleId = useId()
   const notificationTitleId = useId()
   const [open, setOpen] = useState<OpenPanel | null>(null)
+  const [requestedRoom,setRequestedRoom]=useState<RequestedConversation|null>(null)
+  const cache=useQueryClient()
+  const invitations=useQuery({queryKey:['meeting-invitations',profile?.id],queryFn:listMeetingInvitations,enabled:chatEnabled,refetchInterval:chatEnabled?15000:false})
+  const [notificationError,setNotificationError]=useState<string|null>(null)
   const { container: overlayContainer, restoreFocus } = useWorkspaceOverlayHost(open !== null)
-  const [notifications, setNotifications] = useState<InboxNotification[]>(
+  const [localNotifications, setNotifications] = useState<InboxNotification[]>(
     () => MOCK_NOTIFICATIONS,
   )
+  const notifications=useMemo(()=>[...(invitations.data ?? emptyList<InboxNotification>()),...localNotifications],[invitations.data,localNotifications])
+  useEffect(()=>{
+    function receive(event:Event){
+      const detail=(event as CustomEvent<RequestedConversation>).detail
+      if(!chatEnabled || !detail || typeof detail.id!=='string') return
+      openedBy.current='chat';setRequestedRoom(detail);setOpen('chat')
+    }
+    window.addEventListener(OPEN_CONVERSATION_EVENT,receive)
+    return ()=>window.removeEventListener(OPEN_CONVERSATION_EVENT,receive)
+  },[chatEnabled])
+  useEffect(()=>{setRequestedRoom(null);setOpen(null)},[profile?.id])
 
   const notificationCount = useMemo(
     () => notifications.filter((item) => !item.readAt).length,
@@ -64,6 +82,7 @@ export function WorkspaceHeaderActions() {
 
   const closePanel = useCallback(() => {
     setOpen(null)
+    setRequestedRoom(null)
     const button =
       openedBy.current === 'chat'
         ? chatButtonRef.current
@@ -76,6 +95,7 @@ export function WorkspaceHeaderActions() {
   }, [restoreFocus])
 
   function toggle(next: OpenPanel) {
+    setRequestedRoom(null)
     openedBy.current = next
     setOpen((current) => (current === next ? null : next))
   }
@@ -99,7 +119,12 @@ export function WorkspaceHeaderActions() {
     }
   }, [closePanel, open])
 
+  async function markMeetingRead(id:string|null) {
+    try {await readMeetingInvitation(id);setNotificationError(null);await cache.invalidateQueries({queryKey:['meeting-invitations']})}
+    catch(error){console.warn('[meetings] 참석 요청 읽음 처리 실패',{error});setNotificationError('참석 요청을 읽음으로 표시하지 못했습니다. 다시 시도해 주세요.')}
+  }
   function markAllRead() {
+    if(invitations.data?.some(item=>!item.readAt)) void markMeetingRead(null)
     const readAt = new Date().toISOString()
     setNotifications((prev) =>
       prev.map((item) => (item.readAt ? item : { ...item, readAt })),
@@ -107,6 +132,7 @@ export function WorkspaceHeaderActions() {
   }
 
   function openNotification(item: InboxNotification) {
+    if(item.kind==='meeting_invitation') void markMeetingRead(item.id)
     const readAt = new Date().toISOString()
     setNotifications((prev) =>
       prev.map((current) =>
@@ -171,6 +197,7 @@ export function WorkspaceHeaderActions() {
             isAdmin={hasPermission(profile, 'system.manage')}
             titleId={chatTitleId}
             onClose={closePanel}
+            requestedRoom={requestedRoom}
           /></DeveloperPreviewProvider>
         </div>, overlayContainer,
       ) : null}
@@ -187,6 +214,7 @@ export function WorkspaceHeaderActions() {
             onOpen={openNotification}
             onClose={closePanel}
           />
+          {notificationError || invitations.error ? <p role="alert" className="rounded border border-danger bg-card p-2 text-xs text-danger">{notificationError ?? '회의 참석 요청을 불러오지 못했습니다.'}</p> : null}
         </div>, overlayContainer,
       ) : null}
     </div>

@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { openDirectChat } from '@/lib/supabase/chat'
+import { openConversation } from '@/lib/chat/open-conversation'
+import { chatKeys } from '@/features/chat/use-chat'
+import { MeetingAttendance } from './MeetingAttendance'
 import {
   Check,
   ChevronDown,
@@ -23,7 +29,7 @@ import {
   listDepartments,
   type Department,
 } from '@/lib/supabase/profiles'
-import { listMeetingDirectory, uploadMeetingFile, removeMeetingFile, downloadMeetingFile } from '@/lib/supabase/meetings'
+import { listMeetingDirectory, uploadMeetingFile, removeMeetingFile, downloadMeetingFile, respondToMeeting, openMeetingGroup } from '@/lib/supabase/meetings'
 import { useCompanyMeetings } from './useCompanyMeetings'
 import { hasPermission } from '@/lib/company/permissions'
 import { cn, emptyList } from '@/lib/utils'
@@ -149,6 +155,10 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
 
   const { profile } = useAuth()
   const preview = usePagePreview()
+  const cache=useQueryClient(),active=useWorkspaceTabActivity()
+  const [searchParams,setSearchParams]=useSearchParams()
+  const [selectedHostId,setSelectedHostId]=useState<string|null>(null)
+  const [schedulingRoundId,setSchedulingRoundId]=useState<string|null>(null)
   const topicRef = useRef<HTMLInputElement>(null)
   const durationRef = useRef<HTMLSelectElement>(null)
   const composeSectionRef = useRef<HTMLDivElement>(null)
@@ -208,14 +218,15 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     if (people.some((person) => person.id === host.id)) return people
     return [host, ...people]
   }, [host, people])
+  const chosenHost=directory.find(person=>person.id===(selectedHostId ?? host.id)) ?? host
 
   const selectedMemberIds = useMemo(
     () => members.map((person) => person.id),
     [members],
   )
   const departmentGroups = useMemo(
-    () => groupMeetingMembersByDepartment(directory, host.id, departments),
-    [departments, directory, host.id],
+    () => groupMeetingMembersByDepartment(directory, selectedHostId ?? host.id, departments),
+    [departments, directory, host.id, selectedHostId],
   )
 
   const weeks = useMemo(() => chunkMeetingDays(days), [days])
@@ -226,7 +237,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     [days, picker],
   )
   const pickerOccupants = picker
-    ? (occupants.get(roomDayKey(picker.roomId, picker.dateKey)) ?? EMPTY_DRAFTS)
+    ? (occupants.get(roomDayKey(picker.roomId, picker.dateKey)) ?? EMPTY_DRAFTS).filter(item=>item.id!==schedulingRoundId)
     : EMPTY_DRAFTS
   const now = new Date()
 
@@ -257,16 +268,16 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     ? series.find((item) => item.id === deleteSeriesId)
     : undefined
   const submitRound = schedulingSeries
-    ? (findPendingRound(schedulingSeries)?.round ??
+    ? (schedulingSeries.rounds.find(row=>row.id===schedulingRoundId)?.round ?? findPendingRound(schedulingSeries)?.round ??
       nextRoundNumber(schedulingSeries))
     : 1
   const composeTitle = (schedulingSeries?.title ?? title).trim()
   const composeDuration = durationMinutes
-  const composeHost = schedulingSeries?.host ?? host
+  const composeHost = schedulingSeries?.host ?? chosenHost
   const composeMembers = members
   const composeGaps = meetingComposeGaps({
     title: composeTitle,
-    durationMinutes: composeDuration,
+    durationMinutes: schedulingSeries ? composeDuration : DEFAULT_MEETING_DURATION_MINUTES,
     memberCount: composeMembers.length,
     requireMembers: !schedulingSeries,
   })
@@ -278,6 +289,26 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     () => [composeHost, ...composeMembers],
     [composeHost, composeMembers],
   )
+  useEffect(()=>{
+    if(!active || !searchParams.get('meeting') || !searchParams.get('round')) return
+    const item=visibleSeries.find(row=>row.id===searchParams.get('meeting'))
+    const round=item?.rounds.find(row=>row.id===searchParams.get('round'))
+    if(item&&round) setDetail(current=>current?.seriesId===item.id&&current.roundId===round.id?current:{seriesId:item.id,roundId:round.id})
+  },[active,searchParams,visibleSeries])
+  function closeDetail(){
+    setDetail(null)
+    if(active&&searchParams.has('meeting')){const next=new URLSearchParams(searchParams);next.delete('meeting');next.delete('round');setSearchParams(next,{replace:true})}
+  }
+  function chatWith(person:MeetingPerson){
+    void meetings.perform(async()=>{const id=await openDirectChat(person.id);await cache.invalidateQueries({queryKey:chatKeys.rooms});openConversation(id,person.name)})
+  }
+  function groupChat(item:MeetingSeries){
+    void meetings.perform(async()=>{const id=await openMeetingGroup(item.id);await cache.invalidateQueries({queryKey:chatKeys.rooms});openConversation(id,'회의 · '+item.title)})
+  }
+  function respond(item:MeetingSeries,round:MeetingRound,status:'available'|'unavailable'){
+    if(simulating){void setSeries(rows=>rows.map(row=>row.id===item.id?{...row,rounds:row.rounds.map(r=>r.id===round.id?{...r,responses:[...(r.responses??[]).filter(response=>response.profileId!==host.id),{profileId:host.id,status}]}:r)}:row));return}
+    void meetings.perform(()=>respondToMeeting(round.id,round.scheduleVersion ?? 1,status))
+  }
   useEffect(() => {
     if (!picker) return
     function onKeyDown(event: KeyboardEvent) {
@@ -305,6 +336,8 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     setMembers([])
     setMemberPickerOpen(false)
     setSchedulingSeriesId(null)
+    setSchedulingRoundId(null)
+    setSelectedHostId(null)
     setComposePrompt(null)
     setPicker(null)
     setComposeOpen(false)
@@ -313,6 +346,13 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   function openCreate() {
     if (schedulingSeries) resetCompose()
     setComposeOpen(true)
+  }
+  async function createDraft(){
+    if(!composeReady){showComposeGaps();return}
+    const id=newMeetingId(),roundId=newMeetingId()
+    const saved=await setSeries(rows=>[{id,title:composeTitle,host:composeHost,members:composeMembers,createdBy:host.id,phase:'preparing',status:'in_progress',durationMinutes:DEFAULT_MEETING_DURATION_MINUTES,
+      rounds:[{id:roundId,round:1,startsAt:'',roomId:'',quarterId:'q1',confirmed:false,...emptyRoundNotes()}]},...rows])
+    if(saved){resetCompose();setBoardTab('in_progress');setDetail({seriesId:id,roundId})}
   }
 
   function showComposeGaps() {
@@ -332,7 +372,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   }
 
   async function bookSlot(nextRoomId: string, dateKey: string, startClock: string) {
-    if (!composeReady) return
+    if (!composeReady || !schedulingSeries) return
     const startsAt = combineDateTime(dateKey, startClock)
     setVisibleDays((current) =>
       visibleDaysToCover(todayKey, dateKey, current),
@@ -346,52 +386,13 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
       durationMinutes: slotDurationMinutes,
       ...emptyRoundNotes(),
     }
-    let saved: boolean
-    if (schedulingSeries) {
-      const pending = findPendingRound(schedulingSeries)
-      saved=await setSeries((prev) =>
-        prev.map((item) => {
-          if (item.id !== schedulingSeries.id) return item
-          if (!pending) {
-            return {
-              ...item,
-              members: composeMembers,
-              durationMinutes: slotDurationMinutes,
-              rounds: [...item.rounds, round],
-            }
-          }
-          return {
-            ...item,
-            members: composeMembers,
-            durationMinutes: slotDurationMinutes,
-            rounds: item.rounds.map((row) =>
-              row.id === pending.id
-                ? {
-                    ...row,
-                    startsAt: round.startsAt,
-                    roomId: round.roomId,
-                    quarterId: round.quarterId,
-                    durationMinutes: round.durationMinutes,
-                  }
-                : row,
-            ),
-          }
-        }),
-      )
-    } else {
-      saved=await setSeries((prev) => [
-        {
-          id: newMeetingId(),
-          title: composeTitle,
-          host: composeHost,
-          members: composeMembers,
-          status: 'in_progress',
-          durationMinutes: slotDurationMinutes,
-          rounds: [round],
-        },
-        ...prev,
-      ])
-    }
+    const target=schedulingSeries.rounds.find(row=>row.id===schedulingRoundId) ?? findPendingRound(schedulingSeries)
+    const confirmed={...(target ?? round),startsAt,roomId:nextRoomId,quarterId:round.quarterId,durationMinutes:slotDurationMinutes,confirmed:true,
+      scheduleVersion:(target?.scheduleVersion ?? 0)+1,responses:composeMembers.map(person=>({profileId:person.id,status:'pending' as const}))}
+    const saved=await setSeries(rows=>rows.map(item=>item.id===schedulingSeries.id?{
+      ...item,phase:'published',members:composeMembers,durationMinutes:slotDurationMinutes,
+      rounds:target?item.rounds.map(row=>row.id===target.id?confirmed:row):[...item.rounds,confirmed],
+    }:item),{id:schedulingSeries.id,revision:schedulingSeries.revision ?? 0,confirmRound:confirmed.id})
     if(saved) resetCompose()
   }
 
@@ -410,9 +411,10 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     )
   }
 
-  function scheduleNextRound(item: MeetingSeries) {
+  function scheduleNextRound(item: MeetingSeries,roundId?:string) {
     setBoardTab('in_progress')
     setSchedulingSeriesId(item.id)
+    setSchedulingRoundId(roundId ?? null)
     setTitle(item.title)
     setDurationMinutes(null)
     setMembers(item.members)
@@ -470,7 +472,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   return (
     <fieldset disabled={saving} className="min-w-0 space-y-4" aria-busy={saving}>
       {showHeading ? <PageHeader title="회의" /> : null}
-      {simulating ? <p role="status" className="text-xs text-amber-800">화면 테스트 중입니다. 변경 내용은 실제 회의에 저장되지 않습니다.</p> : <p role="status" className="text-xs text-muted-foreground">{saving?'회의를 저장하는 중입니다.':'공유 회의 · 저장한 내용은 참석자에게 공유됩니다.'}</p>}
+      {simulating ? <p role="status" className="text-xs text-amber-800">화면 테스트 중입니다. 변경 내용은 실제 회의에 저장되지 않습니다.</p> : <p role="status" className="text-xs text-muted-foreground">{saving?'회의를 저장하는 중입니다.':'준비 회의는 비공개입니다. 일정을 확정하면 멤버에게 참석 요청과 내용을 공유합니다.'}</p>}
       {meetings.error ? <p role="alert" className="rounded-lg border border-danger/30 p-3 text-sm text-danger">{meetings.error}</p> : null}
       {membersQuery.error ? <p role="alert" className="text-sm text-danger">참석자 목록을 불러오지 못했습니다. {membersQuery.error.message}</p> : null}
 
@@ -517,7 +519,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
           {boardSeries.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
               {boardTab === 'in_progress'
-                ? '진행 중인 회의가 없습니다. 회의 생성을 누른 뒤 날짜를 고르세요.'
+                ? '진행 중인 회의가 없습니다. 회의 생성에서 주제·호스트·멤버를 정해 준비를 시작하세요.'
                 : '완료한 회의가 없습니다.'}
             </p>
           ) : (
@@ -535,6 +537,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                       <p className="shrink-0 text-sm font-medium">
                         {item.title}
                       </p>
+                      {item.phase==='preparing'?<Badge variant="outline">준비 중 · 멤버 비공개</Badge>:null}
                       {item.status === 'done' ? (
                         <span className="shrink-0 text-xs text-muted-foreground">
                           {formatSeriesDateSpan(item) || '일정 없음'}
@@ -544,27 +547,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                         aria-hidden
                         className="hidden h-4 w-px bg-border sm:block"
                       />
-                      <div className="flex min-w-0 flex-wrap items-center gap-1">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-950">
-                          <span
-                            aria-hidden
-                            className="size-1.5 rounded-full bg-sky-600"
-                          />
-                          {item.host.name}
-                        </span>
-                        {item.members.map((person) => (
-                          <span
-                            key={person.id}
-                            className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
-                          >
-                            <span
-                              aria-hidden
-                              className="size-1.5 rounded-full bg-muted-foreground/50"
-                            />
-                            {person.name}
-                          </span>
-                        ))}
-                      </div>
+                      <MeetingAttendance series={item} round={[...item.rounds].reverse().find(row=>row.confirmed ?? row.startsAt)} actorId={host.id} simulating={simulating} compact onChat={chatWith} onGroup={()=>groupChat(item)}/>
                       <span
                         aria-hidden
                         className="hidden h-4 w-px bg-border sm:block"
@@ -673,7 +656,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
           >
             <div className="mb-4 flex items-center justify-between gap-3">
               <h2 id="meeting-create-title" className="text-base font-semibold">
-                {schedulingSeries ? '다음 회의 잡기' : '회의 생성'}
+                {schedulingSeries ? '회의 일정 확정' : '회의 생성'}
               </h2>
               <Button type="button" size="sm" variant="outline" onClick={() => setComposeOpen(false)}>
                 닫기
@@ -697,7 +680,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                   onChange={(event) => setTitle(event.target.value)}
                 />
               </label>
-              <label className="w-36 space-y-1">
+              {schedulingSeries ? <label className="w-36 space-y-1">
                 <span className="text-xs font-medium">회의 시간</span>
                 <Select
                   ref={durationRef}
@@ -721,7 +704,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                     </option>
                   ))}
                 </Select>
-              </label>
+              </label> : null}
               {schedulingSeries ? (
                 <Button
                   type="button"
@@ -742,9 +725,9 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
             <div className="grid items-start gap-3 md:grid-cols-[12rem_minmax(0,1fr)]">
               <div className="space-y-1">
                 <p className="text-xs font-medium">호스트</p>
-                <div className="flex h-9 items-center rounded-md border border-border bg-card px-3 text-sm">
-                  {meetingPersonLabel(schedulingSeries?.host ?? host)} · 나
-                </div>
+                <Select aria-label="호스트" value={composeHost.id} disabled={Boolean(schedulingSeries)} onChange={event=>{setSelectedHostId(event.target.value);setMembers(rows=>rows.filter(person=>person.id!==event.target.value))}}>
+                  {directory.map(person=><option key={person.id} value={person.id}>{meetingPersonLabel(person)}{person.id===host.id?' · 나':''}</option>)}
+                </Select>
               </div>
 
               <div className="space-y-1">
@@ -877,6 +860,10 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                 )}
               </div>
             </div>
+            <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+              <p className="text-xs text-muted-foreground">{schedulingSeries?'일정을 확정하면 멤버에게 참석 요청이 전달됩니다. 일정 변경 시 응답이 초기화됩니다.':'준비 중에는 호스트와 생성자만 볼 수 있습니다. 안내·자료를 준비한 뒤 일정을 확정하세요.'}</p>
+              <Button type="button" onClick={()=>{if(schedulingSeries){if(composeReady)setComposeOpen(false);else showComposeGaps()}else void createDraft()}}>{schedulingSeries?'날짜·시간 선택':'준비 회의 생성'}</Button>
+            </div>
           </div>
         </div>
       </div>
@@ -886,6 +873,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
         <CardContent className="space-y-4 p-4">
           <div>
             <p className="text-sm font-medium">회의실 일정</p>
+            {schedulingSeries ? <p role="status" className="mt-1 text-xs text-sky-700">「{schedulingSeries.title}」 날짜를 누른 뒤 시간을 선택하면 일정이 확정됩니다. <button type="button" className="underline" onClick={resetCompose}>취소</button></p> : null}
           </div>
 
           <RoomScheduleBlock
@@ -893,7 +881,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
             roomId={selectedRoomId}
             weeks={weeks}
             occupants={occupants}
-            composeReady={composeReady}
+            composeReady={composeReady && Boolean(schedulingSeries)}
             durationMinutes={slotDurationMinutes}
             attendees={attendees}
             attendance={EMPTY_ATTENDANCE}
@@ -920,8 +908,9 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
           uploader={host}
           simulating={simulating}
           onRefresh={meetings.refresh}
+          attendance={<MeetingAttendance series={detailSeries} round={detailRound} actorId={host.id} simulating={simulating} onChat={chatWith} onGroup={()=>groupChat(detailSeries)} onRespond={status=>respond(detailSeries,detailRound,status)}/> }
           saveError={meetings.error}
-          onClose={() => setDetail(null)}
+          onClose={closeDetail}
           onSave={async (notes,revision) => {
             const roundId = detailRound.id
             const saved=await setSeries((prev) =>
@@ -939,17 +928,17 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
             return saved ? meetings.currentRevision(detailSeries.id) : null
           }}
           onScheduleNext={async () => {
-            if(await planNextRound(detailSeries)) setDetail(null)
+            if(await planNextRound(detailSeries)) closeDetail()
           }}
           onBookTime={() => {
-            scheduleNextRound(detailSeries)
-            setDetail(null)
+            scheduleNextRound(detailSeries,detailRound.id)
+            closeDetail()
           }}
           onMarkDone={async () => {
-            if(await markDone(detailSeries.id)) setDetail(null)
+            if(await markDone(detailSeries.id)) closeDetail()
           }}
           onReopen={async () => {
-            if(await markInProgress(detailSeries.id)) setDetail(null)
+            if(await markInProgress(detailSeries.id)) closeDetail()
           }}
         />
       ) : null}
@@ -1604,6 +1593,7 @@ function MeetingDetailDrawer({
   uploader,
   simulating,
   onRefresh,
+  attendance,
   saveError,
   onClose,
   onSave,
@@ -1616,6 +1606,7 @@ function MeetingDetailDrawer({
   round: MeetingRound
   uploader: MeetingPerson
   simulating: boolean
+  attendance: ReactNode
   onRefresh: () => Promise<void>
   saveError?: string | null
   onClose: () => void
@@ -1630,6 +1621,7 @@ function MeetingDetailDrawer({
   onReopen: () => Promise<void>
 }) {
   const pending = isPendingRound(round)
+  const isHost=series.host.id===uploader.id
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [prepMaterials, setPrepMaterials] = useState(round.prepMaterials)
   const [content, setContent] = useState(round.content)
@@ -1763,6 +1755,8 @@ function MeetingDetailDrawer({
         </div>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
+          {series.phase==='preparing'?<p className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">준비 중 · 호스트와 생성자만 볼 수 있습니다. 안내와 자료를 준비한 뒤 호스트가 일정을 확정하면 멤버에게 공개됩니다.</p>:null}
+          {attendance}
           {previousRounds.length > 0 ? (
             <section className="space-y-2">
               <h3 className="text-xs font-medium text-muted-foreground">
@@ -1877,21 +1871,21 @@ function MeetingDetailDrawer({
               </div>
             )}
           </section>
-          {pending ? null : (
+          {(
             <>
               <section className="space-y-2">
                 <h3 className="text-xs font-medium text-muted-foreground">
-                  회의 내용
+                  {pending ? '회의 안내' : '회의 내용'}
                 </h3>
                 <Textarea
                   value={content}
                   rows={10}
                   placeholder="회의에서 나온 내용을 빠짐없이 적습니다."
-                  aria-label="회의 내용"
+                  aria-label={pending?'회의 안내':'회의 내용'}
                   onChange={(event) => setContent(event.target.value)}
                 />
               </section>
-              <section className="space-y-2">
+              {!pending ? <section className="space-y-2">
                 <h3 className="text-xs font-medium text-muted-foreground">
                   회의 결과
                 </h3>
@@ -1902,20 +1896,21 @@ function MeetingDetailDrawer({
                   aria-label="회의 결과"
                   onChange={(event) => setResult(event.target.value)}
                 />
-              </section>
+              </section> : null}
             </>
           )}
         </div>
 
         {series.status === 'in_progress' ? (
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-5 py-3">
-            {pending ? (
+            {isHost && !pending ? <Button type="button" variant="outline" onClick={()=>void run(async()=>{if(await persistNotes()) onBookTime()})}>일정 변경</Button>:null}
+            {isHost ? pending ? (
               <Button
                 type="button"
                 variant="outline"
                 onClick={() => void run(async()=>{if(await persistNotes()) onBookTime()})}
               >
-                회의 시간 잡기
+                일정 확정하기
               </Button>
             ) : (
               <Button
@@ -1925,7 +1920,7 @@ function MeetingDetailDrawer({
               >
                 저장하고 다음 회의 진행
               </Button>
-            )}
+            ) : null}
             <Button
               type="button"
               variant="secondary"

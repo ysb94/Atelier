@@ -97,5 +97,72 @@ try{
  assert.equal((await scalar("select public.list_meeting_calendar('2030-01-01','2030-01-31')")).length,0)
  await db.exec('reset role')
  assert.equal(await original(),before)
- console.log('meetings-db: 저장·재조회·참석자 공유·회의록/회차/파일·동시 수정/중복 예약·비참석/타사 차단·기존 사용자 보존 통과')
-}finally{await db.close()}
+ await db.exec(`create table public.chat_rooms(id uuid primary key default gen_random_uuid(),company_id uuid,name text,kind text,created_by uuid);
+ create table public.chat_room_members(room_id uuid references public.chat_rooms(id),profile_id uuid,primary key(room_id,profile_id));
+ create function app.assert_chat_member_profiles(ids uuid[]) returns void language plpgsql security definer set search_path='' as $$begin
+ if exists(select 1 from unnest(ids) x where not exists(select 1 from public.profiles where id=x and company_id=app.meeting_company_id() and status='active')) then raise exception 'invalid chat member'; end if; end$$;
+ create function public.create_group_chat(room_name text,member_ids uuid[]) returns uuid language plpgsql security definer set search_path='' as $$declare r uuid;begin
+ insert into public.chat_rooms(company_id,name,kind,created_by) values(app.meeting_company_id(),room_name,'group',auth.uid()) returning id into r;
+ insert into public.chat_room_members select r,id from (select auth.uid() as id union select unnest(member_ids)) x;return r;end$$;`)
+ const invitations=(await fs.readdir('supabase/migrations')).find(name=>name.endsWith('_meeting_invitations.sql'))
+ await db.exec(await fs.readFile('supabase/migrations/'+invitations,'utf8'))
+ await actor(host)
+ const draft={id:'30000000-0000-4000-8000-000000000010',title:'비공개 준비',host:{id:host},members:[{id:member}],status:'in_progress',durationMinutes:60,rounds:[{id:'40000000-0000-4000-8000-000000000010',round:1,startsAt:'',roomId:'',content:'회의 전 안내',result:''}]}
+ let nextRevision=await scalar('select public.save_company_meeting($1,0)',[draft])
+ assert.equal((await scalar('select public.list_company_meetings()'))[0].phase,'preparing')
+ await actor(member)
+ assert.equal((await scalar('select public.list_company_meetings()')).length,0,'멤버도 준비 회의는 볼 수 없음')
+ assert.equal((await scalar('select public.list_my_meeting_invitations()')).length,0,'확정 전에는 알림 없음')
+ assert.equal(await scalar('select count(*) from public.meeting_rounds'),0)
+ await denied('select app.meeting_list_before_invitations()')
+ await actor(admin)
+ assert.equal((await scalar('select public.list_company_meetings()')).length,0,'운영자 직책으로 비공개 초안을 열지 않음')
+ await actor(host)
+ draft.rounds[0].startsAt='2030-01-08T10:00';draft.rounds[0].roomId='room-1'
+ nextRevision=await scalar('select public.confirm_company_meeting($1,$2,$3)',[draft,nextRevision,draft.rounds[0].id])
+ await actor(member)
+ let shared=(await scalar('select public.list_company_meetings()'))[0]
+ assert.equal(shared.phase,'published')
+ assert.equal((await scalar('select public.list_my_meeting_invitations()')).length,1)
+ await db.query('select public.respond_to_meeting($1,$2,$3)',[draft.rounds[0].id,1,'available'])
+ assert.equal((await scalar('select public.list_company_meetings()'))[0].rounds[0].responses[0].status,'available')
+ const group=await scalar('select public.open_meeting_group($1)',[draft.id])
+ assert.equal(await scalar('select public.open_meeting_group($1)',[draft.id]),group,'같은 회의의 단체방 재사용')
+ await actor(outsider)
+ await denied('select public.respond_to_meeting($1,1,$2)',[draft.rounds[0].id,'available'])
+ await denied('select public.open_meeting_group($1)',[draft.id])
+ await actor(host)
+ shared=(await scalar('select public.list_company_meetings()'))[0]
+ assert.equal(shared.rounds[0].responses[0].status,'available','호스트가 멤버 응답 확인')
+ shared.rounds[0].startsAt='2030-01-08T11:00'
+ await denied('select public.save_company_meeting($1,$2)',[shared,nextRevision],'P0001')
+ nextRevision=await scalar('select public.confirm_company_meeting($1,$2,$3)',[shared,nextRevision,draft.rounds[0].id])
+ await actor(member)
+ shared=(await scalar('select public.list_company_meetings()'))[0]
+ assert.equal(shared.rounds[0].responses[0].status,'pending','일정 변경 시 응답 초기화')
+ assert.equal(shared.rounds[0].scheduleVersion,2)
+ await denied('select public.respond_to_meeting($1,1,$2)',[draft.rounds[0].id,'available'],'40001')
+ await db.query('select public.respond_to_meeting($1,2,$2)',[draft.rounds[0].id,'unavailable'])
+ assert.equal((await scalar('select public.list_company_meetings()'))[0].rounds[0].responses[0].status,'unavailable')
+ await actor(host)
+ shared=(await scalar('select public.list_company_meetings()'))[0]
+ const hiddenRound='40000000-0000-4000-8000-000000000012'
+ shared.rounds.push({id:hiddenRound,round:2,startsAt:'',roomId:'',content:'아직 비공개 다음 회차',result:''})
+ nextRevision=await scalar('select public.save_company_meeting($1,$2)',[shared,nextRevision])
+ await actor(member)
+ shared=(await scalar('select public.list_company_meetings()'))[0]
+ assert.equal(shared.rounds.length,1,'다음 회차 준비도 멤버에게 비공개')
+ shared.rounds[0].content='멤버 회의록 수정'
+ nextRevision=await scalar('select public.save_company_meeting($1,$2)',[shared,nextRevision])
+ await actor(host)
+ shared=(await scalar('select public.list_company_meetings()'))[0]
+ assert.equal(shared.rounds.length,2,'멤버가 본문을 저장해도 숨긴 다음 회차 보존')
+ assert.equal(shared.rounds[1].content,'아직 비공개 다음 회차')
+ const delegated={...draft,id:'30000000-0000-4000-8000-000000000011',host:{id:member},members:[{id:host}],rounds:[{...draft.rounds[0],id:'40000000-0000-4000-8000-000000000011',startsAt:'',roomId:''}]}
+ await db.query('select public.save_company_meeting($1,0)',[delegated])
+ assert.ok((await scalar('select public.list_company_meetings()')).some(item=>item.id===delegated.id),'생성자에게는 위임한 초안 유지')
+ await actor(member)
+ assert.ok((await scalar('select public.list_company_meetings()')).some(item=>item.id===delegated.id),'지정 호스트도 초안 확인')
+ await db.exec('reset role');assert.equal(await original(),before)
+ console.log('meetings-db: 기존 저장/권한 보존·비공개 준비/호스트 지정·확정 알림·본인 참석 응답/상태 공유·일정 변경 초기화/낡은 응답 차단·단체방 재사용/비멤버 차단 통과')
+}catch(error){console.error('meetings-db:',{message:error.message,code:error.code,where:error.where});process.exitCode=1}finally{await db.close()}

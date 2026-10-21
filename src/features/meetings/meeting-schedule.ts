@@ -83,6 +83,9 @@ export type DayQuarterId = 'q1' | 'q2' | 'q3' | 'q4'
 
 export type MeetingRound = {
   id: string
+  confirmed?: boolean
+  scheduleVersion?: number
+  responses?: { profileId: string; status: 'pending' | 'available' | 'unavailable' }[]
   durationMinutes?: number
   round: number
   startsAt: string
@@ -262,6 +265,8 @@ export function groupPrepMaterialsByUploader(
 
 export type MeetingSeries = {
   id: string
+  phase?: 'preparing' | 'published'
+  createdBy?: string
   revision?: number
   title: string
   host: MeetingPerson
@@ -515,8 +520,9 @@ export function filterSeriesForViewer(
   actor: Pick<MeetingPerson, 'id'>,
   isAdmin: boolean,
 ): MeetingSeries[] {
-  if (isAdmin) return [...series]
-  return series.filter((item) => isMeetingParticipant(item, actor))
+  return series.filter((item) => item.phase === 'preparing'
+    ? item.host.id === actor.id || item.createdBy === actor.id
+    : isAdmin || isMeetingParticipant(item, actor))
 }
 
 export function seriesToDrafts(
