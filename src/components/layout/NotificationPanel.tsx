@@ -135,6 +135,7 @@ export function NotificationPanel({
                       <span className="mt-0.5 block truncate text-sm text-muted-foreground">
                         {item.body}
                       </span>
+                      {item.kind==='meeting_invitation'?<span className="mt-1 block text-xs text-primary">회의에서 참석 여부 응답 →</span>:null}
                       <span className="mt-1 block text-[11px] text-muted-foreground">
                         {formatInboxTime(item.createdAt)}
                       </span>

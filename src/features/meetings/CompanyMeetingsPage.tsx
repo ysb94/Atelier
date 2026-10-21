@@ -657,7 +657,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
             role="dialog"
             aria-modal="true"
             aria-labelledby="meeting-create-title"
-            className="relative z-10 max-h-[min(80vh,40rem)] w-full max-w-3xl overflow-auto rounded-xl border border-border bg-card p-5 shadow-lg"
+            className={cn('relative z-10 max-h-[92vh] w-full overflow-auto rounded-xl border border-border bg-card p-5 shadow-lg',schedulingSeries?'max-w-6xl':'max-w-3xl')}
           >
             <div className="mb-4 flex items-center justify-between gap-3">
               <h2 id="meeting-create-title" className="text-base font-semibold">

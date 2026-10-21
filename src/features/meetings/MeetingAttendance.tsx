@@ -29,9 +29,10 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
       <svg className="meeting-all-shape" viewBox="0 0 56 36" aria-hidden="true"><path d="M12 3H44a9 9 0 0 1 9 9v7a9 9 0 0 1-9 9H20l-9 5v-5a9 9 0 0 1-8-9v-7a9 9 0 0 1 9-9Z"/></svg>
       <span className="meeting-all-label">All</span>
     </button> : null}
-    {!compact&&confirmed&&series.members.some(person=>person.id===actorId)&&onRespond ? <div className="rounded-lg border border-border p-3">
+    {!compact&&confirmed&&series.members.some(person=>person.id===actorId)&&onRespond ? <section aria-label="회의 참석 응답" className="rounded-lg border border-border p-3">
+      <h3 className="mb-2 text-sm font-medium">참석 여부 응답</h3>
       <p className="mb-2 text-xs">확정된 일정에 참석할 수 있나요? · {myStatus==='available'?'참석 가능':myStatus==='unavailable'?'참석 불가':'응답 대기'}</p>
       <div className="flex gap-2"><Button size="sm" variant={myStatus==='available'?'default':'outline'} onClick={()=>onRespond('available')}>참석 가능</Button><Button size="sm" variant={myStatus==='unavailable'?'default':'outline'} onClick={()=>onRespond('unavailable')}>참석 불가</Button></div>
-    </div>:null}
+    </section>:null}
   </div>
 }
