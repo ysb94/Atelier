@@ -9,7 +9,6 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
 }) {
   const published=series.phase!=='preparing',confirmed=published && Boolean(round?.confirmed ?? round?.startsAt)
   const participant=series.host.id===actorId || series.members.some(person=>person.id===actorId)
-  const myStatus=round?.responses?.find(response=>response.profileId===actorId)?.status ?? 'pending'
   return <div className={cn('meeting-attendance', compact && 'is-compact', !compact && 'space-y-2')}>
     <div className="meeting-members">
       {[series.host,...series.members].map(person=>{
@@ -29,10 +28,27 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
       <svg className="meeting-all-shape" viewBox="0 0 56 36" aria-hidden="true"><path d="M12 3H44a9 9 0 0 1 9 9v7a9 9 0 0 1-9 9H20l-9 5v-5a9 9 0 0 1-8-9v-7a9 9 0 0 1 9-9Z"/></svg>
       <span className="meeting-all-label">All</span>
     </button> : null}
-    {!compact&&confirmed&&series.members.some(person=>person.id===actorId)&&onRespond ? <section aria-label="회의 참석 응답" className="rounded-lg border border-border p-3">
-      <h3 className="mb-2 text-sm font-medium">참석 여부 응답</h3>
-      <p className="mb-2 text-xs">확정된 일정에 참석할 수 있나요? · {myStatus==='available'?'참석 가능':myStatus==='unavailable'?'참석 불가':'응답 대기'}</p>
-      <div className="flex gap-2"><Button size="sm" variant={myStatus==='available'?'default':'outline'} onClick={()=>onRespond('available')}>참석 가능</Button><Button size="sm" variant={myStatus==='unavailable'?'default':'outline'} onClick={()=>onRespond('unavailable')}>참석 불가</Button></div>
-    </section>:null}
+    {!compact&&confirmed&&round&&series.members.some(person=>person.id===actorId)&&onRespond ? <MeetingResponse round={round} actorId={actorId} onRespond={onRespond}/>:null}
   </div>
+}
+
+export function MeetingResponse({round,actorId,onRespond,scheduleLabel}:{
+  round:MeetingRound;actorId:string;scheduleLabel?:string
+  onRespond:(status:'available'|'unavailable')=>void
+}) {
+  const status=round.responses?.find(response=>response.profileId===actorId)?.status ?? 'pending'
+  const label=status==='available'?'참석 가능':status==='unavailable'?'참석 불가':'응답 대기'
+  return <section aria-label={scheduleLabel?`${round.round}차 회의 참석 응답`:'회의 참석 응답'}
+    className={cn('rounded-lg border p-3',scheduleLabel&&'flex flex-wrap items-center justify-between gap-3',status==='pending'?'border-amber-300 bg-amber-50/50':'border-border')}>
+    <div>
+      <h3 className="text-sm font-medium">{scheduleLabel ?? '참석 여부 응답'}</h3>
+      <p className={cn('text-xs',status==='pending'?'text-amber-800':status==='available'?'text-emerald-700':'text-red-700')} role="status">
+        {status==='pending'?'내 응답 필요':`내 응답 · ${label}`}
+      </p>
+    </div>
+    <div className={cn('flex gap-2',!scheduleLabel&&'mt-2')}>
+      <Button type="button" size="sm" aria-pressed={status==='available'} variant={status==='available'?'default':'outline'} onClick={()=>onRespond('available')}>참석 가능</Button>
+      <Button type="button" size="sm" aria-pressed={status==='unavailable'} variant={status==='unavailable'?'default':'outline'} onClick={()=>onRespond('unavailable')}>참석 불가</Button>
+    </div>
+  </section>
 }

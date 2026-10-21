@@ -5,7 +5,7 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { openDirectChat } from '@/lib/supabase/chat'
 import { openConversation } from '@/lib/chat/open-conversation'
 import { chatKeys } from '@/features/chat/use-chat'
-import { MeetingAttendance } from './MeetingAttendance'
+import { MeetingAttendance, MeetingResponse } from './MeetingAttendance'
 import { MeetingSchedulePicker, type MeetingScheduleChoice } from './MeetingSchedulePicker'
 import {
   Check,
@@ -533,6 +533,8 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                 const rounds = [...item.rounds].sort(
                   (left, right) => left.round - right.round,
                 )
+                const responseRounds = item.status === 'in_progress' && item.phase !== 'preparing' && item.members.some(person => person.id === host.id)
+                  ? rounds.filter(round => Boolean(round.confirmed ?? round.startsAt)) : []
                 return (
                   <li
                     key={item.id}
@@ -637,6 +639,12 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                         </Button>
                       ) : null}
                     </div>
+                    {responseRounds.length > 0 ? <div className="w-full space-y-2">
+                      {responseRounds.map(round => <MeetingResponse key={round.id} round={round} actorId={host.id}
+                        scheduleLabel={`${formatRoundLabel(round.round)} · ${round.startsAt.slice(0,10)} · ${formatBookedTimeRange(round.startsAt,round.durationMinutes ?? item.durationMinutes)} · ${meetingRoomName(round.roomId)}`}
+                        onRespond={status => respond(item,round,status)}/>
+                      )}
+                    </div> : null}
                   </li>
                 )
               })}
