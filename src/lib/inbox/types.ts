@@ -7,6 +7,14 @@ export type InboxNotificationKind =
   | 'mention'
   | 'meeting_invitation'
 
+export type MeetingNotice = {
+  roundId: string
+  scheduleVersion: number
+  status: 'pending' | 'available' | 'unavailable'
+  /** 멤버는 참석 여부를 답하고, 호스트는 불가 발생·전원 참석 가능을 확인한다. */
+  role: 'member' | 'host'
+}
+
 export type InboxNotification = {
   id: string
   kind: InboxNotificationKind
@@ -15,6 +23,7 @@ export type InboxNotification = {
   href: string
   createdAt: string
   readAt: string | null
+  meeting?: MeetingNotice
 }
 
 export type ChatRoomKind = 'direct' | 'group'
