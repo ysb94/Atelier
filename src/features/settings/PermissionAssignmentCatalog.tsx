@@ -6,13 +6,13 @@ import type { PermissionCode, PermissionGrant } from '@/lib/company/permissions'
 import { useRenderWatch } from '@/lib/diagnostics'
 
 type Props = {
-  legacy?: boolean; delegated?: boolean; canEditApprovers: boolean
+  legacy?: boolean; pendingActivation?: boolean; delegated?: boolean; canEditApprovers: boolean
   grants?: readonly PermissionGrant[]; loading?: boolean; error?: boolean
   onApprovers: (part: 'departments' | 'self') => void
   onPermission?: (permission: PermissionCode) => void
 }
 
-export function PermissionAssignmentCatalog({ legacy=false, delegated=false, canEditApprovers, grants=[], loading=false, error=false, onApprovers, onPermission }: Props) {
+export function PermissionAssignmentCatalog({ legacy=false, pendingActivation=false, delegated=false, canEditApprovers, grants=[], loading=false, error=false, onApprovers, onPermission }: Props) {
   useRenderWatch('PermissionAssignmentCatalog')
   const [search,setSearch]=useState('')
   const needle=search.trim().toLowerCase()
@@ -25,7 +25,7 @@ export function PermissionAssignmentCatalog({ legacy=false, delegated=false, can
       {!items.length && <tr><td colSpan={5} className="p-6 text-center text-muted-foreground">검색한 업무가 없습니다.</td></tr>}
       {items.map(item=>{
         const count=new Set(grants.filter(grant=>grant.permission===item.permission).map(grant=>grant.profileId)).size
-        const status=item.approvalPart==='self'?'구성 시안':item.approvalPart?'기존 지정 유지':legacy?'개인별 지정 저장 미연결':loading?'불러오는 중…':error?'조회 실패':`${count}명 지정`
+        const status=item.approvalPart==='self'?'구성 시안':item.approvalPart?'기존 지정 유지':legacy?'개인별 지정 저장 미연결':loading?'불러오는 중…':error?'조회 실패':pendingActivation?`${count}명 저장 · 적용 대기`:`${count}명 지정`
         return <tr key={item.id} className="border-t border-border"><td className="whitespace-nowrap px-4 py-3 text-muted-foreground">{item.group}</td><td className="px-4 py-3"><span className="font-medium">{item.label}</span><span className="mt-1 block text-xs text-muted-foreground">{item.description}</span></td><td className="px-4 py-3 text-xs">{item.scope}</td><td className="px-4 py-3 text-xs text-muted-foreground">{status}</td><td className="px-4 py-3"><Button size="sm" variant="outline" disabled={!item.approvalPart && (legacy || loading || error || !onPermission)} aria-label={`${item.label} 설정`} onClick={()=>{if(item.approvalPart)onApprovers(item.approvalPart);else if(item.permission)onPermission?.(item.permission)}}>{item.approvalPart==='self'?'시안 보기':item.approvalPart?'승인자 설정':'담당자 지정'}</Button></td></tr>
       })}
     </tbody></table></div>

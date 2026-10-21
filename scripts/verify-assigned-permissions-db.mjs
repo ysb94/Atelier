@@ -52,8 +52,14 @@ try {
   create policy approver_write on public.department_request_approvers for all to authenticated using(app.can_edit_org_assignment()) with check(app.can_edit_org_assignment());
   ` .replace('create policy approver_write', () => "create function app.can_edit_org_assignment() returns boolean language sql as $$ select false $$; create policy approver_write"))
   const before = await db.query('select * from public.department_request_approvers order by department_id,request_type')
-  const migration = await fs.readFile('supabase/migrations/20261021033319_assigned_permissions.sql','utf8')
+  const beforeProfiles = await db.query('select * from public.profiles order by id')
+  const beforeCapabilities = await db.query('select * from public.profile_capabilities order by profile_id,capability')
+  const beforeMemberships = await db.query('select * from public.brand_members order by profile_id,brand_id')
+  const migration = await fs.readFile('supabase/pending/assigned_permissions_cutover.sql','utf8')
   await db.exec(migration)
+  assert.deepEqual((await db.query('select * from public.profiles order by id')).rows,beforeProfiles.rows,'권한 DB 추가 시 기존 사용자 정보·로그인·승인 상태를 수정하지 않음')
+  assert.deepEqual((await db.query('select * from public.profile_capabilities order by profile_id,capability')).rows,beforeCapabilities.rows,'기존 업무 역량 원본 유지')
+  assert.deepEqual((await db.query('select * from public.brand_members order by profile_id,brand_id')).rows,beforeMemberships.rows,'기존 브랜드 연결 원본 유지')
   await db.exec(`alter table public.profiles enable row level security;
     grant update on public.profiles to authenticated;
     create policy profiles_read on public.profiles for select to authenticated using(id=auth.uid() or app.can_view_members());

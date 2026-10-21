@@ -1915,7 +1915,14 @@ Supabase에는 한 프로젝트에서 특정 브랜드만 버튼으로 떼는 �
 
 ## 변경 원칙
 
-### 지정 권한으로 전환하는 구현 (2026-10-21, 운영 적용 대기)
+### 지정 권한 저장 연결과 전체 전환 대기 (2026-10-21)
+
+`20261021055942_permission_assignment_storage.sql`은 운영 적용했다. 담당자 저장·조회·해제·이력용
+테이블과 API만 추가했고 기존 사용자 9명·승인자 4건·업무 역량·브랜드 연결, 기존 함수·RLS·
+프로필 트리거는 변경하지 않았다. `permission_directory.activation='pending'`이므로 새 지정은
+저장되지만 업무 권한 판정에 적용되지는 않는다. 기존 관리자가 중앙 설정에서 저장할 수 있다.
+전체 전환 SQL은 자동 적용되지 않도록 `supabase/pending/assigned_permissions_cutover.sql`에
+분리했다. 이미 저장소가 있으므로 이 참고안을 그대로 적용하지 말고 후속 변경만 새로 작성한다.
 
 전환 스위치는 `VITE_ASSIGNED_PERMISSIONS_ENABLED`이며 기본값은 false다. DB·Edge 전환을
 승인하고 검증하기 전에는 켜지 않는다. 전환 전에는 기존 프로필·역량·담당 내역을 사용하며
@@ -1929,8 +1936,8 @@ Supabase에는 한 프로젝트에서 특정 브랜드만 버튼으로 떼는 �
 기존 승인 계정을 pending으로 되돌리지 못하게 한다. 실제 AuthProvider·프로필 로더·
 AuthGate를 기존 DB 형태에 연결한 `verify:auth-recovery-browser`로 이 경로를 검증한다.
 
-`20261021033319_assigned_permissions.sql`과 `src/lib/company/permissions.ts`가
-새 권한 모델이다. 아래 내용은 이 마이그레이션과 새 앱을 함께 적용한 이후의 기준이며,
+`supabase/pending/assigned_permissions_cutover.sql`과 `src/lib/company/permissions.ts`가
+전체 전환 참고안이다. 아래 내용은 후속 전환과 새 앱을 함께 적용한 이후의 기준이며,
 앞부분에 남은 직책·직급·이메일 예외는 이전 모델의 기록이다. 현재 운영 DB에는 새
 마이그레이션을 적용하지 않았고 `styled-image` Edge Function도 배포하지 않았다.
 

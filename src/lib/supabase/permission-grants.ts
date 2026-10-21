@@ -2,7 +2,7 @@ import { getSupabase } from './client'
 import type { PermissionCode, PermissionGrant, PermissionScope } from '../company/permissions'
 
 export type PermissionEvent = { id: string; actor: string; person: string; permission: PermissionCode; scopeKind: PermissionScope; scopeId: string; enabled: boolean; createdAt: string }
-export type PermissionDirectory = { profiles: { id: string; name: string; department: string; position: string; status: string }[]; scopes: { kind: PermissionScope; id: string; name: string }[]; grants: PermissionGrant[]; events?: PermissionEvent[]; revision: string }
+export type PermissionDirectory = { activation?: 'pending' | 'active'; profiles: { id: string; name: string; department: string; position: string; status: string }[]; scopes: { kind: PermissionScope; id: string; name: string }[]; grants: PermissionGrant[]; events?: PermissionEvent[]; revision: string }
 function fail(error: { message: string }) { console.warn('[permissions] 권한 요청 실패', error); return new Error(error.message) }
 export async function listPermissionGrants(): Promise<PermissionGrant[]> {
   const { data, error } = await getSupabase().rpc('list_my_permission_grants')

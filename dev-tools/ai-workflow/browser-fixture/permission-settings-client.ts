@@ -12,7 +12,7 @@ export function permissionFixtureRpc(name: string,args?: Record<string,unknown>)
   if (name === 'permission_directory') {
     if (location.search.includes('permissions-error')) return failure('권한 지정 내역 조회 실패')
     if (location.search.includes('identity=partner')) return Promise.resolve({error:null,data:{revision:String(revision),profiles:[{id:'fixture-user',name:'업체 담당',department:'디자인팀',status:'active'},{id:'other-user',name:'검증 직원',department:'물류팀',status:'active'}],scopes:[{kind:'partner',id:'partner-a',name:'검증 업체'}],grants:structuredClone(grants.filter(grant=>grant.permission==='partner.edit'))}})
-    return Promise.resolve({error:null,data:{revision:String(revision),profiles:[{id:'fixture-user',name:'화면 검수',department:'디자인팀',position:'사원',status:'active'},{id:'other-user',name:'검증 직원',department:'물류팀',position:'사원',status:'active'}],scopes:[{kind:'company',id:company,name:'회사 전체'},{kind:'department',id:'dept-design',name:'디자인팀'},{kind:'department',id:'dept-logistics',name:'물류팀'}],grants:structuredClone(grants)}})
+    return Promise.resolve({error:null,data:{activation:location.search.includes('permissions-legacy')?'pending':undefined,revision:String(revision),profiles:[{id:'fixture-user',name:'화면 검수',department:'디자인팀',position:'사원',status:'active'},{id:'other-user',name:'검증 직원',department:'물류팀',position:'사원',status:'active'}],scopes:[{kind:'company',id:company,name:'회사 전체'},{kind:'department',id:'dept-design',name:'디자인팀'},{kind:'department',id:'dept-logistics',name:'물류팀'}],grants:structuredClone(grants)}})
   }
   if (name === 'set_permission_grant' && args) {
     if (args.p_profile === 'fixture-user') return failure('본인 권한 변경 불가')

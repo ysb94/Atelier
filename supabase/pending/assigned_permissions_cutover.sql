@@ -1,4 +1,5 @@
--- 기존 승인자 테이블과 업무 데이터를 유지한다. 운영 적용 전 별도 검토가 필요하다.
+-- 전체 권한 전환 참고안. 운영 미적용이며 그대로 실행하지 않는다.
+-- 저장 전용 DB가 별도 적용되므로 후속 전환 시 그 상태를 기준으로 새 마이그레이션을 만들어야 한다.
 create table app.permission_catalog (code text primary key, scope_kinds text[] not null);
 create table public.permission_grants (
   id uuid primary key default gen_random_uuid(),

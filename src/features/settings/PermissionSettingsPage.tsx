@@ -15,27 +15,18 @@ type PendingGrant = { profileId: string; permission: PermissionCode; scopeKind: 
 export function PermissionSettingsPage() {
   useRenderWatch('PermissionSettingsPage')
   const { profile } = useAuth()
-  const fullAccess = hasPermission(profile, 'permissions.manage')
+  const fullAccess = hasPermission(profile, 'permissions.manage') || (profile?.permissionMode === 'legacy' && profile.isAdmin)
   const manage = fullAccess || hasPermission(profile, 'partner.manage')
   const approvers = hasPermission(profile, 'approvers.manage')
-  if (profile?.permissionMode === 'legacy') return <LegacyPermissionSettings approvers={approvers} manage={manage}/>
   if (!manage && !approvers) return <><PageHeader title="권한·담당자 설정"/><p role="status">권한 지정 관리 또는 승인자 지정 권한이 필요합니다.</p></>
   return <PermissionSettingsContent key={fullAccess ? 'all' : 'delegated'} manage={manage} fullAccess={fullAccess} approvers={approvers}/>
-}
-
-function LegacyPermissionSettings({approvers,manage}:{approvers:boolean;manage:boolean}) {
-  const [part,setPart]=useState<'catalog'|'departments'|'self'>('catalog')
-  return <div className="space-y-5"><PageHeader title="권한·담당자 설정"/><p role="status">통합 권한 전환은 아직 적용하지 않았습니다. 현재는 기존 권한과 승인자 지정으로 동작합니다.</p>{!approvers&&!manage?<p>권한 지정 관리 또는 승인자 지정 권한이 필요합니다.</p>:<>
-    <div className="flex flex-wrap gap-2"><Button variant={part==='catalog'?'default':'outline'} onClick={()=>setPart('catalog')}>전체 승인·담당 업무</Button>{approvers&&<Button variant={part!=='catalog'?'default':'outline'} onClick={()=>setPart('departments')}>부서별 근태·야근 승인자</Button>}</div>
-    {part==='catalog'?<PermissionAssignmentCatalog legacy canEditApprovers={approvers} onApprovers={setPart}/>:<DepartmentApproversPanel key={part} initialPart={part}/>}
-  </>}</div>
 }
 
 function PermissionSettingsContent({ manage, fullAccess, approvers }: { manage: boolean; fullAccess: boolean; approvers: boolean }) {
   const { profile, refreshProfile } = useAuth()
   const client = useQueryClient()
   const [view, setView] = useState<'features' | 'people' | 'approvers'>(manage ? 'features' : 'approvers')
-  const [catalogOpen,setCatalogOpen]=useState(false)
+  const [catalogOpen,setCatalogOpen]=useState(profile?.permissionMode==='legacy')
   const [approverPart,setApproverPart]=useState<'departments'|'self'>('departments')
   const [permission, setPermission] = useState<PermissionCode>(fullAccess ? 'work.manage' : 'partner.edit')
   const [person, setPerson] = useState('')
@@ -67,12 +58,13 @@ function PermissionSettingsContent({ manage, fullAccess, approvers }: { manage: 
   const disabled = mutation.isPending || directory.isFetching || Boolean(directory.error)
   return <div className="space-y-5">
     <PageHeader title="권한·담당자 설정" description="직책·직급과 관계없이 사람과 대상 범위를 지정합니다."/>
+    {directory.data?.activation==='pending' && <p role="status" className="rounded-lg border border-border bg-muted/40 p-3 text-sm">담당자 지정·저장·해제가 연결되었습니다. 저장한 새 지정은 실제 기능별 권한 전환 전까지 적용 대기 상태이며, 현재 이용 권한과 로그인·가입 승인·근태 승인자 내역은 유지됩니다.</p>}
     <div role="tablist" aria-label="권한 설정 보기" className="flex flex-wrap gap-2 border-b border-border pb-3">
       {manage && <><Button role="tab" aria-selected={view === 'features'} variant={view === 'features' ? 'default' : 'outline'} onClick={() => { setView('features'); setPending(null) }}>기능별 담당자</Button><Button role="tab" aria-selected={view === 'people'} variant={view === 'people' ? 'default' : 'outline'} onClick={() => { setView('people'); setPending(null) }}>직원별 권한</Button></>}
       {approvers && <Button role="tab" aria-selected={view === 'approvers'} variant={view === 'approvers' ? 'default' : 'outline'} onClick={() => { setView('approvers'); setPending(null) }}>근태·야근 승인자</Button>}
       {manage && <Button variant="outline" disabled={directory.isFetching || mutation.isPending} onClick={() => { setPending(null); void directory.refetch() }}>지정 내역 새로 불러오기</Button>}
     </div>
-    {manage && <details open={catalogOpen} onToggle={event=>setCatalogOpen(event.currentTarget.open)} className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-semibold">전체 승인·담당 업무 목록</summary><div className="mt-4"><PermissionAssignmentCatalog delegated={!fullAccess} canEditApprovers={approvers} grants={grants} loading={directory.isPending} error={Boolean(directory.error)} onApprovers={part=>{setApproverPart(part);setView('approvers');setPending(null);setCatalogOpen(false)}} onPermission={code=>{choosePermission(code);setView('features');setCatalogOpen(false)}}/></div></details>}
+    {manage && <details open={catalogOpen} onToggle={event=>setCatalogOpen(event.currentTarget.open)} className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-semibold">전체 승인·담당 업무 목록</summary><div className="mt-4"><PermissionAssignmentCatalog pendingActivation={directory.data?.activation==='pending'} delegated={!fullAccess} canEditApprovers={approvers} grants={grants} loading={directory.isPending} error={Boolean(directory.error)} onApprovers={part=>{setApproverPart(part);setView('approvers');setPending(null);setCatalogOpen(false)}} onPermission={code=>{choosePermission(code);setView('features');setCatalogOpen(false)}}/></div></details>}
     {view === 'approvers' ? <DepartmentApproversPanel key={approverPart} initialPart={approverPart}/> : <>
       <p className="text-sm text-muted-foreground">권한이 있는 행동만 허용됩니다. 본인 신청 승인 금지와 기존 검수·업무 단계는 계속 적용됩니다.</p>
       {directory.error && <div role="alert" className="rounded-xl border border-danger p-4">{directory.error.message}<Button className="ml-3" variant="outline" onClick={() => void directory.refetch()}>다시 불러오기</Button></div>}
