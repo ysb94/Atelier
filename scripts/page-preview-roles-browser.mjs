@@ -36,10 +36,10 @@ export async function verifyPagePreviewRoles(page,origin){
  await page.setViewportSize({width:1440,height:1000})
 
  await page.goto(origin+'/work-requests/design')
- assert.deepEqual(await roles().getByRole('button').allTextContents(),['전체 관리','해당 부서 · 일반','해당 부서 · 담당자','타부서 · 일반','타부서 · 담당자'])
- await choose('해당 부서 · 일반');await page.getByRole('heading',{name:'내 VisualTeam 업무',exact:true}).waitFor()
- await choose('타부서 · 일반');await page.getByRole('heading',{name:'VisualTeam 작업 요청',exact:true}).waitFor()
- await choose('타부서 · 담당자');await page.getByRole('heading',{name:'VisualTeam 업무 관리',exact:true}).waitFor()
+ assert.deepEqual(await roles().getByRole('button').allTextContents(),['전체 관리','담당자','해당 부서','타부서'])
+ await choose('해당 부서');await page.getByRole('heading',{name:'내 VisualTeam 업무',exact:true}).waitFor()
+ await choose('타부서');await page.getByRole('heading',{name:'VisualTeam 작업 요청',exact:true}).waitFor()
+ await choose('담당자');await page.getByRole('heading',{name:'VisualTeam 업무 관리',exact:true}).waitFor()
 
  await page.goto(origin+'/settings/profile?part=work')
  await choose('담당자');await page.getByRole('button',{name:'팀 업무',exact:true}).waitFor()
@@ -105,5 +105,5 @@ export async function verifyPagePreviewRoles(page,origin){
  await chatBar().getByRole('button',{name:'담당자',exact:true}).click();await page.getByText('동료 메시지',{exact:true}).waitFor()
  assert.equal(await page.getByRole('button',{name:'메시지 더보기',exact:true}).count(),2)
  await chatBar().getByRole('button',{name:'일반',exact:true}).click();assert.equal(await page.getByRole('button',{name:'메시지 더보기',exact:true}).count(),1)
- console.log('page-preview-roles: 공통 역할·화면별 2/3/5개 버튼·타부서 담당자·신청/회의 독립 선택·채팅 분리·실제 권한 보존 통과')
+ console.log('page-preview-roles: 담당자 통합·화면별 2/3/4개 버튼·부서별 표시 차이·신청/회의 독립 선택·채팅 분리·실제 권한 보존 통과')
 }

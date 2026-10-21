@@ -6,7 +6,7 @@ import { isWorkRequestOwner, WORK_REQUEST_CONFIG } from '../../features/work-req
 import type { WorkCapability } from './capabilities'
 
 export type PreviewGroup = 'role' | 'request' | 'meeting' | 'chat'
-export type PreviewRole = 'all' | 'employee' | 'manager' | 'other-employee' | 'other-manager'
+export type PreviewRole = 'all' | 'employee' | 'manager' | 'other-employee'
 export type PagePreviewCase = { id: string; label: string; group: PreviewGroup; settings: PreviewSettings }
 type Screen = { permissions: PermissionCode[]; roles?: PreviewRole[]; departmental?: boolean; departmentName?: string }
 const basicRoles: PreviewRole[] = ['all','employee','manager']
@@ -40,11 +40,12 @@ export function pagePreviewCases(pathname: string, real: Profile, search=''): Pa
   const config=screen(path,new URLSearchParams(search).get('part') ?? '')
   if (!config) return []
   const departmentName=config.departmentName ?? real.departmentName ?? '디자인팀'
-  const roles=config.departmental?['all','employee','manager','other-employee','other-manager'] as const:config.roles ?? basicRoles
+  // 담당자는 지정된 업무 화면이 같으므로 소속 부서별 버튼을 중복 제공하지 않는다.
+  const roles=config.departmental?['all','manager','employee','other-employee'] as const:config.roles ?? basicRoles
   return roles.map(role=>{
-    const other=role.startsWith('other-'), manager=role==='manager'||role==='other-manager'
+    const other=role==='other-employee', manager=role==='manager'
     const codes=role==='all'?PERMISSION_CATALOG.map(([code])=>code):manager?config.permissions:[]
-    const label=role==='all'?'전체 관리':`${config.departmental?other?'타부서 · ':'해당 부서 · ':''}${manager?'담당자':'일반'}`
+    const label=role==='all'?'전체 관리':manager?'담당자':config.departmental?other?'타부서':'해당 부서':'일반'
     return { id:role,label,group:'role',settings:{
       departmentId:other?null:real.departmentId, departmentName:other?(departmentName.includes('물류')?'기획팀':'물류팀'):departmentName,
       departmentPersonnelScope:null,position:'사원',jobGrade:'사원',status:'active',isAdmin:false,

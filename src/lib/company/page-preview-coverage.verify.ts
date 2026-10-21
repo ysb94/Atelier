@@ -13,7 +13,7 @@ function profile(path:string,id:string){const item=cases(path).find(item=>item.i
 for(const path of ['/','/members','/settings/profile','/work','/drafts','/operations-support','/brands','/settings/ai','/idea-contest','/usage-codes','/chat/room/test']){
  const items=cases(path)
  assert.equal(new Set(items.map(item=>item.id)).size,items.length)
- assert.ok(items.filter(item=>item.group==='role').length<=5)
+ assert.ok(items.filter(item=>item.group==='role').length<=4)
  assert.ok(items.every(item=>item.settings.status==='active'))
  assert.ok(items.filter(item=>item.group==='role').every(item=>!item.facts?.requestOwner&&!item.facts?.meetingRole&&!item.facts?.chatRole))
 }

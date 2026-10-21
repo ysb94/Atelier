@@ -16,7 +16,7 @@ export type CompletePreviewCase = PagePreviewCase & { facts?: PreviewFacts }
 export function completePagePreviewCases(pathname: string, real: Profile, search=''): CompletePreviewCase[] {
   const path=pathname.replace(/\/$/,'') || '/', part=new URLSearchParams(search).get('part') ?? ''
   const cases: CompletePreviewCase[]=pagePreviewCases(path,real,search).map(item=>{
-    const managing=item.id==='all'||item.id==='manager'||item.id==='other-manager'
+    const managing=item.id==='all'||item.id==='manager'
     const facts: PreviewFacts={}
     if (path==='/usage-codes') facts.usageAccess=item.id==='all'?'manager':managing?'editor':'viewer'
     if (path==='/settings/profile' || path==='/work') facts.departmentApprover=managing
