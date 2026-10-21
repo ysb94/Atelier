@@ -6,6 +6,7 @@ import { openDirectChat } from '@/lib/supabase/chat'
 import { openConversation } from '@/lib/chat/open-conversation'
 import { chatKeys } from '@/features/chat/use-chat'
 import { MeetingAttendance } from './MeetingAttendance'
+import { MeetingSchedulePicker, type MeetingScheduleChoice } from './MeetingSchedulePicker'
 import {
   Check,
   ChevronDown,
@@ -184,6 +185,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   const [composeOpen, setComposeOpen] = useState(false)
   const [deleteSeriesId, setDeleteSeriesId] = useState<string | null>(null)
   const [selectedRoomId, setSelectedRoomId] = useState(MEETING_ROOMS[0].id)
+  const [scheduleChoice,setScheduleChoice]=useState<MeetingScheduleChoice>(()=>({roomId:MEETING_ROOMS[0].id,dateKey:toDateKey(new Date()),clock:''}))
   const todayKey = toDateKey(new Date())
   const fromKey = rangeFromKey ?? todayKey
   const days = useMemo(() => listMeetingDays(fromKey, visibleDays, todayKey),[fromKey,todayKey,visibleDays])
@@ -340,6 +342,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     setSelectedHostId(null)
     setComposePrompt(null)
     setPicker(null)
+    setScheduleChoice({roomId:selectedRoomId,dateKey:todayKey,clock:''})
     setComposeOpen(false)
   }
 
@@ -412,11 +415,13 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   }
 
   function scheduleNextRound(item: MeetingSeries,roundId?:string) {
+    const target=item.rounds.find(round=>round.id===roundId) ?? findPendingRound(item)
     setBoardTab('in_progress')
     setSchedulingSeriesId(item.id)
     setSchedulingRoundId(roundId ?? null)
     setTitle(item.title)
-    setDurationMinutes(null)
+    setDurationMinutes(target?.startsAt ? target.durationMinutes ?? item.durationMinutes : null)
+    setScheduleChoice({roomId:target?.roomId || selectedRoomId,dateKey:target?.startsAt.slice(0,10) || todayKey,clock:target?.startsAt.slice(11,16) || ''})
     setMembers(item.members)
     setComposePrompt(null)
     setMemberPickerOpen(false)
@@ -860,9 +865,12 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                 )}
               </div>
             </div>
+            {schedulingSeries ? <MeetingSchedulePicker rooms={rooms} value={scheduleChoice} onChange={setScheduleChoice} durationMinutes={composeDuration} attendees={attendees}
+              roundId={schedulingRoundId ?? findPendingRound(schedulingSeries)?.id} error={meetings.error}
+              onConfirm={()=>void bookSlot(scheduleChoice.roomId,scheduleChoice.dateKey,scheduleChoice.clock)}/> : null}
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
               <p className="text-xs text-muted-foreground">{schedulingSeries?'일정을 확정하면 멤버에게 참석 요청이 전달됩니다. 일정 변경 시 응답이 초기화됩니다.':'준비 중에는 호스트와 생성자만 볼 수 있습니다. 안내·자료를 준비한 뒤 일정을 확정하세요.'}</p>
-              <Button type="button" onClick={()=>{if(schedulingSeries){if(composeReady)setComposeOpen(false);else showComposeGaps()}else void createDraft()}}>{schedulingSeries?'날짜·시간 선택':'준비 회의 생성'}</Button>
+              {!schedulingSeries?<Button type="button" onClick={()=>void createDraft()}>준비 회의 생성</Button>:null}
             </div>
           </div>
         </div>
@@ -873,7 +881,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
         <CardContent className="space-y-4 p-4">
           <div>
             <p className="text-sm font-medium">회의실 일정</p>
-            {schedulingSeries ? <p role="status" className="mt-1 text-xs text-sky-700">「{schedulingSeries.title}」 날짜를 누른 뒤 시간을 선택하면 일정이 확정됩니다. <button type="button" className="underline" onClick={resetCompose}>취소</button></p> : null}
+            {schedulingSeries ? <p role="status" className="mt-1 text-xs text-sky-700">「{schedulingSeries.title}」 일정 선택 중 · <button type="button" className="underline" onClick={()=>setComposeOpen(true)}>일정 확정 창 열기</button> · <button type="button" className="underline" onClick={resetCompose}>취소</button></p> : null}
           </div>
 
           <RoomScheduleBlock
@@ -953,9 +961,10 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
           occupants={pickerOccupants}
           now={now}
           onClose={() => setPicker(null)}
-          onBook={(clock) =>
-            bookSlot(picker.roomId, picker.dateKey, clock)
-          }
+          onBook={(clock) => {
+            setScheduleChoice({roomId:picker.roomId,dateKey:picker.dateKey,clock})
+            setPicker(null);setComposeOpen(true)
+          }}
         />
       ) : null}
 
