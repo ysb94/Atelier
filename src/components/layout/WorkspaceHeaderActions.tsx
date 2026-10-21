@@ -198,9 +198,9 @@ function ChatPanelPreview(props: ComponentProps<typeof ChatPanel>) {
   return <>
     <DeveloperPreviewBar scope="chat" />
     <div className="min-h-0 flex-1"><ChatPanel {...props}
-      isManager={preview?.chatRole ? preview.chatRole === 'manager' : props.isManager}
+      isManager={preview?.chatRole ? preview.chatRole !== 'employee' : props.isManager}
       canModerateRoom={preview?.chatRole ? undefined : props.canModerateRoom}
-      isAdmin={preview?.chatRole ? preview.chatRole === 'admin' : props.isAdmin}
+      isAdmin={preview?.chatRole ? preview.chatRole === 'all' : props.isAdmin}
     /></div>
   </>
 }

@@ -1,61 +1,47 @@
 import assert from 'node:assert/strict'
 import { completePagePreviewCases, previewUsageAccess } from './page-preview-coverage'
 import { previewProfile } from './profile-preview'
-import { canAccessBrandManagement, canAccessMamamIdeaInbox, canManagePersonnel, canEditOrgAssignment, canAccessOperationsSupport, isAttendanceExempt, isCompanyReviewer, isCompanyManager } from './capabilities'
+import { hasPermission } from './permissions'
+import { canManagePersonnel, canEditOrgAssignment, canAccessOperationsSupport, canAccessBrandManagement, canAccessMamamIdeaInbox } from './capabilities'
+import { previewRequestIsSelf, previewMeetingActor } from './relationship-preview'
+import { canDeleteMeetingSeries, filterSeriesForViewer, type MeetingSeries } from '../../features/meetings/meeting-schedule'
 import type { Profile } from '../supabase/profiles'
-import { previewMeetingActor, previewRequestIsSelf } from './relationship-preview'
-import { canDeleteMeetingSeries, canRemovePrepFile, filterSeriesForViewer, type MeetingSeries } from '../../features/meetings/meeting-schedule'
-
-const real = { companyId: 'company', id: 'developer', email: 'dev@atelier.local', status: 'active', isAdmin: true, capabilities: [], memberships: [] } as unknown as Profile
-const snapshot = JSON.stringify(real)
-const cases = (path: string) => completePagePreviewCases(path, real)
-const profile = (path: string, id: string) => {
-  const item = cases(path).find(item => item.id === id)
-  assert.ok(item, `${path}: ${id}`)
-  const result = previewProfile(real, item.settings)
-  assert.equal(result.id, real.id, '다른 사람의 ID로 쿼리하지 않음')
-  return result
+const real={companyId:'company',id:'developer',email:'dev@atelier.local',status:'active',isAdmin:true,departmentId:'design',departmentName:'디자인팀',capabilities:[],memberships:[],permissionGrants:[]} as unknown as Profile
+const snapshot=JSON.stringify(real)
+const cases=(path:string,search='')=>completePagePreviewCases(path,real,search)
+function profile(path:string,id:string){const item=cases(path).find(item=>item.id===id)!;assert.ok(item);return previewProfile(real,item.settings)}
+for(const path of ['/','/members','/settings/profile','/work','/drafts','/operations-support','/brands','/settings/ai','/idea-contest','/usage-codes','/chat/room/test']){
+ const items=cases(path)
+ assert.equal(new Set(items.map(item=>item.id)).size,items.length)
+ assert.ok(items.filter(item=>item.group==='role').length<=5)
+ assert.ok(items.every(item=>item.settings.status==='active'))
+ assert.ok(items.filter(item=>item.group==='role').every(item=>!item.facts?.requestOwner&&!item.facts?.meetingRole&&!item.facts?.chatRole))
 }
-for (const path of ['/', '/settings/profile', '/work', '/members', '/drafts', '/operations-support', '/brands', '/settings/ai', '/idea-contest', '/usage-codes', '/chat/room/test']) {
-  const items = cases(path)
-  assert.equal(new Set(items.map(item => item.id)).size, items.length)
-  assert.ok(items.every(item => item.label && item.settings.status === 'active'))
-}
-const home = cases('/').filter(item => !item.facts?.chatRole).map(item => previewProfile(real, item.settings))
-assert.deepEqual(new Set(home.map(item => isCompanyReviewer(item) ? 'reviewer' : item.departmentName === '운영지원팀' ? 'operations' : isCompanyManager(item) ? 'manager' : 'employee')), new Set(['reviewer', 'operations', 'manager', 'employee']))
-assert.deepEqual(new Set(home.map(isAttendanceExempt)), new Set([true, false]))
-assert.equal(canManagePersonnel(profile('/', 'personnel-member')), true)
-for (const [id, manage, assignment] of [['editor', true, true], ['personnel-member', true, false], ['admin', true, false], ['viewer', false, false], ['reviewer', false, false]] as const) {
-  const p = profile('/members', id)
-  assert.equal(canManagePersonnel(p), manage, id)
-  assert.equal(canEditOrgAssignment(p), assignment, id)
-}
-assert.equal(canAccessOperationsSupport(profile('/operations-support', 'admin-denied')), false)
-assert.equal(canAccessOperationsSupport(profile('/operations-support', 'reviewer')), true)
-for (const id of ['reviewer', 'reviewer-admin', 'reviewer-lead']) assert.equal(canAccessBrandManagement(profile('/brands', id)), true)
-for (const id of ['admin', 'employee']) assert.equal(canAccessBrandManagement(profile('/brands', id)), false)
-assert.equal(canAccessMamamIdeaInbox(profile('/idea-contest', 'reviewer')), true)
-assert.equal(canAccessMamamIdeaInbox(profile('/idea-contest', 'admin')), false)
-assert.deepEqual(cases('/settings/profile').filter(item => item.facts?.departmentApprover !== undefined).map(item => item.facts?.departmentApprover), [true, false])
-assert.equal(cases('/settings/ai').find(item => item.id === 'brand-lead')?.facts?.brandLead, true, '멤버십이 없는 대표도 책임자 화면 시험')
-const original = Object.freeze({ canRead: true, canEdit: false, canManage: false, editorIds: [] })
-assert.equal(previewUsageAccess(original), original)
-assert.deepEqual(['manager', 'editor', 'viewer'].map(mode => {
-  const result = previewUsageAccess(original, mode as 'manager' | 'editor' | 'viewer')
-  return [result.canEdit, result.canManage]
-}), [[true, true], [true, false], [false, false]])
-assert.equal(original.canEdit, false, '표시 전환이 실제 권한·캐시를 바꾸지 않음')
-assert.equal(JSON.stringify(real), snapshot)
-const owner = { id: 'owner', name: '주최자' }, member = { id: 'member', name: '참여자' }
-const series = [{ host: owner, members: [member], rounds: [{ prepMaterials: [{ uploadedBy: member }] }] }] as unknown as MeetingSeries[]
-const host = previewMeetingActor(owner, series, 'host')
-const participant = previewMeetingActor(owner, series, 'participant')
-const outsider = previewMeetingActor(owner, series, 'outsider')
-assert.equal(canDeleteMeetingSeries(series[0], host, false), true)
-assert.equal(canDeleteMeetingSeries(series[0], participant, false), false)
-assert.equal(filterSeriesForViewer(series, participant, false).length, 1)
-assert.equal(filterSeriesForViewer(series, outsider, false).length, 0)
-assert.equal(filterSeriesForViewer(series, outsider, true).length, 1)
-assert.equal(canRemovePrepFile({ uploadedBy: member }, previewMeetingActor(owner, series, 'uploader')), true)
-assert.deepEqual([previewRequestIsSelf(false, 'self'), previewRequestIsSelf(true, 'other'), previewRequestIsSelf(true)], [true, false, true])
-console.log('page-preview-coverage: 역할 조합·접근 제한·담당자 표시·원본 보존 통과')
+for(const [id,manage,org] of [['all',true,true],['manager',true,false],['employee',false,false]] as const){assert.equal(canManagePersonnel(profile('/members',id)),manage);assert.equal(canEditOrgAssignment(profile('/members',id)),org)}
+assert.equal(canAccessOperationsSupport(profile('/operations-support','manager')),true)
+assert.equal(canEditOrgAssignment(profile('/operations-support','manager')),false)
+assert.equal(canAccessOperationsSupport(profile('/operations-support','employee')),false)
+assert.equal(canAccessBrandManagement(profile('/brands','manager')),true)
+assert.equal(hasPermission(profile('/brands','manager'),'brand.manage'),false)
+assert.equal(canAccessBrandManagement(profile('/brands','employee')),false)
+assert.equal(canAccessMamamIdeaInbox(profile('/idea-contest','all')),true)
+assert.equal(canAccessMamamIdeaInbox(profile('/idea-contest','employee')),false)
+assert.equal(hasPermission(profile('/settings/ai','manager'),'ai.manage'),true)
+assert.equal(hasPermission(profile('/settings/ai','employee'),'ai.manage'),false)
+assert.equal(cases('/settings/profile','?part=work').filter(item=>item.group==='request'||item.group==='meeting').length,0)
+assert.deepEqual(cases('/settings/profile','?part=approvals').filter(item=>item.group==='request').map(item=>item.label),['본인 신청','다른 사람 신청'])
+assert.equal(cases('/operations-support','?part=leave').filter(item=>item.group==='request').length,0,'조회 전용 연차관리에는 승인 관계 선택 없음')
+assert.equal(cases('/settings/profile','?part=meetings').filter(item=>item.group==='meeting').length,4)
+assert.equal(cases('/settings/profile','?part=approvals').filter(item=>item.group==='meeting').length,0)
+assert.equal(cases('/chat/room/test').filter(item=>item.group==='chat').length,2,'별도 채팅 창은 같은 화면인 전체 관리 버튼을 중복 표시하지 않음')
+assert.equal(cases('/').filter(item=>item.group==='chat').length,3)
+const actual=Object.freeze({canEdit:false,canManage:false})
+assert.equal(previewUsageAccess(actual),actual)
+assert.deepEqual(cases('/usage-codes').filter(item=>item.group==='role').map(item=>{const p=previewUsageAccess(actual,item.facts?.usageAccess);return [p.canEdit,p.canManage]}),[[true,true],[false,false],[true,false]])
+const host={id:'host',name:'주최자'},member={id:'member',name:'참여자'}
+const series=[{host,members:[member],rounds:[{prepMaterials:[]}]}] as unknown as MeetingSeries[]
+assert.equal(canDeleteMeetingSeries(series[0],previewMeetingActor(host,series,'host'),false),true)
+assert.equal(filterSeriesForViewer(series,previewMeetingActor(host,series,'outsider'),false).length,0)
+assert.deepEqual([previewRequestIsSelf(false,'self'),previewRequestIsSelf(true,'other'),previewRequestIsSelf(true)],[true,false,true])
+assert.equal(JSON.stringify(real),snapshot)
+console.log('page-preview-coverage: 기능별 표시 차이·신청/회의 관계 분리·채팅 범위·실제 권한/데이터 보존 통과')

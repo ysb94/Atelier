@@ -92,7 +92,7 @@ function ChatWindowContent() {
             title={room.title}
             userId={userId}
             myName={profile.displayName?.trim() || '나'}
-            isManager={preview?.facts?.chatRole ? preview.facts.chatRole === 'manager' : hasPermission(profile, 'chat.moderate', 'chat_room', room.id)}
+            isManager={preview?.facts?.chatRole ? preview.facts.chatRole !== 'employee' : hasPermission(profile, 'chat.moderate', 'chat_room', room.id)}
             outgoing={sending.outgoing}
             titleId={titleId}
             onOpenInfo={() => setInfo(true)}

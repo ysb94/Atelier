@@ -21,6 +21,7 @@ import { ChatWindowPage } from '@/features/chat/ChatWindowPage'
 import { chatKeys } from '@/features/chat/use-chat'
 import type { ChatRoom, ChatMessage } from '@/lib/inbox/types'
 import { SheetTable } from '@/features/data/SheetTable'
+import { WorkRequestPage } from '@/features/work-requests/WorkRequestPage'
 import type { BrandField } from '@/lib/types'
 import { OverlayAuditFixture } from './overlay-audit-fixture'
 import '@/index.css'
@@ -75,6 +76,7 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
     <Route path="/meetings" element={<CompanyMeetingsPage />} />
     <Route path="/data/all" element={<DataHeaderLayeringFixture />} />
     <Route path="/settings/permissions" element={<PermissionSettingsPage />} />
+    <Route path="/work-requests/:owner" element={<WorkRequestPage />} />
     <Route path="/__overlay-audit" element={<OverlayAuditFixture />} />
     <Route path="/usage-codes" element={<><UsageCodePage /><MutationProbe /><output id="guard-result" /></>} />
   </Routes></BrandScope></CompanyBrandScopeProvider></DeveloperPreviewPage>
