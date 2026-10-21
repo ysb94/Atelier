@@ -53,7 +53,6 @@ try {
   ` .replace('create policy approver_write', () => "create function app.can_edit_org_assignment() returns boolean language sql as $$ select false $$; create policy approver_write"))
   const before = await db.query('select * from public.department_request_approvers order by department_id,request_type')
   const migration = await fs.readFile('supabase/migrations/20261021033319_assigned_permissions.sql','utf8')
-  await db.exec("set atelier.permission_rollout_phase='local-rehearsal';")
   await db.exec(migration)
   await db.exec(`alter table public.profiles enable row level security;
     grant update on public.profiles to authenticated;

@@ -1,12 +1,4 @@
 -- 기존 승인자 테이블과 업무 데이터를 유지한다. 운영 적용 전 별도 검토가 필요하다.
--- BEGIN LOCAL REHEARSAL GUARD
--- 운영에서는 이 통합 파일을 직접 실행하지 않는다. 점검 도구의 단계별 패키지만 검토한다.
-do $guard$ begin
- if current_setting('atelier.permission_rollout_phase',true) is distinct from 'local-rehearsal' then
-  raise exception '권한 전환은 아직 승인되지 않았습니다. 개발용 단계별 적용·복구 패키지를 먼저 검토하세요.';
- end if;
-end $guard$;
--- END LOCAL REHEARSAL GUARD
 create table app.permission_catalog (code text primary key, scope_kinds text[] not null);
 create table public.permission_grants (
   id uuid primary key default gen_random_uuid(),
