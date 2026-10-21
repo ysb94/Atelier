@@ -13,7 +13,7 @@ function roundFromHref(href: string, series: readonly MeetingSeries[]) {
 }
 
 function memberNotice(item: InboxNotification, series: readonly MeetingSeries[], profileId: string): MeetingNotice | null {
-  if (item.kind !== 'meeting_invitation') return null
+  if (item.kind !== 'meeting_invitation' || item.meeting?.role === 'host') return null
   const found = roundFromHref(item.href, series)
   if (!found) return null
   const status = found.round.responses?.find((response) => response.profileId === profileId)?.status ?? 'pending'
@@ -32,35 +32,7 @@ export function meetingNoticeItems(invitations: readonly InboxNotification[], se
     const meeting = memberNotice(item, rows, profileId)
     return meeting ? { ...item, meeting } : item
   })
-  if (!series) return memberItems
-  const hostItems: InboxNotification[] = []
-  for (const item of series) {
-    if (item.host.id !== profileId || item.status !== 'in_progress' || item.phase === 'preparing') continue
-    for (const round of item.rounds) {
-      if (!round.startsAt || round.confirmed === false) continue
-      if (item.members.length === 0) continue
-      const declined = item.members.filter(member => round.responses?.some(response => response.profileId === member.id && response.status === 'unavailable'))
-      const allAvailable = item.members.every(member => round.responses?.some(response => response.profileId === member.id && response.status === 'available'))
-      if (declined.length === 0 && !allAvailable) continue
-      const status = declined.length > 0 ? 'unavailable' : 'available'
-      hostItems.push({
-        id: `host-response:${item.id}:${round.id}:${round.scheduleVersion ?? 1}:${status}:${declined.map(member => member.id).sort().join(',')}`,
-        kind: 'meeting_invitation',
-        title: `${item.title} · ${allAvailable ? '전원 참석 가능' : '참석 불가 발생'}`,
-        body: allAvailable ? `멤버 ${item.members.length}명 모두 참석 가능합니다.` : `${declined.map(member => member.name).join(', ')} · 참석 불가 (${declined.length}명)`,
-        href: `/settings/profile?part=meetings&meeting=${item.id}&round=${round.id}`,
-        createdAt: round.startsAt,
-        readAt: null,
-        meeting: {
-          roundId: round.id,
-          scheduleVersion: round.scheduleVersion ?? 1,
-          status,
-          role: 'host',
-        },
-      })
-    }
-  }
-  return [...hostItems, ...memberItems]
+  return [...new Map(memberItems.map(item => [item.id, item])).values()]
 }
 
 export function pendingMeetingNoticeCount(items: readonly InboxNotification[]) {

@@ -125,8 +125,7 @@ export function WorkspaceHeaderActions() {
     catch(error){console.warn('[meetings] 참석 요청 읽음 처리 실패',{error});setNotificationError('참석 요청을 읽음으로 표시하지 못했습니다. 다시 시도해 주세요.')}
   }
   function markAllRead() {
-    if(meetingNotices.items.some(item=>item.kind==='meeting_invitation' && item.meeting?.role!=='host' && !item.readAt)) void markMeetingRead(null)
-    meetingNotices.acknowledgeAll()
+    if(meetingNotices.items.some(item=>item.kind==='meeting_invitation' && !item.readAt)) void markMeetingRead(null)
     const readAt = new Date().toISOString()
     setNotifications((prev) =>
       prev.map((item) => (item.readAt ? item : { ...item, readAt })),
@@ -134,8 +133,7 @@ export function WorkspaceHeaderActions() {
   }
 
   function openNotification(item: InboxNotification) {
-    meetingNotices.acknowledge(item)
-    if(item.kind==='meeting_invitation' && item.meeting?.role!=='host') void markMeetingRead(item.id)
+    if(item.kind==='meeting_invitation') void markMeetingRead(item.id)
     const readAt = new Date().toISOString()
     setNotifications((prev) =>
       prev.map((current) =>

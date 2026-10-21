@@ -1,12 +1,12 @@
 import { getSupabase as general } from './client'
 import { getSupabase as usage } from './usage-headers-client'
 import { permissionFixtureRpc } from './permission-settings-client'
-import { meetingFixtureRpc,meetingFixtureRooms,meetingFixtureStorage } from './meetings-client'
+import { meetingFixtureRpc,meetingFixtureRooms,meetingFixtureStorage,meetingFixtureChannel } from './meetings-client'
 export const isSupabaseConfigured = () => true
 export function getSupabase() {
   const base = general()
   if (location.pathname === '/usage-codes') return { ...usage(), channel: base.channel, removeChannel: base.removeChannel }
-  return { ...base,storage:{...(base as any).storage,from:(name:string)=>name==='company-meetings'?meetingFixtureStorage.from():(base as any).storage.from(name)},from:(name:string)=>name==='meeting_rooms'?meetingFixtureRooms():base.from(name),rpc(name: string, args?: Record<string, unknown>) {
+  return { ...base,channel:(name:string)=>name.startsWith('meeting-notices:')?meetingFixtureChannel():base.channel(),removeChannel:async(channel:any)=>{if(channel.close){channel.close();return 'ok'}return base.removeChannel()},storage:{...(base as any).storage,from:(name:string)=>name==='company-meetings'?meetingFixtureStorage.from():(base as any).storage.from(name)},from:(name:string)=>name==='meeting_rooms'?meetingFixtureRooms():base.from(name),rpc(name: string, args?: Record<string, unknown>) {
     const meetings=meetingFixtureRpc(name,args)
     if(meetings)return meetings
     const permissions = permissionFixtureRpc(name,args)

@@ -2,6 +2,7 @@ import type { MeetingDraft, MeetingPerson, MeetingPrepFile, MeetingRoom, Meeting
 import { getSupabase } from './client'
 import { quarterFromTime } from '@/features/meetings/meeting-slots'
 import type { InboxNotification } from '@/lib/inbox/types'
+import type { MeetingAvailability } from '@/features/meetings/meeting-availability'
 
 const BUCKET='company-meetings'
 function fail(action:string,error:{message:string}):never {
@@ -19,6 +20,7 @@ export async function listCompanyMeetings():Promise<MeetingSeries[]> {
 }
 export const listMeetingDirectory=()=>checked<MeetingPerson[]>(getSupabase().rpc('list_meeting_directory'))
 export const listMeetingCalendar=(from:string,to:string)=>checked<MeetingDraft[]>(getSupabase().rpc('list_meeting_calendar',{p_from:from,p_to:to}))
+export const listMeetingAvailability=(seriesId:string,date:string,people:string[],roundId?:string)=>checked<MeetingAvailability[]>(getSupabase().rpc('list_meeting_availability',{p_series:seriesId,p_date:date,p_people:people,p_exclude_round:roundId ?? null}))
 export async function listMeetingRooms():Promise<MeetingRoom[]> {
   const {data,error}=await getSupabase().from('meeting_rooms').select('id,name').order('sort_order')
   if(error) fail('회의실 조회 실패',error)

@@ -873,9 +873,9 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                 )}
               </div>
             </div>
-            {schedulingSeries ? <MeetingSchedulePicker rooms={rooms} value={scheduleChoice} onChange={setScheduleChoice} durationMinutes={composeDuration} attendees={attendees}
+            {schedulingSeries ? <MeetingSchedulePicker rooms={rooms} value={scheduleChoice} onChange={setScheduleChoice} durationMinutes={composeDuration} attendees={attendees} seriesId={schedulingSeries.id}
               roundId={schedulingRoundId ?? findPendingRound(schedulingSeries)?.id} error={meetings.error}
-              onConfirm={()=>void bookSlot(scheduleChoice.roomId,scheduleChoice.dateKey,scheduleChoice.clock)}/> : null}
+              onConfirm={()=>bookSlot(scheduleChoice.roomId,scheduleChoice.dateKey,scheduleChoice.clock)}/> : null}
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
               <p className="text-xs text-muted-foreground">{schedulingSeries?'일정을 확정하면 멤버에게 참석 요청이 전달됩니다. 일정 변경 시 응답이 초기화됩니다.':'준비 중에는 호스트와 생성자만 볼 수 있습니다. 안내·자료를 준비한 뒤 일정을 확정하세요.'}</p>
               {!schedulingSeries?<Button type="button" onClick={()=>void createDraft()}>준비 회의 생성</Button>:null}
