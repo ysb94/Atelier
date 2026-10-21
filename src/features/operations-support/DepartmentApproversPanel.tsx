@@ -12,9 +12,9 @@ import { ApproverSelfRequestsPanel } from './ApproverSelfRequestsPanel'
 const TYPES = [{ id: 'leave', label: '휴가·외근·재택·정정' }, { id: 'overtime', label: '야근' }] as const
 type Draft = Record<ApprovalType, { approverId: string; substituteId: string }>
 
-export function DepartmentApproversPanel() {
+export function DepartmentApproversPanel({ initialPart = 'departments' }: { initialPart?: 'departments' | 'self' } = {}) {
   useRenderWatch('DepartmentApproversPanel')
-  const [part, setPart] = useState<'departments' | 'self'>('departments')
+  const [part, setPart] = useState<'departments' | 'self'>(initialPart)
   return <div className="space-y-5">
     <div className="grid gap-3 sm:grid-cols-2" role="tablist" aria-label="승인자 설정 영역">
       {([

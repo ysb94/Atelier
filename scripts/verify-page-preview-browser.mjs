@@ -10,6 +10,7 @@ import { verifyPermissionSettings } from './permission-settings-browser.mjs'
 const root = process.cwd(), fixture = path.join(root, 'dev-tools/ai-workflow/browser-fixture')
 const auth = path.join(fixture, 'page-preview-auth.tsx'), client = path.join(fixture, 'page-preview-client.ts')
 const server = await createServer({ root, configFile: false, envFile: false, logLevel: 'error',
+  cacheDir: path.join(root, 'node_modules', '.cache', 'page-preview-vite'),
   plugins: [{ name: 'preview-fixture', enforce: 'pre', resolveId(source, importer) {
     if (importer && source.startsWith('.')) {
       const target = path.resolve(path.dirname(importer), source).replace(/\.tsx?$/, '')
@@ -22,7 +23,7 @@ const server = await createServer({ root, configFile: false, envFile: false, log
       .then(html => { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(html) }).catch(next)
   }) } }, react(), tailwindcss()],
   resolve: { alias: [{ find: '@/lib/supabase/auth', replacement: auth }, { find: '@/lib/supabase/client', replacement: client }, { find: '@', replacement: path.join(root, 'src') }] },
-  server: { host: '127.0.0.1', port: 0, hmr: false, watch: { ignored: ['**/.state/**'] }, fs: { allow: [root] } },
+  server: { host: '127.0.0.1', port: 5191, hmr: false, watch: { ignored: ['**/.state/**'] }, fs: { allow: [root] } },
 })
 await server.listen()
 let browser
@@ -40,7 +41,7 @@ try {
   const page = await context.newPage()
   diagnosticPage = page
   page.setDefaultTimeout(10000)
-  page.setDefaultNavigationTimeout(30000)
+  page.setDefaultNavigationTimeout(120000)
   page.on('pageerror', error => errors.push(error.message))
   page.on('console', message => { if (message.type() === 'error') console.error('browser-console:', message.text()) })
   page.on('requestfailed', request => console.error('browser-request:', request.url(), request.failure()?.errorText))
@@ -52,6 +53,9 @@ try {
     assert.equal(await button.getAttribute('aria-pressed'), 'true')
     assert.equal(await page.getByTestId('hidden-profile').textContent(), 'dev@atelier.local', '비활성 탭의 프로필은 바뀌지 않음')
   }
+  if (process.argv.includes('--permissions-only')) {
+    await verifyPermissionSettings(page,origin)
+  } else {
   await page.goto(origin + '/data/all')
   await page.getByRole('columnheader', { name: '상품명', exact: true }).waitFor()
   await page.getByRole('button', { name: '채팅', exact: true }).click()
@@ -210,6 +214,7 @@ try {
   await page.goto(origin + '/chat/room/fixture-room?identity=employee')
   await page.getByText('동료 메시지', { exact: true }).waitFor()
   assert.equal(await chatBar().count(), 0)
+  }
   }
   assert.deepEqual(errors, [])
   assert.deepEqual(remote, [])

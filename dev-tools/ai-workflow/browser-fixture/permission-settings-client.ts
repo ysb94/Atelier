@@ -2,9 +2,11 @@ const company = 'e0000000-0000-4000-8000-000000000001'
 const original = [{ id:'self-manage',profileId:'fixture-user',permission:'permissions.manage',scopeKind:'company',scopeId:company }, { id:'old-assignment',profileId:'other-user',permission:'work.manage',scopeKind:'department',scopeId:'dept-logistics' }]
 let grants = structuredClone(original), revision = 1
 const audit: Record<string,unknown>[] = []
-Object.assign(window,{ __permissionsFixture: { audit, original, grants: () => structuredClone(grants), conflict: () => { revision++ } } })
+const calls: string[] = []
+Object.assign(window,{ __permissionsFixture: { audit, calls, original, grants: () => structuredClone(grants), conflict: () => { revision++ } } })
 export function permissionFixtureRpc(name: string,args?: Record<string,unknown>) {
   if (!['permission_directory','set_permission_grant'].includes(name)) return undefined
+  calls.push(name)
   const failure = (message: string) => Promise.resolve({data:null,error:{message}})
   if (location.search.includes('identity=employee')) return failure('권한 지정 관리 권한이 필요합니다.')
   if (name === 'permission_directory') {

@@ -4,6 +4,7 @@ import type { Profile } from '@/lib/supabase/profiles'
 import { PERMISSION_CATALOG, hasPermission } from '@/lib/company/permissions'
 const params = new URLSearchParams(location.search)
 const profile = {
+  permissionMode: params.has('permissions-legacy') ? 'legacy' : 'assigned',
   companyId: 'e0000000-0000-4000-8000-000000000001',
   permissionGrants: params.get('identity') === 'employee' ? [] : params.get('identity') === 'partner' ? [{ permission:'partner.manage',scopeKind:'brand',scopeId:'brand-a' }] : PERMISSION_CATALOG.filter(([code]) => params.get('identity') !== 'ceo' || ['basic.use','company.review','preview.use','ideas.read'].includes(code)).map(([permission]) => ({ permission, scopeKind: 'company', scopeId: 'e0000000-0000-4000-8000-000000000001' })),
   id: 'fixture-user', email: params.get('identity') === 'employee' ? 'staff@example.invalid' : params.get('identity') === 'ceo' ? 'ceo@example.invalid' : 'dev@atelier.local',
