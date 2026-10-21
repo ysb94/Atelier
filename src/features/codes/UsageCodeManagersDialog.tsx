@@ -1,8 +1,10 @@
+import { useAuth } from '@/lib/supabase/auth'
+import { LegacyUsageCodeManagersDialog } from './LegacyUsageCodeManagersDialog'
 import { Link } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 
 /** 지정 원본을 두 곳에서 관리하지 않도록 중앙 설정으로 안내한다. */
-export function UsageCodeManagersDialog({ partnerLabel, onClose }: {
+export function UsageCodeManagersDialog(props: {
   brandId: string
   partnerLabel: string
   initialIds: string[]
@@ -10,6 +12,9 @@ export function UsageCodeManagersDialog({ partnerLabel, onClose }: {
   onClose: () => void
   onSave: (ids: string[]) => Promise<void>
 }) {
+  const { profile } = useAuth()
+  if (profile?.permissionMode === 'legacy') return <LegacyUsageCodeManagersDialog {...props}/>
+  const { partnerLabel, onClose } = props
   return <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
     <button type="button" className="absolute inset-0 bg-black/40" aria-label="담당자 설정 닫기" onClick={onClose}/>
     <section role="dialog" aria-modal="true" aria-label="업체 담당자 설정" className="relative w-full max-w-lg space-y-4 rounded-xl border border-border bg-card p-5 shadow-xl">

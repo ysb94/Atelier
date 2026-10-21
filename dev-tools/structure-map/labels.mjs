@@ -54,6 +54,7 @@ const vocabulary = {
   workspace: '작업 공간', activity: '활성 상태', gate: '접근 제어', scope: '범위', pick: '선택', notification: '알림',
   loading: '로딩', overlay: '화면 덮개', developer: '개발자', capabilities: '권한', person: '사람',
   permission: '권한', permissions: '권한', grant: '지정', grants: '지정 내역',
+  legacy: '기존 호환', rollout: '전환', recovery: '복구',
   query: '조회', queries: '조회', cache: '캐시', paged: '페이지별', client: '연결 클라이언트',
   error: '오류', format: '형식', mock: '예제', types: '타입', type: '타입', utils: '공통 유틸리티',
   debug: '진단', flags: '스위치', watch: '감시', render: '렌더', sync: '동기화', box: '박스',

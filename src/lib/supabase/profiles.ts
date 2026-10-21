@@ -1,5 +1,7 @@
 import type { PermissionGrant } from '../company/permissions'
 import { listPermissionGrants } from './permission-grants'
+import { assignedPermissionsEnabled, legacyPermissionGrants } from '../company/permission-rollout'
+import { isAttendanceExemptPosition } from '../company/capabilities'
 import { DEFAULT_COMPANY_ID } from '@/lib/supabase/brands'
 import {
   uniqueCapabilities,
@@ -36,6 +38,7 @@ export type BrandMembership = {
 }
 
 export type Profile = {
+  permissionMode?: 'legacy' | 'assigned'
   permissionGrants?: PermissionGrant[]
   id: string
   email: string
@@ -294,13 +297,13 @@ export type PersonnelTitle = {
 export async function listOrgChartMembers(): Promise<OrgChartMember[]> {
   const [{ data, error }, { data: exempt, error: exemptError }] = await Promise.all([
     getSupabase().rpc('list_org_chart_members'),
-    getSupabase().rpc('list_company_attendance_exempt'),
+    assignedPermissionsEnabled() ? getSupabase().rpc('list_company_attendance_exempt') : Promise.resolve({ data: [], error: null }),
   ])
   if (error) throw toStoreError(error)
   if (exemptError) throw toStoreError(exemptError)
   const exemptIds = new Set((exempt ?? []) as string[])
   return ((data ?? []) as OrgChartMemberRow[]).map((row) => ({
-    attendanceExempt: exemptIds.has(row.id),
+    attendanceExempt: assignedPermissionsEnabled() ? exemptIds.has(row.id) : isAttendanceExemptPosition(row.position),
     id: row.id,
     displayName: row.display_name,
     position: row.position,
@@ -486,7 +489,14 @@ export async function getMyProfile(): Promise<Profile | null> {
   if (!data) return null
   const profile = await hydrateProfile(data as ProfileRow)
   if (profile.status !== 'active') return profile
-  const assigned = { ...profile, permissionGrants: await listPermissionGrants() }
+  if (!assignedPermissionsEnabled()) {
+    const permissionGrants = legacyPermissionGrants(profile)
+    const { data: approvals, error: approvalError } = await getSupabase().from('department_request_approvers').select('department_id,approver_id,substitute_id').eq('company_id',profile.companyId)
+    if (approvalError) console.warn('[auth] 기존 출근시간 담당 범위 조회 실패',approvalError)
+    else for (const row of approvals ?? []) if (row.approver_id === profile.id || row.substitute_id === profile.id) permissionGrants.push({ permission:'attendance.manage',scopeKind:'department',scopeId:row.department_id })
+    return { ...profile, permissionMode: 'legacy', permissionGrants }
+  }
+  const assigned = { ...profile, permissionMode: 'assigned' as const, permissionGrants: await listPermissionGrants() }
   return { ...assigned, capabilities: profileCapabilities(assigned) }
 }
 
@@ -519,6 +529,10 @@ export async function submitAccessRequest(
   const userId = userData.user?.id
   if (!userId) throw new Error('로그인이 필요합니다.')
 
+  const { data: current, error: currentError } = await getSupabase().from('profiles').select('status').eq('id',userId).maybeSingle()
+  if (currentError) throw toStoreError(currentError)
+  if (!current || !['pending','rejected'].includes(current.status)) throw new Error('현재 계정은 재신청할 수 없습니다. 계정 정보를 다시 불러와 주세요.')
+
   if (!input.departmentId) throw new Error('부서를 선택하세요.')
   const displayName = validatePersonName(input.displayName)
 
@@ -536,6 +550,7 @@ export async function submitAccessRequest(
       approved_at: null,
     })
     .eq('id', userId)
+    .in('status', ['pending', 'rejected'])
     .select(PROFILE_COLUMNS)
     .single()
 

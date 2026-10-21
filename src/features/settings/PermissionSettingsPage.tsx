@@ -17,6 +17,7 @@ export function PermissionSettingsPage() {
   const fullAccess = hasPermission(profile, 'permissions.manage')
   const manage = fullAccess || hasPermission(profile, 'partner.manage')
   const approvers = hasPermission(profile, 'approvers.manage')
+  if (profile?.permissionMode === 'legacy') return <div className="space-y-5"><PageHeader title="권한·담당자 설정"/><p role="status">통합 권한 전환은 아직 적용하지 않았습니다. 현재는 기존 권한과 승인자 지정으로 동작합니다.</p>{approvers && <DepartmentApproversPanel/>}</div>
   if (!manage && !approvers) return <><PageHeader title="권한·담당자 설정"/><p role="status">권한 지정 관리 또는 승인자 지정 권한이 필요합니다.</p></>
   return <PermissionSettingsContent key={fullAccess ? 'all' : 'delegated'} manage={manage} fullAccess={fullAccess} approvers={approvers}/>
 }

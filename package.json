@@ -75,6 +75,7 @@
     "verify:chat-thread": "tsx --tsconfig tsconfig.app.json src/lib/chat/thread-layout.verify.ts",
     "verify:company-capabilities": "tsx src/lib/company/capabilities.verify.ts",
     "verify:assigned-permissions": "tsx --tsconfig tsconfig.app.json src/lib/company/assigned-permissions.verify.ts && node scripts/verify-assigned-permissions-db.mjs",
+    "verify:auth-recovery-browser": "node scripts/verify-auth-recovery-browser.mjs",
     "verify:permission-settings-browser": "node scripts/verify-page-preview-browser.mjs --permissions-only",
     "verify:page-preview": "tsx --tsconfig tsconfig.app.json src/lib/company/profile-preview.verify.ts && tsx --tsconfig tsconfig.app.json src/lib/company/page-preview-cases.verify.ts && tsx --tsconfig tsconfig.app.json src/lib/company/page-preview-coverage.verify.ts",
     "verify:page-preview-browser": "node scripts/verify-page-preview-browser.mjs",
