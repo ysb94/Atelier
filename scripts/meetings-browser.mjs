@@ -73,6 +73,8 @@ export async function verifyMeetings(page,origin){
  await nextDialog().getByRole('button',{name:'닫기',exact:true}).click();await nextDialog().waitFor({state:'hidden'})
  await nextRow().getByRole('button',{name:'전체 멤버와 대화',exact:true}).waitFor()
  await page.screenshot({path:'.tmp/meeting-list-group-browser.png'})
+ await nextRow().getByRole('button',{name:'전체 멤버와 대화',exact:true}).hover()
+ await page.screenshot({path:'.tmp/meeting-list-group-hover-browser.png'})
  await nextRow().getByRole('button',{name:'전체 멤버와 대화',exact:true}).click()
  await page.locator('#workspace-chat-panel').waitFor()
  await page.locator('#workspace-chat-panel').getByRole('button',{name:'채팅 닫기',exact:true}).click()

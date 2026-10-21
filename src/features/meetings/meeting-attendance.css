@@ -1,0 +1,9 @@
+.meeting-attendance.is-compact { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.meeting-members { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px; border: 1px solid transparent; border-radius: 999px; }
+.meeting-attendance:has(.meeting-all:hover) .meeting-members,
+.meeting-attendance:has(.meeting-all:focus-visible) .meeting-members { border-color: #8eaa98; }
+.meeting-all { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 32px; min-width: 44px; padding: 0 10px; border: 1px solid #cfd6cc; border-radius: 8px; background: transparent; color: #243128; font-size: 12px; font-weight: 500; }
+.meeting-all:hover { border-color: #8eaa98; }
+.meeting-all:focus-visible { outline: 2px solid #8eaa98; outline-offset: 2px; }
+.meeting-all:disabled { opacity: .5; pointer-events: none; }
+.meeting-attendance:not(.is-compact) .meeting-all { margin-top: 6px; }
