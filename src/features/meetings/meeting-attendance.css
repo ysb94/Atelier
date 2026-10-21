@@ -2,8 +2,10 @@
 .meeting-members { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px; border: 1px solid transparent; border-radius: 999px; }
 .meeting-attendance:has(.meeting-all:hover) .meeting-members,
 .meeting-attendance:has(.meeting-all:focus-visible) .meeting-members { border-color: #8eaa98; }
-.meeting-all { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 32px; min-width: 44px; padding: 0 10px; border: 1px solid #cfd6cc; border-radius: 8px; background: transparent; color: #243128; font-size: 12px; font-weight: 500; }
-.meeting-all:hover { border-color: #8eaa98; }
+.meeting-all { --meeting-all-border: #cfd6cc; position: relative; display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 36px; flex-shrink: 0; padding: 0 0 5px; border: 0; border-radius: 10px; background: transparent; color: #243128; font-size: 12px; font-weight: 500; }
+.meeting-all-shape { position: absolute; inset: 0; width: 100%; height: 100%; fill: none; stroke: var(--meeting-all-border); stroke-width: 1.25; stroke-linejoin: round; pointer-events: none; }
+.meeting-all-label { position: relative; }
+.meeting-all:hover, .meeting-all:focus-visible { --meeting-all-border: #8eaa98; }
 .meeting-all:focus-visible { outline: 2px solid #8eaa98; outline-offset: 2px; }
 .meeting-all:disabled { opacity: .5; pointer-events: none; }
 .meeting-attendance:not(.is-compact) .meeting-all { margin-top: 6px; }
