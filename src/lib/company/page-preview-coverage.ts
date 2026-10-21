@@ -1,6 +1,7 @@
 import type { Profile } from '../supabase/profiles'
 import { WORK_CAPABILITIES, WORK_CAPABILITY_LABEL, type WorkCapability } from './capabilities'
 import { pagePreviewCases, type PagePreviewCase } from './page-preview-cases'
+import { casePermissionGrants } from './permission-preview'
 
 export type PreviewFacts = {
   usageAccess?: 'manager' | 'editor' | 'viewer'
@@ -86,7 +87,7 @@ export function completePagePreviewCases(pathname: string, real: Profile): Compl
   add('chat-manager', '채팅 · 팀장', {}, { chatRole: 'manager' })
   add('chat-admin', '채팅 · 관리자', {}, { chatRole: 'admin' })
   add('chat-employee', '채팅 · 사원', {}, { chatRole: 'employee' })
-  return cases
+  return cases.map(item => ({ ...item, settings: { ...item.settings, permissionGrants: casePermissionGrants(item.id, path, real.companyId ?? '', item.settings.capabilities) } }))
 }
 
 /** API 조회 결과를 캐시에 덮어쓰지 않고 화면에만 적용한다. 실제 저장은 원래 권한으로 검사한다. */

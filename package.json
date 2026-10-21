@@ -74,6 +74,8 @@
     "verify:chat-list": "tsx src/lib/inbox/format.verify.ts",
     "verify:chat-thread": "tsx --tsconfig tsconfig.app.json src/lib/chat/thread-layout.verify.ts",
     "verify:company-capabilities": "tsx src/lib/company/capabilities.verify.ts",
+    "verify:assigned-permissions": "tsx --tsconfig tsconfig.app.json src/lib/company/assigned-permissions.verify.ts && node scripts/verify-assigned-permissions-db.mjs",
+    "verify:permission-settings-browser": "node scripts/verify-page-preview-browser.mjs --permissions-only",
     "verify:page-preview": "tsx --tsconfig tsconfig.app.json src/lib/company/profile-preview.verify.ts && tsx --tsconfig tsconfig.app.json src/lib/company/page-preview-cases.verify.ts && tsx --tsconfig tsconfig.app.json src/lib/company/page-preview-coverage.verify.ts",
     "verify:page-preview-browser": "node scripts/verify-page-preview-browser.mjs",
     "verify:workspace-overlays": "node scripts/verify-workspace-overlays.mjs && node scripts/verify-page-preview-browser.mjs --overlay-only",
@@ -123,6 +125,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.10",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.17",
@@ -131,9 +134,9 @@
     "oxlint": "^1.75.0",
     "playwright-core": "^1.64.0",
     "tailwindcss": "^4.3.3",
+    "tsx": "4.23.15",
     "typescript": "~6.0.2",
-    "vite": "^8.2.0",
-    "tsx": "4.23.15"
+    "vite": "^8.2.0"
   },
   "overrides": {
     "exceljs": {

@@ -82,6 +82,7 @@ const NAV_LABELS: {
     match: /^\/settings\/product-categories(?:\/|$)/,
     label: '데이터 · 카테고리 관리',
   },
+  { match: /^\/settings\/permissions(?:\/|$)/, label: '권한·담당자 설정' },
   { match: /^\/settings\/fields(?:\/|$)/, label: '업로드 항목' },
   { match: /^\/settings\/usage-targets(?:\/|$)/, label: '출고업체' },
   { match: /^\/settings\/import(?:\/|$)/, label: '가져오기' },

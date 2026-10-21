@@ -25,7 +25,7 @@ import {
   type Department,
   type Profile,
 } from '@/lib/supabase/profiles'
-import { isCompanyAdmin } from '@/lib/company/capabilities'
+import { hasPermission } from '@/lib/company/permissions'
 import { cn, emptyList } from '@/lib/utils'
 import {
   DEFAULT_MEETING_DURATION_MINUTES,
@@ -265,7 +265,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     if (!profile) return LOCAL_HOST
     return previewMeetingActor(profileToMeetingPerson(profile), series, preview?.facts?.meetingRole)
   }, [profile, series, preview?.facts?.meetingRole])
-  const isAdmin = isCompanyAdmin(profile)
+  const isAdmin = hasPermission(profile, 'meeting.manage')
 
   const membersQuery = useQuery({
     queryKey: ['profiles', 'manageable'],

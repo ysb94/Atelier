@@ -32,7 +32,8 @@ import {
   saveAiFeatureRoute,
   testAiConnection,
 } from '@/lib/api'
-import { isBrandLead, useAuth } from '@/lib/supabase/auth'
+import { hasPermission } from '@/lib/company/permissions'
+import { useAuth } from '@/lib/supabase/auth'
 import { usePagePreview } from '@/lib/company/page-preview-context'
 
 const FEATURE_LABEL: Record<AiFeatureKey, string> = {
@@ -56,8 +57,8 @@ export function AiSettingsPage() {
   const { profile } = useAuth()
   const preview = usePagePreview()
   const queryClient = useQueryClient()
-  const canEdit = Boolean(preview?.facts?.brandLead) || isBrandLead(profile, brand.id)
-  const actualCanEdit = isBrandLead(preview ? preview.realProfile : profile, brand.id)
+  const canEdit = Boolean(preview?.facts?.brandLead) || hasPermission(profile, 'ai.manage', 'brand', brand.id)
+  const actualCanEdit = hasPermission(preview ? preview.realProfile : profile, 'ai.manage', 'brand', brand.id)
   const [featureKey, setFeatureKey] = useState<AiFeatureKey>(
     'invoice_product_recommendation',
   )

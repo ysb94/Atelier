@@ -1,6 +1,9 @@
+import type { PermissionGrant } from '../company/permissions'
+import { listPermissionGrants } from './permission-grants'
 import { DEFAULT_COMPANY_ID } from '@/lib/supabase/brands'
 import {
   uniqueCapabilities,
+  profileCapabilities,
   type PersonnelScope,
   type WorkCapability,
 } from '@/lib/company/capabilities'
@@ -33,6 +36,7 @@ export type BrandMembership = {
 }
 
 export type Profile = {
+  permissionGrants?: PermissionGrant[]
   id: string
   email: string
   displayName: string | null
@@ -239,51 +243,8 @@ async function capabilitiesFor(
   return map
 }
 
-async function replaceCapabilities(
-  profileId: string,
-  capabilities: WorkCapability[],
-) {
-  const next = uniqueCapabilities(capabilities)
-  const { error: deleteError } = await getSupabase()
-    .from('profile_capabilities')
-    .delete()
-    .eq('profile_id', profileId)
-  if (deleteError) throw toStoreError(deleteError)
-  if (next.length === 0) return
-
-  const { error: insertError } = await getSupabase()
-    .from('profile_capabilities')
-    .insert(
-      next.map((capability) => ({
-        profile_id: profileId,
-        capability,
-      })),
-    )
-  if (insertError) throw toStoreError(insertError)
-}
-
-async function replaceBrandStewards(profileId: string, leadBrandIds: string[]) {
-  const next = [...new Set(leadBrandIds.filter(Boolean))]
-  const { error: deleteError } = await getSupabase()
-    .from('brand_members')
-    .delete()
-    .eq('profile_id', profileId)
-  if (deleteError) throw toStoreError(deleteError)
-  if (next.length === 0) return
-
-  const { error: insertError } = await getSupabase()
-    .from('brand_members')
-    .insert(
-      next.map((brandId) => ({
-        brand_id: brandId,
-        profile_id: profileId,
-        is_lead: true,
-      })),
-    )
-  if (insertError) throw toStoreError(insertError)
-}
-
 export type OrgChartMember = {
+  attendanceExempt?: boolean
   id: string
   displayName: string | null
   position: string | null
@@ -331,9 +292,15 @@ export type PersonnelTitle = {
 
 /** 재직 중인 직원의 이름·직책·소속. 이메일 등 다른 프로필 칸은 없다. */
 export async function listOrgChartMembers(): Promise<OrgChartMember[]> {
-  const { data, error } = await getSupabase().rpc('list_org_chart_members')
+  const [{ data, error }, { data: exempt, error: exemptError }] = await Promise.all([
+    getSupabase().rpc('list_org_chart_members'),
+    getSupabase().rpc('list_company_attendance_exempt'),
+  ])
   if (error) throw toStoreError(error)
+  if (exemptError) throw toStoreError(exemptError)
+  const exemptIds = new Set((exempt ?? []) as string[])
   return ((data ?? []) as OrgChartMemberRow[]).map((row) => ({
+    attendanceExempt: exemptIds.has(row.id),
     id: row.id,
     displayName: row.display_name,
     position: row.position,
@@ -517,7 +484,10 @@ export async function getMyProfile(): Promise<Profile | null> {
 
   if (error) throw toStoreError(error)
   if (!data) return null
-  return hydrateProfile(data as ProfileRow)
+  const profile = await hydrateProfile(data as ProfileRow)
+  if (profile.status !== 'active') return profile
+  const assigned = { ...profile, permissionGrants: await listPermissionGrants() }
+  return { ...assigned, capabilities: profileCapabilities(assigned) }
 }
 
 export async function confirmMyProfileName(name: string): Promise<Profile> {
@@ -588,18 +558,13 @@ export async function approveMember(
   input: ApproveMemberInput,
 ): Promise<Profile> {
   const displayName = validatePersonName(input.displayName ?? '')
-  const capabilities = uniqueCapabilities(input.capabilities)
-  if (!input.isAdmin && capabilities.length === 0) {
-    throw new Error('업무 역량을 하나 이상 지정하세요.')
-  }
 
   const { data: userData, error: userError } = await getSupabase().auth.getUser()
   if (userError) throw toStoreError(userError)
   const actorId = userData.user?.id
   if (!actorId) throw new Error('로그인이 필요합니다.')
 
-  await replaceCapabilities(input.profileId, capabilities)
-  await replaceBrandStewards(input.profileId, input.leadBrandIds ?? [])
+  // 기존 역량·브랜드 연결은 보존한다. 기능 권한은 별도 지정 RPC에서만 변경한다.
 
   const patch: Record<string, unknown> = {
     company_id: DEFAULT_COMPANY_ID,

@@ -56,12 +56,12 @@ assert(
   'VisualTeam 과장은 사원 화면',
 )
 assert(
-  resolveWorkRequestViewRole('design', 'VisualTeam', '팀장') === 'manager',
-  'VisualTeam 팀장은 관리자 화면',
+  resolveWorkRequestViewRole('design', 'VisualTeam', '팀장') === 'employee',
+  'VisualTeam 팀장도 지정 없으면 일반 업무 화면',
 )
 assert(
-  resolveWorkRequestViewRole('design', '디자인팀', '이사') === 'manager',
-  '디자인 이사는 관리자 화면',
+  resolveWorkRequestViewRole('design', '디자인팀', '이사') === 'employee',
+  '디자인 이사도 지정 없으면 일반 업무 화면',
 )
 assert(
   resolveWorkRequestViewRole('logistics', 'VisualTeam', '팀장') === 'requester',

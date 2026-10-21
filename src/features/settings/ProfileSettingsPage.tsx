@@ -7,7 +7,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { useAuth } from '@/lib/supabase/auth'
-import { capabilityLabel, isCompanyManager } from '@/lib/company/capabilities'
+import { capabilityLabel } from '@/lib/company/capabilities'
 import { usePagePreview } from '@/lib/company/page-preview-context'
 import { useMemo } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -16,6 +16,7 @@ import { LeaveApprovalPanel } from '@/features/operations-support/LeaveApprovalP
 import { WorkRequestHubPage } from '@/features/work-requests/WorkRequestHubPage'
 import { useDepartmentApprovers } from '@/features/operations-support/use-department-approvers'
 import { assignedDepartmentIds } from '@/lib/supabase/department-approvers'
+import { hasPermission } from '@/lib/company/permissions'
 import { CompanyMeetingsPage } from '@/features/meetings/CompanyMeetingsPage'
 import { HomeNoticeBoard } from './HomeNoticeBoard'
 import { MyAttendanceStartPanel } from './MyAttendanceStartPanel'
@@ -64,8 +65,7 @@ export function ProfileSettingsPage() {
   }
   const hasDepartments = departments.length > 0
   const noDepartments = !hasDepartments && !approvals.loading && !approvals.error
-  const rolePreview = Boolean(preview?.active && !preview.facts?.chatRole)
-  const showDepartmentTab = preview?.facts?.departmentApprover ?? (isCompanyManager(profile) || (!rolePreview && hasDepartments))
+  const showDepartmentTab = preview?.facts?.departmentApprover ?? hasPermission(profile, 'attendance.manage')
   const visiblePart = part === 'attendance' && !showDepartmentTab ? 'my-attendance' : part
 
   return (
@@ -81,10 +81,7 @@ export function ProfileSettingsPage() {
         <button type="button" role="tab" id="personal-department-notice-tab" aria-selected={visiblePart === 'department-notice'} aria-controls="personal-department-notice-panel" onClick={() => selectPart('department-notice')}>부서 공지</button>
         <button type="button" role="tab" id="personal-meetings-tab" aria-selected={visiblePart === 'meetings'} aria-controls="personal-meetings-panel" onClick={() => selectPart('meetings')}>회의</button>
         {showDepartmentTab ? (
-          <button type="button" role="tab" id="personal-attendance-tab" className="is-department" aria-selected={visiblePart === 'attendance'} aria-controls="personal-attendance-panel" onClick={() => selectPart('attendance')}>
-            부서 출근시간
-            <small>관리자</small>
-          </button>
+          <button type="button" role="tab" id="personal-attendance-tab" className="personal-page-tab-end" aria-selected={visiblePart === 'attendance'} aria-controls="personal-attendance-panel" onClick={() => selectPart('attendance')}>부서 출근시간</button>
         ) : null}
       </div>
       {visiblePart === 'work' && <div id="personal-work-panel" role="tabpanel" aria-labelledby="personal-work-tab"><WorkRequestHubPage /></div>}
@@ -97,7 +94,7 @@ export function ProfileSettingsPage() {
           {hasDepartments ? '담당 부서 정보를 다시 불러오지 못했습니다. 아래 내용이 최신이 아닐 수 있으니 잠시 후 다시 확인해 주세요.'
             : '담당 부서 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'}
         </p>}
-        {hasDepartments ? <MyAttendanceStartPanel departmentIds={departments} />
+        {showDepartmentTab ? <MyAttendanceStartPanel departmentIds={departments} />
           : approvals.loading ? <p className="personal-page-notice" role="status">담당 부서 정보를 불러오는 중입니다.</p>
           : noDepartments && <p className="personal-page-notice">지정된 담당 부서가 없어 설정할 직원이 없습니다. 담당 지정은 운영지원팀에 요청해 주세요.</p>}
       </div>}

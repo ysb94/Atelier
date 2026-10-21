@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 import { OrgChartPage } from '@/features/org/OrgChartPage'
 import { AttendancePanel } from './AttendancePanel'
 import { LeavePanel } from './LeavePanel'
-import { DepartmentApproversPanel } from './DepartmentApproversPanel'
+import { Link } from 'react-router-dom'
 import { DocumentOutputPanel } from './DocumentOutputPanel'
 import { CompanyNoticesPanel } from './CompanyNoticesPanel'
 import { useAuth } from '@/lib/supabase/auth'
@@ -44,7 +44,7 @@ export function OperationsSupportPage() {
 
   // Hide the entire subtree so denied users never mount employee/attendance queries.
   if (!canAccessOperationsSupport(profile)) {
-    return <p role="status" className="rounded-xl border border-border bg-card px-5 py-6 text-sm text-muted-foreground">운영지원팀 전용 화면입니다.</p>
+    return <p role="status" className="rounded-xl border border-border bg-card px-5 py-6 text-sm text-muted-foreground">운영지원 기능 또는 회사 현황 조회 권한이 필요합니다.</p>
   }
 
   return (
@@ -76,7 +76,7 @@ export function OperationsSupportPage() {
       {part === 'org' ? <OrgChartPage mode="manage" showHeading={false} /> : null}
       {part === 'attendance' ? <AttendancePanel /> : null}
       {part === 'leave' ? <LeavePanel /> : null}
-      {part === 'approvers' ? <DepartmentApproversPanel /> : null}
+      {part === 'approvers' ? <Link to="/settings/permissions" className="text-primary underline">권한·담당자 설정에서 승인자 지정 관리하기</Link> : null}
       {part === 'documents' ? <DocumentOutputPanel /> : null}
       {part === 'notices' ? <CompanyNoticesPanel /> : null}
     </div>

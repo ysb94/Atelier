@@ -5,6 +5,7 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { chromium } from 'playwright-core'
 import { verifyWorkspaceOverlays } from './workspace-overlay-browser.mjs'
+import { verifyPermissionSettings } from './permission-settings-browser.mjs'
 
 const root = process.cwd(), fixture = path.join(root, 'dev-tools/ai-workflow/browser-fixture')
 const auth = path.join(fixture, 'page-preview-auth.tsx'), client = path.join(fixture, 'page-preview-client.ts')
@@ -80,11 +81,14 @@ try {
   await page.locator('#workspace-notification-panel').waitFor()
   await assertAboveHeaders('workspace-notification-panel')
   await page.keyboard.press('Escape')
-  if (!process.argv.includes('--layering-only')) await verifyWorkspaceOverlays(page, origin)
+  if (!process.argv.includes('--layering-only') && !process.argv.includes('--permissions-only')) await verifyWorkspaceOverlays(page, origin)
+  if (!process.argv.includes('--layering-only') && !process.argv.includes('--overlay-only')) await verifyPermissionSettings(page, origin)
   if (process.argv.includes('--layering-only')) {
     console.log('page-preview-layering: 실제 SheetTable 고정 헤더 위에서 채팅/알림 표시·스크롤·내부 클릭·닫기 통과')
   } else if (process.argv.includes('--overlay-only')) {
     console.log('workspace-overlays: 전체 소스 점검과 실제 표·모달 겹침 회귀 검증 통과')
+  } else if (process.argv.includes('--permissions-only')) {
+    console.log('permission-settings: 통합 권한·담당자 화면 검증 통과')
   } else {
   await page.goto(origin + '/')
   await choose('운영지원 · 사원')
@@ -136,9 +140,9 @@ try {
   await choose('사원급')
   assert.equal(await page.getByRole('button', { name: '팀 업무', exact: true }).count(), 0)
   await choose('부서 승인 담당자 · 사원')
-  await page.getByRole('tab', { name: '부서 출근시간 관리자' }).waitFor()
+  await page.getByRole('tab', { name: '부서 출근시간', exact: true }).waitFor()
   await choose('부서 승인 미지정 · 사원')
-  assert.equal(await page.getByRole('tab', { name: '부서 출근시간 관리자' }).count(), 0)
+  assert.equal(await page.getByRole('tab', { name: '부서 출근시간', exact: true }).count(), 0)
   await page.getByRole('tab', { name: '승인할 신청', exact: true }).click()
   await page.getByRole('button', { name: '검토', exact: true }).first().click()
   await choose('신청 검토 · 본인 신청')

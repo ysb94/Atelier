@@ -76,6 +76,7 @@ const context = await browser.newContext({
   viewport: { width: 1500, height: 1000 },
 })
 context.setDefaultTimeout(12000)
+context.setDefaultNavigationTimeout(30000)
 await context.route('**/*', (route) =>
   route
     .request()
@@ -109,11 +110,9 @@ try {
   await page.getByText('공통 물류상품명 S ×2', { exact: false }).waitFor()
   assert.ok(await page.getByText('M001-BLACK-S ×2', { exact: false }).count())
   await page.getByRole('button', { name: '담당자 설정', exact: true }).click()
-  await page.getByRole('checkbox', { name: '검증 동료', exact: false }).check()
-  await page.getByRole('button', { name: '담당자 저장', exact: true }).click()
-  await page
-    .getByRole('dialog', { name: '업체 담당자 설정' })
-    .waitFor({ state: 'hidden' })
+  assert.equal(await page.getByRole('link', { name: '권한·담당자 설정 열기', exact: true }).getAttribute('href'), '/settings/permissions')
+  assert.equal(await page.getByRole('dialog', { name: '업체 담당자 설정' }).getByRole('checkbox').count(),0,'업체 화면에서 별도 권한 원본을 변경하지 않음')
+  await page.getByRole('dialog', { name: '업체 담당자 설정' }).getByRole('button', { name: '닫기', exact: true }).click()
   await openHeaders()
   await page.getByLabel('상품명 표시 이름', { exact: true }).fill('물류상품명')
   await page
@@ -204,7 +203,7 @@ try {
     0,
   )
   assert.ok(
-    await page.getByText('읽기 전용 · 지정 담당자', { exact: false }).count(),
+    await page.getByText('읽기 전용 · 이 업체에 편집 권한이 지정된 담당자만', { exact: false }).count(),
   )
   await page.goto(origin + '/usage-codes?fail=1')
   await page.getByText('공통 물류상품명 S ×2', { exact: false }).waitFor()

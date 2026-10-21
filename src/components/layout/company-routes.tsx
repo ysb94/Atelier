@@ -8,6 +8,7 @@ import { WorkRequestPage } from '@/features/work-requests/WorkRequestPage'
 import { OrgChartPage } from '@/features/org/OrgChartPage'
 import { MembersPage } from '@/features/settings/MembersPage'
 import { ProfileSettingsPage } from '@/features/settings/ProfileSettingsPage'
+import { PermissionSettingsPage } from '@/features/settings/PermissionSettingsPage'
 import { BrandSelectPage } from '@/features/brands/BrandSelectPage'
 import { CompanyProductsPage } from '@/features/products/CompanyProductsPage'
 import { DepartmentProductsPage } from '@/features/products/ProductsPage'
@@ -115,6 +116,7 @@ export const companyWorkspaceRoutes = (
       <Route path="org-chart" element={<OrgChartPage />} />
       <Route path="members" element={<MembersPage />} />
       <Route path="settings/profile" element={<ProfileSettingsPage />} />
+      <Route path="settings/permissions" element={<PermissionSettingsPage />} />
       <Route path="brands" element={<BrandSelectPage />} />
       <Route path="products" element={<CompanyProductsPage />}>
         <Route path=":brandSlug/:styleNo" element={<ProductDetailDrawer />} />

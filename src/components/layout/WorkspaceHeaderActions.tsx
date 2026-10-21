@@ -15,7 +15,7 @@ import { useNavigate } from 'react-router-dom'
 import { ChatPanel } from '@/features/chat/ChatPanel'
 import { useChatRealtime } from '@/features/chat/use-chat-realtime'
 import { useChatRooms } from '@/features/chat/use-chat'
-import { COMPANY_MANAGER_POSITIONS } from '@/lib/company/capabilities'
+import { hasPermission } from '@/lib/company/permissions'
 import { useRenderWatch } from '@/lib/diagnostics/render-watch'
 import { inboxBadgeLabel } from '@/lib/inbox/format'
 import { MOCK_NOTIFICATIONS } from '@/lib/inbox/mock'
@@ -31,10 +31,6 @@ type OpenPanel = 'chat' | 'notifications'
 
 // 페이지의 고정 헤더·서랍과 상단 탭의 stacking context 밖에서 공통 패널을 표시한다.
 const HEADER_PANEL_CLASS = 'pointer-events-auto fixed top-12 right-3 bottom-24 z-[200] flex w-[min(24rem,calc(100vw-1.5rem))] flex-col'
-
-function isManagerPosition(position: string | null | undefined) {
-  return COMPANY_MANAGER_POSITIONS.some((item) => item === position)
-}
 
 export function WorkspaceHeaderActions() {
   useRenderWatch('WorkspaceHeaderActions')
@@ -170,8 +166,9 @@ export function WorkspaceHeaderActions() {
             error={roomsError}
             userId={profile.id}
             myName={profile.displayName?.trim() || '나'}
-            isManager={isManagerPosition(profile.position)}
-            isAdmin={profile.isAdmin}
+            isManager={hasPermission(profile, 'chat.moderate', 'company', profile.companyId)}
+            canModerateRoom={roomId => hasPermission(profile, 'chat.moderate', 'chat_room', roomId)}
+            isAdmin={hasPermission(profile, 'system.manage')}
             titleId={chatTitleId}
             onClose={closePanel}
           /></DeveloperPreviewProvider>
@@ -202,6 +199,7 @@ function ChatPanelPreview(props: ComponentProps<typeof ChatPanel>) {
     <DeveloperPreviewBar scope="chat" />
     <div className="min-h-0 flex-1"><ChatPanel {...props}
       isManager={preview?.chatRole ? preview.chatRole === 'manager' : props.isManager}
+      canModerateRoom={preview?.chatRole ? undefined : props.canModerateRoom}
       isAdmin={preview?.chatRole ? preview.chatRole === 'admin' : props.isAdmin}
     /></div>
   </>

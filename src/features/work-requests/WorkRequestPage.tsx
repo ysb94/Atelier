@@ -2202,6 +2202,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     profile?.departmentName,
     profile?.position,
     profile?.capabilities,
+    profile ?? undefined,
   )
   const isDestinationMember = viewRole !== 'requester'
   const canManage = viewRole === 'manager'

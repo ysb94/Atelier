@@ -193,7 +193,7 @@ export function UsageCodeColumnDialog({
           </p>
           {readOnly ? (
             <p className="mt-2 text-sm">
-              읽기 전용 · 지정 담당자 또는 브랜드 책임자·관리자만 수정할 수
+              읽기 전용 · 이 업체에 편집 권한이 지정된 담당자만 수정할 수
               있습니다.
             </p>
           ) : null}

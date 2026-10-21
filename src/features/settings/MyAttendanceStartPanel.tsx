@@ -2,17 +2,20 @@ import { useMemo, useState } from 'react'
 import { Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { isAttendanceExemptPosition } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useOpsDirectory } from '@/features/operations-support/ops-directory'
 import { useAttendanceStartSettings } from '@/features/operations-support/use-attendance-start-settings'
 import { ATTENDANCE_GRACE_MINUTES, forgivenClock, resolveAttendanceStart, startTone, SUGGESTED_START } from '@/features/operations-support/attendance-start-settings'
 import { memberLabel } from '@/features/operations-support/OpsStat'
+import { useAuth } from '@/lib/supabase/auth'
+import { hasPermission } from '@/lib/company/permissions'
 import '@/features/operations-support/attendance-start-settings.css'
 
-export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: string[] }) {
+export function MyAttendanceStartPanel({ departmentIds: _departmentIds }: { departmentIds: string[] }) {
   useRenderWatch('MyAttendanceStartPanel')
+  const { profile } = useAuth()
   const directory = useOpsDirectory()
+  const { members: directoryMembers, departmentName } = directory
   const schedules = useAttendanceStartSettings({ assigned: true })
   const now = new Date()
   const [year, setYear] = useState(String(now.getFullYear()))
@@ -25,8 +28,8 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
   const [message, setMessage] = useState('')
   const validYear = /^\d{4}$/.test(year) && Number(year) >= 2000 && Number(year) <= 2100
   const months = Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`)
-  const departmentSet = useMemo(() => new Set(departmentIds), [departmentIds])
-  const members = useMemo(() => directory.members.filter(member => member.departmentId && departmentSet.has(member.departmentId) && !isAttendanceExemptPosition(member.position) && (!search.trim() || `${memberLabel(member.displayName)} ${directory.departmentName(member.departmentId)}`.toLowerCase().includes(search.trim().toLowerCase()))).sort((a, b) => directory.departmentName(a.departmentId).localeCompare(directory.departmentName(b.departmentId), 'ko') || memberLabel(a.displayName).localeCompare(memberLabel(b.displayName), 'ko')), [directory.members, directory.departmentName, departmentSet, search])
+  const departmentSet = useMemo(() => new Set(directory.departments.filter(department => hasPermission(profile, 'attendance.manage', 'department', department.id)).map(department => department.id)), [directory.departments, profile])
+  const members = useMemo(() => directoryMembers.filter(member => member.departmentId && departmentSet.has(member.departmentId) && !member.attendanceExempt && (!search.trim() || `${memberLabel(member.displayName)} ${departmentName(member.departmentId)}`.toLowerCase().includes(search.trim().toLowerCase()))).sort((a, b) => departmentName(a.departmentId).localeCompare(departmentName(b.departmentId), 'ko') || memberLabel(a.displayName).localeCompare(memberLabel(b.displayName), 'ko')), [directoryMembers, departmentName, departmentSet, search])
   const visibleIds = members.map(member => member.id)
   const checkedVisible = visibleIds.filter(id => checked.includes(id))
   const allVisible = visibleIds.length > 0 && checkedVisible.length === visibleIds.length

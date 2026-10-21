@@ -9,6 +9,7 @@ import {
 } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase/client'
+import { hasPermission } from '../company/permissions'
 import { getMyProfile, type Profile } from '@/lib/supabase/profiles'
 
 type AuthState = {
@@ -46,7 +47,8 @@ function toSignInMessage(message: string) {
 async function loadProfileSafe(): Promise<Profile | null> {
   try {
     return await getMyProfile()
-  } catch {
+  } catch (error) {
+    console.warn('[auth] 프로필·지정 권한 조회 실패', error)
     return null
   }
 }
@@ -192,7 +194,5 @@ export function isBrandLead(
   profile: Profile | null,
   brandId: string,
 ): boolean {
-  if (!profile || profile.status !== 'active') return false
-  if (profile.isAdmin) return true
-  return profile.memberships.some((m) => m.brandId === brandId && m.isLead)
+  return hasPermission(profile, 'brand.edit', 'brand', brandId)
 }

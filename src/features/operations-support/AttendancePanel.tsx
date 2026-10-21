@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Check, ChevronLeft, ChevronRight, Download, LayoutGrid, List, Printer, Search, Settings2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
-import { canEditOrgAssignment, isAttendanceExemptPosition } from '@/lib/company/capabilities'
+import { hasPermission } from '@/lib/company/permissions'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { interactionContext } from '@/lib/diagnostics/perf-watch'
 import { useAuth } from '@/lib/supabase/auth'
@@ -32,7 +32,7 @@ export function AttendancePanel() {
   const { departments, members: allMembers, departmentName, loading, error } = source
   const refetchRef = useRef(source.refetch)
   useEffect(() => { refetchRef.current = source.refetch })
-  const members = useMemo(() => allMembers.filter(member => !isAttendanceExemptPosition(member.position)), [allMembers])
+  const members = useMemo(() => allMembers.filter(member => !member.attendanceExempt), [allMembers])
   const directory = useMemo<ReturnType<typeof useOpsDirectory>>(() => ({ departments, members, departmentName, loading, error, refetch: () => refetchRef.current() }), [departments, members, departmentName, loading, error])
   const { profile } = useAuth()
   const saved = useAttendanceStartSettings()
@@ -43,7 +43,7 @@ export function AttendancePanel() {
       <Button variant={part === 'all' ? 'default' : 'outline'} aria-pressed={part === 'all'} onClick={() => setPart('all')}>전체 근태 관리</Button>
       <Button variant={part === 'settings' ? 'default' : 'outline'} aria-pressed={part === 'settings'} onClick={() => {setEditing({});setPart('settings')}}>출근시간 확인</Button>
     </div>
-    <div hidden={part !== 'all'}><AttendanceWorkspace directory={directory} canEdit={canEditOrgAssignment(profile)} savedSettings={saved.settings} settingsLoading={saved.loading} settingsError={Boolean(saved.error)} onEditStart={(id,month) => {setEditing({id,month});setPart('settings')}}/></div>
+    <div hidden={part !== 'all'}><AttendanceWorkspace directory={directory} canEdit={hasPermission(profile, 'attendance.manage')} savedSettings={saved.settings} settingsLoading={saved.loading} settingsError={Boolean(saved.error)} onEditStart={(id,month) => {setEditing({id,month});setPart('settings')}}/></div>
     {part === 'settings' && <AttendanceStartSettingsPanel readOnly key={`${editing.id}:${editing.month}`} directory={directory} schedules={saved} initialEmployeeId={editing.id} initialMonth={editing.month}/>}
   </div>
 }

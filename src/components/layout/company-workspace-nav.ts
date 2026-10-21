@@ -1,3 +1,4 @@
+import { hasPermission } from '../../lib/company/permissions.ts'
 import type { LucideIcon } from 'lucide-react'
 import {
   canAccessBrandManagement,
@@ -144,6 +145,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
   {
     title: '설정',
     items: [
+      { to: '/settings/permissions', label: '권한·담당자 설정', icon: Users },
       { to: '/settings/fields', label: '업로드 항목', icon: ListChecks },
       { to: '/settings/usage-targets', label: '출고업체', icon: Store },
       { to: '/settings/ai', label: 'AI 설정', icon: Sparkles },
@@ -174,7 +176,8 @@ export function companyNavGroupsForProfile(
       const items = showBrandManagement
         ? group.items
         : group.items.filter(item => item.to !== '/brands')
-      return items.length > 0 ? [{ ...group, items }] : []
+      const allowedItems = items.filter(item => item.to !== '/settings/permissions' || hasPermission(profile, 'permissions.manage') || hasPermission(profile, 'approvers.manage') || hasPermission(profile, 'partner.manage'))
+      return allowedItems.length > 0 ? [{ ...group, items: allowedItems }] : []
     }
     const items = [
       ...(showOperationsSupport ? group.items : []),

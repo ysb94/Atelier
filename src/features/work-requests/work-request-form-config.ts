@@ -1,3 +1,4 @@
+import { hasPermission, type PermissionProfile } from '../../lib/company/permissions'
 import type { FieldOwner } from '@/lib/types'
 
 export const WORK_REQUEST_OWNERS = [
@@ -132,11 +133,14 @@ export type WorkRequestViewRole = 'manager' | 'employee' | 'requester'
 export function resolveWorkRequestViewRole(
   owner: WorkRequestOwner,
   departmentName?: string | null,
-  position?: string | null,
+  _position?: string | null,
   capabilities?: string[] | null,
+  profile?: PermissionProfile,
 ): WorkRequestViewRole {
   const inDepartment = isMemberOfOwnerDepartment(departmentName, owner)
   const hasOwnerCapability = Boolean(capabilities?.includes(owner))
+  const assigned = hasPermission(profile, 'work.manage', 'company', profile?.companyId) || profile?.permissionGrants?.some(grant => grant.permission === 'work.manage' && grant.scopeKind === 'department' && isMemberOfOwnerDepartment(grant.scopeName, owner))
+  if (profile?.status === 'active' && assigned) return 'manager'
   if (!inDepartment && !hasOwnerCapability) return 'requester'
-  return isManagerPosition(position) ? 'manager' : 'employee'
+  return 'employee'
 }

@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { isCompanyManagerPosition } from '@/lib/company/capabilities'
+import { hasPermission } from '@/lib/company/permissions'
 import { useRenderWatch } from '@/lib/diagnostics'
 import type { ChatRoom } from '@/lib/inbox/types'
 import { useAuth } from '@/lib/supabase/auth'
@@ -92,7 +92,7 @@ function ChatWindowContent() {
             title={room.title}
             userId={userId}
             myName={profile.displayName?.trim() || '나'}
-            isManager={preview?.facts?.chatRole ? preview.facts.chatRole === 'manager' : isCompanyManagerPosition(profile.position)}
+            isManager={preview?.facts?.chatRole ? preview.facts.chatRole === 'manager' : hasPermission(profile, 'chat.moderate', 'chat_room', room.id)}
             outgoing={sending.outgoing}
             titleId={titleId}
             onOpenInfo={() => setInfo(true)}

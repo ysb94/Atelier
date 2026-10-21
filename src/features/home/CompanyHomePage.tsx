@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArrowUpRight, CalendarDays, ClipboardList, Network, Users } from 'lucide-react'
 import { primaryWorkOwner } from '@/components/layout/company-nav'
-import { canManagePersonnel, isCompanyManager, isCompanyReviewer, OPERATIONS_SUPPORT_DEPARTMENT } from '@/lib/company/capabilities'
+import { canManagePersonnel, isCompanyManager, isCompanyReviewer, canAccessOperationsSupport } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
 import { HomeCalendar } from './HomeCalendar'
@@ -15,7 +15,7 @@ export function CompanyHomePage() {
   const { profile } = useAuth()
   const workHref = `/work-requests/${primaryWorkOwner(profile ?? {})}`
   const reviewer = isCompanyReviewer(profile)
-  const operations = profile?.departmentName === OPERATIONS_SUPPORT_DEPARTMENT
+  const operations = canAccessOperationsSupport(profile) && !isCompanyReviewer(profile)
   const personnel = canManagePersonnel(profile)
   const manager = isCompanyManager(profile)
   const roleLabel = reviewer ? '회사 현황' : operations ? '운영지원 업무' : manager ? '우리 팀 업무' : '나의 업무'

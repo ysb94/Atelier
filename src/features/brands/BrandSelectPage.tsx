@@ -26,6 +26,7 @@ import { Button } from '@/components/ui/button'
 import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { isBrandLead, useAuth } from '@/lib/supabase/auth'
 import { usePagePreview } from '@/lib/company/page-preview-context'
+import { hasPermission } from '@/lib/company/permissions'
 import { canAccessBrandManagement } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList } from '@/lib/utils'
@@ -63,7 +64,7 @@ function BrandSelectPageContent() {
   const preview = usePagePreview()
   const actualProfile = preview ? preview.realProfile : profile
   const canEditBrand = (id: string) => Boolean(preview?.facts?.brandLead) || isBrandLead(profile, id)
-  const isAdmin = Boolean(profile?.isAdmin)
+  const isAdmin = hasPermission(profile, 'brand.manage')
   const {
     data,
     isLoading,
@@ -98,7 +99,7 @@ function BrandSelectPageContent() {
         if (!isBrandLead(actualProfile, editingBrand.id)) throw new Error('로그인 계정에 이 브랜드를 수정할 권한이 없습니다.')
         return updateBrand(editingBrand.id, values)
       }
-      if (!actualProfile?.isAdmin) throw new Error('로그인 계정에 브랜드를 생성할 권한이 없습니다.')
+      if (!hasPermission(actualProfile, 'brand.manage')) throw new Error('로그인 계정에 브랜드를 생성할 권한이 없습니다.')
       return createBrand(values)
     },
     onSuccess: async () => {
@@ -120,7 +121,7 @@ function BrandSelectPageContent() {
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => {
-      if (!actualProfile?.isAdmin) throw new Error('로그인 계정에 브랜드를 삭제할 권한이 없습니다.')
+      if (!hasPermission(actualProfile, 'brand.manage')) throw new Error('로그인 계정에 브랜드를 삭제할 권한이 없습니다.')
       return deleteBrand(id)
     },
     onMutate: (id) => {
@@ -221,7 +222,7 @@ function BrandSelectPageContent() {
         {selectedBrand ? (
           <BrandInfoCard
             brand={selectedBrand}
-            canEdit={isAdmin || canEditBrand(selectedBrand.id)}
+            canEdit={canEditBrand(selectedBrand.id)}
             isAdmin={isAdmin}
             deleting={deletingId === selectedBrand.id}
             onEdit={() => openEdit(selectedBrand)}
@@ -258,7 +259,7 @@ function BrandSelectPageContent() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             {brands.map((brand) => {
-              const canEdit = isAdmin || canEditBrand(brand.id)
+              const canEdit = canEditBrand(brand.id)
               const selected = selectedBrandId === brand.id
               return (
                 <Card

@@ -1,15 +1,16 @@
 import type { Department, Profile } from '../supabase/profiles'
-import { ORG_ASSIGNMENT_EDITOR_EMAIL, isCompanyReviewer, inferCapabilityFromDepartment, type WorkCapability } from './capabilities.ts'
+import { hasPermission } from './permissions'
+import { inferCapabilityFromDepartment, type WorkCapability } from './capabilities.ts'
 
 export type PreviewSettings = Pick<Profile,
   'departmentId' | 'departmentName' | 'departmentPersonnelScope' | 'position' |
-  'jobGrade' | 'isAdmin' | 'status' | 'capabilities' | 'memberships'>
+  'jobGrade' | 'isAdmin' | 'status' | 'capabilities' | 'memberships' | 'permissionGrants'>
 
 export function canPreviewProfile(profile: Profile | null, sessionEmail: string | null) {
   if (!profile || profile.status !== 'active' || !sessionEmail) return false
   const email = profile.email.trim().toLowerCase()
   return email === sessionEmail.trim().toLowerCase() &&
-    (email === ORG_ASSIGNMENT_EDITOR_EMAIL || isCompanyReviewer(profile))
+    hasPermission(profile, 'preview.use')
 }
 
 export function initialPreview(profile: Profile): PreviewSettings {
@@ -19,6 +20,7 @@ export function initialPreview(profile: Profile): PreviewSettings {
     departmentPersonnelScope: profile.departmentPersonnelScope,
     position: profile.position, jobGrade: profile.jobGrade, isAdmin: profile.isAdmin,
     status: profile.status, capabilities: [...profile.capabilities], memberships: [...profile.memberships],
+    permissionGrants: profile.permissionGrants?.map(grant => ({ ...grant })) ?? [],
   }
 }
 
@@ -34,7 +36,7 @@ export function previewDepartment(department: Department | undefined): Partial<P
 
 export function previewProfile(profile: Profile, settings: PreviewSettings): Profile {
   // 로그인 ID는 보존한다. 개발자 이메일 예외가 일반 직원 화면에 섞이지 않게 한다.
-  return { ...profile, ...settings, email: 'ui-preview@example.invalid' }
+  return { ...profile, ...settings, permissionGrants: settings.permissionGrants ?? [], email: 'ui-preview@example.invalid' }
 }
 
 export function isPreviewProfile(profile: { email?: string | null } | null) {

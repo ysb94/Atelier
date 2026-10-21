@@ -6,6 +6,7 @@ import { CompanyBrandScopeProvider } from '@/components/layout/company-brand-sco
 import { BrandScope } from '@/components/layout/brand-context'
 import { CompanyHomePage } from '@/features/home/CompanyHomePage'
 import { ProfileSettingsPage } from '@/features/settings/ProfileSettingsPage'
+import { PermissionSettingsPage } from '@/features/settings/PermissionSettingsPage'
 import { BrandSelectPage } from '@/features/brands/BrandSelectPage'
 import { AiSettingsPage } from '@/features/settings/AiSettingsPage'
 import { MamamIdeaInboxPage } from '@/features/mamam/MamamIdeaInboxPage'
@@ -73,6 +74,7 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
     <Route path="/idea-contest" element={<MamamIdeaInboxPage />} />
     <Route path="/meetings" element={<CompanyMeetingsPage />} />
     <Route path="/data/all" element={<DataHeaderLayeringFixture />} />
+    <Route path="/settings/permissions" element={<PermissionSettingsPage />} />
     <Route path="/__overlay-audit" element={<OverlayAuditFixture />} />
     <Route path="/usage-codes" element={<><UsageCodePage /><MutationProbe /><output id="guard-result" /></>} />
   </Routes></BrandScope></CompanyBrandScopeProvider></DeveloperPreviewPage>

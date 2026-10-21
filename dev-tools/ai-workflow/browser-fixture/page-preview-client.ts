@@ -1,10 +1,13 @@
 import { getSupabase as general } from './client'
 import { getSupabase as usage } from './usage-headers-client'
+import { permissionFixtureRpc } from './permission-settings-client'
 export const isSupabaseConfigured = () => true
 export function getSupabase() {
   const base = general()
   if (location.pathname === '/usage-codes') return { ...usage(), channel: base.channel, removeChannel: base.removeChannel }
   return { ...base, rpc(name: string, args?: Record<string, unknown>) {
+    const permissions = permissionFixtureRpc(name,args)
+    if (permissions) return permissions
     if (name === 'mark_chat_room_read') return Promise.resolve({ data: null, error: null })
     if (name !== 'list_my_approval_requests') return base.rpc(name, args)
     const data = ['fixture-user', 'other-user'].map((employee_id, index) => ({

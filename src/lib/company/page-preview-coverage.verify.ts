@@ -6,7 +6,7 @@ import type { Profile } from '../supabase/profiles'
 import { previewMeetingActor, previewRequestIsSelf } from './relationship-preview'
 import { canDeleteMeetingSeries, canRemovePrepFile, filterSeriesForViewer, type MeetingSeries } from '../../features/meetings/meeting-schedule'
 
-const real = { id: 'developer', email: 'dev@atelier.local', status: 'active', isAdmin: true, capabilities: [], memberships: [] } as unknown as Profile
+const real = { companyId: 'company', id: 'developer', email: 'dev@atelier.local', status: 'active', isAdmin: true, capabilities: [], memberships: [] } as unknown as Profile
 const snapshot = JSON.stringify(real)
 const cases = (path: string) => completePagePreviewCases(path, real)
 const profile = (path: string, id: string) => {

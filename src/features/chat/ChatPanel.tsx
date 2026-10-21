@@ -24,6 +24,7 @@ export function ChatPanel({
   userId,
   myName,
   isManager,
+  canModerateRoom,
   isAdmin,
   titleId,
   onClose,
@@ -34,6 +35,7 @@ export function ChatPanel({
   userId: string
   myName: string
   isManager: boolean
+  canModerateRoom?: (roomId: string) => boolean
   isAdmin: boolean
   titleId: string
   onClose: () => void
@@ -122,7 +124,7 @@ export function ChatPanel({
             title={title}
             userId={userId}
             myName={myName}
-            isManager={isManager}
+            isManager={canModerateRoom ? canModerateRoom(view.roomId) : isManager}
             outgoing={sending.outgoing}
             titleId={titleId}
             onBack={() => setView({ kind: 'list' })}

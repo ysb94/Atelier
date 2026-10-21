@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { useAuth } from '@/lib/supabase/auth'
-import { canEditOrgAssignment } from '@/lib/company/capabilities'
+import { hasPermission } from '@/lib/company/permissions'
 import {
   COMPANY_NOTICE_SLOTS,
   companyNoticePhase,
@@ -62,12 +62,15 @@ function draftFromNotice(notice: CompanyNotice): Draft {
 export function CompanyNoticesPanel() {
   useRenderWatch('CompanyNoticesPanel')
   const { profile } = useAuth()
-  const canEdit = canEditOrgAssignment(profile)
   const directory = useOpsDirectory()
   const queryClient = useQueryClient()
   const today = koreaDateKey()
   const [slot, setSlot] = useState<CompanyNoticeSlotId>(COMPANY_NOTICE_SLOTS[0].id)
   const [draft, setDraft] = useState<Draft | null>(null)
+  const canWriteNotice = (target: { slot: CompanyNoticeSlotId; departmentId: string | null }) => hasPermission(profile,
+    target.slot === 'department' ? 'notice.department.write' : 'notice.company.write',
+    target.slot === 'department' ? 'department' : 'company', target.departmentId || profile?.companyId)
+  const canEdit = draft ? canWriteNotice(draft) : hasPermission(profile, slot === 'department' ? 'notice.department.write' : 'notice.company.write')
   const [formError, setFormError] = useState('')
   const noticesQuery = useQuery({
     queryKey: ['company-notices'],
@@ -100,7 +103,12 @@ export function CompanyNoticesPanel() {
     },
   })
   const remove = useMutation({
-    mutationFn: deleteCompanyNotice,
+    mutationFn: (id: string) => {
+      const item = notices.find(notice => notice.id === id)
+      const code = item?.slot === 'department' ? 'notice.department.delete' : 'notice.company.delete'
+      if (!item || !hasPermission(profile, code, item.slot === 'department' ? 'department' : 'company', item.departmentId ?? profile?.companyId)) throw new Error('공지 삭제 권한이 필요합니다.')
+      return deleteCompanyNotice(id)
+    },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['company-notices'] })
       setDraft(null)
@@ -192,7 +200,9 @@ export function CompanyNoticesPanel() {
             size="sm"
             disabled={!canEdit || busy}
             onClick={() => {
-              setDraft(emptyDraft(slot))
+              const next = emptyDraft(slot)
+              if (slot === 'department') next.departmentId = directory.departments.find(department => hasPermission(profile,'notice.department.write','department',department.id))?.id ?? ''
+              setDraft(next)
               setFormError('')
             }}
           >
@@ -227,7 +237,7 @@ export function CompanyNoticesPanel() {
                       setFormError('')
                     }}
                   >
-                    {canEdit ? '수정' : '보기'}
+                    {canWriteNotice(notice) ? '수정' : '보기'}
                   </Button>
                 </li>
               )
@@ -309,7 +319,7 @@ export function CompanyNoticesPanel() {
               onChange={(event) => setDraft({ ...draft, departmentId: event.target.value })}
             >
               {draft.slot === 'department' ? null : <option value="">회사 전체</option>}
-              {directory.departments.map((department) => (
+              {directory.departments.filter(department => draft.slot !== 'department' || department.id === draft.departmentId || hasPermission(profile,'notice.department.write','department',department.id)).map((department) => (
                 <option key={department.id} value={department.id}>{department.name}</option>
               ))}
             </Select>
@@ -325,14 +335,14 @@ export function CompanyNoticesPanel() {
             게시
           </label>
           {formError ? <p className="text-sm text-danger" role="alert">{formError}</p> : null}
-          {!canEdit ? <p className="text-xs text-muted-foreground">저장은 운영지원팀만 할 수 있습니다.</p> : null}
+          {!canEdit ? <p className="text-xs text-muted-foreground">이 공지 대상에 작성·수정 권한이 지정된 담당자만 저장할 수 있습니다.</p> : null}
           <div className="flex flex-wrap gap-2">
             <Button type="submit" disabled={!canEdit || busy}>{busy ? '저장 중…' : '저장'}</Button>
             {draft.id ? (
               <Button
                 type="button"
                 variant="outline"
-                disabled={!canEdit || busy}
+                disabled={busy || !hasPermission(profile, draft.slot === 'department' ? 'notice.department.delete' : 'notice.company.delete', draft.slot === 'department' ? 'department' : 'company', draft.departmentId || profile?.companyId)}
                 onClick={() => {
                   if (!draft.id || !window.confirm('이 공지를 삭제할까요?')) return
                   remove.mutate(draft.id)
