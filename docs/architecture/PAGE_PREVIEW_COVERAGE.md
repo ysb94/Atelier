@@ -29,11 +29,35 @@
 화면 테스트 선택을 바꾸지 않는다. 패널을 닫거나 알림으로 전환하면 채팅 테스트도
 언마운트되어 사라지고, 다시 열면 실제 계정 상태에서 시작한다. 기존 채팅 권한은 유지한다.
 
-채팅·알림 패널은 `document.body`의 Portal에서 공통 팝업 레이어(`z-index: 200`)로
-표시한다. 상단 탭(`20`)의 자식으로 두면 상품 데이터 고정 헤더(`20`/`30`)에 가려져,
+채팅·알림 패널은 공통 Portal에서 팝업 레이어(`z-index: 200`)로 표시한다.
+상단 탭(`20`)의 자식으로 두면 상품 데이터 고정 헤더(`20`/`30`)에 가려져,
 패널의 숫자만 높여서는 해결되지 않는다. 바깥 클릭 판정은 버튼 영역과 Portal 영역을
 모두 확인한다. 브라우저 검증은 실제 `SheetTable` 헤더와 패널이 겹치는 좌표에서
 수정 전 실패를 재현했고, 수정 후 가로·세로 스크롤과 내부 클릭·닫기까지 확인했다.
+
+### 전체 화면 겹침 점검 (2026-10-21)
+
+`verify:workspace-overlays`는 `src` 아래 TS/JS/CSS/HTML 전체를 읽어 레이어와
+native 모달 호출을 조사한다. 현재 612개 소스, 구조도 64개 경로(리다이렉트 포함)를
+대상으로 조사했고, 일반 페이지의 가장 높은 `z-index`는 110이다. 세부 파일·줄번호·
+경로 목록은 로컬 전용 `.tmp/workspace-overlay-audit.json`에 매번 다시 생성한다.
+모든 경로의 업무 데이터를 직접 조작한 전수 UI 시험과는 구분한다.
+
+일반 고정 헤더·서랍 외에 `showModal()`을 쓰는 9곳(6개 파일)을 확인했다.
+디자인 이미지 확대, 기획안 작업 지시서 첨부·사진 확대, 일정 날짜 상세,
+조직 배정 편집, 내 근태 신청, 업무 추가·공지·상세가 해당한다.
+native 모달은 CSS 숫자만 올려서는 넘을 수 없어, 열린 채팅·알림에는
+`useWorkspaceOverlayHost`의 수동 popover를 사용한다. 평소에는 body에,
+모달이 열리면 해당 모달 안에 같은 Portal 컨테이너를 옮겨 입력 가능 상태를 유지한다.
+중첩 모달과 조건부 제거도 추적하며, 패널을 다시 만들지 않아 작성 중인 채팅을 보존한다.
+모달의 입력 값·기존 submit/cancel·권한 코드는 바꾸지 않는다.
+
+브라우저에서는 실제 `SheetTable`, 이미지 확대, 일정 상세, 업무 추가·공지·상세와
+중첩 모달/`transform`/`overflow:hidden`을 조합했다. 패널 안 다섯 좌표에서
+`elementFromPoint`로 포인터 수신을 확인하고 실제 입력·읽음·닫기 동작을 검증한다.
+채팅 Escape는 열린 업무 모달을 보존하고 마지막 모달 입력으로 포커스를 돌린다.
+채팅을 닫은 뒤 다시 Escape를 누르면 원래 모달 닫기가 실행된다.
+브라우저 기본 모달이 열린 동안 바깥의 상단 버튼이 비활성화되는 기존 동작은 유지한다.
 
 ## 표시와 실제 데이터의 경계
 
@@ -70,6 +94,7 @@ Node 22에서 실행한다.
 ```sh
 npm run verify:page-preview
 npm run verify:page-preview-browser
+npm run verify:workspace-overlays
 npm run verify:company-capabilities
 npm run verify:work-request-roles
 npm run verify:workspace-tabs

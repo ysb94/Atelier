@@ -21,6 +21,7 @@ import { chatKeys } from '@/features/chat/use-chat'
 import type { ChatRoom, ChatMessage } from '@/lib/inbox/types'
 import { SheetTable } from '@/features/data/SheetTable'
 import type { BrandField } from '@/lib/types'
+import { OverlayAuditFixture } from './overlay-audit-fixture'
 import '@/index.css'
 
 const brand = { id: '20000000-0000-4000-8000-000000000001', slug: 'fixture', name: '검증 브랜드', color: '#333' } as any
@@ -72,6 +73,7 @@ createRoot(document.getElementById('root')!).render(<QueryClientProvider client=
     <Route path="/idea-contest" element={<MamamIdeaInboxPage />} />
     <Route path="/meetings" element={<CompanyMeetingsPage />} />
     <Route path="/data/all" element={<DataHeaderLayeringFixture />} />
+    <Route path="/__overlay-audit" element={<OverlayAuditFixture />} />
     <Route path="/usage-codes" element={<><UsageCodePage /><MutationProbe /><output id="guard-result" /></>} />
   </Routes></BrandScope></CompanyBrandScopeProvider></DeveloperPreviewPage>
   <Routes location="/hidden"><Route path="/hidden" element={<DeveloperPreviewPage><HiddenProfile /></DeveloperPreviewPage>} /></Routes>

@@ -4,6 +4,7 @@ import { createServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { chromium } from 'playwright-core'
+import { verifyWorkspaceOverlays } from './workspace-overlay-browser.mjs'
 
 const root = process.cwd(), fixture = path.join(root, 'dev-tools/ai-workflow/browser-fixture')
 const auth = path.join(fixture, 'page-preview-auth.tsx'), client = path.join(fixture, 'page-preview-client.ts')
@@ -38,6 +39,7 @@ try {
   const page = await context.newPage()
   diagnosticPage = page
   page.setDefaultTimeout(10000)
+  page.setDefaultNavigationTimeout(30000)
   page.on('pageerror', error => errors.push(error.message))
   page.on('console', message => { if (message.type() === 'error') console.error('browser-console:', message.text()) })
   page.on('requestfailed', request => console.error('browser-request:', request.url(), request.failure()?.errorText))
@@ -78,8 +80,11 @@ try {
   await page.locator('#workspace-notification-panel').waitFor()
   await assertAboveHeaders('workspace-notification-panel')
   await page.keyboard.press('Escape')
+  if (!process.argv.includes('--layering-only')) await verifyWorkspaceOverlays(page, origin)
   if (process.argv.includes('--layering-only')) {
     console.log('page-preview-layering: 실제 SheetTable 고정 헤더 위에서 채팅/알림 표시·스크롤·내부 클릭·닫기 통과')
+  } else if (process.argv.includes('--overlay-only')) {
+    console.log('workspace-overlays: 전체 소스 점검과 실제 표·모달 겹침 회귀 검증 통과')
   } else {
   await page.goto(origin + '/')
   await choose('운영지원 · 사원')
@@ -204,7 +209,7 @@ try {
   }
   assert.deepEqual(errors, [])
   assert.deepEqual(remote, [])
-  console.log('page-preview-browser: 고정 표 헤더 위 채팅/알림 표시·스크롤·클릭·화면 전환·테스트 노출·탭 격리·저장 권한 보존 통과 (외부 요청 0)')
+  console.log('page-preview-browser: 선택한 브라우저 시나리오 통과 (오류·외부 요청 0)')
 } catch (error) {
   console.error(JSON.stringify({ runtimeErrors: errors, url: diagnosticPage?.url(), text: (await diagnosticPage?.locator('body').innerText().catch(() => ''))?.slice(0, 4500) }))
   throw error

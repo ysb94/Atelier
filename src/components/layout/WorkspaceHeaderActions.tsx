@@ -25,11 +25,12 @@ import { useHeaderPreview } from '@/lib/company/developer-preview-context'
 import { cn, emptyList } from '@/lib/utils'
 import { NotificationPanel } from './NotificationPanel'
 import { DeveloperPreviewBar, DeveloperPreviewProvider } from './DeveloperPreview'
+import { useWorkspaceOverlayHost } from './use-workspace-overlay-host'
 
 type OpenPanel = 'chat' | 'notifications'
 
 // 페이지의 고정 헤더·서랍과 상단 탭의 stacking context 밖에서 공통 패널을 표시한다.
-const HEADER_PANEL_CLASS = 'fixed top-12 right-3 bottom-24 z-[200] flex w-[min(24rem,calc(100vw-1.5rem))] flex-col'
+const HEADER_PANEL_CLASS = 'pointer-events-auto fixed top-12 right-3 bottom-24 z-[200] flex w-[min(24rem,calc(100vw-1.5rem))] flex-col'
 
 function isManagerPosition(position: string | null | undefined) {
   return COMPANY_MANAGER_POSITIONS.some((item) => item === position)
@@ -51,6 +52,7 @@ export function WorkspaceHeaderActions() {
   const chatTitleId = useId()
   const notificationTitleId = useId()
   const [open, setOpen] = useState<OpenPanel | null>(null)
+  const { container: overlayContainer, restoreFocus } = useWorkspaceOverlayHost(open !== null)
   const [notifications, setNotifications] = useState<InboxNotification[]>(
     () => MOCK_NOTIFICATIONS,
   )
@@ -73,9 +75,9 @@ export function WorkspaceHeaderActions() {
           ? bellButtonRef.current
           : null
     window.requestAnimationFrame(() => {
-      button?.focus()
+      restoreFocus(button)
     })
-  }, [])
+  }, [restoreFocus])
 
   function toggle(next: OpenPanel) {
     openedBy.current = next
@@ -173,7 +175,7 @@ export function WorkspaceHeaderActions() {
             titleId={chatTitleId}
             onClose={closePanel}
           /></DeveloperPreviewProvider>
-        </div>, document.body,
+        </div>, overlayContainer,
       ) : null}
       {open === 'notifications' ? createPortal(
         <div
@@ -188,7 +190,7 @@ export function WorkspaceHeaderActions() {
             onOpen={openNotification}
             onClose={closePanel}
           />
-        </div>, document.body,
+        </div>, overlayContainer,
       ) : null}
     </div>
   )

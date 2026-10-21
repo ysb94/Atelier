@@ -82,6 +82,7 @@ const phrases = {
   'query keys': '조회 캐시 키', 'save queue': '저장 대기열', 'backed up': '백업',
   'work instructions': '작업 지시', 'quick slots': '빠른 입력 슬롯',
   'pending approval': '승인 대기',
+  'overlay host': '팝업 표시 위치',
 }
 const korean = value => /[가-힣]/.test(value ?? '')
 const clean = value => value.replace(/\s+/g, ' ').trim()
