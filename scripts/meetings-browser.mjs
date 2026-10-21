@@ -77,6 +77,7 @@ export async function verifyMeetings(page,origin){
  await page.goto(origin+'/meetings?meeting-member&identity=employee')
  await page.getByRole('button',{name:/^알림(?:,|$)/}).click()
  await page.locator('#workspace-notification-panel').getByRole('button').filter({hasText:'새 회의 참석 흐름 · 참석 요청'}).click()
+ await nextDialog().getByText(/ · 10:00–11:00 · 대회의실/).waitFor()
  await nextDialog().getByRole('button',{name:'참석 가능',exact:true}).click()
  await nextDialog().getByRole('button',{name:'검증 동료 · 참석 가능',exact:true}).waitFor()
  await nextDialog().getByRole('button',{name:'참석 불가',exact:true}).click()

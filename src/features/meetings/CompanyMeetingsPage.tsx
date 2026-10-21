@@ -1756,6 +1756,7 @@ function MeetingDetailDrawer({
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
           {series.phase==='preparing'?<p className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">준비 중 · 호스트와 생성자만 볼 수 있습니다. 안내와 자료를 준비한 뒤 호스트가 일정을 확정하면 멤버에게 공개됩니다.</p>:null}
+          {!pending?<p className="rounded-lg bg-muted px-3 py-2 text-sm font-medium">{round.startsAt.slice(0,10)} · {formatBookedTimeRange(round.startsAt,round.durationMinutes ?? series.durationMinutes)} · {meetingRoomName(round.roomId)}</p>:null}
           {attendance}
           {previousRounds.length > 0 ? (
             <section className="space-y-2">
