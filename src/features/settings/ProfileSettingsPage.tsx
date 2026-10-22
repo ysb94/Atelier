@@ -23,6 +23,7 @@ import { HomeNoticeBoard } from './HomeNoticeBoard'
 import { MyAttendanceStartPanel } from './MyAttendanceStartPanel'
 import { MyAttendancePanel } from './MyAttendancePanel'
 import './personal-requests.css'
+import '@/styles/design-unify-accent.css'
 
 function formatHireDate(value: string | null | undefined) {
   const matched = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value?.trim() ?? '')
@@ -71,7 +72,7 @@ export function ProfileSettingsPage() {
   const visiblePart = part === 'attendance' && !showDepartmentTab ? 'my-attendance' : part
 
   return (
-    <div>
+    <div className="design-unify-accent">
       <PageHeader title="My home" />
 
       <div className="personal-page-tabs" role="tablist" aria-label="My home 메뉴">

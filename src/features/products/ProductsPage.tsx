@@ -41,6 +41,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { SelectFieldInput } from '@/components/fields/SelectFieldInput'
 import { Input, Select } from '@/components/ui/input'
+import '@/styles/design-unify-accent.css'
 import {
   getActiveWarehouseInventorySet,
   getBrandFields,
@@ -1297,10 +1298,10 @@ export function ProductsPage({
       />
   )
 
-  if (contentOverride) return <div>{header}{headerAddon}{contentOverride}<Outlet /></div>
+  if (contentOverride) return <div className="design-unify-accent">{header}{headerAddon}{contentOverride}<Outlet /></div>
 
   return (
-    <div>
+    <div className="design-unify-accent">
       {header}
       {headerAddon}
 
@@ -1537,7 +1538,7 @@ export function ProductsPage({
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+            <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id}>
                   {hg.headers.map((header) => (

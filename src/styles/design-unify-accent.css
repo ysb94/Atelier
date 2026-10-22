@@ -1,0 +1,11 @@
+/* 화면 단위 디자인 통일 작업용 공용 스코프.
+   전역 토큰(src/index.css)은 그대로 두고, 이 클래스를 루트에 붙인 화면에서만
+   --color-primary 계열을 drafts 화면의 레드로 덮어쓴다. Button(default) ·
+   Badge(default) · Input/Select 포커스 링처럼 이미 토큰을 쓰는 공통 컴포넌트는
+   이 클래스 하나로 자동 반영된다. 모든 화면 적용이 끝나면 이 값을 src/index.css의
+   --color-primary로 올리고 이 파일과 각 페이지의 className은 제거한다. */
+.design-unify-accent {
+  --color-primary: #c60920;
+  --color-primary-foreground: #ffffff;
+  --color-ring: #c60920;
+}

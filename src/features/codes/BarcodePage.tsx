@@ -22,6 +22,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Select } from '@/components/ui/input'
+import '@/styles/design-unify-accent.css'
 import {
   ProductCodeStoreError,
   createProductCode,
@@ -289,7 +290,7 @@ export function BarcodePage() {
   )
 
   return (
-    <div>
+    <div className="design-unify-accent">
       <PageHeader
         title="88바코드 관리"
         description={`${brand.name}이 직접 발급하는 88코드 마스터입니다. 업체 프리픽스는 ${barcodePrefix(brand.id)}입니다. 출고업체 연결은 업체별 코드 관리에서 합니다.`}
@@ -401,7 +402,7 @@ export function BarcodePage() {
           <Card className="overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1040px] text-left text-sm">
-                <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+                <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
                   <tr>
                     <th className="w-8 px-4 py-3" />
                     <th className="px-4 py-3 font-medium">바코드</th>

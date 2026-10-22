@@ -5,6 +5,7 @@ import { Card } from '@/components/ui/card'
 import { Input, Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList, formatCurrency } from '@/lib/utils'
+import '@/styles/design-unify-accent.css'
 
 type CompareRow = {
   styleNo: string
@@ -79,7 +80,7 @@ export function PriceComparePage() {
   const visible = rows.length ? rows : emptyList<CompareRow>()
 
   return (
-    <div>
+    <div className="design-unify-accent">
       <PageHeader
         title="가격 비교"
         description="자사 판매가와 비교몰 가격을 한 화면에서 봅니다. 지금은 화면 구성만 있으며 실제 수집·저장은 없습니다."
@@ -105,7 +106,7 @@ export function PriceComparePage() {
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
-            <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+            <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">M번호</th>
                 <th className="px-4 py-3 font-medium">품목명</th>

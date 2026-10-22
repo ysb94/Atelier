@@ -10,6 +10,7 @@ import { DocumentOutputPanel } from './DocumentOutputPanel'
 import { CompanyNoticesPanel } from './CompanyNoticesPanel'
 import { useAuth } from '@/lib/supabase/auth'
 import { canAccessOperationsSupport, canEditOrgAssignment } from '@/lib/company/capabilities'
+import '@/styles/design-unify-accent.css'
 
 const PARTS = [
   { id: 'org', label: '조직도', description: '부서 배치와 직책·직급을 관리합니다.' },
@@ -48,7 +49,7 @@ export function OperationsSupportPage() {
   }
 
   return (
-    <div>
+    <div className="design-unify-accent">
       <PageHeader title="운영지원" description={current.description} />
       {!canEditOrgAssignment(profile) && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">제작 화면 검수 · 운영지원 자료를 조회할 수 있습니다. 저장·승인은 기존 업무 권한을 따릅니다.</p>}
       <div role="tablist" aria-label="운영지원 파트" className="mb-5 flex gap-1 overflow-x-auto border-b border-border">

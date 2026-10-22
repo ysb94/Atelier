@@ -23,6 +23,7 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import '@/styles/design-unify-accent.css'
 import { Input, Select } from '@/components/ui/input'
 import {
   SabangnetProductStoreError,
@@ -253,7 +254,7 @@ export function SabangnetCodePage() {
   }
   function fieldWidth(field: SabangnetField) { return field.systemKey === 'code' ? 140 : field.systemKey === 'name' ? 300 : 200 }
   function fixedClass(field: SabangnetField, header = false) {
-    return field.systemKey === 'code' ? `sticky left-[40px] ${header ? 'z-30 bg-muted' : 'z-10 bg-inherit'}` : field.systemKey === 'name' ? `sticky left-[180px] border-r border-border ${header ? 'z-30 bg-muted' : 'z-10 bg-inherit'}` : ''
+    return field.systemKey === 'code' ? `sticky left-[40px] ${header ? 'z-30 bg-primary' : 'z-10 bg-inherit'}` : field.systemKey === 'name' ? `sticky left-[180px] border-r border-border ${header ? 'z-30 bg-primary' : 'z-10 bg-inherit'}` : ''
   }
   const categoryOptions = useMemo(
     () => (categoryIndex ? listCategoryFilterOptions(categoryIndex.tree) : []),
@@ -427,7 +428,7 @@ export function SabangnetCodePage() {
   }
 
   return (
-    <div>
+    <div className="design-unify-accent">
       <PageHeader
         title="사방넷 코드 관리"
         description={`${brand.name}의 사방넷 코드와 SKU 단위 M번호 연결을 관리합니다.`}
@@ -636,9 +637,9 @@ export function SabangnetCodePage() {
             <div className="max-h-[65vh] overflow-auto" role="region" aria-label="사방넷 코드 표" tabIndex={0}>
               <table className="w-full table-fixed text-left text-sm" style={{ minWidth: 140 + visibleFields.reduce((sum, f) => sum + fieldWidth(f), 0) + (listColumnCount - visibleFields.length - 2) * 200 }}>
                 <colgroup><col style={{ width: 40 }} />{visibleFields.map(f => <col key={f.id} style={{ width: fieldWidth(f) }} />)}{Array.from({ length: listColumnCount - visibleFields.length - 2 }, (_, i) => <col key={`extra-${i}`} style={{ width: 200 }} />)}<col style={{ width: 100 }} /></colgroup>
-                <thead className="sticky top-0 z-20 border-b border-border bg-muted text-xs text-muted-foreground">
+                <thead className="sticky top-0 z-20 border-b border-border bg-primary text-xs text-primary-foreground">
                   <tr>
-                    <th className="sticky left-0 z-30 bg-muted px-2 py-3" />
+                    <th className="sticky left-0 z-30 bg-primary px-2 py-3" />
                     {visibleFields.map((field) => (
                       <th key={field.id} className={cn('truncate px-4 py-3 font-medium', fixedClass(field, true))} title={field.label}>
                         {field.label}
