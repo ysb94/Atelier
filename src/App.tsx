@@ -1,4 +1,5 @@
 import { AuthGate } from '@/features/auth/AuthGate'
+import { AccessIpRecorder } from '@/features/auth/AccessIpRecorder'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrandLayout } from '@/components/layout/BrandLayout'
@@ -36,6 +37,7 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
+        <AccessIpRecorder />
         <AuthGate><BrowserRouter><Routes>
           <Route path="/chat/room/:roomId" element={<ChatWindowPage />} />
           <Route path="/b/:brandSlug/*" element={<BrandLayout />} />

@@ -28,7 +28,7 @@ const vocabulary = {
   new: '새', sending: '전송', outgoing: '전송', send: '보내기', realtime: '실시간 갱신', window: '창',
   home: '홈', calendar: '달력', day: '날짜', events: '일정', meetings: '회의', meeting: '회의', slots: '시간대',
   org: '조직', chart: '차트', directory: '명부', members: '구성원', profiles: '프로필', profile: '프로필',
-  auth: '인증', login: '로그인', access: '접근 권한', legal: '실명', confirmation: '확인', pending: '대기',
+  auth: '인증', login: '로그인', access: '접근 권한', ip: 'IP', recorder: '기록 수집', records: '기록', legal: '실명', confirmation: '확인', pending: '대기',
   ai: 'AI', candidates: '후보', gateway: '호출 게이트웨이', learning: '학습', recommend: '추천',
   md: 'MD', price: '가격', compare: '비교', refresh: '갱신', search: '검색', evidence: '근거', event: '행사',
   design: '디자인', styled: '착장', studio: '스튜디오', cuts: '컷', image: '이미지', images: '이미지',
@@ -74,6 +74,7 @@ const vocabulary = {
   index: '색인', groups: '그룹', shipments: '출고', paths: '경로',
 }
 const phrases = {
+  'access ip': '접속 IP',
   'product name': '상품명', 'item name': '내품명', 'style no': 'M번호(SKU)', 'style name': 'SKU 이름',
   'work request': '작업 요청', 'work order': '작업 지시서', 'work instruction': '작업 지시',
   'file manager': '파일 관리', 'product list': '품목 리스트', 'product code': '상품 코드',

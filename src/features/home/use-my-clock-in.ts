@@ -3,12 +3,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { isAttendanceExempt } from '@/lib/company/capabilities'
 import { useAuth } from '@/lib/supabase/auth'
 import { getSupabase } from '@/lib/supabase/client'
+import { recordAccessIp } from '@/lib/supabase/access-ip'
 import { emptyList } from '@/lib/utils'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { clockOutToday, listMyAttendanceClocks, undoClockOutToday } from '@/lib/supabase/attendance-clocks'
 import { clockOutLabel, koreaDateKey, type AttendanceClock } from '@/features/settings/my-attendance'
 
 async function clockInToday(): Promise<string> {
+  void recordAccessIp('clock_in_request')
   const { data, error } = await getSupabase().rpc('clock_in_today')
   if (error) { console.warn('[attendance-clock] 출근 기록 실패', error); throw new Error(error.message) }
   return String(data).slice(0, 5)
