@@ -66,7 +66,6 @@ export type Profile = {
 
 export type AccessRequestInput = {
   displayName: string
-  departmentId: string
 }
 
 export type ApproveMemberInput = {
@@ -533,7 +532,6 @@ export async function submitAccessRequest(
   if (currentError) throw toStoreError(currentError)
   if (!current || !['pending','rejected'].includes(current.status)) throw new Error('현재 계정은 재신청할 수 없습니다. 계정 정보를 다시 불러와 주세요.')
 
-  if (!input.departmentId) throw new Error('부서를 선택하세요.')
   const displayName = validatePersonName(input.displayName)
 
   const { data, error } = await getSupabase()
@@ -542,7 +540,6 @@ export async function submitAccessRequest(
       display_name: displayName,
       name_confirmed_at: new Date().toISOString(),
       company_id: DEFAULT_COMPANY_ID,
-      department_id: input.departmentId,
       request_note: null,
       requested_at: new Date().toISOString(),
       status: 'pending',
@@ -583,7 +580,7 @@ export async function approveMember(
 
   const patch: Record<string, unknown> = {
     company_id: DEFAULT_COMPANY_ID,
-    department_id: input.departmentId,
+    department_id: input.departmentId || null,
     position: input.position.trim() || null,
     job_grade: input.jobGrade?.trim() || null,
     ...(input.hireDate !== undefined ? { hire_date: normalizeHireDate(input.hireDate) } : {}),
