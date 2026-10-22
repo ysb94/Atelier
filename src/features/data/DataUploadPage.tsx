@@ -5,6 +5,7 @@ import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import { FilterTabs } from '@/components/ui/filter-tabs'
 import { Select } from '@/components/ui/input'
 import { BarcodeBulkUploadPanel } from '@/features/codes/BarcodeBulkUploadPanel'
 import { UsageBulkUploadPanel } from '@/features/codes/UsageBulkUploadPanel'
@@ -19,8 +20,6 @@ import {
 import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import { getUsagePartnerSettings } from '@/lib/supabase/usage-partner-settings'
 import type { CodeUsageStatus } from '@/lib/types'
-import { cn } from '@/lib/utils'
-import '@/styles/design-unify-accent.css'
 
 type UploadKind = 'products' | 'usage' | 'barcodes' | 'partner'
 
@@ -129,28 +128,19 @@ export function DataUploadPage() {
   const current = KINDS.find((item) => item.id === kind) ?? KINDS[0]
 
   return (
-    <div className="design-unify-accent">
+    <div>
       <PageHeader
         title="일괄 업로드"
         description={`${brand.name} 데이터 영역의 상품·코드를 파일로 한 번에 올립니다.`}
       />
 
-      <div className="mb-4 flex flex-wrap gap-1.5">
-        {KINDS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            onClick={() => setKind(item.id)}
-            className={cn(
-              'rounded-md px-3 py-1.5 text-sm transition-colors',
-              item.id === kind
-                ? 'bg-foreground text-background'
-                : 'bg-muted text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {item.label}
-          </button>
-        ))}
+      <div className="mb-4">
+        <FilterTabs
+          ariaLabel="업로드 종류"
+          value={kind}
+          onChange={setKind}
+          tabs={KINDS.map((item) => ({ value: item.id, label: item.label }))}
+        />
       </div>
 
       <p className="mb-6 text-sm text-muted-foreground">

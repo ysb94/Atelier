@@ -1161,11 +1161,11 @@ export function PartnerCodeListPanel({
 
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full min-w-[820px] text-left text-sm">
-              <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+              <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
                 <tr>
                   <th className="whitespace-nowrap px-4 py-3 font-medium">
                     {codeHeader}
-                    <span className="ml-1 text-[10px] text-muted-foreground">
+                    <span className="ml-1 text-[10px] text-primary-foreground">
                       고정
                     </span>
                   </th>
@@ -1179,7 +1179,7 @@ export function PartnerCodeListPanel({
                   ))}
                   <th className="whitespace-nowrap px-4 py-3 font-medium">
                     {PARTNER_COMPONENT_HEADER}
-                    <span className="ml-1 text-[10px] text-muted-foreground">
+                    <span className="ml-1 text-[10px] text-primary-foreground">
                       고정
                     </span>
                   </th>

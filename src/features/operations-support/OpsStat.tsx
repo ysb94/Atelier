@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { cn } from '@/lib/utils'
+import { StatTile } from '@/components/ui/stat-tile'
 
 export function OpsStat({
   label,
@@ -10,15 +11,7 @@ export function OpsStat({
   value: string
   detail?: string
 }) {
-  return (
-    <div className="rounded-xl border border-border bg-card px-4 py-4 sm:px-5">
-      <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <div className="mt-2 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <p className="text-2xl font-semibold tracking-tight tabular-nums">{value}</p>
-        {detail ? <p className="text-xs text-muted-foreground">{detail}</p> : null}
-      </div>
-    </div>
-  )
+  return <StatTile label={label} value={value} hint={detail} />
 }
 
 export function DraftNotice({ children }: { children: ReactNode }) {

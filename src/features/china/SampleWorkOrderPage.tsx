@@ -5,6 +5,7 @@ import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { FilterBar } from '@/components/ui/filter-bar'
 import { Input, Select } from '@/components/ui/input'
 import { DraftPhoto } from '@/features/drafts/DraftSheetRow'
 import '@/features/drafts/draft-board.css'
@@ -357,7 +358,7 @@ export function CompanySampleWorkOrderPage() {
         description="기획에서 올리고 저장한 대표 샘플·컬러별 작업 지시서입니다. 지시서 하나마다 행이 생기고, 이미 발송한 행은 그대로 완료로 남습니다."
       />
 
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+      <FilterBar>
         <Input
           className="sm:max-w-xs"
           placeholder="PL번호, 이름, 파일명, 컬러 검색..."
@@ -367,7 +368,7 @@ export function CompanySampleWorkOrderPage() {
         <div className="text-sm text-muted-foreground sm:ml-auto">
           {formatNumber(visibleWorkOrders.length)}건
         </div>
-      </div>
+      </FilterBar>
 
       <div
         role="tablist"

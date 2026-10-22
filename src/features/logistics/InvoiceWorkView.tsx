@@ -1134,8 +1134,8 @@ export function InvoiceWorkView({ model }: { model: InvoiceWorkModel }) {
                       ) : (
                         <div className="max-h-[70vh] overflow-auto rounded-lg border border-border">
                           <table className="w-full min-w-[640px] border-collapse text-xs">
-                            <thead className="sticky top-0 z-10 bg-muted/90">
-                              <tr className="text-left text-[10px] uppercase tracking-wide text-muted-foreground">
+                            <thead className="sticky top-0 z-10 bg-primary text-primary-foreground">
+                              <tr className="text-left text-[10px] uppercase tracking-wide text-primary-foreground">
                                 <th className="border-b border-border px-3 py-2">
                                   M번호
                                 </th>

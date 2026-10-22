@@ -181,7 +181,7 @@ export function MdProductsPage({ brands }: { brands: Brand[] }) {
     {failed ? <p role="alert" className="mb-3 text-sm text-danger">업체 상품 또는 개인 설정을 불러오지 못했습니다. 새로고침해 주세요.</p> : null}
     <Card className="overflow-hidden"><div className="max-h-[65vh] overflow-auto"><table className="w-full min-w-[1080px] table-fixed text-left text-sm">
       <colgroup><col className="w-36" /><col className="w-32" /><col className="w-80" /><col className="w-40" /><col className="w-48" /><col className="w-32" /></colgroup>
-      <thead className="sticky top-0 z-20 bg-muted text-xs text-muted-foreground"><tr>{['업체', '사방넷 코드', '업체 상품명', '쇼핑몰 상품코드', '연결된 M번호', '상품 링크'].map(label => <th key={label} className="h-11 px-4 font-medium">{label}</th>)}</tr></thead>
+      <thead className="sticky top-0 z-20 bg-primary text-xs text-primary-foreground"><tr>{['업체', '사방넷 코드', '업체 상품명', '쇼핑몰 상품코드', '연결된 M번호', '상품 링크'].map(label => <th key={label} className="h-11 px-4 font-medium">{label}</th>)}</tr></thead>
       <tbody>{loading || failed ? <tr><td colSpan={6} className="py-16 text-center text-muted-foreground">{loading ? '업체 상품을 불러오는 중...' : '조회에 실패했습니다.'}</td></tr> : pageRows.length ? pageRows.map(row => <tr key={row.link.id} className="h-12 border-b border-border odd:bg-card even:bg-muted/30 hover:bg-accent/50">
         <td className="px-4"><div className="truncate" title={row.mall.label}>{row.mall.label}</div>{brands.length > 1 ? <small className="text-muted-foreground">{row.mall.brand.name}</small> : null}</td>
         <td className="px-4 font-medium">{row.product.code}</td><td className="px-4"><div className="truncate" title={row.link.mallProductName || '업체 상품명 미등록'}>{row.link.mallProductName || '업체 상품명 미등록'}</div></td>

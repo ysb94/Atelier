@@ -18,7 +18,6 @@ import {
 import type { CodeUsageTarget } from '@/lib/types'
 import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import { cn } from '@/lib/utils'
-import '@/styles/design-unify-accent.css'
 
 function storageKey(brandId: string) {
   return `atelier:partner-codes-target-ids:${brandId}`
@@ -261,7 +260,7 @@ export function PartnerCodePage() {
   const configured = enabledTargetIds != null
 
   return (
-    <div className="design-unify-accent">
+    <div>
       <PageHeader
         title="거래처 코드"
         description="자사 88바코드를 안 쓰는 업체의 바코드 리스트입니다. 표시할 업체는 설정에서 고릅니다."

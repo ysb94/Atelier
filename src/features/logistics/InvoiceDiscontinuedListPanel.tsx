@@ -215,7 +215,7 @@ export function InvoiceDiscontinuedListPanel({
 
         <div className="max-h-[min(60vh,32rem)] overflow-auto rounded-lg border border-border">
           <table className="w-full min-w-[720px] text-left text-xs">
-            <thead className="sticky top-0 z-10 bg-muted/90">
+            <thead className="sticky top-0 z-10 bg-primary text-primary-foreground">
               <tr>
                 <th className="px-3 py-2 font-medium">M번호</th>
                 <th className="px-3 py-2 font-medium">상품명</th>

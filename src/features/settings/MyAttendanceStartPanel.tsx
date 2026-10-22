@@ -87,9 +87,9 @@ export function MyAttendanceStartPanel({ departmentIds: _departmentIds }: { depa
       <Button type="button" disabled={busy || unavailable || !validYear || checkedVisible.length === 0} onClick={() => void apply()}><Check size={14} />{busy ? '적용 중…' : `${Number(monthNo)}월 · ${checkedVisible.length}명 적용`}</Button>
       {graceUntil && <p className="pb-2 text-xs text-muted-foreground">{graceUntil}까지는 기준 초과로 보지 않습니다.</p>}
     </div>
-    <div className="overflow-auto rounded-xl border border-border bg-card">
+    <div className="overflow-auto rounded-xl border border-border bg-card shadow-sm">
       <table className="w-full min-w-[640px] text-left text-sm" aria-label="담당 직원 출근시간">
-        <thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="w-12 px-4 py-3"><input type="checkbox" aria-label="표시된 직원 모두 선택" checked={allVisible} disabled={unavailable || busy || !members.length} onChange={toggleVisible} /></th><th className="px-4 py-3 font-medium">직원</th><th className="px-4 py-3 font-medium">부서</th><th className="px-4 py-3 font-medium">{Number(monthNo)}월</th></tr></thead>
+        <thead className="bg-primary text-xs text-primary-foreground"><tr><th className="w-12 px-4 py-3"><input type="checkbox" aria-label="표시된 직원 모두 선택" checked={allVisible} disabled={unavailable || busy || !members.length} onChange={toggleVisible} /></th><th className="px-4 py-3 font-medium">직원</th><th className="px-4 py-3 font-medium">부서</th><th className="px-4 py-3 font-medium">{Number(monthNo)}월</th></tr></thead>
         <tbody>
           {members.map(member => {
             const resolved = resolveAttendanceStart(schedules.index, member.id, member.departmentId, month)

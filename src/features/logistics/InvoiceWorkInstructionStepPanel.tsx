@@ -184,7 +184,7 @@ export function InvoiceWorkInstructionStepPanel({
             이번 파일에서 나갈 포장재
           </p>
           <table className="w-full min-w-140 text-left text-xs">
-            <thead className="bg-muted/60">
+            <thead className="bg-primary text-primary-foreground">
               <tr>
                 <th className="px-3 py-2.5 font-medium">M번호</th>
                 <th className="px-3 py-2.5 font-medium">제품명</th>
@@ -235,7 +235,7 @@ export function InvoiceWorkInstructionStepPanel({
 
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[720px] text-left text-xs">
-          <thead className="bg-muted/60">
+          <thead className="bg-primary text-primary-foreground">
             <tr>
               <th className="px-3 py-2.5 font-medium">행</th>
               <th className="px-3 py-2.5 font-medium">쇼핑몰명</th>

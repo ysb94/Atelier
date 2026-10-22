@@ -355,10 +355,10 @@ function StatusCountFilter({
       type="button"
       onClick={onClick}
       className={cn(
-        'rounded-full px-2 py-0.5 text-xs font-medium',
-        variant === 'success' && 'bg-success/15 text-success',
-        variant === 'muted' && 'bg-muted text-muted-foreground',
-        active && 'ring-1 ring-foreground/40',
+        'rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
+        variant === 'success' && 'border-success/30 bg-success/10 text-success',
+        variant === 'muted' && 'border-transparent bg-muted text-muted-foreground',
+        active && 'ring-2 ring-primary/40',
       )}
     >
       {children}

@@ -115,7 +115,7 @@ export function HomeNoticeBoard({
       {kind === 'department' && allowedDepartments.length > 1 && <label className="block max-w-sm text-sm">공지 대상 부서<Select value={departmentId ?? ''} onChange={event => { setSelectedDepartment(event.target.value); resetForm() }}>{allowedDepartments.map(department => <option key={department.id} value={department.id}>{department.name}</option>)}</Select></label>}
       {canRegister ? (
         <form
-          className="space-y-3 rounded-xl border border-border bg-card px-5 py-4"
+          className="space-y-3 rounded-xl border border-border bg-card px-5 py-4 shadow-sm"
           aria-label="부서 공지 등록"
           onSubmit={(event) => {
             event.preventDefault()
@@ -158,7 +158,7 @@ export function HomeNoticeBoard({
         <p className="personal-page-notice">등록된 공지가 없습니다.</p>
       ) : (
         notices.map((notice) => (
-          <article key={notice.id} className="rounded-xl border border-border bg-card px-5 py-4">
+          <article key={notice.id} className="rounded-xl border border-border bg-card px-5 py-4 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <h2 className="text-base font-semibold">{notice.title}</h2>
               {canRegister || canDelete ? (

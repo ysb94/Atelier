@@ -16,6 +16,7 @@ import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { FilterBar } from '@/components/ui/filter-bar'
 import { Input } from '@/components/ui/input'
 import { CargoInboundAddPanel } from '@/features/logistics/CargoInboundAddPanel'
 import type { CargoInboundRegisterPayload } from '@/features/logistics/CargoInboundAddPanel'
@@ -567,7 +568,7 @@ export function CompanyCargoInboundPage() {
             })}
           </div>
 
-          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+          <FilterBar>
             <Input
               className="sm:max-w-xs"
               placeholder="선적일, 브랜드, 선박, 항구 검색..."
@@ -577,7 +578,7 @@ export function CompanyCargoInboundPage() {
             <div className="text-sm text-muted-foreground sm:ml-auto">
               {activeMeta.label} {formatNumber(rows.length)}건
             </div>
-          </div>
+          </FilterBar>
 
           <div
             role="tablist"

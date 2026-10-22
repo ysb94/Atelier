@@ -22,8 +22,10 @@ import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
-import '@/styles/design-unify-accent.css'
+import { Card } from '@/components/ui/card'
+import { StatTile } from '@/components/ui/stat-tile'
+import { FilterBar } from '@/components/ui/filter-bar'
+import { FilterTabs } from '@/components/ui/filter-tabs'
 import { Input, Select } from '@/components/ui/input'
 import {
   SabangnetProductStoreError,
@@ -428,7 +430,7 @@ export function SabangnetCodePage() {
   }
 
   return (
-    <div className="design-unify-accent">
+    <div>
       <PageHeader
         title="사방넷 코드 관리"
         description={`${brand.name}의 사방넷 코드와 SKU 단위 M번호 연결을 관리합니다.`}
@@ -548,28 +550,17 @@ export function SabangnetCodePage() {
         />
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-1.5">
-        {(
-          [
-            ['all', '전체', products.length],
-            ['linked', '연결 완료', linkedCount],
-            ['unlinked', 'M번호 미연결', unlinkedProducts.length],
-          ] as const
-        ).map(([id, label, count]) => (
-          <button
-            key={id}
-            type="button"
-            className={cn(
-              'rounded-md px-3 py-1.5 text-sm transition-colors',
-              tab === id
-                ? 'bg-foreground text-background'
-                : 'bg-muted text-muted-foreground hover:text-foreground',
-            )}
-            onClick={() => setTab(id)}
-          >
-            {label} ({formatNumber(count)})
-          </button>
-        ))}
+      <div className="mb-4">
+        <FilterTabs
+          ariaLabel="사방넷 코드 구분"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { value: 'all', label: '전체', count: products.length },
+            { value: 'linked', label: '연결 완료', count: linkedCount },
+            { value: 'unlinked', label: 'M번호 미연결', count: unlinkedProducts.length },
+          ]}
+        />
       </div>
 
       {tab === 'unlinked' ? (
@@ -582,7 +573,7 @@ export function SabangnetCodePage() {
         />
       ) : (
         <>
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+          <FilterBar>
             <Input
               className="sm:max-w-sm"
               placeholder="등록 항목, M번호, 카테고리 검색..."
@@ -623,7 +614,7 @@ export function SabangnetCodePage() {
                 ? '0건'
                 : `전체 ${formatNumber(totalCount)}건 중 ${formatNumber(rangeStart)}–${formatNumber(rangeEnd)}건`}
             </span>
-          </div>
+          </FilterBar>
 
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">코드·상품명 고정 · 행을 누르면 전체 항목과 쇼핑몰 링크 확인</p>
@@ -974,20 +965,5 @@ function SummaryCard({
   value: string
   icon: typeof FileSpreadsheet
 }) {
-  return (
-    <Card>
-      <CardContent className="flex items-center gap-3 p-4">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-          <Icon className="size-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="mt-0.5 text-xl font-semibold">{value}</p>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {description}
-          </p>
-        </div>
-      </CardContent>
-    </Card>
-  )
+  return <StatTile icon={Icon} label={label} value={value} hint={description} />
 }

@@ -1624,7 +1624,7 @@ function ConvertMatchTable({
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full min-w-[960px] text-left text-sm">
-        <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+        <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
           <tr>
             {visibleColumns.map((column) => (
               <th
@@ -2857,7 +2857,7 @@ function BackupQtyConfirmDialog({
           ) : (
             <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full min-w-[32rem] text-left text-sm">
-                <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+                <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
                   <tr>
                     <th className="px-3 py-2 font-medium">M번호</th>
                     <th className="px-3 py-2 font-medium">공식상품명</th>
@@ -4486,7 +4486,7 @@ export function BulkOutboundPage() {
                       {tabOpenJobs.map((job) => {
                         const own = isOwnJob(job)
                         return (
-                          <div key={job.id} className="rounded-xl border border-border bg-card">
+                          <div key={job.id} className="rounded-xl border border-border bg-card shadow-sm">
                             <button type="button" onClick={() => openJob(job.id)} className="w-full px-4 py-3.5 text-left">
                               <div className="flex items-start justify-between gap-2">
                                 <p className="min-w-0 truncate text-base font-semibold">{job.title}</p>
@@ -5038,7 +5038,7 @@ export function BulkOutboundPage() {
                     ) : (
                       <div className="overflow-x-auto rounded-lg border border-border">
                         <table className="w-full min-w-[640px] text-left text-sm">
-                          <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+                          <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
                             <tr>
                               <th className="whitespace-nowrap px-3 py-2 font-medium">
                                 창고 위치
@@ -5297,7 +5297,7 @@ export function BulkOutboundPage() {
                     />
                     <div className="overflow-x-auto rounded-lg border border-border">
                       <table className="w-full min-w-[480px] text-left text-sm">
-                        <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+                        <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
                           <tr>
                             <th className="whitespace-nowrap px-3 py-2 font-medium">
                               M번호

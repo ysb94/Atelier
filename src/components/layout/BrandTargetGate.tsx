@@ -51,13 +51,13 @@ function BrandPickCard({
       aria-pressed={selected}
       onClick={() => onSelect(brand.slug)}
       className={cn(
-        'flex min-h-36 flex-col items-center justify-center gap-3 rounded-xl border px-4 py-6 text-center transition-colors',
+        'flex min-h-36 flex-col items-center justify-center gap-3 rounded-xl border px-4 py-6 text-center shadow-sm transition-all',
         selected
-          ? 'border-foreground bg-card text-foreground'
-          : 'border-border bg-card text-foreground hover:bg-muted/50',
+          ? 'border-primary bg-card text-foreground ring-2 ring-primary/20'
+          : 'border-border bg-card text-foreground hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md',
         disabled &&
           !selected &&
-          'cursor-not-allowed opacity-50 hover:bg-card',
+          'cursor-not-allowed opacity-50 hover:translate-y-0 hover:border-border hover:shadow-sm',
       )}
     >
       <BrandAvatar brand={brand} className="size-14" textClassName="text-lg" />
@@ -147,7 +147,10 @@ export function BrandTargetGate({
     }
     return (
       <div className="mx-auto flex w-full max-w-3xl flex-col items-center px-2 py-10 text-center sm:py-16">
-        <p className="mb-6 text-lg text-muted-foreground sm:text-xl">{title}</p>
+        <p className="mb-1 text-[11px] font-semibold tracking-[0.12em] text-primary">
+          브랜드 선택
+        </p>
+        <h2 className="mb-6 text-xl font-bold tracking-tight">{title}</h2>
         {statusMessage ?? (
           <div className="grid w-full gap-3 sm:grid-cols-2">
             {brands.map((item) => (

@@ -330,7 +330,7 @@ export function WarehouseSlotSettingsPanel({
             <>
               <div className="overflow-x-auto rounded-lg border border-border bg-card">
                 <table className="w-full min-w-[20rem] text-left text-sm">
-                  <thead className="bg-muted/40 text-xs text-muted-foreground">
+                  <thead className="bg-primary text-xs text-primary-foreground">
                     <tr>
                       <th className="px-3 py-2 font-medium">자리</th>
                       <th className="w-24 px-3 py-2 font-medium">상태</th>

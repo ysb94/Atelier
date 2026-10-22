@@ -187,7 +187,7 @@ export function CompanyNoticesPanel() {
           )
         })}
       </div>
-      <section className="rounded-2xl border border-border bg-card p-5" aria-label={currentSlot.label}>
+      <section className="rounded-xl border border-border bg-card p-5 shadow-sm" aria-label={currentSlot.label}>
         <header className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="text-sm font-semibold">{currentSlot.label}</h3>
@@ -247,7 +247,7 @@ export function CompanyNoticesPanel() {
       </section>
       {draft ? (
         <form
-          className="space-y-4 rounded-2xl border border-border bg-card p-5"
+          className="space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm"
           aria-label="공지 편집"
           onSubmit={(event) => {
             event.preventDefault()

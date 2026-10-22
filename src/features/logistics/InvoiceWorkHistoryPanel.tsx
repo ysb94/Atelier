@@ -473,7 +473,7 @@ export function InvoiceWorkHistoryPanel({ brandId }: { brandId: string }) {
           ) : history.length > 0 ? (
             <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full min-w-200 text-left text-xs">
-                <thead className="bg-muted/60">
+                <thead className="bg-primary text-primary-foreground">
                   <tr>
                     <th className="w-8 px-3 py-2.5" />
                     <th className="px-3 py-2.5 font-medium">작업 시각</th>

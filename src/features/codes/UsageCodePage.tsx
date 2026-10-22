@@ -16,7 +16,6 @@ import {
 } from '@/features/codes/UsagePartnerList'
 import { UsageTargetManagerDialog } from '@/features/codes/UsageTargetManager'
 import { useRenderWatch } from '@/lib/diagnostics/render-watch'
-import '@/styles/design-unify-accent.css'
 import { DEFAULT_USAGE_CODE_COLUMNS } from '@/lib/codes/usage-code-columns'
 import { UsageCodeValuesDialog } from '@/features/codes/UsageCodeValuesDialog'
 import { UsageCodeManagersDialog } from '@/features/codes/UsageCodeManagersDialog'
@@ -589,7 +588,7 @@ export function UsageCodePage() {
   }
 
   return (
-    <div className="design-unify-accent">
+    <div>
       <PageHeader
         title="업체별 코드 관리"
         description="출고업체를 고르고, 그 업체가 사용하는 88코드를 등록·중지합니다."

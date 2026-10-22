@@ -27,7 +27,6 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import '@/styles/design-unify-accent.css'
 import {
   ProductCategoryStoreError,
   createProductCategory,
@@ -410,7 +409,7 @@ export function ProductCategorySettingsPage() {
     : null
 
   return (
-    <div className="design-unify-accent">
+    <div>
       <PageHeader
         title="카테고리 관리"
         description={`${brand.name} 상품의 내부 분류 트리를 관리합니다. 카페24 번호와 ALL 메뉴는 사용하지 않습니다.`}

@@ -224,7 +224,7 @@ export function WaitingOrdersPanel() {
             {filteredOrders.length > 0 ? (
               <div className="overflow-x-auto rounded-lg border border-border">
                 <table className="w-full min-w-220 text-left text-xs">
-                  <thead className="bg-muted/60">
+                  <thead className="bg-primary text-primary-foreground">
                     <tr>
                       <th className="px-3 py-2.5 font-medium">주문번호</th>
                       <th className="px-3 py-2.5 font-medium">상품·옵션</th>
@@ -732,7 +732,7 @@ export function RulesPanel({
           <CardContent>
             <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full min-w-180 text-left text-xs">
-                <thead className="bg-muted/60">
+                <thead className="bg-primary text-primary-foreground">
                   <tr>
                     {table.columns.map((column) => (
                       <th key={column} className="px-3 py-2.5 font-medium">

@@ -81,7 +81,7 @@ export function DocumentOutputPanel() {
         </DraftNotice>
       </header>
 
-      <section className="rounded-2xl border border-border bg-card p-5">
+      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
         <p id="document-output-kind-label" className="text-xs text-muted-foreground">출력 종류</p>
         <div role="group" aria-labelledby="document-output-kind-label" className="mt-2 flex flex-col gap-2 sm:flex-row">
           {OUTPUT_KIND_ORDER.map((id) => (
@@ -164,7 +164,7 @@ export function DocumentOutputPanel() {
         ) : null}
       </section>
 
-      <section aria-label="선택 조건 요약" className="rounded-2xl border border-border bg-card p-5">
+      <section aria-label="선택 조건 요약" className="rounded-xl border border-border bg-card p-5 shadow-sm">
         <h3 className="text-sm font-semibold">선택 조건</h3>
         <dl className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="rounded-xl border border-border bg-muted/30 px-4 py-3">

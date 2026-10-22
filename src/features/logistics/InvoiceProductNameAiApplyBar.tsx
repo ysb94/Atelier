@@ -497,7 +497,7 @@ export function InvoiceProductNameAiApplyBar({
             className="max-h-[min(72vh,56rem)] overflow-auto rounded-md border border-border bg-card"
           >
             <table className="w-full table-fixed text-left text-xs">
-              <thead className="sticky top-0 z-10 bg-muted/90">
+              <thead className="sticky top-0 z-10 bg-primary text-primary-foreground">
                 <tr>
                   <th className="w-[26%] px-2 py-1.5 font-medium">품목명</th>
                   <th className="w-[20%] px-2 py-1.5 font-medium">내품명</th>

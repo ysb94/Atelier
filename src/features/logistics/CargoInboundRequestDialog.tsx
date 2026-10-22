@@ -241,7 +241,7 @@ export function CargoInboundRequestDialog({
                   <col />
                   <col className="w-[99%]" />
                 </colgroup>
-                <thead className="sticky top-0 z-10 bg-muted/90 text-xs text-muted-foreground">
+                <thead className="sticky top-0 z-10 bg-primary text-xs text-primary-foreground">
                   <tr>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">
                       품명

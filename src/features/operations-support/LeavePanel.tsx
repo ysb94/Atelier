@@ -121,7 +121,7 @@ function LeaveBalancePanel() {
         <OpsStat label="사용" value={`${formatDays(totals.used)}일`} />
         <OpsStat label="잔여" value={`${formatDays(totals.remaining)}일`} />
       </div>
-      <article className="overflow-hidden rounded-2xl border border-border bg-card">
+      <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[860px] text-left text-sm">
             <thead className="border-b border-border bg-primary text-xs text-primary-foreground">

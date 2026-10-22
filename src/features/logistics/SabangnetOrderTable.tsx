@@ -183,9 +183,9 @@ export function SabangnetOrderTable({
 
       <div className="max-h-[42rem] overflow-auto rounded-lg border border-border">
         <table className="w-full min-w-[2300px] text-left text-xs">
-          <thead className="sticky top-0 z-20 bg-muted">
+          <thead className="sticky top-0 z-20 bg-primary text-primary-foreground">
             <tr>
-              <th className="sticky left-0 z-30 min-w-16 border-r border-border bg-muted px-3 py-2.5 font-medium">
+              <th className="sticky left-0 z-30 min-w-16 border-r border-border bg-primary px-3 py-2.5 font-medium">
                 원본 행
               </th>
               {ORDER_COLUMNS.map((column) => (

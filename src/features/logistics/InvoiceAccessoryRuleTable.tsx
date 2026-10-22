@@ -223,7 +223,7 @@ export function InvoiceAccessoryRuleTable({
           ) : (
             <div className="max-h-96 overflow-auto rounded-lg border border-border">
               <table className="w-full min-w-[52rem] text-left text-xs">
-                <thead className="sticky top-0 bg-muted/80">
+                <thead className="sticky top-0 bg-primary text-primary-foreground">
                   <tr>
                     <th className="px-3 py-2 font-medium">종류</th>
                     <th className="px-3 py-2 font-medium">패턴</th>

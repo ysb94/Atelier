@@ -220,7 +220,7 @@ function CompanySidebar() {
                     cn(
                       'mb-0.5 flex items-center justify-center rounded-md p-2.5 transition-colors',
                       companyNavItemActive(item.to, location.pathname, item.end)
-                        ? 'bg-sidebar-accent text-white'
+                        ? 'relative bg-sidebar-accent text-white before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-primary'
                         : 'text-white/65 hover:bg-sidebar-muted hover:text-white',
                     )
                   }
@@ -377,7 +377,7 @@ function NavItem({
           'flex items-center rounded-md transition-colors',
           collapsed ? 'justify-center p-2.5' : 'gap-2.5 px-2.5 py-2 text-sm',
           active
-            ? 'bg-sidebar-accent text-white'
+            ? 'relative bg-sidebar-accent text-white before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-primary'
             : 'text-white/65 hover:bg-sidebar-muted hover:text-white',
         )
       }

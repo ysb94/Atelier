@@ -543,7 +543,7 @@ function ExpandedRequestDetails({
       request.firstComeTotalLimit !== null ? (
         <div className="overflow-x-auto rounded-md border border-border">
           <table className="w-full min-w-120 text-left text-xs">
-            <thead className="bg-muted/60">
+            <thead className="bg-primary text-primary-foreground">
               <tr>
                 <th className="px-3 py-2 font-medium">한도 방식</th>
                 <th className="px-3 py-2 font-medium">확정</th>
@@ -576,7 +576,7 @@ function ExpandedRequestDetails({
       ) : request.usesFirstCome && request.quotas.length > 0 ? (
         <div className="overflow-x-auto rounded-md border border-border">
           <table className="w-full min-w-160 text-left text-xs">
-            <thead className="bg-muted/60">
+            <thead className="bg-primary text-primary-foreground">
               <tr>
                 <th className="px-3 py-2 font-medium">M번호</th>
                 <th className="px-3 py-2 font-medium">제품명</th>
@@ -608,7 +608,7 @@ function ExpandedRequestDetails({
 
       <div className="overflow-x-auto rounded-md border border-border">
         <table className="w-full min-w-200 text-left text-xs">
-          <thead className="bg-muted/60">
+          <thead className="bg-primary text-primary-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">원본 품목명</th>
               <th className="px-3 py-2 font-medium">나가는 제품</th>
@@ -661,7 +661,7 @@ function ExpandedRequestDetails({
           ) : (
             <div className="overflow-x-auto rounded-md border border-border">
               <table className="w-full min-w-200 text-left text-xs">
-                <thead className="bg-muted/60">
+                <thead className="bg-primary text-primary-foreground">
                   <tr>
                     <th className="px-3 py-2 font-medium">주문번호</th>
                     <th className="px-3 py-2 font-medium">주문일시</th>
@@ -725,11 +725,11 @@ function StatusCountFilter({
       type="button"
       onClick={onClick}
       className={cn(
-        'rounded-full px-2 py-0.5 text-xs font-medium',
-        variant === 'success' && 'bg-success/15 text-success',
-        variant === 'warning' && 'bg-warning/15 text-warning',
-        variant === 'muted' && 'bg-muted text-muted-foreground',
-        active && 'ring-1 ring-foreground/40',
+        'rounded-full border px-2.5 py-0.5 text-xs font-medium transition-colors',
+        variant === 'success' && 'border-success/30 bg-success/10 text-success',
+        variant === 'warning' && 'border-warning/35 bg-warning/10 text-warning',
+        variant === 'muted' && 'border-transparent bg-muted text-muted-foreground',
+        active && 'ring-2 ring-primary/40',
       )}
     >
       {children}

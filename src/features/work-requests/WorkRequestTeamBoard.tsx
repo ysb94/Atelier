@@ -539,7 +539,7 @@ export function WorkRequestTeamBoard({
             })}
           </div>
         ) : (
-        <div className="max-h-[44rem] overflow-auto rounded-xl border border-border bg-card">
+        <div className="max-h-[44rem] overflow-auto rounded-xl border border-border bg-card shadow-sm">
           <div
             className="grid"
             style={{

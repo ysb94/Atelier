@@ -10,7 +10,6 @@ import { DepartmentApproversPanel } from '@/features/operations-support/Departme
 import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList } from '@/lib/utils'
 import { PermissionAssignmentCatalog } from './PermissionAssignmentCatalog'
-import '@/styles/design-unify-accent.css'
 
 type PendingGrant = { profileId: string; permission: PermissionCode; scopeKind: PermissionScope; scopeId: string; enabled: boolean }
 export function PermissionSettingsPage() {
@@ -57,7 +56,7 @@ function PermissionSettingsContent({ manage, fullAccess, approvers }: { manage: 
     setPermission(next); setScopeKind(kinds.includes('department') ? 'department' : kinds[0]); setScopeId(''); setPending(null)
   }
   const disabled = mutation.isPending || directory.isFetching || Boolean(directory.error)
-  return <div className="design-unify-accent space-y-5">
+  return <div className="space-y-5">
     <PageHeader title="권한·담당자 설정" description="직책·직급과 관계없이 사람과 대상 범위를 지정합니다."/>
     {directory.data?.activation==='pending' && <p role="status" className="rounded-lg border border-border bg-muted/40 p-3 text-sm">담당자 지정·저장·해제가 연결되었습니다. 저장한 새 지정은 실제 기능별 권한 전환 전까지 적용 대기 상태이며, 현재 이용 권한과 로그인·가입 승인·근태 승인자 내역은 유지됩니다.</p>}
     <div role="tablist" aria-label="권한 설정 보기" className="flex flex-wrap gap-2 border-b border-border pb-3">
@@ -69,7 +68,7 @@ function PermissionSettingsContent({ manage, fullAccess, approvers }: { manage: 
     {view === 'approvers' ? <DepartmentApproversPanel key={approverPart} initialPart={approverPart}/> : <>
       <p className="text-sm text-muted-foreground">권한이 있는 행동만 허용됩니다. 본인 신청 승인 금지와 기존 검수·업무 단계는 계속 적용됩니다.</p>
       {directory.error && <div role="alert" className="rounded-xl border border-danger p-4">{directory.error.message}<Button className="ml-3" variant="outline" onClick={() => void directory.refetch()}>다시 불러오기</Button></div>}
-      <section aria-label="담당 권한 지정" className="grid gap-4 rounded-xl border border-border bg-card p-5 sm:grid-cols-2 xl:grid-cols-4">
+      <section aria-label="담당 권한 지정" className="grid gap-4 rounded-xl border border-border bg-card p-5 sm:grid-cols-2 xl:grid-cols-4 shadow-sm">
         <label className="space-y-2 text-sm">기능·행동<Select aria-label="지정할 권한" value={permission} onChange={event => choosePermission(event.target.value as PermissionCode)}>{PERMISSION_CATALOG.filter(item => fullAccess || item[0] === 'partner.edit').map(([id,label,group]) => <option key={id} value={id}>{group} · {label}</option>)}</Select></label>
         <label className="space-y-2 text-sm">직원 검색<Input value={search} onChange={event => setSearch(event.target.value)} placeholder="이름·부서 검색" aria-label="권한 지정 직원 검색"/><Select aria-label="지정할 직원" value={person} onChange={event => { setPerson(event.target.value); setPending(null) }}><option value="">직원을 선택하세요</option>{members.filter(member => member.status === 'active' && `${member.name} ${member.department}`.includes(search)).map(member => <option key={member.id} value={member.id}>{member.name} · {member.department || '소속 없음'}{member.id === profile?.id ? ' · 본인(변경 불가)' : ''}</option>)}</Select></label>
         <label className="space-y-2 text-sm">범위 종류<Select aria-label="권한 범위 종류" value={scopeKind} onChange={event => { setScopeKind(event.target.value as PermissionScope); setScopeId(''); setPending(null) }}>{allowedScopes.map(kind => <option key={kind} value={kind}>{scopeLabel(kind)}</option>)}</Select></label>

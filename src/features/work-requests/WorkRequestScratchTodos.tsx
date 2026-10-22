@@ -114,7 +114,7 @@ export function WorkRequestScratchTodos({
   const openCount = items.filter((item) => !item.done).length
 
   return (
-    <aside className="rounded-xl border border-border bg-card p-3">
+    <aside className="rounded-xl border border-border bg-card p-3 shadow-sm">
       <div className="mb-2 flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-semibold">간단 할 일</h3>
         <span className="text-[11px] text-muted-foreground">
