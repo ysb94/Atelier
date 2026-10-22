@@ -41,7 +41,7 @@
 ### 고정 작업 위치
 
 - 폴더: `C:\Users\dbstj\OneDrive\바탕 화면\Masmarulez\코딩\Atelier`
-- 브랜치: `261022-4`. 사용자가 다른 브랜치를 직접 지정하기 전까지 유지한다.
+- 브랜치: `test`. 사용자가 다른 브랜치를 직접 지정하기 전까지 유지한다.
 - 새 브랜치, worktree, 별도 clone·복사 폴더를 임의로 만들지 않는다. 작업·노션 카드별로
   브랜치를 나누거나 `origin/main`에서 새로 시작하지 않는다.
 - 다른 폴더나 다른 브랜치에서 열렸다면 그곳에서 수정하지 말고 위치가 다르다고 알린다.
@@ -52,7 +52,7 @@
 ### 시작과 동기화
 
 - 먼저 현재 경로, `git branch --show-current`, `git status`를 확인해 기존 변경을 구분한다.
-- 안전하게 동기화할 수 있으면 `git fetch origin`, `git checkout 261022-4`,
+- 안전하게 동기화할 수 있으면 `git fetch origin`, `git checkout test`,
   `git pull --ff-only` 순서로 진행한다. checkout은 지정 브랜치 확인용이며 다른 브랜치로
   바꾸는 데 사용하지 않는다. 다른 작업의 변경에 영향을 줄 수 있으면 checkout·pull을
   강행하지 말고 동기화를 보류했다고 알린다.
