@@ -1,5 +1,6 @@
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage } from '@/lib/supabase/map-error'
+import { DEVELOPER_DELEGATE_ID } from '@/lib/company/developer-delegate'
 
 export type BulkOutboundBarcodeSource = 'own' | 'partner'
 
@@ -28,7 +29,7 @@ export function canSetBulkOutboundPartnerWorkStatus(input: {
   if (email && (email === DEV_LOGIN_EMAIL || (envEmail && email === envEmail))) {
     return true
   }
-  return input.profileId === DEV_LOGIN_PROFILE_ID
+  return input.profileId === DEV_LOGIN_PROFILE_ID || input.profileId === DEVELOPER_DELEGATE_ID
 }
 
 export type BulkOutboundPartnerConfig = {

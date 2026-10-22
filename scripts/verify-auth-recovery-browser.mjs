@@ -73,6 +73,12 @@ try{
    assert.equal(approved.applicant.department_id,'20000000-0000-4000-8000-000000000001','승인 담당자가 선택한 부서를 저장')
    assert.equal(approved.actor.status,'active','승인 담당자 계정 상태 유지')
    assert.equal(approved.audit.updates,1,'신청 대상만 한 번 저장')
+   await page.goto(origin+'/?developer-delegate');await page.getByText('기존 작업 화면 진입',{exact:true}).waitFor()
+   await page.locator('#developer-permission').getByText('화면 테스트 허용',{exact:true}).waitFor()
+   assert.equal(await page.evaluate(()=>window.__authRecovery.audit.updates),0,'개발자 권한 추가로 프로필을 갱신하지 않음')
+   await page.goto(origin+'/?developer-delegate&delegate-error');await page.getByText('기존 작업 화면 진입',{exact:true}).waitFor()
+   await page.locator('#developer-permission').getByText('화면 테스트 없음',{exact:true}).waitFor()
+   assert.equal(await page.evaluate(()=>window.__authRecovery.profile.status),'active','추가 권한 조회 실패 시에도 승인·로그인 유지')
   assert.deepEqual(errors,[]);assert.deepEqual(remote,[])
  }finally{await context.close();await server.close()}
 console.log('auth-recovery-browser: 실제 AuthProvider·프로필 로더·AuthGate에서 이전 DB 로그인 유지·조회 오류/신규 가입 분리·승인 계정 재신청 차단·실제 미승인 유지·전환 후 오류 차단 통과 (운영 연결·외부 요청 없음)')

@@ -1,6 +1,7 @@
 import type { PermissionGrant } from '../company/permissions'
 import { listPermissionGrants } from './permission-grants'
 import { assignedPermissionsEnabled, legacyPermissionGrants } from '../company/permission-rollout'
+import { usesDeveloperDelegation } from '../company/developer-delegate'
 import { isAttendanceExemptPosition } from '../company/capabilities'
 import { DEFAULT_COMPANY_ID } from '@/lib/supabase/brands'
 import {
@@ -493,6 +494,15 @@ export async function getMyProfile(): Promise<Profile | null> {
     const { data: approvals, error: approvalError } = await getSupabase().from('department_request_approvers').select('department_id,approver_id,substitute_id').eq('company_id',profile.companyId)
     if (approvalError) console.warn('[auth] 기존 출근시간 담당 범위 조회 실패',approvalError)
     else for (const row of approvals ?? []) if (row.approver_id === profile.id || row.substitute_id === profile.id) permissionGrants.push({ permission:'attendance.manage',scopeKind:'department',scopeId:row.department_id })
+    if (usesDeveloperDelegation(profile)) {
+      try {
+        const delegated = await listPermissionGrants()
+        for (const grant of delegated) if (!permissionGrants.some(existing => existing.permission === grant.permission && existing.scopeKind === grant.scopeKind && existing.scopeId === grant.scopeId)) permissionGrants.push(grant)
+      } catch (error) {
+        // 부가 권한 조회 실패로 기존 승인 계정을 신규 가입/승인 대기로 돌리지 않는다.
+        console.warn('[auth] 개발자 지정 권한 조회 실패 · 기존 로그인 권한 유지', error)
+      }
+    }
     return { ...profile, permissionMode: 'legacy', permissionGrants }
   }
   const assigned = { ...profile, permissionMode: 'assigned' as const, permissionGrants: await listPermissionGrants() }

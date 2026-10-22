@@ -81,6 +81,7 @@
     "verify:auth-recovery-browser": "node scripts/verify-auth-recovery-browser.mjs",
     "verify:access-ip": "node --experimental-strip-types scripts/verify-access-ip.mjs",
     "verify:access-ip-browser": "node scripts/verify-access-ip-browser.mjs",
+    "verify:developer-delegate": "tsx --tsconfig tsconfig.app.json scripts/verify-developer-delegate.mjs",
     "verify:permission-settings-browser": "node scripts/verify-page-preview-browser.mjs --permissions-only",
     "verify:page-preview": "tsx --tsconfig tsconfig.app.json src/lib/company/profile-preview.verify.ts && tsx --tsconfig tsconfig.app.json src/lib/company/page-preview-cases.verify.ts && tsx --tsconfig tsconfig.app.json src/lib/company/page-preview-coverage.verify.ts",
     "verify:page-preview-browser": "node scripts/verify-page-preview-browser.mjs",
