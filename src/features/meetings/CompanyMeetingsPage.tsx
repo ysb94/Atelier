@@ -59,6 +59,7 @@ import {
   formatRoundGapHint,
   formatRoundGapLabel,
   formatRoundListLabel,
+  roundListCaption,
   roundGapDays,
   groupPrepMaterialsByUploader,
   meetingComposeGaps,
@@ -251,6 +252,16 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     () => filterSeriesByStatus(visibleSeries, 'in_progress'),
     [visibleSeries],
   )
+  const ongoingMeetingCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const item of series) {
+      if (item.status !== 'in_progress') continue
+      for (const id of new Set([item.host.id, ...item.members.map((person) => person.id)])) {
+        counts.set(id, (counts.get(id) ?? 0) + 1)
+      }
+    }
+    return counts
+  }, [series])
   const doneSeries = useMemo(
     () => filterSeriesByStatus(visibleSeries, 'done'),
     [visibleSeries],
@@ -332,6 +343,15 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     )
   }
 
+  function toggleDepartment(people: readonly MeetingPerson[]) {
+    setMembers((prev) => {
+      const selected = new Set(prev.map((person) => person.id))
+      const allSelected = people.every((person) => selected.has(person.id))
+      if (allSelected) return prev.filter((person) => !people.some((item) => item.id === person.id))
+      return [...prev, ...people.filter((person) => !selected.has(person.id))]
+    })
+  }
+
   function resetCompose() {
     setTitle('')
     setDurationMinutes(null)
@@ -397,21 +417,6 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
       rounds:target?item.rounds.map(row=>row.id===target.id?confirmed:row):[...item.rounds,confirmed],
     }:item),{id:schedulingSeries.id,revision:schedulingSeries.revision ?? 0,confirmRound:confirmed.id})
     if(saved) resetCompose()
-  }
-
-  function removeRound(roundId: string) {
-    setSeries((prev) =>
-      prev
-        .map((item) => {
-          if (item.host.id !== host.id) return item
-          if (!item.rounds.some((round) => round.id === roundId)) return item
-          return {
-            ...item,
-            rounds: item.rounds.filter((round) => round.id !== roundId),
-          }
-        })
-        .filter((item) => item.rounds.length > 0),
-    )
   }
 
   function scheduleNextRound(item: MeetingSeries,roundId?:string) {
@@ -540,8 +545,8 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                     key={item.id}
                     className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5"
                   >
-                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-                      <p className="shrink-0 text-sm font-medium">
+                    <div className="flex min-w-0 flex-[1_1_26rem] flex-wrap items-center gap-x-3 gap-y-1">
+                      <p className="max-w-full break-words text-sm font-medium">
                         {item.title}
                       </p>
                       {item.phase==='preparing'?<Badge variant="outline">준비 중 · 멤버 비공개</Badge>:null}
@@ -562,6 +567,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                       <div className="flex flex-wrap items-center gap-1 text-xs">
                         {rounds.map((round, index) => {
                           const gapDays = roundGapDays(rounds, round)
+                          const caption = roundListCaption(round, item.members.map((person) => person.id))
                           return (
                           <span
                             key={round.id}
@@ -579,13 +585,15 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                               type="button"
                               title={
                                 gapDays == null
-                                  ? undefined
+                                  ? caption ?? undefined
                                   : formatRoundGapHint(gapDays)
                               }
                               className={cn(
-                                'rounded px-1 py-0.5 font-medium hover:bg-muted',
-                                isPendingRound(round) &&
+                                'shrink-0 whitespace-nowrap rounded px-1 py-0.5 text-center font-medium hover:bg-muted',
+                                caption &&
                                   'border border-dashed border-foreground/25 text-muted-foreground',
+                                caption === '참석 불가' && 'border-danger/40 text-danger',
+                                caption === '참석 응답 대기' && 'border-amber-400/70 text-amber-800',
                               )}
                               onClick={() =>
                                 setDetail({
@@ -603,7 +611,8 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                                   {formatRoundGapLabel(gapDays)}
                                 </span>
                               )}
-                              {formatRoundListLabel(round)}
+                              <span className="block">{formatRoundLabel(round.round)} 회의</span>
+                              {caption ? <span className="block text-[10px] font-normal">{caption}</span> : null}
                             </button>
                           </span>
                           )
@@ -817,15 +826,24 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                     </div>
                     {memberPickerOpen ? (
                       <div className="rounded-md border border-border bg-card p-2">
-                        <div className="flex gap-3 overflow-x-auto pb-1">
-                          {departmentGroups.map((group) => (
+                        <div className="flex overflow-x-auto pb-1">
+                          {departmentGroups.map((group, index) => (
                             <div
                               key={group.id}
-                              className="min-w-[8.5rem] shrink-0"
+                              className={cn(
+                                'min-w-[8.5rem] shrink-0 px-3',
+                                index > 0 && 'border-l border-border',
+                              )}
                             >
-                              <p className="mb-1 text-xs font-medium">
+                              <button
+                                type="button"
+                                className="mb-1 w-full rounded px-1 py-0.5 text-left text-xs font-medium hover:bg-muted"
+                                aria-pressed={group.members.every((person) => selectedMemberIds.includes(person.id))}
+                                aria-label={`${group.name} 전체 선택`}
+                                onClick={() => toggleDepartment(group.members)}
+                              >
                                 {group.name}
-                              </p>
+                              </button>
                               <ul className="space-y-0.5">
                                 {group.members.map((person) => {
                                   const selected = selectedMemberIds.includes(
@@ -836,6 +854,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                                       <button
                                         type="button"
                                         aria-pressed={selected}
+                                        aria-label={`${person.name}${person.position ? ` ${person.position}` : ''} 진행 중 ${ongoingMeetingCounts.get(person.id) ?? 0}건`}
                                         className={cn(
                                           'flex w-full flex-col rounded px-1.5 py-1 text-left text-xs transition-colors',
                                           selected
@@ -859,6 +878,16 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                                             {person.position}
                                           </span>
                                         ) : null}
+                                        <span
+                                          className={cn(
+                                            'text-[10px]',
+                                            selected
+                                              ? 'text-background/70'
+                                              : 'text-muted-foreground',
+                                          )}
+                                        >
+                                          진행 중 {ongoingMeetingCounts.get(person.id) ?? 0}
+                                        </span>
                                       </button>
                                     </li>
                                   )
@@ -887,31 +916,29 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
 
       <Card>
         <CardContent className="space-y-4 p-4">
-          <div>
-            <p className="text-sm font-medium">회의실 일정</p>
-            {schedulingSeries ? <p role="status" className="mt-1 text-xs text-sky-700">「{schedulingSeries.title}」 일정 선택 중 · <button type="button" className="underline" onClick={()=>setComposeOpen(true)}>일정 확정 창 열기</button> · <button type="button" className="underline" onClick={resetCompose}>취소</button></p> : null}
-          </div>
+          <p className="text-sm font-medium">회의실 일정</p>
 
           <RoomScheduleBlock
             rooms={rooms}
             roomId={selectedRoomId}
             weeks={weeks}
             occupants={occupants}
-            composeReady={composeReady && Boolean(schedulingSeries)}
+            composeReady={false}
             durationMinutes={slotDurationMinutes}
             attendees={attendees}
             attendance={EMPTY_ATTENDANCE}
             now={now}
+            readOnly
             onSelectRoom={setSelectedRoomId}
-            onNeedCompose={showComposeGaps}
-            onPickDay={(roomId, dateKey) => setPicker({ roomId, dateKey })}
+            onNeedCompose={() => undefined}
+            onPickDay={() => undefined}
             onShiftRange={(direction) =>
               setRangeFromKey((current) =>
                 shiftMeetingFromKey(current ?? todayKey, direction),
               )
             }
             currentUserId={host.id}
-            onRemoveRound={removeRound}
+            onRemoveRound={() => undefined}
           />
         </CardContent>
       </Card>
@@ -1132,6 +1159,7 @@ function RoomScheduleBlock({
   onShiftRange,
   onRemoveRound,
   currentUserId,
+  readOnly = false,
 }: {
   rooms: readonly MeetingRoom[]
   roomId: string
@@ -1148,6 +1176,7 @@ function RoomScheduleBlock({
   onShiftRange: (direction: -1 | 1) => void
   onRemoveRound: (roundId: string) => void
   currentUserId: string
+  readOnly?: boolean
 }) {
   const room = rooms.find((item) => item.id === roomId) ?? rooms[0]
   const tone = meetingRoomTone(room.id)
@@ -1254,8 +1283,8 @@ function RoomScheduleBlock({
                 const isPast = dayState.blocks.some(
                   (block) => block.type === 'past',
                 )
-                const canOpen = dayState.available || isPast
-                const needsCompose = !composeReady && !isPast
+                const canOpen = !readOnly && (dayState.available || isPast)
+                const needsCompose = !readOnly && !composeReady && !isPast
                 const reason = formatDayBlockLabel(dayState.blocks)
                 return (
                   <td
@@ -1265,7 +1294,9 @@ function RoomScheduleBlock({
                       isPast ? 'bg-muted/70' : tone.cell,
                       canOpen || needsCompose
                         ? 'cursor-pointer'
-                        : 'cursor-not-allowed',
+                        : readOnly
+                          ? 'cursor-default'
+                          : 'cursor-not-allowed',
                       day.isToday && 'shadow-[inset_0_0_0_2px] shadow-emerald-500',
                     )}
                     onClick={() => {
@@ -1278,9 +1309,11 @@ function RoomScheduleBlock({
                   >
                     <button
                       type="button"
-                      disabled={!canOpen && !needsCompose}
+                      disabled={!readOnly && !canOpen && !needsCompose}
                       title={
-                        isPast
+                        readOnly
+                          ? `${room.name} ${day.month}/${day.day}`
+                          : isPast
                           ? `${room.name} ${day.month}/${day.day} 지난 회의 보기`
                           : dayState.available
                             ? `${room.name} ${day.month}/${day.day} 9–19시 보기`
@@ -1288,11 +1321,12 @@ function RoomScheduleBlock({
                               ? '빠진 항목을 먼저 정하세요'
                               : reason || '이 날은 고를 수 없습니다'
                       }
-                      aria-label={`${room.name} ${day.month}/${day.day} ${
-                        isPast ? '지난 회의 보기' : '9–19시 보기'
+                      aria-label={`${room.name} ${day.month}/${day.day}${
+                        readOnly ? '' : isPast ? ' 지난 회의 보기' : ' 9–19시 보기'
                       }`}
                       className={cn(
                         'flex w-full flex-col items-center justify-center rounded px-1 py-1 text-center',
+                        readOnly && 'cursor-default',
                         dayState.available && 'hover:bg-emerald-100/70',
                         needsCompose && 'hover:bg-amber-100/70',
                         isPast && 'hover:bg-muted',
@@ -1334,7 +1368,7 @@ function RoomScheduleBlock({
                             chipClasses.get(item.id) ?? 'bg-sky-200 text-sky-950'
                           }
                           trailing={
-                            canRemoveBookedMeeting(item, { id: currentUserId }) ? (
+                            !readOnly && canRemoveBookedMeeting(item, { id: currentUserId }) ? (
                               <button
                                 type="button"
                                 className="shrink-0 rounded p-0.5 hover:bg-black/10"
@@ -1803,9 +1837,14 @@ function MeetingDetailDrawer({
             </section>
           ) : null}
           <section className="space-y-2">
-            <h3 className="text-xs font-medium text-muted-foreground">
-              {pending ? '회의 안내' : '회의 내용'}
-            </h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-medium text-muted-foreground">
+                {pending ? '회의 안내' : '회의 내용'}
+              </h3>
+              {series.status === 'in_progress' ? (
+                <Button type="button" size="sm" variant="outline" onClick={() => void run(async () => { await persistNotes() })}>저장</Button>
+              ) : null}
+            </div>
             <Textarea
               value={content}
               rows={10}
@@ -1917,6 +1956,7 @@ function MeetingDetailDrawer({
 
         {series.status === 'in_progress' ? (
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-5 py-3">
+            <Button type="button" variant="outline" onClick={closeDrawer}>닫기</Button>
             {isHost && !pending ? <Button type="button" variant="outline" onClick={()=>void run(async()=>{if(await persistNotes()) onBookTime()})}>일정 변경</Button>:null}
             {isHost ? pending ? (
               <Button

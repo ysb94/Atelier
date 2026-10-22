@@ -1,5 +1,7 @@
-.meeting-attendance-row, .meeting-attendance.is-compact { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.meeting-members { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px; border: 1px solid transparent; border-radius: 999px; }
+.meeting-attendance { min-width: 0; max-width: 100%; }
+.meeting-attendance-row, .meeting-attendance.is-compact { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.meeting-members { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; max-width: 100%; padding: 2px; border: 1px solid transparent; border-radius: 999px; }
+.meeting-members > button { flex-shrink: 0; white-space: nowrap; }
 .meeting-attendance:has(.meeting-all:hover) .meeting-members,
 .meeting-attendance:has(.meeting-all:focus-visible) .meeting-members { border-color: #8eaa98; }
 .meeting-all { --meeting-all-border: #cfd6cc; position: relative; display: inline-flex; align-items: center; justify-content: center; width: 56px; height: 36px; flex-shrink: 0; padding: 0 0 5px; border: 0; border-radius: 10px; background: transparent; color: #243128; font-size: 12px; font-weight: 500; }
