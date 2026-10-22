@@ -1,34 +1,18 @@
 import assert from 'node:assert/strict'
 import type { Profile } from '../supabase/profiles'
-import { canPreviewProfile, initialPreview, previewDepartment, previewProfile } from './profile-preview.ts'
-import { canEditOrgAssignment, canManagePersonnel, canViewDraftsByOwner, hasCapability } from './capabilities.ts'
-
-const real = { id: 'developer-id', email: 'dev@atelier.local', status: 'active', isAdmin: true, position: '팀장', departmentId: 'ops', departmentName: '운영지원팀', departmentPersonnelScope: 'leaders', capabilities: ['planning'], memberships: [{ brandId: 'brand', isLead: true }] } as Profile
-assert.equal(canPreviewProfile(real, real.email), true)
-assert.equal(canPreviewProfile({ ...real, email: 'staff@example.com' }, real.email), false)
-assert.equal(canPreviewProfile(real, 'staff@example.com'), false)
-assert.equal(canPreviewProfile({ ...real, status: 'disabled' }, real.email), false)
-const ceo = { ...real, email: 'ceo@example.com', isAdmin: false, position: '대표이사', departmentName: '운영진', departmentPersonnelScope: null } as Profile
-assert.equal(canPreviewProfile(ceo, ceo.email), true)
-assert.equal(canPreviewProfile(ceo, real.email), false, '세션과 프로필이 다른 경우 검수 불가')
-assert.equal(canPreviewProfile({ ...ceo, status: 'pending' }, ceo.email), false)
-assert.equal(canPreviewProfile({ ...ceo, position: '이사' }, ceo.email), false, '일반 이사에게 확대하지 않음')
-assert.equal(canEditOrgAssignment(ceo), false)
-assert.equal(canManagePersonnel(ceo), false)
-const settings = { ...initialPreview(real), position: '사원', isAdmin: false, ...previewDepartment({ id: 'planning', name: '기획팀', personnelScope: null } as never) }
-const employee = previewProfile(real, settings)
-assert.equal(employee.id, real.id)
-assert.equal(canEditOrgAssignment(employee), false, '개발자 이메일 예외를 일반 직원에게 적용하지 않음')
-assert.equal(canViewDraftsByOwner(employee), false)
-assert.equal(hasCapability(employee, 'planning'), true)
-assert.equal(hasCapability(employee, 'md'), false)
-assert.equal(canViewDraftsByOwner(previewProfile(real, { ...settings, position: '팀장' })), true)
-const support = { ...settings, ...previewDepartment({ id: 'ops', name: '운영지원팀', personnelScope: 'leaders' } as never) }
-assert.equal(canEditOrgAssignment(previewProfile(real, support)), true)
-assert.equal(canManagePersonnel(previewProfile(real, support)), false)
-assert.equal(canManagePersonnel(previewProfile(real, { ...support, position: '팀장' })), true)
-assert.equal(real.isAdmin, true)
-assert.equal(real.email, 'dev@atelier.local')
-assert.equal(real.departmentId, 'ops')
-
-console.log('profile-preview verify: ok')
+import { canPreviewProfile, initialPreview, previewDepartment, previewProfile } from './profile-preview'
+import { canEditOrgAssignment, canManagePersonnel, canViewDraftsByOwner } from './capabilities'
+const real = { id:'same-user',email:'staff@invalid',status:'active',companyId:'company',position:'사원',isAdmin:false,capabilities:[],memberships:[],permissionGrants:[{permission:'preview.use',scopeKind:'company',scopeId:'company'}] } as unknown as Profile
+for (const position of ['사원','팀장','이사','대표이사']) assert.equal(canPreviewProfile({...real,position},real.email),true)
+assert.equal(canPreviewProfile({...real,permissionGrants:[],isAdmin:true,email:'dev@atelier.local',position:'대표이사'},'dev@atelier.local'),false,'이메일·대표·관리자 예외 금지')
+assert.equal(canPreviewProfile(real,'different@invalid'),false)
+assert.equal(canPreviewProfile({...real,status:'disabled'},real.email),false)
+const settings = initialPreview(real)
+settings.permissionGrants=[]
+const displayed=previewProfile(real,{...settings,...previewDepartment({id:'ops',name:'운영지원팀',personnelScope:'leaders'} as never),position:'팀장'})
+assert.equal(displayed.id,real.id)
+assert.equal(canEditOrgAssignment(displayed),false)
+assert.equal(canManagePersonnel(displayed),false)
+assert.equal(canViewDraftsByOwner(displayed),false)
+assert.equal(real.permissionGrants!.length,1,'실제 프로필 지정 내역 보존')
+console.log('profile-preview: 지정된 화면 테스트 권한·동일 세션·직책 독립·표시 격리 통과')

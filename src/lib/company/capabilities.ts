@@ -1,3 +1,4 @@
+import { hasPermission, type PermissionGrant, type PermissionCode } from './permissions'
 export const WORK_CAPABILITIES = [
   'planning',
   'design',
@@ -19,8 +20,7 @@ export const WORK_CAPABILITY_LABEL: Record<WorkCapability, string> = {
 export const COMPANY_MANAGER_POSITIONS = ['팀장', '이사'] as const
 
 /**
- * 출퇴근 기록과 근태 집계에서 빼는 직책. 직급(jobGrade)은 보지 않는다.
- * 비우면 모든 직원을 다시 측정한다.
+ * 이전 데이터·화면 사례의 직책 분류용 목록. 실제 출퇴근 제외는 attendance.exempt 지정으로 판정한다.
  */
 export const ATTENDANCE_EXEMPT_POSITIONS: readonly string[] = [
   '대표이사',
@@ -37,7 +37,7 @@ export type PersonnelScope = (typeof PERSONNEL_SCOPES)[number]
 export const DEFAULT_COMPANY_ID = 'e0000000-0000-4000-8000-000000000001'
 export const ATELIER_BRAND_ID = 'b0000000-0000-4000-8000-000000000001'
 
-/** 조직도의 부서·직책·직급을 고칠 수 있는 개발자 계정. DB 함수와 같다. */
+/** 이전 데이터와 화면 사례에서 사용하는 계정 이름. 권한 판정에는 사용하지 않는다. */
 export const ORG_ASSIGNMENT_EDITOR_EMAIL = 'dev@atelier.local'
 export const OPERATIONS_SUPPORT_DEPARTMENT = '운영지원팀'
 
@@ -80,6 +80,8 @@ export function inferCapabilityFromDepartment(
 }
 
 export type CapabilityProfile = {
+  companyId?: string | null
+  permissionGrants?: readonly PermissionGrant[]
   status?: string | null
   isAdmin?: boolean
   position?: string | null
@@ -92,34 +94,26 @@ export function isApprovedCompanyMember(profile: CapabilityProfile | null) {
 }
 
 export function isCompanyAdmin(profile: CapabilityProfile | null) {
-  return isApprovedCompanyMember(profile) && Boolean(profile?.isAdmin)
+  return hasPermission(profile, 'system.manage')
 }
 
-/** 대표이사는 제작 중인 전체 화면을 검수한다. 업무 저장·승인 권한과 분리한다. */
+/** 명시적으로 지정한 회사 현황 조회. 업무 저장·승인 권한과 분리한다. */
 export function isCompanyReviewer(profile: CapabilityProfile | null) {
-  return isApprovedCompanyMember(profile) && profile?.position === '대표이사'
+  return hasPermission(profile, 'company.review')
 }
 
-/** 브랜드 관리 화면 열람. 활성 대표이사 또는 개발자 계정만 해당하며 저장 권한은 주지 않는다. */
+/** 브랜드 생성·편집 또는 회사 현황 조회를 지정한 사람의 화면 진입. */
 export function canAccessBrandManagement(
   profile: (CapabilityProfile & { email?: string | null }) | null,
 ) {
-  if (!isApprovedCompanyMember(profile)) return false
-  return (
-    isCompanyReviewer(profile) ||
-    profile?.email?.trim().toLowerCase() === ORG_ASSIGNMENT_EDITOR_EMAIL
-  )
+  return ['brand.manage','brand.edit','company.review'].some(code => hasPermission(profile, code as PermissionCode))
 }
 
-/** Mamam 공모전 접수함 조회. 활성 대표이사와 개발자 계정만 해당한다. */
+/** 공모전 접수함 조회를 지정한 사람만 허용한다. */
 export function canAccessMamamIdeaInbox(
   profile: (CapabilityProfile & { email?: string | null }) | null,
 ) {
-  if (!isApprovedCompanyMember(profile)) return false
-  return (
-    isCompanyReviewer(profile) ||
-    profile?.email?.trim().toLowerCase() === ORG_ASSIGNMENT_EDITOR_EMAIL
-  )
+  return hasPermission(profile, 'ideas.read')
 }
 
 export function isAttendanceExemptPosition(position?: string | null) {
@@ -127,24 +121,18 @@ export function isAttendanceExemptPosition(position?: string | null) {
   return Boolean(normalized && ATTENDANCE_EXEMPT_POSITIONS.includes(normalized))
 }
 
-/** 활성 계정이면서 출퇴근 제외 직책인 사람. 출근·퇴근 버튼과 근태 집계에서 뺀다. */
+/** 출퇴근 제외 설정을 지정한 활성 계정. 직책 이름은 판정하지 않는다. */
 export function isAttendanceExempt(profile: CapabilityProfile | null) {
-  return (
-    isApprovedCompanyMember(profile) &&
-    isAttendanceExemptPosition(profile?.position)
-  )
+  return hasPermission(profile, 'attendance.exempt')
 }
 
 export function isCompanyManager(profile: CapabilityProfile | null) {
-  return (
-    isApprovedCompanyMember(profile) &&
-    (isCompanyAdmin(profile) || isCompanyManagerPosition(profile?.position))
-  )
+  return hasPermission(profile, 'work.manage')
 }
 
 /**
  * 조직도에서 다른 직원의 부서·직책·직급을 고친다.
- * 개발자 계정과 운영지원팀 소속만 해당한다. 다른 관리자는 해당하지 않는다.
+ * org.manage 지정만 판정한다. 소속·직책·이메일 예외는 없다.
  * DB `app.can_edit_org_assignment`과 같은 조건이다.
  */
 export function canEditOrgAssignment(
@@ -153,57 +141,41 @@ export function canEditOrgAssignment(
     departmentName?: string | null
   }) | null,
 ) {
-  if (!isApprovedCompanyMember(profile)) return false
-  const email = profile?.email?.trim().toLowerCase()
-  if (email === ORG_ASSIGNMENT_EDITOR_EMAIL) return true
-  return profile?.departmentName === OPERATIONS_SUPPORT_DEPARTMENT
+  return hasPermission(profile, 'org.manage')
 }
 
-/** 운영지원 담당자와 대표이사의 검수용 조회. 저장은 canEditOrgAssignment로 판별한다. */
+/** 운영지원 기능 권한으로 화면을 연다. 각 저장 작업은 별도의 지정 권한을 확인한다. */
 export function canAccessOperationsSupport(
   profile: Parameters<typeof canEditOrgAssignment>[0],
 ) {
-  return canEditOrgAssignment(profile) || isCompanyReviewer(profile)
+  return ['org.manage','personnel.manage','approvers.manage','attendance.manage','notice.company.write','notice.company.delete','company.review'].some(code => hasPermission(profile, code as PermissionCode))
 }
 
 /** 가입 승인과 직책·소속 변경. DB `app.can_manage_personnel`과 같은 조건이다. */
 export function canManagePersonnel(profile: CapabilityProfile | null) {
-  if (!isApprovedCompanyMember(profile)) return false
-  if (isCompanyAdmin(profile)) return true
-  if (profile?.departmentPersonnelScope === 'members') return true
-  return (
-    profile?.departmentPersonnelScope === 'leaders' &&
-    isCompanyManagerPosition(profile.position)
-  )
+  return hasPermission(profile, 'personnel.manage')
 }
 
-/** 직원별 기획안 조회는 팀장·이사와 대표이사 검수자에게 허용한다. */
+/** 직원별 기획안 조회를 지정한 사람에게 허용한다. */
 export function canViewDraftsByOwner(profile: CapabilityProfile | null) {
-  return (
-    isApprovedCompanyMember(profile) &&
-    (isCompanyManagerPosition(profile?.position) || isCompanyReviewer(profile))
-  )
+  return hasPermission(profile, 'drafts.read')
 }
 
 export function profileCapabilities(
   profile: CapabilityProfile | null,
 ): WorkCapability[] {
-  return uniqueCapabilities(profile?.capabilities ?? [])
+  return WORK_CAPABILITIES.filter(key => hasPermission(profile, `data.${key}`))
 }
 
 export function hasCapability(
   profile: CapabilityProfile | null,
   capability: WorkCapability,
 ) {
-  if (!isApprovedCompanyMember(profile)) return false
-  if (isCompanyAdmin(profile)) return true
-  return profileCapabilities(profile).includes(capability)
+  return hasPermission(profile, `data.${capability}`)
 }
 
 export function hasAnyCapability(profile: CapabilityProfile | null) {
-  if (!isApprovedCompanyMember(profile)) return false
-  if (isCompanyAdmin(profile)) return true
-  return profileCapabilities(profile).length > 0
+  return WORK_CAPABILITIES.some(key => hasPermission(profile, `data.${key}`))
 }
 
 export function canEditBrandData(

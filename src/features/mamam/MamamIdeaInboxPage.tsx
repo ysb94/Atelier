@@ -19,6 +19,7 @@ import {
 import { canAccessMamamIdeaInbox } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
+import { usePagePreview } from '@/lib/company/page-preview-context'
 import { cn, emptyList } from '@/lib/utils'
 
 const dateTimeFormatter = new Intl.DateTimeFormat('ko-KR', {
@@ -41,6 +42,7 @@ function queryErrorMessage(error: unknown) {
 export function MamamIdeaInboxPage() {
   useRenderWatch('MamamIdeaInboxPage')
   const { profile } = useAuth()
+  const preview = usePagePreview()
   const allowed = canAccessMamamIdeaInbox(profile)
   const [selectedId, setSelectedId] = useState<string | null>(null)
 
@@ -65,7 +67,9 @@ export function MamamIdeaInboxPage() {
     staleTime: 20 * 60 * 1000,
   })
 
-  if (!allowed) return <Navigate to="/" replace />
+  if (!allowed) return preview?.active
+    ? <p role="status" className="rounded-xl border border-border bg-card p-5 text-sm text-muted-foreground shadow-sm">접근 제한 화면 · 아이디어 공모전 접수함 조회 권한이 지정된 담당자만 볼 수 있습니다.</p>
+    : <Navigate to="/" replace />
 
   return (
     <div className="space-y-5">

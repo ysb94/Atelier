@@ -7,26 +7,33 @@ import {
   useState,
   type ReactNode,
   type Ref,
+  type ComponentProps,
 } from 'react'
+import { createPortal } from 'react-dom'
 import { Bell, MessageCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
+import { OPEN_CONVERSATION_EVENT, type RequestedConversation } from '@/lib/chat/open-conversation'
+import { readMeetingInvitation } from '@/lib/supabase/meetings'
 import { ChatPanel } from '@/features/chat/ChatPanel'
 import { useChatRealtime } from '@/features/chat/use-chat-realtime'
 import { useChatRooms } from '@/features/chat/use-chat'
-import { COMPANY_MANAGER_POSITIONS } from '@/lib/company/capabilities'
+import { hasPermission } from '@/lib/company/permissions'
 import { useRenderWatch } from '@/lib/diagnostics/render-watch'
 import { inboxBadgeLabel } from '@/lib/inbox/format'
-import { MOCK_NOTIFICATIONS } from '@/lib/inbox/mock'
 import type { ChatRoom, InboxNotification } from '@/lib/inbox/types'
 import { useAuth } from '@/lib/supabase/auth'
+import { useHeaderPreview } from '@/lib/company/developer-preview-context'
 import { cn, emptyList } from '@/lib/utils'
 import { NotificationPanel } from './NotificationPanel'
+import { useMeetingNotices } from '@/features/meetings/use-meeting-notices'
+import { DeveloperPreviewBar, DeveloperPreviewProvider } from './DeveloperPreview'
+import { useWorkspaceOverlayHost } from './use-workspace-overlay-host'
 
 type OpenPanel = 'chat' | 'notifications'
 
-function isManagerPosition(position: string | null | undefined) {
-  return COMPANY_MANAGER_POSITIONS.some((item) => item === position)
-}
+// 페이지의 고정 헤더·서랍과 상단 탭의 stacking context 밖에서 공통 패널을 표시한다.
+const HEADER_PANEL_CLASS = 'pointer-events-auto fixed top-12 right-3 bottom-24 z-[200] flex w-[min(24rem,calc(100vw-1.5rem))] flex-col'
 
 export function WorkspaceHeaderActions() {
   useRenderWatch('WorkspaceHeaderActions')
@@ -37,15 +44,29 @@ export function WorkspaceHeaderActions() {
   useChatRealtime(chatEnabled)
   const rooms = roomsQuery.data ?? emptyList<ChatRoom>()
   const rootRef = useRef<HTMLDivElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
   const chatButtonRef = useRef<HTMLButtonElement>(null)
   const bellButtonRef = useRef<HTMLButtonElement>(null)
   const openedBy = useRef<OpenPanel | null>(null)
   const chatTitleId = useId()
   const notificationTitleId = useId()
   const [open, setOpen] = useState<OpenPanel | null>(null)
-  const [notifications, setNotifications] = useState<InboxNotification[]>(
-    () => MOCK_NOTIFICATIONS,
-  )
+  const [requestedRoom,setRequestedRoom]=useState<RequestedConversation|null>(null)
+  const cache=useQueryClient()
+  const meetingNotices=useMeetingNotices()
+  const [notificationError,setNotificationError]=useState<string|null>(null)
+  const { container: overlayContainer, restoreFocus } = useWorkspaceOverlayHost(open !== null)
+  const notifications = meetingNotices.items
+  useEffect(()=>{
+    function receive(event:Event){
+      const detail=(event as CustomEvent<RequestedConversation>).detail
+      if(!chatEnabled || !detail || typeof detail.id!=='string') return
+      openedBy.current='chat';setRequestedRoom(detail);setOpen('chat')
+    }
+    window.addEventListener(OPEN_CONVERSATION_EVENT,receive)
+    return ()=>window.removeEventListener(OPEN_CONVERSATION_EVENT,receive)
+  },[chatEnabled])
+  useEffect(()=>{setRequestedRoom(null);setOpen(null)},[profile?.id])
 
   const notificationCount = useMemo(
     () => notifications.filter((item) => !item.readAt).length,
@@ -58,6 +79,7 @@ export function WorkspaceHeaderActions() {
 
   const closePanel = useCallback(() => {
     setOpen(null)
+    setRequestedRoom(null)
     const button =
       openedBy.current === 'chat'
         ? chatButtonRef.current
@@ -65,11 +87,12 @@ export function WorkspaceHeaderActions() {
           ? bellButtonRef.current
           : null
     window.requestAnimationFrame(() => {
-      button?.focus()
+      restoreFocus(button)
     })
-  }, [])
+  }, [restoreFocus])
 
   function toggle(next: OpenPanel) {
+    setRequestedRoom(null)
     openedBy.current = next
     setOpen((current) => (current === next ? null : next))
   }
@@ -77,7 +100,8 @@ export function WorkspaceHeaderActions() {
   useEffect(() => {
     if (!open) return
     function onPointerDown(event: MouseEvent) {
-      if (!rootRef.current?.contains(event.target as Node)) closePanel()
+      const target = event.target as Node
+      if (!rootRef.current?.contains(target) && !panelRef.current?.contains(target)) closePanel()
     }
     function onKeyDown(event: KeyboardEvent) {
       if (event.key !== 'Escape') return
@@ -92,22 +116,16 @@ export function WorkspaceHeaderActions() {
     }
   }, [closePanel, open])
 
+  async function markMeetingRead(id:string|null) {
+    try {await readMeetingInvitation(id);setNotificationError(null);await cache.invalidateQueries({queryKey:['meeting-invitations']})}
+    catch(error){console.warn('[meetings] 참석 요청 읽음 처리 실패',{error});setNotificationError('참석 요청을 읽음으로 표시하지 못했습니다. 다시 시도해 주세요.')}
+  }
   function markAllRead() {
-    const readAt = new Date().toISOString()
-    setNotifications((prev) =>
-      prev.map((item) => (item.readAt ? item : { ...item, readAt })),
-    )
+    if(meetingNotices.items.some(item=>item.kind==='meeting_invitation' && !item.readAt)) void markMeetingRead(null)
   }
 
   function openNotification(item: InboxNotification) {
-    const readAt = new Date().toISOString()
-    setNotifications((prev) =>
-      prev.map((current) =>
-        current.id === item.id && !current.readAt
-          ? { ...current, readAt }
-          : current,
-      ),
-    )
+    if(item.kind==='meeting_invitation') void markMeetingRead(item.id)
     setOpen(null)
     navigate(item.href)
   }
@@ -147,28 +165,32 @@ export function WorkspaceHeaderActions() {
         <Bell className="size-4" />
       </HeaderIconButton>
 
-      {open === 'chat' && profile ? (
+      {open === 'chat' && profile ? createPortal(
         <div
+          ref={panelRef}
           id="workspace-chat-panel"
-          className="fixed top-12 right-3 bottom-24 z-30 flex w-[min(24rem,calc(100vw-1.5rem))] flex-col"
+          className={HEADER_PANEL_CLASS}
         >
-          <ChatPanel
+          <DeveloperPreviewProvider><ChatPanelPreview
             rooms={rooms}
             loading={roomsQuery.isLoading}
             error={roomsError}
             userId={profile.id}
             myName={profile.displayName?.trim() || '나'}
-            isManager={isManagerPosition(profile.position)}
-            isAdmin={profile.isAdmin}
+            isManager={hasPermission(profile, 'chat.moderate', 'company', profile.companyId)}
+            canModerateRoom={roomId => hasPermission(profile, 'chat.moderate', 'chat_room', roomId)}
+            isAdmin={hasPermission(profile, 'system.manage')}
             titleId={chatTitleId}
             onClose={closePanel}
-          />
-        </div>
+            requestedRoom={requestedRoom}
+          /></DeveloperPreviewProvider>
+        </div>, overlayContainer,
       ) : null}
-      {open === 'notifications' ? (
+      {open === 'notifications' ? createPortal(
         <div
+          ref={panelRef}
           id="workspace-notification-panel"
-          className="fixed top-12 right-3 bottom-24 z-30 flex w-[min(24rem,calc(100vw-1.5rem))] flex-col"
+          className={HEADER_PANEL_CLASS}
         >
           <NotificationPanel
             items={notifications}
@@ -177,10 +199,23 @@ export function WorkspaceHeaderActions() {
             onOpen={openNotification}
             onClose={closePanel}
           />
-        </div>
+          {notificationError || meetingNotices.error ? <p role="alert" className="rounded border border-danger bg-card p-2 text-xs text-danger">{notificationError ?? '회의 참석 요청을 불러오지 못했습니다.'}</p> : null}
+        </div>, overlayContainer,
       ) : null}
     </div>
   )
+}
+
+function ChatPanelPreview(props: ComponentProps<typeof ChatPanel>) {
+  const preview = useHeaderPreview()
+  return <>
+    <DeveloperPreviewBar scope="chat" />
+    <div className="min-h-0 flex-1"><ChatPanel {...props}
+      isManager={preview?.chatRole ? preview.chatRole !== 'employee' : props.isManager}
+      canModerateRoom={preview?.chatRole ? undefined : props.canModerateRoom}
+      isAdmin={preview?.chatRole ? preview.chatRole === 'all' : props.isAdmin}
+    /></div>
+  </>
 }
 
 function HeaderIconButton({

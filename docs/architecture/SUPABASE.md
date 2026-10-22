@@ -36,7 +36,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 | 회사, 브랜드, 팀(조직도), 프로필, 브랜드 멤버 | Supabase |
 | 출시 기획(`seasons`), 내부 상품 카테고리(`product_categories`) + M번호 연결(`style_categories`), 브랜드 항목(`brand_fields` + `brand_field_options`), 상품(`styles`) | Supabase |
 | 기획안(`product_drafts` + `draft_colors` + `draft_options`) | Supabase |
-| 코드·출고업체(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_target_folders`, `code_usage_target_aliases`, `code_usage_assignments`) | Supabase |
+| 코드·출고업체(`product_codes`, `product_code_components`, `code_usage_targets`, `code_usage_target_folders`, `code_usage_target_aliases`, `code_usage_assignments`, `usage_code_columns`) | Supabase |
 | 사방넷 상품·M번호 연결(`sabangnet_products` + `sabangnet_product_styles`) | Supabase |
 | 사방넷 코드별 온라인 쇼핑몰 URL(`sabangnet_mall_urls`) | Supabase |
 | 거래처 코드 헤더(`partner_barcode_fields`). `product_codes.kind='partner'`는 업체마다 같은 바코드 문자열을 허용 | Supabase |
@@ -410,6 +410,19 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   `npm run verify:my-attendance`는 한국시간 경계·윤년·월을 넘긴 신청·미래 표시·최근 승인 정정 표시와 원본 불변을 검증한다.
   `npm run verify:personal-requests`는 휴가 시간·겹침·외근/재택 예외·정정 규칙을 검증한다.
 
+## 화면 위치별 회사 공지
+
+- `company_notices`는 회사 소유 안내 글이다. 브랜드가 아니라 `company_id`로 구분하고,
+  `slot`은 공지가 보이는 화면 자리다. `my-attendance`는 내 근태 상단,
+  `company`는 My home 회사 공지, `department`는 My home 부서 공지다.
+  `department_id`가 비어 있으면 회사 전체, 있으면 그 부서만 본다.
+- 재직 직원은 게시 중이고 한국시간 기간 안인 회사 전체 공지와 자기 부서 공지만 읽는다.
+  운영지원의 저장·삭제는 `app.can_edit_org_assignment()`만 가능하고, 직접 insert/update/delete는 없다.
+  예외로 `department` 공지는 그 부서의 팀장·이사가 자기 부서 글만 등록·수정·삭제할 수 있다.
+  공개 함수 `save_company_notice`, `delete_company_notice`가 비공개 함수에 위임한다.
+- 마이그레이션: `20261020021000_company_notices.sql`, `20261020110000_company_notice_boards.sql`, `20261021120000_department_notice_managers.sql`.
+  `npm run verify:company-notices`는 게시 기간·대상 정렬과 위치 이름 일치를 검증한다.
+
 ## 첫 입력 흐름
 
 앞으로 새로 기획하는 상품은 기획 단계를 거친다.
@@ -735,6 +748,13 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   정식명 1건에 별칭 N건이고 `(brand_id, normalized_alias)`가 unique다. 한 별칭이
   두 업체를 가리키지 못한다. 정식명은 별칭에 넣지 않아도 검색되며, 앱은 입력 중에
   이미 그 이름을 쓰는 업체를 알려 준다.
+- `usage_code_columns`는 업체별 88코드 목록과 등록 양식이 같이 쓰는 헤더다.
+  브랜드 단위이고 업체마다 나누지 않는다. `system_key`가 `code`·`status`인 헤더는
+  빼지 않고 이름만 바꿀 수 있다. 그 외 기본 헤더와 직접 추가한 헤더는 지울 수 있다.
+  직접 추가한 헤더는 목록에 빈 칸으로 보이고, 양식에는 나오지만 등록 값으로 쓰지 않는다.
+  등록에 쓰는 열은 `code`와 `status`다. 저장은 `replace_usage_code_columns` 한 번에
+  바꾸고, 실패하면 기존 헤더가 남는다. 마이그레이션은
+  `20261020061000_usage_code_columns.sql`이다.
 - 비교 키는 앱 `compactOutboundPartnerKey`가 만든다. NFKC로 전각을 접고
   소문자화한 뒤 한글·영문·숫자만 남긴다. 원문 표기는 바꾸지 않으며 DB generated
   column을 쓰지 않는 기존 관례를 따른다. 업체 정식명도 같은 키로
@@ -1846,6 +1866,39 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
 - 사내 채팅 파일만 `companies/{company_id}/chat/{room_id}/{attachment_id}/` 다.
   브랜드 폴더를 쓰지 않는다. 자세한 한도와 권한은 「사내 채팅」에 둔다.
 
+## 회의 저장과 공유
+
+- `20261021064611_company_meetings.sql` 적용. `meeting_rooms`, `meeting_series`,
+  `meeting_members`, `meeting_rounds`, `meeting_files`만 추가했다. 기존 사용자·로그인·승인자·
+  권한 함수와 정책은 변경하지 않았다. 회사 공통 데이터이므로 `company_id`로 격리한다.
+- `20261021073414_meeting_invitations.sql` 적용. 기존 회의는 공개·확정 상태를 유지한다.
+  새 회의는 `phase=preparing`으로 생성해 호스트·생성자만 읽는다. 호스트는 생성 시 변경 가능하다.
+  호스트가 회차 일정을 확정하면 `published`로 전환하고 멤버에게 앱 알림을 보낸다.
+  공개 회의의 다음 회차도 확정 전에는 호스트만 본다. 멤버가 회의록을 저장해도 숨긴 회차는 보존한다.
+- 확정된 회의는 주최자·참석자와 기존 회의 운영자만 회의 내용·결과·자료를 읽고 저장한다. 기존 화면과
+  동일하게 운영자는 `app.is_admin()`이며 미적용된 새 지정 권한을 활성화하지 않는다.
+  회의 삭제는 주최자/운영자, 예약 취소는 주최자, 개별 파일 삭제는 업로더만 가능하다.
+- 일정·구성 변경과 확정은 호스트만 가능하다. `meeting_invitations`는 회차·멤버별 참석 가능/불가를
+  보관하며 일정/회의실/회의 시간/멤버가 바뀌면 응답·읽음을 초기화하고 `schedule_version`을 올린다.
+  이전 버전 응답은 거절한다. `list_my_meeting_invitations()`로 본인 참석 요청만 받는다.
+  1:1은 기존 `open_direct_chat`, 전체 대화는 `open_meeting_group`으로 연결한다.
+  `meeting_chat_rooms`가 회의별 방을 재사용하고 호스트와 전체 멤버를 맞춘다. 기존 채팅 권한은 바꾸지 않는다.
+- 비참석자에게는 같은 회사 회의실의 예약 시간만 공개한다. 제목·참석자·회의록은 제외한다.
+  `list_meeting_directory()`도 같은 회사의 재직자 이름·부서·직책만 돌려준다.
+- 저장 API는 회차·참석자를 원자적으로 저장하며 revision으로 동시 수정 덮어쓰기를 막는다.
+  회사별 예약 잠금으로 같은 회의실의 중복 시간 예약을 차단한다. 한국 시간으로 저장·표시한다.
+  `meeting_booking_limits` 추가 제약으로 평일 09~19시·30분 단위를 테이블에서도 검사한다.
+- 비공개 `company-meetings` 버킷, 파일당 50MB. 경로는
+  `companies/{company_id}/meetings/{series_id}/{round_id}/{file_id}/original`이다.
+  한글 원본 이름은 DB에 보관하고, 업로드 완료·실제 용량을 검증한 파일만 공유한다.
+  받기는 로그인 권한을 매번 검사한다. 삭제 메타데이터를 먼저 숨긴 뒤 Storage API로 정리한다.
+  정리에 실패하면 오류를 표시하고 다음 실제 회의 탭 진입 때 재시도한다. DB 행은 삭제 표식을 남긴다.
+  `20261021065519_meeting_file_cleanup.sql`은 Storage 삭제에 필요한 SELECT를 기존 읽기 권한자 중
+  정리 가능한 사람에게만 허용한다. 객체가 실제로 사라진 뒤에만 정리 완료를 기록한다.
+- 활성 회의 탭은 15초마다 공유 데이터를 갱신한다. 화면 테스트는 별도 메모리에서만 변경한다.
+  검증: `npm run verify:meetings-db`, `npm run verify:meetings-browser`.
+  `scripts/verify-meetings-live.mjs`는 명시적으로 실행하는 실제 API 점검이며 생성한 검증 UUID만 정리한다.
+
 ## 사내 채팅
 
 채팅은 E&J 회사 소유다. `chat_rooms`, `chat_messages`, `chat_attachments`에는
@@ -1894,6 +1947,67 @@ Supabase에는 한 프로젝트에서 특정 브랜드만 버튼으로 떼는 �
 7. 짧은 쓰기 중단 후 연결을 전환하고 기존 데이터는 합의한 기간 동안 읽기 전용 보관한다.
 
 ## 변경 원칙
+
+### 지정 권한 저장 연결과 전체 전환 대기 (2026-10-21)
+
+`20261021055942_permission_assignment_storage.sql`은 운영 적용했다. 담당자 저장·조회·해제·이력용
+테이블과 API만 추가했고 기존 사용자 9명·승인자 4건·업무 역량·브랜드 연결, 기존 함수·RLS·
+프로필 트리거는 변경하지 않았다. `permission_directory.activation='pending'`이므로 새 지정은
+저장되지만 업무 권한 판정에 적용되지는 않는다. 기존 관리자가 중앙 설정에서 저장할 수 있다.
+전체 전환 SQL은 자동 적용되지 않도록 `supabase/pending/assigned_permissions_cutover.sql`에
+분리했다. 이미 저장소가 있으므로 이 참고안을 그대로 적용하지 말고 후속 변경만 새로 작성한다.
+
+전환 스위치는 `VITE_ASSIGNED_PERMISSIONS_ENABLED`이며 기본값은 false다. DB·Edge 전환을
+승인하고 검증하기 전에는 켜지 않는다. 전환 전에는 기존 프로필·역량·담당 내역을 사용하며
+신규 권한 RPC를 로그인이나 조직 명부의 필수 조건으로 호출하지 않는다. 기존 담당자 지정
+화면도 유지한다. 전환 후 RPC가 실패하면 명시적으로 오류를 보여 주며 기존 권한으로
+조용히 되돌리지 않는다.
+
+로그인 게이트는 조회 오류와 신규 계정 부재를 구분한다. 오류가 나면 재조회 화면을
+보여 주고 접근 신청을 열지 않는다. active 계정은 신청일이 없더라도 재가입으로 보내지
+않는다. 재신청 저장은 사전 상태 확인과 UPDATE의 pending/rejected 조건을 함께 써서
+기존 승인 계정을 pending으로 되돌리지 못하게 한다. 실제 AuthProvider·프로필 로더·
+AuthGate를 기존 DB 형태에 연결한 `verify:auth-recovery-browser`로 이 경로를 검증한다.
+
+`supabase/pending/assigned_permissions_cutover.sql`과 `src/lib/company/permissions.ts`가
+전체 전환 참고안이다. 아래 내용은 후속 전환과 새 앱을 함께 적용한 이후의 기준이며,
+앞부분에 남은 직책·직급·이메일 예외는 이전 모델의 기록이다. 현재 운영 DB에는 새
+마이그레이션을 적용하지 않았고 `styled-image` Edge Function도 배포하지 않았다.
+
+- 설정의 `/settings/permissions`에서 기능별 담당자, 직원별 지정 내역, 근태·야근
+  승인자를 관리한다. 일반 권한은 `permission_grants`, 승인자·대체 승인자는 원래의
+  `department_request_approvers`를 그대로 쓴다. 승인자 원본 행을 복사·삭제하지 않는다.
+- 권한은 직원·행동·회사/부서/브랜드/업체/대화방 범위로 지정한다. 직책·직급·부서 이름·
+  개발자 이메일·`profiles.is_admin`에서 실시간 권한을 만들지 않는다. 조회, 작성,
+  삭제, 승인자 지정, 출근시간 설정, 채팅 운영, 시스템 운영은 독립된 행동이다.
+- 기존 예외와 역량·브랜드 책임·업체 담당 내역은 최초 한 번 개인별 지정으로 이관한다.
+  이후 기존 열을 바꿔도 권한은 늘어나지 않는다. 가입 승인은 기본 이용만 추가하고,
+  기존 역량·브랜드 연결을 삭제 후 재생성하지 않는다. 업무 편집은 별도로 지정한다.
+- 전체 권한 관리자는 `permissions.manage`, 승인자 설정 관리자는 `approvers.manage`가
+  필요하다. `partner.manage` 담당자는 같은 중앙 화면에서 지정받은 브랜드의 업체별
+  `partner.edit`만 관리한다. 다른 기능이나 회사 전체 권한을 부여할 수 없다.
+- 저장 전 사람·행동·범위를 확인한다. 서버는 재직·같은 회사·범위를 다시 검사한다.
+  회사별 잠금과 revision으로 동시 수정을 차단하고, 선택한 지정 한 건만 추가/해제한다.
+  본인 권한 변경과 마지막 활성 권한 관리자의 해제·계정 정지를 막는다.
+- `permission_grant_events`에 변경자·대상·시각·지정/해제를 남긴다. 인증 사용자는
+  권한 테이블에 직접 쓸 수 없다. RPC는 공개 invoker와 비공개 definer로 나누고,
+  인증·회사·기능 검사를 수행한다. 서버 회수는 즉시 적용된다. 다른 사람이 열어둔
+  화면의 표시 권한은 새로고침/프로필 재조회 때 갱신된다.
+- 공지는 원래 대상과 새 대상의 수정 권한을 함께 검사하고 삭제 권한을 별도로 검사한다.
+  출근시간은 지정 부서만 저장하며 기존 월 범위·개인 예외 우선 규칙을 유지한다.
+  신청자 본인 승인 금지와 기존 승인 단계·검수 기준은 바꾸지 않는다.
+- 이전에 Cursor가 적용한 부서 공지 이력은 실제 DB 버전인
+  `20261021030030`, `20261021030139` 파일명으로 복원했다. 신규 권한 SQL보다 뒤에서
+  과거 공지 정책을 덮어쓰지 않도록 한다. 이 두 파일은 새로 적용할 대상이 아니다.
+
+검증은 Node 22에서 `verify:assigned-permissions`(임시 PostgreSQL/PGlite,
+운영 연결 없음), `verify:page-preview-browser`, `verify:usage-headers-browser`,
+기존 신청·근태·공지·탭·화면 테스트와 빌드를 사용한다. 브라우저 검증은 실제 컴포넌트를
+로컬 가짜 데이터에 연결하며 외부 요청을 차단한다. 운영 데이터 변경 전 스냅샷은
+`docs/backups/assigned-permissions-pre-20261021.xlsx`에 로컬로만 보관한다.
+
+권한 DB·Edge 전환은 별도 승인 후에만 진행한다. 미적용 상태에서는 기존 로그인·승인 상태와
+승인자 지정을 유지한다. `main` 병합·운영 배포·DB 적용은 사용자가 결정한다.
 
 브랜드 경계, 식별자 고유 범위, 권한 모델 또는 프로젝트 분리 기준을 바꾸는 작업은
 구현 전에 영향 범위와 이전 계획을 제시하고 사용자 승인을 받는다.

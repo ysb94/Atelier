@@ -377,7 +377,7 @@ function DetailTable({
       </p>
       <div className="max-h-72 overflow-auto rounded-lg border border-border">
         <table className="w-full min-w-[760px] text-left text-sm">
-          <thead className="sticky top-0 z-[1] border-b border-border bg-muted/90 text-xs text-muted-foreground backdrop-blur">
+          <thead className="sticky top-0 z-[1] border-b border-border bg-primary text-xs text-primary-foreground">
             <tr>
               <th className="w-16 px-3 py-2 font-medium">행</th>
               <th className="w-24 px-3 py-2 font-medium">사방넷 코드</th>

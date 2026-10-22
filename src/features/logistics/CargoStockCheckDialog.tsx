@@ -341,7 +341,7 @@ export function CargoStockCheckDialog({
             </p>
           ) : (
             <table className="w-full min-w-[40rem] text-left text-sm">
-              <thead className="sticky top-0 bg-muted/90 text-xs text-muted-foreground">
+              <thead className="sticky top-0 bg-primary text-xs text-primary-foreground">
                 <tr>
                   <th className="px-3 py-2 font-medium">NO</th>
                   <th className="px-3 py-2 font-medium">M번호</th>

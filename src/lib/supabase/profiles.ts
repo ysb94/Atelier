@@ -1,6 +1,11 @@
+import type { PermissionGrant } from '../company/permissions'
+import { listPermissionGrants } from './permission-grants'
+import { assignedPermissionsEnabled, legacyPermissionGrants } from '../company/permission-rollout'
+import { isAttendanceExemptPosition } from '../company/capabilities'
 import { DEFAULT_COMPANY_ID } from '@/lib/supabase/brands'
 import {
   uniqueCapabilities,
+  profileCapabilities,
   type PersonnelScope,
   type WorkCapability,
 } from '@/lib/company/capabilities'
@@ -33,6 +38,8 @@ export type BrandMembership = {
 }
 
 export type Profile = {
+  permissionMode?: 'legacy' | 'assigned'
+  permissionGrants?: PermissionGrant[]
   id: string
   email: string
   displayName: string | null
@@ -239,51 +246,8 @@ async function capabilitiesFor(
   return map
 }
 
-async function replaceCapabilities(
-  profileId: string,
-  capabilities: WorkCapability[],
-) {
-  const next = uniqueCapabilities(capabilities)
-  const { error: deleteError } = await getSupabase()
-    .from('profile_capabilities')
-    .delete()
-    .eq('profile_id', profileId)
-  if (deleteError) throw toStoreError(deleteError)
-  if (next.length === 0) return
-
-  const { error: insertError } = await getSupabase()
-    .from('profile_capabilities')
-    .insert(
-      next.map((capability) => ({
-        profile_id: profileId,
-        capability,
-      })),
-    )
-  if (insertError) throw toStoreError(insertError)
-}
-
-async function replaceBrandStewards(profileId: string, leadBrandIds: string[]) {
-  const next = [...new Set(leadBrandIds.filter(Boolean))]
-  const { error: deleteError } = await getSupabase()
-    .from('brand_members')
-    .delete()
-    .eq('profile_id', profileId)
-  if (deleteError) throw toStoreError(deleteError)
-  if (next.length === 0) return
-
-  const { error: insertError } = await getSupabase()
-    .from('brand_members')
-    .insert(
-      next.map((brandId) => ({
-        brand_id: brandId,
-        profile_id: profileId,
-        is_lead: true,
-      })),
-    )
-  if (insertError) throw toStoreError(insertError)
-}
-
 export type OrgChartMember = {
+  attendanceExempt?: boolean
   id: string
   displayName: string | null
   position: string | null
@@ -331,9 +295,15 @@ export type PersonnelTitle = {
 
 /** 재직 중인 직원의 이름·직책·소속. 이메일 등 다른 프로필 칸은 없다. */
 export async function listOrgChartMembers(): Promise<OrgChartMember[]> {
-  const { data, error } = await getSupabase().rpc('list_org_chart_members')
+  const [{ data, error }, { data: exempt, error: exemptError }] = await Promise.all([
+    getSupabase().rpc('list_org_chart_members'),
+    assignedPermissionsEnabled() ? getSupabase().rpc('list_company_attendance_exempt') : Promise.resolve({ data: [], error: null }),
+  ])
   if (error) throw toStoreError(error)
+  if (exemptError) throw toStoreError(exemptError)
+  const exemptIds = new Set((exempt ?? []) as string[])
   return ((data ?? []) as OrgChartMemberRow[]).map((row) => ({
+    attendanceExempt: assignedPermissionsEnabled() ? exemptIds.has(row.id) : isAttendanceExemptPosition(row.position),
     id: row.id,
     displayName: row.display_name,
     position: row.position,
@@ -517,7 +487,17 @@ export async function getMyProfile(): Promise<Profile | null> {
 
   if (error) throw toStoreError(error)
   if (!data) return null
-  return hydrateProfile(data as ProfileRow)
+  const profile = await hydrateProfile(data as ProfileRow)
+  if (profile.status !== 'active') return profile
+  if (!assignedPermissionsEnabled()) {
+    const permissionGrants = legacyPermissionGrants(profile)
+    const { data: approvals, error: approvalError } = await getSupabase().from('department_request_approvers').select('department_id,approver_id,substitute_id').eq('company_id',profile.companyId)
+    if (approvalError) console.warn('[auth] 기존 출근시간 담당 범위 조회 실패',approvalError)
+    else for (const row of approvals ?? []) if (row.approver_id === profile.id || row.substitute_id === profile.id) permissionGrants.push({ permission:'attendance.manage',scopeKind:'department',scopeId:row.department_id })
+    return { ...profile, permissionMode: 'legacy', permissionGrants }
+  }
+  const assigned = { ...profile, permissionMode: 'assigned' as const, permissionGrants: await listPermissionGrants() }
+  return { ...assigned, capabilities: profileCapabilities(assigned) }
 }
 
 export async function confirmMyProfileName(name: string): Promise<Profile> {
@@ -549,6 +529,10 @@ export async function submitAccessRequest(
   const userId = userData.user?.id
   if (!userId) throw new Error('로그인이 필요합니다.')
 
+  const { data: current, error: currentError } = await getSupabase().from('profiles').select('status').eq('id',userId).maybeSingle()
+  if (currentError) throw toStoreError(currentError)
+  if (!current || !['pending','rejected'].includes(current.status)) throw new Error('현재 계정은 재신청할 수 없습니다. 계정 정보를 다시 불러와 주세요.')
+
   if (!input.departmentId) throw new Error('부서를 선택하세요.')
   const displayName = validatePersonName(input.displayName)
 
@@ -566,6 +550,7 @@ export async function submitAccessRequest(
       approved_at: null,
     })
     .eq('id', userId)
+    .in('status', ['pending', 'rejected'])
     .select(PROFILE_COLUMNS)
     .single()
 
@@ -588,18 +573,13 @@ export async function approveMember(
   input: ApproveMemberInput,
 ): Promise<Profile> {
   const displayName = validatePersonName(input.displayName ?? '')
-  const capabilities = uniqueCapabilities(input.capabilities)
-  if (!input.isAdmin && capabilities.length === 0) {
-    throw new Error('업무 역량을 하나 이상 지정하세요.')
-  }
 
   const { data: userData, error: userError } = await getSupabase().auth.getUser()
   if (userError) throw toStoreError(userError)
   const actorId = userData.user?.id
   if (!actorId) throw new Error('로그인이 필요합니다.')
 
-  await replaceCapabilities(input.profileId, capabilities)
-  await replaceBrandStewards(input.profileId, input.leadBrandIds ?? [])
+  // 기존 역량·브랜드 연결은 보존한다. 기능 권한은 별도 지정 RPC에서만 변경한다.
 
   const patch: Record<string, unknown> = {
     company_id: DEFAULT_COMPANY_ID,

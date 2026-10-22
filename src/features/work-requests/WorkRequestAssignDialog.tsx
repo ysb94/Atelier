@@ -70,8 +70,8 @@ export function WorkRequestAssignDialog({
           <p className="mt-1 text-sm font-medium">{request.values.title}</p>
           <p className="mt-2 text-xs text-muted-foreground">
             {hard
-              ? '난이도가 높습니다. 팀장이 직접 하거나, 숙련된 사람에게 맡기세요.'
-              : '팀장이 직접 하거나, 여유 있는 사람에게 맡기세요.'}
+              ? '난이도가 높습니다. 업무 관리 담당자가 직접 하거나, 숙련된 사람에게 맡기세요.'
+              : '업무 관리 담당자가 직접 하거나, 여유 있는 사람에게 맡기세요.'}
           </p>
           {request.managerPriority ? (
             <div className="mt-2">

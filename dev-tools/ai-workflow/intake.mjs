@@ -13,6 +13,7 @@ const plain = items => (items ?? []).map(v => v.plain_text ?? v.text?.content ??
 const positive = (value, fallback) => Number.isFinite(value) && value > 0 ? value : fallback
 
 export function intakeSettings(config) {
+  if (config.v2?.manualMemoIntake === true) return null
   const value = config.memoIntake, positions = config.positions ?? {}
   if (config.mode !== 'memo-board' || value?.enabled !== true || typeof positions.memo !== 'string' || !positions.memo.trim()
     || typeof positions.manual !== 'string' || !positions.manual.trim()) return null

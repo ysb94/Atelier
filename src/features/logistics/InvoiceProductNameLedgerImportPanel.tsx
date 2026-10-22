@@ -240,7 +240,7 @@ export function InvoiceProductNameLedgerImportPanel({
           </div>
           <div className="max-h-[24rem] overflow-auto rounded-lg border border-border">
             <table className="w-full min-w-[880px] text-left text-xs">
-              <thead className="sticky top-0 bg-muted/80">
+              <thead className="sticky top-0 bg-primary text-primary-foreground">
                 <tr>
                   <th className="px-3 py-2 font-medium">행</th>
                   <th className="px-3 py-2 font-medium">원본 품목명·조회 키</th>

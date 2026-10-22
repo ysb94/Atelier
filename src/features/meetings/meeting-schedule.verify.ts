@@ -29,6 +29,7 @@ import {
   formatMeetingComposeGaps,
   formatRoundGapLabel,
   formatRoundListLabel,
+  roundListCaption,
   roundGapDays,
   groupPrepMaterialsByUploader,
   isMeetingComposeReady,
@@ -462,6 +463,11 @@ assert(
   formatRoundListLabel({ round: 4, startsAt: '' }) === '다음 차 예정',
   '예정 차 목록 이름',
 )
+assert(roundListCaption({ startsAt: '', content: '', responses: [] }, ['m']) === '회의 안내 미작성', '안내 없으면 미작성')
+assert(roundListCaption({ startsAt: '', content: '안내', responses: [] }, ['m']) === '일정 미확정', '안내 저장 후 일정 미확정')
+assert(roundListCaption({ startsAt: '2026-10-28T10:30', content: '안내', responses: [{ profileId: 'm', status: 'pending' }] }, ['m']) === '참석 응답 대기', '확정 일정의 참석 응답 대기')
+assert(roundListCaption({ startsAt: '2026-10-28T10:30', content: '안내', responses: [{ profileId: 'm', status: 'unavailable' }] }, ['m']) === '참석 불가', '불가 응답을 일정 승인 거절로 표시하지 않음')
+assert(roundListCaption({ startsAt: '2026-10-28T10:30', content: '안내', responses: [{ profileId: 'm', status: 'available' }] }, ['m']) === null, '전원 수락이면 차수 이름만')
 const gapRounds = [
   { round: 1, startsAt: '2026-09-07T16:30' },
   { round: 2, startsAt: '2026-09-09T10:00' },

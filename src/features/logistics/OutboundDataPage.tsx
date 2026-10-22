@@ -35,19 +35,22 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
+import { StatTile } from '@/components/ui/stat-tile'
 import { Input, Select } from '@/components/ui/input'
 import {
   getCodeUsageTargetFolders,
   getCodeUsageTargets,
   getFilteredOutboundShipments,
 } from '@/lib/api'
-import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import {
   bucketTotalsByPeriod,
   companySeriesId,
   groupPartnersForOutboundChart,
   limitCompaniesWithOther,
   niceTicks,
+  operationsOutboundCompanyLabel,
+  operationsOutboundTargetLabel,
+  operationsOutboundUnitLabel,
   OTHER_COMPANY_KEY,
   resolveChartSeries,
   siteSeriesId,
@@ -138,28 +141,7 @@ function KpiCard({
   hint?: string
   tone?: 'default' | 'success' | 'danger' | 'muted'
 }) {
-  return (
-    <Card className="shadow-none">
-      <CardContent className="p-4">
-        <p
-          className={cn(
-            'text-xl font-semibold tabular-nums tracking-tight sm:text-2xl',
-            tone === 'success' && 'text-success',
-            tone === 'danger' && 'text-danger',
-            tone === 'muted' && 'text-muted-foreground',
-          )}
-        >
-          {value}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">{label}</p>
-        {hint ? (
-          <p className="mt-1 text-[10px] leading-4 text-muted-foreground/80">
-            {hint}
-          </p>
-        ) : null}
-      </CardContent>
-    </Card>
-  )
+  return <StatTile label={label} value={value} hint={hint} tone={tone} />
 }
 
 const SERIES_COLORS = [
@@ -828,7 +810,7 @@ function PartnerRankBars({
           )}
           {renderToggleRow({
             seriesId: companySeriesId(company.key),
-            label: company.label,
+            label: operationsOutboundCompanyLabel(company),
             quantity: company.quantity,
             widthTotal: total,
             shareTotal: total,
@@ -848,7 +830,11 @@ function PartnerRankBars({
                   <div key={unit.partnerId} className="pl-5">
                     {renderToggleRow({
                       seriesId: siteSeriesId(unit.partnerId),
-                      label: unit.siteLabel,
+                      label: operationsOutboundUnitLabel({
+                        companyLabel: company.label,
+                        siteLabel: unit.siteLabel,
+                        channelType: unit.channelType,
+                      }),
                       quantity: unit.quantity,
                       widthTotal: company.quantity,
                       shareTotal: total,
@@ -1186,7 +1172,7 @@ function ProductDetailPanel({
                   </Badge>
                   {topCompany ? (
                     <Badge variant="outline">
-                      {topCompany.label}{' '}
+                      {operationsOutboundCompanyLabel(topCompany)}{' '}
                       {formatShare(topCompany.quantity, summary.totalQuantity)}
                     </Badge>
                   ) : null}
@@ -1366,7 +1352,7 @@ function FilterBar({
           <option value="">전체 업체</option>
           {partners.map((partner) => (
             <option key={partner.id} value={partner.id}>
-              {outboundPartnerDisplayName(partner)}
+              {operationsOutboundTargetLabel(partner)}
             </option>
           ))}
           {extraPartners
@@ -2413,7 +2399,7 @@ export function OutboundDataPage() {
             footer={pager}
             rows={
               <table className="w-full min-w-[42rem] text-left text-sm">
-                <thead className="border-b border-border bg-muted/40 text-xs text-muted-foreground">
+                <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
                   <tr>
                     <th className="px-3 py-2.5 font-medium">M번호</th>
                     <th className="px-3 py-2.5 font-medium">상품명</th>

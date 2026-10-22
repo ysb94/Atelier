@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useSearchParams } from 'react-router-dom'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { openDirectChat } from '@/lib/supabase/chat'
+import { openConversation } from '@/lib/chat/open-conversation'
+import { chatKeys } from '@/features/chat/use-chat'
+import { MeetingAttendance, MeetingResponse } from './MeetingAttendance'
+import { MeetingSchedulePicker, type MeetingScheduleChoice } from './MeetingSchedulePicker'
 import {
   Check,
   ChevronDown,
@@ -17,13 +24,15 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
+import { usePagePreview } from '@/lib/company/page-preview-context'
+import { previewMeetingActor } from '@/lib/company/relationship-preview'
 import {
   listDepartments,
-  listManageableProfiles,
   type Department,
-  type Profile,
 } from '@/lib/supabase/profiles'
-import { isCompanyAdmin } from '@/lib/company/capabilities'
+import { listMeetingDirectory, uploadMeetingFile, removeMeetingFile, downloadMeetingFile, respondToMeeting, openMeetingGroup } from '@/lib/supabase/meetings'
+import { useCompanyMeetings } from './useCompanyMeetings'
+import { hasPermission } from '@/lib/company/permissions'
 import { cn, emptyList } from '@/lib/utils'
 import {
   DEFAULT_MEETING_DURATION_MINUTES,
@@ -50,6 +59,7 @@ import {
   formatRoundGapHint,
   formatRoundGapLabel,
   formatRoundListLabel,
+  roundListCaption,
   roundGapDays,
   groupPrepMaterialsByUploader,
   meetingComposeGaps,
@@ -69,7 +79,6 @@ import {
   revokeMeetingSeriesFiles,
   profileToMeetingPerson,
   roomDayKey,
-  seriesToDrafts,
   shiftMeetingFromKey,
   timeFromDateTime,
   toDateKey,
@@ -93,7 +102,7 @@ import {
   type AttendanceEntry,
 } from './meeting-slots'
 
-const EMPTY_PROFILES = emptyList<Profile>()
+const EMPTY_PEOPLE = emptyList<MeetingPerson>()
 const EMPTY_DEPARTMENTS = emptyList<Department>()
 const EMPTY_ATTENDANCE = emptyList<AttendanceEntry>()
 const EMPTY_DRAFTS = emptyList<MeetingDraft>()
@@ -140,100 +149,21 @@ function newMeetingId() {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
     return crypto.randomUUID()
   }
-  return `meeting-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  throw new Error('회의를 저장하려면 보안 연결을 지원하는 브라우저가 필요합니다.')
 }
 
-const DEMO_MEMBERS: MeetingPerson[] = [
-  { id: 'demo-member-1', name: '김민지', position: '대리' },
-  { id: 'demo-member-2', name: '이준호', position: '사원' },
-]
-
-function createDemoMeetingSeries(
-  host: MeetingPerson,
-  todayKey: string,
-): MeetingSeries[] {
-  const days = listMeetingDays(todayKey, 10, todayKey)
-  const first = days[0]?.key ?? todayKey
-  const second = days[2]?.key ?? first
-  const third = days[4]?.key ?? second
-  return [
-    {
-      id: 'demo-series-ops',
-      title: '주간 운영 점검',
-      host,
-      members: DEMO_MEMBERS,
-      status: 'in_progress',
-      durationMinutes: 90,
-      rounds: [
-        {
-          id: 'demo-r1',
-          round: 1,
-          startsAt: combineDateTime(first, '16:30'),
-          roomId: 'room-1',
-          quarterId: quarterFromTime('16:30'),
-          prepMaterials: [],
-          content: '재고 마감 요일과 샘플 일정을 다시 맞출지 논의했다.',
-          result: '재고 기준을 금요일로 맞춘다. 샘플은 기획이 목록을 올린다.',
-        },
-        {
-          id: 'demo-r2',
-          round: 2,
-          startsAt: combineDateTime(second, '10:00'),
-          roomId: 'room-2',
-          quarterId: quarterFromTime('10:00'),
-          prepMaterials: [],
-          content: '샘플 목록을 보고 촬영 일정을 잡았다.',
-          result: '샘플 촬영은 다음 주 화요일. 담당은 디자인.',
-        },
-        {
-          id: 'demo-r3',
-          round: 3,
-          startsAt: combineDateTime(third, '14:30'),
-          roomId: 'room-1',
-          quarterId: quarterFromTime('14:30'),
-          ...emptyRoundNotes(),
-        },
-      ],
-    },
-    {
-      id: 'demo-series-done',
-      title: '시즌 킥오프',
-      host,
-      members: DEMO_MEMBERS.slice(0, 1),
-      status: 'done',
-      durationMinutes: 60,
-      rounds: [
-        {
-          id: 'demo-d1',
-          round: 1,
-          startsAt: combineDateTime(first, '09:00'),
-          roomId: 'room-2',
-          quarterId: quarterFromTime('09:00'),
-          prepMaterials: [],
-          content: '시즌 콘셉트와 일정 초안을 공유했다.',
-          result: '콘셉트는 A안. 런칭 주는 10월 둘째 주.',
-        },
-        {
-          id: 'demo-d2',
-          round: 2,
-          startsAt: combineDateTime(second, '13:00'),
-          roomId: 'room-1',
-          quarterId: quarterFromTime('13:00'),
-          ...emptyRoundNotes(),
-        },
-      ],
-    },
-  ]
-}
-
-export function CompanyMeetingsPage() {
+export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: boolean } = {}) {
   useRenderWatch('CompanyMeetingsPage')
 
   const { profile } = useAuth()
+  const preview = usePagePreview()
+  const cache=useQueryClient(),active=useWorkspaceTabActivity()
+  const [searchParams,setSearchParams]=useSearchParams()
+  const [selectedHostId,setSelectedHostId]=useState<string|null>(null)
+  const [schedulingRoundId,setSchedulingRoundId]=useState<string|null>(null)
   const topicRef = useRef<HTMLInputElement>(null)
   const durationRef = useRef<HTMLSelectElement>(null)
   const composeSectionRef = useRef<HTMLDivElement>(null)
-  const [series, setSeries] = useState<MeetingSeries[]>([])
   const [boardTab, setBoardTab] = useState<MeetingSeriesStatus>('in_progress')
   const [schedulingSeriesId, setSchedulingSeriesId] = useState<string | null>(
     null,
@@ -253,25 +183,31 @@ export function CompanyMeetingsPage() {
     roundId: string
   } | null>(null)
   const [composePrompt, setComposePrompt] = useState<string | null>(null)
+  const [composeOpen, setComposeOpen] = useState(false)
   const [deleteSeriesId, setDeleteSeriesId] = useState<string | null>(null)
   const [selectedRoomId, setSelectedRoomId] = useState(MEETING_ROOMS[0].id)
-  const demoSeeded = useRef(false)
+  const [scheduleChoice,setScheduleChoice]=useState<MeetingScheduleChoice>(()=>({roomId:MEETING_ROOMS[0].id,dateKey:toDateKey(new Date()),clock:''}))
+  const todayKey = toDateKey(new Date())
+  const fromKey = rangeFromKey ?? todayKey
+  const days = useMemo(() => listMeetingDays(fromKey, visibleDays, todayKey),[fromKey,todayKey,visibleDays])
+  const meetings=useCompanyMeetings(days[0]?.key ?? todayKey,days[days.length-1]?.key ?? todayKey)
+  const {series,setSeries,rooms,saving,simulating}=meetings
 
   const host = useMemo<MeetingPerson>(() => {
     if (!profile) return LOCAL_HOST
-    return profileToMeetingPerson(profile)
-  }, [profile])
-  const isAdmin = isCompanyAdmin(profile)
+    return previewMeetingActor(profileToMeetingPerson(profile), series, preview?.facts?.meetingRole)
+  }, [profile, series, preview?.facts?.meetingRole])
+  const isAdmin = hasPermission(profile, 'meeting.manage')
 
   const membersQuery = useQuery({
-    queryKey: ['profiles', 'manageable'],
-    queryFn: listManageableProfiles,
+    queryKey: ['meeting-directory', preview?.realProfile?.companyId ?? profile?.companyId],
+    queryFn: listMeetingDirectory,
   })
   const departmentsQuery = useQuery({
     queryKey: ['departments', 'active'],
     queryFn: () => listDepartments(true),
   })
-  const profiles = membersQuery.data ?? EMPTY_PROFILES
+  const people = membersQuery.data ?? EMPTY_PEOPLE
   const departments = departmentsQuery.data ?? EMPTY_DEPARTMENTS
 
   useEffect(() => {
@@ -282,44 +218,29 @@ export function CompanyMeetingsPage() {
   }, [membersQuery.error, membersQuery.isError])
 
   const directory = useMemo(() => {
-    const people = profiles
-      .filter((row) => row.status === 'active')
-      .map(profileToMeetingPerson)
     if (people.some((person) => person.id === host.id)) return people
     return [host, ...people]
-  }, [host, profiles])
+  }, [host, people])
+  const chosenHost=directory.find(person=>person.id===(selectedHostId ?? host.id)) ?? host
 
   const selectedMemberIds = useMemo(
     () => members.map((person) => person.id),
     [members],
   )
   const departmentGroups = useMemo(
-    () => groupMeetingMembersByDepartment(directory, host.id, departments),
-    [departments, directory, host.id],
+    () => groupMeetingMembersByDepartment(directory, selectedHostId ?? host.id, departments),
+    [departments, directory, host.id, selectedHostId],
   )
 
-  const todayKey = toDateKey(new Date())
-
-  useEffect(() => {
-    if (demoSeeded.current) return
-    demoSeeded.current = true
-    setSeries(createDemoMeetingSeries(host, todayKey))
-  }, [host, todayKey])
-
-  const fromKey = rangeFromKey ?? todayKey
-  const days = useMemo(
-    () => listMeetingDays(fromKey, visibleDays, todayKey),
-    [fromKey, todayKey, visibleDays],
-  )
   const weeks = useMemo(() => chunkMeetingDays(days), [days])
-  const items = useMemo(() => seriesToDrafts(series), [series])
+  const items = meetings.bookings
   const occupants = useMemo(() => groupMeetingsByRoomDay(items), [items])
   const pickerDay = useMemo(
     () => (picker ? days.find((day) => day.key === picker.dateKey) : undefined),
     [days, picker],
   )
   const pickerOccupants = picker
-    ? (occupants.get(roomDayKey(picker.roomId, picker.dateKey)) ?? EMPTY_DRAFTS)
+    ? (occupants.get(roomDayKey(picker.roomId, picker.dateKey)) ?? EMPTY_DRAFTS).filter(item=>item.id!==schedulingRoundId)
     : EMPTY_DRAFTS
   const now = new Date()
 
@@ -331,6 +252,16 @@ export function CompanyMeetingsPage() {
     () => filterSeriesByStatus(visibleSeries, 'in_progress'),
     [visibleSeries],
   )
+  const ongoingMeetingCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const item of series) {
+      if (item.status !== 'in_progress') continue
+      for (const id of new Set([item.host.id, ...item.members.map((person) => person.id)])) {
+        counts.set(id, (counts.get(id) ?? 0) + 1)
+      }
+    }
+    return counts
+  }, [series])
   const doneSeries = useMemo(
     () => filterSeriesByStatus(visibleSeries, 'done'),
     [visibleSeries],
@@ -350,16 +281,16 @@ export function CompanyMeetingsPage() {
     ? series.find((item) => item.id === deleteSeriesId)
     : undefined
   const submitRound = schedulingSeries
-    ? (findPendingRound(schedulingSeries)?.round ??
+    ? (schedulingSeries.rounds.find(row=>row.id===schedulingRoundId)?.round ?? findPendingRound(schedulingSeries)?.round ??
       nextRoundNumber(schedulingSeries))
     : 1
   const composeTitle = (schedulingSeries?.title ?? title).trim()
   const composeDuration = durationMinutes
-  const composeHost = schedulingSeries?.host ?? host
+  const composeHost = schedulingSeries?.host ?? chosenHost
   const composeMembers = members
   const composeGaps = meetingComposeGaps({
     title: composeTitle,
-    durationMinutes: composeDuration,
+    durationMinutes: schedulingSeries ? composeDuration : DEFAULT_MEETING_DURATION_MINUTES,
     memberCount: composeMembers.length,
     requireMembers: !schedulingSeries,
   })
@@ -371,6 +302,26 @@ export function CompanyMeetingsPage() {
     () => [composeHost, ...composeMembers],
     [composeHost, composeMembers],
   )
+  useEffect(()=>{
+    if(!active || !searchParams.get('meeting') || !searchParams.get('round')) return
+    const item=visibleSeries.find(row=>row.id===searchParams.get('meeting'))
+    const round=item?.rounds.find(row=>row.id===searchParams.get('round'))
+    if(item&&round) setDetail(current=>current?.seriesId===item.id&&current.roundId===round.id?current:{seriesId:item.id,roundId:round.id})
+  },[active,searchParams,visibleSeries])
+  function closeDetail(){
+    setDetail(null)
+    if(active&&searchParams.has('meeting')){const next=new URLSearchParams(searchParams);next.delete('meeting');next.delete('round');setSearchParams(next,{replace:true})}
+  }
+  function chatWith(person:MeetingPerson){
+    void meetings.perform(async()=>{const id=await openDirectChat(person.id);await cache.invalidateQueries({queryKey:chatKeys.rooms});openConversation(id,person.name)})
+  }
+  function groupChat(item:MeetingSeries){
+    void meetings.perform(async()=>{const id=await openMeetingGroup(item.id);await cache.invalidateQueries({queryKey:chatKeys.rooms});openConversation(id,'회의 · '+item.title)})
+  }
+  function respond(item:MeetingSeries,round:MeetingRound,status:'available'|'unavailable'){
+    if(simulating){void setSeries(rows=>rows.map(row=>row.id===item.id?{...row,rounds:row.rounds.map(r=>r.id===round.id?{...r,responses:[...(r.responses??[]).filter(response=>response.profileId!==host.id),{profileId:host.id,status}]}:r)}:row));return}
+    void meetings.perform(()=>respondToMeeting(round.id,round.scheduleVersion ?? 1,status))
+  }
   useEffect(() => {
     if (!picker) return
     function onKeyDown(event: KeyboardEvent) {
@@ -392,35 +343,59 @@ export function CompanyMeetingsPage() {
     )
   }
 
+  function toggleDepartment(people: readonly MeetingPerson[]) {
+    setMembers((prev) => {
+      const selected = new Set(prev.map((person) => person.id))
+      const allSelected = people.every((person) => selected.has(person.id))
+      if (allSelected) return prev.filter((person) => !people.some((item) => item.id === person.id))
+      return [...prev, ...people.filter((person) => !selected.has(person.id))]
+    })
+  }
+
   function resetCompose() {
     setTitle('')
     setDurationMinutes(null)
     setMembers([])
     setMemberPickerOpen(false)
     setSchedulingSeriesId(null)
+    setSchedulingRoundId(null)
+    setSelectedHostId(null)
     setComposePrompt(null)
     setPicker(null)
+    setScheduleChoice({roomId:selectedRoomId,dateKey:todayKey,clock:''})
+    setComposeOpen(false)
+  }
+
+  function openCreate() {
+    if (schedulingSeries) resetCompose()
+    setComposeOpen(true)
+  }
+  async function createDraft(){
+    if(!composeReady){showComposeGaps();return}
+    const id=newMeetingId(),roundId=newMeetingId()
+    const saved=await setSeries(rows=>[{id,title:composeTitle,host:composeHost,members:composeMembers,createdBy:host.id,phase:'preparing',status:'in_progress',durationMinutes:DEFAULT_MEETING_DURATION_MINUTES,
+      rounds:[{id:roundId,round:1,startsAt:'',roomId:'',quarterId:'q1',confirmed:false,...emptyRoundNotes()}]},...rows])
+    if(saved){resetCompose();setBoardTab('in_progress');setDetail({seriesId:id,roundId})}
   }
 
   function showComposeGaps() {
     setComposePrompt(composeGapMessage)
-    composeSectionRef.current?.scrollIntoView({
-      block: 'start',
-      behavior: 'smooth',
-    })
-    if (composeGaps.title) {
-      topicRef.current?.focus()
-      return
-    }
-    if (composeGaps.duration) {
-      durationRef.current?.focus()
-      return
-    }
-    if (composeGaps.members) setMemberPickerOpen(true)
+    setComposeOpen(true)
+    window.setTimeout(() => {
+      if (composeGaps.title) {
+        topicRef.current?.focus()
+        return
+      }
+      if (composeGaps.duration) {
+        durationRef.current?.focus()
+        return
+      }
+      if (composeGaps.members) setMemberPickerOpen(true)
+    }, 0)
   }
 
-  function bookSlot(nextRoomId: string, dateKey: string, startClock: string) {
-    if (!composeReady) return
+  async function bookSlot(nextRoomId: string, dateKey: string, startClock: string) {
+    if (!composeReady || !schedulingSeries) return
     const startsAt = combineDateTime(dateKey, startClock)
     setVisibleDays((current) =>
       visibleDaysToCover(todayKey, dateKey, current),
@@ -431,135 +406,93 @@ export function CompanyMeetingsPage() {
       startsAt,
       roomId: nextRoomId,
       quarterId: quarterFromTime(startClock),
+      durationMinutes: slotDurationMinutes,
       ...emptyRoundNotes(),
     }
-    if (schedulingSeries) {
-      const pending = findPendingRound(schedulingSeries)
-      setSeries((prev) =>
-        prev.map((item) => {
-          if (item.id !== schedulingSeries.id) return item
-          if (!pending) {
-            return {
-              ...item,
-              members: composeMembers,
-              durationMinutes: slotDurationMinutes,
-              rounds: [...item.rounds, round],
-            }
-          }
-          return {
-            ...item,
-            members: composeMembers,
-            durationMinutes: slotDurationMinutes,
-            rounds: item.rounds.map((row) =>
-              row.id === pending.id
-                ? {
-                    ...row,
-                    startsAt: round.startsAt,
-                    roomId: round.roomId,
-                    quarterId: round.quarterId,
-                  }
-                : row,
-            ),
-          }
-        }),
-      )
-    } else {
-      setSeries((prev) => [
-        {
-          id: newMeetingId(),
-          title: composeTitle,
-          host: composeHost,
-          members: composeMembers,
-          status: 'in_progress',
-          durationMinutes: slotDurationMinutes,
-          rounds: [round],
-        },
-        ...prev,
-      ])
-    }
-    resetCompose()
+    const target=schedulingSeries.rounds.find(row=>row.id===schedulingRoundId) ?? findPendingRound(schedulingSeries)
+    const confirmed={...(target ?? round),startsAt,roomId:nextRoomId,quarterId:round.quarterId,durationMinutes:slotDurationMinutes,confirmed:true,
+      scheduleVersion:(target?.scheduleVersion ?? 0)+1,responses:composeMembers.map(person=>({profileId:person.id,status:'pending' as const}))}
+    const saved=await setSeries(rows=>rows.map(item=>item.id===schedulingSeries.id?{
+      ...item,phase:'published',members:composeMembers,durationMinutes:slotDurationMinutes,
+      rounds:target?item.rounds.map(row=>row.id===target.id?confirmed:row):[...item.rounds,confirmed],
+    }:item),{id:schedulingSeries.id,revision:schedulingSeries.revision ?? 0,confirmRound:confirmed.id})
+    if(saved) resetCompose()
   }
 
-  function removeRound(roundId: string) {
-    setSeries((prev) =>
-      prev
-        .map((item) => {
-          if (item.host.id !== host.id) return item
-          if (!item.rounds.some((round) => round.id === roundId)) return item
-          return {
-            ...item,
-            rounds: item.rounds.filter((round) => round.id !== roundId),
-          }
-        })
-        .filter((item) => item.rounds.length > 0),
-    )
-  }
-
-  function scheduleNextRound(item: MeetingSeries) {
+  function scheduleNextRound(item: MeetingSeries,roundId?:string) {
+    const target=item.rounds.find(round=>round.id===roundId) ?? findPendingRound(item)
     setBoardTab('in_progress')
     setSchedulingSeriesId(item.id)
+    setSchedulingRoundId(roundId ?? null)
     setTitle(item.title)
-    setDurationMinutes(null)
+    setDurationMinutes(target?.startsAt ? target.durationMinutes ?? item.durationMinutes : null)
+    setScheduleChoice({roomId:target?.roomId || selectedRoomId,dateKey:target?.startsAt.slice(0,10) || todayKey,clock:target?.startsAt.slice(11,16) || ''})
     setMembers(item.members)
     setComposePrompt(null)
     setMemberPickerOpen(false)
+    setComposeOpen(true)
     window.setTimeout(() => {
-      composeSectionRef.current?.scrollIntoView({
-        block: 'start',
-        behavior: 'smooth',
-      })
       durationRef.current?.focus()
     }, 0)
   }
 
-  function planNextRound(item: MeetingSeries): string {
+  async function planNextRound(item: MeetingSeries): Promise<boolean> {
     const existing = findPendingRound(item)
-    if (existing) return existing.id
+    if (existing) return true
     const nextId = newMeetingId()
-    setSeries((prev) =>
+    return setSeries((prev) =>
       prev.map((row) =>
         row.id === item.id ? appendPendingRound(row, nextId) : row,
       ),
     )
-    return nextId
   }
 
-  function markDone(seriesId: string) {
-    setSeries((prev) =>
+  async function markDone(seriesId: string) {
+    const saved=await setSeries((prev) =>
       prev.map((item) =>
         item.id === seriesId ? { ...item, status: 'done' } : item,
       ),
     )
-    if (schedulingSeriesId === seriesId) resetCompose()
-    setBoardTab('done')
+    if(saved){if (schedulingSeriesId === seriesId) resetCompose();setBoardTab('done')}
+    return saved
   }
 
-  function markInProgress(seriesId: string) {
-    setSeries((prev) =>
+  async function markInProgress(seriesId: string) {
+    const saved=await setSeries((prev) =>
       prev.map((item) =>
         item.id === seriesId ? { ...item, status: 'in_progress' } : item,
       ),
     )
-    setBoardTab('in_progress')
+    if(saved) setBoardTab('in_progress')
+    return saved
   }
 
-  function deleteSeriesForever(item: MeetingSeries) {
+  async function deleteSeriesForever(item: MeetingSeries) {
     if (!canDeleteMeetingSeries(item, host, isAdmin)) return
-    revokeMeetingSeriesFiles(item)
-    setSeries((prev) => prev.filter((row) => row.id !== item.id))
+    const saved=await setSeries((prev) => prev.filter((row) => row.id !== item.id))
+    if(!saved) return
+    if(simulating) revokeMeetingSeriesFiles(item)
     if (schedulingSeriesId === item.id) resetCompose()
     if (detail?.seriesId === item.id) setDetail(null)
     setDeleteSeriesId(null)
   }
 
+  if(meetings.loading) return <p role="status" className="p-4 text-sm text-muted-foreground">회의를 불러오는 중입니다.</p>
+  if(!rooms.length) return <div role="alert" className="space-y-2 p-4 text-sm"><p>{meetings.error ?? '등록된 회의실이 없습니다.'}</p><Button onClick={()=>void meetings.refresh()}>다시 불러오기</Button></div>
   return (
-    <div className="space-y-4">
-      <PageHeader title="회의" />
+    <fieldset disabled={saving} className="min-w-0 space-y-4" aria-busy={saving}>
+      {showHeading ? <PageHeader title="회의" /> : null}
+      {simulating ? <p role="status" className="text-xs text-amber-800">화면 테스트 중입니다. 변경 내용은 실제 회의에 저장되지 않습니다.</p> : <p role="status" className="text-xs text-muted-foreground">{saving?'회의를 저장하는 중입니다.':'준비 회의는 비공개입니다. 일정을 확정하면 멤버에게 참석 요청과 내용을 공유합니다.'}</p>}
+      {meetings.error ? <p role="alert" className="rounded-lg border border-danger/30 p-3 text-sm text-danger">{meetings.error}</p> : null}
+      {membersQuery.error ? <p role="alert" className="text-sm text-danger">참석자 목록을 불러오지 못했습니다. {membersQuery.error.message}</p> : null}
 
       <Card>
         <CardContent className="space-y-3 p-4">
-          <div>
+          <div className="flex items-center justify-between gap-3">
             <p className="text-sm font-medium">진행 회의</p>
+            <Button type="button" size="sm" onClick={openCreate}>
+              회의 생성
+            </Button>
           </div>
           <div
             role="tablist"
@@ -596,7 +529,7 @@ export function CompanyMeetingsPage() {
           {boardSeries.length === 0 ? (
             <p className="py-6 text-center text-sm text-muted-foreground">
               {boardTab === 'in_progress'
-                ? '진행 중인 회의가 없습니다. 아래에서 주제, 회의 시간, 멤버를 정한 뒤 날짜를 누르세요.'
+                ? '진행 중인 회의가 없습니다. 회의 생성에서 주제·호스트·멤버를 정해 준비를 시작하세요.'
                 : '완료한 회의가 없습니다.'}
             </p>
           ) : (
@@ -605,15 +538,18 @@ export function CompanyMeetingsPage() {
                 const rounds = [...item.rounds].sort(
                   (left, right) => left.round - right.round,
                 )
+                const responseRounds = item.status === 'in_progress' && item.phase !== 'preparing' && item.members.some(person => person.id === host.id)
+                  ? rounds.filter(round => Boolean(round.confirmed ?? round.startsAt)) : []
                 return (
                   <li
                     key={item.id}
                     className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5"
                   >
-                    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-1">
-                      <p className="shrink-0 text-sm font-medium">
+                    <div className="flex min-w-0 flex-[1_1_26rem] flex-wrap items-center gap-x-3 gap-y-1">
+                      <p className="max-w-full break-words text-sm font-medium">
                         {item.title}
                       </p>
+                      {item.phase==='preparing'?<Badge variant="outline">준비 중 · 멤버 비공개</Badge>:null}
                       {item.status === 'done' ? (
                         <span className="shrink-0 text-xs text-muted-foreground">
                           {formatSeriesDateSpan(item) || '일정 없음'}
@@ -623,27 +559,7 @@ export function CompanyMeetingsPage() {
                         aria-hidden
                         className="hidden h-4 w-px bg-border sm:block"
                       />
-                      <div className="flex min-w-0 flex-wrap items-center gap-1">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[11px] font-medium text-sky-950">
-                          <span
-                            aria-hidden
-                            className="size-1.5 rounded-full bg-sky-600"
-                          />
-                          {item.host.name}
-                        </span>
-                        {item.members.map((person) => (
-                          <span
-                            key={person.id}
-                            className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
-                          >
-                            <span
-                              aria-hidden
-                              className="size-1.5 rounded-full bg-muted-foreground/50"
-                            />
-                            {person.name}
-                          </span>
-                        ))}
-                      </div>
+                      <MeetingAttendance series={item} round={[...item.rounds].reverse().find(row=>row.confirmed ?? row.startsAt)} actorId={host.id} simulating={simulating} compact onChat={chatWith} onGroup={()=>groupChat(item)}/>
                       <span
                         aria-hidden
                         className="hidden h-4 w-px bg-border sm:block"
@@ -651,6 +567,7 @@ export function CompanyMeetingsPage() {
                       <div className="flex flex-wrap items-center gap-1 text-xs">
                         {rounds.map((round, index) => {
                           const gapDays = roundGapDays(rounds, round)
+                          const caption = roundListCaption(round, item.members.map((person) => person.id))
                           return (
                           <span
                             key={round.id}
@@ -668,13 +585,15 @@ export function CompanyMeetingsPage() {
                               type="button"
                               title={
                                 gapDays == null
-                                  ? undefined
+                                  ? caption ?? undefined
                                   : formatRoundGapHint(gapDays)
                               }
                               className={cn(
-                                'rounded px-1 py-0.5 font-medium hover:bg-muted',
-                                isPendingRound(round) &&
+                                'shrink-0 whitespace-nowrap rounded px-1 py-0.5 text-center font-medium hover:bg-muted',
+                                caption &&
                                   'border border-dashed border-foreground/25 text-muted-foreground',
+                                caption === '참석 불가' && 'border-danger/40 text-danger',
+                                caption === '참석 응답 대기' && 'border-amber-400/70 text-amber-800',
                               )}
                               onClick={() =>
                                 setDetail({
@@ -692,7 +611,8 @@ export function CompanyMeetingsPage() {
                                   {formatRoundGapLabel(gapDays)}
                                 </span>
                               )}
-                              {formatRoundListLabel(round)}
+                              <span className="block">{formatRoundLabel(round.round)} 회의</span>
+                              {caption ? <span className="block text-[10px] font-normal">{caption}</span> : null}
                             </button>
                           </span>
                           )
@@ -728,6 +648,12 @@ export function CompanyMeetingsPage() {
                         </Button>
                       ) : null}
                     </div>
+                    {responseRounds.length > 0 ? <div className="w-full space-y-2">
+                      {responseRounds.map(round => <MeetingResponse key={round.id} round={round} actorId={host.id}
+                        scheduleLabel={`${formatRoundLabel(round.round)} · ${round.startsAt.slice(0,10)} · ${formatBookedTimeRange(round.startsAt,round.durationMinutes ?? item.durationMinutes)} · ${meetingRoomName(round.roomId)}`}
+                        onRespond={status => respond(item,round,status)}/>
+                      )}
+                    </div> : null}
                   </li>
                 )
               })}
@@ -736,9 +662,29 @@ export function CompanyMeetingsPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardContent className="space-y-4 p-4">
-          <div ref={composeSectionRef} className="space-y-3">
+      {composeOpen ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            className="absolute inset-0 bg-black/40"
+            aria-label="회의 생성 닫기"
+            onClick={() => setComposeOpen(false)}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="meeting-create-title"
+            className={cn('relative z-10 max-h-[92vh] w-full overflow-auto rounded-xl border border-border bg-card p-5 shadow-lg',schedulingSeries?'max-w-6xl':'max-w-3xl')}
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <h2 id="meeting-create-title" className="text-base font-semibold">
+                {schedulingSeries ? '회의 일정 확정' : '회의 생성'}
+              </h2>
+              <Button type="button" size="sm" variant="outline" onClick={() => setComposeOpen(false)}>
+                닫기
+              </Button>
+            </div>
+            <div ref={composeSectionRef} className="space-y-3">
             <div className="flex flex-wrap items-end gap-3">
               <label className="min-w-[16rem] flex-1 space-y-1">
                 <span className="text-xs font-medium">회의 주제</span>
@@ -756,7 +702,7 @@ export function CompanyMeetingsPage() {
                   onChange={(event) => setTitle(event.target.value)}
                 />
               </label>
-              <label className="w-36 space-y-1">
+              {schedulingSeries ? <label className="w-36 space-y-1">
                 <span className="text-xs font-medium">회의 시간</span>
                 <Select
                   ref={durationRef}
@@ -780,7 +726,7 @@ export function CompanyMeetingsPage() {
                     </option>
                   ))}
                 </Select>
-              </label>
+              </label> : null}
               {schedulingSeries ? (
                 <Button
                   type="button"
@@ -801,9 +747,9 @@ export function CompanyMeetingsPage() {
             <div className="grid items-start gap-3 md:grid-cols-[12rem_minmax(0,1fr)]">
               <div className="space-y-1">
                 <p className="text-xs font-medium">호스트</p>
-                <div className="flex h-9 items-center rounded-md border border-border bg-card px-3 text-sm">
-                  {meetingPersonLabel(schedulingSeries?.host ?? host)} · 나
-                </div>
+                <Select aria-label="호스트" value={composeHost.id} disabled={Boolean(schedulingSeries)} onChange={event=>{setSelectedHostId(event.target.value);setMembers(rows=>rows.filter(person=>person.id!==event.target.value))}}>
+                  {directory.map(person=><option key={person.id} value={person.id}>{meetingPersonLabel(person)}{person.id===host.id?' · 나':''}</option>)}
+                </Select>
               </div>
 
               <div className="space-y-1">
@@ -880,15 +826,24 @@ export function CompanyMeetingsPage() {
                     </div>
                     {memberPickerOpen ? (
                       <div className="rounded-md border border-border bg-card p-2">
-                        <div className="flex gap-3 overflow-x-auto pb-1">
-                          {departmentGroups.map((group) => (
+                        <div className="flex overflow-x-auto pb-1">
+                          {departmentGroups.map((group, index) => (
                             <div
                               key={group.id}
-                              className="min-w-[8.5rem] shrink-0"
+                              className={cn(
+                                'min-w-[8.5rem] shrink-0 px-3',
+                                index > 0 && 'border-l border-border',
+                              )}
                             >
-                              <p className="mb-1 text-xs font-medium">
+                              <button
+                                type="button"
+                                className="mb-1 w-full rounded px-1 py-0.5 text-left text-xs font-medium hover:bg-muted"
+                                aria-pressed={group.members.every((person) => selectedMemberIds.includes(person.id))}
+                                aria-label={`${group.name} 전체 선택`}
+                                onClick={() => toggleDepartment(group.members)}
+                              >
                                 {group.name}
-                              </p>
+                              </button>
                               <ul className="space-y-0.5">
                                 {group.members.map((person) => {
                                   const selected = selectedMemberIds.includes(
@@ -899,6 +854,7 @@ export function CompanyMeetingsPage() {
                                       <button
                                         type="button"
                                         aria-pressed={selected}
+                                        aria-label={`${person.name}${person.position ? ` ${person.position}` : ''} 진행 중 ${ongoingMeetingCounts.get(person.id) ?? 0}건`}
                                         className={cn(
                                           'flex w-full flex-col rounded px-1.5 py-1 text-left text-xs transition-colors',
                                           selected
@@ -922,6 +878,16 @@ export function CompanyMeetingsPage() {
                                             {person.position}
                                           </span>
                                         ) : null}
+                                        <span
+                                          className={cn(
+                                            'text-[10px]',
+                                            selected
+                                              ? 'text-background/70'
+                                              : 'text-muted-foreground',
+                                          )}
+                                        >
+                                          진행 중 {ongoingMeetingCounts.get(person.id) ?? 0}
+                                        </span>
                                       </button>
                                     </li>
                                   )
@@ -936,32 +902,43 @@ export function CompanyMeetingsPage() {
                 )}
               </div>
             </div>
+            {schedulingSeries ? <MeetingSchedulePicker rooms={rooms} value={scheduleChoice} onChange={setScheduleChoice} durationMinutes={composeDuration} attendees={attendees} seriesId={schedulingSeries.id}
+              roundId={schedulingRoundId ?? findPendingRound(schedulingSeries)?.id} error={meetings.error}
+              onConfirm={()=>bookSlot(scheduleChoice.roomId,scheduleChoice.dateKey,scheduleChoice.clock)}/> : null}
+            <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
+              <p className="text-xs text-muted-foreground">{schedulingSeries?'일정을 확정하면 멤버에게 참석 요청이 전달됩니다. 일정 변경 시 응답이 초기화됩니다.':'준비 중에는 호스트와 생성자만 볼 수 있습니다. 안내·자료를 준비한 뒤 일정을 확정하세요.'}</p>
+              {!schedulingSeries?<Button type="button" onClick={()=>void createDraft()}>준비 회의 생성</Button>:null}
+            </div>
           </div>
+        </div>
+      </div>
+      ) : null}
 
-          <div>
-            <p className="text-sm font-medium">회의실 일정</p>
-          </div>
+      <Card>
+        <CardContent className="space-y-4 p-4">
+          <p className="text-sm font-medium">회의실 일정</p>
 
           <RoomScheduleBlock
-            rooms={MEETING_ROOMS}
+            rooms={rooms}
             roomId={selectedRoomId}
             weeks={weeks}
             occupants={occupants}
-            composeReady={composeReady}
+            composeReady={false}
             durationMinutes={slotDurationMinutes}
             attendees={attendees}
             attendance={EMPTY_ATTENDANCE}
             now={now}
+            readOnly
             onSelectRoom={setSelectedRoomId}
-            onNeedCompose={showComposeGaps}
-            onPickDay={(roomId, dateKey) => setPicker({ roomId, dateKey })}
+            onNeedCompose={() => undefined}
+            onPickDay={() => undefined}
             onShiftRange={(direction) =>
               setRangeFromKey((current) =>
                 shiftMeetingFromKey(current ?? todayKey, direction),
               )
             }
             currentUserId={host.id}
-            onRemoveRound={removeRound}
+            onRemoveRound={() => undefined}
           />
         </CardContent>
       </Card>
@@ -972,10 +949,14 @@ export function CompanyMeetingsPage() {
           series={detailSeries}
           round={detailRound}
           uploader={host}
-          onClose={() => setDetail(null)}
-          onSave={(notes) => {
+          simulating={simulating}
+          onRefresh={meetings.refresh}
+          attendance={<MeetingAttendance series={detailSeries} round={detailRound} actorId={host.id} simulating={simulating} onChat={chatWith} onGroup={()=>groupChat(detailSeries)} onRespond={status=>respond(detailSeries,detailRound,status)}/> }
+          saveError={meetings.error}
+          onClose={closeDetail}
+          onSave={async (notes,revision) => {
             const roundId = detailRound.id
-            setSeries((prev) =>
+            const saved=await setSeries((prev) =>
               prev.map((item) =>
                 item.id === detailSeries.id
                   ? {
@@ -986,23 +967,21 @@ export function CompanyMeetingsPage() {
                     }
                   : item,
               ),
-            )
+            {id:detailSeries.id,revision})
+            return saved ? meetings.currentRevision(detailSeries.id) : null
           }}
-          onScheduleNext={() => {
-            planNextRound(detailSeries)
-            setDetail(null)
+          onScheduleNext={async () => {
+            if(await planNextRound(detailSeries)) closeDetail()
           }}
           onBookTime={() => {
-            scheduleNextRound(detailSeries)
-            setDetail(null)
+            scheduleNextRound(detailSeries,detailRound.id)
+            closeDetail()
           }}
-          onMarkDone={() => {
-            markDone(detailSeries.id)
-            setDetail(null)
+          onMarkDone={async () => {
+            if(await markDone(detailSeries.id)) closeDetail()
           }}
-          onReopen={() => {
-            markInProgress(detailSeries.id)
-            setDetail(null)
+          onReopen={async () => {
+            if(await markInProgress(detailSeries.id)) closeDetail()
           }}
         />
       ) : null}
@@ -1017,9 +996,10 @@ export function CompanyMeetingsPage() {
           occupants={pickerOccupants}
           now={now}
           onClose={() => setPicker(null)}
-          onBook={(clock) =>
-            bookSlot(picker.roomId, picker.dateKey, clock)
-          }
+          onBook={(clock) => {
+            setScheduleChoice({roomId:picker.roomId,dateKey:picker.dateKey,clock})
+            setPicker(null);setComposeOpen(true)
+          }}
         />
       ) : null}
 
@@ -1030,7 +1010,7 @@ export function CompanyMeetingsPage() {
           onConfirm={() => deleteSeriesForever(deleteSeries)}
         />
       ) : null}
-    </div>
+    </fieldset>
   )
 }
 
@@ -1179,6 +1159,7 @@ function RoomScheduleBlock({
   onShiftRange,
   onRemoveRound,
   currentUserId,
+  readOnly = false,
 }: {
   rooms: readonly MeetingRoom[]
   roomId: string
@@ -1195,6 +1176,7 @@ function RoomScheduleBlock({
   onShiftRange: (direction: -1 | 1) => void
   onRemoveRound: (roundId: string) => void
   currentUserId: string
+  readOnly?: boolean
 }) {
   const room = rooms.find((item) => item.id === roomId) ?? rooms[0]
   const tone = meetingRoomTone(room.id)
@@ -1301,8 +1283,8 @@ function RoomScheduleBlock({
                 const isPast = dayState.blocks.some(
                   (block) => block.type === 'past',
                 )
-                const canOpen = dayState.available || isPast
-                const needsCompose = !composeReady && !isPast
+                const canOpen = !readOnly && (dayState.available || isPast)
+                const needsCompose = !readOnly && !composeReady && !isPast
                 const reason = formatDayBlockLabel(dayState.blocks)
                 return (
                   <td
@@ -1312,7 +1294,9 @@ function RoomScheduleBlock({
                       isPast ? 'bg-muted/70' : tone.cell,
                       canOpen || needsCompose
                         ? 'cursor-pointer'
-                        : 'cursor-not-allowed',
+                        : readOnly
+                          ? 'cursor-default'
+                          : 'cursor-not-allowed',
                       day.isToday && 'shadow-[inset_0_0_0_2px] shadow-emerald-500',
                     )}
                     onClick={() => {
@@ -1325,9 +1309,11 @@ function RoomScheduleBlock({
                   >
                     <button
                       type="button"
-                      disabled={!canOpen && !needsCompose}
+                      disabled={!readOnly && !canOpen && !needsCompose}
                       title={
-                        isPast
+                        readOnly
+                          ? `${room.name} ${day.month}/${day.day}`
+                          : isPast
                           ? `${room.name} ${day.month}/${day.day} 지난 회의 보기`
                           : dayState.available
                             ? `${room.name} ${day.month}/${day.day} 9–19시 보기`
@@ -1335,11 +1321,12 @@ function RoomScheduleBlock({
                               ? '빠진 항목을 먼저 정하세요'
                               : reason || '이 날은 고를 수 없습니다'
                       }
-                      aria-label={`${room.name} ${day.month}/${day.day} ${
-                        isPast ? '지난 회의 보기' : '9–19시 보기'
+                      aria-label={`${room.name} ${day.month}/${day.day}${
+                        readOnly ? '' : isPast ? ' 지난 회의 보기' : ' 9–19시 보기'
                       }`}
                       className={cn(
                         'flex w-full flex-col items-center justify-center rounded px-1 py-1 text-center',
+                        readOnly && 'cursor-default',
                         dayState.available && 'hover:bg-emerald-100/70',
                         needsCompose && 'hover:bg-amber-100/70',
                         isPast && 'hover:bg-muted',
@@ -1381,7 +1368,7 @@ function RoomScheduleBlock({
                             chipClasses.get(item.id) ?? 'bg-sky-200 text-sky-950'
                           }
                           trailing={
-                            canRemoveBookedMeeting(item, { id: currentUserId }) ? (
+                            !readOnly && canRemoveBookedMeeting(item, { id: currentUserId }) ? (
                               <button
                                 type="button"
                                 className="shrink-0 rounded p-0.5 hover:bg-black/10"
@@ -1487,7 +1474,7 @@ function MeetingTimePickerDialog({
   }, [])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <button
         type="button"
         className="absolute inset-0 bg-black/40"
@@ -1655,6 +1642,10 @@ function MeetingDetailDrawer({
   series,
   round,
   uploader,
+  simulating,
+  onRefresh,
+  attendance,
+  saveError,
   onClose,
   onSave,
   onScheduleNext,
@@ -1665,22 +1656,30 @@ function MeetingDetailDrawer({
   series: MeetingSeries
   round: MeetingRound
   uploader: MeetingPerson
+  simulating: boolean
+  attendance: ReactNode
+  onRefresh: () => Promise<void>
+  saveError?: string | null
   onClose: () => void
   onSave: (notes: {
     prepMaterials: MeetingPrepFile[]
     content: string
     result: string
-  }) => void
-  onScheduleNext: () => void
+  },revision:number) => Promise<number|null>
+  onScheduleNext: () => Promise<void>
   onBookTime: () => void
-  onMarkDone: () => void
-  onReopen: () => void
+  onMarkDone: () => Promise<void>
+  onReopen: () => Promise<void>
 }) {
   const pending = isPendingRound(round)
+  const isHost=series.host.id===uploader.id
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [prepMaterials, setPrepMaterials] = useState(round.prepMaterials)
   const [content, setContent] = useState(round.content)
   const [result, setResult] = useState(round.result)
+  const [busy,setBusy]=useState(false),[operationError,setOperationError]=useState<string|null>(null)
+  const editRevision=useRef(series.revision ?? 0)
+  useEffect(()=>setPrepMaterials(round.prepMaterials),[round.prepMaterials])
   const previousRounds = useMemo(
     () =>
       [...series.rounds]
@@ -1693,45 +1692,61 @@ function MeetingDetailDrawer({
     [prepMaterials],
   )
 
-  function persistNotes(
+  async function persistNotes(
     notes?: {
       prepMaterials: MeetingPrepFile[]
       content: string
       result: string
     },
   ) {
-    onSave(notes ?? { prepMaterials, content, result })
+    const revision=await onSave(notes ?? { prepMaterials, content, result },editRevision.current)
+    if(revision===null) {setOperationError('회의를 저장하지 못했습니다. 입력 내용은 유지됩니다.');return false}
+    editRevision.current=revision
+    return true
   }
 
+  async function run(action:()=>Promise<void>) {
+    if(busy) return
+    setBusy(true);setOperationError(null)
+    try{await action()}catch(error){
+      console.warn('[meetings] 회의 상세 작업 실패',{error})
+      setOperationError(error instanceof Error?error.message:'회의 작업에 실패했습니다.')
+    }finally{setBusy(false)}
+  }
   function closeDrawer() {
-    persistNotes()
-    onClose()
+    void run(async()=>{if(await persistNotes()) onClose()})
   }
 
-  function addPrepFiles(fileList: FileList | null) {
+  async function addPrepFiles(fileList: FileList | null) {
     if (!fileList || fileList.length === 0) return
-    const next = Array.from(fileList).map((file) => ({
-      id: newMeetingId(),
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      url: URL.createObjectURL(file),
-      uploadedBy: uploader,
-    }))
-    const updated = [...prepMaterials, ...next]
-    setPrepMaterials(updated)
-    persistNotes({ prepMaterials: updated, content, result })
+    const files=Array.from(fileList)
+    await run(async()=>{
+      const next:MeetingPrepFile[]=[]
+      try {
+        for(const file of files) next.push(simulating
+          ? {id:newMeetingId(),name:file.name,size:file.size,type:file.type,url:URL.createObjectURL(file),uploadedBy:uploader}
+          : await uploadMeetingFile(round.id,file,uploader))
+      }finally{
+        // 여러 파일 중 일부만 성공해도 성공한 자료는 재조회해 보여 준다.
+        if(!simulating) await onRefresh()
+        const updated=[...prepMaterials,...next]
+        setPrepMaterials(updated)
+        if(simulating) await persistNotes({prepMaterials:updated,content,result})
+      }
+    })
   }
 
   function removePrepFile(fileId: string) {
     const found = prepMaterials.find((file) => file.id === fileId)
     if (!found || !canRemovePrepFile(found, uploader)) return
-    if (found.url.startsWith('blob:')) {
-      URL.revokeObjectURL(found.url)
-    }
-    const updated = prepMaterials.filter((file) => file.id !== fileId)
-    setPrepMaterials(updated)
-    persistNotes({ prepMaterials: updated, content, result })
+    void run(async()=>{
+      if(!simulating) await removeMeetingFile(fileId)
+      if (found.url.startsWith('blob:')) URL.revokeObjectURL(found.url)
+      const updated=prepMaterials.filter(file=>file.id!==fileId)
+      setPrepMaterials(updated)
+      if(simulating) await persistNotes({prepMaterials:updated,content,result})
+      else await onRefresh()
+    })
   }
 
   return (
@@ -1739,6 +1754,7 @@ function MeetingDetailDrawer({
       <button
         type="button"
         aria-label="닫기"
+        disabled={busy}
         className="absolute inset-0 bg-black/40"
         onClick={closeDrawer}
       />
@@ -1746,13 +1762,16 @@ function MeetingDetailDrawer({
         role="dialog"
         aria-modal="true"
         aria-labelledby="meeting-detail-title"
+        aria-busy={busy}
         className="relative z-10 flex h-full w-full max-w-lg flex-col border-l border-border bg-card shadow-xl"
       >
+        <fieldset disabled={busy} className="contents">
+        {operationError || saveError ? <div className="shrink-0 space-y-2 p-3"><p role="alert" className="text-sm text-danger">{saveError ?? operationError}</p><Button variant="outline" onClick={onClose}>저장하지 않고 닫기</Button></div> : null}
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div className="min-w-0 space-y-2">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="outline">
-                {formatMeetingDuration(series.durationMinutes)}
+                {formatMeetingDuration(round.durationMinutes ?? series.durationMinutes)}
               </Badge>
               <Badge variant={series.status === 'done' ? 'muted' : 'default'}>
                 {series.status === 'done'
@@ -1787,6 +1806,9 @@ function MeetingDetailDrawer({
         </div>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
+          {series.phase==='preparing'?<p className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">준비 중 · 호스트와 생성자만 볼 수 있습니다. 안내와 자료를 준비한 뒤 호스트가 일정을 확정하면 멤버에게 공개됩니다.</p>:null}
+          {!pending?<p className="rounded-lg bg-muted px-3 py-2 text-sm font-medium">{round.startsAt.slice(0,10)} · {formatBookedTimeRange(round.startsAt,round.durationMinutes ?? series.durationMinutes)} · {meetingRoomName(round.roomId)}</p>:null}
+          {attendance}
           {previousRounds.length > 0 ? (
             <section className="space-y-2">
               <h3 className="text-xs font-medium text-muted-foreground">
@@ -1816,6 +1838,23 @@ function MeetingDetailDrawer({
           ) : null}
           <section className="space-y-2">
             <div className="flex items-center justify-between gap-2">
+              <h3 className="text-xs font-medium text-muted-foreground">
+                {pending ? '회의 안내' : '회의 내용'}
+              </h3>
+              {series.status === 'in_progress' ? (
+                <Button type="button" size="sm" variant="outline" onClick={() => void run(async () => { await persistNotes() })}>저장</Button>
+              ) : null}
+            </div>
+            <Textarea
+              value={content}
+              rows={10}
+              placeholder="회의에서 나온 내용을 빠짐없이 적습니다."
+              aria-label={pending?'회의 안내':'회의 내용'}
+              onChange={(event) => setContent(event.target.value)}
+            />
+          </section>
+          <section className="space-y-2">
+            <div className="flex items-center justify-between gap-2">
               <div>
                 <h3 className="text-xs font-medium text-muted-foreground">
                   사전 준비 자료
@@ -1839,7 +1878,7 @@ function MeetingDetailDrawer({
                 multiple
                 className="sr-only"
                 onChange={(event) => {
-                  addPrepFiles(event.target.files)
+                  void addPrepFiles(event.target.files)
                   event.target.value = ''
                 }}
               />
@@ -1872,14 +1911,17 @@ function MeetingDetailDrawer({
                               {formatPrepFileSize(file.size)}
                             </p>
                           </div>
-                          <a
-                            href={file.url}
-                            download={file.name}
+                          <button
+                            type="button"
+                            onClick={()=>void run(async()=>{
+                              if(file.storagePath) await downloadMeetingFile(file)
+                              else {const link=document.createElement('a');link.href=file.url;link.download=file.name;link.click()}
+                            })}
                             className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted"
                             aria-label={`${file.name} 받기`}
                           >
                             <Download className="size-3.5" />
-                          </a>
+                          </button>
                           {canRemovePrepFile(file, uploader) ? (
                             <button
                               type="button"
@@ -1898,68 +1940,45 @@ function MeetingDetailDrawer({
               </div>
             )}
           </section>
-          {pending ? null : (
-            <>
-              <section className="space-y-2">
-                <h3 className="text-xs font-medium text-muted-foreground">
-                  회의 내용
-                </h3>
-                <Textarea
-                  value={content}
-                  rows={10}
-                  placeholder="회의에서 나온 내용을 빠짐없이 적습니다."
-                  aria-label="회의 내용"
-                  onChange={(event) => setContent(event.target.value)}
-                />
-              </section>
-              <section className="space-y-2">
-                <h3 className="text-xs font-medium text-muted-foreground">
-                  회의 결과
-                </h3>
-                <Textarea
-                  value={result}
-                  rows={5}
-                  placeholder="결정 사항, 담당, 기한을 적습니다."
-                  aria-label="회의 결과"
-                  onChange={(event) => setResult(event.target.value)}
-                />
-              </section>
-            </>
-          )}
+          {!pending ? <section className="space-y-2">
+            <h3 className="text-xs font-medium text-muted-foreground">
+              회의 결과
+            </h3>
+            <Textarea
+              value={result}
+              rows={5}
+              placeholder="결정 사항, 담당, 기한을 적습니다."
+              aria-label="회의 결과"
+              onChange={(event) => setResult(event.target.value)}
+            />
+          </section> : null}
         </div>
 
         {series.status === 'in_progress' ? (
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-5 py-3">
-            {pending ? (
+            <Button type="button" variant="outline" onClick={closeDrawer}>닫기</Button>
+            {isHost && !pending ? <Button type="button" variant="outline" onClick={()=>void run(async()=>{if(await persistNotes()) onBookTime()})}>일정 변경</Button>:null}
+            {isHost ? pending ? (
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => {
-                  persistNotes()
-                  onBookTime()
-                }}
+                onClick={() => void run(async()=>{if(await persistNotes()) onBookTime()})}
               >
-                회의 시간 잡기
+                일정 확정하기
               </Button>
             ) : (
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => {
-                  persistNotes()
-                  onScheduleNext()
-                }}
+                onClick={() => void run(async()=>{if(await persistNotes()) await onScheduleNext()})}
               >
                 저장하고 다음 회의 진행
               </Button>
-            )}
+            ) : null}
             <Button
               type="button"
               variant="secondary"
-              onClick={() => {
-                persistNotes()
-                onMarkDone()
-              }}
+              onClick={() => void run(async()=>{if(await persistNotes()) await onMarkDone()})}
             >
               <Check className="size-3.5" />
               회의건 종료
@@ -1970,15 +1989,13 @@ function MeetingDetailDrawer({
             <Button
               type="button"
               variant="outline"
-              onClick={() => {
-                persistNotes()
-                onReopen()
-              }}
+              onClick={() => void run(async()=>{if(await persistNotes()) await onReopen()})}
             >
               다시 진행중으로
             </Button>
           </div>
         )}
+        </fieldset>
       </div>
     </div>
   )

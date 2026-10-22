@@ -22,8 +22,8 @@ export function BrandSelectedChip({
       className={cn(
         'inline-flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs transition-colors',
         selected
-          ? 'border-foreground bg-background font-medium text-foreground'
-          : 'border-border bg-background/60 text-muted-foreground hover:bg-muted/70 hover:text-foreground',
+          ? 'border-primary bg-primary/5 font-semibold text-foreground'
+          : 'border-border bg-card text-muted-foreground hover:border-foreground/30 hover:text-foreground',
         disabled &&
           !selected &&
           'cursor-not-allowed opacity-50 hover:bg-background/60 hover:text-muted-foreground',

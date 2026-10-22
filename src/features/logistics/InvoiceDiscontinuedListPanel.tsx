@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2 } from 'lucide-react'
 import { StylePicker, formatStyleRef } from '@/components/style-picker'
@@ -22,8 +22,10 @@ import { cn, formatNumber, emptyList } from '@/lib/utils'
 
 export function InvoiceDiscontinuedListPanel({
   brandId,
+  focusId = null,
 }: {
   brandId: string
+  focusId?: string | null
 }) {
   const queryClient = useQueryClient()
   const queryKey = ['invoice-discontinued-styles', brandId] as const
@@ -37,8 +39,15 @@ export function InvoiceDiscontinuedListPanel({
   const [query, setQuery] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [messageIsError, setMessageIsError] = useState(false)
-
-  const items = listQuery.data ?? emptyList()
+  const focusedId = useRef<string | null>(null)
+  const items = listQuery.data ?? emptyList<InvoiceDiscontinuedStyle>()
+  useEffect(() => {
+    if (!focusId || focusedId.current === focusId) return
+    const item = items.find((row) => row.id === focusId)
+    if (!item) return
+    focusedId.current = focusId
+    setQuery(item.styleNo)
+  }, [focusId, items])
 
   const visible = useMemo(() => {
     const needle = query.trim().toLocaleLowerCase('ko-KR')
@@ -206,7 +215,7 @@ export function InvoiceDiscontinuedListPanel({
 
         <div className="max-h-[min(60vh,32rem)] overflow-auto rounded-lg border border-border">
           <table className="w-full min-w-[720px] text-left text-xs">
-            <thead className="sticky top-0 z-10 bg-muted/90">
+            <thead className="sticky top-0 z-10 bg-primary text-primary-foreground">
               <tr>
                 <th className="px-3 py-2 font-medium">M번호</th>
                 <th className="px-3 py-2 font-medium">상품명</th>

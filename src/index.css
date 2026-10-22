@@ -8,11 +8,11 @@
   --color-muted: #f0efeb;
   --color-muted-foreground: #6b6b6b;
   --color-border: #e5e2db;
-  --color-primary: #1a1a1a;
-  --color-primary-foreground: #fafafa;
+  --color-primary: #c60920;
+  --color-primary-foreground: #ffffff;
   --color-accent: #e8e4db;
   --color-accent-foreground: #1a1a1a;
-  --color-ring: #1a1a1a;
+  --color-ring: #c60920;
   --color-sidebar: #111111;
   --color-sidebar-foreground: #f5f5f5;
   --color-sidebar-muted: #2a2a2a;
@@ -116,6 +116,52 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+/* 공용 기본 스타일. 화면마다 따로 맞추던 것을 한 곳에서 정한다.
+   @layer base 안의 규칙은 Tailwind 클래스가 항상 이기므로 개별 화면이 덮어쓸 수 있다. */
+@layer base {
+  ::selection {
+    background: color-mix(in srgb, var(--color-primary) 18%, white);
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cbc6ba transparent;
+  }
+
+  :where(a, button, summary, [role='tab']):focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  td,
+  th {
+    font-variant-numeric: tabular-nums;
+  }
+
+  tbody tr {
+    transition: background-color 120ms ease;
+  }
+
+  tbody tr:hover {
+    background-color: color-mix(in srgb, var(--color-primary) 4%, transparent);
+  }
+}
+
+/* 모든 선택 상자에 같은 화살표를 쓴다. 브라우저 기본 화살표는 모양이 제각각이다. */
+select:not([multiple]):not([size]) {
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='none' stroke='%236b6b6b' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m4 6 4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-size: 1rem;
+  padding-right: 2rem;
+}
+
+/* 가운데에 뜨는 대화상자는 윗선을 레드로 맞춘다. */
+[role='dialog'].shadow-xl {
+  border-top: 3px solid var(--color-primary);
 }
 
 .invoice-product-list-print {

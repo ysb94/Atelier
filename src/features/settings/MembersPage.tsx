@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Navigate } from 'react-router-dom'
+import { Navigate, Link } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
@@ -26,10 +26,6 @@ import {
   canManagePersonnel,
   isCompanyReviewer,
   capabilityLabel,
-  WORK_CAPABILITIES,
-  WORK_CAPABILITY_LABEL,
-  type PersonnelScope,
-  type WorkCapability,
 } from '@/lib/company/capabilities'
 import { personNameError } from '@/lib/company/person-name'
 
@@ -57,10 +53,9 @@ function departmentCreateErrorText(error: unknown) {
 function MemberEditor({
   profile,
   departments,
-  brands,
+  brands: _brands,
   duties,
   grades,
-  canSetAdmin,
   canEditAssignment,
   onDone,
 }: {
@@ -69,7 +64,6 @@ function MemberEditor({
   brands: { id: string; name: string; nameKo: string }[]
   duties: string[]
   grades: string[]
-  canSetAdmin: boolean
   canEditAssignment: boolean
   onDone: () => void
 }) {
@@ -78,33 +72,12 @@ function MemberEditor({
   const [position, setPosition] = useState(profile.position ?? '')
   const [jobGrade, setJobGrade] = useState(profile.jobGrade ?? '')
   const [hireDate, setHireDate] = useState(profile.hireDate ?? '')
-  const [capabilities, setCapabilities] = useState<WorkCapability[]>(
-    profile.capabilities,
-  )
-  const [leadBrandIds, setLeadBrandIds] = useState(
-    profile.memberships.filter((m) => m.isLead).map((m) => m.brandId),
-  )
-  const [showStewards, setShowStewards] = useState(
-    profile.memberships.some((m) => m.isLead),
-  )
-  const [isAdmin, setIsAdmin] = useState(profile.isAdmin)
+  const capabilities = profile.capabilities
+  const leadBrandIds = profile.memberships.filter(member => member.isLead).map(member => member.brandId)
+  const isAdmin = profile.isAdmin
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const nameError = personNameError(displayName)
-
-  function toggleCapability(value: WorkCapability) {
-    setCapabilities((prev) =>
-      prev.includes(value)
-        ? prev.filter((item) => item !== value)
-        : [...prev, value],
-    )
-  }
-
-  function toggleLead(id: string) {
-    setLeadBrandIds((prev) =>
-      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
-    )
-  }
 
   return (
     <div className="mt-3 space-y-3 rounded-lg border border-border bg-muted/20 p-4">
@@ -190,65 +163,7 @@ function MemberEditor({
         ) : null}
       </div>
 
-      <div className="space-y-2">
-        <p className="text-xs font-medium">업무 역량</p>
-        <div className="grid gap-2 sm:grid-cols-2">
-          {WORK_CAPABILITIES.map((capability) => (
-            <label
-              key={capability}
-              className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
-            >
-              <input
-                type="checkbox"
-                checked={capabilities.includes(capability)}
-                onChange={() => toggleCapability(capability)}
-                disabled={busy}
-              />
-              {WORK_CAPABILITY_LABEL[capability]}
-            </label>
-          ))}
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <button
-          type="button"
-          className="text-xs font-medium text-muted-foreground underline-offset-2 hover:underline"
-          onClick={() => setShowStewards((prev) => !prev)}
-        >
-          {showStewards ? '브랜드 책임자 접기' : '브랜드 책임자 (선택)'}
-        </button>
-        {showStewards ? (
-          <div className="grid gap-2 sm:grid-cols-2">
-            {brands.map((brand) => (
-              <label
-                key={brand.id}
-                className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-sm"
-              >
-                <input
-                  type="checkbox"
-                  checked={leadBrandIds.includes(brand.id)}
-                  onChange={() => toggleLead(brand.id)}
-                  disabled={busy}
-                />
-                {brand.name} 책임자
-              </label>
-            ))}
-          </div>
-        ) : null}
-      </div>
-
-      {canSetAdmin ? (
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={isAdmin}
-            onChange={(e) => setIsAdmin(e.target.checked)}
-            disabled={busy}
-          />
-          관리자 권한
-        </label>
-      ) : null}
+      <p className="rounded-lg border border-border bg-card p-3 text-sm">기능 권한·브랜드 책임·시스템 운영 담당은 <Link className="text-primary underline" to="/settings/permissions">권한·담당자 설정</Link>에서 지정합니다. 직책과 직급을 바꿔도 지정 권한은 바뀌지 않습니다.</p>
 
       {error ? <p className="text-sm text-danger">{error}</p> : null}
 
@@ -269,7 +184,7 @@ function MemberEditor({
                 ...(profile.status === 'pending' ? { hireDate: hireDate || null } : {}),
                 capabilities,
                 leadBrandIds,
-                isAdmin: canSetAdmin ? isAdmin : false,
+                isAdmin,
                 displayName,
               })
               onDone()
@@ -347,12 +262,7 @@ export function MembersPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [filter, setFilter] = useState<'pending' | 'all'>('pending')
   const [newDeptName, setNewDeptName] = useState('')
-  const canManageMembers = canManagePersonnel({
-    status: me?.status,
-    isAdmin: me?.isAdmin,
-    position: me?.position,
-    departmentPersonnelScope: me?.departmentPersonnelScope,
-  })
+  const canManageMembers = canManagePersonnel(me)
   const canEditAssignment = canEditOrgAssignment(me)
   const canViewMembers = canManageMembers || isCompanyReviewer(me)
 
@@ -500,9 +410,6 @@ export function MembersPage() {
                     >
                       {STATUS_LABEL[member.status]}
                     </Badge>
-                    {member.isAdmin ? (
-                      <Badge variant="muted">관리자</Badge>
-                    ) : null}
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {member.email}
@@ -516,7 +423,7 @@ export function MembersPage() {
                         : ''}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    역량:{' '}
+                    이전 등록 정보(권한 아님):{' '}
                     {member.capabilities.length === 0
                       ? '-'
                       : member.capabilities.map(capabilityLabel).join(', ')}
@@ -555,7 +462,6 @@ export function MembersPage() {
                   brands={brands}
                   duties={duties}
                   grades={grades}
-                  canSetAdmin={Boolean(me?.isAdmin)}
                   canEditAssignment={canEditAssignment}
                   onDone={async () => {
                     setEditingId(null)
@@ -568,7 +474,7 @@ export function MembersPage() {
         </div>
       )}
 
-      {me?.isAdmin ? (
+      {canEditAssignment ? (
         <section className="mt-10 space-y-4">
           <div>
             <h2 className="text-lg font-semibold tracking-tight">회사 부서 추가</h2>
@@ -637,28 +543,6 @@ export function MembersPage() {
                 <Badge variant={dept.isActive ? 'outline' : 'muted'}>
                   {dept.isActive ? '사용 중' : '중지'}
                 </Badge>
-                {dept.personnelScope ? (
-                  <Badge variant="muted">직책 관리</Badge>
-                ) : null}
-                <Select
-                  className="max-w-[9rem]"
-                  aria-label={`${dept.name} 직책 관리`}
-                  value={dept.personnelScope ?? ''}
-                  onChange={async (event) => {
-                    const next = event.target.value
-                    await updateDepartment(dept.id, {
-                      personnelScope:
-                        next === 'leaders' || next === 'members'
-                          ? (next as PersonnelScope)
-                          : null,
-                    })
-                    await invalidate()
-                  }}
-                >
-                  <option value="">안 함</option>
-                  <option value="leaders">팀장·이사만</option>
-                  <option value="members">소속 전원</option>
-                </Select>
                 <div className="ml-auto flex gap-1">
                   <Button
                     type="button"

@@ -1,4 +1,5 @@
 import { createImageJob, readImageJob, openAiBackgroundImageBody, readBackgroundImage } from '../_shared/styled-image-job.ts'
+import { hasAssignedPermission } from '../_shared/assigned-permission.ts'
 import { createClient } from 'npm:@supabase/supabase-js@2.112.2'
 import { corsHeaders } from '../_shared/cors.ts'
 import { directorBody, parseDirectorPlan } from '../_shared/styled-director.ts'
@@ -75,14 +76,13 @@ Deno.serve(async (req) => {
     const { data: { user }, error } = await supabase.auth.getUser(authorization.slice(7))
     if (error || !user) return json({ ok: false, error: '다시 로그인해 주세요.' }, 401)
     userId = user.id
-    const { data: profile, error: profileError } = await supabase.from('profiles').select('status,company_id,is_admin').eq('id', user.id).maybeSingle()
+    const { data: profile, error: profileError } = await supabase.from('profiles').select('status,company_id').eq('id', user.id).maybeSingle()
     if (profileError) throw new Error('직원 정보를 확인하지 못했습니다.')
     if (profile?.status !== 'active' || profile.company_id !== COMPANY_ID) return json({ ok: false, error: '승인된 회사 직원만 사용할 수 있습니다.' }, 403)
-    if (!profile.is_admin) {
-      const { data: capability, error: capabilityError } = await supabase.from('profile_capabilities').select('capability').eq('profile_id', user.id).eq('capability', 'design').maybeSingle()
-      if (capabilityError) throw new Error('디자인 권한을 확인하지 못했습니다.')
-      if (!capability) return json({ ok: false, error: '디자인 업무 권한이 필요합니다.' }, 403)
-    }
+    const { data: grants, error: grantError } = await supabase.rpc('list_my_permission_grants')
+    if (grantError) throw new Error('지정된 디자인 권한을 확인하지 못했습니다.')
+    const designAllowed = hasAssignedPermission(grants, 'data.design', COMPANY_ID, 'brand', 'b0000000-0000-4000-8000-000000000001')
+    if (!designAllowed) return json({ ok: false, error: '디자인 업무 권한이 필요합니다.' }, 403)
     const body = await readBody(req)
     if (body.action === 'models') {
       const openaiKey = Deno.env.get('OPENAI_API_KEY')?.trim()

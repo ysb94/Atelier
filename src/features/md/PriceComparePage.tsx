@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
+import { FilterBar } from '@/components/ui/filter-bar'
 import { Input, Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList, formatCurrency } from '@/lib/utils'
@@ -85,7 +86,7 @@ export function PriceComparePage() {
         description="자사 판매가와 비교몰 가격을 한 화면에서 봅니다. 지금은 화면 구성만 있으며 실제 수집·저장은 없습니다."
       />
 
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+      <FilterBar>
         <Input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -100,12 +101,12 @@ export function PriceComparePage() {
         >
           {MALL_FILTERS.map((item) => <option key={item} value={item}>{item}</option>)}
         </Select>
-      </div>
+      </FilterBar>
 
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-left text-sm">
-            <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+            <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">M번호</th>
                 <th className="px-4 py-3 font-medium">품목명</th>

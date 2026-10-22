@@ -463,7 +463,7 @@ export function OrgChartPage({
         </div>
       ) : (
         <section className="space-y-4">
-          <div className="rounded-xl border border-border bg-card px-5 py-4">
+          <div className="rounded-xl border border-border bg-card px-5 py-4 shadow-sm">
             <h2 className="text-base font-semibold">직책과 직급 관리</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               직책은 맡은 역할, 직급은 회사 내 등급입니다. 직원에게 적용할
@@ -700,7 +700,7 @@ function MemberAssignmentTable({
   }
 
   return (
-    <article className="overflow-hidden rounded-2xl border border-border bg-card">
+    <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <div className="px-5 pt-5">
         <h2 className="flex items-center gap-2 text-base font-semibold">
           직원 배치
@@ -716,7 +716,7 @@ function MemberAssignmentTable({
       </div>
       <div className="mt-3 overflow-x-auto">
         <table className="w-full min-w-[820px] text-left text-sm">
-          <thead className="border-y border-border bg-muted/50 text-xs text-muted-foreground">
+          <thead className="border-y border-border bg-primary text-xs text-primary-foreground">
             <tr>
               <th className="px-4 py-2.5 font-medium">이름</th>
               <th className="px-4 py-2.5 font-medium">부서</th>
@@ -906,7 +906,7 @@ function AssignmentEditor({
         event.preventDefault()
         if (!mutation.isPending) onClose()
       }}
-      className="fixed inset-0 m-auto max-h-[85dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto rounded-2xl border border-border bg-card p-0 text-foreground shadow-2xl backdrop:bg-black/35 backdrop:backdrop-blur-sm"
+      className="fixed inset-0 m-auto max-h-[85dvh] w-[calc(100%-2rem)] max-w-xl overflow-y-auto rounded-xl border border-border bg-card p-0 text-foreground shadow-2xl backdrop:bg-black/35 backdrop:backdrop-blur-sm"
     >
       <form
         className="p-6"
@@ -1093,7 +1093,7 @@ function TitleCatalog({
     deleteMutation.isPending
 
   return (
-    <article className="rounded-2xl border border-border bg-card p-5">
+    <article className="rounded-xl border border-border bg-card p-5 shadow-sm">
       <h2 className="flex items-center gap-2 text-base font-semibold">
         {title}
         <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">

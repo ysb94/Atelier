@@ -2,17 +2,20 @@ import { useMemo, useState } from 'react'
 import { Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { isAttendanceExemptPosition } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useOpsDirectory } from '@/features/operations-support/ops-directory'
 import { useAttendanceStartSettings } from '@/features/operations-support/use-attendance-start-settings'
 import { ATTENDANCE_GRACE_MINUTES, forgivenClock, resolveAttendanceStart, startTone, SUGGESTED_START } from '@/features/operations-support/attendance-start-settings'
 import { memberLabel } from '@/features/operations-support/OpsStat'
+import { useAuth } from '@/lib/supabase/auth'
+import { hasPermission } from '@/lib/company/permissions'
 import '@/features/operations-support/attendance-start-settings.css'
 
-export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: string[] }) {
+export function MyAttendanceStartPanel({ departmentIds: _departmentIds }: { departmentIds: string[] }) {
   useRenderWatch('MyAttendanceStartPanel')
+  const { profile } = useAuth()
   const directory = useOpsDirectory()
+  const { members: directoryMembers, departmentName } = directory
   const schedules = useAttendanceStartSettings({ assigned: true })
   const now = new Date()
   const [year, setYear] = useState(String(now.getFullYear()))
@@ -25,8 +28,8 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
   const [message, setMessage] = useState('')
   const validYear = /^\d{4}$/.test(year) && Number(year) >= 2000 && Number(year) <= 2100
   const months = Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`)
-  const departmentSet = useMemo(() => new Set(departmentIds), [departmentIds])
-  const members = useMemo(() => directory.members.filter(member => member.departmentId && departmentSet.has(member.departmentId) && !isAttendanceExemptPosition(member.position) && (!search.trim() || `${memberLabel(member.displayName)} ${directory.departmentName(member.departmentId)}`.toLowerCase().includes(search.trim().toLowerCase()))).sort((a, b) => directory.departmentName(a.departmentId).localeCompare(directory.departmentName(b.departmentId), 'ko') || memberLabel(a.displayName).localeCompare(memberLabel(b.displayName), 'ko')), [directory.members, directory.departmentName, departmentSet, search])
+  const departmentSet = useMemo(() => new Set(directory.departments.filter(department => hasPermission(profile, 'attendance.manage', 'department', department.id)).map(department => department.id)), [directory.departments, profile])
+  const members = useMemo(() => directoryMembers.filter(member => member.departmentId && departmentSet.has(member.departmentId) && !member.attendanceExempt && (!search.trim() || `${memberLabel(member.displayName)} ${departmentName(member.departmentId)}`.toLowerCase().includes(search.trim().toLowerCase()))).sort((a, b) => departmentName(a.departmentId).localeCompare(departmentName(b.departmentId), 'ko') || memberLabel(a.displayName).localeCompare(memberLabel(b.displayName), 'ko')), [directoryMembers, departmentName, departmentSet, search])
   const visibleIds = members.map(member => member.id)
   const checkedVisible = visibleIds.filter(id => checked.includes(id))
   const allVisible = visibleIds.length > 0 && checkedVisible.length === visibleIds.length
@@ -84,9 +87,9 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
       <Button type="button" disabled={busy || unavailable || !validYear || checkedVisible.length === 0} onClick={() => void apply()}><Check size={14} />{busy ? '적용 중…' : `${Number(monthNo)}월 · ${checkedVisible.length}명 적용`}</Button>
       {graceUntil && <p className="pb-2 text-xs text-muted-foreground">{graceUntil}까지는 기준 초과로 보지 않습니다.</p>}
     </div>
-    <div className="overflow-auto rounded-xl border border-border bg-card">
+    <div className="overflow-auto rounded-xl border border-border bg-card shadow-sm">
       <table className="w-full min-w-[640px] text-left text-sm" aria-label="담당 직원 출근시간">
-        <thead className="bg-muted/40 text-xs text-muted-foreground"><tr><th className="w-12 px-4 py-3"><input type="checkbox" aria-label="표시된 직원 모두 선택" checked={allVisible} disabled={unavailable || busy || !members.length} onChange={toggleVisible} /></th><th className="px-4 py-3 font-medium">직원</th><th className="px-4 py-3 font-medium">부서</th><th className="px-4 py-3 font-medium">{Number(monthNo)}월</th></tr></thead>
+        <thead className="bg-primary text-xs text-primary-foreground"><tr><th className="w-12 px-4 py-3"><input type="checkbox" aria-label="표시된 직원 모두 선택" checked={allVisible} disabled={unavailable || busy || !members.length} onChange={toggleVisible} /></th><th className="px-4 py-3 font-medium">직원</th><th className="px-4 py-3 font-medium">부서</th><th className="px-4 py-3 font-medium">{Number(monthNo)}월</th></tr></thead>
         <tbody>
           {members.map(member => {
             const resolved = resolveAttendanceStart(schedules.index, member.id, member.departmentId, month)

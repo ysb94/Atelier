@@ -9,6 +9,7 @@ import {
 } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase/client'
+import { hasPermission } from '../company/permissions'
 import { getMyProfile, type Profile } from '@/lib/supabase/profiles'
 
 type AuthState = {
@@ -16,6 +17,7 @@ type AuthState = {
   ready: boolean
   session: Session | null
   profile: Profile | null
+  profileError: string | null
   email: string | null
   /** 프로필을 다시 읽어 게이트 화면을 갱신한다 */
   refreshProfile: () => Promise<Profile | null>
@@ -43,17 +45,19 @@ function toSignInMessage(message: string) {
   return message
 }
 
-async function loadProfileSafe(): Promise<Profile | null> {
+async function loadProfileSafe(): Promise<{ profile: Profile | null; error: string | null }> {
   try {
-    return await getMyProfile()
-  } catch {
-    return null
+    return { profile: await getMyProfile(), error: null }
+  } catch (error) {
+    console.warn('[auth] 프로필·지정 권한 조회 실패', error)
+    return { profile: null, error: '계정 정보를 불러오지 못했습니다. 신규 신청 대신 다시 불러오기를 눌러 주세요.' }
   }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
+  const [profileError, setProfileError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
 
   useEffect(() => {
@@ -71,9 +75,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (data.session) {
         const next = await loadProfileSafe()
         if (!active) return
-        setProfile(next)
+        setProfile(next.profile)
+        setProfileError(next.error)
       } else {
         setProfile(null)
+        setProfileError(null)
       }
       setReady(true)
     })
@@ -83,6 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSession(nextSession)
         if (!nextSession) {
           setProfile(null)
+          setProfileError(null)
           setReady(true)
           return
         }
@@ -90,7 +97,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         void Promise.resolve().then(async () => {
           const next = await loadProfileSafe()
           if (!active) return
-          setProfile(next)
+          setProfile(next.profile)
+          setProfileError(next.error)
           setReady(true)
         })
       },
@@ -104,8 +112,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshProfile = useCallback(async () => {
     const next = await loadProfileSafe()
-    setProfile(next)
-    return next
+    setProfile(next.profile)
+    setProfileError(next.error)
+    return next.profile
   }, [])
 
   const signInWithGoogle = useCallback(async () => {
@@ -145,6 +154,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ready,
       session,
       profile,
+      profileError,
       email: session?.user.email ?? profile?.email ?? null,
       refreshProfile,
       signInWithGoogle,
@@ -155,6 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       ready,
       session,
       profile,
+      profileError,
       refreshProfile,
       signInWithGoogle,
       signInAsDev,
@@ -192,7 +203,5 @@ export function isBrandLead(
   profile: Profile | null,
   brandId: string,
 ): boolean {
-  if (!profile || profile.status !== 'active') return false
-  if (profile.isAdmin) return true
-  return profile.memberships.some((m) => m.brandId === brandId && m.isLead)
+  return hasPermission(profile, 'brand.edit', 'brand', brandId)
 }

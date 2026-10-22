@@ -40,7 +40,7 @@ export function InvoiceProductNameComboOrderTable({
       </div>
       <div className="max-h-72 overflow-auto rounded-md border border-border">
         <table className="w-full min-w-[56rem] text-left text-xs">
-          <thead className="sticky top-0 z-10 bg-muted">
+          <thead className="sticky top-0 z-10 bg-primary text-primary-foreground">
             <tr>
               <th className="px-2 py-1.5 font-medium">주문번호</th>
               <th className="px-2 py-1.5 font-medium">쇼핑몰</th>

@@ -1,10 +1,19 @@
-/** 나중에 알림 테이블로 옮길 모양. 지금은 목업만 쓴다. */
+/** 받은 알림. 회의 참석 요청은 저장소에서 오고, 그 외 종류는 이후 알림 테이블에 맞춘다. */
 export type InboxNotificationKind =
   | 'barcode_request'
   | 'barcode_issued'
   | 'barcode_pending'
   | 'outbound_changed'
   | 'mention'
+  | 'meeting_invitation'
+
+export type MeetingNotice = {
+  roundId: string
+  scheduleVersion: number
+  status: 'pending' | 'available' | 'unavailable'
+  /** 멤버는 참석 여부를 답하고, 호스트는 불가 발생·전원 참석 가능을 확인한다. */
+  role: 'member' | 'host'
+}
 
 export type InboxNotification = {
   id: string
@@ -14,6 +23,7 @@ export type InboxNotification = {
   href: string
   createdAt: string
   readAt: string | null
+  meeting?: MeetingNotice
 }
 
 export type ChatRoomKind = 'direct' | 'group'

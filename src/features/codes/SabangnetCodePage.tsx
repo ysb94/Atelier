@@ -22,7 +22,10 @@ import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card } from '@/components/ui/card'
+import { StatTile } from '@/components/ui/stat-tile'
+import { FilterBar } from '@/components/ui/filter-bar'
+import { FilterTabs } from '@/components/ui/filter-tabs'
 import { Input, Select } from '@/components/ui/input'
 import {
   SabangnetProductStoreError,
@@ -253,7 +256,7 @@ export function SabangnetCodePage() {
   }
   function fieldWidth(field: SabangnetField) { return field.systemKey === 'code' ? 140 : field.systemKey === 'name' ? 300 : 200 }
   function fixedClass(field: SabangnetField, header = false) {
-    return field.systemKey === 'code' ? `sticky left-[40px] ${header ? 'z-30 bg-muted' : 'z-10 bg-inherit'}` : field.systemKey === 'name' ? `sticky left-[180px] border-r border-border ${header ? 'z-30 bg-muted' : 'z-10 bg-inherit'}` : ''
+    return field.systemKey === 'code' ? `sticky left-[40px] ${header ? 'z-30 bg-primary' : 'z-10 bg-inherit'}` : field.systemKey === 'name' ? `sticky left-[180px] border-r border-border ${header ? 'z-30 bg-primary' : 'z-10 bg-inherit'}` : ''
   }
   const categoryOptions = useMemo(
     () => (categoryIndex ? listCategoryFilterOptions(categoryIndex.tree) : []),
@@ -547,28 +550,17 @@ export function SabangnetCodePage() {
         />
       </div>
 
-      <div className="mb-4 flex flex-wrap gap-1.5">
-        {(
-          [
-            ['all', '전체', products.length],
-            ['linked', '연결 완료', linkedCount],
-            ['unlinked', 'M번호 미연결', unlinkedProducts.length],
-          ] as const
-        ).map(([id, label, count]) => (
-          <button
-            key={id}
-            type="button"
-            className={cn(
-              'rounded-md px-3 py-1.5 text-sm transition-colors',
-              tab === id
-                ? 'bg-foreground text-background'
-                : 'bg-muted text-muted-foreground hover:text-foreground',
-            )}
-            onClick={() => setTab(id)}
-          >
-            {label} ({formatNumber(count)})
-          </button>
-        ))}
+      <div className="mb-4">
+        <FilterTabs
+          ariaLabel="사방넷 코드 구분"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { value: 'all', label: '전체', count: products.length },
+            { value: 'linked', label: '연결 완료', count: linkedCount },
+            { value: 'unlinked', label: 'M번호 미연결', count: unlinkedProducts.length },
+          ]}
+        />
       </div>
 
       {tab === 'unlinked' ? (
@@ -581,7 +573,7 @@ export function SabangnetCodePage() {
         />
       ) : (
         <>
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+          <FilterBar>
             <Input
               className="sm:max-w-sm"
               placeholder="등록 항목, M번호, 카테고리 검색..."
@@ -622,7 +614,7 @@ export function SabangnetCodePage() {
                 ? '0건'
                 : `전체 ${formatNumber(totalCount)}건 중 ${formatNumber(rangeStart)}–${formatNumber(rangeEnd)}건`}
             </span>
-          </div>
+          </FilterBar>
 
           <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
             <p className="text-xs text-muted-foreground">코드·상품명 고정 · 행을 누르면 전체 항목과 쇼핑몰 링크 확인</p>
@@ -636,9 +628,9 @@ export function SabangnetCodePage() {
             <div className="max-h-[65vh] overflow-auto" role="region" aria-label="사방넷 코드 표" tabIndex={0}>
               <table className="w-full table-fixed text-left text-sm" style={{ minWidth: 140 + visibleFields.reduce((sum, f) => sum + fieldWidth(f), 0) + (listColumnCount - visibleFields.length - 2) * 200 }}>
                 <colgroup><col style={{ width: 40 }} />{visibleFields.map(f => <col key={f.id} style={{ width: fieldWidth(f) }} />)}{Array.from({ length: listColumnCount - visibleFields.length - 2 }, (_, i) => <col key={`extra-${i}`} style={{ width: 200 }} />)}<col style={{ width: 100 }} /></colgroup>
-                <thead className="sticky top-0 z-20 border-b border-border bg-muted text-xs text-muted-foreground">
+                <thead className="sticky top-0 z-20 border-b border-border bg-primary text-xs text-primary-foreground">
                   <tr>
-                    <th className="sticky left-0 z-30 bg-muted px-2 py-3" />
+                    <th className="sticky left-0 z-30 bg-primary px-2 py-3" />
                     {visibleFields.map((field) => (
                       <th key={field.id} className={cn('truncate px-4 py-3 font-medium', fixedClass(field, true))} title={field.label}>
                         {field.label}
@@ -973,20 +965,5 @@ function SummaryCard({
   value: string
   icon: typeof FileSpreadsheet
 }) {
-  return (
-    <Card>
-      <CardContent className="flex items-center gap-3 p-4">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-          <Icon className="size-4" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="mt-0.5 text-xl font-semibold">{value}</p>
-          <p className="truncate text-[11px] text-muted-foreground">
-            {description}
-          </p>
-        </div>
-      </CardContent>
-    </Card>
-  )
+  return <StatTile icon={Icon} label={label} value={value} hint={description} />
 }

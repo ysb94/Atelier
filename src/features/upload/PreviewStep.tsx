@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { StatTile } from '@/components/ui/stat-tile'
 import { Input } from '@/components/ui/input'
 import { FIELD_MAP } from '@/lib/import/fields'
 import { ROW_ACTION_HEADER } from '@/lib/import/row-keys'
@@ -117,7 +118,7 @@ export function PreviewStep({
       <Card className="overflow-hidden">
         <div className="max-h-125 overflow-auto">
           <table className="w-full min-w-200 text-left text-sm">
-            <thead className="sticky top-0 border-b border-border bg-muted text-xs text-muted-foreground">
+            <thead className="sticky top-0 border-b border-border bg-primary text-xs text-primary-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">행</th>
                 <th className="px-4 py-3 font-medium">품번</th>
@@ -260,18 +261,5 @@ function SummaryCard({
   value: string
   tone: 'default' | 'success' | 'danger'
 }) {
-  return (
-    <Card className="p-4">
-      <div className="text-xs text-muted-foreground">{label}</div>
-      <div
-        className={cn(
-          'mt-1 text-xl font-semibold tabular-nums',
-          tone === 'success' && 'text-success',
-          tone === 'danger' && 'text-danger',
-        )}
-      >
-        {value}
-      </div>
-    </Card>
-  )
+  return <StatTile label={label} value={value} tone={tone} />
 }

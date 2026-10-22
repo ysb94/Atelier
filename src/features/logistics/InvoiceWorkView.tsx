@@ -12,7 +12,6 @@ import {
 import { PageHeader } from '@/components/layout/PageHeader'
 
 import { Badge } from '@/components/ui/badge'
-import { Select } from '@/components/ui/input'
 
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -211,30 +210,7 @@ export function InvoiceWorkView({ model }: { model: InvoiceWorkModel }) {
     setGiftSetupTarget,
     applyGiftSourceSession,
     applyGiftSourcePersist,
-    mallCategoryLocked,
-    setMallCategoryKey,
-    mallCategories,
   } = model
-  const mallCategorySelect = (
-    <label className="block max-w-sm space-y-1.5 text-sm">
-      <span className="font-medium">출고업체 분류</span>
-      <Select
-        className="w-full"
-        aria-label="출고업체 분류"
-        value={mallCategoryKey}
-        disabled={isParsing || mallCategoryLocked || mallDialogOpen || outboundBackupBusy}
-        onChange={(event) => setMallCategoryKey(event.target.value)}
-      >
-        <option value="">분류를 선택하세요</option>
-        {mallCategories.map((category) => (
-          <option key={category.key} value={category.key}>{category.name}</option>
-        ))}
-      </Select>
-      <span className="block text-xs text-muted-foreground">
-        선택한 분류의 업체·지점·별칭으로 쇼핑몰명을 연결합니다.
-      </span>
-    </label>
-  )
   return (
     <div>
       {workspaceActive && todayStepBusyLabel ? (
@@ -248,7 +224,7 @@ export function InvoiceWorkView({ model }: { model: InvoiceWorkModel }) {
         />
       ) : null}
       <PageHeader
-        title="송장작업"
+        title="온라인 송장작업"
         description={`${brand.name} 사방넷 주문 파일을 확인하고 CJ 업로드용 엑셀로 바꾸는 작업 공간입니다.`}
       />
 
@@ -278,7 +254,6 @@ export function InvoiceWorkView({ model }: { model: InvoiceWorkModel }) {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {mallCategorySelect}
                 <div
                   role="button"
                   tabIndex={0}
@@ -406,7 +381,6 @@ export function InvoiceWorkView({ model }: { model: InvoiceWorkModel }) {
                 </div>
               </CardHeader>
               <CardContent className="space-y-5">
-                {mallCategorySelect}
                 <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   <SummaryItem
                     label="불러온 상품 행"
@@ -601,7 +575,7 @@ export function InvoiceWorkView({ model }: { model: InvoiceWorkModel }) {
                     />
                   </div>
                 ) : headerReady ? (
-                  <p className="text-sm text-warning">출고업체 분류를 선택해야 다음 단계로 갈 수 있습니다.</p>
+                  <p className="text-sm text-warning">온라인 출고업체 분류를 찾지 못했습니다.</p>
                 ) : null}
 
                 <SabangnetOrderTable
@@ -1160,8 +1134,8 @@ export function InvoiceWorkView({ model }: { model: InvoiceWorkModel }) {
                       ) : (
                         <div className="max-h-[70vh] overflow-auto rounded-lg border border-border">
                           <table className="w-full min-w-[640px] border-collapse text-xs">
-                            <thead className="sticky top-0 z-10 bg-muted/90">
-                              <tr className="text-left text-[10px] uppercase tracking-wide text-muted-foreground">
+                            <thead className="sticky top-0 z-10 bg-primary text-primary-foreground">
+                              <tr className="text-left text-[10px] uppercase tracking-wide text-primary-foreground">
                                 <th className="border-b border-border px-3 py-2">
                                   M번호
                                 </th>

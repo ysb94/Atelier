@@ -39,6 +39,10 @@ import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { FilterBar } from '@/components/ui/filter-bar'
+import { FilterTabs } from '@/components/ui/filter-tabs'
+import { SegmentProgress } from '@/components/ui/segment-progress'
+import { StatusPill } from '@/components/ui/status-pill'
 import { SelectFieldInput } from '@/components/fields/SelectFieldInput'
 import { Input, Select } from '@/components/ui/input'
 import {
@@ -132,7 +136,7 @@ function statusVariant(
   }
 }
 
-function CompletenessDots({
+function ProductCompleteness({
   style,
   fields,
   categoryLabel,
@@ -141,35 +145,11 @@ function CompletenessDots({
   fields: BrandField[]
   categoryLabel?: string
 }) {
-  return (
-    <div
-      className="flex items-center gap-1"
-      onClick={(e) => e.stopPropagation()}
-    >
-      {OWNER_PRESETS.map((owner) => {
-        const { ratio } = ownerCompleteness(style, fields, owner, {
-          categoryLabel,
-        })
-        const pct = Math.round(ratio * 100)
-        return (
-          <span
-            key={owner}
-            title={`${OWNER_LABEL[owner]} ${pct}%`}
-            className={cn(
-              'inline-block h-2 w-2 rounded-sm',
-              pct >= 100
-                ? 'bg-success'
-                : pct >= 50
-                  ? 'bg-warning'
-                  : pct > 0
-                    ? 'bg-muted-foreground/50'
-                    : 'bg-muted',
-            )}
-          />
-        )
-      })}
-    </div>
-  )
+  const segments = OWNER_PRESETS.map((owner) => ({
+    label: OWNER_LABEL[owner],
+    ratio: ownerCompleteness(style, fields, owner, { categoryLabel }).ratio,
+  }))
+  return <SegmentProgress segments={segments} />
 }
 
 function seasonListLabel(season: Season | undefined): string {
@@ -771,11 +751,11 @@ export function ProductsPage({
       .sort((a, b) => a.order - b.order)
   }, [fields, columnPreset])
 
-  const baseStyles = useMemo(() => {
+  /** 상태를 뺀 나머지 조건만 적용한 목록. 상태 탭의 건수를 여기서 센다. */
+  const scopedStyles = useMemo(() => {
     const keyword = search.trim().toLowerCase()
     return allStyles.filter((style) => {
       if (seasonId !== 'all' && style.seasonId !== seasonId) return false
-      if (statusFilter !== 'all' && style.status !== statusFilter) return false
       if (categoryMatcher && !categoryMatcher(style)) return false
       const season = seasonMap.get(style.seasonId)
       return styleMatchesSearch(
@@ -785,15 +765,35 @@ export function ProductsPage({
         categoryLabels.get(style.id),
       )
     })
-  }, [
-    allStyles,
-    search,
-    seasonId,
-    statusFilter,
-    categoryMatcher,
-    categoryLabels,
-    seasonMap,
-  ])
+  }, [allStyles, search, seasonId, categoryMatcher, categoryLabels, seasonMap])
+
+  const baseStyles = useMemo(
+    () =>
+      statusFilter === 'all'
+        ? scopedStyles
+        : scopedStyles.filter((style) => style.status === statusFilter),
+    [scopedStyles, statusFilter],
+  )
+
+  const statusCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const style of scopedStyles) {
+      counts.set(style.status, (counts.get(style.status) ?? 0) + 1)
+    }
+    return counts
+  }, [scopedStyles])
+
+  const statusTabs = useMemo(
+    () => [
+      { value: 'all', label: '전체', count: scopedStyles.length },
+      ...(Object.keys(STYLE_STATUS_LABEL) as StyleStatus[]).map((status) => ({
+        value: status as string,
+        label: STYLE_STATUS_LABEL[status],
+        count: statusCounts.get(status) ?? 0,
+      })),
+    ],
+    [scopedStyles.length, statusCounts],
+  )
 
   /** 지금 보고 있는 범위에서 부서 항목별 미입력 건수 */
   const emptyCounts = useMemo(() => {
@@ -994,25 +994,27 @@ export function ProductsPage({
   )
 
   const columns = useMemo(() => {
+    const brandColumn = isCompany
+      ? [
+          columnHelper.display({
+            id: 'brand',
+            header: '브랜드',
+            cell: ({ row }) => {
+              const item = brandMap.get(row.original.brandId)
+              if (!item) return '—'
+              return (
+                <span className="flex items-center gap-2">
+                  <BrandAvatar brand={item} className="size-6" />
+                  <span>{item.name}</span>
+                </span>
+              )
+            },
+          }),
+        ]
+      : []
+
     const base = [
-      ...(isCompany
-        ? [
-            columnHelper.display({
-              id: 'brand',
-              header: '브랜드',
-              cell: ({ row }) => {
-                const item = brandMap.get(row.original.brandId)
-                if (!item) return '—'
-                return (
-                  <span className="flex items-center gap-2">
-                    <BrandAvatar brand={item} className="size-6" />
-                    <span>{item.name}</span>
-                  </span>
-                )
-              },
-            }),
-          ]
-        : []),
+      ...brandColumn,
       ...(hasImageField
         ? [
             columnHelper.display({
@@ -1064,7 +1066,29 @@ export function ProductsPage({
 
     if (columnPreset === 'all') {
       return [
-        ...base,
+        columnHelper.display({
+          id: 'product',
+          header: `${nameLabel} · ${styleNoLabel}`,
+          cell: ({ row }) => (
+            <div className="flex items-center gap-3">
+              {hasImageField ? (
+                <ProductThumb
+                  sources={resolveProductImageSources(row.original)}
+                  alt={row.original.styleNo}
+                  size={56}
+                  className="rounded-lg"
+                />
+              ) : null}
+              <div className="min-w-0">
+                <p className="font-medium leading-snug">{row.original.name}</p>
+                <span className="mt-1 inline-flex rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+                  {row.original.styleNo}
+                </span>
+              </div>
+            </div>
+          ),
+        }),
+        ...brandColumn,
         columnHelper.accessor('seasonId', {
           header: '출시 기획',
           cell: (info) => seasonListLabel(seasonMap.get(info.getValue())),
@@ -1083,19 +1107,29 @@ export function ProductsPage({
         columnHelper.accessor('status', {
           header: '상태',
           cell: (info) => (
-            <Badge variant={statusVariant(info.getValue())}>
+            <StatusPill tone={statusVariant(info.getValue())}>
               {STYLE_STATUS_LABEL[info.getValue()]}
-            </Badge>
+            </StatusPill>
           ),
         }),
         columnHelper.display({
           id: 'completeness',
           header: '완성도',
           cell: ({ row }) => (
-            <CompletenessDots
+            <ProductCompleteness
               style={row.original}
               fields={fieldsByBrand.get(row.original.brandId) ?? fields}
               categoryLabel={categoryLabels.get(row.original.id)}
+            />
+          ),
+        }),
+        columnHelper.display({
+          id: 'open',
+          header: '',
+          cell: () => (
+            <ChevronRight
+              className="size-4 text-muted-foreground"
+              aria-hidden
             />
           ),
         }),
@@ -1331,7 +1365,18 @@ export function ProductsPage({
       ) : null}
 
       {workSetEmpty ? null : (
-      <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+      <>
+      {!lockedOwner ? (
+        <div className="mb-3">
+          <FilterTabs
+            ariaLabel="상품 상태"
+            tabs={statusTabs}
+            value={statusFilter}
+            onChange={(value) => patchParams({ status: value })}
+          />
+        </div>
+      ) : null}
+      <FilterBar>
         <Input
           className="sm:max-w-xs"
           placeholder="품번, 상품명, 담당, 항목값 검색..."
@@ -1376,17 +1421,19 @@ export function ProductsPage({
             )
           })}
         </Select>
-        <Select
-          value={statusFilter}
-          onChange={(e) => patchParams({ status: e.target.value })}
-        >
-          <option value="all">전체 상태</option>
-          {(Object.keys(STYLE_STATUS_LABEL) as StyleStatus[]).map((status) => (
-            <option key={status} value={status}>
-              {STYLE_STATUS_LABEL[status]}
-            </option>
-          ))}
-        </Select>
+        {lockedOwner ? (
+          <Select
+            value={statusFilter}
+            onChange={(e) => patchParams({ status: e.target.value })}
+          >
+            <option value="all">전체 상태</option>
+            {(Object.keys(STYLE_STATUS_LABEL) as StyleStatus[]).map((status) => (
+              <option key={status} value={status}>
+                {STYLE_STATUS_LABEL[status]}
+              </option>
+            ))}
+          </Select>
+        ) : null}
         <Select
           value={categoryMatcher ? categoryFilter : 'all'}
           aria-label="카테고리 필터"
@@ -1455,7 +1502,8 @@ export function ProductsPage({
             ? '0건'
             : `전체 ${formatNumber(totalCount)}건 중 ${formatNumber(rangeStart)}–${formatNumber(rangeEnd)}건`}
         </div>
-      </div>
+      </FilterBar>
+      </>
       )}
 
       {columnPreset !== 'all' && emptyCounts.length > 0 && !workSetEmpty ? (
@@ -1537,7 +1585,7 @@ export function ProductsPage({
       <Card className="overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-left text-sm">
-            <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+            <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id}>
                   {hg.headers.map((header) => (
@@ -1652,11 +1700,17 @@ export function ProductsPage({
                       }}
                       className={cn(
                         'cursor-pointer border-b border-border last:border-0 transition-colors',
-                        isActive ? 'bg-accent/60' : 'hover:bg-muted/40',
+                        isActive ? 'bg-primary/10' : 'hover:bg-primary/5',
                       )}
                     >
                       {row.getVisibleCells().map((cell) => (
-                        <td key={cell.id} className="px-4 py-3">
+                        <td
+                          key={cell.id}
+                          className={cn(
+                            'px-4',
+                            columnPreset === 'all' ? 'py-3.5' : 'py-3',
+                          )}
+                        >
                           {flexRender(
                             cell.column.columnDef.cell,
                             cell.getContext(),

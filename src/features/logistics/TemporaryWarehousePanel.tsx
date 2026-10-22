@@ -680,9 +680,9 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
 
             <div className="overflow-x-auto rounded-lg border border-border">
               <table className="w-full min-w-[1280px] text-left text-xs">
-                <thead className="bg-muted/50 text-muted-foreground">
+                <thead className="bg-primary text-primary-foreground">
                   <tr>
-                    <th className="sticky left-0 z-10 bg-muted px-3 py-2 font-semibold text-foreground">
+                    <th className="sticky left-0 z-10 bg-primary px-3 py-2 font-semibold text-foreground">
                       박스 고유번호
                     </th>
                     <th className="px-3 py-2 font-medium">창고</th>
@@ -925,7 +925,7 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
 
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[1080px] text-left text-xs">
-          <thead className="bg-muted/50 text-muted-foreground">
+          <thead className="bg-primary text-primary-foreground">
             <tr>
               <th className="px-3 py-2 font-semibold text-foreground">
                 박스 고유번호
@@ -1397,7 +1397,7 @@ function TemporaryWarehouseSlotList({
 
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-[760px] text-left text-xs">
-          <thead className="bg-muted/50 text-muted-foreground">
+          <thead className="bg-primary text-primary-foreground">
             <tr>
               <th className="px-3 py-2 font-semibold text-foreground">
                 자리번호

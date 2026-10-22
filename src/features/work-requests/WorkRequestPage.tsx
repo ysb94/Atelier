@@ -2202,6 +2202,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     profile?.departmentName,
     profile?.position,
     profile?.capabilities,
+    profile ?? undefined,
   )
   const isDestinationMember = viewRole !== 'requester'
   const canManage = viewRole === 'manager'
@@ -2701,7 +2702,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     })
     setFlashMessage(
       needsLeadCompletionReview(request)
-        ? '완료를 요청했습니다. 팀장 확인을 기다립니다.'
+        ? '완료를 요청했습니다. 업무 관리 담당자 확인을 기다립니다.'
         : '완료를 요청했습니다. 요청자 확인을 기다립니다.',
     )
   }
@@ -2884,7 +2885,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
       return startWorkTime(next, LOCAL_SELF_ID, requestId, now)
     })
     setWorkClock(now)
-    setFlashMessage('지금 하는 업무로 장착했습니다. 팀장 화면에 바로 보입니다.')
+    setFlashMessage('지금 하는 업무로 장착했습니다. 업무 관리 담당자 화면에 바로 보입니다.')
   }
 
   function unmountCurrentWork() {
@@ -2963,7 +2964,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         className={cn(detailRequestId === request.id && 'ring-2 ring-primary')}
       >
         <CardContent className="p-5">
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto_auto] xl:items-center">
+          <div className={cn(
+            'grid gap-4 xl:items-center',
+            context === 'mine' || context === 'queue'
+              ? 'xl:grid-cols-[minmax(0,1fr)_auto_auto]'
+              : 'xl:grid-cols-[minmax(0,1fr)_28.5rem_14rem]',
+          )}>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={status.variant}>{status.label}</Badge>
@@ -2990,50 +2996,60 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 {request.values.title}
               </h3>
               <p className="mt-1 truncate text-sm text-muted-foreground">
-                {context === 'sent' ? (
-                  <>
-                    {departmentLabel(request.requesterDepartment)} →{' '}
-                    {WORK_REQUEST_CONFIG[request.owner].teamName}
-                  </>
-                ) : (
-                  <>
-                    {departmentLabel(request.requesterDepartment)} · 요청자{' '}
-                    {requesterLabel(request)}
-                  </>
-                )}{' '}
-                · {formatDateTime(request.createdAt)}
+                {context === 'sent'
+                  ? <>
+                      {departmentLabel(request.requesterDepartment)}
+                      {' · '}
+                      {new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(request.createdAt))}
+                    </>
+                  : <>
+                      {departmentLabel(request.requesterDepartment)} · 요청자{' '}
+                      {requesterLabel(request)} · {formatDateTime(request.createdAt)}
+                    </>}
               </p>
             </div>
 
-            <div className="flex w-full flex-wrap gap-x-5 gap-y-2 text-sm xl:w-auto xl:flex-nowrap">
+            <div className={cn(
+              'grid w-full gap-x-4 text-sm',
+              context === 'queue'
+                ? 'grid-cols-[5.5rem_4.5rem]'
+                : 'grid-cols-[5.5rem_minmax(0,10rem)_minmax(0,1fr)] xl:w-[28.5rem] xl:grid-cols-[5.5rem_10rem_11rem]',
+            )}>
               {context === 'queue' ? (
                 <>
-                  <div className="shrink-0">
+                  <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">요청 희망일</p>
-                    <p className="mt-1 font-medium tabular-nums">
+                    <p className="mt-1 truncate font-medium tabular-nums">
                       {formatSlashDate(request.values.dueDate)}
                     </p>
                   </div>
-                  <div className="shrink-0">
+                  <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">대화</p>
-                    <p className="mt-1 font-medium tabular-nums">
+                    <p className="mt-1 truncate font-medium tabular-nums">
                       {request.messages.length}건
                     </p>
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="shrink-0">
-                    <p className="text-xs text-muted-foreground">확정 마감</p>
-                    <p className="mt-1 font-medium tabular-nums">
+                  <div className="min-w-0">
+                    <p className="whitespace-nowrap text-xs text-muted-foreground">확정 마감</p>
+                    <p className="mt-1 truncate font-medium tabular-nums" title={formatSlashDate(dueDate)}>
                       {formatSlashDate(dueDate)}
                     </p>
                   </div>
-                  <div className="shrink-0">
-                    <p className="text-xs text-muted-foreground">
+                  <div className="min-w-0">
+                    <p className="whitespace-nowrap text-xs text-muted-foreground">
                       {context === 'mine' ? '작업 예정' : '주 담당자'}
                     </p>
-                    <p className="mt-1 font-medium">
+                    <p
+                      className="mt-1 truncate font-medium"
+                      title={context === 'mine'
+                        ? request.plannedStart
+                          ? `${formatSlashDate(requestPlannedRange(request).start)}~${formatSlashDate(requestPlannedRange(request).end)}`
+                          : '미정'
+                        : memberLabel(request.assignee)}
+                    >
                       {context === 'mine'
                         ? request.plannedStart
                           ? `${formatSlashDate(requestPlannedRange(request).start)}~${formatSlashDate(requestPlannedRange(request).end)}`
@@ -3041,11 +3057,18 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                         : memberLabel(request.assignee)}
                     </p>
                   </div>
-                  <div className="shrink-0">
-                    <p className="text-xs text-muted-foreground">
+                  <div className="min-w-0">
+                    <p className="whitespace-nowrap text-xs text-muted-foreground">
                       {context === 'mine' ? '주 담당자' : '협업자'}
                     </p>
-                    <p className="mt-1 font-medium">
+                    <p
+                      className="mt-1 truncate font-medium"
+                      title={context === 'mine'
+                        ? memberLabel(request.assignee)
+                        : request.collaborators.length > 0
+                          ? request.collaborators.map(memberLabel).join(', ')
+                          : '없음'}
+                    >
                       {context === 'mine'
                         ? memberLabel(request.assignee)
                         : request.collaborators.length > 0
@@ -3295,9 +3318,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             <>
               <Badge variant={canManage ? 'default' : 'muted'}>
                 {canManage
-                  ? `관리자 화면 · ${profile?.position || '관리자'}`
+                  ? '업무 관리 담당자 화면'
                   : isDestinationMember
-                    ? `사원 화면 · ${profile?.position || '사원'}`
+                    ? '배정받은 직원 화면'
                     : `${currentDepartment} 요청자 화면`}
               </Badge>
               {isDestinationMember ? null : (
@@ -3312,17 +3335,17 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
         <div className="mb-5 rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm">
           <span className="font-medium">
-            현재 {currentDepartment} · {profile?.position || '직급 미설정'} 기준으로{' '}
+            현재 {currentDepartment} 소속과 지정된 권한을 기준으로{' '}
             {canManage
-              ? `${config.teamName} 관리자용 접수·배정 화면`
+              ? `${config.teamName} 업무 관리 담당자의 접수·배정 화면`
               : isDestinationMember
-                ? `${config.teamName} 사원용 개인 업무 화면`
+                ? `${config.teamName} 배정 업무를 확인하는 개인 업무 화면`
                 : `${config.teamName}으로 요청하는 화면`}
             을 표시하고 있습니다.
           </span>
           <span className="ml-2 text-muted-foreground">
-            마이페이지에서 직급을 바꾸면 화면이 전환됩니다. 팀장·이사만 관리자
-            화면이고, 사원·대리·과장은 사원 화면입니다. 다른 부서에 요청하려면
+            접수·배정 화면은 직책·직급이 아니라 지정된 업무 관리 권한에 따라 표시됩니다.
+            배정받은 직원은 자신의 업무를 확인합니다. 다른 부서에 요청하려면
             그 부서의 작업 요청으로 이동하세요.
           </span>
         </div>
@@ -3479,7 +3502,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                       </Badge>
                     </div>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      사원이 완료를 요청한 업무입니다. 수락하면 요청자가
+                      배정받은 직원이 완료를 요청한 업무입니다. 수락하면 요청자가
                       결과를 확인합니다.
                     </p>
                   </div>
@@ -3631,7 +3654,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     </Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    완료를 요청한 뒤 팀장 또는 요청자 확인을 기다리는 업무입니다.
+                    완료를 요청한 뒤 업무 관리 담당자 또는 요청자 확인을 기다리는 업무입니다.
                   </p>
                   {myCompletionPendingTasks.length > 0 ? (
                     <div className="space-y-3">
@@ -3650,7 +3673,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
           ) : (
             renderEmptyState(
               '현재 배정된 업무가 없습니다.',
-              '관리자가 주 담당자 또는 협업자로 배정한 업무만 여기에 표시됩니다.',
+              '업무 관리 담당자가 주 담당자 또는 협업자로 배정한 업무만 여기에 표시됩니다.',
             )
           )
         ) : null}
@@ -4141,7 +4164,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 <CardHeader>
                   <CardTitle>미배정</CardTitle>
                   <CardDescription>
-                    팀 업무 일정표에서 사원 행으로 끌어다 놓으면 담당자와 작업
+                    팀 업무 일정표에서 구성원 행으로 끌어다 놓으면 담당자와 작업
                     예정 기간이 정해집니다.
                   </CardDescription>
                 </CardHeader>
@@ -4165,8 +4188,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     {isCompletionPending(selectedRequest.status) ? (
                       <p className="text-sm text-muted-foreground">
                         {selectedRequest.status === 'completionReview'
-                          ? '완료를 요청했습니다. 팀장 확인을 기다립니다.'
-                          : '팀장 확인이 끝났습니다. 요청자 확인을 기다립니다.'}
+                          ? '완료를 요청했습니다. 업무 관리 담당자 확인을 기다립니다.'
+                          : '업무 관리 담당자 확인이 끝났습니다. 요청자 확인을 기다립니다.'}
                       </p>
                     ) : (
                       <>
@@ -4197,8 +4220,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                           </Button>
                         ) : null}
                         <p className="text-xs text-muted-foreground">
-                          완료 요청 후 팀장이 수락하고, 요청자가 결과를
-                          확인하면 완료됩니다. 팀장이 직접 맡은 일은 바로
+                          완료 요청 후 업무 관리 담당자가 수락하고, 요청자가 결과를
+                          확인하면 완료됩니다. 업무 관리 담당자가 직접 맡은 일은 바로
                           요청자 확인으로 갑니다.
                         </p>
                       </>
@@ -4214,7 +4237,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     부서 검토
                   </CardTitle>
                   <CardDescription>
-                    {selectedConfig.teamName} 관리자가 대화로 검토한 뒤
+                    {selectedConfig.teamName} 업무 관리 담당자가 대화로 검토한 뒤
                     수락하고 일정표에서 배정합니다.
                   </CardDescription>
                 </CardHeader>

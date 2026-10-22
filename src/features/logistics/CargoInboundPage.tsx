@@ -16,6 +16,7 @@ import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { FilterBar } from '@/components/ui/filter-bar'
 import { Input } from '@/components/ui/input'
 import { CargoInboundAddPanel } from '@/features/logistics/CargoInboundAddPanel'
 import type { CargoInboundRegisterPayload } from '@/features/logistics/CargoInboundAddPanel'
@@ -119,6 +120,17 @@ function formatMonthLabel(value: string) {
   }).format(date)
 }
 
+function currentInboundMonthKey(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+  }).formatToParts(now)
+  const year = parts.find((part) => part.type === 'year')?.value ?? ''
+  const month = parts.find((part) => part.type === 'month')?.value ?? ''
+  return `${year}-${month}`
+}
+
 function groupByMonth(groups: Array<{ date: string; items: CargoInboundItem[] }>) {
   const months: Array<{
     key: string
@@ -178,9 +190,10 @@ export function CompanyCargoInboundPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [deletingId, setDeletingId] = useState<string | null>(null)
-  const [collapsedMonths, setCollapsedMonths] = useState<ReadonlySet<string>>(
-    () => new Set(),
+  const [monthOpen, setMonthOpen] = useState<ReadonlyMap<string, boolean>>(
+    () => new Map(),
   )
+  const currentMonthKey = useMemo(() => currentInboundMonthKey(), [])
   const brandIds = useMemo(() => brands.map((brand) => brand.id), [brands])
   const cargoQueryKey = companyQueryKey('cargo-inbounds', brandIds)
   const cargoQuery = useQuery({
@@ -300,11 +313,16 @@ export function CompanyCargoInboundPage() {
     () => (inboundGroups ? groupByMonth(inboundGroups) : null),
     [inboundGroups],
   )
-  function toggleMonth(key: string) {
-    setCollapsedMonths((current) => {
-      const next = new Set(current)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
+  function monthIsCollapsed(monthKey: string, monthDateKey: string) {
+    if (search.trim()) return false
+    const choice = monthOpen.get(monthKey)
+    if (choice !== undefined) return !choice
+    return monthDateKey !== currentMonthKey
+  }
+  function toggleMonth(monthKey: string, collapsed: boolean) {
+    setMonthOpen((current) => {
+      const next = new Map(current)
+      next.set(monthKey, collapsed)
       return next
     })
   }
@@ -550,7 +568,7 @@ export function CompanyCargoInboundPage() {
             })}
           </div>
 
-          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+          <FilterBar>
             <Input
               className="sm:max-w-xs"
               placeholder="선적일, 브랜드, 선박, 항구 검색..."
@@ -560,7 +578,7 @@ export function CompanyCargoInboundPage() {
             <div className="text-sm text-muted-foreground sm:ml-auto">
               {activeMeta.label} {formatNumber(rows.length)}건
             </div>
-          </div>
+          </FilterBar>
 
           <div
             role="tablist"
@@ -617,15 +635,14 @@ export function CompanyCargoInboundPage() {
             <div className="space-y-6">
               {monthGroups.map((month) => {
                 const monthKey = `${activeTab}:${month.key || 'undated'}`
-                const collapsed =
-                  !search.trim() && collapsedMonths.has(monthKey)
+                const collapsed = monthIsCollapsed(monthKey, month.key)
                 return (
                   <section key={monthKey}>
                     <h3>
                       <button
                         type="button"
                         aria-expanded={!collapsed}
-                        onClick={() => toggleMonth(monthKey)}
+                        onClick={() => toggleMonth(monthKey, collapsed)}
                         className="flex w-full items-center gap-2 text-left"
                       >
                         <ChevronDown

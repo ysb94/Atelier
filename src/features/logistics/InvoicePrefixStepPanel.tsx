@@ -427,7 +427,7 @@ export function InvoicePrefixStepPanel({
           </p>
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full min-w-180 text-left text-xs">
-              <thead className="bg-muted/60">
+              <thead className="bg-primary text-primary-foreground">
                 <tr>
                   <th className="px-3 py-2.5 font-medium">요청 건</th>
                   <th className="px-3 py-2.5 font-medium">한도 방식</th>
@@ -479,7 +479,7 @@ export function InvoicePrefixStepPanel({
           </p>
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full min-w-180 text-left text-xs">
-              <thead className="bg-muted/60">
+              <thead className="bg-primary text-primary-foreground">
                 <tr>
                   <th className="px-3 py-2.5 font-medium">M번호</th>
                   <th className="px-3 py-2.5 font-medium">제품명</th>
@@ -608,7 +608,7 @@ export function InvoicePrefixStepPanel({
         )}
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full min-w-140 text-left text-xs">
-            <thead className="bg-muted/60">
+            <thead className="bg-primary text-primary-foreground">
               <tr>
                 <th className="px-3 py-2.5 font-medium">M번호</th>
                 <th className="px-3 py-2.5 font-medium">나가는 제품</th>
@@ -675,7 +675,7 @@ export function InvoicePrefixStepPanel({
           </p>
           <div className="overflow-x-auto rounded-md border border-border bg-card">
             <table className="w-full min-w-200 text-left text-xs">
-              <thead className="bg-muted/60">
+              <thead className="bg-primary text-primary-foreground">
                 <tr>
                   <th className="px-3 py-2 font-medium">요청 건</th>
                   <th className="px-3 py-2 font-medium">요청 쇼핑몰명</th>
@@ -970,7 +970,7 @@ function RequestReviewCard({ item }: { item: PrefixReviewRequest }) {
                 </p>
               </div>
               <table className="w-full min-w-240 text-left text-xs">
-                <thead className="bg-muted/60">
+                <thead className="bg-primary text-primary-foreground">
                   <tr>
                     <th className="whitespace-nowrap px-3 py-2 font-medium">
                       구분

@@ -1,7 +1,7 @@
 import { useEffect, useId, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
-import { isCompanyManagerPosition } from '@/lib/company/capabilities'
+import { hasPermission } from '@/lib/company/permissions'
 import { useRenderWatch } from '@/lib/diagnostics'
 import type { ChatRoom } from '@/lib/inbox/types'
 import { useAuth } from '@/lib/supabase/auth'
@@ -11,9 +11,16 @@ import { ChatThread } from './ChatThread'
 import { useChatRealtime } from './use-chat-realtime'
 import { useChatRooms } from './use-chat'
 import { useChatSending } from './use-chat-sending'
+import { DeveloperPreviewBar, DeveloperPreviewPage, DeveloperPreviewProvider } from '@/components/layout/DeveloperPreview'
+import { usePagePreview } from '@/lib/company/page-preview-context'
 
 export function ChatWindowPage() {
+  return <DeveloperPreviewProvider><div className="flex h-full min-h-0 flex-col"><DeveloperPreviewBar scope="chat" /><DeveloperPreviewPage><ChatWindowContent /></DeveloperPreviewPage></div></DeveloperPreviewProvider>
+}
+
+function ChatWindowContent() {
   useRenderWatch('ChatWindowPage')
+  const preview = usePagePreview()
   const { roomId = '' } = useParams()
   const titleId = useId()
   const { profile } = useAuth()
@@ -51,7 +58,7 @@ export function ChatWindowPage() {
   if (!profile) return null
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-card">
+    <div className="flex min-h-0 flex-1 flex-col bg-card">
       {roomsQuery.isLoading ? (
         <p className="px-4 py-10 text-center text-sm text-muted-foreground">
           대화를 불러오는 중입니다.
@@ -85,7 +92,7 @@ export function ChatWindowPage() {
             title={room.title}
             userId={userId}
             myName={profile.displayName?.trim() || '나'}
-            isManager={isCompanyManagerPosition(profile.position)}
+            isManager={preview?.facts?.chatRole ? preview.facts.chatRole !== 'employee' : hasPermission(profile, 'chat.moderate', 'chat_room', room.id)}
             outgoing={sending.outgoing}
             titleId={titleId}
             onOpenInfo={() => setInfo(true)}

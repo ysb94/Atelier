@@ -521,7 +521,10 @@ console.info('PASS: 삭제·존재하지 않는 ID·잘못된 mode·생성/수�
   if(process.argv[3]) {
     const proof=JSON.parse(fs.readFileSync(process.argv[3],'utf8'))
     validateTabIdentityProof(proof,root,tabs)
-  }else assert.match(tabs, /id: tabIdFromPath\(location\.pathname\)/, '업무 탭 식별자는 pathname만 사용해야 함')
+  }else {
+    assert.match(tabs, /const pathname = isRemovedPlanningDesignProductPath\(location\.pathname\)/, '이전 경로 정규화는 pathname만 사용해야 함')
+    assert.match(tabs, /id: tabIdFromPath\(pathname\)/, '업무 탭 식별자는 정규화한 pathname만 사용해야 함')
+  }
   assert.match(page, /const tabActive = useWorkspaceTabActivity\(\)/)
   assert.match(page, /workRequestRecoverySearch\(locationSearch, resolvedView, \{\s*active: tabActive && ready,/)
   assert.match(page, /shouldListenWorkRequestEscape\(\{\s*tabActive,/)

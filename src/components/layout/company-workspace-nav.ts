@@ -1,3 +1,4 @@
+import { hasPermission } from '../../lib/company/permissions.ts'
 import type { LucideIcon } from 'lucide-react'
 import {
   canAccessBrandManagement,
@@ -38,7 +39,6 @@ import {
   Upload,
   UserRound,
   Users,
-  Video,
   Warehouse,
 } from 'lucide-react'
 
@@ -56,21 +56,14 @@ export type CompanyNavGroup = {
 
 export const companyTopNav: CompanyNavItem[] = [
   { to: '/', label: 'E&J 홈', icon: Home, end: true },
-  { to: '/work', label: '내 업무', icon: ClipboardList },
-  { to: '/settings/profile', label: '마이페이지', icon: UserRound },
+  { to: '/settings/profile', label: 'My home', icon: UserRound },
   { to: '/operations', label: '운영 현황', icon: ChartColumn },
   { to: '/products', label: '전체 상품', icon: Shirt },
+  { to: '/schedule', label: '일정', icon: CalendarDays },
+  { to: '/org-chart', label: '조직도', icon: Network },
 ]
 
 export const companyNavGroups: CompanyNavGroup[] = [
-  {
-    title: '회사',
-    items: [
-      { to: '/schedule', label: '일정', icon: CalendarDays },
-      { to: '/meetings', label: '회의', icon: Video },
-      { to: '/org-chart', label: '조직도', icon: Network },
-    ],
-  },
   {
     title: '기획',
     items: [
@@ -99,7 +92,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
     items: [
       { to: '/product-work/logistics', label: '상품 정보', icon: Boxes },
       { to: '/work-requests/logistics', label: '작업 요청', icon: ClipboardList },
-      { to: '/logistics/invoices', label: '송장작업', icon: FileSpreadsheet },
+      { to: '/logistics/invoices', label: '온라인 송장작업', icon: FileSpreadsheet },
       {
         to: '/logistics/barcode-outbound-data-entry',
         label: '(임시) 바코드 출고 데이터입력',
@@ -147,6 +140,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
   {
     title: '설정',
     items: [
+      { to: '/settings/permissions', label: '권한·담당자 설정', icon: Users },
       { to: '/settings/fields', label: '업로드 항목', icon: ListChecks },
       { to: '/settings/usage-targets', label: '출고업체', icon: Store },
       { to: '/settings/ai', label: 'AI 설정', icon: Sparkles },
@@ -177,7 +171,8 @@ export function companyNavGroupsForProfile(
       const items = showBrandManagement
         ? group.items
         : group.items.filter(item => item.to !== '/brands')
-      return items.length > 0 ? [{ ...group, items }] : []
+      const allowedItems = items.filter(item => item.to !== '/settings/permissions' || hasPermission(profile, 'permissions.manage') || hasPermission(profile, 'approvers.manage') || hasPermission(profile, 'partner.manage'))
+      return allowedItems.length > 0 ? [{ ...group, items: allowedItems }] : []
     }
     const items = [
       ...(showOperationsSupport ? group.items : []),

@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import type { RequestedConversation } from '@/lib/chat/open-conversation'
 import { useQueryClient } from '@tanstack/react-query'
 import { canUseChatWindows, openChatWindow } from '@/lib/chat/chat-window'
 import { formatChatPerson } from '@/lib/inbox/format'
@@ -24,9 +25,11 @@ export function ChatPanel({
   userId,
   myName,
   isManager,
+  canModerateRoom,
   isAdmin,
   titleId,
   onClose,
+  requestedRoom,
 }: {
   rooms: readonly ChatRoom[]
   loading: boolean
@@ -34,15 +37,20 @@ export function ChatPanel({
   userId: string
   myName: string
   isManager: boolean
+  canModerateRoom?: (roomId: string) => boolean
   isAdmin: boolean
   titleId: string
   onClose: () => void
+  requestedRoom?: RequestedConversation | null
 }) {
   const queryClient = useQueryClient()
   const sending = useChatSending(userId)
   const [view, setView] = useState<ChatView>({ kind: 'list' })
   const [listTab, setListTab] = useState<ChatListTab>('rooms')
   const [popupNotice, setPopupNotice] = useState<string | null>(null)
+  useEffect(() => {
+    if (requestedRoom) setView({kind:'thread',roomId:requestedRoom.id,fallbackTitle:requestedRoom.title})
+  }, [requestedRoom])
 
   const activeId =
     view.kind === 'thread' || view.kind === 'info' ? view.roomId : null
@@ -122,7 +130,7 @@ export function ChatPanel({
             title={title}
             userId={userId}
             myName={myName}
-            isManager={isManager}
+            isManager={canModerateRoom ? canModerateRoom(view.roomId) : isManager}
             outgoing={sending.outgoing}
             titleId={titleId}
             onBack={() => setView({ kind: 'list' })}

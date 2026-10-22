@@ -21,6 +21,8 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { FilterBar } from '@/components/ui/filter-bar'
+import { FilterTabs } from '@/components/ui/filter-tabs'
 import { Input, Select } from '@/components/ui/input'
 import {
   ProductCodeStoreError,
@@ -292,7 +294,7 @@ export function BarcodePage() {
     <div>
       <PageHeader
         title="88바코드 관리"
-        description={`${brand.name}이 직접 발급하는 88코드 마스터입니다. 업체 프리픽스는 ${barcodePrefix(brand.id)}입니다. 출고업체 연결은 업체별 코드 관리의 88코드 탭에서 합니다.`}
+        description={`${brand.name}이 직접 발급하는 88코드 마스터입니다. 업체 프리픽스는 ${barcodePrefix(brand.id)}입니다. 출고업체 연결은 업체별 코드 관리에서 합니다.`}
         actions={headerActions}
       />
 
@@ -335,31 +337,16 @@ export function BarcodePage() {
         </div>
       ) : null}
 
-      <div className="mb-4 flex flex-wrap gap-1.5">
-        <button
-          type="button"
-          onClick={() => setTab('all')}
-          className={cn(
-            'rounded-md px-3 py-1.5 text-sm transition-colors',
-            tab === 'all'
-              ? 'bg-foreground text-background'
-              : 'bg-muted text-muted-foreground hover:text-foreground',
-          )}
-        >
-          전체 ({formatNumber(codes.length)})
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab('pending')}
-          className={cn(
-            'rounded-md px-3 py-1.5 text-sm transition-colors',
-            tab === 'pending'
-              ? 'bg-foreground text-background'
-              : 'bg-muted text-muted-foreground hover:text-foreground',
-          )}
-        >
-          M번호 미지정 ({formatNumber(pendingCodes.length)})
-        </button>
+      <div className="mb-4">
+        <FilterTabs
+          ariaLabel="바코드 구분"
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { value: 'all', label: '전체', count: codes.length },
+            { value: 'pending', label: 'M번호 미지정', count: pendingCodes.length },
+          ]}
+        />
       </div>
 
       {tab === 'pending' ? (
@@ -372,7 +359,7 @@ export function BarcodePage() {
         />
       ) : (
         <>
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+          <FilterBar>
             <Input
               className="sm:max-w-sm"
               placeholder="바코드, 코드명, 구성품 품번, 출고업체 검색..."
@@ -396,12 +383,12 @@ export function BarcodePage() {
                 ? '0건'
                 : `전체 ${formatNumber(totalCount)}건 중 ${formatNumber(rangeStart)}–${formatNumber(rangeEnd)}건`}
             </div>
-          </div>
+          </FilterBar>
 
           <Card className="overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full min-w-[1040px] text-left text-sm">
-                <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+                <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
                   <tr>
                     <th className="w-8 px-4 py-3" />
                     <th className="px-4 py-3 font-medium">바코드</th>

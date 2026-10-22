@@ -183,7 +183,7 @@ export function BarcodeFieldManager({
       <CardContent className="space-y-4">
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full min-w-[680px] text-left text-sm">
-            <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+            <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
               <tr>
                 <th className="w-20 px-3 py-2 font-medium">순서</th>
                 <th className="px-3 py-2 font-medium">헤더명</th>

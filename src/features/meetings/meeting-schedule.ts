@@ -1,4 +1,4 @@
-/** 회사 회의실 일정 UI용 모델. 저장 없이 화면만 쓴다. */
+/** 회사 회의실 일정과 저장 데이터의 공통 화면 모델. */
 
 export const MEETING_WEEKDAY_LABELS = ['월', '화', '수', '목', '금'] as const
 export const MEETING_WEEKDAY_COUNT = MEETING_WEEKDAY_LABELS.length
@@ -83,6 +83,10 @@ export type DayQuarterId = 'q1' | 'q2' | 'q3' | 'q4'
 
 export type MeetingRound = {
   id: string
+  confirmed?: boolean
+  scheduleVersion?: number
+  responses?: { profileId: string; status: 'pending' | 'available' | 'unavailable' }[]
+  durationMinutes?: number
   round: number
   startsAt: string
   roomId: string
@@ -135,6 +139,18 @@ export function formatRoundListLabel(
 ): string {
   if (isPendingRound(round)) return '다음 차 예정'
   return `${formatRoundLabel(round.round)} 회의`
+}
+
+export function roundListCaption(
+  round: Pick<MeetingRound, 'startsAt' | 'content' | 'responses'>,
+  memberIds: readonly string[],
+): '회의 안내 미작성' | '일정 미확정' | '참석 응답 대기' | '참석 불가' | null {
+  if (isPendingRound(round)) return (round.content ?? '').trim() ? '일정 미확정' : '회의 안내 미작성'
+  if (memberIds.length === 0) return null
+  const statuses = memberIds.map((id) => round.responses?.find((response) => response.profileId === id)?.status ?? 'pending')
+  if (statuses.some((status) => status === 'unavailable')) return '참석 불가'
+  if (statuses.every((status) => status === 'available')) return null
+  return '참석 응답 대기'
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
@@ -190,6 +206,7 @@ export type MeetingDurationMinutes = (typeof MEETING_DURATION_MINUTES)[number]
 
 export type MeetingPrepFile = {
   id: string
+  storagePath?: string
   name: string
   size: number
   type: string
@@ -260,6 +277,9 @@ export function groupPrepMaterialsByUploader(
 
 export type MeetingSeries = {
   id: string
+  phase?: 'preparing' | 'published'
+  createdBy?: string
+  revision?: number
   title: string
   host: MeetingPerson
   members: MeetingPerson[]
@@ -512,8 +532,9 @@ export function filterSeriesForViewer(
   actor: Pick<MeetingPerson, 'id'>,
   isAdmin: boolean,
 ): MeetingSeries[] {
-  if (isAdmin) return [...series]
-  return series.filter((item) => isMeetingParticipant(item, actor))
+  return series.filter((item) => item.phase === 'preparing'
+    ? item.host.id === actor.id || item.createdBy === actor.id
+    : isAdmin || isMeetingParticipant(item, actor))
 }
 
 export function seriesToDrafts(
@@ -533,7 +554,7 @@ export function seriesToDrafts(
         seriesId: item.id,
         round: round.round,
         quarterId: round.quarterId,
-        durationMinutes: item.durationMinutes,
+        durationMinutes: round.durationMinutes ?? item.durationMinutes,
       })
     }
   }

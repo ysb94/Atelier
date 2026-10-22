@@ -11,6 +11,7 @@ import {
 } from 'lucide-react'
 import { CompanyAiAssistant } from '@/components/ai/CompanyAiAssistant'
 import { useAuth } from '@/lib/supabase/auth'
+import { useNavigationPreviewProfile } from '@/lib/company/developer-preview-context'
 import { cn } from '@/lib/utils'
 import {
   companyGroupIsActive,
@@ -75,11 +76,12 @@ export function CompanyLayout() {
 function CompanySidebar() {
   const location = useLocation()
   const { email, profile, signOut } = useAuth()
+  const navigationProfile = useNavigationPreviewProfile(profile)
   const [openTitles, setOpenTitles] = useState<Set<string>>(() => new Set())
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const navGroups = useMemo(
-    () => companyNavGroupsForProfile(profile),
-    [profile],
+    () => companyNavGroupsForProfile(navigationProfile),
+    [navigationProfile],
   )
   const flatNavItems = useMemo(
     () => [
@@ -218,7 +220,7 @@ function CompanySidebar() {
                     cn(
                       'mb-0.5 flex items-center justify-center rounded-md p-2.5 transition-colors',
                       companyNavItemActive(item.to, location.pathname, item.end)
-                        ? 'bg-sidebar-accent text-white'
+                        ? 'relative bg-sidebar-accent text-white before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-primary'
                         : 'text-white/65 hover:bg-sidebar-muted hover:text-white',
                     )
                   }
@@ -375,7 +377,7 @@ function NavItem({
           'flex items-center rounded-md transition-colors',
           collapsed ? 'justify-center p-2.5' : 'gap-2.5 px-2.5 py-2 text-sm',
           active
-            ? 'bg-sidebar-accent text-white'
+            ? 'relative bg-sidebar-accent text-white before:absolute before:left-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-r-full before:bg-primary'
             : 'text-white/65 hover:bg-sidebar-muted hover:text-white',
         )
       }

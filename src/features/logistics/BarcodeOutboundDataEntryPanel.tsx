@@ -71,8 +71,8 @@ const cellBorder = 'border-b border-r border-border/80 last:border-r-0'
 
 function EntryTableHead() {
   return (
-    <thead className="sticky top-0 z-10 bg-muted">
-      <tr className="text-xs text-muted-foreground">
+    <thead className="sticky top-0 z-10 bg-primary text-primary-foreground">
+      <tr className="text-xs text-primary-foreground">
         <th className={cn(cellBorder, 'w-24 px-3 py-2.5 font-medium')}>
           M번호
         </th>

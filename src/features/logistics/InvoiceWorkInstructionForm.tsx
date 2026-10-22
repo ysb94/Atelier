@@ -477,7 +477,7 @@ export function InvoiceWorkInstructionForm({
 
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-120 text-left text-xs">
-          <thead className="bg-muted/60">
+          <thead className="bg-primary text-primary-foreground">
             <tr>
               <th className="px-3 py-2.5 font-medium">{targetNoun}</th>
               <th className="w-16 px-3 py-2.5 font-medium">관리</th>

@@ -94,7 +94,7 @@ export function CompanyBarcodeList() {
     >
       <Card className="overflow-hidden">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+          <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
             <tr>
               <th className="px-4 py-3 font-medium">브랜드</th>
               <th className="px-4 py-3 font-medium">바코드</th>
@@ -213,7 +213,7 @@ export function CompanyInvoiceLanding() {
       </div>
       <Card className="overflow-hidden">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+          <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
             <tr>
               <th className="px-4 py-3 font-medium">브랜드</th>
               <th className="px-4 py-3 font-medium">파일</th>
@@ -305,7 +305,7 @@ export function CompanyBarcodeEntryLanding() {
       </div>
       <Card className="overflow-hidden">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+          <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
             <tr>
               <th className="px-4 py-3 font-medium">브랜드</th>
               <th className="px-4 py-3 font-medium">출고일</th>
@@ -383,7 +383,7 @@ export function CompanyBulkOutboundList() {
       </div>
       <Card className="overflow-hidden">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+          <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
             <tr>
               <th className="px-4 py-3 font-medium">브랜드</th>
               <th className="px-4 py-3 font-medium">제목</th>
@@ -467,7 +467,7 @@ export function CompanyOutboundList() {
       </p>
       <Card className="overflow-hidden">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+          <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
             <tr>
               <th className="px-4 py-3 font-medium">브랜드</th>
               <th className="px-4 py-3 font-medium">출고일</th>
@@ -573,7 +573,7 @@ export function CompanyWarehouseList() {
       </div>
       <Card className="overflow-hidden">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+          <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
             <tr>
               <th className="px-4 py-3 font-medium">브랜드</th>
               <th className="px-4 py-3 font-medium">품번</th>

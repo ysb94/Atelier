@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import {
   AtSign,
+  CalendarClock,
   Check,
   CircleAlert,
   ScanBarcode,
@@ -21,6 +22,7 @@ const KIND_ICON: Record<
   barcode_pending: { icon: CircleAlert, label: '미지정' },
   outbound_changed: { icon: Truck, label: '출고 변경' },
   mention: { icon: AtSign, label: '언급' },
+  meeting_invitation: { icon: CalendarClock, label: '회의' },
 }
 
 export function NotificationPanel({
@@ -108,37 +110,38 @@ export function NotificationPanel({
               const unread = !item.readAt
               return (
                 <li key={item.id}>
-                  <button
-                    type="button"
-                    onClick={() => onOpen(item)}
-                    className={cn(
-                      'flex w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted',
-                      unread && 'bg-primary/5',
-                    )}
-                  >
-                    <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                      <Icon className="size-4" aria-label={meta.label} />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-start justify-between gap-2">
-                        <span className="truncate text-sm font-medium">
-                          {item.title}
+                  <div className={cn(unread && 'bg-primary/5')}>
+                    <button
+                      type="button"
+                      onClick={() => onOpen(item)}
+                      className="flex w-full gap-3 px-3 py-3 text-left transition-colors hover:bg-muted"
+                    >
+                      <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
+                        <Icon className="size-4" aria-label={meta.label} />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-start justify-between gap-2">
+                          <span className="truncate text-sm font-medium">
+                            {item.title}
+                          </span>
+                          {unread ? (
+                            <span
+                              className="mt-1.5 size-2 shrink-0 rounded-full bg-danger"
+                              aria-label="안 읽음"
+                            />
+                          ) : null}
                         </span>
-                        {unread ? (
-                          <span
-                            className="mt-1.5 size-2 shrink-0 rounded-full bg-danger"
-                            aria-label="안 읽음"
-                          />
-                        ) : null}
+                        <span className="mt-0.5 block truncate text-sm text-muted-foreground">
+                          {item.body}
+                        </span>
+                        {item.kind==='meeting_invitation'?<span className="mt-1 block text-xs text-primary">{item.meeting?.role==='host'?'회의에서 멤버 응답 확인 →':'회의에서 참석 여부 응답 →'}</span>:null}
+                        <span className="mt-1 block text-[11px] text-muted-foreground">
+                          {formatInboxTime(item.createdAt)}
+                        </span>
                       </span>
-                      <span className="mt-0.5 block truncate text-sm text-muted-foreground">
-                        {item.body}
-                      </span>
-                      <span className="mt-1 block text-[11px] text-muted-foreground">
-                        {formatInboxTime(item.createdAt)}
-                      </span>
-                    </span>
-                  </button>
+                    </button>
+
+                  </div>
                 </li>
               )
             })}

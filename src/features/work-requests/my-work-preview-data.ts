@@ -27,7 +27,3 @@ export function createPreviewWork(): WorkItem[] {
     row('icons','공통 아이콘 정리','todo','정하늘','직접 추가','이번 주','self'),
   ]
 }
-export const PREVIEW_NOTICES = [
-  {id:'company',kind:'회사 공지',title:'이번 주 전체 회의 안내',author:'운영지원팀',time:'오늘 09:00',body:'이번 주 전체 회의는 목요일 오전에 진행합니다. 부서별 진행 업무와 공유할 내용을 미리 정리해 주세요.'},
-  {id:'team',kind:'팀 공지',title:'가을 시즌 작업 일정 공유',author:'디자인팀 팀장',time:'오늘 09:30',body:'가을 시즌 작업은 상세페이지와 룩북 이미지를 먼저 진행합니다. 피드백이 필요한 업무는 진행 상황과 함께 공유해 주세요.'},
-]

@@ -709,7 +709,7 @@ export function InvoicePrefixRequestForm({
 
       <div className="overflow-x-auto rounded-lg border border-border">
         <table className="w-full min-w-200 text-left text-xs">
-          <thead className="bg-muted/60">
+          <thead className="bg-primary text-primary-foreground">
             <tr>
               <th className="w-10 px-3 py-2.5">
                 <input

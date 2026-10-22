@@ -181,7 +181,7 @@ export function InvoiceItemNameRuleBulkPanel({
           {previewRows.length > 0 ? (
             <div className="max-h-72 overflow-auto rounded-lg border border-border">
               <table className="w-full min-w-[62rem] text-left text-xs">
-                <thead className="sticky top-0 border-b border-border bg-muted/60">
+                <thead className="sticky top-0 border-b border-border bg-primary text-primary-foreground">
                   <tr>
                     <th className="px-3 py-2 font-medium">행</th>
                     <th className="px-3 py-2 font-medium">범위</th>

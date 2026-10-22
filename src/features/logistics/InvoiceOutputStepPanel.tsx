@@ -501,7 +501,7 @@ export function InvoiceOutputStepPanel({
       {giftPlan.sharedQuotaPreviews.length > 0 ? (
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full min-w-180 text-left text-xs">
-            <thead className="bg-muted/60">
+            <thead className="bg-primary text-primary-foreground">
               <tr>
                 <th className="px-3 py-2.5 font-medium">요청 건</th>
                 <th className="px-3 py-2.5 font-medium">한도 방식</th>
@@ -538,7 +538,7 @@ export function InvoiceOutputStepPanel({
       {giftPlan.quotaPreviews.length > 0 ? (
         <div className="overflow-x-auto rounded-lg border border-border">
           <table className="w-full min-w-180 text-left text-xs">
-            <thead className="bg-muted/60">
+            <thead className="bg-primary text-primary-foreground">
               <tr>
                 <th className="px-3 py-2.5 font-medium">M번호</th>
                 <th className="px-3 py-2.5 font-medium">기존 확정</th>
@@ -586,7 +586,7 @@ export function InvoiceOutputStepPanel({
         <>
           <div className="max-h-[36rem] overflow-auto rounded-lg border border-border">
             <table className="w-full min-w-[980px] text-left text-xs">
-              <thead className="sticky top-0 bg-muted/80">
+              <thead className="sticky top-0 bg-primary text-primary-foreground">
                 <tr>
                   <th className="px-3 py-2.5 font-medium">구분</th>
                   <th className="px-3 py-2.5 font-medium">품목명</th>

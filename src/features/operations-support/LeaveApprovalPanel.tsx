@@ -6,6 +6,8 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { requestLabel, isFullLeave, type PersonalRequest } from '@/features/settings/personal-requests'
 import { useLeaveRequests } from './use-leave-requests'
 import { OpsPanelFrame, OpsStat } from './OpsStat'
+import { usePagePreview } from '@/lib/company/page-preview-context'
+import { previewRequestIsSelf } from '@/lib/company/relationship-preview'
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
 const LABELS = { pending: '승인 대기', approved: '승인', rejected: '반려', cancelled: '취소' }
@@ -26,6 +28,7 @@ function leaveTimeLabel(item: PersonalRequest) {
 const STATUS_CLASS = { pending: 'bg-warning/10 text-warning', approved: 'bg-success/10 text-success', rejected: 'bg-danger/10 text-danger', cancelled: 'bg-muted text-muted-foreground' }
 export function LeaveApprovalPanel({ readOnly = false }: { readOnly?: boolean }) {
   useRenderWatch('LeaveApprovalPanel')
+  const preview = usePagePreview()
   const leave = useLeaveRequests(readOnly ? 'all' : 'approvals')
   const [status, setStatus] = useState('pending')
   const [department, setDepartment] = useState('all')
@@ -45,8 +48,13 @@ export function LeaveApprovalPanel({ readOnly = false }: { readOnly?: boolean })
   const currentPage = Math.min(page, pages)
   const rows = visible.slice((currentPage - 1) * 10, currentPage * 10)
   const detail = leave.requests.find(item => item.id === selected)
+  const selfRequest = previewRequestIsSelf(detail?.employeeId === leave.userId, preview?.facts?.requestOwner)
   async function decide(next: 'approved' | 'rejected') {
-    if (readOnly || !detail || detail.status !== 'pending' || leave.busy) return
+    if (readOnly || !detail || detail.status !== 'pending' || leave.busy || selfRequest) return
+    if (detail.employeeId === leave.userId) {
+      setMessage('실제 본인 신청은 화면 테스트에서도 승인·반려할 수 없습니다. 다른 지정 승인자가 처리해야 합니다.')
+      return
+    }
     if (next === 'rejected' && !note.trim()) { setMessage('반려 사유를 입력해 주세요.'); return }
     try {
       await leave.transition.mutateAsync({ id: detail.id, status: next, note })
@@ -73,12 +81,12 @@ export function LeaveApprovalPanel({ readOnly = false }: { readOnly?: boolean })
       <p className="my-4 whitespace-pre-wrap rounded-lg bg-muted/40 p-3 text-sm">{detail.note || '신청 메모가 없습니다.'}</p>
       {detail.status === 'pending' && !readOnly ? <>
         <label className="block text-sm">처리 의견 <span className="text-muted-foreground">· 반려 시 필수</span><Textarea aria-label="신청 처리 의견" maxLength={2000} rows={2} value={note} disabled={leave.busy} onChange={event => setNote(event.target.value)} className="mt-2" placeholder="반려 사유 또는 전달할 의견을 적어 주세요."/></label>
-        {detail.employeeId === leave.userId && <p className="mt-3 text-sm text-warning">본인 신청은 다른 지정 승인자가 처리해야 합니다.</p>}
-        <div className="mt-4 flex justify-end gap-2"><Button variant="outline" disabled={leave.busy || detail.employeeId === leave.userId} onClick={() => void decide('rejected')}><X size={14}/>{leave.busy ? '처리 중…' : '반려'}</Button><Button disabled={leave.busy || detail.employeeId === leave.userId} onClick={() => void decide('approved')}><Check size={14}/>{leave.busy ? '처리 중…' : '승인'}</Button></div>
+        {selfRequest && <p className="mt-3 text-sm text-warning">본인 신청은 다른 지정 승인자가 처리해야 합니다.</p>}
+        <div className="mt-4 flex justify-end gap-2"><Button variant="outline" disabled={leave.busy || selfRequest} onClick={() => void decide('rejected')}><X size={14}/>{leave.busy ? '처리 중…' : '반려'}</Button><Button disabled={leave.busy || selfRequest} onClick={() => void decide('approved')}><Check size={14}/>{leave.busy ? '처리 중…' : '승인'}</Button></div>
       </> : detail.status === 'pending' ? <p className="text-sm text-muted-foreground">부서별 지정 승인자의 검토를 기다리고 있습니다.</p> : <p className="text-sm">{LABELS[detail.status]} · {detail.decidedByName || '처리자 미확인'}{detail.decidedAt ? ` · ${new Date(detail.decidedAt).toLocaleString('ko-KR')}` : ''}{detail.decisionNote && <span className="mt-2 block whitespace-pre-wrap">{detail.decisionNote}</span>}</p>}
     </article>}
-    <article className="overflow-hidden rounded-2xl border border-border bg-card">
-      <div className="overflow-x-auto"><table aria-label="근태 신청 목록" className="w-full min-w-[760px] text-left text-sm"><thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground"><tr>{['신청자·부서','신청 종류','일정','신청일','상태','검토'].map(label => <th key={label} className="px-4 py-3 font-medium">{label}</th>)}</tr></thead><tbody>
+    <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="overflow-x-auto"><table aria-label="근태 신청 목록" className="w-full min-w-[760px] text-left text-sm"><thead className="border-b border-border bg-primary text-xs text-primary-foreground"><tr>{['신청자·부서','신청 종류','일정','신청일','상태','검토'].map(label => <th key={label} className="px-4 py-3 font-medium">{label}</th>)}</tr></thead><tbody>
         {!rows.length ? <tr><td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">{leave.loading ? '신청을 불러오는 중…' : leave.error ? '신청 조회에 실패했습니다.' : '해당 조건의 신청이 없습니다.'}</td></tr> : rows.map(item => <tr key={item.id} className="border-b border-border/70 last:border-0"><td className="px-4 py-4"><strong className="font-medium">{item.employeeName}</strong><span className="mt-1 block text-xs text-muted-foreground">{item.departmentName}</span></td><td className="px-4 py-4">{requestLabel(item.kind)}</td><td className="px-4 py-4 tabular-nums">{leaveSpanLabel(item.from, item.to)}<span className="mt-1 block text-xs text-muted-foreground">{leaveTimeLabel(item)}</span>{item.place && <span className="mt-1 block text-xs text-muted-foreground">장소 · {item.place}</span>}</td><td className="px-4 py-4 text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleDateString('ko-KR')}</td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-xs ${STATUS_CLASS[item.status]}`}>{LABELS[item.status]}</span></td><td className="px-4 py-4"><Button size="sm" variant="outline" disabled={leave.busy} onClick={() => { setSelected(item.id); setNote(''); setMessage('') }}>{item.status === 'pending' ? '검토' : '상세'}</Button></td></tr>)}
       </tbody></table></div>
       <footer className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground"><span>{visible.length}건 · {currentPage}/{pages} 페이지</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>이전</Button><Button variant="outline" size="sm" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>다음</Button></div></footer>

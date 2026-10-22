@@ -1,10 +1,10 @@
-.company-home { --home-red: #b71e3a; --home-line: #e7e4de; --home-ink: #282b32; color: var(--home-ink); }
+.company-home { --home-red: #c60920; --home-line: #e7e4de; --home-ink: #282b32; color: var(--home-ink); }
 .company-home button:not(:disabled), .company-home a { cursor: pointer; }
 .company-home button:focus-visible, .company-home a:focus-visible, .company-home input:focus-visible { outline: 2px solid var(--home-red); outline-offset: 3px; }
-.home-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid #c8b382; }
-.home-eyebrow { margin: 0 0 8px; color: #8f7c5b; font-size: 10px; letter-spacing: .15em; font-weight: 600; }
-.home-heading h1 { font-size: 25px; font-weight: 650; letter-spacing: -.035em; margin: 0; }
-.home-subtitle { margin: 7px 0 0; font-size: 12px; color: #787b82; }
+.home-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; margin-bottom: 24px; padding-bottom: 24px; border-bottom: 1px solid var(--home-line); }
+.home-eyebrow { margin: 0 0 4px; color: var(--home-red); font-size: 11px; letter-spacing: .12em; font-weight: 600; }
+.home-heading h1 { font-size: 22px; font-weight: 700; line-height: 1.2; letter-spacing: -.025em; margin: 0; }
+.home-subtitle { margin: 7px 0 0; font-size: 13px; color: #787b82; }
  .home-profile-line { margin: 7px 0 0; color: #92918d; font-size: 10px; }
 .home-attendance-summary { flex: 0 0 370px; background: #fff; border: 1px solid var(--home-line); border-radius: 11px; padding: 14px 18px 11px; }
 .home-attendance-summary dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 13px; }
@@ -18,7 +18,7 @@
 .home-calendar { overflow: hidden; }
 .home-calendar-stage { position: relative; }
 .home-clock-in-overlay { position: absolute; inset: 0; z-index: 5; display: grid; place-items: center; background: rgba(255,255,255,.72); border-radius: 13px; }
-.home-clock-in { width: 376px; height: 376px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: var(--home-red); color: white; box-shadow: 0 18px 44px #b71e3a47; }
+.home-clock-in { width: 376px; height: 376px; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; background: var(--home-red); color: white; box-shadow: 0 18px 44px #c6092047; }
 .home-clock-in small { font-size: 20px; opacity: .85; }
 .home-clock-in strong { font-size: 64px; font-weight: 720; letter-spacing: -.04em; line-height: 1.1; }
 .home-clock-in span { margin-top: 8px; font-size: 36px; font-weight: 720; }
@@ -124,13 +124,13 @@
 
 .home-day-dialog { width: min(900px, calc(100vw - 48px)); max-height: calc(100dvh - 64px); margin: auto; padding: 0; border: 1px solid #e7e4de; border-radius: 16px; box-shadow: 0 24px 100px #161a2940; color: #282b32; background: #fff; overflow: auto; }
 .home-day-dialog::backdrop { background: #1b202860; backdrop-filter: blur(3px); }
-.home-day-dialog-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 28px 30px 22px; border-top: 4px solid #b71e3a; }
+.home-day-dialog-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 28px 30px 22px; border-top: 4px solid #c60920; }
 .home-day-dialog-header h2 { font-size: 26px; font-weight: 650; letter-spacing: -.025em; }.home-day-dialog-header h2 span { font-size: 16px; font-weight: 400; color: #8a8d93; margin-left: 5px; }.home-day-dialog-header .home-holiday { margin-left: 0; font-size: 11px; margin-top: 9px; }
 .home-dialog-close { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; background: #f5f3ef; color: #83858a; cursor: pointer; }
 .home-day-dialog-nav { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 30px; background: #faf8f5; border-block: 1px solid #e7e4de; font-size: 12px; color: #909087; }.home-day-dialog-nav strong { color: #5f6268; font-weight: 550; }.home-day-dialog-nav > div { display: flex; gap: 9px; }.home-day-dialog-nav button { display: flex; align-items: center; gap: 5px; border: 1px solid #e7e4de; background: #fff; border-radius: 6px; padding: 6px 9px; font-size: 11px; color: #696e78; cursor: pointer; }
 .home-day-dialog-body { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 30px; padding: 26px 30px 32px; min-height: 310px; }.home-day-dialog-body h3 { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 650; margin-bottom: 18px; }.home-dialog-team { border-left: 1px solid #e7e4de; padding-left: 26px; }.home-dialog-description { font-size: 11px; color: #92928c; margin: -8px 0 18px; }
 .home-dialog-event { display: flex; align-items: flex-start; gap: 15px; padding: 17px 0; border-top: 1px solid #efede8; }.home-dialog-time { font-size: 12px; color: #898983; font-variant-numeric: tabular-nums; padding-top: 2px; min-width: 45px; }.home-dialog-event > div { min-width: 0; border-left: 3px solid #b89958; padding-left: 13px; }.home-dialog-event.meeting > div { border-color: #5d88c4; }.home-dialog-event.leave > div { border-color: #78a27a; }.home-dialog-event.company > div { border-color: #b45970; }.home-dialog-event h4 { font-size: 15px; font-weight: 550; }.home-dialog-event p { font-size: 12px; color: #93928d; line-height: 1.8; margin-top: 6px; }.home-dialog-empty { padding: 28px 0; color: #9d9b96; font-size: 12px; }
-.home-day-dialog footer { padding: 15px 30px; border-top: 1px solid #e7e4de; font-size: 11px; color: #a19b90; }.home-day-dialog button:focus-visible { outline: 2px solid #b71e3a; outline-offset: 3px; }
+.home-day-dialog footer { padding: 15px 30px; border-top: 1px solid #e7e4de; font-size: 11px; color: #a19b90; }.home-day-dialog button:focus-visible { outline: 2px solid #c60920; outline-offset: 3px; }
 @media (max-width: 650px) { .home-day-dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); }.home-day-dialog-header { padding: 20px; }.home-day-dialog-header h2 { font-size: 20px; }.home-day-dialog-header h2 span { font-size: 12px; }.home-day-dialog-nav { padding: 12px 20px; flex-wrap: wrap; }.home-day-dialog-body { padding: 20px; grid-template-columns: 1fr; gap: 20px; }.home-dialog-team { padding-left: 0; border-left: 0; border-top: 1px solid #e7e4de; padding-top: 20px; }.home-day-dialog footer { padding: 14px 20px; } }
 
 .home-welcome { color: #8e8370; font-size: .8em; font-weight: 450; white-space: nowrap; }

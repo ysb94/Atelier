@@ -200,7 +200,7 @@ export function InvoiceAccessoryAiApplyBar({
           ) : (
             <div className="max-h-[32rem] overflow-auto rounded-md border border-border bg-card">
               <table className="w-full min-w-[56rem] text-left text-xs">
-                <thead className="sticky top-0 bg-muted/80">
+                <thead className="sticky top-0 bg-primary text-primary-foreground">
                   <tr>
                     <th className="w-10 px-2 py-1.5">
                       <input

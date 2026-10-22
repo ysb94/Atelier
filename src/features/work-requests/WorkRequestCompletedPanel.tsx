@@ -61,7 +61,7 @@ export function WorkRequestCompletedPanel({
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3">
+      <div className="flex flex-wrap items-end justify-between gap-3 rounded-xl border border-border bg-card px-4 py-3 shadow-sm">
         <div>
           <p className="font-semibold">완료 기간</p>
           <p className="mt-0.5 text-xs text-muted-foreground">
@@ -160,7 +160,7 @@ export function WorkRequestCompletedPanel({
             {groups.map((group) => (
               <section
                 key={group.member.id}
-                className="flex max-h-[28rem] flex-col overflow-hidden rounded-xl border border-border bg-card"
+                className="flex max-h-[28rem] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-sm"
               >
                 <div className="border-b border-border px-3 py-2">
                   <p className="truncate text-xs font-semibold">
@@ -171,7 +171,7 @@ export function WorkRequestCompletedPanel({
                 <div className="min-h-0 flex-1 overflow-auto">
                   {group.items.length > 0 ? (
                     <table className="w-full border-collapse text-left text-[11px]">
-                      <thead className="sticky top-0 bg-muted text-muted-foreground">
+                      <thead className="sticky top-0 bg-primary text-primary-foreground">
                         <tr>
                           <th className="px-2 py-1.5 font-medium">업무</th>
                           <th
@@ -217,9 +217,9 @@ export function WorkRequestCompletedPanel({
           </div>
         </>
       ) : filtered.length > 0 ? (
-        <div className="max-h-[40rem] overflow-auto rounded-xl border border-border bg-card">
+        <div className="max-h-[40rem] overflow-auto rounded-xl border border-border bg-card shadow-sm">
           <table className="w-full min-w-[40rem] border-collapse text-left text-xs">
-            <thead className="sticky top-0 z-10 bg-muted text-[11px] text-muted-foreground">
+            <thead className="sticky top-0 z-10 bg-primary text-[11px] text-primary-foreground">
               <tr>
                 <th className="px-3 py-2 font-medium">업무</th>
                 <th className="w-40 px-3 py-2 font-medium">요청</th>
