@@ -716,7 +716,7 @@ function MemberAssignmentTable({
       </div>
       <div className="mt-3 overflow-x-auto">
         <table className="w-full min-w-[820px] text-left text-sm">
-          <thead className="border-y border-border bg-muted/50 text-xs text-muted-foreground">
+          <thead className="border-y border-border bg-primary text-xs text-primary-foreground">
             <tr>
               <th className="px-4 py-2.5 font-medium">이름</th>
               <th className="px-4 py-2.5 font-medium">부서</th>

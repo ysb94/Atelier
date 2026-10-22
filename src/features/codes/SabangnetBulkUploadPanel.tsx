@@ -260,7 +260,7 @@ export function SabangnetBulkUploadPanel({
             </p>
             <div className="max-h-56 overflow-auto rounded-lg border border-border">
               <table className="w-full min-w-[560px] text-left text-sm">
-                <thead className="sticky top-0 border-b border-border bg-muted/80 text-xs text-muted-foreground">
+                <thead className="sticky top-0 border-b border-border bg-primary text-xs text-primary-foreground">
                   <tr>
                     <th className="px-3 py-2 font-medium">행</th>
                     <th className="px-3 py-2 font-medium">사방넷 코드</th>

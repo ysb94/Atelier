@@ -4,6 +4,7 @@ import { useBrand } from '@/components/layout/brand-context'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { FieldManager } from '@/features/upload/FieldManager'
 import { getBrandFields } from '@/lib/api'
+import '@/styles/design-unify-accent.css'
 
 export function FieldsSettingsPage() {
   const { brand } = useBrand()
@@ -16,7 +17,7 @@ export function FieldsSettingsPage() {
   const fields = useMemo(() => fieldsQuery.data ?? [], [fieldsQuery.data])
 
   return (
-    <div>
+    <div className="design-unify-accent">
       <PageHeader
         title="업로드 항목"
         description={`${brand.name} 업로드 양식에 포함할 항목을 관리합니다.`}

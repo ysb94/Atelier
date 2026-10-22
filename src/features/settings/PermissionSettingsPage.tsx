@@ -10,6 +10,7 @@ import { DepartmentApproversPanel } from '@/features/operations-support/Departme
 import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList } from '@/lib/utils'
 import { PermissionAssignmentCatalog } from './PermissionAssignmentCatalog'
+import '@/styles/design-unify-accent.css'
 
 type PendingGrant = { profileId: string; permission: PermissionCode; scopeKind: PermissionScope; scopeId: string; enabled: boolean }
 export function PermissionSettingsPage() {
@@ -56,7 +57,7 @@ function PermissionSettingsContent({ manage, fullAccess, approvers }: { manage: 
     setPermission(next); setScopeKind(kinds.includes('department') ? 'department' : kinds[0]); setScopeId(''); setPending(null)
   }
   const disabled = mutation.isPending || directory.isFetching || Boolean(directory.error)
-  return <div className="space-y-5">
+  return <div className="design-unify-accent space-y-5">
     <PageHeader title="권한·담당자 설정" description="직책·직급과 관계없이 사람과 대상 범위를 지정합니다."/>
     {directory.data?.activation==='pending' && <p role="status" className="rounded-lg border border-border bg-muted/40 p-3 text-sm">담당자 지정·저장·해제가 연결되었습니다. 저장한 새 지정은 실제 기능별 권한 전환 전까지 적용 대기 상태이며, 현재 이용 권한과 로그인·가입 승인·근태 승인자 내역은 유지됩니다.</p>}
     <div role="tablist" aria-label="권한 설정 보기" className="flex flex-wrap gap-2 border-b border-border pb-3">
@@ -77,7 +78,7 @@ function PermissionSettingsContent({ manage, fullAccess, approvers }: { manage: 
       </section>
       {pending && <section aria-label="권한 변경 확인" className="rounded-xl border border-primary p-5"><p><strong>{name(pending.profileId)}</strong> · {permissionLabel(pending.permission)} · {targetName(pending.scopeKind,pending.scopeId)}</p><p className="my-3">이 권한을 {pending.enabled ? '지정합니다.' : '해제합니다.'} 다른 지정 내역은 유지됩니다.</p><div className="flex gap-2"><Button disabled={mutation.isPending} onClick={() => mutation.mutate(pending)}>{mutation.isPending ? '저장 중…' : '변경 저장'}</Button><Button variant="outline" disabled={mutation.isPending} onClick={() => setPending(null)}>취소</Button></div></section>}
       {message && <p role="status" className="rounded-lg border border-border p-3">{message}</p>}
-      <div className="overflow-x-auto rounded-xl border border-border"><table aria-label="지정된 권한 목록" className="w-full min-w-[650px] text-left text-sm"><thead className="bg-muted/50"><tr>{['직원','기능·행동','대상 범위','관리'].map(label => <th key={label} className="p-3">{label}</th>)}</tr></thead><tbody>{directory.isPending ? <tr><td colSpan={4} className="p-6">불러오는 중…</td></tr> : !visible.length ? <tr><td colSpan={4} className="p-6">{directory.error ? '지정 내역을 확인하지 못했습니다. 다시 불러와 주세요.' : view === 'people' && !person ? '직원을 선택하면 모든 지정 권한을 볼 수 있습니다.' : '지정된 담당자가 없습니다.'}</td></tr> : visible.map(grant => <tr key={grant.id} className="border-t border-border"><td className="p-3">{name(grant.profileId)}</td><td className="p-3">{permissionLabel(grant.permission)}</td><td className="p-3">{scopeLabel(grant.scopeKind)} · {targetName(grant.scopeKind,grant.scopeId)}</td><td className="p-3"><Button variant="outline" size="sm" disabled={disabled || grant.profileId === profile?.id} onClick={() => { setMessage(''); setPending({ ...grant, profileId: grant.profileId!, enabled: false }) }}>해제 내용 확인</Button></td></tr>)}</tbody></table></div>
+      <div className="overflow-x-auto rounded-xl border border-border"><table aria-label="지정된 권한 목록" className="w-full min-w-[650px] text-left text-sm"><thead className="bg-primary text-primary-foreground"><tr>{['직원','기능·행동','대상 범위','관리'].map(label => <th key={label} className="p-3">{label}</th>)}</tr></thead><tbody>{directory.isPending ? <tr><td colSpan={4} className="p-6">불러오는 중…</td></tr> : !visible.length ? <tr><td colSpan={4} className="p-6">{directory.error ? '지정 내역을 확인하지 못했습니다. 다시 불러와 주세요.' : view === 'people' && !person ? '직원을 선택하면 모든 지정 권한을 볼 수 있습니다.' : '지정된 담당자가 없습니다.'}</td></tr> : visible.map(grant => <tr key={grant.id} className="border-t border-border"><td className="p-3">{name(grant.profileId)}</td><td className="p-3">{permissionLabel(grant.permission)}</td><td className="p-3">{scopeLabel(grant.scopeKind)} · {targetName(grant.scopeKind,grant.scopeId)}</td><td className="p-3"><Button variant="outline" size="sm" disabled={disabled || grant.profileId === profile?.id} onClick={() => { setMessage(''); setPending({ ...grant, profileId: grant.profileId!, enabled: false }) }}>해제 내용 확인</Button></td></tr>)}</tbody></table></div>
       <p className="text-xs text-muted-foreground">본인의 권한 변경은 다른 권한 관리 담당자에게 요청합니다. 기존 승인자·대체 승인자는 위 ‘근태·야근 승인자’에서 같은 원본 내역으로 관리합니다.</p>
       <section aria-label="권한 변경 이력" className="rounded-xl border border-border p-4"><h2 className="mb-3 text-sm font-semibold">최근 권한 변경</h2>{directory.data?.events?.length ? <ul className="space-y-2 text-sm">{directory.data.events.map(event => <li key={event.id}><span className="text-muted-foreground">{new Date(event.createdAt).toLocaleString('ko-KR')} · {event.actor}</span><br/>{event.person} · {permissionLabel(event.permission)} · {targetName(event.scopeKind,event.scopeId)} · {event.enabled ? '지정' : '해제'}</li>)}</ul> : <p className="text-sm text-muted-foreground">기록된 변경이 없습니다.</p>}</section>
     </>}

@@ -117,7 +117,7 @@ export function PreviewStep({
       <Card className="overflow-hidden">
         <div className="max-h-125 overflow-auto">
           <table className="w-full min-w-200 text-left text-sm">
-            <thead className="sticky top-0 border-b border-border bg-muted text-xs text-muted-foreground">
+            <thead className="sticky top-0 border-b border-border bg-primary text-xs text-primary-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">행</th>
                 <th className="px-4 py-3 font-medium">품번</th>

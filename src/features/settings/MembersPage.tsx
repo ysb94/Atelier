@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
+import '@/styles/design-unify-accent.css'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/lib/supabase/auth'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -343,7 +344,7 @@ export function MembersPage() {
   }
 
   return (
-    <div>
+    <div className="design-unify-accent">
       <PageHeader
         title="멤버"
         description="접근 신청을 승인하고 본명과 회사 업무 역량을 확인합니다. 본명은 사내 명단과 같아야 합니다."

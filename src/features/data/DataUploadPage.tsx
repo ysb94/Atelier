@@ -20,6 +20,7 @@ import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
 import { getUsagePartnerSettings } from '@/lib/supabase/usage-partner-settings'
 import type { CodeUsageStatus } from '@/lib/types'
 import { cn } from '@/lib/utils'
+import '@/styles/design-unify-accent.css'
 
 type UploadKind = 'products' | 'usage' | 'barcodes' | 'partner'
 
@@ -128,7 +129,7 @@ export function DataUploadPage() {
   const current = KINDS.find((item) => item.id === kind) ?? KINDS[0]
 
   return (
-    <div>
+    <div className="design-unify-accent">
       <PageHeader
         title="일괄 업로드"
         description={`${brand.name} 데이터 영역의 상품·코드를 파일로 한 번에 올립니다.`}

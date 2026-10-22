@@ -7,21 +7,23 @@ import { listCompanyMeetings, listMeetingInvitations } from '@/lib/supabase/meet
 import { meetingNoticeItems, pendingMeetingNoticeCount } from './meeting-notices'
 import { useMeetingRealtime } from './use-meeting-realtime'
 
-export function useMeetingNotices() {
+/** 실시간 채널 이름이 사용자별 하나뿐이라 구독은 앱 상단 한 곳(realtime 기본값)만 맡는다. 같은 화면에 두 번째로 쓰는 곳은 realtime: false로 같은 쿼리 캐시만 읽는다. */
+export function useMeetingNotices({ realtime = true }: { realtime?: boolean } = {}) {
   const { profile } = useAuth()
   const enabled = profile?.status === 'active'
-  const connected = useMeetingRealtime(Boolean(enabled), profile?.id, profile?.companyId ?? undefined)
+  const connected = useMeetingRealtime(Boolean(enabled && realtime), profile?.id, profile?.companyId ?? undefined)
+  const polling = enabled && realtime && !connected
   const invitations = useQuery({
     queryKey: ['meeting-invitations', profile?.id],
     queryFn: listMeetingInvitations,
     enabled,
-    refetchInterval: enabled && !connected ? 30000 : false,
+    refetchInterval: polling ? 30000 : false,
   })
   const meetings = useQuery({
     queryKey: ['company-meetings', profile?.id, profile?.companyId],
     queryFn: listCompanyMeetings,
     enabled,
-    refetchInterval: enabled && !connected ? 30000 : false,
+    refetchInterval: polling ? 30000 : false,
   })
   const items = useMemo(() => {
     return meetingNoticeItems(invitations.data ?? emptyList<InboxNotification>(), meetings.data, profile?.id).map((item) => {

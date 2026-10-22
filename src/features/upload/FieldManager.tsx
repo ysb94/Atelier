@@ -347,7 +347,7 @@ export function FieldManager({ brandId, brandName, fields }: FieldManagerProps) 
 
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full min-w-[760px] text-left text-sm">
-              <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+              <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
                 <tr>
                   <th className="w-10 px-3 py-2 font-medium">
                     <input

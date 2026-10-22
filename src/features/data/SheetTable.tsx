@@ -114,7 +114,7 @@ export function SheetTable({
                     key={`${group.owner}-${index}`}
                     colSpan={group.span}
                     className={cn(
-                      'sticky top-0 z-20 border-b border-border bg-muted px-2 py-1.5 text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground',
+                      'sticky top-0 z-20 border-b border-primary-foreground/25 bg-primary px-2 py-1.5 text-center text-[10px] font-medium uppercase tracking-wider text-primary-foreground',
                       left !== undefined && 'z-30',
                     )}
                     style={left !== undefined ? { left } : undefined}
@@ -125,7 +125,7 @@ export function SheetTable({
               })}
               {onRowOpen ? (
                 <th
-                  className="sticky top-0 z-20 border-b border-border bg-muted px-2 py-1.5 text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground"
+                  className="sticky top-0 z-20 border-b border-primary-foreground/25 bg-primary px-2 py-1.5 text-center text-[10px] font-medium uppercase tracking-wider text-primary-foreground"
                   colSpan={1}
                 >
                   수정
@@ -151,7 +151,7 @@ export function SheetTable({
                       : 'none'
                   }
                   className={cn(
-                    'sticky z-20 border-b border-border bg-muted p-0 font-medium',
+                    'sticky z-20 border-b border-border bg-primary p-0 font-medium text-primary-foreground',
                     left !== undefined && 'z-30',
                   )}
                   style={{
@@ -179,7 +179,7 @@ export function SheetTable({
               )
             })}
             {onRowOpen ? (
-              <th className="sticky top-0 z-20 w-16 border-b border-border bg-muted px-2 py-1.5 text-center font-medium">
+              <th className="sticky top-0 z-20 w-16 border-b border-border bg-primary px-2 py-1.5 text-center font-medium text-primary-foreground">
                 수정
               </th>
             ) : null}

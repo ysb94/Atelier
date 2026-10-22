@@ -20,6 +20,7 @@ import type { Brand } from '@/lib/types'
 import { warehousePositionQty } from '@/lib/warehouse/stock'
 import { formatNumber } from '@/lib/utils'
 import { withBrandTarget, withBrandsFilter } from '@/lib/workspace/company-paths'
+import '@/styles/design-unify-accent.css'
 
 function BrandCell({
   brandId,
@@ -81,6 +82,7 @@ export function CompanyBarcodeList() {
   const loading = queries.some((query) => query.isLoading)
 
   return (
+    <div className="design-unify-accent">
     <ListShell
       title="88바코드 관리"
       description="전 브랜드 자사 바코드를 한 목록에서 봅니다."
@@ -94,7 +96,7 @@ export function CompanyBarcodeList() {
     >
       <Card className="overflow-hidden">
         <table className="w-full text-left text-sm">
-          <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+          <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
             <tr>
               <th className="px-4 py-3 font-medium">브랜드</th>
               <th className="px-4 py-3 font-medium">바코드</th>
@@ -148,6 +150,7 @@ export function CompanyBarcodeList() {
         </p>
       ) : null}
     </ListShell>
+    </div>
   )
 }
 

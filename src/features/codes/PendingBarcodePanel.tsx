@@ -220,7 +220,7 @@ export function PendingBarcodePanel({
       {pendingCodes.length > 0 ? (
         <div className="overflow-x-auto rounded-xl border border-border">
           <table className="w-full min-w-[760px] text-left text-sm">
-            <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+            <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
               <tr>
                 <th className="px-4 py-3 font-medium">88코드</th>
                 <th className="px-4 py-3 font-medium">바코드 상품명</th>
@@ -287,7 +287,7 @@ export function PendingBarcodePanel({
         <div className="space-y-3">
           <div className="overflow-x-auto rounded-lg border border-border">
             <table className="w-full min-w-[720px] text-left text-sm">
-              <thead className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+              <thead className="border-b border-border bg-primary text-xs text-primary-foreground">
                 <tr>
                   <th className="px-3 py-2 font-medium">행</th>
                   <th className="px-3 py-2 font-medium">88코드</th>

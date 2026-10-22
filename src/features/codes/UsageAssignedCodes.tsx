@@ -285,7 +285,7 @@ export function UsageAssignedCodes({
             ) : (
               <div className="min-h-0 flex-1 overflow-auto">
                 <table className="w-full min-w-[850px] text-left text-sm">
-                  <thead className="sticky top-0 bg-muted">
+                  <thead className="sticky top-0 bg-primary text-primary-foreground">
                     <tr>
                       <th className="w-10 px-3 py-2">선택</th>
                       {visibleColumns.map((column) => (

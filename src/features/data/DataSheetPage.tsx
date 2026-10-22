@@ -61,6 +61,7 @@ import { companyQueryKey } from '@/lib/workspace/query-keys'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
 import { SheetTable, type SheetRow } from './SheetTable'
+import '@/styles/design-unify-accent.css'
 import {
   compareSheetRows,
   isSheetCellBlank,
@@ -630,7 +631,7 @@ export function DataSheetPage() {
     : '/settings/seasons'
 
   return (
-    <div className="-mx-1">
+    <div className="design-unify-accent -mx-1">
       <PageHeader
         title={pageTitle}
         description={

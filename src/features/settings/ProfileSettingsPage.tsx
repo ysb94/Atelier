@@ -54,7 +54,7 @@ function personalPart(value: string | null): PersonalPart {
 export function ProfileSettingsPage() {
   useRenderWatch('ProfileSettingsPage')
   const { profile, email } = useAuth()
-  const meetingNotices = useMeetingNotices()
+  const meetingNotices = useMeetingNotices({ realtime: false })
   const preview = usePagePreview()
   const approvals = useDepartmentApprovers()
   const departments = useMemo(() => assignedDepartmentIds(approvals.settings, profile?.id), [approvals.settings, profile?.id])
