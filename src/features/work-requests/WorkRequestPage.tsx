@@ -2964,7 +2964,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         className={cn(detailRequestId === request.id && 'ring-2 ring-primary')}
       >
         <CardContent className="p-5">
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_auto_auto] xl:items-center">
+          <div className={cn(
+            'grid gap-4 xl:items-center',
+            context === 'mine' || context === 'queue'
+              ? 'xl:grid-cols-[minmax(0,1fr)_auto_auto]'
+              : 'xl:grid-cols-[minmax(0,1fr)_28.5rem_14rem]',
+          )}>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <Badge variant={status.variant}>{status.label}</Badge>
@@ -2991,50 +2996,60 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 {request.values.title}
               </h3>
               <p className="mt-1 truncate text-sm text-muted-foreground">
-                {context === 'sent' ? (
-                  <>
-                    {departmentLabel(request.requesterDepartment)} →{' '}
-                    {WORK_REQUEST_CONFIG[request.owner].teamName}
-                  </>
-                ) : (
-                  <>
-                    {departmentLabel(request.requesterDepartment)} · 요청자{' '}
-                    {requesterLabel(request)}
-                  </>
-                )}{' '}
-                · {formatDateTime(request.createdAt)}
+                {context === 'sent'
+                  ? <>
+                      {departmentLabel(request.requesterDepartment)}
+                      {' · '}
+                      {new Intl.DateTimeFormat('ko-KR', { year: 'numeric', month: 'long', day: 'numeric' }).format(new Date(request.createdAt))}
+                    </>
+                  : <>
+                      {departmentLabel(request.requesterDepartment)} · 요청자{' '}
+                      {requesterLabel(request)} · {formatDateTime(request.createdAt)}
+                    </>}
               </p>
             </div>
 
-            <div className="flex w-full flex-wrap gap-x-5 gap-y-2 text-sm xl:w-auto xl:flex-nowrap">
+            <div className={cn(
+              'grid w-full gap-x-4 text-sm',
+              context === 'queue'
+                ? 'grid-cols-[5.5rem_4.5rem]'
+                : 'grid-cols-[5.5rem_minmax(0,10rem)_minmax(0,1fr)] xl:w-[28.5rem] xl:grid-cols-[5.5rem_10rem_11rem]',
+            )}>
               {context === 'queue' ? (
                 <>
-                  <div className="shrink-0">
+                  <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">요청 희망일</p>
-                    <p className="mt-1 font-medium tabular-nums">
+                    <p className="mt-1 truncate font-medium tabular-nums">
                       {formatSlashDate(request.values.dueDate)}
                     </p>
                   </div>
-                  <div className="shrink-0">
+                  <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">대화</p>
-                    <p className="mt-1 font-medium tabular-nums">
+                    <p className="mt-1 truncate font-medium tabular-nums">
                       {request.messages.length}건
                     </p>
                   </div>
                 </>
               ) : (
                 <>
-                  <div className="shrink-0">
-                    <p className="text-xs text-muted-foreground">확정 마감</p>
-                    <p className="mt-1 font-medium tabular-nums">
+                  <div className="min-w-0">
+                    <p className="whitespace-nowrap text-xs text-muted-foreground">확정 마감</p>
+                    <p className="mt-1 truncate font-medium tabular-nums" title={formatSlashDate(dueDate)}>
                       {formatSlashDate(dueDate)}
                     </p>
                   </div>
-                  <div className="shrink-0">
-                    <p className="text-xs text-muted-foreground">
+                  <div className="min-w-0">
+                    <p className="whitespace-nowrap text-xs text-muted-foreground">
                       {context === 'mine' ? '작업 예정' : '주 담당자'}
                     </p>
-                    <p className="mt-1 font-medium">
+                    <p
+                      className="mt-1 truncate font-medium"
+                      title={context === 'mine'
+                        ? request.plannedStart
+                          ? `${formatSlashDate(requestPlannedRange(request).start)}~${formatSlashDate(requestPlannedRange(request).end)}`
+                          : '미정'
+                        : memberLabel(request.assignee)}
+                    >
                       {context === 'mine'
                         ? request.plannedStart
                           ? `${formatSlashDate(requestPlannedRange(request).start)}~${formatSlashDate(requestPlannedRange(request).end)}`
@@ -3042,11 +3057,18 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                         : memberLabel(request.assignee)}
                     </p>
                   </div>
-                  <div className="shrink-0">
-                    <p className="text-xs text-muted-foreground">
+                  <div className="min-w-0">
+                    <p className="whitespace-nowrap text-xs text-muted-foreground">
                       {context === 'mine' ? '주 담당자' : '협업자'}
                     </p>
-                    <p className="mt-1 font-medium">
+                    <p
+                      className="mt-1 truncate font-medium"
+                      title={context === 'mine'
+                        ? memberLabel(request.assignee)
+                        : request.collaborators.length > 0
+                          ? request.collaborators.map(memberLabel).join(', ')
+                          : '없음'}
+                    >
                       {context === 'mine'
                         ? memberLabel(request.assignee)
                         : request.collaborators.length > 0

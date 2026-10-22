@@ -21,7 +21,6 @@ import { useChatRooms } from '@/features/chat/use-chat'
 import { hasPermission } from '@/lib/company/permissions'
 import { useRenderWatch } from '@/lib/diagnostics/render-watch'
 import { inboxBadgeLabel } from '@/lib/inbox/format'
-import { MOCK_NOTIFICATIONS } from '@/lib/inbox/mock'
 import type { ChatRoom, InboxNotification } from '@/lib/inbox/types'
 import { useAuth } from '@/lib/supabase/auth'
 import { useHeaderPreview } from '@/lib/company/developer-preview-context'
@@ -57,10 +56,7 @@ export function WorkspaceHeaderActions() {
   const meetingNotices=useMeetingNotices()
   const [notificationError,setNotificationError]=useState<string|null>(null)
   const { container: overlayContainer, restoreFocus } = useWorkspaceOverlayHost(open !== null)
-  const [localNotifications, setNotifications] = useState<InboxNotification[]>(
-    () => MOCK_NOTIFICATIONS,
-  )
-  const notifications=useMemo(()=>[...meetingNotices.items,...localNotifications],[meetingNotices.items,localNotifications])
+  const notifications = meetingNotices.items
   useEffect(()=>{
     function receive(event:Event){
       const detail=(event as CustomEvent<RequestedConversation>).detail
@@ -126,22 +122,10 @@ export function WorkspaceHeaderActions() {
   }
   function markAllRead() {
     if(meetingNotices.items.some(item=>item.kind==='meeting_invitation' && !item.readAt)) void markMeetingRead(null)
-    const readAt = new Date().toISOString()
-    setNotifications((prev) =>
-      prev.map((item) => (item.readAt ? item : { ...item, readAt })),
-    )
   }
 
   function openNotification(item: InboxNotification) {
     if(item.kind==='meeting_invitation') void markMeetingRead(item.id)
-    const readAt = new Date().toISOString()
-    setNotifications((prev) =>
-      prev.map((current) =>
-        current.id === item.id && !current.readAt
-          ? { ...current, readAt }
-          : current,
-      ),
-    )
     setOpen(null)
     navigate(item.href)
   }

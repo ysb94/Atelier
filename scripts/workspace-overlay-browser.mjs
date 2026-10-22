@@ -58,7 +58,7 @@ export async function verifyWorkspaceOverlays(page, origin) {
   await clickWithoutOutsideClose(page.getByRole('button', { name: '날짜 상세 닫기', exact: true }))
   await backToBody()
 
-  // 실제 업무 추가/공지/상세: showModal/close 및 입력·읽음 동작 보존.
+  // 실제 업무 추가/상세: showModal/close 및 입력 동작 보존.
   await clickWithoutOutsideClose(page.getByRole('button', { name: '업무 추가', exact: true }).first())
   await aboveModal('workspace-chat-panel', '업무 추가')
   const workTitle = page.getByPlaceholder('어떤 일을 할 예정인가요?')
@@ -74,7 +74,6 @@ export async function verifyWorkspaceOverlays(page, origin) {
   await page.getByRole('dialog', { name: '업무 추가', exact: true }).waitFor({ state: 'hidden' })
 
   for (const [button, modalName, closeName] of [
-    ['.mw-notice', '공지 내용', '공지 닫기'],
     ['.mw-task', '업무 상세', '업무 상세 닫기'],
   ]) {
     await page.getByRole('button', { name: /^알림(?:,|$)/ }).click()

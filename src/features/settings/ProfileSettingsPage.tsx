@@ -18,6 +18,7 @@ import { useDepartmentApprovers } from '@/features/operations-support/use-depart
 import { assignedDepartmentIds } from '@/lib/supabase/department-approvers'
 import { hasPermission } from '@/lib/company/permissions'
 import { CompanyMeetingsPage } from '@/features/meetings/CompanyMeetingsPage'
+import { useMeetingNotices } from '@/features/meetings/use-meeting-notices'
 import { HomeNoticeBoard } from './HomeNoticeBoard'
 import { MyAttendanceStartPanel } from './MyAttendanceStartPanel'
 import { MyAttendancePanel } from './MyAttendancePanel'
@@ -52,6 +53,7 @@ function personalPart(value: string | null): PersonalPart {
 export function ProfileSettingsPage() {
   useRenderWatch('ProfileSettingsPage')
   const { profile, email } = useAuth()
+  const meetingNotices = useMeetingNotices()
   const preview = usePagePreview()
   const approvals = useDepartmentApprovers()
   const departments = useMemo(() => assignedDepartmentIds(approvals.settings, profile?.id), [approvals.settings, profile?.id])
@@ -76,10 +78,11 @@ export function ProfileSettingsPage() {
         <button type="button" role="tab" id="personal-work-tab" aria-selected={visiblePart === 'work'} aria-controls="personal-work-panel" onClick={() => selectPart('work')}>내 업무</button>
         <button type="button" role="tab" id="personal-my-attendance-tab" aria-selected={visiblePart === 'my-attendance'} aria-controls="personal-my-attendance-panel" onClick={() => selectPart('my-attendance')}>내 근태</button>
         <button type="button" role="tab" id="personal-profile-tab" aria-selected={visiblePart === 'profile'} aria-controls="personal-profile-panel" onClick={() => selectPart('profile')}>내 정보</button>
+        <span className="personal-page-tab-split" aria-hidden="true" />
         <button type="button" role="tab" id="personal-approvals-tab" aria-selected={visiblePart === 'approvals'} aria-controls="personal-approvals-panel" onClick={() => selectPart('approvals')}>승인할 신청</button>
         <button type="button" role="tab" id="personal-company-notice-tab" aria-selected={visiblePart === 'company-notice'} aria-controls="personal-company-notice-panel" onClick={() => selectPart('company-notice')}>회사 공지</button>
         <button type="button" role="tab" id="personal-department-notice-tab" aria-selected={visiblePart === 'department-notice'} aria-controls="personal-department-notice-panel" onClick={() => selectPart('department-notice')}>부서 공지</button>
-        <button type="button" role="tab" id="personal-meetings-tab" aria-selected={visiblePart === 'meetings'} aria-controls="personal-meetings-panel" onClick={() => selectPart('meetings')}>회의</button>
+        <button type="button" role="tab" id="personal-meetings-tab" aria-selected={visiblePart === 'meetings'} aria-controls="personal-meetings-panel" onClick={() => selectPart('meetings')}>회의{meetingNotices.pending > 0 ? <span className="personal-page-tab-count">{meetingNotices.pending}</span> : null}</button>
         {showDepartmentTab ? (
           <button type="button" role="tab" id="personal-attendance-tab" className="personal-page-tab-end" aria-selected={visiblePart === 'attendance'} aria-controls="personal-attendance-panel" onClick={() => selectPart('attendance')}>부서 출근시간</button>
         ) : null}

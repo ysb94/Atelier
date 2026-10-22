@@ -10,6 +10,11 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
   const published=series.phase!=='preparing',confirmed=published && Boolean(round?.confirmed ?? round?.startsAt)
   const participant=series.host.id===actorId || series.members.some(person=>person.id===actorId)
   return <div className={cn('meeting-attendance', compact && 'is-compact', !compact && 'space-y-2')}>
+    <div className="meeting-attendance-row">
+    {published&&participant ? <button type="button" className="meeting-all" aria-label="전체 멤버와 대화" title="전체 멤버와 대화" disabled={simulating} onClick={onGroup}>
+      <svg className="meeting-all-shape" viewBox="0 0 56 36" aria-hidden="true"><path d="M12 3H44a9 9 0 0 1 9 9v7a9 9 0 0 1-9 9H20l-9 5v-5a9 9 0 0 1-8-9v-7a9 9 0 0 1 9-9Z"/></svg>
+      <span className="meeting-all-label">All</span>
+    </button> : null}
     <div className="meeting-members">
       {[series.host,...series.members].map(person=>{
         const isHost=person.id===series.host.id
@@ -24,10 +29,7 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
         </button>
       })}
     </div>
-    {published&&participant ? <button type="button" className="meeting-all" aria-label="전체 멤버와 대화" title="전체 멤버와 대화" disabled={simulating} onClick={onGroup}>
-      <svg className="meeting-all-shape" viewBox="0 0 56 36" aria-hidden="true"><path d="M12 3H44a9 9 0 0 1 9 9v7a9 9 0 0 1-9 9H20l-9 5v-5a9 9 0 0 1-8-9v-7a9 9 0 0 1 9-9Z"/></svg>
-      <span className="meeting-all-label">All</span>
-    </button> : null}
+    </div>
     {!compact&&confirmed&&round&&series.members.some(person=>person.id===actorId)&&onRespond ? <MeetingResponse round={round} actorId={actorId} onRespond={onRespond}/>:null}
   </div>
 }

@@ -1,4 +1,4 @@
-/** 나중에 알림 테이블로 옮길 모양. 지금은 목업만 쓴다. */
+/** 받은 알림. 회의 참석 요청은 저장소에서 오고, 그 외 종류는 이후 알림 테이블에 맞춘다. */
 export type InboxNotificationKind =
   | 'barcode_request'
   | 'barcode_issued'

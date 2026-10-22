@@ -1440,7 +1440,7 @@ function MeetingTimePickerDialog({
   }, [])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
       <button
         type="button"
         className="absolute inset-0 bg-black/40"
@@ -1803,6 +1803,18 @@ function MeetingDetailDrawer({
             </section>
           ) : null}
           <section className="space-y-2">
+            <h3 className="text-xs font-medium text-muted-foreground">
+              {pending ? '회의 안내' : '회의 내용'}
+            </h3>
+            <Textarea
+              value={content}
+              rows={10}
+              placeholder="회의에서 나온 내용을 빠짐없이 적습니다."
+              aria-label={pending?'회의 안내':'회의 내용'}
+              onChange={(event) => setContent(event.target.value)}
+            />
+          </section>
+          <section className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <div>
                 <h3 className="text-xs font-medium text-muted-foreground">
@@ -1889,34 +1901,18 @@ function MeetingDetailDrawer({
               </div>
             )}
           </section>
-          {(
-            <>
-              <section className="space-y-2">
-                <h3 className="text-xs font-medium text-muted-foreground">
-                  {pending ? '회의 안내' : '회의 내용'}
-                </h3>
-                <Textarea
-                  value={content}
-                  rows={10}
-                  placeholder="회의에서 나온 내용을 빠짐없이 적습니다."
-                  aria-label={pending?'회의 안내':'회의 내용'}
-                  onChange={(event) => setContent(event.target.value)}
-                />
-              </section>
-              {!pending ? <section className="space-y-2">
-                <h3 className="text-xs font-medium text-muted-foreground">
-                  회의 결과
-                </h3>
-                <Textarea
-                  value={result}
-                  rows={5}
-                  placeholder="결정 사항, 담당, 기한을 적습니다."
-                  aria-label="회의 결과"
-                  onChange={(event) => setResult(event.target.value)}
-                />
-              </section> : null}
-            </>
-          )}
+          {!pending ? <section className="space-y-2">
+            <h3 className="text-xs font-medium text-muted-foreground">
+              회의 결과
+            </h3>
+            <Textarea
+              value={result}
+              rows={5}
+              placeholder="결정 사항, 담당, 기한을 적습니다."
+              aria-label="회의 결과"
+              onChange={(event) => setResult(event.target.value)}
+            />
+          </section> : null}
         </div>
 
         {series.status === 'in_progress' ? (

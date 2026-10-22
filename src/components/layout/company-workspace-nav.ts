@@ -59,16 +59,11 @@ export const companyTopNav: CompanyNavItem[] = [
   { to: '/settings/profile', label: 'My home', icon: UserRound },
   { to: '/operations', label: '운영 현황', icon: ChartColumn },
   { to: '/products', label: '전체 상품', icon: Shirt },
+  { to: '/schedule', label: '일정', icon: CalendarDays },
+  { to: '/org-chart', label: '조직도', icon: Network },
 ]
 
 export const companyNavGroups: CompanyNavGroup[] = [
-  {
-    title: '회사',
-    items: [
-      { to: '/schedule', label: '일정', icon: CalendarDays },
-      { to: '/org-chart', label: '조직도', icon: Network },
-    ],
-  },
   {
     title: '기획',
     items: [

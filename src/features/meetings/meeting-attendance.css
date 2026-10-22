@@ -1,4 +1,4 @@
-.meeting-attendance.is-compact { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.meeting-attendance-row, .meeting-attendance.is-compact { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .meeting-members { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; padding: 2px; border: 1px solid transparent; border-radius: 999px; }
 .meeting-attendance:has(.meeting-all:hover) .meeting-members,
 .meeting-attendance:has(.meeting-all:focus-visible) .meeting-members { border-color: #8eaa98; }
@@ -8,4 +8,3 @@
 .meeting-all:hover, .meeting-all:focus-visible { --meeting-all-border: #8eaa98; }
 .meeting-all:focus-visible { outline: 2px solid #8eaa98; outline-offset: 2px; }
 .meeting-all:disabled { opacity: .5; pointer-events: none; }
-.meeting-attendance:not(.is-compact) .meeting-all { margin-top: 6px; }
