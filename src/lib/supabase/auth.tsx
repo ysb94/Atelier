@@ -9,6 +9,7 @@ import {
 } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { getSupabase, isSupabaseConfigured } from '@/lib/supabase/client'
+import { clearImpersonationState, readImpersonationState, returnToOperator } from '@/lib/supabase/impersonation'
 import { hasPermission } from '../company/permissions'
 import { getMyProfile, type Profile } from '@/lib/supabase/profiles'
 
@@ -144,8 +145,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const signOut = useCallback(async () => {
+    // 직원 세션에서 로그아웃하면 그 세션을 폐기하고 운영자 보관값까지 정리한 뒤 완전히 나간다.
+    if (readImpersonationState()) await returnToOperator({ navigate: false })
+    clearImpersonationState()
     const { error } = await getSupabase().auth.signOut({ scope: 'local' })
-    if (error) throw new Error(error.message)
+    if (error && !/session missing|auth session missing/i.test(error.message)) throw new Error(error.message)
     setProfile(null)
   }, [])
 

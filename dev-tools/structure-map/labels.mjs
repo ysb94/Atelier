@@ -74,6 +74,8 @@ const vocabulary = {
   index: '색인', groups: '그룹', shipments: '출고', paths: '경로',
 }
 const phrases = {
+  'impersonate employee': '직원 계정 전환',
+  impersonation: '직원 계정 전환',
   'release access': '직원 공개 범위',
   'access ip': '접속 IP',
   'product name': '상품명', 'item name': '내품명', 'style no': 'M번호(SKU)', 'style name': 'SKU 이름',

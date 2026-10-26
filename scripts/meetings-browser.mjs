@@ -31,14 +31,6 @@ export async function verifyMeetings(page,origin){
  await open();await dialog().getByRole('button',{name:'저장하고 다음 회의 진행',exact:true}).click();await dialog().waitFor({state:'hidden'})
  await row().getByRole('button',{name:/^2차 회의/}).getByText('회의 안내 미작성',{exact:true}).waitFor()
  await page.reload();await row().getByRole('button',{name:/^2차 회의/}).getByText('회의 안내 미작성',{exact:true}).waitFor()
- const audit=await page.evaluate(()=>JSON.parse(sessionStorage.getItem('atelier:meeting-fixture')).audit.length)
- const bar=page.getByRole('region',{name:'개발자 화면 미리보기'})
- await bar.getByRole('button',{name:'담당자',exact:true}).click()
- await row().getByRole('button',{name:/1차/}).click()
- await page.getByLabel('회의 내용',{exact:true}).fill('실제 저장 금지')
- await close(dialog());await dialog().waitFor({state:'hidden'})
- assert.equal(await page.evaluate(()=>JSON.parse(sessionStorage.getItem('atelier:meeting-fixture')).audit.length),audit,'화면 테스트 중 실제 쓰기 RPC 없음')
- await bar.getByRole('button',{name:'미리보기 종료',exact:true}).click()
  await open();assert.equal(await page.getByLabel('회의 내용',{exact:true}).inputValue(),'실패해도 유지할 입력')
  await dialog().getByRole('button',{name:'회의건 종료',exact:true}).click();await dialog().waitFor({state:'hidden'})
  await page.getByRole('tab',{name:'완료 1',exact:true}).waitFor()
@@ -250,6 +242,6 @@ export async function verifyMeetings(page,origin){
    if(desktopViewport) await page.setViewportSize(desktopViewport)
  }
  console.log('meetings-browser: My home 좁은 메뉴 가로 탐색·멤버 이름·회의 행 배치 통과')
- console.log('meetings-browser: 기존 회의 저장·자료·실패 입력 보존·미리보기 쓰기 차단·준비/확정·채팅 + 목록 응답 필요/가능·불가/새로고침 유지/실패 시 미완료/여러 회차 개별 응답·일정 변경 초기화·알림 이동만 수행 통과')
+ console.log('meetings-browser: 기존 회의 저장·자료·실패 입력 보존·준비/확정·채팅 + 목록 응답 필요/가능·불가/새로고침 유지/실패 시 미완료/여러 회차 개별 응답·일정 변경 초기화·알림 이동만 수행 통과')
  console.log('meetings-browser: 호스트 생성/대기/일부 수락 알림 제외 · 불가 발생/전원 수락 알림 · 읽음 유지/새 일정 구분 통과')
 }

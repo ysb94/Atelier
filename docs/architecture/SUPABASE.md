@@ -1813,10 +1813,10 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
 
 ## 대표이사의 제작 화면 검수
 
-- 활성 `대표이사`는 개발자와 같은 페이지별 `화면 테스트`를 사용하고 전체 메뉴에 진입한다.
-  세션 이메일과 실제 프로필 이메일을 비교하며, 미리보기는 표시 프로필만 바꾼다.
-- `is_admin`, 업무 역량, 승인자 지정, 로그인 세션은 바꾸지 않는다. 실제 저장·승인은
-  기존 DB 권한으로 검사한다. 운영지원 기본 화면은 대표이사에게 조회 화면을 표시한다.
+- 활성 `대표이사`는 개발자와 같은 회사 현황 조회와 전체 메뉴 진입을 쓴다.
+  표시만 바꾸던 화면 테스트 막대는 「직원 계정 전환」으로 대체했다.
+- `company.review` 조회는 `is_admin`, 업무 역량, 승인자 지정, 로그인 세션을 바꾸지 않는다.
+  실제 저장·승인은 기존 DB 권한으로 검사한다. 운영지원 기본 화면은 대표이사에게 조회 화면을 표시한다.
 - `app.company_review_company_id()`는 보호된 실제 프로필의 활성 상태·대표이사 직책을
   확인하고 본인 회사 UUID만 반환한다. 같은 회사의 직원 정보·역량·브랜드 담당 정보,
   출근시간 설정·전체 연차/야근 신청과 입사일을 조회할 수 있다. 다른 회사로 넓히지 않는다.
@@ -1828,6 +1828,37 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
 - 변경 전 정책·조직도 RPC 스냅샷은 `docs/backups/company-review-*-pre.json`이다.
   `supabase/tests/company-review-access.sql`은 회사 격리·조회·저장/승인 차단과
   비활성/익명 차단을 실제 DB에서 검증하고 모든 테스트 변경을 롤백한다.
+
+## 직원 계정 전환
+
+- 기존 허용 명단의 개발자·윤설빈·김준영 세 계정만 같은 회사의 재직 직원으로 실제 로그인 세션을 연다.
+  윤설빈 지정은 기존 `20261022100529_developer_account_delegate.sql`에 포함되어 있다.
+  허용 명단은 `impersonation_operators`다. 화면이 막대를 띄울 후보는 기존 `preview.use`이며,
+  함수가 403을 주면 막대는 숨는다. 일반 직원과 익명 사용자는 호출할 수 없다.
+- `impersonation_events`에 운영자, 대상 직원, 시작·종료 시각, User-Agent를 남긴다.
+  두 테이블 모두 RLS를 켜고 `anon`·`authenticated` 권한은 없다. Edge Function의 service role만
+  읽고 기록한다. 감사 행은 삭제하지 않는다.
+- Edge Function은 `impersonate-employee`다. `list`는 `app.impersonation_subject`로
+  같은 회사의 재직 직원 이름·부서·직책만 돌려준다. 이메일은 함수 안에서만 쓰고 브라우저에는 주지 않는다.
+  service role은 `profiles`를 직접 읽지 않는다.
+  `start`는 대상의 기존 Auth 사용자를 확인한 뒤 `generateLink({ type: 'magiclink' })`로
+  `hashed_token`만 돌려준다. 메일은 보내지 않는다. 브라우저는 `verifyOtp`로 그 직원 세션을 연다.
+  `stop`은 그 전환으로 만든 세션만 `local` 범위로 폐기하고 `ended_at`을 기록한다.
+  직원이 자기 컴퓨터에서 연 세션은 유지한다.
+- 전환 뒤 조회, RLS, 채팅, 알림, 저장, 승인, 읽음, 출퇴근은 그 직원의 `auth.uid()`로 실행된다.
+  같은 브라우저의 다른 Atelier 탭도 그 세션을 쓴다. 운영자 토큰은
+  `localStorage['atelier:impersonation']`에만 둔다. 복원에 실패하면 보관값을 지우고 로그인 화면으로 돌아간다.
+- 역할, 신청 관계, 회의 관계를 고르던 표시 전용 화면 테스트는 제거했다.
+- 마이그레이션: `20261022090659_employee_impersonation.sql`,
+  `20261022090831_employee_impersonation_privileges.sql`,
+  `20261022092429_impersonation_subject.sql`,
+  `20261022092617_impersonation_subject_definer.sql`.
+- `npm run verify:impersonation`은 실제 전환 UI·AuthProvider와 서버 처리의 성공/실패·복귀·재전환·
+  다른 탭 세션 공유·로그아웃·일반 직원 차단을 외부 연결 없이 확인한다.
+- 2026-10-26 검증에서 service role 강제 헤더가 직원 JWT를 덮어 세션 폐기를 건너뛰던 문제를
+  수정했다. 기존 JWT 검증을 유지한 함수 v4를 별도 승인 후 배포했다. 실제 개발자 → 윤설빈
+  전환·직원 세션 폐기/갱신 차단·원래 세션 유지와 두 계정의 프로필/승인 상태 불변을 확인했다.
+  테이블·정책·허용 명단은 변경하지 않았으며 위 네 마이그레이션은 이미 적용된 이력을 저장한 것이다.
 
 ## 회사 중심 전환 후 브랜드 경계 감사
 

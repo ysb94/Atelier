@@ -79,6 +79,7 @@
     "verify:assigned-permissions": "tsx --tsconfig tsconfig.app.json src/lib/company/assigned-permissions.verify.ts && node scripts/verify-assigned-permissions-db.mjs",
     "verify:permission-storage": "node scripts/verify-permission-storage-db.mjs",
     "verify:auth-recovery-browser": "node scripts/verify-auth-recovery-browser.mjs",
+    "verify:impersonation": "node scripts/verify-impersonation.mjs && node scripts/verify-impersonation-browser.mjs",
     "verify:access-ip": "node --experimental-strip-types scripts/verify-access-ip.mjs",
     "verify:access-ip-browser": "node scripts/verify-access-ip-browser.mjs",
     "verify:developer-delegate": "tsx --tsconfig tsconfig.app.json scripts/verify-developer-delegate.mjs",

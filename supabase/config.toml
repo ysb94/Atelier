@@ -30,3 +30,6 @@ verify_jwt = false
 
 [functions.md-price-refresh]
 verify_jwt = true
+
+[functions.impersonate-employee]
+verify_jwt = true
