@@ -6,6 +6,8 @@ import { openDirectChat } from '@/lib/supabase/chat'
 import { openConversation } from '@/lib/chat/open-conversation'
 import { chatKeys } from '@/features/chat/use-chat'
 import { MeetingAttendance, MeetingResponse } from './MeetingAttendance'
+import { MeetingMemberOption } from './MeetingMemberOption'
+import { buildOngoingMeetingParticipation } from './meeting-participation'
 import { MeetingSchedulePicker, type MeetingScheduleChoice } from './MeetingSchedulePicker'
 import {
   Check,
@@ -252,16 +254,10 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     () => filterSeriesByStatus(visibleSeries, 'in_progress'),
     [visibleSeries],
   )
-  const ongoingMeetingCounts = useMemo(() => {
-    const counts = new Map<string, number>()
-    for (const item of series) {
-      if (item.status !== 'in_progress') continue
-      for (const id of new Set([item.host.id, ...item.members.map((person) => person.id)])) {
-        counts.set(id, (counts.get(id) ?? 0) + 1)
-      }
-    }
-    return counts
-  }, [series])
+  const ongoingMeetingParticipation = useMemo(
+    () => buildOngoingMeetingParticipation(series, host, isAdmin),
+    [series, host, isAdmin],
+  )
   const doneSeries = useMemo(
     () => filterSeriesByStatus(visibleSeries, 'done'),
     [visibleSeries],
@@ -851,44 +847,14 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                                   )
                                   return (
                                     <li key={person.id}>
-                                      <button
-                                        type="button"
-                                        aria-pressed={selected}
-                                        aria-label={`${person.name}${person.position ? ` ${person.position}` : ''} 진행 중 ${ongoingMeetingCounts.get(person.id) ?? 0}건`}
-                                        className={cn(
-                                          'flex w-full flex-col rounded px-1.5 py-1 text-left text-xs transition-colors',
-                                          selected
-                                            ? 'bg-foreground text-background'
-                                            : 'hover:bg-muted',
-                                        )}
-                                        onClick={() => toggleMember(person)}
-                                      >
-                                        <span className="font-medium">
-                                          {person.name}
-                                        </span>
-                                        {person.position ? (
-                                          <span
-                                            className={cn(
-                                              'text-[10px]',
-                                              selected
-                                                ? 'text-background/70'
-                                                : 'text-muted-foreground',
-                                            )}
-                                          >
-                                            {person.position}
-                                          </span>
-                                        ) : null}
-                                        <span
-                                          className={cn(
-                                            'text-[10px]',
-                                            selected
-                                              ? 'text-background/70'
-                                              : 'text-muted-foreground',
-                                          )}
-                                        >
-                                          진행 중 {ongoingMeetingCounts.get(person.id) ?? 0}
-                                        </span>
-                                      </button>
+                                      <MeetingMemberOption
+                                        person={person}
+                                        selected={selected}
+                                        onToggle={() => toggleMember(person)}
+                                        participation={ongoingMeetingParticipation.get(person.id)}
+                                        loading={meetings.loading}
+                                        hasError={Boolean(meetings.error)}
+                                      />
                                     </li>
                                   )
                                 })}
