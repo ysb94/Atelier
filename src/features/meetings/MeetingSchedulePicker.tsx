@@ -7,11 +7,12 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { usePagePreview } from '@/lib/company/page-preview-context'
 import { useAuth } from '@/lib/supabase/auth'
 import { listMeetingAvailability, listMeetingCalendar } from '@/lib/supabase/meetings'
+import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
 import { MeetingAvailabilityTable } from './MeetingAvailabilityTable'
 import { availabilityConfirmationKey, overlapsAvailability, type MeetingAvailability } from './meeting-availability'
 import { cn, emptyList } from '@/lib/utils'
 import { type MeetingDraft, type MeetingPerson, type MeetingRoom, parseDateKey, toDateKey } from './meeting-schedule'
-import { formatMeetingClockRange, isClockCoveredByMeeting, resolveStartTimeState, WORK_DAY_CLOCKS } from './meeting-slots'
+import { formatMeetingClockRange, isClockCoveredByMeeting, meetingOverlapsLunch, resolveStartTimeState, WORK_DAY_CLOCKS } from './meeting-slots'
 
 export type MeetingScheduleChoice = { roomId:string; dateKey:string; clock:string }
 
@@ -32,6 +33,7 @@ export function MeetingSchedulePicker({rooms,value,onChange,durationMinutes,atte
     queryFn:()=>listMeetingCalendar(value.dateKey,value.dateKey),
     enabled:active&&real?.status==='active'&&validDate,refetchInterval:active?15000:false,
   })
+  const lunch=useQuery({queryKey:['company-work-hours'],queryFn:loadCompanyLunch,enabled:active,refetchInterval:active?15000:false})
   const people=[...new Set(attendees.map(person=>person.id))].sort()
   const attendance=useQuery({queryKey:['meeting-availability',real?.id,seriesId,value.dateKey,people,roundId],
     queryFn:()=>listMeetingAvailability(seriesId,value.dateKey,people,roundId),enabled:active&&real?.status==='active'&&validDate&&people.length>0,
@@ -47,28 +49,34 @@ export function MeetingSchedulePicker({rooms,value,onChange,durationMinutes,atte
     const expected=selectionKey
     setChecking(true);setCheckError(null)
     try {
-      const result=await attendance.refetch()
+      const [result,latestLunch]=await Promise.all([attendance.refetch(),lunch.refetch()])
+      if(latestLunch.isError||!latestLunch.data)throw latestLunch.error ?? new Error('점심시간 조회 결과가 없습니다.')
       if(result.isError||!result.data)throw result.error ?? new Error('멤버 일정 조회 결과가 없습니다.')
       if(expected!==currentSelection.current)return
+      if(meetingOverlapsLunch(value.clock,durationMinutes ?? 60,latestLunch.data)){
+        setCheckError(`회사 점심시간 ${latestLunch.data.start}–${latestLunch.data.end}과 겹칩니다. 다른 시간을 선택해 주세요.`);return
+      }
       const latest=result.data.filter(row=>row.kind!=='remote'&&overlapsAvailability(row,value.clock,durationMinutes ?? 60))
       if(latest.length&&acknowledged!==availabilityConfirmationKey(selection,latest)){
         setAcknowledged(null);setCheckError('멤버 일정이 겹칩니다. 최신 내용을 확인하고 체크해 주세요.');return
       }
       await onConfirm()
-    } catch(cause){console.warn('[meetings] 확정 전 멤버 일정 조회 실패',{error:cause});setCheckError('멤버 일정을 확인하지 못했습니다. 다시 조회해 주세요.')}
+    } catch(cause){console.warn('[meetings] 확정 전 예약 조건 조회 실패',{error:cause});setCheckError('점심시간 또는 멤버 일정을 확인하지 못했습니다. 다시 조회해 주세요.')}
     finally{setChecking(false)}
   }
   const weekday=validDate?parseDateKey(value.dateKey).getDay():0
   const bookings=(calendar.data ?? emptyList<MeetingDraft>()).filter(item=>item.startsAt.slice(0,10)===value.dateKey&&item.id!==roundId)
   const available=(roomId:string,clock:string)=>resolveStartTimeState({
     composeReady:durationMinutes!==null,weekend:weekday===0||weekday===6,dateKey:value.dateKey,clock,
-    durationMinutes:durationMinutes ?? 60,attendees,attendance:[],occupants:bookings.filter(item=>item.roomId===roomId),now,
+    durationMinutes:durationMinutes ?? 60,attendees,attendance:[],occupants:bookings.filter(item=>item.roomId===roomId),now,lunch:lunch.data,
   })
   const room=rooms.find(item=>item.id===value.roomId)
-  const ready=Boolean(validDate&&room&&durationMinutes&&value.clock&&!calendar.isPending&&!calendar.isError&&!attendance.isPending&&!attendance.isError&&available(value.roomId,value.clock).available)
+  const canChoose=(clock:string,roomId=value.roomId)=>Boolean(validDate&&durationMinutes&&!lunch.isPending&&!lunch.isError&&!calendar.isPending&&!calendar.isError&&!attendance.isPending&&!attendance.isError&&available(roomId,clock).available)
+  const ready=Boolean(room&&value.clock&&canChoose(value.clock))
   const clocks=WORK_DAY_CLOCKS.filter(clock=>clock!=='19:00')
   function changeMonth(offset:number){setViewMonth(toDateKey(new Date(year,month-1+offset,1)).slice(0,7))}
   return <section aria-label="회의실 일정 선택" className="space-y-4 rounded-lg border border-border p-3">
+    {lunch.isPending?<p role="status" className="text-xs">회사 점심시간을 확인 중입니다.</p>:lunch.isError?<p role="alert" className="text-xs text-danger">점심시간을 불러오지 못했습니다. <button type="button" className="underline" onClick={()=>void lunch.refetch()}>다시 조회</button></p>:<p className="text-xs text-muted-foreground">회사 점심시간 {lunch.data.start}–{lunch.data.end}과 겹치는 회의는 예약할 수 없습니다.</p>}
     <div className="grid gap-4 md:grid-cols-[18rem_minmax(0,1fr)]">
       <section aria-label="회의 날짜 달력" className="space-y-2 rounded-lg border border-border p-2">
         <div className="flex items-center justify-between gap-1">
@@ -118,7 +126,8 @@ export function MeetingSchedulePicker({rooms,value,onChange,durationMinutes,atte
           <tbody>{rooms.map(item=><tr key={item.id}>
             <th scope="row" className="border-t border-border p-2 text-left text-xs">{item.name}</th>
             {clocks.map(clock=>{
-              const state=available(item.id,clock),enabled=Boolean(validDate&&durationMinutes&&!calendar.isPending&&!calendar.isError&&!attendance.isPending&&!attendance.isError&&state.available)
+              const state=available(item.id,clock),enabled=canChoose(clock,item.id)
+              const atLunch=Boolean(lunch.data&&meetingOverlapsLunch(clock,durationMinutes ?? 60,lunch.data))
               const peopleBusy=rows.filter(row=>row.kind!=='remote'&&overlapsAvailability(row,clock,durationMinutes ?? 60))
               const peopleTone=peopleBusy.some(row=>row.status==='approved')?'conflict':peopleBusy.length?'warning':null
               const occupied=bookings.find(booking=>booking.roomId===item.id&&isClockCoveredByMeeting(clock,booking.startsAt.slice(11,16),booking.durationMinutes))
@@ -127,15 +136,15 @@ export function MeetingSchedulePicker({rooms,value,onChange,durationMinutes,atte
               return <td key={clock} className="border-l border-t border-border p-0">
                 <button type="button" aria-label={`${item.name} ${clock} 시작`} aria-pressed={start} disabled={!enabled}
                   title={occupied?`${formatMeetingClockRange(occupied.startsAt.slice(11,16),occupied.durationMinutes)} · ${occupied.title}`:durationMinutes===null?'회의 시간을 먼저 선택하세요.':state.reason||`${formatMeetingClockRange(clock,durationMinutes)} 선택`}
-                  className={cn('h-11 w-full text-[10px] disabled:cursor-not-allowed',attendance.isPending||attendance.isError?'bg-muted text-muted-foreground':occupied||peopleTone==='conflict'?'bg-red-100 text-red-800':peopleTone==='warning'?'bg-amber-100 text-amber-900':selected?'bg-sky-200 text-sky-950':enabled?'bg-emerald-50 text-emerald-900 hover:bg-emerald-100':'bg-muted text-muted-foreground',selected&&'ring-1 ring-inset ring-sky-600')}
-                  onClick={()=>onChange({...value,roomId:item.id,clock})}>{occupied?'예약':start?'시작':selected?'선택':peopleTone?'주의':''}</button>
+                  className={cn('h-11 w-full text-[10px] disabled:cursor-not-allowed',lunch.isPending||lunch.isError||attendance.isPending||attendance.isError?'bg-muted text-muted-foreground':occupied||peopleTone==='conflict'?'bg-red-100 text-red-800':atLunch?'bg-muted text-muted-foreground':peopleTone==='warning'?'bg-amber-100 text-amber-900':selected?'bg-sky-200 text-sky-950':enabled?'bg-emerald-50 text-emerald-900 hover:bg-emerald-100':'bg-muted text-muted-foreground',selected&&'ring-1 ring-inset ring-sky-600')}
+                  onClick={()=>onChange({...value,roomId:item.id,clock})}>{occupied?'예약':atLunch?'점심':start?'시작':selected?'선택':peopleTone?'주의':''}</button>
               </td>
             })}
           </tr>)}</tbody>
         </table>
       </div>
     </div>
-    {attendance.isPending?<p role="status" className="text-xs">멤버 일정을 확인하는 중입니다.</p>:attendance.isError?<p role="alert" className="text-xs text-danger">멤버 일정을 불러오지 못했습니다. <button type="button" className="underline" onClick={()=>void attendance.refetch()}>다시 조회</button></p>:<MeetingAvailabilityTable attendees={attendees} rows={rows} clocks={clocks} clock={value.clock} duration={durationMinutes ?? 60} onChoose={clock=>onChange({...value,clock})}/>}
+    {attendance.isPending?<p role="status" className="text-xs">멤버 일정을 확인하는 중입니다.</p>:attendance.isError?<p role="alert" className="text-xs text-danger">멤버 일정을 불러오지 못했습니다. <button type="button" className="underline" onClick={()=>void attendance.refetch()}>다시 조회</button></p>:<MeetingAvailabilityTable attendees={attendees} rows={rows} clocks={clocks} clock={value.clock} duration={durationMinutes ?? 60} canChoose={canChoose} onChoose={clock=>{if(canChoose(clock))onChange({...value,clock})}}/>}
     {conflicts.length>0?<label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={acknowledged===acknowledgmentKey} onChange={event=>setAcknowledged(event.target.checked?acknowledgmentKey:null)}/>멤버의 겹치는 일정을 확인했으며 이 시간으로 진행합니다.</label>:null}
     {error||checkError?<p role="alert" className="text-xs text-danger">{error ?? checkError}</p>:null}
     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">

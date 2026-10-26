@@ -1,5 +1,12 @@
 export const SUGGESTED_START = '10:00'
 export const ATTENDANCE_GRACE_MINUTES = 5
+export const FALLBACK_START_OPTIONS = ['09:00', '10:00']
+
+export function startOptionLabel(start: string) {
+  const match = /^(\d{2}):(\d{2})$/.exec(start)
+  if (!match) return start
+  return match[2] === '00' ? `${Number(match[1])}시` : start
+}
 export function startTone(start: string) {
   if (start === '09:00') return { tone: 'is-nine', label: '9시' }
   if (start === '10:00') return { tone: 'is-ten', label: '10시' }

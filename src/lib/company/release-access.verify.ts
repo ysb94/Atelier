@@ -49,11 +49,17 @@ for (const [departmentName,title] of [
   assert.deepEqual(companyNavGroupsForProfile({...member,status:'pending'}),[])
   assert.deepEqual(companyNavGroupsForProfile({...member,companyId:'other-company'}),[])
 }
-const md={...staff,departmentId:RELEASE_DEPARTMENT_SITES[1].id}
+const md={...staff,departmentId:RELEASE_DEPARTMENT_SITES.find(site=>site.title==='MD')!.id}
 assert.equal(releaseHref(md,'/products/atelier/M%2F1?brand=atelier'),'/product-work/md/atelier/M%2F1?brand=atelier')
 assert.equal(releaseHref(md,'/md?brand=atelier'),'/product-work/md?brand=atelier')
 assert.equal(releaseHref(md,'/product-work/md-malicious'),null)
-assert.equal(releaseHref({...staff,departmentName:'기획팀'},'/drafts'),null,'표시 이름으로 화면 진입 권한을 부여하지 않음')
-assert.equal(releaseHref({...staff,departmentId:RELEASE_DEPARTMENT_SITES[0].id},'/work-requests/planning-malicious'),null)
-assert.equal(releaseHref({...staff,departmentId:RELEASE_DEPARTMENT_SITES[2].id},'/china/work-orders-malicious'),null)
+const visual={...staff,departmentId:'7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1'}
+for (const path of ['/work-requests/design','/design/styled-cuts','/design/file-manager']) {
+  assert.equal(releaseHref(visual,path),path,'Visual 팀은 자기 메뉴를 연다')
+  assert.equal(releaseHref(staff,path),null)
+}
+assert.deepEqual(companyNavGroupsForProfile(visual).find(group=>group.title==='Visual')?.items.map(item=>item.to),['/work-requests/design','/design/styled-cuts','/design/file-manager'])
+assert.equal(releaseHref(visual,'/drafts'),null,'Visual 팀은 기획 화면을 열지 않는다')
+assert.equal(releaseHref({...staff,departmentId:RELEASE_DEPARTMENT_SITES.find(site=>site.title==='기획')!.id},'/work-requests/planning-malicious'),null)
+assert.equal(releaseHref({...staff,departmentId:RELEASE_DEPARTMENT_SITES.find(site=>site.title==='중국팀')!.id},'/china/work-orders-malicious'),null)
 console.log('release-access: 자기 부서 메뉴·준비 중 탭·타부서 차단·부서 UUID·직원/승인자·예외 3계정·직접 주소·상세 경로·업무 권한 분리 통과')

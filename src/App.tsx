@@ -6,6 +6,8 @@ import { BrandLayout } from '@/components/layout/BrandLayout'
 import { CompanyLayout } from '@/components/layout/CompanyLayout'
 import { ChatWindowPage } from '@/features/chat/ChatWindowPage'
 import { AuthProvider } from '@/lib/supabase/auth'
+import { AttendanceEntryProvider } from '@/features/home/attendance-entry-context'
+import { AttendanceEntryGate } from '@/features/home/AttendanceEntryGate'
 import {
   exposeDiagnosticsSwitch,
   installPerfWatch,
@@ -38,12 +40,12 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <AccessIpRecorder />
-        <AuthGate><BrowserRouter><Routes>
+        <AuthGate><BrowserRouter><AttendanceEntryProvider><AttendanceEntryGate><Routes>
           <Route path="/chat/room/:roomId" element={<ChatWindowPage />} />
           <Route path="/b/:brandSlug/*" element={<BrandLayout />} />
           <Route path="/*" element={<CompanyLayout />} />
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes></BrowserRouter></AuthGate>
+        </Routes></AttendanceEntryGate></AttendanceEntryProvider></BrowserRouter></AuthGate>
       </AuthProvider>
     </QueryClientProvider>
   )

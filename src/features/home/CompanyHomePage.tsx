@@ -5,6 +5,7 @@ import { primaryWorkOwner } from '@/components/layout/company-nav'
 import { canManagePersonnel, isCompanyManager, isCompanyReviewer, canAccessOperationsSupport } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
+import { HomeAttendanceSummary } from './HomeAttendanceSummary'
 import { HomeCalendar } from './HomeCalendar'
 import { useMyClockIn } from './use-my-clock-in'
 import { Button } from '@/components/ui/button'
@@ -27,11 +28,7 @@ export function CompanyHomePage() {
   return <div className="company-home">
     <header className="home-heading">
       <div><p className="home-eyebrow">E&J · MY WORKSPACE</p><h1>{profile?.displayName || '직원'}님, 안녕하세요. <span className="home-welcome">반갑습니다.</span></h1><p className="home-subtitle">오늘의 일정을 살펴보고, 필요한 업무를 이어가세요.</p><p className="home-profile-line">{profile?.departmentName || '소속 미지정'} · {profile?.position || '직책 미지정'}</p></div>
-      <section className="home-attendance-summary" aria-label="내 근태 현황">
-        <div className="home-section-heading"><h2>내 근태 현황</h2><Link to="/settings/profile" className="home-text-link">내 기록 보기<ArrowUpRight size={12} /></Link></div>
-        <dl><div><dt>이번 달 지각</dt><dd>{clock.exempt ? '제외' : <>— <span>회</span></>}</dd></div><div><dt>남은 연차</dt><dd>— <span>일</span></dd></div><div><dt>이번 달 야근</dt><dd>— <span>시간</span></dd></div></dl>
-        <p>월별 출퇴근 기록은 My home에서 확인하세요.</p>
-      </section>
+      <HomeAttendanceSummary />
     </header>
     <HomeCalendar clockIns={clock.byDate} sidebar={<>
       <section className="home-side-card home-role-card"><div className="home-section-heading"><h2>{roleLabel}</h2><ClipboardList size={16} /></div><p>{roleDescription}</p><Link to={roleHref} className="home-action-link">{reviewer ? '조직 현황 보기' : operations ? '운영지원 열기' : manager ? '팀 업무판 열기' : '내 업무 열기'}<ArrowUpRight size={15} /></Link></section>

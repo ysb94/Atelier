@@ -9,6 +9,7 @@ export const RELEASE_LOGISTICS_ID = 'c5d4cfca-97ce-4ca7-b30a-6beed842cf1e'
 /** 실제 부서 UUID로 화면을 연결한다. 부서 이름은 빈 탭의 표시 용도로만 쓴다. */
 export const RELEASE_DEPARTMENT_SITES = [
   { id: 'ced99f89-ea80-4eeb-8f03-272bf72f5db1', title: '기획', pages: ['/drafts', '/work-requests/planning'] },
+  { id: '7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1', title: 'Visual', pages: ['/work-requests/design', '/design/styled-cuts', '/design/file-manager'] },
   { id: '919b2c44-afb6-4d7e-a5b8-b7203df9cef9', title: 'MD', pages: ['/product-work/md', '/md/price-compare', '/work-requests/md'] },
   { id: 'bf926822-910c-422f-9c17-5fd3d8ddb3ba', title: '중국팀', pages: ['/china/work-orders'] },
   { id: RELEASE_OPERATIONS_ID, title: '운영지원', pages: [] },

@@ -35,6 +35,7 @@ import {
 import { listMeetingDirectory, listMeetingParticipation, uploadMeetingFile, removeMeetingFile, downloadMeetingFile, respondToMeeting, openMeetingGroup } from '@/lib/supabase/meetings'
 import { useCompanyMeetings } from './useCompanyMeetings'
 import { hasPermission } from '@/lib/company/permissions'
+import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
 import { cn, emptyList } from '@/lib/utils'
 import {
   DEFAULT_MEETING_DURATION_MINUTES,
@@ -399,7 +400,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   }
 
   async function bookSlot(nextRoomId: string, dateKey: string, startClock: string) {
-    if (!composeReady || !schedulingSeries) return
+    if (!composeReady || !schedulingSeries || schedulingSeries.host.id !== host.id) return
     const startsAt = combineDateTime(dateKey, startClock)
     setVisibleDays((current) =>
       visibleDaysToCover(todayKey, dateKey, current),
@@ -424,6 +425,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   }
 
   function scheduleNextRound(item: MeetingSeries,roundId?:string) {
+    if (item.host.id !== host.id) return
     const target=item.rounds.find(round=>round.id===roundId) ?? findPendingRound(item)
     setBoardTab('in_progress')
     setSchedulingSeriesId(item.id)
@@ -441,6 +443,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   }
 
   async function planNextRound(item: MeetingSeries): Promise<boolean> {
+    if (item.host.id !== host.id) return false
     const existing = findPendingRound(item)
     if (existing) return true
     const nextId = newMeetingId()
@@ -452,6 +455,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   }
 
   async function markDone(seriesId: string) {
+    if (series.find(item => item.id === seriesId)?.host.id !== host.id) return false
     const saved=await setSeries((prev) =>
       prev.map((item) =>
         item.id === seriesId ? { ...item, status: 'done' } : item,
@@ -462,6 +466,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   }
 
   async function markInProgress(seriesId: string) {
+    if (series.find(item => item.id === seriesId)?.host.id !== host.id) return false
     const saved=await setSeries((prev) =>
       prev.map((item) =>
         item.id === seriesId ? { ...item, status: 'in_progress' } : item,
@@ -472,7 +477,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   }
 
   async function deleteSeriesForever(item: MeetingSeries) {
-    if (!canDeleteMeetingSeries(item, host, isAdmin)) return
+    if (!canDeleteMeetingSeries(item, host)) return
     const saved=await setSeries((prev) => prev.filter((row) => row.id !== item.id))
     if(!saved) return
     if(simulating) revokeMeetingSeriesFiles(item)
@@ -639,7 +644,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                       >
                         상세
                       </Button>
-                      {canDeleteMeetingSeries(item, host, isAdmin) ? (
+                      {canDeleteMeetingSeries(item, host) ? (
                         <Button
                           type="button"
                           size="sm"
@@ -926,6 +931,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
           saveError={meetings.error}
           onClose={closeDetail}
           onSave={async (notes,revision) => {
+            if (detailSeries.host.id !== host.id) return null
             const roundId = detailRound.id
             const saved=await setSeries((prev) =>
               prev.map((item) =>
@@ -1388,6 +1394,7 @@ function MeetingTimePickerDialog({
   onClose: () => void
   onBook: (clock: string) => void
 }) {
+  const lunch = useQuery({ queryKey: ['company-work-hours'], queryFn: loadCompanyLunch })
   const [hoverStart, setHoverStart] = useState<string | null>(null)
   const [blockedNotice, setBlockedNotice] = useState<string | null>(null)
   const blockedNoticeTimer = useRef<number | null>(null)
@@ -1396,7 +1403,7 @@ function MeetingTimePickerDialog({
       new Map(
         TIME_PICKER_START_CLOCKS.map((clock) => [
           clock,
-          resolveStartTimeState({
+          lunch.isPending || lunch.isError ? { available: false, reason: '점심시간 확인 필요' } : resolveStartTimeState({
             composeReady,
             weekend: day.isWeekend,
             dateKey: day.key,
@@ -1406,6 +1413,7 @@ function MeetingTimePickerDialog({
             attendance: EMPTY_ATTENDANCE,
             occupants,
             now,
+            lunch: lunch.data,
           }),
         ]),
       ),
@@ -1417,6 +1425,9 @@ function MeetingTimePickerDialog({
       durationMinutes,
       now,
       occupants,
+      lunch.data,
+      lunch.isPending,
+      lunch.isError,
     ],
   )
   const hoverSlot = hoverStart ? slotByClock.get(hoverStart) : undefined
@@ -1472,6 +1483,7 @@ function MeetingTimePickerDialog({
             <p className="mt-0.5 text-sm text-muted-foreground">
               가능한 구간은 초록, 불가한 구간은 빨강으로 표시됩니다.
             </p>
+            {lunch.isPending ? <p role="status" className="text-xs">점심시간을 확인 중입니다.</p> : lunch.isError ? <p role="alert" className="text-xs text-danger">점심시간을 불러오지 못했습니다. <button type="button" className="underline" onClick={() => void lunch.refetch()}>다시 조회</button></p> : <p className="text-xs text-muted-foreground">점심시간 {lunch.data.start}–{lunch.data.end}에는 회의를 잡을 수 없습니다.</p>}
             <div className="mt-2 flex flex-wrap gap-1.5">
               <Badge variant="outline">
                 {formatMeetingDuration(durationMinutes)}
@@ -1670,6 +1682,7 @@ function MeetingDetailDrawer({
       result: string
     },
   ) {
+    if (!isHost) return true
     const revision=await onSave(notes ?? { prepMaterials, content, result },editRevision.current)
     if(revision===null) {setOperationError('회의를 저장하지 못했습니다. 입력 내용은 유지됩니다.');return false}
     editRevision.current=revision
@@ -1780,6 +1793,7 @@ function MeetingDetailDrawer({
           {series.phase==='preparing'?<p className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">준비 중 · 호스트와 생성자만 볼 수 있습니다. 안내와 자료를 준비한 뒤 호스트가 일정을 확정하면 멤버에게 공개됩니다.</p>:null}
           {!pending?<p className="rounded-lg bg-muted px-3 py-2 text-sm font-medium">{round.startsAt.slice(0,10)} · {formatBookedTimeRange(round.startsAt,round.durationMinutes ?? series.durationMinutes)} · {meetingRoomName(round.roomId)}</p>:null}
           {attendance}
+          {!isHost ? <p className="text-xs text-muted-foreground">회의 내용·결과·일정 수정과 삭제는 호스트만 할 수 있습니다. 참석 응답·자료 공유·대화는 계속 이용할 수 있습니다.</p> : null}
           {previousRounds.length > 0 ? (
             <section className="space-y-2">
               <h3 className="text-xs font-medium text-muted-foreground">
@@ -1812,7 +1826,7 @@ function MeetingDetailDrawer({
               <h3 className="text-xs font-medium text-muted-foreground">
                 {pending ? '회의 안내' : '회의 내용'}
               </h3>
-              {series.status === 'in_progress' ? (
+              {isHost && series.status === 'in_progress' ? (
                 <Button type="button" size="sm" variant="outline" onClick={() => void run(async () => { await persistNotes() })}>저장</Button>
               ) : null}
             </div>
@@ -1821,6 +1835,7 @@ function MeetingDetailDrawer({
               rows={10}
               placeholder="회의에서 나온 내용을 빠짐없이 적습니다."
               aria-label={pending?'회의 안내':'회의 내용'}
+              readOnly={!isHost}
               onChange={(event) => setContent(event.target.value)}
             />
           </section>
@@ -1920,6 +1935,7 @@ function MeetingDetailDrawer({
               rows={5}
               placeholder="결정 사항, 담당, 기한을 적습니다."
               aria-label="회의 결과"
+              readOnly={!isHost}
               onChange={(event) => setResult(event.target.value)}
             />
           </section> : null}
@@ -1946,24 +1962,24 @@ function MeetingDetailDrawer({
                 저장하고 다음 회의 진행
               </Button>
             ) : null}
-            <Button
+            {isHost ? <Button
               type="button"
               variant="secondary"
               onClick={() => void run(async()=>{if(await persistNotes()) await onMarkDone()})}
             >
               <Check className="size-3.5" />
               회의건 종료
-            </Button>
+            </Button> : null}
           </div>
         ) : (
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-5 py-3">
-            <Button
+            {isHost ? <Button
               type="button"
               variant="outline"
               onClick={() => void run(async()=>{if(await persistNotes()) await onReopen()})}
             >
               다시 진행중으로
-            </Button>
+            </Button> : <Button type="button" variant="outline" onClick={onClose}>닫기</Button>}
           </div>
         )}
         </fieldset>

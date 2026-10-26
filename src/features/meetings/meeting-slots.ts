@@ -384,6 +384,13 @@ export function formatDayBlockLabel(blocks: readonly DayBlock[]): string {
   return labels.join(' · ')
 }
 
+export type MeetingLunch = { start: string; end: string }
+
+export function meetingOverlapsLunch(clock: string, duration: number, lunch: MeetingLunch): boolean {
+  const start = clockToMinutes(clock)
+  return start < clockToMinutes(lunch.end) && start + duration > clockToMinutes(lunch.start)
+}
+
 export function resolveStartTimeState(input: {
   composeReady?: boolean
   weekend?: boolean
@@ -394,6 +401,7 @@ export function resolveStartTimeState(input: {
   attendance: readonly AttendanceEntry[]
   occupants: readonly MeetingDraft[]
   now: Date
+  lunch?: MeetingLunch
 }): StartTimeState {
   if (input.weekend) {
     return { available: false, reason: '주말' }
@@ -403,6 +411,10 @@ export function resolveStartTimeState(input: {
   }
   if (isClockPastOnDay(input.dateKey, input.clock, input.now)) {
     return { available: false, reason: '지난 시간' }
+  }
+  const lunch = input.lunch ?? { start: '12:00', end: '13:00' }
+  if (meetingOverlapsLunch(input.clock, input.durationMinutes, lunch)) {
+    return { available: false, reason: `점심시간 ${lunch.start}–${lunch.end}` }
   }
   const taken = overlappingMeeting(
     input.clock,

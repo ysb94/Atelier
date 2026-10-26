@@ -6,7 +6,7 @@
 .home-heading h1 { font-size: 22px; font-weight: 700; line-height: 1.2; letter-spacing: -.025em; margin: 0; }
 .home-subtitle { margin: 7px 0 0; font-size: 13px; color: #787b82; }
  .home-profile-line { margin: 7px 0 0; color: #92918d; font-size: 10px; }
-.home-attendance-summary { flex: 0 0 370px; background: #fff; border: 1px solid var(--home-line); border-radius: 11px; padding: 14px 18px 11px; }
+.home-attendance-summary { --home-red: #c60920; --home-line: #e7e4de; flex: 0 0 370px; background: #fff; border: 1px solid var(--home-line); border-radius: 11px; padding: 14px 18px 11px; }
 .home-attendance-summary dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 13px; }
 .home-attendance-summary dl > div + div { border-left: 1px solid var(--home-line); padding-left: 17px; }
 .home-attendance-summary dt { font-size: 10px; color: #80848c; }

@@ -26,7 +26,6 @@ import {
   insertMissingDepartmentGroups,
   type CompanyNavItem,
 } from './company-workspace-nav'
-import { SiteClockInPrompt } from '@/features/home/SiteClockInPrompt'
 import { WorkspaceHeaderActions } from './WorkspaceHeaderActions'
 import { DeveloperPreviewBar, DeveloperPreviewProvider } from './DeveloperPreview'
 import {
@@ -383,7 +382,6 @@ function CompanyWorkspaceMain() {
           </ReleasePageGate>
         </div>
       </div>
-      <SiteClockInPrompt />
     </main>
   )
 }

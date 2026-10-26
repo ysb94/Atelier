@@ -1,6 +1,20 @@
 import assert from 'node:assert/strict'
 import { DEFAULT_REMINDER_BASIS as basis, reminderPreview, validateRequest, type RequestForm, type PersonalRequest } from './personal-requests.ts'
+import { endAfterMinutes, leaveTimePresets, leaveWorkMinutes, rangeMinutes } from './request-time-options.ts'
 const form: RequestForm = { kind: 'half', from: '2026-10-08', to: '2026-10-08', start: '09:00', end: '14:00', note: '', place: '' }
+assert.deepEqual(leaveTimePresets('half').map(({start,end})=>[start,end]),[['09:00','14:00'],['14:00','18:00']])
+assert.deepEqual(leaveTimePresets('quarter').map(({start,end})=>[start,end]),[['09:00','11:00'],['16:00','18:00']])
+for (const kind of ['half','quarter'] as const) for (const preset of leaveTimePresets(kind)) {
+  assert.equal(validateRequest({...form,kind,start:preset.start,end:preset.end},[],basis),'','빠른 선택도 기존 검증을 통과해야 함')
+  assert.equal(leaveWorkMinutes(preset.start,preset.end),kind==='half'?240:120)
+}
+assert.equal(leaveWorkMinutes('11:00','14:00'),120,'점심시간은 휴가 사용시간에서 제외')
+assert.equal(endAfterMinutes('18:07',90),'19:37','직접 입력한 분을 반올림하지 않음')
+assert.equal(rangeMinutes('18:07','19:37'),90)
+assert.equal(endAfterMinutes('23:30',30),null,'24:00으로 자동 변환하지 않음')
+assert.equal(endAfterMinutes('23:45',60),null,'다음날로 자동 이동하지 않음')
+assert.equal(endAfterMinutes('18:',60),null)
+assert.equal(rangeMinutes('19:00','18:00'),null)
 assert.equal(validateRequest(form,[],basis),'')
 assert.match(reminderPreview(form,basis)[0],/14:00/)
 assert.match(reminderPreview({...form,start:'14:00',end:'18:00'},basis)[1],/14:00/)

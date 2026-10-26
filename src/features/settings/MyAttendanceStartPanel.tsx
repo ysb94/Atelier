@@ -6,6 +6,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { useOpsDirectory } from '@/features/operations-support/ops-directory'
 import { useAttendanceStartSettings } from '@/features/operations-support/use-attendance-start-settings'
 import { ATTENDANCE_GRACE_MINUTES, forgivenClock, resolveAttendanceStart, startTone, SUGGESTED_START } from '@/features/operations-support/attendance-start-settings'
+import { StartTimeChoices } from '@/features/operations-support/StartTimeChoices'
 import { memberLabel } from '@/features/operations-support/OpsStat'
 import { useAuth } from '@/lib/supabase/auth'
 import { hasPermission } from '@/lib/company/permissions'
@@ -78,11 +79,8 @@ export function MyAttendanceStartPanel({ departmentIds: _departmentIds }: { depa
     </div>
     <div className="attendance-start-months" role="group" aria-label="설정 기준 월">{months.map(value => <button key={value} type="button" disabled={busy || !validYear} aria-pressed={month === value} onClick={() => setMonthNo(value.slice(5, 7))}>{Number(value.slice(5, 7))}월</button>)}</div>
     {!validYear && <p role="alert" className="text-sm text-danger">2000–2100년 사이의 연도를 입력해 주세요.</p>}
-    <div className="flex flex-wrap items-end gap-3">
-      <div className="attendance-start-presets" role="group" aria-label="적용할 출근시간">
-        <Button type="button" size="sm" variant={start === '09:00' ? 'default' : 'outline'} aria-pressed={start === '09:00'} disabled={busy} onClick={() => setStart('09:00')}>9시</Button>
-        <Button type="button" size="sm" variant={start === '10:00' ? 'default' : 'outline'} aria-pressed={start === '10:00'} disabled={busy} onClick={() => setStart('10:00')}>10시</Button>
-      </div>
+      <div className="flex flex-wrap items-end gap-3">
+      <StartTimeChoices value={start} disabled={busy} onChange={setStart} />
       <p className="pb-2 text-xs text-muted-foreground">정해진 출근시간에서 {ATTENDANCE_GRACE_MINUTES}분까지 인정합니다.</p>
       <Button type="button" disabled={busy || unavailable || !validYear || checkedVisible.length === 0} onClick={() => void apply()}><Check size={14} />{busy ? '적용 중…' : `${Number(monthNo)}월 · ${checkedVisible.length}명 적용`}</Button>
       {graceUntil && <p className="pb-2 text-xs text-muted-foreground">{graceUntil}까지는 기준 초과로 보지 않습니다.</p>}

@@ -73,7 +73,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
     ],
   },
   {
-    title: '디자인',
+    title: 'Visual',
     items: [
       { to: '/work-requests/design', label: '작업 요청', icon: ClipboardList },
       { to: '/design/styled-cuts', label: '연출 컷 제작', icon: Camera },
@@ -120,6 +120,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
     title: '운영지원',
     items: [
       { to: '/operations-support', label: '운영지원', icon: Headset },
+      { to: '/settings/permissions', label: '권한·담당자 설정', icon: Users },
     ],
   },
   {
@@ -141,7 +142,6 @@ export const companyNavGroups: CompanyNavGroup[] = [
   {
     title: '설정',
     items: [
-      { to: '/settings/permissions', label: '권한·담당자 설정', icon: Users },
       { to: '/settings/access-ip', label: '접속·출근 IP 기록', icon: Network },
       { to: '/settings/fields', label: '업로드 항목', icon: ListChecks },
       { to: '/settings/usage-targets', label: '출고업체', icon: Store },
@@ -174,11 +174,12 @@ export function companyNavGroupsForProfile(
       const items = showBrandManagement
         ? group.items
         : group.items.filter(item => item.to !== '/brands')
-      const allowedItems = items.filter(item => releaseHref(profile, item.to) !== null && (item.to !== '/settings/access-ip' || showAccessIpMenu(profile)) && (item.to !== '/settings/permissions' || scope.operations || hasPermission(profile, 'permissions.manage') || hasPermission(profile, 'approvers.manage') || hasPermission(profile, 'partner.manage')))
+      const allowedItems = items.filter(item => releaseHref(profile, item.to) !== null && (item.to !== '/settings/access-ip' || showAccessIpMenu(profile)))
       return allowedItems.length > 0 ? [{ ...group, items: allowedItems }] : []
     }
+    const showPermissions = scope.operations || hasPermission(profile, 'permissions.manage') || hasPermission(profile, 'approvers.manage') || hasPermission(profile, 'partner.manage')
     const items = [
-      ...(showOperationsSupport ? group.items.filter(item => releaseHref(profile, item.to) !== null) : []),
+      ...group.items.filter(item => releaseHref(profile, item.to) !== null && (item.to !== '/settings/permissions' ? showOperationsSupport : showPermissions)),
       ...(showMembers && releaseHref(profile, membersNavItem.to) !== null ? [membersNavItem] : []),
     ]
     return items.length > 0 ? [{ ...group, items }] : []

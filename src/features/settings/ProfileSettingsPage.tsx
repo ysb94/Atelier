@@ -1,4 +1,5 @@
 import { PageHeader } from '@/components/layout/PageHeader'
+import { HomeAttendanceSummary } from '@/features/home/HomeAttendanceSummary'
 import {
   Card,
   CardContent,
@@ -94,7 +95,10 @@ function ProfileSettingsContent() {
 
   return (
     <div>
-      <PageHeader title="My home" />
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between [&>div]:mb-0">
+        <PageHeader title="My home" />
+        <HomeAttendanceSummary />
+      </div>
 
       <div className="personal-page-tabs" role="tablist" aria-label="My home 메뉴">
         {tabs.map(tab => <Fragment key={tab.id}>

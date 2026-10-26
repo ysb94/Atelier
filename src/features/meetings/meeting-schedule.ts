@@ -454,9 +454,8 @@ export function canRemoveBookedMeeting(
 export function canDeleteMeetingSeries(
   series: Pick<MeetingSeries, 'host'>,
   actor: Pick<MeetingPerson, 'id'>,
-  isAdmin: boolean,
 ): boolean {
-  return isAdmin || series.host.id === actor.id
+  return series.host.id === actor.id
 }
 
 export type MeetingSeriesDeleteImpact = {

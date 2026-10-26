@@ -1,6 +1,6 @@
 import type { PersonalRequest } from './personal-requests'
 
-export type AttendanceClock = { date: string; clockIn: string; clockOutAt: string | null }
+export type AttendanceClock = { date: string; clockIn: string; clockOutAt: string | null; clockOutReportedAt?: string | null }
 export type AttendanceDay = AttendanceClock & { requests: PersonalRequest[]; correction: PersonalRequest | null; future: boolean }
 export type DayClock = { start: string; end: string; corrected: boolean }
 const koreaDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -11,7 +11,12 @@ export function koreaDateKey(date = new Date()): string {
   const part = (name: string) => parts.find(item => item.type === name)!.value
   return `${part('year')}-${part('month')}-${part('day')}`
 }
-export function clockOutLabel(value: string | null): string { return value ? koreaTime.format(new Date(value)) : '' }
+export function clockOutLabel(value: string | null, workDate?: string): string {
+  if (!value) return ''
+  const stamp = new Date(value), time = koreaTime.format(stamp), date = koreaDateKey(stamp)
+  if (!workDate || date <= workDate) return time
+  return `${date} ${time}`
+}
 export function validAttendanceMonth(month: string): boolean { return /^(19\d{2}|[2-9]\d{3})-(0[1-9]|1[0-2])$/.test(month) }
 export function attendanceMonthDates(month: string): string[] {
   if (!validAttendanceMonth(month)) throw new Error('조회할 월을 확인해 주세요.')
@@ -32,5 +37,5 @@ export function buildMyAttendance(month: string, clocks: AttendanceClock[], requ
 /** 승인된 정정은 표시에만 덮어쓴다. 출퇴근 원본은 바꾸지 않는다. */
 export function dayClock(day: AttendanceDay): DayClock {
   if (day.correction) return { start: day.correction.start, end: day.correction.end, corrected: true }
-  return { start: day.clockIn, end: clockOutLabel(day.clockOutAt), corrected: false }
+  return { start: day.clockIn, end: clockOutLabel(day.clockOutAt, day.date), corrected: false }
 }

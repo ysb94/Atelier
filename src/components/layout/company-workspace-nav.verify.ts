@@ -11,12 +11,15 @@ const departments = [
   'B2B 사업팀', 'OFF LINE TEAM', 'CHINA', '운영지원팀', '중국팀', '마케팅팀',
 ].map(name => ({ name }))
 const missing = missingDepartmentNavGroups(departments, companyNavGroups)
-assert.deepEqual(missing.map(group => group.title), ['Contents', 'Global Online', 'Visual', 'B2B 사업', 'OFF LINE', 'CHINA', '마케팅'])
+assert.deepEqual(missing.map(group => group.title), ['Contents', 'Global Online', 'B2B 사업', 'OFF LINE', 'CHINA', '마케팅'])
+assert.equal(missing.some(group => group.title === 'Visual'), false, 'Visual Team은 디자인 메뉴를 이름만 바꾼 것이다')
+assert.equal(companyNavGroups.some(group => group.title === 'Visual'), true)
+assert.equal(companyNavGroups.some(group => group.title === '디자인'), false)
 assert.ok(missing.every(group => group.items.length === 0))
 
 const inserted = insertMissingDepartmentGroups(companyNavGroups, departments)
 const titles = inserted.map(group => group.title)
 assert.equal(titles.includes('운영진'), false)
 assert.ok(titles.indexOf('Contents') < titles.indexOf('데이터'))
-assert.equal(titles.filter(title => title === '기획').length, 1)
+assert.equal(titles.filter(title => title === 'Visual').length, 1)
 assert.equal(titles.includes('중국'), false)

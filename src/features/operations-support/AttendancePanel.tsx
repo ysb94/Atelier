@@ -8,8 +8,10 @@ import { interactionContext } from '@/lib/diagnostics/perf-watch'
 import { useAuth } from '@/lib/supabase/auth'
 import { formatNumber } from '@/lib/utils'
 import { AttendanceCalendar } from './AttendanceCalendar'
+import { AttendanceLatePanel } from './AttendanceLatePanel'
 import { AttendanceStartSettingsPanel } from './AttendanceStartSettingsPanel'
 import { useAttendanceStartSettings } from './use-attendance-start-settings'
+import { useAttendanceStartOptions } from './use-attendance-start-options'
 import { attendanceStartIndex, resolveAttendanceStart, type AttendanceStartSetting } from './attendance-start-settings'
 import { exportAttendance, type AttendanceRow } from './attendance-export'
 import { memberLabel, OpsPanelFrame, OpsStat } from './OpsStat'
@@ -36,15 +38,17 @@ export function AttendancePanel() {
   const directory = useMemo<ReturnType<typeof useOpsDirectory>>(() => ({ departments, members, departmentName, loading, error, refetch: () => refetchRef.current() }), [departments, members, departmentName, loading, error])
   const { profile } = useAuth()
   const saved = useAttendanceStartSettings()
-  const [part, setPart] = useState<'all' | 'settings'>('all')
+  const [part, setPart] = useState<'all' | 'settings' | 'late'>('all')
   const [editing, setEditing] = useState<{ id?: string; month?: string }>({})
   return <div className="space-y-5">
     <div role="group" aria-label="근태 관리 메뉴" className="flex flex-wrap gap-2">
       <Button variant={part === 'all' ? 'default' : 'outline'} aria-pressed={part === 'all'} onClick={() => setPart('all')}>전체 근태 관리</Button>
       <Button variant={part === 'settings' ? 'default' : 'outline'} aria-pressed={part === 'settings'} onClick={() => {setEditing({});setPart('settings')}}>출근시간 확인</Button>
+      <Button variant={part === 'late' ? 'default' : 'outline'} aria-pressed={part === 'late'} onClick={() => setPart('late')}>지각 * 결근 관리</Button>
     </div>
     <div hidden={part !== 'all'}><AttendanceWorkspace directory={directory} canEdit={hasPermission(profile, 'attendance.manage')} savedSettings={saved.settings} settingsLoading={saved.loading} settingsError={Boolean(saved.error)} onEditStart={(id,month) => {setEditing({id,month});setPart('settings')}}/></div>
     {part === 'settings' && <AttendanceStartSettingsPanel readOnly key={`${editing.id}:${editing.month}`} directory={directory} schedules={saved} initialEmployeeId={editing.id} initialMonth={editing.month}/>}
+    {part === 'late' && <AttendanceLatePanel directory={directory} schedules={saved} />}
   </div>
 }
 
@@ -54,6 +58,7 @@ export function AttendanceWorkspace({ directory, canEdit, today = localDateKey(n
   savedSettings?: AttendanceStartSetting[]; settingsLoading?: boolean; settingsError?: boolean; onEditStart?: (id: string,month: string) => void
 }) {
   useRenderWatch('AttendanceWorkspace')
+  const { options: startOptions } = useAttendanceStartOptions()
   const { members, departmentName } = directory
   const [month, setMonth] = useState(initialMonth ?? today.slice(0, 7))
   const [departmentId, setDepartmentId] = useState('all')
@@ -131,7 +136,7 @@ export function AttendanceWorkspace({ directory, canEdit, today = localDateKey(n
       {selected && view === 'summary' && <aside className="attendance-detail" aria-label={`${memberLabel(selected.member.displayName)} 월별 근태 상세`}>
         <header><div><span>{selected.team} · {monthLabel(month)}</span><h2>{memberLabel(selected.member.displayName)}</h2></div><button type="button" aria-label="개인 달력 닫기" onClick={() => setSelectedId(null)}><X size={18} /></button></header>
         <div className="attendance-detail-body">
-          <div className="attendance-schedule">{savedSettings ? <div><p className="text-sm">저장된 출근 기준 · {selected.schedule.start || '미설정'} · 초과 +{selected.schedule.grace}분</p><Button variant="outline" size="sm" className="mt-2" onClick={() => onEditStart?.(selected.member.id,month)}>출근시간 확인</Button></div> : <><label>출근 기준<Select aria-label="직원 출근 기준" value={selected.schedule.start} disabled={!canEdit} onChange={event => updateSchedule({ start: event.target.value })}><option value="">미설정</option><option value="09:00">09:00</option><option value="10:00">10:00</option>{selected.schedule.start && !['09:00', '10:00'].includes(selected.schedule.start) && <option value={selected.schedule.start}>{selected.schedule.start}</option>}</Select></label><label>초과 기준<Input type="number" aria-label="출근 초과 기준 분" min={0} max={60} value={selected.schedule.grace} disabled={!canEdit} onChange={event => updateSchedule({ grace: Math.max(0, Math.min(60, Number(event.target.value) || 0)) })} /></label></>}</div>
+          <div className="attendance-schedule">{savedSettings ? <div><p className="text-sm">저장된 출근 기준 · {selected.schedule.start || '미설정'} · 초과 +{selected.schedule.grace}분</p><Button variant="outline" size="sm" className="mt-2" onClick={() => onEditStart?.(selected.member.id,month)}>출근시간 확인</Button></div> : <><label>출근 기준<Select aria-label="직원 출근 기준" value={selected.schedule.start} disabled={!canEdit} onChange={event => updateSchedule({ start: event.target.value })}><option value="">미설정</option>{[...startOptions, ...(selected.schedule.start && !startOptions.includes(selected.schedule.start) ? [selected.schedule.start] : [])].map(item => <option key={item} value={item}>{item}</option>)}</Select></label><label>초과 기준<Input type="number" aria-label="출근 초과 기준 분" min={0} max={60} value={selected.schedule.grace} disabled={!canEdit} onChange={event => updateSchedule({ grace: Math.max(0, Math.min(60, Number(event.target.value) || 0)) })} /></label></>}</div>
           <p className="attendance-detail-hint">토요일은 파란색, 일요일과 공휴일은 빨간색, 미기록 근무일은 주황색입니다. 정시 이후는 분홍색, 출근 기준 +{selected.schedule.grace}분 초과는 더 진한 빨간색입니다. 미래 날짜는 월 집계에서 제외합니다.</p>
           <AttendanceCalendar month={month} memberId={selected.member.id} records={records} schedule={selected.schedule} overrides={overrides} today={today} />
           <dl className="attendance-person-stats"><div><dt>평균 출근</dt><dd>{formatTime(selected.summary.average)}</dd></div><div><dt>가장 이른 출근</dt><dd>{formatTime(selected.summary.earliest)}</dd></div><div><dt>가장 늦은 출근</dt><dd>{formatTime(selected.summary.latest)}</dd></div><div><dt>예비군·공가 / 결근</dt><dd>{selected.summary.official}일 / {selected.summary.absent}일</dd></div></dl>

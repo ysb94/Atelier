@@ -20,6 +20,7 @@ import { useChatRealtime } from '@/features/chat/use-chat-realtime'
 import { useChatRooms } from '@/features/chat/use-chat'
 import { hasPermission } from '@/lib/company/permissions'
 import { useRenderWatch } from '@/lib/diagnostics/render-watch'
+import { AttendanceStatusActions } from '@/features/home/AttendanceEntryGate'
 import { inboxBadgeLabel } from '@/lib/inbox/format'
 import type { ChatRoom, InboxNotification } from '@/lib/inbox/types'
 import { useAuth } from '@/lib/supabase/auth'
@@ -150,6 +151,7 @@ function ReleasedHeaderActions() {
       ref={rootRef}
       className="relative mr-10 flex shrink-0 items-center gap-0.5 px-1.5 pt-2"
     >
+      <AttendanceStatusActions />
       <HeaderIconButton
         buttonRef={chatButtonRef}
         label={open === 'chat' ? '채팅 닫기' : '채팅'}

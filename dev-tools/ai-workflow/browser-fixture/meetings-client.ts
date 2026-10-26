@@ -3,6 +3,12 @@ import { MEETING_ROOMS, seriesToDrafts, type MeetingSeries } from '@/features/me
 const key='atelier:meeting-fixture'
 const host={id:'fixture-user',name:'화면 검수'},member={id:'other-user',name:'검증 동료'}
 const actor=new URLSearchParams(location.search).has('meeting-member')?member.id:host.id
+export function meetingFixtureLunch(){
+ const query={select(){return query},maybeSingle(){return query},then(resolve:(value:unknown)=>unknown){
+  const setting=JSON.parse(sessionStorage.getItem('atelier:meeting-lunch-fixture')??'null')
+  return Promise.resolve({data:setting?.error?null:setting,error:setting?.error?{message:'검증용 점심시간 조회 실패'}:null}).then(resolve)
+ }};return query
+}
 type State={series:MeetingSeries[];files:Record<string,{path:string;text:string;name:string;roundId:string}>;audit:string[];read?:string[];failNext?:boolean;notices?:any[];availability?:any[];participation?:{profile_id:string;titles:string[]}[];participationError?:boolean}
 function state():State {
  const saved=sessionStorage.getItem(key)

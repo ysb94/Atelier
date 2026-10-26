@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import { PGlite } from '@electric-sql/pglite'
 import { verifyMeetingParticipation } from './meeting-participation-db.mjs'
+import { verifyMeetingHostLunch } from './meeting-host-lunch-db.mjs'
 
 const db=await PGlite.create()
 const company='10000000-0000-4000-8000-000000000001', foreign='10000000-0000-4000-8000-000000000002'
@@ -232,5 +233,6 @@ try{
  await actor(host)
  assert.equal((await scalar('select public.list_my_meeting_invitations()')).filter(item=>item.meeting?.role==='host').length,1,'마지막 멤버 수락과 재시도에서도 알림 한 건')
  await db.exec('reset role');assert.equal(await original(),before)
- console.log('meetings-db: 기존 저장·권한 보존 + 호스트 알림 중복/읽음/응답 전환·수신자 격리·일정 변경 + 휴가 요약 조회/사유 비노출/타사·비호스트 차단 통과')
+ await verifyMeetingHostLunch(db,{company,host,member,admin,draftId:draft.id,roundId:responseRound,actor})
+ console.log('meetings-db: 기존 저장 + 호스트 알림 중복/읽음/응답 전환·수신자 격리·일정 변경 + 휴가 요약 조회/사유 비노출/타사·비호스트 차단 통과')
 }catch(error){console.error('meetings-db:',{message:error.message,code:error.code,where:error.where});process.exitCode=1}finally{await db.close()}

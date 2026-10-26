@@ -32,20 +32,25 @@ export function useMyClockIn() {
   const save = useMutation({ mutationFn: clockInToday, onSuccess: () => client.invalidateQueries({ queryKey: ['attendance-clock-ins'] }) })
   const departure = useMutation({ mutationFn: clockOutToday, onSuccess: () => client.invalidateQueries({ queryKey: ['attendance-clock-ins'] }) })
   const undoDeparture = useMutation({ mutationFn: undoClockOutToday, onSuccess: () => client.invalidateQueries({ queryKey: ['attendance-clock-ins'] }) })
-  return {
+  const saving = save.isPending || departure.isPending || undoDeparture.isPending
+  const error = save.error instanceof Error ? save.error.message : departure.error instanceof Error ? departure.error.message : undoDeparture.error instanceof Error ? undoDeparture.error.message : save.error || departure.error || undoDeparture.error ? '출퇴근을 기록하지 못했습니다.' : ''
+  const recordIn = save.mutateAsync, recordOut = departure.mutateAsync, undoOut = undoDeparture.mutateAsync, refresh = query.refetch
+  return useMemo(() => ({
+    rows,
+    todayRecord,
     byDate,
     todayClock: byDate[today] ?? '',
     todayClockOut: clockOutLabel(todayRecord?.clockOutAt ?? null),
     exempt,
     needsClockIn: allowed && !exempt && !query.isPending && !query.error && !byDate[today],
     needsClockOut: allowed && !exempt && !query.isPending && !query.error && Boolean(todayRecord?.clockIn) && !todayRecord?.clockOutAt,
-    clockIn: () => save.mutateAsync(),
-    clockOut: () => departure.mutateAsync(),
-    undoClockOut: () => undoDeparture.mutateAsync(),
-    saving: save.isPending || departure.isPending || undoDeparture.isPending,
-    error: save.error instanceof Error ? save.error.message : departure.error instanceof Error ? departure.error.message : undoDeparture.error instanceof Error ? undoDeparture.error.message : save.error || departure.error || undoDeparture.error ? '출퇴근을 기록하지 못했습니다.' : '',
+    clockIn: () => recordIn(),
+    clockOut: () => recordOut(),
+    undoClockOut: () => undoOut(),
+    saving,
+    error,
     queryError: query.error,
-    refresh: () => query.refetch(),
+    refresh,
     loading: allowed && query.isPending,
-  }
+  }), [rows, todayRecord, byDate, today, exempt, allowed, query.isPending, query.error, saving, error, recordIn, recordOut, undoOut, refresh])
 }

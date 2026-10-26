@@ -2,9 +2,9 @@ import { cn } from '@/lib/utils'
 import type { MeetingPerson } from './meeting-schedule'
 import { AVAILABILITY_LABEL, availabilityMinutes, availabilityTone, overlapsAvailability, type MeetingAvailability } from './meeting-availability'
 
-export function MeetingAvailabilityTable({attendees,rows,clocks,clock,duration,onChoose}:{
+export function MeetingAvailabilityTable({attendees,rows,clocks,clock,duration,onChoose,canChoose}:{
   attendees:readonly MeetingPerson[];rows:readonly MeetingAvailability[];clocks:readonly string[]
-  clock:string;duration:number;onChoose:(clock:string)=>void
+  clock:string;duration:number;onChoose:(clock:string)=>void;canChoose?:(clock:string)=>boolean
 }) {
   const selected = clock ? rows.filter(row => overlapsAvailability(row,clock,duration)) : []
   return <section aria-label="멤버별 일정" className="space-y-2">
@@ -19,9 +19,10 @@ export function MeetingAvailabilityTable({attendees,rows,clocks,clock,duration,o
             const entries=rows.filter(row=>row.personId===person.id&&overlapsAvailability(row,time,30))
             const tone=entries.some(row=>availabilityTone(row)==='conflict')?'conflict':entries.some(row=>availabilityTone(row)==='warning')?'warning':entries.length?'info':'free'
             const selectedTime=clock&&availabilityMinutes(time)>=availabilityMinutes(clock)&&availabilityMinutes(time)<availabilityMinutes(clock)+duration
-            return <td key={time} className="border-l border-t border-border p-0"><button type="button" aria-label={`${person.name} ${time} 일정`}
-              title={entries.length?entries.map(row=>`${AVAILABILITY_LABEL[row.kind]} ${row.start}–${row.end}${row.status==='pending'?' · 승인 대기':''}`).join('\n'):'등록된 일정 없음'}
-              className={cn('h-10 w-full',tone==='conflict'?'bg-red-100 text-red-800':tone==='warning'?'bg-amber-100 text-amber-900':tone==='info'?'bg-sky-100 text-sky-900':'bg-emerald-50',selectedTime&&'ring-1 ring-inset ring-sky-600')}
+            const enabled=canChoose ? canChoose(time) : true
+            return <td key={time} className="border-l border-t border-border p-0"><button type="button" aria-label={`${person.name} ${time} 일정`} disabled={!enabled}
+              title={!enabled?'회의실 표에서 선택 가능한 시간을 골라주세요.':entries.length?entries.map(row=>`${AVAILABILITY_LABEL[row.kind]} ${row.start}–${row.end}${row.status==='pending'?' · 승인 대기':''}`).join('\n'):'등록된 일정 없음'}
+              className={cn('h-10 w-full disabled:cursor-not-allowed',!enabled?'bg-muted text-muted-foreground':tone==='conflict'?'bg-red-100 text-red-800':tone==='warning'?'bg-amber-100 text-amber-900':tone==='info'?'bg-sky-100 text-sky-900':'bg-emerald-50',selectedTime&&'ring-1 ring-inset ring-sky-600')}
               onClick={()=>onChoose(time)}>{entries.length?AVAILABILITY_LABEL[entries[0].kind]:''}</button></td>
           })}</tr>)}</tbody>
       </table>

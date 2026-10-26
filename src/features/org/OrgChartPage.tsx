@@ -24,6 +24,14 @@ import {
 import { personInitials } from '@/lib/company/person-name'
 import { useAuth } from '@/lib/supabase/auth'
 import {
+  emptyRoster,
+  listEmployeeRosters,
+  ROSTER_FIELDS,
+  saveEmployeeRosterField,
+  type EmployeeRoster,
+  type RosterFieldKey,
+} from '@/lib/supabase/employee-roster'
+import {
   deletePersonnelTitle,
   listDepartments,
   listOrgChartMembers,
@@ -667,8 +675,22 @@ function MemberAssignmentTable({
   canChange: boolean
   filtered: boolean
 }) {
+  const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [sort, setSort] = useState<{ key: AssignmentSortKey; direction: 'asc' | 'desc' } | null>(null)
+  const rosterQuery = useQuery({
+    queryKey: ['employee-roster'],
+    queryFn: listEmployeeRosters,
+    enabled: canChange,
+  })
+  const rosters = useMemo(() => {
+    const map = new Map<string, EmployeeRoster>()
+    for (const row of rosterQuery.data ?? emptyList<EmployeeRoster>()) {
+      map.set(row.profileId, row)
+    }
+    return map
+  }, [rosterQuery.data])
+  const columnCount = 5 + (canChange ? ROSTER_FIELDS.length : 0)
   const sortedMembers = useMemo(() => {
     if (!sort) return members
     const direction = sort.direction === 'asc' ? 1 : -1
@@ -705,6 +727,22 @@ function MemberAssignmentTable({
     onError: (err) => {
       console.warn('[org-chart] 직원 배치 저장 실패', err)
       setError(err instanceof Error ? err.message : '저장하지 못했습니다.')
+    },
+  })
+
+  const rosterMutation = useMutation({
+    mutationFn: (input: {
+      profileId: string
+      field: RosterFieldKey
+      value: string
+    }) => saveEmployeeRosterField(input.profileId, input.field, input.value),
+    onSuccess: async () => {
+      setError(null)
+      await queryClient.invalidateQueries({ queryKey: ['employee-roster'] })
+    },
+    onError: (err) => {
+      console.warn('[org-chart] 근로자 명부 저장 실패', err)
+      setError(err instanceof Error ? err.message : '명부를 저장하지 못했습니다.')
     },
   })
 
@@ -749,27 +787,39 @@ function MemberAssignmentTable({
           </span>
         </h2>
         <p className="mt-1 text-xs text-muted-foreground">
-          부서·직책·직급·입사일을 바꾸면 바로 저장됩니다. 입사일이 없는 직원은
-          비워 두면 됩니다.
+          부서·직책·직급·입사일과 명부 항목을 바꾸면 바로 저장됩니다. 입사일이
+          없는 직원은 비워 두면 됩니다.
         </p>
+        {rosterQuery.isError ? (
+          <p className="mt-2 text-sm text-danger">
+            근로자 명부를 불러오지 못했습니다.
+          </p>
+        ) : null}
         {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
       </div>
-      <div className="mt-3 overflow-x-auto">
-        <table className="w-full min-w-[820px] text-left text-sm">
-          <thead className="border-y border-border bg-primary text-xs text-primary-foreground">
+      <div className="mt-3 max-h-[min(36rem,calc(100dvh-32rem))] overflow-auto">
+        <table className="w-max min-w-full text-left text-sm">
+          <thead className="sticky top-0 z-10 border-y border-border bg-primary text-xs text-primary-foreground">
             <tr>
               <AssignmentSortHeader label="이름" column="name" sort={sort} onSort={toggleSort} />
               <AssignmentSortHeader label="부서" column="department" sort={sort} onSort={toggleSort} />
               <AssignmentSortHeader label="직책" column="duty" sort={sort} onSort={toggleSort} />
               <AssignmentSortHeader label="직급" column="grade" sort={sort} onSort={toggleSort} />
               <AssignmentSortHeader label="입사일" column="hire" sort={sort} onSort={toggleSort} />
+              {canChange
+                ? ROSTER_FIELDS.map((field) => (
+                    <th key={field.key} className="whitespace-nowrap px-4 py-2.5 font-medium">
+                      {field.label}
+                    </th>
+                  ))
+                : null}
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={columnCount}
                   className="px-4 py-8 text-center text-muted-foreground"
                 >
                   불러오는 중...
@@ -778,7 +828,7 @@ function MemberAssignmentTable({
             ) : members.length === 0 ? (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={columnCount}
                   className="px-4 py-8 text-center text-muted-foreground"
                 >
                   {filtered
@@ -792,8 +842,8 @@ function MemberAssignmentTable({
                   key={member.id}
                   className="border-b border-border/70 transition-colors last:border-0 hover:bg-muted/25"
                 >
-                  <td className="px-4 py-3 font-medium">
-                    <span className="flex items-center gap-3">
+                  <td className="whitespace-nowrap px-4 py-3 font-medium">
+                    <span className="flex items-center gap-3 whitespace-nowrap">
                       <span
                         aria-hidden
                         className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground"
@@ -803,7 +853,7 @@ function MemberAssignmentTable({
                       {memberName(member)}
                     </span>
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="whitespace-nowrap px-4 py-2">
                     <AssignmentSelect
                       label={`${memberName(member)} 부서`}
                       value={member.departmentId ?? ''}
@@ -816,7 +866,7 @@ function MemberAssignmentTable({
                       onChange={(value) => commit(member, 'department', value)}
                     />
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="whitespace-nowrap px-4 py-2">
                     <AssignmentSelect
                       label={`${memberName(member)} 직책`}
                       value={member.position?.trim() ?? ''}
@@ -825,7 +875,7 @@ function MemberAssignmentTable({
                       onChange={(value) => commit(member, 'duty', value)}
                     />
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="whitespace-nowrap px-4 py-2">
                     <AssignmentSelect
                       label={`${memberName(member)} 직급`}
                       value={member.jobGrade?.trim() ?? ''}
@@ -834,7 +884,7 @@ function MemberAssignmentTable({
                       onChange={(value) => commit(member, 'grade', value)}
                     />
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="whitespace-nowrap px-4 py-2">
                     <HireDateScrollField
                       label={`${memberName(member)} 입사일`}
                       value={member.hireDate ?? ''}
@@ -845,6 +895,32 @@ function MemberAssignmentTable({
                       onChange={(value) => commit(member, 'hire', value)}
                     />
                   </td>
+                  {canChange
+                    ? ROSTER_FIELDS.map((field) => {
+                        const roster = rosters.get(member.id) ?? emptyRoster(member.id)
+                        return (
+                          <td key={field.key} className="whitespace-nowrap px-4 py-2">
+                            <RosterField
+                              label={`${memberName(member)} ${field.label}`}
+                              value={roster[field.key]}
+                              maxLength={field.max}
+                              className={field.width}
+                              type={field.key === 'resignedOn' ? 'date' : 'text'}
+                              disabled={rosterQuery.isLoading}
+                              onCommit={(value) => {
+                                if (value === roster[field.key]) return
+                                setError(null)
+                                rosterMutation.mutate({
+                                  profileId: member.id,
+                                  field: field.key,
+                                  value,
+                                })
+                              }}
+                            />
+                          </td>
+                        )
+                      })
+                    : null}
                 </tr>
               ))
             )}
@@ -875,7 +951,7 @@ function AssignmentSortHeader({
     >
       <button
         type="button"
-        className="flex w-full items-center gap-1 px-4 py-2.5 text-left hover:bg-white/10"
+        className="flex w-full items-center gap-1 whitespace-nowrap px-4 py-2.5 text-left hover:bg-white/10"
         title={`${label} ${next}`}
         onClick={() => onSort(column)}
       >
@@ -892,6 +968,48 @@ function AssignmentSortHeader({
   )
 }
 
+function RosterField({
+  label,
+  value,
+  maxLength,
+  className,
+  type,
+  disabled,
+  onCommit,
+}: {
+  label: string
+  value: string
+  maxLength: number
+  className: string
+  type: 'text' | 'date'
+  disabled: boolean
+  onCommit: (value: string) => void
+}) {
+  const [text, setText] = useState(value)
+  useEffect(() => {
+    setText(value)
+  }, [value])
+  const contentWidth =
+    type === 'text' && text ? `${[...text].length + 2}em` : undefined
+  return (
+    <Input
+      aria-label={label}
+      type={type}
+      value={text}
+      maxLength={maxLength}
+      disabled={disabled}
+      style={contentWidth ? { width: contentWidth } : undefined}
+      className={cn('h-8 w-auto shrink-0', className)}
+      onChange={(event) => setText(event.target.value)}
+      onBlur={() => {
+        const next = type === 'date' ? text : text.trim()
+        if (next !== text) setText(next)
+        onCommit(next)
+      }}
+    />
+  )
+}
+
 function AssignmentSelect({
   label,
   value,
@@ -905,13 +1023,15 @@ function AssignmentSelect({
   options: { value: string; label: string }[]
   onChange: (value: string) => void
 }) {
+  const selected = options.find((option) => option.value === value)?.label ?? '미설정'
   return (
     <Select
       aria-label={label}
       value={value}
       disabled={disabled}
+      style={{ width: `${Math.max([...selected].length, 4) + 3}em` }}
       className={cn(
-        'h-9 w-full cursor-pointer px-3 hover:border-foreground/25 focus-visible:border-foreground/25 disabled:cursor-wait disabled:opacity-50',
+        'h-9 w-auto shrink-0 cursor-pointer px-3 hover:border-foreground/25 focus-visible:border-foreground/25 disabled:cursor-wait disabled:opacity-50',
         value
           ? 'border-border/60 bg-card'
           : 'border-warning bg-warning/10 font-medium text-warning',

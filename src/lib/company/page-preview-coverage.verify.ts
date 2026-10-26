@@ -40,7 +40,7 @@ assert.equal(previewUsageAccess(actual),actual)
 assert.deepEqual(cases('/usage-codes').filter(item=>item.group==='role').map(item=>{const p=previewUsageAccess(actual,item.facts?.usageAccess);return [p.canEdit,p.canManage]}),[[true,true],[false,false],[true,false]])
 const host={id:'host',name:'주최자'},member={id:'member',name:'참여자'}
 const series=[{host,members:[member],rounds:[{prepMaterials:[]}]}] as unknown as MeetingSeries[]
-assert.equal(canDeleteMeetingSeries(series[0],previewMeetingActor(host,series,'host'),false),true)
+assert.equal(canDeleteMeetingSeries(series[0],previewMeetingActor(host,series,'host')),true)
 assert.equal(filterSeriesForViewer(series,previewMeetingActor(host,series,'outsider'),false).length,0)
 assert.deepEqual([previewRequestIsSelf(false,'self'),previewRequestIsSelf(true,'other'),previewRequestIsSelf(true)],[true,false,true])
 assert.equal(JSON.stringify(real),snapshot)

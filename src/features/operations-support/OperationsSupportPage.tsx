@@ -5,9 +5,9 @@ import { cn } from '@/lib/utils'
 import { OrgChartPage } from '@/features/org/OrgChartPage'
 import { AttendancePanel } from './AttendancePanel'
 import { LeavePanel } from './LeavePanel'
-import { Link } from 'react-router-dom'
 import { DocumentOutputPanel } from './DocumentOutputPanel'
 import { CompanyNoticesPanel } from './CompanyNoticesPanel'
+import { CompanyHoursPanel } from './CompanyHoursPanel'
 import { useAuth } from '@/lib/supabase/auth'
 import { canAccessOperationsSupport, canEditOrgAssignment } from '@/lib/company/capabilities'
 
@@ -15,8 +15,8 @@ const PARTS = [
   { id: 'org', label: '조직도', description: '부서 배치와 직책·직급을 관리합니다.' },
   { id: 'attendance', label: '근태', description: '월별 직원 근태를 검토하고 정산 자료를 준비합니다.' },
   { id: 'leave', label: '연차관리', description: '직원 휴가 신청과 연차 현황을 확인합니다.' },
-  { id: 'approvers', label: '승인자 설정', description: '부서별 근태(휴가·외근·재택·정정)·야근 승인 담당자를 지정합니다.' },
   { id: 'documents', label: '서류 출력', description: '관련 서류의 출력 조건과 양식 준비 상태를 확인합니다.' },
+  { id: 'hours', label: '회사운영 시간', description: '출근시간을 고를 때 쓰는 선택지와 회사 점심시간을 정합니다.' },
   { id: 'notices', label: '공지', description: '화면 위치별로 회사 전체 공지를 올리고 내립니다.' },
 ] as const
 
@@ -76,8 +76,8 @@ export function OperationsSupportPage() {
       {part === 'org' ? <OrgChartPage mode="manage" showHeading={false} /> : null}
       {part === 'attendance' ? <AttendancePanel /> : null}
       {part === 'leave' ? <LeavePanel /> : null}
-      {part === 'approvers' ? <Link to="/settings/permissions" className="text-primary underline">권한·담당자 설정에서 승인자 지정 관리하기</Link> : null}
       {part === 'documents' ? <DocumentOutputPanel /> : null}
+      {part === 'hours' ? <CompanyHoursPanel /> : null}
       {part === 'notices' ? <CompanyNoticesPanel /> : null}
     </div>
   )

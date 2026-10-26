@@ -401,15 +401,15 @@ assert(
   '호스트가 아니면 일정 칸을 지울 수 없다',
 )
 assert(
-  canDeleteMeetingSeries({ host }, host, false),
+  canDeleteMeetingSeries({ host }, host),
   '호스트는 회의건을 지울 수 있다',
 )
 assert(
-  canDeleteMeetingSeries({ host }, memberA, true),
-  '관리자는 회의건을 지울 수 있다',
+  !canDeleteMeetingSeries({ host }, memberA),
+  '운영 권한과 관계없이 호스트가 아니면 회의건을 못 지운다',
 )
 assert(
-  !canDeleteMeetingSeries({ host }, memberA, false),
+  !canDeleteMeetingSeries({ host }, memberA),
   '다른 멤버는 회의건을 못 지운다',
 )
 assert(

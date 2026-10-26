@@ -1,16 +1,18 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Bell, CalendarDays, ChevronLeft, ChevronRight, Clock3, List, RefreshCw, Search, Send, Settings2, X } from 'lucide-react'
+import { Bell, CalendarDays, ChevronLeft, ChevronRight, Clock3, Search, Send, Settings2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { HireDateScrollField } from '@/features/org/HireDateScrollField'
+import { LeaveTimeShortcuts, QuarterLeaveTime, RequestTimeField, TimeRangeSummary } from './RequestTimeFields'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList } from '@/lib/utils'
 import { useAuth } from '@/lib/supabase/auth'
 import { listMyAttendanceClocks } from '@/lib/supabase/attendance-clocks'
 import { useMyClockIn } from '@/features/home/use-my-clock-in'
+import { useAttendanceEntry } from '@/features/home/attendance-entry-context'
 import { useLeaveRequests } from '@/features/operations-support/use-leave-requests'
 import { useDepartmentApprovers } from '@/features/operations-support/use-department-approvers'
 import { useOpsDirectory } from '@/features/operations-support/ops-directory'
@@ -64,6 +66,7 @@ export function MyAttendancePanel() {
   const active = useWorkspaceTabActivity()
   const today = koreaDateKey()
   const clock = useMyClockIn()
+  const attendanceEntry = useAttendanceEntry()
   const leave = useLeaveRequests()
   const approvals = useDepartmentApprovers()
   const directory = useOpsDirectory()
@@ -82,11 +85,11 @@ export function MyAttendancePanel() {
   )
   const [month, setMonth] = useState(() => today.slice(0, 7))
   const [selected, setSelected] = useState(today)
-  const [view, setView] = useState<'calendar' | 'list'>('calendar')
   const [query, setQuery] = useState('')
   const layers: Record<Layer, boolean> = { clock: true, leave: true, work: true, fix: true, holiday: true, closed: false }
   const [form, setForm] = useState<RequestForm | null>(null)
   const [officialFile, setOfficialFile] = useState<File | null>(null)
+  const officialFileInput = useRef<HTMLInputElement>(null)
   const [formError, setFormError] = useState('')
   const [notice, setNotice] = useState('')
   const [basis, setBasis] = useState(DEFAULT_REMINDER_BASIS)
@@ -139,8 +142,9 @@ export function MyAttendancePanel() {
     setSelected(next === today.slice(0, 7) ? today : `${next}-01`)
   }
   function pickDate(date: string) { setSelected(date); setMonth(date.slice(0, 7)) }
-  function refresh() { void clocks.refetch(); void leave.refresh(); void clock.refresh() }
+  function openAddMenu(date: string) { if (!allowed) return; pickDate(date); setAddOpen(true) }
   function record(action: 'in' | 'out' | 'undo') {
+    if (action === 'out' && attendanceEntry) { attendanceEntry.requestCheckout(); return }
     void (action === 'in' ? clock.clockIn() : action === 'out' ? clock.clockOut() : clock.undoClockOut()).catch(error => {
       console.warn('[my-attendance] 출퇴근 버튼 저장 실패', { action, error })
     })
@@ -221,11 +225,6 @@ export function MyAttendancePanel() {
         </div>
         <label className="personal-request-search"><Search size={14}/><input aria-label="신청 검색" value={query} placeholder="신청 검색" onChange={event => setQuery(event.target.value)}/></label>
         <div className="personal-request-toolbar-actions">
-          <div className="personal-request-view" role="group" aria-label="My Schedule 보기 방식">
-            <Button variant={view === 'calendar' ? 'default' : 'outline'} size="sm" aria-pressed={view === 'calendar'} onClick={() => setView('calendar')}><CalendarDays size={14}/>달력</Button>
-            <Button variant={view === 'list' ? 'default' : 'outline'} size="sm" aria-pressed={view === 'list'} onClick={() => setView('list')}><List size={14}/>목록</Button>
-          </div>
-          <Button type="button" variant="outline" size="sm" disabled={!allowed || clocks.isFetching || leave.busy} onClick={refresh}><RefreshCw size={14}/>새로고침</Button>
           <Button type="button" variant="outline" size="sm" onClick={() => pickDate(today)}>오늘</Button>
           <div className="personal-request-add" ref={addMenuRef}>
             <Button type="button" size="sm" disabled={!allowed} aria-expanded={addOpen} aria-haspopup="menu" onClick={() => setAddOpen(open => !open)}>+추가</Button>
@@ -238,7 +237,7 @@ export function MyAttendancePanel() {
         </div>
       </header>
       <div className="personal-request-shell">
-        {view === 'calendar' ? <div className="personal-request-month" role="group" aria-label={`${monthLabel(month)} 근태 달력`}>
+        <div className="personal-request-month" role="group" aria-label={`${monthLabel(month)} 근태 달력`}>
           {WORKWEEK.map(day => <div key={day} aria-hidden="true" className="personal-request-weekday">{day}</div>)}
           {cells.map((date, index) => {
             if (!date) return <div key={`blank-${index}`} className="agenda-day is-blank" aria-hidden="true"/>
@@ -249,27 +248,15 @@ export function MyAttendancePanel() {
             const items = day.requests.filter(item => shownRequest(item) && !(layers.clock && item.id === day.correction?.id))
             const visibleItems = items.slice(0, Math.max(1, 3 - (layers.holiday && holiday ? 1 : 0) - (timeText ? 1 : 0)))
             const hidden = items.length - visibleItems.length
-            return <div key={date} className={`agenda-day${holiday ? ' is-off' : ''}${date === today ? ' is-today' : ''}${selected === date ? ' is-selected' : ''}`} onClick={() => pickDate(date)}>
+            return <div key={date} className={`agenda-day${holiday ? ' is-off' : ''}${date === today ? ' is-today' : ''}${selected === date ? ' is-selected' : ''}`} onClick={() => pickDate(date)} onDoubleClick={() => openAddMenu(date)}>
               <button type="button" className="agenda-num" aria-pressed={selected === date} aria-label={`${dateLabel(date)} (${WEEKDAYS[dayOfWeek(date)]}) ${holiday ? `${holiday} ` : ''}출근 ${time.start || '없음'} 퇴근 ${time.end || '없음'}${time.corrected ? ' 정정' : ''} 신청 ${items.length}건`} onClick={() => pickDate(date)}>{Number(date.slice(8))}</button>
               {layers.holiday && holiday && <span className="agenda-bar is-holiday">{holiday}</span>}
-              {timeText && <span className={`agenda-clock${time.corrected ? ' is-corrected' : ''}`}>{timeText}{time.corrected && <b className="agenda-fix-tag">정정</b>}</span>}
+              {timeText && <span className={`agenda-clock${time.corrected ? ' is-corrected' : ''}`}>{timeText}{time.corrected && <b className="agenda-fix-tag">정정</b>}{!time.corrected && day.clockOutReportedAt && <b className="agenda-fix-tag">본인 확인 입력</b>}</span>}
               {visibleItems.map(item => requestBar(item, date))}
               {hidden > 0 && <button type="button" className="agenda-more" onClick={() => pickDate(date)}>+{hidden}개</button>}
             </div>
           })}
-        </div> : <div className="personal-request-list"><table><caption className="sr-only">{monthLabel(month)} 내 출퇴근과 신청</caption><thead><tr><th scope="col">날짜</th><th scope="col">출근</th><th scope="col">퇴근</th><th scope="col">신청</th></tr></thead><tbody>
-          {days.filter(day => ![0, 6].includes(dayOfWeek(day.date))).map(day => {
-            const holiday = koreanHolidayLabel(koreanHolidayNames(day.date))
-            const time = dayClock(day)
-            const items = day.requests.filter(shownRequest)
-            return <tr key={day.date} className={day.date === selected ? 'is-selected' : ''}>
-              <th scope="row" className={holiday || [0, 6].includes(dayOfWeek(day.date)) ? 'is-off' : ''}><button type="button" onClick={() => setSelected(day.date)}>{day.date.slice(5).replace('-', '.')} ({WEEKDAYS[dayOfWeek(day.date)]}){day.date === today ? ' · 오늘' : ''}</button>{holiday && <small>{holiday}</small>}</th>
-              <td>{clocksReady ? time.start || '—' : '…'}{time.corrected && <b className="agenda-fix-tag">정정</b>}</td>
-              <td>{clocksReady ? time.end || '—' : '…'}</td>
-              <td>{items.length ? items.map(item => requestBar(item, day.date)) : '—'}</td>
-            </tr>
-          })}
-        </tbody></table></div>}
+        </div>
       </div>
       <p className="personal-request-footnote">출퇴근은 기록된 시각을, 승인된 출퇴근 정정은 정정 시각을 표시합니다. 원래 출퇴근 기록은 바뀌지 않으며, 미기록만으로 결근이나 연차 사용을 판단하지 않습니다.</p>
     </section>
@@ -281,15 +268,21 @@ export function MyAttendancePanel() {
           <label>{span ? '시작일' : '신청일'}<HireDateScrollField label={span ? '개인 신청 시작일' : '개인 신청일'} className="mt-[7px] w-full" value={form.from} min="1950-01-01" max={form.kind === 'correction' ? today : `${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; patch({ from: value, to: !span ? value : form.to < value ? value : form.to }) }}/></label>
           {span && <label>종료일<HireDateScrollField label="개인 신청 종료일" className="mt-[7px] w-full" value={form.to} min={form.from || '1950-01-01'} max={`${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; patch({ to: value }) }}/></label>}
         </div>
-        {isPartialLeave(form.kind) && <div className="personal-request-duration"><strong>{form.kind === 'half' ? '반차 · 0.5일' : '반반차 · 0.25일'}</strong><span>신청 기준: 1일 8시간, 휴게시간 12–13시 제외. 반차 4시간·반반차 2시간이며 잔여일 자동 차감은 미적용입니다.</span>{form.kind === 'half' && <div><Button size="sm" variant="outline" type="button" onClick={() => patch({ start: '09:00', end: '14:00' })}>오전 예시 09–14시</Button><Button size="sm" variant="outline" type="button" onClick={() => patch({ start: '14:00', end: '18:00' })}>오후 예시 14–18시</Button></div>}</div>}
-        {!isAllDayRequest(form.kind) && <div className="personal-request-fields"><label>{form.kind === 'correction' ? '실제 출근 시각' : isLocationRequest(form.kind) ? '매일 시작 시각' : '시작 시각'}<Input aria-label="개인 신청 시작 시각" type="time" value={form.start} onChange={event => patch({ start: event.target.value })}/></label><label>{form.kind === 'correction' ? '실제 퇴근 시각' : isLocationRequest(form.kind) ? '매일 종료 시각' : '종료 시각'}<Input aria-label="개인 신청 종료 시각" type="time" value={form.end} onChange={event => patch({ end: event.target.value })}/></label></div>}
+        {form.kind === 'half' && <><p className="personal-request-hours" role="status">반차는 4시간입니다.</p><LeaveTimeShortcuts kind="half" compact start={form.start} end={form.end} onChange={patch} /></>}
+        {form.kind === 'quarter' && <><p className="personal-request-hours" role="status">반반차는 2시간입니다.</p><QuarterLeaveTime start={form.start} end={form.end} onChange={patch} /></>}
+        {!isAllDayRequest(form.kind) && form.kind !== 'half' && form.kind !== 'quarter' && <>
+          <div className="personal-request-fields request-time-fields">
+            <RequestTimeField label={form.kind === 'correction' ? '실제 출근 시각' : isLocationRequest(form.kind) ? '매일 시작 시각' : '시작 시각'} value={form.start} onChange={value => patch({ start: value })} />
+            <RequestTimeField label={form.kind === 'correction' ? '실제 퇴근 시각' : isLocationRequest(form.kind) ? '매일 종료 시각' : '종료 시각'} value={form.end} onChange={value => patch({ end: value })} />
+          </div>
+          {form.kind !== 'offsite' && <TimeRangeSummary start={form.start} end={form.end} leave={isPartialLeave(form.kind)} daily={isLocationRequest(form.kind)} />}
+        </>}
         {form.kind === 'correction' && <p className="personal-request-helper">{formRecord ? `현재 기록 · 출근 ${formRecord.clockIn || '없음'} · 퇴근 ${clockOutLabel(formRecord.clockOutAt) || '없음'}. ` : ''}승인되면 원래 기록은 그대로 두고 달력에 정정 시각을 ‘정정’으로 표시합니다.</p>}
         {isLocationRequest(form.kind) && <label>{form.kind === 'offsite' ? '외근 장소 · 필수' : '근무 장소 · 선택'}<Input aria-label="개인 신청 근무 장소" maxLength={200} value={form.place} placeholder={form.kind === 'offsite' ? '방문할 거래처 또는 장소' : '재택 등'} onChange={event => patch({ place: event.target.value })}/></label>}
-        {isOfficialLeave(form.kind) && <label>증빙 서류 · 필수<input aria-label="공가 증빙 서류" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.doc,.docx,.hwp,.hwpx" onChange={event => { setOfficialFile(event.target.files?.[0] ?? null); setFormError('') }}/>{officialFile ? <span>{officialFile.name}</span> : <span>예비군 통지서, 청첩장처럼 공가 사유를 확인할 서류를 올려 주세요.</span>}</label>}
+        {isOfficialLeave(form.kind) && <div className={`personal-request-file${officialFile ? ' is-selected' : ''}`}><label htmlFor="official-leave-file">증빙 서류 · 필수</label><div><input id="official-leave-file" ref={officialFileInput} className="personal-request-file-input" aria-label="공가 증빙 서류" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.doc,.docx,.hwp,.hwpx" onChange={event => { setOfficialFile(event.target.files?.[0] ?? null); setFormError('') }}/><p>{officialFile ? officialFile.name : '예비군 통지서, 청첩장처럼 공가 사유를 확인할 서류를 올려 주세요.'}</p>{officialFile && <Button type="button" variant="outline" size="sm" onClick={() => { setOfficialFile(null); if (officialFileInput.current) officialFileInput.current.value = '' }}>지우기</Button>}<Button type="button" variant="outline" size="sm" onClick={() => officialFileInput.current?.click()}>{officialFile ? '다시 선택' : '서류 선택'}</Button></div></div>}
         <label>{form.kind === 'correction' || form.kind === 'overtime' || isOfficialLeave(form.kind) ? '신청 사유 · 필수' : '업무 인수인계·메모 · 선택'}<Textarea maxLength={2000} aria-label="개인 신청 메모" value={form.note} rows={3} placeholder={form.kind === 'correction' ? '기록 누락·보정 사유를 적어 주세요.' : form.kind === 'overtime' ? '예정된 야근 업무를 적어 주세요.' : isOfficialLeave(form.kind) ? '예비군, 결혼처럼 공가로 빠지는 사유를 적어 주세요.' : '업무 인수인계 등 필요한 내용만 적어 주세요.'} onChange={event => patch({ note: event.target.value })}/></label>
-        {isOfficialLeave(form.kind) ? <div className="personal-request-approval-route"><span>처리</span><strong>운영지원 서류 확인</strong><p>서류를 올리면 운영지원이 파일을 확인한 뒤 공가로 처리합니다.</p></div> : !isLeaveRequest(form.kind) ? <div className="personal-request-approval-route"><span>승인 경로</span><strong>{approvalRoute(form.kind)}</strong><p>신청자의 화면에서는 본인 신청을 승인할 수 없습니다.</p></div> : null}
-        <div className="personal-request-alert-preview"><header><strong><Bell size={14}/>승인 후 알림 미리보기</strong><button type="button" aria-expanded={showBasis} onClick={() => setShowBasis(value => !value)}>예시 기준 {showBasis ? '접기' : '보기'}</button></header>{preview.map(text => <p key={text}>{text}</p>)}{(!reminders.arrival || !reminders.departure) && <p>{!reminders.arrival ? '출근' : ''}{!reminders.arrival && !reminders.departure ? '·' : ''}{!reminders.departure ? '퇴근' : ''} 전 알림은 내 설정에서 꺼져 있습니다.</p>}<small>회사 근무 기준은 미연결입니다. 알림 시간은 예시이며 실제 발송되지 않습니다.</small>{showBasis && <div className="personal-request-basis">{([{ key: 'start', label: '예시 출근' }, { key: 'end', label: '예시 퇴근' }, { key: 'breakStart', label: '휴게 시작' }, { key: 'breakEnd', label: '휴게 종료' }] as const).map(item => <label key={item.key}>{item.label}<Input type="time" aria-label={item.label} value={basis[item.key]} onChange={event => setBasis(current => ({ ...current, [item.key]: event.target.value }))}/></label>)}</div>}</div>
-        {isFullLeave(form.kind) && <p className="personal-request-helper">신청하면 바로 등록됩니다. 잔여일 차감은 아직 적용되지 않습니다.</p>}
+        {!isLeaveRequest(form.kind) && !isOfficialLeave(form.kind) && <div className="personal-request-approval-route"><span>승인 경로</span><strong>{approvalRoute(form.kind)}</strong><p>신청자의 화면에서는 본인 신청을 승인할 수 없습니다.</p></div>}
+        {!isOfficialLeave(form.kind) && !isFullLeave(form.kind) && form.kind !== 'half' && form.kind !== 'quarter' && form.kind !== 'offsite' && <div className="personal-request-alert-preview"><header><strong><Bell size={14}/>승인 후 알림 미리보기</strong><button type="button" aria-expanded={showBasis} onClick={() => setShowBasis(value => !value)}>예시 기준 {showBasis ? '접기' : '보기'}</button></header>{preview.map(text => <p key={text}>{text}</p>)}{(!reminders.arrival || !reminders.departure) && <p>{!reminders.arrival ? '출근' : ''}{!reminders.arrival && !reminders.departure ? '·' : ''}{!reminders.departure ? '퇴근' : ''} 전 알림은 내 설정에서 꺼져 있습니다.</p>}<small>회사 근무 기준은 미연결입니다. 알림 시간은 예시이며 실제 발송되지 않습니다.</small>{showBasis && <div className="personal-request-basis">{([{ key: 'start', label: '예시 출근' }, { key: 'end', label: '예시 퇴근' }, { key: 'breakStart', label: '휴게 시작' }, { key: 'breakEnd', label: '휴게 종료' }] as const).map(item => <label key={item.key}>{item.label}<Input type="time" aria-label={item.label} value={basis[item.key]} onChange={event => setBasis(current => ({ ...current, [item.key]: event.target.value }))}/></label>)}</div>}</div>}
         {formError && <p role="alert" className="personal-request-error">{formError}</p>}
       </div>
       <footer><Button type="button" variant="outline" onClick={() => setForm(null)}>닫기</Button><Button type="submit" disabled={leave.busy || leave.loading || Boolean(leave.error)}><Send size={14}/>{leave.busy ? '저장 중…' : '신청하기'}</Button></footer>

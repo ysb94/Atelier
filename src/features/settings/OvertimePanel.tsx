@@ -10,6 +10,7 @@ import { useDepartmentApprovers } from '@/features/operations-support/use-depart
 import { useOpsDirectory } from '@/features/operations-support/ops-directory'
 import { DEFAULT_REMINDER_BASIS, dateLabel, validateRequest, type RequestForm } from './personal-requests'
 import { koreaDateKey } from './my-attendance'
+import { OvertimeTimeFields } from './RequestTimeFields'
 
 const STATUS_LABELS = { pending: '승인 대기', approved: '승인', rejected: '반려', cancelled: '취소' }
 
@@ -120,10 +121,7 @@ function OvertimeDialog({ form, busy, error, route, onChange, onClose, onSubmit 
       <form onSubmit={onSubmit}><fieldset disabled={busy} className="min-w-0 border-0 p-0">
         <div className="personal-request-compose-body">
           <label>날짜<Input aria-label="야근 날짜" type="date" value={form.from} onChange={event => onChange({ ...form, from: event.target.value, to: event.target.value })}/></label>
-          <div className="personal-request-fields">
-            <label>시작 시각<Input aria-label="야근 시작 시각" type="time" value={form.start} onChange={event => onChange({ ...form, start: event.target.value })}/></label>
-            <label>종료 시각<Input aria-label="야근 종료 시각" type="time" value={form.end} onChange={event => onChange({ ...form, end: event.target.value })}/></label>
-          </div>
+          <OvertimeTimeFields start={form.start} end={form.end} onChange={patch => onChange({ ...form, ...patch })} />
           <label>신청 사유 · 필수<Textarea maxLength={2000} aria-label="야근 사유" value={form.note} rows={3} placeholder="예정된 야근 업무를 적어 주세요." onChange={event => onChange({ ...form, note: event.target.value })}/></label>
           <div className="personal-request-approval-route"><span>승인 경로</span><strong>{route}</strong><p>신청자의 화면에서는 본인 신청을 승인할 수 없습니다.</p></div>
           {error && <p role="alert" className="personal-request-error">{error}</p>}

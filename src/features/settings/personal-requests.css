@@ -78,6 +78,7 @@
 .personal-request-details dt { color: #939486; }
 .personal-request-details dd { overflow-wrap: anywhere; white-space: pre-wrap; }
 .personal-request-helper { font-size: 11px; line-height: 1.7; color: #93927f; margin-top: 12px; }
+.personal-request-hours { margin: 0; font-size: 12px; line-height: 1.6; color: #7f8274; }
 .personal-request-reminders { padding: 18px; }
 .personal-request-reminders > header { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .personal-request-reminders > header > div { display: flex; align-items: center; gap: 7px; }
@@ -134,7 +135,13 @@
 .personal-request-compose-body { flex: 1; overflow: auto; padding: 22px; display: grid; align-content: start; gap: 18px; }
 .personal-request-compose-body label { display: block; font-size: 12px; color: #7f8274; }
 .personal-request-compose-body input, .personal-request-compose-body select, .personal-request-compose-body textarea { width: 100%; margin-top: 7px; color: #30342b; }
+.personal-request-file > div { display: flex; align-items: center; gap: 8px; min-width: 0; margin-top: 7px; padding: 8px 10px; border: 1px solid #e8e2d3; border-radius: 8px; background: #fff; }
+.personal-request-compose-body .personal-request-file-input { position: absolute; width: 1px; height: 1px; margin: 0; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.personal-request-file p { min-width: 0; flex: 1; font-size: 12px; line-height: 1.5; color: #7f8274; overflow-wrap: anywhere; }
+.personal-request-file.is-selected p { color: #30342b; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; overflow-wrap: normal; }
 .personal-request-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.request-time-control input, .request-time-control select { margin-top: 0; }
+@media(max-width:520px) { .request-time-fields { grid-template-columns: minmax(0,1fr); } }
 .personal-request-duration { padding: 12px; border: 1px solid #ecdec1; border-radius: 8px; background: #fcf8ed; }
 .personal-request-duration strong { font-size: 12px; font-weight: 500; }
 .personal-request-duration span { display: block; font-size: 10px; color: #99876b; line-height: 1.6; margin-top: 5px; }
