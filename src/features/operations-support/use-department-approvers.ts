@@ -23,5 +23,5 @@ export function useDepartmentApprovers() {
     client.invalidateQueries({ queryKey: ['company-leave-requests'] }),
   ]) } })
   return { settings: allowed ? query.data ?? emptyList<DepartmentApprover>() : emptyList<DepartmentApprover>(),
-    save, canEdit, loading: allowed && query.isPending, error: query.error, refresh: () => query.refetch() }
+    save, canEdit, loading: allowed && query.isPending, error: query.error, refresh: query.refetch }
 }

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { canAccessOperationsSupport, canEditOrgAssignment, canManagePersonnel, canViewDraftsByOwner } from './capabilities.ts'
 import { companyNavGroupsForProfile } from '../../components/layout/company-workspace-nav.ts'
 import type { PermissionCode } from './permissions.ts'
+import { RELEASE_COMPANY_ID, RELEASE_OPERATIONS_ID } from './release-access.ts'
 
 const member = { companyId: 'company', status: 'active', email: 'staff@invalid', departmentName: '운영지원팀', position: '사원', isAdmin: false, permissionGrants: [] }
 const assigned = (...permissions: PermissionCode[]) => ({ ...member, permissionGrants: permissions.map(permission => ({ permission, scopeKind: 'company' as const, scopeId: 'company' })) })
@@ -16,9 +17,11 @@ assert.equal(canManagePersonnel(assigned('personnel.manage')),true)
 assert.equal(canViewDraftsByOwner(assigned('company.review')),false,'현황 조회가 기획안 권한을 자동 생성하지 않음')
 assert.equal(canViewDraftsByOwner(assigned('drafts.read')),true)
 assert.equal(links(member).includes('/operations-support'),false)
-assert.equal(links(assigned('attendance.manage')).includes('/operations-support'),true)
-assert.equal(links(assigned('personnel.manage')).includes('/members'),true)
-for (const code of ['permissions.manage','approvers.manage','partner.manage'] as const) assert.equal(links(assigned(code)).includes('/settings/permissions'),true)
+assert.equal(links(assigned('attendance.manage')).includes('/operations-support'),false,'기존 작업 권한이 있어도 타 부서에는 아직 미공개')
+assert.equal(links(assigned('personnel.manage')).includes('/members'),false)
+const operations = {...member,companyId:RELEASE_COMPANY_ID,departmentId:RELEASE_OPERATIONS_ID}
+for (const href of ['/operations-support','/members','/settings/permissions']) assert.ok(links(operations).includes(href),'운영지원 공개 화면')
+assert.equal(canAccessOperationsSupport(operations),false,'공개 화면 설정이 실제 업무 권한을 부여하지 않음')
 assert.equal(links(assigned('system.manage')).includes('/settings/permissions'),false,'시스템 운영과 권한 지정 관리 분리')
 assert.equal(canAccessOperationsSupport({...assigned('org.manage'),status:'disabled'}),false)
 assert.equal(canAccessOperationsSupport(null),false)

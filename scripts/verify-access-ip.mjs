@@ -67,7 +67,8 @@ try {
   row = (await db.query("select * from public.access_ip_events where ip_source='unavailable'")).rows[0]
   assert.equal(row.ip_address, null, '신뢰 헤더가 없으면 XFF로 채우지 않음')
   assert.equal((await request({ kind: 'login' }, {}, 'invalid')).status, 401)
-  assert.equal((await request({ kind: 'login' }, {}, 'valid', 'https://atelier-6yy.pages.dev')).status, 403, 'main 수집 비활성')
+  assert.equal((await request({ kind: 'login' }, {}, 'valid', 'https://atelier-6yy.pages.dev')).status, 200, '운영 주소도 인증 후 IP 수집')
+  assert.equal((await request({ kind: 'login' }, {}, 'valid', 'https://attacker.invalid')).status, 403, '그 외 주소 제외')
   assert.equal((await request({ kind: 'clock_in_request' })).status, 400)
   assert.equal((await request({ kind: 'unknown' })).status, 400)
   saveFails = true

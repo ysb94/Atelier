@@ -29,6 +29,7 @@ import { NotificationPanel } from './NotificationPanel'
 import { useMeetingNotices } from '@/features/meetings/use-meeting-notices'
 import { DeveloperPreviewBar, DeveloperPreviewProvider } from './DeveloperPreview'
 import { useWorkspaceOverlayHost } from './use-workspace-overlay-host'
+import { ReleaseAccessProvider, useReleaseAccess } from './release-access-context'
 
 type OpenPanel = 'chat' | 'notifications'
 
@@ -36,9 +37,14 @@ type OpenPanel = 'chat' | 'notifications'
 const HEADER_PANEL_CLASS = 'pointer-events-auto fixed top-12 right-3 bottom-24 z-[200] flex w-[min(24rem,calc(100vw-1.5rem))] flex-col'
 
 export function WorkspaceHeaderActions() {
+  return <ReleaseAccessProvider><ReleasedHeaderActions /></ReleaseAccessProvider>
+}
+
+function ReleasedHeaderActions() {
   useRenderWatch('WorkspaceHeaderActions')
   const navigate = useNavigate()
   const { profile } = useAuth()
+  const { href: releaseLink } = useReleaseAccess()
   const chatEnabled = profile?.status === 'active'
   const roomsQuery = useChatRooms(chatEnabled)
   useChatRealtime(chatEnabled)
@@ -56,7 +62,7 @@ export function WorkspaceHeaderActions() {
   const meetingNotices=useMeetingNotices()
   const [notificationError,setNotificationError]=useState<string|null>(null)
   const { container: overlayContainer, restoreFocus } = useWorkspaceOverlayHost(open !== null)
-  const notifications = meetingNotices.items
+  const notifications = useMemo(() => meetingNotices.items.filter(item => releaseLink(item.href) !== null), [meetingNotices.items, releaseLink])
   useEffect(()=>{
     function receive(event:Event){
       const detail=(event as CustomEvent<RequestedConversation>).detail
@@ -121,13 +127,15 @@ export function WorkspaceHeaderActions() {
     catch(error){console.warn('[meetings] 참석 요청 읽음 처리 실패',{error});setNotificationError('참석 요청을 읽음으로 표시하지 못했습니다. 다시 시도해 주세요.')}
   }
   function markAllRead() {
-    if(meetingNotices.items.some(item=>item.kind==='meeting_invitation' && !item.readAt)) void markMeetingRead(null)
+    if(notifications.some(item=>item.kind==='meeting_invitation' && !item.readAt)) void markMeetingRead(null)
   }
 
   function openNotification(item: InboxNotification) {
+    const href = releaseLink(item.href)
+    if (!href) return
     if(item.kind==='meeting_invitation') void markMeetingRead(item.id)
     setOpen(null)
-    navigate(item.href)
+    navigate(href)
   }
 
   const roomsError =

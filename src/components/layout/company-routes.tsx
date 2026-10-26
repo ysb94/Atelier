@@ -40,6 +40,7 @@ import { PriceComparePage } from '@/features/md/PriceComparePage'
 import { OperationsSupportPage } from '@/features/operations-support/OperationsSupportPage'
 import { MamamIdeaInboxPage } from '@/features/mamam/MamamIdeaInboxPage'
 import { DeveloperPreviewPage } from './DeveloperPreview'
+import { ReleasePageGate } from './ReleasePageGate'
 
 function RedirectTo({
   to,
@@ -93,11 +94,13 @@ function Gated({
 
 function CompanyScopeLayout() {
   return (
+    <ReleasePageGate>
     <CompanyBrandScopeProvider>
       <DeveloperPreviewPage>
       <Outlet />
       </DeveloperPreviewPage>
     </CompanyBrandScopeProvider>
+    </ReleasePageGate>
   )
 }
 

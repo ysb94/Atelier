@@ -234,9 +234,10 @@ export async function verifyMeetings(page,origin){
    const tabs=await menu.getByRole('tab').evaluateAll(elements=>elements.map(element=>({
      label:element.textContent,height:element.getBoundingClientRect().height,
    })))
-   assert.ok(tabs.length>=7,'My home 메뉴 전체를 대상으로 검사')
+   assert.ok(tabs.length>=2,'공개된 My home 메뉴를 대상으로 검사')
    assert.ok(tabs.every(tab=>tab.height<=48),`좁은 창에서도 메뉴는 한 줄: ${JSON.stringify(tabs)}`)
-   assert.equal(await menu.evaluate(element=>element.scrollWidth>element.clientWidth),true,'넘치는 메뉴는 가로 스크롤로 탐색')
+   if(tabs.length>=7) assert.equal(await menu.evaluate(element=>element.scrollWidth>element.clientWidth),true,'넘치는 전체 메뉴는 가로 스크롤로 탐색')
+   else assert.deepEqual(tabs.map(tab=>tab.label),['내 근태','회의'],'제한된 직원에게는 공개된 두 탭만 표시')
    const layout=await nextRow().evaluate(element=>({
      width:element.clientWidth,scrollWidth:element.scrollWidth,
      memberHeights:[...element.querySelectorAll('.meeting-members button')].map(button=>button.getBoundingClientRect().height),

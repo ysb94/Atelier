@@ -13,11 +13,14 @@ import { CompanyAiAssistant } from '@/components/ai/CompanyAiAssistant'
 import { useAuth } from '@/lib/supabase/auth'
 import { useNavigationPreviewProfile } from '@/lib/company/developer-preview-context'
 import { cn } from '@/lib/utils'
+import { RELEASE_HOME } from '@/lib/company/release-access'
+import { ReleaseAccessProvider, useReleaseAccess } from './release-access-context'
+import { ReleasePageGate } from './ReleasePageGate'
 import {
   companyGroupIsActive,
   companyNavGroupsForProfile,
   companyNavItemActive,
-  companyTopNav,
+  companyTopNavForProfile,
   type CompanyNavItem,
 } from './company-workspace-nav'
 import { WorkspaceHeaderActions } from './WorkspaceHeaderActions'
@@ -64,12 +67,19 @@ function pageLayoutFor(pathname: string) {
 export function CompanyLayout() {
   return (
     <DeveloperPreviewProvider>
+      <ReleaseAccessProvider><CompanyReleasedLayout /></ReleaseAccessProvider>
+    </DeveloperPreviewProvider>
+  )
+}
+
+function CompanyReleasedLayout() {
+  const { scope } = useReleaseAccess()
+  return (
     <div className="flex h-full min-h-0">
       <CompanySidebar />
       <CompanyWorkspaceMain />
-      <CompanyAiAssistant />
+      {scope.unrestricted && <CompanyAiAssistant />}
     </div>
-    </DeveloperPreviewProvider>
   )
 }
 
@@ -77,6 +87,7 @@ function CompanySidebar() {
   const location = useLocation()
   const { email, profile, signOut } = useAuth()
   const navigationProfile = useNavigationPreviewProfile(profile)
+  const companyTopNav = useMemo(() => companyTopNavForProfile(navigationProfile), [navigationProfile])
   const [openTitles, setOpenTitles] = useState<Set<string>>(() => new Set())
   const [collapsed, setCollapsed] = useState(readCollapsed)
   const navGroups = useMemo(
@@ -96,7 +107,7 @@ function CompanySidebar() {
         })),
       ),
     ],
-    [navGroups],
+    [navGroups, companyTopNav],
   )
 
   useEffect(() => {
@@ -321,13 +332,16 @@ function CompanySidebar() {
 function CompanyWorkspaceMain() {
   const location = useLocation()
   const { tabs, activeId, openTab, closeTab } = useWorkspaceTabs()
+  const { href, approvals, scope } = useReleaseAccess()
+  const visibleTabs = useMemo(() => tabs.filter(tab => href(tab.pathname + tab.search) === tab.pathname + tab.search
+    || (!scope.unrestricted && tab.pathname === RELEASE_HOME && new URLSearchParams(tab.search).get('part') === 'approvals' && (approvals.loading || Boolean(approvals.error)))), [tabs, href, scope.unrestricted, approvals.loading, approvals.error])
   const pageLayout = pageLayoutFor(location.pathname)
 
   return (
     <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
       <div className="relative z-20 flex shrink-0 items-end border-b border-border bg-muted/40">
         <WorkspaceTabBar
-          tabs={tabs}
+          tabs={visibleTabs}
           activeId={activeId}
           onOpen={openTab}
           onClose={closeTab}
@@ -349,7 +363,9 @@ function CompanyWorkspaceMain() {
             pageLayout === 'default' && 'mx-auto max-w-[1600px] p-6 md:p-8',
           )}
         >
-          <WorkspaceTabPanels tabs={tabs} activeId={activeId} />
+          <ReleasePageGate>
+            <WorkspaceTabPanels tabs={visibleTabs} activeId={activeId} />
+          </ReleasePageGate>
         </div>
       </div>
     </main>

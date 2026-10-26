@@ -1,5 +1,6 @@
 import { hasPermission } from '../../lib/company/permissions.ts'
 import { showAccessIpMenu } from '../../lib/company/access-ip.ts'
+import { releaseAccess, releaseHref, type ReleaseProfile } from '../../lib/company/release-access.ts'
 import type { LucideIcon } from 'lucide-react'
 import {
   canAccessBrandManagement,
@@ -163,28 +164,33 @@ const mamamInboxGroup: CompanyNavGroup = {
 }
 
 export function companyNavGroupsForProfile(
-  profile: Parameters<typeof canAccessOperationsSupport>[0],
+  profile: (NonNullable<Parameters<typeof canAccessOperationsSupport>[0]> & ReleaseProfile) | null,
 ) {
-  const showOperationsSupport = canAccessOperationsSupport(profile)
-  const showMembers = canManagePersonnel(profile) || isCompanyReviewer(profile)
+  const scope = releaseAccess(profile)
+  const showOperationsSupport = canAccessOperationsSupport(profile) || scope.operations
+  const showMembers = canManagePersonnel(profile) || isCompanyReviewer(profile) || scope.operations
   const showBrandManagement = canAccessBrandManagement(profile)
   const visibleGroups = companyNavGroups.flatMap((group) => {
     if (group.title !== '운영지원') {
       const items = showBrandManagement
         ? group.items
         : group.items.filter(item => item.to !== '/brands')
-      const allowedItems = items.filter(item => (item.to !== '/settings/access-ip' || showAccessIpMenu(profile)) && (item.to !== '/settings/permissions' || hasPermission(profile, 'permissions.manage') || hasPermission(profile, 'approvers.manage') || hasPermission(profile, 'partner.manage')))
+      const allowedItems = items.filter(item => releaseHref(profile, item.to) !== null && (item.to !== '/settings/access-ip' || showAccessIpMenu(profile)) && (item.to !== '/settings/permissions' || scope.operations || hasPermission(profile, 'permissions.manage') || hasPermission(profile, 'approvers.manage') || hasPermission(profile, 'partner.manage')))
       return allowedItems.length > 0 ? [{ ...group, items: allowedItems }] : []
     }
     const items = [
-      ...(showOperationsSupport ? group.items : []),
-      ...(showMembers ? [membersNavItem] : []),
+      ...(showOperationsSupport ? group.items.filter(item => releaseHref(profile, item.to) !== null) : []),
+      ...(showMembers && releaseHref(profile, membersNavItem.to) !== null ? [membersNavItem] : []),
     ]
     return items.length > 0 ? [{ ...group, items }] : []
   })
-  return canAccessMamamIdeaInbox(profile)
+  return canAccessMamamIdeaInbox(profile) && scope.unrestricted
     ? [...visibleGroups, mamamInboxGroup]
     : visibleGroups
+}
+
+export function companyTopNavForProfile(profile: ReleaseProfile | null) {
+  return companyTopNav.filter(item => releaseHref(profile, item.to) !== null)
 }
 
 export function companyNavItemActive(to: string, pathname: string, end?: boolean) {

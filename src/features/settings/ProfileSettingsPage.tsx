@@ -9,13 +9,14 @@ import {
 import { useAuth } from '@/lib/supabase/auth'
 import { capabilityLabel } from '@/lib/company/capabilities'
 import { usePagePreview } from '@/lib/company/page-preview-context'
-import { useMemo } from 'react'
+import { Fragment, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { LeaveApprovalPanel } from '@/features/operations-support/LeaveApprovalPanel'
 import { WorkRequestHubPage } from '@/features/work-requests/WorkRequestHubPage'
-import { useDepartmentApprovers } from '@/features/operations-support/use-department-approvers'
-import { assignedDepartmentIds } from '@/lib/supabase/department-approvers'
+import { ReleaseAccessProvider, useReleaseAccess } from '@/components/layout/release-access-context'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { releasePersonalPart } from '@/lib/company/release-access'
 import { hasPermission } from '@/lib/company/permissions'
 import { CompanyMeetingsPage } from '@/features/meetings/CompanyMeetingsPage'
 import { useMeetingNotices } from '@/features/meetings/use-meeting-notices'
@@ -51,15 +52,21 @@ function personalPart(value: string | null): PersonalPart {
 }
 
 export function ProfileSettingsPage() {
+  return <ReleaseAccessProvider><ProfileSettingsContent /></ReleaseAccessProvider>
+}
+
+function ProfileSettingsContent() {
   useRenderWatch('ProfileSettingsPage')
   const { profile, email } = useAuth()
   const meetingNotices = useMeetingNotices({ realtime: false })
   const preview = usePagePreview()
-  const approvals = useDepartmentApprovers()
-  const departments = useMemo(() => assignedDepartmentIds(approvals.settings, profile?.id), [approvals.settings, profile?.id])
+  const release = useReleaseAccess()
+  const { approvals, departments } = release
+  const active = useWorkspaceTabActivity()
   const [searchParams, setSearchParams] = useSearchParams()
   const part = personalPart(searchParams.get('part'))
   function selectPart(next: PersonalPart) {
+    if (!releasePersonalPart(release.profile, next, release.approver)) return
     const params = new URLSearchParams(searchParams)
     if (next === 'my-attendance') params.delete('part')
     else params.set('part', next)
@@ -68,24 +75,29 @@ export function ProfileSettingsPage() {
   const hasDepartments = departments.length > 0
   const noDepartments = !hasDepartments && !approvals.loading && !approvals.error
   const showDepartmentTab = preview?.facts?.departmentApprover ?? hasPermission(profile, 'attendance.manage')
-  const visiblePart = part === 'attendance' && !showDepartmentTab ? 'my-attendance' : part
+  const permitted = releasePersonalPart(release.profile, part, release.approver)
+  const visiblePart = !permitted || (part === 'attendance' && !showDepartmentTab) ? 'my-attendance' : part
+  const tabs: { id: PersonalPart; label: string }[] = release.scope.unrestricted ? [
+    { id: 'work', label: '내 업무' }, { id: 'my-attendance', label: '내 근태' }, { id: 'profile', label: '내 정보' },
+    { id: 'approvals', label: '승인할 신청' }, { id: 'company-notice', label: '회사 공지' },
+    { id: 'department-notice', label: '부서 공지' }, { id: 'meetings', label: '회의' },
+    ...(showDepartmentTab ? [{ id: 'attendance' as const, label: '부서 출근시간' }] : []),
+  ] : [{ id: 'my-attendance', label: '내 근태' }, { id: 'meetings', label: '회의' },
+    ...(release.approver ? [{ id: 'approvals' as const, label: '승인할 신청' }] : [])]
+  useEffect(() => {
+    if (!active || permitted || (part === 'approvals' && approvals.loading)) return
+    setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete('part'); return next }, { replace: true })
+  }, [active, permitted, part, approvals.loading, setSearchParams])
 
   return (
     <div>
       <PageHeader title="My home" />
 
       <div className="personal-page-tabs" role="tablist" aria-label="My home 메뉴">
-        <button type="button" role="tab" id="personal-work-tab" aria-selected={visiblePart === 'work'} aria-controls="personal-work-panel" onClick={() => selectPart('work')}>내 업무</button>
-        <button type="button" role="tab" id="personal-my-attendance-tab" aria-selected={visiblePart === 'my-attendance'} aria-controls="personal-my-attendance-panel" onClick={() => selectPart('my-attendance')}>내 근태</button>
-        <button type="button" role="tab" id="personal-profile-tab" aria-selected={visiblePart === 'profile'} aria-controls="personal-profile-panel" onClick={() => selectPart('profile')}>내 정보</button>
-        <span className="personal-page-tab-split" aria-hidden="true" />
-        <button type="button" role="tab" id="personal-approvals-tab" aria-selected={visiblePart === 'approvals'} aria-controls="personal-approvals-panel" onClick={() => selectPart('approvals')}>승인할 신청</button>
-        <button type="button" role="tab" id="personal-company-notice-tab" aria-selected={visiblePart === 'company-notice'} aria-controls="personal-company-notice-panel" onClick={() => selectPart('company-notice')}>회사 공지</button>
-        <button type="button" role="tab" id="personal-department-notice-tab" aria-selected={visiblePart === 'department-notice'} aria-controls="personal-department-notice-panel" onClick={() => selectPart('department-notice')}>부서 공지</button>
-        <button type="button" role="tab" id="personal-meetings-tab" aria-selected={visiblePart === 'meetings'} aria-controls="personal-meetings-panel" onClick={() => selectPart('meetings')}>회의{meetingNotices.pending > 0 ? <span className="personal-page-tab-count">{meetingNotices.pending}</span> : null}</button>
-        {showDepartmentTab ? (
-          <button type="button" role="tab" id="personal-attendance-tab" className="personal-page-tab-end" aria-selected={visiblePart === 'attendance'} aria-controls="personal-attendance-panel" onClick={() => selectPart('attendance')}>부서 출근시간</button>
-        ) : null}
+        {tabs.map(tab => <Fragment key={tab.id}>
+          {release.scope.unrestricted && tab.id === 'approvals' && <span className="personal-page-tab-split" aria-hidden="true" />}
+          <button type="button" role="tab" id={`personal-${tab.id}-tab`} className={tab.id === 'attendance' ? 'personal-page-tab-end' : undefined} aria-selected={visiblePart === tab.id} aria-controls={`personal-${tab.id}-panel`} onClick={() => selectPart(tab.id)}>{tab.label}{tab.id === 'meetings' && meetingNotices.pending > 0 ? <span className="personal-page-tab-count">{meetingNotices.pending}</span> : null}</button>
+        </Fragment>)}
       </div>
       {visiblePart === 'work' && <div id="personal-work-panel" role="tabpanel" aria-labelledby="personal-work-tab"><WorkRequestHubPage /></div>}
       {visiblePart === 'company-notice' && <div id="personal-company-notice-panel" role="tabpanel" aria-labelledby="personal-company-notice-tab"><HomeNoticeBoard kind="company" /></div>}
@@ -105,7 +117,7 @@ export function ProfileSettingsPage() {
         {noDepartments && <p className="personal-page-notice">지정된 승인 담당이 아니면 목록이 비어 있을 수 있습니다.</p>}
         <LeaveApprovalPanel />
       </div>}
-      <div id="personal-profile-panel" role="tabpanel" aria-labelledby="personal-profile-tab" hidden={visiblePart !== 'profile'}>
+      {release.scope.unrestricted && <div id="personal-profile-panel" role="tabpanel" aria-labelledby="personal-profile-tab" hidden={visiblePart !== 'profile'}>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card>
           <CardHeader>
@@ -194,7 +206,7 @@ export function ProfileSettingsPage() {
           </CardContent>
         </Card>
       </div>
-      </div>
+      </div>}
     </div>
   )
 }

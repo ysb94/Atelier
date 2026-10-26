@@ -101,6 +101,7 @@ import {
   productWorkDetailPath,
 } from '@/lib/workspace/company-paths'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { releaseHref } from '@/lib/company/release-access'
 import { combineListQueries } from '@/lib/query/list-queries'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
 import { summarizeWarehouseStockByStyle } from '@/lib/warehouse/stock'
@@ -989,6 +990,7 @@ export function ProductsPage({
     ? Array.from(fieldsByBrand.values()).some((list) => list.some(isImageField))
     : fields.some(isImageField)
   const registerSlug = singleCompanyBrand?.slug ?? scopedBrand?.slug
+  const registrationReleased = releaseHref(profile, '/data/upload') !== null
   const showDepartmentViews = Boolean(
     lockedOwner || !isCompany || singleCompanyBrand,
   )
@@ -1314,7 +1316,7 @@ export function ProductsPage({
               <Plus className="size-4" />
               상품 불러오기
             </Button>
-          ) : registerSlug ? (
+          ) : registerSlug && registrationReleased ? (
             <Link to={dataUploadHref(registerSlug, { mode: 'single' })}>
               <Button type="button">+ 상품 등록</Button>
             </Link>
@@ -1577,7 +1579,8 @@ export function ProductsPage({
           onOpenStyle={(style) => {
             const slug = brandMap.get(style.brandId)?.slug ?? scopedBrand?.slug
             if (!slug) return
-            navigate(`${productDetailPath(slug, style.styleNo)}${detailQuery}`)
+            const path = lockedOwner ? productWorkDetailPath(lockedOwner, slug, style.styleNo) : productDetailPath(slug, style.styleNo)
+            navigate(`${path}${detailQuery}`)
           }}
           onPage={(nextPage) => patchParams({ page: String(nextPage) }, { resetPage: false })}
         />
@@ -1645,7 +1648,7 @@ export function ProductsPage({
                         첫 상품을 추가하세요. 기획안에서 확정한 뒤 상품으로
                         올리는 흐름도 사용할 수 있습니다.
                       </p>
-                      {registerSlug ? (
+                      {registerSlug && registrationReleased ? (
                         <div className="flex flex-wrap items-center justify-center gap-2">
                           <Link to={dataUploadHref(registerSlug, { mode: 'single' })}>
                             <Button type="button" size="sm">
