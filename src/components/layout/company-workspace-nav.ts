@@ -6,8 +6,7 @@ import {
   canAccessBrandManagement,
   canAccessMamamIdeaInbox,
   canAccessOperationsSupport,
-  canManagePersonnel,
-  isCompanyReviewer,
+  canViewMembers,
 } from '../../lib/company/capabilities.ts'
 import {
   Boxes,
@@ -168,7 +167,7 @@ export function companyNavGroupsForProfile(
 ) {
   const scope = releaseAccess(profile)
   const showOperationsSupport = canAccessOperationsSupport(profile) || scope.operations
-  const showMembers = canManagePersonnel(profile) || isCompanyReviewer(profile) || scope.operations
+  const showMembers = canViewMembers(profile) || scope.operations
   const showBrandManagement = canAccessBrandManagement(profile)
   const visibleGroups = companyNavGroups.flatMap((group) => {
     if (group.title !== '운영지원') {

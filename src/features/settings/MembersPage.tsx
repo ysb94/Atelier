@@ -24,7 +24,7 @@ import {
 import {
   canEditOrgAssignment,
   canManagePersonnel,
-  isCompanyReviewer,
+  canViewMembers,
   capabilityLabel,
 } from '@/lib/company/capabilities'
 import { personNameError } from '@/lib/company/person-name'
@@ -264,27 +264,27 @@ export function MembersPage() {
   const [newDeptName, setNewDeptName] = useState('')
   const canManageMembers = canManagePersonnel(me)
   const canEditAssignment = canEditOrgAssignment(me)
-  const canViewMembers = canManageMembers || isCompanyReviewer(me)
+  const canViewMemberList = canViewMembers(me)
 
   const profilesQuery = useQuery({
     queryKey: ['manageable-profiles'],
     queryFn: listManageableProfiles,
-    enabled: canViewMembers,
+    enabled: canViewMemberList,
   })
   const departmentsQuery = useQuery({
     queryKey: ['departments', 'all'],
     queryFn: () => listDepartments(false),
-    enabled: canViewMembers,
+    enabled: canViewMemberList,
   })
   const brandsQuery = useQuery({
     queryKey: ['brand-directory'],
     queryFn: listBrandDirectory,
-    enabled: canViewMembers,
+    enabled: canViewMemberList,
   })
   const titlesQuery = useQuery({
     queryKey: ['personnelTitles'],
     queryFn: listPersonnelTitles,
-    enabled: canViewMembers,
+    enabled: canViewMemberList,
   })
 
   const profiles = useMemo(
@@ -338,7 +338,7 @@ export function MembersPage() {
   const brandName = (id: string) =>
     brands.find((b) => b.id === id)?.name ?? id.slice(0, 8)
 
-  if (!canViewMembers) {
+  if (!canViewMemberList) {
     return <Navigate to="/" replace />
   }
 
@@ -349,7 +349,7 @@ export function MembersPage() {
         description="접근 신청을 승인하고 본명과 회사 업무 역량을 확인합니다. 본명은 사내 명단과 같아야 합니다."
       />
 
-      {!canManageMembers && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">제작 화면 검수 · 멤버 정보는 조회할 수 있습니다. 변경·승인은 기존 업무 권한을 따릅니다.</p>}
+      {!canManageMembers && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">조회 전용 · 멤버 정보는 조회할 수 있습니다. 변경·승인은 기존 업무 권한을 따릅니다.</p>}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Button

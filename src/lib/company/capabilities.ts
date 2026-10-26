@@ -156,6 +156,23 @@ export function canManagePersonnel(profile: CapabilityProfile | null) {
   return hasPermission(profile, 'personnel.manage')
 }
 
+/**
+ * 멤버 목록 조회 전용. 관리 권한과 분리한다.
+ * 조직 관리(org.manage) 지정자는 운영지원 담당으로 보며, DB `app.can_view_members`와 같은 조건이다.
+ */
+export function canViewMembers(
+  profile: (CapabilityProfile & {
+    email?: string | null
+    departmentName?: string | null
+  }) | null,
+) {
+  return (
+    canManagePersonnel(profile) ||
+    isCompanyReviewer(profile) ||
+    canEditOrgAssignment(profile)
+  )
+}
+
 /** 직원별 기획안 조회를 지정한 사람에게 허용한다. */
 export function canViewDraftsByOwner(profile: CapabilityProfile | null) {
   return hasPermission(profile, 'drafts.read')

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { canAccessOperationsSupport, canEditOrgAssignment, canManagePersonnel, canViewDraftsByOwner } from './capabilities.ts'
+import { canAccessOperationsSupport, canEditOrgAssignment, canManagePersonnel, canViewDraftsByOwner, canViewMembers } from './capabilities.ts'
 import { companyNavGroupsForProfile } from '../../components/layout/company-workspace-nav.ts'
 import type { PermissionCode } from './permissions.ts'
 import { RELEASE_COMPANY_ID, RELEASE_OPERATIONS_ID } from './release-access.ts'
@@ -14,6 +14,9 @@ assert.equal(canAccessOperationsSupport(assigned('notice.company.delete')),true,
 assert.equal(canEditOrgAssignment(assigned('org.manage')),true)
 assert.equal(canManagePersonnel(assigned('org.manage')),false,'조직과 인사 승인 분리')
 assert.equal(canManagePersonnel(assigned('personnel.manage')),true)
+assert.equal(canViewMembers(assigned('org.manage')),true,'조직 관리 담당은 멤버 조회 가능')
+assert.equal(canViewMembers(assigned('personnel.manage')),true)
+assert.equal(canViewMembers(member),false,'운영지원 소속만으로 조회 권한이 생기지 않음')
 assert.equal(canViewDraftsByOwner(assigned('company.review')),false,'현황 조회가 기획안 권한을 자동 생성하지 않음')
 assert.equal(canViewDraftsByOwner(assigned('drafts.read')),true)
 assert.equal(links(member).includes('/operations-support'),false)
