@@ -183,9 +183,13 @@ export function companyNavGroupsForProfile(
     ]
     return items.length > 0 ? [{ ...group, items }] : []
   })
-  return canAccessMamamIdeaInbox(profile) && scope.unrestricted
-    ? [...visibleGroups, mamamInboxGroup]
+  const departmentGroups = !scope.unrestricted && scope.departmentTitle
+    && !visibleGroups.some(group => group.title === scope.departmentTitle)
+    ? [...visibleGroups, { title: scope.departmentTitle, items: [] }]
     : visibleGroups
+  return canAccessMamamIdeaInbox(profile) && scope.unrestricted
+    ? [...departmentGroups, mamamInboxGroup]
+    : departmentGroups
 }
 
 export function companyTopNavForProfile(profile: ReleaseProfile | null) {

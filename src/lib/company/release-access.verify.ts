@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { RELEASE_COMPANY_ID, RELEASE_EXCEPTION_IDS, RELEASE_HOME, RELEASE_LOGISTICS_ID, RELEASE_LOGISTICS_PAGES, RELEASE_OPERATIONS_ID, releaseAccess, releaseHref, releasePersonalPart } from './release-access.ts'
+import { RELEASE_COMPANY_ID, RELEASE_DEPARTMENT_SITES, RELEASE_EXCEPTION_IDS, RELEASE_HOME, RELEASE_LOGISTICS_ID, RELEASE_LOGISTICS_PAGES, RELEASE_OPERATIONS_ID, releaseAccess, releaseHref, releasePersonalPart } from './release-access.ts'
 import { companyNavGroupsForProfile, companyTopNavForProfile } from '../../components/layout/company-workspace-nav.ts'
 const staff = { id:'employee',companyId:RELEASE_COMPANY_ID,status:'active',departmentId:'other',email:'staff@invalid' }
 const ops = {...staff,departmentId:RELEASE_OPERATIONS_ID}
@@ -29,4 +29,30 @@ for(const id of RELEASE_EXCEPTION_IDS) {
 }
 assert.equal(releaseAccess({...staff,email:'dev@atelier.local',isAdmin:true,position:'대표이사'} as typeof staff).unrestricted,false,'이메일·관리자·직책으로 예외를 만들지 않음')
 assert.equal(releaseAccess({...staff,departmentName:'운영지원팀'} as typeof staff).operations,false,'부서 이름이 아닌 지정 UUID')
-console.log('release-access: 직원·승인자·부서·예외 3계정·메뉴·직접 주소·상세 경로·비공개 링크·업무 권한 분리 통과')
+for (const site of RELEASE_DEPARTMENT_SITES) {
+  const member = {...staff,departmentId:site.id}
+  assert.ok(companyNavGroupsForProfile(member).some(group=>group.title===site.title),site.title+' 부서 탭')
+  for (const target of RELEASE_DEPARTMENT_SITES) for (const path of target.pages) {
+    assert.equal(releaseHref(member,path),target.id===site.id?path:null,'타부서 화면 공개 방지: '+site.title+' → '+path)
+  }
+  assert.equal(releaseHref({...member,status:'disabled'},site.pages[0]??'/drafts'),null)
+  assert.equal(releaseHref({...member,companyId:'other-company'},site.pages[0]??'/drafts'),null)
+}
+for (const [departmentName,title] of [
+  ['운영진','운영진'],['Contents Team','Contents'],['Global Online','Global Online'],['Visual Team','Visual'],
+  ['B2B 사업팀','B2B 사업'],['OFF LINE TEAM','OFF LINE'],['CHINA','CHINA'],['마케팅팀','마케팅'],
+]) {
+  const member={...staff,departmentName}
+  assert.deepEqual(companyNavGroupsForProfile(member),[{title,items:[]}],'전용 화면이 없는 부서는 자기 부서 준비 중 탭')
+  assert.deepEqual(links(member),[RELEASE_HOME])
+  assert.deepEqual(companyNavGroupsForProfile({...member,status:'pending'}),[])
+  assert.deepEqual(companyNavGroupsForProfile({...member,companyId:'other-company'}),[])
+}
+const md={...staff,departmentId:RELEASE_DEPARTMENT_SITES[1].id}
+assert.equal(releaseHref(md,'/products/atelier/M%2F1?brand=atelier'),'/product-work/md/atelier/M%2F1?brand=atelier')
+assert.equal(releaseHref(md,'/md?brand=atelier'),'/product-work/md?brand=atelier')
+assert.equal(releaseHref(md,'/product-work/md-malicious'),null)
+assert.equal(releaseHref({...staff,departmentName:'기획팀'},'/drafts'),null,'표시 이름으로 화면 진입 권한을 부여하지 않음')
+assert.equal(releaseHref({...staff,departmentId:RELEASE_DEPARTMENT_SITES[0].id},'/work-requests/planning-malicious'),null)
+assert.equal(releaseHref({...staff,departmentId:RELEASE_DEPARTMENT_SITES[2].id},'/china/work-orders-malicious'),null)
+console.log('release-access: 자기 부서 메뉴·준비 중 탭·타부서 차단·부서 UUID·직원/승인자·예외 3계정·직접 주소·상세 경로·업무 권한 분리 통과')
