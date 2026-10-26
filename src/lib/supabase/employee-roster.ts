@@ -32,10 +32,12 @@ export type RosterFieldKey = (typeof ROSTER_FIELDS)[number]['key']
 
 export type EmployeeRoster = {
   profileId: string
+  remainingAnnualLeave: number | null
 } & Record<RosterFieldKey, string>
 
 type RosterRow = {
   profile_id: string
+  remaining_annual_leave: number | null
   phone: string
   bank_name: string
   bank_account: string
@@ -63,11 +65,12 @@ type RosterRow = {
 }
 
 const ROSTER_COLUMNS =
-  'profile_id, phone, bank_name, bank_account, resident_id, home_address, gmail, naver_email, workplace, employment_type, gender, resigned_on, job_description, work_days, work_hours, break_time, pay_basis, annual_salary, monthly_wage, meal_allowance, car_allowance, childcare_allowance, duty_allowance, note, extra'
+  'profile_id, remaining_annual_leave, phone, bank_name, bank_account, resident_id, home_address, gmail, naver_email, workplace, employment_type, gender, resigned_on, job_description, work_days, work_hours, break_time, pay_basis, annual_salary, monthly_wage, meal_allowance, car_allowance, childcare_allowance, duty_allowance, note, extra'
 
 export function emptyRoster(profileId: string): EmployeeRoster {
   return {
     profileId,
+    remainingAnnualLeave: null,
     phone: '',
     bankName: '',
     bankAccount: '',
@@ -98,6 +101,7 @@ export function emptyRoster(profileId: string): EmployeeRoster {
 function fromRow(row: RosterRow): EmployeeRoster {
   return {
     profileId: row.profile_id,
+    remainingAnnualLeave: row.remaining_annual_leave == null ? null : Number(row.remaining_annual_leave),
     phone: row.phone,
     bankName: row.bank_name,
     bankAccount: row.bank_account,

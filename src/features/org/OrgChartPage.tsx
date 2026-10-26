@@ -690,7 +690,7 @@ function MemberAssignmentTable({
     }
     return map
   }, [rosterQuery.data])
-  const columnCount = 5 + (canChange ? ROSTER_FIELDS.length : 0)
+  const columnCount = 5 + (canChange ? ROSTER_FIELDS.length + 1 : 0)
   const sortedMembers = useMemo(() => {
     if (!sort) return members
     const direction = sort.direction === 'asc' ? 1 : -1
@@ -806,6 +806,7 @@ function MemberAssignmentTable({
               <AssignmentSortHeader label="직책" column="duty" sort={sort} onSort={toggleSort} />
               <AssignmentSortHeader label="직급" column="grade" sort={sort} onSort={toggleSort} />
               <AssignmentSortHeader label="입사일" column="hire" sort={sort} onSort={toggleSort} />
+              {canChange ? <th className="whitespace-nowrap px-4 py-2.5 text-right font-medium" title="엑셀에서 확인해 등록한 잔여 일수입니다. 자동 차감되지 않습니다.">남은 연차</th> : null}
               {canChange
                 ? ROSTER_FIELDS.map((field) => (
                     <th key={field.key} className="whitespace-nowrap px-4 py-2.5 font-medium">
@@ -895,6 +896,9 @@ function MemberAssignmentTable({
                       onChange={(value) => commit(member, 'hire', value)}
                     />
                   </td>
+                  {canChange ? <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums" aria-label={`${memberName(member)} 남은 연차`}>
+                    {rosterQuery.isPending ? '불러오는 중…' : rosterQuery.isError ? '조회 실패' : rosters.get(member.id)?.remainingAnnualLeave == null ? '미등록' : `${rosters.get(member.id)!.remainingAnnualLeave}일`}
+                  </td> : null}
                   {canChange
                     ? ROSTER_FIELDS.map((field) => {
                         const roster = rosters.get(member.id) ?? emptyRoster(member.id)
