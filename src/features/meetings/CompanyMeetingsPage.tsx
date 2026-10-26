@@ -667,7 +667,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
       </Card>
 
       {composeOpen ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 md:py-8 md:pl-[calc(15rem+2rem)] md:pr-8">
           <button
             type="button"
             className="absolute inset-0 bg-black/40"
@@ -678,7 +678,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
             role="dialog"
             aria-modal="true"
             aria-labelledby="meeting-create-title"
-            className={cn('relative z-10 max-h-[92vh] w-full overflow-auto rounded-xl border border-border bg-card p-5 shadow-lg',schedulingSeries?'max-w-6xl':'max-w-3xl')}
+            className="relative z-10 max-h-[92vh] w-full max-w-[1600px] overflow-auto rounded-xl border border-border bg-card p-5 shadow-lg"
           >
             <div className="mb-4 flex items-center justify-between gap-3">
               <h2 id="meeting-create-title" className="text-base font-semibold">
@@ -690,7 +690,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
             </div>
             <div ref={composeSectionRef} className="space-y-3">
             <div className="flex flex-wrap items-end gap-3">
-              <label className="min-w-[16rem] flex-1 space-y-1">
+              <label className="min-w-[16rem] flex-[2] space-y-1">
                 <span className="text-xs font-medium">회의 주제</span>
                 <Input
                   ref={topicRef}
@@ -705,6 +705,12 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                   )}
                   onChange={(event) => setTitle(event.target.value)}
                 />
+              </label>
+              <label className="w-64 space-y-1">
+                <span className="text-xs font-medium">호스트</span>
+                <Select aria-label="호스트" className="w-full" value={composeHost.id} disabled={Boolean(schedulingSeries)} onChange={event=>{setSelectedHostId(event.target.value);setMembers(rows=>rows.filter(person=>person.id!==event.target.value))}}>
+                  {directory.map(person=><option key={person.id} value={person.id}>{meetingPersonLabel(person)}{person.id===host.id?' · 나':''}</option>)}
+                </Select>
               </label>
               {schedulingSeries ? <label className="w-36 space-y-1">
                 <span className="text-xs font-medium">회의 시간</span>
@@ -748,15 +754,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
               </p>
             ) : null}
 
-            <div className="grid items-start gap-3 md:grid-cols-[12rem_minmax(0,1fr)]">
-              <div className="space-y-1">
-                <p className="text-xs font-medium">호스트</p>
-                <Select aria-label="호스트" value={composeHost.id} disabled={Boolean(schedulingSeries)} onChange={event=>{setSelectedHostId(event.target.value);setMembers(rows=>rows.filter(person=>person.id!==event.target.value))}}>
-                  {directory.map(person=><option key={person.id} value={person.id}>{meetingPersonLabel(person)}{person.id===host.id?' · 나':''}</option>)}
-                </Select>
-              </div>
-
-              <div className="space-y-1">
+            <div className="space-y-1">
                 <p className="text-xs font-medium">멤버</p>
                 {membersQuery.isLoading || departmentsQuery.isLoading ? (
                   <p className="text-[11px] text-muted-foreground">
@@ -829,13 +827,13 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                       </span>
                     </div>
                     {memberPickerOpen ? (
-                      <div className="rounded-md border border-border bg-card p-2">
-                        <div className="flex overflow-x-auto pb-1">
+                      <div className="max-h-[calc(92vh-14rem)] overflow-auto rounded-md border border-border bg-card p-2">
+                        <div className="flex min-w-full pb-1">
                           {departmentGroups.map((group, index) => (
                             <div
                               key={group.id}
                               className={cn(
-                                'min-w-[8.5rem] shrink-0 px-3',
+                                'min-w-[8.5rem] flex-1 px-3',
                                 index > 0 && 'border-l border-border',
                               )}
                             >
@@ -874,7 +872,6 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                     ) : null}
                   </div>
                 )}
-              </div>
             </div>
             {schedulingSeries ? <MeetingSchedulePicker rooms={rooms} value={scheduleChoice} onChange={setScheduleChoice} durationMinutes={composeDuration} attendees={attendees} seriesId={schedulingSeries.id}
               roundId={schedulingRoundId ?? findPendingRound(schedulingSeries)?.id} error={meetings.error}

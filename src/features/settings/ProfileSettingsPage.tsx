@@ -23,6 +23,7 @@ import { useMeetingNotices } from '@/features/meetings/use-meeting-notices'
 import { HomeNoticeBoard } from './HomeNoticeBoard'
 import { MyAttendanceStartPanel } from './MyAttendanceStartPanel'
 import { MyAttendancePanel } from './MyAttendancePanel'
+import { OvertimePanel } from './OvertimePanel'
 import './personal-requests.css'
 
 function formatHireDate(value: string | null | undefined) {
@@ -34,12 +35,13 @@ function formatHireDate(value: string | null | undefined) {
   return `${matched[1]}년 ${month}월 ${day}일`
 }
 
-type PersonalPart = 'work' | 'my-attendance' | 'profile' | 'approvals' | 'company-notice' | 'department-notice' | 'meetings' | 'attendance'
+type PersonalPart = 'work' | 'my-attendance' | 'profile' | 'overtime' | 'approvals' | 'company-notice' | 'department-notice' | 'meetings' | 'attendance'
 
 function personalPart(value: string | null): PersonalPart {
   if (
     value === 'work' ||
     value === 'profile' ||
+    value === 'overtime' ||
     value === 'approvals' ||
     value === 'company-notice' ||
     value === 'department-notice' ||
@@ -79,10 +81,11 @@ function ProfileSettingsContent() {
   const visiblePart = !permitted || (part === 'attendance' && !showDepartmentTab) ? 'my-attendance' : part
   const tabs: { id: PersonalPart; label: string }[] = release.scope.unrestricted ? [
     { id: 'work', label: '내 업무' }, { id: 'my-attendance', label: '내 근태' }, { id: 'profile', label: '내 정보' },
+    { id: 'overtime', label: '야근' },
     { id: 'approvals', label: '승인할 신청' }, { id: 'company-notice', label: '회사 공지' },
     { id: 'department-notice', label: '부서 공지' }, { id: 'meetings', label: '회의' },
     ...(showDepartmentTab ? [{ id: 'attendance' as const, label: '부서 출근시간' }] : []),
-  ] : [{ id: 'my-attendance', label: '내 근태' }, { id: 'meetings', label: '회의' },
+  ] : [{ id: 'my-attendance', label: '내 근태' }, { id: 'overtime', label: '야근' }, { id: 'meetings', label: '회의' },
     ...(release.approver ? [{ id: 'approvals' as const, label: '승인할 신청' }] : [])]
   useEffect(() => {
     if (!active || permitted || (part === 'approvals' && approvals.loading)) return
@@ -104,6 +107,7 @@ function ProfileSettingsContent() {
       {visiblePart === 'department-notice' && <div id="personal-department-notice-panel" role="tabpanel" aria-labelledby="personal-department-notice-tab"><HomeNoticeBoard kind="department" /></div>}
       {visiblePart === 'meetings' && <div id="personal-meetings-panel" role="tabpanel" aria-labelledby="personal-meetings-tab"><CompanyMeetingsPage showHeading={false} /></div>}
       <div id="personal-my-attendance-panel" role="tabpanel" aria-labelledby="personal-my-attendance-tab" hidden={visiblePart !== 'my-attendance'}><MyAttendancePanel /></div>
+      {visiblePart === 'overtime' && <div id="personal-overtime-panel" role="tabpanel" aria-labelledby="personal-overtime-tab"><OvertimePanel /></div>}
       {visiblePart === 'attendance' && showDepartmentTab && <div id="personal-attendance-panel" role="tabpanel" aria-labelledby="personal-attendance-tab">
         {approvals.error && <p className="personal-page-notice is-error" role="alert">
           {hasDepartments ? '담당 부서 정보를 다시 불러오지 못했습니다. 아래 내용이 최신이 아닐 수 있으니 잠시 후 다시 확인해 주세요.'

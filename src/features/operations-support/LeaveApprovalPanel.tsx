@@ -3,7 +3,9 @@ import { Check, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
-import { requestLabel, isFullLeave, type PersonalRequest } from '@/features/settings/personal-requests'
+import { useQuery } from '@tanstack/react-query'
+import { requestLabel, isAllDayRequest, isOfficialLeave, type PersonalRequest } from '@/features/settings/personal-requests'
+import { downloadLeaveFile, listLeaveFiles } from '@/lib/supabase/leave-requests'
 import { useLeaveRequests } from './use-leave-requests'
 import { OpsPanelFrame, OpsStat } from './OpsStat'
 import { usePagePreview } from '@/lib/company/page-preview-context'
@@ -22,11 +24,18 @@ function leaveSpanLabel(from: string, to: string) {
   return to !== from ? `${leaveDateLabel(from)} ~ ${leaveDateLabel(to)}` : leaveDateLabel(from)
 }
 function leaveTimeLabel(item: PersonalRequest) {
-  if (isFullLeave(item.kind)) return '종일'
+  if (isAllDayRequest(item.kind)) return '종일'
   return item.kind === 'correction' ? `실제 출근·퇴근 ${item.start}–${item.end}` : `${item.start}–${item.end}`
 }
+function OfficialFiles({ requestId }: { requestId: string }) {
+  const files = useQuery({ queryKey: ['leave-files', requestId], queryFn: () => listLeaveFiles(requestId) })
+  if (files.isPending) return <p className="mt-3 text-sm text-muted-foreground">서류를 불러오는 중…</p>
+  if (files.isError) return <p className="mt-3 text-sm text-danger">서류를 불러오지 못했습니다.</p>
+  if (!files.data.length) return <p className="mt-3 text-sm text-muted-foreground">첨부된 서류가 없습니다.</p>
+  return <div className="mt-3 flex flex-wrap gap-2">{files.data.map(file => <Button key={file.id} type="button" size="sm" variant="outline" onClick={() => void downloadLeaveFile(file).catch(error => console.warn('[leave-requests] 공가 서류 받기 실패', error))}>서류 받기 · {file.name}</Button>)}</div>
+}
 const STATUS_CLASS = { pending: 'bg-warning/10 text-warning', approved: 'bg-success/10 text-success', rejected: 'bg-danger/10 text-danger', cancelled: 'bg-muted text-muted-foreground' }
-export function LeaveApprovalPanel({ readOnly = false }: { readOnly?: boolean }) {
+export function LeaveApprovalPanel({ readOnly = false, officialReview = false }: { readOnly?: boolean; officialReview?: boolean }) {
   useRenderWatch('LeaveApprovalPanel')
   const preview = usePagePreview()
   const leave = useLeaveRequests(readOnly ? 'all' : 'approvals')
@@ -50,7 +59,8 @@ export function LeaveApprovalPanel({ readOnly = false }: { readOnly?: boolean })
   const detail = leave.requests.find(item => item.id === selected)
   const selfRequest = previewRequestIsSelf(detail?.employeeId === leave.userId, preview?.facts?.requestOwner)
   async function decide(next: 'approved' | 'rejected') {
-    if (readOnly || !detail || detail.status !== 'pending' || leave.busy || selfRequest) return
+    const officialAction = officialReview && detail?.kind === 'official'
+    if ((!officialAction && readOnly) || !detail || detail.status !== 'pending' || leave.busy || selfRequest) return
     if (detail.employeeId === leave.userId) {
       setMessage('실제 본인 신청은 화면 테스트에서도 승인·반려할 수 없습니다. 다른 지정 승인자가 처리해야 합니다.')
       return
@@ -66,7 +76,7 @@ export function LeaveApprovalPanel({ readOnly = false }: { readOnly?: boolean })
     }
   }
   return <OpsPanelFrame>
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">{readOnly ? '근태·야근 신청 현황' : '승인할 신청'}</h2><p className="mt-1 text-sm text-muted-foreground">{readOnly ? '부서별 지정 담당자가 승인합니다. 운영지원은 신청과 처리 결과를 확인합니다.' : '담당 부서의 휴가·외근·재택·출퇴근 정정·야근 신청을 검토합니다. 본인 신청은 목록에서 제외됩니다.'}</p></div><Button size="sm" variant="outline" disabled={leave.busy} onClick={() => void leave.refresh()}><RefreshCw size={14}/>새로고침</Button></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">{readOnly ? '근태·야근 신청 현황' : '승인할 신청'}</h2><p className="mt-1 text-sm text-muted-foreground">{readOnly ? officialReview ? '공가 서류는 운영지원이 확인한 뒤 처리합니다. 그 외 신청은 부서 승인자가 처리합니다.' : '부서별 지정 담당자가 승인합니다. 운영지원은 신청과 처리 결과를 확인합니다.' : '담당 부서의 휴가·외근·출퇴근 정정·야근 신청을 검토합니다. 공가 서류는 운영지원이 확인합니다. 본인 신청은 목록에서 제외됩니다.'}</p></div><Button size="sm" variant="outline" disabled={leave.busy} onClick={() => void leave.refresh()}><RefreshCw size={14}/>새로고침</Button></div>
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{(['pending','approved','rejected','cancelled'] as const).map(key => <OpsStat key={key} label={LABELS[key]} value={`${leave.requests.filter(item => item.status === key).length}건`}/>)}</div>
     <div className="flex flex-wrap gap-2">
       <Input aria-label="근태 신청 검색" placeholder="직원·부서·장소 검색" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} className="h-9 w-full sm:w-60"/>
@@ -79,11 +89,12 @@ export function LeaveApprovalPanel({ readOnly = false }: { readOnly?: boolean })
     {detail && <article aria-label="근태 신청 검토" className="rounded-2xl border border-primary/30 bg-card p-5">
       <header className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{detail.employeeName} · {requestLabel(detail.kind)}</h3><p className="mt-1 text-sm text-muted-foreground">{detail.departmentName} · {leaveSpanLabel(detail.from, detail.to)} · {leaveTimeLabel(detail)}{detail.place ? ` · 장소 ${detail.place}` : ''}</p></div><Button variant="ghost" size="icon" aria-label="신청 검토 닫기" disabled={leave.busy} onClick={() => setSelected(null)}><X size={16}/></Button></header>
       <p className="my-4 whitespace-pre-wrap rounded-lg bg-muted/40 p-3 text-sm">{detail.note || '신청 메모가 없습니다.'}</p>
-      {detail.status === 'pending' && !readOnly ? <>
+      {isOfficialLeave(detail.kind) && <OfficialFiles requestId={detail.id} />}
+      {detail.status === 'pending' && (!readOnly || (officialReview && isOfficialLeave(detail.kind))) ? <>
         <label className="block text-sm">처리 의견 <span className="text-muted-foreground">· 반려 시 필수</span><Textarea aria-label="신청 처리 의견" maxLength={2000} rows={2} value={note} disabled={leave.busy} onChange={event => setNote(event.target.value)} className="mt-2" placeholder="반려 사유 또는 전달할 의견을 적어 주세요."/></label>
         {selfRequest && <p className="mt-3 text-sm text-warning">본인 신청은 다른 지정 승인자가 처리해야 합니다.</p>}
         <div className="mt-4 flex justify-end gap-2"><Button variant="outline" disabled={leave.busy || selfRequest} onClick={() => void decide('rejected')}><X size={14}/>{leave.busy ? '처리 중…' : '반려'}</Button><Button disabled={leave.busy || selfRequest} onClick={() => void decide('approved')}><Check size={14}/>{leave.busy ? '처리 중…' : '승인'}</Button></div>
-      </> : detail.status === 'pending' ? <p className="text-sm text-muted-foreground">부서별 지정 승인자의 검토를 기다리고 있습니다.</p> : <p className="text-sm">{LABELS[detail.status]} · {detail.decidedByName || '처리자 미확인'}{detail.decidedAt ? ` · ${new Date(detail.decidedAt).toLocaleString('ko-KR')}` : ''}{detail.decisionNote && <span className="mt-2 block whitespace-pre-wrap">{detail.decisionNote}</span>}</p>}
+      </> : detail.status === 'pending' ? <p className="text-sm text-muted-foreground">{isOfficialLeave(detail.kind) ? '운영지원의 서류 확인을 기다리고 있습니다.' : '부서별 지정 승인자의 검토를 기다리고 있습니다.'}</p> : <p className="text-sm">{LABELS[detail.status]} · {detail.decidedByName || '처리자 미확인'}{detail.decidedAt ? ` · ${new Date(detail.decidedAt).toLocaleString('ko-KR')}` : ''}{detail.decisionNote && <span className="mt-2 block whitespace-pre-wrap">{detail.decisionNote}</span>}</p>}
     </article>}
     <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <div className="overflow-x-auto"><table aria-label="근태 신청 목록" className="w-full min-w-[760px] text-left text-sm"><thead className="border-b border-border bg-primary text-xs text-primary-foreground"><tr>{['신청자·부서','신청 종류','일정','신청일','상태','검토'].map(label => <th key={label} className="px-4 py-3 font-medium">{label}</th>)}</tr></thead><tbody>

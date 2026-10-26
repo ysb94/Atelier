@@ -45,10 +45,12 @@ export function MeetingMemberOption({ person, selected, onToggle, participation,
     const button = buttonRef.current, popup = popupRef.current
     if (!button || !popup) return
     const anchor = button.getBoundingClientRect(), box = popup.getBoundingClientRect()
-    const left = Math.max(8, Math.min(anchor.left, window.innerWidth - box.width - 8))
-    const preferred = anchor.bottom + 8 + box.height <= window.innerHeight - 8
-      ? anchor.bottom + 8 : anchor.top - box.height - 8
-    const top = Math.max(8, Math.min(preferred, window.innerHeight - box.height - 8))
+    const gap = 8
+    const roomOnRight = anchor.right + gap + box.width <= window.innerWidth - 8
+    const left = roomOnRight
+      ? anchor.right + gap
+      : Math.max(8, anchor.left - gap - box.width)
+    const top = Math.max(8, Math.min(anchor.top, window.innerHeight - box.height - 8))
     setPosition((previous) => previous.ready && previous.left === left && previous.top === top
       ? previous : { left, top, ready: true })
   }, [])

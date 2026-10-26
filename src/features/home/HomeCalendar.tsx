@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { koreanHolidayLabel, koreanHolidayNames } from '@/features/operations-support/korean-holidays'
@@ -12,7 +12,7 @@ export type ExampleEvent = { id: string; date: string; time: string; title: stri
 const categories: { id: Category; label: string }[] = [{ id: 'meeting', label: '회의' }, { id: 'work', label: '업무·마감' }, { id: 'leave', label: '휴가·근무' }, { id: 'company', label: '회사 일정' }]
 const weekdays = ['월', '화', '수', '목', '금', '토', '일']
 
-export function HomeCalendar({ sidebar, clockIns, needsClockIn, clocking, clockError, onClockIn }: { sidebar: ReactNode; clockIns: Record<string, string>; needsClockIn: boolean; clocking: boolean; clockError: string; onClockIn: () => void }) {
+export function HomeCalendar({ sidebar, clockIns }: { sidebar: ReactNode; clockIns: Record<string, string> }) {
   useRenderWatch('HomeCalendar')
   const [today] = useState(() => toDateKey(new Date()))
   const [selected, setSelected] = useState(today)
@@ -82,24 +82,6 @@ export function HomeCalendar({ sidebar, clockIns, needsClockIn, clocking, clockE
       <HomeTodoList examples={examples} />
       {sidebar}
     </aside>
-    {needsClockIn && <HomeClockInButton busy={clocking} error={clockError} onClockIn={onClockIn} />}
     {dayOpen && <HomeDayDialog date={selected} events={selectedEvents} members={selectedTeam} examples={examples} showTeam={showTeam} onClose={() => setDayOpen(false)} onMove={direction => selectDate(addDays(parseDateKey(selected), direction))} />}
-  </div>
-}
-
-function HomeClockInButton({ busy, error, onClockIn }: { busy: boolean; error: string; onClockIn: () => void }) {
-  const [now, setNow] = useState(() => new Date())
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(new Date()), 1000)
-    return () => window.clearInterval(timer)
-  }, [])
-  const time = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })
-  return <div className="home-clock-in-overlay">
-    <button type="button" className="home-clock-in" disabled={busy} onClick={onClockIn}>
-      <small>지금 시각</small>
-      <strong>{time}</strong>
-      <span>{busy ? '기록 중…' : '출근하기'}</span>
-    </button>
-    {error && <p role="alert">{error}</p>}
   </div>
 }

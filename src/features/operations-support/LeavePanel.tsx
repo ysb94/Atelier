@@ -4,6 +4,8 @@ import { Input, Select } from '@/components/ui/input'
 import { formatNumber } from '@/lib/utils'
 import { DraftNotice, memberLabel, OpsPanelFrame, OpsStat } from './OpsStat'
 import { useOpsDirectory } from './ops-directory'
+import { useAuth } from '@/lib/supabase/auth'
+import { canEditOrgAssignment } from '@/lib/company/capabilities'
 import { LeaveApprovalPanel } from './LeaveApprovalPanel'
 
 type LeaveDraft = { granted: string; used: string; note: string }
@@ -30,13 +32,14 @@ function hireLabel(date: string | null) {
 }
 
 export function LeavePanel() {
+  const { profile } = useAuth()
   const [view, setView] = useState('requests')
   return <div className="space-y-4">
     <div className="flex gap-2" role="group" aria-label="연차관리 보기">
       <Button variant={view === 'requests' ? 'default' : 'outline'} aria-pressed={view === 'requests'} onClick={() => setView('requests')}>신청 현황</Button>
       <Button variant={view === 'balance' ? 'default' : 'outline'} aria-pressed={view === 'balance'} onClick={() => setView('balance')}>연차 현황 · 시안</Button>
     </div>
-    {view === 'requests' ? <LeaveApprovalPanel readOnly/> : <LeaveBalancePanel/>}
+    {view === 'requests' ? <LeaveApprovalPanel readOnly officialReview={canEditOrgAssignment(profile)}/> : <LeaveBalancePanel/>}
   </div>
 }
 

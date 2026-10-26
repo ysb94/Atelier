@@ -9,6 +9,7 @@ assert.deepEqual(links(staff),[RELEASE_HOME])
 assert.equal(releaseHref(staff,'/settings/profile?part=meetings'),'/settings/profile?part=meetings')
 assert.equal(releaseHref(staff,'/settings/profile?part=approvals'),null)
 assert.equal(releaseHref(staff,'/settings/profile?part=approvals',true),'/settings/profile?part=approvals')
+assert.equal(releasePersonalPart(staff,'overtime'),true,'야근은 직원 본인 화면')
 for(const part of ['work','profile','attendance','company-notice','department-notice']) assert.equal(releasePersonalPart(staff,part,true),false)
 for(const path of ['/','/operations','/products','/data/all','/drafts','/settings/access-ip','/brands','/settings/ai','/org-chart']) assert.equal(releaseHref(staff,path),null)
 for(const path of ['/operations-support','/members','/settings/permissions']) { assert.ok(links(ops).includes(path)); assert.equal(releaseHref(logistics,path),null) }

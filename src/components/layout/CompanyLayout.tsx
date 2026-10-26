@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { NavLink, useLocation } from 'react-router-dom'
+import { useQuery } from '@tanstack/react-query'
 import {
   Building2,
   ChevronDown,
@@ -12,8 +13,9 @@ import {
 import { CompanyAiAssistant } from '@/components/ai/CompanyAiAssistant'
 import { useAuth } from '@/lib/supabase/auth'
 import { useNavigationPreviewProfile } from '@/lib/company/developer-preview-context'
-import { cn } from '@/lib/utils'
+import { cn, emptyList } from '@/lib/utils'
 import { RELEASE_HOME } from '@/lib/company/release-access'
+import { listDepartments, type Department } from '@/lib/supabase/profiles'
 import { ReleaseAccessProvider, useReleaseAccess } from './release-access-context'
 import { ReleasePageGate } from './ReleasePageGate'
 import {
@@ -21,8 +23,10 @@ import {
   companyNavGroupsForProfile,
   companyNavItemActive,
   companyTopNavForProfile,
+  insertMissingDepartmentGroups,
   type CompanyNavItem,
 } from './company-workspace-nav'
+import { SiteClockInPrompt } from '@/features/home/SiteClockInPrompt'
 import { WorkspaceHeaderActions } from './WorkspaceHeaderActions'
 import { DeveloperPreviewBar, DeveloperPreviewProvider } from './DeveloperPreview'
 import {
@@ -86,14 +90,25 @@ function CompanyReleasedLayout() {
 function CompanySidebar() {
   const location = useLocation()
   const { email, profile, signOut } = useAuth()
+  const { scope } = useReleaseAccess()
   const navigationProfile = useNavigationPreviewProfile(profile)
   const companyTopNav = useMemo(() => companyTopNavForProfile(navigationProfile), [navigationProfile])
   const [openTitles, setOpenTitles] = useState<Set<string>>(() => new Set())
   const [collapsed, setCollapsed] = useState(readCollapsed)
-  const navGroups = useMemo(
-    () => companyNavGroupsForProfile(navigationProfile),
-    [navigationProfile],
-  )
+  const departmentsQuery = useQuery({
+    queryKey: ['departments', 'active'],
+    queryFn: () => listDepartments(true),
+    enabled: scope.unrestricted,
+  })
+  useEffect(() => {
+    if (departmentsQuery.error) console.warn('[sidebar] 부서 목록 조회 실패', departmentsQuery.error)
+  }, [departmentsQuery.error])
+  const departments = departmentsQuery.data ?? emptyList<Department>()
+  const navGroups = useMemo(() => {
+    const groups = companyNavGroupsForProfile(navigationProfile)
+    if (!scope.unrestricted) return groups
+    return insertMissingDepartmentGroups(groups, departments)
+  }, [navigationProfile, scope.unrestricted, departments])
   const flatNavItems = useMemo(
     () => [
       ...companyTopNav.map((item) => ({ ...item, tip: item.label })),
@@ -338,7 +353,7 @@ function CompanyWorkspaceMain() {
   const pageLayout = pageLayoutFor(location.pathname)
 
   return (
-    <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
+    <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
       <div className="relative z-20 flex shrink-0 items-end border-b border-border bg-muted/40">
         <WorkspaceTabBar
           tabs={visibleTabs}
@@ -368,6 +383,7 @@ function CompanyWorkspaceMain() {
           </ReleasePageGate>
         </div>
       </div>
+      <SiteClockInPrompt />
     </main>
   )
 }

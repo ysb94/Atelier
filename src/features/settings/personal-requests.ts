@@ -3,11 +3,10 @@ export const REQUEST_KINDS = [
   { id: 'half', label: '반차', group: '휴가' },
   { id: 'quarter', label: '반반차', group: '휴가' },
   { id: 'offsite', label: '외근', group: '근무' },
-  { id: 'remote', label: '재택', group: '근무' },
+  { id: 'official', label: '공가', group: '근무' },
   { id: 'overtime', label: '야근', group: '근무' },
-  { id: 'correction', label: '출퇴근 정정', group: '정정' },
 ] as const
-export type RequestKind = typeof REQUEST_KINDS[number]['id']
+export type RequestKind = typeof REQUEST_KINDS[number]['id'] | 'remote' | 'correction'
 export type PersonalRequest = {
   id: string; kind: RequestKind; from: string; to: string; start: string; end: string
   place: string; note: string; status: 'pending' | 'approved' | 'rejected' | 'cancelled'
@@ -16,8 +15,12 @@ export type PersonalRequest = {
 export type RequestForm = Omit<PersonalRequest, 'id' | 'status' | 'createdAt' | 'decisionNote'>
 export type ReminderBasis = { start: string; end: string; breakStart: string; breakEnd: string; before: number }
 export const DEFAULT_REMINDER_BASIS: ReminderBasis = { start: '09:00', end: '18:00', breakStart: '12:00', breakEnd: '13:00', before: 10 }
-export function requestLabel(kind: RequestKind) { return REQUEST_KINDS.find(item => item.id === kind)!.label }
+export function requestLabel(kind: RequestKind) {
+  return REQUEST_KINDS.find(item => item.id === kind)?.label ?? (kind === 'remote' ? '재택' : kind === 'correction' ? '출퇴근 정정' : kind)
+}
 export function isFullLeave(kind: RequestKind) { return kind === 'annual' }
+export function isOfficialLeave(kind: RequestKind) { return kind === 'official' }
+export function isAllDayRequest(kind: RequestKind) { return isFullLeave(kind) || isOfficialLeave(kind) }
 export function isPartialLeave(kind: RequestKind) { return kind === 'half' || kind === 'quarter' }
 export function isLeaveRequest(kind: RequestKind) { return isFullLeave(kind) || isPartialLeave(kind) }
 export function isLocationRequest(kind: RequestKind) { return kind === 'offsite' || kind === 'remote' }
@@ -35,12 +38,12 @@ function validDate(value: string) {
   return !Number.isNaN(date.getTime()) && date.getFullYear() === Number(value.slice(0,4)) && date.getMonth()+1 === Number(value.slice(5,7)) && date.getDate() === Number(value.slice(8,10))
 }
 function interval(form: RequestForm | PersonalRequest) {
-  return [form.from + (isFullLeave(form.kind) ? 'T00:00' : `T${form.start}`), form.to + (isFullLeave(form.kind) ? 'T24:00' : `T${form.end}`)]
+  return [form.from + (isAllDayRequest(form.kind) ? 'T00:00' : `T${form.start}`), form.to + (isAllDayRequest(form.kind) ? 'T24:00' : `T${form.end}`)]
 }
 export function validateRequest(form: RequestForm, requests: PersonalRequest[], basis: ReminderBasis, today?: string) {
   if (!validDate(form.from) || !validDate(form.to) || form.to < form.from) return '신청 시작일과 종료일을 확인해 주세요.'
   if (form.kind === 'correction' && today && form.from > today) return '앞으로의 날짜는 출퇴근 정정을 신청할 수 없습니다.'
-  if (!isFullLeave(form.kind)) {
+  if (!isAllDayRequest(form.kind)) {
     const start = minuteOf(form.start), end = minuteOf(form.end)
     if (start == null || end == null || end <= start) return '시작·종료 시각을 확인해 주세요. 자정을 넘기는 일정은 날짜별로 나눠 신청해 주세요.'
   }
@@ -55,7 +58,7 @@ export function validateRequest(form: RequestForm, requests: PersonalRequest[], 
     if (workMinutes !== (form.kind === 'half' ? 240 : 120)) return `${requestLabel(form.kind)}는 시안 기준으로 휴게시간을 제외한 ${form.kind === 'half' ? '4' : '2'}시간을 선택해 주세요.`
   }
   if (form.kind === 'offsite' && !form.place.trim()) return '외근 장소를 입력해 주세요.'
-  if ((form.kind === 'overtime' || form.kind === 'correction') && !form.note.trim()) return '신청 사유를 입력해 주세요.'
+  if ((form.kind === 'overtime' || form.kind === 'correction' || isOfficialLeave(form.kind)) && !form.note.trim()) return '신청 사유를 입력해 주세요.'
   if (form.kind === 'correction') {
     if (requests.some(item => item.kind === 'correction' && item.status === 'pending' && item.from === form.from)) return '같은 날짜에 승인 대기 중인 출퇴근 정정 신청이 있습니다.'
   } else {
@@ -74,7 +77,7 @@ export function validateRequest(form: RequestForm, requests: PersonalRequest[], 
   return ''
 }
 export function reminderPreview(form: RequestForm, basis: ReminderBasis) {
-  if (isFullLeave(form.kind)) return ['휴가일에는 출근·퇴근 알림을 보내지 않습니다.']
+  if (isFullLeave(form.kind) || isOfficialLeave(form.kind)) return [isOfficialLeave(form.kind) ? '공가로 처리되면 해당 날짜의 출근·퇴근 알림을 보내지 않습니다.' : '휴가일에는 출근·퇴근 알림을 보내지 않습니다.']
   if (form.kind === 'correction') return ['기록 정정은 예정 근무 알림을 변경하지 않습니다.']
   let start = minuteOf(basis.start), end = minuteOf(basis.end)
   const leaveStart = minuteOf(form.start), leaveEnd = minuteOf(form.end)

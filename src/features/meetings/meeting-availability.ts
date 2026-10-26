@@ -1,9 +1,9 @@
 export type MeetingAvailability = {
   id: string; personId: string
-  kind: 'meeting' | 'annual' | 'half' | 'quarter' | 'offsite' | 'remote'
+  kind: 'meeting' | 'annual' | 'half' | 'quarter' | 'offsite' | 'remote' | 'official'
   status: 'approved' | 'pending'; start: string; end: string
 }
-export const AVAILABILITY_LABEL = { meeting: '다른 회의', annual: '연차', half: '반차', quarter: '반반차', offsite: '외근', remote: '재택' }
+export const AVAILABILITY_LABEL = { meeting: '다른 회의', annual: '연차', half: '반차', quarter: '반반차', offsite: '외근', remote: '재택', official: '공가' }
 export function availabilityMinutes(clock: string) {
   const [hour, minute] = clock.split(':').map(Number)
   return hour * 60 + minute

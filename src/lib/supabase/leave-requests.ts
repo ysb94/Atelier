@@ -48,9 +48,51 @@ export async function submitLeaveRequest(employeeId: string, form: RequestForm):
   if (error) fail('신청 저장 실패', error)
   return mapRow(data as LeaveRow)
 }
+export type LeaveFile = { id: string; requestId: string; name: string; type: string; size: number; path: string }
+const LEAVE_FILES = 'company-leave-files'
+export async function uploadLeaveFile(requestId: string, file: File): Promise<LeaveFile> {
+  if (file.size < 1 || file.size > 20 * 1024 * 1024 || /\.(exe|dll|bat|cmd|ps1|msi|com|scr|vbs|js|jar|sh)$/i.test(file.name)) {
+    throw new Error('20MB 이하의 실행 파일이 아닌 서류만 올려 주세요.')
+  }
+  const pending = await checked<{ id: string; path: string }>(getSupabase().rpc('begin_leave_file', {
+    p_request: requestId, p_name: file.name, p_type: file.type, p_size: file.size,
+  }))
+  try {
+    const { error } = await getSupabase().storage.from(LEAVE_FILES).upload(pending.path, file, { contentType: file.type || 'application/octet-stream', upsert: false, cacheControl: '0' })
+    if (error) fail('공가 서류 업로드 실패', error)
+    await checked(getSupabase().rpc('finish_leave_file', { p_id: pending.id }))
+    return { id: pending.id, requestId, name: file.name, type: file.type, size: file.size, path: pending.path }
+  } catch (error) {
+    try { await checked(getSupabase().rpc('remove_unfinished_leave_file', { p_id: pending.id })) }
+    catch (cleanupError) { console.warn('[leave-requests] 미완료 공가 서류 정리 실패', { id: pending.id, error: cleanupError }) }
+    throw error
+  }
+}
+export async function listLeaveFiles(requestId: string): Promise<LeaveFile[]> {
+  const { data, error } = await getSupabase().from('company_leave_files').select('id,request_id,file_name,mime_type,size_bytes,storage_path').eq('request_id', requestId).eq('ready', true)
+  if (error) fail('공가 서류 조회 실패', error)
+  return (data ?? []).map(row => ({ id: row.id, requestId: row.request_id, name: row.file_name, type: row.mime_type, size: row.size_bytes, path: row.storage_path }))
+}
+export async function downloadLeaveFile(file: LeaveFile): Promise<void> {
+  const { data, error } = await getSupabase().storage.from(LEAVE_FILES).download(file.path)
+  if (error || !data) fail('공가 서류 받기 실패', error ?? { message: '파일 내용이 없습니다.' })
+  const url = URL.createObjectURL(data)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = file.name
+  link.click()
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+}
+async function checked<T>(request: PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<T> {
+  return request.then(({ data, error }) => {
+    if (error) fail('공가 서류 요청 실패', error)
+    return data as T
+  })
+}
 export async function transitionLeaveRequest(id: string, status: 'approved' | 'rejected' | 'cancelled', decisionNote = ''): Promise<LeaveRequest> {
-  const { data, error } = await getSupabase().from('company_leave_requests').update({ status, decision_note: decisionNote })
-    .eq('id', id).eq('status', 'pending').select().maybeSingle()
+  let query = getSupabase().from('company_leave_requests').update({ status, decision_note: decisionNote }).eq('id', id)
+  query = status === 'cancelled' ? query.in('status', ['pending', 'approved']) : query.eq('status', 'pending')
+  const { data, error } = await query.select().maybeSingle()
   if (error) fail('신청 처리 실패', error)
   if (!data) throw new Error('이미 처리되었거나 처리 권한이 없는 신청입니다. 목록을 새로고침해 주세요.')
   return mapRow(data as LeaveRow)

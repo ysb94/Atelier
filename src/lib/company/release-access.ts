@@ -41,7 +41,7 @@ export function releaseAccess(profile: ReleaseProfile | null | undefined) {
   }
 }
 export function releasePersonalPart(profile: ReleaseProfile | null | undefined, part: string | null, approver = false) {
-  return releaseAccess(profile).unrestricted || !part || part === 'my-attendance' || part === 'meetings' || (part === 'approvals' && approver)
+  return releaseAccess(profile).unrestricted || !part || part === 'my-attendance' || part === 'overtime' || part === 'meetings' || (part === 'approvals' && approver)
 }
 const under = (path: string, root: string) => path === root || path.startsWith(root + '/')
 

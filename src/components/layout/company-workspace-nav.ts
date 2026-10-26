@@ -204,3 +204,40 @@ export function companyNavItemActive(to: string, pathname: string, end?: boolean
 export function companyGroupIsActive(group: CompanyNavGroup, pathname: string) {
   return group.items.some((item) => companyNavItemActive(item.to, pathname))
 }
+
+/** 사이드바 표시 이름. 부서 이름의 팀·Team은 빼 둔다. */
+export function departmentSidebarLabel(name: string) {
+  return name.replace(/team/gi, '').replace(/팀/g, '').replace(/\s+/g, ' ').trim()
+}
+
+/** 사이드바에 따로 두지 않는 부서. */
+const HIDDEN_DEPARTMENT_LABELS = new Set(['운영진'])
+
+/** 이미 같은 이름 메뉴가 있는 부서는 빼고, 화면만 있는 빈 메뉴를 만든다. */
+export function missingDepartmentNavGroups(
+  departments: { name: string }[],
+  groups: CompanyNavGroup[],
+): CompanyNavGroup[] {
+  const taken = new Set(groups.map((group) => departmentSidebarLabel(group.title).toLocaleLowerCase('ko')))
+  const seen = new Set<string>()
+  const missing: CompanyNavGroup[] = []
+  for (const department of departments) {
+    const title = departmentSidebarLabel(department.name)
+    const key = title.toLocaleLowerCase('ko')
+    if (!title || HIDDEN_DEPARTMENT_LABELS.has(title) || taken.has(key) || seen.has(key)) continue
+    seen.add(key)
+    missing.push({ title, items: [] })
+  }
+  return missing
+}
+
+export function insertMissingDepartmentGroups(
+  groups: CompanyNavGroup[],
+  departments: { name: string }[],
+) {
+  const missing = missingDepartmentNavGroups(departments, groups)
+  if (missing.length === 0) return groups
+  const index = groups.findIndex((group) => group.title === '데이터')
+  if (index < 0) return [...groups, ...missing]
+  return [...groups.slice(0, index), ...missing, ...groups.slice(index)]
+}

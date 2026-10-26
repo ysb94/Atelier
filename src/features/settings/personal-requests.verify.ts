@@ -15,6 +15,8 @@ assert.match(reminderPreview({...form,kind:'overtime',start:'18:00',end:'21:00'}
 assert.match(validateRequest({...form,from:'2026-02-30',to:'2026-02-30'},[],basis),/시작일/)
 assert.match(validateRequest({...form,kind:'overtime',start:'18:00',end:'21:00'},[],basis),/사유/)
 assert.match(validateRequest({...form,kind:'offsite'},[],basis),/장소/)
+assert.match(validateRequest({...form,kind:'official',from:'2026-10-08',to:'2026-10-09',note:''},[],basis),/사유/)
+assert.equal(validateRequest({...form,kind:'official',from:'2026-10-08',to:'2026-10-09',note:'예비군'},[],basis),'')
 const pending: PersonalRequest = {...form,id:'a',status:'pending',createdAt:'2026-10-07'}
 assert.match(validateRequest(form,[pending],basis),/같은 시간/)
 assert.equal(validateRequest(form,[{...pending,status:'cancelled'}],basis),'')

@@ -9,6 +9,8 @@ import {
   Pencil,
   CircleAlert,
   Check,
+  ChevronDown,
+  ChevronUp,
   X,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
@@ -37,6 +39,7 @@ import {
 } from '@/lib/supabase/profiles'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
 import { OrgDirectory } from './OrgDirectory'
+import { HireDateScrollField } from './HireDateScrollField'
 
 const TEAM_TONES = [
   'bg-[#f1e7d6] text-[#7a5a2b]',
@@ -62,6 +65,27 @@ function titleOrder(name: string | null, order: ReadonlyMap<string, number>) {
 function memberName(member: OrgChartMember) {
   return member.displayName?.trim() || '이름 없음'
 }
+type AssignmentSortKey = 'name' | 'department' | 'duty' | 'grade' | 'hire'
+
+function assignmentSortValue(
+  member: OrgChartMember,
+  key: AssignmentSortKey,
+  departmentName: (departmentId: string | null) => string,
+) {
+  if (key === 'name') return memberName(member)
+  if (key === 'department') return member.departmentId ? departmentName(member.departmentId) : ''
+  if (key === 'duty') return member.position?.trim() ?? ''
+  if (key === 'grade') return member.jobGrade?.trim() ?? ''
+  return member.hireDate ?? ''
+}
+
+function compareAssignmentValue(left: string, right: string) {
+  if (!left && !right) return 0
+  if (!left) return 1
+  if (!right) return -1
+  return left.localeCompare(right, 'ko')
+}
+
 function compareMembers(
   left: OrgChartMember,
   right: OrgChartMember,
@@ -644,6 +668,22 @@ function MemberAssignmentTable({
   filtered: boolean
 }) {
   const [error, setError] = useState<string | null>(null)
+  const [sort, setSort] = useState<{ key: AssignmentSortKey; direction: 'asc' | 'desc' } | null>(null)
+  const sortedMembers = useMemo(() => {
+    if (!sort) return members
+    const direction = sort.direction === 'asc' ? 1 : -1
+    return [...members].sort((left, right) => direction * compareAssignmentValue(
+      assignmentSortValue(left, sort.key, departmentName),
+      assignmentSortValue(right, sort.key, departmentName),
+    ))
+  }, [departmentName, members, sort])
+
+  function toggleSort(key: AssignmentSortKey) {
+    setSort((current) => current?.key === key && current.direction === 'asc'
+      ? { key, direction: 'desc' }
+      : { key, direction: 'asc' })
+  }
+
   const mutation = useMutation({
     mutationFn: (input: {
       memberId: string
@@ -718,11 +758,11 @@ function MemberAssignmentTable({
         <table className="w-full min-w-[820px] text-left text-sm">
           <thead className="border-y border-border bg-primary text-xs text-primary-foreground">
             <tr>
-              <th className="px-4 py-2.5 font-medium">이름</th>
-              <th className="px-4 py-2.5 font-medium">부서</th>
-              <th className="px-4 py-2.5 font-medium">직책</th>
-              <th className="px-4 py-2.5 font-medium">직급</th>
-              <th className="px-4 py-2.5 font-medium">입사일</th>
+              <AssignmentSortHeader label="이름" column="name" sort={sort} onSort={toggleSort} />
+              <AssignmentSortHeader label="부서" column="department" sort={sort} onSort={toggleSort} />
+              <AssignmentSortHeader label="직책" column="duty" sort={sort} onSort={toggleSort} />
+              <AssignmentSortHeader label="직급" column="grade" sort={sort} onSort={toggleSort} />
+              <AssignmentSortHeader label="입사일" column="hire" sort={sort} onSort={toggleSort} />
             </tr>
           </thead>
           <tbody>
@@ -747,7 +787,7 @@ function MemberAssignmentTable({
                 </td>
               </tr>
             ) : (
-              members.map((member) => (
+              sortedMembers.map((member) => (
                 <tr
                   key={member.id}
                   className="border-b border-border/70 transition-colors last:border-0 hover:bg-muted/25"
@@ -795,19 +835,15 @@ function MemberAssignmentTable({
                     />
                   </td>
                   <td className="px-4 py-2">
-                    <div className="flex items-center gap-2">
-                      <Input
-                        type="date"
-                        aria-label={`${memberName(member)} 입사일`}
-                        value={member.hireDate ?? ''}
-                        min="1950-01-01"
-                        max={todayDateKey()}
-                        disabled={mutation.isPending || !canChange}
-                        className="h-9 w-40 border-border/60 bg-card px-3 disabled:cursor-wait disabled:opacity-50"
-                        onChange={(event) => commit(member, 'hire', event.target.value)}
-                      />
-                      {member.hireDate ? null : <span className="text-xs text-muted-foreground">없음</span>}
-                    </div>
+                    <HireDateScrollField
+                      label={`${memberName(member)} 입사일`}
+                      value={member.hireDate ?? ''}
+                      min="1950-01-01"
+                      max={todayDateKey()}
+                      disabled={mutation.isPending || !canChange}
+                      className="w-40"
+                      onChange={(value) => commit(member, 'hire', value)}
+                    />
                   </td>
                 </tr>
               ))
@@ -816,6 +852,43 @@ function MemberAssignmentTable({
         </table>
       </div>
     </article>
+  )
+}
+
+function AssignmentSortHeader({
+  label,
+  column,
+  sort,
+  onSort,
+}: {
+  label: string
+  column: AssignmentSortKey
+  sort: { key: AssignmentSortKey; direction: 'asc' | 'desc' } | null
+  onSort: (key: AssignmentSortKey) => void
+}) {
+  const active = sort?.key === column
+  const next = active && sort.direction === 'asc' ? '내림차순' : '오름차순'
+  return (
+    <th
+      aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+      className="p-0 font-medium"
+    >
+      <button
+        type="button"
+        className="flex w-full items-center gap-1 px-4 py-2.5 text-left hover:bg-white/10"
+        title={`${label} ${next}`}
+        onClick={() => onSort(column)}
+      >
+        <span>{label}</span>
+        {active ? (
+          sort.direction === 'asc'
+            ? <ChevronUp className="size-3.5 shrink-0" aria-hidden />
+            : <ChevronDown className="size-3.5 shrink-0" aria-hidden />
+        ) : (
+          <ChevronUp className="size-3.5 shrink-0 opacity-40" aria-hidden />
+        )}
+      </button>
+    </th>
   )
 }
 
@@ -837,7 +910,12 @@ function AssignmentSelect({
       aria-label={label}
       value={value}
       disabled={disabled}
-      className="h-9 w-full cursor-pointer border-border/60 bg-card px-3 hover:border-foreground/25 focus-visible:border-foreground/25 disabled:cursor-wait disabled:opacity-50"
+      className={cn(
+        'h-9 w-full cursor-pointer px-3 hover:border-foreground/25 focus-visible:border-foreground/25 disabled:cursor-wait disabled:opacity-50',
+        value
+          ? 'border-border/60 bg-card'
+          : 'border-warning bg-warning/10 font-medium text-warning',
+      )}
       onChange={(event) => onChange(event.target.value)}
     >
       <option value="">미설정</option>
@@ -986,15 +1064,14 @@ function AssignmentEditor({
           </label>
           <label className="block space-y-1 sm:col-span-3">
             <span className="text-xs font-medium">입사일</span>
-            <Input
-              type="date"
-              aria-label="입사일"
-              className="w-full sm:max-w-xs"
+            <HireDateScrollField
+              label="입사일"
               value={hireDate}
               min="1950-01-01"
               max={todayDateKey()}
-              onChange={(event) => setHireDate(event.target.value)}
               disabled={mutation.isPending}
+              className="w-full sm:max-w-xs"
+              onChange={setHireDate}
             />
           </label>
         </div>
