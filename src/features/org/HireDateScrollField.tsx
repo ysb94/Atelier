@@ -79,7 +79,7 @@ function WheelColumn({
     const el = ref.current
     if (!el) return
     let timer = 0
-    function pick() {
+    const pick = () => {
       if (skip.current) return
       const list = itemsRef.current
       const index = Math.round(el.scrollTop / ITEM)
@@ -141,6 +141,7 @@ export function HireDateScrollField({
   disabled,
   onChange,
   className,
+  clearable = true,
 }: {
   label: string
   value: string
@@ -149,6 +150,7 @@ export function HireDateScrollField({
   disabled?: boolean
   onChange: (value: string) => void
   className?: string
+  clearable?: boolean
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const panelRef = useRef<HTMLDivElement>(null)
@@ -198,16 +200,19 @@ export function HireDateScrollField({
       setOpen(false)
     }
     function onKey(event: KeyboardEvent) {
-      if (event.key === 'Escape') setOpen(false)
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      event.stopPropagation()
+      setOpen(false)
     }
     function onLayout() { place() }
     document.addEventListener('pointerdown', onPointer)
-    document.addEventListener('keydown', onKey)
+    document.addEventListener('keydown', onKey, true)
     window.addEventListener('resize', onLayout)
     window.addEventListener('scroll', onLayout, true)
     return () => {
       document.removeEventListener('pointerdown', onPointer)
-      document.removeEventListener('keydown', onKey)
+      document.removeEventListener('keydown', onKey, true)
       window.removeEventListener('resize', onLayout)
       window.removeEventListener('scroll', onLayout, true)
     }
@@ -222,7 +227,7 @@ export function HireDateScrollField({
       ref={panelRef}
       role="dialog"
       aria-label={`${label} 선택`}
-      className="fixed z-[70] w-[292px] rounded-xl border border-border bg-card p-3 shadow-lg"
+      className="fixed z-[200] w-[292px] rounded-xl border border-border bg-card p-3 shadow-lg"
       style={{ top: box.top, left: box.left }}
     >
       <div className="flex gap-2">
@@ -231,7 +236,7 @@ export function HireDateScrollField({
         <WheelColumn label="일" items={days} value={picked.day} format={(item) => `${item}일`} onPick={(day) => pick({ day })} />
       </div>
       <div className="mt-3 flex justify-end gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={() => { onChange(''); setOpen(false) }}>지우기</Button>
+        {clearable && <Button type="button" variant="outline" size="sm" onClick={() => { onChange(''); setOpen(false) }}>지우기</Button>}
         <Button type="button" size="sm" onClick={() => { onChange(dateKey(picked)); setOpen(false) }}>적용</Button>
       </div>
     </div>

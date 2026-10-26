@@ -4,6 +4,7 @@ import { Bell, CalendarDays, ChevronLeft, ChevronRight, Clock3, List, RefreshCw,
 import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
+import { HireDateScrollField } from '@/features/org/HireDateScrollField'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList } from '@/lib/utils'
@@ -72,7 +73,7 @@ export function MyAttendancePanel() {
     enabled: allowed,
   })
   useEffect(() => {
-    if (companyNotices.error) console.warn('[company-notices] 내 근태 공지 조회 실패', companyNotices.error)
+    if (companyNotices.error) console.warn('[company-notices] My Schedule 공지 조회 실패', companyNotices.error)
   }, [companyNotices.error])
   const postedNotices = visibleCompanyNotices(
     allowed ? companyNotices.data ?? emptyList<CompanyNotice>() : emptyList<CompanyNotice>(),
@@ -211,7 +212,7 @@ export function MyAttendancePanel() {
     {clocks.error && <p role="alert" className="personal-request-error">{monthLabel(month)} 출퇴근 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => void clocks.refetch()}>다시 불러오기</Button></p>}
     {leave.error && <p role="alert" className="personal-request-error">신청 목록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => void leave.refresh()}>다시 불러오기</Button></p>}
     {notice && <p className="personal-request-notice" role="status">{notice}</p>}
-    <section className="personal-request-board" aria-label="내 근태">
+    <section className="personal-request-board" aria-label="My Schedule">
       <header className="personal-request-toolbar">
         <div className="personal-request-toolbar-month">
           <Button variant="ghost" size="icon" aria-label="이전 달" onClick={() => chooseMonth(shiftMonth(month, -1))}><ChevronLeft size={16}/></Button>
@@ -220,7 +221,7 @@ export function MyAttendancePanel() {
         </div>
         <label className="personal-request-search"><Search size={14}/><input aria-label="신청 검색" value={query} placeholder="신청 검색" onChange={event => setQuery(event.target.value)}/></label>
         <div className="personal-request-toolbar-actions">
-          <div className="personal-request-view" role="group" aria-label="내 근태 보기 방식">
+          <div className="personal-request-view" role="group" aria-label="My Schedule 보기 방식">
             <Button variant={view === 'calendar' ? 'default' : 'outline'} size="sm" aria-pressed={view === 'calendar'} onClick={() => setView('calendar')}><CalendarDays size={14}/>달력</Button>
             <Button variant={view === 'list' ? 'default' : 'outline'} size="sm" aria-pressed={view === 'list'} onClick={() => setView('list')}><List size={14}/>목록</Button>
           </div>
@@ -272,13 +273,13 @@ export function MyAttendancePanel() {
       </div>
       <p className="personal-request-footnote">출퇴근은 기록된 시각을, 승인된 출퇴근 정정은 정정 시각을 표시합니다. 원래 출퇴근 기록은 바뀌지 않으며, 미기록만으로 결근이나 연차 사용을 판단하지 않습니다.</p>
     </section>
-    {settingsOpen && <WorkspaceTabOverlay><RequestDialog className="is-settings" labelledBy="personal-reminder-title" onClose={() => setSettingsOpen(false)}><section className="personal-request-reminders personal-request-settings-card" aria-label="내 근태 알림 설정"><header><div><Bell size={16}/><h2 id="personal-reminder-title">내 근태 알림</h2></div><button type="button" aria-label="알림 설정 닫기" onClick={() => setSettingsOpen(false)}><X size={17}/></button></header><p>승인된 휴가·외근·재택·야근 일정을 반영해 알려드립니다. 발송 연결 예정입니다.</p><div className="personal-request-reminder-list">{REMINDER_OPTIONS.map(item => <label key={item.key}><span><strong>{item.label}</strong><small>{item.detail}</small></span><input type="checkbox" checked={reminders[item.key]} onChange={event => setReminders(current => ({ ...current, [item.key]: event.target.checked }))}/></label>)}</div><div className="personal-request-reminder-time"><label htmlFor="personal-reminder-before">미리 알릴 시간</label><Select id="personal-reminder-before" value={basis.before} onChange={event => setBasis(current => ({ ...current, before: Number(event.target.value) }))}>{[5, 10, 15, 30].map(value => <option key={value} value={value}>{value}분 전</option>)}</Select></div></section></RequestDialog></WorkspaceTabOverlay>}
+    {settingsOpen && <WorkspaceTabOverlay><RequestDialog className="is-settings" labelledBy="personal-reminder-title" onClose={() => setSettingsOpen(false)}><section className="personal-request-reminders personal-request-settings-card" aria-label="My Schedule 알림 설정"><header><div><Bell size={16}/><h2 id="personal-reminder-title">My Schedule 알림</h2></div><button type="button" aria-label="알림 설정 닫기" onClick={() => setSettingsOpen(false)}><X size={17}/></button></header><p>승인된 휴가·외근·재택·야근 일정을 반영해 알려드립니다. 발송 연결 예정입니다.</p><div className="personal-request-reminder-list">{REMINDER_OPTIONS.map(item => <label key={item.key}><span><strong>{item.label}</strong><small>{item.detail}</small></span><input type="checkbox" checked={reminders[item.key]} onChange={event => setReminders(current => ({ ...current, [item.key]: event.target.checked }))}/></label>)}</div><div className="personal-request-reminder-time"><label htmlFor="personal-reminder-before">미리 알릴 시간</label><Select id="personal-reminder-before" value={basis.before} onChange={event => setBasis(current => ({ ...current, before: Number(event.target.value) }))}>{[5, 10, 15, 30].map(value => <option key={value} value={value}>{value}분 전</option>)}</Select></div></section></RequestDialog></WorkspaceTabOverlay>}
     {form && <WorkspaceTabOverlay><RequestDialog onClose={() => { if (!leave.busy) setForm(null) }}><section className="personal-request-compose"><header><div><span>개인 근태 신청</span><h2 id="personal-request-title">{requestLabel(form.kind)} 신청</h2></div><button type="button" aria-label="신청 작성 닫기" disabled={leave.busy} onClick={() => setForm(null)}><X size={19}/></button></header><form onSubmit={event => void submit(event)}><fieldset disabled={leave.busy} className="min-w-0 border-0 p-0">
       <div className="personal-request-compose-body">
         <label>신청 종류<Select autoFocus aria-label="개인 신청 종류" value={form.kind} onChange={event => { setForm(formFor(event.target.value as RequestKind, form.from)); setOfficialFile(null); setFormError('') }}>{REQUEST_KINDS.filter(item => item.id !== 'overtime').map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</Select></label>
         <div className="personal-request-fields">
-          <label>{span ? '시작일' : '신청일'}<Input aria-label="개인 신청 시작일" type="date" max={form.kind === 'correction' ? today : undefined} value={form.from} onChange={event => patch({ from: event.target.value, to: !span ? event.target.value : form.to < event.target.value ? event.target.value : form.to })}/></label>
-          {span && <label>종료일<Input aria-label="개인 신청 종료일" type="date" min={form.from} value={form.to} onChange={event => patch({ to: event.target.value })}/></label>}
+          <label>{span ? '시작일' : '신청일'}<HireDateScrollField label={span ? '개인 신청 시작일' : '개인 신청일'} className="mt-[7px] w-full" value={form.from} min="1950-01-01" max={form.kind === 'correction' ? today : `${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; patch({ from: value, to: !span ? value : form.to < value ? value : form.to }) }}/></label>
+          {span && <label>종료일<HireDateScrollField label="개인 신청 종료일" className="mt-[7px] w-full" value={form.to} min={form.from || '1950-01-01'} max={`${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; patch({ to: value }) }}/></label>}
         </div>
         {isPartialLeave(form.kind) && <div className="personal-request-duration"><strong>{form.kind === 'half' ? '반차 · 0.5일' : '반반차 · 0.25일'}</strong><span>신청 기준: 1일 8시간, 휴게시간 12–13시 제외. 반차 4시간·반반차 2시간이며 잔여일 자동 차감은 미적용입니다.</span>{form.kind === 'half' && <div><Button size="sm" variant="outline" type="button" onClick={() => patch({ start: '09:00', end: '14:00' })}>오전 예시 09–14시</Button><Button size="sm" variant="outline" type="button" onClick={() => patch({ start: '14:00', end: '18:00' })}>오후 예시 14–18시</Button></div>}</div>}
         {!isAllDayRequest(form.kind) && <div className="personal-request-fields"><label>{form.kind === 'correction' ? '실제 출근 시각' : isLocationRequest(form.kind) ? '매일 시작 시각' : '시작 시각'}<Input aria-label="개인 신청 시작 시각" type="time" value={form.start} onChange={event => patch({ start: event.target.value })}/></label><label>{form.kind === 'correction' ? '실제 퇴근 시각' : isLocationRequest(form.kind) ? '매일 종료 시각' : '종료 시각'}<Input aria-label="개인 신청 종료 시각" type="time" value={form.end} onChange={event => patch({ end: event.target.value })}/></label></div>}

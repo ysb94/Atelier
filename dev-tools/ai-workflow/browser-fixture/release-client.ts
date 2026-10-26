@@ -7,6 +7,12 @@ export function getSupabase(){
  functions:{invoke:async(_name:string)=>({data:{ok:true,targets:[]},error:null})},
  from(table:string){
   releaseFixture.reads.push(table)
+  // 메뉴·신청 화면 검증은 이미 출근한 직원의 모의 기록을 사용한다.
+  if(table==='attendance_clock_ins'){
+    const day=new Intl.DateTimeFormat('en-CA',{timeZone:'Asia/Seoul',year:'numeric',month:'2-digit',day:'2-digit'}).format(new Date())
+    const query={select(){return query},eq(){return query},order(){return query},gte(){return query},lte(){return query},limit(){return query},then(resolve:(result:unknown)=>unknown){return Promise.resolve({data:[{work_date:day,clock_in:'09:00:00',clock_out_at:null}],error:null}).then(resolve)}}
+    return query
+  }
   if(table==='profiles'){
     const profile=fixtureProfile()
     let single=false

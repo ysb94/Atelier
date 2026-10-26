@@ -80,12 +80,12 @@ function ProfileSettingsContent() {
   const permitted = releasePersonalPart(release.profile, part, release.approver)
   const visiblePart = !permitted || (part === 'attendance' && !showDepartmentTab) ? 'my-attendance' : part
   const tabs: { id: PersonalPart; label: string }[] = release.scope.unrestricted ? [
-    { id: 'work', label: '내 업무' }, { id: 'my-attendance', label: '내 근태' }, { id: 'profile', label: '내 정보' },
+    { id: 'work', label: '내 업무' }, { id: 'my-attendance', label: 'My Schedule' }, { id: 'profile', label: '내 정보' },
     { id: 'overtime', label: '야근' },
     { id: 'approvals', label: '승인할 신청' }, { id: 'company-notice', label: '회사 공지' },
     { id: 'department-notice', label: '부서 공지' }, { id: 'meetings', label: '회의' },
     ...(showDepartmentTab ? [{ id: 'attendance' as const, label: '부서 출근시간' }] : []),
-  ] : [{ id: 'my-attendance', label: '내 근태' }, { id: 'overtime', label: '야근' }, { id: 'meetings', label: '회의' },
+  ] : [{ id: 'my-attendance', label: 'My Schedule' }, { id: 'overtime', label: '야근' }, { id: 'meetings', label: '회의' },
     ...(release.approver ? [{ id: 'approvals' as const, label: '승인할 신청' }] : [])]
   useEffect(() => {
     if (!active || permitted || (part === 'approvals' && approvals.loading)) return
