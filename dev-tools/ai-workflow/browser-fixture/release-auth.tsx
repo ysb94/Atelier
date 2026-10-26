@@ -3,9 +3,9 @@ import type { Profile } from '@/lib/supabase/profiles'
 import { hasPermission, PERMISSION_CATALOG } from '@/lib/company/permissions'
 import { RELEASE_COMPANY_ID, RELEASE_DEPARTMENT_SITES, RELEASE_OPERATIONS_ID, RELEASE_LOGISTICS_ID, RELEASE_EXCEPTION_IDS } from '@/lib/company/release-access'
 const departmentFixtures = {
-  planning: {id:RELEASE_DEPARTMENT_SITES[0].id,name:'기획팀'},
-  md: {id:RELEASE_DEPARTMENT_SITES[1].id,name:'MD Team'},
-  china: {id:RELEASE_DEPARTMENT_SITES[2].id,name:'중국팀'},
+  planning: {id:RELEASE_DEPARTMENT_SITES.find(site=>site.title==='기획')!.id,name:'기획팀'},
+  md: {id:RELEASE_DEPARTMENT_SITES.find(site=>site.title==='MD')!.id,name:'MD Team'},
+  china: {id:RELEASE_DEPARTMENT_SITES.find(site=>site.title==='중국팀')!.id,name:'중국팀'},
   contents: {id:'contents-department',name:'Contents Team'},
   global: {id:'global-department',name:'Global Online'},
   visual: {id:'visual-department',name:'Visual Team'},
