@@ -36,3 +36,14 @@ export function buildOngoingMeetingParticipation(
   }
   return result
 }
+
+/** 멤버 선택용 서버 응답. 회사·확정·진행 여부는 SQL에서 검사하고 본문/회의 ID는 받지 않는다. */
+export type MeetingParticipationRow = { profile_id: string; titles: string[] }
+
+export function buildMeetingParticipationSummary(rows: readonly MeetingParticipationRow[]): Map<string, MeetingParticipation> {
+  return new Map(rows.map(row => [row.profile_id, {
+    count: row.titles.length,
+    visibleMeetings: row.titles.map((title, index) => ({ id: `${row.profile_id}:${index}`, title: title.trim() || '제목 없는 회의' })),
+    hiddenCount: 0,
+  }]))
+}

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs/promises'
 import { PGlite } from '@electric-sql/pglite'
+import { verifyMeetingParticipation } from './meeting-participation-db.mjs'
 
 const db=await PGlite.create()
 const company='10000000-0000-4000-8000-000000000001', foreign='10000000-0000-4000-8000-000000000002'
@@ -164,6 +165,8 @@ try{
  await actor(member)
  assert.ok((await scalar('select public.list_company_meetings()')).some(item=>item.id===delegated.id),'지정 호스트도 초안 확인')
  await db.exec('reset role');assert.equal(await original(),before)
+ await verifyMeetingParticipation(db,{company,host,member,outsider,alien,actor})
+ assert.equal(await original(),before)
  await db.exec(`create table public.company_leave_requests(id uuid primary key default gen_random_uuid(),company_id uuid,employee_id uuid,kind text,status text,from_date date,to_date date,start_time time,end_time time,note text,place text);`)
  await db.query("update public.meeting_invitations set status='pending' where round_id=$1",[draft.rounds[0].id])
  await db.exec(await fs.readFile('supabase/migrations/20261021100736_meeting_live_availability.sql','utf8'))

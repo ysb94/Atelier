@@ -70,6 +70,7 @@
     "verify:diagnostics": "node scripts/verify-diagnostics.mjs",
     "verify:my-attendance": "node --experimental-strip-types src/features/settings/my-attendance.verify.ts",
     "verify:meetings-db": "node scripts/verify-meetings-db.mjs",
+    "verify:meeting-participation": "tsx src/features/meetings/meeting-participation.verify.ts && node scripts/verify-meetings-db.mjs && node scripts/verify-page-preview-browser.mjs --participation-only",
     "verify:meetings-browser": "node scripts/verify-page-preview-browser.mjs --meetings-only",
     "verify:personal-requests": "node --experimental-strip-types src/features/settings/personal-requests.verify.ts",
     "verify:chat-files": "tsx src/lib/chat/file-rules.verify.ts",

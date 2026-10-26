@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { buildOngoingMeetingParticipation } from './meeting-participation'
+import { buildOngoingMeetingParticipation, buildMeetingParticipationSummary } from './meeting-participation'
 import type { MeetingPerson, MeetingSeries } from './meeting-schedule'
 
 const viewer: MeetingPerson = { id: 'viewer', name: '조회자' }
@@ -54,3 +54,14 @@ check('all participants have reconciled counts and input remains unchanged', () 
   assert.equal(JSON.stringify(input), before)
 })
 console.log(`meeting-participation.verify: ${checks} checks passed`)
+
+const rows = [{ profile_id: 'other-department', titles: ['타부서 확정 회의', '같은 제목', '같은 제목'] }, { profile_id: 'empty', titles: [] }]
+const before = JSON.stringify(rows)
+const summaries = buildMeetingParticipationSummary(rows)
+assert.equal(summaries.get('other-department')?.count, 3)
+assert.deepEqual(summaries.get('other-department')?.visibleMeetings.map(item => item.title), rows[0].titles)
+assert.equal(new Set(summaries.get('other-department')?.visibleMeetings.map(item => item.id)).size, 3)
+assert.equal(summaries.get('empty')?.count, 0)
+for (const summary of summaries.values()) { assert.equal(summary.count, summary.visibleMeetings.length); assert.equal(summary.hiddenCount, 0) }
+assert.equal(JSON.stringify(rows), before)
+console.log('meeting-participation-summary: 제목 전용 응답·건수 일치·같은 제목 개별 표시·0건·입력 보존 통과')

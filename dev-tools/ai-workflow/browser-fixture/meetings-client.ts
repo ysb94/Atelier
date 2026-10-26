@@ -3,7 +3,7 @@ import { MEETING_ROOMS, seriesToDrafts, type MeetingSeries } from '@/features/me
 const key='atelier:meeting-fixture'
 const host={id:'fixture-user',name:'화면 검수'},member={id:'other-user',name:'검증 동료'}
 const actor=new URLSearchParams(location.search).has('meeting-member')?member.id:host.id
-type State={series:MeetingSeries[];files:Record<string,{path:string;text:string;name:string;roundId:string}>;audit:string[];read?:string[];failNext?:boolean;notices?:any[];availability?:any[]}
+type State={series:MeetingSeries[];files:Record<string,{path:string;text:string;name:string;roundId:string}>;audit:string[];read?:string[];failNext?:boolean;notices?:any[];availability?:any[];participation?:{profile_id:string;titles:string[]}[];participationError?:boolean}
 function state():State {
  const saved=sessionStorage.getItem(key)
  if(saved)return JSON.parse(saved)
@@ -21,8 +21,16 @@ export function meetingFixtureChannel(){
 export function meetingFixtureRpc(name:string,args:Record<string,unknown>={}) {
  if(name==='list_meeting_cleanup_paths')return Promise.resolve({data:[],error:null})
  if(name==='finish_meeting_cleanup')return Promise.resolve({data:null,error:null})
- if(!['list_meeting_availability','list_company_meetings','list_meeting_directory','list_meeting_calendar','list_my_meeting_invitations','read_meeting_invitation','save_company_meeting','confirm_company_meeting','respond_to_meeting','open_meeting_group','open_direct_chat','delete_company_meeting','begin_meeting_file','finish_meeting_file','remove_meeting_file'].includes(name))return null
+ if(!['list_meeting_member_participation','list_meeting_availability','list_company_meetings','list_meeting_directory','list_meeting_calendar','list_my_meeting_invitations','read_meeting_invitation','save_company_meeting','confirm_company_meeting','respond_to_meeting','open_meeting_group','open_direct_chat','delete_company_meeting','begin_meeting_file','finish_meeting_file','remove_meeting_file'].includes(name))return null
  const value=state();let data:unknown
+ if(name==='list_meeting_member_participation'){
+  if(value.participationError)return Promise.resolve({data:null,error:{message:'검증용 제목 조회 실패'}})
+  const map=new Map<string,string[]>()
+  for(const series of value.series)if(series.status==='in_progress'&&series.phase!=='preparing'&&series.rounds.some(round=>round.confirmed!==false)){
+   for(const id of new Set([series.host.id,...series.members.map(person=>person.id)]))map.set(id,[...(map.get(id)??[]),series.title])
+  }
+  return Promise.resolve({data:value.participation??[...map].map(([profile_id,titles])=>({profile_id,titles})),error:null})
+ }
  if(name==='list_meeting_availability')data=(value.availability??[]).filter(row=>(args.p_people as string[]).includes(row.personId)&&(!row.date||row.date===args.p_date))
  else if(name==='list_company_meetings')data=value.series.filter(series=>series.phase!=='preparing'||series.host.id===actor||series.createdBy===actor)
  else if(name==='list_meeting_directory')data=[host,member]

@@ -7,7 +7,7 @@ import { openConversation } from '@/lib/chat/open-conversation'
 import { chatKeys } from '@/features/chat/use-chat'
 import { MeetingAttendance, MeetingResponse } from './MeetingAttendance'
 import { MeetingMemberOption } from './MeetingMemberOption'
-import { buildOngoingMeetingParticipation } from './meeting-participation'
+import { buildMeetingParticipationSummary } from './meeting-participation'
 import { MeetingSchedulePicker, type MeetingScheduleChoice } from './MeetingSchedulePicker'
 import {
   Check,
@@ -32,7 +32,7 @@ import {
   listDepartments,
   type Department,
 } from '@/lib/supabase/profiles'
-import { listMeetingDirectory, uploadMeetingFile, removeMeetingFile, downloadMeetingFile, respondToMeeting, openMeetingGroup } from '@/lib/supabase/meetings'
+import { listMeetingDirectory, listMeetingParticipation, uploadMeetingFile, removeMeetingFile, downloadMeetingFile, respondToMeeting, openMeetingGroup } from '@/lib/supabase/meetings'
 import { useCompanyMeetings } from './useCompanyMeetings'
 import { hasPermission } from '@/lib/company/permissions'
 import { cn, emptyList } from '@/lib/utils'
@@ -205,6 +205,14 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     queryKey: ['meeting-directory', preview?.realProfile?.companyId ?? profile?.companyId],
     queryFn: listMeetingDirectory,
   })
+  const participationQuery = useQuery({
+    queryKey: ['company-meetings', profile?.id, profile?.companyId, 'member-participation'],
+    queryFn: listMeetingParticipation,
+    enabled: composeOpen && active && profile?.status === 'active',
+    staleTime: 0,
+    refetchInterval: composeOpen && active ? 15000 : false,
+    retry: 1,
+  })
   const departmentsQuery = useQuery({
     queryKey: ['departments', 'active'],
     queryFn: () => listDepartments(true),
@@ -255,8 +263,8 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     [visibleSeries],
   )
   const ongoingMeetingParticipation = useMemo(
-    () => buildOngoingMeetingParticipation(series, host, isAdmin),
-    [series, host, isAdmin],
+    () => buildMeetingParticipationSummary(participationQuery.data ?? emptyList()),
+    [participationQuery.data],
   )
   const doneSeries = useMemo(
     () => filterSeriesByStatus(visibleSeries, 'done'),
@@ -852,8 +860,8 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                                         selected={selected}
                                         onToggle={() => toggleMember(person)}
                                         participation={ongoingMeetingParticipation.get(person.id)}
-                                        loading={meetings.loading}
-                                        hasError={Boolean(meetings.error)}
+                                        loading={participationQuery.isPending}
+                                        hasError={participationQuery.isError}
                                       />
                                     </li>
                                   )

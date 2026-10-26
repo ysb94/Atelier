@@ -8,6 +8,7 @@ import { verifyWorkspaceOverlays } from './workspace-overlay-browser.mjs'
 import { verifyPagePreviewRoles } from './page-preview-roles-browser.mjs'
 import { verifyPermissionSettings } from './permission-settings-browser.mjs'
 import { verifyMeetings } from './meetings-browser.mjs'
+import { verifyMeetingParticipationBrowser } from './meeting-participation-browser.mjs'
 
 const root = process.cwd(), fixture = path.join(root, 'dev-tools/ai-workflow/browser-fixture')
 const auth = path.join(fixture, 'page-preview-auth.tsx'), client = path.join(fixture, 'page-preview-client.ts')
@@ -48,7 +49,10 @@ try {
   page.on('console', message => { if (message.type() === 'error') console.error('browser-console:', message.text()) })
   page.on('requestfailed', request => console.error('browser-request:', request.url(), request.failure()?.errorText))
   page.on('response', response => { if (response.status() >= 400) console.error('browser-response:', response.status(), response.url()) })
-  if (process.argv.includes('--meetings-only')) {
+  if (process.argv.includes('--participation-only')) {
+    await verifyMeetingParticipationBrowser(page,origin)
+  } else if (process.argv.includes('--meetings-only')) {
+    await verifyMeetingParticipationBrowser(page,origin)
     await verifyMeetings(page,origin)
   } else if (process.argv.includes('--permissions-only')) {
     await verifyPermissionSettings(page,origin)

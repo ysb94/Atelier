@@ -3,6 +3,7 @@ import { getSupabase } from './client'
 import { quarterFromTime } from '@/features/meetings/meeting-slots'
 import type { InboxNotification } from '@/lib/inbox/types'
 import type { MeetingAvailability } from '@/features/meetings/meeting-availability'
+import type { MeetingParticipationRow } from '@/features/meetings/meeting-participation'
 
 const BUCKET='company-meetings'
 function fail(action:string,error:{message:string}):never {
@@ -19,6 +20,7 @@ export async function listCompanyMeetings():Promise<MeetingSeries[]> {
   return rows.map(series=>({...series,rounds:series.rounds.map(round=>({...round,quarterId:quarterFromTime(round.startsAt.slice(11,16))}))}))
 }
 export const listMeetingDirectory=()=>checked<MeetingPerson[]>(getSupabase().rpc('list_meeting_directory'))
+export const listMeetingParticipation=()=>checked<MeetingParticipationRow[]>(getSupabase().rpc('list_meeting_member_participation'))
 export const listMeetingCalendar=(from:string,to:string)=>checked<MeetingDraft[]>(getSupabase().rpc('list_meeting_calendar',{p_from:from,p_to:to}))
 export const listMeetingAvailability=(seriesId:string,date:string,people:string[],roundId?:string)=>checked<MeetingAvailability[]>(getSupabase().rpc('list_meeting_availability',{p_series:seriesId,p_date:date,p_people:people,p_exclude_round:roundId ?? null}))
 export async function listMeetingRooms():Promise<MeetingRoom[]> {
