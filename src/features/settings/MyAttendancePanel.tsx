@@ -174,7 +174,7 @@ export function MyAttendancePanel() {
     catch (error) { console.warn('[leave-requests] 마이페이지 취소 실패', error); setNotice(error instanceof Error ? error.message : '신청 취소에 실패했습니다.') }
   }
   function requestBar(item: PersonalRequest, date: string) {
-    return <button key={item.id} type="button" className={`agenda-bar is-${requestLayer(item.kind)} is-${item.status}`} onClick={() => { pickDate(date); setDetailId(item.id) }}>{requestLabel(item.kind)}{item.status === 'approved' ? '' : ` · ${STATUS_LABELS[item.status]}`}</button>
+    return <button key={item.id} type="button" className={`agenda-bar is-${requestLayer(item.kind)} is-${item.status}`} title={`${requestLabel(item.kind)} · ${requestTime(item)}`} onClick={() => { pickDate(date); setDetailId(item.id) }}>{requestLabel(item.kind)}{item.status === 'approved' ? '' : ` · ${STATUS_LABELS[item.status]}`}</button>
   }
 
   const span = form ? isFullLeave(form.kind) || isLocationRequest(form.kind) : false

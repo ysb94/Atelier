@@ -20,23 +20,27 @@ export function MeetingMemberOption({ person, selected, onToggle, participation,
   const tooltipId = useId()
   const buttonRef = useRef<HTMLButtonElement>(null)
   const popupRef = useRef<HTMLDivElement>(null)
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const closeTimer = useRef<number | null>(null)
+  const hovered = useRef(false)
   const focused = useRef(false)
   const overPopup = useRef(false)
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState({ left: 0, top: 0, ready: false })
 
-  const clearClose = useCallback(() => {
-    if (closeTimer.current !== null) clearTimeout(closeTimer.current)
+  const cancelClose = useCallback(() => {
+    if (closeTimer.current !== null) window.clearTimeout(closeTimer.current)
     closeTimer.current = null
   }, [])
-  const show = () => { clearClose(); setOpen(true) }
-  const scheduleClose = () => {
-    clearClose()
-    closeTimer.current = setTimeout(() => {
-      if (!focused.current && !overPopup.current) setOpen(false)
+  const reveal = () => { cancelClose(); setOpen(true) }
+  const closeSoon = () => {
+    cancelClose()
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null
+      if (!hovered.current && !focused.current && !overPopup.current) setOpen(false)
     }, 150)
   }
+  useEffect(() => cancelClose, [cancelClose])
+
   const updatePosition = useCallback(() => {
     const button = buttonRef.current, popup = popupRef.current
     if (!button || !popup) return
@@ -54,7 +58,6 @@ export function MeetingMemberOption({ person, selected, onToggle, participation,
     else setPosition((previous) => previous.ready ? { ...previous, ready: false } : previous)
   }, [open, summary, loading, hasError, updatePosition])
 
-  useEffect(() => clearClose, [clearClose])
   useEffect(() => {
     if (!open) return
     let frame: number | null = null
@@ -67,8 +70,8 @@ export function MeetingMemberOption({ person, selected, onToggle, participation,
       if (event.key !== 'Escape') return
       event.preventDefault()
       event.stopPropagation()
-      clearClose()
-      overPopup.current = false
+      cancelClose()
+      hovered.current = focused.current = overPopup.current = false
       setOpen(false)
     }
     window.addEventListener('resize', reposition)
@@ -80,7 +83,7 @@ export function MeetingMemberOption({ person, selected, onToggle, participation,
       window.removeEventListener('scroll', reposition, true)
       document.removeEventListener('keydown', dismiss, true)
     }
-  }, [open, clearClose, updatePosition])
+  }, [open, updatePosition, cancelClose])
 
   const countLabel = loading ? '진행 중 …' : hasError ? '진행 중 확인 불가' : `진행 중 ${summary.count}`
   const detailLabel = loading ? '진행 회의 불러오는 중' : hasError ? '진행 회의 확인 불가' : `진행 중 ${summary.count}건`
@@ -96,13 +99,16 @@ export function MeetingMemberOption({ person, selected, onToggle, participation,
       className={cn('flex w-full flex-col rounded px-1.5 py-1 text-left text-xs transition-colors',
         selected ? 'bg-foreground text-background' : 'hover:bg-muted')}
       onClick={onToggle}
-      onMouseLeave={scheduleClose}
-      onFocus={() => { focused.current = true; show() }}
-      onBlur={() => { focused.current = false; scheduleClose() }}
+      onFocus={() => { focused.current = true; reveal() }}
+      onBlur={() => { focused.current = false; closeSoon() }}
     >
       <span className="font-medium">{person.name}</span>
       {person.position ? <span className={cn('text-[10px]', secondary)}>{person.position}</span> : null}
-      <span className={cn('text-[10px]', secondary)} onMouseEnter={show} onMouseLeave={scheduleClose}>{countLabel}</span>
+      <span
+        className={cn('text-[10px]', secondary)}
+        onPointerEnter={() => { hovered.current = true; reveal() }}
+        onPointerLeave={() => { hovered.current = false; closeSoon() }}
+      >{countLabel}</span>
     </button>
     {open && typeof document !== 'undefined' ? createPortal(
       <div
@@ -112,8 +118,8 @@ export function MeetingMemberOption({ person, selected, onToggle, participation,
         className="fixed z-[70] w-72 overflow-y-auto rounded-md border border-border bg-card p-3 text-xs text-foreground shadow-md"
         style={{ left: position.left, top: position.top, maxWidth: 'calc(100vw - 16px)',
           maxHeight: 'min(15rem, calc(100vh - 16px))', visibility: position.ready ? 'visible' : 'hidden' }}
-        onMouseEnter={() => { overPopup.current = true; clearClose() }}
-        onMouseLeave={() => { overPopup.current = false; scheduleClose() }}
+        onPointerEnter={() => { overPopup.current = true; reveal() }}
+        onPointerLeave={() => { overPopup.current = false; closeSoon() }}
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => event.stopPropagation()}
       >
