@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -21,7 +22,6 @@ import {
   canEditOrgAssignment,
   OPERATIONS_SUPPORT_DEPARTMENT,
 } from '@/lib/company/capabilities'
-import { personInitials } from '@/lib/company/person-name'
 import { useAuth } from '@/lib/supabase/auth'
 import {
   emptyRoster,
@@ -72,6 +72,21 @@ function titleOrder(name: string | null, order: ReadonlyMap<string, number>) {
 }
 function memberName(member: OrgChartMember) {
   return member.displayName?.trim() || '이름 없음'
+}
+
+function addCalendarMonths(date: string, months: number) {
+  const [year, month, day] = date.split('-').map(Number)
+  const next = new Date(year, month - 1 + months, day)
+  if (next.getDate() !== day) next.setDate(0)
+  const y = next.getFullYear()
+  const m = String(next.getMonth() + 1).padStart(2, '0')
+  const d = String(next.getDate()).padStart(2, '0')
+  return `${y}-${m}-${d}`
+}
+
+function isProbation(hireDate: string | null, today: string) {
+  if (!hireDate || hireDate > today) return false
+  return today < addCalendarMonths(hireDate, 3)
 }
 type AssignmentSortKey = 'name' | 'department' | 'duty' | 'grade' | 'hire'
 
@@ -844,14 +859,11 @@ function MemberAssignmentTable({
                   className="border-b border-border/70 transition-colors last:border-0 hover:bg-muted/25"
                 >
                   <td className="whitespace-nowrap px-4 py-3 font-medium">
-                    <span className="flex items-center gap-3 whitespace-nowrap">
-                      <span
-                        aria-hidden
-                        className="flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs text-muted-foreground"
-                      >
-                        {personInitials(member.displayName)}
-                      </span>
+                    <span className="flex items-center gap-2 whitespace-nowrap">
                       {memberName(member)}
+                      {isProbation(member.hireDate, todayDateKey()) ? (
+                        <Badge variant="warning">수습</Badge>
+                      ) : null}
                     </span>
                   </td>
                   <td className="whitespace-nowrap px-4 py-2">
