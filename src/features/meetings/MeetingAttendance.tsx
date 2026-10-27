@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { MessageCirclePlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MeetingPerson, MeetingRound, MeetingSeries } from './meeting-schedule'
 import './meeting-attendance.css'
@@ -13,8 +14,7 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
   return <div className={cn('meeting-attendance', compact && 'is-compact', !compact && 'space-y-2')}>
     <div className="meeting-attendance-row">
     {published&&participant ? <button type="button" className="meeting-all" aria-label="전체 멤버와 대화" title="전체 멤버와 대화" disabled={simulating} onClick={onGroup}>
-      <svg className="meeting-all-shape" viewBox="0 0 56 36" aria-hidden="true"><path d="M12 3H44a9 9 0 0 1 9 9v7a9 9 0 0 1-9 9H20l-9 5v-5a9 9 0 0 1-8-9v-7a9 9 0 0 1 9-9Z"/></svg>
-      <span className="meeting-all-label">All</span>
+      <MessageCirclePlus className="size-[18px]" aria-hidden="true" strokeWidth={1.75} />
     </button> : null}
     <div className="meeting-members">
       {[series.host,...series.members].map(person=>{
