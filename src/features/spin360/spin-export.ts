@@ -1,5 +1,6 @@
 import type { SpinFrame, SpinSettings } from './spin-core'
 import { spinQuality } from './spin-core'
+import { SPIN_AI_MODEL } from './spin-model'
 
 const escapeHtml = (value: string) => value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;').replaceAll("'", '&#39;')
 
@@ -28,12 +29,14 @@ export async function standaloneSpinHtml(title: string, frames: readonly SpinFra
   return new Blob([spinViewerHtml(title, urls)], { type: 'text/html;charset=utf-8' })
 }
 
-export async function spinZip(title: string, frames: readonly SpinFrame[], settings: SpinSettings, progress: (percent: number) => void): Promise<Blob> {
+export async function spinZip(title: string, frames: readonly SpinFrame[], settings: SpinSettings, progress: (percent: number) => void, video?: Blob): Promise<Blob> {
   const { default: JSZip } = await import('jszip')
   const zip = new JSZip(), urls = frames.map((_, index) => `frames/${String(index + 1).padStart(3, '0')}.webp`)
   frames.forEach((frame, index) => zip.file(urls[index], frame.blob))
   zip.file('viewer.html', spinViewerHtml(title, urls))
-  zip.file('manifest.json', JSON.stringify({ title, frameCount: frames.length, settings, frames: frames.map(({ time, sharpness }, index) => ({ file: urls[index], selectedTime: time, sharpness })), quality: spinQuality(frames) }, null, 2))
+  if (video) zip.file('rotation.mp4', video)
+  zip.file('AI-MODELS.txt', `${SPIN_AI_MODEL.target.name}\n${SPIN_AI_MODEL.target.id}\nrevision: ${SPIN_AI_MODEL.target.revision}\nApache-2.0, https://huggingface.co/${SPIN_AI_MODEL.target.id}\n\n${SPIN_AI_MODEL.name}\n${SPIN_AI_MODEL.id}\nrevision: ${SPIN_AI_MODEL.revision}\nMIT, https://huggingface.co/${SPIN_AI_MODEL.id}\n\n${SPIN_AI_MODEL.runtime}, ${SPIN_AI_MODEL.device}\n영상은 원본의 제품 픽셀을 분리·정렬한 편집 결과입니다.`)
+  zip.file('manifest.json', JSON.stringify({ title, frameCount: frames.length, inputType: frames.some(frame => frame.sourceName) ? 'photos' : 'video', settings, aiModel: settings.ai ? SPIN_AI_MODEL : null, video: video ? { file: 'rotation.mp4', fps: 20, duration: 3.5, frameCount: 70, sourceViews: frames.length } : null, frames: frames.map(({ time, sharpness, sourceName }, index) => ({ file: urls[index], ...(sourceName ? { sourceFile: sourceName, viewIndex: index + 1 } : { selectedTime: time }), sharpness })), quality: spinQuality(frames) }, null, 2))
   zip.file('README.txt', '360 상세이미지 테스트 결과\n\nviewer.html과 frames 폴더를 같은 위치에 두고 viewer.html을 열어 보세요.\n쇼핑몰에는 이 폴더 전체를 HTTPS 이미지 호스팅에 올린 뒤 뷰어 주소로 iframe을 삽입합니다. 업로드는 자동으로 하지 않습니다.\nAI 배경 제거는 상품 디테일과 가는 끈을 지울 수 있으므로 70장 전체를 검수하세요.\n기준 각도를 지정하지 않은 구간은 일정한 회전 속도를 가정합니다. 3D 복원이나 정확한 각도 측정 결과가 아닙니다.\n\nAI 모델: BiRefNet_lite 512 (MIT), Copyright (c) 2024 ZhengPeng; Copyright (c) 2026 Studio Ludens V.O.F.\nhttps://huggingface.co/studioludens/birefnet-lite-512/blob/962e67969ec6acec9c19fab76acee4f5e22e990c/LICENSE\nRuntime: Transformers.js 3.8.1 (Apache-2.0), ONNX Runtime Web (MIT).\n')
   return zip.generateAsync({ type: 'blob', compression: 'STORE' }, metadata => progress(Math.round(metadata.percent)))
 }

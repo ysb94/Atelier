@@ -1,7 +1,8 @@
 export const SPIN_FRAME_COUNT = 70
 export type SpinAnchor = { angle: number; time: number }
-export type SpinSettings = { start: number; end: number; anchors: SpinAnchor[]; edge: number; ai: boolean; brightness: number; contrast: number; crop: number }
-export type SpinFrame = { blob: Blob; time: number; sharpness: number; signature: number[] }
+export type SpinRegion = { x: number; y: number; width: number; height: number }
+export type SpinSettings = { start: number; end: number; anchors: SpinAnchor[]; edge: number; ai: boolean; brightness: number; contrast: number; crop: number; region?: SpinRegion; motionSampling?: boolean; opaque?: boolean }
+export type SpinFrame = { blob: Blob; time: number; sharpness: number; signature: number[]; content?: SpinRegion; sourceName?: string }
 export type SpinResultFrame = SpinFrame & { url: string; thumbnail: string }
 
 export function validateSpinSettings(settings: SpinSettings, duration: number): void {
@@ -9,6 +10,8 @@ export function validateSpinSettings(settings: SpinSettings, duration: number): 
   if (![start, end, duration].every(Number.isFinite) || start < 0 || end > duration || end - start < 2.4) throw new Error('영상 안에서 2.4초 이상의 한 바퀴 구간을 선택해 주세요.')
   if (![640, 800, 960].includes(edge)) throw new Error('출력 크기를 다시 선택해 주세요.')
   if (!Number.isFinite(brightness) || brightness < 60 || brightness > 140 || !Number.isFinite(contrast) || contrast < 60 || contrast > 140 || !Number.isFinite(crop) || crop < 0 || crop > 30) throw new Error('이미지 보정값을 확인해 주세요.')
+  const region = settings.region
+  if (region && (!Object.values(region).every(Number.isFinite) || region.x < 0 || region.y < 0 || region.width < 0.02 || region.height < 0.02 || region.x + region.width > 1.00001 || region.y + region.height > 1.00001)) throw new Error('제품 영역은 영상 안에서 가로·세로 2% 이상으로 지정해 주세요.')
   let previous = { angle: 0, time: start }
   for (const anchor of settings.anchors) {
     if (![90, 180, 270].includes(anchor.angle) || anchor.angle <= previous.angle || !Number.isFinite(anchor.time) || anchor.time <= previous.time || anchor.time >= end) throw new Error('90°·180°·270° 기준 시각은 시작과 끝 사이에서 순서대로 입력해 주세요.')
@@ -24,6 +27,28 @@ export function spinFrameTimes(settings: SpinSettings): number[] {
     const nextIndex = anchors.findIndex(point => point.angle > angle)
     const before = anchors[nextIndex - 1], after = anchors[nextIndex]
     return before.time + (after.time - before.time) * (angle - before.angle) / (after.angle - before.angle)
+  })
+}
+
+/** 장면 변화량으로 정체 구간을 줄인다. 실제 3D 각도를 추정하는 값은 아니다. */
+export function motionRetimedTimes(settings: SpinSettings, samples: { time: number; signature: number[] }[]): number[] {
+  const anchors = [{ angle: 0, time: settings.start }, ...settings.anchors, { angle: 360, time: settings.end }]
+  return spinFrameTimes(settings).map((fallback, index) => {
+    const angle = index * 360 / SPIN_FRAME_COUNT, next = anchors.findIndex(anchor => anchor.angle > angle)
+    const before = anchors[next - 1], after = anchors[next], fraction = (angle - before.angle) / (after.angle - before.angle)
+    if (fraction === 0) return before.time
+    const segment = samples.filter(sample => sample.time >= before.time && sample.time <= after.time)
+    if (segment.length < 3) return fallback
+    let total = 0
+    const cumulative = segment.map((sample, at) => {
+      if (at) total += Math.max(0, sample.signature.reduce((sum, value, pixel) => sum + Math.abs(value - segment[at - 1].signature[pixel]), 0) / sample.signature.length - 1.25)
+      return total
+    })
+    if (total < 1) return fallback
+    const target = fraction * total, at = cumulative.findIndex(value => value >= target)
+    if (at <= 0) return segment[0].time
+    const span = cumulative[at] - cumulative[at - 1]
+    return segment[at - 1].time + (segment[at].time - segment[at - 1].time) * (span ? (target - cumulative[at - 1]) / span : 0)
   })
 }
 

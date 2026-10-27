@@ -1,10 +1,35 @@
 import assert from 'node:assert/strict'
+import { selectionHull, solidifyProductAlpha } from './spin-mask'
+import { spinMovieViews } from './spin-photos'
 import { spinEmbedCode, spinViewerHtml } from './spin-export'
-import { spinFrameTimes, spinPixelStats, spinSampleWindow, spinWrap, validateSpinSettings, type SpinSettings } from './spin-core'
+import { motionRetimedTimes, spinFrameTimes, spinPixelStats, spinSampleWindow, spinWrap, validateSpinSettings, type SpinSettings } from './spin-core'
 
 const settings: SpinSettings = { start: 2, end: 12, anchors: [], edge: 800, ai: false, brightness: 100, contrast: 100, crop: 0 }
+const photoMovie = spinMovieViews(['앞', '오른쪽', '뒤', '왼쪽'])
+assert.equal(photoMovie.length, 70)
+assert.deepEqual([...new Set(photoMovie)], ['앞', '오른쪽', '뒤', '왼쪽'], '영상 재생 시간만 맞추며 새로운 원본 각도를 꾸미지 않음')
+assert.deepEqual(spinMovieViews([]), [])
+const mask = new Uint8Array(100)
+for (let y = 1; y < 9; y++) for (let x = 2; x < 8; x++) if (!(y === 4 && x === 5)) mask[y * 10 + x] = 1
+assert.equal(selectionHull(mask, 10, 10).length, 4, '선택 마스크의 구멍 때문에 실제 제품을 깎지 않음')
+assert.throws(() => selectionHull(new Uint8Array(100), 10, 10))
+const faded = new Uint8ClampedArray(10 * 10 * 4)
+for (let y = 1; y < 9; y++) for (let x = 2; x < 8; x++) faded[(y * 10 + x) * 4 + 3] = 100
+faded[(4 * 10 + 5) * 4 + 3] = 0
+faded[3] = 255
+solidifyProductAlpha(faded, 10, 10)
+assert.equal(faded[(4 * 10 + 5) * 4 + 3], 255, '불투명 인쇄면의 잘못된 내부 구멍 복원')
+assert.equal(faded[(2 * 10 + 3) * 4 + 3], 255, '옅어진 제품 내부를 불투명하게 보존')
+assert.equal(faded[3], 0, '외부 배경을 제품으로 채우지 않음')
 validateSpinSettings(settings, 15)
+validateSpinSettings({ ...settings, region: { x: 0.2, y: 0.1, width: 0.4, height: 0.7 } }, 15)
+for (const region of [{ x: -0.1, y: 0, width: 0.5, height: 1 }, { x: 0.8, y: 0, width: 0.5, height: 1 }, { x: 0, y: NaN, width: 1, height: 1 }, { x: 0, y: 0, width: 0.001, height: 1 }]) assert.throws(() => validateSpinSettings({ ...settings, region }, 15))
 const times = spinFrameTimes(settings)
+const paused = Array.from({ length: 101 }, (_, index) => ({ time: 2 + index / 10, signature: [index < 30 ? index * 4 : index < 70 ? 120 : (index - 40) * 4] }))
+const retimed = motionRetimedTimes(settings, paused)
+assert.equal(retimed.length, 70)
+assert.ok(retimed.filter(time => time > 5 && time < 9).length < 4, '정지 구간을 중복 각도로 길게 선택하지 않음')
+assert.ok(retimed.every((time, index) => !index || time >= retimed[index - 1]), '변화량 보정 후에도 시간 순서 유지')
 assert.equal(times.length, 70)
 assert.equal(times[0], 2)
 assert.ok(times.at(-1)! < 12, '첫 각도와 겹치는 끝 각도를 중복 출력하지 않음')

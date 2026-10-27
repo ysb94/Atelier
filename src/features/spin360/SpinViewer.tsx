@@ -8,7 +8,7 @@ export function SpinViewer({ frames, index, onIndex, active }: { frames: SpinRes
   const select = (value: number) => onIndex(spinWrap(value, frames.length))
   useEffect(() => {
     if (!playing || !active || !frames.length) return
-    const timer = window.setTimeout(() => onIndex(spinWrap(index + 1, frames.length)), 100)
+    const timer = window.setTimeout(() => onIndex(spinWrap(index + 1, frames.length)), Math.max(50, 3500 / frames.length))
     return () => window.clearTimeout(timer)
   }, [playing, active, frames.length, index, onIndex])
   const frame = frames[index]
@@ -28,7 +28,7 @@ export function SpinViewer({ frames, index, onIndex, active }: { frames: SpinRes
         if (gesture.locked) { event.preventDefault(); setPlaying(false); select(gesture.index + Math.round(dx / event.currentTarget.clientWidth * frames.length)) }
       }}
       onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }} onLostPointerCapture={() => { drag.current = null }}>
-      {frame ? <img src={frame.url} alt={`상품 회전 ${index + 1}번째 프레임`} draggable={false} className="pointer-events-none h-full w-full select-none object-contain" /> : <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">영상을 선택하고 70프레임을 생성하면 여기서 좌우로 돌려볼 수 있습니다.</div>}
+      {frame ? <img src={frame.url} alt={`상품 회전 ${index + 1}번째 프레임`} draggable={false} className="pointer-events-none h-full w-full select-none object-contain" /> : <div className="flex h-full items-center justify-center p-8 text-center text-sm text-muted-foreground">촬영 영상이나 여러 각도의 사진으로 생성하면 여기서 좌우로 돌려볼 수 있습니다.</div>}
       <span className="pointer-events-none absolute bottom-3 left-0 right-0 text-center text-xs text-muted-foreground">좌우 드래그 · 방향키로 회전</span>
     </div>
     <div className="flex items-center gap-2"><Button size="sm" variant="outline" aria-label="이전 프레임" disabled={!frame} onClick={() => select(index - 1)}>←</Button><input className="min-w-0 flex-1 accent-primary" aria-label="회전 프레임" type="range" min={0} max={Math.max(0, frames.length - 1)} value={index} disabled={!frame} onChange={event => { setPlaying(false); select(Number(event.target.value)) }} /><Button size="sm" variant="outline" aria-label="다음 프레임" disabled={!frame} onClick={() => select(index + 1)}>→</Button><output className="text-xs tabular-nums">{frame ? String(index + 1).padStart(2, '0') : '00'} / {frames.length}</output></div>

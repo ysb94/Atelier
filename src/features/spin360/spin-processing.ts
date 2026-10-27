@@ -1,4 +1,5 @@
-import { spinFrameTimes, spinPixelStats, spinSampleWindow, timeSpinWork, validateSpinSettings, type SpinFrame, type SpinSettings } from './spin-core'
+import { motionRetimedTimes, spinFrameTimes, spinPixelStats, spinSampleWindow, timeSpinWork, validateSpinSettings, type SpinFrame, type SpinSettings } from './spin-core'
+import { solidifyProductAlpha } from './spin-mask'
 
 export type SpinProgress = { stage: string; done: number; total: number }
 type Progress = (progress: SpinProgress) => void
@@ -28,39 +29,65 @@ export async function seekSpinVideo(video: HTMLVideoElement, time: number, signa
 }
 
 export async function extractSpinFrames(url: string, settings: SpinSettings, signal: AbortSignal, progress: Progress): Promise<SpinFrame[]> {
-  const video = document.createElement('video')
-  video.muted = true; video.playsInline = true; video.preload = 'auto'
+  const { Input, ALL_FORMATS, BlobSource, CanvasSink } = await import('mediabunny')
+  const response = await fetch(url, { signal })
+  const input = new Input({ formats: ALL_FORMATS, source: new BlobSource(await response.blob()) })
   try {
-    await videoEvent(video, 'loadeddata', signal, () => { video.src = url; video.load() })
-    validateSpinSettings(settings, video.duration)
-    const times = spinFrameTimes(settings), result: SpinFrame[] = []
+    const track = await input.getPrimaryVideoTrack()
+    if (!track || !await track.canDecode()) throw new Error('이 영상의 코덱을 읽을 수 없습니다. MP4(H.264)로 변환해 주세요.')
+    validateSpinSettings(settings, await input.computeDuration())
+    const width = await track.getDisplayWidth(), height = await track.getDisplayHeight()
+    const sink = new CanvasSink(track)
+    let times = spinFrameTimes(settings)
+    const result: SpinFrame[] = []
     const output = canvas(settings.edge), context = output.getContext('2d')!
     const sample = canvas(128), sampleContext = sample.getContext('2d', { willReadFrequently: true })!
     const ratio = 1 - settings.crop / 100 * 2
-    const sw = video.videoWidth * ratio, sh = video.videoHeight * ratio, sx = (video.videoWidth - sw) / 2, sy = (video.videoHeight - sh) / 2
+    const region = settings.region ?? { x: 0, y: 0, width: 1, height: 1 }
+    const sw = width * region.width * ratio, sh = height * region.height * ratio
+    const sx = width * (region.x + region.width * settings.crop / 100), sy = height * (region.y + region.height * settings.crop / 100)
     const scale = Math.min(output.width / sw, output.height / sh), dw = sw * scale, dh = sh * scale
+    if (settings.motionSampling) {
+      const samples: { time: number; signature: number[] }[] = []
+      for (let at = 0; at <= 210; at++) {
+        aborted(signal)
+        const time = settings.start + (settings.end - settings.start) * Math.min(at / 210, 0.9999)
+        const decoded = await sink.getCanvas(time)
+        if (!decoded) throw new Error('회전 변화량을 읽지 못했습니다. 구간을 다시 선택해 주세요.')
+        // 손·회전판 영향이 작은 제품 영역 중앙을 비교한다.
+        sampleContext.drawImage(decoded.canvas, sx + sw * 0.15, sy + sh * 0.1, sw * 0.7, sh * 0.7, 0, 0, 128, 128)
+        const stats = timeSpinWork('회전 변화량 분석', () => spinPixelStats(sampleContext.getImageData(0, 0, 128, 128).data, 128, 128))
+        samples.push({ time, signature: stats.signature }); progress({ stage: '정지 구간·회전 변화량 분석', done: at, total: 210 })
+        if (at % 10 === 0) await yieldUI()
+      }
+      times = motionRetimedTimes(settings, samples)
+    }
     for (let index = 0; index < times.length; index++) {
       aborted(signal)
       let best: { time: number; sharpness: number; signature: number[] } | undefined
       for (const time of spinSampleWindow(times, index, settings.start, settings.end)) {
-        await seekSpinVideo(video, time, signal)
-        sampleContext.drawImage(video, sx, sy, sw, sh, 0, 0, 128, 128)
+        const decoded = await sink.getCanvas(time)
+        aborted(signal)
+        if (!decoded) throw new Error(`${time.toFixed(2)}초의 영상 프레임을 읽지 못했습니다.`)
+        sampleContext.drawImage(decoded.canvas, sx, sy, sw, sh, 0, 0, 128, 128)
         const stats = timeSpinWork('선명도 분석', () => spinPixelStats(sampleContext.getImageData(0, 0, 128, 128).data, 128, 128))
         if (!best || stats.sharpness > best.sharpness) best = { time, ...stats }
       }
-      await seekSpinVideo(video, best!.time, signal)
+      const decoded = await sink.getCanvas(best!.time)
+      aborted(signal)
+      if (!decoded) throw new Error('선택한 프레임을 다시 읽지 못했습니다.')
       context.fillStyle = 'white'; context.fillRect(0, 0, output.width, output.height)
-      context.drawImage(video, sx, sy, sw, sh, (output.width - dw) / 2, (output.height - dh) / 2, dw, dh)
+      context.drawImage(decoded.canvas, sx, sy, sw, sh, (output.width - dw) / 2, (output.height - dh) / 2, dw, dh)
       const blob = await encodeSpinImage(output)
-      result.push({ blob, ...best! })
+      result.push({ blob, ...best!, content: { x: (output.width - dw) / 2 / output.width, y: (output.height - dh) / 2 / output.height, width: dw / output.width, height: dh / output.height } })
       progress({ stage: '선명한 프레임 선택', done: index + 1, total: times.length })
       await yieldUI()
     }
     return result
-  } finally { video.pause(); video.removeAttribute('src'); video.load() }
+  } finally { input.dispose() }
 }
 
-function getMask(worker: Worker, blob: Blob, signal: AbortSignal, progress: Progress): Promise<Blob> {
+function getMask(worker: Worker, blob: Blob, signal: AbortSignal, progress: Progress, targetProduct: boolean, content?: SpinFrame['content']): Promise<Blob> {
   return new Promise((resolve, reject) => {
     const clear = () => { clearTimeout(timer); worker.removeEventListener('message', message); worker.removeEventListener('error', failed); signal.removeEventListener('abort', cancel) }
     const cancel = () => { clear(); reject(new DOMException('작업을 취소했습니다.', 'AbortError')) }
@@ -74,7 +101,7 @@ function getMask(worker: Worker, blob: Blob, signal: AbortSignal, progress: Prog
     const timer = window.setTimeout(failed, 180_000)
     worker.addEventListener('message', message); worker.addEventListener('error', failed); signal.addEventListener('abort', cancel, { once: true })
     if (signal.aborted) { cancel(); return }
-    worker.postMessage({ blob })
+    worker.postMessage({ blob, targetProduct, content })
   })
 }
 
@@ -95,17 +122,26 @@ export async function finishSpinFrames(frames: SpinFrame[], settings: SpinSettin
   const worker = settings.ai ? new Worker(new URL('./spin-ai.worker.ts', import.meta.url), { type: 'module' }) : null
   const prepared: { frame: SpinFrame; bounds?: Bounds }[] = []
   const output = canvas(settings.edge), context = output.getContext('2d')!
+  const alphaCanvas = canvas(512), alphaContext = alphaCanvas.getContext('2d', { willReadFrequently: true })!
   try {
     for (let index = 0; index < frames.length; index++) {
       aborted(signal)
       const frame = frames[index]
       if (!worker) { prepared.push({ frame }); continue }
       progress({ stage: 'AI 배경 제거', done: index, total: frames.length })
-      const mask = await getMask(worker, frame.blob, signal, progress)
+      const mask = await getMask(worker, frame.blob, signal, value => progress({ stage: value.stage, done: index, total: frames.length }), Boolean(settings.region), frame.content)
       const [image, alpha] = await Promise.all([createImageBitmap(frame.blob), createImageBitmap(mask)])
       try {
+        let matte: CanvasImageSource = alpha
+        if (settings.opaque !== false) {
+          alphaCanvas.width = alpha.width; alphaCanvas.height = alpha.height
+          alphaContext.drawImage(alpha, 0, 0)
+          const pixels = alphaContext.getImageData(0, 0, alpha.width, alpha.height)
+          timeSpinWork('불투명 제품 내부 보호', () => solidifyProductAlpha(pixels.data, alpha.width, alpha.height))
+          alphaContext.putImageData(pixels, 0, 0); matte = alphaCanvas
+        }
         context.clearRect(0, 0, output.width, output.height); context.drawImage(image, 0, 0)
-        context.globalCompositeOperation = 'destination-in'; context.drawImage(alpha, 0, 0, output.width, output.height); context.globalCompositeOperation = 'source-over'
+        context.globalCompositeOperation = 'destination-in'; context.drawImage(matte, 0, 0, output.width, output.height); context.globalCompositeOperation = 'source-over'
         const bounds = timeSpinWork('상품 위치 분석', () => alphaBounds(output))
         prepared.push({ frame: { ...frame, blob: await encodeSpinImage(output) }, bounds })
       } finally { image.close(); alpha.close() }
