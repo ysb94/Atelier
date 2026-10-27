@@ -22,7 +22,7 @@ export async function listCompanyMeetings():Promise<MeetingSeries[]> {
 export const listMeetingDirectory=()=>checked<MeetingPerson[]>(getSupabase().rpc('list_meeting_directory'))
 export const listMeetingParticipation=()=>checked<MeetingParticipationRow[]>(getSupabase().rpc('list_meeting_member_participation'))
 export const listMeetingCalendar=(from:string,to:string)=>checked<MeetingDraft[]>(getSupabase().rpc('list_meeting_calendar',{p_from:from,p_to:to}))
-export const listMeetingAvailability=(seriesId:string,date:string,people:string[],roundId?:string)=>checked<MeetingAvailability[]>(getSupabase().rpc('list_meeting_availability',{p_series:seriesId,p_date:date,p_people:people,p_exclude_round:roundId ?? null}))
+export const listMeetingAvailability=(seriesId:string,date:string,people:string[],roundId?:string)=>checked<MeetingAvailability[]>(getSupabase().rpc('list_meeting_availability_with_todos',{p_series:seriesId,p_date:date,p_people:people,p_exclude_round:roundId ?? null}))
 export async function listMeetingRooms():Promise<MeetingRoom[]> {
   const {data,error}=await getSupabase().from('meeting_rooms').select('id,name').order('sort_order')
   if(error) fail('회의실 조회 실패',error)

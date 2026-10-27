@@ -2085,3 +2085,17 @@ AuthGate를 기존 DB 형태에 연결한 `verify:auth-recovery-browser`로 이 
 
 브랜드 경계, 식별자 고유 범위, 권한 모델 또는 프로젝트 분리 기준을 바꾸는 작업은
 구현 전에 영향 범위와 이전 계획을 제시하고 사용자 승인을 받는다.
+
+### 중요 개인 To-do 일정 연결 (구현 준비 · 운영 DB 미적용)
+
+- 추가 SQL: `20261027123725_personal_schedule_todo_availability.sql`. 운영 DB 적용은 별도 승인 전까지 실행하지 않는다.
+- `personal_schedule_todos`는 UUID 원본과 회사·소유자를 보관한다. RLS는 활성 본인만 읽기·쓰기하도록 제한한다.
+  기존 브라우저 To-do는 원본 키를 `client_id`로 보존해 최초 조회 시 중복을 무시하고 이전한다. 원본 localStorage는 지우지 않는다.
+  DB 기록을 브라우저의 오래된 값으로 덮어쓰지 않으며, 삭제 표식은 이전을 다시 해도 유지한다.
+- 날짜·선택 시작/종료 시각·중요·완료를 저장한다. 중요 작업에는 같은 날의 유효한 시작/종료 시각이 필수다.
+- 새 `list_meeting_availability_with_todos`는 기존 `app.meeting_availability`를 호출해 활성 회사·호스트/생성자·조회 대상·회차 검사를 그대로 재사용한다.
+  미완료·미삭제 중요 To-do의 시간만 `kind='personal'`로 덧붙이며 제목과 내용은 반환하지 않는다.
+  구버전 운영 화면을 위해 기존 조회 함수·반환값·실행 권한은 바꾸지 않는다. 기존 근태·연차·회의 행과 기존 RLS도 유지한다.
+- 회의 조율에서는 기존 휴가와 동일한 충돌 확인 절차를 사용한다. 완료·삭제·중요 해제 시 시간 점유에서 제외한다.
+- 검증: 개인 To-do 단위 검증, `scripts/verify-meetings-db.mjs`의 인메모리 PGlite 검증,
+  `scripts/verify-schedule-todos-browser.mjs`의 외부 API 없는 화면 검증. 운영 DB 검증이나 운영 공개 완료를 뜻하지 않는다.
