@@ -70,7 +70,7 @@ try {
     if (page.viewportSize().width >= 768) assert.equal(Math.round((await dialog.boundingBox()).width), Math.round(originalWidth), '기존 생성 창을 그대로 재사용')
     await dialog.getByLabel('회의 성격', { exact: true }).selectOption(kind)
     await dialog.getByLabel('회의 주제', { exact: true }).fill(title)
-    if (kind === 'project' || kind === 'routine') {
+    if (kind === 'project' || kind === 'routine' || kind === 'meeting') {
       await dialog.getByRole('button', { name: '멤버 목록 열기', exact: true }).click()
       const member = dialog.getByRole('button', { name: '검증 동료 진행 중 3건', exact: true })
       await member.click()
@@ -90,7 +90,7 @@ try {
   async function openDetail(title) { await row(title).getByRole('button', { name: '상세', exact: true }).click(); await drawer(title).waitFor(); return drawer(title) }
   let bookedMeeting = false
   async function schedule(dialog, date, room, clock) {
-    await dialog.getByRole('button', { name: '일정 확정하기', exact: true }).click()
+    if (await dialog.getByRole('button', { name: '일정 확정하기', exact: true }).count()) await dialog.getByRole('button', { name: '일정 확정하기', exact: true }).click()
     const picker = page.getByRole('dialog', { name: '회의 일정 확정', exact: true })
     await picker.getByLabel('회의 시간', { exact: true }).selectOption('60')
     await picker.getByLabel('회의 연도', { exact: true }).selectOption(date.slice(0, 4))
@@ -106,7 +106,11 @@ try {
     await picker.waitFor({ state: 'hidden' })
   }
   await page.screenshot({ path: path.join(root, '.tmp/meeting-ui-preview-desktop.png'), fullPage: true })
-  let dialog = await prepare('meeting', '미팅 예약 검수')
+  let dialog = await openCreate('meeting', '미팅 예약 검수')
+  await dialog.getByRole('button', { name: '미팅 생성', exact: true }).click()
+  dialog = page.getByRole('dialog', { name: '회의 일정 확정', exact: true })
+  await dialog.waitFor()
+  assert.equal(await drawer('미팅 예약 검수').count(), 0, '미팅 생성 후 상세를 거치지 않고 바로 일정 선택')
   assert.equal(await dialog.locator('textarea').count(), 0, '미팅은 내용·회의록을 작성하지 않음')
   assert.equal(await dialog.getByRole('button', { name: '미팅 완료', exact: true }).count(), 0, '일정 확정 전에는 바로 완료할 수 없음')
   await schedule(dialog, '2030-01-07', 'room-2', '11:00')
@@ -115,6 +119,10 @@ try {
   await page.getByRole('table').getByText(/미팅 예약 검수/).waitFor()
   dialog = await openDetail('미팅 예약 검수')
   await dialog.getByText('2030-01-07 · 11:00–12:00 · 소회의실', { exact: true }).waitFor()
+  await dialog.getByRole('button', { name: '검증 동료 · 일정 공유', exact: true }).waitFor()
+  assert.equal(await dialog.getByRole('button', { name: '참석 가능', exact: true }).count(), 0)
+  assert.equal(await dialog.getByRole('button', { name: '참석 불가', exact: true }).count(), 0)
+  assert.equal(await row('미팅 예약 검수').getByText('참석 응답 대기', { exact: true }).count(), 0)
   assert.equal(await dialog.locator('textarea').count(), 0)
   assert.equal(await dialog.getByRole('button', { name: '저장하고 다음 회의 진행', exact: true }).count(), 0)
   await dialog.getByRole('button', { name: '미팅 완료', exact: true }).click()

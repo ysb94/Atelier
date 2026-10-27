@@ -416,9 +416,15 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
   async function createDraft(){
     if(!composeReady){showComposeGaps();return}
     const id=newMeetingId(),roundId=newMeetingId()
-    const saved=await setSeries(rows=>[{id,title:composeTitle,host:composeHost,members:composeMembers,createdBy:host.id,phase:'preparing',status:'in_progress',durationMinutes:DEFAULT_MEETING_DURATION_MINUTES,
-      rounds:[{id:roundId,round:1,startsAt:'',roomId:'',quarterId:'q1',confirmed:false,...emptyRoundNotes()}]},...rows])
-    if(saved){if(variationPreview)setKindInfos(infos=>({...infos,[id]:newKindInfo}));resetCompose();setBoardTab('in_progress');setDetail({seriesId:id,roundId})}
+    const draft:MeetingSeries={id,title:composeTitle,host:composeHost,members:composeMembers,createdBy:host.id,phase:'preparing',status:'in_progress',durationMinutes:DEFAULT_MEETING_DURATION_MINUTES,
+      rounds:[{id:roundId,round:1,startsAt:'',roomId:'',quarterId:'q1',confirmed:false,...emptyRoundNotes()}]}
+    const saved=await setSeries(rows=>[draft,...rows])
+    if(saved){
+      if(variationPreview)setKindInfos(infos=>({...infos,[id]:newKindInfo}))
+      resetCompose();setBoardTab('in_progress')
+      if(variationPreview&&newKindInfo.kind==='meeting'&&composeHost.id===host.id) scheduleNextRound(draft,roundId)
+      else setDetail({seriesId:id,roundId})
+    }
   }
 
   function showComposeGaps() {
@@ -454,7 +460,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
     }
     const target=schedulingSeries.rounds.find(row=>row.id===schedulingRoundId) ?? findPendingRound(schedulingSeries)
     const confirmed={...(target ?? round),startsAt,roomId:nextRoomId,quarterId:round.quarterId,durationMinutes:slotDurationMinutes,confirmed:true,
-      scheduleVersion:(target?.scheduleVersion ?? 0)+1,responses:composeMembers.map(person=>({profileId:person.id,status:'pending' as const}))}
+      scheduleVersion:(target?.scheduleVersion ?? 0)+1,responses:variationPreview&&composeKindInfo.kind==='meeting'?[]:composeMembers.map(person=>({profileId:person.id,status:'pending' as const}))}
     const saved=await setSeries(rows=>rows.map(item=>item.id===schedulingSeries.id?{
       ...item,phase:'published',members:composeMembers,durationMinutes:slotDurationMinutes,
       rounds:target?item.rounds.map(row=>row.id===target.id?confirmed:row):[...item.rounds,confirmed],
@@ -587,7 +593,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
                 const rounds = [...item.rounds].sort(
                   (left, right) => left.round - right.round,
                 )
-                const responseRounds = item.status === 'in_progress' && item.phase !== 'preparing' && item.members.some(person => person.id === host.id)
+                const responseRounds = item.status === 'in_progress' && item.phase !== 'preparing' && item.members.some(person => person.id === host.id) && !(variationPreview && kindInfos[item.id]?.kind === 'meeting')
                   ? rounds.filter(round => Boolean(round.confirmed ?? round.startsAt)) : []
                 return (
                   <li
@@ -609,7 +615,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
                         aria-hidden
                         className="hidden h-4 w-px bg-border sm:block"
                       />
-                      <MeetingAttendance series={item} round={[...item.rounds].reverse().find(row=>row.confirmed ?? row.startsAt)} actorId={host.id} simulating={simulating} compact onChat={chatWith} onGroup={()=>groupChat(item)}/>
+                      <MeetingAttendance series={item} round={[...item.rounds].reverse().find(row=>row.confirmed ?? row.startsAt)} actorId={host.id} simulating={simulating} compact requiresResponse={!variationPreview || kindInfos[item.id]?.kind !== 'meeting'} onChat={chatWith} onGroup={()=>groupChat(item)}/>
                       <span
                         aria-hidden
                         className="hidden h-4 w-px bg-border sm:block"
@@ -618,7 +624,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
                         {rounds.map((round, index) => {
                           const gapDays = roundGapDays(rounds, round)
                           const simpleMeeting = variationPreview && kindInfos[item.id]?.kind === 'meeting'
-                          const caption = simpleMeeting && isPendingRound(round) ? '일정 미확정' : roundListCaption(round, item.members.map((person) => person.id))
+                          const caption = simpleMeeting ? isPendingRound(round) ? '일정 미확정' : null : roundListCaption(round, item.members.map((person) => person.id))
                           return (
                           <span
                             key={round.id}
@@ -926,7 +932,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
               roundId={schedulingRoundId ?? findPendingRound(schedulingSeries)?.id} error={meetings.error}
               onConfirm={()=>bookSlot(scheduleChoice.roomId,scheduleChoice.dateKey,scheduleChoice.clock)}/> : null}
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-              <p className="text-xs text-muted-foreground">{schedulingSeries?'일정을 확정하면 멤버에게 참석 요청이 전달됩니다. 일정 변경 시 응답이 초기화됩니다.':variationPreview && newKindInfo.kind === 'meeting'?'생성 후 날짜·시간·회의실을 정해 일정을 확정하세요. 미팅은 내용·회의록 없이 진행 사실을 남깁니다.':'준비 중에는 호스트와 생성자만 볼 수 있습니다. 안내·자료를 준비한 뒤 일정을 확정하세요.'}</p>
+              <p className="text-xs text-muted-foreground">{variationPreview && composeKindInfo.kind === 'meeting'?'날짜·시간·회의실을 정하면 참석 수락 없이 일정이 확정됩니다.':schedulingSeries?'일정을 확정하면 멤버에게 참석 요청이 전달됩니다. 일정 변경 시 응답이 초기화됩니다.':'준비 중에는 호스트와 생성자만 볼 수 있습니다. 안내·자료를 준비한 뒤 일정을 확정하세요.'}</p>
               {!schedulingSeries?<Button type="button" className="shrink-0 whitespace-nowrap" onClick={()=>void createDraft()}>{variationPreview && newKindInfo.kind === 'meeting' ? '미팅 생성' : '준비 회의 생성'}</Button>:null}
             </div>
           </div>
@@ -973,7 +979,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
           allowNextRound={!variationPreview || meetingHasNextRound(detailKindInfo?.kind ?? 'project')}
           simpleMeeting={variationPreview && detailKindInfo?.kind === 'meeting'}
           onRefresh={meetings.refresh}
-          attendance={<MeetingAttendance series={detailSeries} round={detailRound} actorId={host.id} simulating={simulating} onChat={chatWith} onGroup={()=>groupChat(detailSeries)} onRespond={status=>respond(detailSeries,detailRound,status)}/> }
+          attendance={<MeetingAttendance series={detailSeries} round={detailRound} actorId={host.id} simulating={simulating} requiresResponse={!variationPreview || detailKindInfo?.kind !== 'meeting'} onChat={chatWith} onGroup={()=>groupChat(detailSeries)} onRespond={status=>respond(detailSeries,detailRound,status)}/> }
           saveError={meetings.error}
           onClose={closeDetail}
           onSave={async (notes,revision) => {

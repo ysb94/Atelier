@@ -3,9 +3,10 @@ import { cn } from '@/lib/utils'
 import type { MeetingPerson, MeetingRound, MeetingSeries } from './meeting-schedule'
 import './meeting-attendance.css'
 
-export function MeetingAttendance({series,round,actorId,simulating,onChat,onGroup,onRespond,compact=false}:{
+export function MeetingAttendance({series,round,actorId,simulating,onChat,onGroup,onRespond,compact=false,requiresResponse=true}:{
   series:MeetingSeries;round?:MeetingRound;actorId:string;simulating:boolean;compact?:boolean
   onChat:(person:MeetingPerson)=>void;onGroup:()=>void;onRespond?:(status:'available'|'unavailable')=>void
+  requiresResponse?:boolean
 }) {
   const published=series.phase!=='preparing',confirmed=published && Boolean(round?.confirmed ?? round?.startsAt)
   const participant=series.host.id===actorId || series.members.some(person=>person.id===actorId)
@@ -19,18 +20,18 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
       {[series.host,...series.members].map(person=>{
         const isHost=person.id===series.host.id
         const status=round?.responses?.find(response=>response.profileId===person.id)?.status ?? 'pending'
-        const label=isHost?'호스트':!confirmed?'준비 중':status==='available'?'참석 가능':status==='unavailable'?'참석 불가':'응답 대기'
+        const label=isHost?'호스트':!confirmed?'준비 중':!requiresResponse?'일정 공유':status==='available'?'참석 가능':status==='unavailable'?'참석 불가':'응답 대기'
         return <button key={person.id} type="button" disabled={!published||!participant||simulating||person.id===actorId}
           title={`${person.name} · ${label}${person.id!==actorId&&published?' · 1:1 대화':''}`}
           aria-label={`${person.name} · ${label}`} onClick={()=>onChat(person)}
           className={cn('inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs disabled:cursor-default',isHost?'bg-sky-100 text-sky-950':'bg-muted text-muted-foreground',published&&participant&&!simulating&&person.id!==actorId&&'hover:ring-1 hover:ring-foreground/30')}>
-          <span aria-hidden className={cn('size-1.5 rounded-full',isHost?'bg-sky-600':confirmed&&status==='available'?'bg-emerald-600':confirmed&&status==='unavailable'?'bg-red-500':'bg-muted-foreground/40')}/>
+          <span aria-hidden className={cn('size-1.5 rounded-full',isHost?'bg-sky-600':confirmed&&requiresResponse&&status==='available'?'bg-emerald-600':confirmed&&requiresResponse&&status==='unavailable'?'bg-red-500':'bg-muted-foreground/40')}/>
           {person.name}{!compact?` · ${label}`:''}
         </button>
       })}
     </div>
     </div>
-    {!compact&&confirmed&&round&&series.members.some(person=>person.id===actorId)&&onRespond ? <MeetingResponse round={round} actorId={actorId} onRespond={onRespond}/>:null}
+    {!compact&&confirmed&&requiresResponse&&round&&series.members.some(person=>person.id===actorId)&&onRespond ? <MeetingResponse round={round} actorId={actorId} onRespond={onRespond}/>:null}
   </div>
 }
 
