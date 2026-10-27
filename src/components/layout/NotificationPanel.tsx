@@ -121,7 +121,7 @@ export function NotificationPanel({
                       </span>
                       <span className="min-w-0 flex-1">
                         <span className="flex items-start justify-between gap-2">
-                          <span className="truncate text-sm font-medium">
+                          <span className={cn('min-w-0 text-sm font-medium', item.kind === 'meeting_invitation' ? 'whitespace-normal break-words' : 'truncate')}>
                             {item.title}
                           </span>
                           {unread ? (
@@ -131,7 +131,7 @@ export function NotificationPanel({
                             />
                           ) : null}
                         </span>
-                        <span className="mt-0.5 block truncate text-sm text-muted-foreground">
+                        <span className={cn('mt-0.5 block text-sm text-muted-foreground', item.kind === 'meeting_invitation' ? 'whitespace-pre-line break-words' : 'truncate')}>
                           {item.body}
                         </span>
                         {item.kind==='meeting_invitation'?<span className="mt-1 block text-xs text-primary">{item.meeting?.role==='host'?'회의에서 멤버 응답 확인 →':'회의에서 참석 여부 응답 →'}</span>:null}
