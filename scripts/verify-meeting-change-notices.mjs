@@ -67,7 +67,7 @@ try {
   await db.query('select public.respond_to_meeting($1,1,$2)', [roundId, 'available'])
   await db.exec('reset role')
   const before = await snapshot()
-  await apply('20261027064219_meeting_change_notices.sql')
+  await apply('20261027074713_meeting_change_notices.sql')
   assert.deepEqual(await snapshot(), before, '기존 사용자·초대·응답·읽음·RLS·권한·다른 함수 보존')
   await actor(member)
   assert.equal((await notices())[0].body, legacy.body, '기존 초대에 변경 전 값을 지어내지 않음')
