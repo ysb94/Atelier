@@ -101,7 +101,7 @@ function ProfileSettingsContent() {
       </div>
 
       <div className="personal-page-tabs" role="tablist" aria-label="My home 메뉴">
-        {tabs.map(tab => <Fragment key={tab.id}>
+        {tabs.filter(tab => tab.id !== 'work' || release.scope.unrestricted).map(tab => <Fragment key={tab.id}>
           {release.scope.unrestricted && tab.id === 'approvals' && <span className="personal-page-tab-split" aria-hidden="true" />}
           <button type="button" role="tab" id={`personal-${tab.id}-tab`} className={tab.id === 'attendance' ? 'personal-page-tab-end' : undefined} aria-selected={visiblePart === tab.id} aria-controls={`personal-${tab.id}-panel`} onClick={() => selectPart(tab.id)}>{tab.label}{tab.id === 'meetings' && meetingNotices.pending > 0 ? <span className="personal-page-tab-count">{meetingNotices.pending}</span> : null}</button>
         </Fragment>)}
