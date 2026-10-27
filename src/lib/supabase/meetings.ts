@@ -28,8 +28,19 @@ export async function listMeetingRooms():Promise<MeetingRoom[]> {
   if(error) fail('회의실 조회 실패',error)
   return data ?? []
 }
-export const saveCompanyMeeting=(series:MeetingSeries,revision:number)=>checked<number>(getSupabase().rpc('save_company_meeting',{p_series:series,p_revision:revision}))
-export const confirmCompanyMeeting=(series:MeetingSeries,revision:number,round:string)=>checked<number>(getSupabase().rpc('confirm_company_meeting',{p_series:series,p_revision:revision,p_round:round}))
+async function requireMeetingKindStorage() {
+  // DB 적용 전 구 서버가 새 성격 값을 무시하고 프로젝트로 저장하는 것을 막는다.
+  const {error}=await getSupabase().from('meeting_series').select('kind').limit(0)
+  if(error) fail('회의 성격 저장 준비 확인 실패',{message:'회의 DB 업데이트를 확인하지 못했습니다. 새로고침 후 다시 시도해 주세요.'})
+}
+export async function saveCompanyMeeting(series:MeetingSeries,revision:number) {
+  await requireMeetingKindStorage()
+  return checked<number>(getSupabase().rpc('save_company_meeting',{p_series:series,p_revision:revision}))
+}
+export async function confirmCompanyMeeting(series:MeetingSeries,revision:number,round:string) {
+  await requireMeetingKindStorage()
+  return checked<number>(getSupabase().rpc('confirm_company_meeting',{p_series:series,p_revision:revision,p_round:round}))
+}
 export const respondToMeeting=(round:string,version:number,status:'available'|'unavailable')=>checked<void>(getSupabase().rpc('respond_to_meeting',{p_round:round,p_version:version,p_status:status}))
 export const listMeetingInvitations=()=>checked<InboxNotification[]>(getSupabase().rpc('list_my_meeting_invitations'))
 export const readMeetingInvitation=(id:string|null)=>checked<void>(getSupabase().rpc('read_meeting_invitation',{p_id:id}))

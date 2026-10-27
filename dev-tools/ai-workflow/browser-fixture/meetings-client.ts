@@ -61,7 +61,7 @@ export function meetingFixtureRpc(name:string,args:Record<string,unknown>={}) {
    if(name==='confirm_company_meeting'){
     next.phase='published';const round=next.rounds.find(row=>row.id===args.p_round)!
     round.confirmed=true;round.scheduleVersion=(previous?.rounds.find(row=>row.id===round.id)?.scheduleVersion??0)+1
-    round.responses=next.members.map(person=>({profileId:person.id,status:'pending'}))
+    round.responses=next.kind==='meeting'?[]:next.members.map(person=>({profileId:person.id,status:'pending'}))
    }
    value.series=[{...next,revision:data as number},...value.series.filter(item=>item.id!==next.id)]
   }else if(name==='delete_company_meeting'){

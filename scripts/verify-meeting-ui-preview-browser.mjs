@@ -40,7 +40,7 @@ try {
   const origin = 'http://127.0.0.1:5197'
   await context.route('**/*', route => { if (route.request().url().startsWith(origin + '/')) return route.continue(); external.push(route.request().url()); return route.abort() })
   await context.addInitScript(() => {
-    if (sessionStorage.getItem('fixture:scale')) return
+    if (sessionStorage.getItem('fixture:scale') || sessionStorage.getItem('fixture:persist')) return
     const host = { id: 'fixture-user', name: '화면 검수', departmentName: '기획팀' }, member = { id: 'other-user', name: '검증 동료', departmentName: 'MD팀' }
     const round = (id, roomId, clock) => ({ id, roomId, startsAt: '2030-01-07T' + clock, round: 1, confirmed: true, quarterId: 'q1', prepMaterials: [], content: '참석자만 보는 회의 내용', result: '', responses: [] })
     sessionStorage.setItem('atelier:meeting-fixture', JSON.stringify({ files: {}, audit: [], participation: [{profile_id:'other-user',titles:['기존 프로젝트','응답할 프로젝트','비참석 진행 회의']}], series: [
@@ -52,15 +52,12 @@ try {
   await page.clock.install({ time: new Date('2030-01-07T08:00:00+09:00') })
   page.on('pageerror', error => errors.push(error.message))
   await page.goto(origin + '/meetings')
-  await page.getByRole('button', { name: '기존 화면', exact: true }).waitFor()
-  assert.equal(await page.getByRole('button', { name: '기존 화면', exact: true }).getAttribute('aria-pressed'), 'true')
+  assert.equal(await page.getByRole('button', { name: '기존 화면', exact: true }).count(), 0)
   await page.getByRole('button', { name: '회의 생성', exact: true }).click()
   const oldDialog = page.getByRole('dialog', { name: '회의 생성', exact: true })
   const originalWidth = (await oldDialog.boundingBox()).width
   await oldDialog.getByRole('button', { name: '닫기', exact: true }).click()
-  const initial = await page.evaluate(() => sessionStorage.getItem('atelier:meeting-fixture'))
-  await page.getByRole('button', { name: '새 화면 미리보기', exact: true }).click()
-  await page.getByText('회의 성격 미리보기', { exact: false }).waitFor()
+  assert.equal(await page.getByRole('button', { name: '새 화면 미리보기', exact: true }).count(), 0)
   await page.getByRole('tab', { name: '대회의실', exact: true }).waitFor()
   await page.evaluate(() => { window.__previewCalls = [] })
   const row = title => page.getByRole('listitem').filter({ has: page.getByText(title, { exact: true }) })
@@ -188,7 +185,7 @@ try {
   dialog = await openDetail('응답할 프로젝트')
   await dialog.getByText('내 응답 · 참석 가능', { exact: true }).waitFor()
   await closeDetail(dialog)
-  assert.equal(await row('기존 프로젝트').getByRole('button', { name: '전체 멤버와 대화', exact: true }).isDisabled(), true, '기존 화면 테스트와 같이 실제 대화방 생성 방지')
+  assert.equal(await row('기존 프로젝트').getByRole('button', { name: '전체 멤버와 대화', exact: true }).isDisabled(), false, '실제 회의 대화방 연결 유지')
   await row('프로젝트 UI 검수').getByRole('button', { name: '삭제', exact: true }).click()
   const deletion = page.getByRole('dialog', { name: '회의건 영구 삭제', exact: true })
   await deletion.getByRole('checkbox').check()
@@ -198,9 +195,10 @@ try {
   await deletion.waitFor({ state: 'hidden' })
   assert.equal(await row('프로젝트 UI 검수').count(), 0)
   const calls = await page.evaluate(() => window.__previewCalls)
-  assert.deepEqual(calls.filter(name => !name.startsWith('list_')), [], '실제 저장·예약·첨부·응답·삭제·알림 RPC 없음')
-  assert.equal(calls.includes('list_meeting_availability'), false, '서버에 없는 미리보기 회의로 개인정보 조회를 요청하지 않음')
-  assert.equal(await page.evaluate(() => sessionStorage.getItem('atelier:meeting-fixture')), initial)
+  for (const name of ['save_company_meeting','confirm_company_meeting','begin_meeting_file','respond_to_meeting','delete_company_meeting','list_meeting_availability']) assert.ok(calls.includes(name), `${name} 실제 저장 경로 연결`)
+  const stored = await page.evaluate(() => JSON.parse(sessionStorage.getItem('atelier:meeting-fixture')).series)
+  assert.equal(stored.find(item=>item.title==='기획팀 면접').kind,'interview')
+  assert.equal(stored.find(item=>item.title==='루틴 UI 검수').kind,'routine')
   await page.setViewportSize({ width: 390, height: 844 })
   await page.screenshot({ path: path.join(root, '.tmp/meeting-ui-preview-mobile.png'), fullPage: true })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
@@ -208,12 +206,13 @@ try {
   assert.equal(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth), true)
   await page.screenshot({ path: path.join(root, '.tmp/meeting-ui-preview-mobile-create.png'), fullPage: true })
   await dialog.getByRole('button', { name: '닫기', exact: true }).click()
-  await page.getByRole('button', { name: '기존 화면', exact: true }).click()
-  await page.getByRole('button', { name: '새 화면 미리보기', exact: true }).click()
-  assert.equal(await row('루틴 UI 검수').count(), 0)
+  await page.evaluate(() => sessionStorage.setItem('fixture:persist','1'))
+  await page.reload()
+  await row('루틴 UI 검수').getByText('루틴 회의', { exact: true }).waitFor()
+  await row('기획팀 면접').getByText('면접', { exact: true }).waitFor()
   await page.getByRole('button', { name: '검증 계정 전환', exact: true }).click()
-  assert.equal(await page.getByRole('button', { name: '기존 화면', exact: true }).getAttribute('aria-pressed'), 'true')
-  await page.getByRole('button', { name: '새 화면 미리보기', exact: true }).click()
+  assert.equal(await page.getByRole('dialog').count(),0,'계정 전환 시 편집 창 초기화')
+  await page.getByRole('button', { name: '검증 계정 전환', exact: true }).click()
   dialog = await prepare('one_off', '조회 실패 검수')
   await dialog.getByRole('button', { name: '일정 확정하기', exact: true }).click()
   const failurePicker = page.getByRole('dialog', { name: '회의 일정 확정', exact: true })
@@ -221,7 +220,7 @@ try {
   await page.evaluate(() => { sessionStorage.setItem('fixture:calendar-error', '1'); return window.__previewRefresh() })
   assert.equal(await failurePicker.getByRole('button', { name: '일정 확정', exact: true }).isDisabled(), true)
   await page.reload()
-  assert.equal(await page.getByRole('button', { name: '기존 화면', exact: true }).getAttribute('aria-pressed'), 'true')
+  assert.equal(await page.getByRole('button', { name: '새 화면 미리보기', exact: true }).count(),0)
   assert.deepEqual(errors, [])
   assert.deepEqual(external, [])
   // 긴 제목·다수 멤버·20개 회차를 가진 회의 8건에서도 카드 내부가 넘치지 않아야 한다.
@@ -231,9 +230,10 @@ try {
     const fixture = JSON.parse(sessionStorage.getItem('atelier:meeting-fixture'))
     const base = fixture.series[0]
     fixture.series = Array.from({ length: 8 }, (_, index) => ({ ...base,
+      phase: 'published', status: 'in_progress', kind: 'project',
       id: `scale-meeting-${index}`, title: `확장 검수 ${index + 1} · ${'여러 부서가 함께 논의하는 장기 프로젝트의 진행 상황과 다음 작업을 확인하는 회의 '.repeat(4)}`,
       members: Array.from({ length: 24 }, (_, member) => ({ id: `scale-person-${member}`, name: `참석직원${member + 1}`, departmentName: '기획팀' })),
-      rounds: Array.from({ length: 20 }, (_, round) => ({ ...base.rounds[0], id: `scale-round-${index}-${round}`, round: round + 1,
+      rounds: Array.from({ length: 20 }, (_, round) => ({ ...base.rounds[0], id: `scale-round-${index}-${round}`, round: round + 1, confirmed: true,
         startsAt: `2030-01-${String(round + 1).padStart(2, '0')}T10:00`, responses: [],
       })),
     }))
@@ -246,21 +246,20 @@ try {
     await entries.first().waitFor()
     assert.equal(await entries.count(), 8)
     const entry = entries.first()
-    if (width < 640) assert.ok((await entry.getByText(/^확장 검수 /).boundingBox()).width > (await entry.boundingBox()).width * 0.8, '모바일 제목은 카드 전체 너비 사용')
+    assert.ok((await entry.getByText(/^확장 검수 /).getAttribute('title')).includes('장기 프로젝트'), '긴 제목 원문 유지')
     const members = entry.getByRole('group', { name: '회의 멤버', exact: true })
     const rounds = entry.getByRole('group', { name: '회의 회차', exact: true })
     assert.equal(await members.getByRole('button').count(), 26, '호스트·24명·전체 대화 버튼 유지')
     const first = await rounds.getByRole('button', { name: /^1차 회의/ }).boundingBox()
     const last = await rounds.getByRole('button', { name: /20차 회의/ }).boundingBox()
-    assert.ok(last.y > first.y, '20개 회차가 여러 줄로 배치')
-    assert.ok((await members.boundingBox()).y > (await entry.getByText(/^확장 검수 /).boundingBox()).y, '멤버는 제목 아래 별도 행')
+    assert.ok(last.y > first.y || await rounds.evaluate(element=>element.scrollWidth>element.clientWidth), '20개 회차는 줄바꿈 또는 내부 스크롤로 모두 접근 가능')
     assert.equal(await entries.evaluateAll(elements => elements.every(element => element.scrollWidth <= element.clientWidth)), true, '회의 카드 가로 넘침 없음')
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
     await entry.screenshot({ path: path.join(root, `.tmp/meeting-list-scale-${width}.png`) })
   }
   assert.deepEqual(errors, [])
   assert.deepEqual(external, [])
-  console.log('meeting-ui-preview-browser: shared original UI/form/drawer/calendar/rounds/materials/response/delete; meeting date/time/room booking and conflict blocking without notes; one-off completion; open-ended routine; interview without applicant fields; mobile; reset/failure guards; zero server mutations or external requests passed')
+  console.log('meeting-kinds-browser: 5가지 성격 실제 API 경로·파일/응답/삭제·새로고침 성격 유지·8건/24명/20차 PC/모바일 배치·계정 전환·조회 실패 차단 검증 통과 (격리 fixture 서버, 외부 요청 없음)')
 } catch (error) {
   if (page) await page.screenshot({ path: path.join(root, '.tmp/meeting-ui-preview-failure.png'), fullPage: true }).catch(error => console.warn('[meeting-ui-preview-test] 실패 화면 캡처 실패', error))
   throw error

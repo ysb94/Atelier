@@ -1963,6 +1963,13 @@ staging이 없는 동안에는 되돌릴 수단을 작업 전에 확보한다.
   검증: `npm run verify:meetings-db`, `npm run verify:meetings-browser`.
   `scripts/verify-meetings-live.mjs`는 명시적으로 실행하는 실제 API 점검이며 생성한 검증 UUID만 정리한다.
 
+### 회의 성격 실제 저장 전환 (2026-10-27)
+
+- `20261027105829_meeting_kinds.sql` 적용. `meeting_series.kind` 하나를 추가하고 기존 회의는 `project`로 읽는다. 기존 행의 일정·revision·응답·자료·채팅 및 사용자 상태는 변경하지 않았다.
+- `meeting`은 한 회차의 일정·진행 기록만 저장하며 참석 요청·응답·자료 업로드를 생략한다. `one_off`·`interview`는 한 회차와 참석 응답을, `project`·`routine`은 여러 회차를 유지한다. 생성한 성격은 변경하지 못하며, 구 버전 요청에서 성격이 누락돼도 기존 값을 보존한다.
+- 기존 UI 미리보기 전환을 제거하고 실제 저장에 연결했다. 권한 화면 테스트의 메모리 모드는 유지한다. DB 준비 확인 실패 시 성격이 무시된 채 저장되지 않도록 저장을 차단한다.
+- 검증: `npm run verify:meetings-db`, `npm run verify:meetings-browser`, `node scripts/verify-meeting-ui-preview-browser.mjs`, Node 22 빌드. 공유 DB에서도 authenticated 역할로 다섯 성격 저장·확정·응답·비호스트 거부를 검증한 뒤 전체 롤백했다. 기존 사용자 33명·회의 17건·자료 4건의 건수·해시가 적용 및 검증 전후 동일했다. 사이트 배포는 포함하지 않는다.
+
 ## 사내 채팅
 
 채팅은 E&J 회사 소유다. `chat_rooms`, `chat_messages`, `chat_attachments`에는

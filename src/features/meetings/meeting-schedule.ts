@@ -277,6 +277,7 @@ export function groupPrepMaterialsByUploader(
 
 export type MeetingSeries = {
   id: string
+  kind?: import('./meeting-kinds').MeetingKind
   phase?: 'preparing' | 'published'
   createdBy?: string
   revision?: number
@@ -290,6 +291,7 @@ export type MeetingSeries = {
 
 export type MeetingDraft = {
   id: string
+  kind?: import('./meeting-kinds').MeetingKind
   title: string
   startsAt: string
   roomId: string
@@ -546,6 +548,7 @@ export function seriesToDrafts(
       drafts.push({
         id: round.id,
         title: item.title,
+        kind: item.kind ?? 'project',
         startsAt: round.startsAt,
         roomId: round.roomId,
         host: item.host,

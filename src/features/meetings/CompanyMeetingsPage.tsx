@@ -9,7 +9,6 @@ import { MeetingAttendance, MeetingResponse } from './MeetingAttendance'
 import { MeetingMemberOption } from './MeetingMemberOption'
 import { buildMeetingParticipationSummary } from './meeting-participation'
 import { MeetingSchedulePicker, type MeetingScheduleChoice } from './MeetingSchedulePicker'
-import { FilterTabs } from '@/components/ui/filter-tabs'
 import { MeetingKindFields, MeetingKindSelect } from './MeetingKindFields'
 import { emptyMeetingKindInfo, MEETING_KINDS, MEETING_KIND_TONES, meetingHasNextRound, meetingKindLabel, type MeetingKindInfo } from './meeting-kinds'
 import {
@@ -29,7 +28,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
-import { PagePreviewContext, usePagePreview } from '@/lib/company/page-preview-context'
+import { usePagePreview } from '@/lib/company/page-preview-context'
 import { previewMeetingActor } from '@/lib/company/relationship-preview'
 import {
   listDepartments,
@@ -166,23 +165,6 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
 }
 
 function MeetingScreen({ showHeading }: { showHeading: boolean }) {
-  const { profile } = useAuth()
-  const preview = usePagePreview()
-  const previewValue = useMemo(() => ({ active: true, realProfile: preview?.realProfile ?? profile, facts: preview?.facts }), [preview?.realProfile, preview?.facts, profile])
-  const [view, setView] = useState<'existing' | 'preview'>('existing')
-  const [busy, setBusy] = useState(false)
-  const active = useWorkspaceTabActivity()
-  useEffect(() => { if (!active) setView('existing') }, [active])
-  return <div className="min-w-0 space-y-4">
-    {showHeading && <PageHeader title="회의" />}
-    <fieldset disabled={busy}>
-      <FilterTabs value={view} onChange={setView} ariaLabel="회의 화면 비교" tabs={[{ value: 'existing', label: '기존 화면' }, { value: 'preview', label: '새 화면 미리보기' }]} />
-    </fieldset>
-    {view === 'preview' ? <PagePreviewContext.Provider value={previewValue}><ExistingCompanyMeetingsPage showHeading={false} onBusyChange={setBusy} variationPreview /></PagePreviewContext.Provider> : <ExistingCompanyMeetingsPage showHeading={false} onBusyChange={setBusy} />}
-  </div>
-}
-
-function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPreview = false }: { showHeading: boolean; onBusyChange: (busy: boolean) => void; variationPreview?: boolean }) {
   useRenderWatch('CompanyMeetingsPage')
 
   const { profile } = useAuth()
@@ -219,17 +201,16 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
   const [scheduleChoice,setScheduleChoice]=useState<MeetingScheduleChoice>(()=>({roomId:MEETING_ROOMS[0].id,dateKey:toDateKey(new Date()),clock:''}))
   const todayKey = toDateKey(new Date())
   const [newKindInfo, setNewKindInfo] = useState(emptyMeetingKindInfo)
-  const [kindInfos, setKindInfos] = useState<Record<string, MeetingKindInfo>>({})
   const [previewDeletedRounds, setPreviewDeletedRounds] = useState<ReadonlySet<string>>(() => new Set())
   const fromKey = rangeFromKey ?? todayKey
   const days = useMemo(() => listMeetingDays(fromKey, visibleDays, todayKey),[fromKey,todayKey,visibleDays])
   const meetings=useCompanyMeetings(days[0]?.key ?? todayKey,days[days.length-1]?.key ?? todayKey)
   const {series,setSeries,rooms,saving,simulating}=meetings
+  const kindInfos = useMemo(() => Object.fromEntries(series.map(item => [item.id, { kind: item.kind ?? 'project' }])), [series])
   const previewSeries = useRef(series); previewSeries.current = series
   useEffect(() => () => {
-    if (variationPreview) for (const item of previewSeries.current) for (const round of item.rounds) for (const file of round.prepMaterials) if (file.url.startsWith('blob:')) URL.revokeObjectURL(file.url)
-  }, [variationPreview])
-  useEffect(() => { onBusyChange(saving); return () => onBusyChange(false) }, [saving, onBusyChange])
+    if (simulating) for (const item of previewSeries.current) for (const round of item.rounds) for (const file of round.prepMaterials) if (file.url.startsWith('blob:')) URL.revokeObjectURL(file.url)
+  }, [simulating])
 
   const host = useMemo<MeetingPerson>(() => {
     if (!profile) return LOCAL_HOST
@@ -279,7 +260,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
   )
 
   const weeks = useMemo(() => chunkMeetingDays(days), [days])
-  const items = useMemo(() => variationPreview ? meetings.bookings.filter(item => !previewDeletedRounds.has(item.id)) : meetings.bookings, [meetings.bookings, previewDeletedRounds, variationPreview])
+  const items = useMemo(() => simulating ? meetings.bookings.filter(item => !previewDeletedRounds.has(item.id)) : meetings.bookings, [meetings.bookings, previewDeletedRounds, simulating])
   const occupants = useMemo(() => groupMeetingsByRoomDay(items), [items])
   const pickerDay = useMemo(
     () => (picker ? days.find((day) => day.key === picker.dateKey) : undefined),
@@ -334,7 +315,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
     title: composeTitle,
     durationMinutes: schedulingSeries ? composeDuration : DEFAULT_MEETING_DURATION_MINUTES,
     memberCount: composeMembers.length,
-    requireMembers: !schedulingSeries && (!variationPreview || meetingHasNextRound(composeKindInfo.kind)),
+    requireMembers: !schedulingSeries && (meetingHasNextRound(composeKindInfo.kind)),
   })
   const composeReady = isMeetingComposeReady(composeGaps)
   const composeGapMessage = formatMeetingComposeGaps(composeGaps)
@@ -416,13 +397,12 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
   async function createDraft(){
     if(!composeReady){showComposeGaps();return}
     const id=newMeetingId(),roundId=newMeetingId()
-    const draft:MeetingSeries={id,title:composeTitle,host:composeHost,members:composeMembers,createdBy:host.id,phase:'preparing',status:'in_progress',durationMinutes:DEFAULT_MEETING_DURATION_MINUTES,
+    const draft:MeetingSeries={id,kind:newKindInfo.kind,title:composeTitle,host:composeHost,members:composeMembers,createdBy:host.id,phase:'preparing',status:'in_progress',durationMinutes:DEFAULT_MEETING_DURATION_MINUTES,
       rounds:[{id:roundId,round:1,startsAt:'',roomId:'',quarterId:'q1',confirmed:false,...emptyRoundNotes()}]}
     const saved=await setSeries(rows=>[draft,...rows])
     if(saved){
-      if(variationPreview)setKindInfos(infos=>({...infos,[id]:newKindInfo}))
       resetCompose();setBoardTab('in_progress')
-      if(variationPreview&&(newKindInfo.kind==='meeting'||newKindInfo.kind==='interview')&&composeHost.id===host.id) scheduleNextRound(draft,roundId)
+      if((newKindInfo.kind==='meeting'||newKindInfo.kind==='interview')&&composeHost.id===host.id) scheduleNextRound(draft,roundId)
       else setDetail({seriesId:id,roundId})
     }
   }
@@ -460,7 +440,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
     }
     const target=schedulingSeries.rounds.find(row=>row.id===schedulingRoundId) ?? findPendingRound(schedulingSeries)
     const confirmed={...(target ?? round),startsAt,roomId:nextRoomId,quarterId:round.quarterId,durationMinutes:slotDurationMinutes,confirmed:true,
-      scheduleVersion:(target?.scheduleVersion ?? 0)+1,responses:variationPreview&&composeKindInfo.kind==='meeting'?[]:composeMembers.map(person=>({profileId:person.id,status:'pending' as const}))}
+      scheduleVersion:(target?.scheduleVersion ?? 0)+1,responses:composeKindInfo.kind==='meeting'?[]:composeMembers.map(person=>({profileId:person.id,status:'pending' as const}))}
     const saved=await setSeries(rows=>rows.map(item=>item.id===schedulingSeries.id?{
       ...item,phase:'published',members:composeMembers,durationMinutes:slotDurationMinutes,
       rounds:target?item.rounds.map(row=>row.id===target.id?confirmed:row):[...item.rounds,confirmed],
@@ -488,7 +468,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
 
   async function planNextRound(item: MeetingSeries): Promise<boolean> {
     if (item.host.id !== host.id) return false
-    if (variationPreview && !meetingHasNextRound(kindInfos[item.id]?.kind ?? 'project')) return false
+    if (!meetingHasNextRound(kindInfos[item.id]?.kind ?? 'project')) return false
     const existing = findPendingRound(item)
     if (existing) return true
     const nextId = newMeetingId()
@@ -525,7 +505,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
     if (!canDeleteMeetingSeries(item, host)) return
     const saved=await setSeries((prev) => prev.filter((row) => row.id !== item.id))
     if(!saved) return
-    if(variationPreview) setPreviewDeletedRounds(ids=>new Set([...ids,...item.rounds.map(round=>round.id)]))
+    if(simulating) setPreviewDeletedRounds(ids=>new Set([...ids,...item.rounds.map(round=>round.id)]))
     if(simulating) revokeMeetingSeriesFiles(item)
     if (schedulingSeriesId === item.id) resetCompose()
     if (detail?.seriesId === item.id) setDetail(null)
@@ -537,7 +517,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
   return (
     <fieldset disabled={saving} className="min-w-0 space-y-4" aria-busy={saving}>
       {showHeading ? <PageHeader title="회의" /> : null}
-      {variationPreview ? <p role="status" className="text-xs text-amber-800">회의 성격 미리보기 · 기존 화면의 기능과 UI를 사용합니다. 변경 내용은 실제 저장·예약·알림에 반영되지 않습니다.</p> : simulating ? <p role="status" className="text-xs text-amber-800">화면 테스트 중입니다. 변경 내용은 실제 회의에 저장되지 않습니다.</p> : <p role="status" className="text-xs text-muted-foreground">{saving?'회의를 저장하는 중입니다.':'준비 회의는 비공개입니다. 일정을 확정하면 멤버에게 참석 요청과 내용을 공유합니다.'}</p>}
+      {simulating ? <p role="status" className="text-xs text-amber-800">화면 테스트 중입니다. 변경 내용은 실제 회의에 저장되지 않습니다.</p> : <p role="status" className="text-xs text-muted-foreground">{saving?'회의를 저장하는 중입니다.':'준비 회의는 비공개입니다. 일정을 확정하면 멤버에게 참석 요청과 내용을 공유합니다.'}</p>}
       {meetings.error ? <p role="alert" className="rounded-lg border border-danger/30 p-3 text-sm text-danger">{meetings.error}</p> : null}
       {membersQuery.error ? <p role="alert" className="text-sm text-danger">참석자 목록을 불러오지 못했습니다. {membersQuery.error.message}</p> : null}
 
@@ -593,7 +573,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
                 const rounds = [...item.rounds].sort(
                   (left, right) => left.round - right.round,
                 )
-                const responseRounds = item.status === 'in_progress' && item.phase !== 'preparing' && item.members.some(person => person.id === host.id) && !(variationPreview && kindInfos[item.id]?.kind === 'meeting')
+                const responseRounds = item.status === 'in_progress' && item.phase !== 'preparing' && item.members.some(person => person.id === host.id) && !(kindInfos[item.id]?.kind === 'meeting')
                   ? rounds.filter(round => Boolean(round.confirmed ?? round.startsAt)) : []
                 return (
                   <li
@@ -602,7 +582,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
                   >
                     <div className="col-span-2 min-w-0 sm:col-span-1">
                       <div className="flex min-w-0 flex-wrap items-start gap-2">
-                        {variationPreview ? <Badge variant="outline" className={MEETING_KIND_TONES[kindInfos[item.id]?.kind ?? 'project']}>{meetingKindLabel(kindInfos[item.id]?.kind ?? 'project')}</Badge> : null}
+                        {<Badge variant="outline" className={MEETING_KIND_TONES[kindInfos[item.id]?.kind ?? 'project']}>{meetingKindLabel(kindInfos[item.id]?.kind ?? 'project')}</Badge>}
                         <p className="min-w-0 w-full break-words text-sm font-medium [overflow-wrap:anywhere]" title={item.title}>
                           {item.title}
                         </p>
@@ -615,12 +595,12 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
                       ) : null}
                     </div>
                     <div className="col-span-2 min-w-0 border-t border-border/60 pt-2" role="group" aria-label="회의 멤버">
-                      <MeetingAttendance series={item} round={[...item.rounds].reverse().find(row=>row.confirmed ?? row.startsAt)} actorId={host.id} simulating={simulating} compact requiresResponse={!variationPreview || kindInfos[item.id]?.kind !== 'meeting'} onChat={chatWith} onGroup={()=>groupChat(item)}/>
+                      <MeetingAttendance series={item} round={[...item.rounds].reverse().find(row=>row.confirmed ?? row.startsAt)} actorId={host.id} simulating={simulating} compact requiresResponse={kindInfos[item.id]?.kind !== 'meeting'} onChat={chatWith} onGroup={()=>groupChat(item)}/>
                     </div>
                     <div className="col-span-2 flex min-w-0 flex-wrap items-start gap-2 border-t border-border/60 pt-2 text-xs" role="group" aria-label="회의 회차">
                         {rounds.map((round, index) => {
                           const gapDays = roundGapDays(rounds, round)
-                          const simpleMeeting = variationPreview && kindInfos[item.id]?.kind === 'meeting'
+                          const simpleMeeting = kindInfos[item.id]?.kind === 'meeting'
                           const caption = simpleMeeting ? isPendingRound(round) ? '일정 미확정' : null : roundListCaption(round, item.members.map((person) => person.id))
                           return (
                           <span
@@ -739,7 +719,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
             </div>
             <div ref={composeSectionRef} className="space-y-3">
             <div className="flex flex-wrap items-end gap-3">
-              {variationPreview ? <MeetingKindSelect kind={composeKindInfo.kind} disabled={Boolean(schedulingSeries)} onChange={kind => setNewKindInfo(info => ({ ...info, kind }))} /> : null}
+              {<MeetingKindSelect kind={composeKindInfo.kind} disabled={Boolean(schedulingSeries)} onChange={kind => setNewKindInfo(info => ({ ...info, kind }))} />}
               <label className="min-w-[16rem] flex-[2] space-y-1">
                 <span className="text-xs font-medium">회의 주제</span>
                 <Input
@@ -923,13 +903,13 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
                   </div>
                 )}
             </div>
-            {variationPreview && !schedulingSeries ? <MeetingKindFields kind={newKindInfo.kind} /> : null}
-            {schedulingSeries ? <MeetingSchedulePicker rooms={rooms} value={scheduleChoice} onChange={setScheduleChoice} durationMinutes={composeDuration} attendees={attendees} seriesId={schedulingSeries.id} previewBookings={variationPreview ? items : undefined} previewHiddenRounds={variationPreview ? previewDeletedRounds : undefined}
+            {!schedulingSeries ? <MeetingKindFields kind={newKindInfo.kind} /> : null}
+            {schedulingSeries ? <MeetingSchedulePicker rooms={rooms} value={scheduleChoice} onChange={setScheduleChoice} durationMinutes={composeDuration} attendees={attendees} seriesId={schedulingSeries.id} previewBookings={simulating ? items : undefined} previewHiddenRounds={simulating ? previewDeletedRounds : undefined}
               roundId={schedulingRoundId ?? findPendingRound(schedulingSeries)?.id} error={meetings.error}
               onConfirm={()=>bookSlot(scheduleChoice.roomId,scheduleChoice.dateKey,scheduleChoice.clock)}/> : null}
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-              <p className="text-xs text-muted-foreground">{variationPreview && composeKindInfo.kind === 'meeting'?'날짜·시간·회의실을 정하면 참석 수락 없이 일정이 확정됩니다.':schedulingSeries?'일정을 확정하면 멤버에게 참석 요청이 전달됩니다. 일정 변경 시 응답이 초기화됩니다.':'준비 중에는 호스트와 생성자만 볼 수 있습니다. 안내·자료를 준비한 뒤 일정을 확정하세요.'}</p>
-              {!schedulingSeries?<Button type="button" className="shrink-0 whitespace-nowrap" onClick={()=>void createDraft()}>{variationPreview && newKindInfo.kind === 'meeting' ? '미팅 생성' : variationPreview && newKindInfo.kind === 'interview' ? '면접 생성' : '준비 회의 생성'}</Button>:null}
+              <p className="text-xs text-muted-foreground">{composeKindInfo.kind === 'meeting'?'날짜·시간·회의실을 정하면 참석 수락 없이 일정이 확정됩니다.':schedulingSeries?'일정을 확정하면 멤버에게 참석 요청이 전달됩니다. 일정 변경 시 응답이 초기화됩니다.':'준비 중에는 호스트와 생성자만 볼 수 있습니다. 안내·자료를 준비한 뒤 일정을 확정하세요.'}</p>
+              {!schedulingSeries?<Button type="button" className="shrink-0 whitespace-nowrap" onClick={()=>void createDraft()}>{newKindInfo.kind === 'meeting' ? '미팅 생성' : newKindInfo.kind === 'interview' ? '면접 생성' : '준비 회의 생성'}</Button>:null}
             </div>
           </div>
         </div>
@@ -939,14 +919,14 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
       <Card>
         <CardContent className="space-y-4 p-4">
           <p className="text-sm font-medium">회의실 일정</p>
-          {variationPreview ? <div className="flex flex-wrap gap-2" aria-label="회의 성격별 색상">{MEETING_KINDS.map(kind => <Badge key={kind.value} variant="outline" className={MEETING_KIND_TONES[kind.value]}>{kind.label}</Badge>)}</div> : null}
+          {<div className="flex flex-wrap gap-2" aria-label="회의 성격별 색상">{MEETING_KINDS.map(kind => <Badge key={kind.value} variant="outline" className={MEETING_KIND_TONES[kind.value]}>{kind.label}</Badge>)}</div>}
 
           <RoomScheduleBlock
             rooms={rooms}
             roomId={selectedRoomId}
             weeks={weeks}
             occupants={occupants}
-            kindInfos={variationPreview ? kindInfos : undefined}
+            kindInfos={kindInfos}
             composeReady={false}
             durationMinutes={slotDurationMinutes}
             attendees={attendees}
@@ -974,10 +954,10 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
           round={detailRound}
           uploader={host}
           simulating={simulating}
-          allowNextRound={!variationPreview || meetingHasNextRound(detailKindInfo?.kind ?? 'project')}
-          simpleMeeting={variationPreview && detailKindInfo?.kind === 'meeting'}
+          allowNextRound={meetingHasNextRound(detailKindInfo?.kind ?? 'project')}
+          simpleMeeting={detailKindInfo?.kind === 'meeting'}
           onRefresh={meetings.refresh}
-          attendance={<MeetingAttendance series={detailSeries} round={detailRound} actorId={host.id} simulating={simulating} requiresResponse={!variationPreview || detailKindInfo?.kind !== 'meeting'} onChat={chatWith} onGroup={()=>groupChat(detailSeries)} onRespond={status=>respond(detailSeries,detailRound,status)}/> }
+          attendance={<MeetingAttendance series={detailSeries} round={detailRound} actorId={host.id} simulating={simulating} requiresResponse={detailKindInfo?.kind !== 'meeting'} onChat={chatWith} onGroup={()=>groupChat(detailSeries)} onRespond={status=>respond(detailSeries,detailRound,status)}/> }
           saveError={meetings.error}
           onClose={closeDetail}
           onSave={async (notes,revision) => {
