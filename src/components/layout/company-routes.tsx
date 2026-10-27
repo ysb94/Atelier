@@ -58,6 +58,8 @@ const DesignFileManagerPage = lazy(async () => {
   return { default: mod.CompanyDesignFileManagerPage }
 })
 
+const Spin360Page = lazy(async () => ({ default: (await import('@/features/spin360/Spin360Page')).Spin360Page }))
+
 function DesignFileManagerRoute() {
   return (
     <Suspense
@@ -112,6 +114,7 @@ function LegacyDraftRedirect() {
 export const companyWorkspaceRoutes = (
     <Route element={<CompanyScopeLayout />}>
       <Route index element={<CompanyHomePage />} />
+      <Route path="test/spin360" element={<Suspense fallback={<p role="status" className="p-4 text-sm">360 제작 도구를 불러오는 중…</p>}><Spin360Page /></Suspense>} />
       <Route path="work" element={<Navigate to="/settings/profile?part=work" replace />} />
       <Route path="work-requests/:owner" element={<WorkRequestPage />} />
       <Route path="schedule" element={<CompanySchedulePage />} />

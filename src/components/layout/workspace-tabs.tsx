@@ -29,6 +29,7 @@ const NAV_LABELS: {
   label: string | ((m: RegExpMatchArray) => string)
 }[] = [
   { match: /^\/?$/, label: '홈' },
+  { match: /^\/test\/spin360(?:\/|$)/, label: '360 상세이미지 생성 · 테스트' },
   { match: /^\/products(?:\/|$)/, label: '전체 상품' },
   { match: /^\/drafts\/new(?:\/|$)/, label: '기획안 추가' },
   { match: /^\/drafts\/[^/]+/, label: '기획안 편집' },
