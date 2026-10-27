@@ -11,7 +11,7 @@ import { buildMeetingParticipationSummary } from './meeting-participation'
 import { MeetingSchedulePicker, type MeetingScheduleChoice } from './MeetingSchedulePicker'
 import { FilterTabs } from '@/components/ui/filter-tabs'
 import { MeetingKindFields, MeetingKindSelect } from './MeetingKindFields'
-import { emptyMeetingKindInfo, meetingHasNextRound, meetingKindLabel, type MeetingKindInfo } from './meeting-kinds'
+import { emptyMeetingKindInfo, MEETING_KINDS, MEETING_KIND_TONES, meetingHasNextRound, meetingKindLabel, type MeetingKindInfo } from './meeting-kinds'
 import {
   Check,
   ChevronDown,
@@ -604,7 +604,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
                       <p className="max-w-full break-words text-sm font-medium">
                         {item.title}
                       </p>
-                      {variationPreview ? <Badge variant="outline">{meetingKindLabel(kindInfos[item.id]?.kind ?? 'project')}</Badge> : null}
+                      {variationPreview ? <Badge variant="outline" className={MEETING_KIND_TONES[kindInfos[item.id]?.kind ?? 'project']}>{meetingKindLabel(kindInfos[item.id]?.kind ?? 'project')}</Badge> : null}
                       {item.phase==='preparing'?<Badge variant="outline">준비 중 · 멤버 비공개</Badge>:null}
                       {item.status === 'done' ? (
                         <span className="shrink-0 text-xs text-muted-foreground">
@@ -943,12 +943,14 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
       <Card>
         <CardContent className="space-y-4 p-4">
           <p className="text-sm font-medium">회의실 일정</p>
+          {variationPreview ? <div className="flex flex-wrap gap-2" aria-label="회의 성격별 색상">{MEETING_KINDS.map(kind => <Badge key={kind.value} variant="outline" className={MEETING_KIND_TONES[kind.value]}>{kind.label}</Badge>)}</div> : null}
 
           <RoomScheduleBlock
             rooms={rooms}
             roomId={selectedRoomId}
             weeks={weeks}
             occupants={occupants}
+            kindInfos={variationPreview ? kindInfos : undefined}
             composeReady={false}
             durationMinutes={slotDurationMinutes}
             attendees={attendees}
@@ -1189,6 +1191,7 @@ function RoomScheduleBlock({
   onRemoveRound,
   currentUserId,
   readOnly = false,
+  kindInfos,
 }: {
   rooms: readonly MeetingRoom[]
   roomId: string
@@ -1206,6 +1209,7 @@ function RoomScheduleBlock({
   onRemoveRound: (roundId: string) => void
   currentUserId: string
   readOnly?: boolean
+  kindInfos?: Readonly<Record<string, MeetingKindInfo>>
 }) {
   const room = rooms.find((item) => item.id === roomId) ?? rooms[0]
   const tone = meetingRoomTone(room.id)
@@ -1394,7 +1398,7 @@ function RoomScheduleBlock({
                           item={item}
                           slotPx={CALENDAR_SLOT_PX}
                           toneClass={
-                            chipClasses.get(item.id) ?? 'bg-sky-200 text-sky-950'
+                            kindInfos ? MEETING_KIND_TONES[kindInfos[item.seriesId]?.kind ?? 'project'] : chipClasses.get(item.id) ?? 'bg-sky-200 text-sky-950'
                           }
                           trailing={
                             !readOnly && canRemoveBookedMeeting(item, { id: currentUserId }) ? (

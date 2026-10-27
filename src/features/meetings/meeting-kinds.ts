@@ -8,6 +8,14 @@ export const MEETING_KINDS = [
 ] as const
 export type MeetingKind = (typeof MEETING_KINDS)[number]['value']
 export type MeetingKindInfo = { kind: MeetingKind }
+/** 성격 구분용 색상. 참석 가능·불가 등 응답 상태 색상과 별개다. */
+export const MEETING_KIND_TONES: Record<MeetingKind, string> = {
+  meeting: 'border-blue-500/30 bg-blue-50 text-blue-800',
+  one_off: 'border-warning/30 bg-warning/10 text-warning',
+  project: 'border-primary/30 bg-primary/10 text-primary',
+  routine: 'border-success/30 bg-success/10 text-success',
+  interview: 'border-violet-500/30 bg-violet-50 text-violet-800',
+}
 export function emptyMeetingKindInfo(): MeetingKindInfo {
   return { kind: 'project' }
 }
