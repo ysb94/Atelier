@@ -1,5 +1,5 @@
 import { Button } from '@/components/ui/button'
-import { Input, Select, Textarea } from '@/components/ui/input'
+import { Input, Select } from '@/components/ui/input'
 import type { MeetingSeries } from './meeting-schedule'
 import { MEETING_KINDS, type MeetingKind, type MeetingKindInfo } from './meeting-kinds'
 
@@ -11,12 +11,7 @@ export function MeetingKindFields({ value, today, onChange }: { value: MeetingKi
   return <section className="space-y-2" aria-label="회의 성격별 항목">
     <p className="text-xs text-muted-foreground">{MEETING_KINDS.find(item => item.value === value.kind)!.hint}</p>
     {value.kind === 'meeting' && <label className="block max-w-56 space-y-1"><span className="text-xs font-medium">미팅 날짜</span><Input type="date" aria-label="미팅 날짜" max={today} value={value.date} onChange={event => onChange({ ...value, date: event.target.value })} /></label>}
-    {value.kind === 'interview' && <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3"><p className="text-xs font-medium">지원자 정보 · 호스트·면접관 전용</p><div className="flex flex-wrap gap-2"><Input className="min-w-0 flex-1 basis-48" aria-label="지원자 이름" placeholder="지원자 이름 · 검수용 예시만 입력" value={value.candidate.name} onChange={event => onChange({ ...value, candidate: { ...value.candidate, name: event.target.value } })} /><Input className="min-w-0 flex-1 basis-48" aria-label="지원자 연락처" placeholder="연락처" value={value.candidate.contact} onChange={event => onChange({ ...value, candidate: { ...value.candidate, contact: event.target.value } })} /></div><Textarea aria-label="면접 메모" rows={2} value={value.candidate.notes} placeholder="면접 메모" onChange={event => onChange({ ...value, candidate: { ...value.candidate, notes: event.target.value } })} /></div>}
   </section>
-}
-
-export function MeetingCandidateSummary({ info }: { info: MeetingKindInfo }) {
-  return <section className="space-y-1 rounded-lg border border-border bg-muted/30 p-3" aria-label="비공개 지원자 정보"><h3 className="text-xs font-medium">지원자 정보 · 호스트·면접관 전용</h3><p className="text-sm">{info.candidate.name || '이름 미입력'}</p><p className="text-sm">{info.candidate.contact}</p><p className="whitespace-pre-wrap text-sm">{info.candidate.notes}</p></section>
 }
 
 export function MeetingRecordDialog({ series, date, onClose }: { series: MeetingSeries; date: string; onClose: () => void }) {

@@ -4,12 +4,12 @@ export const MEETING_KINDS = [
   { value: 'one_off', label: '1회성 회의', hint: '한 번의 회의에 내용과 결과를 기록합니다.' },
   { value: 'project', label: '프로젝트 회의', hint: '기존처럼 회차별로 준비하고 기록합니다.' },
   { value: 'routine', label: '루틴 회의', hint: '종료일 없이 이어갑니다. 필요할 때 다음 회차의 일정을 정합니다.' },
-  { value: 'interview', label: '면접', hint: '공개 주제에는 지원자 이름을 넣지 않습니다. 지원자 정보는 호스트와 면접관만 봅니다.' },
+  { value: 'interview', label: '면접', hint: '면접 주제·담당 멤버·일정을 정하고 필요한 회의 기록을 남깁니다.' },
 ] as const
 export type MeetingKind = (typeof MEETING_KINDS)[number]['value']
-export type MeetingKindInfo = { kind: MeetingKind; date: string; candidate: { name: string; contact: string; notes: string } }
+export type MeetingKindInfo = { kind: MeetingKind; date: string }
 export function emptyMeetingKindInfo(date: string): MeetingKindInfo {
-  return { kind: 'project', date, candidate: { name: '', contact: '', notes: '' } }
+  return { kind: 'project', date }
 }
 export function meetingHasNextRound(kind: MeetingKind) { return kind === 'project' || kind === 'routine' }
 export function meetingKindLabel(kind: MeetingKind) { return MEETING_KINDS.find(item => item.value === kind)!.label }

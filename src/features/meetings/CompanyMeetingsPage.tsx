@@ -10,7 +10,7 @@ import { MeetingMemberOption } from './MeetingMemberOption'
 import { buildMeetingParticipationSummary } from './meeting-participation'
 import { MeetingSchedulePicker, type MeetingScheduleChoice } from './MeetingSchedulePicker'
 import { FilterTabs } from '@/components/ui/filter-tabs'
-import { MeetingCandidateSummary, MeetingKindFields, MeetingKindSelect, MeetingRecordDialog } from './MeetingKindFields'
+import { MeetingKindFields, MeetingKindSelect, MeetingRecordDialog } from './MeetingKindFields'
 import { emptyMeetingKindInfo, meetingHasNextRound, meetingKindLabel, validMeetingRecordDate, type MeetingKindInfo } from './meeting-kinds'
 import {
   Check,
@@ -972,7 +972,6 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
           uploader={host}
           simulating={simulating}
           allowNextRound={!variationPreview || meetingHasNextRound(detailKindInfo?.kind ?? 'project')}
-          kindExtra={detailKindInfo?.kind === 'interview' ? <MeetingCandidateSummary info={detailKindInfo} /> : undefined}
           onRefresh={meetings.refresh}
           attendance={<MeetingAttendance series={detailSeries} round={detailRound} actorId={host.id} simulating={simulating} onChat={chatWith} onGroup={()=>groupChat(detailSeries)} onRespond={status=>respond(detailSeries,detailRound,status)}/> }
           saveError={meetings.error}
@@ -1674,7 +1673,6 @@ function MeetingDetailDrawer({
   uploader,
   simulating,
   allowNextRound = true,
-  kindExtra,
   onRefresh,
   attendance,
   saveError,
@@ -1690,7 +1688,6 @@ function MeetingDetailDrawer({
   uploader: MeetingPerson
   simulating: boolean
   allowNextRound?: boolean
-  kindExtra?: ReactNode
   attendance: ReactNode
   onRefresh: () => Promise<void>
   saveError?: string | null
@@ -1844,7 +1841,6 @@ function MeetingDetailDrawer({
           {series.phase==='preparing'?<p className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">준비 중 · 호스트와 생성자만 볼 수 있습니다. 안내와 자료를 준비한 뒤 호스트가 일정을 확정하면 멤버에게 공개됩니다.</p>:null}
           {!pending?<p className="rounded-lg bg-muted px-3 py-2 text-sm font-medium">{round.startsAt.slice(0,10)} · {formatBookedTimeRange(round.startsAt,round.durationMinutes ?? series.durationMinutes)} · {meetingRoomName(round.roomId)}</p>:null}
           {attendance}
-          {kindExtra}
           {!isHost ? <p className="text-xs text-muted-foreground">회의 내용·결과·일정 수정과 삭제는 호스트만 할 수 있습니다. 참석 응답·자료 공유·대화는 계속 이용할 수 있습니다.</p> : null}
           {previousRounds.length > 0 ? (
             <section className="space-y-2">
