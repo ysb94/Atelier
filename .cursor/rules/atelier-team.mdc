@@ -12,7 +12,7 @@ alwaysApply: true
 ## 공통 폴더·브랜치
 
 - Cursor·Claude·Codex 모두 원래 폴더
-  `C:\Users\dbstj\OneDrive\바탕 화면\Masmarulez\코딩\Atelier`의 `261027-1`에서 작업한다.
+  `C:\Users\dbstj\OneDrive\바탕 화면\Masmarulez\코딩\Atelier`의 `261027`에서 작업한다.
 - 새 브랜치·worktree·별도 clone·복사 폴더를 임의로 만들지 않는다. 사용자가 직접 변경을
   지정하기 전까지 같은 브랜치를 유지하고 `main`은 건드리지 않는다.
 - 시작 시 경로·브랜치·기존 변경을 확인한다. 안전한 경우에만 fetch → 지정 브랜치 확인 →
