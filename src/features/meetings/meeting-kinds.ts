@@ -4,7 +4,7 @@ export const MEETING_KINDS = [
   { value: 'one_off', label: '1회성 회의', hint: '한 번의 회의에 내용과 결과를 기록합니다.' },
   { value: 'project', label: '프로젝트 회의', hint: '기존처럼 회차별로 준비하고 기록합니다.' },
   { value: 'routine', label: '루틴 회의', hint: '종료일 없이 이어갑니다. 필요할 때 다음 회차의 일정을 정합니다.' },
-  { value: 'interview', label: '면접', hint: '면접 주제·담당 멤버·일정을 정하고 필요한 회의 기록을 남깁니다.' },
+  { value: 'interview', label: '면접', hint: '생성 후 바로 날짜·시간·회의실을 정합니다. 일정 확정 후 내부 멤버의 참석 가능·불가 응답을 받습니다.' },
 ] as const
 export type MeetingKind = (typeof MEETING_KINDS)[number]['value']
 export type MeetingKindInfo = { kind: MeetingKind }

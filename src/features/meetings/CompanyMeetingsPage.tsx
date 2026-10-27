@@ -422,7 +422,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
     if(saved){
       if(variationPreview)setKindInfos(infos=>({...infos,[id]:newKindInfo}))
       resetCompose();setBoardTab('in_progress')
-      if(variationPreview&&newKindInfo.kind==='meeting'&&composeHost.id===host.id) scheduleNextRound(draft,roundId)
+      if(variationPreview&&(newKindInfo.kind==='meeting'||newKindInfo.kind==='interview')&&composeHost.id===host.id) scheduleNextRound(draft,roundId)
       else setDetail({seriesId:id,roundId})
     }
   }
@@ -933,7 +933,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
               onConfirm={()=>bookSlot(scheduleChoice.roomId,scheduleChoice.dateKey,scheduleChoice.clock)}/> : null}
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
               <p className="text-xs text-muted-foreground">{variationPreview && composeKindInfo.kind === 'meeting'?'날짜·시간·회의실을 정하면 참석 수락 없이 일정이 확정됩니다.':schedulingSeries?'일정을 확정하면 멤버에게 참석 요청이 전달됩니다. 일정 변경 시 응답이 초기화됩니다.':'준비 중에는 호스트와 생성자만 볼 수 있습니다. 안내·자료를 준비한 뒤 일정을 확정하세요.'}</p>
-              {!schedulingSeries?<Button type="button" className="shrink-0 whitespace-nowrap" onClick={()=>void createDraft()}>{variationPreview && newKindInfo.kind === 'meeting' ? '미팅 생성' : '준비 회의 생성'}</Button>:null}
+              {!schedulingSeries?<Button type="button" className="shrink-0 whitespace-nowrap" onClick={()=>void createDraft()}>{variationPreview && newKindInfo.kind === 'meeting' ? '미팅 생성' : variationPreview && newKindInfo.kind === 'interview' ? '면접 생성' : '준비 회의 생성'}</Button>:null}
             </div>
           </div>
         </div>
