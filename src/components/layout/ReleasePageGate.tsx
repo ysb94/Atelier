@@ -1,6 +1,7 @@
 import { useEffect, type ReactNode } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import { RELEASE_HOME } from '@/lib/company/release-access'
+import { clearImpersonationView } from '@/lib/workspace/impersonation-view'
 import { Button } from '@/components/ui/button'
 import { useWorkspaceTabActivity } from './workspace-tab-activity'
 import { ReleaseAccessProvider, useReleaseAccess } from './release-access-context'
@@ -18,7 +19,10 @@ function ReleasePageContent({ children }: { children: ReactNode }) {
   const waiting = checking && (approvals.loading || Boolean(approvals.error))
   const target = href(current)
   useEffect(() => {
-    if (active && !waiting && target !== current) navigate(target ?? RELEASE_HOME, { replace: true })
+    if (active && !waiting && target !== current) {
+      clearImpersonationView()
+      navigate(target ?? RELEASE_HOME, { replace: true })
+    }
   }, [active, waiting, target, current, navigate])
   if (waiting) return <div role={approvals.error ? 'alert' : 'status'} className="space-y-2 p-4 text-sm">
     <p>{approvals.error ? '승인자 지정을 확인하지 못했습니다.' : '승인자 지정을 확인하고 있습니다.'}</p>

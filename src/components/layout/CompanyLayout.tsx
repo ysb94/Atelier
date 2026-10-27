@@ -18,6 +18,7 @@ import { RELEASE_HOME } from '@/lib/company/release-access'
 import { listDepartments, type Department } from '@/lib/supabase/profiles'
 import { ReleaseAccessProvider, useReleaseAccess } from './release-access-context'
 import { ReleasePageGate } from './ReleasePageGate'
+import { ImpersonationViewRestore } from './ImpersonationViewRestore'
 import {
   companyGroupIsActive,
   companyNavGroupsForProfile,
@@ -378,6 +379,7 @@ function CompanyWorkspaceMain() {
           )}
         >
           <ReleasePageGate>
+            <ImpersonationViewRestore />
             <WorkspaceTabPanels tabs={visibleTabs} activeId={activeId} />
           </ReleasePageGate>
         </div>

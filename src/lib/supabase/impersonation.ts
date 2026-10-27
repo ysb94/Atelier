@@ -1,4 +1,5 @@
 import { getSupabase } from '@/lib/supabase/client'
+import { captureImpersonationView, clearImpersonationView, reloadImpersonationView } from '@/lib/workspace/impersonation-view'
 
 const STORAGE_KEY = 'atelier:impersonation'
 let switching = 0
@@ -173,9 +174,9 @@ async function closeEvent(accessToken: string, eventId: string, employeeAccessTo
 /** 보관한 운영자 세션으로 돌아간다. 직원 전환 세션만 서버에서 폐기한다. */
 export async function returnToOperator(options?: { navigate?: boolean }): Promise<'restored' | 'failed'> {
   const navigate = options?.navigate !== false
+  const view = navigate ? captureImpersonationView() : null
   const state = readImpersonationState()
   if (!state) {
-    if (navigate) goHome()
     return 'restored'
   }
   const supabase = getSupabase()
@@ -188,6 +189,7 @@ export async function returnToOperator(options?: { navigate?: boolean }): Promis
   if (error || !data.session || data.session.user.id !== state.operatorId) {
     console.warn('[impersonation] 운영자 세션 복원 실패', { operatorId: state.operatorId, targetId: state.targetId })
     clearImpersonationState()
+    clearImpersonationView()
     const signedOut = await supabase.auth.signOut({ scope: 'local' })
     if (signedOut.error) console.warn('[impersonation] 로그아웃 실패', { message: signedOut.error.message })
     if (navigate) goHome()
@@ -195,11 +197,13 @@ export async function returnToOperator(options?: { navigate?: boolean }): Promis
   }
   await closeEvent(data.session.access_token, state.eventId, employeeAccessToken)
   clearImpersonationState()
-  if (navigate) goHome()
+  if (view) reloadImpersonationView(view, data.session.user.id)
   return 'restored'
 }
 
 export async function startImpersonation(targetId: string, operatorName: string) {
+  const view = captureImpersonationView()
+  clearImpersonationView()
   switching += 1
   try {
   const existing = readImpersonationState()
@@ -263,7 +267,10 @@ export async function startImpersonation(targetId: string, operatorName: string)
   } catch (error) {
     console.warn('[impersonation] 직원 세션 토큰 보관 실패', { targetId, message: error instanceof Error ? error.message : 'unknown' })
   }
-  goHome()
+  reloadImpersonationView(view, targetId)
+  } catch (error) {
+    clearImpersonationView()
+    throw error
   } finally {
     switching -= 1
   }

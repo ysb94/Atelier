@@ -19,12 +19,12 @@ async function compile(file, imports, globals = {}) {
   }, console: quiet, Date, Request, Response, Headers, ...globals }, { filename: file })
   return module.exports
 }
-function makeClient() {
+function makeClient(operatorUserId = operatorId) {
   const values = new Map(), calls = [], moves = []
-  const operator = { user: { id: operatorId }, access_token: 'operator-access', refresh_token: 'operator-refresh' }
+  const operator = { user: { id: operatorUserId }, access_token: 'operator-access', refresh_token: 'operator-refresh' }
   const employee = { user: { id: targetId }, access_token: 'employee-access', refresh_token: 'employee-refresh' }
   let session = operator
-  const control = { blockedStorage: false, verifyError: false, restoreError: false, wrongTarget: false, deny: false }
+  const control = { blockedStorage: false, blockedViewStorage: false, verifyError: false, restoreError: false, wrongTarget: false, deny: false }
   const storage = {
     getItem: key => values.get(key) ?? null,
     setItem(key, value) { if (control.blockedStorage) throw Error('storage disabled'); values.set(key, value) },
@@ -56,12 +56,14 @@ function makeClient() {
   }
   return { client, control, storage, values, calls, moves, get session() { return session } }
 }
-async function clientCase() {
-  const f = makeClient()
-  const api = await compile('src/lib/supabase/impersonation.ts', { '@/lib/supabase/client': { getSupabase: () => f.client } }, {
-    localStorage: f.storage, window: { location: { pathname: '/settings/profile', search: '', assign: value => f.moves.push(value), reload: () => f.moves.push('reload') } },
-  })
-  return { f, api }
+async function clientCase(operatorUserId = operatorId) {
+  const f = makeClient(operatorUserId), viewValues = new Map()
+  const location = { pathname: '/drafts', search: '?brand=atelier&folder=sample', hash: '#PL-0006', assign: value => f.moves.push(value), reload: () => f.moves.push('reload') }
+  const window = { location, history: { replaceState(_state,_title,href) { const url=new URL(href,'http://localhost');location.pathname=url.pathname;location.search=url.search;location.hash=url.hash;f.moves.push('replace:'+href) } } }
+  const globals = { localStorage:f.storage, sessionStorage:{getItem:key=>viewValues.get(key)??null,setItem:(key,value)=>{if(f.control.blockedViewStorage)throw Error('view storage disabled');viewValues.set(key,value)},removeItem:key=>viewValues.delete(key)}, window }
+  const view = await compile('src/lib/workspace/impersonation-view.ts',{},globals)
+  const api = await compile('src/lib/supabase/impersonation.ts', { '@/lib/supabase/client': { getSupabase: () => f.client }, '@/lib/workspace/impersonation-view':view }, globals)
+  return { f, api, location, viewValues }
 }
 {
   const { f, api } = await clientCase()
@@ -70,7 +72,8 @@ async function clientCase() {
   assert.equal(f.session.user.id, targetId)
   assert.equal(api.readImpersonationState().operatorId, operatorId)
   assert.equal(api.readImpersonationState().employeeAccessToken, 'employee-access')
-  assert.equal(f.moves[0], '/')
+  assert.equal(f.moves[0], 'replace:/drafts?brand=atelier&folder=sample#PL-0006')
+  assert.equal(f.moves[1], 'reload')
   assert.equal(await api.returnToOperator({ navigate: false }), 'restored')
   assert.equal(f.session.user.id, operatorId)
   assert.equal(api.readImpersonationState(), null)
@@ -80,6 +83,19 @@ async function clientCase() {
   assert.equal(await api.returnToOperator({ navigate: false }), 'restored')
   assert.equal(f.calls.filter(call => call.action === 'stop').length, 1)
 }
+for(const actorId of [operatorId,'a5afdd00-4a61-44dc-a1a3-082fa8a1345d','56074867-fdc2-4ce5-8e97-cea431decc36']) {
+  const {f,api,location,viewValues}=await clientCase(actorId)
+  await api.startImpersonation(targetId,'운영자')
+  assert.equal(JSON.parse(viewValues.get('atelier:impersonation-view')).profileId,targetId)
+  location.pathname='/settings/profile';location.search='?part=meetings&meeting=fixture';location.hash='#response'
+  await api.startImpersonation(targetId,'직원')
+  assert.equal(JSON.parse(viewValues.get('atelier:impersonation-view')).href,'/settings/profile?part=meetings&meeting=fixture#response')
+  assert.equal(await api.returnToOperator(),'restored')
+  const saved=JSON.parse(viewValues.get('atelier:impersonation-view'))
+  assert.equal(saved.profileId,actorId);assert.equal(saved.href,'/settings/profile?part=meetings&meeting=fixture#response')
+  assert.equal(Object.hasOwn(saved,'accessToken'),false)
+  assert.equal(f.session.user.id,actorId)
+}
 for (const failure of ['blockedStorage', 'verifyError', 'wrongTarget', 'deny']) {
   const { f, api } = await clientCase()
   f.control[failure] = true
@@ -88,6 +104,19 @@ for (const failure of ['blockedStorage', 'verifyError', 'wrongTarget', 'deny']) 
   assert.equal(api.readImpersonationState(), null)
   assert.equal(f.moves.length, 0)
   if (failure === 'blockedStorage' || failure === 'wrongTarget' || failure === 'deny') assert.equal(f.calls.some(call => call.action === 'verify'), false)
+}
+{
+  const {f,api,location,viewValues}=await clientCase()
+  const invoke=f.client.functions.invoke
+  f.client.functions.invoke=async(...args)=>{location.pathname='/settings/profile';location.search='';location.hash='';return invoke(...args)}
+  await api.startImpersonation(targetId,'운영자')
+  assert.equal(JSON.parse(viewValues.get('atelier:impersonation-view')).href,'/drafts?brand=atelier&folder=sample#PL-0006','Capture before async auth/route changes')
+  f.control.restoreError=true
+  assert.equal(await api.returnToOperator(),'failed');assert.equal(viewValues.size,0);assert.equal(f.moves.at(-1),'/')
+}
+{
+  const {f,api,viewValues}=await clientCase();f.control.blockedViewStorage=true
+  await api.startImpersonation(targetId,'운영자');assert.equal(f.session.user.id,targetId);assert.equal(viewValues.size,0);assert.equal(f.moves.at(-1),'reload')
 }
 {
   const { f, api } = await clientCase()

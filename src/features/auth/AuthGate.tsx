@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { clearImpersonationView } from '@/lib/workspace/impersonation-view'
 import { LoginPage } from './LoginPage'
 import { AccessRequestPage } from './AccessRequestPage'
 import { LegalNameConfirmationPage } from './LegalNameConfirmationPage'
@@ -13,6 +14,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
   useRenderWatch('AuthGate')
   const [forceEditRequest, setForceEditRequest] = useState(false)
+  const discardView = ready && (!session || Boolean(profileError) || !profile || profile.status !== 'active')
+  useEffect(() => { if (discardView) clearImpersonationView() }, [discardView])
 
   useEffect(() => {
     queryClient.clear()
