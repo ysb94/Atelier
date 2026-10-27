@@ -29,6 +29,8 @@ declare
        on conflict(round_id,profile_id) do update set status='pending',schedule_version=excluded.schedule_version,
          sent_at=now(),responded_at=null,read_at=null,schedule_change=excluded.schedule_change;$new$;
 begin
+  original := replace(original, E'\r\n', E'\n');
+  replacement := replace(replacement, E'\r\n', E'\n');
   if strpos(definition,original)=0 or strpos(definition,'schedule_change')>0 then
     raise exception '회의 저장 함수가 예상 버전과 다릅니다. 변경 내용을 확인한 뒤 적용하세요.';
   end if;

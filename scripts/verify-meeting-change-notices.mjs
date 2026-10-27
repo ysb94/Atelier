@@ -18,7 +18,11 @@ const scalar = async (sql, params) => Object.values((await db.query(sql, params)
 const notices = () => scalar('select public.list_my_meeting_invitations()')
 const load = async () => (await scalar('select public.list_company_meetings()')).find(item => item.id === id)
 const denied = (sql, params, code = '42501') => assert.rejects(() => db.query(sql, params), error => error.code === code)
-const apply = async name => db.exec(await fs.readFile(`supabase/migrations/${name}`, 'utf8'))
+const apply = async name => {
+  const sql = await fs.readFile(`supabase/migrations/${name}`, 'utf8')
+  // Windows checkout의 CRLF에서도 원본 함수의 부분 치환이 정확히 동작해야 한다.
+  return db.exec(name.endsWith('_meeting_change_notices.sql') ? sql.replace(/\r?\n/g, '\r\n') : sql)
+}
 const snapshot = () => scalar(`select jsonb_build_object(
  'profiles',(select jsonb_agg(to_jsonb(p) order by id) from public.profiles p),
  'policies',(select jsonb_agg(to_jsonb(p) order by schemaname,tablename,policyname) from pg_policies p),
