@@ -18,7 +18,8 @@ import { MeetingPreviewComposer, type PreviewComposeSeed } from './MeetingPrevie
 import { MeetingPreviewDialog } from './MeetingPreviewTimeline'
 import { quarterFromTime } from './meeting-slots'
 import {
-  chunkMeetingDays, groupMeetingsByRoomDay, listMeetingDays, profileToMeetingPerson, toDateKey,
+  chunkMeetingDays, formatRoundGapHint, formatRoundGapLabel, formatRoundLabel, groupMeetingsByRoomDay,
+  listMeetingDays, profileToMeetingPerson, roundGapDays, roundListCaption, toDateKey,
   type MeetingDay, type MeetingDraft, type MeetingPerson, type MeetingRoom, type MeetingSeries,
 } from './meeting-schedule'
 import {
@@ -36,6 +37,30 @@ function previewRound(item: PreviewMeeting, actorId: string, response?: PreviewR
   return { id: item.id, round: item.round, roomId: item.roomId, startsAt: item.date && item.clock ? `${item.date}T${item.clock}` : '', durationMinutes: item.duration,
     confirmed: item.status !== 'preparing', quarterId: quarterFromTime(item.clock), content: item.content, result: item.result, prepMaterials: [],
     responses: response ? [...item.responses.filter(row => row.profileId !== actorId), { profileId: actorId, status: response }] : item.responses }
+}
+
+/** 기존 회의 목록과 같은 간격·회차·상태 표시 규칙을 미리보기에도 적용한다. */
+function PreviewRoundList({ rows, actorId, responses, onOpen }: {
+  rows: readonly PreviewMeeting[]; actorId: string; responses: Readonly<Record<string, PreviewResponse>>; onOpen: (id: string) => void
+}) {
+  const rounds = rows.map(row => previewRound(row, actorId, responses[row.id]))
+  return <div className="flex flex-wrap items-center gap-1 text-xs">{rounds.map((round, index) => {
+    const gapDays = roundGapDays(rounds, round)
+    const caption = roundListCaption(round, rows[index].members.map(person => person.id))
+    return <span key={round.id} className="flex items-center gap-1">
+      {index > 0 && <span aria-hidden className="text-muted-foreground">|</span>}
+      <button type="button" title={gapDays == null ? caption ?? undefined : formatRoundGapHint(gapDays)}
+        className={cn('shrink-0 whitespace-nowrap rounded px-1 py-0.5 text-center font-medium hover:bg-muted',
+          caption && 'border border-dashed border-foreground/25 text-muted-foreground',
+          caption === '참석 불가' && 'border-danger/40 text-danger',
+          caption === '참석 응답 대기' && 'border-amber-400/70 text-amber-800')}
+        onClick={() => onOpen(round.id)}>
+        {gapDays != null && <span className="mr-1 text-[10px] font-normal text-emerald-700">{formatRoundGapLabel(gapDays)}</span>}
+        <span className="block">{formatRoundLabel(round.round)} 회의</span>
+        {caption && <span className="block text-[10px] font-normal">{caption}</span>}
+      </button>
+    </span>
+  })}</div>
 }
 
 function PreviewNotes({ item, editable, onSave }: { item: PreviewMeeting; editable: boolean; onSave: (content: string, result: string, finish: boolean) => void }) {
@@ -130,7 +155,20 @@ export function MeetingUiPreview({ renderCalendar }: { renderCalendar: (props: M
       {!board.length ? <p className="py-6 text-center text-sm text-muted-foreground">{boardTab === 'done' ? '완료한 회의·미팅 기록이 없습니다.' : '진행 중인 회의가 없습니다. 회의 생성에서 주제·호스트·멤버를 정해 준비를 시작하세요.'}</p> : <ul className="space-y-2">{board.map(rows => {
         const item = rows[rows.length - 1]
         const pending = rows.filter(row => row.kind !== 'meeting' && row.status === 'in_progress' && row.members.some(person => person.id === actor.id) && (responses[row.id] ?? row.responses.find(response => response.profileId === actor.id)?.status ?? 'pending') === 'pending')
-        return <li key={item.seriesId} className="space-y-2 rounded-lg border border-border px-3 py-2.5"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-2"><div className="min-w-0 space-y-1"><div className="flex flex-wrap items-center gap-1.5"><Badge>{previewKindLabel(item.kind)}</Badge><button type="button" className="break-words text-left text-sm font-medium hover:text-primary" onClick={() => setDetailId(item.id)}>{item.title}</button>{item.kind === 'routine' && <span className="text-[10px] text-muted-foreground">상시 운영</span>}</div>{item.kind === 'meeting' ? <p className="text-xs text-muted-foreground">{previewDateLabel(item.date)} · 진행 완료 · {[item.host, ...item.members].map(person => person.name).join(', ')}</p> : attendance(item)}<div className="flex flex-wrap gap-1">{rows.map(row => <button key={row.id} type="button" className="rounded px-1 py-0.5 text-xs font-medium hover:bg-muted" onClick={() => setDetailId(row.id)}>{previewHasRounds(row.kind) ? `${row.round}차 회의` : row.kind === 'meeting' ? '미팅 기록' : '회의 기록'}{row.status === 'preparing' ? ' · 준비 중' : row.finished ? ' · 기록 완료' : row.clock ? ` · ${previewDateLabel(row.date)} ${row.clock}` : ''}</button>)}</div></div></div><Button type="button" size="sm" variant="ghost" onClick={() => setDetailId(item.id)}>상세</Button></div>
+        return <li key={item.seriesId} className="space-y-2 rounded-lg border border-border px-3 py-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 flex-[1_1_26rem] flex-wrap items-center gap-x-3 gap-y-1">
+              <Badge>{previewKindLabel(item.kind)}</Badge>
+              <button type="button" className="max-w-full break-words text-left text-sm font-medium hover:text-primary" onClick={() => setDetailId(item.id)}>{item.title}</button>
+              {item.kind === 'routine' && <span className="text-[10px] text-muted-foreground">상시 운영</span>}
+              {item.status === 'preparing' && <Badge variant="outline">준비 중 · 멤버 비공개</Badge>}
+              <span aria-hidden className="hidden h-4 w-px bg-border sm:block" />
+              {item.kind === 'meeting' ? <p className="text-xs text-muted-foreground">{previewDateLabel(item.date)} · 진행 완료 · {[item.host, ...item.members].map(person => person.name).join(', ')}</p> : attendance(item)}
+              <span aria-hidden className="hidden h-4 w-px bg-border sm:block" />
+              {previewHasRounds(item.kind) ? <PreviewRoundList rows={rows} actorId={actor.id} responses={responses} onOpen={setDetailId} /> : <button type="button" className="rounded px-1 py-0.5 text-xs font-medium hover:bg-muted" onClick={() => setDetailId(item.id)}>{item.kind === 'meeting' ? '미팅 기록' : '회의 기록'}{item.status === 'preparing' ? ' · 준비 중' : item.clock ? ` · ${previewDateLabel(item.date)} ${item.clock}` : ''}</button>}
+            </div>
+            <Button type="button" size="sm" variant="ghost" onClick={() => setDetailId(item.id)}>상세</Button>
+          </div>
           {pending.map(row => <MeetingResponse key={row.id} round={previewRound(row, actor.id, responses[row.id])} actorId={actor.id} scheduleLabel={`${previewHasRounds(row.kind) ? `${row.round}차 · ` : ''}${previewDateLabel(row.date)} · ${previewTimeLabel(row)}`} onRespond={status => respond(row, status)} />)}
         </li>
       })}</ul>}
