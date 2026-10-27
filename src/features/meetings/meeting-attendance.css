@@ -8,4 +8,11 @@
 .meeting-all:hover, .meeting-all:focus-visible { border-color: var(--color-primary); color: var(--color-primary); background: var(--color-muted); }
 .meeting-all:focus-visible { outline: 2px solid var(--color-ring); outline-offset: 2px; }
 .meeting-all:disabled { opacity: .5; pointer-events: none; }
-.meeting-attendance .meeting-all-placeholder { width: 30px; height: 30px; }
+.meeting-attendance.is-compact .meeting-attendance-row { gap: 4px; }
+.meeting-attendance.is-compact .meeting-members { gap: 2px; padding: 0; }
+.meeting-attendance.is-compact .meeting-members > button { height: 1.25rem; padding: 0 0.5rem; font-size: 0.75rem; line-height: 1rem; }
+.meeting-attendance.is-compact .meeting-all,
+.meeting-attendance.is-compact .meeting-all-placeholder { width: 1.25rem; height: 1.25rem; }
+.meeting-attendance.is-compact .meeting-all svg { width: 14px; height: 14px; }
+.meeting-all-placeholder { display: none; width: 56px; height: 36px; flex-shrink: 0; }
+@media (min-width: 1024px) { .meeting-attendance.is-compact .meeting-all-placeholder { display: inline-block; } }

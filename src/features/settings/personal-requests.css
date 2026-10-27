@@ -63,6 +63,8 @@
 .agenda-bar.is-leave { background: #1e8e3e; color: #fff; }
 .agenda-bar.is-work { background: #1a73e8; color: #fff; }
 .agenda-bar.is-fix { background: #e37400; color: #fff; }
+.agenda-bar.is-todo { background: #f3f0ea; color: #3c4043; font-weight: 500; }
+.agenda-bar.is-todo.is-done { color: #8b909c; text-decoration: line-through; }
 .agenda-bar.is-pending { opacity: 0.82; }
 .agenda-bar.is-rejected, .agenda-bar.is-cancelled { background: #e8eaed; color: #5f6368; font-weight: 500; }
 .agenda-more { color: #5f6368; font-weight: 500; padding-left: 6px; }

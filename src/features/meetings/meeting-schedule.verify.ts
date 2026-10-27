@@ -24,6 +24,7 @@ import {
   groupMeetingsByRoomDay,
   appendPendingRound,
   canDeleteMeetingSeries,
+  canOpenMeetingDetail,
   canRemoveBookedMeeting,
   canRemovePrepFile,
   formatMeetingComposeGaps,
@@ -353,14 +354,26 @@ assert(
   '관리자는 모든 회의를 본다',
 )
 assert(
-  filterSeriesForViewer(seriesList, memberB, false).length === 0,
-  '안 들어간 회의는 목록에 없다',
+  filterSeriesForViewer(seriesList, memberB, false).map((item) => item.id).join() ===
+    's-open,s-done',
+  '공개 회의는 참석자가 아니어도 목록에 있다',
 )
 assert(
   filterSeriesForViewer(seriesList, memberA, false).map((item) => item.id).join() ===
-    's-open',
-  '멤버는 본인 회의만 본다',
+    's-open,s-done',
+  '멤버도 다른 공개 회의 목록을 본다',
 )
+assert(
+  filterSeriesForViewer(
+    [{ ...seriesList[0], id: 'prep', phase: 'preparing', createdBy: host.id }],
+    memberB,
+    false,
+  ).length === 0,
+  '준비 회의는 호스트와 생성자만 목록에 있다',
+)
+assert(!canOpenMeetingDetail(seriesList[0], memberB), '비참석자는 상세를 열 수 없다')
+assert(canOpenMeetingDetail(seriesList[0], memberA), '멤버는 상세를 연다')
+assert(canOpenMeetingDetail(seriesList[0], host), '호스트는 상세를 연다')
 assert(seriesToDrafts(seriesList).length === 2, '차수가 일정 칸으로 펼쳐진다')
 assert(
   seriesToDrafts([

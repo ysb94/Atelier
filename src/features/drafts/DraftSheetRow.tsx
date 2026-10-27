@@ -7,6 +7,8 @@ import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import {
   draftStatePercent,
+  sampleHistoryDay,
+  sampleTripSpanDays,
   sheetDay,
 } from '@/lib/drafts/sample-work-order'
 import { readFileAsDataUrl } from '@/lib/images'
@@ -28,8 +30,9 @@ function SampleRoundDecision({
   readOnly?: boolean
   nextLabel: string
   onPass: () => Promise<void>
-  onNextRound: () => Promise<void>
+  onNextRound: (file: { url: string; name: string }) => Promise<void>
 }) {
+  const inputRef = useRef<HTMLInputElement>(null)
   const [busy, setBusy] = useState<'next' | 'pass' | null>(null)
   const [error, setError] = useState('')
 
@@ -49,13 +52,37 @@ function SampleRoundDecision({
 
   return (
     <div className="draft-sheet-sample-decision">
+      <input
+        ref={inputRef}
+        type="file"
+        accept={SAMPLE_WORK_ORDER_ACCEPT}
+        hidden
+        onChange={(event) => {
+          const file = event.target.files?.[0]
+          event.target.value = ''
+          if (!file || readOnly) return
+          if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) {
+            setError('작업 지시서는 8MB 이하만 올릴 수 있습니다.')
+            return
+          }
+          setBusy('next')
+          setError('')
+          void readFileAsDataUrl(file)
+            .then((url) => onNextRound({ url, name: file.name }))
+            .catch((err: unknown) => {
+              console.warn('[drafts] 다음 차수 작업 지시서 업로드 실패', err)
+              setError(err instanceof Error ? err.message : '작업 지시서를 올리지 못했습니다.')
+            })
+            .finally(() => setBusy(null))
+        }}
+      />
       <button
         type="button"
         className="draft-sheet-action is-neutral"
         disabled={readOnly || busy !== null}
-        onClick={() => void run('next', onNextRound)}
+        onClick={() => inputRef.current?.click()}
       >
-        {busy === 'next' ? '저장 중' : nextLabel}
+        {busy === 'next' ? '올리는 중' : nextLabel}
       </button>
       <button
         type="button"
@@ -569,6 +596,79 @@ function EntryButton({
   )
 }
 
+function SampleHistoryDialog({
+  draftNo,
+  samples,
+  colors,
+  onClose,
+}: {
+  draftNo: string
+  samples: { id: string; round: number; shippedAt: string | null; returnedAt: string | null; passed: boolean }[]
+  colors: { id: string; round: number; shippedAt: string | null; returnedAt: string | null; passed: boolean }[]
+  onClose: () => void
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    if (!dialog.open) dialog.showModal()
+    return () => {
+      dialog.onclose = null
+      if (dialog.open) dialog.close()
+    }
+  }, [])
+  const groups = [
+    { title: '대표 샘플', rows: samples },
+    { title: '컬러 샘플', rows: colors },
+  ].filter((group) => group.rows.length > 0)
+  return createPortal(
+    <dialog
+      ref={dialogRef}
+      className="draft-sample-history-dialog"
+      aria-labelledby="sample-history-title"
+      onCancel={(event) => { event.preventDefault(); onClose() }}
+      onClick={(event) => { if (event.target === event.currentTarget) onClose() }}
+    >
+      <header>
+        <div>
+          <p>SAMPLE HISTORY</p>
+          <h2 id="sample-history-title">{draftNo} 샘플 이력</h2>
+        </div>
+        <button type="button" aria-label="샘플 이력 닫기" onClick={onClose}><X size={18} /></button>
+      </header>
+      {groups.length ? groups.map((group) => (
+        <section key={group.title}>
+          <h3>{group.title}</h3>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">차수</th>
+                <th scope="col">보낸 날</th>
+                <th scope="col">온 날</th>
+                <th scope="col">걸린 일수</th>
+              </tr>
+            </thead>
+            <tbody>
+              {group.rows.map((row) => {
+                const days = sampleTripSpanDays(row.shippedAt, row.returnedAt)
+                return (
+                  <tr key={row.id}>
+                    <th scope="row">{row.round}차{row.passed ? ' · 합격' : ''}</th>
+                    <td>{sampleHistoryDay(row.shippedAt) || '기록 없음'}</td>
+                    <td>{row.returnedAt ? sampleHistoryDay(row.returnedAt) : '아직 오지 않음'}</td>
+                    <td>{days == null ? '—' : `${days}일`}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </section>
+      )) : <p>기록된 샘플 차수가 없습니다.</p>}
+    </dialog>,
+    document.body,
+  )
+}
+
 function SampleStatus({
   inProgress,
   passed,
@@ -661,12 +761,13 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
   onSaveSheetValue: (colorId: string, field: 'size' | 'fabric' | 'weight' | 'specDoc', value: string, applyAll: boolean) => Promise<void>
   onUploadSampleWorkOrder: (file: { url: string; name: string }) => Promise<void>
   onPassSample: () => Promise<void>
-  onRequestNextSampleRound: () => Promise<void>
+  onRequestNextSampleRound: (file: { url: string; name: string }) => Promise<void>
   onUploadColorWorkOrder: (file: { url: string; name: string }) => Promise<void>
   onPassColorSample: () => Promise<void>
-  onRequestNextColorSampleRound: () => Promise<void>
+  onRequestNextColorSampleRound: (file: { url: string; name: string }) => Promise<void>
   onToggleConfirm: (flag: DraftConfirmFlag, next: boolean) => Promise<void>
 }) {
+  const [historyOpen, setHistoryOpen] = useState(false)
   const orders = [...(draft.sampleWorkOrders ?? [])]
     .filter((order) => order.url?.trim())
     .sort((a, b) => a.round - b.round)
@@ -703,7 +804,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
         <div className="draft-sheet-samples" aria-label="샘플 진행 이력">
           {samplePassed ? (
             <>
-              <p className="draft-sheet-sample-confirmed">샘플 확정</p>
+              <button type="button" className="draft-sheet-sample-confirmed" aria-haspopup="dialog" onClick={() => setHistoryOpen(true)}>샘플 확정</button>
+              {historyOpen ? <SampleHistoryDialog draftNo={draft.draftNo} samples={orders} colors={colorRounds} onClose={() => setHistoryOpen(false)} /> : null}
               {colorRounds.length ? colorRounds.map((round) => {
                 const latest = round.id === latestColorRound?.id
                 return (

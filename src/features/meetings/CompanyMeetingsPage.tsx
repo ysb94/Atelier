@@ -50,6 +50,7 @@ import {
   groupMeetingsByRoomDay,
   combineDateTime,
   canDeleteMeetingSeries,
+  canOpenMeetingDetail,
   canRemoveBookedMeeting,
   canRemovePrepFile,
   emptyRoundNotes,
@@ -329,7 +330,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
     if(!active || !searchParams.get('meeting') || !searchParams.get('round')) return
     const item=visibleSeries.find(row=>row.id===searchParams.get('meeting'))
     const round=item?.rounds.find(row=>row.id===searchParams.get('round'))
-    if(item&&round) setDetail(current=>current?.seriesId===item.id&&current.roundId===round.id?current:{seriesId:item.id,roundId:round.id})
+    if(item&&round&&canOpenMeetingDetail(item,host)) setDetail(current=>current?.seriesId===item.id&&current.roundId===round.id?current:{seriesId:item.id,roundId:round.id})
   },[active,searchParams,visibleSeries])
   function closeDetail(){
     setDetail(null)
@@ -573,31 +574,27 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
                 const rounds = [...item.rounds].sort(
                   (left, right) => left.round - right.round,
                 )
+                const canDetail = canOpenMeetingDetail(item, host)
                 const responseRounds = item.status === 'in_progress' && item.phase !== 'preparing' && item.members.some(person => person.id === host.id) && !(kindInfos[item.id]?.kind === 'meeting')
                   ? rounds.filter(round => Boolean(round.confirmed ?? round.startsAt)) : []
+                const pendingResponses = responseRounds.filter(round => (round.responses?.find(response => response.profileId === host.id)?.status ?? 'pending') === 'pending')
                 return (
                   <li
                     key={item.id}
-                    className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 rounded-lg border border-border p-3"
+                    className="grid min-w-0 grid-cols-1 items-start gap-x-3 gap-y-3 rounded-lg border border-border p-3 sm:grid-cols-[minmax(0,1fr)_9.5rem]"
                   >
                     <div className="col-span-2 min-w-0 sm:col-span-1">
-                      <div className="flex min-w-0 flex-wrap items-start gap-2">
-                        {<Badge variant="outline" className={MEETING_KIND_TONES[kindInfos[item.id]?.kind ?? 'project']}>{meetingKindLabel(kindInfos[item.id]?.kind ?? 'project')}</Badge>}
-                        <p className="min-w-0 w-full break-words text-sm font-medium [overflow-wrap:anywhere]" title={item.title}>
-                          {item.title}
-                        </p>
-                      </div>
-                      {item.phase==='preparing'?<Badge variant="outline" className="mt-1">준비 중 · 멤버 비공개</Badge>:null}
-                      {item.status === 'done' ? (
-                        <span className="mt-1 block text-xs text-muted-foreground">
-                          {formatSeriesDateSpan(item) || '일정 없음'}
-                        </span>
-                      ) : null}
-                    </div>
-                    <div className="col-span-2 min-w-0 border-t border-border/60 pt-2" role="group" aria-label="회의 멤버">
-                      <MeetingAttendance series={item} round={[...item.rounds].reverse().find(row=>row.confirmed ?? row.startsAt)} actorId={host.id} simulating={simulating} compact requiresResponse={kindInfos[item.id]?.kind !== 'meeting'} onChat={chatWith} onGroup={()=>groupChat(item)}/>
-                    </div>
-                    <div className="col-span-2 flex min-w-0 flex-wrap items-start gap-2 border-t border-border/60 pt-2 text-xs" role="group" aria-label="회의 회차">
+                      <div className="flex min-w-0 flex-wrap items-center gap-1">
+                        {<Badge variant="outline" className={cn('h-5 w-[6.25rem] shrink-0 justify-center px-2 py-0', MEETING_KIND_TONES[kindInfos[item.id]?.kind ?? 'project'])}>{meetingKindLabel(kindInfos[item.id]?.kind ?? 'project')}</Badge>}
+                        <div className="min-w-0" role="group" aria-label="회의 멤버">
+                          <MeetingAttendance series={item} round={[...item.rounds].reverse().find(row=>row.confirmed ?? row.startsAt)} actorId={host.id} simulating={simulating} compact requiresResponse={kindInfos[item.id]?.kind !== 'meeting'} onChat={chatWith} onGroup={()=>groupChat(item)}/>
+                        </div>
+                        <div className="mt-0.5 grid w-full min-w-0 grid-cols-2 items-center">
+                          <p className="min-w-0 truncate pr-2 text-sm font-medium" title={item.title}>
+                            {item.title}
+                          </p>
+                          <div className="min-w-0 overflow-x-auto border-l border-border pl-2" role="group" aria-label="회의 회차">
+                            <div className="flex w-max flex-nowrap items-center gap-1 text-xs">
                         {rounds.map((round, index) => {
                           const gapDays = roundGapDays(rounds, round)
                           const simpleMeeting = kindInfos[item.id]?.kind === 'meeting'
@@ -605,7 +602,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
                           return (
                           <span
                             key={round.id}
-                            className="flex items-center gap-1"
+                            className="flex shrink-0 items-center gap-1"
                           >
                             {index > 0 ? (
                               <span
@@ -617,24 +614,30 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
                             ) : null}
                             <button
                               type="button"
+                              disabled={!canDetail}
                               title={
-                                gapDays == null
-                                  ? caption ?? undefined
-                                  : formatRoundGapHint(gapDays)
+                                canDetail
+                                  ? gapDays == null
+                                    ? caption ?? undefined
+                                    : formatRoundGapHint(gapDays)
+                                  : '호스트와 멤버만 상세를 볼 수 있습니다.'
                               }
                               className={cn(
-                                'shrink-0 whitespace-nowrap rounded px-1 py-0.5 text-center font-medium hover:bg-muted',
+                                'min-w-[4.5rem] shrink-0 whitespace-nowrap rounded px-1 py-0 text-center font-medium',
+                                canDetail && 'hover:bg-muted',
+                                !canDetail && 'cursor-default',
                                 caption &&
                                   'border border-dashed border-foreground/25 text-muted-foreground',
                                 caption === '참석 불가' && 'border-danger/40 text-danger',
                                 caption === '참석 응답 대기' && 'border-amber-400/70 text-amber-800',
                               )}
-                              onClick={() =>
+                              onClick={() => {
+                                if (!canDetail) return
                                 setDetail({
                                   seriesId: item.id,
                                   roundId: round.id,
                                 })
-                              }
+                              }}
                             >
                               {gapDays == null ? null : (
                                 <span
@@ -651,9 +654,19 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
                           </span>
                           )
                         })}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                      {item.phase==='preparing'?<Badge variant="outline" className="mt-1">준비 중 · 멤버 비공개</Badge>:null}
+                      {item.status === 'done' ? (
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          {formatSeriesDateSpan(item) || '일정 없음'}
+                        </span>
+                      ) : null}
                     </div>
-                    <div className="col-span-2 row-start-2 flex flex-wrap items-center justify-end gap-1.5 sm:col-span-1 sm:col-start-2 sm:row-start-1">
-                      <Button
+                    <div className="col-span-2 flex w-full flex-nowrap items-center justify-end gap-1.5 sm:col-span-1 sm:col-start-2 sm:row-start-1">
+                      {canDetail ? <Button
                         type="button"
                         size="sm"
                         variant="ghost"
@@ -667,7 +680,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
                         }}
                       >
                         상세
-                      </Button>
+                      </Button> : null}
                       {canDeleteMeetingSeries(item, host) ? (
                         <Button
                           type="button"
@@ -681,8 +694,8 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
                         </Button>
                       ) : null}
                     </div>
-                    {responseRounds.length > 0 ? <div className="col-span-2 min-w-0 space-y-2">
-                      {responseRounds.map(round => <MeetingResponse key={round.id} round={round} actorId={host.id}
+                    {pendingResponses.length > 0 ? <div className="col-span-2 min-w-0 space-y-2">
+                      {pendingResponses.map(round => <MeetingResponse key={round.id} round={round} actorId={host.id}
                         scheduleLabel={`${formatRoundLabel(round.round)} · ${round.startsAt.slice(0,10)} · ${formatBookedTimeRange(round.startsAt,round.durationMinutes ?? item.durationMinutes)} · ${meetingRoomName(round.roomId)}`}
                         onRespond={status => respond(item,round,status)}/>
                       )}

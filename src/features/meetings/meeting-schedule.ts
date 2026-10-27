@@ -528,14 +528,24 @@ export function isMeetingParticipant(
   )
 }
 
+export function canOpenMeetingDetail(
+  series: Pick<MeetingSeries, 'host' | 'members' | 'phase' | 'createdBy'>,
+  actor: Pick<MeetingPerson, 'id'>,
+): boolean {
+  if (series.phase === 'preparing') {
+    return series.host.id === actor.id || series.createdBy === actor.id
+  }
+  return isMeetingParticipant(series, actor)
+}
+
 export function filterSeriesForViewer(
   series: readonly MeetingSeries[],
   actor: Pick<MeetingPerson, 'id'>,
-  isAdmin: boolean,
+  _isAdmin: boolean,
 ): MeetingSeries[] {
   return series.filter((item) => item.phase === 'preparing'
     ? item.host.id === actor.id || item.createdBy === actor.id
-    : isAdmin || isMeetingParticipant(item, actor))
+    : true)
 }
 
 export function seriesToDrafts(

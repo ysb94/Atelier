@@ -21,6 +21,7 @@ import { monthLabel, shiftMonth } from '@/features/operations-support/monthly-at
 import { DEFAULT_REMINDER_BASIS, REQUEST_KINDS, approvalTypeOf, dateLabel, isAllDayRequest, isFullLeave, isLeaveRequest, isLocationRequest, isOfficialLeave, isPartialLeave, reminderPreview, requestLabel, validateRequest, type PersonalRequest, type RequestForm, type RequestKind } from './personal-requests'
 import { uploadLeaveFile } from '@/lib/supabase/leave-requests'
 import { attendanceMonthDates, buildMyAttendance, clockOutLabel, dayClock, koreaDateKey, validAttendanceMonth, type AttendanceClock } from './my-attendance'
+import { readScheduleTodos, writeScheduleTodos, type ScheduleTodo } from './personal-schedule-todos'
 import { listCompanyNotices } from '@/lib/supabase/company-notices'
 import { visibleCompanyNotices, type CompanyNotice } from '@/lib/company/company-notices'
 import './personal-requests.css'
@@ -96,6 +97,10 @@ export function MyAttendancePanel() {
   const [showBasis, setShowBasis] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [addOpen, setAddOpen] = useState(false)
+  const [todoForm, setTodoForm] = useState<{ date: string; title: string } | null>(null)
+  const [todoError, setTodoError] = useState('')
+  const [todoOwner, setTodoOwner] = useState(userId)
+  const [todos, setTodos] = useState<ScheduleTodo[]>(() => userId ? readScheduleTodos(userId) : [])
   const [reminders, setReminders] = useState({ arrival: true, departure: true, missing: true, decision: true })
   const addMenuRef = useRef<HTMLDivElement>(null)
   const clocks = useQuery({
@@ -135,6 +140,26 @@ export function MyAttendancePanel() {
     return { ...newForm(kind, from), start: record?.clockIn || '09:00', end: clockOutLabel(record?.clockOutAt ?? null) || '18:00' }
   }
   function openForm(kind: RequestKind, date = selected) { setAddOpen(false); setForm(formFor(kind, date)); setOfficialFile(null); setFormError(''); setNotice('') }
+  function openTodo(date = selected) { setAddOpen(false); setTodoForm({ date, title: '' }); setTodoError(''); setNotice('') }
+  function changeTodos(update: (current: ScheduleTodo[]) => ScheduleTodo[]) {
+    setTodos(current => {
+      const next = update(current)
+      if (userId) writeScheduleTodos(userId, next)
+      return next
+    })
+  }
+  function submitTodo(event: FormEvent) {
+    event.preventDefault()
+    if (!todoForm) return
+    const title = todoForm.title.trim()
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(todoForm.date)) { setTodoError('날짜를 확인해 주세요.'); return }
+    if (!title) { setTodoError('할 일을 입력해 주세요.'); return }
+    changeTodos(current => [...current, { id: crypto.randomUUID(), date: todoForm.date, title: title.slice(0, 160), done: false }])
+    setMonth(todoForm.date.slice(0, 7))
+    setSelected(todoForm.date)
+    setTodoForm(null)
+    setNotice('Todo를 달력에 넣었습니다. 근태 신청으로는 저장되지 않습니다.')
+  }
   function patch(patch: Partial<RequestForm>) { setForm(current => current ? { ...current, ...patch } : null); setFormError('') }
   function chooseMonth(next: string) {
     if (!validAttendanceMonth(next)) return
@@ -149,6 +174,11 @@ export function MyAttendancePanel() {
       console.warn('[my-attendance] 출퇴근 버튼 저장 실패', { action, error })
     })
   }
+  useEffect(() => {
+    if (!userId || userId === todoOwner) return
+    setTodoOwner(userId)
+    setTodos(readScheduleTodos(userId))
+  }, [userId, todoOwner])
   useEffect(() => {
     if (!addOpen) return
     function close(event: PointerEvent) {
@@ -232,7 +262,7 @@ export function MyAttendancePanel() {
               const items = REQUEST_KINDS.filter(item => item.group === group && item.id !== 'overtime')
               if (!items.length) return null
               return <section key={group}><h3>{group}</h3>{items.map(item => <button key={item.id} type="button" role="menuitem" onClick={() => openForm(item.id)}>{item.label}</button>)}</section>
-            })}</div>}
+            })}<section><h3>할 일</h3><button type="button" role="menuitem" onClick={() => openTodo()}>Todo</button></section></div>}
           </div>
         </div>
       </header>
@@ -246,13 +276,18 @@ export function MyAttendancePanel() {
             const time = dayClock(day)
             const timeText = layers.clock && clocksReady ? clockText(time.start, time.end) : ''
             const items = day.requests.filter(item => shownRequest(item) && !(layers.clock && item.id === day.correction?.id))
-            const visibleItems = items.slice(0, Math.max(1, 3 - (layers.holiday && holiday ? 1 : 0) - (timeText ? 1 : 0)))
-            const hidden = items.length - visibleItems.length
+            const text = query.trim().toLowerCase()
+            const dayTodos = todos.filter(todo => todo.date === date && (!text || todo.title.toLowerCase().includes(text)))
+            const slots = Math.max(1, 3 - (layers.holiday && holiday ? 1 : 0) - (timeText ? 1 : 0))
+            const visibleItems = items.slice(0, dayTodos.length ? Math.max(0, slots - 1) : slots)
+            const visibleTodos = dayTodos.slice(0, Math.max(0, slots - visibleItems.length))
+            const hidden = items.length - visibleItems.length + dayTodos.length - visibleTodos.length
             return <div key={date} className={`agenda-day${holiday ? ' is-off' : ''}${date === today ? ' is-today' : ''}${selected === date ? ' is-selected' : ''}`} onClick={() => pickDate(date)} onDoubleClick={() => openAddMenu(date)}>
-              <button type="button" className="agenda-num" aria-pressed={selected === date} aria-label={`${dateLabel(date)} (${WEEKDAYS[dayOfWeek(date)]}) ${holiday ? `${holiday} ` : ''}출근 ${time.start || '없음'} 퇴근 ${time.end || '없음'}${time.corrected ? ' 정정' : ''} 신청 ${items.length}건`} onClick={() => pickDate(date)}>{Number(date.slice(8))}</button>
+              <button type="button" className="agenda-num" aria-pressed={selected === date} aria-label={`${dateLabel(date)} (${WEEKDAYS[dayOfWeek(date)]}) ${holiday ? `${holiday} ` : ''}출근 ${time.start || '없음'} 퇴근 ${time.end || '없음'}${time.corrected ? ' 정정' : ''} 신청 ${items.length}건 Todo ${dayTodos.length}건`} onClick={() => pickDate(date)}>{Number(date.slice(8))}</button>
               {layers.holiday && holiday && <span className="agenda-bar is-holiday">{holiday}</span>}
               {timeText && <span className={`agenda-clock${time.corrected ? ' is-corrected' : ''}`}>{timeText}{time.corrected && <b className="agenda-fix-tag">정정</b>}{!time.corrected && day.clockOutReportedAt && <b className="agenda-fix-tag">본인 확인 입력</b>}</span>}
               {visibleItems.map(item => requestBar(item, date))}
+              {visibleTodos.map(todo => <button key={todo.id} type="button" className={`agenda-bar is-todo${todo.done ? ' is-done' : ''}`} title={`Todo · ${todo.title}`} onClick={event => { event.stopPropagation(); pickDate(date); changeTodos(current => current.map(item => item.id === todo.id ? { ...item, done: !item.done } : item)) }}>{todo.title}</button>)}
               {hidden > 0 && <button type="button" className="agenda-more" onClick={() => pickDate(date)}>+{hidden}개</button>}
             </div>
           })}
@@ -261,6 +296,12 @@ export function MyAttendancePanel() {
       <p className="personal-request-footnote">출퇴근은 기록된 시각을, 승인된 출퇴근 정정은 정정 시각을 표시합니다. 원래 출퇴근 기록은 바뀌지 않으며, 미기록만으로 결근이나 연차 사용을 판단하지 않습니다.</p>
     </section>
     {settingsOpen && <WorkspaceTabOverlay><RequestDialog className="is-settings" labelledBy="personal-reminder-title" onClose={() => setSettingsOpen(false)}><section className="personal-request-reminders personal-request-settings-card" aria-label="My Schedule 알림 설정"><header><div><Bell size={16}/><h2 id="personal-reminder-title">My Schedule 알림</h2></div><button type="button" aria-label="알림 설정 닫기" onClick={() => setSettingsOpen(false)}><X size={17}/></button></header><p>승인된 휴가·외근·재택·야근 일정을 반영해 알려드립니다. 발송 연결 예정입니다.</p><div className="personal-request-reminder-list">{REMINDER_OPTIONS.map(item => <label key={item.key}><span><strong>{item.label}</strong><small>{item.detail}</small></span><input type="checkbox" checked={reminders[item.key]} onChange={event => setReminders(current => ({ ...current, [item.key]: event.target.checked }))}/></label>)}</div><div className="personal-request-reminder-time"><label htmlFor="personal-reminder-before">미리 알릴 시간</label><Select id="personal-reminder-before" value={basis.before} onChange={event => setBasis(current => ({ ...current, before: Number(event.target.value) }))}>{[5, 10, 15, 30].map(value => <option key={value} value={value}>{value}분 전</option>)}</Select></div></section></RequestDialog></WorkspaceTabOverlay>}
+    {todoForm && <WorkspaceTabOverlay><RequestDialog labelledBy="personal-todo-title" onClose={() => setTodoForm(null)}><section className="personal-request-compose"><header><div><span>개인 일정</span><h2 id="personal-todo-title">Todo</h2></div><button type="button" aria-label="Todo 작성 닫기" onClick={() => setTodoForm(null)}><X size={19}/></button></header><form onSubmit={submitTodo}><div className="personal-request-compose-body">
+      <label>날짜<HireDateScrollField label="Todo 날짜" className="mt-[7px] w-full" value={todoForm.date} min="1950-01-01" max={`${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; setTodoForm(current => current ? { ...current, date: value } : null); setTodoError('') }}/></label>
+      <label>할 일<Input autoFocus aria-label="Todo 내용" maxLength={160} value={todoForm.title} placeholder="할 일을 적어 주세요." onChange={event => { setTodoForm(current => current ? { ...current, title: event.target.value } : null); setTodoError('') }}/></label>
+      <p className="personal-request-helper">이 달력에만 표시됩니다. 근태 신청이나 승인으로 저장되지 않으며, 칸을 누르면 완료로 바뀝니다.</p>
+      {todoError && <p role="alert" className="personal-request-error">{todoError}</p>}
+    </div><footer><Button type="button" variant="outline" onClick={() => setTodoForm(null)}>닫기</Button><Button type="submit">추가</Button></footer></form></section></RequestDialog></WorkspaceTabOverlay>}
     {form && <WorkspaceTabOverlay><RequestDialog onClose={() => { if (!leave.busy) setForm(null) }}><section className="personal-request-compose"><header><div><span>개인 근태 신청</span><h2 id="personal-request-title">{requestLabel(form.kind)} 신청</h2></div><button type="button" aria-label="신청 작성 닫기" disabled={leave.busy} onClick={() => setForm(null)}><X size={19}/></button></header><form onSubmit={event => void submit(event)}><fieldset disabled={leave.busy} className="min-w-0 border-0 p-0">
       <div className="personal-request-compose-body">
         <label>신청 종류<Select autoFocus aria-label="개인 신청 종류" value={form.kind} onChange={event => { setForm(formFor(event.target.value as RequestKind, form.from)); setOfficialFile(null); setFormError('') }}>{REQUEST_KINDS.filter(item => item.id !== 'overtime').map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</Select></label>

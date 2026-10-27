@@ -33,6 +33,27 @@ export function sampleElapsedDaysLabel(value: string | null, now = new Date()) {
   return `${days}일 경과`
 }
 
+function sampleCalendarDay(value: string) {
+  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
+  if (Number.isNaN(date.getTime())) return null
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate())
+}
+
+/** 요청일부터 회신일까지 지난 날짜 수. 같은 날이면 0일이다. */
+export function sampleTripSpanDays(sentAt: string | null, returnedAt: string | null) {
+  if (!sentAt || !returnedAt) return null
+  const sent = sampleCalendarDay(sentAt)
+  const returned = sampleCalendarDay(returnedAt)
+  if (!sent || !returned) return null
+  return Math.max(0, Math.round((returned.getTime() - sent.getTime()) / 86_400_000))
+}
+
+export function sampleHistoryDay(value: string | null) {
+  const day = value ? sampleCalendarDay(value) : null
+  if (!day) return ''
+  return `${day.getFullYear()}.${String(day.getMonth() + 1).padStart(2, '0')}.${String(day.getDate()).padStart(2, '0')}`
+}
+
 export function draftStatePercent(draft: {
   nameKo: string
   nameEn: string
@@ -321,22 +342,39 @@ export function attachSampleWorkOrderFile(
   return [...list, { ...newSampleWorkOrder(round), ...attached }]
 }
 
-/** 같은 작업지시서로 다음 차수를 다시 요청한다. 파일은 바꾸지 않는다. */
-export function requestNextSampleRound(
+/** 아직 요청하지 않은 최신 차수에 작업지시서 파일을 붙인다. */
+export function attachOpenSampleWorkOrder(
   orders: readonly DraftSampleWorkOrder[] | null | undefined,
+  file: { url: string; name: string },
   at = new Date().toISOString(),
 ): DraftSampleWorkOrder[] {
   const list = orders?.length ? orders.map((order) => ({ ...order })) : []
   const latest = latestFilledSampleWorkOrder(list)
-  if (!latest?.url || !latest.returnedAt || latest.passed || latest.failReason.trim()) return list
+  const url = file.url.trim()
+  const name = file.name.trim()
+  if (!url || !latest?.url || latest.shippedAt || latest.returnedAt || latest.passed) return list
+  return list.map((order) => order.id === latest.id ? { ...order, url, name, shippedAt: at, fileCheckedAt: null } : order)
+}
+
+/** 돌아온 차수 다음에 새 작업지시서 파일을 붙여 요청한다. 이전 파일은 바꾸지 않는다. */
+export function requestNextSampleRound(
+  orders: readonly DraftSampleWorkOrder[] | null | undefined,
+  file: { url: string; name: string },
+  at = new Date().toISOString(),
+): DraftSampleWorkOrder[] {
+  const list = orders?.length ? orders.map((order) => ({ ...order })) : []
+  const latest = latestFilledSampleWorkOrder(list)
+  const url = file.url.trim()
+  const name = file.name.trim()
+  if (!url || !latest?.url || !latest.returnedAt || latest.passed || latest.failReason.trim()) return list
   if (list.some((order) => !order.url?.trim())) return list
   const round = Math.max(0, ...list.map((order) => order.round)) + 1
   return [
     ...list,
     {
       ...newSampleWorkOrder(round),
-      url: latest.url,
-      name: latest.name,
+      url,
+      name,
       shippedAt: at,
       assigneeId: latest.assigneeId,
       assigneeName: latest.assigneeName,

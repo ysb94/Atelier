@@ -9,7 +9,9 @@ import {
   isColorSampleOrdered,
   isColorSampleReadyForPhoto,
   markLatestColorSampleReturned,
+  attachOpenColorSampleRound,
   passLatestColorSampleRound,
+  publishNextColorSampleRound,
   requestNextColorSampleRound,
   resolveColorSampleRounds,
   sanitizeColorWorkOrder,
@@ -90,10 +92,22 @@ const returned = markLatestColorSampleReturned(legacyRounds, '2026-10-14T03:00:0
 assert(returned[0]?.returnedAt === '2026-10-14T03:00:00.000Z', '회신일을 최신 차수에 남긴다')
 const passed = passLatestColorSampleRound(returned)
 assert(passed[0]?.passed === true, '돌아온 컬러 샘플만 합격한다')
-const again = requestNextColorSampleRound(returned)
-assert(again.length === 2 && again[1]?.round === 2, '같은 파일로 2차를 연다')
-assert(again[1]?.url === returned[0]?.url, '2차도 같은 작업지시서 파일을 쓴다')
-assert(again[1]?.shippedAt === null && again[1]?.returnedAt === null, '2차는 작업지시서를 다시 보내지 않는다')
+const again = requestNextColorSampleRound(returned, { url: 'data:file,second', name: 'second.xlsx' }, '2026-10-14T04:00:00.000Z')
+assert(again.length === 2 && again[1]?.round === 2, '새 파일로 2차를 연다')
+assert(again[1]?.url === 'data:file,second' && again[1]?.name === 'second.xlsx', '2차는 첨부한 작업지시서를 쓴다')
+assert(again[1]?.shippedAt === '2026-10-14T04:00:00.000Z' && again[1]?.returnedAt === null, '2차는 첨부한 뒤 요청한다')
+assert(requestNextColorSampleRound(returned, { url: ' ', name: 'empty.xlsx' }).length === 1, '파일이 없으면 차수를 열지 않는다')
+const openColor = again.map((round, index) => index === again.length - 1 ? { ...round, shippedAt: null } : round)
+const attachedColor = attachOpenColorSampleRound(openColor, { url: 'data:file,real', name: 'real.xlsx' }, '2026-10-14T05:00:00.000Z')
+assert(attachedColor[1]?.url === 'data:file,real' && attachedColor[1]?.shippedAt === '2026-10-14T05:00:00.000Z', '요청 전 컬러 차수에 작업지시서를 붙인다')
+const published = publishNextColorSampleRound(
+  [{ ...withFile, sampleWorkOrderShipped: true, sampleWorkOrderShippedAt: '2026-10-14T03:00:00.000Z' }],
+  returned,
+  { url: 'data:file,china', name: 'china.xlsx' },
+  '2026-10-14T06:00:00.000Z',
+)
+assert(published.rounds[1]?.url === 'data:file,china' && published.rounds[1]?.returnedAt == null, '다음 차수는 새 파일로 요청한다')
+assert(published.colors[0]?.sampleWorkOrderUrl === 'data:file,china' && published.colors[0]?.sampleWorkOrderShipped === false, '중국팀에는 새 파일을 미발송으로 보낸다')
 assert(again[0]?.returnedAt, '이전 차수 회신일은 남긴다')
 assert(passLatestColorSampleRound(again)[1]?.passed !== true, '회신 전 차수는 합격하지 않는다')
 

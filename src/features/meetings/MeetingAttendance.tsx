@@ -15,7 +15,7 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
     <div className="meeting-attendance-row">
     {published&&participant ? <button type="button" className="meeting-all" aria-label="전체 멤버와 대화" title="전체 멤버와 대화" disabled={simulating} onClick={onGroup}>
       <MessageCirclePlus className="size-[18px]" aria-hidden="true" strokeWidth={1.75} />
-    </button> : null}
+    </button> : compact ? <span className="meeting-all-placeholder" aria-hidden="true" /> : null}
     <div className="meeting-members">
       {[series.host,...series.members].map(person=>{
         const isHost=person.id===series.host.id
@@ -24,7 +24,7 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
         return <button key={person.id} type="button" disabled={!published||!participant||simulating||person.id===actorId}
           title={`${person.name} · ${label}${person.id!==actorId&&published?' · 1:1 대화':''}`}
           aria-label={`${person.name} · ${label}`} onClick={()=>onChat(person)}
-          className={cn('inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs disabled:cursor-default',isHost?'bg-sky-100 text-sky-950':'bg-muted text-muted-foreground',published&&participant&&!simulating&&person.id!==actorId&&'hover:ring-1 hover:ring-foreground/30')}>
+          className={cn('inline-flex items-center rounded-full disabled:cursor-default', compact ? 'h-5 gap-1 px-2 py-0 text-xs' : 'gap-1 px-2 py-1 text-xs', isHost?'bg-sky-100 text-sky-950':'bg-muted text-muted-foreground',published&&participant&&!simulating&&person.id!==actorId&&'hover:ring-1 hover:ring-foreground/30')}>
           <span aria-hidden className={cn('size-1.5 rounded-full',isHost?'bg-sky-600':confirmed&&requiresResponse&&status==='available'?'bg-emerald-600':confirmed&&requiresResponse&&status==='unavailable'?'bg-red-500':'bg-muted-foreground/40')}/>
           {person.name}{!compact?` · ${label}`:''}
         </button>
