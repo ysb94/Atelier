@@ -42,6 +42,7 @@ export function releaseAccess(profile: ReleaseProfile | null | undefined) {
   }
 }
 export function releasePersonalPart(profile: ReleaseProfile | null | undefined, part: string | null, approver = false) {
+  if (part === 'work' && !releaseAccess(profile).unrestricted) return false // test 공개 보류: 기존 예외 계정과 업무 권한은 유지한다.
   return releaseAccess(profile).unrestricted || !part || part === 'my-attendance' || part === 'overtime' || part === 'meetings' || (part === 'work' && profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID) || (part === 'approvals' && approver)
 }
 const under = (path: string, root: string) => path === root || path.startsWith(root + '/')
@@ -53,6 +54,7 @@ export function releaseHref(profile: ReleaseProfile | null | undefined, href: st
   if (url.origin !== 'https://atelier.invalid' || !href.startsWith('/') || href.startsWith('//')) return null
   const scope = releaseAccess(profile)
   if (scope.unrestricted) return href
+  if (url.pathname.replace(/\/$/, '') === '/work' || url.pathname === '/work-requests' || url.pathname.startsWith('/work-requests/') || (url.pathname === RELEASE_HOME && url.searchParams.get('part') === 'work')) return null
   const path = url.pathname.replace(/\/$/, '') || '/'
   if (profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID && /^\/work-requests\/(planning|design|md|logistics)$/.test(path)) return href
   if (path === RELEASE_HOME) return releasePersonalPart(profile, url.searchParams.get('part'), approver) ? href : null
