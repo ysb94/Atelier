@@ -82,12 +82,13 @@ try {
   }
   async function prepare(kind, title) {
     const dialog = await openCreate(kind, title)
-    await dialog.getByRole('button', { name: '준비 회의 생성', exact: true }).click()
+    await dialog.getByRole('button', { name: kind === 'meeting' ? '미팅 생성' : '준비 회의 생성', exact: true }).click()
     await drawer(title).waitFor()
     return drawer(title)
   }
   async function closeDetail(dialog) { await dialog.getByRole('button', { name: '닫기', exact: true }).last().click(); await dialog.waitFor({ state: 'hidden' }) }
   async function openDetail(title) { await row(title).getByRole('button', { name: '상세', exact: true }).click(); await drawer(title).waitFor(); return drawer(title) }
+  let bookedMeeting = false
   async function schedule(dialog, date, room, clock) {
     await dialog.getByRole('button', { name: '일정 확정하기', exact: true }).click()
     const picker = page.getByRole('dialog', { name: '회의 일정 확정', exact: true })
@@ -97,6 +98,7 @@ try {
     await picker.getByRole('button', { name: `${date} 날짜 선택`, exact: true }).click()
     assert.equal(await picker.getByRole('button', { name: '대회의실 12:00 시작', exact: true }).isDisabled(), true)
     if (date === '2030-01-07') assert.equal(await picker.getByRole('button', { name: '대회의실 10:00 시작', exact: true }).isDisabled(), true)
+    if (date === '2030-01-07' && bookedMeeting) assert.equal(await picker.getByRole('button', { name: '소회의실 11:00 시작', exact: true }).isDisabled(), true, '미팅도 다른 회의의 중복 예약을 막음')
     await picker.getByRole('button', { name: `${room === 'room-1' ? '대회의실' : '소회의실'} ${clock} 시작`, exact: true }).click()
     const conflicts = picker.getByRole('checkbox', { name: '멤버의 겹치는 일정을 확인했으며 이 시간으로 진행합니다.', exact: true })
     if (await conflicts.count()) await conflicts.check()
@@ -104,15 +106,20 @@ try {
     await picker.waitFor({ state: 'hidden' })
   }
   await page.screenshot({ path: path.join(root, '.tmp/meeting-ui-preview-desktop.png'), fullPage: true })
-  let dialog = await openCreate('meeting', '미팅 진행 기록 검수')
-  const recordDate = await dialog.getByLabel('미팅 날짜', { exact: true }).inputValue()
-  await dialog.getByRole('button', { name: '미팅 기록', exact: true }).click()
-  const record = page.getByRole('dialog', { name: '미팅 진행 기록', exact: true })
-  assert.equal(await record.locator('textarea').count(), 0)
-  await record.getByText(`${recordDate} · 미팅 진행 완료`, { exact: true }).waitFor()
-  await closeDetail(record)
+  let dialog = await prepare('meeting', '미팅 예약 검수')
+  assert.equal(await dialog.locator('textarea').count(), 0, '미팅은 내용·회의록을 작성하지 않음')
+  assert.equal(await dialog.getByRole('button', { name: '미팅 완료', exact: true }).count(), 0, '일정 확정 전에는 바로 완료할 수 없음')
+  await schedule(dialog, '2030-01-07', 'room-2', '11:00')
+  bookedMeeting = true
+  await page.getByRole('tab', { name: '소회의실', exact: true }).click()
+  await page.getByRole('table').getByText(/미팅 예약 검수/).waitFor()
+  dialog = await openDetail('미팅 예약 검수')
+  await dialog.getByText('2030-01-07 · 11:00–12:00 · 소회의실', { exact: true }).waitFor()
+  assert.equal(await dialog.locator('textarea').count(), 0)
+  assert.equal(await dialog.getByRole('button', { name: '저장하고 다음 회의 진행', exact: true }).count(), 0)
+  await dialog.getByRole('button', { name: '미팅 완료', exact: true }).click()
+  await dialog.waitFor({ state: 'hidden' })
   assert.equal(await page.getByRole('tab', { name: /^완료/ }).getAttribute('aria-selected'), 'true')
-  assert.equal(await page.getByRole('table').getByText('미팅 진행 기록 검수', { exact: false }).count(), 0)
   dialog = await prepare('one_off', '1회성 회의 UI 검수')
   await dialog.getByLabel('회의 안내', { exact: true }).fill('한 번의 회의 안건')
   await dialog.locator('input[type=file]').setInputFiles({ name: 'preview-notes.txt', mimeType: 'text/plain', buffer: Buffer.from('화면 안에서만 첨부하는 검증 자료') })
@@ -199,7 +206,7 @@ try {
   assert.equal(await page.getByRole('button', { name: '기존 화면', exact: true }).getAttribute('aria-pressed'), 'true')
   assert.deepEqual(errors, [])
   assert.deepEqual(external, [])
-  console.log('meeting-ui-preview-browser: shared original UI/form/drawer/calendar/rounds/materials/response/delete; five-kind-only variations; record-only meeting; one-off completion; open-ended routine; interview without applicant fields; mobile; reset/failure guards; zero server mutations or external requests passed')
+  console.log('meeting-ui-preview-browser: shared original UI/form/drawer/calendar/rounds/materials/response/delete; meeting date/time/room booking and conflict blocking without notes; one-off completion; open-ended routine; interview without applicant fields; mobile; reset/failure guards; zero server mutations or external requests passed')
 } catch (error) {
   if (page) await page.screenshot({ path: path.join(root, '.tmp/meeting-ui-preview-failure.png'), fullPage: true }).catch(error => console.warn('[meeting-ui-preview-test] 실패 화면 캡처 실패', error))
   throw error
