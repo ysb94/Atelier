@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { availabilityMinutes } from './meeting-availability'
 import type { MeetingRoom } from './meeting-schedule'
-import { PREVIEW_CLOCKS, previewKindLabel, previewOverlaps, previewSlotProblem, previewTimeLabel, type MeetingKind, type PreviewMeeting } from './meeting-ui-preview'
+import { PREVIEW_CLOCKS, previewCalendarMeetings, previewKindLabel, previewOverlaps, previewSlotProblem, previewTimeLabel, type MeetingKind, type PreviewMeeting } from './meeting-ui-preview'
 
 /** native dialog의 포커스 잠금·Escape·배경 차단을 사용하며 실제 업무 팝업과 연결하지 않는다. */
 export function MeetingPreviewDialog({ title, children, onClose, wide = false }: { title: string; children: ReactNode; onClose: () => void; wide?: boolean }) {
@@ -33,7 +33,7 @@ export function MeetingPreviewTimeline({ rooms, events, date, lunch, ready, comp
   onPick: (roomId: string, clock: string) => void; onOpen?: (item: PreviewMeeting) => void
 }) {
   const slotHeight = compact ? 25 : 34
-  const current = events.filter(item => item.date === date && item.status !== 'preparing')
+  const current = previewCalendarMeetings(events).filter(item => item.date === date)
   return <div className="min-w-0 overflow-x-auto rounded-xl border border-border">
     <div className={cn('grid', compact ? 'min-w-[470px]' : 'min-w-[560px]')} style={{ gridTemplateColumns: `3.5rem repeat(${Math.max(1, rooms.length)}, minmax(0, 1fr))` }}>
       <div className="border-b border-border bg-primary px-2 py-3 text-xs text-primary-foreground">시간</div>

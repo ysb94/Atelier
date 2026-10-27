@@ -10,7 +10,7 @@ import { MeetingMemberOption } from './MeetingMemberOption'
 import { buildMeetingParticipationSummary } from './meeting-participation'
 import { MeetingSchedulePicker, type MeetingScheduleChoice } from './MeetingSchedulePicker'
 import { FilterTabs } from '@/components/ui/filter-tabs'
-import { MeetingUiPreview } from './MeetingUiPreview'
+import { MeetingUiPreview, type MeetingPreviewCalendarProps } from './MeetingUiPreview'
 import {
   Check,
   ChevronDown,
@@ -174,8 +174,14 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
     <fieldset disabled={busy}>
       <FilterTabs value={view} onChange={setView} ariaLabel="회의 화면 비교" tabs={[{ value: 'existing', label: '기존 화면' }, { value: 'preview', label: '새 화면 미리보기' }]} />
     </fieldset>
-    {view === 'preview' ? <MeetingUiPreview /> : <ExistingCompanyMeetingsPage showHeading={false} onBusyChange={setBusy} />}
+    {view === 'preview' ? <MeetingUiPreview renderCalendar={renderMeetingPreviewCalendar} /> : <ExistingCompanyMeetingsPage showHeading={false} onBusyChange={setBusy} />}
   </div>
+}
+
+function renderMeetingPreviewCalendar(props: MeetingPreviewCalendarProps) {
+  return <RoomScheduleBlock {...props} composeReady={false} durationMinutes={60}
+    attendees={EMPTY_PEOPLE} attendance={EMPTY_ATTENDANCE} now={new Date()} readOnly
+    currentUserId="" onPickDay={() => undefined} onNeedCompose={() => undefined} onRemoveRound={() => undefined} />
 }
 
 function ExistingCompanyMeetingsPage({ showHeading, onBusyChange }: { showHeading: boolean; onBusyChange: (busy: boolean) => void }) {
