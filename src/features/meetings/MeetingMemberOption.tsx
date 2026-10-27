@@ -136,7 +136,7 @@ export function MeetingMemberOption({ person, selected, onToggle, participation,
               {summary.count === 0 ? <p className="text-muted-foreground">진행 중인 회의가 없습니다.</p> : null}
               {summary.hiddenCount > 0 ? <p className="mt-2 text-muted-foreground">열람 권한이 없는 회의 {summary.hiddenCount}건</p> : null}
             </>}
-      </div>, document.body,
+      </div>, buttonRef.current?.closest('dialog') ?? document.body,
     ) : null}
   </>
 }

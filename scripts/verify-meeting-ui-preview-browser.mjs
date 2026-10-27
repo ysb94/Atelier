@@ -42,7 +42,7 @@ try {
   await context.addInitScript(() => {
     const host = { id: 'fixture-user', name: '화면 검수', departmentName: '기획팀' }, member = { id: 'other-user', name: '검증 동료', departmentName: 'MD팀' }
     const round = (id, roomId, clock) => ({ id, roomId, startsAt: '2030-01-07T' + clock, round: 1, confirmed: true, quarterId: 'q1', prepMaterials: [], content: '참석자만 보는 회의 내용', result: '', responses: [] })
-    sessionStorage.setItem('atelier:meeting-fixture', JSON.stringify({ files: {}, audit: [], series: [
+    sessionStorage.setItem('atelier:meeting-fixture', JSON.stringify({ files: {}, audit: [], participation: [{profile_id:'other-user',titles:['기존 프로젝트','응답할 프로젝트','비참석 진행 회의']}], series: [
       { id: 'fixture-meeting', title: '기존 프로젝트', revision: 1, phase: 'published', host, members: [member], status: 'in_progress', durationMinutes: 60, rounds: [round('fixture-round', 'room-1', '10:00')] },
       { id: 'member-meeting', title: '응답할 프로젝트', revision: 1, phase: 'published', host: member, members: [host], status: 'in_progress', durationMinutes: 60, rounds: [round('member-round', 'room-2', '14:00')] },
     ] }))
@@ -52,6 +52,10 @@ try {
   await page.goto(origin + '/meetings')
   await page.getByRole('button', { name: '기존 화면', exact: true }).waitFor()
   assert.equal(await page.getByRole('button', { name: '기존 화면', exact: true }).getAttribute('aria-pressed'), 'true')
+  await page.getByRole('button', { name: '회의 생성', exact: true }).click()
+  const oldDialog = page.getByRole('dialog', { name: '회의 생성', exact: true })
+  const originalWidth = (await oldDialog.boundingBox()).width
+  await oldDialog.getByRole('button', { name: '닫기', exact: true }).click()
   const initial = await page.evaluate(() => sessionStorage.getItem('atelier:meeting-fixture'))
   await page.getByRole('button', { name: '새 화면 미리보기', exact: true }).click()
   await page.getByLabel('회의실 일정 날짜').fill('2030-01-07')
@@ -64,12 +68,18 @@ try {
   async function create(kind, title) {
     await page.getByRole('button', { name: '회의 생성', exact: true }).click()
     const dialog = page.getByRole('dialog', { name: '회의 생성 미리보기', exact: true })
+    if (page.viewportSize().width >= 768) assert.equal(Math.round((await dialog.boundingBox()).width), Math.round(originalWidth), '생성 창 너비는 기존 회의 생성과 동일')
     await dialog.getByLabel('회의 성격', { exact: true }).selectOption(kind)
     await dialog.getByLabel('회의 주제', { exact: true }).fill(title)
     if (kind === 'project' || kind === 'routine') {
-      await dialog.getByLabel('미리보기 멤버 목록 열기').click()
-      await dialog.getByLabel('검증 동료 참석자 선택', { exact: true }).check()
-      await dialog.getByLabel('미리보기 멤버 목록 열기').click()
+      await dialog.getByRole('button', { name: '멤버 목록 열기', exact: true }).click()
+      const member = dialog.getByRole('button', { name: '검증 동료 진행 중 3건', exact: true })
+      await member.click()
+      const tooltip = page.getByRole('tooltip').filter({ hasText: '검증 동료님의 진행 회의' })
+      await tooltip.getByText('비참석 진행 회의', { exact: true }).waitFor({ state: 'visible' })
+      const visibleAboveDialog = await tooltip.evaluate(element => { const r=element.getBoundingClientRect(); return document.elementFromPoint(r.left+r.width/2,r.top+r.height/2)?.closest('[role="tooltip"]')===element })
+      assert.equal(visibleAboveDialog, true, '진행 회의 제목이 생성 창 위에서 보임')
+      await dialog.getByRole('button', { name: '멤버 목록 열기', exact: true }).click()
     }
     return dialog
   }

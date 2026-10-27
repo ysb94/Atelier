@@ -1,10 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { ChevronDown, ChevronLeft, ChevronRight, LockKeyhole, X } from 'lucide-react'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
-import { cn } from '@/lib/utils'
-import { MEETING_DURATION_MINUTES, parseDateKey, toDateKey, type MeetingPerson, type MeetingRoom } from './meeting-schedule'
+import { listMeetingParticipation } from '@/lib/supabase/meetings'
+import { listDepartments } from '@/lib/supabase/profiles'
+import { cn, emptyList } from '@/lib/utils'
+import { MeetingMemberOption } from './MeetingMemberOption'
+import { buildMeetingParticipationSummary } from './meeting-participation'
+import { groupMeetingMembersByDepartment, MEETING_DURATION_MINUTES, meetingPersonLabel, parseDateKey, toDateKey, type MeetingPerson, type MeetingRoom } from './meeting-schedule'
 import { MeetingPreviewDialog, MeetingPreviewTimeline } from './MeetingPreviewTimeline'
 import {
   MEETING_KINDS, PREVIEW_WEEKDAYS, previewDateLabel, previewHasRounds, previewPeopleConflicts,
@@ -66,9 +72,40 @@ export function MeetingPreviewComposer({ seed, actor, people, rooms, events, lun
   const conflicts = !recordOnly && scheduleNow ? previewPeopleConflicts(date, clock, duration, attendees, events) : []
   const acknowledgmentKey = JSON.stringify([kind, attendees.map(person => person.id), date, clock, roomId, duration, conflicts.map(row => row.key)])
   const problem = !recordOnly && scheduleNow ? previewSlotProblem({ date, clock, roomId, duration, events, lunch }) : null
-  const departments = [...new Set(people.filter(person => person.id !== hostId).map(person => person.departmentName ?? '기타'))]
+  const active = useWorkspaceTabActivity()
+  const departmentsQuery = useQuery({ queryKey: ['departments', 'active'], queryFn: () => listDepartments(true) })
+  const participationQuery = useQuery({
+    queryKey: ['company-meetings', actor.id, 'member-participation'],
+    queryFn: listMeetingParticipation,
+    enabled: active && Boolean(actor.id),
+    staleTime: 0,
+    refetchInterval: active ? 15000 : false,
+    retry: 1,
+  })
+  const departmentGroups = useMemo(
+    () => groupMeetingMembersByDepartment(people, hostId, departmentsQuery.data ?? []),
+    [people, hostId, departmentsQuery.data],
+  )
+  const participation = useMemo(
+    () => buildMeetingParticipationSummary(participationQuery.data ?? emptyList()),
+    [participationQuery.data],
+  )
+  useEffect(() => {
+    if (departmentsQuery.error) console.warn('[meetings-preview] 부서 목록 조회 실패', departmentsQuery.error)
+  }, [departmentsQuery.error])
+  useEffect(() => {
+    if (participationQuery.error) console.warn('[meetings-preview] 진행 회의 조회 실패', participationQuery.error)
+  }, [participationQuery.error])
   useEffect(() => { if (!recordOnly && scheduleNow && validPreviewDate(date)) onRangeChange(date, date) }, [date, recordOnly, scheduleNow, onRangeChange])
   function toggleMember(id: string) { setMemberIds(ids => ids.includes(id) ? ids.filter(value => value !== id) : [...ids, id]) }
+  function toggleDepartment(rows: readonly MeetingPerson[]) {
+    setMemberIds(ids => {
+      const selected = new Set(ids)
+      const allSelected = rows.every(person => selected.has(person.id))
+      if (allSelected) return ids.filter(id => !rows.some(person => person.id === id))
+      return [...ids, ...rows.filter(person => !selected.has(person.id)).map(person => person.id)]
+    })
+  }
   function submit() {
     setError('')
     if (!title.trim()) { setError(recordOnly ? '미팅명을 입력해 주세요.' : '회의 주제를 입력해 주세요.'); return }
@@ -86,7 +123,7 @@ export function MeetingPreviewComposer({ seed, actor, people, rooms, events, lun
     }
     onPreview([item], kind === 'interview' ? candidate : undefined)
   }
-  return <MeetingPreviewDialog title={seed.project ? seed.project.status === 'preparing' ? '회의 일정 확정 미리보기' : '다음 회차 미리보기' : '회의 생성 미리보기'} onClose={onClose} wide={scheduleNow && !recordOnly}>
+  return <MeetingPreviewDialog title={seed.project ? seed.project.status === 'preparing' ? '회의 일정 확정 미리보기' : '다음 회차 미리보기' : '회의 생성 미리보기'} onClose={onClose} wide>
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <label className="w-40 space-y-1"><span className="text-xs font-medium">회의 성격</span><Select aria-label="회의 성격" className="w-full" value={kind} disabled={Boolean(seed.project)} onChange={event => { setKind(event.target.value as MeetingKind); setError('') }}>{MEETING_KINDS.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</Select></label>
@@ -94,18 +131,17 @@ export function MeetingPreviewComposer({ seed, actor, people, rooms, events, lun
         <label className="w-56 space-y-1"><span className="text-xs font-medium">호스트</span><Select aria-label="미리보기 호스트" className="w-full" value={hostId} onChange={event => { setHostId(event.target.value); setMemberIds(ids => ids.filter(id => id !== event.target.value)) }}>{people.map(person => <option key={person.id} value={person.id}>{person.name}{person.id === actor.id ? ' · 나' : ''}</option>)}</Select></label>
       </div>
       <p className="text-xs text-muted-foreground">{MEETING_KINDS.find(item => item.value === kind)!.hint}{kind === 'routine' ? ' 반복 요일·종료일은 정하지 않습니다.' : ''}</p>
-      <div className="space-y-1.5"><p className="text-xs font-medium">{kind === 'interview' ? '내부 면접관' : '멤버'}</p>
-        <div className="flex min-h-9 items-center gap-2 rounded-md border border-border bg-card px-3 py-1.5">
-          <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">{members.length ? members.map(person => <span key={person.id} className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs">{person.name}<button type="button" aria-label={`${person.name} 빼기`} onClick={() => toggleMember(person.id)}><X className="size-3" /></button></span>) : <span className="text-sm text-muted-foreground">부서에서 멤버 추가</span>}</div>
-          <button type="button" aria-label="미리보기 멤버 목록 열기" aria-expanded={memberPickerOpen} onClick={() => setMemberPickerOpen(open => !open)}><ChevronDown className={cn('size-4', memberPickerOpen && 'rotate-180')} /></button>
-        </div>
-        {memberPickerOpen && <div className="max-h-56 overflow-auto rounded-md border border-border p-2"><div className="flex min-w-full">{departments.map((department, index) => {
-          const rows = people.filter(person => person.id !== hostId && (person.departmentName ?? '기타') === department)
-          return <div key={department} className={cn('min-w-[8.5rem] flex-1 px-3', index > 0 && 'border-l border-border')}>
-            <button type="button" className="mb-1 text-xs font-medium" onClick={() => setMemberIds(ids => rows.every(person => ids.includes(person.id)) ? ids.filter(id => !rows.some(person => person.id === id)) : [...new Set([...ids, ...rows.map(person => person.id)])])}>{department}</button>
-            {rows.map(person => <label key={person.id} className="flex items-center gap-2 py-1 text-xs"><input type="checkbox" aria-label={`${person.name} 참석자 선택`} checked={memberIds.includes(person.id)} onChange={() => toggleMember(person.id)} />{person.name}</label>)}
+      <div className="space-y-1"><p className="text-xs font-medium">{kind === 'interview' ? '내부 면접관' : '멤버'}</p>
+        {departmentsQuery.isPending ? <p className="text-[11px] text-muted-foreground">멤버를 불러오는 중...</p> : departmentGroups.length === 0 && members.length === 0 ? <p className="text-[11px] text-muted-foreground">추가할 멤버가 없습니다.</p> : <div className="space-y-1.5">
+          <div role="button" tabIndex={0} aria-expanded={memberPickerOpen} aria-label="멤버 목록 열기" className="flex min-h-9 w-full cursor-pointer items-center justify-between gap-2 rounded-md border border-border bg-card px-3 py-1.5 text-sm" onClick={() => setMemberPickerOpen(open => !open)} onKeyDown={event => { if (event.key !== 'Enter' && event.key !== ' ') return; event.preventDefault(); setMemberPickerOpen(open => !open) }}>
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">{members.length === 0 ? <span className="text-muted-foreground">부서에서 멤버 추가</span> : members.map(person => <span key={person.id} className="inline-flex items-center gap-1 rounded-full border border-border px-2 py-0.5 text-xs font-medium">{meetingPersonLabel(person)}<button type="button" className="rounded-full hover:bg-muted" aria-label={`${person.name} 빼기`} onClick={event => { event.stopPropagation(); toggleMember(person.id) }}><X className="size-3" /></button></span>)}</div>
+            <span className="shrink-0 rounded-full p-0.5 text-muted-foreground"><ChevronDown className={cn('size-3.5 transition-transform', memberPickerOpen && 'rotate-180')} /></span>
           </div>
-        })}</div></div>}
+          {memberPickerOpen ? <div className="max-h-[calc(92vh-14rem)] overflow-auto rounded-md border border-border bg-card p-2"><div className="flex min-w-full pb-1">{departmentGroups.map((group, index) => <div key={group.id} className={cn('min-w-[8.5rem] flex-1 px-3', index > 0 && 'border-l border-border')}>
+            <button type="button" className="mb-1 w-full rounded px-1 py-0.5 text-left text-xs font-medium hover:bg-muted" aria-pressed={group.members.every(person => memberIds.includes(person.id))} aria-label={`${group.name} 전체 선택`} onClick={() => toggleDepartment(group.members)}>{group.name}</button>
+            <ul className="space-y-0.5">{group.members.map(person => <li key={person.id}><MeetingMemberOption person={person} selected={memberIds.includes(person.id)} onToggle={() => toggleMember(person.id)} participation={participation.get(person.id)} loading={participationQuery.isPending} hasError={participationQuery.isError} /></li>)}</ul>
+          </div>)}</div></div> : null}
+        </div>}
       </div>
       {recordOnly ? <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3"><label className="block max-w-56 space-y-1"><span className="text-xs font-medium">미팅 날짜</span><Input type="date" aria-label="미팅 날짜" max={toDateKey(new Date())} value={recordDate} onChange={event => setRecordDate(event.target.value)} /></label><p className="text-xs text-muted-foreground">미팅을 했다는 기록만 남깁니다. 회의록·결과 입력과 회의실 예약은 하지 않습니다.</p></div> : <>
         <label className="block space-y-1"><span className="text-xs font-medium">{hasRounds ? `${round}차 준비 내용` : '회의 내용·안내'}</span><Textarea aria-label="회의 내용·안내" rows={3} value={content} onChange={event => setContent(event.target.value)} placeholder="멤버와 공유할 내용을 적어 주세요." /></label>

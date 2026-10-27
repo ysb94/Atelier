@@ -15,7 +15,7 @@ export function MeetingPreviewDialog({ title, children, onClose, wide = false }:
     return () => dialog.close()
   }, [])
   return <dialog ref={ref} aria-label={title} onCancel={event => { event.preventDefault(); onClose() }}
-    className={cn('fixed inset-0 m-auto max-h-[92dvh] w-[calc(100%-2rem)] overflow-auto rounded-xl border border-border bg-card p-0 text-foreground shadow-lg backdrop:bg-black/40', wide ? 'max-w-[1500px]' : 'max-w-2xl')}>
+    className={cn('fixed inset-0 m-auto max-h-[92dvh] w-[calc(100%-2rem)] overflow-auto rounded-xl border border-border bg-card p-0 text-foreground shadow-lg backdrop:bg-black/40', wide ? 'max-w-[1600px] md:left-[calc(15rem+2rem)] md:right-8 md:w-[calc(100%-15rem-4rem)]' : 'max-w-2xl')}>
     <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-border bg-card px-5 py-4">
       <h2 className="text-base font-semibold">{title}</h2>
       <Button type="button" size="icon" variant="ghost" aria-label="미리보기 창 닫기" onClick={onClose}><X className="size-4" /></Button>
