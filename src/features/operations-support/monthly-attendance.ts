@@ -2,7 +2,7 @@ import { koreanHolidayNames } from './korean-holidays.ts'
 
 export const ATTENDANCE_STATUSES = [
   { id: 'unset', label: '미기록' }, { id: 'present', label: '출근' },
-  { id: 'remote', label: '재택' }, { id: 'annual', label: '연차' },
+  { id: 'remote', label: '재택' }, { id: 'offsite', label: '외근' }, { id: 'annual', label: '연차' },
   { id: 'half-am', label: '오전 반차' }, { id: 'half-pm', label: '오후 반차' },
   { id: 'official', label: '예비군·공가' }, { id: 'absent', label: '결근' },
   { id: 'holiday', label: '휴무' },

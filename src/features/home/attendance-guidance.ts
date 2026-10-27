@@ -1,4 +1,4 @@
-import type { AttendanceClock } from '../settings/my-attendance.ts'
+import { clockOutLabel, koreaDateKey, type AttendanceClock } from '../settings/my-attendance.ts'
 import { minuteOf, type PersonalRequest } from '../settings/personal-requests.ts'
 import type { WorkdayBasis } from '../../lib/supabase/attendance-entry.ts'
 
@@ -59,4 +59,16 @@ export function validatePreviousClockOut(previous: AttendanceClock, current: Att
   const start = workInstant(previous.date, previous.clockIn), limit = workInstant(current.date, current.clockIn)
   return value == null || start == null || limit == null || value < start || value > limit || value % MINUTE !== 0
     ? '퇴근 시각은 직전 출근 시각부터 오늘 출근 시각 사이로 입력해 주세요.' : ''
+}
+
+/** 예정 퇴근이 실제 출근보다 이르면 버튼이 죽지 않도록 허용 구간 안으로 당긴다. */
+export function fitPreviousClockOut(suggestion: number | null, previous: AttendanceClock, current: AttendanceClock): { date: string; time: string } | null {
+  const start = workInstant(previous.date, previous.clockIn), limit = workInstant(current.date, current.clockIn)
+  if (start == null || limit == null || limit < start) return null
+  const earliest = Math.ceil(start / MINUTE) * MINUTE
+  const latest = Math.floor(limit / MINUTE) * MINUTE
+  if (latest < earliest) return null
+  const raw = suggestion == null ? latest : Math.round(suggestion / MINUTE) * MINUTE
+  const value = Math.min(latest, Math.max(earliest, raw))
+  return { date: koreaDateKey(new Date(value)), time: clockOutLabel(new Date(value).toISOString()) }
 }

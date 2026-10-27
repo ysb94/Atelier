@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { workdayGuidance, previousMissingClock, validatePreviousClockOut, workInstant } from './attendance-guidance.ts'
+import { fitPreviousClockOut, workdayGuidance, previousMissingClock, validatePreviousClockOut, workInstant } from './attendance-guidance.ts'
 import { clockOutLabel } from '../settings/my-attendance.ts'
 import type { PersonalRequest } from '../settings/personal-requests.ts'
 const date='2026-10-26', today='2026-10-27'
@@ -31,6 +31,11 @@ assert.equal(validatePreviousClockOut(previous,current,workInstant(date,'18:00')
 assert.equal(validatePreviousClockOut(previous,current,workInstant(today,'01:00')),'','다음날 새벽 퇴근 허용')
 assert.ok(validatePreviousClockOut(previous,current,workInstant(date,'08:59')))
 assert.ok(validatePreviousClockOut(previous,current,workInstant(today,'09:04')))
+const lateArrival = { date, clockIn: '20:22', clockOutAt: null }
+const fitted = fitPreviousClockOut(workInstant(date, '18:00'), lateArrival, current)
+assert.equal(fitted?.date, date)
+assert.equal(fitted?.time, '20:22')
+assert.equal(validatePreviousClockOut(lateArrival, current, workInstant(fitted!.date, fitted!.time)), '')
 assert.equal(workInstant('2026-02-30','18:00'),null)
 assert.equal(clockOutLabel('2026-10-26T16:00:00Z',date),'2026-10-27 01:00')
 console.log('attendance-guidance: 근무 기준·휴가·야근·직전 출근일·정정 상태·새벽 퇴근·범위 검증 통과')

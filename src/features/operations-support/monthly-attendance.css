@@ -90,8 +90,10 @@
 .attendance-calendar-day.is-annual strong,
 .attendance-calendar-day.is-half-am strong,
 .attendance-calendar-day.is-half-pm strong { color: #2c4f86; }
-.attendance-calendar-day.is-official { background: #f6f1e4; }
-.attendance-calendar-day.is-official strong { color: #7a6240; }
+.attendance-calendar-day.is-official,
+.attendance-calendar-day.is-offsite { background: #f6f1e4; }
+.attendance-calendar-day.is-official strong,
+.attendance-calendar-day.is-offsite strong { color: #7a6240; }
 .attendance-calendar-day.is-absent { background: #f8d0d4; }
 .attendance-calendar-day.is-absent strong { color: #8f1822; }
 .attendance-calendar-day.is-after { background: #fae8ef; }

@@ -3,3 +3,14 @@
 .attendance-entry-circle small { font-size: clamp(14px,4vw,19px); opacity: .85; }
 .attendance-entry-circle strong { font-size: clamp(32px,10vw,58px); line-height: 1.1; letter-spacing: -.04em; }
 .attendance-entry-circle span { margin-top: 4px; font-size: clamp(20px,6vw,29px); font-weight: 700; }
+.attendance-entry-circle-out { align-items: center; justify-content: center; gap: 2px; background: #1d4ed8; color: #fff; box-shadow: 0 18px 44px color-mix(in srgb,#1d4ed8 35%,transparent); }
+.attendance-entry-date, .attendance-entry-confirm { border: 0; background: transparent; color: inherit; }
+.attendance-entry-date { font-size: clamp(14px,4vw,19px); opacity: .9; }
+.attendance-entry-confirm { font-size: clamp(18px,5vw,26px); font-weight: 700; }
+.attendance-entry-confirm:disabled { opacity: .55; }
+.attendance-entry-wheels { display: flex; align-items: center; gap: 2px; }
+.attendance-entry-wheels > span { font-size: clamp(28px,8vw,46px); font-weight: 700; line-height: 1; }
+.attendance-entry-wheel { --wheel-item: 40px; display: flex; width: 5.2rem; height: calc(var(--wheel-item) * 3); flex-direction: column; overflow: hidden; user-select: none; }
+.attendance-entry-wheel-spacer, .attendance-entry-wheel button { height: var(--wheel-item); flex: 0 0 var(--wheel-item); }
+.attendance-entry-wheel button { display: flex; width: 100%; align-items: center; justify-content: center; border: 0; background: transparent; color: rgb(255 255 255 / .4); font-size: 1.35rem; font-weight: 700; cursor: pointer; user-select: none; }
+.attendance-entry-wheel button.is-selected { color: #fff; font-size: 2.15rem; cursor: default; }

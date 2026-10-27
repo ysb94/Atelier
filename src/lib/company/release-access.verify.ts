@@ -53,6 +53,7 @@ for (const [departmentName,title] of [
 const md={...staff,departmentId:RELEASE_DEPARTMENT_SITES.find(site=>site.title==='MD')!.id}
 assert.equal(releaseHref(md,'/products/atelier/M%2F1?brand=atelier'),'/product-work/md/atelier/M%2F1?brand=atelier')
 assert.equal(releaseHref(md,'/md?brand=atelier'),'/product-work/md?brand=atelier')
+assert.equal(releaseHref(md,'/md/price-compare'),'/product-work/md')
 assert.equal(releaseHref(md,'/product-work/md-malicious'),null)
 const visual={...staff,departmentId:'7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1'}
 for (const path of ['/work-requests/design','/design/styled-cuts','/design/file-manager']) {

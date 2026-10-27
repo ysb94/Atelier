@@ -10,7 +10,7 @@ export const RELEASE_LOGISTICS_ID = 'c5d4cfca-97ce-4ca7-b30a-6beed842cf1e'
 export const RELEASE_DEPARTMENT_SITES = [
   { id: 'ced99f89-ea80-4eeb-8f03-272bf72f5db1', title: '기획', pages: ['/drafts', '/work-requests/planning'] },
   { id: '7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1', title: 'Visual', pages: ['/work-requests/design', '/design/styled-cuts', '/design/file-manager'] },
-  { id: '919b2c44-afb6-4d7e-a5b8-b7203df9cef9', title: 'MD', pages: ['/product-work/md', '/md/price-compare', '/work-requests/md'] },
+  { id: '919b2c44-afb6-4d7e-a5b8-b7203df9cef9', title: 'MD', pages: ['/product-work/md', '/work-requests/md'] },
   { id: 'bf926822-910c-422f-9c17-5fd3d8ddb3ba', title: '중국팀', pages: ['/china/work-orders'] },
   { id: RELEASE_OPERATIONS_ID, title: '운영지원', pages: [] },
   { id: RELEASE_LOGISTICS_ID, title: '물류', pages: [] },
@@ -62,7 +62,7 @@ export function releaseHref(profile: ReleaseProfile | null | undefined, href: st
   if (scope.operations && path === '/org-chart') return '/operations-support?part=org'
   if (scope.departmentSite?.pages.some(root => under(path, root))) return href
   if (scope.departmentSite?.title === 'MD') {
-    if (path === '/md') return '/product-work/md' + url.search
+    if (path === '/md' || path === '/md/price-compare') return '/product-work/md' + url.search
     if (/^\/products\/[^/]+\/[^/]+$/.test(path)) return path.replace('/products/', '/product-work/md/') + url.search
   }
   if (scope.logistics) {

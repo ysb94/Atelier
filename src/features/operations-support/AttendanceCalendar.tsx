@@ -2,7 +2,7 @@ import { koreanHolidayLabel, koreanHolidayNames } from './korean-holidays'
 import { EMPTY_ATTENDANCE, isWorkday, monthDates, recordTiming, type AttendanceRecords, type AttendanceSchedule, type AttendanceStatus, type WorkdayOverrides } from './monthly-attendance'
 
 const STATUS_LABEL: Record<AttendanceStatus, string> = {
-  unset: '미기록', present: '출근', remote: '재택', annual: '연차', 'half-am': '오전 반차', 'half-pm': '오후 반차', official: '예비군·공가', absent: '결근', holiday: '휴무',
+  unset: '미기록', present: '출근', remote: '재택', offsite: '외근', annual: '연차', 'half-am': '오전 반차', 'half-pm': '오후 반차', official: '예비군·공가', absent: '결근', holiday: '휴무',
 }
 
 export function AttendanceCalendar({ month, memberId, records, schedule, overrides, today, selectedDate, onSelect }: {

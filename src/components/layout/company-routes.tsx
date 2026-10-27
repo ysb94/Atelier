@@ -36,7 +36,6 @@ import { CompanyWarehousePage } from '@/features/logistics/WarehousePage'
 import { CompanyWarehouseFinderPage } from '@/features/logistics/WarehouseFinderPage'
 import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
 import { CompanyTemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
-import { PriceComparePage } from '@/features/md/PriceComparePage'
 import { OperationsSupportPage } from '@/features/operations-support/OperationsSupportPage'
 import { MamamIdeaInboxPage } from '@/features/mamam/MamamIdeaInboxPage'
 import { DeveloperPreviewPage } from './DeveloperPreview'
@@ -257,7 +256,7 @@ export const companyWorkspaceRoutes = (
         path="design"
         element={<RedirectTo to="/products" preserveSearch />}
       />
-      <Route path="md/price-compare" element={<PriceComparePage />} />
+      <Route path="md/price-compare" element={<Navigate to="/product-work/md" replace />} />
       <Route path="md" element={<RedirectTo to="/product-work/md" />} />
       <Route
         path="logistics"

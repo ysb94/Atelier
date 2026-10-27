@@ -95,7 +95,7 @@ try{
  await load('operations');await page.getByRole('button',{name:'운영지원',exact:true}).click();hrefs=await nav();for(const href of ['/operations-support','/members','/settings/permissions'])assert.ok(hrefs.includes(href),href);assert.equal(hrefs.includes('/settings/access-ip'),false)
  for(const [role,title,paths] of [
   ['planning','기획',['/drafts','/work-requests/planning']],
-  ['md','MD',['/product-work/md','/md/price-compare','/work-requests/md']],
+  ['md','MD',['/product-work/md','/work-requests/md']],
   ['china','중국팀',['/china/work-orders']],
  ]){
   await load(role);await page.locator('aside nav').getByRole('button',{name:title,exact:true}).click()
