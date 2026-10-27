@@ -8,6 +8,7 @@ import { ChatWindowPage } from '@/features/chat/ChatWindowPage'
 import { AuthProvider } from '@/lib/supabase/auth'
 import { AttendanceEntryProvider } from '@/features/home/attendance-entry-context'
 import { AttendanceEntryGate } from '@/features/home/AttendanceEntryGate'
+import { MeetingStartReminder } from '@/features/meetings/MeetingStartReminder'
 import {
   exposeDiagnosticsSwitch,
   installPerfWatch,
@@ -40,7 +41,7 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <AccessIpRecorder />
-        <AuthGate><BrowserRouter><AttendanceEntryProvider><AttendanceEntryGate><Routes>
+        <AuthGate><BrowserRouter><AttendanceEntryProvider><AttendanceEntryGate><MeetingStartReminder /><Routes>
           <Route path="/chat/room/:roomId" element={<ChatWindowPage />} />
           <Route path="/b/:brandSlug/*" element={<BrandLayout />} />
           <Route path="/*" element={<CompanyLayout />} />

@@ -277,6 +277,7 @@ export function groupPrepMaterialsByUploader(
 
 export type MeetingSeries = {
   id: string
+  kind?: import('./meeting-kinds').MeetingKind
   phase?: 'preparing' | 'published'
   createdBy?: string
   revision?: number
@@ -290,6 +291,7 @@ export type MeetingSeries = {
 
 export type MeetingDraft = {
   id: string
+  kind?: import('./meeting-kinds').MeetingKind
   title: string
   startsAt: string
   roomId: string
@@ -526,14 +528,24 @@ export function isMeetingParticipant(
   )
 }
 
+export function canOpenMeetingDetail(
+  series: Pick<MeetingSeries, 'host' | 'members' | 'phase' | 'createdBy'>,
+  actor: Pick<MeetingPerson, 'id'>,
+): boolean {
+  if (series.phase === 'preparing') {
+    return series.host.id === actor.id || series.createdBy === actor.id
+  }
+  return isMeetingParticipant(series, actor)
+}
+
 export function filterSeriesForViewer(
   series: readonly MeetingSeries[],
   actor: Pick<MeetingPerson, 'id'>,
-  isAdmin: boolean,
+  _isAdmin: boolean,
 ): MeetingSeries[] {
   return series.filter((item) => item.phase === 'preparing'
     ? item.host.id === actor.id || item.createdBy === actor.id
-    : isAdmin || isMeetingParticipant(item, actor))
+    : true)
 }
 
 export function seriesToDrafts(
@@ -546,6 +558,7 @@ export function seriesToDrafts(
       drafts.push({
         id: round.id,
         title: item.title,
+        kind: item.kind ?? 'project',
         startsAt: round.startsAt,
         roomId: round.roomId,
         host: item.host,

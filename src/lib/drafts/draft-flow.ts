@@ -153,17 +153,60 @@ export function passLatestColorSampleRound(
   )
 }
 
-/** 같은 컬러 샘플 파일로 다음 차수를 연다. 작업지시서는 다시 보내지 않는다. */
-export function requestNextColorSampleRound(
+/** 아직 요청하지 않은 최신 컬러 샘플 차수에 작업지시서를 붙인다. */
+export function attachOpenColorSampleRound(
   rounds: readonly DraftColorSampleRound[],
+  file: { url: string; name: string },
+  at = new Date().toISOString(),
 ): DraftColorSampleRound[] {
   const list = rounds.map((round) => ({ ...round }))
   const latest = list[list.length - 1]
-  if (!latest?.url || !latest.returnedAt || latest.passed) return list
+  const url = file.url.trim()
+  const name = file.name.trim()
+  if (!url || !latest?.url || latest.shippedAt || latest.returnedAt || latest.passed) return list
+  return list.map((round, index) => index === list.length - 1 ? { ...round, url, name, shippedAt: at } : round)
+}
+
+/** 다음 컬러 차수 파일을 저장하고, 중국팀 작업 지시서가 새 파일을 미발송으로 보게 한다. */
+export function publishNextColorSampleRound(
+  colors: readonly DraftColorRow[],
+  rounds: readonly DraftColorSampleRound[],
+  file: { url: string; name: string },
+  at = new Date().toISOString(),
+): { colors: DraftColorRow[]; rounds: DraftColorSampleRound[] } {
+  const next = requestNextColorSampleRound(rounds, file, at)
+  const latest = next[next.length - 1]
+  if (!latest || latest.round === rounds[rounds.length - 1]?.round) {
+    return { colors: colors.map((color) => ({ ...color })), rounds: next }
+  }
+  return {
+    rounds: next,
+    colors: colors.map((color) => ({
+      ...color,
+      sampleWorkOrderUrl: latest.url,
+      sampleWorkOrderName: latest.name,
+      sampleWorkOrderShipped: false,
+      sampleWorkOrderShippedAt: null,
+      sampleInProgress: true,
+    })),
+  }
+}
+
+/** 돌아온 컬러 샘플 다음에 새 작업지시서 파일을 붙여 요청한다. */
+export function requestNextColorSampleRound(
+  rounds: readonly DraftColorSampleRound[],
+  file: { url: string; name: string },
+  at = new Date().toISOString(),
+): DraftColorSampleRound[] {
+  const list = rounds.map((round) => ({ ...round }))
+  const latest = list[list.length - 1]
+  const url = file.url.trim()
+  const name = file.name.trim()
+  if (!url || !latest?.url || !latest.returnedAt || latest.passed) return list
   const round = Math.max(0, ...list.map((item) => item.round)) + 1
   return [
     ...list,
-    newColorSampleRound(round, { url: latest.url, name: latest.name }, null),
+    newColorSampleRound(round, { url, name }, at),
   ]
 }
 

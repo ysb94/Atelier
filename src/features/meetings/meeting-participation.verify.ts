@@ -23,8 +23,14 @@ check('distinct meetings with identical titles retained', () => {
   assert.equal(value.count, 2); assert.equal(value.visibleMeetings.length, 2)
   assert.deepEqual(value.visibleMeetings.map(item => item.id), ['a', 'b'])
 })
-check('hidden title and meeting ID never enter returned summaries', () => {
-  const map = buildOngoingMeetingParticipation([meeting('public'), meeting('secret-meeting-id', { title: 'CONFIDENTIAL_TITLE_DO_NOT_EXPOSE', host: other, members: [member] })], viewer, false)
+check('published titles are listed for non-participants', () => {
+  const map = buildOngoingMeetingParticipation([meeting('public'), meeting('shared-id', { title: '다른 회의', host: other, members: [member] })], viewer, false)
+  const value = map.get(member.id)!
+  assert.equal(value.hiddenCount, 0)
+  assert.deepEqual(value.visibleMeetings.map(item => item.title), ['public', '다른 회의'])
+})
+check('preparing titles stay hidden from non-hosts', () => {
+  const map = buildOngoingMeetingParticipation([meeting('public'), meeting('secret-meeting-id', { phase: 'preparing', createdBy: other.id, title: 'CONFIDENTIAL_TITLE_DO_NOT_EXPOSE', host: other, members: [member] })], viewer, false)
   const value = map.get(member.id)!
   assert.equal(value.count, 2); assert.equal(value.hiddenCount, 1)
   assert.deepEqual(value.visibleMeetings.map(item => item.title), ['public'])

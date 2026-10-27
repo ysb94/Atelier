@@ -1,36 +1,37 @@
 import { Button } from '@/components/ui/button'
+import { MessageCirclePlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { MeetingPerson, MeetingRound, MeetingSeries } from './meeting-schedule'
 import './meeting-attendance.css'
 
-export function MeetingAttendance({series,round,actorId,simulating,onChat,onGroup,onRespond,compact=false}:{
+export function MeetingAttendance({series,round,actorId,simulating,onChat,onGroup,onRespond,compact=false,requiresResponse=true}:{
   series:MeetingSeries;round?:MeetingRound;actorId:string;simulating:boolean;compact?:boolean
   onChat:(person:MeetingPerson)=>void;onGroup:()=>void;onRespond?:(status:'available'|'unavailable')=>void
+  requiresResponse?:boolean
 }) {
   const published=series.phase!=='preparing',confirmed=published && Boolean(round?.confirmed ?? round?.startsAt)
   const participant=series.host.id===actorId || series.members.some(person=>person.id===actorId)
   return <div className={cn('meeting-attendance', compact && 'is-compact', !compact && 'space-y-2')}>
     <div className="meeting-attendance-row">
     {published&&participant ? <button type="button" className="meeting-all" aria-label="전체 멤버와 대화" title="전체 멤버와 대화" disabled={simulating} onClick={onGroup}>
-      <svg className="meeting-all-shape" viewBox="0 0 56 36" aria-hidden="true"><path d="M12 3H44a9 9 0 0 1 9 9v7a9 9 0 0 1-9 9H20l-9 5v-5a9 9 0 0 1-8-9v-7a9 9 0 0 1 9-9Z"/></svg>
-      <span className="meeting-all-label">All</span>
-    </button> : null}
+      <MessageCirclePlus className="size-[18px]" aria-hidden="true" strokeWidth={1.75} />
+    </button> : compact ? <span className="meeting-all-placeholder" aria-hidden="true" /> : null}
     <div className="meeting-members">
       {[series.host,...series.members].map(person=>{
         const isHost=person.id===series.host.id
         const status=round?.responses?.find(response=>response.profileId===person.id)?.status ?? 'pending'
-        const label=isHost?'호스트':!confirmed?'준비 중':status==='available'?'참석 가능':status==='unavailable'?'참석 불가':'응답 대기'
+        const label=isHost?'호스트':!confirmed?'준비 중':!requiresResponse?'일정 공유':status==='available'?'참석 가능':status==='unavailable'?'참석 불가':'응답 대기'
         return <button key={person.id} type="button" disabled={!published||!participant||simulating||person.id===actorId}
           title={`${person.name} · ${label}${person.id!==actorId&&published?' · 1:1 대화':''}`}
           aria-label={`${person.name} · ${label}`} onClick={()=>onChat(person)}
-          className={cn('inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs disabled:cursor-default',isHost?'bg-sky-100 text-sky-950':'bg-muted text-muted-foreground',published&&participant&&!simulating&&person.id!==actorId&&'hover:ring-1 hover:ring-foreground/30')}>
-          <span aria-hidden className={cn('size-1.5 rounded-full',isHost?'bg-sky-600':confirmed&&status==='available'?'bg-emerald-600':confirmed&&status==='unavailable'?'bg-red-500':'bg-muted-foreground/40')}/>
+          className={cn('inline-flex items-center rounded-full disabled:cursor-default', compact ? 'h-5 gap-1 px-2 py-0 text-xs' : 'gap-1 px-2 py-1 text-xs', isHost?'bg-sky-100 text-sky-950':'bg-muted text-muted-foreground',published&&participant&&!simulating&&person.id!==actorId&&'hover:ring-1 hover:ring-foreground/30')}>
+          <span aria-hidden className={cn('size-1.5 rounded-full',isHost?'bg-sky-600':confirmed&&requiresResponse&&status==='available'?'bg-emerald-600':confirmed&&requiresResponse&&status==='unavailable'?'bg-red-500':'bg-muted-foreground/40')}/>
           {person.name}{!compact?` · ${label}`:''}
         </button>
       })}
     </div>
     </div>
-    {!compact&&confirmed&&round&&series.members.some(person=>person.id===actorId)&&onRespond ? <MeetingResponse round={round} actorId={actorId} onRespond={onRespond}/>:null}
+    {!compact&&confirmed&&requiresResponse&&round&&series.members.some(person=>person.id===actorId)&&onRespond ? <MeetingResponse round={round} actorId={actorId} onRespond={onRespond}/>:null}
   </div>
 }
 

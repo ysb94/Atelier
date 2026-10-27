@@ -9,6 +9,8 @@ import { MeetingAttendance, MeetingResponse } from './MeetingAttendance'
 import { MeetingMemberOption } from './MeetingMemberOption'
 import { buildMeetingParticipationSummary } from './meeting-participation'
 import { MeetingSchedulePicker, type MeetingScheduleChoice } from './MeetingSchedulePicker'
+import { MeetingKindFields, MeetingKindSelect } from './MeetingKindFields'
+import { emptyMeetingKindInfo, MEETING_KINDS, MEETING_KIND_TONES, meetingHasNextRound, meetingKindLabel, type MeetingKindInfo } from './meeting-kinds'
 import {
   Check,
   ChevronDown,
@@ -48,6 +50,7 @@ import {
   groupMeetingsByRoomDay,
   combineDateTime,
   canDeleteMeetingSeries,
+  canOpenMeetingDetail,
   canRemoveBookedMeeting,
   canRemovePrepFile,
   emptyRoundNotes,
@@ -156,6 +159,13 @@ function newMeetingId() {
 }
 
 export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: boolean } = {}) {
+  const { profile } = useAuth()
+  const preview = usePagePreview()
+  const accountKey = `${preview?.realProfile?.id ?? profile?.id}:${profile?.id}:${profile?.companyId}:${preview?.facts?.meetingRole ?? ''}`
+  return <MeetingScreen key={accountKey} showHeading={showHeading} />
+}
+
+function MeetingScreen({ showHeading }: { showHeading: boolean }) {
   useRenderWatch('CompanyMeetingsPage')
 
   const { profile } = useAuth()
@@ -191,10 +201,17 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   const [selectedRoomId, setSelectedRoomId] = useState(MEETING_ROOMS[0].id)
   const [scheduleChoice,setScheduleChoice]=useState<MeetingScheduleChoice>(()=>({roomId:MEETING_ROOMS[0].id,dateKey:toDateKey(new Date()),clock:''}))
   const todayKey = toDateKey(new Date())
+  const [newKindInfo, setNewKindInfo] = useState(emptyMeetingKindInfo)
+  const [previewDeletedRounds, setPreviewDeletedRounds] = useState<ReadonlySet<string>>(() => new Set())
   const fromKey = rangeFromKey ?? todayKey
   const days = useMemo(() => listMeetingDays(fromKey, visibleDays, todayKey),[fromKey,todayKey,visibleDays])
   const meetings=useCompanyMeetings(days[0]?.key ?? todayKey,days[days.length-1]?.key ?? todayKey)
   const {series,setSeries,rooms,saving,simulating}=meetings
+  const kindInfos = useMemo(() => Object.fromEntries(series.map(item => [item.id, { kind: item.kind ?? 'project' }])), [series])
+  const previewSeries = useRef(series); previewSeries.current = series
+  useEffect(() => () => {
+    if (simulating) for (const item of previewSeries.current) for (const round of item.rounds) for (const file of round.prepMaterials) if (file.url.startsWith('blob:')) URL.revokeObjectURL(file.url)
+  }, [simulating])
 
   const host = useMemo<MeetingPerson>(() => {
     if (!profile) return LOCAL_HOST
@@ -244,7 +261,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   )
 
   const weeks = useMemo(() => chunkMeetingDays(days), [days])
-  const items = meetings.bookings
+  const items = useMemo(() => simulating ? meetings.bookings.filter(item => !previewDeletedRounds.has(item.id)) : meetings.bookings, [meetings.bookings, previewDeletedRounds, simulating])
   const occupants = useMemo(() => groupMeetingsByRoomDay(items), [items])
   const pickerDay = useMemo(
     () => (picker ? days.find((day) => day.key === picker.dateKey) : undefined),
@@ -293,11 +310,13 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   const composeDuration = durationMinutes
   const composeHost = schedulingSeries?.host ?? chosenHost
   const composeMembers = members
+  const composeKindInfo = schedulingSeriesId ? kindInfos[schedulingSeriesId] ?? emptyMeetingKindInfo() : newKindInfo
+  const detailKindInfo = detailSeries ? kindInfos[detailSeries.id] : undefined
   const composeGaps = meetingComposeGaps({
     title: composeTitle,
     durationMinutes: schedulingSeries ? composeDuration : DEFAULT_MEETING_DURATION_MINUTES,
     memberCount: composeMembers.length,
-    requireMembers: !schedulingSeries,
+    requireMembers: !schedulingSeries && (meetingHasNextRound(composeKindInfo.kind)),
   })
   const composeReady = isMeetingComposeReady(composeGaps)
   const composeGapMessage = formatMeetingComposeGaps(composeGaps)
@@ -311,7 +330,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     if(!active || !searchParams.get('meeting') || !searchParams.get('round')) return
     const item=visibleSeries.find(row=>row.id===searchParams.get('meeting'))
     const round=item?.rounds.find(row=>row.id===searchParams.get('round'))
-    if(item&&round) setDetail(current=>current?.seriesId===item.id&&current.roundId===round.id?current:{seriesId:item.id,roundId:round.id})
+    if(item&&round&&canOpenMeetingDetail(item,host)) setDetail(current=>current?.seriesId===item.id&&current.roundId===round.id?current:{seriesId:item.id,roundId:round.id})
   },[active,searchParams,visibleSeries])
   function closeDetail(){
     setDetail(null)
@@ -358,6 +377,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   }
 
   function resetCompose() {
+    setNewKindInfo(emptyMeetingKindInfo())
     setTitle('')
     setDurationMinutes(null)
     setMembers([])
@@ -378,9 +398,14 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   async function createDraft(){
     if(!composeReady){showComposeGaps();return}
     const id=newMeetingId(),roundId=newMeetingId()
-    const saved=await setSeries(rows=>[{id,title:composeTitle,host:composeHost,members:composeMembers,createdBy:host.id,phase:'preparing',status:'in_progress',durationMinutes:DEFAULT_MEETING_DURATION_MINUTES,
-      rounds:[{id:roundId,round:1,startsAt:'',roomId:'',quarterId:'q1',confirmed:false,...emptyRoundNotes()}]},...rows])
-    if(saved){resetCompose();setBoardTab('in_progress');setDetail({seriesId:id,roundId})}
+    const draft:MeetingSeries={id,kind:newKindInfo.kind,title:composeTitle,host:composeHost,members:composeMembers,createdBy:host.id,phase:'preparing',status:'in_progress',durationMinutes:DEFAULT_MEETING_DURATION_MINUTES,
+      rounds:[{id:roundId,round:1,startsAt:'',roomId:'',quarterId:'q1',confirmed:false,...emptyRoundNotes()}]}
+    const saved=await setSeries(rows=>[draft,...rows])
+    if(saved){
+      resetCompose();setBoardTab('in_progress')
+      if((newKindInfo.kind==='meeting'||newKindInfo.kind==='interview')&&composeHost.id===host.id) scheduleNextRound(draft,roundId)
+      else setDetail({seriesId:id,roundId})
+    }
   }
 
   function showComposeGaps() {
@@ -416,7 +441,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     }
     const target=schedulingSeries.rounds.find(row=>row.id===schedulingRoundId) ?? findPendingRound(schedulingSeries)
     const confirmed={...(target ?? round),startsAt,roomId:nextRoomId,quarterId:round.quarterId,durationMinutes:slotDurationMinutes,confirmed:true,
-      scheduleVersion:(target?.scheduleVersion ?? 0)+1,responses:composeMembers.map(person=>({profileId:person.id,status:'pending' as const}))}
+      scheduleVersion:(target?.scheduleVersion ?? 0)+1,responses:composeKindInfo.kind==='meeting'?[]:composeMembers.map(person=>({profileId:person.id,status:'pending' as const}))}
     const saved=await setSeries(rows=>rows.map(item=>item.id===schedulingSeries.id?{
       ...item,phase:'published',members:composeMembers,durationMinutes:slotDurationMinutes,
       rounds:target?item.rounds.map(row=>row.id===target.id?confirmed:row):[...item.rounds,confirmed],
@@ -444,6 +469,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
 
   async function planNextRound(item: MeetingSeries): Promise<boolean> {
     if (item.host.id !== host.id) return false
+    if (!meetingHasNextRound(kindInfos[item.id]?.kind ?? 'project')) return false
     const existing = findPendingRound(item)
     if (existing) return true
     const nextId = newMeetingId()
@@ -480,6 +506,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
     if (!canDeleteMeetingSeries(item, host)) return
     const saved=await setSeries((prev) => prev.filter((row) => row.id !== item.id))
     if(!saved) return
+    if(simulating) setPreviewDeletedRounds(ids=>new Set([...ids,...item.rounds.map(round=>round.id)]))
     if(simulating) revokeMeetingSeriesFiles(item)
     if (schedulingSeriesId === item.id) resetCompose()
     if (detail?.seriesId === item.id) setDetail(null)
@@ -547,40 +574,35 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                 const rounds = [...item.rounds].sort(
                   (left, right) => left.round - right.round,
                 )
-                const responseRounds = item.status === 'in_progress' && item.phase !== 'preparing' && item.members.some(person => person.id === host.id)
+                const canDetail = canOpenMeetingDetail(item, host)
+                const responseRounds = item.status === 'in_progress' && item.phase !== 'preparing' && item.members.some(person => person.id === host.id) && !(kindInfos[item.id]?.kind === 'meeting')
                   ? rounds.filter(round => Boolean(round.confirmed ?? round.startsAt)) : []
+                const pendingResponses = responseRounds.filter(round => (round.responses?.find(response => response.profileId === host.id)?.status ?? 'pending') === 'pending')
                 return (
                   <li
                     key={item.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5"
+                    className="grid min-w-0 grid-cols-1 items-start gap-x-3 gap-y-3 rounded-lg border border-border p-3 sm:grid-cols-[minmax(0,1fr)_9.5rem]"
                   >
-                    <div className="flex min-w-0 flex-[1_1_26rem] flex-wrap items-center gap-x-3 gap-y-1">
-                      <p className="max-w-full break-words text-sm font-medium">
-                        {item.title}
-                      </p>
-                      {item.phase==='preparing'?<Badge variant="outline">준비 중 · 멤버 비공개</Badge>:null}
-                      {item.status === 'done' ? (
-                        <span className="shrink-0 text-xs text-muted-foreground">
-                          {formatSeriesDateSpan(item) || '일정 없음'}
-                        </span>
-                      ) : null}
-                      <span
-                        aria-hidden
-                        className="hidden h-4 w-px bg-border sm:block"
-                      />
-                      <MeetingAttendance series={item} round={[...item.rounds].reverse().find(row=>row.confirmed ?? row.startsAt)} actorId={host.id} simulating={simulating} compact onChat={chatWith} onGroup={()=>groupChat(item)}/>
-                      <span
-                        aria-hidden
-                        className="hidden h-4 w-px bg-border sm:block"
-                      />
-                      <div className="flex flex-wrap items-center gap-1 text-xs">
+                    <div className="col-span-2 min-w-0 sm:col-span-1">
+                      <div className="flex min-w-0 flex-wrap items-center gap-1">
+                        {<Badge variant="outline" className={cn('h-5 w-[6.25rem] shrink-0 justify-center px-2 py-0', MEETING_KIND_TONES[kindInfos[item.id]?.kind ?? 'project'])}>{meetingKindLabel(kindInfos[item.id]?.kind ?? 'project')}</Badge>}
+                        <div className="min-w-0" role="group" aria-label="회의 멤버">
+                          <MeetingAttendance series={item} round={[...item.rounds].reverse().find(row=>row.confirmed ?? row.startsAt)} actorId={host.id} simulating={simulating} compact requiresResponse={kindInfos[item.id]?.kind !== 'meeting'} onChat={chatWith} onGroup={()=>groupChat(item)}/>
+                        </div>
+                        <div className="mt-0.5 grid w-full min-w-0 grid-cols-2 items-center">
+                          <p className="min-w-0 truncate pr-2 text-sm font-medium" title={item.title}>
+                            {item.title}
+                          </p>
+                          <div className="min-w-0 overflow-x-auto border-l border-border pl-2" role="group" aria-label="회의 회차">
+                            <div className="flex w-max flex-nowrap items-center gap-1 text-xs">
                         {rounds.map((round, index) => {
                           const gapDays = roundGapDays(rounds, round)
-                          const caption = roundListCaption(round, item.members.map((person) => person.id))
+                          const simpleMeeting = kindInfos[item.id]?.kind === 'meeting'
+                          const caption = simpleMeeting ? isPendingRound(round) ? '일정 미확정' : null : roundListCaption(round, item.members.map((person) => person.id))
                           return (
                           <span
                             key={round.id}
-                            className="flex items-center gap-1"
+                            className="flex shrink-0 items-center gap-1"
                           >
                             {index > 0 ? (
                               <span
@@ -592,24 +614,30 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                             ) : null}
                             <button
                               type="button"
+                              disabled={!canDetail}
                               title={
-                                gapDays == null
-                                  ? caption ?? undefined
-                                  : formatRoundGapHint(gapDays)
+                                canDetail
+                                  ? gapDays == null
+                                    ? caption ?? undefined
+                                    : formatRoundGapHint(gapDays)
+                                  : '호스트와 멤버만 상세를 볼 수 있습니다.'
                               }
                               className={cn(
-                                'shrink-0 whitespace-nowrap rounded px-1 py-0.5 text-center font-medium hover:bg-muted',
+                                'min-w-[4.5rem] shrink-0 whitespace-nowrap rounded px-1 py-0 text-center font-medium',
+                                canDetail && 'hover:bg-muted',
+                                !canDetail && 'cursor-default',
                                 caption &&
                                   'border border-dashed border-foreground/25 text-muted-foreground',
                                 caption === '참석 불가' && 'border-danger/40 text-danger',
                                 caption === '참석 응답 대기' && 'border-amber-400/70 text-amber-800',
                               )}
-                              onClick={() =>
+                              onClick={() => {
+                                if (!canDetail) return
                                 setDetail({
                                   seriesId: item.id,
                                   roundId: round.id,
                                 })
-                              }
+                              }}
                             >
                               {gapDays == null ? null : (
                                 <span
@@ -620,16 +648,25 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                                   {formatRoundGapLabel(gapDays)}
                                 </span>
                               )}
-                              <span className="block">{formatRoundLabel(round.round)} 회의</span>
+                              <span className="block">{simpleMeeting ? '미팅' : `${formatRoundLabel(round.round)} 회의`}</span>
                               {caption ? <span className="block text-[10px] font-normal">{caption}</span> : null}
                             </button>
                           </span>
                           )
                         })}
+                            </div>
+                          </div>
+                        </div>
                       </div>
+                      {item.phase==='preparing'?<Badge variant="outline" className="mt-1">준비 중 · 멤버 비공개</Badge>:null}
+                      {item.status === 'done' ? (
+                        <span className="mt-1 block text-xs text-muted-foreground">
+                          {formatSeriesDateSpan(item) || '일정 없음'}
+                        </span>
+                      ) : null}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <Button
+                    <div className="col-span-2 flex w-full flex-nowrap items-center justify-end gap-1.5 sm:col-span-1 sm:col-start-2 sm:row-start-1">
+                      {canDetail ? <Button
                         type="button"
                         size="sm"
                         variant="ghost"
@@ -643,7 +680,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                         }}
                       >
                         상세
-                      </Button>
+                      </Button> : null}
                       {canDeleteMeetingSeries(item, host) ? (
                         <Button
                           type="button"
@@ -657,8 +694,8 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                         </Button>
                       ) : null}
                     </div>
-                    {responseRounds.length > 0 ? <div className="w-full space-y-2">
-                      {responseRounds.map(round => <MeetingResponse key={round.id} round={round} actorId={host.id}
+                    {pendingResponses.length > 0 ? <div className="col-span-2 min-w-0 space-y-2">
+                      {pendingResponses.map(round => <MeetingResponse key={round.id} round={round} actorId={host.id}
                         scheduleLabel={`${formatRoundLabel(round.round)} · ${round.startsAt.slice(0,10)} · ${formatBookedTimeRange(round.startsAt,round.durationMinutes ?? item.durationMinutes)} · ${meetingRoomName(round.roomId)}`}
                         onRespond={status => respond(item,round,status)}/>
                       )}
@@ -695,6 +732,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
             </div>
             <div ref={composeSectionRef} className="space-y-3">
             <div className="flex flex-wrap items-end gap-3">
+              {<MeetingKindSelect kind={composeKindInfo.kind} disabled={Boolean(schedulingSeries)} onChange={kind => setNewKindInfo(info => ({ ...info, kind }))} />}
               <label className="min-w-[16rem] flex-[2] space-y-1">
                 <span className="text-xs font-medium">회의 주제</span>
                 <Input
@@ -878,12 +916,13 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
                   </div>
                 )}
             </div>
-            {schedulingSeries ? <MeetingSchedulePicker rooms={rooms} value={scheduleChoice} onChange={setScheduleChoice} durationMinutes={composeDuration} attendees={attendees} seriesId={schedulingSeries.id}
+            {!schedulingSeries ? <MeetingKindFields kind={newKindInfo.kind} /> : null}
+            {schedulingSeries ? <MeetingSchedulePicker rooms={rooms} value={scheduleChoice} onChange={setScheduleChoice} durationMinutes={composeDuration} attendees={attendees} seriesId={schedulingSeries.id} previewBookings={simulating ? items : undefined} previewHiddenRounds={simulating ? previewDeletedRounds : undefined}
               roundId={schedulingRoundId ?? findPendingRound(schedulingSeries)?.id} error={meetings.error}
               onConfirm={()=>bookSlot(scheduleChoice.roomId,scheduleChoice.dateKey,scheduleChoice.clock)}/> : null}
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
-              <p className="text-xs text-muted-foreground">{schedulingSeries?'일정을 확정하면 멤버에게 참석 요청이 전달됩니다. 일정 변경 시 응답이 초기화됩니다.':'준비 중에는 호스트와 생성자만 볼 수 있습니다. 안내·자료를 준비한 뒤 일정을 확정하세요.'}</p>
-              {!schedulingSeries?<Button type="button" onClick={()=>void createDraft()}>준비 회의 생성</Button>:null}
+              <p className="text-xs text-muted-foreground">{composeKindInfo.kind === 'meeting'?'날짜·시간·회의실을 정하면 참석 수락 없이 일정이 확정됩니다.':schedulingSeries?'일정을 확정하면 멤버에게 참석 요청이 전달됩니다. 일정 변경 시 응답이 초기화됩니다.':'준비 중에는 호스트와 생성자만 볼 수 있습니다. 안내·자료를 준비한 뒤 일정을 확정하세요.'}</p>
+              {!schedulingSeries?<Button type="button" className="shrink-0 whitespace-nowrap" onClick={()=>void createDraft()}>{newKindInfo.kind === 'meeting' ? '미팅 생성' : newKindInfo.kind === 'interview' ? '면접 생성' : '준비 회의 생성'}</Button>:null}
             </div>
           </div>
         </div>
@@ -893,12 +932,14 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
       <Card>
         <CardContent className="space-y-4 p-4">
           <p className="text-sm font-medium">회의실 일정</p>
+          {<div className="flex flex-wrap gap-2" aria-label="회의 성격별 색상">{MEETING_KINDS.map(kind => <Badge key={kind.value} variant="outline" className={MEETING_KIND_TONES[kind.value]}>{kind.label}</Badge>)}</div>}
 
           <RoomScheduleBlock
             rooms={rooms}
             roomId={selectedRoomId}
             weeks={weeks}
             occupants={occupants}
+            kindInfos={kindInfos}
             composeReady={false}
             durationMinutes={slotDurationMinutes}
             attendees={attendees}
@@ -926,8 +967,10 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
           round={detailRound}
           uploader={host}
           simulating={simulating}
+          allowNextRound={meetingHasNextRound(detailKindInfo?.kind ?? 'project')}
+          simpleMeeting={detailKindInfo?.kind === 'meeting'}
           onRefresh={meetings.refresh}
-          attendance={<MeetingAttendance series={detailSeries} round={detailRound} actorId={host.id} simulating={simulating} onChat={chatWith} onGroup={()=>groupChat(detailSeries)} onRespond={status=>respond(detailSeries,detailRound,status)}/> }
+          attendance={<MeetingAttendance series={detailSeries} round={detailRound} actorId={host.id} simulating={simulating} requiresResponse={detailKindInfo?.kind !== 'meeting'} onChat={chatWith} onGroup={()=>groupChat(detailSeries)} onRespond={status=>respond(detailSeries,detailRound,status)}/> }
           saveError={meetings.error}
           onClose={closeDetail}
           onSave={async (notes,revision) => {
@@ -1137,6 +1180,7 @@ function RoomScheduleBlock({
   onRemoveRound,
   currentUserId,
   readOnly = false,
+  kindInfos,
 }: {
   rooms: readonly MeetingRoom[]
   roomId: string
@@ -1154,6 +1198,7 @@ function RoomScheduleBlock({
   onRemoveRound: (roundId: string) => void
   currentUserId: string
   readOnly?: boolean
+  kindInfos?: Readonly<Record<string, MeetingKindInfo>>
 }) {
   const room = rooms.find((item) => item.id === roomId) ?? rooms[0]
   const tone = meetingRoomTone(room.id)
@@ -1342,7 +1387,7 @@ function RoomScheduleBlock({
                           item={item}
                           slotPx={CALENDAR_SLOT_PX}
                           toneClass={
-                            chipClasses.get(item.id) ?? 'bg-sky-200 text-sky-950'
+                            kindInfos ? MEETING_KIND_TONES[kindInfos[item.seriesId]?.kind ?? 'project'] : chipClasses.get(item.id) ?? 'bg-sky-200 text-sky-950'
                           }
                           trailing={
                             !readOnly && canRemoveBookedMeeting(item, { id: currentUserId }) ? (
@@ -1626,6 +1671,8 @@ function MeetingDetailDrawer({
   round,
   uploader,
   simulating,
+  allowNextRound = true,
+  simpleMeeting = false,
   onRefresh,
   attendance,
   saveError,
@@ -1640,6 +1687,8 @@ function MeetingDetailDrawer({
   round: MeetingRound
   uploader: MeetingPerson
   simulating: boolean
+  allowNextRound?: boolean
+  simpleMeeting?: boolean
   attendance: ReactNode
   onRefresh: () => Promise<void>
   saveError?: string | null
@@ -1760,6 +1809,8 @@ function MeetingDetailDrawer({
               <Badge variant={series.status === 'done' ? 'muted' : 'default'}>
                 {series.status === 'done'
                   ? '완료'
+                  : simpleMeeting
+                    ? pending ? '일정 미정' : '미팅'
                   : pending
                     ? '다음 차 예정'
                     : formatRoundLabel(round.round)}
@@ -1790,7 +1841,7 @@ function MeetingDetailDrawer({
         </div>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
-          {series.phase==='preparing'?<p className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">준비 중 · 호스트와 생성자만 볼 수 있습니다. 안내와 자료를 준비한 뒤 호스트가 일정을 확정하면 멤버에게 공개됩니다.</p>:null}
+          {series.phase==='preparing'?<p className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">{simpleMeeting?'준비 중 · 호스트가 날짜·시간·회의실을 정해 일정을 확정하면 멤버에게 공개됩니다.':'준비 중 · 호스트와 생성자만 볼 수 있습니다. 안내와 자료를 준비한 뒤 호스트가 일정을 확정하면 멤버에게 공개됩니다.'}</p>:null}
           {!pending?<p className="rounded-lg bg-muted px-3 py-2 text-sm font-medium">{round.startsAt.slice(0,10)} · {formatBookedTimeRange(round.startsAt,round.durationMinutes ?? series.durationMinutes)} · {meetingRoomName(round.roomId)}</p>:null}
           {attendance}
           {!isHost ? <p className="text-xs text-muted-foreground">회의 내용·결과·일정 수정과 삭제는 호스트만 할 수 있습니다. 참석 응답·자료 공유·대화는 계속 이용할 수 있습니다.</p> : null}
@@ -1821,7 +1872,7 @@ function MeetingDetailDrawer({
               </div>
             </section>
           ) : null}
-          <section className="space-y-2">
+          {!simpleMeeting ? <><section className="space-y-2">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-xs font-medium text-muted-foreground">
                 {pending ? '회의 안내' : '회의 내용'}
@@ -1938,14 +1989,14 @@ function MeetingDetailDrawer({
               readOnly={!isHost}
               onChange={(event) => setResult(event.target.value)}
             />
-          </section> : null}
+          </section> : null}</> : <p className="text-xs text-muted-foreground">미팅은 날짜·시간·회의실과 참석자를 기록하며, 내용·회의록은 작성하지 않습니다.</p>}
         </div>
 
         {series.status === 'in_progress' ? (
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-5 py-3">
             <Button type="button" variant="outline" onClick={closeDrawer}>닫기</Button>
             {isHost && !pending ? <Button type="button" variant="outline" onClick={()=>void run(async()=>{if(await persistNotes()) onBookTime()})}>일정 변경</Button>:null}
-            {isHost ? pending ? (
+            {isHost && (pending || allowNextRound) ? pending ? (
               <Button
                 type="button"
                 variant="outline"
@@ -1962,13 +2013,13 @@ function MeetingDetailDrawer({
                 저장하고 다음 회의 진행
               </Button>
             ) : null}
-            {isHost ? <Button
+            {isHost && (!simpleMeeting || !pending) ? <Button
               type="button"
               variant="secondary"
               onClick={() => void run(async()=>{if(await persistNotes()) await onMarkDone()})}
             >
               <Check className="size-3.5" />
-              회의건 종료
+              {simpleMeeting ? '미팅 완료' : '회의건 종료'}
             </Button> : null}
           </div>
         ) : (

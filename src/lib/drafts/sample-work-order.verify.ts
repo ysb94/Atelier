@@ -13,8 +13,11 @@ import {
   legacyWorkOrderFields,
   normalizeSampleWorkOrders,
   previousSampleFailReason,
+  attachOpenSampleWorkOrder,
   requestNextSampleRound,
+  sampleHistoryDay,
   samplePhase,
+  sampleTripSpanDays,
   samplePhaseLabel,
   sampleWorkOrderLabel,
   sanitizeSampleWorkOrders,
@@ -202,16 +205,26 @@ const rerequested = requestNextSampleRound(
       fileCheckedAt: '2026-10-14T09:00:00.000Z',
     },
   ],
+  { url: 'data:file,second', name: 'second.xlsx' },
   '2026-10-14T11:00:00.000Z',
 )
 assert(rerequested.length === 2 && rerequested[1]?.round === 2, '재요청은 2차로 넘긴다')
 assert(
-  rerequested[1]?.url === 'data:file,same' &&
-    rerequested[1]?.name === 'same.xlsx' &&
+  rerequested[1]?.url === 'data:file,second' &&
+    rerequested[1]?.name === 'second.xlsx' &&
     rerequested[1]?.shippedAt === '2026-10-14T11:00:00.000Z' &&
     rerequested[1]?.returnedAt == null &&
+    rerequested[0]?.url === 'data:file,same' &&
     rerequested[0]?.returnedAt === '2026-10-14T10:00:00.000Z',
-  '재요청은 같은 작업지시서를 유지하고 새 요청일만 연다',
+  '재요청은 새로 첨부한 작업지시서로 요청하고 이전 파일은 남긴다',
 )
+assert(requestNextSampleRound(rerequested.slice(0, 1), { url: ' ', name: 'empty.xlsx' }).length === 1, '파일이 없으면 차수를 열지 않는다')
+const opened = requestNextSampleRound(rerequested.slice(0, 1), { url: 'data:file,open', name: 'open.xlsx' }, '2026-10-14T11:00:00.000Z').map((order, index) => index === 1 ? { ...order, shippedAt: null } : order)
+const attachedOpen = attachOpenSampleWorkOrder(opened, { url: 'data:file,real', name: 'real.xlsx' }, '2026-10-14T12:00:00.000Z')
+assert(attachedOpen[1]?.url === 'data:file,real' && attachedOpen[1]?.shippedAt === '2026-10-14T12:00:00.000Z' && attachedOpen[0]?.url === 'data:file,same', '요청 전 차수에만 새 작업지시서를 붙인다')
 
+assert(sampleTripSpanDays('2026-10-14T11:32:00.000Z', '2026-10-14T11:48:00.000Z') === 0, '같은 날 회신은 0일')
+assert(sampleTripSpanDays('2026-10-14T11:32:00.000Z', '2026-10-17T01:00:00.000Z') === 3, '보낸 날부터 온 날까지 일수')
+assert(sampleTripSpanDays('2026-10-14T11:32:00.000Z', null) == null, '아직 오지 않으면 일수를 비운다')
+assert(sampleHistoryDay('2026-10-14T11:32:00.000Z') === '2026.10.14', '이력 날짜')
 console.log('sample-work-order.verify ok')

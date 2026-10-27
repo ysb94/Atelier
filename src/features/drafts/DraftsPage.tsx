@@ -22,7 +22,7 @@ import { newColorRow } from '@/lib/drafts/empty-draft'
 import {
   newColorSampleRound,
   passLatestColorSampleRound,
-  requestNextColorSampleRound,
+  publishNextColorSampleRound,
   resolveColorSampleRounds,
 } from '@/lib/drafts/draft-flow'
 import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields, requestNextSampleRound, setLatestSampleWorkOrderPassed } from '@/lib/drafts/sample-work-order'
@@ -710,21 +710,22 @@ export function CompanyDraftsPage() {
                         }
                       })
                     }}
-                    onRequestNextColorSampleRound={async () => {
+                    onRequestNextColorSampleRound={async (file) => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
                         const rounds = resolveColorSampleRounds(current)
                         const before = rounds[rounds.length - 1]?.round
-                        const next = requestNextColorSampleRound(rounds)
-                        const latest = next[next.length - 1]
+                        const published = publishNextColorSampleRound(input.colors, rounds, file)
+                        const latest = published.rounds[published.rounds.length - 1]
                         if (!latest || latest.round === before) {
                           throw new Error('다음 차수로 넘기지 못했습니다.')
                         }
                         return {
                           ...input,
+                          colors: published.colors,
                           specs: {
                             ...input.specs,
-                            colorSampleRounds: next,
+                            colorSampleRounds: published.rounds,
                           },
                         }
                       })
@@ -754,11 +755,11 @@ export function CompanyDraftsPage() {
                         }
                       })
                     }}
-                    onRequestNextSampleRound={async () => {
+                    onRequestNextSampleRound={async (file) => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
                         const before = latestFilledSampleWorkOrder(input.sampleWorkOrders)?.round
-                        const sampleWorkOrders = requestNextSampleRound(input.sampleWorkOrders)
+                        const sampleWorkOrders = requestNextSampleRound(input.sampleWorkOrders, file)
                         if (latestFilledSampleWorkOrder(sampleWorkOrders)?.round === before) {
                           throw new Error('다음 차수로 넘기지 못했습니다.')
                         }

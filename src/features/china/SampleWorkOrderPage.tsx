@@ -13,11 +13,7 @@ import '@/features/drafts/draft-board.css'
 import { getCompanyProductDrafts } from '@/lib/api'
 import { DEFAULT_COMPANY_ID } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
-import {
-  colorWorkOrderFileName,
-  filledColorWorkOrders,
-  resolveColorSampleRounds,
-} from '@/lib/drafts/draft-flow'
+import { resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import {
   draftHasSampleWorkOrder,
   draftStatePercent,
@@ -85,30 +81,28 @@ function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
     }),
   )
   const colorRounds = resolveColorSampleRounds(draft)
-  const latestColorRound = colorRounds[colorRounds.length - 1]
-  const sentColorRound = [...colorRounds].reverse().find((round) => round.shippedAt) ?? latestColorRound
-  const colors = filledColorWorkOrders(draft.colors)
-    .filter((color, index, list) => {
-      const url = color.sampleWorkOrderUrl?.trim()
-      return list.findIndex((item) => item.sampleWorkOrderUrl?.trim() === url) === index
-    })
-    .map((color) => ({
-    draft,
-    kind: 'color' as const,
-    orderId: color.id,
-    url: color.sampleWorkOrderUrl,
-    fileName: colorWorkOrderFileName(color),
-    shipped: Boolean(color.sampleWorkOrderShipped),
-    shippedAt: sentColorRound?.shippedAt ?? draft.specs.colorSampleRequestedAt ?? null,
-    passed: Boolean(latestColorRound?.passed),
-    failReason: '',
-    focusReason: '',
-    colorName: color.name.trim(),
-    sortRound: sentColorRound?.round ?? 1,
-    assigneeId: null,
-    assigneeName: '',
-    fileCheckedAt: null,
-  }))
+  const shipColorId = draft.colors.find((color) => color.sampleWorkOrderUrl?.trim())?.id ?? draft.colors[0]?.id ?? ''
+  const colorNames = draft.colors.map((color) => color.name.trim()).filter(Boolean).join(', ')
+  const colors = colorRounds.map((round) => {
+    const returned = Boolean(round.returnedAt || round.passed)
+    return {
+      draft,
+      kind: 'color' as const,
+      orderId: returned ? round.id : shipColorId || round.id,
+      url: round.url,
+      fileName: round.name.trim() || `${round.round}차 컬러 샘플 작업 지시서`,
+      shipped: returned,
+      shippedAt: round.shippedAt ?? draft.specs.colorSampleRequestedAt ?? null,
+      passed: round.passed,
+      failReason: '',
+      focusReason: '',
+      colorName: colorNames,
+      sortRound: round.round,
+      assigneeId: null,
+      assigneeName: '',
+      fileCheckedAt: null,
+    }
+  })
   return [...samples, ...colors]
 }
 
