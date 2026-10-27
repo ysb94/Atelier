@@ -20,10 +20,12 @@ const SAMPLE_WORK_ORDER_ACCEPT =
 const SAMPLE_WORK_ORDER_MAX_BYTES = 8 * 1024 * 1024
 
 function SampleRoundDecision({
+  readOnly = false,
   nextLabel,
   onPass,
   onNextRound,
 }: {
+  readOnly?: boolean
   nextLabel: string
   onPass: () => Promise<void>
   onNextRound: () => Promise<void>
@@ -32,7 +34,7 @@ function SampleRoundDecision({
   const [error, setError] = useState('')
 
   async function run(kind: 'next' | 'pass', action: () => Promise<void>) {
-    if (busy) return
+    if (busy || readOnly) return
     setBusy(kind)
     setError('')
     try {
@@ -50,7 +52,7 @@ function SampleRoundDecision({
       <button
         type="button"
         className="draft-sheet-action is-neutral"
-        disabled={busy !== null}
+        disabled={readOnly || busy !== null}
         onClick={() => void run('next', onNextRound)}
       >
         {busy === 'next' ? '저장 중' : nextLabel}
@@ -58,7 +60,7 @@ function SampleRoundDecision({
       <button
         type="button"
         className="draft-sheet-action is-neutral"
-        disabled={busy !== null}
+        disabled={readOnly || busy !== null}
         onClick={() => void run('pass', onPass)}
       >
         {busy === 'pass' ? '저장 중' : '합격'}
@@ -69,9 +71,11 @@ function SampleRoundDecision({
 }
 
 function ColorSampleWorkOrderButton({
+  readOnly = false,
   colorsConfirmed,
   onUpload,
 }: {
+  readOnly?: boolean
   colorsConfirmed: boolean
   onUpload: (file: { url: string; name: string }) => Promise<void>
 }) {
@@ -95,7 +99,7 @@ function ColorSampleWorkOrderButton({
       <button
         type="button"
         className="draft-sheet-action is-neutral"
-        disabled={busy}
+        disabled={readOnly || busy}
         onClick={() => {
           if (colorsConfirmed) inputRef.current?.click()
           else setOpen(true)
@@ -112,7 +116,7 @@ function ColorSampleWorkOrderButton({
         onChange={(event) => {
           const file = event.target.files?.[0]
           event.target.value = ''
-          if (!file) return
+          if (!file || readOnly) return
           if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) {
             setError('작업 지시서는 8MB 이하만 올릴 수 있습니다.')
             return
@@ -156,9 +160,11 @@ function ColorSampleWorkOrderButton({
 }
 
 function SampleWorkOrderButton({
+  readOnly = false,
   onUpload,
   label = '샘플 작업지시서',
 }: {
+  readOnly?: boolean
   onUpload: (file: { url: string; name: string }) => Promise<void>
   label?: string
 }) {
@@ -176,7 +182,7 @@ function SampleWorkOrderButton({
         onChange={(event) => {
           const file = event.target.files?.[0]
           event.target.value = ''
-          if (!file) return
+          if (!file || readOnly) return
           if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) {
             setError('작업 지시서는 8MB 이하만 올릴 수 있습니다.')
             return
@@ -196,7 +202,7 @@ function SampleWorkOrderButton({
       <button
         type="button"
         className="draft-sheet-action is-neutral"
-        disabled={busy}
+        disabled={readOnly || busy}
         onClick={() => inputRef.current?.click()}
       >
         {busy ? '올리는 중' : label}
@@ -263,9 +269,11 @@ function SheetConfirmButton({
 }
 
 function ColorDocumentButton({
+  readOnly = false,
   colorCount,
   onAddColor,
 }: {
+  readOnly?: boolean
   colorCount: number
   onAddColor: (name: string) => Promise<void>
 }) {
@@ -283,6 +291,7 @@ function ColorDocumentButton({
         aria-expanded={open}
         aria-label="컬러 문서"
         title="컬러 추가"
+        disabled={readOnly}
         onClick={() => {
           setError('')
           setOpen((current) => !current)
@@ -295,6 +304,7 @@ function ColorDocumentButton({
           className="draft-color-add-form"
           onSubmit={(event) => {
             event.preventDefault()
+            if (readOnly) return
             const next = name.trim()
             if (!next) {
               setError('컬러 이름을 입력하세요.')
@@ -322,10 +332,10 @@ function ColorDocumentButton({
             aria-label="컬러 이름"
             placeholder="컬러 이름"
             value={name}
-            disabled={busy}
+            disabled={readOnly || busy}
             onChange={(event) => setName(event.target.value)}
           />
-          <button type="submit" disabled={busy || full}>
+          <button type="submit" disabled={readOnly || busy || full}>
             컬러 추가
           </button>
           {error ? <p>{error}</p> : null}
@@ -340,6 +350,7 @@ function ColorLine({ index, children }: { index: number; children: ReactNode }) 
 }
 
 function SheetInlineField({
+  readOnly = false,
   label,
   value,
   placeholder,
@@ -348,6 +359,7 @@ function SheetInlineField({
   multiline = false,
   onCommit,
 }: {
+  readOnly?: boolean
   label: string
   value: string
   placeholder?: string
@@ -364,10 +376,10 @@ function SheetInlineField({
   const busyRef = useRef(false)
 
   useEffect(() => {
-    if (inputRef.current && document.activeElement === inputRef.current) return
+    if (!readOnly && inputRef.current && document.activeElement === inputRef.current) return
     setText(value)
     setError('')
-  }, [value])
+  }, [value, readOnly])
 
   useEffect(() => {
     const field = inputRef.current
@@ -377,6 +389,7 @@ function SheetInlineField({
   }, [text])
 
   function commit(raw: string) {
+    if (readOnly) return
     const next = raw.trim()
     if (next === value.trim()) {
       setText(value)
@@ -406,9 +419,11 @@ function SheetInlineField({
     value: text,
     placeholder,
     disabled: busy,
+    readOnly,
     autoComplete: 'off' as const,
     spellCheck: false as const,
     onChange: (event: { target: { value: string } }) => {
+      if (readOnly) return
       setText(event.target.value)
       if (error) setError('')
     },
@@ -460,6 +475,7 @@ function SheetInlineField({
 }
 
 function EntryButton({
+  readOnly = false,
   label,
   value,
   placeholder,
@@ -469,6 +485,7 @@ function EntryButton({
   disabled = false,
   onSave,
 }: {
+  readOnly?: boolean
   label: string
   value: string
   placeholder: string
@@ -485,10 +502,11 @@ function EntryButton({
   const shown = value.trim()
 
   useEffect(() => {
-    if (!open) setText(value)
-  }, [open, value])
+    if (!open || readOnly) setText(value)
+  }, [open, value, readOnly])
 
   function save(applyAll: boolean) {
+    if (readOnly) return
     setBusy(true)
     setError('')
     void onSave(text.trim(), applyAll)
@@ -530,15 +548,16 @@ function EntryButton({
             aria-label={`${label} 값`}
             placeholder={placeholder}
             value={text}
+            readOnly={readOnly}
             disabled={busy}
-            onChange={(event) => setText(event.target.value)}
+            onChange={(event) => { if (!readOnly) setText(event.target.value) }}
           />
           <div className="draft-sheet-entry-actions">
-            <button type="submit" disabled={busy}>
+            <button type="submit" disabled={readOnly || busy}>
               {busy ? '저장 중…' : '저장'}
             </button>
             {canApplyAll ? (
-              <button type="button" className="is-ghost" disabled={busy} onClick={() => save(true)}>
+              <button type="button" className="is-ghost" disabled={readOnly || busy} onClick={() => save(true)}>
                 전체 컬러에 적용
               </button>
             ) : null}
@@ -673,7 +692,6 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
     return (value: string, applyAll: boolean) => onSaveSheetValue(colorId, field, value, applyAll)
   }
 
-  if (readOnly) return <tr className="draft-sheet-row"><td><strong>{draft.draftNo}</strong><p>{brand?.name ?? '브랜드 미정'}</p><p>{draft.owner || '담당자 미정'}</p><button type="button" className="text-primary underline" onClick={onOpen}>기획안 조회</button></td><td>{draft.nameKo || draft.nameEn || '이름 미정'}</td><td>{draft.colors.map(color=>color.name).join(', ') || '컬러 미정'}</td><td>{DRAFT_STATUS_LABEL[draft.status]}</td><td colSpan={2}><span className="text-xs text-muted-foreground">조회 전용 · 작성자만 수정</span></td></tr>
   return <tr className="draft-sheet-row">
     <td>
       <strong className="draft-sheet-brand">{brand?.name ?? '브랜드 미정'}</strong>
@@ -697,6 +715,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
                     <SampleTripArrows requestAt={round.shippedAt} returnAt={round.returnedAt} />
                     {latest && round.returnedAt && !round.passed ? (
                       <SampleRoundDecision
+                        readOnly={readOnly}
                         nextLabel={`${round.round + 1}차 GO`}
                         onPass={onPassColorSample}
                         onNextRound={onRequestNextColorSampleRound}
@@ -714,6 +733,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
                   <small className="draft-sheet-sample-round">1차</small>
                   <div className="draft-sheet-color-orders">
                     <ColorSampleWorkOrderButton
+                      readOnly={readOnly}
                       colorsConfirmed={colorsConfirmed}
                       onUpload={onUploadColorWorkOrder}
                     />
@@ -730,6 +750,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
               <SampleTripArrows requestAt={order.shippedAt} returnAt={order.returnedAt} />
               {order.id === latestOrderId && order.returnedAt && !order.passed && !order.failReason.trim() ? (
                 <SampleRoundDecision
+                  readOnly={readOnly}
                   nextLabel={`${order.round + 1}차 GO`}
                   onPass={onPassSample}
                   onNextRound={onRequestNextSampleRound}
@@ -741,13 +762,14 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
           ))}
         </div>
       ) : (
-        <div className="draft-sheet-actions"><SampleWorkOrderButton onUpload={onUploadSampleWorkOrder} /></div>
+        <div className="draft-sheet-actions"><SampleWorkOrderButton readOnly={readOnly} onUpload={onUploadSampleWorkOrder} /></div>
       )}
     </td>
     <td><div className="draft-sheet-image-cell">
       <DraftPhoto src={draft.imageUrl} name={name === '이름 미정' ? draft.draftNo : name} />
       <div className="draft-sheet-names">
         <SheetInlineField
+          readOnly={readOnly}
           label={`${draft.draftNo} 한글명`}
           className="draft-sheet-product-name"
           value={draft.nameKo}
@@ -757,6 +779,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
           onCommit={(next) => onRenameProduct('nameKo', next)}
         />
         <SheetInlineField
+          readOnly={readOnly}
           label={`${draft.draftNo} 영문명`}
           className="draft-sheet-product-name"
           value={draft.nameEn}
@@ -769,7 +792,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
       <SheetConfirmButton
         label="이름확정"
         confirmed={nameConfirmed}
-        canToggle={named}
+        canToggle={!readOnly && named}
         blockedTitle="한글명 또는 영문명을 먼저 입력해 주세요"
         onToggle={(next) => onToggleConfirm('nameConfirmed', next)}
       >
@@ -777,17 +800,17 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
       </SheetConfirmButton>
     </div></td>
     <td className="draft-sheet-price-cell">
-      <button type="button" className="draft-sheet-price-request" title="기능 준비 중">
+      <button type="button" className="draft-sheet-price-request" disabled={readOnly} title="기능 준비 중">
         단가 요청
       </button>
     </td>
     <td>
       <div className="draft-color-pad draft-sheet-color-tools">
-        <ColorDocumentButton colorCount={draft.colors.length} onAddColor={onAddColor} />
+        <ColorDocumentButton readOnly={readOnly} colorCount={draft.colors.length} onAddColor={onAddColor} />
         <SheetConfirmButton
           label={colorsConfirmed ? '컬러 구성 확정' : '컬러 구성 미확정'}
           confirmed={colorsConfirmed}
-          canToggle={hasColor}
+          canToggle={!readOnly && hasColor}
           blockedTitle="컬러를 먼저 추가해 주세요"
           doneStyle={false}
           className={`draft-sheet-color-heart${colorsConfirmed ? ' is-confirmed' : ''}`}
@@ -798,7 +821,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
         <SheetConfirmButton
           label="컬러명확정"
           confirmed={colorNamesConfirmed}
-          canToggle={hasColorName}
+          canToggle={!readOnly && hasColorName}
           blockedTitle="컬러 이름을 먼저 입력해 주세요"
           className="draft-sheet-color-name-confirm"
           onToggle={(next) => onToggleConfirm('colorNamesConfirmed', next)}
@@ -808,6 +831,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
         {draft.colors.length ? draft.colors.map((color, index) => (
           <ColorLine key={color.id} index={index}>
             <SheetInlineField
+              readOnly={readOnly}
               label={`${draft.draftNo} 컬러 ${index + 1} 이름`}
               className="draft-sheet-color-name"
               value={color.name}
@@ -834,6 +858,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
                 />
                 <div className="draft-sheet-specs">
                   <EntryButton
+                    readOnly={readOnly}
                     label="size"
                     value={formatSizeSpecLabel(spec?.size ?? '')}
                     placeholder="300×120×210"
@@ -843,6 +868,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
                     onSave={color ? saveColorSpec(color.id, 'size') : async () => undefined}
                   />
                   <EntryButton
+                    readOnly={readOnly}
                     label="Fabric"
                     value={spec?.fabric ?? ''}
                     placeholder="원단"
@@ -852,6 +878,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
                     onSave={color ? saveColorSpec(color.id, 'fabric') : async () => undefined}
                   />
                   <EntryButton
+                    readOnly={readOnly}
                     label="Weight"
                     value={spec?.weight ?? ''}
                     placeholder="무게"
@@ -863,6 +890,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
                 </div>
                 <div className="draft-sheet-actions">
                   <EntryButton
+                    readOnly={readOnly}
                     label={specDocLabel}
                     value={spec?.specDoc ?? ''}
                     placeholder="스펙 내용"
@@ -880,7 +908,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
       </div>
     </td>
     <td className="draft-sheet-md-cell">
-      <button type="button" className="draft-sheet-edit" aria-label={`${draft.draftNo} 기획안 편집`} onClick={onOpen}><Pencil size={12} />기획안 편집</button>
+      <button type="button" className="draft-sheet-edit" aria-label={`${draft.draftNo} 기획안 ${readOnly ? '조회' : '편집'}`} onClick={onOpen}><Pencil size={12} />기획안 {readOnly ? '조회' : '편집'}</button>
       <div className="draft-sheet-md">
       <div className="draft-sheet-md-assets">
         <div className="draft-color-pad" />
@@ -894,7 +922,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
       </div>
       <div className="draft-sheet-release"><strong>발매 이슈</strong><p>{draft.releaseIssue.trim() || '등록된 이슈 없음'}</p>
         {schedule?.group && <div className="draft-sheet-schedule">{formatReleaseGroupLabel(schedule.group)}{schedule.certainty ? ` · ${RELEASE_CERTAINTY_LABEL[schedule.certainty]}` : ''}{schedule.targetDate ? ` · ${formatTargetDate(schedule.targetDate)}` : ''}{schedule.isPreview ? ' · 미리보기' : ''}</div>}
-        <button type="button" className="draft-sheet-schedule-button" onClick={onSchedule}>{schedule?.group ? '일정 수정' : '일정 정하기'}</button>
+        <button type="button" className="draft-sheet-schedule-button" disabled={readOnly} onClick={onSchedule}>{schedule?.group ? '일정 수정' : '일정 정하기'}</button>
       </div>
     </div></td>
   </tr>
