@@ -598,29 +598,26 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
                 return (
                   <li
                     key={item.id}
-                    className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5"
+                    className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-start gap-x-3 gap-y-3 rounded-lg border border-border p-3"
                   >
-                    <div className="flex min-w-0 flex-[1_1_26rem] flex-wrap items-center gap-x-3 gap-y-1">
-                      <p className="max-w-full break-words text-sm font-medium">
-                        {item.title}
-                      </p>
-                      {variationPreview ? <Badge variant="outline" className={MEETING_KIND_TONES[kindInfos[item.id]?.kind ?? 'project']}>{meetingKindLabel(kindInfos[item.id]?.kind ?? 'project')}</Badge> : null}
-                      {item.phase==='preparing'?<Badge variant="outline">준비 중 · 멤버 비공개</Badge>:null}
+                    <div className="col-span-2 min-w-0 sm:col-span-1">
+                      <div className="flex min-w-0 flex-wrap items-start gap-2">
+                        {variationPreview ? <Badge variant="outline" className={MEETING_KIND_TONES[kindInfos[item.id]?.kind ?? 'project']}>{meetingKindLabel(kindInfos[item.id]?.kind ?? 'project')}</Badge> : null}
+                        <p className="min-w-0 w-full break-words text-sm font-medium [overflow-wrap:anywhere]" title={item.title}>
+                          {item.title}
+                        </p>
+                      </div>
+                      {item.phase==='preparing'?<Badge variant="outline" className="mt-1">준비 중 · 멤버 비공개</Badge>:null}
                       {item.status === 'done' ? (
-                        <span className="shrink-0 text-xs text-muted-foreground">
+                        <span className="mt-1 block text-xs text-muted-foreground">
                           {formatSeriesDateSpan(item) || '일정 없음'}
                         </span>
                       ) : null}
-                      <span
-                        aria-hidden
-                        className="hidden h-4 w-px bg-border sm:block"
-                      />
+                    </div>
+                    <div className="col-span-2 min-w-0 border-t border-border/60 pt-2" role="group" aria-label="회의 멤버">
                       <MeetingAttendance series={item} round={[...item.rounds].reverse().find(row=>row.confirmed ?? row.startsAt)} actorId={host.id} simulating={simulating} compact requiresResponse={!variationPreview || kindInfos[item.id]?.kind !== 'meeting'} onChat={chatWith} onGroup={()=>groupChat(item)}/>
-                      <span
-                        aria-hidden
-                        className="hidden h-4 w-px bg-border sm:block"
-                      />
-                      <div className="flex flex-wrap items-center gap-1 text-xs">
+                    </div>
+                    <div className="col-span-2 flex min-w-0 flex-wrap items-start gap-2 border-t border-border/60 pt-2 text-xs" role="group" aria-label="회의 회차">
                         {rounds.map((round, index) => {
                           const gapDays = roundGapDays(rounds, round)
                           const simpleMeeting = variationPreview && kindInfos[item.id]?.kind === 'meeting'
@@ -674,9 +671,8 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
                           </span>
                           )
                         })}
-                      </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="col-span-2 row-start-2 flex flex-wrap items-center justify-end gap-1.5 sm:col-span-1 sm:col-start-2 sm:row-start-1">
                       <Button
                         type="button"
                         size="sm"
@@ -705,7 +701,7 @@ function ExistingCompanyMeetingsPage({ showHeading, onBusyChange, variationPrevi
                         </Button>
                       ) : null}
                     </div>
-                    {responseRounds.length > 0 ? <div className="w-full space-y-2">
+                    {responseRounds.length > 0 ? <div className="col-span-2 min-w-0 space-y-2">
                       {responseRounds.map(round => <MeetingResponse key={round.id} round={round} actorId={host.id}
                         scheduleLabel={`${formatRoundLabel(round.round)} · ${round.startsAt.slice(0,10)} · ${formatBookedTimeRange(round.startsAt,round.durationMinutes ?? item.durationMinutes)} · ${meetingRoomName(round.roomId)}`}
                         onRespond={status => respond(item,round,status)}/>

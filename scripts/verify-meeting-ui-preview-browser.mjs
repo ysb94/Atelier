@@ -40,6 +40,7 @@ try {
   const origin = 'http://127.0.0.1:5197'
   await context.route('**/*', route => { if (route.request().url().startsWith(origin + '/')) return route.continue(); external.push(route.request().url()); return route.abort() })
   await context.addInitScript(() => {
+    if (sessionStorage.getItem('fixture:scale')) return
     const host = { id: 'fixture-user', name: '화면 검수', departmentName: '기획팀' }, member = { id: 'other-user', name: '검증 동료', departmentName: 'MD팀' }
     const round = (id, roomId, clock) => ({ id, roomId, startsAt: '2030-01-07T' + clock, round: 1, confirmed: true, quarterId: 'q1', prepMaterials: [], content: '참석자만 보는 회의 내용', result: '', responses: [] })
     sessionStorage.setItem('atelier:meeting-fixture', JSON.stringify({ files: {}, audit: [], participation: [{profile_id:'other-user',titles:['기존 프로젝트','응답할 프로젝트','비참석 진행 회의']}], series: [
@@ -221,6 +222,42 @@ try {
   assert.equal(await failurePicker.getByRole('button', { name: '일정 확정', exact: true }).isDisabled(), true)
   await page.reload()
   assert.equal(await page.getByRole('button', { name: '기존 화면', exact: true }).getAttribute('aria-pressed'), 'true')
+  assert.deepEqual(errors, [])
+  assert.deepEqual(external, [])
+  // 긴 제목·다수 멤버·20개 회차를 가진 회의 8건에서도 카드 내부가 넘치지 않아야 한다.
+  await page.evaluate(() => {
+    sessionStorage.removeItem('fixture:calendar-error')
+    sessionStorage.setItem('fixture:scale', '1')
+    const fixture = JSON.parse(sessionStorage.getItem('atelier:meeting-fixture'))
+    const base = fixture.series[0]
+    fixture.series = Array.from({ length: 8 }, (_, index) => ({ ...base,
+      id: `scale-meeting-${index}`, title: `확장 검수 ${index + 1} · ${'여러 부서가 함께 논의하는 장기 프로젝트의 진행 상황과 다음 작업을 확인하는 회의 '.repeat(4)}`,
+      members: Array.from({ length: 24 }, (_, member) => ({ id: `scale-person-${member}`, name: `참석직원${member + 1}`, departmentName: '기획팀' })),
+      rounds: Array.from({ length: 20 }, (_, round) => ({ ...base.rounds[0], id: `scale-round-${index}-${round}`, round: round + 1,
+        startsAt: `2030-01-${String(round + 1).padStart(2, '0')}T10:00`, responses: [],
+      })),
+    }))
+    sessionStorage.setItem('atelier:meeting-fixture', JSON.stringify(fixture))
+  })
+  await page.reload()
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 1100 })
+    const entries = page.getByRole('listitem').filter({ has: page.getByText(/^확장 검수 /) })
+    await entries.first().waitFor()
+    assert.equal(await entries.count(), 8)
+    const entry = entries.first()
+    if (width < 640) assert.ok((await entry.getByText(/^확장 검수 /).boundingBox()).width > (await entry.boundingBox()).width * 0.8, '모바일 제목은 카드 전체 너비 사용')
+    const members = entry.getByRole('group', { name: '회의 멤버', exact: true })
+    const rounds = entry.getByRole('group', { name: '회의 회차', exact: true })
+    assert.equal(await members.getByRole('button').count(), 26, '호스트·24명·전체 대화 버튼 유지')
+    const first = await rounds.getByRole('button', { name: /^1차 회의/ }).boundingBox()
+    const last = await rounds.getByRole('button', { name: /20차 회의/ }).boundingBox()
+    assert.ok(last.y > first.y, '20개 회차가 여러 줄로 배치')
+    assert.ok((await members.boundingBox()).y > (await entry.getByText(/^확장 검수 /).boundingBox()).y, '멤버는 제목 아래 별도 행')
+    assert.equal(await entries.evaluateAll(elements => elements.every(element => element.scrollWidth <= element.clientWidth)), true, '회의 카드 가로 넘침 없음')
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), true)
+    await entry.screenshot({ path: path.join(root, `.tmp/meeting-list-scale-${width}.png`) })
+  }
   assert.deepEqual(errors, [])
   assert.deepEqual(external, [])
   console.log('meeting-ui-preview-browser: shared original UI/form/drawer/calendar/rounds/materials/response/delete; meeting date/time/room booking and conflict blocking without notes; one-off completion; open-ended routine; interview without applicant fields; mobile; reset/failure guards; zero server mutations or external requests passed')
