@@ -508,6 +508,7 @@ export function draftHasSampleWorkOrder(draft: {
 export function draftToInput(draft: ProductDraft): ProductDraftInput {
   const {
     id: _id,
+    createdBy: _creator,
     companyId: _companyId,
     draftNo: _draftNo,
     createdAt: _createdAt,
@@ -515,5 +516,5 @@ export function draftToInput(draft: ProductDraft): ProductDraftInput {
     promotedStyleId: _promoted,
     ...input
   } = draft
-  return input
+  return { ...input, expectedUpdatedAt: draft.updatedAt }
 }

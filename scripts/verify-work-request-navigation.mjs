@@ -526,7 +526,7 @@ console.info('PASS: 삭제·존재하지 않는 ID·잘못된 mode·생성/수�
     assert.match(tabs, /id: tabIdFromPath\(pathname\)/, '업무 탭 식별자는 정규화한 pathname만 사용해야 함')
   }
   assert.match(page, /const tabActive = useWorkspaceTabActivity\(\)/)
-  assert.match(page, /workRequestRecoverySearch\(locationSearch, resolvedView, \{\s*active: tabActive && ready,/)
+  assert.match(page, /workRequestRecoverySearch\(locationSearch, resolvedView, \{\s*active: tabActive && ready && !storage.loading && !storage.saving,/)
   assert.match(page, /shouldListenWorkRequestEscape\(\{\s*tabActive,/)
   assert.match(page, /function goToView\(action: WorkRequestNavAction\) \{\s*if \(!tabActive\) return/)
   const navigateCalls = page.match(/\bnavigate\(/g) ?? []
@@ -608,6 +608,6 @@ console.info('PASS: 숨겨진 탭 URL·Escape 보호, 같은 업무 탭 유지, 
   assert.match(detailBlock, /<FileAttachmentCard key=\{item\.id\} file=\{item\.file\} \/>/)
 
   assert.doesNotMatch(page, /localStorage|sessionStorage/, '작업 요청은 로컬 상태로만 유지해야 함')
-  assert.match(page, /UI 시안 단계입니다\. 요청은 새로고침하면 초기화됩니다\./)
+  assert.match(page, /등록한 요청과 첨부는 서버에 저장됩니다\./)
 }
 console.info('PASS: 모든 이미지 업로드 경로의 공용 기본 너비, 참고 파일 이미지 미리보기·크기 조절·상세 읽기 전용 표시')

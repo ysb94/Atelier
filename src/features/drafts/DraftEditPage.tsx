@@ -63,6 +63,7 @@ import {
   withPendingNextSampleWorkOrder,
 } from '@/lib/drafts/sample-work-order'
 import { useAuth } from '@/lib/supabase/auth'
+import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
 import {
   formatSizeSpec,
   parseSizeSpec,
@@ -473,6 +474,7 @@ export function DraftEditPage() {
   useRenderWatch('DraftEditPage')
   const { brands, brandBySlug } = useCompanyBrandScope()
   const { profile } = useAuth()
+  const workAccess = useBasicWorkAccess()
   const { draftId } = useParams()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
@@ -518,6 +520,7 @@ export function DraftEditPage() {
     : EMPTY_STYLES
 
   const loaded = draftQuery.data
+  const editable = canWriteDraft(workAccess.access, isNew ? null : loaded ?? { createdBy: null }, form.brandId)
   useEffect(() => {
     if (!loaded) return
     const {
@@ -605,6 +608,7 @@ export function DraftEditPage() {
 
   const saveMutation = useMutation({
     mutationFn: async (next?: ProductDraftInput) => {
+      if (!editable) throw new Error('기획안은 작성자만 수정할 수 있습니다.')
       const source = next ?? form
       const creator = profile?.displayName?.trim() ?? ''
       const payload =
@@ -616,7 +620,7 @@ export function DraftEditPage() {
       }
       if (isNew) return createProductDraft(companyId, payload)
       if (!draftId) throw new Error('기획안을 찾을 수 없습니다.')
-      return updateProductDraft(draftId, payload)
+      return updateProductDraft(draftId, { ...payload, expectedUpdatedAt: loaded?.updatedAt })
     },
     onSuccess: async (saved) => {
       setError(null)
@@ -634,6 +638,7 @@ export function DraftEditPage() {
 
   const deleteMutation = useMutation({
     mutationFn: async () => {
+      if (!editable) throw new Error('기획안은 작성자만 삭제할 수 있습니다.')
       if (!draftId || isNew) return
       return deleteProductDraft(draftId)
     },
@@ -727,12 +732,12 @@ export function DraftEditPage() {
               {savedAt} 저장됨
             </span>
           ) : null}
-          {!isNew ? (
+          {!isNew && editable ? (
             <Button
               type="button"
               variant="ghost"
               size="sm"
-              disabled={deleteMutation.isPending}
+              disabled={!editable || deleteMutation.isPending}
               onClick={() => {
                 if (window.confirm('이 기획안을 삭제할까요?')) {
                   deleteMutation.mutate()
@@ -746,7 +751,7 @@ export function DraftEditPage() {
           <Button
             type="button"
             size="sm"
-            disabled={saveMutation.isPending}
+            disabled={!editable || saveMutation.isPending}
             onClick={() => saveMutation.mutate(form)}
           >
             <Save className="size-3.5" />
@@ -755,6 +760,8 @@ export function DraftEditPage() {
         </div>
       </div>
 
+      {workAccess.error ? <p role="alert" className="mb-3 text-sm text-danger">{workAccess.error.message}</p> : !editable ? <p role="status" className="mb-3 text-sm text-muted-foreground">조회 전용 · 작성자와 지정된 운영 계정만 수정·삭제할 수 있습니다.</p> : null}
+      <fieldset disabled={!editable} className="min-w-0 border-0 p-0">
       <div className="mb-3">
         <DraftProgressStrip
           form={form}
@@ -1576,6 +1583,7 @@ export function DraftEditPage() {
           }}
         />
       ) : null}
+      </fieldset>
     </div>
   )
 }

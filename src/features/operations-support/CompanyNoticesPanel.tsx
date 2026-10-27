@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { useAuth } from '@/lib/supabase/auth'
+import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import { hasPermission } from '@/lib/company/permissions'
 import {
   COMPANY_NOTICE_SLOTS,
@@ -62,15 +63,17 @@ function draftFromNotice(notice: CompanyNotice): Draft {
 export function CompanyNoticesPanel() {
   useRenderWatch('CompanyNoticesPanel')
   const { profile } = useAuth()
+  const { access } = useBasicWorkAccess()
+  const basicOperations = access?.domains.includes('operations') === true
   const directory = useOpsDirectory()
   const queryClient = useQueryClient()
   const today = koreaDateKey()
   const [slot, setSlot] = useState<CompanyNoticeSlotId>(COMPANY_NOTICE_SLOTS[0].id)
   const [draft, setDraft] = useState<Draft | null>(null)
-  const canWriteNotice = (target: { slot: CompanyNoticeSlotId; departmentId: string | null }) => hasPermission(profile,
+  const canWriteNotice = (target: { slot: CompanyNoticeSlotId; departmentId: string | null }) => basicOperations || hasPermission(profile,
     target.slot === 'department' ? 'notice.department.write' : 'notice.company.write',
     target.slot === 'department' ? 'department' : 'company', target.departmentId || profile?.companyId)
-  const canEdit = draft ? canWriteNotice(draft) : hasPermission(profile, slot === 'department' ? 'notice.department.write' : 'notice.company.write')
+  const canEdit = draft ? canWriteNotice(draft) : basicOperations || hasPermission(profile, slot === 'department' ? 'notice.department.write' : 'notice.company.write')
   const [formError, setFormError] = useState('')
   const noticesQuery = useQuery({
     queryKey: ['company-notices'],
@@ -201,7 +204,7 @@ export function CompanyNoticesPanel() {
             disabled={!canEdit || busy}
             onClick={() => {
               const next = emptyDraft(slot)
-              if (slot === 'department') next.departmentId = directory.departments.find(department => hasPermission(profile,'notice.department.write','department',department.id))?.id ?? ''
+              if (slot === 'department') next.departmentId = directory.departments.find(department => basicOperations || hasPermission(profile,'notice.department.write','department',department.id))?.id ?? ''
               setDraft(next)
               setFormError('')
             }}
@@ -319,7 +322,7 @@ export function CompanyNoticesPanel() {
               onChange={(event) => setDraft({ ...draft, departmentId: event.target.value })}
             >
               {draft.slot === 'department' ? null : <option value="">회사 전체</option>}
-              {directory.departments.filter(department => draft.slot !== 'department' || department.id === draft.departmentId || hasPermission(profile,'notice.department.write','department',department.id)).map((department) => (
+              {directory.departments.filter(department => basicOperations || draft.slot !== 'department' || department.id === draft.departmentId || hasPermission(profile,'notice.department.write','department',department.id)).map((department) => (
                 <option key={department.id} value={department.id}>{department.name}</option>
               ))}
             </Select>

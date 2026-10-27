@@ -23,6 +23,7 @@ import {
   OPERATIONS_SUPPORT_DEPARTMENT,
 } from '@/lib/company/capabilities'
 import { useAuth } from '@/lib/supabase/auth'
+import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import {
   emptyRoster,
   listEmployeeRosters,
@@ -134,7 +135,8 @@ export function OrgChartPage({
   useRenderWatch(mode === 'manage' ? 'OrgChartManage' : 'OrgChartPage')
   const { profile } = useAuth()
   const queryClient = useQueryClient()
-  const canEdit = mode === 'manage' && canEditOrgAssignment(profile)
+  const { access } = useBasicWorkAccess()
+  const canEdit = mode === 'manage' && (canEditOrgAssignment(profile) || access?.domains.includes('operations') === true)
   const [view, setView] = useState<OrgView>(mode === 'manage' ? 'members' : 'chart')
   const [search, setSearch] = useState('')
   const [departmentFilter, setDepartmentFilter] = useState('all')
@@ -524,7 +526,7 @@ export function OrgChartPage({
                 title="직책"
                 titles={duties}
                 loading={titlesQuery.isPending}
-                canEdit={canEdit && !titlesQuery.isError}
+                canEdit={canEditOrgAssignment(profile) && mode === 'manage' && !titlesQuery.isError}
                 onChanged={refreshAssignments}
               />
               <TitleCatalog
@@ -532,7 +534,7 @@ export function OrgChartPage({
                 title="직급"
                 titles={grades}
                 loading={titlesQuery.isPending}
-                canEdit={canEdit && !titlesQuery.isError}
+                canEdit={canEditOrgAssignment(profile) && mode === 'manage' && !titlesQuery.isError}
                 onChanged={refreshAssignments}
               />
             </div>

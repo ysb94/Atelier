@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { canEditOrgAssignment } from '@/lib/company/capabilities'
+import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import { useAuth } from '@/lib/supabase/auth'
 import { loadCompanyLunch, saveCompanyLunch } from '@/lib/supabase/company-work-hours'
 import { addAttendanceStartOption, removeAttendanceStartOption } from '@/lib/supabase/attendance-start-options'
@@ -15,7 +16,9 @@ const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
 export function CompanyHoursPanel() {
   useRenderWatch('CompanyHoursPanel')
   const { profile } = useAuth()
-  const canEdit = canEditOrgAssignment(profile)
+  const { access } = useBasicWorkAccess()
+  const canEdit = canEditOrgAssignment(profile) || access?.domains.includes('operations') === true
+  const canRemove = canEditOrgAssignment(profile)
   const client = useQueryClient()
   const options = useAttendanceStartOptions()
   const [draft, setDraft] = useState('')
@@ -115,7 +118,7 @@ export function CompanyHoursPanel() {
               : options.options.map(item => <tr key={item} className="border-b border-border/70 last:border-0">
                 <th scope="row" className="px-4 py-3 font-medium">{item}</th>
                 <td className="px-4 py-3 text-muted-foreground">{startOptionLabel(item)}</td>
-                <td className="px-4 py-2"><Button type="button" size="sm" variant="outline" disabled={!canEdit || busy} onClick={() => removeOption.mutate(item)}>빼기</Button></td>
+                <td className="px-4 py-2"><Button type="button" size="sm" variant="outline" disabled={!canRemove || busy} onClick={() => removeOption.mutate(item)}>빼기</Button></td>
               </tr>)}
             {!options.loading && options.options.length === 0 && <tr><td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">등록된 출근시간이 없습니다.</td></tr>}
           </tbody>

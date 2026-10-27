@@ -1,3 +1,4 @@
+import { useBasicWorkAccess, canWriteProductField } from '@/lib/supabase/basic-work-access'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -502,6 +503,7 @@ export function ProductsPage({
   const scopedBrand = brandContext?.brand
   const isCompany = Boolean(companyBrands)
   const { profile } = useAuth()
+  const workAccess = useBasicWorkAccess()
   const navigate = useNavigate()
   const { brandSlug: activeBrandSlug, styleNo: activeStyleNoParam } = useParams()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -1254,7 +1256,7 @@ export function ProductsPage({
                 field={field}
                 seasonCode={seasonMap.get(row.original.seasonId)?.code}
                 seasons={seasons}
-                disabled={saveMutation.isPending}
+                disabled={!canWriteProductField(workAccess.access,field) || saveMutation.isPending}
                 onSave={handleSaveField}
               />
             )
@@ -1278,6 +1280,7 @@ export function ProductsPage({
     seasonMap,
     seasons,
     saveMutation.isPending,
+    workAccess.access,
     handleSaveField,
     styleNoLabel,
     nameLabel,

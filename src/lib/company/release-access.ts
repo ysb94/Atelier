@@ -42,7 +42,7 @@ export function releaseAccess(profile: ReleaseProfile | null | undefined) {
   }
 }
 export function releasePersonalPart(profile: ReleaseProfile | null | undefined, part: string | null, approver = false) {
-  return releaseAccess(profile).unrestricted || !part || part === 'my-attendance' || part === 'overtime' || part === 'meetings' || (part === 'approvals' && approver)
+  return releaseAccess(profile).unrestricted || !part || part === 'my-attendance' || part === 'overtime' || part === 'meetings' || (part === 'work' && profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID) || (part === 'approvals' && approver)
 }
 const under = (path: string, root: string) => path === root || path.startsWith(root + '/')
 
@@ -54,6 +54,7 @@ export function releaseHref(profile: ReleaseProfile | null | undefined, href: st
   const scope = releaseAccess(profile)
   if (scope.unrestricted) return href
   const path = url.pathname.replace(/\/$/, '') || '/'
+  if (profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID && /^\/work-requests\/(planning|design|md|logistics)$/.test(path)) return href
   if (path === RELEASE_HOME) return releasePersonalPart(profile, url.searchParams.get('part'), approver) ? href : null
   if (/^\/chat\/room\/[^/]+$/.test(path)) return href
   if (path === '/meetings') { url.pathname = RELEASE_HOME; url.searchParams.set('part', 'meetings'); return url.pathname + url.search }

@@ -85,6 +85,7 @@ type DragState = {
 }
 
 export function WorkRequestTeamBoard({
+  selfId = LOCAL_SELF_ID,
   unassigned,
   assigned,
   teamMembers,
@@ -96,6 +97,7 @@ export function WorkRequestTeamBoard({
   currentWorkByMember,
   workDurationByMember,
 }: {
+  selfId?: string
   unassigned: WorkRequestRecord[]
   assigned: WorkRequestRecord[]
   teamMembers: LocalTeamMember[]
@@ -760,6 +762,7 @@ export function WorkRequestTeamBoard({
 
       {assignRequest ? (
         <WorkRequestAssignDialog
+          selfId={selfId}
           request={assignRequest}
           teamMembers={teamMembers}
           assigned={assigned}
@@ -772,7 +775,7 @@ export function WorkRequestTeamBoard({
           onAssign={(memberId) => {
             onAssign(assignRequest.id, {
               assignee: memberId,
-              assignedBy: LOCAL_SELF_ID,
+              assignedBy: selfId,
               ...assignDefaultRange(assignRequest),
             })
             setAssignRequestId(null)

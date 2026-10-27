@@ -62,12 +62,14 @@ test('literal data resources, constants and Edge implementations include exact e
     getSupabase().functions.invoke('styled-image');
     getSupabase().from(tableName);
     Array.from('hello');
-    import(dynamicPath);`,
+    import(dynamicPath);
+    rpc<string>('save_wrapped_request');`,
   'supabase/functions/styled-image/index.ts': 'export const handler = () => null',
 }, root => {
   const result = analyze(root, config)
   assert.ok(result.nodes.some(n => n.id === 'table:styles'))
   assert.ok(result.nodes.some(n => n.id === 'rpc:save_styles'))
+  assert.ok(result.nodes.some(n => n.id === 'rpc:save_wrapped_request'))
   assert.ok(result.nodes.some(n => n.id === 'storage:images'))
   assert.ok(!result.nodes.some(n => n.id === 'table:hello'))
   assert.ok(result.edges.some(e => e.from === 'function:styled-image' && e.to === 'supabase/functions/styled-image/index.ts'))

@@ -1,3 +1,4 @@
+import { useBasicWorkAccess, canWriteProductField } from '@/lib/supabase/basic-work-access'
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { X } from 'lucide-react'
@@ -170,6 +171,7 @@ function componentSummary(
 export function ProductDetailDrawer() {
   const brandContext = useOptionalBrand()
   const workspaceActive = useWorkspaceTabActivity()
+  const workAccess = useBasicWorkAccess()
   const navigate = useNavigate()
   const location = useLocation()
   const { brandSlug: brandSlugParam, styleNo: styleNoParam } = useParams()
@@ -332,6 +334,8 @@ export function ProductDetailDrawer() {
       value: string
     }) => {
       if (!style) throw new Error('상품을 찾을 수 없습니다.')
+      const field = fields.find(item=>(item.systemKey || item.id)===key)
+      if (!field || !canWriteProductField(workAccess.access,field)) throw new Error('담당 부서 항목만 수정할 수 있습니다.')
       return updateStyleFields(style.id, { [key]: value })
     },
     onSuccess: async (updated) => {
@@ -504,7 +508,7 @@ export function ProductDetailDrawer() {
                               ? styleCategoryIds(categoryIndex, style.id)
                               : []
                             return (
-                              <div key={field.id} className="space-y-1.5">
+                              <fieldset disabled={!canWriteProductField(workAccess.access,field)} key={field.id} className="min-w-0 space-y-1.5">
                                 <span className="flex items-center gap-2 text-sm font-medium">
                                   {field.label}
                                   {field.required ? (
@@ -533,7 +537,7 @@ export function ProductDetailDrawer() {
                                     카테고리를 불러오는 중...
                                   </p>
                                 )}
-                              </div>
+                              </fieldset>
                             )
                           }
                           const sabangnetLinked = isSabangnetCodeField(field)
@@ -593,7 +597,7 @@ export function ProductDetailDrawer() {
                                   <Input
                                     type="url"
                                     value={value}
-                                    disabled={saveMutation.isPending}
+                                    disabled={!canWriteProductField(workAccess.access,field) || saveMutation.isPending}
                                     placeholder="직접 넣은 주소가 있으면 규칙을 대신합니다"
                                     onChange={(e) =>
                                       setDraft(field, e.target.value)
@@ -606,7 +610,7 @@ export function ProductDetailDrawer() {
                               field.systemKey === 'seasonId' ? (
                                 <Select
                                   value={value}
-                                  disabled={saveMutation.isPending}
+                                  disabled={!canWriteProductField(workAccess.access,field) || saveMutation.isPending}
                                   onChange={(e) => {
                                     const next = e.target.value
                                     setDraft(field, next)
@@ -633,7 +637,7 @@ export function ProductDetailDrawer() {
                                 <SelectFieldInput
                                   field={field}
                                   value={value}
-                                  disabled={saveMutation.isPending}
+                                  disabled={!canWriteProductField(workAccess.access,field) || saveMutation.isPending}
                                   onChange={(next) => {
                                     setDraft(field, next)
                                     if (!style) return
@@ -650,7 +654,7 @@ export function ProductDetailDrawer() {
                                 field.systemKey === 'gender' ? (
                                 <Select
                                   value={value}
-                                  disabled={saveMutation.isPending}
+                                  disabled={!canWriteProductField(workAccess.access,field) || saveMutation.isPending}
                                   onChange={(e) => {
                                     const next = e.target.value
                                     setDraft(field, next)
@@ -674,7 +678,7 @@ export function ProductDetailDrawer() {
                               ) : field.systemKey === 'status' ? (
                                 <Select
                                   value={value}
-                                  disabled={saveMutation.isPending}
+                                  disabled={!canWriteProductField(workAccess.access,field) || saveMutation.isPending}
                                   onChange={(e) => {
                                     const next = e.target.value
                                     setDraft(field, next)
@@ -703,7 +707,7 @@ export function ProductDetailDrawer() {
                                 <Textarea
                                   rows={3}
                                   value={value}
-                                  disabled={saveMutation.isPending}
+                                  disabled={!canWriteProductField(workAccess.access,field) || saveMutation.isPending}
                                   onChange={(e) =>
                                     setDraft(field, e.target.value)
                                   }
@@ -718,7 +722,7 @@ export function ProductDetailDrawer() {
                                       : undefined
                                   }
                                   value={value}
-                                  disabled={saveMutation.isPending}
+                                  disabled={!canWriteProductField(workAccess.access,field) || saveMutation.isPending}
                                   onChange={(e) =>
                                     setDraft(field, e.target.value)
                                   }

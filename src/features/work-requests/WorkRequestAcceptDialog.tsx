@@ -17,11 +17,13 @@ export type AcceptDecision = {
 }
 
 export function WorkRequestAcceptDialog({
+  selfId = LOCAL_SELF_ID,
   request,
   teamMembers,
   onClose,
   onConfirm,
 }: {
+  selfId?: string
   request: WorkRequestRecord
   teamMembers: LocalTeamMember[]
   onClose: () => void
@@ -106,7 +108,7 @@ export function WorkRequestAcceptDialog({
                     />
                     <span className="truncate">
                       {member.name}
-                      {member.id === LOCAL_SELF_ID ? ' (나)' : ''} ·{' '}
+                      {member.id === selfId ? ' (나)' : ''} ·{' '}
                       {member.position}
                     </span>
                   </label>

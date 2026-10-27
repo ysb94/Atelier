@@ -99,6 +99,9 @@ export type WorkRequestChatRoom = {
 
 export type WorkRequestRecord = {
   id: string
+  requesterId?: string
+  revision?: number
+  completionResult?: string
   owner: WorkRequestOwner
   /** 빈 문자열이면 브랜드 미정 */
   brandId: string

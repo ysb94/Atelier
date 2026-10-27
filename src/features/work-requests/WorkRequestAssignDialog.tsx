@@ -22,6 +22,7 @@ function isHardPriority(priority: WorkRequestRecord['managerPriority']) {
 }
 
 export function WorkRequestAssignDialog({
+  selfId = LOCAL_SELF_ID,
   request,
   teamMembers,
   assigned,
@@ -30,6 +31,7 @@ export function WorkRequestAssignDialog({
   onOpenDetail,
   onAssign,
 }: {
+  selfId?: string
   request: WorkRequestRecord
   teamMembers: LocalTeamMember[]
   assigned: WorkRequestRecord[]
@@ -39,9 +41,9 @@ export function WorkRequestAssignDialog({
   onAssign: (memberId: string) => void
 }) {
   const hard = isHardPriority(request.managerPriority)
-  const self = teamMembers.find((member) => member.id === LOCAL_SELF_ID)
+  const self = teamMembers.find((member) => member.id === selfId)
   const others = teamMembers
-    .filter((member) => member.id !== LOCAL_SELF_ID)
+    .filter((member) => member.id !== selfId)
     .sort((left, right) => {
       if (hard) {
         return positionRank(right.position) - positionRank(left.position)
@@ -170,7 +172,7 @@ function MemberAssignRow({
       )}
     >
       <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-semibold text-muted-foreground">
-        {member.id === LOCAL_SELF_ID ? (
+        {member.isSelf ? (
           <UserPlus className="size-4" />
         ) : (
           member.name.slice(0, 1)

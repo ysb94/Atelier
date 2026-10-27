@@ -338,6 +338,8 @@ export type DraftColorSampleRound = {
 
 export type ProductDraft = {
   id: string
+  /** Immutable authenticated creator. Legacy drafts may have no known creator. */
+  createdBy?: string | null
   companyId: string
   /** 출시 확정 전에는 비워 둘 수 있다. 상품·코드·물류 행의 brand_id와 달리 기획안만 예외다. */
   brandId: string | null
@@ -391,8 +393,8 @@ export type ProductDraft = {
 
 export type ProductDraftInput = Omit<
   ProductDraft,
-  'id' | 'companyId' | 'draftNo' | 'createdAt' | 'updatedAt' | 'promotedStyleId'
->
+  'id' | 'createdBy' | 'companyId' | 'draftNo' | 'createdAt' | 'updatedAt' | 'promotedStyleId'
+> & { expectedUpdatedAt?: string }
 
 export const DRAFT_STATUS_LABEL: Record<ProductDraftStatus, string> = {
   open: '검토중',

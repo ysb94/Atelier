@@ -1,3 +1,4 @@
+import { useWorkRequests } from './use-work-requests'
 import {
   Fragment,
   useEffect,
@@ -49,18 +50,15 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input, Select } from '@/components/ui/input'
-import { ATELIER_BRAND_ID } from '@/lib/company/capabilities'
 import { useAuth } from '@/lib/supabase/auth'
 import { listBrandDirectory } from '@/lib/supabase/profiles'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, emptyList } from '@/lib/utils'
 import {
   departmentDisplayName,
-  isSameDepartment,
   isWorkRequestOwner,
   resolveWorkRequestViewRole,
   WORK_REQUEST_CONFIG,
-  WORK_REQUEST_OWNERS,
   type WorkRequestOwner,
 } from './work-request-form-config'
 import { WorkRequestAcceptDialog } from './WorkRequestAcceptDialog'
@@ -71,7 +69,6 @@ import { WorkRequestTeamBoard } from './WorkRequestTeamBoard'
 import {
   compareRequestsByDeadline,
   dateFromToday,
-  dateTimeFromToday,
   deadlineLabel,
   currentWorkElapsedMs,
   flushWorkTime,
@@ -83,20 +80,16 @@ import {
   requestPlannedRange,
   startWorkTime,
   workTimeKey,
-  type WorkTimeLog,
 } from './work-request-schedule'
 import {
   DEFAULT_IMAGE_WIDTH_PERCENT,
   IMAGE_BASE_WIDTH_PX,
   LOCAL_CURRENT_DEPARTMENT,
-  LOCAL_SELF_ID,
   PRIORITY_META,
   REQUESTER_CHAT_ROOM,
   STATUS_META,
   isClosedStatus,
   isCompletionPending,
-  localTeamMembers,
-  makeMessageId,
   nextCompletionStatus,
   needsLeadCompletionReview,
   brandLabelForRequest,
@@ -149,385 +142,6 @@ function createEmptyValues(): FormValues {
   }
 }
 
-function demoValues({
-  title,
-  requester,
-  requesterPosition = '사원',
-  dueIn,
-  body,
-}: {
-  title: string
-  requester: string
-  requesterPosition?: string
-  dueIn: number
-  body: string
-}): FormValues {
-  return {
-    title,
-    requester,
-    requesterPosition,
-    dueDate: dateFromToday(dueIn),
-    referenceFiles: [],
-    blocks: [emptyTextBlock(body)],
-  }
-}
-
-function incomingSourceDepartments(owner: WorkRequestOwner): string[] {
-  return WORK_REQUEST_OWNERS.filter((item) => item !== owner).map(
-    (item) => WORK_REQUEST_CONFIG[item].teamName,
-  )
-}
-
-function isCurrentUserRequest(
-  requesterDepartment: string,
-  userDepartment?: string | null,
-) {
-  if (requesterDepartment === LOCAL_CURRENT_DEPARTMENT) return true
-  return isSameDepartment(requesterDepartment, userDepartment)
-}
-
-function createDemoRequests(owner: WorkRequestOwner): WorkRequestRecord[] {
-  const destination = WORK_REQUEST_CONFIG[owner].teamName
-  const prefix = owner.slice(0, 2).toUpperCase()
-  const sourceDepartments = incomingSourceDepartments(owner)
-  const sourceA = sourceDepartments[0] ?? '기획'
-  const sourceB = sourceDepartments[1] ?? 'MD'
-  const sourceC = sourceDepartments[2] ?? '물류'
-
-  const requests: Omit<
-    WorkRequestRecord,
-    | 'messages'
-    | 'assignedBy'
-    | 'assignedAt'
-    | 'completedAt'
-    | 'completionRequestedAt'
-    | 'completionRejectCount'
-    | 'brandId'
-    | 'brandDecidedAt'
-    | 'brandDecidedBy'
-  >[] = [
-    {
-      id: `WR-${prefix}-001`,
-      owner,
-      requesterDepartment: sourceA,
-      values: demoValues({
-        title: `[긴급 확인] ${destination} 결과물 일정 검토 요청`,
-        requester: '한유진',
-        requesterPosition: '과장',
-        dueIn: 2,
-        body: `${sourceA}에서 ${destination}으로 보낸 요청입니다. 채널 오픈 전에 필요한 결과물이니 처리 일정과 추가 자료를 알려 주세요.`,
-      }),
-      status: 'requested',
-      managerPriority: '',
-      assignee: '',
-      collaborators: [],
-      confirmedDueDate: '',
-      plannedStart: '',
-      plannedEnd: '',
-      createdAt: dateTimeFromToday(-1, 10),
-      updatedAt: dateTimeFromToday(-1, 10),
-    },
-    {
-      id: `WR-${prefix}-002`,
-      owner,
-      requesterDepartment: sourceB,
-      values: demoValues({
-        title: `[검토 요청] 26FW 프로모션 ${destination} 업무`,
-        requester: '최도윤',
-        requesterPosition: '대리',
-        dueIn: 5,
-        body: `${sourceB}에서 ${destination}으로 보낸 요청입니다. 26FW 프로모션 오픈에 맞춰 세부 범위를 조율해 주세요.`,
-      }),
-      status: 'reviewing',
-      managerPriority: 'high',
-      assignee: '',
-      collaborators: [],
-      confirmedDueDate: '',
-      plannedStart: '',
-      plannedEnd: '',
-      createdAt: dateTimeFromToday(-2, 14),
-      updatedAt: dateTimeFromToday(-1, 15),
-    },
-    {
-      id: `WR-${prefix}-003`,
-      owner,
-      requesterDepartment: sourceC,
-      values: demoValues({
-        title: `[업무 요청] 신상품 출시 ${destination} 반영`,
-        requester: '정하린',
-        requesterPosition: '사원',
-        dueIn: 8,
-        body: `${sourceC}에서 ${destination}으로 보낸 요청입니다. 접수 후 주 담당자와 협업자를 배정해 주세요.`,
-      }),
-      status: 'accepted',
-      managerPriority: 'normal',
-      assignee: '',
-      collaborators: [],
-      confirmedDueDate: dateFromToday(7),
-      plannedStart: '',
-      plannedEnd: '',
-      createdAt: dateTimeFromToday(-3, 9),
-      updatedAt: dateTimeFromToday(-1, 11),
-    },
-    {
-      id: `WR-${prefix}-004`,
-      owner,
-      requesterDepartment: sourceA,
-      values: demoValues({
-        title: `[진행 중] 주간 운영 ${destination} 수정`,
-        requester: '윤서아',
-        requesterPosition: '팀장',
-        dueIn: 3,
-        body: `${sourceA}에서 요청한 운영 수정입니다. 주 담당자와 협업자가 함께 진행 중입니다.`,
-      }),
-      status: 'inProgress',
-      managerPriority: 'high',
-      assignee: LOCAL_SELF_ID,
-      collaborators: ['member-min'],
-      confirmedDueDate: dateFromToday(3),
-      plannedStart: dateFromToday(-1),
-      plannedEnd: dateFromToday(2),
-      createdAt: dateTimeFromToday(-5, 11),
-      updatedAt: dateTimeFromToday(-1, 17),
-    },
-    {
-      id: `WR-${prefix}-005`,
-      owner,
-      requesterDepartment: sourceB,
-      values: demoValues({
-        title: `[진행 중] 시즌 캠페인 ${destination} 준비`,
-        requester: '김태오',
-        requesterPosition: '대리',
-        dueIn: 1,
-        body: `${sourceB}에서 요청한 시즌 캠페인 준비입니다. 다른 사원에게 배정된 업무입니다.`,
-      }),
-      status: 'inProgress',
-      managerPriority: 'urgent',
-      assignee: 'member-min',
-      collaborators: [],
-      confirmedDueDate: dateFromToday(1),
-      plannedStart: dateFromToday(0),
-      plannedEnd: dateFromToday(1),
-      createdAt: dateTimeFromToday(-6, 13),
-      updatedAt: dateTimeFromToday(0, 9),
-    },
-    {
-      id: `WR-${prefix}-006`,
-      owner,
-      requesterDepartment: sourceC,
-      values: demoValues({
-        title: `[보류] 협력사 확인 후 ${destination} 반영`,
-        requester: '박시은',
-        requesterPosition: '사원',
-        dueIn: 9,
-        body: `${sourceC}에서 요청한 업무입니다. 협력사 원본 자료가 도착하면 재개합니다.`,
-      }),
-      status: 'waiting',
-      managerPriority: 'low',
-      assignee: 'member-jun',
-      collaborators: [LOCAL_SELF_ID],
-      confirmedDueDate: dateFromToday(9),
-      plannedStart: dateFromToday(2),
-      plannedEnd: dateFromToday(6),
-      createdAt: dateTimeFromToday(-7, 15),
-      updatedAt: dateTimeFromToday(-2, 10),
-    },
-    {
-      id: `WR-${prefix}-007`,
-      owner,
-      requesterDepartment: sourceA,
-      values: demoValues({
-        title: `[완료] 지난주 ${destination} 운영 요청`,
-        requester: '이주원',
-        requesterPosition: '과장',
-        dueIn: -1,
-        body: `${sourceA}에서 보낸 지난주 요청으로, 다른 사원이 완료했습니다.`,
-      }),
-      status: 'completed',
-      managerPriority: 'normal',
-      assignee: 'member-seo',
-      collaborators: [],
-      confirmedDueDate: dateFromToday(-1),
-      plannedStart: dateFromToday(-8),
-      plannedEnd: dateFromToday(-2),
-      createdAt: dateTimeFromToday(-10, 9),
-      updatedAt: dateTimeFromToday(-1, 16),
-    },
-    {
-      id: `WR-${prefix}-008`,
-      owner,
-      requesterDepartment: LOCAL_CURRENT_DEPARTMENT,
-      values: demoValues({
-        title: `[요청] ${destination} 협업 일정 확인`,
-        requester: '나',
-        requesterPosition: '이사',
-        dueIn: 6,
-        body: `현재 소속 부서에서 ${destination}으로 보낸 요청입니다. 요청자 화면에서만 목록에 함께 보입니다.`,
-      }),
-      status: 'reviewing',
-      managerPriority: '',
-      assignee: '',
-      collaborators: [],
-      confirmedDueDate: '',
-      plannedStart: '',
-      plannedEnd: '',
-      createdAt: dateTimeFromToday(-1, 16),
-      updatedAt: dateTimeFromToday(-1, 16),
-    },
-    {
-      id: `WR-${prefix}-009`,
-      owner,
-      requesterDepartment: LOCAL_CURRENT_DEPARTMENT,
-      values: demoValues({
-        title: `[접수] ${destination} 작업 범위 확정`,
-        requester: '나',
-        requesterPosition: '이사',
-        dueIn: 10,
-        body: `현재 소속 부서에서 ${destination}으로 보낸 요청입니다. 접수됐지만 아직 담당자는 없습니다.`,
-      }),
-      status: 'accepted',
-      managerPriority: 'normal',
-      assignee: '',
-      collaborators: [],
-      confirmedDueDate: dateFromToday(9),
-      plannedStart: '',
-      plannedEnd: '',
-      createdAt: dateTimeFromToday(-4, 10),
-      updatedAt: dateTimeFromToday(-2, 14),
-    },
-    {
-      id: `WR-${prefix}-010`,
-      owner,
-      requesterDepartment: sourceB,
-      values: demoValues({
-        title: `[완료] 내가 맡은 ${destination} 지난 요청`,
-        requester: '오하은',
-        requesterPosition: '대리',
-        dueIn: -2,
-        body: `${sourceB}에서 요청한 업무로, 현재 접속자에게 배정되어 완료된 임시 데이터입니다.`,
-      }),
-      status: 'completed',
-      managerPriority: 'normal',
-      assignee: LOCAL_SELF_ID,
-      collaborators: [],
-      confirmedDueDate: dateFromToday(-2),
-      plannedStart: dateFromToday(-9),
-      plannedEnd: dateFromToday(-3),
-      createdAt: dateTimeFromToday(-12, 11),
-      updatedAt: dateTimeFromToday(-2, 16),
-    },
-  ]
-
-  return requests.map((request) => {
-    const undecided =
-      request.id.endsWith('-002') || request.id.endsWith('-008')
-    return attachDemoMessages(
-      {
-        ...request,
-        brandId: undecided ? '' : ATELIER_BRAND_ID,
-        brandDecidedAt: undecided ? '' : request.createdAt,
-        brandDecidedBy: undecided ? '' : 'demo-lead',
-        assignedBy: request.assignee ? LOCAL_SELF_ID : '',
-        assignedAt: request.assignee
-          ? request.plannedStart || request.createdAt
-          : '',
-        completedAt:
-          request.status === 'completed' ? request.updatedAt : '',
-        completionRequestedAt:
-          request.status === 'completed' ? request.updatedAt : '',
-        completionRejectCount: request.id.endsWith('-010') ? 1 : 0,
-      },
-      destination,
-    )
-  })
-}
-
-function attachDemoMessages(
-  request: Omit<WorkRequestRecord, 'messages'>,
-  destination: string,
-): WorkRequestRecord {
-  if (request.id.endsWith('-002')) {
-    return {
-      ...request,
-      messages: [
-        {
-          id: `${request.id}-m1`,
-          roomId: 'requester',
-          authorId: 'member-min',
-          authorName: '김민지',
-          authorPosition: '대리',
-          body: `범위 확인 중입니다. ${destination}에서 우선 반영할 항목을 알려 주세요.`,
-          createdAt: dateTimeFromToday(-1, 16),
-        },
-        {
-          id: `${request.id}-m2`,
-          roomId: 'requester',
-          authorId: 'demo-requester',
-          authorName: request.values.requester,
-          authorPosition: request.values.requesterPosition,
-          body: '1차는 프로모션 메인 이미지와 일정 확정만 부탁드립니다.',
-          createdAt: dateTimeFromToday(-1, 17),
-        },
-      ],
-    }
-  }
-
-  if (request.id.endsWith('-004')) {
-    return {
-      ...request,
-      messages: [
-        {
-          id: `${request.id}-m1`,
-          roomId: 'member-min',
-          authorId: LOCAL_SELF_ID,
-          authorName: '나',
-          authorPosition: '이사',
-          body: '오늘 오후까지 1차 수정안을 올리겠습니다.',
-          createdAt: dateTimeFromToday(-1, 11),
-        },
-        {
-          id: `${request.id}-m2`,
-          roomId: 'member-min',
-          authorId: 'member-min',
-          authorName: '김민지',
-          authorPosition: '대리',
-          body: '확인했습니다. 컬러 가이드만 맞춰 주세요.',
-          createdAt: dateTimeFromToday(-1, 13),
-        },
-      ],
-    }
-  }
-
-  return { ...request, messages: [] }
-}
-
-function demoCurrentWork(owner: WorkRequestOwner): Record<string, string> {
-  const prefix = owner.slice(0, 2).toUpperCase()
-  return {
-    [LOCAL_SELF_ID]: `WR-${prefix}-004`,
-    'member-min': `WR-${prefix}-005`,
-  }
-}
-
-function demoWorkTime(owner: WorkRequestOwner): Record<string, WorkTimeLog> {
-  const prefix = owner.slice(0, 2).toUpperCase()
-  const now = Date.now()
-  return {
-    [workTimeKey(LOCAL_SELF_ID, `WR-${prefix}-004`)]: {
-      accumulatedMs: 18 * 60 * 1000,
-      mountedAt: now - 6 * 60 * 1000,
-    },
-    [workTimeKey('member-min', `WR-${prefix}-005`)]: {
-      accumulatedMs: 3 * 60 * 60 * 1000 + 20 * 60 * 1000,
-      mountedAt: now - 45 * 60 * 1000,
-    },
-    [workTimeKey('member-jun', `WR-${prefix}-006`)]: {
-      accumulatedMs: 52 * 60 * 1000,
-      mountedAt: null,
-    },
-  }
-}
-
 function hasRequestBody(blocks: ContentBlock[]): boolean {
   // 참고 파일만 있는 초안은 요청 내용을 쓴 것이 아니다. 본문 블록만 필수값으로 본다.
   return blocks.some((block) =>
@@ -551,10 +165,6 @@ function fileFormatLabel(file: File): string {
   if (file.type.startsWith('audio/')) return 'AUDIO'
   if (file.type.includes('zip') || file.type.includes('compressed')) return 'ZIP'
   return 'FILE'
-}
-
-function makeRequestId(): string {
-  return `WR-${Date.now().toString(36).toUpperCase()}`
 }
 
 function isImageFile(file: File): boolean {
@@ -2147,6 +1757,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   useRenderWatch(`WorkRequestForm:${owner}`)
   const config = WORK_REQUEST_CONFIG[owner]
   const { profile, ready } = useAuth()
+  const selfId=profile?.id??''
+  const storage=useWorkRequests(owner)
+  const {requests,setRequests,currentWorkByMember,setCurrentWorkByMember,workTimeByKey,setWorkTimeByKey,teamMembers}=storage
   const [searchParams] = useSearchParams()
   const location = useLocation()
   const navigate = useNavigate()
@@ -2157,6 +1770,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   })
   const brands = brandsQuery.data ?? emptyList()
   const pageTopRef = useRef<HTMLDivElement>(null)
+  const pendingRequestId=useRef<string|null>(null)
   const appendBodyFilesRef = useRef<(files: File[]) => void>(() => {
     console.warn('[work-request] 요청 내용에 파일을 넣지 못했습니다.', {
       reason: '편집기가 연결되지 않음',
@@ -2170,9 +1784,6 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     draftKey: string | null
     baseBrandId: string
   }>({ screenKey: '', draftKey: null, baseBrandId: '' })
-  const [requests, setRequests] = useState<WorkRequestRecord[]>(() =>
-    createDemoRequests(owner),
-  )
   const [brandFilter, setBrandFilter] = useState<'all' | 'undecided' | string>(
     () => (searchParams.get('brand') === 'undecided' ? 'undecided' : 'all'),
   )
@@ -2186,12 +1797,6 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const [flashMessage, setFlashMessage] = useState<string | null>(null)
   const [acceptRequestId, setAcceptRequestId] = useState<string | null>(null)
   const [reviewConfirmId, setReviewConfirmId] = useState<string | null>(null)
-  const [currentWorkByMember, setCurrentWorkByMember] = useState<
-    Record<string, string>
-  >(() => demoCurrentWork(owner))
-  const [workTimeByKey, setWorkTimeByKey] = useState<Record<string, WorkTimeLog>>(
-    () => demoWorkTime(owner),
-  )
   const [workClock, setWorkClock] = useState(() => Date.now())
 
   const currentDepartment = profile?.departmentName
@@ -2205,17 +1810,10 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     profile ?? undefined,
   )
   const isDestinationMember = viewRole !== 'requester'
-  const canManage = viewRole === 'manager'
-  const teamMembers = localTeamMembers(
-    config.teamName,
-    profile?.displayName,
-    profile?.position,
-  )
+  const canManage = storage.canManage
 
   useEffect(() => {
     setListSection(canManage ? 'inbox' : isDestinationMember ? 'mine' : 'sent')
-    setCurrentWorkByMember(demoCurrentWork(owner))
-    setWorkTimeByKey(demoWorkTime(owner))
   }, [canManage, isDestinationMember, owner])
 
   useEffect(() => {
@@ -2228,19 +1826,16 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   function navigationAccess(requestId: string): WorkRequestAccess | null {
     const request = requests.find((item) => item.id === requestId)
     if (!request || request.owner !== owner) return null
-    const isIncoming =
-      !isDestinationMember ||
-      request.requesterDepartment !== LOCAL_CURRENT_DEPARTMENT
+    const isIncoming = true
     const isSelfRequest =
-      !isDestinationMember &&
-      isCurrentUserRequest(request.requesterDepartment, profile?.departmentName)
-    const visible = canManage
+      (request.requesterId === selfId)
+    const visible = isSelfRequest || (canManage
       ? isIncoming
       : isDestinationMember
         ? isIncoming &&
-          (request.assignee === LOCAL_SELF_ID ||
-            request.collaborators.includes(LOCAL_SELF_ID))
-        : isSelfRequest
+          (request.assignee === selfId ||
+            request.collaborators.includes(selfId))
+        : isSelfRequest)
     if (!visible) return null
     return {
       needsReviewStart: canManage && request.status === 'requested',
@@ -2251,13 +1846,13 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const locationPathname = location.pathname
   const locationSearch = location.search
   const resolvedView = resolveWorkRequestView(locationSearch, {
-    canCreate: !isDestinationMember,
+    canCreate: true,
     accessOf: navigationAccess,
   })
   const view = resolvedView.view
   const detailRequestId = view.kind === 'detail' ? view.requestId : null
   const recoverySearch = workRequestRecoverySearch(locationSearch, resolvedView, {
-    active: tabActive && ready,
+    active: tabActive && ready && !storage.loading && !storage.saving,
   })
 
   useEffect(() => {
@@ -2398,10 +1993,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   function requesterLabel(request: WorkRequestRecord) {
     const position =
       request.values.requesterPosition ||
-      (isCurrentUserRequest(
-        request.requesterDepartment,
-        profile?.departmentName,
-      )
+      ((request.requesterId === selfId)
         ? profile?.position
         : '')
     return personLabel(request.values.requester, position)
@@ -2454,8 +2046,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     return nextErrors
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if(storage.saving)return
     const nextErrors = validate()
     setErrors(nextErrors)
     pageTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -2475,18 +2068,21 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             : request,
         ),
       )
+      if(!await storage.waitForSaves())return
       setFlashMessage('요청 내용을 수정했습니다.')
       setFormDrafts((current) => dropWorkRequestDraft(current, draftKey))
       goToView({ type: 'saved', requestId: editingRequest.id })
     } else {
-      const id = makeRequestId()
+      const id = pendingRequestId.current??crypto.randomUUID()
+      pendingRequestId.current=id
       setRequests((current) => [
         {
           id,
+          requesterId:selfId,
           owner,
           brandId: formBrandId,
           brandDecidedAt: formBrandId ? now : '',
-          brandDecidedBy: formBrandId ? LOCAL_SELF_ID : '',
+          brandDecidedBy: formBrandId ? selfId : '',
           values: { ...values },
           requesterDepartment:
             profile?.departmentName?.trim() || LOCAL_CURRENT_DEPARTMENT,
@@ -2506,8 +2102,10 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
           completionRequestedAt: '',
           completionRejectCount: 0,
         },
-        ...current,
+        ...current.filter(item=>item.id!==id),
       ])
+      if(!await storage.waitForSaves())return
+      pendingRequestId.current=null
       setFlashMessage('작업 요청을 등록했습니다.')
       setFormDrafts((current) => dropWorkRequestDraft(current, draftKey))
       goToView({ type: 'saved', requestId: id })
@@ -2585,31 +2183,28 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         patch.status === 'cancelled' ||
         patch.status === 'rejected' ||
         isCompletionPending(patch.status ?? 'requested')) &&
-      currentWorkByMember[LOCAL_SELF_ID] === requestId
+      currentWorkByMember[selfId] === requestId
     ) {
       const clock = Date.now()
       setCurrentWorkByMember((current) => {
         const next = { ...current }
-        delete next[LOCAL_SELF_ID]
+        delete next[selfId]
         return next
       })
       setWorkTimeByKey((current) =>
-        flushWorkTime(current, LOCAL_SELF_ID, requestId, clock),
+        flushWorkTime(current, selfId, requestId, clock),
       )
       setWorkClock(clock)
     }
   }
 
   function canWriteChat(request: WorkRequestRecord) {
-    const isSelfRequest = isCurrentUserRequest(
-      request.requesterDepartment,
-      profile?.departmentName,
-    )
+    const isSelfRequest = (request.requesterId === selfId)
     if (isSelfRequest) return true
     if (canManage && request.owner === owner) return true
     return (
-      request.assignee === LOCAL_SELF_ID ||
-      request.collaborators.includes(LOCAL_SELF_ID)
+      request.assignee === selfId ||
+      request.collaborators.includes(selfId)
     )
   }
 
@@ -2617,9 +2212,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const text = body.trim()
     if (!text) return
     const message: WorkRequestMessage = {
-      id: makeMessageId(),
+      id: crypto.randomUUID(),
       roomId,
-      authorId: LOCAL_SELF_ID,
+      authorId: selfId,
       authorName: profile?.displayName?.trim() || '나',
       authorPosition: profile?.position ?? '',
       body: text,
@@ -2680,9 +2275,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     if (reason == null) return
     const text = reason.trim() || '요청을 반려했습니다.'
     const message: WorkRequestMessage = {
-      id: makeMessageId(),
+      id: crypto.randomUUID(),
       roomId: REQUESTER_CHAT_ROOM,
-      authorId: LOCAL_SELF_ID,
+      authorId: selfId,
       authorName: profile?.displayName?.trim() || '나',
       authorPosition: profile?.position ?? '',
       body: text,
@@ -2696,7 +2291,10 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   }
 
   function requestCompletion(request: WorkRequestRecord) {
+    const result=window.prompt('완료 결과를 입력하세요.',request.completionResult??'')
+    if(result===null)return
     updateRequest(request.id, {
+      completionResult:result.trim(),
       status: nextCompletionStatus(request),
       completionRequestedAt: new Date().toISOString(),
     })
@@ -2722,9 +2320,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     if (reason == null) return
     const text = reason.trim() || '완료 요청을 반려했습니다.'
     const message: WorkRequestMessage = {
-      id: makeMessageId(),
+      id: crypto.randomUUID(),
       roomId,
-      authorId: LOCAL_SELF_ID,
+      authorId: selfId,
       authorName: profile?.displayName?.trim() || '나',
       authorPosition: profile?.position ?? '',
       body: text,
@@ -2752,13 +2350,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const destinationRequests = requests.filter(
     (request) => request.owner === owner && matchesBrandFilter(request),
   )
-  const incomingRequests = destinationRequests.filter(
-    (request) =>
-      !isDestinationMember ||
-      request.requesterDepartment !== LOCAL_CURRENT_DEPARTMENT,
-  )
+  const incomingRequests = destinationRequests.filter(request=>request.requesterId!==selfId)
   const sentRequests = destinationRequests.filter((request) =>
-    isCurrentUserRequest(request.requesterDepartment, profile?.departmentName),
+    (request.requesterId === selfId),
   )
   const unreviewedRequests = incomingRequests
     .filter((request) => request.status === 'requested')
@@ -2782,8 +2376,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   )
   const myTasks = incomingRequests.filter(
     (request) =>
-      request.assignee === LOCAL_SELF_ID ||
-      request.collaborators.includes(LOCAL_SELF_ID),
+      request.assignee === selfId ||
+      request.collaborators.includes(selfId),
   )
   const myActiveTasks = myTasks.filter(
     (request) => !isClosedStatus(request.status),
@@ -2834,7 +2428,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         ]
       : [{ id: 'sent', label: '보낸 요청', count: sentRequests.length }]
 
-  const allowedSection: WorkListSection = canManage
+  if (!listSections.some(item=>item.id==='sent')) listSections.push({id:'sent',label:'보낸 요청',count:sentRequests.length})
+  const allowedSection: WorkListSection = listSection==='sent' ? 'sent' : canManage
     ? listSection === 'team' ||
       listSection === 'mine' ||
       listSection === 'completed'
@@ -2872,17 +2467,17 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
   function mountCurrentWork(requestId: string) {
     const now = Date.now()
-    const previous = currentWorkByMember[LOCAL_SELF_ID]
+    const previous = currentWorkByMember[selfId]
     setCurrentWorkByMember((current) => ({
       ...current,
-      [LOCAL_SELF_ID]: requestId,
+      [selfId]: requestId,
     }))
     setWorkTimeByKey((current) => {
       let next = current
       if (previous && previous !== requestId) {
-        next = flushWorkTime(next, LOCAL_SELF_ID, previous, now)
+        next = flushWorkTime(next, selfId, previous, now)
       }
-      return startWorkTime(next, LOCAL_SELF_ID, requestId, now)
+      return startWorkTime(next, selfId, requestId, now)
     })
     setWorkClock(now)
     setFlashMessage('지금 하는 업무로 장착했습니다. 업무 관리 담당자 화면에 바로 보입니다.')
@@ -2890,15 +2485,15 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
   function unmountCurrentWork() {
     const now = Date.now()
-    const previous = currentWorkByMember[LOCAL_SELF_ID]
+    const previous = currentWorkByMember[selfId]
     setCurrentWorkByMember((current) => {
       const next = { ...current }
-      delete next[LOCAL_SELF_ID]
+      delete next[selfId]
       return next
     })
     if (previous) {
       setWorkTimeByKey((current) =>
-        flushWorkTime(current, LOCAL_SELF_ID, previous, now),
+        flushWorkTime(current, selfId, previous, now),
       )
     }
     setWorkClock(now)
@@ -2940,8 +2535,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const status = STATUS_META[request.status]
     const dueDate = request.confirmedDueDate || request.values.dueDate
     const deadline = deadlineLabel(dueDate)
-    const isPrimaryAssignee = request.assignee === LOCAL_SELF_ID
-    const isMounted = currentWorkByMember[LOCAL_SELF_ID] === request.id
+    const isPrimaryAssignee = request.assignee === selfId
+    const isMounted = currentWorkByMember[selfId] === request.id
     const completionPending = isCompletionPending(request.status)
     const canStartWork =
       isPrimaryAssignee && request.status === 'accepted'
@@ -2955,8 +2550,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         ? '다시 진행'
         : '완료 요청'
     const isSelfRequest =
-      !isDestinationMember &&
-      isCurrentUserRequest(request.requesterDepartment, profile?.departmentName)
+      (request.requesterId === selfId)
 
     return (
       <Card
@@ -2984,11 +2578,11 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                   </Badge>
                 ) : null}
                 <Badge variant={deadline.variant}>{deadline.label}</Badge>
-                {request.collaborators.includes(LOCAL_SELF_ID) &&
+                {request.collaborators.includes(selfId) &&
                 !isPrimaryAssignee ? (
                   <Badge variant="muted">협업 참여</Badge>
                 ) : null}
-                {currentWorkByMember[LOCAL_SELF_ID] === request.id ? (
+                {currentWorkByMember[selfId] === request.id ? (
                   <Badge variant="default">지금 하는 중</Badge>
                 ) : null}
               </div>
@@ -3231,6 +2825,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     )
   }
 
+  if (storage.loading) return <p role="status" className="p-4 text-sm text-muted-foreground">업무와 권한을 불러오는 중...</p>
+  if (storage.loadError) return <Card><CardContent className="p-5"><p role="alert" className="text-sm text-danger">{storage.error}</p><Button className="mt-3" onClick={()=>void storage.retry()}>다시 조회</Button></CardContent></Card>
   if (view.kind === 'list' || view.kind === 'detail') {
     const managerStats = [
       {
@@ -3265,7 +2861,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
       {
         label: '지금 하는 업무',
         value: myActiveTasks.some(
-          (request) => request.id === currentWorkByMember[LOCAL_SELF_ID],
+          (request) => request.id === currentWorkByMember[selfId],
         )
           ? 1
           : 0,
@@ -3299,6 +2895,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
     return (
       <div ref={pageTopRef}>
+        {storage.error?<p role="alert" className="mb-3 rounded-xl border border-danger/30 bg-card p-3 text-sm text-danger">{storage.error}<button type="button" className="ml-2 underline" onClick={()=>void storage.retry()}>다시 조회</button></p>:null}
+        {storage.saving?<p role="status" className="mb-3 text-sm text-muted-foreground">서버에 저장 중...</p>:null}
+        {!storage.managerAvailable?<p role="status" className="mb-3 rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground">이 부서의 업무 관리 담당자 지정이 필요합니다. 요청은 대기 상태로 저장되며 자동 수락되지 않습니다.</p>:null}
         <PageHeader
           title={
             canManage
@@ -3323,7 +2922,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     ? '배정받은 직원 화면'
                     : `${currentDepartment} 요청자 화면`}
               </Badge>
-              {isDestinationMember ? null : (
+              {(
                 <Button type="button" onClick={() => openForm()}>
                   <Plus className="size-4" />
                   작업 요청 하기
@@ -3350,7 +2949,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
           </span>
         </div>
 
-        {flashMessage ? (
+        {flashMessage && !storage.saving && !storage.error ? (
           <div className="mb-5 flex items-start gap-3 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">
             <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
             <span>{flashMessage}</span>
@@ -3527,6 +3126,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             unassigned={unassignedTeamRequests}
             assigned={activeTeamRequests}
             teamMembers={teamMembers}
+            selfId={selfId}
             departmentLabel={departmentLabel}
             requesterLabel={requesterLabel}
             memberLabel={memberLabel}
@@ -3552,7 +3152,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 (() => {
                   const mounted = myTodoTasks.find(
                     (request) =>
-                      request.id === currentWorkByMember[LOCAL_SELF_ID],
+                      request.id === currentWorkByMember[selfId],
                   )
                   return (
                     <section className="rounded-xl border border-primary/30 bg-primary/5 p-4">
@@ -3581,7 +3181,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                               </p>
                             </div>
                             <div className="flex shrink-0 flex-wrap gap-2">
-                              {mounted.assignee === LOCAL_SELF_ID &&
+                              {mounted.assignee === selfId &&
                               mounted.status === 'inProgress' ? (
                                 <Button
                                   type="button"
@@ -3711,13 +3311,13 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         ) : null}
 
         <p className="mt-4 text-xs text-muted-foreground">
-          역할별 UI 확인용 임시 데이터입니다. 변경 내용은 새로고침하면
-          초기화되며 서버에는 저장되지 않습니다.
+          요청과 진행 상황은 서버에 저장됩니다. 본인 요청과 배정된 업무만 표시됩니다.
         </p>
         {renderDetailPanel()}
         {acceptingRequest ? (
           <WorkRequestAcceptDialog
             request={acceptingRequest}
+            selfId={selfId}
             teamMembers={teamMembers}
             onClose={() => setAcceptRequestId(null)}
             onConfirm={(decision) => acceptRequest(acceptingRequest, decision)}
@@ -3770,21 +3370,17 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const deadline = deadlineLabel(dueDate)
     const selectedConfig = WORK_REQUEST_CONFIG[selectedRequest.owner]
     const isSelfRequest =
-      !isDestinationMember &&
-      isCurrentUserRequest(
-        selectedRequest.requesterDepartment,
-        profile?.departmentName,
-      )
+      (selectedRequest.requesterId === selfId)
     const canManageSelected =
       canManage && selectedRequest.owner === owner
-    const isPrimaryAssignee = selectedRequest.assignee === LOCAL_SELF_ID
+    const isPrimaryAssignee = selectedRequest.assignee === selfId
     const isCollaborator =
-      selectedRequest.collaborators.includes(LOCAL_SELF_ID)
+      selectedRequest.collaborators.includes(selfId)
     const canEdit = isSelfRequest && selectedRequest.status === 'requested'
     const chatRooms = visibleChatRooms(selectedRequest, {
       canManage: canManageSelected,
       isRequester: isSelfRequest,
-      selfId: LOCAL_SELF_ID,
+      selfId: selfId,
       teamMembers,
       teamName: selectedConfig.teamName,
       requesterDepartmentLabel: departmentLabel(
@@ -3879,10 +3475,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 </Button>
               </>
             ) : null}
-            {isCurrentUserRequest(
-              selectedRequest.requesterDepartment,
-              profile?.departmentName,
-            ) && selectedRequest.status === 'completionConfirm' ? (
+            {(selectedRequest.requesterId === selfId) && selectedRequest.status === 'completionConfirm' ? (
               <>
                 <Button
                   type="button"
@@ -3997,7 +3590,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                                 updateRequest(selectedRequest.id, {
                                   brandId: selected.id,
                                   brandDecidedAt: new Date().toISOString(),
-                                  brandDecidedBy: LOCAL_SELF_ID,
+                                  brandDecidedBy: selfId,
                                 })
                                 setFlashMessage(
                                   `${selected.name} 브랜드로 확정했습니다.`,
@@ -4244,12 +3837,13 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               </Card>
             ) : null}
 
+            {selectedRequest.completionResult?<Card><CardContent className="p-4"><h3 className="font-medium">완료 결과</h3><p className="mt-2 whitespace-pre-wrap text-sm">{selectedRequest.completionResult}</p></CardContent></Card>:null}
             <WorkRequestChat
               className="h-[32rem]"
               requestId={selectedRequest.id}
               rooms={chatRooms}
               messages={selectedRequest.messages}
-              selfId={LOCAL_SELF_ID}
+              selfId={selfId}
               canWrite={canWriteChat(selectedRequest)}
               onSend={(body, roomId) =>
                 addMessage(selectedRequest.id, body, roomId)
@@ -4266,6 +3860,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
   return (
     <div ref={pageTopRef}>
+        {storage.error?<p role="alert" className="mb-3 rounded-xl border border-danger/30 bg-card p-3 text-sm text-danger">{storage.error}<button type="button" className="ml-2 underline" onClick={()=>void storage.retry()}>다시 조회</button></p>:null}
+        {storage.saving?<p role="status" className="mb-3 text-sm text-muted-foreground">서버에 저장 중...</p>:null}
+        {!storage.managerAvailable?<p role="status" className="mb-3 rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground">이 부서의 업무 관리 담당자 지정이 필요합니다. 요청은 대기 상태로 저장되며 자동 수락되지 않습니다.</p>:null}
       <form onSubmit={handleSubmit} noValidate>
         <PageHeader
           title={
@@ -4372,13 +3969,13 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
         <div className="mt-4 flex flex-col-reverse gap-3 border-t border-border py-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-muted-foreground">
-            UI 시안 단계입니다. 요청은 새로고침하면 초기화됩니다.
+            등록한 요청과 첨부는 서버에 저장됩니다.
           </p>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={cancelEditing}>
               취소
             </Button>
-            <Button type="submit">
+            <Button type="submit" disabled={storage.saving}>
               {editingRequest ? '수정 내용 저장' : '작업 요청 등록'}
             </Button>
           </div>
@@ -4389,11 +3986,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 }
 
 export function WorkRequestPage() {
+  const {profile}=useAuth()
   const { owner = '' } = useParams()
 
   if (!isWorkRequestOwner(owner)) {
     return <Navigate to="/work" replace />
   }
 
-  return <WorkRequestForm key={owner} owner={owner} />
+  return <WorkRequestForm key={`${profile?.id??'guest'}:${owner}`} owner={owner} />
 }

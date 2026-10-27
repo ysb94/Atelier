@@ -26,13 +26,14 @@ export {
 } from '@/lib/drafts/empty-draft'
 
 const DRAFT_COLUMNS =
-  'id, company_id, brand_id, season_id, draft_no, status, owner, name_ko, name_en, image_url, sample_work_order_url, sample_work_order_name, sample_work_orders, sample_done, order_done, order_in_progress, photo_sample_done, held, hold_reason, held_at, target_cost, cost_currency, cost_confirmed, retail_price, discount_price, origin_country, register_type, open_type, open_type_detail, release_issue, specs, has_options, note, promoted_style_id, created_at, updated_at'
+  'id, created_by, company_id, brand_id, season_id, draft_no, status, owner, name_ko, name_en, image_url, sample_work_order_url, sample_work_order_name, sample_work_orders, sample_done, order_done, order_in_progress, photo_sample_done, held, hold_reason, held_at, target_cost, cost_currency, cost_confirmed, retail_price, discount_price, origin_country, register_type, open_type, open_type_detail, release_issue, specs, has_options, note, promoted_style_id, created_at, updated_at'
 
 const DRAFT_COLUMNS_LEGACY =
   'id, company_id, brand_id, season_id, draft_no, status, owner, name_ko, name_en, image_url, sample_work_order_url, sample_work_order_name, sample_done, order_done, order_in_progress, photo_sample_done, held, hold_reason, held_at, target_cost, cost_currency, cost_confirmed, retail_price, discount_price, origin_country, register_type, open_type, open_type_detail, release_issue, specs, has_options, note, promoted_style_id, created_at, updated_at'
 
 type DraftRow = {
   id: string
+  created_by?: string | null
   company_id: string
   brand_id: string | null
   season_id: string | null
@@ -227,6 +228,7 @@ function assemble(
   )
   return {
     id: row.id,
+    createdBy: row.created_by ?? null,
     companyId: row.company_id,
     brandId: row.brand_id,
     draftNo: row.draft_no,
@@ -369,7 +371,7 @@ async function saveViaRpc(
     p_company_id: companyId,
     p_brand_id: brandId,
     p_id: id,
-    p_payload: buildPayload(clean),
+    p_payload: { ...buildPayload(clean), expectedUpdatedAt: input.expectedUpdatedAt ?? null },
     p_colors: clean.colors.map((color) => ({
       id: color.id,
       name: color.name,

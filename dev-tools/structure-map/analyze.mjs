@@ -188,9 +188,11 @@ export function analyze(root, config) {
           nav.push({ to, label, group, file, line: lineAt(sf, node) })
         }
       }
-      if (!ts.isCallExpression(node) || !ts.isPropertyAccessExpression(node.expression)) return
-      const method = node.expression.name.text
-      const receiver = node.expression.expression.getText(sf)
+      if (!ts.isCallExpression(node)) return
+      const directRpc = ts.isIdentifier(node.expression) && node.expression.text === 'rpc'
+      if (!directRpc && !ts.isPropertyAccessExpression(node.expression)) return
+      const method = directRpc ? 'rpc' : node.expression.name.text
+      const receiver = directRpc ? '' : node.expression.expression.getText(sf)
       let kind
       if (method === 'rpc') kind = 'rpc'
       if (method === 'invoke' && /functions/.test(receiver)) kind = 'function'

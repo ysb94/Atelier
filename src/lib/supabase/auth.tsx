@@ -69,13 +69,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const supabase = getSupabase()
     let active = true
+    let authVersion=0
+    let currentSessionId: string | null = null
 
     supabase.auth.getSession().then(async ({ data }) => {
       if (!active) return
+      const version=++authVersion
+      currentSessionId=data.session?.user.id??null
       setSession(data.session)
       if (data.session) {
         const next = await loadProfileSafe()
-        if (!active) return
+        if (!active || version!==authVersion || (next.profile && next.profile.id!==data.session.user.id)) return
         setProfile(next.profile)
         setProfileError(next.error)
       } else {
@@ -87,7 +91,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: subscription } = supabase.auth.onAuthStateChange(
       (_event, nextSession) => {
+        const version=++authVersion
+        const changedUser=currentSessionId!==(nextSession?.user.id??null)
+        currentSessionId=nextSession?.user.id??null
         setSession(nextSession)
+        if(changedUser){setProfile(null);setReady(false)}
         if (!nextSession) {
           setProfile(null)
           setProfileError(null)
@@ -97,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // onAuthStateChange 콜백 안에서 await하면 데드락이 날 수 있어 다음 틱으로 미룬다.
         void Promise.resolve().then(async () => {
           const next = await loadProfileSafe()
-          if (!active) return
+          if (!active || version!==authVersion || (next.profile && next.profile.id!==nextSession.user.id)) return
           setProfile(next.profile)
           setProfileError(next.error)
           setReady(true)
@@ -113,6 +121,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refreshProfile = useCallback(async () => {
     const next = await loadProfileSafe()
+    const {data}=await getSupabase().auth.getSession()
+    if(next.profile && next.profile.id!==data.session?.user.id)return null
     setProfile(next.profile)
     setProfileError(next.error)
     return next.profile

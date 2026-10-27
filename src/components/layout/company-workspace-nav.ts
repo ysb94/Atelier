@@ -174,7 +174,7 @@ export function companyNavGroupsForProfile(
       const items = showBrandManagement
         ? group.items
         : group.items.filter(item => item.to !== '/brands')
-      const allowedItems = items.filter(item => releaseHref(profile, item.to) !== null && (item.to !== '/settings/access-ip' || showAccessIpMenu(profile)))
+      const allowedItems = items.filter(item => (!item.to.startsWith('/work-requests/') || scope.unrestricted || scope.departmentSite?.pages.some(path=>path===item.to) || (scope.logistics && item.to==='/work-requests/logistics')) && releaseHref(profile, item.to) !== null && (item.to !== '/settings/access-ip' || showAccessIpMenu(profile)))
       return allowedItems.length > 0 ? [{ ...group, items: allowedItems }] : []
     }
     const showPermissions = scope.operations || hasPermission(profile, 'permissions.manage') || hasPermission(profile, 'approvers.manage') || hasPermission(profile, 'partner.manage')

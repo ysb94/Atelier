@@ -29,6 +29,7 @@ import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, l
 import { parseSizeSpecInput } from '@/lib/drafts/spec-format'
 import { writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
+import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
 import {
   type Brand,
   type ProductDraft,
@@ -102,6 +103,7 @@ export function CompanyDraftsPage() {
   useRenderWatch('CompanyDraftsPage')
   const { brands, brandById } = useCompanyBrandScope()
   const { profile } = useAuth()
+  const workAccess = useBasicWorkAccess()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -160,6 +162,7 @@ export function CompanyDraftsPage() {
     const task = previous.catch(() => undefined).then(async () => {
       const current = currentDraft(draftId)
       if (!current) throw new Error('기획안을 찾지 못했습니다.')
+      if (!canWriteDraft(workAccess.access,current)) throw new Error('작성자만 기획안을 수정할 수 있습니다.')
       const input = change(current)
       try {
         const updated = await updateProductDraft(draftId, input)
@@ -546,13 +549,13 @@ export function CompanyDraftsPage() {
             }}
           />
         </div>
-        <Link
+        {canWriteDraft(workAccess.access) && <Link
           to={newHref}
           className="inline-flex h-8 shrink-0 items-center gap-1.5 self-start rounded-md bg-[#c60920] px-3 text-xs font-medium text-white hover:bg-[#b30920] lg:mb-1 lg:self-end"
         >
           <Plus className="size-3.5" />
           기획안 추가
-        </Link>
+        </Link>}
       </div>
 
       {draftsQuery.isError ? (
@@ -639,6 +642,7 @@ export function CompanyDraftsPage() {
                   <DraftSheetRow
                     key={draft.id}
                     draft={draft}
+                    readOnly={!canWriteDraft(workAccess.access,draft)}
                     schedule={schedule}
                     brand={brand}
                     onOpen={() => navigate(draftDetailPath(draft.id))}

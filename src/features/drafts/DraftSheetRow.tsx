@@ -632,7 +632,8 @@ export function DraftPhoto({ src, name }: { src: string | null; name: string }) 
 
 export type DraftConfirmFlag = 'nameConfirmed' | 'colorsConfirmed' | 'colorNamesConfirmed'
 
-export function DraftSheetRow({ draft, schedule, brand, onOpen, onSchedule, onAddColor, onRenameProduct, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onPassSample, onRequestNextSampleRound, onUploadColorWorkOrder, onPassColorSample, onRequestNextColorSampleRound, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onSchedule, onAddColor, onRenameProduct, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onPassSample, onRequestNextSampleRound, onUploadColorWorkOrder, onPassColorSample, onRequestNextColorSampleRound, onToggleConfirm }: {
+  readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
   onOpen: () => void; onSchedule: () => void
   onAddColor: (name: string) => Promise<void>
@@ -672,6 +673,7 @@ export function DraftSheetRow({ draft, schedule, brand, onOpen, onSchedule, onAd
     return (value: string, applyAll: boolean) => onSaveSheetValue(colorId, field, value, applyAll)
   }
 
+  if (readOnly) return <tr className="draft-sheet-row"><td><strong>{draft.draftNo}</strong><p>{brand?.name ?? '브랜드 미정'}</p><p>{draft.owner || '담당자 미정'}</p><button type="button" className="text-primary underline" onClick={onOpen}>기획안 조회</button></td><td>{draft.nameKo || draft.nameEn || '이름 미정'}</td><td>{draft.colors.map(color=>color.name).join(', ') || '컬러 미정'}</td><td>{DRAFT_STATUS_LABEL[draft.status]}</td><td colSpan={2}><span className="text-xs text-muted-foreground">조회 전용 · 작성자만 수정</span></td></tr>
   return <tr className="draft-sheet-row">
     <td>
       <strong className="draft-sheet-brand">{brand?.name ?? '브랜드 미정'}</strong>

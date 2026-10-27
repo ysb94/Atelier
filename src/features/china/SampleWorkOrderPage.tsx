@@ -1,3 +1,4 @@
+import { applyChinaWorkOrder } from '@/lib/supabase/china-work-orders'
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowUpRight, Check, Download, FileText } from 'lucide-react'
@@ -9,27 +10,20 @@ import { FilterBar } from '@/components/ui/filter-bar'
 import { Input, Select } from '@/components/ui/input'
 import { DraftPhoto } from '@/features/drafts/DraftSheetRow'
 import '@/features/drafts/draft-board.css'
-import { getCompanyProductDrafts, updateProductDraft } from '@/lib/api'
+import { getCompanyProductDrafts } from '@/lib/api'
 import { DEFAULT_COMPANY_ID } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import {
   colorWorkOrderFileName,
   filledColorWorkOrders,
-  markLatestColorSampleReturned,
   resolveColorSampleRounds,
-  setColorWorkOrderShipped,
 } from '@/lib/drafts/draft-flow'
 import {
   draftHasSampleWorkOrder,
   draftStatePercent,
-  draftToInput,
   filledSampleWorkOrders,
-  legacyWorkOrderFields,
   previousSampleFailReason,
   sampleElapsedDaysLabel,
-  setSampleWorkOrderAssignee,
-  setSampleWorkOrderFileChecked,
-  setSampleWorkOrderShipped,
   sheetDay,
 } from '@/lib/drafts/sample-work-order'
 import { useAuth } from '@/lib/supabase/auth'
@@ -187,30 +181,7 @@ export function CompanySampleWorkOrderPage() {
       kind: WorkOrderKind
       orderId: string
     }) => {
-      const input = draftToInput(draft)
-      if (kind === 'color') {
-        const returnedAt = new Date().toISOString()
-        const colors = setColorWorkOrderShipped(input.colors, orderId, true, returnedAt)
-        const colorSampleRounds = markLatestColorSampleReturned(
-          resolveColorSampleRounds({ ...draft, colors: input.colors }),
-          returnedAt,
-        )
-        return updateProductDraft(draft.id, {
-          ...input,
-          colors,
-          specs: { ...input.specs, colorSampleRounds },
-        })
-      }
-      const sampleWorkOrders = setSampleWorkOrderShipped(
-        input.sampleWorkOrders,
-        orderId,
-        true,
-      )
-      return updateProductDraft(draft.id, {
-        ...input,
-        sampleWorkOrders,
-        ...legacyWorkOrderFields(sampleWorkOrders),
-      })
+      return applyChinaWorkOrder(draft,orderId,kind === 'color' ? 'color' : 'sample','ship')
     },
     onSuccess: async (updated) => {
       await Promise.all([
@@ -229,25 +200,13 @@ export function CompanySampleWorkOrderPage() {
       draft,
       orderId,
       assigneeId,
-      assigneeName,
     }: {
       draft: ProductDraft
       orderId: string
       assigneeId: string | null
       assigneeName: string
     }) => {
-      const input = draftToInput(draft)
-      const sampleWorkOrders = setSampleWorkOrderAssignee(
-        input.sampleWorkOrders,
-        orderId,
-        assigneeId,
-        assigneeName,
-      )
-      return updateProductDraft(draft.id, {
-        ...input,
-        sampleWorkOrders,
-        ...legacyWorkOrderFields(sampleWorkOrders),
-      })
+      return applyChinaWorkOrder(draft,orderId,'sample','assign',assigneeId)
     },
     onSuccess: async (updated) => {
       await Promise.all([
@@ -269,16 +228,7 @@ export function CompanySampleWorkOrderPage() {
       draft: ProductDraft
       orderId: string
     }) => {
-      const input = draftToInput(draft)
-      const sampleWorkOrders = setSampleWorkOrderFileChecked(
-        input.sampleWorkOrders,
-        orderId,
-      )
-      return updateProductDraft(draft.id, {
-        ...input,
-        sampleWorkOrders,
-        ...legacyWorkOrderFields(sampleWorkOrders),
-      })
+      return applyChinaWorkOrder(draft,orderId,'sample','check')
     },
     onSuccess: async (updated) => {
       await Promise.all([

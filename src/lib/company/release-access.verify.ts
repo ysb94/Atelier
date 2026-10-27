@@ -10,10 +10,11 @@ assert.equal(releaseHref(staff,'/settings/profile?part=meetings'),'/settings/pro
 assert.equal(releaseHref(staff,'/settings/profile?part=approvals'),null)
 assert.equal(releaseHref(staff,'/settings/profile?part=approvals',true),'/settings/profile?part=approvals')
 assert.equal(releasePersonalPart(staff,'overtime'),true,'야근은 직원 본인 화면')
-for(const part of ['work','profile','attendance','company-notice','department-notice']) assert.equal(releasePersonalPart(staff,part,true),false)
+assert.equal(releasePersonalPart(staff,'work'),true,'전 직원 작업 요청 입구')
+for(const part of ['profile','attendance','company-notice','department-notice']) assert.equal(releasePersonalPart(staff,part,true),false)
 for(const path of ['/','/operations','/products','/data/all','/drafts','/settings/access-ip','/brands','/settings/ai','/org-chart']) assert.equal(releaseHref(staff,path),null)
 for(const path of ['/operations-support','/members','/settings/permissions']) { assert.ok(links(ops).includes(path)); assert.equal(releaseHref(logistics,path),null) }
-for(const path of RELEASE_LOGISTICS_PAGES) { assert.ok(links(logistics).includes(path)); assert.equal(releaseHref(staff,path),null); assert.equal(releaseHref(ops,path),null) }
+for(const path of RELEASE_LOGISTICS_PAGES) { assert.ok(links(logistics).includes(path)); assert.equal(releaseHref(staff,path),path.startsWith('/work-requests/')?path:null); assert.equal(releaseHref(ops,path),path.startsWith('/work-requests/')?path:null) }
 assert.equal(releaseHref(logistics,'/products/atelier/M%2F1?brand=atelier'),'/product-work/logistics/atelier/M%2F1?brand=atelier')
 assert.equal(releaseHref(logistics,'/logistics/invoice-data-entry?brand=atelier'),'/logistics/invoices?brand=atelier')
 assert.equal(releaseHref(logistics,'/work-requests/logistics-malicious'),null)
@@ -34,7 +35,7 @@ for (const site of RELEASE_DEPARTMENT_SITES) {
   const member = {...staff,departmentId:site.id}
   assert.ok(companyNavGroupsForProfile(member).some(group=>group.title===site.title),site.title+' 부서 탭')
   for (const target of RELEASE_DEPARTMENT_SITES) for (const path of target.pages) {
-    assert.equal(releaseHref(member,path),target.id===site.id?path:null,'타부서 화면 공개 방지: '+site.title+' → '+path)
+    assert.equal(releaseHref(member,path),target.id===site.id||path.startsWith('/work-requests/')?path:null,'타부서 화면 공개 방지: '+site.title+' → '+path)
   }
   assert.equal(releaseHref({...member,status:'disabled'},site.pages[0]??'/drafts'),null)
   assert.equal(releaseHref({...member,companyId:'other-company'},site.pages[0]??'/drafts'),null)
@@ -56,7 +57,7 @@ assert.equal(releaseHref(md,'/product-work/md-malicious'),null)
 const visual={...staff,departmentId:'7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1'}
 for (const path of ['/work-requests/design','/design/styled-cuts','/design/file-manager']) {
   assert.equal(releaseHref(visual,path),path,'Visual 팀은 자기 메뉴를 연다')
-  assert.equal(releaseHref(staff,path),null)
+  assert.equal(releaseHref(staff,path),path.startsWith('/work-requests/')?path:null)
 }
 assert.deepEqual(companyNavGroupsForProfile(visual).find(group=>group.title==='Visual')?.items.map(item=>item.to),['/work-requests/design','/design/styled-cuts','/design/file-manager'])
 assert.equal(releaseHref(visual,'/drafts'),null,'Visual 팀은 기획 화면을 열지 않는다')
