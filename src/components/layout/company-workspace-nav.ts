@@ -66,6 +66,10 @@ export const companyTopNav: CompanyNavItem[] = [
 
 export const companyNavGroups: CompanyNavGroup[] = [
   {
+    title: '테스트',
+    items: [{ to: '/test/spin360', label: '360 상세이미지 생성', icon: FlaskConical }],
+  },
+  {
     title: '기획',
     items: [
       { to: '/drafts', label: '기획안', icon: Lightbulb },

@@ -27,7 +27,7 @@ export function meetingFixtureChannel(){
 export function meetingFixtureRpc(name:string,args:Record<string,unknown>={}) {
  if(name==='list_meeting_cleanup_paths')return Promise.resolve({data:[],error:null})
  if(name==='finish_meeting_cleanup')return Promise.resolve({data:null,error:null})
- if(!['list_meeting_member_participation','list_meeting_availability','list_company_meetings','list_meeting_directory','list_meeting_calendar','list_my_meeting_invitations','read_meeting_invitation','save_company_meeting','confirm_company_meeting','respond_to_meeting','open_meeting_group','open_direct_chat','delete_company_meeting','begin_meeting_file','finish_meeting_file','remove_meeting_file'].includes(name))return null
+ if(!['list_meeting_member_participation','list_meeting_availability','list_meeting_availability_with_todos','list_company_meetings','list_meeting_directory','list_meeting_calendar','list_my_meeting_invitations','read_meeting_invitation','save_company_meeting','confirm_company_meeting','respond_to_meeting','open_meeting_group','open_direct_chat','delete_company_meeting','begin_meeting_file','finish_meeting_file','remove_meeting_file'].includes(name))return null
  const value=state();let data:unknown
  if(name==='list_meeting_member_participation'){
   if(value.participationError)return Promise.resolve({data:null,error:{message:'검증용 제목 조회 실패'}})
@@ -37,7 +37,7 @@ export function meetingFixtureRpc(name:string,args:Record<string,unknown>={}) {
   }
   return Promise.resolve({data:value.participation??[...map].map(([profile_id,titles])=>({profile_id,titles})),error:null})
  }
- if(name==='list_meeting_availability')data=(value.availability??[]).filter(row=>(args.p_people as string[]).includes(row.personId)&&(!row.date||row.date===args.p_date))
+ if(name==='list_meeting_availability'||name==='list_meeting_availability_with_todos')data=(value.availability??[]).filter(row=>(args.p_people as string[]).includes(row.personId)&&(!row.date||row.date===args.p_date))
  else if(name==='list_company_meetings')data=value.series.filter(series=>series.phase!=='preparing'||series.host.id===actor||series.createdBy===actor)
  else if(name==='list_meeting_directory')data=[host,member]
  else if(name==='list_meeting_calendar')data=seriesToDrafts(value.series)

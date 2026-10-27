@@ -4,6 +4,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { verifyMeetingParticipation } from './meeting-participation-db.mjs'
 import { verifyMeetingHostLunch } from './meeting-host-lunch-db.mjs'
 import { verifyMeetingKinds } from './meeting-kinds-db.mjs'
+import { verifyScheduleTodos } from './personal-schedule-todos-pglite.mjs'
 
 const db=await PGlite.create()
 const company='10000000-0000-4000-8000-000000000001', foreign='10000000-0000-4000-8000-000000000002'
@@ -248,5 +249,6 @@ try{
  await actor(alien)
  assert.equal((await scalar('select public.list_company_meetings()')).length,0,'다른 회사 회의는 목록에 없다')
  await verifyMeetingKinds(db,{company,host,member,outsider,alien,actor})
+ await verifyScheduleTodos(db,{company,foreign,host,member,outsider,alien,actor})
  console.log('meetings-db: 기존 저장 + 호스트 알림 중복/읽음/응답 전환·수신자 격리·일정 변경 + 휴가 요약 조회/사유 비노출/타사·비호스트 차단 통과')
 }catch(error){console.error('meetings-db:',{message:error.message,code:error.code,where:error.where});process.exitCode=1}finally{await db.close()}

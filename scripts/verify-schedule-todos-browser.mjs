@@ -1,0 +1,47 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { createServer } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+import { chromium } from 'playwright-core'
+
+// 화면 입력 검증용 메모리 fixture. 실제 인증/저장 API와 모든 외부 요청을 차단한다.
+const root=process.cwd(),origin='http://127.0.0.1:5207',mockId=path.join(root,'__todo-mock.tsx').split(path.sep).join('/'),entryId=path.join(root,'__todo-entry.tsx').split(path.sep).join('/')
+const owner='20000000-0000-4000-8000-000000000002',legacy={id:'legacy-local',date:'2026-10-27',title:'기존 개인 To-do',done:false}
+const targets=new Set(['lib/supabase/auth','features/home/use-my-clock-in','features/home/attendance-entry-context','features/operations-support/use-leave-requests','features/operations-support/use-department-approvers','features/operations-support/ops-directory','lib/supabase/attendance-clocks','lib/supabase/company-notices','components/layout/workspace-tab-activity','features/settings/use-schedule-todos'].map(name=>path.join(root,'src',name)))
+const mock=`import {useState} from 'react';const EMPTY=[];export const useAuth=()=>({session:{user:{id:'${owner}'}},profile:{id:'${owner}',status:'active',companyId:'10000000-0000-4000-8000-000000000001',departmentId:null}});export const useWorkspaceTabActivity=()=>true;export const useMyClockIn=()=>({loading:false,exempt:true,refresh:async()=>{}});export const useAttendanceEntry=()=>null;export const useLeaveRequests=()=>({requests:EMPTY,loading:false,error:null});export const useDepartmentApprovers=()=>({settings:EMPTY,loading:false,error:null});export const useOpsDirectory=()=>({members:EMPTY,departments:EMPTY,loading:false,error:null});export const listMyAttendanceClocks=async()=>EMPTY;export const listCompanyNotices=async()=>EMPTY;
+window.__todoWrites=[];window.__todoFail=false;export function useScheduleTodos(){const [data,setData]=useState([${JSON.stringify(legacy)}]),[busy,setBusy]=useState(false);const unavailable=location.search.includes('unready');window.__todos=data;return {data:unavailable?undefined:data,todos:data,isSuccess:!unavailable,error:unavailable?new Error('공용 저장 설정 미적용'):null,busy,refetch:async()=>{},change:async(item,remove)=>{if(unavailable)throw Error('설정 미적용');if(window.__todoFail)throw Error('검증용 저장 실패');setBusy(true);await new Promise(r=>setTimeout(r,10));window.__todoWrites.push({item,remove});setData(rows=>remove?rows.filter(row=>row.id!==item.id):[...rows.filter(row=>row.id!==item.id),item]);setBusy(false)}}}`
+const entry=`import React from 'react';import{createRoot}from'react-dom/client';import{QueryClient,QueryClientProvider}from'@tanstack/react-query';import{MyAttendancePanel}from'/src/features/settings/MyAttendancePanel.tsx';import{MeetingAvailabilityTable}from'/src/features/meetings/MeetingAvailabilityTable.tsx';import'/src/index.css';const cache=new QueryClient({defaultOptions:{queries:{retry:false}}});createRoot(document.getElementById('root')).render(<QueryClientProvider client={cache}><main className="mx-auto max-w-6xl p-4"><MyAttendancePanel/><MeetingAvailabilityTable attendees={[{id:'${owner}',name:'직원',department:'기획'}]} rows={[{id:'todo:fixture',personId:'${owner}',kind:'personal',status:'approved',start:'10:15',end:'11:45'}]} clock="10:30" duration={30} clocks={['10:00','10:30','11:00','11:30','12:00']} onChoose={()=>{}}/></main></QueryClientProvider>);`
+const server=await createServer({root,configFile:false,envFile:false,optimizeDeps:{noDiscovery:true,include:['react','react-dom/client','react/jsx-runtime','@tanstack/react-query']},logLevel:'error',cacheDir:path.join(root,'node_modules/.cache/schedule-todos-vite'),plugins:[{name:'todo-fixture',enforce:'pre',resolveId(source,importer){if(source==='/__todo-entry.tsx'||source===entryId)return entryId;if(source===mockId)return mockId;const target=source.startsWith('@/')?path.join(root,'src',source.slice(2)):importer&&source.startsWith('.')?path.resolve(path.dirname(importer),source):'';if(targets.has(target.replace(/\.tsx?$/,'')))return mockId},load(id){if(id===mockId)return mock;if(id===entryId)return entry},configureServer(vite){vite.middlewares.use((req,res,next)=>{if(!req.headers.accept?.includes('text/html'))return next();vite.transformIndexHtml(req.url,'<!doctype html><html lang="ko"><meta charset="utf-8"><body><div id="root"></div><script type="module" src="/__todo-entry.tsx"></script></body></html>').then(html=>{res.setHeader('Content-Type','text/html');res.end(html)}).catch(next)})}},react(),tailwindcss()],resolve:{alias:[...Array.from(targets,target=>({find:'@/'+path.relative(path.join(root,'src'),target).split(path.sep).join('/'),replacement:mockId})),{find:'@',replacement:path.join(root,'src')}] },server:{host:'127.0.0.1',port:5207,strictPort:true,hmr:false,fs:{allow:[root]}}})
+let browser
+try{
+ await server.listen();browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true})
+ const context=await browser.newContext({viewport:{width:1400,height:1000},timezoneId:'Asia/Seoul'}),errors=[],remote=[]
+ await context.route('**/*',route=>route.request().url().startsWith(origin+'/')?route.continue():(remote.push(route.request().url()),route.abort()))
+ await context.addInitScript(({owner,legacy})=>localStorage.setItem('atelier:my-schedule-todos:'+owner,JSON.stringify([legacy])),{owner,legacy})
+ const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));await page.clock.install({time:new Date('2026-10-27T00:00:00Z')})
+ await page.goto(origin,{timeout:90000});await page.getByRole('button',{name:'+추가',exact:true}).click();await page.getByRole('menuitem',{name:'Todo',exact:true}).click()
+ const dialog=page.getByRole('dialog',{name:'Todo',exact:true})
+ await dialog.getByLabel('Todo 내용',{exact:true}).fill('샘플 최종 검수')
+ await dialog.getByLabel('중요 작업으로 일정 점유',{exact:true}).check();await dialog.getByRole('button',{name:'추가',exact:true}).click()
+ await dialog.getByRole('alert').filter({hasText:'시작·종료'}).waitFor()
+ for(const [label,hour,minute]of [['Todo 시작 시각','10','15'],['Todo 종료 시각','11','45']]){await dialog.getByLabel(label+' 시',{exact:true}).selectOption(hour);await dialog.getByLabel(label+' 분',{exact:true}).fill(minute)}
+ await page.evaluate(()=>window.__todoFail=true);await dialog.getByRole('button',{name:'추가',exact:true}).click();await dialog.getByRole('alert').filter({hasText:'검증용 저장 실패'}).waitFor()
+ assert.equal(await dialog.getByLabel('Todo 내용',{exact:true}).inputValue(),'샘플 최종 검수')
+ await page.evaluate(()=>window.__todoFail=false);await dialog.getByRole('button',{name:'추가',exact:true}).click();await dialog.waitFor({state:'hidden'})
+ const saved=await page.evaluate(()=>window.__todos.find(row=>row.title==='샘플 최종 검수'));assert.equal(saved.start,'10:15');assert.equal(saved.end,'11:45');assert.equal(saved.important,true)
+ await page.getByTitle('중요 · 10:15–11:45 · 샘플 최종 검수',{exact:true}).click();await dialog.getByLabel('Todo 완료',{exact:true}).check();await dialog.getByRole('button',{name:'저장',exact:true}).click();await dialog.waitFor({state:'hidden'})
+ assert.equal(await page.evaluate(()=>window.__todos.find(row=>row.title==='샘플 최종 검수').done),true)
+ await page.getByTitle('중요 · 10:15–11:45 · 샘플 최종 검수',{exact:true}).click();await dialog.getByRole('button',{name:'삭제',exact:true}).click();await dialog.waitFor({state:'hidden'})
+ assert.equal(await page.evaluate(()=>window.__todos.length),1)
+ assert.equal(await page.evaluate(owner=>localStorage.getItem('atelier:my-schedule-todos:'+owner),owner),JSON.stringify([legacy]))
+ await page.getByRole('button',{name:'직원 10:30 일정',exact:true}).getByText('개인 일정',{exact:true}).waitFor()
+ await fs.mkdir('dev-tools/ai-workflow/.state/schedule-todos',{recursive:true});await page.screenshot({path:'dev-tools/ai-workflow/.state/schedule-todos/desktop.png',fullPage:true})
+ await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true)
+ await page.goto(origin+'/?unready',{timeout:90000});await page.getByRole('alert').filter({hasText:'공용 저장 설정 미적용'}).waitFor()
+ await page.getByRole('button',{name:'+추가',exact:true}).click();await page.getByRole('menuitem',{name:'Todo',exact:true}).click();assert.equal(await dialog.getByRole('button',{name:'추가',exact:true}).isDisabled(),true)
+ await page.screenshot({path:'dev-tools/ai-workflow/.state/schedule-todos/mobile.png',fullPage:true})
+ assert.deepEqual(errors,[]);assert.deepEqual(remote,[])
+ console.log('schedule-todos-browser: 날짜/시간/중요 입력, 누락·실패 보존, 저장/완료/삭제, 개인 일정 표시, 기존 로컬 보존, DB 미준비 저장 차단, 모바일 통과 (외부 API 없음)')
+}finally{await browser?.close();await server.close()}
