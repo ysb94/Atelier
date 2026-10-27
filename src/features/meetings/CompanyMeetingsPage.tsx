@@ -9,6 +9,8 @@ import { MeetingAttendance, MeetingResponse } from './MeetingAttendance'
 import { MeetingMemberOption } from './MeetingMemberOption'
 import { buildMeetingParticipationSummary } from './meeting-participation'
 import { MeetingSchedulePicker, type MeetingScheduleChoice } from './MeetingSchedulePicker'
+import { FilterTabs } from '@/components/ui/filter-tabs'
+import { MeetingUiPreview } from './MeetingUiPreview'
 import {
   Check,
   ChevronDown,
@@ -156,6 +158,27 @@ function newMeetingId() {
 }
 
 export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: boolean } = {}) {
+  const { profile } = useAuth()
+  const preview = usePagePreview()
+  const accountKey = `${preview?.realProfile?.id ?? profile?.id}:${profile?.id}:${profile?.companyId}:${preview?.facts?.meetingRole ?? ''}`
+  return <MeetingScreen key={accountKey} showHeading={showHeading} />
+}
+
+function MeetingScreen({ showHeading }: { showHeading: boolean }) {
+  const [view, setView] = useState<'existing' | 'preview'>('existing')
+  const [busy, setBusy] = useState(false)
+  const active = useWorkspaceTabActivity()
+  useEffect(() => { if (!active) setView('existing') }, [active])
+  return <div className="min-w-0 space-y-4">
+    {showHeading && <PageHeader title="회의" />}
+    <fieldset disabled={busy}>
+      <FilterTabs value={view} onChange={setView} ariaLabel="회의 화면 비교" tabs={[{ value: 'existing', label: '기존 화면' }, { value: 'preview', label: '새 화면 미리보기' }]} />
+    </fieldset>
+    {view === 'preview' ? <MeetingUiPreview /> : <ExistingCompanyMeetingsPage showHeading={false} onBusyChange={setBusy} />}
+  </div>
+}
+
+function ExistingCompanyMeetingsPage({ showHeading, onBusyChange }: { showHeading: boolean; onBusyChange: (busy: boolean) => void }) {
   useRenderWatch('CompanyMeetingsPage')
 
   const { profile } = useAuth()
@@ -195,6 +218,7 @@ export function CompanyMeetingsPage({ showHeading = true }: { showHeading?: bool
   const days = useMemo(() => listMeetingDays(fromKey, visibleDays, todayKey),[fromKey,todayKey,visibleDays])
   const meetings=useCompanyMeetings(days[0]?.key ?? todayKey,days[days.length-1]?.key ?? todayKey)
   const {series,setSeries,rooms,saving,simulating}=meetings
+  useEffect(() => { onBusyChange(saving); return () => onBusyChange(false) }, [saving, onBusyChange])
 
   const host = useMemo<MeetingPerson>(() => {
     if (!profile) return LOCAL_HOST

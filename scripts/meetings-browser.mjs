@@ -250,7 +250,7 @@ export async function verifyMeetings(page,origin){
    assert.ok(tabs.length>=2,'공개된 My home 메뉴를 대상으로 검사')
    assert.ok(tabs.every(tab=>tab.height<=48),`좁은 창에서도 메뉴는 한 줄: ${JSON.stringify(tabs)}`)
    if(tabs.length>=7) assert.equal(await menu.evaluate(element=>element.scrollWidth>element.clientWidth),true,'넘치는 전체 메뉴는 가로 스크롤로 탐색')
-   else assert.deepEqual(tabs.map(tab=>tab.label),['My Schedule','야근','회의'],'제한된 직원에게는 공개된 세 탭만 표시')
+   else assert.deepEqual(tabs.map(tab=>tab.label),['My Schedule','야근','회의','작업 요청'],'제한된 직원에게는 현재 공개된 네 탭만 표시')
    const layout=await nextRow().evaluate(element=>({
      width:element.clientWidth,scrollWidth:element.scrollWidth,
      memberHeights:[...element.querySelectorAll('.meeting-members button')].map(button=>button.getBoundingClientRect().height),
