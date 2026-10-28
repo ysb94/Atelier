@@ -816,7 +816,7 @@ function MemberAssignmentTable({
       </div>
       <div className="mt-3 max-h-[min(36rem,calc(100dvh-32rem))] overflow-auto">
         <table className="w-max min-w-full text-left text-sm">
-          <thead className="sticky top-0 z-10 border-y border-border bg-primary text-xs text-primary-foreground">
+          <thead className="sticky top-0 z-20 border-y border-border bg-primary text-xs text-primary-foreground">
             <tr>
               <AssignmentSortHeader label="이름" column="name" sort={sort} onSort={toggleSort} />
               <AssignmentSortHeader label="부서" column="department" sort={sort} onSort={toggleSort} />
@@ -860,7 +860,7 @@ function MemberAssignmentTable({
                   key={member.id}
                   className="border-b border-border/70 transition-colors last:border-0 hover:bg-muted/25"
                 >
-                  <td className="whitespace-nowrap px-4 py-3 font-medium">
+                  <td className="sticky left-0 z-10 whitespace-nowrap border-r border-border bg-card px-4 py-3 font-medium">
                     <span className="flex items-center gap-2 whitespace-nowrap">
                       {memberName(member)}
                       {isProbation(member.hireDate, todayDateKey()) ? (
@@ -965,7 +965,7 @@ function AssignmentSortHeader({
   return (
     <th
       aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
-      className="p-0 font-medium"
+      className={cn('p-0 font-medium', column === 'name' && 'sticky left-0 z-10 border-r border-primary-foreground/20 bg-primary')}
     >
       <button
         type="button"
