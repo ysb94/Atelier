@@ -1,4 +1,5 @@
 import { hasPermission, type PermissionGrant, type PermissionCode } from './permissions'
+import { releaseAccess, type ReleaseProfile } from './release-access'
 export const WORK_CAPABILITIES = [
   'planning',
   'design',
@@ -149,6 +150,14 @@ export function canAccessOperationsSupport(
   profile: Parameters<typeof canEditOrgAssignment>[0],
 ) {
   return ['org.manage','personnel.manage','approvers.manage','attendance.manage','notice.company.write','notice.company.delete','company.review'].some(code => hasPermission(profile, code as PermissionCode))
+}
+
+/** 조직도 진입만 운영지원 부서에 공개한다. 수정·승인 권한은 추가하지 않는다. */
+export function canViewOperationsSupportPart(
+  profile: (CapabilityProfile & ReleaseProfile) | null,
+  part: string,
+) {
+  return canAccessOperationsSupport(profile) || (part === 'org' && releaseAccess(profile).operations)
 }
 
 /** 가입 승인과 직책·소속 변경. DB `app.can_manage_personnel`과 같은 조건이다. */

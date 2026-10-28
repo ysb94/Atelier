@@ -9,7 +9,7 @@ import { DocumentOutputPanel } from './DocumentOutputPanel'
 import { CompanyNoticesPanel } from './CompanyNoticesPanel'
 import { CompanyHoursPanel } from './CompanyHoursPanel'
 import { useAuth } from '@/lib/supabase/auth'
-import { canAccessOperationsSupport, canEditOrgAssignment } from '@/lib/company/capabilities'
+import { canViewOperationsSupportPart, canEditOrgAssignment } from '@/lib/company/capabilities'
 
 const PARTS = [
   { id: 'org', label: '조직도', description: '부서 배치와 직책·직급을 관리합니다.' },
@@ -32,6 +32,7 @@ export function OperationsSupportPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const part = partFromSearch(searchParams.get('part'))
   const current = PARTS.find((item) => item.id === part) ?? PARTS[0]
+  const visibleParts = PARTS.filter((item) => canViewOperationsSupportPart(profile, item.id))
 
   function selectPart(next: PartId) {
     setSearchParams((previous) => {
@@ -43,16 +44,16 @@ export function OperationsSupportPage() {
   }
 
   // Hide the entire subtree so denied users never mount employee/attendance queries.
-  if (!canAccessOperationsSupport(profile)) {
+  if (!canViewOperationsSupportPart(profile, part)) {
     return <p role="status" className="rounded-xl border border-border bg-card px-5 py-6 text-sm text-muted-foreground shadow-sm">운영지원 기능 또는 회사 현황 조회 권한이 필요합니다.</p>
   }
 
   return (
     <div>
       <PageHeader title="운영지원" description={current.description} />
-      {!canEditOrgAssignment(profile) && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">제작 화면 검수 · 운영지원 자료를 조회할 수 있습니다. 저장·승인은 기존 업무 권한을 따릅니다.</p>}
+      {!canEditOrgAssignment(profile) && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">운영지원 자료를 조회할 수 있습니다. 저장·승인은 기존 업무 권한을 따릅니다.</p>}
       <div role="tablist" aria-label="운영지원 파트" className="mb-5 flex gap-1 overflow-x-auto border-b border-border">
-        {PARTS.map((item) => {
+        {visibleParts.map((item) => {
           const selected = item.id === part
           return (
             <button
