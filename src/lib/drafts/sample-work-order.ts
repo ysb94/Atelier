@@ -165,7 +165,7 @@ export function canAddNextSampleWorkOrder(
   const latest = latestFilledSampleWorkOrder(orders)
   return Boolean(
     latest?.url &&
-      latest.shipped &&
+      (latest.shipped || latest.receivedAt) &&
       !latest.passed &&
       !latest.failReason.trim(),
   )
@@ -240,9 +240,10 @@ export function sanitizeSampleWorkOrders(
     shippedAt: order.url?.trim() ? (order.shippedAt ?? null) : null,
     returnedAt:
       order.shipped && order.returnedAt ? order.returnedAt : null,
-    passed: Boolean(order.shipped && order.passed),
+    receivedAt: order.receivedAt ?? null,
+    passed: Boolean((order.shipped || order.receivedAt) && order.passed),
     passedAt:
-      order.shipped && order.passed
+      (order.shipped || order.receivedAt) && order.passed
         ? (order.passedAt ?? new Date().toISOString())
         : null,
     failReason:
@@ -297,7 +298,7 @@ export function setLatestSampleWorkOrderPassed(
   at = new Date().toISOString(),
 ) {
   const latest = latestFilledSampleWorkOrder(orders)
-  if (!latest?.shipped) return orders
+  if (!latest || (!latest.shipped && !latest.receivedAt)) return orders
   return orders.map((order) =>
     order.id === latest.id
       ? {
@@ -418,6 +419,7 @@ export function patchSampleWorkOrder(
 ) {
   return orders.map((order) => {
     if (order.id !== id) return order
+    if (order.receivedAt && patch.url !== undefined && patch.url !== order.url) throw new Error('수령한 샘플의 작업지시서는 바꿀 수 없습니다. 다음 차수를 등록해 주세요.')
     const next = { ...order, ...patch }
     if (!next.url?.trim()) {
       next.url = null
@@ -425,6 +427,7 @@ export function patchSampleWorkOrder(
       next.shipped = false
       next.shippedAt = null
       next.returnedAt = null
+      next.receivedAt = null
       next.passed = false
       next.passedAt = null
       next.failReason = ''
@@ -492,6 +495,7 @@ function parseSampleWorkOrder(value: unknown): DraftSampleWorkOrder | null {
   const row = value as Record<string, unknown>
   const url = typeof row.url === 'string' && row.url.trim() ? row.url : null
   const round = Number(row.round)
+  const receivedAt = url && typeof row.receivedAt === 'string' && !Number.isNaN(Date.parse(row.receivedAt)) ? row.receivedAt : null
   return {
     id: typeof row.id === 'string' && row.id ? row.id : newId(),
     round: Number.isFinite(round) && round > 0 ? Math.floor(round) : 1,
@@ -509,9 +513,11 @@ function parseSampleWorkOrder(value: unknown): DraftSampleWorkOrder | null {
       row.returnedAt
         ? row.returnedAt
         : null,
-    passed: Boolean(url && row.shipped && row.passed),
+    receivedAt,
+    originCountry: typeof row.originCountry === 'string' ? row.originCountry : undefined,
+    passed: Boolean(url && (row.shipped || receivedAt) && row.passed),
     passedAt:
-      url && row.shipped && row.passed && typeof row.passedAt === 'string'
+      url && (row.shipped || receivedAt) && row.passed && typeof row.passedAt === 'string'
         ? row.passedAt
         : null,
     failReason:

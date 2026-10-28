@@ -266,6 +266,10 @@ export type DraftSampleWorkOrder = {
   shippedAt: string | null
   /** 중국팀이 발송 완료를 누른 시각. 예전 기록에는 없을 수 있다. */
   returnedAt: string | null
+  /** 실물을 받은 뒤 수령 확인한 시각. 이전 기록은 비어 있다. */
+  receivedAt?: string | null
+  /** 차수 등록·수령 당시의 제조국. 미기록 차수는 기획안의 제조국을 표시한다. */
+  originCountry?: string
   /** 기획이 도착 샘플을 합격했는지. 합격하면 컬러별 샘플로 넘어간다. */
   passed: boolean
   passedAt: string | null

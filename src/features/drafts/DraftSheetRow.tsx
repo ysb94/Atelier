@@ -16,6 +16,7 @@ import { DRAFT_STATUS_LABEL, type Brand, type DraftColorRow, type ProductDraft }
 import { formatNumber } from '@/lib/utils'
 import { RELEASE_CERTAINTY_LABEL, formatReleaseGroupLabel, formatTargetDate, type ResolvedReleaseSchedule } from './release-schedule-preview'
 import './draft-board.css'
+import { DraftSampleProgress } from './DraftSampleProgress'
 
 const SAMPLE_WORK_ORDER_ACCEPT =
   'application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp,.xls,.xlsx'
@@ -603,8 +604,8 @@ function SampleHistoryDialog({
   onClose,
 }: {
   draftNo: string
-  samples: { id: string; round: number; shippedAt: string | null; returnedAt: string | null; passed: boolean }[]
-  colors: { id: string; round: number; shippedAt: string | null; returnedAt: string | null; passed: boolean }[]
+  samples: { id: string; round: number; shippedAt: string | null; returnedAt: string | null; receivedAt?: string | null; passed: boolean }[]
+  colors: { id: string; round: number; shippedAt: string | null; returnedAt: string | null; receivedAt?: string | null; passed: boolean }[]
   onClose: () => void
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null)
@@ -618,8 +619,8 @@ function SampleHistoryDialog({
     }
   }, [])
   const groups = [
-    { title: '대표 샘플', rows: samples },
-    { title: '컬러 샘플', rows: colors },
+    { title: '대표 샘플', rows: samples, receipt: true },
+    { title: '컬러 샘플', rows: colors, receipt: false },
   ].filter((group) => group.rows.length > 0)
   return createPortal(
     <dialog
@@ -643,19 +644,21 @@ function SampleHistoryDialog({
             <thead>
               <tr>
                 <th scope="col">차수</th>
-                <th scope="col">보낸 날</th>
-                <th scope="col">온 날</th>
+                <th scope="col">지시서 등록일</th>
+                <th scope="col">발송 완료일</th>
+                {group.receipt && <th scope="col">실물 수령일</th>}
                 <th scope="col">걸린 일수</th>
               </tr>
             </thead>
             <tbody>
               {group.rows.map((row) => {
-                const days = sampleTripSpanDays(row.shippedAt, row.returnedAt)
+                const days = sampleTripSpanDays(row.shippedAt, group.receipt ? row.receivedAt ?? null : row.returnedAt)
                 return (
                   <tr key={row.id}>
                     <th scope="row">{row.round}차{row.passed ? ' · 합격' : ''}</th>
                     <td>{sampleHistoryDay(row.shippedAt) || '기록 없음'}</td>
-                    <td>{row.returnedAt ? sampleHistoryDay(row.returnedAt) : '아직 오지 않음'}</td>
+                    <td>{row.returnedAt ? sampleHistoryDay(row.returnedAt) : '기록 없음'}</td>
+                    {group.receipt && <td>{sampleHistoryDay(row.receivedAt ?? null) || '기록 없음'}</td>}
                     <td>{days == null ? '—' : `${days}일`}</td>
                   </tr>
                 )
@@ -751,7 +754,7 @@ export function DraftPhoto({ src, name }: { src: string | null; name: string }) 
 
 export type DraftConfirmFlag = 'nameConfirmed' | 'colorsConfirmed' | 'colorNamesConfirmed'
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onSchedule, onAddColor, onRenameProduct, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onPassSample, onRequestNextSampleRound, onUploadColorWorkOrder, onPassColorSample, onRequestNextColorSampleRound, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onSchedule, onAddColor, onRenameProduct, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onPassSample, onReceiveSample, onRequestNextSampleRound, onUploadColorWorkOrder, onPassColorSample, onRequestNextColorSampleRound, onToggleConfirm }: {
   readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
   onOpen: () => void; onSchedule: () => void
@@ -761,7 +764,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
   onSaveSheetValue: (colorId: string, field: 'size' | 'fabric' | 'weight' | 'specDoc', value: string, applyAll: boolean) => Promise<void>
   onUploadSampleWorkOrder: (file: { url: string; name: string }) => Promise<void>
   onPassSample: () => Promise<void>
-  onRequestNextSampleRound: (file: { url: string; name: string }) => Promise<void>
+  onReceiveSample: (id: string) => Promise<void>
+  onRequestNextSampleRound: (file: { url: string; name: string }, country?: string) => Promise<void>
   onUploadColorWorkOrder: (file: { url: string; name: string }) => Promise<void>
   onPassColorSample: () => Promise<void>
   onRequestNextColorSampleRound: (file: { url: string; name: string }) => Promise<void>
@@ -772,7 +776,6 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
     .filter((order) => order.url?.trim())
     .sort((a, b) => a.round - b.round)
   const latestOrder = orders[orders.length - 1]
-  const latestOrderId = latestOrder?.id
   const samplePassed = Boolean(latestOrder?.passed)
   const colorRounds = resolveColorSampleRounds(draft)
   const latestColorRound = colorRounds[colorRounds.length - 1]
@@ -877,25 +880,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
                 </div>
               )}
             </>
-          ) : orders.map(order => (
-            <div className="draft-sheet-sample-block" key={order.id}>
-              <span className="draft-sheet-sample-mark">
-                <b>Sample</b>
-              </span>
-              <small className="draft-sheet-sample-round">{order.round}차</small>
-              <SampleTripArrows requestAt={order.shippedAt} returnAt={order.returnedAt} />
-              {order.id === latestOrderId && order.returnedAt && !order.passed && !order.failReason.trim() ? (
-                <SampleRoundDecision
-                  readOnly={readOnly}
-                  nextLabel={`${order.round + 1}차 GO`}
-                  onPass={onPassSample}
-                  onNextRound={onRequestNextSampleRound}
-                />
-              ) : order.returnedAt ? null : (
-                <span className="draft-sheet-sample-wait">Waiting</span>
-              )}
-            </div>
-          ))}
+          ) : <DraftSampleProgress orders={orders} originCountry={draft.originCountry} readOnly={readOnly} onReceive={onReceiveSample} onNext={onRequestNextSampleRound} onPass={onPassSample} />}
         </div>
       ) : (
         <div className="draft-sheet-actions"><SampleWorkOrderButton readOnly={readOnly} onUpload={onUploadSampleWorkOrder} /></div>

@@ -29,6 +29,9 @@ import {
   updateProductDraft,
 } from '@/lib/api'
 import { readFileAsDataUrl, readImageFile } from '@/lib/images'
+import { DraftSampleProgress } from './DraftSampleProgress'
+import { receiveSample, registerNextReceivedSample } from '@/lib/drafts/sample-receipt'
+import { latestFilledSampleWorkOrder } from '@/lib/drafts/sample-work-order'
 import {
   COST_CURRENCY_LABEL,
   DRAFT_OPEN_DETAIL_OPTIONS,
@@ -636,6 +639,16 @@ export function DraftEditPage() {
     },
   })
 
+  async function saveSampleProgress(sampleWorkOrders: ProductDraftInput['sampleWorkOrders'], originCountry = form.originCountry) {
+    const sampleDone = isSamplePassed(sampleWorkOrders)
+    const nextForm = { ...form, originCountry, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders), sampleDone,
+      colors: sampleDone ? startColorSamples(form.colors) : form.colors,
+      orderInProgress: sampleDone ? false : form.orderInProgress }
+    if (isNew) { patch(nextForm); return }
+    const saved = await saveMutation.mutateAsync(nextForm)
+    setForm({ ...nextForm, ...saved })
+  }
+
   const deleteMutation = useMutation({
     mutationFn: async () => {
       if (!editable) throw new Error('기획안은 작성자만 삭제할 수 있습니다.')
@@ -761,6 +774,15 @@ export function DraftEditPage() {
       </div>
 
       {workAccess.error ? <p role="alert" className="mb-3 text-sm text-danger">{workAccess.error.message}</p> : !editable ? <p role="status" className="mb-3 text-sm text-muted-foreground">조회 전용 · 작성자와 지정된 운영 계정만 수정·삭제할 수 있습니다.</p> : null}
+      {latestFilledSampleWorkOrder(form.sampleWorkOrders) && <Card className="mb-4 p-4">
+        <DraftSampleProgress orders={form.sampleWorkOrders} originCountry={form.originCountry} readOnly={!editable} saving={saveMutation.isPending}
+          onReceive={async id => { await saveSampleProgress(receiveSample(form.sampleWorkOrders, id, form.originCountry)) }}
+          onNext={async (file, country) => { await saveSampleProgress(registerNextReceivedSample(form.sampleWorkOrders, file, country, form.originCountry), country) }}
+          onPass={async () => {
+            if (!latestFilledSampleWorkOrder(form.sampleWorkOrders)?.receivedAt) throw new Error('실물 수령을 먼저 확인해 주세요.')
+            await saveSampleProgress(setLatestSampleWorkOrderPassed(form.sampleWorkOrders, true))
+          }} />
+      </Card>}
       <fieldset disabled={!editable} className="min-w-0 border-0 p-0">
       <div className="mb-3">
         <DraftProgressStrip
@@ -904,7 +926,7 @@ export function DraftEditPage() {
                 }
               }}
             />
-            {canPassLatestSampleWorkOrder(workOrders) ? (
+            {latestFilledSampleWorkOrder(workOrders)?.receivedAt && canPassLatestSampleWorkOrder(workOrders) ? (
               <div className="grid grid-cols-2 gap-1.5">
                 <Button
                   type="button"

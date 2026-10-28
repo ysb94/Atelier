@@ -61,7 +61,7 @@ type WorkOrderRow = {
 }
 
 function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
-  const samples = filledSampleWorkOrders(draft.sampleWorkOrders).map(
+  const samples = filledSampleWorkOrders(draft.sampleWorkOrders).filter(order => !order.originCountry || /중국|china/i.test(order.originCountry)).map(
     (order) => ({
       draft,
       kind: 'sample' as const,

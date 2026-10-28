@@ -25,7 +25,8 @@ import {
   publishNextColorSampleRound,
   resolveColorSampleRounds,
 } from '@/lib/drafts/draft-flow'
-import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields, requestNextSampleRound, setLatestSampleWorkOrderPassed } from '@/lib/drafts/sample-work-order'
+import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields, setLatestSampleWorkOrderPassed } from '@/lib/drafts/sample-work-order'
+import { receiveSample, registerNextReceivedSample } from '@/lib/drafts/sample-receipt'
 import { parseSizeSpecInput } from '@/lib/drafts/spec-format'
 import { writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
@@ -755,11 +756,17 @@ export function CompanyDraftsPage() {
                         }
                       })
                     }}
-                    onRequestNextSampleRound={async (file) => {
+                    onReceiveSample={async (id) => {
+                      await saveDraftChange(draft.id, (current) => {
+                        const input = draftToInput(current)
+                        return { ...input, sampleWorkOrders: receiveSample(input.sampleWorkOrders, id, input.originCountry) }
+                      })
+                    }}
+                    onRequestNextSampleRound={async (file, country) => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
                         const before = latestFilledSampleWorkOrder(input.sampleWorkOrders)?.round
-                        const sampleWorkOrders = requestNextSampleRound(input.sampleWorkOrders, file)
+                        const sampleWorkOrders = registerNextReceivedSample(input.sampleWorkOrders, file, country || input.originCountry, input.originCountry)
                         if (latestFilledSampleWorkOrder(sampleWorkOrders)?.round === before) {
                           throw new Error('다음 차수로 넘기지 못했습니다.')
                         }
@@ -768,12 +775,14 @@ export function CompanyDraftsPage() {
                           sampleWorkOrders,
                           ...legacyWorkOrderFields(sampleWorkOrders),
                           sampleDone: false,
+                          originCountry: country || input.originCountry,
                         }
                       })
                     }}
                     onPassSample={async () => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
+                        if (!latestFilledSampleWorkOrder(input.sampleWorkOrders)?.receivedAt) throw new Error('실물 수령을 먼저 확인해 주세요.')
                         const sampleWorkOrders = setLatestSampleWorkOrderPassed(
                           input.sampleWorkOrders,
                           true,
