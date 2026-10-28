@@ -11,17 +11,31 @@ function newId() {
   return `swo-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+/** 날짜만 있는 값, ISO 시각, PostgreSQL의 공백·마이크로초·짧은 시차 표기를 함께 읽는다. */
+function sampleDate(value: string | null) {
+  const text = value?.trim()
+  if (!text) return null
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(text)
+  if (!dateOnly && !/^\d{4}-\d{2}-\d{2}[T\s]+\d{2}:\d{2}/.test(text)) return null
+  const source = dateOnly ? `${text}T00:00:00` : text
+    .replace(/^(\d{4}-\d{2}-\d{2})\s+/, '$1T')
+    .replace(/(\.\d{3})\d+/, '$1')
+    .replace(/([+-]\d{2})$/, '$1:00')
+  const date = new Date(source)
+  if (Number.isNaN(date.getTime())) return null
+  if (dateOnly && (date.getFullYear() !== Number(text.slice(0, 4)) || date.getMonth() + 1 !== Number(text.slice(5, 7)) || date.getDate() !== Number(text.slice(8, 10)))) return null
+  return date
+}
+
 export function sheetDay(value: string | null) {
-  if (!value) return ''
-  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return ''
+  const date = sampleDate(value)
+  if (!date) return ''
   return `${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`
 }
 
 export function sampleElapsedDays(value: string | null, now = new Date()) {
-  if (!value) return null
-  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return null
+  const date = sampleDate(value)
+  if (!date) return null
   const start = new Date(date.getFullYear(), date.getMonth(), date.getDate())
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   return Math.max(0, Math.round((today.getTime() - start.getTime()) / 86_400_000))
@@ -34,8 +48,8 @@ export function sampleElapsedDaysLabel(value: string | null, now = new Date()) {
 }
 
 function sampleCalendarDay(value: string) {
-  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return null
+  const date = sampleDate(value)
+  if (!date) return null
   return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }
 
@@ -231,7 +245,7 @@ export function withPendingNextSampleWorkOrder(
 
 /** 중국팀 저장 함수는 완료 표시 대신 발송일만 기록하는 버전도 있다. */
 function sampleShipmentRecorded(shipped: unknown, returnedAt: unknown) {
-  return Boolean(shipped || (typeof returnedAt === 'string' && returnedAt.trim() && !Number.isNaN(Date.parse(returnedAt))))
+  return Boolean(shipped || (typeof returnedAt === 'string' && sampleDate(returnedAt)))
 }
 
 export function sanitizeSampleWorkOrders(
