@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
-import { Input, Select } from '@/components/ui/input'
+import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { canEditOrgAssignment } from '@/lib/company/capabilities'
@@ -16,16 +16,17 @@ export function AttendanceExemptionsPanel({ directory }: { directory: ReturnType
   const { profile } = useAuth()
   const cache = useQueryClient()
   const canEdit = canEditOrgAssignment(profile)
-  const [selected, setSelected] = useState('')
   const [search, setSearch] = useState('')
   const [error, setError] = useState<string | null>(null)
   const excluded = useMemo(() => directory.members.filter(member => member.attendanceExempt), [directory.members])
   const available = useMemo(() => directory.members.filter(member => !member.attendanceExempt), [directory.members])
-  const visible = excluded.filter(member => `${memberLabel(member.displayName)} ${directory.departmentName(member.departmentId)}`.toLocaleLowerCase('ko').includes(search.trim().toLocaleLowerCase('ko')))
+  const needle = search.trim().toLocaleLowerCase('ko')
+  const matches = available.filter(member => needle && memberLabel(member.displayName).toLocaleLowerCase('ko').includes(needle))
   const mutation = useMutation({
     mutationFn: ({ id, exempt }: { id: string; exempt: boolean }) => setAttendanceExemption(id, exempt),
-    onSuccess: async () => {
-      setSelected(''); setError(null)
+    onSuccess: async (_, { exempt }) => {
+      if (exempt) setSearch('')
+      setError(null)
       await Promise.all([
         cache.invalidateQueries({ queryKey: ['orgChartMembers'] }),
         cache.invalidateQueries({ queryKey: ['my-attendance-exemption'] }),
@@ -44,16 +45,18 @@ export function AttendanceExemptionsPanel({ directory }: { directory: ReturnType
     </div>
     {directory.error ? <div role="alert"><p className="text-sm text-danger">직원과 제외자 목록을 불러오지 못했습니다.</p><Button variant="outline" onClick={directory.refetch}>다시 확인</Button></div> : null}
     {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}
-    <FilterBar>
-      <Input aria-label="제외자 검색" placeholder="이름·부서 검색" value={search} onChange={event => setSearch(event.target.value)} className="max-w-64" />
-      {canEdit ? <><Select aria-label="출퇴근 제외 직원 선택" value={selected} onChange={event => setSelected(event.target.value)} disabled={directory.loading || Boolean(directory.error) || mutation.isPending} className="max-w-80">
-        <option value="">추가할 직원 선택</option>
-        {available.map(member => <option key={member.id} value={member.id}>{memberLabel(member.displayName)} · {directory.departmentName(member.departmentId)}</option>)}
-      </Select><Button disabled={!selected || mutation.isPending || directory.loading || Boolean(directory.error)} onClick={() => save(selected, true)}>제외자 추가</Button></> : null}
-    </FilterBar>
+    {canEdit ? <div className="space-y-2">
+      <FilterBar><Input aria-label="추가할 직원 이름 검색" placeholder="추가할 직원 이름 검색" value={search} onChange={event => setSearch(event.target.value)} className="max-w-80" /></FilterBar>
+      {needle && !directory.loading && !directory.error ? <div className="max-h-60 overflow-y-auto rounded-xl border border-border" aria-label="추가할 직원 검색 결과">
+        {matches.length ? matches.map(member => <div key={member.id} className="flex items-center justify-between gap-3 border-b border-border px-3 py-2 last:border-b-0">
+          <div className="min-w-0"><p className="break-words text-sm font-medium">{memberLabel(member.displayName)}</p><p className="text-xs text-muted-foreground">{directory.departmentName(member.departmentId)}</p></div>
+          <Button size="sm" disabled={mutation.isPending} aria-label={`${memberLabel(member.displayName)} 제외자 추가`} onClick={() => save(member.id, true)}>추가</Button>
+        </div>) : <p role="status" className="px-3 py-3 text-sm text-muted-foreground">추가할 직원이 없습니다. 이미 제외된 직원은 검색에 표시되지 않습니다.</p>}
+      </div> : null}
+    </div> : null}
     {directory.loading ? <p role="status">불러오는 중…</p> : !directory.error ? <div className="overflow-x-auto rounded-xl border border-border">
       <table className="w-full text-left text-sm"><thead className="bg-primary text-primary-foreground"><tr><th className="px-3 py-2">이름</th><th className="px-3 py-2">부서</th><th className="px-3 py-2">관리</th></tr></thead>
-        <tbody>{visible.length ? visible.map(member => <tr key={member.id} className="border-t border-border"><td className="px-3 py-2 font-medium">{memberLabel(member.displayName)}</td><td className="px-3 py-2">{directory.departmentName(member.departmentId)}</td><td className="px-3 py-2">{canEdit ? <Button variant="outline" size="sm" disabled={mutation.isPending} aria-label={`${memberLabel(member.displayName)} 제외 해제`} onClick={() => save(member.id, false)}>제외 해제</Button> : '조회 전용'}</td></tr>) : <tr><td colSpan={3} className="px-3 py-6 text-center text-muted-foreground">{search.trim() ? '검색 결과가 없습니다.' : '등록된 제외자가 없습니다.'}</td></tr>}</tbody>
+        <tbody>{excluded.length ? excluded.map(member => <tr key={member.id} className="border-t border-border"><td className="px-3 py-2 font-medium">{memberLabel(member.displayName)}</td><td className="px-3 py-2">{directory.departmentName(member.departmentId)}</td><td className="px-3 py-2">{canEdit ? <Button variant="outline" size="sm" disabled={mutation.isPending} aria-label={`${memberLabel(member.displayName)} 제외 해제`} onClick={() => save(member.id, false)}>제외 해제</Button> : '조회 전용'}</td></tr>) : <tr><td colSpan={3} className="px-3 py-6 text-center text-muted-foreground">등록된 제외자가 없습니다.</td></tr>}</tbody>
       </table></div> : null}
   </CardContent></Card>
 }
