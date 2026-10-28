@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { readFileAsDataUrl } from '@/lib/images'
 import type { DraftSampleWorkOrder } from '@/lib/types'
-import { sampleElapsedDays, sampleHistoryDay } from '@/lib/drafts/sample-work-order'
+import { sampleElapsedDays, sampleHistoryDay, sampleTripSpanDays } from '@/lib/drafts/sample-work-order'
 import { canReceiveSample, sampleCountry } from '@/lib/drafts/sample-receipt'
 import './draft-sample-progress.css'
 
@@ -42,7 +42,7 @@ export function DraftSampleProgress({ orders, originCountry, readOnly = false, s
   return <div className="draft-sample-progress" aria-label="샘플 등록·수령 이력">
     {list.map(order => {
       const country = sampleCountry(order.originCountry || originCountry)
-      const registered = sampleElapsedDays(order.shippedAt)
+      const registered = order.receivedAt ? sampleTripSpanDays(order.shippedAt, order.receivedAt) : sampleElapsedDays(order.shippedAt)
       const received = sampleElapsedDays(order.receivedAt ?? null)
       const current = order.id === latest?.id
       return <section key={order.id} aria-label={`${order.round}차 샘플`} className="draft-sample-round">
@@ -50,11 +50,11 @@ export function DraftSampleProgress({ orders, originCountry, readOnly = false, s
           <div className="draft-sample-heading">
             <span className="draft-sample-country" title={country.label}>{country.code}<span aria-hidden="true"> | </span></span>
             <a href={order.url!} download={order.name} title="작업지시서 내려받기">{order.round}차 샘플 {sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}</a>
-            {registered !== null && <span className="draft-sample-registered-elapsed" title="작업지시서 등록 후 경과일">({registered}일 경과)</span>}
+            {registered !== null && <span className="draft-sample-registered-elapsed" title={order.receivedAt ? '작업지시서 등록부터 실물 수령까지 걸린 일수' : '작업지시서 등록 후 경과일'}>({registered}일{order.receivedAt ? '' : ' 경과'})</span>}
           </div>
-          <p className="draft-sample-dispatch">{country.code === 'CN'
+          {!order.receivedAt && <p className="draft-sample-dispatch">{country.code === 'CN'
             ? order.shipped ? `${sampleHistoryDay(order.returnedAt).slice(2) || '날짜 기록 없음'} 중국 발송 완료` : '중국팀 제작·발송 대기'
-            : '국내 샘플'}</p>
+            : '국내 샘플'}</p>}
           {current && !order.passed && !order.receivedAt && <Button type="button" size="sm" variant="outline" className="draft-sample-receive" disabled={readOnly || saving || busy || !canReceiveSample(order, originCountry)}
             title="실물을 받은 뒤 확인하세요. 수령 확인은 합격 처리가 아닙니다." onClick={() => void run(() => onReceive(order.id))}>{busy ? '저장 중' : '수령 확인'}</Button>}
         </div>
