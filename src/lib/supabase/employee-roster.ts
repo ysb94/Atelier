@@ -29,6 +29,7 @@ export const ROSTER_FIELDS = [
 ] as const
 
 export type RosterFieldKey = (typeof ROSTER_FIELDS)[number]['key']
+export type RosterWriteFieldKey = RosterFieldKey | 'remainingAnnualLeave'
 
 export type EmployeeRoster = {
   profileId: string
@@ -143,12 +144,19 @@ export async function listEmployeeRosters(): Promise<EmployeeRoster[]> {
 
 export async function saveEmployeeRosterField(
   profileId: string,
-  field: RosterFieldKey,
+  field: RosterWriteFieldKey,
   value: string,
 ): Promise<void> {
-  const spec = ROSTER_FIELDS.find((item) => item.key === field)
+  const spec = field === 'remainingAnnualLeave' ? { column: 'remaining_annual_leave' } : ROSTER_FIELDS.find((item) => item.key === field)
   if (!spec) throw new Error('저장할 명부 항목을 찾지 못했습니다.')
-  const stored = field === 'resignedOn' ? value || null : value
+  let stored: string | number | null = field === 'resignedOn' ? value || null : value
+  if (field === 'remainingAnnualLeave') {
+    const text = value.trim()
+    if (text && (!/^[+-]?(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(text) || !Number.isFinite(Number(text)) || Math.abs(Number(text)) > 99999.99)) {
+      throw new Error('남은 연차는 소수 둘째 자리까지 숫자로 입력해 주세요.')
+    }
+    stored = text ? Number(text) : null
+  }
   const { error } = await getSupabase()
     .from('employee_roster')
     .upsert(
