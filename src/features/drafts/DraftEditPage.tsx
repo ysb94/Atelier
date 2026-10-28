@@ -29,6 +29,8 @@ import {
   updateProductDraft,
 } from '@/lib/api'
 import { readFileAsDataUrl, readImageFile } from '@/lib/images'
+import { SampleWorkOrderRegistration } from './SampleWorkOrderRegistration'
+import { registerDraftSampleStage } from '@/lib/drafts/sample-registration'
 import {
   COST_CURRENCY_LABEL,
   DRAFT_OPEN_DETAIL_OPTIONS,
@@ -50,15 +52,18 @@ import {
   colorWorkOrderFileName,
   startColorSamples,
 } from '@/lib/drafts/draft-flow'
+import { applySampleOrigin, sampleCountry } from '@/lib/drafts/sample-receipt'
 import {
+  attachSampleWorkOrderFile,
+  draftToInput,
   canPassLatestSampleWorkOrder,
   failLatestSampleWorkOrder,
   isSamplePassed,
+  latestFilledSampleWorkOrder,
   legacyWorkOrderFields,
   patchSampleWorkOrder,
   samplePhase,
-  samplePhaseHint,
-  samplePhaseLabel,
+  sampleWorkOrderFileName,
   setLatestSampleWorkOrderPassed,
   withPendingNextSampleWorkOrder,
 } from '@/lib/drafts/sample-work-order'
@@ -84,186 +89,6 @@ const TEXT_SPEC_KEYS = ['fabric', 'coating'] as const satisfies DraftSpecKey[]
 const SPEC_PLACEHOLDER: Record<(typeof TEXT_SPEC_KEYS)[number], string> = {
   fabric: '겉감: Nylon 75% / 안감: Polyester 100%',
   coating: '생활 발수 OK',
-}
-
-const DRAFT_FLOW_STEPS = [
-  {
-    key: 'sample',
-    label: '샘플 진행 중',
-    hint: '작업 지시서를 올리면 시작합니다',
-    interactive: false,
-  },
-  {
-    key: 'colorSample',
-    label: '컬러별 샘플 진행',
-    hint: '대표 컬러 합격 뒤 컬러마다 샘플을 만듭니다',
-    interactive: false,
-  },
-  {
-    key: 'orderInProgress',
-    label: '컬러샘플 발주 완료',
-    hint: '디자인에서 촬영할 수 있습니다',
-    interactive: true,
-  },
-  {
-    key: 'orderDone',
-    label: '생산 발주 완료',
-    hint: '본 발주',
-    interactive: true,
-  },
-] as const
-
-type DraftFlowKey = (typeof DRAFT_FLOW_STEPS)[number]['key']
-
-function draftFlowActive(
-  form: ProductDraftInput,
-): Record<DraftFlowKey, boolean> {
-  const phase = samplePhase(form.sampleWorkOrders)
-  return {
-    sample: phase !== 'empty',
-    colorSample: phase === 'passed',
-    orderInProgress: form.orderInProgress || form.orderDone,
-    orderDone: form.orderDone,
-  }
-}
-
-function draftFlowState(
-  form: ProductDraftInput,
-  index: number,
-): 'done' | 'current' | 'todo' {
-  const phase = samplePhase(form.sampleWorkOrders)
-  const step = DRAFT_FLOW_STEPS[index]
-  if (step.key === 'sample') {
-    if (phase === 'passed') return 'done'
-    if (phase === 'empty') return 'todo'
-    return 'current'
-  }
-  if (step.key === 'colorSample') {
-    if (phase !== 'passed') return 'todo'
-    if (form.orderInProgress || form.orderDone) return 'done'
-    return 'current'
-  }
-  if (step.key === 'orderInProgress') {
-    if (form.orderDone) return 'done'
-    if (form.orderInProgress) return 'current'
-    return 'todo'
-  }
-  return form.orderDone ? 'done' : 'todo'
-}
-
-function DraftProgressStrip({
-  form,
-  onToggle,
-}: {
-  form: ProductDraftInput
-  onToggle: (key: 'orderInProgress' | 'orderDone') => void
-}) {
-  const active = draftFlowActive(form)
-  return (
-    <div className="overflow-x-auto rounded-xl border border-border bg-card px-3 py-2 shadow-sm">
-      <ol className="flex min-w-[36rem] items-start justify-between gap-1">
-        {DRAFT_FLOW_STEPS.map((step, index) => {
-          const state = draftFlowState(form, index)
-          const nextState =
-            index < DRAFT_FLOW_STEPS.length - 1
-              ? draftFlowState(form, index + 1)
-              : null
-          const connectorDone =
-            state === 'done' &&
-            (nextState === 'done' || nextState === 'current')
-          const label =
-            step.key === 'sample'
-              ? samplePhaseLabel(form.sampleWorkOrders)
-              : step.label
-          const hint =
-            step.key === 'sample'
-              ? samplePhaseHint(form.sampleWorkOrders)
-              : step.hint
-          const className = cn(
-            'relative z-[1] flex w-full flex-col items-center gap-1 rounded-md px-0.5 py-0.5 text-center outline-none',
-            step.interactive && 'focus-visible:ring-2 focus-visible:ring-ring',
-            !step.interactive && 'cursor-default',
-          )
-          const body = (
-            <>
-              <span
-                className={cn(
-                  'flex size-6 items-center justify-center rounded-full border text-[10px] font-semibold transition-colors',
-                  state === 'done' &&
-                    'border-foreground bg-foreground text-background',
-                  state === 'current' &&
-                    'border-foreground bg-background text-foreground ring-4 ring-foreground/10',
-                  state === 'todo' &&
-                    'border-border bg-background text-muted-foreground',
-                )}
-              >
-                {state === 'done' ? (
-                  <Check className="size-3" strokeWidth={2.5} />
-                ) : (
-                  index + 1
-                )}
-              </span>
-              <span
-                className={cn(
-                  'max-w-[9rem] text-[11px] leading-tight',
-                  state === 'current'
-                    ? 'font-semibold text-foreground'
-                    : state === 'done'
-                      ? 'font-medium text-foreground/80'
-                      : 'text-muted-foreground',
-                )}
-              >
-                {label}
-              </span>
-              {state === 'current' || state === 'done' ? (
-                <span className="text-[10px] leading-none text-muted-foreground">
-                  {hint}
-                </span>
-              ) : (
-                <span className="h-2.5" aria-hidden />
-              )}
-            </>
-          )
-          return (
-            <li
-              key={step.key}
-              className="relative flex min-w-0 flex-1 flex-col items-center"
-            >
-              {index < DRAFT_FLOW_STEPS.length - 1 ? (
-                <span
-                  aria-hidden
-                  className={cn(
-                    'absolute left-[calc(50%+0.85rem)] right-[calc(-50%+0.85rem)] top-3 h-px',
-                    connectorDone ? 'bg-foreground/40' : 'bg-border',
-                  )}
-                />
-              ) : null}
-              {step.interactive ? (
-                <button
-                  type="button"
-                  aria-pressed={active[step.key]}
-                  aria-current={state === 'current' ? 'step' : undefined}
-                  title={hint}
-                  onClick={() => onToggle(step.key)}
-                  className={className}
-                >
-                  {body}
-                </button>
-              ) : (
-                <div
-                  aria-current={state === 'current' ? 'step' : undefined}
-                  title={hint}
-                  className={className}
-                >
-                  {body}
-                </div>
-              )}
-            </li>
-          )
-        })}
-      </ol>
-    </div>
-  )
 }
 
 function toNumber(value: string): number | null {
@@ -480,6 +305,7 @@ export function DraftEditPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const basicWorkOrderInputRef = useRef<HTMLInputElement>(null)
   const workOrderInputRef = useRef<HTMLInputElement>(null)
   const uploadOrderIdRef = useRef<string | null>(null)
   const uploadColorIdRef = useRef<string | null>(null)
@@ -493,6 +319,22 @@ export function DraftEditPage() {
   const [seasonFromQueryDone, setSeasonFromQueryDone] = useState(false)
   const [failOpen, setFailOpen] = useState(false)
   const [failReason, setFailReason] = useState('')
+  const [editorPart, setEditorPart] = useState<'basic' | 'pending'>('basic')
+  const photoObserver = useRef<ResizeObserver | null>(null)
+  const [photoSize, setPhotoSize] = useState(144)
+  const nameBlockRef = (node: HTMLDivElement | null) => {
+    photoObserver.current?.disconnect()
+    photoObserver.current = null
+    if (!node) return
+    const update = () => {
+      const next = Math.round(node.getBoundingClientRect().height)
+      if (next > 0) setPhotoSize((current) => (current === next ? current : next))
+    }
+    update()
+    const observer = new ResizeObserver(update)
+    photoObserver.current = observer
+    observer.observe(node)
+  }
 
   const draftQuery = useQuery({
     queryKey: ['product-draft', draftId],
@@ -595,6 +437,55 @@ export function DraftEditPage() {
     })
   }
 
+  const currentSample = latestFilledSampleWorkOrder(form.sampleWorkOrders)
+  const sampleRound = currentSample?.round ?? 1
+  const samplePhaseNow = samplePhase(form.sampleWorkOrders)
+  const sampleStatus =
+    samplePhaseNow === 'passed'
+      ? `${sampleRound}차샘플 합격`
+      : samplePhaseNow === 'shipped'
+        ? `${sampleRound}차샘플 발송`
+        : `${sampleRound}차샘플 진행`
+  const sampleFileName = currentSample?.url ? sampleWorkOrderFileName(currentSample) : ''
+  const sampleUploadLocked = Boolean(currentSample && (currentSample.shipped || currentSample.passed))
+
+  async function uploadBasicWorkOrder(file: File) {
+    if (sampleUploadLocked) return
+    const country = sampleCountry(form.originCountry)
+    if (country.code !== 'CN' && country.code !== 'KO') {
+      setError('제조국을 먼저 선택해 주세요. 중국은 중국팀으로 전달되고, 한국은 기록만 남습니다.')
+      return
+    }
+    if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) {
+      setError('작업 지시서는 8MB 이하만 올릴 수 있습니다.')
+      return
+    }
+    try {
+      const url = await readFileAsDataUrl(file)
+      const attached =
+        currentSample && !currentSample.shipped && !currentSample.passed
+          ? patchSampleWorkOrder(form.sampleWorkOrders, currentSample.id, {
+              url,
+              name: file.name,
+              shipped: false,
+              shippedAt: new Date().toISOString(),
+              returnedAt: null,
+            })
+          : attachSampleWorkOrderFile(form.sampleWorkOrders, { url, name: file.name })
+      const next = applySampleOrigin(attached, form.originCountry)
+      const nextForm = {
+        ...form,
+        sampleWorkOrders: next,
+        ...legacyWorkOrderFields(next),
+      }
+      patchWorkOrders(next)
+      if (!isNew) saveMutation.mutate(nextForm)
+    } catch (err) {
+      console.warn('[drafts] 샘플 작업 지시서 업로드 실패', err)
+      setError('작업 지시서를 불러오지 못했습니다.')
+    }
+  }
+
   function patchColor(
     colorId: string,
     next: Partial<ProductDraftInput['colors'][number]>,
@@ -620,7 +511,7 @@ export function DraftEditPage() {
       }
       if (isNew) return createProductDraft(companyId, payload)
       if (!draftId) throw new Error('기획안을 찾을 수 없습니다.')
-      return updateProductDraft(draftId, { ...payload, expectedUpdatedAt: loaded?.updatedAt })
+      return updateProductDraft(draftId, { ...payload, expectedUpdatedAt: payload.expectedUpdatedAt ?? loaded?.updatedAt })
     },
     onSuccess: async (saved) => {
       setError(null)
@@ -762,26 +653,19 @@ export function DraftEditPage() {
 
       {workAccess.error ? <p role="alert" className="mb-3 text-sm text-danger">{workAccess.error.message}</p> : !editable ? <p role="status" className="mb-3 text-sm text-muted-foreground">조회 전용 · 작성자와 지정된 운영 계정만 수정·삭제할 수 있습니다.</p> : null}
       <fieldset disabled={!editable} className="min-w-0 border-0 p-0">
-      <div className="mb-3">
-        <DraftProgressStrip
-          form={form}
-          onToggle={(key) => {
-            const nextForm = { ...form, [key]: !form[key] }
-            patch({ [key]: nextForm[key] })
-            if (!isNew) saveMutation.mutate(nextForm)
-          }}
-        />
-      </div>
-
       {error ? (
         <p className="mb-3 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
           {error}
         </p>
       ) : null}
 
+      <div role="tablist" aria-label="기획안 편집 구역" className="mb-3 flex gap-2 border-b border-border pb-3">
+        <Button type="button" role="tab" aria-selected={editorPart === 'basic'} variant={editorPart === 'basic' ? 'default' : 'outline'} onClick={() => setEditorPart('basic')}>기본</Button>
+        <Button type="button" role="tab" aria-selected={editorPart === 'pending'} variant={editorPart === 'pending' ? 'default' : 'outline'} onClick={() => setEditorPart('pending')}>수정예정</Button>
+      </div>
       <div className="grid gap-3 lg:grid-cols-3">
-        {/* 기본 정보 + 사진 */}
-        <SectionCard title="기본">
+        {editorPart === 'basic' ? (
+        <SectionCard title="기본" className="lg:col-span-3">
           <input
             ref={fileInputRef}
             type="file"
@@ -798,22 +682,22 @@ export function DraftEditPage() {
               }
             }}
           />
-          <div className="flex gap-3">
-            <div className="relative shrink-0">
+          <div className="flex items-start gap-6">
+            <div className="relative shrink-0" style={{ width: photoSize, height: photoSize }}>
               <button
                 type="button"
                 title="사진 선택"
                 onClick={() => fileInputRef.current?.click()}
-                className="flex size-[5.5rem] items-center justify-center overflow-hidden rounded-md border border-border bg-muted/40 transition-colors hover:bg-muted"
+                className="flex size-full items-center justify-center overflow-hidden rounded-xl border border-border bg-muted/40 transition-colors hover:bg-muted"
               >
                 {form.imageUrl ? (
                   <img
                     src={form.imageUrl}
                     alt=""
-                    className="size-full object-contain"
+                    className="max-h-full max-w-full object-contain"
                   />
                 ) : (
-                  <ImagePlus className="size-5 text-muted-foreground" />
+                  <ImagePlus className="size-8 text-muted-foreground" />
                 )}
               </button>
               {form.imageUrl ? (
@@ -828,28 +712,138 @@ export function DraftEditPage() {
                 </button>
               ) : null}
             </div>
-            <div className="min-w-0 flex-1 space-y-2">
+            <div ref={nameBlockRef} className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-end gap-x-3 gap-y-3">
+              <div className="col-span-2">
+                <p className="text-sm text-foreground">Designer <strong>{form.owner.trim() || '미정'}</strong></p>
+                <p className="text-sm font-semibold">{loaded?.draftNo ? `No. ${loaded.draftNo}` : 'No. 저장 시 발급'}</p>
+              </div>
               <Field label="한글명">
                 <Input
-                  className="h-8"
+                  className="h-9"
                   value={form.nameKo}
                   placeholder="투웨이 셔링 호보백_글로우"
+                  readOnly={Boolean(form.specs.nameConfirmed)}
                   onChange={(e) => patch({ nameKo: e.target.value })}
                 />
               </Field>
+              <span />
               <Field label="영문명">
                 <Input
-                  className="h-8"
+                  className="h-9"
                   value={form.nameEn}
                   placeholder="2way shirring hobo bag_Glow"
+                  readOnly={Boolean(form.specs.nameConfirmed)}
                   onChange={(e) => patch({ nameEn: e.target.value })}
                 />
               </Field>
+              <div className="flex gap-2">
+                    {form.specs.nameConfirmed ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!editable || saveMutation.isPending}
+                      onClick={() => {
+                        const nextForm = { ...form, specs: { ...form.specs, nameConfirmed: false } }
+                        patch({ specs: nextForm.specs })
+                        if (!isNew) saveMutation.mutate(nextForm)
+                      }}
+                    >
+                      네임수정
+                    </Button>
+                    ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!editable || saveMutation.isPending}
+                      onClick={() => {
+                        if (!form.nameKo.trim() && !form.nameEn.trim()) {
+                          setError('한글명 또는 영문명을 먼저 입력해 주세요.')
+                          return
+                        }
+                        const nextForm = { ...form, specs: { ...form.specs, nameConfirmed: true } }
+                        patch({ specs: nextForm.specs })
+                        if (!isNew) saveMutation.mutate(nextForm)
+                      }}
+                    >
+                      네임확정
+                    </Button>
+                    )}
+                  </div>
+                </div>
+              </div>
+          <div className="mt-2 border-t border-border pt-5">
+            <input
+              ref={basicWorkOrderInputRef}
+              type="file"
+              accept={SAMPLE_WORK_ORDER_ACCEPT}
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0]
+                event.target.value = ''
+                if (file) void uploadBasicWorkOrder(file)
+              }}
+            />
+            <p className="text-center">
+              <span className="inline-flex rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">{sampleStatus}</span>
+            </p>
+            <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+              <span />
+              <p className="text-sm text-muted-foreground">{sampleRound}차샘플 작업지시서 업로드</p>
+              <div className="justify-self-end">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!editable || sampleUploadLocked || saveMutation.isPending}
+                  onClick={() => basicWorkOrderInputRef.current?.click()}
+                >
+                  <Upload className="size-3.5" />
+                  올리기
+                </Button>
+              </div>
+            </div>
+            <div className="mt-4 grid items-center gap-4 sm:grid-cols-[240px_minmax(0,1fr)]">
+              <div>
+                <OptionSelect
+                  className="h-11"
+                  value={form.originCountry}
+                  options={DRAFT_ORIGIN_OPTIONS}
+                  placeholder="제조국 선택"
+                  onChange={(originCountry) => {
+                    const sampleWorkOrders = applySampleOrigin(form.sampleWorkOrders, originCountry)
+                    const nextForm = { ...form, originCountry, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) }
+                    patch({ originCountry, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) })
+                    if (!isNew && latestFilledSampleWorkOrder(sampleWorkOrders)) saveMutation.mutate(nextForm)
+                  }}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">중국은 중국팀으로 전달되고, 한국은 전송하지 않고 기록만 남습니다.</p>
+              </div>
+              <div className="flex min-h-16 items-center justify-center rounded-xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
+                {sampleFileName && currentSample?.url ? (
+                  <a href={currentSample.url} download={sampleFileName} className="max-w-full truncate text-foreground underline-offset-2 hover:underline">
+                    {sampleFileName}
+                  </a>
+                ) : (
+                  '올린 파일이 없습니다.'
+                )}
+              </div>
             </div>
           </div>
+          <SampleWorkOrderRegistration originCountry={form.originCountry} nextRound={(latestFilledSampleWorkOrder(form.sampleWorkOrders)?.round ?? 1) + 1} readOnly={!editable} saving={saveMutation.isPending}
+            onRegister={async (stage, file, country) => {
+              if (isNew || !draftId) throw new Error('1차 작업지시서를 먼저 저장해 주세요.')
+              const current = await getProductDraftById(draftId)
+              if (!current) throw new Error('기획안을 다시 조회해 주세요.')
+              const nextForm = registerDraftSampleStage(draftToInput(current), stage, file, country)
+              const saved = await saveMutation.mutateAsync({ ...nextForm, expectedUpdatedAt: current.updatedAt })
+              setForm(draftToInput(saved))
+            }} />
 
         </SectionCard>
-
+        ) : (
+        <>
         {/* 1차 샘플 작업 지시서 + 컬러 */}
         <SectionCard
           title="컬러"
@@ -904,7 +898,7 @@ export function DraftEditPage() {
                 }
               }}
             />
-            {canPassLatestSampleWorkOrder(workOrders) ? (
+            {latestFilledSampleWorkOrder(workOrders)?.receivedAt && canPassLatestSampleWorkOrder(workOrders) ? (
               <div className="grid grid-cols-2 gap-1.5">
                 <Button
                   type="button"
@@ -1557,6 +1551,8 @@ export function DraftEditPage() {
             />
           </Field>
         </SectionCard>
+        </>
+        )}
       </div>
 
       {failOpen ? (

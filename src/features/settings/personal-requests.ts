@@ -23,6 +23,14 @@ export function isOfficialLeave(kind: RequestKind) { return kind === 'official' 
 export function isAllDayRequest(kind: RequestKind) { return isFullLeave(kind) || isOfficialLeave(kind) }
 export function isPartialLeave(kind: RequestKind) { return kind === 'half' || kind === 'quarter' }
 export function isLeaveRequest(kind: RequestKind) { return isFullLeave(kind) || isPartialLeave(kind) }
+export function isDirectRegistration(kind: RequestKind) { return isLeaveRequest(kind) || kind === 'offsite' }
+export function requiresDepartmentApproval(kind: RequestKind) { return kind === 'overtime' || kind === 'correction' }
+export function isSelfApprovedRequest(request: { status: PersonalRequest['status']; employeeId?: string; decidedBy?: string | null }) {
+  return request.status === 'approved' && Boolean(request.employeeId && request.decidedBy && request.employeeId === request.decidedBy)
+}
+export function requestStatusLabel(request: Pick<PersonalRequest, 'kind' | 'status'>) {
+  return request.status === 'approved' && isDirectRegistration(request.kind) ? '등록' : { pending: '승인 대기', approved: '승인', rejected: '반려', cancelled: '취소' }[request.status]
+}
 export function isLocationRequest(kind: RequestKind) { return kind === 'offsite' || kind === 'remote' }
 export function approvalTypeOf(kind: RequestKind): 'leave' | 'overtime' { return kind === 'overtime' ? 'overtime' : 'leave' }
 export function minuteOf(value: string) {
@@ -41,6 +49,7 @@ function interval(form: RequestForm | PersonalRequest) {
   return [form.from + (isAllDayRequest(form.kind) ? 'T00:00' : `T${form.start}`), form.to + (isAllDayRequest(form.kind) ? 'T24:00' : `T${form.end}`)]
 }
 export function validateRequest(form: RequestForm, requests: PersonalRequest[], basis: ReminderBasis, today?: string) {
+  if (form.kind === 'remote') return '재택은 등록할 수 없습니다.'
   if (!validDate(form.from) || !validDate(form.to) || form.to < form.from) return '신청 시작일과 종료일을 확인해 주세요.'
   if (form.kind === 'correction' && today && form.from > today) return '앞으로의 날짜는 출퇴근 정정을 신청할 수 없습니다.'
   if (!isAllDayRequest(form.kind)) {

@@ -256,6 +256,8 @@ export type DraftColorRow = {
 /** 기획안에서 중국팀으로 보내는 샘플 작업 지시서 한 차수 */
 export type DraftSampleWorkOrder = {
   id: string
+  /** 명시적으로 등록한 샘플 종류. 기존 차수는 numbered로 표시한다. */
+  sampleStage?: 'numbered' | 'final'
   /** 1부터. 1차, 2차, 3차… */
   round: number
   /** data URL */
@@ -266,6 +268,10 @@ export type DraftSampleWorkOrder = {
   shippedAt: string | null
   /** 중국팀이 발송 완료를 누른 시각. 예전 기록에는 없을 수 있다. */
   returnedAt: string | null
+  /** 실물을 받은 뒤 수령 확인한 시각. 이전 기록은 비어 있다. */
+  receivedAt?: string | null
+  /** 차수 등록·수령 당시의 제조국. 미기록 차수는 기획안의 제조국을 표시한다. */
+  originCountry?: string
   /** 기획이 도착 샘플을 합격했는지. 합격하면 컬러별 샘플로 넘어간다. */
   passed: boolean
   passedAt: string | null
@@ -325,6 +331,8 @@ export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
 /** 컬러 샘플 작업지시서 한 차수. 대표 샘플과 같이 회신 뒤에 합격 또는 다음 차수로 간다. */
 export type DraftColorSampleRound = {
   id: string
+  /** 차수별 제조국. 기존 기록은 기획안 제조국을 따른다. */
+  originCountry?: string
   /** 1부터. 1차, 2차, 3차… */
   round: number
   url: string
@@ -424,10 +432,8 @@ export const DRAFT_OWNER_OPTIONS = [
 ] as const
 
 export const DRAFT_ORIGIN_OPTIONS = [
-  '중국 OEM',
-  '국내 생산',
-  '베트남 OEM',
-  '미정',
+  '중국',
+  '한국',
 ] as const
 
 export const DRAFT_REGISTER_TYPE_OPTIONS = [

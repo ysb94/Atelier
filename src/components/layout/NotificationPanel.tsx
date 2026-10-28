@@ -23,6 +23,8 @@ const KIND_ICON: Record<
   outbound_changed: { icon: Truck, label: '출고 변경' },
   mention: { icon: AtSign, label: '언급' },
   meeting_invitation: { icon: CalendarClock, label: '회의' },
+  leave_alarm_sample: { icon: CalendarClock, label: '연차 안내' },
+  leave_usage_notice: { icon: CalendarClock, label: '연차 안내' },
 }
 
 export function NotificationPanel({
@@ -135,6 +137,7 @@ export function NotificationPanel({
                           {item.body}
                         </span>
                         {item.kind==='meeting_invitation'?<span className="mt-1 block text-xs text-primary">{item.meeting?.role==='host'?'회의에서 멤버 응답 확인 →':'회의에서 참석 여부 응답 →'}</span>:null}
+                        {item.kind==='leave_alarm_sample'||item.kind==='leave_usage_notice'?<span className="mt-1 block text-xs text-primary">안내문 열람·확인 →</span>:null}
                         <span className="mt-1 block text-[11px] text-muted-foreground">
                           {formatInboxTime(item.createdAt)}
                         </span>

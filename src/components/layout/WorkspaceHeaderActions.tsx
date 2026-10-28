@@ -31,6 +31,9 @@ import { useMeetingNotices } from '@/features/meetings/use-meeting-notices'
 import { DeveloperPreviewBar, DeveloperPreviewProvider } from './DeveloperPreview'
 import { useWorkspaceOverlayHost } from './use-workspace-overlay-host'
 import { ReleaseAccessProvider, useReleaseAccess } from './release-access-context'
+import { useLeaveUsageNotices } from '@/features/operations-support/use-leave-usage-notices'
+import { leaveNoticeItems } from '@/features/operations-support/leave-usage-notices'
+import { LeaveUsageNoticeReceiver } from '@/features/operations-support/LeaveUsageNoticeReceiver'
 
 type OpenPanel = 'chat' | 'notifications'
 
@@ -61,9 +64,10 @@ function ReleasedHeaderActions() {
   const [requestedRoom,setRequestedRoom]=useState<RequestedConversation|null>(null)
   const cache=useQueryClient()
   const meetingNotices=useMeetingNotices()
+  const leaveNotices=useLeaveUsageNotices()
   const [notificationError,setNotificationError]=useState<string|null>(null)
   const { container: overlayContainer, restoreFocus } = useWorkspaceOverlayHost(open !== null)
-  const notifications = useMemo(() => meetingNotices.items.filter(item => releaseLink(item.href) !== null), [meetingNotices.items, releaseLink])
+  const notifications = useMemo(() => [...meetingNotices.items.filter(item => releaseLink(item.href) !== null), ...leaveNoticeItems(leaveNotices.records)].sort((a,b) => b.createdAt.localeCompare(a.createdAt)), [meetingNotices.items, releaseLink, leaveNotices.records])
   useEffect(()=>{
     function receive(event:Event){
       const detail=(event as CustomEvent<RequestedConversation>).detail
@@ -129,9 +133,11 @@ function ReleasedHeaderActions() {
   }
   function markAllRead() {
     if(notifications.some(item=>item.kind==='meeting_invitation' && !item.readAt)) void markMeetingRead(null)
+    if(notifications.some(item=>item.kind==='leave_usage_notice' && !item.readAt)) void leaveNotices.markAllRead()
   }
 
   function openNotification(item: InboxNotification) {
+    if(item.kind==='leave_usage_notice') { setOpen(null);void leaveNotices.open(item.id);return }
     const href = releaseLink(item.href)
     if (!href) return
     if(item.kind==='meeting_invitation') void markMeetingRead(item.id)
@@ -152,6 +158,7 @@ function ReleasedHeaderActions() {
       className="relative mr-10 flex shrink-0 items-center gap-0.5 px-1.5 pt-2"
     >
       <AttendanceStatusActions />
+      <LeaveUsageNoticeReceiver notices={leaveNotices}/>
       <HeaderIconButton
         buttonRef={chatButtonRef}
         label={open === 'chat' ? '채팅 닫기' : '채팅'}
@@ -209,7 +216,7 @@ function ReleasedHeaderActions() {
             onOpen={openNotification}
             onClose={closePanel}
           />
-          {notificationError || meetingNotices.error ? <p role="alert" className="rounded border border-danger bg-card p-2 text-xs text-danger">{notificationError ?? '회의 참석 요청을 불러오지 못했습니다.'}</p> : null}
+          {notificationError || meetingNotices.error || leaveNotices.error ? <p role="alert" className="rounded border border-danger bg-card p-2 text-xs text-danger">{notificationError ?? leaveNotices.error ?? '회의 참석 요청을 불러오지 못했습니다.'}</p> : null}
         </div>, overlayContainer,
       ) : null}
     </div>

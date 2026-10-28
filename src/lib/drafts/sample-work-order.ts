@@ -11,17 +11,31 @@ function newId() {
   return `swo-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
+/** 날짜만 있는 값, ISO 시각, PostgreSQL의 공백·마이크로초·짧은 시차 표기를 함께 읽는다. */
+function sampleDate(value: string | null) {
+  const text = value?.trim()
+  if (!text) return null
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(text)
+  if (!dateOnly && !/^\d{4}-\d{2}-\d{2}[T\s]+\d{2}:\d{2}/.test(text)) return null
+  const source = dateOnly ? `${text}T00:00:00` : text
+    .replace(/^(\d{4}-\d{2}-\d{2})\s+/, '$1T')
+    .replace(/(\.\d{3})\d+/, '$1')
+    .replace(/([+-]\d{2})$/, '$1:00')
+  const date = new Date(source)
+  if (Number.isNaN(date.getTime())) return null
+  if (dateOnly && (date.getFullYear() !== Number(text.slice(0, 4)) || date.getMonth() + 1 !== Number(text.slice(5, 7)) || date.getDate() !== Number(text.slice(8, 10)))) return null
+  return date
+}
+
 export function sheetDay(value: string | null) {
-  if (!value) return ''
-  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return ''
+  const date = sampleDate(value)
+  if (!date) return ''
   return `${String(date.getMonth() + 1).padStart(2, '0')}.${String(date.getDate()).padStart(2, '0')}`
 }
 
 export function sampleElapsedDays(value: string | null, now = new Date()) {
-  if (!value) return null
-  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return null
+  const date = sampleDate(value)
+  if (!date) return null
   const start = new Date(date.getFullYear(), date.getMonth(), date.getDate())
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   return Math.max(0, Math.round((today.getTime() - start.getTime()) / 86_400_000))
@@ -34,8 +48,8 @@ export function sampleElapsedDaysLabel(value: string | null, now = new Date()) {
 }
 
 function sampleCalendarDay(value: string) {
-  const date = new Date(value.includes('T') ? value : `${value}T00:00:00`)
-  if (Number.isNaN(date.getTime())) return null
+  const date = sampleDate(value)
+  if (!date) return null
   return new Date(date.getFullYear(), date.getMonth(), date.getDate())
 }
 
@@ -52,6 +66,12 @@ export function sampleHistoryDay(value: string | null) {
   const day = value ? sampleCalendarDay(value) : null
   if (!day) return ''
   return `${day.getFullYear()}.${String(day.getMonth() + 1).padStart(2, '0')}.${String(day.getDate()).padStart(2, '0')}`
+}
+
+/** 기획안이 처음 등록된 날. 26.10.12 */
+export function sheetRegisteredDay(value: string | null) {
+  const day = sampleHistoryDay(value)
+  return day ? day.slice(2) : ''
 }
 
 export function draftStatePercent(draft: {
@@ -165,7 +185,7 @@ export function canAddNextSampleWorkOrder(
   const latest = latestFilledSampleWorkOrder(orders)
   return Boolean(
     latest?.url &&
-      latest.shipped &&
+      (latest.shipped || latest.receivedAt) &&
       !latest.passed &&
       !latest.failReason.trim(),
   )
@@ -229,25 +249,32 @@ export function withPendingNextSampleWorkOrder(
   return list
 }
 
+/** 중국팀 저장 함수는 완료 표시 대신 발송일만 기록하는 버전도 있다. */
+function sampleShipmentRecorded(shipped: unknown, returnedAt: unknown) {
+  return Boolean(shipped || (typeof returnedAt === 'string' && sampleDate(returnedAt)))
+}
+
 export function sanitizeSampleWorkOrders(
   orders: readonly DraftSampleWorkOrder[] | null | undefined,
 ) {
-  return filledSampleWorkOrders(orders).map((order, index) => ({
-    ...order,
-    round: index + 1,
-    name: order.name.trim(),
-    shipped: Boolean(order.shipped),
-    shippedAt: order.url?.trim() ? (order.shippedAt ?? null) : null,
-    returnedAt:
-      order.shipped && order.returnedAt ? order.returnedAt : null,
-    passed: Boolean(order.shipped && order.passed),
-    passedAt:
-      order.shipped && order.passed
-        ? (order.passedAt ?? new Date().toISOString())
-        : null,
-    failReason:
-      order.shipped && !order.passed ? order.failReason.trim() : '',
-  }))
+  return filledSampleWorkOrders(orders).map((order, index) => {
+    const shipped = sampleShipmentRecorded(order.shipped, order.returnedAt)
+    return {
+      ...order,
+      round: index + 1,
+      name: order.name.trim(),
+      shipped,
+      shippedAt: order.url?.trim() ? (order.shippedAt ?? null) : null,
+      returnedAt: shipped && order.returnedAt ? order.returnedAt : null,
+      receivedAt: order.receivedAt ?? null,
+      passed: Boolean((shipped || order.receivedAt) && order.passed),
+      passedAt:
+        (shipped || order.receivedAt) && order.passed
+          ? (order.passedAt ?? new Date().toISOString())
+          : null,
+      failReason: shipped && !order.passed ? order.failReason.trim() : '',
+    }
+  })
 }
 
 export function legacyWorkOrderFields(
@@ -297,7 +324,7 @@ export function setLatestSampleWorkOrderPassed(
   at = new Date().toISOString(),
 ) {
   const latest = latestFilledSampleWorkOrder(orders)
-  if (!latest?.shipped) return orders
+  if (!latest || (!latest.shipped && !latest.receivedAt)) return orders
   return orders.map((order) =>
     order.id === latest.id
       ? {
@@ -418,6 +445,7 @@ export function patchSampleWorkOrder(
 ) {
   return orders.map((order) => {
     if (order.id !== id) return order
+    if (order.receivedAt && patch.url !== undefined && patch.url !== order.url) throw new Error('수령한 샘플의 작업지시서는 바꿀 수 없습니다. 다음 차수를 등록해 주세요.')
     const next = { ...order, ...patch }
     if (!next.url?.trim()) {
       next.url = null
@@ -425,6 +453,7 @@ export function patchSampleWorkOrder(
       next.shipped = false
       next.shippedAt = null
       next.returnedAt = null
+      next.receivedAt = null
       next.passed = false
       next.passedAt = null
       next.failReason = ''
@@ -492,26 +521,31 @@ function parseSampleWorkOrder(value: unknown): DraftSampleWorkOrder | null {
   const row = value as Record<string, unknown>
   const url = typeof row.url === 'string' && row.url.trim() ? row.url : null
   const round = Number(row.round)
+  const receivedAt = url && typeof row.receivedAt === 'string' && !Number.isNaN(Date.parse(row.receivedAt)) ? row.receivedAt : null
+  const shipped = Boolean(url && sampleShipmentRecorded(row.shipped, row.returnedAt))
   return {
     id: typeof row.id === 'string' && row.id ? row.id : newId(),
+    sampleStage: row.sampleStage === 'final' ? 'final' : 'numbered',
     round: Number.isFinite(round) && round > 0 ? Math.floor(round) : 1,
     url,
     name: typeof row.name === 'string' ? row.name : '',
-    shipped: Boolean(url && row.shipped),
+    shipped,
     shippedAt:
       url && typeof row.shippedAt === 'string' && row.shippedAt
         ? row.shippedAt
         : null,
     returnedAt:
       url &&
-      row.shipped &&
+      shipped &&
       typeof row.returnedAt === 'string' &&
       row.returnedAt
         ? row.returnedAt
         : null,
-    passed: Boolean(url && row.shipped && row.passed),
+    receivedAt,
+    originCountry: typeof row.originCountry === 'string' ? row.originCountry : undefined,
+    passed: Boolean(url && (shipped || receivedAt) && row.passed),
     passedAt:
-      url && row.shipped && row.passed && typeof row.passedAt === 'string'
+      url && (shipped || receivedAt) && row.passed && typeof row.passedAt === 'string'
         ? row.passedAt
         : null,
     failReason:

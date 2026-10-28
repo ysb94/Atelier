@@ -16,6 +16,9 @@ import {
   attachOpenSampleWorkOrder,
   requestNextSampleRound,
   sampleHistoryDay,
+  sampleElapsedDays,
+  sheetDay,
+  sheetRegisteredDay,
   samplePhase,
   sampleTripSpanDays,
   samplePhaseLabel,
@@ -227,4 +230,27 @@ assert(sampleTripSpanDays('2026-10-14T11:32:00.000Z', '2026-10-14T11:48:00.000Z'
 assert(sampleTripSpanDays('2026-10-14T11:32:00.000Z', '2026-10-17T01:00:00.000Z') === 3, '보낸 날부터 온 날까지 일수')
 assert(sampleTripSpanDays('2026-10-14T11:32:00.000Z', null) == null, '아직 오지 않으면 일수를 비운다')
 assert(sampleHistoryDay('2026-10-14T11:32:00.000Z') === '2026.10.14', '이력 날짜')
+assert(sheetRegisteredDay('2026-10-14T11:32:00.000Z') === '26.10.14', '등록일')
+assert(sheetRegisteredDay('') === '', '등록일이 없으면 비운다')
+const dateOnlyShipment = { ...attached[0]!, shipped: false, returnedAt: '2026-10-28 10:00:00.123456+00' }
+const restoredShipment = normalizeSampleWorkOrders([dateOnlyShipment])
+assert(restoredShipment[0]?.shipped === true, '서버가 발송일만 저장해도 발송 완료로 조회한다')
+assert(restoredShipment[0]?.returnedAt === dateOnlyShipment.returnedAt, '실제 중국 발송일을 보존한다')
+assert(restoredShipment[0]?.receivedAt == null && !restoredShipment[0]?.passed, '발송 완료를 실물 수령이나 합격으로 취급하지 않는다')
+assert(sanitizeSampleWorkOrders([dateOnlyShipment])[0]?.shipped === true, '이후 기획안 저장에서도 발송 상태를 보존한다')
+assert(sanitizeSampleWorkOrders([dateOnlyShipment])[0]?.returnedAt === dateOnlyShipment.returnedAt, '이후 저장 시 발송일이 사라지지 않는다')
+assert(normalizeSampleWorkOrders([{ ...dateOnlyShipment, returnedAt: '잘못된 날짜' }])[0]?.shipped === false, '잘못된 날짜로 발송 완료를 만들지 않는다')
+assert(normalizeSampleWorkOrders([{ ...dateOnlyShipment, returnedAt: null }])[0]?.shipped === false, '발송일이 없는 요청은 대기로 유지한다')
+const databaseTimestamp = '2026-10-28 10:17:23.538142+00'
+const isoTimestamp = '2026-10-28T10:17:23.538Z'
+assert(sampleHistoryDay(databaseTimestamp) === sampleHistoryDay(isoTimestamp), '실제 DB 날짜 형식이 ISO와 같은 날짜로 표시된다')
+assert(sampleHistoryDay(databaseTimestamp) !== '', '저장된 중국 발송일을 날짜 없음으로 표시하지 않는다')
+assert(sheetDay(databaseTimestamp) === sheetDay(isoTimestamp), '샘플 화살표의 짧은 날짜도 DB 형식을 읽는다')
+assert(sampleElapsedDays(databaseTimestamp, new Date('2026-10-30T01:00:00Z')) === sampleElapsedDays(isoTimestamp, new Date('2026-10-30T01:00:00Z')), '경과일도 같은 날짜 기준을 쓴다')
+assert(sampleTripSpanDays('2026-10-26 10:00:00.123456+00', databaseTimestamp) === 2, 'DB 형식의 등록일·발송일 사이 일수 계산')
+assert(sampleHistoryDay('2026-10-28 23:30:00.123456+00') === sampleHistoryDay('2026-10-28T23:30:00.123Z'), '시차로 날짜가 바뀌어도 ISO와 동일하게 처리')
+assert(sampleHistoryDay('2026-10-28 19:17:23.538142+09') === sampleHistoryDay(isoTimestamp), 'DB의 짧은 +09 시차를 처리')
+assert(sheetDay('2026-10-28') === '10.28', '기존 날짜 전용 입력은 그대로 표시')
+assert(sampleHistoryDay('2026-02-30') === '', '유효하지 않은 날짜를 임의 날짜로 만들지 않는다')
+assert(sampleHistoryDay('') === '' && sheetDay(null) === '' && sampleElapsedDays('잘못된 날짜') === null, '누락·잘못된 값은 비워 둔다')
 console.log('sample-work-order.verify ok')

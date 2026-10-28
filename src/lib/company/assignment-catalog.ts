@@ -1,19 +1,16 @@
 import { PERMISSION_CATALOG, scopeLabel, type PermissionCode, type PermissionScope } from './permissions'
-import { REQUEST_KINDS, approvalTypeOf } from '../../features/settings/personal-requests'
 
 export type AssignmentItem = {
   id: string; group: string; label: string; scope: string; description: string
-  approvalPart?: 'departments' | 'self'; permission?: PermissionCode
+  approvalPart?: 'departments'; permission?: PermissionCode
 }
 
 /** 기존 신청 종류와 권한 목록을 사용하며 새 승인 흐름을 만들지 않는다. */
 export const ASSIGNMENT_CATALOG: readonly AssignmentItem[] = [
-  ...REQUEST_KINDS.map(kind => ({
-    id: `approval-${kind.id}`, group: '신청 승인', label: `${kind.label} 승인자`, scope: '부서별',
-    description: approvalTypeOf(kind.id) === 'overtime' ? '기존 야근 승인자·대체 승인자를 사용합니다.' : '휴가·외근·재택·정정은 기존 근태 승인자·대체 승인자를 함께 사용합니다.',
-    approvalPart: 'departments' as const,
+  ...(['야근', '출퇴근 정정'] as const).map((label,index) => ({
+    id: index === 0 ? 'approval-overtime' : 'approval-correction', group: '신청 승인', label: `${label} 승인자`, scope: '부서별',
+    description: '같은 지정 승인자·대체 승인자가 처리하며 담당 부서의 본인 신청도 승인할 수 있습니다.', approvalPart: 'departments' as const,
   })),
-  { id: 'approval-self', group: '신청 승인', label: '승인자 본인 신청 담당', scope: '회사', description: '기존 구성 시안입니다. 실제 승인 흐름에는 아직 연결되지 않았습니다.', approvalPart: 'self' },
   ...PERMISSION_CATALOG.map(([permission,label,group,scopes]) => ({
     id: permission, permission, label, group,
     scope: scopes.split(',').map(kind => scopeLabel(kind as PermissionScope)).join(' · '),

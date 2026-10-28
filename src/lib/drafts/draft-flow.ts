@@ -91,6 +91,7 @@ export function normalizeColorSampleRounds(raw: unknown): DraftColorSampleRound[
     if (!url || !Number.isFinite(round) || round < 1) continue
     rounds.push({
       id: typeof row.id === 'string' && row.id.trim() ? row.id : `csr-${round}`,
+      originCountry: typeof row.originCountry === 'string' ? row.originCountry : undefined,
       round,
       url,
       name: typeof row.name === 'string' ? row.name : '',

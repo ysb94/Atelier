@@ -28,17 +28,34 @@ export const ROSTER_FIELDS = [
   { key: 'extra', column: 'extra', label: '기타', max: 200, width: 'min-w-32' },
 ] as const
 
+export type RosterColumnKind = 'text' | 'number' | 'money'
+export type RosterHeaderKind = RosterColumnKind | 'date' | 'choice'
+export type RosterHeaderSetting = { key: string; label: string; hidden: boolean }
+export const ROSTER_BASE_HEADERS: readonly { key: string; label: string; kind: RosterHeaderKind }[] = [
+  { key: 'name', label: '이름', kind: 'text' },
+  { key: 'department', label: '부서', kind: 'choice' },
+  { key: 'duty', label: '직책', kind: 'choice' },
+  { key: 'grade', label: '직급', kind: 'choice' },
+  { key: 'hire', label: '입사일', kind: 'date' },
+  { key: 'inclusiveOvertimeHours', label: '약정 연장근로시간(포괄임금)', kind: 'number' },
+  { key: 'remainingAnnualLeave', label: '남은 연차', kind: 'number' },
+  ...ROSTER_FIELDS.map(field => ({ key: field.key, label: field.label, kind: (field.key === 'resignedOn' ? 'date' : ['annualSalary', 'monthlyWage', 'mealAllowance', 'carAllowance', 'childcareAllowance', 'dutyAllowance'].includes(field.key) ? 'money' : 'text') as RosterHeaderKind })),
+]
+export type RosterColumn = { id: string; label: string; kind: RosterColumnKind; sortOrder: number }
+export type RosterColumnValue = { columnId: string; profileId: string; value: string }
 export type RosterFieldKey = (typeof ROSTER_FIELDS)[number]['key']
-export type RosterWriteFieldKey = RosterFieldKey | 'remainingAnnualLeave'
+export type RosterWriteFieldKey = RosterFieldKey | 'remainingAnnualLeave' | 'inclusiveOvertimeHours'
 
 export type EmployeeRoster = {
   profileId: string
   remainingAnnualLeave: number | null
+  inclusiveOvertimeHours: number | null
 } & Record<RosterFieldKey, string>
 
 type RosterRow = {
   profile_id: string
   remaining_annual_leave: number | null
+  inclusive_overtime_hours: number | null
   phone: string
   bank_name: string
   bank_account: string
@@ -66,12 +83,13 @@ type RosterRow = {
 }
 
 const ROSTER_COLUMNS =
-  'profile_id, remaining_annual_leave, phone, bank_name, bank_account, resident_id, home_address, gmail, naver_email, workplace, employment_type, gender, resigned_on, job_description, work_days, work_hours, break_time, pay_basis, annual_salary, monthly_wage, meal_allowance, car_allowance, childcare_allowance, duty_allowance, note, extra'
+  'profile_id, remaining_annual_leave, inclusive_overtime_hours, phone, bank_name, bank_account, resident_id, home_address, gmail, naver_email, workplace, employment_type, gender, resigned_on, job_description, work_days, work_hours, break_time, pay_basis, annual_salary, monthly_wage, meal_allowance, car_allowance, childcare_allowance, duty_allowance, note, extra'
 
 export function emptyRoster(profileId: string): EmployeeRoster {
   return {
     profileId,
     remainingAnnualLeave: null,
+    inclusiveOvertimeHours: null,
     phone: '',
     bankName: '',
     bankAccount: '',
@@ -103,6 +121,7 @@ function fromRow(row: RosterRow): EmployeeRoster {
   return {
     profileId: row.profile_id,
     remainingAnnualLeave: row.remaining_annual_leave == null ? null : Number(row.remaining_annual_leave),
+    inclusiveOvertimeHours: row.inclusive_overtime_hours == null ? null : Number(row.inclusive_overtime_hours),
     phone: row.phone,
     bankName: row.bank_name,
     bankAccount: row.bank_account,
@@ -147,13 +166,14 @@ export async function saveEmployeeRosterField(
   field: RosterWriteFieldKey,
   value: string,
 ): Promise<void> {
-  const spec = field === 'remainingAnnualLeave' ? { column: 'remaining_annual_leave' } : ROSTER_FIELDS.find((item) => item.key === field)
+  const numericColumn = field === 'remainingAnnualLeave' ? 'remaining_annual_leave' : field === 'inclusiveOvertimeHours' ? 'inclusive_overtime_hours' : null
+  const spec = numericColumn ? { column: numericColumn } : ROSTER_FIELDS.find((item) => item.key === field)
   if (!spec) throw new Error('저장할 명부 항목을 찾지 못했습니다.')
   let stored: string | number | null = field === 'resignedOn' ? value || null : value
-  if (field === 'remainingAnnualLeave') {
+  if (numericColumn) {
     const text = value.trim()
     if (text && (!/^[+-]?(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(text) || !Number.isFinite(Number(text)) || Math.abs(Number(text)) > 99999.99)) {
-      throw new Error('남은 연차는 소수 둘째 자리까지 숫자로 입력해 주세요.')
+      throw new Error(field === 'inclusiveOvertimeHours' ? '약정 연장근로시간은 소수 둘째 자리까지 숫자로 입력해 주세요.' : '남은 연차는 소수 둘째 자리까지 숫자로 입력해 주세요.')
     }
     stored = text ? Number(text) : null
   }
@@ -174,5 +194,96 @@ export async function saveEmployeeRosterField(
       message: error.message,
     })
     throw new Error('근로자 명부를 저장하지 못했습니다.')
+  }
+}
+
+export async function listRosterColumns(): Promise<RosterColumn[]> {
+  const { data, error } = await getSupabase()
+    .from('employee_roster_columns')
+    .select('id, label, kind, sort_order')
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
+  if (error) {
+    console.warn('[org] 추가 헤더 조회 실패', { message: error.message })
+    throw new Error('추가 헤더를 불러오지 못했습니다.')
+  }
+  return ((data ?? []) as { id: string; label: string; kind: RosterColumnKind; sort_order: number }[]).map((row) => ({
+    id: row.id,
+    label: row.label,
+    kind: row.kind,
+    sortOrder: row.sort_order,
+  }))
+}
+
+export async function listRosterColumnValues(): Promise<RosterColumnValue[]> {
+  const rows: RosterColumnValue[] = []
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await getSupabase()
+      .from('employee_roster_values')
+      .select('column_id, profile_id, value')
+      .range(offset, offset + 999)
+    if (error) {
+      console.warn('[org] 추가 헤더 값 조회 실패', { message: error.message })
+      throw new Error('추가 헤더 값을 불러오지 못했습니다.')
+    }
+    rows.push(...((data ?? []) as { column_id: string; profile_id: string; value: string }[]).map((row) => ({
+      columnId: row.column_id,
+      profileId: row.profile_id,
+      value: row.value,
+    })))
+    if ((data ?? []).length < 1000) return rows
+  }
+}
+
+export async function addRosterColumn(label: string, kind: RosterColumnKind): Promise<void> {
+  const existing = await listRosterColumns()
+  const sortOrder = existing.reduce((max, item) => Math.max(max, item.sortOrder), 0) + 1
+  const { error } = await getSupabase().from('employee_roster_columns').insert({
+    company_id: DEFAULT_COMPANY_ID,
+    label: label.trim(),
+    kind,
+    sort_order: sortOrder,
+  })
+  if (error) {
+    console.warn('[org] 추가 헤더 저장 실패', { message: error.message })
+    throw new Error(error.code === '23505' ? '같은 이름의 헤더가 있습니다.' : '헤더를 추가하지 못했습니다.')
+  }
+}
+
+export async function listRosterHeaderSettings(): Promise<{ ready: boolean; settings: RosterHeaderSetting[] }> {
+  const { data, error } = await getSupabase().from('employee_roster_header_settings').select('header_key,label,hidden')
+  if (error?.code === 'PGRST205' || error?.code === '42P01') {
+    console.warn('[org] 전체 헤더 설정 저장소 적용 전: 기본 헤더 표시 유지')
+    return { ready: false, settings: [] }
+  }
+  if (error) { console.warn('[org] 헤더 설정 조회 실패', error); throw new Error('헤더 설정을 불러오지 못했습니다.') }
+  return { ready: true, settings: ((data ?? []) as { header_key: string; label: string; hidden: boolean }[]).map(row => ({ key: row.header_key, label: row.label, hidden: row.hidden })) }
+}
+
+export async function saveRosterHeaderSetting(key: string, label: string, hidden: boolean): Promise<void> {
+  const next = label.trim()
+  if (!next || next.length > 40) throw new Error('헤더 이름은 1자에서 40자까지 입력해 주세요.')
+  if (!ROSTER_BASE_HEADERS.some(header => header.key === key) && !(key.startsWith('column:') && key.length > 7 && key.length <= 80)) throw new Error('헤더를 다시 확인해 주세요.')
+  const { error } = await getSupabase().from('employee_roster_header_settings').upsert({ company_id: DEFAULT_COMPANY_ID, header_key: key, label: next, hidden }, { onConflict: 'company_id,header_key' })
+  if (error) { console.warn('[org] 헤더 설정 저장 실패', { key, message: error.message }); throw new Error('헤더 설정을 저장하지 못했습니다.') }
+}
+
+export async function removeRosterColumn(columnId: string): Promise<void> {
+  const { error } = await getSupabase().from('employee_roster_columns').delete().eq('id', columnId)
+  if (error) {
+    console.warn('[org] 추가 헤더 삭제 실패', { columnId, message: error.message })
+    throw new Error('헤더를 삭제하지 못했습니다.')
+  }
+}
+
+export async function saveRosterColumnValue(profileId: string, columnId: string, value: string): Promise<void> {
+  const { error } = await getSupabase().from('employee_roster_values').upsert({
+    column_id: columnId,
+    profile_id: profileId,
+    value,
+  }, { onConflict: 'column_id,profile_id' })
+  if (error) {
+    console.warn('[org] 추가 헤더 값 저장 실패', { columnId, message: error.message })
+    throw new Error('헤더 값을 저장하지 못했습니다.')
   }
 }
