@@ -2,7 +2,7 @@ import type { PermissionGrant } from '../company/permissions'
 import { listPermissionGrants } from './permission-grants'
 import { assignedPermissionsEnabled, legacyPermissionGrants } from '../company/permission-rollout'
 import { usesDeveloperDelegation } from '../company/developer-delegate'
-import { isAttendanceExemptPosition } from '../company/capabilities'
+import { listAttendanceExemptions } from './attendance-exemptions'
 import { DEFAULT_COMPANY_ID } from '@/lib/supabase/brands'
 import {
   uniqueCapabilities,
@@ -297,13 +297,13 @@ export type PersonnelTitle = {
 export async function listOrgChartMembers(): Promise<OrgChartMember[]> {
   const [{ data, error }, { data: exempt, error: exemptError }] = await Promise.all([
     getSupabase().rpc('list_org_chart_members'),
-    assignedPermissionsEnabled() ? getSupabase().rpc('list_company_attendance_exempt') : Promise.resolve({ data: [], error: null }),
+    listAttendanceExemptions().then(data => ({ data, error: null })),
   ])
   if (error) throw toStoreError(error)
   if (exemptError) throw toStoreError(exemptError)
   const exemptIds = new Set((exempt ?? []) as string[])
   return ((data ?? []) as OrgChartMemberRow[]).map((row) => ({
-    attendanceExempt: assignedPermissionsEnabled() ? exemptIds.has(row.id) : isAttendanceExemptPosition(row.position),
+    attendanceExempt: exemptIds.has(row.id),
     id: row.id,
     displayName: row.display_name,
     position: row.position,

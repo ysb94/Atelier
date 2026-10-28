@@ -30,7 +30,7 @@ import {
   ROSTER_FIELDS,
   saveEmployeeRosterField,
   type EmployeeRoster,
-  type RosterFieldKey,
+  type RosterWriteFieldKey,
 } from '@/lib/supabase/employee-roster'
 import {
   deletePersonnelTitle,
@@ -750,12 +750,13 @@ function MemberAssignmentTable({
   const rosterMutation = useMutation({
     mutationFn: (input: {
       profileId: string
-      field: RosterFieldKey
+      field: RosterWriteFieldKey
       value: string
     }) => saveEmployeeRosterField(input.profileId, input.field, input.value),
-    onSuccess: async () => {
+    onSuccess: async (_result, input) => {
       setError(null)
       await queryClient.invalidateQueries({ queryKey: ['employee-roster'] })
+      if (input.field === 'remainingAnnualLeave') await queryClient.invalidateQueries({ queryKey: ['my-attendance-basis'] })
     },
     onError: (err) => {
       console.warn('[org-chart] 근로자 명부 저장 실패', err)
@@ -816,14 +817,14 @@ function MemberAssignmentTable({
       </div>
       <div className="mt-3 max-h-[min(36rem,calc(100dvh-32rem))] overflow-auto">
         <table className="w-max min-w-full text-left text-sm">
-          <thead className="sticky top-0 z-10 border-y border-border bg-primary text-xs text-primary-foreground">
+          <thead className="sticky top-0 z-20 border-y border-border bg-primary text-xs text-primary-foreground">
             <tr>
               <AssignmentSortHeader label="이름" column="name" sort={sort} onSort={toggleSort} />
               <AssignmentSortHeader label="부서" column="department" sort={sort} onSort={toggleSort} />
               <AssignmentSortHeader label="직책" column="duty" sort={sort} onSort={toggleSort} />
               <AssignmentSortHeader label="직급" column="grade" sort={sort} onSort={toggleSort} />
               <AssignmentSortHeader label="입사일" column="hire" sort={sort} onSort={toggleSort} />
-              {canChange ? <th className="whitespace-nowrap px-4 py-2.5 text-right font-medium" title="엑셀에서 확인해 등록한 잔여 일수입니다. 자동 차감되지 않습니다.">남은 연차</th> : null}
+              {canChange ? <th className="whitespace-nowrap px-4 py-2.5 text-right font-medium" title="잔여 일수를 직접 입력합니다. 입력 후 다른 칸을 누르면 저장되며, 신청 시 자동 차감되지 않습니다.">남은 연차</th> : null}
               {canChange
                 ? ROSTER_FIELDS.map((field) => (
                     <th key={field.key} className="whitespace-nowrap px-4 py-2.5 font-medium">
@@ -860,7 +861,7 @@ function MemberAssignmentTable({
                   key={member.id}
                   className="border-b border-border/70 transition-colors last:border-0 hover:bg-muted/25"
                 >
-                  <td className="whitespace-nowrap px-4 py-3 font-medium">
+                  <td className="sticky left-0 z-10 whitespace-nowrap border-r border-border bg-card px-4 py-3 font-medium">
                     <span className="flex items-center gap-2 whitespace-nowrap">
                       {memberName(member)}
                       {isProbation(member.hireDate, todayDateKey()) ? (
@@ -906,12 +907,22 @@ function MemberAssignmentTable({
                       min="1950-01-01"
                       max={todayDateKey()}
                       disabled={mutation.isPending || !canChange}
-                      className="w-40"
+                      className={cn('w-40', !member.hireDate && 'border-warning bg-warning/10 font-medium text-warning')}
                       onChange={(value) => commit(member, 'hire', value)}
                     />
                   </td>
                   {canChange ? <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums" aria-label={`${memberName(member)} 남은 연차`}>
-                    {rosterQuery.isPending ? '불러오는 중…' : rosterQuery.isError ? '조회 실패' : rosters.get(member.id)?.remainingAnnualLeave == null ? '미등록' : `${rosters.get(member.id)!.remainingAnnualLeave}일`}
+                    {rosterQuery.isPending ? '불러오는 중…' : rosterQuery.isError ? '조회 실패' : <div className="flex items-center justify-end gap-1">
+                      <RosterField label={`${memberName(member)} 남은 연차 입력`} value={String(rosters.get(member.id)?.remainingAnnualLeave ?? '')}
+                        maxLength={10} className="w-24 text-right tabular-nums" type="number" disabled={rosterMutation.isPending}
+                        onCommit={value => {
+                          const current=rosters.get(member.id)?.remainingAnnualLeave ?? null
+                          if ((value.trim() === '' && current === null) || (value.trim() !== '' && Number(value) === current)) return
+                          setError(null)
+                          rosterMutation.mutate({profileId:member.id,field:'remainingAnnualLeave',value})
+                        }} />
+                      <span className="text-xs text-muted-foreground">일</span>
+                    </div>}
                   </td> : null}
                   {canChange
                     ? ROSTER_FIELDS.map((field) => {
@@ -965,7 +976,7 @@ function AssignmentSortHeader({
   return (
     <th
       aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
-      className="p-0 font-medium"
+      className={cn('p-0 font-medium', column === 'name' && 'sticky left-0 z-10 border-r border-primary-foreground/20 bg-primary')}
     >
       <button
         type="button"
@@ -999,7 +1010,7 @@ function RosterField({
   value: string
   maxLength: number
   className: string
-  type: 'text' | 'date'
+  type: 'text' | 'date' | 'number'
   disabled: boolean
   onCommit: (value: string) => void
 }) {
@@ -1013,13 +1024,18 @@ function RosterField({
     <Input
       aria-label={label}
       type={type}
+      step={type === 'number' ? '0.01' : undefined}
+      min={type === 'number' ? '-99999.99' : undefined}
+      max={type === 'number' ? '99999.99' : undefined}
+      placeholder={type === 'number' ? '미등록' : undefined}
       value={text}
       maxLength={maxLength}
       disabled={disabled}
       style={contentWidth ? { width: contentWidth } : undefined}
-      className={cn('h-8 w-auto shrink-0', className)}
+      className={cn('h-8 w-auto shrink-0', className, !text.trim() && 'border-warning bg-warning/10 font-medium text-warning')}
       onChange={(event) => setText(event.target.value)}
-      onBlur={() => {
+      onBlur={(event) => {
+        if (!event.currentTarget.validity.valid) { event.currentTarget.reportValidity(); return }
         const next = type === 'date' ? text : text.trim()
         if (next !== text) setText(next)
         onCommit(next)

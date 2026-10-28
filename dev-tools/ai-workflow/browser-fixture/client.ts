@@ -39,6 +39,8 @@ export function getSupabase() {
       return chain
     },
     rpc(name: string,args?:Record<string,unknown>) {
+      if(name==='is_my_attendance_exempt')return Promise.resolve({data:!new URLSearchParams(location.search).has('identity'),error:null})
+      if(name==='list_company_attendance_exempt')return Promise.resolve({data:[],error:null})
       const fixture=window as unknown as {__fixtureDirectoryMode?:string;__fixtureRpcCalls?:unknown[]}
       if(name==='list_org_chart_members') {
         if(fixture.__fixtureDirectoryMode==='loading')return new Promise(()=>{})

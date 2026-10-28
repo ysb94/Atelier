@@ -6,6 +6,7 @@ export const MEETING_KINDS = [
   { value: 'routine', label: '루틴 회의', hint: '종료일 없이 이어갑니다. 필요할 때 다음 회차의 일정을 정합니다.' },
   { value: 'interview', label: '면접', hint: '생성 후 바로 날짜·시간·회의실을 정합니다. 일정 확정 후 내부 멤버의 참석 가능·불가 응답을 받습니다.' },
 ] as const
+export const CREATABLE_MEETING_KINDS = MEETING_KINDS.filter(item => item.value === 'one_off' || item.value === 'project' || item.value === 'routine')
 export type MeetingKind = (typeof MEETING_KINDS)[number]['value']
 export type MeetingKindInfo = { kind: MeetingKind }
 /** 성격 구분용 색상. 참석 가능·불가 등 응답 상태 색상과 별개다. */

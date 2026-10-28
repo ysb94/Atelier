@@ -10,7 +10,7 @@ import { MeetingMemberOption } from './MeetingMemberOption'
 import { buildMeetingParticipationSummary } from './meeting-participation'
 import { MeetingSchedulePicker, type MeetingScheduleChoice } from './MeetingSchedulePicker'
 import { MeetingKindFields, MeetingKindSelect } from './MeetingKindFields'
-import { emptyMeetingKindInfo, MEETING_KINDS, MEETING_KIND_TONES, meetingHasNextRound, meetingKindLabel, type MeetingKindInfo } from './meeting-kinds'
+import { CREATABLE_MEETING_KINDS, emptyMeetingKindInfo, MEETING_KIND_TONES, meetingHasNextRound, meetingKindLabel, type MeetingKindInfo } from './meeting-kinds'
 import {
   Check,
   ChevronDown,
@@ -60,6 +60,7 @@ import {
   appendPendingRound,
   formatMeetingComposeGaps,
   isMeetingComposeReady,
+  isMeetingParticipant,
   isPendingRound,
   formatMeetingDuration,
   formatRoundGapHint,
@@ -178,6 +179,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
   const durationRef = useRef<HTMLSelectElement>(null)
   const composeSectionRef = useRef<HTMLDivElement>(null)
   const [boardTab, setBoardTab] = useState<MeetingSeriesStatus>('in_progress')
+  const [mineOnly, setMineOnly] = useState(true)
   const [schedulingSeriesId, setSchedulingSeriesId] = useState<string | null>(
     null,
   )
@@ -276,17 +278,21 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
     () => filterSeriesForViewer(series, host, isAdmin),
     [host, isAdmin, series],
   )
+  const listedSeries = useMemo(
+    () => mineOnly ? visibleSeries.filter(item => isMeetingParticipant(item, host)) : visibleSeries,
+    [host, mineOnly, visibleSeries],
+  )
   const openSeries = useMemo(
-    () => filterSeriesByStatus(visibleSeries, 'in_progress'),
-    [visibleSeries],
+    () => filterSeriesByStatus(listedSeries, 'in_progress'),
+    [listedSeries],
   )
   const ongoingMeetingParticipation = useMemo(
     () => buildMeetingParticipationSummary(participationQuery.data ?? emptyList()),
     [participationQuery.data],
   )
   const doneSeries = useMemo(
-    () => filterSeriesByStatus(visibleSeries, 'done'),
-    [visibleSeries],
+    () => filterSeriesByStatus(listedSeries, 'done'),
+    [listedSeries],
   )
   const boardSeries = boardTab === 'in_progress' ? openSeries : doneSeries
   const schedulingSeries = schedulingSeriesId
@@ -403,8 +409,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
     const saved=await setSeries(rows=>[draft,...rows])
     if(saved){
       resetCompose();setBoardTab('in_progress')
-      if((newKindInfo.kind==='meeting'||newKindInfo.kind==='interview')&&composeHost.id===host.id) scheduleNextRound(draft,roundId)
-      else setDetail({seriesId:id,roundId})
+      setDetail({seriesId:id,roundId})
     }
   }
 
@@ -525,10 +530,17 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
       <Card>
         <CardContent className="space-y-3 p-4">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-medium">진행 회의</p>
-            <Button type="button" size="sm" onClick={openCreate}>
-              회의 생성
-            </Button>
+            <p className="shrink-0 text-sm font-medium">진행 회의</p>
+            <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+              <label className="inline-flex shrink-0 items-center gap-1.5 text-xs font-medium">
+                <input type="checkbox" checked={mineOnly} aria-label="내 회의만 보기" onChange={event => setMineOnly(event.target.checked)} />
+                MY
+              </label>
+              <div className="flex flex-wrap gap-2" aria-label="회의 성격별 색상">{CREATABLE_MEETING_KINDS.map(kind => <Badge key={kind.value} variant="outline" className={MEETING_KIND_TONES[kind.value]}>{kind.label}</Badge>)}</div>
+              <Button type="button" size="sm" onClick={openCreate}>
+                회의 생성
+              </Button>
+            </div>
           </div>
           <div
             role="tablist"
@@ -922,7 +934,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
               onConfirm={()=>bookSlot(scheduleChoice.roomId,scheduleChoice.dateKey,scheduleChoice.clock)}/> : null}
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
               <p className="text-xs text-muted-foreground">{composeKindInfo.kind === 'meeting'?'날짜·시간·회의실을 정하면 참석 수락 없이 일정이 확정됩니다.':schedulingSeries?'일정을 확정하면 멤버에게 참석 요청이 전달됩니다. 일정 변경 시 응답이 초기화됩니다.':'준비 중에는 호스트와 생성자만 볼 수 있습니다. 안내·자료를 준비한 뒤 일정을 확정하세요.'}</p>
-              {!schedulingSeries?<Button type="button" className="shrink-0 whitespace-nowrap" onClick={()=>void createDraft()}>{newKindInfo.kind === 'meeting' ? '미팅 생성' : newKindInfo.kind === 'interview' ? '면접 생성' : '준비 회의 생성'}</Button>:null}
+              {!schedulingSeries?<Button type="button" className="shrink-0 whitespace-nowrap" onClick={()=>void createDraft()}>준비 회의 생성</Button>:null}
             </div>
           </div>
         </div>
@@ -932,7 +944,6 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
       <Card>
         <CardContent className="space-y-4 p-4">
           <p className="text-sm font-medium">회의실 일정</p>
-          {<div className="flex flex-wrap gap-2" aria-label="회의 성격별 색상">{MEETING_KINDS.map(kind => <Badge key={kind.value} variant="outline" className={MEETING_KIND_TONES[kind.value]}>{kind.label}</Badge>)}</div>}
 
           <RoomScheduleBlock
             rooms={rooms}

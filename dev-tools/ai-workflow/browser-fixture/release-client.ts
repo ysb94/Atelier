@@ -1,5 +1,6 @@
 import { getSupabase as baseClient } from './page-preview-client'
 import { fixtureProfile, releaseFixture } from './release-auth'
+import { hasPermission } from '@/lib/company/permissions'
 export const isSupabaseConfigured=()=>true
 export function getSupabase(){
  const base=baseClient()
@@ -30,6 +31,7 @@ export function getSupabase(){
   }}
   return chain
  },rpc(name:string,args?:Record<string,unknown>){
+  if(name==='is_my_attendance_exempt')return Promise.resolve({data:hasPermission(fixtureProfile(),'attendance.exempt'),error:null})
   if(name==='clock_in_today'){releaseFixture.writes.push(name);return Promise.resolve({data:'09:00:00',error:null})}
   return base.rpc(name,args)
  }}
