@@ -794,6 +794,40 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
   }
 
   return <tr className="draft-sheet-row">
+    <td><div className="draft-sheet-image-cell">
+      <DraftPhoto src={draft.imageUrl} name={name === '이름 미정' ? draft.draftNo : name} />
+      <div className="draft-sheet-names">
+        <SheetInlineField
+          readOnly={readOnly}
+          label={`${draft.draftNo} 한글명`}
+          className="draft-sheet-product-name"
+          value={draft.nameKo}
+          placeholder="투웨이 셔링 호보백_글로우"
+          multiline
+          showError
+          onCommit={(next) => onRenameProduct('nameKo', next)}
+        />
+        <SheetInlineField
+          readOnly={readOnly}
+          label={`${draft.draftNo} 영문명`}
+          className="draft-sheet-product-name"
+          value={draft.nameEn}
+          placeholder="2way shirring hobo bag_Glow"
+          multiline
+          showError
+          onCommit={(next) => onRenameProduct('nameEn', next)}
+        />
+      </div>
+      <SheetConfirmButton
+        label="이름확정"
+        confirmed={nameConfirmed}
+        canToggle={!readOnly && named}
+        blockedTitle="한글명 또는 영문명을 먼저 입력해 주세요"
+        onToggle={(next) => onToggleConfirm('nameConfirmed', next)}
+      >
+        {named ? '이름확정' : '이름 미정'}
+      </SheetConfirmButton>
+    </div></td>
     <td>
       <strong className="draft-sheet-brand">{brand?.name ?? '브랜드 미정'}</strong>
       <div className="draft-sheet-owner">Designer <strong>{draft.owner.trim() || '미정'}</strong></div>
@@ -867,40 +901,6 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
         <div className="draft-sheet-actions"><SampleWorkOrderButton readOnly={readOnly} onUpload={onUploadSampleWorkOrder} /></div>
       )}
     </td>
-    <td><div className="draft-sheet-image-cell">
-      <DraftPhoto src={draft.imageUrl} name={name === '이름 미정' ? draft.draftNo : name} />
-      <div className="draft-sheet-names">
-        <SheetInlineField
-          readOnly={readOnly}
-          label={`${draft.draftNo} 한글명`}
-          className="draft-sheet-product-name"
-          value={draft.nameKo}
-          placeholder="투웨이 셔링 호보백_글로우"
-          multiline
-          showError
-          onCommit={(next) => onRenameProduct('nameKo', next)}
-        />
-        <SheetInlineField
-          readOnly={readOnly}
-          label={`${draft.draftNo} 영문명`}
-          className="draft-sheet-product-name"
-          value={draft.nameEn}
-          placeholder="2way shirring hobo bag_Glow"
-          multiline
-          showError
-          onCommit={(next) => onRenameProduct('nameEn', next)}
-        />
-      </div>
-      <SheetConfirmButton
-        label="이름확정"
-        confirmed={nameConfirmed}
-        canToggle={!readOnly && named}
-        blockedTitle="한글명 또는 영문명을 먼저 입력해 주세요"
-        onToggle={(next) => onToggleConfirm('nameConfirmed', next)}
-      >
-        {named ? '이름확정' : '이름 미정'}
-      </SheetConfirmButton>
-    </div></td>
     <td className="draft-sheet-price-cell">
       <button type="button" className="draft-sheet-price-request" disabled={readOnly} title="기능 준비 중">
         단가 요청

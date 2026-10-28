@@ -30,14 +30,14 @@
 .draft-folder-editor p{flex-basis:100%;margin:0;font-size:11px;color:#c60920}
 .draft-folder-chip:focus-visible{outline:2px solid #b89952;outline-offset:2px}
 .draft-board-table{width:100%;min-width:1330px;table-layout:fixed;border-collapse:collapse;font-size:12px;line-height:1.6;color:#343a40}
-.draft-board-table col:nth-child(1){width:184px}
-.draft-board-table col:nth-child(2){width:280px}
+.draft-board-table col:nth-child(1){width:280px}
+.draft-board-table col:nth-child(2){width:184px}
 .draft-board-table col:nth-child(3){width:100px}
 .draft-board-table col:nth-child(4){width:160px}
 .draft-board-table col:nth-child(5){width:480px}
 .draft-board-table th{height:44px;padding:10px 16px;font-size:12px;font-weight:500;letter-spacing:.025em;text-align:left;color:white;background:#c60920}
 .draft-board-table th:last-child{background:#386b9f}
-.draft-board-table th:nth-child(2){text-align:center}
+.draft-board-table th:nth-child(1){text-align:center}
 .draft-sheet-row{border-bottom:1px solid #d88489}
 .draft-sheet-row>td{padding:24px 18px;vertical-align:top;background:#fff;overflow-wrap:anywhere}
 .draft-sheet-row>td+td{border-left:1px solid #f0efec}
