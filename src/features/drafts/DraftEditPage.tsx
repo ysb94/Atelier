@@ -29,6 +29,8 @@ import {
   updateProductDraft,
 } from '@/lib/api'
 import { readFileAsDataUrl, readImageFile } from '@/lib/images'
+import { SampleWorkOrderRegistration } from './SampleWorkOrderRegistration'
+import { registerDraftSampleStage } from '@/lib/drafts/sample-registration'
 import { DraftSampleProgress } from './DraftSampleProgress'
 import { receiveSample, registerNextReceivedSample } from '@/lib/drafts/sample-receipt'
 import { latestFilledSampleWorkOrder } from '@/lib/drafts/sample-work-order'
@@ -54,6 +56,7 @@ import {
   startColorSamples,
 } from '@/lib/drafts/draft-flow'
 import {
+  draftToInput,
   canPassLatestSampleWorkOrder,
   failLatestSampleWorkOrder,
   isSamplePassed,
@@ -623,7 +626,7 @@ export function DraftEditPage() {
       }
       if (isNew) return createProductDraft(companyId, payload)
       if (!draftId) throw new Error('기획안을 찾을 수 없습니다.')
-      return updateProductDraft(draftId, { ...payload, expectedUpdatedAt: loaded?.updatedAt })
+      return updateProductDraft(draftId, { ...payload, expectedUpdatedAt: payload.expectedUpdatedAt ?? loaded?.updatedAt })
     },
     onSuccess: async (saved) => {
       setError(null)
@@ -870,6 +873,15 @@ export function DraftEditPage() {
             </div>
           </div>
 
+          <SampleWorkOrderRegistration originCountry={form.originCountry} nextRound={(latestFilledSampleWorkOrder(form.sampleWorkOrders)?.round ?? 1) + 1} readOnly={!editable} saving={saveMutation.isPending}
+            onRegister={async (stage, file, country) => {
+              if (isNew || !draftId) throw new Error('1차 작업지시서를 먼저 저장해 주세요.')
+              const current = await getProductDraftById(draftId)
+              if (!current) throw new Error('기획안을 다시 조회해 주세요.')
+              const nextForm = registerDraftSampleStage(draftToInput(current), stage, file, country)
+              const saved = await saveMutation.mutateAsync({ ...nextForm, expectedUpdatedAt: current.updatedAt })
+              setForm(draftToInput(saved))
+            }} />
         </SectionCard>
 
         {/* 1차 샘플 작업 지시서 + 컬러 */}

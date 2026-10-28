@@ -5,11 +5,12 @@ import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
 import { resolveColorSpec } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
+import { sampleCountry } from '@/lib/drafts/sample-receipt'
 import {
   draftStatePercent,
   sampleHistoryDay,
+  sampleElapsedDaysLabel,
   sampleTripSpanDays,
-  sheetDay,
 } from '@/lib/drafts/sample-work-order'
 import { readFileAsDataUrl } from '@/lib/images'
 import { DRAFT_STATUS_LABEL, type Brand, type DraftColorRow, type ProductDraft } from '@/lib/types'
@@ -695,43 +696,6 @@ function SampleStatus({
   )
 }
 
-function SampleTripArrows({
-  requestAt,
-  returnAt,
-}: {
-  requestAt: string | null
-  returnAt: string | null
-}) {
-  const requestDay = sheetDay(requestAt)
-  const returnDay = sheetDay(returnAt)
-  return (
-    <>
-      {requestDay ? (
-        <>
-          <svg className="draft-sheet-sample-request" viewBox="0 0 36 16" aria-hidden="true">
-            <path d="M1 12C12 12 16 4 30 4" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            <path d="M25 1.2L31.5 4L25 7.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span className="draft-sheet-sample-request-date" title="샘플 요청일">
-            {requestDay}
-          </span>
-        </>
-      ) : null}
-      {returnDay ? (
-        <>
-          <svg className="draft-sheet-sample-return" viewBox="0 0 36 16" aria-hidden="true">
-            <path d="M35 4C24 4 20 12 6 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-            <path d="M11 8.8L4.5 12L11 15.2" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          <span className="draft-sheet-sample-return-date" title="발송 완료일">
-            {returnDay}
-          </span>
-        </>
-      ) : null}
-    </>
-  )
-}
-
 function specTone(value: string, confirmed: boolean): 'neutral' | 'pending' | 'done' {
   if (!value.trim()) return 'neutral'
   return confirmed ? 'done' : 'pending'
@@ -845,13 +809,17 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
               {historyOpen ? <SampleHistoryDialog draftNo={draft.draftNo} samples={orders} colors={colorRounds} onClose={() => setHistoryOpen(false)} /> : null}
               {colorRounds.length ? colorRounds.map((round) => {
                 const latest = round.id === latestColorRound?.id
+                const country = sampleCountry(round.originCountry || draft.originCountry)
                 return (
-                  <div className="draft-sheet-sample-block" key={round.id} aria-label="컬러 샘플">
-                    <span className="draft-sheet-sample-mark">
-                      <b>컬러 샘플</b>
-                    </span>
-                    <small className="draft-sheet-sample-round">{round.round}차</small>
-                    <SampleTripArrows requestAt={round.shippedAt} returnAt={round.returnedAt} />
+                  <section className="draft-sample-round" key={round.id} aria-label={`${round.round}차 컬러샘플`}>
+                    <div className="draft-sample-route">
+                      <div className="draft-sample-heading">
+                        <span className="draft-sample-country">{country.code} | </span>
+                        <a href={round.url} download={round.name}>{round.round}차 컬러샘플 {sampleHistoryDay(round.shippedAt).slice(2)}</a>
+                        <span className="draft-sample-registered-elapsed">({sampleElapsedDaysLabel(round.shippedAt)})</span>
+                      </div>
+                      <p className="draft-sample-dispatch">{country.code === 'CN' ? round.returnedAt ? `${sampleHistoryDay(round.returnedAt).slice(2)} 중국 발송 완료` : '중국팀 제작·발송 대기' : '국내 샘플'}</p>
+                    </div>
                     {latest && round.returnedAt && !round.passed ? (
                       <SampleRoundDecision
                         readOnly={readOnly}
@@ -862,7 +830,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
                     ) : round.returnedAt ? null : (
                       <span className="draft-sheet-sample-wait">Waiting</span>
                     )}
-                  </div>
+                  </section>
                 )
               }) : (
                 <div className="draft-sheet-sample-block" aria-label="컬러 샘플">

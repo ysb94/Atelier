@@ -519,6 +519,7 @@ function parseSampleWorkOrder(value: unknown): DraftSampleWorkOrder | null {
   const shipped = Boolean(url && sampleShipmentRecorded(row.shipped, row.returnedAt))
   return {
     id: typeof row.id === 'string' && row.id ? row.id : newId(),
+    sampleStage: row.sampleStage === 'final' ? 'final' : 'numbered',
     round: Number.isFinite(round) && round > 0 ? Math.floor(round) : 1,
     url,
     name: typeof row.name === 'string' ? row.name : '',

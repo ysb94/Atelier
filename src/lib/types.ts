@@ -256,6 +256,8 @@ export type DraftColorRow = {
 /** 기획안에서 중국팀으로 보내는 샘플 작업 지시서 한 차수 */
 export type DraftSampleWorkOrder = {
   id: string
+  /** 명시적으로 등록한 샘플 종류. 기존 차수는 numbered로 표시한다. */
+  sampleStage?: 'numbered' | 'final'
   /** 1부터. 1차, 2차, 3차… */
   round: number
   /** data URL */
@@ -329,6 +331,8 @@ export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
 /** 컬러 샘플 작업지시서 한 차수. 대표 샘플과 같이 회신 뒤에 합격 또는 다음 차수로 간다. */
 export type DraftColorSampleRound = {
   id: string
+  /** 차수별 제조국. 기존 기록은 기획안 제조국을 따른다. */
+  originCountry?: string
   /** 1부터. 1차, 2차, 3차… */
   round: number
   url: string

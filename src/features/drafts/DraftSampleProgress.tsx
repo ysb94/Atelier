@@ -6,6 +6,7 @@ import { readFileAsDataUrl } from '@/lib/images'
 import type { DraftSampleWorkOrder } from '@/lib/types'
 import { sampleElapsedDays, sampleHistoryDay, sampleTripSpanDays } from '@/lib/drafts/sample-work-order'
 import { canReceiveSample, sampleCountry } from '@/lib/drafts/sample-receipt'
+import { sampleOrderLabel } from '@/lib/drafts/sample-registration'
 import './draft-sample-progress.css'
 
 type WorkOrderFile = { url: string; name: string }
@@ -45,11 +46,11 @@ export function DraftSampleProgress({ orders, originCountry, readOnly = false, s
       const registered = order.receivedAt ? sampleTripSpanDays(order.shippedAt, order.receivedAt) : sampleElapsedDays(order.shippedAt)
       const received = sampleElapsedDays(order.receivedAt ?? null)
       const current = order.id === latest?.id
-      return <section key={order.id} aria-label={`${order.round}차 샘플`} className="draft-sample-round">
+      return <section key={order.id} aria-label={sampleOrderLabel(order)} className="draft-sample-round">
         <div className="draft-sample-route">
           <div className="draft-sample-heading">
             <span className="draft-sample-country" title={country.label}>{country.code}<span aria-hidden="true"> | </span></span>
-            <a href={order.url!} download={order.name} title="작업지시서 내려받기">{order.round}차 샘플 {sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}</a>
+            <a href={order.url!} download={order.name} title="작업지시서 내려받기">{sampleOrderLabel(order)} {sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}</a>
             {registered !== null && <span className="draft-sample-registered-elapsed" title={order.receivedAt ? '작업지시서 등록부터 실물 수령까지 걸린 일수' : '작업지시서 등록 후 경과일'}>({registered}일{order.receivedAt ? '' : ' 경과'})</span>}
           </div>
           {!order.receivedAt && <p className="draft-sample-dispatch">{country.code === 'CN'

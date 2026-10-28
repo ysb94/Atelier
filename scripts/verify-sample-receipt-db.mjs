@@ -27,10 +27,11 @@ try{
  assert.equal((await orders())[0].receivedAt,receiptAt,'기존 저장 함수가 새 수령일을 저장·조회')
  assert.equal((await orders())[0].returnedAt,dispatched.returnedAt,'중국 발송일 보존')
  assert.equal((await orders())[0].passed,false,'수령이 합격 처리가 되지 않음')
- const second={...original,id:'sample-2',round:2,url:'data:text/plain,second',name:'second.pdf',shippedAt:new Date().toISOString(),originCountry:'한국'}
+ const second={...original,id:'sample-2',round:2,url:'data:text/plain,second',name:'second.pdf',shippedAt:new Date().toISOString(),originCountry:'한국',sampleStage:'final'}
  await db.query("select public.save_product_draft($1,null,$2,$3,'[]','[]')",[company,draft,{nameKo:'샘플 수령 검증',originCountry:'한국',sampleWorkOrders:[received,second],expectedUpdatedAt:await revision()}])
  assert.equal((await orders()).length,2);assert.equal((await orders())[0].receivedAt,receiptAt)
  assert.equal((await orders())[1].originCountry,'한국');assert.equal((await orders())[1].receivedAt,null)
+ assert.equal((await orders())[1].sampleStage,'final','새 테이블 없이 기존 저장 함수가 최종 샘플 종류를 보존')
  const after=await orders();await actor(colleague)
  await assert.rejects(()=>db.query("select public.save_product_draft($1,null,$2,$3,'[]','[]')",[company,draft,{nameKo:'위조',sampleWorkOrders:after}]))
  assert.deepEqual(await orders(),after,'다른 직원의 수정 권한을 확대하지 않음')

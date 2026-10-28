@@ -45,6 +45,7 @@ type WorkOrderKind = 'sample' | 'color'
 type WorkOrderRow = {
   draft: ProductDraft
   kind: WorkOrderKind
+  sampleStage?: 'numbered' | 'final'
   orderId: string
   url: string | null
   fileName: string
@@ -65,6 +66,7 @@ function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
     (order) => ({
       draft,
       kind: 'sample' as const,
+      sampleStage: order.sampleStage,
       orderId: order.id,
       url: order.url,
       fileName: workOrderFileName(order.name),
@@ -83,7 +85,7 @@ function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
   const colorRounds = resolveColorSampleRounds(draft)
   const shipColorId = draft.colors.find((color) => color.sampleWorkOrderUrl?.trim())?.id ?? draft.colors[0]?.id ?? ''
   const colorNames = draft.colors.map((color) => color.name.trim()).filter(Boolean).join(', ')
-  const colors = colorRounds.map((round) => {
+  const colors = colorRounds.filter(round => !(round.originCountry || draft.originCountry) || /중국|china/i.test(round.originCountry || draft.originCountry)).map((round) => {
     const returned = Boolean(round.returnedAt || round.passed)
     return {
       draft,
@@ -441,7 +443,7 @@ export function CompanySampleWorkOrderPage() {
                       <div className="draft-sheet-samples" aria-label="샘플 진행">
                         <div className="draft-sheet-sample">
                           <span>
-                            <b>{row.kind === 'color' ? '컬러 샘플' : 'Sample'}</b>
+                            <b>{row.kind === 'color' ? '컬러 샘플' : row.sampleStage === 'final' ? '최종 샘플' : 'Sample'}</b>
                             <small>{row.sortRound}차</small>
                           </span>
                           <div>
