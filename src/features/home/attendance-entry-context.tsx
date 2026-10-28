@@ -51,6 +51,7 @@ function useEntryState() {
       void cache.invalidateQueries({ queryKey: ['company-leave-requests', userId, 'mine'] })
     } })
   const refresh = useCallback(() => {
+    void cache.invalidateQueries({ queryKey: ['my-attendance-exemption', userId] })
     void cache.invalidateQueries({ queryKey: ['attendance-clock-ins', userId] })
     void cache.invalidateQueries({ queryKey: ['company-leave-requests', userId, 'mine'] })
     void cache.invalidateQueries({ queryKey: ['my-workday-basis', userId] })

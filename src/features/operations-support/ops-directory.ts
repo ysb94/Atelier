@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { listDepartments, listOrgChartMembers, type Department, type OrgChartMember } from '@/lib/supabase/profiles'
 import { emptyList } from '@/lib/utils'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 
 export function useOpsDirectory() {
+  const active = useWorkspaceTabActivity()
   const departmentsQuery = useQuery({
     queryKey: ['departments', 'active'],
     queryFn: () => listDepartments(true),
@@ -11,6 +13,7 @@ export function useOpsDirectory() {
   const membersQuery = useQuery({
     queryKey: ['orgChartMembers'],
     queryFn: () => listOrgChartMembers(),
+    refetchInterval: active ? 30_000 : false,
   })
 
   useEffect(() => {
