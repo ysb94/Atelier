@@ -347,8 +347,8 @@ export function CompanySampleWorkOrderPage() {
         </p>
       ) : null}
       {shipMutation.isError ? (
-        <p className="mb-3 text-sm text-danger">
-          발송 완료를 저장하지 못했습니다.
+        <p role="alert" className="mb-3 text-sm text-danger">
+          발송 처리 실패: {shipMutation.error.message}
         </p>
       ) : null}
       {assignMutation.isError ? (
@@ -404,8 +404,11 @@ export function CompanySampleWorkOrderPage() {
                 const note = done ? row.failReason : row.focusReason
                 const shippingThis =
                   shipMutation.isPending &&
+                  shipMutation.variables?.draft.id === draft.id &&
                   shipMutation.variables?.kind === row.kind &&
                   shipMutation.variables?.orderId === row.orderId
+                const savingThisDraft = [shipMutation, assignMutation, checkMutation].some(mutation => mutation.isPending && mutation.variables?.draft.id === draft.id)
+                const shipError = shipMutation.isError && shipMutation.variables?.draft.id === draft.id && shipMutation.variables.kind === row.kind && shipMutation.variables.orderId === row.orderId ? shipMutation.error : null
                 const progress = draftStatePercent(draft)
                 const brandName = draft.brandId
                   ? brandById.get(draft.brandId)?.name ?? '브랜드 미정'
@@ -476,8 +479,7 @@ export function CompanySampleWorkOrderPage() {
                               disabled={
                                 departmentsQuery.isLoading ||
                                 membersQuery.isLoading ||
-                                (assignMutation.isPending &&
-                                  assignMutation.variables?.orderId === row.orderId)
+                                savingThisDraft
                               }
                               onChange={(event) => {
                                 const assigneeId = event.target.value
@@ -555,7 +557,7 @@ export function CompanySampleWorkOrderPage() {
                             variant={done ? 'secondary' : 'outline'}
                             size="sm"
                             aria-pressed={done}
-                            disabled={!row.url || done || shippingThis}
+                            disabled={!row.url || done || savingThisDraft}
                             className={cn(
                               done &&
                                 'border-success/40 bg-success/10 text-foreground hover:bg-success/15',
@@ -569,9 +571,10 @@ export function CompanySampleWorkOrderPage() {
                             }
                           >
                             {done ? <Check className="size-3.5" /> : null}
-                            {shippingThis ? '저장 중...' : '발송 완료'}
+                            {shippingThis ? '저장 중...' : savingThisDraft ? '확인 중...' : '발송 완료'}
                           </Button>
                         </div>
+                        {shipError && <p role="alert" className="text-xs text-danger">{shipError.message}</p>}
                         {note ? (
                           <p className="rounded-md bg-muted/70 px-2.5 py-2 text-xs whitespace-pre-wrap">
                             {done ? '불합격 사유' : '중점'}: {note}

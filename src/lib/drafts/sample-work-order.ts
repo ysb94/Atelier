@@ -229,26 +229,32 @@ export function withPendingNextSampleWorkOrder(
   return list
 }
 
+/** 중국팀 저장 함수는 완료 표시 대신 발송일만 기록하는 버전도 있다. */
+function sampleShipmentRecorded(shipped: unknown, returnedAt: unknown) {
+  return Boolean(shipped || (typeof returnedAt === 'string' && returnedAt.trim() && !Number.isNaN(Date.parse(returnedAt))))
+}
+
 export function sanitizeSampleWorkOrders(
   orders: readonly DraftSampleWorkOrder[] | null | undefined,
 ) {
-  return filledSampleWorkOrders(orders).map((order, index) => ({
-    ...order,
-    round: index + 1,
-    name: order.name.trim(),
-    shipped: Boolean(order.shipped),
-    shippedAt: order.url?.trim() ? (order.shippedAt ?? null) : null,
-    returnedAt:
-      order.shipped && order.returnedAt ? order.returnedAt : null,
-    receivedAt: order.receivedAt ?? null,
-    passed: Boolean((order.shipped || order.receivedAt) && order.passed),
-    passedAt:
-      (order.shipped || order.receivedAt) && order.passed
-        ? (order.passedAt ?? new Date().toISOString())
-        : null,
-    failReason:
-      order.shipped && !order.passed ? order.failReason.trim() : '',
-  }))
+  return filledSampleWorkOrders(orders).map((order, index) => {
+    const shipped = sampleShipmentRecorded(order.shipped, order.returnedAt)
+    return {
+      ...order,
+      round: index + 1,
+      name: order.name.trim(),
+      shipped,
+      shippedAt: order.url?.trim() ? (order.shippedAt ?? null) : null,
+      returnedAt: shipped && order.returnedAt ? order.returnedAt : null,
+      receivedAt: order.receivedAt ?? null,
+      passed: Boolean((shipped || order.receivedAt) && order.passed),
+      passedAt:
+        (shipped || order.receivedAt) && order.passed
+          ? (order.passedAt ?? new Date().toISOString())
+          : null,
+      failReason: shipped && !order.passed ? order.failReason.trim() : '',
+    }
+  })
 }
 
 export function legacyWorkOrderFields(
@@ -496,28 +502,29 @@ function parseSampleWorkOrder(value: unknown): DraftSampleWorkOrder | null {
   const url = typeof row.url === 'string' && row.url.trim() ? row.url : null
   const round = Number(row.round)
   const receivedAt = url && typeof row.receivedAt === 'string' && !Number.isNaN(Date.parse(row.receivedAt)) ? row.receivedAt : null
+  const shipped = Boolean(url && sampleShipmentRecorded(row.shipped, row.returnedAt))
   return {
     id: typeof row.id === 'string' && row.id ? row.id : newId(),
     round: Number.isFinite(round) && round > 0 ? Math.floor(round) : 1,
     url,
     name: typeof row.name === 'string' ? row.name : '',
-    shipped: Boolean(url && row.shipped),
+    shipped,
     shippedAt:
       url && typeof row.shippedAt === 'string' && row.shippedAt
         ? row.shippedAt
         : null,
     returnedAt:
       url &&
-      row.shipped &&
+      shipped &&
       typeof row.returnedAt === 'string' &&
       row.returnedAt
         ? row.returnedAt
         : null,
     receivedAt,
     originCountry: typeof row.originCountry === 'string' ? row.originCountry : undefined,
-    passed: Boolean(url && (row.shipped || receivedAt) && row.passed),
+    passed: Boolean(url && (shipped || receivedAt) && row.passed),
     passedAt:
-      url && (row.shipped || receivedAt) && row.passed && typeof row.passedAt === 'string'
+      url && (shipped || receivedAt) && row.passed && typeof row.passedAt === 'string'
         ? row.passedAt
         : null,
     failReason:

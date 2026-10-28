@@ -227,4 +227,13 @@ assert(sampleTripSpanDays('2026-10-14T11:32:00.000Z', '2026-10-14T11:48:00.000Z'
 assert(sampleTripSpanDays('2026-10-14T11:32:00.000Z', '2026-10-17T01:00:00.000Z') === 3, '보낸 날부터 온 날까지 일수')
 assert(sampleTripSpanDays('2026-10-14T11:32:00.000Z', null) == null, '아직 오지 않으면 일수를 비운다')
 assert(sampleHistoryDay('2026-10-14T11:32:00.000Z') === '2026.10.14', '이력 날짜')
+const dateOnlyShipment = { ...attached[0]!, shipped: false, returnedAt: '2026-10-28 10:00:00.123456+00' }
+const restoredShipment = normalizeSampleWorkOrders([dateOnlyShipment])
+assert(restoredShipment[0]?.shipped === true, '서버가 발송일만 저장해도 발송 완료로 조회한다')
+assert(restoredShipment[0]?.returnedAt === dateOnlyShipment.returnedAt, '실제 중국 발송일을 보존한다')
+assert(restoredShipment[0]?.receivedAt == null && !restoredShipment[0]?.passed, '발송 완료를 실물 수령이나 합격으로 취급하지 않는다')
+assert(sanitizeSampleWorkOrders([dateOnlyShipment])[0]?.shipped === true, '이후 기획안 저장에서도 발송 상태를 보존한다')
+assert(sanitizeSampleWorkOrders([dateOnlyShipment])[0]?.returnedAt === dateOnlyShipment.returnedAt, '이후 저장 시 발송일이 사라지지 않는다')
+assert(normalizeSampleWorkOrders([{ ...dateOnlyShipment, returnedAt: '잘못된 날짜' }])[0]?.shipped === false, '잘못된 날짜로 발송 완료를 만들지 않는다')
+assert(normalizeSampleWorkOrders([{ ...dateOnlyShipment, returnedAt: null }])[0]?.shipped === false, '발송일이 없는 요청은 대기로 유지한다')
 console.log('sample-work-order.verify ok')
