@@ -68,6 +68,12 @@ export function sampleHistoryDay(value: string | null) {
   return `${day.getFullYear()}.${String(day.getMonth() + 1).padStart(2, '0')}.${String(day.getDate()).padStart(2, '0')}`
 }
 
+/** 기획안이 처음 등록된 날. 26.10.12 */
+export function sheetRegisteredDay(value: string | null) {
+  const day = sampleHistoryDay(value)
+  return day ? day.slice(2) : ''
+}
+
 export function draftStatePercent(draft: {
   nameKo: string
   nameEn: string

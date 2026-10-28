@@ -8,7 +8,7 @@ import { useAuth } from '@/lib/supabase/auth'
 import { useLeaveRequests } from '@/features/operations-support/use-leave-requests'
 import { useDepartmentApprovers } from '@/features/operations-support/use-department-approvers'
 import { useOpsDirectory } from '@/features/operations-support/ops-directory'
-import { DEFAULT_REMINDER_BASIS, dateLabel, validateRequest, type RequestForm } from './personal-requests'
+import { DEFAULT_REMINDER_BASIS, dateLabel, validateRequest, isSelfApprovedRequest, type RequestForm } from './personal-requests'
 import { koreaDateKey } from './my-attendance'
 import { OvertimeTimeFields } from './RequestTimeFields'
 
@@ -37,8 +37,8 @@ export function OvertimePanel() {
     if (approvals.loading || directory.loading) return '승인 담당자 확인 중…'
     if (approvals.error || directory.error) return '승인 담당자를 불러오지 못했습니다.'
     const setting = approvals.settings.find(item => item.departmentId === profile?.departmentId && item.type === 'overtime')
-    const names = [setting?.approverId, setting?.substituteId].filter(id => id && id !== leave.userId)
-      .map(id => directory.members.find(member => member.id === id)?.displayName).filter(Boolean)
+    const names = [setting?.approverId, setting?.substituteId].filter(Boolean)
+      .map(id => id === leave.userId ? '나 · 본인 승인 가능' : directory.members.find(member => member.id === id)?.displayName).filter(Boolean)
     return names.length ? `야근 승인자 · ${names.join(' / ')}` : '야근 승인자 미지정 · 운영지원에 담당자 설정을 요청해 주세요.'
   }, [approvals.error, approvals.loading, approvals.settings, directory.error, directory.loading, directory.members, leave.userId, profile?.departmentId])
 
@@ -89,7 +89,7 @@ export function OvertimePanel() {
                 <th scope="row">{dateLabel(item.from)}</th>
                 <td>{item.start}–{item.end}</td>
                 <td>{item.note || '—'}</td>
-                <td>{STATUS_LABELS[item.status]}</td>
+                <td>{STATUS_LABELS[item.status]}{isSelfApprovedRequest(item) && <span className="ml-2 text-xs">본인 승인</span>}{item.decidedByName && <small className="block">{item.decidedByName}{item.decidedAt ? ` · ${new Date(item.decidedAt).toLocaleString('ko-KR')}` : ''}</small>}{item.decisionNote && <small className="block whitespace-pre-wrap">{item.decisionNote}</small>}</td>
                 <td>{item.status === 'pending' ? <Button type="button" variant="outline" size="sm" disabled={leave.busy} onClick={() => void cancel(item.id)}>취소</Button> : '—'}</td>
               </tr>)}
           </tbody>
@@ -123,7 +123,7 @@ function OvertimeDialog({ form, busy, error, route, onChange, onClose, onSubmit 
           <label>날짜<Input aria-label="야근 날짜" type="date" value={form.from} onChange={event => onChange({ ...form, from: event.target.value, to: event.target.value })}/></label>
           <OvertimeTimeFields start={form.start} end={form.end} onChange={patch => onChange({ ...form, ...patch })} />
           <label>신청 사유 · 필수<Textarea maxLength={2000} aria-label="야근 사유" value={form.note} rows={3} placeholder="예정된 야근 업무를 적어 주세요." onChange={event => onChange({ ...form, note: event.target.value })}/></label>
-          <div className="personal-request-approval-route"><span>승인 경로</span><strong>{route}</strong><p>신청자의 화면에서는 본인 신청을 승인할 수 없습니다.</p></div>
+          <div className="personal-request-approval-route"><span>승인 경로</span><strong>{route}</strong><p>지정 승인자·대체 승인자는 ‘승인할 신청’에서 본인 신청도 승인할 수 있습니다.</p></div>
           {error && <p role="alert" className="personal-request-error">{error}</p>}
         </div>
         <footer><Button type="button" variant="outline" onClick={onClose}>닫기</Button><Button type="submit" disabled={busy}><Send size={14}/>{busy ? '저장 중…' : '신청하기'}</Button></footer>

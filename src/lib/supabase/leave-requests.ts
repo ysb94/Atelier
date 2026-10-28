@@ -4,20 +4,20 @@ import type { PersonalRequest, RequestForm, RequestKind } from '@/features/setti
 
 export type LeaveRequest = PersonalRequest & {
   employeeId: string; employeeName: string; departmentId: string | null; departmentName: string
-  decidedAt: string | null; decidedByName: string | null
+  decidedAt: string | null; decidedByName: string | null; decidedBy?: string | null
 }
 type LeaveRow = {
   id: string; employee_id: string; employee_name: string; department_id: string | null; department_name: string
   kind: RequestKind; from_date: string; to_date: string; start_time: string; end_time: string
   note: string; place: string | null; status: PersonalRequest['status']; created_at: string; decision_note: string | null
-  decided_at: string | null; decided_by_name: string | null
+  decided_at: string | null; decided_by_name: string | null; decided_by?: string | null
 }
 function mapRow(row: LeaveRow): LeaveRequest {
   return { id: row.id, employeeId: row.employee_id, employeeName: row.employee_name,
     departmentId: row.department_id, departmentName: row.department_name, kind: row.kind,
     from: row.from_date, to: row.to_date, start: row.start_time.slice(0,5), end: row.end_time.slice(0,5),
     note: row.note, place: row.place ?? '', status: row.status, createdAt: row.created_at,
-    decisionNote: row.decision_note ?? undefined, decidedAt: row.decided_at, decidedByName: row.decided_by_name }
+    decisionNote: row.decision_note ?? undefined, decidedAt: row.decided_at, decidedByName: row.decided_by_name, decidedBy: row.decided_by ?? null }
 }
 function fail(action: string, error: { message: string }): never {
   console.warn('[leave-requests] ' + action, { message: error.message })

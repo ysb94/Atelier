@@ -1,21 +1,44 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Check, Clock3, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { openConversation } from '@/lib/chat/open-conversation'
+import { useAuth } from '@/lib/supabase/auth'
+import { openDirectChat } from '@/lib/supabase/chat'
+import { chatKeys } from '@/features/chat/use-chat'
+import type { DepartmentApprover } from '@/lib/supabase/department-approvers'
 import { ATTENDANCE_GRACE_MINUTES, forgivenClock, resolveAttendanceStart, startTone, SUGGESTED_START } from './attendance-start-settings'
 import { StartTimeChoices } from './StartTimeChoices'
-import { type useOpsDirectory } from './ops-directory'
+import { useOpsDirectory } from './ops-directory'
 import { type useAttendanceStartSettings } from './use-attendance-start-settings'
+import { useDepartmentApprovers } from './use-department-approvers'
 import { memberLabel, OpsStat } from './OpsStat'
 import './attendance-start-settings.css'
 
 type Target = { employeeId: string | null; departmentId: string | null; label: string; month: string }
+type AttendanceManager = { id: string; name: string }
+
+function attendanceManagers(departmentId: string | null, settings: readonly DepartmentApprover[], names: ReadonlyMap<string, string>) {
+  if (!departmentId) return [] as AttendanceManager[]
+  const rows = settings.filter(item => item.departmentId === departmentId)
+  const primaries = [...new Set(rows.flatMap(item => item.approverId ? [item.approverId] : []))]
+  const chosen = primaries.length ? primaries : [...new Set(rows.flatMap(item => item.substituteId ? [item.substituteId] : []))]
+  return chosen.map(id => ({ id, name: names.get(id) || '담당자' }))
+}
 export function AttendanceStartSettingsPanel({ directory, schedules, initialEmployeeId, initialMonth, readOnly = false }: { directory: ReturnType<typeof useOpsDirectory>; schedules: ReturnType<typeof useAttendanceStartSettings>; initialEmployeeId?: string; initialMonth?: string; readOnly?: boolean }) {
   useRenderWatch('AttendanceStartSettingsPanel')
+  const { profile } = useAuth()
+  const queryClient = useQueryClient()
+  const approvers = useDepartmentApprovers()
+  const roster = useOpsDirectory()
   const canEdit = schedules.canEdit && !readOnly
   const { members: allMembers, departmentName } = directory
+  const [chatPending, setChatPending] = useState<string | null>(null)
+  const [chatError, setChatError] = useState('')
+  const managerNames = useMemo(() => new Map(roster.members.map(member => [member.id, memberLabel(member.displayName)])), [roster.members])
   const active = useWorkspaceTabActivity()
   const editorRef = useRef<HTMLElement>(null)
   const now = new Date()
@@ -54,6 +77,21 @@ export function AttendanceStartSettingsPanel({ directory, schedules, initialEmpl
     setIndividual(!next.employeeId || setting?.source==='individual'); setUntil(next.month.slice(5,7)); setMessage('')
   }
   const initialMember = initialEmployeeId && allMembers.find(member => member.id===initialEmployeeId)
+  async function chatWith(person: AttendanceManager) {
+    if (chatPending || person.id === profile?.id) return
+    setChatError('')
+    setChatPending(person.id)
+    try {
+      const roomId = await openDirectChat(person.id)
+      await queryClient.invalidateQueries({ queryKey: chatKeys.rooms })
+      openConversation(roomId, person.name)
+    } catch (error) {
+      console.warn('[attendance-start] 담당자 채팅 열기 실패', { profileId: person.id, error })
+      setChatError(error instanceof Error ? error.message : '채팅방을 만들지 못했습니다.')
+    } finally {
+      setChatPending(null)
+    }
+  }
   async function save() {
     if (!target || busy || !validYear || !canEdit) return
     if ((!target.employeeId || individual) && !/^([01]\d|2[0-3]):[0-5]\d$/.test(start)) { setMessage('출근시간을 입력해 주세요.'); return }
@@ -73,9 +111,10 @@ export function AttendanceStartSettingsPanel({ directory, schedules, initialEmpl
     {message && <p role="status" className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">{message}</p>}
     {!validYear && <p role="alert" className="text-sm text-danger">2000–2100년 사이의 연도를 입력해 주세요.</p>}
     {unavailable && <p role="status" className="text-sm text-muted-foreground">{schedules.error || directory.error ? '직원 또는 출근시간을 불러오지 못했습니다. 새로고침해 주세요.' : '직원과 출근시간을 불러오는 중…'}</p>}
+    {chatError && <p role="alert" className="text-sm text-danger">{chatError}</p>}
     {target && <section ref={editorRef} aria-label="출근시간 편집" className="attendance-start-editor"><header><div><strong>{target.label} · {Number(target.month.slice(5,7))}월 설정</strong><p>{target.employeeId ? '부서 기준을 따르거나 이 직원만 다른 시간으로 지정합니다.' : '개별 시간을 지정한 직원은 유지하고, 부서 기준을 따르는 직원에게 적용합니다.'}</p></div><Button variant="ghost" size="icon" aria-label="출근시간 편집 닫기" disabled={busy} onClick={() => setTarget(null)}><X size={16}/></Button></header><fieldset disabled={busy || unavailable || !canEdit}><div className="attendance-start-editor-fields">{target.employeeId && <label>적용 방식<Select aria-label="출근시간 적용 방식" value={individual?'individual':'department'} onChange={event => setIndividual(event.target.value==='individual')}><option value="department">부서 기준 따르기</option><option value="individual">직원 개별 설정</option></Select></label>}{(!target.employeeId || individual) && <><label>출근시간<Input type="time" aria-label="설정 출근시간" value={start} onChange={event => setStart(event.target.value)}/></label><div className="attendance-start-presets"><StartTimeChoices value={start} disabled={busy || unavailable || !canEdit} onChange={setStart} /></div></>}<p className="text-xs text-muted-foreground">정해진 출근시간에서 {ATTENDANCE_GRACE_MINUTES}분까지 인정합니다.</p><label>적용 마지막 월<Select aria-label="출근시간 적용 마지막 월" value={until} onChange={event => setUntil(event.target.value)}>{months.filter(value=>value>=target.month).map(value=><option key={value} value={value.slice(5,7)}>{Number(value.slice(5,7))}월{value===target.month?' · 해당 월만':''}</option>)}</Select></label></div><p className="mt-3 text-xs text-muted-foreground">{!editorSaved && '저장된 출근시간은 아직 없습니다. '}{(!target.employeeId || individual) && graceUntil ? `${graceUntil}까지는 기준 초과로 보지 않습니다. ` : ''}{target.month} ~ {target.month.slice(0,4)}-{until} 저장 · 다른 월은 그대로 유지됩니다. 선택한 기간의 기존 설정은 변경됩니다.</p><div className="mt-4 flex justify-end"><Button onClick={() => void save()}><Check size={14}/>{busy?'저장 중…':'출근시간 저장'}</Button></div></fieldset></section>}
     <section aria-label="부서 기본 출근시간"><header className="mb-3 flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">부서 기본시간 · {Number(monthNo)}월</h3><label className="flex items-center gap-2 text-xs text-muted-foreground"><input type="checkbox" checked={showEmptyDepartments} onChange={event=>setShowEmptyDepartments(event.target.checked)}/>직원이 없는 부서도 보기</label></header><div className="attendance-start-departments">{directory.departments.filter(item=>(department==='all' ? showEmptyDepartments || allMembers.some(member=>member.departmentId===item.id) : item.id===department)).map(item => {const saved=schedules.index.get(`${month}:department:${item.id}`);const count=allMembers.filter(member=>member.departmentId===item.id).length;const tone=startTone(saved?.start||'');return <article key={item.id}><div><strong>{item.name}</strong><small>{count}명 · {Number(monthNo)}월 기본</small></div><span className={`attendance-start-mark ${tone.tone}`}>{tone.label}</span>{canEdit && <Button variant="outline" size="sm" disabled={unavailable||busy||!validYear} onClick={()=>edit({employeeId:null,departmentId:item.id,label:item.name,month})}><Clock3 size={13}/>설정</Button>}</article>})}</div></section>
-    <div className="attendance-start-matrix"><table aria-label="연간 직원 출근시간"><thead><tr><th>부서·직원</th>{months.map(value=><th key={value} className={value===month?'is-current':''}>{Number(value.slice(5,7))}월</th>)}</tr></thead><tbody>{pageMembers.map(member=><tr key={member.id}><th><strong>{memberLabel(member.displayName)}</strong><small>{departmentName(member.departmentId)}</small></th>{months.map(value=>{const resolved=resolveAttendanceStart(schedules.index,member.id,member.departmentId,value);const tone=startTone(resolved.start);return <td key={value} className={value===month?'is-current':''}><button type="button" disabled={unavailable||busy||!validYear||!canEdit} aria-label={`${memberLabel(member.displayName)} ${value} 출근시간 ${tone.label} ${resolved.source==='individual'?'개별':'부서 기준'}`} title={resolved.configured?`${resolved.source==='individual'?'직원 개별 설정':'부서 기준'} · ${resolved.grace}분까지 정상`:'미설정'} className={tone.tone} onClick={()=>edit({employeeId:member.id,departmentId:member.departmentId,label:memberLabel(member.displayName),month:value})}>{tone.label}{resolved.configured&&resolved.source==='individual'&&<i aria-label="개별 설정">•</i>}</button></td>})}</tr>)}{!pageMembers.length&&<tr><td colSpan={13} className="py-10 text-center text-muted-foreground">{unavailable?'정보를 확인하는 중입니다.':'조건에 맞는 직원이 없습니다.'}</td></tr>}</tbody></table></div>
+    <div className="attendance-start-matrix"><table aria-label="연간 직원 출근시간"><thead><tr><th><span className="attendance-start-who"><span>부서·직원</span><span>담당</span></span></th>{months.map(value=><th key={value} className={value===month?'is-current':''}>{Number(value.slice(5,7))}월</th>)}</tr></thead><tbody>{pageMembers.map(member=>{const managers=attendanceManagers(member.departmentId,approvers.settings,managerNames);const employeeName=memberLabel(member.displayName);return <tr key={member.id}><th><div className="attendance-start-who"><span className="attendance-start-person"><strong>{employeeName}</strong><small>{departmentName(member.departmentId)}</small></span><span className="attendance-start-owners">{approvers.loading ? <small>담당 확인 중</small> : managers.length ? managers.map(person => <button key={person.id} type="button" className="attendance-start-owner" disabled={Boolean(chatPending) || person.id===profile?.id} aria-label={`${employeeName} 출근시간 담당 ${person.name}${person.id===profile?.id?'':'에게 채팅'}`} title={person.id===profile?.id?'본인이 이 직원의 출근시간을 설정합니다.':`${person.name}과 채팅`} onClick={() => void chatWith(person)}>담당 {chatPending===person.id?'연결 중…':person.name}</button>) : <small className="attendance-start-owner-empty">담당자 없음</small>}</span></div></th>{months.map(value=>{const resolved=resolveAttendanceStart(schedules.index,member.id,member.departmentId,value);const tone=startTone(resolved.start);return <td key={value} className={value===month?'is-current':''}><button type="button" disabled={unavailable||busy||!validYear||!canEdit} aria-label={`${memberLabel(member.displayName)} ${value} 출근시간 ${tone.label} ${resolved.source==='individual'?'개별':'부서 기준'}`} title={resolved.configured?`${resolved.source==='individual'?'직원 개별 설정':'부서 기준'} · ${resolved.grace}분까지 정상`:'미설정'} className={tone.tone} onClick={()=>edit({employeeId:member.id,departmentId:member.departmentId,label:memberLabel(member.displayName),month:value})}>{tone.label}{resolved.configured&&resolved.source==='individual'&&<i aria-label="개별 설정">•</i>}</button></td>})}</tr>})}{!pageMembers.length&&<tr><td colSpan={13} className="py-10 text-center text-muted-foreground">{unavailable?'정보를 확인하는 중입니다.':'조건에 맞는 직원이 없습니다.'}</td></tr>}</tbody></table></div>
     <footer className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground"><span>초록 9시 · 보라 10시 · • 직원 개별 설정 · 미설정은 자동 지정하지 않습니다.</span><div className="flex items-center gap-2"><Button variant="outline" size="sm" disabled={currentPage===1} onClick={()=>setPage(currentPage-1)}>이전</Button>{currentPage}/{pageCount}<Button variant="outline" size="sm" disabled={currentPage===pageCount} onClick={()=>setPage(currentPage+1)}>다음</Button></div></footer>
   </div>
 }

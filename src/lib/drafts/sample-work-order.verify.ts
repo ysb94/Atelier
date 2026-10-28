@@ -18,6 +18,7 @@ import {
   sampleHistoryDay,
   sampleElapsedDays,
   sheetDay,
+  sheetRegisteredDay,
   samplePhase,
   sampleTripSpanDays,
   samplePhaseLabel,
@@ -229,6 +230,8 @@ assert(sampleTripSpanDays('2026-10-14T11:32:00.000Z', '2026-10-14T11:48:00.000Z'
 assert(sampleTripSpanDays('2026-10-14T11:32:00.000Z', '2026-10-17T01:00:00.000Z') === 3, '보낸 날부터 온 날까지 일수')
 assert(sampleTripSpanDays('2026-10-14T11:32:00.000Z', null) == null, '아직 오지 않으면 일수를 비운다')
 assert(sampleHistoryDay('2026-10-14T11:32:00.000Z') === '2026.10.14', '이력 날짜')
+assert(sheetRegisteredDay('2026-10-14T11:32:00.000Z') === '26.10.14', '등록일')
+assert(sheetRegisteredDay('') === '', '등록일이 없으면 비운다')
 const dateOnlyShipment = { ...attached[0]!, shipped: false, returnedAt: '2026-10-28 10:00:00.123456+00' }
 const restoredShipment = normalizeSampleWorkOrders([dateOnlyShipment])
 assert(restoredShipment[0]?.shipped === true, '서버가 발송일만 저장해도 발송 완료로 조회한다')

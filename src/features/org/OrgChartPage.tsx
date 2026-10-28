@@ -27,9 +27,17 @@ import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import {
   emptyRoster,
   listEmployeeRosters,
+  listRosterColumns,
+  listRosterHeaderSettings,
+  ROSTER_BASE_HEADERS,
+  type RosterHeaderSetting,
+  listRosterColumnValues,
   ROSTER_FIELDS,
   saveEmployeeRosterField,
+  saveRosterColumnValue,
   type EmployeeRoster,
+  type RosterColumn,
+  type RosterFieldKey,
   type RosterWriteFieldKey,
 } from '@/lib/supabase/employee-roster'
 import {
@@ -47,6 +55,7 @@ import {
   type PersonnelTitleKind,
 } from '@/lib/supabase/profiles'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
+import { RosterHeaderDialog } from './RosterHeaderDialog'
 import { OrgDirectory } from './OrgDirectory'
 import { HireDateScrollField } from './HireDateScrollField'
 
@@ -89,25 +98,45 @@ function isProbation(hireDate: string | null, today: string) {
   if (!hireDate || hireDate > today) return false
   return today < addCalendarMonths(hireDate, 3)
 }
-type AssignmentSortKey = 'name' | 'department' | 'duty' | 'grade' | 'hire'
+type AssignmentSortKey = 'name' | 'department' | 'duty' | 'grade' | 'hire' | RosterWriteFieldKey | `column:${string}`
+
+function isCustomColumnSortKey(key: AssignmentSortKey): key is `column:${string}` {
+  return key.startsWith('column:')
+}
 
 function assignmentSortValue(
   member: OrgChartMember,
   key: AssignmentSortKey,
   departmentName: (departmentId: string | null) => string,
+  roster: EmployeeRoster | undefined,
+  custom = '',
 ) {
+  if (isCustomColumnSortKey(key)) return custom
   if (key === 'name') return memberName(member)
   if (key === 'department') return member.departmentId ? departmentName(member.departmentId) : ''
   if (key === 'duty') return member.position?.trim() ?? ''
   if (key === 'grade') return member.jobGrade?.trim() ?? ''
-  return member.hireDate ?? ''
+  if (key === 'hire') return member.hireDate ?? ''
+  if (key === 'remainingAnnualLeave') return roster?.remainingAnnualLeave == null ? '' : String(roster.remainingAnnualLeave)
+  if (key === 'inclusiveOvertimeHours') return roster?.inclusiveOvertimeHours == null ? '' : String(roster.inclusiveOvertimeHours)
+  return roster?.[key]?.trim() ?? ''
+}
+
+function sortNumber(value: string) {
+  const normalized = value.replaceAll(',', '').trim()
+  if (!/^-?\d+(\.\d+)?$/.test(normalized)) return null
+  const number = Number(normalized)
+  return Number.isFinite(number) ? number : null
 }
 
 function compareAssignmentValue(left: string, right: string) {
   if (!left && !right) return 0
   if (!left) return 1
   if (!right) return -1
-  return left.localeCompare(right, 'ko')
+  const leftNumber = sortNumber(left)
+  const rightNumber = sortNumber(right)
+  if (leftNumber !== null && rightNumber !== null && leftNumber !== rightNumber) return leftNumber < rightNumber ? -1 : 1
+  return left.localeCompare(right, 'ko', { numeric: true })
 }
 
 function compareMembers(
@@ -692,9 +721,11 @@ function MemberAssignmentTable({
   canChange: boolean
   filtered: boolean
 }) {
+  const { profile } = useAuth()
   const queryClient = useQueryClient()
   const [error, setError] = useState<string | null>(null)
   const [sort, setSort] = useState<{ key: AssignmentSortKey; direction: 'asc' | 'desc' } | null>(null)
+  const [headersOpen, setHeadersOpen] = useState(false)
   const rosterQuery = useQuery({
     queryKey: ['employee-roster'],
     queryFn: listEmployeeRosters,
@@ -707,15 +738,44 @@ function MemberAssignmentTable({
     }
     return map
   }, [rosterQuery.data])
-  const columnCount = 5 + (canChange ? ROSTER_FIELDS.length + 1 : 0)
+  const columnQuery = useQuery({
+    queryKey: ['employee-roster-columns'],
+    queryFn: listRosterColumns,
+    enabled: canChange,
+  })
+  const columnValueQuery = useQuery({
+    queryKey: ['employee-roster-column-values'],
+    queryFn: listRosterColumnValues,
+    enabled: canChange,
+  })
+  const allExtraColumns = columnQuery.data ?? emptyList<RosterColumn>()
+  const headerSettingsQuery = useQuery({ queryKey: ['employee-roster-header-settings'], queryFn: listRosterHeaderSettings, enabled: profile?.status === 'active', retry: false })
+  const headerSettings = headerSettingsQuery.data?.settings ?? emptyList<RosterHeaderSetting>()
+  const headerSettingsMap = useMemo(() => new Map(headerSettings.map(setting => [setting.key, setting])), [headerSettings])
+  const showHeader = (key: string) => !headerSettingsMap.get(key)?.hidden
+  const headerLabel = (key: string, fallback: string) => headerSettingsMap.get(key)?.label ?? fallback
+  const extraColumns = allExtraColumns.filter(column => showHeader(`column:${column.id}`))
+  const visibleRosterFields = ROSTER_FIELDS.filter(field => showHeader(field.key))
+  const columnValues = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const row of columnValueQuery.data ?? emptyList<{ columnId: string; profileId: string; value: string }>()) {
+      map.set(`${row.columnId}:${row.profileId}`, row.value)
+    }
+    return map
+  }, [columnValueQuery.data])
+  const columnCount = Math.max(1, ROSTER_BASE_HEADERS.filter(header => (canChange || ['name','department','duty','grade','hire'].includes(header.key)) && showHeader(header.key)).length + (canChange ? extraColumns.length : 0))
+  const anyHeaderVisible = ROSTER_BASE_HEADERS.some(header => (canChange || ['name','department','duty','grade','hire'].includes(header.key)) && showHeader(header.key)) || (canChange && extraColumns.length > 0)
   const sortedMembers = useMemo(() => {
     if (!sort) return members
     const direction = sort.direction === 'asc' ? 1 : -1
-    return [...members].sort((left, right) => direction * compareAssignmentValue(
-      assignmentSortValue(left, sort.key, departmentName),
-      assignmentSortValue(right, sort.key, departmentName),
-    ))
-  }, [departmentName, members, sort])
+    const custom = (memberId: string) => sort.key.startsWith('column:') ? columnValues.get(`${sort.key.slice('column:'.length)}:${memberId}`) ?? '' : ''
+    return [...members].sort((left, right) => {
+      const leftValue = assignmentSortValue(left, sort.key, departmentName, rosters.get(left.id), custom(left.id))
+      const rightValue = assignmentSortValue(right, sort.key, departmentName, rosters.get(right.id), custom(right.id))
+      if (!leftValue || !rightValue) return !leftValue && !rightValue ? 0 : leftValue ? -1 : 1
+      return direction * compareAssignmentValue(leftValue, rightValue)
+    })
+  }, [columnValues, departmentName, members, rosters, sort])
 
   function toggleSort(key: AssignmentSortKey) {
     setSort((current) => current?.key === key && current.direction === 'asc'
@@ -763,6 +823,17 @@ function MemberAssignmentTable({
       setError(err instanceof Error ? err.message : '명부를 저장하지 못했습니다.')
     },
   })
+  const columnValueMutation = useMutation({
+    mutationFn: (input: { profileId: string; columnId: string; value: string }) => saveRosterColumnValue(input.profileId, input.columnId, input.value),
+    onSuccess: async () => {
+      setError(null)
+      await queryClient.invalidateQueries({ queryKey: ['employee-roster-column-values'] })
+    },
+    onError: (err) => {
+      console.warn('[org-chart] 추가 헤더 값 저장 실패', err)
+      setError(err instanceof Error ? err.message : '헤더 값을 저장하지 못했습니다.')
+    },
+  })
 
   function commit(
     member: OrgChartMember,
@@ -808,6 +879,9 @@ function MemberAssignmentTable({
           부서·직책·직급·입사일과 명부 항목을 바꾸면 바로 저장됩니다. 입사일이
           없는 직원은 비워 두면 됩니다.
         </p>
+        {canChange ? <Button type="button" size="sm" variant="outline" className="mt-3" onClick={() => setHeadersOpen(true)}><Settings2 className="size-4" />헤더 관리</Button> : null}
+        {canChange && headersOpen ? <RosterHeaderDialog columns={allExtraColumns} settings={headerSettings} settingsReady={headerSettingsQuery.data?.ready ?? false} settingsLoading={headerSettingsQuery.isPending} loading={columnQuery.isPending} failed={columnQuery.isError || headerSettingsQuery.isError} onClose={() => setHeadersOpen(false)} onRemoved={() => setSort(null)} onRetry={() => { void columnQuery.refetch(); void headerSettingsQuery.refetch() }} /> : null}
+        {columnQuery.isError ? <p className="mt-2 text-sm text-danger">추가 헤더를 불러오지 못했습니다.</p> : null}
         {rosterQuery.isError ? (
           <p className="mt-2 text-sm text-danger">
             근로자 명부를 불러오지 못했습니다.
@@ -816,26 +890,28 @@ function MemberAssignmentTable({
         {error ? <p className="mt-2 text-sm text-danger">{error}</p> : null}
       </div>
       <div className="mt-3 max-h-[min(36rem,calc(100dvh-32rem))] overflow-auto">
-        <table className="w-max min-w-full text-left text-sm">
+        <table className="w-max min-w-full text-left text-sm [&_td+td]:border-l [&_td+td]:border-border/70 [&_th+th]:border-l [&_th+th]:border-primary-foreground/30">
           <thead className="sticky top-0 z-20 border-y border-border bg-primary text-xs text-primary-foreground">
             <tr>
-              <AssignmentSortHeader label="이름" column="name" sort={sort} onSort={toggleSort} />
-              <AssignmentSortHeader label="부서" column="department" sort={sort} onSort={toggleSort} />
-              <AssignmentSortHeader label="직책" column="duty" sort={sort} onSort={toggleSort} />
-              <AssignmentSortHeader label="직급" column="grade" sort={sort} onSort={toggleSort} />
-              <AssignmentSortHeader label="입사일" column="hire" sort={sort} onSort={toggleSort} />
-              {canChange ? <th className="whitespace-nowrap px-4 py-2.5 text-right font-medium" title="잔여 일수를 직접 입력합니다. 입력 후 다른 칸을 누르면 저장되며, 신청 시 자동 차감되지 않습니다.">남은 연차</th> : null}
+              <AssignmentSortHeader hidden={!showHeader('name')} label={headerLabel('name', '이름')} column="name" sort={sort} onSort={toggleSort} />
+              <AssignmentSortHeader hidden={!showHeader('department')} label={headerLabel('department', '부서')} column="department" sort={sort} onSort={toggleSort} />
+              <AssignmentSortHeader hidden={!showHeader('duty')} label={headerLabel('duty', '직책')} column="duty" sort={sort} onSort={toggleSort} />
+              <AssignmentSortHeader hidden={!showHeader('grade')} label={headerLabel('grade', '직급')} column="grade" sort={sort} onSort={toggleSort} />
+              <AssignmentSortHeader hidden={!showHeader('hire')} label={headerLabel('hire', '입사일')} column="hire" sort={sort} onSort={toggleSort} />
+              {canChange ? <AssignmentSortHeader hidden={!showHeader('inclusiveOvertimeHours')} label={headerLabel('inclusiveOvertimeHours', '약정 연장근로시간(포괄임금)')} column="inclusiveOvertimeHours" sort={sort} onSort={toggleSort} hint="포괄임금에 포함된 월 연장근로시간입니다. 비우면 미등록이며, 추가 근무가 이 시간을 넘으면 추가수당 대상입니다." /> : null}
+              {canChange ? <AssignmentSortHeader hidden={!showHeader('remainingAnnualLeave')} label={headerLabel('remainingAnnualLeave', '남은 연차')} column="remainingAnnualLeave" sort={sort} onSort={toggleSort} hint="잔여 일수를 직접 입력합니다. 입력 후 다른 칸을 누르면 저장되며, 신청 시 자동 차감되지 않습니다." /> : null}
               {canChange
-                ? ROSTER_FIELDS.map((field) => (
-                    <th key={field.key} className="whitespace-nowrap px-4 py-2.5 font-medium">
-                      {field.label}
-                    </th>
+                ? visibleRosterFields.map((field) => (
+                    <AssignmentSortHeader key={field.key} label={headerLabel(field.key, field.label)} column={field.key} sort={sort} onSort={toggleSort} />
                   ))
                 : null}
+              {canChange ? extraColumns.map((column) => (
+                <AssignmentSortHeader key={column.id} label={headerLabel(`column:${column.id}`, column.label)} column={`column:${column.id}`} sort={sort} onSort={toggleSort} hint={column.kind === 'money' ? '금액입니다. 숫자는 천 단위 쉼표로 보입니다.' : column.kind === 'number' ? '숫자만 입력합니다.' : '텍스트를 입력합니다.'} />
+              )) : null}
             </tr>
           </thead>
           <tbody>
-            {loading ? (
+            {!anyHeaderVisible ? <tr><td colSpan={columnCount} className="px-4 py-8 text-center text-muted-foreground">표시할 헤더가 없습니다. 헤더 관리에서 복원할 수 있습니다.</td></tr> : loading ? (
               <tr>
                 <td
                   colSpan={columnCount}
@@ -861,7 +937,7 @@ function MemberAssignmentTable({
                   key={member.id}
                   className="border-b border-border/70 transition-colors last:border-0 hover:bg-muted/25"
                 >
-                  <td className="sticky left-0 z-10 whitespace-nowrap border-r border-border bg-card px-4 py-3 font-medium">
+                  <td hidden={!showHeader('name')} className="sticky left-0 z-10 whitespace-nowrap border-r border-border bg-card px-4 py-3 font-medium">
                     <span className="flex items-center gap-2 whitespace-nowrap">
                       {memberName(member)}
                       {isProbation(member.hireDate, todayDateKey()) ? (
@@ -869,7 +945,7 @@ function MemberAssignmentTable({
                       ) : null}
                     </span>
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2">
+                  <td hidden={!showHeader('department')} className="whitespace-nowrap px-4 py-2">
                     <AssignmentSelect
                       label={`${memberName(member)} 부서`}
                       value={member.departmentId ?? ''}
@@ -882,7 +958,7 @@ function MemberAssignmentTable({
                       onChange={(value) => commit(member, 'department', value)}
                     />
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2">
+                  <td hidden={!showHeader('duty')} className="whitespace-nowrap px-4 py-2">
                     <AssignmentSelect
                       label={`${memberName(member)} 직책`}
                       value={member.position?.trim() ?? ''}
@@ -891,7 +967,7 @@ function MemberAssignmentTable({
                       onChange={(value) => commit(member, 'duty', value)}
                     />
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2">
+                  <td hidden={!showHeader('grade')} className="whitespace-nowrap px-4 py-2">
                     <AssignmentSelect
                       label={`${memberName(member)} 직급`}
                       value={member.jobGrade?.trim() ?? ''}
@@ -900,7 +976,7 @@ function MemberAssignmentTable({
                       onChange={(value) => commit(member, 'grade', value)}
                     />
                   </td>
-                  <td className="whitespace-nowrap px-4 py-2">
+                  <td hidden={!showHeader('hire')} className="whitespace-nowrap px-4 py-2">
                     <HireDateScrollField
                       label={`${memberName(member)} 입사일`}
                       value={member.hireDate ?? ''}
@@ -911,7 +987,20 @@ function MemberAssignmentTable({
                       onChange={(value) => commit(member, 'hire', value)}
                     />
                   </td>
-                  {canChange ? <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums" aria-label={`${memberName(member)} 남은 연차`}>
+                  {canChange && showHeader('inclusiveOvertimeHours') ? <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums" aria-label={`${memberName(member)} 약정 연장근로시간`}>
+                    {rosterQuery.isPending ? '불러오는 중…' : rosterQuery.isError ? '조회 실패' : <div className="flex items-center justify-end gap-1">
+                      <RosterField label={`${memberName(member)} 약정 연장근로시간 입력`} value={String(rosters.get(member.id)?.inclusiveOvertimeHours ?? '')}
+                        maxLength={10} className="w-24 text-right tabular-nums" type="number" disabled={rosterMutation.isPending}
+                        onCommit={value => {
+                          const current=rosters.get(member.id)?.inclusiveOvertimeHours ?? null
+                          if ((value.trim() === '' && current === null) || (value.trim() !== '' && Number(value) === current)) return
+                          setError(null)
+                          rosterMutation.mutate({profileId:member.id,field:'inclusiveOvertimeHours',value})
+                        }} />
+                      <span className="text-xs text-muted-foreground">시간</span>
+                    </div>}
+                  </td> : null}
+                  {canChange && showHeader('remainingAnnualLeave') ? <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums" aria-label={`${memberName(member)} 남은 연차`}>
                     {rosterQuery.isPending ? '불러오는 중…' : rosterQuery.isError ? '조회 실패' : <div className="flex items-center justify-end gap-1">
                       <RosterField label={`${memberName(member)} 남은 연차 입력`} value={String(rosters.get(member.id)?.remainingAnnualLeave ?? '')}
                         maxLength={10} className="w-24 text-right tabular-nums" type="number" disabled={rosterMutation.isPending}
@@ -925,7 +1014,7 @@ function MemberAssignmentTable({
                     </div>}
                   </td> : null}
                   {canChange
-                    ? ROSTER_FIELDS.map((field) => {
+                    ? visibleRosterFields.map((field) => {
                         const roster = rosters.get(member.id) ?? emptyRoster(member.id)
                         return (
                           <td key={field.key} className="whitespace-nowrap px-4 py-2">
@@ -935,6 +1024,7 @@ function MemberAssignmentTable({
                               maxLength={field.max}
                               className={field.width}
                               type={field.key === 'resignedOn' ? 'date' : 'text'}
+                              money={MONEY_ROSTER_FIELDS.has(field.key)}
                               disabled={rosterQuery.isLoading}
                               onCommit={(value) => {
                                 if (value === roster[field.key]) return
@@ -950,6 +1040,28 @@ function MemberAssignmentTable({
                         )
                       })
                     : null}
+                  {canChange ? extraColumns.map((column) => {
+                    const current = columnValues.get(`${column.id}:${member.id}`) ?? ''
+                    return (
+                      <td key={column.id} className="whitespace-nowrap px-4 py-2">
+                        <RosterField
+                          label={`${memberName(member)} ${headerLabel(`column:${column.id}`, column.label)}`}
+                          value={current}
+                          maxLength={column.kind === 'text' ? 200 : 12}
+                          className="min-w-28"
+                          type="text"
+                          money={column.kind === 'money'}
+                          numeric={column.kind === 'number'}
+                          disabled={columnValueQuery.isLoading || columnValueMutation.isPending}
+                          onCommit={(value) => {
+                            if (value === current) return
+                            setError(null)
+                            columnValueMutation.mutate({ profileId: member.id, columnId: column.id, value })
+                          }}
+                        />
+                      </td>
+                    )
+                  }) : null}
                 </tr>
               ))
             )}
@@ -965,23 +1077,28 @@ function AssignmentSortHeader({
   column,
   sort,
   onSort,
+  hint,
+  hidden = false,
 }: {
   label: string
   column: AssignmentSortKey
   sort: { key: AssignmentSortKey; direction: 'asc' | 'desc' } | null
   onSort: (key: AssignmentSortKey) => void
+  hint?: string
+  hidden?: boolean
 }) {
   const active = sort?.key === column
   const next = active && sort.direction === 'asc' ? '내림차순' : '오름차순'
   return (
-    <th
+    <th hidden={hidden}
       aria-sort={active ? (sort.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
       className={cn('p-0 font-medium', column === 'name' && 'sticky left-0 z-10 border-r border-primary-foreground/20 bg-primary')}
     >
+      <div className="flex w-full items-stretch">
       <button
         type="button"
-        className="flex w-full items-center gap-1 whitespace-nowrap px-4 py-2.5 text-left hover:bg-white/10"
-        title={`${label} ${next}`}
+        className="flex min-w-0 flex-1 items-center justify-center gap-1 whitespace-nowrap px-4 py-2.5 hover:bg-white/10"
+        title={hint ? `${hint} ${label} ${next}.` : `${label} ${next}`}
         onClick={() => onSort(column)}
       >
         <span>{label}</span>
@@ -993,8 +1110,36 @@ function AssignmentSortHeader({
           <ChevronUp className="size-3.5 shrink-0 opacity-40" aria-hidden />
         )}
       </button>
+      </div>
     </th>
   )
+}
+
+const MONEY_ROSTER_FIELDS = new Set<RosterFieldKey>(['annualSalary', 'monthlyWage', 'mealAllowance', 'carAllowance', 'childcareAllowance', 'dutyAllowance'])
+
+function moneyDigits(value: string, maxDigits: number) {
+  return value.replaceAll(/[^\d]/g, '').replace(/^0+(?=\d)/, '').slice(0, maxDigits)
+}
+
+function formatMoney(value: string, maxDigits: number) {
+  const digits = moneyDigits(value, maxDigits)
+  return digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+}
+
+function plainNumber(value: string, maxDigits: number) {
+  const cleaned = value.replaceAll(/[^\d.]/g, '')
+  const dot = cleaned.indexOf('.')
+  const whole = (dot < 0 ? cleaned : cleaned.slice(0, dot)).replace(/^0+(?=\d)/, '').slice(0, maxDigits)
+  const fraction = dot < 0 ? '' : cleaned.slice(dot + 1).replaceAll('.', '').slice(0, 2)
+  if (dot < 0) return whole
+  return `${whole || '0'}.${fraction}`
+}
+
+function emptyRosterWidth(widthClass: string) {
+  const size = /^min-w-(\d+)$/.exec(widthClass)
+  if (!size) return undefined
+  const rem = `max(${Number(size[1]) / 8}rem, 5.5rem)`
+  return { width: rem, minWidth: rem, maxWidth: rem }
 }
 
 function RosterField({
@@ -1003,6 +1148,8 @@ function RosterField({
   maxLength,
   className,
   type,
+  money = false,
+  numeric = false,
   disabled,
   onCommit,
 }: {
@@ -1011,31 +1158,78 @@ function RosterField({
   maxLength: number
   className: string
   type: 'text' | 'date' | 'number'
+  money?: boolean
+  numeric?: boolean
   disabled: boolean
   onCommit: (value: string) => void
 }) {
-  const [text, setText] = useState(value)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [text, setText] = useState(() => money ? formatMoney(value, maxLength) : numeric ? plainNumber(value, maxLength) : value)
+  const [pickingDate, setPickingDate] = useState(false)
   useEffect(() => {
-    setText(value)
-  }, [value])
-  const contentWidth =
-    type === 'text' && text ? `${[...text].length + 2}em` : undefined
+    setText(money ? formatMoney(value, maxLength) : numeric ? plainNumber(value, maxLength) : value)
+  }, [maxLength, money, numeric, value])
+  useEffect(() => {
+    if (!pickingDate || inputRef.current?.type !== 'date') return
+    inputRef.current.showPicker?.()
+  }, [pickingDate])
+  const filled = text.trim().length > 0
+  const dateActive = type === 'date' && (filled || pickingDate)
+  const contentWidth = money && filled
+    ? `${text.length + 3}ch`
+    : type === 'text' && filled ? `${[...text].length + 2}em` : undefined
+  const emptyWidth = filled || dateActive ? undefined : emptyRosterWidth(className)
   return (
     <Input
+      ref={inputRef}
       aria-label={label}
-      type={type}
+      type={type === 'date' ? (dateActive ? 'date' : 'text') : type}
       step={type === 'number' ? '0.01' : undefined}
       min={type === 'number' ? '-99999.99' : undefined}
       max={type === 'number' ? '99999.99' : undefined}
-      placeholder={type === 'number' ? '미등록' : undefined}
+      inputMode={money || numeric ? 'decimal' : undefined}
+      placeholder="미등록"
       value={text}
-      maxLength={maxLength}
+      maxLength={money || numeric ? undefined : maxLength}
       disabled={disabled}
-      style={contentWidth ? { width: contentWidth } : undefined}
-      className={cn('h-8 w-auto shrink-0', className, !text.trim() && 'border-warning bg-warning/10 font-medium text-warning')}
-      onChange={(event) => setText(event.target.value)}
+      style={filled ? (contentWidth ? { width: contentWidth } : undefined) : emptyWidth}
+      className={cn('h-8 w-auto shrink-0', (filled || dateActive) && className, (money || numeric) && 'text-right tabular-nums', !filled && 'border-warning bg-warning/10 font-medium text-warning')}
+      onFocus={() => { if (type === 'date' && !filled) setPickingDate(true) }}
+      onChange={(event) => {
+        if (numeric && !money) { setText(plainNumber(event.target.value, maxLength)); return }
+        if (!money) { setText(event.target.value); return }
+        const raw = event.target.value
+        const caret = event.target.selectionStart ?? raw.length
+        const digitsBefore = moneyDigits(raw.slice(0, caret), maxLength).length
+        const formatted = formatMoney(raw, maxLength)
+        setText(formatted)
+        requestAnimationFrame(() => {
+          const input = inputRef.current
+          if (!input) return
+          let seen = 0
+          let next = formatted.length
+          for (let index = 0; index < formatted.length; index += 1) {
+            if (/\d/.test(formatted[index] ?? '')) seen += 1
+            if (seen >= digitsBefore) { next = index + 1; break }
+          }
+          input.setSelectionRange(next, next)
+        })
+      }}
       onBlur={(event) => {
+        if (type === 'date' && !event.currentTarget.value) setPickingDate(false)
         if (!event.currentTarget.validity.valid) { event.currentTarget.reportValidity(); return }
+        if (money) {
+          const digits = moneyDigits(text, maxLength)
+          setText(formatMoney(digits, maxLength))
+          onCommit(digits)
+          return
+        }
+        if (numeric) {
+          const next = plainNumber(text, maxLength)
+          setText(next)
+          onCommit(next)
+          return
+        }
         const next = type === 'date' ? text : text.trim()
         if (next !== text) setText(next)
         onCommit(next)
@@ -1063,7 +1257,7 @@ function AssignmentSelect({
       aria-label={label}
       value={value}
       disabled={disabled}
-      style={{ width: `${Math.max([...selected].length, 4) + 3}em` }}
+      style={{ width: `calc(${[...selected].length}em + 3.25rem)` }}
       className={cn(
         'h-9 w-auto shrink-0 cursor-pointer px-3 hover:border-foreground/25 focus-visible:border-foreground/25 disabled:cursor-wait disabled:opacity-50',
         value

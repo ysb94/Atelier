@@ -7,6 +7,30 @@ export function sampleCountry(country: string) {
   return { code: country.trim() || '국가 미정', label: country.trim() || '국가 미정' }
 }
 
+/** 차수에 국가가 있으면 그 값을, 없으면 기획안 제조국을 본다. 한국은 어디에도 보내지 않는다. */
+export function sampleSentToChinaTeam(orderCountry: string | undefined, draftCountry: string) {
+  const country = orderCountry?.trim() || draftCountry.trim()
+  if (!country) return true
+  return sampleCountry(country).code === 'CN'
+}
+
+/** 아직 중국팀이 발송하지 않은 최신 작업지시서에 제조국을 남긴다. 한국이면 중국 담당을 비운다. */
+export function applySampleOrigin(orders: readonly DraftSampleWorkOrder[], country: string) {
+  const latest = latestFilledSampleWorkOrder(orders)
+  const nextCountry = country.trim()
+  if (!latest || !nextCountry || latest.passed || latest.receivedAt) return orders.map((order) => ({ ...order }))
+  if (latest.shipped && sampleCountry(latest.originCountry || '').code === 'CN' && sampleCountry(nextCountry).code !== 'CN') {
+    return orders.map((order) => ({ ...order }))
+  }
+  const china = sampleCountry(nextCountry).code === 'CN'
+  return orders.map((order) => order.id === latest.id ? {
+    ...order,
+    originCountry: nextCountry,
+    assigneeId: china ? order.assigneeId : null,
+    assigneeName: china ? order.assigneeName : '',
+  } : { ...order })
+}
+
 export function canReceiveSample(order: DraftSampleWorkOrder, country: string) {
   return Boolean(order.url?.trim() && order.shippedAt && !order.receivedAt && !order.passed &&
     (sampleCountry(order.originCountry || country).code !== 'CN' || order.shipped))

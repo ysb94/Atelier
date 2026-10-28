@@ -20,8 +20,10 @@ export function useBasicWorkAccess() {
   const reload=query.refetch
   useEffect(()=>{
     if(!actorId || session?.user.id!==actorId)return
-    const channel=getSupabase().channel(`basic-work-profile:${actorId}`).on('postgres_changes',{event:'UPDATE',schema:'public',table:'profiles',filter:`id=eq.${actorId}`},()=>{void reload();void refreshProfile()}).subscribe()
-    return()=>{void getSupabase().removeChannel(channel)}
+    const client=getSupabase()
+    // KeepAlive 화면과 StrictMode의 재등록도 이미 구독한 채널을 재사용하지 않는다.
+    const channel=client.channel(`basic-work-profile:${actorId}:${crypto.randomUUID()}`).on('postgres_changes',{event:'UPDATE',schema:'public',table:'profiles',filter:`id=eq.${actorId}`},()=>{void reload();void refreshProfile()}).subscribe()
+    return()=>{void client.removeChannel(channel)}
   },[actorId,session?.user.id,reload,refreshProfile])
   return { ...query, access }
 }

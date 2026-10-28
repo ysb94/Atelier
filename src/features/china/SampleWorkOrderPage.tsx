@@ -14,6 +14,7 @@ import { getCompanyProductDrafts } from '@/lib/api'
 import { DEFAULT_COMPANY_ID } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
+import { sampleSentToChinaTeam } from '@/lib/drafts/sample-receipt'
 import {
   draftHasSampleWorkOrder,
   draftStatePercent,
@@ -62,7 +63,7 @@ type WorkOrderRow = {
 }
 
 function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
-  const samples = filledSampleWorkOrders(draft.sampleWorkOrders).filter(order => !order.originCountry || /중국|china/i.test(order.originCountry)).map(
+  const samples = filledSampleWorkOrders(draft.sampleWorkOrders).filter(order => sampleSentToChinaTeam(order.originCountry, draft.originCountry)).map(
     (order) => ({
       draft,
       kind: 'sample' as const,

@@ -1,16 +1,17 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, Heart, ImageOff, Pencil, X } from 'lucide-react'
+import { Button } from '@/components/ui/button'
 import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
 import { resolveColorSpec } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import { sampleCountry } from '@/lib/drafts/sample-receipt'
 import {
-  draftStatePercent,
   sampleHistoryDay,
   sampleElapsedDaysLabel,
   sampleTripSpanDays,
+  sheetRegisteredDay,
 } from '@/lib/drafts/sample-work-order'
 import { readFileAsDataUrl } from '@/lib/images'
 import { DRAFT_STATUS_LABEL, type Brand, type DraftColorRow, type ProductDraft } from '@/lib/types'
@@ -191,10 +192,12 @@ function ColorSampleWorkOrderButton({
 function SampleWorkOrderButton({
   readOnly = false,
   onUpload,
+  onOpen,
   label = '샘플 작업지시서',
 }: {
   readOnly?: boolean
   onUpload: (file: { url: string; name: string }) => Promise<void>
+  onOpen?: () => void
   label?: string
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
@@ -228,14 +231,18 @@ function SampleWorkOrderButton({
             .finally(() => setBusy(false))
         }}
       />
-      <button
+      <Button
         type="button"
-        className="draft-sheet-action is-neutral"
-        disabled={readOnly || busy}
-        onClick={() => inputRef.current?.click()}
+        variant="outline"
+        size="sm"
+        disabled={onOpen ? false : readOnly || busy}
+        onClick={() => {
+          if (onOpen) onOpen()
+          else inputRef.current?.click()
+        }}
       >
         {busy ? '올리는 중' : label}
-      </button>
+      </Button>
       {error ? <span className="draft-sheet-field-error">{error}</span> : null}
     </>
   )
@@ -701,12 +708,12 @@ function specTone(value: string, confirmed: boolean): 'neutral' | 'pending' | 'd
   return confirmed ? 'done' : 'pending'
 }
 
-export function DraftPhoto({ src, name }: { src: string | null; name: string }) {
+export function DraftPhoto({ src, name, onOpen }: { src: string | null; name: string; onOpen?: () => void }) {
   const [open, setOpen] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
   useEffect(() => { if (open) dialog.current?.showModal() }, [open])
   return <>
-    <button type="button" className="draft-sheet-photo" disabled={!src} aria-label={`${name} 사진 크게 보기`} onClick={() => setOpen(true)}>
+    <button type="button" className={`draft-sheet-photo${onOpen ? ' is-editor' : ''}`} disabled={!onOpen && !src} aria-label={onOpen ? `${name} 기획안 편집` : `${name} 사진 크게 보기`} onClick={() => { if (onOpen) onOpen(); else if (src) setOpen(true) }}>
       {src ? <img src={src} alt={name} loading="lazy" /> : <span><ImageOff size={25} /><small>등록된 사진 없음</small></span>}
     </button>
     {open && src && createPortal(<dialog ref={dialog} className="draft-photo-dialog" aria-label={`${name} 사진 크게 보기`} onCancel={() => setOpen(false)} onClose={() => setOpen(false)} onClick={event => { if (event.target === event.currentTarget) setOpen(false) }}>
@@ -718,7 +725,7 @@ export function DraftPhoto({ src, name }: { src: string | null; name: string }) 
 
 export type DraftConfirmFlag = 'nameConfirmed' | 'colorsConfirmed' | 'colorNamesConfirmed'
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onSchedule, onAddColor, onRenameProduct, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onPassSample, onReceiveSample, onRequestNextSampleRound, onUploadColorWorkOrder, onPassColorSample, onRequestNextColorSampleRound, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onSchedule, onAddColor, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onPassSample, onReceiveSample, onRequestNextSampleRound, onUploadColorWorkOrder, onPassColorSample, onRequestNextColorSampleRound, onToggleConfirm }: {
   readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
   onOpen: () => void; onSchedule: () => void
@@ -751,7 +758,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
   const nameConfirmed = Boolean(draft.specs.nameConfirmed)
   const colorsConfirmed = Boolean(draft.specs.colorsConfirmed)
   const colorNamesConfirmed = Boolean(draft.specs.colorNamesConfirmed)
-  const progress = draftStatePercent(draft)
+  const registeredDay = sheetRegisteredDay(draft.createdAt)
   const specsConfirmed = draft.specs.size.confirmed && draft.specs.fabric.confirmed && draft.specs.weight.confirmed
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
   const canApplyAll = draft.colors.length > 1
@@ -762,44 +769,27 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
 
   return <tr className="draft-sheet-row">
     <td><div className="draft-sheet-image-cell">
-      <DraftPhoto src={draft.imageUrl} name={name === '이름 미정' ? draft.draftNo : name} />
+      <strong className="draft-sheet-brand">{brand?.name ?? '브랜드 미정'}</strong>
+      <DraftPhoto src={draft.imageUrl} name={name === '이름 미정' ? draft.draftNo : name} onOpen={onOpen} />
       <div className="draft-sheet-names">
-        <SheetInlineField
-          readOnly={readOnly}
-          label={`${draft.draftNo} 한글명`}
-          className="draft-sheet-product-name"
-          value={draft.nameKo}
-          placeholder="투웨이 셔링 호보백_글로우"
-          multiline
-          showError
-          onCommit={(next) => onRenameProduct('nameKo', next)}
-        />
-        <SheetInlineField
-          readOnly={readOnly}
-          label={`${draft.draftNo} 영문명`}
-          className="draft-sheet-product-name"
-          value={draft.nameEn}
-          placeholder="2way shirring hobo bag_Glow"
-          multiline
-          showError
-          onCommit={(next) => onRenameProduct('nameEn', next)}
-        />
+        <div className="draft-sheet-owner">Designer <strong>{draft.owner.trim() || '미정'}</strong></div>
+        <strong className="draft-sheet-number">No. {draft.draftNo}</strong>
+        <button type="button" className={`draft-sheet-product-name${draft.nameKo.trim() ? '' : ' is-placeholder'}`} aria-label={`${draft.draftNo} 한글명`} onClick={onOpen}>{draft.nameKo.trim() || '투웨이 셔링 호보백_글로우'}</button>
+        <button type="button" className={`draft-sheet-product-name is-en${draft.nameEn.trim() ? '' : ' is-placeholder'}`} aria-label={`${draft.draftNo} 영문명`} onClick={onOpen}>{draft.nameEn.trim() || '2way shirring hobo bag_Glow'}</button>
       </div>
       <SheetConfirmButton
-        label="이름확정"
+        className="draft-sheet-name-confirm"
+        label="네임확정"
         confirmed={nameConfirmed}
         canToggle={!readOnly && named}
         blockedTitle="한글명 또는 영문명을 먼저 입력해 주세요"
         onToggle={(next) => onToggleConfirm('nameConfirmed', next)}
       >
-        {named ? '이름확정' : '이름 미정'}
+        {named ? '네임확정' : '네임 미정'}
       </SheetConfirmButton>
     </div></td>
     <td>
-      <strong className="draft-sheet-brand">{brand?.name ?? '브랜드 미정'}</strong>
-      <div className="draft-sheet-owner">Designer <strong>{draft.owner.trim() || '미정'}</strong></div>
-      <strong className="draft-sheet-number">No. {draft.draftNo}</strong>
-      <div className="draft-sheet-state"><span>State <strong>{progress}%</strong></span><span className="draft-sheet-progress" role="meter" aria-label="기획 진행률" aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100}><i style={{ width: `${progress}%` }} /></span></div>
+      {registeredDay ? <p className="draft-sheet-registered">등록일 : {registeredDay}</p> : null}
       {(draft.status !== 'open' || draft.held) && <div className="draft-sheet-status">{draft.status !== 'open' ? DRAFT_STATUS_LABEL[draft.status] : ''}{draft.held ? ' · 보류' : ''}</div>}
       {orders.length > 0 ? (
         <div className="draft-sheet-samples" aria-label="샘플 진행 이력">
@@ -848,10 +838,10 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
                 </div>
               )}
             </>
-          ) : <DraftSampleProgress orders={orders} originCountry={draft.originCountry} readOnly={readOnly} onReceive={onReceiveSample} onNext={onRequestNextSampleRound} onPass={onPassSample} />}
+          ) : <DraftSampleProgress orders={orders} originCountry={draft.originCountry} readOnly={readOnly} onReceive={onReceiveSample} onNext={onRequestNextSampleRound} onPass={onPassSample} onOpen={onOpen} />}
         </div>
       ) : (
-        <div className="draft-sheet-actions"><SampleWorkOrderButton readOnly={readOnly} onUpload={onUploadSampleWorkOrder} /></div>
+        <div className="draft-sheet-actions draft-sheet-sample-launch"><SampleWorkOrderButton readOnly={readOnly} onUpload={onUploadSampleWorkOrder} onOpen={onOpen} /></div>
       )}
     </td>
     <td className="draft-sheet-price-cell">

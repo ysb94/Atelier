@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { canReceiveSample, receiveSample, registerNextReceivedSample, sampleCountry } from './sample-receipt'
+import { applySampleOrigin, canReceiveSample, receiveSample, registerNextReceivedSample, sampleCountry, sampleSentToChinaTeam } from './sample-receipt'
 import { attachSampleWorkOrderFile, normalizeSampleWorkOrders, sampleElapsedDays, sanitizeSampleWorkOrders, setLatestSampleWorkOrderPassed, setLatestSampleWorkOrderShipped } from './sample-work-order'
 
 const initial = attachSampleWorkOrderFile([], { url: 'data:file,first', name: 'first.xlsx' }, '2026-10-20T01:00:00Z')
@@ -40,4 +40,12 @@ assert.equal(restored[1]!.receivedAt, domestic[1]!.receivedAt)
 assert.equal(restored[1]!.passed, true, '국내 샘플의 수령 후 합격·저장·재조회 유지')
 assert.equal(restored[1]!.shipped, false, '국내 수령을 중국 발송으로 기록하지 않음')
 assert.throws(() => registerNextReceivedSample(restored,{url:'file',name:'next'},'한국','한국'), /실물 수령/)
+assert.equal(sampleSentToChinaTeam(undefined, ''), true, '제조국이 없으면 기존처럼 중국팀 목록에 둔다')
+assert.equal(sampleSentToChinaTeam(undefined, '한국'), false, '기획안 제조국이 한국이면 전달하지 않는다')
+assert.equal(sampleSentToChinaTeam('중국', '한국'), true, '차수 국가가 중국이면 전달한다')
+assert.equal(sampleSentToChinaTeam('한국', '중국'), false, '차수 국가가 한국이면 기록만 남긴다')
+const recorded = applySampleOrigin(initial, '한국')
+assert.equal(recorded[0]?.originCountry, '한국')
+assert.equal(recorded[0]?.assigneeName, '')
+assert.equal(applySampleOrigin(setLatestSampleWorkOrderShipped(applySampleOrigin(initial, '중국'), true), '한국')[0]?.originCountry, '중국', '중국 발송 뒤에는 한국으로 되돌리지 않는다')
 console.log('sample-receipt: 등록·발송·수령 분리, 수령 반복, 새 차수 실등록, 과거 이력, 국내 샘플, 저장·재조회 검증 통과')

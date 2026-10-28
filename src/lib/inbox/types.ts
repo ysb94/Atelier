@@ -6,6 +6,8 @@ export type InboxNotificationKind =
   | 'outbound_changed'
   | 'mention'
   | 'meeting_invitation'
+  | 'leave_alarm_sample'
+  | 'leave_usage_notice'
 
 export type MeetingNotice = {
   roundId: string

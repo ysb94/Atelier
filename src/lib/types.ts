@@ -432,10 +432,8 @@ export const DRAFT_OWNER_OPTIONS = [
 ] as const
 
 export const DRAFT_ORIGIN_OPTIONS = [
-  '중국 OEM',
-  '국내 생산',
-  '베트남 OEM',
-  '미정',
+  '중국',
+  '한국',
 ] as const
 
 export const DRAFT_REGISTER_TYPE_OPTIONS = [
