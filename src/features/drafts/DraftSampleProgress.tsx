@@ -6,6 +6,7 @@ import { readFileAsDataUrl } from '@/lib/images'
 import type { DraftSampleWorkOrder } from '@/lib/types'
 import { sampleElapsedDays, sampleHistoryDay } from '@/lib/drafts/sample-work-order'
 import { canReceiveSample, sampleCountry } from '@/lib/drafts/sample-receipt'
+import './draft-sample-progress.css'
 
 type WorkOrderFile = { url: string; name: string }
 type Props = {
@@ -38,32 +39,35 @@ export function DraftSampleProgress({ orders, originCountry, readOnly = false, s
     } finally { pending.current = false; setBusy(false) }
   }
 
-  return <div className="space-y-3" aria-label="샘플 등록·수령 이력">
+  return <div className="draft-sample-progress" aria-label="샘플 등록·수령 이력">
     {list.map(order => {
       const country = sampleCountry(order.originCountry || originCountry)
       const registered = sampleElapsedDays(order.shippedAt)
       const received = sampleElapsedDays(order.receivedAt ?? null)
       const current = order.id === latest?.id
-      return <section key={order.id} aria-label={`${order.round}차 샘플`} className="border-b border-border py-3 last:border-b-0">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm">
-          <span className="font-semibold text-primary" title={country.label}>{country.code}</span>
-          <strong>{order.round}차 샘플</strong>
-          <span title="작업지시서 등록일">{sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}</span>
-          {registered !== null && <span className={order.receivedAt ? 'text-xs text-muted-foreground' : 'text-primary'}>등록 후 {registered}일</span>}
-          <a href={order.url!} download={order.name} className="text-xs text-muted-foreground underline">작업지시서</a>
+      return <section key={order.id} aria-label={`${order.round}차 샘플`} className="draft-sample-round">
+        <div className="draft-sample-route">
+          <div className="draft-sample-heading">
+            <span className="draft-sample-country" title={country.label}>{country.code}<span aria-hidden="true"> | </span></span>
+            <a href={order.url!} download={order.name} title="작업지시서 내려받기">{order.round}차 샘플 {sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}</a>
+            {registered !== null && <span className="draft-sample-registered-elapsed" title="작업지시서 등록 후 경과일">({registered}일 경과)</span>}
+          </div>
+          <p className="draft-sample-dispatch">{country.code === 'CN'
+            ? order.shipped ? `${sampleHistoryDay(order.returnedAt).slice(2) || '날짜 기록 없음'} 중국 발송 완료` : '중국팀 제작·발송 대기'
+            : '국내 샘플'}</p>
+          {current && !order.passed && !order.receivedAt && <Button type="button" size="sm" variant="outline" className="draft-sample-receive" disabled={readOnly || saving || busy || !canReceiveSample(order, originCountry)}
+            title="실물을 받은 뒤 확인하세요. 수령 확인은 합격 처리가 아닙니다." onClick={() => void run(() => onReceive(order.id))}>{busy ? '저장 중' : '수령 확인'}</Button>}
         </div>
-        {country.code === 'CN' && <p className="mt-1 text-xs text-muted-foreground">{order.shipped ? `${sampleHistoryDay(order.returnedAt).slice(2) || '날짜 기록 없음'} 중국 발송 완료` : '중국팀 제작·발송 대기'}</p>}
-        {order.receivedAt ? <div className="mt-3 flex flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="text-xs text-muted-foreground">수령일 {sampleHistoryDay(order.receivedAt).slice(2)}</span>
-          {received !== null && <strong className="text-base text-primary">수령 후 {received}일</strong>}
-        </div> : <p className="mt-2 text-xs text-muted-foreground">{order.passed ? '이전 기록 · 수령일 기록 없음' : '실물 수령 대기'}</p>}
-        {order.passed && <p className="mt-2 text-sm font-medium text-primary">샘플 합격</p>}
-        {current && !order.passed && <div className="mt-3 flex flex-wrap gap-2">
-          {!order.receivedAt ? <Button type="button" size="sm" variant="outline" disabled={readOnly || saving || busy || !canReceiveSample(order, originCountry)}
-            title="실물을 받은 뒤 확인하세요. 수령 확인은 합격 처리가 아닙니다." onClick={() => void run(() => onReceive(order.id))}>{busy ? '저장 중' : '수령 확인'}</Button>
-            : <><Button type="button" size="sm" variant="outline" disabled={readOnly || saving || busy} onClick={() => { setError(''); setNextOpen(true) }}>{order.round + 1}차 작업지시서 작성</Button>
-              <Button type="button" size="sm" variant="outline" disabled={readOnly || saving || busy} onClick={() => void run(onPass)}>샘플 합격</Button></>}
-        </div>}
+        <div className="draft-sample-interval">
+          {order.receivedAt ? <>
+            {received !== null && <strong className="draft-sample-received-elapsed" title={`수령일 ${sampleHistoryDay(order.receivedAt)}`}>수령 후 {received}일</strong>}
+            {current && !order.passed && <div className="draft-sample-next-actions">
+              <Button type="button" size="sm" variant="outline" disabled={readOnly || saving || busy} onClick={() => { setError(''); setNextOpen(true) }}>{order.round + 1}차 작업지시서 작성</Button>
+              <Button type="button" size="sm" variant="outline" disabled={readOnly || saving || busy} onClick={() => void run(onPass)}>샘플 합격</Button>
+            </div>}
+          </> : <span className="draft-sample-waiting">{order.passed ? '이전 기록 · 수령일 기록 없음' : '실물 수령 대기'}</span>}
+          {order.passed && <p className="draft-sample-passed">샘플 합격</p>}
+        </div>
       </section>
     })}
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}

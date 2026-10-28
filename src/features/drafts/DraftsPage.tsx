@@ -592,7 +592,7 @@ export function CompanyDraftsPage() {
           <colgroup>{Array.from({ length: 6 }, (_, index) => <col key={index} />)}</colgroup>
           <thead>
             <tr>
-              {(['IMAGE', 'BRAND', 'PRICE', 'COLOR', 'INFORMATION'] as const).map(
+              {(['BRAND', 'SAMPLE', 'PRICE', 'COLOR', 'INFORMATION'] as const).map(
                 (label) => (
                   <th
                     key={label}
