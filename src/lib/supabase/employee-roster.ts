@@ -40,6 +40,7 @@ export const ROSTER_BASE_HEADERS: readonly { key: string; label: string; kind: R
   { key: 'hire', label: '입사일', kind: 'date' },
   { key: 'fixedOvertimePlan', label: '고정OT 설계', kind: 'choice' },
   { key: 'inclusiveOvertimeHours', label: '약정 연장근로시간(포괄임금)', kind: 'number' },
+  { key: 'accruedAnnualLeave', label: '발생일수', kind: 'number' },
   { key: 'remainingAnnualLeave', label: '남은 연차', kind: 'number' },
   ...ROSTER_FIELDS.map(field => ({ key: field.key, label: field.label, kind: (field.key === 'resignedOn' ? 'date' : ['annualSalary', 'monthlyWage', 'mealAllowance', 'carAllowance', 'childcareAllowance', 'dutyAllowance'].includes(field.key) ? 'money' : 'text') as RosterHeaderKind })),
 ]
@@ -50,6 +51,8 @@ export type RosterWriteFieldKey = RosterFieldKey | 'remainingAnnualLeave' | 'inc
 
 export type EmployeeRoster = {
   profileId: string
+  /** undefined: server field unavailable; null: not registered. */
+  accruedAnnualLeave?: number | null
   remainingAnnualLeave: number | null
   inclusiveOvertimeHours: number | null
   fixedOvertimePlan: string
@@ -164,7 +167,14 @@ export async function listEmployeeRosters(): Promise<EmployeeRoster[]> {
     console.warn('[org] 근로자 명부 조회 실패', { message: error.message })
     throw new Error('근로자 명부를 불러오지 못했습니다.')
   }
-  return ((data ?? []) as RosterRow[]).map(fromRow)
+  // Read the additive field separately so a pending migration never breaks the existing roster.
+  const grants = await getSupabase().from('employee_roster').select('profile_id, accrued_annual_leave')
+  if (grants.error) console.warn('[org] 연차 발생일수 조회 실패', { code: grants.error.code, message: grants.error.message })
+  const byEmployee = new Map<string, number | null>((grants.data ?? []).map(row => [row.profile_id, row.accrued_annual_leave == null ? null : Number(row.accrued_annual_leave)]))
+  return ((data ?? []) as RosterRow[]).map(row => ({
+    ...fromRow(row),
+    accruedAnnualLeave: grants.error ? undefined : byEmployee.get(row.profile_id) ?? null,
+  }))
 }
 
 export async function saveEmployeeRosterField(

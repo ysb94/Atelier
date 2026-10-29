@@ -100,7 +100,7 @@ function isProbation(hireDate: string | null, today: string) {
   if (!hireDate || hireDate > today) return false
   return today < addCalendarMonths(hireDate, 3)
 }
-type AssignmentSortKey = 'name' | 'department' | 'duty' | 'grade' | 'hire' | RosterWriteFieldKey | `column:${string}`
+type AssignmentSortKey = 'name' | 'department' | 'duty' | 'grade' | 'hire' | 'accruedAnnualLeave' | RosterWriteFieldKey | `column:${string}`
 
 function isCustomColumnSortKey(key: AssignmentSortKey): key is `column:${string}` {
   return key.startsWith('column:')
@@ -119,6 +119,7 @@ function assignmentSortValue(
   if (key === 'duty') return member.position?.trim() ?? ''
   if (key === 'grade') return member.jobGrade?.trim() ?? ''
   if (key === 'hire') return member.hireDate ?? ''
+  if (key === 'accruedAnnualLeave') return roster?.accruedAnnualLeave == null ? '' : String(roster.accruedAnnualLeave)
   if (key === 'remainingAnnualLeave') return roster?.remainingAnnualLeave == null ? '' : String(roster.remainingAnnualLeave)
   if (key === 'inclusiveOvertimeHours') return roster?.inclusiveOvertimeHours == null ? '' : String(roster.inclusiveOvertimeHours)
   return roster?.[key]?.trim() ?? ''
@@ -904,7 +905,8 @@ function MemberAssignmentTable({
               <AssignmentSortHeader hidden={!showHeader('hire')} label={headerLabel('hire', '입사일')} column="hire" sort={sort} onSort={toggleSort} />
               {canChange ? <AssignmentSortHeader hidden={!showHeader('fixedOvertimePlan')} label={headerLabel('fixedOvertimePlan', '고정OT 설계')} column="fixedOvertimePlan" sort={sort} onSort={toggleSort} hint="고정OT 설계 유형을 선택합니다. 약정 연장근로시간은 오른쪽에서 별도로 관리합니다." /> : null}
               {canChange ? <AssignmentSortHeader hidden={!showHeader('inclusiveOvertimeHours')} label={headerLabel('inclusiveOvertimeHours', '약정 연장근로시간(포괄임금)')} column="inclusiveOvertimeHours" sort={sort} onSort={toggleSort} hint="포괄임금에 포함된 월 연장근로시간입니다. 비우면 미등록이며, 추가 근무가 이 시간을 넘으면 추가수당 대상입니다." /> : null}
-              {canChange ? <AssignmentSortHeader hidden={!showHeader('remainingAnnualLeave')} label={headerLabel('remainingAnnualLeave', '남은 연차')} column="remainingAnnualLeave" sort={sort} onSort={toggleSort} hint="잔여 일수를 직접 입력합니다. 입력 후 다른 칸을 누르면 저장되며, 신청 시 자동 차감되지 않습니다." /> : null}
+              {canChange ? <AssignmentSortHeader hidden={!showHeader('accruedAnnualLeave')} label={headerLabel('accruedAnnualLeave', '발생일수')} column="accruedAnnualLeave" sort={sort} onSort={toggleSort} hint="해당 연차 기간의 발생일수입니다. 남은 연차에는 사용 내역과 조정값이 반영됩니다." /> : null}
+              {canChange ? <AssignmentSortHeader hidden={!showHeader('remainingAnnualLeave')} label={headerLabel('remainingAnnualLeave', '남은 연차')} column="remainingAnnualLeave" sort={sort} onSort={toggleSort} hint="등록된 잔여 일수입니다. 새 연차·반차·반반차 등록 시 자동 차감되며, 직접 수정하면 잔여 일수를 보정합니다." /> : null}
               {canChange
                 ? visibleRosterFields.map((field) => (
                     <AssignmentSortHeader key={field.key} label={headerLabel(field.key, field.label)} column={field.key} sort={sort} onSort={toggleSort} />
@@ -1014,6 +1016,11 @@ function MemberAssignmentTable({
                         }} />
                       <span className="text-xs text-muted-foreground">시간</span>
                     </div>}
+                  </td> : null}
+                  {canChange && showHeader('accruedAnnualLeave') ? <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums" aria-label={`${memberName(member)} 발생일수`}>
+                    {rosterQuery.isPending ? '불러오는 중…' : rosterQuery.isError ? '조회 실패' : rosters.has(member.id) && rosters.get(member.id)?.accruedAnnualLeave === undefined
+                      ? <span className="text-xs text-muted-foreground">조회 대기</span>
+                      : <span className={rosters.get(member.id)?.accruedAnnualLeave == null ? 'rounded bg-warning/15 px-3 py-1 text-warning' : ''}>{rosters.get(member.id)?.accruedAnnualLeave == null ? '미등록' : `${rosters.get(member.id)?.accruedAnnualLeave}일`}</span>}
                   </td> : null}
                   {canChange && showHeader('remainingAnnualLeave') ? <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums" aria-label={`${memberName(member)} 남은 연차`}>
                     {rosterQuery.isPending ? '불러오는 중…' : rosterQuery.isError ? '조회 실패' : <div className="flex items-center justify-end gap-1">

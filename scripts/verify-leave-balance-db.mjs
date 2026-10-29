@@ -71,6 +71,12 @@ try {
   assert.equal(await value("select md5(jsonb_build_object('roster',(select jsonb_agg(r order by profile_id) from employee_roster r),'requests',(select jsonb_agg(r order by id) from company_leave_requests r))::text)"),before,'적용 시 기존 데이터 유지')
   assert.equal(await value("select md5(jsonb_agg(p order by policyname)::text) from pg_policies p where schemaname='public' and policyname<>'leave_create'"),policyBefore)
   assert.equal(Number(await value('select count(*) from app.leave_balance_entries')),0)
+  if (process.argv.includes('--anniversary')) {
+    await db.exec(await readFile('supabase/migrations/20261029093102_employee_leave_import.sql','utf8'))
+    await db.exec("select set_config('test.today','2026-10-29',false)")
+    const accrual = await readFile('supabase/migrations/20261029093112_employee_leave_anniversary_accrual.sql','utf8')
+    await db.exec(accrual.replaceAll("(now() at time zone 'Asia/Seoul')::date", "current_setting('test.today')::date"))
+  }
   for(let year=2018;year<=2027;year++) for(const date of Object.keys(holidays[`y${year}`])) {
     assert.equal(Number(await value('select count(*) from app.leave_balance_holidays where day=$1',[date])),1)
   }
@@ -108,6 +114,10 @@ try {
   await actor(staff);await reject(()=>create('quarter','2026-11-18'),/부족/)
   await db.exec('reset role');await db.query("update profiles set status='inactive' where id=$1",[staff]);await actor(staff)
   await reject(()=>create('annual','2026-11-19'),/재직/)
+  if (process.argv.includes('--anniversary')) {
+    const { verifyAnniversaryLeave } = await import('./verify-leave-anniversary-cases.mjs')
+    await verifyAnniversaryLeave({db,actor,value,create,peer,ops,company})
+  }
   console.log('leave-balance-db: 기존 값·정책 보존, 1/0.5/0.25일 차감, 주말·공휴일 제외, 취소 1회 복원, 기존 취소 무가산, 미등록·부족·타인·타사·직접 위조 차단, 외근·야근 무차감, 사용연도 확인 보존 통과')
 } catch(error) {
   console.error('leave-balance-db 실패:',error.message,{code:error.code,query:error.query})
