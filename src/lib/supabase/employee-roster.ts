@@ -177,9 +177,10 @@ export async function listEmployeeRosters(): Promise<EmployeeRoster[]> {
   const byEmployee = new Map<string, number | null>((grants.data ?? []).map(row => [row.profile_id, row.accrued_annual_leave == null ? null : Number(row.accrued_annual_leave)]))
   const extras = await listExtraLeave()
   const available = new Map(extras.balances.map(row => [row.profileId, row.available]))
+  const shortfalls = new Map(extras.balances.map(row => [row.profileId, row.shortfall ?? 0]))
   return ((data ?? []) as RosterRow[]).map(row => ({
     ...fromRow(row),
-    remainingAnnualLeave: row.remaining_annual_leave == null ? null : Number((Number(row.remaining_annual_leave) + (available.get(row.profile_id) ?? 0)).toFixed(2)),
+    remainingAnnualLeave: row.remaining_annual_leave == null ? null : Number((Number(row.remaining_annual_leave) + (available.get(row.profile_id) ?? 0) - (shortfalls.get(row.profile_id) ?? 0)).toFixed(2)),
     additionalAnnualLeave: extras.ready ? available.get(row.profile_id) ?? 0 : undefined,
     accruedAnnualLeave: grants.error ? undefined : byEmployee.get(row.profile_id) ?? null,
   }))

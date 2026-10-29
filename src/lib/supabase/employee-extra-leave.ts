@@ -1,7 +1,8 @@
 import { getSupabase } from './client'
 
 export type ExtraLeave = { id: string; employeeId: string; days: number; expires: string; note: string; created: string; version: number; used: number }
-export type ExtraLeaveRecords = { ready: boolean; entries: ExtraLeave[]; balances: { profileId: string; available: number }[] }
+export type LeaveEvent = { id: string; employeeId: string; source: string; kind: string; days: number; date: string; note?: string; reason?: string; expires?: string; actorName?: string; recalculated?: boolean }
+export type ExtraLeaveRecords = { ready: boolean; fefoReady?: boolean; entries: ExtraLeave[]; balances: { profileId: string; available: number; shortfall?: number }[]; events?: LeaveEvent[] }
 export async function listExtraLeave(): Promise<ExtraLeaveRecords> {
   const { data, error } = await getSupabase().rpc('employee_extra_leave_records')
   if (error) {
@@ -13,7 +14,7 @@ export async function listExtraLeave(): Promise<ExtraLeaveRecords> {
     throw new Error('추가 연차를 조회하지 못했습니다. 다시 조회해 주세요.')
   }
   const result = data as ExtraLeaveRecords
-  return { ready: result.ready, entries: result.entries.map(row => ({ ...row, days: Number(row.days), used: Number(row.used) })), balances: result.balances.map(row => ({ ...row, available: Number(row.available) })) }
+  return { ready: result.ready, fefoReady: result.fefoReady === true, entries: result.entries.map(row => ({ ...row, days: Number(row.days), used: Number(row.used) })), balances: result.balances.map(row => ({ ...row, available: Number(row.available), shortfall: Number(row.shortfall ?? 0) })), events: result.events?.map(row => ({ ...row, days: Number(row.days) })) }
 }
 export type SaveExtraLeave = { id: string; employeeId: string; days: number; expires: string; note: string; version: number; remove?: boolean }
 export async function saveExtraLeave(input: SaveExtraLeave) {

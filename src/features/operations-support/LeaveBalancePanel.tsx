@@ -14,7 +14,7 @@ import { memberLabel, OpsPanelFrame, OpsStat } from './OpsStat'
 import { useOpsDirectory } from './ops-directory'
 import { HireDateScrollField } from '@/features/org/HireDateScrollField'
 import { koreaDateKey } from '@/features/settings/my-attendance'
-import { listExtraLeave, saveExtraLeave, type ExtraLeave, type SaveExtraLeave } from '@/lib/supabase/employee-extra-leave'
+import { listExtraLeave, saveExtraLeave, type ExtraLeave, type SaveExtraLeave, type LeaveEvent } from '@/lib/supabase/employee-extra-leave'
 
 export function LeaveBalancePanel() {
   useRenderWatch('LeaveBalancePanel')
@@ -49,7 +49,7 @@ export function LeaveBalancePanel() {
   const ready = !failed && !loading
   return <OpsPanelFrame>
     <p className="text-sm text-muted-foreground">조직도 직원 배치와 같은 현재 연차 값입니다. 입사일 기준 연차 기간에 따라 발생일수가 자동 갱신됩니다. 남은 연차를 수정해 저장하면 조직도에도 반영됩니다.</p>
-    <p className="text-xs text-muted-foreground">남은 연차에는 기한이 남은 추가 연차가 포함됩니다. 사용 시에는 기한이 빠른 추가분부터 차감합니다.</p>
+    <p className="text-xs text-muted-foreground">{extras.data?.fefoReady ? '기본·추가 연차 중 기한이 빠른 순서로 사용합니다. 부여 취소로 부족해진 일수도 총 잔여에 반영되며, 만료와 재계산 기록은 이력에 남습니다.' : '기본·추가 연차 통합 기한순 차감·만료 이력·부여 취소 재계산은 서버 적용 승인 대기 중입니다. 현재는 기존 추가 연차 우선 차감 방식이 유지됩니다.'}</p>
     {extras.isError ? <p role="alert" className="text-sm text-danger">추가 연차 조회에 실패했습니다. 다시 조회해 주세요.</p> : extras.data?.ready === false ? <p className="text-sm text-warning">추가 연차 서버 연결 대기 중입니다. 기존 연차 값은 유지됩니다.</p> : null}
     <FilterBar>
       <Input aria-label="연차 직원 검색" placeholder="직원 이름 검색" value={search} onChange={event => setSearch(event.target.value)} className="sm:w-52"/>
@@ -79,7 +79,7 @@ export function LeaveBalancePanel() {
               <td className="whitespace-nowrap px-4 py-3 tabular-nums">{member.hireDate || <MissingValue/>}</td>
               <td className="px-4 py-3 tabular-nums" aria-label={`${memberLabel(member.displayName)} 발생일수`}>{balance && balance.accruedAnnualLeave === undefined ? '조회 실패' : balance?.accruedAnnualLeave == null ? <MissingValue/> : `${balance.accruedAnnualLeave}일`}</td>
               <td className="px-4 py-3" aria-label={`${memberLabel(member.displayName)} 추가 연차`}>
-                <AdditionalLeaveInputs name={memberLabel(member.displayName)} employeeId={member.id} entries={extras.data?.entries.filter(entry => entry.employeeId === member.id) ?? []} baseRegistered={balance?.remainingAnnualLeave != null} available={extras.data?.ready ? extras.data.balances.find(row => row.profileId === member.id)?.available ?? 0 : undefined} ready={extras.data?.ready === true && !extras.isError}/>
+                <AdditionalLeaveInputs name={memberLabel(member.displayName)} employeeId={member.id} entries={extras.data?.entries.filter(entry => entry.employeeId === member.id) ?? []} events={extras.data?.events?.filter(event => event.employeeId === member.id) ?? []} fefoReady={extras.data?.fefoReady === true} baseRegistered={balance?.remainingAnnualLeave != null} available={extras.data?.ready ? extras.data.balances.find(row => row.profileId === member.id)?.available ?? 0 : undefined} ready={extras.data?.ready === true && !extras.isError}/>
               </td>
               <td className="px-4 py-2"><RemainingLeaveEditor profileId={member.id} name={memberLabel(member.displayName)} value={balance?.remainingAnnualLeave ?? null}/></td>
             </tr>)}
@@ -89,7 +89,7 @@ export function LeaveBalancePanel() {
   </OpsPanelFrame>
 }
 
-function AdditionalLeaveInputs({ name, employeeId, entries, available, ready, baseRegistered }: { name: string; employeeId: string; entries: ExtraLeave[]; available?: number; ready: boolean; baseRegistered: boolean }) {
+function AdditionalLeaveInputs({ name, employeeId, entries, events, available, ready, baseRegistered, fefoReady }: { name: string; employeeId: string; entries: ExtraLeave[]; events: LeaveEvent[]; available?: number; ready: boolean; baseRegistered: boolean; fefoReady: boolean }) {
   const [open, setOpen] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
   const [editing, setEditing] = useState<ExtraLeave | null>(null)
@@ -100,11 +100,12 @@ function AdditionalLeaveInputs({ name, employeeId, entries, available, ready, ba
   const client = useQueryClient()
   const [message, setMessage] = useState('')
   const [deleting, setDeleting] = useState<string | null>(null)
+  const [cancelReason, setCancelReason] = useState('')
   function clearInput() { setEditing(null); setNewId(crypto.randomUUID()); setDays(''); setExpires(koreaDateKey()); setNote('') }
   const mutation = useMutation({ mutationFn: saveExtraLeave,
     onSuccess: async (_data, input) => {
       await Promise.all(['employee-extra-leave', 'employee-roster', 'my-attendance-basis', 'leave-notice-management'].map(key => client.invalidateQueries({ queryKey: [key] })))
-      clearInput(); setDeleting(null); setMessage(input.remove ? '삭제되었습니다.' : '저장되었습니다.')
+      clearInput(); setDeleting(null); setCancelReason(''); setMessage(input.remove ? '부여 취소 및 사용 내역 재계산이 완료되었습니다.' : '저장되었습니다.')
     },
     onError: () => { void client.invalidateQueries({ queryKey: ['employee-extra-leave'] }) },
   })
@@ -147,15 +148,23 @@ function AdditionalLeaveInputs({ name, employeeId, entries, available, ready, ba
               <span className="text-xs text-muted-foreground">등록 날짜: {dateLabel(entry.created)}</span>
               <div className="flex gap-1">
                 <Button type="button" size="sm" variant="ghost" disabled={!ready || mutation.isPending} onClick={() => { setEditing(entry); setDays(String(entry.days)); setExpires(entry.expires); setNote(entry.note); setMessage(''); mutation.reset() }}>수정</Button>
-                <Button type="button" size="sm" variant="ghost" disabled={!ready || mutation.isPending || entry.used > 0} onClick={() => setDeleting(entry.id)}>삭제</Button>
+                <Button type="button" size="sm" variant="ghost" disabled={!ready || !fefoReady || mutation.isPending} title={!fefoReady ? '재계산 서버 적용 승인 대기 중입니다.' : undefined} onClick={() => { setDeleting(entry.id); setCancelReason('') }}>부여 취소</Button>
               </div>
             </div>
-            {deleting === entry.id ? <div className="flex flex-wrap items-center gap-2"><span>이 추가 연차를 삭제할까요?</span><Button type="button" size="sm" disabled={mutation.isPending} onClick={() => mutation.mutate({ ...entry, employeeId, remove: true } satisfies SaveExtraLeave)}>삭제 확인</Button><Button type="button" size="sm" variant="ghost" disabled={mutation.isPending} onClick={() => setDeleting(null)}>취소</Button></div> : null}
+            {deleting === entry.id ? <div className="space-y-2"><p>부여를 취소하면 기존 휴가는 유지하고 사용 내역을 다시 배분합니다. 잔여가 부족하면 음수로 표시됩니다.</p><Input aria-label={`${name} 부여 취소 사유`} placeholder="부여 취소 사유" maxLength={500} value={cancelReason} onChange={event => setCancelReason(event.target.value)}/><div className="flex gap-2"><Button type="button" size="sm" disabled={mutation.isPending || !cancelReason.trim()} onClick={() => mutation.mutate({ ...entry, employeeId, note: cancelReason.trim(), remove: true } satisfies SaveExtraLeave)}>취소 확정</Button><Button type="button" size="sm" variant="ghost" disabled={mutation.isPending} onClick={() => setDeleting(null)}>닫기</Button></div></div> : null}
           </li>)}
         </ul>}
       </section>
+      <section className="space-y-2 border-t border-border pt-3" aria-label={`${name} 연차 변동 이력`}>
+        <h4 className="text-sm font-medium">연차 변동 이력</h4>
+        {events.length === 0 ? <p className="text-xs text-muted-foreground">기록된 변동이 없습니다.</p> : <ul className="space-y-2">{events.map(event => <li key={event.id} className="rounded-xl border border-border p-3 text-sm">
+          <p><strong>{event.days > 0 ? '+' : ''}{event.days}일</strong> · {event.source === 'base' ? '기본 연차' : '추가 연차'} {({ granted: '부여', edited: '수정', revoked: '부여 취소', expired: '만료', expiry_adjustment: '만료 정정' } as Record<string,string>)[event.kind] ?? event.kind}</p>
+          <p className="text-xs text-muted-foreground">{dateLabel(event.date)}{event.actorName ? ` · ${event.actorName}` : ''}{event.recalculated ? ' · 사용 내역 재계산' : ''}</p>
+          {event.reason || event.note ? <p className="mt-1 break-words">{event.reason || event.note}</p> : null}
+        </li>)}</ul>}
+      </section>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">{!baseRegistered ? '기본 잔여 연차를 먼저 등록해 주세요.' : ready ? '사용 기한 당일까지 반영됩니다. 사용·예약한 이력은 삭제할 수 없습니다.' : '서버 연결 전에는 추가·수정·삭제할 수 없습니다.'}</p>
+        <p className="text-xs text-muted-foreground">{!baseRegistered ? '기본 잔여 연차를 먼저 등록해 주세요.' : !fefoReady ? '만료 이력·부여 취소 재계산은 서버 적용 승인 대기 중입니다.' : ready ? '사용 기한 당일까지 반영됩니다. 만료·부여 취소 기록은 보존됩니다.' : '서버 연결 전에는 추가·수정·삭제할 수 없습니다.'}</p>
         <Button type="button" size="sm" variant="outline" onClick={() => dialog.current?.close()}>닫기</Button>
       </div>
     </dialog>
