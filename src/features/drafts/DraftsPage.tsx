@@ -18,7 +18,7 @@ import {
   type DraftBrandScope,
   type DraftOwnerScope,
 } from '@/lib/drafts/company-draft'
-import { newColorRow } from '@/lib/drafts/empty-draft'
+import { MAX_DRAFT_COLORS, newColorRow } from '@/lib/drafts/empty-draft'
 import { receiveColorSample, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import { registerDraftSampleStage } from '@/lib/drafts/sample-registration'
 import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields } from '@/lib/drafts/sample-work-order'
@@ -645,12 +645,21 @@ export function CompanyDraftsPage() {
                     onOpen={() => navigate(draftDetailPath(draft.id))}
                     onNextSample={() => navigate(`${draftDetailPath(draft.id)}#next-sample`)}
                     onSchedule={() => setScheduleDraftId(draft.id)}
-                    onAddColor={async (name) => {
+                    onSaveColors={async (rows) => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
+                        if (rows.length > MAX_DRAFT_COLORS) {
+                          throw new Error(`최대 ${MAX_DRAFT_COLORS}컬러까지 추가할 수 있습니다.`)
+                        }
+                        const byId = new Map(input.colors.map((color) => [color.id, color]))
                         return {
                           ...input,
-                          colors: [...input.colors, { ...newColorRow(), name }],
+                          colors: rows.map((row) => {
+                            const name = row.name.trim()
+                            const existing = row.id ? byId.get(row.id) : undefined
+                            if (existing) return { ...existing, name }
+                            return { ...newColorRow(), name }
+                          }),
                         }
                       })
                     }}

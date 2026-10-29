@@ -913,7 +913,7 @@ export function DraftEditPage() {
           ))}
           <RegisteredColorSampleCards rounds={savedColorSamples} originCountry={form.originCountry} readOnly={!editable} saving={saveMutation.isPending}
             onUpload={(id, file) => { void replaceSavedColorSampleFile(id, file) }} onCountry={updateSavedColorSampleCountry} />
-          <div id="next-sample">
+          {savedSamples.length > 0 ? <div id="next-sample">
           <SampleWorkOrderRegistration originCountry={form.originCountry} nextRound={(latestFilledSampleWorkOrder(form.sampleWorkOrders)?.round ?? 1) + 1} nextColorRound={Math.max(0, ...savedColorSamples.map(round => round.round)) + 1} latestIsFinal={savedSamples.at(-1)?.sampleStage === 'final'} finalCount={savedSamples.filter((order) => order.sampleStage === 'final').length} readOnly={!editable} saving={saveMutation.isPending}
             onRegister={async (stage, file, country) => {
               if (isNew || !draftId) throw new Error('1차 작업지시서를 먼저 저장해 주세요.')
@@ -925,7 +925,7 @@ export function DraftEditPage() {
               const registeredId = stage === 'color' ? resolveColorSampleRounds(saved).at(-1)?.id : latestFilledSampleWorkOrder(saved.sampleWorkOrders)?.id
               if (registeredId) window.requestAnimationFrame(() => document.getElementById(`sample-history-${registeredId}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
             }} />
-          </div>
+          </div> : null}
 
         </SectionCard>
         ) : (

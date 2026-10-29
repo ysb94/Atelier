@@ -146,8 +146,8 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-product-name:hover,.draft-sheet-product-name:focus{outline:none;background:#fff;box-shadow:0 0 0 1px #e5c3c6}
 .draft-sheet-product-name:disabled{opacity:.7}
 .draft-sheet-product-name[aria-invalid=true]{box-shadow:0 0 0 1px #c60920}
-.draft-sheet-color-name{min-width:0;flex:1;width:100%;box-sizing:border-box;border:0;border-radius:4px;background:transparent;padding:2px 4px;font:inherit;font-size:12px;color:#343a40}
-.draft-sheet-color-name:hover,.draft-sheet-color-name:focus{outline:none;background:#fff;box-shadow:0 0 0 1px #e5e5e2}
+.draft-sheet-color-name{min-width:0;flex:1;width:100%;box-sizing:border-box;border:0;border-radius:4px;background:transparent;padding:2px 4px;font:inherit;font-size:12px;color:#343a40;cursor:default}
+.draft-sheet-color-name:hover,.draft-sheet-color-name:focus{outline:none;background:transparent;box-shadow:none}
 .draft-sheet-color-name:disabled{opacity:.7}
 .draft-sheet-color-name[aria-invalid=true]{box-shadow:0 0 0 1px #c60920}
 .draft-sheet-field-error{display:block;max-width:100%;font-size:10px;line-height:1.3;color:#c60920;text-align:center}
@@ -161,16 +161,17 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-color-line small{color:#8a8e94}
 .draft-sheet-color-tools{display:flex;gap:5px;align-items:flex-start}
 .draft-color-add{position:relative}
-.draft-color-add-form{position:absolute;z-index:2;top:calc(100% + 6px);left:0;display:flex;flex-direction:column;gap:6px;width:168px;padding:8px;border:1px solid #e5e5e2;border-radius:8px;background:white;box-shadow:0 8px 24px #00000014}
-.draft-color-add-form input{height:28px;border:1px solid #e5e5e2;border-radius:6px;padding:0 8px;font:inherit;font-size:11px;color:#343a40}
-.draft-color-add-form button{height:28px;border:0;border-radius:6px;background:#c60920;color:white;font:inherit;font-size:11px;cursor:pointer}
-.draft-color-add-form button:disabled{cursor:not-allowed;opacity:.6}
+.draft-color-add-form{position:absolute;z-index:2;top:calc(100% + 6px);left:0;display:flex;flex-direction:column;gap:8px;width:280px;padding:8px;border:1px solid #e5e5e2;border-radius:8px;background:white;box-shadow:0 8px 24px #00000014}
+.draft-color-add-rows{display:flex;flex-direction:column;gap:8px}
+.draft-color-add-row{display:flex;align-items:center;gap:4px;border-radius:8px}
+.draft-color-add-row.is-lifted{position:relative;z-index:2;background:#fff;box-shadow:0 10px 24px #0000001f}
+.draft-color-add-grip{display:inline-flex;width:28px;height:28px;flex:none;align-items:center;justify-content:center;border:0;background:transparent;color:#8a8e94;cursor:grab;touch-action:none}
+.draft-color-add-grip:active{cursor:grabbing}
+.draft-color-add-grip:disabled{cursor:not-allowed;opacity:.6}
 .draft-color-add-form p{margin:0;font-size:10px;color:#b30920}
 .draft-sheet-color-tools .draft-sheet-action{padding:4px;border-color:transparent}
 .draft-sheet-color-tools .draft-sheet-color-heart{color:#ec526a}
 .draft-sheet-color-tools .draft-sheet-color-heart.is-confirmed{color:#c60920}
-.draft-sheet-color-tools .draft-sheet-color-name-confirm{padding:3px 9px;border-color:#e5e5e2}
-.draft-sheet-color-tools .draft-sheet-color-name-confirm.is-done{border-color:#cbdccc}
 .draft-sheet-entry{position:relative;flex:none}
 .draft-sheet-entry>.draft-sheet-action{max-width:none}
 .draft-sheet-entry-label{display:block;white-space:nowrap}

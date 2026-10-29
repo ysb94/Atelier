@@ -10,6 +10,8 @@ type WorkOrderFile = { url: string; name: string }
 type Props = {
   orders: readonly Pick<DraftSampleWorkOrder, 'id' | 'round' | 'url' | 'name' | 'originCountry' | 'shippedAt' | 'returnedAt' | 'receivedAt' | 'shipped' | 'passed' | 'sampleStage'>[]
   kind?: 'sample' | 'color'
+  /** 다음 단계 목록이 이미 아래에 있으면 경과·다음샘플을 샘플 줄처럼 붙여 둔다. */
+  joined?: boolean
   originCountry: string
   readOnly?: boolean
   saving?: boolean
@@ -18,7 +20,7 @@ type Props = {
   onOpen?: () => void
 }
 
-export function DraftSampleProgress({ orders, kind = 'sample', originCountry, readOnly = false, saving = false, onReceive, onOpen }: Props) {
+export function DraftSampleProgress({ orders, kind = 'sample', joined = false, originCountry, readOnly = false, saving = false, onReceive, onOpen }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const pending = useRef(false)
@@ -37,7 +39,7 @@ export function DraftSampleProgress({ orders, kind = 'sample', originCountry, re
     } finally { pending.current = false; setBusy(false) }
   }
 
-  return <div className="draft-sample-progress" aria-label={kind === 'color' ? '컬러샘플 등록·수령 이력' : '샘플 등록·수령 이력'}>
+  return <div className={`draft-sample-progress${joined ? ' is-joined' : ''}`} aria-label={kind === 'color' ? '컬러샘플 등록·수령 이력' : '샘플 등록·수령 이력'}>
     {list.map(order => {
       const country = sampleCountry(order.originCountry || originCountry)
       const registered = order.receivedAt ? sampleTripSpanDays(order.shippedAt, order.receivedAt) : sampleElapsedDays(order.shippedAt)
@@ -57,7 +59,7 @@ export function DraftSampleProgress({ orders, kind = 'sample', originCountry, re
           {current && !order.passed && !order.receivedAt && <Button type="button" size="sm" variant="outline" className="draft-sample-receive" disabled={readOnly || saving || busy || !canReceiveSample(order, originCountry)}
             title="실물을 받은 뒤 수령일을 기록하세요." onClick={() => void run(() => onReceive(order.id))}>{busy ? '저장 중' : '수령 확인'}</Button>}
         </div>
-        {current ? <div className="draft-sample-interval">
+        {current && !joined ? <div className="draft-sample-interval">
           {order.receivedAt ? <>
             {received !== null && <strong className="draft-sample-received-elapsed" title={`수령일 ${sampleHistoryDay(order.receivedAt)}`}>+ {received} days</strong>}
             {sampleReadyForNextStage(order) && <div className="draft-sample-next-actions">

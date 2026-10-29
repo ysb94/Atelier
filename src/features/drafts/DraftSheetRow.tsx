@@ -1,17 +1,14 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { FileText, Heart, ImageOff, Pencil, X } from 'lucide-react'
+import { FileText, GripVertical, Heart, ImageOff, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
 import { resolveColorSpec } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import { sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
-import {
-  sampleHistoryDay,
-  sampleTripSpanDays,
-  sheetRegisteredDay,
-} from '@/lib/drafts/sample-work-order'
+import { sheetRegisteredDay } from '@/lib/drafts/sample-work-order'
 import { readFileAsDataUrl } from '@/lib/images'
 import { DRAFT_STATUS_LABEL, type Brand, type DraftColorRow, type ProductDraft } from '@/lib/types'
 import { formatNumber } from '@/lib/utils'
@@ -19,100 +16,10 @@ import { RELEASE_CERTAINTY_LABEL, formatReleaseGroupLabel, formatTargetDate, typ
 import './draft-board.css'
 import { DraftSampleProgress } from './DraftSampleProgress'
 import { DraftColorSampleProgress } from './DraftColorSampleProgress'
-import { colorSampleLabel, sampleOrderLabel } from '@/lib/drafts/sample-registration'
 
 const SAMPLE_WORK_ORDER_ACCEPT =
   'application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp,.xls,.xlsx'
 const SAMPLE_WORK_ORDER_MAX_BYTES = 8 * 1024 * 1024
-
-function ColorSampleWorkOrderButton({
-  readOnly = false,
-  colorsConfirmed,
-  onUpload,
-}: {
-  readOnly?: boolean
-  colorsConfirmed: boolean
-  onUpload: (file: { url: string; name: string }) => Promise<void>
-}) {
-  const dialogRef = useRef<HTMLDialogElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [open, setOpen] = useState(false)
-  const [busy, setBusy] = useState(false)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    if (open) dialogRef.current?.showModal()
-  }, [open])
-
-  function close() {
-    dialogRef.current?.close()
-    setOpen(false)
-  }
-
-  return (
-    <>
-      <button
-        type="button"
-        className="draft-sheet-action is-neutral"
-        disabled={readOnly || busy}
-        onClick={() => {
-          if (colorsConfirmed) inputRef.current?.click()
-          else setOpen(true)
-        }}
-      >
-        {busy ? '올리는 중' : '컬러 샘플 작업지시서'}
-      </button>
-      {error ? <span className="draft-sheet-field-error">{error}</span> : null}
-      <input
-        ref={inputRef}
-        type="file"
-        accept={SAMPLE_WORK_ORDER_ACCEPT}
-        hidden
-        onChange={(event) => {
-          const file = event.target.files?.[0]
-          event.target.value = ''
-          if (!file || readOnly) return
-          if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) {
-            setError('작업 지시서는 8MB 이하만 올릴 수 있습니다.')
-            return
-          }
-          setBusy(true)
-          setError('')
-          void readFileAsDataUrl(file)
-            .then((url) => onUpload({ url, name: file.name }))
-            .then(() => undefined)
-            .catch((err: unknown) => {
-              console.warn('[drafts] 컬러 샘플 작업 지시서 업로드 실패', err)
-              setError(err instanceof Error ? err.message : '작업 지시서를 올리지 못했습니다.')
-            })
-            .finally(() => setBusy(false))
-        }}
-      />
-      {open ? createPortal(
-        <dialog
-          ref={dialogRef}
-          className="draft-color-confirm-dialog"
-          aria-labelledby="color-confirm-title"
-          onCancel={(event) => {
-            event.preventDefault()
-            close()
-          }}
-          onClose={() => setOpen(false)}
-          onClick={(event) => {
-            if (event.target === event.currentTarget) close()
-          }}
-        >
-          <h2 id="color-confirm-title">컬러를 확정해 주세요</h2>
-          <p>컬러 샘플 작업지시서를 보내려면 COLOR 칸 상단의 하트(♥)를 눌러 컬러 구성을 먼저 확정해 주세요.</p>
-          <div>
-            <button type="button" onClick={close}>닫기</button>
-          </div>
-        </dialog>,
-        document.body,
-      ) : null}
-    </>
-  )
-}
 
 function SampleWorkOrderButton({
   readOnly = false,
@@ -229,23 +136,174 @@ function SheetConfirmButton({
   )
 }
 
+type ColorFormRow = { key: number; id: string | null; name: string }
+
+const COLOR_ROW_EASE = 'cubic-bezier(0.22, 1, 0.36, 1)'
+
+function layoutCenterY(node: HTMLElement) {
+  const parent = node.offsetParent instanceof HTMLElement ? node.offsetParent : null
+  const origin = parent ? parent.getBoundingClientRect().top : 0
+  return origin + node.offsetTop + node.offsetHeight / 2
+}
+
+function slideColorRow(node: HTMLElement, fromY: number) {
+  if (Math.abs(fromY) < 1) return
+  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+  node.getAnimations().forEach((animation) => animation.cancel())
+  node.animate(
+    [{ transform: `translateY(${fromY}px)` }, { transform: 'translateY(0)' }],
+    { duration: 220, easing: COLOR_ROW_EASE },
+  )
+}
+
 function ColorDocumentButton({
   readOnly = false,
-  colorCount,
-  onAddColor,
+  colors,
+  onSaveColors,
 }: {
   readOnly?: boolean
-  colorCount: number
-  onAddColor: (name: string) => Promise<void>
+  colors: DraftColorRow[]
+  onSaveColors: (colors: Array<{ id: string | null; name: string }>) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
-  const [name, setName] = useState('')
+  const [rows, setRows] = useState<ColorFormRow[]>([{ key: 1, id: null, name: '' }])
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const full = colorCount >= MAX_DRAFT_COLORS
+  const rootRef = useRef<HTMLDivElement>(null)
+  const listRef = useRef<HTMLDivElement>(null)
+  const nextKey = useRef(1)
+  const layoutTops = useRef(new Map<number, number>())
+  const shiftRef = useRef(0)
+  const dragRef = useRef<{ key: number; pointerId: number; startY: number; y: number } | null>(null)
+  const [draggingKey, setDraggingKey] = useState<number | null>(null)
+  const [shiftY, setShiftY] = useState(0)
+
+  useEffect(() => {
+    if (!open) return
+    function closeOnOutside(event: PointerEvent) {
+      if (rootRef.current?.contains(event.target as Node)) return
+      setOpen(false)
+    }
+    document.addEventListener('pointerdown', closeOnOutside, true)
+    return () => document.removeEventListener('pointerdown', closeOnOutside, true)
+  }, [open])
+
+  function freshRows(source: DraftColorRow[]) {
+    if (!source.length) {
+      nextKey.current += 1
+      return [{ key: nextKey.current, id: null, name: '' }]
+    }
+    return source.map((color) => {
+      nextKey.current += 1
+      return { key: nextKey.current, id: color.id, name: color.name }
+    })
+  }
+
+  function addRow() {
+    if (readOnly || busy || rows.length >= MAX_DRAFT_COLORS) return
+    setError('')
+    nextKey.current += 1
+    setRows((current) => [...current, { key: nextKey.current, id: null, name: '' }])
+  }
+
+  function removeRow(key: number) {
+    setError('')
+    setRows((current) => {
+      const next = current.filter((row) => row.key !== key)
+      if (next.length) return next
+      nextKey.current += 1
+      return [{ key: nextKey.current, id: null, name: '' }]
+    })
+  }
+
+  useLayoutEffect(() => {
+    const list = listRef.current
+    if (!list) {
+      layoutTops.current.clear()
+      return
+    }
+    const drag = dragRef.current
+    for (const node of list.querySelectorAll<HTMLElement>('[data-color-key]')) {
+      const key = Number(node.dataset.colorKey)
+      const top = node.offsetTop
+      const prev = layoutTops.current.get(key)
+      if (prev != null && prev !== top) {
+        const dy = prev - top
+        if (drag?.key === key) {
+          drag.startY += top - prev
+          const nextShift = drag.y - drag.startY
+          shiftRef.current = nextShift
+          setShiftY(nextShift)
+        } else {
+          slideColorRow(node, dy)
+        }
+      }
+      layoutTops.current.set(key, top)
+    }
+  })
+
+  function beginDrag(event: ReactPointerEvent<HTMLButtonElement>, key: number) {
+    if (readOnly || busy || event.button !== 0) return
+    event.preventDefault()
+    event.stopPropagation()
+    const drag = { key, pointerId: event.pointerId, startY: event.clientY, y: event.clientY }
+    dragRef.current = drag
+    shiftRef.current = 0
+    setDraggingKey(key)
+    setShiftY(0)
+    try { event.currentTarget.setPointerCapture(event.pointerId) } catch (err) {
+      console.warn('[drafts] 컬러 순서 포인터 캡처 실패', err)
+    }
+
+    function move(pointerEvent: PointerEvent) {
+      if (pointerEvent.pointerId !== drag.pointerId || dragRef.current !== drag) return
+      pointerEvent.preventDefault()
+      drag.y = pointerEvent.clientY
+      const nextShift = pointerEvent.clientY - drag.startY
+      shiftRef.current = nextShift
+      setShiftY(nextShift)
+      const list = listRef.current
+      if (!list) return
+      const nodes = [...list.querySelectorAll<HTMLElement>('[data-color-key]')]
+      const active = nodes.find((node) => Number(node.dataset.colorKey) === drag.key)
+      if (!active) return
+      const mid = layoutCenterY(active) + nextShift
+      let to = 0
+      for (const node of nodes) {
+        if (node === active) continue
+        if (mid > layoutCenterY(node)) to += 1
+      }
+      setRows((current) => {
+        const from = current.findIndex((row) => row.key === drag.key)
+        if (from < 0 || from === to) return current
+        const next = [...current]
+        const [item] = next.splice(from, 1)
+        next.splice(to, 0, item)
+        return next
+      })
+    }
+
+    function end(pointerEvent: PointerEvent) {
+      if (pointerEvent.pointerId !== drag.pointerId) return
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', end)
+      window.removeEventListener('pointercancel', end)
+      const fromY = shiftRef.current
+      dragRef.current = null
+      shiftRef.current = 0
+      setDraggingKey(null)
+      setShiftY(0)
+      const node = listRef.current?.querySelector<HTMLElement>(`[data-color-key="${drag.key}"]`)
+      if (node) slideColorRow(node, fromY)
+    }
+
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', end)
+    window.addEventListener('pointercancel', end)
+  }
 
   return (
-    <div className="draft-color-add">
+    <div className="draft-color-add" ref={rootRef}>
       <button
         type="button"
         className="draft-sheet-action is-neutral"
@@ -255,6 +313,10 @@ function ColorDocumentButton({
         disabled={readOnly}
         onClick={() => {
           setError('')
+          if (!open) {
+            layoutTops.current.clear()
+            setRows(freshRows(colors))
+          }
           setOpen((current) => !current)
         }}
       >
@@ -265,41 +327,95 @@ function ColorDocumentButton({
           className="draft-color-add-form"
           onSubmit={(event) => {
             event.preventDefault()
-            if (readOnly) return
-            const next = name.trim()
-            if (!next) {
+            if (readOnly || busy) return
+            if (rows.some((row) => row.id && !row.name.trim())) {
               setError('컬러 이름을 입력하세요.')
               return
             }
-            if (full) {
+            const next = rows
+              .filter((row) => row.name.trim())
+              .map((row) => ({ id: row.id, name: row.name.trim() }))
+            if (!next.length && colors.length === 0) {
+              setError('컬러 이름을 입력하세요.')
+              return
+            }
+            if (next.length > MAX_DRAFT_COLORS) {
               setError(`최대 ${MAX_DRAFT_COLORS}컬러까지 추가할 수 있습니다.`)
               return
             }
             setBusy(true)
             setError('')
-            void onAddColor(next)
-              .then(() => {
-                setName('')
-                setOpen(false)
-              })
+            void onSaveColors(next)
+              .then(() => setOpen(false))
               .catch((err: unknown) => {
                 console.warn('[drafts] 컬러 추가 실패', err)
-                setError(err instanceof Error ? err.message : '컬러를 추가하지 못했습니다.')
+                setError(err instanceof Error ? err.message : '컬러를 저장하지 못했습니다.')
               })
               .finally(() => setBusy(false))
           }}
         >
-          <input
-            aria-label="컬러 이름"
-            placeholder="컬러 이름"
-            value={name}
-            disabled={readOnly || busy}
-            onChange={(event) => setName(event.target.value)}
-          />
-          <button type="submit" disabled={readOnly || busy || full}>
-            컬러 추가
-          </button>
-          {error ? <p>{error}</p> : null}
+          <div className="draft-color-add-rows" ref={listRef}>
+            {rows.map((row, index) => {
+              const lifted = draggingKey === row.key
+              return (
+              <div
+                key={row.key}
+                data-color-key={row.key}
+                className={`draft-color-add-row${lifted ? ' is-lifted' : ''}`}
+                style={lifted ? { transform: `translateY(${shiftY}px)` } : undefined}
+              >
+                <button
+                  type="button"
+                  className="draft-color-add-grip"
+                  aria-label={`컬러 ${index + 1} 순서 변경`}
+                  title="끌어서 순서 변경"
+                  disabled={readOnly || busy}
+                  onPointerDown={(event) => beginDrag(event, row.key)}
+                >
+                  <GripVertical className="size-3.5" />
+                </button>
+                <Input
+                  className="h-8 min-w-0 text-sm"
+                  aria-label={rows.length > 1 ? `컬러 이름 ${index + 1}` : '컬러 이름'}
+                  placeholder="컬러 이름"
+                  value={row.name}
+                  disabled={readOnly || busy}
+                  onChange={(event) => {
+                    const name = event.target.value
+                    setRows((current) => current.map((item) => item.key === row.key ? { ...item, name } : item))
+                  }}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 shrink-0 text-muted-foreground"
+                  aria-label={row.id ? `컬러 ${index + 1} 삭제` : rows.length > 1 ? `컬러 이름 ${index + 1} 삭제` : '컬러 이름 지우기'}
+                  disabled={readOnly || busy}
+                  onClick={() => removeRow(row.key)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              </div>
+              )
+            })}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              className="flex h-8 min-w-0 flex-1 items-center justify-center gap-1 rounded-md border border-dashed border-border text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+              disabled={readOnly || busy || rows.length >= MAX_DRAFT_COLORS}
+              onClick={addRow}
+            >
+              <Plus className="size-3.5" />
+              컬러 추가
+            </button>
+            <Button type="submit" size="sm" className="h-8 shrink-0 px-2.5" disabled={readOnly || busy}>
+              <Save className="size-3.5" />
+              {busy ? '저장 중' : '저장'}
+            </Button>
+          </div>
+          {error ? <p>{error}</p> : rows.length >= MAX_DRAFT_COLORS ? <p>최대 {MAX_DRAFT_COLORS}컬러까지 추가할 수 있습니다.</p> : null}
         </form>
       ) : null}
     </div>
@@ -530,81 +646,6 @@ function EntryButton({
   )
 }
 
-function SampleHistoryDialog({
-  draftNo,
-  samples,
-  colors,
-  onClose,
-}: {
-  draftNo: string
-  samples: { id: string; round: number; sampleStage?: 'numbered' | 'final'; shippedAt: string | null; returnedAt: string | null; receivedAt?: string | null; passed: boolean }[]
-  colors: { id: string; round: number; shippedAt: string | null; returnedAt: string | null; receivedAt?: string | null; passed: boolean }[]
-  onClose: () => void
-}) {
-  const dialogRef = useRef<HTMLDialogElement>(null)
-  useEffect(() => {
-    const dialog = dialogRef.current
-    if (!dialog) return
-    if (!dialog.open) dialog.showModal()
-    return () => {
-      dialog.onclose = null
-      if (dialog.open) dialog.close()
-    }
-  }, [])
-  const groups = [
-    { title: '대표 샘플', rows: samples, receipt: true },
-    { title: '컬러 샘플', rows: colors, receipt: true, color: true },
-  ].filter((group) => group.rows.length > 0)
-  return createPortal(
-    <dialog
-      ref={dialogRef}
-      className="draft-sample-history-dialog"
-      aria-labelledby="sample-history-title"
-      onCancel={(event) => { event.preventDefault(); onClose() }}
-      onClick={(event) => { if (event.target === event.currentTarget) onClose() }}
-    >
-      <header>
-        <div>
-          <p>SAMPLE HISTORY</p>
-          <h2 id="sample-history-title">{draftNo} 샘플 이력</h2>
-        </div>
-        <button type="button" aria-label="샘플 이력 닫기" onClick={onClose}><X size={18} /></button>
-      </header>
-      {groups.length ? groups.map((group) => (
-        <section key={group.title}>
-          <h3>{group.title}</h3>
-          <table>
-            <thead>
-              <tr>
-                <th scope="col">차수</th>
-                <th scope="col">지시서 등록일</th>
-                <th scope="col">발송 완료일</th>
-                {group.receipt && <th scope="col">실물 수령일</th>}
-                <th scope="col">걸린 일수</th>
-              </tr>
-            </thead>
-            <tbody>
-              {group.rows.map((row) => {
-                const days = sampleTripSpanDays(row.shippedAt, group.receipt ? row.receivedAt ?? null : row.returnedAt)
-                return (
-                  <tr key={row.id}>
-                    <th scope="row">{'color' in group ? colorSampleLabel(row.round) : sampleOrderLabel(row, samples)}{row.receivedAt ? ' · 수령' : ''}</th>
-                    <td>{sampleHistoryDay(row.shippedAt) || '기록 없음'}</td>
-                    <td>{row.returnedAt ? sampleHistoryDay(row.returnedAt) : '기록 없음'}</td>
-                    {group.receipt && <td>{sampleHistoryDay(row.receivedAt ?? null) || '기록 없음'}</td>}
-                    <td>{days == null ? '—' : `${days}일`}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </section>
-      )) : <p>기록된 샘플 차수가 없습니다.</p>}
-    </dialog>,
-    document.body,
-  )
-}
-
 function SampleStatus({
   inProgress,
   sent,
@@ -648,15 +689,15 @@ export function DraftPhoto({ src, name, onOpen }: { src: string | null; name: st
   </>
 }
 
-export type DraftConfirmFlag = 'nameConfirmed' | 'colorsConfirmed' | 'colorNamesConfirmed'
+export type DraftConfirmFlag = 'nameConfirmed' | 'colorsConfirmed'
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onNextSample, onSchedule, onAddColor, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onUploadColorWorkOrder, onReceiveColorSample, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onToggleConfirm }: {
   readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
   onOpen: () => void
   onNextSample?: () => void
   onSchedule: () => void
-  onAddColor: (name: string) => Promise<void>
+  onSaveColors: (colors: Array<{ id: string | null; name: string }>) => Promise<void>
   onRenameProduct: (field: 'nameKo' | 'nameEn', name: string) => Promise<void>
   onRenameColor: (colorId: string, name: string) => Promise<void>
   onSaveSheetValue: (colorId: string, field: 'size' | 'fabric' | 'weight' | 'specDoc', value: string, applyAll: boolean) => Promise<void>
@@ -667,7 +708,6 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
   onReceiveColorSample: (id: string) => Promise<void>
   onToggleConfirm: (flag: DraftConfirmFlag, next: boolean) => Promise<void>
 }) {
-  const [historyOpen, setHistoryOpen] = useState(false)
   const orders = [...(draft.sampleWorkOrders ?? [])]
     .filter((order) => order.url?.trim())
     .sort((a, b) => a.round - b.round)
@@ -679,10 +719,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
   const name = draft.nameEn.trim() || draft.nameKo.trim() || '이름 미정'
   const named = Boolean(draft.nameEn.trim() || draft.nameKo.trim())
   const hasColor = draft.colors.length > 0
-  const hasColorName = draft.colors.some((color) => color.name.trim())
   const nameConfirmed = Boolean(draft.specs.nameConfirmed)
   const colorsConfirmed = Boolean(draft.specs.colorsConfirmed)
-  const colorNamesConfirmed = Boolean(draft.specs.colorNamesConfirmed)
   const registeredDay = sheetRegisteredDay(draft.createdAt)
   const specsConfirmed = draft.specs.size.confirmed && draft.specs.fabric.confirmed && draft.specs.weight.confirmed
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
@@ -717,31 +755,11 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
       {registeredDay ? <p className="draft-sheet-registered">등록일 : {registeredDay}</p> : null}
       {(draft.status !== 'open' || draft.held) && <div className="draft-sheet-status">{draft.status !== 'open' ? DRAFT_STATUS_LABEL[draft.status] : ''}{draft.held ? ' · 보류' : ''}</div>}
       {orders.length > 0 ? (
-        <div className="draft-sheet-samples" aria-label="샘플 진행 이력">
-          <DraftSampleProgress orders={orders} originCountry={draft.originCountry} readOnly={readOnly} onReceive={onReceiveSample} onNext={onRequestNextSampleRound} onOpen={onNextSample ?? onOpen} />
-          {sampleReady ? (
-            <>
-              <button type="button" className="draft-sheet-sample-confirmed" aria-haspopup="dialog" onClick={() => setHistoryOpen(true)}>샘플 이력</button>
-              {historyOpen ? <SampleHistoryDialog draftNo={draft.draftNo} samples={orders} colors={colorRounds} onClose={() => setHistoryOpen(false)} /> : null}
-              {colorRounds.length ? (
-                <DraftColorSampleProgress rounds={colorRounds} originCountry={draft.originCountry} readOnly={readOnly}
-                  onReceive={onReceiveColorSample} onOpen={onNextSample ?? onOpen} />
-              ) : (
-                <div className="draft-sheet-sample-block" aria-label="컬러 샘플">
-                  <span className="draft-sheet-sample-mark">
-                    <b>컬러 샘플</b>
-                  </span>
-                  <small className="draft-sheet-sample-round">1차</small>
-                  <div className="draft-sheet-color-orders">
-                    <ColorSampleWorkOrderButton
-                      readOnly={readOnly}
-                      colorsConfirmed={colorsConfirmed}
-                      onUpload={onUploadColorWorkOrder}
-                    />
-                  </div>
-                </div>
-              )}
-            </>
+        <div className={`draft-sheet-samples${colorRounds.length ? ' has-color-sample' : ''}`} aria-label="샘플 진행 이력">
+          <DraftSampleProgress orders={orders} joined={colorRounds.length > 0} originCountry={draft.originCountry} readOnly={readOnly} onReceive={onReceiveSample} onNext={onRequestNextSampleRound} onOpen={onNextSample ?? onOpen} />
+          {sampleReady && colorRounds.length ? (
+            <DraftColorSampleProgress rounds={colorRounds} originCountry={draft.originCountry} readOnly={readOnly}
+              onReceive={onReceiveColorSample} onOpen={onNextSample ?? onOpen} />
           ) : null}
         </div>
       ) : (
@@ -755,7 +773,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
     </td>
     <td>
       <div className="draft-color-pad draft-sheet-color-tools">
-        <ColorDocumentButton readOnly={readOnly} colorCount={draft.colors.length} onAddColor={onAddColor} />
+        <ColorDocumentButton readOnly={readOnly} colors={draft.colors} onSaveColors={onSaveColors} />
         <SheetConfirmButton
           label={colorsConfirmed ? '컬러 구성 확정' : '컬러 구성 미확정'}
           confirmed={colorsConfirmed}
@@ -767,20 +785,12 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
         >
           <Heart size={17} fill={colorsConfirmed ? 'currentColor' : 'none'} />
         </SheetConfirmButton>
-        <SheetConfirmButton
-          label="컬러명확정"
-          confirmed={colorNamesConfirmed}
-          canToggle={!readOnly && hasColorName}
-          blockedTitle="컬러 이름을 먼저 입력해 주세요"
-          className="draft-sheet-color-name-confirm"
-          onToggle={(next) => onToggleConfirm('colorNamesConfirmed', next)}
-        />
       </div>
       <div className="draft-color-lines">
         {draft.colors.length ? draft.colors.map((color, index) => (
           <ColorLine key={color.id} index={index}>
             <SheetInlineField
-              readOnly={readOnly}
+              readOnly
               label={`${draft.draftNo} 컬러 ${index + 1} 이름`}
               className="draft-sheet-color-name"
               value={color.name}
