@@ -15,6 +15,7 @@ import { DEFAULT_COMPANY_ID } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import { sampleSentToChinaTeam } from '@/lib/drafts/sample-receipt'
+import { colorSampleLabel, sampleOrderLabel } from '@/lib/drafts/sample-registration'
 import {
   draftHasSampleWorkOrder,
   draftStatePercent,
@@ -47,6 +48,7 @@ type WorkOrderRow = {
   draft: ProductDraft
   kind: WorkOrderKind
   sampleStage?: 'numbered' | 'final'
+  stageLabel: string
   orderId: string
   url: string | null
   fileName: string
@@ -63,11 +65,13 @@ type WorkOrderRow = {
 }
 
 function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
-  const samples = filledSampleWorkOrders(draft.sampleWorkOrders).filter(order => sampleSentToChinaTeam(order.originCountry, draft.originCountry)).map(
+  const allSamples = filledSampleWorkOrders(draft.sampleWorkOrders)
+  const samples = allSamples.filter(order => sampleSentToChinaTeam(order.originCountry, draft.originCountry)).map(
     (order) => ({
       draft,
       kind: 'sample' as const,
       sampleStage: order.sampleStage,
+      stageLabel: sampleOrderLabel(order, allSamples),
       orderId: order.id,
       url: order.url,
       fileName: workOrderFileName(order.name),
@@ -91,6 +95,7 @@ function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
     return {
       draft,
       kind: 'color' as const,
+      stageLabel: colorSampleLabel(round.round),
       orderId: returned ? round.id : shipColorId || round.id,
       url: round.url,
       fileName: round.name.trim() || `${round.round}차 컬러 샘플 작업 지시서`,
@@ -444,8 +449,7 @@ export function CompanySampleWorkOrderPage() {
                       <div className="draft-sheet-samples" aria-label="샘플 진행">
                         <div className="draft-sheet-sample">
                           <span>
-                            <b>{row.kind === 'color' ? '컬러 샘플' : row.sampleStage === 'final' ? '최종 샘플' : 'Sample'}</b>
-                            <small>{row.sortRound}차</small>
+                            <b>{row.stageLabel}</b>
                           </span>
                           <div>
                             <span className="draft-sheet-sent" title="샘플 발송일">

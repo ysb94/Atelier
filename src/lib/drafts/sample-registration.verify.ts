@@ -3,7 +3,7 @@ import { emptyDraftInput, newColorRow } from './empty-draft'
 import { attachSampleWorkOrderFile, normalizeSampleWorkOrders, sanitizeSampleWorkOrders, setLatestSampleWorkOrderShipped } from './sample-work-order'
 import { receiveSample } from './sample-receipt'
 import { normalizeColorSampleRounds } from './draft-flow'
-import { finalSampleLabel, registerDraftSampleStage, sampleOrderLabel, sampleRegistrationLabel } from './sample-registration'
+import { colorSampleLabel, finalSampleLabel, registerDraftSampleStage, sampleOrderLabel, sampleRegistrationLabel } from './sample-registration'
 
 const attached = attachSampleWorkOrderFile([], {url:'data:file,first',name:'first.xlsx'}, '2026-10-20T01:00:00Z')
 const shipped = setLatestSampleWorkOrderShipped(attached, true, '2026-10-21T01:00:00Z')
@@ -47,4 +47,14 @@ const secondColor=registerDraftSampleStage(returned,'color',{url:'data:file,colo
 assert.equal(secondColor.specs.colorSampleRounds!.length,2)
 assert.equal(secondColor.specs.colorSampleRounds![0]!.originCountry,'한국')
 assert.equal(secondColor.specs.colorSampleRounds![1]!.originCountry,'중국')
+assert.equal(sampleRegistrationLabel('color',3,1,2),'2차 컬러샘플','다음 컬러샘플은 저장된 차수에 연동')
+assert.equal(colorSampleLabel(secondColor.specs.colorSampleRounds![1]!.round),'2차 컬러샘플')
+assert.equal(secondColor.specs.colorSampleRounds![0]!.url,file.url,'다음 컬러 등록이 이전 파일을 덮어쓰지 않음')
+const localFinal=registerDraftSampleStage(input,'final',{url:'data:file,final1',name:'final1.xlsx'},'한국',at)
+const receivedFinal={...localFinal,sampleWorkOrders:receiveSample(localFinal.sampleWorkOrders,localFinal.sampleWorkOrders.at(-1)!.id,'한국')}
+const finalAgain=registerDraftSampleStage(receivedFinal,'final',{url:'data:file,final2',name:'final2.xlsx'},'중국')
+const reloadedFinals=normalizeSampleWorkOrders(JSON.parse(JSON.stringify(sanitizeSampleWorkOrders(finalAgain.sampleWorkOrders))))
+assert.deepEqual(reloadedFinals.map(order=>sampleOrderLabel(order,reloadedFinals)),['1차 샘플','최종 샘플','최최종 샘플'])
+assert.equal(reloadedFinals[1]!.url,'data:file,final1')
+assert.equal(reloadedFinals[2]!.url,'data:file,final2')
 console.log('sample-registration: 차수·최종·컬러 분리, 저장·재조회, 국가·기존 기록 보존, 미수령·중복·무파일 차단 통과')

@@ -12,8 +12,10 @@ export function finalSampleLabel(depth: number) {
   return `${'최'.repeat(Math.max(0, Math.floor(depth)))}최종 샘플`
 }
 
-export function sampleRegistrationLabel(stage: SampleRegistrationStage, nextRound: number, finalCount = 0) {
-  if (stage === 'color') return '컬러샘플'
+export function colorSampleLabel(round: number) { return `${round}차 컬러샘플` }
+
+export function sampleRegistrationLabel(stage: SampleRegistrationStage, nextRound: number, finalCount = 0, nextColorRound = 1) {
+  if (stage === 'color') return nextColorRound > 1 ? colorSampleLabel(nextColorRound) : '컬러샘플'
   if (stage === 'final') return finalSampleLabel(finalCount)
   return `${nextRound}차 샘플`
 }

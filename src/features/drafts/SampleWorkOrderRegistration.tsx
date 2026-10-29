@@ -8,8 +8,8 @@ import { nextRegistrationStages, sampleRegistrationLabel, type SampleRegistratio
 
 type WorkOrderFile = { url: string; name: string }
 
-export function SampleWorkOrderRegistration({ originCountry, nextRound, latestIsFinal = false, finalCount = 0, readOnly, saving, onRegister }: {
-  originCountry: string; nextRound: number; latestIsFinal?: boolean; finalCount?: number; readOnly: boolean; saving: boolean
+export function SampleWorkOrderRegistration({ originCountry, nextRound, nextColorRound = 1, latestIsFinal = false, finalCount = 0, readOnly, saving, onRegister }: {
+  originCountry: string; nextRound: number; nextColorRound?: number; latestIsFinal?: boolean; finalCount?: number; readOnly: boolean; saving: boolean
   onRegister: (stage: SampleRegistrationStage, file: WorkOrderFile, country: string) => Promise<void>
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
@@ -28,7 +28,7 @@ export function SampleWorkOrderRegistration({ originCountry, nextRound, latestIs
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   useEffect(() => { if (!countryTouched.current) setCountry(sampleCountry(originCountry).label) }, [originCountry])
-  const label = sampleRegistrationLabel(stage, nextRound, finalCount)
+  const label = sampleRegistrationLabel(stage, nextRound, finalCount, nextColorRound)
   const shown = file ?? registered
   const disabled = readOnly || saving || busy || reading
 
@@ -54,7 +54,7 @@ export function SampleWorkOrderRegistration({ originCountry, nextRound, latestIs
       finally { setReading(false) }
     }} />
     <div className="flex flex-wrap justify-center gap-2" role="radiogroup" aria-label="다음 샘플 단계">
-      {stages.map(value => <Button key={value} type="button" role="radio" size="sm" disabled={disabled} aria-checked={stage === value} variant={stage === value ? 'default' : 'outline'} onClick={() => { setStage(value); setError('') }}>{sampleRegistrationLabel(value, nextRound, finalCount)} 진행</Button>)}
+      {stages.map(value => <Button key={value} type="button" role="radio" size="sm" disabled={disabled} aria-checked={stage === value} variant={stage === value ? 'default' : 'outline'} onClick={() => { setStage(value); setError('') }}>{sampleRegistrationLabel(value, nextRound, finalCount, nextColorRound)} 진행</Button>)}
     </div>
     <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
       <span /><p className="text-sm text-muted-foreground">{label} 작업지시서 업로드</p>

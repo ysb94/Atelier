@@ -30,6 +30,8 @@ import {
 } from '@/lib/api'
 import { readFileAsDataUrl, readImageFile } from '@/lib/images'
 import { SampleWorkOrderRegistration } from './SampleWorkOrderRegistration'
+import { RegisteredColorSampleCards } from './RegisteredColorSampleCards'
+import { resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import { registerDraftSampleStage } from '@/lib/drafts/sample-registration'
 import {
   COST_CURRENCY_LABEL,
@@ -443,11 +445,12 @@ export function DraftEditPage() {
 
   const currentSample = latestFilledSampleWorkOrder(form.sampleWorkOrders)
   const savedSamples = filledSampleWorkOrders(form.sampleWorkOrders).slice().sort((left, right) => left.round - right.round)
+  const savedColorSamples = resolveColorSampleRounds(form)
   const sampleRound = currentSample?.round ?? 1
   useEffect(() => {
     if (location.hash !== '#next-sample') return
     document.getElementById('next-sample')?.scrollIntoView({ block: 'start' })
-  }, [location.hash, savedSamples.length])
+  }, [location.hash, loaded?.id])
   const samplePhaseNow = samplePhase(form.sampleWorkOrders)
   const sampleStatus =
     samplePhaseNow === 'passed'
@@ -887,7 +890,7 @@ export function DraftEditPage() {
             const locked = order.shipped || order.passed
             const status = order.passed ? '합격' : order.shipped ? '발송' : '진행'
             return (
-              <div key={order.id} className="mt-2 border-t border-border pt-5">
+              <div key={order.id} id={`sample-history-${order.id}`} aria-label={`등록된 ${sampleOrderLabel(order, savedSamples)}`} className="mt-2 scroll-mt-20 border-t border-border pt-5">
                 <p className="text-center">
                   <span className="inline-flex rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">{sampleOrderLabel(order, savedSamples)} {status}</span>
                 </p>
@@ -913,8 +916,9 @@ export function DraftEditPage() {
               </div>
             )
           })}
+          <RegisteredColorSampleCards rounds={savedColorSamples} originCountry={form.originCountry}/>
           <div id="next-sample">
-          <SampleWorkOrderRegistration originCountry={form.originCountry} nextRound={(latestFilledSampleWorkOrder(form.sampleWorkOrders)?.round ?? 1) + 1} latestIsFinal={savedSamples.at(-1)?.sampleStage === 'final'} finalCount={savedSamples.filter((order) => order.sampleStage === 'final').length} readOnly={!editable} saving={saveMutation.isPending}
+          <SampleWorkOrderRegistration originCountry={form.originCountry} nextRound={(latestFilledSampleWorkOrder(form.sampleWorkOrders)?.round ?? 1) + 1} nextColorRound={Math.max(0, ...savedColorSamples.map(round => round.round)) + 1} latestIsFinal={savedSamples.at(-1)?.sampleStage === 'final'} finalCount={savedSamples.filter((order) => order.sampleStage === 'final').length} readOnly={!editable} saving={saveMutation.isPending}
             onRegister={async (stage, file, country) => {
               if (isNew || !draftId) throw new Error('1차 작업지시서를 먼저 저장해 주세요.')
               const current = await getProductDraftById(draftId)
@@ -922,6 +926,8 @@ export function DraftEditPage() {
               const nextForm = registerDraftSampleStage(draftToInput(current), stage, file, country)
               const saved = await saveMutation.mutateAsync({ ...nextForm, expectedUpdatedAt: current.updatedAt })
               setForm(draftToInput(saved))
+              const registeredId = stage === 'color' ? resolveColorSampleRounds(saved).at(-1)?.id : latestFilledSampleWorkOrder(saved.sampleWorkOrders)?.id
+              if (registeredId) window.requestAnimationFrame(() => document.getElementById(`sample-history-${registeredId}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }))
             }} />
           </div>
 
