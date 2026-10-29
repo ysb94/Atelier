@@ -1,5 +1,6 @@
 import { DEFAULT_COMPANY_ID } from '@/lib/supabase/brands'
 import { getSupabase } from '@/lib/supabase/client'
+import { listExtraLeave } from './employee-extra-leave'
 
 export const ROSTER_FIELDS = [
   { key: 'phone', column: 'phone', label: '전화번호', max: 40, width: 'min-w-36' },
@@ -56,6 +57,7 @@ export type EmployeeRoster = {
   /** undefined: server field unavailable; null: not registered. */
   accruedAnnualLeave?: number | null
   remainingAnnualLeave: number | null
+  additionalAnnualLeave?: number
   inclusiveOvertimeHours: number | null
   fixedOvertimePlan: string
 } & Record<RosterFieldKey, string>
@@ -173,8 +175,12 @@ export async function listEmployeeRosters(): Promise<EmployeeRoster[]> {
   const grants = await getSupabase().from('employee_roster').select('profile_id, accrued_annual_leave')
   if (grants.error) console.warn('[org] 연차 발생일수 조회 실패', { code: grants.error.code, message: grants.error.message })
   const byEmployee = new Map<string, number | null>((grants.data ?? []).map(row => [row.profile_id, row.accrued_annual_leave == null ? null : Number(row.accrued_annual_leave)]))
+  const extras = await listExtraLeave()
+  const available = new Map(extras.balances.map(row => [row.profileId, row.available]))
   return ((data ?? []) as RosterRow[]).map(row => ({
     ...fromRow(row),
+    remainingAnnualLeave: row.remaining_annual_leave == null ? null : Number((Number(row.remaining_annual_leave) + (available.get(row.profile_id) ?? 0)).toFixed(2)),
+    additionalAnnualLeave: extras.ready ? available.get(row.profile_id) ?? 0 : undefined,
     accruedAnnualLeave: grants.error ? undefined : byEmployee.get(row.profile_id) ?? null,
   }))
 }
@@ -199,6 +205,15 @@ export async function saveEmployeeRosterField(
       throw new Error(field === 'inclusiveOvertimeHours' ? '약정 연장근로시간은 소수 둘째 자리까지 숫자로 입력해 주세요.' : '남은 연차는 소수 둘째 자리까지 숫자로 입력해 주세요.')
     }
     stored = text ? Number(text) : null
+  }
+  if (field === 'remainingAnnualLeave') {
+    const { error: totalError } = await getSupabase().rpc('save_employee_leave_total', { p_employee: profileId, p_total: stored })
+    if (!totalError) return
+    if (!['PGRST202', '42883'].includes(totalError.code)) {
+      console.warn('[org] 연차 합계 저장 실패', totalError)
+      throw new Error(totalError.message)
+    }
+    // Before the additive migration, preserve the original base-only save path.
   }
   const { error } = await getSupabase()
     .from('employee_roster')

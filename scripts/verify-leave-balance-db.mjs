@@ -118,6 +118,10 @@ try {
     const { verifyAnniversaryLeave } = await import('./verify-leave-anniversary-cases.mjs')
     await verifyAnniversaryLeave({db,actor,value,create,peer,ops,company})
   }
+  if (process.argv.includes('--additional')) {
+    const { verifyExtraLeave } = await import('./verify-extra-leave-cases.mjs')
+    await verifyExtraLeave({db,actor,value,create,staff,peer,ops,foreign,company})
+  }
   console.log('leave-balance-db: 기존 값·정책 보존, 1/0.5/0.25일 차감, 주말·공휴일 제외, 취소 1회 복원, 기존 취소 무가산, 미등록·부족·타인·타사·직접 위조 차단, 외근·야근 무차감, 사용연도 확인 보존 통과')
 } catch(error) {
   console.error('leave-balance-db 실패:',error.message,{code:error.code,query:error.query})

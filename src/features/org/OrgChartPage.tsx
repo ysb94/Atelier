@@ -914,7 +914,7 @@ function MemberAssignmentTable({
               {canChange ? <AssignmentSortHeader hidden={!showHeader('fixedOvertimePlan')} label={headerLabel('fixedOvertimePlan', '고정OT 설계')} column="fixedOvertimePlan" sort={sort} onSort={toggleSort} hint="고정OT 설계 유형을 선택합니다. 약정 연장근로시간은 오른쪽에서 별도로 관리합니다." /> : null}
               {canChange ? <AssignmentSortHeader hidden={!showHeader('inclusiveOvertimeHours')} label={headerLabel('inclusiveOvertimeHours', '약정 연장근로시간(포괄임금)')} column="inclusiveOvertimeHours" sort={sort} onSort={toggleSort} hint="포괄임금에 포함된 월 연장근로시간입니다. 비우면 미등록이며, 추가 근무가 이 시간을 넘으면 추가수당 대상입니다." /> : null}
               {canChange ? <AssignmentSortHeader hidden={!showHeader('accruedAnnualLeave')} label={headerLabel('accruedAnnualLeave', '발생일수')} column="accruedAnnualLeave" sort={sort} onSort={toggleSort} hint="해당 연차 기간의 발생일수입니다. 남은 연차에는 사용 내역과 조정값이 반영됩니다." /> : null}
-              {canChange && showHeader('additionalAnnualLeave') ? <th className="whitespace-nowrap px-4 py-2.5 font-medium" title="입력·저장과 잔여 연차 계산은 아직 연결하지 않은 열입니다.">{headerLabel('additionalAnnualLeave', '추가 연차')}</th> : null}
+              {canChange && showHeader('additionalAnnualLeave') ? <th className="whitespace-nowrap px-4 py-2.5 font-medium" title="사용 기한이 남은 추가 연차의 미사용 일수입니다. 연차관리에서 추가·수정·삭제합니다.">{headerLabel('additionalAnnualLeave', '추가 연차')}</th> : null}
               {canChange ? <AssignmentSortHeader hidden={!showHeader('remainingAnnualLeave')} label={headerLabel('remainingAnnualLeave', '남은 연차')} column="remainingAnnualLeave" sort={sort} onSort={toggleSort} hint="등록된 잔여 일수입니다. 새 연차·반차·반반차 등록 시 자동 차감되며, 직접 수정하면 잔여 일수를 보정합니다." /> : null}
               {canChange
                 ? visibleRosterFields.map((field) => (
@@ -1032,7 +1032,7 @@ function MemberAssignmentTable({
                       ? <span className="text-xs text-muted-foreground">조회 대기</span>
                       : <span className={rosters.get(member.id)?.accruedAnnualLeave == null ? 'rounded bg-warning/15 px-3 py-1 text-warning' : ''}>{rosters.get(member.id)?.accruedAnnualLeave == null ? '미등록' : `${rosters.get(member.id)?.accruedAnnualLeave}일`}</span>}
                   </td> : null}
-                  {canChange && showHeader('additionalAnnualLeave') ? <td className="whitespace-nowrap px-4 py-2 text-right text-muted-foreground" aria-label={`${memberName(member)} 추가 연차`} title="입력·저장은 아직 연결하지 않았습니다.">—</td> : null}
+                  {canChange && showHeader('additionalAnnualLeave') ? <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums" aria-label={`${memberName(member)} 추가 연차`} title="사용 기한이 남은 추가 연차의 미사용 일수입니다.">{rosterQuery.isError ? '조회 실패' : rosters.get(member.id)?.additionalAnnualLeave === undefined ? '조회 대기' : `${rosters.get(member.id)?.additionalAnnualLeave}일`}</td> : null}
                   {canChange && showHeader('remainingAnnualLeave') ? <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums" aria-label={`${memberName(member)} 남은 연차`}>
                     {rosterQuery.isPending ? '불러오는 중…' : rosterQuery.isError ? '조회 실패' : <div className="flex items-center justify-end gap-1">
                       <RosterField label={`${memberName(member)} 남은 연차 입력`} value={String(rosters.get(member.id)?.remainingAnnualLeave ?? '')}

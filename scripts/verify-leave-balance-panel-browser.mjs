@@ -12,7 +12,8 @@ const fixtures = {
   '@/lib/supabase/auth': `export function useAuth(){return {profile:{id:'manager',status:'active',permissionGrants:[],capabilities:[],memberships:[]}}}`,
   '@/lib/supabase/basic-work-access': `export function useBasicWorkAccess(){return {access:{domains:location.hash==='#denied'?[]:['operations']},isPending:false}}`,
   '@/features/operations-support/ops-directory': `const members=[{id:'a',displayName:'가 직원',departmentId:'ops',hireDate:'2024-01-01'},{id:'b',displayName:'나 직원',departmentId:'md',hireDate:null},{id:'c',displayName:'다 직원',departmentId:'ops',hireDate:'2025-01-01'}];export function useOpsDirectory(){return {members,departments:[{id:'ops',name:'운영지원'},{id:'md',name:'MD'}],departmentName:id=>id==='ops'?'운영지원':'MD',loading:false,error:null,refetch(){}}}`,
-  '@/lib/supabase/client': `const s=window.__leave={remaining:JSON.parse(sessionStorage.getItem('remaining')||'"initial"'),writes:[],reads:0,fail:false,readFail:false};export function getSupabase(){return {from(table){if(table!=='employee_roster')throw Error(table);const q={select(){return q},upsert:async row=>{s.writes.push(row);if(s.fail){s.fail=false;return {error:{message:'save failed'}}}s.remaining=row.remaining_annual_leave;sessionStorage.setItem('remaining',JSON.stringify(s.remaining));return {error:null}},then:resolve=>{s.reads++;return Promise.resolve(s.readFail?{data:null,error:{message:'read failed'}}:{data:[{profile_id:'a',remaining_annual_leave:s.remaining==='initial'?7.75:s.remaining,accrued_annual_leave:15},{profile_id:'b',remaining_annual_leave:0,accrued_annual_leave:0}],error:null}).then(resolve)}};return q}}}`,
+  '@/lib/supabase/employee-extra-leave': `const s=window.__bonus={entries:JSON.parse(sessionStorage.getItem('bonus')||'[]'),ready:true,fail:false,writes:0};export async function listExtraLeave(){return {ready:s.ready,entries:[...s.entries],balances:[{profileId:'a',available:s.entries.reduce((sum,e)=>sum+e.days-e.used,0)}]}};export async function saveExtraLeave(input){if(s.fail){s.fail=false;throw Error('추가 연차 저장 실패')}s.writes++;const entry=s.entries.find(e=>e.id===input.id);s.entries=input.remove?s.entries.filter(e=>e.id!==input.id):entry?s.entries.map(e=>e.id===input.id?{...e,...input,version:e.version+1}:e):[...s.entries,{...input,created:'2026-10-29',used:0,version:1}];sessionStorage.setItem('bonus',JSON.stringify(s.entries))}`,
+  '@/lib/supabase/client': `const s=window.__leave={remaining:JSON.parse(sessionStorage.getItem('remaining')||'"initial"'),writes:[],reads:0,fail:false,readFail:false};export function getSupabase(){return {rpc:async()=>({data:null,error:{code:'PGRST202',message:'server pending'}}),from(table){if(table!=='employee_roster')throw Error(table);const q={select(){return q},upsert:async row=>{s.writes.push(row);if(s.fail){s.fail=false;return {error:{message:'save failed'}}}s.remaining=row.remaining_annual_leave;sessionStorage.setItem('remaining',JSON.stringify(s.remaining));return {error:null}},then:resolve=>{s.reads++;return Promise.resolve(s.readFail?{data:null,error:{message:'read failed'}}:{data:[{profile_id:'a',remaining_annual_leave:s.remaining==='initial'?7.75:s.remaining,accrued_annual_leave:15},{profile_id:'b',remaining_annual_leave:0,accrued_annual_leave:0}],error:null}).then(resolve)}};return q}}}`,
 }
 const aliases = []
 for (const [index, [find, source]] of Object.entries(fixtures).entries()) {
@@ -55,16 +56,24 @@ try {
   await expiryPicker.getByRole('button', { name: '31일', exact: true }).click()
   await expiryPicker.getByRole('button', { name: '적용', exact: true }).click()
   assert.equal(await page.evaluate(() => window.__leave.writes.length), 0, '추가 연차 입력은 아직 저장하지 않음')
+  await page.evaluate(() => { window.__bonus.fail = true })
+  await additional.getByRole('button', { name: '이력에 추가', exact: true }).click()
+  await additional.getByRole('alert').waitFor()
+  assert.equal(await additional.getByRole('spinbutton', { name: '가 직원 추가 일수', exact: true }).inputValue(), '1.5')
   await additional.getByRole('button', { name: '이력에 추가', exact: true }).click()
   await additional.getByText('+1.5일', { exact: true }).waitFor()
   await additional.getByText('(26.12.31까지) [추가 사유 확인]', { exact: false }).waitFor()
+  assert.equal(await input.inputValue(), '9.25', '추가 연차 잔여에 합산')
+  await page.reload(); await input.waitFor(); assert.equal(await input.inputValue(), '9.25')
+  await page.getByRole('button', { name: '가 직원 추가 연차 추가', exact: true }).click()
+  await additional.getByText('+1.5일', { exact: true }).waitFor()
   await additional.getByRole('button', { name: '수정', exact: true }).click()
   await additional.getByRole('spinbutton', { name: '가 직원 추가 일수', exact: true }).fill('2')
   await additional.getByRole('button', { name: '수정 반영', exact: true }).click()
   await additional.getByText('+2일', { exact: true }).waitFor()
   await additional.getByRole('button', { name: '삭제', exact: true }).click()
+  await additional.getByRole('button', { name: '삭제 확인', exact: true }).click()
   await additional.getByText('추가 이력이 없습니다.', { exact: true }).waitFor()
-  assert.equal(await page.evaluate(() => window.__leave.writes.length), 0, '시안 이력 추가·수정·삭제는 실제 연차를 변경하지 않음')
   await additional.getByRole('button', { name: '닫기', exact: true }).click()
   assert.equal(await additional.count(), 0)
   assert.equal(await input.inputValue(), '7.75')
