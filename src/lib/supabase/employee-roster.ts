@@ -41,6 +41,7 @@ export const ROSTER_BASE_HEADERS: readonly { key: string; label: string; kind: R
   { key: 'fixedOvertimePlan', label: '고정OT 설계', kind: 'choice' },
   { key: 'inclusiveOvertimeHours', label: '약정 연장근로시간(포괄임금)', kind: 'number' },
   { key: 'accruedAnnualLeave', label: '발생일수', kind: 'number' },
+  { key: 'additionalAnnualLeave', label: '추가 연차', kind: 'number' },
   { key: 'remainingAnnualLeave', label: '남은 연차', kind: 'number' },
   ...ROSTER_FIELDS.map(field => ({ key: field.key, label: field.label, kind: (field.key === 'resignedOn' ? 'date' : ['annualSalary', 'monthlyWage', 'mealAllowance', 'carAllowance', 'childcareAllowance', 'dutyAllowance'].includes(field.key) ? 'money' : 'text') as RosterHeaderKind })),
 ]
