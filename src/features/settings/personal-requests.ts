@@ -24,6 +24,9 @@ export function isAllDayRequest(kind: RequestKind) { return isFullLeave(kind) ||
 export function isPartialLeave(kind: RequestKind) { return kind === 'half' || kind === 'quarter' }
 export function isLeaveRequest(kind: RequestKind) { return isFullLeave(kind) || isPartialLeave(kind) }
 export function isDirectRegistration(kind: RequestKind) { return isLeaveRequest(kind) || kind === 'offsite' }
+export function canCancelOwnRequest(request: Pick<PersonalRequest, 'kind' | 'status'>) {
+  return request.status === 'pending' || (request.status === 'approved' && isDirectRegistration(request.kind))
+}
 export function requiresDepartmentApproval(kind: RequestKind) { return kind === 'overtime' || kind === 'correction' }
 export function isSelfApprovedRequest(request: { status: PersonalRequest['status']; employeeId?: string; decidedBy?: string | null }) {
   return request.status === 'approved' && Boolean(request.employeeId && request.decidedBy && request.employeeId === request.decidedBy)
