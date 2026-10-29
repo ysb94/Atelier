@@ -126,6 +126,11 @@ try {
     const { verifyFefoLeave } = await import('./verify-leave-fefo-cases.mjs')
     await verifyFefoLeave({db,actor,value,create,ops,company,foreign})
   }
+  if (process.argv.includes('--birthday')) {
+    assert.ok(['--anniversary','--additional','--fefo'].every(flag=>process.argv.includes(flag)), '생일 검증에는 기존 연차 검증을 함께 실행합니다.')
+    const { verifyBirthdayLeave } = await import('./verify-birthday-leave-cases.mjs')
+    await verifyBirthdayLeave({db,actor,value,create,ops,company,foreign})
+  }
   console.log('leave-balance-db: 기존 값·정책 보존, 1/0.5/0.25일 차감, 주말·공휴일 제외, 취소 1회 복원, 기존 취소 무가산, 미등록·부족·타인·타사·직접 위조 차단, 외근·야근 무차감, 사용연도 확인 보존 통과')
 } catch(error) {
   console.error('leave-balance-db 실패:',error.message,{code:error.code,query:error.query})
