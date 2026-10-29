@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -85,22 +85,24 @@ export function LeaveBalancePanel() {
 
 function AdditionalLeaveInputs({ name }: { name: string }) {
   const [open, setOpen] = useState(false)
+  const dialog = useRef<HTMLDialogElement>(null)
   return <div className="space-y-2">
     <div className="flex items-center gap-2 whitespace-nowrap">
       <span className="tabular-nums">0일</span>
-      <Button type="button" variant="outline" size="sm" className="size-8 p-0" aria-label={`${name} 추가 연차 추가`} aria-expanded={open} onClick={() => setOpen(value => !value)}>+</Button>
+      <Button type="button" variant="outline" size="sm" className="size-8 p-0" aria-label={`${name} 추가 연차 추가`} aria-haspopup="dialog" aria-expanded={open} onClick={() => { dialog.current?.showModal(); setOpen(true) }}>+</Button>
     </div>
-    {open ? <div className="space-y-2 rounded-xl border border-border bg-card p-3" role="group" aria-label={`${name} 추가 연차 입력`}>
-      <div className="flex flex-wrap items-end gap-2">
-        <label className="space-y-1 text-xs"><span>추가 일수</span><Input aria-label={`${name} 추가 일수`} type="number" min="0.01" step="0.01" placeholder="예: 1.5" className="w-24"/></label>
-        <label className="space-y-1 text-xs"><span>메모</span><Input aria-label={`${name} 추가 연차 메모`} placeholder="추가 사유" maxLength={500} className="w-48"/></label>
-        <label className="space-y-1 text-xs"><span>사용 기한</span><Input aria-label={`${name} 추가 연차 사용 기한`} type="date" className="w-40"/></label>
+    <dialog ref={dialog} onClose={() => setOpen(false)} aria-label={`${name} 추가 연차 입력`} className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-md space-y-4 overflow-auto rounded-xl border border-border bg-card p-5 text-card-foreground shadow-lg backdrop:bg-black/40">
+      <h3 className="font-semibold">{name} · 추가 연차</h3>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="space-y-1 text-sm"><span>추가 일수</span><Input aria-label={`${name} 추가 일수`} type="number" min="0.01" step="0.01" placeholder="예: 1.5"/></label>
+        <label className="space-y-1 text-sm"><span>사용 기한</span><Input aria-label={`${name} 추가 연차 사용 기한`} type="date"/></label>
+        <label className="col-span-2 space-y-1 text-sm"><span>메모</span><Input aria-label={`${name} 추가 연차 메모`} placeholder="추가 사유" maxLength={500}/></label>
       </div>
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">입력 화면 미리보기 · 아직 저장되지 않습니다.</p>
-        <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>닫기</Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => dialog.current?.close()}>닫기</Button>
       </div>
-    </div> : null}
+    </dialog>
   </div>
 }
 

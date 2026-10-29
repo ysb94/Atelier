@@ -45,7 +45,7 @@ try {
   const input = page.getByRole('spinbutton', { name: '가 직원 남은 연차 입력', exact: true })
   await input.waitFor()
   await page.getByRole('button', { name: '가 직원 추가 연차 추가', exact: true }).click()
-  const additional = page.getByRole('group', { name: '가 직원 추가 연차 입력', exact: true })
+  const additional = page.getByRole('dialog', { name: '가 직원 추가 연차 입력', exact: true })
   await additional.getByRole('spinbutton', { name: '가 직원 추가 일수', exact: true }).fill('1.5')
   await additional.getByRole('textbox', { name: '가 직원 추가 연차 메모', exact: true }).fill('추가 사유 확인')
   await additional.getByLabel('가 직원 추가 연차 사용 기한', { exact: true }).fill('2026-12-31')
