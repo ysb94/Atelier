@@ -79,7 +79,7 @@ export function LeaveBalancePanel() {
               <td className="whitespace-nowrap px-4 py-3 tabular-nums">{member.hireDate || <MissingValue/>}</td>
               <td className="px-4 py-3 tabular-nums" aria-label={`${memberLabel(member.displayName)} 발생일수`}>{balance && balance.accruedAnnualLeave === undefined ? '조회 실패' : balance?.accruedAnnualLeave == null ? <MissingValue/> : `${balance.accruedAnnualLeave}일`}</td>
               <td className="px-4 py-3" aria-label={`${memberLabel(member.displayName)} 추가 연차`}>
-                <AdditionalLeaveInputs name={memberLabel(member.displayName)} employeeId={member.id} entries={extras.data?.entries.filter(entry => entry.employeeId === member.id) ?? []} available={balance?.additionalAnnualLeave} ready={extras.data?.ready === true && !extras.isError}/>
+                <AdditionalLeaveInputs name={memberLabel(member.displayName)} employeeId={member.id} entries={extras.data?.entries.filter(entry => entry.employeeId === member.id) ?? []} baseRegistered={balance?.remainingAnnualLeave != null} available={extras.data?.ready ? extras.data.balances.find(row => row.profileId === member.id)?.available ?? 0 : undefined} ready={extras.data?.ready === true && !extras.isError}/>
               </td>
               <td className="px-4 py-2"><RemainingLeaveEditor profileId={member.id} name={memberLabel(member.displayName)} value={balance?.remainingAnnualLeave ?? null}/></td>
             </tr>)}
@@ -89,7 +89,7 @@ export function LeaveBalancePanel() {
   </OpsPanelFrame>
 }
 
-function AdditionalLeaveInputs({ name, employeeId, entries, available, ready }: { name: string; employeeId: string; entries: ExtraLeave[]; available?: number; ready: boolean }) {
+function AdditionalLeaveInputs({ name, employeeId, entries, available, ready, baseRegistered }: { name: string; employeeId: string; entries: ExtraLeave[]; available?: number; ready: boolean; baseRegistered: boolean }) {
   const [open, setOpen] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
   const [editing, setEditing] = useState<ExtraLeave | null>(null)
@@ -111,7 +111,7 @@ function AdditionalLeaveInputs({ name, employeeId, entries, available, ready }: 
   const dateLabel = (date: string) => date.slice(2).replaceAll('-', '.')
   return <div className="space-y-2">
     <div className="flex items-center gap-2 whitespace-nowrap">
-      <span className="tabular-nums">{available === undefined ? '조회 대기' : `${available}일`}</span>
+      <span className="tabular-nums">{!baseRegistered ? '기본 연차 미등록' : available === undefined ? '조회 대기' : `${available}일`}</span>
       <Button type="button" variant="outline" size="sm" className="size-8 p-0" aria-label={`${name} 추가 연차 추가`} aria-haspopup="dialog" aria-expanded={open} onClick={() => { dialog.current?.showModal(); setOpen(true) }}>+</Button>
     </div>
     <dialog ref={dialog} onClose={() => setOpen(false)} aria-label={`${name} 추가 연차 입력`} className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-md space-y-4 overflow-auto rounded-xl border border-border bg-card p-5 text-card-foreground shadow-lg backdrop:bg-black/40">
@@ -123,7 +123,7 @@ function AdditionalLeaveInputs({ name, employeeId, entries, available, ready }: 
         setMessage('')
         mutation.mutate({ id: editing?.id ?? newId, employeeId, days: amount, expires, note: note.trim(), version: editing?.version ?? 0 })
       }}>
-      <fieldset disabled={!ready || mutation.isPending} className="space-y-3">
+      <fieldset disabled={!ready || !baseRegistered || mutation.isPending} className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
         <label className="space-y-1 text-sm"><span>추가 일수</span><Input aria-label={`${name} 추가 일수`} type="number" min="0.01" max="99999.99" step="0.01" required value={days} onChange={event => setDays(event.target.value)} placeholder="예: 1.5"/></label>
         <div className="space-y-1 text-sm"><span>사용 기한</span><HireDateScrollField label={`${name} 추가 연차 사용 기한`} value={expires} min="1950-01-01" max={`${Number(koreaDateKey().slice(0, 4)) + 5}-12-31`} clearable={false} className="w-full" onChange={setExpires}/></div>
@@ -155,7 +155,7 @@ function AdditionalLeaveInputs({ name, employeeId, entries, available, ready }: 
         </ul>}
       </section>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">{ready ? '사용 기한 당일까지 반영됩니다. 사용·예약한 이력은 삭제할 수 없습니다.' : '서버 연결 전에는 추가·수정·삭제할 수 없습니다.'}</p>
+        <p className="text-xs text-muted-foreground">{!baseRegistered ? '기본 잔여 연차를 먼저 등록해 주세요.' : ready ? '사용 기한 당일까지 반영됩니다. 사용·예약한 이력은 삭제할 수 없습니다.' : '서버 연결 전에는 추가·수정·삭제할 수 없습니다.'}</p>
         <Button type="button" size="sm" variant="outline" onClick={() => dialog.current?.close()}>닫기</Button>
       </div>
     </dialog>
