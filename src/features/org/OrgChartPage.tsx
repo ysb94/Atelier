@@ -18,6 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import {
   canEditOrgAssignment,
   OPERATIONS_SUPPORT_DEPARTMENT,
@@ -727,10 +728,12 @@ function MemberAssignmentTable({
   const [error, setError] = useState<string | null>(null)
   const [sort, setSort] = useState<{ key: AssignmentSortKey; direction: 'asc' | 'desc' } | null>(null)
   const [headersOpen, setHeadersOpen] = useState(false)
+  const active = useWorkspaceTabActivity()
   const rosterQuery = useQuery({
     queryKey: ['employee-roster'],
     queryFn: listEmployeeRosters,
     enabled: canChange,
+    refetchInterval: canChange && active ? 30_000 : false,
   })
   const rosters = useMemo(() => {
     const map = new Map<string, EmployeeRoster>()

@@ -75,6 +75,7 @@
     "verify:meeting-participation": "tsx src/features/meetings/meeting-participation.verify.ts && node scripts/verify-meetings-db.mjs && node scripts/verify-page-preview-browser.mjs --participation-only",
     "verify:meetings-browser": "node scripts/verify-page-preview-browser.mjs --meetings-only",
     "verify:personal-requests": "node --experimental-strip-types src/features/settings/personal-requests.verify.ts",
+    "verify:leave-balance": "node scripts/verify-leave-balance-db.mjs",
     "verify:chat-files": "tsx src/lib/chat/file-rules.verify.ts",
     "verify:chat-list": "tsx src/lib/inbox/format.verify.ts",
     "verify:chat-thread": "tsx --tsconfig tsconfig.app.json src/lib/chat/thread-layout.verify.ts",

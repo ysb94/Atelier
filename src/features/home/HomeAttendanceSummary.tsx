@@ -31,6 +31,7 @@ export function HomeAttendanceSummary() {
     queryKey: ['my-attendance-basis', userId, month],
     queryFn: () => getMyAttendanceBasis(userId, month),
     enabled: allowed && active,
+    refetchInterval: allowed && active ? 30_000 : false,
   })
   const leaves = useQuery({
     queryKey: ['home-my-leave', userId, dates[0], dates[dates.length - 1]],

@@ -20,7 +20,12 @@ export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' = 'mine') {
     refetchInterval: active && allowed ? 30_000 : false,
   })
   useEffect(() => { if (query.error) console.warn('[leave-requests] 신청 조회 실패', query.error) }, [query.error])
-  async function refresh() { await client.invalidateQueries({ queryKey: ['company-leave-requests'] }) }
+  async function refresh() {
+    await Promise.all([
+      'company-leave-requests', 'my-attendance-basis', 'home-my-leave',
+      'employee-roster', 'leave-notice-management', 'meeting-availability',
+    ].map(key => client.invalidateQueries({ queryKey: [key] })))
+  }
   const create = useMutation({
     mutationFn: (form: RequestForm) => {
       if (!userId) throw new Error('로그인 상태를 확인해 주세요.')
