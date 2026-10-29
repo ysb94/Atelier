@@ -12,6 +12,8 @@ import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import { listEmployeeRosters, saveEmployeeRosterField } from '@/lib/supabase/employee-roster'
 import { memberLabel, OpsPanelFrame, OpsStat } from './OpsStat'
 import { useOpsDirectory } from './ops-directory'
+import { HireDateScrollField } from '@/features/org/HireDateScrollField'
+import { koreaDateKey } from '@/features/settings/my-attendance'
 
 export function LeaveBalancePanel() {
   useRenderWatch('LeaveBalancePanel')
@@ -89,9 +91,9 @@ function AdditionalLeaveInputs({ name }: { name: string }) {
   const [entries, setEntries] = useState<{ id: string; days: number; expires: string; note: string; created: string }[]>([])
   const [editing, setEditing] = useState<string | null>(null)
   const [days, setDays] = useState('')
-  const [expires, setExpires] = useState('')
+  const [expires, setExpires] = useState(koreaDateKey)
   const [note, setNote] = useState('')
-  function clearInput() { setEditing(null); setDays(''); setExpires(''); setNote('') }
+  function clearInput() { setEditing(null); setDays(''); setExpires(koreaDateKey()); setNote('') }
   const dateLabel = (date: string) => date.slice(2).replaceAll('-', '.')
   return <div className="space-y-2">
     <div className="flex items-center gap-2 whitespace-nowrap">
@@ -110,7 +112,7 @@ function AdditionalLeaveInputs({ name }: { name: string }) {
       }}>
       <div className="grid grid-cols-2 gap-3">
         <label className="space-y-1 text-sm"><span>추가 일수</span><Input aria-label={`${name} 추가 일수`} type="number" min="0.01" max="99999.99" step="0.01" required value={days} onChange={event => setDays(event.target.value)} placeholder="예: 1.5"/></label>
-        <label className="space-y-1 text-sm"><span>사용 기한</span><Input aria-label={`${name} 추가 연차 사용 기한`} type="date" required value={expires} onChange={event => setExpires(event.target.value)}/></label>
+        <div className="space-y-1 text-sm"><span>사용 기한</span><HireDateScrollField label={`${name} 추가 연차 사용 기한`} value={expires} min="1950-01-01" max={`${Number(koreaDateKey().slice(0, 4)) + 5}-12-31`} clearable={false} className="w-full" onChange={setExpires}/></div>
         <label className="col-span-2 space-y-1 text-sm"><span>메모</span><Input aria-label={`${name} 추가 연차 메모`} placeholder="추가 사유" maxLength={500} required value={note} onChange={event => setNote(event.target.value)}/></label>
       </div>
       <div className="flex justify-end gap-2">
