@@ -43,11 +43,11 @@ export function DraftSampleProgress({ orders, originCountry, readOnly = false, s
       const registered = order.receivedAt ? sampleTripSpanDays(order.shippedAt, order.receivedAt) : sampleElapsedDays(order.shippedAt)
       const received = sampleElapsedDays(order.receivedAt ?? null)
       const current = order.id === latest?.id
-      return <section key={order.id} aria-label={sampleOrderLabel(order)} className="draft-sample-round">
+      return <section key={order.id} aria-label={sampleOrderLabel(order, list)} className="draft-sample-round">
         <div className="draft-sample-route">
           <div className="draft-sample-heading">
             <span className="draft-sample-country" title={country.label}>{country.code}<span aria-hidden="true"> | </span></span>
-            <a href={order.url!} download={order.name} title="작업지시서 내려받기">{sampleOrderLabel(order)} {sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}</a>
+            <a href={order.url!} download={order.name} title="작업지시서 내려받기">{sampleOrderLabel(order, list)} {sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}</a>
             {registered !== null && <span className="draft-sample-registered-elapsed" title={order.receivedAt ? '작업지시서 등록부터 실물 수령까지 걸린 일수' : '작업지시서 등록 후 경과일'}>({registered}일{order.receivedAt ? '' : ' 경과'})</span>}
           </div>
           {!order.receivedAt && <p className="draft-sample-dispatch">{country.code === 'CN'
@@ -56,15 +56,15 @@ export function DraftSampleProgress({ orders, originCountry, readOnly = false, s
           {current && !order.passed && !order.receivedAt && <Button type="button" size="sm" variant="outline" className="draft-sample-receive" disabled={readOnly || saving || busy || !canReceiveSample(order, originCountry)}
             title="실물을 받은 뒤 확인하세요. 수령 확인은 합격 처리가 아닙니다." onClick={() => void run(() => onReceive(order.id))}>{busy ? '저장 중' : '수령 확인'}</Button>}
         </div>
-        <div className="draft-sample-interval">
+        {current ? <div className="draft-sample-interval">
           {order.receivedAt ? <>
             {received !== null && <strong className="draft-sample-received-elapsed" title={`수령일 ${sampleHistoryDay(order.receivedAt)}`}>+ {received} days</strong>}
-            {current && !order.passed && <div className="draft-sample-next-actions">
+            {!order.passed && <div className="draft-sample-next-actions">
               <Button type="button" size="sm" variant="outline" onClick={onOpen}>다음샘플</Button>
             </div>}
           </> : <span className="draft-sample-waiting">{order.passed ? '이전 기록 · 수령일 기록 없음' : '실물 수령 대기'}</span>}
           {order.passed && <p className="draft-sample-passed">샘플 합격</p>}
-        </div>
+        </div> : null}
       </section>
     })}
     {error && <p role="alert" className="text-sm text-danger">{error}</p>}

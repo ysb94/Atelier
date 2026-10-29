@@ -24,6 +24,7 @@ export const GLOBAL_SEARCH_KEY = 'masmarulezGlobalSearch'
 export const VIDEO_UPLOAD_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.m4v'])
 
 export const FILE_TYPE_ICON_META = {
+  glb: { icon: '🧊', title: '3D 모델' },
   mp4: { icon: '🎬', title: '동영상' },
   webm: { icon: '🎬', title: '동영상' },
   mov: { icon: '🎬', title: '동영상' },

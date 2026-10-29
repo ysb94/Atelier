@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
   Check,
   ChevronLeft,
@@ -53,12 +53,14 @@ import {
   startColorSamples,
 } from '@/lib/drafts/draft-flow'
 import { applySampleOrigin, sampleCountry } from '@/lib/drafts/sample-receipt'
+import { sampleOrderLabel } from '@/lib/drafts/sample-registration'
 import {
   attachSampleWorkOrderFile,
   draftToInput,
   canPassLatestSampleWorkOrder,
   failLatestSampleWorkOrder,
   isSamplePassed,
+  filledSampleWorkOrders,
   latestFilledSampleWorkOrder,
   legacyWorkOrderFields,
   patchSampleWorkOrder,
@@ -306,6 +308,8 @@ export function DraftEditPage() {
   const queryClient = useQueryClient()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const basicWorkOrderInputRef = useRef<HTMLInputElement>(null)
+  const sampleFileTargetRef = useRef<string | null>(null)
+  const location = useLocation()
   const workOrderInputRef = useRef<HTMLInputElement>(null)
   const uploadOrderIdRef = useRef<string | null>(null)
   const uploadColorIdRef = useRef<string | null>(null)
@@ -438,7 +442,12 @@ export function DraftEditPage() {
   }
 
   const currentSample = latestFilledSampleWorkOrder(form.sampleWorkOrders)
+  const savedSamples = filledSampleWorkOrders(form.sampleWorkOrders).slice().sort((left, right) => left.round - right.round)
   const sampleRound = currentSample?.round ?? 1
+  useEffect(() => {
+    if (location.hash !== '#next-sample') return
+    document.getElementById('next-sample')?.scrollIntoView({ block: 'start' })
+  }, [location.hash, savedSamples.length])
   const samplePhaseNow = samplePhase(form.sampleWorkOrders)
   const sampleStatus =
     samplePhaseNow === 'passed'
@@ -484,6 +493,46 @@ export function DraftEditPage() {
       console.warn('[drafts] 샘플 작업 지시서 업로드 실패', err)
       setError('작업 지시서를 불러오지 못했습니다.')
     }
+  }
+
+  async function replaceSavedSampleFile(orderId: string, file: File) {
+    const order = form.sampleWorkOrders.find((item) => item.id === orderId)
+    if (!order || order.shipped || order.passed) return
+    if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) {
+      setError('작업 지시서는 8MB 이하만 올릴 수 있습니다.')
+      return
+    }
+    try {
+      const url = await readFileAsDataUrl(file)
+      const sampleWorkOrders = patchSampleWorkOrder(form.sampleWorkOrders, orderId, {
+        url,
+        name: file.name,
+        shipped: false,
+        shippedAt: order.shippedAt ?? new Date().toISOString(),
+        returnedAt: null,
+      })
+      const nextForm = { ...form, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) }
+      patchWorkOrders(sampleWorkOrders)
+      if (!isNew) saveMutation.mutate(nextForm)
+    } catch (err) {
+      console.warn('[drafts] 샘플 작업 지시서 교체 실패', err)
+      setError('작업 지시서를 불러오지 못했습니다.')
+    }
+  }
+
+  function updateSavedSampleCountry(orderId: string, originCountry: string) {
+    const china = sampleCountry(originCountry).code === 'CN'
+    const sampleWorkOrders = form.sampleWorkOrders.map((order) => order.id === orderId && !order.shipped && !order.passed ? {
+      ...order,
+      originCountry,
+      assigneeId: china ? order.assigneeId : null,
+      assigneeName: china ? order.assigneeName : '',
+    } : order)
+    const latest = latestFilledSampleWorkOrder(sampleWorkOrders)
+    const nextOrigin = latest?.id === orderId ? originCountry : form.originCountry
+    const nextForm = { ...form, originCountry: nextOrigin, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) }
+    patch({ originCountry: nextOrigin, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) })
+    if (!isNew) saveMutation.mutate(nextForm)
   }
 
   function patchColor(
@@ -773,19 +822,22 @@ export function DraftEditPage() {
                   </div>
                 </div>
               </div>
-          <div className="mt-2 border-t border-border pt-5">
-            <input
-              ref={basicWorkOrderInputRef}
-              type="file"
-              accept={SAMPLE_WORK_ORDER_ACCEPT}
-              className="hidden"
-              onChange={(event) => {
-                const file = event.target.files?.[0]
-                event.target.value = ''
-                if (file) void uploadBasicWorkOrder(file)
-              }}
-            />
-            <p className="text-center">
+          <input
+            ref={basicWorkOrderInputRef}
+            type="file"
+            accept={SAMPLE_WORK_ORDER_ACCEPT}
+            className="hidden"
+            onChange={(event) => {
+              const file = event.target.files?.[0]
+              const orderId = sampleFileTargetRef.current
+              event.target.value = ''
+              sampleFileTargetRef.current = null
+              if (!file) return
+              if (orderId) void replaceSavedSampleFile(orderId, file)
+              else void uploadBasicWorkOrder(file)
+            }}
+          />
+          {savedSamples.length === 0 ? <div className="mt-2 border-t border-border pt-5"><p className="text-center">
               <span className="inline-flex rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">{sampleStatus}</span>
             </p>
             <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
@@ -830,8 +882,39 @@ export function DraftEditPage() {
                 )}
               </div>
             </div>
-          </div>
-          <SampleWorkOrderRegistration originCountry={form.originCountry} nextRound={(latestFilledSampleWorkOrder(form.sampleWorkOrders)?.round ?? 1) + 1} readOnly={!editable} saving={saveMutation.isPending}
+          </div> : savedSamples.map((order) => {
+            const countryValue = (DRAFT_ORIGIN_OPTIONS as readonly string[]).includes(order.originCountry || '') ? order.originCountry! : ((DRAFT_ORIGIN_OPTIONS as readonly string[]).includes(form.originCountry) ? form.originCountry : '')
+            const locked = order.shipped || order.passed
+            const status = order.passed ? '합격' : order.shipped ? '발송' : '진행'
+            return (
+              <div key={order.id} className="mt-2 border-t border-border pt-5">
+                <p className="text-center">
+                  <span className="inline-flex rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">{sampleOrderLabel(order, savedSamples)} {status}</span>
+                </p>
+                <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                  <span />
+                  <p className="text-sm text-muted-foreground">{sampleOrderLabel(order, savedSamples)} 작업지시서 업로드</p>
+                  <div className="justify-self-end">
+                    <Button type="button" variant="outline" size="sm" disabled={!editable || locked || saveMutation.isPending} onClick={() => { sampleFileTargetRef.current = order.id; basicWorkOrderInputRef.current?.click() }}>
+                      <Upload className="size-3.5" />
+                      올리기
+                    </Button>
+                  </div>
+                </div>
+                <div className="mt-4 grid items-center gap-4 sm:grid-cols-[240px_minmax(0,1fr)]">
+                  <div>
+                    <OptionSelect className="h-11" value={countryValue} options={DRAFT_ORIGIN_OPTIONS} placeholder="제조국 선택" onChange={(originCountry) => updateSavedSampleCountry(order.id, originCountry)} />
+                    <p className="mt-1 text-xs text-muted-foreground">중국은 중국팀으로 전달되고, 한국은 전송하지 않고 기록만 남습니다.</p>
+                  </div>
+                  <div className="flex min-h-16 items-center justify-center rounded-xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
+                    {order.url ? <a href={order.url} download={sampleWorkOrderFileName(order)} className="max-w-full truncate text-foreground underline-offset-2 hover:underline">{sampleWorkOrderFileName(order)}</a> : '올린 파일이 없습니다.'}
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+          <div id="next-sample">
+          <SampleWorkOrderRegistration originCountry={form.originCountry} nextRound={(latestFilledSampleWorkOrder(form.sampleWorkOrders)?.round ?? 1) + 1} latestIsFinal={savedSamples.at(-1)?.sampleStage === 'final'} finalCount={savedSamples.filter((order) => order.sampleStage === 'final').length} readOnly={!editable} saving={saveMutation.isPending}
             onRegister={async (stage, file, country) => {
               if (isNew || !draftId) throw new Error('1차 작업지시서를 먼저 저장해 주세요.')
               const current = await getProductDraftById(draftId)
@@ -840,6 +923,7 @@ export function DraftEditPage() {
               const saved = await saveMutation.mutateAsync({ ...nextForm, expectedUpdatedAt: current.updatedAt })
               setForm(draftToInput(saved))
             }} />
+          </div>
 
         </SectionCard>
         ) : (

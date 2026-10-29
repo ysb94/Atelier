@@ -31,12 +31,14 @@ export const ROSTER_FIELDS = [
 export type RosterColumnKind = 'text' | 'number' | 'money'
 export type RosterHeaderKind = RosterColumnKind | 'date' | 'choice'
 export type RosterHeaderSetting = { key: string; label: string; hidden: boolean }
+export const FIXED_OVERTIME_PLANS = ['유형 1', '유형 2'] as const
 export const ROSTER_BASE_HEADERS: readonly { key: string; label: string; kind: RosterHeaderKind }[] = [
   { key: 'name', label: '이름', kind: 'text' },
   { key: 'department', label: '부서', kind: 'choice' },
   { key: 'duty', label: '직책', kind: 'choice' },
   { key: 'grade', label: '직급', kind: 'choice' },
   { key: 'hire', label: '입사일', kind: 'date' },
+  { key: 'fixedOvertimePlan', label: '고정OT 설계', kind: 'choice' },
   { key: 'inclusiveOvertimeHours', label: '약정 연장근로시간(포괄임금)', kind: 'number' },
   { key: 'remainingAnnualLeave', label: '남은 연차', kind: 'number' },
   ...ROSTER_FIELDS.map(field => ({ key: field.key, label: field.label, kind: (field.key === 'resignedOn' ? 'date' : ['annualSalary', 'monthlyWage', 'mealAllowance', 'carAllowance', 'childcareAllowance', 'dutyAllowance'].includes(field.key) ? 'money' : 'text') as RosterHeaderKind })),
@@ -44,18 +46,20 @@ export const ROSTER_BASE_HEADERS: readonly { key: string; label: string; kind: R
 export type RosterColumn = { id: string; label: string; kind: RosterColumnKind; sortOrder: number }
 export type RosterColumnValue = { columnId: string; profileId: string; value: string }
 export type RosterFieldKey = (typeof ROSTER_FIELDS)[number]['key']
-export type RosterWriteFieldKey = RosterFieldKey | 'remainingAnnualLeave' | 'inclusiveOvertimeHours'
+export type RosterWriteFieldKey = RosterFieldKey | 'remainingAnnualLeave' | 'inclusiveOvertimeHours' | 'fixedOvertimePlan'
 
 export type EmployeeRoster = {
   profileId: string
   remainingAnnualLeave: number | null
   inclusiveOvertimeHours: number | null
+  fixedOvertimePlan: string
 } & Record<RosterFieldKey, string>
 
 type RosterRow = {
   profile_id: string
   remaining_annual_leave: number | null
   inclusive_overtime_hours: number | null
+  fixed_overtime_plan: string
   phone: string
   bank_name: string
   bank_account: string
@@ -83,13 +87,14 @@ type RosterRow = {
 }
 
 const ROSTER_COLUMNS =
-  'profile_id, remaining_annual_leave, inclusive_overtime_hours, phone, bank_name, bank_account, resident_id, home_address, gmail, naver_email, workplace, employment_type, gender, resigned_on, job_description, work_days, work_hours, break_time, pay_basis, annual_salary, monthly_wage, meal_allowance, car_allowance, childcare_allowance, duty_allowance, note, extra'
+  'profile_id, remaining_annual_leave, fixed_overtime_plan, inclusive_overtime_hours, phone, bank_name, bank_account, resident_id, home_address, gmail, naver_email, workplace, employment_type, gender, resigned_on, job_description, work_days, work_hours, break_time, pay_basis, annual_salary, monthly_wage, meal_allowance, car_allowance, childcare_allowance, duty_allowance, note, extra'
 
 export function emptyRoster(profileId: string): EmployeeRoster {
   return {
     profileId,
     remainingAnnualLeave: null,
     inclusiveOvertimeHours: null,
+    fixedOvertimePlan: '',
     phone: '',
     bankName: '',
     bankAccount: '',
@@ -122,6 +127,7 @@ function fromRow(row: RosterRow): EmployeeRoster {
     profileId: row.profile_id,
     remainingAnnualLeave: row.remaining_annual_leave == null ? null : Number(row.remaining_annual_leave),
     inclusiveOvertimeHours: row.inclusive_overtime_hours == null ? null : Number(row.inclusive_overtime_hours),
+    fixedOvertimePlan: row.fixed_overtime_plan ?? '',
     phone: row.phone,
     bankName: row.bank_name,
     bankAccount: row.bank_account,
@@ -167,9 +173,14 @@ export async function saveEmployeeRosterField(
   value: string,
 ): Promise<void> {
   const numericColumn = field === 'remainingAnnualLeave' ? 'remaining_annual_leave' : field === 'inclusiveOvertimeHours' ? 'inclusive_overtime_hours' : null
-  const spec = numericColumn ? { column: numericColumn } : ROSTER_FIELDS.find((item) => item.key === field)
+  const spec = field === 'fixedOvertimePlan' ? { column: 'fixed_overtime_plan' } : numericColumn ? { column: numericColumn } : ROSTER_FIELDS.find((item) => item.key === field)
   if (!spec) throw new Error('저장할 명부 항목을 찾지 못했습니다.')
   let stored: string | number | null = field === 'resignedOn' ? value || null : value
+  if (field === 'fixedOvertimePlan') {
+    const plan = value.trim()
+    if (plan && !FIXED_OVERTIME_PLANS.some(option => option === plan)) throw new Error('고정OT 설계는 유형 1 또는 유형 2를 선택해 주세요.')
+    stored = plan
+  }
   if (numericColumn) {
     const text = value.trim()
     if (text && (!/^[+-]?(?:\d+(?:\.\d{0,2})?|\.\d{1,2})$/.test(text) || !Number.isFinite(Number(text)) || Math.abs(Number(text)) > 99999.99)) {

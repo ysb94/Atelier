@@ -155,10 +155,11 @@ function ReleasedHeaderActions() {
   return (
     <div
       ref={rootRef}
-      className="relative mr-10 flex shrink-0 items-center gap-0.5 px-1.5 pt-2"
+      className="relative mr-1.5 flex shrink-0 items-center gap-0.5 self-center px-0.5"
     >
       <AttendanceStatusActions />
       <LeaveUsageNoticeReceiver notices={leaveNotices}/>
+      <KoreaHeaderClock />
       <HeaderIconButton
         buttonRef={chatButtonRef}
         label={open === 'chat' ? '채팅 닫기' : '채팅'}
@@ -220,6 +221,36 @@ function ReleasedHeaderActions() {
         </div>, overlayContainer,
       ) : null}
     </div>
+  )
+}
+
+function koreaClockLabel(date: Date) {
+  const parts = new Intl.DateTimeFormat('ko-KR', {
+    timeZone: 'Asia/Seoul',
+    month: 'numeric',
+    day: 'numeric',
+    weekday: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).formatToParts(date)
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? ''
+  return `${part('month')}월 ${part('day')}일 (${part('weekday')}) ${part('dayPeriod')} ${part('hour')}:${part('minute')}`
+}
+
+function KoreaHeaderClock() {
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+  return (
+    <time
+      dateTime={now.toISOString()}
+      className="inline-flex h-7 items-center rounded-full bg-primary px-2 text-sm font-medium whitespace-nowrap text-primary-foreground tabular-nums"
+    >
+      {koreaClockLabel(now)}
+    </time>
   )
 }
 

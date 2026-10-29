@@ -3,7 +3,7 @@ import { emptyDraftInput, newColorRow } from './empty-draft'
 import { attachSampleWorkOrderFile, normalizeSampleWorkOrders, sanitizeSampleWorkOrders, setLatestSampleWorkOrderShipped } from './sample-work-order'
 import { receiveSample } from './sample-receipt'
 import { normalizeColorSampleRounds } from './draft-flow'
-import { registerDraftSampleStage, sampleOrderLabel } from './sample-registration'
+import { finalSampleLabel, registerDraftSampleStage, sampleOrderLabel, sampleRegistrationLabel } from './sample-registration'
 
 const attached = attachSampleWorkOrderFile([], {url:'data:file,first',name:'first.xlsx'}, '2026-10-20T01:00:00Z')
 const shipped = setLatestSampleWorkOrderShipped(attached, true, '2026-10-21T01:00:00Z')
@@ -28,6 +28,9 @@ const final=registerDraftSampleStage(input,'final',file,'중국',at)
 const restored=normalizeSampleWorkOrders(JSON.parse(JSON.stringify(sanitizeSampleWorkOrders(final.sampleWorkOrders))))
 assert.equal(restored[1]!.sampleStage,'final')
 assert.equal(sampleOrderLabel(restored[1]!),'최종 샘플','재조회 후에도 최종 종류 유지')
+assert.equal(finalSampleLabel(1),'최최종 샘플')
+assert.equal(finalSampleLabel(2),'최최최종 샘플')
+assert.equal(sampleRegistrationLabel('final', 4, 1),'최최종 샘플')
 assert.equal(restored[1]!.passed,false,'최종 등록이 자동 합격 처리가 되지 않음')
 assert.throws(()=>registerDraftSampleStage(input,'color',file,'중국'),/대표 샘플 합격/)
 const passed={...input,sampleDone:true,sampleWorkOrders:orders.map(o=>({...o,passed:true,passedAt:at})),colors:[{...newColorRow(),name:'블랙'},{...newColorRow(),name:'아이보리'}],specs:{...input.specs,colorsConfirmed:true}}

@@ -30,6 +30,7 @@ import {
   listRosterColumns,
   listRosterHeaderSettings,
   ROSTER_BASE_HEADERS,
+  FIXED_OVERTIME_PLANS,
   type RosterHeaderSetting,
   listRosterColumnValues,
   ROSTER_FIELDS,
@@ -898,6 +899,7 @@ function MemberAssignmentTable({
               <AssignmentSortHeader hidden={!showHeader('duty')} label={headerLabel('duty', '직책')} column="duty" sort={sort} onSort={toggleSort} />
               <AssignmentSortHeader hidden={!showHeader('grade')} label={headerLabel('grade', '직급')} column="grade" sort={sort} onSort={toggleSort} />
               <AssignmentSortHeader hidden={!showHeader('hire')} label={headerLabel('hire', '입사일')} column="hire" sort={sort} onSort={toggleSort} />
+              {canChange ? <AssignmentSortHeader hidden={!showHeader('fixedOvertimePlan')} label={headerLabel('fixedOvertimePlan', '고정OT 설계')} column="fixedOvertimePlan" sort={sort} onSort={toggleSort} hint="고정OT 설계 유형을 선택합니다. 약정 연장근로시간은 오른쪽에서 별도로 관리합니다." /> : null}
               {canChange ? <AssignmentSortHeader hidden={!showHeader('inclusiveOvertimeHours')} label={headerLabel('inclusiveOvertimeHours', '약정 연장근로시간(포괄임금)')} column="inclusiveOvertimeHours" sort={sort} onSort={toggleSort} hint="포괄임금에 포함된 월 연장근로시간입니다. 비우면 미등록이며, 추가 근무가 이 시간을 넘으면 추가수당 대상입니다." /> : null}
               {canChange ? <AssignmentSortHeader hidden={!showHeader('remainingAnnualLeave')} label={headerLabel('remainingAnnualLeave', '남은 연차')} column="remainingAnnualLeave" sort={sort} onSort={toggleSort} hint="잔여 일수를 직접 입력합니다. 입력 후 다른 칸을 누르면 저장되며, 신청 시 자동 차감되지 않습니다." /> : null}
               {canChange
@@ -987,6 +989,16 @@ function MemberAssignmentTable({
                       onChange={(value) => commit(member, 'hire', value)}
                     />
                   </td>
+                  {canChange && showHeader('fixedOvertimePlan') ? <td className="whitespace-nowrap px-4 py-2" aria-label={`${memberName(member)} 고정OT 설계`}>
+                    {rosterQuery.isPending ? '불러오는 중…' : rosterQuery.isError ? '조회 실패' : <AssignmentSelect
+                      label={`${memberName(member)} 고정OT 설계 선택`} value={rosters.get(member.id)?.fixedOvertimePlan ?? ''}
+                      disabled={rosterMutation.isPending} options={FIXED_OVERTIME_PLANS.map(value => ({ value, label: value }))}
+                      onChange={value => {
+                        if (value === (rosters.get(member.id)?.fixedOvertimePlan ?? '')) return
+                        setError(null)
+                        rosterMutation.mutate({ profileId: member.id, field: 'fixedOvertimePlan', value })
+                      }} />}
+                  </td> : null}
                   {canChange && showHeader('inclusiveOvertimeHours') ? <td className="whitespace-nowrap px-4 py-2 text-right tabular-nums" aria-label={`${memberName(member)} 약정 연장근로시간`}>
                     {rosterQuery.isPending ? '불러오는 중…' : rosterQuery.isError ? '조회 실패' : <div className="flex items-center justify-end gap-1">
                       <RosterField label={`${memberName(member)} 약정 연장근로시간 입력`} value={String(rosters.get(member.id)?.inclusiveOvertimeHours ?? '')}

@@ -67,7 +67,21 @@ export async function startDevelopment(viteArgs = [], structurePort = Number(pro
     if (await existingManager(automationPort)) console.info(`[dev] 기존 자동화 관리자 사용: http://127.0.0.1:${automationPort}/health`)
     else if (!stopping) automation = launch(path.resolve(toolDir, '../ai-workflow/serve.mjs'), [], false, '자동화 관리자')
   } catch (error) { console.warn('[dev] 자동화 설정 확인 실패. Atelier 개발 서버는 계속 실행합니다.', error.message) }
-  return { vite, structure, automation, stop, url }
+  let tripo = null
+  try {
+    let occupied = false, reusable = false
+    try {
+      const response = await fetch('http://127.0.0.1:4320/health', { signal: AbortSignal.timeout(1500) })
+      occupied = true
+      if (response.ok) { const data = await response.json(); reusable = data.tool === 'atelier-tripo-local' && normalized(data.root) === normalized(root) }
+    } catch (error) {
+      if (error.cause?.code !== 'ECONNREFUSED') { occupied = true; console.warn('[dev] Tripo 로컬 서버 확인 실패', error.message) }
+    }
+    if (reusable) console.info('[dev] 기존 Tripo 로컬 제작 서버 사용')
+    else if (occupied) console.warn('[dev] 4320 포트를 확인하세요. Tripo 로컬 제작 서버를 자동으로 바꾸지 않습니다.')
+    else if (!stopping) tripo = launch(path.join(root, 'scripts/tripo360/local-test.mjs'), ['--serve'], false, 'Tripo 로컬 제작 서버')
+  } catch (error) { console.warn('[dev] Tripo 로컬 서버 준비 실패. 저장된 사이트 결과는 계속 조회할 수 있습니다.', error.message) }
+  return { vite, structure, automation, tripo, stop, url }
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -4,27 +4,31 @@ import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/input'
 import { readFileAsDataUrl } from '@/lib/images'
 import { sampleCountry } from '@/lib/drafts/sample-receipt'
-import { sampleRegistrationLabel, type SampleRegistrationStage } from '@/lib/drafts/sample-registration'
+import { nextRegistrationStages, sampleRegistrationLabel, type SampleRegistrationStage } from '@/lib/drafts/sample-registration'
 
-const STAGES: SampleRegistrationStage[] = ['next', 'final', 'color']
 type WorkOrderFile = { url: string; name: string }
 
-export function SampleWorkOrderRegistration({ originCountry, nextRound, readOnly, saving, onRegister }: {
-  originCountry: string; nextRound: number; readOnly: boolean; saving: boolean
+export function SampleWorkOrderRegistration({ originCountry, nextRound, latestIsFinal = false, finalCount = 0, readOnly, saving, onRegister }: {
+  originCountry: string; nextRound: number; latestIsFinal?: boolean; finalCount?: number; readOnly: boolean; saving: boolean
   onRegister: (stage: SampleRegistrationStage, file: WorkOrderFile, country: string) => Promise<void>
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const countryTouched = useRef(false)
   const pending = useRef(false)
   const [country, setCountry] = useState(sampleCountry(originCountry).label)
-  const [stage, setStage] = useState<SampleRegistrationStage>('next')
+  const stages = nextRegistrationStages(latestIsFinal)
+  const [stage, setStage] = useState<SampleRegistrationStage>(stages[0])
+  useEffect(() => {
+    const available = nextRegistrationStages(latestIsFinal)
+    setStage((current) => (available.includes(current) ? current : available[0]))
+  }, [latestIsFinal])
   const [file, setFile] = useState<WorkOrderFile | null>(null)
   const [registered, setRegistered] = useState<(WorkOrderFile & { label: string }) | null>(null)
   const [reading, setReading] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   useEffect(() => { if (!countryTouched.current) setCountry(sampleCountry(originCountry).label) }, [originCountry])
-  const label = sampleRegistrationLabel(stage, nextRound)
+  const label = sampleRegistrationLabel(stage, nextRound, finalCount)
   const shown = file ?? registered
   const disabled = readOnly || saving || busy || reading
 
@@ -50,7 +54,7 @@ export function SampleWorkOrderRegistration({ originCountry, nextRound, readOnly
       finally { setReading(false) }
     }} />
     <div className="flex flex-wrap justify-center gap-2" role="radiogroup" aria-label="다음 샘플 단계">
-      {STAGES.map(value => <Button key={value} type="button" role="radio" size="sm" disabled={disabled} aria-checked={stage === value} variant={stage === value ? 'default' : 'outline'} onClick={() => { setStage(value); setError('') }}>{sampleRegistrationLabel(value, nextRound)} 진행</Button>)}
+      {stages.map(value => <Button key={value} type="button" role="radio" size="sm" disabled={disabled} aria-checked={stage === value} variant={stage === value ? 'default' : 'outline'} onClick={() => { setStage(value); setError('') }}>{sampleRegistrationLabel(value, nextRound, finalCount)} 진행</Button>)}
     </div>
     <div className="mt-4 grid grid-cols-[1fr_auto_1fr] items-center gap-3">
       <span /><p className="text-sm text-muted-foreground">{label} 작업지시서 업로드</p>

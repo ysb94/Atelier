@@ -725,10 +725,12 @@ export function DraftPhoto({ src, name, onOpen }: { src: string | null; name: st
 
 export type DraftConfirmFlag = 'nameConfirmed' | 'colorsConfirmed' | 'colorNamesConfirmed'
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onSchedule, onAddColor, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onPassSample, onReceiveSample, onRequestNextSampleRound, onUploadColorWorkOrder, onPassColorSample, onRequestNextColorSampleRound, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onNextSample, onSchedule, onAddColor, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onPassSample, onReceiveSample, onRequestNextSampleRound, onUploadColorWorkOrder, onPassColorSample, onRequestNextColorSampleRound, onToggleConfirm }: {
   readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
-  onOpen: () => void; onSchedule: () => void
+  onOpen: () => void
+  onNextSample?: () => void
+  onSchedule: () => void
   onAddColor: (name: string) => Promise<void>
   onRenameProduct: (field: 'nameKo' | 'nameEn', name: string) => Promise<void>
   onRenameColor: (colorId: string, name: string) => Promise<void>
@@ -838,7 +840,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
                 </div>
               )}
             </>
-          ) : <DraftSampleProgress orders={orders} originCountry={draft.originCountry} readOnly={readOnly} onReceive={onReceiveSample} onNext={onRequestNextSampleRound} onPass={onPassSample} onOpen={onOpen} />}
+          ) : <DraftSampleProgress orders={orders} originCountry={draft.originCountry} readOnly={readOnly} onReceive={onReceiveSample} onNext={onRequestNextSampleRound} onPass={onPassSample} onOpen={onNextSample ?? onOpen} />}
         </div>
       ) : (
         <div className="draft-sheet-actions draft-sheet-sample-launch"><SampleWorkOrderButton readOnly={readOnly} onUpload={onUploadSampleWorkOrder} onOpen={onOpen} /></div>

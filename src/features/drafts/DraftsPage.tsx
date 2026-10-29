@@ -647,6 +647,7 @@ export function CompanyDraftsPage() {
                     schedule={schedule}
                     brand={brand}
                     onOpen={() => navigate(draftDetailPath(draft.id))}
+                    onNextSample={() => navigate(`${draftDetailPath(draft.id)}#next-sample`)}
                     onSchedule={() => setScheduleDraftId(draft.id)}
                     onAddColor={async (name) => {
                       await saveDraftChange(draft.id, (current) => {
