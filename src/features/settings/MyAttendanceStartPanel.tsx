@@ -29,7 +29,7 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
   const [message, setMessage] = useState('')
   const validYear = /^\d{4}$/.test(year) && Number(year) >= 2000 && Number(year) <= 2100
   const months = Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`)
-  const departmentSet = useMemo(() => new Set(directory.departments.filter(department => canManageDepartmentAttendance(profile, departmentIds, department.id)).map(department => department.id)), [directory.departments, profile, departmentIds])
+  const departmentSet = useMemo(() => new Set(directory.departments.filter(department => canManageDepartmentAttendance(profile, departmentIds, department.id, true)).map(department => department.id)), [directory.departments, profile, departmentIds])
   const members = useMemo(() => directoryMembers.filter(member => member.departmentId && departmentSet.has(member.departmentId) && !member.attendanceExempt && (!search.trim() || `${memberLabel(member.displayName)} ${departmentName(member.departmentId)}`.toLowerCase().includes(search.trim().toLowerCase()))).sort((a, b) => departmentName(a.departmentId).localeCompare(departmentName(b.departmentId), 'ko') || memberLabel(a.displayName).localeCompare(memberLabel(b.displayName), 'ko')), [directoryMembers, departmentName, departmentSet, search])
   const visibleIds = members.map(member => member.id)
   const checkedVisible = visibleIds.filter(id => checked.includes(id))

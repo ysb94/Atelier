@@ -21,4 +21,9 @@ assert.equal(canManageDepartmentAttendance(profile, assignedDepartmentIds(settin
 const changed = settings.map(row => ({ ...row, approverId: 'replacement', substituteId: null }))
 assert.equal(canManageDepartmentAttendance(profile, assignedDepartmentIds(changed, 'approver'), 'planning'), false, '지정 해제 뒤 기존 범위를 사용할 수 없다')
 assert.equal(canManageDepartmentAttendance({ ...profile, permissionGrants: [{ permission: 'attendance.manage', scopeKind: 'department', scopeId: 'visual' }] }, [], 'visual'), true, '기존 명시적 부서 권한 유지')
+const operations: PermissionProfile = { ...profile, permissionGrants: [{ permission: 'attendance.manage', scopeKind: 'company', scopeId: 'company' }] }
+assert.equal(canManageDepartmentAttendance(operations, ['planning'], 'visual'), true, '운영지원의 회사 전체 설정 범위 유지')
+assert.equal(canManageDepartmentAttendance(operations, ['planning'], 'planning', true), true, 'My home은 지정 부서 허용')
+assert.equal(canManageDepartmentAttendance(operations, ['planning'], 'visual', true), false, '회사 전체 권한이 있어도 My home의 다른 부서는 제외')
+assert.equal(canManageDepartmentAttendance(operations, [], 'planning', true), false, '운영지원 직원도 승인자 해제 후 My home 설정 불가')
 console.log('attendance-assignment: 승인자·대체 승인자, 담당/타부서, 해제·퇴사, 기존 권한 검증 통과')

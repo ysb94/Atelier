@@ -5,9 +5,9 @@ export function assignedDepartmentIds(settings: readonly { departmentId: string;
   return [...new Set(settings.flatMap(item => item.approverId === userId || item.substituteId === userId ? [item.departmentId] : []))]
 }
 
-/** 기존 승인자 지정과 명시적인 출근시간 권한을 같은 부서 범위로 확인한다. */
-export function canManageDepartmentAttendance(profile: PermissionProfile | null | undefined, assignedDepartmentIds: readonly string[], departmentId: string | null | undefined) {
+/** My home에서는 승인자 지정만, 운영지원에서는 기존 출근시간 권한도 확인한다. */
+export function canManageDepartmentAttendance(profile: PermissionProfile | null | undefined, assignedDepartmentIds: readonly string[], departmentId: string | null | undefined, assignedOnly = false) {
   return Boolean(profile?.status === 'active' && departmentId && (
-    assignedDepartmentIds.includes(departmentId) || hasPermission(profile, 'attendance.manage', 'department', departmentId)
+    assignedDepartmentIds.includes(departmentId) || (!assignedOnly && hasPermission(profile, 'attendance.manage', 'department', departmentId))
   ))
 }

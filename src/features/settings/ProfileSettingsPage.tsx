@@ -18,7 +18,6 @@ import { WorkRequestHubPage } from '@/features/work-requests/WorkRequestHubPage'
 import { ReleaseAccessProvider, useReleaseAccess } from '@/components/layout/release-access-context'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { releasePersonalPart } from '@/lib/company/release-access'
-import { hasPermission } from '@/lib/company/permissions'
 import { CompanyMeetingsPage } from '@/features/meetings/CompanyMeetingsPage'
 import { useMeetingNotices } from '@/features/meetings/use-meeting-notices'
 import { HomeNoticeBoard } from './HomeNoticeBoard'
@@ -77,8 +76,8 @@ function ProfileSettingsContent() {
   }
   const hasDepartments = departments.length > 0
   const noDepartments = !hasDepartments && !approvals.loading && !approvals.error
-  const showDepartmentTab = preview?.facts?.departmentApprover ?? (release.approver || hasPermission(profile, 'attendance.manage'))
-  const permitted = releasePersonalPart(release.profile, part, release.approver)
+  const showDepartmentTab = preview?.facts?.departmentApprover ?? release.approver
+  const permitted = releasePersonalPart(release.profile, part, release.approver) && (part !== 'attendance' || showDepartmentTab)
   const visiblePart = !permitted || (part === 'attendance' && !showDepartmentTab) ? 'my-attendance' : part
   const tabs: { id: PersonalPart; label: string }[] = release.scope.unrestricted ? [
     { id: 'work', label: '작업 요청' }, { id: 'my-attendance', label: 'My Schedule' }, { id: 'profile', label: '내 정보' },
