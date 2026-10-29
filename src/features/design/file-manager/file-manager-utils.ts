@@ -232,10 +232,14 @@ export function isVideoItem(item: ServerFileItem, type: string): boolean {
   return type === 'video' || /\.(mp4|webm|mov)$/i.test(getItemFileName(item))
 }
 
+export function isModelItem(item: ServerFileItem): boolean {
+  return /\.glb$/i.test(getItemFileName(item))
+}
+
 export function isImageItem(item: ServerFileItem, type: string): boolean {
+  if (isModelItem(item)) return false
   return (
     type === 'image' ||
-    type === 'spin360' ||
     /\.(jpg|jpeg|png|gif|webp)$/i.test(getItemFileName(item))
   )
 }

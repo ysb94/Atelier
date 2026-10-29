@@ -5,12 +5,28 @@ import { newColorSampleRound, publishNextColorSampleRound, resolveColorSampleRou
 
 export type SampleRegistrationStage = 'next' | 'final' | 'color'
 
-export function sampleRegistrationLabel(stage: SampleRegistrationStage, nextRound: number) {
-  return stage === 'color' ? '컬러샘플' : stage === 'final' ? '최종 샘플' : `${nextRound}차 샘플`
+type StageOrder = Pick<DraftSampleWorkOrder, 'id' | 'round'> & { sampleStage?: 'numbered' | 'final' }
+
+/** 0은 최종, 1은 최최종, 2는 최최최종이다. */
+export function finalSampleLabel(depth: number) {
+  return `${'최'.repeat(Math.max(0, Math.floor(depth)))}최종 샘플`
 }
 
-export function sampleOrderLabel(order: Pick<DraftSampleWorkOrder, 'round'> & { sampleStage?: 'numbered' | 'final' }) {
-  return order.sampleStage === 'final' ? '최종 샘플' : `${order.round}차 샘플`
+export function sampleRegistrationLabel(stage: SampleRegistrationStage, nextRound: number, finalCount = 0) {
+  if (stage === 'color') return '컬러샘플'
+  if (stage === 'final') return finalSampleLabel(finalCount)
+  return `${nextRound}차 샘플`
+}
+
+export function nextRegistrationStages(latestIsFinal: boolean): SampleRegistrationStage[] {
+  return latestIsFinal ? ['final', 'color'] : ['next', 'final', 'color']
+}
+
+export function sampleOrderLabel(order: StageOrder, orders: readonly StageOrder[] = [order]) {
+  if (order.sampleStage !== 'final') return `${order.round}차 샘플`
+  const finals = orders.filter((item) => item.sampleStage === 'final')
+  const depth = finals.findIndex((item) => item.id === order.id)
+  return finalSampleLabel(depth < 0 ? 0 : depth)
 }
 
 /** 선택만으로는 바꾸지 않고 등록 시점에 새 지시서와 단계만 추가한다. */
