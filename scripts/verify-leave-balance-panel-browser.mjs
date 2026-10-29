@@ -1,0 +1,87 @@
+import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import path from 'node:path'
+import { createServer } from 'vite'
+import react from '@vitejs/plugin-react'
+import tailwindcss from '@tailwindcss/vite'
+import { chromium } from 'playwright-core'
+
+const root = process.cwd(), folder = path.join(root, '.tmp/leave-balance-panel')
+fs.mkdirSync(folder, { recursive: true })
+const fixtures = {
+  '@/lib/supabase/auth': `export function useAuth(){return {profile:{id:'manager',status:'active',permissionGrants:[],capabilities:[],memberships:[]}}}`,
+  '@/lib/supabase/basic-work-access': `export function useBasicWorkAccess(){return {access:{domains:location.hash==='#denied'?[]:['operations']},isPending:false}}`,
+  '@/features/operations-support/ops-directory': `const members=[{id:'a',displayName:'가 직원',departmentId:'ops',hireDate:'2024-01-01'},{id:'b',displayName:'나 직원',departmentId:'md',hireDate:null},{id:'c',displayName:'다 직원',departmentId:'ops',hireDate:'2025-01-01'}];export function useOpsDirectory(){return {members,departments:[{id:'ops',name:'운영지원'},{id:'md',name:'MD'}],departmentName:id=>id==='ops'?'운영지원':'MD',loading:false,error:null,refetch(){}}}`,
+  '@/lib/supabase/client': `const s=window.__leave={remaining:JSON.parse(sessionStorage.getItem('remaining')||'"initial"'),writes:[],reads:0,fail:false,readFail:false};export function getSupabase(){return {from(table){if(table!=='employee_roster')throw Error(table);const q={select(){return q},upsert:async row=>{s.writes.push(row);if(s.fail){s.fail=false;return {error:{message:'save failed'}}}s.remaining=row.remaining_annual_leave;sessionStorage.setItem('remaining',JSON.stringify(s.remaining));return {error:null}},then:resolve=>{s.reads++;return Promise.resolve(s.readFail?{data:null,error:{message:'read failed'}}:{data:[{profile_id:'a',remaining_annual_leave:s.remaining==='initial'?7.75:s.remaining,accrued_annual_leave:15},{profile_id:'b',remaining_annual_leave:0,accrued_annual_leave:0}],error:null}).then(resolve)}};return q}}}`,
+}
+const aliases = []
+for (const [index, [find, source]] of Object.entries(fixtures).entries()) {
+  const replacement = path.join(folder, `mock-${index}.ts`)
+  fs.writeFileSync(replacement, source)
+  aliases.push({ find, replacement })
+}
+fs.writeFileSync(path.join(folder, 'entry.tsx'), `import {createRoot} from 'react-dom/client';import {QueryClient,QueryClientProvider} from '@tanstack/react-query';import {LeaveBalancePanel} from '@/features/operations-support/LeaveBalancePanel';import '@/index.css';const cache=new QueryClient({defaultOptions:{queries:{retry:false,refetchOnWindowFocus:false},mutations:{retry:false}}});window.__refresh=()=>cache.invalidateQueries({queryKey:['employee-roster']});window.__cached=()=>cache.getQueryData(['employee-roster']);createRoot(document.getElementById('root')).render(<QueryClientProvider client={cache}><LeaveBalancePanel/></QueryClientProvider>);`)
+const server = await createServer({ configFile: false, envDir: false, logLevel: 'error',
+  plugins: [{ name: 'leave-balance-fixtures', enforce: 'pre', resolveId(source, importer) {
+    if (!importer || !source.startsWith('.')) return
+    const target = path.resolve(path.dirname(importer), source).replace(/\.tsx?$/, '')
+    return aliases.find(alias => path.join(root, 'src', alias.find.slice(2)) === target)?.replacement
+  }, configureServer(vite) {
+    vite.middlewares.use((req, res, next) => {
+      if (!req.headers.accept?.includes('text/html')) return next()
+      vite.transformIndexHtml(req.url, '<html><head><meta name="viewport" content="width=device-width,initial-scale=1"></head><body><div id="root"></div><script type="module" src="/.tmp/leave-balance-panel/entry.tsx"></script></body></html>').then(html => { res.setHeader('Content-Type', 'text/html'); res.end(html) }).catch(next)
+    })
+  } }, react(), tailwindcss()], resolve: { alias: [...aliases, { find: '@', replacement: path.join(root, 'src') }] },
+  server: { host: '127.0.0.1', port: 5197, strictPort: true, hmr: false } })
+let browser
+try {
+  await server.listen()
+  browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  const errors = [], remote = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.route('**/*', route => route.request().url().startsWith('http://127.0.0.1:5197/') ? route.continue() : (remote.push(route.request().url()), route.abort()))
+  await page.goto('http://127.0.0.1:5197/')
+  const input = page.getByRole('spinbutton', { name: '가 직원 남은 연차 입력', exact: true })
+  await input.waitFor()
+  assert.equal(await input.inputValue(), '7.75')
+  assert.equal(await page.getByRole('spinbutton', { name: '나 직원 남은 연차 입력', exact: true }).inputValue(), '0')
+  assert.equal(await page.getByRole('spinbutton', { name: '다 직원 남은 연차 입력', exact: true }).inputValue(), '')
+  await page.getByRole('cell', { name: '가 직원 발생일수', exact: true }).getByText('15일').waitFor()
+  assert.equal(await page.getByRole('combobox', { name: '연차 연도' }).count(), 0)
+  const row = page.getByRole('row').filter({ has: input })
+  await input.fill('-4.5')
+  await row.getByRole('button', { name: '저장', exact: true }).click()
+  await row.getByRole('status').waitFor()
+  assert.equal(await page.evaluate(() => window.__cached().find(row => row.profileId === 'a').remainingAnnualLeave), -4.5)
+  assert.deepEqual(await page.evaluate(() => Object.keys(window.__leave.writes[0]).sort()), ['company_id', 'profile_id', 'remaining_annual_leave'])
+  await page.reload(); await input.waitFor(); assert.equal(await input.inputValue(), '-4.5')
+  await page.evaluate(() => { window.__leave.fail = true })
+  await input.fill('6.25'); await row.getByRole('button', { name: '저장', exact: true }).click()
+  await row.getByRole('alert').waitFor(); assert.equal(await input.inputValue(), '6.25')
+  assert.equal(await page.evaluate(() => window.__cached().find(row => row.profileId === 'a').remainingAnnualLeave), -4.5)
+  await row.getByRole('button', { name: '저장', exact: true }).click(); await row.getByRole('status').waitFor()
+  await page.evaluate(async () => { window.__leave.remaining = 3.75; await window.__refresh() })
+  assert.equal(await input.inputValue(), '3.75')
+  await input.fill('9'); await row.getByRole('button', { name: '취소', exact: true }).click(); assert.equal(await input.inputValue(), '3.75')
+  await input.fill(''); await row.getByRole('button', { name: '저장', exact: true }).click(); await row.getByRole('status').waitFor()
+  assert.equal(await page.evaluate(() => window.__cached().find(row => row.profileId === 'a').remainingAnnualLeave), null)
+  await page.getByRole('combobox', { name: '연차 부서' }).selectOption('md')
+  assert.equal(await input.count(), 0)
+  await page.getByRole('combobox', { name: '연차 부서' }).selectOption('all')
+  await page.getByRole('textbox', { name: '연차 직원 검색' }).fill('다 직원')
+  assert.equal(await page.getByRole('spinbutton').count(), 1)
+  await page.setViewportSize({ width: 390, height: 844 })
+  assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390), '모바일에서 표 내부 스크롤')
+  await page.getByRole('textbox', { name: '연차 직원 검색' }).fill('')
+  await page.evaluate(async () => { window.__leave.readFail = true; await window.__refresh() })
+  await page.getByRole('alert').waitFor(); assert.equal(await page.getByRole('spinbutton').count(), 0)
+  await page.evaluate(() => { window.__leave.readFail = false })
+  await page.getByRole('button', { name: '새로고침', exact: true }).click(); await input.waitFor()
+  await page.goto('http://127.0.0.1:5197/#denied'); await page.reload()
+  await page.getByText('연차 현황은 직원 명부 관리 권한이 있는 담당자만 조회·수정할 수 있습니다.').waitFor()
+  assert.equal(await page.getByRole('spinbutton').count(), 0)
+  assert.equal(await page.evaluate(() => window.__leave.reads), 0)
+  assert.deepEqual(errors, []); assert.deepEqual(remote, [])
+  console.log('leave-balance-panel: 실제 저장 API 연결·공유 캐시·새로고침·음수/0/미등록·실패 재시도·부서/이름 검색·권한 제한·모바일 검증 통과 (실제 직원 변경 없음)')
+} finally { await browser?.close(); await server.close() }
