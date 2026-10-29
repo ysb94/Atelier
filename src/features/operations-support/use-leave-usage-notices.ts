@@ -5,6 +5,7 @@ import { usePagePreview } from '@/lib/company/page-preview-context'
 import { readImpersonationState } from '@/lib/supabase/impersonation'
 import { listMyLeaveUsageNotices, recordLeaveUsageNotice, type LeaveUsageNotice } from '@/lib/supabase/leave-usage-notices'
 import { emptyList } from '@/lib/utils'
+import { getSupabase } from '@/lib/supabase/client'
 
 export function useLeaveUsageNotices() {
   const { profile, session } = useAuth()
@@ -21,11 +22,26 @@ export function useLeaveUsageNotices() {
   useEffect(() => { setActiveId(null); setActionError(null) }, [employeeId])
   useEffect(() => { if (query.error) console.warn('[leave-notices] 본인 연차 안내 조회 실패', { error: query.error, employeeId }) }, [query.error, employeeId])
   const records = enabled ? query.data ?? emptyList<LeaveUsageNotice>() : emptyList<LeaveUsageNotice>()
+  useEffect(() => {
+    if (!enabled || !employeeId) return
+    const db = getSupabase()
+    const refresh = () => { void cache.invalidateQueries({ queryKey: ['leave-usage-notices', employeeId] }) }
+    const channel = db.channel(`extra-leave-notices:${employeeId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'extra_leave_usage_notices', filter: `employee_id=eq.${employeeId}` }, refresh)
+      .subscribe(status => {
+        if (status === 'SUBSCRIBED') refresh()
+        else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('[leave-notices] 실시간 연결 실패, 주기 조회로 보완', { status })
+      })
+    return () => { void db.removeChannel(channel).catch(error => console.warn('[leave-notices] 실시간 연결 정리 실패', error)) }
+  }, [cache, employeeId, enabled])
   async function record(id: string | null, action: 'read' | 'view' | 'confirm') {
     if (!canConfirm || busy) return false
     setBusy(true); setActionError(null)
     try {
-      await recordLeaveUsageNotice(id, action)
+      if (id === null) {
+        await recordLeaveUsageNotice(null, action)
+        if (records.some(row => row.notice_source && row.notice_source !== 'base')) await recordLeaveUsageNotice(null, action, 'extra')
+      } else await recordLeaveUsageNotice(id, action, records.find(row => row.id === id)?.notice_source ?? 'base')
       await Promise.all([cache.invalidateQueries({ queryKey: ['leave-usage-notices', employeeId] }), cache.invalidateQueries({ queryKey: ['leave-notice-management'] })])
       return true
     } catch (error) {

@@ -89,5 +89,9 @@ try {
   await actor(id(3));await denied("select public.record_leave_usage_notice($1,'view')",[notice.id]);await denied("select public.record_leave_usage_notice($1,'confirm')",[notice.id])
   await db.exec('reset role;set role anon');await denied('select * from public.leave_usage_notices');await denied("select public.record_leave_usage_notice(null,'read')");await denied('select public.leave_usage_notice_management()')
   await db.exec('reset role');assert.equal(await value("select remaining_annual_leave::text from public.employee_roster where profile_id='"+id(3)+"'"),'3.50')
+  if (process.argv.includes('--additional-notices')) {
+    const { verifyExtraLeaveNotices } = await import('./verify-extra-leave-notices-cases.mjs')
+    await verifyExtraLeaveNotices({db,value,actor,company,other,id})
+  }
   console.log('leave-usage-notices-db: cycle/leap/expiry, latest due phase, exclusions, idempotence, original data preservation, read/view/confirm separation, first timestamps, own/company/manager/anonymous isolation, invalid and impersonated session rejection passed')
 } finally { await db.close() }
