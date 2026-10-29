@@ -86,20 +86,55 @@ export function LeaveBalancePanel() {
 function AdditionalLeaveInputs({ name }: { name: string }) {
   const [open, setOpen] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
+  const [entries, setEntries] = useState<{ id: string; days: number; expires: string; note: string; created: string }[]>([])
+  const [editing, setEditing] = useState<string | null>(null)
+  const [days, setDays] = useState('')
+  const [expires, setExpires] = useState('')
+  const [note, setNote] = useState('')
+  function clearInput() { setEditing(null); setDays(''); setExpires(''); setNote('') }
+  const dateLabel = (date: string) => date.slice(2).replaceAll('-', '.')
   return <div className="space-y-2">
     <div className="flex items-center gap-2 whitespace-nowrap">
-      <span className="tabular-nums">0일</span>
+      <span className="tabular-nums">{Number(entries.reduce((sum, entry) => sum + entry.days, 0).toFixed(2))}일</span>
       <Button type="button" variant="outline" size="sm" className="size-8 p-0" aria-label={`${name} 추가 연차 추가`} aria-haspopup="dialog" aria-expanded={open} onClick={() => { dialog.current?.showModal(); setOpen(true) }}>+</Button>
     </div>
     <dialog ref={dialog} onClose={() => setOpen(false)} aria-label={`${name} 추가 연차 입력`} className="fixed inset-0 m-auto max-h-[90dvh] w-[calc(100%-2rem)] max-w-md space-y-4 overflow-auto rounded-xl border border-border bg-card p-5 text-card-foreground shadow-lg backdrop:bg-black/40">
       <h3 className="font-semibold">{name} · 추가 연차</h3>
+      <form className="space-y-3" onSubmit={event => {
+        event.preventDefault()
+        const amount = Number(days)
+        if (!Number.isFinite(amount) || amount <= 0 || !expires || !note.trim()) return
+        if (editing) setEntries(current => current.map(entry => entry.id === editing ? { ...entry, days: amount, expires, note: note.trim() } : entry))
+        else setEntries(current => [...current, { id: crypto.randomUUID(), days: amount, expires, note: note.trim(), created: new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date()) }])
+        clearInput()
+      }}>
       <div className="grid grid-cols-2 gap-3">
-        <label className="space-y-1 text-sm"><span>추가 일수</span><Input aria-label={`${name} 추가 일수`} type="number" min="0.01" step="0.01" placeholder="예: 1.5"/></label>
-        <label className="space-y-1 text-sm"><span>사용 기한</span><Input aria-label={`${name} 추가 연차 사용 기한`} type="date"/></label>
-        <label className="col-span-2 space-y-1 text-sm"><span>메모</span><Input aria-label={`${name} 추가 연차 메모`} placeholder="추가 사유" maxLength={500}/></label>
+        <label className="space-y-1 text-sm"><span>추가 일수</span><Input aria-label={`${name} 추가 일수`} type="number" min="0.01" max="99999.99" step="0.01" required value={days} onChange={event => setDays(event.target.value)} placeholder="예: 1.5"/></label>
+        <label className="space-y-1 text-sm"><span>사용 기한</span><Input aria-label={`${name} 추가 연차 사용 기한`} type="date" required value={expires} onChange={event => setExpires(event.target.value)}/></label>
+        <label className="col-span-2 space-y-1 text-sm"><span>메모</span><Input aria-label={`${name} 추가 연차 메모`} placeholder="추가 사유" maxLength={500} required value={note} onChange={event => setNote(event.target.value)}/></label>
       </div>
+      <div className="flex justify-end gap-2">
+        {editing ? <Button type="button" variant="ghost" size="sm" onClick={clearInput}>수정 취소</Button> : null}
+        <Button type="submit" size="sm">{editing ? '수정 반영' : '이력에 추가'}</Button>
+      </div>
+      </form>
+      <section className="space-y-2 border-t border-border pt-3" aria-label={`${name} 추가 연차 이력`}>
+        <h4 className="text-sm font-medium">추가 이력</h4>
+        {entries.length === 0 ? <p className="text-sm text-muted-foreground">추가 이력이 없습니다.</p> : <ul className="space-y-2">
+          {entries.map(entry => <li key={entry.id} className="space-y-2 rounded-xl border border-border p-3 text-sm">
+            <p className="break-words"><strong>+{entry.days}일</strong> ({dateLabel(entry.expires)}까지) [{entry.note}]</p>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">등록 날짜: {dateLabel(entry.created)}</span>
+              <div className="flex gap-1">
+                <Button type="button" size="sm" variant="ghost" onClick={() => { setEditing(entry.id); setDays(String(entry.days)); setExpires(entry.expires); setNote(entry.note) }}>수정</Button>
+                <Button type="button" size="sm" variant="ghost" onClick={() => { setEntries(current => current.filter(item => item.id !== entry.id)); if (editing === entry.id) clearInput() }}>삭제</Button>
+              </div>
+            </div>
+          </li>)}
+        </ul>}
+      </section>
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs text-muted-foreground">입력 화면 미리보기 · 아직 저장되지 않습니다.</p>
+        <p className="text-xs text-muted-foreground">화면 미리보기 · 새로고침하면 이력이 사라지며 실제 잔여에는 반영되지 않습니다.</p>
         <Button type="button" size="sm" variant="outline" onClick={() => dialog.current?.close()}>닫기</Button>
       </div>
     </dialog>
