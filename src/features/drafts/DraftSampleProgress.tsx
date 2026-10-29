@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import type { DraftSampleWorkOrder } from '@/lib/types'
 import { sampleElapsedDays, sampleHistoryDay, sampleTripSpanDays } from '@/lib/drafts/sample-work-order'
-import { canReceiveSample, sampleCountry } from '@/lib/drafts/sample-receipt'
+import { canReceiveSample, sampleCountry, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
 import { sampleOrderLabel } from '@/lib/drafts/sample-registration'
 import './draft-sample-progress.css'
 
@@ -14,7 +14,6 @@ type Props = {
   saving?: boolean
   onReceive: (id: string) => Promise<void>
   onNext: (file: WorkOrderFile, country: string) => Promise<void>
-  onPass: () => Promise<void>
   onOpen?: () => void
 }
 
@@ -54,16 +53,15 @@ export function DraftSampleProgress({ orders, originCountry, readOnly = false, s
             ? order.shipped ? `${sampleHistoryDay(order.returnedAt).slice(2) || '날짜 기록 없음'} 중국 발송 완료` : '중국팀 제작·발송 대기'
             : '국내 샘플'}</p>}
           {current && !order.passed && !order.receivedAt && <Button type="button" size="sm" variant="outline" className="draft-sample-receive" disabled={readOnly || saving || busy || !canReceiveSample(order, originCountry)}
-            title="실물을 받은 뒤 확인하세요. 수령 확인은 합격 처리가 아닙니다." onClick={() => void run(() => onReceive(order.id))}>{busy ? '저장 중' : '수령 확인'}</Button>}
+            title="실물을 받은 뒤 수령일을 기록하세요." onClick={() => void run(() => onReceive(order.id))}>{busy ? '저장 중' : '수령 확인'}</Button>}
         </div>
         {current ? <div className="draft-sample-interval">
           {order.receivedAt ? <>
             {received !== null && <strong className="draft-sample-received-elapsed" title={`수령일 ${sampleHistoryDay(order.receivedAt)}`}>+ {received} days</strong>}
-            {!order.passed && <div className="draft-sample-next-actions">
+            {sampleReadyForNextStage(order) && <div className="draft-sample-next-actions">
               <Button type="button" size="sm" variant="outline" onClick={onOpen}>다음샘플</Button>
             </div>}
-          </> : <span className="draft-sample-waiting">{order.passed ? '이전 기록 · 수령일 기록 없음' : '실물 수령 대기'}</span>}
-          {order.passed && <p className="draft-sample-passed">샘플 합격</p>}
+          </> : <><span className="draft-sample-waiting">{order.passed ? '이전 기록 · 수령일 기록 없음' : '실물 수령 대기'}</span>{sampleReadyForNextStage(order) && <Button type="button" size="sm" variant="outline" onClick={onOpen}>다음샘플</Button>}</>}
         </div> : null}
       </section>
     })}

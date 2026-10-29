@@ -10,7 +10,6 @@ import { emptyDraftInput } from '@/lib/drafts/empty-draft'
 import { normalizeDraftBrandId, parseDraftNo } from '@/lib/drafts/company-draft'
 import { sanitizeColorWorkOrder, normalizeColorSampleRounds } from '@/lib/drafts/draft-flow'
 import {
-  isSamplePassed,
   legacyWorkOrderFields,
   normalizeSampleWorkOrders,
   sanitizeSampleWorkOrders,
@@ -130,7 +129,7 @@ function sanitize(input: ProductDraftInput): ProductDraftInput {
     holdReason: held ? input.holdReason.trim() : '',
     sampleWorkOrders,
     ...legacyWorkOrderFields(sampleWorkOrders),
-    sampleDone: isSamplePassed(sampleWorkOrders),
+    sampleDone: Boolean(input.sampleDone),
     orderDone: Boolean(input.orderDone),
     orderInProgress: Boolean(input.orderInProgress),
     colors: input.colors

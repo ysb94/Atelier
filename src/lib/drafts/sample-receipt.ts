@@ -36,7 +36,7 @@ export function canReceiveSample(order: DraftSampleWorkOrder, country: string) {
     (sampleCountry(order.originCountry || country).code !== 'CN' || order.shipped))
 }
 
-/** 발송 완료와 합격을 바꾸지 않고 실물 수령일만 기록한다. 반복 확인은 기존 날짜를 유지한다. */
+/** 실물 수령일만 기록한다. 반복 확인은 기존 날짜를 유지한다. */
 export function receiveSample(
   orders: readonly DraftSampleWorkOrder[], id: string, country: string,
   at = new Date().toISOString(),
@@ -50,19 +50,24 @@ export function receiveSample(
 }
 
 /** 회의 뒤 새 파일을 등록한 시점에만 다음 차수를 추가한다. 이전 차수와 파일은 보존한다. */
+export function sampleReadyForNextStage(order: DraftSampleWorkOrder | null | undefined) {
+  // Older records may only contain the legacy completion flag; do not rewrite their dates.
+  return Boolean(order?.url?.trim() && (order.receivedAt || order.passed))
+}
+
 export function registerNextReceivedSample(
   orders: readonly DraftSampleWorkOrder[], file: { url: string; name: string },
   country: string, previousCountry: string, at = new Date().toISOString(),
 ) {
   const latest = latestFilledSampleWorkOrder(orders)
-  if (!latest?.receivedAt || latest.passed) throw new Error('실물 수령을 확인한 뒤 다음 작업지시서를 등록해 주세요.')
+  if (!sampleReadyForNextStage(latest)) throw new Error('실물 수령을 확인한 뒤 다음 작업지시서를 등록해 주세요.')
   if (!file.url.trim() || !file.name.trim()) throw new Error('새 작업지시서 파일을 선택해 주세요.')
   if (!country.trim()) throw new Error('제조국을 선택해 주세요.')
   const round = Math.max(0, ...orders.filter(order => order.url?.trim()).map(order => order.round)) + 1
   return [
     ...orders.filter(order => order.url?.trim()).map(order => ({ ...order, originCountry: order.originCountry || previousCountry })),
     { ...newSampleWorkOrder(round), url: file.url, name: file.name.trim(), shippedAt: at, originCountry: country,
-      assigneeId: sampleCountry(country).code === 'CN' ? latest.assigneeId : null,
-      assigneeName: sampleCountry(country).code === 'CN' ? latest.assigneeName : '' },
+      assigneeId: sampleCountry(country).code === 'CN' ? latest?.assigneeId ?? null : null,
+      assigneeName: sampleCountry(country).code === 'CN' ? latest?.assigneeName ?? '' : '' },
   ]
 }

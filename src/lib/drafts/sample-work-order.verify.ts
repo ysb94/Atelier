@@ -63,8 +63,8 @@ assert(canAddNextSampleWorkOrder(shipped), '발송 완료 뒤 다음 차수를 �
 assert(canPassLatestSampleWorkOrder(shipped), '발송 완료 뒤 합격할 수 있다')
 
 const passed = setLatestSampleWorkOrderPassed(shipped, true, '2026-09-08T01:00:00.000Z')
-assert(samplePhase(passed) === 'passed', '합격하면 샘플 단계가 끝난다')
-assert(samplePhaseLabel(passed) === '1차 샘플 합격', '1차 합격 라벨')
+assert(samplePhase(passed) === 'received', '과거 완료 기록도 수령 단계로 호환한다')
+assert(samplePhaseLabel(passed) === '1차 샘플 수령', '판정 대신 수령 라벨')
 assert(!canAddNextSampleWorkOrder(passed), '합격 뒤에는 다음 차수를 안 올린다')
 
 const withSecond = addNextSampleWorkOrder(shipped)

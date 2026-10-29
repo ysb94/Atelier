@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import {
-  Check,
   ChevronLeft,
   FileText,
   ImagePlus,
@@ -52,23 +51,18 @@ import {
 } from '@/lib/drafts/company-draft'
 import {
   colorWorkOrderFileName,
-  startColorSamples,
 } from '@/lib/drafts/draft-flow'
-import { applySampleOrigin, sampleCountry } from '@/lib/drafts/sample-receipt'
+import { applySampleOrigin, sampleCountry, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
 import { sampleOrderLabel } from '@/lib/drafts/sample-registration'
 import {
   attachSampleWorkOrderFile,
   draftToInput,
-  canPassLatestSampleWorkOrder,
-  failLatestSampleWorkOrder,
-  isSamplePassed,
   filledSampleWorkOrders,
   latestFilledSampleWorkOrder,
   legacyWorkOrderFields,
   patchSampleWorkOrder,
   samplePhase,
   sampleWorkOrderFileName,
-  setLatestSampleWorkOrderPassed,
   withPendingNextSampleWorkOrder,
 } from '@/lib/drafts/sample-work-order'
 import { useAuth } from '@/lib/supabase/auth'
@@ -323,8 +317,6 @@ export function DraftEditPage() {
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [seasonPrefillDone, setSeasonPrefillDone] = useState(false)
   const [seasonFromQueryDone, setSeasonFromQueryDone] = useState(false)
-  const [failOpen, setFailOpen] = useState(false)
-  const [failReason, setFailReason] = useState('')
   const [editorPart, setEditorPart] = useState<'basic' | 'pending'>('basic')
   const photoObserver = useRef<ResizeObserver | null>(null)
   const [photoSize, setPhotoSize] = useState(144)
@@ -453,13 +445,13 @@ export function DraftEditPage() {
   }, [location.hash, loaded?.id])
   const samplePhaseNow = samplePhase(form.sampleWorkOrders)
   const sampleStatus =
-    samplePhaseNow === 'passed'
-      ? `${sampleRound}차샘플 합격`
+    samplePhaseNow === 'received'
+      ? `${sampleRound}차샘플 수령`
       : samplePhaseNow === 'shipped'
         ? `${sampleRound}차샘플 발송`
         : `${sampleRound}차샘플 진행`
   const sampleFileName = currentSample?.url ? sampleWorkOrderFileName(currentSample) : ''
-  const sampleUploadLocked = Boolean(currentSample && (currentSample.shipped || currentSample.passed))
+  const sampleUploadLocked = Boolean(currentSample && (currentSample.shipped || currentSample.receivedAt || currentSample.passed))
 
   async function uploadBasicWorkOrder(file: File) {
     if (sampleUploadLocked) return
@@ -475,7 +467,7 @@ export function DraftEditPage() {
     try {
       const url = await readFileAsDataUrl(file)
       const attached =
-        currentSample && !currentSample.shipped && !currentSample.passed
+        currentSample && !currentSample.shipped && !currentSample.receivedAt && !currentSample.passed
           ? patchSampleWorkOrder(form.sampleWorkOrders, currentSample.id, {
               url,
               name: file.name,
@@ -500,7 +492,7 @@ export function DraftEditPage() {
 
   async function replaceSavedSampleFile(orderId: string, file: File) {
     const order = form.sampleWorkOrders.find((item) => item.id === orderId)
-    if (!order || order.shipped || order.passed) return
+    if (!order || order.shipped || order.receivedAt || order.passed) return
     if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) {
       setError('작업 지시서는 8MB 이하만 올릴 수 있습니다.')
       return
@@ -525,7 +517,7 @@ export function DraftEditPage() {
 
   function updateSavedSampleCountry(orderId: string, originCountry: string) {
     const china = sampleCountry(originCountry).code === 'CN'
-    const sampleWorkOrders = form.sampleWorkOrders.map((order) => order.id === orderId && !order.shipped && !order.passed ? {
+    const sampleWorkOrders = form.sampleWorkOrders.map((order) => order.id === orderId && !order.shipped && !order.receivedAt && !order.passed ? {
       ...order,
       originCountry,
       assigneeId: china ? order.assigneeId : null,
@@ -887,8 +879,8 @@ export function DraftEditPage() {
             </div>
           </div> : savedSamples.map((order) => {
             const countryValue = (DRAFT_ORIGIN_OPTIONS as readonly string[]).includes(order.originCountry || '') ? order.originCountry! : ((DRAFT_ORIGIN_OPTIONS as readonly string[]).includes(form.originCountry) ? form.originCountry : '')
-            const locked = order.shipped || order.passed
-            const status = order.passed ? '합격' : order.shipped ? '발송' : '진행'
+            const locked = Boolean(order.shipped || order.receivedAt || order.passed)
+            const status = order.receivedAt ? '수령' : order.shipped ? '발송' : '진행'
             return (
               <div key={order.id} id={`sample-history-${order.id}`} aria-label={`등록된 ${sampleOrderLabel(order, savedSamples)}`} className="mt-2 scroll-mt-20 border-t border-border pt-5">
                 <p className="text-center">
@@ -988,51 +980,7 @@ export function DraftEditPage() {
                 }
               }}
             />
-            {latestFilledSampleWorkOrder(workOrders)?.receivedAt && canPassLatestSampleWorkOrder(workOrders) ? (
-              <div className="grid grid-cols-2 gap-1.5">
-                <Button
-                  type="button"
-                  size="sm"
-                  onClick={() => {
-                    const nextOrders = setLatestSampleWorkOrderPassed(
-                      workOrders,
-                      true,
-                    )
-                    const nextForm = {
-                      ...form,
-                      sampleWorkOrders: nextOrders,
-                      ...legacyWorkOrderFields(nextOrders),
-                      sampleDone: true,
-                      colors: startColorSamples(form.colors),
-                      orderInProgress: false,
-                    }
-                    patch({
-                      sampleWorkOrders: nextOrders,
-                      ...legacyWorkOrderFields(nextOrders),
-                      sampleDone: true,
-                      colors: startColorSamples(form.colors),
-                      orderInProgress: false,
-                    })
-                    if (!isNew) saveMutation.mutate(nextForm)
-                  }}
-                >
-                  <Check className="size-3.5" />
-                  합격
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setFailReason('')
-                    setFailOpen(true)
-                  }}
-                >
-                  <Plus className="size-3.5" />
-                  불합격 · 다음 차수
-                </Button>
-              </div>
-            ) : null}
+            {sampleReadyForNextStage(latestFilledSampleWorkOrder(workOrders)) ? <Button type="button" size="sm" variant="outline" onClick={() => { setEditorPart('basic'); window.requestAnimationFrame(() => document.getElementById('next-sample')?.scrollIntoView({ block: 'start' })) }}>다음 샘플 진행</Button> : null}
           </div>
 
           <div className="space-y-1.5">
@@ -1046,7 +994,7 @@ export function DraftEditPage() {
             <div className="space-y-2">
               {form.colors.map((color, index) => {
                 const showColorWorkOrder =
-                  isSamplePassed(workOrders) ||
+                  sampleReadyForNextStage(latestFilledSampleWorkOrder(workOrders)) ||
                   Boolean(color.sampleWorkOrderUrl)
                 const colorFileName = colorWorkOrderFileName(color)
                 return (
@@ -1645,89 +1593,7 @@ export function DraftEditPage() {
         )}
       </div>
 
-      {failOpen ? (
-        <SampleFailReasonDialog
-          value={failReason}
-          saving={saveMutation.isPending}
-          onChange={setFailReason}
-          onClose={() => setFailOpen(false)}
-          onConfirm={() => {
-            const nextOrders = failLatestSampleWorkOrder(workOrders, failReason)
-            if (nextOrders === workOrders) {
-              setError('불합격 사유를 적어 주세요.')
-              return
-            }
-            const nextForm = {
-              ...form,
-              sampleWorkOrders: nextOrders,
-              ...legacyWorkOrderFields(nextOrders),
-            }
-            patchWorkOrders(nextOrders)
-            setFailOpen(false)
-            setFailReason('')
-            if (!isNew) saveMutation.mutate(nextForm)
-          }}
-        />
-      ) : null}
       </fieldset>
-    </div>
-  )
-}
-
-function SampleFailReasonDialog({
-  value,
-  saving,
-  onChange,
-  onClose,
-  onConfirm,
-}: {
-  value: string
-  saving: boolean
-  onChange: (value: string) => void
-  onClose: () => void
-  onConfirm: () => void
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <button
-        type="button"
-        aria-label="닫기"
-        className="absolute inset-0 bg-black/40"
-        onClick={onClose}
-      />
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="sample-fail-title"
-        className="relative z-10 w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-2xl"
-      >
-        <h2 id="sample-fail-title" className="text-base font-semibold">
-          불합격 사유
-        </h2>
-        <p className="mt-1 text-sm text-muted-foreground">
-          다음 샘플에서 어디를 고칠지 남겨 두면 중국팀이 그 부분을 중점으로
-          봅니다.
-        </p>
-        <Textarea
-          className="mt-4 min-h-28"
-          autoFocus
-          placeholder="예: 소매 기장 1cm 짧게, 원단 두께 한 단계 올리기"
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-        />
-        <div className="mt-4 flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={onClose}>
-            취소
-          </Button>
-          <Button
-            type="button"
-            disabled={!value.trim() || saving}
-            onClick={onConfirm}
-          >
-            {saving ? '저장 중...' : '저장하고 다음 차수'}
-          </Button>
-        </div>
-      </div>
     </div>
   )
 }

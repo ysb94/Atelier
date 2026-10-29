@@ -11,7 +11,7 @@ export function RegisteredColorSampleCards({ rounds, originCountry }: { rounds: 
     const country = sampleCountry(round.originCountry || originCountry)
     const label = colorSampleLabel(round.round)
     return <section key={round.id} id={`sample-history-${round.id}`} aria-label={`등록된 ${label}`} className="mt-2 scroll-mt-20 border-t border-border pt-5">
-      <p className="text-center"><span className="inline-flex rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">{label} {round.passed ? '합격' : round.returnedAt ? '발송' : '진행'}</span></p>
+      <p className="text-center"><span className="inline-flex rounded-full bg-primary px-3 py-1 text-xs font-medium text-primary-foreground">{label} {round.returnedAt ? '발송' : '진행'}</span></p>
       <p className="mt-4 text-center text-sm text-muted-foreground">{label} 작업지시서</p>
       <div className="mt-4 grid items-center gap-4 sm:grid-cols-[240px_minmax(0,1fr)]">
         <div className="rounded-lg border border-border px-3 py-2 text-sm">제조국 · {country.label}</div>

@@ -1,6 +1,6 @@
 import type { DraftSampleWorkOrder, ProductDraftInput } from '../types'
 import { latestFilledSampleWorkOrder, legacyWorkOrderFields } from './sample-work-order'
-import { registerNextReceivedSample, sampleCountry } from './sample-receipt'
+import { registerNextReceivedSample, sampleCountry, sampleReadyForNextStage } from './sample-receipt'
 import { newColorSampleRound, publishNextColorSampleRound, resolveColorSampleRounds } from './draft-flow'
 
 export type SampleRegistrationStage = 'next' | 'final' | 'color'
@@ -44,16 +44,16 @@ export function registerDraftSampleStage(
     const orders = registerNextReceivedSample(input.sampleWorkOrders, file, country, input.originCountry, at)
     const nextId = latestFilledSampleWorkOrder(orders)!.id
     const sampleWorkOrders = orders.map(order => order.id === nextId ? { ...order, sampleStage: stage === 'final' ? 'final' as const : 'numbered' as const } : order)
-    return { ...input, originCountry: country, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders), sampleDone: false }
+    return { ...input, originCountry: country, sampleWorkOrders, ...legacyWorkOrderFields(sampleWorkOrders) }
   }
-  if (!latest?.passed) throw new Error('대표 샘플 합격 후 컬러샘플을 등록할 수 있습니다.')
+  if (!sampleReadyForNextStage(latest)) throw new Error('실물 수령을 확인한 뒤 컬러샘플을 등록해 주세요.')
   if (!input.specs.colorsConfirmed || !input.colors.some(color => color.name.trim())) throw new Error('컬러 구성을 먼저 등록·확정해 주세요.')
   const before = resolveColorSampleRounds(input)
   const published = before.length ? publishNextColorSampleRound(input.colors, before, file, at) : {
     rounds: [newColorSampleRound(1, file, at)],
     colors: input.colors.map(color => ({ ...color, sampleWorkOrderUrl: file.url, sampleWorkOrderName: file.name, sampleWorkOrderShipped: false, sampleWorkOrderShippedAt: null, sampleInProgress: true })),
   }
-  if (before.length && published.rounds.length === before.length) throw new Error('진행 중인 컬러샘플의 발송·검토 상태를 먼저 확인해 주세요.')
+  if (before.length && published.rounds.length === before.length) throw new Error('진행 중인 컬러샘플의 발송 상태를 먼저 확인해 주세요.')
   const lastId = published.rounds.at(-1)!.id
   const rounds = published.rounds.map(round => ({ ...round, originCountry: round.id === lastId ? country : ('originCountry' in round && typeof round.originCountry === 'string' ? round.originCountry : input.originCountry) }))
   return {

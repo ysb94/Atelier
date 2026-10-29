@@ -79,6 +79,8 @@ export function draftStatePercent(draft: {
   nameEn: string
   colors: readonly unknown[]
   sampleDone: boolean
+  sampleWorkOrders?: readonly DraftSampleWorkOrder[]
+  specs?: { colorSampleRounds?: readonly { url: string }[] }
   orderInProgress: boolean
   orderDone: boolean
   photoSampleDone: boolean
@@ -88,7 +90,7 @@ export function draftStatePercent(draft: {
   const flags = [
     Boolean(draft.nameKo.trim() || draft.nameEn.trim()),
     draft.colors.length > 0,
-    draft.sampleDone,
+    Boolean(draft.sampleWorkOrders?.some(order => order.receivedAt) || draft.specs?.colorSampleRounds?.some(round => round.url.trim()) || draft.sampleDone),
     draft.orderInProgress,
     draft.orderDone,
     draft.photoSampleDone,
@@ -116,14 +118,14 @@ export function newSampleWorkOrder(round = 1): DraftSampleWorkOrder {
   }
 }
 
-export type SamplePhase = 'empty' | 'in_progress' | 'shipped' | 'passed'
+export type SamplePhase = 'empty' | 'in_progress' | 'shipped' | 'received'
 
 export function samplePhase(
   orders: readonly DraftSampleWorkOrder[] | null | undefined,
 ): SamplePhase {
   const latest = latestFilledSampleWorkOrder(orders)
   if (!latest) return 'empty'
-  if (latest.passed) return 'passed'
+  if (latest.receivedAt || latest.passed) return 'received'
   if (latest.shipped) return 'shipped'
   return 'in_progress'
 }
@@ -135,7 +137,7 @@ export function samplePhaseLabel(
   const phase = samplePhase(orders)
   if (!latest || phase === 'empty') return '샘플 진행 중'
   const round = sampleWorkOrderLabel(latest.round)
-  if (phase === 'passed') return `${round} 샘플 합격`
+  if (phase === 'received') return `${round} 샘플 수령`
   if (phase === 'shipped') return `${round} 샘플 발송완료`
   return `${round} 샘플 진행중`
 }
@@ -144,8 +146,8 @@ export function samplePhaseHint(
   orders: readonly DraftSampleWorkOrder[] | null | undefined,
 ) {
   const phase = samplePhase(orders)
-  if (phase === 'passed') return '컬러별 샘플로 진행'
-  if (phase === 'shipped') return '도착 후 합격·불합격'
+  if (phase === 'received') return '다음 샘플 단계로 진행'
+  if (phase === 'shipped') return '실물 수령 후 다음 단계로 진행'
   if (phase === 'in_progress') return '중국팀 제작'
   return '작업 지시서를 올리면 시작합니다'
 }
@@ -153,7 +155,8 @@ export function samplePhaseHint(
 export function isSamplePassed(
   orders: readonly DraftSampleWorkOrder[] | null | undefined,
 ) {
-  return samplePhase(orders) === 'passed'
+  // Compatibility for old persisted records, not a current workflow condition.
+  return Boolean(latestFilledSampleWorkOrder(orders)?.passed)
 }
 
 export function sampleWorkOrderLabel(round: number) {

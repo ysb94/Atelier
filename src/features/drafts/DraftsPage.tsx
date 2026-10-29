@@ -19,13 +19,8 @@ import {
   type DraftOwnerScope,
 } from '@/lib/drafts/company-draft'
 import { newColorRow } from '@/lib/drafts/empty-draft'
-import {
-  newColorSampleRound,
-  passLatestColorSampleRound,
-  publishNextColorSampleRound,
-  resolveColorSampleRounds,
-} from '@/lib/drafts/draft-flow'
-import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields, setLatestSampleWorkOrderPassed } from '@/lib/drafts/sample-work-order'
+import { registerDraftSampleStage } from '@/lib/drafts/sample-registration'
+import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields } from '@/lib/drafts/sample-work-order'
 import { receiveSample, registerNextReceivedSample } from '@/lib/drafts/sample-receipt'
 import { parseSizeSpecInput } from '@/lib/drafts/spec-format'
 import { writeColorSpec } from '@/lib/drafts/color-spec'
@@ -698,63 +693,16 @@ export function CompanyDraftsPage() {
                         }
                       })
                     }}
-                    onPassColorSample={async () => {
-                      await saveDraftChange(draft.id, (current) => {
-                        const input = draftToInput(current)
-                        const rounds = resolveColorSampleRounds(current)
-                        const next = passLatestColorSampleRound(rounds)
-                        if (!next[next.length - 1]?.passed) {
-                          throw new Error('돌아온 컬러 샘플만 합격할 수 있습니다.')
-                        }
-                        return {
-                          ...input,
-                          specs: { ...input.specs, colorSampleRounds: next },
-                        }
-                      })
-                    }}
                     onRequestNextColorSampleRound={async (file) => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
-                        const rounds = resolveColorSampleRounds(current)
-                        const before = rounds[rounds.length - 1]?.round
-                        const published = publishNextColorSampleRound(input.colors, rounds, file)
-                        const latest = published.rounds[published.rounds.length - 1]
-                        if (!latest || latest.round === before) {
-                          throw new Error('다음 차수로 넘기지 못했습니다.')
-                        }
-                        return {
-                          ...input,
-                          colors: published.colors,
-                          specs: {
-                            ...input.specs,
-                            colorSampleRounds: published.rounds,
-                          },
-                        }
+                        return registerDraftSampleStage(input, 'color', file, input.originCountry)
                       })
                     }}
                     onUploadColorWorkOrder={async (file) => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
-                        const colors = input.colors.length > 0 ? input.colors : [newColorRow()]
-                        const requestedAt = new Date().toISOString()
-                        return {
-                          ...input,
-                          specs: {
-                            ...input.specs,
-                            colorSampleRequestedAt: requestedAt,
-                            colorSampleRounds: [
-                              newColorSampleRound(1, file, requestedAt),
-                            ],
-                          },
-                          colors: colors.map((color) => ({
-                            ...color,
-                            sampleWorkOrderUrl: file.url,
-                            sampleWorkOrderName: file.name,
-                            sampleWorkOrderShipped: false,
-                            sampleWorkOrderShippedAt: null,
-                            sampleInProgress: true,
-                          })),
-                        }
+                        return registerDraftSampleStage(input, 'color', file, input.originCountry)
                       })
                     }}
                     onReceiveSample={async (id) => {
@@ -775,28 +723,7 @@ export function CompanyDraftsPage() {
                           ...input,
                           sampleWorkOrders,
                           ...legacyWorkOrderFields(sampleWorkOrders),
-                          sampleDone: false,
                           originCountry: country || input.originCountry,
-                        }
-                      })
-                    }}
-                    onPassSample={async () => {
-                      await saveDraftChange(draft.id, (current) => {
-                        const input = draftToInput(current)
-                        if (!latestFilledSampleWorkOrder(input.sampleWorkOrders)?.receivedAt) throw new Error('실물 수령을 먼저 확인해 주세요.')
-                        const sampleWorkOrders = setLatestSampleWorkOrderPassed(
-                          input.sampleWorkOrders,
-                          true,
-                        )
-                        if (!latestFilledSampleWorkOrder(sampleWorkOrders)?.passed) {
-                          throw new Error('돌아온 샘플만 합격할 수 있습니다.')
-                        }
-                        return {
-                          ...input,
-                          sampleWorkOrders,
-                          ...legacyWorkOrderFields(sampleWorkOrders),
-                          sampleDone: true,
-                          orderInProgress: false,
                         }
                       })
                     }}

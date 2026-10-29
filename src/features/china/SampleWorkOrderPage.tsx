@@ -539,13 +539,7 @@ export function CompanySampleWorkOrderPage() {
                             )}
                             <div className="text-[11px] text-muted-foreground">
                               {formatSavedAt(row.shippedAt || draft.updatedAt)}{' '}
-                              {row.passed
-                                ? '합격'
-                                : row.failReason
-                                  ? '불합격'
-                                  : done
-                                    ? '발송'
-                                    : '저장'}
+                              {done ? '발송' : '저장'}
                               {row.fileCheckedAt ? ' · 확인' : ''}
                             </div>
                           </div>
@@ -584,7 +578,7 @@ export function CompanySampleWorkOrderPage() {
                         {shipError && <p role="alert" className="text-xs text-danger">{shipError.message}</p>}
                         {note ? (
                           <p className="rounded-md bg-muted/70 px-2.5 py-2 text-xs whitespace-pre-wrap">
-                            {done ? '불합격 사유' : '중점'}: {note}
+                            {done ? '수정 요청' : '중점'}: {note}
                           </p>
                         ) : null}
                       </div>

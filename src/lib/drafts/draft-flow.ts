@@ -203,7 +203,7 @@ export function requestNextColorSampleRound(
   const latest = list[list.length - 1]
   const url = file.url.trim()
   const name = file.name.trim()
-  if (!url || !latest?.url || !latest.returnedAt || latest.passed) return list
+  if (!url || !latest?.url || !(latest.returnedAt || latest.passed)) return list
   const round = Math.max(0, ...list.map((item) => item.round)) + 1
   return [
     ...list,
