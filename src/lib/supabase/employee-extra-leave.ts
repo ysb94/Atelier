@@ -17,6 +17,15 @@ export async function listExtraLeave(): Promise<ExtraLeaveRecords> {
   return { ready: result.ready, fefoReady: result.fefoReady === true, entries: result.entries.map(row => ({ ...row, days: Number(row.days), used: Number(row.used) })), balances: result.balances.map(row => ({ ...row, available: Number(row.available), shortfall: Number(row.shortfall ?? 0) })), events: result.events?.map(row => ({ ...row, days: Number(row.days) })) }
 }
 export type SaveExtraLeave = { id: string; employeeId: string; days: number; expires: string; note: string; version: number; remove?: boolean }
+export async function listMyExtraLeave(): Promise<Pick<ExtraLeave, 'id' | 'days' | 'expires' | 'note' | 'created' | 'used'>[]> {
+  const { data, error } = await getSupabase().rpc('my_extra_leave_entries')
+  if (error) {
+    console.warn('[extra-leave] 본인 추가 연차 조회 실패', error)
+    throw new Error('추가 연차 이력을 불러오지 못했습니다.')
+  }
+  const rows = (data ?? []) as Pick<ExtraLeave, 'id' | 'days' | 'expires' | 'note' | 'created' | 'used'>[]
+  return rows.map(row => ({ ...row, days: Number(row.days), used: Number(row.used) }))
+}
 export async function saveExtraLeave(input: SaveExtraLeave) {
   const { error } = await getSupabase().rpc('save_employee_extra_leave', {
     p_id: input.id, p_employee: input.employeeId, p_days: input.days, p_expires: input.expires,

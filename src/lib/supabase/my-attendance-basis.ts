@@ -3,6 +3,8 @@ import { getSupabase } from './client'
 
 export type MyAttendanceBasis = {
   departmentId: string | null
+  baseAnnualLeave: number | null
+  additionalAnnualLeave: number | null
   remainingAnnualLeave: number | null
   start: string
   grace: number
@@ -19,11 +21,13 @@ type BasisSetting = {
 }
 type BasisPayload = {
   departmentId: string | null
+  baseAnnualLeave?: number | string | null
+  additionalAnnualLeave?: number | string | null
   remainingAnnualLeave: number | string | null
   settings: BasisSetting[]
 }
 
-function leaveDays(value: number | string | null): number | null {
+function leaveDays(value: number | string | null | undefined): number | null {
   if (value == null || value === '') return null
   const days = typeof value === 'number' ? value : Number(value)
   return Number.isFinite(days) ? days : null
@@ -46,6 +50,8 @@ export async function getMyAttendanceBasis(userId: string, month: string): Promi
   const resolved = resolveAttendanceStart(attendanceStartIndex(settings), userId, payload.departmentId, month)
   return {
     departmentId: payload.departmentId,
+    baseAnnualLeave: leaveDays(payload.baseAnnualLeave),
+    additionalAnnualLeave: leaveDays(payload.additionalAnnualLeave),
     remainingAnnualLeave: leaveDays(payload.remainingAnnualLeave),
     start: resolved.start,
     grace: resolved.grace,
