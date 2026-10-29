@@ -1,4 +1,5 @@
 import type { DraftColorRow, DraftColorSampleRound, DraftSpecs } from '../types'
+import { canReceiveSample } from './sample-receipt'
 
 export function isColorSampleOrdered(draft: {
   orderInProgress?: boolean
@@ -97,6 +98,7 @@ export function normalizeColorSampleRounds(raw: unknown): DraftColorSampleRound[
       name: typeof row.name === 'string' ? row.name : '',
       shippedAt: colorSampleTimestamp(row.shippedAt),
       returnedAt: colorSampleTimestamp(row.returnedAt),
+      receivedAt: colorSampleTimestamp(row.receivedAt),
       passed: Boolean(row.passed),
     })
   }
@@ -203,7 +205,7 @@ export function requestNextColorSampleRound(
   const latest = list[list.length - 1]
   const url = file.url.trim()
   const name = file.name.trim()
-  if (!url || !latest?.url || !(latest.returnedAt || latest.passed)) return list
+  if (!url || !latest?.url || !(latest.receivedAt || latest.passed)) return list
   const round = Math.max(0, ...list.map((item) => item.round)) + 1
   return [
     ...list,
@@ -221,4 +223,17 @@ export function markLatestColorSampleReturned(
   return rounds.map((round, index) =>
     index === latestIndex ? { ...round, returnedAt: at } : round,
   )
+}
+
+/** 등록·발송 기록을 보존하고 현재 컬러샘플의 실물 수령만 확인한다. */
+export function receiveColorSample(
+  rounds: readonly DraftColorSampleRound[], id: string, country: string,
+  at = new Date().toISOString(),
+): DraftColorSampleRound[] {
+  const latest = rounds.at(-1)
+  if (latest?.id !== id) throw new Error('현재 진행 중인 컬러샘플만 수령 확인할 수 있습니다.')
+  if (latest.receivedAt) return [...rounds]
+  if (!canReceiveSample({ ...latest, shipped: Boolean(latest.returnedAt) }, country)) throw new Error('작업지시서 등록과 발송 상태를 먼저 확인해 주세요.')
+  if (Number.isNaN(Date.parse(at))) throw new Error('수령 날짜를 확인해 주세요.')
+  return rounds.map(round => round.id === id ? { ...round, receivedAt: at, originCountry: round.originCountry || country } : { ...round })
 }

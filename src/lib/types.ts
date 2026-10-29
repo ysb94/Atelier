@@ -341,6 +341,8 @@ export type DraftColorSampleRound = {
   shippedAt: string | null
   /** 중국팀이 발송 완료를 누른 시각 */
   returnedAt: string | null
+  /** 발송일과 구분되는 실물 수령 확인 시각. 이전 기록은 비어 있다. */
+  receivedAt?: string | null
   passed: boolean
 }
 

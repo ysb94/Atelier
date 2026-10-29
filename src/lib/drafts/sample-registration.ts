@@ -53,7 +53,7 @@ export function registerDraftSampleStage(
     rounds: [newColorSampleRound(1, file, at)],
     colors: input.colors.map(color => ({ ...color, sampleWorkOrderUrl: file.url, sampleWorkOrderName: file.name, sampleWorkOrderShipped: false, sampleWorkOrderShippedAt: null, sampleInProgress: true })),
   }
-  if (before.length && published.rounds.length === before.length) throw new Error('진행 중인 컬러샘플의 발송 상태를 먼저 확인해 주세요.')
+  if (before.length && published.rounds.length === before.length) throw new Error('진행 중인 컬러샘플의 실물 수령 상태를 먼저 확인해 주세요.')
   const lastId = published.rounds.at(-1)!.id
   const rounds = published.rounds.map(round => ({ ...round, originCountry: round.id === lastId ? country : ('originCountry' in round && typeof round.originCountry === 'string' ? round.originCountry : input.originCountry) }))
   return {
@@ -61,5 +61,21 @@ export function registerDraftSampleStage(
     sampleWorkOrders: input.sampleWorkOrders.map(order => ({ ...order, originCountry: order.originCountry || input.originCountry })),
     colors: published.colors,
     specs: { ...input.specs, colorSampleRequestedAt: at, colorSampleRounds: rounds },
+  }
+}
+
+/** 현재 미발송 컬러샘플만 수정한다. 이전 차수와 수령한 파일은 보존한다. */
+export function updateDraftColorSample(input: ProductDraftInput, id: string, change: { file?: { url: string; name: string }; country?: string }): ProductDraftInput {
+  const rounds = resolveColorSampleRounds(input)
+  const latest = rounds.at(-1)
+  if (latest?.id !== id || latest.returnedAt || latest.receivedAt || latest.passed) throw new Error('진행 중인 미발송 컬러샘플만 수정할 수 있습니다.')
+  if (change.file && (!change.file.url.trim() || !change.file.name.trim())) throw new Error('작업지시서 파일을 선택해 주세요.')
+  if (change.country !== undefined && !['CN', 'KO'].includes(sampleCountry(change.country).code)) throw new Error('제조국을 선택해 주세요.')
+  return { ...input,
+    specs: { ...input.specs, colorSampleRounds: rounds.map(round => round.id === id ? {
+      ...round, ...(change.file ? { url: change.file.url, name: change.file.name.trim() } : {}),
+      ...(change.country !== undefined ? { originCountry: change.country } : {}),
+    } : round) },
+    colors: change.file ? input.colors.map(color => ({ ...color, sampleWorkOrderUrl: change.file!.url, sampleWorkOrderName: change.file!.name.trim() })) : input.colors,
   }
 }

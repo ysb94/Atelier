@@ -3,21 +3,22 @@ import { Button } from '@/components/ui/button'
 import type { DraftSampleWorkOrder } from '@/lib/types'
 import { sampleElapsedDays, sampleHistoryDay, sampleTripSpanDays } from '@/lib/drafts/sample-work-order'
 import { canReceiveSample, sampleCountry, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
-import { sampleOrderLabel } from '@/lib/drafts/sample-registration'
+import { colorSampleLabel, sampleOrderLabel } from '@/lib/drafts/sample-registration'
 import './draft-sample-progress.css'
 
 type WorkOrderFile = { url: string; name: string }
 type Props = {
-  orders: readonly DraftSampleWorkOrder[]
+  orders: readonly Pick<DraftSampleWorkOrder, 'id' | 'round' | 'url' | 'name' | 'originCountry' | 'shippedAt' | 'returnedAt' | 'receivedAt' | 'shipped' | 'passed' | 'sampleStage'>[]
+  kind?: 'sample' | 'color'
   originCountry: string
   readOnly?: boolean
   saving?: boolean
   onReceive: (id: string) => Promise<void>
-  onNext: (file: WorkOrderFile, country: string) => Promise<void>
+  onNext?: (file: WorkOrderFile, country: string) => Promise<void>
   onOpen?: () => void
 }
 
-export function DraftSampleProgress({ orders, originCountry, readOnly = false, saving = false, onReceive, onOpen }: Props) {
+export function DraftSampleProgress({ orders, kind = 'sample', originCountry, readOnly = false, saving = false, onReceive, onOpen }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const pending = useRef(false)
@@ -36,17 +37,18 @@ export function DraftSampleProgress({ orders, originCountry, readOnly = false, s
     } finally { pending.current = false; setBusy(false) }
   }
 
-  return <div className="draft-sample-progress" aria-label="샘플 등록·수령 이력">
+  return <div className="draft-sample-progress" aria-label={kind === 'color' ? '컬러샘플 등록·수령 이력' : '샘플 등록·수령 이력'}>
     {list.map(order => {
       const country = sampleCountry(order.originCountry || originCountry)
       const registered = order.receivedAt ? sampleTripSpanDays(order.shippedAt, order.receivedAt) : sampleElapsedDays(order.shippedAt)
       const received = sampleElapsedDays(order.receivedAt ?? null)
       const current = order.id === latest?.id
-      return <section key={order.id} aria-label={sampleOrderLabel(order, list)} className="draft-sample-round">
+      const label = kind === 'color' ? colorSampleLabel(order.round) : sampleOrderLabel(order, list)
+      return <section key={order.id} aria-label={label} className="draft-sample-round">
         <div className="draft-sample-route">
           <div className="draft-sample-heading">
             <span className="draft-sample-country" title={country.label}>{country.code}<span aria-hidden="true"> | </span></span>
-            <a href={order.url!} download={order.name} title="작업지시서 내려받기">{sampleOrderLabel(order, list)} {sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}</a>
+            <a href={order.url!} download={order.name} title="작업지시서 내려받기">{label} {sampleHistoryDay(order.shippedAt).slice(2) || '등록일 기록 없음'}</a>
             {registered !== null && <span className="draft-sample-registered-elapsed" title={order.receivedAt ? '작업지시서 등록부터 실물 수령까지 걸린 일수' : '작업지시서 등록 후 경과일'}>({registered}일{order.receivedAt ? '' : ' 경과'})</span>}
           </div>
           {!order.receivedAt && <p className="draft-sample-dispatch">{country.code === 'CN'

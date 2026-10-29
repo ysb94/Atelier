@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { emptyDraftInput, newColorRow } from './empty-draft'
 import { attachSampleWorkOrderFile, normalizeSampleWorkOrders, sanitizeSampleWorkOrders, setLatestSampleWorkOrderShipped } from './sample-work-order'
 import { receiveSample } from './sample-receipt'
-import { normalizeColorSampleRounds } from './draft-flow'
-import { colorSampleLabel, finalSampleLabel, registerDraftSampleStage, sampleOrderLabel, sampleRegistrationLabel } from './sample-registration'
+import { normalizeColorSampleRounds, receiveColorSample } from './draft-flow'
+import { colorSampleLabel, finalSampleLabel, registerDraftSampleStage, sampleOrderLabel, sampleRegistrationLabel, updateDraftColorSample } from './sample-registration'
 
 const attached = attachSampleWorkOrderFile([], {url:'data:file,first',name:'first.xlsx'}, '2026-10-20T01:00:00Z')
 const shipped = setLatestSampleWorkOrderShipped(attached, true, '2026-10-21T01:00:00Z')
@@ -44,7 +44,12 @@ assert.equal(normalizeColorSampleRounds(JSON.parse(JSON.stringify(color.specs.co
 assert.deepEqual(color.colors.map(c=>c.name),receivedInput.colors.map(c=>c.name))
 assert.ok(color.colors.every(c=>c.sampleWorkOrderUrl===file.url))
 assert.throws(()=>registerDraftSampleStage(color,'color',file,'한국'),/진행 중인 컬러샘플/)
-const returned={...color,specs:{...color.specs,colorSampleRounds:color.specs.colorSampleRounds!.map(r=>({...r,returnedAt:at}))}}
+const returned={...color,specs:{...color.specs,colorSampleRounds:receiveColorSample(color.specs.colorSampleRounds!,color.specs.colorSampleRounds![0]!.id,'한국',at)}}
+const editableColor=updateDraftColorSample(color,color.specs.colorSampleRounds![0]!.id,{file:{url:'file:updated',name:'new.pdf'},country:'중국'})
+assert.equal(editableColor.colors[0]!.sampleWorkOrderUrl,'file:updated')
+assert.equal(editableColor.specs.colorSampleRounds![0]!.originCountry,'중국')
+assert.equal(color.specs.colorSampleRounds![0]!.url,file.url,'기존 파일 불변')
+assert.throws(()=>updateDraftColorSample(returned,returned.specs.colorSampleRounds![0]!.id,{country:'중국'}),/미발송/)
 const secondColor=registerDraftSampleStage(returned,'color',{url:'data:file,color2',name:'color2.xlsx'},'중국')
 assert.equal(secondColor.specs.colorSampleRounds!.length,2)
 assert.equal(secondColor.specs.colorSampleRounds![0]!.originCountry,'한국')

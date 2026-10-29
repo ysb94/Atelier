@@ -19,6 +19,7 @@ import {
   type DraftOwnerScope,
 } from '@/lib/drafts/company-draft'
 import { newColorRow } from '@/lib/drafts/empty-draft'
+import { receiveColorSample, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import { registerDraftSampleStage } from '@/lib/drafts/sample-registration'
 import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields } from '@/lib/drafts/sample-work-order'
 import { receiveSample, registerNextReceivedSample } from '@/lib/drafts/sample-receipt'
@@ -693,10 +694,10 @@ export function CompanyDraftsPage() {
                         }
                       })
                     }}
-                    onRequestNextColorSampleRound={async (file) => {
+                    onReceiveColorSample={async (id) => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
-                        return registerDraftSampleStage(input, 'color', file, input.originCountry)
+                        return { ...input, specs: { ...input.specs, colorSampleRounds: receiveColorSample(resolveColorSampleRounds(input), id, input.originCountry) } }
                       })
                     }}
                     onUploadColorWorkOrder={async (file) => {

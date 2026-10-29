@@ -31,7 +31,7 @@ export function applySampleOrigin(orders: readonly DraftSampleWorkOrder[], count
   } : { ...order })
 }
 
-export function canReceiveSample(order: DraftSampleWorkOrder, country: string) {
+export function canReceiveSample(order: Pick<DraftSampleWorkOrder, 'url' | 'shippedAt' | 'receivedAt' | 'passed' | 'originCountry' | 'shipped'>, country: string) {
   return Boolean(order.url?.trim() && order.shippedAt && !order.receivedAt && !order.passed &&
     (sampleCountry(order.originCountry || country).code !== 'CN' || order.shipped))
 }
@@ -50,7 +50,7 @@ export function receiveSample(
 }
 
 /** 회의 뒤 새 파일을 등록한 시점에만 다음 차수를 추가한다. 이전 차수와 파일은 보존한다. */
-export function sampleReadyForNextStage(order: DraftSampleWorkOrder | null | undefined) {
+export function sampleReadyForNextStage(order: Pick<DraftSampleWorkOrder, 'url' | 'receivedAt' | 'passed'> | null | undefined) {
   // Older records may only contain the legacy completion flag; do not rewrite their dates.
   return Boolean(order?.url?.trim() && (order.receivedAt || order.passed))
 }

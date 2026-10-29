@@ -13,6 +13,8 @@ import {
   passLatestColorSampleRound,
   publishNextColorSampleRound,
   requestNextColorSampleRound,
+  receiveColorSample,
+  normalizeColorSampleRounds,
   resolveColorSampleRounds,
   sanitizeColorWorkOrder,
   setColorWorkOrderShipped,
@@ -92,7 +94,14 @@ const returned = markLatestColorSampleReturned(legacyRounds, '2026-10-14T03:00:0
 assert(returned[0]?.returnedAt === '2026-10-14T03:00:00.000Z', '회신일을 최신 차수에 남긴다')
 const passed = passLatestColorSampleRound(returned)
 assert(passed[0]?.passed === true, '돌아온 컬러 샘플만 합격한다')
-const again = requestNextColorSampleRound(returned, { url: 'data:file,second', name: 'second.xlsx' }, '2026-10-14T04:00:00.000Z')
+assert(requestNextColorSampleRound(returned, { url: 'file', name: 'next' }).length === 1, '중국 발송만으로 다음 단계를 열지 않는다')
+const received = receiveColorSample(returned, returned[0]!.id, '중국', '2026-10-14T03:30:00.000Z')
+assert(received[0]?.receivedAt === '2026-10-14T03:30:00.000Z' && received[0]?.returnedAt === returned[0]?.returnedAt, '실물 수령과 발송을 구분한다')
+assert(received[0]?.passed === false, '수령에 판정은 필요하지 않다')
+assert(normalizeColorSampleRounds(JSON.parse(JSON.stringify(received)))[0]?.receivedAt === received[0]?.receivedAt, '수령 후 저장·재조회')
+assert(receiveColorSample(received, received[0]!.id, '중국', '2026-10-15T01:00:00Z')[0]?.receivedAt === received[0]?.receivedAt, '반복 확인은 원래 수령일 유지')
+assert(returned[0]?.receivedAt == null, '기존 입력은 바꾸지 않는다')
+const again = requestNextColorSampleRound(received, { url: 'data:file,second', name: 'second.xlsx' }, '2026-10-14T04:00:00.000Z')
 assert(again.length === 2 && again[1]?.round === 2, '새 파일로 2차를 연다')
 assert(again[1]?.url === 'data:file,second' && again[1]?.name === 'second.xlsx', '2차는 첨부한 작업지시서를 쓴다')
 assert(again[1]?.shippedAt === '2026-10-14T04:00:00.000Z' && again[1]?.returnedAt === null, '2차는 첨부한 뒤 요청한다')
@@ -102,7 +111,7 @@ const attachedColor = attachOpenColorSampleRound(openColor, { url: 'data:file,re
 assert(attachedColor[1]?.url === 'data:file,real' && attachedColor[1]?.shippedAt === '2026-10-14T05:00:00.000Z', '요청 전 컬러 차수에 작업지시서를 붙인다')
 const published = publishNextColorSampleRound(
   [{ ...withFile, sampleWorkOrderShipped: true, sampleWorkOrderShippedAt: '2026-10-14T03:00:00.000Z' }],
-  returned,
+  received,
   { url: 'data:file,china', name: 'china.xlsx' },
   '2026-10-14T06:00:00.000Z',
 )

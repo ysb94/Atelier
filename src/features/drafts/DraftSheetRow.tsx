@@ -6,10 +6,9 @@ import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
 import { resolveColorSpec } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
-import { sampleCountry, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
+import { sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
 import {
   sampleHistoryDay,
-  sampleElapsedDaysLabel,
   sampleTripSpanDays,
   sheetRegisteredDay,
 } from '@/lib/drafts/sample-work-order'
@@ -19,63 +18,12 @@ import { formatNumber } from '@/lib/utils'
 import { RELEASE_CERTAINTY_LABEL, formatReleaseGroupLabel, formatTargetDate, type ResolvedReleaseSchedule } from './release-schedule-preview'
 import './draft-board.css'
 import { DraftSampleProgress } from './DraftSampleProgress'
+import { DraftColorSampleProgress } from './DraftColorSampleProgress'
 import { colorSampleLabel, sampleOrderLabel } from '@/lib/drafts/sample-registration'
 
 const SAMPLE_WORK_ORDER_ACCEPT =
   'application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp,.xls,.xlsx'
 const SAMPLE_WORK_ORDER_MAX_BYTES = 8 * 1024 * 1024
-
-function SampleRoundDecision({
-  readOnly = false,
-  nextLabel,
-  onNextRound,
-}: {
-  readOnly?: boolean
-  nextLabel: string
-  onNextRound: (file: { url: string; name: string }) => Promise<void>
-}) {
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [busy, setBusy] = useState<'next' | null>(null)
-  const [error, setError] = useState('')
-
-  return (
-    <div className="draft-sheet-sample-decision">
-      <input
-        ref={inputRef}
-        type="file"
-        accept={SAMPLE_WORK_ORDER_ACCEPT}
-        hidden
-        onChange={(event) => {
-          const file = event.target.files?.[0]
-          event.target.value = ''
-          if (!file || readOnly) return
-          if (file.size > SAMPLE_WORK_ORDER_MAX_BYTES) {
-            setError('작업 지시서는 8MB 이하만 올릴 수 있습니다.')
-            return
-          }
-          setBusy('next')
-          setError('')
-          void readFileAsDataUrl(file)
-            .then((url) => onNextRound({ url, name: file.name }))
-            .catch((err: unknown) => {
-              console.warn('[drafts] 다음 차수 작업 지시서 업로드 실패', err)
-              setError(err instanceof Error ? err.message : '작업 지시서를 올리지 못했습니다.')
-            })
-            .finally(() => setBusy(null))
-        }}
-      />
-      <button
-        type="button"
-        className="draft-sheet-action is-neutral"
-        disabled={readOnly || busy !== null}
-        onClick={() => inputRef.current?.click()}
-      >
-        {busy === 'next' ? '올리는 중' : nextLabel}
-      </button>
-      {error ? <span className="draft-sheet-field-error">{error}</span> : null}
-    </div>
-  )
-}
 
 function ColorSampleWorkOrderButton({
   readOnly = false,
@@ -605,7 +553,7 @@ function SampleHistoryDialog({
   }, [])
   const groups = [
     { title: '대표 샘플', rows: samples, receipt: true },
-    { title: '컬러 샘플', rows: colors, receipt: false },
+    { title: '컬러 샘플', rows: colors, receipt: true, color: true },
   ].filter((group) => group.rows.length > 0)
   return createPortal(
     <dialog
@@ -640,7 +588,7 @@ function SampleHistoryDialog({
                 const days = sampleTripSpanDays(row.shippedAt, group.receipt ? row.receivedAt ?? null : row.returnedAt)
                 return (
                   <tr key={row.id}>
-                    <th scope="row">{group.receipt ? sampleOrderLabel(row, samples) : colorSampleLabel(row.round)}{row.receivedAt ? ' · 수령' : ''}</th>
+                    <th scope="row">{'color' in group ? colorSampleLabel(row.round) : sampleOrderLabel(row, samples)}{row.receivedAt ? ' · 수령' : ''}</th>
                     <td>{sampleHistoryDay(row.shippedAt) || '기록 없음'}</td>
                     <td>{row.returnedAt ? sampleHistoryDay(row.returnedAt) : '기록 없음'}</td>
                     {group.receipt && <td>{sampleHistoryDay(row.receivedAt ?? null) || '기록 없음'}</td>}
@@ -702,7 +650,7 @@ export function DraftPhoto({ src, name, onOpen }: { src: string | null; name: st
 
 export type DraftConfirmFlag = 'nameConfirmed' | 'colorsConfirmed' | 'colorNamesConfirmed'
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onNextSample, onSchedule, onAddColor, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onUploadColorWorkOrder, onRequestNextColorSampleRound, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onNextSample, onSchedule, onAddColor, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onUploadColorWorkOrder, onReceiveColorSample, onToggleConfirm }: {
   readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
   onOpen: () => void
@@ -716,7 +664,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
   onReceiveSample: (id: string) => Promise<void>
   onRequestNextSampleRound: (file: { url: string; name: string }, country?: string) => Promise<void>
   onUploadColorWorkOrder: (file: { url: string; name: string }) => Promise<void>
-  onRequestNextColorSampleRound: (file: { url: string; name: string }) => Promise<void>
+  onReceiveColorSample: (id: string) => Promise<void>
   onToggleConfirm: (flag: DraftConfirmFlag, next: boolean) => Promise<void>
 }) {
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -775,31 +723,10 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
             <>
               <button type="button" className="draft-sheet-sample-confirmed" aria-haspopup="dialog" onClick={() => setHistoryOpen(true)}>샘플 이력</button>
               {historyOpen ? <SampleHistoryDialog draftNo={draft.draftNo} samples={orders} colors={colorRounds} onClose={() => setHistoryOpen(false)} /> : null}
-              {colorRounds.length ? colorRounds.map((round) => {
-                const latest = round.id === latestColorRound?.id
-                const country = sampleCountry(round.originCountry || draft.originCountry)
-                return (
-                  <section className="draft-sample-round" key={round.id} aria-label={colorSampleLabel(round.round)}>
-                    <div className="draft-sample-route">
-                      <div className="draft-sample-heading">
-                        <span className="draft-sample-country">{country.code} | </span>
-                        <a href={round.url} download={round.name}>{colorSampleLabel(round.round)} {sampleHistoryDay(round.shippedAt).slice(2)}</a>
-                        <span className="draft-sample-registered-elapsed">({sampleElapsedDaysLabel(round.shippedAt)})</span>
-                      </div>
-                      <p className="draft-sample-dispatch">{country.code === 'CN' ? round.returnedAt ? `${sampleHistoryDay(round.returnedAt).slice(2)} 중국 발송 완료` : '중국팀 제작·발송 대기' : '국내 샘플'}</p>
-                    </div>
-                    {latest && (round.returnedAt || round.passed) ? (
-                      <SampleRoundDecision
-                        readOnly={readOnly}
-                        nextLabel={`${round.round + 1}차 GO`}
-                        onNextRound={onRequestNextColorSampleRound}
-                      />
-                    ) : round.returnedAt ? null : (
-                      <span className="draft-sheet-sample-wait">Waiting</span>
-                    )}
-                  </section>
-                )
-              }) : (
+              {colorRounds.length ? (
+                <DraftColorSampleProgress rounds={colorRounds} originCountry={draft.originCountry} readOnly={readOnly}
+                  onReceive={onReceiveColorSample} onOpen={onNextSample ?? onOpen} />
+              ) : (
                 <div className="draft-sheet-sample-block" aria-label="컬러 샘플">
                   <span className="draft-sheet-sample-mark">
                     <b>컬러 샘플</b>
