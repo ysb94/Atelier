@@ -35,3 +35,7 @@ assert.equal(days[3].clockIn, '')
 assert.equal(days[3].clockOutAt, null)
 assert.equal(JSON.stringify({ requests, clocks }), original)
 console.info('my-attendance verify: ok (Korea dates/times, leap month, cross-month requests, future, latest approved correction overlay, immutable inputs)')
+const automatic = buildMyAttendance('2026-10', [{ date:'2026-10-02',clockIn:'09:00',clockOutAt:null,autoClosedAt:'2026-10-02T11:15:00Z' }], [], '2026-10-03')[1]
+assert.equal(automatic.clockOutAt,null)
+assert.equal(dayClock(automatic).end,'자동 퇴근 · 확인 필요')
+assert.equal(dayClock({...automatic,clockOutAt:'2026-10-02T09:20:00Z'}).end,'18:20','실제 시각 입력 후 자동 종료시각 대신 실제 시각 표시')

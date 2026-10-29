@@ -4,6 +4,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { clockOutLabel, koreaDateKey } from '@/features/settings/my-attendance'
 import { useAttendanceEntry } from './attendance-entry-context'
 import { fitPreviousClockOut, validatePreviousClockOut, workInstant } from './attendance-guidance'
+import { AttendancePresenceMonitor } from './AttendancePresenceMonitor'
 import './attendance-entry.css'
 
 function datesBetween(from: string, to: string) {
@@ -148,7 +149,7 @@ function PreviousClockOutForm() {
     catch (caught) { console.warn('[attendance-entry] 직전 퇴근 확인 실패', caught); setError(caught instanceof Error ? caught.message : '퇴근을 확인하지 못했습니다.'); entry.refresh() }
   }
   return <form className="mx-auto grid w-full max-w-md gap-4" onSubmit={event => void submit(event)}>
-    <div className="text-center"><h1 className="text-lg font-semibold">직전 근무일 퇴근 확인</h1><p className="mt-1 text-sm text-muted-foreground">근무일 {previous.date} · 출근 {previous.clockIn}</p></div>
+    <div className="text-center"><h1 className="text-lg font-semibold">직전 근무일 퇴근 확인</h1><p className="mt-1 text-sm text-muted-foreground">근무일 {previous.date} · 출근 {previous.clockIn}</p>{previous.autoClosedAt && <p className="mt-2 text-sm text-warning">근무 확인에 연속 5회 응답이 없어 자동 퇴근·확인 필요로 처리됐습니다. 실제 퇴근 시각을 확인해 등록해 주세요. 자동 종료 시각은 실제 퇴근 시각이 아닙니다.</p>}</div>
     <div className="attendance-entry-circle attendance-entry-circle-out" onClick={event => {
       const target = event.target as HTMLElement
       if (entry.confirming || target.closest('.attendance-entry-wheel, .attendance-entry-date, .attendance-entry-confirm')) return
@@ -190,27 +191,6 @@ function CheckoutConfirmation() {
   </AttendanceDialog>
 }
 
-function DepartureReminder() {
-  const entry = useAttendanceEntry()!
-  const [shown, setShown] = useState<string | null>(null)
-  const seen = useRef(new Set<string>())
-  const key = entry.schedule.end == null ? '' : `atelier:clock-out-reminder:${entry.userId}:${entry.today}:${entry.schedule.end}`
-  const due = entry.phase === 'ready' && entry.clock.needsClockOut && !entry.scheduleUnavailable && !entry.schedule.fullLeave && entry.schedule.end != null && entry.now.getTime() >= entry.schedule.end + 10 * 60_000
-  useEffect(() => {
-    if (!due || !key) { setShown(null); return }
-    if (seen.current.has(key)) return
-    seen.current.add(key)
-    try { if (localStorage.getItem(key)) return; localStorage.setItem(key, '1') }
-    catch (error) { console.warn('[attendance-entry] 퇴근 안내 확인 상태 저장 실패', error) }
-    setShown(key)
-  }, [due, key])
-  useEffect(() => { const receive = (event: StorageEvent) => { if (event.key === key && event.newValue) setShown(null) }; window.addEventListener('storage', receive); return () => window.removeEventListener('storage', receive) }, [key])
-  if (!due || shown !== key) return null
-  return <aside role="status" aria-label="퇴근 기록 안내" className="fixed right-4 top-14 z-40 w-[min(24rem,calc(100vw-2rem))] rounded-xl border border-border bg-card p-4 shadow-sm">
-    <p className="mb-3 text-sm">퇴근 예정시간이 지났습니다. 아직 근무 중인가요?</p><div className="flex gap-2"><Button size="sm" onClick={() => { setShown(null); entry.requestCheckout() }}>퇴근하기</Button><Button size="sm" variant="outline" onClick={() => setShown(null)}>아직 근무 중</Button></div>
-  </aside>
-}
-
 export function AttendanceEntryGate({ children }: { children: ReactNode }) {
   useRenderWatch('AttendanceEntryGate')
   const entry = useAttendanceEntry()
@@ -225,7 +205,7 @@ export function AttendanceEntryGate({ children }: { children: ReactNode }) {
         <div className="mt-4 flex justify-center gap-3">{entry.developerSkip && <Button type="button" variant="outline" disabled={entry.clock.saving || entry.confirming} onClick={entry.skip}>개발자입니다</Button>}<Button type="button" variant="ghost" disabled={entry.clock.saving || entry.confirming} onClick={() => { void entry.signOut().catch(error => console.warn('[attendance-entry] 로그아웃 실패', error)) }}>로그아웃</Button></div>
       </div>
     </AttendanceDialog>}
-    {entry?.phase === 'ready' && <><DepartureReminder />{entry.checkoutOpen && <CheckoutConfirmation key={entry.identity} />}</>}
+    {entry?.phase === 'ready' && <><AttendancePresenceMonitor />{entry.checkoutOpen && <CheckoutConfirmation key={entry.identity} />}</>}
   </>
 }
 

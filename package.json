@@ -71,6 +71,7 @@
     "verify:styled-image-deployment": "node scripts/verify-styled-image-deployment.mjs",
     "verify:diagnostics": "node scripts/verify-diagnostics.mjs",
     "verify:my-attendance": "node --experimental-strip-types src/features/settings/my-attendance.verify.ts",
+    "verify:attendance-presence": "node scripts/verify-attendance-presence-db.mjs",
     "verify:meetings-db": "node scripts/verify-meetings-db.mjs",
     "verify:meeting-participation": "tsx src/features/meetings/meeting-participation.verify.ts && node scripts/verify-meetings-db.mjs && node scripts/verify-page-preview-browser.mjs --participation-only",
     "verify:meetings-browser": "node scripts/verify-page-preview-browser.mjs --meetings-only",

@@ -14,3 +14,9 @@ assert.deepEqual(rows.map(row => [row.employeeId, row.date, row.clockIn, row.clo
 ])
 assert.equal(rows.some(row => row.employeeId === 'c'), false)
 console.log('deferred-clock-outs.verify ok')
+const automatic=deferredClockOutViews([{employeeId:'a',date:'2026-10-26',clockIn:'09:00',clockOutAt:null,reportedAt:null,autoClosedAt:'2026-10-26T11:15:00Z',workConfirmedAt:'2026-10-26T09:40:00Z'}],'2026-10')[0]
+assert.equal(automatic.pending,true)
+assert.equal(automatic.automatic,true)
+assert.equal(automatic.clockOutText,'—')
+assert.equal(automatic.lastConfirmedText,'18:40')
+assert.equal(automatic.reportedText,'10.26 20:15')

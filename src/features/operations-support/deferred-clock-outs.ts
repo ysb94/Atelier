@@ -5,7 +5,9 @@ export type DeferredClockOut = {
   date: string
   clockIn: string
   clockOutAt: string | null
-  reportedAt: string
+  reportedAt: string | null
+  autoClosedAt?: string | null
+  workConfirmedAt?: string | null
 }
 
 export type DeferredClockOutView = {
@@ -17,21 +19,26 @@ export type DeferredClockOutView = {
   reportedDate: string
   reportedText: string
   totalCount: number
+  automatic: boolean
+  pending: boolean
+  lastConfirmedText: string
 }
 
 /** 다음 출근 때 입력한 퇴근만 고르고, 누적은 월과 상관없이 같은 사람의 전체 횟수다. */
 export function deferredClockOutViews(rows: readonly DeferredClockOut[], month: string): DeferredClockOutView[] {
   const totals = new Map<string, number>()
   for (const row of rows) {
-    if (!row.reportedAt || Number.isNaN(Date.parse(row.reportedAt))) continue
+    const eventAt = row.reportedAt ?? row.autoClosedAt
+    if (!eventAt || Number.isNaN(Date.parse(eventAt))) continue
     totals.set(row.employeeId, (totals.get(row.employeeId) ?? 0) + 1)
   }
   return rows.flatMap(row => {
-    if (row.date.slice(0, 7) !== month || !row.reportedAt) return []
-    const reported = new Date(row.reportedAt)
+    const eventAt = row.reportedAt ?? row.autoClosedAt
+    if (row.date.slice(0, 7) !== month || !eventAt) return []
+    const reported = new Date(eventAt)
     if (Number.isNaN(reported.getTime())) return []
     const reportedDate = koreaDateKey(reported)
-    const reportedTime = clockOutLabel(row.reportedAt)
+    const reportedTime = clockOutLabel(eventAt)
     return [{
       key: `${row.employeeId}:${row.date}`,
       employeeId: row.employeeId,
@@ -41,6 +48,9 @@ export function deferredClockOutViews(rows: readonly DeferredClockOut[], month: 
       reportedDate,
       reportedText: reportedTime ? `${reportedDate.slice(5).replace('-', '.')} ${reportedTime}` : reportedDate,
       totalCount: totals.get(row.employeeId) ?? 0,
+      automatic: Boolean(row.autoClosedAt),
+      pending: Boolean(row.autoClosedAt && !row.clockOutAt),
+      lastConfirmedText: clockOutLabel(row.workConfirmedAt ?? null, row.date) || '확인 없음',
     }]
   }).sort((left, right) => right.totalCount - left.totalCount || right.date.localeCompare(left.date) || left.employeeId.localeCompare(right.employeeId))
 }

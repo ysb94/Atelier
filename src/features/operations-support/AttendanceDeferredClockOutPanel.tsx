@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { listCompanyDeferredClockOuts, type CompanyDeferredClockOut } from '@/lib/supabase/attendance-clocks'
 import { emptyList } from '@/lib/utils'
 import { deferredClockOutViews } from './deferred-clock-outs'
@@ -25,9 +26,11 @@ export function AttendanceDeferredClockOutPanel({ directory }: { directory: Retu
   const [departmentId, setDepartmentId] = useState('all')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
+  const active = useWorkspaceTabActivity()
   const clocks = useQuery({
     queryKey: ['company-deferred-clock-outs'],
     queryFn: listCompanyDeferredClockOuts,
+    refetchInterval: active ? 30_000 : false,
   })
   useEffect(() => {
     if (clocks.error) console.warn('[attendance-work] 퇴근 미처리 조회 실패', clocks.error)
@@ -59,7 +62,7 @@ export function AttendanceDeferredClockOutPanel({ directory }: { directory: Retu
   return <div className="space-y-4">
     <header>
       <h2 className="text-base font-semibold">퇴근 미처리</h2>
-      <p className="mt-1 text-sm text-muted-foreground">퇴근 시각이 지나도 퇴근을 누르지 않고, 다음 날 출근하면서 직전 퇴근을 입력한 기록입니다. 누적은 같은 사람이 이 방식으로 처리한 전체 횟수입니다.</p>
+      <p className="mt-1 text-sm text-muted-foreground">다음 출근 때 퇴근 시각을 입력한 기록과 연속 5회 무응답으로 자동 종료된 기록입니다. 자동 종료 시각은 실제 퇴근이나 야근 시간으로 계산하지 않습니다. 누적은 같은 사람의 전체 기록 횟수입니다.</p>
     </header>
     <div className="flex flex-wrap items-center gap-2">
       <Button variant="outline" size="icon" aria-label="이전 월" onClick={() => chooseMonth(shiftMonth(month, -1))}><ChevronLeft size={15} /></Button>
@@ -86,19 +89,21 @@ export function AttendanceDeferredClockOutPanel({ directory }: { directory: Retu
       <table className="w-full text-left text-sm">
         <caption className="sr-only">{monthLabel(month)} 퇴근 미처리</caption>
         <thead className="bg-primary text-primary-foreground">
-          <tr>{['근무일', '직원', '부서', '출근', '입력한 퇴근', '처리한 시각', '누적'].map(label => <th key={label} className="px-3 py-2 font-medium">{label}</th>)}</tr>
+          <tr>{['근무일', '직원', '부서', '출근', '상태', '마지막 근무 확인', '입력한 퇴근', '입력·자동 종료 시각', '누적'].map(label => <th key={label} className="px-3 py-2 font-medium">{label}</th>)}</tr>
         </thead>
         <tbody>
-          {unavailable ? <tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">퇴근 미처리 기록을 확인하고 있습니다.</td></tr>
+          {unavailable ? <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">퇴근 미처리 기록을 확인하고 있습니다.</td></tr>
             : pageRows.length ? pageRows.map(row => <tr key={row.key} className="border-t border-border">
               <td className="px-3 py-2">{dateLabel(row.date)}</td>
               <td className="px-3 py-2 font-medium">{row.name}</td>
               <td className="px-3 py-2">{row.team}</td>
               <td className="px-3 py-2">{row.clockIn}</td>
+              <td className="px-3 py-2">{row.pending ? '자동 퇴근 · 확인 필요' : row.automatic ? '자동 종료 후 입력 완료' : '입력 완료'}</td>
+              <td className="px-3 py-2">{row.lastConfirmedText}</td>
               <td className="px-3 py-2">{row.clockOutText}</td>
               <td className="px-3 py-2">{row.reportedText}</td>
               <td className="px-3 py-2 font-medium">{row.totalCount}회</td>
-            </tr>) : <tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">{clocks.error ? '기록을 불러오지 못했습니다.' : '이 조건에서 다음 출근 때 퇴근을 입력한 기록이 없습니다.'}</td></tr>}
+            </tr>) : <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">{clocks.error ? '기록을 불러오지 못했습니다.' : '이 조건에 해당하는 퇴근 미처리 기록이 없습니다.'}</td></tr>}
         </tbody>
       </table>
       {!unavailable && rows.length > PAGE_SIZE && <nav className="flex items-center justify-between border-t border-border px-3 py-2 text-xs text-muted-foreground" aria-label="퇴근 미처리 페이지">

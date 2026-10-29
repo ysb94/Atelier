@@ -254,7 +254,7 @@ export function MyAttendancePanel() {
         {clock.exempt ? <p className="personal-request-helper">출퇴근 제외자로 지정되어 지각·결근 관리에 포함되지 않습니다.</p> : (clock.needsClockIn || clock.needsClockOut || clock.todayClockOut) && <div className="personal-attendance-today-actions">
           {clock.needsClockIn && <Button size="sm" disabled={clock.saving} onClick={() => record('in')}>{clock.saving ? '저장 중…' : '출근하기'}</Button>}
           {clock.needsClockOut && <Button size="sm" disabled={clock.saving} onClick={() => record('out')}>{clock.saving ? '저장 중…' : '퇴근하기'}</Button>}
-          {clock.todayClockOut && <Button size="sm" variant="outline" disabled={clock.saving} onClick={() => record('undo')}>{clock.saving ? '저장 중…' : '퇴근 무르기'}</Button>}
+          {clock.todayRecord?.clockOutAt && <Button size="sm" variant="outline" disabled={clock.saving} onClick={() => record('undo')}>{clock.saving ? '저장 중…' : '퇴근 무르기'}</Button>}
         </div>}
       </article>
       <article><CalendarDays size={17}/><span>{monthLabel(month)} 출근 기록</span><strong>{clocksReady ? recorded : '—'}<small>일</small></strong><p>퇴근 기록 {clocksReady ? `${completed}일` : '—'}</p></article>

@@ -1,12 +1,12 @@
 import { getSupabase } from './client'
 import { attendanceMonthDates, type AttendanceClock } from '@/features/settings/my-attendance'
 
-type ClockRow = { work_date: string; clock_in: string; clock_out_at: string | null; clock_out_reported_at: string | null }
+type ClockRow = { work_date: string; clock_in: string; clock_out_at: string | null; clock_out_reported_at: string | null; auto_closed_at: string | null; work_confirmed_at: string | null }
 export type CompanyAttendanceClock = { employeeId: string; date: string; clockIn: string }
 type CompanyClockRow = { employee_id: string; work_date: string; clock_in: string }
 export async function listMyAttendanceClocks(employeeId: string, month?: string): Promise<AttendanceClock[]> {
   if (!employeeId) throw new Error('로그인 상태를 확인해 주세요.')
-  let query = getSupabase().from('attendance_clock_ins').select('work_date,clock_in,clock_out_at,clock_out_reported_at')
+  let query = getSupabase().from('attendance_clock_ins').select('work_date,clock_in,clock_out_at,clock_out_reported_at,auto_closed_at,work_confirmed_at')
     .eq('employee_id', employeeId).order('work_date', { ascending: false })
   if (month) {
     const dates = attendanceMonthDates(month)
@@ -14,18 +14,19 @@ export async function listMyAttendanceClocks(employeeId: string, month?: string)
   } else query = query.limit(400)
   const { data, error } = await query
   if (error) { console.warn('[attendance-clock] 내 출퇴근 기록 조회 실패', { month, error }); throw new Error(error.message) }
-  return ((data ?? []) as ClockRow[]).map(row => ({ date: row.work_date, clockIn: row.clock_in.slice(0, 5), clockOutAt: row.clock_out_at, clockOutReportedAt: row.clock_out_reported_at ?? null }))
+  return ((data ?? []) as ClockRow[]).map(row => ({ date: row.work_date, clockIn: row.clock_in.slice(0, 5), clockOutAt: row.clock_out_at, clockOutReportedAt: row.clock_out_reported_at ?? null, autoClosedAt: row.auto_closed_at, workConfirmedAt: row.work_confirmed_at }))
 }
-export type CompanyDeferredClockOut = { employeeId: string; date: string; clockIn: string; clockOutAt: string | null; reportedAt: string }
-type DeferredClockRow = { employee_id: string; work_date: string; clock_in: string; clock_out_at: string | null; clock_out_reported_at: string | null }
+export type CompanyDeferredClockOut = { employeeId: string; date: string; clockIn: string; clockOutAt: string | null; reportedAt: string | null; autoClosedAt?: string | null; workConfirmedAt?: string | null }
+type DeferredClockRow = ClockRow & { employee_id: string }
 export async function listCompanyDeferredClockOuts(): Promise<CompanyDeferredClockOut[]> {
   const { data, error } = await getSupabase().from('attendance_clock_ins')
-    .select('employee_id,work_date,clock_in,clock_out_at,clock_out_reported_at')
-    .not('clock_out_reported_at', 'is', null)
+    .select('employee_id,work_date,clock_in,clock_out_at,clock_out_reported_at,auto_closed_at,work_confirmed_at')
+    .or('clock_out_reported_at.not.is.null,auto_closed_at.not.is.null')
     .order('work_date', { ascending: false })
   if (error) { console.warn('[attendance-clock] 퇴근 미처리 조회 실패', error); throw new Error(error.message) }
-  return ((data ?? []) as DeferredClockRow[]).flatMap(row => row.clock_out_reported_at ? [{
+  return ((data ?? []) as DeferredClockRow[]).flatMap(row => row.clock_out_reported_at || row.auto_closed_at ? [{
     employeeId: row.employee_id, date: row.work_date, clockIn: row.clock_in.slice(0, 5), clockOutAt: row.clock_out_at, reportedAt: row.clock_out_reported_at,
+    autoClosedAt: row.auto_closed_at, workConfirmedAt: row.work_confirmed_at,
   }] : [])
 }
 export type CompanyAttendanceSpan = { employeeId: string; date: string; clockIn: string; clockOutAt: string | null }
