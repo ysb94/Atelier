@@ -77,7 +77,7 @@ function ProfileSettingsContent() {
   }
   const hasDepartments = departments.length > 0
   const noDepartments = !hasDepartments && !approvals.loading && !approvals.error
-  const showDepartmentTab = preview?.facts?.departmentApprover ?? hasPermission(profile, 'attendance.manage')
+  const showDepartmentTab = preview?.facts?.departmentApprover ?? (release.approver || hasPermission(profile, 'attendance.manage'))
   const permitted = releasePersonalPart(release.profile, part, release.approver)
   const visiblePart = !permitted || (part === 'attendance' && !showDepartmentTab) ? 'my-attendance' : part
   const tabs: { id: PersonalPart; label: string }[] = release.scope.unrestricted ? [
@@ -85,11 +85,11 @@ function ProfileSettingsContent() {
     { id: 'overtime', label: '야근' },
     { id: 'approvals', label: '승인할 신청' }, { id: 'company-notice', label: '회사 공지' },
     { id: 'department-notice', label: '부서 공지' }, { id: 'meetings', label: '회의' },
-    ...(showDepartmentTab ? [{ id: 'attendance' as const, label: '부서 출근시간' }] : []),
+    ...(showDepartmentTab ? [{ id: 'attendance' as const, label: '담당 부서 출근시간' }] : []),
   ] : [{ id: 'my-attendance', label: 'My Schedule' }, { id: 'overtime', label: '야근' }, { id: 'meetings', label: '회의' }, { id: 'work', label: '작업 요청' },
-    ...(release.approver ? [{ id: 'approvals' as const, label: '승인할 신청' }] : [])]
+    ...(release.approver ? [{ id: 'approvals' as const, label: '승인할 신청' }, { id: 'attendance' as const, label: '담당 부서 출근시간' }] : [])]
   useEffect(() => {
-    if (!active || permitted || (part === 'approvals' && approvals.loading)) return
+    if (!active || permitted || ((part === 'approvals' || part === 'attendance') && approvals.loading)) return
     setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete('part'); return next }, { replace: true })
   }, [active, permitted, part, approvals.loading, setSearchParams])
 
@@ -117,7 +117,7 @@ function ProfileSettingsContent() {
           {hasDepartments ? '담당 부서 정보를 다시 불러오지 못했습니다. 아래 내용이 최신이 아닐 수 있으니 잠시 후 다시 확인해 주세요.'
             : '담당 부서 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.'}
         </p>}
-        {showDepartmentTab ? <MyAttendanceStartPanel departmentIds={departments} />
+        {showDepartmentTab && !approvals.error && !approvals.loading ? <MyAttendanceStartPanel departmentIds={departments} />
           : approvals.loading ? <p className="personal-page-notice" role="status">담당 부서 정보를 불러오는 중입니다.</p>
           : noDepartments && <p className="personal-page-notice">지정된 담당 부서가 없어 설정할 직원이 없습니다. 담당 지정은 운영지원팀에 요청해 주세요.</p>}
       </div>}

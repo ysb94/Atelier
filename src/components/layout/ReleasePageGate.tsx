@@ -15,7 +15,7 @@ function ReleasePageContent({ children }: { children: ReactNode }) {
   const active = useWorkspaceTabActivity()
   const navigate = useNavigate()
   const current = location.pathname + location.search
-  const checking = !scope.unrestricted && location.pathname === RELEASE_HOME && new URLSearchParams(location.search).get('part') === 'approvals'
+  const checking = !scope.unrestricted && location.pathname === RELEASE_HOME && ['approvals', 'attendance'].includes(new URLSearchParams(location.search).get('part') ?? '')
   const waiting = checking && (approvals.loading || Boolean(approvals.error))
   const target = href(current)
   useEffect(() => {

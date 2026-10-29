@@ -349,7 +349,7 @@ function CompanyWorkspaceMain() {
   const { tabs, activeId, openTab, closeTab } = useWorkspaceTabs()
   const { href, approvals, scope } = useReleaseAccess()
   const visibleTabs = useMemo(() => tabs.filter(tab => href(tab.pathname + tab.search) === tab.pathname + tab.search
-    || (!scope.unrestricted && tab.pathname === RELEASE_HOME && new URLSearchParams(tab.search).get('part') === 'approvals' && (approvals.loading || Boolean(approvals.error)))), [tabs, href, scope.unrestricted, approvals.loading, approvals.error])
+    || (!scope.unrestricted && tab.pathname === RELEASE_HOME && ['approvals', 'attendance'].includes(new URLSearchParams(tab.search).get('part') ?? '') && (approvals.loading || Boolean(approvals.error)))), [tabs, href, scope.unrestricted, approvals.loading, approvals.error])
   const pageLayout = pageLayoutFor(location.pathname)
 
   return (

@@ -9,15 +9,16 @@ import { listAttendanceStartSettings, saveAttendanceStartSettings, type SaveAtte
 import { attendanceStartIndex, type AttendanceStartSetting } from './attendance-start-settings'
 import { hasPermission } from '@/lib/company/permissions'
 import { usePagePreview } from '@/lib/company/page-preview-context'
+import { canManageDepartmentAttendance } from '@/lib/company/attendance-assignment'
 
-export function useAttendanceStartSettings(options?: { assigned?: boolean }) {
+export function useAttendanceStartSettings(options?: { assigned?: boolean; departmentIds?: readonly string[] }) {
   const { profile, session } = useAuth()
   const preview = usePagePreview()
   const { access } = useBasicWorkAccess()
   const basicOperations = access?.domains.includes('operations') === true
   const assigned = options?.assigned === true
   const allowed = basicOperations || canAccessOperationsSupport(profile) || (assigned && profile?.status === 'active')
-  const canEdit = basicOperations || hasPermission(profile, 'attendance.manage')
+  const canEdit = basicOperations || hasPermission(profile, 'attendance.manage') || (assigned && Boolean(options?.departmentIds?.length))
   const active = useWorkspaceTabActivity()
   const client = useQueryClient()
   const query = useQuery({ queryKey: ['attendance-start-settings',session?.user.id,allowed], queryFn: listAttendanceStartSettings,
@@ -27,7 +28,7 @@ export function useAttendanceStartSettings(options?: { assigned?: boolean }) {
   const index = useMemo(() => attendanceStartIndex(settings), [settings])
   const save = useMutation({ mutationFn: (input: SaveAttendanceStart) => {
     if (assigned && !input.employeeId) throw new Error('직원별로 출근시간을 저장해 주세요.')
-    if (!basicOperations && !hasPermission(preview?.realProfile ?? profile, 'attendance.manage', 'department', input.departmentId)) throw new Error('이 부서의 출근시간 설정 권한이 필요합니다.')
+    if (!basicOperations && !canManageDepartmentAttendance(preview?.realProfile ?? profile, assigned ? options?.departmentIds ?? [] : [], input.departmentId)) throw new Error('이 부서의 출근시간 설정 권한이 필요합니다.')
     return saveAttendanceStartSettings(input)
   }, onSuccess: () => client.invalidateQueries({queryKey:['attendance-start-settings']}) })
   return { settings, index, save, allowed, canEdit, loading: allowed && query.isPending, error: query.error, refresh: () => query.refetch() }

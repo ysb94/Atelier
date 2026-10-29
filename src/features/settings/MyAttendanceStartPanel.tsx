@@ -9,15 +9,15 @@ import { ATTENDANCE_GRACE_MINUTES, forgivenClock, resolveAttendanceStart, startT
 import { StartTimeChoices } from '@/features/operations-support/StartTimeChoices'
 import { memberLabel } from '@/features/operations-support/OpsStat'
 import { useAuth } from '@/lib/supabase/auth'
-import { hasPermission } from '@/lib/company/permissions'
+import { canManageDepartmentAttendance } from '@/lib/company/attendance-assignment'
 import '@/features/operations-support/attendance-start-settings.css'
 
-export function MyAttendanceStartPanel({ departmentIds: _departmentIds }: { departmentIds: string[] }) {
+export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: string[] }) {
   useRenderWatch('MyAttendanceStartPanel')
   const { profile } = useAuth()
   const directory = useOpsDirectory()
   const { members: directoryMembers, departmentName } = directory
-  const schedules = useAttendanceStartSettings({ assigned: true })
+  const schedules = useAttendanceStartSettings({ assigned: true, departmentIds })
   const now = new Date()
   const [year, setYear] = useState(String(now.getFullYear()))
   const [monthNo, setMonthNo] = useState(String(now.getMonth() + 1).padStart(2, '0'))
@@ -29,7 +29,7 @@ export function MyAttendanceStartPanel({ departmentIds: _departmentIds }: { depa
   const [message, setMessage] = useState('')
   const validYear = /^\d{4}$/.test(year) && Number(year) >= 2000 && Number(year) <= 2100
   const months = Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`)
-  const departmentSet = useMemo(() => new Set(directory.departments.filter(department => hasPermission(profile, 'attendance.manage', 'department', department.id)).map(department => department.id)), [directory.departments, profile])
+  const departmentSet = useMemo(() => new Set(directory.departments.filter(department => canManageDepartmentAttendance(profile, departmentIds, department.id)).map(department => department.id)), [directory.departments, profile, departmentIds])
   const members = useMemo(() => directoryMembers.filter(member => member.departmentId && departmentSet.has(member.departmentId) && !member.attendanceExempt && (!search.trim() || `${memberLabel(member.displayName)} ${departmentName(member.departmentId)}`.toLowerCase().includes(search.trim().toLowerCase()))).sort((a, b) => departmentName(a.departmentId).localeCompare(departmentName(b.departmentId), 'ko') || memberLabel(a.displayName).localeCompare(memberLabel(b.displayName), 'ko')), [directoryMembers, departmentName, departmentSet, search])
   const visibleIds = members.map(member => member.id)
   const checkedVisible = visibleIds.filter(id => checked.includes(id))

@@ -43,7 +43,7 @@ export function releaseAccess(profile: ReleaseProfile | null | undefined) {
 }
 export function releasePersonalPart(profile: ReleaseProfile | null | undefined, part: string | null, approver = false) {
   if (part === 'work' && !releaseAccess(profile).unrestricted) return false // 직원 공개 보류: 기존 예외 계정과 업무 권한은 유지한다.
-  return releaseAccess(profile).unrestricted || !part || part === 'my-attendance' || part === 'overtime' || part === 'meetings' || (part === 'work' && profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID) || (part === 'approvals' && approver)
+  return releaseAccess(profile).unrestricted || !part || part === 'my-attendance' || part === 'overtime' || part === 'meetings' || (part === 'work' && profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID) || ((part === 'approvals' || part === 'attendance') && approver)
 }
 const under = (path: string, root: string) => path === root || path.startsWith(root + '/')
 

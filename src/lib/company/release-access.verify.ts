@@ -11,7 +11,11 @@ assert.equal(releaseHref(staff,'/settings/profile?part=approvals'),null)
 assert.equal(releaseHref(staff,'/settings/profile?part=approvals',true),'/settings/profile?part=approvals')
 assert.equal(releasePersonalPart(staff,'overtime'),true,'야근은 직원 본인 화면')
 assert.equal(releasePersonalPart(staff,'work'),false,'일반 직원의 작업 요청은 공개 보류')
-for(const part of ['profile','attendance','company-notice','department-notice']) assert.equal(releasePersonalPart(staff,part,true),false)
+for(const part of ['profile','company-notice','department-notice']) assert.equal(releasePersonalPart(staff,part,true),false)
+assert.equal(releasePersonalPart(staff,'attendance'),false,'일반 직원에게 담당 부서 설정을 열지 않는다')
+assert.equal(releasePersonalPart(staff,'attendance',true),true,'지정 승인자는 담당 부서 설정을 연다')
+assert.equal(releaseHref(staff,'/settings/profile?part=attendance'),null)
+assert.equal(releaseHref(staff,'/settings/profile?part=attendance',true),'/settings/profile?part=attendance')
 for(const path of ['/','/operations','/products','/data/all','/drafts','/settings/access-ip','/brands','/settings/ai','/org-chart']) assert.equal(releaseHref(staff,path),null)
 for(const path of ['/operations-support','/members','/settings/permissions']) { assert.ok(links(ops).includes(path)); assert.equal(releaseHref(logistics,path),null) }
 for(const path of RELEASE_LOGISTICS_PAGES) { assert.equal(links(logistics).includes(path),!path.startsWith('/work-requests/')); assert.equal(releaseHref(staff,path),null); assert.equal(releaseHref(ops,path),null) }
