@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { DEFAULT_REMINDER_BASIS as basis, reminderPreview, validateRequest, isSelfApprovedRequest, isDirectRegistration, requiresDepartmentApproval, requestStatusLabel, type RequestForm, type PersonalRequest } from './personal-requests.ts'
+import { DEFAULT_REMINDER_BASIS as basis, reminderPreview, validateRequest, isSelfApprovedRequest, isDirectRegistration, canCancelOwnRequest, requiresDepartmentApproval, requestStatusLabel, type RequestForm, type PersonalRequest } from './personal-requests.ts'
 import { endAfterMinutes, leaveTimePresets, leaveWorkMinutes, rangeMinutes } from './request-time-options.ts'
 const form: RequestForm = { kind: 'half', from: '2026-10-08', to: '2026-10-08', start: '09:00', end: '14:00', note: '', place: '' }
 assert.deepEqual(leaveTimePresets('half').map(({start,end})=>[start,end]),[['09:00','14:00'],['14:00','18:00']])
@@ -53,6 +53,10 @@ console.log('personal requests verify: ok (leave durations, break time, reminder
 for (const kind of ['annual','half','quarter','offsite'] as const) { assert.equal(isDirectRegistration(kind),true); assert.equal(requiresDepartmentApproval(kind),false);assert.equal(requestStatusLabel({...form,kind,status:'approved'}),'등록') }
 for (const kind of ['overtime','correction'] as const) assert.equal(requiresDepartmentApproval(kind),true)
 assert.equal(isDirectRegistration('official'),false)
+assert.equal(canCancelOwnRequest({ kind: 'annual', status: 'approved' }), true)
+assert.equal(canCancelOwnRequest({ kind: 'official', status: 'pending' }), true)
+assert.equal(canCancelOwnRequest({ kind: 'overtime', status: 'approved' }), false)
+assert.equal(canCancelOwnRequest({ kind: 'annual', status: 'cancelled' }), false)
 assert.match(validateRequest({...form,kind:'remote'},[],basis),/재택은 등록할 수 없습니다/)
 assert.equal(isSelfApprovedRequest({status:'approved',employeeId:'a',decidedBy:'a'}),true)
 for(const record of [{status:'approved',employeeId:'a',decidedBy:null},{status:'approved',employeeId:'a',decidedBy:'b'},{status:'cancelled',employeeId:'a',decidedBy:'a'}] as const)assert.equal(isSelfApprovedRequest(record),false)

@@ -22,8 +22,8 @@ export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' = 'mine') {
   useEffect(() => { if (query.error) console.warn('[leave-requests] 신청 조회 실패', query.error) }, [query.error])
   async function refresh() {
     await Promise.all([
-      'company-leave-requests', 'my-attendance-basis', 'home-my-leave',
-      'employee-roster', 'leave-notice-management', 'meeting-availability',
+      'company-leave-requests', 'company-leave-cover', 'my-attendance-basis', 'home-my-leave', 'my-extra-leave',
+      'employee-roster', 'employee-extra-leave', 'leave-notice-management', 'meeting-availability',
     ].map(key => client.invalidateQueries({ queryKey: [key] })))
   }
   const create = useMutation({
