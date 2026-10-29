@@ -44,6 +44,7 @@ export const ROSTER_BASE_HEADERS: readonly { key: string; label: string; kind: R
   { key: 'additionalAnnualLeave', label: '추가 연차', kind: 'number' },
   { key: 'remainingAnnualLeave', label: '남은 연차', kind: 'number' },
   ...ROSTER_FIELDS.map(field => ({ key: field.key, label: field.label, kind: (field.key === 'resignedOn' ? 'date' : ['annualSalary', 'monthlyWage', 'mealAllowance', 'carAllowance', 'childcareAllowance', 'dutyAllowance'].includes(field.key) ? 'money' : 'text') as RosterHeaderKind })),
+  { key: 'loginEmail', label: '로그인 아이디(구글)', kind: 'text' },
 ]
 export type RosterColumn = { id: string; label: string; kind: RosterColumnKind; sortOrder: number }
 export type RosterColumnValue = { columnId: string; profileId: string; value: string }

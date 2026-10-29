@@ -46,6 +46,7 @@ import {
   deletePersonnelTitle,
   listDepartments,
   listOrgChartMembers,
+  listEmployeeLoginEmails,
   listPersonnelTitles,
   renamePersonnelTitle,
   createPersonnelTitle,
@@ -736,6 +737,13 @@ function MemberAssignmentTable({
     enabled: canChange,
     refetchInterval: canChange && active ? 30_000 : false,
   })
+  const loginEmailsQuery = useQuery({
+    queryKey: ['employee-login-emails', profile?.id],
+    queryFn: listEmployeeLoginEmails,
+    enabled: canChange,
+    refetchInterval: canChange && active ? 30_000 : false,
+  })
+  const loginEmails = useMemo(() => new Map(loginEmailsQuery.data?.map(row => [row.id, row.email])), [loginEmailsQuery.data])
   const rosters = useMemo(() => {
     const map = new Map<string, EmployeeRoster>()
     for (const row of rosterQuery.data ?? emptyList<EmployeeRoster>()) {
@@ -913,6 +921,7 @@ function MemberAssignmentTable({
                     <AssignmentSortHeader key={field.key} label={headerLabel(field.key, field.label)} column={field.key} sort={sort} onSort={toggleSort} />
                   ))
                 : null}
+              {canChange && showHeader('loginEmail') ? <th className="whitespace-nowrap px-4 py-2.5 font-medium">{headerLabel('loginEmail', '로그인 아이디(구글)')}</th> : null}
               {canChange ? extraColumns.map((column) => (
                 <AssignmentSortHeader key={column.id} label={headerLabel(`column:${column.id}`, column.label)} column={`column:${column.id}`} sort={sort} onSort={toggleSort} hint={column.kind === 'money' ? '금액입니다. 숫자는 천 단위 쉼표로 보입니다.' : column.kind === 'number' ? '숫자만 입력합니다.' : '텍스트를 입력합니다.'} />
               )) : null}
@@ -1064,6 +1073,9 @@ function MemberAssignmentTable({
                         )
                       })
                     : null}
+                  {canChange && showHeader('loginEmail') ? <td className="whitespace-nowrap px-4 py-2" aria-label={`${memberName(member)} 로그인 아이디`}>
+                    {loginEmailsQuery.isPending ? '불러오는 중…' : loginEmailsQuery.isError ? <Button size="sm" variant="outline" onClick={() => void loginEmailsQuery.refetch()}>다시 조회</Button> : loginEmails.get(member.id) || <span className="text-muted-foreground">조회 불가</span>}
+                  </td> : null}
                   {canChange ? extraColumns.map((column) => {
                     const current = columnValues.get(`${column.id}:${member.id}`) ?? ''
                     return (

@@ -256,6 +256,16 @@ export type OrgChartMember = {
   hireDate: string | null
 }
 
+/** 실제 로그인 이메일만 조회한다. 기존 프로필 조회 정책을 그대로 따른다. */
+export async function listEmployeeLoginEmails(): Promise<{ id: string; email: string }[]> {
+  const { data, error } = await getSupabase().from('profiles').select('id, email')
+  if (error) {
+    console.warn('[org-chart] 로그인 아이디 조회 실패', error)
+    throw toStoreError(error)
+  }
+  return (data ?? []) as { id: string; email: string }[]
+}
+
 type OrgChartMemberRow = {
   id: string
   display_name: string | null
