@@ -72,7 +72,12 @@ export function LeaveBalancePanel() {
               <td className="px-4 py-3">{directory.departmentName(member.departmentId)}</td>
               <td className="whitespace-nowrap px-4 py-3 tabular-nums">{member.hireDate || <MissingValue/>}</td>
               <td className="px-4 py-3 tabular-nums" aria-label={`${memberLabel(member.displayName)} 발생일수`}>{balance && balance.accruedAnnualLeave === undefined ? '조회 실패' : balance?.accruedAnnualLeave == null ? <MissingValue/> : `${balance.accruedAnnualLeave}일`}</td>
-              <td className="px-4 py-3 text-muted-foreground" title="입력·저장은 아직 연결하지 않았습니다.">—</td>
+              <td className="px-4 py-3" aria-label={`${memberLabel(member.displayName)} 추가 연차`}>
+                <div className="flex items-center gap-2 whitespace-nowrap">
+                  <span className="tabular-nums">0일</span>
+                  <Button type="button" variant="outline" size="sm" className="size-8 p-0" disabled aria-label={`${memberLabel(member.displayName)} 추가 연차 추가`} title="추가 기능 준비 중">+</Button>
+                </div>
+              </td>
               <td className="px-4 py-2"><RemainingLeaveEditor profileId={member.id} name={memberLabel(member.displayName)} value={balance?.remainingAnnualLeave ?? null}/></td>
             </tr>)}
         </tbody>
