@@ -73,10 +73,7 @@ export function LeaveBalancePanel() {
               <td className="whitespace-nowrap px-4 py-3 tabular-nums">{member.hireDate || <MissingValue/>}</td>
               <td className="px-4 py-3 tabular-nums" aria-label={`${memberLabel(member.displayName)} 발생일수`}>{balance && balance.accruedAnnualLeave === undefined ? '조회 실패' : balance?.accruedAnnualLeave == null ? <MissingValue/> : `${balance.accruedAnnualLeave}일`}</td>
               <td className="px-4 py-3" aria-label={`${memberLabel(member.displayName)} 추가 연차`}>
-                <div className="flex items-center gap-2 whitespace-nowrap">
-                  <span className="tabular-nums">0일</span>
-                  <Button type="button" variant="outline" size="sm" className="size-8 p-0" disabled aria-label={`${memberLabel(member.displayName)} 추가 연차 추가`} title="추가 기능 준비 중">+</Button>
-                </div>
+                <AdditionalLeaveInputs name={memberLabel(member.displayName)}/>
               </td>
               <td className="px-4 py-2"><RemainingLeaveEditor profileId={member.id} name={memberLabel(member.displayName)} value={balance?.remainingAnnualLeave ?? null}/></td>
             </tr>)}
@@ -84,6 +81,27 @@ export function LeaveBalancePanel() {
       </table>
     </div></Card>
   </OpsPanelFrame>
+}
+
+function AdditionalLeaveInputs({ name }: { name: string }) {
+  const [open, setOpen] = useState(false)
+  return <div className="space-y-2">
+    <div className="flex items-center gap-2 whitespace-nowrap">
+      <span className="tabular-nums">0일</span>
+      <Button type="button" variant="outline" size="sm" className="size-8 p-0" aria-label={`${name} 추가 연차 추가`} aria-expanded={open} onClick={() => setOpen(value => !value)}>+</Button>
+    </div>
+    {open ? <div className="space-y-2 rounded-xl border border-border bg-card p-3" role="group" aria-label={`${name} 추가 연차 입력`}>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="space-y-1 text-xs"><span>추가 일수</span><Input aria-label={`${name} 추가 일수`} type="number" min="0.01" step="0.01" placeholder="예: 1.5" className="w-24"/></label>
+        <label className="space-y-1 text-xs"><span>메모</span><Input aria-label={`${name} 추가 연차 메모`} placeholder="추가 사유" maxLength={500} className="w-48"/></label>
+        <label className="space-y-1 text-xs"><span>사용 기한</span><Input aria-label={`${name} 추가 연차 사용 기한`} type="date" className="w-40"/></label>
+      </div>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground">입력 화면 미리보기 · 아직 저장되지 않습니다.</p>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>닫기</Button>
+      </div>
+    </div> : null}
+  </div>
 }
 
 function MissingValue() {
