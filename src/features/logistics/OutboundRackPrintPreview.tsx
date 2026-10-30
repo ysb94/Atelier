@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronLeft, ChevronRight, Printer, X } from 'lucide-react'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
@@ -8,7 +8,6 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { outboundRackLabelPages } from '@/lib/warehouse/outbound-qr'
 import './outbound-rack-print.css'
 
-export type RackQrLabel = { code: string; image: string }
 const PRINT_STYLE_ID = 'outbound-rack-page-style'
 
 function clearPrintMode() {
@@ -25,23 +24,19 @@ function enablePrintMode() {
   }
   style.textContent = '@page { size: A4 portrait; margin: 0; }'
 }
-function LabelSheet({ labels }: { labels: (RackQrLabel | null)[] }) {
-  return <div className="outbound-rack-sheet">{labels.map((label, index) => <div className="outbound-rack-label" key={label?.code ?? 'blank-' + index}>{label && <>
-    <span className="outbound-rack-label-title">출고창고 · 렉 번호</span>
-    <strong className="outbound-rack-label-code" style={{ fontSize: label.code.length > 16 ? '15pt' : label.code.length > 10 ? '22pt' : undefined }}>{label.code}</strong>
-    <img className="outbound-rack-label-qr" src={label.image} alt={label.code + ' 렉 QR'} />
-    <span className="outbound-rack-label-caption">{label.code.split('-')[0]}번 창고 · {label.code.split('-')[1]}번째 줄 · {label.code.split('-')[2]}번째 렉</span>
-  </>}</div>)}</div>
+function LabelSheet({ labels }: { labels: (string | null)[] }) {
+  return <div className="outbound-rack-sheet">{labels.map((label, index) => <div className="outbound-rack-label" key={label ?? 'blank-' + index}>{label &&
+    <strong className="outbound-rack-label-code" style={{ '--rack-label-font': Math.max(18, Math.min(70, 350 / label.length)) } as CSSProperties}>{label}</strong>
+  }</div>)}</div>
 }
 
-export function OutboundRackPrintPreview({ labels, onClose }: { labels: RackQrLabel[]; onClose: () => void }) {
+export function OutboundRackPrintPreview({ labels, onClose }: { labels: string[]; onClose: () => void }) {
   useRenderWatch('OutboundRackPrintPreview')
   const active = useWorkspaceTabActivity()
   const pages = outboundRackLabelPages(labels)
   const [pageIndex, setPageIndex] = useState(0)
   const [printing, setPrinting] = useState(false)
   const [error, setError] = useState('')
-  const printRoot = useRef<HTMLDivElement>(null)
   const dialog = useRef<HTMLElement>(null)
   useEffect(() => {
     const previous = document.activeElement
@@ -64,7 +59,6 @@ export function OutboundRackPrintPreview({ labels, onClose }: { labels: RackQrLa
     if (!active || printing) return
     setPrinting(true); setError('')
     try {
-      await Promise.all(Array.from(printRoot.current?.querySelectorAll('img') ?? []).map((img) => img.decode()))
       await document.fonts.ready
       enablePrintMode()
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
@@ -98,6 +92,6 @@ export function OutboundRackPrintPreview({ labels, onClose }: { labels: RackQrLa
         <footer className="border-t border-border px-4 py-3 text-xs text-muted-foreground">한 칸은 가로 105mm × 세로 148.5mm입니다. 마지막 장의 남는 칸은 인쇄하지 않습니다.{error && <p role="alert" className="mt-1 text-danger">{error}</p>}</footer>
       </section>
     </div>
-    {active && createPortal(<div className="outbound-rack-print-root" ref={printRoot} aria-hidden="true">{pages.map((page, index) => <LabelSheet key={index} labels={page} />)}</div>, document.body)}
+    {active && createPortal(<div className="outbound-rack-print-root" aria-hidden="true">{pages.map((page, index) => <LabelSheet key={index} labels={page} />)}</div>, document.body)}
   </WorkspaceTabOverlay>
 }

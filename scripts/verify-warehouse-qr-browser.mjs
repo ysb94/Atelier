@@ -64,11 +64,12 @@ try {
   await page.getByRole('button', { name: '4칸 라벨 미리보기', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: '렉 번호 · A4 4칸 라벨' })
   await dialog.waitFor()
-  assert.equal(await dialog.getByRole('img').count(), 4)
+  assert.equal(await dialog.getByRole('img').count(), 0)
   assert.deepEqual(await dialog.locator('.outbound-rack-label-code').allTextContents(), ['3-1-1', '3-1-2', '3-1-3', '3-1-4'])
+  assert.deepEqual(await dialog.locator('.outbound-rack-label').allTextContents(), ['3-1-1', '3-1-2', '3-1-3', '3-1-4'])
   await page.screenshot({ path: path.join(output, 'rack-preview.png'), fullPage: true })
   await page.getByRole('button', { name: '다음 라벨 페이지' }).click()
-  assert.equal(await dialog.getByRole('img').count(), 3)
+  assert.equal(await dialog.getByRole('img').count(), 0)
   assert.equal(await dialog.locator('.outbound-rack-label').count(), 4)
   assert.deepEqual(await dialog.locator('.outbound-rack-label-code').allTextContents(), ['3-1-5', '3-1-6', '3-1-7'])
   await page.getByRole('button', { name: '전체 렉 라벨 인쇄', exact: true }).click()
@@ -84,21 +85,9 @@ try {
   assert.equal(await page.locator('#root').isVisible(), false)
   const pdf = await page.pdf({ path: path.join(output, 'rack-labels.pdf'), preferCSSPageSize: true, printBackground: true })
   assert.equal((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length, 2, '7 racks = 2 physical A4 pages')
-  const qr = await page.evaluate(async () => {
-    if (typeof BarcodeDetector === 'undefined' || !(await BarcodeDetector.getSupportedFormats()).includes('qr_code')) return { supported: false }
-    const detector = new BarcodeDetector({ formats: ['qr_code'] })
-    const images = Array.from(document.querySelectorAll('.outbound-rack-print-root img'))
-    const values = []
-    for (const img of images) {
-      await img.decode()
-      const canvas = document.createElement('canvas'); canvas.width = 400; canvas.height = 400
-      canvas.getContext('2d').drawImage(img, 0, 0, 400, 400)
-      const decoded = await detector.detect(canvas)
-      values.push(decoded[0]?.rawValue)
-    }
-    return { supported: true, values }
-  })
-  if (qr.supported) assert.deepEqual(qr.values, ['3-1-1', '3-1-2', '3-1-3', '3-1-4', '3-1-5', '3-1-6', '3-1-7'])
+  assert.deepEqual(await page.locator('.outbound-rack-print-root .outbound-rack-label').allTextContents(), ['3-1-1', '3-1-2', '3-1-3', '3-1-4', '3-1-5', '3-1-6', '3-1-7', ''])
+  assert.equal(await page.locator('.outbound-rack-print-root img').count(), 0)
+  assert.ok(await page.locator('.outbound-rack-print-root .outbound-rack-label-code').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize) >= 90))
   await page.emulateMedia({ media: 'screen' })
   await page.evaluate(() => window.dispatchEvent(new Event('afterprint')))
   assert.equal(await page.locator('html').evaluate((el) => el.classList.contains('printing-outbound-racks')), false)
@@ -122,5 +111,5 @@ try {
   await page.setViewportSize({ width: 390, height: 844 })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
   assert.deepEqual(errors, [])
-  console.log(JSON.stringify({ passed: true, racks: 7, slots: 112, labelPages: 2, blankLastCell: true, qrDecode: qr, excelAndLegacyBox: true, rangeAndListValidation: true, mobile: true, artifacts: output }))
+  console.log(JSON.stringify({ passed: true, racks: 7, slots: 112, labelPages: 2, blankLastCell: true, numberOnlyLabels: true, excelAndLegacyBox: true, rangeAndListValidation: true, mobile: true, artifacts: output }))
 } finally { await browser.close(); await server.close() }
