@@ -54,6 +54,7 @@
     "verify:product-list-order-shape": "node scripts/verify-product-list-order-shape.mjs",
     "verify:warehouse-stock": "node scripts/verify-warehouse-stock.mjs",
     "verify:warehouse-qr": "node --experimental-strip-types src/lib/warehouse/outbound-qr.verify.ts",
+    "verify:warehouse-slots-db": "node scripts/verify-warehouse-slot-reclassify-db.mjs",
     "verify:warehouse-qr-browser": "node scripts/verify-warehouse-qr-browser.mjs",
     "verify:warehouse-finder": "node scripts/verify-warehouse-finder.mjs",
     "verify:warehouse-sheet-sync": "node scripts/verify-warehouse-sheet-sync.mjs",

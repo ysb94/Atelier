@@ -1117,7 +1117,27 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   합계에서는 뺀다. Google 시트 AA는 `external_row_id`다.
 - `warehouse_registered_slots`는 창고 안에서 자리번호가 속하는 구역이다.
   등록된 `picking` 자리만 출고창고로 분류하고, 없으면 박스창고다. 기존 연습
-  세트의 존별 자리 중복은 그대로 두고, 앞으로의 자동 분류만 이 등록표를 쓴다.
+  세트의 존별 자리 중복은 행·수량을 합치지 않고 보존한다.
+  - 출고창고 자리 설정은 형식을 강제하지 않는 직접 입력이 기본이다. 앞뒤 공백과
+    중복만 정리하며 `3-1-1_C1`과 `3-1-1-C-1`은 서로 다른 전체 번호로 비교한다.
+  - `save_warehouse_registered_slots(brand, warehouse, zone, codes)`는 등록 목록 저장과
+    해당 브랜드의 현재 `active/sandbox` 재고 재분류를 한 트랜잭션으로 처리한다.
+    창고·브랜드 경계, 기존 편집/물류 권한, RLS를 지키는 `SECURITY INVOKER`다.
+    `anon`/`PUBLIC` 실행을 금지한다. 업데이트가 RLS로 누락되어도 성공 처리하지 않는다.
+  - 같은 자리번호의 양쪽 존 위치가 이미 있어도 기존 위치를 수정·삭제하지 않는다.
+    대상 존의 위치를 찾아 현재 재고 행의 `location_id`만 바꾼다. 수량·상품·행 ID·원본
+    값·보관된 스냅샷·고유 박스 원장은 유지한다. 변경 시 세트 갱신 알림과 화면 재조회로
+    재고/파인더에 반영한다. 동일한 등록 목록도 다시 저장해 현재 재고에 적용할 수 있다.
+  - 기존 직접 테이블 저장 클라이언트와 호환되는 추가 RPC다. 마이그레이션:
+    `20261030092330_warehouse_slot_reclassify.sql`. 적용 자체는 기존 데이터를 바꾸지 않으며
+    사용자가 새 화면의 ‘자리 저장’을 눌렀을 때 재분류한다.
+    검증: `npm run verify:warehouse-slots-db`, `verify:warehouse-qr-browser`,
+    `verify:warehouse-sheet-sync`. 실제 창고 행 대신 로컬 PostgreSQL/가상 화면으로 저장·
+    수량 보존·두 형식의 exact 분류·실패 롤백·브랜드/보관 스냅샷 경계를 확인한다.
+  - 2026-10-30 사용자 요청으로 RPC를 공유 Atelier DB에 적용했다. 적용 전후 등록 자리
+    907개·현재 재고 2,096행·위치 6,277개·세트 138개·고유 박스 4개의 건수와 내용 해시가
+    동일하다. 함수는 invoker, 익명 실행 불가를 확인했고 신규 보안 경고는 없다.
+    대조 기록은 Git 제외 경로 `docs/backups/warehouse-slot-reclassify-*-20261030.json`에 둔다.
   `warehouse_boxes`는 고유 박스 ID 원장이다. 연습 스냅샷에 묶이지 않게
   `set_id`를 비울 수 있고, 브랜드 안 박스번호는 하나여야 한다.
   `0 <= current_qty <= initial_qty` 와 브랜드·상품·자리 경계를 제약으로

@@ -703,12 +703,14 @@ export async function saveWarehouseRegisteredSlots(
   warehouseId: string,
   zone: WarehouseZone,
   codes: readonly string[],
+  brandId: string,
 ) {
   await delay()
   return warehouseStockStore.saveWarehouseRegisteredSlots(
     warehouseId,
     zone,
     codes,
+    brandId,
   )
 }
 

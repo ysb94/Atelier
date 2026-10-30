@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { FilterTabs } from '@/components/ui/filter-tabs'
 import { Input, Textarea } from '@/components/ui/input'
 import {
   getActiveWarehouseInventorySet,
@@ -13,6 +14,8 @@ import { compareWarehouseLocationCodeNatural } from '@/lib/invoice/product-list-
 import { useRenderWatch } from '@/lib/diagnostics'
 import type { WarehouseZone } from '@/lib/types'
 import { emptyList, formatNumber } from '@/lib/utils'
+import { classifyWarehouseSheetZone } from '@/lib/warehouse/sheet-sync'
+import { OutboundSlotGenerator } from './OutboundSlotGenerator'
 
 const MAX_ADD_ROWS = 200
 const TABLE_PAGE_SIZE = 50
@@ -34,15 +37,14 @@ function buildRangeCodes(prefix: string, startText: string, endText: string) {
   return Array.from({ length: count }, (_, index) => `${base}-${start + index}`)
 }
 
-function parseListCodes(text: string) {
+function parseListCodes(text: string, preserveInput = false) {
   const seen = new Set<string>()
   const codes: string[] = []
   for (const line of text.split(/\r?\n/)) {
-    const code = normalizeLocationCode(line)
+    const code = preserveInput ? line.trim() : normalizeLocationCode(line)
     if (!code || seen.has(code)) continue
     seen.add(code)
     codes.push(code)
-    if (codes.length >= MAX_ADD_ROWS) break
   }
   return codes
 }
@@ -59,6 +61,8 @@ export function WarehouseSlotSettingsPanel({
   useRenderWatch('WarehouseSlotSettingsPanel')
   const queryClient = useQueryClient()
   const [mode, setMode] = useState<SlotMode>('range')
+  const [pickingInputMode, setPickingInputMode] = useState<'list' | 'rack'>('list')
+  const [checkCode, setCheckCode] = useState('')
   const [prefix, setPrefix] = useState('2-1')
   const [startNo, setStartNo] = useState('1')
   const [endNo, setEndNo] = useState('12')
@@ -130,12 +134,17 @@ export function WarehouseSlotSettingsPanel({
   )
 
   const saveMutation = useMutation({
-    mutationFn: () => saveWarehouseRegisteredSlots(warehouseId, zone, codes),
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({
-        queryKey: ['warehouse-registered-slots', warehouseId],
-      })
-      setStatus('자리 설정을 저장했습니다.')
+    mutationFn: () => saveWarehouseRegisteredSlots(warehouseId, zone, codes, brandId),
+    onSuccess: async (result) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['warehouse-registered-slots', warehouseId] }),
+        queryClient.invalidateQueries({ queryKey: ['warehouse-stock-positions', brandId] }),
+        queryClient.invalidateQueries({ queryKey: ['warehouse-inventory-set', brandId] }),
+        queryClient.invalidateQueries({ queryKey: ['warehouse-inventory-sets', brandId] }),
+        queryClient.invalidateQueries({ queryKey: ['warehouse-finder', brandId] }),
+        queryClient.invalidateQueries({ queryKey: ['warehouse-finder-inbounds', brandId] }),
+      ])
+      setStatus('자리 설정을 저장했습니다. 현재 재고 ' + formatNumber(result.reclassifiedCount) + '행의 창고 분류를 갱신했습니다.')
     },
     onError: (error) => {
       console.warn('[warehouse-slots] 자리 저장 실패', { warehouseId, zone, error })
@@ -145,27 +154,34 @@ export function WarehouseSlotSettingsPanel({
     },
   })
 
-  const addCodes =
-    mode === 'range'
+  const listCodes = useMemo(() => parseListCodes(listText, zone === 'picking'), [listText, zone])
+  const usingList = zone === 'picking' || mode === 'list'
+  const listTooBig = usingList && listCodes.length > MAX_ADD_ROWS
+  const addCodes = listTooBig ? [] :
+    !usingList
       ? buildRangeCodes(prefix, startNo, endNo)
-      : parseListCodes(listText)
+      : listCodes
   const rangeCount = Number(endNo) - Number(startNo) + 1
   const rangeTooBig =
     mode === 'range' && Number.isFinite(rangeCount) && rangeCount > MAX_ADD_ROWS
 
-  function addToList() {
-    if (addCodes.length === 0) {
+  function appendCodes(incomingCodes: readonly string[]) {
+    if (incomingCodes.length === 0) {
       setStatus('추가할 자리가 없습니다.')
       return
     }
     setCodes((prev) => {
+      const started = performance.now()
       const next = new Set(prev)
-      for (const code of addCodes) next.add(code)
-      return [...next].sort(compareWarehouseLocationCodeNatural)
+      for (const code of incomingCodes) next.add(code)
+      const sorted = [...next].sort(compareWarehouseLocationCodeNatural)
+      const elapsedMs = performance.now() - started
+      if (elapsedMs >= 200) console[elapsedMs >= 1000 ? 'warn' : 'info']('[warehouse-slots] 자리 목록 정렬', { path: location.pathname, elapsedMs, slots: sorted.length })
+      return sorted
     })
     setSearch('')
     setTablePage(0)
-    setStatus(null)
+    setStatus(zone === 'picking' ? '목록에 추가했습니다. ‘자리 저장’을 누르면 출고창고로 등록됩니다.' : null)
   }
 
   function removeCode(code: string) {
@@ -173,13 +189,17 @@ export function WarehouseSlotSettingsPanel({
     setStatus(null)
   }
 
-  const loading = setQuery.isLoading || slotsQuery.isLoading
+  const loading = setQuery.isLoading || slotsQuery.isLoading || hydratedKey !== `${warehouseId}:${zone}`
 
   return (
     <div className="space-y-4">
+      {zone === 'picking' && <>
+        <p className="rounded-lg border border-border bg-muted/30 p-3 text-sm leading-relaxed">여기에 저장한 자리번호와 <strong>정확히 일치하면 출고창고</strong>, 나머지는 <strong>박스창고</strong>로 분류합니다. <span className="text-muted-foreground">3-1-1_C1과 3-1-1-C-1은 서로 다른 자리입니다. ‘자리 저장’을 누르면 현재 재고도 바로 다시 분류합니다.</span></p>
+        <FilterTabs ariaLabel="출고창고 자리 추가 방식" value={pickingInputMode} onChange={setPickingInputMode} tabs={[{ value: 'list', label: '직접 입력' }, { value: 'rack', label: '렉별 16자리 생성 · 선택' }]} />
+      </>}
       <div className="grid gap-3 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
-          <div>
+        {zone === 'picking' && pickingInputMode === 'rack' ? <OutboundSlotGenerator onAdd={appendCodes} disabled={loading || setQuery.isError || slotsQuery.isError || saveMutation.isPending} /> : <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
+          {zone !== 'picking' && <div>
             <p className="text-xs font-medium text-muted-foreground">추가 방법</p>
             <div className="mt-2 grid grid-cols-2 gap-2">
               <Button
@@ -199,9 +219,9 @@ export function WarehouseSlotSettingsPanel({
                 직접 입력
               </Button>
             </div>
-          </div>
+          </div>}
 
-          {mode === 'range' ? (
+          {!usingList ? (
             <div className="grid grid-cols-[1.4fr_0.8fr_0.8fr] gap-2">
               <label className="space-y-1">
                 <span className="text-xs text-muted-foreground">앞자리</span>
@@ -234,15 +254,17 @@ export function WarehouseSlotSettingsPanel({
                 자리번호 · 한 줄에 하나
               </span>
               <Textarea
+                aria-label={zone === 'picking' ? '출고창고 자리번호' : '자리번호 목록'}
                 rows={8}
                 value={listText}
-                placeholder={'2-1-1\n2-1-2\n6-1-10'}
+                placeholder={zone === 'picking' ? '3-1-1_C1\n3-1-1-C-1\n직접 정한 다른 자리번호' : '2-1-1\n2-1-2\n6-1-10'}
                 onChange={(event) => setListText(event.target.value)}
               />
             </label>
           )}
+          {zone === 'picking' && <p className="text-xs leading-relaxed text-muted-foreground">입력한 기호와 문자를 그대로 사용합니다. 앞뒤 공백과 중복 행만 정리합니다. 한 렉 번호를 저장해도 그 안의 다른 자리가 자동으로 출고창고가 되지는 않습니다.</p>}
 
-          {rangeTooBig ? (
+          {rangeTooBig && !usingList || listTooBig ? (
             <p className="text-xs text-danger">
               한 번에 {formatNumber(MAX_ADD_ROWS)}개까지 넣을 수 있습니다.
             </p>
@@ -252,15 +274,15 @@ export function WarehouseSlotSettingsPanel({
             type="button"
             size="sm"
             className="w-full"
-            disabled={addCodes.length === 0}
-            onClick={addToList}
+            disabled={addCodes.length === 0 || loading || setQuery.isError || slotsQuery.isError || saveMutation.isPending}
+            onClick={() => appendCodes(addCodes)}
           >
             <Plus className="size-3.5" />
             {addCodes.length > 0
               ? `${formatNumber(addCodes.length)}개 추가`
               : '자리 추가'}
           </Button>
-        </div>
+        </div>}
 
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -279,7 +301,7 @@ export function WarehouseSlotSettingsPanel({
             <Button
               type="button"
               size="sm"
-              disabled={!warehouseId || !dirty || saveMutation.isPending}
+              disabled={!warehouseId || (!dirty && zone !== 'picking') || loading || setQuery.isError || slotsQuery.isError || saveMutation.isPending}
               onClick={() => {
                 setStatus(null)
                 saveMutation.mutate()
@@ -297,6 +319,11 @@ export function WarehouseSlotSettingsPanel({
               setTablePage(0)
             }}
           />
+          {zone === 'picking' && <details className="rounded-lg border border-border p-3">
+            <summary className="cursor-pointer text-xs font-medium">저장된 번호로 창고 분류 확인</summary>
+            <div className="mt-2 flex flex-wrap items-center gap-2"><Input aria-label="분류 확인할 자리번호" className="min-w-40 flex-1" placeholder="예: 3-1-1_C1" value={checkCode} onChange={(event) => setCheckCode(event.target.value)} />{checkCode.trim() && <Badge variant={loading || setQuery.isError || slotsQuery.isError ? 'muted' : classifyWarehouseSheetZone(checkCode, savedCodes) === 'picking' ? 'success' : 'outline'}>{loading ? '조회 중' : setQuery.isError || slotsQuery.isError ? '확인 불가' : classifyWarehouseSheetZone(checkCode, savedCodes) === 'picking' ? '출고창고' : '박스창고'}</Badge>}</div>
+            <p className="mt-2 text-xs text-muted-foreground">현재 저장된 자리번호로 확인합니다. 목록에 추가만 하고 저장하지 않은 번호는 아직 박스창고로 표시됩니다.</p>
+          </details>}
 
           {status ? (
             <p className="text-xs text-muted-foreground" role="status">
@@ -329,10 +356,10 @@ export function WarehouseSlotSettingsPanel({
           ) : (
             <>
               <div className="overflow-x-auto rounded-lg border border-border bg-card">
-                <table className="w-full min-w-[20rem] text-left text-sm">
+                <table aria-label={warehouseLabel + ' 등록 자리'} className="w-full min-w-[20rem] text-left text-sm">
                   <thead className="bg-primary text-xs text-primary-foreground">
                     <tr>
-                      <th className="px-3 py-2 font-medium">자리</th>
+                      <th className="px-3 py-2 font-medium">자리번호</th>
                       <th className="w-24 px-3 py-2 font-medium">상태</th>
                       <th className="w-20 px-3 py-2 text-right font-medium">
                         관리

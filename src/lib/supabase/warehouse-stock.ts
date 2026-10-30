@@ -825,55 +825,26 @@ export async function saveWarehouseRegisteredSlots(
   warehouseId: string,
   zone: WarehouseZone,
   codes: readonly string[],
-): Promise<void> {
-  if (!warehouseId.trim()) {
+  brandId: string,
+): Promise<{ reclassifiedCount: number }> {
+  if (!warehouseId.trim() || !brandId.trim()) {
     throw new WarehouseStockStoreError('창고를 확인하세요.')
   }
   const nextCodes = [
     ...new Set(codes.map((code) => code.trim()).filter(Boolean)),
   ]
-  const existing = await listWarehouseRegisteredSlots(warehouseId)
-  const currentZoneCodes = existing
-    .filter((slot) => slot.zone === zone)
-    .map((slot) => slot.code)
-  const currentZoneSet = new Set(currentZoneCodes)
-  const nextSet = new Set(nextCodes)
-  const toDelete = currentZoneCodes.filter((code) => !nextSet.has(code))
-  const toUpsert = nextCodes.filter((code) => {
-    const current = existing.find((slot) => slot.code === code)
-    return !currentZoneSet.has(code) || current?.zone !== zone
+  const { data, error } = await getSupabase().rpc('save_warehouse_registered_slots', {
+    p_brand_id: brandId,
+    p_warehouse_id: warehouseId,
+    p_zone: zone,
+    p_codes: nextCodes,
   })
-
-  if (toDelete.length > 0) {
-    const { error } = await getSupabase()
-      .from('warehouse_registered_slots')
-      .delete()
-      .eq('warehouse_id', warehouseId)
-      .eq('zone', zone)
-      .in('code', toDelete)
-    if (error) {
-      throw new WarehouseStockStoreError(
-        errorMessage(error, '창고 자리를 저장하지 못했습니다.'),
-      )
-    }
-  }
-
-  if (toUpsert.length === 0) return
-  const { error } = await getSupabase()
-    .from('warehouse_registered_slots')
-    .upsert(
-      toUpsert.map((code) => ({
-        warehouse_id: warehouseId,
-        code,
-        zone,
-      })),
-      { onConflict: 'warehouse_id,code' },
-    )
   if (error) {
     throw new WarehouseStockStoreError(
       errorMessage(error, '창고 자리를 저장하지 못했습니다.'),
     )
   }
+  return { reclassifiedCount: Number((data as { reclassified_count?: number } | null)?.reclassified_count ?? 0) }
 }
 
 export async function listWarehouseBoxes(

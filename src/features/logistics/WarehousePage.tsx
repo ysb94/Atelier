@@ -177,7 +177,7 @@ export function WarehousePage() {
             </CardTitle>
             <CardDescription className="mt-1">
               {activePanel === 'slots'
-                ? `${active.label}에 속하는 자리번호를 등록합니다. 등록된 출고창고 자리만 입고 시트에서 출고창고로 분류됩니다.`
+                ? activeView === 'outbound' ? '형식에 상관없이 출고창고 자리번호를 입력합니다. 저장하면 현재 재고도 정확히 일치하는 번호는 출고창고, 나머지는 박스창고로 다시 분류됩니다.' : `${active.label}에 속하는 자리번호를 등록합니다. 등록된 출고창고 자리만 입고 시트에서 출고창고로 분류됩니다.`
                 : active.detail}
             </CardDescription>
           </div>

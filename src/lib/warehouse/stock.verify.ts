@@ -543,6 +543,13 @@ assert(unknownQtyStock.has('') === false, 'M번호 없는 행은 SKU 합계에 �
 
 const fixture = buildWarehouseSheetSyncFixture(2028)
 assert(fixture.rows.length === 2028, '2,028행 fixture를 만든다')
+const customLocationCodes = ['3-1-1_C1', '3-1-1-C-1', '3-1-1_C2', '임시 자리 7', '3-1-1']
+const customLocationRows = customLocationCodes.map((locationRaw, index) => ({ ...fixture.rows[index], locationRaw }))
+const customLocations = prepareWarehouseSheetSyncRows(customLocationRows, styles, ['3-1-1_C1', '임시 자리 7'])
+assert(customLocations.every((row, index) => row.locationCode === customLocationCodes[index]), '직접 입력한 기호·문자·내부 공백을 시트 분류에서도 그대로 유지한다')
+assert(customLocations.map((row) => row.zone).join(',') === 'picking,box_storage,box_storage,picking,box_storage', '등록한 전체 번호만 출고창고이며 비슷한 형식과 같은 렉의 미등록 자리는 박스창고다')
+const bothFormats = prepareWarehouseSheetSyncRows(customLocationRows, styles, ['3-1-1_C1', '3-1-1-C-1'])
+assert(bothFormats[0].zone === 'picking' && bothFormats[1].zone === 'picking', '두 형식을 각각 등록하면 둘 다 출고창고로 분류한다')
 const payloadIssues = validateWarehouseSheetSyncPayload([
   ...fixture.rows,
   { ...fixture.rows[0], sourceRowNumber: 9999 },
