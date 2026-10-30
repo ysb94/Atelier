@@ -42,14 +42,14 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
     try {
       const XLSX = await import('xlsx')
       const sheet = XLSX.utils.aoa_to_sheet(outboundSlotExcelRows(racks))
-      sheet['!cols'] = [{ wch: 24 }, { wch: 24 }]
+      sheet['!cols'] = [{ wch: 24 }, { wch: 18 }, { wch: 14 }]
       const workbook = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(workbook, sheet, 'QR')
       const date = new Date()
       const stamp = [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('')
       const brand = brandName.replace(/[\\/:*?"<>|]+/g, '').trim() || '창고'
       XLSX.writeFile(workbook, brand + '_출고창고_고정자리_' + stamp + '.xlsx')
-      setStatus(formatNumber(slotCount) + '개 자리의 엑셀을 내려받았습니다. 아이라벨에서 ‘자리’는 글자에, ‘QR’은 QR 바코드에 연결해 주세요.')
+      setStatus(formatNumber(slotCount) + '개 자리의 엑셀을 내려받았습니다. 아이라벨에서 ‘QR’은 QR 바코드에, ‘렉자리’와 ‘렉박스자리’는 각각 글자에 연결해 주세요.')
     } catch (error) {
       console.warn('[warehouse-qr] 고정 자리 엑셀 실패', { path: location.pathname, error })
       setStatus('자리 엑셀을 내려받지 못했습니다. 다시 시도해 주세요.')
@@ -101,7 +101,7 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
               <table aria-label="렉 안 고정 자리 배치" className="w-full min-w-[30rem] text-center text-xs"><thead className="bg-primary text-primary-foreground"><tr><th className="px-2 py-2 font-medium">층</th>{OUTBOUND_SLOT_COLUMNS.map((column) => <th className="px-2 py-2 font-medium" key={column}>{column}칸{column === 1 ? ' · 왼쪽' : column === 4 ? ' · 오른쪽' : ''}</th>)}</tr></thead><tbody>{VISUAL_LEVELS.map((level) => <tr key={level} className="border-t border-border hover:bg-muted/20"><th className="px-2 py-3 font-medium">{OUTBOUND_SLOT_LEVELS.indexOf(level) + 1}층 · {level}</th>{OUTBOUND_SLOT_COLUMNS.map((column) => <td className="border-l border-border px-2 py-4" key={column}><span className="block font-semibold text-primary">{level}{column}</span><span className="mt-1 block whitespace-nowrap text-muted-foreground">{selectedRack}_{level}{column}</span></td>)}</tr>)}</tbody></table>
             </div>
             <p className="text-xs text-muted-foreground">위 그림은 렉 정면입니다. 엑셀은 렉별 A1~A4 → B1~B4 → C1~C4 → D1~D4 순서로 저장됩니다.</p>
-            <details className="rounded-lg border border-border p-3"><summary className="cursor-pointer text-xs font-medium">아이라벨에서 출력하는 방법</summary><ol className="mt-2 list-inside list-decimal space-y-1 text-xs leading-relaxed text-muted-foreground"><li>내려받은 엑셀의 ‘QR’ 시트를 아이라벨에서 불러옵니다.</li><li>‘자리’ 열을 글자에 연결하고, ‘QR’ 열을 QR 바코드에 연결합니다.</li><li>아이라벨에서 사용할 용지를 선택하고 인쇄합니다.</li></ol><p className="mt-2 text-xs text-muted-foreground">두 열에는 같은 고정 자리번호가 들어갑니다. QR 그림은 아이라벨에서 만듭니다.</p></details>
+            <details className="rounded-lg border border-border p-3"><summary className="cursor-pointer text-xs font-medium">아이라벨에서 출력하는 방법</summary><ol className="mt-2 list-inside list-decimal space-y-1 text-xs leading-relaxed text-muted-foreground"><li>내려받은 엑셀의 ‘QR’ 시트를 아이라벨에서 불러옵니다.</li><li>‘QR’ 열을 QR 바코드에 연결합니다.</li><li>‘렉자리’와 ‘렉박스자리’ 열을 각각 글자에 연결합니다.</li><li>아이라벨에서 사용할 용지를 선택하고 인쇄합니다.</li></ol><p className="mt-2 text-xs text-muted-foreground">예: QR = 3-1-1_A1 · 렉자리 = 3-1-1 · 렉박스자리 = A1. QR 그림은 아이라벨에서 만듭니다.</p></details>
           </>}
           {status && <p role="status" className="text-xs leading-relaxed text-muted-foreground">{status}</p>}
         </CardContent>

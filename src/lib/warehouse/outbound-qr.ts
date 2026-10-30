@@ -50,9 +50,9 @@ export function outboundSlotCodes(rack: string) {
   return OUTBOUND_SLOT_LEVELS.flatMap((level) => OUTBOUND_SLOT_COLUMNS.map((column) => `${rack}_${level}${column}`))
 }
 
-/** Keep the existing iLabel contract: location text and QR payload, both strings. */
+/** Keep the full QR payload and split the two text fields for iLabel. */
 export function outboundSlotExcelRows(racks: readonly string[]) {
-  return [['자리', 'QR'], ...racks.flatMap((rack) => outboundSlotCodes(rack).map((code) => [code, code]))]
+  return [['QR', '렉자리', '렉박스자리'], ...racks.flatMap((rack) => outboundSlotCodes(rack).map((code) => [code, rack, code.slice(rack.length + 1)]))]
 }
 
 export function outboundRackLabelPages<T>(labels: readonly T[]): (T | null)[][] {
