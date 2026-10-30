@@ -25,9 +25,19 @@ function enablePrintMode() {
   style.textContent = '@page { size: A4 portrait; margin: 0; }'
 }
 function LabelSheet({ labels }: { labels: (string | null)[] }) {
-  return <div className="outbound-rack-sheet">{labels.map((label, index) => <div className="outbound-rack-label" key={label ?? 'blank-' + index}>{label &&
-    <strong className="outbound-rack-label-code" style={{ '--rack-label-font': Math.max(18, Math.min(70, 350 / label.length)) } as CSSProperties}>{label}</strong>
-  }</div>)}</div>
+  return <div className="outbound-rack-sheet">{labels.map((label, index) => {
+    const parts = label?.split('-') ?? []
+    return <div className="outbound-rack-label" key={label ?? 'blank-' + index}>{label &&
+      <div className="outbound-rack-label-content">
+        <strong className="outbound-rack-label-code" aria-label={label} style={{ '--rack-part-length': Math.max(...parts.map((part) => part.length)) } as CSSProperties}>
+          {parts.map((part, partIndex) => <span className="outbound-rack-label-part" key={partIndex}>
+            {partIndex > 0 && <span className="outbound-rack-label-separator" aria-hidden="true">|</span>}
+            <span className="outbound-rack-label-number">{part}</span>
+          </span>)}
+        </strong>
+      </div>
+    }</div>
+  })}</div>
 }
 
 export function OutboundRackPrintPreview({ labels, onClose }: { labels: string[]; onClose: () => void }) {
@@ -89,7 +99,7 @@ export function OutboundRackPrintPreview({ labels, onClose }: { labels: string[]
           <div className="flex items-center gap-2"><Button size="sm" variant="outline" aria-label="이전 라벨 페이지" disabled={pageIndex === 0} onClick={() => setPageIndex((index) => index - 1)}><ChevronLeft className="size-4" /></Button><span className="min-w-14 text-center text-xs tabular-nums">{pageIndex + 1} / {pages.length}장</span><Button size="sm" variant="outline" aria-label="다음 라벨 페이지" disabled={pageIndex === pages.length - 1} onClick={() => setPageIndex((index) => index + 1)}><ChevronRight className="size-4" /></Button></div>
         </div>
         <div className="min-h-0 flex-1 overflow-auto bg-muted/40 p-4"><div className="outbound-rack-screen-preview"><LabelSheet labels={pages[pageIndex]} /></div></div>
-        <footer className="border-t border-border px-4 py-3 text-xs text-muted-foreground">한 칸은 가로 105mm × 세로 148.5mm입니다. 마지막 장의 남는 칸은 인쇄하지 않습니다.{error && <p role="alert" className="mt-1 text-danger">{error}</p>}</footer>
+        <footer className="border-t border-border px-4 py-3 text-xs text-muted-foreground">한 칸은 가로 105mm × 세로 148.5mm입니다. 왼쪽 ¼은 비우고 오른쪽 ¾의 중앙에 세로로 표시합니다. 마지막 장의 남는 칸은 인쇄하지 않습니다.{error && <p role="alert" className="mt-1 text-danger">{error}</p>}</footer>
       </section>
     </div>
     {active && createPortal(<div className="outbound-rack-print-root" aria-hidden="true">{pages.map((page, index) => <LabelSheet key={index} labels={page} />)}</div>, document.body)}

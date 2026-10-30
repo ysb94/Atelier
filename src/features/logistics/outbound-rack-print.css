@@ -1,15 +1,19 @@
 .outbound-rack-print-root{display:none}
 .outbound-rack-sheet{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,minmax(0,1fr));background:#fff;color:#000;aspect-ratio:210/297;box-sizing:border-box}
-.outbound-rack-label{display:flex;align-items:center;justify-content:center;box-sizing:border-box;min-width:0;min-height:0;padding:8%;text-align:center;font-family:"Malgun Gothic","맑은 고딕",sans-serif}
-.outbound-rack-label-code{font-size:calc(var(--rack-label-font) * 1pt);font-weight:800;line-height:1.2;max-width:100%;overflow-wrap:anywhere;letter-spacing:-.04em}
+.outbound-rack-label{display:grid;grid-template-columns:1fr 3fr;box-sizing:border-box;min-width:0;min-height:0;text-align:center;font-family:"Malgun Gothic","맑은 고딕",sans-serif}
+.outbound-rack-label-content{grid-column:2;min-width:0;min-height:0;padding:5mm 6mm}
+.outbound-rack-label-code{container-type:size;display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;font-weight:800;line-height:1;letter-spacing:-.04em}
+.outbound-rack-label-part{display:contents}
+.outbound-rack-label-number{display:block;flex:none;font-size:min(28cqh,calc(165cqw / var(--rack-part-length)));line-height:1;white-space:nowrap}
+.outbound-rack-label-separator{display:block;flex:none;font-size:8cqh;line-height:1;font-weight:400}
 .outbound-rack-screen-preview{width:min(100%,530px);margin:0 auto;container-type:inline-size;box-shadow:0 1px 8px #0002}
 .outbound-rack-screen-preview .outbound-rack-label{border:1px dashed #ccc}
-.outbound-rack-screen-preview .outbound-rack-label-code{font-size:calc(var(--rack-label-font) * .168cqw)}
+.outbound-rack-screen-preview .outbound-rack-label-content{padding:2.38cqw 2.86cqw}
 @media print{
   html.printing-outbound-racks,html.printing-outbound-racks body{margin:0!important;padding:0!important;width:210mm!important;background:#fff!important}
   html.printing-outbound-racks body>*:not(.outbound-rack-print-root){display:none!important}
   html.printing-outbound-racks .outbound-rack-print-root{display:block!important;margin:0!important;padding:0!important;width:210mm!important;color:#000!important}
   html.printing-outbound-racks .outbound-rack-sheet{width:210mm;height:297mm;aspect-ratio:auto;break-inside:avoid;break-after:page;page-break-after:always;overflow:hidden}
   html.printing-outbound-racks .outbound-rack-sheet:last-child{break-after:auto;page-break-after:auto}
-  html.printing-outbound-racks .outbound-rack-label{width:105mm;height:148.5mm;padding:10mm 7mm;border:0}
+  html.printing-outbound-racks .outbound-rack-label{width:105mm;height:148.5mm;border:0}
 }
