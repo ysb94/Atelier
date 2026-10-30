@@ -45,7 +45,7 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
       const labels = racks.flatMap(outboundSlotCodes)
       const slotImages = new Map<string, string>()
       for (const [index, code] of labels.entries()) {
-        const svg = await QRCode.toString(code, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 })
+        const svg = await QRCode.toString(code, { type: 'svg', errorCorrectionLevel: 'M', margin: 1 })
         slotImages.set(code, 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg))
         // Let input and preparation feedback paint during long batches.
         if (index % 8 === 7) await new Promise<void>((resolve) => setTimeout(resolve, 0))
