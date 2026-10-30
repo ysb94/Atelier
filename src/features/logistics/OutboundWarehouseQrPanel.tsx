@@ -7,7 +7,7 @@ import { FilterTabs } from '@/components/ui/filter-tabs'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { formatNumber } from '@/lib/utils'
-import { buildOutboundRackCodes, MAX_OUTBOUND_QR_RACKS, OUTBOUND_SLOT_COLUMNS, OUTBOUND_SLOT_LEVELS, OUTBOUND_SLOTS_PER_RACK, outboundSlotExcelRows } from '@/lib/warehouse/outbound-qr'
+import { buildOutboundRackCodes, MAX_OUTBOUND_QR_RACKS, OUTBOUND_SLOT_COLUMNS, OUTBOUND_SLOT_LEVELS, OUTBOUND_SLOTS_PER_RACK, outboundSlotCodes, outboundSlotExcelRows } from '@/lib/warehouse/outbound-qr'
 import { OutboundRackPrintPreview } from './OutboundRackPrintPreview'
 
 const VISUAL_LEVELS = [...OUTBOUND_SLOT_LEVELS].reverse()
@@ -24,7 +24,7 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
   const [focusedRack, setFocusedRack] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
-  const [labels, setLabels] = useState<string[] | null>(null)
+  const [preview, setPreview] = useState<{ labels: string[]; slotImages?: ReadonlyMap<string, string> } | null>(null)
   const result = useMemo(() => buildOutboundRackCodes({ mode, warehouse, row, startRack, endRack, list }), [mode, warehouse, row, startRack, endRack, list])
   const { racks } = result
   const selectedRack = racks.includes(focusedRack) ? focusedRack : racks[0] ?? ''
@@ -33,7 +33,32 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
   function previewLabels() {
     if (!racks.length || busy) return
     setStatus('')
-    setLabels([...racks])
+    setPreview({ labels: [...racks] })
+  }
+
+  async function previewSlots() {
+    if (!racks.length || busy) return
+    setBusy(true); setStatus('')
+    const started = performance.now()
+    try {
+      const QRCode = (await import('qrcode')).default
+      const labels = racks.flatMap(outboundSlotCodes)
+      const slotImages = new Map<string, string>()
+      for (const [index, code] of labels.entries()) {
+        const svg = await QRCode.toString(code, { type: 'svg', errorCorrectionLevel: 'M', margin: 4 })
+        slotImages.set(code, 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg))
+        // Let input and preparation feedback paint during long batches.
+        if (index % 8 === 7) await new Promise<void>((resolve) => setTimeout(resolve, 0))
+      }
+      setPreview({ labels, slotImages })
+    } catch (error) {
+      console.warn('[warehouse-qr] 고정 자리 QR 준비 실패', { path: location.pathname, error })
+      setStatus('고정 자리 QR을 준비하지 못했습니다. 다시 시도해 주세요.')
+    } finally {
+      const elapsedMs = performance.now() - started
+      if (elapsedMs >= 200) console[elapsedMs >= 1000 ? 'warn' : 'info']('[warehouse-qr] 고정 자리 QR 준비', { path: location.pathname, elapsedMs, slots: slotCount })
+      setBusy(false)
+    }
   }
 
   async function downloadSlots() {
@@ -59,7 +84,7 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
   return <div className="space-y-4">
     <FilterTabs ariaLabel="출고창고 QR 종류" value={output} onChange={(value) => { setOutput(value); setStatus('') }} tabs={[
       { value: 'rack', label: '렉 번호 · 4칸 라벨 인쇄', count: racks.length },
-      { value: 'slot', label: '렉 안 고정 자리 · 아이라벨 엑셀', count: slotCount },
+      { value: 'slot', label: '렉 안 고정 자리 · 라벨 인쇄 / 엑셀', count: slotCount },
     ]} />
     <div className="grid gap-4 lg:grid-cols-[19rem_minmax(0,1fr)]">
       <Card>
@@ -87,7 +112,7 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
         <CardContent className="space-y-4 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div><div className="mb-2 flex flex-wrap gap-2"><Badge variant="muted">{brandName}</Badge><Badge variant="outline">출고창고</Badge></div><h3 className="text-base font-semibold">{output === 'rack' ? '렉 번호 라벨' : '렉 안의 고정 자리 번호'}</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">{output === 'rack' ? '3-1-1처럼 렉 하나를 표시합니다. A4를 2열 × 2행으로 나눠 한 장에 4개씩 인쇄합니다.' : '박스 자체 번호가 아닌, 렉에 붙여 두는 고정 자리입니다. A는 맨 아래 1층, 숫자는 정면에서 왼쪽부터입니다.'}</p></div>
-            {output === 'rack' ? <Button size="sm" disabled={!racks.length || busy} onClick={previewLabels}><Printer className="size-3.5" />4칸 라벨 미리보기</Button> : <Button size="sm" disabled={!racks.length || busy} onClick={() => void downloadSlots()}><Download className="size-3.5" />{busy ? '엑셀 준비 중…' : '아이라벨용 엑셀 내려받기'}</Button>}
+            {output === 'rack' ? <Button size="sm" disabled={!racks.length || busy} onClick={previewLabels}><Printer className="size-3.5" />4칸 라벨 미리보기</Button> : <div className="flex flex-wrap gap-2"><Button size="sm" disabled={!racks.length || busy} onClick={() => void previewSlots()}><Printer className="size-3.5" />{busy ? '준비 중…' : '고정 자리 4칸 라벨 미리보기'}</Button><Button size="sm" variant="outline" disabled={!racks.length || busy} onClick={() => void downloadSlots()}><Download className="size-3.5" />아이라벨용 엑셀 내려받기</Button></div>}
           </div>
           {!racks.length ? <div className="flex min-h-64 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border text-center"><Table2 className="size-8 text-muted-foreground" /><p className="text-sm text-muted-foreground">왼쪽에서 올바른 렉 번호를 입력해 주세요.</p></div> : output === 'rack' ? <>
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><Badge variant="success">{formatNumber(racks.length)}개 렉</Badge><span>A4 {Math.ceil(racks.length / 4)}장 · 한 장당 4칸</span><span>마지막 장의 남는 칸은 비워 둡니다.</span></div>
@@ -96,6 +121,7 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
             </div>
             <p className="text-xs text-muted-foreground">인쇄 설정은 A4 세로 · 배율 100% · 여백 없음 · 머리글/바닥글 끄기로 맞춰 주세요.</p>
           </> : <>
+            <p className="rounded-lg border border-border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">직접 인쇄: A4 가로 · 2열 × 2행 · QR 약 83mm. 왼쪽에 큰 QR, 오른쪽에 렉자리와 렉박스자리를 표시합니다. 총 {Math.ceil(slotCount / 4)}장입니다.</p>
             <div className="flex flex-wrap items-center justify-between gap-2"><Badge variant="success">{formatNumber(slotCount)}개 자리 · 렉당 16개</Badge><label className="flex items-center gap-2 text-xs text-muted-foreground">미리 볼 렉<Select aria-label="미리 볼 렉" value={selectedRack} onChange={(event) => setFocusedRack(event.target.value)}>{racks.map((rack) => <option key={rack}>{rack}</option>)}</Select></label></div>
             <div className="overflow-x-auto rounded-lg border border-border">
               <table aria-label="렉 안 고정 자리 배치" className="w-full min-w-[30rem] text-center text-xs"><thead className="bg-primary text-primary-foreground"><tr><th className="px-2 py-2 font-medium">층</th>{OUTBOUND_SLOT_COLUMNS.map((column) => <th className="px-2 py-2 font-medium" key={column}>{column}칸{column === 1 ? ' · 왼쪽' : column === 4 ? ' · 오른쪽' : ''}</th>)}</tr></thead><tbody>{VISUAL_LEVELS.map((level) => <tr key={level} className="border-t border-border hover:bg-muted/20"><th className="px-2 py-3 font-medium">{OUTBOUND_SLOT_LEVELS.indexOf(level) + 1}층 · {level}</th>{OUTBOUND_SLOT_COLUMNS.map((column) => <td className="border-l border-border px-2 py-4" key={column}><span className="block font-semibold text-primary">{level}{column}</span><span className="mt-1 block whitespace-nowrap text-muted-foreground">{selectedRack}_{level}{column}</span></td>)}</tr>)}</tbody></table>
@@ -107,6 +133,6 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
         </CardContent>
       </Card>
     </div>
-    {labels && <OutboundRackPrintPreview labels={labels} onClose={() => setLabels(null)} />}
+    {preview && <OutboundRackPrintPreview labels={preview.labels} slotImages={preview.slotImages} onClose={() => setPreview(null)} />}
   </div>
 }

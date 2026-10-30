@@ -14,7 +14,7 @@ type QrMode = 'range' | 'list'
 
 const TARGET_COPY: Record<QrTarget, { label: string; hint: string }> = {
   box: { label: '박스창고', hint: '박스 단위 보관 자리' },
-  outbound: { label: '출고창고', hint: '렉 라벨 인쇄 · 고정 자리 엑셀' },
+  outbound: { label: '출고창고', hint: '렉·고정 자리 라벨 인쇄 / 엑셀' },
 }
 
 function QrTargetSelector({ target, onChange }: { target: QrTarget; onChange: (target: QrTarget) => void }) {
