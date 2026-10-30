@@ -76,9 +76,9 @@ try {
   })
   assert.ok(Math.abs(slotGeometry.width - 148.5 * 96 / 25.4) < 1)
   assert.ok(Math.abs(slotGeometry.height - 105 * 96 / 25.4) < 1)
-  assert.ok(slotGeometry.qr >= 75 * 96 / 25.4, 'large QR fits beside the wider reference-style text area')
+  assert.ok(slotGeometry.qr >= 60 * 96 / 25.4, 'QR fits the compact upper section of the reference layout')
   assert.ok(slotGeometry.qrTop - slotGeometry.top <= 1.1 * 96 / 25.4 && Math.abs(slotGeometry.textTop - slotGeometry.qrTop) < 1, 'reference layout starts at the top with a 1mm outer margin')
-  assert.ok(slotGeometry.positionFont >= 44 * 96 / 25.4, 'position text is larger than the previous layout')
+  assert.ok(slotGeometry.positionFont >= 38 * 96 / 25.4, 'large position text fits above the reserved bottom area')
   assert.ok(slotGeometry.textLeft >= slotGeometry.qrRight - 1 && slotGeometry.textRight <= slotGeometry.right, 'QR and text do not overlap: ' + JSON.stringify(slotGeometry))
   const overflowingSlotText = await page.locator('.outbound-rack-print-root .outbound-slot-label').evaluateAll((els) => els.flatMap((el) => {
     const qr = el.querySelector('img').getBoundingClientRect(), label = el.getBoundingClientRect()
@@ -110,7 +110,7 @@ try {
     return { qr: firstInk(.03, .50), rack: firstInk(.60, .97), lastInk, height: canvas.height, decoded: window.jsQR(data, canvas.width, canvas.height)?.data }
   }, firstSlotImage.toString('base64'))
   assert.ok(inkTops.qr > 0 && inkTops.qr < inkTops.height * .1 && inkTops.rack >= inkTops.qr - 3 && inkTops.rack <= inkTops.qr + 16, 'QR is near the upper left and rack number near the upper right: ' + JSON.stringify(inkTops))
-  assert.ok(inkTops.lastInk < inkTops.height * .8 && inkTops.lastInk > inkTops.height * .6, 'reference layout keeps the bottom area blank')
+  assert.ok(inkTops.lastInk < inkTops.height * .63 && inkTops.lastInk > inkTops.height * .5, 'reference layout keeps approximately 40% of the label blank at the bottom')
   assert.equal(inkTops.decoded, '3-1-1_A1', 'the actual printed label raster is readable')
   const slotPdf = await page.pdf({ path: path.join(output, 'slot-labels.pdf'), preferCSSPageSize: true, printBackground: true })
   assert.equal((slotPdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length, 28, '112 slots = 28 physical A4 pages')
