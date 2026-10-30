@@ -88,6 +88,22 @@ try {
     }).map((part) => part.textContent)
   }))
   assert.deepEqual(overflowingSlotText, [], 'all A1–D4 labels fit without overlap or clipping')
+  const firstSlotImage = await page.locator('.outbound-rack-print-root .outbound-slot-label').first().screenshot()
+  const inkTops = await page.evaluate(async (png) => {
+    const img = new Image(); img.src = 'data:image/png;base64,' + png; await img.decode()
+    const canvas = document.createElement('canvas'); canvas.width = img.naturalWidth; canvas.height = img.naturalHeight
+    const context = canvas.getContext('2d'); context.drawImage(img, 0, 0)
+    const { data } = context.getImageData(0, 0, canvas.width, canvas.height)
+    function firstInk(start, end) {
+      for (let y = 0; y < canvas.height; y++) for (let x = Math.floor(start * canvas.width); x < end * canvas.width; x++) {
+        const index = (y * canvas.width + x) * 4
+        if (data[index] < 64 && data[index + 1] < 64 && data[index + 2] < 64 && data[index + 3] > 200) return y
+      }
+      return -1
+    }
+    return { qr: firstInk(.03, .60), rack: firstInk(.67, .97) }
+  }, firstSlotImage.toString('base64'))
+  assert.ok(inkTops.qr > 0 && Math.abs(inkTops.qr - inkTops.rack) <= 3, 'visible QR pattern and rack number align: ' + JSON.stringify(inkTops))
   const slotPdf = await page.pdf({ path: path.join(output, 'slot-labels.pdf'), preferCSSPageSize: true, printBackground: true })
   assert.equal((slotPdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length, 28, '112 slots = 28 physical A4 pages')
   await page.addScriptTag({ content: await fs.readFile(path.join(root, 'node_modules/jsqr/dist/jsQR.js'), 'utf8') })

@@ -8,7 +8,7 @@ import { Input, Select, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { formatNumber } from '@/lib/utils'
 import { buildOutboundRackCodes, MAX_OUTBOUND_QR_RACKS, OUTBOUND_SLOT_COLUMNS, OUTBOUND_SLOT_LEVELS, OUTBOUND_SLOTS_PER_RACK, outboundSlotCodes, outboundSlotExcelRows } from '@/lib/warehouse/outbound-qr'
-import { OutboundRackPrintPreview } from './OutboundRackPrintPreview'
+import { OutboundRackPrintPreview, type SlotQrImage } from './OutboundRackPrintPreview'
 
 const VISUAL_LEVELS = [...OUTBOUND_SLOT_LEVELS].reverse()
 
@@ -24,7 +24,7 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
   const [focusedRack, setFocusedRack] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
-  const [preview, setPreview] = useState<{ labels: string[]; slotImages?: ReadonlyMap<string, string> } | null>(null)
+  const [preview, setPreview] = useState<{ labels: string[]; slotImages?: ReadonlyMap<string, SlotQrImage> } | null>(null)
   const result = useMemo(() => buildOutboundRackCodes({ mode, warehouse, row, startRack, endRack, list }), [mode, warehouse, row, startRack, endRack, list])
   const { racks } = result
   const selectedRack = racks.includes(focusedRack) ? focusedRack : racks[0] ?? ''
@@ -43,10 +43,12 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
     try {
       const QRCode = (await import('qrcode')).default
       const labels = racks.flatMap(outboundSlotCodes)
-      const slotImages = new Map<string, string>()
+      const slotImages = new Map<string, SlotQrImage>()
       for (const [index, code] of labels.entries()) {
         const svg = await QRCode.toString(code, { type: 'svg', errorCorrectionLevel: 'M', margin: 4 })
-        slotImages.set(code, 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg))
+        const size = Number(svg.match(/viewBox="0 0 (\d+) \d+"/)?.[1])
+        if (!size) throw new Error('QR 크기를 확인할 수 없습니다: ' + code)
+        slotImages.set(code, { src: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg), quietRatio: 4 / size })
         // Let input and preparation feedback paint during long batches.
         if (index % 8 === 7) await new Promise<void>((resolve) => setTimeout(resolve, 0))
       }

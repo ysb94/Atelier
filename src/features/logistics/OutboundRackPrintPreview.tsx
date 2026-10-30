@@ -9,6 +9,7 @@ import { outboundRackLabelPages } from '@/lib/warehouse/outbound-qr'
 import './outbound-rack-print.css'
 
 const PRINT_STYLE_ID = 'outbound-rack-page-style'
+export type SlotQrImage = { src: string; quietRatio: number }
 
 function clearPrintMode() {
   document.documentElement.classList.remove('printing-outbound-racks')
@@ -26,13 +27,14 @@ function enablePrintMode(slotMode: boolean) {
   }
   style.textContent = '@page { size: A4 ' + (slotMode ? 'landscape' : 'portrait') + '; margin: 0; }'
 }
-function LabelSheet({ labels, slotImages }: { labels: (string | null)[]; slotImages?: ReadonlyMap<string, string> }) {
+function LabelSheet({ labels, slotImages }: { labels: (string | null)[]; slotImages?: ReadonlyMap<string, SlotQrImage> }) {
   return <div className={'outbound-rack-sheet' + (slotImages ? ' outbound-slot-sheet' : '')}>{labels.map((label, index) => {
     if (slotImages) {
       const [rack, slot] = label?.split('_') ?? []
+      const qr = label ? slotImages.get(label) : undefined
       return <div className="outbound-rack-label outbound-slot-label" key={label ?? 'blank-' + index}>{label && <>
-        <img className="outbound-slot-qr" src={slotImages.get(label)} alt={label + ' 자리 QR'} />
-        <div className="outbound-slot-text" style={{ '--slot-rack-length': rack.length } as CSSProperties}>
+        <img className="outbound-slot-qr" src={qr?.src} alt={label + ' 자리 QR'} />
+        <div className="outbound-slot-text" style={{ '--slot-rack-length': rack.length, '--slot-quiet-ratio': qr?.quietRatio ?? 0 } as CSSProperties}>
           <span className="outbound-slot-rack">{rack}</span>
           <strong className="outbound-slot-position">{slot}</strong>
         </div>
@@ -52,7 +54,7 @@ function LabelSheet({ labels, slotImages }: { labels: (string | null)[]; slotIma
   })}</div>
 }
 
-export function OutboundRackPrintPreview({ labels, slotImages, onClose }: { labels: string[]; slotImages?: ReadonlyMap<string, string>; onClose: () => void }) {
+export function OutboundRackPrintPreview({ labels, slotImages, onClose }: { labels: string[]; slotImages?: ReadonlyMap<string, SlotQrImage>; onClose: () => void }) {
   useRenderWatch('OutboundRackPrintPreview')
   const active = useWorkspaceTabActivity()
   const slotMode = slotImages !== undefined
