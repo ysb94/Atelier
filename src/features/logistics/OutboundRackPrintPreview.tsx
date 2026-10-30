@@ -9,7 +9,6 @@ import { outboundRackLabelPages } from '@/lib/warehouse/outbound-qr'
 import './outbound-rack-print.css'
 
 const PRINT_STYLE_ID = 'outbound-rack-page-style'
-export type SlotQrImage = { src: string; quietRatio: number }
 
 function clearPrintMode() {
   document.documentElement.classList.remove('printing-outbound-racks')
@@ -27,14 +26,13 @@ function enablePrintMode(slotMode: boolean) {
   }
   style.textContent = '@page { size: A4 ' + (slotMode ? 'landscape' : 'portrait') + '; margin: 0; }'
 }
-function LabelSheet({ labels, slotImages }: { labels: (string | null)[]; slotImages?: ReadonlyMap<string, SlotQrImage> }) {
+function LabelSheet({ labels, slotImages }: { labels: (string | null)[]; slotImages?: ReadonlyMap<string, string> }) {
   return <div className={'outbound-rack-sheet' + (slotImages ? ' outbound-slot-sheet' : '')}>{labels.map((label, index) => {
     if (slotImages) {
       const [rack, slot] = label?.split('_') ?? []
-      const qr = label ? slotImages.get(label) : undefined
       return <div className="outbound-rack-label outbound-slot-label" key={label ?? 'blank-' + index}>{label && <>
-        <img className="outbound-slot-qr" src={qr?.src} alt={label + ' 자리 QR'} />
-        <div className="outbound-slot-text" style={{ '--slot-rack-length': rack.length, '--slot-quiet-ratio': qr?.quietRatio ?? 0 } as CSSProperties}>
+        <img className="outbound-slot-qr" src={slotImages.get(label)} alt={label + ' 자리 QR'} />
+        <div className="outbound-slot-text" style={{ '--slot-rack-length': rack.length } as CSSProperties}>
           <span className="outbound-slot-rack">{rack}</span>
           <strong className="outbound-slot-position">{slot}</strong>
         </div>
@@ -54,7 +52,7 @@ function LabelSheet({ labels, slotImages }: { labels: (string | null)[]; slotIma
   })}</div>
 }
 
-export function OutboundRackPrintPreview({ labels, slotImages, onClose }: { labels: string[]; slotImages?: ReadonlyMap<string, SlotQrImage>; onClose: () => void }) {
+export function OutboundRackPrintPreview({ labels, slotImages, onClose }: { labels: string[]; slotImages?: ReadonlyMap<string, string>; onClose: () => void }) {
   useRenderWatch('OutboundRackPrintPreview')
   const active = useWorkspaceTabActivity()
   const slotMode = slotImages !== undefined
@@ -117,7 +115,7 @@ export function OutboundRackPrintPreview({ labels, slotImages, onClose }: { labe
           <div className="flex items-center gap-2"><Button size="sm" variant="outline" aria-label="이전 라벨 페이지" disabled={pageIndex === 0} onClick={() => setPageIndex((index) => index - 1)}><ChevronLeft className="size-4" /></Button><span className="min-w-14 text-center text-xs tabular-nums">{pageIndex + 1} / {pages.length}장</span><Button size="sm" variant="outline" aria-label="다음 라벨 페이지" disabled={pageIndex === pages.length - 1} onClick={() => setPageIndex((index) => index + 1)}><ChevronRight className="size-4" /></Button></div>
         </div>
         <div className="min-h-0 flex-1 overflow-auto bg-muted/40 p-4"><div className={'outbound-rack-screen-preview' + (slotMode ? ' outbound-slot-preview' : '')}><LabelSheet labels={pages[pageIndex]} slotImages={slotImages} /></div></div>
-        <footer className="border-t border-border px-4 py-3 text-xs text-muted-foreground">{slotMode ? '한 칸은 가로 148.5mm × 세로 105mm입니다. 같은 4칸 용지를 가로로 사용합니다. 바깥 여백은 약 2mm, QR은 흰 여백을 포함해 약 92mm 정사각형입니다.' : '한 칸은 가로 105mm × 세로 148.5mm입니다. 왼쪽 ¼은 비우고 오른쪽 ¾의 중앙에 세로로 표시합니다.'} 마지막 장의 남는 칸은 인쇄하지 않습니다.{error && <p role="alert" className="mt-1 text-danger">{error}</p>}</footer>
+        <footer className="border-t border-border px-4 py-3 text-xs text-muted-foreground">{slotMode ? '한 칸은 가로 148.5mm × 세로 105mm입니다. 같은 4칸 용지를 가로로 사용합니다. 왼쪽 상단 QR · 오른쪽 위 렉자리 · 오른쪽 아래 큰 자리번호 구성입니다.' : '한 칸은 가로 105mm × 세로 148.5mm입니다. 왼쪽 ¼은 비우고 오른쪽 ¾의 중앙에 세로로 표시합니다.'} 마지막 장의 남는 칸은 인쇄하지 않습니다.{error && <p role="alert" className="mt-1 text-danger">{error}</p>}</footer>
       </section>
     </div>
     {active && createPortal(<div className={'outbound-rack-print-root' + (slotMode ? ' outbound-slot-mode' : '')} ref={printRoot} aria-hidden="true">{pages.map((page, index) => <LabelSheet key={index} labels={page} slotImages={slotImages} />)}</div>, document.body)}

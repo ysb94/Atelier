@@ -8,7 +8,7 @@ import { Input, Select, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { formatNumber } from '@/lib/utils'
 import { buildOutboundRackCodes, MAX_OUTBOUND_QR_RACKS, OUTBOUND_SLOT_COLUMNS, OUTBOUND_SLOT_LEVELS, OUTBOUND_SLOTS_PER_RACK, outboundSlotCodes, outboundSlotExcelRows } from '@/lib/warehouse/outbound-qr'
-import { OutboundRackPrintPreview, type SlotQrImage } from './OutboundRackPrintPreview'
+import { OutboundRackPrintPreview } from './OutboundRackPrintPreview'
 
 const VISUAL_LEVELS = [...OUTBOUND_SLOT_LEVELS].reverse()
 
@@ -24,7 +24,7 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
   const [focusedRack, setFocusedRack] = useState('')
   const [busy, setBusy] = useState(false)
   const [status, setStatus] = useState('')
-  const [preview, setPreview] = useState<{ labels: string[]; slotImages?: ReadonlyMap<string, SlotQrImage> } | null>(null)
+  const [preview, setPreview] = useState<{ labels: string[]; slotImages?: ReadonlyMap<string, string> } | null>(null)
   const result = useMemo(() => buildOutboundRackCodes({ mode, warehouse, row, startRack, endRack, list }), [mode, warehouse, row, startRack, endRack, list])
   const { racks } = result
   const selectedRack = racks.includes(focusedRack) ? focusedRack : racks[0] ?? ''
@@ -43,12 +43,10 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
     try {
       const QRCode = (await import('qrcode')).default
       const labels = racks.flatMap(outboundSlotCodes)
-      const slotImages = new Map<string, SlotQrImage>()
+      const slotImages = new Map<string, string>()
       for (const [index, code] of labels.entries()) {
-        const svg = await QRCode.toString(code, { type: 'svg', errorCorrectionLevel: 'M', margin: 4 })
-        const size = Number(svg.match(/viewBox="0 0 (\d+) \d+"/)?.[1])
-        if (!size) throw new Error('QR 크기를 확인할 수 없습니다: ' + code)
-        slotImages.set(code, { src: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg), quietRatio: 4 / size })
+        const svg = await QRCode.toString(code, { type: 'svg', errorCorrectionLevel: 'M', margin: 2 })
+        slotImages.set(code, 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg))
         // Let input and preparation feedback paint during long batches.
         if (index % 8 === 7) await new Promise<void>((resolve) => setTimeout(resolve, 0))
       }
@@ -123,7 +121,7 @@ export function OutboundWarehouseQrPanel({ brandName }: { brandName: string }) {
             </div>
             <p className="text-xs text-muted-foreground">인쇄 설정은 A4 세로 · 배율 100% · 여백 없음 · 머리글/바닥글 끄기로 맞춰 주세요.</p>
           </> : <>
-            <p className="rounded-lg border border-border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">직접 인쇄: A4 가로 · 2열 × 2행 · QR 약 92mm. 왼쪽에 큰 QR, 오른쪽에 렉자리와 렉박스자리를 위쪽에 맞춰 표시합니다. 총 {Math.ceil(slotCount / 4)}장입니다.</p>
+            <p className="rounded-lg border border-border bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">직접 인쇄: A4 가로 · 2열 × 2행. 왼쪽 상단에 QR, 오른쪽 위에 렉자리, 그 아래에 큰 렉박스자리를 표시합니다. 총 {Math.ceil(slotCount / 4)}장입니다.</p>
             <div className="flex flex-wrap items-center justify-between gap-2"><Badge variant="success">{formatNumber(slotCount)}개 자리 · 렉당 16개</Badge><label className="flex items-center gap-2 text-xs text-muted-foreground">미리 볼 렉<Select aria-label="미리 볼 렉" value={selectedRack} onChange={(event) => setFocusedRack(event.target.value)}>{racks.map((rack) => <option key={rack}>{rack}</option>)}</Select></label></div>
             <div className="overflow-x-auto rounded-lg border border-border">
               <table aria-label="렉 안 고정 자리 배치" className="w-full min-w-[30rem] text-center text-xs"><thead className="bg-primary text-primary-foreground"><tr><th className="px-2 py-2 font-medium">층</th>{OUTBOUND_SLOT_COLUMNS.map((column) => <th className="px-2 py-2 font-medium" key={column}>{column}칸{column === 1 ? ' · 왼쪽' : column === 4 ? ' · 오른쪽' : ''}</th>)}</tr></thead><tbody>{VISUAL_LEVELS.map((level) => <tr key={level} className="border-t border-border hover:bg-muted/20"><th className="px-2 py-3 font-medium">{OUTBOUND_SLOT_LEVELS.indexOf(level) + 1}층 · {level}</th>{OUTBOUND_SLOT_COLUMNS.map((column) => <td className="border-l border-border px-2 py-4" key={column}><span className="block font-semibold text-primary">{level}{column}</span><span className="mt-1 block whitespace-nowrap text-muted-foreground">{selectedRack}_{level}{column}</span></td>)}</tr>)}</tbody></table>
