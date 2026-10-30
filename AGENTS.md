@@ -40,7 +40,7 @@
 
 ### 고정 작업 위치
 
-- 폴더: `C:\Users\dbstj\OneDrive\바탕 화면\Masmarulez\코딩\Atelier`
+- 폴더: `C:\Users\A\Desktop\mas site code\Atelier`
 - 브랜치: `261029-end`. 사용자가 다른 브랜치를 직접 지정하기 전까지 유지한다.
 - 새 브랜치, worktree, 별도 clone·복사 폴더를 임의로 만들지 않는다. 작업·노션 카드별로
   브랜치를 나누거나 `origin/main`에서 새로 시작하지 않는다.
