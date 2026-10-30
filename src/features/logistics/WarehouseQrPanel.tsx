@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber } from '@/lib/utils'
+import { OutboundWarehouseQrPanel } from './OutboundWarehouseQrPanel'
 
 const MAX_QR_ROWS = 200
 
@@ -13,7 +14,13 @@ type QrMode = 'range' | 'list'
 
 const TARGET_COPY: Record<QrTarget, { label: string; hint: string }> = {
   box: { label: '박스창고', hint: '박스 단위 보관 자리' },
-  outbound: { label: '출고창고', hint: '피킹용 낱개 자리' },
+  outbound: { label: '출고창고', hint: '렉 라벨 인쇄 · 고정 자리 엑셀' },
+}
+
+function QrTargetSelector({ target, onChange }: { target: QrTarget; onChange: (target: QrTarget) => void }) {
+  return <div><p className="text-xs font-medium text-muted-foreground">대상</p><div className="mt-2 grid max-w-xl grid-cols-2 gap-2">
+    {(Object.keys(TARGET_COPY) as QrTarget[]).map((value) => <button key={value} type="button" aria-pressed={target === value} onClick={() => onChange(value)} className={cn('rounded-md border px-3 py-2 text-left transition-colors', target === value ? 'border-primary/40 bg-primary/5' : 'border-border bg-card hover:bg-muted/40')}><p className="text-sm font-medium">{TARGET_COPY[value].label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{TARGET_COPY[value].hint}</p></button>)}
+  </div></div>
 }
 
 function normalizeLocationCode(raw: string) {
@@ -110,39 +117,13 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
     }
   }
 
+  if (target === 'outbound') return <div className="space-y-4"><QrTargetSelector target={target} onChange={setTarget} /><OutboundWarehouseQrPanel brandName={brandName} /></div>
+
   return (
     <div className="space-y-4">
       <div className="grid gap-3 lg:grid-cols-[20rem_minmax(0,1fr)]">
         <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
-          <div>
-            <p className="text-xs font-medium text-muted-foreground">대상</p>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              {(Object.keys(TARGET_COPY) as QrTarget[]).map((value) => {
-                const selected = value === target
-                return (
-                  <button
-                    key={value}
-                    type="button"
-                    aria-pressed={selected}
-                    onClick={() => setTarget(value)}
-                    className={cn(
-                      'rounded-md border px-3 py-2 text-left transition-colors',
-                      selected
-                        ? 'border-primary/40 bg-primary/5'
-                        : 'border-border bg-card hover:bg-muted/40',
-                    )}
-                  >
-                    <p className="text-sm font-medium">
-                      {TARGET_COPY[value].label}
-                    </p>
-                    <p className="mt-0.5 text-[11px] text-muted-foreground">
-                      {TARGET_COPY[value].hint}
-                    </p>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
+          <QrTargetSelector target={target} onChange={setTarget} />
 
           <div>
             <p className="text-xs font-medium text-muted-foreground">만드는 방법</p>

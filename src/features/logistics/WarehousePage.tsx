@@ -47,9 +47,9 @@ const WAREHOUSE_VIEWS: {
   {
     value: 'qr',
     label: 'QR 생성',
-    description: '아이라벨용 자리 엑셀을 만듭니다',
+    description: '렉 라벨 인쇄와 자리 엑셀을 만듭니다',
     detail:
-      '자리번호를 자리·QR 두 열 엑셀로 내려받습니다. QR 그림은 아이라벨에서 용지에 맞춰 만듭니다.',
+      '출고창고 렉 번호는 A4 4칸 라벨로 인쇄하고, 렉 안의 A1~D4 고정 자리는 아이라벨용 엑셀로 내려받습니다.',
     icon: QrCode,
   },
 ]
