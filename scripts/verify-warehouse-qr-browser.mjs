@@ -71,13 +71,23 @@ try {
   assert.ok(await page.locator('html').evaluate((el) => el.classList.contains('printing-outbound-slots')))
   await page.emulateMedia({ media: 'print' })
   const slotGeometry = await page.locator('.outbound-rack-print-root .outbound-slot-label').first().evaluate((el) => {
-    const label = el.getBoundingClientRect(), qr = el.querySelector('img').getBoundingClientRect(), rack = el.querySelector('.outbound-slot-rack').getBoundingClientRect(), slot = el.querySelector('.outbound-slot-position').getBoundingClientRect()
-    return { width: label.width, height: label.height, qr: qr.width, qrRight: qr.right, textLeft: Math.min(rack.left, slot.left), textRight: Math.max(rack.right, slot.right), right: label.right }
+    const label = el.getBoundingClientRect(), qr = el.querySelector('img').getBoundingClientRect(), rack = el.querySelector('.outbound-slot-rack').getBoundingClientRect(), slotElement = el.querySelector('.outbound-slot-position'), slot = slotElement.getBoundingClientRect(), text = el.querySelector('.outbound-slot-text').getBoundingClientRect()
+    return { width: label.width, height: label.height, qr: qr.width, qrRight: qr.right, qrTop: qr.top, textTop: text.top, top: label.top, positionFont: parseFloat(getComputedStyle(slotElement).fontSize), textLeft: Math.min(rack.left, slot.left), textRight: Math.max(rack.right, slot.right), right: label.right }
   })
   assert.ok(Math.abs(slotGeometry.width - 148.5 * 96 / 25.4) < 1)
   assert.ok(Math.abs(slotGeometry.height - 105 * 96 / 25.4) < 1)
-  assert.ok(slotGeometry.qr >= 80 * 96 / 25.4, 'QR is at least 80mm wide including the quiet zone')
-  assert.ok(slotGeometry.textLeft >= slotGeometry.qrRight - 1 && slotGeometry.textRight <= slotGeometry.right, 'QR and text do not overlap')
+  assert.ok(slotGeometry.qr >= 90 * 96 / 25.4, 'QR is at least 90mm wide including the quiet zone')
+  assert.ok(slotGeometry.qrTop - slotGeometry.top <= 2.1 * 96 / 25.4 && Math.abs(slotGeometry.textTop - slotGeometry.qrTop) < 1, 'QR and text align at the top with a 2mm outer margin')
+  assert.ok(slotGeometry.positionFont >= 44 * 96 / 25.4, 'position text is larger than the previous layout')
+  assert.ok(slotGeometry.textLeft >= slotGeometry.qrRight - 1 && slotGeometry.textRight <= slotGeometry.right, 'QR and text do not overlap: ' + JSON.stringify(slotGeometry))
+  const overflowingSlotText = await page.locator('.outbound-rack-print-root .outbound-slot-label').evaluateAll((els) => els.flatMap((el) => {
+    const qr = el.querySelector('img').getBoundingClientRect(), label = el.getBoundingClientRect()
+    return Array.from(el.querySelectorAll('.outbound-slot-rack, .outbound-slot-position')).filter((part) => {
+      const rect = part.getBoundingClientRect()
+      return rect.left < qr.right - 1 || rect.right > label.right || rect.bottom > label.bottom
+    }).map((part) => part.textContent)
+  }))
+  assert.deepEqual(overflowingSlotText, [], 'all A1–D4 labels fit without overlap or clipping')
   const slotPdf = await page.pdf({ path: path.join(output, 'slot-labels.pdf'), preferCSSPageSize: true, printBackground: true })
   assert.equal((slotPdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length, 28, '112 slots = 28 physical A4 pages')
   await page.addScriptTag({ content: await fs.readFile(path.join(root, 'node_modules/jsqr/dist/jsQR.js'), 'utf8') })

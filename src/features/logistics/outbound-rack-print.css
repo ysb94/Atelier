@@ -11,11 +11,11 @@
 .outbound-rack-screen-preview .outbound-rack-label-content{padding:2.38cqw 2.86cqw}
 .outbound-slot-preview{width:min(100%,700px)}
 .outbound-slot-sheet{container-type:inline-size;aspect-ratio:297/210}
-.outbound-slot-label{grid-template-columns:60% minmax(0,1fr);align-items:center;padding:1.684cqw}
+.outbound-slot-label{grid-template-columns:64% minmax(0,1fr);align-items:start;padding:.6734cqw}
 .outbound-slot-qr{display:block;width:100%;aspect-ratio:1;object-fit:contain}
-.outbound-slot-text{container-type:size;display:flex;flex-direction:column;align-items:center;justify-content:space-evenly;width:100%;aspect-ratio:2/3;min-width:0;line-height:1;letter-spacing:-.04em}
-.outbound-slot-rack{font-size:min(16cqh,calc(180cqw / var(--slot-rack-length)));font-weight:700;white-space:nowrap}
-.outbound-slot-position{font-size:75cqw;font-weight:900;white-space:nowrap}
+.outbound-slot-text{container-type:size;display:flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:4%;width:100%;aspect-ratio:2/3;min-width:0;line-height:1;letter-spacing:-.04em}
+.outbound-slot-rack{font-size:min(20cqh,calc(180cqw / var(--slot-rack-length)));font-weight:700;white-space:nowrap}
+.outbound-slot-position{font-size:85cqw;font-weight:900;letter-spacing:-.08em;white-space:nowrap}
 @media print{
   html.printing-outbound-racks,html.printing-outbound-racks body{margin:0!important;padding:0!important;width:210mm!important;background:#fff!important}
   html.printing-outbound-racks body>*:not(.outbound-rack-print-root){display:none!important}
