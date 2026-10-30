@@ -31,7 +31,7 @@ function LabelSheet({ labels }: { labels: (string | null)[] }) {
       <div className="outbound-rack-label-content">
         <strong className="outbound-rack-label-code" aria-label={label} style={{ '--rack-part-length': Math.max(...parts.map((part) => part.length)) } as CSSProperties}>
           {parts.map((part, partIndex) => <span className="outbound-rack-label-part" key={partIndex}>
-            {partIndex > 0 && <span className="outbound-rack-label-separator" aria-hidden="true">|</span>}
+            {partIndex > 0 && <span className="outbound-rack-label-separator" aria-hidden="true">/</span>}
             <span className="outbound-rack-label-number">{part}</span>
           </span>)}
         </strong>

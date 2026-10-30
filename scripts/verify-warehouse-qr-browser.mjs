@@ -66,7 +66,7 @@ try {
   await dialog.waitFor()
   assert.equal(await dialog.getByRole('img').count(), 0)
   assert.deepEqual(await dialog.locator('.outbound-rack-label-code').evaluateAll((els) => els.map((el) => el.getAttribute('aria-label'))), ['3-1-1', '3-1-2', '3-1-3', '3-1-4'])
-  assert.deepEqual(await dialog.locator('.outbound-rack-label').allTextContents(), ['3|1|1', '3|1|2', '3|1|3', '3|1|4'])
+  assert.deepEqual(await dialog.locator('.outbound-rack-label').allTextContents(), ['3/1/1', '3/1/2', '3/1/3', '3/1/4'])
   await page.screenshot({ path: path.join(output, 'rack-preview.png'), fullPage: true })
   await page.getByRole('button', { name: '다음 라벨 페이지' }).click()
   assert.equal(await dialog.getByRole('img').count(), 0)
@@ -85,7 +85,7 @@ try {
   assert.equal(await page.locator('#root').isVisible(), false)
   const pdf = await page.pdf({ path: path.join(output, 'rack-labels.pdf'), preferCSSPageSize: true, printBackground: true })
   assert.equal((pdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length, 2, '7 racks = 2 physical A4 pages')
-  assert.deepEqual(await page.locator('.outbound-rack-print-root .outbound-rack-label').allTextContents(), ['3|1|1', '3|1|2', '3|1|3', '3|1|4', '3|1|5', '3|1|6', '3|1|7', ''])
+  assert.deepEqual(await page.locator('.outbound-rack-print-root .outbound-rack-label').allTextContents(), ['3/1/1', '3/1/2', '3/1/3', '3/1/4', '3/1/5', '3/1/6', '3/1/7', ''])
   assert.equal(await page.locator('.outbound-rack-print-root img').count(), 0)
   assert.ok(await page.locator('.outbound-rack-print-root .outbound-rack-label-number').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize) >= 90))
   const stack = await page.locator('.outbound-rack-print-root .outbound-rack-label').first().evaluate((el) => {
@@ -97,7 +97,7 @@ try {
     return { center: code.x + code.width / 2, targetCenter: label.x + label.width * .625, top: code.top, bottom: code.bottom, parts }
   })
   assert.ok(Math.abs(stack.center - stack.targetCenter) < 1, 'center in the right three quarters')
-  assert.deepEqual(stack.parts.map((part) => part.text), ['3', '|', '1', '|', '1'])
+  assert.deepEqual(stack.parts.map((part) => part.text), ['3', '/', '1', '/', '1'])
   assert.ok(stack.parts.every((part, index) => Math.abs(part.x + part.width / 2 - stack.center) < 1 && part.y >= stack.top - 1 && part.y + part.height <= stack.bottom + 1 && (!index || part.y >= stack.parts[index - 1].y + stack.parts[index - 1].height - 1)))
   await page.emulateMedia({ media: 'screen' })
   await page.evaluate(() => window.dispatchEvent(new Event('afterprint')))

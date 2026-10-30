@@ -5,7 +5,7 @@
 .outbound-rack-label-code{container-type:size;display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;font-weight:800;line-height:1;letter-spacing:-.04em}
 .outbound-rack-label-part{display:contents}
 .outbound-rack-label-number{display:block;flex:none;font-size:min(28cqh,calc(165cqw / var(--rack-part-length)));line-height:1;white-space:nowrap}
-.outbound-rack-label-separator{display:block;flex:none;font-size:8cqh;line-height:1;font-weight:400}
+.outbound-rack-label-separator{display:block;flex:none;font-size:8cqh;line-height:1;font-weight:900}
 .outbound-rack-screen-preview{width:min(100%,530px);margin:0 auto;container-type:inline-size;box-shadow:0 1px 8px #0002}
 .outbound-rack-screen-preview .outbound-rack-label{border:1px dashed #ccc}
 .outbound-rack-screen-preview .outbound-rack-label-content{padding:2.38cqw 2.86cqw}
