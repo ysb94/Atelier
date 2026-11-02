@@ -29,15 +29,11 @@ export function useMyHomeNotifications({ coordinator = false } = {}) {
   const leave = useQuery({ queryKey: ['leave-usage-notices', profile?.id], queryFn: () => listMyLeaveUsageNotices(profile!.id), enabled, refetchInterval: poll })
   const late = useQuery({ queryKey: ['late-statement-notices', profile?.id], queryFn: listMyLateStatementNotices, enabled, refetchInterval: poll })
   const work = useQuery({ queryKey: ['my-home-work-notices', profile?.id], queryFn: workNotices, enabled, refetchInterval: poll, retry: false })
-  const hostReads=useQuery({queryKey:['my-home-host-reads',profile?.id],enabled,refetchInterval:poll,retry:false,queryFn:async()=>{
-    const {data,error}=await getSupabase().from('my_home_notification_reads').select('event_key').eq('reader_id',profile!.id).like('event_key','host-action:%')
-    if(error){console.warn('[my-home-notifications] 호스트 확인 기록 조회 실패',error);throw error}return data as {event_key:string}[]
-  }})
   const cache=useQueryClient()
   useEffect(()=>{
     if(!coordinator||!enabled||!profile?.id)return
     const db=getSupabase()
-    const refresh=()=>{void cache.invalidateQueries({queryKey:['my-home-work-notices',profile.id]});void cache.invalidateQueries({queryKey:['my-home-host-reads',profile.id]})}
+    const refresh=()=>{void cache.invalidateQueries({queryKey:['my-home-work-notices',profile.id]})}
     const channel=db.channel(`my-home-work:${profile.id}`)
       .on('postgres_changes',{event:'*',schema:'public',table:'my_home_request_events',filter:`employee_id=eq.${profile.id}`},refresh)
       .on('postgres_changes',{event:'*',schema:'public',table:'my_home_notification_reads',filter:`reader_id=eq.${profile.id}`},refresh)
@@ -50,8 +46,9 @@ export function useMyHomeNotifications({ coordinator = false } = {}) {
       const url = new URL(item.href, 'https://atelier.local')
       const round = url.searchParams.get('round') ?? item.id
       const series=meetings.series?.find(row=>row.id===url.searchParams.get('meeting'))
-      const pending = !item.meeting?.finalized && (item.meeting?.role==='host' ? !(hostReads.data??[]).some(row=>row.event_key===`host-action:${item.id}`) : item.meeting?.status === 'pending')
-      return { ...item,current:meetings.series===undefined||Boolean(series&&series.status!=='done'), target: { source: 'meeting' as const, entityId: round, eventVersion: item.createdAt, tab: 'meetings' as const, href: item.href }, action: pending ? { key: `meeting:${round}:${item.meeting?.role}`, label: item.meeting?.role === 'host' ? '호스트 확인 필요' : '참석 응답 필요' } : null }
+      // 호스트 결과는 읽음으로 끝나는 안내다. 멤버의 실제 참석 응답만 업무로 남긴다.
+      const pending = !item.meeting?.finalized && item.meeting?.role !== 'host' && item.meeting?.status === 'pending'
+      return { ...item,current:meetings.series===undefined||Boolean(series&&series.status!=='done'), target: { source: 'meeting' as const, entityId: round, eventVersion: item.createdAt, tab: 'meetings' as const, href: item.href }, action: pending ? { key: `meeting:${round}:${item.meeting?.role}`, label: '참석 응답 필요' } : null }
     })
     const records = leave.data ?? emptyList<LeaveUsageNotice>()
     const leaveItems = leaveNoticeItems(records).map((item, index) => ({ ...item,
@@ -78,8 +75,8 @@ export function useMyHomeNotifications({ coordinator = false } = {}) {
       }
     })
     return [...meetingItems,...leaveItems,...lateItems,...workItems].sort((a,b) => b.createdAt.localeCompare(a.createdAt))
-  }, [enabled, meetings.items, meetings.series, leave.data, late.data, work.data,hostReads.data])
-  return { items, work: work.data ?? emptyList<WorkNotice>(), error: enabled ? meetings.error ?? leave.error ?? late.error ?? work.error ?? hostReads.error : null }
+  }, [enabled, meetings.items, meetings.series, leave.data, late.data, work.data])
+  return { items, work: work.data ?? emptyList<WorkNotice>(), error: enabled ? meetings.error ?? leave.error ?? late.error ?? work.error : null }
 }
 
 export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout', entityId: string|undefined, version: string|undefined, displayed: boolean) {
@@ -126,14 +123,4 @@ export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout'
     return () => { cancelled=true }
   }, [active,cache,displayed,entityId,preview?.active,profile?.id,retry,source,version,meetingEvents.data])
   return { error, retry: () => {completed.current=null;setRetry(value=>value+1)} }
-}
-
-export async function confirmHostNotice(roundId:string,version:number,cache:ReturnType<typeof useQueryClient>,profileId:string) {
-  const items=cache.getQueryData<InboxNotification[]>(['meeting-invitations',profileId])??[]
-  for(const item of items){
-    if(item.meeting?.role!=='host'||item.meeting.roundId!==roundId)continue
-    const {error}=await getSupabase().rpc('confirm_my_home_host_notice',{p_id:item.id,p_sent_at:item.createdAt,p_schedule_version:version})
-    if(error){console.warn('[my-home-notifications] 호스트 확인 저장 실패',error);throw new Error(error.message)}
-  }
-  await Promise.all(['meeting-invitations','my-home-host-reads'].map(key=>cache.invalidateQueries({queryKey:[key,profileId]})))
 }
