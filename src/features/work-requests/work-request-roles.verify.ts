@@ -4,11 +4,11 @@
  */
 import {
   departmentDisplayName,
-  isManagerPosition,
   isMemberOfOwnerDepartment,
   isSameDepartment,
   resolveWorkRequestViewRole,
 } from './work-request-form-config'
+import { RELEASE_COMPANY_ID, RELEASE_EXCEPTION_IDS } from '../../lib/company/release-access'
 import {
   needsLeadCompletionReview,
   nextCompletionStatus,
@@ -33,11 +33,21 @@ assert(!isSameDepartment('물류', 'VisualTeam'), '물류와 VisualTeam은 다�
 assert(departmentDisplayName('디자인팀') === 'VisualTeam', '디자인 표시명은 VisualTeam')
 assert(departmentDisplayName('물류팀') === '물류', '물류 표시명은 물류')
 
-assert(!isManagerPosition('사원'), '사원은 관리자가 아님')
-assert(!isManagerPosition('대리'), '대리는 관리자가 아님')
-assert(!isManagerPosition('과장'), '과장은 관리자가 아님')
-assert(isManagerPosition('팀장'), '팀장은 관리자')
-assert(isManagerPosition('이사'), '이사는 관리자')
+const employee = { status: 'active', companyId: RELEASE_COMPANY_ID, permissionGrants: [] }
+for (const position of ['사원', '과장', '팀장', '이사']) {
+  assert(resolveWorkRequestViewRole('design', 'VisualTeam', position, [], employee) === 'employee', `${position}도 지정 없으면 일반 직원`)
+}
+for (const id of RELEASE_EXCEPTION_IDS) {
+  for (const owner of ['planning', 'design', 'md', 'logistics'] as const) {
+    assert(resolveWorkRequestViewRole(owner, '다른 부서', null, [], { ...employee, id }) === 'manager', `${id}: 모든 작업 요청 관리`)
+    assert(resolveWorkRequestViewRole(owner, '다른 부서', null, [], { ...employee, id, status: 'pending' }) !== 'manager', '승인 대기 예외 계정은 관리자 아님')
+    assert(resolveWorkRequestViewRole(owner, '다른 부서', null, [], { ...employee, id, companyId: 'other-company' }) !== 'manager', '다른 회사 예외 계정은 관리자 아님')
+  }
+}
+const designated = { ...employee, permissionGrants: [{ permission: 'work.manage' as const, scopeKind: 'department' as const, scopeId: '7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1', scopeName: '이름이 바뀐 부서' }] }
+assert(resolveWorkRequestViewRole('design', '다른 부서', '사원', [], designated) === 'manager', '직책·부서명 대신 지정한 Visual UUID 기준')
+assert(resolveWorkRequestViewRole('md', 'MD', '이사', [], designated) === 'employee', 'Visual 지정자는 MD 관리자 아님')
+assert(resolveWorkRequestViewRole('design', 'VisualTeam', '팀장', [], { ...designated, permissionGrants: [] }) === 'employee', '지정 해제 시 직책으로 관리 권한이 남지 않음')
 
 assert(
   resolveWorkRequestViewRole('design', '물류', '사원') === 'requester',

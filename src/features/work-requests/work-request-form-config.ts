@@ -1,4 +1,5 @@
 import { hasPermission, type PermissionProfile } from '../../lib/company/permissions'
+import { RELEASE_COMPANY_ID, RELEASE_EXCEPTION_IDS } from '../../lib/company/release-access'
 import type { FieldOwner } from '@/lib/types'
 
 export const WORK_REQUEST_OWNERS = [
@@ -66,7 +67,12 @@ export const WORK_REQUEST_CONFIG: Record<
   },
 }
 
-export const WORK_REQUEST_MANAGER_POSITIONS = ['팀장', '이사'] as const
+export const WORK_REQUEST_DEPARTMENT_IDS: Record<WorkRequestOwner, string> = {
+  planning: 'ced99f89-ea80-4eeb-8f03-272bf72f5db1',
+  design: '7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1',
+  md: '919b2c44-afb6-4d7e-a5b8-b7203df9cef9',
+  logistics: 'c5d4cfca-97ce-4ca7-b30a-6beed842cf1e',
+}
 
 export function isWorkRequestOwner(value: string): value is WorkRequestOwner {
   return (WORK_REQUEST_OWNERS as readonly string[]).includes(value)
@@ -121,13 +127,6 @@ export function departmentDisplayName(value: string) {
   return owner ? WORK_REQUEST_CONFIG[owner].teamName : value.trim()
 }
 
-export function isManagerPosition(position?: string | null) {
-  return Boolean(
-    position &&
-      (WORK_REQUEST_MANAGER_POSITIONS as readonly string[]).includes(position),
-  )
-}
-
 export type WorkRequestViewRole = 'manager' | 'employee' | 'requester'
 
 export function resolveWorkRequestViewRole(
@@ -135,12 +134,15 @@ export function resolveWorkRequestViewRole(
   departmentName?: string | null,
   _position?: string | null,
   capabilities?: string[] | null,
-  profile?: PermissionProfile,
+  profile?: PermissionProfile & { id?: string | null },
 ): WorkRequestViewRole {
   const inDepartment = isMemberOfOwnerDepartment(departmentName, owner)
   const hasOwnerCapability = Boolean(capabilities?.includes(owner))
-  const assigned = hasPermission(profile, 'work.manage', 'company', profile?.companyId) || profile?.permissionGrants?.some(grant => grant.permission === 'work.manage' && grant.scopeKind === 'department' && isMemberOfOwnerDepartment(grant.scopeName, owner))
-  if (profile?.status === 'active' && assigned) return 'manager'
+  const active = profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID
+  const operator = active && RELEASE_EXCEPTION_IDS.some(id => id === profile?.id)
+  const assigned = hasPermission(profile, 'work.manage', 'company', profile?.companyId)
+    || hasPermission(profile, 'work.manage', 'department', WORK_REQUEST_DEPARTMENT_IDS[owner])
+  if (active && (operator || assigned)) return 'manager'
   if (!inDepartment && !hasOwnerCapability) return 'requester'
   return 'employee'
 }

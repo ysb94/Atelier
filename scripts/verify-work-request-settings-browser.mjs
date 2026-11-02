@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process'
 import path from 'node:path'
 
 const original = (await readFile('scripts/verify-work-requests-browser.mjs', 'utf8')).replace(/\r\n/g, '\n')
+const explicitManagers = process.argv.includes('--explicit-managers')
 let setup = original.slice(0, original.indexOf(' const managerPage='))
 setup = setup.replace("from './work-request-test-db.mjs'", "from '../../scripts/work-request-test-db.mjs'")
   .replaceAll('5196', '5197')
@@ -68,6 +69,7 @@ const checks = String.raw`
  assert.deepEqual(errors,[])
  console.log('PASS: 관리 설정 저장·새로고침·다중 폼 입력·공통 첨부·실제 RPC 자동/수동 배정·담당자 공유 조회·일반 직원 설정 차단·모바일 (격리된 로컬 PostgreSQL)')
 ` + original.slice(original.indexOf('}catch(error){console.error'))
+if (explicitManagers) setup = setup.replace("await db.exec('reset role');for", "await db.exec(await fs.readFile('supabase/migrations/20261102043240_work_request_explicit_managers.sql','utf8'));await db.query(\"update public.profiles set position='팀장',is_admin=true where id=$1\",[ids.design]);await db.exec('reset role');for")
 await mkdir('node_modules/.tmp',{recursive:true})
 await mkdir('.tmp',{recursive:true})
 // Match Supabase's multiplexed realtime connection; separate SSEs exhaust HTTP/1.1's six sockets.
@@ -80,7 +82,17 @@ const fixture=(await readFile('dev-tools/ai-workflow/browser-fixture/work-live-c
   .replace('channels.get(channel)?.close();channels.delete(channel)', 'channels.delete(channel);if(channels.size===0){sharedEvents?.close();sharedEvents=undefined}')
 await writeFile(clientFixture,fixture)
 const generated=path.resolve('node_modules/.tmp/work-request-settings-browser.mjs')
-await writeFile(generated,setup+checks.replace(/\.goto\((origin\+[^;\n]+)\)/g,".goto($1,{waitUntil:'domcontentloaded'})"))
+const roleChecks = String.raw`
+ await page.goto(origin+'/design/work-request-management?actor=design')
+ await page.getByText('설정 변경은 기존 Visual 업무 관리 담당자만 할 수 있습니다.',{exact:true}).waitFor()
+ assert.equal(await page.getByRole('button',{name:'추가',exact:true}).isEnabled(),false,'팀장·일반 관리자라도 지정 없으면 변경 불가')
+ await page.goto(origin+'/design/work-request-management?actor=ceo')
+ await page.getByRole('button',{name:'추가',exact:true}).waitFor()
+ assert.equal(await page.getByRole('button',{name:'추가',exact:true}).isEnabled(),true,'예외 운영 계정은 설정 관리 가능')
+ console.log('PASS: 직책 자동 관리 차단·예외 운영 계정 관리 화면')
+`
+const completeChecks = explicitManagers ? checks.replace(' assert.deepEqual(errors,[])', roleChecks+' assert.deepEqual(errors,[])') : checks
+await writeFile(generated,setup+completeChecks.replace(/\.goto\((origin\+[^;\n]+)\)/g,".goto($1,{waitUntil:'domcontentloaded'})"))
 try {
   const code=await new Promise((resolve,reject)=>{const child=spawn(process.execPath,[generated],{stdio:'inherit'});child.on('error',reject);child.on('exit',resolve)})
   if(code)process.exitCode=code

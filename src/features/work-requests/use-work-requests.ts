@@ -6,7 +6,7 @@ import { listOrgChartMembers } from '@/lib/supabase/profiles'
 import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import { comparison, deleteWorkRequest, listWorkRequests, saveWorkRequestChange, setActiveWorkRequest } from '@/lib/supabase/work-requests'
 import { emptyList } from '@/lib/utils'
-import type { WorkRequestOwner } from './work-request-form-config'
+import { WORK_REQUEST_DEPARTMENT_IDS, type WorkRequestOwner } from './work-request-form-config'
 import type { LocalTeamMember, WorkRequestRecord } from './work-request-types'
 import type { WorkTimeLog } from './work-request-schedule'
 
@@ -67,6 +67,6 @@ export function useWorkRequests(owner: WorkRequestOwner) {
     enqueue(async()=>{const snapshot=await listWorkRequests(actorId,owner);const current:Record<string,string>={};for(const timer of snapshot.timers)if(timer.mountedAt)current[timer.profileId]=timer.requestId;const next=typeof update==='function'?update(current):update;await setActiveWorkRequest(next[actorId]??null)})
   },[enqueue,actorId,owner])
   const members=directory.data??emptyList<NonNullable<typeof directory.data>[number]>()
-  const teamMembers:LocalTeamMember[]=members.filter(member=>member.departmentId===({planning:'ced99f89-ea80-4eeb-8f03-272bf72f5db1',design:'7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1',md:'919b2c44-afb6-4d7e-a5b8-b7203df9cef9',logistics:'c5d4cfca-97ce-4ca7-b30a-6beed842cf1e'}[owner])).map(member=>({id:member.id,name:member.displayName||'직원',position:member.position??'',isSelf:member.id===actorId}))
+  const teamMembers:LocalTeamMember[]=members.filter(member=>member.departmentId===WORK_REQUEST_DEPARTMENT_IDS[owner]).map(member=>({id:member.id,name:member.displayName||'직원',position:member.position??'',isSelf:member.id===actorId}))
   return {requests:active?(saving?requests:query.data?.requests??requests):emptyList<WorkRequestRecord>(),setRequests,currentWorkByMember,workTimeByKey,setCurrentWorkByMember,setWorkTimeByKey,teamMembers,canManage:Boolean(access.access?.manageOwners.includes(owner)),managerAvailable:query.data?.managerAvailable??false,loading:query.isPending||access.isPending,loadError:query.error?.message??directory.error?.message??access.error?.message??null,error:error??query.error?.message??directory.error?.message??access.error?.message??null,saving,waitForSaves:()=>queue.current.then(()=>lastSaveError.current===null),retry:()=>{setError(null);return refresh()}}
 }
