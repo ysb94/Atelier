@@ -5,7 +5,7 @@ export async function verifyMeetingManualConfirmation(db,{host,member,outsider,a
  const value=async(sql,args=[])=>Object.values((await db.query(sql,args)).rows[0])[0]
  const denied=async(sql,args,code)=>assert.rejects(()=>db.query(sql,args),error=>error.code===code)
  await db.exec('reset role')
- await db.exec(await readFile('supabase/migrations/20261102072550_meeting_manual_confirmation.sql','utf8'))
+ await db.exec(await readFile('supabase/migrations/20261102074305_meeting_manual_confirmation.sql','utf8'))
  assert.equal(await value("select has_function_privilege('anon','public.manually_confirm_meeting_round(uuid,bigint,integer,uuid[])','execute')"),false,'익명 실행 금지')
  assert.equal(await value("select prosecdef from pg_proc where oid='public.manually_confirm_meeting_round(uuid,bigint,integer,uuid[])'::regprocedure"),false,'공개 RPC는 invoker')
  const id='35000000-0000-4000-8000-000000000001',rid='45000000-0000-4000-8000-000000000001'
