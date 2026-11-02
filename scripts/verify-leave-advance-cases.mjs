@@ -13,6 +13,8 @@ export async function verifyLeaveAdvances({db,actor,value,ops,company,foreign,de
  const before=await hash()
  await db.exec((await readFile(migration,'utf8')).replaceAll("(now() at time zone 'Asia/Seoul')::date","current_setting('test.today')::date"))
  assert.equal(await hash(),before,'마이그레이션 자체가 기존 원본·권한·배분을 바꾸지 않음')
+ const verifyLoadGuard=process.argv.includes('--load-guard')
+   ? await (await import('./verify-leave-load-guard-cases.mjs')).prepareLeaveLoadGuard({db,value,company}) : null
  let serial=10
  const today=async date=>{await db.exec('reset role');await db.query("select set_config('test.today',$1,false)",[date])}
  async function init(amount=0,hire='2024-11-03') {
@@ -126,5 +128,6 @@ export async function verifyLeaveAdvances({db,actor,value,ops,company,foreign,de
  await assert.rejects(()=>db.query('select public.employee_leave_advances(true)'),/권한/)
  for(const table of ['leave_advance_authorizations','leave_advance_transfers','leave_advance_limits','leave_advance_events']) await assert.rejects(()=>db.query(`select * from app.${table}`),/permission denied/)
  await db.exec('reset role;set role anon');await assert.rejects(()=>db.query('select public.employee_leave_advances(false)'),/permission denied/)
+ if (verifyLoadGuard) await verifyLoadGuard()
  console.log('leave-advance: 기존 원본/ACL/RLS 보존·별도 승인·분할·한도·본인/타사 차단·월 발생·기념일 정산·정산 후 취소·멱등·엑셀 음수 분류·퇴사 보류 통과')
 }

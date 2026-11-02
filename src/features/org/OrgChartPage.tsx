@@ -19,6 +19,7 @@ import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { useEmployeeRoster } from '@/features/operations-support/use-employee-roster'
 import {
   canEditOrgAssignment,
   OPERATIONS_SUPPORT_DEPARTMENT,
@@ -27,7 +28,6 @@ import { useAuth } from '@/lib/supabase/auth'
 import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import {
   emptyRoster,
-  listEmployeeRosters,
   listRosterColumns,
   listRosterHeaderSettings,
   ROSTER_BASE_HEADERS,
@@ -731,12 +731,8 @@ function MemberAssignmentTable({
   const [sort, setSort] = useState<{ key: AssignmentSortKey; direction: 'asc' | 'desc' } | null>(null)
   const [headersOpen, setHeadersOpen] = useState(false)
   const active = useWorkspaceTabActivity()
-  const rosterQuery = useQuery({
-    queryKey: ['employee-roster'],
-    queryFn: listEmployeeRosters,
-    enabled: canChange,
-    refetchInterval: canChange && active ? 30_000 : false,
-  })
+  const rosterSnapshot = useEmployeeRoster(canChange)
+  const rosterQuery = { ...rosterSnapshot, data: rosterSnapshot.data?.rosters }
   const loginEmailsQuery = useQuery({
     queryKey: ['employee-login-emails', profile?.id],
     queryFn: listEmployeeLoginEmails,
@@ -829,7 +825,7 @@ function MemberAssignmentTable({
     onSuccess: async (_result, input) => {
       setError(null)
       await queryClient.invalidateQueries({ queryKey: ['employee-roster'] })
-      if (input.field === 'remainingAnnualLeave') await queryClient.invalidateQueries({ queryKey: ['my-attendance-basis'] })
+      if (input.field === 'remainingAnnualLeave') await Promise.all(['my-attendance-basis', 'my-extra-leave', 'employee-extra-leave', 'employee-leave-advances', 'leave-notice-management'].map(key => queryClient.invalidateQueries({ queryKey: [key] })))
     },
     onError: (err) => {
       console.warn('[org-chart] 근로자 명부 저장 실패', err)

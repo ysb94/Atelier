@@ -16,6 +16,10 @@ try {
     create table public.company_leave_requests(id uuid primary key,company_id uuid,employee_id uuid,kind text,from_date date,to_date date,start_time time,end_time time,status text,created_at timestamptz);
     insert into public.profiles values('10000000-0000-4000-8000-000000000001','dev@atelier.local','e0000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','active');`)
   await db.exec(await readFile('supabase/migrations/20261026103425_attendance_previous_checkout.sql','utf8'))
+  const lockGuard = await readFile('supabase/migrations/20261102101948_attendance_lock_contention_guard.sql','utf8')
+  const confirmation = lockGuard.match(/create or replace function app\.confirm_previous_clock_out\([\s\S]*?\$\$;/i)
+  assert.ok(confirmation, '실제 직전 퇴근 잠금 보완 함수 사용')
+  await db.exec(confirmation[0])
   const result = await db.exec(await readFile('supabase/tests/attendance_previous_checkout.sql','utf8'))
   assert.equal(result.at(-1).rows[0].verification,'attendance_previous_checkout_db_tests_passed')
   assert.equal((await db.query('select count(*) n from public.attendance_clock_ins')).rows[0].n,0,'시험 후 출퇴근 행이 남지 않음')

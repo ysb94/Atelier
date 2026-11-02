@@ -50,6 +50,12 @@ try {
   await db.exec(await readFile('supabase/migrations/20261026103425_attendance_previous_checkout.sql','utf8'))
   const original=await value('select md5(jsonb_agg(p order by id)::text) from profiles p')
   await db.exec(await readFile('supabase/migrations/20261029130013_attendance_presence_confirmation.sql','utf8'))
+  const lockGuard = await readFile('supabase/migrations/20261102101948_attendance_lock_contention_guard.sql','utf8')
+  for (const name of ['advance_attendance_presence', 'my_attendance_presence', 'clock_out_today', 'confirm_previous_clock_out']) {
+    const definition = lockGuard.match(new RegExp(`create or replace function app\\.${name}\\([\\s\\S]*?\\$\\$;`, 'i'))
+    assert.ok(definition, `실제 잠금 보완 함수 ${name}`)
+    await db.exec(definition[0])
+  }
   assert.equal(await value('select md5(jsonb_agg(p order by id)::text) from profiles p'),original)
   assert.equal(Number(await value("select count(*) from cron.job where jobname='atelier-attendance-presence' and schedule='* * * * *'")),1)
 

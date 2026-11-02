@@ -1,36 +1,35 @@
 import { useMemo, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useIsFetching, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { Input, Select } from '@/components/ui/input'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { canEditOrgAssignment } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
 import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
-import { listEmployeeRosters, saveEmployeeRosterField } from '@/lib/supabase/employee-roster'
+import { saveEmployeeRosterField } from '@/lib/supabase/employee-roster'
 import { memberLabel, OpsPanelFrame, OpsStat } from './OpsStat'
 import { useOpsDirectory } from './ops-directory'
 import { HireDateScrollField } from '@/features/org/HireDateScrollField'
 import { koreaDateKey } from '@/features/settings/my-attendance'
-import { listExtraLeave, saveExtraLeave, type ExtraLeave, type SaveExtraLeave, type LeaveEvent } from '@/lib/supabase/employee-extra-leave'
+import { saveExtraLeave, type ExtraLeave, type SaveExtraLeave, type LeaveEvent } from '@/lib/supabase/employee-extra-leave'
 import { LeaveAdvancePanel } from './LeaveAdvancePanel'
+import { useEmployeeRoster } from './use-employee-roster'
 
 export function LeaveBalancePanel() {
   useRenderWatch('LeaveBalancePanel')
   const { profile } = useAuth()
   const { access, isPending: accessPending } = useBasicWorkAccess()
   const canManage = canEditOrgAssignment(profile) || access?.domains.includes('operations') === true
-  const active = useWorkspaceTabActivity()
+  const client = useQueryClient()
+  const advanceFetching = useIsFetching({ queryKey: ['employee-leave-advances', profile?.id, true] })
   const directory = useOpsDirectory()
   const [departmentId, setDepartmentId] = useState('all')
   const [search, setSearch] = useState('')
-  // Share the roster query so changes in either management screen update both.
-  const roster = useQuery({ queryKey: ['employee-roster'], queryFn: listEmployeeRosters,
-    enabled: canManage, refetchInterval: canManage && active ? 30_000 : false })
-  const extras = useQuery({ queryKey: ['employee-extra-leave', profile?.id], queryFn: listExtraLeave,
-    enabled: canManage, refetchInterval: canManage && active ? 30_000 : false })
+  const snapshot = useEmployeeRoster(canManage)
+  const roster = { ...snapshot, data: snapshot.data?.rosters }
+  const extras = { ...snapshot, data: snapshot.data?.extraLeave }
   const rows = useMemo(() => {
     const balances = new Map(roster.data?.map(row => [row.profileId, row]))
     return directory.members.filter(member => (departmentId === 'all' || member.departmentId === departmentId)
@@ -51,14 +50,14 @@ export function LeaveBalancePanel() {
   return <OpsPanelFrame>
     <p className="text-sm text-muted-foreground">조직도 직원 배치와 같은 현재 연차 값입니다. 입사일 기준 연차 기간에 따라 발생일수가 자동 갱신됩니다. 남은 연차를 수정해 저장하면 조직도에도 반영됩니다.</p>
     <p className="text-xs text-muted-foreground">{extras.data?.fefoReady ? '기본·추가 연차 중 기한이 빠른 순서로 사용합니다. 부여 취소로 부족해진 일수도 총 잔여에 반영되며, 만료와 재계산 기록은 이력에 남습니다.' : '기본·추가 연차 통합 기한순 차감·만료 이력·부여 취소 재계산은 서버 적용 승인 대기 중입니다. 현재는 기존 추가 연차 우선 차감 방식이 유지됩니다.'}</p>
-    {extras.isError ? <p role="alert" className="text-sm text-danger">추가 연차 조회에 실패했습니다. 다시 조회해 주세요.</p> : extras.data?.ready === false ? <p className="text-sm text-warning">추가 연차 서버 연결 대기 중입니다. 기존 연차 값은 유지됩니다.</p> : null}
+    {!extras.isError && extras.data?.ready === false ? <p className="text-sm text-warning">추가 연차 서버 연결 대기 중입니다. 기존 연차 값은 유지됩니다.</p> : null}
     <FilterBar>
       <Input aria-label="연차 직원 검색" placeholder="직원 이름 검색" value={search} onChange={event => setSearch(event.target.value)} className="sm:w-52"/>
       <Select aria-label="연차 부서" value={departmentId} onChange={event => setDepartmentId(event.target.value)} className="sm:w-44">
         <option value="all">전체 부서</option>
         {directory.departments.map(dept => <option key={dept.id} value={dept.id}>{dept.name}</option>)}
       </Select>
-      <Button variant="outline" disabled={roster.isFetching} onClick={() => { directory.refetch(); void roster.refetch(); void extras.refetch() }}>새로고침</Button>
+      <Button variant="outline" disabled={roster.isFetching || advanceFetching > 0} onClick={() => { directory.refetch(); void snapshot.refetch(); void client.invalidateQueries({ queryKey: ['employee-leave-advances', profile?.id, true] }) }}>새로고침</Button>
     </FilterBar>
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
       <OpsStat label="대상 직원" value={ready ? `${rows.length}명` : '—'} detail={ready ? `잔여 등록 ${totals.registered}명` : undefined}/>
@@ -106,10 +105,10 @@ function AdditionalLeaveInputs({ name, employeeId, entries, events, available, r
   function clearInput() { setEditing(null); setNewId(crypto.randomUUID()); setDays(''); setExpires(koreaDateKey()); setNote('') }
   const mutation = useMutation({ mutationFn: saveExtraLeave,
     onSuccess: async (_data, input) => {
-      await Promise.all(['employee-extra-leave', 'employee-roster', 'my-attendance-basis', 'leave-notice-management'].map(key => client.invalidateQueries({ queryKey: [key] })))
+      await Promise.all(['employee-extra-leave', 'employee-roster', 'employee-leave-advances', 'my-attendance-basis', 'my-extra-leave', 'leave-notice-management'].map(key => client.invalidateQueries({ queryKey: [key] })))
       clearInput(); setDeleting(null); setCancelReason(''); setMessage(input.remove ? '부여 취소 및 사용 내역 재계산이 완료되었습니다.' : '저장되었습니다.')
     },
-    onError: () => { void client.invalidateQueries({ queryKey: ['employee-extra-leave'] }) },
+    onError: () => { void client.invalidateQueries({ queryKey: ['employee-roster'] }) },
   })
   const dateLabel = (date: string) => date.slice(2).replaceAll('-', '.')
   return <div className="space-y-2">
@@ -184,7 +183,7 @@ function RemainingLeaveEditor({ profileId, name, value }: { profileId: string; n
   const mutation = useMutation({
     mutationFn: (next: string) => saveEmployeeRosterField(profileId, 'remainingAnnualLeave', next),
     onSuccess: async () => {
-      await Promise.all(['employee-roster', 'my-attendance-basis', 'leave-notice-management'].map(key => client.invalidateQueries({ queryKey: [key] })))
+      await Promise.all(['employee-roster', 'employee-leave-advances', 'employee-extra-leave', 'my-attendance-basis', 'my-extra-leave', 'leave-notice-management'].map(key => client.invalidateQueries({ queryKey: [key] })))
       setDraft(null)
       setSaved(true)
     },

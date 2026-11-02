@@ -1,6 +1,6 @@
 import { DEFAULT_COMPANY_ID } from '@/lib/supabase/brands'
 import { getSupabase } from '@/lib/supabase/client'
-import { listExtraLeave } from './employee-extra-leave'
+import { listExtraLeave, type ExtraLeaveRecords } from './employee-extra-leave'
 
 export const ROSTER_FIELDS = [
   { key: 'phone', column: 'phone', label: '전화번호', max: 40, width: 'min-w-36' },
@@ -162,7 +162,10 @@ function fromRow(row: RosterRow): EmployeeRoster {
   }
 }
 
-export async function listEmployeeRosters(): Promise<EmployeeRoster[]> {
+export async function getEmployeeRosterSnapshot(): Promise<{ rosters: EmployeeRoster[]; extraLeave: ExtraLeaveRecords }> {
+  // This RPC can reconcile the base balance. Read roster rows afterwards so
+  // the base and extra amounts belong to the same completed refresh.
+  const extras = await listExtraLeave()
   const { data, error } = await getSupabase()
     .from('employee_roster')
     .select(ROSTER_COLUMNS)
@@ -175,15 +178,15 @@ export async function listEmployeeRosters(): Promise<EmployeeRoster[]> {
   const grants = await getSupabase().from('employee_roster').select('profile_id, accrued_annual_leave')
   if (grants.error) console.warn('[org] 연차 발생일수 조회 실패', { code: grants.error.code, message: grants.error.message })
   const byEmployee = new Map<string, number | null>((grants.data ?? []).map(row => [row.profile_id, row.accrued_annual_leave == null ? null : Number(row.accrued_annual_leave)]))
-  const extras = await listExtraLeave()
   const available = new Map(extras.balances.map(row => [row.profileId, row.available]))
   const shortfalls = new Map(extras.balances.map(row => [row.profileId, row.shortfall ?? 0]))
-  return ((data ?? []) as RosterRow[]).map(row => ({
+  const rosters = ((data ?? []) as RosterRow[]).map(row => ({
     ...fromRow(row),
     remainingAnnualLeave: row.remaining_annual_leave == null ? null : Number((Number(row.remaining_annual_leave) + (available.get(row.profile_id) ?? 0) - (shortfalls.get(row.profile_id) ?? 0)).toFixed(2)),
     additionalAnnualLeave: extras.ready ? available.get(row.profile_id) ?? 0 : undefined,
     accruedAnnualLeave: grants.error ? undefined : byEmployee.get(row.profile_id) ?? null,
   }))
+  return { rosters, extraLeave: extras }
 }
 
 export async function saveEmployeeRosterField(

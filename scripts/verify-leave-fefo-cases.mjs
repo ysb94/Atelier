@@ -9,6 +9,10 @@ export async function verifyFefoLeave({db,actor,value,create,ops,company,foreign
   await db.exec(sql.replaceAll("(now() at time zone 'Asia/Seoul')::date", "current_setting('test.today')::date"))
   const guard=await readFile('supabase/migrations/20261029111042_leave_fefo_available_balance_guard.sql','utf8')
   await db.exec(guard.replaceAll("(now() at time zone 'Asia/Seoul')::date", "current_setting('test.today')::date"))
+  if (process.argv.includes('--load-guard')) {
+    const loadGuard=await readFile('supabase/migrations/20261102102010_leave_refresh_load_guard.sql','utf8')
+    await db.exec(loadGuard.match(/create or replace function app\.fefo_budget\([\s\S]*?end \$\$;/)[0])
+  }
   // Imported negative opening/reset policy is deferred by the user; no exception migration is applied.
   assert.equal(await hash(),before,'기한순 차감 전환 시 기존 데이터·정책 유지')
   const staff='10000000-0000-4000-8000-000000000007',shortfallStaff='10000000-0000-4000-8000-000000000008'
