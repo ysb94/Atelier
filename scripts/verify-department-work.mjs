@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { filterDepartmentWork, clearWorkFilters } from '../src/features/work-requests/department-work.ts'
+import { filterDepartmentWork, clearWorkFilters, inDepartmentWorkScope, inDepartmentWorkStage } from '../src/features/work-requests/department-work.ts'
 import { readFile } from 'node:fs/promises'
 import { createWorkTestDb, ids } from './work-request-test-db.mjs'
 const filters=clearWorkFilters()
@@ -9,6 +9,15 @@ assert.equal(filterDepartmentWork(sample,{...filters,status:['completed']},'').l
 assert.equal(filterDepartmentWork(sample,{...filters,requester:['a','b'],assignee:['b']},'공통').length,1)
 assert.equal(filterDepartmentWork(sample,{...filters,requester:['b'],assignee:['b']},'').length,0)
 assert.equal(filterDepartmentWork(sample,{...filters,status:['completed'],assignee:['unassigned'],brand:['undecided']},'').length,1)
+assert.equal(inDepartmentWorkScope({requesterId:'a',assigneeIds:['b']},'mine','a'),true,'own request is mine even when assigned to a colleague')
+assert.equal(inDepartmentWorkScope({requesterId:'b',assigneeIds:['a','c']},'mine','a'),true,'assignees include collaborators and category workers')
+assert.equal(inDepartmentWorkScope({requesterId:'b',assigneeIds:['c']},'mine','a'),false)
+assert.equal(inDepartmentWorkScope({requesterId:'b',assigneeIds:['c']},'team','a'),true)
+for(const status of ['requested','reviewing','accepted','inProgress','waiting','completionReview','completionConfirm','completed','cancelled','rejected']) {
+ const expected=['requested','reviewing'].includes(status)?'unconfirmed':['accepted','inProgress','waiting'].includes(status)?'progress':status==='completionReview'?'feedback':status==='completionConfirm'?'completion':null
+ assert.equal(inDepartmentWorkStage(status,'all'),expected!==null)
+ for(const stage of ['unconfirmed','progress','feedback','completion'])assert.equal(inDepartmentWorkStage(status,stage),stage===expected, status+' has exactly one active stage')
+}
 const db=await createWorkTestDb()
 const scalar=async(sql,args=[])=>Object.values((await db.query(sql,args)).rows[0])[0]
 async function actor(id){await db.exec('reset role');await db.query("select set_config('request.jwt.claim.sub',$1,false)",[id]);await db.exec('set role authenticated')}

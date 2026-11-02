@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Textarea } from '@/components/ui/input'
 import { StatTile } from '@/components/ui/stat-tile'
+import { FilterTabs } from '@/components/ui/filter-tabs'
 import { StatusPill } from '@/components/ui/status-pill'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/lib/supabase/auth'
@@ -17,7 +18,7 @@ import { visibleCompanyNotices } from '@/lib/company/company-notices'
 import { hasPermission } from '@/lib/company/permissions'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList } from '@/lib/utils'
-import { clearWorkFilters, filterDepartmentWork, type DepartmentWork, type WorkFilters } from './department-work'
+import { clearWorkFilters, DEPARTMENT_WORK_STAGES, filterDepartmentWork, inDepartmentWorkScope, inDepartmentWorkStage, type DepartmentWork, type DepartmentWorkScope, type DepartmentWorkStage, type WorkFilters } from './department-work'
 import { ownerFromDepartment, WORK_REQUEST_CONFIG, WORK_REQUEST_DEPARTMENT_IDS, type WorkRequestOwner } from './work-request-form-config'
 import { STATUS_META } from './work-request-types'
 
@@ -69,7 +70,9 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
     catch(error) { console.warn('[department-work] 팀 공지 저장 실패',error); setNoticeError(error instanceof Error ? error.message : '공지를 저장하지 못했습니다.') }
     finally { setNoticeSaving(false) }
   }
-  const [section, setSection] = useState('team')
+  const [scope, setScope] = useState<DepartmentWorkScope>('team')
+  const [stage, setStage] = useState<DepartmentWorkStage>('all')
+  useEffect(() => { setScope('team'); setStage('all'); setFilters(clearWorkFilters()); setSearch('') }, [actor, owner])
   const [sort, setSort] = useState<{ field: 'createdAt' | 'dueDate'; direction: number }>({ field: 'dueDate', direction: 1 })
   const rows = (activeSession ? query.data : undefined) ?? emptyList<DepartmentWork>()
   const options = useMemo(() => {
@@ -77,9 +80,9 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
     for (const row of rows) { requester.set(row.requesterId, `${row.requesterName} · ${row.requesterDepartment || '부서 미정'}`); row.assigneeIds.forEach((id, index) => assignee.set(id, row.assigneeNames[index] || '직원')); if (row.brandId) brand.set(row.brandId, row.brandName) }
     return { requester: [...requester], assignee: [...assignee], brand: [...brand], status: Object.entries(STATUS_META).map(([id, meta]): [string, string] => [id, meta.label]) }
   }, [rows])
-  const active = rows.filter(row => !['completed', 'cancelled', 'rejected'].includes(row.status))
-  const inSection = (row: DepartmentWork, value: string) => value === 'mine' ? row.assigneeIds.includes(actor) : value === 'inbox' ? ['requested', 'reviewing'].includes(row.status) : value === 'progress' ? row.status === 'inProgress' : value === 'completion' ? ['completionReview', 'completionConfirm'].includes(row.status) : true
-  const visible = filterDepartmentWork(rows, filters, search).filter(row => inSection(row, section)).sort((a, b) => {
+  const active = rows.filter(row => inDepartmentWorkStage(row.status, 'all'))
+  const scoped = rows.filter(row => inDepartmentWorkScope(row, scope, actor))
+  const visible = filterDepartmentWork(scoped, filters, search).filter(row => stage === 'all' || inDepartmentWorkStage(row.status, stage)).sort((a, b) => {
     const left = a[sort.field], right = b[sort.field]
     return (!left ? 1 : !right ? -1 : left.localeCompare(right) * sort.direction) || a.id.localeCompare(b.id)
   })
@@ -91,7 +94,7 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
   // Keep headings in place even when a department has no work or filters hide its rows.
   for (const row of rows) { const key = departmentLabel(row.requesterDepartment); if (!groups.has(key)) groups.set(key, []) }
   for (const row of visible) groups.get(departmentLabel(row.requesterDepartment))!.push(row)
-  const dueSoon = active.filter(row => row.dueDate && new Date(row.dueDate + 'T23:59:59+09:00').getTime() - Date.now() < 3 * 86400000).length
+  const dueSoon = scoped.filter(row => inDepartmentWorkStage(row.status, 'all') && row.dueDate && new Date(row.dueDate + 'T23:59:59+09:00').getTime() - Date.now() < 3 * 86400000).length
   const departmentId = WORK_REQUEST_DEPARTMENT_IDS[owner]
   const canWriteNotice = hasPermission(profile, 'notice.department.write', 'department', departmentId) || hasPermission(profile, 'notice.department.write', 'company', profile?.companyId)
   const teamNotices = visibleCompanyNotices(notices.data ?? emptyList(), new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }), departmentId).filter(notice => notice.departmentId === departmentId)
@@ -110,18 +113,19 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
       </div>
     </section>
     <section aria-label="업무 현황" className="border-b border-border/60 pb-5 pt-8 sm:pt-16">
-      <div className="grid grid-cols-2 gap-1 sm:grid-cols-5">{[['mine', '내 업무'], ['team', '팀 업무'], ['inbox', '접수 대기'], ['progress', '진행 중'], ['completion', '완료 대기']].map(([id, label]) => <button type="button" key={id} aria-pressed={section === id} onClick={() => setSection(id)}><StatTile layout="value-first" label={label} value={active.filter(row => inSection(row, id)).length} className={`min-h-[88px] items-center rounded-lg shadow-none ${section === id ? 'border-border/60 bg-card' : 'border-transparent bg-transparent'}`} /></button>)}</div>
+      <div className="mb-6"><FilterTabs ariaLabel="업무 범위" value={scope} onChange={setScope} tabs={([{value:'mine',label:'내 업무'},{value:'team',label:'팀 업무'}] as const).map(tab => ({...tab,count:active.filter(row => inDepartmentWorkScope(row,tab.value,actor)).length}))} /></div>
+      <div role="group" aria-label="업무 상태" className="grid grid-cols-2 gap-1 sm:grid-cols-5">{DEPARTMENT_WORK_STAGES.map(({value, label}) => <button type="button" key={value} aria-pressed={stage === value} onClick={() => { setStage(value); setFilters(current => ({...current,status:[]})) }}><StatTile layout="value-first" label={label} value={scoped.filter(row => inDepartmentWorkStage(row.status, value)).length} className={`min-h-[88px] items-center rounded-lg shadow-none ${stage === value ? 'border-border/60 bg-card' : 'border-transparent bg-transparent'}`} /></button>)}</div>
       {dueSoon ? <p className="mt-5 flex items-center gap-1 text-xs"><TriangleAlert aria-hidden="true" className="size-3 text-danger" />마감 임박·초과 {dueSoon}건</p> : null}
     </section>
     <section aria-labelledby="department-work-list-title" className="space-y-6 pt-8 sm:pt-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h2 id="department-work-list-title" className="text-lg font-medium">팀 업무 목록</h2>
+          <h2 id="department-work-list-title" className="text-lg font-medium">{scope === 'mine' ? '내 업무 목록' : '팀 업무 목록'}</h2>
           <Link to="?mode=new&internal=1"><Button size="sm" variant="ghost" className="h-6 gap-1 bg-muted px-2 text-xs text-muted-foreground"><Plus className="size-3" />업무 등록</Button></Link>
         </div>
         <div className="flex max-w-full items-center gap-2">
           <div className="relative w-64 max-w-full"><Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" aria-label="업무 검색" placeholder="업무 검색" value={search} onChange={event => setSearch(event.target.value)} /></div>
-          <Button variant="ghost" size="sm" onClick={() => { setFilters(clearWorkFilters()); setSearch(''); setSection('team') }}><X className="size-4" />초기화</Button>
+          <Button variant="ghost" size="sm" onClick={() => { setFilters(clearWorkFilters()); setSearch(''); setScope('team'); setStage('all') }}><X className="size-4" />초기화</Button>
         </div>
       </div>
       {query.isError ? <Card className="p-5"><p role="alert">{query.error.message}</p><p className="mt-2 text-sm text-muted-foreground">부서 업무 조회 연결을 확인해 주세요.</p><Button onClick={() => void query.refetch()}>다시 조회</Button></Card> : query.isPending ? <p role="status">업무를 불러오는 중...</p> : <>
@@ -132,7 +136,7 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
             <thead className="border-b border-border bg-transparent text-xs font-normal text-muted-foreground">
               <tr>
                 <th scope="col" className="py-5 pr-4 font-normal">업무명</th>
-                {(['requester', 'assignee', 'status'] as const).map((key, index) => <th scope="col" key={key} className="px-3 py-5 font-normal"><ColumnFilter label={['요청자', '담당자', '상태'][index]} options={options[key]} selected={filters[key]} onApply={value => setFilters(current => ({ ...current, [key]: value }))} /></th>)}
+                {(['requester', 'assignee', 'status'] as const).map((key, index) => <th scope="col" key={key} className="px-3 py-5 font-normal"><ColumnFilter label={['요청자', '담당자', '상태'][index]} options={options[key]} selected={filters[key]} onApply={value => { if(key === 'status') setStage('all'); setFilters(current => ({ ...current, [key]: value })) }} /></th>)}
                 {(['createdAt', 'dueDate'] as const).map((field, index) => <th scope="col" className="px-3 py-5 font-normal" key={field}><button type="button" onClick={() => toggleSort(field)} className="inline-flex items-center gap-1">{['요청 날짜', '마감 날짜'][index]}<ArrowDownUp className="size-3" />{sort.field === field ? sort.direction === 1 ? '↑' : '↓' : ''}</button></th>)}
                 <th scope="col" className="py-5 pl-3 font-normal"><ColumnFilter label="브랜드" options={options.brand} selected={filters.brand} onApply={brand => setFilters(current => ({ ...current, brand }))} /></th>
               </tr>

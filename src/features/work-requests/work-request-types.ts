@@ -150,13 +150,13 @@ export const STATUS_META: Record<
     variant: 'default' | 'success' | 'warning' | 'danger' | 'outline' | 'muted'
   }
 > = {
-  requested: { label: '요청됨', variant: 'outline' },
+  requested: { label: '미확인', variant: 'outline' },
   reviewing: { label: '검토 중', variant: 'warning' },
   accepted: { label: '수락됨', variant: 'default' },
   inProgress: { label: '진행 중', variant: 'default' },
   waiting: { label: '보류', variant: 'warning' },
-  completionReview: { label: '완료 요청', variant: 'warning' },
-  completionConfirm: { label: '요청자 확인', variant: 'warning' },
+  completionReview: { label: '피드백', variant: 'warning' },
+  completionConfirm: { label: '완료 대기', variant: 'warning' },
   completed: { label: '완료', variant: 'success' },
   cancelled: { label: '취소', variant: 'muted' },
   rejected: { label: '반려', variant: 'danger' },
