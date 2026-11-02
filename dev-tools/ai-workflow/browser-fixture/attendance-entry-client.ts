@@ -14,6 +14,11 @@ function seed(): State {
   const requests: Record<string, unknown>[] = []
   if (scenario === 'pending-correction' || scenario === 'approved-correction' || scenario === 'overtime') requests.push({ id: 'request-1', employee_id: 'fixture-user', employee_name: '검증 직원', department_id: 'other-department', department_name: '일반팀', kind: scenario === 'overtime' ? 'overtime' : 'correction', from_date: previous, to_date: previous, start_time: scenario === 'overtime' ? '18:00:00' : '09:00:00', end_time: scenario === 'overtime' ? '21:00:00' : '18:00:00', note: '검증', place: '', status: scenario === 'pending-correction' ? 'pending' : 'approved', created_at: previous + 'T00:00:00Z', decided_at: null, decided_by_name: null, decision_note: '' })
   if (scenario.startsWith('offsite')) requests.push({ id: 'offsite-1', employee_id: 'fixture-user', employee_name: '검증 직원', department_id: 'other-department', department_name: '일반팀', kind: 'offsite', from_date: today, to_date: today, start_time: '09:00:00', end_time: '18:00:00', note: '검증', place: '거래처', status: 'approved', created_at: previous + 'T00:00:00Z', decided_at: null, decided_by_name: null, decision_note: '' })
+  if (scenario === 'offsite-correction') {
+    Object.assign(requests[0], { from_date: '2026-10-26', to_date: '2026-10-29', end_time: '21:00:00' })
+    Object.assign(rows[0], { clock_in: '08:55:00', clock_out_at: '2026-10-26T15:30:00Z' })
+    rows.push({ ...row('2026-10-27', '2026-10-27T12:00:00Z'), clock_in: '08:55:00' })
+  }
   return { rows, requests, writes: [], calls: [], saveFailures: scenario === 'save-error' ? 1 : 0, readError: scenario === 'read-error', basisError: scenario === 'basis-error' }
 }
 function read(): State { const value = localStorage.getItem(key); if (value) return JSON.parse(value); const state = seed(); write(state); return state }
@@ -26,12 +31,19 @@ export function getSupabase() {
   return { ...base, from(table: string) {
     if (table !== 'attendance_clock_ins' && table !== 'company_leave_requests') return base.from(table)
     const filters: Array<(row: Record<string, unknown>) => boolean> = []; let offset = 0, count = 500
+    let inserted: Record<string, unknown> | null = null
     const query = { select() { return query }, order() { return query },
+      insert(input: Record<string, unknown>) { inserted = input; return query }, single() { return query },
       eq(field: string, value: unknown) { filters.push(row => row[field] === value); return query },
       gte(field: string, value: string) { filters.push(row => String(row[field]) >= value); return query },
       lte(field: string, value: string) { filters.push(row => String(row[field]) <= value); return query },
       range(start: number, end: number) { offset = start; count = end - start + 1; return query }, limit(value: number) { count = value; return query },
       then(resolve: (value: unknown) => unknown) { const state = read(); if (table === 'attendance_clock_ins' && state.readError) return Promise.resolve({ data: null, error: { message: '검증용 기록 조회 실패' } }).then(resolve)
+        if (inserted && table === 'company_leave_requests') {
+          const row = { end_next_day: false, ...inserted, id: crypto.randomUUID(), status: 'pending', created_at: new Date().toISOString(), decided_at: null, decided_by_name: null, decision_note: '' }
+          state.requests.push(row); state.writes.push('submit_correction'); write(state)
+          return Promise.resolve({ data: row, error: null }).then(resolve)
+        }
         const rows = (table === 'attendance_clock_ins' ? state.rows : state.requests) as Record<string, unknown>[]
         return Promise.resolve({ data: rows.filter(row => filters.every(filter => filter(row))).slice(offset, offset + count), error: null }).then(resolve) },
     }; return query
