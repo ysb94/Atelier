@@ -11,6 +11,7 @@ export function StatTile({
   hint,
   tone = 'default',
   accent = false,
+  layout = 'default',
   icon: Icon,
   className,
 }: {
@@ -19,6 +20,7 @@ export function StatTile({
   hint?: ReactNode
   tone?: StatTone
   accent?: boolean
+  layout?: 'default' | 'value-first'
   icon?: LucideIcon
   className?: string
 }) {
@@ -35,9 +37,9 @@ export function StatTile({
           <Icon className="size-4" />
         </div>
       ) : null}
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-medium text-muted-foreground">{label}</p>
-        <div className="mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <div className={cn('min-w-0 flex-1', layout === 'value-first' && 'flex flex-col items-center gap-1 text-center')}>
+        <p className={cn('text-xs font-medium text-muted-foreground', layout === 'value-first' && 'order-last text-foreground')}>{label}</p>
+        <div className={cn('mt-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1', layout === 'value-first' && 'mt-0 justify-center')}>
           <p
             className={cn(
               'text-2xl font-bold tracking-tight tabular-nums',

@@ -2,7 +2,7 @@ import { createPortal } from 'react-dom'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDownUp, Filter, Plus, Search, X } from 'lucide-react'
+import { ArrowDownUp, ChevronDown, ChevronUp, Filter, Plus, Search, TriangleAlert, X } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -61,6 +61,7 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
   const [noticeDraft, setNoticeDraft] = useState<{title: string; body: string} | null>(null)
   const [noticeError, setNoticeError] = useState('')
   const [noticeSaving, setNoticeSaving] = useState(false)
+  const [noticesExpanded, setNoticesExpanded] = useState(true)
   async function registerNotice() {
     if (!noticeDraft || !noticeDraft.title.trim() || !noticeDraft.body.trim() || noticeSaving) return
     setNoticeSaving(true); setNoticeError('')
@@ -98,10 +99,21 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
   return <div className="space-y-5">
     {noticeDraft ? <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/30 p-4"><form role="dialog" aria-modal="true" aria-label="팀 공지 등록" className="w-full max-w-lg space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm" onSubmit={event => { event.preventDefault(); void registerNotice() }}><h2 className="font-semibold">팀 공지 등록</h2><label className="block">제목<Input required value={noticeDraft.title} onChange={event => setNoticeDraft({...noticeDraft,title:event.target.value})} /></label><label className="block">내용<Textarea required value={noticeDraft.body} onChange={event => setNoticeDraft({...noticeDraft,body:event.target.value})} /></label>{noticeError ? <p role="alert" className="text-danger">{noticeError}</p> : null}<div className="flex justify-end gap-2"><Button type="button" variant="outline" disabled={noticeSaving} onClick={() => setNoticeDraft(null)}>취소</Button><Button disabled={noticeSaving}>등록</Button></div></form></div> : null}
     <PageHeader title={`${WORK_REQUEST_CONFIG[owner].teamName} 부서 업무`} description="받은 요청과 부서 자체 업무를 함께 확인합니다." actions={<Link to={`?aux=1`}><Button variant="outline">일정표·업무 처리</Button></Link>} />
-    <Card className="p-4"><div className="flex items-center justify-between"><h2 className="font-semibold">팀 공지</h2>{canWriteNotice ? <Button size="sm" variant="outline" onClick={() => { setNoticeError(''); setNoticeDraft({title:'',body:''}) }}>공지 등록</Button> : null}</div>{notices.isError ? <p role="alert">공지를 불러오지 못했습니다.<button type="button" onClick={() => void notices.refetch()}>다시 조회</button></p> : teamNotices.map(notice => <details key={notice.id} className="border-t border-border py-3"><summary>{notice.title}</summary><p className="mt-2 whitespace-pre-wrap text-sm">{notice.body}</p></details>)}{!teamNotices.length && !notices.isError ? <p className="mt-3 text-sm text-muted-foreground">등록된 팀 공지가 없습니다.</p> : null}</Card>
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">{[['mine', '내 업무'], ['team', '팀 업무'], ['inbox', '접수 대기'], ['progress', '진행 중'], ['completion', '완료 대기']].map(([id, label]) => <button type="button" key={id} aria-pressed={section === id} onClick={() => setSection(id)}><StatTile label={label} value={active.filter(row => inSection(row, id)).length} accent={section === id} /></button>)}</div>
-    {dueSoon ? <p className="text-sm text-danger">마감 임박·초과 {dueSoon}건</p> : null}
-    <section aria-labelledby="department-work-list-title" className="space-y-6 pt-4">
+    <section aria-labelledby="department-notices-title" className="pt-2">
+      <div className="mb-4 flex items-center gap-3">
+        <h2 id="department-notices-title" className="text-lg font-medium"><button type="button" aria-expanded={noticesExpanded} aria-controls="department-notices-list" aria-label={noticesExpanded ? '팀 공지 접기' : '팀 공지 펼치기'} className="inline-flex items-center gap-2" onClick={() => setNoticesExpanded(value => !value)}>팀 공지{noticesExpanded ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}</button></h2>
+        {canWriteNotice ? <Button size="sm" variant="ghost" className="h-6 gap-1 bg-muted px-2 text-xs text-muted-foreground" onClick={() => { setNoticeError(''); setNoticeDraft({title:'',body:''}) }}><Plus className="size-3" />공지 등록</Button> : null}
+      </div>
+      <div id="department-notices-list" hidden={!noticesExpanded} className="border-t border-border/60">
+        {notices.isError ? <p role="alert" className="py-5 text-sm">공지를 불러오지 못했습니다.<button type="button" className="ml-2 underline" onClick={() => void notices.refetch()}>다시 조회</button></p> : notices.isPending ? <p role="status" className="py-5 text-sm text-muted-foreground">공지를 불러오는 중...</p> : teamNotices.map(notice => <details key={notice.id} className="border-b border-border/60 py-5"><summary className="cursor-pointer list-none text-sm [&::-webkit-details-marker]:hidden">{notice.title}</summary><p className="mt-3 whitespace-pre-wrap text-sm text-muted-foreground">{notice.body}</p></details>)}
+        {!teamNotices.length && !notices.isError && !notices.isPending ? <p className="border-b border-border/60 py-5 text-sm text-muted-foreground">등록된 팀 공지가 없습니다.</p> : null}
+      </div>
+    </section>
+    <section aria-label="업무 현황" className="border-b border-border/60 pb-5 pt-8 sm:pt-16">
+      <div className="grid grid-cols-2 gap-1 sm:grid-cols-5">{[['mine', '내 업무'], ['team', '팀 업무'], ['inbox', '접수 대기'], ['progress', '진행 중'], ['completion', '완료 대기']].map(([id, label]) => <button type="button" key={id} aria-pressed={section === id} onClick={() => setSection(id)}><StatTile layout="value-first" label={label} value={active.filter(row => inSection(row, id)).length} className={`min-h-[88px] items-center rounded-lg shadow-none ${section === id ? 'border-border/60 bg-card' : 'border-transparent bg-transparent'}`} /></button>)}</div>
+      {dueSoon ? <p className="mt-5 flex items-center gap-1 text-xs"><TriangleAlert aria-hidden="true" className="size-3 text-danger" />마감 임박·초과 {dueSoon}건</p> : null}
+    </section>
+    <section aria-labelledby="department-work-list-title" className="space-y-6 pt-8 sm:pt-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <h2 id="department-work-list-title" className="text-lg font-medium">팀 업무 목록</h2>
