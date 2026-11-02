@@ -10,6 +10,8 @@ export type InboxNotificationKind =
   | 'leave_usage_notice'
   | 'late_statement_manager'
   | 'late_statement_confirmed'
+  | 'personal_request'
+  | 'checkout_needed'
 
 export type MeetingNotice = {
   roundId: string
@@ -29,6 +31,9 @@ export type InboxNotification = {
   createdAt: string
   readAt: string | null
   meeting?: MeetingNotice
+  target?: import('./my-home-notifications').MyHomeNotificationTarget
+  action?: { key: string; label: string } | null
+  current?: boolean
 }
 
 export type ChatRoomKind = 'direct' | 'group'

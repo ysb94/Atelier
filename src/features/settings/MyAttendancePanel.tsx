@@ -1,3 +1,4 @@
+import { useReadMyHomeNotification } from './use-my-home-notifications'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Bell, CalendarDays, ChevronLeft, ChevronRight, Clock3, Search, Send, Settings2, X } from 'lucide-react'
@@ -126,6 +127,7 @@ export function MyAttendancePanel() {
   const [formError, setFormError] = useState('')
   const [notice, setNotice] = useState('')
   const [detail, setDetail] = useState<ScheduleDetail | null>(null)
+  const noticeRead=useReadMyHomeNotification(detail?.type==='clock'?'checkout':'request',detail?.type==='request'?detail.item.id:detail?.type==='clock'?detail.date:undefined,detail?.type==='request'?`status:${detail.item.status}`:detail?.type==='clock'?'status:pending':undefined,detail?.type==='request'||detail?.type==='clock')
   const [basis, setBasis] = useState(DEFAULT_REMINDER_BASIS)
   const [showBasis, setShowBasis] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -298,6 +300,7 @@ export function MyAttendancePanel() {
     {clock.queryError && <p role="alert" className="personal-request-error">오늘의 출퇴근 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => void clock.refresh()}>다시 불러오기</Button></p>}
     {clocks.error && <p role="alert" className="personal-request-error">{monthLabel(month)} 출퇴근 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => void clocks.refetch()}>다시 불러오기</Button></p>}
     {leave.error && <p role="alert" className="personal-request-error">신청 목록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => void leave.refresh()}>다시 불러오기</Button></p>}
+    {noticeRead.error && <p role="alert" className="text-sm text-danger">{noticeRead.error}<Button type="button" size="sm" onClick={noticeRead.retry}>읽음 저장 재시도</Button></p>}
     {notice && <p className="personal-request-notice" role="status">{notice}</p>}
     {todoStore.readOnly && <p className="personal-request-helper">화면 미리보기에서는 실제 To-do를 저장하거나 회의 일정을 변경하지 않습니다.</p>}
     {todoStore.error && <p role="alert" className="personal-request-error">To-do를 공용 저장소에서 불러오지 못했습니다. 마지막으로 확인한 내용을 표시하며 기존 브라우저 기록도 삭제하지 않았습니다. {todoStore.error.message} <Button variant="outline" size="sm" onClick={()=>void todoStore.refetch()}>다시 불러오기</Button></p>}

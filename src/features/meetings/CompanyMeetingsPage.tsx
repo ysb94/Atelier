@@ -1,3 +1,4 @@
+import { confirmHostNotice, useMyHomeNotifications, useReadMyHomeNotification } from '@/features/settings/use-my-home-notifications'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
@@ -1696,6 +1697,11 @@ function MeetingDetailDrawer({
   onMarkDone: () => Promise<void>
   onReopen: () => Promise<void>
 }) {
+  const noticeRead = useReadMyHomeNotification('meeting', round.id, String(round.scheduleVersion ?? 1), !simulating)
+  const noticeCache=useQueryClient()
+  const noticeHub=useMyHomeNotifications()
+  const [hostNoticeError,setHostNoticeError]=useState<string|null>(null)
+  const [hostNoticeBusy,setHostNoticeBusy]=useState(false)
   const pending = isPendingRound(round)
   const isHost=series.host.id===uploader.id
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -1796,6 +1802,8 @@ function MeetingDetailDrawer({
       >
         <fieldset disabled={busy} className="contents">
         {operationError || saveError ? <div className="shrink-0 space-y-2 p-3"><p role="alert" className="text-sm text-danger">{saveError ?? operationError}</p><Button variant="outline" onClick={onClose}>저장하지 않고 닫기</Button></div> : null}
+        {noticeRead.error && <div className="p-3"><p role="alert" className="text-sm text-danger">{noticeRead.error}</p><Button type="button" size="sm" variant="outline" onClick={noticeRead.retry}>읽음 저장 재시도</Button></div>}
+        {isHost && !pending && !simulating && noticeHub.items.some(item=>item.meeting?.role==='host'&&item.target?.entityId===round.id&&item.action) && <div className="p-3"><Button type="button" size="sm" variant="outline" disabled={hostNoticeBusy} onClick={async()=>{setHostNoticeBusy(true);try{await confirmHostNotice(round.id,round.scheduleVersion??1,noticeCache,uploader.id);setHostNoticeError(null)}catch(error){setHostNoticeError(error instanceof Error?error.message:'확인 기록 저장 실패')}finally{setHostNoticeBusy(false)}}}>응답 현황 확인 완료</Button>{hostNoticeError&&<p role="alert" className="text-sm text-danger">{hostNoticeError}</p>}</div>}
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div className="min-w-0 space-y-2">
             <div className="flex flex-wrap items-center gap-2">

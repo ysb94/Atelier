@@ -1,3 +1,6 @@
+import { useEffect } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useReadMyHomeNotification } from '@/features/settings/use-my-home-notifications'
 import { useMemo, useState } from 'react'
 import { Check, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -65,6 +68,10 @@ export function LeaveApprovalPanel({ readOnly = false, officialReview = false }:
   const currentPage = Math.min(page, pages)
   const rows = visible.slice((currentPage - 1) * 10, currentPage * 10)
   const detail = leave.requests.find(item => item.id === selected)
+  const [noticeParams] = useSearchParams()
+  useEffect(()=>{const id=noticeParams.get('request');if(id&&leave.requests.some(item=>item.id===id))setSelected(id)},[noticeParams,leave.requests])
+  const noticeRead=useReadMyHomeNotification('request',detail?.id,detail?`status:${detail.status}`:undefined,Boolean(detail)&&!readOnly)
+
   const checkoutPreview = useQuery({ queryKey: ['overtime-checkout-preview', detail?.id], queryFn: () => fetchOvertimeCheckoutPreview(detail!.id), enabled: !readOnly && detail?.kind === 'overtime' && detail.status === 'pending', retry: false })
   const previewReady = overtimeApprovalReady(detail?.kind, detail?.from, koreaDateKey(), checkoutPreview.isSuccess)
   const selfRequest = previewRequestIsSelf(detail?.employeeId === leave.userId, preview?.facts?.requestOwner)
@@ -95,6 +102,7 @@ export function LeaveApprovalPanel({ readOnly = false, officialReview = false }:
       <Select aria-label="근태 신청 부서" value={department} onChange={event => { setDepartment(event.target.value); setPage(1) }} className="h-9 w-40"><option value="all">전체 부서</option>{departments.map(name => <option key={name}>{name}</option>)}</Select>
       <Input aria-label="신청 일정 월" type="month" value={month} onChange={event => { setMonth(event.target.value); setPage(1) }} className="h-9 w-40"/>{month && <Button size="sm" variant="ghost" onClick={() => setMonth('')}>전체 기간</Button>}
     </div>
+    {noticeRead.error && <p role="alert" className="text-sm text-danger">{noticeRead.error}<Button type="button" size="sm" onClick={noticeRead.retry}>읽음 저장 재시도</Button></p>}
     {message && <p role="status" className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">{message}</p>}
     {leave.error && <p role="alert" className="text-sm text-danger">신청을 불러오지 못했습니다. 새로고침으로 다시 확인해 주세요.</p>}
     {detail && <article aria-label="근태 신청 검토" className="rounded-2xl border border-primary/30 bg-card p-5">

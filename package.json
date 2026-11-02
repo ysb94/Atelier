@@ -76,6 +76,7 @@
     "verify:studio-batch": "node --experimental-strip-types scripts/verify-studio-batch.mjs",
     "verify:styled-image-deployment": "node scripts/verify-styled-image-deployment.mjs",
     "verify:diagnostics": "node scripts/verify-diagnostics.mjs",
+    "verify:my-home-notifications": "tsx src/lib/inbox/my-home-notifications.verify.ts && node scripts/verify-my-home-notifications-db.mjs && node scripts/verify-my-home-notifications-browser.mjs",
     "verify:my-attendance": "node --experimental-strip-types src/features/settings/my-attendance.verify.ts",
     "verify:attendance-presence": "node scripts/verify-attendance-presence-db.mjs",
     "verify:meetings-db": "node scripts/verify-meetings-db.mjs",

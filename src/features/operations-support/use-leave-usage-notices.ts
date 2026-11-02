@@ -53,7 +53,8 @@ export function useLeaveUsageNotices() {
   return {
     records, enabled, canConfirm, busy, active: records.find(row => row.id === activeId),
     error: actionError ?? (query.error ? '연차 안내를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.' : null),
-    async open(id: string) { if (!records.some(row => row.id === id)) return; if (!canConfirm || await record(id, 'view')) setActiveId(id) },
+    async open(id: string) { if (records.some(row => row.id === id)) setActiveId(id) },
+    viewed(id: string) { return record(id, 'view') },
     close() { setActiveId(null) },
     confirm(id: string) { return record(id, 'confirm') },
     markAllRead() { return record(null, 'read') },

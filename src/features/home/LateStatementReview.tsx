@@ -1,4 +1,8 @@
-import { useEffect } from 'react'
+import { useAuth } from '@/lib/supabase/auth'
+import { usePagePreview } from '@/lib/company/page-preview-context'
+import { useNotificationDetailVisibility } from '@/lib/inbox/use-notification-visibility'
+import { readLateStatementNotice } from '@/lib/supabase/late-arrival-statements'
+import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
@@ -59,6 +63,11 @@ export function LateStatementApprovalList() {
 
 export function LateStatementNoticeDialog() {
   const client = useQueryClient()
+  const {profile}=useAuth()
+  const preview=usePagePreview()
+  const active=useNotificationDetailVisibility()
+  const [readError,setReadError]=useState<string|null>(null)
+  const [readRetry,setReadRetry]=useState(0)
   const [searchParams, setSearchParams] = useSearchParams()
   const id = searchParams.get('lateStatement')
   const review = searchParams.get('lateRole') === 'manager' ? 'manager' : 'view'
@@ -70,11 +79,25 @@ export function LateStatementNoticeDialog() {
   useEffect(() => {
     if (statement.error) console.warn('[late-arrival] 알림 사유서 조회 실패', statement.error)
   }, [statement.error])
-  if (!id) return null
+  useEffect(()=>{
+    if(!id||!statement.data||!active||preview?.active)return
+    let cancelled=false
+    async function read(){
+      try{
+        const notices=await listMyLateStatementNotices()
+        for(const notice of notices.filter(row=>row.statementId===id&&!row.readAt))await readLateStatementNotice(notice.kind==='manager'?'manager':'employee',notice.noticeId)
+        if(!cancelled)setReadError(null)
+        await client.invalidateQueries({queryKey:['late-statement-notices',profile?.id]})
+      }catch(error){console.warn('[late-arrival] 상세 열람 읽음 저장 실패',error);if(!cancelled)setReadError('읽음 기록을 저장하지 못했습니다.')}
+    }
+    void read();return()=>{cancelled=true}
+  },[id,statement.data,active,preview?.active,client,profile?.id,readRetry])
+  if (!id || !active) return null
   function close() {
     setSearchParams(previous => { const next = new URLSearchParams(previous); next.delete('lateStatement'); next.delete('lateRole'); return next }, { replace: true })
   }
   return <div className="fixed inset-0 z-[70] grid place-items-center bg-background/75 p-4" role="dialog" aria-label="지각 사유서">
+    {readError&&<p role="alert" className="text-sm text-danger">{readError}<Button type="button" size="sm" onClick={()=>setReadRetry(value=>value+1)}>읽음 저장 재시도</Button></p>}
     {statement.isPending ? <p className="rounded-xl bg-white px-6 py-4 text-sm">사유서를 불러오는 중입니다.</p>
       : statement.data ? <LateArrivalStatementDocument statement={statement.data} review={review} onClose={close} onUpdated={saved => { client.setQueryData(['late-arrival-statement', id], saved) }} />
       : <section className="rounded-xl bg-white px-6 py-4"><p role="alert" className="text-sm text-danger">사유서를 불러오지 못했습니다.</p><Button type="button" className="mt-3" variant="outline" size="sm" onClick={close}>닫기</Button></section>}

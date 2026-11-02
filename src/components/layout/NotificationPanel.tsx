@@ -1,3 +1,4 @@
+import { notificationNeedsAttention } from '@/lib/inbox/my-home-notifications'
 import { useMemo, useState, type ReactNode } from 'react'
 import {
   AtSign,
@@ -18,6 +19,8 @@ const KIND_ICON: Record<
   InboxNotificationKind,
   { icon: typeof ScanBarcode; label: string }
 > = {
+  personal_request: { icon: Check, label: '신청' },
+  checkout_needed: { icon: Clock, label: '퇴근 확인' },
   barcode_request: { icon: ScanBarcode, label: '발급 요청' },
   barcode_issued: { icon: Check, label: '발급 완료' },
   barcode_pending: { icon: CircleAlert, label: '미지정' },
@@ -33,23 +36,22 @@ const KIND_ICON: Record<
 export function NotificationPanel({
   items,
   titleId,
-  onMarkAllRead,
   onOpen,
   onClose,
 }: {
   items: readonly InboxNotification[]
   titleId: string
-  onMarkAllRead: () => void
+  onMarkAllRead?: () => void
   onOpen: (item: InboxNotification) => void
   onClose: () => void
 }) {
-  const [filter, setFilter] = useState<'all' | 'unread'>('all')
+  const [filter, setFilter] = useState<'attention' | 'all' | 'unread'>('attention')
   const unreadCount = useMemo(
-    () => items.filter((item) => !item.readAt).length,
+    () => items.filter((item) => item.current!==false&&!item.readAt).length,
     [items],
   )
   const visible = useMemo(
-    () => (filter === 'unread' ? items.filter((item) => !item.readAt) : items),
+    () => items.filter(item => filter === 'all' || (filter === 'unread' ? item.current!==false&&!item.readAt : notificationNeedsAttention(item))),
     [filter, items],
   )
 
@@ -68,15 +70,6 @@ export function NotificationPanel({
           <Button
             type="button"
             variant="ghost"
-            size="sm"
-            disabled={unreadCount === 0}
-            onClick={onMarkAllRead}
-          >
-            모두 읽음
-          </Button>
-          <Button
-            type="button"
-            variant="ghost"
             size="icon"
             className="size-7"
             aria-label="알림 닫기"
@@ -88,11 +81,12 @@ export function NotificationPanel({
       </header>
 
       <div className="flex shrink-0 gap-1 border-b border-border px-3 py-2">
+        <FilterButton selected={filter === 'attention'} onClick={() => setFilter('attention')}>확인·처리 필요</FilterButton>
         <FilterButton
           selected={filter === 'all'}
           onClick={() => setFilter('all')}
         >
-          전체
+          전체 기록
         </FilterButton>
         <FilterButton
           selected={filter === 'unread'}
@@ -136,6 +130,7 @@ export function NotificationPanel({
                             />
                           ) : null}
                         </span>
+                        {item.action && item.current !== false && <span className="mt-1 block text-xs font-medium text-primary">{item.action.label}</span>}
                         <span className={cn('mt-0.5 block text-sm text-muted-foreground', item.kind === 'meeting_invitation' ? 'whitespace-pre-line break-words' : 'truncate')}>
                           {item.body}
                         </span>

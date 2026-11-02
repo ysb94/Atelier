@@ -1,3 +1,4 @@
+import { useNotificationDetailVisibility } from '@/lib/inbox/use-notification-visibility'
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Button } from '@/components/ui/button'
@@ -26,10 +27,13 @@ function LeaveNoticeDocument({ record, notices }: { record: LeaveUsageNotice; no
   const dialog = useRef<HTMLDialogElement>(null)
   const [checked, setChecked] = useState(false)
   useEffect(() => { dialog.current?.showModal() }, [])
+  const visible=useNotificationDetailVisibility()
+  const viewAction=useRef(notices.viewed);viewAction.current=notices.viewed
+  useEffect(() => { if (visible && notices.canConfirm && (!record.viewed_at || !record.read_at)) void viewAction.current(record.id) }, [record.id, record.viewed_at, record.read_at, notices.canConfirm,visible])
   return createPortal(<dialog ref={dialog} aria-labelledby="leave-notice-title" onCancel={event => { event.preventDefault(); if (!notices.busy) notices.close() }} className="m-auto max-h-[90dvh] w-[min(42rem,calc(100vw-2rem))] overflow-y-auto rounded-xl border border-border bg-card p-5 text-foreground shadow-sm backdrop:bg-foreground/30">
     <header className="flex items-start justify-between gap-3"><h2 id="leave-notice-title" className="text-lg font-semibold">{record.title} · {LEAVE_NOTICE_LABELS[record.phase]}</h2><Button size="sm" variant="ghost" disabled={notices.busy} onClick={notices.close}>닫기</Button></header>
     <article aria-label="연차 사용 안내문" className="my-4 whitespace-pre-wrap rounded-lg border border-border bg-muted/20 p-4 text-sm leading-6">{record.body}</article>
-    {notices.error && <p role="alert" className="my-2 text-sm text-danger">{notices.error}</p>}
+    {notices.error && <p role="alert" className="my-2 text-sm text-danger">{notices.error}<Button type="button" size="sm" variant="outline" disabled={notices.busy} onClick={()=>void notices.viewed(record.id)}>열람 저장 재시도</Button></p>}
     {!notices.canConfirm ? <p className="text-sm text-warning">직원 계정 전환·미리보기에서는 본인 확인을 남길 수 없습니다.</p> : record.confirmed_at ? <p role="status" className="text-sm text-success">본인 확인 완료 · {leaveNoticeTime(record.confirmed_at)}</p> : <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={checked} disabled={notices.busy} onChange={event => setChecked(event.target.checked)} className="mt-1 accent-primary"/>잔여 연차와 사용기한 안내를 확인했습니다.</label>}
     <footer className="mt-5 flex flex-wrap justify-end gap-2 border-t border-border pt-4">
       <Button size="sm" variant="outline" disabled={notices.busy} onClick={notices.close}>{record.confirmed_at ? '닫기' : '나중에 확인'}</Button>

@@ -21,7 +21,7 @@ import { ReleaseAccessProvider, useReleaseAccess } from '@/components/layout/rel
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { releasePersonalPart } from '@/lib/company/release-access'
 import { CompanyMeetingsPage } from '@/features/meetings/CompanyMeetingsPage'
-import { useMeetingNotices } from '@/features/meetings/use-meeting-notices'
+import { MyHomeNotificationBadge, MyHomeNotificationList, MyHomeWorkNoticeDetail } from './MyHomeNotificationList'
 import { HomeNoticeBoard } from './HomeNoticeBoard'
 import { MyAttendanceStartPanel } from './MyAttendanceStartPanel'
 import { MyAttendancePanel } from './MyAttendancePanel'
@@ -62,7 +62,6 @@ export function ProfileSettingsPage() {
 function ProfileSettingsContent() {
   useRenderWatch('ProfileSettingsPage')
   const { profile, email } = useAuth()
-  const meetingNotices = useMeetingNotices({ realtime: false })
   const preview = usePagePreview()
   const release = useReleaseAccess()
   const { approvals, departments } = release
@@ -72,6 +71,7 @@ function ProfileSettingsContent() {
   function selectPart(next: PersonalPart) {
     if (!releasePersonalPart(release.profile, next, release.approver)) return
     const params = new URLSearchParams(searchParams)
+    if(next!==part) for(const key of ['workNotice','request','leaveNotice','lateStatement','lateRole','meeting','round'])params.delete(key)
     if (next === 'my-attendance') params.delete('part')
     else params.set('part', next)
     setSearchParams(params, { replace: true })
@@ -105,9 +105,11 @@ function ProfileSettingsContent() {
       <div className="personal-page-tabs" role="tablist" aria-label="My home 메뉴">
         {tabs.filter(tab => tab.id !== 'work' || release.scope.unrestricted).map(tab => <Fragment key={tab.id}>
           {release.scope.unrestricted && tab.id === 'approvals' && <span className="personal-page-tab-split" aria-hidden="true" />}
-          <button type="button" role="tab" id={`personal-${tab.id}-tab`} className={tab.id === 'attendance' ? 'personal-page-tab-end' : undefined} aria-selected={visiblePart === tab.id} aria-controls={`personal-${tab.id}-panel`} onClick={() => selectPart(tab.id)}>{tab.label}{tab.id === 'meetings' && meetingNotices.pending > 0 ? <span className="personal-page-tab-count">{meetingNotices.pending}</span> : null}</button>
+          <button type="button" role="tab" id={`personal-${tab.id}-tab`} className={tab.id === 'attendance' ? 'personal-page-tab-end' : undefined} aria-selected={visiblePart === tab.id} aria-controls={`personal-${tab.id}-panel`} onClick={() => selectPart(tab.id)}>{tab.label}{<MyHomeNotificationBadge tab={tab.id}/> }</button>
         </Fragment>)}
       </div>
+      {['meetings','my-attendance','approvals','overtime'].includes(visiblePart) && <MyHomeNotificationList key={visiblePart} tab={visiblePart as 'meetings'|'my-attendance'|'approvals'|'overtime'} />}
+      <MyHomeWorkNoticeDetail />
       {visiblePart === 'work' && <div id="personal-work-panel" role="tabpanel" aria-labelledby="personal-work-tab"><WorkRequestHubPage /></div>}
       {visiblePart === 'company-notice' && <div id="personal-company-notice-panel" role="tabpanel" aria-labelledby="personal-company-notice-tab"><HomeNoticeBoard kind="company" /></div>}
       {visiblePart === 'department-notice' && <div id="personal-department-notice-panel" role="tabpanel" aria-labelledby="personal-department-notice-tab"><HomeNoticeBoard kind="department" /></div>}

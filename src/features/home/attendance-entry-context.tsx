@@ -46,6 +46,7 @@ function useEntryState() {
   const confirmation = useMutation({ mutationFn: (input: { workDate: string; value: string }) => confirmPreviousClockOut(input.workDate, input.value),
     onSuccess: data => {
       setResolved(`${identity}:${data.work_date}`)
+      void cache.invalidateQueries({queryKey:['my-home-work-notices',userId]})
       if (data.clock_out_at) cache.setQueryData<AttendanceClock[]>(['attendance-clock-ins', userId, allowed], rows => rows?.map(row => row.date === data.work_date ? { ...row, clockOutAt: data.clock_out_at, clockOutReportedAt: data.clock_out_reported_at } : row))
       void cache.invalidateQueries({ queryKey: ['attendance-clock-ins', userId] })
       void cache.invalidateQueries({ queryKey: ['company-leave-requests', userId, 'mine'] })

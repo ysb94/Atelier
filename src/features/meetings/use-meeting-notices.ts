@@ -26,13 +26,11 @@ export function useMeetingNotices({ realtime = true }: { realtime?: boolean } = 
     refetchInterval: polling ? 30000 : false,
   })
   const items = useMemo(() => {
-    return meetingNoticeItems(invitations.data ?? emptyList<InboxNotification>(), meetings.data, profile?.id).map((item) => {
-      if (item.meeting?.role === 'member' && item.meeting.status === 'pending') return { ...item, readAt: null }
-      return item
-    })
+    return meetingNoticeItems(invitations.data ?? emptyList<InboxNotification>(), meetings.data, profile?.id)
   }, [invitations.data, meetings.data, profile?.id])
   return {
     items,
+    series: meetings.data,
     pending: pendingMeetingNoticeCount(items),
     error: invitations.error ?? meetings.error,
   }

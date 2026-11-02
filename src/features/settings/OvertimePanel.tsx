@@ -1,3 +1,5 @@
+import { useNavigate } from 'react-router-dom'
+import { useMyHomeNotifications } from './use-my-home-notifications'
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { Plus, Send, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -21,6 +23,8 @@ function overtimeForm(day: string): RequestForm {
 
 export function OvertimePanel() {
   useRenderWatch('OvertimePanel')
+  const navigate=useNavigate()
+  const notifications=useMyHomeNotifications()
   const { session, profile } = useAuth()
   const allowed = Boolean(session?.user.id) && profile?.status === 'active'
   const today = koreaDateKey()
@@ -88,7 +92,7 @@ export function OvertimePanel() {
             {leave.loading ? <tr><td colSpan={5}>불러오는 중…</td></tr>
               : rows.length === 0 ? <tr><td colSpan={5}>신청한 야근이 없습니다.</td></tr>
               : rows.map(item => <tr key={item.id}>
-                <th scope="row">{dateLabel(item.from)}</th>
+                <th scope="row">{notifications.items.some(row=>row.target?.source==='request'&&row.target.entityId===item.id)?<button type="button" onClick={()=>{const notice=notifications.items.find(row=>row.target?.source==='request'&&row.target.entityId===item.id);if(notice)navigate(notice.href)}}>{dateLabel(item.from)} · 상세</button>:dateLabel(item.from)}</th>
                 <td>{item.start}–{item.endNextDay ? '다음 날 ' : ''}{item.end}</td>
                 <td>{item.note || '—'}</td>
                 <td>{STATUS_LABELS[item.status]}{isSelfApprovedRequest(item) && <span className="ml-2 text-xs">본인 승인</span>}{item.decidedByName && <small className="block">{item.decidedByName}{item.decidedAt ? ` · ${new Date(item.decidedAt).toLocaleString('ko-KR')}` : ''}</small>}{item.decisionNote && <small className="block whitespace-pre-wrap">{item.decisionNote}</small>}</td>

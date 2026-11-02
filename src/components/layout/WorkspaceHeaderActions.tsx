@@ -1,3 +1,5 @@
+import { myHomeNotificationSummary } from '@/lib/inbox/my-home-notifications'
+import { useMyHomeNotifications } from '@/features/settings/use-my-home-notifications'
 import {
   useCallback,
   useEffect,
@@ -11,12 +13,8 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import { Bell, MessageCircle } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
-import { useQueryClient } from '@tanstack/react-query'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { OPEN_CONVERSATION_EVENT, type RequestedConversation } from '@/lib/chat/open-conversation'
-import { readMeetingInvitation } from '@/lib/supabase/meetings'
-import { readLateStatementNotice } from '@/lib/supabase/late-arrival-statements'
-import { useLateStatementNotices } from '@/features/home/LateStatementReview'
 import { ChatPanel } from '@/features/chat/ChatPanel'
 import { useChatRealtime } from '@/features/chat/use-chat-realtime'
 import { useChatRooms } from '@/features/chat/use-chat'
@@ -29,12 +27,10 @@ import { useAuth } from '@/lib/supabase/auth'
 import { useHeaderPreview } from '@/lib/company/developer-preview-context'
 import { cn, emptyList } from '@/lib/utils'
 import { NotificationPanel } from './NotificationPanel'
-import { useMeetingNotices } from '@/features/meetings/use-meeting-notices'
 import { DeveloperPreviewBar, DeveloperPreviewProvider } from './DeveloperPreview'
 import { useWorkspaceOverlayHost } from './use-workspace-overlay-host'
 import { ReleaseAccessProvider, useReleaseAccess } from './release-access-context'
 import { useLeaveUsageNotices } from '@/features/operations-support/use-leave-usage-notices'
-import { leaveNoticeItems } from '@/features/operations-support/leave-usage-notices'
 import { LeaveUsageNoticeReceiver } from '@/features/operations-support/LeaveUsageNoticeReceiver'
 
 type OpenPanel = 'chat' | 'notifications'
@@ -64,13 +60,18 @@ function ReleasedHeaderActions() {
   const notificationTitleId = useId()
   const [open, setOpen] = useState<OpenPanel | null>(null)
   const [requestedRoom,setRequestedRoom]=useState<RequestedConversation|null>(null)
-  const cache=useQueryClient()
-  const meetingNotices=useMeetingNotices()
+  const homeNotices=useMyHomeNotifications({coordinator:true})
   const leaveNotices=useLeaveUsageNotices()
-  const lateNotices=useLateStatementNotices(profile?.status === 'active')
-  const [notificationError,setNotificationError]=useState<string|null>(null)
+  const [noticeParams,setNoticeParams]=useSearchParams()
+  const openLeaveNotice=useRef(leaveNotices.open);openLeaveNotice.current=leaveNotices.open
+  const requestedLeave=noticeParams.get('leaveNotice')
+  useEffect(()=>{
+    if (!requestedLeave || !leaveNotices.records.some(row=>row.id===requestedLeave)) return
+    void openLeaveNotice.current(requestedLeave)
+    setNoticeParams(previous=>{const next=new URLSearchParams(previous);next.delete('leaveNotice');return next},{replace:true})
+  },[requestedLeave,leaveNotices.records,setNoticeParams])
   const { container: overlayContainer, restoreFocus } = useWorkspaceOverlayHost(open !== null)
-  const notifications = useMemo(() => [...meetingNotices.items.filter(item => releaseLink(item.href) !== null), ...leaveNoticeItems(leaveNotices.records), ...lateNotices.items.filter(item => releaseLink(item.href) !== null)].sort((a,b) => b.createdAt.localeCompare(a.createdAt)), [meetingNotices.items, releaseLink, leaveNotices.records, lateNotices.items])
+  const notifications = useMemo(() => homeNotices.items.filter(item => releaseLink(item.href) !== null), [homeNotices.items,releaseLink])
   useEffect(()=>{
     function receive(event:Event){
       const detail=(event as CustomEvent<RequestedConversation>).detail
@@ -83,7 +84,7 @@ function ReleasedHeaderActions() {
   useEffect(()=>{setRequestedRoom(null);setOpen(null)},[profile?.id])
 
   const notificationCount = useMemo(
-    () => notifications.filter((item) => !item.readAt).length,
+    () => notifications.filter((item) => item.current!==false&&!item.readAt).length,
     [notifications],
   )
   const chatCount = useMemo(
@@ -130,31 +131,9 @@ function ReleasedHeaderActions() {
     }
   }, [closePanel, open])
 
-  async function markMeetingRead(id:string|null) {
-    try {await readMeetingInvitation(id);setNotificationError(null);await cache.invalidateQueries({queryKey:['meeting-invitations']})}
-    catch(error){console.warn('[meetings] 참석 요청 읽음 처리 실패',{error});setNotificationError('참석 요청을 읽음으로 표시하지 못했습니다. 다시 시도해 주세요.')}
-  }
-  function markAllRead() {
-    if(notifications.some(item=>item.kind==='meeting_invitation' && !item.readAt)) void markMeetingRead(null)
-    if(notifications.some(item=>item.kind==='leave_usage_notice' && !item.readAt)) void leaveNotices.markAllRead()
-    if(notifications.some(item => (item.kind==='late_statement_manager' || item.kind==='late_statement_confirmed') && !item.readAt)) {
-      void readLateStatementNotice('all', null).then(() => cache.invalidateQueries({ queryKey: ['late-statement-notices'] })).catch(error => { console.warn('[late-arrival] 사유서 알림 읽음 실패', error); setNotificationError('지각 사유서 알림을 읽음으로 표시하지 못했습니다.') })
-    }
-  }
-
   function openNotification(item: InboxNotification) {
-    if(item.kind==='leave_usage_notice') { setOpen(null);void leaveNotices.open(item.id);return }
-    if(item.kind==='late_statement_manager' || item.kind==='late_statement_confirmed') {
-      const href = releaseLink(item.href)
-      if (!href) return
-      void readLateStatementNotice(item.kind === 'late_statement_manager' ? 'manager' : 'employee', item.id).then(() => cache.invalidateQueries({ queryKey: ['late-statement-notices'] })).catch(error => console.warn('[late-arrival] 사유서 알림 읽음 실패', error))
-      setOpen(null)
-      navigate(href)
-      return
-    }
-    const href = releaseLink(item.href)
+    const href=releaseLink(item.href)
     if (!href) return
-    if(item.kind==='meeting_invitation') void markMeetingRead(item.id)
     setOpen(null)
     navigate(href)
   }
@@ -188,7 +167,7 @@ function ReleasedHeaderActions() {
         buttonRef={bellButtonRef}
         label={open === 'notifications' ? '알림 닫기' : '알림'}
         pressed={open === 'notifications'}
-        badge={inboxBadgeLabel(notificationCount)}
+        badge={myHomeNotificationSummary(notifications).pending>0?`${inboxBadgeLabel(myHomeNotificationSummary(notifications).pending)}${notificationCount>0?' •':''}`:(notificationCount>0?'•':null)}
         controls={
           open === 'notifications' ? 'workspace-notification-panel' : undefined
         }
@@ -227,11 +206,10 @@ function ReleasedHeaderActions() {
           <NotificationPanel
             items={notifications}
             titleId={notificationTitleId}
-            onMarkAllRead={markAllRead}
             onOpen={openNotification}
             onClose={closePanel}
           />
-          {notificationError || meetingNotices.error || leaveNotices.error || lateNotices.error ? <p role="alert" className="rounded border border-danger bg-card p-2 text-xs text-danger">{notificationError ?? leaveNotices.error ?? lateNotices.error ?? '회의 참석 요청을 불러오지 못했습니다.'}</p> : null}
+          {homeNotices.error || leaveNotices.error ? <p role="alert" className="rounded border border-danger bg-card p-2 text-xs text-danger">{leaveNotices.error ?? (homeNotices.error instanceof Error ? homeNotices.error.message : '알림을 불러오지 못했습니다.')}</p> : null}
         </div>, overlayContainer,
       ) : null}
     </div>

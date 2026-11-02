@@ -2,6 +2,9 @@
 
 이 저장소에서는 먼저 `AGENTS.md`를 따른다.
 
+업무 알림 작업은 `AGENTS.md`의 「업무 알림과 My home 연결」을 따른다.
+종합 알림과 해당 탭의 읽음·처리 대기를 함께 설계하고 양방향 동기화를 검증한다.
+
 Cursor·Claude·Codex는 모두 원래 폴더
 `C:\Users\dbstj\OneDrive\바탕 화면\Masmarulez\코딩\Atelier`의 `261102-2`에서 작업한다.
 새 브랜치·worktree·별도 clone·복사 폴더를 임의로 만들지 않는다. 각자 맡은 파일·구간만 수정하고
