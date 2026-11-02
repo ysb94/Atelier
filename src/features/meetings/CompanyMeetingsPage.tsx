@@ -640,8 +640,8 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
                                 !canDetail && 'cursor-default',
                                 caption &&
                                   'border border-dashed border-foreground/25 text-muted-foreground',
-                                caption === '참석 불가' && 'border-danger/40 text-danger',
-                                caption === '참석 응답 대기' && 'border-amber-400/70 text-amber-800',
+                                caption?.startsWith('불참 ') && 'border-warning/40 text-warning',
+                                caption?.includes('응답 대기') && 'border-warning/40 text-warning',
                               )}
                               onClick={() => {
                                 if (!canDetail) return

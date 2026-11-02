@@ -145,12 +145,14 @@ export function formatRoundListLabel(
 export function roundListCaption(
   round: Pick<MeetingRound, 'startsAt' | 'content' | 'responses' | 'manualConfirmation'>,
   memberIds: readonly string[],
-): '회의 안내 미작성' | '일정 미확정' | '참석 응답 대기' | '참석 불가' | '수동 확정 · 불참자 제외' | null {
+): string | null {
   if (isPendingRound(round)) return (round.content ?? '').trim() ? '일정 미확정' : '회의 안내 미작성'
   if (round.manualConfirmation) return '수동 확정 · 불참자 제외'
   if (memberIds.length === 0) return null
   const statuses = memberIds.map((id) => round.responses?.find((response) => response.profileId === id)?.status ?? 'pending')
-  if (statuses.some((status) => status === 'unavailable')) return '참석 불가'
+  const unavailable = statuses.filter(status => status === 'unavailable').length
+  const pending = statuses.filter(status => status === 'pending').length
+  if (unavailable) return pending ? `불참 ${unavailable}명 · 응답 대기 ${pending}명` : `불참 ${unavailable}명 · 진행 확인 필요`
   if (statuses.every((status) => status === 'available')) return null
   return '참석 응답 대기'
 }
