@@ -9,6 +9,7 @@ import { useAuth } from '@/lib/supabase/auth'
 import { listMeetingAvailability, listMeetingCalendar } from '@/lib/supabase/meetings'
 import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
 import { MeetingAvailabilityTable } from './MeetingAvailabilityTable'
+import { MeetingTimeTableHeader } from './MeetingTimeTableHeader'
 import { availabilityConfirmationKey, availabilityMinutes, overlapsAvailability, type MeetingAvailability } from './meeting-availability'
 import { cn, emptyList } from '@/lib/utils'
 import { type MeetingDraft, type MeetingPerson, type MeetingRoom, parseDateKey, toDateKey } from './meeting-schedule'
@@ -131,10 +132,11 @@ export function MeetingSchedulePicker({rooms,value,onChange,durationMinutes,atte
         <p className="font-medium">회의실별 시간표 · 평일 09~19시, 30분 단위</p>
         <p className="flex gap-3"><span className="text-emerald-700">초록: 빈 시간</span><span className="text-red-700">빨강: 예약·일정 충돌</span><span className="text-amber-800">노랑: 승인 대기</span><span className="text-sky-700">파랑 테두리: 선택</span></p>
       </div>
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <p className="text-xs text-muted-foreground">시간은 세로 경계선을 가리킵니다. 09:00 선 오른쪽 첫 칸은 09:00~09:30입니다.</p>
+      <div className="overflow-x-auto rounded-lg border border-border"><div className="meeting-time-grid-inner">
         <table className="w-full min-w-[960px] table-fixed border-collapse text-center text-[10px]">
           <caption className="sr-only">회의실별 예약 시간과 빈 시간</caption>
-          <thead><tr><th scope="col" className="w-24 bg-muted p-2 text-left">회의실</th>{clocks.map(clock=><th key={clock} scope="col" className="border-l border-border bg-muted py-2 font-normal tabular-nums">{clock}</th>)}</tr></thead>
+          <MeetingTimeTableHeader label="회의실" clocks={clocks}/>
           <tbody>{rooms.map(item=><tr key={item.id}>
             <th scope="row" className="border-t border-border p-2 text-left text-xs">{item.name}</th>
             {clocks.map(clock=>{
@@ -154,7 +156,7 @@ export function MeetingSchedulePicker({rooms,value,onChange,durationMinutes,atte
             })}
           </tr>)}</tbody>
         </table>
-      </div>
+      </div></div>
     </div>
     {attendancePending?<p role="status" className="text-xs">멤버 일정을 확인하는 중입니다.</p>:attendanceError?<p role="alert" className="text-xs text-danger">멤버 일정을 불러오지 못했습니다. <button type="button" className="underline" onClick={()=>void attendance.refetch()}>다시 조회</button></p>:<MeetingAvailabilityTable attendees={attendees} rows={rows} clocks={clocks} clock={value.clock} duration={durationMinutes ?? 60} canChoose={canChoose} onChoose={clock=>{if(canChoose(clock))onChange({...value,clock})}}/>}
     {conflicts.length>0?<label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={acknowledged===acknowledgmentKey} onChange={event=>setAcknowledged(event.target.checked?acknowledgmentKey:null)}/>멤버의 겹치는 일정을 확인했으며 이 시간으로 진행합니다.</label>:null}

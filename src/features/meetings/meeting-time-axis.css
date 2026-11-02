@@ -1,0 +1,7 @@
+/* End labels extend into this gutter without being clipped by horizontal scroll. */
+.meeting-time-grid-inner { min-width: 1000px; padding-inline: 20px; }
+.meeting-time-axis-cell { position: relative; height: 40px; padding: 0; }
+.meeting-time-axis-label { position: absolute; left: 0; bottom: 12px; transform: translateX(-50%); white-space: nowrap; }
+.meeting-time-axis-tick { position: absolute; left: 0; bottom: 0; height: 9px; border-left-width: 1px; }
+.meeting-time-axis-label.is-end { left: auto; right: 0; transform: translateX(50%); }
+.meeting-time-axis-tick.is-end { left: auto; right: 0; }
