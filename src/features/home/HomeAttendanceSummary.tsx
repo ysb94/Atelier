@@ -6,9 +6,10 @@ import { type PersonalRequest } from '@/features/settings/personal-requests'
 import { listMyExtraLeave } from '@/lib/supabase/employee-extra-leave'
 import { listLeaveRequests } from '@/lib/supabase/leave-requests'
 import { getMyAttendanceBasis } from '@/lib/supabase/my-attendance-basis'
+import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
 import { useAuth } from '@/lib/supabase/auth'
 import { emptyList } from '@/lib/utils'
-import { approvedOvertimeHours, countMyLateDays } from './my-attendance-summary'
+import { actualOvertimeHours, countMyLateDays } from './my-attendance-summary'
 import { useMyClockIn } from './use-my-clock-in'
 import './company-home.css'
 
@@ -78,27 +79,37 @@ export function HomeAttendanceSummary() {
     queryKey: ['home-my-leave', userId, dates[0], dates[dates.length - 1]],
     queryFn: () => listLeaveRequests(userId, false, { from: dates[0], to: dates[dates.length - 1] }),
     enabled: allowed && active,
+    refetchInterval: allowed && active ? 30_000 : false,
+  })
+  const lunch = useQuery({
+    queryKey: ['company-work-hours'],
+    queryFn: loadCompanyLunch,
+    enabled: allowed && active,
+    refetchInterval: allowed && active ? 30_000 : false,
   })
   useEffect(() => {
     if (leaves.error) console.warn('[home-attendance] 이번 달 신청 조회 실패', leaves.error)
-  }, [leaves.error])
+    if (lunch.error) console.warn('[home-attendance] 점심시간 조회 실패', lunch.error)
+  }, [leaves.error, lunch.error])
   const requests = leaves.data ?? emptyList<PersonalRequest>()
   const basisRow = basis.data
+  const lunchHours = lunch.data
   const summary = useMemo(() => ({
     late: basisRow ? countMyLateDays(clock.rows.filter(row => row.date.startsWith(month)), basisRow.start, basisRow.grace, today) : null,
-    overtime: approvedOvertimeHours(requests, month),
-  }), [basisRow, clock.rows, month, today, requests])
+    overtime: lunchHours ? actualOvertimeHours(clock.rows, requests, lunchHours.start, lunchHours.end, month, today) : 0,
+  }), [basisRow, clock.rows, month, today, requests, lunchHours])
   const lateLoading = !clock.exempt && (clock.loading || (allowed && basis.isPending))
   const leaveLoading = allowed && basis.isPending
-  const overtimeLoading = allowed && leaves.isPending
+  const overtimeLoading = allowed && (clock.loading || leaves.isPending || lunch.isPending)
+  const overtimeError = Boolean(clock.queryError || leaves.error || lunch.error)
 
   return <details className="home-attendance-summary">
     <summary><h2>내 근태 현황</h2></summary>
     <dl>
       <div><dt>이번 달 지각</dt><dd>{clock.exempt ? '제외' : lateLoading ? '…' : basis.isError ? '조회 실패' : summary.late == null ? '기준 미설정' : amount(summary.late, '회')}</dd></div>
       <div><dt>남은 연차</dt><dd className={basisRow?.additionalAnnualLeave != null && basisRow.additionalAnnualLeave > 0 ? 'is-split' : undefined}>{leaveLoading ? '…' : basis.isError ? '조회 실패' : basisRow?.additionalAnnualLeave != null && basisRow.additionalAnnualLeave > 0 && basisRow.baseAnnualLeave != null ? <AdditionalLeaveHistory userId={userId}>{remainingLeaveAmount(basisRow.baseAnnualLeave, basisRow.additionalAnnualLeave, basisRow.remainingAnnualLeave)}</AdditionalLeaveHistory> : remainingLeaveAmount(basisRow?.baseAnnualLeave, basisRow?.additionalAnnualLeave, basisRow?.remainingAnnualLeave ?? null)}</dd></div>
-      <div><dt>이번 달 야근</dt><dd>{overtimeLoading ? '…' : leaves.isError ? '조회 실패' : amount(summary.overtime, '시간')}</dd></div>
+      <div><dt>이번 달 야근</dt><dd>{overtimeError ? '조회 실패' : overtimeLoading ? '…' : amount(summary.overtime, '시간')}</dd></div>
     </dl>
-    <p>월별 출퇴근 기록은 My home에서 확인하세요.</p>
+    <p>야근은 실제 출퇴근 기록으로 집계하며, 퇴근 미기록은 제외합니다. 월별 기록은 My home에서 확인하세요.</p>
   </details>
 }
