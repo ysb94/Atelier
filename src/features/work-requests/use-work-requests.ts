@@ -10,14 +10,15 @@ import { WORK_REQUEST_DEPARTMENT_IDS, type WorkRequestOwner } from './work-reque
 import type { LocalTeamMember, WorkRequestRecord } from './work-request-types'
 import type { WorkTimeLog } from './work-request-schedule'
 
-export function useWorkRequests(owner: WorkRequestOwner) {
+export function useWorkRequests(owner: WorkRequestOwner, requestId?: string, skipList = false) {
   const { profile, session }=useAuth()
   const actorId=profile?.id??''
   const active=Boolean(actorId && profile?.status==='active' && session?.user.id===actorId)
   const actorRef=useRef(actorId);actorRef.current=actorId
+  const dataScope=useRef(actorId+':'+owner)
   const queryClient=useQueryClient()
   const access=useBasicWorkAccess()
-  const query=useQuery({queryKey:['work-requests',actorId,owner],queryFn:()=>listWorkRequests(actorId,owner),enabled:active,retry:false})
+  const query=useQuery({queryKey:['work-requests',actorId,owner,requestId],queryFn:()=>listWorkRequests(actorId,owner,requestId),enabled:active&&!skipList,retry:false})
   const directory=useQuery({queryKey:['orgChartMembers',actorId],queryFn:listOrgChartMembers,enabled:active,retry:false})
   const [requests,setLocal]=useState<WorkRequestRecord[]>([])
   const [error,setError]=useState<string|null>(null)
@@ -29,8 +30,8 @@ export function useWorkRequests(owner: WorkRequestOwner) {
   const revisions=useRef(new Map<string,number>())
   const [currentWorkByMember,setLocalCurrent]=useState<Record<string,string>>({})
   const [workTimeByKey,setWorkTimeByKey]=useState<Record<string,WorkTimeLog>>({})
-  const refresh=useCallback(()=>queryClient.invalidateQueries({queryKey:['work-requests',actorId]}),[queryClient,actorId])
-  useEffect(()=>{requestsRef.current=[];setLocal([]);revisions.current.clear();setLocalCurrent({});setWorkTimeByKey({});setError(null)},[actorId,owner])
+  const refresh=useCallback(async()=>{await Promise.all([queryClient.invalidateQueries({queryKey:['work-requests',actorId]}),queryClient.invalidateQueries({queryKey:['department-work',actorId]})])},[queryClient,actorId])
+  useEffect(()=>{dataScope.current=actorId+':'+owner;requestsRef.current=[];setLocal([]);revisions.current.clear();setLocalCurrent({});setWorkTimeByKey({});setError(null)},[actorId,owner])
   useEffect(()=>{
     if(!active || !query.data || pending.current)return
     requestsRef.current=query.data.requests;setLocal(query.data.requests)
@@ -68,5 +69,5 @@ export function useWorkRequests(owner: WorkRequestOwner) {
   },[enqueue,actorId,owner])
   const members=directory.data??emptyList<NonNullable<typeof directory.data>[number]>()
   const teamMembers:LocalTeamMember[]=members.filter(member=>member.departmentId===WORK_REQUEST_DEPARTMENT_IDS[owner]).map(member=>({id:member.id,name:member.displayName||'직원',position:member.position??'',isSelf:member.id===actorId}))
-  return {requests:active?(saving?requests:query.data?.requests??requests):emptyList<WorkRequestRecord>(),setRequests,currentWorkByMember,workTimeByKey,setCurrentWorkByMember,setWorkTimeByKey,teamMembers,canManage:Boolean(access.access?.manageOwners.includes(owner)),managerAvailable:query.data?.managerAvailable??false,loading:query.isPending||access.isPending,loadError:query.error?.message??directory.error?.message??access.error?.message??null,error:error??query.error?.message??directory.error?.message??access.error?.message??null,saving,waitForSaves:()=>queue.current.then(()=>lastSaveError.current===null),retry:()=>{setError(null);return refresh()}}
+  return {requests:active&&dataScope.current===actorId+':'+owner?(saving?requests:query.data?.requests??requests):emptyList<WorkRequestRecord>(),setRequests,currentWorkByMember,workTimeByKey,setCurrentWorkByMember,setWorkTimeByKey,teamMembers,canManage:Boolean(access.access?.manageOwners.includes(owner)),managerAvailable:query.data?.managerAvailable??false,loading:(!skipList&&query.isPending)||access.isPending,loadError:query.error?.message??directory.error?.message??access.error?.message??null,error:error??query.error?.message??directory.error?.message??access.error?.message??null,saving,waitForSaves:()=>queue.current.then(()=>lastSaveError.current===null),retry:()=>{setError(null);return refresh()}}
 }

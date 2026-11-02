@@ -536,7 +536,7 @@ console.info('PASS: 삭제·존재하지 않는 ID·잘못된 mode·생성/수�
   assert.doesNotMatch(page, /setSearchParams|setScreen\(|setDetailRequestId\(/)
   assert.equal((page.match(/goToView\(\{ type: 'saved'/g) ?? []).length, 2, '수정·새 요청 저장 모두 saved(replace)여야 함')
   assert.match(page, /goToView\(\{ type: 'deleted' \}\)/)
-  assert.match(page, /needsReviewStart: canManage && request\.status === 'requested'/)
+  assert.match(page, /needsReviewStart: auxiliary && canManage && request\.status === 'requested'/)
   assert.match(page, /editable: isSelfRequest && request\.status === 'requested'/)
   assert.match(page, /const canEdit = isSelfRequest && selectedRequest\.status === 'requested'/)
   assert.match(page, /window\.confirm\('작성 중인 변경 내용을 지우고 돌아갈까요\?'\)/)

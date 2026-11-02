@@ -99,6 +99,8 @@ export type WorkRequestChatRoom = {
 }
 
 export type WorkRequestRecord = {
+  kind?: 'request' | 'internal'
+  departmentReadable?: boolean
   categoryAssignments?: { categoryId: string; label: string; assigneeId: string; assignedBy: string; assignedAt: string; formFields?: import('./visual-request-config').VisualField[] }[]
   id: string
   requesterId?: string

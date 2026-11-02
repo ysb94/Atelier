@@ -23,6 +23,8 @@
     "verify:workspace-tabs": "node scripts/verify-workspace-tabs.mjs",
     "verify:spin360": "tsx src/features/spin360/spin-core.verify.ts && node scripts/verify-tripo-form-browser.mjs",
     "verify:spin360-ai": "node scripts/verify-spin360-browser.mjs --ai",
+    "verify:department-work": "node --experimental-strip-types scripts/verify-department-work.mjs",
+    "verify:department-work-browser": "node scripts/verify-department-work-browser.mjs",
     "verify:work-request-navigation": "node --experimental-strip-types scripts/verify-work-request-navigation.mjs",
     "verify:work-request-settings": "node scripts/verify-work-request-settings.mjs",
     "verify:work-request-managers": "node scripts/verify-work-request-managers.mjs",

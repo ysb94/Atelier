@@ -54,9 +54,9 @@ export function releaseHref(profile: ReleaseProfile | null | undefined, href: st
   if (url.origin !== 'https://atelier.invalid' || !href.startsWith('/') || href.startsWith('//')) return null
   const scope = releaseAccess(profile)
   if (scope.unrestricted) return href
-  if (url.pathname.replace(/\/$/, '') === '/work' || url.pathname === '/work-requests' || url.pathname.startsWith('/work-requests/') || (url.pathname === RELEASE_HOME && url.searchParams.get('part') === 'work')) return null
+  if (url.pathname.replace(/\/$/, '') === '/work' || url.pathname === '/work-requests' || (url.pathname === RELEASE_HOME && url.searchParams.get('part') === 'work')) return null
   const path = url.pathname.replace(/\/$/, '') || '/'
-  if (profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID && /^\/work-requests\/(planning|design|md|logistics)$/.test(path)) return href
+  if (/^\/work-requests\/(planning|design|md|logistics)$/.test(path)) return scope.departmentSite?.pages.some(page => page === path) || (scope.logistics && path === '/work-requests/logistics') ? href : null
   if (path === RELEASE_HOME) return releasePersonalPart(profile, url.searchParams.get('part'), approver) ? href : null
   if (/^\/chat\/room\/[^/]+$/.test(path)) return href
   if (path === '/meetings') { url.pathname = RELEASE_HOME; url.searchParams.set('part', 'meetings'); return url.pathname + url.search }

@@ -1,3 +1,4 @@
+import { DepartmentWorkBoard } from './DepartmentWorkBoard'
 import { useWorkRequests } from './use-work-requests'
 import {
   Fragment,
@@ -1924,7 +1925,11 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const config = WORK_REQUEST_CONFIG[owner]
   const { profile, ready } = useAuth()
   const selfId=profile?.id??''
-  const storage=useWorkRequests(owner)
+  const workLocation = useLocation()
+  const detailId = new URLSearchParams(workLocation.search).get('requestId') ?? undefined
+  const auxiliary = new URLSearchParams(workLocation.search).get('aux') === '1'
+  const internal = new URLSearchParams(workLocation.search).get('internal') === '1'
+  const storage=useWorkRequests(owner, auxiliary ? undefined : detailId, !auxiliary && !detailId)
   const visualSettings = useWorkRequestSettings(owner === 'design')
   const visualCategories = visualSettings.data?.categories ?? DEFAULT_VISUAL_CATEGORIES
   const {requests,setRequests,currentWorkByMember,setCurrentWorkByMember,workTimeByKey,setWorkTimeByKey,teamMembers}=storage
@@ -2004,9 +2009,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
           (request.assignee === selfId ||
             request.collaborators.includes(selfId))
         : isSelfRequest)
-    if (!visible) return null
+    if (!visible && !request.departmentReadable) return null
     return {
-      needsReviewStart: canManage && request.status === 'requested',
+      needsReviewStart: auxiliary && canManage && request.status === 'requested',
       editable: isSelfRequest && request.status === 'requested',
     }
   }
@@ -2256,6 +2261,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         {
           id,
           requesterId:selfId,
+          kind: internal ? 'internal' : 'request',
           owner,
           brandId: formBrandId,
           brandDecidedAt: formBrandId ? now : '',
@@ -2472,11 +2478,11 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     if(result===null)return
     updateRequest(request.id, {
       completionResult:result.trim(),
-      status: nextCompletionStatus(request),
+      status: request.kind === 'internal' && request.requesterId === selfId && request.assignee === selfId ? 'completed' : nextCompletionStatus(request),
       completionRequestedAt: new Date().toISOString(),
     })
     setFlashMessage(
-      needsLeadCompletionReview(request)
+      request.kind === 'internal' && request.requesterId === selfId && request.assignee === selfId ? '업무를 완료했습니다.' : needsLeadCompletionReview(request)
         ? '완료를 요청했습니다. 업무 관리 담당자 확인을 기다립니다.'
         : '완료를 요청했습니다. 요청자 확인을 기다립니다.',
     )
@@ -2527,7 +2533,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const destinationRequests = requests.filter(
     (request) => request.owner === owner && matchesBrandFilter(request),
   )
-  const incomingRequests = destinationRequests.filter(request=>request.requesterId!==selfId)
+  const incomingRequests = destinationRequests
   const sentRequests = destinationRequests.filter((request) =>
     (request.requesterId === selfId),
   )
@@ -3002,6 +3008,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     )
   }
 
+  if (!auxiliary && (view.kind === 'list' || view.kind === 'detail')) return <><DepartmentWorkBoard owner={owner} />{storage.error ? <p role="alert" className="p-4 text-danger">{storage.error}<Button onClick={() => void storage.retry()}>다시 조회</Button></p> : null}{renderDetailPanel()}{acceptingRequest ? <WorkRequestAcceptDialog request={acceptingRequest} selfId={selfId} teamMembers={teamMembers} onClose={() => setAcceptRequestId(null)} onConfirm={decision => acceptRequest(acceptingRequest, decision)} /> : null}</>
+
   if (storage.loading) return <p role="status" className="p-4 text-sm text-muted-foreground">업무와 권한을 불러오는 중...</p>
   if (storage.loadError) return <Card><CardContent className="p-5"><p role="alert" className="text-sm text-danger">{storage.error}</p><Button className="mt-3" onClick={()=>void storage.retry()}>다시 조회</Button></CardContent></Card>
   if (view.kind === 'list' || view.kind === 'detail') {
@@ -3074,7 +3082,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
       <div ref={pageTopRef}>
         {storage.error?<p role="alert" className="mb-3 rounded-xl border border-danger/30 bg-card p-3 text-sm text-danger">{storage.error}<button type="button" className="ml-2 underline" onClick={()=>void storage.retry()}>다시 조회</button></p>:null}
         {storage.saving?<p role="status" className="mb-3 text-sm text-muted-foreground">서버에 저장 중...</p>:null}
-        {!storage.managerAvailable?<p role="status" className="mb-3 rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground">이 부서의 업무 관리 담당자 지정이 필요합니다. 요청은 대기 상태로 저장되며 자동 수락되지 않습니다.</p>:null}
+        {!internal && !storage.managerAvailable?<p role="status" className="mb-3 rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground">이 부서의 업무 관리 담당자 지정이 필요합니다. 요청은 대기 상태로 저장되며 자동 수락되지 않습니다.</p>:null}
         <PageHeader
           title={
             canManage
@@ -3986,13 +3994,11 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                             size="sm"
                             onClick={() => requestCompletion(selectedRequest)}
                           >
-                            완료 요청
+                            {selectedRequest.kind === 'internal' && isSelfRequest ? '업무 완료' : '완료 요청'}
                           </Button>
                         ) : null}
                         <p className="text-xs text-muted-foreground">
-                          완료 요청 후 업무 관리 담당자가 수락하고, 요청자가 결과를
-                          확인하면 완료됩니다. 업무 관리 담당자가 직접 맡은 일은 바로
-                          요청자 확인으로 갑니다.
+                          {selectedRequest.kind === 'internal' && isSelfRequest ? '본인이 등록하고 담당하는 자체 업무는 직접 완료합니다.' : '완료 요청 후 기존 업무 검수와 요청자 확인을 거쳐 완료됩니다.'}
                         </p>
                       </>
                     )}
@@ -4041,13 +4047,13 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     <div ref={pageTopRef}>
         {storage.error?<p role="alert" className="mb-3 rounded-xl border border-danger/30 bg-card p-3 text-sm text-danger">{storage.error}<button type="button" className="ml-2 underline" onClick={()=>void storage.retry()}>다시 조회</button></p>:null}
         {storage.saving?<p role="status" className="mb-3 text-sm text-muted-foreground">서버에 저장 중...</p>:null}
-        {!storage.managerAvailable?<p role="status" className="mb-3 rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground">이 부서의 업무 관리 담당자 지정이 필요합니다. 요청은 대기 상태로 저장되며 자동 수락되지 않습니다.</p>:null}
+        {!internal && !storage.managerAvailable?<p role="status" className="mb-3 rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground">이 부서의 업무 관리 담당자 지정이 필요합니다. 요청은 대기 상태로 저장되며 자동 수락되지 않습니다.</p>:null}
       <form onSubmit={handleSubmit} noValidate>
         <PageHeader
           title={
             editingRequest
               ? `${config.teamName} 작업 요청 수정`
-              : owner === 'design' ? 'Visual Team 작업 요청' : `${config.teamName} 작업 요청 등록`
+              : owner === 'design' ? internal ? 'Visual Team 업무 등록' : 'Visual Team 작업 요청' : `${config.teamName} ${internal ? '업무' : '작업 요청'} 등록`
           }
           description={owner === 'design' ? '작업 분류를 선택하시면 입력 창이 뜹니다. (다중 선택 가능)' : config.description}
           actions={
@@ -4186,7 +4192,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               취소
             </Button>
             <Button type="submit" disabled={storage.saving || (owner === 'design' && (visualSettings.isPending || visualSettings.isError || !visualSettings.data?.available))}>
-              {editingRequest ? '수정 내용 저장' : '작업 요청 등록'}
+              {editingRequest ? '수정 내용 저장' : internal ? '업무 등록 · 바로 시작' : '작업 요청 등록'}
             </Button>
           </div>
         </div>

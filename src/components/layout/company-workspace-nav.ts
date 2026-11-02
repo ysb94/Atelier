@@ -74,13 +74,13 @@ export const companyNavGroups: CompanyNavGroup[] = [
     title: '기획',
     items: [
       { to: '/drafts', label: '기획안', icon: Lightbulb },
-      { to: '/work-requests/planning', label: '작업 요청', icon: ClipboardList },
+      { to: '/work-requests/planning', label: '부서 업무', icon: ClipboardList },
     ],
   },
   {
     title: 'Visual',
     items: [
-      { to: '/work-requests/design', label: '작업 요청', icon: ClipboardList },
+      { to: '/work-requests/design', label: '부서 업무', icon: ClipboardList },
       { to: '/design/work-request-management', label: '작업 요청 관리', icon: ClipboardCheck },
       { to: '/design/styled-cuts', label: '연출 컷 제작', icon: Camera },
       { to: '/design/file-manager', label: '이미지 업로드', icon: Images },
@@ -90,14 +90,14 @@ export const companyNavGroups: CompanyNavGroup[] = [
     title: 'MD',
     items: [
       { to: '/product-work/md', label: '상품 정보', icon: LayoutGrid },
-      { to: '/work-requests/md', label: '작업 요청', icon: ClipboardList },
+      { to: '/work-requests/md', label: '부서 업무', icon: ClipboardList },
     ],
   },
   {
     title: '물류',
     items: [
       { to: '/product-work/logistics', label: '상품 정보', icon: Boxes },
-      { to: '/work-requests/logistics', label: '작업 요청', icon: ClipboardList },
+      { to: '/work-requests/logistics', label: '부서 업무', icon: ClipboardList },
       { to: '/logistics/invoices', label: '온라인 송장작업', icon: FileSpreadsheet },
       {
         to: '/logistics/barcode-outbound-data-entry',

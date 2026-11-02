@@ -47,8 +47,8 @@ function decode(value: unknown, files: Map<string,File>): unknown {
   }
   return value
 }
-export async function listWorkRequests(actorId: string, owner?: WorkRequestOwner): Promise<WorkRequestSnapshot> {
-  const snapshot=await rpc<WorkRequestSnapshot | null>('list_work_requests',{p_owner:owner??null})
+export async function listWorkRequests(actorId: string, owner?: WorkRequestOwner, requestId?: string): Promise<WorkRequestSnapshot> {
+  const snapshot=await rpc<WorkRequestSnapshot | null>(requestId?'get_department_work':'list_work_requests',requestId?{p_id:requestId}:{p_owner:owner??null})
   if(!snapshot)throw new Error('직원 세션을 확인해 주세요.')
   if(downloadActor!==actorId){downloads.clear();downloadActor=actorId}
   const allFiles=new Map<string,File>()
@@ -73,10 +73,13 @@ export async function listWorkRequests(actorId: string, owner?: WorkRequestOwner
 const PATCH_FIELDS = ['values','brandId','status','managerPriority','assignee','collaborators','confirmedDueDate','plannedStart','plannedEnd','completionResult'] as const
 export async function saveWorkRequestChange(before: WorkRequestRecord | undefined, next: WorkRequestRecord, revision?: number): Promise<number> {
   let expected=revision??before?.revision??1
-  if(!before)expected=await rpc<number>('begin_work_request',{p_id:next.id,p_owner:next.owner})
+  if(!before)expected=await rpc<number>(next.kind==='internal'?'begin_department_work':'begin_work_request',{p_id:next.id,p_owner:next.owner})
   const patch: Record<string,unknown>={}
   for(const key of PATCH_FIELDS)if((before ? comparison(before[key])!==comparison(next[key]) : ['values','brandId','status'].includes(key)) && next[key]!==undefined)patch[key]=await encode(next[key],next.id)
-  if(Object.keys(patch).length)expected=await rpc<number>('save_work_request',{p_id:next.id,p_revision:expected,p_patch:patch,p_command:crypto.randomUUID()})
+  const selfCompletion = before?.kind==='internal' && before.requesterId===before.assignee && next.status==='completed' && before.status!=='completed'
+  if(selfCompletion)delete patch.status
+  if(Object.keys(patch).length)expected=await rpc<number>(!before && next.kind==='internal'?'save_department_work':'save_work_request',{p_id:next.id,p_revision:expected,p_patch:patch,p_command:crypto.randomUUID()})
+  if(selfCompletion)expected=await rpc<number>('complete_department_work',{p_id:next.id,p_revision:expected,p_command:crypto.randomUUID()})
   for(const message of next.messages)if(!before?.messages.some(item=>item.id===message.id))await sendWorkRequestMessage(next.id,message)
   return expected
 }
