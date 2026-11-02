@@ -10,6 +10,10 @@ setup=setup.replace("try{\n await db.exec('reset role');", "try{\n for(const nam
 setup=setup.replace('page.setDefaultTimeout(15000)', 'page.setDefaultTimeout(60000);page.setDefaultNavigationTimeout(90000)')
 const checks=String.raw`
  page.on('console',message=>{if(message.type()==='warning'||message.type()==='error')console.warn('[department-browser]',message.text())})
+ await page.goto(origin+'/work-requests/planning?actor=planner')
+ const table=page.getByRole('table',{name:'부서별 팀 업무 목록'})
+ for(const department of ['Visual','MD','기획','물류'])await table.getByRole('rowgroup',{name:department+' 요청 업무',exact:true}).waitFor()
+ assert.equal(await table.getByText('등록된 업무가 없습니다.',{exact:true}).count(),4)
  await page.goto(origin+'/work-requests/planning?actor=planner&mode=new&internal=1')
  await page.locator('#work-request-title').fill('부서 자체 업무 브라우저 검증')
  await page.locator('input[type=date]').first().fill('2030-01-01')
@@ -23,6 +27,8 @@ const checks=String.raw`
  await page.getByRole('dialog',{name:'담당자 필터 선택'}).getByRole('checkbox',{name:'미정',exact:true}).check()
  await page.getByRole('button',{name:'선택한 1개 필터 적용'}).click()
  await page.getByText('조건에 맞는 업무가 없습니다.',{exact:true}).waitFor()
+ for(const department of ['Visual','MD','기획','물류'])assert.equal(await table.getByRole('rowgroup',{name:department+' 요청 업무',exact:true}).count(),1)
+ await table.getByText('현재 조건에 해당하는 업무가 없습니다.',{exact:true}).waitFor()
  await page.getByRole('button',{name:'초기화',exact:true}).click()
  await page.getByRole('link',{name:'부서 자체 업무 브라우저 검증',exact:true}).click()
  const requestId=new URL(page.url()).searchParams.get('requestId')
@@ -30,6 +36,7 @@ const checks=String.raw`
  await page.getByText('같은 부서에서 공유할 업무 내용',{exact:true}).first().waitFor()
  assert.equal(await page.getByRole('button',{name:'업무 완료',exact:true}).count(),0)
  await page.getByRole('button',{name:'상세 닫기',exact:true}).last().click()
+ await page.screenshot({path:'node_modules/.tmp/department-work-desktop.png',fullPage:true})
  await page.setViewportSize({width:390,height:844})
  await page.getByRole('link',{name:'부서 자체 업무 브라우저 검증',exact:true}).waitFor()
  await page.screenshot({path:'node_modules/.tmp/department-work-mobile.png',fullPage:true})
@@ -39,7 +46,7 @@ const checks=String.raw`
  await page.reload()
  await page.getByText('완료',{exact:true}).first().waitFor()
  assert.deepEqual(errors,[])
- console.log('PASS department browser: create, own start, peer content/read-only, filters, mobile, complete/reload; production network blocked')
+ console.log('PASS department browser: empty department headings, headings retained under filters, create, own start, peer read-only, desktop/mobile, complete/reload; production network blocked')
 }finally{await browser?.close();await server?.close();await db.close()}
 `
 await mkdir('node_modules/.tmp',{recursive:true})

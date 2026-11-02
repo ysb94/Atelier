@@ -1,8 +1,8 @@
 import { createPortal } from 'react-dom'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDownUp, Filter, Plus, X } from 'lucide-react'
+import { ArrowDownUp, Filter, Plus, Search, X } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -18,7 +18,7 @@ import { hasPermission } from '@/lib/company/permissions'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList } from '@/lib/utils'
 import { clearWorkFilters, filterDepartmentWork, type DepartmentWork, type WorkFilters } from './department-work'
-import { WORK_REQUEST_CONFIG, WORK_REQUEST_DEPARTMENT_IDS, type WorkRequestOwner } from './work-request-form-config'
+import { ownerFromDepartment, WORK_REQUEST_CONFIG, WORK_REQUEST_DEPARTMENT_IDS, type WorkRequestOwner } from './work-request-form-config'
 import { STATUS_META } from './work-request-types'
 
 function ColumnFilter({ label, options, selected, onApply }: { label: string; options: [string, string][]; selected: string[]; onApply: (value: string[]) => void }) {
@@ -82,8 +82,14 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
     const left = a[sort.field], right = b[sort.field]
     return (!left ? 1 : !right ? -1 : left.localeCompare(right) * sort.direction) || a.id.localeCompare(b.id)
   })
-  const groups = new Map<string, DepartmentWork[]>()
-  for (const row of visible) { const key = row.requesterDepartment || '부서 미정'; const group = groups.get(key); if (group) group.push(row); else groups.set(key, [row]) }
+  const departmentLabel = (name: string) => {
+    const department = ownerFromDepartment(name)
+    return department === 'design' ? 'Visual' : department ? WORK_REQUEST_CONFIG[department].teamName : name.trim() || '부서 미정'
+  }
+  const groups = new Map<string, DepartmentWork[]>(['Visual', 'MD', '기획', '물류'].map(name => [name, []]))
+  // Keep headings in place even when a department has no work or filters hide its rows.
+  for (const row of rows) { const key = departmentLabel(row.requesterDepartment); if (!groups.has(key)) groups.set(key, []) }
+  for (const row of visible) groups.get(departmentLabel(row.requesterDepartment))!.push(row)
   const dueSoon = active.filter(row => row.dueDate && new Date(row.dueDate + 'T23:59:59+09:00').getTime() - Date.now() < 3 * 86400000).length
   const departmentId = WORK_REQUEST_DEPARTMENT_IDS[owner]
   const canWriteNotice = hasPermission(profile, 'notice.department.write', 'department', departmentId) || hasPermission(profile, 'notice.department.write', 'company', profile?.companyId)
@@ -95,7 +101,45 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
     <Card className="p-4"><div className="flex items-center justify-between"><h2 className="font-semibold">팀 공지</h2>{canWriteNotice ? <Button size="sm" variant="outline" onClick={() => { setNoticeError(''); setNoticeDraft({title:'',body:''}) }}>공지 등록</Button> : null}</div>{notices.isError ? <p role="alert">공지를 불러오지 못했습니다.<button type="button" onClick={() => void notices.refetch()}>다시 조회</button></p> : teamNotices.map(notice => <details key={notice.id} className="border-t border-border py-3"><summary>{notice.title}</summary><p className="mt-2 whitespace-pre-wrap text-sm">{notice.body}</p></details>)}{!teamNotices.length && !notices.isError ? <p className="mt-3 text-sm text-muted-foreground">등록된 팀 공지가 없습니다.</p> : null}</Card>
     <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">{[['mine', '내 업무'], ['team', '팀 업무'], ['inbox', '접수 대기'], ['progress', '진행 중'], ['completion', '완료 대기']].map(([id, label]) => <button type="button" key={id} aria-pressed={section === id} onClick={() => setSection(id)}><StatTile label={label} value={active.filter(row => inSection(row, id)).length} accent={section === id} /></button>)}</div>
     {dueSoon ? <p className="text-sm text-danger">마감 임박·초과 {dueSoon}건</p> : null}
-    <div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><h2 className="font-semibold">팀 업무 목록</h2><Link to="?mode=new&internal=1"><Button size="sm"><Plus className="size-4" />업무 등록</Button></Link></div><div className="flex items-center gap-2"><Input aria-label="업무 검색" placeholder="업무 검색" value={search} onChange={event => setSearch(event.target.value)} /><Button variant="ghost" size="sm" onClick={() => { setFilters(clearWorkFilters()); setSearch(''); setSection('team') }}><X className="size-4" />초기화</Button></div></div>
-    {query.isError ? <Card className="p-5"><p role="alert">{query.error.message}</p><p className="mt-2 text-sm text-muted-foreground">부서 업무 조회 연결을 확인해 주세요.</p><Button onClick={() => void query.refetch()}>다시 조회</Button></Card> : query.isPending ? <p role="status">업무를 불러오는 중...</p> : <Card className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><thead className="bg-primary text-primary-foreground"><tr><th className="p-3">업무명</th>{(['requester', 'assignee', 'status'] as const).map((key, index) => <th key={key} className="p-3"><ColumnFilter label={['요청자', '담당자', '상태'][index]} options={options[key]} selected={filters[key]} onApply={value => setFilters(current => ({ ...current, [key]: value }))} /></th>)}{(['createdAt', 'dueDate'] as const).map((field, index) => <th className="p-3" key={field}><button type="button" onClick={() => toggleSort(field)} className="inline-flex items-center gap-1">{['요청 날짜', '마감 날짜'][index]}<ArrowDownUp className="size-3" />{sort.field === field ? sort.direction === 1 ? '↑' : '↓' : ''}</button></th>)}<th className="p-3"><ColumnFilter label="브랜드" options={options.brand} selected={filters.brand} onApply={brand => setFilters(current => ({ ...current, brand }))} /></th></tr></thead><tbody>{[...groups].sort(([a], [b]) => a.localeCompare(b)).map(([department, items]) => <Fragment key={department}><tr><th colSpan={7} className="bg-muted/40 p-3">{department}</th></tr>{items.map(row => <tr key={row.id} className="border-t border-border"><td className="p-3"><Link className="font-medium hover:underline" to={`?requestId=${row.id}`}>{row.title}</Link>{row.kind === 'internal' ? <Badge className="ml-2" variant="muted">자체 업무</Badge> : null}</td><td className="p-3">{row.requesterName}</td><td className="p-3">{row.assigneeNames.join(', ') || '미정'}</td><td className="p-3"><StatusPill tone={STATUS_META[row.status]?.variant}>{STATUS_META[row.status]?.label ?? row.status}</StatusPill></td><td className="p-3">{row.createdAt.slice(0, 10)}</td><td className={`p-3 ${row.dueDate && row.dueDate < new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) && !['completed', 'cancelled', 'rejected'].includes(row.status) ? 'text-danger' : ''}`}>{row.dueDate || '미정'}</td><td className="p-3">{row.brandName || '브랜드 미정'}</td></tr>)}</Fragment>)}{!visible.length ? <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">조건에 맞는 업무가 없습니다.</td></tr> : null}</tbody></table></Card>}
+    <section aria-labelledby="department-work-list-title" className="space-y-6 pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <h2 id="department-work-list-title" className="text-lg font-medium">팀 업무 목록</h2>
+          <Link to="?mode=new&internal=1"><Button size="sm" variant="ghost" className="h-6 gap-1 bg-muted px-2 text-xs text-muted-foreground"><Plus className="size-3" />업무 등록</Button></Link>
+        </div>
+        <div className="flex max-w-full items-center gap-2">
+          <div className="relative w-64 max-w-full"><Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" aria-label="업무 검색" placeholder="업무 검색" value={search} onChange={event => setSearch(event.target.value)} /></div>
+          <Button variant="ghost" size="sm" onClick={() => { setFilters(clearWorkFilters()); setSearch(''); setSection('team') }}><X className="size-4" />초기화</Button>
+        </div>
+      </div>
+      {query.isError ? <Card className="p-5"><p role="alert">{query.error.message}</p><p className="mt-2 text-sm text-muted-foreground">부서 업무 조회 연결을 확인해 주세요.</p><Button onClick={() => void query.refetch()}>다시 조회</Button></Card> : query.isPending ? <p role="status">업무를 불러오는 중...</p> : <>
+        {!visible.length ? <p role="status" className="text-sm text-muted-foreground">조건에 맞는 업무가 없습니다.</p> : null}
+        <Card className="overflow-x-auto rounded-none border-0 bg-transparent shadow-none">
+          <table aria-label="부서별 팀 업무 목록" className="w-full min-w-[1000px] table-fixed text-left text-sm">
+            <colgroup><col className="w-[34%]" /><col className="w-[11%]" /><col className="w-[12%]" /><col className="w-[11%]" /><col className="w-[10%]" /><col className="w-[10%]" /><col className="w-[12%]" /></colgroup>
+            <thead className="border-b border-border bg-transparent text-xs font-normal text-muted-foreground">
+              <tr>
+                <th scope="col" className="py-5 pr-4 font-normal">업무명</th>
+                {(['requester', 'assignee', 'status'] as const).map((key, index) => <th scope="col" key={key} className="px-3 py-5 font-normal"><ColumnFilter label={['요청자', '담당자', '상태'][index]} options={options[key]} selected={filters[key]} onApply={value => setFilters(current => ({ ...current, [key]: value }))} /></th>)}
+                {(['createdAt', 'dueDate'] as const).map((field, index) => <th scope="col" className="px-3 py-5 font-normal" key={field}><button type="button" onClick={() => toggleSort(field)} className="inline-flex items-center gap-1">{['요청 날짜', '마감 날짜'][index]}<ArrowDownUp className="size-3" />{sort.field === field ? sort.direction === 1 ? '↑' : '↓' : ''}</button></th>)}
+                <th scope="col" className="py-5 pl-3 font-normal"><ColumnFilter label="브랜드" options={options.brand} selected={filters.brand} onApply={brand => setFilters(current => ({ ...current, brand }))} /></th>
+              </tr>
+            </thead>
+            {[...groups].map(([department, items]) => <tbody key={department} aria-label={`${department} 요청 업무`}>
+              <tr className="hover:bg-transparent"><th scope="rowgroup" colSpan={7} className="border-b border-border pb-3 pt-14 text-base font-semibold">{department}</th></tr>
+              {items.length ? items.map(row => <tr key={row.id} className="border-b border-border/60 align-middle">
+                <td className="py-6 pr-4"><Link className="break-words hover:underline" to={`?requestId=${row.id}`}>{row.title}</Link>{row.kind === 'internal' ? <Badge className="ml-2" variant="muted">자체 업무</Badge> : null}</td>
+                <td className="break-words px-3 py-6">{row.requesterName}</td>
+                <td className={`break-words px-3 py-6 ${!row.assigneeNames.length ? 'text-danger' : ''}`}>{row.assigneeNames.join(', ') || '미정'}</td>
+                <td className="px-3 py-6"><StatusPill tone={STATUS_META[row.status]?.variant}>{STATUS_META[row.status]?.label ?? row.status}</StatusPill></td>
+                <td className="px-3 py-6">{row.createdAt.slice(0, 10)}</td>
+                <td className={`px-3 py-6 ${row.dueDate && row.dueDate < new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) && !['completed', 'cancelled', 'rejected'].includes(row.status) ? 'text-danger' : ''}`}>{row.dueDate || '미정'}</td>
+                <td className="break-words py-6 pl-3">{row.brandName || '브랜드 미정'}</td>
+              </tr>) : <tr><td colSpan={7} className="border-b border-border/60 py-5 text-xs text-muted-foreground">{rows.some(row => departmentLabel(row.requesterDepartment) === department) ? '현재 조건에 해당하는 업무가 없습니다.' : '등록된 업무가 없습니다.'}</td></tr>}
+            </tbody>)}
+          </table>
+        </Card>
+      </>}
+    </section>
   </div>
 }
