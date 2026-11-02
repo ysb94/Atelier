@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
 export async function verifyLeaveAdvances({db,actor,value,ops,company,foreign,dept}) {
- const migration='supabase/migrations/20261102032221_employee_leave_advances.sql'
+ const migration='supabase/migrations/20261102035701_employee_leave_advances.sql'
  const approver='91000000-0000-4000-8000-000000000001'
  await db.exec(`reset role;alter table employee_roster add column if not exists resigned_on date;
   insert into profiles(id,company_id,department_id,status,display_name,hire_date) values('${approver}','${company}','${dept}','active','승인자','2020-01-01');
