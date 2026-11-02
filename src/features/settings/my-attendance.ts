@@ -1,6 +1,6 @@
 import type { PersonalRequest } from './personal-requests'
 
-export type AttendanceClock = { date: string; clockIn: string; clockOutAt: string | null; clockOutReportedAt?: string | null; autoClosedAt?: string | null; workConfirmedAt?: string | null }
+export type AttendanceClock = { date: string; clockIn: string; clockOutAt: string | null; clockOutReportedAt?: string | null; autoClosedAt?: string | null; workConfirmedAt?: string | null; clockInSource?: string | null; clockOutSource?: string | null }
 export type AttendanceDay = AttendanceClock & { requests: PersonalRequest[]; correction: PersonalRequest | null; future: boolean }
 export type DayClock = { start: string; end: string; corrected: boolean }
 const koreaDate = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' })
@@ -34,9 +34,18 @@ export function buildMyAttendance(month: string, clocks: AttendanceClock[], requ
     future: date > today,
   }))
 }
-/** 승인된 정정은 표시에만 덮어쓴다. 출퇴근 원본은 바꾸지 않는다. */
+/** 유효 조회가 제공되면 서버가 판정한 시각을 쓰고, 구 서버는 승인 정정을 표시한다. */
 export function dayClock(day: AttendanceDay): DayClock {
-  if (day.correction) return { start: day.correction.start, end: day.correction.end, corrected: true }
+  if (day.clockOutSource) {
+    if (!day.clockOutAt && day.autoClosedAt) return { start: day.clockIn, end: '자동 퇴근 · 확인 필요', corrected: false }
+    return { start: day.clockIn, end: clockOutLabel(day.clockOutAt, day.date), corrected: day.clockOutSource === 'correction' }
+  }
+  if (day.correction) {
+    const end = day.correction.endNextDay
+      ? `${new Date(Date.parse(`${day.date}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10)} ${day.correction.end}`
+      : day.correction.end
+    return { start: day.correction.start, end, corrected: true }
+  }
   if (!day.clockOutAt && day.autoClosedAt) return { start: day.clockIn, end: '자동 퇴근 · 확인 필요', corrected: false }
   return { start: day.clockIn, end: clockOutLabel(day.clockOutAt, day.date), corrected: false }
 }

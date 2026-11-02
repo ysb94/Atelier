@@ -18,11 +18,12 @@ export function countMyLateDays(clocks: readonly { date: string; clockIn: string
 }
 
 /** 본인 출퇴근 기록을 운영지원과 같은 기준으로 집계한다. 퇴근 미기록은 제외한다. */
-export function actualOvertimeHours(clocks: readonly AttendanceClock[], requests: readonly PersonalRequest[], lunchStart: string, lunchEnd: string, month: string, today: string): number {
+export function actualOvertimeHours(clocks: readonly AttendanceClock[], requests: readonly PersonalRequest[], lunchStart: string, lunchEnd: string, month: string, today: string, start: string): number | null {
   const rows = monthlyOvertimeHours(
     clocks.map(clock => ({ ...clock, employeeId: 'self' })),
     requests.map(request => ({ ...request, employeeId: 'self' })),
-    lunchStart, lunchEnd, month, today,
+    lunchStart, lunchEnd, month, today, new Map([['self', start]]),
   )
+  if (rows[0]?.unconfiguredDays) return null
   return (rows[0]?.extraMinutes ?? 0) / 60
 }

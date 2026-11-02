@@ -6,6 +6,9 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { useQuery } from '@tanstack/react-query'
 import { requestLabel, isAllDayRequest, isOfficialLeave, requiresDepartmentApproval, isSelfApprovedRequest, requestStatusLabel, type PersonalRequest } from '@/features/settings/personal-requests'
 import { downloadLeaveFile, listLeaveFiles } from '@/lib/supabase/leave-requests'
+import { getSupabase } from '@/lib/supabase/client'
+import { clockOutLabel, koreaDateKey } from '@/features/settings/my-attendance'
+import { overtimeApprovalReady } from './overtime-approval-preview'
 import { useLeaveRequests } from './use-leave-requests'
 import { OpsPanelFrame, OpsStat } from './OpsStat'
 import { usePagePreview } from '@/lib/company/page-preview-context'
@@ -25,7 +28,7 @@ function leaveSpanLabel(from: string, to: string) {
 }
 function leaveTimeLabel(item: PersonalRequest) {
   if (isAllDayRequest(item.kind)) return '종일'
-  return item.kind === 'correction' ? `실제 출근·퇴근 ${item.start}–${item.end}` : `${item.start}–${item.end}`
+  return `${item.kind === 'correction' ? '실제 출근·퇴근 ' : ''}${item.start}–${item.endNextDay ? '다음 날 ' : ''}${item.end}`
 }
 function OfficialFiles({ requestId }: { requestId: string }) {
   const files = useQuery({ queryKey: ['leave-files', requestId], queryFn: () => listLeaveFiles(requestId) })
@@ -33,6 +36,11 @@ function OfficialFiles({ requestId }: { requestId: string }) {
   if (files.isError) return <p className="mt-3 text-sm text-danger">서류를 불러오지 못했습니다.</p>
   if (!files.data.length) return <p className="mt-3 text-sm text-muted-foreground">첨부된 서류가 없습니다.</p>
   return <div className="mt-3 flex flex-wrap gap-2">{files.data.map(file => <Button key={file.id} type="button" size="sm" variant="outline" onClick={() => void downloadLeaveFile(file).catch(error => console.warn('[leave-requests] 공가 서류 받기 실패', error))}>서류 받기 · {file.name}</Button>)}</div>
+}
+async function fetchOvertimeCheckoutPreview(requestId: string) {
+  const { data, error } = await getSupabase().rpc('get_overtime_checkout_preview', { p_request_id: requestId })
+  if (error) { console.warn('[leave-requests] 야근 퇴근 보정 조회 실패', error); throw new Error(error.code === 'PGRST202' ? '야근 퇴근 보정 연결 대기' : error.message) }
+  return data as { before: string | null; after: string | null }
 }
 const STATUS_CLASS = { pending: 'bg-warning/10 text-warning', approved: 'bg-success/10 text-success', rejected: 'bg-danger/10 text-danger', cancelled: 'bg-muted text-muted-foreground' }
 export function LeaveApprovalPanel({ readOnly = false, officialReview = false }: { readOnly?: boolean; officialReview?: boolean }) {
@@ -57,10 +65,13 @@ export function LeaveApprovalPanel({ readOnly = false, officialReview = false }:
   const currentPage = Math.min(page, pages)
   const rows = visible.slice((currentPage - 1) * 10, currentPage * 10)
   const detail = leave.requests.find(item => item.id === selected)
+  const checkoutPreview = useQuery({ queryKey: ['overtime-checkout-preview', detail?.id], queryFn: () => fetchOvertimeCheckoutPreview(detail!.id), enabled: !readOnly && detail?.kind === 'overtime' && detail.status === 'pending', retry: false })
+  const previewReady = overtimeApprovalReady(detail?.kind, detail?.from, koreaDateKey(), checkoutPreview.isSuccess)
   const selfRequest = previewRequestIsSelf(detail?.employeeId === leave.userId, preview?.facts?.requestOwner)
   async function decide(next: 'approved' | 'rejected') {
     const officialAction = officialReview && detail?.kind === 'official'
     if ((!officialAction && readOnly) || !detail || detail.status !== 'pending' || leave.busy || (!officialAction && !(detail.advanceRequested || requiresDepartmentApproval(detail.kind)))) return
+    if (next === 'approved' && !previewReady) { setMessage('과거 야근의 퇴근 반영 시각을 확인한 뒤 승인해 주세요. 다시 조회할 수 있습니다.'); return }
     if ((selfRequest || detail.employeeId === leave.userId) && (officialAction || detail.advanceRequested || next !== 'approved')) {
       setMessage('본인 처리는 담당 부서의 야근·출퇴근 정정 승인만 가능합니다.')
       return
@@ -89,11 +100,15 @@ export function LeaveApprovalPanel({ readOnly = false, officialReview = false }:
     {detail && <article aria-label="근태 신청 검토" className="rounded-2xl border border-primary/30 bg-card p-5">
       <header className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{detail.employeeName} · {requestLabel(detail.kind)}</h3><p className="mt-1 text-sm text-muted-foreground">{detail.advanceRequested ? '선사용 승인 신청 · ' : ''}{detail.departmentName} · {leaveSpanLabel(detail.from, detail.to)} · {leaveTimeLabel(detail)}{detail.place ? ` · 장소 ${detail.place}` : ''}</p></div><Button variant="ghost" size="icon" aria-label="신청 검토 닫기" disabled={leave.busy} onClick={() => setSelected(null)}><X size={16}/></Button></header>
       {detail.advanceRequested && <p className="mt-3 text-sm text-warning">연차 부족분 선사용 신청입니다. 승인 시 해당 직원의 잔여와 한도를 다시 확인하고 다음 발생분에서 정산합니다. 본인 승인은 불가합니다.</p>}<p className="my-4 whitespace-pre-wrap rounded-lg bg-muted/40 p-3 text-sm">{detail.note || '신청 메모가 없습니다.'}</p>
+      {!readOnly && detail.kind === 'overtime' && detail.status === 'pending' && (checkoutPreview.isPending
+        ? <p role="status" className="mt-3 text-sm text-muted-foreground">퇴근 반영 시각 확인 중…</p>
+        : checkoutPreview.error ? <p role="alert" className="mt-3 text-sm text-warning">{checkoutPreview.error instanceof Error ? checkoutPreview.error.message : '퇴근 반영 시각 조회 실패'}{!previewReady && ' · 과거 야근은 확인 후 승인할 수 있습니다.'} <Button type="button" variant="outline" size="sm" onClick={() => void checkoutPreview.refetch()}>다시 조회</Button></p>
+        : checkoutPreview.data && (checkoutPreview.data.before || checkoutPreview.data.after) ? <p className="mt-3 text-sm text-muted-foreground">퇴근 기록 · 현재 {clockOutLabel(checkoutPreview.data.before, detail.from) || '미기록'} → 승인 후 {clockOutLabel(checkoutPreview.data.after, detail.from) || '미기록'}</p> : null)}
       {isOfficialLeave(detail.kind) && <OfficialFiles requestId={detail.id} />}
       {detail.status === 'pending' && (!readOnly || (officialReview && isOfficialLeave(detail.kind))) && (detail.advanceRequested || isOfficialLeave(detail.kind) || requiresDepartmentApproval(detail.kind)) ? <>
         <label className="block text-sm">처리 의견 <span className="text-muted-foreground">· 반려 시 필수</span><Textarea aria-label="신청 처리 의견" maxLength={2000} rows={2} value={note} disabled={leave.busy} onChange={event => setNote(event.target.value)} className="mt-2" placeholder="반려 사유 또는 전달할 의견을 적어 주세요."/></label>
         {selfRequest && <p className="mt-3 text-sm text-warning">{detail.advanceRequested ? '선사용은 본인 외 지정 승인자가 처리해야 합니다.' : isOfficialLeave(detail.kind) ? '공가는 다른 운영지원 담당자가 서류를 확인해야 합니다.' : '본인 승인으로 기록됩니다.'}</p>}
-        <div className="mt-4 flex justify-end gap-2"><Button variant="outline" disabled={leave.busy || selfRequest || detail.employeeId === leave.userId} onClick={() => void decide('rejected')}><X size={14}/>{leave.busy ? '처리 중…' : '반려'}</Button><Button disabled={leave.busy || ((detail.advanceRequested || isOfficialLeave(detail.kind)) && (selfRequest || detail.employeeId === leave.userId))} onClick={() => void decide('approved')}><Check size={14}/>{leave.busy ? '처리 중…' : '승인'}</Button></div>
+        <div className="mt-4 flex justify-end gap-2"><Button variant="outline" disabled={leave.busy || selfRequest || detail.employeeId === leave.userId} onClick={() => void decide('rejected')}><X size={14}/>{leave.busy ? '처리 중…' : '반려'}</Button><Button disabled={leave.busy || !previewReady || ((detail.advanceRequested || isOfficialLeave(detail.kind)) && (selfRequest || detail.employeeId === leave.userId))} onClick={() => void decide('approved')}><Check size={14}/>{leave.busy ? '처리 중…' : '승인'}</Button></div>
       </> : detail.status === 'pending' ? <p className="text-sm text-muted-foreground">{isOfficialLeave(detail.kind) ? '운영지원의 서류 확인을 기다리고 있습니다.' : '부서별 지정 승인자의 검토를 기다리고 있습니다.'}</p> : <p className="text-sm">{requestStatusLabel(detail)}{isSelfApprovedRequest(detail) ? ' · 본인 승인' : ''} · {detail.decidedByName || '처리자 미확인'}{detail.decidedAt ? ` · ${new Date(detail.decidedAt).toLocaleString('ko-KR')}` : ''}{detail.decisionNote && <span className="mt-2 block whitespace-pre-wrap">{detail.decisionNote}</span>}</p>}
     </article>}
     <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
@@ -102,6 +117,6 @@ export function LeaveApprovalPanel({ readOnly = false, officialReview = false }:
       </tbody></table></div>
       <footer className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground"><span>{visible.length}건 · {currentPage}/{pages} 페이지</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>이전</Button><Button variant="outline" size="sm" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>다음</Button></div></footer>
     </article>
-    <p className="text-xs text-muted-foreground">승인 기록은 저장됩니다. 승인된 출퇴근 정정은 원래 기록을 바꾸지 않고 신청자의 내 근태 달력에 정정 시각으로 표시됩니다. 일반 연차는 즉시 차감하고 선사용은 별도 승인 후 차감·정산 기록을 남깁니다.</p>
+    <p className="text-xs text-muted-foreground">승인 기록은 저장됩니다. 승인된 출퇴근 정정은 원래 기록을 보존하며 달력과 야근 집계에 반영됩니다. 일반 연차는 즉시 차감하고 선사용은 별도 승인 후 차감·정산 기록을 남깁니다.</p>
   </OpsPanelFrame>
 }

@@ -96,19 +96,19 @@ export function HomeAttendanceSummary() {
   const lunchHours = lunch.data
   const summary = useMemo(() => ({
     late: basisRow ? countMyLateDays(clock.rows.filter(row => row.date.startsWith(month)), basisRow.start, basisRow.grace, today) : null,
-    overtime: lunchHours ? actualOvertimeHours(clock.rows, requests, lunchHours.start, lunchHours.end, month, today) : 0,
+    overtime: lunchHours && basisRow?.configured ? actualOvertimeHours(clock.rows, requests, lunchHours.start, lunchHours.end, month, today, basisRow.start) : null,
   }), [basisRow, clock.rows, month, today, requests, lunchHours])
   const lateLoading = !clock.exempt && (clock.loading || (allowed && basis.isPending))
   const leaveLoading = allowed && basis.isPending
-  const overtimeLoading = allowed && (clock.loading || leaves.isPending || lunch.isPending)
-  const overtimeError = Boolean(clock.queryError || leaves.error || lunch.error)
+  const overtimeLoading = allowed && (clock.loading || leaves.isPending || lunch.isPending || basis.isPending)
+  const overtimeError = Boolean(clock.queryError || leaves.error || lunch.error || basis.error)
 
   return <details className="home-attendance-summary">
     <summary><h2>내 근태 현황</h2></summary>
     <dl>
       <div><dt>이번 달 지각</dt><dd>{clock.exempt ? '제외' : lateLoading ? '…' : basis.isError ? '조회 실패' : summary.late == null ? '기준 미설정' : amount(summary.late, '회')}</dd></div>
       <div><dt>남은 연차</dt><dd className={basisRow?.additionalAnnualLeave != null && basisRow.additionalAnnualLeave > 0 ? 'is-split' : undefined}>{leaveLoading ? '…' : basis.isError ? '조회 실패' : basisRow?.additionalAnnualLeave != null && basisRow.additionalAnnualLeave > 0 && basisRow.baseAnnualLeave != null ? <AdditionalLeaveHistory userId={userId}>{remainingLeaveAmount(basisRow.baseAnnualLeave, basisRow.additionalAnnualLeave, basisRow.remainingAnnualLeave)}</AdditionalLeaveHistory> : remainingLeaveAmount(basisRow?.baseAnnualLeave, basisRow?.additionalAnnualLeave, basisRow?.remainingAnnualLeave ?? null)}</dd></div>
-      <div><dt>이번 달 야근</dt><dd>{overtimeError ? '조회 실패' : overtimeLoading ? '…' : amount(summary.overtime, '시간')}</dd></div>
+      <div><dt>이번 달 야근</dt><dd>{overtimeError ? '조회 실패' : overtimeLoading ? '…' : summary.overtime == null ? '기준 미설정' : amount(summary.overtime, '시간')}</dd></div>
     </dl>
     <p>야근은 실제 출퇴근 기록으로 집계하며, 퇴근 미기록은 제외합니다. 월별 기록은 My home에서 확인하세요.</p>
   </details>

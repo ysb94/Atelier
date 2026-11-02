@@ -10,13 +10,13 @@ type LeaveRow = {
   id: string; employee_id: string; employee_name: string; department_id: string | null; department_name: string
   kind: RequestKind; from_date: string; to_date: string; start_time: string; end_time: string
   note: string; place: string | null; status: PersonalRequest['status']; created_at: string; decision_note: string | null
-  decided_at: string | null; decided_by_name: string | null; decided_by?: string | null; advance_requested?: boolean
+  decided_at: string | null; decided_by_name: string | null; decided_by?: string | null; advance_requested?: boolean; end_next_day?: boolean
 }
 function mapRow(row: LeaveRow): LeaveRequest {
   return { id: row.id, employeeId: row.employee_id, employeeName: row.employee_name,
     departmentId: row.department_id, departmentName: row.department_name, kind: row.kind,
     from: row.from_date, to: row.to_date, start: row.start_time.slice(0,5), end: row.end_time.slice(0,5),
-    note: row.note, place: row.place ?? '', status: row.status, createdAt: row.created_at, advanceRequested: row.advance_requested === true,
+    note: row.note, place: row.place ?? '', status: row.status, createdAt: row.created_at, advanceRequested: row.advance_requested === true, endNextDay: row.end_next_day === true,
     decisionNote: row.decision_note ?? undefined, decidedAt: row.decided_at, decidedByName: row.decided_by_name, decidedBy: row.decided_by ?? null }
 }
 function fail(action: string, error: { message: string }): never {
@@ -45,6 +45,7 @@ export async function submitLeaveRequest(employeeId: string, form: RequestForm):
     // The database replaces these with the authenticated employee's company and department.
     company_id: DEFAULT_COMPANY_ID, employee_name: '', department_name: '',
     ...(form.advanceRequested ? { advance_requested: true } : {}),
+    ...(form.endNextDay ? { end_next_day: true } : {}),
   }).select().single()
   if (error) fail('신청 저장 실패', error)
   return mapRow(data as LeaveRow)

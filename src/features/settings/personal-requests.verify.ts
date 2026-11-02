@@ -44,6 +44,13 @@ assert.equal(validateRequest({...form,kind:'overtime',from:'2026-10-08',to:'2026
 assert.match(validateRequest({...form,kind:'offsite',from:'2026-10-08',to:'2026-10-08',start:'13:00',end:'15:00',place:'거래처'},[remoteWeek],basis),/같은 시간/)
 assert.equal(validateRequest({...form,kind:'offsite',from:'2026-10-12',to:'2026-10-13',start:'10:00',end:'17:00',place:'거래처'},[remoteWeek],basis),'')
 const correction: RequestForm = {...form,kind:'correction',from:'2026-10-12',to:'2026-10-12',start:'09:00',end:'18:00',note:'퇴근 누락'}
+const overnight: RequestForm = {...form,kind:'overtime',from:'2026-10-12',to:'2026-10-12',start:'22:00',end:'00:30',endNextDay:true,note:'야근'}
+assert.equal(validateRequest(overnight,[],basis,'2026-10-13'),'','자정을 넘긴 야근을 근무일로 신청')
+assert.equal(validateRequest({...correction,end:'00:30',endNextDay:true},[],basis,'2026-10-13'),'','다음 날 종료된 근무를 정정')
+assert.match(validateRequest({...overnight,endNextDay:false},[],basis),/시작·종료/)
+assert.match(validateRequest({...form,kind:'offsite',place:'외근',endNextDay:true},[],basis),/다음 날 종료/)
+assert.match(validateRequest({...overnight,start:'22:00',end:'23:00'},[],basis),/24시간/)
+assert.match(validateRequest({...overnight,from:'2026-10-13',to:'2026-10-13',start:'00:00',end:'01:00',endNextDay:false},[{...overnight,id:'night',status:'approved',createdAt:'2026-10-12'}],basis),/같은 시간/,'다음 날 이어진 신청과의 겹침 검증')
 assert.equal(validateRequest(correction,[remoteWeek],basis,'2026-10-13'),'')
 assert.match(validateRequest({...correction,from:'2026-10-14',to:'2026-10-14'},[],basis,'2026-10-13'),/앞으로의 날짜/)
 assert.match(validateRequest(correction,[{...pending,...correction,id:'fix',status:'pending'}],basis,'2026-10-13'),/승인 대기 중인 출퇴근 정정/)

@@ -30,12 +30,13 @@ export function RequestTimeField({ label, value, onChange }: {
   </fieldset>
 }
 
-export function TimeRangeSummary({ start, end, leave = false, daily = false }: {
-  start: string; end: string; leave?: boolean; daily?: boolean
+export function TimeRangeSummary({ start, end, leave = false, daily = false, endNextDay = false }: {
+  start: string; end: string; leave?: boolean; daily?: boolean; endNextDay?: boolean
 }) {
-  const minutes = leave ? leaveWorkMinutes(start, end) : rangeMinutes(start, end)
+  const from = minuteOf(start), to = minuteOf(end)
+  const minutes = endNextDay ? (from != null && to != null && to + 1440 > from && to + 1440 - from <= 1440 ? to + 1440 - from : null) : leave ? leaveWorkMinutes(start, end) : rangeMinutes(start, end)
   return <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm" role="status" aria-live="polite">
-    {minutes == null ? '시작·종료 시각을 선택해 주세요.' : `${daily ? '매일 ' : ''}${start}–${end} · ${leave ? '휴게시간 제외 ' : '총 '}${durationLabel(minutes)}`}
+    {minutes == null ? '시작·종료 시각을 선택해 주세요.' : `${daily ? '매일 ' : ''}${start}–${endNextDay ? '다음 날 ' : ''}${end} · ${leave ? '휴게시간 제외 ' : '총 '}${durationLabel(minutes)}`}
   </p>
 }
 
@@ -75,8 +76,8 @@ export function LeaveTimeShortcuts({ kind, start, end, onChange, compact = false
   </div>
 }
 
-export function OvertimeTimeFields({ start, end, onChange }: {
-  start: string; end: string; onChange: (patch: { start?: string; end?: string }) => void
+export function OvertimeTimeFields({ start, end, endNextDay = false, onChange }: {
+  start: string; end: string; endNextDay?: boolean; onChange: (patch: { start?: string; end?: string; endNextDay?: boolean }) => void
 }) {
   const [duration, setDuration] = useState<number | null>(() => rangeMinutes(start, end))
   const overflow = duration != null && minuteOf(start) != null && endAfterMinutes(start, duration) == null
@@ -86,7 +87,7 @@ export function OvertimeTimeFields({ start, end, onChange }: {
       <div className="flex flex-wrap gap-2" role="group" aria-label="야근 근무 시간">
         {OVERTIME_DURATIONS.map(minutes => <Button key={minutes} type="button" size="sm" variant={duration === minutes ? 'default' : 'outline'}
           aria-pressed={duration === minutes} disabled={endAfterMinutes(start, minutes) == null}
-          onClick={() => { setDuration(minutes); onChange({ end: endAfterMinutes(start, minutes)! }) }}>{durationLabel(minutes)}</Button>)}
+          onClick={() => { setDuration(minutes); onChange({ end: endAfterMinutes(start, minutes)!, endNextDay: false }) }}>{durationLabel(minutes)}</Button>)}
         <Button type="button" size="sm" variant={duration == null ? 'default' : 'outline'} aria-pressed={duration == null} onClick={() => setDuration(null)}>직접 설정</Button>
       </div>
     </div>
@@ -94,7 +95,8 @@ export function OvertimeTimeFields({ start, end, onChange }: {
       <RequestTimeField label="야근 시작 시각" value={start} onChange={value => onChange({ start: value, ...(duration != null ? { end: endAfterMinutes(value, duration) ?? '' } : {}) })} />
       <RequestTimeField label="야근 종료 시각" value={end} onChange={value => { setDuration(null); onChange({ end: value }) }} />
     </div>
-    <TimeRangeSummary start={start} end={end} />
+    <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={endNextDay} onChange={event => { setDuration(null); onChange({ endNextDay: event.target.checked }) }} />다음 날 퇴근</label>
+    <TimeRangeSummary start={start} end={end} endNextDay={endNextDay} />
     {overflow && <p role="alert" className="text-sm text-danger">선택한 근무 시간이 자정을 넘습니다. 시간을 줄이거나 날짜별로 나눠 신청해 주세요.</p>}
     <p className="text-xs text-muted-foreground">분은 직접 입력할 수 있습니다. 종료 시각을 직접 바꾸면 자동 계산이 해제됩니다.</p>
   </>

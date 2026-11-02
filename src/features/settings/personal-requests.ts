@@ -10,7 +10,7 @@ export type RequestKind = typeof REQUEST_KINDS[number]['id'] | 'remote' | 'corre
 export type PersonalRequest = {
   id: string; kind: RequestKind; from: string; to: string; start: string; end: string
   place: string; note: string; status: 'pending' | 'approved' | 'rejected' | 'cancelled'
-  createdAt: string; decisionNote?: string; advanceRequested?: boolean
+  createdAt: string; decisionNote?: string; advanceRequested?: boolean; endNextDay?: boolean
 }
 export type RequestForm = Omit<PersonalRequest, 'id' | 'status' | 'createdAt' | 'decisionNote'>
 export type ReminderBasis = { start: string; end: string; breakStart: string; breakEnd: string; before: number }
@@ -49,16 +49,19 @@ function validDate(value: string) {
   return !Number.isNaN(date.getTime()) && date.getFullYear() === Number(value.slice(0,4)) && date.getMonth()+1 === Number(value.slice(5,7)) && date.getDate() === Number(value.slice(8,10))
 }
 function interval(form: RequestForm | PersonalRequest) {
-  return [form.from + (isAllDayRequest(form.kind) ? 'T00:00' : `T${form.start}`), form.to + (isAllDayRequest(form.kind) ? 'T24:00' : `T${form.end}`)]
+  const next = form.endNextDay ? new Date(Date.parse(`${form.to}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10) : form.to
+  return [form.from + (isAllDayRequest(form.kind) ? 'T00:00' : `T${form.start}`), next + (isAllDayRequest(form.kind) ? 'T24:00' : `T${form.end}`)]
 }
 export function validateRequest(form: RequestForm, requests: PersonalRequest[], basis: ReminderBasis, today?: string) {
   if (form.advanceRequested && (!isLeaveRequest(form.kind) || !form.note.trim())) return '연차·반차·반반차를 선택하고 선사용 사유를 입력해 주세요.'
   if (form.kind === 'remote') return '재택은 등록할 수 없습니다.'
   if (!validDate(form.from) || !validDate(form.to) || form.to < form.from) return '신청 시작일과 종료일을 확인해 주세요.'
   if (form.kind === 'correction' && today && form.from > today) return '앞으로의 날짜는 출퇴근 정정을 신청할 수 없습니다.'
+  if (form.endNextDay && form.kind !== 'overtime' && form.kind !== 'correction') return '다음 날 종료는 야근·출퇴근 정정에만 사용할 수 있습니다.'
   if (!isAllDayRequest(form.kind)) {
     const start = minuteOf(form.start), end = minuteOf(form.end)
-    if (start == null || end == null || end <= start) return '시작·종료 시각을 확인해 주세요. 자정을 넘기는 일정은 날짜별로 나눠 신청해 주세요.'
+    const duration = start == null || end == null ? 0 : end + (form.endNextDay ? 1440 : 0) - start
+    if (duration <= 0 || duration > 1440) return '시작·종료 시각을 확인해 주세요. 다음 날 종료는 24시간 이내로 입력해 주세요.'
   }
   if ((isPartialLeave(form.kind) || form.kind === 'correction' || form.kind === 'overtime') && form.from !== form.to) return '이 신청은 날짜별로 작성해 주세요.'
   if (isPartialLeave(form.kind)) {

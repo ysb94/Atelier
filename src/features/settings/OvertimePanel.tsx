@@ -9,8 +9,9 @@ import { useLeaveRequests } from '@/features/operations-support/use-leave-reques
 import { useDepartmentApprovers } from '@/features/operations-support/use-department-approvers'
 import { useOpsDirectory } from '@/features/operations-support/ops-directory'
 import { DEFAULT_REMINDER_BASIS, dateLabel, validateRequest, isSelfApprovedRequest, type RequestForm } from './personal-requests'
-import { koreaDateKey } from './my-attendance'
+import { clockOutLabel, koreaDateKey } from './my-attendance'
 import { OvertimeTimeFields } from './RequestTimeFields'
+import { useMyClockIn } from '@/features/home/use-my-clock-in'
 
 const STATUS_LABELS = { pending: '승인 대기', approved: '승인', rejected: '반려', cancelled: '취소' }
 
@@ -24,6 +25,7 @@ export function OvertimePanel() {
   const allowed = Boolean(session?.user.id) && profile?.status === 'active'
   const today = koreaDateKey()
   const leave = useLeaveRequests()
+  const clock = useMyClockIn()
   const approvals = useDepartmentApprovers()
   const directory = useOpsDirectory()
   const [form, setForm] = useState<RequestForm | null>(null)
@@ -87,7 +89,7 @@ export function OvertimePanel() {
               : rows.length === 0 ? <tr><td colSpan={5}>신청한 야근이 없습니다.</td></tr>
               : rows.map(item => <tr key={item.id}>
                 <th scope="row">{dateLabel(item.from)}</th>
-                <td>{item.start}–{item.end}</td>
+                <td>{item.start}–{item.endNextDay ? '다음 날 ' : ''}{item.end}</td>
                 <td>{item.note || '—'}</td>
                 <td>{STATUS_LABELS[item.status]}{isSelfApprovedRequest(item) && <span className="ml-2 text-xs">본인 승인</span>}{item.decidedByName && <small className="block">{item.decidedByName}{item.decidedAt ? ` · ${new Date(item.decidedAt).toLocaleString('ko-KR')}` : ''}</small>}{item.decisionNote && <small className="block whitespace-pre-wrap">{item.decisionNote}</small>}</td>
                 <td>{item.status === 'pending' ? <Button type="button" variant="outline" size="sm" disabled={leave.busy} onClick={() => void cancel(item.id)}>취소</Button> : '—'}</td>
@@ -96,15 +98,16 @@ export function OvertimePanel() {
         </table>
       </div>
     </section>
-    {form && <OvertimeDialog form={form} busy={leave.busy} error={error} route={route} onChange={next => { setForm(next); setError('') }} onClose={() => { if (!leave.busy) setForm(null) }} onSubmit={event => void submit(event)} />}
+    {form && <OvertimeDialog form={form} busy={leave.busy} error={error} route={route} existingEnd={form.from < today && leave.requests.some(item => item.kind === 'offsite' && item.status === 'approved' && item.from <= form.from && item.to >= form.from) ? clock.rows.find(item => item.date === form.from)?.clockOutAt ?? null : null} onChange={next => { setForm(next); setError('') }} onClose={() => { if (!leave.busy) setForm(null) }} onSubmit={event => void submit(event)} />}
   </section>
 }
 
-function OvertimeDialog({ form, busy, error, route, onChange, onClose, onSubmit }: {
+function OvertimeDialog({ form, busy, error, route, existingEnd, onChange, onClose, onSubmit }: {
   form: RequestForm
   busy: boolean
   error: string
   route: string
+  existingEnd: string | null
   onChange: (form: RequestForm) => void
   onClose: () => void
   onSubmit: (event: FormEvent) => void
@@ -121,7 +124,8 @@ function OvertimeDialog({ form, busy, error, route, onChange, onClose, onSubmit 
       <form onSubmit={onSubmit}><fieldset disabled={busy} className="min-w-0 border-0 p-0">
         <div className="personal-request-compose-body">
           <label>날짜<Input aria-label="야근 날짜" type="date" value={form.from} onChange={event => onChange({ ...form, from: event.target.value, to: event.target.value })}/></label>
-          <OvertimeTimeFields start={form.start} end={form.end} onChange={patch => onChange({ ...form, ...patch })} />
+          <OvertimeTimeFields start={form.start} end={form.end} endNextDay={form.endNextDay} onChange={patch => onChange({ ...form, ...patch })} />
+          {existingEnd && <p className="personal-request-helper">현재 퇴근 {clockOutLabel(existingEnd, form.from)} · 신청 종료 {form.endNextDay ? '다음 날 ' : ''}{form.end}. 승인 시 실제 종료시각을 퇴근에 반영합니다.</p>}
           <label>신청 사유 · 필수<Textarea maxLength={2000} aria-label="야근 사유" value={form.note} rows={3} placeholder="예정된 야근 업무를 적어 주세요." onChange={event => onChange({ ...form, note: event.target.value })}/></label>
           <div className="personal-request-approval-route"><span>승인 경로</span><strong>{route}</strong><p>지정 승인자·대체 승인자는 ‘승인할 신청’에서 본인 신청도 승인할 수 있습니다.</p></div>
           {error && <p role="alert" className="personal-request-error">{error}</p>}

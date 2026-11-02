@@ -6,7 +6,7 @@ assert.equal(workedMinutes('2026-10-26', '09:00', '2026-10-26T09:00:00Z', ...lun
 assert.equal(workedMinutes('2026-10-26', '09:00', '2026-10-26T12:00:00Z', ...lunch), 660)
 assert.equal(workedMinutes('2026-10-26', '09:00', '2026-10-25T23:00:00Z', ...lunch), null)
 
-const leave = (patch: { employeeId?: string; kind: string; status?: string; from: string; to?: string; start?: string; end?: string }) => ({
+const leave = (patch: { employeeId?: string; kind: string; status?: string; from: string; to?: string; start?: string; end?: string; endNextDay?: boolean }) => ({
   employeeId: patch.employeeId ?? 'a', status: patch.status ?? 'approved', to: patch.to ?? patch.from, start: patch.start ?? '09:00', end: patch.end ?? '18:00', ...patch,
 })
 const span = (date: string, clockIn: string, clockOutAt: string | null, employeeId = 'a') => ({ employeeId, date, clockIn, clockOutAt })
@@ -17,13 +17,13 @@ const rows = monthlyOvertimeHours([
   span('2026-10-23', '09:00', '2026-10-23T09:00:00Z'),
   span('2026-10-25', '10:00', '2026-10-25T05:00:00Z'),
   span('2026-11-02', '09:00', '2026-11-02T12:00:00Z'),
-  span('2026-10-21', '09:00', '2026-10-21T05:00:00Z', 'b'),
+  span('2026-10-21', '14:00', '2026-10-21T09:00:00Z', 'b'),
 ], [
   leave({ kind: 'annual', from: '2026-10-23' }),
-  leave({ kind: 'half', from: '2026-10-21', employeeId: 'b' }),
+  leave({ kind: 'half', from: '2026-10-21', employeeId: 'b', start: '09:00', end: '14:00' }),
   leave({ kind: 'overtime', from: '2026-10-27', start: '18:00', end: '21:00' }),
   leave({ kind: 'overtime', from: '2026-10-20', start: '18:00', end: '20:00', status: 'pending' }),
-], ...lunch, '2026-10', '2026-10-27')
+], ...lunch, '2026-10', '2026-10-27', new Map([['a', '09:00'], ['b', '09:00']]))
 
 const mine = rows.find(row => row.employeeId === 'a')
 const half = rows.find(row => row.employeeId === 'b')
@@ -34,6 +34,8 @@ assert.equal(mine?.extraMinutes, 180 + 180)
 assert.equal(mine?.approvedMinutes, 180)
 assert.equal(half?.workedMinutes, 240)
 assert.equal(half?.extraMinutes, 0)
+const overnight = monthlyOvertimeHours([], [leave({ kind: 'overtime', from: '2026-10-26', start: '18:00', end: '00:30', endNextDay: true })], ...lunch, '2026-10', '2026-10-27', new Map())
+assert.equal(overnight[0]?.approvedMinutes, 390, '다음 날 00:30 종료는 승인 야근 6시간 30분')
 assert.equal(workDurationLabel(200), '3시간 20분')
 assert.equal(workDurationLabel(120), '2시간')
 assert.equal(workDurationLabel(15), '15분')

@@ -5,6 +5,7 @@ import { clockOutLabel, koreaDateKey } from '@/features/settings/my-attendance'
 import { useAttendanceEntry } from './attendance-entry-context'
 import { fitPreviousClockOut, validatePreviousClockOut, workInstant } from './attendance-guidance'
 import { AttendancePresenceMonitor } from './AttendancePresenceMonitor'
+import { OffsiteStatus } from './OffsiteStatus'
 import './attendance-entry.css'
 
 function datesBetween(from: string, to: string) {
@@ -213,6 +214,7 @@ export function AttendanceStatusActions() {
   const entry = useAttendanceEntry()
   if (!entry || entry.phase !== 'ready' || entry.clock.exempt) return null
   return <div role="group" aria-label="출퇴근 상태" className="mr-2 flex items-center gap-2 text-xs">
+    <OffsiteStatus />
     <span className="hidden text-muted-foreground sm:inline">{entry.clock.todayClock ? `${entry.clock.todayClock} 출근` : '출근 미기록'}</span>
     {entry.clock.todayClockOut ? <span>퇴근 {entry.clock.todayClockOut}</span> : entry.clock.needsClockOut ? <Button type="button" size="sm" disabled={entry.clock.saving} onClick={entry.requestCheckout}>퇴근하기</Button> : null}
   </div>
