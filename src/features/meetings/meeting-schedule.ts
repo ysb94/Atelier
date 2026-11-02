@@ -157,6 +157,12 @@ export function roundListCaption(
   return '참석 응답 대기'
 }
 
+/** 저장된 회의 안내와 입력 중인 글이 같을 때만 일정을 확정할 수 있다. */
+export function meetingGuideSaved(saved: string | null | undefined, draft: string) {
+  const stored = (saved ?? '').trim()
+  return stored.length > 0 && draft.trim() === stored
+}
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 export function calendarDaysBetween(

@@ -9,7 +9,7 @@ export function MyLeaveAdvanceSummary() {
   const query = useLeaveAdvances()
   const employee = query.data?.employees[0]
   if (query.isError) return <p role="alert" className="text-sm text-danger">선사용 내역을 불러오지 못했습니다. <Button size="sm" variant="outline" onClick={() => void query.refetch()}>다시 조회</Button></p>
-  if (!employee || !query.data?.ready) return null
+  if (!employee || !query.data?.ready || employee.outstanding <= 0) return null
   return <Card className="mb-4 p-4 text-sm" aria-label="내 연차 선사용">
     <details>
       <summary className="cursor-pointer font-semibold">연차 선사용</summary>

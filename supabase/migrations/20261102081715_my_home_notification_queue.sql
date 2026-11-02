@@ -1,4 +1,5 @@
 -- Additive notification state only. Existing business rows, policies and RPC signatures are preserved.
+-- Applied to Atelier on 2026-11-02; filename matches the server migration history.
 create table public.my_home_notification_reads (
  reader_id uuid not null references public.profiles(id),
  event_key text not null check(length(event_key) between 1 and 250),

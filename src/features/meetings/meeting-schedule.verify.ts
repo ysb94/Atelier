@@ -31,6 +31,7 @@ import {
   formatRoundGapLabel,
   formatRoundListLabel,
   roundListCaption,
+  meetingGuideSaved,
   roundGapDays,
   groupPrepMaterialsByUploader,
   isMeetingComposeReady,
@@ -479,6 +480,10 @@ assert(
 assert(roundListCaption({ startsAt: '2026-11-04T11:30', content: 'NEEORU 정기회의', responses: [{ profileId: 'absent', status: 'unavailable' }, ...['a','b','c'].map(profileId => ({ profileId, status: 'available' as const }))] }, ['absent','a','b','c','pending-a','pending-b','pending-c','pending-d']) === '불참 1명 · 응답 대기 4명', 'NEEORU와 같은 응답 상태를 인원별로 표시')
 assert(roundListCaption({ startsAt: '', content: '', responses: [] }, ['m']) === '회의 안내 미작성', '안내 없으면 미작성')
 assert(roundListCaption({ startsAt: '', content: '안내', responses: [] }, ['m']) === '일정 미확정', '안내 저장 후 일정 미확정')
+assert(meetingGuideSaved('', '') === false, '빈 안내는 확정할 수 없다')
+assert(meetingGuideSaved('  ', '안내') === false, '저장 전 입력은 확정할 수 없다')
+assert(meetingGuideSaved('안내', '안내 수정') === false, '저장하지 않은 수정은 확정할 수 없다')
+assert(meetingGuideSaved(' 안내 ', '안내') === true, '저장된 안내와 같으면 확정할 수 있다')
 assert(roundListCaption({ startsAt: '2026-10-28T10:30', content: '안내', responses: [{ profileId: 'm', status: 'pending' }] }, ['m']) === '참석 응답 대기', '확정 일정의 참석 응답 대기')
 assert(roundListCaption({ startsAt: '2026-10-28T10:30', content: '안내', responses: [{ profileId: 'm', status: 'unavailable' }] }, ['m']) === '불참 1명 · 진행 확인 필요', '개인 불참을 회의 전체 진행 불가로 표시하지 않음')
 assert(roundListCaption({ startsAt: '2026-10-28T10:30', content: '안내', responses: [{ profileId: 'm', status: 'available' }] }, ['m']) === null, '전원 수락이면 차수 이름만')

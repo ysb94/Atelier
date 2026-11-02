@@ -63,6 +63,7 @@ import {
   isMeetingComposeReady,
   isMeetingParticipant,
   isPendingRound,
+  meetingGuideSaved,
   formatMeetingDuration,
   formatRoundGapHint,
   formatRoundGapLabel,
@@ -446,6 +447,10 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
       ...emptyRoundNotes(),
     }
     const target=schedulingSeries.rounds.find(row=>row.id===schedulingRoundId) ?? findPendingRound(schedulingSeries)
+    if (composeKindInfo.kind !== 'meeting' && !(target?.content ?? '').trim()) {
+      setComposePrompt('회의 안내를 저장한 뒤 일정을 확정할 수 있습니다.')
+      return
+    }
     const confirmed={...(target ?? round),startsAt,roomId:nextRoomId,quarterId:round.quarterId,durationMinutes:slotDurationMinutes,confirmed:true,
       scheduleVersion:(target?.scheduleVersion ?? 0)+1,responses:composeKindInfo.kind==='meeting'?[]:composeMembers.map(person=>({profileId:person.id,status:'pending' as const}))}
     const saved=await setSeries(rows=>rows.map(item=>item.id===schedulingSeries.id?{
@@ -1707,6 +1712,7 @@ function MeetingDetailDrawer({
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [prepMaterials, setPrepMaterials] = useState(round.prepMaterials)
   const [content, setContent] = useState(round.content)
+  const guideSaved = meetingGuideSaved(round.content, content)
   const [result, setResult] = useState(round.result)
   const [manualOpen,setManualOpen]=useState(false)
   const unavailable=series.members.filter(person=>round.responses?.find(response=>response.profileId===person.id)?.status==='unavailable')
@@ -2003,13 +2009,17 @@ function MeetingDetailDrawer({
             {isHost && !pending && !simpleMeeting && !round.manualConfirmation && <Button type="button" variant="outline" disabled={simulating || !series.manualConfirmationReady || !allResponded || unavailable.length===0} onClick={()=>setManualOpen(true)}>수동 확정</Button>}
             {isHost && !pending && !simpleMeeting && !round.manualConfirmation && <span className="w-full text-right text-xs text-muted-foreground">{!series.manualConfirmationReady ? '수동 확정 서버 연결 대기' : !allResponded ? '모든 멤버가 응답하면 수동 확정할 수 있습니다.' : unavailable.length===0 ? '모두 참석 가능합니다.' : '불참 멤버를 이번 차수에서만 제외하고 진행할 수 있습니다.'}</span>}
             {isHost && (pending || allowNextRound) ? pending ? (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void run(async()=>{if(await persistNotes()) onBookTime()})}
-              >
-                일정 확정하기
-              </Button>
+              <>
+                {!simpleMeeting && !guideSaved ? <p className="w-full text-right text-xs text-muted-foreground">회의 안내를 저장하면 일정을 확정할 수 있습니다.</p> : null}
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={!simpleMeeting && !guideSaved}
+                  onClick={() => void run(async()=>{ if (!simpleMeeting && !guideSaved) return; if(await persistNotes()) onBookTime() })}
+                >
+                  일정 확정하기
+                </Button>
+              </>
             ) : (
               <Button
                 type="button"

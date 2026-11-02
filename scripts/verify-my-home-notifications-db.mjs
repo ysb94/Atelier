@@ -31,7 +31,7 @@ create function app.meeting_notifications() returns jsonb language sql security 
 create function app.meeting_read_invitation(uuid) returns void language sql security definer as $$update public.meeting_invitations set read_at=coalesce(read_at,now()) where id=$1 and profile_id=auth.uid()$$;
 insert into company_leave_requests(company_id,employee_id,department_id,employee_name,kind,status) values('${company}','${staff}','${dept}','직원','overtime','approved');`)
 const original=await val('select md5(jsonb_agg(r)::text) from company_leave_requests r')
-await db.exec(await readFile('supabase/migrations/20261102074629_my_home_notification_queue.sql','utf8'))
+await db.exec(await readFile('supabase/migrations/20261102081715_my_home_notification_queue.sql','utf8'))
 assert.equal(await val('select md5(jsonb_agg(r)::text) from company_leave_requests r'),original)
 assert.equal(await val('select count(*)::int from my_home_request_events'),0,'No historical result backfill')
 const id=await val(`insert into company_leave_requests(company_id,employee_id,department_id,employee_name,kind,status) values($1,$2,$3,'직원','overtime','pending') returning id`,[company,staff,dept])
