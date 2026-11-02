@@ -2,10 +2,12 @@ import { cn } from '@/lib/utils'
 import type { MeetingPerson } from './meeting-schedule'
 import { AVAILABILITY_LABEL, availabilityMinutes, availabilityTone, overlapsAvailability, type MeetingAvailability } from './meeting-availability'
 import { MeetingTimeTableHeader } from './MeetingTimeTableHeader'
+import { MeetingRangeMarker } from './MeetingRangeMarker'
 
-export function MeetingAvailabilityTable({attendees,rows,clocks,clock,duration,onChoose,canChoose}:{
+export function MeetingAvailabilityTable({attendees,rows,clocks,clock,duration,onChoose,canChoose,rangeBlocked=false}:{
   attendees:readonly MeetingPerson[];rows:readonly MeetingAvailability[];clocks:readonly string[]
   clock:string;duration:number;onChoose:(clock:string)=>void;canChoose?:(clock:string)=>boolean
+  rangeBlocked?:boolean
 }) {
   const selected = clock ? rows.filter(row => overlapsAvailability(row,clock,duration)) : []
   return <section aria-label="멤버별 일정" className="space-y-2">
@@ -20,18 +22,19 @@ export function MeetingAvailabilityTable({attendees,rows,clocks,clock,duration,o
             const entries=rows.filter(row=>row.personId===person.id&&overlapsAvailability(row,time,30))
             const tone=entries.some(row=>availabilityTone(row)==='conflict')?'conflict':entries.some(row=>availabilityTone(row)==='warning')?'warning':entries.length?'info':'free'
             const selectedTime=clock&&availabilityMinutes(time)>=availabilityMinutes(clock)&&availabilityMinutes(time)<availabilityMinutes(clock)+duration
+            const start=time===clock,end=availabilityMinutes(time)+30>=availabilityMinutes(clock)+duration
             const enabled=canChoose ? canChoose(time) : true
-            return <td key={time} className="border-l border-t border-border p-0"><button type="button" aria-label={`${person.name} ${time} 일정`} disabled={!enabled}
+            return <td key={time} data-range-state={selectedTime?(rangeBlocked?'blocked':'available'):undefined} className="relative border-l border-t border-border p-0"><button type="button" aria-label={`${person.name} ${time} 일정`} disabled={!enabled}
               title={!enabled?'회의실 표에서 선택 가능한 시간을 골라주세요.':entries.length?entries.map(row=>`${AVAILABILITY_LABEL[row.kind]} ${row.start}–${row.end}${row.status==='pending'?' · 승인 대기':''}`).join('\n'):'등록된 일정 없음'}
-              className={cn('h-10 w-full disabled:cursor-not-allowed',!enabled?'bg-muted text-muted-foreground':tone==='conflict'?'bg-red-100 text-red-800':tone==='warning'?'bg-amber-100 text-amber-900':tone==='info'?'bg-sky-100 text-sky-900':'bg-emerald-50',selectedTime&&'ring-1 ring-inset ring-sky-600')}
-              onClick={()=>onChoose(time)}>{entries.length?AVAILABILITY_LABEL[entries[0].kind]:''}</button></td>
+              className={cn('h-10 w-full disabled:cursor-not-allowed',selectedTime?rangeBlocked?'bg-danger/15 text-danger':'bg-success/15 text-success':!enabled?'bg-muted text-muted-foreground':tone==='conflict'?'bg-danger/10 text-danger':tone==='warning'?'bg-warning/15 text-warning':tone==='info'?'bg-muted text-muted-foreground':'bg-success/5')}
+              onClick={()=>onChoose(time)}>{entries.length?AVAILABILITY_LABEL[entries[0].kind]:''}</button>{selectedTime&&<MeetingRangeMarker start={start} end={end} blocked={rangeBlocked}/>}</td>
           })}</tr>)}</tbody>
       </table>
     </div></div>
     {clock?<div aria-label="선택 시간의 멤버 일정" className="space-y-1 text-xs">
       {selected.length?selected.map(row=><p key={`${row.personId}:${row.id}`} className={availabilityTone(row)==='conflict'?'text-red-700':availabilityTone(row)==='warning'?'text-amber-800':'text-sky-700'}>
         {attendees.find(person=>person.id===row.personId)?.name} · {AVAILABILITY_LABEL[row.kind]} · {row.start}–{row.end}{row.status==='pending'?' · 승인 대기':''}
-      </p>):<p className="text-emerald-700">선택한 시간에 등록된 충돌 일정이 없습니다.</p>}
+      </p>):<p className={rangeBlocked?'text-danger':'text-success'}>{rangeBlocked?'멤버 일정은 비어 있습니다. 위의 불가 시간 안내를 확인해 주세요.':'선택한 시간에 등록된 충돌 일정이 없습니다.'}</p>}
     </div>:null}
   </section>
 }

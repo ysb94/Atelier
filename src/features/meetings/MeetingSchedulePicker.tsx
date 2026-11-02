@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type Ref } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { Button } from '@/components/ui/button'
@@ -10,17 +10,19 @@ import { listMeetingAvailability, listMeetingCalendar } from '@/lib/supabase/mee
 import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
 import { MeetingAvailabilityTable } from './MeetingAvailabilityTable'
 import { MeetingTimeTableHeader } from './MeetingTimeTableHeader'
+import { MeetingRangeMarker } from './MeetingRangeMarker'
 import { availabilityConfirmationKey, availabilityMinutes, overlapsAvailability, type MeetingAvailability } from './meeting-availability'
 import { cn, emptyList } from '@/lib/utils'
-import { type MeetingDraft, type MeetingPerson, type MeetingRoom, parseDateKey, toDateKey } from './meeting-schedule'
-import { formatMeetingClockRange, isClockCoveredByMeeting, meetingOverlapsLunch, resolveStartTimeState, WORK_DAY_CLOCKS } from './meeting-slots'
+import { type MeetingDraft, type MeetingPerson, type MeetingRoom, parseDateKey, toDateKey, MEETING_DURATION_MINUTES, formatMeetingDuration } from './meeting-schedule'
+import { formatMeetingClockRange, isClockCoveredByMeeting, isClockPastOnDay, meetingOverlapsLunch, resolveStartTimeState, WORK_DAY_CLOCKS } from './meeting-slots'
 
 export type MeetingScheduleChoice = { roomId:string; dateKey:string; clock:string }
 
 /** 달력과 회의실별 시간표에서 선택한 값은 최종 확정 전까지 입력 상태로만 유지한다. */
-export function MeetingSchedulePicker({rooms,value,onChange,durationMinutes,attendees,seriesId,roundId,error,onConfirm,previewBookings,previewHiddenRounds}:{
+export function MeetingSchedulePicker({rooms,value,onChange,durationMinutes,onDurationChange,durationRef,durationInvalid,attendees,seriesId,roundId,error,onConfirm,previewBookings,previewHiddenRounds}:{
   rooms:readonly MeetingRoom[];value:MeetingScheduleChoice;onChange:(value:MeetingScheduleChoice)=>void
   durationMinutes:number|null;attendees:readonly MeetingPerson[];seriesId:string;roundId?:string;error:string|null|undefined;onConfirm:()=>Promise<unknown>
+  onDurationChange:(minutes:number|null)=>void;durationRef?:Ref<HTMLSelectElement>;durationInvalid?:boolean
   previewBookings?:readonly MeetingDraft[]
   previewHiddenRounds?:ReadonlySet<string>
 }) {
@@ -52,13 +54,13 @@ export function MeetingSchedulePicker({rooms,value,onChange,durationMinutes,atte
     refetchInterval:active?15000:false})
   const rows=previewing?previewRows.filter(row=>people.includes(row.personId)):attendance.data ?? emptyList<MeetingAvailability>()
   const attendancePending=!previewing&&attendance.isPending,attendanceError=!previewing&&attendance.isError
-  const conflicts=value.clock?rows.filter(row=>row.kind!=='remote'&&overlapsAvailability(row,value.clock,durationMinutes ?? 60)):[]
+  const conflicts=value.clock&&durationMinutes?rows.filter(row=>row.kind!=='remote'&&overlapsAvailability(row,value.clock,durationMinutes)):[]
   const selection=[value,durationMinutes,people]
   const selectionKey=JSON.stringify(selection),currentSelection=useRef(selectionKey);currentSelection.current=selectionKey
   const acknowledgmentKey=availabilityConfirmationKey(selection,conflicts)
   const [acknowledged,setAcknowledged]=useState<string|null>(null),[checking,setChecking]=useState(false),[checkError,setCheckError]=useState<string|null>(null)
   async function confirm(){
-    if(checking)return
+    if(checking||!ready)return
     const expected=selectionKey
     setChecking(true);setCheckError(null)
     try {
@@ -84,8 +86,13 @@ export function MeetingSchedulePicker({rooms,value,onChange,durationMinutes,atte
   })
   const room=rooms.find(item=>item.id===value.roomId)
   const canChoose=(clock:string,roomId=value.roomId)=>Boolean(validDate&&durationMinutes&&!lunch.isPending&&!lunch.isError&&!calendar.isPending&&!calendar.isError&&!attendancePending&&!attendanceError&&available(roomId,clock).available)
+  const canPreview=(clock:string)=>Boolean(validDate&&durationMinutes&&weekday!==0&&weekday!==6&&!lunch.isPending&&!lunch.isError&&!calendar.isPending&&!calendar.isError&&!attendancePending&&!attendanceError&&!isClockPastOnDay(value.dateKey,clock,now))
   const ready=Boolean(room&&value.clock&&canChoose(value.clock))
   const clocks=WORK_DAY_CLOCKS.filter(clock=>clock!=='19:00')
+  const selectionState=value.clock&&room&&durationMinutes ? available(room.id,value.clock) : null
+  const rangeBlocked=Boolean(selectionState&&!selectionState.available)||conflicts.length>0
+  const rangeEnd=value.clock&&durationMinutes ? availabilityMinutes(value.clock)+durationMinutes : null
+  const previewMessage=!value.clock||!durationMinutes?'소요 시간과 시작 시각을 선택하세요.':!canPreview(value.clock)?'일정 조회 상태와 선택한 날짜를 확인하세요.':selectionState&&!selectionState.available?`확정 불가 · ${selectionState.reason}`:conflicts.length?'멤버 일정 겹침 · 아래 내용을 확인해 주세요.':'선택한 범위로 회의 시간을 확정할 수 있습니다.'
   function changeMonth(offset:number){setViewMonth(toDateKey(new Date(year,month-1+offset,1)).slice(0,7))}
   return <section aria-label="회의실 일정 선택" className="space-y-4 rounded-lg border border-border p-3">
     {previewing?<p className="text-xs text-muted-foreground">미리보기에서는 조회된 회의와 화면에서 추가한 일정만 비교합니다. 실제 휴가·외근 전체 조회와 예약·알림은 실행하지 않습니다.</p>:null}
@@ -116,9 +123,34 @@ export function MeetingSchedulePicker({rooms,value,onChange,durationMinutes,atte
           })}
         </div>
       </section>
-      <div className="min-w-0 space-y-2">
+      <div className="min-w-0 space-y-3">
+        <section aria-label="회의 시간 선택" className="space-y-4 rounded-xl border border-border bg-card p-4 shadow-sm">
+          <h3 className="text-base font-semibold">회의 시간 선택</h3>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="space-y-2 text-sm font-medium">소요 시간
+              <Select ref={durationRef} aria-label="회의 시간" className={cn('h-12 w-full text-lg font-semibold',durationInvalid&&'ring-2 ring-warning')} value={durationMinutes ?? ''} onChange={event=>onDurationChange(event.target.value?Number(event.target.value):null)}>
+                <option value="">시간 선택</option>{MEETING_DURATION_MINUTES.map(minutes=><option key={minutes} value={minutes}>{formatMeetingDuration(minutes)}</option>)}
+              </Select>
+            </label>
+            <label className="space-y-2 text-sm font-medium">회의실
+              <Select aria-label="회의실 선택" className="h-12 w-full text-lg font-semibold" value={value.roomId} onChange={event=>onChange({...value,roomId:event.target.value})}>
+                <option value="" disabled>회의실 선택</option>{rooms.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}
+              </Select>
+            </label>
+            <label className="space-y-2 text-sm font-medium">시작 시각
+              <Select aria-label="회의 시작 시각" className="h-12 w-full text-lg font-semibold" value={value.clock} disabled={!durationMinutes} onChange={event=>onChange({...value,clock:event.target.value})}>
+                <option value="">시작 선택</option>{clocks.map(clock=><option key={clock} value={clock} disabled={!canPreview(clock)}>{clock}</option>)}
+              </Select>
+            </label>
+          </div>
+          <div role="status" aria-label="선택한 회의 시간 범위" className={cn('space-y-1 rounded-lg border p-3',rangeBlocked?'border-danger/40 bg-danger/10':'border-border bg-muted/30')}>
+            <p className="text-sm text-muted-foreground">{room?.name || '회의실 선택'} · {value.dateKey}</p>
+            <p className={cn('text-2xl font-semibold tabular-nums',rangeBlocked&&'text-danger')}>{value.clock&&durationMinutes?formatMeetingClockRange(value.clock,durationMinutes):'시작 시각 선택'}{durationMinutes&&<span className="ml-2 text-base">{formatMeetingDuration(durationMinutes)}</span>}</p>
+            <p className={cn('text-sm',rangeBlocked?'text-danger':'text-muted-foreground')}>{previewMessage}</p>
+          </div>
+        </section>
         <h3 className="text-sm font-medium">{value.dateKey} 예약 현황</h3>
-        <p className="text-xs text-muted-foreground">달력에서 날짜를 고르고, 아래 시간표의 빈 시간을 누르세요. 회의실과 시작 시간이 함께 선택됩니다.</p>
+        <p className="text-xs text-muted-foreground">달력에서 날짜를 고르고 위에서 시간을 선택하거나, 아래 시간표의 시작 칸을 누르세요. 회의 전체 범위와 겹치는 시간을 함께 확인할 수 있습니다.</p>
         {!validDate?<p className="text-xs">회의 날짜를 선택하세요.</p>:calendar.isError?<p role="alert" className="text-xs text-danger">예약 일정을 불러오지 못했습니다. <button type="button" className="underline" onClick={()=>void calendar.refetch()}>다시 조회</button></p>:calendar.isPending?<p role="status" className="text-xs">예약 일정을 확인하는 중입니다.</p>:<div className="max-h-40 space-y-2 overflow-auto text-xs">
           {rooms.map(item=>{
             const booked=bookings.filter(booking=>booking.roomId===item.id).sort((a,b)=>a.startsAt.localeCompare(b.startsAt))
@@ -130,9 +162,9 @@ export function MeetingSchedulePicker({rooms,value,onChange,durationMinutes,atte
     <div className="space-y-2">
       <div className="flex flex-wrap justify-between gap-2 text-xs">
         <p className="font-medium">회의실별 시간표 · 평일 09~19시, 30분 단위</p>
-        <p className="flex gap-3"><span className="text-emerald-700">초록: 빈 시간</span><span className="text-red-700">빨강: 예약·일정 충돌</span><span className="text-amber-800">노랑: 승인 대기</span><span className="text-sky-700">파랑 테두리: 선택</span></p>
+        <p className="flex flex-wrap gap-3"><span className="text-success">초록 영역: 선택 가능</span><span className="text-danger">빨강 영역: 선택 범위에 불가·겹침 포함</span><span className="text-warning">노랑: 승인 대기</span></p>
       </div>
-      <p className="text-xs text-muted-foreground">시간은 세로 경계선을 가리킵니다. 09:00 선 오른쪽 첫 칸은 09:00~09:30입니다.</p>
+      <p className="text-xs text-muted-foreground">시간은 세로 경계선을 가리킵니다. 09:00 선 오른쪽 첫 칸은 09:00~09:30입니다. 점심·예약 표시는 실제 시간에 고정되며, 칸을 누르면 선택한 소요 시간만큼 영역이 표시됩니다.</p>
       <div className="overflow-x-auto rounded-lg border border-border"><div className="meeting-time-grid-inner">
         <table className="w-full min-w-[960px] table-fixed border-collapse text-center text-[10px]">
           <caption className="sr-only">회의실별 예약 시간과 빈 시간</caption>
@@ -140,29 +172,31 @@ export function MeetingSchedulePicker({rooms,value,onChange,durationMinutes,atte
           <tbody>{rooms.map(item=><tr key={item.id}>
             <th scope="row" className="border-t border-border p-2 text-left text-xs">{item.name}</th>
             {clocks.map(clock=>{
-              const state=available(item.id,clock),enabled=canChoose(clock,item.id)
-              const atLunch=Boolean(lunch.data&&meetingOverlapsLunch(clock,durationMinutes ?? 60,lunch.data))
-              const peopleBusy=rows.filter(row=>row.kind!=='remote'&&overlapsAvailability(row,clock,durationMinutes ?? 60))
+              const state=available(item.id,clock),enabled=canPreview(clock)
+              const atLunch=Boolean(lunch.data&&meetingOverlapsLunch(clock,30,lunch.data))
+              const peopleBusy=rows.filter(row=>row.kind!=='remote'&&overlapsAvailability(row,clock,30))
               const peopleTone=peopleBusy.some(row=>row.status==='approved')?'conflict':peopleBusy.length?'warning':null
               const occupied=bookings.find(booking=>booking.roomId===item.id&&isClockCoveredByMeeting(clock,booking.startsAt.slice(11,16),booking.durationMinutes))
-              const selected=item.id===value.roomId&&Boolean(value.clock)&&isClockCoveredByMeeting(clock,value.clock,durationMinutes ?? 60)
+              const selected=item.id===value.roomId&&Boolean(value.clock)&&Boolean(durationMinutes)&&isClockCoveredByMeeting(clock,value.clock,durationMinutes ?? 60)
               const start=item.id===value.roomId&&value.clock===clock
-              return <td key={clock} className="border-l border-t border-border p-0">
+              const end=selected&&rangeEnd!==null&&availabilityMinutes(clock)+30>=rangeEnd
+              return <td key={clock} data-range-state={selected?(rangeBlocked?'blocked':'available'):undefined} className="relative border-l border-t border-border p-0">
                 <button type="button" aria-label={`${item.name} ${clock} 시작`} aria-pressed={start} disabled={!enabled}
-                  title={occupied?`${formatMeetingClockRange(occupied.startsAt.slice(11,16),occupied.durationMinutes)} · ${occupied.title}`:durationMinutes===null?'회의 시간을 먼저 선택하세요.':state.reason||`${formatMeetingClockRange(clock,durationMinutes)} 선택`}
-                  className={cn('h-11 w-full text-[10px] disabled:cursor-not-allowed',lunch.isPending||lunch.isError||attendancePending||attendanceError?'bg-muted text-muted-foreground':occupied||peopleTone==='conflict'?'bg-red-100 text-red-800':atLunch?'bg-muted text-muted-foreground':peopleTone==='warning'?'bg-amber-100 text-amber-900':selected?'bg-sky-200 text-sky-950':enabled?'bg-emerald-50 text-emerald-900 hover:bg-emerald-100':'bg-muted text-muted-foreground',selected&&'ring-1 ring-inset ring-sky-600')}
-                  onClick={()=>onChange({...value,roomId:item.id,clock})}>{occupied?'예약':atLunch?'점심':start?'시작':selected?'선택':peopleTone?'주의':''}</button>
+                  title={occupied?`${formatMeetingClockRange(occupied.startsAt.slice(11,16),occupied.durationMinutes)} · ${occupied.title}`:durationMinutes===null?'회의 시간을 먼저 선택하세요.':`${formatMeetingClockRange(clock,durationMinutes)} 미리보기${state.available?'':` · 확정 불가: ${state.reason}`}`}
+                  className={cn('h-11 w-full text-[10px] disabled:cursor-not-allowed',selected?rangeBlocked?'bg-danger/15 text-danger':'bg-success/15 text-success':lunch.isPending||lunch.isError||attendancePending||attendanceError?'bg-muted text-muted-foreground':occupied||peopleTone==='conflict'?'bg-danger/10 text-danger':atLunch?'bg-muted text-muted-foreground':peopleTone==='warning'?'bg-warning/15 text-warning':enabled?'bg-success/5 hover:bg-success/10':'bg-muted text-muted-foreground')}
+                  onClick={()=>onChange({...value,roomId:item.id,clock})}>{occupied?'예약':atLunch?'점심':start?'시작':end?'끝':peopleTone?'일정':''}</button>
+                {selected&&<MeetingRangeMarker start={start} end={Boolean(end)} blocked={rangeBlocked}/>}
               </td>
             })}
           </tr>)}</tbody>
         </table>
       </div></div>
     </div>
-    {attendancePending?<p role="status" className="text-xs">멤버 일정을 확인하는 중입니다.</p>:attendanceError?<p role="alert" className="text-xs text-danger">멤버 일정을 불러오지 못했습니다. <button type="button" className="underline" onClick={()=>void attendance.refetch()}>다시 조회</button></p>:<MeetingAvailabilityTable attendees={attendees} rows={rows} clocks={clocks} clock={value.clock} duration={durationMinutes ?? 60} canChoose={canChoose} onChoose={clock=>{if(canChoose(clock))onChange({...value,clock})}}/>}
+    {attendancePending?<p role="status" className="text-xs">멤버 일정을 확인하는 중입니다.</p>:attendanceError?<p role="alert" className="text-xs text-danger">멤버 일정을 불러오지 못했습니다. <button type="button" className="underline" onClick={()=>void attendance.refetch()}>다시 조회</button></p>:<MeetingAvailabilityTable attendees={attendees} rows={rows} clocks={clocks} clock={durationMinutes?value.clock:''} duration={durationMinutes ?? 60} rangeBlocked={rangeBlocked} canChoose={canPreview} onChoose={clock=>{if(canPreview(clock))onChange({...value,clock})}}/>}
     {conflicts.length>0?<label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={acknowledged===acknowledgmentKey} onChange={event=>setAcknowledged(event.target.checked?acknowledgmentKey:null)}/>멤버의 겹치는 일정을 확인했으며 이 시간으로 진행합니다.</label>:null}
     {error||checkError?<p role="alert" className="text-xs text-danger">{error ?? checkError}</p>:null}
     <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
-      <p className="text-xs text-muted-foreground">{ready?`${room!.name} · ${value.dateKey} · ${formatMeetingClockRange(value.clock,durationMinutes!)}`:'회의 시간·날짜를 고르고 원하는 회의실의 빈 시간을 누르세요.'}</p>
+      <p className="text-xs text-muted-foreground">{room&&value.clock&&durationMinutes?`${room.name} · ${value.dateKey} · ${formatMeetingClockRange(value.clock,durationMinutes)}`:'회의 시간·날짜를 고르고 원하는 시작 시각을 선택하세요.'}</p>
       <Button type="button" disabled={!ready||checking||(conflicts.length>0&&acknowledged!==acknowledgmentKey)} onClick={()=>void confirm()}>{checking?'확인 중…':'일정 확정'}</Button>
     </div>
   </section>

@@ -42,7 +42,6 @@ import { cn, emptyList } from '@/lib/utils'
 import {
   DEFAULT_MEETING_DURATION_MINUTES,
   DEFAULT_MEETING_VISIBLE_DAYS,
-  MEETING_DURATION_MINUTES,
   MEETING_ROOMS,
   MEETING_WEEKDAY_LABELS,
   chunkMeetingDays,
@@ -767,31 +766,6 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
                   {directory.map(person=><option key={person.id} value={person.id}>{meetingPersonLabel(person)}{person.id===host.id?' · 나':''}</option>)}
                 </Select>
               </label>
-              {schedulingSeries ? <label className="w-36 space-y-1">
-                <span className="text-xs font-medium">회의 시간</span>
-                <Select
-                  ref={durationRef}
-                  className={cn(
-                    'w-full',
-                    composePrompt &&
-                      composeGaps.duration &&
-                      'ring-2 ring-amber-500',
-                  )}
-                  value={composeDuration == null ? '' : String(composeDuration)}
-                  aria-label="회의 시간"
-                  onChange={(event) => {
-                    const value = event.target.value
-                    setDurationMinutes(value ? Number(value) : null)
-                  }}
-                >
-                  <option value="">선택</option>
-                  {MEETING_DURATION_MINUTES.map((minutes) => (
-                    <option key={minutes} value={minutes}>
-                      {formatMeetingDuration(minutes)}
-                    </option>
-                  ))}
-                </Select>
-              </label> : null}
               {schedulingSeries ? (
                 <Button
                   type="button"
@@ -929,7 +903,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
                 )}
             </div>
             {!schedulingSeries ? <MeetingKindFields kind={newKindInfo.kind} /> : null}
-            {schedulingSeries ? <MeetingSchedulePicker rooms={rooms} value={scheduleChoice} onChange={setScheduleChoice} durationMinutes={composeDuration} attendees={attendees} seriesId={schedulingSeries.id} previewBookings={simulating ? items : undefined} previewHiddenRounds={simulating ? previewDeletedRounds : undefined}
+            {schedulingSeries ? <MeetingSchedulePicker rooms={rooms} value={scheduleChoice} onChange={setScheduleChoice} durationMinutes={composeDuration} onDurationChange={setDurationMinutes} durationRef={durationRef} durationInvalid={Boolean(composePrompt && composeGaps.duration)} attendees={attendees} seriesId={schedulingSeries.id} previewBookings={simulating ? items : undefined} previewHiddenRounds={simulating ? previewDeletedRounds : undefined}
               roundId={schedulingRoundId ?? findPendingRound(schedulingSeries)?.id} error={meetings.error}
               onConfirm={()=>bookSlot(scheduleChoice.roomId,scheduleChoice.dateKey,scheduleChoice.clock)}/> : null}
             <div className="flex items-center justify-between gap-3 border-t border-border pt-3">
