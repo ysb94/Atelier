@@ -139,7 +139,7 @@ export function NotificationPanel({
                         <span className={cn('mt-0.5 block text-sm text-muted-foreground', item.kind === 'meeting_invitation' ? 'whitespace-pre-line break-words' : 'truncate')}>
                           {item.body}
                         </span>
-                        {item.kind==='meeting_invitation'?<span className="mt-1 block text-xs text-primary">{item.meeting?.role==='host'?'회의에서 멤버 응답 확인 →':'회의에서 참석 여부 응답 →'}</span>:null}
+                        {item.kind==='meeting_invitation'?<span className="mt-1 block text-xs text-primary">{item.meeting?.finalized?'회의 확정 내역 보기 →':item.meeting?.role==='host'?'회의에서 멤버 응답 확인 →':'회의에서 참석 여부 응답 →'}</span>:null}
                         {item.kind==='leave_alarm_sample'||item.kind==='leave_usage_notice'?<span className="mt-1 block text-xs text-primary">안내문 열람·확인 →</span>:null}
                         <span className="mt-1 block text-[11px] text-muted-foreground">
                           {formatInboxTime(item.createdAt)}

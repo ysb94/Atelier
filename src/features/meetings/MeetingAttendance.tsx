@@ -20,7 +20,8 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
       {[series.host,...series.members].map(person=>{
         const isHost=person.id===series.host.id
         const status=round?.responses?.find(response=>response.profileId===person.id)?.status ?? 'pending'
-        const label=isHost?'호스트':!confirmed?'준비 중':!requiresResponse?'일정 공유':status==='available'?'참석 가능':status==='unavailable'?'참석 불가':'응답 대기'
+        const excluded=round?.manualConfirmation?.excludedIds.includes(person.id)
+        const label=isHost?'호스트':excluded?'이번 차수 제외 · 불참':!confirmed?'준비 중':!requiresResponse?'일정 공유':status==='available'?'참석 가능':status==='unavailable'?'참석 불가':'응답 대기'
         return <button key={person.id} type="button" disabled={!published||!participant||simulating||person.id===actorId}
           title={`${person.name} · ${label}${person.id!==actorId&&published?' · 1:1 대화':''}`}
           aria-label={`${person.name} · ${label}`} onClick={()=>onChat(person)}
@@ -31,7 +32,8 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
       })}
     </div>
     </div>
-    {!compact&&confirmed&&requiresResponse&&round&&series.members.some(person=>person.id===actorId)&&onRespond ? <MeetingResponse round={round} actorId={actorId} onRespond={onRespond}/>:null}
+    {round?.manualConfirmation && !compact && <p className="text-sm text-muted-foreground">수동 확정 · 불참자 {round.manualConfirmation.excludedIds.length}명은 이번 차수에서 제외됩니다.</p>}
+    {!compact&&confirmed&&requiresResponse&&round&&!round.manualConfirmation&&series.members.some(person=>person.id===actorId)&&onRespond ? <MeetingResponse round={round} actorId={actorId} onRespond={onRespond}/>:null}
   </div>
 }
 

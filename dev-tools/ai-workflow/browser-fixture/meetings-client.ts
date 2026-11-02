@@ -27,7 +27,7 @@ export function meetingFixtureChannel(){
 export function meetingFixtureRpc(name:string,args:Record<string,unknown>={}) {
  if(name==='list_meeting_cleanup_paths')return Promise.resolve({data:[],error:null})
  if(name==='finish_meeting_cleanup')return Promise.resolve({data:null,error:null})
- if(!['list_meeting_member_participation','list_meeting_availability','list_meeting_availability_with_todos','list_company_meetings','list_meeting_directory','list_meeting_calendar','list_my_meeting_invitations','read_meeting_invitation','save_company_meeting','confirm_company_meeting','respond_to_meeting','open_meeting_group','open_direct_chat','delete_company_meeting','begin_meeting_file','finish_meeting_file','remove_meeting_file'].includes(name))return null
+ if(!['list_meeting_member_participation','list_meeting_availability','list_meeting_availability_with_todos','list_company_meetings','list_meeting_directory','list_meeting_calendar','list_my_meeting_invitations','read_meeting_invitation','save_company_meeting','confirm_company_meeting','manually_confirm_meeting_round','respond_to_meeting','open_meeting_group','open_direct_chat','delete_company_meeting','begin_meeting_file','finish_meeting_file','remove_meeting_file'].includes(name))return null
  const value=state();let data:unknown
  if(name==='list_meeting_member_participation'){
   if(value.participationError)return Promise.resolve({data:null,error:{message:'검증용 제목 조회 실패'}})
@@ -38,7 +38,7 @@ export function meetingFixtureRpc(name:string,args:Record<string,unknown>={}) {
   return Promise.resolve({data:value.participation??[...map].map(([profile_id,titles])=>({profile_id,titles})),error:null})
  }
  if(name==='list_meeting_availability'||name==='list_meeting_availability_with_todos')data=(value.availability??[]).filter(row=>(args.p_people as string[]).includes(row.personId)&&(!row.date||row.date===args.p_date))
- else if(name==='list_company_meetings')data=value.series.filter(series=>series.phase!=='preparing'||series.host.id===actor||series.createdBy===actor)
+ else if(name==='list_company_meetings')data=value.series.filter(series=>series.phase!=='preparing'||series.host.id===actor||series.createdBy===actor).map(series=>({...series,manualConfirmationReady:series.manualConfirmationReady ?? true}))
  else if(name==='list_meeting_directory')data=[host,member]
  else if(name==='list_meeting_calendar')data=seriesToDrafts(value.series)
  else if(name==='list_my_meeting_invitations')data=[...value.series.filter(series=>series.phase==='published'&&series.members.some(person=>person.id===actor)).flatMap(series=>series.rounds.filter(round=>round.confirmed).map(round=>({id:round.id,kind:'meeting_invitation',title:series.title+' · 참석 요청',body:'확정된 일정에 참석 가능·불가로 답해 주세요.',href:`/settings/profile?part=meetings&meeting=${series.id}&round=${round.id}`,createdAt:'2026-10-21T00:00:00Z',readAt:value.read?.includes(round.id)?'2026-10-21T01:00:00Z':null}))),...(value.notices??[]).filter(notice=>notice.recipient===actor&&value.series.some(series=>series.status==='in_progress'&&series.rounds.some(round=>round.id===notice.meeting.roundId&&round.scheduleVersion===notice.meeting.scheduleVersion))).map(notice=>({...notice,readAt:value.read?.includes(notice.id)?'2026-10-21T01:00:00Z':null}))]
@@ -47,6 +47,12 @@ export function meetingFixtureRpc(name:string,args:Record<string,unknown>={}) {
   value.audit.push(name)
   if(name==='read_meeting_invitation')value.read=[...(value.read??[]),...(args.p_id?[args.p_id as string]:[...(value.notices??[]).filter(notice=>notice.recipient===actor).map(notice=>notice.id),...value.series.flatMap(series=>series.members.some(person=>person.id===actor)?series.rounds.map(round=>round.id):[])])]
   else if(name==='open_meeting_group'||name==='open_direct_chat')data='fixture-room'
+  else if(name==='manually_confirm_meeting_round'){
+   const series=value.series.find(s=>s.rounds.some(r=>r.id===args.p_round))!,round=series.rounds.find(r=>r.id===args.p_round)!
+   if(series.host.id!==actor||series.revision!==args.p_revision||series.members.some(m=>!round.responses?.some(r=>r.profileId===m.id&&r.status!=='pending')))return Promise.resolve({data:null,error:{message:'최신 멤버 응답을 확인해 주세요.'}})
+   round.manualConfirmation={excludedIds:args.p_excluded as string[],decidedAt:new Date().toISOString(),actorId:actor}
+   data=series.revision=(series.revision??0)+1
+  }
   else if(name==='respond_to_meeting'){
    for(const series of value.series)for(const round of series.rounds)if(round.id===args.p_round){
     const old=round.responses?.find(response=>response.profileId===actor)?.status
@@ -60,7 +66,7 @@ export function meetingFixtureRpc(name:string,args:Record<string,unknown>={}) {
    data=(previous?.revision ?? 0)+1
    if(name==='confirm_company_meeting'){
     next.phase='published';const round=next.rounds.find(row=>row.id===args.p_round)!
-    round.confirmed=true;round.scheduleVersion=(previous?.rounds.find(row=>row.id===round.id)?.scheduleVersion??0)+1
+    round.manualConfirmation=null;round.confirmed=true;round.scheduleVersion=(previous?.rounds.find(row=>row.id===round.id)?.scheduleVersion??0)+1
     round.responses=next.kind==='meeting'?[]:next.members.map(person=>({profileId:person.id,status:'pending'}))
    }
    value.series=[{...next,revision:data as number},...value.series.filter(item=>item.id!==next.id)]

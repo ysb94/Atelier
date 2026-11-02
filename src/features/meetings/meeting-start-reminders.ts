@@ -25,6 +25,7 @@ export function upcomingMeetingNotices(series: readonly MeetingSeries[], personI
     const host = meeting.host.id === personId
     if (!host && !meeting.members.some(member => member.id === personId)) continue
     for (const round of meeting.rounds) {
+      if (round.manualConfirmation?.excludedIds.includes(personId)) continue
       if (!round.confirmed || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(round.startsAt)) continue
       const startsAtMs = Date.parse(`${round.startsAt}:00+09:00`)
       if (!Number.isFinite(startsAtMs)) continue

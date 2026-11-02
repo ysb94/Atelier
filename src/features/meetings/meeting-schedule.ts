@@ -86,6 +86,7 @@ export type MeetingRound = {
   confirmed?: boolean
   scheduleVersion?: number
   responses?: { profileId: string; status: 'pending' | 'available' | 'unavailable' }[]
+  manualConfirmation?: { excludedIds: string[]; decidedAt: string; actorId: string } | null
   durationMinutes?: number
   round: number
   startsAt: string
@@ -142,10 +143,11 @@ export function formatRoundListLabel(
 }
 
 export function roundListCaption(
-  round: Pick<MeetingRound, 'startsAt' | 'content' | 'responses'>,
+  round: Pick<MeetingRound, 'startsAt' | 'content' | 'responses' | 'manualConfirmation'>,
   memberIds: readonly string[],
-): '회의 안내 미작성' | '일정 미확정' | '참석 응답 대기' | '참석 불가' | null {
+): '회의 안내 미작성' | '일정 미확정' | '참석 응답 대기' | '참석 불가' | '수동 확정 · 불참자 제외' | null {
   if (isPendingRound(round)) return (round.content ?? '').trim() ? '일정 미확정' : '회의 안내 미작성'
+  if (round.manualConfirmation) return '수동 확정 · 불참자 제외'
   if (memberIds.length === 0) return null
   const statuses = memberIds.map((id) => round.responses?.find((response) => response.profileId === id)?.status ?? 'pending')
   if (statuses.some((status) => status === 'unavailable')) return '참석 불가'
@@ -281,6 +283,7 @@ export type MeetingSeries = {
   phase?: 'preparing' | 'published'
   createdBy?: string
   revision?: number
+  manualConfirmationReady?: boolean
   title: string
   host: MeetingPerson
   members: MeetingPerson[]
@@ -562,7 +565,7 @@ export function seriesToDrafts(
         startsAt: round.startsAt,
         roomId: round.roomId,
         host: item.host,
-        members: item.members,
+        members: item.members.filter(member => !round.manualConfirmation?.excludedIds.includes(member.id)),
         seriesId: item.id,
         round: round.round,
         quarterId: round.quarterId,

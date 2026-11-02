@@ -17,6 +17,7 @@ export type MeetingNotice = {
   status: 'pending' | 'available' | 'unavailable'
   /** 멤버는 참석 여부를 답하고, 호스트는 불가 발생·전원 참석 가능을 확인한다. */
   role: 'member' | 'host'
+  finalized?: boolean
 }
 
 export type InboxNotification = {

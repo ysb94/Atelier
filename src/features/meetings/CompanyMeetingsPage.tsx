@@ -6,6 +6,7 @@ import { openDirectChat } from '@/lib/supabase/chat'
 import { openConversation } from '@/lib/chat/open-conversation'
 import { chatKeys } from '@/features/chat/use-chat'
 import { MeetingAttendance, MeetingResponse } from './MeetingAttendance'
+import { ManualMeetingConfirmation } from './ManualMeetingConfirmation'
 import { MeetingMemberOption } from './MeetingMemberOption'
 import { buildMeetingParticipationSummary } from './meeting-participation'
 import { MeetingSchedulePicker, type MeetingScheduleChoice } from './MeetingSchedulePicker'
@@ -34,7 +35,7 @@ import {
   listDepartments,
   type Department,
 } from '@/lib/supabase/profiles'
-import { listMeetingDirectory, listMeetingParticipation, uploadMeetingFile, removeMeetingFile, downloadMeetingFile, respondToMeeting, openMeetingGroup } from '@/lib/supabase/meetings'
+import { listMeetingDirectory, listMeetingParticipation, uploadMeetingFile, removeMeetingFile, downloadMeetingFile, respondToMeeting, manuallyConfirmMeetingRound, openMeetingGroup } from '@/lib/supabase/meetings'
 import { useCompanyMeetings } from './useCompanyMeetings'
 import { hasPermission } from '@/lib/company/permissions'
 import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
@@ -587,7 +588,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
                 )
                 const canDetail = canOpenMeetingDetail(item, host)
                 const responseRounds = item.status === 'in_progress' && item.phase !== 'preparing' && item.members.some(person => person.id === host.id) && !(kindInfos[item.id]?.kind === 'meeting')
-                  ? rounds.filter(round => Boolean(round.confirmed ?? round.startsAt)) : []
+                  ? rounds.filter(round => Boolean(round.confirmed ?? round.startsAt) && !round.manualConfirmation) : []
                 const pendingResponses = responseRounds.filter(round => (round.responses?.find(response => response.profileId === host.id)?.status ?? 'pending') === 'pending')
                 return (
                   <li
@@ -955,6 +956,11 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
           allowNextRound={meetingHasNextRound(detailKindInfo?.kind ?? 'project')}
           simpleMeeting={detailKindInfo?.kind === 'meeting'}
           onRefresh={meetings.refresh}
+          onManualConfirm={async (revision,excluded) => {
+            let updated:number|null=null
+            const saved=await meetings.perform(async()=>{updated=await manuallyConfirmMeetingRound(detailRound.id,revision,detailRound.scheduleVersion ?? 1,excluded)})
+            return saved ? updated : null
+          }}
           attendance={<MeetingAttendance series={detailSeries} round={detailRound} actorId={host.id} simulating={simulating} requiresResponse={detailKindInfo?.kind !== 'meeting'} onChat={chatWith} onGroup={()=>groupChat(detailSeries)} onRespond={status=>respond(detailSeries,detailRound,status)}/> }
           saveError={meetings.error}
           onClose={closeDetail}
@@ -1665,6 +1671,7 @@ function MeetingDetailDrawer({
   onSave,
   onScheduleNext,
   onBookTime,
+  onManualConfirm,
   onMarkDone,
   onReopen,
 }: {
@@ -1685,6 +1692,7 @@ function MeetingDetailDrawer({
   },revision:number) => Promise<number|null>
   onScheduleNext: () => Promise<void>
   onBookTime: () => void
+  onManualConfirm: (revision:number,excluded:string[]) => Promise<number|null>
   onMarkDone: () => Promise<void>
   onReopen: () => Promise<void>
 }) {
@@ -1694,6 +1702,9 @@ function MeetingDetailDrawer({
   const [prepMaterials, setPrepMaterials] = useState(round.prepMaterials)
   const [content, setContent] = useState(round.content)
   const [result, setResult] = useState(round.result)
+  const [manualOpen,setManualOpen]=useState(false)
+  const unavailable=series.members.filter(person=>round.responses?.find(response=>response.profileId===person.id)?.status==='unavailable')
+  const allResponded=series.members.every(person=>['available','unavailable'].includes(round.responses?.find(response=>response.profileId===person.id)?.status ?? 'pending'))
   const [busy,setBusy]=useState(false),[operationError,setOperationError]=useState<string|null>(null)
   const editRevision=useRef(series.revision ?? 0)
   useEffect(()=>setPrepMaterials(round.prepMaterials),[round.prepMaterials])
@@ -1981,6 +1992,8 @@ function MeetingDetailDrawer({
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t border-border px-5 py-3">
             <Button type="button" variant="outline" onClick={closeDrawer}>닫기</Button>
             {isHost && !pending ? <Button type="button" variant="outline" onClick={()=>void run(async()=>{if(await persistNotes()) onBookTime()})}>일정 변경</Button>:null}
+            {isHost && !pending && !simpleMeeting && !round.manualConfirmation && <Button type="button" variant="outline" disabled={simulating || !series.manualConfirmationReady || !allResponded || unavailable.length===0} onClick={()=>setManualOpen(true)}>수동 확정</Button>}
+            {isHost && !pending && !simpleMeeting && !round.manualConfirmation && <span className="w-full text-right text-xs text-muted-foreground">{!series.manualConfirmationReady ? '수동 확정 서버 연결 대기' : !allResponded ? '모든 멤버가 응답하면 수동 확정할 수 있습니다.' : unavailable.length===0 ? '모두 참석 가능합니다.' : '불참 멤버를 이번 차수에서만 제외하고 진행할 수 있습니다.'}</span>}
             {isHost && (pending || allowNextRound) ? pending ? (
               <Button
                 type="button"
@@ -2019,6 +2032,11 @@ function MeetingDetailDrawer({
           </div>
         )}
         </fieldset>
+        {manualOpen && <ManualMeetingConfirmation names={unavailable.map(person=>person.name)} busy={busy} error={operationError ?? saveError} onClose={()=>setManualOpen(false)} onConfirm={()=>void run(async()=>{
+          if(!await persistNotes()) return
+          const revision=await onManualConfirm(editRevision.current,unavailable.map(person=>person.id))
+          if(revision!==null){editRevision.current=revision;setManualOpen(false)}
+        })}/>}
       </div>
     </div>
   )

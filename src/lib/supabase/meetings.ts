@@ -42,6 +42,7 @@ export async function confirmCompanyMeeting(series:MeetingSeries,revision:number
   return checked<number>(getSupabase().rpc('confirm_company_meeting',{p_series:series,p_revision:revision,p_round:round}))
 }
 export const respondToMeeting=(round:string,version:number,status:'available'|'unavailable')=>checked<void>(getSupabase().rpc('respond_to_meeting',{p_round:round,p_version:version,p_status:status}))
+export const manuallyConfirmMeetingRound=(round:string,revision:number,version:number,excluded:string[])=>checked<number>(getSupabase().rpc('manually_confirm_meeting_round',{p_round:round,p_revision:revision,p_version:version,p_excluded:excluded}))
 export const listMeetingInvitations=()=>checked<InboxNotification[]>(getSupabase().rpc('list_my_meeting_invitations'))
 export const readMeetingInvitation=(id:string|null)=>checked<void>(getSupabase().rpc('read_meeting_invitation',{p_id:id}))
 export const openMeetingGroup=(id:string)=>checked<string>(getSupabase().rpc('open_meeting_group',{p_series:id}))

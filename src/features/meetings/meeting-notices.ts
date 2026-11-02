@@ -22,6 +22,7 @@ function memberNotice(item: InboxNotification, series: readonly MeetingSeries[],
     scheduleVersion: found.round.scheduleVersion ?? 1,
     status,
     role: 'member',
+    finalized: Boolean(found.round.manualConfirmation),
   }
 }
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import type { MeetingSeries } from './meeting-schedule'
+import { roundListCaption, seriesToDrafts, type MeetingSeries } from './meeting-schedule'
 import { MEETING_REMINDER_LEAD_MS, meetingNoticeDue, meetingNoticeStorageKey, upcomingMeetingNotices } from './meeting-start-reminders'
 
 const series: MeetingSeries = {
@@ -8,6 +8,16 @@ const series: MeetingSeries = {
   rounds: [{ id: 'round', round: 1, confirmed: true, scheduleVersion: 1, startsAt: '2030-01-08T10:00', roomId: 'room-1', quarterId: 'q1', prepMaterials: [], content: '', result: '' }],
 }
 const [notice] = upcomingMeetingNotices([series], 'host')
+const excluded=structuredClone(series)
+excluded.rounds[0].manualConfirmation={excludedIds:['member'],decidedAt:'2030-01-07T00:00:00Z',actorId:'host'}
+excluded.rounds[0].responses=[{profileId:'member',status:'unavailable'}]
+assert.equal(upcomingMeetingNotices([excluded],'member').length,0,'이번 차수 제외자는 시작 알림 제외')
+assert.equal(upcomingMeetingNotices([excluded],'host').length,1,'호스트는 시작 알림 유지')
+assert.equal(seriesToDrafts([excluded])[0].members.length,0,'달력의 해당 차수 참석자만 제외')
+assert.equal(roundListCaption(excluded.rounds[0],['member']),'수동 확정 · 불참자 제외','불참 경고 대신 확정 표시')
+excluded.rounds.push({...series.rounds[0],id:'next',round:2})
+assert.equal(upcomingMeetingNotices([excluded],'member').length,1,'다음 차수에는 다시 시작 알림 대상')
+assert.equal(seriesToDrafts([excluded])[1].members.length,1,'다음 차수 참석자 유지')
 assert.equal(notice.startsAtMs, Date.parse('2030-01-08T01:00:00Z'), '기기 시간대와 무관하게 한국 시각 사용')
 assert.equal(notice.role, '호스트')
 assert.equal(upcomingMeetingNotices([series], 'member')[0].role, '멤버')
