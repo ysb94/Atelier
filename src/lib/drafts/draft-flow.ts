@@ -237,3 +237,38 @@ export function receiveColorSample(
   if (Number.isNaN(Date.parse(at))) throw new Error('수령 날짜를 확인해 주세요.')
   return rounds.map(round => round.id === id ? { ...round, receivedAt: at, originCountry: round.originCountry || country } : { ...round })
 }
+
+export type ColorSampleLineStatus = 'waiting' | 'sampling' | 'done'
+
+/** 컬러샘플이 시작되면 샘플중이다. 수령 확인 뒤에 완료로 표시한 컬러만 완료다. */
+export function colorSampleLineStatus(started: boolean, received: boolean, done: boolean): ColorSampleLineStatus {
+  if (!started) return 'waiting'
+  if (received && done) return 'done'
+  return 'sampling'
+}
+
+export function normalizeColorSampleDone(raw: unknown): Record<string, string[]> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {}
+  const done: Record<string, string[]> = {}
+  for (const [roundId, colors] of Object.entries(raw)) {
+    if (!roundId.trim() || !Array.isArray(colors)) continue
+    const ids = [...new Set(colors.filter((id): id is string => typeof id === 'string' && id.trim().length > 0).map(id => id.trim()))]
+    if (ids.length) done[roundId] = ids
+  }
+  return done
+}
+
+export function setColorSampleDone(
+  done: Record<string, string[]> | undefined,
+  roundId: string,
+  colorId: string,
+  complete: boolean,
+): Record<string, string[]> {
+  const next = { ...normalizeColorSampleDone(done) }
+  const ids = new Set(next[roundId] ?? [])
+  if (complete) ids.add(colorId)
+  else ids.delete(colorId)
+  if (ids.size) next[roundId] = [...ids]
+  else delete next[roundId]
+  return next
+}

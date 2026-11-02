@@ -73,6 +73,7 @@ export function emptyDraftInput(): ProductDraftInput {
       colorNamesConfirmed: false,
       colorSampleRequestedAt: null,
       colorSampleRounds: [],
+      colorSampleDone: {},
     },
     hasOptions: false,
     options: [],

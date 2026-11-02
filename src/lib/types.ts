@@ -326,6 +326,8 @@ export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
   colorSampleRequestedAt?: string | null
   /** 컬러 샘플 차수. 파일은 같고, 요청·회신·합격만 차수마다 남긴다. */
   colorSampleRounds?: DraftColorSampleRound[]
+  /** 수령 확인한 컬러샘플 차수별로, 완료로 표시한 컬러 id */
+  colorSampleDone?: Record<string, string[]>
 }
 
 /** 컬러 샘플 작업지시서 한 차수. 대표 샘플과 같이 회신 뒤에 합격 또는 다음 차수로 간다. */

@@ -19,7 +19,7 @@ import {
   type DraftOwnerScope,
 } from '@/lib/drafts/company-draft'
 import { MAX_DRAFT_COLORS, newColorRow } from '@/lib/drafts/empty-draft'
-import { receiveColorSample, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
+import { receiveColorSample, resolveColorSampleRounds, setColorSampleDone } from '@/lib/drafts/draft-flow'
 import { registerDraftSampleStage } from '@/lib/drafts/sample-registration'
 import { draftToInput, attachSampleWorkOrderFile, latestFilledSampleWorkOrder, legacyWorkOrderFields } from '@/lib/drafts/sample-work-order'
 import { receiveSample, registerNextReceivedSample } from '@/lib/drafts/sample-receipt'
@@ -707,6 +707,33 @@ export function CompanyDraftsPage() {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
                         return { ...input, specs: { ...input.specs, colorSampleRounds: receiveColorSample(resolveColorSampleRounds(input), id, input.originCountry) } }
+                      })
+                    }}
+                    onSetColorSampleDone={(colorId, done) => {
+                      const current = currentDraft(draft.id)
+                      if (!current) return Promise.reject(new Error('기획안을 찾지 못했습니다.'))
+                      const latest = resolveColorSampleRounds(current).at(-1)
+                      if (!latest?.receivedAt) return Promise.reject(new Error('컬러샘플을 수령 확인한 뒤에 완료로 바꿀 수 있습니다.'))
+                      const optimistic: ProductDraft = {
+                        ...current,
+                        specs: { ...current.specs, colorSampleDone: setColorSampleDone(current.specs.colorSampleDone, latest.id, colorId, done) },
+                      }
+                      queryClient.setQueryData<ProductDraft[]>(['product-drafts', 'company', companyId], list => list?.map(item => item.id === draft.id ? optimistic : item))
+                      return saveDraftChange(draft.id, (base) => {
+                        const next = draftToInput(base)
+                        const round = resolveColorSampleRounds(next).at(-1)
+                        if (!round?.receivedAt) throw new Error('컬러샘플을 수령 확인한 뒤에 완료로 바꿀 수 있습니다.')
+                        return { ...next, specs: { ...next.specs, colorSampleDone: setColorSampleDone(next.specs.colorSampleDone, round.id, colorId, done) } }
+                      }).then(() => undefined).catch((error: unknown) => {
+                        queryClient.setQueryData<ProductDraft[]>(['product-drafts', 'company', companyId], list => list?.map(item => {
+                          if (item.id !== draft.id) return item
+                          const round = resolveColorSampleRounds(item).at(-1)
+                          if (!round) return item
+                          const marked = (item.specs.colorSampleDone?.[round.id] ?? []).includes(colorId)
+                          if (marked !== done) return item
+                          return { ...item, specs: { ...item.specs, colorSampleDone: setColorSampleDone(item.specs.colorSampleDone, round.id, colorId, !done) } }
+                        }))
+                        throw error
                       })
                     }}
                     onUploadColorWorkOrder={async (file) => {

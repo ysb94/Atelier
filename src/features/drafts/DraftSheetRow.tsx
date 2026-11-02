@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input'
 import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
 import { resolveColorSpec } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
-import { resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
+import { colorSampleLineStatus, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import { sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
 import { sheetRegisteredDay } from '@/lib/drafts/sample-work-order'
 import { readFileAsDataUrl } from '@/lib/images'
@@ -647,22 +647,29 @@ function EntryButton({
 }
 
 function SampleStatus({
-  inProgress,
-  sent,
+  status,
+  canToggle,
+  onToggle,
 }: {
-  inProgress: boolean
-  sent: boolean
+  status: 'waiting' | 'sampling' | 'done'
+  canToggle: boolean
+  onToggle?: () => void
 }) {
-  const label = sent ? '발송 완료' : inProgress ? '샘플중' : '대기'
-  const tone = sent ? 'done' : inProgress ? 'pending' : 'neutral'
-  const title = sent ? '컬러 샘플 발송 완료' : inProgress ? '컬러 샘플 작업지시서를 보냄' : '작업지시서 전'
+  const label = status === 'done' ? '완료' : status === 'sampling' ? '샘플중' : '대기'
+  const tone = status === 'done' ? 'done' : status === 'sampling' ? 'pending' : 'neutral'
+  const title = status === 'waiting'
+    ? '컬러샘플 시작 전'
+    : canToggle
+      ? status === 'done' ? '샘플중으로 되돌리기' : '완료로 바꾸기'
+      : '실물 수령 확인 후 완료로 바꿀 수 있습니다'
   return (
     <button
       type="button"
       className={`draft-sheet-action is-${tone} draft-sheet-status-badge`}
       aria-label={label}
       title={title}
-      disabled
+      disabled={!canToggle}
+      onClick={() => onToggle?.()}
     >
       {label}
     </button>
@@ -691,7 +698,7 @@ export function DraftPhoto({ src, name, onOpen }: { src: string | null; name: st
 
 export type DraftConfirmFlag = 'nameConfirmed' | 'colorsConfirmed'
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
   onOpen: () => void
@@ -706,6 +713,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
   onRequestNextSampleRound: (file: { url: string; name: string }, country?: string) => Promise<void>
   onUploadColorWorkOrder: (file: { url: string; name: string }) => Promise<void>
   onReceiveColorSample: (id: string) => Promise<void>
+  onSetColorSampleDone: (colorId: string, done: boolean) => Promise<void>
   onToggleConfirm: (flag: DraftConfirmFlag, next: boolean) => Promise<void>
 }) {
   const orders = [...(draft.sampleWorkOrders ?? [])]
@@ -715,7 +723,10 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
   const colorRounds = resolveColorSampleRounds(draft)
   const sampleReady = sampleReadyForNextStage(latestOrder) || colorRounds.length > 0
   const latestColorRound = colorRounds[colorRounds.length - 1]
-  const colorSampleSent = Boolean(latestColorRound?.returnedAt)
+  const colorSampleStarted = Boolean(latestColorRound?.url.trim())
+  const colorSampleReceived = Boolean(latestColorRound?.receivedAt)
+  const doneColorIds = new Set(latestColorRound ? draft.specs.colorSampleDone?.[latestColorRound.id] ?? [] : [])
+  const [pendingDone, setPendingDone] = useState<Record<string, boolean>>({})
   const name = draft.nameEn.trim() || draft.nameKo.trim() || '이름 미정'
   const named = Boolean(draft.nameEn.trim() || draft.nameKo.trim())
   const hasColor = draft.colors.length > 0
@@ -728,6 +739,29 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
 
   function saveColorSpec(colorId: string, field: 'size' | 'fabric' | 'weight' | 'specDoc') {
     return (value: string, applyAll: boolean) => onSaveSheetValue(colorId, field, value, applyAll)
+  }
+  function colorSampleDone(colorId: string) {
+    return colorId in pendingDone ? pendingDone[colorId] : doneColorIds.has(colorId)
+  }
+  function toggleColorSampleDone(colorId: string, done: boolean) {
+    if (readOnly || !colorSampleReceived) return
+    setPendingDone(current => ({ ...current, [colorId]: done }))
+    void onSetColorSampleDone(colorId, done).then(() => {
+      setPendingDone(current => {
+        if (current[colorId] !== done) return current
+        const next = { ...current }
+        delete next[colorId]
+        return next
+      })
+    }, (error: unknown) => {
+      console.warn('[drafts] 컬러샘플 완료 상태 저장 실패', { colorId, done, error })
+      setPendingDone(current => {
+        if (current[colorId] !== done) return current
+        const next = { ...current }
+        delete next[colorId]
+        return next
+      })
+    })
   }
 
   return <tr className="draft-sheet-row">
@@ -812,8 +846,9 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
             <ColorLine key={color?.id ?? 'none'} index={index}>
               <div className="draft-sheet-info">
                 <SampleStatus
-                  inProgress={Boolean(color?.sampleWorkOrderUrl?.trim())}
-                  sent={colorSampleSent}
+                  status={colorSampleLineStatus(colorSampleStarted, colorSampleReceived, Boolean(color && colorSampleDone(color.id)))}
+                  canToggle={!readOnly && Boolean(color) && colorSampleReceived}
+                  onToggle={color ? () => toggleColorSampleDone(color.id, !colorSampleDone(color.id)) : undefined}
                 />
                 <div className="draft-sheet-specs">
                   <EntryButton

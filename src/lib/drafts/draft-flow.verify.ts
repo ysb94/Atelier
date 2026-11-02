@@ -14,6 +14,9 @@ import {
   publishNextColorSampleRound,
   requestNextColorSampleRound,
   receiveColorSample,
+  colorSampleLineStatus,
+  normalizeColorSampleDone,
+  setColorSampleDone,
   normalizeColorSampleRounds,
   resolveColorSampleRounds,
   sanitizeColorWorkOrder,
@@ -119,5 +122,14 @@ assert(published.rounds[1]?.url === 'data:file,china' && published.rounds[1]?.re
 assert(published.colors[0]?.sampleWorkOrderUrl === 'data:file,china' && published.colors[0]?.sampleWorkOrderShipped === false, '중국팀에는 새 파일을 미발송으로 보낸다')
 assert(again[0]?.returnedAt, '이전 차수 회신일은 남긴다')
 assert(passLatestColorSampleRound(again)[1]?.passed !== true, '회신 전 차수는 합격하지 않는다')
+assert(colorSampleLineStatus(false, false, false) === 'waiting', '컬러샘플 시작 전에는 대기')
+assert(colorSampleLineStatus(true, false, false) === 'sampling', '시작 후 수령 전에는 샘플중')
+assert(colorSampleLineStatus(true, true, false) === 'sampling', '수령 후에도 완료 표시 전에는 샘플중')
+assert(colorSampleLineStatus(true, true, true) === 'done', '수령 후 완료 표시')
+assert(colorSampleLineStatus(true, false, true) === 'sampling', '수령 전 완료 표시는 샘플중으로 둔다')
+const marked = setColorSampleDone({}, received[0]!.id, 'color-1', true)
+assert(marked[received[0]!.id]?.includes('color-1') === true, '완료 컬러를 차수에 남긴다')
+assert(setColorSampleDone(marked, received[0]!.id, 'color-1', false)[received[0]!.id] == null, '완료를 해제하면 차수 기록을 지운다')
+assert(normalizeColorSampleDone({ [received[0]!.id]: ['color-1', 'color-1', ' '] })[received[0]!.id]?.join() === 'color-1', '완료 컬러는 비운 값 없이 한 번만 남긴다')
 
 console.log('draft-flow.verify ok')

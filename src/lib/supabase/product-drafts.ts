@@ -8,7 +8,7 @@ import type {
 import { normalizeColorSpecs } from '@/lib/drafts/color-spec'
 import { emptyDraftInput } from '@/lib/drafts/empty-draft'
 import { normalizeDraftBrandId, parseDraftNo } from '@/lib/drafts/company-draft'
-import { sanitizeColorWorkOrder, normalizeColorSampleRounds } from '@/lib/drafts/draft-flow'
+import { sanitizeColorWorkOrder, normalizeColorSampleRounds, normalizeColorSampleDone } from '@/lib/drafts/draft-flow'
 import {
   legacyWorkOrderFields,
   normalizeSampleWorkOrders,
@@ -212,6 +212,7 @@ function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined) {
       ? raw.colorSampleRequestedAt
       : null
   base.colorSampleRounds = normalizeColorSampleRounds(raw?.colorSampleRounds)
+  base.colorSampleDone = normalizeColorSampleDone(raw?.colorSampleDone)
   return base
 }
 

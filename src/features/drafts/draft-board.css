@@ -121,6 +121,7 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-action{display:inline-flex;justify-content:center;align-items:center;gap:4px;min-height:26px;border:1px solid #e5e5e2;border-radius:6px;background:white;color:#73777c;font:inherit;font-size:11px;padding:3px 9px;white-space:nowrap}
 .draft-sheet-action:disabled{cursor:not-allowed;opacity:.75}
 .draft-sheet-status-badge:disabled{opacity:1;cursor:default}
+.draft-sheet-status-badge:not(:disabled){cursor:pointer}
 .draft-sheet-action.is-done{background:#eef5ee;border-color:#cbdccc;color:#43734e}
 .draft-sheet-action.is-pending{background:#c60920;border-color:#c60920;color:#fff}
 .draft-sheet-row>td.draft-sheet-md-cell{position:relative}
