@@ -6,6 +6,8 @@ import { FilterTabs } from '@/components/ui/filter-tabs'
 import { Input, Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { listCompanyAttendanceClocks, type CompanyAttendanceClock } from '@/lib/supabase/attendance-clocks'
+import { countLateStatementsAwaitingHr, listLateArrivalStatements, type LateArrivalStatement } from '@/lib/supabase/late-arrival-statements'
+import { LateArrivalStatementDocument } from '@/features/home/LateArrivalClockIn'
 import { listLeaveRequests, type LeaveRequest } from '@/lib/supabase/leave-requests'
 import { emptyList } from '@/lib/utils'
 import type { RequestKind } from '@/features/settings/personal-requests'
@@ -45,12 +47,19 @@ export function AttendanceLatePanel({ directory, schedules }: {
   const [search, setSearch] = useState('')
   const [kind, setKind] = useState<'all' | 'late' | 'absent'>('all')
   const [page, setPage] = useState(1)
+  const [statement, setStatement] = useState<LateArrivalStatement | null>(null)
   const monthOk = /^\d{4}-(0[1-9]|1[0-2])$/.test(month)
   const dates = useMemo(() => monthOk ? monthDates(month) : emptyList<string>(), [month, monthOk])
   const clocks = useQuery({
     queryKey: ['company-attendance-clocks', month],
     queryFn: () => listCompanyAttendanceClocks(month),
     enabled: monthOk,
+  })
+  const awaitingHr = useQuery({ queryKey: ['late-statements-awaiting-hr'], queryFn: countLateStatementsAwaitingHr })
+  const statements = useQuery({
+    queryKey: ['late-arrival-statements', month],
+    queryFn: () => listLateArrivalStatements(dates[0], dates[dates.length - 1]),
+    enabled: monthOk && dates.length > 0,
   })
   const leaves = useQuery({
     queryKey: ['company-leave-cover', month],
@@ -59,6 +68,8 @@ export function AttendanceLatePanel({ directory, schedules }: {
   })
   const clockRows = clocks.data ?? emptyList<CompanyAttendanceClock>()
   const leaveRows = leaves.data ?? emptyList<LeaveRequest>()
+  const statementRows = statements.data ?? emptyList<LateArrivalStatement>()
+  const statementByKey = useMemo(() => new Map(statementRows.map(item => [`${item.employeeId}:${item.date}`, item])), [statementRows])
   const needle = search.trim().toLocaleLowerCase('ko')
   const covered = useMemo(() => {
     const keys = new Set<string>()
@@ -125,7 +136,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
   return <div className="space-y-4">
     <header>
       <h2 className="text-base font-semibold">지각 * 결근 관리</h2>
-      <p className="mt-1 text-sm text-muted-foreground">출근 기준에서 {ATTENDANCE_GRACE_MINUTES}분이 지난 기록은 지각입니다. 연차·반차·반반차·공가·외근·재택이 등록되지 않은 근무일에 출근이 없으면 결근으로 표시합니다.</p>
+      <p className="mt-1 text-sm text-muted-foreground">출근 기준에서 {ATTENDANCE_GRACE_MINUTES}분이 지난 기록은 지각입니다. 연차·반차·반반차·공가·외근·재택이 등록되지 않은 근무일에 출근이 없으면 결근으로 표시합니다. 인사 확인 대기 {awaitingHr.isPending ? '…' : awaitingHr.isError ? '확인 실패' : `${awaitingHr.data ?? 0}건`}입니다.</p>
     </header>
     <div className="flex flex-wrap items-center gap-2">
       <Button variant="outline" size="icon" aria-label="이전 월" onClick={() => chooseMonth(shiftMonth(month, -1))}><ChevronLeft size={15} /></Button>
@@ -158,16 +169,18 @@ export function AttendanceLatePanel({ directory, schedules }: {
         { value: 'absent', label: '결근만', count: unavailable ? undefined : absentRows.length },
       ]}
     />
-    {(clocks.error || leaves.error) && <p role="alert" className="text-sm text-danger">출근 기록 또는 신청을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => { void clocks.refetch(); void leaves.refetch() }}>다시 불러오기</Button></p>}
+    {(clocks.error || leaves.error || statements.error) && <p role="alert" className="text-sm text-danger">출근 기록, 신청 또는 지각 사유서를 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => { void clocks.refetch(); void leaves.refetch(); void statements.refetch() }}>다시 불러오기</Button></p>}
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <table className="w-full text-left text-sm">
         <caption className="sr-only">{monthLabel(month)} 지각·결근</caption>
         <thead className="bg-primary text-primary-foreground">
-          <tr>{['날짜', '구분', '직원', '부서', '출근 기준', '출근 시각', '내용'].map(label => <th key={label} className="px-3 py-2 font-medium">{label}</th>)}</tr>
+          <tr>{['날짜', '구분', '직원', '부서', '출근 기준', '출근 시각', '내용', '사유서'].map(label => <th key={label} className={`px-3 py-2 font-medium${label === '사유서' ? ' text-right' : ''}`}>{label}</th>)}</tr>
         </thead>
         <tbody>
-          {unavailable ? <tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">출근과 신청을 확인하고 있습니다.</td></tr>
-            : pageRows.length ? pageRows.map(row => <tr key={row.key} className="border-t border-border">
+          {unavailable ? <tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">출근과 신청을 확인하고 있습니다.</td></tr>
+            : pageRows.length ? pageRows.map(row => {
+              const attached = statementByKey.get(`${row.memberId}:${row.date}`)
+              return <tr key={row.key} className="border-t border-border">
               <td className="px-3 py-2">{row.dateLabel}</td>
               <td className="px-3 py-2">{row.kind === 'late' ? '지각' : '결근'}</td>
               <td className="px-3 py-2 font-medium">{row.name}</td>
@@ -175,7 +188,8 @@ export function AttendanceLatePanel({ directory, schedules }: {
               <td className="px-3 py-2">{row.start}</td>
               <td className="px-3 py-2">{row.clockIn}</td>
               <td className="px-3 py-2 font-medium text-danger">{row.result}</td>
-            </tr>) : <tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">{clocks.error || leaves.error ? '기록을 불러오지 못했습니다.' : emptyLabel}</td></tr>}
+              <td className="px-3 py-2 text-right">{row.kind !== 'late' ? <span className="text-muted-foreground">—</span> : statements.isPending ? '…' : statements.error ? '조회 실패' : attached ? <span className="inline-flex items-center justify-end gap-2">{attached.hrConfirmedAt ? <span className="text-xs text-muted-foreground">확인됨</span> : attached.managerConfirmedAt ? <span className="text-xs text-warning">인사 대기</span> : null}<Button type="button" size="sm" variant="outline" onClick={() => setStatement(attached)}>사유서</Button></span> : <span className="text-muted-foreground">없음</span>}</td>
+            </tr>}) : <tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">{clocks.error || leaves.error ? '기록을 불러오지 못했습니다.' : emptyLabel}</td></tr>}
         </tbody>
       </table>
       {!unavailable && visibleRows.length > PAGE_SIZE && <nav className="flex items-center justify-between border-t border-border px-3 py-2 text-xs text-muted-foreground" aria-label="지각·결근 페이지">
@@ -187,5 +201,6 @@ export function AttendanceLatePanel({ directory, schedules }: {
         </div>
       </nav>}
     </div>
+    {statement && <div className="fixed inset-0 z-50 grid place-items-center bg-background/75 p-4" role="dialog" aria-label="지각 사유서"><LateArrivalStatementDocument statement={statement} review="hr" onClose={() => setStatement(null)} onUpdated={setStatement} /></div>}
   </div>
 }

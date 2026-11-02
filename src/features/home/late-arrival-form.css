@@ -1,0 +1,41 @@
+.late-form { width: min(760px, 100%); background: #fff; color: #1c1c1c; padding: 28px 32px 24px; }
+.late-form h2 { margin: 0 0 10px; text-align: center; font-size: 30px; font-weight: 500; letter-spacing: .62em; text-indent: .62em; }
+.late-form-rule { height: 3px; margin: 0 0 8px; background: #111; }
+.late-form table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.late-form th, .late-form td { border: 1px solid #222; padding: 8px 10px; font-size: 14px; font-weight: 500; text-align: center; vertical-align: middle; }
+.late-form th { width: 22%; background: #d9e8f7; }
+.late-form td { background: #fff; text-align: left; }
+.late-form .is-label { width: 18%; background: #d9e8f7; text-align: center; }
+.late-form .late-form-banner th { background: #d9e8f7; letter-spacing: .12em; font-weight: 600; }
+.late-form .late-form-note { height: auto; min-height: 148px; background: #fff8dc; vertical-align: top; text-align: left; }
+.late-form .late-form-plan { height: 92px; background: #fff8dc; vertical-align: top; text-align: left; }
+.late-form input, .late-form textarea { width: 100%; border: 0; background: transparent; color: inherit; font: inherit; text-align: inherit; outline: none; resize: none; }
+.late-form input::placeholder, .late-form textarea::placeholder { color: #2456b5; }
+.late-form .late-form-note textarea, .late-form .late-form-plan textarea { height: auto; min-height: 112px; display: block; }
+.late-form-attach { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px dashed #c5b16a; }
+.late-form-attach label { display: inline-flex; align-items: center; border: 1px solid #2456b5; color: #2456b5; background: #fff; padding: 2px 8px; font-size: 13px; cursor: pointer; }
+.late-form-attach input { display: none; }
+.late-form-attach span, .late-form-attach .late-form-file { display: inline-flex; align-items: center; max-width: 100%; border: 1px solid #222; background: #fff; padding: 2px 6px; font: inherit; font-size: 13px; }
+.late-form-attach .late-form-file { color: #2456b5; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28rem; }
+.late-form-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 28rem; }
+.late-form-attach .late-form-file-remove { border: 0; background: transparent; margin-left: 4px; padding: 0; font: inherit; cursor: pointer; }
+.late-form .late-form-plan textarea { min-height: 72px; }
+.late-form-confirm { margin: 22px 0 8px; text-align: center; font-size: 14px; line-height: 1.7; }
+.late-form-sign { width: min(280px, 100%); margin: 8px 0 18px auto; border-collapse: collapse; }
+.late-form-sign td { border: 0; padding: 4px 0; text-align: left; font-size: 15px; }
+.late-form-sign td:last-child { text-align: right; }
+.late-form-foot th { letter-spacing: 0; text-indent: 0; font-size: 13px; }
+.late-form-foot td { height: 48px; text-align: center; }
+.late-form-foot td:last-child { white-space: nowrap; }
+.late-form-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.late-form-error { margin: 10px 0 0; color: var(--color-danger, #c60920); font-size: 13px; }
+
+.late-statement-dialog .late-form { width: 100%; }
+.late-statement-dialog .late-form td { overflow-wrap: anywhere; }
+.late-statement-dialog .late-form-attach .late-form-file { max-width: 100%; }
+@media (max-width: 639px) {
+  .late-statement-dialog .late-form { padding: 18px 12px; }
+  .late-statement-dialog .late-form h2 { font-size: 23px; letter-spacing: .35em; text-indent: .35em; }
+  .late-statement-dialog .late-form th, .late-statement-dialog .late-form td { padding: 7px 5px; font-size: 12px; }
+  .late-statement-dialog .late-form-confirm { font-size: 12px; }
+}

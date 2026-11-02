@@ -414,6 +414,22 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - 마이그레이션: `20261012025011_attendance_clock_ins.sql`.
   `supabase/tests/attendance-clock-ins.sql`은 저장·중복 유지·타인 조회 차단·직접 쓰기를 검증하고 롤백한다.
 
+## 지각 사유서 첨부
+
+- 오늘 지각으로 출근한 직원이 My home에서 사유서를 작성한다. `late_arrival_statements`는 직원·날짜당 하나다.
+- 상세 사유의 서류는 비공개 `company-late-statements` 버킷에 둔다. 경로는
+  `companies/{company_id}/late-statements/{statement_id}/{file_id}`이고, 파일당 20MB, 사유서당 5개다.
+  한글 파일 이름은 DB에 두고, 저장이 끝난 파일만 사유서와 같은 사람(본인, 조직 배치 수정 권한, 회사 검토 권한)이 받는다.
+  실행 파일은 거절한다. 기존 사유서 본문과 출근 기록은 바꾸지 않는다.
+- 사유서 하단의 누적 칸은 해당 연도 1월 1일부터 사유서 날짜까지 근무일 지각 횟수와 분 합계다.
+  `attendance_starts_between`은 본인, 또는 사유서를 볼 수 있는 사람에게 그 직원의 월별 출근 시각만 돌려준다.
+  출근 기록과 기준 저장은 바꾸지 않는다.
+- 제출하면 소속 부서의 통합 승인자에게 알림이 간다. 본인이 승인자면 대체 승인자에게 간다.
+  그 사람이 확인하면 부서장 칸에 이름과 날짜가 남고, 지각 관리의 인사 확인 대기에 오른다.
+  지각 관리에서 확인을 누른 사람이 인사 담당이 되며, 작성자에게 확인 알림이 간다.
+  부서장이 없으면 인사 확인만 받는다. 열람만으로는 담당자가 되지 않는다.
+- 마이그레이션: `20261102141000_late_arrival_statements.sql`, `20261102145000_late_arrival_statement_files.sql`, `20261102150000_attendance_starts_between.sql`, `20261102152000_late_statement_review.sql`.
+
 ## 내 월별 근태와 퇴근 기록
 
 - 마이페이지 기본 탭 `내 근태` 하나에서 일요일부터 시작하는 7일 달력/목록으로 본인 출근·퇴근 시각과

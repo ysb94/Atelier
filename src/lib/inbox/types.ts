@@ -8,6 +8,8 @@ export type InboxNotificationKind =
   | 'meeting_invitation'
   | 'leave_alarm_sample'
   | 'leave_usage_notice'
+  | 'late_statement_manager'
+  | 'late_statement_confirmed'
 
 export type MeetingNotice = {
   roundId: string

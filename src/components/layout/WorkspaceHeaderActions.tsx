@@ -15,6 +15,8 @@ import { useNavigate } from 'react-router-dom'
 import { useQueryClient } from '@tanstack/react-query'
 import { OPEN_CONVERSATION_EVENT, type RequestedConversation } from '@/lib/chat/open-conversation'
 import { readMeetingInvitation } from '@/lib/supabase/meetings'
+import { readLateStatementNotice } from '@/lib/supabase/late-arrival-statements'
+import { useLateStatementNotices } from '@/features/home/LateStatementReview'
 import { ChatPanel } from '@/features/chat/ChatPanel'
 import { useChatRealtime } from '@/features/chat/use-chat-realtime'
 import { useChatRooms } from '@/features/chat/use-chat'
@@ -65,9 +67,10 @@ function ReleasedHeaderActions() {
   const cache=useQueryClient()
   const meetingNotices=useMeetingNotices()
   const leaveNotices=useLeaveUsageNotices()
+  const lateNotices=useLateStatementNotices(profile?.status === 'active')
   const [notificationError,setNotificationError]=useState<string|null>(null)
   const { container: overlayContainer, restoreFocus } = useWorkspaceOverlayHost(open !== null)
-  const notifications = useMemo(() => [...meetingNotices.items.filter(item => releaseLink(item.href) !== null), ...leaveNoticeItems(leaveNotices.records)].sort((a,b) => b.createdAt.localeCompare(a.createdAt)), [meetingNotices.items, releaseLink, leaveNotices.records])
+  const notifications = useMemo(() => [...meetingNotices.items.filter(item => releaseLink(item.href) !== null), ...leaveNoticeItems(leaveNotices.records), ...lateNotices.items.filter(item => releaseLink(item.href) !== null)].sort((a,b) => b.createdAt.localeCompare(a.createdAt)), [meetingNotices.items, releaseLink, leaveNotices.records, lateNotices.items])
   useEffect(()=>{
     function receive(event:Event){
       const detail=(event as CustomEvent<RequestedConversation>).detail
@@ -134,10 +137,21 @@ function ReleasedHeaderActions() {
   function markAllRead() {
     if(notifications.some(item=>item.kind==='meeting_invitation' && !item.readAt)) void markMeetingRead(null)
     if(notifications.some(item=>item.kind==='leave_usage_notice' && !item.readAt)) void leaveNotices.markAllRead()
+    if(notifications.some(item => (item.kind==='late_statement_manager' || item.kind==='late_statement_confirmed') && !item.readAt)) {
+      void readLateStatementNotice('all', null).then(() => cache.invalidateQueries({ queryKey: ['late-statement-notices'] })).catch(error => { console.warn('[late-arrival] 사유서 알림 읽음 실패', error); setNotificationError('지각 사유서 알림을 읽음으로 표시하지 못했습니다.') })
+    }
   }
 
   function openNotification(item: InboxNotification) {
     if(item.kind==='leave_usage_notice') { setOpen(null);void leaveNotices.open(item.id);return }
+    if(item.kind==='late_statement_manager' || item.kind==='late_statement_confirmed') {
+      const href = releaseLink(item.href)
+      if (!href) return
+      void readLateStatementNotice(item.kind === 'late_statement_manager' ? 'manager' : 'employee', item.id).then(() => cache.invalidateQueries({ queryKey: ['late-statement-notices'] })).catch(error => console.warn('[late-arrival] 사유서 알림 읽음 실패', error))
+      setOpen(null)
+      navigate(href)
+      return
+    }
     const href = releaseLink(item.href)
     if (!href) return
     if(item.kind==='meeting_invitation') void markMeetingRead(item.id)
@@ -217,7 +231,7 @@ function ReleasedHeaderActions() {
             onOpen={openNotification}
             onClose={closePanel}
           />
-          {notificationError || meetingNotices.error || leaveNotices.error ? <p role="alert" className="rounded border border-danger bg-card p-2 text-xs text-danger">{notificationError ?? leaveNotices.error ?? '회의 참석 요청을 불러오지 못했습니다.'}</p> : null}
+          {notificationError || meetingNotices.error || leaveNotices.error || lateNotices.error ? <p role="alert" className="rounded border border-danger bg-card p-2 text-xs text-danger">{notificationError ?? leaveNotices.error ?? lateNotices.error ?? '회의 참석 요청을 불러오지 못했습니다.'}</p> : null}
         </div>, overlayContainer,
       ) : null}
     </div>

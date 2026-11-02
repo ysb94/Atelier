@@ -8,6 +8,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { interactionContext } from '@/lib/diagnostics/perf-watch'
 import { useAuth } from '@/lib/supabase/auth'
 import { listCompanyAttendanceClocks, type CompanyAttendanceClock } from '@/lib/supabase/attendance-clocks'
+import { countLateStatementsAwaitingHr } from '@/lib/supabase/late-arrival-statements'
 import { listLeaveRequests, type LeaveRequest } from '@/lib/supabase/leave-requests'
 import { emptyList, formatNumber } from '@/lib/utils'
 import { buildAttendanceRecords } from './attendance-records'
@@ -45,13 +46,14 @@ export function AttendancePanel() {
   const directory = useMemo<ReturnType<typeof useOpsDirectory>>(() => ({ departments, members, departmentName, loading, error, refetch: () => refetchRef.current() }), [departments, members, departmentName, loading, error])
   const { profile } = useAuth()
   const saved = useAttendanceStartSettings()
+  const awaitingHr = useQuery({ queryKey: ['late-statements-awaiting-hr'], queryFn: countLateStatementsAwaitingHr })
   const [part, setPart] = useState<'all' | 'settings' | 'late' | 'missed' | 'overtime' | 'exemptions'>('all')
   const [editing, setEditing] = useState<{ id?: string; month?: string }>({})
   return <div className="space-y-5">
     <div role="group" aria-label="근태 관리 메뉴" className="flex flex-wrap gap-2">
       <Button variant={part === 'all' ? 'default' : 'outline'} aria-pressed={part === 'all'} onClick={() => setPart('all')}>전체 근태 관리</Button>
       <Button variant={part === 'settings' ? 'default' : 'outline'} aria-pressed={part === 'settings'} onClick={() => {setEditing({});setPart('settings')}}>출근시간 확인</Button>
-      <Button variant={part === 'late' ? 'default' : 'outline'} aria-pressed={part === 'late'} onClick={() => setPart('late')}>지각 * 결근 관리</Button>
+      <Button variant={part === 'late' ? 'default' : 'outline'} aria-pressed={part === 'late'} onClick={() => setPart('late')}>지각 * 결근 관리{awaitingHr.data ? ` ${awaitingHr.data}` : ''}</Button>
       <Button variant={part === 'missed' ? 'default' : 'outline'} aria-pressed={part === 'missed'} onClick={() => setPart('missed')}>퇴근 미처리</Button>
       <Button variant={part === 'overtime' ? 'default' : 'outline'} aria-pressed={part === 'overtime'} onClick={() => setPart('overtime')}>야근 관리</Button>
       <Button variant={part === 'exemptions' ? 'default' : 'outline'} aria-pressed={part === 'exemptions'} onClick={() => setPart('exemptions')}>출퇴근 시간 제외자</Button>

@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react'
 import {
   AtSign,
   CalendarClock,
+  Clock,
   Check,
   CircleAlert,
   ScanBarcode,
@@ -25,6 +26,8 @@ const KIND_ICON: Record<
   meeting_invitation: { icon: CalendarClock, label: '회의' },
   leave_alarm_sample: { icon: CalendarClock, label: '연차 안내' },
   leave_usage_notice: { icon: CalendarClock, label: '연차 안내' },
+  late_statement_manager: { icon: Clock, label: '지각 사유서' },
+  late_statement_confirmed: { icon: Clock, label: '지각 사유서' },
 }
 
 export function NotificationPanel({

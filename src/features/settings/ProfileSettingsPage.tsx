@@ -1,5 +1,7 @@
 import { PageHeader } from '@/components/layout/PageHeader'
 import { HomeAttendanceSummary } from '@/features/home/HomeAttendanceSummary'
+import { LateArrivalHeaderButton } from '@/features/home/LateArrivalClockIn'
+import { LateStatementApprovalList, LateStatementNoticeDialog } from '@/features/home/LateStatementReview'
 import {
   Card,
   CardContent,
@@ -94,9 +96,10 @@ function ProfileSettingsContent() {
 
   return (
     <div>
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between [&>div]:mb-0">
+      <div className="mb-6 grid grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:[&>div]:mb-0">
         <PageHeader title="My home" />
-        <HomeAttendanceSummary />
+        <div className="flex justify-center"><LateArrivalHeaderButton /></div>
+        <div className="sm:justify-self-end"><HomeAttendanceSummary /></div>
       </div>
 
       <div className="personal-page-tabs" role="tablist" aria-label="My home 메뉴">
@@ -122,8 +125,10 @@ function ProfileSettingsContent() {
       </div>}
       {visiblePart === 'approvals' && <div id="personal-approvals-panel" role="tabpanel" aria-labelledby="personal-approvals-tab">
         {noDepartments && <p className="personal-page-notice">지정된 승인 담당이 아니면 목록이 비어 있을 수 있습니다.</p>}
+        <LateStatementApprovalList />
         <LeaveApprovalPanel />
       </div>}
+      <LateStatementNoticeDialog />
       {release.scope.unrestricted && <div id="personal-profile-panel" role="tabpanel" aria-labelledby="personal-profile-tab" hidden={visiblePart !== 'profile'}>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card>

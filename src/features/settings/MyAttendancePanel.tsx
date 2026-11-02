@@ -267,6 +267,7 @@ export function MyAttendancePanel() {
         <p className="mt-2 text-muted-foreground">연차 부여 일수·입사일·연도 계산 기준은 보류 중입니다.</p>
       </details>
     ))}
+    <MyLeaveAdvanceSummary/>
     {!allowed && <p role="status" className="personal-request-error">활성 직원 계정으로 로그인해 주세요.</p>}
     <div className="personal-request-overview">
       <article className="personal-attendance-today">
@@ -280,7 +281,6 @@ export function MyAttendancePanel() {
       </article>
       <article><CalendarDays size={17}/><span>{monthLabel(month)} 출근 기록</span><strong>{clocksReady ? recorded : '—'}<small>일</small></strong><p>퇴근 기록 {clocksReady ? `${completed}일` : '—'}</p></article>
     </div>
-    <MyLeaveAdvanceSummary/>
     {clock.error && <p role="alert" className="personal-request-error">{clock.error}</p>}
     {clock.queryError && <p role="alert" className="personal-request-error">오늘의 출퇴근 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => void clock.refresh()}>다시 불러오기</Button></p>}
     {clocks.error && <p role="alert" className="personal-request-error">{monthLabel(month)} 출퇴근 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => void clocks.refetch()}>다시 불러오기</Button></p>}
