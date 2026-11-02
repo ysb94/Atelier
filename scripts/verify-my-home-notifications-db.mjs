@@ -68,7 +68,15 @@ await db.exec('reset role');await db.query('update clocks set clock_out_at=now()
 await actor(staff);assert.equal((await val('select list_my_home_work_notifications()')).filter(row=>row.event_type==='checkout').length,0);
 await db.exec('reset role');await db.query("insert into clocks values($1,current_date-2,'09:00',null,null)",[peer]);
 await actor(staff);assert.equal((await val('select list_my_home_work_notifications()')).filter(row=>row.event_type==='checkout').length,0,'Other employee clocks are excluded');
-await db.exec('reset role');await db.query("update profiles set status='inactive' where id=$1",[staff]);await actor(staff);assert.equal((await val('select list_my_home_work_notifications()')).length,0);assert.equal(await val('select count(*)::int from my_home_notification_reads'),0,'Inactive staff cannot read notification metadata');
+// 오래된 자동 종료는 알림을 보존하되 기존 정정 신청이 접수되면 중복 처리 대기에서 제외한다.
+await db.exec('reset role;truncate clocks');
+await db.query("insert into clocks values($1,current_date-4,'09:00',null,now()-interval '4 days'),($1,current_date-1,'09:00',now()-interval '1 day',null)",[staff]);
+await actor(staff);const older=(await val('select list_my_home_work_notifications()')).find(row=>row.event_type==='checkout');assert.ok(older?.action_needed,'오래된 자동 종료 알림 보존');
+await db.exec('reset role');const originalClocks=await val('select jsonb_agg(to_jsonb(c) order by work_date) from clocks c');
+await db.query("insert into company_leave_requests(company_id,employee_id,department_id,employee_name,kind,from_date,to_date,status,note) values($1,$2,$3,'직원','correction',current_date-4,current_date-4,'pending','퇴근 미기록 정정')",[company,staff,dept]);
+await actor(staff);assert.equal((await val('select list_my_home_work_notifications()')).filter(row=>row.event_type==='checkout').length,0,'정정 신청 후 기존 알림 처리 대기 제거');
+await db.exec('reset role');assert.deepEqual(await val('select jsonb_agg(to_jsonb(c) order by work_date) from clocks c'),originalClocks,'정정 대기 중 출퇴근 원본 보존');
+await db.query("update profiles set status='inactive' where id=$1",[staff]);await actor(staff);assert.equal((await val('select list_my_home_work_notifications()')).length,0);assert.equal(await val('select count(*)::int from my_home_notification_reads'),0,'Inactive staff cannot read notification metadata');
 await db.exec('reset role');await db.exec('set role anon');await assert.rejects(()=>db.query('select list_my_home_work_notifications()'))
 console.info('My home DB notifications: pending/read, result, idempotency, isolation, version guard passed')
 } catch(error) { console.error(error.message,error.query??'');process.exitCode=1 } finally {await db.close()}

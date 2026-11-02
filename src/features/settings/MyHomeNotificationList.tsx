@@ -1,7 +1,5 @@
-import { Input } from '@/components/ui/input'
-import { confirmPreviousClockOut } from '@/lib/supabase/attendance-entry'
-import { useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
+import { CheckoutNoticeForm } from './CheckoutNoticeForm'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useMyHomeNotifications, useReadMyHomeNotification } from './use-my-home-notifications'
 import { myHomeNotificationSummary, notificationNeedsAttention, type MyHomeNotificationTab } from '@/lib/inbox/my-home-notifications'
@@ -45,24 +43,4 @@ export function MyHomeWorkNoticeDetail() {
     {read.error&&<p role="alert" className="my-2 text-sm text-danger">{read.error}<Button type="button" size="sm" variant="outline" onClick={read.retry}>읽음 저장 재시도</Button></p>}
     <Button type="button" size="sm" variant="ghost" onClick={close}>닫기</Button>
   </section>
-}
-
-function CheckoutNoticeForm({workDate,onClose}:{workDate:string;onClose:()=>void}) {
-  const cache=useQueryClient()
-  const [value,setValue]=useState('')
-  const [busy,setBusy]=useState(false)
-  const [error,setError]=useState<string|null>(null)
-  async function save(){
-    if(busy||!value)return
-    setBusy(true);setError(null)
-    try {
-      const time=new Date(value)
-      if(!Number.isFinite(time.getTime()))throw new Error('실제 퇴근 날짜와 시각을 입력해 주세요.')
-      await confirmPreviousClockOut(workDate,time.toISOString())
-      await Promise.all(['my-home-work-notices','attendance-clock-ins','attendance-presence','company-attendance-spans','company-deferred-clock-outs'].map(key=>cache.invalidateQueries({queryKey:[key]})))
-      onClose()
-    } catch(failure){console.warn('[my-home-notifications] 퇴근 확인 입력 실패',failure);setError(failure instanceof Error?failure.message:'퇴근시간을 등록하지 못했습니다.')}
-    finally{setBusy(false)}
-  }
-  return <div className="my-3 space-y-2"><label className="block text-sm">실제 퇴근 날짜·시각<Input type="datetime-local" value={value} disabled={busy} onChange={event=>setValue(event.target.value)}/></label><p className="text-xs text-muted-foreground">기존 퇴근 미등록 확인과 같은 조건으로 저장합니다. 오늘 자동 종료된 기록은 다음 출근 후 입력해 주세요.</p>{error&&<p role="alert" className="text-sm text-danger">{error}</p>}<Button type="button" disabled={busy||!value} onClick={()=>void save()}>{busy?'저장 중…':'실제 퇴근시간 등록'}</Button></div>
 }

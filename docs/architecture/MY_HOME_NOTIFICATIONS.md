@@ -24,8 +24,10 @@
   계속 제외한다. 일반 연차·외근의 즉시 등록에는 새 승인 요청을 만들지 않는다.
 - 새 승인·반려 결과는 after-update 트리거에서 수신자와 원문 메모를 기록한다. 새 표는 RLS로
   본인 조회만 허용하며 결과 이벤트 직접 쓰기는 허용하지 않는다.
-- 퇴근 확인은 유효 출퇴근 기록과 기존 미등록 조건으로 판단한다. 실제 입력은 기존
-  `confirm_previous_clock_out` API를 사용하며 자동 종료를 실제 퇴근으로 변환하지 않는다.
+- 퇴근 확인은 유효 출퇴근 기록과 기존 미등록 조건으로 판단한다. 직전 출근일의 누락은
+  오늘 출근 후 기존 `confirm_previous_clock_out` API로 확인한다. 더 오래된 자동 종료
+  기록은 사유를 입력해 기존 출퇴근 정정 신청으로 제출하고 지정 승인자가 처리한다.
+  자동 종료를 실제 퇴근으로 변환하거나 기존 기록을 직접 덮어쓰지 않는다.
 
 ## 검증과 운영 반영
 
@@ -34,10 +36,14 @@ Node 버전은 `.nvmrc`를 따른다.
 ```text
 npm run build
 npm run verify:my-home-notifications
+npx --no-install tsx --tsconfig tsconfig.app.json src/features/settings/checkout-notice.verify.ts
+node scripts/verify-checkout-notice-browser.mjs
 npm run verify:diagnostics
 npm run verify:personal-requests
 npm run verify:my-attendance
 npm run verify:meetings-db
+npm run verify:meetings-browser
+node scripts/verify-page-preview-browser.mjs --host-lunch-only
 npm run verify:structure-map
 ```
 
