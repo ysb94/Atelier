@@ -15,6 +15,7 @@ import {
   Camera,
   ChartColumn,
   ClipboardList,
+  ClipboardCheck,
   FlaskConical,
   FileSpreadsheet,
   FileText,
@@ -80,6 +81,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
     title: 'Visual',
     items: [
       { to: '/work-requests/design', label: '작업 요청', icon: ClipboardList },
+      { to: '/design/work-request-management', label: '작업 요청 관리', icon: ClipboardCheck },
       { to: '/design/styled-cuts', label: '연출 컷 제작', icon: Camera },
       { to: '/design/file-manager', label: '이미지 업로드', icon: Images },
     ],

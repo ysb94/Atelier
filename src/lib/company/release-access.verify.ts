@@ -60,11 +60,11 @@ assert.equal(releaseHref(md,'/md?brand=atelier'),'/product-work/md?brand=atelier
 assert.equal(releaseHref(md,'/md/price-compare'),'/product-work/md')
 assert.equal(releaseHref(md,'/product-work/md-malicious'),null)
 const visual={...staff,departmentId:'7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1'}
-for (const path of ['/work-requests/design','/design/styled-cuts','/design/file-manager']) {
+for (const path of ['/work-requests/design','/design/work-request-management','/design/styled-cuts','/design/file-manager']) {
   assert.equal(releaseHref(visual,path),path.startsWith('/work-requests/')?null:path,'Visual 팀은 공개된 자기 메뉴를 연다')
   assert.equal(releaseHref(staff,path),null)
 }
-assert.deepEqual(companyNavGroupsForProfile(visual).find(group=>group.title==='Visual')?.items.map(item=>item.to),['/design/styled-cuts','/design/file-manager'])
+assert.deepEqual(companyNavGroupsForProfile(visual).find(group=>group.title==='Visual')?.items.map(item=>item.to),['/design/work-request-management','/design/styled-cuts','/design/file-manager'])
 assert.equal(releaseHref(visual,'/drafts'),null,'Visual 팀은 기획 화면을 열지 않는다')
 assert.equal(releaseHref({...staff,departmentId:RELEASE_DEPARTMENT_SITES.find(site=>site.title==='기획')!.id},'/work-requests/planning-malicious'),null)
 assert.equal(releaseHref({...staff,departmentId:RELEASE_DEPARTMENT_SITES.find(site=>site.title==='중국팀')!.id},'/china/work-orders-malicious'),null)

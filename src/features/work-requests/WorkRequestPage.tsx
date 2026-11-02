@@ -50,7 +50,10 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Input, Select } from '@/components/ui/input'
+import { Input, Select, Textarea } from '@/components/ui/input'
+import { useWorkRequestSettings } from '@/lib/supabase/work-request-settings'
+import { DEFAULT_VISUAL_CATEGORIES, type VisualCategory, type VisualRequestValues } from './visual-request-config'
+import { WorkRequestCategoryAssignments } from './WorkRequestCategoryAssignments'
 import { useAuth } from '@/lib/supabase/auth'
 import { listBrandDirectory } from '@/lib/supabase/profiles'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -68,7 +71,6 @@ import { WorkRequestChat } from './WorkRequestChat'
 import { WorkRequestScratchTodos } from './WorkRequestScratchTodos'
 import { WorkRequestTeamBoard } from './WorkRequestTeamBoard'
 import {
-  VISUAL_REQUEST_CATEGORIES,
   setVisualSection,
   splitVisualSections,
   visualSectionId,
@@ -1790,16 +1792,83 @@ function VisualRequestSection({ title, blocks, onChange, guide, error }: {
   return <RequestBodyEditor blocks={blocks} onChange={onChange} placeholder="내용을 입력하세요." visualTitle={title} guide={guide} error={error} appendFilesRef={appendFilesRef} />
 }
 
-function VisualRequestFields({ blocks, onChange, brandPicker, error, requestKey }: {
+function RequestTitleAndDue({
+  title,
+  dueDate,
+  titleError,
+  dueError,
+  titlePlaceholder,
+  titleExample,
+  onTitle,
+  onDue,
+}: {
+  title: string
+  dueDate: string
+  titleError?: string
+  dueError?: string
+  titlePlaceholder: string
+  titleExample: string
+  onTitle: (value: string) => void
+  onDue: (value: string) => void
+}) {
+  return (
+    <>
+      <label className="block space-y-1.5">
+        <span className="flex items-center gap-1 text-sm font-medium">
+          요청 제목 <span className="text-danger">*</span>
+        </span>
+        <Input
+          id="work-request-title"
+          value={title}
+          placeholder={titlePlaceholder}
+          aria-invalid={Boolean(titleError)}
+          onChange={(event) => onTitle(event.target.value)}
+          className={cn(titleError && 'border-danger focus-visible:ring-danger')}
+        />
+        <span className="block text-xs text-muted-foreground">제목 예시: {titleExample}</span>
+        {titleError ? <span className="block text-xs text-danger">{titleError}</span> : null}
+      </label>
+      <label className="block space-y-1.5">
+        <span className="flex items-center gap-1 text-sm font-medium">
+          희망 마감일 <span className="text-danger">*</span>
+        </span>
+        <Input
+          type="date"
+          value={dueDate}
+          aria-invalid={Boolean(dueError)}
+          onChange={(event) => onDue(event.target.value)}
+          className={cn(dueError && 'border-danger focus-visible:ring-danger')}
+        />
+        {dueError ? <span className="block text-xs text-danger">{dueError}</span> : null}
+      </label>
+    </>
+  )
+}
+
+function VisualRequestFields({ blocks, onChange, brandPicker, beforeMain, error, requestKey, categories, visualValues, onVisualChange }: {
   blocks: ContentBlock[]
   onChange: (blocks: ContentBlock[]) => void
   brandPicker: ReactNode
+  beforeMain?: ReactNode
   error?: string
   requestKey: string
+  categories: VisualCategory[]
+  visualValues?: VisualRequestValues
+  onVisualChange: (values: VisualRequestValues) => void
 }) {
   const sections = splitVisualSections(blocks)
+  const visibleCategories = categories.filter(category => category.enabled || sections.has(category.id))
+  for (const [id] of sections) {
+    if (id !== 'main' && !visibleCategories.some(category => category.id === id)) {
+      const saved = visualValues?.categories.find(category => category.id === id)
+      visibleCategories.push({ id, label: saved?.label ?? '이전 분류', enabled: false, assigneeId: '', fields: Object.keys(saved?.fields ?? {}).map(key => ({ id: key, label: key, type: 'text', required: false, placeholder: '' })) })
+    }
+  }
+  function metadata(selected: Map<VisualSectionId, ContentBlock[]>): VisualRequestValues {
+    return { categories: visibleCategories.filter(category => selected.has(category.id)).map(category => ({ id: category.id, label: category.label, fields: visualValues?.categories.find(item => item.id === category.id)?.fields ?? {}, fieldLabels: Object.fromEntries(category.fields.map(field => [field.id, field.label])) })) }
+  }
   function updateSection(id: VisualSectionId, next: ContentBlock[]) {
-    onChange(setVisualSection(blocks, id, next))
+    onChange(setVisualSection(blocks, id, next, visibleCategories))
   }
   return (
     <div className="space-y-6">
@@ -1807,21 +1876,37 @@ function VisualRequestFields({ blocks, onChange, brandPicker, error, requestKey 
         {brandPicker}
         <fieldset className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-3">
           <legend className="float-left mr-5 py-0.5 text-xs text-muted-foreground">분류</legend>
-          {VISUAL_REQUEST_CATEGORIES.map((category) => (
+          {visibleCategories.map((category) => (
             <label key={category.id} className="flex cursor-pointer items-center gap-1.5 text-xs">
               <input type="checkbox" className="size-3.5 accent-primary" checked={sections.has(category.id)} onChange={(event) => {
                 const content = sections.get(category.id)
-                if (!event.target.checked && content && hasRequestBody(content) && !window.confirm(`${category.label}에 입력한 내용과 첨부를 지울까요?`)) return
-                onChange(setVisualSection(blocks, category.id, event.target.checked ? [emptyTextBlock()] : null))
+                const hasFields = Object.values(visualValues?.categories.find(item => item.id === category.id)?.fields ?? {}).some(value => value.trim())
+                if (!event.target.checked && ((content && hasRequestBody(content)) || hasFields) && !window.confirm(`${category.label}에 입력한 내용과 첨부를 지울까요?`)) return
+                const next = setVisualSection(blocks, category.id, event.target.checked ? [emptyTextBlock()] : null, visibleCategories)
+                onChange(next)
+                onVisualChange(metadata(splitVisualSections(next)))
               }} />
               {category.label}
             </label>
           ))}
         </fieldset>
       </div>
+      {beforeMain}
       <VisualRequestSection key={`${requestKey}:main`} title="메인 내용" blocks={sections.get('main') ?? []} onChange={(next) => updateSection('main', next)} error={error} />
-      {VISUAL_REQUEST_CATEGORIES.filter((category) => sections.has(category.id)).map((category) => (
-        <VisualRequestSection key={`${requestKey}:${category.id}`} title={visualSectionTitle(category)} guide={category.guide} blocks={sections.get(category.id)!} onChange={(next) => updateSection(category.id, next)} />
+      {visibleCategories.filter((category) => sections.has(category.id)).map((category) => (
+        <div key={`${requestKey}:${category.id}`} className="space-y-3">
+          {category.fields.length ? <Card><CardContent className="space-y-4 p-5"><h2 className="font-semibold">{category.label} · 요청 정보</h2><div className="grid gap-4 md:grid-cols-2">{category.fields.map(field => {
+            const value = visualValues?.categories.find(item => item.id === category.id)?.fields[field.id] ?? ''
+            const change = (value: string) => {
+              const next = metadata(sections)
+              const target = next.categories.find(item => item.id === category.id)!
+              target.fields = { ...target.fields, [field.id]: value }
+              onVisualChange(next)
+            }
+            return <label key={field.id} className={`block space-y-1 text-sm ${field.type === 'textarea' ? 'md:col-span-2' : ''}`}><span>{field.label}{field.required ? <span className="ml-1 text-danger">*</span> : null}</span>{field.type === 'textarea' ? <Textarea value={value} placeholder={field.placeholder} required={field.required} maxLength={10000} rows={3} onChange={event => change(event.target.value)} /> : <Input type={field.type} value={value} placeholder={field.placeholder} required={field.required} maxLength={10000} onChange={event => change(event.target.value)} />}</label>
+          })}</div></CardContent></Card> : null}
+          <VisualRequestSection title={visualSectionTitle(category)} blocks={sections.get(category.id)!} onChange={(next) => updateSection(category.id, next)} />
+        </div>
       ))}
     </div>
   )
@@ -1840,6 +1925,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const { profile, ready } = useAuth()
   const selfId=profile?.id??''
   const storage=useWorkRequests(owner)
+  const visualSettings = useWorkRequestSettings(owner === 'design')
+  const visualCategories = visualSettings.data?.categories ?? DEFAULT_VISUAL_CATEGORIES
   const {requests,setRequests,currentWorkByMember,setCurrentWorkByMember,workTimeByKey,setWorkTimeByKey,teamMembers}=storage
   const [searchParams] = useSearchParams()
   const location = useLocation()
@@ -2121,8 +2208,17 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const nextErrors: FormErrors = {}
     if (!values.title.trim()) nextErrors.title = '요청 제목을 입력하세요.'
     if (!values.dueDate) nextErrors.dueDate = '희망 마감일을 선택하세요.'
-    if (!hasRequestBody(owner === 'design' ? values.blocks.filter((block) => !visualSectionId(block)) : values.blocks)) {
+    const hasVisualFields = values.visualRequest?.categories.some(category => Object.values(category.fields).some(value => value.trim()))
+    if (!hasRequestBody(owner === 'design' ? values.blocks.filter((block) => !visualSectionId(block)) : values.blocks) && !(owner === 'design' && hasVisualFields)) {
       nextErrors.blocks = '요청 내용을 입력하거나 이미지를 넣어 주세요.'
+    }
+    if (owner === 'design') {
+      if (visualSettings.isPending || visualSettings.isError || !visualSettings.data?.available) nextErrors.blocks = '분류 설정의 서버 연결을 확인한 뒤 다시 등록해 주세요.'
+      for (const category of visualCategories.filter(item => splitVisualSections(values.blocks).has(item.id))) {
+        const answers = values.visualRequest?.categories.find(item => item.id === category.id)?.fields ?? {}
+        const fields = editingRequest?.categoryAssignments?.find(item => item.categoryId === category.id)?.formFields ?? category.fields
+        if (fields.some(field => field.required && !answers[field.id]?.trim())) nextErrors.blocks = `${category.label}의 필수 입력 항목을 확인해 주세요.`
+      }
     }
     return nextErrors
   }
@@ -3919,6 +4015,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             ) : null}
 
             {selectedRequest.completionResult?<Card><CardContent className="p-4"><h3 className="font-medium">완료 결과</h3><p className="mt-2 whitespace-pre-wrap text-sm">{selectedRequest.completionResult}</p></CardContent></Card>:null}
+            {selectedRequest.values.visualRequest?.categories.some(category => Object.values(category.fields).some(Boolean)) ? <Card><CardContent className="space-y-4 p-5">{selectedRequest.values.visualRequest.categories.map(category => <section key={category.id}><h3 className="text-sm font-semibold">{category.label}</h3><dl className="mt-2 space-y-2 text-sm">{Object.entries(category.fields).filter(([, value]) => value).map(([id, value]) => <div key={id}><dt className="text-xs text-muted-foreground">{category.fieldLabels?.[id] ?? id}</dt><dd className="whitespace-pre-wrap break-words">{value}</dd></div>)}</dl></section>)}</CardContent></Card> : null}
+            <WorkRequestCategoryAssignments key={`${selfId}:${selectedRequest.id}`} request={selectedRequest} members={teamMembers} canManage={canManageSelected} busy={storage.saving} />
             <WorkRequestChat
               className="h-[32rem]"
               requestId={selectedRequest.id}
@@ -3960,6 +4058,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
           }
         />
 
+        {owner === 'design' && (visualSettings.isPending || visualSettings.error || !visualSettings.data?.available) ? (
+          <div role={visualSettings.error ? 'alert' : 'status'} className="mb-5 rounded-xl border border-border bg-card p-4 text-sm">
+            {visualSettings.isPending ? '분류 설정을 불러오는 중…' : visualSettings.error ? `분류 설정 조회 실패: ${visualSettings.error.message}` : '분류 설정·자동 배정의 서버 연결이 아직 적용되지 않았습니다. 서버 적용 후 등록할 수 있습니다.'}
+            {!visualSettings.isPending ? <Button type="button" size="sm" variant="outline" className="ml-3" onClick={() => void visualSettings.refetch()}>다시 조회</Button> : null}
+          </div>
+        ) : null}
         {Object.keys(errors).length > 0 ? (
           <div className="mb-5 flex items-start gap-3 rounded-lg border border-danger/30 bg-danger/10 px-4 py-3 text-sm text-danger">
             <AlertCircle className="mt-0.5 size-4 shrink-0" />
@@ -3969,10 +4073,35 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
         {owner === 'design' ? (
           <VisualRequestFields
+            categories={[
+              ...visualCategories.map(category => {
+                const saved = editingRequest?.categoryAssignments?.find(item => item.categoryId === category.id)
+                return saved ? { ...category, label: saved.label, fields: saved.formFields ?? category.fields } : category
+              }),
+              ...(editingRequest?.categoryAssignments ?? []).filter(saved => !visualCategories.some(category => category.id === saved.categoryId)).map(saved => ({ id: saved.categoryId, label: saved.label, enabled: false, assigneeId: saved.assigneeId, fields: saved.formFields ?? [] })),
+            ]}
+            visualValues={values.visualRequest}
+            onVisualChange={(visual) => updateValue('visualRequest', visual)}
             blocks={values.blocks}
             onChange={(blocks) => updateValue('blocks', blocks)}
             error={errors.blocks}
             requestKey={draftKey ?? 'new'}
+            beforeMain={
+              <Card>
+                <CardContent className="grid gap-5 space-y-0 p-5 md:grid-cols-[minmax(0,1fr)_15rem]">
+                  <RequestTitleAndDue
+                    title={values.title}
+                    dueDate={values.dueDate}
+                    titleError={errors.title}
+                    dueError={errors.dueDate}
+                    titlePlaceholder={config.titlePlaceholder}
+                    titleExample={config.titleExample}
+                    onTitle={(value) => updateValue('title', value)}
+                    onDue={(value) => updateValue('dueDate', value)}
+                  />
+                </CardContent>
+              </Card>
+            }
             brandPicker={
               <label className="flex flex-wrap items-center gap-4 text-xs">
                 <span className="text-muted-foreground">브랜드</span>
@@ -3996,9 +4125,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
           </CardContent></Card>
         ) : null}
 
-        <Card className={owner === 'design' ? 'mt-6' : undefined}>
-          <CardContent className={cn('space-y-5 p-5', owner === 'design' && 'grid gap-5 space-y-0 md:grid-cols-[minmax(0,1fr)_15rem]')}>
-            {owner !== 'design' ? (
+        {owner !== 'design' ? (
+        <Card>
+          <CardContent className="space-y-5 p-5">
             <label className="block space-y-1.5">
               <span className="text-sm font-medium">브랜드 (선택)</span>
               <Select
@@ -4018,51 +4147,18 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 데이터가 있으면 브랜드를 직접 바꾸지 않습니다.
               </span>
             </label>
-            ) : null}
 
-            <label className="block space-y-1.5">
-              <span className="flex items-center gap-1 text-sm font-medium">
-                요청 제목 <span className="text-danger">*</span>
-              </span>
-              <Input
-                id="work-request-title"
-                value={values.title}
-                placeholder={config.titlePlaceholder}
-                aria-invalid={Boolean(errors.title)}
-                onChange={(event) => updateValue('title', event.target.value)}
-                className={cn(
-                  errors.title && 'border-danger focus-visible:ring-danger',
-                )}
-              />
-              <span className="block text-xs text-muted-foreground">
-                제목 예시: {config.titleExample}
-              </span>
-              {errors.title ? (
-                <span className="block text-xs text-danger">{errors.title}</span>
-              ) : null}
-            </label>
+            <RequestTitleAndDue
+              title={values.title}
+              dueDate={values.dueDate}
+              titleError={errors.title}
+              dueError={errors.dueDate}
+              titlePlaceholder={config.titlePlaceholder}
+              titleExample={config.titleExample}
+              onTitle={(value) => updateValue('title', value)}
+              onDue={(value) => updateValue('dueDate', value)}
+            />
 
-            <label className="block space-y-1.5">
-              <span className="flex items-center gap-1 text-sm font-medium">
-                희망 마감일 <span className="text-danger">*</span>
-              </span>
-              <Input
-                type="date"
-                value={values.dueDate}
-                aria-invalid={Boolean(errors.dueDate)}
-                onChange={(event) => updateValue('dueDate', event.target.value)}
-                className={cn(
-                  errors.dueDate && 'border-danger focus-visible:ring-danger',
-                )}
-              />
-              {errors.dueDate ? (
-                <span className="block text-xs text-danger">
-                  {errors.dueDate}
-                </span>
-              ) : null}
-            </label>
-
-            {owner !== 'design' ? <>
             <RequestBodyEditor
               blocks={values.blocks}
               error={errors.blocks}
@@ -4077,9 +4173,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               onChange={(files) => updateValue('referenceFiles', files)}
               onAddFiles={(incoming) => appendBodyFilesRef.current(incoming)}
             />
-            </> : null}
           </CardContent>
         </Card>
+        ) : null}
 
         <div className="mt-4 flex flex-col-reverse gap-3 border-t border-border py-4 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs text-muted-foreground">
@@ -4089,7 +4185,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             <Button type="button" variant="outline" onClick={cancelEditing}>
               취소
             </Button>
-            <Button type="submit" disabled={storage.saving}>
+            <Button type="submit" disabled={storage.saving || (owner === 'design' && (visualSettings.isPending || visualSettings.isError || !visualSettings.data?.available))}>
               {editingRequest ? '수정 내용 저장' : '작업 요청 등록'}
             </Button>
           </div>

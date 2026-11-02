@@ -14,11 +14,11 @@ export const VISUAL_REQUEST_CATEGORIES = [
   { id: 'detail3', label: '상세(3)', guide: [] },
 ] as const
 
-export type VisualCategoryId = (typeof VISUAL_REQUEST_CATEGORIES)[number]['id']
+export type VisualCategoryId = string
 export type VisualSectionId = 'main' | VisualCategoryId
 const SECTION_PREFIX = 'visual-request-section:'
 
-export function visualSectionTitle(category: (typeof VISUAL_REQUEST_CATEGORIES)[number]): string {
+export function visualSectionTitle(category: { label: string }): string {
   if (category.label.endsWith('요청')) return category.label
   if (category.label.endsWith('작업')) return `${category.label} 요청`
   return `${category.label} 작업 요청`
@@ -27,8 +27,8 @@ export function visualSectionTitle(category: (typeof VISUAL_REQUEST_CATEGORIES)[
 // 분류 제목도 기존 본문 텍스트 블록으로 보관한다. 기존 상세·첨부 저장 경로를 그대로 쓴다.
 export function visualSectionId(block: ContentBlock): VisualCategoryId | null {
   if (block.type !== 'text' || !block.id.startsWith(SECTION_PREFIX)) return null
-  const category = VISUAL_REQUEST_CATEGORIES.find((item) => block.id === `${SECTION_PREFIX}${item.id}`)
-  return category?.id ?? null
+  const id = block.id.slice(SECTION_PREFIX.length)
+  return /^[a-zA-Z0-9_-]{1,64}$/.test(id) && id !== 'main' ? id : null
 }
 
 export function splitVisualSections(blocks: ContentBlock[]): Map<VisualSectionId, ContentBlock[]> {
@@ -50,15 +50,18 @@ export function setVisualSection(
   blocks: ContentBlock[],
   section: VisualSectionId,
   content: ContentBlock[] | null,
+  categories: readonly { id: string; label: string }[] = VISUAL_REQUEST_CATEGORIES,
 ): ContentBlock[] {
   const sections = splitVisualSections(blocks)
   if (content === null) sections.delete(section)
   else sections.set(section, content)
   const result = [...(sections.get('main') ?? [])]
-  for (const category of VISUAL_REQUEST_CATEGORIES) {
-    const items = sections.get(category.id)
-    if (!items) continue
-    result.push({ id: `${SECTION_PREFIX}${category.id}`, type: 'text', text: visualSectionTitle(category) }, ...items)
+  for (const [id, items] of sections) {
+    if (id === 'main') continue
+    const category = categories.find(item => item.id === id)
+    const previous = blocks.find(block => visualSectionId(block) === id)
+    const title = category ? visualSectionTitle(category) : previous?.type === 'text' ? previous.text : '작업 요청'
+    result.push({ id: `${SECTION_PREFIX}${id}`, type: 'text', text: title }, ...items)
   }
   return result
 }

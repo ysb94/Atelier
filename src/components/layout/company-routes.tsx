@@ -16,6 +16,7 @@ import { DepartmentProductsPage } from '@/features/products/ProductsPage'
 import { ProductDetailDrawer } from '@/features/products/ProductDetailDrawer'
 import { CompanySampleWorkOrderPage } from '@/features/china/SampleWorkOrderPage'
 import { DesignStyledCutsPage } from '@/features/design/StyledCutsPage'
+import { VisualWorkRequestManagePage } from '@/features/work-requests/VisualWorkRequestManagePage'
 import { CompanyDraftsPage } from '@/features/drafts/DraftsPage'
 import { DraftEditPage } from '@/features/drafts/DraftEditPage'
 import { CompanyBarcodePage } from '@/features/codes/BarcodePage'
@@ -161,6 +162,7 @@ export const companyWorkspaceRoutes = (
           element={<ProductDetailDrawer />}
         />
       </Route>
+      <Route path="design/work-request-management" element={<VisualWorkRequestManagePage />} />
       <Route path="design/styled-cuts" element={<DesignStyledCutsPage />} />
       <Route
         path="design/color-samples"

@@ -48,6 +48,7 @@ const NAV_LABELS: {
   { match: /^\/work-requests\/md(?:\/|$)/, label: 'MD · 작업 요청' },
   { match: /^\/work-requests\/logistics(?:\/|$)/, label: '물류 · 작업 요청' },
   { match: /^\/work(?:\/|$)/, label: '내 업무' },
+  { match: /^\/design\/work-request-management(?:\/|$)/, label: '디자인 · 작업 요청 관리' },
   { match: /^\/design\/styled-cuts(?:\/|$)/, label: '디자인 · 연출 컷 제작' },
   { match: /^\/design\/file-manager(?:\/|$)/, label: '디자인 · 이미지 업로드' },
   { match: /^\/product-work\/md(?:\/|$)/, label: 'MD · 상품 정보' },

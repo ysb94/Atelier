@@ -53,6 +53,7 @@ export type ReferenceFile = {
 }
 
 export type FormValues = {
+  visualRequest?: import('./visual-request-config').VisualRequestValues
   title: string
   requester: string
   requesterPosition: string
@@ -98,6 +99,7 @@ export type WorkRequestChatRoom = {
 }
 
 export type WorkRequestRecord = {
+  categoryAssignments?: { categoryId: string; label: string; assigneeId: string; assignedBy: string; assignedAt: string; formFields?: import('./visual-request-config').VisualField[] }[]
   id: string
   requesterId?: string
   revision?: number
