@@ -142,10 +142,15 @@ export function OrgDirectory({ teams, loading, failed, titlesFailed, onRetry, on
 function ApprovalLabels({ settings, names, loading, failed }: {
   settings?: DepartmentApprover[]; names: ReadonlyMap<string, string>; loading: boolean; failed: boolean
 }) {
-  return <span className="org-team-approvers" aria-label="부서 승인자">{([{ type: 'leave', label: '근태' }, { type: 'overtime', label: '야근' }] as const).map(({ type, label }) => {
-    const setting = settings?.find(item => item.type === type)
+  const leave = settings?.find(item => item.type === 'leave')
+  const overtime = settings?.find(item => item.type === 'overtime')
+  const samePerson = (leave?.approverId ?? null) === (overtime?.approverId ?? null) && (leave?.substituteId ?? null) === (overtime?.substituteId ?? null)
+  const rows = samePerson
+    ? [{ key: 'both', label: '근태·야근', setting: leave }]
+    : ([{ type: 'leave', label: '근태' }, { type: 'overtime', label: '야근' }] as const).map(({ type, label }) => ({ key: type, label, setting: settings?.find(item => item.type === type) }))
+  return <span className="org-team-approvers" aria-label="부서 승인자">{rows.map(({ key, label, setting }) => {
     const primary = setting?.approverId ? names.get(setting.approverId) ?? '재직 확인 필요' : '미지정'
     const substitute = setting?.substituteId ? names.get(setting.substituteId) ?? '재직 확인 필요' : ''
-    return <span key={type} className="org-team-approver">{label} · {loading ? '확인 중' : failed ? '조회 실패' : primary}{!loading && !failed && substitute && <span> / 대체 {substitute}</span>}</span>
+    return <span key={key} className="org-team-approver">{label} · {loading ? '확인 중' : failed ? '조회 실패' : primary}{!loading && !failed && substitute && <span> / 대체 {substitute}</span>}</span>
   })}</span>
 }

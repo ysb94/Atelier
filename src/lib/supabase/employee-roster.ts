@@ -1,3 +1,4 @@
+import { isRosterChoiceKey } from '@/lib/company/roster-choices'
 import { DEFAULT_COMPANY_ID } from '@/lib/supabase/brands'
 import { getSupabase } from '@/lib/supabase/client'
 import { listExtraLeave, type ExtraLeaveRecords } from './employee-extra-leave'
@@ -44,7 +45,7 @@ export const ROSTER_BASE_HEADERS: readonly { key: string; label: string; kind: R
   { key: 'accruedAnnualLeave', label: '발생일수', kind: 'number' },
   { key: 'additionalAnnualLeave', label: '추가 연차', kind: 'number' },
   { key: 'remainingAnnualLeave', label: '남은 연차', kind: 'number' },
-  ...ROSTER_FIELDS.map(field => ({ key: field.key, label: field.label, kind: (field.key === 'resignedOn' ? 'date' : ['annualSalary', 'monthlyWage', 'mealAllowance', 'carAllowance', 'childcareAllowance', 'dutyAllowance'].includes(field.key) ? 'money' : 'text') as RosterHeaderKind })),
+  ...ROSTER_FIELDS.map(field => ({ key: field.key, label: field.label, kind: (isRosterChoiceKey(field.key) ? 'choice' : field.key === 'resignedOn' ? 'date' : ['annualSalary', 'monthlyWage', 'mealAllowance', 'carAllowance', 'childcareAllowance', 'dutyAllowance'].includes(field.key) ? 'money' : 'text') as RosterHeaderKind })),
   { key: 'loginEmail', label: '로그인 아이디(구글)', kind: 'text' },
 ]
 export type RosterColumn = { id: string; label: string; kind: RosterColumnKind; sortOrder: number }

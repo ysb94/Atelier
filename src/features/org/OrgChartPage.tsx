@@ -1,3 +1,6 @@
+import { RosterChoiceSettings } from './RosterChoiceSettings'
+import { useRosterChoiceSettings } from './use-roster-choice-settings'
+import { isRosterChoiceKey, rosterChoiceValues } from '@/lib/company/roster-choices'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -396,7 +399,7 @@ export function OrgChartPage({
           {(
             [
               { id: 'members', label: '직원 배치', icon: Users },
-              { id: 'titles', label: '직책·직급 설정', icon: Settings2 },
+              { id: 'titles', label: '드롭다운 설정', icon: Settings2 },
             ] as const
           ).map((item) => (
             <button
@@ -546,9 +549,9 @@ export function OrgChartPage({
       ) : (
         <section className="space-y-4">
           <div className="rounded-xl border border-border bg-card px-5 py-4 shadow-sm">
-            <h2 className="text-base font-semibold">직책과 직급 관리</h2>
+            <h2 className="text-base font-semibold">직책·직급과 드롭다운 관리</h2>
             <p className="mt-1 text-sm text-muted-foreground">
-              직책은 맡은 역할, 직급은 회사 내 등급입니다. 직원에게 적용할
+              직책·직급과 은행명·근무지 등 직원 배치에서 선택할
               항목을 관리합니다.
             </p>
           </div>
@@ -572,6 +575,8 @@ export function OrgChartPage({
               />
             </div>
           ) : null}
+          <article className="rounded-xl border border-border bg-card p-4 shadow-sm"><h3 className="font-medium">고정OT 설계</h3><div className="my-3 flex flex-wrap gap-2">{FIXED_OVERTIME_PLANS.map(value=><Badge key={value} variant="outline">{value}</Badge>)}</div><p className="text-sm text-muted-foreground">현재 업무 기준인 유형 1·유형 2를 사용합니다. 직원별 약정 연장근로시간은 직원 배치에서 별도로 입력합니다.</p></article>
+          <RosterChoiceSettings canEdit={canEdit} />
         </section>
       )}
 
@@ -757,6 +762,8 @@ function MemberAssignmentTable({
     queryFn: listRosterColumnValues,
     enabled: canChange,
   })
+  const choiceSettingsQuery=useRosterChoiceSettings(canChange)
+  const choiceSettings=useMemo(()=>new Map(choiceSettingsQuery.data?.settings.map(row=>[row.key,row.options])),[choiceSettingsQuery.data])
   const allExtraColumns = columnQuery.data ?? emptyList<RosterColumn>()
   const headerSettingsQuery = useQuery({ queryKey: ['employee-roster-header-settings'], queryFn: listRosterHeaderSettings, enabled: profile?.status === 'active', retry: false })
   const headerSettings = headerSettingsQuery.data?.settings ?? emptyList<RosterHeaderSetting>()
@@ -888,6 +895,7 @@ function MemberAssignmentTable({
           부서·직책·직급·입사일과 명부 항목을 바꾸면 바로 저장됩니다. 입사일이
           없는 직원은 비워 두면 됩니다.
         </p>
+        {canChange&&choiceSettingsQuery.isError&&<p role="alert" className="my-2 text-sm text-danger">선택 목록을 불러오지 못했습니다. 드롭다운 설정에서 다시 확인해 주세요.</p>}
         {canChange ? <Button type="button" size="sm" variant="outline" className="mt-3" onClick={() => setHeadersOpen(true)}><Settings2 className="size-4" />헤더 관리</Button> : null}
         {canChange && headersOpen ? <RosterHeaderDialog columns={allExtraColumns} settings={headerSettings} settingsReady={headerSettingsQuery.data?.ready ?? false} settingsLoading={headerSettingsQuery.isPending} loading={columnQuery.isPending} failed={columnQuery.isError || headerSettingsQuery.isError} onClose={() => setHeadersOpen(false)} onRemoved={() => setSort(null)} onRetry={() => { void columnQuery.refetch(); void headerSettingsQuery.refetch() }} /> : null}
         {columnQuery.isError ? <p className="mt-2 text-sm text-danger">추가 헤더를 불러오지 못했습니다.</p> : null}
@@ -1047,14 +1055,20 @@ function MemberAssignmentTable({
                         const roster = rosters.get(member.id) ?? emptyRoster(member.id)
                         return (
                           <td key={field.key} className="whitespace-nowrap px-4 py-2">
-                            <RosterField
+                            {isRosterChoiceKey(field.key) && choiceSettingsQuery.data?.ready ? <AssignmentSelect
+                              label={`${memberName(member)} ${headerLabel(field.key,field.label)}`}
+                              value={roster[field.key]}
+                              disabled={rosterQuery.isLoading||rosterMutation.isPending||choiceSettingsQuery.isError}
+                              options={rosterChoiceValues(choiceSettings.get(field.key)??[],roster[field.key]).map(value=>({value,label:value}))}
+                              onChange={value=>{if(value!==roster[field.key]){setError(null);rosterMutation.mutate({profileId:member.id,field:field.key,value})}}}
+                            /> : <RosterField
                               label={`${memberName(member)} ${field.label}`}
                               value={roster[field.key]}
                               maxLength={field.max}
                               className={field.width}
                               type={field.key === 'resignedOn' ? 'date' : 'text'}
                               money={MONEY_ROSTER_FIELDS.has(field.key)}
-                              disabled={rosterQuery.isLoading}
+                              disabled={rosterQuery.isLoading||(isRosterChoiceKey(field.key)&&choiceSettingsQuery.isError)}
                               onCommit={(value) => {
                                 if (value === roster[field.key]) return
                                 setError(null)
@@ -1064,7 +1078,7 @@ function MemberAssignmentTable({
                                   value,
                                 })
                               }}
-                            />
+                            />}
                           </td>
                         )
                       })
