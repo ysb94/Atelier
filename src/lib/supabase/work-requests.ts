@@ -84,6 +84,9 @@ export async function saveWorkRequestChange(before: WorkRequestRecord | undefine
   return expected
 }
 export async function sendWorkRequestMessage(requestId: string,message: WorkRequestMessage) { return rpc('send_work_request_message',{p_id:requestId,p_room:message.roomId,p_body:message.body,p_command:message.id}) }
+export async function cancelWorkRequest(request: WorkRequestRecord, action: 'request' | 'approve' | 'reject', commandId: string) {
+  return rpc<number>('cancel_work_request',{p_id:request.id,p_revision:request.revision,p_command:commandId,p_action:action})
+}
 export async function deleteWorkRequest(request: WorkRequestRecord, revision?: number) {
   const paths=await rpc<string[]>('delete_work_request',{p_id:request.id,p_revision:revision??request.revision})
   if(paths.length){const {error}=await getSupabase().storage.from(BUCKET).remove(paths);if(error){console.warn('[work-requests] 삭제 첨부 정리 실패',{requestId:request.id,error});throw new Error('요청은 삭제되었습니다. 첨부 정리는 다음 조회 때 다시 시도합니다.')}await rpc('finish_work_request_delete',{p_id:request.id})}

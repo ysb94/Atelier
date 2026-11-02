@@ -5,6 +5,7 @@ export type DepartmentWork = {
   requesterName: string; requesterDepartment: string; assigneeIds: string[]
   assigneeNames: string[]; status: RequestStatus; createdAt: string; dueDate: string
   brandId: string; brandName: string
+  cancellation?: { state: string } | null
 }
 export type WorkFilters = { requester: string[]; assignee: string[]; status: string[]; brand: string[] }
 export const clearWorkFilters = (): WorkFilters => ({ requester: [], assignee: [], status: [], brand: [] })

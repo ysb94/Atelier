@@ -147,7 +147,7 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
                 <td className="py-6 pr-4"><Link className="break-words hover:underline" to={`?requestId=${row.id}`}>{row.title}</Link>{row.kind === 'internal' ? <Badge className="ml-2" variant="muted">자체 업무</Badge> : null}</td>
                 <td className="break-words px-3 py-6">{row.requesterName}</td>
                 <td className={`break-words px-3 py-6 ${!row.assigneeNames.length ? 'text-danger' : ''}`}>{row.assigneeNames.join(', ') || '미정'}</td>
-                <td className="px-3 py-6"><StatusPill tone={STATUS_META[row.status]?.variant}>{STATUS_META[row.status]?.label ?? row.status}</StatusPill></td>
+                <td className="px-3 py-6"><div className="flex flex-wrap gap-1"><StatusPill tone={STATUS_META[row.status]?.variant}>{STATUS_META[row.status]?.label ?? row.status}</StatusPill>{row.cancellation?.state==='requested'&&!['completed','cancelled','rejected'].includes(row.status)?<Badge variant="warning">취소 요청 중</Badge>:null}</div></td>
                 <td className="px-3 py-6">{row.createdAt.slice(0, 10)}</td>
                 <td className={`px-3 py-6 ${row.dueDate && row.dueDate < new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) && !['completed', 'cancelled', 'rejected'].includes(row.status) ? 'text-danger' : ''}`}>{row.dueDate || '미정'}</td>
                 <td className="break-words py-6 pl-3">{row.brandName || '브랜드 미정'}</td>

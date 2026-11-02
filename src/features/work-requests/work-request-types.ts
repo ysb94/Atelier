@@ -99,6 +99,7 @@ export type WorkRequestChatRoom = {
 }
 
 export type WorkRequestRecord = {
+  cancellation?: { state: 'requested' | 'cancelled' | 'approved' | 'rejected'; requestedBy: string; requestedName: string; requestedAt: string; resolvedBy?: string; resolvedName?: string; resolvedAt?: string }
   kind?: 'request' | 'internal'
   departmentReadable?: boolean
   categoryAssignments?: { categoryId: string; label: string; assigneeId: string; assignedBy: string; assignedAt: string; formFields?: import('./visual-request-config').VisualField[] }[]

@@ -31,6 +31,17 @@
 
 ## 적용 상태
 
+### 요청 취소: 로컬 구현, 공유 DB 적용 승인 대기
+
+`20261102114206_work_request_cancellation.sql`은 미확인(requested/reviewing)의 즉시 취소와 접수 후 취소 요청을 분리한다. 기존 업무 상태는 취소 요청 중에도 유지하고, 기존 `work.manage` 담당자가 수락하면 취소·실행 중 타이머 마감, 반려하면 원래 업무를 계속한다. 자체 업무의 본인 취소는 유지한다.
+
+- 신규 `app.cancel_work_request`와 public invoker 래퍼: 로그인 본인·동일 회사·기존 관리 권한·revision·명령 UUID를 검사한다. 요청/처리자 UUID·시각과 이력은 기존 data JSON에 서버가 기록하고 기존 요청자 업무 대화에도 전달한다. 새 표·정책·전역 권한은 추가하지 않는다.
+- 기존 `save_work_request`는 접수 후 직접 취소 우회를 차단하고, `list_department_work`는 취소 요청 요약을 추가한다. 다른 저장·접수·배정·검수 동작과 기존 행은 변경하지 않는다.
+- My home 보낸 요청과 상세에서 취소/취소 요청을 제공한다. 진행 중 취소 요청은 중복 발송하지 않으며 목록에 표시한다. 관리자는 상세에서 수락·반려한다. 서버 적용 전에는 새 API가 없으므로 실제 취소 저장은 연결 대기 상태다.
+- 검증: `verify:work-request-cancellation`, `verify:work-request-cancellation-browser`. 모의 DB·브라우저로 즉시 취소, 진행 유지, 수락·반려, 처리자 위조·동일 부서/다른 회사·직원 차단, 중복/오래된 revision, 시간 기록, 실패 재시도·새로고침을 확인한다. 운영 기록을 시험 취소하지 않는다.
+
+### 부서 업무 기본 DB: 적용 완료
+
 2026-11-02 20:06 KST, 사용자 승인 범위로 공유 DB 적용 완료. 로컬 SQL `20261102093634_department_work_board.sql`(기능 커밋 `e0861e8`)은 서버 이력 `20261102110658_department_work_board`에 대응한다. MCP가 실제 적용 시각으로 서버 버전을 기록했다.
 
 - 추가 범위: `kind` 열 1개, app API 6개·보호 함수 2개와 public invoker 래퍼 6개, SELECT 정책 3개, 자체 업무만 자동 분류 배정을 건너뛰는 기존 트리거 보완이다.

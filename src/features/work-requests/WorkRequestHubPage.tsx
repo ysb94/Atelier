@@ -10,6 +10,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList } from '@/lib/utils'
 import { useEffect } from 'react'
 import { getSupabase } from '@/lib/supabase/client'
+import { WorkRequestCancellation } from './WorkRequestCancellation'
 
 export function WorkRequestHubPage() {
   useRenderWatch('WorkRequestHubPage')
@@ -31,7 +32,7 @@ export function WorkRequestHubPage() {
     {query.error?<p role="alert" className="text-sm text-danger">{query.error.message}<button className="ml-2 underline" onClick={()=>void query.refetch()}>다시 조회</button></p>:query.isPending?<p role="status">업무를 불러오는 중...</p>:null}
     {(['sent','assigned'] as const).map(section=>{
       const rows=requests.filter(request=>section==='sent'?request.requesterId===profile?.id:request.assignee===profile?.id||request.collaborators.includes(profile?.id??''))
-      return <Card key={section}><CardContent className="p-4"><h3 className="mb-3 font-medium">{section==='sent'?'보낸 요청':'배정받은 업무'} · {rows.length}</h3>{rows.length?rows.map(request=><Link key={request.id} className="flex items-center justify-between gap-3 border-t border-border py-3 text-sm" to={`/work-requests/${request.owner}?requestId=${request.id}`}><span>{request.values.title}<small className="ml-2 text-muted-foreground">{WORK_REQUEST_CONFIG[request.owner].label}</small></span><Badge variant={request.status==='completed'?'success':'muted'}>{STATUS_META[request.status].label}</Badge></Link>):<p className="text-sm text-muted-foreground">등록된 업무가 없습니다.</p>}</CardContent></Card>
+      return <Card key={section}><CardContent className="p-4"><h3 className="mb-3 font-medium">{section==='sent'?'보낸 요청':'배정받은 업무'} · {rows.length}</h3>{rows.length?rows.map(request=><div key={request.id} className="flex flex-wrap items-center gap-3 border-t border-border py-3 text-sm"><Link className="flex min-w-0 flex-1 items-center justify-between gap-3" to={`/work-requests/${request.owner}?requestId=${request.id}`}><span className="break-words">{request.values.title}<small className="ml-2 text-muted-foreground">{WORK_REQUEST_CONFIG[request.owner].label}</small></span><Badge variant={request.status==='completed'?'success':'muted'}>{STATUS_META[request.status].label}</Badge></Link>{section==='sent'?<WorkRequestCancellation request={request}/>:request.cancellation?.state==='requested'&&!['completed','cancelled','rejected'].includes(request.status)?<Badge variant="warning">취소 요청 중</Badge>:null}</div>):<p className="text-sm text-muted-foreground">등록된 업무가 없습니다.</p>}</CardContent></Card>
     })}
   </div>
 }

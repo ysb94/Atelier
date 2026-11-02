@@ -1,4 +1,5 @@
 import { DepartmentWorkBoard } from './DepartmentWorkBoard'
+import { WorkRequestCancellation } from './WorkRequestCancellation'
 import { useWorkRequests } from './use-work-requests'
 import {
   Fragment,
@@ -2313,27 +2314,6 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     goToView({ type: 'deleted' })
   }
 
-  function cancelRequest(request: WorkRequestRecord) {
-    if (
-      isClosedStatus(request.status) ||
-      !window.confirm('이 작업 요청을 취소할까요?')
-    ) {
-      return
-    }
-    setRequests((current) =>
-      current.map((item) =>
-        item.id === request.id
-          ? {
-              ...item,
-              status: 'cancelled',
-              updatedAt: new Date().toISOString(),
-            }
-          : item,
-      ),
-    )
-    setFlashMessage('작업 요청을 취소했습니다.')
-  }
-
   function updateRequest(
     requestId: string,
     patch: Partial<WorkRequestRecord>,
@@ -3681,18 +3661,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 </Button>
               </>
             ) : null}
-            {isSelfRequest &&
-            !canEdit &&
-            !isClosedStatus(selectedRequest.status) ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => cancelRequest(selectedRequest)}
-              >
-                취소
-              </Button>
-            ) : null}
+            <WorkRequestCancellation request={selectedRequest} canManage={canManageSelected} disabled={storage.saving} />
             <Button
               type="button"
               variant="outline"

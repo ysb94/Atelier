@@ -25,6 +25,8 @@
     "verify:spin360-ai": "node scripts/verify-spin360-browser.mjs --ai",
     "verify:department-work": "node --experimental-strip-types scripts/verify-department-work.mjs",
     "verify:department-work-browser": "node scripts/verify-department-work-browser.mjs",
+    "verify:work-request-cancellation": "node scripts/verify-work-request-cancellation.mjs",
+    "verify:work-request-cancellation-browser": "node scripts/verify-work-request-cancellation-browser.mjs",
     "verify:work-request-navigation": "node --experimental-strip-types scripts/verify-work-request-navigation.mjs",
     "verify:work-request-settings": "node scripts/verify-work-request-settings.mjs",
     "verify:work-request-managers": "node scripts/verify-work-request-managers.mjs",
