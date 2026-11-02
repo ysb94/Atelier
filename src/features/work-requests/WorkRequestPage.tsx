@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type ReactNode,
   type ClipboardEvent,
   type CSSProperties,
   type DragEvent,
@@ -66,6 +67,14 @@ import { WorkRequestCompletedPanel } from './WorkRequestCompletedPanel'
 import { WorkRequestChat } from './WorkRequestChat'
 import { WorkRequestScratchTodos } from './WorkRequestScratchTodos'
 import { WorkRequestTeamBoard } from './WorkRequestTeamBoard'
+import {
+  VISUAL_REQUEST_CATEGORIES,
+  setVisualSection,
+  splitVisualSections,
+  visualSectionId,
+  visualSectionTitle,
+  type VisualSectionId,
+} from './visual-request-sections'
 import {
   compareRequestsByDeadline,
   dateFromToday,
@@ -1262,14 +1271,19 @@ function RequestBodyEditor({
   placeholder,
   onChange,
   appendFilesRef,
+  visualTitle,
+  guide,
 }: {
   blocks: ContentBlock[]
   error?: string
   placeholder: string
   onChange: (blocks: ContentBlock[]) => void
   appendFilesRef: { current: (files: File[]) => void }
+  visualTitle?: string
+  guide?: readonly string[]
 }) {
   const editorRef = useRef<HTMLDivElement>(null)
+  const visualFileRef = useRef<HTMLInputElement>(null)
   const blocksRef = useRef(blocks)
   const onChangeRef = useRef(onChange)
   const dropTargetRef = useRef<ImageDropTarget | null>(null)
@@ -1620,15 +1634,18 @@ function RequestBodyEditor({
     : undefined
 
   return (
-    <div className="space-y-2">
+    <div className={cn('space-y-2', visualTitle && 'rounded-xl border border-border bg-card p-5 shadow-sm sm:p-7')}>
+      {visualTitle ? <h2 className="text-sm font-semibold">{visualTitle}</h2> : (
       <span className="flex items-center gap-1 text-sm font-medium">
         요청 내용 <span className="text-danger">*</span>
       </span>
+      )}
 
       <div
         ref={editorRef}
         className={cn(
           'relative min-h-72 rounded-md border border-border bg-card px-4 py-4',
+          visualTitle && 'min-h-80 border-0 px-0 sm:min-h-96',
           isDraggingFiles && 'border-primary bg-primary/5',
           moving?.active && 'select-none',
           error && 'border-danger',
@@ -1646,6 +1663,13 @@ function RequestBodyEditor({
         onDragLeave={() => setIsDraggingFiles(false)}
         onDrop={handleDrop}
       >
+        {guide?.length ? <ul className="mb-3 list-inside list-disc text-xs leading-6 text-muted-foreground">{guide.map((item) => <li key={item}>{item} :</li>)}</ul> : null}
+        {visualTitle && onlyEmptyText ? (
+          <button type="button" className="absolute left-1/2 top-1/2 z-10 flex w-max max-w-full -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2 rounded-md p-3 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary" onClick={() => visualFileRef.current?.click()} aria-label={`${visualTitle} 파일 추가`}>
+            <Paperclip className="size-5" />
+            파일을 끌어 놓거나 버튼을 눌러 첨부하세요.
+          </button>
+        ) : null}
         {parts.map((part, index) => {
           if (part.type === 'file') {
             return (
@@ -1737,11 +1761,68 @@ function RequestBodyEditor({
           </div>
         ) : null}
       </div>
+      {visualTitle ? (
+        <div className="flex justify-end">
+          <input ref={visualFileRef} type="file" multiple className="sr-only" aria-label={`${visualTitle} 첨부 파일`} onChange={(event) => { appendFilesRef.current(Array.from(event.target.files ?? [])); event.target.value = '' }} />
+          <Button type="button" variant="ghost" size="sm" onClick={() => visualFileRef.current?.click()}><Paperclip className="size-3.5" />파일 추가</Button>
+        </div>
+      ) : (
       <p className="text-xs text-muted-foreground">
         이미지를 끌어 줄 사이에 놓으면 그 높이에 고정됩니다. 위쪽 글이 늘어나도 이미지는
         밀리지 않고, 배치 아이콘에 따라 옆이나 아래로 글이 이어집니다.
       </p>
+      )}
       {error ? <p className="text-xs text-danger">{error}</p> : null}
+    </div>
+  )
+}
+
+function VisualRequestSection({ title, blocks, onChange, guide, error }: {
+  title: string
+  blocks: ContentBlock[]
+  onChange: (blocks: ContentBlock[]) => void
+  guide?: readonly string[]
+  error?: string
+}) {
+  const appendFilesRef = useRef<(files: File[]) => void>(() => {
+    console.warn('[work-request] Visual 요청 편집기가 연결되지 않았습니다.', { title })
+  })
+  return <RequestBodyEditor blocks={blocks} onChange={onChange} placeholder="내용을 입력하세요." visualTitle={title} guide={guide} error={error} appendFilesRef={appendFilesRef} />
+}
+
+function VisualRequestFields({ blocks, onChange, brandPicker, error, requestKey }: {
+  blocks: ContentBlock[]
+  onChange: (blocks: ContentBlock[]) => void
+  brandPicker: ReactNode
+  error?: string
+  requestKey: string
+}) {
+  const sections = splitVisualSections(blocks)
+  function updateSection(id: VisualSectionId, next: ContentBlock[]) {
+    onChange(setVisualSection(blocks, id, next))
+  }
+  return (
+    <div className="space-y-6">
+      <div className="space-y-5 border-t border-border pt-6">
+        {brandPicker}
+        <fieldset className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-3">
+          <legend className="float-left mr-5 py-0.5 text-xs text-muted-foreground">분류</legend>
+          {VISUAL_REQUEST_CATEGORIES.map((category) => (
+            <label key={category.id} className="flex cursor-pointer items-center gap-1.5 text-xs">
+              <input type="checkbox" className="size-3.5 accent-primary" checked={sections.has(category.id)} onChange={(event) => {
+                const content = sections.get(category.id)
+                if (!event.target.checked && content && hasRequestBody(content) && !window.confirm(`${category.label}에 입력한 내용과 첨부를 지울까요?`)) return
+                onChange(setVisualSection(blocks, category.id, event.target.checked ? [emptyTextBlock()] : null))
+              }} />
+              {category.label}
+            </label>
+          ))}
+        </fieldset>
+      </div>
+      <VisualRequestSection key={`${requestKey}:main`} title="메인 내용" blocks={sections.get('main') ?? []} onChange={(next) => updateSection('main', next)} error={error} />
+      {VISUAL_REQUEST_CATEGORIES.filter((category) => sections.has(category.id)).map((category) => (
+        <VisualRequestSection key={`${requestKey}:${category.id}`} title={visualSectionTitle(category)} guide={category.guide} blocks={sections.get(category.id)!} onChange={(next) => updateSection(category.id, next)} />
+      ))}
     </div>
   )
 }
@@ -2040,7 +2121,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const nextErrors: FormErrors = {}
     if (!values.title.trim()) nextErrors.title = '요청 제목을 입력하세요.'
     if (!values.dueDate) nextErrors.dueDate = '희망 마감일을 선택하세요.'
-    if (!hasRequestBody(values.blocks)) {
+    if (!hasRequestBody(owner === 'design' ? values.blocks.filter((block) => !visualSectionId(block)) : values.blocks)) {
       nextErrors.blocks = '요청 내용을 입력하거나 이미지를 넣어 주세요.'
     }
     return nextErrors
@@ -3868,9 +3949,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
           title={
             editingRequest
               ? `${config.teamName} 작업 요청 수정`
-              : `${config.teamName} 작업 요청 등록`
+              : owner === 'design' ? 'Visual Team 작업 요청' : `${config.teamName} 작업 요청 등록`
           }
-          description={config.description}
+          description={owner === 'design' ? '작업 분류를 선택하시면 입력 창이 뜹니다. (다중 선택 가능)' : config.description}
           actions={
             <Button type="button" variant="outline" onClick={cancelEditing}>
               <ArrowLeft className="size-4" />
@@ -3886,8 +3967,38 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
           </div>
         ) : null}
 
-        <Card>
-          <CardContent className="space-y-5 p-5">
+        {owner === 'design' ? (
+          <VisualRequestFields
+            blocks={values.blocks}
+            onChange={(blocks) => updateValue('blocks', blocks)}
+            error={errors.blocks}
+            requestKey={draftKey ?? 'new'}
+            brandPicker={
+              <label className="flex flex-wrap items-center gap-4 text-xs">
+                <span className="text-muted-foreground">브랜드</span>
+                <Select className="h-8 w-44 text-xs" value={formBrandId} onChange={(event) => setFormBrandId(event.target.value)} disabled={Boolean(editingRequest?.brandId)}>
+                  <option value="">브랜드 미정</option>
+                  {brands.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}
+                </Select>
+              </label>
+            }
+          />
+        ) : null}
+
+        {owner === 'design' && values.referenceFiles.length > 0 ? (
+          <Card className="mt-6"><CardContent className="p-5">
+            <ReferenceFilesField
+              files={values.referenceFiles}
+              contentBlocks={values.blocks}
+              onChange={(files) => updateValue('referenceFiles', files)}
+              onAddFiles={(incoming) => updateValue('blocks', setVisualSection(values.blocks, 'main', appendFilesToBlocks(splitVisualSections(values.blocks).get('main') ?? [], incoming, 0)))}
+            />
+          </CardContent></Card>
+        ) : null}
+
+        <Card className={owner === 'design' ? 'mt-6' : undefined}>
+          <CardContent className={cn('space-y-5 p-5', owner === 'design' && 'grid gap-5 space-y-0 md:grid-cols-[minmax(0,1fr)_15rem]')}>
+            {owner !== 'design' ? (
             <label className="block space-y-1.5">
               <span className="text-sm font-medium">브랜드 (선택)</span>
               <Select
@@ -3907,6 +4018,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 데이터가 있으면 브랜드를 직접 바꾸지 않습니다.
               </span>
             </label>
+            ) : null}
 
             <label className="block space-y-1.5">
               <span className="flex items-center gap-1 text-sm font-medium">
@@ -3950,6 +4062,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               ) : null}
             </label>
 
+            {owner !== 'design' ? <>
             <RequestBodyEditor
               blocks={values.blocks}
               error={errors.blocks}
@@ -3964,6 +4077,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               onChange={(files) => updateValue('referenceFiles', files)}
               onAddFiles={(incoming) => appendBodyFilesRef.current(incoming)}
             />
+            </> : null}
           </CardContent>
         </Card>
 
