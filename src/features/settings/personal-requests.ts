@@ -10,7 +10,7 @@ export type RequestKind = typeof REQUEST_KINDS[number]['id'] | 'remote' | 'corre
 export type PersonalRequest = {
   id: string; kind: RequestKind; from: string; to: string; start: string; end: string
   place: string; note: string; status: 'pending' | 'approved' | 'rejected' | 'cancelled'
-  createdAt: string; decisionNote?: string
+  createdAt: string; decisionNote?: string; advanceRequested?: boolean
 }
 export type RequestForm = Omit<PersonalRequest, 'id' | 'status' | 'createdAt' | 'decisionNote'>
 export type ReminderBasis = { start: string; end: string; breakStart: string; breakEnd: string; before: number }
@@ -31,8 +31,8 @@ export function requiresDepartmentApproval(kind: RequestKind) { return kind === 
 export function isSelfApprovedRequest(request: { status: PersonalRequest['status']; employeeId?: string; decidedBy?: string | null }) {
   return request.status === 'approved' && Boolean(request.employeeId && request.decidedBy && request.employeeId === request.decidedBy)
 }
-export function requestStatusLabel(request: Pick<PersonalRequest, 'kind' | 'status'>) {
-  return request.status === 'approved' && isDirectRegistration(request.kind) ? '등록' : { pending: '승인 대기', approved: '승인', rejected: '반려', cancelled: '취소' }[request.status]
+export function requestStatusLabel(request: Pick<PersonalRequest, 'kind' | 'status' | 'advanceRequested'>) {
+  return request.status === 'approved' && isDirectRegistration(request.kind) && !request.advanceRequested ? '등록' : { pending: '승인 대기', approved: '승인', rejected: '반려', cancelled: '취소' }[request.status]
 }
 export function isLocationRequest(kind: RequestKind) { return kind === 'offsite' || kind === 'remote' }
 export function approvalTypeOf(kind: RequestKind): 'leave' | 'overtime' { return kind === 'overtime' ? 'overtime' : 'leave' }
@@ -52,6 +52,7 @@ function interval(form: RequestForm | PersonalRequest) {
   return [form.from + (isAllDayRequest(form.kind) ? 'T00:00' : `T${form.start}`), form.to + (isAllDayRequest(form.kind) ? 'T24:00' : `T${form.end}`)]
 }
 export function validateRequest(form: RequestForm, requests: PersonalRequest[], basis: ReminderBasis, today?: string) {
+  if (form.advanceRequested && (!isLeaveRequest(form.kind) || !form.note.trim())) return '연차·반차·반반차를 선택하고 선사용 사유를 입력해 주세요.'
   if (form.kind === 'remote') return '재택은 등록할 수 없습니다.'
   if (!validDate(form.from) || !validDate(form.to) || form.to < form.from) return '신청 시작일과 종료일을 확인해 주세요.'
   if (form.kind === 'correction' && today && form.from > today) return '앞으로의 날짜는 출퇴근 정정을 신청할 수 없습니다.'

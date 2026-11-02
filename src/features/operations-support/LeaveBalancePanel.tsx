@@ -15,6 +15,7 @@ import { useOpsDirectory } from './ops-directory'
 import { HireDateScrollField } from '@/features/org/HireDateScrollField'
 import { koreaDateKey } from '@/features/settings/my-attendance'
 import { listExtraLeave, saveExtraLeave, type ExtraLeave, type SaveExtraLeave, type LeaveEvent } from '@/lib/supabase/employee-extra-leave'
+import { LeaveAdvancePanel } from './LeaveAdvancePanel'
 
 export function LeaveBalancePanel() {
   useRenderWatch('LeaveBalancePanel')
@@ -86,6 +87,7 @@ export function LeaveBalancePanel() {
         </tbody>
       </table>
     </div></Card>
+    <LeaveAdvancePanel/>
   </OpsPanelFrame>
 }
 

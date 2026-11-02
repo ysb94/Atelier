@@ -23,7 +23,7 @@ export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' = 'mine') {
   async function refresh() {
     await Promise.all([
       'company-leave-requests', 'company-leave-cover', 'my-attendance-basis', 'home-my-leave', 'my-extra-leave',
-      'employee-roster', 'employee-extra-leave', 'leave-notice-management', 'meeting-availability',
+      'employee-roster', 'employee-extra-leave', 'employee-leave-advances', 'leave-notice-management', 'meeting-availability',
     ].map(key => client.invalidateQueries({ queryKey: [key] })))
   }
   const create = useMutation({

@@ -132,6 +132,11 @@ try {
     await verifyBirthdayLeave({db,actor,value,create,ops,company,foreign})
   }
   console.log('leave-balance-db: 기존 값·정책 보존, 1/0.5/0.25일 차감, 주말·공휴일 제외, 취소 1회 복원, 기존 취소 무가산, 미등록·부족·타인·타사·직접 위조 차단, 외근·야근 무차감, 사용연도 확인 보존 통과')
+  if (process.argv.includes('--advance')) {
+    assert.ok(['--anniversary','--additional','--fefo','--birthday'].every(flag=>process.argv.includes(flag)))
+    const { verifyLeaveAdvances } = await import('./verify-leave-advance-cases.mjs')
+    await verifyLeaveAdvances({db,actor,value,create,ops,company,foreign,dept})
+  }
 } catch(error) {
   console.error('leave-balance-db 실패:',error.message,{code:error.code,query:error.query})
   process.exitCode=1
