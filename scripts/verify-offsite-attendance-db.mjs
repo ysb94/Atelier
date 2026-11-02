@@ -41,7 +41,7 @@ try {
     insert into app.leave_balance_calendar_years values(2026);
   `)
   await db.exec(await readFile('supabase/migrations/20261012081000_undo_clock_out_today.sql', 'utf8'))
-  await db.exec(await readFile('supabase/migrations/20261102053844_offsite_attendance_automation.sql', 'utf8'))
+  await db.exec(await readFile('supabase/migrations/20261102063022_offsite_attendance_automation.sql', 'utf8'))
   await db.exec("update app.offsite_attendance_config set activated_at='2026-11-02T00:00:00+09:00'")
   await db.query("insert into public.company_leave_requests(company_id,employee_id,kind,from_date,to_date,start_time,end_time,status,created_at) values($1,$2,'offsite','2026-11-02','2026-11-02','09:00','18:00','approved','2026-11-02T08:00:00+09:00')", [company,staff])
   const advance = time => db.query('select app.advance_offsite_attendance($1,$2,$3)', [staff,'2026-11-02',`2026-11-02T${time}:00+09:00`])
