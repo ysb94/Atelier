@@ -29,6 +29,9 @@ import { visibleCompanyNotices, type CompanyNotice } from '@/lib/company/company
 import './personal-requests.css'
 import { MyLeaveAdvanceSummary } from './MyLeaveAdvanceSummary'
 import { useLeaveAdvances } from '@/features/operations-support/use-leave-advances'
+import { useMyScheduleMeetings } from './use-my-schedule-meetings'
+import { MyScheduleMeetingLink } from './MyScheduleMeetingLink'
+import { meetingKindLabel } from '@/features/meetings/meeting-kinds'
 
 const STATUS_LABELS = { pending: '승인 대기', approved: '승인', rejected: '반려', cancelled: '취소' }
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
@@ -113,6 +116,7 @@ export function MyAttendancePanel() {
     profile?.departmentId ?? null,
   )
   const [month, setMonth] = useState(() => today.slice(0, 7))
+  const meetings = useMyScheduleMeetings(userId, profile?.companyId ?? undefined, allowed && profile?.id === userId, active, month)
   const [selected, setSelected] = useState(today)
   const [query, setQuery] = useState('')
   const layers: Record<Layer, boolean> = { clock: true, leave: true, work: true, fix: true, holiday: true, closed: false }
@@ -330,13 +334,17 @@ export function MyAttendancePanel() {
             const text = query.trim().toLowerCase()
             const dayTodos = todos.filter(todo => todo.date === date && (!text || todo.title.toLowerCase().includes(text)))
             const slots = Math.max(1, 3 - (layers.holiday && holiday ? 1 : 0) - (timeText ? 1 : 0))
-            const visibleItems = items.slice(0, dayTodos.length ? Math.max(0, slots - 1) : slots)
-            const visibleTodos = dayTodos.slice(0, Math.max(0, slots - visibleItems.length))
-            const hidden = items.length - visibleItems.length + dayTodos.length - visibleTodos.length
+            const dayMeetings = meetings.events.filter(meeting => meeting.date === date && (!text || `${meeting.title} ${meeting.hostName} ${meetingKindLabel(meeting.kind)}`.toLowerCase().includes(text)))
+            const visibleMeetings = dayMeetings.slice(0, slots)
+            const remainingSlots = slots - visibleMeetings.length
+            const visibleItems = items.slice(0, dayTodos.length ? Math.max(0, remainingSlots - 1) : remainingSlots)
+            const visibleTodos = dayTodos.slice(0, Math.max(0, remainingSlots - visibleItems.length))
+            const hidden = items.length - visibleItems.length + dayTodos.length - visibleTodos.length + dayMeetings.length - visibleMeetings.length
             return <div key={date} className={`agenda-day${holiday ? ' is-off' : ''}${date === today ? ' is-today' : ''}${selected === date ? ' is-selected' : ''}`} onClick={() => pickDate(date)} onDoubleClick={() => openAddMenu(date)}>
               <button type="button" className="agenda-num" aria-pressed={selected === date} aria-label={`${dateLabel(date)} (${WEEKDAYS[dayOfWeek(date)]}) ${holiday ? `${holiday} ` : ''}출근 ${time.start || '없음'} 퇴근 ${time.end || '없음'}${time.corrected ? ' 정정' : ''} 신청 ${items.length}건 Todo ${dayTodos.length}건`} onClick={() => pickDate(date)}>{Number(date.slice(8))}</button>
               {layers.holiday && holiday && <button type="button" className="agenda-bar is-holiday" onClick={event => { event.stopPropagation(); pickDate(date); setDetail({ type: 'holiday', date, name: holiday }) }}>{holiday}</button>}
               {timeText && <button type="button" className={`agenda-clock${time.corrected ? ' is-corrected' : ''}`} onClick={event => { event.stopPropagation(); pickDate(date); setDetail({ type: 'clock', date, start: time.start, end: time.end, corrected: time.corrected, reported: !time.corrected && Boolean(day.clockOutReportedAt) }) }}>{timeText}{time.corrected && <b className="agenda-fix-tag">정정</b>}{!time.corrected && day.clockOutReportedAt && <b className="agenda-fix-tag">본인 확인 입력</b>}</button>}
+              {visibleMeetings.map(meeting => <MyScheduleMeetingLink key={meeting.id} meeting={meeting} compact />)}
               {visibleItems.map(item => requestBar(item, date))}
               {visibleTodos.map(todo => <button key={todo.id} type="button" className={`agenda-bar is-todo${todo.important ? ' is-important' : ''}${todo.done ? ' is-done' : ''}`} title={`${todo.important ? '중요 · ' : ''}${scheduleTodoTime(todo)} · ${todo.title}`} onClick={event => { event.stopPropagation(); pickDate(date); openTodo(date,todo) }}>{todo.important ? '★ ' : ''}{todo.start ? todo.start+' ' : ''}{todo.title}</button>)}
               {hidden > 0 && <button type="button" className="agenda-more" onClick={() => pickDate(date)}>+{hidden}개</button>}
@@ -345,7 +353,11 @@ export function MyAttendancePanel() {
         </div>
       </div>
       <p className="personal-request-footnote">출퇴근은 기록된 시각을, 승인된 출퇴근 정정은 정정 시각을 표시합니다. 원래 출퇴근 기록은 바뀌지 않으며, 미기록만으로 결근이나 연차 사용을 판단하지 않습니다.</p>
+      <p className="personal-request-footnote">회의는 호스트에게 일정 등록 후, 멤버에게 참석 가능 응답 후 표시합니다. 참석 응답이 없는 미팅은 등록되면 표시합니다.</p>
+      {meetings.loading && <p role="status" className="px-3 pb-3 text-xs text-muted-foreground">내 회의 일정을 불러오고 있습니다.</p>}
+      {meetings.error && <p role="alert" className="px-3 pb-3 text-sm text-danger">회의 일정을 불러오지 못했습니다. <Button type="button" variant="outline" size="sm" onClick={() => void meetings.refresh()}>회의 다시 조회</Button></p>}
     </section>
+    {meetings.events.some(meeting => meeting.date === selected) && <section aria-label="선택 날짜의 회의 일정" className="mt-3 space-y-2 rounded-xl border border-border bg-card p-4"><h3 className="text-sm font-semibold">{dateLabel(selected)} 회의 일정</h3>{meetings.events.filter(meeting => meeting.date === selected).map(meeting => <MyScheduleMeetingLink key={meeting.id} meeting={meeting} />)}</section>}
     {leave.requests.some(item => item.from <= selected && selected <= item.to) && <section aria-label="선택 날짜의 근태 일정" className="mt-3 space-y-2 rounded-xl border border-border bg-card p-4"><h3 className="text-sm font-semibold">{dateLabel(selected)} 근태 일정</h3>{leave.requests.filter(item => item.from <= selected && selected <= item.to).map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3 text-sm"><div><p>{requestLabel(item.kind)}{item.advanceRequested ? ' · 선사용' : ''} · {requestTime(item)} · {requestStatusLabel(item)}{isSelfApprovedRequest(item) ? ' · 본인 승인' : ''}</p>{item.decidedByName && <p className="mt-1 text-xs text-muted-foreground">{item.decidedByName}{item.decidedAt ? ` · ${new Date(item.decidedAt).toLocaleString('ko-KR')}` : ''}</p>}{item.decisionNote && <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">{item.decisionNote}</p>}</div><Button variant="outline" size="sm" onClick={() => setDetail({ type: 'request', item, date: selected })}>보기</Button></div>)}</section>}
     {todos.some(todo=>todo.date===selected) && <section aria-label="선택 날짜의 To-do" className="mt-3 space-y-2 rounded-xl border border-border bg-card p-4"><h3 className="text-sm font-semibold">{dateLabel(selected)} To-do</h3>{todos.filter(todo=>todo.date===selected).map(todo=><button key={todo.id} type="button" className="flex w-full items-center gap-2 rounded-md border border-border p-2 text-left text-sm" onClick={()=>openTodo(selected,todo)}><span>{todo.done ? '완료' : todo.important ? '★ 중요' : 'To-do'}</span><span className="tabular-nums text-muted-foreground">{scheduleTodoTime(todo)}</span><span className={todo.done ? 'line-through text-muted-foreground' : ''}>{todo.title}</span></button>)}</section>}
     {detail && <WorkspaceTabOverlay><RequestDialog labelledBy="personal-detail-title" onClose={() => { if (!leave.busy) setDetail(null) }}><section className="personal-request-compose"><header><div><span>{detail.type === 'holiday' ? '공휴일' : detail.type === 'clock' ? '출퇴근' : '일정 내용'}</span><h2 id="personal-detail-title">{detail.type === 'request' ? `${requestLabel(detail.item.kind)}${detail.item.advanceRequested ? ' · 선사용' : ''}` : detail.type === 'holiday' ? detail.name : '출퇴근 기록'}</h2></div><button type="button" aria-label="일정 내용 닫기" disabled={leave.busy} onClick={() => setDetail(null)}><X size={19}/></button></header><div className="personal-request-compose-body"><dl className="personal-request-view">{detail.type === 'request' ? requestFacts(detail.item).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>) : detail.type === 'holiday' ? <><div><dt>날짜</dt><dd>{dateLabel(detail.date)} ({WEEKDAYS[dayOfWeek(detail.date)]})</dd></div><div><dt>이름</dt><dd>{detail.name}</dd></div></> : <><div><dt>날짜</dt><dd>{dateLabel(detail.date)} ({WEEKDAYS[dayOfWeek(detail.date)]})</dd></div><div><dt>출근</dt><dd>{detail.start || '미기록'}</dd></div><div><dt>퇴근</dt><dd>{detail.end || '미기록'}</dd></div><div><dt>표시</dt><dd>{detail.corrected ? '승인된 정정 시각' : detail.reported ? '본인 확인 입력' : '기록된 시각'}</dd></div></>}</dl>{detail.type === 'clock' && <p className="personal-request-helper">원래 출퇴근 기록은 보존하며 승인된 정정은 달력과 야근 집계에 반영합니다.</p>}{detail.type === 'request' && canCancelOwnRequest(detail.item) && <p className="personal-request-helper">{cancelEffect(detail.item)}</p>}{offsiteDetail && <p className="personal-request-helper">{dateLabel(offsiteDetail.date)} 출퇴근 정정 · {offsiteDetail.date > today ? '미래 날짜는 정정할 수 없습니다.' : pendingCorrection ? '이 날짜에 승인 대기 중인 정정 신청이 있습니다.' : '실제 출퇴근 시각을 신청하면 담당자 승인 후 달력과 야근 집계에 반영됩니다.'}</p>}</div><footer><Button type="button" variant="outline" disabled={leave.busy} onClick={() => setDetail(null)}>닫기</Button>{offsiteDetail && <Button type="button" variant="outline" disabled={!canRequestCorrection} onClick={requestOffsiteCorrection}>정정 신청</Button>}{detail.type === 'request' && canCancelOwnRequest(detail.item) && <Button type="button" disabled={leave.busy} onClick={() => void confirmCancel()}>{leave.busy ? '취소 중…' : '취소'}</Button>}</footer></section></RequestDialog></WorkspaceTabOverlay>}
