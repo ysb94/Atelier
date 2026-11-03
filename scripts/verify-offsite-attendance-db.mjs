@@ -43,11 +43,25 @@ try {
   await db.exec(await readFile('supabase/migrations/20261012081000_undo_clock_out_today.sql', 'utf8'))
   await db.exec(await readFile('supabase/migrations/20261102063022_offsite_attendance_automation.sql', 'utf8'))
   const lockGuard = await readFile('supabase/migrations/20261102101948_attendance_lock_contention_guard.sql', 'utf8')
-  for (const name of ['offsite_attendance_state', 'undo_clock_out_today']) {
+  for (const name of ['offsite_attendance_state', 'undo_clock_out_today', 'process_attendance_presence', 'clock_out_today']) {
     const definition = lockGuard.match(new RegExp(`create or replace function app\\.${name}\\([\\s\\S]*?\\$\\$;`, 'i'))
     assert.ok(definition, `실제 잠금 보완 함수 ${name}`)
     await db.exec(definition[0])
   }
+  await db.exec(`revoke all on function app.clock_out_today() from public,anon;grant execute on function app.clock_out_today() to authenticated;
+    create table app.attendance_presence_sessions(clock_id uuid,closed_at timestamptz);
+    create function app.advance_attendance_presence(uuid,timestamptz) returns void language sql as $$select$$;
+    create function app.meeting_availability(uuid,date,uuid[],uuid) returns jsonb language sql stable security definer set search_path='' as $$select '[]'::jsonb$$;
+    revoke all on function app.meeting_availability(uuid,date,uuid[],uuid) from public,anon;grant execute on function app.meeting_availability(uuid,date,uuid[],uuid) to authenticated;`)
+  const beforeNightRows=await value("select md5(coalesce(jsonb_agg(to_jsonb(t) order by id)::text,'')) from public.company_leave_requests t")
+  const beforeNightPolicies=await value("select md5(coalesce(jsonb_agg(to_jsonb(p) order by policyname)::text,'')) from pg_policies p where tablename in ('company_leave_requests','attendance_clock_ins')")
+  const beforeNightGrants=await value("select md5(jsonb_agg(jsonb_build_array(proname,proacl::text,prosecdef,proconfig) order by proname)::text) from pg_proc where pronamespace='app'::regnamespace and proname in ('advance_offsite_attendance','offsite_attendance_state','attendance_presence_end','process_attendance_presence','clock_in_today','clock_out_today','meeting_availability')")
+  // Substitute only the server clock in this isolated fixture; execute the real migration logic.
+  const nightSql=await readFile('supabase/migrations/20261103075546_offsite_overnight_schedule.sql','utf8')
+  await db.exec(nightSql.replace(/(?:pg_catalog\.)?clock_timestamp\(\)/g,"coalesce(nullif(current_setting('test.now',true),'')::timestamptz,clock_timestamp())"))
+  assert.equal(await value("select md5(coalesce(jsonb_agg(to_jsonb(t) order by id)::text,'')) from public.company_leave_requests t"),beforeNightRows)
+  assert.equal(await value("select md5(coalesce(jsonb_agg(to_jsonb(p) order by policyname)::text,'')) from pg_policies p where tablename in ('company_leave_requests','attendance_clock_ins')"),beforeNightPolicies)
+  assert.equal(await value("select md5(jsonb_agg(jsonb_build_array(proname,proacl::text,prosecdef,proconfig) order by proname)::text) from pg_proc where pronamespace='app'::regnamespace and proname in ('advance_offsite_attendance','offsite_attendance_state','attendance_presence_end','process_attendance_presence','clock_in_today','clock_out_today','meeting_availability')"),beforeNightGrants)
   await db.exec("update app.offsite_attendance_config set activated_at='2026-11-02T00:00:00+09:00'")
   await db.query("insert into public.company_leave_requests(company_id,employee_id,kind,from_date,to_date,start_time,end_time,status,created_at) values($1,$2,'offsite','2026-11-02','2026-11-02','09:00','18:00','approved','2026-11-02T08:00:00+09:00')", [company,staff])
   const advance = time => db.query('select app.advance_offsite_attendance($1,$2,$3)', [staff,'2026-11-02',`2026-11-02T${time}:00+09:00`])
@@ -218,6 +232,57 @@ try {
       await assert.rejects(()=>db.query("update public.company_leave_requests set status='approved' where id=$1",[previous]),/다음 출근 기록과 겹칩니다/)
     }
   }
+  await db.exec(`reset role;
+    select set_config('test.now','2026-12-01T08:00:00+09:00',false);
+    create table public.meeting_series(id uuid,company_id uuid,host_id uuid,created_by uuid,deleted_at timestamptz,phase text);
+    create table public.meeting_rounds(id uuid,series_id uuid,company_id uuid,starts_at timestamptz,duration_minutes integer,deleted_at timestamptz,confirmed_at timestamptz);
+    create table public.meeting_members(series_id uuid,profile_id uuid);
+    create function app.meeting_company_id() returns uuid language sql stable as $$select company_id from public.profiles where id=auth.uid() and status='active'$$;`)
+  const nightEmployee='10000000-0000-4000-8000-000000000810',autoEmployee='10000000-0000-4000-8000-000000000811'
+  for(const person of [nightEmployee,autoEmployee]) {
+    await db.query("insert into profiles values($1,$2,null,'active','overnight')",[person,company])
+    await db.query("select set_config('request.jwt.claim.sub',$1,false)",[person])
+    await db.query("insert into company_leave_requests(employee_id,kind,from_date,to_date,start_time,end_time,end_next_day,note,place) values($1,'offsite','2026-12-02','2026-12-02','09:00','03:00',true,'출장','거래처')",[person])
+    await assert.rejects(()=>db.query("insert into company_leave_requests(employee_id,kind,from_date,to_date,start_time,end_time,end_next_day,note,place) values($1,'offsite','2026-12-04','2026-12-04','09:00','10:00',true,'출장','거래처')",[person]),/check constraint/)
+    await db.query("select app.advance_offsite_attendance($1,'2026-12-02','2026-12-02T09:00:00+09:00')",[person])
+    await db.query("select app.advance_offsite_attendance($1,'2026-12-02','2026-12-02T18:00:00+09:00')",[person])
+    assert.equal(await value("select clock_out_at from attendance_clock_ins where employee_id=$1 and work_date='2026-12-02'",[person]),null,'외근 종료 전 당일 퇴근 금지')
+  }
+  await db.exec("select set_config('test.now','2026-12-03T00:30:00+09:00',false)")
+  await db.query("select set_config('request.jwt.claim.sub',$1,false)",[nightEmployee])
+  await db.exec('set role authenticated')
+  const midnight=await value('select public.my_offsite_attendance()')
+  assert.equal(midnight.overnightSupported,true);assert.equal(midnight.workDate,'2026-12-02');assert.equal(midnight.state,'offsite')
+  assert.equal(new Date(midnight.scheduledEndAt).toISOString(),'2026-12-02T18:00:00.000Z','다음 날 03시')
+  await assert.rejects(()=>db.query('select app.clock_in_today()'),/외근이 근무 중/,'자정 이후 이중 출근 방지')
+  const returned=await value('select public.return_from_offsite()');assert.equal(returned.state,'returned');assert.equal(returned.workDate,'2026-12-02')
+  const returnedAgain=await value('select public.my_offsite_attendance()');assert.equal(returnedAgain.state,'returned');assert.equal(returnedAgain.workDate,'2026-12-02')
+  await db.exec("reset role;select set_config('test.now','2026-12-03T02:00:00+09:00',false);set role authenticated")
+  const earlyOut=await value('select app.clock_out_today()');assert.equal(new Date(earlyOut).toISOString(),'2026-12-02T17:00:00.000Z')
+  await db.exec("reset role;select set_config('test.now','2026-12-03T03:00:00+09:00',false)")
+  // The real cron body must finish yesterday's overnight workday after midnight.
+  await db.exec('create table if not exists app.attendance_presence_sessions(clock_id uuid,closed_at timestamptz)')
+  await db.exec("create or replace function app.advance_attendance_presence(uuid,timestamptz) returns void language sql as $$select$$")
+  await db.exec('select app.process_attendance_presence();select app.process_attendance_presence()')
+  assert.equal(new Date(await value("select clock_out_at from attendance_clock_ins where employee_id=$1 and work_date='2026-12-02'",[autoEmployee])).toISOString(),'2026-12-02T18:00:00.000Z','매분 작업이 다음 날 03시에 자동 퇴근')
+  assert.equal(Number(await value("select count(*) from attendance_clock_ins where employee_id=any($1::uuid[]) and work_date='2026-12-03'",[[nightEmployee,autoEmployee]])),0,'새 근무일 출근을 만들지 않음')
+  assert.equal(Number(await value("select count(*) from app.offsite_attendance_events where employee_id=$1 and action='auto_out'",[autoEmployee])),1,'자정 이후 재실행 중복 방지')
+  await db.query("select set_config('request.jwt.claim.sub',$1,false)",[nightEmployee])
+  const mixed='10000000-0000-4000-8000-000000000813'
+  await db.query("insert into profiles values($1,$2,null,'active','mixed')",[mixed,company])
+  await db.query("select set_config('request.jwt.claim.sub',$1,false)",[mixed])
+  await db.query("insert into company_leave_requests(employee_id,kind,from_date,to_date,start_time,end_time,end_next_day,note,place) values($1,'offsite','2026-12-02','2026-12-02','09:00','18:00',false,'낮','거래처'),($1,'offsite','2026-12-02','2026-12-02','18:00','03:00',true,'밤','거래처')",[mixed])
+  await db.query("select app.advance_offsite_attendance($1,'2026-12-02','2026-12-03T03:00:00+09:00')",[mixed])
+  assert.equal(await value("select offsite_request_id from attendance_clock_ins where employee_id=$1 and work_date='2026-12-02'",[mixed]),await value("select id from company_leave_requests where employee_id=$1 and end_next_day",[mixed]),'낮 외근과 밤 외근이 함께 있으면 다음 날 실제 종료 건에 연결')
+  await db.query("select set_config('request.jwt.claim.sub',$1,false)",[nightEmployee])
+  const series='10000000-0000-4000-8000-000000000812'
+  await db.query("insert into meeting_series values($1,$2,$3,$3,null,'published')",[series,company,nightEmployee])
+  const firstDay=await value("select app.meeting_availability($1,'2026-12-02',$2,null)",[series,[autoEmployee]])
+  const secondDay=await value("select app.meeting_availability($1,'2026-12-03',$2,null)",[series,[autoEmployee]])
+  assert.equal(firstDay.find(row=>row.kind==='offsite').end,'24:00');assert.equal(secondDay.find(row=>row.kind==='offsite').start,'00:00');assert.equal(secondDay.find(row=>row.kind==='offsite').end,'03:00')
+  await db.query("select set_config('request.jwt.claim.sub',$1,false)",[peer])
+  await assert.rejects(()=>db.query("select app.meeting_availability($1,'2026-12-03',$2,null)",[series,[autoEmployee]]),/권한/,'회의 조율 권한 유지')
+  console.info('Overnight offsite: next-day 03:00 auto checkout, midnight state/return/manual checkout, duplicate prevention, unchanged source rows/policies/grants and meeting busy ranges passed')
   console.log('offsite-attendance-db: scheduled clocks, idempotence, correction precedence, isolation, weekend handling and overnight requests passed')
 } catch (error) { console.error('offsite-attendance-db:',error); process.exitCode=1 }
 finally { await db.close() }

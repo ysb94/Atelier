@@ -2300,3 +2300,8 @@ AuthGate를 기존 DB 형태에 연결한 `verify:auth-recovery-browser`로 이 
 
 - 외근 관리 목록과 승인된 야근의 실제 입력 집계를 로컬에 준비했다. 새 이력 표·invoker 최신 뷰·입력 RPC만 추가하는 `20261103074047_overtime_actual_reports.sql`은 별도 승인 전까지 운영 DB에 적용하지 않는다.
 - 기존 출퇴근·신청·연차·권한은 변경하지 않으며, 기존 퇴근 기록으로 실제 야근을 소급 생성하지 않는다. 상세 범위·검증은 [OVERTIME_ACTUALS.md](OVERTIME_ACTUALS.md)를 따른다.
+
+### 2026-11-03 다음 날 종료 외근 (운영 DB 미적용)
+
+- 외근을 시작일 한 건으로 등록하고 다음 날 새벽 종료를 지원하는 `20261103075546_offsite_overnight_schedule.sql`을 준비했다. 기존 `end_next_day`를 사용하며 기존 행·RLS·권한·자동 처리 활성화 시각을 변경하지 않는다.
+- 자정 이후 자동 퇴근·복귀·수동 퇴근·출근 안내·회의 불가 구간을 보완했다. 운영 DB 적용 전에는 다음 날 종료 저장을 차단하고 대기를 안내한다. 상세와 검증은 [OFFSITE_OVERNIGHT.md](OFFSITE_OVERNIGHT.md)를 따른다.

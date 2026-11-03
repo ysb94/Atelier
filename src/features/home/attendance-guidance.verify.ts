@@ -1,8 +1,14 @@
 import assert from 'node:assert/strict'
-import { fitPreviousClockOut, workdayGuidance, previousMissingClock, validatePreviousClockOut, workInstant } from './attendance-guidance.ts'
+import { continuingOffsiteClock, fitPreviousClockOut, workdayGuidance, previousMissingClock, validatePreviousClockOut, workInstant } from './attendance-guidance.ts'
 import { clockOutLabel } from '../settings/my-attendance.ts'
 import type { PersonalRequest } from '../settings/personal-requests.ts'
 const date='2026-10-26', today='2026-10-27'
+const nightClock={date,clockIn:'09:00',clockOutAt:null}
+assert.equal(continuingOffsiteClock([nightClock],today,{state:'offsite',workDate:date,overnightSupported:true}),nightClock)
+assert.equal(continuingOffsiteClock([nightClock],today,{state:'returned',workDate:date,overnightSupported:true}),nightClock)
+assert.equal(continuingOffsiteClock([nightClock],today,{state:'clocked_out',workDate:date,overnightSupported:true}),null)
+assert.equal(continuingOffsiteClock([nightClock],today,{state:'offsite',workDate:date}),null,'구 서버의 상태를 밤샘 근무로 추정하지 않음')
+assert.equal(continuingOffsiteClock([{...nightClock,clockOutAt:'2026-10-27T03:00:00+09:00'}],today,{state:'offsite',workDate:date,overnightSupported:true}),null)
 const basis={date,start:'09:00',lunchStart:'12:00',lunchEnd:'13:00',configured:true}
 const request=(kind:PersonalRequest['kind'],start:string,end:string,status:PersonalRequest['status']='approved'):PersonalRequest=>({id:kind,kind,from:date,to:date,start,end,status,note:'검증',place:'',createdAt:'2026-10-25'})
 const end=(requests:PersonalRequest[]=[],start='09:00')=>workdayGuidance(date,{...basis,start},requests).end

@@ -15,6 +15,7 @@ import { listMyAttendanceClocks } from '@/lib/supabase/attendance-clocks'
 import { useMyClockIn } from '@/features/home/use-my-clock-in'
 import { useAttendanceEntry } from '@/features/home/attendance-entry-context'
 import { OffsiteConnectionNotice } from '@/features/home/OffsiteStatus'
+import { offsiteAction } from '@/lib/supabase/offsite-attendance'
 import { useLeaveRequests } from '@/features/operations-support/use-leave-requests'
 import { useDepartmentApprovers } from '@/features/operations-support/use-department-approvers'
 import { useOpsDirectory } from '@/features/operations-support/ops-directory'
@@ -238,6 +239,7 @@ export function MyAttendancePanel() {
     if (error) { setFormError(error); return }
     let createdId: string | null = null
     try {
+      if (form.kind === 'offsite' && form.endNextDay && !(await offsiteAction('my_offsite_attendance')).overnightSupported) throw new Error('다음 날 종료 외근의 DB 설정 적용 대기입니다. 기존 외근·출퇴근 기록은 보존됩니다.')
       const request = await leave.create.mutateAsync(form)
       createdId = request.id
       if (isOfficialLeave(form.kind) && officialFile) await uploadLeaveFile(request.id, officialFile)
@@ -269,7 +271,7 @@ export function MyAttendancePanel() {
     return <button key={item.id} type="button" className={`agenda-bar is-${requestLayer(item.kind)} is-${item.status}`} title={`${requestLabel(item.kind)} · ${requestTime(item)}`} onClick={event => { event.stopPropagation(); pickDate(date); setDetail({ type: 'request', item, date }) }}>{requestLabel(item.kind)}{item.advanceRequested ? ' · 선사용' : ''}{item.status === 'approved' ? '' : ` · ${STATUS_LABELS[item.status]}`}</button>
   }
 
-  const span = form ? isAllDayRequest(form.kind) || isLocationRequest(form.kind) : false
+  const span = form ? isAllDayRequest(form.kind) || (isLocationRequest(form.kind) && !form.endNextDay) : false
   return <div className="personal-requests">
     <div className="personal-request-draft-row">
       <div className="personal-request-draft"><strong>근태 신청</strong><span>연차·반차·반반차는 신청하면 바로 등록됩니다. 공가는 사유와 서류를 첨부하면 운영지원이 확인한 뒤 처리합니다. 외근도 승인 없이 바로 등록됩니다. 야근·출퇴근 정정만 부서 지정 담당자가 승인합니다.</span></div>
@@ -392,14 +394,15 @@ export function MyAttendancePanel() {
         {form.kind === 'quarter' && <><p className="personal-request-hours" role="status">반반차는 2시간입니다.</p><QuarterLeaveTime start={form.start} end={form.end} onChange={patch} /></>}
         {!isAllDayRequest(form.kind) && form.kind !== 'half' && form.kind !== 'quarter' && <>
           <div className="personal-request-fields request-time-fields">
-            <RequestTimeField label={form.kind === 'correction' ? '실제 출근 시각' : isLocationRequest(form.kind) ? '매일 시작 시각' : '시작 시각'} value={form.start} onChange={value => patch({ start: value })} />
-            <RequestTimeField label={form.kind === 'correction' ? '실제 퇴근 시각' : isLocationRequest(form.kind) ? '매일 종료 시각' : '종료 시각'} value={form.end} onChange={value => patch({ end: value })} />
+            <RequestTimeField label={form.kind === 'correction' ? '실제 출근 시각' : isLocationRequest(form.kind) && !form.endNextDay ? '매일 시작 시각' : '시작 시각'} value={form.start} onChange={value => patch({ start: value })} />
+            <RequestTimeField label={form.kind === 'correction' ? '실제 퇴근 시각' : isLocationRequest(form.kind) && !form.endNextDay ? '매일 종료 시각' : '종료 시각'} value={form.end} onChange={value => patch({ end: value })} />
           </div>
-          {form.kind === 'correction' && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.endNextDay === true} onChange={event => patch({ endNextDay: event.target.checked })} />다음 날 퇴근</label>}
+          {(form.kind === 'correction' || form.kind === 'offsite') && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.endNextDay === true} onChange={event => patch({ endNextDay: event.target.checked, ...(form.kind === 'offsite' && event.target.checked ? { to: form.from } : {}) })} />{form.kind === 'offsite' ? '다음 날 종료' : '다음 날 퇴근'}</label>}
+          {form.kind === 'offsite' && form.endNextDay && <p className="personal-request-helper">{dateLabel(form.from)} {form.start} → {dateLabel(new Date(Date.parse(`${form.from}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10))} {form.end} · 시작일의 외근 한 건으로 등록됩니다.</p>}
           {form.kind !== 'offsite' && <TimeRangeSummary start={form.start} end={form.end} endNextDay={form.endNextDay} leave={isPartialLeave(form.kind)} daily={isLocationRequest(form.kind)} />}
         </>}
         {form.kind === 'correction' && <p className="personal-request-helper">{formRecord ? `현재 기록 · 출근 ${formRecord.clockIn || '없음'} · 퇴근 ${clockOutLabel(formRecord.clockOutAt) || '없음'}. ` : ''}승인되면 원래 기록은 보존하고 정정 시각을 달력과 야근 집계에 반영합니다.</p>}
-        {form.kind === 'offsite' && <OffsiteConnectionNotice />}
+        {form.kind === 'offsite' && <OffsiteConnectionNotice overnight={form.endNextDay} />}
         {isLocationRequest(form.kind) && <label>{form.kind === 'offsite' ? '외근 장소 · 필수' : '근무 장소 · 선택'}<Input aria-label="개인 신청 근무 장소" maxLength={200} value={form.place} placeholder={form.kind === 'offsite' ? '방문할 거래처 또는 장소' : '재택 등'} onChange={event => patch({ place: event.target.value })}/></label>}
         {isOfficialLeave(form.kind) && <div className={`personal-request-file${officialFile ? ' is-selected' : ''}`}><label htmlFor="official-leave-file">증빙 서류 · 필수</label><div><input id="official-leave-file" ref={officialFileInput} className="personal-request-file-input" aria-label="공가 증빙 서류" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.doc,.docx,.hwp,.hwpx" onChange={event => { setOfficialFile(event.target.files?.[0] ?? null); setFormError('') }}/><p>{officialFile ? officialFile.name : '예비군 통지서, 청첩장처럼 공가 사유를 확인할 서류를 올려 주세요.'}</p>{officialFile && <Button type="button" variant="outline" size="sm" onClick={() => { setOfficialFile(null); if (officialFileInput.current) officialFileInput.current.value = '' }}>지우기</Button>}<Button type="button" variant="outline" size="sm" onClick={() => officialFileInput.current?.click()}>{officialFile ? '다시 선택' : '서류 선택'}</Button></div></div>}
         <label>{form.advanceRequested || form.kind === 'correction' || form.kind === 'overtime' || isOfficialLeave(form.kind) ? '신청 사유 · 필수' : '업무 인수인계·메모 · 선택'}<Textarea maxLength={2000} aria-label="개인 신청 메모" value={form.note} rows={3} placeholder={form.kind === 'correction' ? '기록 누락·보정 사유를 적어 주세요.' : form.kind === 'overtime' ? '예정된 야근 업무를 적어 주세요.' : isOfficialLeave(form.kind) ? '예비군, 결혼처럼 공가로 빠지는 사유를 적어 주세요.' : '업무 인수인계 등 필요한 내용만 적어 주세요.'} onChange={event => patch({ note: event.target.value })}/></label>

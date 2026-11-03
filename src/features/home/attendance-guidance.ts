@@ -49,6 +49,12 @@ export function previousClock(rows: readonly AttendanceClock[], today: string): 
   return rows.reduce<AttendanceClock | null>((latest, row) => row.date < today && (!latest || row.date > latest.date) ? row : latest, null)
 }
 
+/** 자정을 넘겨도 서버가 확인한 외근 근무일을 이어 쓴다. 새 날짜 출근을 강요하지 않는다. */
+export function continuingOffsiteClock(rows: readonly AttendanceClock[], today: string, state?: { state: string; workDate: string | null; overnightSupported?: boolean }) {
+  if (!state?.overnightSupported || !state.workDate || state.workDate >= today || !['offsite', 'returned'].includes(state.state)) return null
+  return rows.find(row => row.date === state.workDate && !row.clockOutAt && !row.autoClosedAt) ?? null
+}
+
 export function previousMissingClock(rows: readonly AttendanceClock[], requests: readonly PersonalRequest[], today: string): AttendanceClock | null {
   const row = previousClock(rows, today)
   if (!row || row.date < ATTENDANCE_GUIDANCE_START || row.clockOutAt) return null

@@ -70,8 +70,8 @@ function useEntryState() {
   if (enabled) {
     if (clock.loading) phase = 'loading'
     else if (clock.queryError) phase = 'error'
-    else if (!clock.todayRecord) phase = 'clock-in'
-    else if (target) phase = requestQuery.isPending ? 'loading' : requestQuery.error ? 'error' : 'previous'
+    else if (!clock.todayRecord && !clock.ongoingOffsiteRecord) phase = 'clock-in'
+    else if (target && target.date !== clock.ongoingOffsiteRecord?.date) phase = requestQuery.isPending ? 'loading' : requestQuery.error ? 'error' : 'previous'
   }
   const targetId = stored?.targetId
   const skip = useCallback(() => {

@@ -57,7 +57,8 @@ export function validateRequest(form: RequestForm, requests: PersonalRequest[], 
   if (form.kind === 'remote') return '재택은 등록할 수 없습니다.'
   if (!validDate(form.from) || !validDate(form.to) || form.to < form.from) return '신청 시작일과 종료일을 확인해 주세요.'
   if (form.kind === 'correction' && today && form.from > today) return '앞으로의 날짜는 출퇴근 정정을 신청할 수 없습니다.'
-  if (form.endNextDay && form.kind !== 'overtime' && form.kind !== 'correction') return '다음 날 종료는 야근·출퇴근 정정에만 사용할 수 있습니다.'
+  if (form.endNextDay && form.kind !== 'overtime' && form.kind !== 'correction' && form.kind !== 'offsite') return '다음 날 종료는 외근·야근·출퇴근 정정에만 사용할 수 있습니다.'
+  if (form.kind === 'offsite' && form.endNextDay && form.from !== form.to) return '다음 날 종료 외근은 시작일별로 한 건씩 등록해 주세요.'
   if (!isAllDayRequest(form.kind)) {
     const start = minuteOf(form.start), end = minuteOf(form.end)
     const duration = start == null || end == null ? 0 : end + (form.endNextDay ? 1440 : 0) - start

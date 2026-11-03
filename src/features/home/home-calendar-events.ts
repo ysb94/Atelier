@@ -46,7 +46,7 @@ function leaveTime(request: PersonalRequest): string {
 }
 
 function leaveNote(request: PersonalRequest): string {
-  return [request.place.trim(), request.note.trim()].filter(Boolean).join(' · ')
+  return [request.endNextDay ? `${request.start}–다음 날 ${request.end}` : '', request.place.trim(), request.note.trim()].filter(Boolean).join(' · ')
 }
 
 /** 확정됐고 내가 호스트이거나 멤버인 회의만. 달력 RPC는 제목·참석자가 비어 회사 전체 예약을 돌려준다. */
