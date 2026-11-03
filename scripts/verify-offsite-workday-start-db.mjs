@@ -46,7 +46,7 @@ try {
   const oldAcls = await scalar("select jsonb_agg(jsonb_build_array(proname,proacl::text) order by proname) from pg_proc where pronamespace='app'::regnamespace and proname in ('get_my_workday_basis','attendance_presence_end_original','save_my_late_statement')")
   const before = await scalar("select md5(jsonb_agg(to_jsonb(t) order by id)::text) from public.attendance_clock_ins t")
   const beforePolicies = await scalar("select md5(jsonb_agg(to_jsonb(t) order by policyname)::text) from pg_policies t")
-  const migration = await readFile('supabase/migrations/20261103090128_offsite_workday_start_override.sql', 'utf8')
+  const migration = await readFile('supabase/migrations/20261103105053_offsite_workday_start_override.sql', 'utf8')
   await db.exec(migration.replace(/(?:pg_catalog\.)?clock_timestamp\(\)/g, "'2026-11-04T11:00:00+09:00'::timestamptz"))
   assert.deepEqual(await scalar("select jsonb_agg(jsonb_build_array(proname,proacl::text) order by proname) from pg_proc where pronamespace='app'::regnamespace and proname in ('get_my_workday_basis','attendance_presence_end_original','save_my_late_statement')"), oldAcls, '기존 함수 실행 권한 유지')
   assert.equal(await scalar("select md5(jsonb_agg(to_jsonb(t) order by id)::text) from public.attendance_clock_ins t"), before)

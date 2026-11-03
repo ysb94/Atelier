@@ -1,6 +1,6 @@
 # Supabase 데이터 아키텍처 원칙
 
-- 2026-11-03 외근일 당일 출근 기준 변경은 [OFFSITE_WORKDAY_START.md](OFFSITE_WORKDAY_START.md)에 정리했다. 호환 마이그레이션·화면·연결 검증을 준비했으며 공유 DB 적용은 별도 승인 대기다.
+- 2026-11-03 외근일 당일 출근 기준 변경은 [OFFSITE_WORKDAY_START.md](OFFSITE_WORKDAY_START.md)에 정리했다. 사용자 승인 후 공유 DB에 `20261103105053_offsite_workday_start_override.sql`을 적용했고, 기존 원본·권한 보존과 실제 인증 역할의 지정·취소·지각·다음 날 원복을 롤백 검증했다. 운영 화면 배포는 포함하지 않는다.
 
 이 문서는 Atelier 사내 상품 운영 시스템의 Supabase 기준 문서다.
 Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전 반드시 읽는다.
