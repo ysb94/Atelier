@@ -45,7 +45,7 @@ export function OffsiteSettlementEditor({ request, onClose }: { request: LeaveRe
   const dates = preview.data?.dates
   const positive = dates?.filter(row => row.minutes != null && row.minutes > 0)
   const parsed = Object.entries(minutes).map(([date, value]) => [date, value.trim(), durationInputMinutes(value)] as const)
-  const actual = mode === 'none' ? {} : Object.fromEntries(parsed.filter(([, value, amount]) => value !== '' && amount != null).map(([date, , amount]) => [date, amount]))
+  const actual = mode === 'none' ? {} : Object.fromEntries(parsed.filter(([, value, amount]) => value !== '' && amount != null).map(([date, , amount]) => [date, amount!]))
   const invalidTime = parsed.some(([, value, amount]) => value !== '' && amount == null)
   const total = Object.values(actual).reduce((sum,value) => sum+value,0)
   const valid = Boolean(dates && !prior && !save.isSuccess && note.trim() && !invalidTime && (mode === 'none' || (total>0 && Object.entries(actual).every(([date,value]) => Number.isInteger(value) && value>=0 && value<=(dates.find(row=>row.date===date)?.minutes ?? -1)))) && (mode !== 'leave' || (Number(days)>0 && Number(days)<=365 && Number(days)*4%1===0 && expires)))
