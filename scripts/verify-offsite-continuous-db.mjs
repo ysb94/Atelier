@@ -72,7 +72,7 @@ try {
     insert into public.attendance_start_settings values(gen_random_uuid(),'${company}','${staff}',null,'2026-11-01','09:00',now());
     insert into public.attendance_start_settings values(gen_random_uuid(),'${company}','${staff}',null,'2026-12-01','09:00',now());
   `)
-  const override=await readFile('supabase/migrations/20261103090128_offsite_workday_start_override.sql','utf8')
+  const override=await readFile('supabase/migrations/20261103105053_offsite_workday_start_override.sql','utf8')
   for(const name of ['attendance_start_for_date','guard_offsite_workday_start']) {
     const fn=override.match(new RegExp(`create function app\\.${name}\\([\\s\\S]*?\\$\\$;`,'i'))
     assert.ok(fn,name);await db.exec(fn[0])
@@ -82,7 +82,7 @@ try {
   const originalRows=await value("select md5(jsonb_agg(to_jsonb(t) order by id)::text) from public.company_leave_requests t")
   const oldPolicies=await value("select md5(jsonb_agg(to_jsonb(p) order by policyname)::text) from pg_policies p where tablename in ('company_leave_requests','attendance_clock_ins')")
   const oldAcl=await value("select md5(jsonb_agg(jsonb_build_array(proname,proacl::text,prosecdef,proconfig) order by proname)::text) from pg_proc where pronamespace='app'::regnamespace and proname in ('advance_offsite_attendance','offsite_attendance_state','process_attendance_presence','attendance_presence_end','clock_in_today','clock_out_today','attendance_start_for_date','guard_offsite_workday_start')")
-  const migration=await readFile('supabase/migrations/20261103102914_offsite_continuous_settlement.sql','utf8')
+  const migration=await readFile('supabase/migrations/20261103105522_offsite_continuous_settlement.sql','utf8')
   await db.exec(migration)
   assert.equal(await value("select md5(jsonb_agg(to_jsonb(t)-'offsite_continuous' order by id)::text) from public.company_leave_requests t"),originalRows,'existing repeated offsite original preserved')
   const clockFunctions=(await db.query("select pg_get_functiondef(oid) as source from pg_proc where pronamespace='app'::regnamespace and proname in ('offsite_attendance_state','clock_in_today','clock_out_today','process_attendance_presence','attendance_presence_end','save_offsite_settlement','offsite_settlement_preview','guard_overtime_actual')")).rows

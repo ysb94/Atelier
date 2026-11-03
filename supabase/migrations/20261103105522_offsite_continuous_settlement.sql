@@ -1,4 +1,5 @@
--- Additive; prepare locally first. Requires the existing offsite_workday_start migration.
+-- Applied to Atelier 2026-11-03 after user approval, with transaction-local preservation checks.
+-- Requires offsite_workday_start_override; existing business rows and permissions are preserved.
 begin;
 alter table public.company_leave_requests add column offsite_continuous boolean not null default false;
 alter table public.company_leave_requests drop constraint company_leave_requests_span_check;
