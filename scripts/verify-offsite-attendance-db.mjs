@@ -48,7 +48,7 @@ try {
     assert.ok(definition, `실제 잠금 보완 함수 ${name}`)
     await db.exec(definition[0])
   }
-  await db.exec(`revoke all on function app.clock_out_today() from public,anon;grant execute on function app.clock_out_today() to authenticated;
+  await db.exec(`alter function app.clock_in_today() set lock_timeout='2s';revoke all on function app.clock_out_today() from public,anon;grant execute on function app.clock_out_today() to authenticated;
     create table app.attendance_presence_sessions(clock_id uuid,closed_at timestamptz);
     create function app.advance_attendance_presence(uuid,timestamptz) returns void language sql as $$select$$;
     create function app.meeting_availability(uuid,date,uuid[],uuid) returns jsonb language sql stable security definer set search_path='' as $$select '[]'::jsonb$$;
@@ -57,7 +57,7 @@ try {
   const beforeNightPolicies=await value("select md5(coalesce(jsonb_agg(to_jsonb(p) order by policyname)::text,'')) from pg_policies p where tablename in ('company_leave_requests','attendance_clock_ins')")
   const beforeNightGrants=await value("select md5(jsonb_agg(jsonb_build_array(proname,proacl::text,prosecdef,proconfig) order by proname)::text) from pg_proc where pronamespace='app'::regnamespace and proname in ('advance_offsite_attendance','offsite_attendance_state','attendance_presence_end','process_attendance_presence','clock_in_today','clock_out_today','meeting_availability')")
   // Substitute only the server clock in this isolated fixture; execute the real migration logic.
-  const nightSql=await readFile('supabase/migrations/20261103075546_offsite_overnight_schedule.sql','utf8')
+  const nightSql=await readFile('supabase/migrations/20261103081826_offsite_overnight_schedule.sql','utf8')
   await db.exec(nightSql.replace(/(?:pg_catalog\.)?clock_timestamp\(\)/g,"coalesce(nullif(current_setting('test.now',true),'')::timestamptz,clock_timestamp())"))
   assert.equal(await value("select md5(coalesce(jsonb_agg(to_jsonb(t) order by id)::text,'')) from public.company_leave_requests t"),beforeNightRows)
   assert.equal(await value("select md5(coalesce(jsonb_agg(to_jsonb(p) order by policyname)::text,'')) from pg_policies p where tablename in ('company_leave_requests','attendance_clock_ins')"),beforeNightPolicies)
@@ -237,6 +237,7 @@ try {
     create table public.meeting_series(id uuid,company_id uuid,host_id uuid,created_by uuid,deleted_at timestamptz,phase text);
     create table public.meeting_rounds(id uuid,series_id uuid,company_id uuid,starts_at timestamptz,duration_minutes integer,deleted_at timestamptz,confirmed_at timestamptz);
     create table public.meeting_members(series_id uuid,profile_id uuid);
+    create function app.meeting_round_decision(uuid) returns jsonb language sql stable as $$select jsonb_build_object('excludedIds',coalesce(nullif(current_setting('test.excluded',true),'')::jsonb,'[]'::jsonb))$$;
     create function app.meeting_company_id() returns uuid language sql stable as $$select company_id from public.profiles where id=auth.uid() and status='active'$$;`)
   const nightEmployee='10000000-0000-4000-8000-000000000810',autoEmployee='10000000-0000-4000-8000-000000000811'
   for(const person of [nightEmployee,autoEmployee]) {
@@ -280,6 +281,16 @@ try {
   const firstDay=await value("select app.meeting_availability($1,'2026-12-02',$2,null)",[series,[autoEmployee]])
   const secondDay=await value("select app.meeting_availability($1,'2026-12-03',$2,null)",[series,[autoEmployee]])
   assert.equal(firstDay.find(row=>row.kind==='offsite').end,'24:00');assert.equal(secondDay.find(row=>row.kind==='offsite').start,'00:00');assert.equal(secondDay.find(row=>row.kind==='offsite').end,'03:00')
+  await db.query("select set_config('request.jwt.claim.sub',$1,false)",[autoEmployee])
+  await db.query("insert into company_leave_requests(employee_id,kind,from_date,to_date,start_time,end_time,note,place) values($1,'official','2026-12-04','2026-12-04','09:00','18:00','공가','')",[autoEmployee])
+  await db.query("insert into meeting_members values($1,$2)",[series,autoEmployee])
+  await db.query("insert into meeting_rounds values($1,$2,$3,'2026-12-04T10:00:00+09:00',60,null,now())",['10000000-0000-4000-8000-000000000814',series,company])
+  await db.query("select set_config('request.jwt.claim.sub',$1,false)",[nightEmployee])
+  const officialRange=await value("select app.meeting_availability($1,'2026-12-04',$2,null)",[series,[autoEmployee]])
+  assert.equal(officialRange.find(row=>row.kind==='official').start,'00:00');assert.equal(officialRange.find(row=>row.kind==='official').end,'24:00','기존 공가 종일 불가 유지')
+  assert.equal(officialRange.filter(row=>row.kind==='meeting').length,1)
+  await db.query("select set_config('test.excluded',$1,false)",[JSON.stringify([autoEmployee])])
+  assert.equal((await value("select app.meeting_availability($1,'2026-12-04',$2,null)",[series,[autoEmployee]])).filter(row=>row.kind==='meeting').length,0,'기존 회의 제외 멤버 처리 유지')
   await db.query("select set_config('request.jwt.claim.sub',$1,false)",[peer])
   await assert.rejects(()=>db.query("select app.meeting_availability($1,'2026-12-03',$2,null)",[series,[autoEmployee]]),/권한/,'회의 조율 권한 유지')
   console.info('Overnight offsite: next-day 03:00 auto checkout, midnight state/return/manual checkout, duplicate prevention, unchanged source rows/policies/grants and meeting busy ranges passed')

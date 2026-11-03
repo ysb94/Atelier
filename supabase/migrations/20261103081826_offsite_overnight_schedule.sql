@@ -181,7 +181,7 @@ begin
   return app.attendance_presence_end_original(p_clock_id);
 end $$;
 
-create or replace function app.clock_in_today() returns time language plpgsql security definer set search_path='' as $$
+create or replace function app.clock_in_today() returns time language plpgsql security definer set search_path='' set lock_timeout='2s' as $$
 declare actor uuid:=auth.uid(); today date:=(clock_timestamp() at time zone 'Asia/Seoul')::date; stamp timestamptz:=date_trunc('minute',clock_timestamp());
 begin
   if actor is null then raise exception '로그인이 필요합니다.'; end if;
@@ -251,13 +251,13 @@ begin
   from public.meeting_rounds r join public.meeting_series s on s.id=r.series_id
   join public.profiles p on p.id=any(p_people) and (s.host_id=p.id or exists(select 1 from public.meeting_members m where m.series_id=s.id and m.profile_id=p.id))
   where r.company_id=company and s.deleted_at is null and r.deleted_at is null and s.phase='published' and r.confirmed_at is not null
-   and r.id is distinct from p_exclude_round and (r.starts_at at time zone 'Asia/Seoul')::date=p_date
+   and r.id is distinct from p_exclude_round and not coalesce((app.meeting_round_decision(r.id)->'excludedIds') ? p.id::text,false) and (r.starts_at at time zone 'Asia/Seoul')::date=p_date
   union all
   select jsonb_build_object('id',l.id,'personId',l.employee_id,'kind',l.kind,'status',l.status,
-   'start',case when l.kind='annual' or (l.kind in ('offsite','remote') and p_date>l.from_date) then '00:00' else to_char(l.start_time,'HH24:MI') end,
-   'end',case when l.kind='annual' or (l.kind in ('offsite','remote') and p_date<(l.to_date+case when l.kind='offsite' and l.end_next_day then 1 else 0 end)) then '24:00' else to_char(l.end_time,'HH24:MI') end)
+   'start',case when l.kind in ('annual','official') or (l.kind in ('offsite','remote') and p_date>l.from_date) then '00:00' else to_char(l.start_time,'HH24:MI') end,
+   'end',case when l.kind in ('annual','official') or (l.kind in ('offsite','remote') and p_date<(l.to_date+case when l.kind='offsite' and l.end_next_day then 1 else 0 end)) then '24:00' else to_char(l.end_time,'HH24:MI') end)
   from public.company_leave_requests l where l.company_id=company and l.employee_id=any(p_people)
-   and l.status in ('approved','pending') and l.kind in ('annual','half','quarter','offsite','remote') and p_date between l.from_date and (l.to_date+case when l.kind='offsite' and l.end_next_day then 1 else 0 end)
+   and l.status in ('approved','pending') and l.kind in ('annual','half','quarter','offsite','remote','official') and p_date between l.from_date and (l.to_date+case when l.kind='offsite' and l.end_next_day then 1 else 0 end)
  ) rows);
 end $$;
 notify pgrst,'reload schema';

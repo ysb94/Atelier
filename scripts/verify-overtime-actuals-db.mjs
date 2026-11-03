@@ -22,7 +22,7 @@ try {
  const source=await value('select md5(jsonb_agg(r order by id)::text) from company_leave_requests r')
  const clocks=await value('select md5(jsonb_agg(r)::text) from attendance_clock_ins r')
  const policies=await value("select md5(jsonb_agg(p order by policyname)::text) from pg_policies p where tablename='company_leave_requests'")
- await db.exec(await readFile('supabase/migrations/20261103074047_overtime_actual_reports.sql','utf8'))
+ await db.exec(await readFile('supabase/migrations/20261103081759_overtime_actual_reports.sql','utf8'))
  await actor(employee);await assert.rejects(()=>save(future,'2099-01-02T18:00:00+09:00','2099-01-02T19:00:00+09:00'));await save()
  assert.equal(Number(await value('select revision from overtime_actual_latest')),1)
  await assert.rejects(()=>save(),/변경/)
