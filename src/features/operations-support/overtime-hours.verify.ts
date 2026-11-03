@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { monthlyOvertimeHours, workDurationLabel, workedMinutes } from './overtime-hours.ts'
+import { monthlyOvertimeHours, durationInputMinutes, durationInputValue, formatDurationClock, parseDurationClock, workDurationLabel, workedMinutes } from './overtime-hours.ts'
 import { registeredOvertime, type OvertimeActual, type OvertimeRequest } from './overtime-actuals.ts'
 const request: OvertimeRequest = { id: 'r', employeeId: 'a', kind: 'overtime', status: 'approved', from: '2026-10-26', to: '2026-10-26', start: '18:00', end: '22:00' }
 const actual: OvertimeActual = { requestId: 'r', startAt: '2026-10-26T18:30:00+09:00', endAt: '2026-10-26T21:00:00+09:00', breakMinutes: 30, revision: 1, savedAt: '' }
@@ -22,4 +22,12 @@ const nightActual = { ...actual, startAt: '2026-10-26T23:00:00+09:00', endAt: '2
 assert.equal(total([night], [nightActual])[0].extraMinutes, 135)
 assert.equal(workedMinutes('2026-10-26','09:00','2026-10-26T18:00:00+09:00','12:00','13:00'), 480)
 assert.equal(workDurationLabel(135), '2시간 15분')
+assert.equal(formatDurationClock(240), '4:00')
+assert.equal(formatDurationClock(90), '1:30')
+assert.equal(parseDurationClock('4:00'), 240)
+assert.equal(parseDurationClock('3:30'), 210)
+assert.equal(parseDurationClock('240'), null)
+assert.equal(durationInputValue('240'), '4:00')
+assert.equal(durationInputMinutes('240'), 240)
+assert.equal(durationInputMinutes('3:30'), 210)
 console.info('Overtime: approval + explicit actual only; late clock-outs/offsite/pending/missing reports excluded; breaks, revisions, midnight and month boundaries passed')

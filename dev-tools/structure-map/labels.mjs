@@ -17,6 +17,7 @@ const vocabulary = {
   mall: '쇼핑몰', urls: '주소', url: '주소', fields: '필드', field: '필드', info: '정보',
   usage: '사용처', targets: '대상', target: '대상', assignments: '배정', assigned: '배정',
   draft: '기획안', drafts: '기획안', release: '출시', schedule: '일정', sample: '샘플', flow: '흐름',
+  onboarding: '신규 직원 입사 관리', employee: '직원',
   empty: '초기값', company: '회사', brand: '브랜드', brands: '브랜드', department: '부서',
   approvers: '결재자', approver: '결재자', leave: '휴가', approval: '승인', attendance: '근태',
   clocks: '출퇴근 기록', clock: '출퇴근 기록', start: '시작', settings: '설정', personal: '개인',

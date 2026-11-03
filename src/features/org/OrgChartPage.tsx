@@ -1,9 +1,11 @@
 import { RosterChoiceSettings } from './RosterChoiceSettings'
+import { NewEmployeesPanel } from './NewEmployeesPanel'
 import { useRosterChoiceSettings } from './use-roster-choice-settings'
 import { isRosterChoiceKey, rosterChoiceValues } from '@/lib/company/roster-choices'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  UserPlus,
   Users,
   Network,
   Search,
@@ -25,6 +27,7 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { useEmployeeRoster } from '@/features/operations-support/use-employee-roster'
 import {
   canEditOrgAssignment,
+  canManagePersonnel,
   OPERATIONS_SUPPORT_DEPARTMENT,
 } from '@/lib/company/capabilities'
 import { useAuth } from '@/lib/supabase/auth'
@@ -74,7 +77,7 @@ const TEAM_TONES = [
   'bg-[#dfecee] text-[#2d6470]',
 ] as const
 const UNASSIGNED_TONE = 'bg-muted text-muted-foreground'
-type OrgView = 'chart' | 'members' | 'titles'
+type OrgView = 'chart' | 'members' | 'new' | 'titles'
 type TeamGroup = {
   id: string
   name: string
@@ -399,6 +402,7 @@ export function OrgChartPage({
           {(
             [
               { id: 'members', label: '직원 배치', icon: Users },
+              { id: 'new', label: '신규직원', icon: UserPlus },
               { id: 'titles', label: '드롭다운 설정', icon: Settings2 },
             ] as const
           ).map((item) => (
@@ -419,7 +423,9 @@ export function OrgChartPage({
             </button>
           ))}
           <span className="ml-auto hidden items-center px-3 text-xs text-muted-foreground lg:flex">
-            {canEdit
+            {activeView === 'new'
+              ? '가입 신청과 아직 부서가 없는 신규 직원을 배치합니다'
+              : canEdit
               ? '배치와 직책·직급을 수정할 수 있습니다'
               : '조회만 할 수 있습니다'}
           </span>
@@ -468,7 +474,7 @@ export function OrgChartPage({
         </div>
       ) : null}
 
-      {mode === 'manage' && activeView !== 'titles' ? (
+      {mode === 'manage' && activeView === 'members' ? (
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
           <div className="relative min-w-0 flex-1 sm:max-w-sm">
             <Search
@@ -546,6 +552,14 @@ export function OrgChartPage({
             filtered={hasFilter}
           />
         </div>
+      ) : activeView === 'new' ? (
+        <NewEmployeesPanel
+          departments={departments}
+          duties={duties.map(title => title.name)}
+          grades={grades.map(title => title.name)}
+          canApprove={canManagePersonnel(profile)}
+          canAssign={canEdit && !directoryError && !titlesQuery.isError}
+        />
       ) : (
         <section className="space-y-4">
           <div className="rounded-xl border border-border bg-card px-5 py-4 shadow-sm">

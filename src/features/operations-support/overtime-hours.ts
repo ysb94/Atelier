@@ -60,3 +60,28 @@ export function workDurationLabel(minutes: number): string {
   if (!rest) return `${hours}시간`
   return `${hours}시간 ${rest}분`
 }
+
+/** 추가 근무 입력칸. 240분이면 4:00이다. */
+export function formatDurationClock(minutes: number) {
+  const whole = Math.max(0, Math.floor(minutes))
+  return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, '0')}`
+}
+
+/** 시:분 입력을 분으로 바꾼다. 형식이 아니면 null이다. */
+export function parseDurationClock(value: string) {
+  const match = /^(\d{1,2}):([0-5]\d)$/.exec(value.trim())
+  if (!match) return null
+  return Number(match[1]) * 60 + Number(match[2])
+}
+
+/** 입력칸에 보일 시:분. 240처럼 세 자리 이상인 예전 분 숫자만 시:분으로 바꾼다. */
+export function durationInputValue(value: string | undefined) {
+  if (value == null) return ''
+  if (/^\d{3,}$/.test(value)) return formatDurationClock(Number(value))
+  return value
+}
+
+/** 저장할 분. 시:분만 받는다. */
+export function durationInputMinutes(value: string) {
+  return parseDurationClock(durationInputValue(value))
+}

@@ -1,5 +1,7 @@
 # Supabase 데이터 아키텍처 원칙
 
+- 2026-11-03 신규 직원 등록·서류 관리 실저장 연결은 [EMPLOYEE_ONBOARDING.md](EMPLOYEE_ONBOARDING.md)를 따른다. 로컬 검증과 사용자 승인 후 공유 DB 적용·원본 보존·실제 저장소 연결 검증을 완료했다. 사이트 배포는 하지 않았다.
+
 - 2026-11-03 외근일 당일 출근 기준 변경은 [OFFSITE_WORKDAY_START.md](OFFSITE_WORKDAY_START.md)에 정리했다. 사용자 승인 후 공유 DB에 `20261103105053_offsite_workday_start_override.sql`을 적용했고, 기존 원본·권한 보존과 실제 인증 역할의 지정·취소·지각·다음 날 원복을 롤백 검증했다. 운영 화면 배포는 포함하지 않는다.
 
 이 문서는 Atelier 사내 상품 운영 시스템의 Supabase 기준 문서다.
