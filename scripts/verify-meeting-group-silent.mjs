@@ -12,7 +12,7 @@ const scalar = async (sql, args = []) => Object.values((await db.query(sql, args
 const actor = async id => db.query("select set_config('request.jwt.claim.sub',$1,false)", [id])
 const open = id => scalar('select app.meeting_open_group($1)', [id])
 const rooms = () => db.query('select * from public.list_my_chat_rooms()').then(r => r.rows)
-const migration = 'supabase/migrations/20261103105254_meeting_group_silent_creation.sql'
+const migration = 'supabase/migrations/20261103105913_meeting_group_silent_creation.sql'
 const original = await readFile('supabase/migrations/20260930160000_company_chat.sql', 'utf8')
 const list = await readFile('supabase/migrations/20260930190000_company_chat_room_list.sql', 'utf8')
 function definition(source, name) {
