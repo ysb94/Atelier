@@ -26,6 +26,7 @@ import { HomeNoticeBoard } from './HomeNoticeBoard'
 import { MyAttendanceStartPanel } from './MyAttendanceStartPanel'
 import { MyAttendancePanel } from './MyAttendancePanel'
 import { OvertimePanel } from './OvertimePanel'
+import { RequiredInformationButton } from './RequiredInformationButton'
 import './personal-requests.css'
 
 function formatHireDate(value: string | null | undefined) {
@@ -98,7 +99,7 @@ function ProfileSettingsContent() {
     <div>
       <div className="mb-6 grid grid-cols-1 items-center gap-3 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:[&>div]:mb-0">
         <PageHeader title="My home" />
-        <div className="flex justify-center"><LateArrivalHeaderButton /></div>
+        <div className="flex flex-wrap justify-center gap-2"><RequiredInformationButton /><LateArrivalHeaderButton /></div>
         <div className="sm:justify-self-end"><HomeAttendanceSummary /></div>
       </div>
 
