@@ -13,6 +13,20 @@ const EMPTY_FILES: Record<DocumentKind, string> = { identity: '', bank: '', educ
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="block min-w-0 space-y-1.5"><span className="text-sm font-medium">{label}</span>{children}</label>
 }
+function EmailField({ label, name, domain, defaultValue = '' }: { label: string; name: string; domain: string; defaultValue?: string }) {
+  const id = useId()
+  return <div className="min-w-0 space-y-1.5">
+    <label htmlFor={id} className="text-sm font-medium">{label}</label>
+    <div className="flex min-w-0 items-center gap-2">
+      <Input id={id} name={name} required inputMode="email" autoCapitalize="none" spellCheck={false} maxLength={254} pattern={'[A-Za-z0-9._%+\\-]{1,64}'} placeholder="아이디" defaultValue={defaultValue} aria-describedby={`${id}-domain`} className="min-w-0 flex-1" onChange={event => {
+        const input = event.currentTarget
+        const value = input.value.trim()
+        input.value = value.toLowerCase().endsWith(`@${domain}`) ? value.slice(0, -(domain.length + 1)) : value
+      }} />
+      <span id={`${id}-domain`} className="shrink-0 text-sm text-muted-foreground">@{domain}</span>
+    </div>
+  </div>
+}
 function formatPhone(value: string) {
   const digits = value.replace(/\D/g, '').slice(0, value.startsWith('02') ? 10 : 11)
   const prefix = digits.startsWith('02') ? 2 : 3
@@ -56,7 +70,7 @@ export function RequiredInformationButton() {
         setReview([
           ['영문명', text('englishName')],
           ['주민등록번호', `${text('residentFront')}-*******`], ['연락처', text('phone')], ['현 거주지', `${text('address')} ${text('addressDetail')}`.trim()],
-          ['G메일', text('gmail')], ['네이버메일', text('naverEmail')], ['은행', bank === 'other' ? text('bankOther') : bank],
+          ['G메일', `${text('gmail')}@gmail.com`], ['네이버메일', `${text('naverEmail')}@naver.com`], ['은행', bank === 'other' ? text('bankOther') : bank],
           ['예금주', text('accountHolder')], ['계좌번호', text('accountNumber').replace(/.(?=.{4})/g, '•')],
           ...DOCUMENTS.map(([key, label]): [string, string] => [label, files[key]]),
         ])
@@ -81,8 +95,8 @@ export function RequiredInformationButton() {
                     input.setSelectionRange(position, position)
                   }
                 }} /></Field>
-                <Field label="G메일 *"><Input name="gmail" type="email" required defaultValue={profile.email} maxLength={254} placeholder="name@gmail.com" /></Field>
-                <Field label="네이버메일 *"><Input name="naverEmail" type="email" required maxLength={254} placeholder="name@naver.com" /></Field>
+                <EmailField label="G메일 *" name="gmail" domain="gmail.com" defaultValue={profile.email.toLowerCase().endsWith('@gmail.com') ? profile.email.slice(0, -10) : ''} />
+                <EmailField label="네이버메일 *" name="naverEmail" domain="naver.com" />
                 <div className="grid gap-3 sm:col-span-2"><Field label="현 거주지 *"><Input name="address" required maxLength={200} placeholder="도로명 또는 지번 주소" /></Field><Field label="상세주소"><Input name="addressDetail" maxLength={100} placeholder="동·호수 등 상세주소" /></Field></div>
               </div>
             </fieldset>
