@@ -82,7 +82,7 @@
     "verify:styled-image-deployment": "node scripts/verify-styled-image-deployment.mjs",
     "verify:diagnostics": "node scripts/verify-diagnostics.mjs",
     "verify:overtime-actuals": "node --experimental-strip-types src/features/operations-support/overtime-hours.verify.ts && node --experimental-strip-types src/features/home/my-attendance-summary.verify.ts && node scripts/verify-overtime-actuals-db.mjs && node scripts/verify-overtime-actuals-browser.mjs",
-    "verify:offsite-overnight": "node --experimental-strip-types src/features/settings/personal-requests.verify.ts && node --experimental-strip-types src/features/home/attendance-guidance.verify.ts && node scripts/verify-offsite-attendance-db.mjs && node scripts/verify-offsite-overnight-browser.mjs",
+    "verify:offsite-overnight": "node --experimental-strip-types src/features/settings/offsite-form.verify.ts && node --experimental-strip-types src/features/settings/personal-requests.verify.ts && node --experimental-strip-types src/features/home/attendance-guidance.verify.ts && node scripts/verify-offsite-attendance-db.mjs && node scripts/verify-offsite-overnight-browser.mjs",
     "verify:roster-choices": "tsx src/lib/company/roster-choices.verify.ts && node scripts/verify-roster-choices-db.mjs && node scripts/verify-roster-choices-browser.mjs",
     "verify:my-home-notifications": "tsx src/lib/inbox/my-home-notifications.verify.ts && node scripts/verify-my-home-notifications-db.mjs && node scripts/verify-my-home-notifications-browser.mjs",
     "verify:my-attendance": "node --experimental-strip-types src/features/settings/my-attendance.verify.ts",

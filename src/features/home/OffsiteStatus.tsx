@@ -46,5 +46,5 @@ export function OffsiteConnectionNotice({ overnight = false }: { overnight?: boo
   if (query.isPending) return <p role="status" className="personal-request-helper">외근 자동 출퇴근 연결 상태 확인 중…</p>
   if (query.error) return <p role="alert" className="personal-request-error">외근 자동 출퇴근 연결 대기 또는 조회 실패입니다. 연결 전에는 외근을 등록해도 자동 처리되지 않습니다.</p>
   if (overnight && !query.data.overnightSupported) return <p role="status" className="personal-request-helper">다음 날 종료 외근의 DB 설정 적용 대기입니다. 적용 후 저장할 수 있습니다.</p>
-  return <p className="personal-request-helper">외근 시작·종료 시각에 자동 출퇴근합니다. 다음 날 종료는 시작일의 출퇴근 한 건으로 기록합니다. 여러 날 신청은 평일에만 자동 처리하며 주말·공휴일 외근은 날짜별로 등록해 주세요.</p>
+  return <p className="personal-request-helper">입력한 시작·종료에 맞춰 자동 출퇴근합니다. 자정을 지나도 시작일의 출퇴근 한 건으로 기록합니다.</p>
 }
