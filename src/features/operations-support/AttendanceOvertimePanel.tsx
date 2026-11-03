@@ -1,144 +1,80 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
-import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input, Select } from '@/components/ui/input'
+import { Card } from '@/components/ui/card'
+import { StatGrid, StatTile } from '@/components/ui/stat-tile'
 import { useRenderWatch } from '@/lib/diagnostics'
-import { listCompanyAttendanceSpans, type CompanyAttendanceSpan } from '@/lib/supabase/attendance-clocks'
-import { listLeaveRequests, type LeaveRequest } from '@/lib/supabase/leave-requests'
-import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
-import { emptyList } from '@/lib/utils'
-import { monthlyOvertimeHours, workDurationLabel } from './overtime-hours'
-import { memberLabel, OpsStat } from './OpsStat'
-import { type useOpsDirectory } from './ops-directory'
-import { localDateKey, monthDates, monthLabel, shiftMonth } from './monthly-attendance'
-import { useAttendanceStartSettings } from './use-attendance-start-settings'
-import { resolveAttendanceStart } from './attendance-start-settings'
+import { getSupabase } from '@/lib/supabase/client'
+import { useAuth } from '@/lib/supabase/auth'
+import { useOvertimeActuals } from './use-overtime-actuals'
+import { useMonthlyWorkRequests } from './use-monthly-work-requests'
+import { registeredOvertime } from './overtime-actuals'
+import { workDurationLabel } from './overtime-hours'
+import { WorkManagementFilters } from './WorkManagementFilters'
+import type { useOpsDirectory } from './ops-directory'
+import { localDateKey, monthLabel } from './monthly-attendance'
+import { clockOutLabel } from '@/features/settings/my-attendance'
 
-const PAGE_SIZE = 25
-
+type Allowance = { profile_id: string; inclusive_overtime_hours: number | null }
+async function listAllowances() {
+  const rows: Allowance[] = []
+  for (let offset = 0; ; offset += 500) {
+    const { data, error } = await getSupabase().from('employee_roster').select('profile_id,inclusive_overtime_hours').order('profile_id').range(offset, offset + 499)
+    if (error) { console.warn('[attendance-work] 약정 연장근로시간 조회 실패', error); throw new Error(error.message) }
+    rows.push(...data as Allowance[])
+    if (data.length < 500) return rows
+  }
+}
 export function AttendanceOvertimePanel({ directory }: { directory: ReturnType<typeof useOpsDirectory> }) {
   useRenderWatch('AttendanceOvertimePanel')
   const active = useWorkspaceTabActivity()
+  const { profile } = useAuth()
   const today = localDateKey(new Date())
   const [month, setMonth] = useState(today.slice(0, 7))
-  const [departmentId, setDepartmentId] = useState('all')
+  const [department, setDepartment] = useState('all')
   const [search, setSearch] = useState('')
-  const [page, setPage] = useState(1)
-  const monthOk = /^\d{4}-(0[1-9]|1[0-2])$/.test(month)
-  const dates = useMemo(() => monthOk ? monthDates(month) : emptyList<string>(), [month, monthOk])
-  const spans = useQuery({
-    queryKey: ['company-attendance-spans', month],
-    queryFn: () => listCompanyAttendanceSpans(month),
-    enabled: monthOk,
-    refetchInterval: monthOk && active ? 30_000 : false,
-  })
-  const leaves = useQuery({
-    queryKey: ['company-leave-cover', month],
-    queryFn: () => listLeaveRequests(undefined, false, { from: dates[0], to: dates[dates.length - 1] }),
-    enabled: monthOk && dates.length > 0,
-    refetchInterval: monthOk && active ? 30_000 : false,
-  })
-  const lunch = useQuery({ queryKey: ['company-work-hours'], queryFn: loadCompanyLunch })
-  const startSettings = useAttendanceStartSettings()
-  useEffect(() => {
-    if (spans.error) console.warn('[attendance-work] 야근 근무시간 조회 실패', spans.error)
-    if (leaves.error) console.warn('[attendance-work] 야근 신청 조회 실패', leaves.error)
-    if (lunch.error) console.warn('[attendance-work] 점심시간 조회 실패', lunch.error)
-  }, [spans.error, leaves.error, lunch.error])
-  const spanRows = spans.data ?? emptyList<CompanyAttendanceSpan>()
-  const leaveRows = leaves.data ?? emptyList<LeaveRequest>()
-  const lunchHours = lunch.data ?? { start: '12:00', end: '13:00', saved: false }
-  const needle = search.trim().toLocaleLowerCase('ko')
-  const starts = useMemo(() => new Map(directory.members.map(member => [member.id, resolveAttendanceStart(startSettings.index, member.id, member.departmentId, month).start])), [directory.members, startSettings.index, month])
-  const summaries = useMemo(
-    () => monthOk ? monthlyOvertimeHours(spanRows, leaveRows, lunchHours.start, lunchHours.end, month, today, starts) : [],
-    [monthOk, spanRows, leaveRows, lunchHours.start, lunchHours.end, month, today, starts],
-  )
-  const rows = useMemo(() => summaries.flatMap(summary => {
-    const member = directory.members.find(item => item.id === summary.employeeId)
-    if (!member) return []
-    const team = directory.departmentName(member.departmentId)
-    const name = memberLabel(member.displayName)
-    if (departmentId === 'unassigned' ? Boolean(member.departmentId) : departmentId !== 'all' && member.departmentId !== departmentId) return []
-    if (needle && !`${name} ${team}`.toLocaleLowerCase('ko').includes(needle)) return []
-    return [{ ...summary, name, team }]
-  }).sort((left, right) => right.extraMinutes - left.extraMinutes || right.approvedMinutes - left.approvedMinutes || left.name.localeCompare(right.name, 'ko')), [summaries, directory, departmentId, needle])
-  const extraPeople = rows.filter(row => row.extraMinutes > 0).length
-  const extraMinutes = rows.reduce((sum, row) => sum + row.extraMinutes, 0)
-  const openDays = rows.reduce((sum, row) => sum + row.openDays, 0)
-  const approvedMinutes = rows.reduce((sum, row) => sum + row.approvedMinutes, 0)
-  const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
-  const currentPage = Math.min(page, pages)
-  const pageRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
-  const unavailable = directory.loading || spans.isPending || leaves.isPending || lunch.isPending || startSettings.loading
-  const failed = Boolean(directory.error || spans.error || leaves.error || lunch.error || startSettings.error)
-  function chooseMonth(next: string) {
-    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(next)) return
-    setMonth(next)
-    setPage(1)
-  }
-
-  return <div className="space-y-4">
-    <header>
-      <h2 className="text-base font-semibold">야근 관리</h2>
-      <p className="mt-1 text-sm text-muted-foreground">직원별 예정 퇴근 이후 실제 근무시간을 집계합니다. 휴일에는 점심을 뺀 실제 근무 전체를 포함합니다. 급여·수당 계산과는 별도입니다.</p>
-    </header>
-    <div className="flex flex-wrap items-center gap-2">
-      <Button variant="outline" size="icon" aria-label="이전 월" onClick={() => chooseMonth(shiftMonth(month, -1))}><ChevronLeft size={15} /></Button>
-      <Input aria-label="야근 관리 월" type="month" className="h-9 w-40" value={month} onChange={event => chooseMonth(event.target.value)} />
-      <Button variant="outline" size="icon" aria-label="다음 월" onClick={() => chooseMonth(shiftMonth(month, 1))}><ChevronRight size={15} /></Button>
-      <Button variant="ghost" size="sm" onClick={() => chooseMonth(today.slice(0, 7))}>이번 달</Button>
-      <Select aria-label="야근 관리 부서" value={departmentId} onChange={event => { setDepartmentId(event.target.value); setPage(1) }} className="h-9 w-40">
-        <option value="all">전체 부서</option>
-        {directory.departments.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-        <option value="unassigned">소속 없음</option>
-      </Select>
-      <div className="relative min-w-[210px] flex-1">
-        <Search size={15} className="absolute left-3 top-2.5 text-muted-foreground" />
-        <Input aria-label="야근 관리 검색" placeholder="직원·부서 검색" className="h-9 pl-9" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} />
-      </div>
-    </div>
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <OpsStat label="추가 근무 직원" value={unavailable || failed ? '—' : `${extraPeople}명`} detail={monthLabel(month)} />
-      <OpsStat label="추가 근무 합계" value={unavailable || failed ? '—' : workDurationLabel(extraMinutes)} detail="예정 퇴근 이후 기록" />
-      <OpsStat label="승인된 야근" value={unavailable || failed ? '—' : workDurationLabel(approvedMinutes)} detail="신청 시각의 합" />
-      <OpsStat label="퇴근 없는 날" value={unavailable || failed ? '—' : `${openDays}일`} detail="추가 근무에 넣지 않음" />
-    </div>
-    {failed && <p role="alert" className="text-sm text-danger">야근 집계에 필요한 정보를 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => { void spans.refetch(); void leaves.refetch(); void lunch.refetch(); startSettings.refresh(); directory.refetch() }}>다시 불러오기</Button></p>}
-    {rows.some(row => row.unconfiguredDays > 0) && <p role="status" className="text-sm text-warning">출근 기준이 없는 직원의 평일 야근은 집계에서 제외됩니다.</p>}
-    {!lunch.data?.saved && !lunch.isPending && !lunch.error && <p className="text-sm text-muted-foreground">저장된 점심시간이 없어 12:00–13:00을 빼고 계산합니다.</p>}
-    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[760px] text-left text-sm">
-          <caption className="sr-only">{monthLabel(month)} 야근 관리</caption>
-          <thead className="bg-primary text-primary-foreground">
-            <tr>{['직원', '부서', '출퇴근 완료', '퇴근 없음', '실제 근무', '추가 근무', '승인 야근'].map(label => <th key={label} className="px-3 py-2 font-medium">{label}</th>)}</tr>
-          </thead>
-          <tbody>
-            {failed ? <tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">기록을 불러오지 못했습니다.</td></tr>
-              : unavailable ? <tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">출퇴근과 야근 신청을 확인하고 있습니다.</td></tr>
-              : pageRows.length ? pageRows.map(row => <tr key={row.employeeId} className="border-t border-border">
-                <td className="px-3 py-2 font-medium">{row.name}</td>
-                <td className="px-3 py-2">{row.team}</td>
-                <td className="px-3 py-2">{row.completeDays}일</td>
-                <td className="px-3 py-2">{row.openDays ? `${row.openDays}일` : '—'}</td>
-                <td className="px-3 py-2">{workDurationLabel(row.workedMinutes)}</td>
-                <td className={`px-3 py-2 font-medium${row.extraMinutes ? ' text-danger' : ''}`}>{row.unconfiguredDays ? '기준 미설정' : workDurationLabel(row.extraMinutes)}</td>
-                <td className="px-3 py-2">{workDurationLabel(row.approvedMinutes)}</td>
-              </tr>) : <tr><td colSpan={7} className="px-3 py-10 text-center text-muted-foreground">{failed ? '기록을 불러오지 못했습니다.' : '이 조건의 근무 기록이 없습니다.'}</td></tr>}
-          </tbody>
-        </table>
-      </div>
-      {!unavailable && rows.length > PAGE_SIZE && <nav className="flex items-center justify-between border-t border-border px-3 py-2 text-xs text-muted-foreground" aria-label="야근 관리 페이지">
-        <span>{(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, rows.length)} / {rows.length}명</span>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>이전</Button>
-          <span>{currentPage} / {pages}</span>
-          <Button variant="outline" size="sm" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>다음</Button>
-        </div>
-      </nav>}
-    </div>
-  </div>
+  const [limit, setLimit] = useState(50)
+  const [selected, setSelected] = useState<string | null>(null)
+  const actuals = useOvertimeActuals()
+  const requests = useMonthlyWorkRequests(month)
+  const allowances = useQuery({ queryKey: ['employee-roster-overtime', profile?.id], queryFn: listAllowances, enabled: profile?.status === 'active', refetchInterval: active ? 30_000 : false })
+  useEffect(() => { if (allowances.error) console.warn('[attendance-work] 포괄임금 기준 조회 실패', allowances.error) }, [allowances.error])
+  const entries = useMemo(() => registeredOvertime(requests.rows, actuals.rows, month, today), [requests.rows, actuals.rows, month, today])
+  const rows = useMemo(() => {
+    const grouped = new Map<string, { employeeId: string; name: string; team: string; minutes: number; count: number; approved: number }>()
+    const originals = new Map(requests.rows.map(row => [row.id, row]))
+    for (const item of entries) {
+      const request = item.request
+      const original = originals.get(request.id)!
+      if (department !== 'all' && (department === 'unassigned' ? Boolean(original.departmentId) : original.departmentId !== department)) continue
+      if (!`${original.employeeName} ${original.departmentName}`.toLocaleLowerCase('ko').includes(search.trim().toLocaleLowerCase('ko'))) continue
+      const row = grouped.get(request.employeeId) ?? { employeeId: request.employeeId, name: original.employeeName, team: original.departmentName || '소속 없음', minutes: 0, count: 0, approved: 0 }
+      row.minutes += item.minutes; row.approved += item.approvedMinutes; row.count += 1
+      grouped.set(row.employeeId, row)
+    }
+    return [...grouped.values()].sort((a, b) => b.minutes - a.minutes || a.name.localeCompare(b.name, 'ko'))
+  }, [entries, requests.rows, department, search])
+  const awaiting = requests.rows.filter(row => row.kind === 'overtime' && row.status === 'approved' && row.from <= today && !actuals.rows.some(actual => actual.requestId === row.id)).length
+  const loading = actuals.isPending || requests.isPending
+  const failed = actuals.isError || requests.isError
+  const ready = actuals.ready && !failed && !loading
+  const selectedRows = entries.filter(row => row.request.employeeId === selected)
+  return <section className="space-y-4" aria-label="야근 관리">
+    <header><h2 className="text-base font-semibold">야근 관리</h2><p className="mt-1 text-sm text-muted-foreground">승인된 야근 신청에 실제 시간을 입력한 직원만 표시합니다. 실제 시작·종료에서 휴게시간을 뺀 시간만 포괄임금 비교용 야근 누적에 포함합니다. 늦은 퇴근 기록이나 외근 자동 퇴근만으로 집계하지 않습니다.</p></header>
+    <WorkManagementFilters label="야근 관리" month={month} setMonth={value => { setMonth(value); setLimit(50); setSelected(null) }} department={department} setDepartment={value => { setDepartment(value); setLimit(50); setSelected(null) }} search={search} setSearch={value => { setSearch(value); setLimit(50); setSelected(null) }} directory={directory} />
+    <StatGrid><StatTile label="실제 야근 입력 직원" value={ready ? `${rows.length}명` : '—'} hint={monthLabel(month)} /><StatTile label="누적 반영 야근" value={ready ? workDurationLabel(rows.reduce((sum, row) => sum + row.minutes, 0)) : '—'} hint="현재 필터 · 휴게시간 제외" /><StatTile label="실제 시간 입력 대기" value={ready ? `${awaiting}건` : '—'} hint="해당 월 전체 승인 건 · 누적 제외" /></StatGrid>
+    {failed && <p role="alert" className="text-danger">야근 기록 조회 실패 <Button size="sm" variant="outline" onClick={() => { void actuals.refetch(); void requests.refetch() }}>다시 불러오기</Button></p>}
+    {!actuals.isPending && !actuals.isError && !actuals.ready && <p role="status" className="text-warning">실제 야근 입력 DB 적용 대기입니다. 기존 출퇴근·신청은 보존되며 추정 시간을 대신 표시하지 않습니다.</p>}
+    {allowances.isError && <p role="alert" className="text-warning">약정 연장근로시간 조회 실패 · 실제 야근은 표시하고 초과 시간은 계산하지 않습니다. <Button size="sm" variant="outline" onClick={() => void allowances.refetch()}>다시 불러오기</Button></p>}
+    <Card className="overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm"><caption className="sr-only">{monthLabel(month)} 실제 야근 누적</caption><thead className="bg-primary text-primary-foreground"><tr>{['직원', '부서', '실제 입력', '해당 신청 승인 시간', '야근 누적', '약정 연장근로시간(포괄임금)', '약정 초과', '상세'].map(label => <th key={label} className="px-3 py-2">{label}</th>)}</tr></thead><tbody>
+      {!ready || !rows.length ? <tr><td colSpan={8} className="p-8 text-center">{loading ? '불러오는 중…' : failed ? '조회 실패' : !actuals.ready ? '실제 시간 연결 대기' : '승인 후 실제 야근 시간을 입력한 직원이 없습니다.'}</td></tr> : rows.slice(0, limit).map(row => {
+        const hours = allowances.isError ? null : allowances.data?.find(item => item.profile_id === row.employeeId)?.inclusive_overtime_hours
+        const threshold = hours == null ? null : Math.round(hours * 60)
+        return <tr key={row.employeeId} className="border-t border-border"><td className="px-3 py-2 font-medium">{row.name}</td><td className="px-3 py-2">{row.team}</td><td className="px-3 py-2">{row.count}건</td><td className="px-3 py-2">{workDurationLabel(row.approved)}</td><td className="px-3 py-2 font-semibold">{workDurationLabel(row.minutes)}</td><td className="px-3 py-2">{allowances.isPending ? '조회 중…' : threshold == null ? '미등록·확인 필요' : workDurationLabel(threshold)}</td><td className="px-3 py-2">{threshold == null ? '—' : workDurationLabel(Math.max(0, row.minutes - threshold))}</td><td className="px-3 py-2"><Button size="sm" variant="outline" onClick={() => setSelected(selected === row.employeeId ? null : row.employeeId)}>입력 내역</Button></td></tr>
+      })}
+    </tbody></table></Card>
+    {rows.length > limit && <Button variant="outline" onClick={() => setLimit(value => value + 50)}>더 보기 ({limit}/{rows.length})</Button>}
+    {selected && rows.some(row => row.employeeId === selected) && <Card className="overflow-x-auto p-4"><h3 className="mb-3 font-semibold">실제 야근 입력 내역 · {rows.find(row => row.employeeId === selected)?.name}</h3><table className="w-full text-left text-sm"><thead className="bg-primary text-primary-foreground"><tr>{['날짜', '승인 시간', '실제 시간', '휴게', '누적 반영'].map(label => <th key={label} className="p-2">{label}</th>)}</tr></thead><tbody>{selectedRows.map(({ request, actual, minutes }) => <tr key={request.id}><td className="p-2">{request.from}</td><td className="p-2">{request.start}–{request.endNextDay ? '다음 날 ' : ''}{request.end}</td><td className="p-2">{clockOutLabel(actual.startAt, request.from)}–{clockOutLabel(actual.endAt, request.from)}</td><td className="p-2">{actual.breakMinutes}분</td><td className="p-2">{workDurationLabel(minutes)}</td></tr>)}</tbody></table></Card>}
+  </section>
 }

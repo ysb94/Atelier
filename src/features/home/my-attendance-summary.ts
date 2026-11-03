@@ -1,4 +1,5 @@
 import { isWorkday, timeSeconds } from '../operations-support/monthly-attendance.ts'
+import type { OvertimeActual } from '../operations-support/overtime-actuals.ts'
 import { monthlyOvertimeHours } from '../operations-support/overtime-hours.ts'
 import type { AttendanceClock } from '../settings/my-attendance.ts'
 import type { PersonalRequest } from '../settings/personal-requests.ts'
@@ -17,12 +18,12 @@ export function countMyLateDays(clocks: readonly { date: string; clockIn: string
   return count
 }
 
-/** 본인 출퇴근 기록을 운영지원과 같은 기준으로 집계한다. 퇴근 미기록은 제외한다. */
-export function actualOvertimeHours(clocks: readonly AttendanceClock[], requests: readonly PersonalRequest[], lunchStart: string, lunchEnd: string, month: string, today: string, start: string): number | null {
+/** 승인된 야근의 실제 입력을 운영지원과 같은 기준으로 합산한다. */
+export function actualOvertimeHours(clocks: readonly AttendanceClock[], requests: readonly PersonalRequest[], lunchStart: string, lunchEnd: string, month: string, today: string, start: string, actuals: readonly OvertimeActual[] = []): number | null {
   const rows = monthlyOvertimeHours(
     clocks.map(clock => ({ ...clock, employeeId: 'self' })),
     requests.map(request => ({ ...request, employeeId: 'self' })),
-    lunchStart, lunchEnd, month, today, new Map([['self', start]]),
+    lunchStart, lunchEnd, month, today, new Map([['self', start]]), actuals,
   )
   if (rows[0]?.unconfiguredDays) return null
   return (rows[0]?.extraMinutes ?? 0) / 60

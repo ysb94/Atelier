@@ -15,6 +15,7 @@ import { buildAttendanceRecords } from './attendance-records'
 import { AttendanceCalendar } from './AttendanceCalendar'
 import { AttendanceDeferredClockOutPanel } from './AttendanceDeferredClockOutPanel'
 import { AttendanceOvertimePanel } from './AttendanceOvertimePanel'
+import { AttendanceOffsitePanel } from './AttendanceOffsitePanel'
 import { AttendanceExemptionsPanel } from './AttendanceExemptionsPanel'
 import { AttendanceLatePanel } from './AttendanceLatePanel'
 import { AttendanceStartSettingsPanel } from './AttendanceStartSettingsPanel'
@@ -47,7 +48,7 @@ export function AttendancePanel() {
   const { profile } = useAuth()
   const saved = useAttendanceStartSettings()
   const awaitingHr = useQuery({ queryKey: ['late-statements-awaiting-hr'], queryFn: countLateStatementsAwaitingHr })
-  const [part, setPart] = useState<'all' | 'settings' | 'late' | 'missed' | 'overtime' | 'exemptions'>('all')
+  const [part, setPart] = useState<'all' | 'settings' | 'late' | 'missed' | 'overtime' | 'offsite' | 'exemptions'>('all')
   const [editing, setEditing] = useState<{ id?: string; month?: string }>({})
   return <div className="space-y-5">
     <div role="group" aria-label="근태 관리 메뉴" className="flex flex-wrap gap-2">
@@ -56,13 +57,15 @@ export function AttendancePanel() {
       <Button variant={part === 'late' ? 'default' : 'outline'} aria-pressed={part === 'late'} onClick={() => setPart('late')}>지각 * 결근 관리{awaitingHr.data ? ` ${awaitingHr.data}` : ''}</Button>
       <Button variant={part === 'missed' ? 'default' : 'outline'} aria-pressed={part === 'missed'} onClick={() => setPart('missed')}>퇴근 미처리</Button>
       <Button variant={part === 'overtime' ? 'default' : 'outline'} aria-pressed={part === 'overtime'} onClick={() => setPart('overtime')}>야근 관리</Button>
+      <Button variant={part === 'offsite' ? 'default' : 'outline'} aria-pressed={part === 'offsite'} onClick={() => setPart('offsite')}>외근 관리</Button>
       <Button variant={part === 'exemptions' ? 'default' : 'outline'} aria-pressed={part === 'exemptions'} onClick={() => setPart('exemptions')}>출퇴근 시간 제외자</Button>
     </div>
     <div hidden={part !== 'all'}><AttendanceWorkspace directory={directory} canEdit={hasPermission(profile, 'attendance.manage')} savedSettings={saved.settings} settingsLoading={saved.loading} settingsError={Boolean(saved.error)} onEditStart={(id,month) => {setEditing({id,month});setPart('settings')}}/></div>
     {part === 'settings' && <AttendanceStartSettingsPanel readOnly key={`${editing.id}:${editing.month}`} directory={directory} schedules={saved} initialEmployeeId={editing.id} initialMonth={editing.month}/>}
     {part === 'late' && <AttendanceLatePanel directory={directory} schedules={saved} />}
     {part === 'missed' && <AttendanceDeferredClockOutPanel directory={directory} />}
-    {part === 'overtime' && <AttendanceOvertimePanel directory={directory} />}
+    {part === 'overtime' && <AttendanceOvertimePanel directory={source} />}
+    {part === 'offsite' && <AttendanceOffsitePanel directory={source} />}
     {part === 'exemptions' && <AttendanceExemptionsPanel directory={source} />}
   </div>
 }

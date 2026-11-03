@@ -1,42 +1,25 @@
 import assert from 'node:assert/strict'
 import { monthlyOvertimeHours, workDurationLabel, workedMinutes } from './overtime-hours.ts'
-
-const lunch = ['12:00', '13:00'] as const
-assert.equal(workedMinutes('2026-10-26', '09:00', '2026-10-26T09:00:00Z', ...lunch), 480)
-assert.equal(workedMinutes('2026-10-26', '09:00', '2026-10-26T12:00:00Z', ...lunch), 660)
-assert.equal(workedMinutes('2026-10-26', '09:00', '2026-10-25T23:00:00Z', ...lunch), null)
-
-const leave = (patch: { employeeId?: string; kind: string; status?: string; from: string; to?: string; start?: string; end?: string; endNextDay?: boolean }) => ({
-  employeeId: patch.employeeId ?? 'a', status: patch.status ?? 'approved', to: patch.to ?? patch.from, start: patch.start ?? '09:00', end: patch.end ?? '18:00', ...patch,
-})
-const span = (date: string, clockIn: string, clockOutAt: string | null, employeeId = 'a') => ({ employeeId, date, clockIn, clockOutAt })
-const rows = monthlyOvertimeHours([
-  span('2026-10-26', '09:00', '2026-10-26T09:00:00Z'),
-  span('2026-10-27', '09:00', '2026-10-27T12:00:00Z'),
-  span('2026-10-22', '09:00', null),
-  span('2026-10-23', '09:00', '2026-10-23T09:00:00Z'),
-  span('2026-10-25', '10:00', '2026-10-25T05:00:00Z'),
-  span('2026-11-02', '09:00', '2026-11-02T12:00:00Z'),
-  span('2026-10-21', '14:00', '2026-10-21T09:00:00Z', 'b'),
-], [
-  leave({ kind: 'annual', from: '2026-10-23' }),
-  leave({ kind: 'half', from: '2026-10-21', employeeId: 'b', start: '09:00', end: '14:00' }),
-  leave({ kind: 'overtime', from: '2026-10-27', start: '18:00', end: '21:00' }),
-  leave({ kind: 'overtime', from: '2026-10-20', start: '18:00', end: '20:00', status: 'pending' }),
-], ...lunch, '2026-10', '2026-10-27', new Map([['a', '09:00'], ['b', '09:00']]))
-
-const mine = rows.find(row => row.employeeId === 'a')
-const half = rows.find(row => row.employeeId === 'b')
-assert.equal(mine?.completeDays, 3)
-assert.equal(mine?.openDays, 1)
-assert.equal(mine?.workedMinutes, 480 + 660 + 180)
-assert.equal(mine?.extraMinutes, 180 + 180)
-assert.equal(mine?.approvedMinutes, 180)
-assert.equal(half?.workedMinutes, 240)
-assert.equal(half?.extraMinutes, 0)
-const overnight = monthlyOvertimeHours([], [leave({ kind: 'overtime', from: '2026-10-26', start: '18:00', end: '00:30', endNextDay: true })], ...lunch, '2026-10', '2026-10-27', new Map())
-assert.equal(overnight[0]?.approvedMinutes, 390, '다음 날 00:30 종료는 승인 야근 6시간 30분')
-assert.equal(workDurationLabel(200), '3시간 20분')
-assert.equal(workDurationLabel(120), '2시간')
-assert.equal(workDurationLabel(15), '15분')
-console.log('overtime-hours.verify ok')
+import { registeredOvertime, type OvertimeActual, type OvertimeRequest } from './overtime-actuals.ts'
+const request: OvertimeRequest = { id: 'r', employeeId: 'a', kind: 'overtime', status: 'approved', from: '2026-10-26', to: '2026-10-26', start: '18:00', end: '22:00' }
+const actual: OvertimeActual = { requestId: 'r', startAt: '2026-10-26T18:30:00+09:00', endAt: '2026-10-26T21:00:00+09:00', breakMinutes: 30, revision: 1, savedAt: '' }
+const total = (requests = [request], reports = [actual]) => monthlyOvertimeHours([{ employeeId: 'a', date: '2026-10-26', clockIn: '09:00', clockOutAt: '2026-10-26T23:00:00+09:00' }], requests, '12:00', '13:00', '2026-10', '2026-10-27', new Map(), reports)
+assert.equal(total()[0].extraMinutes, 120, '실제 입력 구간에서 휴게시간만 차감')
+assert.equal(total()[0].approvedMinutes, 240)
+assert.deepEqual(total([], []), [], '늦은 퇴근만으로 야근 목록 생성 금지')
+assert.deepEqual(total([request], []), [], '승인만 받고 실제 입력이 없는 신청 제외')
+for (const status of ['pending', 'rejected', 'cancelled']) assert.deepEqual(total([{ ...request, status }]), [])
+assert.deepEqual(total([{ ...request, kind: 'offsite' }]), [], '외근 자동 출퇴근을 야근으로 만들지 않음')
+assert.deepEqual(total([request], [{ ...actual, requestId: 'other' }]), [])
+assert.deepEqual(total([request], [{ ...actual, startAt: '2026-10-26T17:00:00+09:00' }]), [])
+assert.deepEqual(total([request], [{ ...actual, endAt: '2026-10-26T23:00:00+09:00' }]), [])
+for (const breakMinutes of [-1, 151, 0.5, NaN]) assert.deepEqual(total([request], [{ ...actual, breakMinutes }]), [])
+assert.equal(total([request], [actual, { ...actual, revision: 2, breakMinutes: 0 }, actual])[0].extraMinutes, 150, '수정 이력과 중복 응답은 최신 1건만 합산')
+assert.equal(registeredOvertime([request], [actual], '2026-11', '2026-11-01').length, 0)
+assert.equal(registeredOvertime([request], [actual], '2026-10', '2026-10-25').length, 0)
+const night = { ...request, start: '22:00', end: '02:00', endNextDay: true }
+const nightActual = { ...actual, startAt: '2026-10-26T23:00:00+09:00', endAt: '2026-10-27T01:30:00+09:00', breakMinutes: 15 }
+assert.equal(total([night], [nightActual])[0].extraMinutes, 135)
+assert.equal(workedMinutes('2026-10-26','09:00','2026-10-26T18:00:00+09:00','12:00','13:00'), 480)
+assert.equal(workDurationLabel(135), '2시간 15분')
+console.info('Overtime: approval + explicit actual only; late clock-outs/offsite/pending/missing reports excluded; breaks, revisions, midnight and month boundaries passed')
