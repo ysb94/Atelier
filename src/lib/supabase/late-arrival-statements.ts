@@ -172,18 +172,20 @@ export async function loadCumulativeLate(employeeId: string, through: string) {
     listEmployeeAttendanceClocks(employeeId, from, through),
     listAttendanceStartsBetween(employeeId, from, through),
   ])
-  const startByMonth = new Map(starts.map(item => [item.month, item.start]))
-  return cumulativeLateText(cumulativeLateTotal(clocks, date => startByMonth.get(date.slice(0, 7)) ?? '', through))
+  const startByDate = new Map(starts.map(item => [item.date, item.start]))
+  return cumulativeLateText(cumulativeLateTotal(clocks, date => startByDate.get(date) ?? startByDate.get(date.slice(0, 7)) ?? '', through))
 }
 
 async function listAttendanceStartsBetween(employeeId: string, from: string, to: string) {
-  const { data, error } = await getSupabase().rpc('attendance_starts_between', { p_employee: employeeId, p_from: from, p_to: to })
+  let { data, error } = await getSupabase().rpc('attendance_workday_starts_between', { p_employee: employeeId, p_from: from, p_to: to })
+  // 서버 적용 전에는 기존 월별 기준으로 동작한다. 새 당일 기준 입력은 화면에서 차단된다.
+  if (error && ['PGRST202', '42883'].includes(error.code)) ({ data, error } = await getSupabase().rpc('attendance_starts_between', { p_employee: employeeId, p_from: from, p_to: to }))
   if (error) {
     console.warn('[late-arrival] 출근 기준 조회 실패', error)
     throw new Error('누적 지각을 계산하지 못했습니다.')
   }
-  return ((data ?? []) as { month: string; start_time: string | null }[]).map(row => ({
-    month: String(row.month).slice(0, 7),
+  return ((data ?? []) as { work_date?: string; month?: string; start_time: string | null }[]).map(row => ({
+    date: row.work_date ? String(row.work_date).slice(0, 10) : String(row.month).slice(0, 7),
     start: row.start_time?.slice(0, 5) ?? '',
   }))
 }

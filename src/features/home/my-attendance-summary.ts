@@ -3,16 +3,17 @@ import type { OvertimeActual } from '../operations-support/overtime-actuals.ts'
 import { monthlyOvertimeHours } from '../operations-support/overtime-hours.ts'
 import type { AttendanceClock } from '../settings/my-attendance.ts'
 import type { PersonalRequest } from '../settings/personal-requests.ts'
+import { offsiteWorkdayStart } from '../operations-support/offsite-workday-start.ts'
 
 /** 근무일이고 출근 기준+유예보다 늦은 기록 수. 기준이 없으면 null. */
-export function countMyLateDays(clocks: readonly { date: string; clockIn: string }[], start: string, grace: number, today: string): number | null {
+export function countMyLateDays(clocks: readonly { date: string; clockIn: string }[], start: string, grace: number, today: string, requests: readonly PersonalRequest[] = []): number | null {
   const baseline = timeSeconds(start)
   if (baseline == null) return null
-  const limit = baseline + grace * 60
   let count = 0
   for (const clock of clocks) {
     if (clock.date > today || !isWorkday(clock.date, {})) continue
     const actual = timeSeconds(clock.clockIn)
+    const limit = (timeSeconds(offsiteWorkdayStart(requests, clock.date) ?? start) ?? baseline) + grace * 60
     if (actual != null && actual > limit) count += 1
   }
   return count

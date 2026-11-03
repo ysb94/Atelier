@@ -10,7 +10,7 @@ export type RequestKind = typeof REQUEST_KINDS[number]['id'] | 'remote' | 'corre
 export type PersonalRequest = {
   id: string; kind: RequestKind; from: string; to: string; start: string; end: string
   place: string; note: string; status: 'pending' | 'approved' | 'rejected' | 'cancelled'
-  createdAt: string; decisionNote?: string; advanceRequested?: boolean; endNextDay?: boolean
+  createdAt: string; decisionNote?: string; advanceRequested?: boolean; endNextDay?: boolean; offsiteWorkStart?: string
 }
 export type RequestForm = Omit<PersonalRequest, 'id' | 'status' | 'createdAt' | 'decisionNote'>
 export type ReminderBasis = { start: string; end: string; breakStart: string; breakEnd: string; before: number }
@@ -53,6 +53,11 @@ function interval(form: RequestForm | PersonalRequest) {
   return [form.from + (isAllDayRequest(form.kind) ? 'T00:00' : `T${form.start}`), next + (isAllDayRequest(form.kind) ? 'T24:00' : `T${form.end}`)]
 }
 export function validateRequest(form: RequestForm, requests: PersonalRequest[], basis: ReminderBasis, today?: string) {
+  if (form.offsiteWorkStart) {
+    if (form.kind !== 'offsite' || form.from !== form.to || minuteOf(form.offsiteWorkStart) == null) return '당일 출근 기준은 하루 외근에만 지정할 수 있습니다.'
+    if (today && form.from < today) return '지난 날짜의 출근 기준은 외근 신청으로 변경할 수 없습니다.'
+    if (requests.some(request => request.kind === 'offsite' && request.status === 'approved' && request.from === form.from && request.offsiteWorkStart && request.offsiteWorkStart !== form.offsiteWorkStart)) return '같은 날짜에 다른 출근 기준이 등록되어 있습니다. 기존 외근을 확인해 주세요.'
+  }
   if (form.advanceRequested && (!isLeaveRequest(form.kind) || !form.note.trim())) return '연차·반차·반반차를 선택하고 선사용 사유를 입력해 주세요.'
   if (form.kind === 'remote') return '재택은 등록할 수 없습니다.'
   if (!validDate(form.from) || !validDate(form.to) || form.to < form.from) return '신청 시작일과 종료일을 확인해 주세요.'

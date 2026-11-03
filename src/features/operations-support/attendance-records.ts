@@ -1,5 +1,6 @@
 import type { LeaveRequest } from '../../lib/supabase/leave-requests.ts'
 import { EMPTY_ATTENDANCE, type AttendanceRecord, type AttendanceRecords, type AttendanceStatus } from './monthly-attendance.ts'
+import { offsiteWorkdayStart } from './offsite-workday-start.ts'
 
 const STATUS_RANK: Partial<Record<LeaveRequest['kind'], number>> = {
   annual: 5, official: 4, half: 3, remote: 2, offsite: 1,
@@ -46,6 +47,8 @@ export function buildAttendanceRecords(dates: readonly string[], clocks: readonl
       (STATUS_RANK[right.kind] ?? 0) - (STATUS_RANK[left.kind] ?? 0) || Number(right.status === 'approved') - Number(left.status === 'approved'))
     const chosen = ranked[0]
     let record = records[date]?.[employeeId] ?? { ...EMPTY_ATTENDANCE }
+    const workStart = offsiteWorkdayStart(requests, date)
+    if (workStart) record = { ...record, expectedStart: workStart }
     if (chosen) {
       const status = leaveStatus(chosen)
       if (status) record = { ...record, status, note: chosen.status === 'pending' ? '승인 대기' : record.note }

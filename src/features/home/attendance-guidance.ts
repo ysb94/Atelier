@@ -1,6 +1,7 @@
 import { clockOutLabel, koreaDateKey, type AttendanceClock } from '../settings/my-attendance.ts'
 import { minuteOf, type PersonalRequest } from '../settings/personal-requests.ts'
 import type { WorkdayBasis } from '../../lib/supabase/attendance-entry.ts'
+import { offsiteWorkdayStart } from '../operations-support/offsite-workday-start.ts'
 
 export const ATTENDANCE_GUIDANCE_START = '2026-10-26'
 const MINUTE = 60_000
@@ -26,8 +27,10 @@ export function workdayGuidance(date: string, basis: WorkdayBasis | null | undef
   const approved = requests.filter(r => r.status === 'approved' && r.from <= date && r.to >= date)
   const fullLeave = approved.some(r => r.kind === 'annual' || r.kind === 'official')
   const empty = { start: null as number | null, end: null as number | null, fullLeave }
-  if (fullLeave || !basis?.configured || !basis.start) return empty
-  const start = workInstant(date, basis.start), lunchStart = workInstant(date, basis.lunchStart), lunchEnd = workInstant(date, basis.lunchEnd)
+  const override = offsiteWorkdayStart(requests, date)
+  const workStart = override ?? basis?.start
+  if (fullLeave || !basis || (!basis.configured && !override) || !workStart) return empty
+  const start = workInstant(date, workStart), lunchStart = workInstant(date, basis.lunchStart), lunchEnd = workInstant(date, basis.lunchEnd)
   if (start == null || lunchStart == null || lunchEnd == null || lunchEnd < lunchStart) return empty
   let end = start + 480 * MINUTE
   if (start < lunchEnd && end > lunchStart) end += lunchEnd - Math.max(start, lunchStart)

@@ -46,7 +46,7 @@ export function formatTime(value: number | null) {
 }
 export function needsArrival(status: AttendanceStatus) { return ['present', 'remote', 'half-am', 'half-pm'].includes(status) }
 export function recordTiming(record: AttendanceRecord, schedule: AttendanceSchedule) {
-  const actual = needsArrival(record.status) ? timeSeconds(record.start) : null
+  const actual = needsArrival(record.status) || (record.status === 'offsite' && record.expectedStart) ? timeSeconds(record.start) : null
   const expected = record.expectedStart || (record.status === 'half-am' ? '' : schedule.start)
   const baseline = timeSeconds(expected)
   return {

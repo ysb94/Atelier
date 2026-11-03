@@ -17,6 +17,8 @@ import { useAttendanceEntry } from '@/features/home/attendance-entry-context'
 import { OffsiteConnectionNotice } from '@/features/home/OffsiteStatus'
 import { offsiteAction } from '@/lib/supabase/offsite-attendance'
 import { OffsiteDateTimeFields } from './OffsiteDateTimeFields'
+import { OffsiteWorkdayStartField } from './OffsiteWorkdayStartField'
+import { getMyWorkdayBasis } from '@/lib/supabase/attendance-entry'
 import { offsiteSubmission } from './offsite-form'
 import { useLeaveRequests } from '@/features/operations-support/use-leave-requests'
 import { useDepartmentApprovers } from '@/features/operations-support/use-department-approvers'
@@ -66,7 +68,7 @@ function requestTime(item: PersonalRequest) { return isAllDayRequest(item.kind) 
 function requestSpan(item: PersonalRequest) { return item.from === item.to ? dateLabel(item.from) : `${dateLabel(item.from)}–${dateLabel(item.to)}` }
 function cancelEffect(item: PersonalRequest) {
   if (isLeaveRequest(item.kind)) return '취소하면 달력과 회의 가능 시간에서 빠지고, 차감된 연차는 원래 사용 기간에 맞춰 다시 계산됩니다. 이미 만료된 기본·추가·생일 연차는 현재 남은 연차로 돌아오지 않습니다.'
-  if (item.kind === 'offsite') return '취소하면 외근과 남은 자동 퇴근 예약이 빠집니다. 이미 생성된 출퇴근 기록은 유지되며 실제와 다르면 정정 신청해 주세요.'
+  if (item.kind === 'offsite') return '취소하면 외근과 남은 자동 퇴근 예약, 이 외근에 지정한 당일 출근 기준 변경이 해제됩니다. 이미 생성된 출퇴근 기록은 유지되며 실제와 다르면 정정 신청해 주세요.'
   return '승인 전 신청을 취소하면 달력의 대기 표시도 함께 빠집니다.'
 }
 type ScheduleDetail =
@@ -81,6 +83,7 @@ function requestFacts(item: PersonalRequest) {
     ['상태', `${requestStatusLabel(item)}${isSelfApprovedRequest(row) ? ' · 본인 승인' : ''}`],
   ]
   if (item.place.trim()) facts.push(['장소', item.place.trim()])
+  if (item.kind === 'offsite' && item.offsiteWorkStart) facts.push(['당일 출근 기준', `${item.offsiteWorkStart} · 외근 시작일에만 적용`])
   if (item.note.trim()) facts.push([item.kind === 'overtime' || item.kind === 'official' || item.kind === 'correction' ? '사유' : '메모', item.note.trim()])
   if (row.decidedByName) facts.push(['처리', `${row.decidedByName}${row.decidedAt ? ` · ${new Date(row.decidedAt).toLocaleString('ko-KR')}` : ''}`])
   if (item.decisionNote?.trim()) facts.push(['처리 메모', item.decisionNote.trim()])
@@ -245,6 +248,7 @@ export function MyAttendancePanel() {
     let createdId: string | null = null
     try {
       if (submission.kind === 'offsite' && submission.endNextDay && !(await offsiteAction('my_offsite_attendance')).overnightSupported) throw new Error('다음 날 종료 외근의 DB 설정 적용 대기입니다. 기존 외근·출퇴근 기록은 보존됩니다.')
+      if (submission.kind === 'offsite' && submission.offsiteWorkStart && !(await getMyWorkdayBasis(submission.from)).offsiteWorkdayStartSupported) throw new Error('당일 출근 기준 변경은 서버 적용 대기 중입니다.')
       const request = await leave.create.mutateAsync(submission)
       createdId = request.id
       if (isOfficialLeave(form.kind) && officialFile) await uploadLeaveFile(request.id, officialFile)
@@ -391,7 +395,7 @@ export function MyAttendancePanel() {
           <p className="text-xs text-muted-foreground">{advances.isPending ? '선사용 기준 확인 중…' : advances.isError ? '선사용 기준 조회 실패 · 다시 조회 후 신청해 주세요.' : !advances.data?.ready ? '선사용 서버 적용 전입니다. 일반 등록은 기존 방식으로 이용할 수 있습니다.' : `선사용 한도 ${advances.data.employees[0]?.limit ?? 0}일 · 현재 선사용 ${advances.data.employees[0]?.outstanding ?? 0}일. 한도 미설정·연차 기준 미등록은 운영지원에 문의해 주세요.`}</p>
           {form.advanceRequested && <p className="text-sm text-warning">부족분 선사용을 신청합니다. 승인 전에는 차감되지 않으며, 승인 후 마이너스 잔액과 다음 발생분 정산 기록이 남습니다. 선사용 사유를 입력해 주세요. 본인 승인은 불가합니다.</p>}
         </>}
-        {form.kind === 'offsite' ? <OffsiteDateTimeFields form={form} maxDate={`${Number(today.slice(0, 4)) + 5}-12-31`} onChange={patch} /> : <>
+        {form.kind === 'offsite' ? <><OffsiteDateTimeFields form={form} maxDate={`${Number(today.slice(0, 4)) + 5}-12-31`} onChange={patch} /><OffsiteWorkdayStartField form={form} requests={leave.requests} onChange={patch} /></> : <>
         <div className="personal-request-fields">
           <label>{span ? '시작일' : '신청일'}<HireDateScrollField label={span ? '개인 신청 시작일' : '개인 신청일'} className="mt-[7px] w-full" value={form.from} min="1950-01-01" max={form.kind === 'correction' ? today : `${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; patch({ from: value, to: !span ? value : form.to < value ? value : form.to }) }}/></label>
           {span && <label>종료일<HireDateScrollField label="개인 신청 종료일" className="mt-[7px] w-full" value={form.to} min={form.from || '1950-01-01'} max={`${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; patch({ to: value }) }}/></label>}

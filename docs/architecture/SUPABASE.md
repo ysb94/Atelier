@@ -1,5 +1,7 @@
 # Supabase 데이터 아키텍처 원칙
 
+- 2026-11-03 외근일 당일 출근 기준 변경은 [OFFSITE_WORKDAY_START.md](OFFSITE_WORKDAY_START.md)에 정리했다. 호환 마이그레이션·화면·연결 검증을 준비했으며 공유 DB 적용은 별도 승인 대기다.
+
 이 문서는 Atelier 사내 상품 운영 시스템의 Supabase 기준 문서다.
 Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전 반드시 읽는다.
 

@@ -11,7 +11,8 @@ import { LateArrivalStatementDocument } from '@/features/home/LateArrivalClockIn
 import { listLeaveRequests, type LeaveRequest } from '@/lib/supabase/leave-requests'
 import { emptyList } from '@/lib/utils'
 import type { RequestKind } from '@/features/settings/personal-requests'
-import { ATTENDANCE_GRACE_MINUTES, resolveAttendanceStart } from './attendance-start-settings'
+import { ATTENDANCE_GRACE_MINUTES } from './attendance-start-settings'
+import { resolveWorkdayStart } from './offsite-workday-start'
 import { memberLabel, OpsStat } from './OpsStat'
 import { type useOpsDirectory } from './ops-directory'
 import { type useAttendanceStartSettings } from './use-attendance-start-settings'
@@ -89,7 +90,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
     for (const clock of clockRows) {
       const member = directory.members.find(item => item.id === clock.employeeId)
       if (!member || member.attendanceExempt || !isWorkday(clock.date, {})) continue
-      const schedule = resolveAttendanceStart(schedules.index, member.id, member.departmentId, month)
+      const schedule = resolveWorkdayStart(schedules.index, member.id, member.departmentId, clock.date, leaveRows)
       const actual = timeSeconds(clock.clockIn)
       const baseline = timeSeconds(schedule.start)
       if (actual == null || baseline == null || actual <= baseline + schedule.grace * 60) continue
@@ -103,16 +104,16 @@ export function AttendanceLatePanel({ directory, schedules }: {
       const team = directory.departmentName(member.departmentId)
       const name = memberLabel(member.displayName)
       if (!matches(member.departmentId, name, team)) continue
-      const schedule = resolveAttendanceStart(schedules.index, member.id, member.departmentId, month)
-      const baseline = timeSeconds(schedule.start)
       for (const date of dates) {
+        const schedule = resolveWorkdayStart(schedules.index, member.id, member.departmentId, date, leaveRows)
+        const baseline = timeSeconds(schedule.start)
         if (date > today || !isWorkday(date, {}) || clockByKey.has(`${member.id}:${date}`) || covered.has(`${member.id}:${date}`)) continue
         if (date === today && (baseline == null ? nowMinutes < 18 * 60 : nowMinutes * 60 <= baseline + schedule.grace * 60)) continue
         next.push({ key: `absent:${member.id}:${date}`, memberId: member.id, date, dateLabel: dateLabel(date), name, team, start: schedule.start || '미설정', clockIn: '없음', result: '결근', kind: 'absent' })
       }
     }
     return next.sort((a, b) => b.date.localeCompare(a.date) || Number(a.kind === 'late') - Number(b.kind === 'late') || a.name.localeCompare(b.name, 'ko'))
-  }, [clockRows, clockByKey, covered, dates, directory, schedules.index, month, departmentId, needle, today, nowMinutes])
+  }, [clockRows, clockByKey, covered, dates, directory, schedules.index, leaveRows, departmentId, needle, today, nowMinutes])
   const lateRows = rows.filter(row => row.kind === 'late')
   const absentRows = rows.filter(row => row.kind === 'absent')
   const latePeople = new Set(lateRows.map(row => row.memberId)).size
