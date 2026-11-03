@@ -1,9 +1,9 @@
 import type { PersonalRequest } from '../settings/personal-requests.ts'
 import { resolveAttendanceStart, type attendanceStartIndex } from './attendance-start-settings.ts'
 
-export function offsiteWorkdayStart(requests: readonly Pick<PersonalRequest, 'kind' | 'status' | 'from' | 'to' | 'offsiteWorkStart'>[], date: string) {
+export function offsiteWorkdayStart(requests: readonly Pick<PersonalRequest, 'kind' | 'status' | 'from' | 'to' | 'offsiteWorkStart'|'offsiteContinuous'>[], date: string) {
   const starts = new Set(requests.filter(request => request.kind === 'offsite' && request.status === 'approved'
-    && request.from === date && request.to === date && request.offsiteWorkStart).map(request => request.offsiteWorkStart!))
+    && request.from === date && (request.to === date || request.offsiteContinuous) && request.offsiteWorkStart).map(request => request.offsiteWorkStart!))
   return starts.size === 1 ? [...starts][0] : null
 }
 

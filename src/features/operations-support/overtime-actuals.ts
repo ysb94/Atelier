@@ -1,5 +1,5 @@
 export type OvertimeActual = {
-  requestId: string; startAt: string; endAt: string; breakMinutes: number; revision: number; savedAt: string
+  requestId: string; startAt: string; endAt: string; breakMinutes: number; revision: number; savedAt: string; offsiteMinutes?: Record<string,number>
 }
 export type OvertimeRequest = {
   id: string; employeeId: string; kind: string; status: string; from: string; to: string
@@ -19,8 +19,14 @@ export function registeredOvertime(requests: readonly OvertimeRequest[], actuals
   return requests.flatMap(request => {
     if (seen.has(request.id)) return []
     seen.add(request.id)
-    if (request.kind !== 'overtime' || request.status !== 'approved' || request.from !== request.to || request.from.slice(0, 7) !== month || request.from > today) return []
     const actual = latest.get(request.id)
+    if (request.kind === 'offsite' && request.status === 'approved' && actual?.offsiteMinutes) {
+      const values = Object.entries(actual.offsiteMinutes).filter(([date])=>date.slice(0,7)===month && date<=today)
+      if (values.some(([,minutes])=>!Number.isInteger(minutes)||minutes<0||minutes>1440)) return []
+      const minutes=values.reduce((sum,[,value])=>sum+value,0)
+      return minutes>0 ? [{request,actual,minutes,approvedMinutes:minutes}] : []
+    }
+    if (request.kind !== 'overtime' || request.status !== 'approved' || request.from !== request.to || request.from.slice(0, 7) !== month || request.from > today) return []
     if (!actual) return []
     const start = Date.parse(actual.startAt), end = Date.parse(actual.endAt)
     const approvedStart = overtimeInstant(request.from, request.start), approvedEnd = overtimeInstant(request.to, request.end, request.endNextDay)

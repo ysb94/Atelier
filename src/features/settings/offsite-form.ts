@@ -14,6 +14,6 @@ export function offsiteSubmission(form: RequestForm): { request: RequestForm | n
   }
   const minutes = (Date.parse(`${form.to}T${form.end}:00+09:00`) - Date.parse(`${form.from}T${form.start}:00+09:00`)) / 60_000
   if (minutes <= 0) return { request: null, error: '종료 날짜·시간은 시작 날짜·시간보다 늦어야 합니다.', minutes: null }
-  if (minutes > 1440) return { request: null, error: '외근은 시작부터 종료까지 24시간 이내로 등록해 주세요. 더 긴 일정은 날짜별로 나눠 주세요.', minutes: null }
-  return { request: { ...form, to: form.from, endNextDay: form.to !== form.from }, error: '', minutes }
+  if (minutes > 1440) return { request: { ...form, endNextDay: false, offsiteContinuous: true }, error: '', minutes }
+  return { request: { ...form, to: form.from, endNextDay: form.to !== form.from, offsiteContinuous: false }, error: '', minutes }
 }

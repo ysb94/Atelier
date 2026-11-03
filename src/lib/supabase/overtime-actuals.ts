@@ -1,5 +1,6 @@
 import { getSupabase } from './client'
 import type { OvertimeActual } from '@/features/operations-support/overtime-actuals'
+import { listOffsiteSettlements } from './offsite-settlements'
 
 type Row = { request_id: string; start_at: string; end_at: string; break_minutes: number; revision: number; saved_at: string }
 export async function listOvertimeActuals(): Promise<{ ready: boolean; rows: OvertimeActual[] }> {
@@ -12,7 +13,14 @@ export async function listOvertimeActuals(): Promise<{ ready: boolean; rows: Ove
       throw new Error(error.message)
     }
     rows.push(...(data as Row[]).map(row => ({ requestId: row.request_id, startAt: row.start_at, endAt: row.end_at, breakMinutes: row.break_minutes, revision: Number(row.revision), savedAt: row.saved_at })))
-    if (data.length < 500) return { ready: true, rows }
+    if (data.length < 500) {
+      const settlements=await listOffsiteSettlements()
+      for (const row of settlements.rows) if (row.mode==='overtime') {
+        const dates=Object.keys(row.minutes_by_date).sort()
+        if (dates.length) rows.push({requestId:row.request_id,startAt:`${dates[0]}T00:00:00+09:00`,endAt:`${dates[dates.length-1]}T23:59:00+09:00`,breakMinutes:0,revision:1,savedAt:row.decided_at,offsiteMinutes:row.minutes_by_date})
+      }
+      return { ready: true, rows }
+    }
   }
 }
 export async function saveOvertimeActual(input: Omit<OvertimeActual, 'savedAt'>) {

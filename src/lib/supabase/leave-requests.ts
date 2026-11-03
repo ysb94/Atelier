@@ -10,14 +10,14 @@ type LeaveRow = {
   id: string; employee_id: string; employee_name: string; department_id: string | null; department_name: string
   kind: RequestKind; from_date: string; to_date: string; start_time: string; end_time: string
   note: string; place: string | null; status: PersonalRequest['status']; created_at: string; decision_note: string | null
-  decided_at: string | null; decided_by_name: string | null; decided_by?: string | null; advance_requested?: boolean; end_next_day?: boolean; offsite_work_start?: string | null
+  decided_at: string | null; decided_by_name: string | null; decided_by?: string | null; advance_requested?: boolean; end_next_day?: boolean; offsite_work_start?: string | null; offsite_continuous?: boolean
 }
 function mapRow(row: LeaveRow): LeaveRequest {
   return { id: row.id, employeeId: row.employee_id, employeeName: row.employee_name,
     departmentId: row.department_id, departmentName: row.department_name, kind: row.kind,
     from: row.from_date, to: row.to_date, start: row.start_time.slice(0,5), end: row.end_time.slice(0,5),
     note: row.note, place: row.place ?? '', status: row.status, createdAt: row.created_at, advanceRequested: row.advance_requested === true, endNextDay: row.end_next_day === true,
-    offsiteWorkStart: row.offsite_work_start?.slice(0, 5) || undefined,
+    offsiteWorkStart: row.offsite_work_start?.slice(0, 5) || undefined, offsiteContinuous: row.offsite_continuous === true,
     decisionNote: row.decision_note ?? undefined, decidedAt: row.decided_at, decidedByName: row.decided_by_name, decidedBy: row.decided_by ?? null }
 }
 function fail(action: string, error: { message: string }): never {
@@ -30,12 +30,14 @@ export async function listLeaveRequests(employeeId?: string, approvals = false, 
     let query = (approvals ? getSupabase().rpc('list_my_approval_requests') : getSupabase().from('company_leave_requests').select('*')).order('created_at', { ascending: false }).order('id').range(offset, offset + 499)
     if (employeeId) query = query.eq('employee_id', employeeId)
     if (period) {
-      query = query.lte('from_date', period.to).gte('to_date', period.from)
+      const previous = new Date(Date.parse(`${period.from}T00:00:00Z`)-86_400_000).toISOString().slice(0,10)
+      query = query.lte('from_date', period.to).gte('to_date', previous)
       if (period.approvedOnly) query = query.eq('status', 'approved')
     }
     const { data, error } = await query
     if (error) fail('신청 목록 조회 실패', error)
-    rows.push(...(data as LeaveRow[]).map(mapRow))
+    rows.push(...(data as LeaveRow[]).map(mapRow).filter(row => !period || (row.endNextDay
+      ? new Date(Date.parse(`${row.to}T00:00:00Z`)+86_400_000).toISOString().slice(0,10) : row.to) >= period.from))
     if (data.length < 500) return rows
   }
 }
@@ -47,6 +49,7 @@ export async function submitLeaveRequest(employeeId: string, form: RequestForm):
     company_id: DEFAULT_COMPANY_ID, employee_name: '', department_name: '',
     ...(form.advanceRequested ? { advance_requested: true } : {}),
     ...(form.endNextDay ? { end_next_day: true } : {}),
+    ...(form.kind === 'offsite' && form.offsiteContinuous ? { offsite_continuous: true } : {}),
     ...(form.kind === 'offsite' && form.offsiteWorkStart ? { offsite_work_start: form.offsiteWorkStart } : {}),
   }).select().single()
   if (error) fail('신청 저장 실패', error)

@@ -33,8 +33,7 @@ export function useMyClockIn() {
   const byDate = useMemo(() => Object.fromEntries(rows.map(row => [row.date, row.clockIn])), [rows])
   const today = koreaDateKey()
   const todayRecord = rows.find(row => row.date === today)
-  const yesterday = new Date(Date.parse(`${today}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10)
-  const overnightEnabled = allowed && !exempt && !todayRecord && rows.some(row => row.date === yesterday && !row.clockOutAt && !row.autoClosedAt)
+  const overnightEnabled = allowed && !exempt && !todayRecord && rows.some(row => row.date < today && !row.clockOutAt && !row.autoClosedAt)
   const overnight = useQuery({ queryKey: ['my-offsite-attendance', userId, today], queryFn: () => offsiteAction('my_offsite_attendance'), enabled: overnightEnabled, refetchInterval: overnightEnabled && active ? 30_000 : false, retry: false })
   useEffect(() => { if (overnightEnabled && overnight.error) console.warn('[attendance-clock] 전일 외근 상태 확인 실패', overnight.error) }, [overnightEnabled, overnight.error])
   const ongoingOffsiteRecord = overnightEnabled && !overnight.error ? continuingOffsiteClock(rows, today, overnight.data) : null

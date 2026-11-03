@@ -20,6 +20,6 @@ export function OffsiteDateTimeFields({ form, maxDate, onChange }: {
       </div>
     </div>
     {range.request && range.minutes != null ? <p className="personal-request-helper" role="status">{form.from.replaceAll('-', '.')} {form.start} → {form.to.replaceAll('-', '.')} {form.end} · 외근 구간 {durationLabel(range.minutes)}</p> : <p className="personal-request-helper" role="status">{range.error}</p>}
-    <p className="personal-request-helper">실제 시작·종료 날짜와 시각을 입력하세요. 날짜가 바뀌면 자동으로 다음 날 종료로 처리합니다. 한 건은 24시간 이내입니다.</p>
+    <p className="personal-request-helper">실제 시작·종료 날짜와 시각을 입력하세요. 여러 날 외근도 주말·공휴일을 포함한 하나의 연속 일정으로 등록합니다. 이 구간 전체가 실제 야근시간으로 자동 누적되지는 않습니다.</p>
   </section>
 }

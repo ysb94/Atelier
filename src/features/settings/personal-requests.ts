@@ -10,7 +10,7 @@ export type RequestKind = typeof REQUEST_KINDS[number]['id'] | 'remote' | 'corre
 export type PersonalRequest = {
   id: string; kind: RequestKind; from: string; to: string; start: string; end: string
   place: string; note: string; status: 'pending' | 'approved' | 'rejected' | 'cancelled'
-  createdAt: string; decisionNote?: string; advanceRequested?: boolean; endNextDay?: boolean; offsiteWorkStart?: string
+  createdAt: string; decisionNote?: string; advanceRequested?: boolean; endNextDay?: boolean; offsiteWorkStart?: string; offsiteContinuous?: boolean
 }
 export type RequestForm = Omit<PersonalRequest, 'id' | 'status' | 'createdAt' | 'decisionNote'>
 export type ReminderBasis = { start: string; end: string; breakStart: string; breakEnd: string; before: number }
@@ -54,7 +54,7 @@ function interval(form: RequestForm | PersonalRequest) {
 }
 export function validateRequest(form: RequestForm, requests: PersonalRequest[], basis: ReminderBasis, today?: string) {
   if (form.offsiteWorkStart) {
-    if (form.kind !== 'offsite' || form.from !== form.to || minuteOf(form.offsiteWorkStart) == null) return '당일 출근 기준은 하루 외근에만 지정할 수 있습니다.'
+    if (form.kind !== 'offsite' || (!form.offsiteContinuous && form.from !== form.to) || minuteOf(form.offsiteWorkStart) == null) return '당일 출근 기준은 외근 시작일에만 지정할 수 있습니다.'
     if (today && form.from < today) return '지난 날짜의 출근 기준은 외근 신청으로 변경할 수 없습니다.'
     if (requests.some(request => request.kind === 'offsite' && request.status === 'approved' && request.from === form.from && request.offsiteWorkStart && request.offsiteWorkStart !== form.offsiteWorkStart)) return '같은 날짜에 다른 출근 기준이 등록되어 있습니다. 기존 외근을 확인해 주세요.'
   }
@@ -64,7 +64,8 @@ export function validateRequest(form: RequestForm, requests: PersonalRequest[], 
   if (form.kind === 'correction' && today && form.from > today) return '앞으로의 날짜는 출퇴근 정정을 신청할 수 없습니다.'
   if (form.endNextDay && form.kind !== 'overtime' && form.kind !== 'correction' && form.kind !== 'offsite') return '다음 날 종료는 외근·야근·출퇴근 정정에만 사용할 수 있습니다.'
   if (form.kind === 'offsite' && form.endNextDay && form.from !== form.to) return '다음 날 종료 외근은 시작일별로 한 건씩 등록해 주세요.'
-  if (!isAllDayRequest(form.kind)) {
+  if (form.offsiteContinuous && (form.kind !== 'offsite' || form.endNextDay || !validDate(form.from) || !validDate(form.to) || minuteOf(form.start) == null || minuteOf(form.end) == null || `${form.from}T${form.start}` >= `${form.to}T${form.end}`)) return '외근 시작·종료 날짜와 시각을 확인해 주세요.'
+  if (!isAllDayRequest(form.kind) && !form.offsiteContinuous) {
     const start = minuteOf(form.start), end = minuteOf(form.end)
     const duration = start == null || end == null ? 0 : end + (form.endNextDay ? 1440 : 0) - start
     if (duration <= 0 || duration > 1440) return '시작·종료 시각을 확인해 주세요. 다음 날 종료는 24시간 이내로 입력해 주세요.'

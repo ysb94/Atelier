@@ -67,7 +67,7 @@ export function useMyHomeNotifications({ coordinator = false } = {}) {
       const href = `/settings/profile?part=${item.tab}&workNotice=${encodeURIComponent(item.event_key)}`
       const label = requestLabel(item.kind)
       return { id: item.event_key, kind: item.event_type==='checkout'?'checkout_needed' as const:'personal_request' as const,
-        title: item.event_type === 'checkout' ? `${item.from_date} 퇴근시간 확인 필요` : item.event_type === 'approval' ? `${item.employee_name} · ${label} 승인 요청` : `${label} ${item.status === 'approved' ? '승인' : '반려'}`,
+        title: item.event_type === 'checkout' ? `${item.from_date} 퇴근시간 확인 필요` : item.event_type === 'offsite-settlement' ? '외근 후처리 결과' : item.event_type === 'approval' ? `${item.employee_name} · ${label} 승인 요청` : `${label} ${item.status === 'approved' ? '승인' : '반려'}`,
         body: item.event_type==='checkout'?`${item.from_date} · 출근 ${item.start_time}\n${item.note}`:`${item.from_date} ~ ${item.to_date} · ${item.start_time}–${item.end_time}${item.decision_note ? `\n처리 의견: ${item.decision_note}` : ''}`,
         createdAt: item.created_at, readAt: item.read_at, current:item.current!==false, href,
         target: { source: item.event_type==='checkout'?'checkout' as const:'request' as const, entityId: item.entity_id, eventVersion: item.event_key, tab: item.tab, href },
@@ -107,7 +107,7 @@ export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout'
           }
         } else {
           const records = await workNotices()
-          for (const item of records.filter(row => row.entity_id === entityId && !row.read_at && (version === `status:${row.status}` || row.event_key === version))) {
+          for (const item of records.filter(row => row.entity_id === entityId && !row.read_at && ((row.event_type!=='offsite-settlement' && version === `status:${row.status}`) || row.event_key === version))) {
             const { error: readError } = await getSupabase().rpc('read_my_home_work_notification',{p_key:item.event_key})
             if (readError) throw readError
           }

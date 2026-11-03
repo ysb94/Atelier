@@ -2,7 +2,7 @@ import { getSupabase } from './client'
 export type OffsiteState = {
   state: 'inactive' | 'scheduled' | 'offsite' | 'returned' | 'clocked_out'
   workDate: string | null; scheduledStartAt: string | null; scheduledEndAt: string | null; serverNow: string
-  overnightSupported?: boolean
+  overnightSupported?: boolean; continuousSupported?: boolean
 }
 export async function offsiteAction(action: 'my_offsite_attendance' | 'return_from_offsite'): Promise<OffsiteState> {
   const { data, error } = await getSupabase().rpc(action)

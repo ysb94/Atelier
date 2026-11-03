@@ -29,4 +29,5 @@ assert.equal(calculate({}, [setting], [{ ...request, kind: 'half', start: '14:00
 assert.equal(calculate({}, [setting], [{ ...request, kind: 'half', start: '13:00', end: '18:00' }]).minutes, 480, '예정 퇴근이 점심 직전이면 추가 근무에서도 점심 제외')
 assert.equal(calculate({}, [setting], [{ ...request, kind: 'half', employeeId: 'other', start: '14:00', end: '18:00' }]).minutes, 180, '다른 직원 휴가 제외')
 assert.equal(calculate({}, [setting], [{ ...request, kind: 'half', status: 'cancelled', start: '14:00', end: '18:00' }]).minutes, 180)
+assert.equal(calculate({to:'2026-11-04',end:'03:00',offsiteContinuous:true}).minutes,1440, 'continuous multi-day actual endpoints include early-morning extra, no daily repetition')
 console.info('Offsite extra hours: individual/monthly schedule, regular-end overlap, leave, overnight, selected month, weekdays/holidays and cancellation passed')
