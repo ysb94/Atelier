@@ -27,6 +27,7 @@
     "verify:department-work-browser": "node scripts/verify-department-work-browser.mjs",
     "verify:work-request-cancellation": "node scripts/verify-work-request-cancellation.mjs",
     "verify:work-request-cancellation-browser": "node scripts/verify-work-request-cancellation-browser.mjs",
+    "verify:required-information-browser": "node scripts/verify-required-information-browser.mjs",
     "verify:work-request-navigation": "node --experimental-strip-types scripts/verify-work-request-navigation.mjs",
     "verify:work-request-settings": "node scripts/verify-work-request-settings.mjs",
     "verify:work-request-managers": "node scripts/verify-work-request-managers.mjs",
