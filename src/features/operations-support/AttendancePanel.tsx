@@ -65,7 +65,7 @@ export function AttendancePanel() {
     {part === 'late' && <AttendanceLatePanel directory={directory} schedules={saved} />}
     {part === 'missed' && <AttendanceDeferredClockOutPanel directory={directory} />}
     {part === 'overtime' && <AttendanceOvertimePanel directory={source} />}
-    {part === 'offsite' && <AttendanceOffsitePanel directory={source} />}
+    {part === 'offsite' && <AttendanceOffsitePanel directory={source} schedules={saved} />}
     {part === 'exemptions' && <AttendanceExemptionsPanel directory={source} />}
   </div>
 }
