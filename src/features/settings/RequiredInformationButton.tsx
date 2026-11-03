@@ -46,9 +46,9 @@ export function RequiredInformationButton() {
         const data = new FormData(event.currentTarget)
         const text = (key: string) => String(data.get(key) ?? '').trim()
         setReview([
-          ['입사일', profile.hireDate || '입사일 미등록'], ['성명', profile.displayName || '성명 미등록'], ['영문명', text('englishName')],
+          ['영문명', text('englishName')],
           ['주민등록번호', `${text('residentFront')}-*******`], ['연락처', text('phone')], ['현 거주지', `${text('address')} ${text('addressDetail')}`.trim()],
-          ['이메일(구글)', profile.email], ['이메일(네이버)', text('naverEmail')], ['은행', bank === 'other' ? text('bankOther') : bank],
+          ['G메일', text('gmail')], ['네이버메일', text('naverEmail')], ['은행', bank === 'other' ? text('bankOther') : bank],
           ['예금주', text('accountHolder')], ['계좌번호', text('accountNumber').replace(/.(?=.{4})/g, '•')],
           ...DOCUMENTS.map(([key, label]): [string, string] => [label, files[key]]),
         ])
@@ -59,13 +59,11 @@ export function RequiredInformationButton() {
           <div hidden={review !== null} className="space-y-5">
             <fieldset className="min-w-0 rounded-xl border border-border p-4"><legend className="px-2 text-sm font-semibold">기본 정보·연락처</legend>
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="입사일 · 회사 등록"><Input readOnly value={profile.hireDate || ''} placeholder="입사일 미등록" /></Field>
-                <Field label="성명 · 회사 등록"><Input readOnly value={profile.displayName || ''} placeholder="성명 미등록" /></Field>
                 <Field label="영문명 *"><Input name="englishName" required maxLength={100} placeholder="여권 등 공식 영문명" /></Field>
                 <div className="space-y-1.5"><span className="text-sm font-medium">주민등록번호 *</span><div className="flex items-center gap-2"><Input aria-label="주민등록번호 앞 6자리" name="residentFront" inputMode="numeric" required pattern="[0-9]{6}" minLength={6} maxLength={6} placeholder="앞 6자리" /><span aria-hidden="true">-</span><Input aria-label="주민등록번호 뒤 7자리" name="residentBack" type={showResidentNumber ? 'text' : 'password'} inputMode="numeric" required pattern="[0-9]{7}" minLength={7} maxLength={7} placeholder="뒤 7자리" /><Button type="button" size="icon" variant="ghost" aria-label={showResidentNumber ? '주민번호 숨기기' : '주민번호 보기'} onClick={() => setShowResidentNumber(value => !value)}>{showResidentNumber ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</Button></div></div>
                 <Field label="연락처 *"><Input name="phone" type="tel" required maxLength={20} placeholder="010-0000-0000" /></Field>
-                <Field label="이메일(구글) · 로그인 계정"><Input readOnly value={profile.email} /></Field>
-                <Field label="이메일(네이버) *"><Input name="naverEmail" type="email" required maxLength={254} placeholder="name@naver.com" /></Field>
+                <Field label="G메일 *"><Input name="gmail" type="email" required defaultValue={profile.email} maxLength={254} placeholder="name@gmail.com" /></Field>
+                <Field label="네이버메일 *"><Input name="naverEmail" type="email" required maxLength={254} placeholder="name@naver.com" /></Field>
                 <div className="grid gap-3 sm:col-span-2"><Field label="현 거주지 *"><Input name="address" required maxLength={200} placeholder="도로명 또는 지번 주소" /></Field><Field label="상세주소"><Input name="addressDetail" maxLength={100} placeholder="동·호수 등 상세주소" /></Field></div>
               </div>
             </fieldset>
