@@ -13,6 +13,14 @@ const EMPTY_FILES: Record<DocumentKind, string> = { identity: '', bank: '', educ
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="block min-w-0 space-y-1.5"><span className="text-sm font-medium">{label}</span>{children}</label>
 }
+function formatPhone(value: string) {
+  const digits = value.replace(/\D/g, '').slice(0, value.startsWith('02') ? 10 : 11)
+  const prefix = digits.startsWith('02') ? 2 : 3
+  if (digits.length <= prefix) return digits
+  if (digits.length <= prefix + 4) return `${digits.slice(0, prefix)}-${digits.slice(prefix)}`
+  const middle = digits.length > prefix + 7 ? 4 : 3
+  return `${digits.slice(0, prefix)}-${digits.slice(prefix, prefix + middle)}-${digits.slice(prefix + middle)}`
+}
 
 /** 개발자 전용 입력 시안. 값·파일은 현재 창에서만 사용하고 닫을 때 정리한다. */
 export function RequiredInformationButton() {
@@ -61,7 +69,18 @@ export function RequiredInformationButton() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="영문명 *"><Input name="englishName" required maxLength={100} placeholder="여권 등 공식 영문명" /></Field>
                 <div className="space-y-1.5"><span className="text-sm font-medium">주민등록번호 *</span><div className="flex items-center gap-2"><Input aria-label="주민등록번호 앞 6자리" name="residentFront" inputMode="numeric" required pattern="[0-9]{6}" minLength={6} maxLength={6} placeholder="앞 6자리" /><span aria-hidden="true">-</span><Input aria-label="주민등록번호 뒤 7자리" name="residentBack" type={showResidentNumber ? 'text' : 'password'} inputMode="numeric" required pattern="[0-9]{7}" minLength={7} maxLength={7} placeholder="뒤 7자리" /><Button type="button" size="icon" variant="ghost" aria-label={showResidentNumber ? '주민번호 숨기기' : '주민번호 보기'} onClick={() => setShowResidentNumber(value => !value)}>{showResidentNumber ? <EyeOff className="size-4" /> : <Eye className="size-4" />}</Button></div></div>
-                <Field label="연락처 *"><Input name="phone" type="tel" required maxLength={20} placeholder="010-0000-0000" /></Field>
+                <Field label="연락처 *"><Input name="phone" type="tel" inputMode="tel" required maxLength={20} placeholder="010-0000-0000" onChange={event => {
+                  const input = event.currentTarget
+                  const before = input.value
+                  const caret = input.selectionStart ?? before.length
+                  const digitsBeforeCaret = before.slice(0, caret).replace(/\D/g, '').length
+                  input.value = formatPhone(before)
+                  if (input.value !== before) {
+                    let position = 0, digits = 0
+                    while (position < input.value.length && digits < digitsBeforeCaret) if (/\d/.test(input.value[position++])) digits++
+                    input.setSelectionRange(position, position)
+                  }
+                }} /></Field>
                 <Field label="G메일 *"><Input name="gmail" type="email" required defaultValue={profile.email} maxLength={254} placeholder="name@gmail.com" /></Field>
                 <Field label="네이버메일 *"><Input name="naverEmail" type="email" required maxLength={254} placeholder="name@naver.com" /></Field>
                 <div className="grid gap-3 sm:col-span-2"><Field label="현 거주지 *"><Input name="address" required maxLength={200} placeholder="도로명 또는 지번 주소" /></Field><Field label="상세주소"><Input name="addressDetail" maxLength={100} placeholder="동·호수 등 상세주소" /></Field></div>
