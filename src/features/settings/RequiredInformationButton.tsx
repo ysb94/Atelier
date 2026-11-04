@@ -6,7 +6,7 @@ import { Input, Select } from '@/components/ui/input'
 import { useAuth } from '@/lib/supabase/auth'
 import { RELEASE_COMPANY_ID, RELEASE_EXCEPTION_IDS } from '@/lib/company/release-access'
 import { OnboardingFiles } from '@/features/org/OnboardingFiles'
-import { EMPLOYEE_FILES, ONBOARDING_QUERY, getOnboarding, loadMyOnboarding, onboardingInformationRows, saveOnboarding, startOnboardingTest, type OnboardingRecord } from '@/lib/supabase/employee-onboarding'
+import { EMPLOYEE_FILES, ONBOARDING_QUERY, getOnboarding, listOnboardings, loadMyOnboarding, onboardingInformationRows, saveOnboarding, startOnboardingTest, type OnboardingRecord } from '@/lib/supabase/employee-onboarding'
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label className="block min-w-0 space-y-1.5"><span className="text-sm font-medium">{label}</span>{children}</label>
 }
@@ -48,11 +48,23 @@ function RequiredInformationContent() {
   const {profile,session}=useAuth(), client=useQueryClient()
   const active=profile?.status==='active' && profile.companyId===RELEASE_COMPANY_ID && session?.user.id===profile.id
   const developer=active && import.meta.env.DEV && profile.id===RELEASE_EXCEPTION_IDS[0]
-  const query=useQuery({queryKey:[ONBOARDING_QUERY,'mine',profile?.id,session?.user.id],queryFn:loadMyOnboarding,enabled:active,retry:false,refetchOnWindowFocus:false})
+  const queryKey=[ONBOARDING_QUERY,'mine',profile?.id,session?.user.id]
+  const query=useQuery({queryKey,queryFn:async()=>{
+    const state=await loadMyOnboarding()
+    if(!developer||!state.ready)return state
+    // 로컬 개발자 테스트도 실제 직원과 같은 완료·되돌리기 표시 규칙을 따른다.
+    const tests=await listOnboardings(),test=tests.items.find(person=>person.isTest&&person.profileId===profile.id)
+    return {ready:tests.ready,record:test?{id:test.id,submittedAt:test.submittedAt,completedAt:test.completedAt}:state.record}
+  },enabled:active,retry:false,refetchOnWindowFocus:false})
   const [record,setRecord]=useState<OnboardingRecord|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('')
   useEffect(()=>{setRecord(null);setError('')},[profile?.id,session?.user.id])
-  if(!active || (!developer && !query.data?.record))return null
-  async function open(){setError('');setBusy(true);try{const id=developer?await startOnboardingTest():query.data!.record!.id;setRecord(await getOnboarding(id))}catch(caught){setError(caught instanceof Error?caught.message:'정보를 불러오지 못했습니다.')}finally{setBusy(false)}}
+  if(!active || query.data?.record?.completedAt || (!developer && !query.data?.record))return null
+  async function open(){setError('');setBusy(true);try{
+    const id=developer?await startOnboardingTest():query.data!.record!.id,next=await getOnboarding(id)
+    // 다른 화면에서 먼저 완료한 경우에도 완료된 입력창을 열지 않는다.
+    if(next.completedAt){client.setQueryData(queryKey,{ready:true,record:{id:next.id,submittedAt:next.submittedAt,completedAt:next.completedAt}});setRecord(null);return}
+    setRecord(next)
+  }catch(caught){setError(caught instanceof Error?caught.message:'정보를 불러오지 못했습니다.')}finally{setBusy(false)}}
   return <><Button type="button" className="h-11 px-7 text-base font-semibold shadow-md" disabled={busy||!query.data?.ready} onClick={()=>void open()}><FileText className="size-4" aria-hidden="true"/>{query.data?.record?.submittedAt?'제출 정보 확인':'필수정보 입력'}</Button>{developer&&!query.data?.ready?<span className="text-xs text-muted-foreground">신규 직원 서버 연결 대기</span>:null}{error?<span role="alert" className="text-sm text-danger">{error}</span>:null}{record?<RequiredInformationForm key={`${profile.id}:${session.user.id}:${record.id}`} initial={record} onClose={()=>{setRecord(null);void client.invalidateQueries({queryKey:[ONBOARDING_QUERY]})}}/>:null}</>
 }
 function RequiredInformationForm({initial,onClose}:{initial:OnboardingRecord;onClose:()=>void}) {

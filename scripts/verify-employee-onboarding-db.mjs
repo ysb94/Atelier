@@ -46,6 +46,12 @@ await db.exec('reset role')
 for(const id of [delegate,ceo]){await db.query("insert into profiles(id,company_id,status,department_id) values($1,$2,'active',$3)",[id,company,dept]);await actor(id);assert.equal((await val('select list_employee_onboardings()')).length,2);assert.ok((await get(list[0].id)).company);await db.exec('reset role')}
 await actor(manager)
 let c=await get(list.find(p=>p.profileId===staff).id)
+// 아무 정보·서류가 없어도 지정 관리자가 완료/되돌리기 할 수 있으며 원본은 보존한다.
+const blankBefore={personal:c.personal,company:c.company,files:c.files,submittedAt:c.submittedAt}
+c=await val('select set_employee_onboarding_complete($1,true,$2)',[c.id,c.version]);assert.ok(c.completedAt)
+assert.deepEqual({personal:c.personal,company:c.company,files:c.files,submittedAt:c.submittedAt},blankBefore)
+await actor(staff);assert.ok((await val('select get_my_employee_onboarding_status()')).completedAt)
+await actor(manager);c=await val('select set_employee_onboarding_complete($1,false,$2)',[c.id,c.version]);assert.equal(c.completedAt,null)
 const wage={wageMode:'excel',periodMode:'auto',hireDate:'2026-10-21',documentDate:'2026-11-03',contractTerm:'fixed',contractMonths:'3',wageTerm:'until-change',probationApply:'yes',probationMonths:'3',payBasis:'월급x12개월',workDays:'주5일(월~금)',workStart:'09:00',workEnd:'18:00',breakStart:'13:00',breakEnd:'14:00',workHours:'09:00 ~ 18:00',breakTime:'13:00 ~ 14:00',fixedOvertimePlan:'유형 1',annualSalary:'50400000',mealAllowance:'200000',departmentId:dept,position:'',jobGrade:'사원',basePay:'999999999'}
 await db.exec('reset role')
 for(const annualSalary of ['30000000','35999999','36000000','36300000','36300012','50400000','77000000']){

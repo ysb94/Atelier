@@ -26,7 +26,7 @@ const server=await createServer({root,configFile:false,envDir:false,logLevel:'er
    if(name==='get_my_employee_onboarding_status')data=actor==='staff'?{id:'case-employee',submittedAt:records.get('case-employee').submittedAt,completedAt:records.get('case-employee').completedAt}:null
    else if(name==='list_employee_onboardings')data=[...records.values()].map(summary)
    else if(name==='get_employee_onboarding'){data=structuredClone(records.get(p.p_case));if(actor==='staff')data.company=null}
-   else if(name==='start_employee_onboarding_test'){data='case-test';if(!records.has(data))records.set(data,{...records.get('case-employee'),id:data,profileId:dev,isTest:true,personal:{},company:null,files:[],version:0})}
+   else if(name==='start_employee_onboarding_test'){data='case-test';if(!records.has(data))records.set(data,{...records.get('case-employee'),id:data,profileId:dev,isTest:true,personal:{},company:null,files:[],version:0,submittedAt:null,completedAt:null})}
    else if(name==='save_employee_onboarding'){const c=records.get(p.p_case);assert.equal(c.version,p.p_version);if(p.p_section==='company')c.company=calculateCompanyWage(calculateCompanyPeriods(p.p_data)).value;else c.personal=p.p_data;if(p.p_section==='submit')c.submittedAt=new Date().toISOString();c.version++;data=c;writes.push(p.p_section)}
    else if(name==='begin_employee_onboarding_file'){data={id:'file-'+(++sequence),path:'fixture/'+sequence};pendingFiles.set(data.id,{...p,...data})}
    else if(name==='upload'){if(failUpload){failUpload=false;error={code:'test',message:'upload failed'}}}
@@ -46,6 +46,20 @@ try{
  const context=await browser.newContext(),page=await context.newPage(),remote=[],errors=[];page.setDefaultTimeout(30000);page.on('pageerror',e=>errors.push(e.message))
  await context.route('**/*',route=>route.request().url().startsWith(origin+'/')?route.continue():(remote.push(route.request().url()),route.abort()))
  await page.goto(origin+'/?actor=staff',{timeout:90000});console.log('fixture loaded');const required=page.getByRole('dialog',{name:'필수정보 입력',exact:true})
+ const initialManager=await context.newPage();await initialManager.goto(origin+'/?actor=ops',{timeout:90000})
+ const emptyRow=initialManager.getByRole('row').filter({hasText:'검증 직원'}),emptyCase=records.get('case-employee')
+ await emptyRow.getByRole('button',{name:'완료',exact:true}).click();const confirmation=initialManager.getByRole('dialog',{name:'검증 직원 · 완료 처리',exact:true})
+ assert.match(await confirmation.innerText(),/정말 완료 처리하시겠습니까/);assert.equal(emptyCase.completedAt,null)
+ await confirmation.getByRole('button',{name:'닫기',exact:true}).click();assert.equal(emptyCase.completedAt,null,'취소하면 완료하지 않음')
+ await emptyRow.getByRole('button',{name:'완료',exact:true}).click();await confirmation.getByRole('button',{name:'확인하고 완료',exact:true}).click();await confirmation.waitFor({state:'detached'})
+ assert.ok(emptyCase.completedAt);assert.deepEqual(emptyCase.personal,{});assert.equal(emptyCase.company,null);assert.deepEqual(emptyCase.files,[])
+ await page.getByRole('button',{name:'필수정보 입력',exact:true}).click()
+ await page.waitForFunction(()=>![...document.querySelectorAll('button')].some(button=>button.textContent==='필수정보 입력'))
+ assert.equal(await required.count(),0,'다른 화면에서 완료했다면 오래 열린 버튼을 눌러도 입력창을 열지 않음')
+ await page.reload({waitUntil:'networkidle'});assert.equal(await page.getByRole('button',{name:/^(필수정보 입력|제출 정보 확인)$/}).count(),0,'미입력 상태로 완료해도 직원 버튼 숨김')
+ await initialManager.getByRole('button',{name:'완료 목록',exact:true}).click();await emptyRow.getByRole('button',{name:'진행 중으로 되돌리기',exact:true}).click();await confirmation.getByRole('button',{name:'진행 중으로 되돌리기',exact:true}).click();await confirmation.waitFor({state:'detached'})
+ await page.reload({waitUntil:'networkidle'});assert.equal(await page.getByRole('button',{name:'필수정보 입력',exact:true}).count(),1,'되돌리면 직원 입력 버튼 다시 표시')
+ await initialManager.close()
  await page.getByRole('button',{name:'필수정보 입력',exact:true}).click();await required.getByLabel('영문명 *',{exact:true}).fill('TEST STAFF');await required.getByRole('button',{name:'임시 저장',exact:true}).click();await required.getByRole('status').filter({hasText:'임시 저장했습니다.'}).waitFor()
  await required.getByRole('button',{name:'닫기',exact:true}).click();await page.reload();await page.getByRole('button',{name:'필수정보 입력',exact:true}).click();assert.equal(await required.getByLabel('영문명 *',{exact:true}).inputValue(),'TEST STAFF')
  for(const [label,value] of [['주민등록번호 앞 6자리','940102'],['주민등록번호 뒤 7자리','1000000'],['연락처 *','01012345678'],['G메일 *','test.staff@gmail.com'],['네이버메일 *','test.staff@naver.com'],['현 거주지 *','검증 주소'],['계좌번호 *','123456']])await required.getByLabel(label,{exact:true}).fill(value)
@@ -64,10 +78,17 @@ try{
  for(const label of ['근로계약서','개인정보 수집 동의서','생체인식정보 동의서'])await file(docs,label,label+'.pdf')
  failUpload=true;await docs.getByLabel('신분증 사본 업로드',{exact:true}).setInputFiles({name:'replacement.pdf',mimeType:'application/pdf',buffer:Buffer.from('%PDF-1.7\nfixture')});await docs.getByRole('alert').waitFor();assert.equal(records.get('case-employee').files.find(f=>f.kind==='identity').name,'신분증 사본.pdf')
  await docs.getByRole('button',{name:'닫기',exact:true}).click();await row.getByRole('button',{name:'완료',exact:true}).click();let complete=manager.getByRole('dialog',{name:'검증 직원 · 완료 처리',exact:true});await complete.getByRole('button',{name:'확인하고 완료',exact:true}).click();await complete.waitFor({state:'detached'});assert.equal(await row.count(),0)
+ await page.reload({waitUntil:'networkidle'});assert.equal(await page.getByRole('button',{name:/^(필수정보 입력|제출 정보 확인)$/}).count(),0,'제출 후 완료한 경우에도 버튼 숨김')
  await manager.getByRole('button',{name:'완료 목록',exact:true}).click();await row.waitFor();await row.getByRole('button',{name:'진행 중으로 되돌리기',exact:true}).click();await complete.getByRole('button',{name:'진행 중으로 되돌리기',exact:true}).click();await complete.waitFor({state:'detached'});await manager.getByRole('button',{name:'진행 중',exact:true}).click();await row.waitFor()
  await manager.waitForFunction(()=>[...document.querySelectorAll('button')].some(b=>b.textContent==='진행 중'&&b.className.includes('bg-primary')));await manager.screenshot({path:path.join(temp,'manager-desktop.png')});await manager.setViewportSize({width:390,height:844});await manager.screenshot({path:path.join(temp,'manager-mobile.png')});assert.ok(await manager.evaluate(()=>document.documentElement.scrollWidth<=innerWidth))
  await manager.evaluate(()=>window.setOnboardingActor('other'));assert.equal(await manager.getByRole('button',{name:'회사정보 입력',exact:true}).count(),0);assert.equal(await manager.locator('input[name="residentBack"]').count(),0)
  await page.goto(origin+'/?actor=dev');await page.getByRole('button',{name:'필수정보 입력',exact:true}).click();assert.match(await page.getByRole('dialog').innerText(),/실제 개발자 계정의 정보/)
+ await page.getByRole('button',{name:'필수정보 입력 닫기',exact:true}).click()
+ const developerRow=page.getByRole('row').filter({hasText:'개발자 · 테스트'})
+ await developerRow.getByRole('button',{name:'완료',exact:true}).click();const developerComplete=page.getByRole('dialog',{name:'개발자 · 테스트 · 완료 처리',exact:true})
+ await developerComplete.getByRole('button',{name:'확인하고 완료',exact:true}).click();await developerComplete.waitFor({state:'detached'});await page.getByRole('button',{name:'필수정보 입력',exact:true}).waitFor({state:'hidden'});assert.equal(await page.getByRole('button',{name:'필수정보 입력',exact:true}).count(),0,'개발자 테스트도 완료 후 상태 갱신으로 숨김')
+ await page.reload({waitUntil:'networkidle'});assert.equal(await page.getByRole('button',{name:'필수정보 입력',exact:true}).count(),0,'새로고침해도 개발자 완료 상태 유지')
+ await page.getByRole('button',{name:'완료 목록',exact:true}).click();await developerRow.getByRole('button',{name:'진행 중으로 되돌리기',exact:true}).click();await developerComplete.getByRole('button',{name:'진행 중으로 되돌리기',exact:true}).click();await developerComplete.waitFor({state:'detached'});await page.getByRole('button',{name:'필수정보 입력',exact:true}).waitFor({state:'visible'});assert.equal(await page.getByRole('button',{name:'필수정보 입력',exact:true}).count(),1)
  assert.deepEqual(remote,[]);assert.deepEqual(errors,[]);assert.ok(writes.includes('draft')&&writes.includes('submit')&&writes.includes('company'))
- console.log('PASS two browser screens, draft/reload, five uploads, submit/masking, company payroll, selected employee A4, signed files, failed replacement preservation, complete/reopen, PC/mobile and actor switch; all requests stayed in fixture server')
+ console.log('PASS empty-case completion/confirmation cancel, staff/developer button hide/reopen/reload/stale open, two browser screens, draft, uploads, submit, payroll, A4, failure preservation, PC/mobile and actor switch; all requests stayed in fixture server')
 }catch(error){console.error(error);throw error}finally{await browser?.close();await server.close()}
