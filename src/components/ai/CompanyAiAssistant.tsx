@@ -268,7 +268,7 @@ export function CompanyAiAssistant() {
           <header className="flex shrink-0 items-start justify-between gap-3 border-b border-border px-3 py-2.5">
             <div className="min-w-0">
               <h2 id={titleId} className="truncate text-sm font-medium">
-                Atelier
+                E&amp;J
               </h2>
               <p className="text-[11px] text-muted-foreground">
                 앱 사용법 · 문장 정리 · 오늘 {usedToday}/{dailyLimit}회
@@ -367,8 +367,8 @@ export function CompanyAiAssistant() {
         aria-expanded={open}
         aria-haspopup="dialog"
         aria-controls={open ? dialogId : undefined}
-        aria-label={open ? 'Atelier 닫기' : 'Atelier 열기'}
-        title="Atelier"
+        aria-label={open ? 'E&J 닫기' : 'E&J 열기'}
+        title="E&J"
         onClick={() => (open ? closePanel() : openPanel())}
         className="pointer-events-auto inline-flex size-14 items-center justify-center rounded-full bg-[linear-gradient(180deg,#c4b5fd_0%,#7c3aed_100%)] text-white shadow-lg transition-opacity hover:opacity-95"
       >

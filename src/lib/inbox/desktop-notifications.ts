@@ -13,7 +13,7 @@ export function desktopCandidates(items: readonly InboxNotification[], seen: Set
 
 export function desktopBody(item: InboxNotification): string {
   // Free-text reasons and decision comments stay inside the authenticated site.
-  return item.action?.label ? `${item.action.label} · 자세한 내용은 Atelier에서 확인하세요.` : '새 업무 알림입니다. 자세한 내용은 Atelier에서 확인하세요.'
+  return item.action?.label ? `${item.action.label} · 자세한 내용은 E&J에서 확인하세요.` : '새 업무 알림입니다. 자세한 내용은 E&J에서 확인하세요.'
 }
 
 export function desktopBackgroundEnabled(userId?: string): boolean {

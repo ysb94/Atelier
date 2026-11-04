@@ -1,4 +1,6 @@
 import { myHomeNotificationSummary } from '@/lib/inbox/my-home-notifications'
+import { browserUnreadCount } from '@/lib/workspace/browser-title'
+import { useBrowserTabIdentity } from './browser-identity-context'
 import { useMyHomeNotifications } from '@/features/settings/use-my-home-notifications'
 import {
   useCallback,
@@ -101,6 +103,11 @@ function ReleasedHeaderActions() {
   const chatCount = useMemo(
     () => rooms.reduce((sum, room) => sum + room.unread, 0),
     [rooms],
+  )
+  const browserCount = useMemo(() => browserUnreadCount(notifications, rooms), [notifications, rooms])
+  useBrowserTabIdentity(
+    session?.user.id === profile?.id && !preview?.selected ? profile?.id : undefined,
+    browserCount,
   )
 
   const closePanel = useCallback(() => {

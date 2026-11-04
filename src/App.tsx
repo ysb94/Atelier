@@ -9,6 +9,7 @@ import { AuthProvider } from '@/lib/supabase/auth'
 import { AttendanceEntryProvider } from '@/features/home/attendance-entry-context'
 import { AttendanceEntryGate } from '@/features/home/AttendanceEntryGate'
 import { MeetingStartReminder } from '@/features/meetings/MeetingStartReminder'
+import { BrowserIdentityProvider } from '@/components/layout/BrowserIdentity'
 import {
   exposeDiagnosticsSwitch,
   installPerfWatch,
@@ -41,12 +42,12 @@ export default function App() {
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <AccessIpRecorder />
-        <AuthGate><BrowserRouter><AttendanceEntryProvider><AttendanceEntryGate><MeetingStartReminder /><Routes>
+        <BrowserRouter><BrowserIdentityProvider><AuthGate><AttendanceEntryProvider><AttendanceEntryGate><MeetingStartReminder /><Routes>
           <Route path="/chat/room/:roomId" element={<ChatWindowPage />} />
           <Route path="/b/:brandSlug/*" element={<BrandLayout />} />
           <Route path="/*" element={<CompanyLayout />} />
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes></AttendanceEntryGate></AttendanceEntryProvider></BrowserRouter></AuthGate>
+        </Routes></AttendanceEntryGate></AttendanceEntryProvider></AuthGate></BrowserIdentityProvider></BrowserRouter>
       </AuthProvider>
     </QueryClientProvider>
   )

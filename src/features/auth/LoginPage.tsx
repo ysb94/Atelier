@@ -20,7 +20,7 @@ export function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="mb-8">
           <p className="mb-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground">
-            Atelier
+            E&amp;J
           </p>
           <h1 className="text-2xl font-semibold tracking-tight">로그인</h1>
           <p className="mt-2 text-sm text-muted-foreground">

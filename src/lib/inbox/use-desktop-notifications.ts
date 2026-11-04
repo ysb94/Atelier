@@ -52,7 +52,7 @@ export function useDesktopNotifications(userId: string | undefined, items: reado
         const state = latest.current
         const current = state.items.find(row => desktopEventKey(row) === key)
         if (state.userId !== userId || !state.enabled || permission() !== 'granted' || document.visibilityState !== 'hidden' || !current || current.readAt || current.current === false) return false
-        const toast = new Notification(item.title, { body: desktopBody(item), icon: '/favicon.svg', tag: key })
+        const toast = new Notification(`E&J · ${item.title}`, { body: desktopBody(item), icon: '/ej-icon-192.png', tag: key })
         notifications.current.set(key, toast)
         toast.onclose = () => { notifications.current.delete(key) }
         toast.onclick = () => {
@@ -92,7 +92,7 @@ export function useDesktopNotifications(userId: string | undefined, items: reado
   }
   function test() {
     try {
-      const toast = new Notification('Atelier PC 알림 테스트', { body: '새 업무 알림이 이곳에 표시됩니다.', icon: '/favicon.svg', tag: 'atelier-desktop-test' })
+      const toast = new Notification('E&J PC 알림 테스트', { body: '새 업무 알림이 이곳에 표시됩니다.', icon: '/ej-icon-192.png', tag: 'atelier-desktop-test' })
       notifications.current.set('test', toast)
       toast.onclick = () => { toast.close(); window.focus() }
       toast.onclose = () => { notifications.current.delete('test') }

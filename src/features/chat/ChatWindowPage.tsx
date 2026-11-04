@@ -13,6 +13,8 @@ import { useChatRooms } from './use-chat'
 import { useChatSending } from './use-chat-sending'
 import { DeveloperPreviewBar, DeveloperPreviewPage, DeveloperPreviewProvider } from '@/components/layout/DeveloperPreview'
 import { usePagePreview } from '@/lib/company/page-preview-context'
+import { useBrowserTabIdentity } from '@/components/layout/browser-identity-context'
+import { browserUnreadCount } from '@/lib/workspace/browser-title'
 
 export function ChatWindowPage() {
   return <DeveloperPreviewProvider><div className="flex h-full min-h-0 flex-col"><DeveloperPreviewBar scope="chat" /><DeveloperPreviewPage><ChatWindowContent /></DeveloperPreviewPage></div></DeveloperPreviewProvider>
@@ -23,7 +25,7 @@ function ChatWindowContent() {
   const preview = usePagePreview()
   const { roomId = '' } = useParams()
   const titleId = useId()
-  const { profile } = useAuth()
+  const { profile, session } = useAuth()
   const enabled = profile?.status === 'active'
   useChatRealtime(enabled)
   const roomsQuery = useChatRooms(enabled)
@@ -34,9 +36,11 @@ function ChatWindowContent() {
   const [info, setInfo] = useState(false)
   const uploading = sending.uploads.some((item) => item.roomId === roomId && !item.error)
 
-  useEffect(() => {
-    document.title = room ? `${room.title} - 채팅` : '채팅'
-  }, [room])
+  useBrowserTabIdentity(
+    session?.user.id === profile?.id && !preview?.active ? profile?.id : undefined,
+    browserUnreadCount([], rooms),
+    room ? `${room.title} · 채팅` : '채팅',
+  )
 
   useEffect(() => {
     if (!uploading) return
