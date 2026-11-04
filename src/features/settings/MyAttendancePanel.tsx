@@ -265,7 +265,18 @@ export function MyAttendancePanel() {
     const normalized = offsiteSubmission(form)
     if (normalized.error || !normalized.request) { setFormError(normalized.error); return }
     const submission = groupEnabled && !participants.includes(userId!) ? { ...normalized.request, offsiteWorkStart: undefined } : normalized.request
-    const error = validateRequest(submission, groupEnabled ? [] : leave.requests, isLeaveRequest(form.kind) ? DEFAULT_REMINDER_BASIS : basis, today)
+    const workdayStarts: Record<string, string | null> = {}
+    if (!groupEnabled && (submission.kind === 'annual' || submission.kind === 'offsite')) {
+      const endDate = submission.endNextDay ? new Date(Date.parse(`${submission.to}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10) : submission.to
+      const dates = submission.kind === 'annual' ? [submission.from] : [...new Set(leave.requests.filter(item => item.kind === 'annual' && item.from > submission.from && item.from <= endDate && ['pending', 'approved'].includes(item.status)).map(item => item.from))]
+      try {
+        await Promise.all(dates.map(async date => { const dayBasis = await getMyWorkdayBasis(date); workdayStarts[date] = dayBasis.configured ? dayBasis.start : null }))
+      } catch (failure) {
+        setFormError(failure instanceof Error ? failure.message : '출근 기준을 확인하지 못했습니다. 다시 시도해 주세요.')
+        return
+      }
+    }
+    const error = validateRequest(submission, groupEnabled ? [] : leave.requests, isLeaveRequest(form.kind) ? DEFAULT_REMINDER_BASIS : basis, today, workdayStarts)
       || (isOfficialLeave(form.kind) && !officialFile ? '공가 서류를 첨부해 주세요.' : '')
     if (error) { setFormError(error); return }
     if (submission.kind === 'offsite' && groupEnabled) {

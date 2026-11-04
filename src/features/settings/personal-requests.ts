@@ -52,7 +52,7 @@ function interval(form: RequestForm | PersonalRequest) {
   const next = form.endNextDay ? new Date(Date.parse(`${form.to}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10) : form.to
   return [form.from + (isAllDayRequest(form.kind) ? 'T00:00' : `T${form.start}`), next + (isAllDayRequest(form.kind) ? 'T24:00' : `T${form.end}`)]
 }
-export function validateRequest(form: RequestForm, requests: PersonalRequest[], basis: ReminderBasis, today?: string) {
+export function validateRequest(form: RequestForm, requests: PersonalRequest[], basis: ReminderBasis, today?: string, workdayStarts: Readonly<Record<string, string | null>> = {}) {
   if (form.offsiteWorkStart) {
     if (form.kind !== 'offsite' || (!form.offsiteContinuous && form.from !== form.to) || minuteOf(form.offsiteWorkStart) == null) return '당일 출근 기준은 외근 시작일에만 지정할 수 있습니다.'
     if (today && form.from < today) return '지난 날짜의 출근 기준은 외근 신청으로 변경할 수 없습니다.'
@@ -91,8 +91,14 @@ export function validateRequest(form: RequestForm, requests: PersonalRequest[], 
       if (!['pending','approved'].includes(item.status) || item.kind === 'correction') return false
       // 근무 장소(외근·재택)는 반차·반반차·야근과 같은 시간에 둘 수 있다. DB 트리거와 같은 규칙을 유지한다.
       if ((isLocationRequest(form.kind) && timed(item.kind)) || (isLocationRequest(item.kind) && timed(form.kind))) return false
+      const offsite = form.kind === 'offsite' && item.kind === 'annual' ? form : item.kind === 'offsite' && form.kind === 'annual' ? item : null
+      const annual = form.kind === 'annual' ? form : item.kind === 'annual' ? item : null
+      if (offsite && annual && offsite.from < annual.from && (offsite.endNextDay || offsite.offsiteContinuous)) {
+        const start = workdayStarts[annual.from]
+        if (start && minuteOf(start) != null && interval(offsite)[1] <= `${annual.from}T${start}`) return false
+      }
       const [itemFrom, itemTo] = interval(item)
-      // A full-day leave conflicts with any work request. Time intervals use strict boundaries.
+      // Remaining overlaps keep the existing strict interval boundaries.
       return from < itemTo && to > itemFrom
     })
     if (conflict) return '같은 시간에 대기 중이거나 승인된 신청이 있습니다. 기존 신청을 확인해 주세요.'

@@ -82,6 +82,7 @@
     "verify:styled-image-deployment": "node scripts/verify-styled-image-deployment.mjs",
     "verify:diagnostics": "node scripts/verify-diagnostics.mjs",
     "verify:overtime-actuals": "node --experimental-strip-types src/features/operations-support/overtime-hours.verify.ts && node --experimental-strip-types src/features/home/my-attendance-summary.verify.ts && node scripts/verify-overtime-actuals-db.mjs && node scripts/verify-overtime-actuals-browser.mjs",
+    "verify:overnight-annual": "node --experimental-strip-types src/features/settings/overnight-annual.verify.ts && node scripts/verify-overnight-annual-db.mjs && node scripts/verify-overnight-annual-browser.mjs",
     "verify:offsite-groups": "node scripts/verify-offsite-groups-db.mjs && node scripts/verify-offsite-groups-browser.mjs",
     "verify:offsite-extra-hours": "node --experimental-strip-types src/features/operations-support/offsite-extra-hours.verify.ts && node scripts/verify-overtime-actuals-browser.mjs",
     "verify:offsite-workday-start": "node --experimental-strip-types src/features/operations-support/offsite-workday-start.verify.ts && node scripts/verify-offsite-workday-start-db.mjs && node scripts/verify-offsite-overnight-browser.mjs && node scripts/verify-overtime-actuals-browser.mjs",
