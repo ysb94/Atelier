@@ -1,6 +1,6 @@
 # Supabase 데이터 아키텍처 원칙
 
-- 2026-11-04 로그인·공통 알림·숨겨진 My Schedule·연차 반복 조회 최적화는 [READ_LOADING_OPTIMIZATION.md](READ_LOADING_OPTIMIZATION.md)를 따른다. 기존 데이터·권한을 보존하는 로컬 검증을 수행했으며, 기존 함수 4개 보완 SQL은 공유 DB 적용 승인과 서버 정의 최종 대조를 기다린다. test/main 배포는 별도 승인 대상이다.
+- 2026-11-04 로그인·공통 알림·숨겨진 My Schedule·연차 반복 조회 최적화는 [READ_LOADING_OPTIMIZATION.md](READ_LOADING_OPTIMIZATION.md)를 따른다. 로컬 검증 후 `05e5128`로 저장·push했고 기존 함수 4개의 공유 DB 적용 승인을 받았다. 다만 MCP·CLI 연결 시간 초과로 최종 정의 대조를 못 해 DB는 아직 변경하지 않았다. 연결 정상화 후 같은 승인 범위의 적용·검증을 이어간다. test/main 배포는 별도 승인 대상이다.
 
 - 2026-11-04 밤샘 외근 다음 날 연차는 [OVERNIGHT_ANNUAL.md](OVERNIGHT_ANNUAL.md)를 따른다. 사용자 승인 후 `20261104041501_overnight_offsite_annual_overlap.sql`을 공유 DB에 적용했다. 가상 직원 8명으로 양쪽 등록 순서·출근 기준 경계·당일 변경·1일 차감을 실제 인증 역할에서 검증하고 모두 롤백했다. 기존 원본·정책·권한과 보안 점검 결과를 보존했다.
 
