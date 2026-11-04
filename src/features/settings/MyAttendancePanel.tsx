@@ -48,7 +48,6 @@ import { meetingKindLabel } from '@/features/meetings/meeting-kinds'
 
 const STATUS_LABELS = { pending: '승인 대기', approved: '승인', rejected: '반려', cancelled: '취소' }
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
-const WORKWEEK = ['월', '화', '수', '목', '금']
 type Layer = 'clock' | 'leave' | 'work' | 'fix' | 'holiday' | 'closed'
 const REMINDER_OPTIONS = [
   { key: 'arrival', label: '출근 전 알림', detail: '종일 휴가는 제외하고, 오전 휴가는 복귀 시각 기준으로 안내' },
@@ -59,13 +58,10 @@ const REMINDER_OPTIONS = [
 
 function dayOfWeek(date: string) { return new Date(`${date}T12:00:00+09:00`).getUTCDay() }
 function calendarCells(month: string) {
-  const dates = attendanceMonthDates(month).filter(date => {
-    const weekday = dayOfWeek(date)
-    return weekday !== 0 && weekday !== 6
-  })
-  const lead = dates.length ? dayOfWeek(dates[0]) - 1 : 0
+  const dates = attendanceMonthDates(month)
+  const lead = dates.length ? dayOfWeek(dates[0]) : 0
   const cells: (string | null)[] = [...Array.from({ length: lead }, () => null), ...dates]
-  while (cells.length % 5) cells.push(null)
+  while (cells.length % 7) cells.push(null)
   return cells
 }
 function requestLayer(kind: RequestKind) {
@@ -397,7 +393,7 @@ export function MyAttendancePanel() {
       </header>
       <div className="personal-request-shell">
         <div className="personal-request-month" role="group" aria-label={`${monthLabel(month)} 근태 달력`}>
-          {WORKWEEK.map(day => <div key={day} aria-hidden="true" className="personal-request-weekday">{day}</div>)}
+          {WEEKDAYS.map((day, index) => <div key={day} aria-hidden="true" className={`personal-request-weekday${index === 0 || index === 6 ? ' is-off' : ''}`}>{day}</div>)}
           {cells.map((date, index) => {
             if (!date) return <div key={`blank-${index}`} className="agenda-day is-blank" aria-hidden="true"/>
             const day = dayIndex.get(date)!
@@ -414,7 +410,7 @@ export function MyAttendancePanel() {
             const visibleItems = items.slice(0, dayTodos.length ? Math.max(0, remainingSlots - 1) : remainingSlots)
             const visibleTodos = dayTodos.slice(0, Math.max(0, remainingSlots - visibleItems.length))
             const hidden = items.length - visibleItems.length + dayTodos.length - visibleTodos.length + dayMeetings.length - visibleMeetings.length
-            return <div key={date} className={`agenda-day${holiday ? ' is-off' : ''}${date === today ? ' is-today' : ''}${selected === date ? ' is-selected' : ''}`} onClick={() => pickDate(date)} onDoubleClick={() => openAddMenu(date)}>
+            return <div key={date} className={`agenda-day${holiday || dayOfWeek(date) === 0 || dayOfWeek(date) === 6 ? ' is-off' : ''}${date === today ? ' is-today' : ''}${selected === date ? ' is-selected' : ''}`} onClick={() => pickDate(date)} onDoubleClick={() => openAddMenu(date)}>
               <button type="button" className="agenda-num" aria-pressed={selected === date} aria-label={`${dateLabel(date)} (${WEEKDAYS[dayOfWeek(date)]}) ${holiday ? `${holiday} ` : ''}출근 ${time.start || '없음'} 퇴근 ${time.end || '없음'}${time.corrected ? ' 정정' : ''} 신청 ${items.length}건 Todo ${dayTodos.length}건`} onClick={() => pickDate(date)}>{Number(date.slice(8))}</button>
               {layers.holiday && holiday && <button type="button" className="agenda-bar is-holiday" onClick={event => { event.stopPropagation(); pickDate(date); setDetail({ type: 'holiday', date, name: holiday }) }}>{holiday}</button>}
               {timeText && <button type="button" className={`agenda-clock${time.corrected ? ' is-corrected' : ''}`} onClick={event => { event.stopPropagation(); pickDate(date); setDetail({ type: 'clock', date, start: time.start, end: time.end, corrected: time.corrected, reported: !time.corrected && Boolean(day.clockOutReportedAt) }) }}>{timeText}{time.corrected && <b className="agenda-fix-tag">정정</b>}{!time.corrected && day.clockOutReportedAt && <b className="agenda-fix-tag">본인 확인 입력</b>}</button>}
