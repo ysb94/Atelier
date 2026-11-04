@@ -1,4 +1,7 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import type { SupabaseClient } from '@supabase/supabase-js'
+import { createDiagnosedClient } from './diagnosed-client'
+import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
+import { createSupabaseFetch } from './request-policy'
 
 /**
  * 브라우저용 Supabase 클라이언트.
@@ -23,10 +26,15 @@ let client: SupabaseClient | null = null
 export function getSupabase(): SupabaseClient {
   const problem = missingEnvMessage()
   if (problem || !url || !publishableKey) {
+    startWorkflow('db', 'configure_client').fail(new Error(problem ?? 'Supabase 환경변수가 없습니다.'))
     throw new Error(problem ?? 'Supabase 환경변수가 없습니다.')
   }
   if (!client) {
-    client = createClient(url, publishableKey)
+    client = createDiagnosedClient(url, publishableKey, {
+      // Query owns retry/backoff. SDK retries otherwise multiply each failed read.
+      db: { retry: false },
+      global: { fetch: createSupabaseFetch(url) },
+    })
   }
   return client
 }

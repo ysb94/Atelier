@@ -12,15 +12,17 @@ await mkdir(dir, { recursive: true })
 await writeFile(path.join(dir, 'client.ts'), `
 const params=new URLSearchParams(location.search),listeners=new Set();
 const sessionFor=(id,token=id+'-token')=>id?{user:{id,email:id+'@example.invalid'},access_token:token}:null;
-export const fixture={session:sessionFor('ordinary'),jobs:[],sessionCalls:0,insideCallback:false,readInCallback:0,
+export const fixture={session:sessionFor('ordinary'),jobs:[],sessionCalls:0,insideCallback:false,readInCallback:0,sessionResolvers:[],sessionMode:params.has('session-hang')?'hang':params.has('session-reject')?'reject':'ok',
+ recoverSession(id='ordinary'){this.sessionMode='ok';this.session=sessionFor(id)},
+ finishSessions(id){for(const resolve of this.sessionResolvers)resolve({data:{session:sessionFor(id)},error:null})},
  emit(event,id='ordinary',token){this.session=sessionFor(id,token);for(const fn of listeners){this.insideCallback=true;try{fn(event,this.session)}finally{this.insideCallback=false}}},
  finish(index,patch={}){const job=this.jobs[index];job.resolve(patch===null?null:{id:job.id,status:'active',nameConfirmedAt:'done',permissionGrants:['staff'],...patch})},
  fail(index){this.jobs[index].reject(new Error('fixture profile read failed'))},
 };
 export function getMyProfile(){fixture.readInCallback+=Number(fixture.insideCallback);const id=fixture.session?.user.id;return new Promise((resolve,reject)=>fixture.jobs.push({id,resolve,reject}))}
 export const getSupabase=()=>({auth:{
- getSession(){fixture.sessionCalls++;if(params.has('session-reject'))return Promise.reject(new Error('fixture session failed'));if(params.has('session-hang'))return new Promise(()=>{});return Promise.resolve({data:{session:fixture.session},error:null})},
- onAuthStateChange(fn){listeners.add(fn);if(!params.has('session-reject')&&!params.has('session-hang'))setTimeout(()=>{if(listeners.has(fn))fn('INITIAL_SESSION',fixture.session)},0);return {data:{subscription:{unsubscribe(){listeners.delete(fn)}}}}},
+ getSession(){fixture.sessionCalls++;if(fixture.sessionMode==='reject')return Promise.reject(new Error('fixture session failed'));if(fixture.sessionMode==='hang')return new Promise(resolve=>fixture.sessionResolvers.push(resolve));return Promise.resolve({data:{session:fixture.session},error:null})},
+ onAuthStateChange(fn){listeners.add(fn);setTimeout(()=>{if(listeners.has(fn))fn('INITIAL_SESSION',fixture.sessionMode==='ok'?fixture.session:null)},0);return {data:{subscription:{unsubscribe(){listeners.delete(fn)}}}}},
  signOut:async()=>{fixture.emit('SIGNED_OUT',null);return{error:null}},
 }});
 export const isSupabaseConfigured=()=>true;
@@ -54,7 +56,7 @@ try {
   })
   const page = await context.newPage()
   page.on('pageerror', e => errors.push(e.message))
-  const state = () => page.evaluate(() => ({ ready: window.auth.ready, id: window.auth.profile?.id, error: window.auth.profileError, user: window.auth.session?.user.id, calls: window.fixture.jobs.length }))
+  const state = () => page.evaluate(() => ({ ready: window.auth.ready, id: window.auth.profile?.id, error: window.auth.profileError, sessionError: window.auth.sessionError, user: window.auth.session?.user.id, calls: window.fixture.jobs.length }))
   const jobs = n => page.waitForFunction(n => window.fixture?.jobs.length >= n, n)
   const finish = (i, patch = {}) => page.evaluate(([i, patch]) => window.fixture.finish(i, patch), [i, patch])
   const ready = id => page.waitForFunction(id => window.auth.ready && window.auth.profile?.id === id, id)
@@ -113,7 +115,7 @@ try {
     // Deadline leaves a retryable error, and a late result cannot overwrite recovery.
     await page.clock.install()
     await page.evaluate(() => { void window.auth.refreshProfile() }); await jobs(12)
-    await page.clock.fastForward(30_001)
+    await page.clock.fastForward(35_001)
     await page.waitForFunction(() => window.auth.ready && Boolean(window.auth.profileError))
     await page.evaluate(() => { void window.auth.refreshProfile() }); await jobs(13)
     await finish(12, { status: 'pending' }); await ready('pending')
@@ -122,13 +124,26 @@ try {
 
     await page.goto('http://auth-loading.test/?session-reject')
     await page.waitForFunction(() => window.auth?.ready)
-    assert.ok((await state()).error)
+    assert.ok((await state()).sessionError)
+    assert.equal((await state()).calls, 0, 'a failed session must not query a profile or become a signup')
+    await page.evaluate(() => { window.fixture.recoverSession(); window.auth.retrySession() })
+    await jobs(1); await finish(0); await ready('ordinary')
+    assert.equal((await state()).sessionError, null)
     await page.goto('http://auth-loading.test/?session-hang')
     await page.waitForFunction(() => Boolean(window.auth))
-    await page.clock.fastForward(30_001)
+    await page.clock.fastForward(35_001)
     await page.waitForFunction(() => window.auth.ready)
-    assert.ok((await state()).error)
-    console.log('PASS auth-loading: ordinary initial profile reads 1; concurrent coalescing; later permission/token refresh; explicit save refresh; account switch/logout isolation; pending/error recovery; stalled session/profile deadlines; no remote writes')
+    assert.ok((await state()).sessionError)
+    await page.evaluate(() => { window.fixture.recoverSession('recovered'); window.auth.retrySession() })
+    await jobs(1); await finish(0); await ready('recovered')
+    await page.evaluate(() => window.fixture.finishSessions('stale'))
+    await page.waitForTimeout(30)
+    assert.equal((await state()).id, 'recovered', 'late initial session cannot replace recovered identity')
+    // A successful empty session still reaches the login screen.
+    await page.evaluate(() => { window.fixture.recoverSession(null); window.auth.retrySession() })
+    await page.waitForFunction(() => window.auth.ready && !window.auth.session)
+    assert.equal((await state()).sessionError, null)
+    console.log('PASS auth-loading: initial read coalescing; permission/token refresh; account/logout isolation; pending/error recovery; session/profile deadlines; null INITIAL_SESSION failure handling; explicit session recovery and late-response isolation; no remote writes')
   }
   assert.deepEqual(errors, [])
   assert.deepEqual(remote, [])

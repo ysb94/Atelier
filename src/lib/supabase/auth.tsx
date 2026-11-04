@@ -20,6 +20,8 @@ type AuthState = {
   session: Session | null
   profile: Profile | null
   profileError: string | null
+  sessionError: string | null
+  retrySession: () => void
   email: string | null
   /** 프로필을 다시 읽어 게이트 화면을 갱신한다 */
   refreshProfile: () => Promise<Profile | null>
@@ -48,7 +50,9 @@ function toSignInMessage(message: string) {
 }
 
 const PROFILE_LOAD_ERROR = '계정 정보를 불러오지 못했습니다. 신규 신청 대신 다시 불러오기를 눌러 주세요.'
-const AUTH_READ_TIMEOUT_MS = 30_000
+const SESSION_LOAD_ERROR = '로그인 상태를 확인하지 못했습니다. 연결 상태를 확인한 뒤 다시 조회해 주세요.'
+// Allow the transport's 31s Auth deadline to finish and release the SDK lock.
+const AUTH_READ_TIMEOUT_MS = 35_000
 
 // A stalled network request must not leave the entry gate loading forever.
 // The underlying read may finish later; request versions below discard it.
@@ -72,6 +76,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [profile, setProfile] = useState<Profile | null>(null)
   const [profileError, setProfileError] = useState<string | null>(null)
+  const [sessionError, setSessionError] = useState<string | null>(null)
+  const [sessionAttempt, setSessionAttempt] = useState(0)
   const [ready, setReady] = useState(false)
   const currentAuth = useRef<{ session: Session | null; version: number }>({ session: null, version: 0 })
   const pendingProfile = useRef<{ userId: string; token: string; promise: ReturnType<typeof loadProfileSafe> } | null>(null)
@@ -101,6 +107,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const acceptSession = (nextSession: Session | null, initial = false) => {
       if (!active || (initial && receivedSession)) return
       receivedSession = true
+      setSessionError(null)
       const changedUser = currentAuth.current.session?.user.id !== nextSession?.user.id
       const version = ++currentAuth.current.version
       currentAuth.current.session = nextSession
@@ -137,12 +144,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }).catch(error => {
       if (!active || receivedSession) return
       console.warn('[auth] 초기 세션 조회 실패', error)
-      setProfileError(PROFILE_LOAD_ERROR)
+      setSessionError(SESSION_LOAD_ERROR)
       setReady(true)
     })
 
     const { data: subscription } = supabase.auth.onAuthStateChange(
-      (event, nextSession) => acceptSession(nextSession, event === 'INITIAL_SESSION'),
+      (event, nextSession) => {
+        // The SDK also emits INITIAL_SESSION(null) when its read failed. Only
+        // getSession's error-bearing result can confirm an empty initial session.
+        if (event === 'INITIAL_SESSION' && !nextSession) return
+        acceptSession(nextSession, event === 'INITIAL_SESSION')
+      },
     )
 
     return () => {
@@ -150,7 +162,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authState.version += 1
       subscription.subscription.unsubscribe()
     }
-  }, [readProfile])
+  }, [readProfile, sessionAttempt])
+
+  const retrySession = useCallback(() => {
+    setSessionError(null)
+    setReady(false)
+    setSessionAttempt(attempt => attempt + 1)
+  }, [])
 
   const refreshProfile = useCallback(async () => {
     const nextSession = currentAuth.current.session
@@ -207,6 +225,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       profile,
       profileError,
+      sessionError,
+      retrySession,
       email: session?.user.email ?? profile?.email ?? null,
       refreshProfile,
       signInWithGoogle,
@@ -218,6 +238,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       session,
       profile,
       profileError,
+      sessionError,
+      retrySession,
       refreshProfile,
       signInWithGoogle,
       signInAsDev,

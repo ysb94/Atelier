@@ -22,6 +22,8 @@
     "verify:structure-map": "node --test dev-tools/structure-map/analyze.test.mjs",
     "verify:workspace-tabs": "node scripts/verify-workspace-tabs.mjs",
     "verify:auth-loading": "node scripts/verify-auth-loading.mjs",
+    "verify:supabase-request-policy": "node scripts/verify-supabase-request-policy.mjs",
+    "verify:attendance-presence-retry": "node scripts/verify-attendance-presence-retry-browser.mjs",
     "verify:shared-read-load": "node scripts/verify-shared-read-load.mjs",
     "verify:hidden-schedule": "node scripts/verify-hidden-schedule-browser.mjs",
     "verify:leave-read-efficiency": "node scripts/verify-leave-balance-db.mjs --anniversary --additional --fefo --birthday --advance --load-guard --read-efficiency",

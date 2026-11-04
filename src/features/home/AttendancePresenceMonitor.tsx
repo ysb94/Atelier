@@ -9,6 +9,8 @@ import { attendancePresence } from '@/lib/supabase/attendance-presence'
 import type { AttendancePresence } from '@/lib/supabase/attendance-presence'
 import { useAttendanceEntry } from './attendance-entry-context'
 
+const DELIVERY_RETRY_DELAY_MS = 60_000
+
 export function AttendancePresenceMonitor() {
   useRenderWatch('AttendancePresenceMonitor')
   const entry = useAttendanceEntry()
@@ -26,12 +28,15 @@ export function AttendancePresenceMonitor() {
   const [visible, setVisible] = useState(() => document.visibilityState === 'visible')
   const [seconds, setSeconds] = useState(300)
   const clock = useRef({ server: 0, local: 0 })
-  const deliveryAttempt = useRef('')
+  const deliveryAttempt = useRef({ checkId: '', retryAt: 0 })
   async function refresh() {
     await Promise.all(['attendance-presence', 'attendance-clock-ins', 'company-deferred-clock-outs'].map(part => cache.invalidateQueries({ queryKey: [part] })))
   }
   const deliver = useMutation({ mutationFn: (id: string) => attendancePresence('present', id),
-    onSuccess: data => cache.setQueryData(key, data), onError: () => { deliveryAttempt.current = ''; void query.refetch() } })
+    onSuccess: data => cache.setQueryData(key, data), onError: (_error, id) => {
+      // A successful poll with a failed delivery must not immediately retry the same write.
+      if (deliveryAttempt.current.checkId === id) deliveryAttempt.current.retryAt = Date.now() + DELIVERY_RETRY_DELAY_MS
+    } })
   const answer = useMutation({ mutationFn: (action: 'continue' | 'clock_out') => attendancePresence(action, current?.check?.id),
     onSuccess: refresh, onError: () => { void query.refetch() } })
   const due = enabled && visible && (current?.state === 'waiting' || current?.state === 'awaiting_delivery') && Boolean(current.check) && !entry?.checkoutOpen
@@ -42,12 +47,14 @@ export function AttendancePresenceMonitor() {
   }, [enabled, refetchPresence])
   const checkId = current?.check?.id
   const present = deliver.mutate
+  const deliveryPending = deliver.isPending
   useEffect(() => {
-    if (!due || current?.state !== 'awaiting_delivery' || !checkId || deliveryAttempt.current === checkId) return
+    if (!due || current?.state !== 'awaiting_delivery' || !checkId || deliveryPending) return
+    if (deliveryAttempt.current.checkId === checkId && Date.now() < deliveryAttempt.current.retryAt) return
     if (document.querySelector('dialog[open]')) return
-    deliveryAttempt.current = checkId
+    deliveryAttempt.current = { checkId, retryAt: Infinity }
     present(checkId)
-  }, [due, current?.state, current?.serverNow, checkId, present])
+  }, [due, current?.state, current?.serverNow, checkId, present, deliveryPending])
   const deadline = current?.check?.deadlineAt
   useEffect(() => {
     if (!current?.serverNow) return
@@ -74,7 +81,11 @@ export function AttendancePresenceMonitor() {
   if (!due || !current?.check) return null
   const busy = deliver.isPending || answer.isPending
   const error = answer.error ?? deliver.error
-  return <AttendancePresencePrompt current={current} seconds={seconds} busy={busy} error={error instanceof Error ? error.message : error ? '응답을 저장하지 못했습니다.' : null} onRetry={() => deliver.mutate(current.check!.id)} onAnswer={action => answer.mutate(action)} />
+  return <AttendancePresencePrompt current={current} seconds={seconds} busy={busy} error={error instanceof Error ? error.message : error ? '응답을 저장하지 못했습니다.' : null} onRetry={() => {
+    if (busy) return
+    deliveryAttempt.current = { checkId: current.check!.id, retryAt: Infinity }
+    deliver.mutate(current.check!.id)
+  }} onAnswer={action => answer.mutate(action)} />
 }
 
 export function AttendancePresencePrompt({ current, seconds, busy, error, onRetry, onAnswer }: {
@@ -87,7 +98,7 @@ export function AttendancePresencePrompt({ current, seconds, busy, error, onRetr
     <p role="timer" aria-label="근무 확인 응답 남은 시간" className="my-3 text-3xl font-semibold tabular-nums">{current.state === 'awaiting_delivery' ? '확인 중…' : `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`}</p>
     <p className="mb-3 text-xs text-muted-foreground">연속 무응답 {current.missedCount ?? 0}회 / 5회 · 응답 없으면 30분 간격으로 다시 확인합니다. 5회 연속 무응답 시 자동 퇴근·확인 필요로 표시됩니다.</p>
     {seconds === 0 && current.state === 'waiting' && <p className="mb-3 text-sm text-warning">응답 시간이 지났습니다. 처리 결과를 확인하고 있습니다.</p>}
-    {error && <p role="alert" className="mb-3 text-sm text-danger">{error}{current.state === 'awaiting_delivery' && <Button size="sm" variant="outline" onClick={onRetry}>다시 연결</Button>}</p>}
+    {error && <p role="alert" className="mb-3 text-sm text-danger">{error}{current.state === 'awaiting_delivery' && <Button size="sm" variant="outline" disabled={busy} onClick={onRetry}>다시 연결</Button>}</p>}
     <div className="flex gap-2"><Button disabled={busy || current.state !== 'waiting' || seconds === 0} onClick={() => onAnswer('continue')}>계속 근무 중</Button><Button variant="outline" disabled={busy || current.state !== 'waiting' || seconds === 0} onClick={() => onAnswer('clock_out')}>지금 퇴근하기</Button></div>
   </section>
 }

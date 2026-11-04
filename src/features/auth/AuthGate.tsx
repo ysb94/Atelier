@@ -3,6 +3,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { clearImpersonationView } from '@/lib/workspace/impersonation-view'
+import { Button } from '@/components/ui/button'
 import { LoginPage } from './LoginPage'
 import { AccessRequestPage } from './AccessRequestPage'
 import { LegalNameConfirmationPage } from './LegalNameConfirmationPage'
@@ -10,7 +11,7 @@ import { PendingApprovalPage } from './PendingApprovalPage'
 
 /** 조회 실패를 신규 가입으로 취급하지 않는다. 계정 상태 변경은 신청 가능 상태에서만 한다. */
 export function AuthGate({ children }: { children: ReactNode }) {
-  const { ready, session, profile, profileError, refreshProfile, signOut } = useAuth()
+  const { ready, session, profile, profileError, sessionError, retrySession, refreshProfile, signOut } = useAuth()
   const queryClient = useQueryClient()
   useRenderWatch('AuthGate')
   const [forceEditRequest, setForceEditRequest] = useState(false)
@@ -29,6 +30,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
       </div>
     )
   }
+
+  if (sessionError) return <div role="alert" className="m-6 space-y-4 rounded-xl border border-border bg-card p-6 shadow-sm"><p>{sessionError}</p><Button type="button" variant="outline" onClick={retrySession}>로그인 상태 다시 확인</Button></div>
 
   if (!session) return <LoginPage />
 

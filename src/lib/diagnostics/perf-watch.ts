@@ -58,6 +58,15 @@ export function interactionContext() {
   }
 }
 
+/** 요청 진단에는 검색값·해시·직원 이름이 들어갈 수 있는 클릭 문구를 남기지 않는다. */
+export function safeInteractionContext(context = interactionContext()) {
+  const input = context.lastInput?.match(/^([a-z]+) ([a-z0-9-]+)(?::[\s\S]*)? \((\d+)ms 전\)$/i)
+  return {
+    path: context.path.split(/[?#]/)[0],
+    lastInput: input ? `${input[1]} ${input[2]} (${input[3]}ms 전)` : null,
+  }
+}
+
 export function classifyFrameStall(gapMs: number): 'ok' | 'warn' | 'error' {
   if (gapMs >= PERF_FRAME_STALL_ERROR_MS) return 'error'
   if (gapMs >= PERF_FRAME_STALL_WARN_MS) return 'warn'

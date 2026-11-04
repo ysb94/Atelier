@@ -6,8 +6,10 @@ import { BrandLayout } from '@/components/layout/BrandLayout'
 import { CompanyLayout } from '@/components/layout/CompanyLayout'
 import { ChatWindowPage } from '@/features/chat/ChatWindowPage'
 import { AuthProvider } from '@/lib/supabase/auth'
+import { shouldRetrySupabaseQuery } from '@/lib/supabase/request-policy'
 import { AttendanceEntryProvider } from '@/features/home/attendance-entry-context'
 import { AttendanceEntryGate } from '@/features/home/AttendanceEntryGate'
+import { installWorkflowDiagnostics } from '@/lib/diagnostics/runtime-watch'
 import { MeetingStartReminder } from '@/features/meetings/MeetingStartReminder'
 import { BrowserIdentityProvider } from '@/components/layout/BrowserIdentity'
 import {
@@ -20,7 +22,7 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 30_000,
-      retry: 1,
+      retry: shouldRetrySupabaseQuery,
       // 엑셀 등 다른 창을 오갈 때마다 열린 탭 전체가 재조회되면 원장 재매칭이 연쇄되어
       // 화면이 멈춘다. 데이터 갱신은 저장 뒤 invalidate 와 화면 진입 시 stale 재조회로 충분하다.
       refetchOnWindowFocus: false,
@@ -30,6 +32,7 @@ const queryClient = new QueryClient({
 
 // 콘솔 진단: 개발 모드는 항상, 배포는 콘솔에서 atelierDebug.on() 후 새로고침.
 exposeDiagnosticsSwitch()
+installWorkflowDiagnostics(queryClient)
 installPerfWatch()
 installQueryWatch(queryClient)
 
