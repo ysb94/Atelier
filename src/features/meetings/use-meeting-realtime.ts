@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { getSupabase } from '@/lib/supabase/client'
+import { diagnosticRealtime, startWorkflow } from '@/lib/diagnostics/workflow-trace'
 
 /** 앱 상단에서 한 번 구독한다. 이벤트는 원본 조회 신호로만 사용한다. */
 export function useMeetingRealtime(enabled: boolean, personId?: string, companyId?: string) {
@@ -26,15 +27,15 @@ export function useMeetingRealtime(enabled: boolean, personId?: string, companyI
       .on('system', { event: '*' }, payload => {
         if (!disposed && payload.extension === 'postgres_changes' && payload.status === 'error') {
           setConnected(false)
-          console.warn('[meetings] 알림 변경 구독 실패', { payload })
+          diagnosticRealtime('meeting','notice_channel','CHANNEL_ERROR')
         }
       })
       .subscribe(status => {
         if (disposed) return
+        diagnosticRealtime('meeting','notice_channel',status)
         if (status === 'SUBSCRIBED') { setConnected(true); refresh() }
         else if (['CHANNEL_ERROR', 'TIMED_OUT', 'CLOSED'].includes(status)) {
           setConnected(false)
-          console.warn('[meetings] 알림 실시간 연결 끊김', { status })
         }
       })
     const visible = () => { if (document.visibilityState === 'visible') refresh() }
@@ -43,7 +44,7 @@ export function useMeetingRealtime(enabled: boolean, personId?: string, companyI
       disposed = true
       window.clearTimeout(timer)
       document.removeEventListener('visibilitychange', visible)
-      void client.removeChannel(channel).catch(error => console.warn('[meetings] 알림 구독 해제 실패', { error }))
+      void client.removeChannel(channel).catch(error => startWorkflow('meeting','unsubscribe').fail(error))
     }
   }, [enabled, personId, companyId, cache])
   return connected

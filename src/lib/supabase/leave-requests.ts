@@ -1,6 +1,7 @@
 import { getSupabase } from './client'
 import { DEFAULT_COMPANY_ID } from './brands'
 import type { PersonalRequest, RequestForm, RequestKind } from '@/features/settings/personal-requests'
+import { diagnosticOperation, startWorkflow, tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 
 export type LeaveRequest = PersonalRequest & {
   employeeId: string; employeeName: string; departmentId: string | null; departmentName: string
@@ -21,8 +22,8 @@ function mapRow(row: LeaveRow): LeaveRequest {
     decisionNote: row.decision_note ?? undefined, decidedAt: row.decided_at, decidedByName: row.decided_by_name, decidedBy: row.decided_by ?? null }
 }
 function fail(action: string, error: { message: string }): never {
-  console.warn('[leave-requests] ' + action, { message: error.message })
-  throw new Error(error.message)
+  startWorkflow('leave', 'request').fail(error, { scope: /서류/.test(action) ? 'attachment' : 'request' })
+  throw new Error(error.message, { cause: error })
 }
 export async function listLeaveRequests(employeeId?: string, approvals = false, period?: { from: string; to: string; approvedOnly?: boolean }): Promise<LeaveRequest[]> {
   const rows: LeaveRequest[] = []
@@ -41,8 +42,9 @@ export async function listLeaveRequests(employeeId?: string, approvals = false, 
     if (data.length < 500) return rows
   }
 }
-export async function submitLeaveRequest(employeeId: string, form: RequestForm): Promise<LeaveRequest> {
-  const { data, error } = await getSupabase().from('company_leave_requests').insert({
+export async function submitLeaveRequest(employeeId: string, form: RequestForm, context?: DiagnosticContext): Promise<LeaveRequest> {
+  return diagnosticOperation(form.kind === 'offsite' ? 'offsite' : 'leave', 'submit_request', async trace => {
+  const { data, error } = await trace.run('db_insert', current => tracedQuery(getSupabase().from('company_leave_requests').insert({
     employee_id: employeeId, kind: form.kind, from_date: form.from, to_date: form.to,
     start_time: form.start, end_time: form.end, note: form.note.trim(), place: form.place.trim(),
     // The database replaces these with the authenticated employee's company and department.
@@ -51,9 +53,11 @@ export async function submitLeaveRequest(employeeId: string, form: RequestForm):
     ...(form.endNextDay ? { end_next_day: true } : {}),
     ...(form.kind === 'offsite' && form.offsiteContinuous ? { offsite_continuous: true } : {}),
     ...(form.kind === 'offsite' && form.offsiteWorkStart ? { offsite_work_start: form.offsiteWorkStart } : {}),
-  }).select().single()
-  if (error) fail('신청 저장 실패', error)
+  }).select().single(), current))
+  if (error) { trace.fail(error); throw new Error(error.message, { cause: error }) }
+  trace.step('saved', { writeOutcome: 'committed' })
   return mapRow(data as LeaveRow)
+  }, context)
 }
 export type LeaveFile = { id: string; requestId: string; name: string; type: string; size: number; path: string }
 const LEAVE_FILES = 'company-leave-files'
@@ -96,11 +100,14 @@ async function checked<T>(request: PromiseLike<{ data: unknown; error: { message
     return data as T
   })
 }
-export async function transitionLeaveRequest(id: string, status: 'approved' | 'rejected' | 'cancelled', decisionNote = ''): Promise<LeaveRequest> {
+export async function transitionLeaveRequest(id: string, status: 'approved' | 'rejected' | 'cancelled', decisionNote = '', context?: DiagnosticContext): Promise<LeaveRequest> {
+  return diagnosticOperation('leave', status, async trace => {
   let query = getSupabase().from('company_leave_requests').update({ status, decision_note: decisionNote }).eq('id', id)
   query = status === 'cancelled' ? query.in('status', ['pending', 'approved']) : query.eq('status', 'pending')
-  const { data, error } = await query.select().maybeSingle()
-  if (error) fail('신청 처리 실패', error)
-  if (!data) throw new Error('이미 처리되었거나 처리 권한이 없는 신청입니다. 목록을 새로고침해 주세요.')
+  const { data, error } = await trace.run('db_update', current => tracedQuery(query.select().maybeSingle(), current))
+  if (error) { trace.fail(error); throw new Error(error.message, { cause: error }) }
+  if (!data) { trace.block('no_changed_row', { writeOutcome: 'not_changed' }); throw new Error('이미 처리되었거나 처리 권한이 없는 신청입니다. 목록을 새로고침해 주세요.') }
+  trace.step('saved', { writeOutcome: 'committed' })
   return mapRow(data as LeaveRow)
+  }, context)
 }

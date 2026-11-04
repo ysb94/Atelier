@@ -176,6 +176,11 @@
 
 새 코드를 쓸 때 지켜야 할 규칙:
 
+- DB와 연결되는 새 업무·변경은 [업무 단계 진단](docs/architecture/WORKFLOW_DIAGNOSTICS.md)을 따른다.
+  `startWorkflow`로 입력 검사·권한/기준 확인·DB 처리·화면 갱신을 구분하고 같은 추적 문맥을
+  전달한다. 공통 `getSupabase()`의 요청 감시를 유지하고 오류 코드·서버 요청 번호를 보존한다.
+  원본 입력·직원 식별값·토큰·DB 오류 원문은 새 진단에 넣지 않는다. 오류 직후
+  `atelierDebug.report()`로 증거를 확인하며 `npm run verify:workflow-diagnostics`로 검증한다.
 - 페이지 단위 컴포넌트나 1,000행 이상 처리하는 패널을 만들면 최상단에
   `useRenderWatch('컴포넌트명')` 한 줄을 넣는다.
 - 200ms 를 넘을 수 있는 동기 계산(원장 매칭, 파일 파싱, 대량 정렬)은

@@ -351,11 +351,11 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
     void meetings.perform(async()=>{const id=await openDirectChat(person.id);await cache.invalidateQueries({queryKey:chatKeys.rooms});openConversation(id,person.name)})
   }
   function groupChat(item:MeetingSeries){
-    void meetings.perform(async()=>{const id=await openMeetingGroup(item.id);await cache.invalidateQueries({queryKey:chatKeys.rooms});openConversation(id,'회의 · '+item.title)})
+    void meetings.perform(async context=>{const id=await openMeetingGroup(item.id,context);await cache.invalidateQueries({queryKey:chatKeys.rooms});openConversation(id,'회의 · '+item.title)})
   }
   function respond(item:MeetingSeries,round:MeetingRound,status:'available'|'unavailable'){
     if(simulating){void setSeries(rows=>rows.map(row=>row.id===item.id?{...row,rounds:row.rounds.map(r=>r.id===round.id?{...r,responses:[...(r.responses??[]).filter(response=>response.profileId!==host.id),{profileId:host.id,status}]}:r)}:row));return}
-    void meetings.perform(()=>respondToMeeting(round.id,round.scheduleVersion ?? 1,status))
+    void meetings.perform(context=>respondToMeeting(round.id,round.scheduleVersion ?? 1,status,context))
   }
   useEffect(() => {
     if (!picker) return
@@ -968,7 +968,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
           onRefresh={meetings.refresh}
           onManualConfirm={async (revision,excluded) => {
             let updated:number|null=null
-            const saved=await meetings.perform(async()=>{updated=await manuallyConfirmMeetingRound(detailRound.id,revision,detailRound.scheduleVersion ?? 1,excluded)})
+            const saved=await meetings.perform(async context=>{updated=await manuallyConfirmMeetingRound(detailRound.id,revision,detailRound.scheduleVersion ?? 1,excluded,context)})
             return saved ? updated : null
           }}
           attendance={<MeetingAttendance series={detailSeries} round={detailRound} actorId={host.id} simulating={simulating} requiresResponse={detailKindInfo?.kind !== 'meeting'} onChat={chatWith} onGroup={()=>groupChat(detailSeries)} onRespond={status=>respond(detailSeries,detailRound,status)}/> }

@@ -14,6 +14,7 @@ import { LeaveTimeShortcuts, QuarterLeaveTime, RequestTimeField, TimeRangeSummar
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { diagnosticError, startWorkflow, tracedInput } from '@/lib/diagnostics/workflow-trace'
 import { emptyList } from '@/lib/utils'
 import { useAuth } from '@/lib/supabase/auth'
 import { listMyAttendanceClocks } from '@/lib/supabase/attendance-clocks'
@@ -265,64 +266,72 @@ export function MyAttendancePanel() {
   async function submit(event: FormEvent) {
     event.preventDefault()
     if (!form || leave.busy || groupBusy) return
+    const trace = startWorkflow(form.kind === 'offsite' ? 'offsite' : 'leave', 'submit', { kind: form.kind, group: groupEnabled, nextDay: Boolean(form.endNextDay), continuous: Boolean(form.offsiteContinuous) })
+    trace.step('normalize_input')
     const normalized = offsiteSubmission(form)
-    if (normalized.error || !normalized.request) { setFormError(normalized.error); return }
+    if (normalized.error || !normalized.request) { trace.block('invalid_date_range'); setFormError(normalized.error); return }
     const submission = groupEnabled && !participants.includes(userId!) ? { ...normalized.request, offsiteWorkStart: undefined } : normalized.request
     const workdayStarts: Record<string, string | null> = {}
     if (!groupEnabled && (submission.kind === 'annual' || submission.kind === 'offsite')) {
       const endDate = submission.endNextDay ? new Date(Date.parse(`${submission.to}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10) : submission.to
       const dates = submission.kind === 'annual' ? [submission.from] : [...new Set(leave.requests.filter(item => item.kind === 'annual' && item.from > submission.from && item.from <= endDate && ['pending', 'approved'].includes(item.status)).map(item => item.from))]
       try {
-        await Promise.all(dates.map(async date => { const dayBasis = await getMyWorkdayBasis(date); workdayStarts[date] = dayBasis.configured ? dayBasis.start : null }))
+        await trace.run('load_workday_basis', context => Promise.all(dates.map(async date => { const dayBasis = await getMyWorkdayBasis(date, context); workdayStarts[date] = dayBasis.configured ? dayBasis.start : null })), { count: dates.length })
       } catch (failure) {
+        trace.fail(failure)
         setFormError(failure instanceof Error ? failure.message : '출근 기준을 확인하지 못했습니다. 다시 시도해 주세요.')
         return
       }
     }
+    trace.step('validate_conflicts', { count: groupEnabled ? 0 : leave.requests.length, configuredCount: Object.values(workdayStarts).filter(Boolean).length, missingCount: Object.values(workdayStarts).filter(value => !value).length })
     const error = validateRequest(submission, groupEnabled ? [] : leave.requests, isLeaveRequest(form.kind) ? DEFAULT_REMINDER_BASIS : basis, today, workdayStarts)
       || (isOfficialLeave(form.kind) && !officialFile ? '공가 서류를 첨부해 주세요.' : '')
-    if (error) { setFormError(error); return }
+    if (error) { trace.block('validation_failed', { ...diagnosticError(new Error(error)), missingCount: Object.values(workdayStarts).filter(value => !value).length }); setFormError(error); return }
     if (submission.kind === 'offsite' && groupEnabled) {
-      if (!groups.isSuccess || !participants.length) { setFormError('서버 연결과 참여 직원을 확인해 주세요.'); return }
+      if (!groups.isSuccess || !participants.length) { trace.block(!groups.isSuccess ? 'group_server_not_ready' : 'no_participants'); setFormError('서버 연결과 참여 직원을 확인해 주세요.'); return }
       setGroupBusy(true)
       try {
-        await registerOffsiteGroup(groupKey.current, participants, { ...submission, offsiteWorkStart: participants.includes(userId!) ? submission.offsiteWorkStart : undefined })
-        await leave.refresh(); await refreshOffsiteQueries(groupCache)
+        await trace.run('register_group', context => registerOffsiteGroup(groupKey.current, participants, { ...submission, offsiteWorkStart: participants.includes(userId!) ? submission.offsiteWorkStart : undefined }, context), { count: participants.length })
+        await trace.run('refresh_queries', async () => { await leave.refresh(); await refreshOffsiteQueries(groupCache) }, { writeOutcome: 'committed' })
         setMonth(form.from.slice(0, 7)); setSelected(form.from); setForm(null)
         setNotice('참여자별 외근을 등록하고 각자에게 알림을 보냈습니다.')
-      } catch (failure) { setFormError(failure instanceof Error ? failure.message : '단체 외근 등록에 실패했습니다.') }
+        trace.done({ writeOutcome: 'committed' })
+      } catch (failure) { trace.fail(failure); setFormError(failure instanceof Error ? failure.message : '단체 외근 등록에 실패했습니다.') }
       finally { setGroupBusy(false) }
       return
     }
     let createdId: string | null = null
     try {
-      if (submission.kind === 'offsite' && submission.offsiteContinuous && !(await offsiteAction('my_offsite_attendance')).continuousSupported) throw new Error('여러 날 연속 외근의 서버 설정 적용 대기입니다. 입력 내용과 기존 기록은 유지됩니다.')
-      if (submission.kind === 'offsite' && submission.endNextDay && !(await offsiteAction('my_offsite_attendance')).overnightSupported) throw new Error('다음 날 종료 외근의 DB 설정 적용 대기입니다. 기존 외근·출퇴근 기록은 보존됩니다.')
-      if (submission.kind === 'offsite' && submission.offsiteWorkStart && !(await getMyWorkdayBasis(submission.from)).offsiteWorkdayStartSupported) throw new Error('당일 출근 기준 변경은 서버 적용 대기 중입니다.')
-      const request = await leave.create.mutateAsync(submission)
+      if (submission.kind === 'offsite' && submission.offsiteContinuous && !(await trace.run('check_continuous_support', context => offsiteAction('my_offsite_attendance', context))).continuousSupported) { trace.block('server_feature_unavailable'); throw new Error('여러 날 연속 외근의 서버 설정 적용 대기입니다. 입력 내용과 기존 기록은 유지됩니다.') }
+      if (submission.kind === 'offsite' && submission.endNextDay && !(await trace.run('check_overnight_support', context => offsiteAction('my_offsite_attendance', context))).overnightSupported) { trace.block('server_feature_unavailable'); throw new Error('다음 날 종료 외근의 DB 설정 적용 대기입니다. 기존 외근·출퇴근 기록은 보존됩니다.') }
+      if (submission.kind === 'offsite' && submission.offsiteWorkStart && !(await trace.run('check_start_override_support', context => getMyWorkdayBasis(submission.from, context))).offsiteWorkdayStartSupported) { trace.block('server_feature_unavailable'); throw new Error('당일 출근 기준 변경은 서버 적용 대기 중입니다.') }
+      const request = await trace.run('save_and_refresh', context => leave.create.mutateAsync(tracedInput(submission, context)))
       createdId = request.id
-      if (isOfficialLeave(form.kind) && officialFile) await uploadLeaveFile(request.id, officialFile)
+      if (isOfficialLeave(form.kind) && officialFile) await trace.run('upload_attachment', () => uploadLeaveFile(request.id, officialFile))
       setMonth(form.from.slice(0, 7)); setSelected(form.from)
       setForm(null); setOfficialFile(null)
       setNotice(form.advanceRequested ? '선사용 신청을 저장했습니다. 기존 부서 승인자의 승인 후 휴가와 부족분이 반영됩니다.' : isDirectRegistration(form.kind) && request.status === 'approved' ? form.kind === 'offsite' ? '외근을 등록했습니다. 승인 없이 달력에 반영됩니다.' : '휴가를 등록했습니다. 승인 없이 달력에 반영됩니다.' : isOfficialLeave(form.kind) ? '공가 신청을 저장했습니다. 운영지원이 서류를 확인한 뒤 처리합니다.' : form.kind === 'correction' ? '출퇴근 정정 신청을 저장했습니다. 승인되면 원본을 보존하고 달력과 야근 집계에 반영합니다.' : '신청을 저장했습니다. 부서 지정 승인자가 승인하면 달력에 반영됩니다.')
+      trace.done({ writeOutcome: 'committed' })
     } catch (error) {
       if (createdId && isOfficialLeave(form.kind)) {
         try { await leave.transition.mutateAsync({ id: createdId, status: 'cancelled' }) }
         catch (cleanupError) { console.warn('[leave-requests] 서류 없는 공가 신청 취소 실패', cleanupError) }
       }
-      console.warn('[leave-requests] 마이페이지 신청 실패', error)
+      trace.fail(error)
       setFormError(error instanceof Error ? error.message : '신청을 저장하지 못했습니다.')
     }
   }
   async function confirmCancel() {
     if (detail?.type !== 'request' || leave.busy) return
     const item = detail.item
+    const trace = startWorkflow(item.kind === 'offsite' ? 'offsite' : 'leave', 'cancel', { kind: item.kind })
     try {
-      await leave.transition.mutateAsync({ id: item.id, status: 'cancelled' })
+      await trace.run('cancel_and_refresh', context => leave.transition.mutateAsync(tracedInput({ id: item.id, status: 'cancelled' as const }, context)))
       setDetail(null)
       setNotice(isLeaveRequest(item.kind) ? '휴가를 취소하고 연차를 사용 기간에 맞춰 다시 계산했습니다. 이미 만료된 기본·추가·생일 연차는 현재 남은 연차로 돌아오지 않습니다.' : item.kind === 'offsite' ? '외근 등록을 취소했습니다.' : '신청을 취소했습니다.')
+      trace.done({ writeOutcome: 'committed' })
     } catch (error) {
-      console.warn('[my-attendance] 등록 취소 실패', error)
+      trace.fail(error)
       setNotice(error instanceof Error ? error.message : '취소하지 못했습니다.')
     }
   }

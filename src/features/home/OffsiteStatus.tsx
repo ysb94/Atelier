@@ -7,6 +7,7 @@ import { usePagePreview } from '@/lib/company/page-preview-context'
 import { useAuth } from '@/lib/supabase/auth'
 import { offsiteAction } from '@/lib/supabase/offsite-attendance'
 import { readImpersonationState } from '@/lib/supabase/impersonation'
+import { diagnosticOperation } from '@/lib/diagnostics/workflow-trace'
 
 export function OffsiteStatus() {
   const { session, profile } = useAuth()
@@ -20,10 +21,12 @@ export function OffsiteStatus() {
   const enabled = Boolean(userId && profile?.status === 'active' && active && !preview?.active && !readImpersonationState())
   const key = ['my-offsite-attendance', userId, today]
   const query = useQuery({ queryKey: key, queryFn: () => offsiteAction('my_offsite_attendance'), enabled, refetchInterval: enabled ? 30_000 : false, retry: false })
-  const returned = useMutation({ mutationFn: () => offsiteAction('return_from_offsite'), onSuccess: async data => {
+  const returned = useMutation({ mutationFn: () => diagnosticOperation('offsite','return_and_refresh',async trace => {
+    const data = await trace.run('resume_office',context=>offsiteAction('return_from_offsite',context))
     cache.setQueryData(key, data)
-    await Promise.all(['attendance-clock-ins', 'attendance-presence', 'company-attendance-spans', 'company-deferred-clock-outs', 'offsite-groups'].map(part => cache.invalidateQueries({ queryKey: [part] })))
-  } })
+    await trace.run('refresh_queries',()=>Promise.all(['attendance-clock-ins', 'attendance-presence', 'company-attendance-spans', 'company-deferred-clock-outs', 'offsite-groups'].map(part => cache.invalidateQueries({ queryKey: [part] }))),{writeOutcome:'committed'})
+    return data
+  }) })
   if (!enabled) return null
   if (query.error) return hasOffsite ? <span role="status" className="text-warning">{query.error instanceof Error ? query.error.message : '외근 상태 조회 실패'}</span> : null
   const current = query.data

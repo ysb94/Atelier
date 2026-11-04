@@ -5,6 +5,7 @@ import { readImpersonationState } from '@/lib/supabase/impersonation'
 import { listOffsiteGroups } from '@/lib/supabase/offsite-groups'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
+import { useDiagnosticGate } from '@/lib/diagnostics/use-diagnostic-gate'
 export async function refreshOffsiteQueries(cache: QueryClient) {
   await Promise.all(['offsite-groups','company-leave-requests','my-offsite-attendance','my-workday-basis','my-attendance-basis','home-my-leave','attendance-clock-ins','attendance-presence','company-attendance-clocks','company-attendance-spans','late-arrival-cumulative','late-arrival-statements','my-home-work-notices'].map(key => cache.invalidateQueries({ queryKey: [key] })))
 }
@@ -12,6 +13,9 @@ export function useOffsiteGroups() {
   const { session, profile } = useAuth()
   const preview = usePagePreview()
   const active = useWorkspaceTabActivity()
-  const enabled = Boolean(session?.user.id === profile?.id && profile?.status === 'active' && !preview?.active && !readImpersonationState())
+  const impersonating = Boolean(readImpersonationState())
+  const enabled = Boolean(session?.user.id === profile?.id && profile?.status === 'active' && !preview?.active && !impersonating)
+  const reason = !active ? 'inactive_tab' : preview?.active ? 'preview' : impersonating ? 'impersonation' : !session ? 'no_session' : session.user.id !== profile?.id ? 'identity_mismatch' : 'inactive_employee'
+  useDiagnosticGate('offsite', 'groups_access', enabled && active, enabled && active ? 'enabled' : reason)
   return useQuery({ queryKey: ['offsite-groups', session?.user.id], queryFn: listOffsiteGroups, ...sharedReadPolicy, enabled: enabled && active, refetchInterval: readPollInterval(30_000, enabled && active) })
 }

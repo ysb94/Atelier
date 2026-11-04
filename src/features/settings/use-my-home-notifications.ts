@@ -14,33 +14,37 @@ import { emptyList } from '@/lib/utils'
 import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
 import { requestLabel, type RequestKind } from './personal-requests'
 import { useNotificationDetailVisibility } from '@/lib/inbox/use-notification-visibility'
+import { diagnosticRealtime, startWorkflow, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
+import { diagnosticQuery } from '@/lib/supabase/diagnostic-query'
+import { useDiagnosticGate } from '@/lib/diagnostics/use-diagnostic-gate'
 
 type WorkNotice = { event_key: string; entity_id: string; created_at: string; event_type: string; tab: 'approvals'|'overtime'|'my-attendance'; kind: RequestKind; employee_name: string; from_date: string; to_date: string; start_time: string; end_time: string; note: string; decision_note: string|null; action_needed: boolean; status: string; current?: boolean; read_at: string|null }
-async function workNotices(): Promise<WorkNotice[]> {
-  const { data, error } = await getSupabase().rpc('list_my_home_work_notifications')
-  if (error) { console.warn('[my-home-notifications] 업무 알림 조회 실패', error); throw new Error(['PGRST202','42883'].includes(error.code) ? '신청·퇴근 알림 서버 연결 대기: 추가 DB 설정이 필요합니다.' : '업무 알림을 불러오지 못했습니다.') }
-  return data ?? []
+async function workNotices(context?: DiagnosticContext): Promise<WorkNotice[]> {
+  try { return await diagnosticQuery<WorkNotice[]>('notification','list_work_notices',getSupabase().rpc('list_my_home_work_notifications'),context) ?? [] }
+  catch(error) { const code=(error as Error & {cause?:{code?:string}}).cause?.code;throw new Error(['PGRST202','42883'].includes(code ?? '') ? '신청·퇴근 알림 서버 연결 대기: 추가 DB 설정이 필요합니다.' : '업무 알림을 불러오지 못했습니다.',{cause:error}) }
 }
 export function useMyHomeNotifications({ coordinator = false, background = false } = {}) {
   const { profile, session } = useAuth()
   const preview = usePagePreview()
   const enabled = profile?.status === 'active' && session?.user.id === profile.id && !preview?.active
+  useDiagnosticGate('notification','inbox_access',enabled,enabled?'enabled':preview?.active?'preview':!session?'no_session':profile?.status!=='active'?'inactive_employee':'identity_mismatch')
   const meetings = useMeetingNotices({ realtime: coordinator && enabled, background })
   const poll = readPollInterval(30_000, coordinator && enabled)
   const leave = useQuery({ queryKey: ['leave-usage-notices', profile?.id], queryFn: () => listMyLeaveUsageNotices(profile!.id), ...sharedReadPolicy, enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
   const late = useQuery({ queryKey: ['late-statement-notices', profile?.id], queryFn: listMyLateStatementNotices, ...sharedReadPolicy, enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
-  const work = useQuery({ queryKey: ['my-home-work-notices', profile?.id], queryFn: workNotices, ...sharedReadPolicy, enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
+  const work = useQuery({ queryKey: ['my-home-work-notices', profile?.id], queryFn: () => workNotices(), ...sharedReadPolicy, enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
   const cache=useQueryClient()
   useEffect(()=>{
     if(!coordinator||!enabled||!profile?.id)return
     const db=getSupabase()
+    let disposed=false
     let timer: ReturnType<typeof setTimeout> | undefined
     const refresh=()=>{clearTimeout(timer);timer=setTimeout(()=>{void cache.invalidateQueries({queryKey:['my-home-work-notices',profile.id]})},150)}
     const channel=db.channel(`my-home-work:${profile.id}`)
       .on('postgres_changes',{event:'*',schema:'public',table:'my_home_request_events',filter:`employee_id=eq.${profile.id}`},refresh)
       .on('postgres_changes',{event:'*',schema:'public',table:'my_home_notification_reads',filter:`reader_id=eq.${profile.id}`},refresh)
-      .subscribe(status=>{if(status==='SUBSCRIBED')refresh();else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT')console.warn('[my-home-notifications] 실시간 연결 실패, 주기 조회로 보완',{status})})
-    return()=>{clearTimeout(timer);void db.removeChannel(channel).catch(error=>console.warn('[my-home-notifications] 실시간 정리 실패',error))}
+      .subscribe(status=>{if(disposed)return;diagnosticRealtime('notification','work_notice_channel',status);if(status==='SUBSCRIBED')refresh()})
+    return()=>{disposed=true;clearTimeout(timer);void db.removeChannel(channel).catch(error=>startWorkflow('notification','unsubscribe').fail(error))}
   },[coordinator,enabled,profile?.id,cache])
   const items = useMemo<InboxNotification[]>(() => {
     if (!enabled) return []
@@ -97,6 +101,9 @@ export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout'
     if (completed.current === key) return
     let cancelled = false
     async function read() {
+      const trace=startWorkflow('notification','read_detail',{source})
+      trace.step('match_displayed_version')
+      let count=0
       try {
         if (source === 'meeting') {
           // Match the exact event shown by the drawer, including host notices.
@@ -104,20 +111,21 @@ export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout'
           for (const item of (data ?? []) as InboxNotification[]) {
             const url = new URL(item.href,'https://atelier.local')
             if (item.kind !== 'meeting_invitation' || url.searchParams.get('round') !== entityId || item.readAt || item.meeting?.scheduleVersion && String(item.meeting.scheduleVersion) !== version) continue
-            const { error: readError } = await getSupabase().rpc('read_meeting_notice_version',{p_id:item.id,p_sent_at:item.createdAt,p_schedule_version:Number(version)})
-            if (readError) throw readError
+            await trace.run('save_read',context=>diagnosticQuery('notification','read_meeting_notice',getSupabase().rpc('read_meeting_notice_version',{p_id:item.id,p_sent_at:item.createdAt,p_schedule_version:Number(version)}),context))
+            count++
           }
         } else {
-          const records = await workNotices()
+          const records = await trace.run('load_current_events',context=>workNotices(context))
           for (const item of records.filter(row => row.entity_id === entityId && !row.read_at && ((row.event_type!=='offsite-settlement' && version === `status:${row.status}`) || row.event_key === version))) {
-            const { error: readError } = await getSupabase().rpc('read_my_home_work_notification',{p_key:item.event_key})
-            if (readError) throw readError
+            await trace.run('save_read',context=>diagnosticQuery('notification','read_work_notice',getSupabase().rpc('read_my_home_work_notification',{p_key:item.event_key}),context))
+            count++
           }
         }
         if (!cancelled) { completed.current=key; setError(null) }
-        await Promise.all(['meeting-invitations','my-home-work-notices'].map(name=>cache.invalidateQueries({queryKey:[name,profile?.id]})))
+        await trace.run('refresh_queries',()=>Promise.all(['meeting-invitations','my-home-work-notices'].map(name=>cache.invalidateQueries({queryKey:[name,profile?.id]}))),{writeOutcome:count?'committed':'not_changed'})
+        trace.done({count,state:count?'read_saved':'no_current_unread'})
       } catch (failure) {
-        console.warn('[my-home-notifications] 상세 열람 읽음 저장 실패',{source,entityId,failure})
+        trace.fail(failure)
         if (!cancelled) setError('읽음 기록을 저장하지 못했습니다. 다시 시도해 주세요.')
       }
     }

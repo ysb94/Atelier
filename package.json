@@ -88,6 +88,7 @@
     "verify:studio-batch": "node --experimental-strip-types scripts/verify-studio-batch.mjs",
     "verify:styled-image-deployment": "node scripts/verify-styled-image-deployment.mjs",
     "verify:diagnostics": "node scripts/verify-diagnostics.mjs",
+    "verify:workflow-diagnostics": "node scripts/verify-workflow-diagnostics.mjs",
     "verify:desktop-notifications": "node scripts/verify-desktop-notifications-browser.mjs",
     "verify:overtime-actuals": "node --experimental-strip-types src/features/operations-support/overtime-hours.verify.ts && node --experimental-strip-types src/features/home/my-attendance-summary.verify.ts && node scripts/verify-overtime-actuals-db.mjs && node scripts/verify-overtime-actuals-browser.mjs",
     "verify:overnight-annual": "node --experimental-strip-types src/features/settings/overnight-annual.verify.ts && node scripts/verify-overnight-annual-db.mjs && node scripts/verify-overnight-annual-browser.mjs",

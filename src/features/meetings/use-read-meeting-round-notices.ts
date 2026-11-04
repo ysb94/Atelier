@@ -4,6 +4,7 @@ import { useNotificationDetailVisibility } from '@/lib/inbox/use-notification-vi
 import { useAuth } from '@/lib/supabase/auth'
 import { listMeetingInvitations, readMeetingRoundNotice } from '@/lib/supabase/meetings'
 import type { MeetingRound } from './meeting-schedule'
+import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 
 export function useReadMeetingRoundNotices(round: MeetingRound, enabled: boolean) {
   const active = useNotificationDetailVisibility()
@@ -16,6 +17,8 @@ export function useReadMeetingRoundNotices(round: MeetingRound, enabled: boolean
     if (!active || !enabled || !profile?.id || !invitations.data || round.detailAccess === 'none' || document.visibilityState !== 'visible') return
     let cancelled = false
     async function read() {
+      const trace=startWorkflow('notification','read_meeting_result')
+      trace.step('match_displayed_version')
       try {
         const notices = invitations.data ?? []
         let changed = false
@@ -25,13 +28,14 @@ export function useReadMeetingRoundNotices(round: MeetingRound, enabled: boolean
           if (url.searchParams.get('round') !== round.id) continue
           // The rendered publication must exist, not just its round's schedule.
           if (notice.kind === 'meeting_result' && !round.sharedResults?.some(result => `result:${result.version}` === url.searchParams.get('resultVersion'))) continue
-          await readMeetingRoundNotice(notice.id, notice.createdAt)
+          await trace.run('save_read',context=>readMeetingRoundNotice(notice.id, notice.createdAt,context))
           changed = true
         }
         if (!cancelled) setError(null)
-        if (changed) await cache.invalidateQueries({ queryKey: ['meeting-invitations', profile?.id] })
+        if (changed) await trace.run('refresh_queries',()=>cache.invalidateQueries({ queryKey: ['meeting-invitations', profile?.id] }),{writeOutcome:'committed'})
+        trace.done({state:changed?'read_saved':'no_current_unread'})
       } catch (cause) {
-        console.warn('[meetings] 회차 결과 읽음 저장 실패', { roundId: round.id, cause })
+        trace.fail(cause)
         if (!cancelled) setError('읽음 기록을 저장하지 못했습니다. 다시 시도해 주세요.')
       }
     }

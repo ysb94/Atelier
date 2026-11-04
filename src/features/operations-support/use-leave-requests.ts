@@ -7,6 +7,7 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { emptyList } from '@/lib/utils'
 import type { RequestForm } from '@/features/settings/personal-requests'
 import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
+import { diagnosticOperation, inputDiagnosticContext, newDiagnosticContext, tracedInput, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 
 export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' = 'mine') {
   const { session, profile } = useAuth()
@@ -22,7 +23,8 @@ export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' = 'mine') {
     refetchInterval: readPollInterval(30_000, active && allowed),
   })
   useEffect(() => { if (query.error) console.warn('[leave-requests] 신청 조회 실패', query.error) }, [query.error])
-  async function refresh() {
+  async function refresh(context?: DiagnosticContext, outcome = 'unknown') {
+    return diagnosticOperation('leave', 'refresh_queries', trace => trace.run('invalidate_queries', async () => {
     await Promise.all([
       'company-leave-requests', 'company-leave-cover', 'my-attendance-basis', 'home-my-leave', 'my-extra-leave',
       'employee-roster', 'employee-extra-leave', 'employee-leave-advances', 'leave-notice-management', 'meeting-availability',
@@ -31,18 +33,23 @@ export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' = 'mine') {
       'my-workday-basis', 'company-attendance-clocks', 'late-arrival-statements', 'late-statement-notices', 'late-statement-tasks',
       'late-arrival-cumulative',
     ].map(key => client.invalidateQueries({ queryKey: [key] })))
+    }, { writeOutcome: outcome }), context)
   }
   const create = useMutation({
     mutationFn: (form: RequestForm) => {
       if (!userId) throw new Error('로그인 상태를 확인해 주세요.')
-      return submitLeaveRequest(userId, form)
+      if (!inputDiagnosticContext(form)) tracedInput(form, newDiagnosticContext(form.kind === 'offsite' ? 'offsite' : 'leave', 'submit'))
+      return submitLeaveRequest(userId, form, inputDiagnosticContext(form))
     },
-    onSuccess: refresh,
+    onSuccess: (_data, form) => refresh(inputDiagnosticContext(form), 'committed'),
   })
   const transition = useMutation({
-    mutationFn: (input: { id: string; status: 'approved' | 'rejected' | 'cancelled'; note?: string }) => transitionLeaveRequest(input.id, input.status, input.note),
-    onSuccess: refresh,
-    onError: refresh,
+    mutationFn: (input: { id: string; status: 'approved' | 'rejected' | 'cancelled'; note?: string }) => {
+      if (!inputDiagnosticContext(input)) tracedInput(input, newDiagnosticContext('leave', input.status))
+      return transitionLeaveRequest(input.id, input.status, input.note, inputDiagnosticContext(input))
+    },
+    onSuccess: (_data, input) => refresh(inputDiagnosticContext(input), 'committed'),
+    onError: (_error, input) => refresh(inputDiagnosticContext(input)),
   })
   return { requests: allowed ? query.data ?? emptyList<LeaveRequest>() : emptyList<LeaveRequest>(),
     loading: query.isPending && Boolean(allowed), error: query.error,

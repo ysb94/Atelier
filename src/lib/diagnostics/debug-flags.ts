@@ -45,6 +45,8 @@ declare global {
       on: () => void
       off: () => void
       enabled: () => boolean
+      report?: () => ReturnType<typeof import('./workflow-trace').diagnosticReport>
+      clear?: () => void
     }
   }
 }
@@ -53,6 +55,7 @@ declare global {
 export function exposeDiagnosticsSwitch() {
   if (typeof window === 'undefined') return
   window.atelierDebug = {
+    ...window.atelierDebug,
     on: () => {
       setDiagnosticsEnabled(true)
       console.info(
