@@ -61,7 +61,7 @@ try {
     create function app.offsite_finish(r public.company_leave_requests,d date) returns timestamptz language sql as $$select (r.to_date+r.end_time) at time zone 'Asia/Seoul'$$;
     insert into public.profiles values('10000000-0000-4000-8000-000000000003','${company}',null,'active','third','staff');
     insert into public.attendance_start_settings(company_id,employee_id,month,start_time) values('${company}','${staff}','2099-11-01','09:00');`)
-  await db.exec(await readFile('supabase/migrations/20261104031354_offsite_group_registration.sql','utf8'))
+  await db.exec(await readFile('supabase/migrations/20261104033803_offsite_group_registration.sql','utf8'))
   const third='10000000-0000-4000-8000-000000000003'
   const ids=[staff,peer,third]
   const form={from:'2099-11-04',to:'2099-11-04',start:'16:00',end:'20:00',place:'거래처',note:'공동 외근'}
