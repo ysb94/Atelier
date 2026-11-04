@@ -8,7 +8,7 @@ import { meetingNoticeItems, pendingMeetingNoticeCount } from './meeting-notices
 import { useMeetingRealtime } from './use-meeting-realtime'
 
 /** 실시간 채널 이름이 사용자별 하나뿐이라 구독은 앱 상단 한 곳(realtime 기본값)만 맡는다. 같은 화면에 두 번째로 쓰는 곳은 realtime: false로 같은 쿼리 캐시만 읽는다. */
-export function useMeetingNotices({ realtime = true }: { realtime?: boolean } = {}) {
+export function useMeetingNotices({ realtime = true, background = false }: { realtime?: boolean; background?: boolean } = {}) {
   const { profile } = useAuth()
   const enabled = profile?.status === 'active'
   useMeetingRealtime(Boolean(enabled && realtime), profile?.id, profile?.companyId ?? undefined)
@@ -18,17 +18,20 @@ export function useMeetingNotices({ realtime = true }: { realtime?: boolean } = 
     queryFn: listMeetingInvitations,
     enabled,
     refetchInterval: polling ? 30000 : false,
+    refetchIntervalInBackground: background && polling,
   })
   const meetings = useQuery({
     queryKey: ['company-meetings', profile?.id, profile?.companyId],
     queryFn: listCompanyMeetings,
     enabled,
     refetchInterval: polling ? 30000 : false,
+    refetchIntervalInBackground: background && polling,
   })
   const items = useMemo(() => {
     return meetingNoticeItems(invitations.data ?? emptyList<InboxNotification>(), meetings.data, profile?.id)
   }, [invitations.data, meetings.data, profile?.id])
   return {
+    ready: invitations.isSuccess && meetings.isSuccess,
     items,
     series: meetings.data,
     pending: pendingMeetingNoticeCount(items),

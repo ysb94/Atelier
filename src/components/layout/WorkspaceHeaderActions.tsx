@@ -2,6 +2,7 @@ import { myHomeNotificationSummary } from '@/lib/inbox/my-home-notifications'
 import { useMyHomeNotifications } from '@/features/settings/use-my-home-notifications'
 import {
   useCallback,
+  useContext,
   useEffect,
   useId,
   useMemo,
@@ -24,9 +25,12 @@ import { AttendanceStatusActions } from '@/features/home/AttendanceEntryGate'
 import { inboxBadgeLabel } from '@/lib/inbox/format'
 import type { ChatRoom, InboxNotification } from '@/lib/inbox/types'
 import { useAuth } from '@/lib/supabase/auth'
-import { useHeaderPreview } from '@/lib/company/developer-preview-context'
+import { PreviewContext, useHeaderPreview } from '@/lib/company/developer-preview-context'
 import { cn, emptyList } from '@/lib/utils'
 import { NotificationPanel } from './NotificationPanel'
+import { DesktopNotificationSettings } from './DesktopNotificationSettings'
+import { useDesktopNotifications } from '@/lib/inbox/use-desktop-notifications'
+import { desktopBackgroundEnabled } from '@/lib/inbox/desktop-notifications'
 import { DeveloperPreviewBar, DeveloperPreviewProvider } from './DeveloperPreview'
 import { useWorkspaceOverlayHost } from './use-workspace-overlay-host'
 import { ReleaseAccessProvider, useReleaseAccess } from './release-access-context'
@@ -45,8 +49,9 @@ export function WorkspaceHeaderActions() {
 function ReleasedHeaderActions() {
   useRenderWatch('WorkspaceHeaderActions')
   const navigate = useNavigate()
-  const { profile } = useAuth()
-  const { href: releaseLink } = useReleaseAccess()
+  const { profile, session } = useAuth()
+  const preview = useContext(PreviewContext)
+  const { href: releaseLink, approvals } = useReleaseAccess()
   const chatEnabled = profile?.status === 'active'
   const roomsQuery = useChatRooms(chatEnabled)
   useChatRealtime(chatEnabled)
@@ -60,7 +65,7 @@ function ReleasedHeaderActions() {
   const notificationTitleId = useId()
   const [open, setOpen] = useState<OpenPanel | null>(null)
   const [requestedRoom,setRequestedRoom]=useState<RequestedConversation|null>(null)
-  const homeNotices=useMyHomeNotifications({coordinator:true})
+  const homeNotices=useMyHomeNotifications({coordinator:true, background:!preview?.selected && desktopBackgroundEnabled(profile?.id)})
   const leaveNotices=useLeaveUsageNotices()
   const [noticeParams,setNoticeParams]=useSearchParams()
   const openLeaveNotice=useRef(leaveNotices.open);openLeaveNotice.current=leaveNotices.open
@@ -72,6 +77,12 @@ function ReleasedHeaderActions() {
   },[requestedLeave,leaveNotices.records,setNoticeParams])
   const { container: overlayContainer, restoreFocus } = useWorkspaceOverlayHost(open !== null)
   const notifications = useMemo(() => homeNotices.items.filter(item => releaseLink(item.href) !== null), [homeNotices.items,releaseLink])
+  const desktop = useDesktopNotifications(
+    !preview?.selected && profile?.status === 'active' && session?.user.id === profile.id ? profile.id : undefined,
+    notifications,
+    homeNotices.ready && !homeNotices.error && !approvals.loading && !approvals.error,
+    openNotification,
+  )
   useEffect(()=>{
     function receive(event:Event){
       const detail=(event as CustomEvent<RequestedConversation>).detail
@@ -153,6 +164,11 @@ function ReleasedHeaderActions() {
       <AttendanceStatusActions />
       <LeaveUsageNoticeReceiver notices={leaveNotices}/>
       <KoreaHeaderClock />
+      {desktop.prompt && open !== 'notifications' ? createPortal(
+        <div className="fixed bottom-4 right-4 z-[200] w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+          <DesktopNotificationSettings controls={desktop} invitation />
+        </div>, document.body,
+      ) : null}
       <HeaderIconButton
         buttonRef={chatButtonRef}
         label={open === 'chat' ? '채팅 닫기' : '채팅'}
@@ -204,6 +220,7 @@ function ReleasedHeaderActions() {
           className={HEADER_PANEL_CLASS}
         >
           <NotificationPanel
+            desktopSettings={<DesktopNotificationSettings controls={desktop} />}
             items={notifications}
             titleId={notificationTitleId}
             onOpen={openNotification}

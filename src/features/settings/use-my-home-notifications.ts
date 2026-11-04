@@ -20,15 +20,15 @@ async function workNotices(): Promise<WorkNotice[]> {
   if (error) { console.warn('[my-home-notifications] 업무 알림 조회 실패', error); throw new Error(['PGRST202','42883'].includes(error.code) ? '신청·퇴근 알림 서버 연결 대기: 추가 DB 설정이 필요합니다.' : '업무 알림을 불러오지 못했습니다.') }
   return data ?? []
 }
-export function useMyHomeNotifications({ coordinator = false } = {}) {
+export function useMyHomeNotifications({ coordinator = false, background = false } = {}) {
   const { profile, session } = useAuth()
   const preview = usePagePreview()
   const enabled = profile?.status === 'active' && session?.user.id === profile.id && !preview?.active
-  const meetings = useMeetingNotices({ realtime: coordinator && enabled })
+  const meetings = useMeetingNotices({ realtime: coordinator && enabled, background })
   const poll = coordinator && enabled ? 30_000 : false
-  const leave = useQuery({ queryKey: ['leave-usage-notices', profile?.id], queryFn: () => listMyLeaveUsageNotices(profile!.id), enabled, refetchInterval: poll })
-  const late = useQuery({ queryKey: ['late-statement-notices', profile?.id], queryFn: listMyLateStatementNotices, enabled, refetchInterval: poll })
-  const work = useQuery({ queryKey: ['my-home-work-notices', profile?.id], queryFn: workNotices, enabled, refetchInterval: poll, retry: false })
+  const leave = useQuery({ queryKey: ['leave-usage-notices', profile?.id], queryFn: () => listMyLeaveUsageNotices(profile!.id), enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
+  const late = useQuery({ queryKey: ['late-statement-notices', profile?.id], queryFn: listMyLateStatementNotices, enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
+  const work = useQuery({ queryKey: ['my-home-work-notices', profile?.id], queryFn: workNotices, enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator, retry: false })
   const cache=useQueryClient()
   useEffect(()=>{
     if(!coordinator||!enabled||!profile?.id)return
@@ -76,7 +76,7 @@ export function useMyHomeNotifications({ coordinator = false } = {}) {
     })
     return [...meetingItems,...leaveItems,...lateItems,...workItems].sort((a,b) => b.createdAt.localeCompare(a.createdAt))
   }, [enabled, meetings.items, meetings.series, leave.data, late.data, work.data])
-  return { items, work: work.data ?? emptyList<WorkNotice>(), error: enabled ? meetings.error ?? leave.error ?? late.error ?? work.error : null }
+  return { items, ready: enabled && meetings.ready && leave.isSuccess && late.isSuccess && work.isSuccess, work: work.data ?? emptyList<WorkNotice>(), error: enabled ? meetings.error ?? leave.error ?? late.error ?? work.error : null }
 }
 
 export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout', entityId: string|undefined, version: string|undefined, displayed: boolean) {

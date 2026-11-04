@@ -40,12 +40,14 @@ export function NotificationPanel({
   titleId,
   onOpen,
   onClose,
+  desktopSettings,
 }: {
   items: readonly InboxNotification[]
   titleId: string
   onMarkAllRead?: () => void
   onOpen: (item: InboxNotification) => void
   onClose: () => void
+  desktopSettings?: ReactNode
 }) {
   const [filter, setFilter] = useState<'attention' | 'all' | 'unread'>('attention')
   const unreadCount = useMemo(
@@ -81,6 +83,8 @@ export function NotificationPanel({
           </Button>
         </div>
       </header>
+
+      {desktopSettings}
 
       <div className="flex shrink-0 gap-1 border-b border-border px-3 py-2">
         <FilterButton selected={filter === 'attention'} onClick={() => setFilter('attention')}>확인·처리 필요</FilterButton>
