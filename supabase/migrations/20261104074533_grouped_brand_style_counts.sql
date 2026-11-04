@@ -4,7 +4,8 @@ do $$ begin
   if (select count(*) from pg_policies where schemaname='public' and tablename='styles'
       and cmd in ('ALL','SELECT')) <> 1
      or not exists(select 1 from pg_policies where schemaname='public' and tablename='styles'
-       and policyname='styles_all_member' and cmd='ALL' and qual='app.can_read_brand(brand_id)') then
+       and policyname='styles_all_member' and cmd='ALL' and qual='app.can_read_brand(brand_id)'
+       and permissive='PERMISSIVE' and roles=array['authenticated']::name[]) then
     raise exception 'styles read policy changed; revalidate count boundary';
   end if;
 end $$;

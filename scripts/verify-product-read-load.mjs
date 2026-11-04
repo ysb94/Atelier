@@ -78,7 +78,7 @@ create table public.styles(id uuid,brand_id uuid);alter table public.styles enab
 create table public.profiles(id uuid,status text,is_admin boolean);
 create function app.can_read_brand(uuid) returns boolean language sql stable security definer as $$select exists(select 1 from public.profiles where id=auth.uid() and status='active')$$;
 create function app.can_edit_brand(uuid) returns boolean language sql stable as $$select false$$;
-create policy styles_all_member on public.styles for all using(app.can_read_brand(brand_id)) with check(app.can_edit_brand(brand_id));
+create policy styles_all_member on public.styles for all to authenticated using(app.can_read_brand(brand_id)) with check(app.can_edit_brand(brand_id));
 grant usage on schema auth,app to authenticated,anon;grant select on public.styles to authenticated,anon;
 insert into public.profiles values('11111111-1111-4111-8111-111111111111','active',false),('22222222-2222-4222-8222-222222222222','pending',false);
 insert into public.styles values('33333333-3333-4333-8333-333333333333','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'),('44444444-4444-4444-8444-444444444444','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');`)
