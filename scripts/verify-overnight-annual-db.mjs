@@ -67,7 +67,7 @@ try {
 
   await db.exec(`create or replace function app.offsite_finish(r public.company_leave_requests,d date) returns timestamptz language sql as $$select ((case when r.offsite_continuous then r.to_date else d+case when r.end_next_day then 1 else 0 end end)+r.end_time) at time zone 'Asia/Seoul'$$;`)
   const acls=await scalar("select proacl::text from pg_proc where oid='app.guard_company_leave_request()'::regprocedure")
-  await db.exec(await readFile('supabase/migrations/20261104035650_overnight_offsite_annual_overlap.sql','utf8'))
+  await db.exec(await readFile('supabase/migrations/20261104041501_overnight_offsite_annual_overlap.sql','utf8'))
   assert.equal(await scalar("select proacl::text from pg_proc where oid='app.guard_company_leave_request()'::regprocedure"),acls)
   const clear=async()=>db.exec('reset role;delete from public.company_leave_requests;set role authenticated')
   const add=async(kind,from,to,start,end,next=false,continuous=false,shift=null)=>scalar(`insert into public.company_leave_requests(company_id,employee_id,kind,from_date,to_date,start_time,end_time,end_next_day,offsite_continuous,offsite_work_start,note,place) values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'검증','거래처') returning id`,[company,staff,kind,from,to,start,end,next,continuous,shift])
