@@ -54,8 +54,13 @@ language sql stable security definer set search_path='' as $$
  and (s.host_id=auth.uid() or app.is_admin() or (s.phase='preparing' and s.created_by=auth.uid())
  or (r.confirmed_at is not null and exists(select 1 from app.meeting_round_people_rows(r.id) p where p.profile_id=auth.uid() and p.role='attendee'))))
 $$;
-alter function app.meeting_round_can_read(uuid) rename to meeting_round_can_read_before_roles;
-create function app.meeting_round_can_read(p_id uuid) returns boolean language sql stable security definer set search_path='' as $$
+-- Keep the original function OID: existing RLS expressions reference it by OID.
+do $$declare definition text; begin
+ definition:=pg_get_functiondef('app.meeting_round_can_read(uuid)'::regprocedure);
+ if strpos(definition,'FUNCTION app.meeting_round_can_read(')=0 then raise exception '회차 조회 함수가 변경되었습니다.'; end if;
+ execute replace(definition,'FUNCTION app.meeting_round_can_read(','FUNCTION app.meeting_round_can_read_before_roles(');
+end $$;
+create or replace function app.meeting_round_can_read(p_id uuid) returns boolean language sql stable security definer set search_path='' as $$
  select case when exists(select 1 from app.meeting_round_rosters where round_id=p_id)
  then app.meeting_round_full_access(p_id) else app.meeting_round_can_read_before_roles(p_id) end
 $$;
@@ -368,7 +373,7 @@ do $$declare f record; begin
  where (n.nspname='app' and p.proname in ('meeting_round_people_rows','meeting_round_full_access','meeting_materialize_rosters','meeting_sync_round_group','meeting_set_round_people','meeting_publish_result','meeting_read_round_notice','meeting_round_can_read','meeting_list','meeting_notifications','meeting_respond','meeting_write','meeting_round_can_read_before_roles'))
  or (n.nspname='public' and p.proname in ('set_meeting_round_people','publish_meeting_result','read_meeting_round_notice')) loop
  execute format('revoke all on function %s from public,anon,authenticated',f.signature);
- if f.signature::text not like 'app.meeting_write(%' and f.signature::text not like 'app.meeting_materialize_rosters(%' and f.signature::text not like 'app.meeting_sync_round_group(%' and f.signature::text not like 'app.meeting_round_people_rows(%' then
+ if f.signature::text not like 'app.meeting_round_can_read_before_roles(%' and f.signature::text not like 'app.meeting_write(%' and f.signature::text not like 'app.meeting_materialize_rosters(%' and f.signature::text not like 'app.meeting_sync_round_group(%' and f.signature::text not like 'app.meeting_round_people_rows(%' then
  execute format('grant execute on function %s to authenticated',f.signature); end if;
  end loop;
 end $$;
