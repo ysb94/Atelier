@@ -118,17 +118,39 @@ create function app.holiday_work_remaining(p_work uuid) returns integer language
  select greatest(0,coalesce(d.credit_units,0)-coalesce((select sum(a.units)::integer from app.holiday_work_allocations a where a.work_id=d.id),0)) from app.holiday_work_days d where d.id=p_work
 $$;
 
-create function app.holiday_work_list(p_month date,p_scope text) returns jsonb language plpgsql stable security definer set search_path='' as $$
-declare company uuid:=app.meeting_company_id(); last_day date; rows jsonb; policy jsonb;
+-- Route the whole explicit trip, including a holiday in a different month.
+-- Old repeating weekday trips do not imply work on their intervening weekends.
+create function app.holiday_work_offsite_holiday(r public.company_leave_requests) returns date language plpgsql stable security definer set search_path='' as $$
+declare d date; finish timestamp;
+begin
+ if r.kind<>'offsite' or (not r.offsite_continuous and r.from_date<>r.to_date) then return null; end if;
+ finish:=r.to_date+r.end_time+case when r.end_next_day then interval '1 day' else interval '0 day' end;
+ for d in select generate_series(r.from_date,least((finish-interval '1 microsecond')::date,r.from_date+7),interval '1 day')::date loop
+  if (d+1)::timestamp>r.from_date+r.start_time and d::timestamp<finish and app.holiday_work_day_kind(d) is not null then return d; end if;
+ end loop;
+ return null;
+end $$;
+
+create function app.holiday_work_list(p_month date,p_scope text,p_request uuid default null) returns jsonb language plpgsql stable security definer set search_path='' as $$
+declare company uuid:=app.meeting_company_id(); last_day date; rows jsonb; policy jsonb; trip public.company_leave_requests;
 begin
  if company is null then raise exception '활성 직원만 조회할 수 있습니다.' using errcode='42501'; end if;
  if p_month is null or extract(day from p_month)<>1 or p_scope not in ('mine','review','operations') then raise exception '조회 월과 범위를 확인하세요.' using errcode='23514'; end if;
  if p_scope='operations' and not app.holiday_work_ops() then raise exception '운영지원 권한이 필요합니다.' using errcode='42501'; end if;
  last_day:=(p_month+interval '1 month - 1 day')::date;
+ if p_request is not null then
+  select * into trip from public.company_leave_requests where id=p_request and company_id=company and kind='offsite';
+  if trip.id is null or not app.holiday_work_can_view(trip.employee_id) then raise exception '해당 외근을 조회할 권한이 없습니다.' using errcode='42501'; end if;
+  if app.holiday_work_offsite_holiday(trip) is null then raise exception '주말·공휴일이 포함된 외근을 선택하세요.' using errcode='23514'; end if;
+  p_month:=trip.from_date;
+  last_day:=((trip.to_date+trip.end_time+case when trip.end_next_day then interval '1 day' else interval '0 day' end)-interval '1 microsecond')::date;
+  if exists(select 1 from generate_series(extract(year from p_month)::integer,extract(year from last_day)::integer) y where not exists(select 1 from app.leave_balance_calendar_years c where c.year=y)) then raise exception '외근 전체 기간의 공휴일 기준을 먼저 등록해 주세요.' using errcode='23514'; end if;
+ end if;
  if not exists(select 1 from app.leave_balance_calendar_years where year=extract(year from p_month)::integer) then raise exception '해당 연도의 공휴일 기준이 없습니다.' using errcode='23514'; end if;
  with dates as (select generate_series(p_month,last_day,interval '1 day')::date as work_day),
  candidates as (
  select p.id employee,d.work_day from public.profiles p cross join dates d where p.company_id=company and (p.status='active' or exists(select 1 from app.holiday_work_days old where old.company_id=company and old.employee_id=p.id and old.work_date=d.work_day))
+ and (p_request is null or p.id=trip.employee_id)
  and (p_scope='mine' and p.id=auth.uid() or p_scope='review' and app.holiday_work_review(p.id) or p_scope='operations')
  and (extract(isodow from d.work_day)>5 or exists(select 1 from app.leave_balance_holidays h where h.day=d.work_day))
  and (exists(select 1 from app.holiday_work_days w where w.company_id=company and w.employee_id=p.id and w.work_date=d.work_day)
@@ -289,13 +311,31 @@ create function app.holiday_work_notifications() returns jsonb language sql stab
  where app.holiday_work_can_view(d.employee_id) and (e.audience='employee' and d.employee_id=auth.uid() or e.audience='reviewer' and app.holiday_work_review(d.employee_id) or e.audience='operations' and app.holiday_work_ops())
 $$;
 
+create function app.holiday_work_offsite_settle(p jsonb) returns jsonb language plpgsql security definer set search_path='' as $$
+declare trip public.company_leave_requests; old_context text:=current_setting('app.holiday_offsite_request',true);
+begin
+ if not app.holiday_work_ops() then raise exception '운영지원 권한이 필요합니다.' using errcode='42501'; end if;
+ select * into trip from public.company_leave_requests where id=(p->>'requestId')::uuid and company_id=app.meeting_company_id() and kind='offsite' and status='approved';
+ if trip.id is null then raise exception '해당 외근을 처리할 권한이 없습니다.' using errcode='42501'; end if;
+ if app.holiday_work_offsite_holiday(trip) is null then raise exception '주말·공휴일 포함 외근만 이 화면에서 처리합니다.' using errcode='23514'; end if;
+ if p->>'mode'='leave' and not exists(select 1 from app.holiday_work_policy where company_id=trip.company_id and agreement_date<=(now() at time zone 'Asia/Seoul')::date) then raise exception '근로자대표 서면합의 기준 등록 전에는 보상휴가를 확정할 수 없습니다.' using errcode='23514'; end if;
+ perform set_config('app.holiday_offsite_request',trip.id::text,true);
+ perform app.save_offsite_settlement(trip.id,p->>'mode',p->'minutes',(p->>'days')::numeric,(p->>'expires')::date,p->>'note');
+ perform set_config('app.holiday_offsite_request',coalesce(old_context,''),true);
+ perform app.holiday_work_signal(trip.employee_id);
+ return jsonb_build_object('saved',true);
+exception when others then
+ perform set_config('app.holiday_offsite_request',coalesce(old_context,''),true);raise;
+end $$;
+
 create function app.holiday_work(p_action text,p jsonb) returns jsonb language plpgsql security definer set search_path='' as $$
 begin
  if app.meeting_company_id() is null then raise exception '활성 직원 계정이 필요합니다.' using errcode='42501'; end if;
- if p_action='list' then return app.holiday_work_list((p->>'month')::date,p->>'scope');
+ if p_action='list' then return app.holiday_work_list((p->>'month')::date,p->>'scope',(p->>'request')::uuid);
  elsif p_action in ('plan','submit','review','cancel') then return jsonb_build_object('id',app.holiday_work_day_action(p_action,p));
  elsif p_action='settle' then return jsonb_build_object('id',app.holiday_work_settle(p));
  elsif p_action in ('policy','paid') then return app.holiday_work_settings(p_action,p);
+ elsif p_action='offsite-settle' then return app.holiday_work_offsite_settle(p);
  else raise exception '지원하지 않는 처리입니다.' using errcode='23514'; end if;
 end $$;
 create function public.holiday_work(p_action text,p_payload jsonb default '{}') returns jsonb language sql security invoker set search_path='' as $$ select app.holiday_work(p_action,p_payload) $$;
@@ -316,6 +356,7 @@ begin
  if TG_TABLE_NAME='offsite_settlements' then
   select * into r from public.company_leave_requests where id=new.request_id;
   perform pg_advisory_xact_lock(hashtextextended(r.employee_id::text,0));
+  if app.holiday_work_offsite_holiday(r) is not null and current_setting('app.holiday_offsite_request',true) is distinct from r.id::text then raise exception '주말·공휴일이 포함된 외근은 건 전체를 주말·공휴일 근무 관리에서 후처리해 주세요.' using errcode='23514'; end if;
   if exists(select 1 from jsonb_each_text(new.minutes_by_date) x where x.value::integer>0 and (extract(isodow from x.key::date)>5 or exists(select 1 from app.leave_balance_holidays h where h.day=x.key::date))) then raise exception '주말·공휴일 구간은 주말·공휴일 근무 관리에서 확인·정산해 주세요.' using errcode='23514'; end if;
  elsif TG_TABLE_NAME='overtime_actual_reports' then
   select * into r from public.company_leave_requests where id=new.request_id;

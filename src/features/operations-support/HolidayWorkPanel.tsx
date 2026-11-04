@@ -15,6 +15,7 @@ import { MyHomeNotificationList } from '@/features/settings/MyHomeNotificationLi
 import { HolidaySettlementEditor, HolidayWorkInput, type HolidaySave } from './HolidayWorkEditor'
 import { holidayCredit, holidayPhase, holidayTime, HOLIDAY_LOCATIONS, type HolidayWork } from './holiday-work'
 import { useHolidayWork } from './use-holiday-work'
+import { HolidayOffsiteCases } from './HolidayOffsiteCases'
 import { localDateKey } from './monthly-attendance'
 
 export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 'review' | 'operations'; month?: string }) {
@@ -24,7 +25,8 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
   const [localMonth, setMonth] = useState(localDateKey(new Date()).slice(0, 7))
   const routedMonth = params.get('holidayMonth')
   const month = routedMonth && /^\d{4}-(0[1-9]|1[0-2])$/.test(routedMonth) ? routedMonth : monthProp ?? localMonth
-  const work = useHolidayWork(month, scope), [search, setSearch] = useState(''), [filter, setFilter] = useState('all')
+  const caseId = scope==='operations' ? params.get('offsiteCase') ?? undefined : undefined
+  const work = useHolidayWork(month, scope, caseId), [search, setSearch] = useState(''), [filter, setFilter] = useState('all')
   const [selected, setSelected] = useState<string | null>(null), [editing, setEditing] = useState<HolidayWork | 'plan' | null>(null)
   const [basket, setBasket] = useState<HolidayWork[]>([]), [settling, setSettling] = useState(false), [limit, setLimit] = useState(50)
   const detailAnchor = useRef<HTMLDivElement>(null), editorAnchor = useRef<HTMLDivElement>(null)
@@ -35,7 +37,7 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
   const requestedKey = params.get('holidayEvent')
   const detailEvent = requestedKey ? detailEvents.find(event => event.event_key === requestedKey) : [...detailEvents].sort((a,b) => b.created_at.localeCompare(a.created_at))[0]
   const read = useReadMyHomeNotification('request', row?.id ?? undefined, detailEvent?.event_key, active && Boolean(row))
-  useEffect(() => { setSelected(null); setEditing(null); setBasket([]); setSettling(false) }, [profile?.id,profile?.companyId])
+  useEffect(() => { setSelected(null); setEditing(null); setBasket([]); setSettling(false) }, [profile?.id,profile?.companyId,caseId])
   useEffect(() => { const id = params.get('holidayWork'); if (active && id && work.rows.some(r => r.id === id)) setSelected(id) }, [active, params, work.rows])
   const detailDisplayed = Boolean(row)
   useEffect(() => { if (active && selected && detailDisplayed) detailAnchor.current?.scrollIntoView({ block: 'nearest' }) }, [active,selected,detailDisplayed])
@@ -53,14 +55,16 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
   return <section className="space-y-4" aria-label={scope === 'operations' ? '주말·공휴일 근무 관리' : scope === 'review' ? '주말·공휴일 실제 시간 확인' : '내 주말·공휴일 근무'}>
     <header><h2 className="text-base font-semibold">{scope === 'operations' ? '주말·공휴일 근무 관리' : scope === 'review' ? '주말·공휴일 실제 시간 확인' : '주말·공휴일 근무'}</h2><p className="text-sm text-muted-foreground">{scope === 'mine' ? '외근·출퇴근 기록을 참고해 실제 일한 구간만 제출하세요. 부서 승인자가 시간을 확인하고 운영지원이 수당·보상휴가를 확정합니다.' : '사무실·외근을 직원·날짜별로 한 번만 확인합니다. 실제 시간과 가산 보상 시간을 구분하며 평일 야근 누적에 중복 반영하지 않습니다.'}</p></header>
     {scope === 'operations' && <MyHomeNotificationList tab="holiday-work" />}
-    <FilterBar>{!monthProp && <label className="text-sm">근무 월<Input aria-label="휴일 근무 월" type="month" value={month} onChange={e => { if (/^\d{4}-(0[1-9]|1[0-2])$/.test(e.target.value)) { setMonth(e.target.value); setLimit(50); if (params.has('holidayMonth')) close() } }} /></label>}<Input aria-label="휴일 근무 직원 검색" placeholder="직원·부서 검색" value={search} onChange={e => setSearch(e.target.value)} />
+    <FilterBar>{!monthProp && !caseId && <label className="text-sm">근무 월<Input aria-label="휴일 근무 월" type="month" value={month} onChange={e => { if (/^\d{4}-(0[1-9]|1[0-2])$/.test(e.target.value)) { setMonth(e.target.value); setLimit(50); if (params.has('holidayMonth')) close() } }} /></label>}<Input aria-label="휴일 근무 직원 검색" placeholder="직원·부서 검색" value={search} onChange={e => setSearch(e.target.value)} />
       {scope === 'mine' && <Button type="button" disabled={!work.data?.ready} onClick={() => setEditing('plan')}>주말·공휴일 근무 예정 등록</Button>}</FilterBar>
     {!work.enabled && <p className="text-sm text-muted-foreground">본인 계정의 활성 화면에서 조회합니다.</p>}
     {work.isSuccess && !work.data.ready && <p role="status" className="rounded-xl border border-border bg-muted p-3 text-sm">주말·공휴일 근무의 추가 DB 설정 적용 대기입니다. 기존 근무·연차·권한은 그대로 유지됩니다.</p>}
     {work.error && <p role="alert" className="text-sm text-danger">{work.error.message}<Button type="button" size="sm" variant="outline" onClick={() => void work.refetch()}>다시 조회</Button></p>}
     {work.data?.ready && <>
+      {scope==='operations' && <HolidayOffsiteCases month={month} search={search} policyReady={Boolean(work.data.policy)} enabled={work.enabled} />}
+      {caseId && <p className="text-sm font-medium">선택 외근 전체 기간의 주말·공휴일 기록 · 다른 달의 날짜도 함께 표시합니다.</p>}
       <FilterTabs ariaLabel="휴일 근무 진행 구분" value={filter} onChange={setFilter} tabs={[{ value: 'all', label: '전체', count: work.rows.length }, { value: 'planned', label: '예정·입력 필요', count: work.rows.filter(r => ['planned', 'unreported', 'returned'].includes(r.state)).length }, { value: 'review', label: '부서 확인 대기', count: work.rows.filter(r => r.state === 'submitted').length }, { value: 'settle', label: '정산 대기', count: work.rows.filter(r => r.state === 'approved' && r.remainingUnits > 0).length }, { value: 'paid', label: '정산 내역', count: work.rows.filter(r => r.settlements.length).length }]} />
-      <StatGrid><StatTile label="선택 월 실제 시간" value={holidayCredit(work.rows.reduce((sum, r) => sum + (r.actualMinutes ?? 0) * 2, 0))} /><StatTile label="선택 월 미정산 보상 시간" value={holidayCredit(work.rows.reduce((sum, r) => sum + r.remainingUnits, 0))} /><StatTile label="부서 확인 대기" value={`${work.rows.filter(r => r.state === 'submitted').length}건`} /></StatGrid>
+      <StatGrid><StatTile label="주말·공휴일 실제 시간" value={holidayCredit(work.rows.reduce((sum, r) => sum + (r.actualMinutes ?? 0) * 2, 0))} /><StatTile label="미정산 보상 시간" value={holidayCredit(work.rows.reduce((sum, r) => sum + r.remainingUnits, 0))} /><StatTile label="부서 확인 대기" value={`${work.rows.filter(r => r.state === 'submitted').length}건`} /></StatGrid>
       {editing && <div ref={editorAnchor}><HolidayWorkInput key={editing === 'plan' ? `plan:${month}` : `${editing.employeeId}:${editing.date}:${editing.version}`} row={editing === 'plan' ? undefined : editing} planned={editing === 'plan'} month={month} save={save} close={() => setEditing(null)} /></div>}
       {row && <div ref={detailAnchor}><HolidayWorkDetail key={`${row.employeeId}:${row.date}`} row={row} event={detailEvent?.note} scope={scope} save={save} close={close} edit={() => setEditing(row)} /></div>}
       {read.error && <p role="alert" className="text-sm text-danger">{read.error}<Button type="button" variant="outline" size="sm" onClick={read.retry}>읽음 저장 재시도</Button></p>}

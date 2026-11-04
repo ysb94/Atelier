@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { holidayAmount, holidayClock, holidayCredit, parsedHolidayIntervals } from './holiday-work.ts'
+import { firstOffsiteHoliday, holidayOffsiteHref } from './offsite-holiday-routing.ts'
 const periods = [{start:540,end:720},{start:780,end:1080}]
 assert.deepEqual(holidayAmount(periods,'rest'),{minutes:480,night:0,units:1440})
 assert.deepEqual(holidayAmount([{start:540,end:1140}],'holiday'),{minutes:600,night:0,units:1920})
@@ -12,4 +13,12 @@ assert.equal(holidayAmount([{start:541.5,end:600}],'rest'),null)
 assert.equal(holidayClock('24:00'),1440);assert.equal(holidayClock('24:01'),null)
 assert.equal(parsedHolidayIntervals([{start:'09:00',end:''}]),null)
 assert.deepEqual(parsedHolidayIntervals([{start:'09:00',end:'12:00'}]),[{start:540,end:720}])
+const trip={id:'mixed',kind:'offsite' as const,from:'2026-07-31',to:'2026-08-03',start:'09:00',end:'03:00',offsiteContinuous:true}
+assert.equal(firstOffsiteHoliday(trip),'2026-08-01','route whole trip even when the first month contains weekdays only')
+assert.match(holidayOffsiteHref(trip),/holidayMonth=2026-07&offsiteCase=mixed$/)
+assert.equal(firstOffsiteHoliday({...trip,to:'2026-08-01',end:'00:00'}),null,'midnight endpoint does not include weekend work')
+assert.equal(firstOffsiteHoliday({...trip,to:'2026-08-01',end:'00:01'}),'2026-08-01','one weekend minute routes the whole trip')
+assert.equal(firstOffsiteHoliday({...trip,to:trip.from,end:'00:01',endNextDay:true}),'2026-08-01')
+assert.equal(firstOffsiteHoliday({...trip,offsiteContinuous:false}),null,'legacy repeated weekday plan does not imply weekend work')
+assert.equal(firstOffsiteHoliday({...trip,from:'2026-12-25',to:'2026-12-25',end:'10:00'}),'2026-12-25','weekday public holiday routes whole trip')
 console.log('holiday-work calculation: rest/holiday bands, breaks, night, minute precision and validation passed')

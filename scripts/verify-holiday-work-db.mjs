@@ -36,6 +36,7 @@ try {
     create function app.basic_work_allowed(text) returns boolean language sql stable as $$select auth.uid()='${ops}'::uuid$$;
     create function app.is_department_request_approver(uuid,uuid,text) returns boolean language sql stable security definer set search_path='' as $$select exists(select 1 from app.test_approvers a join public.profiles p on p.id=a.employee_id where a.employee_id=auth.uid() and a.department_id=$2 and p.company_id=$1 and $3='overtime')$$;
     create function app.save_employee_extra_leave(p_id uuid,p_employee uuid,p_days numeric,p_expires date,p_note text,p_version integer,p_delete boolean) returns uuid language plpgsql security definer set search_path='' as $$begin if not app.basic_work_allowed('operations') then raise exception 'not operations';end if;insert into app.employee_extra_leave values(p_id,p_employee,p_days,p_expires,p_note,null);return p_id;end$$;
+    create function app.save_offsite_settlement(p_request uuid,p_mode text,p_minutes jsonb,p_days numeric,p_expires date,p_note text) returns void language plpgsql security definer set search_path='' as $$begin if not app.basic_work_allowed('operations') then raise exception 'not operations';end if;if not exists(select 1 from public.offsite_settlements where request_id=p_request) then insert into public.offsite_settlements(request_id,mode,minutes_by_date) values(p_request,p_mode,p_minutes);end if;end$$;
     create function public.list_my_home_work_notifications() returns jsonb language sql stable security invoker set search_path='' as $$select '[{"event_key":"old-event","entity_id":"old","read_at":"2026-09-01","event_type":"result"}]'::jsonb$$;
     create function public.read_my_home_work_notification(p_key text) returns void language plpgsql security definer set search_path='' as $$begin if not exists(select 1 from jsonb_array_elements(public.list_my_home_work_notifications()) e where e->>'event_key'=p_key) then raise exception '읽음 권한 없음' using errcode='42501';end if;insert into public.my_home_notification_reads values(auth.uid(),p_key,clock_timestamp()) on conflict do nothing;end$$;
     insert into public.companies values('${company}'),('${otherCompany}');
@@ -123,7 +124,9 @@ try {
   await db.exec('reset role')
   const req=await value('select id from public.company_leave_requests limit 1')
   await assert.rejects(()=>db.query("insert into public.offsite_settlements(request_id,mode,minutes_by_date) values($1,'overtime',$2)",[req,{'2026-10-10':120}]),/주말/)
-  await db.query("insert into public.offsite_settlements(request_id,mode,minutes_by_date) values($1,'overtime',$2)",[req,{'2026-10-12':120}])
+  await assert.rejects(()=>db.query("insert into public.offsite_settlements(request_id,mode,minutes_by_date) values($1,'overtime',$2)",[req,{'2026-10-12':120}]),/건 전체/)
+  await as(ops);await call('offsite-settle',{requestId:req,mode:'overtime',minutes:{'2026-10-12':120},days:null,expires:null,note:'건 전체 화면의 평일 기록'})
+  await db.exec('reset role')
   await assert.rejects(()=>db.query("insert into public.overtime_actual_reports(request_id,start_at,end_at) values($1,'2026-10-10T22:00+09','2026-10-11T02:00+09')",[req]),/주말/)
   await assert.rejects(()=>db.query("update public.company_leave_requests set status='cancelled' where id=$1",[req]),/원본/)
   // A changed reference cannot silently be approved, and returning/resubmitting
