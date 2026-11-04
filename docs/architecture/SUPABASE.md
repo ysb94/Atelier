@@ -1,6 +1,6 @@
 # Supabase 데이터 아키텍처 원칙
 
-- 2026-11-04 단체 외근은 [OFFSITE_GROUPS.md](OFFSITE_GROUPS.md)를 따른다. 사용자 승인 후 공유 DB에 `20261104033803_offsite_group_registration.sql`을 적용했고 기존 원본·정책·실행 권한 보존과 REST 익명 차단을 확인했다. 실제 사용자 또는 합성 사용자에 대한 실DB 업무 검증은 자동 승인 심사에서 거절되어 미실행이며 로컬 검증과 구분한다.
+- 2026-11-04 단체 외근은 [OFFSITE_GROUPS.md](OFFSITE_GROUPS.md)를 따른다. 사용자 승인 후 공유 DB에 `20261104033803_offsite_group_registration.sql`을 적용했고 기존 원본·정책·실행 권한 보존과 REST 익명 차단을 확인했다. 추가 명시 승인 후 가상 직원 4명으로 등록·개인 처리·알림을 실제 인증 역할에서 검증하고 모두 롤백했다. 참여자 알림의 프로필 조회 권한 문제는 `20261104034900_offsite_group_member_notifications.sql`로 수정·적용했으며 기존 프로필 정책을 유지했다.
 
 - 2026-11-03 신규 직원 등록·서류 관리 실저장 연결은 [EMPLOYEE_ONBOARDING.md](EMPLOYEE_ONBOARDING.md)를 따른다. 로컬 검증과 사용자 승인 후 공유 DB 적용·원본 보존·실제 저장소 연결 검증을 완료했다. 사이트 배포는 하지 않았다.
 

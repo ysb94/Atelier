@@ -62,6 +62,8 @@ try {
     insert into public.profiles values('10000000-0000-4000-8000-000000000003','${company}',null,'active','third','staff');
     insert into public.attendance_start_settings(company_id,employee_id,month,start_time) values('${company}','${staff}','2099-11-01','09:00');`)
   await db.exec(await readFile('supabase/migrations/20261104033803_offsite_group_registration.sql','utf8'))
+  await db.exec("alter table public.profiles enable row level security;create policy profiles_self on public.profiles for select to authenticated using(id=auth.uid());")
+  await db.exec(await readFile('supabase/migrations/20261104034900_offsite_group_member_notifications.sql','utf8'))
   const third='10000000-0000-4000-8000-000000000003'
   const ids=[staff,peer,third]
   const form={from:'2099-11-04',to:'2099-11-04',start:'16:00',end:'20:00',place:'거래처',note:'공동 외근'}
@@ -94,6 +96,8 @@ try {
   assert.equal((await scalar('select public.my_offsite_groups()'))[0].participants.filter(x=>x.state==='취소').length,1)
   await db.exec(`reset role;select set_config('request.jwt.claim.sub','${peer}',false);set role authenticated`)
   assert.equal((await scalar('select public.my_offsite_groups()'))[0].participants.length,1,'participant sees only self')
+  assert.equal((await scalar('select public.list_my_home_work_notifications()')).length,1,'participant receives notice despite creator profile RLS')
+  assert.equal(await scalar('select count(*)::int from public.profiles where id=$1',[staff]),0,'creator profile remains private')
   await assert.rejects(db.query('select * from app.offsite_write_context'),/permission denied/)
   await db.exec("reset role;update public.profiles set status='inactive' where id='"+peer+"';set role authenticated")
   await assert.rejects(register('30000000-0000-4000-8000-000000000009'),/재직 중/)
