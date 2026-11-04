@@ -22,7 +22,7 @@ export function OffsiteStatus() {
   const query = useQuery({ queryKey: key, queryFn: () => offsiteAction('my_offsite_attendance'), enabled, refetchInterval: enabled ? 30_000 : false, retry: false })
   const returned = useMutation({ mutationFn: () => offsiteAction('return_from_offsite'), onSuccess: async data => {
     cache.setQueryData(key, data)
-    await Promise.all(['attendance-clock-ins', 'attendance-presence', 'company-attendance-spans', 'company-deferred-clock-outs'].map(part => cache.invalidateQueries({ queryKey: [part] })))
+    await Promise.all(['attendance-clock-ins', 'attendance-presence', 'company-attendance-spans', 'company-deferred-clock-outs', 'offsite-groups'].map(part => cache.invalidateQueries({ queryKey: [part] })))
   } })
   if (!enabled) return null
   if (query.error) return hasOffsite ? <span role="status" className="text-warning">{query.error instanceof Error ? query.error.message : '외근 상태 조회 실패'}</span> : null

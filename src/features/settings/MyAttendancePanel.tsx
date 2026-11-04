@@ -1,6 +1,10 @@
+import { useSearchParams } from 'react-router-dom'
+import { OffsiteGroupHistory, OffsiteStartEditor } from './OffsiteGroupFields'
+import { useOffsiteGroups, refreshOffsiteQueries } from './offsite-group-state'
+import { registerOffsiteGroup } from '@/lib/supabase/offsite-groups'
 import { useReadMyHomeNotification } from './use-my-home-notifications'
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bell, CalendarDays, ChevronLeft, ChevronRight, Clock3, Search, Send, Settings2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
@@ -129,11 +133,29 @@ export function MyAttendancePanel() {
   const [query, setQuery] = useState('')
   const layers: Record<Layer, boolean> = { clock: true, leave: true, work: true, fix: true, holiday: true, closed: false }
   const [form, setForm] = useState<RequestForm | null>(null)
+  const groupCache = useQueryClient()
+  const groups = useOffsiteGroups()
+  const [groupEnabled, setGroupEnabled] = useState(false)
+  const [participants, setParticipants] = useState<string[]>(userId ? [userId] : [])
+  const groupKey = useRef(crypto.randomUUID())
+  const [groupBusy, setGroupBusy] = useState(false)
   const [officialFile, setOfficialFile] = useState<File | null>(null)
   const officialFileInput = useRef<HTMLInputElement>(null)
   const [formError, setFormError] = useState('')
   const [notice, setNotice] = useState('')
   const [detail, setDetail] = useState<ScheduleDetail | null>(null)
+  const [routeParams] = useSearchParams()
+  const openedRequest = useRef<string | null>(null)
+  const routedRequest = routeParams.get('request')
+  useEffect(() => {
+    if (!active || !routedRequest || leave.loading || leave.error || openedRequest.current === routedRequest) return
+    const item = leave.requests.find(request => request.id === routedRequest)
+    if (!item) return
+    setDetail({ type: 'request', item, date: item.from })
+    setMonth(item.from.slice(0, 7)); setSelected(item.from)
+    openedRequest.current = routedRequest
+  }, [active, routedRequest, leave.loading, leave.error, leave.requests])
+
   const noticeRead=useReadMyHomeNotification(detail?.type==='clock'?'checkout':'request',detail?.type==='request'?detail.item.id:detail?.type==='clock'?detail.date:undefined,detail?.type==='request'?`status:${detail.item.status}`:detail?.type==='clock'?'status:pending':undefined,detail?.type==='request'||detail?.type==='clock')
   const [basis, setBasis] = useState(DEFAULT_REMINDER_BASIS)
   const [showBasis, setShowBasis] = useState(false)
@@ -186,7 +208,7 @@ export function MyAttendancePanel() {
     return { ...newForm(kind, from), start: record?.clockIn || '', end: clockOutLabel(record?.clockOutAt ?? null),
       endNextDay: Boolean(record?.clockOutAt && koreaDateKey(new Date(record.clockOutAt)) > from) }
   }
-  function openForm(kind: RequestKind, date = selected) { setAddOpen(false); setForm(formFor(kind, date)); setOfficialFile(null); setFormError(''); setNotice('') }
+  function openForm(kind: RequestKind, date = selected) { setAddOpen(false); setGroupEnabled(false); setParticipants(userId ? [userId] : []); groupKey.current = crypto.randomUUID(); setForm(formFor(kind, date)); setOfficialFile(null); setFormError(''); setNotice('') }
   function requestOffsiteCorrection() {
     if (!offsiteDetail || !canRequestCorrection) return
     openForm('correction', offsiteDetail.date)
@@ -211,7 +233,7 @@ export function MyAttendancePanel() {
     try { await todoStore.change({ ...todoForm,id:todoForm.id },true); setTodoForm(null); setNotice('To-do를 삭제했습니다. 회의 조율의 개인 일정 표시에서도 제외됩니다.') }
     catch(error) { console.warn('[schedule-todos] 삭제 실패',error); setTodoError(error instanceof Error ? error.message : 'To-do를 삭제하지 못했습니다.') }
   }
-  function patch(patch: Partial<RequestForm>) { setForm(current => current ? { ...current, ...patch } : null); setFormError('') }
+  function patch(patch: Partial<RequestForm>) { groupKey.current = crypto.randomUUID(); setForm(current => current ? { ...current, ...patch } : null); setFormError('') }
   function chooseMonth(next: string) {
     if (!validAttendanceMonth(next)) return
     setMonth(next)
@@ -239,13 +261,25 @@ export function MyAttendancePanel() {
   }, [addOpen])
   async function submit(event: FormEvent) {
     event.preventDefault()
-    if (!form || leave.busy) return
+    if (!form || leave.busy || groupBusy) return
     const normalized = offsiteSubmission(form)
     if (normalized.error || !normalized.request) { setFormError(normalized.error); return }
-    const submission = normalized.request
-    const error = validateRequest(submission, leave.requests, isLeaveRequest(form.kind) ? DEFAULT_REMINDER_BASIS : basis, today)
+    const submission = groupEnabled && !participants.includes(userId!) ? { ...normalized.request, offsiteWorkStart: undefined } : normalized.request
+    const error = validateRequest(submission, groupEnabled ? [] : leave.requests, isLeaveRequest(form.kind) ? DEFAULT_REMINDER_BASIS : basis, today)
       || (isOfficialLeave(form.kind) && !officialFile ? '공가 서류를 첨부해 주세요.' : '')
     if (error) { setFormError(error); return }
+    if (submission.kind === 'offsite' && groupEnabled) {
+      if (!groups.isSuccess || !participants.length) { setFormError('서버 연결과 참여 직원을 확인해 주세요.'); return }
+      setGroupBusy(true)
+      try {
+        await registerOffsiteGroup(groupKey.current, participants, { ...submission, offsiteWorkStart: participants.includes(userId!) ? submission.offsiteWorkStart : undefined })
+        await leave.refresh(); await refreshOffsiteQueries(groupCache)
+        setMonth(form.from.slice(0, 7)); setSelected(form.from); setForm(null)
+        setNotice('참여자별 외근을 등록하고 각자에게 알림을 보냈습니다.')
+      } catch (failure) { setFormError(failure instanceof Error ? failure.message : '단체 외근 등록에 실패했습니다.') }
+      finally { setGroupBusy(false) }
+      return
+    }
     let createdId: string | null = null
     try {
       if (submission.kind === 'offsite' && submission.offsiteContinuous && !(await offsiteAction('my_offsite_attendance')).continuousSupported) throw new Error('여러 날 연속 외근의 서버 설정 적용 대기입니다. 입력 내용과 기존 기록은 유지됩니다.')
@@ -284,6 +318,7 @@ export function MyAttendancePanel() {
 
   const span = form ? isAllDayRequest(form.kind) || (isLocationRequest(form.kind) && !form.endNextDay) : false
   return <div className="personal-requests">
+    <OffsiteGroupHistory />
     <div className="personal-request-draft-row">
       <div className="personal-request-draft"><strong>근태 신청</strong><span>연차·반차·반반차는 신청하면 바로 등록됩니다. 공가는 사유와 서류를 첨부하면 운영지원이 확인한 뒤 처리합니다. 외근도 승인 없이 바로 등록됩니다. 야근·출퇴근 정정만 부서 지정 담당자가 승인합니다.</span></div>
       <Button type="button" variant="outline" size="sm" className="personal-request-settings-button" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(true)}><Settings2 size={14}/>알림 설정</Button>
@@ -376,7 +411,7 @@ export function MyAttendancePanel() {
     {meetings.events.some(meeting => meeting.date === selected) && <section aria-label="선택 날짜의 회의 일정" className="mt-3 space-y-2 rounded-xl border border-border bg-card p-4"><h3 className="text-sm font-semibold">{dateLabel(selected)} 회의 일정</h3>{meetings.events.filter(meeting => meeting.date === selected).map(meeting => <MyScheduleMeetingLink key={meeting.id} meeting={meeting} />)}</section>}
     {leave.requests.some(item => item.from <= selected && selected <= item.to) && <section aria-label="선택 날짜의 근태 일정" className="mt-3 space-y-2 rounded-xl border border-border bg-card p-4"><h3 className="text-sm font-semibold">{dateLabel(selected)} 근태 일정</h3>{leave.requests.filter(item => item.from <= selected && selected <= item.to).map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3 text-sm"><div><p>{requestLabel(item.kind)}{item.advanceRequested ? ' · 선사용' : ''} · {requestTime(item)} · {requestStatusLabel(item)}{isSelfApprovedRequest(item) ? ' · 본인 승인' : ''}</p>{item.decidedByName && <p className="mt-1 text-xs text-muted-foreground">{item.decidedByName}{item.decidedAt ? ` · ${new Date(item.decidedAt).toLocaleString('ko-KR')}` : ''}</p>}{item.decisionNote && <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">{item.decisionNote}</p>}</div><Button variant="outline" size="sm" onClick={() => setDetail({ type: 'request', item, date: selected })}>보기</Button></div>)}</section>}
     {todos.some(todo=>todo.date===selected) && <section aria-label="선택 날짜의 To-do" className="mt-3 space-y-2 rounded-xl border border-border bg-card p-4"><h3 className="text-sm font-semibold">{dateLabel(selected)} To-do</h3>{todos.filter(todo=>todo.date===selected).map(todo=><button key={todo.id} type="button" className="flex w-full items-center gap-2 rounded-md border border-border p-2 text-left text-sm" onClick={()=>openTodo(selected,todo)}><span>{todo.done ? '완료' : todo.important ? '★ 중요' : 'To-do'}</span><span className="tabular-nums text-muted-foreground">{scheduleTodoTime(todo)}</span><span className={todo.done ? 'line-through text-muted-foreground' : ''}>{todo.title}</span></button>)}</section>}
-    {detail && <WorkspaceTabOverlay><RequestDialog labelledBy="personal-detail-title" onClose={() => { if (!leave.busy) setDetail(null) }}><section className="personal-request-compose"><header><div><span>{detail.type === 'holiday' ? '공휴일' : detail.type === 'clock' ? '출퇴근' : '일정 내용'}</span><h2 id="personal-detail-title">{detail.type === 'request' ? `${requestLabel(detail.item.kind)}${detail.item.advanceRequested ? ' · 선사용' : ''}` : detail.type === 'holiday' ? detail.name : '출퇴근 기록'}</h2></div><button type="button" aria-label="일정 내용 닫기" disabled={leave.busy} onClick={() => setDetail(null)}><X size={19}/></button></header><div className="personal-request-compose-body"><dl className="personal-request-view">{detail.type === 'request' ? requestFacts(detail.item).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>) : detail.type === 'holiday' ? <><div><dt>날짜</dt><dd>{dateLabel(detail.date)} ({WEEKDAYS[dayOfWeek(detail.date)]})</dd></div><div><dt>이름</dt><dd>{detail.name}</dd></div></> : <><div><dt>날짜</dt><dd>{dateLabel(detail.date)} ({WEEKDAYS[dayOfWeek(detail.date)]})</dd></div><div><dt>출근</dt><dd>{detail.start || '미기록'}</dd></div><div><dt>퇴근</dt><dd>{detail.end || '미기록'}</dd></div><div><dt>표시</dt><dd>{detail.corrected ? '승인된 정정 시각' : detail.reported ? '본인 확인 입력' : '기록된 시각'}</dd></div></>}</dl>{detail.type === 'clock' && <p className="personal-request-helper">원래 출퇴근 기록은 보존하며 승인된 정정은 달력과 야근 집계에 반영합니다.</p>}{detail.type === 'request' && canCancelOwnRequest(detail.item) && <p className="personal-request-helper">{cancelEffect(detail.item)}</p>}{offsiteDetail && <OffsiteSettlementResult requestId={offsiteDetail.item.id} />}{offsiteDetail && <p className="personal-request-helper">{dateLabel(offsiteDetail.date)} 출퇴근 정정 · {offsiteDetail.date > today ? '미래 날짜는 정정할 수 없습니다.' : pendingCorrection ? '이 날짜에 승인 대기 중인 정정 신청이 있습니다.' : '실제 출퇴근 시각을 신청하면 담당자 승인 후 달력과 야근 집계에 반영됩니다.'}</p>}</div><footer><Button type="button" variant="outline" disabled={leave.busy} onClick={() => setDetail(null)}>닫기</Button>{offsiteDetail && <Button type="button" variant="outline" disabled={!canRequestCorrection} onClick={requestOffsiteCorrection}>정정 신청</Button>}{detail.type === 'request' && canCancelOwnRequest(detail.item) && <Button type="button" disabled={leave.busy} onClick={() => void confirmCancel()}>{leave.busy ? '취소 중…' : '취소'}</Button>}</footer></section></RequestDialog></WorkspaceTabOverlay>}
+    {detail && <WorkspaceTabOverlay><RequestDialog labelledBy="personal-detail-title" onClose={() => { if (!leave.busy) setDetail(null) }}><section className="personal-request-compose"><header><div><span>{detail.type === 'holiday' ? '공휴일' : detail.type === 'clock' ? '출퇴근' : '일정 내용'}</span><h2 id="personal-detail-title">{detail.type === 'request' ? `${requestLabel(detail.item.kind)}${detail.item.advanceRequested ? ' · 선사용' : ''}` : detail.type === 'holiday' ? detail.name : '출퇴근 기록'}</h2></div><button type="button" aria-label="일정 내용 닫기" disabled={leave.busy} onClick={() => setDetail(null)}><X size={19}/></button></header><div className="personal-request-compose-body"><dl className="personal-request-view">{detail.type === 'request' ? requestFacts(detail.item).map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>) : detail.type === 'holiday' ? <><div><dt>날짜</dt><dd>{dateLabel(detail.date)} ({WEEKDAYS[dayOfWeek(detail.date)]})</dd></div><div><dt>이름</dt><dd>{detail.name}</dd></div></> : <><div><dt>날짜</dt><dd>{dateLabel(detail.date)} ({WEEKDAYS[dayOfWeek(detail.date)]})</dd></div><div><dt>출근</dt><dd>{detail.start || '미기록'}</dd></div><div><dt>퇴근</dt><dd>{detail.end || '미기록'}</dd></div><div><dt>표시</dt><dd>{detail.corrected ? '승인된 정정 시각' : detail.reported ? '본인 확인 입력' : '기록된 시각'}</dd></div></>}</dl>{detail.type === 'clock' && <p className="personal-request-helper">원래 출퇴근 기록은 보존하며 승인된 정정은 달력과 야근 집계에 반영합니다.</p>}{detail.type === 'request' && canCancelOwnRequest(detail.item) && <p className="personal-request-helper">{cancelEffect(detail.item)}</p>}{offsiteDetail && offsiteDetail.item.status === 'approved' && <OffsiteStartEditor key={offsiteDetail.item.id} request={offsiteDetail.item} requests={leave.requests} onSaved={() => { setDetail(null); void leave.refresh() }} />}{offsiteDetail && <OffsiteSettlementResult requestId={offsiteDetail.item.id} />}{offsiteDetail && <p className="personal-request-helper">{dateLabel(offsiteDetail.date)} 출퇴근 정정 · {offsiteDetail.date > today ? '미래 날짜는 정정할 수 없습니다.' : pendingCorrection ? '이 날짜에 승인 대기 중인 정정 신청이 있습니다.' : '실제 출퇴근 시각을 신청하면 담당자 승인 후 달력과 야근 집계에 반영됩니다.'}</p>}</div><footer><Button type="button" variant="outline" disabled={leave.busy} onClick={() => setDetail(null)}>닫기</Button>{offsiteDetail && <Button type="button" variant="outline" disabled={!canRequestCorrection} onClick={requestOffsiteCorrection}>정정 신청</Button>}{detail.type === 'request' && canCancelOwnRequest(detail.item) && <Button type="button" disabled={leave.busy} onClick={() => void confirmCancel()}>{leave.busy ? '취소 중…' : '취소'}</Button>}</footer></section></RequestDialog></WorkspaceTabOverlay>}
     {settingsOpen && <WorkspaceTabOverlay><RequestDialog className="is-settings" labelledBy="personal-reminder-title" onClose={() => setSettingsOpen(false)}><section className="personal-request-reminders personal-request-settings-card" aria-label="My Schedule 알림 설정"><header><div><Bell size={16}/><h2 id="personal-reminder-title">My Schedule 알림</h2></div><button type="button" aria-label="알림 설정 닫기" onClick={() => setSettingsOpen(false)}><X size={17}/></button></header><p>등록된 휴가·외근과 승인된 야근 일정을 반영해 알려드립니다. 발송 연결 예정입니다.</p><div className="personal-request-reminder-list">{REMINDER_OPTIONS.map(item => <label key={item.key}><span><strong>{item.label}</strong><small>{item.detail}</small></span><input type="checkbox" checked={reminders[item.key]} onChange={event => setReminders(current => ({ ...current, [item.key]: event.target.checked }))}/></label>)}</div><div className="personal-request-reminder-time"><label htmlFor="personal-reminder-before">미리 알릴 시간</label><Select id="personal-reminder-before" value={basis.before} onChange={event => setBasis(current => ({ ...current, before: Number(event.target.value) }))}>{[5, 10, 15, 30].map(value => <option key={value} value={value}>{value}분 전</option>)}</Select></div></section></RequestDialog></WorkspaceTabOverlay>}
     {todoForm && <WorkspaceTabOverlay><RequestDialog labelledBy="personal-todo-title" onClose={() => { if(!todoStore.busy) setTodoForm(null) }}><section className="personal-request-compose"><header><div><span>개인 일정</span><h2 id="personal-todo-title">Todo</h2></div><button type="button" aria-label="Todo 작성 닫기" disabled={todoStore.busy} onClick={() => setTodoForm(null)}><X size={19}/></button></header><form onSubmit={event=>void submitTodo(event)}><fieldset disabled={todoStore.busy} className="min-w-0 border-0 p-0"><div className="personal-request-compose-body">
       <label>날짜<HireDateScrollField label="Todo 날짜" className="mt-[7px] w-full" value={todoForm.date} min="1950-01-01" max={`${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; setTodoForm(current => current ? { ...current, date: value } : null); setTodoError('') }}/></label>
@@ -388,7 +423,7 @@ export function MyAttendancePanel() {
       <p className="personal-request-helper">중요 작업은 시작·종료 시간이 필요합니다. 다른 직원에게는 제목 없이 개인 일정과 시간만 보입니다. 완료·삭제·중요 해제 시 일정 점유가 해제됩니다. 연차 차감이나 근태 승인은 발생하지 않습니다.</p>
       {todoError && <p role="alert" className="personal-request-error">{todoError}</p>}
     </div><footer>{todoForm.id && <Button type="button" variant="outline" onClick={()=>void removeTodo()}>삭제</Button>}<Button type="button" variant="outline" onClick={() => setTodoForm(null)}>닫기</Button><Button type="submit" disabled={!todoStore.isSuccess}>{todoStore.busy ? '저장 중…' : todoForm.id ? '저장' : '추가'}</Button></footer></fieldset></form></section></RequestDialog></WorkspaceTabOverlay>}
-    {form && <WorkspaceTabOverlay><RequestDialog onClose={() => { if (!leave.busy) setForm(null) }}><section className="personal-request-compose"><header><div><span>개인 근태 신청</span><h2 id="personal-request-title">{requestLabel(form.kind)} 신청</h2></div><button type="button" aria-label="신청 작성 닫기" disabled={leave.busy} onClick={() => setForm(null)}><X size={19}/></button></header><form onSubmit={event => void submit(event)}><fieldset disabled={leave.busy} className="min-w-0 border-0 p-0">
+    {form && <WorkspaceTabOverlay><RequestDialog onClose={() => { if (!leave.busy) setForm(null) }}><section className="personal-request-compose"><header><div><span>개인 근태 신청</span><h2 id="personal-request-title">{requestLabel(form.kind)} 신청</h2></div><button type="button" aria-label="신청 작성 닫기" disabled={leave.busy} onClick={() => setForm(null)}><X size={19}/></button></header><form onSubmit={event => void submit(event)}><fieldset disabled={leave.busy || groupBusy} className="min-w-0 border-0 p-0">
       <div className="personal-request-compose-body">
         <label>신청 종류<Select autoFocus aria-label="개인 신청 종류" disabled={form.kind === 'correction'} value={form.kind} onChange={event => { setForm(formFor(event.target.value as RequestKind, form.from)); setOfficialFile(null); setFormError('') }}>{form.kind === 'correction' && <option value="correction">출퇴근 정정</option>}{REQUEST_KINDS.filter(item => item.id !== 'overtime').map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</Select></label>
         {isLeaveRequest(form.kind) && <>
@@ -397,7 +432,7 @@ export function MyAttendancePanel() {
           <p className="text-xs text-muted-foreground">{advances.isPending ? '선사용 기준 확인 중…' : advances.isError ? '선사용 기준 조회 실패 · 다시 조회 후 신청해 주세요.' : !advances.data?.ready ? '선사용 서버 적용 전입니다. 일반 등록은 기존 방식으로 이용할 수 있습니다.' : `선사용 한도 ${advances.data.employees[0]?.limit ?? 0}일 · 현재 선사용 ${advances.data.employees[0]?.outstanding ?? 0}일. 한도 미설정·연차 기준 미등록은 운영지원에 문의해 주세요.`}</p>
           {form.advanceRequested && <p className="text-sm text-warning">부족분 선사용을 신청합니다. 승인 전에는 차감되지 않으며, 승인 후 마이너스 잔액과 다음 발생분 정산 기록이 남습니다. 선사용 사유를 입력해 주세요. 본인 승인은 불가합니다.</p>}
         </>}
-        {form.kind === 'offsite' ? <><OffsiteDateTimeFields form={form} maxDate={`${Number(today.slice(0, 4)) + 5}-12-31`} onChange={patch} /><OffsiteWorkdayStartField form={form} requests={leave.requests} onChange={patch} /></> : <>
+        {form.kind === 'offsite' ? <><section className="space-y-2 rounded-xl border border-border p-3"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={groupEnabled} disabled={!groups.isSuccess || groupBusy} onChange={event => setGroupEnabled(event.target.checked)}/>함께 외근할 직원 선택</label>{!groups.isSuccess && <p role="status" className="text-sm text-warning">{groups.error?.message ?? '단체 외근 서버 연결 확인 중…'}</p>}{groupEnabled && <><p className="text-xs text-muted-foreground">각자의 외근으로 즉시 등록됩니다. 취소·복귀·당일 출근 기준 변경은 본인만 할 수 있습니다.</p><div className="max-h-48 overflow-auto">{directory.members.map(member => <label key={member.id} className="flex items-center gap-2 py-1 text-sm"><input type="checkbox" checked={participants.includes(member.id)} disabled={groupBusy} onChange={event => { setParticipants(current => event.target.checked ? [...current, member.id] : current.filter(id => id !== member.id)); groupKey.current = crypto.randomUUID() }}/>{member.displayName}{member.id === userId ? ' · 나' : ''}</label>)}</div></>}</section><OffsiteDateTimeFields form={form} maxDate={`${Number(today.slice(0, 4)) + 5}-12-31`} onChange={patch} />{(!groupEnabled || participants.includes(userId!)) && <OffsiteWorkdayStartField form={form} requests={leave.requests} onChange={patch} />}{groupEnabled && <p className="text-xs text-muted-foreground">출근 기준은 각자가 본인 외근 상세에서 변경할 수 있습니다. 이 화면의 기준 변경은 본인에게만 적용됩니다.</p>}</> : <>
         <div className="personal-request-fields">
           <label>{span ? '시작일' : '신청일'}<HireDateScrollField label={span ? '개인 신청 시작일' : '개인 신청일'} className="mt-[7px] w-full" value={form.from} min="1950-01-01" max={form.kind === 'correction' ? today : `${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; patch({ from: value, to: !span ? value : form.to < value ? value : form.to }) }}/></label>
           {span && <label>종료일<HireDateScrollField label="개인 신청 종료일" className="mt-[7px] w-full" value={form.to} min={form.from || '1950-01-01'} max={`${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; patch({ to: value }) }}/></label>}
@@ -422,7 +457,7 @@ export function MyAttendancePanel() {
         {!isOfficialLeave(form.kind) && !isFullLeave(form.kind) && form.kind !== 'half' && form.kind !== 'quarter' && form.kind !== 'offsite' && form.kind !== 'correction' && <div className="personal-request-alert-preview"><header><strong><Bell size={14}/>승인 후 알림 미리보기</strong><button type="button" aria-expanded={showBasis} onClick={() => setShowBasis(value => !value)}>예시 기준 {showBasis ? '접기' : '보기'}</button></header>{preview.map(text => <p key={text}>{text}</p>)}{(!reminders.arrival || !reminders.departure) && <p>{!reminders.arrival ? '출근' : ''}{!reminders.arrival && !reminders.departure ? '·' : ''}{!reminders.departure ? '퇴근' : ''} 전 알림은 내 설정에서 꺼져 있습니다.</p>}<small>회사 근무 기준은 미연결입니다. 알림 시간은 예시이며 실제 발송되지 않습니다.</small>{showBasis && <div className="personal-request-basis">{([{ key: 'start', label: '예시 출근' }, { key: 'end', label: '예시 퇴근' }, { key: 'breakStart', label: '휴게 시작' }, { key: 'breakEnd', label: '휴게 종료' }] as const).map(item => <label key={item.key}>{item.label}<Input type="time" aria-label={item.label} value={basis[item.key]} onChange={event => setBasis(current => ({ ...current, [item.key]: event.target.value }))}/></label>)}</div>}</div>}
         {formError && <p role="alert" className="personal-request-error">{formError}</p>}
       </div>
-      <footer><Button type="button" variant="outline" onClick={() => setForm(null)}>닫기</Button><Button type="submit" disabled={leave.busy || leave.loading || Boolean(leave.error)}><Send size={14}/>{leave.busy ? '저장 중…' : '신청하기'}</Button></footer>
+      <footer><Button type="button" variant="outline" onClick={() => setForm(null)}>닫기</Button><Button type="submit" disabled={leave.busy || groupBusy || leave.loading || Boolean(leave.error)}><Send size={14}/>{leave.busy || groupBusy ? '저장 중…' : '신청하기'}</Button></footer>
     </fieldset></form></section></RequestDialog></WorkspaceTabOverlay>}
   </div>
 }

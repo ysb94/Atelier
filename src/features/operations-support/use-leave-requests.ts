@@ -25,7 +25,7 @@ export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' = 'mine') {
       'company-leave-requests', 'company-leave-cover', 'my-attendance-basis', 'home-my-leave', 'my-extra-leave',
       'employee-roster', 'employee-extra-leave', 'employee-leave-advances', 'leave-notice-management', 'meeting-availability',
       'attendance-clock-ins', 'company-attendance-spans', 'company-deferred-clock-outs', 'attendance-presence',
-      'my-offsite-attendance', 'overtime-checkout-preview', 'my-home-work-notices',
+      'offsite-groups', 'my-offsite-attendance', 'overtime-checkout-preview', 'my-home-work-notices',
       'my-workday-basis', 'company-attendance-clocks', 'late-arrival-statements', 'late-statement-notices', 'late-statement-tasks',
       'late-arrival-cumulative',
     ].map(key => client.invalidateQueries({ queryKey: [key] })))
