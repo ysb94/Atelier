@@ -1,5 +1,7 @@
 # Supabase 데이터 아키텍처 원칙
 
+- 2026-11-04 상품 개수·창고 재고·공통 알림의 추가 최적화는 [PRODUCT_NOTIFICATION_READ_OPTIMIZATION.md](PRODUCT_NOTIFICATION_READ_OPTIMIZATION.md)를 따른다. 진행 중 동일 조회 공유와 상품 재고 표시의 필요한 열만 조회하는 경로를 구현했다. 새 상품 개수 집계 함수 1개는 공유 DB 적용 승인 대기이며, 기존 정확한 COUNT fallback을 유지한다. test/main 사이트 배포는 하지 않는다.
+
 - 2026-11-04 로그인·공통 알림·숨겨진 My Schedule·연차 반복 조회 최적화와 504 대응은 [READ_LOADING_OPTIMIZATION.md](READ_LOADING_OPTIMIZATION.md)를 따른다. 초기 코드 `05e5128`에 이어 인증·조회 제한시간, 실패 반복 억제와 대기 진단을 보완했다. 사용자 재시작 후 승인된 함수 4개를 원격 `20261104071756`로 적용하고 기존 13개 업무 표·권한·RLS 보존 및 일반 직원 조회를 검증했다. 별도 승인된 Micro 1GB 변경 완료와 실제 로그인 회복을 확인했다. 메모리 commitment/실제 RAM, 남은 swap 활동과 느린 재고·상품 개수 조회는 문서의 읽기 전용 조사 결과를 따른다. test/main 사이트 배포는 별도 승인 대상이다.
 
 - 2026-11-04 밤샘 외근 다음 날 연차는 [OVERNIGHT_ANNUAL.md](OVERNIGHT_ANNUAL.md)를 따른다. 사용자 승인 후 `20261104041501_overnight_offsite_annual_overlap.sql`을 공유 DB에 적용했다. 가상 직원 8명으로 양쪽 등록 순서·출근 기준 경계·당일 변경·1일 차감을 실제 인증 역할에서 검증하고 모두 롤백했다. 기존 원본·정책·권한과 보안 점검 결과를 보존했다.

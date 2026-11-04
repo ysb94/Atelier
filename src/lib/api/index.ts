@@ -672,6 +672,8 @@ export async function getActiveWarehouseInventorySet(brandId: string) {
   return warehouseStockStore.getActiveWarehouseInventorySet(brandId)
 }
 
+export const getWarehouseStockSummary = warehouseStockStore.getWarehouseStockSummary
+
 export async function getWarehouseStockPositions(
   brandId: string,
   setId: string,

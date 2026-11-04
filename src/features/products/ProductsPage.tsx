@@ -51,7 +51,7 @@ import {
   getBrandFields,
   getSeasonsByBrand,
   getStylesByBrand,
-  getWarehouseStockPositions,
+  getWarehouseStockSummary,
   UNASSIGNED_SEASON_CODE,
   UNASSIGNED_SEASON_NAME,
   updateStyleFields,
@@ -105,7 +105,6 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { releaseHref } from '@/lib/company/release-access'
 import { combineListQueries } from '@/lib/query/list-queries'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
-import { summarizeWarehouseStockByStyle } from '@/lib/warehouse/stock'
 
 const columnHelper = createColumnHelper<Style>()
 
@@ -616,14 +615,15 @@ export function ProductsPage({
       'warehouse-stock-positions',
       stockBrandId,
       warehouseSetQuery.data?.id,
+      'product-summary',
     ],
     queryFn: () =>
-      getWarehouseStockPositions(stockBrandId, warehouseSetQuery.data!.id),
+      getWarehouseStockSummary(stockBrandId, warehouseSetQuery.data!.id),
     enabled: needsWarehouseStock && Boolean(warehouseSetQuery.data?.id),
   })
   const stockByStyle = useMemo(
     () =>
-      summarizeWarehouseStockByStyle(warehousePositionsQuery.data ?? []),
+      warehousePositionsQuery.data ?? new Map(),
     [warehousePositionsQuery.data],
   )
   const stockPending =

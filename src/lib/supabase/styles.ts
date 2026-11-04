@@ -114,12 +114,21 @@ function toRowPatch(style: Style) {
 }
 
 /**
- * 브랜드별 상품 수. PostgREST 기본 1000행 상한에 걸리지 않도록
- * brand_id마다 count: exact + head로 센다.
+ * Exact counts in one guarded server read. Older servers retain HEAD fallback.
  */
+let groupedCountAvailable = true
 export async function countStylesByBrand(
   brandIds: string[],
 ): Promise<Record<string, number>> {
+  brandIds = [...new Set(brandIds)]
+  if (!brandIds.length) return {}
+  if (groupedCountAvailable && brandIds.length <= 200) {
+    const { data, error } = await getSupabase().rpc('count_brand_styles', { p_brand_ids: brandIds })
+    if (!error) return data as Record<string, number>
+    // Old deployments remain usable until the separately approved RPC is applied.
+    if (error.code === 'PGRST202' || error.code === '42883') groupedCountAvailable = false
+    else throw new StyleStoreError(errorMessage(error, '상품 수를 불러오지 못했습니다.'), 'invalid')
+  }
   const counts: Record<string, number> = {}
   await Promise.all(
     brandIds.map(async (brandId) => {

@@ -19,6 +19,7 @@ import type {
 import { normalizeStyleNo } from '@/lib/import/transform'
 import {
   assignWarehouseUsageRanks,
+  summarizeWarehouseStockByStyle,
   toWarehouseImportRpcRows,
   type PreparedWarehouseImportRow,
 } from '@/lib/warehouse/stock'
@@ -563,17 +564,18 @@ export async function listWarehouseLocations(
   return all
 }
 
-export async function listWarehouseStockPositions(
+async function readPositionRows<T = PositionRow>(
   brandId: string,
   setId: string,
   zone?: WarehouseZone,
-): Promise<WarehouseStockPosition[]> {
+  columns = POSITION_COLUMNS,
+): Promise<T[]> {
   const supabase = getSupabase()
-  const raw: PositionRow[] = []
+  const raw: T[] = []
   for (let from = 0; ; from += PAGE_SIZE) {
     let query = supabase
       .from('warehouse_stock_positions')
-      .select(POSITION_COLUMNS)
+      .select(columns)
       .eq('brand_id', brandId)
       .eq('set_id', setId)
       .order('source_row_number', { ascending: true })
@@ -586,10 +588,42 @@ export async function listWarehouseStockPositions(
         errorMessage(error, '창고 재고를 불러오지 못했습니다.'),
       )
     }
-    const rows = (data as PositionRow[]) ?? []
+    const rows = (data as T[]) ?? []
     raw.push(...rows)
     if (rows.length < PAGE_SIZE) break
   }
+  return raw
+}
+
+/** Same RLS, set/order and inner location join; omit fields unused by totals. */
+export async function getWarehouseStockSummary(brandId: string, setId: string) {
+  type SummaryRow = Pick<PositionRow, 'normalized_style_no' | 'received_on' | 'received_on_raw' |
+    'is_forced_priority' | 'is_final_location' | 'usage_priority' | 'quantity_status' |
+    'units_per_box' | 'remaining_boxes' | 'opened_units' | 'source_row_number' | 'warehouse_locations'>
+  const raw = await readPositionRows<SummaryRow>(brandId, setId, undefined,
+    'id, normalized_style_no, received_on, received_on_raw, is_forced_priority, is_final_location, usage_priority, quantity_status, units_per_box, remaining_boxes, opened_units, source_row_number, warehouse_locations!inner(code, zone)')
+  return summarizeWarehouseStockByStyle(raw.map(row => {
+    const location = Array.isArray(row.warehouse_locations) ? row.warehouse_locations[0] : row.warehouse_locations
+    return {
+      styleNo: row.normalized_style_no, locationCode: location?.code ?? '', zone: location?.zone ?? 'box_storage',
+      receivedOn: row.received_on, receivedOnRaw: row.received_on_raw,
+      isForcedPriority: row.is_forced_priority, isFinalLocation: row.is_final_location,
+      usagePriority: USAGE_PRIORITIES.has(row.usage_priority as WarehouseUsagePriority)
+        ? row.usage_priority as WarehouseUsagePriority : row.is_forced_priority ? 'first' as const : 'fifo' as const,
+      quantityStatus: row.quantity_status === 'unknown' || row.units_per_box == null || row.remaining_boxes == null
+        ? 'unknown' as const : 'known' as const,
+      unitsPerBox: row.units_per_box, remainingBoxes: row.remaining_boxes,
+      openedUnits: row.opened_units, sourceRowNumber: row.source_row_number,
+    }
+  }))
+}
+
+export async function listWarehouseStockPositions(
+  brandId: string,
+  setId: string,
+  zone?: WarehouseZone,
+): Promise<WarehouseStockPosition[]> {
+  const raw = await readPositionRows(brandId, setId, zone)
   if (raw.length === 0) return []
 
   const ranked = assignWarehouseUsageRanks(

@@ -11,6 +11,7 @@ const TIMEOUT_MESSAGE = '서버 응답 시간이 초과됐습니다. 연결 상�
 // records, so a timeout must never cause an immediate automatic replay.
 // Do not infer safety from a name prefix or apply this deadline to write RPCs.
 const SCREEN_READ_RPCS = new Set([
+  'count_brand_styles',
   'get_my_basic_work_access', 'list_my_permission_grants', 'permission_directory',
   'list_org_chart_members', 'get_my_employee_onboarding_status', 'list_employee_onboardings',
   'is_my_attendance_exempt', 'list_company_attendance_exempt', 'list_effective_attendance_clocks',
