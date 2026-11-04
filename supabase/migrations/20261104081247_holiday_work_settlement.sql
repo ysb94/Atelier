@@ -37,10 +37,19 @@ create table app.holiday_work_events (
 create index holiday_work_days_company_date on app.holiday_work_days(company_id,work_date,employee_id);
 create index holiday_work_events_work on app.holiday_work_events(work_id);
 create index holiday_work_allocations_work on app.holiday_work_allocations(work_id);
+create index holiday_work_days_employee on app.holiday_work_days(employee_id,work_date);
+create index holiday_work_days_reviewer on app.holiday_work_days(reviewer_id);
+create index holiday_work_policy_actor on app.holiday_work_policy(actor_id);
+create index holiday_work_settlements_company on app.holiday_work_settlements(company_id,employee_id);
+create index holiday_work_settlements_employee on app.holiday_work_settlements(employee_id);
+create index holiday_work_settlements_actor on app.holiday_work_settlements(actor_id);
+create index holiday_work_settlements_grant on app.holiday_work_settlements(grant_id);
+create index holiday_work_events_settlement on app.holiday_work_events(settlement_id);
 create table public.holiday_work_signals (
  employee_id uuid primary key references public.profiles(id),company_id uuid not null references public.companies(id),
  version bigint not null default 1,changed_at timestamptz not null default clock_timestamp()
 );
+create index holiday_work_signals_company on public.holiday_work_signals(company_id);
 alter table app.holiday_work_days enable row level security;
 alter table app.holiday_work_policy enable row level security;
 alter table app.holiday_work_settlements enable row level security;
@@ -385,6 +394,8 @@ do $$declare f record; begin
  if exists(select 1 from pg_publication where pubname='supabase_realtime') then alter publication supabase_realtime add table public.holiday_work_signals; end if;
 end $$;
 create table app.holiday_work_day_history(id bigint generated always as identity primary key,work_id uuid not null references app.holiday_work_days(id),version integer not null,actor_id uuid references public.profiles(id),snapshot jsonb not null,created_at timestamptz not null default clock_timestamp());
+create index holiday_work_history_work on app.holiday_work_day_history(work_id);
+create index holiday_work_history_actor on app.holiday_work_day_history(actor_id);
 alter table app.holiday_work_day_history enable row level security;
 revoke all on app.holiday_work_day_history from public,anon,authenticated;
 create function app.holiday_work_audit() returns trigger language plpgsql security definer set search_path='' as $$begin insert into app.holiday_work_day_history(work_id,version,actor_id,snapshot) values(new.id,new.version,auth.uid(),to_jsonb(new));return new;end$$;
