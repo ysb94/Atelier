@@ -1,3 +1,4 @@
+import { roundRole } from './meeting-round-members'
 import type { MeetingSeries } from './meeting-schedule'
 
 export const MEETING_REMINDER_LEAD_MS = 30 * 60_000
@@ -23,8 +24,9 @@ export function upcomingMeetingNotices(series: readonly MeetingSeries[], personI
   for (const meeting of series) {
     if (meeting.status !== 'in_progress' || meeting.phase !== 'published') continue
     const host = meeting.host.id === personId
-    if (!host && !meeting.members.some(member => member.id === personId)) continue
+
     for (const round of meeting.rounds) {
+      if (!host && roundRole(meeting, round, personId) !== 'attendee') continue
       if (round.manualConfirmation?.excludedIds.includes(personId)) continue
       if (!round.confirmed || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(round.startsAt)) continue
       const startsAtMs = Date.parse(`${round.startsAt}:00+09:00`)

@@ -9,7 +9,7 @@ export function meetingFixtureLunch(){
   return Promise.resolve({data:setting?.error?null:setting,error:setting?.error?{message:'검증용 점심시간 조회 실패'}:null}).then(resolve)
  }};return query
 }
-type State={series:MeetingSeries[];files:Record<string,{path:string;text:string;name:string;roundId:string}>;audit:string[];read?:string[];hostReads?:string[];failNext?:boolean;notices?:any[];availability?:any[];participation?:{profile_id:string;titles:string[]}[];participationError?:boolean}
+type State={roundRoles?:boolean;series:MeetingSeries[];files:Record<string,{path:string;text:string;name:string;roundId:string}>;audit:string[];read?:string[];hostReads?:string[];failNext?:boolean;notices?:any[];availability?:any[];participation?:{profile_id:string;titles:string[]}[];participationError?:boolean}
 function state():State {
  const saved=sessionStorage.getItem(key)
  if(saved)return JSON.parse(saved)
@@ -32,7 +32,7 @@ export function meetingFixtureChannel(){
 export function meetingFixtureRpc(name:string,args:Record<string,unknown>={}) {
  if(name==='list_meeting_cleanup_paths')return Promise.resolve({data:[],error:null})
  if(name==='finish_meeting_cleanup')return Promise.resolve({data:null,error:null})
- if(!['list_meeting_member_participation','list_meeting_availability','list_meeting_availability_with_todos','list_company_meetings','list_meeting_directory','list_meeting_calendar','list_my_meeting_invitations','read_meeting_invitation','read_meeting_notice_version','confirm_my_home_host_notice','save_company_meeting','confirm_company_meeting','manually_confirm_meeting_round','respond_to_meeting','open_meeting_group','open_direct_chat','delete_company_meeting','begin_meeting_file','finish_meeting_file','remove_meeting_file'].includes(name))return null
+ if(!['set_meeting_round_people','publish_meeting_result','read_meeting_round_notice','list_meeting_member_participation','list_meeting_availability','list_meeting_availability_with_todos','list_company_meetings','list_meeting_directory','list_meeting_calendar','list_my_meeting_invitations','read_meeting_invitation','read_meeting_notice_version','confirm_my_home_host_notice','save_company_meeting','confirm_company_meeting','manually_confirm_meeting_round','respond_to_meeting','open_meeting_group','open_direct_chat','delete_company_meeting','begin_meeting_file','finish_meeting_file','remove_meeting_file'].includes(name))return null
  const value=state();let data:unknown
  if(name==='list_meeting_member_participation'){
   if(value.participationError)return Promise.resolve({data:null,error:{message:'검증용 제목 조회 실패'}})
@@ -44,13 +44,24 @@ export function meetingFixtureRpc(name:string,args:Record<string,unknown>={}) {
  }
  if(name==='list_meeting_availability'||name==='list_meeting_availability_with_todos')data=(value.availability??[]).filter(row=>(args.p_people as string[]).includes(row.personId)&&(!row.date||row.date===args.p_date))
  else if(name==='list_company_meetings')data=value.series.filter(series=>series.phase!=='preparing'||series.host.id===actor||series.createdBy===actor).map(series=>({...series,manualConfirmationReady:series.manualConfirmationReady ?? true}))
- else if(name==='list_meeting_directory')data=[host,member]
+ else if(name==='list_meeting_directory')data=value.roundRoles?[host,member,{id:'extra-user',name:'추가 직원'}]:[host,member]
  else if(name==='list_meeting_calendar')data=seriesToDrafts(value.series)
- else if(name==='list_my_meeting_invitations')data=[...value.series.filter(series=>series.phase==='published'&&series.members.some(person=>person.id===actor)).flatMap(series=>series.rounds.filter(round=>round.confirmed).map(round=>({id:round.id,kind:'meeting_invitation',title:series.title+' · 참석 요청',body:'확정된 일정에 참석 가능·불가로 답해 주세요.',href:`/settings/profile?part=meetings&meeting=${series.id}&round=${round.id}`,createdAt:'2026-10-21T00:00:00Z',readAt:value.read?.includes(round.id)?'2026-10-21T01:00:00Z':null,meeting:{role:'member',roundId:round.id,scheduleVersion:round.scheduleVersion??1,status:round.responses?.find(response=>response.profileId===actor)?.status??'pending'}}))),...(value.notices??[]).filter(notice=>notice.recipient===actor&&value.series.some(series=>series.status==='in_progress'&&series.rounds.some(round=>round.id===notice.meeting.roundId&&round.scheduleVersion===notice.meeting.scheduleVersion))).map(notice=>({...notice,readAt:value.read?.includes(notice.id)?'2026-10-21T01:00:00Z':null}))]
+ else if(name==='list_my_meeting_invitations')data=[...value.series.filter(series=>series.phase==='published'&&series.members.some(person=>person.id===actor)).flatMap(series=>series.rounds.filter(round=>round.confirmed&&(!round.membership||round.membership.some(p=>p.person.id===actor&&p.role==='attendee'))).map(round=>({id:round.id,kind:'meeting_invitation',title:series.title+' · 참석 요청',body:'확정된 일정에 참석 가능·불가로 답해 주세요.',href:`/settings/profile?part=meetings&meeting=${series.id}&round=${round.id}`,createdAt:'2026-10-21T00:00:00Z',readAt:value.read?.includes(round.id)?'2026-10-21T01:00:00Z':null,meeting:{role:'member',roundId:round.id,scheduleVersion:round.scheduleVersion??1,status:round.responses?.find(response=>response.profileId===actor)?.status??'pending'}}))),...(value.notices??[]).filter(notice=>notice.recipient===actor&&value.series.some(series=>series.status==='in_progress'&&series.rounds.some(round=>notice.kind==='meeting_result'||notice.kind==='meeting_removed' ? round.id===new URL(notice.href,'https://fixture.local').searchParams.get('round') : round.id===notice.meeting.roundId&&round.scheduleVersion===notice.meeting.scheduleVersion))).map(notice=>({...notice,readAt:value.read?.includes(notice.id)?'2026-10-21T01:00:00Z':null}))]
  else {
   if(value.failNext){value.failNext=false;save(value);return Promise.resolve({data:null,error:{message:'검증용 저장 실패'}})}
   value.audit.push(name)
-  if(name==='read_meeting_notice_version'||name==='confirm_my_home_host_notice'){
+  if(name==='set_meeting_round_people'){
+   const series=value.series.find(s=>s.rounds.some(r=>r.id===args.p_round))!,round=series.rounds.find(r=>r.id===args.p_round)!
+   if(series.revision!==args.p_revision)return Promise.resolve({data:null,error:{message:'회의가 변경되었습니다.'}})
+   round.membership=(args.p_people as {id:string;role:'attendee'|'result'|'excluded'}[]).map(p=>({person:[host,member,{id:'extra-user',name:'추가 직원'}].find(person=>person.id===p.id)!,role:p.role}))
+   data=++series.revision!
+  }else if(name==='publish_meeting_result'){
+   const series=value.series.find(s=>s.rounds.some(r=>r.id===args.p_round))!,round=series.rounds.find(r=>r.id===args.p_round)!
+   if(series.revision!==args.p_revision)return Promise.resolve({data:null,error:{message:'회의가 변경되었습니다.'}})
+   round.sharedResults=[...(round.sharedResults??[]),{version:(round.sharedResults?.length??0)+1,body:round.result,sharedAt:'2030-01-07T03:00:00Z'}]
+   data=++series.revision!
+  }else if(name==='read_meeting_round_notice')value.read=[...(value.read??[]),args.p_id as string]
+  else if(name==='read_meeting_notice_version'||name==='confirm_my_home_host_notice'){
    const notice=(value.notices??[]).find(item=>item.id===args.p_id&&item.recipient===actor)
    const series=value.series.find(item=>item.rounds.some(round=>round.id===(notice?.meeting.roundId??args.p_id)))
    const round=series?.rounds.find(item=>item.id===(notice?.meeting.roundId??args.p_id))

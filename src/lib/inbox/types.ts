@@ -6,6 +6,8 @@ export type InboxNotificationKind =
   | 'outbound_changed'
   | 'mention'
   | 'meeting_invitation'
+  | 'meeting_result'
+  | 'meeting_removed'
   | 'leave_alarm_sample'
   | 'leave_usage_notice'
   | 'late_statement_manager'

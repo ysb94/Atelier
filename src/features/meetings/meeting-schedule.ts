@@ -1,3 +1,4 @@
+import { inheritRoundMembers, roundAttendees } from './meeting-round-members'
 /** 회사 회의실 일정과 저장 데이터의 공통 화면 모델. */
 
 export const MEETING_WEEKDAY_LABELS = ['월', '화', '수', '목', '금'] as const
@@ -82,6 +83,9 @@ export type MeetingSeriesStatus = 'in_progress' | 'done'
 export type DayQuarterId = 'q1' | 'q2' | 'q3' | 'q4'
 
 export type MeetingRound = {
+  membership?: import('./meeting-round-members').MeetingRoundMember[]
+  detailAccess?: 'full' | 'result' | 'none'
+  sharedResults?: import('./meeting-round-members').MeetingSharedResult[]
   id: string
   confirmed?: boolean
   scheduleVersion?: number
@@ -126,6 +130,7 @@ export function appendPendingRound(
       {
         id,
         round: nextRoundNumber(series),
+        membership: inheritRoundMembers(series),
         startsAt: '',
         roomId: '',
         quarterId: 'q1',
@@ -286,6 +291,7 @@ export function groupPrepMaterialsByUploader(
 }
 
 export type MeetingSeries = {
+  roundMembershipReady?: boolean
   id: string
   kind?: import('./meeting-kinds').MeetingKind
   phase?: 'preparing' | 'published'
@@ -540,13 +546,13 @@ export function isMeetingParticipant(
 }
 
 export function canOpenMeetingDetail(
-  series: Pick<MeetingSeries, 'host' | 'members' | 'phase' | 'createdBy'>,
+  series: Pick<MeetingSeries, 'host' | 'members' | 'phase' | 'createdBy' | 'rounds'>,
   actor: Pick<MeetingPerson, 'id'>,
 ): boolean {
   if (series.phase === 'preparing') {
     return series.host.id === actor.id || series.createdBy === actor.id
   }
-  return isMeetingParticipant(series, actor)
+  return isMeetingParticipant(series, actor) || series.rounds.some(round => round.detailAccess === 'result' || round.detailAccess === 'full')
 }
 
 export function filterSeriesForViewer(
@@ -573,7 +579,7 @@ export function seriesToDrafts(
         startsAt: round.startsAt,
         roomId: round.roomId,
         host: item.host,
-        members: item.members.filter(member => !round.manualConfirmation?.excludedIds.includes(member.id)),
+        members: roundAttendees(item, round).filter(member => !round.manualConfirmation?.excludedIds.includes(member.id)),
         seriesId: item.id,
         round: round.round,
         quarterId: round.quarterId,

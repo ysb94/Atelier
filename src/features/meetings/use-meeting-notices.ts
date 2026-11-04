@@ -11,8 +11,8 @@ import { useMeetingRealtime } from './use-meeting-realtime'
 export function useMeetingNotices({ realtime = true }: { realtime?: boolean } = {}) {
   const { profile } = useAuth()
   const enabled = profile?.status === 'active'
-  const connected = useMeetingRealtime(Boolean(enabled && realtime), profile?.id, profile?.companyId ?? undefined)
-  const polling = enabled && realtime && !connected
+  useMeetingRealtime(Boolean(enabled && realtime), profile?.id, profile?.companyId ?? undefined)
+  const polling = enabled && realtime
   const invitations = useQuery({
     queryKey: ['meeting-invitations', profile?.id],
     queryFn: listMeetingInvitations,

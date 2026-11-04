@@ -26,6 +26,8 @@ const KIND_ICON: Record<
   barcode_pending: { icon: CircleAlert, label: '미지정' },
   outbound_changed: { icon: Truck, label: '출고 변경' },
   mention: { icon: AtSign, label: '언급' },
+  meeting_result: { icon: Check, label: '회의 결과' },
+  meeting_removed: { icon: CalendarClock, label: '참석 해제' },
   meeting_invitation: { icon: CalendarClock, label: '회의' },
   leave_alarm_sample: { icon: CalendarClock, label: '연차 안내' },
   leave_usage_notice: { icon: CalendarClock, label: '연차 안내' },

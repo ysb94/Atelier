@@ -48,7 +48,7 @@ export function useMyHomeNotifications({ coordinator = false } = {}) {
       const series=meetings.series?.find(row=>row.id===url.searchParams.get('meeting'))
       // 호스트 결과는 읽음으로 끝나는 안내다. 멤버의 실제 참석 응답만 업무로 남긴다.
       const pending = !item.meeting?.finalized && item.meeting?.role !== 'host' && item.meeting?.status === 'pending'
-      return { ...item,current:meetings.series===undefined||Boolean(series&&series.status!=='done'), target: { source: 'meeting' as const, entityId: round, eventVersion: item.createdAt, tab: 'meetings' as const, href: item.href }, action: pending ? { key: `meeting:${round}:${item.meeting?.role}`, label: '참석 응답 필요' } : null }
+      return { ...item,current:item.current!==false&&(meetings.series===undefined||Boolean(series&&(item.kind==='meeting_result'||item.kind==='meeting_removed'||series.status!=='done'))), target: { source: 'meeting' as const, entityId: round, eventVersion: item.createdAt, tab: 'meetings' as const, href: item.href }, action: pending ? { key: `meeting:${round}:${item.meeting?.role}`, label: '참석 응답 필요' } : null }
     })
     const records = leave.data ?? emptyList<LeaveUsageNotice>()
     const leaveItems = leaveNoticeItems(records).map((item, index) => ({ ...item,
@@ -101,7 +101,7 @@ export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout'
           const data=meetingEvents.data ?? []
           for (const item of (data ?? []) as InboxNotification[]) {
             const url = new URL(item.href,'https://atelier.local')
-            if (url.searchParams.get('round') !== entityId || item.readAt || item.meeting?.scheduleVersion && String(item.meeting.scheduleVersion) !== version) continue
+            if (item.kind !== 'meeting_invitation' || url.searchParams.get('round') !== entityId || item.readAt || item.meeting?.scheduleVersion && String(item.meeting.scheduleVersion) !== version) continue
             const { error: readError } = await getSupabase().rpc('read_meeting_notice_version',{p_id:item.id,p_sent_at:item.createdAt,p_schedule_version:Number(version)})
             if (readError) throw readError
           }

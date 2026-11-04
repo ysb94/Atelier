@@ -1,3 +1,4 @@
+import { roundRole } from '../meetings/meeting-round-members'
 import type { MeetingSeries } from '../meetings/meeting-schedule'
 import type { MeetingKind } from '../meetings/meeting-kinds'
 
@@ -20,8 +21,9 @@ export function myScheduleMeetings(series: readonly MeetingSeries[], userId: str
   const events: MyScheduleMeeting[] = []
   for (const item of series) {
     const isHost = item.host.id === userId
-    if (!isHost && (item.phase === 'preparing' || !item.members.some(member => member.id === userId))) continue
+    if (!isHost && item.phase === 'preparing') continue
     for (const round of item.rounds) {
+      if (roundRole(item, round, userId) !== 'attendee') continue
       const date = round.startsAt.slice(0, 10), start = round.startsAt.slice(11, 16)
       if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date.slice(0, 7) !== month || !/^([01]\d|2[0-3]):[0-5]\d$/.test(start)) continue
       if (!isHost) {

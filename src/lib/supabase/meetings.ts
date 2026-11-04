@@ -91,3 +91,7 @@ export async function downloadMeetingFile(file:MeetingPrepFile):Promise<void> {
   link.href=url;link.download=file.name;link.click()
   window.setTimeout(()=>URL.revokeObjectURL(url),1000)
 }
+
+export const setMeetingRoundPeople=(round:string,revision:number,people:{id:string;role:string}[])=>checked<number>(getSupabase().rpc('set_meeting_round_people',{p_round:round,p_revision:revision,p_people:people}))
+export const publishMeetingResult=(round:string,revision:number)=>checked<number>(getSupabase().rpc('publish_meeting_result',{p_round:round,p_revision:revision}))
+export const readMeetingRoundNotice=(id:string,created:string)=>checked<void>(getSupabase().rpc('read_meeting_round_notice',{p_id:id,p_created:created}))

@@ -22,6 +22,7 @@ export function useMeetingRealtime(enabled: boolean, personId?: string, companyI
     const channel = client.channel(`meeting-notices:${personId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'meeting_host_notices', filter: `recipient_id=eq.${personId}` }, refresh)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'meeting_invitations', filter: `company_id=eq.${companyId}` }, refresh)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'meeting_round_notices', filter: `recipient_id=eq.${personId}` }, refresh)
       .on('system', { event: '*' }, payload => {
         if (!disposed && payload.extension === 'postgres_changes' && payload.status === 'error') {
           setConnected(false)

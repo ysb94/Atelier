@@ -1,3 +1,4 @@
+import { verifyMeetingRoundBrowser } from './meeting-round-browser.mjs'
 import assert from 'node:assert/strict'
 import path from 'node:path'
 import { createServer } from 'vite'
@@ -51,7 +52,9 @@ try {
   page.on('console', message => { if (message.type() === 'error') console.error('browser-console:', message.text()) })
   page.on('requestfailed', request => console.error('browser-request:', request.url(), request.failure()?.errorText))
   page.on('response', response => { if (response.status() >= 400) console.error('browser-response:', response.status(), response.url()) })
-  if (process.argv.includes('--manual-confirmation-only')) {
+  if (process.argv.includes('--round-roles-only')) {
+    await verifyMeetingRoundBrowser(page,origin)
+  } else if (process.argv.includes('--manual-confirmation-only')) {
     await verifyMeetingManualConfirmationBrowser(page,origin)
   } else if (process.argv.includes('--host-lunch-only')) {
     await verifyMeetingHostLunchBrowser(page,origin)

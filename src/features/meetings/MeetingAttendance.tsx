@@ -1,3 +1,4 @@
+import { roundAttendees } from './meeting-round-members'
 import { Button } from '@/components/ui/button'
 import { MessageCirclePlus } from 'lucide-react'
 import { cn } from '@/lib/utils'
@@ -9,15 +10,16 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
   onChat:(person:MeetingPerson)=>void;onGroup:()=>void;onRespond?:(status:'available'|'unavailable')=>void
   requiresResponse?:boolean
 }) {
+  const attendees=roundAttendees(series,round)
   const published=series.phase!=='preparing',confirmed=published && Boolean(round?.confirmed ?? round?.startsAt)
-  const participant=series.host.id===actorId || series.members.some(person=>person.id===actorId)
+  const participant=series.host.id===actorId || attendees.some(person=>person.id===actorId)
   return <div className={cn('meeting-attendance', compact && 'is-compact', !compact && 'space-y-2')}>
     <div className="meeting-attendance-row">
     {published&&participant ? <button type="button" className="meeting-all" aria-label="전체 멤버와 대화" title="전체 멤버와 대화" disabled={simulating} onClick={onGroup}>
       <MessageCirclePlus className="size-[18px]" aria-hidden="true" strokeWidth={1.75} />
     </button> : compact ? <span className="meeting-all-placeholder" aria-hidden="true" /> : null}
     <div className="meeting-members">
-      {[series.host,...series.members].map(person=>{
+      {[series.host,...attendees].map(person=>{
         const isHost=person.id===series.host.id
         const status=round?.responses?.find(response=>response.profileId===person.id)?.status ?? 'pending'
         const excluded=round?.manualConfirmation?.excludedIds.includes(person.id)
@@ -33,7 +35,7 @@ export function MeetingAttendance({series,round,actorId,simulating,onChat,onGrou
     </div>
     </div>
     {round?.manualConfirmation && !compact && <p className="text-sm text-muted-foreground">수동 확정 · 불참자 {round.manualConfirmation.excludedIds.length}명은 이번 차수에서 제외됩니다.</p>}
-    {!compact&&confirmed&&requiresResponse&&round&&!round.manualConfirmation&&series.members.some(person=>person.id===actorId)&&onRespond ? <MeetingResponse round={round} actorId={actorId} onRespond={onRespond}/>:null}
+    {!compact&&confirmed&&requiresResponse&&round&&!round.manualConfirmation&&attendees.some(person=>person.id===actorId)&&onRespond ? <MeetingResponse round={round} actorId={actorId} onRespond={onRespond}/>:null}
   </div>
 }
 

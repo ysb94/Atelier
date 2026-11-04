@@ -1,3 +1,7 @@
+import { MeetingRoundPeople, MeetingSharedResults } from './MeetingRoundPeople'
+import { roundAttendees, roundRole } from './meeting-round-members'
+import { publishMeetingResult } from '@/lib/supabase/meetings'
+import { useReadMeetingRoundNotices } from './use-read-meeting-round-notices'
 import { useReadMyHomeNotification } from '@/features/settings/use-my-home-notifications'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -61,7 +65,6 @@ import {
   appendPendingRound,
   formatMeetingComposeGaps,
   isMeetingComposeReady,
-  isMeetingParticipant,
   isPendingRound,
   meetingGuideSaved,
   formatMeetingDuration,
@@ -281,7 +284,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
     [host, isAdmin, series],
   )
   const listedSeries = useMemo(
-    () => mineOnly ? visibleSeries.filter(item => isMeetingParticipant(item, host)) : visibleSeries,
+    () => mineOnly ? visibleSeries.filter(item => canOpenMeetingDetail(item, host)) : visibleSeries,
     [host, mineOnly, visibleSeries],
   )
   const openSeries = useMemo(
@@ -339,7 +342,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
     const item=visibleSeries.find(row=>row.id===searchParams.get('meeting'))
     const round=item?.rounds.find(row=>row.id===searchParams.get('round'))
     if(item&&round&&canOpenMeetingDetail(item,host)) setDetail(current=>current?.seriesId===item.id&&current.roundId===round.id?current:{seriesId:item.id,roundId:round.id})
-  },[active,searchParams,visibleSeries])
+  },[active,searchParams,visibleSeries,host])
   function closeDetail(){
     setDetail(null)
     if(active&&searchParams.has('meeting')){const next=new URLSearchParams(searchParams);next.delete('meeting');next.delete('round');setSearchParams(next,{replace:true})}
@@ -454,7 +457,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
     const confirmed={...(target ?? round),startsAt,roomId:nextRoomId,quarterId:round.quarterId,durationMinutes:slotDurationMinutes,confirmed:true,
       scheduleVersion:(target?.scheduleVersion ?? 0)+1,responses:composeKindInfo.kind==='meeting'?[]:composeMembers.map(person=>({profileId:person.id,status:'pending' as const}))}
     const saved=await setSeries(rows=>rows.map(item=>item.id===schedulingSeries.id?{
-      ...item,phase:'published',members:composeMembers,durationMinutes:slotDurationMinutes,
+      ...item,phase:'published',members:item.roundMembershipReady ? item.members : composeMembers,durationMinutes:slotDurationMinutes,
       rounds:target?item.rounds.map(row=>row.id===target.id?confirmed:row):[...item.rounds,confirmed],
     }:item),{id:schedulingSeries.id,revision:schedulingSeries.revision ?? 0,confirmRound:confirmed.id})
     if(saved) resetCompose()
@@ -469,7 +472,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
     setTitle(item.title)
     setDurationMinutes(target?.startsAt ? target.durationMinutes ?? item.durationMinutes : null)
     setScheduleChoice({roomId:target?.roomId || selectedRoomId,dateKey:target?.startsAt.slice(0,10) || todayKey,clock:target?.startsAt.slice(11,16) || ''})
-    setMembers(item.members)
+    setMembers(roundAttendees(item,target ?? undefined))
     setComposePrompt(null)
     setMemberPickerOpen(false)
     setComposeOpen(true)
@@ -593,8 +596,8 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
                   (left, right) => left.round - right.round,
                 )
                 const canDetail = canOpenMeetingDetail(item, host)
-                const responseRounds = item.status === 'in_progress' && item.phase !== 'preparing' && item.members.some(person => person.id === host.id) && !(kindInfos[item.id]?.kind === 'meeting')
-                  ? rounds.filter(round => Boolean(round.confirmed ?? round.startsAt) && !round.manualConfirmation) : []
+                const responseRounds = item.status === 'in_progress' && item.phase !== 'preparing' && item.host.id!==host.id && rounds.some(round=>roundRole(item,round,host.id)==='attendee') && !(kindInfos[item.id]?.kind === 'meeting')
+                  ? rounds.filter(round => roundRole(item,round,host.id)==='attendee' && Boolean(round.confirmed ?? round.startsAt) && !round.manualConfirmation) : []
                 const pendingResponses = responseRounds.filter(round => (round.responses?.find(response => response.profileId === host.id)?.status ?? 'pending') === 'pending')
                 return (
                   <li
@@ -616,7 +619,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
                         {rounds.map((round, index) => {
                           const gapDays = roundGapDays(rounds, round)
                           const simpleMeeting = kindInfos[item.id]?.kind === 'meeting'
-                          const caption = simpleMeeting ? isPendingRound(round) ? '일정 미확정' : null : roundListCaption(round, item.members.map((person) => person.id))
+                          const caption = simpleMeeting ? isPendingRound(round) ? '일정 미확정' : null : roundListCaption(round, roundAttendees(item,round).map((person) => person.id))
                           return (
                           <span
                             key={round.id}
@@ -676,6 +679,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
                           </div>
                         </div>
                       </div>
+                      {item.roundMembershipReady && (()=>{const latest=[...item.rounds].sort((a,b)=>b.round-a.round)[0];const people=latest ? roundAttendees(item,latest) : item.members;const sharing=latest?.membership?.filter(p=>p.role==='result').length ?? 0;return <p className="mt-1 text-xs text-muted-foreground">참석 {1+people.length}명 · 결과 공유 {sharing}명{latest && roundRole(item,latest,host.id)==='result' ? ' · 결과 공유 대상' : latest && roundRole(item,latest,host.id)==='attendee' ? ' · 참석 대상' : ''}</p>})()}
                       {item.phase==='preparing'?<Badge variant="outline" className="mt-1">준비 중 · 멤버 비공개</Badge>:null}
                       {item.status === 'done' ? (
                         <span className="mt-1 block text-xs text-muted-foreground">
@@ -792,7 +796,7 @@ function MeetingScreen({ showHeading }: { showHeading: boolean }) {
 
             <div className="space-y-1">
                 <p className="text-xs font-medium">멤버</p>
-                {membersQuery.isLoading || departmentsQuery.isLoading ? (
+                {schedulingSeries?.roundMembershipReady ? <p className="text-xs text-muted-foreground">{members.map(person=>person.name).join(' · ') || '호스트만 참석'} · 명단 변경은 회의 상세의 ‘회차 멤버 관리’를 이용하세요.</p> : membersQuery.isLoading || departmentsQuery.isLoading ? (
                   <p className="text-[11px] text-muted-foreground">
                     멤버를 불러오는 중...
                   </p>
@@ -1705,17 +1709,19 @@ function MeetingDetailDrawer({
   const noticeRead = useReadMyHomeNotification('meeting', round.id, String(round.scheduleVersion ?? 1), !simulating)
   const pending = isPendingRound(round)
   const isHost=series.host.id===uploader.id
+  const roundNoticeRead=useReadMeetingRoundNotices(round, !simulating)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [prepMaterials, setPrepMaterials] = useState(round.prepMaterials)
   const [content, setContent] = useState(round.content)
   const guideSaved = meetingGuideSaved(round.content, content)
   const [result, setResult] = useState(round.result)
   const [manualOpen,setManualOpen]=useState(false)
-  const unavailable=series.members.filter(person=>round.responses?.find(response=>response.profileId===person.id)?.status==='unavailable')
-  const allResponded=series.members.every(person=>['available','unavailable'].includes(round.responses?.find(response=>response.profileId===person.id)?.status ?? 'pending'))
+  const unavailable=roundAttendees(series,round).filter(person=>round.responses?.find(response=>response.profileId===person.id)?.status==='unavailable')
+  const allResponded=roundAttendees(series,round).every(person=>['available','unavailable'].includes(round.responses?.find(response=>response.profileId===person.id)?.status ?? 'pending'))
   const [busy,setBusy]=useState(false),[operationError,setOperationError]=useState<string|null>(null)
   const editRevision=useRef(series.revision ?? 0)
   useEffect(()=>setPrepMaterials(round.prepMaterials),[round.prepMaterials])
+  useEffect(()=>{if(!isHost){setContent(round.content);setResult(round.result)}},[isHost,round.content,round.result])
   const previousRounds = useMemo(
     () =>
       [...series.rounds]
@@ -1804,6 +1810,7 @@ function MeetingDetailDrawer({
       >
         <fieldset disabled={busy} className="contents">
         {operationError || saveError ? <div className="shrink-0 space-y-2 p-3"><p role="alert" className="text-sm text-danger">{saveError ?? operationError}</p><Button variant="outline" onClick={onClose}>저장하지 않고 닫기</Button></div> : null}
+        {roundNoticeRead.error && <div className="p-3"><p role="alert" className="text-sm text-danger">{roundNoticeRead.error}</p><Button type="button" size="sm" variant="outline" onClick={roundNoticeRead.retry}>읽음 저장 재시도</Button></div>}
         {noticeRead.error && <div className="p-3"><p role="alert" className="text-sm text-danger">{noticeRead.error}</p><Button type="button" size="sm" variant="outline" onClick={noticeRead.retry}>읽음 저장 재시도</Button></div>}
         <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
           <div className="min-w-0 space-y-2">
@@ -1830,7 +1837,7 @@ function MeetingDetailDrawer({
             <p className="truncate text-xs text-muted-foreground">
               {series.host.name}
               {series.members.length > 0
-                ? ` | ${series.members.map((person) => person.name).join(', ')}`
+                ? ` | ${roundAttendees(series,round).map((person) => person.name).join(', ')}`
                 : ''}
             </p>
           </div>
@@ -1846,9 +1853,11 @@ function MeetingDetailDrawer({
         </div>
 
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
-          {series.phase==='preparing'?<p className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">{simpleMeeting?'준비 중 · 호스트가 날짜·시간·회의실을 정해 일정을 확정하면 멤버에게 공개됩니다.':'준비 중 · 호스트와 생성자만 볼 수 있습니다. 안내와 자료를 준비한 뒤 호스트가 일정을 확정하면 멤버에게 공개됩니다.'}</p>:null}
           {!pending?<p className="rounded-lg bg-muted px-3 py-2 text-sm font-medium">{round.startsAt.slice(0,10)} · {formatBookedTimeRange(round.startsAt,round.durationMinutes ?? series.durationMinutes)} · {meetingRoomName(round.roomId)}</p>:null}
+          {round.detailAccess && round.detailAccess!=='full' ? <><p className="rounded-xl border border-border p-3 text-sm">{roundRole(series,round,uploader.id)==='result' ? '결과 공유 대상 · 이번 회의에는 참석하지 않습니다.' : '이번 회차 참석 대상이 아닙니다. 이전에 공유받은 결과를 확인할 수 있습니다.'}</p><MeetingSharedResults round={round} /></> : <>
+          {series.phase==='preparing'?<p className="rounded border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900">{simpleMeeting?'준비 중 · 호스트가 날짜·시간·회의실을 정해 일정을 확정하면 멤버에게 공개됩니다.':'준비 중 · 호스트와 생성자만 볼 수 있습니다. 안내와 자료를 준비한 뒤 호스트가 일정을 확정하면 멤버에게 공개됩니다.'}</p>:null}
           {attendance}
+          <MeetingRoundPeople series={series} round={round} actorId={uploader.id} revision={editRevision.current} onSaved={async revision=>{editRevision.current=revision;await onRefresh()}} />
           {!isHost ? <p className="text-xs text-muted-foreground">회의 내용·결과·일정 수정과 삭제는 호스트만 할 수 있습니다. 참석 응답·자료 공유·대화는 계속 이용할 수 있습니다.</p> : null}
           {previousRounds.length > 0 ? (
             <section className="space-y-2">
@@ -1986,6 +1995,7 @@ function MeetingDetailDrawer({
             <h3 className="text-xs font-medium text-muted-foreground">
               회의 결과
             </h3>
+            {isHost && series.roundMembershipReady && <div className="flex gap-2"><Button type="button" size="sm" variant="outline" onClick={()=>void run(async()=>{await persistNotes()})}>결과 저장</Button><Button type="button" size="sm" disabled={!result.trim()} onClick={()=>void run(async()=>{if(await persistNotes()){editRevision.current=await publishMeetingResult(round.id,editRevision.current);await onRefresh()}})}>{round.sharedResults?.length ? '수정 결과 공유' : '결과 공유'}</Button></div>}
             <Textarea
               value={result}
               rows={5}
@@ -1994,7 +2004,9 @@ function MeetingDetailDrawer({
               readOnly={!isHost}
               onChange={(event) => setResult(event.target.value)}
             />
+          {!isHost && round.sharedResults && <MeetingSharedResults round={round} />}
           </section> : null}</> : <p className="text-xs text-muted-foreground">미팅은 날짜·시간·회의실과 참석자를 기록하며, 내용·회의록은 작성하지 않습니다.</p>}
+          </>}
         </div>
 
         {series.status === 'in_progress' ? (
