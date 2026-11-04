@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom'
 import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Select } from '@/components/ui/input'
@@ -5,7 +6,7 @@ import { useAuth } from '@/lib/supabase/auth'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { listOffsiteSettlements } from '@/lib/supabase/offsite-settlements'
 import { OffsiteSettlementEditor } from './OffsiteSettlementEditor'
-import { offsitePhase, OFFSITE_PHASE_LABEL } from './offsite-period'
+import { offsiteEnd, offsitePhase, OFFSITE_PHASE_LABEL } from './offsite-period'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { StatusPill } from '@/components/ui/status-pill'
@@ -14,7 +15,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { requestStatusLabel } from '@/features/settings/personal-requests'
 import { useMonthlyWorkRequests } from './use-monthly-work-requests'
 import { WorkManagementFilters } from './WorkManagementFilters'
-import { localDateKey, monthLabel } from './monthly-attendance'
+import { isWorkday, localDateKey, monthDates, monthLabel } from './monthly-attendance'
 import type { useOpsDirectory } from './ops-directory'
 import type { useAttendanceStartSettings } from './use-attendance-start-settings'
 import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
@@ -40,7 +41,7 @@ export function AttendanceOffsitePanel({ directory, schedules }: { directory: Re
   const lunch = useQuery({ queryKey: ['company-work-hours'], queryFn: loadCompanyLunch })
   useEffect(() => { if (lunch.error) console.warn('[attendance-work] 외근 추가 근무 기준 조회 실패', lunch.error) }, [lunch.error])
   const extraHours = useMemo(() => timeAttendanceWork('외근 추가 근무 예상',()=>new Map(requests.rows.filter(item => item.kind === 'offsite').map(item => [item.id, lunch.data
-    ? offsiteExtraHours(item, month, schedules.index, lunch.data, requests.rows, directory.members.find(member => member.id === item.employeeId)?.departmentId)
+    ? offsiteExtraHours(item, month, schedules.index, lunch.data, requests.rows, directory.members.find(member => member.id === item.employeeId)?.departmentId, true)
     : null]))), [requests.rows, month, schedules.index, lunch.data, directory.members])
   const hoursLoading = schedules.loading || lunch.isPending || directory.loading
   const hoursFailed = Boolean(schedules.error || lunch.error || directory.error)
@@ -62,11 +63,13 @@ export function AttendanceOffsitePanel({ directory, schedules }: { directory: Re
     <StatGrid><StatTile label="외근 등록자" value={loading || failed ? '—' : `${new Set(rows.filter(item => item.status === 'approved').map(item => item.employeeId)).size}명`} hint={monthLabel(month)} /><StatTile label="등록 외근" value={loading || failed ? '—' : `${rows.filter(item => item.status === 'approved').length}건`} /><StatTile label="취소 외근" value={loading || failed ? '—' : `${rows.filter(item => item.status === 'cancelled').length}건`} /></StatGrid>
     {failed && <p role="alert" className="text-danger">외근을 불러오지 못했습니다. <Button size="sm" variant="outline" onClick={() => void requests.refetch()}>다시 불러오기</Button></p>}
     {hoursFailed && <p role="alert" className="text-warning">근무 기준 조회 실패 · 추가 근무시간을 계산하지 못했습니다. <Button size="sm" variant="outline" onClick={() => { void schedules.refresh(); void lunch.refetch(); directory.refetch() }}>다시 불러오기</Button></p>}
-    <Card className="overflow-x-auto"><table className="w-full min-w-[1100px] text-left text-sm"><caption className="sr-only">{monthLabel(month)} 외근 등록 목록</caption><thead className="bg-primary text-primary-foreground"><tr>{['직원', '부서', '외근 날짜', '외근 시간', '정규 근무시간', '추가 근무(야근)', '장소', '사유', '진행', '후처리'].map(label => <th key={label} className="px-3 py-2">{label}</th>)}</tr></thead><tbody>
+    <Card className="overflow-x-auto"><table className="w-full min-w-[1100px] text-left text-sm"><caption className="sr-only">{monthLabel(month)} 외근 등록 목록</caption><thead className="bg-primary text-primary-foreground"><tr>{['직원', '부서', '외근 날짜', '외근 시간', '정규 근무시간', '평일 추가 근무(야근)', '장소', '사유', '진행', '후처리'].map(label => <th key={label} className="px-3 py-2">{label}</th>)}</tr></thead><tbody>
       {loading || failed || !visible.length ? <tr><td colSpan={10} className="p-8 text-center">{loading ? '불러오는 중…' : failed ? '조회 실패' : '해당하는 외근 등록이 없습니다.'}</td></tr> : visible.map(item => {
         const extra = extraHours.get(item.id)
+        const endDate = item.endNextDay ? new Date(Date.parse(`${item.to}T00:00:00Z`)+86_400_000).toISOString().slice(0,10) : item.to
+        const hasHoliday = item.status === 'approved' && monthDates(month).some(date => item.from <= date && date <= endDate && !isWorkday(date,{}) && (item.offsiteContinuous || item.from === item.to) && Date.parse(`${date}T00:00:00+09:00`)<offsiteEnd(item))
         const basis = item.status !== 'approved' ? '—' : hoursFailed ? '조회 실패' : hoursLoading ? '불러오는 중…' : extra?.baseline ?? '기준 미설정'
-        return <tr key={item.id} className="border-t border-border"><td className="px-3 py-2">{item.employeeName}</td><td className="px-3 py-2">{item.departmentName || '소속 없음'}</td><td className="px-3 py-2">{item.from}{item.to !== item.from ? ` ~ ${item.to}` : ''}</td><td className="px-3 py-2">{item.start}–{item.endNextDay ? '다음 날 ' : ''}{item.end}</td><td className="px-3 py-2">{basis}</td><td className="px-3 py-2 font-semibold">{item.status !== 'approved' || hoursFailed || hoursLoading || extra?.minutes == null ? basis : <>{workDurationLabel(extra.minutes)}{extra.days > 1 && <span className="block text-xs font-normal text-muted-foreground">선택 월 {extra.days}일 합계</span>}</>}</td><td className="px-3 py-2 whitespace-pre-wrap">{item.place}</td><td className="max-w-80 px-3 py-2 whitespace-pre-wrap">{item.note || '—'}</td><td className="px-3 py-2"><StatusPill tone={offsitePhase(item,now)==='ended'?'success':'muted'}>{OFFSITE_PHASE_LABEL[offsitePhase(item,now)]}</StatusPill><span className="block text-xs text-muted-foreground">{requestStatusLabel(item)}</span></td><td className="px-3 py-2">{offsitePhase(item,now)==='ended'&&((extra?.minutes===0&&!hoursLoading&&!hoursFailed&&!settlementIndex.has(item.id))?<span>정규 근무 · 후처리 없음</span>:<><span className="block text-xs">{settlementIndex.get(item.id)?.mode==='leave'?'휴가 지급 · 야근 제외':settlementIndex.get(item.id)?.mode==='overtime'?'야근 누적 완료':settlementIndex.get(item.id)?.mode==='none'?'추가 근무 없음':!settlements.data?.ready?'연결 대기':'후처리 대기'}</span><Button size="sm" variant="outline" disabled={!settlements.data?.ready||settlements.isError} onClick={()=>setSelected(item.id)}>{settlementIndex.has(item.id)?'처리 내역':'후처리'}</Button></>)}</td></tr>
+        return <tr key={item.id} className="border-t border-border"><td className="px-3 py-2">{item.employeeName}</td><td className="px-3 py-2">{item.departmentName || '소속 없음'}</td><td className="px-3 py-2">{item.from}{item.to !== item.from ? ` ~ ${item.to}` : ''}</td><td className="px-3 py-2">{item.start}–{item.endNextDay ? '다음 날 ' : ''}{item.end}</td><td className="px-3 py-2">{basis}</td><td className="px-3 py-2 font-semibold">{item.status !== 'approved' || hoursFailed || hoursLoading || extra?.minutes == null ? basis : <>{workDurationLabel(extra.minutes)}{extra.days > 1 && <span className="block text-xs font-normal text-muted-foreground">선택 월 {extra.days}일 합계</span>}</>}</td><td className="px-3 py-2 whitespace-pre-wrap">{item.place}</td><td className="max-w-80 px-3 py-2 whitespace-pre-wrap">{item.note || '—'}</td><td className="px-3 py-2"><StatusPill tone={offsitePhase(item,now)==='ended'?'success':'muted'}>{OFFSITE_PHASE_LABEL[offsitePhase(item,now)]}</StatusPill><span className="block text-xs text-muted-foreground">{requestStatusLabel(item)}</span></td><td className="px-3 py-2">{hasHoliday && <Link className="block text-primary underline" to={`/operations-support?part=attendance&attendanceView=holiday&holidayMonth=${month}`}>주말·공휴일 별도 관리</Link>}{offsitePhase(item,now)==='ended'&&((extra?.minutes===0&&!hoursLoading&&!hoursFailed&&!settlementIndex.has(item.id))?<span>{hasHoliday ? '평일 추가 근무 없음' : '정규 근무 · 후처리 없음'}</span>:<><span className="block text-xs">{settlementIndex.get(item.id)?.mode==='leave'?'휴가 지급 · 야근 제외':settlementIndex.get(item.id)?.mode==='overtime'?'야근 누적 완료':settlementIndex.get(item.id)?.mode==='none'?'추가 근무 없음':!settlements.data?.ready?'연결 대기':'후처리 대기'}</span><Button size="sm" variant="outline" disabled={!settlements.data?.ready||settlements.isError} onClick={()=>setSelected(item.id)}>{settlementIndex.has(item.id)?'처리 내역':'후처리'}</Button></>)}</td></tr>
       })}
     </tbody></table></Card>
     {rows.length > limit && <Button variant="outline" onClick={() => setLimit(value => value + 50)}>더 보기 ({visible.length}/{rows.length})</Button>}

@@ -137,6 +137,11 @@ try {
     const { verifyLeaveAdvances } = await import('./verify-leave-advance-cases.mjs')
     await verifyLeaveAdvances({db,actor,value,create,ops,company,foreign,dept})
   }
+  if (process.argv.includes('--holiday-work')) {
+    assert.ok(['--anniversary','--additional','--fefo','--birthday','--advance'].every(flag=>process.argv.includes(flag)))
+    const { verifyHolidayLeaveIntegration } = await import('./verify-holiday-leave-integration.mjs')
+    await verifyHolidayLeaveIntegration({db,actor,value,create,ops,company,dept,peer})
+  }
 } catch(error) {
   console.error('leave-balance-db 실패:',error.message,{code:error.code,query:error.query})
   process.exitCode=1

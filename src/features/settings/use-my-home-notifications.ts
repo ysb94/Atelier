@@ -18,7 +18,7 @@ import { diagnosticRealtime, startWorkflow, type DiagnosticContext } from '@/lib
 import { diagnosticQuery } from '@/lib/supabase/diagnostic-query'
 import { useDiagnosticGate } from '@/lib/diagnostics/use-diagnostic-gate'
 
-type WorkNotice = { event_key: string; entity_id: string; created_at: string; event_type: string; tab: 'approvals'|'overtime'|'my-attendance'; kind: RequestKind; employee_name: string; from_date: string; to_date: string; start_time: string; end_time: string; note: string; decision_note: string|null; action_needed: boolean; status: string; current?: boolean; read_at: string|null }
+type WorkNotice = { event_key: string; entity_id: string; created_at: string; event_type: string; tab: 'approvals'|'overtime'|'my-attendance'|'holiday-work'; title?: string; action_key?: string; kind: RequestKind; employee_name: string; from_date: string; to_date: string; start_time: string; end_time: string; note: string; decision_note: string|null; action_needed: boolean; status: string; current?: boolean; read_at: string|null }
 async function workNotices(context?: DiagnosticContext): Promise<WorkNotice[]> {
   try { return await diagnosticQuery<WorkNotice[]>('notification','list_work_notices',getSupabase().rpc('list_my_home_work_notifications'),context) ?? [] }
   catch(error) { const code=(error as Error & {cause?:{code?:string}}).cause?.code;throw new Error(['PGRST202','42883'].includes(code ?? '') ? '신청·퇴근 알림 서버 연결 대기: 추가 DB 설정이 필요합니다.' : '업무 알림을 불러오지 못했습니다.',{cause:error}) }
@@ -34,18 +34,22 @@ export function useMyHomeNotifications({ coordinator = false, background = false
   const late = useQuery({ queryKey: ['late-statement-notices', profile?.id], queryFn: listMyLateStatementNotices, ...sharedReadPolicy, enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
   const work = useQuery({ queryKey: ['my-home-work-notices', profile?.id], queryFn: () => workNotices(), ...sharedReadPolicy, enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
   const cache=useQueryClient()
+  // Old servers have no holiday signal table. Keep their existing subscriptions
+  // intact; the first holiday event is discovered by the shared 30-second poll.
+  const holidaySignals = Boolean(work.data?.some(item=>item.event_type.startsWith('holiday-')))
   useEffect(()=>{
     if(!coordinator||!enabled||!profile?.id)return
     const db=getSupabase()
     let disposed=false
     let timer: ReturnType<typeof setTimeout> | undefined
-    const refresh=()=>{clearTimeout(timer);timer=setTimeout(()=>{void cache.invalidateQueries({queryKey:['my-home-work-notices',profile.id]})},150)}
+    const refresh=()=>{clearTimeout(timer);timer=setTimeout(()=>{void Promise.all(['my-home-work-notices','holiday-work'].map(key=>cache.invalidateQueries({queryKey:[key]})))},150)}
     const channel=db.channel(`my-home-work:${profile.id}`)
       .on('postgres_changes',{event:'*',schema:'public',table:'my_home_request_events',filter:`employee_id=eq.${profile.id}`},refresh)
       .on('postgres_changes',{event:'*',schema:'public',table:'my_home_notification_reads',filter:`reader_id=eq.${profile.id}`},refresh)
-      .subscribe(status=>{if(disposed)return;diagnosticRealtime('notification','work_notice_channel',status);if(status==='SUBSCRIBED')refresh()})
+    if(holidaySignals&&profile.companyId)channel.on('postgres_changes',{event:'*',schema:'public',table:'holiday_work_signals',filter:`company_id=eq.${profile.companyId}`},refresh)
+    channel.subscribe(status=>{if(disposed)return;diagnosticRealtime('notification','work_notice_channel',status);if(status==='SUBSCRIBED')refresh()})
     return()=>{disposed=true;clearTimeout(timer);void db.removeChannel(channel).catch(error=>startWorkflow('notification','unsubscribe').fail(error))}
-  },[coordinator,enabled,profile?.id,cache])
+  },[coordinator,enabled,profile?.id,profile?.companyId,cache,holidaySignals])
   const items = useMemo<InboxNotification[]>(() => {
     if (!enabled) return []
     const meetingItems = meetings.items.map(item => {
@@ -70,14 +74,16 @@ export function useMyHomeNotifications({ coordinator = false, background = false
         action: item.kind === 'late_statement_manager' ? { key: `late:${item.id}`, label: '사유서 확인 필요' } : null }
     })
     const workItems = (work.data ?? emptyList<WorkNotice>()).map(item => {
-      const href = item.event_type === 'offsite-group' ? `/settings/profile?part=my-attendance&request=${item.entity_id}` : `/settings/profile?part=${item.tab}&workNotice=${encodeURIComponent(item.event_key)}`
+      const holiday = item.event_type.startsWith('holiday-')
+      const holidayPath = item.tab === 'holiday-work' ? '/operations-support?part=attendance&attendanceView=holiday' : `/settings/profile?part=${item.tab}`
+      const href = holiday ? `${holidayPath}&holidayWork=${item.entity_id}&holidayMonth=${item.from_date.slice(0,7)}&holidayEvent=${encodeURIComponent(item.event_key)}` : item.event_type === 'offsite-group' ? `/settings/profile?part=my-attendance&request=${item.entity_id}` : `/settings/profile?part=${item.tab}&workNotice=${encodeURIComponent(item.event_key)}`
       const label = requestLabel(item.kind)
       return { id: item.event_key, kind: item.event_type==='checkout'?'checkout_needed' as const:'personal_request' as const,
-        title: item.event_type === 'offsite-group' ? `${item.employee_name}님이 외근을 등록했습니다${item.status === 'cancelled' ? ' · 취소됨' : ''}` : item.event_type === 'checkout' ? `${item.from_date} 퇴근시간 확인 필요` : item.event_type === 'offsite-settlement' ? '외근 후처리 결과' : item.event_type === 'approval' ? `${item.employee_name} · ${label} 승인 요청` : `${label} ${item.status === 'approved' ? '승인' : '반려'}`,
-        body: item.event_type==='checkout'?`${item.from_date} · 출근 ${item.start_time}\n${item.note}`:`${item.from_date} ~ ${item.to_date} · ${item.start_time}–${item.end_time}${item.decision_note ? `\n처리 의견: ${item.decision_note}` : ''}`,
+        title: holiday ? item.title ?? '주말·공휴일 근무 안내' : item.event_type === 'offsite-group' ? `${item.employee_name}님이 외근을 등록했습니다${item.status === 'cancelled' ? ' · 취소됨' : ''}` : item.event_type === 'checkout' ? `${item.from_date} 퇴근시간 확인 필요` : item.event_type === 'offsite-settlement' ? '외근 후처리 결과' : item.event_type === 'approval' ? `${item.employee_name} · ${label} 승인 요청` : `${label} ${item.status === 'approved' ? '승인' : '반려'}`,
+        body: holiday ? item.note : item.event_type==='checkout'?`${item.from_date} · 출근 ${item.start_time}\n${item.note}`:`${item.from_date} ~ ${item.to_date} · ${item.start_time}–${item.end_time}${item.decision_note ? `\n처리 의견: ${item.decision_note}` : ''}`,
         createdAt: item.created_at, readAt: item.read_at, current:item.current!==false, href,
         target: { source: item.event_type==='checkout'?'checkout' as const:'request' as const, entityId: item.entity_id, eventVersion: item.event_key, tab: item.tab, href },
-        action: item.action_needed ? { key: `request:${item.entity_id}`, label: item.event_type==='checkout'?'실제 퇴근시간 등록 필요':'승인 처리 필요' } : null,
+        action: item.action_needed ? { key: item.action_key ?? `request:${item.entity_id}`, label: holiday ? item.tab==='approvals'?'실제 시간 확인 필요':item.tab==='holiday-work'?'보상 처리 필요':'실제 시간 보완 필요' : item.event_type==='checkout'?'실제 퇴근시간 등록 필요':'승인 처리 필요' } : null,
       }
     })
     return [...meetingItems,...leaveItems,...lateItems,...workItems].sort((a,b) => b.createdAt.localeCompare(a.createdAt))
@@ -116,7 +122,7 @@ export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout'
           }
         } else {
           const records = await trace.run('load_current_events',context=>workNotices(context))
-          for (const item of records.filter(row => row.entity_id === entityId && !row.read_at && ((row.event_type!=='offsite-settlement' && version === `status:${row.status}`) || row.event_key === version))) {
+          for (const item of records.filter(row => row.entity_id === entityId && !row.read_at && ((row.event_type!=='offsite-settlement' && !row.event_type.startsWith('holiday-') && version === `status:${row.status}`) || row.event_key === version))) {
             await trace.run('save_read',context=>diagnosticQuery('notification','read_work_notice',getSupabase().rpc('read_my_home_work_notification',{p_key:item.event_key}),context))
             count++
           }

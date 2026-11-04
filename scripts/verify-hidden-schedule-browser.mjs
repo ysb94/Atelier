@@ -27,7 +27,7 @@ const mocked = [
   'features/settings/OvertimePanel', 'features/settings/RequiredInformationButton',
   'features/settings/OffsiteGroupFields', 'features/settings/OffsiteSettlementResult',
   'features/settings/OffsiteWorkdayStartField', 'features/settings/use-my-home-notifications',
-  'features/settings/MyLeaveAdvanceSummary',
+  'features/settings/MyLeaveAdvanceSummary', 'lib/supabase/holiday-work',
 ]
 await fs.writeFile(fixture, `
 import React, {createContext,useContext,useState} from 'react';
@@ -55,6 +55,9 @@ export function OffsiteGroupHistory(){const directory=useOpsDirectory();return <
 export const OffsiteStartEditor=()=>null,OffsiteConnectionNotice=()=>null,OffsiteSettlementResult=()=>null,OffsiteWorkdayStartField=()=>null;
 export const MyLeaveAdvanceSummary=()=>{useLeaveAdvances();return null};
 export const useReadMyHomeNotification=()=>({error:null,retry:()=>{}});
+export const useMyHomeNotifications=()=>({work:EMPTY,items:EMPTY,ready:true,error:null});
+export const listHolidayWork=async()=>{hit('holiday-work');return{ready:true,rows:EMPTY,isOperations:false,policy:null}};
+export const changeHolidayWork=async()=>{throw Error('Unexpected holiday write')};
 export const getMyAttendanceExemption=async()=>{hit('exemption');return false};
 export const listMyAttendanceClocks=async(owner,month)=>{hit(month?'month-clocks':'global-clocks');if(month&&window.__failMonth)throw Error('검증용 월별 조회 실패');return [{date:'2026-11-04',clockIn:'09:00',clockOutAt:null}]};
 export const clockOutToday=async()=>{window.__writes.push('clock-out')},undoClockOutToday=async()=>{window.__writes.push('undo-clock-out')},recordAccessIp=async()=>{};
@@ -136,7 +139,7 @@ try{
   const beforeHiddenPoll=await counts();await page.clock.runFor(31_000)
   await page.evaluate(async()=>{window.__revision=1;await window.__cache.invalidateQueries({queryKey:['personal-schedule-todos']})})
   const afterHiddenPoll=await counts()
-  for(const key of ['month-clocks','members','advances','todos','meetings','offsite-groups'])assert.equal(afterHiddenPoll[key],beforeHiddenPoll[key],key+' stays paused')
+  for(const key of ['month-clocks','members','advances','todos','meetings','offsite-groups','holiday-work'])assert.equal(afterHiddenPoll[key],beforeHiddenPoll[key],key+' stays paused')
   assert.ok(afterHiddenPoll['global-clocks']>beforeHiddenPoll['global-clocks'])
   await page.getByRole('tab',{name:'My Schedule',exact:true}).click()
   await page.getByRole('dialog',{name:'Todo',exact:true}).waitFor()
@@ -184,7 +187,7 @@ try{
   await page.waitForFunction(()=>window.__cache.isFetching()===0)
   // Parent workspace inactivity also disables the nested panel; errors recover on re-entry.
   await page.evaluate(()=>window.__workspace(false));const background=await counts();await page.clock.runFor(31_000)
-  for(const key of ['month-clocks','members','advances','todos','meetings','offsite-groups'])assert.equal((await counts())[key],background[key])
+  for(const key of ['month-clocks','members','advances','todos','meetings','offsite-groups','holiday-work'])assert.equal((await counts())[key],background[key])
   await page.evaluate(()=>{window.__failMonth=true;window.__failMembers=true;window.__workspace(true)})
   await page.getByRole('alert').filter({hasText:'2026년 11월 출퇴근 기록'}).waitFor()
   await page.waitForFunction(()=>window.__cache.getQueryState(['orgChartMembers','employee-b','company'])?.status==='error')
@@ -198,8 +201,8 @@ try{
   await baseline.goto(origin+'/settings/profile?part=meetings&unscopedBaseline')
   await baseline.waitForFunction(()=>window.__counts?.['month-clocks']&&window.__cache.isFetching()===0)
   const baselineReads=await baseline.evaluate(()=>({...window.__counts}));await baseline.close()
-  assert.equal(Object.keys(baselineReads).length-Object.keys(initial).length,8)
-  const report={normalEmployee:true,initialHiddenReads:initial,unscopedBaselineReads:baselineReads,initialCallsSaved:8,firstVisibleReads:visible,checks:['hidden first-load/poll suppressed','global attendance retained','form preserved','invalidation refetch on return','own cancellation','account reset','account/company directory cache isolation without cache.clear','session/profile mismatch blocked','workspace inactivity','failed read recovery'],externalRequests:external.length}
+  assert.equal(Object.keys(baselineReads).length-Object.keys(initial).length,9)
+  const report={normalEmployee:true,initialHiddenReads:initial,unscopedBaselineReads:baselineReads,initialCallsSaved:9,firstVisibleReads:visible,checks:['hidden first-load/poll suppressed','global attendance retained','form preserved','invalidation refetch on return','own cancellation','account reset','account/company directory cache isolation without cache.clear','session/profile mismatch blocked','workspace inactivity','failed read recovery'],externalRequests:external.length}
   await fs.writeFile(path.join(dir,'result.json'),JSON.stringify(report,null,2))
   console.log('hidden-schedule-browser: PASS '+JSON.stringify(report))
 }finally{await browser?.close();await new Promise(resolve=>server.close(resolve))}

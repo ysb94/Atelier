@@ -19,10 +19,11 @@ function registeredMinutes(date: string, from: number, to: number, lunch: { star
 }
 
 /** 외근 등록 구간 중 예정 퇴근 이후 시간. 실제 야근 입력/급여 누적과는 별개다. */
-export function offsiteExtraHours(request: LeaveRequest, month: string, starts: ReturnType<typeof attendanceStartIndex>, lunch: { start: string; end: string }, leaves: readonly LeaveRequest[], departmentId = request.departmentId) {
+export function offsiteExtraHours(request: LeaveRequest, month: string, starts: ReturnType<typeof attendanceStartIndex>, lunch: { start: string; end: string }, leaves: readonly LeaveRequest[], departmentId = request.departmentId, weekdaysOnly = false) {
   const last = request.endNextDay ? new Date(Date.parse(`${request.to}T00:00:00Z`)+86_400_000).toISOString().slice(0,10) : request.to
   const continuous = request.offsiteContinuous || request.endNextDay
   const dates = monthDates(month).filter(date => request.from <= date && date <= last
+    && (!weekdaysOnly || isWorkday(date, {}))
     && (request.offsiteContinuous || request.from === request.to || isWorkday(date, {})))
   const baselines = new Set<string>()
   let minutes = 0

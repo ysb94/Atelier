@@ -30,4 +30,6 @@ assert.equal(calculate({}, [setting], [{ ...request, kind: 'half', start: '13:00
 assert.equal(calculate({}, [setting], [{ ...request, kind: 'half', employeeId: 'other', start: '14:00', end: '18:00' }]).minutes, 180, '다른 직원 휴가 제외')
 assert.equal(calculate({}, [setting], [{ ...request, kind: 'half', status: 'cancelled', start: '14:00', end: '18:00' }]).minutes, 180)
 assert.equal(calculate({to:'2026-11-04',end:'03:00',offsiteContinuous:true}).minutes,1440, 'continuous multi-day actual endpoints include early-morning extra, no daily repetition')
+assert.equal(offsiteExtraHours({...request,from:'2026-11-06',to:'2026-11-09',end:'03:00',offsiteContinuous:true},'2026-11',attendanceStartIndex([setting]),lunch,[],'d',true).minutes,540,'weekday management excludes Saturday/Sunday and clips at midnight')
+assert.equal(offsiteExtraHours({...request,from:'2026-11-07',to:'2026-11-07'},'2026-11',attendanceStartIndex([setting]),lunch,[],'d',true).minutes,0,'holiday-only trip has no weekday overtime amount')
 console.info('Offsite extra hours: individual/monthly schedule, regular-end overlap, leave, overnight, selected month, weekdays/holidays and cancellation passed')

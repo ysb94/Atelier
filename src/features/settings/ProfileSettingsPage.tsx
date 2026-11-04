@@ -16,6 +16,7 @@ import { Fragment, useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { LeaveApprovalPanel } from '@/features/operations-support/LeaveApprovalPanel'
+import { HolidayWorkPanel } from '@/features/operations-support/HolidayWorkPanel'
 import { WorkRequestHubPage } from '@/features/work-requests/WorkRequestHubPage'
 import { ReleaseAccessProvider, useReleaseAccess } from '@/components/layout/release-access-context'
 import { WorkspaceTabActivityContext, useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
@@ -132,6 +133,7 @@ function ProfileSettingsContent() {
         {noDepartments && <p className="personal-page-notice">지정된 승인 담당이 아니면 목록이 비어 있을 수 있습니다.</p>}
         <LateStatementApprovalList />
         <LeaveApprovalPanel />
+        <HolidayWorkPanel key={profile?.id} scope="review" />
       </div>}
       <LateStatementNoticeDialog />
       {release.scope.unrestricted && <div id="personal-profile-panel" role="tabpanel" aria-labelledby="personal-profile-tab" hidden={visiblePart !== 'profile'}>
