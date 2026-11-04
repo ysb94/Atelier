@@ -1,5 +1,7 @@
 # Supabase 데이터 아키텍처 원칙
 
+- 2026-11-04 로그인·공통 알림·숨겨진 My Schedule·연차 반복 조회 최적화는 [READ_LOADING_OPTIMIZATION.md](READ_LOADING_OPTIMIZATION.md)를 따른다. 기존 데이터·권한을 보존하는 로컬 검증을 수행했으며, 기존 함수 4개 보완 SQL은 공유 DB 적용 승인과 서버 정의 최종 대조를 기다린다. test/main 배포는 별도 승인 대상이다.
+
 - 2026-11-04 밤샘 외근 다음 날 연차는 [OVERNIGHT_ANNUAL.md](OVERNIGHT_ANNUAL.md)를 따른다. 사용자 승인 후 `20261104041501_overnight_offsite_annual_overlap.sql`을 공유 DB에 적용했다. 가상 직원 8명으로 양쪽 등록 순서·출근 기준 경계·당일 변경·1일 차감을 실제 인증 역할에서 검증하고 모두 롤백했다. 기존 원본·정책·권한과 보안 점검 결과를 보존했다.
 
 - 2026-11-04 단체 외근은 [OFFSITE_GROUPS.md](OFFSITE_GROUPS.md)를 따른다. 사용자 승인 후 공유 DB에 `20261104033803_offsite_group_registration.sql`을 적용했고 기존 원본·정책·실행 권한 보존과 REST 익명 차단을 확인했다. 추가 명시 승인 후 가상 직원 4명으로 등록·개인 처리·알림을 실제 인증 역할에서 검증하고 모두 롤백했다. 참여자 알림의 프로필 조회 권한 문제는 `20261104034900_offsite_group_member_notifications.sql`로 수정·적용했으며 기존 프로필 정책을 유지했다.

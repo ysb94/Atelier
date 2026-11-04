@@ -6,6 +6,7 @@ import { readImpersonationState } from '@/lib/supabase/impersonation'
 import { listMyLeaveUsageNotices, recordLeaveUsageNotice, type LeaveUsageNotice } from '@/lib/supabase/leave-usage-notices'
 import { emptyList } from '@/lib/utils'
 import { getSupabase } from '@/lib/supabase/client'
+import { sharedReadPolicy } from '@/lib/query/shared-read-policy'
 
 export function useLeaveUsageNotices() {
   const { profile, session } = useAuth()
@@ -15,7 +16,8 @@ export function useLeaveUsageNotices() {
   const canConfirm = enabled && !impersonation
   const employeeId = profile?.id
   const cache = useQueryClient()
-  const query = useQuery({ queryKey: ['leave-usage-notices', employeeId], queryFn: () => listMyLeaveUsageNotices(employeeId!), enabled, refetchInterval: enabled ? 30_000 : false })
+  // The header's notification coordinator owns polling for this same query key.
+  const query = useQuery({ queryKey: ['leave-usage-notices', employeeId], queryFn: () => listMyLeaveUsageNotices(employeeId!), ...sharedReadPolicy, enabled })
   const [activeId, setActiveId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -25,14 +27,15 @@ export function useLeaveUsageNotices() {
   useEffect(() => {
     if (!enabled || !employeeId) return
     const db = getSupabase()
-    const refresh = () => { void cache.invalidateQueries({ queryKey: ['leave-usage-notices', employeeId] }) }
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh = () => { clearTimeout(timer); timer = setTimeout(() => { void cache.invalidateQueries({ queryKey: ['leave-usage-notices', employeeId] }) }, 150) }
     const channel = db.channel(`extra-leave-notices:${employeeId}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'extra_leave_usage_notices', filter: `employee_id=eq.${employeeId}` }, refresh)
       .subscribe(status => {
         if (status === 'SUBSCRIBED') refresh()
         else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('[leave-notices] 실시간 연결 실패, 주기 조회로 보완', { status })
       })
-    return () => { void db.removeChannel(channel).catch(error => console.warn('[leave-notices] 실시간 연결 정리 실패', error)) }
+    return () => { clearTimeout(timer); void db.removeChannel(channel).catch(error => console.warn('[leave-notices] 실시간 연결 정리 실패', error)) }
   }, [cache, employeeId, enabled])
   async function record(id: string | null, action: 'read' | 'view' | 'confirm') {
     if (!canConfirm || busy) return false

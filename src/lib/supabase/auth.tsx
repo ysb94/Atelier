@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react'
@@ -46,12 +47,24 @@ function toSignInMessage(message: string) {
   return message
 }
 
+const PROFILE_LOAD_ERROR = '계정 정보를 불러오지 못했습니다. 신규 신청 대신 다시 불러오기를 눌러 주세요.'
+const AUTH_READ_TIMEOUT_MS = 30_000
+
+// A stalled network request must not leave the entry gate loading forever.
+// The underlying read may finish later; request versions below discard it.
+function boundedAuthRead<T>(request: Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('계정 조회 응답 시간 초과')), AUTH_READ_TIMEOUT_MS)
+    request.then(resolve, reject).finally(() => clearTimeout(timeout))
+  })
+}
+
 async function loadProfileSafe(): Promise<{ profile: Profile | null; error: string | null }> {
   try {
-    return { profile: await getMyProfile(), error: null }
+    return { profile: await boundedAuthRead(getMyProfile()), error: null }
   } catch (error) {
     console.warn('[auth] 프로필·지정 권한 조회 실패', error)
-    return { profile: null, error: '계정 정보를 불러오지 못했습니다. 신규 신청 대신 다시 불러오기를 눌러 주세요.' }
+    return { profile: null, error: PROFILE_LOAD_ERROR }
   }
 }
 
@@ -60,6 +73,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null)
   const [profileError, setProfileError] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
+  const currentAuth = useRef<{ session: Session | null; version: number }>({ session: null, version: 0 })
+  const pendingProfile = useRef<{ userId: string; token: string; promise: ReturnType<typeof loadProfileSafe> } | null>(null)
+
+  // Only simultaneous reads share a result. There is no cached permission TTL:
+  // later auth events and explicit refreshes still read the current permissions.
+  const readProfile = useCallback((nextSession: Session, force = false) => {
+    const pending = pendingProfile.current
+    if (!force && pending?.userId === nextSession.user.id && pending.token === nextSession.access_token) return pending.promise
+    const request = { userId: nextSession.user.id, token: nextSession.access_token, promise: loadProfileSafe() }
+    pendingProfile.current = request
+    void request.promise.then(() => { if (pendingProfile.current === request) pendingProfile.current = null })
+    return request.promise
+  }, [])
 
   useEffect(() => {
     if (!isSupabaseConfigured()) {
@@ -68,65 +94,77 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     const supabase = getSupabase()
+    const authState = currentAuth.current
     let active = true
-    let authVersion=0
-    let currentSessionId: string | null = null
+    let receivedSession = false
 
-    supabase.auth.getSession().then(async ({ data }) => {
-      if (!active) return
-      const version=++authVersion
-      currentSessionId=data.session?.user.id??null
-      setSession(data.session)
-      if (data.session) {
-        const next = await loadProfileSafe()
-        if (!active || version!==authVersion || (next.profile && next.profile.id!==data.session.user.id)) return
-        setProfile(next.profile)
-        setProfileError(next.error)
-      } else {
+    const acceptSession = (nextSession: Session | null, initial = false) => {
+      if (!active || (initial && receivedSession)) return
+      receivedSession = true
+      const changedUser = currentAuth.current.session?.user.id !== nextSession?.user.id
+      const version = ++currentAuth.current.version
+      currentAuth.current.session = nextSession
+      setSession(nextSession)
+      if (changedUser) {
+        pendingProfile.current = null
         setProfile(null)
         setProfileError(null)
+        setReady(false)
       }
+      if (!nextSession) {
+        pendingProfile.current = null
+        setProfile(null)
+        setProfileError(null)
+        setReady(true)
+        return
+      }
+      // Exit the Supabase auth callback/lock before getMyProfile calls getUser.
+      setTimeout(() => {
+        if (!active || version !== currentAuth.current.version) return
+        void readProfile(nextSession).then(next => {
+          if (!active || version !== currentAuth.current.version) return
+          const matches = !next.profile || next.profile.id === nextSession.user.id
+          setProfile(matches ? next.profile : null)
+          setProfileError(matches ? next.error : PROFILE_LOAD_ERROR)
+          setReady(true)
+        })
+      }, 0)
+    }
+
+    void boundedAuthRead(supabase.auth.getSession()).then(({ data, error }) => {
+      if (error) throw error
+      acceptSession(data.session, true)
+    }).catch(error => {
+      if (!active || receivedSession) return
+      console.warn('[auth] 초기 세션 조회 실패', error)
+      setProfileError(PROFILE_LOAD_ERROR)
       setReady(true)
     })
 
     const { data: subscription } = supabase.auth.onAuthStateChange(
-      (_event, nextSession) => {
-        const version=++authVersion
-        const changedUser=currentSessionId!==(nextSession?.user.id??null)
-        currentSessionId=nextSession?.user.id??null
-        setSession(nextSession)
-        if(changedUser){setProfile(null);setReady(false)}
-        if (!nextSession) {
-          setProfile(null)
-          setProfileError(null)
-          setReady(true)
-          return
-        }
-        // onAuthStateChange 콜백 안에서 await하면 데드락이 날 수 있어 다음 틱으로 미룬다.
-        void Promise.resolve().then(async () => {
-          const next = await loadProfileSafe()
-          if (!active || version!==authVersion || (next.profile && next.profile.id!==nextSession.user.id)) return
-          setProfile(next.profile)
-          setProfileError(next.error)
-          setReady(true)
-        })
-      },
+      (event, nextSession) => acceptSession(nextSession, event === 'INITIAL_SESSION'),
     )
 
     return () => {
       active = false
+      authState.version += 1
       subscription.subscription.unsubscribe()
     }
-  }, [])
+  }, [readProfile])
 
   const refreshProfile = useCallback(async () => {
-    const next = await loadProfileSafe()
-    const {data}=await getSupabase().auth.getSession()
-    if(next.profile && next.profile.id!==data.session?.user.id)return null
-    setProfile(next.profile)
-    setProfileError(next.error)
-    return next.profile
-  }, [])
+    const nextSession = currentAuth.current.session
+    if (!nextSession) return null
+    const version = ++currentAuth.current.version
+    // A save may have just changed the profile. Never reuse an older in-flight read.
+    const next = await readProfile(nextSession, true)
+    if (version !== currentAuth.current.version) return null
+    const matches = !next.profile || next.profile.id === nextSession.user.id
+    setProfile(matches ? next.profile : null)
+    setProfileError(matches ? next.error : PROFILE_LOAD_ERROR)
+    setReady(true)
+    return matches ? next.profile : null
+  }, [readProfile])
 
   const signInWithGoogle = useCallback(async () => {
     const { error } = await getSupabase().auth.signInWithOAuth({

@@ -11,6 +11,7 @@ import { lateStatementNoticeItems } from '@/features/home/LateStatementReview'
 import { leaveNoticeItems } from '@/features/operations-support/leave-usage-notices'
 import type { InboxNotification } from '@/lib/inbox/types'
 import { emptyList } from '@/lib/utils'
+import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
 import { requestLabel, type RequestKind } from './personal-requests'
 import { useNotificationDetailVisibility } from '@/lib/inbox/use-notification-visibility'
 
@@ -25,20 +26,21 @@ export function useMyHomeNotifications({ coordinator = false, background = false
   const preview = usePagePreview()
   const enabled = profile?.status === 'active' && session?.user.id === profile.id && !preview?.active
   const meetings = useMeetingNotices({ realtime: coordinator && enabled, background })
-  const poll = coordinator && enabled ? 30_000 : false
-  const leave = useQuery({ queryKey: ['leave-usage-notices', profile?.id], queryFn: () => listMyLeaveUsageNotices(profile!.id), enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
-  const late = useQuery({ queryKey: ['late-statement-notices', profile?.id], queryFn: listMyLateStatementNotices, enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
-  const work = useQuery({ queryKey: ['my-home-work-notices', profile?.id], queryFn: workNotices, enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator, retry: false })
+  const poll = readPollInterval(30_000, coordinator && enabled)
+  const leave = useQuery({ queryKey: ['leave-usage-notices', profile?.id], queryFn: () => listMyLeaveUsageNotices(profile!.id), ...sharedReadPolicy, enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
+  const late = useQuery({ queryKey: ['late-statement-notices', profile?.id], queryFn: listMyLateStatementNotices, ...sharedReadPolicy, enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
+  const work = useQuery({ queryKey: ['my-home-work-notices', profile?.id], queryFn: workNotices, ...sharedReadPolicy, enabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
   const cache=useQueryClient()
   useEffect(()=>{
     if(!coordinator||!enabled||!profile?.id)return
     const db=getSupabase()
-    const refresh=()=>{void cache.invalidateQueries({queryKey:['my-home-work-notices',profile.id]})}
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const refresh=()=>{clearTimeout(timer);timer=setTimeout(()=>{void cache.invalidateQueries({queryKey:['my-home-work-notices',profile.id]})},150)}
     const channel=db.channel(`my-home-work:${profile.id}`)
       .on('postgres_changes',{event:'*',schema:'public',table:'my_home_request_events',filter:`employee_id=eq.${profile.id}`},refresh)
       .on('postgres_changes',{event:'*',schema:'public',table:'my_home_notification_reads',filter:`reader_id=eq.${profile.id}`},refresh)
-      .subscribe(status=>{if(status==='SUBSCRIBED')refresh();else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT')console.warn('[my-home-notifications] 실시간 연결 실패, 30초 조회로 보완',{status})})
-    return()=>{void db.removeChannel(channel).catch(error=>console.warn('[my-home-notifications] 실시간 정리 실패',error))}
+      .subscribe(status=>{if(status==='SUBSCRIBED')refresh();else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT')console.warn('[my-home-notifications] 실시간 연결 실패, 주기 조회로 보완',{status})})
+    return()=>{clearTimeout(timer);void db.removeChannel(channel).catch(error=>console.warn('[my-home-notifications] 실시간 정리 실패',error))}
   },[coordinator,enabled,profile?.id,cache])
   const items = useMemo<InboxNotification[]>(() => {
     if (!enabled) return []

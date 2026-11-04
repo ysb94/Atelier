@@ -6,6 +6,7 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { emptyList } from '@/lib/utils'
 import { cleanupMeetingFiles, confirmCompanyMeeting, deleteCompanyMeeting, listCompanyMeetings, listMeetingCalendar, listMeetingRooms, saveCompanyMeeting } from '@/lib/supabase/meetings'
 import { type MeetingSeries, seriesToDrafts } from './meeting-schedule'
+import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
 
 /** 실제 저장과 화면 테스트를 분리한다. 실패·충돌 시 입력 화면을 유지한다. */
 export function useCompanyMeetings(from:string,to:string) {
@@ -14,10 +15,10 @@ export function useCompanyMeetings(from:string,to:string) {
   const cache=useQueryClient()
   const key=useMemo(()=>['company-meetings',real?.id,real?.companyId],[real?.id,real?.companyId])
   const enabled=Boolean(real?.status==='active' && active)
-  const query=useQuery({queryKey:key,queryFn:listCompanyMeetings,enabled,refetchInterval:active&&!simulating?15000:false})
+  const query=useQuery({queryKey:key,queryFn:listCompanyMeetings,...sharedReadPolicy,enabled,refetchInterval:readPollInterval(15_000,active&&!simulating)})
   const roomsQuery=useQuery({queryKey:['meeting-rooms',real?.companyId],queryFn:listMeetingRooms,enabled})
   const calendarKey=useMemo(()=>['meeting-calendar',real?.id,real?.companyId,from,to],[real?.id,real?.companyId,from,to])
-  const calendar=useQuery({queryKey:calendarKey,queryFn:()=>listMeetingCalendar(from,to),enabled,refetchInterval:active&&!simulating?15000:false})
+  const calendar=useQuery({queryKey:calendarKey,queryFn:()=>listMeetingCalendar(from,to),...sharedReadPolicy,enabled,refetchInterval:readPollInterval(15_000,active&&!simulating)})
   const [simulation,setSimulation]=useState<MeetingSeries[]|null>(null)
   const [error,setError]=useState<string|null>(null),[saving,setSaving]=useState(false)
   const tail=useRef<Promise<unknown>>(Promise.resolve())

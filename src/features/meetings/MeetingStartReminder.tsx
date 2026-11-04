@@ -7,6 +7,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
 import { listCompanyMeetings, listMeetingRooms } from '@/lib/supabase/meetings'
 import { emptyList } from '@/lib/utils'
+import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
 import type { MeetingRoom, MeetingSeries } from './meeting-schedule'
 import { MEETING_REMINDER_LEAD_MS, meetingNoticeDue, meetingNoticeStorageKey, upcomingMeetingNotices, type MeetingStartNotice } from './meeting-start-reminders'
 
@@ -18,7 +19,7 @@ export function MeetingStartReminder() {
   const enabled = profile?.status === 'active'
   const meetings = useQuery({
     queryKey: ['company-meetings', profile?.id, profile?.companyId], queryFn: listCompanyMeetings,
-    enabled, refetchInterval: enabled ? 30_000 : false,
+    ...sharedReadPolicy, enabled, refetchInterval: readPollInterval(30_000, Boolean(enabled)),
   })
   const rooms = useQuery({ queryKey: ['meeting-rooms', profile?.companyId], queryFn: listMeetingRooms, enabled })
   const notices = useMemo(() => upcomingMeetingNotices(meetings.data ?? emptyList<MeetingSeries>(), profile?.id ?? ''), [meetings.data, profile?.id])

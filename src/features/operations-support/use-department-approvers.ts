@@ -5,6 +5,7 @@ import { hasPermission } from '@/lib/company/permissions'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { emptyList } from '@/lib/utils'
 import { listDepartmentApprovers, saveDepartmentApprovers, type DepartmentApprover } from '@/lib/supabase/department-approvers'
+import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
 
 export function useDepartmentApprovers() {
   const { profile, session } = useAuth()
@@ -13,7 +14,7 @@ export function useDepartmentApprovers() {
   const canEdit = hasPermission(profile, 'approvers.manage')
   const client = useQueryClient()
   const query = useQuery({ queryKey: ['department-approvers', session?.user.id, allowed], queryFn: listDepartmentApprovers,
-    enabled: allowed, refetchInterval: active && allowed ? 30_000 : false })
+    ...sharedReadPolicy, enabled: active && allowed, refetchInterval: readPollInterval(30_000, active && allowed) })
   useEffect(() => { if (query.error) console.warn('[department-approvers] 설정 불러오기 실패', query.error) }, [query.error])
   const save = useMutation({ mutationFn: (input: Parameters<typeof saveDepartmentApprovers>) => {
     if (!canEdit) throw new Error('승인자 지정 권한이 필요합니다.')

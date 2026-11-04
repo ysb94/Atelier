@@ -12,6 +12,7 @@ import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { HireDateScrollField } from '@/features/org/HireDateScrollField'
 import { LeaveTimeShortcuts, QuarterLeaveTime, RequestTimeField, TimeRangeSummary } from './RequestTimeFields'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList } from '@/lib/utils'
 import { useAuth } from '@/lib/supabase/auth'
@@ -105,7 +106,7 @@ export function MyAttendancePanel() {
   useRenderWatch('MyAttendancePanel')
   const { session, profile } = useAuth()
   const userId = session?.user.id
-  const allowed = Boolean(userId) && profile?.status === 'active'
+  const allowed = Boolean(userId) && profile?.id === userId && profile?.status === 'active'
   const active = useWorkspaceTabActivity()
   const today = koreaDateKey()
   const clock = useMyClockIn()
@@ -115,9 +116,10 @@ export function MyAttendancePanel() {
   const approvals = useDepartmentApprovers()
   const directory = useOpsDirectory()
   const companyNotices = useQuery({
-    queryKey: ['company-notices', 'my-attendance'],
+    queryKey: ['company-notices', 'my-attendance', userId, profile?.companyId],
     queryFn: () => listCompanyNotices('my-attendance'),
-    enabled: allowed,
+    ...sharedReadPolicy,
+    enabled: allowed && active,
   })
   useEffect(() => {
     if (companyNotices.error) console.warn('[company-notices] My Schedule 공지 조회 실패', companyNotices.error)
@@ -163,15 +165,16 @@ export function MyAttendancePanel() {
   const [addOpen, setAddOpen] = useState(false)
   const [todoForm, setTodoForm] = useState<ScheduleTodoForm | null>(null)
   const [todoError, setTodoError] = useState('')
-  const todoStore = useScheduleTodos(userId, profile?.companyId ?? undefined, allowed, active, month)
+  const todoStore = useScheduleTodos(userId, profile?.companyId ?? undefined, allowed && active, active, month)
   const legacyTodos = useMemo(() => userId ? readScheduleTodos(userId) : emptyList<ScheduleTodo>(), [userId])
   const todos = todoStore.data ?? legacyTodos
   const [reminders, setReminders] = useState({ arrival: true, departure: true, missing: true, decision: true })
   const addMenuRef = useRef<HTMLDivElement>(null)
   const clocks = useQuery({
     queryKey: ['attendance-clock-ins', userId, 'month', month, allowed],
-    queryFn: () => listMyAttendanceClocks(userId!, month), enabled: allowed,
-    refetchInterval: allowed && active ? 30_000 : false,
+    ...sharedReadPolicy,
+    queryFn: () => listMyAttendanceClocks(userId!, month), enabled: allowed && active,
+    refetchInterval: readPollInterval(30_000, allowed && active),
   })
   useEffect(() => { if (clocks.error) console.warn('[my-attendance] 월별 출퇴근 조회 실패', { month, error: clocks.error }) }, [month, clocks.error])
   const clockRows = allowed ? clocks.data ?? emptyList<AttendanceClock>() : emptyList<AttendanceClock>()

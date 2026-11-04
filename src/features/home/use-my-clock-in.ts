@@ -10,6 +10,7 @@ import { clockOutToday, listMyAttendanceClocks, undoClockOutToday } from '@/lib/
 import { clockOutLabel, koreaDateKey, type AttendanceClock } from '@/features/settings/my-attendance'
 import { offsiteAction } from '@/lib/supabase/offsite-attendance'
 import { continuingOffsiteClock } from './attendance-guidance'
+import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
 
 async function clockInToday(): Promise<string> {
   void recordAccessIp('clock_in_request')
@@ -24,9 +25,9 @@ export function useMyClockIn() {
   const allowed = profile?.status === 'active' && Boolean(userId)
   const active = useWorkspaceTabActivity()
   const client = useQueryClient()
-  const exemption = useQuery({ queryKey: ['my-attendance-exemption', userId], queryFn: () => getMyAttendanceExemption(userId!), enabled: allowed, refetchInterval: allowed && active ? 30_000 : false })
+  const exemption = useQuery({ queryKey: ['my-attendance-exemption', userId], queryFn: () => getMyAttendanceExemption(userId!), ...sharedReadPolicy, enabled: allowed && active, refetchInterval: readPollInterval(30_000, allowed && active) })
   const exempt = exemption.data === true && !exemption.error
-  const query = useQuery({ queryKey: ['attendance-clock-ins', userId, allowed], queryFn: () => listMyAttendanceClocks(userId!), enabled: allowed, refetchInterval: allowed && active ? 30_000 : false })
+  const query = useQuery({ queryKey: ['attendance-clock-ins', userId, allowed], queryFn: () => listMyAttendanceClocks(userId!), ...sharedReadPolicy, enabled: allowed && active, refetchInterval: readPollInterval(30_000, allowed && active) })
   useEffect(() => { if (query.error) console.warn('[attendance-clock] 출근 기록 불러오기 실패', query.error) }, [query.error])
   useEffect(() => { if (exemption.error) console.warn('[attendance-clock] 제외 설정 확인 실패', exemption.error) }, [exemption.error])
   const rows = allowed ? query.data ?? emptyList<AttendanceClock>() : emptyList<AttendanceClock>()
@@ -34,7 +35,7 @@ export function useMyClockIn() {
   const today = koreaDateKey()
   const todayRecord = rows.find(row => row.date === today)
   const overnightEnabled = allowed && !exempt && !todayRecord && rows.some(row => row.date < today && !row.clockOutAt && !row.autoClosedAt)
-  const overnight = useQuery({ queryKey: ['my-offsite-attendance', userId, today], queryFn: () => offsiteAction('my_offsite_attendance'), enabled: overnightEnabled, refetchInterval: overnightEnabled && active ? 30_000 : false, retry: false })
+  const overnight = useQuery({ queryKey: ['my-offsite-attendance', userId, today], queryFn: () => offsiteAction('my_offsite_attendance'), ...sharedReadPolicy, enabled: overnightEnabled && active, refetchInterval: readPollInterval(30_000, overnightEnabled && active) })
   useEffect(() => { if (overnightEnabled && overnight.error) console.warn('[attendance-clock] 전일 외근 상태 확인 실패', overnight.error) }, [overnightEnabled, overnight.error])
   const ongoingOffsiteRecord = overnightEnabled && !overnight.error ? continuingOffsiteClock(rows, today, overnight.data) : null
   const workingRecord = todayRecord ?? ongoingOffsiteRecord

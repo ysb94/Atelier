@@ -6,6 +6,7 @@ import { listLeaveRequests, submitLeaveRequest, transitionLeaveRequest, type Lea
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { emptyList } from '@/lib/utils'
 import type { RequestForm } from '@/features/settings/personal-requests'
+import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
 
 export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' = 'mine') {
   const { session, profile } = useAuth()
@@ -16,8 +17,9 @@ export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' = 'mine') {
   const query = useQuery({
     queryKey: ['company-leave-requests', userId, scope, allowed],
     queryFn: () => listLeaveRequests(scope === 'mine' ? userId : undefined, scope === 'approvals'),
-    enabled: Boolean(userId && allowed),
-    refetchInterval: active && allowed ? 30_000 : false,
+    ...sharedReadPolicy,
+    enabled: active && Boolean(userId && allowed),
+    refetchInterval: readPollInterval(30_000, active && allowed),
   })
   useEffect(() => { if (query.error) console.warn('[leave-requests] 신청 조회 실패', query.error) }, [query.error])
   async function refresh() {

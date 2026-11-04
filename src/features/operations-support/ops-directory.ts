@@ -3,17 +3,28 @@ import { useQuery } from '@tanstack/react-query'
 import { listDepartments, listOrgChartMembers, type Department, type OrgChartMember } from '@/lib/supabase/profiles'
 import { emptyList } from '@/lib/utils'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
+import { useAuth } from '@/lib/supabase/auth'
 
 export function useOpsDirectory() {
   const active = useWorkspaceTabActivity()
+  const { session, profile } = useAuth()
+  const userId = session?.user.id
+  const companyId = profile?.companyId
+  const allowed = Boolean(userId && companyId && profile?.id === userId && profile.status === 'active')
+  const enabled = active && allowed
   const departmentsQuery = useQuery({
-    queryKey: ['departments', 'active'],
+    queryKey: ['departments', 'active', userId, companyId],
     queryFn: () => listDepartments(true),
+    ...sharedReadPolicy,
+    enabled,
   })
   const membersQuery = useQuery({
-    queryKey: ['orgChartMembers'],
+    queryKey: ['orgChartMembers', userId, companyId],
     queryFn: () => listOrgChartMembers(),
-    refetchInterval: active ? 30_000 : false,
+    ...sharedReadPolicy,
+    enabled,
+    refetchInterval: readPollInterval(30_000, enabled),
   })
 
   useEffect(() => {
@@ -27,8 +38,8 @@ export function useOpsDirectory() {
     }
   }, [membersQuery.error])
 
-  const departments = departmentsQuery.data ?? emptyList<Department>()
-  const members = membersQuery.data ?? emptyList<OrgChartMember>()
+  const departments = allowed ? departmentsQuery.data ?? emptyList<Department>() : emptyList<Department>()
+  const members = allowed ? membersQuery.data ?? emptyList<OrgChartMember>() : emptyList<OrgChartMember>()
   const departmentNames = useMemo(
     () => new Map(departments.map((dept) => [dept.id, dept.name])),
     [departments],
@@ -42,9 +53,10 @@ export function useOpsDirectory() {
     departments,
     members,
     departmentName,
-    loading: departmentsQuery.isPending || membersQuery.isPending,
+    loading: allowed && (departmentsQuery.isPending || membersQuery.isPending),
     error: departmentsQuery.error || membersQuery.error,
     refetch: () => {
+      if (!enabled) return
       void departmentsQuery.refetch()
       void membersQuery.refetch()
     },

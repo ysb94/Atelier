@@ -56,7 +56,7 @@ export function getSupabase() {
       return query
     }
     if (name === 'my_offsite_attendance' || name === 'return_from_offsite') {
-      if (!scenario.startsWith('offsite')) return Promise.resolve({ data: null, error: { code: 'PGRST202', message: '외근 자동 처리 연결 대기' } })
+      if (!scenario.startsWith('offsite')) return Promise.resolve({ data: { state: 'inactive', workDate: null, scheduledStartAt: null, scheduledEndAt: null, serverNow: new Date().toISOString() }, error: null })
       if (name === 'return_from_offsite') {
         state.offsiteReturned = true
         const current = state.rows.find(row => row.work_date === today && row.employee_id === actor)

@@ -18,7 +18,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { LeaveApprovalPanel } from '@/features/operations-support/LeaveApprovalPanel'
 import { WorkRequestHubPage } from '@/features/work-requests/WorkRequestHubPage'
 import { ReleaseAccessProvider, useReleaseAccess } from '@/components/layout/release-access-context'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { WorkspaceTabActivityContext, useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { releasePersonalPart } from '@/lib/company/release-access'
 import { CompanyMeetingsPage } from '@/features/meetings/CompanyMeetingsPage'
 import { MyHomeNotificationBadge, MyHomeNotificationList, MyHomeWorkNoticeDetail } from './MyHomeNotificationList'
@@ -115,7 +115,9 @@ function ProfileSettingsContent() {
       {visiblePart === 'company-notice' && <div id="personal-company-notice-panel" role="tabpanel" aria-labelledby="personal-company-notice-tab"><HomeNoticeBoard kind="company" /></div>}
       {visiblePart === 'department-notice' && <div id="personal-department-notice-panel" role="tabpanel" aria-labelledby="personal-department-notice-tab"><HomeNoticeBoard kind="department" /></div>}
       {visiblePart === 'meetings' && <div id="personal-meetings-panel" role="tabpanel" aria-labelledby="personal-meetings-tab"><CompanyMeetingsPage showHeading={false} /></div>}
-      <div id="personal-my-attendance-panel" role="tabpanel" aria-labelledby="personal-my-attendance-tab" hidden={visiblePart !== 'my-attendance'}><MyAttendancePanel /></div>
+      <WorkspaceTabActivityContext.Provider value={active && visiblePart === 'my-attendance'}>
+        <div id="personal-my-attendance-panel" role="tabpanel" aria-labelledby="personal-my-attendance-tab" hidden={visiblePart !== 'my-attendance'}><MyAttendancePanel key={profile?.id ?? 'signed-out'} /></div>
+      </WorkspaceTabActivityContext.Provider>
       {visiblePart === 'overtime' && <div id="personal-overtime-panel" role="tabpanel" aria-labelledby="personal-overtime-tab"><OvertimePanel /></div>}
       {visiblePart === 'attendance' && showDepartmentTab && <div id="personal-attendance-panel" role="tabpanel" aria-labelledby="personal-attendance-tab">
         {approvals.error && <p className="personal-page-notice is-error" role="alert">
