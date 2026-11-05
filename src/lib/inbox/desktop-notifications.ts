@@ -8,7 +8,7 @@ export function desktopEventKey(item: InboxNotification): string {
 export function desktopCandidates(items: readonly InboxNotification[], seen: Set<string>, hidden: boolean) {
   const fresh = items.filter(item => !seen.has(desktopEventKey(item)))
   for (const item of items) seen.add(desktopEventKey(item))
-  return hidden ? fresh.filter(item => item.current !== false && !item.readAt) : []
+  return hidden ? fresh.filter(item => item.kind !== 'attendance_start_needed' && item.current !== false && !item.readAt) : []
 }
 
 export function desktopBody(item: InboxNotification): string {

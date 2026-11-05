@@ -33,6 +33,6 @@ export function useAttendanceStartSettings(options?: { assigned?: boolean; depar
       : basicOperations || canManageDepartmentAttendance(preview?.realProfile ?? profile, [], input.departmentId)
     if (!permitted) throw new Error('이 부서의 출근시간 설정 권한이 필요합니다.')
     return saveAttendanceStartSettings(input)
-  }, onSuccess: () => client.invalidateQueries({queryKey:['attendance-start-settings']}) })
+  }, onSuccess: () => Promise.all([client.invalidateQueries({queryKey:['attendance-start-settings']}),client.invalidateQueries({queryKey:['attendance-start-reminders']})]) })
   return { settings, index, save, allowed, canEdit, loading: allowed && query.isPending, error: query.error, refresh: () => query.refetch() }
 }

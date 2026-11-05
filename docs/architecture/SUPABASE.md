@@ -1,5 +1,7 @@
 # Supabase 데이터 아키텍처 원칙
 
+- 2026-11-05 다음 달 담당 부서 출근시간 지정 알림은 [ATTENDANCE_START_REMINDERS.md](ATTENDANCE_START_REMINDERS.md)를 따른다. 로컬 구현·격리 검증용 추가 SQL을 준비했으며, 공유 DB 적용과 test/main 배포는 별도 승인 대상이다.
+
 - 가입 승인 시각에 따른 본사 근태 집계 시작일은 [ATTENDANCE_ENROLLMENT.md](ATTENDANCE_ENROLLMENT.md)를 따른다. 사용자 승인 후 운영 DB에 `20261105094711_attendance_approval_tracking_start`를 적용하고 실제 직원의 다음 근무일 집계와 기존 5개 원본 표·정책·권한 보존을 검증했다. 입사일은 유지하며 최초 승인 기준을 별도 보관한다. main 화면 배포는 별도 단계다.
 
 - 2026-11-05 본사 관리 대상·물류 수기 근무/휴가는 [WORKFORCE_MANAGEMENT.md](WORKFORCE_MANAGEMENT.md)를 따른다. 중국팀의 본사 인사·근태·연차 제외, 물류팀 별도 관리와 김보영 전용 화면을 로컬 코드·추가 마이그레이션으로 준비했다. 기존 계정·업무 권한·원본은 보존하며, 공유 DB 적용과 main 배포는 아직 하지 않았다.

@@ -1,4 +1,6 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import { useAttendanceStartReminders, AttendanceStartReminderRead } from './use-attendance-start-reminders'
 import { Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,6 +17,9 @@ import '@/features/operations-support/attendance-start-settings.css'
 export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: string[] }) {
   useRenderWatch('MyAttendanceStartPanel')
   const { profile } = useAuth()
+  const [params,setParams]=useSearchParams()
+  const linkedMonth=params.get('month')
+  const reminders=useAttendanceStartReminders()
   const directory = useOpsDirectory('head-office')
   const { members: directoryMembers, departmentName } = directory
   const schedules = useAttendanceStartSettings({ assigned: true, departmentIds })
@@ -23,6 +28,8 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
   const [monthNo, setMonthNo] = useState(String(now.getMonth() + 1).padStart(2, '0'))
   const month = `${year}-${monthNo}`
   const [search, setSearch] = useState('')
+  const [onlyMissing,setOnlyMissing]=useState(false)
+  useEffect(()=>{if(linkedMonth&&/^(20\d{2}|2100)-(0[1-9]|1[0-2])$/.test(linkedMonth)){setYear(linkedMonth.slice(0,4));setMonthNo(linkedMonth.slice(5));setChecked([])}},[linkedMonth])
   const [checked, setChecked] = useState<string[]>([])
   const [start, setStart] = useState(SUGGESTED_START)
   const [saving, setSaving] = useState(false)
@@ -30,8 +37,11 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
   const validYear = /^\d{4}$/.test(year) && Number(year) >= 2000 && Number(year) <= 2100
   const months = Array.from({ length: 12 }, (_, index) => `${year}-${String(index + 1).padStart(2, '0')}`)
   const departmentSet = useMemo(() => new Set(directory.departments.filter(department => canManageDepartmentAttendance(profile, departmentIds, department.id, true)).map(department => department.id)), [directory.departments, profile, departmentIds])
-  const members = useMemo(() => directoryMembers.filter(member => member.departmentId && departmentSet.has(member.departmentId) && !member.attendanceExempt && (!search.trim() || `${memberLabel(member.displayName)} ${departmentName(member.departmentId)}`.toLowerCase().includes(search.trim().toLowerCase()))).sort((a, b) => departmentName(a.departmentId).localeCompare(departmentName(b.departmentId), 'ko') || memberLabel(a.displayName).localeCompare(memberLabel(b.displayName), 'ko')), [directoryMembers, departmentName, departmentSet, search])
-  const visibleIds = members.map(member => member.id)
+  const members = useMemo(() => directoryMembers.filter(member => member.departmentId && departmentSet.has(member.departmentId) && !member.attendanceExempt).sort((a, b) => departmentName(a.departmentId).localeCompare(departmentName(b.departmentId), 'ko') || memberLabel(a.displayName).localeCompare(memberLabel(b.displayName), 'ko')), [directoryMembers, departmentName, departmentSet])
+  const missing=members.filter(member=>!resolveAttendanceStart(schedules.index,member.id,member.departmentId,month).configured)
+  const displayedMembers=(onlyMissing?missing:members).filter(member=>!search.trim()||`${memberLabel(member.displayName)} ${departmentName(member.departmentId)}`.toLowerCase().includes(search.trim().toLowerCase()))
+  const visibleIds = displayedMembers.map(member => member.id)
+  const reminderRows=useMemo(()=>reminders.rows.filter(row=>row.month===month&&departmentSet.has(row.departmentId)),[reminders.rows,month,departmentSet])
   const checkedVisible = visibleIds.filter(id => checked.includes(id))
   const allVisible = visibleIds.length > 0 && checkedVisible.length === visibleIds.length
   const graceUntil = forgivenClock(start, ATTENDANCE_GRACE_MINUTES)
@@ -40,6 +50,10 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
   const unavailable = schedules.loading || directory.loading || Boolean(schedules.error || directory.error)
   const departmentLabel = directory.departments.filter(item => departmentSet.has(item.id)).map(item => item.name).join(' · ')
 
+  function chooseMonth(value:string) {
+    const next=new URLSearchParams(params);next.set('month',value);setParams(next,{replace:true});setChecked([])
+  }
+
   function toggle(id: string) {
     setChecked(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id])
   }
@@ -47,7 +61,7 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
     setChecked(current => allVisible ? current.filter(id => !visibleIds.includes(id)) : [...new Set([...current, ...visibleIds])])
   }
   async function apply() {
-    const targets = members.filter(member => member.departmentId && checked.includes(member.id))
+    const targets = displayedMembers.filter(member => member.departmentId && checked.includes(member.id))
     if (!targets.length || busy || !validYear || unavailable) { if (!targets.length) setMessage('적용할 직원을 선택해 주세요.'); return }
     if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(start)) { setMessage('출근시간을 입력해 주세요.'); return }
     setSaving(true)
@@ -71,13 +85,15 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
       <h2 className="text-base font-semibold">담당 부서 출근시간</h2>
       <p className="mt-1 text-sm text-muted-foreground">{departmentLabel || '담당 부서 없음'} · 월을 고르고 시간을 정한 뒤, 직원을 체크해 적용합니다.</p>
     </header>
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-3 text-sm"><strong>{Number(monthNo)}월 · {unavailable?'정보 확인 중':`${members.length}명 중 ${missing.length}명 미지정`}</strong><label className="inline-flex items-center gap-2"><input type="checkbox" checked={onlyMissing} onChange={event=>setOnlyMissing(event.target.checked)}/>미지정만 보기</label></div>
+    <AttendanceStartReminderRead rows={reminderRows} displayed={!unavailable&&validYear&&(!linkedMonth||linkedMonth===month)&&reminderRows.every(row=>members.filter(m=>m.departmentId===row.departmentId).length===row.total&&missing.filter(m=>m.departmentId===row.departmentId).length===row.missing)}/>
     {message && <p role="status" className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">{message}</p>}
     {unavailable && <p role="status" className="text-sm text-muted-foreground">{schedules.error || directory.error ? '직원 또는 출근시간을 불러오지 못했습니다.' : '담당 직원과 출근시간을 불러오는 중…'}</p>}
     <div className="flex flex-wrap items-center gap-2">
-      <Input aria-label="출근시간 연도" type="number" min="2000" max="2100" className="h-9 w-24" value={year} disabled={busy} onChange={event => setYear(event.target.value)} />
+      <Input aria-label="출근시간 연도" type="number" min="2000" max="2100" className="h-9 w-24" value={year} disabled={busy} onChange={event => {setYear(event.target.value);if(/^(20\d{2}|2100)$/.test(event.target.value))chooseMonth(`${event.target.value}-${monthNo}`)}} />
       <Input aria-label="담당 직원 검색" placeholder="직원·부서 검색" value={search} onChange={event => setSearch(event.target.value)} className="h-9 w-full sm:w-56" />
     </div>
-    <div className="attendance-start-months" role="group" aria-label="설정 기준 월">{months.map(value => <button key={value} type="button" disabled={busy || !validYear} aria-pressed={month === value} onClick={() => setMonthNo(value.slice(5, 7))}>{Number(value.slice(5, 7))}월</button>)}</div>
+    <div className="attendance-start-months" role="group" aria-label="설정 기준 월">{months.map(value => <button key={value} type="button" disabled={busy || !validYear} aria-pressed={month === value} onClick={() => chooseMonth(value)}>{Number(value.slice(5, 7))}월</button>)}</div>
     {!validYear && <p role="alert" className="text-sm text-danger">2000–2100년 사이의 연도를 입력해 주세요.</p>}
       <div className="flex flex-wrap items-end gap-3">
       <StartTimeChoices value={start} disabled={busy} onChange={setStart} />
@@ -89,7 +105,7 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
       <table className="w-full min-w-[640px] text-left text-sm" aria-label="담당 직원 출근시간">
         <thead className="bg-primary text-xs text-primary-foreground"><tr><th className="w-12 px-4 py-3"><input type="checkbox" aria-label="표시된 직원 모두 선택" checked={allVisible} disabled={unavailable || busy || !members.length} onChange={toggleVisible} /></th><th className="px-4 py-3 font-medium">직원</th><th className="px-4 py-3 font-medium">부서</th><th className="px-4 py-3 font-medium">{Number(monthNo)}월</th></tr></thead>
         <tbody>
-          {members.map(member => {
+          {displayedMembers.map(member => {
             const resolved = resolveAttendanceStart(schedules.index, member.id, member.departmentId, month)
             const current = startTone(resolved.start)
             const name = memberLabel(member.displayName)
@@ -100,7 +116,7 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
               <td className="px-4 py-3"><span className={`attendance-start-mark ${current.tone}`}>{current.label}</span></td>
             </tr>
           })}
-          {!members.length && <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">{unavailable ? '정보를 확인하는 중입니다.' : '담당 부서에 정할 직원이 없습니다.'}</td></tr>}
+          {!displayedMembers.length && <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">{unavailable ? '정보를 확인하는 중입니다.' : onlyMissing?'미지정 직원이 없습니다.':'담당 부서에 정할 직원이 없습니다.'}</td></tr>}
         </tbody>
       </table>
     </div>

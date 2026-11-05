@@ -110,7 +110,7 @@ function ProfileSettingsContent() {
           <button type="button" role="tab" id={`personal-${tab.id}-tab`} className={tab.id === 'attendance' ? 'personal-page-tab-end' : undefined} aria-selected={visiblePart === tab.id} aria-controls={`personal-${tab.id}-panel`} onClick={() => selectPart(tab.id)}>{tab.label}{<MyHomeNotificationBadge tab={tab.id}/> }</button>
         </Fragment>)}
       </div>
-      {['meetings','my-attendance','approvals','overtime'].includes(visiblePart) && <MyHomeNotificationList key={visiblePart} tab={visiblePart as 'meetings'|'my-attendance'|'approvals'|'overtime'} />}
+      {['meetings','my-attendance','approvals','overtime','attendance'].includes(visiblePart) && <MyHomeNotificationList key={visiblePart} tab={visiblePart as 'meetings'|'my-attendance'|'approvals'|'overtime'|'attendance'} />}
       <MyHomeWorkNoticeDetail />
       {visiblePart === 'work' && <div id="personal-work-panel" role="tabpanel" aria-labelledby="personal-work-tab"><WorkRequestHubPage /></div>}
       {visiblePart === 'company-notice' && <div id="personal-company-notice-panel" role="tabpanel" aria-labelledby="personal-company-notice-tab"><HomeNoticeBoard kind="company" /></div>}

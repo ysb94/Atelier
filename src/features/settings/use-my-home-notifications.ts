@@ -18,6 +18,8 @@ import { useNotificationDetailVisibility } from '@/lib/inbox/use-notification-vi
 import { diagnosticRealtime, startWorkflow, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { diagnosticQuery } from '@/lib/supabase/diagnostic-query'
 import { useDiagnosticGate } from '@/lib/diagnostics/use-diagnostic-gate'
+import { useAttendanceStartReminders } from './use-attendance-start-reminders'
+import { attendanceStartReminderItems } from './attendance-start-reminders'
 
 type WorkNotice = { event_key: string; entity_id: string; created_at: string; event_type: string; tab: 'approvals'|'overtime'|'my-attendance'|'holiday-work'; title?: string; action_key?: string; kind: RequestKind; employee_name: string; from_date: string; to_date: string; start_time: string; end_time: string; note: string; decision_note: string|null; action_needed: boolean; status: string; current?: boolean; read_at: string|null }
 async function workNotices(context?: DiagnosticContext): Promise<WorkNotice[]> {
@@ -44,6 +46,7 @@ export function useMyHomeNotifications({ coordinator = false, background = false
   const late = useQuery({ queryKey: ['late-statement-notices', profile?.id], queryFn: listMyLateStatementNotices, ...sharedReadPolicy, enabled: enabled && selfService, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
   const work = useQuery({ queryKey: ['my-home-work-notices', profile?.id], queryFn: () => workNotices(), ...sharedReadPolicy, enabled: enabled && selfService, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
   const cache=useQueryClient()
+  const attendanceReminders=useAttendanceStartReminders(coordinator,background)
   // Old servers have no holiday signal table. Keep their existing subscriptions
   // intact; the first holiday event is discovered by the shared 30-second poll.
   const holidaySignals = Boolean(work.data?.some(item=>item.event_type.startsWith('holiday-')))
@@ -96,9 +99,9 @@ export function useMyHomeNotifications({ coordinator = false, background = false
         action: item.action_needed ? { key: item.action_key ?? `request:${item.entity_id}`, label: holiday ? item.tab==='approvals'?'실제 시간 확인 필요':item.tab==='holiday-work'?'보상 처리 필요':'실제 시간 보완 필요' : item.event_type==='checkout'?'실제 퇴근시간 등록 필요':'승인 처리 필요' } : null,
       }
     })
-    return [...meetingItems,...leaveItems,...lateItems,...workItems].sort((a,b) => b.createdAt.localeCompare(a.createdAt))
-  }, [enabled, meetings.items, meetings.series, leave.data, late.data, work.data, selfService])
-  return { items, ready: enabled && meetings.ready && (!selfService || (leave.isSuccess && late.isSuccess && work.isSuccess)), work: selfService ? work.data ?? emptyList<WorkNotice>() : emptyList<WorkNotice>(), error: enabled ? meetings.error ?? (selfService ? leave.error ?? late.error ?? work.error : null) : null }
+    return [...meetingItems,...leaveItems,...lateItems,...workItems,...attendanceStartReminderItems(attendanceReminders.rows)].sort((a,b) => b.createdAt.localeCompare(a.createdAt))
+  }, [enabled, meetings.items, meetings.series, leave.data, late.data, work.data, selfService,attendanceReminders.rows])
+  return { items, ready: enabled && meetings.ready && (!selfService || (leave.isSuccess && late.isSuccess && work.isSuccess)), work: selfService ? work.data ?? emptyList<WorkNotice>() : emptyList<WorkNotice>(), error: enabled ? meetings.error ?? attendanceReminders.error ?? (selfService ? leave.error ?? late.error ?? work.error : null) : null }
 }
 
 export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout', entityId: string|undefined, version: string|undefined, displayed: boolean) {
