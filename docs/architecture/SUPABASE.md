@@ -4,7 +4,7 @@
 
 - 가입 승인 시각에 따른 본사 근태 집계 시작일은 [ATTENDANCE_ENROLLMENT.md](ATTENDANCE_ENROLLMENT.md)를 따른다. 사용자 승인 후 운영 DB에 `20261105094711_attendance_approval_tracking_start`를 적용하고 실제 직원의 다음 근무일 집계와 기존 5개 원본 표·정책·권한 보존을 검증했다. 입사일은 유지하며 최초 승인 기준을 별도 보관한다. main 화면 배포는 별도 단계다.
 
-- 2026-11-05 본사 관리 대상·물류 수기 근무/휴가는 [WORKFORCE_MANAGEMENT.md](WORKFORCE_MANAGEMENT.md)를 따른다. 중국팀의 본사 인사·근태·연차 제외, 물류팀 별도 관리와 김보영 전용 화면을 로컬 코드·추가 마이그레이션으로 준비했다. 기존 계정·업무 권한·원본은 보존하며, 공유 DB 적용과 main 배포는 아직 하지 않았다.
+- 2026-11-05 부서·팀별 본사 관리 / 현장 자체관리 / 외부 협력사 구분은 [WORKFORCE_MANAGEMENT.md](WORKFORCE_MANAGEMENT.md)를 따른다. 사용자 승인 후 공유 DB에 `20261105121136_department_workforce_management`를 적용했다. 활성 직원 39계정·알림 조회 78건·접근 차단 77건과 임시 설정 저장 후 전체 롤백을 검증하고 기존 9개 업무 표·정책·권한·cron을 보존했다. 개인별 예외와 별도 물류 원장 DB는 적용하지 않았다. test/main 사이트 배포는 하지 않았다.
 
 - 2026-11-05 운영지원부서 가입 승인·거절의 검사 순서는 [OPERATIONS_ACCESS_APPROVAL.md](OPERATIONS_ACCESS_APPROVAL.md)를 따른다. 사용자 승인 후 원격 `20261105070234_operations_access_approval_guard_order`와 `20261105070802_operations_access_approval_department_guard`를 적용했다. 실제 운영지원 계정과 가상 직원의 인증 역할 검증·전체 가상 기록 롤백, 기존 프로필·정책·권한 보존과 같은 회사의 활성 부서 검사를 확인했다. 기존 직원 정지·관리자 지정 권한은 추가하지 않았다.
 
