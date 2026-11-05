@@ -11,6 +11,7 @@ export type WorkOrderRow = {
   shipped: boolean
   shippedAt: string | null
   returnedAt: string | null
+  receivedAt: string | null
   passed: boolean
   failReason: string
   focusReason: string

@@ -100,6 +100,9 @@ export function normalizeColorSampleRounds(raw: unknown): DraftColorSampleRound[
       returnedAt: colorSampleTimestamp(row.returnedAt),
       receivedAt: colorSampleTimestamp(row.receivedAt),
       passed: Boolean(row.passed),
+      assigneeId: typeof row.assigneeId === 'string' && row.assigneeId ? row.assigneeId : null,
+      assigneeName: typeof row.assigneeName === 'string' ? row.assigneeName : '',
+      fileCheckedAt: colorSampleTimestamp(row.fileCheckedAt),
     })
   }
   return rounds.sort((left, right) => left.round - right.round)

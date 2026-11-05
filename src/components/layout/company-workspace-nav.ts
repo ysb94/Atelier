@@ -131,7 +131,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
   {
     title: '중국팀',
     items: [
-      { to: '/china/work-orders', label: '작업 지시서', icon: FileText },
+      { to: '/china/work-orders', label: '중국 업무', icon: FileText },
     ],
   },
   {

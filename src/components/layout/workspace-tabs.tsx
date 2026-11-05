@@ -35,7 +35,7 @@ const NAV_LABELS: {
   { match: /^\/drafts\/[^/]+/, label: '기획안 편집' },
   { match: /^\/drafts(?:\/|$)/, label: '기획안' },
   { match: /^\/planning\/material-requests(?:\/|$)/, label: '자재요청' },
-  { match: /^\/china\/work-orders(?:\/|$)/, label: '중국팀 · 작업 지시서' },
+  { match: /^\/china\/work-orders(?:\/|$)/, label: '중국 업무' },
   { match: /^\/b2b\/duty-free(?:\/|$)/, label: '면세 · B2B 사업' },
   { match: /^\/operations-support(?:\/|$)/, label: '운영지원' },
   { match: /^\/data\/upload(?:\/|$)/, label: '데이터 · 일괄 업로드' },

@@ -213,6 +213,20 @@ function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined) {
       : null
   base.colorSampleRounds = normalizeColorSampleRounds(raw?.colorSampleRounds)
   base.colorSampleDone = normalizeColorSampleDone(raw?.colorSampleDone)
+  const assignment = raw?.chinaWorkAssignment
+  if (
+    assignment
+    && typeof assignment.assigneeId === 'string'
+    && assignment.assigneeId.trim()
+    && typeof assignment.assignedAt === 'string'
+    && assignment.assignedAt.trim()
+  ) {
+    base.chinaWorkAssignment = {
+      assigneeId: assignment.assigneeId,
+      assigneeName: typeof assignment.assigneeName === 'string' ? assignment.assigneeName : '',
+      assignedAt: assignment.assignedAt,
+    }
+  }
   return base
 }
 
