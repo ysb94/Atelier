@@ -430,6 +430,7 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 
 ## 지각 사유서 첨부
 
+- 2026-11-05 클라이언트의 204 완료 응답과 실패 시 첨부 보존·재첨부는 [LATE_STATEMENT_ATTACHMENTS.md](LATE_STATEMENT_ATTACHMENTS.md)를 따른다. 기존 DB 함수·정책·권한·업무 원본은 변경하지 않는다.
 - 오늘 지각으로 출근한 직원이 My home에서 사유서를 작성한다. `late_arrival_statements`는 직원·날짜당 하나다.
 - 상세 사유의 서류는 비공개 `company-late-statements` 버킷에 둔다. 경로는
   `companies/{company_id}/late-statements/{statement_id}/{file_id}`이고, 파일당 20MB, 사유서당 5개다.

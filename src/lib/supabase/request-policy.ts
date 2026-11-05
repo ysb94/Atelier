@@ -75,7 +75,8 @@ export function createSupabaseFetch(
     const cleanup = () => { clearTimeout(timer); callerSignal?.removeEventListener('abort', cancel) }
     try {
       const response = await fetcher(input, { ...init, signal: controller.signal })
-      if (!response.body) { cleanup(); return response }
+      // Do not wrap an empty Chromium stream in a body-forbidden response.
+      if (method === 'HEAD' || [204, 205, 304].includes(response.status) || !response.body) { cleanup(); return response }
       const reader = response.body.getReader()
       const body = new ReadableStream<Uint8Array>({
         async pull(stream) {

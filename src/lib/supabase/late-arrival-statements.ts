@@ -1,6 +1,8 @@
 import { cumulativeLateText, cumulativeLateTotal, lateAttachmentError } from '@/features/home/late-arrival'
 import { listEmployeeAttendanceClocks } from './attendance-clocks'
 import { getSupabase } from './client'
+import { startWorkflow, tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
+import { diagnosticQuery } from './diagnostic-query'
 
 const LATE_FILES = 'company-late-statements'
 
@@ -102,6 +104,18 @@ export async function saveMyLateStatement(input: { priorApproval: string; reason
 
 export type LateStatementFile = { id: string; statementId: string; name: string; path: string }
 
+type LateFileUpload = { owner: string; statementId: string; pending?: LateStatementFile; attempted: boolean; uploaded: boolean; task?: Promise<LateStatementFile> }
+// An uncertain upload lives only as long as its selected File. Account and
+// statement checks prevent reuse after an account switch; nothing is persisted.
+const pendingLateFiles = new WeakMap<File, LateFileUpload>()
+
+async function confirmedLateFile(file: LateStatementFile, context: DiagnosticContext): Promise<LateStatementFile | null> {
+  const row = await diagnosticQuery<{ id: string; statement_id: string; file_name: string; storage_path: string } | null>('db', 'verify_late_attachment',
+    getSupabase().from('late_arrival_statement_files').select('id,statement_id,file_name,storage_path')
+      .eq('statement_id', file.statementId).eq('id', file.id).eq('ready', true).maybeSingle(), context)
+  return row ? { id: row.id, statementId: row.statement_id, name: row.file_name, path: row.storage_path } : null
+}
+
 export async function listLateStatementFiles(statementId: string): Promise<LateStatementFile[]> {
   const { data, error } = await getSupabase().from('late_arrival_statement_files')
     .select('id,statement_id,file_name,storage_path')
@@ -120,23 +134,72 @@ export async function listLateStatementFiles(statementId: string): Promise<LateS
 export async function uploadLateStatementFile(statementId: string, file: File): Promise<LateStatementFile> {
   const message = lateAttachmentError(file.name, file.size)
   if (message) throw new Error(message)
-  const pending = await checked<{ id: string; path: string }>(getSupabase().rpc('begin_late_statement_file', {
-    p_statement: statementId, p_name: file.name, p_type: file.type, p_size: file.size,
-  }))
-  try {
-    const { error } = await getSupabase().storage.from(LATE_FILES).upload(pending.path, file, { contentType: file.type || 'application/octet-stream', upsert: false, cacheControl: '0' })
-    if (error) throw new Error(error.message)
-    await checked(getSupabase().rpc('finish_late_statement_file', { p_id: pending.id }))
-    return { id: pending.id, statementId, name: file.name, path: pending.path }
-  } catch (caught) {
-    const removed = await getSupabase().storage.from(LATE_FILES).remove([pending.path])
-    if (removed.error && !/not found|does not exist/i.test(removed.error.message)) {
-      console.warn('[late-arrival] 미완료 첨부 파일 정리 실패', { id: pending.id, error: removed.error })
-    }
-    try { await checked(getSupabase().rpc('remove_my_late_statement_file', { p_id: pending.id })) }
-    catch (cleanupError) { console.warn('[late-arrival] 미완료 첨부 정리 실패', { id: pending.id, error: cleanupError }) }
-    throw caught
+  const db = getSupabase()
+  const { data: auth, error: authError } = await db.auth.getSession()
+  const owner = auth.session?.user.id
+  if (authError || !owner) throw new Error('로그인 상태를 확인한 뒤 다시 제출해 주세요.')
+  let upload = pendingLateFiles.get(file)
+  if (!upload || upload.owner !== owner || upload.statementId !== statementId) {
+    upload = { owner, statementId, attempted: false, uploaded: false }
+    pendingLateFiles.set(file, upload)
   }
+  if (upload.task) return upload.task
+  const state = upload
+  const run = async () => {
+    const trace = startWorkflow('db', 'late_attachment')
+    const complete = (saved: LateStatementFile) => {
+      if (pendingLateFiles.get(file) === state) pendingLateFiles.delete(file)
+      trace.done({ writeOutcome: 'committed' })
+      return saved
+    }
+    try {
+      if (!state.pending) {
+        const pending = await trace.run('prepare_file', context => diagnosticQuery<{ id: string; path: string }>('db', 'begin_late_attachment', db.rpc('begin_late_statement_file', {
+          p_statement: statementId, p_name: file.name, p_type: file.type, p_size: file.size,
+        }), context))
+        state.pending = { ...pending, statementId, name: file.name }
+      } else {
+        const saved = await trace.run('check_saved', context => confirmedLateFile(state.pending!, context))
+        if (saved) return complete(saved)
+        if (state.attempted && !state.uploaded) {
+          // On explicit retry verify an upload whose response may have been lost
+          // before sending the same bytes again. Existing server rules apply.
+          const result = await trace.run('check_uploaded', context => tracedQuery(db.rpc('finish_late_statement_file', { p_id: state.pending!.id }), context))
+          if (!result.error) return complete(state.pending)
+          if (result.error.message !== '첨부파일이 저장소에 없습니다.') throw new Error(result.error.message, { cause: result.error })
+        }
+      }
+      if (!state.uploaded) {
+        state.attempted = true
+        await trace.run('upload_file', async () => {
+          const { error } = await db.storage.from(LATE_FILES).upload(state.pending!.path, file, { contentType: file.type || 'application/octet-stream', upsert: false, cacheControl: '0' })
+          if (error) throw new Error(error.message, { cause: error })
+        })
+        state.uploaded = true
+      }
+      await trace.run('finish_file', context => diagnosticQuery('db', 'finish_late_attachment', db.rpc('finish_late_statement_file', { p_id: state.pending!.id }), context))
+      return complete(state.pending)
+    } catch (caught) {
+      if (state.pending) {
+        try {
+          const saved = await confirmedLateFile(state.pending, trace.step('check_saved'))
+          if (saved) {
+            startWorkflow('db', 'late_attachment_recovered', {}, trace.context()).done({ writeOutcome: 'committed' })
+            return complete(saved)
+          }
+        } catch (verificationError) {
+          trace.fail(verificationError, { writeOutcome: 'unknown' })
+        }
+      }
+      trace.fail(caught, { writeOutcome: 'unknown' })
+      // Never delete an object/row after an uncertain response. Retain its
+      // reservation for explicit retry; only an explicit remove deletes files.
+      throw new Error(state.pending ? '첨부파일 저장 확인이 필요합니다. 같은 창에서 다시 제출해 주세요. 새로고침했다면 사유서를 열어 첨부파일을 추가해 주세요.' : caught instanceof Error ? caught.message : '첨부파일을 준비하지 못했습니다.', { cause: caught })
+    }
+  }
+  state.task = run()
+  try { return await state.task }
+  finally { state.task = undefined }
 }
 
 export async function removeLateStatementFile(file: LateStatementFile) {
@@ -188,15 +251,6 @@ async function listAttendanceStartsBetween(employeeId: string, from: string, to:
     date: row.work_date ? String(row.work_date).slice(0, 10) : String(row.month).slice(0, 7),
     start: row.start_time?.slice(0, 5) ?? '',
   }))
-}
-
-async function checked<T>(request: PromiseLike<{ data: unknown; error: { message: string } | null }>): Promise<T> {
-  const { data, error } = await request
-  if (error) {
-    console.warn('[late-arrival] 첨부 요청 실패', error)
-    throw new Error(error.message)
-  }
-  return data as T
 }
 
 function statementFromRpc(data: unknown): LateArrivalStatement {
