@@ -27,7 +27,13 @@ async function chooseMinute(page,minute){
 }
 async function newPage(context,time='2026-10-27T00:00:00Z'){
  const page=await context.newPage();current=page;page.setDefaultTimeout(12000);page.setDefaultNavigationTimeout(120000)
- page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error')errors.push(message.text())})
+ page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{
+  if(message.type()!=='error')return
+  // This scenario intentionally fails the workday-basis read. The shared
+  // diagnostics now reports that failure at error level; other errors still fail.
+  if(new URL(page.url()).searchParams.get('case')==='basis-error' && message.text().startsWith('[workflow] leave.workday_basis / db_request'))return
+  errors.push(message.text())
+ })
  await page.clock.install({time:new Date(time)})
  return page
 }

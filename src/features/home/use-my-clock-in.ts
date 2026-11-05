@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getMyAttendanceExemption } from '@/lib/supabase/attendance-exemptions'
 import { useAuth } from '@/lib/supabase/auth'
@@ -10,7 +10,11 @@ import { clockOutToday, listMyAttendanceClocks, undoClockOutToday } from '@/lib/
 import { clockOutLabel, koreaDateKey, type AttendanceClock } from '@/features/settings/my-attendance'
 import { offsiteAction } from '@/lib/supabase/offsite-attendance'
 import { continuingOffsiteClock } from './attendance-guidance'
+import { continuingOvertimeClock } from './overtime-clock'
+import { listLeaveRequests } from '@/lib/supabase/leave-requests'
+import { getMyWorkdayBasis } from '@/lib/supabase/attendance-entry'
 import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
+import { diagnosticOperation, newDiagnosticContext, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 
 async function clockInToday(): Promise<string> {
   void recordAccessIp('clock_in_request')
@@ -38,21 +42,30 @@ export function useMyClockIn() {
   const overnight = useQuery({ queryKey: ['my-offsite-attendance', userId, today], queryFn: () => offsiteAction('my_offsite_attendance'), ...sharedReadPolicy, enabled: overnightEnabled && active, refetchInterval: readPollInterval(30_000, overnightEnabled && active) })
   useEffect(() => { if (overnightEnabled && overnight.error) console.warn('[attendance-clock] 전일 외근 상태 확인 실패', overnight.error) }, [overnightEnabled, overnight.error])
   const ongoingOffsiteRecord = overnightEnabled && !overnight.error ? continuingOffsiteClock(rows, today, overnight.data) : null
-  const workingRecord = todayRecord ?? ongoingOffsiteRecord
+  const yesterday = koreaDateKey(new Date(Date.now() - 86_400_000))
+  const overnightCandidate = allowed && !exempt && !todayRecord && rows.some(row => row.date === yesterday)
+  const requests = useQuery({ queryKey: ['company-leave-requests', userId, 'mine', allowed], queryFn: () => listLeaveRequests(userId), ...sharedReadPolicy, enabled: overnightCandidate && active, refetchInterval: readPollInterval(30_000, overnightCandidate && active) })
+  const hasOvertime = Boolean(requests.data?.some(row => row.kind === 'overtime' && ['pending', 'approved'].includes(row.status) && row.from === yesterday && row.to === yesterday))
+  const basis = useQuery({ queryKey: ['my-workday-basis', userId, today], queryFn: () => getMyWorkdayBasis(today), ...sharedReadPolicy, enabled: overnightCandidate && hasOvertime && active })
+  const ongoingOvertimeRecord = !basis.error && !requests.error ? continuingOvertimeClock(rows, requests.data ?? emptyList(), today, basis.data?.start) : null
+  const workingRecord = todayRecord ?? ongoingOffsiteRecord ?? ongoingOvertimeRecord
   const save = useMutation({ mutationFn: clockInToday, onSuccess: () => client.invalidateQueries({ queryKey: ['attendance-clock-ins'] }) })
-  const departure = useMutation({ mutationFn: clockOutToday, onSuccess: () => client.invalidateQueries({ queryKey: ['attendance-clock-ins'] }) })
-  const undoDeparture = useMutation({ mutationFn: undoClockOutToday, onSuccess: () => client.invalidateQueries({ queryKey: ['attendance-clock-ins'] }) })
+  const checkoutTrace = useRef<DiagnosticContext | undefined>(undefined), undoTrace = useRef<DiagnosticContext | undefined>(undefined)
+  const refreshDeparture = (context?: DiagnosticContext) => diagnosticOperation('leave', 'checkout_refresh', trace => trace.run('invalidate_queries', () => Promise.all(['attendance-clock-ins', 'overtime-actuals', 'company-attendance-spans', 'my-home-work-notices'].map(key => client.invalidateQueries({ queryKey: [key] }))), { writeOutcome: 'committed' }), context)
+  const departure = useMutation({ mutationFn: () => { checkoutTrace.current = newDiagnosticContext('leave','checkout_overtime','begin'); return clockOutToday(checkoutTrace.current) }, onSuccess: () => refreshDeparture(checkoutTrace.current) })
+  const undoDeparture = useMutation({ mutationFn: () => { undoTrace.current = newDiagnosticContext('leave','undo_checkout','begin'); return undoClockOutToday(undoTrace.current) }, onSuccess: () => refreshDeparture(undoTrace.current) })
   const saving = save.isPending || departure.isPending || undoDeparture.isPending
   const error = save.error instanceof Error ? save.error.message : departure.error instanceof Error ? departure.error.message : undoDeparture.error instanceof Error ? undoDeparture.error.message : save.error || departure.error || undoDeparture.error ? '출퇴근을 기록하지 못했습니다.' : ''
   const recordIn = save.mutateAsync, recordOut = departure.mutateAsync, undoOut = undoDeparture.mutateAsync
-  const reloadClocks = query.refetch, reloadExemption = exemption.refetch, reloadOvernight = overnight.refetch
-  const refresh = useCallback(() => Promise.all([reloadClocks(), reloadExemption(), ...(overnightEnabled ? [reloadOvernight()] : [])]), [reloadClocks, reloadExemption, overnightEnabled, reloadOvernight])
-  const loading = allowed && (query.isPending || exemption.isPending || (overnightEnabled && overnight.isPending))
-  const queryError = query.error || exemption.error || (overnightEnabled ? overnight.error : null)
+  const reloadClocks = query.refetch, reloadExemption = exemption.refetch, reloadOvernight = overnight.refetch, reloadRequests = requests.refetch, reloadBasis = basis.refetch
+  const refresh = useCallback(() => Promise.all([reloadClocks(), reloadExemption(), ...(overnightEnabled ? [reloadOvernight()] : []), ...(overnightCandidate ? [reloadRequests()] : []), ...(overnightCandidate && hasOvertime ? [reloadBasis()] : [])]), [reloadClocks, reloadExemption, overnightEnabled, reloadOvernight, overnightCandidate, hasOvertime, reloadRequests, reloadBasis])
+  const loading = allowed && (query.isPending || exemption.isPending || (overnightEnabled && overnight.isPending) || (overnightCandidate && requests.isPending) || (overnightCandidate && hasOvertime && basis.isPending))
+  const queryError = query.error || exemption.error || (overnightEnabled ? overnight.error : null) || (overnightCandidate && requests.error) || (overnightCandidate && hasOvertime && basis.error)
   return useMemo(() => ({
     rows,
     todayRecord,
     ongoingOffsiteRecord,
+    ongoingOvertimeRecord,
     byDate,
     todayClock: workingRecord?.clockIn ?? '',
     todayClockOut: clockOutLabel(workingRecord?.clockOutAt ?? null, workingRecord?.date) || (workingRecord?.autoClosedAt ? '자동 퇴근 · 확인 필요' : ''),
@@ -67,5 +80,5 @@ export function useMyClockIn() {
     queryError,
     refresh,
     loading,
-  }), [rows, todayRecord, ongoingOffsiteRecord, workingRecord, byDate, exempt, allowed, loading, queryError, saving, error, recordIn, recordOut, undoOut, refresh])
+  }), [rows, todayRecord, ongoingOffsiteRecord, ongoingOvertimeRecord, workingRecord, byDate, exempt, allowed, loading, queryError, saving, error, recordIn, recordOut, undoOut, refresh])
 }

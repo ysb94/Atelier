@@ -14,5 +14,5 @@ export function useOvertimeActuals() {
   const query = useQuery({ queryKey: ['overtime-actuals', session?.user.id, profile?.companyId], queryFn: listOvertimeActuals, enabled, refetchInterval: enabled && active ? 30_000 : false })
   useEffect(() => { if (query.error) console.warn('[overtime-actuals] 조회 오류', query.error) }, [query.error])
   const save = useMutation({ mutationFn: saveOvertimeActual, onSuccess: () => cache.invalidateQueries({ queryKey: ['overtime-actuals'] }) })
-  return { ...query, rows: enabled ? query.data?.rows ?? emptyList<OvertimeActual>() : emptyList<OvertimeActual>(), ready: enabled && query.data?.ready === true, save }
+  return { ...query, rows: enabled ? query.data?.rows ?? emptyList<OvertimeActual>() : emptyList<OvertimeActual>(), ready: enabled && query.data?.ready === true, checkoutReady: enabled && query.data?.checkoutLinkedReady === true, save }
 }

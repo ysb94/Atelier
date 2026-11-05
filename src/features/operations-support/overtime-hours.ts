@@ -37,7 +37,7 @@ export function workedMinutes(date: string, clockIn: string, clockOutAt: string,
   return Math.max(0, minutes)
 }
 
-/** 승인 신청에 연결된 실제 입력만 합산한다. 출퇴근 기록으로 야근을 추정하지 않는다. */
+/** 승인 신청에 연결된 실제 퇴근과 보존된 과거 입력만 합산한다. */
 export function monthlyOvertimeHours(_spans: readonly OvertimeSpan[], leaves: readonly OvertimeLeave[], _lunchStart: string, _lunchEnd: string, month: string, today: string, _starts: ReadonlyMap<string, string>, actuals: readonly OvertimeActual[] = []): MonthlyOvertime[] {
   const rows = new Map<string, MonthlyOvertime>()
   const requests = leaves.filter((leave): leave is OvertimeLeave & { id: string } => typeof leave.id === 'string')
