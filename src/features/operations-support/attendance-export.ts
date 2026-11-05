@@ -9,7 +9,7 @@ export async function exportAttendance(month: string, rows: AttendanceRow[], rec
   const ExcelJS = (await import('exceljs')).default
   const workbook = new ExcelJS.Workbook()
   const summarySheet = workbook.addWorksheet('월별 요약')
-  summarySheet.addRow(['2026년 11월 2일과 직원 입사일 중 더 늦은 날부터 집계합니다.'])
+  summarySheet.addRow(['사이트 도입일·입사일·가입 승인에 따른 근태 시작일 중 가장 늦은 날부터 집계합니다.'])
   summarySheet.addRow(['월', '이름', '부서', '출근 기준', '초과 기준(분)', '출근 기록일', '정시 이후', '기준 초과', '연차', '반차(회)', '예비군·공가', '결근', '미기록', '확인 필요', '평균 출근', '가장 이른 출근', '가장 늦은 출근', '월 검토'])
   for (const row of rows) {
     const s = row.summary

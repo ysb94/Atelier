@@ -37,7 +37,7 @@ function useManagementState() {
       .subscribe(status => { if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('[workforce] 관리 대상 실시간 연결 실패', { code: status }) })
     return () => { void getSupabase().removeChannel(channel).catch(() => console.warn('[workforce] 관리 대상 구독 해제 실패', { code: 'unsubscribe' })) }
   }, [enabled, query.data?.ready, userId, companyId, cache, key])
-  return useMemo(() => ({ policies, byId, decorate, ownMode, selfService, ready: query.data?.ready === true, loading: enabled && query.isPending, error: query.error, refresh: query.refetch }), [policies, byId, decorate, ownMode, selfService, query.data?.ready, enabled, query.isPending, query.error, query.refetch])
+  return useMemo(() => ({ today, policies, byId, decorate, ownMode, selfService, ready: query.data?.ready === true, loading: enabled && query.isPending, error: query.error, refresh: query.refetch }), [today, policies, byId, decorate, ownMode, selfService, query.data?.ready, enabled, query.isPending, query.error, query.refetch])
 }
 const WorkforceContext = createContext<ReturnType<typeof useManagementState> | null>(null)
 export function WorkforceManagementProvider({ children }: { children: ReactNode }) {

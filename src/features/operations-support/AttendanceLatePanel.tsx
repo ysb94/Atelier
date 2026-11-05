@@ -141,7 +141,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
   return <div className="space-y-4">
     <header>
       <h2 className="text-base font-semibold">지각 * 결근 관리</h2>
-      <p className="mt-1 text-sm text-muted-foreground">2026년 11월 2일부터 집계합니다. 이후 입사한 직원은 입사일부터 집계합니다.</p>
+      <p className="mt-1 text-sm text-muted-foreground">사이트 도입일·입사일·가입 승인에 따른 근태 시작일 중 가장 늦은 날부터 집계합니다. 출근 기준 시각 이후 승인되거나 출근 기준이 미설정된 직원은 다음 근무일부터 집계합니다.</p>
       <p className="mt-1 text-sm text-muted-foreground">출근 기준에서 {ATTENDANCE_GRACE_MINUTES}분이 지난 기록은 지각입니다. 연차·반차·반반차·공가·외근·재택이 등록되지 않은 근무일에 출근이 없으면 결근으로 표시합니다. 인사 확인 대기 {awaitingHr.isPending ? '…' : awaitingHr.isError ? '확인 실패' : `${awaitingHr.data ?? 0}건`}입니다.</p>
     </header>
     <div className="flex flex-wrap items-center gap-2">

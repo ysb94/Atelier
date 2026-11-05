@@ -13,7 +13,7 @@ const TIMEOUT_MESSAGE = '서버 응답 시간이 초과됐습니다. 연결 상�
 const SCREEN_READ_RPCS = new Set([
   'count_brand_styles',
   'get_my_basic_work_access', 'list_my_permission_grants', 'permission_directory',
-  'list_org_chart_members', 'get_my_employee_onboarding_status', 'list_employee_onboardings',
+  'list_org_chart_members', 'list_attendance_enrollments', 'get_my_employee_onboarding_status', 'list_employee_onboardings',
   'is_my_attendance_exempt', 'list_company_attendance_exempt', 'list_effective_attendance_clocks',
   'get_my_workday_basis', 'get_my_attendance_basis', 'my_offsite_attendance', 'my_offsite_groups',
   'list_my_approval_requests', 'employee_extra_leave_records', 'my_extra_leave_entries',
