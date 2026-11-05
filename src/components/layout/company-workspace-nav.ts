@@ -85,6 +85,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
     title: '기획',
     items: [
       { to: '/drafts', label: '기획안', icon: Lightbulb },
+      { to: '/planning/material-requests', label: '자재요청', icon: PackagePlus },
       { to: '/work-requests/planning', label: '부서 업무', icon: ClipboardList },
     ],
   },

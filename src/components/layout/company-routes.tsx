@@ -19,6 +19,7 @@ import { DesignStyledCutsPage } from '@/features/design/StyledCutsPage'
 import { VisualWorkRequestManagePage } from '@/features/work-requests/VisualWorkRequestManagePage'
 import { CompanyDraftsPage } from '@/features/drafts/DraftsPage'
 import { DraftEditPage } from '@/features/drafts/DraftEditPage'
+import { MaterialRequestsPage } from '@/features/planning/MaterialRequestsPage'
 import { CompanyBarcodePage } from '@/features/codes/BarcodePage'
 import { SabangnetCodePage } from '@/features/codes/SabangnetCodePage'
 import { CompanyUsageCodePage } from '@/features/codes/UsageCodePage'
@@ -132,6 +133,7 @@ export const companyWorkspaceRoutes = (
         <Route path=":brandSlug/:styleNo" element={<ProductDetailDrawer />} />
       </Route>
       <Route path="drafts" element={<CompanyDraftsPage />} />
+      <Route path="planning/material-requests" element={<MaterialRequestsPage />} />
       <Route path="drafts/new" element={<DraftEditPage />} />
       <Route path="drafts/:draftId" element={<DraftEditPage />} />
       <Route
