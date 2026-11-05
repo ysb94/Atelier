@@ -49,6 +49,7 @@ function useEntryState() {
       void cache.invalidateQueries({queryKey:['my-home-work-notices',userId]})
       if (data.clock_out_at) cache.setQueryData<AttendanceClock[]>(['attendance-clock-ins', userId, allowed], rows => rows?.map(row => row.date === data.work_date ? { ...row, clockOutAt: data.clock_out_at, clockOutReportedAt: data.clock_out_reported_at } : row))
       void cache.invalidateQueries({ queryKey: ['attendance-clock-ins', userId] })
+      void cache.invalidateQueries({ queryKey: ['overtime-actuals', userId] })
       void cache.invalidateQueries({ queryKey: ['company-leave-requests', userId, 'mine'] })
     } })
   const refresh = useCallback(() => {
@@ -70,8 +71,8 @@ function useEntryState() {
   if (enabled) {
     if (clock.loading) phase = 'loading'
     else if (clock.queryError) phase = 'error'
-    else if (!clock.todayRecord && !clock.ongoingOffsiteRecord) phase = 'clock-in'
-    else if (target && target.date !== clock.ongoingOffsiteRecord?.date) phase = requestQuery.isPending ? 'loading' : requestQuery.error ? 'error' : 'previous'
+    else if (!clock.todayRecord && !clock.ongoingOffsiteRecord && !clock.ongoingOvertimeRecord) phase = 'clock-in'
+    else if (target && target.date !== clock.ongoingOffsiteRecord?.date && target.date !== clock.ongoingOvertimeRecord?.date) phase = requestQuery.isPending ? 'loading' : requestQuery.error ? 'error' : 'previous'
   }
   const targetId = stored?.targetId
   const skip = useCallback(() => {

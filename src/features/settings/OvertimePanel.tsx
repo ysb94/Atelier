@@ -15,7 +15,6 @@ import { clockOutLabel, koreaDateKey } from './my-attendance'
 import { OvertimeTimeFields } from './RequestTimeFields'
 import { useMyClockIn } from '@/features/home/use-my-clock-in'
 import { useOvertimeActuals } from '@/features/operations-support/use-overtime-actuals'
-import { OvertimeActualEditor } from './OvertimeActualEditor'
 import { workDurationLabel } from '@/features/operations-support/overtime-hours'
 import { registeredOvertime } from '@/features/operations-support/overtime-actuals'
 
@@ -34,7 +33,6 @@ export function OvertimePanel() {
   const today = koreaDateKey()
   const leave = useLeaveRequests()
   const actuals = useOvertimeActuals()
-  const [editingActual, setEditingActual] = useState<string | null>(null)
   const clock = useMyClockIn()
   const approvals = useDepartmentApprovers()
   const directory = useOpsDirectory()
@@ -87,12 +85,13 @@ export function OvertimePanel() {
 
   return <section className="personal-requests" aria-label="야근">
     <div className="personal-request-draft-row">
-      <div className="personal-request-draft"><strong>야근</strong><span>신청·승인 후 실제 야근 시간과 휴게시간을 입력하면 해당 시간만 누적됩니다. 퇴근을 늦게 누른 시간은 야근으로 자동 계산하지 않습니다.</span></div>
+      <div className="personal-request-draft"><strong>야근</strong><span>야근 신청한 날 퇴근하기를 누르면 신청 시작 시각부터 실제 퇴근 시각까지 자동 기록됩니다. 예정 종료보다 더 하거나 덜 해도 실제 시간이 반영되며, 승인 후 누적됩니다.</span></div>
       <Button type="button" size="sm" disabled={!allowed || leave.busy} onClick={() => { setForm(overtimeForm(today)); setError(''); setNotice('') }}><Plus size={14}/>야근 신청</Button>
     </div>
     {!allowed && <p role="status" className="personal-request-error">활성 직원 계정으로 로그인해 주세요.</p>}
+    {actuals.ready && actuals.checkoutReady === false && <p role="status" className="personal-request-helper">퇴근 자동 연결 서버 적용 대기입니다. 기존 야근 내역을 표시합니다.</p>}
     {leave.error && <p role="alert" className="personal-request-error">야근 목록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => void leave.refresh()}>다시 불러오기</Button></p>}
-    {actuals.isError ? <p role="alert" className="personal-request-error">실제 야근 기록 조회 실패 <Button size="sm" variant="outline" onClick={() => void actuals.refetch()}>다시 불러오기</Button></p> : !actuals.isPending && !actuals.ready && <p role="status" className="personal-request-helper">실제 야근 입력 DB 적용 대기입니다. 기존 신청과 출퇴근 기록은 보존됩니다.</p>}
+    {actuals.isError ? <p role="alert" className="personal-request-error">실제 야근 기록 조회 실패 <Button size="sm" variant="outline" onClick={() => void actuals.refetch()}>다시 불러오기</Button></p> : !actuals.isPending && !actuals.ready && <p role="status" className="personal-request-helper">실제 야근 조회 연결 대기입니다. 기존 신청과 출퇴근 기록은 보존됩니다.</p>}
     {notice && <p className="personal-request-notice" role="status">{notice}</p>}
     {error && !form && <p role="alert" className="personal-request-error">{error}</p>}
     <section className="personal-request-board">
@@ -108,14 +107,13 @@ export function OvertimePanel() {
                 <td>{item.start}–{item.endNextDay ? '다음 날 ' : ''}{item.end}</td>
                 <td>{item.note || '—'}</td>
                 <td>{STATUS_LABELS[item.status]}{isSelfApprovedRequest(item) && <span className="ml-2 text-xs">본인 승인</span>}{item.decidedByName && <small className="block">{item.decidedByName}{item.decidedAt ? ` · ${new Date(item.decidedAt).toLocaleString('ko-KR')}` : ''}</small>}{item.decisionNote && <small className="block whitespace-pre-wrap">{item.decisionNote}</small>}</td>
-                <td>{item.status !== 'approved' ? '—' : actuals.isPending ? '조회 중…' : !actuals.ready ? '연결 대기' : <>{reportedMinutes.get(item.id) != null ? workDurationLabel(reportedMinutes.get(item.id)!) : '실제 시간 미입력'} <Button type="button" variant="outline" size="sm" disabled={!allowed || item.from > today} onClick={() => setEditingActual(item.id)}>실제 시간 입력·수정</Button></>}</td>
+                <td>{item.status !== 'approved' ? item.status === 'pending' ? '승인 후 실제 퇴근 시간 반영' : '—' : actuals.isPending ? '조회 중…' : !actuals.ready ? '연결 대기' : <>{reportedMinutes.get(item.id) != null ? workDurationLabel(reportedMinutes.get(item.id)!) : '퇴근 기록 대기'}{actualByRequest.get(item.id)?.clockLinked && <small className="block">퇴근 기록 자동 연결 · {clockOutLabel(actualByRequest.get(item.id)!.checkoutAt ?? actualByRequest.get(item.id)!.endAt,item.from)}</small>}</>}</td>
                 <td>{item.status === 'pending' ? <Button type="button" variant="outline" size="sm" disabled={leave.busy} onClick={() => void cancel(item.id)}>취소</Button> : '—'}</td>
               </tr>)}
           </tbody>
         </table>
       </div>
     </section>
-    {editingActual && rows.find(item => item.id === editingActual && item.status === 'approved') && <OvertimeActualEditor key={editingActual} request={rows.find(item => item.id === editingActual)!} existing={actualByRequest.get(editingActual)} onSave={value => actuals.save.mutateAsync(value).then(() => setNotice('실제 야근을 저장했습니다. 승인된 야근의 실제 입력 시간만 누적됩니다.'))} onClose={() => setEditingActual(null)} />}
     {form && <OvertimeDialog form={form} busy={leave.busy} error={error} route={route} existingEnd={form.from < today && leave.requests.some(item => item.kind === 'offsite' && item.status === 'approved' && item.from <= form.from && item.to >= form.from) ? clock.rows.find(item => item.date === form.from)?.clockOutAt ?? null : null} onChange={next => { setForm(next); setError('') }} onClose={() => { if (!leave.busy) setForm(null) }} onSubmit={event => void submit(event)} />}
   </section>
 }

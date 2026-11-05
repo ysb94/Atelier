@@ -1,5 +1,5 @@
 export type OvertimeActual = {
-  requestId: string; startAt: string; endAt: string; breakMinutes: number; revision: number; savedAt: string; offsiteMinutes?: Record<string,number>
+  requestId: string; startAt: string; endAt: string; breakMinutes: number; revision: number; savedAt: string; offsiteMinutes?: Record<string,number>; clockLinked?: boolean; checkoutAt?: string | null
 }
 export type OvertimeRequest = {
   id: string; employeeId: string; kind: string; status: string; from: string; to: string
@@ -11,7 +11,7 @@ export function overtimeInstant(date: string, time: string, nextDay = false) {
   return stamp + (nextDay ? 86_400_000 : 0)
 }
 
-/** Explicit employee reports only; clock-out timestamps never create payable overtime. */
+/** Approved overtime uses its linked actual checkout; legacy reports keep their stored values. */
 export function registeredOvertime(requests: readonly OvertimeRequest[], actuals: readonly OvertimeActual[], month: string, today: string) {
   const latest = new Map<string, OvertimeActual>()
   const seen = new Set<string>()
@@ -31,7 +31,7 @@ export function registeredOvertime(requests: readonly OvertimeRequest[], actuals
     const start = Date.parse(actual.startAt), end = Date.parse(actual.endAt)
     const approvedStart = overtimeInstant(request.from, request.start), approvedEnd = overtimeInstant(request.to, request.end, request.endNextDay)
     const elapsed = Math.floor((end - start) / 60_000)
-    if (![start, end, approvedStart, approvedEnd].every(Number.isFinite) || end <= start || start < approvedStart || end > approvedEnd || !Number.isInteger(actual.breakMinutes) || actual.breakMinutes < 0 || actual.breakMinutes > elapsed) return []
-    return [{ request, actual, minutes: elapsed - actual.breakMinutes, approvedMinutes: Math.floor((approvedEnd - approvedStart) / 60_000) }]
+    if (![start, end, approvedStart, approvedEnd].every(Number.isFinite) || (!actual.clockLinked && end <= start) || !Number.isInteger(actual.breakMinutes) || actual.breakMinutes < 0 || actual.breakMinutes > Math.max(0,elapsed)) return []
+    return [{ request, actual, minutes: Math.max(0,elapsed) - actual.breakMinutes, approvedMinutes: Math.floor((approvedEnd - approvedStart) / 60_000) }]
   })
 }

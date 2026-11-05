@@ -1,4 +1,5 @@
 import { getSupabase } from './client'
+import { diagnosticOperation, tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { fetchAttendancePages } from './attendance-pagination'
 import { attendanceMonthDates, type AttendanceClock } from '@/features/settings/my-attendance'
 
@@ -73,12 +74,17 @@ export async function listEmployeeAttendanceClocks(employeeId: string, from: str
 export async function listCompanyAttendanceClocks(month: string): Promise<CompanyAttendanceClock[]> {
   return (await listCompanyAttendanceSpans(month)).map(({ employeeId, date, clockIn }) => ({ employeeId, date, clockIn }))
 }
-export async function clockOutToday(): Promise<string> {
-  const { data, error } = await getSupabase().rpc('clock_out_today')
-  if (error) { console.warn('[attendance-clock] 퇴근 기록 실패', error); throw new Error(error.message) }
-  return String(data)
+export async function clockOutToday(context?: DiagnosticContext): Promise<string> {
+  return diagnosticOperation('leave', 'checkout_overtime', async trace => {
+    const { data, error } = await trace.run('save_checkout', context => tracedQuery(getSupabase().rpc('clock_out_today'), context))
+    if (error) { trace.fail(error); throw new Error(error.message) }
+    trace.step('checkout_saved', { writeOutcome: 'committed' })
+    return String(data)
+  }, context)
 }
-export async function undoClockOutToday(): Promise<void> {
-  const { error } = await getSupabase().rpc('undo_clock_out_today')
-  if (error) { console.warn('[attendance-clock] 퇴근 취소 실패', error); throw new Error(error.message) }
+export async function undoClockOutToday(context?: DiagnosticContext): Promise<void> {
+  return diagnosticOperation('leave', 'undo_checkout', async trace => {
+    const { error } = await trace.run('save_undo', current => tracedQuery(getSupabase().rpc('undo_clock_out_today'), current))
+    if (error) { trace.fail(error); throw new Error(error.message) }
+  }, context)
 }

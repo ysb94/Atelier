@@ -12,7 +12,7 @@ export const requests=[request,{...request,id:'missing',employeeId:'b',employeeN
 requests.push({...request,id:'offsite-shifted',employeeId:'shifted',employeeName:'당일 변경 외근 직원',kind:'offsite',start:'16:00',end:'20:00',offsiteWorkStart:'10:00'});
 export const schedules={index:new Map([['2026-11:department:d',{start:'09:00'}],['2026-11:employee:ten',{start:'10:00'}]]),settings:[],loading:false,error:null,refresh(){}};
 export const directory={members:[],departments:[{id:'d',name:'디자인'}],departmentName:()=> '디자인',loading:false,error:null,refetch(){}};
-const C=createContext(null);export function Provider({children}){const [rows,setRows]=useState([]);const [fail,setFail]=useState(false);return <C.Provider value={{rows,setRows,fail}}><button onClick={()=>setFail(!fail)}>저장 오류 전환</button>{children}</C.Provider>};export const useData=()=>useContext(C);
+const C=createContext(null);export function Provider({children}){const [rows,setRows]=useState([]);const [fail,setFail]=useState(false);return <C.Provider value={{rows,setRows,fail}}><button onClick={()=>setRows([{requestId:'approved',startAt:'2026-11-02T18:00:00+09:00',endAt:'2026-11-02T23:00:00+09:00',checkoutAt:'2026-11-02T23:00:00+09:00',clockLinked:true,breakMinutes:0,revision:0,savedAt:'2026-11-03'}])}>테스트 퇴근</button><button onClick={()=>setRows([{requestId:'approved',startAt:'2026-11-02T18:00:00+09:00',endAt:'2026-11-02T19:00:00+09:00',clockLinked:true,breakMinutes:0,revision:0,savedAt:'2026-11-03'}])}>테스트 짧은 퇴근</button><button onClick={()=>setRows([])}>테스트 퇴근 무르기</button><button onClick={()=>setFail(!fail)}>저장 오류 전환</button>{children}</C.Provider>};export const useData=()=>useContext(C);
 `)
 await writeFile(path.join(dir,'stubs.tsx'),`import {useData,requests,directory} from './data';
 export const useAuth=()=>({session:{user:{id:'a'}},profile:{id:'a',status:'active',companyId:'company',departmentId:'d'}});
@@ -32,14 +32,15 @@ const server=createServer(async(req,res)=>{if(req.url==='/app.js'){res.setHeader
 let browser
 try{
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});const page=await browser.newPage({viewport:{width:1500,height:1100}});const errors=[];page.on('pageerror',e=>errors.push(e.message));const origin=`http://127.0.0.1:${server.address().port}`;await page.route('**/*',route=>route.request().url().startsWith(origin)?route.continue():route.abort());await page.goto(origin);await page.waitForTimeout(500);assert.deepEqual(errors,[])
-await page.getByRole('button',{name:'관리 야근',exact:true}).click();await page.getByText('승인 후 실제 야근 시간을 입력한 직원이 없습니다.',{exact:true}).waitFor()
-await page.getByRole('button',{name:'개인 야근',exact:true}).click();await page.getByRole('button',{name:'실제 시간 입력·수정',exact:true}).first().click()
-await page.getByLabel('실제 야근 시작',{exact:true}).fill('2026-11-02T18:30');await page.getByLabel('실제 야근 종료',{exact:true}).fill('2026-11-02T21:00');await page.getByLabel('실제 야근 휴게시간').fill('30');await page.getByText('누적 반영: 2시간',{exact:true}).waitFor()
-await page.getByRole('button',{name:'저장 오류 전환'}).click();await page.getByRole('button',{name:'실제 야근 저장',exact:true}).click();await page.getByRole('alert').filter({hasText:'연결 오류'}).waitFor();assert.equal(await page.getByLabel('실제 야근 시작',{exact:true}).inputValue(),'2026-11-02T18:30')
-await page.getByRole('button',{name:'저장 오류 전환'}).click();await page.getByRole('button',{name:'실제 야근 저장',exact:true}).click();await page.getByText('실제 야근을 저장했습니다. 승인된 야근의 실제 입력 시간만 누적됩니다.',{exact:true}).waitFor()
+await page.getByRole('button',{name:'관리 야근',exact:true}).click();await page.getByText('퇴근 기록이 연결된 승인 야근이 없습니다.',{exact:true}).waitFor()
+await page.getByRole('button',{name:'개인 야근',exact:true}).click();assert.equal(await page.getByRole('button',{name:'실제 시간 입력·수정',exact:true}).count(),0);assert.equal(await page.getByLabel('실제 야근 휴게시간').count(),0)
+await page.getByRole('button',{name:'테스트 퇴근',exact:true}).click();await page.getByText('퇴근 기록 자동 연결 · 23:00',{exact:true}).waitFor();await page.getByRole('cell',{name:'5시간 퇴근 기록 자동 연결 · 23:00',exact:true}).waitFor()
+await page.getByRole('button',{name:'테스트 짧은 퇴근',exact:true}).click();await page.getByText('퇴근 기록 자동 연결 · 19:00',{exact:true}).waitFor()
+await page.getByRole('button',{name:'테스트 퇴근 무르기',exact:true}).click();await page.getByRole('cell',{name:'퇴근 기록 대기',exact:true}).first().waitFor()
+await page.getByRole('button',{name:'테스트 퇴근',exact:true}).click()
 await page.getByRole('button',{name:'관리 야근',exact:true}).click();await page.getByRole('cell',{name:'실제 입력 직원',exact:true}).waitFor();assert.equal(await page.getByRole('cell',{name:'미입력 직원',exact:true}).count(),0);assert.equal(await page.getByRole('cell',{name:'미승인 직원',exact:true}).count(),0);assert.equal(await page.getByRole('cell',{name:'외근 직원',exact:true}).count(),0)
-const row=page.getByRole('row').filter({has:page.getByRole('cell',{name:'실제 입력 직원',exact:true})});assert.deepEqual(await row.getByRole('cell').allTextContents(),['실제 입력 직원','디자인','1건','4시간','2시간','1시간','1시간','입력 내역'])
-await page.getByRole('button',{name:'입력 내역',exact:true}).click();await page.getByRole('cell',{name:'18:30–21:00',exact:true}).waitFor();await page.screenshot({path:path.join(dir,'overtime.png'),fullPage:true})
+const row=page.getByRole('row').filter({has:page.getByRole('cell',{name:'실제 입력 직원',exact:true})});assert.deepEqual(await row.getByRole('cell').allTextContents(),['실제 입력 직원','디자인','1건','4시간','5시간','1시간','4시간','입력 내역'])
+await page.getByRole('button',{name:'입력 내역',exact:true}).click();await page.getByRole('cell',{name:'18:00–23:00',exact:true}).waitFor();await page.screenshot({path:path.join(dir,'overtime.png'),fullPage:true})
 await page.getByRole('button',{name:'관리 외근',exact:true}).click();await page.getByRole('cell',{name:'외근 직원',exact:true}).waitFor();await page.getByRole('cell',{name:'거래처',exact:true}).waitFor();
 const offsiteRow=name=>page.getByRole('row').filter({has:page.getByRole('cell',{name,exact:true})});
 await offsiteRow('외근 직원').getByRole('cell',{name:'3시간',exact:true}).waitFor();await offsiteRow('외근 직원').getByRole('cell',{name:'09:00–18:00',exact:true}).waitFor();
@@ -51,5 +52,5 @@ await page.getByLabel('외근 관리 검색').fill('없음');await page.getByTex
 await page.getByLabel('외근 관리 부서').selectOption('unassigned');await page.getByRole('cell',{name:'미설정 외근 직원',exact:true}).waitFor();assert.equal(await page.getByRole('cell',{name:'외근 직원',exact:true}).count(),0);await page.getByLabel('외근 관리 부서').selectOption('all');
 await page.getByLabel('외근 진행 구분').selectOption('cancelled');await offsiteRow('취소 외근 직원').waitFor();assert.equal(await offsiteRow('외근 직원').count(),0);await page.getByLabel('외근 진행 구분').selectOption('all');
 await page.screenshot({path:path.join(dir,'offsite.png'),fullPage:true});assert.deepEqual(errors,[])
-console.info('Browser: real personal/admin/offsite components; only approved explicit reports counted, failed save preserves input, breaks/allowance excess/detail, offsite filters passed; no external requests')
+console.info('Browser: real personal/admin/offsite components; automatic actual checkout/shorter/longer/undo, no break entry, legacy detail and allowance excess, offsite filters passed; no external requests')
 }finally{await browser?.close();await new Promise(resolve=>server.close(resolve))}

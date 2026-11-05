@@ -31,7 +31,7 @@ export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' = 'mine') {
       'attendance-clock-ins', 'company-attendance-spans', 'company-deferred-clock-outs', 'attendance-presence',
       'offsite-groups', 'my-offsite-attendance', 'overtime-checkout-preview', 'my-home-work-notices',
       'my-workday-basis', 'company-attendance-clocks', 'late-arrival-statements', 'late-statement-notices', 'late-statement-tasks',
-      'late-arrival-cumulative',
+      'late-arrival-cumulative', 'overtime-actuals',
     ].map(key => client.invalidateQueries({ queryKey: [key] })))
     }, { writeOutcome: outcome }), context)
   }
