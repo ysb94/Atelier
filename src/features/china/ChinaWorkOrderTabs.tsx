@@ -34,7 +34,7 @@ export function ChinaWorkOrderTabs({ children }: { children: ReactNode }) {
     <div className="mb-5">
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
         <FilterTabs tabs={workTabs} value={workTab} onChange={setWorkTab} ariaLabel="중국팀 업무" variant="underline" size="large" className="flex-1" />
-        <Badge variant="muted" className="self-start sm:self-center">탭 구성 미리보기</Badge>
+        <Badge variant="muted" className="self-start sm:self-center">화면 구성 미리보기</Badge>
       </div>
       {workTab === 'orders' && <FilterTabs tabs={assigneeTabs} value={assigneeTab} onChange={setAssigneeTab} ariaLabel="작업지시서 담당자" variant="underline" className="mt-2 border-b-0" />}
     </div>
