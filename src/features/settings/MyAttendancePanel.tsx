@@ -46,6 +46,8 @@ import { useLeaveAdvances } from '@/features/operations-support/use-leave-advanc
 import { useMyScheduleMeetings } from './use-my-schedule-meetings'
 import { MyScheduleMeetingLink } from './MyScheduleMeetingLink'
 import { meetingKindLabel } from '@/features/meetings/meeting-kinds'
+import { DepartmentScheduleBars, DepartmentScheduleList, DepartmentScheduleToolbar, useDepartmentSchedule } from './DepartmentSchedule'
+import type { DepartmentDayAbsence } from './department-schedule'
 
 const STATUS_LABELS = { pending: '승인 대기', approved: '승인', rejected: '반려', cancelled: '취소' }
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
@@ -131,6 +133,8 @@ export function MyAttendancePanel() {
   const meetings = useMyScheduleMeetings(userId, profile?.companyId ?? undefined, allowed && profile?.id === userId, active, month)
   const [selected, setSelected] = useState(today)
   const [query, setQuery] = useState('')
+  const [showDepartment, setShowDepartment] = useState(true)
+  const departmentSchedule = useDepartmentSchedule(month, allowed && showDepartment, active, query)
   const layers: Record<Layer, boolean> = { clock: true, leave: true, work: true, fix: true, holiday: true, closed: false }
   const [form, setForm] = useState<RequestForm | null>(null)
   const groupCache = useQueryClient()
@@ -392,6 +396,7 @@ export function MyAttendancePanel() {
           </div>
         </div>
       </header>
+      <DepartmentScheduleToolbar schedule={departmentSchedule} visible={showDepartment} onChange={setShowDepartment}/>
       <div className="personal-request-shell">
         <div className="personal-request-month" role="group" aria-label={`${monthLabel(month)} 근태 달력`}>
           {WEEKDAYS.map((day, index) => <div key={day} aria-hidden="true" className={`personal-request-weekday${index === 0 || index === 6 ? ' is-off' : ''}`}>{day}</div>)}
@@ -411,6 +416,7 @@ export function MyAttendancePanel() {
             const visibleItems = items.slice(0, dayTodos.length ? Math.max(0, remainingSlots - 1) : remainingSlots)
             const visibleTodos = dayTodos.slice(0, Math.max(0, remainingSlots - visibleItems.length))
             const hidden = items.length - visibleItems.length + dayTodos.length - visibleTodos.length + dayMeetings.length - visibleMeetings.length
+            const departmentItems = departmentSchedule.entries.get(date) ?? emptyList<DepartmentDayAbsence>()
             return <div key={date} className={`agenda-day${holiday || dayOfWeek(date) === 0 || dayOfWeek(date) === 6 ? ' is-off' : ''}${date === today ? ' is-today' : ''}${selected === date ? ' is-selected' : ''}`} onClick={() => pickDate(date)} onDoubleClick={() => openAddMenu(date)}>
               <button type="button" className="agenda-num" aria-pressed={selected === date} aria-label={`${dateLabel(date)} (${WEEKDAYS[dayOfWeek(date)]}) ${holiday ? `${holiday} ` : ''}출근 ${time.start || '없음'} 퇴근 ${time.end || '없음'}${time.corrected ? ' 정정' : ''} 신청 ${items.length}건 Todo ${dayTodos.length}건`} onClick={() => pickDate(date)}>{Number(date.slice(8))}</button>
               {layers.holiday && holiday && <button type="button" className="agenda-bar is-holiday" onClick={event => { event.stopPropagation(); pickDate(date); setDetail({ type: 'holiday', date, name: holiday }) }}>{holiday}</button>}
@@ -419,6 +425,7 @@ export function MyAttendancePanel() {
               {visibleItems.map(item => requestBar(item, date))}
               {visibleTodos.map(todo => <button key={todo.id} type="button" className={`agenda-bar is-todo${todo.important ? ' is-important' : ''}${todo.done ? ' is-done' : ''}`} title={`${todo.important ? '중요 · ' : ''}${scheduleTodoTime(todo)} · ${todo.title}`} onClick={event => { event.stopPropagation(); pickDate(date); openTodo(date,todo) }}>{todo.important ? '★ ' : ''}{todo.start ? todo.start+' ' : ''}{todo.title}</button>)}
               {hidden > 0 && <button type="button" className="agenda-more" onClick={() => pickDate(date)}>+{hidden}개</button>}
+              <DepartmentScheduleBars items={departmentItems} onSelect={() => pickDate(date)}/>
             </div>
           })}
         </div>
@@ -429,6 +436,7 @@ export function MyAttendancePanel() {
       {meetings.error && <p role="alert" className="px-3 pb-3 text-sm text-danger">회의 일정을 불러오지 못했습니다. <Button type="button" variant="outline" size="sm" onClick={() => void meetings.refresh()}>회의 다시 조회</Button></p>}
     </section>
     {meetings.events.some(meeting => meeting.date === selected) && <section aria-label="선택 날짜의 회의 일정" className="mt-3 space-y-2 rounded-xl border border-border bg-card p-4"><h3 className="text-sm font-semibold">{dateLabel(selected)} 회의 일정</h3>{meetings.events.filter(meeting => meeting.date === selected).map(meeting => <MyScheduleMeetingLink key={meeting.id} meeting={meeting} />)}</section>}
+    <DepartmentScheduleList items={departmentSchedule.entries.get(selected) ?? emptyList<DepartmentDayAbsence>()} dateLabel={dateLabel(selected)} department={departmentSchedule.department}/>
     {leave.requests.some(item => item.from <= selected && selected <= item.to) && <section aria-label="선택 날짜의 근태 일정" className="mt-3 space-y-2 rounded-xl border border-border bg-card p-4"><h3 className="text-sm font-semibold">{dateLabel(selected)} 근태 일정</h3>{leave.requests.filter(item => item.from <= selected && selected <= item.to).map(item => <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-border p-3 text-sm"><div><p>{requestLabel(item.kind)}{item.advanceRequested ? ' · 선사용' : ''} · {requestTime(item)} · {requestStatusLabel(item)}{isSelfApprovedRequest(item) ? ' · 본인 승인' : ''}</p>{item.decidedByName && <p className="mt-1 text-xs text-muted-foreground">{item.decidedByName}{item.decidedAt ? ` · ${new Date(item.decidedAt).toLocaleString('ko-KR')}` : ''}</p>}{item.decisionNote && <p className="mt-1 whitespace-pre-wrap text-xs text-muted-foreground">{item.decisionNote}</p>}</div><Button variant="outline" size="sm" onClick={() => setDetail({ type: 'request', item, date: selected })}>보기</Button></div>)}</section>}
     {todos.some(todo=>todo.date===selected) && <section aria-label="선택 날짜의 To-do" className="mt-3 space-y-2 rounded-xl border border-border bg-card p-4"><h3 className="text-sm font-semibold">{dateLabel(selected)} To-do</h3>{todos.filter(todo=>todo.date===selected).map(todo=><button key={todo.id} type="button" className="flex w-full items-center gap-2 rounded-md border border-border p-2 text-left text-sm" onClick={()=>openTodo(selected,todo)}><span>{todo.done ? '완료' : todo.important ? '★ 중요' : 'To-do'}</span><span className="tabular-nums text-muted-foreground">{scheduleTodoTime(todo)}</span><span className={todo.done ? 'line-through text-muted-foreground' : ''}>{todo.title}</span></button>)}</section>}
     <HolidayWorkPanel scope="mine" month={month} />

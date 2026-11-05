@@ -67,6 +67,7 @@ button.agenda-clock { width: 100%; border: 0; background: transparent; text-alig
 .agenda-bar.is-todo { background: #f3f0ea; color: #3c4043; font-weight: 500; }
 .agenda-bar.is-todo.is-done { color: #8b909c; text-decoration: line-through; }
 .agenda-bar.is-todo.is-important:not(.is-done) { background: var(--primary); color: var(--primary-foreground); }
+.agenda-bar.is-department { background: var(--color-muted); color: var(--color-foreground); border-left: 3px solid var(--color-primary); font-weight: 500; }
 .agenda-bar.is-pending { opacity: 0.82; }
 .agenda-bar.is-rejected, .agenda-bar.is-cancelled { background: #e8eaed; color: #5f6368; font-weight: 500; }
 .agenda-more { color: #5f6368; font-weight: 500; padding-left: 6px; }
