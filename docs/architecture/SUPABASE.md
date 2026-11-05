@@ -1,5 +1,7 @@
 # Supabase 데이터 아키텍처 원칙
 
+- 2026-11-05 신청 시작~실제 퇴근의 자동 야근 연결은 [OVERTIME_CHECKOUT_LINK.md](OVERTIME_CHECKOUT_LINK.md)를 따른다. 사용자 승인 후 원격 `20261105031646_overtime_checkout_link`를 적용했다. 기존 8개 업무 표 원본·정책·관련 권한·기존 view를 보존하고 활성 직원 37계정의 실제 인증 역할 조회 및 접근 차단을 검증했다. 별도 시간·휴게 입력 UI를 제거했으며 test/main 사이트 배포는 하지 않았다.
+
 - 2026-11-04 주말·공휴일 근무는 [HOLIDAY_WORK.md](HOLIDAY_WORK.md)를 따른다. 사용자 승인 후 공유 DB에 `20261104092829_holiday_work_settlement`을 적용했다. 주말 포함 외근의 건 전체 후처리와 실제 부서 확인·수당·보상휴가를 검증했고, 기존 15개 표 원본·잔액·권한·읽음을 보존했다. 가상 직원 5명과 검증 기록은 모두 롤백했으며 서면합의 기준은 비어 있어 실제 보상휴가 지급은 잠겨 있다. main 화면 배포는 별도 단계다.
 
 - 2026-11-04 상품 개수·창고 재고·공통 알림의 추가 최적화는 [PRODUCT_NOTIFICATION_READ_OPTIMIZATION.md](PRODUCT_NOTIFICATION_READ_OPTIMIZATION.md)를 따른다. 진행 중 동일 조회 공유와 상품 재고 표시의 필요한 열만 조회하는 경로를 구현했다. 사용자 승인 후 새 상품 개수 집계 함수 1개를 원격 `20261104092102`로 적용하고 기존 데이터·정책·권한 보존, 일반 직원·관리자 개수 일치와 익명 차단을 검증했다. 기존 정확한 COUNT fallback을 유지하며 test/main 사이트 배포는 하지 않았다.
