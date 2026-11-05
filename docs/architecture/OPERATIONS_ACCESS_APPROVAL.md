@@ -31,3 +31,4 @@
 - 기존 프로필 39건의 전체 행 해시, 역량·브랜드 연결 해시, 프로필 RLS·트리거·표 권한과 함수 소유자·실행 권한·설정이 모두 보존됐다. 검증 중 실제 로그인·세션 갱신이 있으므로 Auth 전체 행 해시는 보존 판정에서 제외했다. Auth 계정 수는 39건으로 같고, 검증은 기존 Auth 행을 UPDATE하지 않는다.
 - 보안 점검의 기존 항목별 건수는 적용 전후 동일하며 새로운 항목은 없다. 익명의 운영지원 확인 함수 실행은 차단되고 인증 역할만 허용된다.
 - Node 22.23.3: 가입 승인 DB 검증, 운영지원 화면 권한 검증, 공개 범위 검증, diagnostics·workflow diagnostics(브라우저 포함), lint, 전체 build, 구조 목차 9검사 통과. `verify:company-capabilities` 전체 실행은 기존 `assigned-permissions.verify.ts:25`의 디자인 업무 `manager`/`requester` 불일치 1건으로 실패했다. 이번 변경의 운영지원 검증은 별도로 실행해 통과했고 해당 디자인 권한 코드는 수정하지 않았다.
+- 2026-11-05 후속 테스트 정리: 사용자 요청으로 `assigned-permissions.verify.ts`의 예시 회사·부서 번호를 `RELEASE_COMPANY_ID`와 `WORK_REQUEST_DEPARTMENT_IDS`로 맞췄다. 다른 부서에서 디자인 관리 권한을 받은 경우와 다른 회사·비활성·미지정·예전 부서 문자열의 차단을 검증했으며, `verify:company-capabilities` 전체와 `verify:release-access`가 통과해 앞선 테스트 실패가 해소됐다. Node 22에서 전체 build·lint·구조 목차 9검사도 통과했다. 실제 업무 권한과 공유 DB 변경은 없다.

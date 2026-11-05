@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict'
 import { hasPermission, type PermissionGrant, type PermissionCode } from './permissions'
 import { canManagePersonnel, canEditOrgAssignment, canViewDraftsByOwner, isCompanyManager, isCompanyReviewer, hasCapability, brandStorageRoot, inferCapabilityFromDepartment, uniqueCapabilities } from './capabilities'
-import { resolveWorkRequestViewRole } from '../../features/work-requests/work-request-form-config'
+import { resolveWorkRequestViewRole, WORK_REQUEST_DEPARTMENT_IDS } from '../../features/work-requests/work-request-form-config'
+import { RELEASE_COMPANY_ID } from './release-access'
 import { canPreviewProfile, initialPreview, previewProfile } from './profile-preview'
 import type { Profile } from '../supabase/profiles'
 import { hasAssignedPermission } from '../../../supabase/functions/_shared/assigned-permission'
 
-const companyId = 'company-a'
-const base = { id: 'employee', email: 'employee@invalid', status: 'active', companyId, position: '사원', jobGrade: '사원', departmentName: '디자인팀', departmentId: 'design', departmentPersonnelScope: null, isAdmin: false, capabilities: [], memberships: [], permissionGrants: [] } as unknown as Profile
+const companyId = RELEASE_COMPANY_ID
+const designDepartmentId = WORK_REQUEST_DEPARTMENT_IDS.design
+const logisticsDepartmentId = WORK_REQUEST_DEPARTMENT_IDS.logistics
+const base = { id: 'employee', email: 'employee@invalid', status: 'active', companyId, position: '사원', jobGrade: '사원', departmentName: '디자인팀', departmentId: designDepartmentId, departmentPersonnelScope: null, isAdmin: false, capabilities: [], memberships: [], permissionGrants: [] } as unknown as Profile
 const grants = (...permissions: PermissionCode[]): PermissionGrant[] => permissions.map(permission => ({ permission, scopeKind: 'company', scopeId: companyId }))
 const enabled = { ...base, permissionGrants: grants('work.manage','org.manage','personnel.manage','drafts.read','company.review','preview.use','data.planning') }
 for (const position of ['사원','팀장','이사','대표이사']) for (const jobGrade of ['사원','과장','부장']) {
@@ -16,13 +19,18 @@ for (const position of ['사원','팀장','이사','대표이사']) for (const j
   const allowed = { ...enabled, position, jobGrade }
   for (const check of [isCompanyManager,canManagePersonnel,canEditOrgAssignment,canViewDraftsByOwner,isCompanyReviewer]) assert.equal(check(allowed),true,'지정 권한은 직책과 무관')
 }
-const scoped = { ...base, permissionGrants: [{ permission: 'work.manage', scopeKind: 'department', scopeId: 'design', scopeName: '디자인팀' }] as PermissionGrant[] }
-assert.equal(hasPermission(scoped,'work.manage','department','design'),true)
-assert.equal(hasPermission(scoped,'work.manage','department','logistics'),false)
+const scoped = { ...base, permissionGrants: [{ permission: 'work.manage', scopeKind: 'department', scopeId: designDepartmentId, scopeName: '디자인팀' }] as PermissionGrant[] }
+assert.equal(hasPermission(scoped,'work.manage','department',designDepartmentId),true)
+assert.equal(hasPermission(scoped,'work.manage','department',logisticsDepartmentId),false)
 assert.equal(hasPermission(scoped,'work.manage','department',null),false,'대상이 없으면 임의로 전체 범위를 허용하지 않음')
 assert.equal(hasPermission({ ...enabled, status:'disabled' },'org.manage'),false)
 assert.equal(hasPermission({ ...enabled, companyId:'company-b' },'org.manage'),false)
-assert.equal(resolveWorkRequestViewRole('design','물류','사원',[],scoped),'manager','다른 부서 사원도 지정한 디자인 업무를 관리')
+const delegated = { ...scoped, departmentName: '물류팀', departmentId: logisticsDepartmentId }
+assert.equal(resolveWorkRequestViewRole('design',delegated.departmentName,'사원',[],delegated),'manager','다른 부서 사원도 지정한 디자인 업무를 관리')
+assert.equal(resolveWorkRequestViewRole('design',delegated.departmentName,'사원',[],{...delegated,companyId:'company-b'}),'requester','다른 회사는 부서 ID가 같아도 업무 관리 불가')
+assert.equal(resolveWorkRequestViewRole('design',delegated.departmentName,'사원',[],{...delegated,status:'disabled'}),'requester','비활성 계정은 지정 권한이 있어도 업무 관리 불가')
+assert.equal(resolveWorkRequestViewRole('design',delegated.departmentName,'사원',[],{...delegated,permissionGrants:[]}),'requester','다른 부서는 지정 권한 없이 업무 관리 불가')
+assert.equal(resolveWorkRequestViewRole('design',delegated.departmentName,'사원',[],{...delegated,permissionGrants:delegated.permissionGrants.map(grant=>({...grant,scopeId:'design'}))}),'requester','예전 부서 문자열을 현재 부서 ID로 인정하지 않음')
 assert.equal(resolveWorkRequestViewRole('logistics','디자인팀','팀장',[],scoped),'requester','미지정 다른 업무 관리 불가')
 assert.equal(resolveWorkRequestViewRole('design','디자인팀','대표이사',[],base),'employee','대표도 지정 없으면 업무 관리자 아님')
 assert.equal(hasCapability(enabled,'planning'),true)
