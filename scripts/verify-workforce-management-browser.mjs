@@ -19,7 +19,10 @@ const subscribe=fn=>{listeners.add(fn);return()=>listeners.delete(fn)};
 export function useAuth(){const role=useSyncExternalStore(subscribe,()=>window.account);const profile=profiles[role];return{profile,session:{user:{id:profile.id}}}}
 window.policies=members.map(p=>({employeeId:p.id,mode:workforceMode(p),trackingStart:null,version:0}));window.policyWrites=0;window.opsQueries=0;window.opsWrites=0;window.records=[];window.failNextSave=false;
 export const listWorkforceManagement=async()=>{if(window.failPolicyRead)throw new Error('분류 조회 연결 실패');return{ready:true,items:structuredClone(window.policies)}};
-export const saveWorkforceManagement=async input=>{window.policyWrites++;const at=window.policies.findIndex(row=>row.employeeId===input.employeeId);const next={...input,version:input.version+1};window.policies=window.policies.map((row,i)=>i===at?next:row);return next};
+export const allDepartments=[{id:logistics,name:'물류팀'},{id:china,name:'중국팀'},{id:id(70),name:'빈 현장팀'}];
+window.departmentPolicies=allDepartments.map(d=>({departmentId:d.id,mode:d.id===logistics?'local':d.id===china?'external':'head-office',trackingStart:null,version:0}));
+export const listDepartmentWorkforceManagement=async()=>({ready:new URL(location.href).searchParams.get('missing')!=='1',items:structuredClone(window.departmentPolicies)});
+export const saveDepartmentWorkforceManagement=async input=>{if(window.failNextPolicySave){window.failNextPolicySave=false;throw new Error('부서 설정 저장 실패. 다시 시도해 주세요.')};window.policyWrites++;const next={...input,version:input.version+1};window.departmentPolicies=window.departmentPolicies.map(row=>row.departmentId===input.departmentId?next:row);window.policies=window.policies.map(row=>members.find(p=>p.id===row.employeeId)?.departmentId===input.departmentId?{...row,mode:input.mode==='local'&&input.departmentId===logistics?'logistics':input.mode,trackingStart:input.trackingStart,version:next.version}:row);return next};
 export const getLogisticsOperations=async()=>{window.opsQueries++;return{ready:true,employees:members.filter(p=>window.policies.find(row=>row.employeeId===p.id)?.mode==='logistics').map(p=>({id:p.id,name:p.name,hireDate:p.hireDate})),entries:structuredClone(window.records)}};
 export const saveLogisticsOperation=async input=>{window.opsWrites++;if(window.failNextSave){window.failNextSave=false;throw new Error('연결이 끊겼습니다. 입력 내용은 유지됩니다.')};const old=window.records.find(row=>row.id===input.id);let next;if(input.action==='cancel')next={...old,cancelled_at:new Date().toISOString(),version:old.version+1};else next={id:input.id,employee_id:input.employeeId,employee_name:members.find(p=>p.id===input.employeeId).name,kind:input.kind,from_date:input.from,to_date:input.to,started_at:input.startedAt,ended_at:input.endedAt,break_minutes:input.breakMinutes,leave_kind:input.leaveKind,leave_days:input.leaveDays,note:input.note,version:(old?.version||0)+1,cancelled_at:null,updated_at:new Date().toISOString()};window.records=old?window.records.map(row=>row.id===old.id?next:row):[...window.records,next];return{id:next.id,version:next.version}};
 const channel=()=>({on(){return this},subscribe(){return this}});export const getSupabase=()=>({channel,removeChannel:async()=> 'ok'});
@@ -28,9 +31,9 @@ export const allMembers=members;
 const entry = path.join(dir, 'entry.tsx')
 await writeFile(entry, `
 import React from 'react';import{createRoot}from'react-dom/client';import{BrowserRouter}from'react-router-dom';import{QueryClient,QueryClientProvider}from'@tanstack/react-query';
-import{WorkforceManagementProvider,useHeadOfficeSelfService,useWorkforceManagement}from'../../src/lib/company/workforce-management-context';import{LogisticsOperationsPage}from'../../src/features/logistics/operations/LogisticsOperationsPage';import{WorkforceManagementPanel}from'../../src/features/org/WorkforceManagementPanel';import{companyNavGroupsForProfile}from'../../src/components/layout/company-workspace-nav';import{canEditOrgAssignment}from'../../src/lib/company/capabilities';import{useAuth,allMembers}from'./fixture';
+import{WorkforceManagementProvider,useHeadOfficeSelfService,useWorkforceManagement}from'../../src/lib/company/workforce-management-context';import{LogisticsOperationsPage}from'../../src/features/logistics/operations/LogisticsOperationsPage';import{WorkforceManagementPanel}from'../../src/features/org/WorkforceManagementPanel';import{companyNavGroupsForProfile}from'../../src/components/layout/company-workspace-nav';import{canEditOrgAssignment}from'../../src/lib/company/capabilities';import{useAuth,allMembers,allDepartments}from'./fixture';
 const q=new QueryClient({defaultOptions:{queries:{retry:false,refetchOnWindowFocus:false},mutations:{retry:false}}});
-function Shell(){const{profile}=useAuth();const state=useWorkforceManagement();const allowed=useHeadOfficeSelfService();window.refreshPolicies=()=>state.refresh();window.selfServiceAllowed=allowed;window.scopeReadFailed=Boolean(state.error);const items=companyNavGroupsForProfile(profile).flatMap(group=>group.items).filter(item=>item.to==='/logistics/operations');return <main style={{padding:24}}><nav>{items.map(item=><a key={item.to} href={item.to}>{item.label}</a>)}</nav>{new URL(location.href).searchParams.get('page')==='policy'?<WorkforceManagementPanel members={allMembers} departmentName={id=>id?.startsWith('bf926')?'중국팀':id?'물류팀':'본사'} canEdit={canEditOrgAssignment(profile)}/>:<LogisticsOperationsPage/>}</main>}
+function Shell(){const{profile}=useAuth();const state=useWorkforceManagement();const allowed=useHeadOfficeSelfService();window.refreshPolicies=()=>state.refresh();window.selfServiceAllowed=allowed;window.scopeReadFailed=Boolean(state.error);const items=companyNavGroupsForProfile(profile).flatMap(group=>group.items).filter(item=>item.to==='/logistics/operations');return <main style={{padding:24}}><nav>{items.map(item=><a key={item.to} href={item.to}>{item.label}</a>)}</nav>{new URL(location.href).searchParams.get('page')==='policy'?<WorkforceManagementPanel members={allMembers} departments={allDepartments} canEdit={canEditOrgAssignment(profile)}/>:<LogisticsOperationsPage/>}</main>}
 createRoot(document.getElementById('root')).render(<QueryClientProvider client={q}><BrowserRouter><WorkforceManagementProvider><Shell/></WorkforceManagementProvider></BrowserRouter></QueryClientProvider>);
 `, 'utf8')
 const mocked = /(?:lib\/supabase\/(?:auth|client|workforce-management|logistics-operations))$/
@@ -109,18 +112,35 @@ try {
     await denied.close()
   }
   const policy = await open('hr', 'policy')
-  const row = policy.locator('tbody tr').filter({ has: policy.getByLabel('협력사직원 관리 방식', { exact: true }) })
-  await row.getByLabel('협력사직원 관리 방식', { exact: true }).selectOption('head-office')
-  await row.getByLabel('협력사직원 본사 근태 시작일', { exact: true }).fill('2026-11-06')
+  const row = policy.locator('tbody tr').filter({ has: policy.getByLabel('중국팀 관리 방식', { exact: true }) })
+  await row.getByLabel('중국팀 관리 방식', { exact: true }).selectOption('head-office')
+  await row.getByLabel('중국팀 본사 근태 시작일', { exact: true }).fill('2026-11-06')
+  await policy.evaluate(()=>window.failNextPolicySave=true)
+  await row.getByRole('button', { name: '저장', exact: true }).click()
+  await row.getByRole('alert').waitFor()
+  assert.equal(await row.getByLabel('중국팀 관리 방식', {exact:true}).inputValue(),'head-office','save failure retains selection')
   await row.getByRole('button', { name: '저장', exact: true }).click()
   await policy.waitForFunction(() => window.policyWrites === 1 && window.policies.find(p => p.employeeId.endsWith('000000000004')).version === 1)
   await row.getByText('본사 관리', { exact: true }).first().waitFor()
-  assert.equal(await row.getByLabel('협력사직원 본사 근태 시작일', { exact: true }).inputValue(), '2026-11-06')
+  assert.equal(await row.getByLabel('중국팀 본사 근태 시작일', { exact: true }).inputValue(), '2026-11-06')
   assert.equal(await policy.evaluate(() => JSON.stringify(window.fixtureProfiles) === window.profileSnapshot), true)
   await policy.screenshot({ path: path.join(dir, 'workforce-policy.png'), fullPage: true })
   await policy.setViewportSize({ width: 390, height: 844 })
   assert.equal(await policy.evaluate(() => document.documentElement.scrollWidth), 390)
+  assert.equal(await policy.locator('tbody tr').count(),3,'one row per department including empty department')
+  await policy.getByLabel('관리 대상 부서 검색').fill('빈 현장')
+  assert.equal(await policy.locator('tbody tr').count(),1)
+  await policy.getByText('소속 직원 0명 · 신규·이동 직원 자동 적용',{exact:true}).waitFor()
+  await policy.getByLabel('관리 대상 부서 검색').fill('')
+  const missing = await context.newPage()
+  missing.on('pageerror', error => errors.push(error.message))
+  await missing.goto('https://workforce-preview.invalid/?actor=hr&page=policy&missing=1')
+  await missing.getByText('부서별 저장 기능은 DB 적용 대기입니다. 기본 구분을 표시하며 아직 저장할 수 없습니다.',{exact:true}).waitFor()
+  assert.equal(await missing.getByLabel('물류팀 관리 방식',{exact:true}).isDisabled(),true,'missing API cannot pretend saved')
+  await missing.close()
   const scope = await open('normal', 'policy')
+  await scope.getByLabel('물류팀 관리 방식',{exact:true}).waitFor()
+  assert.equal(await scope.getByLabel('물류팀 관리 방식',{exact:true}).isDisabled(),true,'ordinary employee cannot change policy')
   await scope.waitForFunction(() => window.selfServiceAllowed === true)
   await scope.evaluate(() => { window.failPolicyRead = true;void window.refreshPolicies() })
   await scope.waitForFunction(() => window.scopeReadFailed === true)

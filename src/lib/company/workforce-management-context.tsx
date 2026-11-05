@@ -33,7 +33,10 @@ function useManagementState() {
   useEffect(() => {
     if (!enabled || !query.data?.ready) return
     const channel = getSupabase().channel(`workforce-policy:${userId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'workforce_management_overrides', filter: `company_id=eq.${companyId}` }, () => { void cache.invalidateQueries({ queryKey: key }) })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'department_workforce_policies', filter: `company_id=eq.${companyId}` }, () => {
+        void cache.invalidateQueries({ queryKey: key })
+        void cache.invalidateQueries({ queryKey: ['department-workforce-management'] })
+      })
       .subscribe(status => { if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('[workforce] 관리 대상 실시간 연결 실패', { code: status }) })
     return () => { void getSupabase().removeChannel(channel).catch(() => console.warn('[workforce] 관리 대상 구독 해제 실패', { code: 'unsubscribe' })) }
   }, [enabled, query.data?.ready, userId, companyId, cache, key])

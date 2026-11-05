@@ -117,7 +117,7 @@
     "verify:chat-list": "tsx src/lib/inbox/format.verify.ts",
     "verify:chat-thread": "tsx --tsconfig tsconfig.app.json src/lib/chat/thread-layout.verify.ts",
     "verify:company-capabilities": "tsx src/lib/company/capabilities.verify.ts",
-    "verify:workforce-management": "tsx --tsconfig tsconfig.app.json src/lib/company/workforce-management.verify.ts && node scripts/verify-workforce-management-db.mjs && node scripts/verify-workforce-management-browser.mjs",
+    "verify:workforce-management": "tsx --tsconfig tsconfig.app.json src/lib/company/workforce-management.verify.ts && node scripts/verify-workforce-management-db.mjs && node scripts/verify-department-workforce-db.mjs && node scripts/verify-workforce-management-browser.mjs",
     "verify:attendance-enrollment": "node scripts/verify-attendance-enrollment-db.mjs && node scripts/verify-attendance-enrollment-browser.mjs",
     "verify:operations-access-approval": "node scripts/verify-operations-access-approval-db.mjs",
     "verify:employee-access": "tsx --tsconfig tsconfig.app.json src/features/org/new-employee-access.verify.ts && node scripts/verify-employee-onboarding-db.mjs && node scripts/verify-employee-access-browser.mjs",

@@ -4,7 +4,7 @@ export const CHINA_DEPARTMENT_ID = 'bf926822-910c-422f-9c17-5fd3d8ddb3ba'
 export const LOGISTICS_OPERATIONS_MANAGER_ID = '7f159ac7-9e05-41a4-8891-f9929d3af806'
 export const LOGISTICS_OPERATIONS_HREF = '/logistics/operations'
 
-export type WorkforceMode = 'head-office' | 'logistics' | 'external'
+export type WorkforceMode = 'head-office' | 'logistics' | 'local' | 'external'
 export type WorkforceMember = { departmentId?: string | null; workforceMode?: WorkforceMode }
 export function workforceMode(member: WorkforceMember | null | undefined): WorkforceMode {
   if (member?.workforceMode) return member.workforceMode
