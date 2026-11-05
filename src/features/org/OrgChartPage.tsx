@@ -5,6 +5,7 @@ import { NewEmployeesPanel } from './NewEmployeesPanel'
 import { useRosterChoiceSettings } from './use-roster-choice-settings'
 import { isRosterChoiceKey, rosterChoiceValues } from '@/lib/company/roster-choices'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   UserPlus,
@@ -30,7 +31,6 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { useEmployeeRoster } from '@/features/operations-support/use-employee-roster'
 import {
   canEditOrgAssignment,
-  canManagePersonnel,
   OPERATIONS_SUPPORT_DEPARTMENT,
 } from '@/lib/company/capabilities'
 import { useAuth } from '@/lib/supabase/auth'
@@ -176,10 +176,30 @@ export function OrgChartPage({
 } = {}) {
   useRenderWatch(mode === 'manage' ? 'OrgChartManage' : 'OrgChartPage')
   const { profile } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabActive = useWorkspaceTabActivity()
   const queryClient = useQueryClient()
   const { access } = useBasicWorkAccess()
   const canEdit = mode === 'manage' && (canEditOrgAssignment(profile) || access?.domains.includes('operations') === true)
-  const [view, setView] = useState<OrgView>(mode === 'manage' ? 'members' : 'chart')
+  const [view, setView] = useState<OrgView>(() => {
+    const initial = searchParams.get('orgView')
+    return mode !== 'manage' ? 'chart' : initial === 'new' || initial === 'titles' || initial === 'workforce' ? initial : 'members'
+  })
+  useEffect(() => {
+    if (mode !== 'manage' || !tabActive) return
+    const next = searchParams.get('orgView')
+    setView(next === 'new' || next === 'titles' || next === 'workforce' ? next : 'members')
+  }, [mode, tabActive, searchParams])
+  function selectView(next: OrgView) {
+    if (!tabActive) return
+    setView(next)
+    setSearchParams(previous => {
+      const params = new URLSearchParams(previous)
+      if (next === 'members') params.delete('orgView')
+      else params.set('orgView', next)
+      return params
+    }, { replace: true })
+  }
   const [search, setSearch] = useState('')
   const [departmentFilter, setDepartmentFilter] = useState('all')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -417,7 +437,7 @@ export function OrgChartPage({
               key={item.id}
               type="button"
               aria-pressed={activeView === item.id}
-              onClick={() => setView(item.id)}
+              onClick={() => selectView(item.id)}
               className={cn(
                 'flex min-h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
                 activeView === item.id
@@ -431,7 +451,7 @@ export function OrgChartPage({
           ))}
           <span className="ml-auto hidden items-center px-3 text-xs text-muted-foreground lg:flex">
             {activeView === 'new'
-              ? '가입 신청과 아직 부서가 없는 신규 직원을 배치합니다'
+              ? '가입 승인과 신규직원의 입사 정보·서류를 확인합니다'
               : canEdit
               ? '배치와 직책·직급을 수정할 수 있습니다'
               : '조회만 할 수 있습니다'}
@@ -566,8 +586,6 @@ export function OrgChartPage({
           departments={departments}
           duties={duties.map(title => title.name)}
           grades={grades.map(title => title.name)}
-          canApprove={canManagePersonnel(profile)}
-          canAssign={canEdit && !directoryError && !titlesQuery.isError}
         />
       ) : (
         <section className="space-y-4">

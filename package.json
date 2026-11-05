@@ -120,6 +120,7 @@
     "verify:workforce-management": "tsx --tsconfig tsconfig.app.json src/lib/company/workforce-management.verify.ts && node scripts/verify-workforce-management-db.mjs && node scripts/verify-workforce-management-browser.mjs",
     "verify:attendance-enrollment": "node scripts/verify-attendance-enrollment-db.mjs && node scripts/verify-attendance-enrollment-browser.mjs",
     "verify:operations-access-approval": "node scripts/verify-operations-access-approval-db.mjs",
+    "verify:employee-access": "tsx --tsconfig tsconfig.app.json src/features/org/new-employee-access.verify.ts && node scripts/verify-employee-onboarding-db.mjs && node scripts/verify-employee-access-browser.mjs",
     "verify:assigned-permissions": "tsx --tsconfig tsconfig.app.json src/lib/company/assigned-permissions.verify.ts && node scripts/verify-assigned-permissions-db.mjs",
     "verify:permission-storage": "node scripts/verify-permission-storage-db.mjs",
     "verify:auth-recovery-browser": "node scripts/verify-auth-recovery-browser.mjs",

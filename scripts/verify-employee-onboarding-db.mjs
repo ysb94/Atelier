@@ -4,6 +4,7 @@ import {PGlite} from '@electric-sql/pglite'
 import {build} from 'esbuild'
 import {pathToFileURL} from 'node:url'
 import path from 'node:path'
+import {verifyEmployeeAccessReview} from './employee-access-review-db.mjs'
 const target=path.resolve('node_modules/.tmp/onboarding-payroll.mjs')
 await build({entryPoints:['src/features/org/company-information-values.ts'],bundle:true,outfile:target,platform:'node',format:'esm'})
 const {calculateCompanyWage,calculateCompanyPeriods,CALCULATED_WAGE_KEYS,CALCULATED_PERIOD_KEYS}=await import(pathToFileURL(target).href)
@@ -103,4 +104,5 @@ assert.equal((await get(testId)).personal.residentFront,'940102');assert.equal(a
 await actor(manager);await denied('select get_employee_onboarding($1)',[testId])
 await db.exec('reset role;set role anon');await denied('select list_employee_onboardings()');await denied('select get_employee_onboarding(null)')
 console.log('PASS onboarding migration preservation, self/ops/company/anon access, draft/submit, payroll, files/failure/concurrency, completion/reopen, test isolation and no broad roster grants')
+await verifyEmployeeAccessReview(db,{company,other,ops,dept,manager,staff,outsider})
 }catch(error){console.error(error.stack,{code:error.code});process.exitCode=1}finally{await db.close()}

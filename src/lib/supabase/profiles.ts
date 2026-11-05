@@ -12,6 +12,8 @@ import {
 } from '@/lib/company/capabilities'
 import { validatePersonName } from '@/lib/company/person-name'
 import { getSupabase } from '@/lib/supabase/client'
+import { diagnosticQuery } from './diagnostic-query'
+import type { DiagnosticContext } from '@/lib/diagnostics'
 
 export type ProfileStatus = 'pending' | 'active' | 'rejected' | 'disabled'
 
@@ -590,6 +592,7 @@ export async function listManageableProfiles(): Promise<Profile[]> {
 
 export async function approveMember(
   input: ApproveMemberInput,
+  context?: DiagnosticContext,
 ): Promise<Profile> {
   const displayName = validatePersonName(input.displayName ?? '')
 
@@ -613,24 +616,25 @@ export async function approveMember(
     display_name: displayName,
   }
 
-  const { data, error } = await getSupabase()
+  const data = await diagnosticQuery<ProfileRow>('app', 'access_approve', getSupabase()
     .from('profiles')
     .update(patch)
     .eq('id', input.profileId)
+    .eq('company_id', DEFAULT_COMPANY_ID)
+    .eq('status', 'pending')
     .select(PROFILE_COLUMNS)
-    .single()
+    .single(), context)
 
-  if (error) throw toStoreError(error)
   return hydrateProfile(data as ProfileRow)
 }
 
-export async function rejectMember(profileId: string): Promise<Profile> {
+export async function rejectMember(profileId: string, context?: DiagnosticContext): Promise<Profile> {
   const { data: userData, error: userError } = await getSupabase().auth.getUser()
   if (userError) throw toStoreError(userError)
   const actorId = userData.user?.id
   if (!actorId) throw new Error('로그인이 필요합니다.')
 
-  const { data, error } = await getSupabase()
+  const data = await diagnosticQuery<ProfileRow>('app', 'access_reject', getSupabase()
     .from('profiles')
     .update({
       status: 'rejected',
@@ -638,11 +642,30 @@ export async function rejectMember(profileId: string): Promise<Profile> {
       approved_at: new Date().toISOString(),
     })
     .eq('id', profileId)
+    .eq('company_id', DEFAULT_COMPANY_ID)
+    .eq('status', 'pending')
     .select(PROFILE_COLUMNS)
-    .single()
+    .single(), context)
 
-  if (error) throw toStoreError(error)
   return hydrateProfile(data as ProfileRow)
+}
+
+export async function listEmployeeAccessRequests(): Promise<Profile[]> {
+  const rows = await diagnosticQuery<ProfileRow[]>('app', 'access_requests', getSupabase().from('profiles')
+    .select(PROFILE_COLUMNS).eq('company_id', DEFAULT_COMPANY_ID).in('status', ['pending', 'rejected'])
+    .order('requested_at', { ascending: false, nullsFirst: false }))
+  // 가입 확인에는 기본 프로필만 필요하다. 타인의 역량·브랜드 연결은 추가 조회하지 않는다.
+  return rows.map(row => toProfile(row, [], []))
+}
+
+/** 기존 계정 정보 저장은 승인 상태·승인 이력을 바꾸지 않는다. */
+export async function saveMemberAccount(input: ApproveMemberInput): Promise<Profile> {
+  const data = await diagnosticQuery<ProfileRow>('app', 'member_account_save', getSupabase().from('profiles')
+    .update({ display_name: validatePersonName(input.displayName || ''), department_id: input.departmentId || null,
+      position: input.position.trim() || null, job_grade: input.jobGrade?.trim() || null, is_admin: input.isAdmin })
+    .eq('id', input.profileId).eq('company_id', DEFAULT_COMPANY_ID).in('status', ['active', 'disabled'])
+    .select(PROFILE_COLUMNS).single())
+  return hydrateProfile(data)
 }
 
 export async function setMemberDisabled(
