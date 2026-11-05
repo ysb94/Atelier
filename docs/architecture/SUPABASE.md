@@ -1,6 +1,6 @@
 # Supabase 데이터 아키텍처 원칙
 
-- 2026-11-05 My Schedule의 같은 부서 확정 연차·외근·공가 공유는 [DEPARTMENT_ABSENCE_SCHEDULE.md](DEPARTMENT_ABSENCE_SCHEDULE.md)를 따른다. 최소 정보만 반환하는 읽기 전용 RPC를 로컬에 준비했으며 기존 신청 상세·쓰기 정책을 유지한다. 공유 DB 적용과 test/main 배포는 아직 하지 않았다.
+- 2026-11-05 My Schedule의 같은 부서 확정 연차·외근·공가 공유는 [DEPARTMENT_ABSENCE_SCHEDULE.md](DEPARTMENT_ABSENCE_SCHEDULE.md)를 따른다. 승인 후 공유 DB에 `20261105060910_department_absence_schedule`을 적용했다. 실제 활성 직원 38계정의 최소 조회 범위와 3개 접근 차단, 기존 9개 표·정책·권한·연차/출퇴근/승인 함수 보존을 검증했다. test/main 사이트 배포는 하지 않았다.
 
 - 2026-11-05 신청 시작~실제 퇴근의 자동 야근 연결은 [OVERTIME_CHECKOUT_LINK.md](OVERTIME_CHECKOUT_LINK.md)를 따른다. 사용자 승인 후 원격 `20261105031646_overtime_checkout_link`를 적용했다. 기존 8개 업무 표 원본·정책·관련 권한·기존 view를 보존하고 활성 직원 37계정의 실제 인증 역할 조회 및 접근 차단을 검증했다. 별도 시간·휴게 입력 UI를 제거했으며 test/main 사이트 배포는 하지 않았다.
 
