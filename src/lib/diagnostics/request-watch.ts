@@ -86,7 +86,9 @@ export function createDiagnosticFetch(supabaseUrl: string, fetcher: typeof fetch
         recordDiagnostic(context, 'failed', { ...meta, ...diagnosticError(null, response.status), ...(method === 'GET' || method === 'HEAD' ? {} : { writeOutcome: 'unknown' }) }, performance.now() - at)
         void errorDetails(response).then(details => recordDiagnostic(context, 'failed', { ...meta, ...details }, performance.now() - at)).catch(() => recordDiagnostic(context, 'failed', { ...meta, reason: 'error_body_unavailable' }, performance.now() - at))
       } else recordDiagnostic({ ...context, stage: 'response_headers' }, 'step', meta, performance.now() - at)
-      if (!response.body || response.status === 0) { finish(response.ok ? 'completed' : 'failed', meta, response.ok); return response }
+      // Chromium may expose an empty stream for HEAD/204. Reconstructing those
+      // responses with any body throws even though the server write succeeded.
+      if (method === 'HEAD' || [204, 205, 304].includes(response.status) || !response.body || response.status === 0) { finish(response.ok ? 'completed' : 'failed', meta, response.ok); return response }
       const reader = response.body.getReader()
       const body = new ReadableStream<Uint8Array>({
         async pull(stream) {
