@@ -5,8 +5,11 @@ import { emptyList } from '@/lib/utils'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
 import { useAuth } from '@/lib/supabase/auth'
+import { isHeadOfficeMember, isPersonnelMember } from '@/lib/company/workforce-management'
+import { useWorkforceManagement } from '@/lib/company/workforce-management-context'
 
-export function useOpsDirectory() {
+export function useOpsDirectory(scope: 'all' | 'head-office' | 'personnel' = 'all') {
+  const workforce = useWorkforceManagement()
   const active = useWorkspaceTabActivity()
   const { session, profile } = useAuth()
   const userId = session?.user.id
@@ -39,7 +42,12 @@ export function useOpsDirectory() {
   }, [membersQuery.error])
 
   const departments = allowed ? departmentsQuery.data ?? emptyList<Department>() : emptyList<Department>()
-  const members = allowed ? membersQuery.data ?? emptyList<OrgChartMember>() : emptyList<OrgChartMember>()
+  const sourceMembers = allowed ? membersQuery.data ?? emptyList<OrgChartMember>() : emptyList<OrgChartMember>()
+  const members = useMemo(() => {
+    if (scope !== 'all' && (workforce?.loading || workforce?.error)) return emptyList<OrgChartMember>()
+    const decorated = workforce ? sourceMembers.map(workforce.decorate) : sourceMembers
+    return scope === 'all' ? decorated : decorated.filter(scope === 'head-office' ? isHeadOfficeMember : isPersonnelMember)
+  }, [sourceMembers, scope, workforce])
   const departmentNames = useMemo(
     () => new Map(departments.map((dept) => [dept.id, dept.name])),
     [departments],
@@ -53,12 +61,13 @@ export function useOpsDirectory() {
     departments,
     members,
     departmentName,
-    loading: allowed && (departmentsQuery.isPending || membersQuery.isPending),
-    error: departmentsQuery.error || membersQuery.error,
+    loading: allowed && (departmentsQuery.isPending || membersQuery.isPending || (scope !== 'all' && Boolean(workforce?.loading))),
+    error: departmentsQuery.error || membersQuery.error || (scope !== 'all' ? workforce?.error : null),
     refetch: () => {
       if (!enabled) return
       void departmentsQuery.refetch()
       void membersQuery.refetch()
+      if (scope !== 'all') void workforce?.refresh()
     },
   }
 }

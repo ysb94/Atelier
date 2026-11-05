@@ -33,7 +33,7 @@ export function AttendanceStartSettingsPanel({ directory, schedules, initialEmpl
   const { profile } = useAuth()
   const queryClient = useQueryClient()
   const approvers = useDepartmentApprovers()
-  const roster = useOpsDirectory()
+  const roster = useOpsDirectory('head-office')
   const canEdit = schedules.canEdit && !readOnly
   const { members: allMembers, departmentName } = directory
   const [chatPending, setChatPending] = useState<string | null>(null)

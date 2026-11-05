@@ -22,7 +22,7 @@ export async function exportAttendance(month: string, rows: AttendanceRow[], rec
   const detailSheet = workbook.addWorksheet('날짜별 기록')
   detailSheet.addRow(['날짜', '이름', '부서', '상태', '출근', '퇴근', '해당 날짜 출근 기준', '정시 이후', '기준 초과', '확인', '메모'])
   for (const row of rows) for (const date of monthDates(month)) {
-    if (date < attendanceTrackingStart(row.member.hireDate)) continue
+    if (date < attendanceTrackingStart(row.member.hireDate, row.member.attendanceTrackedFrom)) continue
     const record = records[date]?.[row.member.id] ?? EMPTY_ATTENDANCE
     if (record.status === 'unset' && !record.note) continue
     const timing = recordTiming(record, row.schedule)

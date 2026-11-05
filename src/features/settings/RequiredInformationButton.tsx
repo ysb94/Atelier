@@ -4,6 +4,8 @@ import { Eye, EyeOff, FileText, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { useAuth } from '@/lib/supabase/auth'
+import { useWorkforceManagement } from '@/lib/company/workforce-management-context'
+import { workforceMode } from '@/lib/company/workforce-management'
 import { RELEASE_COMPANY_ID, RELEASE_EXCEPTION_IDS } from '@/lib/company/release-access'
 import { OnboardingFiles } from '@/features/org/OnboardingFiles'
 import { EMPLOYEE_FILES, ONBOARDING_QUERY, getOnboarding, listOnboardings, loadMyOnboarding, onboardingInformationRows, saveOnboarding, startOnboardingTest, type OnboardingRecord } from '@/lib/supabase/employee-onboarding'
@@ -46,7 +48,8 @@ export function RequiredInformationButton() {
 }
 function RequiredInformationContent() {
   const {profile,session}=useAuth(), client=useQueryClient()
-  const active=profile?.status==='active' && profile.companyId===RELEASE_COMPANY_ID && session?.user.id===profile.id
+  const workforce=useWorkforceManagement()
+  const active=profile?.status==='active' && profile.companyId===RELEASE_COMPANY_ID && session?.user.id===profile.id && (workforce?.ownMode ?? workforceMode(profile))!=='external'
   const developer=active && import.meta.env.DEV && profile.id===RELEASE_EXCEPTION_IDS[0]
   const queryKey=[ONBOARDING_QUERY,'mine',profile?.id,session?.user.id]
   const query=useQuery({queryKey,queryFn:async()=>{

@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
+import { useWorkforceManagement } from '@/lib/company/workforce-management-context'
+import { workforceMode } from '@/lib/company/workforce-management'
 import { approveMember, listManageableProfiles, rejectMember } from '@/lib/supabase/profiles'
 import { canManageOnboarding, ONBOARDING_QUERY, EMPLOYEE_FILES, SIGNED_FILES, listOnboardings, getOnboarding, saveOnboarding, completeOnboarding, onboardingInformationRows, type OnboardingRecord, type OnboardingEmployee } from '@/lib/supabase/employee-onboarding'
 import { NewEmployeeCompanyInformation, type CompanyInformation } from './NewEmployeeCompanyInformation'
@@ -16,6 +18,7 @@ export function NewEmployeesPanel(props:Props){
   return <NewEmployeesContent key={`${profile?.id}:${session?.user.id}`} {...props}/>
 }
 function NewEmployeesContent({departments,duties,grades,canApprove}:Props){
+  const workforce=useWorkforceManagement()
   useRenderWatch('NewEmployeesPanel')
   const {profile:actor,session}=useAuth(),client=useQueryClient()
   const allowed=canManageOnboarding(actor)
@@ -37,7 +40,7 @@ function NewEmployeesContent({departments,duties,grades,canApprove}:Props){
     }
     setPart(null);setRecord(null)
   })}
-  const rows=(query.data?.items||[]).filter(person=>Boolean(person.completedAt)===(view==='complete'))
+  const rows=(query.data?.items||[]).filter(person=>(workforce?.byId.get(person.profileId)?.mode ?? workforceMode(person))!=='external' && Boolean(person.completedAt)===(view==='complete'))
   if(!allowed)return <p className="text-sm text-muted-foreground">운영지원 부서와 지정된 예외 계정만 신규 직원 정보를 관리할 수 있습니다.</p>
   return <section className="space-y-4" aria-label="신규 직원"><div className="rounded-xl border border-border bg-card px-5 py-4 shadow-sm"><h2 className="text-base font-semibold">신규 직원</h2><p className="mt-1 text-sm text-muted-foreground">가입 승인 후 정보·서류를 확인하고 완료 처리합니다. 부서 배치 후에도 완료 전까지 표시됩니다.</p></div>
     <div className="flex flex-wrap items-center gap-2"><Button variant={view==='active'?'default':'outline'} size="sm" onClick={()=>setView('active')}>진행 중</Button><Button variant={view==='complete'?'default':'outline'} size="sm" onClick={()=>setView('complete')}>완료 목록</Button><Button variant="outline" size="sm" disabled={busy} onClick={()=>void query.refetch()}>새로고침</Button></div>

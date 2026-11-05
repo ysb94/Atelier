@@ -1,6 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
+import { isHeadOfficeMember } from '@/lib/company/workforce-management'
+import { useWorkforceManagement } from '@/lib/company/workforce-management-context'
 import { readImpersonationState } from '@/lib/supabase/impersonation'
 import { confirmPreviousClockOut, getMyWorkdayBasis } from '@/lib/supabase/attendance-entry'
 import { listLeaveRequests } from '@/lib/supabase/leave-requests'
@@ -18,7 +20,8 @@ function skippedTarget() {
 function useEntryState() {
   const { session, profile, signOut } = useAuth()
   const userId = session?.user.id
-  const allowed = Boolean(userId && profile?.status === 'active')
+  const workforce = useWorkforceManagement()
+  const allowed = Boolean(userId && profile?.status === 'active' && (workforce ? workforce.selfService : isHeadOfficeMember(profile)))
   const cache = useQueryClient()
   const clock = useMyClockIn()
   const [now, setNow] = useState(() => new Date())

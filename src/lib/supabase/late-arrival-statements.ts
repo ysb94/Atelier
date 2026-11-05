@@ -310,9 +310,11 @@ export type LateStatementNotice = {
 }
 
 export async function listMyLateStatementNotices(): Promise<LateStatementNotice[]> {
-  const { data, error } = await getSupabase().rpc('list_my_late_statement_notices')
+  let { data, error } = await getSupabase().rpc('list_my_managed_late_notices')
+  // Older servers retain the existing notices and receipts until scope setup is applied.
+  if (error && ['PGRST202', '42883'].includes(error.code)) ({ data, error } = await getSupabase().rpc('list_my_late_statement_notices'))
   if (error) {
-    console.warn('[late-arrival] 사유서 알림 조회 실패', error)
+    console.warn('[late-arrival] 사유서 알림 조회 실패', { code: error.code })
     throw new Error('지각 사유서 알림을 불러오지 못했습니다.')
   }
   return ((data ?? []) as { kind: string; notice_id: string; statement_id: string; employee_name: string; work_date: string; late_minutes: number; created_at: string; read_at: string | null }[]).map(row => ({

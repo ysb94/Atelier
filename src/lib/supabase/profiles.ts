@@ -247,6 +247,8 @@ async function capabilitiesFor(
 }
 
 export type OrgChartMember = {
+  workforceMode?: import('@/lib/company/workforce-management').WorkforceMode
+  attendanceTrackedFrom?: string
   attendanceExempt?: boolean
   id: string
   displayName: string | null

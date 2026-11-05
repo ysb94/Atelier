@@ -19,6 +19,7 @@ const SCREEN_READ_RPCS = new Set([
   'list_my_approval_requests', 'employee_extra_leave_records', 'my_extra_leave_entries',
   'employee_leave_advances', 'list_my_extra_leave_notices', 'leave_notice_management_v2',
   'leave_usage_notice_management', 'list_my_home_work_notifications',
+  'list_workforce_management', 'get_logistics_operations', 'list_my_managed_work_notifications', 'list_my_managed_late_notices',
   'list_company_meetings', 'list_meeting_directory', 'list_meeting_member_participation',
   'list_meeting_calendar', 'list_meeting_availability_with_todos', 'list_my_meeting_invitations',
   'list_my_chat_rooms', 'list_chat_directory', 'list_chat_room_members', 'chat_storage_usage',

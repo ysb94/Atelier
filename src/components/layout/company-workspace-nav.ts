@@ -109,6 +109,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
     items: [
       { to: '/product-work/logistics', label: '상품 정보', icon: Boxes },
       { to: '/work-requests/logistics', label: '부서 업무', icon: ClipboardList },
+      { to: '/logistics/operations', label: '물류 운영관리', icon: ClipboardList },
       { to: '/logistics/invoices', label: '온라인 송장작업', icon: FileSpreadsheet },
       {
         to: '/logistics/barcode-outbound-data-entry',

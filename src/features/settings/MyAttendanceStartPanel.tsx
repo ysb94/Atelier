@@ -15,7 +15,7 @@ import '@/features/operations-support/attendance-start-settings.css'
 export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: string[] }) {
   useRenderWatch('MyAttendanceStartPanel')
   const { profile } = useAuth()
-  const directory = useOpsDirectory()
+  const directory = useOpsDirectory('head-office')
   const { members: directoryMembers, departmentName } = directory
   const schedules = useAttendanceStartSettings({ assigned: true, departmentIds })
   const now = new Date()

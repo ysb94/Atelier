@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
+import { useHeadOfficeSelfService } from '@/lib/company/workforce-management-context'
 import { usePagePreview } from '@/lib/company/page-preview-context'
 import { readImpersonationState } from '@/lib/supabase/impersonation'
 import { listMyLeaveUsageNotices, recordLeaveUsageNotice, type LeaveUsageNotice } from '@/lib/supabase/leave-usage-notices'
@@ -10,8 +11,9 @@ import { sharedReadPolicy } from '@/lib/query/shared-read-policy'
 
 export function useLeaveUsageNotices() {
   const { profile, session } = useAuth()
+  const selfService = useHeadOfficeSelfService()
   const preview = usePagePreview()
-  const enabled = Boolean(profile?.status === 'active' && session?.user.id === profile.id && !preview?.active)
+  const enabled = Boolean(profile?.status === 'active' && session?.user.id === profile.id && !preview?.active && selfService)
   const impersonation = enabled ? readImpersonationState() : null
   const canConfirm = enabled && !impersonation
   const employeeId = profile?.id

@@ -1,6 +1,8 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
+import { useWorkforceManagement, useHeadOfficeSelfService } from '@/lib/company/workforce-management-context'
+import { workforceMode } from '@/lib/company/workforce-management'
 import { canAccessOperationsSupport } from '@/lib/company/capabilities'
 import { listLeaveRequests, submitLeaveRequest, transitionLeaveRequest, type LeaveRequest } from '@/lib/supabase/leave-requests'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
@@ -11,9 +13,11 @@ import { diagnosticOperation, inputDiagnosticContext, newDiagnosticContext, trac
 
 export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' = 'mine') {
   const { session, profile } = useAuth()
+  const selfService = useHeadOfficeSelfService()
+  const workforce = useWorkforceManagement()
   const userId = session?.user.id
   const active = useWorkspaceTabActivity()
-  const allowed = profile?.status === 'active' && (scope !== 'all' || canAccessOperationsSupport(profile))
+  const allowed = profile?.status === 'active' && (scope !== 'mine' || selfService) && (scope !== 'all' || canAccessOperationsSupport(profile))
   const client = useQueryClient()
   const query = useQuery({
     queryKey: ['company-leave-requests', userId, scope, allowed],
@@ -51,8 +55,10 @@ export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' = 'mine') {
     onSuccess: (_data, input) => refresh(inputDiagnosticContext(input), 'committed'),
     onError: (_error, input) => refresh(inputDiagnosticContext(input)),
   })
-  return { requests: allowed ? query.data ?? emptyList<LeaveRequest>() : emptyList<LeaveRequest>(),
-    loading: query.isPending && Boolean(allowed), error: query.error,
+  const source = allowed && !workforce?.loading && !workforce?.error ? query.data ?? emptyList<LeaveRequest>() : emptyList<LeaveRequest>()
+  const requests = useMemo(() => scope === 'mine' ? source : source.filter(row => (workforce?.byId.get(row.employeeId)?.mode ?? workforceMode(row)) === 'head-office'), [source, scope, workforce])
+  return { requests,
+    loading: (query.isPending || Boolean(workforce?.loading)) && Boolean(allowed), error: workforce?.error || query.error,
     refresh: () => query.refetch(), create, transition, userId,
     busy: create.isPending || transition.isPending }
 }

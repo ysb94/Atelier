@@ -38,6 +38,7 @@ import { CompanyWarehouseFinderPage } from '@/features/logistics/WarehouseFinder
 import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
 import { CompanyTemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
 import { OperationsSupportPage } from '@/features/operations-support/OperationsSupportPage'
+import { LogisticsOperationsPage } from '@/features/logistics/operations/LogisticsOperationsPage'
 import { DutyFreePage } from '@/features/b2b/DutyFreePage'
 import { MamamIdeaInboxPage } from '@/features/mamam/MamamIdeaInboxPage'
 import { DeveloperPreviewPage } from './DeveloperPreview'
@@ -171,6 +172,7 @@ export const companyWorkspaceRoutes = (
       />
       <Route path="design/file-manager" element={<DesignFileManagerRoute />} />
       <Route path="logistics/invoices" element={<CompanyInvoiceWorkPage />} />
+      <Route path="logistics/operations" element={<LogisticsOperationsPage />} />
       <Route
         path="logistics/invoice-data-entry"
         element={<RedirectTo to="/logistics/invoices" />}

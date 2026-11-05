@@ -21,7 +21,7 @@ export function AdvanceHistory({ events }: { events: AdvanceEvent[] }) {
 export function LeaveAdvancePanel() {
   useRenderWatch('LeaveAdvancePanel')
   const query = useLeaveAdvances(true)
-  const directory = useOpsDirectory()
+  const directory = useOpsDirectory('head-office')
   const client = useQueryClient()
   const [employeeId, setEmployeeId] = useState('')
   const [action, setAction] = useState<'limit' | 'import' | 'import_cancel'>('limit')

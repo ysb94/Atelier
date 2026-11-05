@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { getMyAttendanceExemption } from '@/lib/supabase/attendance-exemptions'
 import { useAuth } from '@/lib/supabase/auth'
+import { isHeadOfficeMember } from '@/lib/company/workforce-management'
+import { useWorkforceManagement } from '@/lib/company/workforce-management-context'
 import { getSupabase } from '@/lib/supabase/client'
 import { recordAccessIp } from '@/lib/supabase/access-ip'
 import { emptyList } from '@/lib/utils'
@@ -26,11 +28,13 @@ async function clockInToday(): Promise<string> {
 export function useMyClockIn() {
   const { profile, session } = useAuth()
   const userId = session?.user.id
-  const allowed = profile?.status === 'active' && Boolean(userId)
+  const workforce = useWorkforceManagement()
+  const selfService = workforce ? workforce.selfService : isHeadOfficeMember(profile)
+  const allowed = profile?.status === 'active' && Boolean(userId) && selfService
   const active = useWorkspaceTabActivity()
   const client = useQueryClient()
   const exemption = useQuery({ queryKey: ['my-attendance-exemption', userId], queryFn: () => getMyAttendanceExemption(userId!), ...sharedReadPolicy, enabled: allowed && active, refetchInterval: readPollInterval(30_000, allowed && active) })
-  const exempt = exemption.data === true && !exemption.error
+  const exempt = !selfService || (exemption.data === true && !exemption.error)
   const query = useQuery({ queryKey: ['attendance-clock-ins', userId, allowed], queryFn: () => listMyAttendanceClocks(userId!), ...sharedReadPolicy, enabled: allowed && active, refetchInterval: readPollInterval(30_000, allowed && active) })
   useEffect(() => { if (query.error) console.warn('[attendance-clock] 출근 기록 불러오기 실패', query.error) }, [query.error])
   useEffect(() => { if (exemption.error) console.warn('[attendance-clock] 제외 설정 확인 실패', exemption.error) }, [exemption.error])

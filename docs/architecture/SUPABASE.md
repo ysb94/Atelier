@@ -1,5 +1,7 @@
 # Supabase 데이터 아키텍처 원칙
 
+- 2026-11-05 본사 관리 대상·물류 수기 근무/휴가는 [WORKFORCE_MANAGEMENT.md](WORKFORCE_MANAGEMENT.md)를 따른다. 중국팀의 본사 인사·근태·연차 제외, 물류팀 별도 관리와 김보영 전용 화면을 로컬 코드·추가 마이그레이션으로 준비했다. 기존 계정·업무 권한·원본은 보존하며, 공유 DB 적용과 main 배포는 아직 하지 않았다.
+
 - 2026-11-05 운영지원부서 가입 승인·거절의 검사 순서는 [OPERATIONS_ACCESS_APPROVAL.md](OPERATIONS_ACCESS_APPROVAL.md)를 따른다. 사용자 승인 후 원격 `20261105070234_operations_access_approval_guard_order`와 `20261105070802_operations_access_approval_department_guard`를 적용했다. 실제 운영지원 계정과 가상 직원의 인증 역할 검증·전체 가상 기록 롤백, 기존 프로필·정책·권한 보존과 같은 회사의 활성 부서 검사를 확인했다. 기존 직원 정지·관리자 지정 권한은 추가하지 않았다.
 
 - 2026-11-05 중국팀 작업지시서 담당자 탭은 `china_work_assignees`에 둔다. 재직 중인 중국팀 직원만 추가하고 순번만 바꾸며, 기존 지시서 배정·확인·발송 함수는 그대로다. test/main 사이트 배포는 하지 않았다.

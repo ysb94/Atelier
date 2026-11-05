@@ -29,7 +29,7 @@ function formatOutputMonth(value: string) {
 
 export function DocumentOutputPanel() {
   useRenderWatch('DocumentOutputPanel')
-  const directory = useOpsDirectory()
+  const directory = useOpsDirectory('personnel')
   const currentYear = new Date().getFullYear()
   const [kind, setKind] = useState<OutputKind>('leave')
   const [selectedYear, setSelectedYear] = useState(() => String(new Date().getFullYear()))

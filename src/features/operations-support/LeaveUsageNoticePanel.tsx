@@ -10,6 +10,7 @@ import { StatGrid, StatTile } from '@/components/ui/stat-tile'
 import { StatusPill } from '@/components/ui/status-pill'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
+import { useOpsDirectory } from './ops-directory'
 import { canEditOrgAssignment } from '@/lib/company/capabilities'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { getLeaveNoticeManagement, LEAVE_NOTICE_LABELS, type LeaveUsageNotice, type LeaveNoticeSource } from '@/lib/supabase/leave-usage-notices'
@@ -20,6 +21,8 @@ type Filter = 'all' | 'pending' | 'setup'
 export function LeaveUsageNoticePanel() {
   useRenderWatch('LeaveUsageNoticePanel')
   const { profile } = useAuth()
+  const directory = useOpsDirectory('head-office')
+  const managedIds = useMemo(() => new Set(directory.members.map(member => member.id)), [directory.members])
   const permitted = canEditOrgAssignment(profile)
   const active = useWorkspaceTabActivity()
   const query = useQuery({ queryKey: ['leave-notice-management', profile?.id], queryFn: getLeaveNoticeManagement, enabled: permitted, refetchInterval: permitted && active ? 30_000 : false })
@@ -30,11 +33,11 @@ export function LeaveUsageNoticePanel() {
   const [document, setDocument] = useState<LeaveUsageNotice | null>(null)
   useEffect(() => { if (query.error) console.warn('[leave-notices] 운영지원 기록 조회 실패', { error: query.error }) }, [query.error])
   const groups = useMemo(() => !query.data ? [] : query.data.employees
-    .filter(e => (department === 'all' || e.department === department) && (e.display_name ?? '').includes(search.trim()))
+    .filter(e => managedIds.has(e.id) && (department === 'all' || e.department === department) && (e.display_name ?? '').includes(search.trim()))
     .map(employee => ({ employee, items: employeeLeaveNoticeItems(employee, query.data!).filter(i => source === 'all' || i.source === source) }))
-    .filter(g => g.items.length > 0), [query.data, department, search, source])
+    .filter(g => g.items.length > 0), [query.data, department, search, source, managedIds])
   if (!permitted) return <Card className="p-5 text-sm text-muted-foreground">직원별 잔여 연차와 확인 기록은 기존 명부 관리 권한이 있는 담당자만 확인할 수 있습니다.</Card>
-  const departments = [...new Set(query.data?.employees.map(row => row.department))].sort()
+  const departments = [...new Set(query.data?.employees.filter(row => managedIds.has(row.id)).map(row => row.department))].sort()
   const pending = (items: LeaveNoticeGroupItem[]) => items.reduce((sum, i) => sum + itemPendingNotices(i).length, 0)
   const needsSetup = (items: LeaveNoticeGroupItem[]) => items.some(i => i.source === 'base' && i.blocked && /미등록|확인 필요/.test(i.blocked))
   const visible = groups.filter(g => filter === 'all' || (filter === 'pending' ? pending(g.items) > 0 : needsSetup(g.items)))

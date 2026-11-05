@@ -1,4 +1,6 @@
 import { RosterChoiceSettings } from './RosterChoiceSettings'
+import { WorkforceManagementPanel } from './WorkforceManagementPanel'
+import { useWorkforceManagement } from '@/lib/company/workforce-management-context'
 import { NewEmployeesPanel } from './NewEmployeesPanel'
 import { useRosterChoiceSettings } from './use-roster-choice-settings'
 import { isRosterChoiceKey, rosterChoiceValues } from '@/lib/company/roster-choices'
@@ -23,6 +25,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { isPersonnelMember } from '@/lib/company/workforce-management'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { useEmployeeRoster } from '@/features/operations-support/use-employee-roster'
 import {
@@ -77,7 +80,7 @@ const TEAM_TONES = [
   'bg-[#dfecee] text-[#2d6470]',
 ] as const
 const UNASSIGNED_TONE = 'bg-muted text-muted-foreground'
-type OrgView = 'chart' | 'members' | 'new' | 'titles'
+type OrgView = 'chart' | 'members' | 'new' | 'titles' | 'workforce'
 type TeamGroup = {
   id: string
   name: string
@@ -193,7 +196,10 @@ export function OrgChartPage({
     queryFn: () => listPersonnelTitles(),
   })
   const departments = departmentsQuery.data ?? emptyList<Department>()
-  const members = membersQuery.data ?? emptyList<OrgChartMember>()
+  const workforce = useWorkforceManagement()
+  const sourceRows = membersQuery.data ?? emptyList<OrgChartMember>()
+  const sourceMembers = useMemo(() => workforce ? sourceRows.map(workforce.decorate) : sourceRows, [sourceRows, workforce])
+  const members = useMemo(() => mode === 'manage' ? workforce?.error ? emptyList<OrgChartMember>() : sourceMembers.filter(isPersonnelMember) : sourceMembers, [sourceMembers, mode, workforce?.error])
   const titles = titlesQuery.data ?? emptyList<PersonnelTitle>()
 
   useEffect(() => {
@@ -317,8 +323,8 @@ export function OrgChartPage({
   const loading =
     departmentsQuery.isPending ||
     membersQuery.isPending ||
-    titlesQuery.isPending
-  const directoryError = departmentsQuery.error || membersQuery.error
+    titlesQuery.isPending || (mode === 'manage' && Boolean(workforce?.loading))
+  const directoryError = departmentsQuery.error || membersQuery.error || (mode === 'manage' ? workforce?.error : null)
   const hasFilter = Boolean(needle) || departmentFilter !== 'all'
   async function refreshAssignments() {
     setEditingId(null)
@@ -404,6 +410,7 @@ export function OrgChartPage({
               { id: 'members', label: '직원 배치', icon: Users },
               { id: 'new', label: '신규직원', icon: UserPlus },
               { id: 'titles', label: '드롭다운 설정', icon: Settings2 },
+              { id: 'workforce', label: '본사 관리 대상', icon: Users },
             ] as const
           ).map((item) => (
             <button
@@ -552,6 +559,8 @@ export function OrgChartPage({
             filtered={hasFilter}
           />
         </div>
+      ) : activeView === 'workforce' ? (
+        <WorkforceManagementPanel members={sourceMembers} departmentName={departmentName} canEdit={canEdit && !directoryError} />
       ) : activeView === 'new' ? (
         <NewEmployeesPanel
           departments={departments}

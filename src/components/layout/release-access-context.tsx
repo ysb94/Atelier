@@ -4,10 +4,13 @@ import { useNavigationPreviewProfile } from '@/lib/company/developer-preview-con
 import { releaseAccess, releaseHref } from '@/lib/company/release-access'
 import { useDepartmentApprovers } from '@/features/operations-support/use-department-approvers'
 import { assignedDepartmentIds } from '@/lib/supabase/department-approvers'
+import { useWorkforceManagement } from '@/lib/company/workforce-management-context'
 
 function useReleaseState() {
   const { profile: real } = useAuth()
-  const profile = useNavigationPreviewProfile(real)
+  const displayed = useNavigationPreviewProfile(real)
+  const workforce = useWorkforceManagement()
+  const profile = useMemo(() => displayed && workforce ? workforce.decorate(displayed) : displayed, [displayed, workforce])
   const approvals = useDepartmentApprovers()
   const departments = useMemo(() => assignedDepartmentIds(approvals.settings, profile?.id), [approvals.settings, profile?.id])
   const approver = !approvals.loading && !approvals.error && departments.length > 0

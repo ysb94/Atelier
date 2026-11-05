@@ -88,6 +88,18 @@ try {
   await page.getByText('부서 일정 서버 연결 준비 중입니다.', { exact: true }).waitFor(); const pending = await page.evaluate(() => window.__deptCalls.length)
   await page.clock.runFor(61000); assert.equal(await page.evaluate(() => window.__deptCalls.length), pending, 'missing API does not repeat automatic requests')
   await page.evaluate(() => { window.__unready = false }); await page.getByRole('button', { name: '부서 일정 새로고침', exact: true }).click(); await list.waitFor()
+  for(const departmentId of ['c5d4cfca-97ce-4ca7-b30a-6beed842cf1e','bf926822-910c-422f-9c17-5fd3d8ddb3ba']) {
+    await page.evaluate(departmentId=>window.__setProfile({id:'other',companyId:'company',departmentId,status:'active'}),departmentId)
+    await page.getByText('할 일과 회의 일정을 확인하고 관리합니다.',{exact:true}).waitFor()
+    assert.equal(await list.count(),0,'separate/external management shows no headquarters department leave layer')
+    assert.equal(await page.getByRole('button',{name:'알림 설정',exact:true}).count(),0)
+    assert.equal(await page.getByRole('button',{name:'출근하기',exact:true}).count(),0)
+    await page.getByRole('button',{name:'+추가',exact:true}).click()
+    assert.equal(await page.getByRole('menuitem',{name:'Todo',exact:true}).count(),1,'work-only accounts retain their to-do calendar')
+    assert.equal(await page.getByRole('menuitem',{name:'월차/연차',exact:true}).count(),0)
+    await page.getByRole('button',{name:'+추가',exact:true}).click()
+  }
+  await page.evaluate(()=>window.__setProfile({id:'other',companyId:'company',departmentId:'visual',departmentName:'Visual팀',status:'active'}));await list.waitFor()
   await page.evaluate(() => window.__mismatch()); await page.getByText('활성 직원 계정으로 로그인해 주세요.', { exact: true }).waitFor(); assert.equal(await list.count(), 0)
   assert.deepEqual(errors, []); assert.deepEqual(external, [])
   console.log('PASS real My Schedule PC/mobile: department layer/day list/overflow/search, own detail preserved, month/account isolation, hidden/disabled polling, failures/missing server, no peer mutations/read marks; external API blocked')
