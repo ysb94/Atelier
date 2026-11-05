@@ -65,6 +65,17 @@ export const companyTopNav: CompanyNavItem[] = [
   { to: '/org-chart', label: '조직도', icon: Network },
 ]
 
+/** B2B 사업팀 메뉴. 부서 목록의 빈 칸에만 붙이고 다른 부서 메뉴와 섞지 않는다. */
+export const dutyFreeNavItem: CompanyNavItem = {
+  to: '/b2b/duty-free',
+  label: '면세',
+  icon: Store,
+}
+
+function departmentMenuItems(title: string): CompanyNavItem[] {
+  return title === 'B2B 사업' ? [dutyFreeNavItem] : []
+}
+
 export const companyNavGroups: CompanyNavGroup[] = [
   {
     title: '테스트',
@@ -189,9 +200,12 @@ export function companyNavGroupsForProfile(
     ]
     return items.length > 0 ? [{ ...group, items }] : []
   })
+  const departmentItems = scope.departmentTitle
+    ? departmentMenuItems(scope.departmentTitle).filter(item => releaseHref(profile, item.to) !== null)
+    : []
   const departmentGroups = !scope.unrestricted && scope.departmentTitle
     && !visibleGroups.some(group => group.title === scope.departmentTitle)
-    ? [...visibleGroups, { title: scope.departmentTitle, items: [] }]
+    ? [...visibleGroups, { title: scope.departmentTitle, items: departmentItems }]
     : visibleGroups
   return canAccessMamamIdeaInbox(profile) && scope.unrestricted
     ? [...departmentGroups, mamamInboxGroup]
@@ -232,7 +246,7 @@ export function missingDepartmentNavGroups(
     const key = title.toLocaleLowerCase('ko')
     if (!title || HIDDEN_DEPARTMENT_LABELS.has(title) || taken.has(key) || seen.has(key)) continue
     seen.add(key)
-    missing.push({ title, items: [] })
+    missing.push({ title, items: departmentMenuItems(title) })
   }
   return missing
 }

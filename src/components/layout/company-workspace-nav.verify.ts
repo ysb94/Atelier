@@ -15,7 +15,8 @@ assert.deepEqual(missing.map(group => group.title), ['Contents', 'Global Online'
 assert.equal(missing.some(group => group.title === 'Visual'), false, 'Visual Team은 디자인 메뉴를 이름만 바꾼 것이다')
 assert.equal(companyNavGroups.some(group => group.title === 'Visual'), true)
 assert.equal(companyNavGroups.some(group => group.title === '디자인'), false)
-assert.ok(missing.every(group => group.items.length === 0))
+assert.deepEqual(missing.find(group => group.title === 'B2B 사업')?.items.map(item => item.label), ['면세'])
+assert.ok(missing.filter(group => group.title !== 'B2B 사업').every(group => group.items.length === 0))
 
 const inserted = insertMissingDepartmentGroups(companyNavGroups, departments)
 const titles = inserted.map(group => group.title)

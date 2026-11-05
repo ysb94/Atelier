@@ -16,7 +16,7 @@ const mocked = [
   'lib/supabase/attendance-clocks', 'lib/supabase/attendance-exemptions', 'lib/supabase/access-ip',
   'lib/supabase/attendance-entry', 'lib/supabase/offsite-attendance', 'lib/supabase/offsite-groups',
   'lib/supabase/leave-requests', 'lib/supabase/department-approvers', 'lib/supabase/company-notices',
-  'lib/supabase/personal-schedule-todos', 'lib/supabase/leave-advances', 'lib/supabase/meetings',
+  'lib/supabase/personal-schedule-todos', 'lib/supabase/leave-advances', 'lib/supabase/meetings', 'lib/supabase/department-schedule',
   'lib/supabase/impersonation', 'lib/diagnostics', 'lib/company/permissions', 'lib/company/capabilities',
   'components/layout/release-access-context', 'components/layout/PageHeader',
   'features/home/HomeAttendanceSummary', 'features/home/LateArrivalClockIn', 'features/home/LateStatementReview',
@@ -79,6 +79,7 @@ export const listLeaveAdvances=async()=>{hit('advances');return{ready:true,emplo
 export const listScheduleTodos=async(owner)=>{hit('todos');return owner==='employee-a'?[{id:'todo-a',date:'2026-11-04',title:'서버 일정 '+window.__revision,done:false}]:[]};
 export const saveScheduleTodo=async()=>{},deleteScheduleTodo=async()=>{};
 export const listCompanyMeetings=async()=>{hit('meetings');return []};
+export const listDepartmentAbsences=async()=>{hit('department-schedule');return{ready:true,rows:EMPTY}};
 `)
 await fs.writeFile(entry, `
 import React,{useState} from 'react';import{createRoot}from'react-dom/client';
@@ -201,8 +202,9 @@ try{
   await baseline.goto(origin+'/settings/profile?part=meetings&unscopedBaseline')
   await baseline.waitForFunction(()=>window.__counts?.['month-clocks']&&window.__cache.isFetching()===0)
   const baselineReads=await baseline.evaluate(()=>({...window.__counts}));await baseline.close()
-  assert.equal(Object.keys(baselineReads).length-Object.keys(initial).length,9)
-  const report={normalEmployee:true,initialHiddenReads:initial,unscopedBaselineReads:baselineReads,initialCallsSaved:9,firstVisibleReads:visible,checks:['hidden first-load/poll suppressed','global attendance retained','form preserved','invalidation refetch on return','own cancellation','account reset','account/company directory cache isolation without cache.clear','session/profile mismatch blocked','workspace inactivity','failed read recovery'],externalRequests:external.length}
+  // The new department schedule is also suppressed by the inner activity scope.
+  assert.equal(Object.keys(baselineReads).length-Object.keys(initial).length,10)
+  const report={normalEmployee:true,initialHiddenReads:initial,unscopedBaselineReads:baselineReads,initialCallsSaved:10,firstVisibleReads:visible,checks:['hidden first-load/poll suppressed','department schedule hidden read suppressed','global attendance retained','form preserved','invalidation refetch on return','own cancellation','account reset','account/company directory cache isolation without cache.clear','session/profile mismatch blocked','workspace inactivity','failed read recovery'],externalRequests:external.length}
   await fs.writeFile(path.join(dir,'result.json'),JSON.stringify(report,null,2))
   console.log('hidden-schedule-browser: PASS '+JSON.stringify(report))
 }finally{await browser?.close();await new Promise(resolve=>server.close(resolve))}
