@@ -56,12 +56,12 @@ export function recordTiming(record: AttendanceRecord, schedule: AttendanceSched
   }
 }
 
-export function monthlyAttendance(memberId: string, month: string, records: AttendanceRecords, schedule: AttendanceSchedule, overrides: WorkdayOverrides, today: string) {
+export function monthlyAttendance(memberId: string, month: string, records: AttendanceRecords, schedule: AttendanceSchedule, overrides: WorkdayOverrides, today: string, trackingStart?: string) {
   let annual = 0, half = 0, official = 0, absent = 0, after = 0, exceeded = 0
   const arrivals: number[] = [], missingDates: string[] = [], pendingDates: string[] = []
   let dueDays = 0
   for (const date of monthDates(month)) {
-    if (date > today) continue
+    if (date > today || (trackingStart && date < trackingStart)) continue
     const workday = isWorkday(date, overrides)
     const record = records[date]?.[memberId] ?? EMPTY_ATTENDANCE
     if (workday && record.status !== 'holiday') dueDays++

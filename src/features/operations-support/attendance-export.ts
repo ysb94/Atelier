@@ -1,5 +1,6 @@
 import { downloadExcelWorkbook } from '@/lib/export/product-workbook'
 import type { OrgChartMember } from '@/lib/supabase/profiles'
+import { attendanceTrackingStart } from './attendance-period'
 import { ATTENDANCE_STATUSES, EMPTY_ATTENDANCE, formatTime, monthDates, recordTiming, type AttendanceRecords, type AttendanceSchedule, type MonthlyAttendance } from './monthly-attendance'
 
 export type AttendanceRow = { member: OrgChartMember; team: string; schedule: AttendanceSchedule; summary: MonthlyAttendance; complete: boolean }
@@ -8,7 +9,7 @@ export async function exportAttendance(month: string, rows: AttendanceRow[], rec
   const ExcelJS = (await import('exceljs')).default
   const workbook = new ExcelJS.Workbook()
   const summarySheet = workbook.addWorksheet('월별 요약')
-  summarySheet.addRow(['화면 시안 입력값입니다. 출퇴근 원본·연차 시스템과 연결되지 않았습니다.'])
+  summarySheet.addRow(['2026년 11월 2일과 직원 입사일 중 더 늦은 날부터 집계합니다.'])
   summarySheet.addRow(['월', '이름', '부서', '출근 기준', '초과 기준(분)', '출근 기록일', '정시 이후', '기준 초과', '연차', '반차(회)', '예비군·공가', '결근', '미기록', '확인 필요', '평균 출근', '가장 이른 출근', '가장 늦은 출근', '월 검토'])
   for (const row of rows) {
     const s = row.summary
@@ -21,6 +22,7 @@ export async function exportAttendance(month: string, rows: AttendanceRow[], rec
   const detailSheet = workbook.addWorksheet('날짜별 기록')
   detailSheet.addRow(['날짜', '이름', '부서', '상태', '출근', '퇴근', '해당 날짜 출근 기준', '정시 이후', '기준 초과', '확인', '메모'])
   for (const row of rows) for (const date of monthDates(month)) {
+    if (date < attendanceTrackingStart(row.member.hireDate)) continue
     const record = records[date]?.[row.member.id] ?? EMPTY_ATTENDANCE
     if (record.status === 'unset' && !record.note) continue
     const timing = recordTiming(record, row.schedule)

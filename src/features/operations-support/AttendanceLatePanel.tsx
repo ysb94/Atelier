@@ -12,6 +12,7 @@ import { listLeaveRequests, type LeaveRequest } from '@/lib/supabase/leave-reque
 import { emptyList } from '@/lib/utils'
 import type { RequestKind } from '@/features/settings/personal-requests'
 import { ATTENDANCE_GRACE_MINUTES } from './attendance-start-settings'
+import { attendanceTrackingStart } from './attendance-period'
 import { resolveWorkdayStart } from './offsite-workday-start'
 import { memberLabel, OpsStat } from './OpsStat'
 import { type useOpsDirectory } from './ops-directory'
@@ -89,7 +90,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
     }
     for (const clock of clockRows) {
       const member = directory.members.find(item => item.id === clock.employeeId)
-      if (!member || member.attendanceExempt || !isWorkday(clock.date, {})) continue
+      if (!member || member.attendanceExempt || clock.date < attendanceTrackingStart(member.hireDate) || !isWorkday(clock.date, {})) continue
       const schedule = resolveWorkdayStart(schedules.index, member.id, member.departmentId, clock.date, leaveRows)
       const actual = timeSeconds(clock.clockIn)
       const baseline = timeSeconds(schedule.start)
@@ -101,10 +102,12 @@ export function AttendanceLatePanel({ directory, schedules }: {
     }
     for (const member of directory.members) {
       if (member.attendanceExempt) continue
+      const trackingStart = attendanceTrackingStart(member.hireDate)
       const team = directory.departmentName(member.departmentId)
       const name = memberLabel(member.displayName)
       if (!matches(member.departmentId, name, team)) continue
       for (const date of dates) {
+        if (date < trackingStart) continue
         const schedule = resolveWorkdayStart(schedules.index, member.id, member.departmentId, date, leaveRows)
         const baseline = timeSeconds(schedule.start)
         if (date > today || !isWorkday(date, {}) || clockByKey.has(`${member.id}:${date}`) || covered.has(`${member.id}:${date}`)) continue
@@ -137,6 +140,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
   return <div className="space-y-4">
     <header>
       <h2 className="text-base font-semibold">지각 * 결근 관리</h2>
+      <p className="mt-1 text-sm text-muted-foreground">2026년 11월 2일부터 집계합니다. 이후 입사한 직원은 입사일부터 집계합니다.</p>
       <p className="mt-1 text-sm text-muted-foreground">출근 기준에서 {ATTENDANCE_GRACE_MINUTES}분이 지난 기록은 지각입니다. 연차·반차·반반차·공가·외근·재택이 등록되지 않은 근무일에 출근이 없으면 결근으로 표시합니다. 인사 확인 대기 {awaitingHr.isPending ? '…' : awaitingHr.isError ? '확인 실패' : `${awaitingHr.data ?? 0}건`}입니다.</p>
     </header>
     <div className="flex flex-wrap items-center gap-2">
