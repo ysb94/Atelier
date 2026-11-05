@@ -117,6 +117,7 @@
     "verify:chat-list": "tsx src/lib/inbox/format.verify.ts",
     "verify:chat-thread": "tsx --tsconfig tsconfig.app.json src/lib/chat/thread-layout.verify.ts",
     "verify:company-capabilities": "tsx src/lib/company/capabilities.verify.ts",
+    "verify:operations-access-approval": "node scripts/verify-operations-access-approval-db.mjs",
     "verify:assigned-permissions": "tsx --tsconfig tsconfig.app.json src/lib/company/assigned-permissions.verify.ts && node scripts/verify-assigned-permissions-db.mjs",
     "verify:permission-storage": "node scripts/verify-permission-storage-db.mjs",
     "verify:auth-recovery-browser": "node scripts/verify-auth-recovery-browser.mjs",

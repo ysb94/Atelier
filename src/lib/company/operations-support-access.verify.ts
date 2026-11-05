@@ -30,6 +30,10 @@ assert.equal(canEditOrgAssignment(operations),false,'조직도 진입이 편집 
 assert.equal(canManagePersonnel(operations),false,'직원 관리 권한은 유지')
 assert.equal(canViewMembers(operations),true,'운영지원 부서원은 멤버 목록을 본다')
 assert.equal(canReviewMember(operations,'pending'),true,'운영지원 부서원은 대기 신청을 승인한다')
+for (const position of [null, '사원', '팀장', '이사']) {
+  assert.equal(canReviewMember({...operations,position},'pending'),true,'운영지원은 직책·개인 지정 권한 없이 대기 신청을 승인한다')
+  assert.equal(canReviewMember({...operations,position},'active'),false,'가입 승인 권한이 기존 재직자 관리 권한을 만들지 않는다')
+}
 assert.equal(canReviewMember(operations,'active'),false,'운영지원 소속만으로 재직 계정을 관리하지 않음')
 assert.equal(canReviewMember({...operations,status:'pending'},'pending'),false,'비활성 계정은 승인하지 못함')
 assert.equal(canReviewMember(member,'pending'),false,'다른 소속은 대기 승인을 받지 않음')
