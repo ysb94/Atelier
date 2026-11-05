@@ -38,6 +38,7 @@ import { CompanyWarehouseFinderPage } from '@/features/logistics/WarehouseFinder
 import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
 import { CompanyTemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
 import { OperationsSupportPage } from '@/features/operations-support/OperationsSupportPage'
+import { DutyFreePage } from '@/features/b2b/DutyFreePage'
 import { MamamIdeaInboxPage } from '@/features/mamam/MamamIdeaInboxPage'
 import { DeveloperPreviewPage } from './DeveloperPreview'
 import { ReleasePageGate } from './ReleasePageGate'
@@ -267,6 +268,7 @@ export const companyWorkspaceRoutes = (
         path="logistics"
         element={<RedirectTo to="/product-work/logistics" />}
       />
+      <Route path="b2b/duty-free" element={<DutyFreePage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Route>
 )

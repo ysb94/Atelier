@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { canAccessOperationsSupport, canViewOperationsSupportPart, canEditOrgAssignment, canManagePersonnel, canViewDraftsByOwner, canViewMembers } from './capabilities.ts'
+import { canAccessOperationsSupport, canViewOperationsSupportPart, canEditOrgAssignment, canManagePersonnel, canReviewMember, canViewDraftsByOwner, canViewMembers } from './capabilities.ts'
 import { companyNavGroupsForProfile } from '../../components/layout/company-workspace-nav.ts'
 import type { PermissionCode } from './permissions.ts'
 import { RELEASE_COMPANY_ID, RELEASE_OPERATIONS_ID } from './release-access.ts'
@@ -28,6 +28,11 @@ assert.equal(canAccessOperationsSupport(operations),false,'공개 화면 설정�
 assert.equal(canViewOperationsSupportPart(operations,'org'),true,'운영지원은 관리 권한 없이도 조직도에 진입')
 assert.equal(canEditOrgAssignment(operations),false,'조직도 진입이 편집 권한을 만들지 않음')
 assert.equal(canManagePersonnel(operations),false,'직원 관리 권한은 유지')
+assert.equal(canViewMembers(operations),true,'운영지원 부서원은 멤버 목록을 본다')
+assert.equal(canReviewMember(operations,'pending'),true,'운영지원 부서원은 대기 신청을 승인한다')
+assert.equal(canReviewMember(operations,'active'),false,'운영지원 소속만으로 재직 계정을 관리하지 않음')
+assert.equal(canReviewMember({...operations,status:'pending'},'pending'),false,'비활성 계정은 승인하지 못함')
+assert.equal(canReviewMember(member,'pending'),false,'다른 소속은 대기 승인을 받지 않음')
 for (const part of ['attendance','leave','documents','hours','notices']) {
   assert.equal(canViewOperationsSupportPart(operations,part),false,'운영지원 소속만으로 다른 관리 화면을 열지 않음')
   assert.equal(canViewOperationsSupportPart(assigned('org.manage'),part),true,'기존 지정 관리자의 진입 유지')

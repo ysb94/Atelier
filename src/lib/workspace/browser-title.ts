@@ -1,4 +1,4 @@
-import { companyNavGroups, companyTopNav, membersNavItem } from '../../components/layout/company-workspace-nav.ts'
+import { companyNavGroups, companyTopNav, dutyFreeNavItem, membersNavItem } from '../../components/layout/company-workspace-nav.ts'
 import type { ChatRoom, InboxNotification } from '../inbox/types.ts'
 
 export const SITE_NAME = 'E&J'
@@ -21,6 +21,7 @@ const NAV_TITLES = [
     path: item.to, title: item.label === group.title ? item.label : `${item.label} · ${group.title}`,
   }))),
   { path: membersNavItem.to, title: membersNavItem.label },
+  { path: dutyFreeNavItem.to, title: '면세 · B2B 사업' },
 ].sort((a, b) => b.path.length - a.path.length)
 
 /** Resolve the active URL only. Hidden KeepAlive pages never write the browser title. */

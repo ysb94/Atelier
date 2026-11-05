@@ -165,9 +165,24 @@ export function canManagePersonnel(profile: CapabilityProfile | null) {
   return hasPermission(profile, 'personnel.manage')
 }
 
+/** 운영지원팀 재직 직원. 가입 대기 승인만 열고, 계정 정지·조직 편집 권한은 만들지 않는다. */
+export function isOperationsDepartmentMember(
+  profile: (CapabilityProfile & ReleaseProfile) | null,
+) {
+  return releaseAccess(profile).operations
+}
+
+/** 대기 신청의 관리·승인. 지정된 인사 권한 또는 운영지원팀 소속이다. */
+export function canReviewMember(
+  profile: (CapabilityProfile & ReleaseProfile) | null,
+  status: string | null | undefined,
+) {
+  return canManagePersonnel(profile) || (status === 'pending' && isOperationsDepartmentMember(profile))
+}
+
 /**
  * 멤버 목록 조회 전용. 관리 권한과 분리한다.
- * 조직 관리(org.manage) 지정자는 운영지원 담당으로 보며, DB `app.can_view_members`와 같은 조건이다.
+ * 조직 관리(org.manage) 지정자와 운영지원팀 재직 직원이 볼 수 있으며, DB `app.can_view_members`와 같은 조건이다.
  */
 export function canViewMembers(
   profile: (CapabilityProfile & {
@@ -178,7 +193,8 @@ export function canViewMembers(
   return (
     canManagePersonnel(profile) ||
     isCompanyReviewer(profile) ||
-    canEditOrgAssignment(profile)
+    canEditOrgAssignment(profile) ||
+    isOperationsDepartmentMember(profile)
   )
 }
 

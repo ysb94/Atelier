@@ -68,4 +68,8 @@ assert.deepEqual(companyNavGroupsForProfile(visual).find(group=>group.title==='V
 assert.equal(releaseHref(visual,'/drafts'),null,'Visual 팀은 기획 화면을 열지 않는다')
 assert.equal(releaseHref({...staff,departmentId:RELEASE_DEPARTMENT_SITES.find(site=>site.title==='기획')!.id},'/work-requests/planning-malicious'),null)
 assert.equal(releaseHref({...staff,departmentId:RELEASE_DEPARTMENT_SITES.find(site=>site.title==='중국팀')!.id},'/china/work-orders-malicious'),null)
+const b2b={...staff,departmentId:RELEASE_DEPARTMENT_SITES.find(site=>site.title==='B2B 사업')!.id}
+assert.deepEqual(companyNavGroupsForProfile(b2b).find(group=>group.title==='B2B 사업')?.items.map(item=>item.to),['/b2b/duty-free'])
+assert.equal(releaseHref(staff,'/b2b/duty-free'),null,'다른 부서는 면세를 열지 않는다')
+assert.equal(releaseHref(b2b,'/b2b/duty-free-malicious'),null)
 console.log('release-access: 자기 부서 메뉴·준비 중 탭·타부서 차단·부서 UUID·직원/승인자·예외 3계정·직접 주소·상세 경로·업무 권한 분리 통과')

@@ -1,5 +1,7 @@
 # Supabase 데이터 아키텍처 원칙
 
+- 2026-11-05 중국팀 작업지시서 담당자 탭은 `china_work_assignees`에 둔다. 재직 중인 중국팀 직원만 추가하고 순번만 바꾸며, 기존 지시서 배정·확인·발송 함수는 그대로다. test/main 사이트 배포는 하지 않았다.
+
 - 2026-11-05 My Schedule의 같은 부서 확정 연차·외근·공가 공유는 [DEPARTMENT_ABSENCE_SCHEDULE.md](DEPARTMENT_ABSENCE_SCHEDULE.md)를 따른다. 승인 후 공유 DB에 `20261105060910_department_absence_schedule`을 적용했다. 실제 활성 직원 38계정의 최소 조회 범위와 3개 접근 차단, 기존 9개 표·정책·권한·연차/출퇴근/승인 함수 보존을 검증했다. test/main 사이트 배포는 하지 않았다.
 
 - 2026-11-05 신청 시작~실제 퇴근의 자동 야근 연결은 [OVERTIME_CHECKOUT_LINK.md](OVERTIME_CHECKOUT_LINK.md)를 따른다. 사용자 승인 후 원격 `20261105031646_overtime_checkout_link`를 적용했다. 기존 8개 업무 표 원본·정책·관련 권한·기존 view를 보존하고 활성 직원 37계정의 실제 인증 역할 조회 및 접근 차단을 검증했다. 별도 시간·휴게 입력 UI를 제거했으며 test/main 사이트 배포는 하지 않았다.
@@ -293,7 +295,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   기존 관리자·승인·권한 지정 함수와 일반 업무의 최상위 삭제 기준은 확대하지 않는다.
 - 기획안은 nullable `created_by`로 실제 작성자를 기록한다. 기존 이름으로 작성자를 추정하지 않는다.
   조회는 공유하고 수정·삭제는 작성자와 확정된 운영 계정 3개만 허용한다. 중국팀은
-  `apply_china_work_order`로 지정한 지시서의 배정·확인·발송 값만 수정한다.
+  `apply_china_work_order`로 지정한 지시서의 배정·확인·발송 값만 수정한다. 작업지시서
+  화면의 담당자 탭은 `china_work_assignees`이며 중국팀 업무 권한으로만 바꾼다.
 - `20261027044916_work_requests_storage.sql`은 회사 소유 작업 요청·메시지·첨부·작업시간·중복 명령
   테이블과 `company-work-requests` 비공개 버킷을 추가한다. 요청자·작업자·관리 담당자를 UUID로
   확인하며, 단계 변경과 수정 버전·중복 요청을 서버에서 검증한다. 요청자·작업자별 대화도 분리한다.

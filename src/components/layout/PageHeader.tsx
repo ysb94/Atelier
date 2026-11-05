@@ -4,6 +4,7 @@ import {
   companyNavGroups,
   companyNavItemActive,
   companyTopNav,
+  dutyFreeNavItem,
   membersNavItem,
 } from './company-workspace-nav'
 
@@ -17,6 +18,7 @@ type PageHeaderProps = {
 
 function sectionOf(pathname: string): string | undefined {
   if (companyNavItemActive(membersNavItem.to, pathname)) return '운영지원'
+  if (companyNavItemActive(dutyFreeNavItem.to, pathname)) return 'B2B 사업'
   const group = companyNavGroups.find((item) =>
     item.items.some((entry) => companyNavItemActive(entry.to, pathname)),
   )

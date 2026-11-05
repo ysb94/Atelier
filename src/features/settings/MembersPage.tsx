@@ -24,8 +24,10 @@ import {
 import {
   canEditOrgAssignment,
   canManagePersonnel,
+  canReviewMember,
   canViewMembers,
   capabilityLabel,
+  isOperationsDepartmentMember,
 } from '@/lib/company/capabilities'
 import { personNameError } from '@/lib/company/person-name'
 
@@ -265,6 +267,7 @@ export function MembersPage() {
   const canManageMembers = canManagePersonnel(me)
   const canEditAssignment = canEditOrgAssignment(me)
   const canViewMemberList = canViewMembers(me)
+  const operationsMember = isOperationsDepartmentMember(me)
 
   const profilesQuery = useQuery({
     queryKey: ['manageable-profiles'],
@@ -349,7 +352,7 @@ export function MembersPage() {
         description="접근 신청을 승인하고 본명과 회사 업무 역량을 확인합니다. 본명은 사내 명단과 같아야 합니다."
       />
 
-      {!canManageMembers && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">조회 전용 · 멤버 정보는 조회할 수 있습니다. 변경·승인은 기존 업무 권한을 따릅니다.</p>}
+      {!canManageMembers && !operationsMember && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">조회 전용 · 멤버 정보는 조회할 수 있습니다. 변경·승인은 기존 업무 권한을 따릅니다.</p>}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Button
@@ -444,7 +447,7 @@ export function MembersPage() {
                   type="button"
                   size="sm"
                   variant="outline"
-                  disabled={!canManageMembers}
+                  disabled={!canReviewMember(me, member.status)}
                   onClick={() =>
                     setEditingId((prev) =>
                       prev === member.id ? null : member.id,
@@ -455,14 +458,14 @@ export function MembersPage() {
                 </Button>
               </div>
 
-              {editingId === member.id && canManageMembers ? (
+              {editingId === member.id && canReviewMember(me, member.status) ? (
                 <MemberEditor
                   profile={member}
                   departments={departments.filter((d) => d.isActive || d.id === member.departmentId)}
                   brands={brands}
                   duties={duties}
                   grades={grades}
-                  canEditAssignment={canEditAssignment}
+                  canEditAssignment={canEditAssignment || (operationsMember && member.status === 'pending')}
                   onDone={async () => {
                     setEditingId(null)
                     await invalidate()

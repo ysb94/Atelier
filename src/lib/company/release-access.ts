@@ -14,6 +14,7 @@ export const RELEASE_DEPARTMENT_SITES = [
   { id: 'bf926822-910c-422f-9c17-5fd3d8ddb3ba', title: '중국팀', pages: ['/china/work-orders'] },
   { id: RELEASE_OPERATIONS_ID, title: '운영지원', pages: [] },
   { id: RELEASE_LOGISTICS_ID, title: '물류', pages: [] },
+  { id: 'cae821f4-8440-4de9-92dc-5cd98d70507b', title: 'B2B 사업', pages: ['/b2b/duty-free'] },
 ] as const
 export const RELEASE_EXCEPTION_IDS = [
   'd0000000-0000-4000-8000-000000000001', // 개발자
