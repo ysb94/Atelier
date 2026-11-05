@@ -28,13 +28,13 @@ import { useAuth } from '@/lib/supabase/auth'
 import { listDepartments, listOrgChartMembers } from '@/lib/supabase/profiles'
 import type { ProductDraft } from '@/lib/types'
 import { cn, emptyList, formatNumber } from '@/lib/utils'
+import { ChinaWorkOrderTabs } from './ChinaWorkOrderTabs'
 
-type WorkOrderTab = 'open' | 'color' | 'price' | 'done'
+type WorkOrderTab = 'open' | 'color' | 'done'
 
 const WORK_ORDER_TABS: { value: WorkOrderTab; label: string }[] = [
   { value: 'open', label: '샘플 요청' },
   { value: 'color', label: '컬러별 샘플 요청' },
-  { value: 'price', label: '단가 요청' },
   { value: 'done', label: '종료' },
 ]
 
@@ -284,18 +284,8 @@ export function CompanySampleWorkOrderPage() {
       })
   }, [draftsQuery.data, search])
 
-  const tabCounts = useMemo(
-    () => ({
-      open: workOrders.filter((row) => isOpenSampleRequest(row) && !row.fileCheckedAt).length,
-      color: workOrders.filter(isOpenColorRequest).length,
-      price: 0,
-      done: workOrders.filter((row) => isWorkOrderDone(row)).length,
-    }),
-    [workOrders],
-  )
   const visibleWorkOrders = useMemo(
     () => {
-      if (listTab === 'price') return []
       if (listTab === 'done') return workOrders.filter(isWorkOrderDone)
       if (listTab === 'color') return workOrders.filter(isOpenColorRequest)
       return workOrders.filter(isOpenSampleRequest)
@@ -310,6 +300,7 @@ export function CompanySampleWorkOrderPage() {
         description="기획에서 올리고 저장한 대표 샘플·컬러별 작업 지시서입니다. 지시서 하나마다 행이 생기고, 이미 발송한 행은 그대로 완료로 남습니다."
       />
 
+      <ChinaWorkOrderTabs>
       <FilterBar>
         <Input
           className="sm:max-w-xs"
@@ -317,37 +308,13 @@ export function CompanySampleWorkOrderPage() {
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
+        <Select aria-label="작업 지시서 상태" className="sm:w-48" value={listTab} onChange={event => setListTab(event.target.value as WorkOrderTab)}>
+          {WORK_ORDER_TABS.map(tab => <option key={tab.value} value={tab.value}>{tab.label}</option>)}
+        </Select>
         <div className="text-sm text-muted-foreground sm:ml-auto">
           {formatNumber(visibleWorkOrders.length)}건
         </div>
       </FilterBar>
-
-      <div
-        role="tablist"
-        aria-label="작업 지시서 상태"
-        className="china-work-tabs"
-      >
-        {WORK_ORDER_TABS.map((item) => {
-          const selected = item.value === listTab
-          return (
-            <button
-              key={item.value}
-              type="button"
-              role="tab"
-              aria-selected={selected}
-              onClick={() => setListTab(item.value)}
-              className="china-work-tab"
-            >
-              <span>{item.label}</span>
-              {tabCounts[item.value] > 0 ? (
-                <span className="china-work-tab-badge">
-                  {formatNumber(tabCounts[item.value])}
-                </span>
-              ) : null}
-            </button>
-          )
-        })}
-      </div>
 
       {draftsQuery.isError ? (
         <p className="mb-3 text-sm text-danger">
@@ -374,7 +341,7 @@ export function CompanySampleWorkOrderPage() {
         <p className="py-10 text-center text-sm text-muted-foreground">
           불러오는 중...
         </p>
-      ) : workOrders.length === 0 && listTab !== 'price' ? (
+      ) : workOrders.length === 0 ? (
         <Card className="px-4 py-10 text-center text-sm text-muted-foreground">
           {search.trim()
             ? '조건에 맞는 작업 지시서가 없습니다.'
@@ -382,9 +349,7 @@ export function CompanySampleWorkOrderPage() {
         </Card>
       ) : visibleWorkOrders.length === 0 ? (
         <Card className="px-4 py-10 text-center text-sm text-muted-foreground">
-          {listTab === 'price'
-            ? '단가 요청이 없습니다.'
-            : listTab === 'color'
+          {listTab === 'color'
               ? '컬러 샘플 요청이 없습니다.'
               : listTab === 'open'
                 ? '진행 중인 작업 지시서가 없습니다.'
@@ -590,6 +555,7 @@ export function CompanySampleWorkOrderPage() {
           </table>
         </div>
       )}
+      </ChinaWorkOrderTabs>
     </div>
   )
 }
