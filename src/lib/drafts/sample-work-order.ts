@@ -565,6 +565,10 @@ function parseSampleWorkOrder(value: unknown): DraftSampleWorkOrder | null {
       url && typeof row.fileCheckedAt === 'string' && row.fileCheckedAt
         ? row.fileCheckedAt
         : null,
+    assigneeCheckedAt:
+      url && typeof row.assigneeCheckedAt === 'string' && row.assigneeCheckedAt
+        ? row.assigneeCheckedAt
+        : null,
   }
 }
 

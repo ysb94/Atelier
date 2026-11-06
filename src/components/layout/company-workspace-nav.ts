@@ -1,6 +1,7 @@
 import { hasPermission } from '../../lib/company/permissions.ts'
 import { showAccessIpMenu } from '../../lib/company/access-ip.ts'
 import { releaseAccess, releaseHref, type ReleaseProfile } from '../../lib/company/release-access.ts'
+import { MATERIAL_REQUESTS_PATH } from '../../lib/workspace/material-request-navigation.ts'
 import type { LucideIcon } from 'lucide-react'
 import {
   canAccessBrandManagement,
@@ -85,7 +86,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
     title: '기획',
     items: [
       { to: '/drafts', label: '기획안', icon: Lightbulb },
-      { to: '/planning/material-requests', label: '자재요청', icon: PackagePlus },
+      { to: MATERIAL_REQUESTS_PATH, label: '자재요청', icon: PackagePlus },
       { to: '/work-requests/planning', label: '부서 업무', icon: ClipboardList },
     ],
   },
@@ -182,6 +183,7 @@ const mamamInboxGroup: CompanyNavGroup = {
 
 export function companyNavGroupsForProfile(
   profile: (NonNullable<Parameters<typeof canAccessOperationsSupport>[0]> & ReleaseProfile) | null,
+  materialNudgeViewer = false,
 ) {
   const scope = releaseAccess(profile)
   const showOperationsSupport = canAccessOperationsSupport(profile) || scope.operations
@@ -192,7 +194,7 @@ export function companyNavGroupsForProfile(
       const items = showBrandManagement
         ? group.items
         : group.items.filter(item => item.to !== '/brands')
-      const allowedItems = items.filter(item => (!item.to.startsWith('/work-requests/') || scope.unrestricted || scope.departmentSite?.pages.some(path=>path===item.to) || (scope.logistics && item.to==='/work-requests/logistics')) && releaseHref(profile, item.to) !== null && (item.to !== '/settings/access-ip' || showAccessIpMenu(profile)))
+      const allowedItems = items.filter(item => (!item.to.startsWith('/work-requests/') || scope.unrestricted || scope.departmentSite?.pages.some(path=>path===item.to) || (scope.logistics && item.to==='/work-requests/logistics')) && releaseHref(profile, item.to, false, materialNudgeViewer) !== null && (item.to !== '/settings/access-ip' || showAccessIpMenu(profile)))
       return allowedItems.length > 0 ? [{ ...group, items: allowedItems }] : []
     }
     const showPermissions = scope.operations || hasPermission(profile, 'permissions.manage') || hasPermission(profile, 'approvers.manage') || hasPermission(profile, 'partner.manage')

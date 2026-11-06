@@ -5,15 +5,20 @@ import path from 'node:path'
 
 const original = (await readFile('scripts/verify-work-requests-browser.mjs', 'utf8')).replace(/\r\n/g, '\n')
 const explicitManagers = process.argv.includes('--explicit-managers')
+const migrations = [
+  '20261102034546_work_request_category_settings',
+  ...(explicitManagers ? ['20261102043240_work_request_explicit_managers'] : []),
+  '20261102093634_department_work_board',
+]
 let setup = original.slice(0, original.indexOf(' const managerPage='))
 setup = setup.replace("from './work-request-test-db.mjs'", "from '../../scripts/work-request-test-db.mjs'")
   .replaceAll('5196', '5197')
   .replace('page.setDefaultTimeout(15000)', 'page.setDefaultTimeout(30000);page.setDefaultNavigationTimeout(60000)')
   .replaceAll("path.join(root,'dev-tools/ai-workflow/browser-fixture/work-live-client.ts')", "path.join(root,'node_modules/.tmp/work-settings-client.ts')")
-  .replace("const rpcNames=new Set([", "const rpcNames=new Set(['get_work_request_settings','save_work_request_settings','assign_work_request_category',")
-  .replace("!['get_my_basic_work_access','list_work_requests','list_org_chart_members']", "!['get_my_basic_work_access','list_work_requests','list_org_chart_members','get_work_request_settings','list_company_attendance_exempt']")
-  .replace("if(body.name==='list_org_chart_members')", "if(body.name==='list_company_attendance_exempt')data=[];else if(body.name==='list_org_chart_members')")
-  .replace("try{\n await db.exec('reset role');", "try{\n await db.exec(await fs.readFile('supabase/migrations/20261102034546_work_request_category_settings.sql','utf8'));\n await db.exec('reset role');")
+  .replace("const rpcNames=new Set([", "const rpcNames=new Set(['get_work_request_settings','save_work_request_settings','assign_work_request_category','list_department_work','get_department_work',")
+  .replace("!['get_my_basic_work_access','list_work_requests','list_org_chart_members']", "!['get_my_basic_work_access','list_work_requests','list_org_chart_members','get_work_request_settings','list_company_attendance_exempt','list_brand_directory','list_department_work','get_department_work']")
+  .replace("if(body.name==='list_org_chart_members')", "if(body.name==='list_company_attendance_exempt'||body.name==='list_brand_directory')data=[];else if(body.name==='list_org_chart_members')")
+  .replace("try{\n await db.exec('reset role');", "try{\n for(const name of " + JSON.stringify(migrations) + ")await db.exec(await fs.readFile('supabase/migrations/'+name+'.sql','utf8'));\n await db.exec('reset role');")
   .replace("name:'work-live-test',enforce:'pre',", `name:'work-live-test',enforce:'pre',transform(code,id){if(id.endsWith('/work-live-entry.tsx'))return code.replace("import '@/index.css'", "import {VisualWorkRequestManagePage} from '@/features/work-requests/VisualWorkRequestManagePage';import '@/index.css'").replace('<Routes>','<Routes><Route path="/design/work-request-management" element={<VisualWorkRequestManagePage/>}/>');},`)
 const checks = String.raw`
  const managerPage=page
@@ -47,10 +52,9 @@ const checks = String.raw`
  await workerPage.goto(origin+'/work-requests/design?actor=design&requestId='+requestId)
  await workerPage.getByText('모든 분류가 공유하는 메인 내용',{exact:true}).first().waitFor()
  await managerPage.goto(origin+'/work-requests/design?actor=manager&requestId='+requestId)
- if(!await managerPage.getByLabel('SNS 담당자',{exact:true}).isVisible()) {
-   await managerPage.getByRole('button',{name:'상세',exact:true}).click()
-   await managerPage.getByRole('button',{name:'상세 열기',exact:true}).click()
- }
+ await managerPage.getByRole('heading',{name:'분류별 작업 담당자',exact:true}).waitFor()
+ assert.equal(await managerPage.getByLabel('배너 담당자',{exact:true}).inputValue(),ids.design)
+ assert.equal(await managerPage.getByLabel('SNS 담당자',{exact:true}).inputValue(),'')
  await managerPage.getByLabel('SNS 담당자',{exact:true}).selectOption(ids.design)
  await managerPage.getByRole('button',{name:'배정 저장',exact:true}).filter({visible:true}).last().click()
  await managerPage.getByLabel('SNS 담당자',{exact:true}).waitFor()
@@ -69,7 +73,7 @@ const checks = String.raw`
  assert.deepEqual(errors,[])
  console.log('PASS: 관리 설정 저장·새로고침·다중 폼 입력·공통 첨부·실제 RPC 자동/수동 배정·담당자 공유 조회·일반 직원 설정 차단·모바일 (격리된 로컬 PostgreSQL)')
 ` + original.slice(original.indexOf('}catch(error){console.error'))
-if (explicitManagers) setup = setup.replace("await db.exec('reset role');for", "await db.exec(await fs.readFile('supabase/migrations/20261102043240_work_request_explicit_managers.sql','utf8'));await db.query(\"update public.profiles set position='팀장',is_admin=true where id=$1\",[ids.design]);await db.exec('reset role');for")
+if (explicitManagers) setup = setup.replace("await db.exec('reset role');for", "await db.exec('reset role');await db.query(\"update public.profiles set position='팀장',is_admin=true where id=$1\",[ids.design]);for")
 await mkdir('node_modules/.tmp',{recursive:true})
 await mkdir('.tmp',{recursive:true})
 // Match Supabase's multiplexed realtime connection; separate SSEs exhaust HTTP/1.1's six sockets.

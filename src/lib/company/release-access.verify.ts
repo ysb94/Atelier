@@ -1,11 +1,23 @@
 import assert from 'node:assert/strict'
 import { RELEASE_COMPANY_ID, RELEASE_DEPARTMENT_SITES, RELEASE_EXCEPTION_IDS, RELEASE_HOME, RELEASE_LOGISTICS_ID, RELEASE_LOGISTICS_PAGES, RELEASE_OPERATIONS_ID, releaseAccess, releaseHref, releasePersonalPart } from './release-access.ts'
 import { companyNavGroupsForProfile, companyTopNavForProfile } from '../../components/layout/company-workspace-nav.ts'
+import { MATERIAL_REQUESTS_PATH, materialNudgeHref, materialNudgeTarget } from '../workspace/material-request-navigation.ts'
 const staff = { id:'employee',companyId:RELEASE_COMPANY_ID,status:'active',departmentId:'other',email:'staff@invalid' }
 const ops = {...staff,departmentId:RELEASE_OPERATIONS_ID}
 const logistics = {...staff,departmentId:RELEASE_LOGISTICS_ID}
 const links = (profile: typeof staff) => [...companyTopNavForProfile(profile),...companyNavGroupsForProfile(profile).flatMap(group=>group.items)].map(item=>item.to)
 assert.deepEqual(links(staff),[RELEASE_HOME])
+const nudgeTarget = { scope:'notice', id:'12345678-1234-1234-1234-123456789abc' } as const
+const nudgeLink = materialNudgeHref(nudgeTarget)
+assert.deepEqual(materialNudgeTarget(new URL(nudgeLink,'https://atelier.invalid').searchParams),nudgeTarget)
+assert.equal(materialNudgeTarget(new URLSearchParams('nudge=invalid')),null)
+assert.equal(releaseHref(staff,nudgeLink),null)
+assert.equal(releaseHref(staff,nudgeLink,false,true),nudgeLink)
+assert.deepEqual(companyNavGroupsForProfile(staff,true).flatMap(group=>group.items.map(item=>item.to)),[MATERIAL_REQUESTS_PATH])
+for(const path of ['/drafts','/work-requests/planning','/planning/material-requests/unreleased']) assert.equal(releaseHref(staff,path,false,true),null)
+for(const profile of [{...staff,status:'pending'},{...staff,companyId:'other'},{...staff,email:'ui-preview@example.invalid'}]) {
+  assert.equal(releaseHref(profile,nudgeLink,false,true),null)
+}
 assert.equal(releaseHref(staff,'/settings/profile?part=meetings'),'/settings/profile?part=meetings')
 assert.equal(releaseHref(staff,'/settings/profile?part=approvals'),null)
 assert.equal(releaseHref(staff,'/settings/profile?part=approvals',true),'/settings/profile?part=approvals')

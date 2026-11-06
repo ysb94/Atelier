@@ -20,6 +20,7 @@ export type WorkOrderRow = {
   assigneeId: string | null
   assigneeName: string
   fileCheckedAt: string | null
+  assigneeCheckedAt: string | null
 }
 
 export type WorkOrderGroup = { draft: ProductDraft; rows: WorkOrderRow[] }

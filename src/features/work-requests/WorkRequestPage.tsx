@@ -408,12 +408,9 @@ function splitBodyParts(blocks: ContentBlock[]): BodyPart[] {
             id: pendingText.id,
             type: 'text',
             text: joinPlainText(pendingText.text, block.text),
+            ...(!block.text && pendingText.previewHtml !== undefined ? { previewHtml: pendingText.previewHtml } : {}),
           }
-        : {
-            id: block.id,
-            type: 'text',
-            text: block.text,
-          }
+        : { ...block }
       continue
     }
     pendingImages.push(block)
@@ -1065,6 +1062,8 @@ function ReferenceFilesField({
 function AutoGrowEditable({
   textId,
   value,
+  previewHtml,
+  richPreview,
   placeholder,
   className,
   onChange,
@@ -1073,9 +1072,11 @@ function AutoGrowEditable({
 }: {
   textId: string
   value: string
+  previewHtml?: string
+  richPreview?: boolean
   placeholder?: string
   className?: string
-  onChange: (text: string) => void
+  onChange: (text: string, previewHtml?: string) => void
   onPasteFiles?: (event: ClipboardEvent<HTMLDivElement>) => void
   onBackspaceEmpty?: (event: KeyboardEvent<HTMLDivElement>) => void
 }) {
@@ -1084,10 +1085,15 @@ function AutoGrowEditable({
   useEffect(() => {
     const el = ref.current
     if (!el || document.activeElement === el) return
+    if (richPreview && previewHtml !== undefined) {
+      // Only the local preview editor supplies this markup. Paste accepts plain text.
+      if (el.innerHTML !== previewHtml) el.innerHTML = previewHtml
+      return
+    }
     if (normalizeEditableText(el.innerText) !== value) {
       el.textContent = value
     }
-  }, [value])
+  }, [value, previewHtml, richPreview])
 
   return (
     <div
@@ -1103,7 +1109,8 @@ function AutoGrowEditable({
         className,
       )}
       onInput={(event) => {
-        onChange(normalizeEditableText(event.currentTarget.innerText))
+        const el = event.currentTarget
+        onChange(normalizeEditableText(el.innerText), richPreview ? el.innerHTML : undefined)
       }}
       onPaste={(event) => {
         if (event.clipboardData.files.length > 0) {
@@ -1165,6 +1172,7 @@ function BodyFlow({
   movingId,
   heights,
   onTextChange,
+  richPreview,
   onImageSize,
   onImageWrap,
   onImageHeight,
@@ -1180,7 +1188,8 @@ function BodyFlow({
   readOnly?: boolean
   movingId?: string
   heights: Record<string, number>
-  onTextChange?: (text: string) => void
+  onTextChange?: (text: string, previewHtml?: string) => void
+  richPreview?: boolean
   onImageSize?: (id: string, size: { widthPercent: number; heightPx?: number }) => void
   onImageWrap?: (id: string, wrap: ImageWrap) => void
   onImageHeight?: (id: string, height: number) => void
@@ -1252,15 +1261,19 @@ function BodyFlow({
         )
       })}
       {readOnly ? (
-        text.text.trim() ? (
+        richPreview && text.previewHtml !== undefined ? (
+          <div className="whitespace-pre-wrap text-sm leading-7" dangerouslySetInnerHTML={{ __html: text.previewHtml }} />
+        ) : text.text.trim() ? (
           <p className="whitespace-pre-wrap text-sm leading-7">{text.text}</p>
         ) : null
       ) : (
         <AutoGrowEditable
           textId={text.id}
           value={text.text}
+          previewHtml={text.previewHtml}
+          richPreview={richPreview}
           placeholder={placeholder}
-          onChange={(value) => onTextChange?.(value)}
+          onChange={(value, html) => onTextChange?.(value, html)}
           onPasteFiles={onPasteFiles}
           onBackspaceEmpty={onBackspaceEmpty}
         />
@@ -1269,7 +1282,18 @@ function BodyFlow({
   )
 }
 
-function RequestBodyEditor({
+export function RequestBodyPreview({ blocks, richPreview }: { blocks: ContentBlock[]; richPreview?: boolean }) {
+  return (
+    <div className="space-y-5">
+      {splitBodyParts(blocks).map((part, index) => part.type === 'file'
+        ? <FileAttachmentCard key={part.file.id} file={part.file.file} />
+        : <BodyFlow key={part.text.id} flowIndex={index} text={part.text} images={part.images}
+            readOnly richPreview={richPreview} heights={{}} />)}
+    </div>
+  )
+}
+
+export function RequestBodyEditor({
   blocks,
   error,
   placeholder,
@@ -1277,6 +1301,7 @@ function RequestBodyEditor({
   appendFilesRef,
   visualTitle,
   guide,
+  richPreview,
 }: {
   blocks: ContentBlock[]
   error?: string
@@ -1285,6 +1310,7 @@ function RequestBodyEditor({
   appendFilesRef: { current: (files: File[]) => void }
   visualTitle?: string
   guide?: readonly string[]
+  richPreview?: boolean
 }) {
   const editorRef = useRef<HTMLDivElement>(null)
   const visualFileRef = useRef<HTMLInputElement>(null)
@@ -1327,7 +1353,8 @@ function RequestBodyEditor({
     const endOffsetY = lastFlow
       ? Math.max(0, Math.round(lastFlow.getBoundingClientRect().height))
       : 0
-    onChangeRef.current(appendFilesToBlocks(blocksRef.current, incoming, endOffsetY))
+    const files = richPreview ? incoming.filter(isImageFile) : incoming
+    if (files.length) onChangeRef.current(appendFilesToBlocks(blocksRef.current, files, endOffsetY))
   }
 
   const parts = splitBodyParts(blocks)
@@ -1345,11 +1372,11 @@ function RequestBodyEditor({
     return splitBodyParts(blocksRef.current)
   }
 
-  function updateFlowText(flowIndex: number, text: string) {
+  function updateFlowText(flowIndex: number, text: string, previewHtml?: string) {
     const next = currentParts()
     const part = next[flowIndex]
     if (!part || part.type !== 'flow') return
-    next[flowIndex] = { ...part, text: { ...part.text, text } }
+    next[flowIndex] = { ...part, text: { ...part.text, text, ...(richPreview ? { previewHtml } : {}) } }
     commit(next)
   }
 
@@ -1377,7 +1404,7 @@ function RequestBodyEditor({
     if (!part || part.type !== 'flow') return
 
     const images = createImageBlocks(files, offsetY)
-    const attachments = files
+    const attachments = (richPreview ? [] : files)
       .filter((file) => !isImageFile(file))
       .map((file) => ({
         id: makeBlockId(),
@@ -1697,7 +1724,8 @@ function RequestBodyEditor({
               }
               movingId={moving?.active ? moving.id : undefined}
               heights={imageHeights}
-              onTextChange={(text) => updateFlowText(index, text)}
+              richPreview={richPreview}
+              onTextChange={(text, html) => updateFlowText(index, text, html)}
               onImageSize={(id, size) =>
                 updateFlowImages(index, (images) =>
                   images.map((image) =>

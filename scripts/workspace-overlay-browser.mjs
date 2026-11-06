@@ -79,12 +79,11 @@ export async function verifyWorkspaceOverlays(page, origin) {
     await page.getByRole('button', { name: /^알림(?:,|$)/ }).click()
     await clickWithoutOutsideClose(page.locator(button).first())
     await aboveModal('workspace-notification-panel', modalName)
-    const markAll = page.locator('#workspace-notification-panel').getByRole('button', { name: '모두 읽음', exact: true })
-    if (await markAll.isEnabled()) await markAll.click()
-    assert.equal(await markAll.isDisabled(), true, '모두 읽음 상태가 재오픈 후에도 유지')
-    await page.locator('#workspace-notification-panel').getByRole('button', { name: '전체', exact: true }).click()
+    const history = page.locator('#workspace-notification-panel').getByRole('button', { name: '전체 기록', exact: true })
+    await history.click()
     await clickWithoutOutsideClose(page.getByRole('button', { name: closeName, exact: true }))
     await page.waitForFunction(() => document.querySelector('[data-workspace-overlay-root]')?.parentElement === document.body)
+    assert.equal(await history.getAttribute('aria-pressed'), 'true', '상세 창이 닫혀도 같은 알림 필터를 유지')
     await page.keyboard.press('Escape')
   }
 

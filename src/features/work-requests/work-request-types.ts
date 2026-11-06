@@ -7,6 +7,7 @@ export type TextContentBlock = {
   id: string
   type: 'text'
   text: string
+  previewHtml?: string
 }
 
 export type ImageWrap = 'none' | 'left' | 'right'

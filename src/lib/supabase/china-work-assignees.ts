@@ -12,7 +12,7 @@ type AssigneeRow = { profile_id: string; sort_order: number }
 export async function listChinaWorkAssignees(): Promise<ChinaWorkAssignee[]> {
   const rows = await diagnosticQuery<AssigneeRow[] | null>('app', 'china_assignees_read', getSupabase()
     .from('china_work_assignees').select('profile_id, sort_order').eq('company_id', DEFAULT_COMPANY_ID)
-    .order('sort_order', { ascending: true }).order('created_at', { ascending: true }))
+    .order('sort_order', { ascending: true }).order('created_at', { ascending: true }).order('profile_id', { ascending: true }))
   return (rows ?? []).map(row => ({ profileId: row.profile_id, sortOrder: row.sort_order }))
 }
 
@@ -22,7 +22,10 @@ function savedMessage(error: unknown) {
     : undefined
   console.warn('[china-assignees] 담당자 목록 저장 실패', { code: code ?? 'unknown' })
   if (code === '23505') return '이미 추가된 담당자입니다.'
-  if (code === '42501') return '중국팀 업무 권한이 있어야 담당자를 바꿀 수 있습니다.'
+  if (code === '23503' && error instanceof Error && /^진행 중 \d+건 · 완료 대기 \d+건이 남아 있습니다\.$/.test(error.message)) return error.message
+  if (code === '55P03') return '담당자 업무가 변경 중입니다. 잠시 뒤 다시 시도해 주세요.'
+  if (code === '40001') return '담당자 목록이 바뀌었습니다. 새로 불러온 순서를 확인해 주세요.'
+  if (code === '42501') return '중국 업무 관리자만 담당자 목록을 바꿀 수 있습니다.'
   return '담당자 목록을 저장하지 못했습니다.'
 }
 
@@ -59,24 +62,15 @@ export async function removeChinaWorkAssignee(profileId: string) {
   }
 }
 
-export async function moveChinaWorkAssignee(profileId: string, direction: 'up' | 'down') {
+export async function saveChinaWorkAssigneeOrder(expected: string[], ordered: string[]) {
   const trace = startWorkflow('app', 'china_assignee_move')
   try {
-    trace.step('validate_input')
-    const current = await listChinaWorkAssignees()
-    const index = current.findIndex(row => row.profileId === profileId)
-    const next = index + (direction === 'up' ? -1 : 1)
-    const row = current[index]
-    const neighbor = current[next]
-    if (!row || !neighbor) { trace.block('out_of_range'); return }
-    await trace.run('save', async context => {
-      await diagnosticQuery('app', 'china_assignee_order', getSupabase().from('china_work_assignees')
-        .update({ sort_order: neighbor.sortOrder }).eq('company_id', DEFAULT_COMPANY_ID).eq('profile_id', row.profileId), context)
-      await diagnosticQuery('app', 'china_assignee_order', getSupabase().from('china_work_assignees')
-        .update({ sort_order: row.sortOrder }).eq('company_id', DEFAULT_COMPANY_ID).eq('profile_id', neighbor.profileId), context)
-    })
+    trace.step('match_displayed_order', { count: expected.length })
+    await trace.run('save', context => diagnosticQuery('app', 'china_assignee_order',
+      getSupabase().rpc('save_china_work_assignee_order', { p_expected: expected, p_ordered: ordered }), context))
     trace.done({ writeOutcome: 'committed' })
   } catch (error) {
+    trace.fail(error)
     rethrowSaved(error)
   }
 }

@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus } from 'lucide-react'
-import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { createSeason, deleteSeason, getCompanyProductDrafts, getSeasonsByBrand, updateProductDraft, updateSeason } from '@/lib/api'
@@ -28,7 +27,6 @@ import { writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
 import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
 import {
-  type Brand,
   type ProductDraft,
   type ProductDraftInput,
   type Season,
@@ -36,6 +34,7 @@ import {
 import { combineListQueries, flattenListQueries } from '@/lib/query/list-queries'
 import { draftDetailPath, draftNewPath } from '@/lib/workspace/company-paths'
 import { cn, formatNumber, emptyList } from '@/lib/utils'
+import { DraftBrandScopeBar, countScheduleRows } from './DraftBrandScopeBar'
 import { DraftFolderBar, DraftFolderHeading } from './DraftFolderBar'
 import { matchesDraftFolder } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
@@ -46,27 +45,9 @@ import {
   seasonToPreviewGroup,
   type PreviewReleaseAssignment,
   type PreviewReleaseGroup,
-  type ResolvedReleaseSchedule,
 } from './release-schedule-preview'
 
 type BoardFilter = 'all' | 'unassigned' | 'scheduled'
-
-function hasReleaseGroup(schedule: ResolvedReleaseSchedule | undefined) {
-  return Boolean(schedule?.group)
-}
-
-function countScheduleRows(
-  rows: ProductDraft[],
-  scheduleByDraft: Map<string, ResolvedReleaseSchedule>,
-) {
-  let pending = 0
-  let scheduled = 0
-  for (const draft of rows) {
-    if (hasReleaseGroup(scheduleByDraft.get(draft.id))) scheduled += 1
-    else pending += 1
-  }
-  return { total: rows.length, pending, scheduled }
-}
 
 function emptyMessage(
   hasAny: boolean,
@@ -324,7 +305,7 @@ export function CompanyDraftsPage() {
     let mdOpen = 0
     for (const draft of folderDrafts) {
       const schedule = scheduleByDraft.get(draft.id)
-      if (hasReleaseGroup(schedule)) scheduled += 1
+      if (schedule?.group) scheduled += 1
       else pending += 1
       if (draft.status === 'open') planningOpen += 1
       if (!schedule?.group || schedule.certainty !== 'confirmed') mdOpen += 1
@@ -340,7 +321,7 @@ export function CompanyDraftsPage() {
 
   const visible = useMemo(() => {
     return folderDrafts.filter((draft) => {
-      const scheduled = hasReleaseGroup(scheduleByDraft.get(draft.id))
+      const scheduled = Boolean(scheduleByDraft.get(draft.id)?.group)
       if (boardFilter === 'unassigned' && scheduled) return false
       if (boardFilter === 'scheduled' && !scheduled) return false
       return true
@@ -459,50 +440,13 @@ export function CompanyDraftsPage() {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <BrandStatCard
-          label="전체"
-          badge={{ name: 'ALL', color: '#343a40', logoUrl: null }}
-          total={allScopeCounts.total}
-          pending={allScopeCounts.pending}
-          scheduled={allScopeCounts.scheduled}
-          selected={brandScope === 'all'}
-          onSelect={() => setBrandScope('all')}
-        />
-        {brandCards.map((card) => (
-          <BrandStatCard
-            key={card.brand.id}
-            label={card.brand.name}
-            badge={card.brand}
-            total={card.total}
-            pending={card.pending}
-            scheduled={card.scheduled}
-            selected={brandScope === card.brand.slug}
-            onSelect={() =>
-              setBrandScope(
-                brandScope === card.brand.slug ? 'all' : card.brand.slug,
-              )
-            }
-          />
-        ))}
-        {unassignedScopeCounts.total > 0 ? (
-          <BrandStatCard
-            label="브랜드 미정"
-            badge={{ name: '미정', color: '#8a8e94', logoUrl: null }}
-            total={unassignedScopeCounts.total}
-            pending={unassignedScopeCounts.pending}
-            scheduled={unassignedScopeCounts.scheduled}
-            selected={brandScope === UNASSIGNED_DRAFT_BRAND}
-            onSelect={() =>
-              setBrandScope(
-                brandScope === UNASSIGNED_DRAFT_BRAND
-                  ? 'all'
-                  : UNASSIGNED_DRAFT_BRAND,
-              )
-            }
-          />
-        ) : null}
-      </div>
+      <DraftBrandScopeBar
+        brandScope={brandScope}
+        allScopeCounts={allScopeCounts}
+        brandCards={brandCards}
+        unassignedScopeCounts={unassignedScopeCounts}
+        onSelect={setBrandScope}
+      />
 
       <div className="mb-3 flex flex-col gap-3 border-b border-[#ead7b0] pb-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="flex flex-wrap items-center gap-1.5 lg:pb-2">
@@ -819,57 +763,6 @@ export function CompanyDraftsPage() {
         }}
       />
     </div>
-  )
-}
-
-function BrandStatCard({
-  label,
-  badge,
-  total,
-  pending,
-  scheduled,
-  selected,
-  onSelect,
-}: {
-  label: string
-  badge: Pick<Brand, 'name' | 'color' | 'logoUrl'>
-  total: number
-  pending: number
-  scheduled: number
-  selected: boolean
-  onSelect: () => void
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      title={selected && label !== '전체' ? '다시 누르면 전체 브랜드' : label}
-      onClick={onSelect}
-      className={cn(
-        'inline-flex min-w-[168px] items-center gap-2 rounded-full border bg-white px-1.5 py-1 text-left',
-        selected
-          ? 'border-foreground shadow-sm'
-          : 'border-[#ead7c8] hover:border-[#d7c2ae]',
-      )}
-    >
-      <BrandAvatar
-        brand={badge}
-        className="size-9 rounded-full text-[10px]"
-        textClassName="text-[10px]"
-      />
-      <span className="min-w-0">
-        <span className="block truncate text-[11px] font-semibold tracking-wide">
-          {label}
-        </span>
-        <span className="mt-0.5 flex items-baseline gap-1.5 text-[10px] text-muted-foreground">
-          <span className="text-sm font-semibold tabular-nums text-foreground">
-            {formatNumber(total)}
-          </span>
-          <span className="tabular-nums">미정 {formatNumber(pending)}</span>
-          <span className="tabular-nums">확정 {formatNumber(scheduled)}</span>
-        </span>
-      </span>
-    </button>
   )
 }
 

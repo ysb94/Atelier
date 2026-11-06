@@ -282,6 +282,8 @@ export type DraftSampleWorkOrder = {
   assigneeName: string
   /** 작업 지시서 파일을 받아 확인한 시각 */
   fileCheckedAt: string | null
+  /** 배정받은 직원이 받기로 확인한 시각. 담당자 화면의 받기와는 따로다. */
+  assigneeCheckedAt?: string | null
 }
 
 /** 기획안에 함께 붙여 판매할 상품 한 줄 */
@@ -357,6 +359,8 @@ export type DraftColorSampleRound = {
   assigneeName?: string
   /** 중국팀이 작업 지시서 파일을 받아 확인한 시각. */
   fileCheckedAt?: string | null
+  /** 배정받은 직원이 받기로 확인한 시각. */
+  assigneeCheckedAt?: string | null
 }
 
 export type ProductDraft = {

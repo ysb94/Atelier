@@ -580,7 +580,7 @@ export function OrgChartPage({
           />
         </div>
       ) : activeView === 'workforce' ? (
-        <WorkforceManagementPanel members={sourceMembers} departments={departments} canEdit={canEdit && !directoryError} />
+        <WorkforceManagementPanel members={sourceMembers} departments={departments} canEdit={canEdit && membersQuery.isSuccess && departmentsQuery.isSuccess} />
       ) : activeView === 'new' ? (
         <NewEmployeesPanel
           departments={departments}

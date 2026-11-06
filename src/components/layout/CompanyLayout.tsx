@@ -90,7 +90,7 @@ function CompanyReleasedLayout() {
 function CompanySidebar() {
   const location = useLocation()
   const { email, profile, signOut } = useAuth()
-  const { scope } = useReleaseAccess()
+  const { scope, materialNudgeViewer } = useReleaseAccess()
   const navigationProfile = useNavigationPreviewProfile(profile)
   const companyTopNav = useMemo(() => companyTopNavForProfile(navigationProfile), [navigationProfile])
   const [openTitles, setOpenTitles] = useState<Set<string>>(() => new Set())
@@ -105,10 +105,10 @@ function CompanySidebar() {
   }, [departmentsQuery.error])
   const departments = departmentsQuery.data ?? emptyList<Department>()
   const navGroups = useMemo(() => {
-    const groups = companyNavGroupsForProfile(navigationProfile)
+    const groups = companyNavGroupsForProfile(navigationProfile, materialNudgeViewer)
     if (!scope.unrestricted) return groups
     return insertMissingDepartmentGroups(groups, departments)
-  }, [navigationProfile, scope.unrestricted, departments])
+  }, [navigationProfile, scope.unrestricted, departments, materialNudgeViewer])
   const flatNavItems = useMemo(
     () => [
       ...companyTopNav.map((item) => ({ ...item, tip: item.label })),

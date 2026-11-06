@@ -20,7 +20,7 @@ export function useAuth(){const role=useSyncExternalStore(subscribe,()=>window.a
 window.policies=members.map(p=>({employeeId:p.id,mode:workforceMode(p),trackingStart:null,version:0}));window.policyWrites=0;window.opsQueries=0;window.opsWrites=0;window.records=[];window.failNextSave=false;
 export const listWorkforceManagement=async()=>{if(window.failPolicyRead)throw new Error('분류 조회 연결 실패');return{ready:true,items:structuredClone(window.policies)}};
 export const allDepartments=[{id:logistics,name:'물류팀'},{id:china,name:'중국팀'},{id:id(70),name:'빈 현장팀'}];
-window.departmentPolicies=allDepartments.map(d=>({departmentId:d.id,mode:d.id===logistics?'local':d.id===china?'external':'head-office',trackingStart:null,version:0}));
+window.departmentPolicies=allDepartments.map(d=>({departmentId:d.id,mode:d.id===logistics?'local':d.id===china?'external':'head-office',trackingStart:null,contactIds:d.id===china?[profiles.normal.id]:[],version:0}));
 export const listDepartmentWorkforceManagement=async()=>({ready:new URL(location.href).searchParams.get('missing')!=='1',items:structuredClone(window.departmentPolicies)});
 export const saveDepartmentWorkforceManagement=async input=>{if(window.failNextPolicySave){window.failNextPolicySave=false;throw new Error('부서 설정 저장 실패. 다시 시도해 주세요.')};window.policyWrites++;const next={...input,version:input.version+1};window.departmentPolicies=window.departmentPolicies.map(row=>row.departmentId===input.departmentId?next:row);window.policies=window.policies.map(row=>members.find(p=>p.id===row.employeeId)?.departmentId===input.departmentId?{...row,mode:input.mode==='local'&&input.departmentId===logistics?'logistics':input.mode,trackingStart:input.trackingStart,version:next.version}:row);return next};
 export const getLogisticsOperations=async()=>{window.opsQueries++;return{ready:true,employees:members.filter(p=>window.policies.find(row=>row.employeeId===p.id)?.mode==='logistics').map(p=>({id:p.id,name:p.name,hireDate:p.hireDate})),entries:structuredClone(window.records)}};
@@ -113,6 +113,21 @@ try {
   }
   const policy = await open('hr', 'policy')
   const row = policy.locator('tbody tr').filter({ has: policy.getByLabel('중국팀 관리 방식', { exact: true }) })
+  const contacts = row.getByRole('group', { name: '중국팀 소통 담당', exact: true })
+  await contacts.getByText('본사 연락 창구입니다. 소통 담당자를 포함한 소속 직원 모두 본사 근태·연차 관리 대상에서 제외됩니다.', { exact: true }).waitFor()
+  await contacts.getByRole('button', { name: '담당자 추가' }).waitFor()
+  await policy.getByText(/소통 담당 0명/).waitFor()
+  await contacts.getByRole('button', { name: '담당자 추가' }).click()
+  const contactSearch = contacts.getByLabel('중국팀 소통 담당 검색')
+  await contactSearch.fill('찾을 수 없는 이름')
+  await contacts.getByText('검색 결과가 없습니다.', { exact: true }).waitFor()
+  await contactSearch.fill('협력사')
+  await contacts.getByRole('button', { name: '협력사직원 사원' }).click()
+  await contacts.getByText('1 / 3명', { exact: true }).waitFor()
+  assert.equal(await row.getByLabel('중국팀 본사 근태 시작일').count(), 0)
+  assert.equal(await policy.evaluate(() => window.policyWrites), 0)
+  await contacts.getByRole('button', { name: '협력사직원 소통 담당 해제' }).click()
+  await contacts.getByText('0 / 3명', { exact: true }).waitFor()
   await row.getByLabel('중국팀 관리 방식', { exact: true }).selectOption('head-office')
   await row.getByLabel('중국팀 본사 근태 시작일', { exact: true }).fill('2026-11-06')
   await policy.evaluate(()=>window.failNextPolicySave=true)

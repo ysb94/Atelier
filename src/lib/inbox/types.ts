@@ -6,6 +6,7 @@ export type InboxNotificationKind =
   | 'barcode_pending'
   | 'outbound_changed'
   | 'mention'
+  | 'material_nudge'
   | 'meeting_invitation'
   | 'meeting_result'
   | 'meeting_removed'
