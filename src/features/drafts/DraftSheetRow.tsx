@@ -493,7 +493,7 @@ function SheetInlineField({
     'aria-invalid': error ? true as const : undefined,
     title: error || undefined,
     className,
-    value: text,
+    value: readOnly ? value : text,
     placeholder,
     disabled: busy,
     readOnly,
@@ -624,7 +624,7 @@ function EntryButton({
           <input
             aria-label={`${label} 값`}
             placeholder={placeholder}
-            value={text}
+            value={readOnly ? value : text}
             readOnly={readOnly}
             disabled={busy}
             onChange={(event) => { if (!readOnly) setText(event.target.value) }}
