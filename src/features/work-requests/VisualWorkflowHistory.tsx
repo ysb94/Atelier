@@ -69,9 +69,16 @@ export function VisualWorkflowHistory({ review, feedbackHost }: {
         <ResultContent entry={review.handoff} />
       </section>}
       {feedbackHost && createPortal(<section aria-label="중간 관리자 피드백" className="rounded-lg border border-border px-3">
-        <FeedbackRow summary={`중간 수정 ${review.assignments[0]?.middle ?? 0}회`}>
-          {review.entries.length > 0 && <FeedbackEntries entries={review.entries} />}
-        </FeedbackRow>
+        <ol className="divide-y divide-border">
+          {review.previousMiddleCounts?.map((count, index) => <li key={index}>
+            <FeedbackRow summary={`중간 수정 ${count}회`} />
+          </li>)}
+          <li>
+            <FeedbackRow summary={`중간 수정 ${review.assignments[0]?.middle ?? 0}회`}>
+              {review.entries.length > 0 && <FeedbackEntries entries={review.entries} />}
+            </FeedbackRow>
+          </li>
+        </ol>
       </section>, feedbackHost)}
     </>
   }

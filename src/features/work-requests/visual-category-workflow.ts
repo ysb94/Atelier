@@ -57,6 +57,7 @@ export type VisualWorkflowReview = {
   role: 'manager' | 'worker' | 'requester'
   result: VisualWorkflowEntry | null
   handoff?: VisualWorkflowEntry | null
+  previousMiddleCounts?: number[]
   entries: VisualWorkflowEntry[]
   assignments: VisualWorkflowAssignment[]
 }

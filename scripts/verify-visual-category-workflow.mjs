@@ -130,6 +130,7 @@ try {
   const oldNotices = (await db.query('select * from public.visual_workflow_notices where request_id=$1 order by id', [legacy])).rows
   await db.exec('begin')
   await db.exec(await readFile('supabase/migrations/20261109192913_visual_assignment_history_visibility.sql', 'utf8'))
+  await db.exec(await readFile('supabase/migrations/20261109202708_visual_worker_feedback_counts.sql', 'utf8'))
   await db.exec('commit')
   delete historical.data.visualCategoryWorkflow.categories.banner.feedback
   delete historical.data.visualCategoryWorkflow.categories.banner.feedbackCycles
@@ -138,7 +139,9 @@ try {
   const oldReview = await review(middle, 'banner', legacy)
   assert.deepEqual(oldReview.assignments.map(row => row.middle), [1])
   assert.equal(oldReview.entries.length, 2)
-  assert.deepEqual((await review(worker, 'banner', legacy)).entries.map(row => row.note), ['이전 중간 수정', '이전 시안'])
+  const oldWorkerReview = await review(worker, 'banner', legacy)
+  assert.deepEqual(oldWorkerReview.entries.map(row => row.note), ['이전 중간 수정', '이전 시안'])
+  assert.deepEqual(oldWorkerReview.previousMiddleCounts, [])
   assert.equal((await review(ids.planner, 'banner', legacy)).result, null)
 
   const draft = await rpc(ids.planner, 'begin_work_request', [request, 'design'])
@@ -215,8 +218,11 @@ try {
   assert.deepEqual((await review(middle, 'banner')).assignments.map(row => [row.workerName, row.middle, row.supervisor]), [
     ['배너 작업자', 1, 1], ['배너 작업자', 0, 1],
   ])
-  assert.deepEqual((await review(worker, 'banner')).entries.map(row => row.note), ['총괄 의견 전달'])
-  assert.equal((await review(worker, 'banner')).handoff.note, '두 번째 시안')
+  const continuingWorkerReview = await review(worker, 'banner')
+  assert.deepEqual(continuingWorkerReview.previousMiddleCounts, [1])
+  assert.deepEqual(continuingWorkerReview.assignments, [{ middle: 0 }])
+  assert.deepEqual(continuingWorkerReview.entries.map(row => row.note), ['총괄 의견 전달'])
+  assert.equal(continuingWorkerReview.handoff.note, '두 번째 시안')
   assert.equal((await detail()).visualCategoryWorkflow.categories.banner.feedback, undefined)
   await actor(ids.planner)
   const rawWorkerRequest = (await db.query('select data from public.work_requests where id=$1', [request])).rows[0].data
@@ -243,13 +249,16 @@ try {
   const newWorkerReview = await review(otherWorker, 'banner')
   assert.equal(newWorkerReview.handoff.note, '배너 완성본')
   assert.deepEqual(newWorkerReview.assignments, [{ middle: 0 }])
+  assert.deepEqual(newWorkerReview.previousMiddleCounts, [])
   assert.deepEqual(newWorkerReview.entries.map(row => row.note), ['새 요청을 반영해 주세요'])
   await act(otherWorker, 'banner', 'submit', { note: '새 작업자 초안' })
   await act(middle, 'banner', 'middle_return', { note: '초안 수정' })
   await act(middle, 'banner', 'assign_worker', { person: worker, note: '초안에서 제목만 정리해 주세요' })
   await rejected(() => review(otherWorker, 'banner'))
-  assert.equal((await review(worker, 'banner')).handoff.note, '새 작업자 초안')
-  assert.deepEqual((await review(worker, 'banner')).entries.map(row => row.note), ['초안에서 제목만 정리해 주세요'])
+  const returningWorkerReview = await review(worker, 'banner')
+  assert.deepEqual(returningWorkerReview.previousMiddleCounts, [1, 0])
+  assert.equal(returningWorkerReview.handoff.note, '새 작업자 초안')
+  assert.deepEqual(returningWorkerReview.entries.map(row => row.note), ['초안에서 제목만 정리해 주세요'])
   const fullReview = await review(supervisor, 'banner')
   assert.deepEqual(fullReview.assignments.map(row => [row.workerName, row.middle, row.supervisor, row.requester]), [
     ['배너 작업자', 1, 1, undefined], ['배너 작업자', 0, 1, 1],
