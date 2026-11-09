@@ -30,6 +30,7 @@ import {
   CheckCircle2,
   ClipboardPlus,
   Clock3,
+  Ellipsis,
   Eye,
   Inbox,
   Paperclip,
@@ -56,6 +57,8 @@ import { Input, Select, Textarea } from '@/components/ui/input'
 import { useWorkRequestSettings } from '@/lib/supabase/work-request-settings'
 import { DEFAULT_VISUAL_CATEGORIES, type VisualCategory, type VisualRequestValues } from './visual-request-config'
 import { WorkRequestCategoryAssignments } from './WorkRequestCategoryAssignments'
+import { VisualWorkRequestDrawer } from './VisualWorkRequestDrawer'
+import { visualWorkDetail } from './visual-work-detail'
 import { useAuth } from '@/lib/supabase/auth'
 import { listBrandDirectory } from '@/lib/supabase/profiles'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -3580,29 +3583,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         selectedRequest.requesterDepartment,
       ),
     })
+    const visual = selectedRequest.owner === 'design' ? visualWorkDetail(selectedRequest, visualCategories) : null
+    const visualDetail = visual?.sections.length ? visual : null
+    const initialCategory = searchParams.get('visualTab')
 
-    return (
-      <div className="fixed inset-0 z-50">
-        <button
-          type="button"
-          aria-label="상세 닫기"
-          className="absolute inset-0 bg-black/20"
-          onClick={closeRequest}
-        />
-        <aside className="absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-card shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
-          <div className="min-w-0">
-            <p className="text-xs text-muted-foreground">
-              {selectedRequest.id} ·{' '}
-              {departmentLabel(selectedRequest.requesterDepartment)}{' '}
-              {requesterLabel(selectedRequest)} →{' '}
-              {selectedConfig.teamName}
-            </p>
-            <h2 className="mt-1 truncate text-lg font-semibold">
-              {selectedRequest.values.title}
-            </h2>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
+    const headerActions = (
+      <>
             {isSelfRequest && canEdit ? (
               <>
                 <Button
@@ -3690,6 +3676,33 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               </>
             ) : null}
             <WorkRequestCancellation request={selectedRequest} canManage={canManageSelected} disabled={storage.saving} />
+      </>
+    )
+
+    const renderHeader = (menuAction?: ReactNode) => (
+        <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">
+              {visualDetail
+                ? `${departmentLabel(selectedRequest.requesterDepartment)} ${requesterLabel(selectedRequest)}`
+                : `${selectedRequest.id} · ${departmentLabel(selectedRequest.requesterDepartment)} ${requesterLabel(selectedRequest)} → ${selectedConfig.teamName}`}
+            </p>
+            <h2 className={cn('mt-1 text-lg font-semibold', visualDetail ? 'break-words' : 'truncate')}>
+              {selectedRequest.values.title}
+            </h2>
+          </div>
+          <div className="flex shrink-0 items-center gap-2">
+            {visualDetail ? (
+              <details className="relative">
+                <summary aria-label="업무 메뉴" className="flex size-8 cursor-pointer list-none items-center justify-center rounded-md border border-border bg-card hover:bg-accent [&::-webkit-details-marker]:hidden">
+                  <Ellipsis className="size-4" />
+                </summary>
+                <div className="absolute right-0 z-10 mt-1 grid min-w-32 gap-1 rounded-lg border border-border bg-card p-1 shadow-sm">
+                  {headerActions}
+                  {menuAction}
+                </div>
+              </details>
+            ) : headerActions}
             <Button
               type="button"
               variant="outline"
@@ -3701,15 +3714,30 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             </Button>
           </div>
         </div>
+    )
 
-        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
-        {flashMessage ? (
+    const notice = flashMessage ? (
           <div className="flex items-start gap-3 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">
             <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
             <span>{flashMessage}</span>
           </div>
-        ) : null}
+    ) : null
 
+    const references = selectedRequest.values.referenceFiles.filter(
+      item => !blockHasFile(selectedRequest.values.blocks, item.file),
+    )
+    const referenceCards = references.length ? (
+      <div>
+        <p className="text-xs text-muted-foreground">참고 파일</p>
+        <div className="mt-2 space-y-2">
+          {references.map(item => isImageFile(item.file)
+            ? <ResizableImage key={item.id} file={item.file} widthPercent={item.widthPercent} heightPx={item.heightPx} />
+            : <FileAttachmentCard key={item.id} file={item.file} />)}
+        </div>
+      </div>
+    ) : null
+
+    const management = (
         <div className="space-y-6">
           <div className="space-y-6">
             <Card>
@@ -3883,7 +3911,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     </p>
                   </div>
                 ) : null}
-                <div className="space-y-5">
+                {!visualDetail && <div className="space-y-5">
                   {splitBodyParts(selectedRequest.values.blocks).map((part, index) => {
                     if (part.type === 'file') {
                       return (
@@ -3904,29 +3932,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                       />
                     )
                   })}
-                </div>
-                {selectedRequest.values.referenceFiles.some(
-                  (item) => !blockHasFile(selectedRequest.values.blocks, item.file),
-                ) ? (
-                  <div>
-                    <p className="text-xs text-muted-foreground">참고 파일</p>
-                    <div className="mt-2 space-y-2">
-                      {selectedRequest.values.referenceFiles.map((item) => {
-                        if (blockHasFile(selectedRequest.values.blocks, item.file)) return null
-                        return isImageFile(item.file) ? (
-                          <ResizableImage
-                            key={item.id}
-                            file={item.file}
-                            widthPercent={item.widthPercent}
-                            heightPx={item.heightPx}
-                          />
-                        ) : (
-                          <FileAttachmentCard key={item.id} file={item.file} />
-                        )
-                      })}
-                    </div>
-                  </div>
-                ) : null}
+                </div>}
+                {!visualDetail && referenceCards}
               </CardContent>
             </Card>
           </div>
@@ -4018,24 +4025,57 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             ) : null}
 
             {selectedRequest.completionResult?<Card><CardContent className="p-4"><h3 className="font-medium">완료 결과</h3><p className="mt-2 whitespace-pre-wrap text-sm">{selectedRequest.completionResult}</p></CardContent></Card>:null}
-            {selectedRequest.values.visualRequest?.categories.some(category => Object.values(category.fields).some(Boolean)) ? <Card><CardContent className="space-y-4 p-5">{selectedRequest.values.visualRequest.categories.map(category => <section key={category.id}><h3 className="text-sm font-semibold">{category.label}</h3><dl className="mt-2 space-y-2 text-sm">{Object.entries(category.fields).filter(([, value]) => value).map(([id, value]) => <div key={id}><dt className="text-xs text-muted-foreground">{category.fieldLabels?.[id] ?? id}</dt><dd className="whitespace-pre-wrap break-words">{value}</dd></div>)}</dl></section>)}</CardContent></Card> : null}
-            <WorkRequestCategoryAssignments key={`${selfId}:${selectedRequest.id}`} request={selectedRequest} members={teamMembers} canManage={canManageSelected} busy={storage.saving} />
-            <WorkRequestChat
+            {!visualDetail && selectedRequest.values.visualRequest?.categories.some(category => Object.values(category.fields).some(Boolean)) ? <Card><CardContent className="space-y-4 p-5">{selectedRequest.values.visualRequest.categories.map(category => <section key={category.id}><h3 className="text-sm font-semibold">{category.label}</h3><dl className="mt-2 space-y-2 text-sm">{Object.entries(category.fields).filter(([, value]) => value).map(([id, value]) => <div key={id}><dt className="text-xs text-muted-foreground">{category.fieldLabels?.[id] ?? id}</dt><dd className="whitespace-pre-wrap break-words">{value}</dd></div>)}</dl></section>)}</CardContent></Card> : null}
+            {!visualDetail && <WorkRequestCategoryAssignments key={`${selfId}:${selectedRequest.id}`} request={selectedRequest} members={teamMembers} canManage={canManageSelected} busy={storage.saving} />}
+            {(!visualDetail || selectedRequest.messages.length > 0) && <WorkRequestChat
               className="h-[32rem]"
               requestId={selectedRequest.id}
               rooms={chatRooms}
               messages={selectedRequest.messages}
               selfId={selfId}
-              canWrite={canWriteChat(selectedRequest)}
+              canWrite={!visualDetail && canWriteChat(selectedRequest)}
               onSend={(body, roomId) =>
                 addMessage(selectedRequest.id, body, roomId)
               }
-            />
+            />}
 
           </div>
         </div>
-        </div>
-      </aside>
+    )
+
+    return (
+      <div className="fixed inset-0 z-50">
+        <button
+          type="button"
+          aria-label="상세 닫기"
+          className="absolute inset-0 bg-black/20"
+          onClick={closeRequest}
+        />
+        {visualDetail ? <VisualWorkRequestDrawer
+          key={`${selfId}:${selectedRequest.id}:${initialCategory ?? ''}`}
+          requestId={selectedRequest.id}
+          title={selectedRequest.values.title}
+          detail={visualDetail}
+          initialCategory={initialCategory}
+          viewerId={selfId}
+          canManage={canManageSelected}
+          isRequester={isSelfRequest}
+          header={renderHeader}
+          notice={notice}
+          mainReferences={referenceCards}
+          management={management}
+          memberName={id => storage.directoryMembers.find(person => person.id === id)?.displayName?.trim() || '기존 직원'}
+          renderBody={blocks => <RequestBodyPreview blocks={blocks} />}
+          renderAssignment={categoryId => <WorkRequestCategoryAssignments
+            request={selectedRequest} members={teamMembers} canManage={canManageSelected}
+            busy={storage.saving} categoryId={categoryId}
+          />}
+        /> : (
+          <aside className="absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-card shadow-2xl">
+            {renderHeader()}
+            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">{notice}{management}</div>
+          </aside>
+        )}
       </div>
     )
   }
