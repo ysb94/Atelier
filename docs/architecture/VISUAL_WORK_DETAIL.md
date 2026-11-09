@@ -26,7 +26,9 @@
 
 지정 중간·총괄 관리자와 기존 Visual 업무 관리 담당자는 작업자별 구간과 전체 검수 이력을 읽는다. 현재 작업자는 본인 구간별 제출물·중간 관리자 피드백과 현재 인계 시안을 읽는다. 요청자는 공유된 결과를 확인하거나 수정을 요청한다. 요청자와 분류 관리자가 새로 남긴 공유 댓글은 배정된 작업자도 볼 수 있다. 기존 내부 댓글·첨부와 내부 댓글의 답글은 관리자 범위에서 조회한다.
 
-`20261109210739_visual_workflow_review_rounds.sql`은 총괄 확인과 배정 분리, 수정 묶음, 댓글 및 제출 파일 연결을 검증한 로컬 마이그레이션이다. 공유 DB 적용 전에는 기존 서버 처리 기준이 사용된다.
+2026-11-09 사용자 승인 후 `20261109210739_visual_workflow_review_rounds.sql`을 공유 Atelier DB에 적용했다. 적용 이력은 `20261109123753_visual_workflow_review_rounds`다. 적용 전 함수 정의와 원본 대조값은 `docs/backups/visual-workflow-review-rounds-functions-before-20261109.sql`과 `docs/backups/visual-workflow-review-rounds-pre-apply-20261109.json`에 보관했다.
+
+공유 DB의 인증 역할로 임시 요청에서 총괄 확인 전 배정, 역할별 알림과 첨부 접근, 총괄·중간 수정 횟수 초기화, 요청자 확인 후 전체 완료를 검증하고 롤백했다. 적용 전후 기존 요청·댓글·첨부·이력·알림 원본과 기존 함수 실행 권한을 대조했다.
 
 2026-11-09 `20261109192913_visual_assignment_history_visibility.sql`을 사용자 승인 범위에서 공유 Atelier DB에 적용했다. 운영 이력은 `20261109103827_visual_assignment_history_visibility`다. 기존 수정 횟수는 비공개 표에 옮겼으며, 담당자를 확인할 수 없는 과거 구간은 관리자 화면에 기존 기록으로 표시한다. 적용 전 정의와 이력은 `docs/backups/visual-assignment-history-before-20261109.json`에 보관했다. 적용 전후 요청·이력·알림·설정·직원 원본과 기존 실행 권한을 대조하고, 인증 역할 조회와 익명 접근 차단을 검증했다.
 
