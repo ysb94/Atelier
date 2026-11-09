@@ -1,3 +1,5 @@
+import type { VisualCommentFile } from '@/lib/supabase/work-request-visual-comments'
+
 export const VISUAL_CATEGORY_STATES = {
   assignment: '작업자 지정 대기',
   working: '작업 중',
@@ -27,9 +29,9 @@ export type VisualCategoryWorkflow = {
 
 export type VisualWorkflowEntryAction =
   | 'submit' | 'middle_return' | 'supervisor_return' | 'requester_return' | 'supervisor_forward' | 'middle_forward' | 'assign_worker'
+  | 'middle_approve' | 'supervisor_approve' | 'requester_confirm'
 
-export type VisualWorkflowAction = VisualWorkflowEntryAction
-  | 'receipt' | 'assign_supervisor' | 'middle_approve' | 'supervisor_approve' | 'requester_confirm'
+export type VisualWorkflowAction = VisualWorkflowEntryAction | 'receipt' | 'assign_supervisor'
 
 export type VisualWorkflowEntry = {
   id: string
@@ -41,16 +43,17 @@ export type VisualWorkflowEntry = {
   sharedAt?: string | null
   assignmentId?: string | null
   actorName?: string | null
+  files?: VisualCommentFile[]
 }
 
-export type VisualWorkflowAssignment = {
+export type VisualRevisionCounts = { middle?: number; supervisor?: number; requester?: number }
+
+export type VisualWorkflowAssignment = VisualRevisionCounts & {
   id?: string
   workerName?: string | null
   assignedAt?: string
+  supervisorRoundId?: string
   reason?: 'initial' | 'handoff' | 'review' | 'legacy'
-  middle?: number
-  supervisor?: number
-  requester?: number
 }
 
 export type VisualWorkflowReview = {
@@ -58,8 +61,61 @@ export type VisualWorkflowReview = {
   result: VisualWorkflowEntry | null
   handoff?: VisualWorkflowEntry | null
   previousMiddleCounts?: number[]
+  pastAssignments?: { id?: string | null; middle: number; entries: VisualWorkflowEntry[] }[]
+  currentCounts?: VisualRevisionCounts
+  reviewRounds?: boolean
   entries: VisualWorkflowEntry[]
   assignments: VisualWorkflowAssignment[]
+}
+
+type VisualReviewGroup = {
+  openedBy?: VisualWorkflowEntry
+  requesterFeedback?: VisualWorkflowEntry
+  supervisorCount: number
+  assignments: { assignment: VisualWorkflowAssignment; index: number; entries: VisualWorkflowEntry[] }[]
+}
+
+export function visualReviewGroups(review: VisualWorkflowReview) {
+  const first: VisualReviewGroup = { supervisorCount: 0, assignments: [] }
+  const groups = [first]
+  const byOpeningId = new Map<string, VisualReviewGroup>()
+  const entriesByAssignment = new Map<string, VisualWorkflowEntry[]>()
+  const requesterFeedback = new Map<string, VisualWorkflowEntry>()
+  let active = first
+
+  for (const entry of [...review.entries].reverse()) {
+    if (entry.action === 'requester_return') requesterFeedback.set(entry.id, entry)
+    if (entry.action === 'supervisor_forward') {
+      active = {
+        openedBy: entry, requesterFeedback: entry.roundId ? requesterFeedback.get(entry.roundId) : undefined,
+        supervisorCount: 0, assignments: [],
+      }
+      groups.push(active)
+      byOpeningId.set(entry.id, active)
+    } else if (entry.action === 'supervisor_return') {
+      active.supervisorCount++
+    }
+  }
+
+  for (const entry of review.entries) {
+    if (!entry.assignmentId || entry.action === 'supervisor_forward') continue
+    const items = entriesByAssignment.get(entry.assignmentId) ?? []
+    items.push(entry)
+    entriesByAssignment.set(entry.assignmentId, items)
+  }
+  const newestFirst = [...groups].reverse()
+  for (const [index, assignment] of review.assignments.entries()) {
+    const group = assignment.supervisorRoundId && byOpeningId.get(assignment.supervisorRoundId)
+    const assignedAt = assignment.assignedAt
+    const legacyGroup = !group && assignedAt && newestFirst.find(item =>
+      item.openedBy && Date.parse(item.openedBy.createdAt) <= Date.parse(assignedAt))
+    const section = group || legacyGroup || first
+    section.assignments.push({ assignment, index, entries: assignment.id ? entriesByAssignment.get(assignment.id) ?? [] : [] })
+    if (section === first) first.supervisorCount = Math.max(first.supervisorCount, assignment.supervisor ?? 0)
+  }
+
+  active.supervisorCount = review.currentCounts?.supervisor ?? active.supervisorCount
+  return { groups, requesterCount: requesterFeedback.size }
 }
 
 export type VisualWorkflowNotice = {

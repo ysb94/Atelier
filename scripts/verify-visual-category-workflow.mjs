@@ -48,6 +48,17 @@ const review = (id, category, target = request) => rpc(id, 'get_visual_workflow_
 const notices = async id => (await rpc(id, 'list_my_visual_workflow_notices')).filter(row => row.requestId === request)
 const current = async (id, kind, category = '') => (await notices(id)).find(row => row.current && row.kind === kind && row.categoryId === category)
 const rejected = action => assert.rejects(action, { code: '42501' })
+const bucket = 'company-work-requests'
+const fileSpec = [{ name: '배너 시안.txt', type: 'text/plain', size: 12 }]
+const reserve = (id, category, command) => rpc(id, 'reserve_visual_work_result_files', [request, category, command, fileSpec])
+async function upload(id, path) {
+  await actor(id)
+  await db.query('insert into storage.objects(bucket_id,name,metadata) values($1,$2,$3)', [bucket, path, { size: fileSpec[0].size }])
+}
+async function canReadFile(id, path) {
+  await actor(id)
+  return (await db.query('select name from storage.objects where bucket_id=$1 and name=$2', [bucket, path])).rows.length === 1
+}
 
 try {
   for (const migration of migrations) await db.exec(await readFile('supabase/migrations/' + migration + '.sql', 'utf8'))
@@ -132,6 +143,14 @@ try {
   await db.exec(await readFile('supabase/migrations/20261109192913_visual_assignment_history_visibility.sql', 'utf8'))
   await db.exec(await readFile('supabase/migrations/20261109202708_visual_worker_feedback_counts.sql', 'utf8'))
   await db.exec('commit')
+  const oldComment = crypto.randomUUID()
+  const oldCommentArgs = [legacy, 'banner', oldComment, '기존 관리자 댓글', null, fileSpec]
+  const oldCommentPath = (await rpc(middle, 'save_visual_work_category_comment', [...oldCommentArgs, false])).files[0].path
+  await upload(middle, oldCommentPath)
+  await rpc(middle, 'save_visual_work_category_comment', [...oldCommentArgs, true])
+  await db.exec('reset role; begin')
+  await db.exec(await readFile('supabase/migrations/20261109210739_visual_workflow_review_rounds.sql', 'utf8'))
+  await db.exec('commit')
   delete historical.data.visualCategoryWorkflow.categories.banner.feedback
   delete historical.data.visualCategoryWorkflow.categories.banner.feedbackCycles
   assert.deepEqual(await rawRequest(legacy), historical)
@@ -143,6 +162,14 @@ try {
   assert.deepEqual(oldWorkerReview.entries.map(row => row.note), ['이전 중간 수정', '이전 시안'])
   assert.deepEqual(oldWorkerReview.previousMiddleCounts, [])
   assert.equal((await review(ids.planner, 'banner', legacy)).result, null)
+  assert.equal((await rpc(middle, 'list_visual_work_category_comments', [legacy, 'banner'])).items[0].internal, true)
+  assert.deepEqual((await rpc(worker, 'list_visual_work_category_comments', [legacy, 'banner'])).items, [])
+  assert.deepEqual((await rpc(ids.planner, 'list_visual_work_category_comments', [legacy, 'banner'])).items, [])
+  assert.equal(await canReadFile(worker, oldCommentPath), false)
+  assert.equal(await canReadFile(ids.planner, oldCommentPath), false)
+  await assert.rejects(() => rpc(ids.planner, 'save_visual_work_category_comment', [
+    legacy, 'banner', crypto.randomUUID(), '숨은 댓글에 답글 시도', oldComment, [], true,
+  ]), { code: '22023' })
 
   const draft = await rpc(ids.planner, 'begin_work_request', [request, 'design'])
   const publishCommand = crypto.randomUUID()
@@ -168,20 +195,17 @@ try {
   assert.equal(await current(otherMiddle, 'registered', 'video'), undefined)
   revision = await rpc(ids.planner, 'save_work_request', [request, revision, { values }, crypto.randomUUID()])
   assert.ok(await current(otherMiddle, 'registered', 'video'))
-  await rejected(() => act(middle, 'banner', 'assign_worker', { person: worker }))
   await rejected(() => rpc(ids.manager, 'save_work_request', [request, revision, { status: 'reviewing' }, crypto.randomUUID()]))
   await rejected(() => act(ids.outsider, '', 'receipt'))
-  await act(supervisor, '', 'receipt')
-  await rejected(() => act(otherSupervisor, '', 'receipt'))
-  assert.equal(await current(otherSupervisor, 'receipt'), undefined)
-  assert.ok(await current(middle, 'assignment', 'banner'))
-  assert.ok(await current(otherMiddle, 'assignment', 'video'))
   await rejected(() => act(otherMiddle, 'banner', 'assign_worker', { person: worker }))
   await assert.rejects(() => act(middle, 'banner', 'assign_worker', { person: ids.md }), { code: '22023' })
   const preAssignment = revision
   const assignmentCommand = crypto.randomUUID()
   await act(middle, 'banner', 'assign_worker', { person: worker, command: assignmentCommand })
   const assignedRevision = revision
+  assert.equal((await detail()).visualCategoryWorkflow.receivedAt, undefined)
+  assert.equal(await current(middle, 'registered', 'banner'), undefined)
+  assert.ok(await current(worker, 'working', 'banner'))
   assert.equal(await act(middle, 'banner', 'assign_worker', { person: worker, command: assignmentCommand, revision: preAssignment }), assignedRevision)
   await assert.rejects(() => act(otherMiddle, 'video', 'assign_worker', { person: otherWorker, revision: preAssignment }), { code: '40001' })
   await act(otherMiddle, 'video', 'assign_worker', { person: otherWorker })
@@ -190,23 +214,45 @@ try {
   assert.ok(board.assigneeIds.includes(worker) && board.assigneeIds.includes(otherWorker))
   assert.ok(await current(worker, 'working', 'banner'))
   await rejected(() => rpc(worker, 'list_visual_work_category_comments', [request, 'video']))
-  await rejected(() => rpc(worker, 'list_visual_work_category_comments', [request, 'banner']))
-  await rejected(() => rpc(ids.planner, 'list_visual_work_category_comments', [request, 'banner']))
-  assert.deepEqual((await rpc(middle, 'list_visual_work_category_comments', [request, 'banner'])).items, [])
+  await rejected(() => rpc(ids.outsider, 'list_visual_work_category_comments', [request, 'banner']))
+  for (const author of [ids.planner, middle]) {
+    await rpc(author, 'save_visual_work_category_comment', [request, 'banner', crypto.randomUUID(), '작업 참고 의견', null, [], true])
+  }
+  const workerComments = await rpc(worker, 'list_visual_work_category_comments', [request, 'banner'])
+  assert.equal(workerComments.items.length, 2)
+  assert.equal(workerComments.canWrite, false)
+  await rejected(() => rpc(worker, 'save_visual_work_category_comment', [
+    request, 'banner', crypto.randomUUID(), '읽기 전용 댓글 권한 검증', null, [], true,
+  ]))
+  assert.equal((await rpc(ids.planner, 'list_visual_work_category_comments', [request, 'banner'])).items.length, 2)
   assert.deepEqual((await review(worker, 'banner')).assignments, [{ middle: 0 }])
   assert.deepEqual((await review(middle, 'banner')).assignments.map(row => [row.workerName, row.middle]), [['배너 작업자', 0]])
 
   await rejected(() => act(otherWorker, 'banner', 'submit', { note: '권한 없음' }))
-  await act(worker, 'banner', 'submit', { note: '초안', url: 'https://example.com/banner-draft' })
+  const draftResult = crypto.randomUUID()
+  await rejected(() => reserve(otherWorker, 'banner', draftResult))
+  const draftFile = (await reserve(worker, 'banner', draftResult)).files[0].path
+  await assert.rejects(() => act(worker, 'banner', 'submit', { command: draftResult }), { code: '22023' })
+  await upload(worker, draftFile)
+  await act(worker, 'banner', 'submit', { command: draftResult })
+  assert.equal((await reserve(worker, 'banner', draftResult)).published, true)
   assert.deepEqual(await entries(ids.planner, 'banner'), [])
+  assert.equal(await canReadFile(ids.planner, draftFile), false)
+  assert.equal(await canReadFile(middle, draftFile), true)
+  assert.equal(await canReadFile(otherWorker, draftFile), false)
+  assert.equal((await review(middle, 'banner')).entries.find(row => row.id === draftResult).files[0].path, draftFile)
   await rejected(() => entries(otherWorker, 'banner'))
   await act(middle, 'banner', 'middle_return', { note: '색상 수정' })
   assert.equal((await entries(worker, 'banner'))[0].action, 'middle_return')
   await act(worker, 'banner', 'submit', { note: '두 번째 시안' })
   await act(middle, 'banner', 'middle_approve')
-  await rejected(() => act(otherSupervisor, 'banner', 'supervisor_approve'))
+  assert.ok(await current(supervisor, 'supervisor_review', 'banner'))
+  assert.ok(await current(otherSupervisor, 'supervisor_review', 'banner'))
+  assert.equal((await detail()).visualCategoryWorkflow.receivedAt, undefined)
   assert.equal((await rpc(supervisor, 'list_department_work', ['design'])).find(row => row.id === request).visualCategoryReview.pending, true)
   await act(supervisor, 'banner', 'supervisor_return', { note: '총괄 검수 수정' })
+  await rejected(() => act(otherSupervisor, '', 'receipt'))
+  assert.equal(await current(otherSupervisor, 'receipt'), undefined)
   assert.equal((await entries(worker, 'banner')).some(row => row.action === 'supervisor_return'), false)
   const beforeForward = revision
   const forwardCommand = crypto.randomUUID()
@@ -220,6 +266,10 @@ try {
   ])
   const continuingWorkerReview = await review(worker, 'banner')
   assert.deepEqual(continuingWorkerReview.previousMiddleCounts, [1])
+  assert.ok(continuingWorkerReview.pastAssignments[0].entries.some(row => row.note === '색상 수정'))
+  assert.ok(continuingWorkerReview.pastAssignments[0].entries.some(row => row.files?.[0]?.path === draftFile))
+  assert.ok(continuingWorkerReview.pastAssignments.every(assignment =>
+    assignment.entries.every(row => !['supervisor_return', 'requester_return', 'supervisor_forward'].includes(row.action))))
   assert.deepEqual(continuingWorkerReview.assignments, [{ middle: 0 }])
   assert.deepEqual(continuingWorkerReview.entries.map(row => row.note), ['총괄 의견 전달'])
   assert.equal(continuingWorkerReview.handoff.note, '두 번째 시안')
@@ -230,12 +280,21 @@ try {
   assert.equal(rawWorkerRequest.visualCategoryWorkflow.categories.banner.feedbackCycles, undefined)
   await assert.rejects(() => db.query('select * from app.visual_workflow_feedback'), { code: '42501' })
 
-  await act(worker, 'banner', 'submit', { note: '배너 완성본' })
+  await act(worker, 'banner', 'submit', { note: '배너 재작업 시안' })
+  await act(middle, 'banner', 'middle_return', { note: '재작업 시안도 한 번 더 다듬어 주세요.' })
+  const approvedResult = crypto.randomUUID()
+  const approvedFile = (await reserve(worker, 'banner', approvedResult)).files[0].path
+  await upload(worker, approvedFile)
+  await act(worker, 'banner', 'submit', { note: '배너 완성본', command: approvedResult })
   await act(middle, 'banner', 'middle_approve')
+  await rejected(() => act(otherSupervisor, 'banner', 'supervisor_approve'))
   await act(supervisor, 'banner', 'supervisor_approve')
   const firstResult = await current(ids.planner, 'requester_review', 'banner')
   assert.ok(firstResult?.personal)
   assert.equal((await entries(ids.planner, 'banner'))[0].note, '배너 완성본')
+  assert.equal((await review(ids.planner, 'banner')).result.files[0].path, approvedFile)
+  assert.equal(await canReadFile(ids.planner, approvedFile), true)
+  assert.equal(await canReadFile(ids.planner, draftFile), false)
   assert.equal((await detail()).visualCategoryWorkflow.categories.video.state, 'working')
   await rpc(ids.planner, 'read_my_visual_workflow_notices', [request, 'video', revision, [firstResult.id]])
   assert.equal((await current(ids.planner, 'requester_review', 'banner')).readAt, null)
@@ -243,11 +302,20 @@ try {
   assert.ok((await current(ids.planner, 'requester_review', 'banner')).readAt)
   await act(ids.planner, 'banner', 'requester_return', { note: '요청자 변경 요청' })
   assert.ok(await current(supervisor, 'supervisor_revision', 'banner'))
-  await act(supervisor, 'banner', 'supervisor_forward', { note: '중간 관리자에게 전달' })
+  assert.deepEqual((await review(supervisor, 'banner')).currentCounts, { middle: 1, supervisor: 1, requester: 1 })
+  const groupId = crypto.randomUUID()
+  await act(supervisor, 'banner', 'supervisor_forward', { note: '중간 관리자에게 전달', command: groupId })
+  assert.deepEqual((await review(middle, 'banner')).currentCounts, { middle: 1, supervisor: 0, requester: 1 })
+  assert.ok(await current(middle, 'middle_revision', 'banner'))
   await act(middle, 'banner', 'middle_forward', { person: otherWorker, note: '새 요청을 반영해 주세요' })
+  assert.deepEqual((await review(supervisor, 'banner')).currentCounts, { middle: 0, supervisor: 0, requester: 1 })
+  assert.ok(await current(otherWorker, 'rework', 'banner'))
   await rejected(() => review(worker, 'banner'))
   const newWorkerReview = await review(otherWorker, 'banner')
   assert.equal(newWorkerReview.handoff.note, '배너 완성본')
+  assert.equal(newWorkerReview.handoff.files[0].path, approvedFile)
+  assert.equal(await canReadFile(otherWorker, approvedFile), true)
+  assert.equal(await canReadFile(otherWorker, draftFile), false)
   assert.deepEqual(newWorkerReview.assignments, [{ middle: 0 }])
   assert.deepEqual(newWorkerReview.previousMiddleCounts, [])
   assert.deepEqual(newWorkerReview.entries.map(row => row.note), ['새 요청을 반영해 주세요'])
@@ -256,17 +324,24 @@ try {
   await act(middle, 'banner', 'assign_worker', { person: worker, note: '초안에서 제목만 정리해 주세요' })
   await rejected(() => review(otherWorker, 'banner'))
   const returningWorkerReview = await review(worker, 'banner')
-  assert.deepEqual(returningWorkerReview.previousMiddleCounts, [1, 0])
+  assert.deepEqual(returningWorkerReview.previousMiddleCounts, [1, 1])
+  assert.equal(returningWorkerReview.pastAssignments.flatMap(assignment => assignment.entries).some(row => row.note === '초안 수정'), false)
   assert.equal(returningWorkerReview.handoff.note, '새 작업자 초안')
   assert.deepEqual(returningWorkerReview.entries.map(row => row.note), ['초안에서 제목만 정리해 주세요'])
   const fullReview = await review(supervisor, 'banner')
   assert.deepEqual(fullReview.assignments.map(row => [row.workerName, row.middle, row.supervisor, row.requester]), [
-    ['배너 작업자', 1, 1, undefined], ['배너 작업자', 0, 1, 1],
-    ['영상 작업자', 1, 1, undefined], ['배너 작업자', 0, undefined, undefined],
+    ['배너 작업자', 1, 1, undefined], ['배너 작업자', 1, 1, 1],
+    ['영상 작업자', 1, 0, undefined], ['배너 작업자', 0, undefined, undefined],
   ])
+  assert.deepEqual(fullReview.assignments.map(row => row.supervisorRoundId), [undefined, undefined, groupId, groupId])
   assert.ok(fullReview.entries.some(row => row.note === '요청자 변경 요청'))
-  await act(worker, 'banner', 'submit', { note: '배너 확정본' })
+  await act(worker, 'banner', 'submit', { note: '배너 두 번째 검수 시안' })
   assert.equal((await review(ids.planner, 'banner')).result.note, '배너 완성본')
+  await act(middle, 'banner', 'middle_approve')
+  await act(supervisor, 'banner', 'supervisor_return', { note: '새 묶음 첫 총괄 수정' })
+  assert.deepEqual((await review(supervisor, 'banner')).currentCounts, { middle: 0, supervisor: 1, requester: 1 })
+  await act(middle, 'banner', 'middle_forward', { person: worker, note: '새 묶음 첫 작업자 수정' })
+  await act(worker, 'banner', 'submit', { note: '배너 확정본' })
   await act(middle, 'banner', 'middle_approve')
   await act(supervisor, 'banner', 'supervisor_approve')
   const requesterReview = await review(ids.planner, 'banner')
@@ -278,6 +353,14 @@ try {
   assert.ok(nextResult && nextResult.id !== firstResult.id)
   await rpc(ids.planner, 'read_my_visual_workflow_notices', [request, 'banner', firstResult.version, [nextResult.id]])
   assert.equal((await current(ids.planner, 'requester_review', 'banner')).readAt, null)
+  await act(ids.planner, 'banner', 'requester_return', { note: '요청자 두 번째 변경 요청' })
+  assert.deepEqual((await review(supervisor, 'banner')).currentCounts, { middle: 0, supervisor: 1, requester: 2 })
+  await act(supervisor, 'banner', 'supervisor_forward', { note: '두 번째 변경 전달' })
+  await act(middle, 'banner', 'middle_forward', { person: worker, note: '두 번째 변경 작업' })
+  assert.deepEqual((await review(supervisor, 'banner')).currentCounts, { middle: 0, supervisor: 0, requester: 2 })
+  await act(worker, 'banner', 'submit', { note: '두 번째 변경 최종본' })
+  await act(middle, 'banner', 'middle_approve')
+  await act(supervisor, 'banner', 'supervisor_approve')
   await act(ids.planner, 'banner', 'requester_confirm')
   assert.equal(await current(ids.planner, 'requester_review', 'banner'), undefined)
   assert.equal((await detail()).status, 'inProgress')
@@ -298,8 +381,9 @@ try {
   assert.equal((await db.query('select id from public.visual_workflow_notices')).rows.length, 0)
   await db.exec('reset role; set role anon')
   await assert.rejects(() => db.query('select public.get_visual_workflow_review($1,$2)', [request, 'banner']), { code: '42501' })
+  await assert.rejects(() => db.query('select public.reserve_visual_work_result_files($1,$2,$3,$4)', [request, 'banner', crypto.randomUUID(), JSON.stringify(fileSpec)]), { code: '42501' })
   await assert.rejects(() => db.query('select public.list_my_visual_workflow_notices()'), { code: '42501' })
-  console.log('PASS Visual workflow: legacy preservation, same and changed worker assignments, private counters, role-scoped feedback, notice/read versions, idempotency and overall completion')
+  console.log('PASS Visual workflow: early assignment, review groups and independent resets, participant comments, private result files, scoped history, notices and completion')
 } catch (error) {
   console.error({ message: error.message, code: error.code, detail: error.detail, where: error.where, stack: error.stack?.split('\n').slice(0, 7).join('\n') })
   process.exitCode = 1

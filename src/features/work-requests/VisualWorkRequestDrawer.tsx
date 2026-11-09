@@ -74,6 +74,7 @@ export function VisualWorkRequestDrawer({
   const [linkStatus, setLinkStatus] = useState('')
   const [manageOpen, setManageOpen] = useState(false)
   const [feedbackHost, setFeedbackHost] = useState<HTMLDivElement | null>(null)
+  const [reviewRoundsReady, setReviewRoundsReady] = useState(false)
   const [confirmationHost, setConfirmationHost] = useState<HTMLDivElement | null>(null)
   const current = detail.sections.find(section => section.id === chosen) ?? detail.sections[0]
 
@@ -116,13 +117,24 @@ export function VisualWorkRequestDrawer({
   const workflowSupervisor = workflow && !workflow.data.legacyReceiptPending
     ? visualFinalApprover(workflow.data, workflow.supervisors) : undefined
   const workflowManager = canManage || Boolean(viewerId && (
-    workflowSupervisor === viewerId || (assigned?.assigneeId === viewerId && workflow?.members.some(member => member.id === viewerId))
+    (workflow && !workflow.data.legacyReceiptPending && workflow.supervisors.includes(viewerId)
+      && (!workflowSupervisor || workflowSupervisor === viewerId))
+    || (assigned?.assigneeId === viewerId && workflow?.members.some(member => member.id === viewerId))
   ))
   const requesterOnly = Boolean(workflow && isRequester && (requesterView || !workflowManager))
   const privateWorkflow = Boolean(step && !workflow?.data.legacyReceiptPending)
+  const canDiscussWorkflow = (!requesterOnly && workflowManager)
+    || (reviewRoundsReady && (isRequester || Boolean(viewerId && step?.workerId === viewerId)))
   const assignmentDate = assigned?.assignedAt && visualWorkDate(assigned.assignedAt)
   const panelId = instance + '-panel'
   const managementId = instance + '-management'
+  const progressPanel = workflow && current && step && <VisualCategoryWorkflowPanel
+    key={current.id + ':' + step.version}
+    request={workflow.request} workflow={workflow.data} category={current} step={step}
+    viewerId={viewerId} canManage={canManage} supervisors={workflow.supervisors}
+    members={workflow.members} memberName={memberName} confirmationHost={confirmationHost} requesterOnly={requesterOnly}
+    feedbackHost={feedbackHost} onReviewRoundsReady={setReviewRoundsReady}
+  />
   return (
     <aside aria-label={title + ' 상세'} className="absolute inset-y-0 right-0 flex w-full max-w-5xl flex-col border-l border-border bg-card shadow-2xl lg:w-[calc(100%-3rem)]">
       <header className="flex min-h-12 shrink-0 items-stretch justify-between border-b border-border bg-card">
@@ -176,7 +188,7 @@ export function VisualWorkRequestDrawer({
             </div>
             {!requesterOnly && <dl aria-label="업무 기본 정보" className={cn('grid gap-px border-y border-border bg-border', summary.finalApprover === undefined ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6' : 'grid-cols-3 lg:grid-cols-7')}>
               {summary.finalApprover !== undefined && <SummaryCell label="총괄 관리자" title="이 업무의 최종 승인자" confirmed={Boolean(workflow?.data.receivedAt)}>{summary.finalApprover}</SummaryCell>}
-              <SummaryCell label="중간 관리자" confirmed={Boolean(workflow?.data.receivedAt && step?.workerId)}>{assigned?.assigneeId ? memberName(assigned.assigneeId) : '미지정'}</SummaryCell>
+              <SummaryCell label="중간 관리자" confirmed={Boolean(step?.workerId)}>{assigned?.assigneeId ? memberName(assigned.assigneeId) : '미지정'}</SummaryCell>
               <SummaryCell label="작업자">{step?.workerId ? memberName(step.workerId) : <span className="text-muted-foreground">—</span>}</SummaryCell>
               <SummaryCell label="상태" title="업무 전체 상태">{summary.status}</SummaryCell>
               <SummaryCell label="요청 날짜"><SummaryDate value={summary.requestedAt} /></SummaryCell>
@@ -186,13 +198,6 @@ export function VisualWorkRequestDrawer({
             {linkStatus && <p role="status" className="mt-2 text-sm text-muted-foreground">{linkStatus}</p>}
             <div className="mt-6 space-y-5 sm:mt-8 sm:space-y-6 lg:mt-10">
               {notice}
-              {workflow && current && step && <VisualCategoryWorkflowPanel
-                key={current.id + ':' + step.version}
-                request={workflow.request} workflow={workflow.data} category={current} step={step}
-                viewerId={viewerId} canManage={canManage} supervisors={workflow.supervisors}
-                members={workflow.members} memberName={memberName} confirmationHost={confirmationHost} requesterOnly={requesterOnly}
-                feedbackHost={feedbackHost}
-              />}
               {!requesterOnly && manageOpen && <section id={managementId} aria-label="업무 관리" className="space-y-4">
                 {current && <p className="text-sm text-muted-foreground">
                   {current.label} · {assigned?.assigneeId ? '배정됨' : '미배정'}
@@ -216,16 +221,18 @@ export function VisualWorkRequestDrawer({
                     </dd> : <dd className="inline whitespace-pre-wrap before:mx-1.5 before:text-muted-foreground before:content-['·']">{field.value.trim() ? field.value : <span className="text-muted-foreground">—</span>}</dd>}
                   </div>)}
                 </dl>}
+              {progressPanel}
                 {current.blocks.length ? renderBody(current.blocks) : !current.fields.length && <p className="text-sm text-muted-foreground">등록된 분류 내용이 없습니다.</p>}
               </ContentSection>}
             </div>
           </div>
-          {current && !requesterOnly && (!privateWorkflow || workflowManager) && <VisualCategoryComments
+          {current && (privateWorkflow ? canDiscussWorkflow : !requesterOnly) && <VisualCategoryComments
             key={viewerId + ':' + requestId}
             requestId={requestId}
             category={current}
-            canDiscuss={privateWorkflow ? workflowManager : isRequester || canManage || Boolean(viewerId && assigned?.assigneeId === viewerId)}
-            legacyConversation={legacyConversation}
+            canDiscuss={privateWorkflow || isRequester || canManage || Boolean(viewerId && assigned?.assigneeId === viewerId)}
+            legacyConversation={requesterOnly || (privateWorkflow && !workflowManager) ? undefined : legacyConversation}
+            sharedOnly={requesterOnly}
           />}
         </div>
       </div>
