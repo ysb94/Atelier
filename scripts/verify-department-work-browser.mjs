@@ -23,8 +23,9 @@ const checks=String.raw`
  await summary.getByRole('button',{name:/내 업무/}).click()
  await summary.getByRole('button',{name:/팀 업무/}).click()
  const table=page.getByRole('table',{name:'부서별 팀 업무 목록'})
- for(const department of ['Visual','MD','기획','물류'])await table.getByRole('rowgroup',{name:department+' 요청 업무',exact:true}).waitFor()
- assert.equal(await table.getByText('등록된 업무가 없습니다.',{exact:true}).count(),4)
+ await table.waitFor()
+ assert.equal(await table.getByText('등록된 업무가 없습니다.',{exact:true}).count(),0)
+ for(const department of ['Visual','MD','기획','물류'])assert.equal(await table.getByRole('rowgroup',{name:department+' 요청 업무',exact:true}).count(),0)
  const stages=page.getByRole('group',{name:'업무 상태',exact:true})
  const scopes=page.getByRole('group',{name:'업무 범위',exact:true})
  const counts=async expected=>{for(const [label,count] of Object.entries(expected))assert.equal(await stages.getByRole('button',{name:new RegExp(label)}).locator('p').filter({hasText:/^\d+$/}).innerText(),String(count))}
@@ -66,8 +67,7 @@ const checks=String.raw`
  await page.getByRole('dialog',{name:'담당자 필터 선택'}).getByRole('checkbox',{name:'미정',exact:true}).check()
  await page.getByRole('button',{name:'선택한 1개 필터 적용'}).click()
  await page.getByText('조건에 맞는 업무가 없습니다.',{exact:true}).waitFor()
- for(const department of ['Visual','MD','기획','물류'])assert.equal(await table.getByRole('rowgroup',{name:department+' 요청 업무',exact:true}).count(),1)
- await table.getByText('현재 조건에 해당하는 업무가 없습니다.',{exact:true}).waitFor()
+ assert.equal(await table.getByRole('rowgroup',{name:/요청 업무$/}).count(),0)
  await page.getByRole('button',{name:'초기화',exact:true}).click()
  await page.getByRole('link',{name:'부서 자체 업무 브라우저 검증',exact:true}).click()
  const requestId=new URL(page.url()).searchParams.get('requestId')
@@ -145,6 +145,39 @@ const checks=String.raw`
  await page.goto(origin+'/work-requests/planning?actor=ceo&mode=new')
  await page.waitForURL(url=>url.pathname==='/work-requests/planning'&&!url.searchParams.has('mode'))
  assert.equal(await page.getByRole('button',{name:'업무 등록',exact:true}).count(),0)
+
+ await db.exec('reset role')
+ const aiCoeDepartment=crypto.randomUUID()
+ const cancelledId=crypto.randomUUID()
+ const activeId=crypto.randomUUID()
+ await db.query("insert into public.departments(id,company_id,name,is_active) select $1,company_id,'AI CoE',true from public.departments where id=$2",[aiCoeDepartment,departments.design])
+ await db.query('update public.profiles set department_id=$1 where id=$2',[aiCoeDepartment,ids.ordinary])
+ const cancellation={state:'cancelled',requestedAt:'2026-11-09T00:00:00Z'}
+ const visualFixtures=[
+   [cancelledId,ids.ordinary,'cancelled',{values:{title:'AI CoE 취소 이력'},cancellation,cancellationHistory:[cancellation]}],
+   [activeId,ids.planner,'inProgress',{values:{title:'기획에서 요청한 진행 업무'},assignee:ids.design}],
+ ]
+ for(const [id,requester,status,data] of visualFixtures){
+   await db.query("insert into public.work_requests(id,company_id,owner,requester_id,status,data) select $1,company_id,'design',id,$3,$4 from public.profiles where id=$2",[id,requester,status,data])
+ }
+ const readCancelled=async()=> (await db.query('select status,revision,data from public.work_requests where id=$1',[cancelledId])).rows[0]
+ const originalCancellation=await readCancelled()
+ await page.goto(origin+'/work-requests/design?actor=design')
+ const planningGroup=table.getByRole('rowgroup',{name:'기획 요청 업무',exact:true})
+ const aiCoeGroup=table.getByRole('rowgroup',{name:'AI CoE 요청 업무',exact:true})
+ await planningGroup.getByRole('link',{name:'기획에서 요청한 진행 업무',exact:true}).waitFor()
+ assert.equal(await aiCoeGroup.count(),0)
+ await page.getByRole('button',{name:'상태 필터',exact:true}).click()
+ await page.getByRole('dialog',{name:'상태 필터 선택'}).getByRole('checkbox',{name:'취소',exact:true}).check()
+ await page.getByRole('button',{name:'선택한 1개 필터 적용'}).click()
+ await aiCoeGroup.getByRole('link',{name:'AI CoE 취소 이력',exact:true}).waitFor()
+ assert.equal(await planningGroup.count(),0)
+ await page.getByRole('button',{name:'초기화',exact:true}).click()
+ await planningGroup.waitFor()
+ assert.equal(await aiCoeGroup.count(),0)
+ await db.exec('reset role')
+ assert.deepEqual(await readCancelled(),originalCancellation)
+ console.log('PASS department browser: empty headings are hidden for every requester department, and cancelled history remains available')
  assert.deepEqual(errors,[])
  console.log('PASS department browser: department board and internal registration, same-tab My home create/edit/detail, reload, own-department gate, desktop/mobile; production network blocked')
 }finally{for(const stream of events)stream.end();await browser?.close();await server?.close();await db.close()}

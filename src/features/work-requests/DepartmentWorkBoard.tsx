@@ -156,9 +156,9 @@ export function DepartmentWorkBoard({ owner, activeSupervisorIds = emptyList<str
                 <th scope="col" className="py-5 pl-3 font-normal"><ColumnFilter label="브랜드" options={options.brand} selected={filters.brand} onApply={brand => setFilters(current => ({ ...current, brand }))} /></th>
               </tr>
             </thead>
-            {[...groups].map(([department, items]) => <tbody key={department} aria-label={`${department} 요청 업무`}>
+            {[...groups].filter(([, items]) => items.length > 0).map(([department, items]) => <tbody key={department} aria-label={`${department} 요청 업무`}>
               <tr className="hover:bg-transparent"><th scope="rowgroup" colSpan={7} className="border-b border-border pb-3 pt-14 text-base font-semibold">{department}</th></tr>
-              {items.length ? items.map(row => <tr key={row.id} className="border-b border-border/60 align-middle">
+              {items.map(row => <tr key={row.id} className="border-b border-border/60 align-middle">
                 <td className="py-6 pr-4"><Link className="break-words hover:underline" to={`?requestId=${row.id}`}>{row.title}</Link>{row.kind === 'internal' ? <Badge className="ml-2" variant="muted">자체 업무</Badge> : null}</td>
                 <td className="break-words px-3 py-6">{row.requesterName}</td>
                 <td className={`break-words px-3 py-6 ${!row.assigneeNames.length ? 'text-danger' : ''}`}>{row.assigneeNames.join(', ') || '미정'}</td>
@@ -166,7 +166,7 @@ export function DepartmentWorkBoard({ owner, activeSupervisorIds = emptyList<str
                 <td className="px-3 py-6">{row.createdAt.slice(0, 10)}</td>
                 <td className={`px-3 py-6 ${row.dueDate && row.dueDate < new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) && !['completed', 'cancelled', 'rejected'].includes(row.status) ? 'text-danger' : ''}`}>{row.dueDate || '미정'}</td>
                 <td className="break-words py-6 pl-3">{row.brandName || '브랜드 미정'}</td>
-              </tr>) : <tr><td colSpan={7} className="border-b border-border/60 py-5 text-xs text-muted-foreground">{rows.some(row => departmentLabel(row.requesterDepartment) === department) ? '현재 조건에 해당하는 업무가 없습니다.' : '등록된 업무가 없습니다.'}</td></tr>}
+              </tr>)}
             </tbody>)}
           </table>
         </Card>
