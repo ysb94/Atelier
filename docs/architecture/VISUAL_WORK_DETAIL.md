@@ -42,8 +42,24 @@
 
 새 등록 경로는 서버 지원을 확인한 뒤 사용한다. 이미 접수된 업무, 자체 업무와 분류 없는 요청에는 기존 승인 흐름을 사용한다. 로컬 검증은 `verify:visual-category-workflow`와 `verify:visual-category-workflow-browser`를 실행한다. 사이트 화면 배포는 별도 단계다.
 
+### 기존 미접수 외부 요청의 총괄 확인
+
+2026-11-09 사용자 승인 후 `supabase/pending/visual_supervisor_receipt_queue.sql`을 공유 Atelier DB에 적용했다. 운영 이력은 `20261109094620_visual_supervisor_receipt_queue`다. 적용 전 함수 정의 세 개와 데이터·권한 비교값은 `docs/backups/visual-supervisor-receipt-queue-before-20261109.xlsx`에 보관했다.
+
+운영 DB의 실제 총괄 권한으로 기존 미접수 외부 요청 두 건이 내 업무와 총괄 확인 대기 대상에 포함되는 것을 확인했다. 총괄 접수 뒤 중간 관리자 단계로 넘어가는 것과 알림 생성은 시험 요청으로 검증하고 롤백했다. 실제 두 건의 요청 내용과 배정, 기존 정책과 실행 권한을 보존했다. 화면에서 두 건 중 한 건을 확인하면 대기가 한 건으로 줄고 해당 요청의 중간 관리자 버튼이 열리는 것을 격리 브라우저에서 확인했다.
+
 ## Visual 총괄 관리자
 
 기존 Visual 업무 관리 담당자가 작업 요청 관리에서 재직 중인 총괄 관리자를 필요한 만큼 설정한다. 총괄이 한 명이면 자동 지정된다. 여러 명이면 업무별로 한 명을 배정하거나, 최종 승인 대기의 미배정 업무를 총괄 관리자가 직접 맡는다. 분류별 중간 관리자는 기존 분류 배정을 사용한다.
 
-요청자 결과 확인 뒤 해당 총괄 관리자가 최종 승인하면 완료된다. Visual 자체 업무도 최종 승인으로 보내며, 반려 사유를 기록하면 업무가 진행 중으로 돌아간다. 기존 완료 건과 다른 부서의 흐름을 보존한다. `20261109062457_visual_work_final_approval.sql`은 공유 DB 승인 전 검수용이며 `verify:visual-work-final-approval`과 `verify:work-request-settings-browser`로 검증한다.
+요청자 결과 확인 뒤 해당 총괄 관리자가 최종 승인하면 완료된다. Visual 자체 업무도 최종 승인으로 보내며, 반려 사유를 기록하면 업무가 진행 중으로 돌아간다. 기존 완료 건과 다른 부서의 흐름을 보존한다.
+
+2026-11-09 사용자 승인 후 공유 Atelier DB에 `20261109062457_visual_work_final_approval.sql`을 적용했다. 운영 적용 이력은 `20261109070240_visual_work_final_approval`이다. 승인 범위인 Visual 업무 3건, 설정 1건, 복구용 함수 정의 2개를 `docs/backups/visual-work-final-approval-pre-apply-20261109.xlsx`에 저장하고 다시 읽어 원본과 대조했다. 함수 SQL은 줄바꿈까지 복구할 수 있도록 JSON 문자열로 저장했다.
+
+운영 DB 인증 역할에서 총괄 4명 등록, 업무별로 배정된 총괄 2명의 승인, 한 명일 때의 자동 배정과 권한 차단을 검증했다. 가상 계정·업무·승인 기록은 롤백했다. 적용 직후 업무 원본과 기존 계정·권한·정책이 일치했고, 별도로 저장된 설정과 업무 변경은 최신 상태로 보존했다. 보안 진단에 새 항목이 생기지 않았다. 실제 총괄 명단 지정과 사이트 화면 배포는 별도 단계다.
+
+## Visual 팀 업무 목록 역할 요약
+
+2026-11-09 사용자 승인 후 `20261109074836_visual_department_work_role_columns.sql`을 공유 Atelier DB에 적용했다. 운영 적용 이력은 `20261109080207_visual_department_work_role_columns`이다. 기존 목록 조회 함수 정의는 `docs/backups/visual-department-work-role-columns-function-before-20261109.sql`에 보관했다.
+
+기존 조회 함수가 Visual 목록에 분류별 중간 관리자 ID와 최종 승인자 기록을 함께 반환한다. 운영 인증 역할에서 목록 3건의 배정 정보를 상세와 대조했다. 진행 업무 1건의 중간 관리자 2명을 포함해 조회된 이름이 모두 일치했다. 기존 목록 응답, 업무 원본, 권한 및 정책의 적용 전후 비교와 격리 DB 브라우저 검증을 통과했다. 운영 사이트의 화면 배포는 별도 단계다.

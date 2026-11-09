@@ -4244,6 +4244,10 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
           summary={{
             requesterDepartment: departmentLabel(selectedRequest.requesterDepartment),
             requesterName: selectedRequest.values.requester?.trim() || '미입력',
+            requesterPosition: selectedRequest.values.requesterPosition?.trim()
+              || storage.directoryMembers.find(person => person.id === selectedRequest.requesterId)?.position?.trim()
+              || storage.directoryMembers.find(person => person.id === selectedRequest.requesterId)?.jobGrade?.trim()
+              || '',
             status: status.label,
             requestedAt: selectedRequest.createdAt,
             dueDate,

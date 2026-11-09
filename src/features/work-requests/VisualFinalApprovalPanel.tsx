@@ -28,6 +28,16 @@ export function VisualFinalApprovalPanel({ request, activeSupervisorIds, viewerI
   const canClaim = pending && supervisor && !approverId && !canManage
   const assignmentChanged = assignment !== null && assignment.revision !== request.revision
   const target = assignment && activeSupervisorIds.includes(assignment.id) ? assignment.id : approverId ?? ''
+  const needsPanel = Boolean(
+    (!closed && !activeSupervisorIds.length)
+    || (pending && request.completionResult)
+    || approval?.returnedReason
+    || canAssign
+    || canClaim
+    || (pending && assignedToMe)
+    || error
+  )
+  if (!needsPanel) return null
 
   return <Card role="region" aria-label="총괄 관리자 최종 승인"><CardContent className="space-y-3 p-4">
     <div className="flex flex-wrap items-center justify-between gap-2">

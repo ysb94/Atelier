@@ -120,10 +120,15 @@ export function DepartmentWorkBoard({ owner, activeSupervisorIds, finalApprovalE
     const department = ownerFromDepartment(name)
     return department === 'design' ? 'Visual' : department ? WORK_REQUEST_CONFIG[department].teamName : name.trim() || '부서 미정'
   }
-  const groups = new Map<string, DepartmentWork[]>(['Visual', 'MD', '기획', '물류'].map(name => [name, []]))
-  // Keep headings in place even when a department has no work or filters hide its rows.
-  for (const row of rows) { const key = departmentLabel(row.requesterDepartment); if (!groups.has(key)) groups.set(key, []) }
-  for (const row of visible) groups.get(departmentLabel(row.requesterDepartment))!.push(row)
+  const groups = new Map<string, DepartmentWork[]>()
+  for (const row of rows) {
+    const key = departmentLabel(row.requesterDepartment)
+    if (!groups.has(key)) groups.set(key, [])
+  }
+  const ordered = new Map<string, DepartmentWork[]>()
+  for (const name of ['Visual', 'MD', '기획', '물류']) if (groups.has(name)) ordered.set(name, groups.get(name)!)
+  for (const [name, items] of groups) if (!ordered.has(name)) ordered.set(name, items)
+  for (const row of visible) ordered.get(departmentLabel(row.requesterDepartment))!.push(row)
   const dueSoon = scoped.filter(row => inDepartmentWorkStage(row.status, 'all') && row.dueDate && new Date(row.dueDate + 'T23:59:59+09:00').getTime() - Date.now() < 3 * 86400000).length
   const departmentId = WORK_REQUEST_DEPARTMENT_IDS[owner]
   const canWriteNotice = hasPermission(profile, 'notice.department.write', 'department', departmentId) || hasPermission(profile, 'notice.department.write', 'company', profile?.companyId)
@@ -187,19 +192,19 @@ export function DepartmentWorkBoard({ owner, activeSupervisorIds, finalApprovalE
                 <th scope="col" className="py-5 pl-3 font-normal"><ColumnFilter label="브랜드" options={options.brand} selected={filters.brand} onApply={brand => setFilters(current => ({ ...current, brand }))} /></th>
               </tr>
             </thead>
-            {[...groups].filter(([, items]) => items.length > 0).map(([department, items]) => <tbody key={department} aria-label={`${department} 요청 업무`}>
+            {[...ordered].filter(([, items]) => items.length > 0).map(([department, items]) => <tbody key={department} aria-label={`${department} 요청 업무`}>
               <tr className="hover:bg-transparent"><th scope="rowgroup" colSpan={columnWidths.length} className="border-b border-border pb-3 pt-14 text-base font-semibold">{department}</th></tr>
               {items.map(row => {
                 const approverId = visual ? visualSummaryApprover(row, activeSupervisorIds) : undefined
                 const showApproval = Boolean(row.visualFinalApproval) || (finalApprovalEnabled && !isClosedStatus(row.status))
                 const assignees = visual ? row.visualMiddleManagerIds?.map(id => names.get(id) || '기존 직원') : row.assigneeNames
                 const assigneeLabel = assignees == null ? '—' : assignees.join(', ') || unassignedLabel
+                const status = visual && needsVisualReceipt(row) ? { label: '총괄 접수 대기', variant: 'warning' as const } : workRequestStatusMeta(row)
                 return <tr key={row.id} className="border-b border-border/60 align-middle">
                   <td className="py-6 pr-4"><Link className="break-words hover:underline" to={`?requestId=${row.id}`}>{row.title}</Link>{row.kind === 'internal' ? <Badge className="ml-2" variant="muted">자체 업무</Badge> : null}</td>
                   <td className="break-words px-3 py-6">{row.requesterName}</td>
                   {visual && <td className="break-words px-3 py-6">{approverId ? names.get(approverId) || '기존 직원' : showApproval ? '미지정' : '—'}</td>}
                   <td className={`break-words px-3 py-6 ${assignees?.length === 0 ? 'text-danger' : ''}`}>{assigneeLabel}</td>
-                const status = visual && needsVisualReceipt(row) ? { label: '총괄 접수 대기', variant: 'warning' as const } : workRequestStatusMeta(row)
                   {visual && <td className="px-3 py-6 text-muted-foreground">—</td>}
                   <td className="px-3 py-6"><div className="flex flex-wrap gap-1"><StatusPill tone={status?.variant}>{status?.label ?? row.status}</StatusPill>{row.cancellation?.state==='requested'&&!isClosedStatus(row.status)?<Badge variant="warning">취소 요청 중</Badge>:null}</div></td>
                   <td className="px-3 py-6">{row.createdAt.slice(0, 10)}</td>

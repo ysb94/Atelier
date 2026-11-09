@@ -53,7 +53,7 @@ export function VisualWorkRequestDrawer({
   canManage: boolean
   isRequester: boolean
   requesterView: boolean
-  summary: { requesterDepartment: string; requesterName: string; status: string; requestedAt: string; dueDate: string; brand: string; finalApprover?: string }
+  summary: { requesterDepartment: string; requesterName: string; requesterPosition: string; status: string; requestedAt: string; dueDate: string; brand: string; finalApprover?: string }
   onClose: () => void
   headerActions: ReactNode
   notice?: ReactNode
@@ -137,16 +137,6 @@ export function VisualWorkRequestDrawer({
   />
   return (
     <aside aria-label={title + ' 상세'} className="absolute inset-y-0 right-0 flex w-full max-w-5xl flex-col border-l border-border bg-card shadow-2xl lg:w-[calc(100%-3rem)]">
-      <header className="flex min-h-12 shrink-0 items-stretch justify-between border-b border-border bg-card">
-        <div role="group" className="flex min-w-0 flex-wrap items-baseline gap-x-2 self-center py-2 pl-4 pr-2 sm:pl-8 lg:pl-10" aria-label="요청자">
-          <span className="text-sm text-muted-foreground">{summary.requesterDepartment}</span>
-          <strong className="wrap-anywhere text-base font-medium">{summary.requesterName}</strong>
-        </div>
-        <Button type="button" variant="ghost" aria-label="상세 닫기" onClick={onClose}
-          className="h-auto w-12 shrink-0 rounded-none border-l border-border px-0 text-muted-foreground">
-          <X className="size-6" />
-        </Button>
-      </header>
       {current && <div
         role="tablist" aria-label="Visual 업무 분류"
         className="flex shrink-0 gap-1 overflow-x-auto border-b border-border bg-card p-2 lg:absolute lg:right-full lg:top-56 lg:max-h-[calc(100dvh-14rem)] lg:w-11 lg:flex-col lg:overflow-y-auto lg:overflow-x-hidden lg:border-0 lg:bg-transparent lg:p-0"
@@ -171,8 +161,12 @@ export function VisualWorkRequestDrawer({
           aria-labelledby={current ? instance + '-' + current.id : undefined}>
           <div className="px-4 pt-6 sm:px-8 sm:pt-10 lg:px-10 lg:pt-12">
             <div className="mb-3 flex items-start justify-between gap-3">
-              <h2 className="min-w-0 wrap-anywhere text-xl font-semibold tracking-tight sm:text-2xl">{title}</h2>
-              <details ref={menu} className="relative shrink-0">
+              <div className="min-w-0">
+                <h2 className="wrap-anywhere text-xl font-semibold tracking-tight sm:text-2xl">{title}</h2>
+                <p className="mt-1 text-sm text-muted-foreground">{[summary.requesterName, summary.requesterDepartment, summary.requesterPosition].filter(Boolean).join(' · ')}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1">
+              <details ref={menu} className="relative">
                 <summary aria-label="업무 메뉴" className="flex size-8 cursor-pointer list-none items-center justify-center rounded-md text-muted-foreground hover:bg-muted [&::-webkit-details-marker]:hidden">
                   <EllipsisVertical className="size-5" />
                 </summary>
@@ -185,6 +179,10 @@ export function VisualWorkRequestDrawer({
                   </Button>}
                 </div>
               </details>
+              <Button type="button" variant="ghost" size="icon" aria-label="상세 닫기" onClick={onClose} className="text-muted-foreground">
+                <X className="size-5" />
+              </Button>
+              </div>
             </div>
             {!requesterOnly && <dl aria-label="업무 기본 정보" className={cn('grid gap-px border-y border-border bg-border', summary.finalApprover === undefined ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6' : 'grid-cols-3 lg:grid-cols-7')}>
               {summary.finalApprover !== undefined && <SummaryCell label="총괄 관리자" title="이 업무의 최종 승인자" confirmed={Boolean(workflow?.data.receivedAt)}>{summary.finalApprover}</SummaryCell>}
@@ -221,9 +219,9 @@ export function VisualWorkRequestDrawer({
                     </dd> : <dd className="inline whitespace-pre-wrap before:mx-1.5 before:text-muted-foreground before:content-['·']">{field.value.trim() ? field.value : <span className="text-muted-foreground">—</span>}</dd>}
                   </div>)}
                 </dl>}
-              {progressPanel}
                 {current.blocks.length ? renderBody(current.blocks) : !current.fields.length && <p className="text-sm text-muted-foreground">등록된 분류 내용이 없습니다.</p>}
               </ContentSection>}
+              {progressPanel}
             </div>
           </div>
           {current && (privateWorkflow ? canDiscussWorkflow : !requesterOnly) && <VisualCategoryComments

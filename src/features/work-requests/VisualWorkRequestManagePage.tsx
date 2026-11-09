@@ -4,7 +4,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { useAuth } from '@/lib/supabase/auth'
@@ -27,6 +27,7 @@ function VisualWorkRequestManageForm() {
   const [selectedId, setSelectedId] = useState('image')
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+  const [managersOpen, setManagersOpen] = useState(false)
   const categories = draft?.categories ?? settings.data?.categories ?? emptyList<VisualCategory>()
   const supervisors = draft?.supervisors ?? settings.data?.supervisorIds ?? emptyList<string>()
   const supervisorIds = new Set(supervisors)
@@ -42,6 +43,9 @@ function VisualWorkRequestManageForm() {
   }
   function update(patch: Partial<VisualCategory>) {
     if (selected) change(categories.map(item => item.id === selected.id ? { ...item, ...patch } : item))
+  }
+  function assignManager(categoryId: string, assigneeId: string) {
+    change(categories.map(item => item.id === categoryId ? { ...item, assigneeId } : item))
   }
   async function save() {
     if (!draft || saving || !settings.data?.available) return
@@ -78,9 +82,20 @@ function VisualWorkRequestManageForm() {
       {message ? <p role="status" className="mb-4 text-sm">{message}</p> : null}
       {draft && settings.data && draft.revision !== settings.data.revision ? <p role="alert" className="mb-4 text-sm text-warning">다른 관리자가 설정을 변경했습니다. 작성 중인 값은 유지됩니다. 다시 불러온 뒤 변경 내용을 확인하세요.</p> : null}
       <Card className="mb-5"><CardContent className="space-y-3 p-5">
-        <h2 className="font-semibold">총괄 관리자 설정</h2>
+        <h2 className="font-semibold">
+          <button type="button" aria-expanded={managersOpen} aria-controls="visual-manager-settings" className="inline-flex items-center gap-2" onClick={() => setManagersOpen(open => !open)}>
+            관리자 설정{managersOpen ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
+          </button>
+        </h2>
+        <div id="visual-manager-settings" hidden={!managersOpen} className="space-y-3">
         <p className="text-sm text-muted-foreground">요청자가 결과를 확인한 뒤, 해당 업무에 배정된 총괄 관리자가 최종 승인합니다. 한 명이면 자동 지정되며, 여러 명이면 업무별로 한 명씩 나눠 배정할 수 있습니다.</p>
         <fieldset disabled={!editable || !finalApprovalAvailable || directory.isPending || directory.isError} className="min-w-0 space-y-3">
+          <label className="block max-w-sm space-y-1 text-sm">총괄 관리자 추가
+            <Select aria-label="총괄 관리자 추가" className="w-full" value="" disabled={!supervisorCandidates.length} onChange={event => change(categories, [...supervisors, event.target.value])}>
+              <option value="" disabled>Visual 직원 선택</option>
+              {supervisorCandidates.map(member => <option key={member.id} value={member.id}>{member.displayName || '직원'}{member.position ? ` · ${member.position}` : ''}</option>)}
+            </Select>
+          </label>
           {supervisors.length > 0 && <ul aria-label="설정된 총괄 관리자" className="flex flex-wrap gap-2">
             {supervisors.map(id => {
               const member = membersById.get(id)
@@ -91,14 +106,24 @@ function VisualWorkRequestManageForm() {
               </li>
             })}
           </ul>}
-          <label className="block max-w-sm space-y-1 text-sm">총괄 관리자 추가
-            <Select aria-label="총괄 관리자 추가" className="w-full" value="" disabled={!supervisorCandidates.length} onChange={event => change(categories, [...supervisors, event.target.value])}>
-              <option value="" disabled>Visual 직원 선택</option>
-              {supervisorCandidates.map(member => <option key={member.id} value={member.id}>{member.displayName || '직원'}{member.position ? ` · ${member.position}` : ''}</option>)}
-            </Select>
-          </label>
         </fieldset>
+        <div className="space-y-2 border-t border-border pt-3">
+          <h3 className="text-sm font-medium">작업별 중간 담당자</h3>
+          {categories.length ? <ul aria-label="작업별 중간 담당자" className="divide-y divide-border">
+            {categories.map(category => (
+              <li key={category.id} className="grid items-center gap-3 py-2 sm:grid-cols-[minmax(8rem,16rem)_minmax(0,20rem)]">
+                <span className="break-words text-sm">{category.label}{!category.enabled ? <span className="ml-2 text-xs text-muted-foreground">숨김</span> : null}</span>
+                <Select aria-label={`${category.label} 중간 담당자`} className="w-full" value={category.assigneeId} disabled={!editable || directory.isPending || directory.isError} onChange={event => assignManager(category.id, event.target.value)}>
+                  <option value="">미지정 · 관리자가 배정</option>
+                  {category.assigneeId && !members.some(member => member.id === category.assigneeId) ? <option value={category.assigneeId}>기존 중간 관리자 · 현재 배정 불가</option> : null}
+                  {members.map(member => <option key={member.id} value={member.id}>{member.displayName || '직원'}{member.position ? ` · ${member.position}` : ''}</option>)}
+                </Select>
+              </li>
+            ))}
+          </ul> : <p className="text-sm text-muted-foreground">등록된 작업 분류가 없습니다.</p>}
+        </div>
         {settings.data && !finalApprovalAvailable && <p className="text-sm text-warning">총괄 관리자 설정은 서버 적용 후 저장할 수 있습니다.</p>}
+        </div>
       </CardContent></Card>
       <div className="grid gap-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
         <Card><CardContent className="space-y-3 p-4">
