@@ -6,6 +6,8 @@ import { myHomeNotificationSummary, notificationNeedsAttention, type MyHomeNotif
 import { Button } from '@/components/ui/button'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { useVisualWorkflowNotices, visualWorkflowNoticeItem } from '@/features/work-requests/use-visual-workflow-notices'
+import type { InboxNotification } from '@/lib/inbox/types'
 
 export function MyHomeNotificationBadge({ tab }: { tab: string }) {
   const notices=useMyHomeNotifications()
@@ -16,12 +18,22 @@ export function MyHomeNotificationBadge({ tab }: { tab: string }) {
 export function MyHomeNotificationList({ tab }: { tab: MyHomeNotificationTab }) {
   useRenderWatch('MyHomeNotificationList')
   const notices=useMyHomeNotifications()
+  return <NotificationRows items={notices.items.filter(item => item.target?.tab === tab)} error={notices.error} />
+}
+
+export function VisualWorkflowNotificationList() {
+  const notices = useVisualWorkflowNotices()
+  if (!notices.available && !notices.error) return null
+  return <NotificationRows items={notices.rows?.map(visualWorkflowNoticeItem) ?? []} error={notices.error} />
+}
+
+function NotificationRows({ items, error }: { items: readonly InboxNotification[]; error: unknown }) {
   const navigate=useNavigate()
   const [history,setHistory]=useState(false)
-  const rows=notices.items.filter(item=>item.target?.tab===tab && (history || notificationNeedsAttention(item)))
+  const rows=items.filter(item=>history || notificationNeedsAttention(item))
   return <section className="mb-4 rounded-xl border border-border bg-card p-4 shadow-sm" aria-label="이 탭의 알림">
     <header className="flex items-center justify-between gap-2"><h2 className="text-sm font-semibold">알림·처리할 일</h2><Button type="button" size="sm" variant="ghost" onClick={()=>setHistory(value=>!value)}>{history?'확인·처리 필요':'전체 기록'}</Button></header>
-    {notices.error&&<p role="alert" className="my-2 text-sm text-danger">{notices.error instanceof Error?notices.error.message:'알림을 불러오지 못했습니다.'}</p>}
+    {Boolean(error)&&<p role="alert" className="my-2 text-sm text-danger">{error instanceof Error?error.message:'알림을 불러오지 못했습니다.'}</p>}
     {rows.length===0?<p className="mt-2 text-sm text-muted-foreground">{history?'알림 기록이 없습니다.':'확인하거나 처리할 알림이 없습니다.'}</p>:<ul className="mt-2 divide-y divide-border">{rows.map(item=><li key={`${item.kind}:${item.id}`}><button type="button" className="w-full py-3 text-left" onClick={()=>navigate(item.href)}><span className="flex items-center gap-2 text-sm font-medium">{!item.readAt&&<span className="size-2 shrink-0 rounded-full bg-danger" aria-label="새 알림"/>}{item.title}</span><span className="mt-1 block whitespace-pre-line text-sm text-muted-foreground">{item.body}</span>{item.action&&<span className="mt-1 block text-xs text-primary">{item.action.label}</span>}</button></li>)}</ul>}
   </section>
 }

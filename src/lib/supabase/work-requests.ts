@@ -1,6 +1,9 @@
 import { getSupabase } from './client'
 import type { WorkRequestRecord, WorkRequestMessage } from '@/features/work-requests/work-request-types'
 import type { WorkRequestOwner } from '@/features/work-requests/work-request-form-config'
+import type { VisualFinalAction } from '@/features/work-requests/visual-final-approval'
+import { diagnosticOperation, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
+import { diagnosticQuery } from './diagnostic-query'
 
 const BUCKET = 'company-work-requests'
 type SavedFile = { id: string; requestId: string; name: string; path: string; type: string; size: number; deleted?: boolean }
@@ -71,14 +74,19 @@ export async function listWorkRequests(actorId: string, owner?: WorkRequestOwner
   return snapshot
 }
 const PATCH_FIELDS = ['values','brandId','status','managerPriority','assignee','collaborators','confirmedDueDate','plannedStart','plannedEnd','completionResult'] as const
-export async function saveWorkRequestChange(before: WorkRequestRecord | undefined, next: WorkRequestRecord, revision?: number): Promise<number> {
+export async function saveWorkRequestChange(before: WorkRequestRecord | undefined, next: WorkRequestRecord, revision?: number, categoryWorkflowAvailable = false): Promise<number> {
   let expected=revision??before?.revision??1
   if(!before)expected=await rpc<number>(next.kind==='internal'?'begin_department_work':'begin_work_request',{p_id:next.id,p_owner:next.owner})
   const patch: Record<string,unknown>={}
   for(const key of PATCH_FIELDS)if((before ? comparison(before[key])!==comparison(next[key]) : ['values','brandId','status'].includes(key)) && next[key]!==undefined)patch[key]=await encode(next[key],next.id)
   const selfCompletion = before?.kind==='internal' && before.requesterId===before.assignee && next.status==='completed' && before.status!=='completed'
   if(selfCompletion)delete patch.status
-  if(Object.keys(patch).length)expected=await rpc<number>(!before && next.kind==='internal'?'save_department_work':'save_work_request',{p_id:next.id,p_revision:expected,p_patch:patch,p_command:crypto.randomUUID()})
+  if (!before && next.owner === 'design' && next.kind !== 'internal' && categoryWorkflowAvailable && next.values.visualRequest?.categories.length) {
+    expected = await diagnosticOperation('app', 'visual_category_work_publish', trace =>
+      trace.run('save', context => diagnosticQuery<number>('app', 'visual_category_work_publish', getSupabase().rpc('publish_visual_category_work', {
+        p_id: next.id, p_revision: expected, p_patch: patch, p_command: next.id,
+      }), context)))
+  } else if(Object.keys(patch).length)expected=await rpc<number>(!before && next.kind==='internal'?'save_department_work':'save_work_request',{p_id:next.id,p_revision:expected,p_patch:patch,p_command:crypto.randomUUID()})
   if(selfCompletion)expected=await rpc<number>('complete_department_work',{p_id:next.id,p_revision:expected,p_command:crypto.randomUUID()})
   for(const message of next.messages)if(!before?.messages.some(item=>item.id===message.id))await sendWorkRequestMessage(next.id,message)
   return expected
@@ -86,6 +94,11 @@ export async function saveWorkRequestChange(before: WorkRequestRecord | undefine
 export async function sendWorkRequestMessage(requestId: string,message: WorkRequestMessage) { return rpc('send_work_request_message',{p_id:requestId,p_room:message.roomId,p_body:message.body,p_command:message.id}) }
 export async function cancelWorkRequest(request: WorkRequestRecord, action: 'request' | 'approve' | 'reject', commandId: string) {
   return rpc<number>('cancel_work_request',{p_id:request.id,p_revision:request.revision,p_command:commandId,p_action:action})
+}
+export function changeVisualWorkFinalApproval(request: WorkRequestRecord, action: VisualFinalAction, value: string | null, context: DiagnosticContext) {
+  return diagnosticQuery<number>('app', `visual_work_final_${action}`, getSupabase().rpc('change_visual_work_final_approval', {
+    p_request: request.id, p_revision: request.revision, p_action: action, p_value: value, p_command: crypto.randomUUID(),
+  }), context)
 }
 export async function deleteWorkRequest(request: WorkRequestRecord, revision?: number) {
   const paths=await rpc<string[]>('delete_work_request',{p_id:request.id,p_revision:revision??request.revision})

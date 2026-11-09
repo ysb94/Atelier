@@ -14,7 +14,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   Link,
   Navigate,
@@ -53,11 +53,16 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Input, Select, Textarea } from '@/components/ui/input'
+import { Input, Select } from '@/components/ui/input'
 import { useWorkRequestSettings } from '@/lib/supabase/work-request-settings'
+import { changeVisualWorkFinalApproval } from '@/lib/supabase/work-requests'
+import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { DEFAULT_VISUAL_CATEGORIES, type VisualCategory, type VisualRequestValues } from './visual-request-config'
 import { WorkRequestCategoryAssignments } from './WorkRequestCategoryAssignments'
 import { VisualWorkRequestDrawer } from './VisualWorkRequestDrawer'
+import { VisualWorkflowNotificationList } from '@/features/settings/MyHomeNotificationList'
+import { VisualFinalApprovalPanel } from './VisualFinalApprovalPanel'
+import { visualFinalPending, visualSummaryApprover, workRequestStatusMeta, type VisualFinalAction } from './visual-final-approval'
 import { downloadVisualWorkFile, visualWorkDetail } from './visual-work-detail'
 import { useAuth } from '@/lib/supabase/auth'
 import { listBrandDirectory } from '@/lib/supabase/profiles'
@@ -68,6 +73,7 @@ import {
   isWorkRequestOwner,
   resolveWorkRequestViewRole,
   WORK_REQUEST_CONFIG,
+  WORK_REQUEST_DEPARTMENT_IDS,
   type WorkRequestOwner,
 } from './work-request-form-config'
 import { WorkRequestAcceptDialog } from './WorkRequestAcceptDialog'
@@ -82,6 +88,8 @@ import {
   visualSectionTitle,
   type VisualSectionId,
 } from './visual-request-sections'
+import { VisualQuestionAnswer, type VisualAnswerEditorOptions } from './VisualQuestionAnswer'
+import { replaceVisualQuestionMedia, splitVisualQuestionContent } from './visual-question-content'
 import {
   compareRequestsByDeadline,
   dateFromToday,
@@ -103,7 +111,6 @@ import {
   LOCAL_CURRENT_DEPARTMENT,
   PRIORITY_META,
   REQUESTER_CHAT_ROOM,
-  STATUS_META,
   hasRequestBody,
   isClosedStatus,
   isCompletionPending,
@@ -1074,6 +1081,13 @@ function ReferenceFilesField({
   )
 }
 
+type EditableTextOptions = {
+  label: string
+  descriptionId?: string
+  required?: boolean
+  singleLine?: boolean
+}
+
 function AutoGrowEditable({
   textId,
   value,
@@ -1081,6 +1095,7 @@ function AutoGrowEditable({
   richPreview,
   placeholder,
   className,
+  textOptions,
   onChange,
   onPasteFiles,
   onBackspaceEmpty,
@@ -1091,15 +1106,19 @@ function AutoGrowEditable({
   richPreview?: boolean
   placeholder?: string
   className?: string
+  textOptions?: EditableTextOptions
   onChange: (text: string, previewHtml?: string) => void
   onPasteFiles?: (event: ClipboardEvent<HTMLDivElement>) => void
   onBackspaceEmpty?: (event: KeyboardEvent<HTMLDivElement>) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const questionAnswer = textOptions?.required !== undefined
 
   useEffect(() => {
     const el = ref.current
-    if (!el || document.activeElement === el) return
+    if (!el) return
+    const focused = document.activeElement === el
+    if (focused && !questionAnswer) return
     if (richPreview && previewHtml !== undefined) {
       // Only the local preview editor supplies this markup. Paste accepts plain text.
       if (el.innerHTML !== previewHtml) el.innerHTML = previewHtml
@@ -1107,20 +1126,32 @@ function AutoGrowEditable({
     }
     if (normalizeEditableText(el.innerText) !== value) {
       el.textContent = value
+      if (focused) {
+        const range = document.createRange()
+        range.selectNodeContents(el)
+        range.collapse(false)
+        const selection = window.getSelection()
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+      }
     }
-  }, [value, previewHtml, richPreview])
+  }, [value, previewHtml, richPreview, questionAnswer])
 
   return (
     <div
       ref={ref}
       data-text-id={textId}
       role="textbox"
-      aria-multiline="true"
+      aria-label={textOptions?.label}
+      aria-describedby={textOptions?.descriptionId}
+      aria-required={textOptions?.required}
+      aria-multiline={!textOptions?.singleLine}
       contentEditable
       suppressContentEditableWarning
       data-placeholder={placeholder}
       className={cn(
         'min-h-7 w-full text-sm leading-7 outline-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]',
+        questionAnswer && 'rounded-sm focus-visible:ring-1 focus-visible:ring-ring/25',
         className,
       )}
       onInput={(event) => {
@@ -1133,12 +1164,24 @@ function AutoGrowEditable({
           return
         }
         event.preventDefault()
-        document.execCommand('insertText', false, event.clipboardData.getData('text/plain'))
+        const text = event.clipboardData.getData('text/plain')
+        document.execCommand('insertText', false, textOptions?.singleLine ? text.replace(/[\r\n]+/g, ' ') : text)
       }}
       onKeyDown={(event) => {
+        if (questionAnswer && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+          event.preventDefault()
+          const selection = window.getSelection()
+          if (selection) {
+            const range = document.createRange()
+            range.selectNodeContents(event.currentTarget)
+            selection.removeAllRanges()
+            selection.addRange(range)
+          }
+          return
+        }
         if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
           event.preventDefault()
-          document.execCommand('insertText', false, '\n')
+          if (!textOptions?.singleLine) document.execCommand('insertText', false, '\n')
           return
         }
         if (
@@ -1183,6 +1226,7 @@ function BodyFlow({
   text,
   images,
   placeholder,
+  textOptions,
   readOnly,
   visualDetail,
   movingId,
@@ -1201,6 +1245,7 @@ function BodyFlow({
   text: TextContentBlock
   images: ImageContentBlock[]
   placeholder?: string
+  textOptions?: EditableTextOptions
   readOnly?: boolean
   visualDetail?: boolean
   movingId?: string
@@ -1291,6 +1336,7 @@ function BodyFlow({
           previewHtml={text.previewHtml}
           richPreview={richPreview}
           placeholder={placeholder}
+          textOptions={textOptions}
           onChange={(value, html) => onTextChange?.(value, html)}
           onPasteFiles={onPasteFiles}
           onBackspaceEmpty={onBackspaceEmpty}
@@ -1322,6 +1368,8 @@ export function RequestBodyEditor({
   visualTitle,
   guide,
   richPreview,
+  leading,
+  visualAnswer,
 }: {
   blocks: ContentBlock[]
   error?: string
@@ -1331,6 +1379,8 @@ export function RequestBodyEditor({
   visualTitle?: string
   guide?: readonly string[]
   richPreview?: boolean
+  leading?: ReactNode
+  visualAnswer?: VisualAnswerEditorOptions
 }) {
   const editorRef = useRef<HTMLDivElement>(null)
   const visualFileRef = useRef<HTMLInputElement>(null)
@@ -1627,8 +1677,7 @@ export function RequestBodyEditor({
         lineWidth: 0,
       } satisfies ImageDropTarget)
     const part = parts[target.flowIndex]
-    const textOffset =
-      part?.type === 'flow' ? part.text.text.length : target.textOffset
+    const textOffset = !visualAnswer && part?.type === 'flow' ? part.text.text.length : target.textOffset
     insertFilesAtFlow(target.flowIndex, files, target.offsetY, textOffset, textOffset)
   }
 
@@ -1683,20 +1732,30 @@ export function RequestBodyEditor({
           block.id === moving.id && block.type === 'image',
       )
     : undefined
+  const fileLabel = visualAnswer?.label ?? visualTitle
+  const mediaOnly = Boolean(visualAnswer?.control)
+  const textOptions = visualAnswer ?? (visualTitle ? { label: leading ? `${visualTitle} 추가 내용` : `${visualTitle} 작성` } : undefined)
 
   return (
-    <div className={cn('space-y-2', visualTitle && 'rounded-xl border border-border bg-card p-5 shadow-sm sm:p-7')}>
-      {visualTitle ? <h2 className="text-sm font-semibold">{visualTitle}</h2> : (
+    <div role={visualTitle ? 'group' : undefined} aria-label={visualTitle}
+      className={cn('space-y-2', visualTitle && 'rounded-xl border border-border bg-card p-5 shadow-sm sm:p-7',
+      visualAnswer && 'relative min-h-8 space-y-0 pr-9')}>
+      {visualAnswer ? visualAnswer.control : visualTitle ? <h2 className="text-sm font-semibold">{visualTitle}</h2> : (
       <span className="flex items-center gap-1 text-sm font-medium">
         요청 내용 <span className="text-danger">*</span>
       </span>
       )}
+      {leading}
+      {visualTitle && leading && <h3 className="border-t border-border pt-4 text-sm font-semibold">추가 내용</h3>}
 
       <div
         ref={editorRef}
         className={cn(
           'relative min-h-72 rounded-md border border-border bg-card px-4 py-4',
           visualTitle && 'min-h-80 border-0 px-0 sm:min-h-96',
+          visualTitle && leading && 'min-h-16 py-1 sm:min-h-16',
+          visualAnswer && 'min-h-7 border-0 bg-transparent p-0',
+          mediaOnly && 'min-h-0',
           isDraggingFiles && 'border-primary bg-primary/5',
           moving?.active && 'select-none',
           error && 'border-danger',
@@ -1715,7 +1774,7 @@ export function RequestBodyEditor({
         onDrop={handleDrop}
       >
         {guide?.length ? <ul className="mb-3 list-inside list-disc text-xs leading-6 text-muted-foreground">{guide.map((item) => <li key={item}>{item} :</li>)}</ul> : null}
-        {visualTitle && onlyEmptyText ? (
+        {visualTitle && !leading && onlyEmptyText ? (
           <button type="button" className="absolute left-1/2 top-1/2 z-10 flex w-max max-w-full -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2 rounded-md p-3 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary" onClick={() => visualFileRef.current?.click()} aria-label={`${visualTitle} 파일 추가`}>
             <Paperclip className="size-5" />
             파일을 끌어 놓거나 버튼을 눌러 첨부하세요.
@@ -1732,6 +1791,7 @@ export function RequestBodyEditor({
             )
           }
 
+          if (mediaOnly && part.images.length === 0) return null
           const previous = parts[index - 1]
           return (
             <BodyFlow
@@ -1739,6 +1799,8 @@ export function RequestBodyEditor({
               flowIndex={index}
               text={part.text}
               images={part.images}
+              readOnly={mediaOnly}
+              textOptions={textOptions}
               placeholder={
                 onlyEmptyText ? placeholder : '이어서 설명을 작성하세요.'
               }
@@ -1813,10 +1875,12 @@ export function RequestBodyEditor({
           </div>
         ) : null}
       </div>
-      {visualTitle ? (
-        <div className="flex justify-end">
-          <input ref={visualFileRef} type="file" multiple className="sr-only" aria-label={`${visualTitle} 첨부 파일`} onChange={(event) => { appendFilesRef.current(Array.from(event.target.files ?? [])); event.target.value = '' }} />
-          <Button type="button" variant="ghost" size="sm" onClick={() => visualFileRef.current?.click()}><Paperclip className="size-3.5" />파일 추가</Button>
+      {fileLabel ? (
+        <div className={cn('flex justify-end', visualAnswer && 'absolute right-0 top-0')}>
+          <input ref={visualFileRef} type="file" multiple className="sr-only" aria-label={`${fileLabel} 첨부 파일`} onChange={(event) => { appendFilesRef.current(Array.from(event.target.files ?? [])); event.target.value = '' }} />
+          <Button type="button" variant="ghost" size={visualAnswer ? 'icon' : 'sm'}
+            aria-label={visualAnswer ? `${fileLabel} 파일 추가` : undefined} title={visualAnswer ? `${fileLabel} 파일 추가` : undefined}
+            onClick={() => visualFileRef.current?.click()}><Paperclip className="size-3.5" />{!visualAnswer && '파일 추가'}</Button>
         </div>
       ) : (
       <p className="text-xs text-muted-foreground">
@@ -1829,17 +1893,18 @@ export function RequestBodyEditor({
   )
 }
 
-function VisualRequestSection({ title, blocks, onChange, guide, error }: {
+function VisualRequestSection({ title, blocks, onChange, guide, error, leading }: {
   title: string
   blocks: ContentBlock[]
   onChange: (blocks: ContentBlock[]) => void
   guide?: readonly string[]
   error?: string
+  leading?: ReactNode
 }) {
   const appendFilesRef = useRef<(files: File[]) => void>(() => {
     console.warn('[work-request] Visual 요청 편집기가 연결되지 않았습니다.', { title })
   })
-  return <RequestBodyEditor blocks={blocks} onChange={onChange} placeholder="내용을 입력하세요." visualTitle={title} guide={guide} error={error} appendFilesRef={appendFilesRef} />
+  return <RequestBodyEditor blocks={blocks} onChange={onChange} placeholder="내용을 입력하세요." visualTitle={title} guide={guide} error={error} leading={leading} appendFilesRef={appendFilesRef} />
 }
 
 function RequestTitleAndDue({
@@ -1911,7 +1976,8 @@ function VisualRequestFields({ blocks, onChange, brandPicker, beforeMain, error,
   for (const [id] of sections) {
     if (id !== 'main' && !visibleCategories.some(category => category.id === id)) {
       const saved = visualValues?.categories.find(category => category.id === id)
-      visibleCategories.push({ id, label: saved?.label ?? '이전 분류', enabled: false, assigneeId: '', fields: Object.keys(saved?.fields ?? {}).map(key => ({ id: key, label: key, type: 'text', required: false, placeholder: '' })) })
+      const fieldIds = new Set([...Object.keys(saved?.fieldLabels ?? {}), ...Object.keys(saved?.fields ?? {})])
+      visibleCategories.push({ id, label: saved?.label ?? '이전 분류', enabled: false, assigneeId: '', fields: Array.from(fieldIds, key => ({ id: key, label: saved?.fieldLabels?.[key] ?? key, type: 'text', required: false, placeholder: '' })) })
     }
   }
   function metadata(selected: Map<VisualSectionId, ContentBlock[]>): VisualRequestValues {
@@ -1943,21 +2009,38 @@ function VisualRequestFields({ blocks, onChange, brandPicker, beforeMain, error,
       </div>
       {beforeMain}
       <VisualRequestSection key={`${requestKey}:main`} title="메인 내용" blocks={sections.get('main') ?? []} onChange={(next) => updateSection('main', next)} error={error} />
-      {visibleCategories.filter((category) => sections.has(category.id)).map((category) => (
-        <div key={`${requestKey}:${category.id}`} className="space-y-3">
-          {category.fields.length ? <Card><CardContent className="space-y-4 p-5"><h2 className="font-semibold">{category.label} · 요청 정보</h2><div className="grid gap-4 md:grid-cols-2">{category.fields.map(field => {
-            const value = visualValues?.categories.find(item => item.id === category.id)?.fields[field.id] ?? ''
-            const change = (value: string) => {
-              const next = metadata(sections)
-              const target = next.categories.find(item => item.id === category.id)!
-              target.fields = { ...target.fields, [field.id]: value }
-              onVisualChange(next)
-            }
-            return <label key={field.id} className={`block space-y-1 text-sm ${field.type === 'textarea' ? 'md:col-span-2' : ''}`}><span>{field.label}{field.required ? <span className="ml-1 text-danger">*</span> : null}</span>{field.type === 'textarea' ? <Textarea value={value} placeholder={field.placeholder} required={field.required} maxLength={10000} rows={3} onChange={event => change(event.target.value)} /> : <Input type={field.type} value={value} placeholder={field.placeholder} required={field.required} maxLength={10000} onChange={event => change(event.target.value)} />}</label>
-          })}</div></CardContent></Card> : null}
-          <VisualRequestSection title={visualSectionTitle(category)} blocks={sections.get(category.id)!} onChange={(next) => updateSection(category.id, next)} />
-        </div>
-      ))}
+      {visibleCategories.filter(category => sections.has(category.id)).map(category => {
+        const section = sections.get(category.id)!
+        const content = splitVisualQuestionContent(section, category.fields.map(field => field.id))
+        const values = visualValues?.categories.find(item => item.id === category.id)?.fields
+        return (
+          <VisualRequestSection
+            key={`${requestKey}:${category.id}`}
+            title={visualSectionTitle(category)}
+            blocks={content.body}
+            onChange={next => updateSection(category.id, [...next, ...Array.from(content.answers.values()).flat()])}
+            leading={category.fields.length ? <div className="space-y-5 py-3">
+              {category.fields.map(field => {
+                const media = content.answers.get(field.id)
+                const value = values?.[field.id] ?? ''
+                return <VisualQuestionAnswer key={field.id} field={field} categoryId={category.id}
+                  value={value} media={media} BodyEditor={RequestBodyEditor}
+                  onChange={answer => {
+                    if (media?.length || answer.media.length) {
+                      updateSection(category.id, replaceVisualQuestionMedia(section, field.id, answer.media))
+                    }
+                    if (answer.value !== value) {
+                      const next = metadata(sections)
+                      const target = next.categories.find(item => item.id === category.id)!
+                      target.fields = { ...target.fields, [field.id]: answer.value }
+                      onVisualChange(next)
+                    }
+                  }} />
+              })}
+            </div> : undefined}
+          />
+        )
+      })}
     </div>
   )
 }
@@ -1969,23 +2052,37 @@ type FormDraft = {
   hasEdited: boolean
 }
 
-function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
+export function WorkRequestForm({ owner, surface = 'department' }: {
+  owner: WorkRequestOwner
+  surface?: 'department' | 'personal' | 'notice'
+}) {
   useRenderWatch(`WorkRequestForm:${owner}`)
   const config = WORK_REQUEST_CONFIG[owner]
-  const { profile, ready } = useAuth()
+  const { profile, ready, session } = useAuth()
   const selfId=profile?.id??''
-  const workLocation = useLocation()
-  const detailId = new URLSearchParams(workLocation.search).get('requestId') ?? undefined
-  const auxiliary = new URLSearchParams(workLocation.search).get('aux') === '1'
-  const internal = new URLSearchParams(workLocation.search).get('internal') === '1'
-  const storage=useWorkRequests(owner, auxiliary ? undefined : detailId, !auxiliary && !detailId)
-  const visualSettings = useWorkRequestSettings(owner === 'design')
-  const visualCategories = visualSettings.data?.categories ?? DEFAULT_VISUAL_CATEGORIES
-  const {requests,setRequests,currentWorkByMember,setCurrentWorkByMember,workTimeByKey,setWorkTimeByKey,teamMembers}=storage
-  const [searchParams] = useSearchParams()
+  const personal = surface !== 'department'
+  const noticeOnly = surface === 'notice'
+  const ownDepartment = profile?.departmentId === WORK_REQUEST_DEPARTMENT_IDS[owner]
+  const canCreate = !noticeOnly && profile?.status === 'active' && session?.user.id === selfId && (personal ? !ownDepartment : ownDepartment)
   const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const detailId = searchParams.get('requestId')?.trim() || undefined
+  const auxiliary = !personal && searchParams.get('aux') === '1'
+  const internal = !personal && !detailId && searchParams.get('mode') === 'new'
+  const visualSettings = useWorkRequestSettings(owner === 'design')
+  const storage=useWorkRequests(owner, auxiliary ? undefined : detailId, !auxiliary && !detailId, visualSettings.data?.categoryWorkflowAvailable)
+  const visualCategories = visualSettings.data?.categories ?? DEFAULT_VISUAL_CATEGORIES
+  const activeSupervisorIds = visualSettings.data?.activeSupervisorIds ?? emptyList<string>()
+  const finalApprovalEnabled = owner === 'design' && Boolean(visualSettings.data?.supervisorIds?.length)
+  const finalApprovalCheckPending = owner === 'design' && (visualSettings.isPending || visualSettings.isError)
+  const {requests,setRequests,currentWorkByMember,setCurrentWorkByMember,workTimeByKey,setWorkTimeByKey,teamMembers}=storage
   const navigate = useNavigate()
   const tabActive = useWorkspaceTabActivity()
+  const navigationActiveRef = useRef(false)
+  useEffect(() => {
+    navigationActiveRef.current = tabActive
+    return () => { navigationActiveRef.current = false }
+  }, [tabActive])
   const brandsQuery = useQuery({
     queryKey: ['brand-directory'],
     queryFn: listBrandDirectory,
@@ -2017,6 +2114,29 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const [errors, setErrors] = useState<FormErrors>({})
   const [hasEdited, setHasEdited] = useState(false)
   const [flashMessage, setFlashMessage] = useState<string | null>(null)
+  const finalApproval = useMutation({
+    mutationFn: async ({ request, action, value }: { request: WorkRequestRecord; action: VisualFinalAction; value?: string }) => {
+      const trace = startWorkflow('app', `visual_work_final_${action}`)
+      trace.step('validate_input')
+      if (!request.revision || request.owner !== 'design') {
+        trace.block('invalid_request')
+        throw new Error('업무를 다시 불러온 뒤 처리해 주세요.')
+      }
+      try {
+        await trace.run('save', context => changeVisualWorkFinalApproval(request, action, value ?? null, context))
+      } catch (error) {
+        trace.fail(error)
+        void storage.retry()
+        throw error
+      }
+      try {
+        await trace.run('refresh_queries', storage.retry, { writeOutcome: 'committed' })
+        trace.done({ writeOutcome: 'committed' })
+      } catch (error) {
+        trace.fail(error, { writeOutcome: 'committed' })
+      }
+    },
+  })
   const [acceptRequestId, setAcceptRequestId] = useState<string | null>(null)
   const [reviewConfirmId, setReviewConfirmId] = useState<string | null>(null)
   const [workClock, setWorkClock] = useState(() => Date.now())
@@ -2051,29 +2171,30 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const isIncoming = true
     const isSelfRequest =
       (request.requesterId === selfId)
+    const assignedToSelf = request.assignee === selfId || request.collaborators.includes(selfId)
+    if (noticeOnly && (!isSelfRequest || !request.visualCategoryWorkflow)) return null
+    if (personal && !isSelfRequest && !assignedToSelf) return null
     const visible = isSelfRequest || (canManage
       ? isIncoming
       : isDestinationMember
-        ? isIncoming &&
-          (request.assignee === selfId ||
-            request.collaborators.includes(selfId))
+        ? isIncoming && assignedToSelf
         : isSelfRequest)
-    if (!visible && !request.departmentReadable) return null
+    if (!personal && !visible && !request.departmentReadable) return null
     return {
-      needsReviewStart: auxiliary && canManage && request.status === 'requested',
-      editable: isSelfRequest && request.status === 'requested',
+      needsReviewStart: auxiliary && canManage && request.status === 'requested' && !request.visualCategoryWorkflow,
+      editable: isSelfRequest && request.status === 'requested' && !noticeOnly,
     }
   }
 
   const locationPathname = location.pathname
   const locationSearch = location.search
   const resolvedView = resolveWorkRequestView(locationSearch, {
-    canCreate: true,
+    canCreate,
     accessOf: navigationAccess,
   })
   const view = resolvedView.view
   const detailRequestId = view.kind === 'detail' ? view.requestId : null
-  const recoverySearch = workRequestRecoverySearch(locationSearch, resolvedView, {
+  const recoverySearch = personal && storage.loadError ? null : workRequestRecoverySearch(locationSearch, resolvedView, {
     active: tabActive && ready && !storage.loading && !storage.saving,
   })
 
@@ -2186,6 +2307,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
   function goToView(action: WorkRequestNavAction) {
     if (!tabActive) return
+    if (!navigationActiveRef.current) return
     const next = workRequestNavigation(locationSearch, view, action)
     navigate(
       { pathname: locationPathname, search: next.search },
@@ -2268,10 +2390,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     }
     if (owner === 'design') {
       if (visualSettings.isPending || visualSettings.isError || !visualSettings.data?.available) nextErrors.blocks = '분류 설정의 서버 연결을 확인한 뒤 다시 등록해 주세요.'
-      for (const category of visualCategories.filter(item => splitVisualSections(values.blocks).has(item.id))) {
+      const sections = splitVisualSections(values.blocks)
+      for (const category of visualCategories.filter(item => sections.has(item.id))) {
         const answers = values.visualRequest?.categories.find(item => item.id === category.id)?.fields ?? {}
         const fields = editingRequest?.categoryAssignments?.find(item => item.categoryId === category.id)?.formFields ?? category.fields
         if (fields.some(field => field.required && !answers[field.id]?.trim())) nextErrors.blocks = `${category.label}의 필수 입력 항목을 확인해 주세요.`
+        else if (fields.some(field => (answers[field.id]?.length ?? 0) > 10000)) nextErrors.blocks = `${category.label}의 답변은 항목별로 10000자까지 작성할 수 있습니다.`
       }
     }
     return nextErrors
@@ -2501,16 +2625,38 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     setFlashMessage('요청을 반려했습니다.')
   }
 
+  async function runFinalApproval(request: WorkRequestRecord, action: VisualFinalAction, value?: string) {
+    if (storage.saving || finalApproval.isPending || finalApprovalCheckPending) return false
+    setFlashMessage(null)
+    try {
+      await finalApproval.mutateAsync({ request, action, value })
+    } catch {
+      // The mutation error is shown in the request detail.
+      return false
+    }
+    setFlashMessage({
+      assign: '총괄 관리자를 배정했습니다.', submit: '총괄 관리자에게 최종 승인을 요청했습니다.',
+      approve: '최종 승인하여 업무를 완료했습니다.', return: '반려 사유를 저장하고 업무를 진행 중으로 돌렸습니다.',
+    }[action])
+    return true
+  }
+
   function requestCompletion(request: WorkRequestRecord) {
+    if (finalApprovalCheckPending || finalApproval.isPending) return
     const result=window.prompt('완료 결과를 입력하세요.',request.completionResult??'')
     if(result===null)return
+    const ownInternal = request.kind === 'internal' && request.requesterId === selfId && request.assignee === selfId
+    if (ownInternal && finalApprovalEnabled) {
+      void runFinalApproval(request, 'submit', result.trim())
+      return
+    }
     updateRequest(request.id, {
       completionResult:result.trim(),
-      status: request.kind === 'internal' && request.requesterId === selfId && request.assignee === selfId ? 'completed' : nextCompletionStatus(request),
+      status: ownInternal ? 'completed' : nextCompletionStatus(request),
       completionRequestedAt: new Date().toISOString(),
     })
     setFlashMessage(
-      request.kind === 'internal' && request.requesterId === selfId && request.assignee === selfId ? '업무를 완료했습니다.' : needsLeadCompletionReview(request)
+      ownInternal ? '업무를 완료했습니다.' : needsLeadCompletionReview(request)
         ? '완료를 요청했습니다. 업무 관리 담당자 확인을 기다립니다.'
         : '완료를 요청했습니다. 요청자 확인을 기다립니다.',
     )
@@ -2548,6 +2694,11 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   }
 
   function confirmCompletion(request: WorkRequestRecord) {
+    if (finalApprovalCheckPending || visualFinalPending(request)) return
+    if (finalApprovalEnabled) {
+      void runFinalApproval(request, 'submit')
+      return
+    }
     updateRequest(request.id, { status: 'completed' })
     setFlashMessage('결과를 확인했습니다. 완료되었습니다.')
   }
@@ -2743,7 +2894,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     request: WorkRequestRecord,
     context: 'queue' | 'mine' | 'sent' | 'completed',
   ) {
-    const status = STATUS_META[request.status]
+    const status = workRequestStatusMeta(request)
     const dueDate = request.confirmedDueDate || request.values.dueDate
     const deadline = deadlineLabel(dueDate)
     const isPrimaryAssignee = request.assignee === selfId
@@ -2932,9 +3083,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     variant={canRequestCompletion ? 'secondary' : 'default'}
                     size="sm"
                     className="w-full px-0"
-                    disabled={
-                      !canStartWork && !canResumeWork && !canRequestCompletion
-                    }
+                    disabled={(!canStartWork && !canResumeWork && !canRequestCompletion) ||
+                      (canRequestCompletion && (finalApprovalCheckPending || finalApproval.isPending))}
                     title={
                       canStartWork
                         ? '이 업무를 시작합니다'
@@ -2984,11 +3134,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               ) : null}
               {context === 'sent' &&
               isSelfRequest &&
-              request.status === 'completionConfirm' ? (
+              request.status === 'completionConfirm' && !visualFinalPending(request) ? (
                 <>
                   <Button
                     type="button"
                     size="sm"
+                    disabled={finalApprovalCheckPending || finalApproval.isPending}
                     onClick={() => confirmCompletion(request)}
                   >
                     결과 확인
@@ -3036,7 +3187,19 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     )
   }
 
-  if (!auxiliary && (view.kind === 'list' || view.kind === 'detail')) return <><DepartmentWorkBoard owner={owner} />{storage.error ? <p role="alert" className="p-4 text-danger">{storage.error}<Button onClick={() => void storage.retry()}>다시 조회</Button></p> : null}{renderDetailPanel()}{acceptingRequest ? <WorkRequestAcceptDialog request={acceptingRequest} selfId={selfId} teamMembers={teamMembers} onClose={() => setAcceptRequestId(null)} onConfirm={decision => acceptRequest(acceptingRequest, decision)} /> : null}</>
+  if (!auxiliary && (view.kind === 'list' || view.kind === 'detail')) return <>
+    {!personal && owner === 'design' && visualSettings.data?.categoryWorkflowAvailable && <VisualWorkflowNotificationList />}
+    {!personal && <DepartmentWorkBoard owner={owner} activeSupervisorIds={activeSupervisorIds}
+      finalApprovalEnabled={finalApprovalEnabled} directoryMembers={storage.directoryMembers} />}
+    {personal && storage.loading && <p role="status" className="p-4 text-sm text-muted-foreground">요청 상세를 불러오는 중...</p>}
+    {storage.error && <div role="alert" className="flex flex-wrap items-center gap-2 p-4 text-danger">
+      {storage.error}
+      <Button type="button" variant="outline" size="sm" onClick={() => void storage.retry()}>다시 조회</Button>
+      {personal && <Button type="button" variant="outline" size="sm" onClick={() => goToView({ type: 'closeDetail' })}>목록으로 돌아가기</Button>}
+    </div>}
+    {renderDetailPanel()}
+    {acceptingRequest && <WorkRequestAcceptDialog request={acceptingRequest} selfId={selfId} teamMembers={teamMembers} onClose={() => setAcceptRequestId(null)} onConfirm={decision => acceptRequest(acceptingRequest, decision)} />}
+  </>
 
   if (storage.loading) return <p role="status" className="p-4 text-sm text-muted-foreground">업무와 권한을 불러오는 중...</p>
   if (storage.loadError) return <Card><CardContent className="p-5"><p role="alert" className="text-sm text-danger">{storage.error}</p><Button className="mt-3" onClick={()=>void storage.retry()}>다시 조회</Button></CardContent></Card>
@@ -3135,10 +3298,10 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     ? '배정받은 직원 화면'
                     : `${currentDepartment} 요청자 화면`}
               </Badge>
-              {(
+              {canCreate && (
                 <Button type="button" onClick={() => openForm()}>
                   <Plus className="size-4" />
-                  작업 요청 하기
+                  업무 등록
                 </Button>
               )}
             </>
@@ -3168,6 +3331,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             <span>{flashMessage}</span>
           </div>
         ) : null}
+        {finalApproval.error && !detailRequestId && <p role="alert" className="mb-5 text-sm text-danger">{finalApproval.error.message}</p>}
 
         {stats.length > 0 ? (
           <div
@@ -3577,7 +3741,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
   function renderDetailPanel() {
     if (!selectedRequest) return null
-    const status = STATUS_META[selectedRequest.status]
+    const categoryWorkflow = selectedRequest.visualCategoryWorkflow
+    const status = workRequestStatusMeta(selectedRequest)
     const dueDate =
       selectedRequest.confirmedDueDate || selectedRequest.values.dueDate
     const deadline = deadlineLabel(dueDate)
@@ -3585,11 +3750,16 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const isSelfRequest =
       (selectedRequest.requesterId === selfId)
     const canManageSelected =
-      canManage && selectedRequest.owner === owner
+      canManage && selectedRequest.owner === owner && !(categoryWorkflow && personal && isSelfRequest)
     const isPrimaryAssignee = selectedRequest.assignee === selfId
     const isCollaborator =
       selectedRequest.collaborators.includes(selfId)
-    const canEdit = isSelfRequest && selectedRequest.status === 'requested'
+    const awaitingFinalApproval = visualFinalPending(selectedRequest)
+    const showFinalApproval = selectedRequest.owner === 'design' && (Boolean(categoryWorkflow || selectedRequest.visualFinalApproval) ||
+      (finalApprovalEnabled && !isClosedStatus(selectedRequest.status)))
+    const supervisorId = visualSummaryApprover(selectedRequest, activeSupervisorIds)
+    const memberName = (id: string) => storage.directoryMembers.find(person => person.id === id)?.displayName?.trim() || '기존 직원'
+    const canEdit = isSelfRequest && selectedRequest.status === 'requested' && !noticeOnly
     const chatRooms = visibleChatRooms(selectedRequest, {
       canManage: canManageSelected,
       isRequester: isSelfRequest,
@@ -3632,13 +3802,13 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             (selectedRequest.status === 'requested' ||
               selectedRequest.status === 'reviewing') ? (
               <>
-                <Button
+                {!categoryWorkflow && <Button
                   type="button"
                   size="sm"
                   onClick={() => setAcceptRequestId(selectedRequest.id)}
                 >
                   수락
-                </Button>
+                </Button>}
                 <Button
                   type="button"
                   variant="outline"
@@ -3649,7 +3819,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 </Button>
               </>
             ) : null}
-            {canManageSelected &&
+            {!categoryWorkflow && canManageSelected &&
             selectedRequest.status === 'completionReview' ? (
               <>
                 <Button
@@ -3671,11 +3841,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 </Button>
               </>
             ) : null}
-            {(selectedRequest.requesterId === selfId) && selectedRequest.status === 'completionConfirm' ? (
+            {!categoryWorkflow && isSelfRequest && selectedRequest.status === 'completionConfirm' && !awaitingFinalApproval ? (
               <>
                 <Button
                   type="button"
                   size="sm"
+                  disabled={finalApprovalCheckPending || finalApproval.isPending}
                   onClick={() => confirmCompletion(selectedRequest)}
                 >
                   결과 확인
@@ -3713,12 +3884,23 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
       </div>
     )
 
-    const notice = flashMessage ? (
+    const notice = <>
+      {owner === 'design' && visualSettings.isError && <div className="flex flex-wrap items-center gap-2 text-sm text-danger">
+        <p role="alert">총괄 관리자 설정을 불러오지 못했습니다.</p>
+        <Button type="button" variant="outline" size="sm" onClick={() => void visualSettings.refetch()}>설정 다시 조회</Button>
+      </div>}
+      {flashMessage && (
           <div className="flex items-start gap-3 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">
             <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
             <span>{flashMessage}</span>
           </div>
-    ) : null
+      )}
+      {showFinalApproval && !categoryWorkflow && <VisualFinalApprovalPanel key={`${selfId}:${selectedRequest.id}`} request={selectedRequest}
+        activeSupervisorIds={activeSupervisorIds} viewerId={selfId} canManage={canManageSelected}
+        busy={storage.saving || finalApproval.isPending || finalApprovalCheckPending}
+        error={finalApproval.variables?.request.id === selectedRequest.id ? finalApproval.error?.message : undefined}
+        memberName={memberName} onAction={(action, value) => runFinalApproval(selectedRequest, action, value)} />}
+    </>
 
     const references = selectedRequest.values.referenceFiles.filter(
       item => !blockHasFile(selectedRequest.values.blocks, item.file),
@@ -3976,7 +4158,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                   <CardContent className="space-y-3">
                     {isCompletionPending(selectedRequest.status) ? (
                       <p className="text-sm text-muted-foreground">
-                        {selectedRequest.status === 'completionReview'
+                        {awaitingFinalApproval ? '총괄 관리자 승인을 기다립니다.' : selectedRequest.status === 'completionReview'
                           ? '완료를 요청했습니다. 업무 관리 담당자 확인을 기다립니다.'
                           : '업무 관리 담당자 확인이 끝났습니다. 요청자 확인을 기다립니다.'}
                       </p>
@@ -4003,13 +4185,14 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                             type="button"
                             variant="secondary"
                             size="sm"
+                            disabled={finalApprovalCheckPending || finalApproval.isPending}
                             onClick={() => requestCompletion(selectedRequest)}
                           >
-                            {selectedRequest.kind === 'internal' && isSelfRequest ? '업무 완료' : '완료 요청'}
+                            {selectedRequest.kind === 'internal' && isSelfRequest ? (finalApprovalEnabled ? '최종 승인 요청' : '업무 완료') : '완료 요청'}
                           </Button>
                         ) : null}
                         <p className="text-xs text-muted-foreground">
-                          {selectedRequest.kind === 'internal' && isSelfRequest ? '본인이 등록하고 담당하는 자체 업무는 직접 완료합니다.' : '완료 요청 후 기존 업무 검수와 요청자 확인을 거쳐 완료됩니다.'}
+                          {finalApprovalEnabled ? '총괄 관리자가 최종 승인하면 완료됩니다.' : selectedRequest.kind === 'internal' && isSelfRequest ? '본인이 등록하고 담당하는 자체 업무는 직접 완료합니다.' : '완료 요청 후 기존 업무 검수와 요청자 확인을 거쳐 완료됩니다.'}
                         </p>
                       </>
                     )}
@@ -4057,21 +4240,28 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
           viewerId={selfId}
           canManage={canManageSelected}
           isRequester={isSelfRequest}
+          requesterView={personal && isSelfRequest}
           summary={{
             requesterDepartment: departmentLabel(selectedRequest.requesterDepartment),
             requesterName: selectedRequest.values.requester?.trim() || '미입력',
+            requesterPosition: selectedRequest.values.requesterPosition?.trim()
+              || storage.directoryMembers.find(person => person.id === selectedRequest.requesterId)?.position?.trim()
+              || storage.directoryMembers.find(person => person.id === selectedRequest.requesterId)?.jobGrade?.trim()
+              || '',
             status: status.label,
             requestedAt: selectedRequest.createdAt,
             dueDate,
             brand: brandLabelForRequest(selectedRequest, brands),
+            finalApprover: showFinalApproval ? (supervisorId ? memberName(supervisorId) : '미지정') : undefined,
           }}
           onClose={closeRequest}
           headerActions={headerActions}
           notice={notice}
           mainReferences={referenceCards}
-          management={management}
+          management={categoryWorkflow ? undefined : management}
+          workflow={categoryWorkflow ? { data: categoryWorkflow, request: selectedRequest, supervisors: activeSupervisorIds, members: teamMembers } : undefined}
           legacyConversation={workConversation}
-          memberName={id => storage.directoryMembers.find(person => person.id === id)?.displayName?.trim() || '기존 직원'}
+          memberName={memberName}
           renderBody={blocks => <RequestBodyPreview blocks={blocks} visualDetail />}
           renderAssignment={categoryId => <WorkRequestCategoryAssignments
             request={selectedRequest} members={teamMembers} canManage={canManageSelected}
@@ -4091,7 +4281,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     <div ref={pageTopRef}>
         {storage.error?<p role="alert" className="mb-3 rounded-xl border border-danger/30 bg-card p-3 text-sm text-danger">{storage.error}<button type="button" className="ml-2 underline" onClick={()=>void storage.retry()}>다시 조회</button></p>:null}
         {storage.saving?<p role="status" className="mb-3 text-sm text-muted-foreground">서버에 저장 중...</p>:null}
-        {!internal && !storage.managerAvailable?<p role="status" className="mb-3 rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground">이 부서의 업무 관리 담당자 지정이 필요합니다. 요청은 대기 상태로 저장되며 자동 수락되지 않습니다.</p>:null}
+        {!internal && (!personal || detailId) && !storage.managerAvailable?<p role="status" className="mb-3 rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground">이 부서의 업무 관리 담당자 지정이 필요합니다. 요청은 대기 상태로 저장되며 자동 수락되지 않습니다.</p>:null}
       <form onSubmit={handleSubmit} noValidate>
         <PageHeader
           title={

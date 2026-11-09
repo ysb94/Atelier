@@ -3,8 +3,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from './auth'
 import { getSupabase } from './client'
 import { DEFAULT_VISUAL_CATEGORIES, type VisualCategory } from '@/features/work-requests/visual-request-config'
+import type { DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
+import { diagnosticQuery } from './diagnostic-query'
 
-export type WorkRequestSettings = { revision: number; categories: VisualCategory[]; canManage: boolean; available: boolean }
+export type WorkRequestSettings = {
+  revision: number; categories: VisualCategory[]; canManage: boolean; available: boolean
+  supervisorIds?: string[]; activeSupervisorIds?: string[]; categoryWorkflowAvailable?: boolean
+}
 export async function loadWorkRequestSettings(): Promise<WorkRequestSettings> {
   const { data, error } = await getSupabase().rpc('get_work_request_settings', { p_owner: 'design' })
   if (error) {
@@ -14,10 +19,11 @@ export async function loadWorkRequestSettings(): Promise<WorkRequestSettings> {
   }
   return { ...data, available: true } as WorkRequestSettings
 }
-export async function saveWorkRequestSettings(categories: VisualCategory[], revision: number): Promise<number> {
-  const { data, error } = await getSupabase().rpc('save_work_request_settings', { p_owner: 'design', p_revision: revision, p_categories: categories })
-  if (error) { console.warn('[work-request-settings] 분류 설정 저장 실패', error); throw new Error(error.message) }
-  return data as number
+export function saveWorkRequestSettings(categories: VisualCategory[], revision: number, supervisors: string[] | undefined, context: DiagnosticContext) {
+  const query = supervisors === undefined
+    ? getSupabase().rpc('save_work_request_settings', { p_owner: 'design', p_revision: revision, p_categories: categories })
+    : getSupabase().rpc('save_visual_work_request_settings', { p_revision: revision, p_categories: categories, p_supervisors: supervisors })
+  return diagnosticQuery<number>('app', 'visual_work_settings_save', query, context)
 }
 export async function assignWorkRequestCategory(requestId: string, categoryId: string, assigneeId: string, revision: number): Promise<void> {
   const { error } = await getSupabase().rpc('assign_work_request_category', { p_request: requestId, p_category: categoryId, p_assignee: assigneeId || null, p_revision: revision })

@@ -31,12 +31,12 @@ type Draft = {
 const EMPTY_DRAFT: Draft = { body: '', files: [], reply: null }
 const PREVIEW_IMAGE = /^image\/(?:jpeg|png|webp|gif|avif)$/i
 
-function CommentFile({ file }: { file: VisualCommentFile }) {
+export function VisualWorkAttachment({ file, previewImage = true }: { file: VisualCommentFile; previewImage?: boolean }) {
   const [preview, setPreview] = useState<string>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const live = useRef(false)
-  const previewable = PREVIEW_IMAGE.test(file.type) && file.size <= 5 * 1024 * 1024
+  const previewable = previewImage && PREVIEW_IMAGE.test(file.type) && file.size <= 5 * 1024 * 1024
 
   useEffect(() => {
     live.current = true
@@ -98,6 +98,7 @@ function CommentEntry({
         {comment.replyTo && <CornerDownRight aria-hidden="true" className="size-3.5 self-center text-muted-foreground" />}
         {comment.authorDepartment && <span className="text-xs text-muted-foreground sm:text-sm">{comment.authorDepartment}</span>}
         <strong className="wrap-anywhere text-sm font-medium sm:text-base">{comment.authorName}</strong>
+        {comment.internal && <span className="text-xs text-muted-foreground">내부 댓글</span>}
         {created && <time className="whitespace-nowrap pl-1 text-xs text-muted-foreground tabular-nums sm:pl-2" dateTime={comment.createdAt}>{created.fullDate} {created.time}</time>}
       </div>
       {comment.body && <p className="whitespace-pre-wrap wrap-anywhere text-[15px] leading-6">
@@ -109,19 +110,20 @@ function CommentEntry({
         <CornerDownRight className="size-3" />답글
       </Button>}
       {!!comment.files.length && <div className="flex flex-wrap gap-3 pt-2 sm:pl-8">
-        {comment.files.map(file => <CommentFile key={file.path} file={file} />)}
+        {comment.files.map(file => <VisualWorkAttachment key={file.path} file={file} />)}
       </div>}
     </div>
   )
 }
 
 export function VisualCategoryComments({
-  requestId, category, canDiscuss, legacyConversation,
+  requestId, category, canDiscuss, legacyConversation, sharedOnly,
 }: {
   requestId: string
   category: { id: string; label: string }
   canDiscuss: boolean
   legacyConversation?: ReactNode
+  sharedOnly?: boolean
 }) {
   useRenderWatch('VisualCategoryComments')
   const { profile, session } = useAuth()
@@ -211,6 +213,7 @@ export function VisualCategoryComments({
   const roots: VisualComment[] = []
   if (enabled && query.isSuccess && query.data.ready) {
     for (const item of query.data.items) {
+      if (sharedOnly && item.internal) continue
       if (!item.replyTo) roots.push(item)
       else {
         const thread = replies.get(item.replyTo)

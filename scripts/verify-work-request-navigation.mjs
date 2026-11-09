@@ -5,6 +5,7 @@ import { validateTabIdentityProof } from '../dev-tools/ai-workflow/navigation-pr
 import { fileURLToPath,pathToFileURL } from 'node:url'
 const root=process.argv[2]?fs.realpathSync(process.argv[2]):path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..')
 const {
+  buildPersonalWorkRequestSearch,
   buildWorkRequestSearch,
   dropWorkRequestDraft,
   isSameWorkRequestSearch,
@@ -48,6 +49,11 @@ assert.equal(buildWorkRequestSearch('?requestId=a&requestId=b', { kind: 'detail'
 assert.equal(buildWorkRequestSearch('?requestId=R1&visualTab=banner', { kind: 'detail', requestId: 'R1' }), '?requestId=R1&visualTab=banner')
 assert.equal(buildWorkRequestSearch('?requestId=R1&visualTab=banner&brand=undecided', { kind: 'detail', requestId: 'R2' }), '?requestId=R2&brand=undecided')
 assert.equal(buildWorkRequestSearch('?requestId=R1&visualTab=banner', { kind: 'list' }), '')
+const personalNew = buildPersonalWorkRequestSearch('?part=work&brand=undecided&requestId=R1&visualTab=banner', 'md', { kind: 'new' })
+assert.equal(personalNew, '?part=work&brand=undecided&workOwner=md&mode=new')
+const personalSaved = workRequestNavigation(personalNew, { kind: 'new' }, { type: 'saved', requestId: 'R2' })
+assert.deepEqual(personalSaved, { search: '?part=work&brand=undecided&workOwner=md&requestId=R2', replace: true })
+assert.equal(buildWorkRequestSearch(personalSaved.search, { kind: 'list' }), '?part=work&brand=undecided')
 assert.ok(isSameWorkRequestSearch('?a=1&b=2', '?b=2&a=1'))
 assert.ok(!isSameWorkRequestSearch('?a=1', '?a=1&a=1'))
 console.info('PASS: URL 해석·작성, brand 등 기존 query 보존')

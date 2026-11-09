@@ -18,11 +18,13 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { LeaveApprovalPanel } from '@/features/operations-support/LeaveApprovalPanel'
 import { HolidayWorkPanel } from '@/features/operations-support/HolidayWorkPanel'
 import { WorkRequestHubPage } from '@/features/work-requests/WorkRequestHubPage'
+import { VisualWorkNoticeDetail } from '@/features/work-requests/VisualWorkNoticeDetail'
+import { WORK_REQUEST_VIEW_PARAMS } from '@/features/work-requests/work-request-navigation'
 import { ReleaseAccessProvider, useReleaseAccess } from '@/components/layout/release-access-context'
 import { WorkspaceTabActivityContext, useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { releasePersonalPart } from '@/lib/company/release-access'
 import { CompanyMeetingsPage } from '@/features/meetings/CompanyMeetingsPage'
-import { MyHomeNotificationBadge, MyHomeNotificationList, MyHomeWorkNoticeDetail } from './MyHomeNotificationList'
+import { MyHomeNotificationBadge, MyHomeNotificationList, MyHomeWorkNoticeDetail, VisualWorkflowNotificationList } from './MyHomeNotificationList'
 import { HomeNoticeBoard } from './HomeNoticeBoard'
 import { MyAttendanceStartPanel } from './MyAttendanceStartPanel'
 import { MyAttendancePanel } from './MyAttendancePanel'
@@ -73,7 +75,7 @@ function ProfileSettingsContent() {
   function selectPart(next: PersonalPart) {
     if (!releasePersonalPart(release.profile, next, release.approver)) return
     const params = new URLSearchParams(searchParams)
-    if(next!==part) for(const key of ['workNotice','request','leaveNotice','lateStatement','lateRole','meeting','round'])params.delete(key)
+    if(next!==part) for(const key of ['workNotice','request','leaveNotice','lateStatement','lateRole','meeting','round', ...WORK_REQUEST_VIEW_PARAMS])params.delete(key)
     if (next === 'my-attendance') params.delete('part')
     else params.set('part', next)
     setSearchParams(params, { replace: true })
@@ -112,7 +114,8 @@ function ProfileSettingsContent() {
       </div>
       {['meetings','my-attendance','approvals','overtime','attendance'].includes(visiblePart) && <MyHomeNotificationList key={visiblePart} tab={visiblePart as 'meetings'|'my-attendance'|'approvals'|'overtime'|'attendance'} />}
       <MyHomeWorkNoticeDetail />
-      {visiblePart === 'work' && <div id="personal-work-panel" role="tabpanel" aria-labelledby="personal-work-tab"><WorkRequestHubPage /></div>}
+      {visiblePart !== 'work' && <VisualWorkNoticeDetail />}
+      {visiblePart === 'work' && <div id="personal-work-panel" role="tabpanel" aria-labelledby="personal-work-tab"><VisualWorkflowNotificationList /><WorkRequestHubPage /></div>}
       {visiblePart === 'company-notice' && <div id="personal-company-notice-panel" role="tabpanel" aria-labelledby="personal-company-notice-tab"><HomeNoticeBoard kind="company" /></div>}
       {visiblePart === 'department-notice' && <div id="personal-department-notice-panel" role="tabpanel" aria-labelledby="personal-department-notice-tab"><HomeNoticeBoard kind="department" /></div>}
       {visiblePart === 'meetings' && <div id="personal-meetings-panel" role="tabpanel" aria-labelledby="personal-meetings-tab"><CompanyMeetingsPage showHeading={false} /></div>}
