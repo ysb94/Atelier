@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileText, Settings2, UserPlus } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -8,9 +8,12 @@ import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import type { ChinaAssigneeWorkload } from '@/lib/supabase/china-assigned-work-orders'
 import { CHINA_DEPARTMENT_ID, listChinaWorkAssignees, saveChinaWorkAssigneeOrder } from '@/lib/supabase/china-work-assignees'
 import { listOrgChartMembers, type OrgChartMember } from '@/lib/supabase/profiles'
+import type { ProductDraft } from '@/lib/types'
 import { cn, emptyList } from '@/lib/utils'
 import { ChinaAssigneeManager } from './ChinaAssigneeManager'
 import { ChinaMaterialRequests } from './ChinaMaterialRequests'
+import { ChinaPriceRequests } from './ChinaPriceRequests'
+import { buildChinaPricePreviewRequests, type ChinaPricePreviewState } from './china-price-preview'
 import { useMaterialRequests } from '@/features/planning/useMaterialRequests'
 import { materialAwaitingAssignment } from './china-material-workload'
 
@@ -31,15 +34,22 @@ const workTabs: { value: WorkTab; label: string }[] = [
   { value: 'outbound', label: '출고작업' },
 ]
 
-export function ChinaWorkOrderTabs({ children, workloads, unchecked, unreceived }: {
+export function ChinaWorkOrderTabs({ children, workloads, unchecked, unreceived, priceDrafts, brandById }: {
   children: (scope: { assigneeId: string | null }) => ReactNode
   workloads?: readonly ChinaAssigneeWorkload[]
   unchecked: ReadonlyMap<string, number>
   unreceived: number
+  priceDrafts?: readonly ProductDraft[]
+  brandById?: ReadonlyMap<string, { name: string }>
 }) {
   const [workTab, setWorkTab] = useState<WorkTab>('orders')
   const [assigneeTab, setAssigneeTab] = useState(NEW_ASSIGNEE)
   const [materialAssigneeTab, setMaterialAssigneeTab] = useState(NEW_ASSIGNEE)
+  const [pricePreview, setPricePreview] = useState<ChinaPricePreviewState>({})
+  const [pricePreviewTime] = useState(() => new Date().toISOString())
+  const priceRequests = useMemo(() => buildChinaPricePreviewRequests(priceDrafts ?? emptyList<ProductDraft>(), brandById, pricePreviewTime),
+    [priceDrafts, brandById, pricePreviewTime])
+  const pendingPrices = priceRequests.filter(request => !pricePreview[request.id]?.sent).length
   const { requests: materialRequests } = useMaterialRequests('china', { refreshMs: 30_000 })
   const [managerMode, setManagerMode] = useState<'add' | 'manage' | null>(null)
   const dragged = useRef<string | null>(null)
@@ -89,7 +99,7 @@ export function ChinaWorkOrderTabs({ children, workloads, unchecked, unreceived 
   const isMaterials = workTab === 'materials'
   const showAssignees = workTab === 'orders' || isMaterials
   const workTabItems = workTabs.map(tab => {
-    const unread = tab.value === 'orders' ? unreceived : tab.value === 'materials' ? unreadMaterials : 0
+    const unread = tab.value === 'orders' ? unreceived : tab.value === 'materials' ? unreadMaterials : tab.value === 'prices' ? pendingPrices : 0
     return unread > 0 ? { ...tab, aboveCount: unread } : tab
   })
   const assigneeTabs: FilterTab<string>[] = [
@@ -195,6 +205,7 @@ export function ChinaWorkOrderTabs({ children, workloads, unchecked, unreceived 
     {workTab === 'orders' ? children({ assigneeId: selectedAssigneeId }) : workTab === 'materials'
       ? <ChinaMaterialRequests key={currentAssignee.value} selectedAssigneeId={selectedAssigneeId} showHistory={showHistory} activeAssigneeIds={assigneesQuery.isSuccess ? activeAssigneeIds : null}
         assignees={assignees.map(row => ({ id: row.profileId, name: names.get(row.profileId) || '담당자' }))} />
+      : workTab === 'prices' ? <ChinaPriceRequests requests={priceRequests} preview={pricePreview} setPreview={setPricePreview} />
       : <Card className="flex min-h-64 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
       <FileText className="size-8 text-muted-foreground" aria-hidden="true" />
       <h2 className="text-base font-semibold">{currentWork.label}</h2>

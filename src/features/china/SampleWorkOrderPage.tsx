@@ -237,7 +237,7 @@ function ChinaManagedWorkOrders({ revision, workloads }: { revision?: string | n
         description="같은 상품의 샘플 회차를 한 묶음으로 표시합니다. 발송하면 기획안 회차에 발송일이 남습니다."
       />
 
-      <ChinaWorkOrderTabs workloads={workloads} unchecked={unchecked} unreceived={unreceived}>
+      <ChinaWorkOrderTabs workloads={workloads} unchecked={unchecked} unreceived={unreceived} priceDrafts={draftsQuery.data} brandById={brandById}>
       {({ assigneeId }) => {
       const scopedGroups = visibleGroups.flatMap(group => {
         const assignment = group.draft.specs.chinaWorkAssignment

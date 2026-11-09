@@ -24,9 +24,15 @@ const { outputFiles } = await build({
     import {MATERIAL_REQUESTS_PATH} from './src/lib/workspace/material-request-navigation'
     const ids = ${JSON.stringify(ids)}
     const actors = { planning: ids.requester, manager: ids.manager, managerBoard: ids.manager, worker: ids.worker, other: ids.other, recipient: ids.worker, scoreRecipient: ids.viewer, dualRecipient: ids.colleague }
+    const colorPhoto='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jN9sAAAAASUVORK5CYII='
+    const priceDrafts=[{
+      id:'price-preview',draftNo:'PL-0007',brandId:null,imageUrl:null,owner:'테스트 디자이너',nameKo:'예시 상품',nameEn:'Sample Product',
+      colors:[{id:'black',name:'Black'},{id:'yellow',name:'Yellow'}],
+      specs:{colorImageChoices:{black:'Image',yellow:'None'},colorPhotoUrls:{black:colorPhoto,yellow:colorPhoto}},
+    }]
     function ManagerBoard() {
       const screen=useQuery({queryKey:['china-work-screen',window.actor],queryFn:getMyChinaWorkOrders})
-      return <ChinaWorkOrderTabs workloads={screen.data?.workloads} unchecked={new Map()} unreceived={0}>{()=>null}</ChinaWorkOrderTabs>
+      return <ChinaWorkOrderTabs workloads={screen.data?.workloads} unchecked={new Map()} unreceived={0} priceDrafts={priceDrafts}>{()=>null}</ChinaWorkOrderTabs>
     }
     function NudgeInbox() {
       const [item,setItem]=useState(null)
@@ -224,7 +230,7 @@ try {
     if (screen==='worker' || screen==='other' || screen==='managerBoard') await materialsTab.click()
   }
   const materialsTab = page.getByRole('group',{name:'중국팀 업무'}).getByRole('button',{name:/자재요청/})
-  const pricesTab = page.getByRole('group',{name:'중국팀 업무'}).getByRole('button',{name:'단가요청',exact:true})
+  const pricesTab = page.getByRole('group',{name:'중국팀 업무'}).getByRole('button',{name:/단가요청$/})
   const expectWorkload = async (openCount, resting) => {
     await materialsTab.getByTitle('발송 전 자재요청 / 발송 후 완료 대기 자재요청')
       .filter({hasText: new RegExp('\\(\\s*'+openCount+'\\s*/\\s*'+resting+'\\s*\\)')}).waitFor()
@@ -348,6 +354,38 @@ try {
   await open('managerBoard')
   await pricesTab.click()
   await page.getByRole('heading',{name:'단가요청',exact:true}).waitFor()
+  const priceFilters=page.getByRole('group',{name:'단가요청 구분'})
+  const priceTable=page.getByRole('table',{name:'단가요청 목록'})
+  const firstPriceRow=priceTable.getByRole('row').filter({hasText:'1차 요청'})
+  const repeatPriceRow=priceTable.getByRole('row').filter({hasText:'단가 재요청'})
+  assert.equal(await pricesTab.getByTitle('미확인 건수').textContent(),'2')
+  assert.equal(await priceTable.getByRole('row').nth(1).textContent(),await firstPriceRow.textContent())
+  await priceFilters.getByRole('button',{name:'재요청 (1)',exact:true}).click()
+  await repeatPriceRow.waitFor()
+  assert.equal(await firstPriceRow.count(),0)
+  await priceFilters.getByRole('button',{name:'1차 요청 (1)',exact:true}).click()
+  assert.equal(await firstPriceRow.getByRole('button',{name:'Yellow 컬러 사진 크게 보기'}).count(),0)
+  await firstPriceRow.getByRole('button',{name:'Black 컬러 사진 크게 보기'}).click()
+  const colorDialog=page.getByRole('dialog',{name:'Black 컬러 사진 크게 보기'})
+  await colorDialog.getByRole('img',{name:'Black 컬러'}).waitFor()
+  await colorDialog.getByRole('button',{name:'사진 크게 보기 닫기'}).click()
+  const blackPrice=firstPriceRow.getByRole('spinbutton',{name:'Black 단가 (위안)',exact:true})
+  await blackPrice.fill('')
+  await firstPriceRow.getByRole('button',{name:'단가 전송',exact:true}).click()
+  assert.equal(await blackPrice.evaluate(input=>input.validity.valueMissing),true)
+  assert.equal(await pricesTab.getByTitle('미확인 건수').textContent(),'2')
+  await blackPrice.fill('17.50')
+  await firstPriceRow.getByRole('button',{name:'단가 전송',exact:true}).click()
+  await firstPriceRow.getByText('전송 미리보기 완료',{exact:true}).waitFor()
+  assert.equal(await pricesTab.getByTitle('미확인 건수').textContent(),'1')
+  await priceFilters.getByRole('button',{name:'ALL (1)',exact:true}).click()
+  assert.equal(await repeatPriceRow.getByRole('spinbutton',{name:'Black 단가 (위안)',exact:true}).inputValue(),'15')
+  await materialsTab.click()
+  await pricesTab.click()
+  assert.equal(await blackPrice.inputValue(),'17.50')
+  assert.equal(await blackPrice.isEditable(),false)
+  await repeatPriceRow.getByRole('button',{name:'단가 전송',exact:true}).click()
+  assert.equal(await pricesTab.getByTitle('미확인 건수').count(),0)
   await materialsTab.click()
   const assigneeTabs=page.getByRole('group',{name:'자재요청 담당자',exact:true})
   const workerTab=assigneeTabs.getByRole('button',{name:/김영인/})
