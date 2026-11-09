@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -27,7 +28,7 @@ const historyLabels: Record<VisualWorkflowEntryAction, string> = {
 const workerCompleteStates = ['supervisor_review', 'middle_revision', 'requester_review', 'supervisor_revision', 'confirmed']
 
 export function VisualCategoryWorkflowPanel({
-  request, workflow, category, step, viewerId, canManage, supervisors, members, memberName,
+  request, workflow, category, step, viewerId, canManage, supervisors, members, memberName, confirmationHost,
 }: {
   request: Pick<WorkRequestRecord, 'id' | 'requesterId' | 'revision' | 'status'>
   workflow: VisualCategoryWorkflow
@@ -38,6 +39,7 @@ export function VisualCategoryWorkflowPanel({
   supervisors: readonly string[]
   members: readonly LocalTeamMember[]
   memberName: (id: string) => string
+  confirmationHost: HTMLDivElement | null
 }) {
   const cache = useQueryClient()
   const active = useWorkspaceTabActivity()
@@ -62,6 +64,7 @@ export function VisualCategoryWorkflowPanel({
   const [note, setNote] = useState('')
   const [link, setLink] = useState('')
   const [person, setPerson] = useState<string | null>(null)
+  const [choosingWorker, setChoosingWorker] = useState(false)
   const [supervisorChoice, setSupervisorChoice] = useState('')
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
@@ -77,7 +80,10 @@ export function VisualCategoryWorkflowPanel({
   const canSubmit = received && state === 'working' && isWorker
   const canForwardToMiddle = received && state === 'supervisor_revision' && canSupervise
   const canForwardToWorker = received && state === 'middle_revision' && isMiddle
-  const canAssignWorker = received && isMiddle && (state === 'assignment' || state === 'working')
+  const showSupervisorConfirmation = !received && !closed && canSupervise
+  const showMiddleConfirmation = !closed && isMiddle && state === 'assignment'
+  const canReassignWorker = received && isMiddle && state === 'working'
+  const showConfirmation = Boolean(confirmationHost && (showSupervisorConfirmation || showMiddleConfirmation))
   const canAssignSupervisor = canManage && !closed && supervisors.length > 0
     && (supervisors.length > 1 || Boolean(workflow.approverId && !supervisors.includes(workflow.approverId)))
   const currentResult = history.data?.find(item => item.id === step.resultId)
@@ -122,6 +128,7 @@ export function VisualCategoryWorkflowPanel({
       setNote('')
       setLink('')
       setPerson(null)
+      setChoosingWorker(false)
       setSupervisorChoice('')
     } catch (failure) {
       setError(committed ? '저장했습니다. 최신 내용을 다시 조회해 주세요.'
@@ -132,7 +139,20 @@ export function VisualCategoryWorkflowPanel({
     }
   }
 
-  return <Card role="region" aria-label={category.label + ' 작업 진행'}>
+  const workerSelect = <label className="grid min-w-0 gap-1 text-sm">분류 작업자
+    <Select aria-label="분류 작업자" value={workerChoice} disabled={!changeable} autoFocus={choosingWorker} onChange={event => setPerson(event.target.value)}>
+      <option value="">Visual 직원 선택</option>
+      {members.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}
+    </Select>
+  </label>
+  const saveFeedback = <>
+    {saving && <p role="status" className="text-sm text-muted-foreground">저장 중입니다.</p>}
+    {error && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-danger">
+      {error}<Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>업무 다시 조회</Button>
+    </div>}
+  </>
+
+  const progress = <Card role="region" aria-label={category.label + ' 작업 진행'}>
     <CardContent className="space-y-4 p-4 sm:p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <CardTitle>{category.label} 작업 진행</CardTitle>
@@ -143,7 +163,6 @@ export function VisualCategoryWorkflowPanel({
         {step.workerId && workerCompleteStates.includes(state) && <Badge variant="success">작업자 완료</Badge>}
         <span className="text-sm text-muted-foreground">중간 수정 {feedback?.middle ?? 0}회 · 총괄 수정 {feedback?.supervisor ?? 0}회 · 요청자 수정 {feedback?.requester ?? 0}회</span>
       </div>
-      {!received && !closed && canSupervise && <Button type="button" disabled={!changeable} onClick={() => void change('receipt')}>총괄 접수 확인</Button>}
       {canAssignSupervisor && <details>
         <summary className="cursor-pointer text-sm text-muted-foreground">총괄 관리자 배정</summary>
         <div className="mt-2 flex flex-wrap items-center gap-2">
@@ -156,14 +175,9 @@ export function VisualCategoryWorkflowPanel({
         </div>
       </details>}
       {received && !closed && !category.assignment?.assigneeId && <p className="text-sm text-muted-foreground">업무 관리에서 이 분류의 중간 관리자를 먼저 지정해 주세요.</p>}
-      {!closed && (canAssignWorker || canForwardToWorker) && <div className="flex flex-wrap items-end gap-2">
-        <label className="grid gap-1 text-sm">분류 작업자
-          <Select aria-label="분류 작업자" value={workerChoice} disabled={!changeable} onChange={event => setPerson(event.target.value)}>
-            <option value="">Visual 직원 선택</option>
-            {members.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}
-          </Select>
-        </label>
-        {canAssignWorker && <Button type="button" disabled={!changeable || !workerChoice || workerChoice === step.workerId}
+      {!closed && (canReassignWorker || canForwardToWorker) && <div className="flex flex-wrap items-end gap-2">
+        {workerSelect}
+        {canReassignWorker && <Button type="button" disabled={!changeable || !workerChoice || workerChoice === step.workerId}
           onClick={() => void change('assign_worker', workerChoice)}>작업자 지정</Button>}
       </div>}
       {historyAllowed && history.isPending && received && <p role="status" className="text-sm text-muted-foreground">분류 기록을 불러오는 중입니다.</p>}
@@ -205,13 +219,32 @@ export function VisualCategoryWorkflowPanel({
           </li>)}
         </ul>
       </details>}
-      {saving && <p role="status" className="text-sm text-muted-foreground">저장 중입니다.</p>}
-      {error && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-danger">
-        {error}<Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>업무 다시 조회</Button>
-      </div>}
+      {!showConfirmation && saveFeedback}
       {seen.error && <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-danger">
         알림 읽음을 저장하지 못했습니다.<Button type="button" size="sm" variant="outline" onClick={seen.retry}>읽음 다시 저장</Button>
       </div>}
     </CardContent>
   </Card>
+  return <>
+    {progress}
+    {confirmationHost && showConfirmation && createPortal(
+      <section aria-label="업무 확인" className="space-y-2 border-t border-border bg-card px-4 py-3 sm:px-8 lg:px-10">
+        {saveFeedback}
+        <div className="flex flex-wrap items-end justify-end gap-2">
+          {showSupervisorConfirmation && <Button type="button" disabled={!changeable} onClick={() => void change('receipt')}>총괄 확인</Button>}
+          {showMiddleConfirmation && (received && choosingWorker
+            ? <form className="flex w-full flex-wrap items-end justify-end gap-2 sm:w-auto" onSubmit={event => {
+              event.preventDefault()
+              if (workerChoice) void change('assign_worker', workerChoice)
+            }}>
+              {workerSelect}
+              <Button type="button" variant="outline" disabled={saving} onClick={() => { setChoosingWorker(false); setPerson(null) }}>취소</Button>
+              <Button type="submit" disabled={!changeable || !workerChoice}>작업자 지정</Button>
+            </form>
+            : <Button type="button" variant={received ? 'default' : 'outline'} disabled={!changeable || !received}
+              onClick={() => setChoosingWorker(true)}>중간 관리자 확인</Button>)}
+        </div>
+      </section>, confirmationHost,
+    )}
+  </>
 }

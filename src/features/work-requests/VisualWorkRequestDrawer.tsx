@@ -1,6 +1,7 @@
 import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useLocation } from 'react-router-dom'
 import { EllipsisVertical, X } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardTitle } from '@/components/ui/card'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -12,10 +13,13 @@ import { visualFinalApprover } from './visual-final-approval'
 import type { ContentBlock, LocalTeamMember, WorkRequestRecord } from './work-request-types'
 import { visualWorkDate, type VisualWorkDetail } from './visual-work-detail'
 
-function SummaryCell({ label, children, title }: { label: string; children: ReactNode; title?: string }) {
+function SummaryCell({ label, children, title, confirmed }: { label: string; children: ReactNode; title?: string; confirmed?: boolean }) {
   return <div className="flex min-w-0 flex-col items-center justify-center gap-1.5 bg-card px-2 py-3 text-center lg:min-h-24" title={title}>
     <dt className="text-xs text-muted-foreground sm:text-sm">{label}</dt>
-    <dd className="max-w-full wrap-anywhere text-sm font-medium sm:text-base">{children}</dd>
+    <dd className="max-w-full wrap-anywhere text-sm font-medium sm:text-base">
+      {children}
+      {confirmed && <span className="mt-1 block"><Badge variant="success">확인 완료</Badge></span>}
+    </dd>
   </div>
 }
 
@@ -68,6 +72,7 @@ export function VisualWorkRequestDrawer({
   const [chosen, setChosen] = useState(initialCategory)
   const [linkStatus, setLinkStatus] = useState('')
   const [manageOpen, setManageOpen] = useState(false)
+  const [confirmationHost, setConfirmationHost] = useState<HTMLDivElement | null>(null)
   const current = detail.sections.find(section => section.id === chosen) ?? detail.sections[0]
 
   function choose(id: string) {
@@ -162,8 +167,8 @@ export function VisualWorkRequestDrawer({
               </details>
             </div>
             <dl aria-label="업무 기본 정보" className={cn('grid gap-px border-y border-border bg-border', summary.finalApprover === undefined ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6' : 'grid-cols-3 lg:grid-cols-7')}>
-              {summary.finalApprover !== undefined && <SummaryCell label="총괄 관리자" title="이 업무의 최종 승인자">{summary.finalApprover}</SummaryCell>}
-              <SummaryCell label="중간 관리자">{assigned?.assigneeId ? memberName(assigned.assigneeId) : '미지정'}</SummaryCell>
+              {summary.finalApprover !== undefined && <SummaryCell label="총괄 관리자" title="이 업무의 최종 승인자" confirmed={Boolean(workflow?.data.receivedAt)}>{summary.finalApprover}</SummaryCell>}
+              <SummaryCell label="중간 관리자" confirmed={Boolean(workflow?.data.receivedAt && step?.workerId)}>{assigned?.assigneeId ? memberName(assigned.assigneeId) : '미지정'}</SummaryCell>
               <SummaryCell label="작업자">{step?.workerId ? memberName(step.workerId) : <span className="text-muted-foreground">—</span>}</SummaryCell>
               <SummaryCell label="상태" title="업무 전체 상태">{summary.status}</SummaryCell>
               <SummaryCell label="요청 날짜"><SummaryDate value={summary.requestedAt} /></SummaryCell>
@@ -177,7 +182,7 @@ export function VisualWorkRequestDrawer({
                 key={current.id + ':' + step.version}
                 request={workflow.request} workflow={workflow.data} category={current} step={step}
                 viewerId={viewerId} canManage={canManage} supervisors={workflow.supervisors}
-                members={workflow.members} memberName={memberName}
+                members={workflow.members} memberName={memberName} confirmationHost={confirmationHost}
               />}
               {manageOpen && <section id={managementId} aria-label="업무 관리" className="space-y-4">
                 {current && <p className="text-sm text-muted-foreground">
@@ -217,6 +222,7 @@ export function VisualWorkRequestDrawer({
           />}
         </div>
       </div>
+      {workflow && <div ref={setConfirmationHost} className="shrink-0 empty:hidden" />}
     </aside>
   )
 }
