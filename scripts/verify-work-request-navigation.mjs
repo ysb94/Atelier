@@ -45,6 +45,9 @@ assert.equal(buildWorkRequestSearch('?requestId=R1&brand=undecided&mode=edit', {
 assert.equal(buildWorkRequestSearch('?brand=undecided&x=1', { kind: 'new' }), '?brand=undecided&x=1&mode=new')
 assert.equal(buildWorkRequestSearch('', { kind: 'list' }), '')
 assert.equal(buildWorkRequestSearch('?requestId=a&requestId=b', { kind: 'detail', requestId: 'b' }), '?requestId=b')
+assert.equal(buildWorkRequestSearch('?requestId=R1&visualTab=banner', { kind: 'detail', requestId: 'R1' }), '?requestId=R1&visualTab=banner')
+assert.equal(buildWorkRequestSearch('?requestId=R1&visualTab=banner&brand=undecided', { kind: 'detail', requestId: 'R2' }), '?requestId=R2&brand=undecided')
+assert.equal(buildWorkRequestSearch('?requestId=R1&visualTab=banner', { kind: 'list' }), '')
 assert.ok(isSameWorkRequestSearch('?a=1&b=2', '?b=2&a=1'))
 assert.ok(!isSameWorkRequestSearch('?a=1', '?a=1&a=1'))
 console.info('PASS: URL 해석·작성, brand 등 기존 query 보존')
@@ -601,11 +604,10 @@ console.info('PASS: 숨겨진 탭 URL·Escape 보호, 같은 업무 탭 유지, 
   assert.match(referenceField, /files\.filter\(\(file\) => file\.id !== item\.id\)/, '참고 파일 삭제 동작이 빠짐')
   assert.match(referenceField, /파일을 끌어다 놓거나 버튼을 눌러 첨부하세요\./)
 
-  const detailFiles = page.slice(page.indexOf('selectedRequest.values.referenceFiles.map('))
-  const detailBlock = detailFiles.slice(0, detailFiles.indexOf('</div>'))
+  const detailBlock = between('const referenceCards =', 'const management =')
   assert.match(detailBlock, /<ResizableImage[\s\S]*?widthPercent=\{item\.widthPercent\}\s*heightPx=\{item\.heightPx\}\s*\/>/, '상세 보기 참고 이미지가 저장 크기로 보이지 않음')
   assert.doesNotMatch(detailBlock, /onSizeChange|onRemove/, '상세 보기 참고 이미지는 읽기 전용이어야 함')
-  assert.match(detailBlock, /<FileAttachmentCard key=\{item\.id\} file=\{item\.file\} \/>/)
+  assert.match(detailBlock, /<FileAttachmentCard key=\{item\.id\} file=\{item\.file\} downloadable=\{Boolean\(visualDetail\)\} \/>/)
 
   assert.doesNotMatch(page, /localStorage|sessionStorage/, '작업 요청은 로컬 상태로만 유지해야 함')
   assert.match(page, /등록한 요청과 첨부는 서버에 저장됩니다\./)

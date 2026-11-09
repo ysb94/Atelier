@@ -30,6 +30,7 @@ import {
   CheckCircle2,
   ClipboardPlus,
   Clock3,
+  Download,
   Eye,
   Inbox,
   Paperclip,
@@ -56,6 +57,8 @@ import { Input, Select, Textarea } from '@/components/ui/input'
 import { useWorkRequestSettings } from '@/lib/supabase/work-request-settings'
 import { DEFAULT_VISUAL_CATEGORIES, type VisualCategory, type VisualRequestValues } from './visual-request-config'
 import { WorkRequestCategoryAssignments } from './WorkRequestCategoryAssignments'
+import { VisualWorkRequestDrawer } from './VisualWorkRequestDrawer'
+import { downloadVisualWorkFile, visualWorkDetail } from './visual-work-detail'
 import { useAuth } from '@/lib/supabase/auth'
 import { listBrandDirectory } from '@/lib/supabase/profiles'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -101,6 +104,7 @@ import {
   PRIORITY_META,
   REQUESTER_CHAT_ROOM,
   STATUS_META,
+  hasRequestBody,
   isClosedStatus,
   isCompletionPending,
   nextCompletionStatus,
@@ -153,13 +157,6 @@ function createEmptyValues(): FormValues {
     referenceFiles: [],
     blocks: [emptyTextBlock()],
   }
-}
-
-function hasRequestBody(blocks: ContentBlock[]): boolean {
-  // 참고 파일만 있는 초안은 요청 내용을 쓴 것이 아니다. 본문 블록만 필수값으로 본다.
-  return blocks.some((block) =>
-    block.type === 'text' ? block.text.trim().length > 0 : true,
-  )
 }
 
 function formatFileSize(size: number): string {
@@ -664,6 +661,7 @@ function ResizableImage({
   onHeightChange,
   isMoving,
   onRemove,
+  downloadable = false,
   removeLabel = '이미지 삭제',
 }: {
   file: File
@@ -677,6 +675,7 @@ function ResizableImage({
   onHeightChange?: (height: number) => void
   isMoving?: boolean
   onRemove?: () => void
+  downloadable?: boolean
   removeLabel?: string
 }) {
   const boxRef = useRef<HTMLDivElement>(null)
@@ -800,7 +799,7 @@ function ResizableImage({
   if (failed) {
     return (
       <div ref={boxRef} className="flow-root">
-        <FileAttachmentCard file={file} onRemove={onRemove} />
+        <FileAttachmentCard file={file} onRemove={onRemove} downloadable={downloadable} />
       </div>
     )
   }
@@ -835,6 +834,12 @@ function ResizableImage({
           style={lockedHeight ? { aspectRatio: `${imageWidthPx(width)} / ${lockedHeight}` } : undefined}
           onError={handleImageError}
         />
+        {downloadable && <Button type="button" variant="outline" size="icon"
+          aria-label={`${file.name} 다운로드`} title={`${file.name} 다운로드`}
+          className="absolute right-2 top-2 size-9 bg-card/95 text-muted-foreground shadow-none"
+          onClick={() => downloadVisualWorkFile(file, file.name)}>
+          <Download className="size-4" />
+        </Button>}
         {onSizeChange || onWrapChange ? (
           <>
             <div className="pointer-events-none absolute inset-0 rounded-md ring-1 ring-border/70 ring-inset" />
@@ -916,10 +921,20 @@ function ResizableImage({
 function FileAttachmentCard({
   file,
   onRemove,
+  downloadable = false,
 }: {
   file: File
   onRemove?: () => void
+  downloadable?: boolean
 }) {
+  if (downloadable) return (
+    <Button type="button" variant="outline" aria-label={`${file.name} 다운로드`}
+      className="h-auto min-h-12 w-full justify-between gap-4 whitespace-normal bg-background/70 px-4 py-3 text-left font-normal shadow-none"
+      onClick={() => downloadVisualWorkFile(file, file.name)}>
+      <span className="min-w-0 wrap-anywhere">{file.name}</span>
+      <Download className="size-5 shrink-0 text-muted-foreground" />
+    </Button>
+  )
   const format = fileFormatLabel(file)
 
   return (
@@ -1169,6 +1184,7 @@ function BodyFlow({
   images,
   placeholder,
   readOnly,
+  visualDetail,
   movingId,
   heights,
   onTextChange,
@@ -1186,6 +1202,7 @@ function BodyFlow({
   images: ImageContentBlock[]
   placeholder?: string
   readOnly?: boolean
+  visualDetail?: boolean
   movingId?: string
   heights: Record<string, number>
   onTextChange?: (text: string, previewHtml?: string) => void
@@ -1232,6 +1249,7 @@ function BodyFlow({
             >
               <ResizableImage
                 file={image.file}
+                downloadable={visualDetail}
                 widthPercent={width}
                 heightPx={image.heightPx}
                 wrap={image.wrap ?? 'none'}
@@ -1264,7 +1282,7 @@ function BodyFlow({
         richPreview && text.previewHtml !== undefined ? (
           <div className="whitespace-pre-wrap text-sm leading-7" dangerouslySetInnerHTML={{ __html: text.previewHtml }} />
         ) : text.text.trim() ? (
-          <p className="whitespace-pre-wrap text-sm leading-7">{text.text}</p>
+          <p className={cn('whitespace-pre-wrap leading-7', visualDetail ? 'wrap-anywhere text-[15px]' : 'text-sm')}>{text.text}</p>
         ) : null
       ) : (
         <AutoGrowEditable
@@ -1282,13 +1300,15 @@ function BodyFlow({
   )
 }
 
-export function RequestBodyPreview({ blocks, richPreview }: { blocks: ContentBlock[]; richPreview?: boolean }) {
+export function RequestBodyPreview({ blocks, richPreview, visualDetail }: { blocks: ContentBlock[]; richPreview?: boolean; visualDetail?: boolean }) {
   return (
     <div className="space-y-5">
-      {splitBodyParts(blocks).map((part, index) => part.type === 'file'
-        ? <FileAttachmentCard key={part.file.id} file={part.file.file} />
-        : <BodyFlow key={part.text.id} flowIndex={index} text={part.text} images={part.images}
-            readOnly richPreview={richPreview} heights={{}} />)}
+      {splitBodyParts(blocks).map((part, index) => {
+        if (part.type === 'file') return <FileAttachmentCard key={part.file.id} file={part.file.file} downloadable={visualDetail} />
+        if (visualDetail && !part.text.text.trim() && !part.images.length) return null
+        return <BodyFlow key={part.text.id} flowIndex={index} text={part.text} images={part.images}
+          readOnly visualDetail={visualDetail} richPreview={richPreview} heights={{}} />
+      })}
     </div>
   )
 }
@@ -3580,29 +3600,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         selectedRequest.requesterDepartment,
       ),
     })
+    const visual = selectedRequest.owner === 'design' ? visualWorkDetail(selectedRequest, visualCategories) : null
+    const visualDetail = visual?.sections.length ? visual : null
+    const initialCategory = searchParams.get('visualTab')
 
-    return (
-      <div className="fixed inset-0 z-50">
-        <button
-          type="button"
-          aria-label="상세 닫기"
-          className="absolute inset-0 bg-black/20"
-          onClick={closeRequest}
-        />
-        <aside className="absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-card shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
-          <div className="min-w-0">
-            <p className="text-xs text-muted-foreground">
-              {selectedRequest.id} ·{' '}
-              {departmentLabel(selectedRequest.requesterDepartment)}{' '}
-              {requesterLabel(selectedRequest)} →{' '}
-              {selectedConfig.teamName}
-            </p>
-            <h2 className="mt-1 truncate text-lg font-semibold">
-              {selectedRequest.values.title}
-            </h2>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
+    const headerActions = (
+      <>
             {isSelfRequest && canEdit ? (
               <>
                 <Button
@@ -3690,26 +3693,58 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               </>
             ) : null}
             <WorkRequestCancellation request={selectedRequest} canManage={canManageSelected} disabled={storage.saving} />
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              aria-label="상세 닫기"
-              onClick={closeRequest}
-            >
-              <X className="size-4" />
-            </Button>
-          </div>
-        </div>
+      </>
+    )
 
-        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
-        {flashMessage ? (
+    const legacyHeader = (
+      <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+        <div className="min-w-0">
+          <p className="text-xs text-muted-foreground">
+            {selectedRequest.id} · {departmentLabel(selectedRequest.requesterDepartment)} {requesterLabel(selectedRequest)} → {selectedConfig.teamName}
+          </p>
+          <h2 className="mt-1 truncate text-lg font-semibold">{selectedRequest.values.title}</h2>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {headerActions}
+          <Button type="button" variant="outline" size="icon" aria-label="상세 닫기" onClick={closeRequest}>
+            <X className="size-4" />
+          </Button>
+        </div>
+      </div>
+    )
+
+    const notice = flashMessage ? (
           <div className="flex items-start gap-3 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">
             <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
             <span>{flashMessage}</span>
           </div>
-        ) : null}
+    ) : null
 
+    const references = selectedRequest.values.referenceFiles.filter(
+      item => !blockHasFile(selectedRequest.values.blocks, item.file),
+    )
+    const referenceCards = references.length ? (
+      <div>
+        {!visualDetail && <p className="text-xs text-muted-foreground">참고 파일</p>}
+        <div className={cn('space-y-2', !visualDetail && 'mt-2')}>
+          {references.map(item => isImageFile(item.file)
+            ? <ResizableImage key={item.id} file={item.file} downloadable={Boolean(visualDetail)} widthPercent={item.widthPercent} heightPx={item.heightPx} />
+            : <FileAttachmentCard key={item.id} file={item.file} downloadable={Boolean(visualDetail)} />)}
+        </div>
+      </div>
+    ) : null
+
+    const workConversation = (!visualDetail || selectedRequest.messages.some(message => chatRooms.some(room => room.id === message.roomId))) && <WorkRequestChat
+      className={visualDetail ? 'h-80' : 'h-[32rem]'}
+      requestId={selectedRequest.id}
+      rooms={chatRooms}
+      messages={selectedRequest.messages}
+      selfId={selfId}
+      canWrite={!visualDetail && canWriteChat(selectedRequest)}
+      onSend={(body, roomId) => addMessage(selectedRequest.id, body, roomId)}
+    />
+
+    const management = (
         <div className="space-y-6">
           <div className="space-y-6">
             <Card>
@@ -3883,7 +3918,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     </p>
                   </div>
                 ) : null}
-                <div className="space-y-5">
+                {!visualDetail && <div className="space-y-5">
                   {splitBodyParts(selectedRequest.values.blocks).map((part, index) => {
                     if (part.type === 'file') {
                       return (
@@ -3904,29 +3939,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                       />
                     )
                   })}
-                </div>
-                {selectedRequest.values.referenceFiles.some(
-                  (item) => !blockHasFile(selectedRequest.values.blocks, item.file),
-                ) ? (
-                  <div>
-                    <p className="text-xs text-muted-foreground">참고 파일</p>
-                    <div className="mt-2 space-y-2">
-                      {selectedRequest.values.referenceFiles.map((item) => {
-                        if (blockHasFile(selectedRequest.values.blocks, item.file)) return null
-                        return isImageFile(item.file) ? (
-                          <ResizableImage
-                            key={item.id}
-                            file={item.file}
-                            widthPercent={item.widthPercent}
-                            heightPx={item.heightPx}
-                          />
-                        ) : (
-                          <FileAttachmentCard key={item.id} file={item.file} />
-                        )
-                      })}
-                    </div>
-                  </div>
-                ) : null}
+                </div>}
+                {!visualDetail && referenceCards}
               </CardContent>
             </Card>
           </div>
@@ -4018,24 +4032,57 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             ) : null}
 
             {selectedRequest.completionResult?<Card><CardContent className="p-4"><h3 className="font-medium">완료 결과</h3><p className="mt-2 whitespace-pre-wrap text-sm">{selectedRequest.completionResult}</p></CardContent></Card>:null}
-            {selectedRequest.values.visualRequest?.categories.some(category => Object.values(category.fields).some(Boolean)) ? <Card><CardContent className="space-y-4 p-5">{selectedRequest.values.visualRequest.categories.map(category => <section key={category.id}><h3 className="text-sm font-semibold">{category.label}</h3><dl className="mt-2 space-y-2 text-sm">{Object.entries(category.fields).filter(([, value]) => value).map(([id, value]) => <div key={id}><dt className="text-xs text-muted-foreground">{category.fieldLabels?.[id] ?? id}</dt><dd className="whitespace-pre-wrap break-words">{value}</dd></div>)}</dl></section>)}</CardContent></Card> : null}
-            <WorkRequestCategoryAssignments key={`${selfId}:${selectedRequest.id}`} request={selectedRequest} members={teamMembers} canManage={canManageSelected} busy={storage.saving} />
-            <WorkRequestChat
-              className="h-[32rem]"
-              requestId={selectedRequest.id}
-              rooms={chatRooms}
-              messages={selectedRequest.messages}
-              selfId={selfId}
-              canWrite={canWriteChat(selectedRequest)}
-              onSend={(body, roomId) =>
-                addMessage(selectedRequest.id, body, roomId)
-              }
-            />
+            {!visualDetail && selectedRequest.values.visualRequest?.categories.some(category => Object.values(category.fields).some(Boolean)) ? <Card><CardContent className="space-y-4 p-5">{selectedRequest.values.visualRequest.categories.map(category => <section key={category.id}><h3 className="text-sm font-semibold">{category.label}</h3><dl className="mt-2 space-y-2 text-sm">{Object.entries(category.fields).filter(([, value]) => value).map(([id, value]) => <div key={id}><dt className="text-xs text-muted-foreground">{category.fieldLabels?.[id] ?? id}</dt><dd className="whitespace-pre-wrap break-words">{value}</dd></div>)}</dl></section>)}</CardContent></Card> : null}
+            {!visualDetail && <WorkRequestCategoryAssignments key={`${selfId}:${selectedRequest.id}`} request={selectedRequest} members={teamMembers} canManage={canManageSelected} busy={storage.saving} />}
+            {!visualDetail && workConversation}
 
           </div>
         </div>
-        </div>
-      </aside>
+    )
+
+    return (
+      <div className="fixed inset-0 z-50">
+        <button
+          type="button"
+          aria-label="상세 닫기"
+          className="absolute inset-0 bg-black/20"
+          onClick={closeRequest}
+        />
+        {visualDetail ? <VisualWorkRequestDrawer
+          key={`${selfId}:${selectedRequest.id}:${initialCategory ?? ''}`}
+          requestId={selectedRequest.id}
+          title={selectedRequest.values.title}
+          detail={visualDetail}
+          initialCategory={initialCategory}
+          viewerId={selfId}
+          canManage={canManageSelected}
+          isRequester={isSelfRequest}
+          summary={{
+            requesterDepartment: departmentLabel(selectedRequest.requesterDepartment),
+            requesterName: selectedRequest.values.requester?.trim() || '미입력',
+            status: status.label,
+            requestedAt: selectedRequest.createdAt,
+            dueDate,
+            brand: brandLabelForRequest(selectedRequest, brands),
+          }}
+          onClose={closeRequest}
+          headerActions={headerActions}
+          notice={notice}
+          mainReferences={referenceCards}
+          management={management}
+          legacyConversation={workConversation}
+          memberName={id => storage.directoryMembers.find(person => person.id === id)?.displayName?.trim() || '기존 직원'}
+          renderBody={blocks => <RequestBodyPreview blocks={blocks} visualDetail />}
+          renderAssignment={categoryId => <WorkRequestCategoryAssignments
+            request={selectedRequest} members={teamMembers} canManage={canManageSelected}
+            busy={storage.saving} categoryId={categoryId}
+          />}
+        /> : (
+          <aside className="absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-card shadow-2xl">
+            {legacyHeader}
+            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">{notice}{management}</div>
+          </aside>
+        )}
       </div>
     )
   }

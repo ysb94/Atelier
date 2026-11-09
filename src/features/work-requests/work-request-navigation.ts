@@ -133,6 +133,7 @@ export function buildWorkRequestSearch(
     view.kind === 'detail' || view.kind === 'edit' ? view.requestId : null
   const mode =
     view.kind === 'edit' ? 'edit' : view.kind === 'new' ? 'new' : null
+  if (!requestId || params.get(WORK_REQUEST_ID_PARAM) !== requestId) params.delete('visualTab')
   if (requestId) params.set(WORK_REQUEST_ID_PARAM, requestId)
   else params.delete(WORK_REQUEST_ID_PARAM)
   if (mode) params.set(WORK_REQUEST_MODE_PARAM, mode)

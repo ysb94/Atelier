@@ -37,6 +37,7 @@
     "verify:required-information-browser": "node scripts/verify-required-information-browser.mjs",
     "verify:work-request-navigation": "node --experimental-strip-types scripts/verify-work-request-navigation.mjs",
     "verify:work-request-settings": "node scripts/verify-work-request-settings.mjs",
+    "verify:visual-work-category-comments": "node scripts/verify-visual-work-category-comments.mjs",
     "verify:work-request-managers": "node scripts/verify-work-request-managers.mjs",
     "verify:work-request-settings-browser": "node scripts/verify-work-request-settings-browser.mjs",
     "verify:style-components": "node scripts/verify-style-components.mjs",

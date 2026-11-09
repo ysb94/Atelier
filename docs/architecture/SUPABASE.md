@@ -1,5 +1,7 @@
 # Supabase 데이터 아키텍처 원칙
 
+- 2026-11-09 사용자 승인 후 Visual 업무의 분류별 댓글을 `20261109052445_visual_work_category_comments.sql`로 공유 DB에 적용했다. 배너와 광고 소재의 분리 저장·조회와 권한을 실제 인증 역할에서 검증하고 가상 자료를 롤백했다. 적용 전 백업과 검증 범위는 [Visual 업무 상세](VISUAL_WORK_DETAIL.md)를 따른다.
+
 - 2026-11-06 자재요청 조르기 알림을 받을 직원을 `material_nudge_recipients`에 둔다. 기획 업무 권한만 조회·저장하고, 재직 직원 10명까지 지정한다. 공유 DB에 알림 저장과 발송·조회·읽음 API를 적용했다. 적용 버전과 검증은 [자재요청 저장과 권한](MATERIAL_REQUEST_WORKFLOW.md)을 따른다.
 
 - 2026-11-06 중국팀 작업자 화면의 샘플 차수에 경과일을 표시한다. 공유 DB의 `app.get_my_china_work_orders()` 응답에 기존 지시서 발송일만 추가했다(원격 `20261106102131_china_assigned_order_elapsed_days`). 배정된 5회차의 날짜와 기존 조회 범위를 검증했다. 기존 기록과 권한은 바꾸지 않았으며 test/main 화면 배포는 하지 않았다.

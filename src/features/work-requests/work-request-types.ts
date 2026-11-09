@@ -45,6 +45,10 @@ export type ContentBlock =
   | ImageContentBlock
   | FileContentBlock
 
+export function hasRequestBody(blocks: ContentBlock[]): boolean {
+  return blocks.some(block => block.type !== 'text' || block.text.trim().length > 0)
+}
+
 export type ReferenceFile = {
   id: string
   file: File
