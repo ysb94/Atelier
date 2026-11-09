@@ -119,14 +119,6 @@ export function ChinaMaterialRequests(props: Props) {
 
   return (
     <div className="space-y-3">
-      {accountId ? (
-        <div className="space-y-2">
-          <div>
-            <h2 className="font-semibold">내 자재요청 작업</h2>
-            <p className="text-sm text-muted-foreground">요청 내용을 열고 확인을 누른 뒤, 한국으로 보낸 발송을 기록해 주세요.</p>
-          </div>
-        </div>
-      ) : null}
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground" role="status">{loadingDetail ? '요청 내용을 불러오는 중…' : query.isPending ? '자재요청을 불러오는 중…' : ''}</p>
         <Button type="button" size="sm" variant="outline" disabled={query.isFetching || mutation.isPending} onClick={() => {
