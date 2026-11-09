@@ -73,6 +73,7 @@ export function VisualWorkRequestDrawer({
   const [chosen, setChosen] = useState(initialCategory)
   const [linkStatus, setLinkStatus] = useState('')
   const [manageOpen, setManageOpen] = useState(false)
+  const [feedbackHost, setFeedbackHost] = useState<HTMLDivElement | null>(null)
   const [confirmationHost, setConfirmationHost] = useState<HTMLDivElement | null>(null)
   const current = detail.sections.find(section => section.id === chosen) ?? detail.sections[0]
 
@@ -190,6 +191,7 @@ export function VisualWorkRequestDrawer({
                 request={workflow.request} workflow={workflow.data} category={current} step={step}
                 viewerId={viewerId} canManage={canManage} supervisors={workflow.supervisors}
                 members={workflow.members} memberName={memberName} confirmationHost={confirmationHost} requesterOnly={requesterOnly}
+                feedbackHost={feedbackHost}
               />}
               {!requesterOnly && manageOpen && <section id={managementId} aria-label="업무 관리" className="space-y-4">
                 {current && <p className="text-sm text-muted-foreground">
@@ -199,6 +201,7 @@ export function VisualWorkRequestDrawer({
                 {current && canManage && renderAssignment(current.id)}
                 {management}
               </section>}
+              {privateWorkflow && !requesterOnly && <div ref={setFeedbackHost} className="empty:hidden" />}
               {!requesterOnly && <ContentSection title="메인 내용">
                 {detail.main.length ? renderBody(detail.main) : !mainReferences && <p className="text-sm text-muted-foreground">등록된 메인 내용이 없습니다.</p>}
                 {mainReferences}

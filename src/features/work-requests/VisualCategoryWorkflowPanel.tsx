@@ -21,6 +21,7 @@ const workerCompleteStates = ['supervisor_review', 'middle_revision', 'requester
 
 export function VisualCategoryWorkflowPanel({
   request, workflow, category, step, viewerId, canManage, supervisors, members, memberName, confirmationHost, requesterOnly,
+  feedbackHost,
 }: {
   request: Pick<WorkRequestRecord, 'id' | 'requesterId' | 'revision' | 'status'>
   workflow: VisualCategoryWorkflow
@@ -33,6 +34,7 @@ export function VisualCategoryWorkflowPanel({
   memberName: (id: string) => string
   confirmationHost: HTMLDivElement | null
   requesterOnly: boolean
+  feedbackHost: HTMLDivElement | null
 }) {
   const cache = useQueryClient()
   const active = useWorkspaceTabActivity()
@@ -187,7 +189,7 @@ export function VisualCategoryWorkflowPanel({
       {historyAllowed && history.isError && <p role="alert" className="flex flex-wrap items-center gap-2 text-sm text-danger">분류 기록을 불러오지 못했습니다.
         <Button type="button" variant="outline" size="sm" onClick={() => void history.refetch()}>기록 다시 조회</Button>
       </p>}
-      {historyAllowed && history.data && <VisualWorkflowHistory review={requesterOnly
+      {historyAllowed && history.data && <VisualWorkflowHistory feedbackHost={feedbackHost} review={requesterOnly
         ? { role: 'requester', result: publicResult, entries: [], assignments: [] } : history.data} />}
       {!closed && (visibleNote || requesterReview) && <div className="space-y-2">
         {visibleNote && <label className="grid gap-1 text-sm">{canSubmit ? '결과 내용' : '수정 의견'}

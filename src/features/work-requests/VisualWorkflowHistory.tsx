@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { formatDateTime } from './work-request-schedule'
 import type { VisualWorkflowEntry, VisualWorkflowEntryAction, VisualWorkflowReview } from './visual-category-workflow'
 
@@ -31,7 +32,10 @@ function FeedbackEntries({ entries }: { entries: VisualWorkflowEntry[] }) {
   </ol>
 }
 
-export function VisualWorkflowHistory({ review }: { review: VisualWorkflowReview }) {
+export function VisualWorkflowHistory({ review, feedbackHost }: {
+  review: VisualWorkflowReview
+  feedbackHost: HTMLDivElement | null
+}) {
   if (review.role === 'requester') {
     return review.result ? <section aria-label="검수 통과 결과물" className="space-y-2 rounded-lg border border-border p-3">
       <h4 className="text-sm font-semibold">검수 통과 결과물</h4>
@@ -39,21 +43,22 @@ export function VisualWorkflowHistory({ review }: { review: VisualWorkflowReview
     </section> : null
   }
   if (review.role === 'worker') {
-    return <div className="space-y-3">
+    return <>
       {review.handoff && <section aria-label="인계받은 시안" className="space-y-2 rounded-lg border border-border p-3">
         <h4 className="text-sm font-semibold">인계받은 시안{review.handoff.actorName && ' · ' + review.handoff.actorName}</h4>
         <ResultContent entry={review.handoff} />
       </section>}
-      <section aria-label="중간 관리자 피드백" className="space-y-2 rounded-lg border border-border p-3">
+      {feedbackHost && createPortal(<section aria-label="중간 관리자 피드백" className="space-y-2 rounded-lg border border-border p-3">
         <h4 className="text-sm font-semibold">중간 관리자 피드백</h4>
         <p className="text-sm text-muted-foreground">중간 수정 {review.assignments[0]?.middle ?? 0}회</p>
         <FeedbackEntries entries={review.entries} />
-      </section>
-    </div>
+      </section>, feedbackHost)}
+    </>
   }
 
+  if (!feedbackHost) return null
   const priorEntries = review.entries.filter(entry => !entry.assignmentId)
-  return <section aria-label="배정·수정 이력" className="space-y-3 rounded-lg border border-border p-3">
+  return createPortal(<section aria-label="배정·수정 이력" className="space-y-3 rounded-lg border border-border p-3">
     <h4 className="text-sm font-semibold">배정·수정 이력</h4>
     {priorEntries.length > 0 && <details className="space-y-2">
       <summary className="cursor-pointer text-sm font-medium">이전 기록</summary>
@@ -81,5 +86,5 @@ export function VisualWorkflowHistory({ review }: { review: VisualWorkflowReview
         </li>
       })}
     </ol>
-  </section>
+  </section>, feedbackHost)
 }
