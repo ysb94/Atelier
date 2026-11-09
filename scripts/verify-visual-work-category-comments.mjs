@@ -54,7 +54,7 @@ try {
 
   const before = await rpc('list_work_requests', ['design'])
   await db.exec('reset role')
-  await db.exec(await readFile('supabase/migrations/20261109044057_visual_work_category_comments.sql', 'utf8'))
+  await db.exec(await readFile('supabase/migrations/20261109052445_visual_work_category_comments.sql', 'utf8'))
   await actor(ids.planner)
   assert.deepEqual(await rpc('list_work_requests', ['design']), before, 'the migration preserves request, assignments and legacy messages')
   assert.deepEqual(await list('banner'), { canWrite: true, items: [] })

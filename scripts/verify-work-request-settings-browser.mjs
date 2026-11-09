@@ -9,7 +9,7 @@ const migrations = [
   '20261102034546_work_request_category_settings',
   ...(explicitManagers ? ['20261102043240_work_request_explicit_managers'] : []),
   '20261102093634_department_work_board',
-  '20261109044057_visual_work_category_comments',
+  '20261109052445_visual_work_category_comments',
 ]
 let setup = original.slice(0, original.indexOf(' const managerPage='))
 setup = setup.replace("from './work-request-test-db.mjs'", "from '../../scripts/work-request-test-db.mjs'")
