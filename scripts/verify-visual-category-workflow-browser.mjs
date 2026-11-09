@@ -13,9 +13,53 @@ const checks = String.raw`
    return reply.data
  }
  const supervisor=ids.manager, middle=ids.manager, worker=ids.design, requester=ids.planner
- const settings=await command(supervisor,'get_work_request_settings',{p_owner:'design'})
- await command(supervisor,'save_visual_work_request_settings',{p_revision:settings.revision,p_supervisors:[supervisor],
-   p_categories:settings.categories.map(item=>({...item,assigneeId:['banner','video'].includes(item.id)?middle:''}))})
+ async function configureMiddle(member, supervisorId=supervisor) {
+   const settings=await command(supervisor,'get_work_request_settings',{p_owner:'design'})
+   await command(supervisor,'save_visual_work_request_settings',{p_revision:settings.revision,p_supervisors:[supervisorId],
+     p_categories:settings.categories.map(item=>({...item,assigneeId:['banner','video'].includes(item.id)?member:''}))})
+ }
+
+ await configureMiddle(ids.manager,ids.design)
+ const legacyId=crypto.randomUUID(), legacyTitle='기존 외부 미접수 요청'
+ const legacyDraft=await command(requester,'begin_work_request',{p_id:legacyId,p_owner:'design'})
+ await command(requester,'save_work_request',{p_id:legacyId,p_revision:legacyDraft,p_command:crypto.randomUUID(),p_patch:{
+   status:'requested',values:{title:legacyTitle,dueDate:'2030-01-01',referenceFiles:[],
+     blocks:[{id:'body',type:'text',text:'다른 부서에서 등록한 배너 작업입니다.'}],
+     visualRequest:{categories:[{id:'banner',fields:{}}]}},
+ }})
+ await db.exec('reset role')
+ await db.exec(await fs.readFile('supabase/pending/visual_supervisor_receipt_queue.sql','utf8'))
+ const legacyDetail=origin+'/work-requests/design?requestId='+legacyId+'&visualTab=banner'
+ const scopes=page.getByRole('group',{name:'업무 범위',exact:true})
+ const legacyRow=page.getByRole('link',{name:legacyTitle,exact:true})
+ const legacyConfirmation=page.getByRole('region',{name:'업무 확인',exact:true})
+ const legacyMiddle=legacyConfirmation.getByRole('button',{name:'중간 관리자 확인',exact:true})
+ const legacySupervisor=legacyConfirmation.getByRole('button',{name:'총괄 확인',exact:true})
+ await page.goto(legacyDetail+'&actor=manager',{waitUntil:'domcontentloaded'})
+ await legacyMiddle.waitFor()
+ assert.equal(await legacyMiddle.isEnabled(),false)
+ assert.equal(await legacySupervisor.count(),0)
+ assert.equal(await scopes.getByRole('button',{name:/총괄 확인 대기/}).count(),0)
+ await page.goto(origin+'/work-requests/design?actor=design',{waitUntil:'domcontentloaded'})
+ await scopes.getByRole('button',{name:/^내 업무 1$/}).click()
+ await legacyRow.waitFor()
+ await scopes.getByRole('button',{name:/^총괄 확인 대기 1$/}).click()
+ await legacyRow.click()
+ await legacySupervisor.waitFor()
+ await page.getByText('요청자, 업무 관리자, 이 분류의 담당자가 댓글을 확인할 수 있습니다.',{exact:true}).waitFor()
+ assert.equal(await legacyMiddle.count(),0)
+ await legacySupervisor.click()
+ await page.getByText('작업자 지정 대기',{exact:true}).waitFor()
+ await page.getByRole('complementary',{name:legacyTitle+' 상세',exact:true}).getByRole('button',{name:'상세 닫기',exact:true}).click()
+ await scopes.getByRole('button',{name:/^총괄 확인 대기 0$/}).waitFor()
+ assert.equal(await legacyRow.count(),0)
+ await scopes.getByRole('button',{name:/^내 업무 0$/}).click()
+ assert.equal(await legacyRow.count(),0)
+ await page.goto(legacyDetail+'&actor=manager',{waitUntil:'domcontentloaded'})
+ await legacyMiddle.waitFor()
+ assert.equal(await legacyMiddle.isEnabled(),true)
+ console.log('PASS separate supervisor and middle-manager browser accounts: legacy receipt queue, mine, and post-receipt handoff')
+ await configureMiddle(middle)
 
  await page.goto(origin+'/settings/profile?part=work&actor=planner',{waitUntil:'domcontentloaded'})
  await page.getByRole('link',{name:'디자인에 요청하기',exact:true}).click()
@@ -140,7 +184,7 @@ const checks = String.raw`
 
 const homeFixture = `import {VisualWorkNoticeDetail} from '@/features/work-requests/VisualWorkNoticeDetail';import {VisualWorkflowNotificationList} from '@/features/settings/MyHomeNotificationList';import {useSearchParams} from 'react-router-dom';function PersonalWorkFixture(){const [params]=useSearchParams();return params.get('part')==='work'?<WorkRequestHubPage/>:<><VisualWorkflowNotificationList/><VisualWorkNoticeDetail/></>}import '@/index.css'`
 const transformed = (source.slice(0,start) + 'const checks = String.raw' + String.fromCharCode(96) + checks + source.slice(end))
-  .replace("'20261109062457_visual_work_final_approval',", "'20261109062457_visual_work_final_approval','20261109074511_visual_category_workflow',")
+  .replace("'20261109062457_visual_work_final_approval',", "'20261109062457_visual_work_final_approval','20261109074836_visual_department_work_role_columns','20261109074511_visual_category_workflow',")
   .replace("const rpcNames=new Set(['get_work_request_settings'", "const rpcNames=new Set(['publish_visual_category_work','change_visual_category_work','list_visual_workflow_entries','list_my_visual_workflow_notices','read_my_visual_workflow_notices','get_work_request_settings'")
   .replace("'list_visual_work_category_comments']\")", "'list_visual_work_category_comments','list_visual_workflow_entries','list_my_visual_workflow_notices']\")")
   .replace("import {VisualWorkRequestManagePage} from '@/features/work-requests/VisualWorkRequestManagePage';import '@/index.css'", homeFixture)

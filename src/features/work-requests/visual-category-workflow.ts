@@ -24,6 +24,7 @@ export type VisualCategoryStep = {
 export type VisualCategoryWorkflow = {
   approverId?: string
   receivedAt?: string
+  legacyReceiptPending?: true
   categories: Record<string, VisualCategoryStep>
 }
 

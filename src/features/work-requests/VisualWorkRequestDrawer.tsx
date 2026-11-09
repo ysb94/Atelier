@@ -111,7 +111,8 @@ export function VisualWorkRequestDrawer({
 
   const assigned = current?.assignment
   const step = current && workflow?.data.categories[current.id]
-  const workflowSupervisor = workflow && visualFinalApprover(workflow.data, workflow.supervisors)
+  const workflowSupervisor = workflow && !workflow.data.legacyReceiptPending
+    ? visualFinalApprover(workflow.data, workflow.supervisors) : undefined
   const assignmentDate = assigned?.assignedAt && visualWorkDate(assigned.assignedAt)
   const panelId = instance + '-panel'
   const managementId = instance + '-management'

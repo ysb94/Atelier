@@ -9,6 +9,7 @@ const migrations = [
   '20261102114206_work_request_cancellation',
   '20261109052445_visual_work_category_comments',
   '20261109062457_visual_work_final_approval',
+  '20261109074836_visual_department_work_role_columns',
   '20261109074511_visual_category_workflow',
 ]
 const db = await createWorkTestDb()
@@ -59,8 +60,61 @@ try {
 
   const legacy = crypto.randomUUID()
   const legacyDraft = await rpc(ids.planner, 'begin_work_request', [legacy, 'design'])
-  await rpc(ids.planner, 'save_work_request', [legacy, legacyDraft, { values, status: 'requested' }, crypto.randomUUID()])
+  const publishedLegacy = await rpc(ids.planner, 'save_work_request', [legacy, legacyDraft, { values, status: 'requested' }, crypto.randomUUID()])
+  const legacyRevision = await rpc(ids.manager, 'change_visual_work_final_approval', [legacy, publishedLegacy, 'assign', supervisor, crypto.randomUUID()])
   assert.equal((await rpc(ids.planner, 'get_department_work', [legacy])).requests[0].visualCategoryWorkflow, undefined)
+
+  const accepted = crypto.randomUUID()
+  const acceptedDraft = await rpc(ids.planner, 'begin_work_request', [accepted, 'design'])
+  const requestedRevision = await rpc(ids.planner, 'save_work_request', [accepted, acceptedDraft, { values, status: 'requested' }, crypto.randomUUID()])
+  const acceptedRevision = await rpc(ids.manager, 'save_work_request', [accepted, requestedRevision, {
+    status: 'accepted', assignee: middle, confirmedDueDate: values.dueDate, managerPriority: 'normal',
+  }, crypto.randomUUID()])
+  await db.exec('reset role')
+  const rawRequest = async id => (await db.query('select to_jsonb(w) as data from public.work_requests w where w.id=$1', [id])).rows[0].data
+  const legacyBefore = await rawRequest(legacy)
+  const acceptedBefore = await rawRequest(accepted)
+  const functionAccess = async () => (await db.query(`select oid,proowner,proacl,prosecdef,proconfig
+    from pg_proc where oid in (
+      'app.list_department_work(text)'::regprocedure, 'app.get_department_work(uuid)'::regprocedure,
+      'app.change_visual_category_work(uuid,text,bigint,text,uuid,text,text,uuid)'::regprocedure
+    ) order by oid`)).rows
+  const accessBefore = await functionAccess()
+  await db.exec(await readFile('supabase/pending/visual_supervisor_receipt_queue.sql', 'utf8'))
+  assert.deepEqual(await rawRequest(legacy), legacyBefore)
+  assert.deepEqual(await rawRequest(accepted), acceptedBefore)
+  assert.deepEqual(await functionAccess(), accessBefore)
+  const pendingLegacy = (await rpc(supervisor, 'list_department_work', ['design'])).find(row => row.id === legacy)
+  assert.equal(pendingLegacy.visualReceiptPending, true)
+  assert.ok(!pendingLegacy.assigneeIds.includes(supervisor))
+  assert.deepEqual(pendingLegacy.visualMiddleManagerIds, [middle, otherMiddle])
+  const legacyDetail = (await rpc(supervisor, 'get_department_work', [legacy])).requests[0]
+  assert.deepEqual(Object.keys(legacyDetail.visualCategoryWorkflow.categories).sort(), ['banner', 'video'])
+  assert.equal(legacyDetail.visualCategoryWorkflow.legacyReceiptPending, true)
+  assert.equal(legacyDetail.visualCategoryWorkflow.approverId, supervisor)
+  assert.equal(legacyDetail.visualCategoryWorkflow.receivedAt, undefined)
+  await rejected(() => rpc(supervisor, 'list_visual_work_category_comments', [legacy, 'banner']))
+  assert.equal((await rpc(supervisor, 'get_department_work', [accepted])).requests[0].visualCategoryWorkflow, undefined)
+  const legacyAction = (id, action, { target = legacy, category = '', revision = legacyRevision, person = null } = {}) =>
+    rpc(id, 'change_visual_category_work', [target, category, revision, action, person, '', '', crypto.randomUUID()])
+  await rejected(() => legacyAction(supervisor, 'receipt', { target: accepted, revision: acceptedRevision }))
+  await rejected(() => legacyAction(otherSupervisor, 'receipt'))
+  await rejected(() => legacyAction(ids.outsider, 'receipt'))
+  await rejected(() => legacyAction(middle, 'receipt'))
+  await rejected(() => legacyAction(middle, 'assign_worker', { category: 'banner', person: worker }))
+  await legacyAction(supervisor, 'receipt')
+  const receivedLegacy = (await rpc(middle, 'get_department_work', [legacy])).requests[0]
+  assert.equal(receivedLegacy.status, 'inProgress')
+  assert.equal(receivedLegacy.visualCategoryWorkflow.approverId, supervisor)
+  assert.ok(receivedLegacy.visualCategoryWorkflow.receivedAt)
+  assert.equal(receivedLegacy.visualCategoryWorkflow.legacyReceiptPending, undefined)
+  assert.deepEqual((await rpc(supervisor, 'list_visual_work_category_comments', [legacy, 'banner'])).items, [])
+  assert.deepEqual(receivedLegacy.categoryAssignments, legacyBefore.data.categoryAssignments)
+  assert.deepEqual(receivedLegacy.values, legacyBefore.data.values)
+  assert.deepEqual(receivedLegacy.visualFinalApproval, legacyBefore.data.visualFinalApproval)
+  assert.equal((await rpc(supervisor, 'list_department_work', ['design'])).find(row => row.id === legacy).visualReceiptPending, null)
+  assert.equal((await rpc(middle, 'list_my_visual_workflow_notices')).filter(row =>
+    row.requestId === legacy && row.categoryId === 'banner' && row.kind === 'assignment' && row.current).length, 1)
 
   const draft = await rpc(ids.planner, 'begin_work_request', [request, 'design'])
   const publishCommand = crypto.randomUUID()
@@ -68,6 +122,7 @@ try {
   revision = await rpc(ids.planner, 'publish_visual_category_work', publishArgs)
   assert.equal(await rpc(ids.planner, 'publish_visual_category_work', publishArgs), revision)
   assert.equal((await detail()).status, 'requested')
+  assert.equal((await rpc(supervisor, 'list_department_work', ['design'])).find(row => row.id === request).visualReceiptPending, true)
   assert.ok(await current(middle, 'registered', 'banner'))
   assert.ok(await current(otherMiddle, 'registered', 'video'))
   assert.ok(await current(otherSupervisor, 'receipt'))
@@ -168,7 +223,7 @@ try {
   assert.equal((await db.query('select id from public.visual_workflow_notices')).rows.length, 0)
   await db.exec('reset role; set role anon')
   await assert.rejects(() => db.query('select public.list_my_visual_workflow_notices()'), { code: '42501' })
-  console.log('PASS Visual workflow: legacy compatibility, staged assignment, two categories, three feedback counters, private results, notice/read versions, actor and stale-write protection, overall completion')
+  console.log('PASS Visual workflow: pending legacy receipt, accepted work preserved, staged assignment, two categories, three feedback counters, private results, notice/read versions, actor and stale-write protection, overall completion')
 } catch (error) {
   console.error({ message: error.message, code: error.code, detail: error.detail, where: error.where, stack: error.stack?.split('\n').slice(0, 7).join('\n') })
   process.exitCode = 1

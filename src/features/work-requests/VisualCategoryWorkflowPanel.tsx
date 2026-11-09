@@ -59,7 +59,7 @@ export function VisualCategoryWorkflowPanel({
     ...sharedReadPolicy,
     queryKey: ['visual-workflow-history', viewerId, request.id, category.id, request.revision],
     queryFn: () => listVisualWorkflowEntries(request.id, category.id),
-    enabled: active && valid && historyAllowed,
+    enabled: active && valid && received && historyAllowed,
   })
   const [note, setNote] = useState('')
   const [link, setLink] = useState('')

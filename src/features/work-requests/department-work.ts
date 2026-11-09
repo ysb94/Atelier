@@ -10,6 +10,7 @@ export type DepartmentWork = {
   cancellation?: { state: string } | null
   visualFinalApproval?: VisualFinalApproval | null
   visualCategoryReview?: { approverId?: string | null; pending: boolean } | null
+  visualReceiptPending?: boolean | null
 }
 export type WorkFilters = { requester: string[]; assignee: string[]; status: string[]; brand: string[] }
 export const clearWorkFilters = (): WorkFilters => ({ requester: [], assignee: [], status: [], brand: [] })
@@ -34,6 +35,10 @@ export function inDepartmentWorkStage(status: RequestStatus, stage: DepartmentWo
     completion: ['completionConfirm'],
   }
   return stages[stage].includes(status)
+}
+export function needsVisualReceipt(row: Pick<DepartmentWork, 'status' | 'visualReceiptPending' | 'visualCategoryReview'>) {
+  // The first version of the workflow summary omitted receipt state. A new workflow stays requested until receipt.
+  return row.visualReceiptPending ?? (row.visualCategoryReview != null && row.status === 'requested')
 }
 export function filterDepartmentWork(rows: DepartmentWork[], filters: WorkFilters, search: string, assignmentKey: 'assigneeIds' | 'visualMiddleManagerIds' = 'assigneeIds') {
   return rows.filter(row => {
