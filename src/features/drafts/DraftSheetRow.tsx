@@ -3,6 +3,8 @@ import { createPortal } from 'react-dom'
 import { FileText, GripVertical, Heart, ImageOff, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
+import { DRAFT_COLOR_PHOTO_ACCEPT, prepareDraftColorPhoto } from '@/lib/drafts/color-photo'
 import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
 import { resolveColorSpec } from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
@@ -138,10 +140,12 @@ function SheetConfirmButton({
 
 const COLOR_IMAGE_CHOICES: readonly DraftColorImageChoice[] = ['Image', 'None']
 
+type ColorPhotoChange = { choice: 'Image'; url: string } | { choice: 'None'; url: null }
+
 type ColorFormValue = {
   id: string | null
   name: string
-  imageChoice?: DraftColorImageChoice
+  photoChange?: ColorPhotoChange
 }
 
 type ColorFormRow = ColorFormValue & { key: number }
@@ -178,35 +182,41 @@ function ColorDocumentButton({
   readOnly = false,
   colors,
   imageChoices,
+  photoUrls,
   onSaveColors,
 }: {
   readOnly?: boolean
   colors: DraftColorRow[]
   imageChoices: DraftSpecs['colorImageChoices']
+  photoUrls: DraftSpecs['colorPhotoUrls']
   onSaveColors: (colors: ColorFormValue[]) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<ColorFormRow[]>([{ key: 1, id: null, name: '' }])
   const [busy, setBusy] = useState(false)
+  const [preparingPhotoKey, setPreparingPhotoKey] = useState<number | null>(null)
   const [error, setError] = useState('')
   const rootRef = useRef<HTMLDivElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
+  const photoInputRef = useRef<HTMLInputElement>(null)
+  const photoTargetKey = useRef<number | null>(null)
   const nextKey = useRef(1)
   const layoutTops = useRef(new Map<number, number>())
   const shiftRef = useRef(0)
   const dragRef = useRef<{ key: number; pointerId: number; startY: number; y: number } | null>(null)
   const [draggingKey, setDraggingKey] = useState<number | null>(null)
   const [shiftY, setShiftY] = useState(0)
+  const locked = readOnly || busy || preparingPhotoKey !== null
 
   useEffect(() => {
-    if (!open) return
+    if (!open || busy || preparingPhotoKey !== null) return
     function closeOnOutside(event: PointerEvent) {
       if (rootRef.current?.contains(event.target as Node)) return
       setOpen(false)
     }
     document.addEventListener('pointerdown', closeOnOutside, true)
     return () => document.removeEventListener('pointerdown', closeOnOutside, true)
-  }, [open])
+  }, [open, busy, preparingPhotoKey])
 
   function freshRows(source: DraftColorRow[]) {
     if (!source.length) {
@@ -220,7 +230,7 @@ function ColorDocumentButton({
   }
 
   function addRow() {
-    if (readOnly || busy || rows.length >= MAX_DRAFT_COLORS) return
+    if (locked || rows.length >= MAX_DRAFT_COLORS) return
     setError('')
     nextKey.current += 1
     setRows((current) => [...current, { key: nextKey.current, id: null, name: '' }])
@@ -234,6 +244,26 @@ function ColorDocumentButton({
       nextKey.current += 1
       return [{ key: nextKey.current, id: null, name: '' }]
     })
+  }
+
+  function changePhoto(key: number, photoChange: ColorPhotoChange) {
+    setError('')
+    setRows((current) => current.map((row) => row.key === key ? { ...row, photoChange } : row))
+  }
+
+  async function attachPhoto(key: number, file: File) {
+    setPreparingPhotoKey(key)
+    setError('')
+    const trace = startWorkflow('app', 'draft_color_prepare_photo')
+    try {
+      const url = await trace.run('prepare_image', () => prepareDraftColorPhoto(file))
+      changePhoto(key, { choice: 'Image', url })
+      trace.done()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '사진을 불러오지 못했습니다.')
+    } finally {
+      setPreparingPhotoKey(null)
+    }
   }
 
   useLayoutEffect(() => {
@@ -263,7 +293,7 @@ function ColorDocumentButton({
   })
 
   function beginDrag(event: ReactPointerEvent<HTMLButtonElement>, key: number) {
-    if (readOnly || busy || event.button !== 0) return
+    if (locked || event.button !== 0) return
     event.preventDefault()
     event.stopPropagation()
     const drag = { key, pointerId: event.pointerId, startY: event.clientY, y: event.clientY }
@@ -330,7 +360,7 @@ function ColorDocumentButton({
         aria-expanded={open}
         aria-label="컬러 문서"
         title="컬러 추가"
-        disabled={readOnly}
+        disabled={locked}
         onClick={() => {
           setError('')
           if (!open) {
@@ -347,14 +377,14 @@ function ColorDocumentButton({
           className="draft-color-add-form"
           onSubmit={(event) => {
             event.preventDefault()
-            if (readOnly || busy) return
-            if (rows.some((row) => row.id && !row.name.trim())) {
+            if (locked) return
+            if (rows.some((row) => (row.id || row.photoChange) && !row.name.trim())) {
               setError('컬러 이름을 입력하세요.')
               return
             }
             const next = rows
               .filter((row) => row.name.trim())
-              .map(({ id, name, imageChoice }) => ({ id, name: name.trim(), imageChoice }))
+              .map(({ id, name, photoChange }) => ({ id, name: name.trim(), photoChange }))
             if (!next.length && colors.length === 0) {
               setError('컬러 이름을 입력하세요.')
               return
@@ -373,10 +403,24 @@ function ColorDocumentButton({
               .finally(() => setBusy(false))
           }}
         >
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept={DRAFT_COLOR_PHOTO_ACCEPT}
+            hidden
+            onChange={(event) => {
+              const file = event.currentTarget.files?.[0]
+              const key = photoTargetKey.current
+              event.currentTarget.value = ''
+              photoTargetKey.current = null
+              if (file && key !== null && !locked) void attachPhoto(key, file)
+            }}
+          />
           <div className="draft-color-add-rows" ref={listRef}>
             {rows.map((row, index) => {
               const lifted = draggingKey === row.key
-              const imageChoice = row.imageChoice ?? (row.id ? imageChoices?.[row.id] : undefined)
+              const imageChoice = row.photoChange?.choice ?? (row.id ? imageChoices?.[row.id] : undefined)
+              const photoUrl = row.photoChange ? row.photoChange.url : row.id ? photoUrls?.[row.id] : undefined
               return (
               <div
                 key={row.key}
@@ -390,7 +434,7 @@ function ColorDocumentButton({
                   className="draft-color-add-grip"
                   aria-label={`컬러 ${index + 1} 순서 변경`}
                   title="끌어서 순서 변경"
-                  disabled={readOnly || busy}
+                  disabled={locked}
                   onPointerDown={(event) => beginDrag(event, row.key)}
                 >
                   <GripVertical className="size-3.5" />
@@ -400,7 +444,7 @@ function ColorDocumentButton({
                   aria-label={rows.length > 1 ? `컬러 이름 ${index + 1}` : '컬러 이름'}
                   placeholder="컬러 이름"
                   value={row.name}
-                  disabled={readOnly || busy}
+                  disabled={locked}
                   onChange={(event) => {
                     const name = event.target.value
                     setRows((current) => current.map((item) => item.key === row.key ? { ...item, name } : item))
@@ -412,7 +456,7 @@ function ColorDocumentButton({
                   size="icon"
                   className="size-7 shrink-0 text-muted-foreground"
                   aria-label={row.id ? `컬러 ${index + 1} 삭제` : rows.length > 1 ? `컬러 이름 ${index + 1} 삭제` : '컬러 이름 지우기'}
-                  disabled={readOnly || busy}
+                  disabled={locked}
                   onClick={() => removeRow(row.key)}
                 >
                   <Trash2 className="size-3.5" />
@@ -424,13 +468,21 @@ function ColorDocumentButton({
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="h-7 px-2 text-muted-foreground aria-pressed:border-primary/40 aria-pressed:bg-primary/10 aria-pressed:text-primary"
+                      className="h-7 gap-1 px-2 text-muted-foreground aria-pressed:border-primary/40 aria-pressed:bg-primary/10 aria-pressed:text-primary"
+                      title={choice === 'Image' ? (photoUrl ? '사진 교체' : '사진 첨부') : '사진 없이 저장'}
                       aria-pressed={imageChoice === choice}
-                      disabled={readOnly || busy}
+                      aria-busy={choice === 'Image' && preparingPhotoKey === row.key}
+                      disabled={locked}
                       onClick={() => {
-                        setRows((current) => current.map((item) => item.key === row.key ? { ...item, imageChoice: choice } : item))
+                        if (choice === 'None') {
+                          changePhoto(row.key, { choice, url: null })
+                          return
+                        }
+                        photoTargetKey.current = row.key
+                        photoInputRef.current?.click()
                       }}
                     >
+                      {choice === 'Image' && photoUrl ? <img src={photoUrl} alt="" className="size-5 rounded-sm object-contain" /> : null}
                       {choice}
                     </Button>
                   ))}
@@ -443,18 +495,19 @@ function ColorDocumentButton({
             <button
               type="button"
               className="flex h-8 min-w-0 flex-1 items-center justify-center gap-1 rounded-md border border-dashed border-border text-xs text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
-              disabled={readOnly || busy || rows.length >= MAX_DRAFT_COLORS}
+              disabled={locked || rows.length >= MAX_DRAFT_COLORS}
               onClick={addRow}
             >
               <Plus className="size-3.5" />
               컬러 추가
             </button>
-            <Button type="submit" size="sm" className="h-8 shrink-0 px-2.5" disabled={readOnly || busy}>
+            <Button type="submit" size="sm" className="h-8 shrink-0 px-2.5" disabled={locked}>
               <Save className="size-3.5" />
               {busy ? '저장 중' : '저장'}
             </Button>
           </div>
-          {error ? <p>{error}</p> : rows.length >= MAX_DRAFT_COLORS ? <p>최대 {MAX_DRAFT_COLORS}컬러까지 추가할 수 있습니다.</p> : null}
+          {preparingPhotoKey !== null ? <span role="status" className="text-xs text-muted-foreground">사진 준비 중…</span> : null}
+          {error ? <p role="alert">{error}</p> : rows.length >= MAX_DRAFT_COLORS ? <p>최대 {MAX_DRAFT_COLORS}컬러까지 추가할 수 있습니다.</p> : null}
         </form>
       ) : null}
     </div>
@@ -720,12 +773,12 @@ function specTone(value: string, confirmed: boolean): 'neutral' | 'pending' | 'd
   return confirmed ? 'done' : 'pending'
 }
 
-export function DraftPhoto({ src, name, onOpen }: { src: string | null; name: string; onOpen?: () => void }) {
+export function DraftPhoto({ src, name, onOpen, compact = false }: { src: string | null; name: string; onOpen?: () => void; compact?: boolean }) {
   const [open, setOpen] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
   useEffect(() => { if (open) dialog.current?.showModal() }, [open])
   return <>
-    <button type="button" className={`draft-sheet-photo${onOpen ? ' is-editor' : ''}`} disabled={!onOpen && !src} aria-label={onOpen ? `${name} 기획안 편집` : `${name} 사진 크게 보기`} onClick={() => { if (onOpen) onOpen(); else if (src) setOpen(true) }}>
+    <button type="button" className={`draft-sheet-photo${onOpen ? ' is-editor' : ''}${compact ? ' is-compact' : ''}`} disabled={!onOpen && !src} aria-label={onOpen ? `${name} 기획안 편집` : `${name} 사진 크게 보기`} onClick={() => { if (onOpen) onOpen(); else if (src) setOpen(true) }}>
       {src ? <img src={src} alt={name} loading="lazy" /> : <span><ImageOff size={25} /><small>등록된 사진 없음</small></span>}
     </button>
     {open && src && createPortal(<dialog ref={dialog} className="draft-photo-dialog" aria-label={`${name} 사진 크게 보기`} onCancel={() => setOpen(false)} onClose={() => setOpen(false)} onClick={event => { if (event.target === event.currentTarget) setOpen(false) }}>
@@ -850,6 +903,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
           readOnly={readOnly}
           colors={draft.colors}
           imageChoices={draft.specs.colorImageChoices}
+          photoUrls={draft.specs.colorPhotoUrls}
           onSaveColors={onSaveColors}
         />
         <SheetConfirmButton
@@ -865,20 +919,24 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
         </SheetConfirmButton>
       </div>
       <div className="draft-color-lines">
-        {draft.colors.length ? draft.colors.map((color, index) => (
-          <ColorLine key={color.id} index={index}>
-            <ColorImageChoiceDot choice={draft.specs.colorImageChoices?.[color.id]} />
-            <SheetInlineField
-              readOnly
-              label={`${draft.draftNo} 컬러 ${index + 1} 이름`}
-              className="draft-sheet-color-name"
-              value={color.name}
-              placeholder="컬러 이름"
-              onCommit={(next) => onRenameColor(color.id, next)}
-            />
-            {color.orderQty != null && color.orderQty > 0 ? <small>{formatNumber(color.orderQty)}</small> : null}
-          </ColorLine>
-        )) : <ColorLine index={0}><span className="draft-sheet-muted">컬러 미정</span></ColorLine>}
+        {draft.colors.length ? draft.colors.map((color, index) => {
+          const photoUrl = draft.specs.colorPhotoUrls?.[color.id]
+          return (
+            <ColorLine key={color.id} index={index}>
+              <ColorImageChoiceDot choice={draft.specs.colorImageChoices?.[color.id]} />
+              <SheetInlineField
+                readOnly
+                label={`${draft.draftNo} 컬러 ${index + 1} 이름`}
+                className="draft-sheet-color-name"
+                value={color.name}
+                placeholder="컬러 이름"
+                onCommit={(next) => onRenameColor(color.id, next)}
+              />
+              {photoUrl ? <DraftPhoto src={photoUrl} name={`${color.name} 컬러`} compact /> : null}
+              {color.orderQty != null && color.orderQty > 0 ? <small>{formatNumber(color.orderQty)}</small> : null}
+            </ColorLine>
+          )
+        }) : <ColorLine index={0}><span className="draft-sheet-muted">컬러 미정</span></ColorLine>}
       </div>
     </td>
     <td>

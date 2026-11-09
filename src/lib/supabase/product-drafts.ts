@@ -7,6 +7,7 @@ import type {
   ProductDraftInput,
 } from '@/lib/types'
 import { inputDiagnosticContext, tracedQuery } from '@/lib/diagnostics/workflow-trace'
+import { normalizeColorPhotoUrls } from '@/lib/drafts/color-photo'
 import { normalizeColorSpecs } from '@/lib/drafts/color-spec'
 import { emptyDraftInput } from '@/lib/drafts/empty-draft'
 import { normalizeDraftBrandId, parseDraftNo } from '@/lib/drafts/company-draft'
@@ -189,7 +190,7 @@ function buildPayload(input: ProductDraftInput) {
     openType: input.openType,
     openTypeDetail: input.openTypeDetail,
     releaseIssue: input.releaseIssue,
-    specs: input.specs,
+    specs: { ...input.specs, colorPhotoUrls: normalizeColorPhotoUrls(input.specs, input.colors) },
     hasOptions: input.hasOptions,
     note: input.note,
   }
@@ -212,6 +213,8 @@ function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined, colors: D
     if (choice === 'Image' || choice === 'None') colorImageChoices[id] = choice
   }
   if (Object.keys(colorImageChoices).length) base.colorImageChoices = colorImageChoices
+  const colorPhotoUrls = normalizeColorPhotoUrls(raw, colors)
+  if (colorPhotoUrls) base.colorPhotoUrls = colorPhotoUrls
   base.nameConfirmed = Boolean(raw?.nameConfirmed)
   base.colorsConfirmed = Boolean(raw?.colorsConfirmed)
   base.colorNamesConfirmed = Boolean(raw?.colorNamesConfirmed)

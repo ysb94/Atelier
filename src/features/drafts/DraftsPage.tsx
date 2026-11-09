@@ -605,17 +605,20 @@ export function CompanyDraftsPage() {
                         }
                         const byId = new Map(input.colors.map((color) => [color.id, color]))
                         const colorImageChoices: Record<string, DraftColorImageChoice> = {}
-                        const colors = rows.map(({ id, name, imageChoice }) => {
+                        const colorPhotoUrls: Record<string, string> = {}
+                        const colors = rows.map(({ id, name, photoChange }) => {
                           const existing = id ? byId.get(id) : undefined
                           const color = { ...(existing ?? newColorRow(crypto.randomUUID())), name: name.trim() }
-                          const choice = imageChoice ?? input.specs.colorImageChoices?.[color.id]
+                          const choice = photoChange?.choice ?? input.specs.colorImageChoices?.[color.id]
+                          const photoUrl = photoChange ? photoChange.url : input.specs.colorPhotoUrls?.[color.id]
                           if (choice) colorImageChoices[color.id] = choice
+                          if (choice === 'Image' && photoUrl) colorPhotoUrls[color.id] = photoUrl
                           return color
                         })
                         return {
                           ...input,
                           colors,
-                          specs: { ...input.specs, colorImageChoices },
+                          specs: { ...input.specs, colorImageChoices, colorPhotoUrls },
                         }
                       }, 'draft_save_colors')
                     }}
