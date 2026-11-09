@@ -52,6 +52,14 @@ function FeedbackRow({ summary, children }: { summary: string; children?: ReactN
   </details>
 }
 
+function CurrentFeedback({ host, counts }: { host: HTMLDivElement | null; counts: string }) {
+  return host && createPortal(
+    <section aria-label="현재 구간 수정 횟수" className="rounded-lg border border-border px-3">
+      <FeedbackRow summary={counts} />
+    </section>, host,
+  )
+}
+
 export function VisualWorkflowHistory({ review, feedbackHost }: {
   review: VisualWorkflowReview
   feedbackHost: HTMLDivElement | null
@@ -63,50 +71,55 @@ export function VisualWorkflowHistory({ review, feedbackHost }: {
     </section> : null
   }
   if (review.role === 'worker') {
+    const currentCounts = `중간 수정 ${review.assignments[0]?.middle ?? 0}회`
     return <>
+      <CurrentFeedback host={feedbackHost} counts={currentCounts} />
       {review.handoff && <section aria-label="인계받은 시안" className="space-y-2 rounded-lg border border-border p-3">
         <h4 className="text-sm font-semibold">인계받은 시안{review.handoff.actorName && ' · ' + review.handoff.actorName}</h4>
         <ResultContent entry={review.handoff} />
       </section>}
-      {feedbackHost && createPortal(<section aria-label="중간 관리자 피드백" className="rounded-lg border border-border px-3">
+      <section aria-label="중간 관리자 피드백" className="rounded-lg border border-border px-3">
         <ol className="divide-y divide-border">
           {review.previousMiddleCounts?.map((count, index) => <li key={index}>
             <FeedbackRow summary={`중간 수정 ${count}회`} />
           </li>)}
           <li>
-            <FeedbackRow summary={`중간 수정 ${review.assignments[0]?.middle ?? 0}회`}>
+            <FeedbackRow summary={currentCounts}>
               {review.entries.length > 0 && <FeedbackEntries entries={review.entries} />}
             </FeedbackRow>
           </li>
         </ol>
-      </section>, feedbackHost)}
+      </section>
     </>
   }
 
-  if (!feedbackHost) return null
   const priorEntries = review.entries.filter(entry => !entry.assignmentId)
-  if (priorEntries.length === 0 && review.assignments.length === 0) return null
-  return createPortal(<section aria-label="배정·수정 이력" className="divide-y divide-border rounded-lg border border-border px-3">
-    {priorEntries.length > 0 && <FeedbackRow summary="이전 기록">
-      <FeedbackEntries entries={priorEntries} />
-    </FeedbackRow>}
-    <ol className="divide-y divide-border">
-      {review.assignments.map((assignment, index) => {
-        const entries = assignment.id ? review.entries.filter(entry => entry.assignmentId === assignment.id) : []
-        const reason = assignment.reason === 'handoff' ? '작업자 재배정' : assignment.reason === 'review' ? '수정 작업 배정' : ''
-        return <li key={assignment.id ?? index}>
-          <FeedbackRow summary={revisionCounts(assignment)}>
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
-              <strong>{index + 1}구간 · {assignment.workerName || '기존 기록'}</strong>
-              {reason && <span>{reason}</span>}
-              {assignment.assignedAt && <time dateTime={assignment.assignedAt} className="text-xs text-muted-foreground">
-                {formatDateTime(assignment.assignedAt)}
-              </time>}
-            </div>
-            {entries.length > 0 && <FeedbackEntries entries={entries} />}
-          </FeedbackRow>
-        </li>
-      })}
-    </ol>
-  </section>, feedbackHost)
+  const current = review.assignments.at(-1)
+  if (priorEntries.length === 0 && !current) return null
+  return <>
+    {current && <CurrentFeedback host={feedbackHost} counts={revisionCounts(current)} />}
+    <section aria-label="배정·수정 이력" className="divide-y divide-border rounded-lg border border-border px-3">
+      {priorEntries.length > 0 && <FeedbackRow summary="이전 기록">
+        <FeedbackEntries entries={priorEntries} />
+      </FeedbackRow>}
+      <ol className="divide-y divide-border">
+        {review.assignments.map((assignment, index) => {
+          const entries = assignment.id ? review.entries.filter(entry => entry.assignmentId === assignment.id) : []
+          const reason = assignment.reason === 'handoff' ? '작업자 재배정' : assignment.reason === 'review' ? '수정 작업 배정' : ''
+          return <li key={assignment.id ?? index}>
+            <FeedbackRow summary={revisionCounts(assignment)}>
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+                <strong>{index + 1}구간 · {assignment.workerName || '기존 기록'}</strong>
+                {reason && <span>{reason}</span>}
+                {assignment.assignedAt && <time dateTime={assignment.assignedAt} className="text-xs text-muted-foreground">
+                  {formatDateTime(assignment.assignedAt)}
+                </time>}
+              </div>
+              {entries.length > 0 && <FeedbackEntries entries={entries} />}
+            </FeedbackRow>
+          </li>
+        })}
+      </ol>
+    </section>
+  </>
 }
