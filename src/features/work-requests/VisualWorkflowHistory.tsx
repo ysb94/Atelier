@@ -1,0 +1,85 @@
+import { formatDateTime } from './work-request-schedule'
+import type { VisualWorkflowEntry, VisualWorkflowEntryAction, VisualWorkflowReview } from './visual-category-workflow'
+
+const labels: Record<VisualWorkflowEntryAction, string> = {
+  submit: '결과물 제출',
+  middle_return: '중간 검수 수정 요청',
+  supervisor_return: '총괄 검수 수정 요청',
+  requester_return: '요청자 수정 요청',
+  supervisor_forward: '중간 관리자에게 수정 전달',
+  middle_forward: '작업자에게 수정 전달',
+  assign_worker: '작업 인계 지시',
+}
+
+function ResultContent({ entry }: { entry: VisualWorkflowEntry }) {
+  return <>
+    {entry.note && <p className="whitespace-pre-wrap break-words text-sm">{entry.note}</p>}
+    {entry.resultUrl && <a className="break-all text-sm text-primary underline" href={entry.resultUrl}
+      target="_blank" rel="noopener noreferrer">결과물 링크 열기</a>}
+  </>
+}
+
+function FeedbackEntries({ entries }: { entries: VisualWorkflowEntry[] }) {
+  return <ol className="space-y-3">
+    {[...entries].reverse().map(entry => <li key={entry.id} className="space-y-1 border-t border-border pt-3 first:border-0 first:pt-0">
+      <div className="flex flex-wrap items-center justify-between gap-1">
+        <strong className="text-sm">{labels[entry.action]}{entry.actorName && ' · ' + entry.actorName}</strong>
+        <time dateTime={entry.createdAt} className="text-xs text-muted-foreground">{formatDateTime(entry.createdAt)}</time>
+      </div>
+      <ResultContent entry={entry} />
+    </li>)}
+  </ol>
+}
+
+export function VisualWorkflowHistory({ review }: { review: VisualWorkflowReview }) {
+  if (review.role === 'requester') {
+    return review.result ? <section aria-label="검수 통과 결과물" className="space-y-2 rounded-lg border border-border p-3">
+      <h4 className="text-sm font-semibold">검수 통과 결과물</h4>
+      <ResultContent entry={review.result} />
+    </section> : null
+  }
+  if (review.role === 'worker') {
+    return <div className="space-y-3">
+      {review.handoff && <section aria-label="인계받은 시안" className="space-y-2 rounded-lg border border-border p-3">
+        <h4 className="text-sm font-semibold">인계받은 시안{review.handoff.actorName && ' · ' + review.handoff.actorName}</h4>
+        <ResultContent entry={review.handoff} />
+      </section>}
+      <section aria-label="중간 관리자 피드백" className="space-y-2 rounded-lg border border-border p-3">
+        <h4 className="text-sm font-semibold">중간 관리자 피드백</h4>
+        <p className="text-sm text-muted-foreground">중간 수정 {review.assignments[0]?.middle ?? 0}회</p>
+        <FeedbackEntries entries={review.entries} />
+      </section>
+    </div>
+  }
+
+  const priorEntries = review.entries.filter(entry => !entry.assignmentId)
+  return <section aria-label="배정·수정 이력" className="space-y-3 rounded-lg border border-border p-3">
+    <h4 className="text-sm font-semibold">배정·수정 이력</h4>
+    {priorEntries.length > 0 && <details className="space-y-2">
+      <summary className="cursor-pointer text-sm font-medium">이전 기록</summary>
+      <FeedbackEntries entries={priorEntries} />
+    </details>}
+    <ol className="divide-y divide-border">
+      {review.assignments.map((assignment, index) => {
+        const entries = assignment.id ? review.entries.filter(entry => entry.assignmentId === assignment.id) : []
+        const counts = [
+          '중간 수정 ' + (assignment.middle ?? 0) + '회',
+          ...(assignment.supervisor == null ? [] : ['총괄 수정 ' + assignment.supervisor + '회']),
+          ...(assignment.requester == null ? [] : ['요청자 수정 ' + assignment.requester + '회']),
+        ]
+        const reason = assignment.reason === 'handoff' ? '작업자 재배정' : assignment.reason === 'review' ? '수정 작업 배정' : ''
+        return <li key={assignment.id ?? index} className="space-y-2 py-3 first:pt-1 last:pb-1">
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-sm">
+            <strong>{index + 1}구간 · {assignment.workerName || '기존 기록'}</strong>
+            {reason && <span>{reason}</span>}
+            <span className="text-muted-foreground">{counts.join(' · ')}</span>
+            {assignment.assignedAt && <time dateTime={assignment.assignedAt} className="text-xs text-muted-foreground">
+              {formatDateTime(assignment.assignedAt)}
+            </time>}
+          </div>
+          <FeedbackEntries entries={entries} />
+        </li>
+      })}
+    </ol>
+  </section>
+}

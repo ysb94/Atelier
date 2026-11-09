@@ -1,4 +1,4 @@
-import type { VisualWorkflowAction, VisualWorkflowEntry, VisualWorkflowNotice } from '@/features/work-requests/visual-category-workflow'
+import type { VisualWorkflowAction, VisualWorkflowNotice, VisualWorkflowReview } from '@/features/work-requests/visual-category-workflow'
 import type { DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { diagnosticQuery } from './diagnostic-query'
 import { getSupabase } from './client'
@@ -21,8 +21,8 @@ export function changeVisualCategoryWork(input: ActionInput, context: Diagnostic
   }), context)
 }
 
-export function listVisualWorkflowEntries(request: string, category: string) {
-  return diagnosticQuery<VisualWorkflowEntry[]>('app', 'visual_category_work_history', getSupabase().rpc('list_visual_workflow_entries', {
+export function getVisualWorkflowReview(request: string, category: string) {
+  return diagnosticQuery<VisualWorkflowReview>('app', 'visual_category_work_history', getSupabase().rpc('get_visual_workflow_review', {
     p_request: request, p_category: category,
   }))
 }

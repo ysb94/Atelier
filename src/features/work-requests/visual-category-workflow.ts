@@ -10,15 +10,12 @@ export const VISUAL_CATEGORY_STATES = {
 } as const
 
 export type VisualCategoryState = keyof typeof VISUAL_CATEGORY_STATES
-export type VisualFeedbackSource = 'middle' | 'supervisor' | 'requester'
-
 export type VisualCategoryStep = {
   state: VisualCategoryState
   version: number
   workerId?: string
   resultId?: string
   roundId?: string
-  feedback?: Partial<Record<VisualFeedbackSource, number>>
 }
 
 export type VisualCategoryWorkflow = {
@@ -29,19 +26,39 @@ export type VisualCategoryWorkflow = {
 }
 
 export type VisualWorkflowEntryAction =
-  | 'submit' | 'middle_return' | 'supervisor_return' | 'requester_return' | 'supervisor_forward' | 'middle_forward'
+  | 'submit' | 'middle_return' | 'supervisor_return' | 'requester_return' | 'supervisor_forward' | 'middle_forward' | 'assign_worker'
 
 export type VisualWorkflowAction = VisualWorkflowEntryAction
-  | 'receipt' | 'assign_supervisor' | 'assign_worker' | 'middle_approve' | 'supervisor_approve' | 'requester_confirm'
+  | 'receipt' | 'assign_supervisor' | 'middle_approve' | 'supervisor_approve' | 'requester_confirm'
 
 export type VisualWorkflowEntry = {
   id: string
   action: VisualWorkflowEntryAction
   note: string
   resultUrl: string | null
-  roundId: string | null
+  roundId?: string | null
   createdAt: string
-  sharedAt: string | null
+  sharedAt?: string | null
+  assignmentId?: string | null
+  actorName?: string | null
+}
+
+export type VisualWorkflowAssignment = {
+  id?: string
+  workerName?: string | null
+  assignedAt?: string
+  reason?: 'initial' | 'handoff' | 'review' | 'legacy'
+  middle?: number
+  supervisor?: number
+  requester?: number
+}
+
+export type VisualWorkflowReview = {
+  role: 'manager' | 'worker' | 'requester'
+  result: VisualWorkflowEntry | null
+  handoff?: VisualWorkflowEntry | null
+  entries: VisualWorkflowEntry[]
+  assignments: VisualWorkflowAssignment[]
 }
 
 export type VisualWorkflowNotice = {

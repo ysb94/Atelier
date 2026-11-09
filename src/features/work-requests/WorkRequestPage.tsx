@@ -3750,7 +3750,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
     const isSelfRequest =
       (selectedRequest.requesterId === selfId)
     const canManageSelected =
-      canManage && selectedRequest.owner === owner
+      canManage && selectedRequest.owner === owner && !(categoryWorkflow && personal && isSelfRequest)
     const isPrimaryAssignee = selectedRequest.assignee === selfId
     const isCollaborator =
       selectedRequest.collaborators.includes(selfId)
@@ -4240,6 +4240,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
           viewerId={selfId}
           canManage={canManageSelected}
           isRequester={isSelfRequest}
+          requesterView={personal && isSelfRequest}
           summary={{
             requesterDepartment: departmentLabel(selectedRequest.requesterDepartment),
             requesterName: selectedRequest.values.requester?.trim() || '미입력',

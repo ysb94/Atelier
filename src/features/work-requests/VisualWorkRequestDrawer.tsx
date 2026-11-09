@@ -42,7 +42,7 @@ function ContentSection({ title, children }: { title: string; children: ReactNod
 }
 
 export function VisualWorkRequestDrawer({
-  requestId, title, detail, initialCategory, viewerId, canManage, isRequester,
+  requestId, title, detail, initialCategory, viewerId, canManage, isRequester, requesterView,
   summary, onClose, headerActions, notice, mainReferences, management, legacyConversation, memberName, renderBody, renderAssignment, workflow,
 }: {
   requestId: string
@@ -52,6 +52,7 @@ export function VisualWorkRequestDrawer({
   viewerId: string
   canManage: boolean
   isRequester: boolean
+  requesterView: boolean
   summary: { requesterDepartment: string; requesterName: string; status: string; requestedAt: string; dueDate: string; brand: string; finalApprover?: string }
   onClose: () => void
   headerActions: ReactNode
@@ -113,6 +114,11 @@ export function VisualWorkRequestDrawer({
   const step = current && workflow?.data.categories[current.id]
   const workflowSupervisor = workflow && !workflow.data.legacyReceiptPending
     ? visualFinalApprover(workflow.data, workflow.supervisors) : undefined
+  const workflowManager = canManage || Boolean(viewerId && (
+    workflowSupervisor === viewerId || (assigned?.assigneeId === viewerId && workflow?.members.some(member => member.id === viewerId))
+  ))
+  const requesterOnly = Boolean(workflow && isRequester && (requesterView || !workflowManager))
+  const privateWorkflow = Boolean(step && !workflow?.data.legacyReceiptPending)
   const assignmentDate = assigned?.assignedAt && visualWorkDate(assigned.assignedAt)
   const panelId = instance + '-panel'
   const managementId = instance + '-management'
@@ -160,14 +166,14 @@ export function VisualWorkRequestDrawer({
                 <div className="absolute right-0 z-10 grid min-w-32 gap-1 rounded-lg border border-border bg-card p-1.5 shadow-sm [&_button]:w-full [&_button]:justify-start">
                   {headerActions}
                   <Button type="button" variant="ghost" size="sm" onClick={() => void copyLink()}>링크 복사</Button>
-                  {(management || (workflow && canManage && current?.assignment)) && <Button type="button" variant="ghost" size="sm" aria-expanded={manageOpen} aria-controls={manageOpen ? managementId : undefined}
+                  {!requesterOnly && (management || (workflow && canManage && current?.assignment)) && <Button type="button" variant="ghost" size="sm" aria-expanded={manageOpen} aria-controls={manageOpen ? managementId : undefined}
                     onClick={() => { setManageOpen(open => !open); menu.current?.removeAttribute('open') }}>
                     {manageOpen ? '업무 관리 닫기' : '업무 관리'}
                   </Button>}
                 </div>
               </details>
             </div>
-            <dl aria-label="업무 기본 정보" className={cn('grid gap-px border-y border-border bg-border', summary.finalApprover === undefined ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6' : 'grid-cols-3 lg:grid-cols-7')}>
+            {!requesterOnly && <dl aria-label="업무 기본 정보" className={cn('grid gap-px border-y border-border bg-border', summary.finalApprover === undefined ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6' : 'grid-cols-3 lg:grid-cols-7')}>
               {summary.finalApprover !== undefined && <SummaryCell label="총괄 관리자" title="이 업무의 최종 승인자" confirmed={Boolean(workflow?.data.receivedAt)}>{summary.finalApprover}</SummaryCell>}
               <SummaryCell label="중간 관리자" confirmed={Boolean(workflow?.data.receivedAt && step?.workerId)}>{assigned?.assigneeId ? memberName(assigned.assigneeId) : '미지정'}</SummaryCell>
               <SummaryCell label="작업자">{step?.workerId ? memberName(step.workerId) : <span className="text-muted-foreground">—</span>}</SummaryCell>
@@ -175,7 +181,7 @@ export function VisualWorkRequestDrawer({
               <SummaryCell label="요청 날짜"><SummaryDate value={summary.requestedAt} /></SummaryCell>
               <SummaryCell label="마감 날짜"><SummaryDate value={summary.dueDate} /></SummaryCell>
               <SummaryCell label="브랜드">{summary.brand}</SummaryCell>
-            </dl>
+            </dl>}
             {linkStatus && <p role="status" className="mt-2 text-sm text-muted-foreground">{linkStatus}</p>}
             <div className="mt-6 space-y-5 sm:mt-8 sm:space-y-6 lg:mt-10">
               {notice}
@@ -183,9 +189,9 @@ export function VisualWorkRequestDrawer({
                 key={current.id + ':' + step.version}
                 request={workflow.request} workflow={workflow.data} category={current} step={step}
                 viewerId={viewerId} canManage={canManage} supervisors={workflow.supervisors}
-                members={workflow.members} memberName={memberName} confirmationHost={confirmationHost}
+                members={workflow.members} memberName={memberName} confirmationHost={confirmationHost} requesterOnly={requesterOnly}
               />}
-              {manageOpen && <section id={managementId} aria-label="업무 관리" className="space-y-4">
+              {!requesterOnly && manageOpen && <section id={managementId} aria-label="업무 관리" className="space-y-4">
                 {current && <p className="text-sm text-muted-foreground">
                   {current.label} · {assigned?.assigneeId ? '배정됨' : '미배정'}
                   {assignmentDate && assigned && <time dateTime={assigned.assignedAt}> · {assignmentDate.fullDate} {assignmentDate.time}</time>}
@@ -193,11 +199,11 @@ export function VisualWorkRequestDrawer({
                 {current && canManage && renderAssignment(current.id)}
                 {management}
               </section>}
-              <ContentSection title="메인 내용">
+              {!requesterOnly && <ContentSection title="메인 내용">
                 {detail.main.length ? renderBody(detail.main) : !mainReferences && <p className="text-sm text-muted-foreground">등록된 메인 내용이 없습니다.</p>}
                 {mainReferences}
-              </ContentSection>
-              {current && <ContentSection title={current.title}>
+              </ContentSection>}
+              {!requesterOnly && current && <ContentSection title={current.title}>
                 {!!current.fields.length && <dl className="space-y-1.5 text-[15px] leading-6">
                   {current.fields.map(field => <div key={field.id} className="relative wrap-anywhere pl-4 before:absolute before:left-1 before:content-['•']">
                     <dt className="inline font-medium">{field.label}</dt>
@@ -211,14 +217,11 @@ export function VisualWorkRequestDrawer({
               </ContentSection>}
             </div>
           </div>
-          {current && <VisualCategoryComments
+          {current && !requesterOnly && (!privateWorkflow || workflowManager) && <VisualCategoryComments
             key={viewerId + ':' + requestId}
             requestId={requestId}
             category={current}
-            canDiscuss={isRequester || canManage || Boolean(viewerId && (
-              assigned?.assigneeId === viewerId || step?.workerId === viewerId
-              || (step && workflowSupervisor === viewerId)
-            ))}
+            canDiscuss={privateWorkflow ? workflowManager : isRequester || canManage || Boolean(viewerId && assigned?.assigneeId === viewerId)}
             legacyConversation={legacyConversation}
           />}
         </div>
