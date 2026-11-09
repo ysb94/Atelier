@@ -1,15 +1,15 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Paperclip, Reply, Send, X } from 'lucide-react'
+import { CornerDownRight, Download, Paperclip, Send, X } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent } from '@/components/ui/card'
 import { Textarea } from '@/components/ui/input'
 import { usePagePreview } from '@/lib/company/page-preview-context'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { readPollInterval, sharedReadPolicy } from '@/lib/query/shared-read-policy'
 import { useAuth } from '@/lib/supabase/auth'
+import { cn } from '@/lib/utils'
 import {
   downloadVisualWorkCommentFile,
   listVisualWorkComments,
@@ -19,7 +19,7 @@ import {
   type VisualComment,
   type VisualCommentFile,
 } from '@/lib/supabase/work-request-visual-comments'
-import { formatDateTime } from './work-request-schedule'
+import { downloadVisualWorkFile, visualWorkDate } from './visual-work-detail'
 
 type Draft = {
   body: string
@@ -67,12 +67,7 @@ function CommentFile({ file }: { file: VisualCommentFile }) {
     try {
       const blob = await downloadVisualWorkCommentFile(file)
       if (!live.current) return
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = file.name
-      link.click()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      downloadVisualWorkFile(blob, file.name)
     } catch {
       if (live.current) setError('첨부파일을 받을 수 없습니다. 다시 시도해 주세요.')
     } finally {
@@ -81,11 +76,12 @@ function CommentFile({ file }: { file: VisualCommentFile }) {
   }
 
   return (
-    <div className="max-w-60 space-y-1">
-      {preview && <img src={preview} alt={file.name} className="max-h-44 rounded-md border border-border object-contain" />}
-      <Button type="button" variant="outline" size="sm" disabled={busy} className="max-w-full" onClick={() => void download()}>
-        <Download className="size-4 shrink-0" />
-        <span className="truncate">{busy ? '받는 중…' : file.name}</span>
+    <div className="max-w-40 space-y-1">
+      <Button type="button" variant="outline" disabled={busy} onClick={() => void download()}
+        title={file.name} aria-label={`${file.name} 다운로드`} aria-busy={busy}
+        className={cn('relative size-24 flex-col items-start justify-between overflow-hidden p-3 text-left shadow-none sm:size-28', preview && 'p-0')}>
+        {preview ? <img src={preview} alt={file.name} className="size-full object-cover" /> : <span className="line-clamp-3 wrap-anywhere text-sm font-normal">{file.name}</span>}
+        <Download className={cn('size-4 shrink-0 text-muted-foreground', preview && 'absolute right-1.5 top-1.5 size-6 rounded bg-card/95 p-1')} />
       </Button>
       {error && <p className="text-xs text-danger" role="alert">{error}</p>}
     </div>
@@ -95,30 +91,37 @@ function CommentFile({ file }: { file: VisualCommentFile }) {
 function CommentEntry({
   comment, onReply,
 }: { comment: VisualComment; onReply?: (comment: VisualComment) => void }) {
+  const created = visualWorkDate(comment.createdAt)
   return (
-    <div className="space-y-2 py-3">
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs">
-        {comment.authorDepartment && <span className="text-muted-foreground">{comment.authorDepartment}</span>}
-        <strong>{comment.authorName}</strong>
-        <time className="text-muted-foreground" dateTime={comment.createdAt}>{formatDateTime(comment.createdAt)}</time>
+    <div className="space-y-1.5 py-4 sm:py-5">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        {comment.replyTo && <CornerDownRight aria-hidden="true" className="size-3.5 self-center text-muted-foreground" />}
+        {comment.authorDepartment && <span className="text-xs text-muted-foreground sm:text-sm">{comment.authorDepartment}</span>}
+        <strong className="wrap-anywhere text-sm font-medium sm:text-base">{comment.authorName}</strong>
+        {created && <time className="whitespace-nowrap pl-1 text-xs text-muted-foreground tabular-nums sm:pl-2" dateTime={comment.createdAt}>{created.fullDate} {created.time}</time>}
       </div>
-      {comment.body && <p className="whitespace-pre-wrap break-words text-sm">{comment.body}</p>}
-      {!!comment.files.length && <div className="flex flex-wrap gap-2">
+      {comment.body && <p className="whitespace-pre-wrap wrap-anywhere text-[15px] leading-6">
+        {comment.body.split(/(https?:\/\/[^\s<>"']+)/gi).map((part, index) => index % 2 === 0 ? part : (
+          <a key={index} href={part} target="_blank" rel="noopener noreferrer" className="underline decoration-border underline-offset-4 hover:text-primary">{part}</a>
+        ))}
+      </p>}
+      {onReply && <Button type="button" variant="ghost" size="sm" className="h-6 gap-1 px-0.5 font-normal text-muted-foreground" onClick={() => onReply(comment)}>
+        <CornerDownRight className="size-3" />답글
+      </Button>}
+      {!!comment.files.length && <div className="flex flex-wrap gap-3 pt-2 sm:pl-8">
         {comment.files.map(file => <CommentFile key={file.path} file={file} />)}
       </div>}
-      {onReply && <Button type="button" variant="ghost" size="sm" className="h-7 px-1 text-xs" onClick={() => onReply(comment)}>
-        <Reply className="size-3.5" />답글
-      </Button>}
     </div>
   )
 }
 
 export function VisualCategoryComments({
-  requestId, category, canDiscuss,
+  requestId, category, canDiscuss, legacyConversation,
 }: {
   requestId: string
   category: { id: string; label: string }
   canDiscuss: boolean
+  legacyConversation?: ReactNode
 }) {
   useRenderWatch('VisualCategoryComments')
   const { profile, session } = useAuth()
@@ -136,6 +139,7 @@ export function VisualCategoryComments({
   })
   const [drafts, setDrafts] = useState<Record<string, Draft>>({})
   const [sending, setSending] = useState<string[]>([])
+  const [legacyCategory, setLegacyCategory] = useState<string | null>(null)
   const inFlight = useRef(new Set<string>())
   const identity = useRef(actor)
   identity.current = valid ? actor : undefined
@@ -144,6 +148,8 @@ export function VisualCategoryComments({
   const fileInput = useRef<HTMLInputElement>(null)
   const editor = useRef<HTMLTextAreaElement>(null)
   const composerId = useId()
+  const legacyId = useId()
+  const legacyOpen = Boolean(legacyConversation && legacyCategory === category.id)
   const draft = drafts[category.id] ?? EMPTY_DRAFT
   const busy = sending.includes(category.id)
 
@@ -200,6 +206,7 @@ export function VisualCategoryComments({
   }
 
   const writable = enabled && query.isSuccess && query.data.ready && query.data.canWrite
+  const hasDraft = Boolean(draft.body.trim() || draft.files.length)
   const replies = new Map<string, VisualComment[]>()
   const roots: VisualComment[] = []
   if (enabled && query.isSuccess && query.data.ready) {
@@ -214,31 +221,39 @@ export function VisualCategoryComments({
   }
 
   return (
-    <Card aria-label={category.label + ' 댓글'}>
-      <CardContent className="space-y-3 p-4">
-        <h3 className="text-sm font-semibold">댓글 <span className="text-xs font-normal text-muted-foreground">{category.label}</span></h3>
-        {!valid || !canDiscuss ? <p className="text-sm text-muted-foreground">요청자, 업무 관리자, 이 분류의 담당자가 댓글을 확인할 수 있습니다.</p>
-          : query.isError ? <p role="alert" className="text-sm text-danger">{query.error.message}
+    <section aria-label={category.label + ' 댓글'} className="mt-8 border-y border-border bg-background/50 sm:mt-12">
+      <header className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3 sm:px-8 lg:px-10">
+        <h3 className="text-base font-medium">댓글</h3>
+        {legacyConversation && <Button type="button" variant="secondary" size="sm"
+          className="h-6 px-2 text-[11px] font-normal text-muted-foreground" aria-expanded={legacyOpen} aria-controls={legacyId}
+          onClick={() => setLegacyCategory(legacyOpen ? null : category.id)}>
+          {legacyOpen ? '이전 댓글 닫기' : '이전 댓글 보기'}
+        </Button>}
+      </header>
+      <div className="px-4 pb-5 sm:px-8 sm:pb-6 lg:px-10">
+        {legacyConversation && <div id={legacyId} hidden={!legacyOpen} className="pt-4">{legacyOpen && legacyConversation}</div>}
+        {!valid || !canDiscuss ? <p className="py-4 text-sm text-muted-foreground">요청자, 업무 관리자, 이 분류의 담당자가 댓글을 확인할 수 있습니다.</p>
+          : query.isError ? <p role="alert" className="py-4 text-sm text-danger">{query.error.message}
               <Button type="button" variant="ghost" size="sm" onClick={() => void query.refetch()}>다시 조회</Button>
             </p>
-          : query.isPending ? <p role="status" className="text-sm text-muted-foreground">댓글을 불러오는 중…</p>
-          : !query.data.ready ? <p role="status" className="text-sm text-muted-foreground">분류별 댓글 서버 연결 대기</p>
-          : enabled && !roots.length ? <p className="text-sm text-muted-foreground">아직 등록된 댓글이 없습니다.</p> : null}
+          : query.isPending ? <p role="status" className="py-4 text-sm text-muted-foreground">댓글을 불러오는 중…</p>
+          : !query.data.ready ? <p role="status" className="py-4 text-sm text-muted-foreground">분류별 댓글 서버 연결 대기</p>
+          : enabled && !roots.length ? <p className="py-4 text-sm text-muted-foreground">아직 등록된 댓글이 없습니다.</p> : null}
         {roots.map(comment => (
-          <div key={comment.id} className="border-t border-border">
+          <article key={comment.id} className="border-b border-border py-1">
             <CommentEntry comment={comment} onReply={writable ? item => {
               updateDraft({ reply: { id: item.id, author: item.authorName } })
               editor.current?.focus()
             } : undefined} />
             {replies.get(comment.id)?.map(reply => (
-              <div key={reply.id} className="ml-3 border-l border-border pl-3 sm:ml-6 sm:pl-4">
+              <div key={reply.id} className="ml-5 border-t border-border sm:ml-9">
                 <CommentEntry comment={reply} />
               </div>
             ))}
-          </div>
+          </article>
         ))}
         {writable && (
-          <form className="space-y-2 border-t border-border pt-3" onSubmit={event => void submit(event)}>
+          <form className="space-y-2 pt-4 sm:pt-6" onSubmit={event => void submit(event)}>
             {draft.reply && <div className="flex items-center justify-between rounded-md bg-muted px-2 text-xs">
               <span className="truncate">{draft.reply.author} 님에게 답글</span>
               <Button type="button" variant="ghost" size="sm" aria-label="답글 취소" disabled={busy} onClick={() => updateDraft({ reply: null })}>
@@ -246,22 +261,38 @@ export function VisualCategoryComments({
               </Button>
             </div>}
             <label className="sr-only" htmlFor={composerId}>{category.label} 댓글 입력</label>
-            <Textarea
-              id={composerId}
-              ref={editor}
-              placeholder="댓글 입력 · Shift+Enter 줄바꿈 / Enter 등록"
-              rows={2}
-              maxLength={MAX_VISUAL_COMMENT_LENGTH}
-              value={draft.body}
-              disabled={busy}
-              onChange={event => updateDraft({ body: event.target.value })}
-              onKeyDown={event => {
-                if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                  event.preventDefault()
-                  void submit()
-                }
-              }}
-            />
+            <div className="flex items-center rounded-md border border-border bg-card px-2 focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/25">
+              <Textarea
+                id={composerId}
+                ref={editor}
+                placeholder="줄바꿈 Shift+Enter / 입력 Enter"
+                rows={2}
+                className="min-w-0 resize-y border-0 px-2 py-4 shadow-none focus-visible:ring-0 sm:px-3"
+                maxLength={MAX_VISUAL_COMMENT_LENGTH}
+                value={draft.body}
+                disabled={busy}
+                onChange={event => updateDraft({ body: event.target.value })}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                    event.preventDefault()
+                    void submit()
+                  }
+                }}
+              />
+              <input type="file" ref={fileInput} className="hidden" multiple
+                onChange={event => {
+                  addFiles(Array.from(event.target.files ?? []))
+                  event.target.value = ''
+                }} />
+              <Button type="button" variant="ghost" size="icon" className="size-9 shrink-0 text-muted-foreground" disabled={busy}
+                aria-label="댓글 파일 첨부" title="댓글 파일 첨부" onClick={() => fileInput.current?.click()}>
+                <Paperclip className="size-4" />
+              </Button>
+              {(hasDraft || busy) && <Button type="submit" variant="ghost" size="icon" className="size-9 shrink-0 text-primary" disabled={busy}
+                aria-label={busy ? '등록 중…' : draft.reply ? '답글 등록' : '댓글 등록'} title={draft.reply ? '답글 등록' : '댓글 등록'}>
+                <Send className="size-4" />
+              </Button>}
+            </div>
             {draft.files.length > 0 && <ul className="flex flex-wrap gap-2 text-xs">
               {draft.files.map((file, index) => <li key={file.name + ':' + index} className="flex max-w-full items-center gap-1 rounded-md border border-border pl-2">
                 <span className="truncate">{file.name}</span>
@@ -270,22 +301,9 @@ export function VisualCategoryComments({
               </li>)}
             </ul>}
             {draft.error && <p role="alert" className="text-sm text-danger">{draft.error}</p>}
-            <div className="flex justify-between gap-2">
-              <input type="file" ref={fileInput} className="hidden" multiple
-                onChange={event => {
-                  addFiles(Array.from(event.target.files ?? []))
-                  event.target.value = ''
-                }} />
-              <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => fileInput.current?.click()}>
-                <Paperclip className="size-4" />첨부
-              </Button>
-              <Button type="submit" size="sm" disabled={busy || (!draft.body.trim() && !draft.files.length)}>
-                <Send className="size-4" />{busy ? '등록 중…' : draft.reply ? '답글 등록' : '댓글 등록'}
-              </Button>
-            </div>
           </form>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   )
 }

@@ -607,7 +607,7 @@ console.info('PASS: 숨겨진 탭 URL·Escape 보호, 같은 업무 탭 유지, 
   const detailBlock = between('const referenceCards =', 'const management =')
   assert.match(detailBlock, /<ResizableImage[\s\S]*?widthPercent=\{item\.widthPercent\}\s*heightPx=\{item\.heightPx\}\s*\/>/, '상세 보기 참고 이미지가 저장 크기로 보이지 않음')
   assert.doesNotMatch(detailBlock, /onSizeChange|onRemove/, '상세 보기 참고 이미지는 읽기 전용이어야 함')
-  assert.match(detailBlock, /<FileAttachmentCard key=\{item\.id\} file=\{item\.file\} \/>/)
+  assert.match(detailBlock, /<FileAttachmentCard key=\{item\.id\} file=\{item\.file\} downloadable=\{Boolean\(visualDetail\)\} \/>/)
 
   assert.doesNotMatch(page, /localStorage|sessionStorage/, '작업 요청은 로컬 상태로만 유지해야 함')
   assert.match(page, /등록한 요청과 첨부는 서버에 저장됩니다\./)
