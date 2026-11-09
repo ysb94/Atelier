@@ -31,12 +31,12 @@ type Draft = {
 const EMPTY_DRAFT: Draft = { body: '', files: [], reply: null }
 const PREVIEW_IMAGE = /^image\/(?:jpeg|png|webp|gif|avif)$/i
 
-export function VisualWorkAttachment({ file }: { file: VisualCommentFile }) {
+export function VisualWorkAttachment({ file, previewImage = true }: { file: VisualCommentFile; previewImage?: boolean }) {
   const [preview, setPreview] = useState<string>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const live = useRef(false)
-  const previewable = PREVIEW_IMAGE.test(file.type) && file.size <= 5 * 1024 * 1024
+  const previewable = previewImage && PREVIEW_IMAGE.test(file.type) && file.size <= 5 * 1024 * 1024
 
   useEffect(() => {
     live.current = true

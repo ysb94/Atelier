@@ -334,6 +334,7 @@ try {
     ['영상 작업자', 1, 0, undefined], ['배너 작업자', 0, undefined, undefined],
   ])
   assert.deepEqual(fullReview.assignments.map(row => row.supervisorRoundId), [undefined, undefined, groupId, groupId])
+  assert.deepEqual(fullReview.assignments.map(row => row.supervisorAtStart), [0, 1, 0, 0])
   assert.ok(fullReview.entries.some(row => row.note === '요청자 변경 요청'))
   await act(worker, 'banner', 'submit', { note: '배너 두 번째 검수 시안' })
   assert.equal((await review(ids.planner, 'banner')).result.note, '배너 완성본')

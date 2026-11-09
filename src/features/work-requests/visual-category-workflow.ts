@@ -53,6 +53,7 @@ export type VisualWorkflowAssignment = VisualRevisionCounts & {
   workerName?: string | null
   assignedAt?: string
   supervisorRoundId?: string
+  supervisorAtStart?: number
   reason?: 'initial' | 'handoff' | 'review' | 'legacy'
 }
 
@@ -70,52 +71,60 @@ export type VisualWorkflowReview = {
 
 type VisualReviewGroup = {
   openedBy?: VisualWorkflowEntry
-  requesterFeedback?: VisualWorkflowEntry
   supervisorCount: number
-  assignments: { assignment: VisualWorkflowAssignment; index: number; entries: VisualWorkflowEntry[] }[]
+  returns: VisualWorkflowEntry[]
+  rounds: Map<number, VisualWorkflowAssignment[]>
 }
 
 export function visualReviewGroups(review: VisualWorkflowReview) {
-  const first: VisualReviewGroup = { supervisorCount: 0, assignments: [] }
+  const first: VisualReviewGroup = { supervisorCount: 0, returns: [], rounds: new Map() }
   const groups = [first]
   const byOpeningId = new Map<string, VisualReviewGroup>()
-  const entriesByAssignment = new Map<string, VisualWorkflowEntry[]>()
-  const requesterFeedback = new Map<string, VisualWorkflowEntry>()
   let active = first
 
   for (const entry of [...review.entries].reverse()) {
-    if (entry.action === 'requester_return') requesterFeedback.set(entry.id, entry)
     if (entry.action === 'supervisor_forward') {
-      active = {
-        openedBy: entry, requesterFeedback: entry.roundId ? requesterFeedback.get(entry.roundId) : undefined,
-        supervisorCount: 0, assignments: [],
-      }
+      active = { openedBy: entry, supervisorCount: 0, returns: [], rounds: new Map() }
       groups.push(active)
       byOpeningId.set(entry.id, active)
     } else if (entry.action === 'supervisor_return') {
+      active.returns.push(entry)
       active.supervisorCount++
     }
   }
 
-  for (const entry of review.entries) {
-    if (!entry.assignmentId || entry.action === 'supervisor_forward') continue
-    const items = entriesByAssignment.get(entry.assignmentId) ?? []
-    items.push(entry)
-    entriesByAssignment.set(entry.assignmentId, items)
-  }
   const newestFirst = [...groups].reverse()
-  for (const [index, assignment] of review.assignments.entries()) {
+  for (const assignment of review.assignments) {
     const group = assignment.supervisorRoundId && byOpeningId.get(assignment.supervisorRoundId)
-    const assignedAt = assignment.assignedAt
+    const assignedAt = assignment.assignedAt ? Date.parse(assignment.assignedAt) : undefined
     const legacyGroup = !group && assignedAt && newestFirst.find(item =>
-      item.openedBy && Date.parse(item.openedBy.createdAt) <= Date.parse(assignedAt))
+      item.openedBy && Date.parse(item.openedBy.createdAt) <= assignedAt)
     const section = group || legacyGroup || first
-    section.assignments.push({ assignment, index, entries: assignment.id ? entriesByAssignment.get(assignment.id) ?? [] : [] })
+    const supervisorAtStart = assignment.supervisorAtStart ?? (assignedAt
+      ? section.returns.filter(entry => Date.parse(entry.createdAt) <= assignedAt).length : 0)
+    const round = section.rounds.get(supervisorAtStart) ?? []
+    round.push(assignment)
+    section.rounds.set(supervisorAtStart, round)
     if (section === first) first.supervisorCount = Math.max(first.supervisorCount, assignment.supervisor ?? 0)
   }
 
   active.supervisorCount = review.currentCounts?.supervisor ?? active.supervisorCount
-  return { groups, requesterCount: requesterFeedback.size }
+  for (const group of groups) {
+    if (!group.rounds.has(group.supervisorCount)) group.rounds.set(group.supervisorCount, [])
+  }
+  return groups
+}
+
+export function visualHistoryEntries(review: VisualWorkflowReview) {
+  const entries = [...review.entries, ...(review.pastAssignments ?? []).flatMap(assignment => assignment.entries)]
+  const assigned = new Set(entries.filter(entry => entry.action === 'assign_worker' || entry.action === 'middle_forward')
+    .map(entry => entry.assignmentId))
+  for (const { id, assignedAt } of review.assignments) {
+    if (id && assignedAt && !assigned.has(id)) {
+      entries.push({ id: 'assignment:' + id, action: 'assign_worker', note: '', resultUrl: null, createdAt: assignedAt, assignmentId: id })
+    }
+  }
+  return entries.sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt) || a.id.localeCompare(b.id))
 }
 
 export type VisualWorkflowNotice = {

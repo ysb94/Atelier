@@ -272,6 +272,7 @@ begin
         'reason',case when p_action='middle_forward' then 'review' when previous_worker is not null then 'handoff' else 'initial' end,
         'previousWorkerId',case when previous_worker is distinct from worker then previous_worker end,
         'sourceResultId',result_id,'supervisorRoundId',counts->'supervisorRoundId',
+        'supervisorAtStart',coalesce((counts->>'supervisor')::int,0),
         'supervisor',case when p_action='middle_forward' then coalesce((counts->>'supervisor')::int,0) end
       )));
     elsif cycle_id is null and worker is not null then
