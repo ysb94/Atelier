@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { build } from 'esbuild'
 import { chromium } from 'playwright-core'
 import { china, company, createMaterialTestDatabase, ids } from './verify-material-request-workflow.mjs'
+import { callDraftPriceFixture, draftPriceFixture, draftPriceRpcArgs, installDraftPriceFixture } from './verify-draft-price-requests.mjs'
 
 const { outputFiles } = await build({
   outdir: '.tmp/material-db-browser', write: false, bundle: true, format: 'esm', jsx: 'automatic', tsconfig: 'tsconfig.app.json',
@@ -13,6 +14,8 @@ const { outputFiles } = await build({
     import {ChinaMaterialRequests} from './src/features/china/ChinaMaterialRequests'
     import {ChinaAssignedWorkOrders} from './src/features/china/ChinaAssignedWorkOrders'
     import {ChinaWorkOrderTabs} from './src/features/china/ChinaWorkOrderTabs'
+    import {DraftPriceRequestButton} from './src/features/drafts/DraftPriceRequestButton'
+    import {useDraftPriceRequests} from './src/features/drafts/useDraftPriceRequests'
     import {getMyChinaWorkOrders} from './src/lib/supabase/china-assigned-work-orders'
     import {createRoot} from 'react-dom/client'
     import {MaterialRequestsPage} from './src/features/planning/MaterialRequestsPage'
@@ -23,13 +26,18 @@ const { outputFiles } = await build({
     import {companyNavGroupsForProfile} from './src/components/layout/company-workspace-nav'
     import {MATERIAL_REQUESTS_PATH} from './src/lib/workspace/material-request-navigation'
     const ids = ${JSON.stringify(ids)}
-    const actors = { planning: ids.requester, manager: ids.manager, managerBoard: ids.manager, worker: ids.worker, other: ids.other, recipient: ids.worker, scoreRecipient: ids.viewer, dualRecipient: ids.colleague }
-    const colorPhoto='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jN9sAAAAASUVORK5CYII='
-    const priceDrafts=[{
-      id:'price-preview',draftNo:'PL-0007',brandId:null,imageUrl:null,owner:'테스트 디자이너',nameKo:'예시 상품',nameEn:'Sample Product',
-      colors:[{id:'black',name:'Black'},{id:'yellow',name:'Yellow'}],
-      specs:{colorImageChoices:{black:'Image',yellow:'None'},colorPhotoUrls:{black:colorPhoto,yellow:colorPhoto}},
-    }]
+    const actors = { planning: ids.requester, pricePlanning: ids.requester, manager: ids.manager, managerBoard: ids.manager, worker: ids.worker, other: ids.other, recipient: ids.worker, scoreRecipient: ids.viewer, dualRecipient: ids.colleague }
+    const priceDraft = ${JSON.stringify(draftPriceFixture)}
+    const priceDrafts=[{ id:priceDraft.id,draftNo:'PL-0007',brandId:null,imageUrl:null,owner:'테스트 디자이너',nameKo:'검증용 상품',nameEn:'Fixture Product' }]
+    function PricePlanning() {
+      const prices=useDraftPriceRequests('planning')
+      const requests=prices.requests.filter(row=>row.draftId===priceDraft.id).sort((a,b)=>b.round-a.round)
+      const latest=requests[0]
+      return <DraftPriceRequestButton readOnly={false} hasColors missingColors={[]} controls={{
+        latest,reply:requests.find(row=>row.answeredAt),loading:prices.query.isPending,error:prices.query.error?.message ?? '',
+        retry:()=>void prices.query.refetch(),request:()=>prices.change({action:'request',draftId:priceDraft.id,revision:priceDraft.updatedAt,previousId:latest?.id ?? null}),
+      }}/>
+    }
     function ManagerBoard() {
       const screen=useQuery({queryKey:['china-work-screen',window.actor],queryFn:getMyChinaWorkOrders})
       return <ChinaWorkOrderTabs workloads={screen.data?.workloads} unchecked={new Map()} unreceived={0} priceDrafts={priceDrafts}>{()=>null}</ChinaWorkOrderTabs>
@@ -68,7 +76,7 @@ const { outputFiles } = await build({
         <FixtureNavigation />
         {recipientScreen && <NudgeInbox />}
         {locationState.pathname===MATERIAL_REQUESTS_PATH ? <ReleasePageGate><MaterialRequestsPage /></ReleasePageGate>
-          : screen==='planning' ? <MaterialRequestsPage/> : screen==='manager'
+          : screen==='pricePlanning' ? <PricePlanning/> : screen==='planning' ? <MaterialRequestsPage/> : screen==='manager'
           ? <><button onClick={()=>setPreviousActive(v=>!v)}>Toggle previous employment</button>
               <button onClick={()=>setSelectedAssigneeId(ids.worker)}>Assigned to worker</button>
               <ChinaMaterialRequests key={screen} selectedAssigneeId={selectedAssigneeId} activeAssigneeIds={new Set(previousActive ? [ids.worker,ids.other] : [ids.other])} assignees={[{id:ids.worker,name:'담당 직원'},{id:ids.other,name:'다른 직원'}]}/></>
@@ -83,7 +91,7 @@ const { outputFiles } = await build({
     builder.onResolve({ filter: /^@\/(?:features\/operations-support\/use-department-approvers|lib\/company\/workforce-management-context)$/ }, args =>
       /release-access-context\.tsx$/.test(args.importer) ? {path:args.path,namespace:'fixture'} : null)
     builder.onResolve({ filter: /^@\/lib\/supabase\/profiles$/ }, args => /(?:MaterialNudge(?:Dialog|Settings)|ChinaWorkOrderTabs|ChinaAssigneeManager)\.tsx$/.test(args.importer) ? {path:args.path,namespace:'fixture'} : null)
-    builder.onResolve({ filter: /^\.\/client$/ }, args => /(?:material-(?:requests|nudges|nudge-recipients)|china-(?:assigned-work-orders|work-assignees))\.ts$/.test(args.importer) ? {path:'client',namespace:'fixture'} : null)
+    builder.onResolve({ filter: /^\.\/client$/ }, args => /(?:draft-price-requests|material-(?:requests|nudges|nudge-recipients)|china-(?:assigned-work-orders|work-assignees))\.ts$/.test(args.importer) ? {path:'client',namespace:'fixture'} : null)
     builder.onLoad({ filter: /.*/, namespace: 'fixture' }, args => ({ contents:
       args.path === 'client' ? `
         const options=()=>({'x-actor':window.actor})
@@ -119,18 +127,21 @@ const { outputFiles } = await build({
 })
 
 const db = await createMaterialTestDatabase()
+await installDraftPriceFixture(db)
 const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || 'C:/Program Files/Google/Chrome/Application/chrome.exe' })
 const files = new Map()
 const downloads = []
 const errors = []
 let holdDetail
 let failConfirmation = false
+let failPriceReply = false
 await db.query('insert into public.material_nudge_recipients (company_id,profile_id) values ($1,$2),($1,$3)',
   [company, ids.manager, ids.worker])
 try {
-  const page = await browser.newPage()
+  const context = await browser.newContext()
+  const page = await context.newPage()
   page.on('pageerror', error => errors.push(error.message))
-  await page.route('https://material-board.invalid/**', async route => {
+  await context.route('https://material-board.invalid/**', async route => {
     const req = route.request()
     const path = new URL(req.url()).pathname
     if (path === '/app.js') return route.fulfill({ contentType: 'text/javascript', body: outputFiles.find(f => f.path.endsWith('.js')).text })
@@ -143,6 +154,10 @@ try {
     }
     if (failConfirmation && path.endsWith('/confirm_material_nudge_request')) {
       failConfirmation = false
+      return route.fulfill({ status:503,json:{data:null,error:{code:'57014',message:'Fixture timeout'}} })
+    }
+    if (failPriceReply && path.endsWith('/reply_draft_price')) {
+      failPriceReply = false
       return route.fulfill({ status:503,json:{data:null,error:{code:'57014',message:'Fixture timeout'}} })
     }
     try {
@@ -161,6 +176,8 @@ try {
           return rows.length && files.has(key) ? files.get(key) : {error:{code:'42501',message:'파일에 접근할 수 없습니다.'}}
         }
         const p = req.postDataJSON()
+        const rpc = path.slice('/rpc/'.length)
+        if (Object.hasOwn(draftPriceRpcArgs, rpc)) return { data:await callDraftPriceFixture(tx,rpc,p),error:null }
         if (path.endsWith('/material_nudge_recipients')) {
           const { rows } = await tx.query('select profile_id from public.material_nudge_recipients order by profile_id')
           return {data:rows,error:null}
@@ -351,42 +368,79 @@ try {
   assert.equal(await materialsTab.getByTitle('미확인 건수').count(),0)
   await page.getByRole('button',{name:'발송 처리',exact:true}).click()
   await expectWorkload(0,1)
-  await open('managerBoard')
-  await pricesTab.click()
-  await page.getByRole('heading',{name:'단가요청',exact:true}).waitFor()
-  const priceFilters=page.getByRole('group',{name:'단가요청 구분'})
-  const priceTable=page.getByRole('table',{name:'단가요청 목록'})
+  const priceManager = await context.newPage()
+  priceManager.on('pageerror', error => errors.push(error.message))
+  await priceManager.clock.install()
+  await priceManager.goto('https://material-board.invalid/#managerBoard')
+  const managerPricesTab=priceManager.getByRole('group',{name:'중국팀 업무'}).getByRole('button',{name:/단가요청$/})
+  const managerMaterialsTab=priceManager.getByRole('group',{name:'중국팀 업무'}).getByRole('button',{name:/자재요청$/})
+  await managerPricesTab.click()
+  await priceManager.getByText('해당 단가요청이 없습니다.',{exact:true}).waitFor()
+  await page.clock.install()
+  await page.bringToFront()
+  await open('pricePlanning')
+  await page.getByRole('button',{name:'단가 요청',exact:true}).click()
+  const planningPriceDialog=page.getByRole('dialog')
+  await planningPriceDialog.getByRole('button',{name:'단가 요청 보내기',exact:true}).click()
+  await planningPriceDialog.getByText('1차 요청이 접수되어 중국팀 회신을 기다리고 있습니다.').waitFor()
+  assert.equal(await planningPriceDialog.getByRole('button',{name:/단가.*보내기/}).count(),0)
+
+  await priceManager.bringToFront()
+  await priceManager.clock.fastForward(31_000)
+  const priceFilters=priceManager.getByRole('group',{name:'단가요청 구분'})
+  const priceTable=priceManager.getByRole('table',{name:'단가요청 목록'})
   const firstPriceRow=priceTable.getByRole('row').filter({hasText:'1차 요청'})
   const repeatPriceRow=priceTable.getByRole('row').filter({hasText:'단가 재요청'})
-  assert.equal(await pricesTab.getByTitle('미확인 건수').textContent(),'2')
-  assert.equal(await priceTable.getByRole('row').nth(1).textContent(),await firstPriceRow.textContent())
-  await priceFilters.getByRole('button',{name:'재요청 (1)',exact:true}).click()
-  await repeatPriceRow.waitFor()
-  assert.equal(await firstPriceRow.count(),0)
+  await firstPriceRow.getByText('No. PL-0007',{exact:true}).waitFor()
+  assert.equal(await managerPricesTab.getByTitle('미확인 건수').textContent(),'1')
   await priceFilters.getByRole('button',{name:'1차 요청 (1)',exact:true}).click()
   assert.equal(await firstPriceRow.getByRole('button',{name:'Yellow 컬러 사진 크게 보기'}).count(),0)
   await firstPriceRow.getByRole('button',{name:'Black 컬러 사진 크게 보기'}).click()
-  const colorDialog=page.getByRole('dialog',{name:'Black 컬러 사진 크게 보기'})
+  const colorDialog=priceManager.getByRole('dialog',{name:'Black 컬러 사진 크게 보기'})
   await colorDialog.getByRole('img',{name:'Black 컬러'}).waitFor()
   await colorDialog.getByRole('button',{name:'사진 크게 보기 닫기'}).click()
   const blackPrice=firstPriceRow.getByRole('spinbutton',{name:'Black 단가 (위안)',exact:true})
-  await blackPrice.fill('')
+  assert.equal(await blackPrice.inputValue(),'')
   await firstPriceRow.getByRole('button',{name:'단가 전송',exact:true}).click()
   assert.equal(await blackPrice.evaluate(input=>input.validity.valueMissing),true)
-  assert.equal(await pricesTab.getByTitle('미확인 건수').textContent(),'2')
+  assert.equal(await managerPricesTab.getByTitle('미확인 건수').textContent(),'1')
   await blackPrice.fill('17.50')
-  await firstPriceRow.getByRole('button',{name:'단가 전송',exact:true}).click()
-  await firstPriceRow.getByText('전송 미리보기 완료',{exact:true}).waitFor()
-  assert.equal(await pricesTab.getByTitle('미확인 건수').textContent(),'1')
-  await priceFilters.getByRole('button',{name:'ALL (1)',exact:true}).click()
-  assert.equal(await repeatPriceRow.getByRole('spinbutton',{name:'Black 단가 (위안)',exact:true}).inputValue(),'15')
-  await materialsTab.click()
-  await pricesTab.click()
+  await firstPriceRow.getByRole('spinbutton',{name:'Yellow 단가 (위안)',exact:true}).fill('0')
+  await managerMaterialsTab.click()
+  await managerPricesTab.click()
   assert.equal(await blackPrice.inputValue(),'17.50')
+  failPriceReply = true
+  await firstPriceRow.getByRole('button',{name:'단가 전송',exact:true}).click()
+  await firstPriceRow.getByRole('alert').filter({hasText:'단가를 전송하지 못했습니다.'}).waitFor()
+  assert.equal(await managerPricesTab.getByTitle('미확인 건수').textContent(),'1')
+  await firstPriceRow.getByRole('button',{name:'단가 전송',exact:true}).click()
+  await firstPriceRow.getByText('전송 완료',{exact:true}).waitFor()
+  assert.equal(await managerPricesTab.getByTitle('미확인 건수').count(),0)
+  await priceFilters.getByRole('button',{name:'ALL (0)',exact:true}).waitFor()
+  assert.equal(Number(await blackPrice.inputValue()),17.5)
   assert.equal(await blackPrice.isEditable(),false)
-  await repeatPriceRow.getByRole('button',{name:'단가 전송',exact:true}).click()
-  assert.equal(await pricesTab.getByTitle('미확인 건수').count(),0)
-  await materialsTab.click()
+  await priceManager.reload()
+  await managerPricesTab.click()
+  await firstPriceRow.getByText('전송 완료',{exact:true}).waitFor()
+  assert.equal(Number(await blackPrice.inputValue()),17.5)
+
+  await page.bringToFront()
+  await page.clock.fastForward(31_000)
+  await planningPriceDialog.getByText('1차 회신 단가',{exact:true}).waitFor()
+  await planningPriceDialog.getByText('¥17.5',{exact:true}).waitFor()
+  await planningPriceDialog.getByText('¥0',{exact:true}).waitFor()
+  await planningPriceDialog.getByRole('button',{name:'단가 재요청 보내기',exact:true}).click()
+  await planningPriceDialog.getByText('2차 요청이 접수되어 중국팀 회신을 기다리고 있습니다.').waitFor()
+  await planningPriceDialog.getByText('¥17.5',{exact:true}).waitFor()
+  await priceManager.bringToFront()
+  await priceManager.clock.fastForward(31_000)
+  await priceFilters.getByRole('button',{name:'재요청 (1)',exact:true}).click()
+  await repeatPriceRow.waitFor()
+  assert.equal(await firstPriceRow.count(),0)
+  assert.equal(await repeatPriceRow.getByRole('spinbutton',{name:'Black 단가 (위안)',exact:true}).inputValue(),'')
+  await priceManager.close()
+  console.log('Draft price browser: planning request, cross-page refresh, manager photo/reply, failure retry, pending count and re-request passed')
+  await open('managerBoard')
   const assigneeTabs=page.getByRole('group',{name:'자재요청 담당자',exact:true})
   const workerTab=assigneeTabs.getByRole('button',{name:/김영인/})
   await workerTab.getByTitle('진행 중 / 완료 대기').filter({hasText:/0\s*\/\s*1/}).waitFor()

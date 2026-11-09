@@ -1,7 +1,6 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, GripVertical, Heart, ImageOff, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
@@ -19,6 +18,7 @@ import { RELEASE_CERTAINTY_LABEL, formatReleaseGroupLabel, formatTargetDate, typ
 import './draft-board.css'
 import { DraftSampleProgress } from './DraftSampleProgress'
 import { DraftColorSampleProgress } from './DraftColorSampleProgress'
+import { DraftPriceRequestButton, type DraftPriceControls } from './DraftPriceRequestButton'
 
 const SAMPLE_WORK_ORDER_ACCEPT =
   'application/pdf,image/png,image/jpeg,image/webp,.pdf,.png,.jpg,.jpeg,.webp,.xls,.xlsx'
@@ -164,54 +164,6 @@ function ColorImageChoiceDot({ choice, photoUrl }: { choice?: DraftColorImageCho
       aria-label={label}
       className={`size-1.5 shrink-0 rounded-full border ${configured ? 'border-primary bg-primary' : 'border-muted-foreground'}`}
     />
-  )
-}
-
-function DraftPriceRequestButton({ readOnly, hasColors, missingColors }: {
-  readOnly: boolean
-  hasColors: boolean
-  missingColors: string[]
-}) {
-  const [open, setOpen] = useState(false)
-  const active = useWorkspaceTabActivity()
-  const dialogRef = useRef<HTMLDialogElement>(null)
-  const titleId = useId()
-  const ready = hasColors && missingColors.length === 0
-  const visible = open && active && !readOnly
-  const heading = ready ? '단가요청 준비 완료' : hasColors ? '컬러 이미지를 등록해 주세요' : '컬러를 먼저 추가해 주세요'
-
-  useEffect(() => {
-    if (!visible) return
-    const dialog = dialogRef.current
-    dialog?.showModal()
-    return () => dialog?.close()
-  }, [visible])
-
-  return (
-    <>
-      <Button type="button" size="sm" variant={ready ? 'default' : 'outline'} className="h-7 px-2.5"
-        disabled={readOnly} title={heading} aria-haspopup="dialog" onClick={() => setOpen(true)}>
-        단가 요청
-      </Button>
-      {visible ? createPortal(
-        <dialog ref={dialogRef} aria-labelledby={titleId} onCancel={(event) => { event.preventDefault(); setOpen(false) }}
-          className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-sm rounded-xl border border-border bg-card p-5 text-left text-card-foreground shadow-xl backdrop:bg-black/40">
-          <h2 id={titleId} className="font-semibold">{heading}</h2>
-          {ready ? (
-            <p className="mt-2 text-sm text-muted-foreground">모든 컬러의 이미지 설정을 확인했습니다. 단가요청 접수 기능은 준비 중입니다.</p>
-          ) : (
-            <div className="mt-2 space-y-2 text-sm">
-              {missingColors.length > 0 ? <p className="break-words text-danger">미등록 컬러 · {missingColors.join(', ')}</p> : null}
-              <p className="text-muted-foreground">COLOR 열의 컬러 문서에서 사진은 Image로 첨부하고, 사진이 없으면 None을 선택해 저장해 주세요.</p>
-            </div>
-          )}
-          <div className="mt-4 flex justify-end">
-            <Button type="button" size="sm" onClick={() => setOpen(false)}>확인</Button>
-          </div>
-        </dialog>,
-        document.body,
-      ) : null}
-    </>
   )
 }
 
@@ -845,9 +797,10 @@ export function DraftPhoto({ src, name, onOpen, compact = false }: { src: string
 
 export type DraftConfirmFlag = 'nameConfirmed' | 'colorsConfirmed'
 
-export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
+export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price, onOpen, onNextSample, onSchedule, onSaveColors, onRenameColor, onSaveSheetValue, onUploadSampleWorkOrder, onReceiveSample, onRequestNextSampleRound, onReceiveColorSample, onSetColorSampleDone, onToggleConfirm }: {
   readOnly?: boolean
   draft: ProductDraft; schedule: ResolvedReleaseSchedule | undefined; brand: Brand | undefined
+  price?: DraftPriceControls
   onOpen: () => void
   onNextSample?: () => void
   onSchedule: () => void
@@ -953,7 +906,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
       )}
     </td>
     <td className="draft-sheet-price-cell">
-      <DraftPriceRequestButton readOnly={readOnly} hasColors={hasColor} missingColors={missingPriceColors} />
+      <DraftPriceRequestButton readOnly={readOnly} hasColors={hasColor} missingColors={missingPriceColors} controls={price} />
     </td>
     <td>
       <div className="draft-color-pad draft-sheet-color-tools">

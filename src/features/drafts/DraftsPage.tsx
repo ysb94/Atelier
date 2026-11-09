@@ -27,6 +27,7 @@ import { parseSizeSpecInput } from '@/lib/drafts/spec-format'
 import { writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
 import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
+import { draftPriceError, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
 import {
   type DraftColorImageChoice,
   type ProductDraft,
@@ -41,6 +42,7 @@ import { DraftFolderBar, DraftFolderHeading } from './DraftFolderBar'
 import { matchesDraftFolder } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
+import { useDraftPriceRequests } from './useDraftPriceRequests'
 import {
   formatReleaseGroupLabel,
   resolveReleaseSchedule,
@@ -110,6 +112,18 @@ export function CompanyDraftsPage() {
     queryKey: ['product-drafts', 'company', companyId],
     queryFn: () => getCompanyProductDrafts(companyId),
   })
+  const prices = useDraftPriceRequests('planning')
+  const priceByDraft = useMemo(() => {
+    const byDraft = new Map<string, { latest: DraftPriceRequest; reply?: DraftPriceRequest }>()
+    for (const request of prices.requests) {
+      const current = byDraft.get(request.draftId)
+      const latest = !current || request.round > current.latest.round ? request : current.latest
+      const reply = request.answeredAt && (!current?.reply || request.round > current.reply.round) ? request : current?.reply
+      byDraft.set(request.draftId, { latest, reply })
+    }
+    return byDraft
+  }, [prices.requests])
+  const priceListError = prices.query.error ? draftPriceError(prices.query.error, '단가요청을 불러오지 못했습니다.') : ''
   const seasonQueries = useQueries({
     queries: brands.map((item) => ({
       queryKey: ['seasons', item.id] as const,
@@ -587,6 +601,7 @@ export function CompanyDraftsPage() {
                 const schedule = scheduleByDraft.get(draft.id)
                 const brandId = schedule?.brandId ?? draft.brandId
                 const brand = brandId ? brandById.get(brandId) : undefined
+                const price = priceByDraft.get(draft.id)
                 return (
                   <DraftSheetRow
                     key={draft.id}
@@ -594,6 +609,13 @@ export function CompanyDraftsPage() {
                     readOnly={!canWriteDraft(workAccess.access,draft)}
                     schedule={schedule}
                     brand={brand}
+                    price={{
+                      ...price, loading: prices.query.isPending, error: priceListError,
+                      retry: () => { void prices.query.refetch() },
+                      request: () => prices.change({
+                        action: 'request', draftId: draft.id, revision: draft.updatedAt, previousId: price?.latest.id ?? null,
+                      }),
+                    }}
                     onOpen={() => navigate(draftDetailPath(draft.id))}
                     onNextSample={() => navigate(`${draftDetailPath(draft.id)}#next-sample`)}
                     onSchedule={() => setScheduleDraftId(draft.id)}

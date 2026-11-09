@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileText, Settings2, UserPlus } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
@@ -7,13 +7,14 @@ import { FilterTabs, type FilterTab } from '@/components/ui/filter-tabs'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import type { ChinaAssigneeWorkload } from '@/lib/supabase/china-assigned-work-orders'
 import { CHINA_DEPARTMENT_ID, listChinaWorkAssignees, saveChinaWorkAssigneeOrder } from '@/lib/supabase/china-work-assignees'
+import { draftPriceError } from '@/lib/supabase/draft-price-requests'
 import { listOrgChartMembers, type OrgChartMember } from '@/lib/supabase/profiles'
 import type { ProductDraft } from '@/lib/types'
 import { cn, emptyList } from '@/lib/utils'
 import { ChinaAssigneeManager } from './ChinaAssigneeManager'
 import { ChinaMaterialRequests } from './ChinaMaterialRequests'
-import { ChinaPriceRequests } from './ChinaPriceRequests'
-import { buildChinaPricePreviewRequests, type ChinaPricePreviewState } from './china-price-preview'
+import { ChinaPriceRequests, type DraftPriceInputs } from './ChinaPriceRequests'
+import { useDraftPriceRequests } from '@/features/drafts/useDraftPriceRequests'
 import { useMaterialRequests } from '@/features/planning/useMaterialRequests'
 import { materialAwaitingAssignment } from './china-material-workload'
 
@@ -45,11 +46,9 @@ export function ChinaWorkOrderTabs({ children, workloads, unchecked, unreceived,
   const [workTab, setWorkTab] = useState<WorkTab>('orders')
   const [assigneeTab, setAssigneeTab] = useState(NEW_ASSIGNEE)
   const [materialAssigneeTab, setMaterialAssigneeTab] = useState(NEW_ASSIGNEE)
-  const [pricePreview, setPricePreview] = useState<ChinaPricePreviewState>({})
-  const [pricePreviewTime] = useState(() => new Date().toISOString())
-  const priceRequests = useMemo(() => buildChinaPricePreviewRequests(priceDrafts ?? emptyList<ProductDraft>(), brandById, pricePreviewTime),
-    [priceDrafts, brandById, pricePreviewTime])
-  const pendingPrices = priceRequests.filter(request => !pricePreview[request.id]?.sent).length
+  const [priceInputs, setPriceInputs] = useState<DraftPriceInputs>({})
+  const prices = useDraftPriceRequests('china')
+  const pendingPrices = prices.requests.filter(request => !request.answeredAt).length
   const { requests: materialRequests } = useMaterialRequests('china', { refreshMs: 30_000 })
   const [managerMode, setManagerMode] = useState<'add' | 'manage' | null>(null)
   const dragged = useRef<string | null>(null)
@@ -97,6 +96,7 @@ export function ChinaWorkOrderTabs({ children, workloads, unchecked, unreceived,
     }
   }
   const isMaterials = workTab === 'materials'
+  const isPrices = workTab === 'prices'
   const showAssignees = workTab === 'orders' || isMaterials
   const workTabItems = workTabs.map(tab => {
     const unread = tab.value === 'orders' ? unreceived : tab.value === 'materials' ? unreadMaterials : tab.value === 'prices' ? pendingPrices : 0
@@ -127,6 +127,15 @@ export function ChinaWorkOrderTabs({ children, workloads, unchecked, unreceived,
     setDropTarget(null)
   }
 
+  async function replyPrice(requestId: string, amounts: Record<string, number>) {
+    await prices.change({ action: 'reply', requestId, amounts })
+    setPriceInputs(current => {
+      const next = { ...current }
+      delete next[requestId]
+      return next
+    })
+  }
+
   useEffect(() => {
     if (assigneesQuery.error) console.warn('[china-assignees] 담당자 목록 조회 실패', { code: 'query' })
   }, [assigneesQuery.error])
@@ -138,7 +147,7 @@ export function ChinaWorkOrderTabs({ children, workloads, unchecked, unreceived,
     <div className="mb-5">
       <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
         <FilterTabs tabs={workTabItems} value={workTab} onChange={setWorkTab} ariaLabel="중국팀 업무" variant="underline" size="large" className="flex-1" />
-        {!isMaterials && <Badge variant="muted" className="self-start sm:self-center">화면 구성 미리보기</Badge>}
+        {!isMaterials && !isPrices && <Badge variant="muted" className="self-start sm:self-center">화면 구성 미리보기</Badge>}
       </div>
       {showAssignees && (
         <div className="mt-2 flex min-w-0 items-stretch border-b border-border">
@@ -205,7 +214,10 @@ export function ChinaWorkOrderTabs({ children, workloads, unchecked, unreceived,
     {workTab === 'orders' ? children({ assigneeId: selectedAssigneeId }) : workTab === 'materials'
       ? <ChinaMaterialRequests key={currentAssignee.value} selectedAssigneeId={selectedAssigneeId} showHistory={showHistory} activeAssigneeIds={assigneesQuery.isSuccess ? activeAssigneeIds : null}
         assignees={assignees.map(row => ({ id: row.profileId, name: names.get(row.profileId) || '담당자' }))} />
-      : workTab === 'prices' ? <ChinaPriceRequests requests={priceRequests} preview={pricePreview} setPreview={setPricePreview} />
+      : isPrices ? <ChinaPriceRequests requests={prices.requests} drafts={priceDrafts ?? emptyList<ProductDraft>()} brandById={brandById} inputs={priceInputs}
+        loading={prices.query.isPending} error={prices.query.error ? draftPriceError(prices.query.error, '단가요청을 불러오지 못했습니다.') : ''}
+        onRetry={() => { void prices.query.refetch() }} onReply={replyPrice}
+        onEdit={(requestId, colorId, value) => setPriceInputs(current => ({ ...current, [requestId]: { ...current[requestId], [colorId]: value } }))} />
       : <Card className="flex min-h-64 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
       <FileText className="size-8 text-muted-foreground" aria-hidden="true" />
       <h2 className="text-base font-semibold">{currentWork.label}</h2>
