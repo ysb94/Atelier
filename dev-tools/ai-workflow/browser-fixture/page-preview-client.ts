@@ -11,6 +11,11 @@ export function getSupabase() {
     if(meetings)return meetings
     const permissions = permissionFixtureRpc(name,args)
     if (permissions) return permissions
+    if (name === 'list_my_department_absences') return { range: async () => ({ data: [], error: null }) }
+    if (name === 'material_nudge_workspace') {
+      const response = Promise.resolve({ data: { can_view: false, notices: [] }, error: null })
+      return Object.assign(response, { abortSignal: () => response })
+    }
     if (name === 'mark_chat_room_read') return Promise.resolve({ data: null, error: null })
     if (name !== 'list_my_approval_requests') return base.rpc(name, args)
     const data = ['fixture-user', 'other-user'].map((employee_id, index) => ({

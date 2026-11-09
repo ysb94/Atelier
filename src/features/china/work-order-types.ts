@@ -11,6 +11,7 @@ export type WorkOrderRow = {
   shipped: boolean
   shippedAt: string | null
   returnedAt: string | null
+  receivedAt: string | null
   passed: boolean
   failReason: string
   focusReason: string
@@ -19,6 +20,7 @@ export type WorkOrderRow = {
   assigneeId: string | null
   assigneeName: string
   fileCheckedAt: string | null
+  assigneeCheckedAt: string | null
 }
 
 export type WorkOrderGroup = { draft: ProductDraft; rows: WorkOrderRow[] }

@@ -14,7 +14,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   Link,
   Navigate,
@@ -30,6 +30,7 @@ import {
   CheckCircle2,
   ClipboardPlus,
   Clock3,
+  Download,
   Eye,
   Inbox,
   Paperclip,
@@ -52,10 +53,17 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Input, Select, Textarea } from '@/components/ui/input'
+import { Input, Select } from '@/components/ui/input'
 import { useWorkRequestSettings } from '@/lib/supabase/work-request-settings'
+import { changeVisualWorkFinalApproval } from '@/lib/supabase/work-requests'
+import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { DEFAULT_VISUAL_CATEGORIES, type VisualCategory, type VisualRequestValues } from './visual-request-config'
 import { WorkRequestCategoryAssignments } from './WorkRequestCategoryAssignments'
+import { VisualWorkRequestDrawer } from './VisualWorkRequestDrawer'
+import { VisualWorkflowNotificationList } from '@/features/settings/MyHomeNotificationList'
+import { VisualFinalApprovalPanel } from './VisualFinalApprovalPanel'
+import { visualFinalPending, visualSummaryApprover, workRequestStatusMeta, type VisualFinalAction } from './visual-final-approval'
+import { downloadVisualWorkFile, visualWorkDetail } from './visual-work-detail'
 import { useAuth } from '@/lib/supabase/auth'
 import { listBrandDirectory } from '@/lib/supabase/profiles'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -65,6 +73,7 @@ import {
   isWorkRequestOwner,
   resolveWorkRequestViewRole,
   WORK_REQUEST_CONFIG,
+  WORK_REQUEST_DEPARTMENT_IDS,
   type WorkRequestOwner,
 } from './work-request-form-config'
 import { WorkRequestAcceptDialog } from './WorkRequestAcceptDialog'
@@ -79,6 +88,8 @@ import {
   visualSectionTitle,
   type VisualSectionId,
 } from './visual-request-sections'
+import { VisualQuestionAnswer, type VisualAnswerEditorOptions } from './VisualQuestionAnswer'
+import { replaceVisualQuestionMedia, splitVisualQuestionContent } from './visual-question-content'
 import {
   compareRequestsByDeadline,
   dateFromToday,
@@ -100,7 +111,7 @@ import {
   LOCAL_CURRENT_DEPARTMENT,
   PRIORITY_META,
   REQUESTER_CHAT_ROOM,
-  STATUS_META,
+  hasRequestBody,
   isClosedStatus,
   isCompletionPending,
   nextCompletionStatus,
@@ -153,13 +164,6 @@ function createEmptyValues(): FormValues {
     referenceFiles: [],
     blocks: [emptyTextBlock()],
   }
-}
-
-function hasRequestBody(blocks: ContentBlock[]): boolean {
-  // 참고 파일만 있는 초안은 요청 내용을 쓴 것이 아니다. 본문 블록만 필수값으로 본다.
-  return blocks.some((block) =>
-    block.type === 'text' ? block.text.trim().length > 0 : true,
-  )
 }
 
 function formatFileSize(size: number): string {
@@ -408,12 +412,9 @@ function splitBodyParts(blocks: ContentBlock[]): BodyPart[] {
             id: pendingText.id,
             type: 'text',
             text: joinPlainText(pendingText.text, block.text),
+            ...(!block.text && pendingText.previewHtml !== undefined ? { previewHtml: pendingText.previewHtml } : {}),
           }
-        : {
-            id: block.id,
-            type: 'text',
-            text: block.text,
-          }
+        : { ...block }
       continue
     }
     pendingImages.push(block)
@@ -667,6 +668,7 @@ function ResizableImage({
   onHeightChange,
   isMoving,
   onRemove,
+  downloadable = false,
   removeLabel = '이미지 삭제',
 }: {
   file: File
@@ -680,6 +682,7 @@ function ResizableImage({
   onHeightChange?: (height: number) => void
   isMoving?: boolean
   onRemove?: () => void
+  downloadable?: boolean
   removeLabel?: string
 }) {
   const boxRef = useRef<HTMLDivElement>(null)
@@ -803,7 +806,7 @@ function ResizableImage({
   if (failed) {
     return (
       <div ref={boxRef} className="flow-root">
-        <FileAttachmentCard file={file} onRemove={onRemove} />
+        <FileAttachmentCard file={file} onRemove={onRemove} downloadable={downloadable} />
       </div>
     )
   }
@@ -838,6 +841,12 @@ function ResizableImage({
           style={lockedHeight ? { aspectRatio: `${imageWidthPx(width)} / ${lockedHeight}` } : undefined}
           onError={handleImageError}
         />
+        {downloadable && <Button type="button" variant="outline" size="icon"
+          aria-label={`${file.name} 다운로드`} title={`${file.name} 다운로드`}
+          className="absolute right-2 top-2 size-9 bg-card/95 text-muted-foreground shadow-none"
+          onClick={() => downloadVisualWorkFile(file, file.name)}>
+          <Download className="size-4" />
+        </Button>}
         {onSizeChange || onWrapChange ? (
           <>
             <div className="pointer-events-none absolute inset-0 rounded-md ring-1 ring-border/70 ring-inset" />
@@ -919,10 +928,20 @@ function ResizableImage({
 function FileAttachmentCard({
   file,
   onRemove,
+  downloadable = false,
 }: {
   file: File
   onRemove?: () => void
+  downloadable?: boolean
 }) {
+  if (downloadable) return (
+    <Button type="button" variant="outline" aria-label={`${file.name} 다운로드`}
+      className="h-auto min-h-12 w-full justify-between gap-4 whitespace-normal bg-background/70 px-4 py-3 text-left font-normal shadow-none"
+      onClick={() => downloadVisualWorkFile(file, file.name)}>
+      <span className="min-w-0 wrap-anywhere">{file.name}</span>
+      <Download className="size-5 shrink-0 text-muted-foreground" />
+    </Button>
+  )
   const format = fileFormatLabel(file)
 
   return (
@@ -1062,48 +1081,82 @@ function ReferenceFilesField({
   )
 }
 
+type EditableTextOptions = {
+  label: string
+  descriptionId?: string
+  required?: boolean
+  singleLine?: boolean
+}
+
 function AutoGrowEditable({
   textId,
   value,
+  previewHtml,
+  richPreview,
   placeholder,
   className,
+  textOptions,
   onChange,
   onPasteFiles,
   onBackspaceEmpty,
 }: {
   textId: string
   value: string
+  previewHtml?: string
+  richPreview?: boolean
   placeholder?: string
   className?: string
-  onChange: (text: string) => void
+  textOptions?: EditableTextOptions
+  onChange: (text: string, previewHtml?: string) => void
   onPasteFiles?: (event: ClipboardEvent<HTMLDivElement>) => void
   onBackspaceEmpty?: (event: KeyboardEvent<HTMLDivElement>) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const questionAnswer = textOptions?.required !== undefined
 
   useEffect(() => {
     const el = ref.current
-    if (!el || document.activeElement === el) return
+    if (!el) return
+    const focused = document.activeElement === el
+    if (focused && !questionAnswer) return
+    if (richPreview && previewHtml !== undefined) {
+      // Only the local preview editor supplies this markup. Paste accepts plain text.
+      if (el.innerHTML !== previewHtml) el.innerHTML = previewHtml
+      return
+    }
     if (normalizeEditableText(el.innerText) !== value) {
       el.textContent = value
+      if (focused) {
+        const range = document.createRange()
+        range.selectNodeContents(el)
+        range.collapse(false)
+        const selection = window.getSelection()
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+      }
     }
-  }, [value])
+  }, [value, previewHtml, richPreview, questionAnswer])
 
   return (
     <div
       ref={ref}
       data-text-id={textId}
       role="textbox"
-      aria-multiline="true"
+      aria-label={textOptions?.label}
+      aria-describedby={textOptions?.descriptionId}
+      aria-required={textOptions?.required}
+      aria-multiline={!textOptions?.singleLine}
       contentEditable
       suppressContentEditableWarning
       data-placeholder={placeholder}
       className={cn(
         'min-h-7 w-full text-sm leading-7 outline-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]',
+        questionAnswer && 'rounded-sm focus-visible:ring-1 focus-visible:ring-ring/25',
         className,
       )}
       onInput={(event) => {
-        onChange(normalizeEditableText(event.currentTarget.innerText))
+        const el = event.currentTarget
+        onChange(normalizeEditableText(el.innerText), richPreview ? el.innerHTML : undefined)
       }}
       onPaste={(event) => {
         if (event.clipboardData.files.length > 0) {
@@ -1111,12 +1164,24 @@ function AutoGrowEditable({
           return
         }
         event.preventDefault()
-        document.execCommand('insertText', false, event.clipboardData.getData('text/plain'))
+        const text = event.clipboardData.getData('text/plain')
+        document.execCommand('insertText', false, textOptions?.singleLine ? text.replace(/[\r\n]+/g, ' ') : text)
       }}
       onKeyDown={(event) => {
+        if (questionAnswer && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+          event.preventDefault()
+          const selection = window.getSelection()
+          if (selection) {
+            const range = document.createRange()
+            range.selectNodeContents(event.currentTarget)
+            selection.removeAllRanges()
+            selection.addRange(range)
+          }
+          return
+        }
         if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
           event.preventDefault()
-          document.execCommand('insertText', false, '\n')
+          if (!textOptions?.singleLine) document.execCommand('insertText', false, '\n')
           return
         }
         if (
@@ -1161,10 +1226,13 @@ function BodyFlow({
   text,
   images,
   placeholder,
+  textOptions,
   readOnly,
+  visualDetail,
   movingId,
   heights,
   onTextChange,
+  richPreview,
   onImageSize,
   onImageWrap,
   onImageHeight,
@@ -1177,10 +1245,13 @@ function BodyFlow({
   text: TextContentBlock
   images: ImageContentBlock[]
   placeholder?: string
+  textOptions?: EditableTextOptions
   readOnly?: boolean
+  visualDetail?: boolean
   movingId?: string
   heights: Record<string, number>
-  onTextChange?: (text: string) => void
+  onTextChange?: (text: string, previewHtml?: string) => void
+  richPreview?: boolean
   onImageSize?: (id: string, size: { widthPercent: number; heightPx?: number }) => void
   onImageWrap?: (id: string, wrap: ImageWrap) => void
   onImageHeight?: (id: string, height: number) => void
@@ -1223,6 +1294,7 @@ function BodyFlow({
             >
               <ResizableImage
                 file={image.file}
+                downloadable={visualDetail}
                 widthPercent={width}
                 heightPx={image.heightPx}
                 wrap={image.wrap ?? 'none'}
@@ -1252,15 +1324,20 @@ function BodyFlow({
         )
       })}
       {readOnly ? (
-        text.text.trim() ? (
-          <p className="whitespace-pre-wrap text-sm leading-7">{text.text}</p>
+        richPreview && text.previewHtml !== undefined ? (
+          <div className="whitespace-pre-wrap text-sm leading-7" dangerouslySetInnerHTML={{ __html: text.previewHtml }} />
+        ) : text.text.trim() ? (
+          <p className={cn('whitespace-pre-wrap leading-7', visualDetail ? 'wrap-anywhere text-[15px]' : 'text-sm')}>{text.text}</p>
         ) : null
       ) : (
         <AutoGrowEditable
           textId={text.id}
           value={text.text}
+          previewHtml={text.previewHtml}
+          richPreview={richPreview}
           placeholder={placeholder}
-          onChange={(value) => onTextChange?.(value)}
+          textOptions={textOptions}
+          onChange={(value, html) => onTextChange?.(value, html)}
           onPasteFiles={onPasteFiles}
           onBackspaceEmpty={onBackspaceEmpty}
         />
@@ -1269,7 +1346,20 @@ function BodyFlow({
   )
 }
 
-function RequestBodyEditor({
+export function RequestBodyPreview({ blocks, richPreview, visualDetail }: { blocks: ContentBlock[]; richPreview?: boolean; visualDetail?: boolean }) {
+  return (
+    <div className="space-y-5">
+      {splitBodyParts(blocks).map((part, index) => {
+        if (part.type === 'file') return <FileAttachmentCard key={part.file.id} file={part.file.file} downloadable={visualDetail} />
+        if (visualDetail && !part.text.text.trim() && !part.images.length) return null
+        return <BodyFlow key={part.text.id} flowIndex={index} text={part.text} images={part.images}
+          readOnly visualDetail={visualDetail} richPreview={richPreview} heights={{}} />
+      })}
+    </div>
+  )
+}
+
+export function RequestBodyEditor({
   blocks,
   error,
   placeholder,
@@ -1277,6 +1367,9 @@ function RequestBodyEditor({
   appendFilesRef,
   visualTitle,
   guide,
+  richPreview,
+  leading,
+  visualAnswer,
 }: {
   blocks: ContentBlock[]
   error?: string
@@ -1285,6 +1378,9 @@ function RequestBodyEditor({
   appendFilesRef: { current: (files: File[]) => void }
   visualTitle?: string
   guide?: readonly string[]
+  richPreview?: boolean
+  leading?: ReactNode
+  visualAnswer?: VisualAnswerEditorOptions
 }) {
   const editorRef = useRef<HTMLDivElement>(null)
   const visualFileRef = useRef<HTMLInputElement>(null)
@@ -1327,7 +1423,8 @@ function RequestBodyEditor({
     const endOffsetY = lastFlow
       ? Math.max(0, Math.round(lastFlow.getBoundingClientRect().height))
       : 0
-    onChangeRef.current(appendFilesToBlocks(blocksRef.current, incoming, endOffsetY))
+    const files = richPreview ? incoming.filter(isImageFile) : incoming
+    if (files.length) onChangeRef.current(appendFilesToBlocks(blocksRef.current, files, endOffsetY))
   }
 
   const parts = splitBodyParts(blocks)
@@ -1345,11 +1442,11 @@ function RequestBodyEditor({
     return splitBodyParts(blocksRef.current)
   }
 
-  function updateFlowText(flowIndex: number, text: string) {
+  function updateFlowText(flowIndex: number, text: string, previewHtml?: string) {
     const next = currentParts()
     const part = next[flowIndex]
     if (!part || part.type !== 'flow') return
-    next[flowIndex] = { ...part, text: { ...part.text, text } }
+    next[flowIndex] = { ...part, text: { ...part.text, text, ...(richPreview ? { previewHtml } : {}) } }
     commit(next)
   }
 
@@ -1377,7 +1474,7 @@ function RequestBodyEditor({
     if (!part || part.type !== 'flow') return
 
     const images = createImageBlocks(files, offsetY)
-    const attachments = files
+    const attachments = (richPreview ? [] : files)
       .filter((file) => !isImageFile(file))
       .map((file) => ({
         id: makeBlockId(),
@@ -1580,8 +1677,7 @@ function RequestBodyEditor({
         lineWidth: 0,
       } satisfies ImageDropTarget)
     const part = parts[target.flowIndex]
-    const textOffset =
-      part?.type === 'flow' ? part.text.text.length : target.textOffset
+    const textOffset = !visualAnswer && part?.type === 'flow' ? part.text.text.length : target.textOffset
     insertFilesAtFlow(target.flowIndex, files, target.offsetY, textOffset, textOffset)
   }
 
@@ -1636,20 +1732,30 @@ function RequestBodyEditor({
           block.id === moving.id && block.type === 'image',
       )
     : undefined
+  const fileLabel = visualAnswer?.label ?? visualTitle
+  const mediaOnly = Boolean(visualAnswer?.control)
+  const textOptions = visualAnswer ?? (visualTitle ? { label: leading ? `${visualTitle} 추가 내용` : `${visualTitle} 작성` } : undefined)
 
   return (
-    <div className={cn('space-y-2', visualTitle && 'rounded-xl border border-border bg-card p-5 shadow-sm sm:p-7')}>
-      {visualTitle ? <h2 className="text-sm font-semibold">{visualTitle}</h2> : (
+    <div role={visualTitle ? 'group' : undefined} aria-label={visualTitle}
+      className={cn('space-y-2', visualTitle && 'rounded-xl border border-border bg-card p-5 shadow-sm sm:p-7',
+      visualAnswer && 'relative min-h-8 space-y-0 pr-9')}>
+      {visualAnswer ? visualAnswer.control : visualTitle ? <h2 className="text-sm font-semibold">{visualTitle}</h2> : (
       <span className="flex items-center gap-1 text-sm font-medium">
         요청 내용 <span className="text-danger">*</span>
       </span>
       )}
+      {leading}
+      {visualTitle && leading && <h3 className="border-t border-border pt-4 text-sm font-semibold">추가 내용</h3>}
 
       <div
         ref={editorRef}
         className={cn(
           'relative min-h-72 rounded-md border border-border bg-card px-4 py-4',
           visualTitle && 'min-h-80 border-0 px-0 sm:min-h-96',
+          visualTitle && leading && 'min-h-16 py-1 sm:min-h-16',
+          visualAnswer && 'min-h-7 border-0 bg-transparent p-0',
+          mediaOnly && 'min-h-0',
           isDraggingFiles && 'border-primary bg-primary/5',
           moving?.active && 'select-none',
           error && 'border-danger',
@@ -1668,7 +1774,7 @@ function RequestBodyEditor({
         onDrop={handleDrop}
       >
         {guide?.length ? <ul className="mb-3 list-inside list-disc text-xs leading-6 text-muted-foreground">{guide.map((item) => <li key={item}>{item} :</li>)}</ul> : null}
-        {visualTitle && onlyEmptyText ? (
+        {visualTitle && !leading && onlyEmptyText ? (
           <button type="button" className="absolute left-1/2 top-1/2 z-10 flex w-max max-w-full -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2 rounded-md p-3 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary" onClick={() => visualFileRef.current?.click()} aria-label={`${visualTitle} 파일 추가`}>
             <Paperclip className="size-5" />
             파일을 끌어 놓거나 버튼을 눌러 첨부하세요.
@@ -1685,6 +1791,7 @@ function RequestBodyEditor({
             )
           }
 
+          if (mediaOnly && part.images.length === 0) return null
           const previous = parts[index - 1]
           return (
             <BodyFlow
@@ -1692,12 +1799,15 @@ function RequestBodyEditor({
               flowIndex={index}
               text={part.text}
               images={part.images}
+              readOnly={mediaOnly}
+              textOptions={textOptions}
               placeholder={
                 onlyEmptyText ? placeholder : '이어서 설명을 작성하세요.'
               }
               movingId={moving?.active ? moving.id : undefined}
               heights={imageHeights}
-              onTextChange={(text) => updateFlowText(index, text)}
+              richPreview={richPreview}
+              onTextChange={(text, html) => updateFlowText(index, text, html)}
               onImageSize={(id, size) =>
                 updateFlowImages(index, (images) =>
                   images.map((image) =>
@@ -1765,10 +1875,12 @@ function RequestBodyEditor({
           </div>
         ) : null}
       </div>
-      {visualTitle ? (
-        <div className="flex justify-end">
-          <input ref={visualFileRef} type="file" multiple className="sr-only" aria-label={`${visualTitle} 첨부 파일`} onChange={(event) => { appendFilesRef.current(Array.from(event.target.files ?? [])); event.target.value = '' }} />
-          <Button type="button" variant="ghost" size="sm" onClick={() => visualFileRef.current?.click()}><Paperclip className="size-3.5" />파일 추가</Button>
+      {fileLabel ? (
+        <div className={cn('flex justify-end', visualAnswer && 'absolute right-0 top-0')}>
+          <input ref={visualFileRef} type="file" multiple className="sr-only" aria-label={`${fileLabel} 첨부 파일`} onChange={(event) => { appendFilesRef.current(Array.from(event.target.files ?? [])); event.target.value = '' }} />
+          <Button type="button" variant="ghost" size={visualAnswer ? 'icon' : 'sm'}
+            aria-label={visualAnswer ? `${fileLabel} 파일 추가` : undefined} title={visualAnswer ? `${fileLabel} 파일 추가` : undefined}
+            onClick={() => visualFileRef.current?.click()}><Paperclip className="size-3.5" />{!visualAnswer && '파일 추가'}</Button>
         </div>
       ) : (
       <p className="text-xs text-muted-foreground">
@@ -1781,17 +1893,18 @@ function RequestBodyEditor({
   )
 }
 
-function VisualRequestSection({ title, blocks, onChange, guide, error }: {
+function VisualRequestSection({ title, blocks, onChange, guide, error, leading }: {
   title: string
   blocks: ContentBlock[]
   onChange: (blocks: ContentBlock[]) => void
   guide?: readonly string[]
   error?: string
+  leading?: ReactNode
 }) {
   const appendFilesRef = useRef<(files: File[]) => void>(() => {
     console.warn('[work-request] Visual 요청 편집기가 연결되지 않았습니다.', { title })
   })
-  return <RequestBodyEditor blocks={blocks} onChange={onChange} placeholder="내용을 입력하세요." visualTitle={title} guide={guide} error={error} appendFilesRef={appendFilesRef} />
+  return <RequestBodyEditor blocks={blocks} onChange={onChange} placeholder="내용을 입력하세요." visualTitle={title} guide={guide} error={error} leading={leading} appendFilesRef={appendFilesRef} />
 }
 
 function RequestTitleAndDue({
@@ -1863,7 +1976,8 @@ function VisualRequestFields({ blocks, onChange, brandPicker, beforeMain, error,
   for (const [id] of sections) {
     if (id !== 'main' && !visibleCategories.some(category => category.id === id)) {
       const saved = visualValues?.categories.find(category => category.id === id)
-      visibleCategories.push({ id, label: saved?.label ?? '이전 분류', enabled: false, assigneeId: '', fields: Object.keys(saved?.fields ?? {}).map(key => ({ id: key, label: key, type: 'text', required: false, placeholder: '' })) })
+      const fieldIds = new Set([...Object.keys(saved?.fieldLabels ?? {}), ...Object.keys(saved?.fields ?? {})])
+      visibleCategories.push({ id, label: saved?.label ?? '이전 분류', enabled: false, assigneeId: '', fields: Array.from(fieldIds, key => ({ id: key, label: saved?.fieldLabels?.[key] ?? key, type: 'text', required: false, placeholder: '' })) })
     }
   }
   function metadata(selected: Map<VisualSectionId, ContentBlock[]>): VisualRequestValues {
@@ -1895,21 +2009,38 @@ function VisualRequestFields({ blocks, onChange, brandPicker, beforeMain, error,
       </div>
       {beforeMain}
       <VisualRequestSection key={`${requestKey}:main`} title="메인 내용" blocks={sections.get('main') ?? []} onChange={(next) => updateSection('main', next)} error={error} />
-      {visibleCategories.filter((category) => sections.has(category.id)).map((category) => (
-        <div key={`${requestKey}:${category.id}`} className="space-y-3">
-          {category.fields.length ? <Card><CardContent className="space-y-4 p-5"><h2 className="font-semibold">{category.label} · 요청 정보</h2><div className="grid gap-4 md:grid-cols-2">{category.fields.map(field => {
-            const value = visualValues?.categories.find(item => item.id === category.id)?.fields[field.id] ?? ''
-            const change = (value: string) => {
-              const next = metadata(sections)
-              const target = next.categories.find(item => item.id === category.id)!
-              target.fields = { ...target.fields, [field.id]: value }
-              onVisualChange(next)
-            }
-            return <label key={field.id} className={`block space-y-1 text-sm ${field.type === 'textarea' ? 'md:col-span-2' : ''}`}><span>{field.label}{field.required ? <span className="ml-1 text-danger">*</span> : null}</span>{field.type === 'textarea' ? <Textarea value={value} placeholder={field.placeholder} required={field.required} maxLength={10000} rows={3} onChange={event => change(event.target.value)} /> : <Input type={field.type} value={value} placeholder={field.placeholder} required={field.required} maxLength={10000} onChange={event => change(event.target.value)} />}</label>
-          })}</div></CardContent></Card> : null}
-          <VisualRequestSection title={visualSectionTitle(category)} blocks={sections.get(category.id)!} onChange={(next) => updateSection(category.id, next)} />
-        </div>
-      ))}
+      {visibleCategories.filter(category => sections.has(category.id)).map(category => {
+        const section = sections.get(category.id)!
+        const content = splitVisualQuestionContent(section, category.fields.map(field => field.id))
+        const values = visualValues?.categories.find(item => item.id === category.id)?.fields
+        return (
+          <VisualRequestSection
+            key={`${requestKey}:${category.id}`}
+            title={visualSectionTitle(category)}
+            blocks={content.body}
+            onChange={next => updateSection(category.id, [...next, ...Array.from(content.answers.values()).flat()])}
+            leading={category.fields.length ? <div className="space-y-5 py-3">
+              {category.fields.map(field => {
+                const media = content.answers.get(field.id)
+                const value = values?.[field.id] ?? ''
+                return <VisualQuestionAnswer key={field.id} field={field} categoryId={category.id}
+                  value={value} media={media} BodyEditor={RequestBodyEditor}
+                  onChange={answer => {
+                    if (media?.length || answer.media.length) {
+                      updateSection(category.id, replaceVisualQuestionMedia(section, field.id, answer.media))
+                    }
+                    if (answer.value !== value) {
+                      const next = metadata(sections)
+                      const target = next.categories.find(item => item.id === category.id)!
+                      target.fields = { ...target.fields, [field.id]: answer.value }
+                      onVisualChange(next)
+                    }
+                  }} />
+              })}
+            </div> : undefined}
+          />
+        )
+      })}
     </div>
   )
 }
@@ -1921,23 +2052,37 @@ type FormDraft = {
   hasEdited: boolean
 }
 
-function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
+export function WorkRequestForm({ owner, surface = 'department' }: {
+  owner: WorkRequestOwner
+  surface?: 'department' | 'personal' | 'notice'
+}) {
   useRenderWatch(`WorkRequestForm:${owner}`)
   const config = WORK_REQUEST_CONFIG[owner]
-  const { profile, ready } = useAuth()
+  const { profile, ready, session } = useAuth()
   const selfId=profile?.id??''
-  const workLocation = useLocation()
-  const detailId = new URLSearchParams(workLocation.search).get('requestId') ?? undefined
-  const auxiliary = new URLSearchParams(workLocation.search).get('aux') === '1'
-  const internal = new URLSearchParams(workLocation.search).get('internal') === '1'
-  const storage=useWorkRequests(owner, auxiliary ? undefined : detailId, !auxiliary && !detailId)
-  const visualSettings = useWorkRequestSettings(owner === 'design')
-  const visualCategories = visualSettings.data?.categories ?? DEFAULT_VISUAL_CATEGORIES
-  const {requests,setRequests,currentWorkByMember,setCurrentWorkByMember,workTimeByKey,setWorkTimeByKey,teamMembers}=storage
-  const [searchParams] = useSearchParams()
+  const personal = surface !== 'department'
+  const noticeOnly = surface === 'notice'
+  const ownDepartment = profile?.departmentId === WORK_REQUEST_DEPARTMENT_IDS[owner]
+  const canCreate = !noticeOnly && profile?.status === 'active' && session?.user.id === selfId && (personal ? !ownDepartment : ownDepartment)
   const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const detailId = searchParams.get('requestId')?.trim() || undefined
+  const auxiliary = !personal && searchParams.get('aux') === '1'
+  const internal = !personal && !detailId && searchParams.get('mode') === 'new'
+  const visualSettings = useWorkRequestSettings(owner === 'design')
+  const storage=useWorkRequests(owner, auxiliary ? undefined : detailId, !auxiliary && !detailId, visualSettings.data?.categoryWorkflowAvailable)
+  const visualCategories = visualSettings.data?.categories ?? DEFAULT_VISUAL_CATEGORIES
+  const activeSupervisorIds = visualSettings.data?.activeSupervisorIds ?? emptyList<string>()
+  const finalApprovalEnabled = owner === 'design' && Boolean(visualSettings.data?.supervisorIds?.length)
+  const finalApprovalCheckPending = owner === 'design' && (visualSettings.isPending || visualSettings.isError)
+  const {requests,setRequests,currentWorkByMember,setCurrentWorkByMember,workTimeByKey,setWorkTimeByKey,teamMembers}=storage
   const navigate = useNavigate()
   const tabActive = useWorkspaceTabActivity()
+  const navigationActiveRef = useRef(false)
+  useEffect(() => {
+    navigationActiveRef.current = tabActive
+    return () => { navigationActiveRef.current = false }
+  }, [tabActive])
   const brandsQuery = useQuery({
     queryKey: ['brand-directory'],
     queryFn: listBrandDirectory,
@@ -1969,6 +2114,29 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const [errors, setErrors] = useState<FormErrors>({})
   const [hasEdited, setHasEdited] = useState(false)
   const [flashMessage, setFlashMessage] = useState<string | null>(null)
+  const finalApproval = useMutation({
+    mutationFn: async ({ request, action, value }: { request: WorkRequestRecord; action: VisualFinalAction; value?: string }) => {
+      const trace = startWorkflow('app', `visual_work_final_${action}`)
+      trace.step('validate_input')
+      if (!request.revision || request.owner !== 'design') {
+        trace.block('invalid_request')
+        throw new Error('업무를 다시 불러온 뒤 처리해 주세요.')
+      }
+      try {
+        await trace.run('save', context => changeVisualWorkFinalApproval(request, action, value ?? null, context))
+      } catch (error) {
+        trace.fail(error)
+        void storage.retry()
+        throw error
+      }
+      try {
+        await trace.run('refresh_queries', storage.retry, { writeOutcome: 'committed' })
+        trace.done({ writeOutcome: 'committed' })
+      } catch (error) {
+        trace.fail(error, { writeOutcome: 'committed' })
+      }
+    },
+  })
   const [acceptRequestId, setAcceptRequestId] = useState<string | null>(null)
   const [reviewConfirmId, setReviewConfirmId] = useState<string | null>(null)
   const [workClock, setWorkClock] = useState(() => Date.now())
@@ -2003,29 +2171,30 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const isIncoming = true
     const isSelfRequest =
       (request.requesterId === selfId)
+    const assignedToSelf = request.assignee === selfId || request.collaborators.includes(selfId)
+    if (noticeOnly && (!isSelfRequest || !request.visualCategoryWorkflow)) return null
+    if (personal && !isSelfRequest && !assignedToSelf) return null
     const visible = isSelfRequest || (canManage
       ? isIncoming
       : isDestinationMember
-        ? isIncoming &&
-          (request.assignee === selfId ||
-            request.collaborators.includes(selfId))
+        ? isIncoming && assignedToSelf
         : isSelfRequest)
-    if (!visible && !request.departmentReadable) return null
+    if (!personal && !visible && !request.departmentReadable) return null
     return {
-      needsReviewStart: auxiliary && canManage && request.status === 'requested',
-      editable: isSelfRequest && request.status === 'requested',
+      needsReviewStart: auxiliary && canManage && request.status === 'requested' && !request.visualCategoryWorkflow,
+      editable: isSelfRequest && request.status === 'requested' && !noticeOnly,
     }
   }
 
   const locationPathname = location.pathname
   const locationSearch = location.search
   const resolvedView = resolveWorkRequestView(locationSearch, {
-    canCreate: true,
+    canCreate,
     accessOf: navigationAccess,
   })
   const view = resolvedView.view
   const detailRequestId = view.kind === 'detail' ? view.requestId : null
-  const recoverySearch = workRequestRecoverySearch(locationSearch, resolvedView, {
+  const recoverySearch = personal && storage.loadError ? null : workRequestRecoverySearch(locationSearch, resolvedView, {
     active: tabActive && ready && !storage.loading && !storage.saving,
   })
 
@@ -2138,6 +2307,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
   function goToView(action: WorkRequestNavAction) {
     if (!tabActive) return
+    if (!navigationActiveRef.current) return
     const next = workRequestNavigation(locationSearch, view, action)
     navigate(
       { pathname: locationPathname, search: next.search },
@@ -2220,10 +2390,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     }
     if (owner === 'design') {
       if (visualSettings.isPending || visualSettings.isError || !visualSettings.data?.available) nextErrors.blocks = '분류 설정의 서버 연결을 확인한 뒤 다시 등록해 주세요.'
-      for (const category of visualCategories.filter(item => splitVisualSections(values.blocks).has(item.id))) {
+      const sections = splitVisualSections(values.blocks)
+      for (const category of visualCategories.filter(item => sections.has(item.id))) {
         const answers = values.visualRequest?.categories.find(item => item.id === category.id)?.fields ?? {}
         const fields = editingRequest?.categoryAssignments?.find(item => item.categoryId === category.id)?.formFields ?? category.fields
         if (fields.some(field => field.required && !answers[field.id]?.trim())) nextErrors.blocks = `${category.label}의 필수 입력 항목을 확인해 주세요.`
+        else if (fields.some(field => (answers[field.id]?.length ?? 0) > 10000)) nextErrors.blocks = `${category.label}의 답변은 항목별로 10000자까지 작성할 수 있습니다.`
       }
     }
     return nextErrors
@@ -2453,16 +2625,38 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     setFlashMessage('요청을 반려했습니다.')
   }
 
+  async function runFinalApproval(request: WorkRequestRecord, action: VisualFinalAction, value?: string) {
+    if (storage.saving || finalApproval.isPending || finalApprovalCheckPending) return false
+    setFlashMessage(null)
+    try {
+      await finalApproval.mutateAsync({ request, action, value })
+    } catch {
+      // The mutation error is shown in the request detail.
+      return false
+    }
+    setFlashMessage({
+      assign: '총괄 관리자를 배정했습니다.', submit: '총괄 관리자에게 최종 승인을 요청했습니다.',
+      approve: '최종 승인하여 업무를 완료했습니다.', return: '반려 사유를 저장하고 업무를 진행 중으로 돌렸습니다.',
+    }[action])
+    return true
+  }
+
   function requestCompletion(request: WorkRequestRecord) {
+    if (finalApprovalCheckPending || finalApproval.isPending) return
     const result=window.prompt('완료 결과를 입력하세요.',request.completionResult??'')
     if(result===null)return
+    const ownInternal = request.kind === 'internal' && request.requesterId === selfId && request.assignee === selfId
+    if (ownInternal && finalApprovalEnabled) {
+      void runFinalApproval(request, 'submit', result.trim())
+      return
+    }
     updateRequest(request.id, {
       completionResult:result.trim(),
-      status: request.kind === 'internal' && request.requesterId === selfId && request.assignee === selfId ? 'completed' : nextCompletionStatus(request),
+      status: ownInternal ? 'completed' : nextCompletionStatus(request),
       completionRequestedAt: new Date().toISOString(),
     })
     setFlashMessage(
-      request.kind === 'internal' && request.requesterId === selfId && request.assignee === selfId ? '업무를 완료했습니다.' : needsLeadCompletionReview(request)
+      ownInternal ? '업무를 완료했습니다.' : needsLeadCompletionReview(request)
         ? '완료를 요청했습니다. 업무 관리 담당자 확인을 기다립니다.'
         : '완료를 요청했습니다. 요청자 확인을 기다립니다.',
     )
@@ -2500,6 +2694,11 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   }
 
   function confirmCompletion(request: WorkRequestRecord) {
+    if (finalApprovalCheckPending || visualFinalPending(request)) return
+    if (finalApprovalEnabled) {
+      void runFinalApproval(request, 'submit')
+      return
+    }
     updateRequest(request.id, { status: 'completed' })
     setFlashMessage('결과를 확인했습니다. 완료되었습니다.')
   }
@@ -2695,7 +2894,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     request: WorkRequestRecord,
     context: 'queue' | 'mine' | 'sent' | 'completed',
   ) {
-    const status = STATUS_META[request.status]
+    const status = workRequestStatusMeta(request)
     const dueDate = request.confirmedDueDate || request.values.dueDate
     const deadline = deadlineLabel(dueDate)
     const isPrimaryAssignee = request.assignee === selfId
@@ -2884,9 +3083,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     variant={canRequestCompletion ? 'secondary' : 'default'}
                     size="sm"
                     className="w-full px-0"
-                    disabled={
-                      !canStartWork && !canResumeWork && !canRequestCompletion
-                    }
+                    disabled={(!canStartWork && !canResumeWork && !canRequestCompletion) ||
+                      (canRequestCompletion && (finalApprovalCheckPending || finalApproval.isPending))}
                     title={
                       canStartWork
                         ? '이 업무를 시작합니다'
@@ -2936,11 +3134,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               ) : null}
               {context === 'sent' &&
               isSelfRequest &&
-              request.status === 'completionConfirm' ? (
+              request.status === 'completionConfirm' && !visualFinalPending(request) ? (
                 <>
                   <Button
                     type="button"
                     size="sm"
+                    disabled={finalApprovalCheckPending || finalApproval.isPending}
                     onClick={() => confirmCompletion(request)}
                   >
                     결과 확인
@@ -2988,7 +3187,19 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     )
   }
 
-  if (!auxiliary && (view.kind === 'list' || view.kind === 'detail')) return <><DepartmentWorkBoard owner={owner} />{storage.error ? <p role="alert" className="p-4 text-danger">{storage.error}<Button onClick={() => void storage.retry()}>다시 조회</Button></p> : null}{renderDetailPanel()}{acceptingRequest ? <WorkRequestAcceptDialog request={acceptingRequest} selfId={selfId} teamMembers={teamMembers} onClose={() => setAcceptRequestId(null)} onConfirm={decision => acceptRequest(acceptingRequest, decision)} /> : null}</>
+  if (!auxiliary && (view.kind === 'list' || view.kind === 'detail')) return <>
+    {!personal && owner === 'design' && visualSettings.data?.categoryWorkflowAvailable && <VisualWorkflowNotificationList />}
+    {!personal && <DepartmentWorkBoard owner={owner} activeSupervisorIds={activeSupervisorIds}
+      finalApprovalEnabled={finalApprovalEnabled} directoryMembers={storage.directoryMembers} />}
+    {personal && storage.loading && <p role="status" className="p-4 text-sm text-muted-foreground">요청 상세를 불러오는 중...</p>}
+    {storage.error && <div role="alert" className="flex flex-wrap items-center gap-2 p-4 text-danger">
+      {storage.error}
+      <Button type="button" variant="outline" size="sm" onClick={() => void storage.retry()}>다시 조회</Button>
+      {personal && <Button type="button" variant="outline" size="sm" onClick={() => goToView({ type: 'closeDetail' })}>목록으로 돌아가기</Button>}
+    </div>}
+    {renderDetailPanel()}
+    {acceptingRequest && <WorkRequestAcceptDialog request={acceptingRequest} selfId={selfId} teamMembers={teamMembers} onClose={() => setAcceptRequestId(null)} onConfirm={decision => acceptRequest(acceptingRequest, decision)} />}
+  </>
 
   if (storage.loading) return <p role="status" className="p-4 text-sm text-muted-foreground">업무와 권한을 불러오는 중...</p>
   if (storage.loadError) return <Card><CardContent className="p-5"><p role="alert" className="text-sm text-danger">{storage.error}</p><Button className="mt-3" onClick={()=>void storage.retry()}>다시 조회</Button></CardContent></Card>
@@ -3087,10 +3298,10 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     ? '배정받은 직원 화면'
                     : `${currentDepartment} 요청자 화면`}
               </Badge>
-              {(
+              {canCreate && (
                 <Button type="button" onClick={() => openForm()}>
                   <Plus className="size-4" />
-                  작업 요청 하기
+                  업무 등록
                 </Button>
               )}
             </>
@@ -3120,6 +3331,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             <span>{flashMessage}</span>
           </div>
         ) : null}
+        {finalApproval.error && !detailRequestId && <p role="alert" className="mb-5 text-sm text-danger">{finalApproval.error.message}</p>}
 
         {stats.length > 0 ? (
           <div
@@ -3529,7 +3741,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
   function renderDetailPanel() {
     if (!selectedRequest) return null
-    const status = STATUS_META[selectedRequest.status]
+    const categoryWorkflow = selectedRequest.visualCategoryWorkflow
+    const status = workRequestStatusMeta(selectedRequest)
     const dueDate =
       selectedRequest.confirmedDueDate || selectedRequest.values.dueDate
     const deadline = deadlineLabel(dueDate)
@@ -3537,11 +3750,16 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const isSelfRequest =
       (selectedRequest.requesterId === selfId)
     const canManageSelected =
-      canManage && selectedRequest.owner === owner
+      canManage && selectedRequest.owner === owner && !(categoryWorkflow && personal && isSelfRequest)
     const isPrimaryAssignee = selectedRequest.assignee === selfId
     const isCollaborator =
       selectedRequest.collaborators.includes(selfId)
-    const canEdit = isSelfRequest && selectedRequest.status === 'requested'
+    const awaitingFinalApproval = visualFinalPending(selectedRequest)
+    const showFinalApproval = selectedRequest.owner === 'design' && (Boolean(categoryWorkflow || selectedRequest.visualFinalApproval) ||
+      (finalApprovalEnabled && !isClosedStatus(selectedRequest.status)))
+    const supervisorId = visualSummaryApprover(selectedRequest, activeSupervisorIds)
+    const memberName = (id: string) => storage.directoryMembers.find(person => person.id === id)?.displayName?.trim() || '기존 직원'
+    const canEdit = isSelfRequest && selectedRequest.status === 'requested' && !noticeOnly
     const chatRooms = visibleChatRooms(selectedRequest, {
       canManage: canManageSelected,
       isRequester: isSelfRequest,
@@ -3552,29 +3770,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
         selectedRequest.requesterDepartment,
       ),
     })
+    const visual = selectedRequest.owner === 'design' ? visualWorkDetail(selectedRequest, visualCategories) : null
+    const visualDetail = visual?.sections.length ? visual : null
+    const initialCategory = searchParams.get('visualTab')
 
-    return (
-      <div className="fixed inset-0 z-50">
-        <button
-          type="button"
-          aria-label="상세 닫기"
-          className="absolute inset-0 bg-black/20"
-          onClick={closeRequest}
-        />
-        <aside className="absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-card shadow-2xl">
-        <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
-          <div className="min-w-0">
-            <p className="text-xs text-muted-foreground">
-              {selectedRequest.id} ·{' '}
-              {departmentLabel(selectedRequest.requesterDepartment)}{' '}
-              {requesterLabel(selectedRequest)} →{' '}
-              {selectedConfig.teamName}
-            </p>
-            <h2 className="mt-1 truncate text-lg font-semibold">
-              {selectedRequest.values.title}
-            </h2>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
+    const headerActions = (
+      <>
             {isSelfRequest && canEdit ? (
               <>
                 <Button
@@ -3601,13 +3802,13 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             (selectedRequest.status === 'requested' ||
               selectedRequest.status === 'reviewing') ? (
               <>
-                <Button
+                {!categoryWorkflow && <Button
                   type="button"
                   size="sm"
                   onClick={() => setAcceptRequestId(selectedRequest.id)}
                 >
                   수락
-                </Button>
+                </Button>}
                 <Button
                   type="button"
                   variant="outline"
@@ -3618,7 +3819,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 </Button>
               </>
             ) : null}
-            {canManageSelected &&
+            {!categoryWorkflow && canManageSelected &&
             selectedRequest.status === 'completionReview' ? (
               <>
                 <Button
@@ -3640,11 +3841,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 </Button>
               </>
             ) : null}
-            {(selectedRequest.requesterId === selfId) && selectedRequest.status === 'completionConfirm' ? (
+            {!categoryWorkflow && isSelfRequest && selectedRequest.status === 'completionConfirm' && !awaitingFinalApproval ? (
               <>
                 <Button
                   type="button"
                   size="sm"
+                  disabled={finalApprovalCheckPending || finalApproval.isPending}
                   onClick={() => confirmCompletion(selectedRequest)}
                 >
                   결과 확인
@@ -3662,26 +3864,69 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               </>
             ) : null}
             <WorkRequestCancellation request={selectedRequest} canManage={canManageSelected} disabled={storage.saving} />
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              aria-label="상세 닫기"
-              onClick={closeRequest}
-            >
-              <X className="size-4" />
-            </Button>
-          </div>
-        </div>
+      </>
+    )
 
-        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">
-        {flashMessage ? (
+    const legacyHeader = (
+      <div className="flex items-start justify-between gap-3 border-b border-border px-5 py-4">
+        <div className="min-w-0">
+          <p className="text-xs text-muted-foreground">
+            {selectedRequest.id} · {departmentLabel(selectedRequest.requesterDepartment)} {requesterLabel(selectedRequest)} → {selectedConfig.teamName}
+          </p>
+          <h2 className="mt-1 truncate text-lg font-semibold">{selectedRequest.values.title}</h2>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          {headerActions}
+          <Button type="button" variant="outline" size="icon" aria-label="상세 닫기" onClick={closeRequest}>
+            <X className="size-4" />
+          </Button>
+        </div>
+      </div>
+    )
+
+    const notice = <>
+      {owner === 'design' && visualSettings.isError && <div className="flex flex-wrap items-center gap-2 text-sm text-danger">
+        <p role="alert">총괄 관리자 설정을 불러오지 못했습니다.</p>
+        <Button type="button" variant="outline" size="sm" onClick={() => void visualSettings.refetch()}>설정 다시 조회</Button>
+      </div>}
+      {flashMessage && (
           <div className="flex items-start gap-3 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">
             <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
             <span>{flashMessage}</span>
           </div>
-        ) : null}
+      )}
+      {showFinalApproval && !categoryWorkflow && <VisualFinalApprovalPanel key={`${selfId}:${selectedRequest.id}`} request={selectedRequest}
+        activeSupervisorIds={activeSupervisorIds} viewerId={selfId} canManage={canManageSelected}
+        busy={storage.saving || finalApproval.isPending || finalApprovalCheckPending}
+        error={finalApproval.variables?.request.id === selectedRequest.id ? finalApproval.error?.message : undefined}
+        memberName={memberName} onAction={(action, value) => runFinalApproval(selectedRequest, action, value)} />}
+    </>
 
+    const references = selectedRequest.values.referenceFiles.filter(
+      item => !blockHasFile(selectedRequest.values.blocks, item.file),
+    )
+    const referenceCards = references.length ? (
+      <div>
+        {!visualDetail && <p className="text-xs text-muted-foreground">참고 파일</p>}
+        <div className={cn('space-y-2', !visualDetail && 'mt-2')}>
+          {references.map(item => isImageFile(item.file)
+            ? <ResizableImage key={item.id} file={item.file} downloadable={Boolean(visualDetail)} widthPercent={item.widthPercent} heightPx={item.heightPx} />
+            : <FileAttachmentCard key={item.id} file={item.file} downloadable={Boolean(visualDetail)} />)}
+        </div>
+      </div>
+    ) : null
+
+    const workConversation = (!visualDetail || selectedRequest.messages.some(message => chatRooms.some(room => room.id === message.roomId))) && <WorkRequestChat
+      className={visualDetail ? 'h-80' : 'h-[32rem]'}
+      requestId={selectedRequest.id}
+      rooms={chatRooms}
+      messages={selectedRequest.messages}
+      selfId={selfId}
+      canWrite={!visualDetail && canWriteChat(selectedRequest)}
+      onSend={(body, roomId) => addMessage(selectedRequest.id, body, roomId)}
+    />
+
+    const management = (
         <div className="space-y-6">
           <div className="space-y-6">
             <Card>
@@ -3855,7 +4100,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     </p>
                   </div>
                 ) : null}
-                <div className="space-y-5">
+                {!visualDetail && <div className="space-y-5">
                   {splitBodyParts(selectedRequest.values.blocks).map((part, index) => {
                     if (part.type === 'file') {
                       return (
@@ -3876,29 +4121,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                       />
                     )
                   })}
-                </div>
-                {selectedRequest.values.referenceFiles.some(
-                  (item) => !blockHasFile(selectedRequest.values.blocks, item.file),
-                ) ? (
-                  <div>
-                    <p className="text-xs text-muted-foreground">참고 파일</p>
-                    <div className="mt-2 space-y-2">
-                      {selectedRequest.values.referenceFiles.map((item) => {
-                        if (blockHasFile(selectedRequest.values.blocks, item.file)) return null
-                        return isImageFile(item.file) ? (
-                          <ResizableImage
-                            key={item.id}
-                            file={item.file}
-                            widthPercent={item.widthPercent}
-                            heightPx={item.heightPx}
-                          />
-                        ) : (
-                          <FileAttachmentCard key={item.id} file={item.file} />
-                        )
-                      })}
-                    </div>
-                  </div>
-                ) : null}
+                </div>}
+                {!visualDetail && referenceCards}
               </CardContent>
             </Card>
           </div>
@@ -3934,7 +4158,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                   <CardContent className="space-y-3">
                     {isCompletionPending(selectedRequest.status) ? (
                       <p className="text-sm text-muted-foreground">
-                        {selectedRequest.status === 'completionReview'
+                        {awaitingFinalApproval ? '총괄 관리자 승인을 기다립니다.' : selectedRequest.status === 'completionReview'
                           ? '완료를 요청했습니다. 업무 관리 담당자 확인을 기다립니다.'
                           : '업무 관리 담당자 확인이 끝났습니다. 요청자 확인을 기다립니다.'}
                       </p>
@@ -3961,13 +4185,14 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                             type="button"
                             variant="secondary"
                             size="sm"
+                            disabled={finalApprovalCheckPending || finalApproval.isPending}
                             onClick={() => requestCompletion(selectedRequest)}
                           >
-                            {selectedRequest.kind === 'internal' && isSelfRequest ? '업무 완료' : '완료 요청'}
+                            {selectedRequest.kind === 'internal' && isSelfRequest ? (finalApprovalEnabled ? '최종 승인 요청' : '업무 완료') : '완료 요청'}
                           </Button>
                         ) : null}
                         <p className="text-xs text-muted-foreground">
-                          {selectedRequest.kind === 'internal' && isSelfRequest ? '본인이 등록하고 담당하는 자체 업무는 직접 완료합니다.' : '완료 요청 후 기존 업무 검수와 요청자 확인을 거쳐 완료됩니다.'}
+                          {finalApprovalEnabled ? '총괄 관리자가 최종 승인하면 완료됩니다.' : selectedRequest.kind === 'internal' && isSelfRequest ? '본인이 등록하고 담당하는 자체 업무는 직접 완료합니다.' : '완료 요청 후 기존 업무 검수와 요청자 확인을 거쳐 완료됩니다.'}
                         </p>
                       </>
                     )}
@@ -3990,24 +4215,64 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             ) : null}
 
             {selectedRequest.completionResult?<Card><CardContent className="p-4"><h3 className="font-medium">완료 결과</h3><p className="mt-2 whitespace-pre-wrap text-sm">{selectedRequest.completionResult}</p></CardContent></Card>:null}
-            {selectedRequest.values.visualRequest?.categories.some(category => Object.values(category.fields).some(Boolean)) ? <Card><CardContent className="space-y-4 p-5">{selectedRequest.values.visualRequest.categories.map(category => <section key={category.id}><h3 className="text-sm font-semibold">{category.label}</h3><dl className="mt-2 space-y-2 text-sm">{Object.entries(category.fields).filter(([, value]) => value).map(([id, value]) => <div key={id}><dt className="text-xs text-muted-foreground">{category.fieldLabels?.[id] ?? id}</dt><dd className="whitespace-pre-wrap break-words">{value}</dd></div>)}</dl></section>)}</CardContent></Card> : null}
-            <WorkRequestCategoryAssignments key={`${selfId}:${selectedRequest.id}`} request={selectedRequest} members={teamMembers} canManage={canManageSelected} busy={storage.saving} />
-            <WorkRequestChat
-              className="h-[32rem]"
-              requestId={selectedRequest.id}
-              rooms={chatRooms}
-              messages={selectedRequest.messages}
-              selfId={selfId}
-              canWrite={canWriteChat(selectedRequest)}
-              onSend={(body, roomId) =>
-                addMessage(selectedRequest.id, body, roomId)
-              }
-            />
+            {!visualDetail && selectedRequest.values.visualRequest?.categories.some(category => Object.values(category.fields).some(Boolean)) ? <Card><CardContent className="space-y-4 p-5">{selectedRequest.values.visualRequest.categories.map(category => <section key={category.id}><h3 className="text-sm font-semibold">{category.label}</h3><dl className="mt-2 space-y-2 text-sm">{Object.entries(category.fields).filter(([, value]) => value).map(([id, value]) => <div key={id}><dt className="text-xs text-muted-foreground">{category.fieldLabels?.[id] ?? id}</dt><dd className="whitespace-pre-wrap break-words">{value}</dd></div>)}</dl></section>)}</CardContent></Card> : null}
+            {!visualDetail && <WorkRequestCategoryAssignments key={`${selfId}:${selectedRequest.id}`} request={selectedRequest} members={teamMembers} canManage={canManageSelected} busy={storage.saving} />}
+            {!visualDetail && workConversation}
 
           </div>
         </div>
-        </div>
-      </aside>
+    )
+
+    return (
+      <div className="fixed inset-0 z-50">
+        <button
+          type="button"
+          aria-label="상세 닫기"
+          className="absolute inset-0 bg-black/20"
+          onClick={closeRequest}
+        />
+        {visualDetail ? <VisualWorkRequestDrawer
+          key={`${selfId}:${selectedRequest.id}:${initialCategory ?? ''}`}
+          requestId={selectedRequest.id}
+          title={selectedRequest.values.title}
+          detail={visualDetail}
+          initialCategory={initialCategory}
+          viewerId={selfId}
+          canManage={canManageSelected}
+          isRequester={isSelfRequest}
+          requesterView={personal && isSelfRequest}
+          summary={{
+            requesterDepartment: departmentLabel(selectedRequest.requesterDepartment),
+            requesterName: selectedRequest.values.requester?.trim() || '미입력',
+            requesterPosition: selectedRequest.values.requesterPosition?.trim()
+              || storage.directoryMembers.find(person => person.id === selectedRequest.requesterId)?.position?.trim()
+              || storage.directoryMembers.find(person => person.id === selectedRequest.requesterId)?.jobGrade?.trim()
+              || '',
+            status: status.label,
+            requestedAt: selectedRequest.createdAt,
+            dueDate,
+            brand: brandLabelForRequest(selectedRequest, brands),
+            finalApprover: showFinalApproval ? (supervisorId ? memberName(supervisorId) : '미지정') : undefined,
+          }}
+          onClose={closeRequest}
+          headerActions={headerActions}
+          notice={notice}
+          mainReferences={referenceCards}
+          management={categoryWorkflow ? undefined : management}
+          workflow={categoryWorkflow ? { data: categoryWorkflow, request: selectedRequest, supervisors: activeSupervisorIds, members: teamMembers } : undefined}
+          legacyConversation={workConversation}
+          memberName={memberName}
+          renderBody={blocks => <RequestBodyPreview blocks={blocks} visualDetail />}
+          renderAssignment={categoryId => <WorkRequestCategoryAssignments
+            request={selectedRequest} members={teamMembers} canManage={canManageSelected}
+            busy={storage.saving} categoryId={categoryId}
+          />}
+        /> : (
+          <aside className="absolute inset-y-0 right-0 flex w-full max-w-xl flex-col border-l border-border bg-card shadow-2xl">
+            {legacyHeader}
+            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-5">{notice}{management}</div>
+          </aside>
+        )}
       </div>
     )
   }
@@ -4016,7 +4281,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     <div ref={pageTopRef}>
         {storage.error?<p role="alert" className="mb-3 rounded-xl border border-danger/30 bg-card p-3 text-sm text-danger">{storage.error}<button type="button" className="ml-2 underline" onClick={()=>void storage.retry()}>다시 조회</button></p>:null}
         {storage.saving?<p role="status" className="mb-3 text-sm text-muted-foreground">서버에 저장 중...</p>:null}
-        {!internal && !storage.managerAvailable?<p role="status" className="mb-3 rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground">이 부서의 업무 관리 담당자 지정이 필요합니다. 요청은 대기 상태로 저장되며 자동 수락되지 않습니다.</p>:null}
+        {!internal && (!personal || detailId) && !storage.managerAvailable?<p role="status" className="mb-3 rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground">이 부서의 업무 관리 담당자 지정이 필요합니다. 요청은 대기 상태로 저장되며 자동 수락되지 않습니다.</p>:null}
       <form onSubmit={handleSubmit} noValidate>
         <PageHeader
           title={

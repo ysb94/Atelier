@@ -1,4 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMemo } from 'react'
+import { useHeadOfficeSelfService, useWorkforceManagement } from '@/lib/company/workforce-management-context'
 import { useAuth } from '@/lib/supabase/auth'
 import { usePagePreview } from '@/lib/company/page-preview-context'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
@@ -11,7 +13,8 @@ import type { HolidayWork } from './holiday-work'
 
 export function useHolidayWork(month: string, scope: 'mine' | 'review' | 'operations', requestId?: string) {
   const { profile, session } = useAuth(), preview = usePagePreview(), active = useWorkspaceTabActivity(), cache = useQueryClient()
-  const enabled = Boolean(active && !preview?.active && profile?.companyId && profile?.status === 'active' && session?.user.id === profile.id)
+  const workforce = useWorkforceManagement(), selfService = useHeadOfficeSelfService()
+  const enabled = Boolean(active && !preview?.active && profile?.companyId && profile?.status === 'active' && session?.user.id === profile.id && (scope !== 'mine' || selfService))
   useDiagnosticGate('offsite','holiday_access',enabled,enabled?'enabled':preview?.active?'preview':!active?'hidden_tab':!session?'no_session':profile?.status!=='active'?'inactive_employee':'identity_mismatch')
   const query = useQuery({ queryKey: ['holiday-work', profile?.id, profile?.companyId, scope, month, requestId ?? null], queryFn: () => listHolidayWork(month, scope, requestId), ...sharedReadPolicy, enabled, refetchInterval: readPollInterval(30_000, enabled) })
   const save = useMutation({ mutationFn: ({ action, payload }: { action: HolidayAction; payload: object }) => changeHolidayWork(action, payload), onSuccess: async () => {
@@ -21,5 +24,7 @@ export function useHolidayWork(month: string, scope: 'mine' | 'review' | 'operat
       trace.done({ writeOutcome: 'committed' })
     } catch (error) { trace.fail(error, { writeOutcome: 'committed' }); throw new Error('서버 저장은 완료했지만 화면 갱신에 실패했습니다. 새로 조회해 처리 상태를 확인해 주세요.', { cause: error }) }
   } })
-  return { ...query, save, enabled, rows: query.data?.rows ?? emptyList<HolidayWork>() }
+  const source = enabled && !workforce?.loading && !workforce?.error ? query.data?.rows ?? emptyList<HolidayWork>() : emptyList<HolidayWork>()
+  const rows = useMemo(() => source.filter(row => (workforce?.byId.get(row.employeeId)?.mode ?? 'head-office') === 'head-office'), [source, workforce])
+  return { ...query, isPending: query.isPending || Boolean(workforce?.loading), error: workforce?.error || query.error, refetch: () => Promise.all([query.refetch(), workforce?.refresh()]), save, enabled, rows }
 }

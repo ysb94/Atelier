@@ -60,10 +60,9 @@ function initialInformation(person: Person): CompanyInformation {
   } as CompanyInformation
 }
 
-export function NewEmployeeCompanyInformation({ person, rosterProfileId = person.id, isTest = false, saved, departments, duties, grades, canEdit, canApprove, busy, error, onApprove, onReject, onApply, onClose }: {
+export function NewEmployeeCompanyInformation({ person, rosterProfileId = person.id, isTest = false, saved, departments, duties, grades, canEdit, busy, error, onApply, onClose }: {
   person: Person; saved?: CompanyInformation; departments: { id: string; name: string }[]; duties: string[]; grades: string[]; rosterProfileId?: string; isTest?: boolean
-  onApply: (value: CompanyInformation) => void; onClose: () => void; canEdit: boolean; canApprove: boolean; busy: boolean; error: string | null
-  onApprove: (value: CompanyInformation) => Promise<void>; onReject: () => Promise<void>
+  onApply: (value: CompanyInformation) => void; onClose: () => void; canEdit: boolean; busy: boolean; error: string | null
 }) {
   const dialog = useRef<HTMLDialogElement>(null), form = useRef<HTMLFormElement>(null)
   const { profile } = useAuth(), choices = useRosterChoiceSettings(canEdit)
@@ -93,7 +92,7 @@ export function NewEmployeeCompanyInformation({ person, rosterProfileId = person
     setValue(current => ({ ...current, [key]: text }))
   }
   function input(key: FieldKey) {
-    const [label, kind] = FIELDS[key], disabled = busy || (key === 'hireDate' ? !canEdit && !canApprove : !canEdit)
+    const [label, kind] = FIELDS[key], disabled = busy || !canEdit
     const imported = !touched.current.has(key) && Boolean(value[key]) && (roster.data?.[key] === value[key] || (key === 'departmentId' || key === 'position' || key === 'jobGrade' || key === 'hireDate') && person[key] === value[key])
     const origin = imported ? '직원 배치에서 가져옴' : !touched.current.has(key) && COMMON_DEFAULTS[key] === value[key] && value[key] ? '양식 기본값' : '직접 입력'
     const options = kind === 'department' ? departments.map(item => ({ value: item.id, label: item.name }))
@@ -149,9 +148,9 @@ export function NewEmployeeCompanyInformation({ person, rosterProfileId = person
         <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-semibold">계약기간·회사 공통값 확인 / 수정<span className="mt-1 block font-normal text-muted-foreground">{periodSummary}</span></summary><div className="mt-4 space-y-5">{grid(['contractTerm',...(value.contractTerm === 'fixed' ? ['contractMonths'] as const : []),'wageTerm',...(value.wageTerm === 'fixed' ? ['wageMonths'] as const : []),'probationApply',...(value.probationApply === 'yes' ? ['probationMonths'] as const : []),'probationPayRate','weeklyHoliday','payDay','employerName','representative','employerAddress'])}<p className="text-xs text-muted-foreground">계약 개월 수와 수습기간은 제공한 출력용 시트의 기본값입니다. 직원별 조건이 다르면 여기서 변경하세요.</p></div></details>
         <section aria-label="자동 반영 결과" className="rounded-xl border border-border p-4"><h4 className="font-semibold">자동 반영 결과</h4><p className="mb-4 mt-1 text-xs text-muted-foreground">입력값이 바뀌면 다시 계산됩니다. 결과 칸은 직접 입력하지 않습니다.</p><h5 className="mb-3 text-sm font-medium">계약서 날짜</h5><dl className="grid gap-3 sm:grid-cols-2">{CALCULATED_PERIOD_KEYS.map(output)}</dl><h5 className="mb-3 mt-5 text-sm font-medium">월 임금</h5><dl className="grid gap-3 sm:grid-cols-2">{(['monthlyWage','basePay','overtimeAllowance'] as const).map(output)}</dl>{calculation.error ? <p role="status" className="mt-3 text-sm text-warning">자동 계산 대기: {calculation.error}</p> : null}<details className="mt-4 border-t border-border pt-3"><summary className="cursor-pointer text-sm font-medium">산정시간·나머지 수당 확인</summary><dl className="mt-4 grid gap-3 sm:grid-cols-2">{CALCULATED_WAGE_KEYS.filter(key => !['monthlyWage','basePay','overtimeAllowance'].includes(key)).map(output)}</dl>{calculation.actualOvertimeHours ? <p className="mt-3 text-xs text-muted-foreground">약정 실제 연장근로 월 약 {calculation.actualOvertimeHours}시간 · 1.5배 가산 산정 {value.overtimeHours}시간</p> : null}</details><p className="mt-4 text-xs text-muted-foreground">임금구성항목(2026) 기준: 세전 연봉·주 5일·실근무 8시간·월 기본 209시간. 야간·휴일·연차미사용수당은 현재 유형에 미반영입니다. 원 단위로 반올림하고 기본급에서 합계를 맞춥니다.</p></section>
         <details className="rounded-xl border border-border p-4"><summary className="cursor-pointer text-sm font-medium">예외 조건 직접 입력</summary><div className="mt-4 space-y-4">{grid(['periodMode','wageMode'])}{value.periodMode === 'manual' ? grid(CALCULATED_PERIOD_KEYS) : null}{value.wageMode === 'manual' ? grid(CALCULATED_WAGE_KEYS) : null}<details><summary className="cursor-pointer text-sm text-muted-foreground">시간 직접 지정·기타</summary><div className="mt-3">{grid(['workStart','workEnd','breakStart','breakEnd','employeeNumber'])}</div></details></div></details>
-        <p className="text-xs text-muted-foreground">저장하면 회사 입력정보와 해당 직원의 배치·근무·급여 항목에 반영됩니다. 가입 승인 권한은 기존 기준을 따릅니다.</p>
+        <p className="text-xs text-muted-foreground">저장하면 회사 입력정보와 해당 직원의 배치·근무·급여 항목에 반영됩니다. 가입 승인·거절은 신규직원 목록의 승인여부 → 관리에서 처리합니다.</p>
       </div>
-      <div className="shrink-0 space-y-2 border-t border-border bg-card p-4">{error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}<div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>취소</Button><Button type="submit" variant="outline" disabled={busy || !canEdit}>회사정보 저장</Button>{person.status === 'pending' ? <Button type="button" variant="outline" disabled={busy || !canApprove} onClick={() => void onReject()}>거절</Button> : null}{person.status === 'pending' ? <Button type="button" disabled={busy || !canApprove} onClick={() => { if (form.current?.reportValidity()) void onApprove(value) }}>{busy ? '저장 중…' : person.status === 'pending' ? '승인' : '회사정보 저장'}</Button> : null}</div></div>
+      <div className="shrink-0 space-y-2 border-t border-border bg-card p-4">{error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}<div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="outline" disabled={busy} onClick={onClose}>취소</Button><Button type="submit" variant="outline" disabled={busy || !canEdit}>회사정보 저장</Button></div></div>
     </form>
   </dialog>
 }

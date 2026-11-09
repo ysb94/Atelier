@@ -5,9 +5,9 @@ const STATUS_LABEL: Record<AttendanceStatus, string> = {
   unset: '미기록', present: '출근', remote: '재택', offsite: '외근', annual: '연차', 'half-am': '오전 반차', 'half-pm': '오후 반차', official: '예비군·공가', absent: '결근', holiday: '휴무',
 }
 
-export function AttendanceCalendar({ month, memberId, records, schedule, overrides, today, selectedDate, onSelect }: {
+export function AttendanceCalendar({ month, memberId, records, schedule, overrides, today, trackingStart, selectedDate, onSelect }: {
   month: string; memberId: string; records: AttendanceRecords; schedule: AttendanceSchedule
-  overrides: WorkdayOverrides; today: string; selectedDate?: string; onSelect?: (date: string) => void
+  overrides: WorkdayOverrides; today: string; trackingStart: string; selectedDate?: string; onSelect?: (date: string) => void
 }) {
   const dates = monthDates(month)
   const leading = (new Date(`${month}-01T12:00:00`).getDay() + 6) % 7
@@ -17,6 +17,7 @@ export function AttendanceCalendar({ month, memberId, records, schedule, overrid
     {Array.from({ length: leading }, (_, i) => <span key={`blank-${i}`} className="attendance-calendar-blank" />)}
     {dates.map(date => {
       const record = records[date]?.[memberId] ?? EMPTY_ATTENDANCE
+      const excluded = date < trackingStart
       const timing = recordTiming(record, schedule)
       const names = koreanHolidayNames(date)
       const holidayLabel = koreanHolidayLabel(names)
@@ -24,22 +25,22 @@ export function AttendanceCalendar({ month, memberId, records, schedule, overrid
       const future = date > today
       const weekday = new Date(`${date}T12:00:00`).getDay()
       const nationalHoliday = names.length > 0 && !workday && record.status === 'unset'
-      const status = record.status === 'unset' ? (!workday ? holidayLabel || '휴무' : future ? '예정' : '미기록') : STATUS_LABEL[record.status]
+      const status = excluded ? '집계 제외' : record.status === 'unset' ? (!workday ? holidayLabel || '휴무' : future ? '예정' : '미기록') : STATUS_LABEL[record.status]
       const className = [
         'attendance-calendar-day',
-        !workday ? 'is-off' : '',
+        !workday || excluded ? 'is-off' : '',
         weekday === 6 ? 'is-sat' : '',
         weekday === 0 ? 'is-sun' : '',
         nationalHoliday ? 'is-holiday' : '',
-        workday && record.status === 'unset' && !future ? 'is-missing' : '',
-        workday && record.status === 'unset' && future ? 'is-planned' : '',
-        record.status !== 'unset' ? `is-${record.status}` : '',
+        !excluded && workday && record.status === 'unset' && !future ? 'is-missing' : '',
+        !excluded && workday && record.status === 'unset' && future ? 'is-planned' : '',
+        !excluded && record.status !== 'unset' ? `is-${record.status}` : '',
         date === today ? 'is-today' : '',
-        timing.exceeded ? 'is-exceeded' : timing.after ? 'is-after' : '',
+        !excluded && (timing.exceeded ? 'is-exceeded' : timing.after ? 'is-after' : ''),
         selectedDate === date ? 'is-selected' : '',
       ].filter(Boolean).join(' ')
-      const spoken = names.length && record.status === 'unset' ? names.join(', ') : `${status}${record.start ? ` ${record.start}` : ''}`
-      const content = <><span className="attendance-calendar-date">{Number(date.slice(-2))}{record.reviewed && <span title="확인 완료">✓</span>}</span><strong>{record.start || status}</strong>{record.start && !['present', 'unset'].includes(record.status) && <small>{status}</small>}{record.note && <span className="attendance-calendar-note" title={record.note}>메모</span>}</>
+      const spoken = excluded ? status : names.length && record.status === 'unset' ? names.join(', ') : `${status}${record.start ? ` ${record.start}` : ''}`
+      const content = <><span className="attendance-calendar-date">{Number(date.slice(-2))}{!excluded && record.reviewed && <span title="확인 완료">✓</span>}</span><strong>{excluded ? status : record.start || status}</strong>{!excluded && record.start && !['present', 'unset'].includes(record.status) && <small>{status}</small>}{!excluded && record.note && <span className="attendance-calendar-note" title={record.note}>메모</span>}</>
       return onSelect ? <button key={date} type="button" className={className} aria-label={`${date} ${spoken}`} title={names.join(' · ') || undefined} aria-pressed={selectedDate === date} onClick={() => onSelect(date)}>{content}</button> : <div key={date} className={className} title={names.join(' · ') || undefined}>{content}</div>
     })}
     </div>

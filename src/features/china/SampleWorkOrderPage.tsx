@@ -1,9 +1,12 @@
-import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { Button } from '@/components/ui/button'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { FilterBar } from '@/components/ui/filter-bar'
-import { Input, Select } from '@/components/ui/input'
+import { FilterTabs } from '@/components/ui/filter-tabs'
+import { Input } from '@/components/ui/input'
 import '@/features/drafts/draft-board.css'
 import { getCompanyProductDrafts } from '@/lib/api'
 import { DEFAULT_COMPANY_ID } from '@/lib/company/capabilities'
@@ -17,17 +20,20 @@ import {
   previousSampleFailReason,
 } from '@/lib/drafts/sample-work-order'
 import { useAuth } from '@/lib/supabase/auth'
+import { getMyChinaWorkOrders, type ChinaAssigneeWorkload } from '@/lib/supabase/china-assigned-work-orders'
+import { readPollInterval, sharedReadPolicy } from '@/lib/query/shared-read-policy'
 import type { ProductDraft } from '@/lib/types'
 import { emptyList, formatNumber } from '@/lib/utils'
 import { ChinaWorkOrderTabs } from './ChinaWorkOrderTabs'
 import { ChinaWorkOrderBoard } from './ChinaWorkOrderBoard'
+import { ChinaAssignedWorkOrders } from './ChinaAssignedWorkOrders'
 import type { WorkOrderGroup, WorkOrderRow } from './work-order-types'
 
-type WorkOrderTab = 'open' | 'color' | 'done'
+type WorkOrderTab = 'all' | 'open' | 'done'
 
 const WORK_ORDER_TABS: { value: WorkOrderTab; label: string }[] = [
+  { value: 'all', label: '전체' },
   { value: 'open', label: '샘플 요청' },
-  { value: 'color', label: '컬러별 샘플 요청' },
   { value: 'done', label: '종료' },
 ]
 
@@ -35,10 +41,15 @@ function workOrderFileName(name: string) {
   return name.trim() || '샘플 작업 지시서'
 }
 
+function closedRound(row: Pick<WorkOrderRow, 'shipped' | 'passed' | 'receivedAt'>) {
+  return Boolean(row.shipped || row.passed || row.receivedAt)
+}
+
 function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
   const allSamples = filledSampleWorkOrders(draft.sampleWorkOrders)
-  const samples = allSamples.filter(order => sampleSentToChinaTeam(order.originCountry, draft.originCountry)).map(
-    (order) => ({
+  const samples = allSamples.map((order) => ({
+    china: sampleSentToChinaTeam(order.originCountry, draft.originCountry),
+    row: {
       draft,
       kind: 'sample' as const,
       sampleStage: order.sampleStage,
@@ -49,6 +60,7 @@ function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
       shipped: Boolean(order.shipped),
       shippedAt: order.shippedAt,
       returnedAt: order.returnedAt,
+      receivedAt: order.receivedAt ?? null,
       passed: Boolean(order.passed),
       failReason: order.failReason?.trim() ?? '',
       focusReason: previousSampleFailReason(draft.sampleWorkOrders, order.id),
@@ -57,45 +69,62 @@ function flattenDraftWorkOrders(draft: ProductDraft): WorkOrderRow[] {
       assigneeId: order.assigneeId,
       assigneeName: order.assigneeName,
       fileCheckedAt: order.fileCheckedAt,
-    }),
-  )
-  const colorRounds = resolveColorSampleRounds(draft)
-  const colorNames = draft.colors.map((color) => color.name.trim()).filter(Boolean).join(', ')
-  const colors = colorRounds.filter(round => !(round.originCountry || draft.originCountry) || /중국|china/i.test(round.originCountry || draft.originCountry)).map((round) => {
+      assigneeCheckedAt: order.assigneeCheckedAt ?? null,
+    },
+  }))
+  const colors = resolveColorSampleRounds(draft).map((round) => {
     const returned = Boolean(round.returnedAt || round.passed)
     return {
-      draft,
-      kind: 'color' as const,
-      stageLabel: colorSampleLabel(round.round),
-      rowId: round.id,
-      url: round.url,
-      fileName: round.name.trim() || `${round.round}차 컬러 샘플 작업 지시서`,
-      shipped: returned,
-      shippedAt: round.shippedAt ?? draft.specs.colorSampleRequestedAt ?? null,
-      returnedAt: round.returnedAt,
-      passed: round.passed,
-      failReason: '',
-      focusReason: '',
-      colorName: colorNames,
-      sortRound: round.round,
-      assigneeId: null,
-      assigneeName: '',
-      fileCheckedAt: null,
+      china: sampleSentToChinaTeam(round.originCountry, draft.originCountry),
+      row: {
+        draft,
+        kind: 'color' as const,
+        stageLabel: colorSampleLabel(round.round),
+        rowId: round.id,
+        url: round.url,
+        fileName: round.name.trim() || `${round.round}차 컬러 샘플 작업 지시서`,
+        shipped: returned,
+        shippedAt: round.shippedAt ?? draft.specs.colorSampleRequestedAt ?? null,
+        returnedAt: round.returnedAt,
+        receivedAt: round.receivedAt ?? null,
+        passed: round.passed,
+        failReason: '',
+        focusReason: '',
+        colorName: '',
+        sortRound: round.round,
+        assigneeId: round.assigneeId ?? null,
+        assigneeName: round.assigneeName ?? '',
+        fileCheckedAt: round.fileCheckedAt ?? null,
+        assigneeCheckedAt: round.assigneeCheckedAt ?? null,
+      },
     }
   })
-  return [...samples, ...colors]
+  const rounds = [...samples, ...colors]
+  if (!rounds.some((item) => item.china)) return []
+  return rounds.filter((item) => item.china || closedRound(item.row)).map((item) => item.row)
 }
 
-function isWorkOrderDone(row: Pick<WorkOrderRow, 'kind' | 'shipped' | 'passed'>) {
-  return row.kind === 'color' ? row.shipped : Boolean(row.shipped || row.passed)
+function isWorkOrderDone(row: Pick<WorkOrderRow, 'shipped' | 'passed' | 'receivedAt'>) {
+  return closedRound(row)
 }
 
-function isOpenSampleRequest(row: WorkOrderRow) {
-  return row.kind === 'sample' && !isWorkOrderDone(row)
+function matchesListTab(row: WorkOrderRow, tab: WorkOrderTab) {
+  if (tab === 'all') return true
+  if (tab === 'done') return isWorkOrderDone(row)
+  return !isWorkOrderDone(row)
 }
 
-function isOpenColorRequest(row: WorkOrderRow) {
-  return row.kind === 'color' && !isWorkOrderDone(row)
+function assignmentTime(value: string | null | undefined) {
+  if (!value) return null
+  const time = Date.parse(value)
+  return Number.isNaN(time) ? null : time
+}
+
+function roundHandedOff(row: WorkOrderRow, assignedAt: string | null | undefined) {
+  const assigned = assignmentTime(assignedAt)
+  if (assigned == null) return false
+  const arrived = assignmentTime(row.shippedAt)
+  return arrived == null || arrived <= assigned
 }
 
 function groupWorkOrders(rows: readonly WorkOrderRow[]): WorkOrderGroup[] {
@@ -113,13 +142,65 @@ function groupWorkOrders(rows: readonly WorkOrderRow[]): WorkOrderGroup[] {
   return [...groups.values()].sort((left, right) => right.draft.updatedAt.localeCompare(left.draft.updatedAt))
 }
 
+function assigneeUncheckedPlans(groups: readonly WorkOrderGroup[]) {
+  const counts = new Map<string, number>()
+  for (const group of groups) {
+    const assignment = group.draft.specs.chinaWorkAssignment
+    const assigneeId = assignment?.assigneeId
+    if (!assigneeId || group.draft.status === 'confirmed') continue
+    const pending = group.rows.some(row => row.assigneeId === assigneeId && roundHandedOff(row, assignment.assignedAt) && Boolean(row.url) && !isWorkOrderDone(row) && !row.assigneeCheckedAt)
+    if (!pending) continue
+    counts.set(assigneeId, (counts.get(assigneeId) ?? 0) + 1)
+  }
+  return counts
+}
+
+function unreceivedWorkOrders(groups: readonly WorkOrderGroup[]) {
+  return groups.reduce((sum, group) => sum + group.rows.filter(row => !isWorkOrderDone(row) && Boolean(row.url) && !row.fileCheckedAt).length, 0)
+}
+
 export function CompanySampleWorkOrderPage() {
   useRenderWatch('CompanySampleWorkOrderPage')
+  const { profile, session } = useAuth()
+  const { brandById } = useCompanyBrandScope()
+  const active = useWorkspaceTabActivity()
+  const accountId = session?.user.id
+  const enabled = Boolean(accountId && profile?.id === accountId && profile.status === 'active')
+  const screen = useQuery({
+    queryKey: ['china-work-screen', accountId],
+    queryFn: getMyChinaWorkOrders,
+    ...sharedReadPolicy,
+    enabled,
+    refetchInterval: readPollInterval(30_000, active && enabled),
+  })
+  if (enabled && !screen.isError && screen.data?.role === 'manager') return <ChinaManagedWorkOrders key={accountId}
+    revision={screen.data.revision} workloads={screen.data.workloads} />
+  if (enabled && !screen.isError && accountId && screen.data?.role === 'worker') {
+    return <ChinaAssignedWorkOrders key={accountId} accountId={accountId} orders={screen.data.orders} brandById={brandById} />
+  }
+  return <div>
+    <PageHeader title="중국 업무" />
+    {screen.isError ? <p role="alert" className="flex flex-wrap items-center gap-3 text-sm text-danger">
+      중국 업무를 불러오지 못했습니다.
+      <Button type="button" size="sm" variant="outline" onClick={() => void screen.refetch()}>다시 조회</Button>
+    </p> : <p role="status" className="text-sm text-muted-foreground">{screen.data?.role === 'denied' ? '중국 업무를 볼 수 있는 계정이 아닙니다.' : '중국 업무를 불러오는 중입니다.'}</p>}
+  </div>
+}
+
+function ChinaManagedWorkOrders({ revision, workloads }: { revision?: string | null; workloads?: readonly ChinaAssigneeWorkload[] }) {
+  useRenderWatch('ChinaManagedWorkOrders')
   const { brandById } = useCompanyBrandScope()
   const { profile } = useAuth()
   const [search, setSearch] = useState('')
-  const [listTab, setListTab] = useState<WorkOrderTab>('open')
+  const [listTab, setListTab] = useState<WorkOrderTab>('all')
   const companyId = profile?.companyId ?? DEFAULT_COMPANY_ID
+  const cache = useQueryClient()
+  const previousRevision = useRef(revision)
+  useEffect(() => {
+    if (previousRevision.current === revision) return
+    previousRevision.current = revision
+    void cache.invalidateQueries({ queryKey: ['product-drafts', 'company', companyId], exact: true })
+  }, [cache, companyId, revision])
 
   const draftsQuery = useQuery({
     queryKey: ['product-drafts', 'company', companyId],
@@ -129,28 +210,46 @@ export function CompanySampleWorkOrderPage() {
     (draftsQuery.data ?? emptyList<ProductDraft>())
       .filter(draftHasSampleWorkOrder).flatMap(flattenDraftWorkOrders),
   ), [draftsQuery.data])
+  const unchecked = useMemo(() => assigneeUncheckedPlans(workOrderGroups), [workOrderGroups])
+  const unreceived = useMemo(() => unreceivedWorkOrders(workOrderGroups), [workOrderGroups])
   const visibleGroups = useMemo(() => {
     const keyword = search.trim().toLowerCase()
-    return workOrderGroups.filter(group => {
-      const matchesStatus = group.rows.some(row => listTab === 'done' ? isWorkOrderDone(row) : listTab === 'color' ? isOpenColorRequest(row) : isOpenSampleRequest(row))
-      if (!matchesStatus) return false
-      return !keyword || group.rows.some(row => [
-        group.draft.draftNo, group.draft.nameKo, group.draft.nameEn,
-        group.draft.owner, row.fileName, row.colorName,
+    return workOrderGroups.flatMap(group => {
+      if (group.draft.status === 'confirmed' && listTab !== 'done') return []
+      const matched = group.rows.filter(row => matchesListTab(row, listTab))
+      if (matched.length === 0) return []
+      const rows = listTab === 'open'
+        ? group.rows.filter(row => isWorkOrderDone(row) || matchesListTab(row, listTab))
+        : matched
+      const matchesKeyword = !keyword || [
+        group.draft.draftNo, group.draft.nameKo, group.draft.nameEn, group.draft.owner,
+        ...rows.flatMap(row => [row.fileName, row.colorName]),
         ...group.draft.colors.map(color => color.name),
-      ].some(value => value.toLowerCase().includes(keyword)))
+      ].some(value => value.toLowerCase().includes(keyword))
+      return matchesKeyword ? [{ ...group, rows }] : []
     })
   }, [workOrderGroups, listTab, search])
-  const visibleRounds = visibleGroups.reduce((count, group) => count + group.rows.length, 0)
 
   return (
     <div>
       <PageHeader
-        title="작업 지시서"
-        description="같은 상품의 샘플 회차를 한 묶음으로 표시합니다. 담당자 지정·받기·발송·업무배정 버튼은 화면 확인용입니다."
+        title="중국 업무"
+        description="같은 상품의 샘플 회차를 한 묶음으로 표시합니다. 발송하면 기획안 회차에 발송일이 남습니다."
       />
 
-      <ChinaWorkOrderTabs>
+      <ChinaWorkOrderTabs workloads={workloads} unchecked={unchecked} unreceived={unreceived} priceDrafts={draftsQuery.data} brandById={brandById}>
+      {({ assigneeId }) => {
+      const scopedGroups = visibleGroups.flatMap(group => {
+        const assignment = group.draft.specs.chinaWorkAssignment
+        const assignedTo = assignment?.assigneeId ?? ''
+        const pending = group.rows.some(row => !roundHandedOff(row, assignedTo ? assignment?.assignedAt : null))
+        if (!assigneeId) return assignedTo && !pending ? [] : [group]
+        if (assignedTo !== assigneeId) return []
+        const rows = group.rows.filter(row => roundHandedOff(row, assignment?.assignedAt))
+        return rows.length ? [{ ...group, rows }] : []
+      })
+      const scopedRounds = scopedGroups.reduce((count, group) => count + group.rows.length, 0)
+      return <>
       <FilterBar>
         <Input
           className="sm:max-w-xs"
@@ -158,12 +257,14 @@ export function CompanySampleWorkOrderPage() {
           value={search}
           onChange={(event) => setSearch(event.target.value)}
         />
-        <Select aria-label="작업 지시서 상태" className="sm:w-48" value={listTab} onChange={event => setListTab(event.target.value as WorkOrderTab)}>
-          {WORK_ORDER_TABS.map(tab => <option key={tab.value} value={tab.value}>{tab.label}</option>)}
-        </Select>
+        <FilterTabs tabs={WORK_ORDER_TABS} value={listTab} onChange={setListTab} ariaLabel="작업 지시서 상태" />
         <div className="text-sm text-muted-foreground sm:ml-auto">
-          {formatNumber(visibleGroups.length)}상품 · {formatNumber(visibleRounds)}회차
+          {formatNumber(scopedGroups.length)}상품 · {formatNumber(scopedRounds)}회차
         </div>
+        <Button type="button" variant="outline" size="sm" disabled={draftsQuery.isFetching} onClick={() => {
+          void draftsQuery.refetch()
+          void cache.invalidateQueries({ queryKey: ['china-work-screen'] })
+        }}>새로고침</Button>
       </FilterBar>
 
       {draftsQuery.isError ? (
@@ -171,9 +272,11 @@ export function CompanySampleWorkOrderPage() {
           작업 지시서를 불러오지 못했습니다.
         </p>
       ) : null}
-      <ChinaWorkOrderBoard groups={visibleGroups} brandById={brandById} emptyMessage={
-        draftsQuery.isLoading ? '불러오는 중...' : draftsQuery.isError ? '작업 지시서를 불러오지 못했습니다.' : search.trim() ? '조건에 맞는 상품이 없습니다.' : '기획안에 등록된 작업 지시서가 여기에 상품별로 나타납니다.'
+      <ChinaWorkOrderBoard groups={scopedGroups} brandById={brandById} emptyMessage={
+        draftsQuery.isLoading ? '불러오는 중...' : draftsQuery.isError ? '작업 지시서를 불러오지 못했습니다.' : search.trim() ? '조건에 맞는 상품이 없습니다.' : assigneeId ? '이 담당자에게 배정된 작업 지시서가 없습니다.' : '기획안에 등록된 작업 지시서가 여기에 상품별로 나타납니다.'
       } />
+      </>
+      }}
       </ChinaWorkOrderTabs>
     </div>
   )

@@ -24,7 +24,7 @@ export function LeaveBalancePanel() {
   const canManage = canEditOrgAssignment(profile) || access?.domains.includes('operations') === true
   const client = useQueryClient()
   const advanceFetching = useIsFetching({ queryKey: ['employee-leave-advances', profile?.id, true] })
-  const directory = useOpsDirectory()
+  const directory = useOpsDirectory('head-office')
   const [departmentId, setDepartmentId] = useState('all')
   const [search, setSearch] = useState('')
   const snapshot = useEmployeeRoster(canManage)

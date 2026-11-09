@@ -1,8 +1,11 @@
 import { RosterChoiceSettings } from './RosterChoiceSettings'
+import { WorkforceManagementPanel } from './WorkforceManagementPanel'
+import { useWorkforceManagement } from '@/lib/company/workforce-management-context'
 import { NewEmployeesPanel } from './NewEmployeesPanel'
 import { useRosterChoiceSettings } from './use-roster-choice-settings'
 import { isRosterChoiceKey, rosterChoiceValues } from '@/lib/company/roster-choices'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   UserPlus,
@@ -23,11 +26,11 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { isPersonnelMember } from '@/lib/company/workforce-management'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { useEmployeeRoster } from '@/features/operations-support/use-employee-roster'
 import {
   canEditOrgAssignment,
-  canManagePersonnel,
   OPERATIONS_SUPPORT_DEPARTMENT,
 } from '@/lib/company/capabilities'
 import { useAuth } from '@/lib/supabase/auth'
@@ -77,7 +80,7 @@ const TEAM_TONES = [
   'bg-[#dfecee] text-[#2d6470]',
 ] as const
 const UNASSIGNED_TONE = 'bg-muted text-muted-foreground'
-type OrgView = 'chart' | 'members' | 'new' | 'titles'
+type OrgView = 'chart' | 'members' | 'new' | 'titles' | 'workforce'
 type TeamGroup = {
   id: string
   name: string
@@ -173,10 +176,30 @@ export function OrgChartPage({
 } = {}) {
   useRenderWatch(mode === 'manage' ? 'OrgChartManage' : 'OrgChartPage')
   const { profile } = useAuth()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tabActive = useWorkspaceTabActivity()
   const queryClient = useQueryClient()
   const { access } = useBasicWorkAccess()
   const canEdit = mode === 'manage' && (canEditOrgAssignment(profile) || access?.domains.includes('operations') === true)
-  const [view, setView] = useState<OrgView>(mode === 'manage' ? 'members' : 'chart')
+  const [view, setView] = useState<OrgView>(() => {
+    const initial = searchParams.get('orgView')
+    return mode !== 'manage' ? 'chart' : initial === 'new' || initial === 'titles' || initial === 'workforce' ? initial : 'members'
+  })
+  useEffect(() => {
+    if (mode !== 'manage' || !tabActive) return
+    const next = searchParams.get('orgView')
+    setView(next === 'new' || next === 'titles' || next === 'workforce' ? next : 'members')
+  }, [mode, tabActive, searchParams])
+  function selectView(next: OrgView) {
+    if (!tabActive) return
+    setView(next)
+    setSearchParams(previous => {
+      const params = new URLSearchParams(previous)
+      if (next === 'members') params.delete('orgView')
+      else params.set('orgView', next)
+      return params
+    }, { replace: true })
+  }
   const [search, setSearch] = useState('')
   const [departmentFilter, setDepartmentFilter] = useState('all')
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -193,7 +216,10 @@ export function OrgChartPage({
     queryFn: () => listPersonnelTitles(),
   })
   const departments = departmentsQuery.data ?? emptyList<Department>()
-  const members = membersQuery.data ?? emptyList<OrgChartMember>()
+  const workforce = useWorkforceManagement()
+  const sourceRows = membersQuery.data ?? emptyList<OrgChartMember>()
+  const sourceMembers = useMemo(() => workforce ? sourceRows.map(workforce.decorate) : sourceRows, [sourceRows, workforce])
+  const members = useMemo(() => mode === 'manage' ? workforce?.error ? emptyList<OrgChartMember>() : sourceMembers.filter(isPersonnelMember) : sourceMembers, [sourceMembers, mode, workforce?.error])
   const titles = titlesQuery.data ?? emptyList<PersonnelTitle>()
 
   useEffect(() => {
@@ -317,8 +343,8 @@ export function OrgChartPage({
   const loading =
     departmentsQuery.isPending ||
     membersQuery.isPending ||
-    titlesQuery.isPending
-  const directoryError = departmentsQuery.error || membersQuery.error
+    titlesQuery.isPending || (mode === 'manage' && Boolean(workforce?.loading))
+  const directoryError = departmentsQuery.error || membersQuery.error || (mode === 'manage' ? workforce?.error : null)
   const hasFilter = Boolean(needle) || departmentFilter !== 'all'
   async function refreshAssignments() {
     setEditingId(null)
@@ -404,13 +430,14 @@ export function OrgChartPage({
               { id: 'members', label: '직원 배치', icon: Users },
               { id: 'new', label: '신규직원', icon: UserPlus },
               { id: 'titles', label: '드롭다운 설정', icon: Settings2 },
+              { id: 'workforce', label: '본사 관리 대상', icon: Users },
             ] as const
           ).map((item) => (
             <button
               key={item.id}
               type="button"
               aria-pressed={activeView === item.id}
-              onClick={() => setView(item.id)}
+              onClick={() => selectView(item.id)}
               className={cn(
                 'flex min-h-10 items-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring',
                 activeView === item.id
@@ -424,7 +451,7 @@ export function OrgChartPage({
           ))}
           <span className="ml-auto hidden items-center px-3 text-xs text-muted-foreground lg:flex">
             {activeView === 'new'
-              ? '가입 신청과 아직 부서가 없는 신규 직원을 배치합니다'
+              ? '가입 승인과 신규직원의 입사 정보·서류를 확인합니다'
               : canEdit
               ? '배치와 직책·직급을 수정할 수 있습니다'
               : '조회만 할 수 있습니다'}
@@ -552,13 +579,13 @@ export function OrgChartPage({
             filtered={hasFilter}
           />
         </div>
+      ) : activeView === 'workforce' ? (
+        <WorkforceManagementPanel members={sourceMembers} departments={departments} canEdit={canEdit && membersQuery.isSuccess && departmentsQuery.isSuccess} />
       ) : activeView === 'new' ? (
         <NewEmployeesPanel
           departments={departments}
           duties={duties.map(title => title.name)}
           grades={grades.map(title => title.name)}
-          canApprove={canManagePersonnel(profile)}
-          canAssign={canEdit && !directoryError && !titlesQuery.isError}
         />
       ) : (
         <section className="space-y-4">

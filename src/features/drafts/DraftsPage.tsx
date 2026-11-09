@@ -2,9 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus } from 'lucide-react'
-import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { startWorkflow, tracedInput } from '@/lib/diagnostics/workflow-trace'
 import { createSeason, deleteSeason, getCompanyProductDrafts, getSeasonsByBrand, updateProductDraft, updateSeason } from '@/lib/api'
 import {
   DEFAULT_COMPANY_ID,
@@ -27,8 +27,9 @@ import { parseSizeSpecInput } from '@/lib/drafts/spec-format'
 import { writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
 import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
+import { draftPriceError, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
 import {
-  type Brand,
+  type DraftColorImageChoice,
   type ProductDraft,
   type ProductDraftInput,
   type Season,
@@ -36,37 +37,21 @@ import {
 import { combineListQueries, flattenListQueries } from '@/lib/query/list-queries'
 import { draftDetailPath, draftNewPath } from '@/lib/workspace/company-paths'
 import { cn, formatNumber, emptyList } from '@/lib/utils'
+import { DraftBrandScopeBar, countScheduleRows } from './DraftBrandScopeBar'
 import { DraftFolderBar, DraftFolderHeading } from './DraftFolderBar'
 import { matchesDraftFolder } from './draft-folder-filter'
 import { DraftSheetRow, type DraftConfirmFlag } from './DraftSheetRow'
 import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
+import { useDraftPriceRequests } from './useDraftPriceRequests'
 import {
   formatReleaseGroupLabel,
   resolveReleaseSchedule,
   seasonToPreviewGroup,
   type PreviewReleaseAssignment,
   type PreviewReleaseGroup,
-  type ResolvedReleaseSchedule,
 } from './release-schedule-preview'
 
 type BoardFilter = 'all' | 'unassigned' | 'scheduled'
-
-function hasReleaseGroup(schedule: ResolvedReleaseSchedule | undefined) {
-  return Boolean(schedule?.group)
-}
-
-function countScheduleRows(
-  rows: ProductDraft[],
-  scheduleByDraft: Map<string, ResolvedReleaseSchedule>,
-) {
-  let pending = 0
-  let scheduled = 0
-  for (const draft of rows) {
-    if (hasReleaseGroup(scheduleByDraft.get(draft.id))) scheduled += 1
-    else pending += 1
-  }
-  return { total: rows.length, pending, scheduled }
-}
 
 function emptyMessage(
   hasAny: boolean,
@@ -127,6 +112,18 @@ export function CompanyDraftsPage() {
     queryKey: ['product-drafts', 'company', companyId],
     queryFn: () => getCompanyProductDrafts(companyId),
   })
+  const prices = useDraftPriceRequests('planning')
+  const priceByDraft = useMemo(() => {
+    const byDraft = new Map<string, { latest: DraftPriceRequest; reply?: DraftPriceRequest }>()
+    for (const request of prices.requests) {
+      const current = byDraft.get(request.draftId)
+      const latest = !current || request.round > current.latest.round ? request : current.latest
+      const reply = request.answeredAt && (!current?.reply || request.round > current.reply.round) ? request : current?.reply
+      byDraft.set(request.draftId, { latest, reply })
+    }
+    return byDraft
+  }, [prices.requests])
+  const priceListError = prices.query.error ? draftPriceError(prices.query.error, '단가요청을 불러오지 못했습니다.') : ''
   const seasonQueries = useQueries({
     queries: brands.map((item) => ({
       queryKey: ['seasons', item.id] as const,
@@ -153,30 +150,36 @@ export function CompanyDraftsPage() {
   function saveDraftChange(
     draftId: string,
     change: (current: ProductDraft) => ProductDraftInput,
+    action = 'draft_save',
   ) {
     const previous = saveChainRef.current.get(draftId) ?? Promise.resolve()
     // 앞선 저장 실패는 그 호출을 기다린 쪽에 이미 전달됐다. 다음 수정은 이어서 저장한다.
     const task = previous.catch(() => undefined).then(async () => {
-      const current = currentDraft(draftId)
-      if (!current) throw new Error('기획안을 찾지 못했습니다.')
-      if (!canWriteDraft(workAccess.access,current)) throw new Error('작성자만 기획안을 수정할 수 있습니다.')
-      const input = change(current)
+      const trace = startWorkflow('app', action)
       try {
-        const updated = await updateProductDraft(draftId, input)
-        savedDraftRef.current.set(draftId, updated)
-        queryClient.setQueryData<ProductDraft[]>(
-          ['product-drafts', 'company', companyId],
-          (current) =>
-            current?.map((item) => (item.id === updated.id ? updated : item)),
+        trace.step('check_access')
+        const current = currentDraft(draftId)
+        if (!current) throw new Error('기획안을 찾지 못했습니다.')
+        if (!canWriteDraft(workAccess.access,current)) throw new Error('작성자만 기획안을 수정할 수 있습니다.')
+        trace.step('validate_input')
+        const input = change(current)
+        const updated = await trace.run('save', (context) =>
+          updateProductDraft(draftId, tracedInput(input, context)),
         )
-        await queryClient.invalidateQueries({ queryKey: ['product-drafts'] })
-        await queryClient.invalidateQueries({ queryKey: ['product-draft', draftId] })
+        await trace.run('refresh_queries', async () => {
+          savedDraftRef.current.set(draftId, updated)
+          queryClient.setQueryData<ProductDraft[]>(
+            ['product-drafts', 'company', companyId],
+            (current) =>
+              current?.map((item) => (item.id === updated.id ? updated : item)),
+          )
+          await queryClient.invalidateQueries({ queryKey: ['product-drafts'] })
+          await queryClient.invalidateQueries({ queryKey: ['product-draft', draftId] })
+        }, { writeOutcome: 'committed' })
+        trace.done({ writeOutcome: 'committed' })
         return updated
       } catch (err) {
-        console.warn('[drafts] 기획안 저장 실패', {
-          draftId,
-          message: err instanceof Error ? err.message : String(err),
-        })
+        trace.fail(err)
         throw err
       }
     })
@@ -324,7 +327,7 @@ export function CompanyDraftsPage() {
     let mdOpen = 0
     for (const draft of folderDrafts) {
       const schedule = scheduleByDraft.get(draft.id)
-      if (hasReleaseGroup(schedule)) scheduled += 1
+      if (schedule?.group) scheduled += 1
       else pending += 1
       if (draft.status === 'open') planningOpen += 1
       if (!schedule?.group || schedule.certainty !== 'confirmed') mdOpen += 1
@@ -340,7 +343,7 @@ export function CompanyDraftsPage() {
 
   const visible = useMemo(() => {
     return folderDrafts.filter((draft) => {
-      const scheduled = hasReleaseGroup(scheduleByDraft.get(draft.id))
+      const scheduled = Boolean(scheduleByDraft.get(draft.id)?.group)
       if (boardFilter === 'unassigned' && scheduled) return false
       if (boardFilter === 'scheduled' && !scheduled) return false
       return true
@@ -459,50 +462,13 @@ export function CompanyDraftsPage() {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center gap-2">
-        <BrandStatCard
-          label="전체"
-          badge={{ name: 'ALL', color: '#343a40', logoUrl: null }}
-          total={allScopeCounts.total}
-          pending={allScopeCounts.pending}
-          scheduled={allScopeCounts.scheduled}
-          selected={brandScope === 'all'}
-          onSelect={() => setBrandScope('all')}
-        />
-        {brandCards.map((card) => (
-          <BrandStatCard
-            key={card.brand.id}
-            label={card.brand.name}
-            badge={card.brand}
-            total={card.total}
-            pending={card.pending}
-            scheduled={card.scheduled}
-            selected={brandScope === card.brand.slug}
-            onSelect={() =>
-              setBrandScope(
-                brandScope === card.brand.slug ? 'all' : card.brand.slug,
-              )
-            }
-          />
-        ))}
-        {unassignedScopeCounts.total > 0 ? (
-          <BrandStatCard
-            label="브랜드 미정"
-            badge={{ name: '미정', color: '#8a8e94', logoUrl: null }}
-            total={unassignedScopeCounts.total}
-            pending={unassignedScopeCounts.pending}
-            scheduled={unassignedScopeCounts.scheduled}
-            selected={brandScope === UNASSIGNED_DRAFT_BRAND}
-            onSelect={() =>
-              setBrandScope(
-                brandScope === UNASSIGNED_DRAFT_BRAND
-                  ? 'all'
-                  : UNASSIGNED_DRAFT_BRAND,
-              )
-            }
-          />
-        ) : null}
-      </div>
+      <DraftBrandScopeBar
+        brandScope={brandScope}
+        allScopeCounts={allScopeCounts}
+        brandCards={brandCards}
+        unassignedScopeCounts={unassignedScopeCounts}
+        onSelect={setBrandScope}
+      />
 
       <div className="mb-3 flex flex-col gap-3 border-b border-[#ead7b0] pb-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="flex flex-wrap items-center gap-1.5 lg:pb-2">
@@ -635,6 +601,7 @@ export function CompanyDraftsPage() {
                 const schedule = scheduleByDraft.get(draft.id)
                 const brandId = schedule?.brandId ?? draft.brandId
                 const brand = brandId ? brandById.get(brandId) : undefined
+                const price = priceByDraft.get(draft.id)
                 return (
                   <DraftSheetRow
                     key={draft.id}
@@ -642,6 +609,13 @@ export function CompanyDraftsPage() {
                     readOnly={!canWriteDraft(workAccess.access,draft)}
                     schedule={schedule}
                     brand={brand}
+                    price={{
+                      ...price, loading: prices.query.isPending, error: priceListError,
+                      retry: () => { void prices.query.refetch() },
+                      request: () => prices.change({
+                        action: 'request', draftId: draft.id, revision: draft.updatedAt, previousId: price?.latest.id ?? null,
+                      }),
+                    }}
                     onOpen={() => navigate(draftDetailPath(draft.id))}
                     onNextSample={() => navigate(`${draftDetailPath(draft.id)}#next-sample`)}
                     onSchedule={() => setScheduleDraftId(draft.id)}
@@ -652,16 +626,23 @@ export function CompanyDraftsPage() {
                           throw new Error(`최대 ${MAX_DRAFT_COLORS}컬러까지 추가할 수 있습니다.`)
                         }
                         const byId = new Map(input.colors.map((color) => [color.id, color]))
+                        const colorImageChoices: Record<string, DraftColorImageChoice> = {}
+                        const colorPhotoUrls: Record<string, string> = {}
+                        const colors = rows.map(({ id, name, photoChange }) => {
+                          const existing = id ? byId.get(id) : undefined
+                          const color = { ...(existing ?? newColorRow(crypto.randomUUID())), name: name.trim() }
+                          const choice = photoChange?.choice ?? input.specs.colorImageChoices?.[color.id]
+                          const photoUrl = photoChange ? photoChange.url : input.specs.colorPhotoUrls?.[color.id]
+                          if (choice) colorImageChoices[color.id] = choice
+                          if (choice === 'Image' && photoUrl) colorPhotoUrls[color.id] = photoUrl
+                          return color
+                        })
                         return {
                           ...input,
-                          colors: rows.map((row) => {
-                            const name = row.name.trim()
-                            const existing = row.id ? byId.get(row.id) : undefined
-                            if (existing) return { ...existing, name }
-                            return { ...newColorRow(), name }
-                          }),
+                          colors,
+                          specs: { ...input.specs, colorImageChoices, colorPhotoUrls },
                         }
-                      })
+                      }, 'draft_save_colors')
                     }}
                     onRenameProduct={async (field, name) => {
                       await saveDraftChange(draft.id, (current) => {
@@ -819,57 +800,6 @@ export function CompanyDraftsPage() {
         }}
       />
     </div>
-  )
-}
-
-function BrandStatCard({
-  label,
-  badge,
-  total,
-  pending,
-  scheduled,
-  selected,
-  onSelect,
-}: {
-  label: string
-  badge: Pick<Brand, 'name' | 'color' | 'logoUrl'>
-  total: number
-  pending: number
-  scheduled: number
-  selected: boolean
-  onSelect: () => void
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      title={selected && label !== '전체' ? '다시 누르면 전체 브랜드' : label}
-      onClick={onSelect}
-      className={cn(
-        'inline-flex min-w-[168px] items-center gap-2 rounded-full border bg-white px-1.5 py-1 text-left',
-        selected
-          ? 'border-foreground shadow-sm'
-          : 'border-[#ead7c8] hover:border-[#d7c2ae]',
-      )}
-    >
-      <BrandAvatar
-        brand={badge}
-        className="size-9 rounded-full text-[10px]"
-        textClassName="text-[10px]"
-      />
-      <span className="min-w-0">
-        <span className="block truncate text-[11px] font-semibold tracking-wide">
-          {label}
-        </span>
-        <span className="mt-0.5 flex items-baseline gap-1.5 text-[10px] text-muted-foreground">
-          <span className="text-sm font-semibold tabular-nums text-foreground">
-            {formatNumber(total)}
-          </span>
-          <span className="tabular-nums">미정 {formatNumber(pending)}</span>
-          <span className="tabular-nums">확정 {formatNumber(scheduled)}</span>
-        </span>
-      </span>
-    </button>
   )
 }
 

@@ -2,7 +2,7 @@
   "domains": [
     { "id": "home", "label": "홈 · 일정", "description": "회사 홈, 개인 출근 기록과 일정", "features": ["home"], "libs": [], "stores": ["attendance-clocks"] },
     { "id": "products", "label": "상품 · SKU", "description": "M번호는 색상·사이즈별 SKU. 상품 조회, 편집, 분류와 이미지", "features": ["products"], "libs": ["products", "seasons"], "stores": ["styles", "style-", "product-categories", "seasons"] },
-    { "id": "drafts", "label": "기획안", "description": "회사 소유 기획안과 브랜드 상품 승격", "features": ["drafts"], "libs": ["drafts"], "stores": ["product-drafts", "draft-"] },
+    { "id": "drafts", "label": "기획안", "description": "회사 소유 기획안, 자재요청과 브랜드 상품 승격", "features": ["drafts", "planning"], "libs": ["drafts"], "stores": ["product-drafts", "draft-"] },
     { "id": "logistics", "label": "물류 · 송장 · 창고", "description": "송장 변환, 바코드 출고, 출고 원장, 창고와 입고. 출고 원장과 재고 차감은 별도", "features": ["logistics"], "libs": ["invoice", "warehouse", "outbound", "cargo", "bulk-outbound"], "stores": ["invoice-", "warehouse-", "warehouses", "cargo-", "outbound-shipments", "bulk-outbound", "barcode-data-entry"], "functions": ["warehouse-sheet-sync"] },
     { "id": "design", "label": "디자인 · 이미지", "description": "연출 컷 제작, 360 상세이미지, 스튜디오와 R2 파일 관리", "features": ["design", "spin360"], "libs": ["design"], "stores": ["styled-", "studio-"], "functions": ["styled-image"], "shared": ["styled-"] },
     { "id": "codes", "label": "바코드 · 사방넷 · 업체", "description": "88코드 구성품, 사방넷 SKU 연결, 출고업체와 별칭", "features": ["codes"], "libs": ["codes"], "stores": ["product-codes", "barcode-", "sabangnet-", "partner-", "code-usage-", "usage-code-", "outbound-partner-"] },

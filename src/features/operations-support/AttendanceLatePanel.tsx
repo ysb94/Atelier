@@ -12,6 +12,7 @@ import { listLeaveRequests, type LeaveRequest } from '@/lib/supabase/leave-reque
 import { emptyList } from '@/lib/utils'
 import type { RequestKind } from '@/features/settings/personal-requests'
 import { ATTENDANCE_GRACE_MINUTES } from './attendance-start-settings'
+import { attendanceTrackingStart } from './attendance-period'
 import { resolveWorkdayStart } from './offsite-workday-start'
 import { memberLabel, OpsStat } from './OpsStat'
 import { type useOpsDirectory } from './ops-directory'
@@ -89,7 +90,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
     }
     for (const clock of clockRows) {
       const member = directory.members.find(item => item.id === clock.employeeId)
-      if (!member || member.attendanceExempt || !isWorkday(clock.date, {})) continue
+      if (!member || member.attendanceExempt || clock.date < attendanceTrackingStart(member.hireDate, member.attendanceTrackedFrom) || !isWorkday(clock.date, {})) continue
       const schedule = resolveWorkdayStart(schedules.index, member.id, member.departmentId, clock.date, leaveRows)
       const actual = timeSeconds(clock.clockIn)
       const baseline = timeSeconds(schedule.start)
@@ -101,10 +102,12 @@ export function AttendanceLatePanel({ directory, schedules }: {
     }
     for (const member of directory.members) {
       if (member.attendanceExempt) continue
+      const trackingStart = attendanceTrackingStart(member.hireDate, member.attendanceTrackedFrom)
       const team = directory.departmentName(member.departmentId)
       const name = memberLabel(member.displayName)
       if (!matches(member.departmentId, name, team)) continue
       for (const date of dates) {
+        if (date < trackingStart) continue
         const schedule = resolveWorkdayStart(schedules.index, member.id, member.departmentId, date, leaveRows)
         const baseline = timeSeconds(schedule.start)
         if (date > today || !isWorkday(date, {}) || clockByKey.has(`${member.id}:${date}`) || covered.has(`${member.id}:${date}`)) continue
@@ -127,7 +130,8 @@ export function AttendanceLatePanel({ directory, schedules }: {
     : kind === 'absent'
       ? '이 조건의 결근 기록이 없습니다.'
       : '이 조건의 지각·결근 기록이 없습니다.'
-  const unavailable = directory.loading || schedules.loading || clocks.isPending || leaves.isPending
+  const readError = directory.error || schedules.error || clocks.error || leaves.error
+  const unavailable = directory.loading || schedules.loading || clocks.isPending || leaves.isPending || Boolean(readError)
   function chooseMonth(next: string) {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(next)) return
     setMonth(next)
@@ -137,6 +141,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
   return <div className="space-y-4">
     <header>
       <h2 className="text-base font-semibold">지각 * 결근 관리</h2>
+      <p className="mt-1 text-sm text-muted-foreground">사이트 도입일·입사일·가입 승인에 따른 근태 시작일 중 가장 늦은 날부터 집계합니다. 출근 기준 시각 이후 승인되거나 출근 기준이 미설정된 직원은 다음 근무일부터 집계합니다.</p>
       <p className="mt-1 text-sm text-muted-foreground">출근 기준에서 {ATTENDANCE_GRACE_MINUTES}분이 지난 기록은 지각입니다. 연차·반차·반반차·공가·외근·재택이 등록되지 않은 근무일에 출근이 없으면 결근으로 표시합니다. 인사 확인 대기 {awaitingHr.isPending ? '…' : awaitingHr.isError ? '확인 실패' : `${awaitingHr.data ?? 0}건`}입니다.</p>
     </header>
     <div className="flex flex-wrap items-center gap-2">
@@ -170,7 +175,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
         { value: 'absent', label: '결근만', count: unavailable ? undefined : absentRows.length },
       ]}
     />
-    {(clocks.error || leaves.error || statements.error) && <p role="alert" className="text-sm text-danger">출근 기록, 신청 또는 지각 사유서를 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => { void clocks.refetch(); void leaves.refetch(); void statements.refetch() }}>다시 불러오기</Button></p>}
+    {(readError || statements.error) && <p role="alert" className="text-sm text-danger">직원·관리 대상·출근 기준 또는 근태 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => { directory.refetch(); void schedules.refresh(); void clocks.refetch(); void leaves.refetch(); void statements.refetch() }}>다시 불러오기</Button></p>}
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <table className="w-full text-left text-sm">
         <caption className="sr-only">{monthLabel(month)} 지각·결근</caption>
@@ -178,7 +183,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
           <tr>{['날짜', '구분', '직원', '부서', '출근 기준', '출근 시각', '내용', '사유서'].map(label => <th key={label} className={`px-3 py-2 font-medium${label === '사유서' ? ' text-right' : ''}`}>{label}</th>)}</tr>
         </thead>
         <tbody>
-          {unavailable ? <tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">출근과 신청을 확인하고 있습니다.</td></tr>
+          {unavailable ? <tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">{readError ? '기록을 확인하지 못해 지각·결근을 집계하지 않습니다.' : '출근과 신청을 확인하고 있습니다.'}</td></tr>
             : pageRows.length ? pageRows.map(row => {
               const attached = statementByKey.get(`${row.memberId}:${row.date}`)
               return <tr key={row.key} className="border-t border-border">

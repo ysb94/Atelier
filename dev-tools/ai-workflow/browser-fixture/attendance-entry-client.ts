@@ -49,6 +49,7 @@ export function getSupabase() {
     }; return query
   }, rpc(name: string, args: Record<string, unknown> = {}) {
     const state = read(), today = koreaDateKey(), actor = fixtureProfile().id
+    if (name === 'list_my_department_absences') return { range: async () => ({ data: [], error: null }) }
     if (name === 'list_effective_attendance_clocks') {
       // 서버 미적용 환경과 동일하게 PostgREST 오류를 돌려 기존 출퇴근 조회 경로를 검증한다.
       const result = { data: null, error: { code: 'PGRST202', message: '유효 출퇴근 RPC 연결 대기' } }

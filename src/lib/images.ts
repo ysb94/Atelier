@@ -31,21 +31,29 @@ export async function shrinkImageDataUrl(
   dataUrl: string,
   maxSize = 1200,
   quality = 0.82,
+  { maxDataLength = Infinity, format = 'image/jpeg' }: {
+    maxDataLength?: number
+    format?: 'image/jpeg' | 'image/webp'
+  } = {},
 ): Promise<string> {
   const image = await loadImage(dataUrl)
   const longest = Math.max(image.width, image.height)
-  if (longest <= maxSize) return dataUrl
+  if (longest <= maxSize && dataUrl.length <= maxDataLength) return dataUrl
 
-  const scale = maxSize / longest
+  const scale = Math.min(1, maxSize / longest)
   const canvas = document.createElement('canvas')
-  canvas.width = Math.round(image.width * scale)
-  canvas.height = Math.round(image.height * scale)
+  canvas.width = Math.max(1, Math.round(image.width * scale))
+  canvas.height = Math.max(1, Math.round(image.height * scale))
 
   const context = canvas.getContext('2d')
   if (!context) return dataUrl
 
   context.drawImage(image, 0, 0, canvas.width, canvas.height)
-  return canvas.toDataURL('image/jpeg', quality)
+  const encoded = canvas.toDataURL(format, quality)
+  if (format === 'image/webp' && encoded.startsWith('data:image/png;') && encoded.length > maxDataLength) {
+    return canvas.toDataURL('image/jpeg', quality)
+  }
+  return encoded
 }
 
 /** 파일 하나를 화면에 쓸 수 있는 작은 data URL로 바꾼다. */

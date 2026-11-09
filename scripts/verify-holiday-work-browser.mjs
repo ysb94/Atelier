@@ -25,7 +25,7 @@ export const saveOffsiteSettlement=async()=>{throw Error('mixed case must use th
 function add(kind,audience,tab,body,action){const r=window.__rows[0];window.__events.unshift({event_key:'holiday:'+kind+':'+r.version,entity_id:r.id,created_at:new Date(Date.now()+r.version*1000).toISOString(),event_type:'holiday-'+kind,tab,kind:'overtime',employee_name:r.employeeName,from_date:r.date,to_date:r.date,start_time:'',end_time:'',note:body,decision_note:null,action_needed:action,status:r.state,current:true,read_at:null,title:r.employeeName+' · '+body,action_key:'holiday-work:'+r.id,audience})}
 function events(){return window.__events.filter(e=>e.audience===window.__role).map(e=>({...e,action_needed:e.event_type==='holiday-submitted'?window.__rows[0].state==='submitted':e.event_type==='holiday-settle'?window.__rows[0].remainingUnits>0:e.action_needed,current:e.event_type==='holiday-submitted'?window.__rows[0].state==='submitted':e.current}))}
 export const getSupabase=()=>({rpc:async(name,args={})=>{
- if(name==='list_my_home_work_notifications')return{data:events(),error:null};
+ if(name==='list_my_managed_work_notifications'||name==='list_my_home_work_notifications')return{data:events(),error:null};
  if(name==='read_my_home_work_notification'){window.__reads.push(args.p_key);const e=window.__events.find(e=>e.event_key===args.p_key);if(e)e.read_at=new Date().toISOString();return{data:null,error:null}}
  if(name!=='holiday_work')throw Error('unexpected '+name);
  const{p_action:a,p_payload:p}=args;let r=window.__rows[0];

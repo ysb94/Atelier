@@ -19,6 +19,7 @@ import { DesignStyledCutsPage } from '@/features/design/StyledCutsPage'
 import { VisualWorkRequestManagePage } from '@/features/work-requests/VisualWorkRequestManagePage'
 import { CompanyDraftsPage } from '@/features/drafts/DraftsPage'
 import { DraftEditPage } from '@/features/drafts/DraftEditPage'
+import { MaterialRequestsPage } from '@/features/planning/MaterialRequestsPage'
 import { CompanyBarcodePage } from '@/features/codes/BarcodePage'
 import { SabangnetCodePage } from '@/features/codes/SabangnetCodePage'
 import { CompanyUsageCodePage } from '@/features/codes/UsageCodePage'
@@ -38,6 +39,7 @@ import { CompanyWarehouseFinderPage } from '@/features/logistics/WarehouseFinder
 import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
 import { CompanyTemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
 import { OperationsSupportPage } from '@/features/operations-support/OperationsSupportPage'
+import { LogisticsOperationsPage } from '@/features/logistics/operations/LogisticsOperationsPage'
 import { DutyFreePage } from '@/features/b2b/DutyFreePage'
 import { MamamIdeaInboxPage } from '@/features/mamam/MamamIdeaInboxPage'
 import { DeveloperPreviewPage } from './DeveloperPreview'
@@ -131,6 +133,7 @@ export const companyWorkspaceRoutes = (
         <Route path=":brandSlug/:styleNo" element={<ProductDetailDrawer />} />
       </Route>
       <Route path="drafts" element={<CompanyDraftsPage />} />
+      <Route path="planning/material-requests" element={<MaterialRequestsPage />} />
       <Route path="drafts/new" element={<DraftEditPage />} />
       <Route path="drafts/:draftId" element={<DraftEditPage />} />
       <Route
@@ -171,6 +174,7 @@ export const companyWorkspaceRoutes = (
       />
       <Route path="design/file-manager" element={<DesignFileManagerRoute />} />
       <Route path="logistics/invoices" element={<CompanyInvoiceWorkPage />} />
+      <Route path="logistics/operations" element={<LogisticsOperationsPage />} />
       <Route
         path="logistics/invoice-data-entry"
         element={<RedirectTo to="/logistics/invoices" />}

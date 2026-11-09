@@ -253,6 +253,8 @@ export type DraftColorRow = {
   sampleWorkOrderShippedAt: string | null
 }
 
+export type DraftColorImageChoice = 'Image' | 'None'
+
 /** 기획안에서 중국팀으로 보내는 샘플 작업 지시서 한 차수 */
 export type DraftSampleWorkOrder = {
   id: string
@@ -282,6 +284,8 @@ export type DraftSampleWorkOrder = {
   assigneeName: string
   /** 작업 지시서 파일을 받아 확인한 시각 */
   fileCheckedAt: string | null
+  /** 배정받은 직원이 받기로 확인한 시각. 담당자 화면의 받기와는 따로다. */
+  assigneeCheckedAt?: string | null
 }
 
 /** 기획안에 함께 붙여 판매할 상품 한 줄 */
@@ -316,6 +320,8 @@ export type DraftColorSpec = {
 
 export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
   colorSpecs: Record<string, DraftColorSpec>
+  colorImageChoices?: Record<string, DraftColorImageChoice>
+  colorPhotoUrls?: Record<string, string>
   /** 상품명 최종 확정. 출시 전에도 이름은 고칠 수 있다. */
   nameConfirmed?: boolean
   /** 컬러 종류 확정. 컬러 샘플 작업지시서를 보내는 조건이다. */
@@ -328,6 +334,12 @@ export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
   colorSampleRounds?: DraftColorSampleRound[]
   /** 수령 확인한 컬러샘플 차수별로, 완료로 표시한 컬러 id */
   colorSampleDone?: Record<string, string[]>
+  /** 중국 업무 배정으로 기획안 전체 회차를 넘긴 담당자 */
+  chinaWorkAssignment?: {
+    assigneeId: string
+    assigneeName: string
+    assignedAt: string
+  } | null
 }
 
 /** 컬러 샘플 작업지시서 한 차수. 대표 샘플과 같이 회신 뒤에 합격 또는 다음 차수로 간다. */
@@ -346,6 +358,13 @@ export type DraftColorSampleRound = {
   /** 발송일과 구분되는 실물 수령 확인 시각. 이전 기록은 비어 있다. */
   receivedAt?: string | null
   passed: boolean
+  /** 중국팀 담당 직원. 샘플 회차와 같이 진행 중인 컬러샘플에 남긴다. */
+  assigneeId?: string | null
+  assigneeName?: string
+  /** 중국팀이 작업 지시서 파일을 받아 확인한 시각. */
+  fileCheckedAt?: string | null
+  /** 배정받은 직원이 받기로 확인한 시각. */
+  assigneeCheckedAt?: string | null
 }
 
 export type ProductDraft = {

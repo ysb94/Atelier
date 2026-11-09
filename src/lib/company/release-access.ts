@@ -1,5 +1,9 @@
+import { canManageLogisticsOperations, isHeadOfficeMember, LOGISTICS_OPERATIONS_HREF } from './workforce-management.ts'
+import { MATERIAL_REQUESTS_PATH } from '../workspace/material-request-navigation.ts'
+
 /** 1차 직원 공개 범위. 실제 조회·수정·승인 권한을 부여하는 규칙이 아니다. */
 export type ReleaseProfile = {
+  workforceMode?: import('./workforce-management.ts').WorkforceMode
   id?: string | null; companyId?: string | null; departmentId?: string | null
   status?: string | null; email?: string | null; departmentName?: string | null
 }
@@ -8,7 +12,7 @@ export const RELEASE_OPERATIONS_ID = '2e49ef43-75b9-4c89-b42d-9fd50ad9087b'
 export const RELEASE_LOGISTICS_ID = 'c5d4cfca-97ce-4ca7-b30a-6beed842cf1e'
 /** 실제 부서 UUID로 화면을 연결한다. 부서 이름은 빈 탭의 표시 용도로만 쓴다. */
 export const RELEASE_DEPARTMENT_SITES = [
-  { id: 'ced99f89-ea80-4eeb-8f03-272bf72f5db1', title: '기획', pages: ['/drafts', '/work-requests/planning'] },
+  { id: 'ced99f89-ea80-4eeb-8f03-272bf72f5db1', title: '기획', pages: ['/drafts', MATERIAL_REQUESTS_PATH, '/work-requests/planning'] },
   { id: '7ac8b7a8-7f12-4f3e-a371-d2dac7e492f1', title: 'Visual', pages: ['/work-requests/design', '/design/work-request-management', '/design/styled-cuts', '/design/file-manager'] },
   { id: '919b2c44-afb6-4d7e-a5b8-b7203df9cef9', title: 'MD', pages: ['/product-work/md', '/work-requests/md'] },
   { id: 'bf926822-910c-422f-9c17-5fd3d8ddb3ba', title: '중국팀', pages: ['/china/work-orders'] },
@@ -43,20 +47,24 @@ export function releaseAccess(profile: ReleaseProfile | null | undefined) {
   }
 }
 export function releasePersonalPart(profile: ReleaseProfile | null | undefined, part: string | null, approver = false) {
+  if ((part === 'overtime' || part === 'attendance') && !isHeadOfficeMember(profile)) return false
   if (part === 'work' && !releaseAccess(profile).unrestricted) return false // 직원 공개 보류: 기존 예외 계정과 업무 권한은 유지한다.
   return releaseAccess(profile).unrestricted || !part || part === 'my-attendance' || part === 'overtime' || part === 'meetings' || (part === 'work' && profile?.status === 'active' && profile.companyId === RELEASE_COMPANY_ID) || ((part === 'approvals' || part === 'attendance') && approver)
 }
 const under = (path: string, root: string) => path === root || path.startsWith(root + '/')
 
 /** 미공개는 null. 기존 상세 링크는 비공개 부모 화면을 열지 않고 공개 경로로 연결한다. */
-export function releaseHref(profile: ReleaseProfile | null | undefined, href: string, approver = false): string | null {
+export function releaseHref(profile: ReleaseProfile | null | undefined, href: string, approver = false, materialNudgeViewer = false): string | null {
   let url: URL
   try { url = new URL(href, 'https://atelier.invalid') } catch { return null /* 잘못된 링크는 화면 진입 경로로 취급하지 않는다. */ }
   if (url.origin !== 'https://atelier.invalid' || !href.startsWith('/') || href.startsWith('//')) return null
   const scope = releaseAccess(profile)
+  if (url.pathname === LOGISTICS_OPERATIONS_HREF || url.pathname.startsWith(LOGISTICS_OPERATIONS_HREF + '/')) return canManageLogisticsOperations(profile) ? href : null
   if (scope.unrestricted) return href
   if (url.pathname.replace(/\/$/, '') === '/work' || url.pathname === '/work-requests' || (url.pathname === RELEASE_HOME && url.searchParams.get('part') === 'work')) return null
   const path = url.pathname.replace(/\/$/, '') || '/'
+  if (path === MATERIAL_REQUESTS_PATH && materialNudgeViewer && profile?.status === 'active'
+    && profile.companyId === RELEASE_COMPANY_ID && profile.email !== 'ui-preview@example.invalid') return href
   if (/^\/work-requests\/(planning|design|md|logistics)$/.test(path)) return scope.departmentSite?.pages.some(page => page === path) || (scope.logistics && path === '/work-requests/logistics') ? href : null
   if (path === RELEASE_HOME) return releasePersonalPart(profile, url.searchParams.get('part'), approver) ? href : null
   if (/^\/chat\/room\/[^/]+$/.test(path)) return href

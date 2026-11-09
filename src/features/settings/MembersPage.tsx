@@ -5,18 +5,17 @@ import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
+import { FilterTabs } from '@/components/ui/filter-tabs'
 import { useAuth } from '@/lib/supabase/auth'
 import { useRenderWatch } from '@/lib/diagnostics'
 import {
-  approveMember,
-  todayDateKey,
+  saveMemberAccount,
   createDepartment,
   listBrandDirectory,
   listDepartments,
   listManageableProfiles,
   listPersonnelTitles,
   type PersonnelTitle,
-  rejectMember,
   setMemberDisabled,
   updateDepartment,
   type Profile,
@@ -24,12 +23,12 @@ import {
 import {
   canEditOrgAssignment,
   canManagePersonnel,
-  canReviewMember,
   canViewMembers,
   capabilityLabel,
-  isOperationsDepartmentMember,
 } from '@/lib/company/capabilities'
 import { personNameError } from '@/lib/company/person-name'
+import { NEW_EMPLOYEES_HREF } from '@/features/org/new-employee-access'
+import { isPreviewProfile } from '@/lib/company/profile-preview'
 
 const emptyTitles: PersonnelTitle[] = []
 
@@ -73,7 +72,6 @@ function MemberEditor({
   const [departmentId, setDepartmentId] = useState(profile.departmentId ?? '')
   const [position, setPosition] = useState(profile.position ?? '')
   const [jobGrade, setJobGrade] = useState(profile.jobGrade ?? '')
-  const [hireDate, setHireDate] = useState(profile.hireDate ?? '')
   const capabilities = profile.capabilities
   const leadBrandIds = profile.memberships.filter(member => member.isLead).map(member => member.brandId)
   const isAdmin = profile.isAdmin
@@ -146,23 +144,6 @@ function MemberEditor({
             </p>
           )}
         </label>
-        {profile.status === 'pending' ? (
-          <label className="block space-y-1">
-            <span className="text-xs font-medium">입사일</span>
-            <Input
-              type="date"
-              aria-label="입사일"
-              value={hireDate}
-              min="1950-01-01"
-              max={todayDateKey()}
-              onChange={(event) => setHireDate(event.target.value)}
-              disabled={busy}
-            />
-            <p className="text-xs text-muted-foreground">
-              비워 두면 없음입니다. 승인 후 수정은 조직도에서 합니다.
-            </p>
-          </label>
-        ) : null}
       </div>
 
       <p className="rounded-lg border border-border bg-card p-3 text-sm">기능 권한·브랜드 책임·시스템 운영 담당은 <Link className="text-primary underline" to="/settings/permissions">권한·담당자 설정</Link>에서 지정합니다. 직책과 직급을 바꿔도 지정 권한은 바뀌지 않습니다.</p>
@@ -178,12 +159,11 @@ function MemberEditor({
             setBusy(true)
             setError(null)
             try {
-              await approveMember({
+              await saveMemberAccount({
                 profileId: profile.id,
                 departmentId,
                 position,
                 jobGrade,
-                ...(profile.status === 'pending' ? { hireDate: hireDate || null } : {}),
                 capabilities,
                 leadBrandIds,
                 isAdmin,
@@ -192,39 +172,15 @@ function MemberEditor({
               onDone()
             } catch (err) {
               setError(
-                err instanceof Error ? err.message : '승인에 실패했습니다.',
+                err instanceof Error ? err.message : '저장에 실패했습니다.',
               )
             } finally {
               setBusy(false)
             }
           }}
         >
-          {profile.status === 'pending' ? '승인' : '저장'}
+          저장
         </Button>
-        {profile.status === 'pending' ? (
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={async () => {
-              setBusy(true)
-              setError(null)
-              try {
-                await rejectMember(profile.id)
-                onDone()
-              } catch (err) {
-                setError(
-                  err instanceof Error ? err.message : '거절에 실패했습니다.',
-                )
-              } finally {
-                setBusy(false)
-              }
-            }}
-          >
-            거절
-          </Button>
-        ) : null}
         {profile.status === 'active' || profile.status === 'disabled' ? (
           <Button
             type="button"
@@ -259,15 +215,15 @@ function MemberEditor({
 
 export function MembersPage() {
   useRenderWatch('MembersPage')
-  const { profile: me } = useAuth()
+  const { profile: me, session } = useAuth()
   const queryClient = useQueryClient()
   const [editingId, setEditingId] = useState<string | null>(null)
-  const [filter, setFilter] = useState<'pending' | 'all'>('pending')
+  const [filter, setFilter] = useState<'all' | 'active' | 'disabled'>('all')
   const [newDeptName, setNewDeptName] = useState('')
-  const canManageMembers = canManagePersonnel(me)
-  const canEditAssignment = canEditOrgAssignment(me)
+  const safeSession = Boolean(me?.id && me.id === session?.user.id && !isPreviewProfile(me))
+  const canManageMembers = safeSession && canManagePersonnel(me)
+  const canEditAssignment = safeSession && canEditOrgAssignment(me)
   const canViewMemberList = canViewMembers(me)
-  const operationsMember = isOperationsDepartmentMember(me)
 
   const profilesQuery = useQuery({
     queryKey: ['manageable-profiles'],
@@ -311,14 +267,9 @@ export function MembersPage() {
     .map((title) => title.name)
 
   const visible = useMemo(() => {
-    const others = profiles.filter((p) => p.id !== me?.id)
-    if (filter === 'pending') {
-      return others.filter(
-        (p) => p.status === 'pending' && p.requestedAt != null,
-      )
-    }
-    return others
-  }, [profiles, me?.id, filter])
+    return profiles.filter(p => p.id !== me?.id && p.companyId === me?.companyId
+      && (p.status === 'active' || p.status === 'disabled') && (filter === 'all' || p.status === filter))
+  }, [profiles, me?.id, me?.companyId, filter])
 
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: ['manageable-profiles'] })
@@ -349,28 +300,14 @@ export function MembersPage() {
     <div>
       <PageHeader
         title="멤버"
-        description="접근 신청을 승인하고 본명과 회사 업무 역량을 확인합니다. 본명은 사내 명단과 같아야 합니다."
+        description="기존 직원의 계정 정보와 이용·정지 상태를 관리합니다."
       />
 
-      {!canManageMembers && !operationsMember && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">조회 전용 · 멤버 정보는 조회할 수 있습니다. 변경·승인은 기존 업무 권한을 따릅니다.</p>}
+      <p className="mb-4 rounded-xl border border-border bg-card p-3 text-sm">가입 신청 승인·거절은 <Link className="text-primary underline" to={NEW_EMPLOYEES_HREF}>조직도 → 신규직원</Link>에서 처리합니다.</p>
+      {!canManageMembers && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">조회 전용 · 계정 정보 변경과 정지는 기존 직원 관리 권한을 따릅니다.</p>}
 
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          variant={filter === 'pending' ? 'default' : 'outline'}
-          onClick={() => setFilter('pending')}
-        >
-          승인 대기
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant={filter === 'all' ? 'default' : 'outline'}
-          onClick={() => setFilter('all')}
-        >
-          전체
-        </Button>
+        <FilterTabs<'all'|'active'|'disabled'> ariaLabel="계정 상태" value={filter} onChange={setFilter} tabs={[{value:'all',label:'전체'},{value:'active',label:STATUS_LABEL.active},{value:'disabled',label:STATUS_LABEL.disabled}]}/>
         <Button
           type="button"
           size="sm"
@@ -385,9 +322,7 @@ export function MembersPage() {
         <p className="text-sm text-muted-foreground">불러오는 중...</p>
       ) : visible.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border p-8 text-sm text-muted-foreground">
-          {filter === 'pending'
-            ? '대기 중인 신청이 없습니다.'
-            : '관리할 멤버가 없습니다.'}
+          관리할 기존 계정이 없습니다.
         </div>
       ) : (
         <div className="space-y-3">
@@ -447,7 +382,7 @@ export function MembersPage() {
                   type="button"
                   size="sm"
                   variant="outline"
-                  disabled={!canReviewMember(me, member.status)}
+                  disabled={!canManageMembers}
                   onClick={() =>
                     setEditingId((prev) =>
                       prev === member.id ? null : member.id,
@@ -458,14 +393,14 @@ export function MembersPage() {
                 </Button>
               </div>
 
-              {editingId === member.id && canReviewMember(me, member.status) ? (
+              {editingId === member.id && canManageMembers ? (
                 <MemberEditor
                   profile={member}
                   departments={departments.filter((d) => d.isActive || d.id === member.departmentId)}
                   brands={brands}
                   duties={duties}
                   grades={grades}
-                  canEditAssignment={canEditAssignment || (operationsMember && member.status === 'pending')}
+                  canEditAssignment={canEditAssignment}
                   onDone={async () => {
                     setEditingId(null)
                     await invalidate()

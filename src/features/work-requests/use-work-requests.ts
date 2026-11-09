@@ -10,7 +10,7 @@ import { WORK_REQUEST_DEPARTMENT_IDS, type WorkRequestOwner } from './work-reque
 import type { LocalTeamMember, WorkRequestRecord } from './work-request-types'
 import type { WorkTimeLog } from './work-request-schedule'
 
-export function useWorkRequests(owner: WorkRequestOwner, requestId?: string, skipList = false) {
+export function useWorkRequests(owner: WorkRequestOwner, requestId?: string, skipList = false, categoryWorkflowAvailable = false) {
   const { profile, session }=useAuth()
   const actorId=profile?.id??''
   const active=Boolean(actorId && profile?.status==='active' && session?.user.id===actorId)
@@ -44,7 +44,8 @@ export function useWorkRequests(owner: WorkRequestOwner, requestId?: string, ski
     if(!active)return
     let timer:ReturnType<typeof setTimeout>|undefined
     const signal=()=>{clearTimeout(timer);timer=setTimeout(()=>void refresh(),100)}
-    const channel=getSupabase().channel(`work-requests:${actorId}:${owner}`).on('postgres_changes',{event:'*',schema:'public',table:'work_requests'},signal).on('postgres_changes',{event:'INSERT',schema:'public',table:'work_request_messages'},signal).on('postgres_changes',{event:'*',schema:'public',table:'work_request_time_entries'},signal).subscribe(status=>{if(status==='SUBSCRIBED')signal();if(status==='CHANNEL_ERROR'||status==='TIMED_OUT')console.warn('[work-requests] 실시간 연결 실패',{owner,status})})
+    // My home과 부서 업무가 같은 부서의 요청을 동시에 열 수 있다.
+    const channel=getSupabase().channel(`work-requests:${actorId}:${owner}:${crypto.randomUUID()}`).on('postgres_changes',{event:'*',schema:'public',table:'work_requests'},signal).on('postgres_changes',{event:'INSERT',schema:'public',table:'work_request_messages'},signal).on('postgres_changes',{event:'*',schema:'public',table:'work_request_time_entries'},signal).subscribe(status=>{if(status==='SUBSCRIBED')signal();if(status==='CHANNEL_ERROR'||status==='TIMED_OUT')console.warn('[work-requests] 실시간 연결 실패',{owner,status})})
     const reconnect=()=>void refresh();window.addEventListener('online',reconnect)
     return()=>{clearTimeout(timer);window.removeEventListener('online',reconnect);void getSupabase().removeChannel(channel)}
   },[active,actorId,owner,refresh])
@@ -58,10 +59,10 @@ export function useWorkRequests(owner: WorkRequestOwner, requestId?: string, ski
     const next=typeof update==='function'?update(before):update
     requestsRef.current=next;setLocal(next)
     enqueue(async()=>{
-      for(const request of next){const old=before.find(item=>item.id===request.id);if(!old||comparison(old)!==comparison(request)){const revision=await saveWorkRequestChange(old,request,revisions.current.get(request.id));revisions.current.set(request.id,revision)}}
+      for(const request of next){const old=before.find(item=>item.id===request.id);if(!old||comparison(old)!==comparison(request)){const revision=await saveWorkRequestChange(old,request,revisions.current.get(request.id),categoryWorkflowAvailable);revisions.current.set(request.id,revision)}}
       for(const request of before)if(!next.some(item=>item.id===request.id))await deleteWorkRequest(request,revisions.current.get(request.id))
     })
-  },[active,enqueue])
+  },[active,categoryWorkflowAvailable,enqueue])
   const setCurrentWorkByMember=useCallback((update:SetStateAction<Record<string,string>>)=>{
     setLocalCurrent(current=>{const next=typeof update==='function'?update(current):update;return next})
     // Persist only the signed-in worker's active task; no client-supplied colleague timer is accepted.
@@ -69,5 +70,5 @@ export function useWorkRequests(owner: WorkRequestOwner, requestId?: string, ski
   },[enqueue,actorId,owner])
   const members=directory.data??emptyList<NonNullable<typeof directory.data>[number]>()
   const teamMembers:LocalTeamMember[]=members.filter(member=>member.departmentId===WORK_REQUEST_DEPARTMENT_IDS[owner]).map(member=>({id:member.id,name:member.displayName||'직원',position:member.position??'',isSelf:member.id===actorId}))
-  return {requests:active&&dataScope.current===actorId+':'+owner?(saving?requests:query.data?.requests??requests):emptyList<WorkRequestRecord>(),setRequests,currentWorkByMember,workTimeByKey,setCurrentWorkByMember,setWorkTimeByKey,teamMembers,canManage:Boolean(access.access?.manageOwners.includes(owner)),managerAvailable:query.data?.managerAvailable??false,loading:(!skipList&&query.isPending)||access.isPending,loadError:query.error?.message??directory.error?.message??access.error?.message??null,error:error??query.error?.message??directory.error?.message??access.error?.message??null,saving,waitForSaves:()=>queue.current.then(()=>lastSaveError.current===null),retry:()=>{setError(null);return refresh()}}
+  return {requests:active&&dataScope.current===actorId+':'+owner?(saving?requests:query.data?.requests??requests):emptyList<WorkRequestRecord>(),setRequests,currentWorkByMember,workTimeByKey,setCurrentWorkByMember,setWorkTimeByKey,teamMembers,directoryMembers:members,canManage:Boolean(access.access?.manageOwners.includes(owner)),managerAvailable:query.data?.managerAvailable??false,loading:(!skipList&&query.isPending)||access.isPending,loadError:query.error?.message??directory.error?.message??access.error?.message??null,error:error??query.error?.message??directory.error?.message??access.error?.message??null,saving,waitForSaves:()=>queue.current.then(()=>lastSaveError.current===null),retry:()=>{setError(null);return refresh()}}
 }

@@ -2,6 +2,7 @@ import { notificationNeedsAttention } from '@/lib/inbox/my-home-notifications'
 import { useMemo, useState, type ReactNode } from 'react'
 import {
   AtSign,
+  ClipboardList,
   CalendarClock,
   Clock,
   Check,
@@ -19,6 +20,7 @@ const KIND_ICON: Record<
   InboxNotificationKind,
   { icon: typeof ScanBarcode; label: string }
 > = {
+  visual_workflow: { icon: ClipboardList, label: 'Visual 업무' },
   attendance_start_needed: { icon: CalendarClock, label: '출근시간 지정' },
   personal_request: { icon: Check, label: '신청' },
   checkout_needed: { icon: Clock, label: '퇴근 확인' },
@@ -27,6 +29,7 @@ const KIND_ICON: Record<
   barcode_pending: { icon: CircleAlert, label: '미지정' },
   outbound_changed: { icon: Truck, label: '출고 변경' },
   mention: { icon: AtSign, label: '언급' },
+  material_nudge: { icon: CircleAlert, label: '자재요청 조르기' },
   meeting_result: { icon: Check, label: '회의 결과' },
   meeting_removed: { icon: CalendarClock, label: '참석 해제' },
   meeting_invitation: { icon: CalendarClock, label: '회의' },

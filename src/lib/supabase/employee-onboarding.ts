@@ -12,7 +12,7 @@ export type OnboardingEmployee = { id: string; profileId: string; isTest: boolea
 type StoreError = { code?: string; message?: string }
 function fail(error: StoreError): never {
   console.warn('[onboarding] 요청 실패', { code: error.code })
-  throw new Error(error.code === '40001' ? '다른 곳에서 정보가 변경됐습니다. 다시 조회해 주세요.' : error.code === 'P0001' ? error.message : '신규 직원 정보를 처리하지 못했습니다. 다시 시도해 주세요.')
+  throw new Error(error.code === '40001' ? '다른 곳에서 정보가 변경됐습니다. 다시 조회해 주세요.' : error.code === 'P0001' ? error.message : '신규 직원 정보를 처리하지 못했습니다. 다시 시도해 주세요.', { cause: { code: error.code } })
 }
 export async function onboardingCall<T>(name: string, args: Record<string,unknown> = {}): Promise<T> {
   const {data,error} = await getSupabase().rpc(name,args)

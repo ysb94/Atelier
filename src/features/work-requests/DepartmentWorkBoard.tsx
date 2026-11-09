@@ -18,9 +18,12 @@ import { visibleCompanyNotices } from '@/lib/company/company-notices'
 import { hasPermission } from '@/lib/company/permissions'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList } from '@/lib/utils'
-import { clearWorkFilters, DEPARTMENT_WORK_STAGES, filterDepartmentWork, inDepartmentWorkScope, inDepartmentWorkStage, type DepartmentWork, type DepartmentWorkScope, type DepartmentWorkStage, type WorkFilters } from './department-work'
+import { clearWorkFilters, DEPARTMENT_WORK_STAGES, filterDepartmentWork, inDepartmentWorkScope, inDepartmentWorkStage, needsVisualReceipt, type DepartmentWork, type DepartmentWorkScope, type DepartmentWorkStage, type WorkFilters } from './department-work'
 import { ownerFromDepartment, WORK_REQUEST_CONFIG, WORK_REQUEST_DEPARTMENT_IDS, type WorkRequestOwner } from './work-request-form-config'
-import { STATUS_META } from './work-request-types'
+import { isClosedStatus, STATUS_META } from './work-request-types'
+import { visualFinalPending, visualSummaryApprover, workRequestStatusMeta } from './visual-final-approval'
+
+type BoardScope = DepartmentWorkScope | 'receipt' | 'final'
 
 function ColumnFilter({ label, options, selected, onApply }: { label: string; options: [string, string][]; selected: string[]; onApply: (value: string[]) => void }) {
   const [open, setOpen] = useState(false)
@@ -39,7 +42,12 @@ function ColumnFilter({ label, options, selected, onApply }: { label: string; op
     {open ? createPortal(<div ref={popup} style={position} role="dialog" aria-label={`${label} 필터 선택`} className="fixed z-[60] w-56 rounded-xl border border-border bg-card p-3 text-left text-foreground shadow-sm"><div className="mb-3 flex justify-between"><span>필터 선택</span><button type="button" className="text-xs text-muted-foreground" onClick={() => setDraft([])}>초기화</button></div><div className="max-h-56 overflow-auto">{options.map(([id, name]) => <label key={id} className="flex gap-2 py-1 text-sm"><input type="checkbox" checked={draft.includes(id)} onChange={() => setDraft(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])} />{name}</label>)}</div><Button type="button" size="sm" className="mt-3 w-full" onClick={() => { onApply(draft); setOpen(false) }}>선택한 {draft.length}개 필터 적용</Button></div>, document.body) : null}</div>
 }
 
-export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
+export function DepartmentWorkBoard({ owner, activeSupervisorIds, finalApprovalEnabled, directoryMembers }: {
+  owner: WorkRequestOwner
+  activeSupervisorIds: readonly string[]
+  finalApprovalEnabled: boolean
+  directoryMembers: readonly { id: string; displayName?: string | null }[]
+}) {
   useRenderWatch('DepartmentWorkBoard')
   const { profile, session } = useAuth()
   const activeSession = profile?.status === 'active' && session?.user.id === profile.id
@@ -70,19 +78,41 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
     catch(error) { console.warn('[department-work] 팀 공지 저장 실패',error); setNoticeError(error instanceof Error ? error.message : '공지를 저장하지 못했습니다.') }
     finally { setNoticeSaving(false) }
   }
-  const [scope, setScope] = useState<DepartmentWorkScope>('team')
+  const [selectedScope, setScope] = useState<BoardScope>('team')
   const [stage, setStage] = useState<DepartmentWorkStage>('all')
   useEffect(() => { setScope('team'); setStage('all'); setFilters(clearWorkFilters()); setSearch('') }, [actor, owner])
   const [sort, setSort] = useState<{ field: 'createdAt' | 'dueDate'; direction: number }>({ field: 'dueDate', direction: 1 })
   const rows = (activeSession ? query.data : undefined) ?? emptyList<DepartmentWork>()
-  const options = useMemo(() => {
-    const requester = new Map<string, string>(), assignee = new Map<string, string>([['unassigned', '미정']]), brand = new Map<string, string>([['undecided', '브랜드 미정']])
-    for (const row of rows) { requester.set(row.requesterId, `${row.requesterName} · ${row.requesterDepartment || '부서 미정'}`); row.assigneeIds.forEach((id, index) => assignee.set(id, row.assigneeNames[index] || '직원')); if (row.brandId) brand.set(row.brandId, row.brandName) }
-    return { requester: [...requester], assignee: [...assignee], brand: [...brand], status: Object.entries(STATUS_META).map(([id, meta]): [string, string] => [id, meta.label]) }
-  }, [rows])
+  const visual = owner === 'design'
+  const supervisor = visual && activeSupervisorIds.includes(actor)
+  const assignmentKey = visual ? 'visualMiddleManagerIds' : 'assigneeIds'
+  const unassignedLabel = visual ? '미지정' : '미정'
+  const hasAssignmentSummary = !visual || rows.some(row => row.visualMiddleManagerIds != null)
+  const names = useMemo(() => new Map(directoryMembers.map(member => [member.id, member.displayName?.trim() || '기존 직원'])), [directoryMembers])
+  const columnWidths = visual ? [24, 10, 11, 11, 8, 11, 8, 8, 9] : [34, 11, 12, 11, 10, 10, 12]
+  const scope = !supervisor && (selectedScope === 'receipt' || selectedScope === 'final') ? 'team' : selectedScope
   const active = rows.filter(row => inDepartmentWorkStage(row.status, 'all'))
-  const scoped = rows.filter(row => inDepartmentWorkScope(row, scope, actor))
-  const visible = filterDepartmentWork(scoped, filters, search).filter(row => stage === 'all' || inDepartmentWorkStage(row.status, stage)).sort((a, b) => {
+  const supervisorRows = supervisor ? active.filter(row => {
+    const approver = visualSummaryApprover(row, activeSupervisorIds)
+    return !approver || approver === actor
+  }) : emptyList<DepartmentWork>()
+  const receiptQueue = supervisorRows.filter(needsVisualReceipt)
+  const finalQueue = supervisorRows.filter(row => row.visualCategoryReview?.pending ?? visualFinalPending(row))
+  const pendingSupervisorIds = new Set([...receiptQueue, ...finalQueue].map(row => row.id))
+  const myRows = rows.filter(row => inDepartmentWorkScope(row, 'mine', actor) || pendingSupervisorIds.has(row.id))
+  const options = useMemo(() => {
+    const requester = new Map<string, string>()
+    const assignee = new Map<string, string>([['unassigned', unassignedLabel]])
+    const brand = new Map<string, string>([['undecided', '브랜드 미정']])
+    for (const row of rows) {
+      requester.set(row.requesterId, `${row.requesterName} · ${row.requesterDepartment || '부서 미정'}`)
+      row[assignmentKey]?.forEach((id, index) => assignee.set(id, visual ? names.get(id) || '기존 직원' : row.assigneeNames[index] || '직원'))
+      if (row.brandId) brand.set(row.brandId, row.brandName)
+    }
+    return { requester: [...requester], assignee: [...assignee], brand: [...brand], status: Object.entries(STATUS_META).map(([id, meta]): [string, string] => [id, meta.label]) }
+  }, [rows, assignmentKey, names, visual, unassignedLabel])
+  const scoped = { team: rows, mine: myRows, receipt: receiptQueue, final: finalQueue }[scope]
+  const visible = filterDepartmentWork(scoped, filters, search, assignmentKey).filter(row => stage === 'all' || inDepartmentWorkStage(row.status, stage)).sort((a, b) => {
     const left = a[sort.field], right = b[sort.field]
     return (!left ? 1 : !right ? -1 : left.localeCompare(right) * sort.direction) || a.id.localeCompare(b.id)
   })
@@ -90,10 +120,15 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
     const department = ownerFromDepartment(name)
     return department === 'design' ? 'Visual' : department ? WORK_REQUEST_CONFIG[department].teamName : name.trim() || '부서 미정'
   }
-  const groups = new Map<string, DepartmentWork[]>(['Visual', 'MD', '기획', '물류'].map(name => [name, []]))
-  // Keep headings in place even when a department has no work or filters hide its rows.
-  for (const row of rows) { const key = departmentLabel(row.requesterDepartment); if (!groups.has(key)) groups.set(key, []) }
-  for (const row of visible) groups.get(departmentLabel(row.requesterDepartment))!.push(row)
+  const groups = new Map<string, DepartmentWork[]>()
+  for (const row of rows) {
+    const key = departmentLabel(row.requesterDepartment)
+    if (!groups.has(key)) groups.set(key, [])
+  }
+  const ordered = new Map<string, DepartmentWork[]>()
+  for (const name of ['Visual', 'MD', '기획', '물류']) if (groups.has(name)) ordered.set(name, groups.get(name)!)
+  for (const [name, items] of groups) if (!ordered.has(name)) ordered.set(name, items)
+  for (const row of visible) ordered.get(departmentLabel(row.requesterDepartment))!.push(row)
   const dueSoon = scoped.filter(row => inDepartmentWorkStage(row.status, 'all') && row.dueDate && new Date(row.dueDate + 'T23:59:59+09:00').getTime() - Date.now() < 3 * 86400000).length
   const departmentId = WORK_REQUEST_DEPARTMENT_IDS[owner]
   const canWriteNotice = hasPermission(profile, 'notice.department.write', 'department', departmentId) || hasPermission(profile, 'notice.department.write', 'company', profile?.companyId)
@@ -113,15 +148,25 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
       </div>
     </section>
     <section aria-label="업무 현황" className="border-b border-border/60 pb-5 pt-8 sm:pt-16">
-      <div className="mb-6"><FilterTabs ariaLabel="업무 범위" value={scope} onChange={setScope} tabs={([{value:'mine',label:'내 업무'},{value:'team',label:'팀 업무'}] as const).map(tab => ({...tab,count:active.filter(row => inDepartmentWorkScope(row,tab.value,actor)).length}))} /></div>
+      <div className="mb-6"><FilterTabs<BoardScope> ariaLabel="업무 범위" value={scope} onChange={value => {
+        setScope(value)
+        if (value === 'receipt' || value === 'final') { setStage('all'); setFilters(current => ({ ...current, status: [] })) }
+      }} tabs={[
+        { value: 'mine', label: '내 업무', count: myRows.filter(row => inDepartmentWorkStage(row.status, 'all')).length },
+        { value: 'team', label: '팀 업무', count: active.length },
+        ...(supervisor ? [
+          { value: 'receipt' as const, label: '총괄 확인 대기', count: receiptQueue.length },
+          { value: 'final' as const, label: '최종 승인 대기', count: finalQueue.length },
+        ] : []),
+      ]} /></div>
       <div role="group" aria-label="업무 상태" className="grid grid-cols-2 gap-1 sm:grid-cols-5">{DEPARTMENT_WORK_STAGES.map(({value, label}) => <button type="button" key={value} aria-pressed={stage === value} onClick={() => { setStage(value); setFilters(current => ({...current,status:[]})) }}><StatTile layout="value-first" label={label} value={scoped.filter(row => inDepartmentWorkStage(row.status, value)).length} className={`min-h-[88px] items-center rounded-lg shadow-none ${stage === value ? 'border-border/60 bg-card' : 'border-transparent bg-transparent'}`} /></button>)}</div>
       {dueSoon ? <p className="mt-5 flex items-center gap-1 text-xs"><TriangleAlert aria-hidden="true" className="size-3 text-danger" />마감 임박·초과 {dueSoon}건</p> : null}
     </section>
     <section aria-labelledby="department-work-list-title" className="space-y-6 pt-8 sm:pt-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h2 id="department-work-list-title" className="text-lg font-medium">{scope === 'mine' ? '내 업무 목록' : '팀 업무 목록'}</h2>
-          <Link to="?mode=new&internal=1"><Button size="sm" variant="ghost" className="h-6 gap-1 bg-muted px-2 text-xs text-muted-foreground"><Plus className="size-3" />업무 등록</Button></Link>
+          <h2 id="department-work-list-title" className="text-lg font-medium">{{ team: '팀 업무 목록', mine: '내 업무 목록', receipt: '총괄 확인 대기 목록', final: '총괄 승인 목록' }[scope]}</h2>
+          {activeSession && profile.departmentId === WORK_REQUEST_DEPARTMENT_IDS[owner] && <Link to="?mode=new"><Button size="sm" variant="ghost" className="h-6 gap-1 bg-muted px-2 text-xs text-muted-foreground"><Plus className="size-3" />업무 등록</Button></Link>}
         </div>
         <div className="flex max-w-full items-center gap-2">
           <div className="relative w-64 max-w-full"><Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" aria-label="업무 검색" placeholder="업무 검색" value={search} onChange={event => setSearch(event.target.value)} /></div>
@@ -131,27 +176,42 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
       {query.isError ? <Card className="p-5"><p role="alert">{query.error.message}</p><p className="mt-2 text-sm text-muted-foreground">부서 업무 조회 연결을 확인해 주세요.</p><Button onClick={() => void query.refetch()}>다시 조회</Button></Card> : query.isPending ? <p role="status">업무를 불러오는 중...</p> : <>
         {!visible.length ? <p role="status" className="text-sm text-muted-foreground">조건에 맞는 업무가 없습니다.</p> : null}
         <Card className="overflow-x-auto rounded-none border-0 bg-transparent shadow-none">
-          <table aria-label="부서별 팀 업무 목록" className="w-full min-w-[1000px] table-fixed text-left text-sm">
-            <colgroup><col className="w-[34%]" /><col className="w-[11%]" /><col className="w-[12%]" /><col className="w-[11%]" /><col className="w-[10%]" /><col className="w-[10%]" /><col className="w-[12%]" /></colgroup>
+          <table aria-label="부서별 팀 업무 목록" className={`w-full table-fixed text-left text-sm ${visual ? 'min-w-[1180px]' : 'min-w-[1000px]'}`}>
+            <colgroup>{columnWidths.map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
             <thead className="border-b border-border bg-transparent text-xs font-normal text-muted-foreground">
               <tr>
                 <th scope="col" className="py-5 pr-4 font-normal">업무명</th>
-                {(['requester', 'assignee', 'status'] as const).map((key, index) => <th scope="col" key={key} className="px-3 py-5 font-normal"><ColumnFilter label={['요청자', '담당자', '상태'][index]} options={options[key]} selected={filters[key]} onApply={value => { if(key === 'status') setStage('all'); setFilters(current => ({ ...current, [key]: value })) }} /></th>)}
+                <th scope="col" className="px-3 py-5 font-normal"><ColumnFilter label="요청자" options={options.requester} selected={filters.requester} onApply={requester => setFilters(current => ({ ...current, requester }))} /></th>
+                {visual && <th scope="col" className="px-3 py-5 font-normal">총괄 관리자</th>}
+                <th scope="col" className="px-3 py-5 font-normal">{hasAssignmentSummary
+                  ? <ColumnFilter label={visual ? '중간 관리자' : '담당자'} options={options.assignee} selected={filters.assignee} onApply={assignee => setFilters(current => ({ ...current, assignee }))} />
+                  : '중간 관리자'}</th>
+                {visual && <th scope="col" className="px-3 py-5 font-normal">작업자</th>}
+                <th scope="col" className="px-3 py-5 font-normal"><ColumnFilter label="상태" options={options.status} selected={filters.status} onApply={status => { setStage('all'); setFilters(current => ({ ...current, status })) }} /></th>
                 {(['createdAt', 'dueDate'] as const).map((field, index) => <th scope="col" className="px-3 py-5 font-normal" key={field}><button type="button" onClick={() => toggleSort(field)} className="inline-flex items-center gap-1">{['요청 날짜', '마감 날짜'][index]}<ArrowDownUp className="size-3" />{sort.field === field ? sort.direction === 1 ? '↑' : '↓' : ''}</button></th>)}
                 <th scope="col" className="py-5 pl-3 font-normal"><ColumnFilter label="브랜드" options={options.brand} selected={filters.brand} onApply={brand => setFilters(current => ({ ...current, brand }))} /></th>
               </tr>
             </thead>
-            {[...groups].map(([department, items]) => <tbody key={department} aria-label={`${department} 요청 업무`}>
-              <tr className="hover:bg-transparent"><th scope="rowgroup" colSpan={7} className="border-b border-border pb-3 pt-14 text-base font-semibold">{department}</th></tr>
-              {items.length ? items.map(row => <tr key={row.id} className="border-b border-border/60 align-middle">
-                <td className="py-6 pr-4"><Link className="break-words hover:underline" to={`?requestId=${row.id}`}>{row.title}</Link>{row.kind === 'internal' ? <Badge className="ml-2" variant="muted">자체 업무</Badge> : null}</td>
-                <td className="break-words px-3 py-6">{row.requesterName}</td>
-                <td className={`break-words px-3 py-6 ${!row.assigneeNames.length ? 'text-danger' : ''}`}>{row.assigneeNames.join(', ') || '미정'}</td>
-                <td className="px-3 py-6"><div className="flex flex-wrap gap-1"><StatusPill tone={STATUS_META[row.status]?.variant}>{STATUS_META[row.status]?.label ?? row.status}</StatusPill>{row.cancellation?.state==='requested'&&!['completed','cancelled','rejected'].includes(row.status)?<Badge variant="warning">취소 요청 중</Badge>:null}</div></td>
-                <td className="px-3 py-6">{row.createdAt.slice(0, 10)}</td>
-                <td className={`px-3 py-6 ${row.dueDate && row.dueDate < new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) && !['completed', 'cancelled', 'rejected'].includes(row.status) ? 'text-danger' : ''}`}>{row.dueDate || '미정'}</td>
-                <td className="break-words py-6 pl-3">{row.brandName || '브랜드 미정'}</td>
-              </tr>) : <tr><td colSpan={7} className="border-b border-border/60 py-5 text-xs text-muted-foreground">{rows.some(row => departmentLabel(row.requesterDepartment) === department) ? '현재 조건에 해당하는 업무가 없습니다.' : '등록된 업무가 없습니다.'}</td></tr>}
+            {[...ordered].filter(([, items]) => items.length > 0).map(([department, items]) => <tbody key={department} aria-label={`${department} 요청 업무`}>
+              <tr className="hover:bg-transparent"><th scope="rowgroup" colSpan={columnWidths.length} className="border-b border-border pb-3 pt-14 text-base font-semibold">{department}</th></tr>
+              {items.map(row => {
+                const approverId = visual ? visualSummaryApprover(row, activeSupervisorIds) : undefined
+                const showApproval = Boolean(row.visualFinalApproval) || (finalApprovalEnabled && !isClosedStatus(row.status))
+                const assignees = visual ? row.visualMiddleManagerIds?.map(id => names.get(id) || '기존 직원') : row.assigneeNames
+                const assigneeLabel = assignees == null ? '—' : assignees.join(', ') || unassignedLabel
+                const status = visual && needsVisualReceipt(row) ? { label: '총괄 접수 대기', variant: 'warning' as const } : workRequestStatusMeta(row)
+                return <tr key={row.id} className="border-b border-border/60 align-middle">
+                  <td className="py-6 pr-4"><Link className="break-words hover:underline" to={`?requestId=${row.id}`}>{row.title}</Link>{row.kind === 'internal' ? <Badge className="ml-2" variant="muted">자체 업무</Badge> : null}</td>
+                  <td className="break-words px-3 py-6">{row.requesterName}</td>
+                  {visual && <td className="break-words px-3 py-6">{approverId ? names.get(approverId) || '기존 직원' : showApproval ? '미지정' : '—'}</td>}
+                  <td className={`break-words px-3 py-6 ${assignees?.length === 0 ? 'text-danger' : ''}`}>{assigneeLabel}</td>
+                  {visual && <td className="px-3 py-6 text-muted-foreground">—</td>}
+                  <td className="px-3 py-6"><div className="flex flex-wrap gap-1"><StatusPill tone={status?.variant}>{status?.label ?? row.status}</StatusPill>{row.cancellation?.state==='requested'&&!isClosedStatus(row.status)?<Badge variant="warning">취소 요청 중</Badge>:null}</div></td>
+                  <td className="px-3 py-6">{row.createdAt.slice(0, 10)}</td>
+                  <td className={`px-3 py-6 ${row.dueDate && row.dueDate < new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) && !isClosedStatus(row.status) ? 'text-danger' : ''}`}>{row.dueDate || '미정'}</td>
+                  <td className="break-words py-6 pl-3">{row.brandName || '브랜드 미정'}</td>
+                </tr>
+              })}
             </tbody>)}
           </table>
         </Card>

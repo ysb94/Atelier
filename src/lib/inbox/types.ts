@@ -1,11 +1,13 @@
 /** 받은 알림. 회의 참석 요청은 저장소에서 오고, 그 외 종류는 이후 알림 테이블에 맞춘다. */
 export type InboxNotificationKind =
+  | 'visual_workflow'
   | 'attendance_start_needed'
   | 'barcode_request'
   | 'barcode_issued'
   | 'barcode_pending'
   | 'outbound_changed'
   | 'mention'
+  | 'material_nudge'
   | 'meeting_invitation'
   | 'meeting_result'
   | 'meeting_removed'

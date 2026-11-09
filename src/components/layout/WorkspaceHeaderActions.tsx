@@ -38,6 +38,7 @@ import { useWorkspaceOverlayHost } from './use-workspace-overlay-host'
 import { ReleaseAccessProvider, useReleaseAccess } from './release-access-context'
 import { useLeaveUsageNotices } from '@/features/operations-support/use-leave-usage-notices'
 import { LeaveUsageNoticeReceiver } from '@/features/operations-support/LeaveUsageNoticeReceiver'
+import { MaterialNudgeNotice } from '@/features/planning/MaterialNudgeDialog'
 
 type OpenPanel = 'chat' | 'notifications'
 
@@ -53,7 +54,8 @@ function ReleasedHeaderActions() {
   const navigate = useNavigate()
   const { profile, session } = useAuth()
   const preview = useContext(PreviewContext)
-  const { href: releaseLink, approvals } = useReleaseAccess()
+  const { href: releaseLink, approvals, materialNudgeAccountId: nudgeAccountId,
+    materialNudgeNotifications, materialNudgeError, materialNudgeSupported, refreshMaterialNudges } = useReleaseAccess()
   const chatEnabled = profile?.status === 'active'
   const roomsQuery = useChatRooms(chatEnabled)
   useChatRealtime(chatEnabled)
@@ -66,6 +68,7 @@ function ReleasedHeaderActions() {
   const chatTitleId = useId()
   const notificationTitleId = useId()
   const [open, setOpen] = useState<OpenPanel | null>(null)
+  const [nudgeDetail, setNudgeDetail] = useState<{ accountId: string; item: InboxNotification } | null>(null)
   const [requestedRoom,setRequestedRoom]=useState<RequestedConversation|null>(null)
   const homeNotices=useMyHomeNotifications({coordinator:true, background:!preview?.selected && desktopBackgroundEnabled(profile?.id)})
   const leaveNotices=useLeaveUsageNotices()
@@ -78,10 +81,12 @@ function ReleasedHeaderActions() {
     setNoticeParams(previous=>{const next=new URLSearchParams(previous);next.delete('leaveNotice');return next},{replace:true})
   },[requestedLeave,leaveNotices.records,setNoticeParams])
   const { container: overlayContainer, restoreFocus } = useWorkspaceOverlayHost(open !== null)
-  const notifications = useMemo(() => homeNotices.items.filter(item => releaseLink(item.href) !== null), [homeNotices.items,releaseLink])
+  const homeNotifications = useMemo(() => homeNotices.items.filter(item => releaseLink(item.href) !== null), [homeNotices.items,releaseLink])
+  const notifications = useMemo(() => [...homeNotifications, ...materialNudgeNotifications]
+    .sort((a,b) => b.createdAt.localeCompare(a.createdAt)), [homeNotifications, materialNudgeNotifications])
   const desktop = useDesktopNotifications(
     !preview?.selected && profile?.status === 'active' && session?.user.id === profile.id ? profile.id : undefined,
-    notifications,
+    homeNotifications,
     homeNotices.ready && !homeNotices.error && !approvals.loading && !approvals.error,
     openNotification,
   )
@@ -94,7 +99,7 @@ function ReleasedHeaderActions() {
     window.addEventListener(OPEN_CONVERSATION_EVENT,receive)
     return ()=>window.removeEventListener(OPEN_CONVERSATION_EVENT,receive)
   },[chatEnabled])
-  useEffect(()=>{setRequestedRoom(null);setOpen(null)},[profile?.id])
+  useEffect(()=>{setRequestedRoom(null);setOpen(null);setNudgeDetail(null)},[profile?.id])
 
   const notificationCount = useMemo(
     () => notifications.filter((item) => item.current!==false&&!item.readAt).length,
@@ -125,6 +130,9 @@ function ReleasedHeaderActions() {
   }, [restoreFocus])
 
   function toggle(next: OpenPanel) {
+    if (next === 'notifications' && open !== 'notifications' && nudgeAccountId && materialNudgeSupported) {
+      void refreshMaterialNudges({ cancelRefetch: false })
+    }
     setRequestedRoom(null)
     openedBy.current = next
     setOpen((current) => (current === next ? null : next))
@@ -150,6 +158,18 @@ function ReleasedHeaderActions() {
   }, [closePanel, open])
 
   function openNotification(item: InboxNotification) {
+    if (item.kind === 'material_nudge') {
+      if (!nudgeAccountId) return
+      const target = item.href ? releaseLink(item.href) : null
+      setOpen(null)
+      if (target) {
+        setNudgeDetail(null)
+        navigate(target)
+      } else {
+        setNudgeDetail({ accountId: nudgeAccountId, item })
+      }
+      return
+    }
     const href=releaseLink(item.href)
     if (!href) return
     setOpen(null)
@@ -170,9 +190,15 @@ function ReleasedHeaderActions() {
     >
       <AttendanceStatusActions />
       <LeaveUsageNoticeReceiver notices={leaveNotices}/>
+      {nudgeDetail && nudgeDetail.accountId === nudgeAccountId &&
+        <MaterialNudgeNotice key={nudgeDetail.item.id} item={nudgeDetail.item} accountId={nudgeDetail.accountId}
+          onClose={() => {
+            setNudgeDetail(null)
+            window.requestAnimationFrame(() => restoreFocus(bellButtonRef.current))
+          }} />}
       <KoreaHeaderClock />
       {desktop.prompt && open !== 'notifications' ? createPortal(
-        <div className="fixed bottom-4 right-4 z-[200] w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+        <div className="fixed bottom-4 right-4 z-40 w-[min(24rem,calc(100vw-2rem))] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
           <DesktopNotificationSettings controls={desktop} invitation />
         </div>, document.body,
       ) : null}
@@ -234,6 +260,8 @@ function ReleasedHeaderActions() {
             onClose={closePanel}
           />
           {homeNotices.error || leaveNotices.error ? <p role="alert" className="rounded border border-danger bg-card p-2 text-xs text-danger">{leaveNotices.error ?? (homeNotices.error instanceof Error ? homeNotices.error.message : '알림을 불러오지 못했습니다.')}</p> : null}
+          {materialNudgeError &&
+            <p role="alert" className="rounded border border-danger bg-card p-2 text-xs text-danger">자재요청 조르기 알림을 불러오지 못했습니다.</p>}
         </div>, overlayContainer,
       ) : null}
     </div>

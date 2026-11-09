@@ -8,6 +8,7 @@ import { listLeaveRequests } from '@/lib/supabase/leave-requests'
 import { getMyAttendanceBasis } from '@/lib/supabase/my-attendance-basis'
 import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
 import { useAuth } from '@/lib/supabase/auth'
+import { useHeadOfficeSelfService } from '@/lib/company/workforce-management-context'
 import { emptyList } from '@/lib/utils'
 import { actualOvertimeHours, countMyLateDays } from './my-attendance-summary'
 import { useOvertimeActuals } from '@/features/operations-support/use-overtime-actuals'
@@ -62,6 +63,10 @@ function AdditionalLeaveHistory({ userId, children }: { userId: string; children
 }
 
 export function HomeAttendanceSummary() {
+  const enabled = useHeadOfficeSelfService()
+  return enabled ? <HeadOfficeAttendanceSummary /> : null
+}
+function HeadOfficeAttendanceSummary() {
   const actuals = useOvertimeActuals()
   const clock = useMyClockIn()
   const { profile, session } = useAuth()

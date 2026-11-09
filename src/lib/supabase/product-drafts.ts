@@ -1,10 +1,13 @@
 import type {
+  DraftColorImageChoice,
   DraftColorRow,
   DraftOptionRow,
   DraftSpecKey,
   ProductDraft,
   ProductDraftInput,
 } from '@/lib/types'
+import { inputDiagnosticContext, tracedQuery } from '@/lib/diagnostics/workflow-trace'
+import { normalizeColorPhotoUrls } from '@/lib/drafts/color-photo'
 import { normalizeColorSpecs } from '@/lib/drafts/color-spec'
 import { emptyDraftInput } from '@/lib/drafts/empty-draft'
 import { normalizeDraftBrandId, parseDraftNo } from '@/lib/drafts/company-draft'
@@ -187,13 +190,13 @@ function buildPayload(input: ProductDraftInput) {
     openType: input.openType,
     openTypeDetail: input.openTypeDetail,
     releaseIssue: input.releaseIssue,
-    specs: input.specs,
+    specs: { ...input.specs, colorPhotoUrls: normalizeColorPhotoUrls(input.specs, input.colors) },
     hasOptions: input.hasOptions,
     note: input.note,
   }
 }
 
-function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined) {
+function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined, colors: DraftColorRow[]) {
   const base = emptyDraftInput().specs
   for (const key of SPEC_KEYS) {
     const spec = raw?.[key]
@@ -204,6 +207,14 @@ function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined) {
     }
   }
   base.colorSpecs = normalizeColorSpecs(raw?.colorSpecs)
+  const colorImageChoices: Record<string, DraftColorImageChoice> = {}
+  for (const { id } of colors) {
+    const choice = raw?.colorImageChoices?.[id]
+    if (choice === 'Image' || choice === 'None') colorImageChoices[id] = choice
+  }
+  if (Object.keys(colorImageChoices).length) base.colorImageChoices = colorImageChoices
+  const colorPhotoUrls = normalizeColorPhotoUrls(raw, colors)
+  if (colorPhotoUrls) base.colorPhotoUrls = colorPhotoUrls
   base.nameConfirmed = Boolean(raw?.nameConfirmed)
   base.colorsConfirmed = Boolean(raw?.colorsConfirmed)
   base.colorNamesConfirmed = Boolean(raw?.colorNamesConfirmed)
@@ -213,6 +224,20 @@ function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined) {
       : null
   base.colorSampleRounds = normalizeColorSampleRounds(raw?.colorSampleRounds)
   base.colorSampleDone = normalizeColorSampleDone(raw?.colorSampleDone)
+  const assignment = raw?.chinaWorkAssignment
+  if (
+    assignment
+    && typeof assignment.assigneeId === 'string'
+    && assignment.assigneeId.trim()
+    && typeof assignment.assignedAt === 'string'
+    && assignment.assignedAt.trim()
+  ) {
+    base.chinaWorkAssignment = {
+      assigneeId: assignment.assigneeId,
+      assigneeName: typeof assignment.assigneeName === 'string' ? assignment.assigneeName : '',
+      assignedAt: assignment.assignedAt,
+    }
+  }
   return base
 }
 
@@ -258,7 +283,7 @@ function assemble(
     openType: row.open_type,
     openTypeDetail: row.open_type_detail,
     releaseIssue: row.release_issue,
-    specs: normalizeSpecs(row.specs),
+    specs: normalizeSpecs(row.specs, colors),
     hasOptions: row.has_options,
     options,
     note: row.note,
@@ -367,7 +392,7 @@ async function saveViaRpc(
     )
   }
 
-  const { data, error } = await getSupabase().rpc('save_product_draft', {
+  const request = getSupabase().rpc('save_product_draft', {
     p_company_id: companyId,
     p_brand_id: brandId,
     p_id: id,
@@ -389,6 +414,7 @@ async function saveViaRpc(
       price: toJsonValue(option.price),
     })),
   })
+  const { data, error } = await tracedQuery(request, inputDiagnosticContext(input))
 
   if (error) {
     throw new ProductDraftStoreError(

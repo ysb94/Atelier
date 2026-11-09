@@ -1,4 +1,5 @@
 import type { WorkRequestOwner } from './work-request-form-config'
+import type { VisualFinalApproval } from './visual-final-approval'
 
 export const LOCAL_SELF_ID = 'local-self'
 export const LOCAL_CURRENT_DEPARTMENT = 'local-current-department'
@@ -7,6 +8,7 @@ export type TextContentBlock = {
   id: string
   type: 'text'
   text: string
+  previewHtml?: string
 }
 
 export type ImageWrap = 'none' | 'left' | 'right'
@@ -43,6 +45,10 @@ export type ContentBlock =
   | TextContentBlock
   | ImageContentBlock
   | FileContentBlock
+
+export function hasRequestBody(blocks: ContentBlock[]): boolean {
+  return blocks.some(block => block.type !== 'text' || block.text.trim().length > 0)
+}
 
 export type ReferenceFile = {
   id: string
@@ -99,6 +105,8 @@ export type WorkRequestChatRoom = {
 }
 
 export type WorkRequestRecord = {
+  visualCategoryWorkflow?: import('./visual-category-workflow').VisualCategoryWorkflow
+  visualFinalApproval?: VisualFinalApproval | null
   cancellation?: { state: 'requested' | 'cancelled' | 'approved' | 'rejected'; requestedBy: string; requestedName: string; requestedAt: string; resolvedBy?: string; resolvedName?: string; resolvedAt?: string }
   kind?: 'request' | 'internal'
   departmentReadable?: boolean

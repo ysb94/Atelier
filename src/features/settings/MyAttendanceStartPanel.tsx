@@ -20,7 +20,7 @@ export function MyAttendanceStartPanel({ departmentIds }: { departmentIds: strin
   const [params,setParams]=useSearchParams()
   const linkedMonth=params.get('month')
   const reminders=useAttendanceStartReminders()
-  const directory = useOpsDirectory()
+  const directory = useOpsDirectory('head-office')
   const { members: directoryMembers, departmentName } = directory
   const schedules = useAttendanceStartSettings({ assigned: true, departmentIds })
   const now = new Date()
