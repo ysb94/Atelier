@@ -18,6 +18,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { LeaveApprovalPanel } from '@/features/operations-support/LeaveApprovalPanel'
 import { HolidayWorkPanel } from '@/features/operations-support/HolidayWorkPanel'
 import { WorkRequestHubPage } from '@/features/work-requests/WorkRequestHubPage'
+import { WORK_REQUEST_VIEW_PARAMS } from '@/features/work-requests/work-request-navigation'
 import { ReleaseAccessProvider, useReleaseAccess } from '@/components/layout/release-access-context'
 import { WorkspaceTabActivityContext, useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { releasePersonalPart } from '@/lib/company/release-access'
@@ -73,7 +74,7 @@ function ProfileSettingsContent() {
   function selectPart(next: PersonalPart) {
     if (!releasePersonalPart(release.profile, next, release.approver)) return
     const params = new URLSearchParams(searchParams)
-    if(next!==part) for(const key of ['workNotice','request','leaveNotice','lateStatement','lateRole','meeting','round'])params.delete(key)
+    if(next!==part) for(const key of ['workNotice','request','leaveNotice','lateStatement','lateRole','meeting','round', ...WORK_REQUEST_VIEW_PARAMS])params.delete(key)
     if (next === 'my-attendance') params.delete('part')
     else params.set('part', next)
     setSearchParams(params, { replace: true })

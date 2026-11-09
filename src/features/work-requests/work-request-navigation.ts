@@ -9,8 +9,12 @@
  * - 새 요청: ?mode=new
  */
 
+import type { WorkRequestOwner } from './work-request-form-config'
+
 export const WORK_REQUEST_ID_PARAM = 'requestId'
 export const WORK_REQUEST_MODE_PARAM = 'mode'
+export const PERSONAL_WORK_OWNER_PARAM = 'workOwner'
+export const WORK_REQUEST_VIEW_PARAMS = [PERSONAL_WORK_OWNER_PARAM, WORK_REQUEST_ID_PARAM, WORK_REQUEST_MODE_PARAM, 'visualTab'] as const
 
 export type WorkRequestView =
   | { kind: 'list' }
@@ -138,7 +142,19 @@ export function buildWorkRequestSearch(
   else params.delete(WORK_REQUEST_ID_PARAM)
   if (mode) params.set(WORK_REQUEST_MODE_PARAM, mode)
   else params.delete(WORK_REQUEST_MODE_PARAM)
+  if (view.kind === 'list') params.delete(PERSONAL_WORK_OWNER_PARAM)
   return toSearch(params)
+}
+
+export function buildPersonalWorkRequestSearch(
+  search: string | URLSearchParams,
+  owner: WorkRequestOwner,
+  view: Exclude<WorkRequestView, { kind: 'list' }>,
+): string {
+  const params = toParams(search)
+  params.set('part', 'work')
+  params.set(PERSONAL_WORK_OWNER_PARAM, owner)
+  return buildWorkRequestSearch(params, view)
 }
 
 function sortedEntries(search: string | URLSearchParams): string {

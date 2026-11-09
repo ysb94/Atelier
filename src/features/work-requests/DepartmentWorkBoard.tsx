@@ -136,7 +136,7 @@ export function DepartmentWorkBoard({ owner, activeSupervisorIds = emptyList<str
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <h2 id="department-work-list-title" className="text-lg font-medium">{scope === 'final' ? '총괄 승인 목록' : scope === 'mine' ? '내 업무 목록' : '팀 업무 목록'}</h2>
-          <Link to="?mode=new&internal=1"><Button size="sm" variant="ghost" className="h-6 gap-1 bg-muted px-2 text-xs text-muted-foreground"><Plus className="size-3" />업무 등록</Button></Link>
+          {activeSession && profile.departmentId === WORK_REQUEST_DEPARTMENT_IDS[owner] && <Link to="?mode=new"><Button size="sm" variant="ghost" className="h-6 gap-1 bg-muted px-2 text-xs text-muted-foreground"><Plus className="size-3" />업무 등록</Button></Link>}
         </div>
         <div className="flex max-w-full items-center gap-2">
           <div className="relative w-64 max-w-full"><Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" aria-label="업무 검색" placeholder="업무 검색" value={search} onChange={event => setSearch(event.target.value)} /></div>

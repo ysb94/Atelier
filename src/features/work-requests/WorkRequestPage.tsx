@@ -72,6 +72,7 @@ import {
   isWorkRequestOwner,
   resolveWorkRequestViewRole,
   WORK_REQUEST_CONFIG,
+  WORK_REQUEST_DEPARTMENT_IDS,
   type WorkRequestOwner,
 } from './work-request-form-config'
 import { WorkRequestAcceptDialog } from './WorkRequestAcceptDialog'
@@ -2050,15 +2051,22 @@ type FormDraft = {
   hasEdited: boolean
 }
 
-function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
+export function WorkRequestForm({ owner, surface = 'department' }: {
+  owner: WorkRequestOwner
+  surface?: 'department' | 'personal'
+}) {
   useRenderWatch(`WorkRequestForm:${owner}`)
   const config = WORK_REQUEST_CONFIG[owner]
-  const { profile, ready } = useAuth()
+  const { profile, ready, session } = useAuth()
   const selfId=profile?.id??''
-  const workLocation = useLocation()
-  const detailId = new URLSearchParams(workLocation.search).get('requestId') ?? undefined
-  const auxiliary = new URLSearchParams(workLocation.search).get('aux') === '1'
-  const internal = new URLSearchParams(workLocation.search).get('internal') === '1'
+  const personal = surface === 'personal'
+  const ownDepartment = profile?.departmentId === WORK_REQUEST_DEPARTMENT_IDS[owner]
+  const canCreate = profile?.status === 'active' && session?.user.id === selfId && (personal ? !ownDepartment : ownDepartment)
+  const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const detailId = searchParams.get('requestId')?.trim() || undefined
+  const auxiliary = !personal && searchParams.get('aux') === '1'
+  const internal = !personal && !detailId && searchParams.get('mode') === 'new'
   const storage=useWorkRequests(owner, auxiliary ? undefined : detailId, !auxiliary && !detailId)
   const visualSettings = useWorkRequestSettings(owner === 'design')
   const visualCategories = visualSettings.data?.categories ?? DEFAULT_VISUAL_CATEGORIES
@@ -2066,10 +2074,13 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const finalApprovalEnabled = owner === 'design' && Boolean(visualSettings.data?.supervisorIds?.length)
   const finalApprovalCheckPending = owner === 'design' && (visualSettings.isPending || visualSettings.isError)
   const {requests,setRequests,currentWorkByMember,setCurrentWorkByMember,workTimeByKey,setWorkTimeByKey,teamMembers}=storage
-  const [searchParams] = useSearchParams()
-  const location = useLocation()
   const navigate = useNavigate()
   const tabActive = useWorkspaceTabActivity()
+  const navigationActiveRef = useRef(false)
+  useEffect(() => {
+    navigationActiveRef.current = tabActive
+    return () => { navigationActiveRef.current = false }
+  }, [tabActive])
   const brandsQuery = useQuery({
     queryKey: ['brand-directory'],
     queryFn: listBrandDirectory,
@@ -2158,14 +2169,14 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const isIncoming = true
     const isSelfRequest =
       (request.requesterId === selfId)
+    const assignedToSelf = request.assignee === selfId || request.collaborators.includes(selfId)
+    if (personal && !isSelfRequest && !assignedToSelf) return null
     const visible = isSelfRequest || (canManage
       ? isIncoming
       : isDestinationMember
-        ? isIncoming &&
-          (request.assignee === selfId ||
-            request.collaborators.includes(selfId))
+        ? isIncoming && assignedToSelf
         : isSelfRequest)
-    if (!visible && !request.departmentReadable) return null
+    if (!personal && !visible && !request.departmentReadable) return null
     return {
       needsReviewStart: auxiliary && canManage && request.status === 'requested',
       editable: isSelfRequest && request.status === 'requested',
@@ -2175,12 +2186,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const locationPathname = location.pathname
   const locationSearch = location.search
   const resolvedView = resolveWorkRequestView(locationSearch, {
-    canCreate: true,
+    canCreate,
     accessOf: navigationAccess,
   })
   const view = resolvedView.view
   const detailRequestId = view.kind === 'detail' ? view.requestId : null
-  const recoverySearch = workRequestRecoverySearch(locationSearch, resolvedView, {
+  const recoverySearch = personal && storage.loadError ? null : workRequestRecoverySearch(locationSearch, resolvedView, {
     active: tabActive && ready && !storage.loading && !storage.saving,
   })
 
@@ -2293,6 +2304,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
   function goToView(action: WorkRequestNavAction) {
     if (!tabActive) return
+    if (!navigationActiveRef.current) return
     const next = workRequestNavigation(locationSearch, view, action)
     navigate(
       { pathname: locationPathname, search: next.search },
@@ -3172,7 +3184,17 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     )
   }
 
-  if (!auxiliary && (view.kind === 'list' || view.kind === 'detail')) return <><DepartmentWorkBoard owner={owner} activeSupervisorIds={activeSupervisorIds} />{storage.error ? <p role="alert" className="p-4 text-danger">{storage.error}<Button onClick={() => void storage.retry()}>다시 조회</Button></p> : null}{renderDetailPanel()}{acceptingRequest ? <WorkRequestAcceptDialog request={acceptingRequest} selfId={selfId} teamMembers={teamMembers} onClose={() => setAcceptRequestId(null)} onConfirm={decision => acceptRequest(acceptingRequest, decision)} /> : null}</>
+  if (!auxiliary && (view.kind === 'list' || view.kind === 'detail')) return <>
+    {!personal && <DepartmentWorkBoard owner={owner} activeSupervisorIds={activeSupervisorIds} />}
+    {personal && storage.loading && <p role="status" className="p-4 text-sm text-muted-foreground">요청 상세를 불러오는 중...</p>}
+    {storage.error && <div role="alert" className="flex flex-wrap items-center gap-2 p-4 text-danger">
+      {storage.error}
+      <Button type="button" variant="outline" size="sm" onClick={() => void storage.retry()}>다시 조회</Button>
+      {personal && <Button type="button" variant="outline" size="sm" onClick={() => goToView({ type: 'closeDetail' })}>목록으로 돌아가기</Button>}
+    </div>}
+    {renderDetailPanel()}
+    {acceptingRequest && <WorkRequestAcceptDialog request={acceptingRequest} selfId={selfId} teamMembers={teamMembers} onClose={() => setAcceptRequestId(null)} onConfirm={decision => acceptRequest(acceptingRequest, decision)} />}
+  </>
 
   if (storage.loading) return <p role="status" className="p-4 text-sm text-muted-foreground">업무와 권한을 불러오는 중...</p>
   if (storage.loadError) return <Card><CardContent className="p-5"><p role="alert" className="text-sm text-danger">{storage.error}</p><Button className="mt-3" onClick={()=>void storage.retry()}>다시 조회</Button></CardContent></Card>
@@ -3271,10 +3293,10 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     ? '배정받은 직원 화면'
                     : `${currentDepartment} 요청자 화면`}
               </Badge>
-              {(
+              {canCreate && (
                 <Button type="button" onClick={() => openForm()}>
                   <Plus className="size-4" />
-                  작업 요청 하기
+                  업무 등록
                 </Button>
               )}
             </>
@@ -4249,7 +4271,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     <div ref={pageTopRef}>
         {storage.error?<p role="alert" className="mb-3 rounded-xl border border-danger/30 bg-card p-3 text-sm text-danger">{storage.error}<button type="button" className="ml-2 underline" onClick={()=>void storage.retry()}>다시 조회</button></p>:null}
         {storage.saving?<p role="status" className="mb-3 text-sm text-muted-foreground">서버에 저장 중...</p>:null}
-        {!internal && !storage.managerAvailable?<p role="status" className="mb-3 rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground">이 부서의 업무 관리 담당자 지정이 필요합니다. 요청은 대기 상태로 저장되며 자동 수락되지 않습니다.</p>:null}
+        {!internal && (!personal || detailId) && !storage.managerAvailable?<p role="status" className="mb-3 rounded-xl border border-border bg-card p-3 text-sm text-muted-foreground">이 부서의 업무 관리 담당자 지정이 필요합니다. 요청은 대기 상태로 저장되며 자동 수락되지 않습니다.</p>:null}
       <form onSubmit={handleSubmit} noValidate>
         <PageHeader
           title={

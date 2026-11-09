@@ -44,7 +44,8 @@ export function useWorkRequests(owner: WorkRequestOwner, requestId?: string, ski
     if(!active)return
     let timer:ReturnType<typeof setTimeout>|undefined
     const signal=()=>{clearTimeout(timer);timer=setTimeout(()=>void refresh(),100)}
-    const channel=getSupabase().channel(`work-requests:${actorId}:${owner}`).on('postgres_changes',{event:'*',schema:'public',table:'work_requests'},signal).on('postgres_changes',{event:'INSERT',schema:'public',table:'work_request_messages'},signal).on('postgres_changes',{event:'*',schema:'public',table:'work_request_time_entries'},signal).subscribe(status=>{if(status==='SUBSCRIBED')signal();if(status==='CHANNEL_ERROR'||status==='TIMED_OUT')console.warn('[work-requests] 실시간 연결 실패',{owner,status})})
+    // My home과 부서 업무가 같은 부서의 요청을 동시에 열 수 있다.
+    const channel=getSupabase().channel(`work-requests:${actorId}:${owner}:${crypto.randomUUID()}`).on('postgres_changes',{event:'*',schema:'public',table:'work_requests'},signal).on('postgres_changes',{event:'INSERT',schema:'public',table:'work_request_messages'},signal).on('postgres_changes',{event:'*',schema:'public',table:'work_request_time_entries'},signal).subscribe(status=>{if(status==='SUBSCRIBED')signal();if(status==='CHANNEL_ERROR'||status==='TIMED_OUT')console.warn('[work-requests] 실시간 연결 실패',{owner,status})})
     const reconnect=()=>void refresh();window.addEventListener('online',reconnect)
     return()=>{clearTimeout(timer);window.removeEventListener('online',reconnect);void getSupabase().removeChannel(channel)}
   },[active,actorId,owner,refresh])
