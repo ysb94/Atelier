@@ -86,8 +86,8 @@ function ProfileSettingsContent() {
   const permitted = releasePersonalPart(release.profile, part, release.approver) && (part !== 'attendance' || showDepartmentTab)
   const visiblePart = !permitted || (part === 'attendance' && !showDepartmentTab) ? 'my-attendance' : part
   const tabs: { id: PersonalPart; label: string }[] = release.scope.unrestricted ? [
-    { id: 'work', label: '작업 요청' }, { id: 'my-attendance', label: 'My Schedule' }, { id: 'profile', label: '내 정보' },
-    { id: 'overtime', label: '야근' },
+    { id: 'my-attendance', label: 'My Schedule' }, { id: 'profile', label: '내 정보' },
+    { id: 'overtime', label: '야근' }, { id: 'work', label: '작업 요청' },
     { id: 'approvals', label: '승인할 신청' }, { id: 'company-notice', label: '회사 공지' },
     { id: 'department-notice', label: '부서 공지' }, { id: 'meetings', label: '회의' },
     ...(showDepartmentTab ? [{ id: 'attendance' as const, label: '담당 부서 출근시간' }] : []),

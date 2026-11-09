@@ -25,7 +25,7 @@ export function WorkRequestHubPage() {
   const owner = view.kind !== 'list' && isWorkRequestOwner(ownerParam) ? ownerParam : null
   const formOpen = Boolean(owner && (view.kind === 'new' || view.kind === 'edit'))
   const canRequest = profile?.status === 'active' && session?.user.id === profile.id
-  const destinations = WORK_REQUEST_OWNERS.filter(target => WORK_REQUEST_DEPARTMENT_IDS[target] !== profile?.departmentId)
+  const destinations = WORK_REQUEST_OWNERS.filter(target => target === 'design' && WORK_REQUEST_DEPARTMENT_IDS[target] !== profile?.departmentId)
   const query=useQuery({queryKey:['work-requests',profile?.id,'hub'],queryFn:()=>listWorkRequests(profile!.id),enabled:canRequest,retry:false})
   useEffect(() => {
     if (!tabActive || owner || !WORK_REQUEST_VIEW_PARAMS.some(key => searchParams.has(key))) return
