@@ -192,6 +192,11 @@ const checks = String.raw`
  await page.goto(origin+'/design/work-request-management?actor=planner')
  await page.getByText('설정 변경은 기존 Visual 업무 관리 담당자만 할 수 있습니다.',{exact:true}).waitFor()
  assert.equal(await page.getByRole('button',{name:'설정 저장',exact:true}).isEnabled(),false)
+ await db.exec('reset role')
+ const extraSupervisors=[{id:crypto.randomUUID(),name:'추가 총괄 A'},{id:crypto.randomUUID(),name:'추가 총괄 B'}]
+ for(const {id,name} of extraSupervisors){
+   await db.query("insert into public.profiles(id,company_id,department_id,display_name,status,is_admin,position) select $1,company_id,department_id,$2,'active',false,'' from public.profiles where id=$3",[id,name,ids.design])
+ }
  await managerPage.goto(origin+'/design/work-request-management?actor=manager')
  await managerPage.getByRole('button',{name:/^배너/}).click()
  await managerPage.screenshot({path:'.tmp/work-request-settings-desktop.png',fullPage:true})
@@ -199,14 +204,24 @@ const checks = String.raw`
  assert.equal(await managerPage.locator('body').evaluate(el=>el.scrollWidth<=innerWidth),true)
  await managerPage.screenshot({path:'.tmp/work-request-settings-mobile.png',fullPage:true})
  await managerPage.setViewportSize({width:1440,height:1000})
- await managerPage.getByLabel('총괄 관리자 1',{exact:true}).selectOption(ids.manager)
- await managerPage.getByLabel('총괄 관리자 2',{exact:true}).selectOption(ids.design)
+ const addSupervisor=managerPage.getByLabel('총괄 관리자 추가',{exact:true})
+ const roster=managerPage.getByRole('list',{name:'설정된 총괄 관리자'})
+ for(const id of [ids.manager,ids.design,...extraSupervisors.map(supervisor=>supervisor.id)]){
+   await addSupervisor.selectOption(id)
+   assert.equal(await addSupervisor.locator('option[value="'+id+'"]').count(),0)
+ }
  await managerPage.getByRole('button',{name:'설정 저장',exact:true}).click()
  await managerPage.getByText('작업 요청 설정을 저장했습니다.',{exact:true}).waitFor()
  await managerPage.reload()
- await managerPage.getByRole('button',{name:/^배너/}).waitFor()
- assert.equal(await managerPage.getByLabel('총괄 관리자 1',{exact:true}).inputValue(),ids.manager)
- assert.equal(await managerPage.getByLabel('총괄 관리자 2',{exact:true}).inputValue(),ids.design)
+ await roster.getByText('추가 총괄 B',{exact:true}).waitFor()
+ assert.deepEqual(await roster.getByRole('listitem').allTextContents(),['manager','design','추가 총괄 A','추가 총괄 B'])
+ await roster.getByRole('button',{name:'추가 총괄 B 총괄 관리자 해제',exact:true}).click()
+ await managerPage.getByRole('button',{name:'설정 저장',exact:true}).click()
+ await managerPage.getByText('작업 요청 설정을 저장했습니다.',{exact:true}).waitFor()
+ await managerPage.reload()
+ await roster.getByText('추가 총괄 A',{exact:true}).waitFor()
+ assert.deepEqual(await roster.getByRole('listitem').allTextContents(),['manager','design','추가 총괄 A'])
+ assert.equal(await addSupervisor.locator('option[value="'+extraSupervisors[1].id+'"]').count(),1)
 
  const getRequest=async actor=>(await command(actor,'get_department_work',{p_id:requestId})).requests[0]
  const patchWork=async(actor,patch)=>command(actor,'save_work_request',{
@@ -242,7 +257,7 @@ const checks = String.raw`
  const complete=await getRequest(ids.planner)
  assert.equal(complete.status,'completed')
  assert.equal(complete.visualFinalApproval.approvedBy,ids.design)
- console.log('PASS: 두 총괄 설정 저장·업무별 배정·요청자 결과 확인·지정된 총괄의 최종 승인')
+ console.log('PASS: 총괄 4명 설정·해제·새로고침·업무별 배정·지정된 총괄의 최종 승인')
  assert.deepEqual(errors,[])
  console.log('PASS: 관리 설정 저장·새로고침·다중 폼 입력·공통 첨부·실제 RPC 자동/수동 배정·담당자 공유 조회·일반 직원 설정 차단·모바일 (격리된 로컬 PostgreSQL)')
 ` + original.slice(original.indexOf('}catch(error){console.error'))

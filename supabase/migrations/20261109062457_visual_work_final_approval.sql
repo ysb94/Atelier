@@ -1,6 +1,5 @@
 -- A configured Visual supervisor signs off after the existing requester confirmation.
-alter table public.work_request_settings add column supervisor_ids uuid[] not null default '{}'
-  check (cardinality(supervisor_ids) <= 2);
+alter table public.work_request_settings add column supervisor_ids uuid[] not null default '{}';
 
 create function app.active_visual_work_supervisors(p_company uuid, p_ids uuid[]) returns uuid[]
 language sql stable set search_path = '' as $$
@@ -43,10 +42,10 @@ begin
   v_revision := app.save_work_request_settings('design', p_revision, p_categories);
   select supervisor_ids into v_previous from public.work_request_settings where company_id = v_company and owner = 'design';
   if p_supervisors is not distinct from v_previous then return v_revision; end if;
-  if p_supervisors is null or cardinality(p_supervisors) not between 1 and 2
+  if p_supervisors is null or cardinality(p_supervisors) = 0
     or cardinality(p_supervisors) <> (select count(distinct id) from unnest(p_supervisors) id)
     or p_supervisors is distinct from app.active_visual_work_supervisors(v_company, p_supervisors) then
-    raise exception 'Visual 재직 직원 중 서로 다른 총괄 관리자를 한 명 또는 두 명 지정해 주세요.' using errcode = '22023';
+    raise exception 'Visual 재직 직원 중 총괄 관리자를 한 명 이상 중복 없이 지정해 주세요.' using errcode = '22023';
   end if;
   update public.work_request_settings set supervisor_ids = p_supervisors where company_id = v_company and owner = 'design';
   return v_revision;

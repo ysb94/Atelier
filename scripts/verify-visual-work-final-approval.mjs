@@ -57,13 +57,15 @@ try {
   await rpc('complete_department_work', [existing, existingRev, crypto.randomUUID()])
   assert.equal((await read(existing)).status, 'completed', 'Existing workflow works before any supervisor is set')
 
-  const third = crypto.randomUUID()
+  const ordinary = crypto.randomUUID()
+  const extraSupervisors = [crypto.randomUUID(), crypto.randomUUID()]
+  const supervisors = [ids.manager, ids.design, ...extraSupervisors]
   await db.exec('reset role')
   await db.query(`insert into public.profiles(id,company_id,department_id,display_name,status,is_admin,position)
-    select $1,company_id,$2,'기존 일반 Visual 직원','active',false,'' from public.profiles where id=$3`, [third, departments.design, ids.design])
+    select staff.id,p.company_id,$2,'추가 Visual 직원','active',false,'' from public.profiles p
+    cross join unnest($1::uuid[]) as staff(id) where p.id=$3`, [[ordinary, ...extraSupervisors], departments.design, ids.design])
   await actor(ids.manager)
   const settings = await rpc('get_work_request_settings', ['design'])
-  const supervisors = [ids.manager, ids.design]
   const configure = (rev, selected) => rpc('save_visual_work_request_settings', [rev, settings.categories, selected])
   await denied(configure(settings.revision, [ids.manager, ids.manager]), '22023')
   await denied(configure(settings.revision, [ids.planner]), '22023')
@@ -79,8 +81,11 @@ try {
 
   const [one, oneRev] = await createAtRequesterReview('배너')
   const [two, twoRev] = await createAtRequesterReview('광고 소재')
+  const [extra, extraRev] = await createAtRequesterReview('네 번째 총괄 배정')
+  const fourth = extraSupervisors[1]
   let first = await approval(one, oneRev, 'assign', ids.design)
   let second = await approval(two, twoRev, 'assign', ids.manager)
+  const extraAssigned = await approval(extra, extraRev, 'assign', fourth)
   await denied(approval(one, oneRev, 'assign', ids.manager), '40001')
   await denied(approval(one, first, 'approve'))
   await actor(ids.planner)
@@ -90,21 +95,27 @@ try {
   assert.equal(await approval(one, first, 'submit', null, submit), submitted)
   first = submitted
   second = await approval(two, second, 'submit')
+  const extraPending = await approval(extra, extraAssigned, 'submit')
   assert.equal((await read(one)).status, 'completionConfirm')
   assert.ok((await read(one)).visualFinalApproval.requestedAt)
   await denied(save(one, first, { status: 'completed' }))
   await denied(approval(one, first, 'approve'))
-  await actor(third)
+  await actor(ordinary)
   await denied(approval(one, first, 'approve'))
   await denied(approval(two, second, 'assign', ids.design))
   await actor(ids.outsider)
   await denied(approval(one, first, 'approve'))
   await actor(ids.manager)
   await denied(approval(one, first, 'approve'))
+  await denied(approval(extra, extraPending, 'approve'))
   const list = await rpc('list_department_work', ['design'])
   assert.equal(list.find(row => row.id === one).visualFinalApproval.approverId, ids.design)
   assert.equal(list.find(row => row.id === two).visualFinalApproval.approverId, ids.manager)
   await approval(two, second, 'approve')
+  await actor(fourth)
+  await denied(approval(one, first, 'approve'))
+  await approval(extra, extraPending, 'approve')
+  assert.equal((await read(extra)).visualFinalApproval.approvedBy, fourth)
   await actor(ids.design)
   const command = crypto.randomUUID()
   const approved = await approval(one, first, 'approve', null, command)
@@ -137,7 +148,7 @@ try {
   assert.equal((await read(planning)).status, 'completed', 'Other departments keep their completion path')
   await actor('', 'anon')
   await denied(approval(one, approved, 'approve'))
-  console.log('PASS: Visual final approval, two-supervisor assignment, requester confirmation, blocked bypasses, internal/rework flow, and existing data and access')
+  console.log('PASS: Visual final approval with four supervisors, per-work assignment, requester confirmation, blocked bypasses, internal/rework flow, and existing data and access')
 } finally {
   await db.close()
 }

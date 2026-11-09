@@ -29,6 +29,9 @@ function VisualWorkRequestManageForm() {
   const [message, setMessage] = useState('')
   const categories = draft?.categories ?? settings.data?.categories ?? emptyList<VisualCategory>()
   const supervisors = draft?.supervisors ?? settings.data?.supervisorIds ?? emptyList<string>()
+  const supervisorIds = new Set(supervisors)
+  const membersById = new Map(members.map(member => [member.id, member]))
+  const supervisorCandidates = members.filter(member => !supervisorIds.has(member.id))
   const finalApprovalAvailable = settings.data?.supervisorIds !== undefined
   const selected = categories.find(item => item.id === selectedId) ?? categories[0]
   const canManage = settings.data?.canManage ?? Boolean(access.access?.manageOwners.includes('design'))
@@ -46,13 +49,12 @@ function VisualWorkRequestManageForm() {
     trace.step('validate_input')
     const error = validateVisualSettings(draft.categories)
     if (error) { trace.block('invalid_categories'); setMessage(error); return }
-    const selectedSupervisors = draft.supervisors.filter(Boolean)
-    if (settings.data.supervisorIds?.length && selectedSupervisors.length === 0) {
+    if (settings.data.supervisorIds?.length && draft.supervisors.length === 0) {
       trace.block('no_supervisor'); setMessage('총괄 관리자를 한 명 이상 지정해 주세요.'); return
     }
     setSaving(true)
     try {
-      await trace.run('save', context => saveWorkRequestSettings(draft.categories, draft.revision, finalApprovalAvailable ? selectedSupervisors : undefined, context))
+      await trace.run('save', context => saveWorkRequestSettings(draft.categories, draft.revision, finalApprovalAvailable ? draft.supervisors : undefined, context))
       await trace.run('refresh_queries', () => client.invalidateQueries({ queryKey: ['work-request-settings', profile?.id] }), { writeOutcome: 'committed' })
       trace.done({ writeOutcome: 'committed' })
       setDraft(null)
@@ -77,22 +79,24 @@ function VisualWorkRequestManageForm() {
       {draft && settings.data && draft.revision !== settings.data.revision ? <p role="alert" className="mb-4 text-sm text-warning">다른 관리자가 설정을 변경했습니다. 작성 중인 값은 유지됩니다. 다시 불러온 뒤 변경 내용을 확인하세요.</p> : null}
       <Card className="mb-5"><CardContent className="space-y-3 p-5">
         <h2 className="font-semibold">총괄 관리자 설정</h2>
-        <p className="text-sm text-muted-foreground">요청자가 결과를 확인한 뒤, 해당 업무에 배정된 총괄 관리자가 최종 승인합니다. 한 명이면 자동 지정되며, 두 명이면 업무별로 나눠 배정할 수 있습니다.</p>
-        <fieldset disabled={!editable || !finalApprovalAvailable || directory.isPending || directory.isError} className="grid gap-3 sm:grid-cols-2">
-          {[0, 1].map(index => {
-            const value = supervisors[index] ?? ''
-            return <label key={index} className="space-y-1 text-sm">총괄 관리자 {index + 1}
-              <Select aria-label={`총괄 관리자 ${index + 1}`} className="w-full" value={value} onChange={event => {
-                const next = [supervisors[0] ?? '', supervisors[1] ?? '']
-                next[index] = event.target.value
-                change(categories, next)
-              }}>
-                <option value="">미지정</option>
-                {value && !members.some(member => member.id === value) && <option value={value}>기존 총괄 관리자 · 현재 배정 불가</option>}
-                {members.map(member => <option key={member.id} value={member.id} disabled={supervisors[1 - index] === member.id}>{member.displayName || '직원'}{member.position ? ` · ${member.position}` : ''}</option>)}
-              </Select>
-            </label>
-          })}
+        <p className="text-sm text-muted-foreground">요청자가 결과를 확인한 뒤, 해당 업무에 배정된 총괄 관리자가 최종 승인합니다. 한 명이면 자동 지정되며, 여러 명이면 업무별로 한 명씩 나눠 배정할 수 있습니다.</p>
+        <fieldset disabled={!editable || !finalApprovalAvailable || directory.isPending || directory.isError} className="min-w-0 space-y-3">
+          {supervisors.length > 0 && <ul aria-label="설정된 총괄 관리자" className="flex flex-wrap gap-2">
+            {supervisors.map(id => {
+              const member = membersById.get(id)
+              const name = member ? member.displayName || '직원' : '기존 총괄 관리자 · 현재 배정 불가'
+              return <li key={id} className="inline-flex max-w-full items-center gap-2 rounded-md border border-border pl-2 text-sm">
+                <span className="break-all">{name}</span>
+                <Button type="button" variant="ghost" size="sm" className="shrink-0" aria-label={`${name} 총괄 관리자 해제`} onClick={() => change(categories, supervisors.filter(supervisor => supervisor !== id))}><Trash2 className="size-4" /></Button>
+              </li>
+            })}
+          </ul>}
+          <label className="block max-w-sm space-y-1 text-sm">총괄 관리자 추가
+            <Select aria-label="총괄 관리자 추가" className="w-full" value="" disabled={!supervisorCandidates.length} onChange={event => change(categories, [...supervisors, event.target.value])}>
+              <option value="" disabled>Visual 직원 선택</option>
+              {supervisorCandidates.map(member => <option key={member.id} value={member.id}>{member.displayName || '직원'}{member.position ? ` · ${member.position}` : ''}</option>)}
+            </Select>
+          </label>
         </fieldset>
         {settings.data && !finalApprovalAvailable && <p className="text-sm text-warning">총괄 관리자 설정은 서버 적용 후 저장할 수 있습니다.</p>}
       </CardContent></Card>
