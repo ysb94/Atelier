@@ -1,6 +1,7 @@
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { FileText, GripVertical, Heart, ImageOff, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
@@ -150,13 +151,67 @@ type ColorFormValue = {
 
 type ColorFormRow = ColorFormValue & { key: number }
 
-function ColorImageChoiceDot({ choice }: { choice?: DraftColorImageChoice }) {
+function colorImageConfigured(choice?: DraftColorImageChoice, photoUrl?: string | null) {
+  return choice === 'None' || (choice === 'Image' && Boolean(photoUrl))
+}
+
+function ColorImageChoiceDot({ choice, photoUrl }: { choice?: DraftColorImageChoice; photoUrl?: string | null }) {
+  const configured = colorImageConfigured(choice, photoUrl)
+  const label = configured ? `이미지 설정 ${choice}` : choice === 'Image' ? '이미지 미첨부' : '이미지 미선택'
   return (
     <span
       role="img"
-      aria-label={choice ? `이미지 설정 ${choice}` : '이미지 미선택'}
-      className={`size-1.5 shrink-0 rounded-full border ${choice ? 'border-primary bg-primary' : 'border-muted-foreground'}`}
+      aria-label={label}
+      className={`size-1.5 shrink-0 rounded-full border ${configured ? 'border-primary bg-primary' : 'border-muted-foreground'}`}
     />
+  )
+}
+
+function DraftPriceRequestButton({ readOnly, hasColors, missingColors }: {
+  readOnly: boolean
+  hasColors: boolean
+  missingColors: string[]
+}) {
+  const [open, setOpen] = useState(false)
+  const active = useWorkspaceTabActivity()
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const titleId = useId()
+  const ready = hasColors && missingColors.length === 0
+  const visible = open && active && !readOnly
+  const heading = ready ? '단가요청 준비 완료' : hasColors ? '컬러 이미지를 등록해 주세요' : '컬러를 먼저 추가해 주세요'
+
+  useEffect(() => {
+    if (!visible) return
+    const dialog = dialogRef.current
+    dialog?.showModal()
+    return () => dialog?.close()
+  }, [visible])
+
+  return (
+    <>
+      <Button type="button" size="sm" variant={ready ? 'default' : 'outline'} className="h-7 px-2.5"
+        disabled={readOnly} title={heading} aria-haspopup="dialog" onClick={() => setOpen(true)}>
+        단가 요청
+      </Button>
+      {visible ? createPortal(
+        <dialog ref={dialogRef} aria-labelledby={titleId} onCancel={(event) => { event.preventDefault(); setOpen(false) }}
+          className="fixed inset-0 m-auto w-[calc(100%-2rem)] max-w-sm rounded-xl border border-border bg-card p-5 text-left text-card-foreground shadow-xl backdrop:bg-black/40">
+          <h2 id={titleId} className="font-semibold">{heading}</h2>
+          {ready ? (
+            <p className="mt-2 text-sm text-muted-foreground">모든 컬러의 이미지 설정을 확인했습니다. 단가요청 접수 기능은 준비 중입니다.</p>
+          ) : (
+            <div className="mt-2 space-y-2 text-sm">
+              {missingColors.length > 0 ? <p className="break-words text-danger">미등록 컬러 · {missingColors.join(', ')}</p> : null}
+              <p className="text-muted-foreground">COLOR 열의 컬러 문서에서 사진은 Image로 첨부하고, 사진이 없으면 None을 선택해 저장해 주세요.</p>
+            </div>
+          )}
+          <div className="mt-4 flex justify-end">
+            <Button type="button" size="sm" onClick={() => setOpen(false)}>확인</Button>
+          </div>
+        </dialog>,
+        document.body,
+      ) : null}
+    </>
   )
 }
 
@@ -428,7 +483,7 @@ function ColorDocumentButton({
                 className={`draft-color-add-row${lifted ? ' is-lifted' : ''}`}
                 style={lifted ? { transform: `translateY(${shiftY}px)` } : undefined}
               >
-                <ColorImageChoiceDot choice={imageChoice} />
+                <ColorImageChoiceDot choice={imageChoice} photoUrl={photoUrl} />
                 <button
                   type="button"
                   className="draft-color-add-grip"
@@ -822,6 +877,11 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
   const name = draft.nameEn.trim() || draft.nameKo.trim() || '이름 미정'
   const named = Boolean(draft.nameEn.trim() || draft.nameKo.trim())
   const hasColor = draft.colors.length > 0
+  const missingPriceColors = draft.colors.flatMap((color, index) =>
+    colorImageConfigured(draft.specs.colorImageChoices?.[color.id], draft.specs.colorPhotoUrls?.[color.id])
+      ? []
+      : [color.name.trim() || `${index + 1}번 컬러`],
+  )
   const nameConfirmed = Boolean(draft.specs.nameConfirmed)
   const colorsConfirmed = Boolean(draft.specs.colorsConfirmed)
   const registeredDay = sheetRegisteredDay(draft.createdAt)
@@ -893,9 +953,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
       )}
     </td>
     <td className="draft-sheet-price-cell">
-      <button type="button" className="draft-sheet-price-request" disabled={readOnly} title="기능 준비 중">
-        단가 요청
-      </button>
+      <DraftPriceRequestButton readOnly={readOnly} hasColors={hasColor} missingColors={missingPriceColors} />
     </td>
     <td>
       <div className="draft-color-pad draft-sheet-color-tools">
@@ -923,7 +981,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, onOpen
           const photoUrl = draft.specs.colorPhotoUrls?.[color.id]
           return (
             <ColorLine key={color.id} index={index}>
-              <ColorImageChoiceDot choice={draft.specs.colorImageChoices?.[color.id]} />
+              <ColorImageChoiceDot choice={draft.specs.colorImageChoices?.[color.id]} photoUrl={photoUrl} />
               <SheetInlineField
                 readOnly
                 label={`${draft.draftNo} 컬러 ${index + 1} 이름`}

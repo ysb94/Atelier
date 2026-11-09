@@ -155,7 +155,6 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-sheet-color-name[aria-invalid=true]{box-shadow:0 0 0 1px #c60920}
 .draft-sheet-field-error{display:block;max-width:100%;font-size:10px;line-height:1.3;color:#c60920;text-align:center}
 .draft-sheet-row>td.draft-sheet-price-cell{vertical-align:middle;text-align:center}
-.draft-sheet-price-request{display:inline-flex;justify-content:center;align-items:center;min-height:26px;border:1px solid #e5e5e2;border-radius:6px;background:white;color:#343a40;font:inherit;font-size:11px;padding:3px 9px;white-space:nowrap;cursor:default}
 .draft-color-pad{display:flex;align-items:center;height:36px}
 .draft-color-lines{display:flex;flex-direction:column}
 .draft-color-line{display:flex;align-items:center;justify-content:space-between;gap:8px;box-sizing:border-box;min-height:40px;padding:6px 8px;border-bottom:1px solid #f0d0d0;background:#fff}
