@@ -51,7 +51,7 @@ export async function installDraftPriceFixture(db) {
   await db.query(`insert into public.draft_colors (id,draft_id,company_id,name,sort_order)
     values ($1,$3,$4,'Black',1),($2,$3,$4,'Yellow',2),($5,$6,$4,'Ivory',1)`, [black, yellow, id, company, fixtureId(5), incompleteId])
   const baseline = await originalState(db)
-  await db.exec(await migration('20261109030119_draft_price_requests'))
+  await db.exec(await migration('20261109044448_draft_price_requests'))
   assert.deepEqual(await originalState(db), baseline, 'Migration preserves existing data, policies and grants')
   return baseline
 }
