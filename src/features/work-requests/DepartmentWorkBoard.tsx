@@ -21,7 +21,7 @@ import { emptyList } from '@/lib/utils'
 import { clearWorkFilters, DEPARTMENT_WORK_STAGES, filterDepartmentWork, inDepartmentWorkScope, inDepartmentWorkStage, type DepartmentWork, type DepartmentWorkScope, type DepartmentWorkStage, type WorkFilters } from './department-work'
 import { ownerFromDepartment, WORK_REQUEST_CONFIG, WORK_REQUEST_DEPARTMENT_IDS, type WorkRequestOwner } from './work-request-form-config'
 import { isClosedStatus, STATUS_META } from './work-request-types'
-import { visualFinalApprover, visualFinalPending, visualSummaryApprover, workRequestStatusMeta } from './visual-final-approval'
+import { visualFinalPending, visualSummaryApprover, workRequestStatusMeta } from './visual-final-approval'
 
 type BoardScope = DepartmentWorkScope | 'final'
 
@@ -93,7 +93,7 @@ export function DepartmentWorkBoard({ owner, activeSupervisorIds, finalApprovalE
   const scope = selectedScope === 'final' && !supervisor ? 'team' : selectedScope
   const finalQueue = supervisor ? rows.filter(row => {
     const review = row.visualCategoryReview
-    const approver = visualFinalApprover(review?.approverId ? { approverId: review.approverId } : row.visualFinalApproval, activeSupervisorIds)
+    const approver = visualSummaryApprover(row, activeSupervisorIds)
     return (review ? review.pending : visualFinalPending(row)) && (!approver || approver === actor)
   }) : emptyList<DepartmentWork>()
   const options = useMemo(() => {

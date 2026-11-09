@@ -1,0 +1,58 @@
+export const VISUAL_CATEGORY_STATES = {
+  assignment: '작업자 지정 대기',
+  working: '작업 중',
+  middle_review: '중간 검수 대기',
+  supervisor_review: '총괄 검수 대기',
+  requester_review: '요청자 결과 확인 대기',
+  supervisor_revision: '요청자 수정 의견 전달 대기',
+  middle_revision: '작업자에게 수정 전달 대기',
+  confirmed: '분류 완료',
+} as const
+
+export type VisualCategoryState = keyof typeof VISUAL_CATEGORY_STATES
+export type VisualFeedbackSource = 'middle' | 'supervisor' | 'requester'
+
+export type VisualCategoryStep = {
+  state: VisualCategoryState
+  version: number
+  workerId?: string
+  resultId?: string
+  roundId?: string
+  feedback?: Partial<Record<VisualFeedbackSource, number>>
+}
+
+export type VisualCategoryWorkflow = {
+  approverId?: string
+  receivedAt?: string
+  categories: Record<string, VisualCategoryStep>
+}
+
+export type VisualWorkflowEntryAction =
+  | 'submit' | 'middle_return' | 'supervisor_return' | 'requester_return' | 'supervisor_forward' | 'middle_forward'
+
+export type VisualWorkflowAction = VisualWorkflowEntryAction
+  | 'receipt' | 'assign_supervisor' | 'assign_worker' | 'middle_approve' | 'supervisor_approve' | 'requester_confirm'
+
+export type VisualWorkflowEntry = {
+  id: string
+  action: VisualWorkflowEntryAction
+  note: string
+  resultUrl: string | null
+  roundId: string | null
+  createdAt: string
+  sharedAt: string | null
+}
+
+export type VisualWorkflowNotice = {
+  id: string
+  requestId: string
+  categoryId: string
+  categoryLabel: string
+  title: string
+  kind: 'receipt' | 'registered' | 'rework' | Exclude<VisualCategoryState, 'confirmed'>
+  version: number
+  personal: boolean
+  createdAt: string
+  readAt: string | null
+  current: boolean
+}

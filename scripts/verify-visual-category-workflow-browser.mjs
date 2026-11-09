@@ -1,0 +1,128 @@
+import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+
+const source = (await readFile('scripts/verify-work-request-settings-browser.mjs', 'utf8')).replace(/\r\n/g, '\n')
+const start = source.indexOf('const checks = String.raw' + String.fromCharCode(96))
+const end = source.indexOf(String.fromCharCode(96) + ' + original.slice', start + 20)
+if (start < 0 || end < 0) throw new Error('Visual browser fixture not found')
+const checks = String.raw`
+ async function command(actor,name,args={}) {
+   const response=await page.request.post(origin+'/__work-test/rpc',{headers:{'X-Test-Actor':actor},data:{name,args}})
+   const reply=await response.json()
+   assert.equal(reply.error,null,JSON.stringify(reply.error))
+   return reply.data
+ }
+ const supervisor=ids.manager, middle=ids.manager, worker=ids.design, requester=ids.planner
+ const settings=await command(supervisor,'get_work_request_settings',{p_owner:'design'})
+ await command(supervisor,'save_visual_work_request_settings',{p_revision:settings.revision,p_supervisors:[supervisor],
+   p_categories:settings.categories.map(item=>({...item,assigneeId:['banner','video'].includes(item.id)?middle:''}))})
+
+ await page.goto(origin+'/settings/profile?part=work&actor=planner',{waitUntil:'domcontentloaded'})
+ await page.getByRole('link',{name:'디자인에 요청하기',exact:true}).click()
+ await page.getByRole('checkbox',{name:'배너',exact:true}).check()
+ await page.getByRole('checkbox',{name:'영상',exact:true}).check()
+ await page.locator('#work-request-title').fill('분류별 배정 브라우저 검증')
+ await page.locator('input[type=date]').first().fill('2030-01-01')
+ await page.locator('[contenteditable=true]').first().fill('배너와 영상을 제작해 주세요.')
+ await page.getByRole('button',{name:'작업 요청 등록',exact:true}).click()
+ await page.waitForURL(/requestId=/)
+ const requestId=new URL(page.url()).searchParams.get('requestId')
+ const visual=(role,category)=>origin+'/work-requests/design?actor='+role+'&requestId='+requestId+'&visualTab='+category
+ const panel=label=>page.getByRole('region',{name:label+' 작업 진행',exact:true})
+ const browserNotice=page.getByRole('region',{name:'이 탭의 알림'})
+ const banner=panel('배너'), video=panel('영상')
+
+ await page.goto(visual('manager','banner'),{waitUntil:'domcontentloaded'})
+ await banner.getByRole('button',{name:'총괄 접수 확인',exact:true}).click()
+ await banner.getByText('작업자 지정 대기',{exact:true}).waitFor()
+ await page.goto(visual('manager','banner'),{waitUntil:'domcontentloaded'})
+ await banner.getByLabel('분류 작업자',{exact:true}).selectOption(worker)
+ await banner.getByRole('button',{name:'작업자 지정',exact:true}).click()
+ await page.locator('dl[aria-label="업무 기본 정보"]').getByText('design',{exact:true}).waitFor()
+ await page.goto(visual('design','banner'),{waitUntil:'domcontentloaded'})
+ await banner.getByLabel('결과 내용',{exact:true}).fill('배너 첫 시안')
+ await banner.getByRole('button',{name:'결과물 제출',exact:true}).click()
+ await banner.getByText('중간 검수 대기',{exact:true}).waitFor()
+
+ await page.goto(visual('manager','banner'),{waitUntil:'domcontentloaded'})
+ await banner.getByLabel('수정 의견',{exact:true}).fill('밝기를 올려 주세요.')
+ await banner.getByRole('button',{name:'수정 요청',exact:true}).click()
+ await banner.getByText('중간 수정 1회 · 총괄 수정 0회 · 요청자 수정 0회',{exact:true}).waitFor()
+ await page.goto(visual('design','banner'),{waitUntil:'domcontentloaded'})
+ await banner.getByLabel('결과 내용',{exact:true}).fill('배너 수정본')
+ await banner.getByRole('button',{name:'결과물 제출',exact:true}).click()
+ await banner.getByText('중간 검수 대기',{exact:true}).waitFor()
+
+ await page.goto(visual('manager','banner'),{waitUntil:'domcontentloaded'})
+ await banner.getByRole('button',{name:'중간 검수 통과',exact:true}).click()
+ await banner.getByText('작업자 완료',{exact:true}).waitFor()
+ await page.goto(visual('manager','banner'),{waitUntil:'domcontentloaded'})
+ await banner.getByRole('button',{name:'총괄 검수 통과 · 요청자에게 보내기',exact:true}).click()
+ await banner.getByText('요청자 결과 확인 대기',{exact:true}).waitFor()
+
+ await page.goto(origin+'/settings/profile?actor=planner',{waitUntil:'domcontentloaded'})
+ await browserNotice.getByRole('button',{name:/분류별 배정 브라우저 검증 · 배너/}).click()
+ await page.waitForURL(url=>url.pathname==='/settings/profile'&&url.searchParams.get('visualReview')==='1'&&url.searchParams.get('visualTab')==='banner')
+ await banner.getByText('배너 수정본',{exact:true}).first().waitFor()
+ const readDeadline=Date.now()+10_000
+ let notice
+ do {
+   const notices=await command(requester,'list_my_visual_workflow_notices')
+   notice=notices.find(row=>row.requestId===requestId&&row.categoryId==='banner'&&row.kind==='requester_review')
+   if (notice?.readAt) break
+   await new Promise(resolve=>setTimeout(resolve,100))
+ } while (Date.now()<readDeadline)
+ assert.ok(notice?.readAt)
+ assert.equal(notice.current,true)
+ await banner.getByRole('button',{name:'이 분류 결과 확인',exact:true}).click()
+ await banner.getByText('전체 결과 확인 1/2',{exact:true}).waitFor()
+ const record=()=>command(requester,'get_department_work',{p_id:requestId}).then(snapshot=>snapshot.requests[0])
+ assert.equal((await record()).status,'inProgress')
+
+ await page.goto(visual('manager','video'),{waitUntil:'domcontentloaded'})
+ await video.getByLabel('분류 작업자',{exact:true}).selectOption(worker)
+ await video.getByRole('button',{name:'작업자 지정',exact:true}).click()
+ await video.getByText('작업 중',{exact:true}).waitFor()
+ await page.goto(visual('design','video'),{waitUntil:'domcontentloaded'})
+ await video.getByLabel('결과물 링크',{exact:true}).fill('https://example.com/approved-video')
+ await video.getByRole('button',{name:'결과물 제출',exact:true}).click()
+ await video.getByText('중간 검수 대기',{exact:true}).waitFor()
+ await page.goto(visual('manager','video'),{waitUntil:'domcontentloaded'})
+ await video.getByRole('button',{name:'중간 검수 통과',exact:true}).click()
+ await video.getByText('총괄 검수 대기',{exact:true}).waitFor()
+ await page.goto(visual('manager','video'),{waitUntil:'domcontentloaded'})
+ await video.getByRole('button',{name:'총괄 검수 통과 · 요청자에게 보내기',exact:true}).click()
+ await video.getByText('요청자 결과 확인 대기',{exact:true}).waitFor()
+ await page.setViewportSize({width:390,height:844})
+ await page.goto(origin+'/settings/profile?actor=planner',{waitUntil:'domcontentloaded'})
+ await browserNotice.getByRole('button',{name:/분류별 배정 브라우저 검증 · 영상/}).click()
+ const approvedLink=video.getByRole('link',{name:'결과물 링크 열기',exact:true}).first()
+ await approvedLink.waitFor()
+ assert.equal(await approvedLink.getAttribute('href'),'https://example.com/approved-video')
+ await video.getByRole('button',{name:'이 분류 결과 확인',exact:true}).click()
+ await video.getByText('전체 결과 확인 2/2',{exact:true}).waitFor()
+ assert.equal((await record()).status,'completed')
+ assert.deepEqual(errors,[])
+ console.log('PASS Visual category browser: create, role actions, worker name, feedback, same-My-home alert, independent completion, mobile')
+`
+
+const homeFixture = `import {VisualWorkNoticeDetail} from '@/features/work-requests/VisualWorkNoticeDetail';import {VisualWorkflowNotificationList} from '@/features/settings/MyHomeNotificationList';import {useSearchParams} from 'react-router-dom';function PersonalWorkFixture(){const [params]=useSearchParams();return params.get('part')==='work'?<WorkRequestHubPage/>:<><VisualWorkflowNotificationList/><VisualWorkNoticeDetail/></>}import '@/index.css'`
+const transformed = (source.slice(0,start) + 'const checks = String.raw' + String.fromCharCode(96) + checks + source.slice(end))
+  .replace("'20261109062457_visual_work_final_approval',", "'20261109062457_visual_work_final_approval','20261109074511_visual_category_workflow',")
+  .replace("const rpcNames=new Set(['get_work_request_settings'", "const rpcNames=new Set(['publish_visual_category_work','change_visual_category_work','list_visual_workflow_entries','list_my_visual_workflow_notices','read_my_visual_workflow_notices','get_work_request_settings'")
+  .replace("'list_visual_work_category_comments']\")", "'list_visual_work_category_comments','list_visual_workflow_entries','list_my_visual_workflow_notices']\")")
+  .replace("import {VisualWorkRequestManagePage} from '@/features/work-requests/VisualWorkRequestManagePage';import '@/index.css'", homeFixture)
+  .replace(".replace('<Routes>','<Routes><Route path=\"/design/work-request-management\" element={<VisualWorkRequestManagePage/>}/>')", ".replace('<WorkRequestHubPage/>}/>', '<PersonalWorkFixture/>}/>')")
+  .replaceAll('5197','5204').replaceAll('work-settings-vite','visual-category-vite')
+  .replaceAll('work-settings-client.ts','visual-category-client.ts')
+  .replaceAll('node_modules/.tmp/work-request-settings-browser.mjs','node_modules/.tmp/visual-category-browser.mjs')
+
+await mkdir('node_modules/.tmp',{recursive:true})
+const runner='node_modules/.tmp/visual-category-runner.mjs'
+await writeFile(runner,transformed)
+try {
+  const child=spawn(process.execPath,[runner],{stdio:'inherit'})
+  process.exitCode=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('exit',code=>resolve(code??1))})
+} finally {
+  await unlink(runner)
+}

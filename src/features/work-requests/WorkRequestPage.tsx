@@ -60,6 +60,7 @@ import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { DEFAULT_VISUAL_CATEGORIES, type VisualCategory, type VisualRequestValues } from './visual-request-config'
 import { WorkRequestCategoryAssignments } from './WorkRequestCategoryAssignments'
 import { VisualWorkRequestDrawer } from './VisualWorkRequestDrawer'
+import { VisualWorkflowNotificationList } from '@/features/settings/MyHomeNotificationList'
 import { VisualFinalApprovalPanel } from './VisualFinalApprovalPanel'
 import { visualFinalPending, visualSummaryApprover, workRequestStatusMeta, type VisualFinalAction } from './visual-final-approval'
 import { downloadVisualWorkFile, visualWorkDetail } from './visual-work-detail'
@@ -2053,22 +2054,23 @@ type FormDraft = {
 
 export function WorkRequestForm({ owner, surface = 'department' }: {
   owner: WorkRequestOwner
-  surface?: 'department' | 'personal'
+  surface?: 'department' | 'personal' | 'notice'
 }) {
   useRenderWatch(`WorkRequestForm:${owner}`)
   const config = WORK_REQUEST_CONFIG[owner]
   const { profile, ready, session } = useAuth()
   const selfId=profile?.id??''
-  const personal = surface === 'personal'
+  const personal = surface !== 'department'
+  const noticeOnly = surface === 'notice'
   const ownDepartment = profile?.departmentId === WORK_REQUEST_DEPARTMENT_IDS[owner]
-  const canCreate = profile?.status === 'active' && session?.user.id === selfId && (personal ? !ownDepartment : ownDepartment)
+  const canCreate = !noticeOnly && profile?.status === 'active' && session?.user.id === selfId && (personal ? !ownDepartment : ownDepartment)
   const location = useLocation()
   const [searchParams] = useSearchParams()
   const detailId = searchParams.get('requestId')?.trim() || undefined
   const auxiliary = !personal && searchParams.get('aux') === '1'
   const internal = !personal && !detailId && searchParams.get('mode') === 'new'
-  const storage=useWorkRequests(owner, auxiliary ? undefined : detailId, !auxiliary && !detailId)
   const visualSettings = useWorkRequestSettings(owner === 'design')
+  const storage=useWorkRequests(owner, auxiliary ? undefined : detailId, !auxiliary && !detailId, visualSettings.data?.categoryWorkflowAvailable)
   const visualCategories = visualSettings.data?.categories ?? DEFAULT_VISUAL_CATEGORIES
   const activeSupervisorIds = visualSettings.data?.activeSupervisorIds ?? emptyList<string>()
   const finalApprovalEnabled = owner === 'design' && Boolean(visualSettings.data?.supervisorIds?.length)
@@ -2170,6 +2172,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
     const isSelfRequest =
       (request.requesterId === selfId)
     const assignedToSelf = request.assignee === selfId || request.collaborators.includes(selfId)
+    if (noticeOnly && (!isSelfRequest || !request.visualCategoryWorkflow)) return null
     if (personal && !isSelfRequest && !assignedToSelf) return null
     const visible = isSelfRequest || (canManage
       ? isIncoming
@@ -2178,8 +2181,8 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
         : isSelfRequest)
     if (!personal && !visible && !request.departmentReadable) return null
     return {
-      needsReviewStart: auxiliary && canManage && request.status === 'requested',
-      editable: isSelfRequest && request.status === 'requested',
+      needsReviewStart: auxiliary && canManage && request.status === 'requested' && !request.visualCategoryWorkflow,
+      editable: isSelfRequest && request.status === 'requested' && !noticeOnly,
     }
   }
 
@@ -3185,6 +3188,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
   }
 
   if (!auxiliary && (view.kind === 'list' || view.kind === 'detail')) return <>
+    {!personal && owner === 'design' && visualSettings.data?.categoryWorkflowAvailable && <VisualWorkflowNotificationList />}
     {!personal && <DepartmentWorkBoard owner={owner} activeSupervisorIds={activeSupervisorIds}
       finalApprovalEnabled={finalApprovalEnabled} directoryMembers={storage.directoryMembers} />}
     {personal && storage.loading && <p role="status" className="p-4 text-sm text-muted-foreground">요청 상세를 불러오는 중...</p>}
@@ -3737,6 +3741,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
 
   function renderDetailPanel() {
     if (!selectedRequest) return null
+    const categoryWorkflow = selectedRequest.visualCategoryWorkflow
     const status = workRequestStatusMeta(selectedRequest)
     const dueDate =
       selectedRequest.confirmedDueDate || selectedRequest.values.dueDate
@@ -3750,11 +3755,11 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
     const isCollaborator =
       selectedRequest.collaborators.includes(selfId)
     const awaitingFinalApproval = visualFinalPending(selectedRequest)
-    const showFinalApproval = selectedRequest.owner === 'design' && (Boolean(selectedRequest.visualFinalApproval) ||
+    const showFinalApproval = selectedRequest.owner === 'design' && (Boolean(categoryWorkflow || selectedRequest.visualFinalApproval) ||
       (finalApprovalEnabled && !isClosedStatus(selectedRequest.status)))
     const supervisorId = visualSummaryApprover(selectedRequest, activeSupervisorIds)
     const memberName = (id: string) => storage.directoryMembers.find(person => person.id === id)?.displayName?.trim() || '기존 직원'
-    const canEdit = isSelfRequest && selectedRequest.status === 'requested'
+    const canEdit = isSelfRequest && selectedRequest.status === 'requested' && !noticeOnly
     const chatRooms = visibleChatRooms(selectedRequest, {
       canManage: canManageSelected,
       isRequester: isSelfRequest,
@@ -3797,13 +3802,13 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
             (selectedRequest.status === 'requested' ||
               selectedRequest.status === 'reviewing') ? (
               <>
-                <Button
+                {!categoryWorkflow && <Button
                   type="button"
                   size="sm"
                   onClick={() => setAcceptRequestId(selectedRequest.id)}
                 >
                   수락
-                </Button>
+                </Button>}
                 <Button
                   type="button"
                   variant="outline"
@@ -3814,7 +3819,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
                 </Button>
               </>
             ) : null}
-            {canManageSelected &&
+            {!categoryWorkflow && canManageSelected &&
             selectedRequest.status === 'completionReview' ? (
               <>
                 <Button
@@ -3836,7 +3841,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
                 </Button>
               </>
             ) : null}
-            {isSelfRequest && selectedRequest.status === 'completionConfirm' && !awaitingFinalApproval ? (
+            {!categoryWorkflow && isSelfRequest && selectedRequest.status === 'completionConfirm' && !awaitingFinalApproval ? (
               <>
                 <Button
                   type="button"
@@ -3890,7 +3895,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
             <span>{flashMessage}</span>
           </div>
       )}
-      {showFinalApproval && <VisualFinalApprovalPanel key={`${selfId}:${selectedRequest.id}`} request={selectedRequest}
+      {showFinalApproval && !categoryWorkflow && <VisualFinalApprovalPanel key={`${selfId}:${selectedRequest.id}`} request={selectedRequest}
         activeSupervisorIds={activeSupervisorIds} viewerId={selfId} canManage={canManageSelected}
         busy={storage.saving || finalApproval.isPending || finalApprovalCheckPending}
         error={finalApproval.variables?.request.id === selectedRequest.id ? finalApproval.error?.message : undefined}
@@ -4248,7 +4253,8 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
           headerActions={headerActions}
           notice={notice}
           mainReferences={referenceCards}
-          management={management}
+          management={categoryWorkflow ? undefined : management}
+          workflow={categoryWorkflow ? { data: categoryWorkflow, request: selectedRequest, supervisors: activeSupervisorIds, members: teamMembers } : undefined}
           legacyConversation={workConversation}
           memberName={memberName}
           renderBody={blocks => <RequestBodyPreview blocks={blocks} visualDetail />}

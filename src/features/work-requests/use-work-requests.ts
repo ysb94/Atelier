@@ -10,7 +10,7 @@ import { WORK_REQUEST_DEPARTMENT_IDS, type WorkRequestOwner } from './work-reque
 import type { LocalTeamMember, WorkRequestRecord } from './work-request-types'
 import type { WorkTimeLog } from './work-request-schedule'
 
-export function useWorkRequests(owner: WorkRequestOwner, requestId?: string, skipList = false) {
+export function useWorkRequests(owner: WorkRequestOwner, requestId?: string, skipList = false, categoryWorkflowAvailable = false) {
   const { profile, session }=useAuth()
   const actorId=profile?.id??''
   const active=Boolean(actorId && profile?.status==='active' && session?.user.id===actorId)
@@ -59,10 +59,10 @@ export function useWorkRequests(owner: WorkRequestOwner, requestId?: string, ski
     const next=typeof update==='function'?update(before):update
     requestsRef.current=next;setLocal(next)
     enqueue(async()=>{
-      for(const request of next){const old=before.find(item=>item.id===request.id);if(!old||comparison(old)!==comparison(request)){const revision=await saveWorkRequestChange(old,request,revisions.current.get(request.id));revisions.current.set(request.id,revision)}}
+      for(const request of next){const old=before.find(item=>item.id===request.id);if(!old||comparison(old)!==comparison(request)){const revision=await saveWorkRequestChange(old,request,revisions.current.get(request.id),categoryWorkflowAvailable);revisions.current.set(request.id,revision)}}
       for(const request of before)if(!next.some(item=>item.id===request.id))await deleteWorkRequest(request,revisions.current.get(request.id))
     })
-  },[active,enqueue])
+  },[active,categoryWorkflowAvailable,enqueue])
   const setCurrentWorkByMember=useCallback((update:SetStateAction<Record<string,string>>)=>{
     setLocalCurrent(current=>{const next=typeof update==='function'?update(current):update;return next})
     // Persist only the signed-in worker's active task; no client-supplied colleague timer is accepted.

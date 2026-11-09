@@ -8,7 +8,7 @@ import { diagnosticQuery } from './diagnostic-query'
 
 export type WorkRequestSettings = {
   revision: number; categories: VisualCategory[]; canManage: boolean; available: boolean
-  supervisorIds?: string[]; activeSupervisorIds?: string[]
+  supervisorIds?: string[]; activeSupervisorIds?: string[]; categoryWorkflowAvailable?: boolean
 }
 export async function loadWorkRequestSettings(): Promise<WorkRequestSettings> {
   const { data, error } = await getSupabase().rpc('get_work_request_settings', { p_owner: 'design' })

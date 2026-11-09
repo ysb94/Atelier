@@ -105,6 +105,7 @@ export type WorkRequestChatRoom = {
 }
 
 export type WorkRequestRecord = {
+  visualCategoryWorkflow?: import('./visual-category-workflow').VisualCategoryWorkflow
   visualFinalApproval?: VisualFinalApproval | null
   cancellation?: { state: 'requested' | 'cancelled' | 'approved' | 'rejected'; requestedBy: string; requestedName: string; requestedAt: string; resolvedBy?: string; resolvedName?: string; resolvedAt?: string }
   kind?: 'request' | 'internal'

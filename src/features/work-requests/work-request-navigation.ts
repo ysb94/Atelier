@@ -14,7 +14,8 @@ import type { WorkRequestOwner } from './work-request-form-config'
 export const WORK_REQUEST_ID_PARAM = 'requestId'
 export const WORK_REQUEST_MODE_PARAM = 'mode'
 export const PERSONAL_WORK_OWNER_PARAM = 'workOwner'
-export const WORK_REQUEST_VIEW_PARAMS = [PERSONAL_WORK_OWNER_PARAM, WORK_REQUEST_ID_PARAM, WORK_REQUEST_MODE_PARAM, 'visualTab'] as const
+export const VISUAL_REVIEW_PARAM = 'visualReview'
+export const WORK_REQUEST_VIEW_PARAMS = [PERSONAL_WORK_OWNER_PARAM, WORK_REQUEST_ID_PARAM, WORK_REQUEST_MODE_PARAM, 'visualTab', VISUAL_REVIEW_PARAM] as const
 
 export type WorkRequestView =
   | { kind: 'list' }
@@ -142,7 +143,10 @@ export function buildWorkRequestSearch(
   else params.delete(WORK_REQUEST_ID_PARAM)
   if (mode) params.set(WORK_REQUEST_MODE_PARAM, mode)
   else params.delete(WORK_REQUEST_MODE_PARAM)
-  if (view.kind === 'list') params.delete(PERSONAL_WORK_OWNER_PARAM)
+  if (view.kind === 'list') {
+    params.delete(PERSONAL_WORK_OWNER_PARAM)
+    params.delete(VISUAL_REVIEW_PARAM)
+  }
   return toSearch(params)
 }
 

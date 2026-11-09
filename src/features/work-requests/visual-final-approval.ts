@@ -22,7 +22,10 @@ export function visualFinalApprover(approval: VisualFinalApproval | null | undef
   return activeSupervisorIds.length === 1 ? activeSupervisorIds[0] : undefined
 }
 
-export function visualSummaryApprover(work: Pick<WorkRequestRecord, 'status' | 'visualFinalApproval'>, activeSupervisorIds: readonly string[]) {
+export function visualSummaryApprover(work: Pick<WorkRequestRecord, 'status' | 'visualFinalApproval' | 'visualCategoryWorkflow'>
+  & { visualCategoryReview?: Pick<VisualFinalApproval, 'approverId'> | null }, activeSupervisorIds: readonly string[]) {
+  const categoryWorkflow = work.visualCategoryWorkflow ?? work.visualCategoryReview
+  if (categoryWorkflow) return isClosedStatus(work.status) ? categoryWorkflow.approverId ?? undefined : visualFinalApprover(categoryWorkflow, activeSupervisorIds)
   return isClosedStatus(work.status)
     ? work.visualFinalApproval?.approvedBy ?? work.visualFinalApproval?.approverId ?? undefined
     : visualFinalApprover(work.visualFinalApproval, activeSupervisorIds)

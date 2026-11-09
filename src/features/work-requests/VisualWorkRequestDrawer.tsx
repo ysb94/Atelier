@@ -6,7 +6,10 @@ import { Card, CardContent, CardTitle } from '@/components/ui/card'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn } from '@/lib/utils'
 import { VisualCategoryComments } from './VisualCategoryComments'
-import type { ContentBlock } from './work-request-types'
+import { VisualCategoryWorkflowPanel } from './VisualCategoryWorkflowPanel'
+import type { VisualCategoryWorkflow } from './visual-category-workflow'
+import { visualFinalApprover } from './visual-final-approval'
+import type { ContentBlock, LocalTeamMember, WorkRequestRecord } from './work-request-types'
 import { visualWorkDate, type VisualWorkDetail } from './visual-work-detail'
 
 function SummaryCell({ label, children, title }: { label: string; children: ReactNode; title?: string }) {
@@ -36,7 +39,7 @@ function ContentSection({ title, children }: { title: string; children: ReactNod
 
 export function VisualWorkRequestDrawer({
   requestId, title, detail, initialCategory, viewerId, canManage, isRequester,
-  summary, onClose, headerActions, notice, mainReferences, management, legacyConversation, memberName, renderBody, renderAssignment,
+  summary, onClose, headerActions, notice, mainReferences, management, legacyConversation, memberName, renderBody, renderAssignment, workflow,
 }: {
   requestId: string
   title: string
@@ -55,6 +58,7 @@ export function VisualWorkRequestDrawer({
   memberName: (id: string) => string
   renderBody: (blocks: ContentBlock[]) => ReactNode
   renderAssignment: (categoryId: string) => ReactNode
+  workflow?: { data: VisualCategoryWorkflow; request: WorkRequestRecord; supervisors: readonly string[]; members: readonly LocalTeamMember[] }
 }) {
   useRenderWatch('VisualWorkRequestDrawer')
   const location = useLocation()
@@ -101,6 +105,8 @@ export function VisualWorkRequestDrawer({
   }
 
   const assigned = current?.assignment
+  const step = current && workflow?.data.categories[current.id]
+  const workflowSupervisor = workflow && visualFinalApprover(workflow.data, workflow.supervisors)
   const assignmentDate = assigned?.assignedAt && visualWorkDate(assigned.assignedAt)
   const panelId = instance + '-panel'
   const managementId = instance + '-management'
@@ -148,7 +154,7 @@ export function VisualWorkRequestDrawer({
                 <div className="absolute right-0 z-10 grid min-w-32 gap-1 rounded-lg border border-border bg-card p-1.5 shadow-sm [&_button]:w-full [&_button]:justify-start">
                   {headerActions}
                   <Button type="button" variant="ghost" size="sm" onClick={() => void copyLink()}>링크 복사</Button>
-                  {management && <Button type="button" variant="ghost" size="sm" aria-expanded={manageOpen} aria-controls={manageOpen ? managementId : undefined}
+                  {(management || (workflow && canManage && current?.assignment)) && <Button type="button" variant="ghost" size="sm" aria-expanded={manageOpen} aria-controls={manageOpen ? managementId : undefined}
                     onClick={() => { setManageOpen(open => !open); menu.current?.removeAttribute('open') }}>
                     {manageOpen ? '업무 관리 닫기' : '업무 관리'}
                   </Button>}
@@ -158,7 +164,7 @@ export function VisualWorkRequestDrawer({
             <dl aria-label="업무 기본 정보" className={cn('grid gap-px border-y border-border bg-border', summary.finalApprover === undefined ? 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6' : 'grid-cols-3 lg:grid-cols-7')}>
               {summary.finalApprover !== undefined && <SummaryCell label="총괄 관리자" title="이 업무의 최종 승인자">{summary.finalApprover}</SummaryCell>}
               <SummaryCell label="중간 관리자">{assigned?.assigneeId ? memberName(assigned.assigneeId) : '미지정'}</SummaryCell>
-              <SummaryCell label="작업자"><span className="text-muted-foreground">—</span></SummaryCell>
+              <SummaryCell label="작업자">{step?.workerId ? memberName(step.workerId) : <span className="text-muted-foreground">—</span>}</SummaryCell>
               <SummaryCell label="상태" title="업무 전체 상태">{summary.status}</SummaryCell>
               <SummaryCell label="요청 날짜"><SummaryDate value={summary.requestedAt} /></SummaryCell>
               <SummaryCell label="마감 날짜"><SummaryDate value={summary.dueDate} /></SummaryCell>
@@ -167,6 +173,12 @@ export function VisualWorkRequestDrawer({
             {linkStatus && <p role="status" className="mt-2 text-sm text-muted-foreground">{linkStatus}</p>}
             <div className="mt-6 space-y-5 sm:mt-8 sm:space-y-6 lg:mt-10">
               {notice}
+              {workflow && current && step && <VisualCategoryWorkflowPanel
+                key={current.id + ':' + step.version}
+                request={workflow.request} workflow={workflow.data} category={current} step={step}
+                viewerId={viewerId} canManage={canManage} supervisors={workflow.supervisors}
+                members={workflow.members} memberName={memberName}
+              />}
               {manageOpen && <section id={managementId} aria-label="업무 관리" className="space-y-4">
                 {current && <p className="text-sm text-muted-foreground">
                   {current.label} · {assigned?.assigneeId ? '배정됨' : '미배정'}
@@ -197,7 +209,10 @@ export function VisualWorkRequestDrawer({
             key={viewerId + ':' + requestId}
             requestId={requestId}
             category={current}
-            canDiscuss={isRequester || canManage || Boolean(viewerId && assigned?.assigneeId === viewerId)}
+            canDiscuss={isRequester || canManage || Boolean(viewerId && (
+              assigned?.assigneeId === viewerId || step?.workerId === viewerId
+              || (step && workflowSupervisor === viewerId)
+            ))}
             legacyConversation={legacyConversation}
           />}
         </div>
