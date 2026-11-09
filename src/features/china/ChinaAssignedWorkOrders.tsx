@@ -19,7 +19,6 @@ import { workerMaterialGroups } from './china-material-workload'
 const workTabs = [
   { value: 'orders', label: '작업 지시서' },
   { value: 'materials', label: '자재요청' },
-  { value: 'prices', label: '단가요청' },
   { value: 'purchase', label: '발주서' },
   { value: 'outbound', label: '출고작업' },
 ] as const

@@ -224,6 +224,7 @@ try {
     if (screen==='worker' || screen==='other' || screen==='managerBoard') await materialsTab.click()
   }
   const materialsTab = page.getByRole('group',{name:'중국팀 업무'}).getByRole('button',{name:/자재요청/})
+  const pricesTab = page.getByRole('group',{name:'중국팀 업무'}).getByRole('button',{name:'단가요청',exact:true})
   const expectWorkload = async (openCount, resting) => {
     await materialsTab.getByTitle('발송 전 자재요청 / 발송 후 완료 대기 자재요청')
       .filter({hasText: new RegExp('\\(\\s*'+openCount+'\\s*/\\s*'+resting+'\\s*\\)')}).waitFor()
@@ -328,6 +329,7 @@ try {
   await expectWorkload(0,0)
   await open('worker')
   await expectWorkload(1,0)
+  assert.equal(await pricesTab.count(),0)
   assert.equal(await materialsTab.getByTitle('미확인 건수').textContent(),'1')
   assert.equal(await page.getByRole('group',{name:'내 자재요청 작업 상태'}).count(),0)
   await page.getByRole('button',{name:'라벨 샘플 열기'}).click()
@@ -344,6 +346,9 @@ try {
   await page.getByRole('button',{name:'발송 처리',exact:true}).click()
   await expectWorkload(0,1)
   await open('managerBoard')
+  await pricesTab.click()
+  await page.getByRole('heading',{name:'단가요청',exact:true}).waitFor()
+  await materialsTab.click()
   const assigneeTabs=page.getByRole('group',{name:'자재요청 담당자',exact:true})
   const workerTab=assigneeTabs.getByRole('button',{name:/김영인/})
   await workerTab.getByTitle('진행 중 / 완료 대기').filter({hasText:/0\s*\/\s*1/}).waitFor()
