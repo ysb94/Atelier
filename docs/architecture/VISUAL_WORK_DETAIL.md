@@ -26,7 +26,11 @@
 
 업무 화면과 종합 알림은 같은 수신 기록을 사용한다. 요청자 알림은 My home의 본인 요청 상세를 열며, 해당 분류와 표시된 버전을 확인한 뒤 읽음을 저장한다. 요청자 확인 대기 표시는 확인 또는 수정 요청을 처리할 때 끝난다.
 
-`20261109074511_visual_category_workflow.sql`은 공유 DB 적용 승인 대기다. 새 등록 경로는 서버 지원을 확인한 뒤 사용한다. 이미 접수된 업무, 자체 업무와 분류 없는 요청에는 기존 승인 흐름을 사용한다. 로컬 검증은 `verify:visual-category-workflow`와 `verify:visual-category-workflow-browser`를 실행한다.
+2026-11-09 사용자 승인 후 `20261109074511_visual_category_workflow.sql`을 공유 Atelier DB에 적용했다. 운영 적용 이력은 `20261109083117_visual_category_workflow`다. 적용 전 함수 정의 4개는 `docs/backups/visual-category-workflow-before-20261109.sql`에 보관했다.
+
+운영 DB에서 인증 역할의 설정·부서 업무·본인 알림 조회, 허용 범위 밖의 이력 조회·단계 변경 차단, 익명 접근 차단과 실시간 연결을 확인했다. 기존 업무·직원·설정 데이터와 기존 정책·함수 권한의 적용 전후가 일치했다. 보안 진단 결과도 일치했다.
+
+새 등록 경로는 서버 지원을 확인한 뒤 사용한다. 이미 접수된 업무, 자체 업무와 분류 없는 요청에는 기존 승인 흐름을 사용한다. 로컬 검증은 `verify:visual-category-workflow`와 `verify:visual-category-workflow-browser`를 실행한다. 사이트 화면 배포는 별도 단계다.
 
 ## Visual 총괄 관리자
 
