@@ -21,6 +21,9 @@ import { emptyList } from '@/lib/utils'
 import { clearWorkFilters, DEPARTMENT_WORK_STAGES, filterDepartmentWork, inDepartmentWorkScope, inDepartmentWorkStage, type DepartmentWork, type DepartmentWorkScope, type DepartmentWorkStage, type WorkFilters } from './department-work'
 import { ownerFromDepartment, WORK_REQUEST_CONFIG, WORK_REQUEST_DEPARTMENT_IDS, type WorkRequestOwner } from './work-request-form-config'
 import { STATUS_META } from './work-request-types'
+import { visualFinalApprover, visualFinalPending, workRequestStatusMeta } from './visual-final-approval'
+
+type BoardScope = DepartmentWorkScope | 'final'
 
 function ColumnFilter({ label, options, selected, onApply }: { label: string; options: [string, string][]; selected: string[]; onApply: (value: string[]) => void }) {
   const [open, setOpen] = useState(false)
@@ -39,7 +42,7 @@ function ColumnFilter({ label, options, selected, onApply }: { label: string; op
     {open ? createPortal(<div ref={popup} style={position} role="dialog" aria-label={`${label} 필터 선택`} className="fixed z-[60] w-56 rounded-xl border border-border bg-card p-3 text-left text-foreground shadow-sm"><div className="mb-3 flex justify-between"><span>필터 선택</span><button type="button" className="text-xs text-muted-foreground" onClick={() => setDraft([])}>초기화</button></div><div className="max-h-56 overflow-auto">{options.map(([id, name]) => <label key={id} className="flex gap-2 py-1 text-sm"><input type="checkbox" checked={draft.includes(id)} onChange={() => setDraft(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])} />{name}</label>)}</div><Button type="button" size="sm" className="mt-3 w-full" onClick={() => { onApply(draft); setOpen(false) }}>선택한 {draft.length}개 필터 적용</Button></div>, document.body) : null}</div>
 }
 
-export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
+export function DepartmentWorkBoard({ owner, activeSupervisorIds = emptyList<string>() }: { owner: WorkRequestOwner; activeSupervisorIds?: readonly string[] }) {
   useRenderWatch('DepartmentWorkBoard')
   const { profile, session } = useAuth()
   const activeSession = profile?.status === 'active' && session?.user.id === profile.id
@@ -70,18 +73,24 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
     catch(error) { console.warn('[department-work] 팀 공지 저장 실패',error); setNoticeError(error instanceof Error ? error.message : '공지를 저장하지 못했습니다.') }
     finally { setNoticeSaving(false) }
   }
-  const [scope, setScope] = useState<DepartmentWorkScope>('team')
+  const [selectedScope, setScope] = useState<BoardScope>('team')
   const [stage, setStage] = useState<DepartmentWorkStage>('all')
   useEffect(() => { setScope('team'); setStage('all'); setFilters(clearWorkFilters()); setSearch('') }, [actor, owner])
   const [sort, setSort] = useState<{ field: 'createdAt' | 'dueDate'; direction: number }>({ field: 'dueDate', direction: 1 })
   const rows = (activeSession ? query.data : undefined) ?? emptyList<DepartmentWork>()
+  const supervisor = owner === 'design' && activeSupervisorIds.includes(actor)
+  const scope = selectedScope === 'final' && !supervisor ? 'team' : selectedScope
+  const finalQueue = supervisor ? rows.filter(row => {
+    const approver = visualFinalApprover(row.visualFinalApproval, activeSupervisorIds)
+    return visualFinalPending(row) && (!approver || approver === actor)
+  }) : emptyList<DepartmentWork>()
   const options = useMemo(() => {
     const requester = new Map<string, string>(), assignee = new Map<string, string>([['unassigned', '미정']]), brand = new Map<string, string>([['undecided', '브랜드 미정']])
     for (const row of rows) { requester.set(row.requesterId, `${row.requesterName} · ${row.requesterDepartment || '부서 미정'}`); row.assigneeIds.forEach((id, index) => assignee.set(id, row.assigneeNames[index] || '직원')); if (row.brandId) brand.set(row.brandId, row.brandName) }
     return { requester: [...requester], assignee: [...assignee], brand: [...brand], status: Object.entries(STATUS_META).map(([id, meta]): [string, string] => [id, meta.label]) }
   }, [rows])
   const active = rows.filter(row => inDepartmentWorkStage(row.status, 'all'))
-  const scoped = rows.filter(row => inDepartmentWorkScope(row, scope, actor))
+  const scoped = scope === 'final' ? finalQueue : rows.filter(row => inDepartmentWorkScope(row, scope, actor))
   const visible = filterDepartmentWork(scoped, filters, search).filter(row => stage === 'all' || inDepartmentWorkStage(row.status, stage)).sort((a, b) => {
     const left = a[sort.field], right = b[sort.field]
     return (!left ? 1 : !right ? -1 : left.localeCompare(right) * sort.direction) || a.id.localeCompare(b.id)
@@ -113,14 +122,20 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
       </div>
     </section>
     <section aria-label="업무 현황" className="border-b border-border/60 pb-5 pt-8 sm:pt-16">
-      <div className="mb-6"><FilterTabs ariaLabel="업무 범위" value={scope} onChange={setScope} tabs={([{value:'mine',label:'내 업무'},{value:'team',label:'팀 업무'}] as const).map(tab => ({...tab,count:active.filter(row => inDepartmentWorkScope(row,tab.value,actor)).length}))} /></div>
+      <div className="mb-6"><FilterTabs<BoardScope> ariaLabel="업무 범위" value={scope} onChange={value => {
+        setScope(value)
+        if (value === 'final') { setStage('all'); setFilters(current => ({ ...current, status: [] })) }
+      }} tabs={[
+        ...([{value:'mine',label:'내 업무'},{value:'team',label:'팀 업무'}] as const).map(tab => ({...tab,count:active.filter(row => inDepartmentWorkScope(row,tab.value,actor)).length})),
+        ...(supervisor ? [{value:'final' as const,label:'최종 승인 대기',count:finalQueue.length}] : []),
+      ]} /></div>
       <div role="group" aria-label="업무 상태" className="grid grid-cols-2 gap-1 sm:grid-cols-5">{DEPARTMENT_WORK_STAGES.map(({value, label}) => <button type="button" key={value} aria-pressed={stage === value} onClick={() => { setStage(value); setFilters(current => ({...current,status:[]})) }}><StatTile layout="value-first" label={label} value={scoped.filter(row => inDepartmentWorkStage(row.status, value)).length} className={`min-h-[88px] items-center rounded-lg shadow-none ${stage === value ? 'border-border/60 bg-card' : 'border-transparent bg-transparent'}`} /></button>)}</div>
       {dueSoon ? <p className="mt-5 flex items-center gap-1 text-xs"><TriangleAlert aria-hidden="true" className="size-3 text-danger" />마감 임박·초과 {dueSoon}건</p> : null}
     </section>
     <section aria-labelledby="department-work-list-title" className="space-y-6 pt-8 sm:pt-10">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h2 id="department-work-list-title" className="text-lg font-medium">{scope === 'mine' ? '내 업무 목록' : '팀 업무 목록'}</h2>
+          <h2 id="department-work-list-title" className="text-lg font-medium">{scope === 'final' ? '총괄 승인 목록' : scope === 'mine' ? '내 업무 목록' : '팀 업무 목록'}</h2>
           <Link to="?mode=new&internal=1"><Button size="sm" variant="ghost" className="h-6 gap-1 bg-muted px-2 text-xs text-muted-foreground"><Plus className="size-3" />업무 등록</Button></Link>
         </div>
         <div className="flex max-w-full items-center gap-2">
@@ -147,7 +162,7 @@ export function DepartmentWorkBoard({ owner }: { owner: WorkRequestOwner }) {
                 <td className="py-6 pr-4"><Link className="break-words hover:underline" to={`?requestId=${row.id}`}>{row.title}</Link>{row.kind === 'internal' ? <Badge className="ml-2" variant="muted">자체 업무</Badge> : null}</td>
                 <td className="break-words px-3 py-6">{row.requesterName}</td>
                 <td className={`break-words px-3 py-6 ${!row.assigneeNames.length ? 'text-danger' : ''}`}>{row.assigneeNames.join(', ') || '미정'}</td>
-                <td className="px-3 py-6"><div className="flex flex-wrap gap-1"><StatusPill tone={STATUS_META[row.status]?.variant}>{STATUS_META[row.status]?.label ?? row.status}</StatusPill>{row.cancellation?.state==='requested'&&!['completed','cancelled','rejected'].includes(row.status)?<Badge variant="warning">취소 요청 중</Badge>:null}</div></td>
+                <td className="px-3 py-6"><div className="flex flex-wrap gap-1"><StatusPill tone={workRequestStatusMeta(row)?.variant}>{workRequestStatusMeta(row)?.label ?? row.status}</StatusPill>{row.cancellation?.state==='requested'&&!['completed','cancelled','rejected'].includes(row.status)?<Badge variant="warning">취소 요청 중</Badge>:null}</div></td>
                 <td className="px-3 py-6">{row.createdAt.slice(0, 10)}</td>
                 <td className={`px-3 py-6 ${row.dueDate && row.dueDate < new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) && !['completed', 'cancelled', 'rejected'].includes(row.status) ? 'text-danger' : ''}`}>{row.dueDate || '미정'}</td>
                 <td className="break-words py-6 pl-3">{row.brandName || '브랜드 미정'}</td>

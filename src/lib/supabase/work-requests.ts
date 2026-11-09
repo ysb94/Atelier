@@ -1,6 +1,9 @@
 import { getSupabase } from './client'
 import type { WorkRequestRecord, WorkRequestMessage } from '@/features/work-requests/work-request-types'
 import type { WorkRequestOwner } from '@/features/work-requests/work-request-form-config'
+import type { VisualFinalAction } from '@/features/work-requests/visual-final-approval'
+import type { DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
+import { diagnosticQuery } from './diagnostic-query'
 
 const BUCKET = 'company-work-requests'
 type SavedFile = { id: string; requestId: string; name: string; path: string; type: string; size: number; deleted?: boolean }
@@ -86,6 +89,11 @@ export async function saveWorkRequestChange(before: WorkRequestRecord | undefine
 export async function sendWorkRequestMessage(requestId: string,message: WorkRequestMessage) { return rpc('send_work_request_message',{p_id:requestId,p_room:message.roomId,p_body:message.body,p_command:message.id}) }
 export async function cancelWorkRequest(request: WorkRequestRecord, action: 'request' | 'approve' | 'reject', commandId: string) {
   return rpc<number>('cancel_work_request',{p_id:request.id,p_revision:request.revision,p_command:commandId,p_action:action})
+}
+export function changeVisualWorkFinalApproval(request: WorkRequestRecord, action: VisualFinalAction, value: string | null, context: DiagnosticContext) {
+  return diagnosticQuery<number>('app', `visual_work_final_${action}`, getSupabase().rpc('change_visual_work_final_approval', {
+    p_request: request.id, p_revision: request.revision, p_action: action, p_value: value, p_command: crypto.randomUUID(),
+  }), context)
 }
 export async function deleteWorkRequest(request: WorkRequestRecord, revision?: number) {
   const paths=await rpc<string[]>('delete_work_request',{p_id:request.id,p_revision:revision??request.revision})

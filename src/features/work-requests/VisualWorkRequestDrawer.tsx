@@ -45,7 +45,7 @@ export function VisualWorkRequestDrawer({
   viewerId: string
   canManage: boolean
   isRequester: boolean
-  summary: { requesterDepartment: string; requesterName: string; status: string; requestedAt: string; dueDate: string; brand: string }
+  summary: { requesterDepartment: string; requesterName: string; status: string; requestedAt: string; dueDate: string; brand: string; finalApprover?: string }
   onClose: () => void
   headerActions: ReactNode
   notice?: ReactNode
@@ -155,9 +155,10 @@ export function VisualWorkRequestDrawer({
                 </div>
               </details>
             </div>
-            <dl aria-label="업무 기본 정보" className="grid grid-cols-2 gap-px border-y border-border bg-border sm:grid-cols-3 lg:grid-cols-6">
+            <dl aria-label="업무 기본 정보" className={cn('grid grid-cols-2 gap-px border-y border-border bg-border sm:grid-cols-3', summary.finalApprover === undefined ? 'lg:grid-cols-6' : 'lg:grid-cols-7')}>
+              {summary.finalApprover !== undefined && <SummaryCell label="총괄 관리자" title="이 업무의 최종 승인자">{summary.finalApprover}</SummaryCell>}
               <SummaryCell label="관리자" title="이 분류의 배정 관리자">{assigned?.assignedBy ? memberName(assigned.assignedBy) : '미지정'}</SummaryCell>
-              <SummaryCell label="담당자">{assigned?.assigneeId ? memberName(assigned.assigneeId) : '미지정'}</SummaryCell>
+              <SummaryCell label="중간 관리자">{assigned?.assigneeId ? memberName(assigned.assigneeId) : '미지정'}</SummaryCell>
               <SummaryCell label="상태" title="업무 전체 상태">{summary.status}</SummaryCell>
               <SummaryCell label="요청 날짜"><SummaryDate value={summary.requestedAt} /></SummaryCell>
               <SummaryCell label="마감 날짜"><SummaryDate value={summary.dueDate} /></SummaryCell>

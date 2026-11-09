@@ -6,6 +6,9 @@ export const departments={planning:'ced99f89-ea80-4eeb-8f03-272bf72f5db1',design
 
 export async function createWorkTestDb(){const db=await PGlite.create();try {
  await db.exec(await readFile('supabase/tests/department_work_fixture.sql','utf8'))
+ await db.exec(`create function app.permission_company_id() returns uuid language sql stable security definer set search_path='' as $$
+   select company_id from public.profiles where id=auth.uid() and status='active'
+ $$;`)
  await db.exec(await readFile('supabase/migrations/20261027044909_department_work_access.sql','utf8'))
  await db.exec(await readFile('supabase/migrations/20261027044916_work_requests_storage.sql','utf8'))
  await db.query('insert into public.companies(id) values($1)',[company])

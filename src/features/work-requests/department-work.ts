@@ -1,4 +1,5 @@
 import type { RequestStatus } from './work-request-types'
+import type { VisualFinalApproval } from './visual-final-approval'
 
 export type DepartmentWork = {
   id: string; kind: 'request' | 'internal'; title: string; requesterId: string
@@ -6,6 +7,7 @@ export type DepartmentWork = {
   assigneeNames: string[]; status: RequestStatus; createdAt: string; dueDate: string
   brandId: string; brandName: string
   cancellation?: { state: string } | null
+  visualFinalApproval?: VisualFinalApproval | null
 }
 export type WorkFilters = { requester: string[]; assignee: string[]; status: string[]; brand: string[] }
 export const clearWorkFilters = (): WorkFilters => ({ requester: [], assignee: [], status: [], brand: [] })

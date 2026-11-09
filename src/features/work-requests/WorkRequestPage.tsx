@@ -14,7 +14,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import {
   Link,
   Navigate,
@@ -55,9 +55,13 @@ import {
 } from '@/components/ui/card'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { useWorkRequestSettings } from '@/lib/supabase/work-request-settings'
+import { changeVisualWorkFinalApproval } from '@/lib/supabase/work-requests'
+import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { DEFAULT_VISUAL_CATEGORIES, type VisualCategory, type VisualRequestValues } from './visual-request-config'
 import { WorkRequestCategoryAssignments } from './WorkRequestCategoryAssignments'
 import { VisualWorkRequestDrawer } from './VisualWorkRequestDrawer'
+import { VisualFinalApprovalPanel } from './VisualFinalApprovalPanel'
+import { visualFinalApprover, visualFinalPending, workRequestStatusMeta, type VisualFinalAction } from './visual-final-approval'
 import { downloadVisualWorkFile, visualWorkDetail } from './visual-work-detail'
 import { useAuth } from '@/lib/supabase/auth'
 import { listBrandDirectory } from '@/lib/supabase/profiles'
@@ -103,7 +107,6 @@ import {
   LOCAL_CURRENT_DEPARTMENT,
   PRIORITY_META,
   REQUESTER_CHAT_ROOM,
-  STATUS_META,
   hasRequestBody,
   isClosedStatus,
   isCompletionPending,
@@ -1981,6 +1984,9 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const storage=useWorkRequests(owner, auxiliary ? undefined : detailId, !auxiliary && !detailId)
   const visualSettings = useWorkRequestSettings(owner === 'design')
   const visualCategories = visualSettings.data?.categories ?? DEFAULT_VISUAL_CATEGORIES
+  const activeSupervisorIds = visualSettings.data?.activeSupervisorIds ?? emptyList<string>()
+  const finalApprovalEnabled = owner === 'design' && Boolean(visualSettings.data?.supervisorIds?.length)
+  const finalApprovalCheckPending = owner === 'design' && (visualSettings.isPending || visualSettings.isError)
   const {requests,setRequests,currentWorkByMember,setCurrentWorkByMember,workTimeByKey,setWorkTimeByKey,teamMembers}=storage
   const [searchParams] = useSearchParams()
   const location = useLocation()
@@ -2017,6 +2023,29 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   const [errors, setErrors] = useState<FormErrors>({})
   const [hasEdited, setHasEdited] = useState(false)
   const [flashMessage, setFlashMessage] = useState<string | null>(null)
+  const finalApproval = useMutation({
+    mutationFn: async ({ request, action, value }: { request: WorkRequestRecord; action: VisualFinalAction; value?: string }) => {
+      const trace = startWorkflow('app', `visual_work_final_${action}`)
+      trace.step('validate_input')
+      if (!request.revision || request.owner !== 'design') {
+        trace.block('invalid_request')
+        throw new Error('업무를 다시 불러온 뒤 처리해 주세요.')
+      }
+      try {
+        await trace.run('save', context => changeVisualWorkFinalApproval(request, action, value ?? null, context))
+      } catch (error) {
+        trace.fail(error)
+        void storage.retry()
+        throw error
+      }
+      try {
+        await trace.run('refresh_queries', storage.retry, { writeOutcome: 'committed' })
+        trace.done({ writeOutcome: 'committed' })
+      } catch (error) {
+        trace.fail(error, { writeOutcome: 'committed' })
+      }
+    },
+  })
   const [acceptRequestId, setAcceptRequestId] = useState<string | null>(null)
   const [reviewConfirmId, setReviewConfirmId] = useState<string | null>(null)
   const [workClock, setWorkClock] = useState(() => Date.now())
@@ -2501,16 +2530,38 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     setFlashMessage('요청을 반려했습니다.')
   }
 
+  async function runFinalApproval(request: WorkRequestRecord, action: VisualFinalAction, value?: string) {
+    if (storage.saving || finalApproval.isPending || finalApprovalCheckPending) return false
+    setFlashMessage(null)
+    try {
+      await finalApproval.mutateAsync({ request, action, value })
+    } catch {
+      // The mutation error is shown in the request detail.
+      return false
+    }
+    setFlashMessage({
+      assign: '총괄 관리자를 배정했습니다.', submit: '총괄 관리자에게 최종 승인을 요청했습니다.',
+      approve: '최종 승인하여 업무를 완료했습니다.', return: '반려 사유를 저장하고 업무를 진행 중으로 돌렸습니다.',
+    }[action])
+    return true
+  }
+
   function requestCompletion(request: WorkRequestRecord) {
+    if (finalApprovalCheckPending || finalApproval.isPending) return
     const result=window.prompt('완료 결과를 입력하세요.',request.completionResult??'')
     if(result===null)return
+    const ownInternal = request.kind === 'internal' && request.requesterId === selfId && request.assignee === selfId
+    if (ownInternal && finalApprovalEnabled) {
+      void runFinalApproval(request, 'submit', result.trim())
+      return
+    }
     updateRequest(request.id, {
       completionResult:result.trim(),
-      status: request.kind === 'internal' && request.requesterId === selfId && request.assignee === selfId ? 'completed' : nextCompletionStatus(request),
+      status: ownInternal ? 'completed' : nextCompletionStatus(request),
       completionRequestedAt: new Date().toISOString(),
     })
     setFlashMessage(
-      request.kind === 'internal' && request.requesterId === selfId && request.assignee === selfId ? '업무를 완료했습니다.' : needsLeadCompletionReview(request)
+      ownInternal ? '업무를 완료했습니다.' : needsLeadCompletionReview(request)
         ? '완료를 요청했습니다. 업무 관리 담당자 확인을 기다립니다.'
         : '완료를 요청했습니다. 요청자 확인을 기다립니다.',
     )
@@ -2548,6 +2599,11 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
   }
 
   function confirmCompletion(request: WorkRequestRecord) {
+    if (finalApprovalCheckPending || visualFinalPending(request)) return
+    if (finalApprovalEnabled) {
+      void runFinalApproval(request, 'submit')
+      return
+    }
     updateRequest(request.id, { status: 'completed' })
     setFlashMessage('결과를 확인했습니다. 완료되었습니다.')
   }
@@ -2743,7 +2799,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     request: WorkRequestRecord,
     context: 'queue' | 'mine' | 'sent' | 'completed',
   ) {
-    const status = STATUS_META[request.status]
+    const status = workRequestStatusMeta(request)
     const dueDate = request.confirmedDueDate || request.values.dueDate
     const deadline = deadlineLabel(dueDate)
     const isPrimaryAssignee = request.assignee === selfId
@@ -2932,9 +2988,8 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                     variant={canRequestCompletion ? 'secondary' : 'default'}
                     size="sm"
                     className="w-full px-0"
-                    disabled={
-                      !canStartWork && !canResumeWork && !canRequestCompletion
-                    }
+                    disabled={(!canStartWork && !canResumeWork && !canRequestCompletion) ||
+                      (canRequestCompletion && (finalApprovalCheckPending || finalApproval.isPending))}
                     title={
                       canStartWork
                         ? '이 업무를 시작합니다'
@@ -2984,11 +3039,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
               ) : null}
               {context === 'sent' &&
               isSelfRequest &&
-              request.status === 'completionConfirm' ? (
+              request.status === 'completionConfirm' && !visualFinalPending(request) ? (
                 <>
                   <Button
                     type="button"
                     size="sm"
+                    disabled={finalApprovalCheckPending || finalApproval.isPending}
                     onClick={() => confirmCompletion(request)}
                   >
                     결과 확인
@@ -3036,7 +3092,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     )
   }
 
-  if (!auxiliary && (view.kind === 'list' || view.kind === 'detail')) return <><DepartmentWorkBoard owner={owner} />{storage.error ? <p role="alert" className="p-4 text-danger">{storage.error}<Button onClick={() => void storage.retry()}>다시 조회</Button></p> : null}{renderDetailPanel()}{acceptingRequest ? <WorkRequestAcceptDialog request={acceptingRequest} selfId={selfId} teamMembers={teamMembers} onClose={() => setAcceptRequestId(null)} onConfirm={decision => acceptRequest(acceptingRequest, decision)} /> : null}</>
+  if (!auxiliary && (view.kind === 'list' || view.kind === 'detail')) return <><DepartmentWorkBoard owner={owner} activeSupervisorIds={activeSupervisorIds} />{storage.error ? <p role="alert" className="p-4 text-danger">{storage.error}<Button onClick={() => void storage.retry()}>다시 조회</Button></p> : null}{renderDetailPanel()}{acceptingRequest ? <WorkRequestAcceptDialog request={acceptingRequest} selfId={selfId} teamMembers={teamMembers} onClose={() => setAcceptRequestId(null)} onConfirm={decision => acceptRequest(acceptingRequest, decision)} /> : null}</>
 
   if (storage.loading) return <p role="status" className="p-4 text-sm text-muted-foreground">업무와 권한을 불러오는 중...</p>
   if (storage.loadError) return <Card><CardContent className="p-5"><p role="alert" className="text-sm text-danger">{storage.error}</p><Button className="mt-3" onClick={()=>void storage.retry()}>다시 조회</Button></CardContent></Card>
@@ -3168,6 +3224,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             <span>{flashMessage}</span>
           </div>
         ) : null}
+        {finalApproval.error && !detailRequestId && <p role="alert" className="mb-5 text-sm text-danger">{finalApproval.error.message}</p>}
 
         {stats.length > 0 ? (
           <div
@@ -3577,7 +3634,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
 
   function renderDetailPanel() {
     if (!selectedRequest) return null
-    const status = STATUS_META[selectedRequest.status]
+    const status = workRequestStatusMeta(selectedRequest)
     const dueDate =
       selectedRequest.confirmedDueDate || selectedRequest.values.dueDate
     const deadline = deadlineLabel(dueDate)
@@ -3589,6 +3646,13 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     const isPrimaryAssignee = selectedRequest.assignee === selfId
     const isCollaborator =
       selectedRequest.collaborators.includes(selfId)
+    const awaitingFinalApproval = visualFinalPending(selectedRequest)
+    const showFinalApproval = selectedRequest.owner === 'design' && (Boolean(selectedRequest.visualFinalApproval) ||
+      (finalApprovalEnabled && !isClosedStatus(selectedRequest.status)))
+    const supervisorId = isClosedStatus(selectedRequest.status)
+      ? selectedRequest.visualFinalApproval?.approvedBy ?? selectedRequest.visualFinalApproval?.approverId
+      : visualFinalApprover(selectedRequest.visualFinalApproval, activeSupervisorIds)
+    const memberName = (id: string) => storage.directoryMembers.find(person => person.id === id)?.displayName?.trim() || '기존 직원'
     const canEdit = isSelfRequest && selectedRequest.status === 'requested'
     const chatRooms = visibleChatRooms(selectedRequest, {
       canManage: canManageSelected,
@@ -3671,11 +3735,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                 </Button>
               </>
             ) : null}
-            {(selectedRequest.requesterId === selfId) && selectedRequest.status === 'completionConfirm' ? (
+            {isSelfRequest && selectedRequest.status === 'completionConfirm' && !awaitingFinalApproval ? (
               <>
                 <Button
                   type="button"
                   size="sm"
+                  disabled={finalApprovalCheckPending || finalApproval.isPending}
                   onClick={() => confirmCompletion(selectedRequest)}
                 >
                   결과 확인
@@ -3713,12 +3778,23 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
       </div>
     )
 
-    const notice = flashMessage ? (
+    const notice = <>
+      {owner === 'design' && visualSettings.isError && <div className="flex flex-wrap items-center gap-2 text-sm text-danger">
+        <p role="alert">총괄 관리자 설정을 불러오지 못했습니다.</p>
+        <Button type="button" variant="outline" size="sm" onClick={() => void visualSettings.refetch()}>설정 다시 조회</Button>
+      </div>}
+      {flashMessage && (
           <div className="flex items-start gap-3 rounded-lg border border-success/30 bg-success/10 px-4 py-3 text-sm text-success">
             <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
             <span>{flashMessage}</span>
           </div>
-    ) : null
+      )}
+      {showFinalApproval && <VisualFinalApprovalPanel key={`${selfId}:${selectedRequest.id}`} request={selectedRequest}
+        activeSupervisorIds={activeSupervisorIds} viewerId={selfId} canManage={canManageSelected}
+        busy={storage.saving || finalApproval.isPending || finalApprovalCheckPending}
+        error={finalApproval.variables?.request.id === selectedRequest.id ? finalApproval.error?.message : undefined}
+        memberName={memberName} onAction={(action, value) => runFinalApproval(selectedRequest, action, value)} />}
+    </>
 
     const references = selectedRequest.values.referenceFiles.filter(
       item => !blockHasFile(selectedRequest.values.blocks, item.file),
@@ -3976,7 +4052,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                   <CardContent className="space-y-3">
                     {isCompletionPending(selectedRequest.status) ? (
                       <p className="text-sm text-muted-foreground">
-                        {selectedRequest.status === 'completionReview'
+                        {awaitingFinalApproval ? '총괄 관리자 승인을 기다립니다.' : selectedRequest.status === 'completionReview'
                           ? '완료를 요청했습니다. 업무 관리 담당자 확인을 기다립니다.'
                           : '업무 관리 담당자 확인이 끝났습니다. 요청자 확인을 기다립니다.'}
                       </p>
@@ -4003,13 +4079,14 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
                             type="button"
                             variant="secondary"
                             size="sm"
+                            disabled={finalApprovalCheckPending || finalApproval.isPending}
                             onClick={() => requestCompletion(selectedRequest)}
                           >
-                            {selectedRequest.kind === 'internal' && isSelfRequest ? '업무 완료' : '완료 요청'}
+                            {selectedRequest.kind === 'internal' && isSelfRequest ? (finalApprovalEnabled ? '최종 승인 요청' : '업무 완료') : '완료 요청'}
                           </Button>
                         ) : null}
                         <p className="text-xs text-muted-foreground">
-                          {selectedRequest.kind === 'internal' && isSelfRequest ? '본인이 등록하고 담당하는 자체 업무는 직접 완료합니다.' : '완료 요청 후 기존 업무 검수와 요청자 확인을 거쳐 완료됩니다.'}
+                          {finalApprovalEnabled ? '총괄 관리자가 최종 승인하면 완료됩니다.' : selectedRequest.kind === 'internal' && isSelfRequest ? '본인이 등록하고 담당하는 자체 업무는 직접 완료합니다.' : '완료 요청 후 기존 업무 검수와 요청자 확인을 거쳐 완료됩니다.'}
                         </p>
                       </>
                     )}
@@ -4064,6 +4141,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
             requestedAt: selectedRequest.createdAt,
             dueDate,
             brand: brandLabelForRequest(selectedRequest, brands),
+            finalApprover: showFinalApproval ? (supervisorId ? memberName(supervisorId) : '미지정') : undefined,
           }}
           onClose={closeRequest}
           headerActions={headerActions}
@@ -4071,7 +4149,7 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
           mainReferences={referenceCards}
           management={management}
           legacyConversation={workConversation}
-          memberName={id => storage.directoryMembers.find(person => person.id === id)?.displayName?.trim() || '기존 직원'}
+          memberName={memberName}
           renderBody={blocks => <RequestBodyPreview blocks={blocks} visualDetail />}
           renderAssignment={categoryId => <WorkRequestCategoryAssignments
             request={selectedRequest} members={teamMembers} canManage={canManageSelected}
