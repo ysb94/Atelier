@@ -183,7 +183,10 @@ export function VisualWorkRequestDrawer({
                 {!!current.fields.length && <dl className="space-y-1.5 text-[15px] leading-6">
                   {current.fields.map(field => <div key={field.id} className="relative wrap-anywhere pl-4 before:absolute before:left-1 before:content-['•']">
                     <dt className="inline font-medium">{field.label}</dt>
-                    <dd className="inline whitespace-pre-wrap before:mx-1.5 before:text-muted-foreground before:content-['·']">{field.value.trim() ? field.value : <span className="text-muted-foreground">—</span>}</dd>
+                    {field.answerBlocks ? <dd className="mt-1 space-y-2">
+                      {field.typed && field.value && <p className="whitespace-pre-wrap">{field.value}</p>}
+                      {renderBody(field.answerBlocks)}
+                    </dd> : <dd className="inline whitespace-pre-wrap before:mx-1.5 before:text-muted-foreground before:content-['·']">{field.value.trim() ? field.value : <span className="text-muted-foreground">—</span>}</dd>}
                   </div>)}
                 </dl>}
                 {current.blocks.length ? renderBody(current.blocks) : !current.fields.length && <p className="text-sm text-muted-foreground">등록된 분류 내용이 없습니다.</p>}

@@ -121,7 +121,7 @@ function VisualWorkRequestManageForm() {
           </CardContent></Card>
           <Card><CardContent className="space-y-4 p-5">
             <div className="flex items-center justify-between"><h2 className="font-semibold">분류별 입력 양식</h2><Button variant="outline" size="sm" disabled={selected.fields.length >= 30} onClick={() => update({ fields: [...selected.fields, { id: crypto.randomUUID(), label: '', type: 'text', required: false, placeholder: '' }] })}><Plus className="size-3.5" />항목 추가</Button></div>
-            <p className="text-xs text-muted-foreground">공통 메인 내용은 항상 표시됩니다. 아래 입력 항목과 별도로 분류별 자유 내용·이미지·파일 첨부 영역을 제공합니다.</p>
+            <p className="text-xs text-muted-foreground">항목 이름과 입력 안내가 분류별 요청서에 글줄로 표시됩니다. 요청자는 각 질문 아래에 답변을 쓰고 이미지나 파일을 첨부할 수 있습니다.</p>
             {!selected.fields.length ? <p className="py-6 text-sm text-muted-foreground">등록된 입력 항목이 없습니다. 자유 내용과 첨부만 표시됩니다.</p> : null}
             {selected.fields.map((field, index) => {
               const changeField = (patch: Partial<VisualField>) => update({ fields: selected.fields.map(item => item.id === field.id ? { ...item, ...patch } : item) })

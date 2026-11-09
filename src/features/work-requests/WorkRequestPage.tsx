@@ -53,7 +53,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Input, Select, Textarea } from '@/components/ui/input'
+import { Input, Select } from '@/components/ui/input'
 import { useWorkRequestSettings } from '@/lib/supabase/work-request-settings'
 import { changeVisualWorkFinalApproval } from '@/lib/supabase/work-requests'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
@@ -86,6 +86,8 @@ import {
   visualSectionTitle,
   type VisualSectionId,
 } from './visual-request-sections'
+import { VisualQuestionAnswer, type VisualAnswerEditorOptions } from './VisualQuestionAnswer'
+import { replaceVisualQuestionMedia, splitVisualQuestionContent } from './visual-question-content'
 import {
   compareRequestsByDeadline,
   dateFromToday,
@@ -1077,6 +1079,13 @@ function ReferenceFilesField({
   )
 }
 
+type EditableTextOptions = {
+  label: string
+  descriptionId?: string
+  required?: boolean
+  singleLine?: boolean
+}
+
 function AutoGrowEditable({
   textId,
   value,
@@ -1084,6 +1093,7 @@ function AutoGrowEditable({
   richPreview,
   placeholder,
   className,
+  textOptions,
   onChange,
   onPasteFiles,
   onBackspaceEmpty,
@@ -1094,15 +1104,19 @@ function AutoGrowEditable({
   richPreview?: boolean
   placeholder?: string
   className?: string
+  textOptions?: EditableTextOptions
   onChange: (text: string, previewHtml?: string) => void
   onPasteFiles?: (event: ClipboardEvent<HTMLDivElement>) => void
   onBackspaceEmpty?: (event: KeyboardEvent<HTMLDivElement>) => void
 }) {
   const ref = useRef<HTMLDivElement>(null)
+  const questionAnswer = textOptions?.required !== undefined
 
   useEffect(() => {
     const el = ref.current
-    if (!el || document.activeElement === el) return
+    if (!el) return
+    const focused = document.activeElement === el
+    if (focused && !questionAnswer) return
     if (richPreview && previewHtml !== undefined) {
       // Only the local preview editor supplies this markup. Paste accepts plain text.
       if (el.innerHTML !== previewHtml) el.innerHTML = previewHtml
@@ -1110,20 +1124,32 @@ function AutoGrowEditable({
     }
     if (normalizeEditableText(el.innerText) !== value) {
       el.textContent = value
+      if (focused) {
+        const range = document.createRange()
+        range.selectNodeContents(el)
+        range.collapse(false)
+        const selection = window.getSelection()
+        selection?.removeAllRanges()
+        selection?.addRange(range)
+      }
     }
-  }, [value, previewHtml, richPreview])
+  }, [value, previewHtml, richPreview, questionAnswer])
 
   return (
     <div
       ref={ref}
       data-text-id={textId}
       role="textbox"
-      aria-multiline="true"
+      aria-label={textOptions?.label}
+      aria-describedby={textOptions?.descriptionId}
+      aria-required={textOptions?.required}
+      aria-multiline={!textOptions?.singleLine}
       contentEditable
       suppressContentEditableWarning
       data-placeholder={placeholder}
       className={cn(
         'min-h-7 w-full text-sm leading-7 outline-none empty:before:text-muted-foreground empty:before:content-[attr(data-placeholder)]',
+        questionAnswer && 'rounded-sm focus-visible:ring-1 focus-visible:ring-ring/25',
         className,
       )}
       onInput={(event) => {
@@ -1136,12 +1162,24 @@ function AutoGrowEditable({
           return
         }
         event.preventDefault()
-        document.execCommand('insertText', false, event.clipboardData.getData('text/plain'))
+        const text = event.clipboardData.getData('text/plain')
+        document.execCommand('insertText', false, textOptions?.singleLine ? text.replace(/[\r\n]+/g, ' ') : text)
       }}
       onKeyDown={(event) => {
+        if (questionAnswer && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'a') {
+          event.preventDefault()
+          const selection = window.getSelection()
+          if (selection) {
+            const range = document.createRange()
+            range.selectNodeContents(event.currentTarget)
+            selection.removeAllRanges()
+            selection.addRange(range)
+          }
+          return
+        }
         if (event.key === 'Enter' && !event.nativeEvent.isComposing) {
           event.preventDefault()
-          document.execCommand('insertText', false, '\n')
+          if (!textOptions?.singleLine) document.execCommand('insertText', false, '\n')
           return
         }
         if (
@@ -1186,6 +1224,7 @@ function BodyFlow({
   text,
   images,
   placeholder,
+  textOptions,
   readOnly,
   visualDetail,
   movingId,
@@ -1204,6 +1243,7 @@ function BodyFlow({
   text: TextContentBlock
   images: ImageContentBlock[]
   placeholder?: string
+  textOptions?: EditableTextOptions
   readOnly?: boolean
   visualDetail?: boolean
   movingId?: string
@@ -1294,6 +1334,7 @@ function BodyFlow({
           previewHtml={text.previewHtml}
           richPreview={richPreview}
           placeholder={placeholder}
+          textOptions={textOptions}
           onChange={(value, html) => onTextChange?.(value, html)}
           onPasteFiles={onPasteFiles}
           onBackspaceEmpty={onBackspaceEmpty}
@@ -1325,6 +1366,8 @@ export function RequestBodyEditor({
   visualTitle,
   guide,
   richPreview,
+  leading,
+  visualAnswer,
 }: {
   blocks: ContentBlock[]
   error?: string
@@ -1334,6 +1377,8 @@ export function RequestBodyEditor({
   visualTitle?: string
   guide?: readonly string[]
   richPreview?: boolean
+  leading?: ReactNode
+  visualAnswer?: VisualAnswerEditorOptions
 }) {
   const editorRef = useRef<HTMLDivElement>(null)
   const visualFileRef = useRef<HTMLInputElement>(null)
@@ -1630,8 +1675,7 @@ export function RequestBodyEditor({
         lineWidth: 0,
       } satisfies ImageDropTarget)
     const part = parts[target.flowIndex]
-    const textOffset =
-      part?.type === 'flow' ? part.text.text.length : target.textOffset
+    const textOffset = !visualAnswer && part?.type === 'flow' ? part.text.text.length : target.textOffset
     insertFilesAtFlow(target.flowIndex, files, target.offsetY, textOffset, textOffset)
   }
 
@@ -1686,20 +1730,30 @@ export function RequestBodyEditor({
           block.id === moving.id && block.type === 'image',
       )
     : undefined
+  const fileLabel = visualAnswer?.label ?? visualTitle
+  const mediaOnly = Boolean(visualAnswer?.control)
+  const textOptions = visualAnswer ?? (visualTitle ? { label: leading ? `${visualTitle} 추가 내용` : `${visualTitle} 작성` } : undefined)
 
   return (
-    <div className={cn('space-y-2', visualTitle && 'rounded-xl border border-border bg-card p-5 shadow-sm sm:p-7')}>
-      {visualTitle ? <h2 className="text-sm font-semibold">{visualTitle}</h2> : (
+    <div role={visualTitle ? 'group' : undefined} aria-label={visualTitle}
+      className={cn('space-y-2', visualTitle && 'rounded-xl border border-border bg-card p-5 shadow-sm sm:p-7',
+      visualAnswer && 'relative min-h-8 space-y-0 pr-9')}>
+      {visualAnswer ? visualAnswer.control : visualTitle ? <h2 className="text-sm font-semibold">{visualTitle}</h2> : (
       <span className="flex items-center gap-1 text-sm font-medium">
         요청 내용 <span className="text-danger">*</span>
       </span>
       )}
+      {leading}
+      {visualTitle && leading && <h3 className="border-t border-border pt-4 text-sm font-semibold">추가 내용</h3>}
 
       <div
         ref={editorRef}
         className={cn(
           'relative min-h-72 rounded-md border border-border bg-card px-4 py-4',
           visualTitle && 'min-h-80 border-0 px-0 sm:min-h-96',
+          visualTitle && leading && 'min-h-16 py-1 sm:min-h-16',
+          visualAnswer && 'min-h-7 border-0 bg-transparent p-0',
+          mediaOnly && 'min-h-0',
           isDraggingFiles && 'border-primary bg-primary/5',
           moving?.active && 'select-none',
           error && 'border-danger',
@@ -1718,7 +1772,7 @@ export function RequestBodyEditor({
         onDrop={handleDrop}
       >
         {guide?.length ? <ul className="mb-3 list-inside list-disc text-xs leading-6 text-muted-foreground">{guide.map((item) => <li key={item}>{item} :</li>)}</ul> : null}
-        {visualTitle && onlyEmptyText ? (
+        {visualTitle && !leading && onlyEmptyText ? (
           <button type="button" className="absolute left-1/2 top-1/2 z-10 flex w-max max-w-full -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2 rounded-md p-3 text-xs text-muted-foreground hover:text-foreground focus-visible:outline-2 focus-visible:outline-primary" onClick={() => visualFileRef.current?.click()} aria-label={`${visualTitle} 파일 추가`}>
             <Paperclip className="size-5" />
             파일을 끌어 놓거나 버튼을 눌러 첨부하세요.
@@ -1735,6 +1789,7 @@ export function RequestBodyEditor({
             )
           }
 
+          if (mediaOnly && part.images.length === 0) return null
           const previous = parts[index - 1]
           return (
             <BodyFlow
@@ -1742,6 +1797,8 @@ export function RequestBodyEditor({
               flowIndex={index}
               text={part.text}
               images={part.images}
+              readOnly={mediaOnly}
+              textOptions={textOptions}
               placeholder={
                 onlyEmptyText ? placeholder : '이어서 설명을 작성하세요.'
               }
@@ -1816,10 +1873,12 @@ export function RequestBodyEditor({
           </div>
         ) : null}
       </div>
-      {visualTitle ? (
-        <div className="flex justify-end">
-          <input ref={visualFileRef} type="file" multiple className="sr-only" aria-label={`${visualTitle} 첨부 파일`} onChange={(event) => { appendFilesRef.current(Array.from(event.target.files ?? [])); event.target.value = '' }} />
-          <Button type="button" variant="ghost" size="sm" onClick={() => visualFileRef.current?.click()}><Paperclip className="size-3.5" />파일 추가</Button>
+      {fileLabel ? (
+        <div className={cn('flex justify-end', visualAnswer && 'absolute right-0 top-0')}>
+          <input ref={visualFileRef} type="file" multiple className="sr-only" aria-label={`${fileLabel} 첨부 파일`} onChange={(event) => { appendFilesRef.current(Array.from(event.target.files ?? [])); event.target.value = '' }} />
+          <Button type="button" variant="ghost" size={visualAnswer ? 'icon' : 'sm'}
+            aria-label={visualAnswer ? `${fileLabel} 파일 추가` : undefined} title={visualAnswer ? `${fileLabel} 파일 추가` : undefined}
+            onClick={() => visualFileRef.current?.click()}><Paperclip className="size-3.5" />{!visualAnswer && '파일 추가'}</Button>
         </div>
       ) : (
       <p className="text-xs text-muted-foreground">
@@ -1832,17 +1891,18 @@ export function RequestBodyEditor({
   )
 }
 
-function VisualRequestSection({ title, blocks, onChange, guide, error }: {
+function VisualRequestSection({ title, blocks, onChange, guide, error, leading }: {
   title: string
   blocks: ContentBlock[]
   onChange: (blocks: ContentBlock[]) => void
   guide?: readonly string[]
   error?: string
+  leading?: ReactNode
 }) {
   const appendFilesRef = useRef<(files: File[]) => void>(() => {
     console.warn('[work-request] Visual 요청 편집기가 연결되지 않았습니다.', { title })
   })
-  return <RequestBodyEditor blocks={blocks} onChange={onChange} placeholder="내용을 입력하세요." visualTitle={title} guide={guide} error={error} appendFilesRef={appendFilesRef} />
+  return <RequestBodyEditor blocks={blocks} onChange={onChange} placeholder="내용을 입력하세요." visualTitle={title} guide={guide} error={error} leading={leading} appendFilesRef={appendFilesRef} />
 }
 
 function RequestTitleAndDue({
@@ -1914,7 +1974,8 @@ function VisualRequestFields({ blocks, onChange, brandPicker, beforeMain, error,
   for (const [id] of sections) {
     if (id !== 'main' && !visibleCategories.some(category => category.id === id)) {
       const saved = visualValues?.categories.find(category => category.id === id)
-      visibleCategories.push({ id, label: saved?.label ?? '이전 분류', enabled: false, assigneeId: '', fields: Object.keys(saved?.fields ?? {}).map(key => ({ id: key, label: key, type: 'text', required: false, placeholder: '' })) })
+      const fieldIds = new Set([...Object.keys(saved?.fieldLabels ?? {}), ...Object.keys(saved?.fields ?? {})])
+      visibleCategories.push({ id, label: saved?.label ?? '이전 분류', enabled: false, assigneeId: '', fields: Array.from(fieldIds, key => ({ id: key, label: saved?.fieldLabels?.[key] ?? key, type: 'text', required: false, placeholder: '' })) })
     }
   }
   function metadata(selected: Map<VisualSectionId, ContentBlock[]>): VisualRequestValues {
@@ -1946,21 +2007,38 @@ function VisualRequestFields({ blocks, onChange, brandPicker, beforeMain, error,
       </div>
       {beforeMain}
       <VisualRequestSection key={`${requestKey}:main`} title="메인 내용" blocks={sections.get('main') ?? []} onChange={(next) => updateSection('main', next)} error={error} />
-      {visibleCategories.filter((category) => sections.has(category.id)).map((category) => (
-        <div key={`${requestKey}:${category.id}`} className="space-y-3">
-          {category.fields.length ? <Card><CardContent className="space-y-4 p-5"><h2 className="font-semibold">{category.label} · 요청 정보</h2><div className="grid gap-4 md:grid-cols-2">{category.fields.map(field => {
-            const value = visualValues?.categories.find(item => item.id === category.id)?.fields[field.id] ?? ''
-            const change = (value: string) => {
-              const next = metadata(sections)
-              const target = next.categories.find(item => item.id === category.id)!
-              target.fields = { ...target.fields, [field.id]: value }
-              onVisualChange(next)
-            }
-            return <label key={field.id} className={`block space-y-1 text-sm ${field.type === 'textarea' ? 'md:col-span-2' : ''}`}><span>{field.label}{field.required ? <span className="ml-1 text-danger">*</span> : null}</span>{field.type === 'textarea' ? <Textarea value={value} placeholder={field.placeholder} required={field.required} maxLength={10000} rows={3} onChange={event => change(event.target.value)} /> : <Input type={field.type} value={value} placeholder={field.placeholder} required={field.required} maxLength={10000} onChange={event => change(event.target.value)} />}</label>
-          })}</div></CardContent></Card> : null}
-          <VisualRequestSection title={visualSectionTitle(category)} blocks={sections.get(category.id)!} onChange={(next) => updateSection(category.id, next)} />
-        </div>
-      ))}
+      {visibleCategories.filter(category => sections.has(category.id)).map(category => {
+        const section = sections.get(category.id)!
+        const content = splitVisualQuestionContent(section, category.fields.map(field => field.id))
+        const values = visualValues?.categories.find(item => item.id === category.id)?.fields
+        return (
+          <VisualRequestSection
+            key={`${requestKey}:${category.id}`}
+            title={visualSectionTitle(category)}
+            blocks={content.body}
+            onChange={next => updateSection(category.id, [...next, ...Array.from(content.answers.values()).flat()])}
+            leading={category.fields.length ? <div className="space-y-5 py-3">
+              {category.fields.map(field => {
+                const media = content.answers.get(field.id)
+                const value = values?.[field.id] ?? ''
+                return <VisualQuestionAnswer key={field.id} field={field} categoryId={category.id}
+                  value={value} media={media} BodyEditor={RequestBodyEditor}
+                  onChange={answer => {
+                    if (media?.length || answer.media.length) {
+                      updateSection(category.id, replaceVisualQuestionMedia(section, field.id, answer.media))
+                    }
+                    if (answer.value !== value) {
+                      const next = metadata(sections)
+                      const target = next.categories.find(item => item.id === category.id)!
+                      target.fields = { ...target.fields, [field.id]: answer.value }
+                      onVisualChange(next)
+                    }
+                  }} />
+              })}
+            </div> : undefined}
+          />
+        )
+      })}
     </div>
   )
 }
@@ -2297,10 +2375,12 @@ function WorkRequestForm({ owner }: { owner: WorkRequestOwner }) {
     }
     if (owner === 'design') {
       if (visualSettings.isPending || visualSettings.isError || !visualSettings.data?.available) nextErrors.blocks = '분류 설정의 서버 연결을 확인한 뒤 다시 등록해 주세요.'
-      for (const category of visualCategories.filter(item => splitVisualSections(values.blocks).has(item.id))) {
+      const sections = splitVisualSections(values.blocks)
+      for (const category of visualCategories.filter(item => sections.has(item.id))) {
         const answers = values.visualRequest?.categories.find(item => item.id === category.id)?.fields ?? {}
         const fields = editingRequest?.categoryAssignments?.find(item => item.categoryId === category.id)?.formFields ?? category.fields
         if (fields.some(field => field.required && !answers[field.id]?.trim())) nextErrors.blocks = `${category.label}의 필수 입력 항목을 확인해 주세요.`
+        else if (fields.some(field => (answers[field.id]?.length ?? 0) > 10000)) nextErrors.blocks = `${category.label}의 답변은 항목별로 10000자까지 작성할 수 있습니다.`
       }
     }
     return nextErrors

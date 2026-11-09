@@ -1,3 +1,4 @@
+import { isTypedVisualQuestion, readVisualQuestionAnswer, splitVisualQuestionContent } from './visual-question-content'
 import { splitVisualSections, visualSectionId, visualSectionTitle } from './visual-request-sections'
 import { hasRequestBody, type WorkRequestRecord } from './work-request-types'
 
@@ -19,15 +20,23 @@ export function visualWorkDetail(request: WorkRequestRecord, categories: readonl
       const heading = request.values.blocks.find(block => visualSectionId(block) === id)
       const label = metadata?.label || assignment?.label || categories.find(item => item.id === id)?.label
         || (heading?.type === 'text' ? heading.text.replace(/ (?:작업 )?요청$/, '') : '') || '이전 분류'
-      const fieldLabels = new Map(assignment?.formFields?.map(field => [field.id, field.label]))
+      const definitions = new Map(assignment?.formFields?.map(field => [field.id, field]))
+      const fieldLabels = new Map(Array.from(definitions, ([key, field]) => [key, field.label]))
       for (const [key, value] of Object.entries(metadata?.fieldLabels ?? {})) fieldLabels.set(key, value)
       for (const key of Object.keys(metadata?.fields ?? {})) {
         if (!fieldLabels.has(key)) fieldLabels.set(key, key)
       }
+      const content = splitVisualQuestionContent(grouped.get(id) ?? [], [...fieldLabels.keys()])
       return {
         id, label, title: visualSectionTitle({ label }), assignment,
-        blocks: blocksFor(id),
-        fields: Array.from(fieldLabels, ([key, label]) => ({ id: key, label, value: metadata?.fields?.[key] ?? '' })),
+        blocks: hasRequestBody(content.body) ? content.body : [],
+        fields: Array.from(fieldLabels, ([key, label]) => {
+          const value = metadata?.fields?.[key] ?? ''
+          const media = content.answers.get(key)
+          const typed = media?.[0]?.visualAnswer.typed === true || isTypedVisualQuestion(definitions.get(key)?.type)
+          const answerBlocks = media?.length ? readVisualQuestionAnswer(`${id}:${key}`, typed ? '' : value, media) : undefined
+          return { id: key, label, value, typed, answerBlocks }
+        }),
       }
     }),
   }
