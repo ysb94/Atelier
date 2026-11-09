@@ -1,4 +1,4 @@
-import { STATUS_META, type RequestStatus, type WorkRequestRecord } from './work-request-types'
+import { isClosedStatus, STATUS_META, type RequestStatus, type WorkRequestRecord } from './work-request-types'
 
 export type VisualFinalApproval = {
   approverId?: string | null
@@ -20,6 +20,12 @@ export function visualFinalApprover(approval: VisualFinalApproval | null | undef
   const assigned = approval?.approverId
   if (assigned && activeSupervisorIds.includes(assigned)) return assigned
   return activeSupervisorIds.length === 1 ? activeSupervisorIds[0] : undefined
+}
+
+export function visualSummaryApprover(work: Pick<WorkRequestRecord, 'status' | 'visualFinalApproval'>, activeSupervisorIds: readonly string[]) {
+  return isClosedStatus(work.status)
+    ? work.visualFinalApproval?.approvedBy ?? work.visualFinalApproval?.approverId ?? undefined
+    : visualFinalApprover(work.visualFinalApproval, activeSupervisorIds)
 }
 
 export function workRequestStatusMeta(work: Pick<WorkRequestRecord, 'status' | 'visualFinalApproval'>) {

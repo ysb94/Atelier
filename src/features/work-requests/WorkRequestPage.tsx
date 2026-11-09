@@ -61,7 +61,7 @@ import { DEFAULT_VISUAL_CATEGORIES, type VisualCategory, type VisualRequestValue
 import { WorkRequestCategoryAssignments } from './WorkRequestCategoryAssignments'
 import { VisualWorkRequestDrawer } from './VisualWorkRequestDrawer'
 import { VisualFinalApprovalPanel } from './VisualFinalApprovalPanel'
-import { visualFinalApprover, visualFinalPending, workRequestStatusMeta, type VisualFinalAction } from './visual-final-approval'
+import { visualFinalPending, visualSummaryApprover, workRequestStatusMeta, type VisualFinalAction } from './visual-final-approval'
 import { downloadVisualWorkFile, visualWorkDetail } from './visual-work-detail'
 import { useAuth } from '@/lib/supabase/auth'
 import { listBrandDirectory } from '@/lib/supabase/profiles'
@@ -3185,7 +3185,8 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
   }
 
   if (!auxiliary && (view.kind === 'list' || view.kind === 'detail')) return <>
-    {!personal && <DepartmentWorkBoard owner={owner} activeSupervisorIds={activeSupervisorIds} />}
+    {!personal && <DepartmentWorkBoard owner={owner} activeSupervisorIds={activeSupervisorIds}
+      finalApprovalEnabled={finalApprovalEnabled} directoryMembers={storage.directoryMembers} />}
     {personal && storage.loading && <p role="status" className="p-4 text-sm text-muted-foreground">요청 상세를 불러오는 중...</p>}
     {storage.error && <div role="alert" className="flex flex-wrap items-center gap-2 p-4 text-danger">
       {storage.error}
@@ -3751,9 +3752,7 @@ export function WorkRequestForm({ owner, surface = 'department' }: {
     const awaitingFinalApproval = visualFinalPending(selectedRequest)
     const showFinalApproval = selectedRequest.owner === 'design' && (Boolean(selectedRequest.visualFinalApproval) ||
       (finalApprovalEnabled && !isClosedStatus(selectedRequest.status)))
-    const supervisorId = isClosedStatus(selectedRequest.status)
-      ? selectedRequest.visualFinalApproval?.approvedBy ?? selectedRequest.visualFinalApproval?.approverId
-      : visualFinalApprover(selectedRequest.visualFinalApproval, activeSupervisorIds)
+    const supervisorId = visualSummaryApprover(selectedRequest, activeSupervisorIds)
     const memberName = (id: string) => storage.directoryMembers.find(person => person.id === id)?.displayName?.trim() || '기존 직원'
     const canEdit = isSelfRequest && selectedRequest.status === 'requested'
     const chatRooms = visibleChatRooms(selectedRequest, {

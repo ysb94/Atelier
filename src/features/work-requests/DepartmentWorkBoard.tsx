@@ -20,8 +20,8 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { emptyList } from '@/lib/utils'
 import { clearWorkFilters, DEPARTMENT_WORK_STAGES, filterDepartmentWork, inDepartmentWorkScope, inDepartmentWorkStage, type DepartmentWork, type DepartmentWorkScope, type DepartmentWorkStage, type WorkFilters } from './department-work'
 import { ownerFromDepartment, WORK_REQUEST_CONFIG, WORK_REQUEST_DEPARTMENT_IDS, type WorkRequestOwner } from './work-request-form-config'
-import { STATUS_META } from './work-request-types'
-import { visualFinalApprover, visualFinalPending, workRequestStatusMeta } from './visual-final-approval'
+import { isClosedStatus, STATUS_META } from './work-request-types'
+import { visualFinalApprover, visualFinalPending, visualSummaryApprover, workRequestStatusMeta } from './visual-final-approval'
 
 type BoardScope = DepartmentWorkScope | 'final'
 
@@ -42,7 +42,12 @@ function ColumnFilter({ label, options, selected, onApply }: { label: string; op
     {open ? createPortal(<div ref={popup} style={position} role="dialog" aria-label={`${label} 필터 선택`} className="fixed z-[60] w-56 rounded-xl border border-border bg-card p-3 text-left text-foreground shadow-sm"><div className="mb-3 flex justify-between"><span>필터 선택</span><button type="button" className="text-xs text-muted-foreground" onClick={() => setDraft([])}>초기화</button></div><div className="max-h-56 overflow-auto">{options.map(([id, name]) => <label key={id} className="flex gap-2 py-1 text-sm"><input type="checkbox" checked={draft.includes(id)} onChange={() => setDraft(current => current.includes(id) ? current.filter(value => value !== id) : [...current, id])} />{name}</label>)}</div><Button type="button" size="sm" className="mt-3 w-full" onClick={() => { onApply(draft); setOpen(false) }}>선택한 {draft.length}개 필터 적용</Button></div>, document.body) : null}</div>
 }
 
-export function DepartmentWorkBoard({ owner, activeSupervisorIds = emptyList<string>() }: { owner: WorkRequestOwner; activeSupervisorIds?: readonly string[] }) {
+export function DepartmentWorkBoard({ owner, activeSupervisorIds, finalApprovalEnabled, directoryMembers }: {
+  owner: WorkRequestOwner
+  activeSupervisorIds: readonly string[]
+  finalApprovalEnabled: boolean
+  directoryMembers: readonly { id: string; displayName?: string | null }[]
+}) {
   useRenderWatch('DepartmentWorkBoard')
   const { profile, session } = useAuth()
   const activeSession = profile?.status === 'active' && session?.user.id === profile.id
@@ -78,20 +83,33 @@ export function DepartmentWorkBoard({ owner, activeSupervisorIds = emptyList<str
   useEffect(() => { setScope('team'); setStage('all'); setFilters(clearWorkFilters()); setSearch('') }, [actor, owner])
   const [sort, setSort] = useState<{ field: 'createdAt' | 'dueDate'; direction: number }>({ field: 'dueDate', direction: 1 })
   const rows = (activeSession ? query.data : undefined) ?? emptyList<DepartmentWork>()
-  const supervisor = owner === 'design' && activeSupervisorIds.includes(actor)
+  const visual = owner === 'design'
+  const supervisor = visual && activeSupervisorIds.includes(actor)
+  const assignmentKey = visual ? 'visualMiddleManagerIds' : 'assigneeIds'
+  const unassignedLabel = visual ? '미지정' : '미정'
+  const hasAssignmentSummary = !visual || rows.some(row => row.visualMiddleManagerIds != null)
+  const names = useMemo(() => new Map(directoryMembers.map(member => [member.id, member.displayName?.trim() || '기존 직원'])), [directoryMembers])
+  const columnWidths = visual ? [24, 10, 11, 11, 8, 11, 8, 8, 9] : [34, 11, 12, 11, 10, 10, 12]
   const scope = selectedScope === 'final' && !supervisor ? 'team' : selectedScope
   const finalQueue = supervisor ? rows.filter(row => {
-    const approver = visualFinalApprover(row.visualFinalApproval, activeSupervisorIds)
-    return visualFinalPending(row) && (!approver || approver === actor)
+    const review = row.visualCategoryReview
+    const approver = visualFinalApprover(review?.approverId ? { approverId: review.approverId } : row.visualFinalApproval, activeSupervisorIds)
+    return (review ? review.pending : visualFinalPending(row)) && (!approver || approver === actor)
   }) : emptyList<DepartmentWork>()
   const options = useMemo(() => {
-    const requester = new Map<string, string>(), assignee = new Map<string, string>([['unassigned', '미정']]), brand = new Map<string, string>([['undecided', '브랜드 미정']])
-    for (const row of rows) { requester.set(row.requesterId, `${row.requesterName} · ${row.requesterDepartment || '부서 미정'}`); row.assigneeIds.forEach((id, index) => assignee.set(id, row.assigneeNames[index] || '직원')); if (row.brandId) brand.set(row.brandId, row.brandName) }
+    const requester = new Map<string, string>()
+    const assignee = new Map<string, string>([['unassigned', unassignedLabel]])
+    const brand = new Map<string, string>([['undecided', '브랜드 미정']])
+    for (const row of rows) {
+      requester.set(row.requesterId, `${row.requesterName} · ${row.requesterDepartment || '부서 미정'}`)
+      row[assignmentKey]?.forEach((id, index) => assignee.set(id, visual ? names.get(id) || '기존 직원' : row.assigneeNames[index] || '직원'))
+      if (row.brandId) brand.set(row.brandId, row.brandName)
+    }
     return { requester: [...requester], assignee: [...assignee], brand: [...brand], status: Object.entries(STATUS_META).map(([id, meta]): [string, string] => [id, meta.label]) }
-  }, [rows])
+  }, [rows, assignmentKey, names, visual, unassignedLabel])
   const active = rows.filter(row => inDepartmentWorkStage(row.status, 'all'))
   const scoped = scope === 'final' ? finalQueue : rows.filter(row => inDepartmentWorkScope(row, scope, actor))
-  const visible = filterDepartmentWork(scoped, filters, search).filter(row => stage === 'all' || inDepartmentWorkStage(row.status, stage)).sort((a, b) => {
+  const visible = filterDepartmentWork(scoped, filters, search, assignmentKey).filter(row => stage === 'all' || inDepartmentWorkStage(row.status, stage)).sort((a, b) => {
     const left = a[sort.field], right = b[sort.field]
     return (!left ? 1 : !right ? -1 : left.localeCompare(right) * sort.direction) || a.id.localeCompare(b.id)
   })
@@ -146,27 +164,41 @@ export function DepartmentWorkBoard({ owner, activeSupervisorIds = emptyList<str
       {query.isError ? <Card className="p-5"><p role="alert">{query.error.message}</p><p className="mt-2 text-sm text-muted-foreground">부서 업무 조회 연결을 확인해 주세요.</p><Button onClick={() => void query.refetch()}>다시 조회</Button></Card> : query.isPending ? <p role="status">업무를 불러오는 중...</p> : <>
         {!visible.length ? <p role="status" className="text-sm text-muted-foreground">조건에 맞는 업무가 없습니다.</p> : null}
         <Card className="overflow-x-auto rounded-none border-0 bg-transparent shadow-none">
-          <table aria-label="부서별 팀 업무 목록" className="w-full min-w-[1000px] table-fixed text-left text-sm">
-            <colgroup><col className="w-[34%]" /><col className="w-[11%]" /><col className="w-[12%]" /><col className="w-[11%]" /><col className="w-[10%]" /><col className="w-[10%]" /><col className="w-[12%]" /></colgroup>
+          <table aria-label="부서별 팀 업무 목록" className={`w-full table-fixed text-left text-sm ${visual ? 'min-w-[1180px]' : 'min-w-[1000px]'}`}>
+            <colgroup>{columnWidths.map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
             <thead className="border-b border-border bg-transparent text-xs font-normal text-muted-foreground">
               <tr>
                 <th scope="col" className="py-5 pr-4 font-normal">업무명</th>
-                {(['requester', 'assignee', 'status'] as const).map((key, index) => <th scope="col" key={key} className="px-3 py-5 font-normal"><ColumnFilter label={['요청자', '담당자', '상태'][index]} options={options[key]} selected={filters[key]} onApply={value => { if(key === 'status') setStage('all'); setFilters(current => ({ ...current, [key]: value })) }} /></th>)}
+                <th scope="col" className="px-3 py-5 font-normal"><ColumnFilter label="요청자" options={options.requester} selected={filters.requester} onApply={requester => setFilters(current => ({ ...current, requester }))} /></th>
+                {visual && <th scope="col" className="px-3 py-5 font-normal">총괄 관리자</th>}
+                <th scope="col" className="px-3 py-5 font-normal">{hasAssignmentSummary
+                  ? <ColumnFilter label={visual ? '중간 관리자' : '담당자'} options={options.assignee} selected={filters.assignee} onApply={assignee => setFilters(current => ({ ...current, assignee }))} />
+                  : '중간 관리자'}</th>
+                {visual && <th scope="col" className="px-3 py-5 font-normal">작업자</th>}
+                <th scope="col" className="px-3 py-5 font-normal"><ColumnFilter label="상태" options={options.status} selected={filters.status} onApply={status => { setStage('all'); setFilters(current => ({ ...current, status })) }} /></th>
                 {(['createdAt', 'dueDate'] as const).map((field, index) => <th scope="col" className="px-3 py-5 font-normal" key={field}><button type="button" onClick={() => toggleSort(field)} className="inline-flex items-center gap-1">{['요청 날짜', '마감 날짜'][index]}<ArrowDownUp className="size-3" />{sort.field === field ? sort.direction === 1 ? '↑' : '↓' : ''}</button></th>)}
                 <th scope="col" className="py-5 pl-3 font-normal"><ColumnFilter label="브랜드" options={options.brand} selected={filters.brand} onApply={brand => setFilters(current => ({ ...current, brand }))} /></th>
               </tr>
             </thead>
             {[...groups].filter(([, items]) => items.length > 0).map(([department, items]) => <tbody key={department} aria-label={`${department} 요청 업무`}>
-              <tr className="hover:bg-transparent"><th scope="rowgroup" colSpan={7} className="border-b border-border pb-3 pt-14 text-base font-semibold">{department}</th></tr>
-              {items.map(row => <tr key={row.id} className="border-b border-border/60 align-middle">
-                <td className="py-6 pr-4"><Link className="break-words hover:underline" to={`?requestId=${row.id}`}>{row.title}</Link>{row.kind === 'internal' ? <Badge className="ml-2" variant="muted">자체 업무</Badge> : null}</td>
-                <td className="break-words px-3 py-6">{row.requesterName}</td>
-                <td className={`break-words px-3 py-6 ${!row.assigneeNames.length ? 'text-danger' : ''}`}>{row.assigneeNames.join(', ') || '미정'}</td>
-                <td className="px-3 py-6"><div className="flex flex-wrap gap-1"><StatusPill tone={workRequestStatusMeta(row)?.variant}>{workRequestStatusMeta(row)?.label ?? row.status}</StatusPill>{row.cancellation?.state==='requested'&&!['completed','cancelled','rejected'].includes(row.status)?<Badge variant="warning">취소 요청 중</Badge>:null}</div></td>
-                <td className="px-3 py-6">{row.createdAt.slice(0, 10)}</td>
-                <td className={`px-3 py-6 ${row.dueDate && row.dueDate < new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) && !['completed', 'cancelled', 'rejected'].includes(row.status) ? 'text-danger' : ''}`}>{row.dueDate || '미정'}</td>
-                <td className="break-words py-6 pl-3">{row.brandName || '브랜드 미정'}</td>
-              </tr>)}
+              <tr className="hover:bg-transparent"><th scope="rowgroup" colSpan={columnWidths.length} className="border-b border-border pb-3 pt-14 text-base font-semibold">{department}</th></tr>
+              {items.map(row => {
+                const approverId = visual ? visualSummaryApprover(row, activeSupervisorIds) : undefined
+                const showApproval = Boolean(row.visualFinalApproval) || (finalApprovalEnabled && !isClosedStatus(row.status))
+                const assignees = visual ? row.visualMiddleManagerIds?.map(id => names.get(id) || '기존 직원') : row.assigneeNames
+                const assigneeLabel = assignees == null ? '—' : assignees.join(', ') || unassignedLabel
+                return <tr key={row.id} className="border-b border-border/60 align-middle">
+                  <td className="py-6 pr-4"><Link className="break-words hover:underline" to={`?requestId=${row.id}`}>{row.title}</Link>{row.kind === 'internal' ? <Badge className="ml-2" variant="muted">자체 업무</Badge> : null}</td>
+                  <td className="break-words px-3 py-6">{row.requesterName}</td>
+                  {visual && <td className="break-words px-3 py-6">{approverId ? names.get(approverId) || '기존 직원' : showApproval ? '미지정' : '—'}</td>}
+                  <td className={`break-words px-3 py-6 ${assignees?.length === 0 ? 'text-danger' : ''}`}>{assigneeLabel}</td>
+                  {visual && <td className="px-3 py-6 text-muted-foreground">—</td>}
+                  <td className="px-3 py-6"><div className="flex flex-wrap gap-1"><StatusPill tone={workRequestStatusMeta(row)?.variant}>{workRequestStatusMeta(row)?.label ?? row.status}</StatusPill>{row.cancellation?.state==='requested'&&!isClosedStatus(row.status)?<Badge variant="warning">취소 요청 중</Badge>:null}</div></td>
+                  <td className="px-3 py-6">{row.createdAt.slice(0, 10)}</td>
+                  <td className={`px-3 py-6 ${row.dueDate && row.dueDate < new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Seoul' }) && !isClosedStatus(row.status) ? 'text-danger' : ''}`}>{row.dueDate || '미정'}</td>
+                  <td className="break-words py-6 pl-3">{row.brandName || '브랜드 미정'}</td>
+                </tr>
+              })}
             </tbody>)}
           </table>
         </Card>

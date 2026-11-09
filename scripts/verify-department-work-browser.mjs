@@ -3,11 +3,20 @@ import { spawn } from 'node:child_process'
 const original=(await readFile('scripts/verify-work-requests-browser.mjs','utf8')).replace(/\r\n/g,'\n')
 let setup=original.slice(0,original.indexOf(' const managerPage='))
 setup=setup.replace("from './work-request-test-db.mjs'", "from '../../scripts/work-request-test-db.mjs'").replaceAll('5196','5198')
-setup=setup.replace("'get_my_basic_work_access','begin_work_request'", "'save_department_work','list_department_work','get_department_work','begin_department_work','publish_department_work','complete_department_work','get_work_request_settings','get_my_basic_work_access','begin_work_request'")
+setup=setup.replace("'get_my_basic_work_access','begin_work_request'", "'save_department_work','list_department_work','get_department_work','begin_department_work','publish_department_work','complete_department_work','get_work_request_settings','list_visual_work_category_comments','get_my_basic_work_access','begin_work_request'")
 setup=setup.replace("if(body.name==='list_org_chart_members')", "if(body.name==='list_brand_directory'||body.name==='list_company_attendance_exempt')data=[];else if(body.name==='list_org_chart_members')")
 setup=setup.replace("!['get_my_basic_work_access','list_work_requests','list_org_chart_members'].includes(body.name)", "!/^(get|list)_/.test(body.name)")
 setup=setup.replace("if(!['brands'", "if(body.table==='company_notices'){const data=[['notice-one','10월 윈터 잡화 발매','공지 본문 검증'],['notice-two','룩북 컨셉 회의 일정','두번째 공지 본문']].map(([id,title,body])=>({id,title,body,slot:'department',department_id:departments.planning,published:true,starts_on:null,ends_on:null,updated_at:'2026-11-02T00:00:00Z'}));res.setHeader('Content-Type','application/json');res.end(JSON.stringify({data,error:null}));return}if(!['brands'")
-setup=setup.replace("try{\n await db.exec('reset role');", "try{\n for(const name of ['20261102034546_work_request_category_settings','20261102043240_work_request_explicit_managers','20261102093634_department_work_board'])await db.exec(await fs.readFile('supabase/migrations/'+name+'.sql','utf8'));\n await db.exec('reset role');")
+const migrations=[
+  '20261102034546_work_request_category_settings',
+  '20261102043240_work_request_explicit_managers',
+  '20261102093634_department_work_board',
+  '20261102114206_work_request_cancellation',
+  '20261109052445_visual_work_category_comments',
+  '20261109062457_visual_work_final_approval',
+  '20261109074836_visual_department_work_role_columns',
+]
+setup=setup.replace("try{\n await db.exec('reset role');", "try{\n for(const name of "+JSON.stringify(migrations)+")await db.exec(await fs.readFile('supabase/migrations/'+name+'.sql','utf8'));\n await db.exec('reset role');")
 setup=setup.replace('page.setDefaultTimeout(15000)', 'page.setDefaultTimeout(60000);page.setDefaultNavigationTimeout(90000)')
 const checks=String.raw`
  page.on('console',message=>{if(message.type()==='warning'||message.type()==='error')console.warn('[department-browser]',message.text())})
@@ -152,10 +161,18 @@ const checks=String.raw`
  const activeId=crypto.randomUUID()
  await db.query("insert into public.departments(id,company_id,name,is_active) select $1,company_id,'AI CoE',true from public.departments where id=$2",[aiCoeDepartment,departments.design])
  await db.query('update public.profiles set department_id=$1 where id=$2',[aiCoeDepartment,ids.ordinary])
+ await db.query("update public.work_request_settings s set supervisor_ids=array[$1::uuid] from public.profiles p where p.id=$1 and s.company_id=p.company_id and s.owner='design'",[ids.manager])
  const cancellation={state:'cancelled',requestedAt:'2026-11-09T00:00:00Z'}
  const visualFixtures=[
    [cancelledId,ids.ordinary,'cancelled',{values:{title:'AI CoE 취소 이력'},cancellation,cancellationHistory:[cancellation]}],
-   [activeId,ids.planner,'inProgress',{values:{title:'기획에서 요청한 진행 업무'},assignee:ids.design}],
+   [activeId,ids.planner,'inProgress',{
+     values:{title:'기획에서 요청한 진행 업무',requester:'planner',dueDate:'2030-01-01',blocks:[],referenceFiles:[]},
+     assignee:ids.manager,
+     categoryAssignments:[
+       {categoryId:'banner',label:'배너',assigneeId:ids.design,formFields:[]},
+       {categoryId:'image',label:'이미지',assigneeId:ids.design,formFields:[]},
+     ],
+   }],
  ]
  for(const [id,requester,status,data] of visualFixtures){
    await db.query("insert into public.work_requests(id,company_id,owner,requester_id,status,data) select $1,company_id,'design',id,$3,$4 from public.profiles where id=$2",[id,requester,status,data])
@@ -165,7 +182,25 @@ const checks=String.raw`
  await page.goto(origin+'/work-requests/design?actor=design')
  const planningGroup=table.getByRole('rowgroup',{name:'기획 요청 업무',exact:true})
  const aiCoeGroup=table.getByRole('rowgroup',{name:'AI CoE 요청 업무',exact:true})
- await planningGroup.getByRole('link',{name:'기획에서 요청한 진행 업무',exact:true}).waitFor()
+ const visualLink=planningGroup.getByRole('link',{name:'기획에서 요청한 진행 업무',exact:true})
+ await visualLink.waitFor()
+ const columnLabels=(await table.getByRole('columnheader').allTextContents()).map(label=>label.replace(/[↑↓]/g,'').trim())
+ assert.deepEqual(columnLabels,['업무명','요청자','총괄 관리자','중간 관리자','작업자','상태','요청 날짜','마감 날짜','브랜드'])
+ const visualRow=planningGroup.getByRole('row').filter({hasText:'기획에서 요청한 진행 업무'})
+ assert.deepEqual((await visualRow.getByRole('cell').allTextContents()).slice(2,5),['manager','design','—'])
+ await visualLink.click()
+ const visualSummary=page.locator('dl[aria-label="업무 기본 정보"]')
+ await visualSummary.waitFor()
+ assert.deepEqual((await visualSummary.locator('dt').allTextContents()).slice(0,3),columnLabels.slice(2,5))
+ assert.deepEqual((await visualSummary.locator('dd').allTextContents()).slice(0,3),['manager','design','—'])
+ await page.getByRole('button',{name:'상세 닫기',exact:true}).last().click()
+ await page.getByRole('button',{name:'중간 관리자 필터',exact:true}).click()
+ const middleManagerFilter=page.getByRole('dialog',{name:'중간 관리자 필터 선택'})
+ assert.equal(await middleManagerFilter.getByRole('checkbox',{name:'manager',exact:true}).count(),0)
+ await middleManagerFilter.getByRole('checkbox',{name:'design',exact:true}).check()
+ await page.getByRole('button',{name:'선택한 1개 필터 적용'}).click()
+ await visualLink.waitFor()
+ await page.getByRole('button',{name:'초기화',exact:true}).click()
  assert.equal(await aiCoeGroup.count(),0)
  await page.getByRole('button',{name:'상태 필터',exact:true}).click()
  await page.getByRole('dialog',{name:'상태 필터 선택'}).getByRole('checkbox',{name:'취소',exact:true}).check()
@@ -177,7 +212,7 @@ const checks=String.raw`
  assert.equal(await aiCoeGroup.count(),0)
  await db.exec('reset role')
  assert.deepEqual(await readCancelled(),originalCancellation)
- console.log('PASS department browser: empty headings are hidden for every requester department, and cancelled history remains available')
+ console.log('PASS department browser: Visual list/detail role columns match, middle-manager filter is role-specific, and cancelled history remains available')
  assert.deepEqual(errors,[])
  console.log('PASS department browser: department board and internal registration, same-tab My home create/edit/detail, reload, own-department gate, desktop/mobile; production network blocked')
 }finally{for(const stream of events)stream.end();await browser?.close();await server?.close();await db.close()}

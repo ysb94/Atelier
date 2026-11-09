@@ -51,6 +51,7 @@ try {
     (select jsonb_agg(to_jsonb(p) order by p.tablename,p.policyname) from pg_policies p) as policies`).then(result => result.rows[0])
   const originalAccess = await snapshot()
   await migration('20261109062457_visual_work_final_approval')
+  await migration('20261109074836_visual_department_work_role_columns')
   assert.deepEqual(await snapshot(), originalAccess)
   await actor(ids.design)
   assert.deepEqual(await read(existing), before)
@@ -123,6 +124,9 @@ try {
   assert.equal((await read(one)).visualFinalApproval.approvedBy, ids.design)
   assert.equal((await read(one)).completionResult, '배너 완료 결과')
   assert.equal((await read(two)).visualFinalApproval.approvedBy, ids.manager)
+  const completedRows = await rpc('list_department_work', ['design'])
+  assert.equal(completedRows.find(row => row.id === one).visualFinalApproval.approvedBy, ids.design)
+  assert.deepEqual(completedRows.find(row => row.id === one).visualMiddleManagerIds, [])
 
   const [own, ownRev] = await createInternal(ids.design, 'design')
   await denied(rpc('complete_department_work', [own, ownRev, crypto.randomUUID()]))
