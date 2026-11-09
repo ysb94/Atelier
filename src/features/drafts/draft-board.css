@@ -162,7 +162,7 @@ button.draft-sheet-sample-confirmed:hover{text-decoration:underline}
 .draft-color-line small{color:#8a8e94}
 .draft-sheet-color-tools{display:flex;gap:5px;align-items:flex-start}
 .draft-color-add{position:relative}
-.draft-color-add-form{position:absolute;z-index:2;top:calc(100% + 6px);left:0;display:flex;flex-direction:column;gap:8px;width:280px;padding:8px;border:1px solid #e5e5e2;border-radius:8px;background:white;box-shadow:0 8px 24px #00000014}
+.draft-color-add-form{position:absolute;z-index:2;top:calc(100% + 6px);left:0;display:flex;flex-direction:column;gap:8px;width:min(26rem,calc(100vw - 1rem));padding:8px;border:1px solid #e5e5e2;border-radius:8px;background:white;box-shadow:0 8px 24px #00000014}
 .draft-color-add-rows{display:flex;flex-direction:column;gap:8px}
 .draft-color-add-row{display:flex;align-items:center;gap:4px;border-radius:8px}
 .draft-color-add-row.is-lifted{position:relative;z-index:2;background:#fff;box-shadow:0 10px 24px #0000001f}

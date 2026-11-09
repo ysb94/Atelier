@@ -253,6 +253,8 @@ export type DraftColorRow = {
   sampleWorkOrderShippedAt: string | null
 }
 
+export type DraftColorImageChoice = 'Image' | 'None'
+
 /** 기획안에서 중국팀으로 보내는 샘플 작업 지시서 한 차수 */
 export type DraftSampleWorkOrder = {
   id: string
@@ -318,6 +320,7 @@ export type DraftColorSpec = {
 
 export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
   colorSpecs: Record<string, DraftColorSpec>
+  colorImageChoices?: Record<string, DraftColorImageChoice>
   /** 상품명 최종 확정. 출시 전에도 이름은 고칠 수 있다. */
   nameConfirmed?: boolean
   /** 컬러 종류 확정. 컬러 샘플 작업지시서를 보내는 조건이다. */

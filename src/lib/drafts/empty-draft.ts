@@ -15,9 +15,9 @@ function newId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
 }
 
-export function newColorRow(): DraftColorRow {
+export function newColorRow(id = newId('color')): DraftColorRow {
   return {
-    id: newId('color'),
+    id,
     name: '',
     orderQty: null,
     sampleInProgress: false,

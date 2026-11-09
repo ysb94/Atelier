@@ -4,6 +4,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus } from 'lucide-react'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { startWorkflow, tracedInput } from '@/lib/diagnostics/workflow-trace'
 import { createSeason, deleteSeason, getCompanyProductDrafts, getSeasonsByBrand, updateProductDraft, updateSeason } from '@/lib/api'
 import {
   DEFAULT_COMPANY_ID,
@@ -27,6 +28,7 @@ import { writeColorSpec } from '@/lib/drafts/color-spec'
 import { useAuth } from '@/lib/supabase/auth'
 import { useBasicWorkAccess, canWriteDraft } from '@/lib/supabase/basic-work-access'
 import {
+  type DraftColorImageChoice,
   type ProductDraft,
   type ProductDraftInput,
   type Season,
@@ -134,30 +136,36 @@ export function CompanyDraftsPage() {
   function saveDraftChange(
     draftId: string,
     change: (current: ProductDraft) => ProductDraftInput,
+    action = 'draft_save',
   ) {
     const previous = saveChainRef.current.get(draftId) ?? Promise.resolve()
     // 앞선 저장 실패는 그 호출을 기다린 쪽에 이미 전달됐다. 다음 수정은 이어서 저장한다.
     const task = previous.catch(() => undefined).then(async () => {
-      const current = currentDraft(draftId)
-      if (!current) throw new Error('기획안을 찾지 못했습니다.')
-      if (!canWriteDraft(workAccess.access,current)) throw new Error('작성자만 기획안을 수정할 수 있습니다.')
-      const input = change(current)
+      const trace = startWorkflow('app', action)
       try {
-        const updated = await updateProductDraft(draftId, input)
-        savedDraftRef.current.set(draftId, updated)
-        queryClient.setQueryData<ProductDraft[]>(
-          ['product-drafts', 'company', companyId],
-          (current) =>
-            current?.map((item) => (item.id === updated.id ? updated : item)),
+        trace.step('check_access')
+        const current = currentDraft(draftId)
+        if (!current) throw new Error('기획안을 찾지 못했습니다.')
+        if (!canWriteDraft(workAccess.access,current)) throw new Error('작성자만 기획안을 수정할 수 있습니다.')
+        trace.step('validate_input')
+        const input = change(current)
+        const updated = await trace.run('save', (context) =>
+          updateProductDraft(draftId, tracedInput(input, context)),
         )
-        await queryClient.invalidateQueries({ queryKey: ['product-drafts'] })
-        await queryClient.invalidateQueries({ queryKey: ['product-draft', draftId] })
+        await trace.run('refresh_queries', async () => {
+          savedDraftRef.current.set(draftId, updated)
+          queryClient.setQueryData<ProductDraft[]>(
+            ['product-drafts', 'company', companyId],
+            (current) =>
+              current?.map((item) => (item.id === updated.id ? updated : item)),
+          )
+          await queryClient.invalidateQueries({ queryKey: ['product-drafts'] })
+          await queryClient.invalidateQueries({ queryKey: ['product-draft', draftId] })
+        }, { writeOutcome: 'committed' })
+        trace.done({ writeOutcome: 'committed' })
         return updated
       } catch (err) {
-        console.warn('[drafts] 기획안 저장 실패', {
-          draftId,
-          message: err instanceof Error ? err.message : String(err),
-        })
+        trace.fail(err)
         throw err
       }
     })
@@ -596,16 +604,20 @@ export function CompanyDraftsPage() {
                           throw new Error(`최대 ${MAX_DRAFT_COLORS}컬러까지 추가할 수 있습니다.`)
                         }
                         const byId = new Map(input.colors.map((color) => [color.id, color]))
+                        const colorImageChoices: Record<string, DraftColorImageChoice> = {}
+                        const colors = rows.map(({ id, name, imageChoice }) => {
+                          const existing = id ? byId.get(id) : undefined
+                          const color = { ...(existing ?? newColorRow(crypto.randomUUID())), name: name.trim() }
+                          const choice = imageChoice ?? input.specs.colorImageChoices?.[color.id]
+                          if (choice) colorImageChoices[color.id] = choice
+                          return color
+                        })
                         return {
                           ...input,
-                          colors: rows.map((row) => {
-                            const name = row.name.trim()
-                            const existing = row.id ? byId.get(row.id) : undefined
-                            if (existing) return { ...existing, name }
-                            return { ...newColorRow(), name }
-                          }),
+                          colors,
+                          specs: { ...input.specs, colorImageChoices },
                         }
-                      })
+                      }, 'draft_save_colors')
                     }}
                     onRenameProduct={async (field, name) => {
                       await saveDraftChange(draft.id, (current) => {
