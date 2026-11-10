@@ -5,15 +5,29 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { generateIndividualBoxCodes, MAX_INDIVIDUAL_BOX_CODES } from '@/lib/warehouse/individual-box-codes'
 import labelCss from './box-individual-label.css?inline'
 import './box-individual-label.css'
 
-const MAX_LABELS = 200
+const MAX_LABELS = MAX_INDIVIDUAL_BOX_CODES
+const RECENT_CODES_KEY = 'atelier:individual-box-labels:recent:v1'
 type PreparedLabels = { key: string; images: Map<string, string> }
+
+function readRecentCodes() {
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(RECENT_CODES_KEY) ?? 'null')
+    if (Array.isArray(saved) && saved.length <= MAX_LABELS && saved.every(code => typeof code === 'string' && /^ENJ-\d{6}-[A-HJ-NP-Z2-9]{8}$/.test(code))) return saved.join('\n')
+  } catch (cause) { console.warn('[warehouse-qr] 최근 박스 번호 불러오기 실패', { cause }) }
+  return ''
+}
 
 export function BoxIndividualLabelPanel() {
   useRenderWatch('BoxIndividualLabelPanel')
-  const [text, setText] = useState('')
+  const [text, setText] = useState(readRecentCodes)
+  const [generationCount, setGenerationCount] = useState('100')
+  const [generationError, setGenerationError] = useState('')
+  const [storageWarning, setStorageWarning] = useState('')
+  const issued = useRef(new Set<string>())
   const [copies, setCopies] = useState('1')
   const [prepared, setPrepared] = useState<PreparedLabels | null>(null)
   const [error, setError] = useState('')
@@ -30,6 +44,27 @@ export function BoxIndividualLabelPanel() {
     : total > MAX_LABELS ? `한 번에 총 ${MAX_LABELS}장까지 출력할 수 있습니다. 번호나 매수를 줄여 주세요.` : ''
   const key = JSON.stringify(codes)
   const ready = !validation && prepared?.key === key
+  const requestedCount = Number(generationCount)
+  const invalidCount = !/^\d+$/.test(generationCount) || !Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > MAX_LABELS
+
+  function generateCodes() {
+    if (invalidCount || printing) return
+    setGenerationError(''); setStorageWarning('')
+    try {
+      const generated = generateIndividualBoxCodes(requestedCount, [...issued.current, ...codes])
+      generated.forEach(code => issued.current.add(code))
+      setText(generated.join('\n'))
+      setCopies('1')
+      try { localStorage.setItem(RECENT_CODES_KEY, JSON.stringify(generated)) }
+      catch (cause) {
+        console.warn('[warehouse-qr] 최근 박스 번호 보관 실패', { cause })
+        setStorageWarning('번호는 생성했지만 이 브라우저에 보관하지 못했습니다. 재출력할 번호 목록을 복사해 보관해 주세요.')
+      }
+    } catch (cause) {
+      console.warn('[warehouse-qr] 박스 번호 자동 생성 실패', { cause })
+      setGenerationError('번호를 생성하지 못했습니다. 다시 시도해 주세요.')
+    }
+  }
 
   useEffect(() => {
     mounted.current = true
@@ -110,7 +145,13 @@ export function BoxIndividualLabelPanel() {
 
   return <div className="grid gap-4 lg:grid-cols-[19rem_minmax(0,1fr)]">
     <Card><CardContent className="space-y-4 p-4">
-      <div><h3 className="text-sm font-semibold">박스 번호 입력</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">각 박스에 붙일 번호를 입력해 주세요. 입력한 번호 그대로 QR과 글자로 인쇄합니다.</p></div>
+      <div><h3 className="text-sm font-semibold">박스 번호 자동 생성</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">필요한 박스 개수만큼 서로 다른 번호를 만듭니다.<br />예: ENJ-261110-7K9M2X4P<br />날짜는 생성하는 날의 한국 날짜입니다.</p></div>
+      <label className="block space-y-1"><span className="text-xs text-muted-foreground">생성할 박스 개수</span><Input aria-label="생성할 박스 개수" inputMode="numeric" value={generationCount} disabled={printing} onChange={event => setGenerationCount(event.target.value)} /></label>
+      <Button className="w-full" disabled={invalidCount || printing} onClick={generateCodes}>새 번호 생성</Button>
+      {invalidCount && <p role="alert" className="text-xs text-danger">생성 개수는 1~{MAX_LABELS} 사이의 정수로 입력해 주세요.</p>}
+      {generationError && <p role="alert" className="text-xs text-danger">{generationError}</p>}
+      {storageWarning && <p role="alert" className="text-xs text-danger">{storageWarning}</p>}
+      <p className="text-xs leading-relaxed text-muted-foreground">새로 생성하면 아래 목록이 새 번호로 바뀝니다. 인쇄 버튼은 번호를 바꾸지 않습니다. 마지막 자동 생성 목록은 이 브라우저에 보관됩니다.</p>
       <label className="block space-y-1"><span className="text-xs text-muted-foreground">박스 번호 · 한 줄에 하나</span><Textarea aria-label="개별 라벨 박스 번호" rows={8} value={text} disabled={printing} onChange={event => setText(event.target.value)} placeholder={'BOX-001\nBOX-002\nBOX-003'} /><span className="text-xs text-muted-foreground">중복 번호는 한 번만 사용합니다. 번호당 최대 32자입니다.</span></label>
       <label className="block space-y-1"><span className="text-xs text-muted-foreground">번호별 출력 매수</span><Input aria-label="번호별 출력 매수" inputMode="numeric" value={copies} disabled={printing} onChange={event => setCopies(event.target.value)} /></label>
       {validation && <p role={text || copies !== '1' ? 'alert' : undefined} className="text-xs text-muted-foreground">{validation}</p>}
