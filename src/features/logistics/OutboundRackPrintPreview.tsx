@@ -41,7 +41,7 @@ function LabelSheet({ labels, slotImages }: { labels: (string | null)[]; slotIma
     const parts = label?.split('-') ?? []
     return <div className="outbound-rack-label" key={label ?? 'blank-' + index}>{label &&
       <div className="outbound-rack-label-content">
-        <strong className="outbound-rack-label-code" aria-label={label} style={{ '--rack-part-length': Math.max(...parts.map((part) => part.length)) } as CSSProperties}>
+        <strong className="outbound-rack-label-code" aria-label={label} style={{ '--rack-part-length': Math.max(1, ...parts.map((part) => part.length)), '--rack-number-height': `${84 / parts.length}cqh`, '--rack-separator-height': `${16 / Math.max(1, parts.length - 1)}cqh` } as CSSProperties}>
           {parts.map((part, partIndex) => <span className="outbound-rack-label-part" key={partIndex}>
             {partIndex > 0 && <span className="outbound-rack-label-separator" aria-hidden="true">/</span>}
             <span className="outbound-rack-label-number">{part}</span>
@@ -52,11 +52,12 @@ function LabelSheet({ labels, slotImages }: { labels: (string | null)[]; slotIma
   })}</div>
 }
 
-export function OutboundRackPrintPreview({ labels, slotImages, onClose }: { labels: string[]; slotImages?: ReadonlyMap<string, string>; onClose: () => void }) {
+export function OutboundRackPrintPreview({ labels, slotImages, labelKind = 'rack', onClose }: { labels: string[]; slotImages?: ReadonlyMap<string, string>; labelKind?: 'rack' | 'box'; onClose: () => void }) {
   useRenderWatch('OutboundRackPrintPreview')
   const active = useWorkspaceTabActivity()
   const slotMode = slotImages !== undefined
-  const title = slotMode ? '고정 자리 · A4 4칸 QR 라벨' : '렉 번호 · A4 4칸 라벨'
+  const boxMode = labelKind === 'box'
+  const title = slotMode ? '고정 자리 · A4 4칸 QR 라벨' : boxMode ? '박스창고 자리번호 · A4 4칸 라벨' : '렉 번호 · A4 4칸 라벨'
   const pages = outboundRackLabelPages(labels)
   const [pageIndex, setPageIndex] = useState(0)
   const [printing, setPrinting] = useState(false)
@@ -65,7 +66,7 @@ export function OutboundRackPrintPreview({ labels, slotImages, onClose }: { labe
   const printRoot = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const previous = document.activeElement
-    dialog.current?.querySelector<HTMLButtonElement>('[aria-label="렉 라벨 미리보기 닫기"]')?.focus()
+    dialog.current?.querySelector<HTMLButtonElement>('[data-print-preview-close]')?.focus()
     return () => {
       clearPrintMode()
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
@@ -107,8 +108,8 @@ export function OutboundRackPrintPreview({ labels, slotImages, onClose }: { labe
     <div className="fixed inset-0 z-[3500] flex flex-col bg-foreground/40 p-3 sm:p-6">
       <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby="outbound-rack-print-title" className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl" onKeyDown={trapFocus}>
         <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
-          <div><h2 id="outbound-rack-print-title" className="text-base font-semibold">{title}</h2><p className="mt-1 text-xs text-muted-foreground">2열 × 2행 균등 분할 · {slotMode ? '자리' : '렉'} {labels.length}개 · 총 {pages.length}장</p></div>
-          <div className="flex gap-2"><Button size="sm" disabled={printing} onClick={() => void printLabels()}><Printer className="size-3.5" />{printing ? '인쇄 준비 중…' : slotMode ? '전체 고정 자리 라벨 인쇄' : '전체 렉 라벨 인쇄'}</Button><Button variant="outline" size="sm" disabled={printing} aria-label="렉 라벨 미리보기 닫기" onClick={onClose}><X className="size-4" /></Button></div>
+          <div><h2 id="outbound-rack-print-title" className="text-base font-semibold">{title}</h2><p className="mt-1 text-xs text-muted-foreground">2열 × 2행 균등 분할 · {slotMode || boxMode ? '자리' : '렉'} {labels.length}개 · 총 {pages.length}장</p></div>
+          <div className="flex gap-2"><Button size="sm" disabled={printing} onClick={() => void printLabels()}><Printer className="size-3.5" />{printing ? '인쇄 준비 중…' : slotMode ? '전체 고정 자리 라벨 인쇄' : boxMode ? '전체 박스창고 자리 라벨 인쇄' : '전체 렉 라벨 인쇄'}</Button><Button variant="outline" size="sm" disabled={printing} data-print-preview-close aria-label={boxMode ? '박스창고 라벨 미리보기 닫기' : '렉 라벨 미리보기 닫기'} onClick={onClose}><X className="size-4" /></Button></div>
         </header>
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
           <p className="text-xs text-muted-foreground">A4 {slotMode ? '가로' : '세로'} · 배율 100% · 여백 없음 · 머리글/바닥글 끄기</p>

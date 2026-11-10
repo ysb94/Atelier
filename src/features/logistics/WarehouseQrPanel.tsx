@@ -1,11 +1,12 @@
 import { useMemo, useState } from 'react'
-import { Download, Table2 } from 'lucide-react'
+import { Download, Printer, Table2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber } from '@/lib/utils'
 import { OutboundWarehouseQrPanel } from './OutboundWarehouseQrPanel'
+import { OutboundRackPrintPreview } from './OutboundRackPrintPreview'
 
 const MAX_QR_ROWS = 200
 
@@ -13,7 +14,7 @@ type QrTarget = 'box' | 'outbound'
 type QrMode = 'range' | 'list'
 
 const TARGET_COPY: Record<QrTarget, { label: string; hint: string }> = {
-  box: { label: '박스창고', hint: '박스 단위 보관 자리' },
+  box: { label: '박스창고', hint: '자리번호 4칸 라벨 인쇄 / 엑셀' },
   outbound: { label: '출고창고', hint: '렉·고정 자리 라벨 인쇄 / 엑셀' },
 }
 
@@ -46,7 +47,7 @@ function parseListCodes(text: string) {
     if (!code || seen.has(code)) continue
     seen.add(code)
     codes.push(code)
-    if (codes.length >= MAX_QR_ROWS) break
+    if (codes.length > MAX_QR_ROWS) break
   }
   return codes
 }
@@ -72,14 +73,17 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
   const [listText, setListText] = useState('2-1-1\n2-1-2\n2-1-3')
   const [status, setStatus] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
+  const [previewLabels, setPreviewLabels] = useState<string[] | null>(null)
 
-  const codes = useMemo(
+  const parsedCodes = useMemo(
     () =>
       mode === 'range'
         ? buildRangeCodes(prefix, startNo, endNo)
         : parseListCodes(listText),
     [endNo, listText, mode, prefix, startNo],
   )
+  const listTooBig = mode === 'list' && parsedCodes.length > MAX_QR_ROWS
+  const codes = listTooBig ? [] : parsedCodes
   const targetMeta = TARGET_COPY[target]
   const rangeCount = Number(endNo) - Number(startNo) + 1
   const rangeTooBig =
@@ -121,9 +125,10 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
 
   return (
     <div className="space-y-4">
+      <QrTargetSelector target={target} onChange={setTarget} />
       <div className="grid gap-3 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
-          <QrTargetSelector target={target} onChange={setTarget} />
+        <div className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div><h3 className="text-sm font-semibold">박스창고 자리번호 만들기</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">앞자리와 번호 범위를 입력하거나, 인쇄할 자리번호를 한 줄에 하나씩 넣어 주세요.</p></div>
 
           <div>
             <p className="text-xs font-medium text-muted-foreground">만드는 방법</p>
@@ -180,6 +185,7 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
                 자리번호 · 한 줄에 하나
               </span>
               <Textarea
+                aria-label="박스창고 자리번호 목록"
                 rows={8}
                 value={listText}
                 placeholder={'2-1-1\n2-1-2\n6-1-10'}
@@ -189,29 +195,34 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
           )}
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-sm">
+          <div><h3 className="text-base font-semibold">박스창고 자리번호 · A4 4칸 라벨</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">출고창고 렉 번호와 같은 형식으로 자리번호만 크게 인쇄합니다. A4 세로를 2열 × 2행으로 균등하게 나눕니다.</p></div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="muted">{brandName}</Badge>
               <Badge variant="outline">{targetMeta.label}</Badge>
               <Badge variant={codes.length > 0 ? 'success' : 'muted'}>
-                {formatNumber(codes.length)}행
+                {formatNumber(codes.length)}개 자리 · A4 {Math.ceil(codes.length / 4)}장
               </Badge>
             </div>
+            <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" disabled={codes.length === 0 || downloading} onClick={() => setPreviewLabels([...codes])}><Printer className="size-3.5" />4칸 라벨 미리보기</Button>
             <Button
               type="button"
               size="sm"
+              variant="outline"
               disabled={codes.length === 0 || downloading}
               onClick={() => void handleDownload()}
             >
               <Download className="size-3.5" />
               {downloading ? '준비 중...' : '엑셀 내려받기'}
             </Button>
+            </div>
           </div>
 
-          {rangeTooBig ? (
-            <p className="text-xs text-danger">
-              한 번에 {formatNumber(MAX_QR_ROWS)}행까지 만들 수 있습니다.
+          {rangeTooBig || listTooBig ? (
+            <p role="alert" className="text-xs text-danger">
+              한 번에 {formatNumber(MAX_QR_ROWS)}개까지 만들 수 있습니다. 범위를 나눠 주세요.
             </p>
           ) : null}
           {status ? (
@@ -233,22 +244,24 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
                 <thead className="bg-primary text-xs text-primary-foreground">
                   <tr>
                     <th className="px-3 py-2 font-medium">자리</th>
-                    <th className="px-3 py-2 font-medium">QR</th>
+                    <th className="px-3 py-2 font-medium">인쇄 위치</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {codes.map((code) => (
+                  {codes.map((code, index) => (
                     <tr key={code} className="border-t border-border">
                       <td className="px-3 py-2 font-medium">{code}</td>
-                      <td className="px-3 py-2">{code}</td>
+                      <td className="px-3 py-2 text-xs text-muted-foreground">{Math.floor(index / 4) + 1}장 · {['왼쪽 위', '오른쪽 위', '왼쪽 아래', '오른쪽 아래'][index % 4]}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
           )}
+          <p className="text-xs leading-relaxed text-muted-foreground">인쇄 설정: A4 세로 · 배율 100% · 여백 없음 · 머리글/바닥글 끄기. 마지막 장의 남는 칸은 비워 둡니다.</p>
         </div>
       </div>
+      {previewLabels && <OutboundRackPrintPreview labels={previewLabels} labelKind="box" onClose={() => setPreviewLabels(null)} />}
     </div>
   )
 }
