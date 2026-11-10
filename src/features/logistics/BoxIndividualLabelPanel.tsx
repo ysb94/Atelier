@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Printer } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,11 @@ import './box-individual-label.css'
 const MAX_LABELS = MAX_INDIVIDUAL_BOX_CODES
 const RECENT_CODES_KEY = 'atelier:individual-box-labels:recent:v1'
 type PreparedLabels = { key: string; images: Map<string, string> }
+
+// Size a single line for both monospace ASCII codes and full-width characters.
+function codeTextUnits(code: string) {
+  return Math.max(1, Array.from(code).reduce((units, char) => units + (/^[\x20-\x7e]$/.test(char) ? .62 : 1.05), 0))
+}
 
 function readRecentCodes() {
   try {
@@ -125,7 +130,8 @@ export function BoxIndividualLabelPanel() {
         img.src = prepared.images.get(code)!
         img.alt = code + ' QR'
         const number = doc.createElement('strong')
-        number.className = 'box-roll-code' + (code.length > 12 ? ' box-roll-code-long' : '')
+        number.className = 'box-roll-code'
+        number.style.setProperty('--roll-code-units', String(codeTextUnits(code)))
         number.textContent = code
         label.append(img, number)
         doc.body.appendChild(label)
@@ -165,7 +171,7 @@ export function BoxIndividualLabelPanel() {
       {error && <p role="alert" className="text-xs text-danger">{error}</p>}
       {status && <p role="status" className="text-xs text-muted-foreground">{status}</p>}
       <div aria-label="개별 롤 라벨 미리보기" className="flex max-h-[36rem] min-h-64 flex-wrap items-start justify-center gap-4 overflow-auto rounded-lg border border-dashed border-border bg-muted/20 p-3">
-        {ready ? codes.map(code => <div key={code} className="space-y-1"><div className="box-roll-label shadow-sm"><img src={prepared.images.get(code)} alt={code + ' QR'} /><strong className={'box-roll-code' + (code.length > 12 ? ' box-roll-code-long' : '')}>{code}</strong></div><p className="text-center text-xs text-muted-foreground">{count}장</p></div>) : <p className="self-center text-sm text-muted-foreground">{validation ? '박스 번호와 출력 매수를 입력하면 미리보기가 표시됩니다.' : error ? 'QR 준비 실패' : 'QR 준비 중…'}</p>}
+        {ready ? codes.map(code => <div key={code} className="space-y-1"><div className="box-roll-label shadow-sm"><img src={prepared.images.get(code)} alt={code + ' QR'} /><strong className="box-roll-code" style={{ '--roll-code-units': codeTextUnits(code) } as CSSProperties}>{code}</strong></div><p className="text-center text-xs text-muted-foreground">{count}장</p></div>) : <p className="self-center text-sm text-muted-foreground">{validation ? '박스 번호와 출력 매수를 입력하면 미리보기가 표시됩니다.' : error ? 'QR 준비 실패' : 'QR 준비 중…'}</p>}
       </div>
     </CardContent></Card>
   </div>

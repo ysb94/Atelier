@@ -291,6 +291,7 @@ try {
   assert.equal(new Set(generatedCodes).size, 100)
   assert.ok(generatedCodes.every(code => /^ENJ-261110-[A-HJ-NP-Z2-9]{8}$/.test(code) && /[2-9]/.test(code.slice(-8)) && /[A-Z]/.test(code.slice(-8))), 'Korea date and readable mixed random suffix')
   await page.waitForFunction(() => document.querySelectorAll('.box-roll-label img').length === 100)
+  await page.locator('.box-roll-label').first().screenshot({ path: path.join(output, 'roll-label-right-qr.png') })
   await page.getByLabel('생성할 박스 개수', { exact: true }).fill('50')
   assert.equal(await rollInput.inputValue(), generatedCodes.join('\n'), 'editing quantity does not silently replace issued codes')
   await page.evaluate(() => { window.__rackPrintCalls = 0 })
@@ -333,10 +334,10 @@ try {
   const rollFrame = page.frameLocator('iframe.box-roll-print-frame')
   assert.deepEqual(await rollFrame.locator('.box-roll-code').allTextContents(), ['BOX-001', 'BOX-001', longRollCode, longRollCode])
   const rollDimensions = await rollFrame.locator('.box-roll-label').evaluateAll(labels => labels.map(label => {
-    const r = label.getBoundingClientRect(), text = label.querySelector('strong').getBoundingClientRect()
-    return { width: r.width, height: r.height, fits: text.bottom <= r.bottom && text.right <= r.right && label.scrollHeight <= label.clientHeight }
+    const r = label.getBoundingClientRect(), code = label.querySelector('strong'), text = code.getBoundingClientRect(), qr = label.querySelector('img').getBoundingClientRect()
+    return { width: r.width, height: r.height, fits: text.bottom <= r.bottom && text.right <= r.right && label.scrollHeight <= label.clientHeight && code.scrollWidth <= code.clientWidth, rightAligned: qr.left - r.left > r.right - qr.right + 50, belowQr: text.top >= qr.bottom, singleLine: getComputedStyle(code).whiteSpace === 'pre' }
   }))
-  assert.ok(rollDimensions.every(r => Math.abs(r.width - 60 * 96 / 25.4) < 1 && Math.abs(r.height - 40 * 96 / 25.4) < 1 && r.fits))
+  assert.ok(rollDimensions.every(r => Math.abs(r.width - 60 * 96 / 25.4) < 1 && Math.abs(r.height - 40 * 96 / 25.4) < 1 && r.fits && r.rightAligned && r.belowQr && r.singleLine))
   const rollDecoded = await page.evaluate(async () => {
     const doc = document.querySelector('iframe.box-roll-print-frame').contentDocument
     const values = []
