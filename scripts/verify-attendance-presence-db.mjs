@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { PGlite } from '@electric-sql/pglite'
+import { verifyWorkforceGuardAlias } from './verify-workforce-guard-alias.mjs'
 
 const db=await PGlite.create()
 const company='e0000000-0000-4000-8000-000000000001', department='20000000-0000-4000-8000-000000000001'
@@ -56,10 +57,15 @@ try {
     assert.ok(definition, `실제 잠금 보완 함수 ${name}`)
     await db.exec(definition[0])
   }
+  await verifyWorkforceGuardAlias(db, 'presence')
   assert.equal(await value('select md5(jsonb_agg(p order by id)::text) from profiles p'),original)
   assert.equal(Number(await value("select count(*) from cron.job where jobname='atelier-attendance-presence' and schedule='* * * * *'")),1)
 
   let f=await fixture();let first=await at(f.id,'18:10')
+  await db.exec("select set_config('test.workforce_mode','unmanaged',false)")
+  await advance(f.id, first)
+  assert.equal(Number(await value('select count(*) from app.attendance_presence_sessions')),0,'관리 대상 밖 직원은 계속 제외')
+  await db.exec("select set_config('test.workforce_mode','head-office',false)")
   assert.equal(new Date(await value('select app.attendance_presence_end($1)',[f.id])).getTime(),(await at(f.id,'18:00')).getTime())
   await advance(f.id,new Date(first.getTime()-1));assert.equal(Number(await value('select count(*) from app.attendance_presence_checks')),0)
   await advance(f.id,first);await advance(f.id,first);assert.equal(Number(await value('select count(*) from app.attendance_presence_checks')),1,'여러 창에서도 한 요청')

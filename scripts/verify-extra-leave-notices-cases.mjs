@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { verifyWorkforceGuardAlias } from './verify-workforce-guard-alias.mjs'
 
 export async function verifyExtraLeaveNotices({db,value,actor,company,other,id}) {
   const employee=id(30), manager=id(1), peer=id(31), foreign=id(32), session='30000000-0000-4000-8000-000000000030'
@@ -16,6 +17,7 @@ export async function verifyExtraLeaveNotices({db,value,actor,company,other,id})
   const before=await hash()
   const migration=await readFile('supabase/migrations/20261029120358_extra_leave_usage_notices.sql','utf8')
   await db.exec(migration.replaceAll("(now() at time zone 'Asia/Seoul')::date","current_setting('test.today')::date").replaceAll('clock_timestamp()',"(current_setting('test.today')::date::timestamp at time zone 'Asia/Seoul')"))
+  await verifyWorkforceGuardAlias(db, 'notice')
   assert.equal(await hash(),before,'기존 직원·잔여·기본 안내·확인 이력 보존')
   const today=async day=>{await db.exec('reset role');await db.query("select set_config('test.today',$1,false)",[day])}
   const grant=async(days,expiry,source='manual',who=employee,created='2026-10-29')=>{
@@ -28,6 +30,10 @@ export async function verifyExtraLeaveNotices({db,value,actor,company,other,id})
   const notices=async key=>{await db.exec('reset role');return(await db.query('select * from extra_leave_usage_notices where grant_id=$1 order by issued_at,phase',[key])).rows}
   const dispatch=async key=>{await db.exec('reset role');return value('select app.dispatch_extra_leave_grant_notice($1)',[key])}
   const normal=await grant(2,'2027-04-30'), birthday=await grant(0.5,'2026-11-12','birthday')
+  await db.exec("select set_config('test.workforce_mode','unmanaged',false)")
+  const excluded=await grant(1,'2027-04-30')
+  assert.equal((await notices(excluded)).length,0,'관리 대상 밖 직원의 알림은 계속 제외')
+  await db.exec("select set_config('test.workforce_mode','head-office',false)")
   let first=(await notices(normal))[0];assert.equal(first.phase,'registered');assert.equal(Number(first.remaining_days),2);assert.ok(first.body.includes('사유 테스트'));assert.ok(first.body.includes('2027-04-30'))
   assert.equal(await dispatch(normal),0,'연속 실행 등록 중복 없음');assert.equal((await notices(birthday)).length,1)
   await today('2026-11-05');await dispatch(birthday);assert.deepEqual((await notices(birthday)).map(n=>n.phase),['registered','oneWeek'],'생일은 등록과 1주일 전만')
