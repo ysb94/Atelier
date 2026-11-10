@@ -25,7 +25,10 @@
 .attendance-summary-table thead th { position: sticky; top: 0; z-index: 2; padding: 13px 12px; background: var(--color-primary); font-weight: 500; color: var(--color-primary-foreground); white-space: nowrap; }
 .attendance-summary-table thead th:first-child { left: 0; z-index: 3; }
 .attendance-summary-table tbody th { position: sticky; left: 0; z-index: 1; width: 210px; min-width: 210px; background: var(--color-card); border-right: 1px solid var(--color-border); text-align: left; font-weight: 400; }
-.attendance-summary-table tbody th, .attendance-summary-table td { padding: 13px 14px; border-bottom: 1px solid var(--color-border); }
+/* 행 사이 로즈색 선: 기획안·중국 업무 표와 같은 레드 옅은 선. */
+.attendance-summary-table tbody th, .attendance-summary-table td { padding: 14px; border-bottom: 1px solid color-mix(in srgb, var(--color-primary) 45%, white); }
+.attendance-person { display: flex; align-items: center; gap: 10px; }
+.attendance-avatar { display: grid; place-items: center; flex: none; width: 32px; height: 32px; border-radius: 999px; background: var(--color-muted); color: var(--color-foreground); font-size: 12px; font-weight: 700; }
 .attendance-summary-table tbody tr:last-child > * { border-bottom: 0; }
 .attendance-summary-table tbody th button { font-weight: 600; font-size: 13px; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--color-primary) 35%, transparent); text-underline-offset: 4px; }
 .attendance-summary-table small { display: block; font-size: 10px; color: var(--color-muted-foreground); margin-top: 5px; font-weight: 400; }
