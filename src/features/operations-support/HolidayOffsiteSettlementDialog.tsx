@@ -11,6 +11,7 @@ import { holidayCredit, holidayPhase, type HolidayWork } from './holiday-work'
 import { isWorkday } from './monthly-attendance'
 import { offsitePhase } from './offsite-period'
 import { durationInputMinutes, formatDurationClock, workDurationLabel } from './overtime-hours'
+import { useHolidayWork } from './use-holiday-work'
 
 const MODES = [
   { value: 'leave', label: '휴가로 지급' },
@@ -22,7 +23,14 @@ function validDays(days: number) {
   return days > 0 && days <= 365 && Number.isInteger(days * 4)
 }
 
-export function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error, refresh, policyReady, close }: {
+export function HolidayOffsiteCaseDialog({ request, month, close }: { request: LeaveRequest; month: string; close: () => void }) {
+  const work = useHolidayWork(month, 'operations', request.id)
+  const error = work.error ?? (work.data?.ready === false ? new Error('외근 기록을 조회할 수 없습니다.') : null)
+  return <HolidayOffsiteSettlementDialog request={request} rows={work.rows} active={work.enabled}
+    loading={work.isPending} error={error} refresh={work.refetch} policyReady={Boolean(work.data?.policy)} close={close} />
+}
+
+function HolidayOffsiteSettlementDialog({ request, rows, active, loading, error, refresh, policyReady, close }: {
   request: LeaveRequest; rows: HolidayWork[]; active: boolean; loading: boolean
   error: Error | null; refresh: () => Promise<unknown>; policyReady: boolean; close: () => void
 }) {

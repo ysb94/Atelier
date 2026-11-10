@@ -19,7 +19,7 @@ export function FixtureAuth({children}){const[role,setRole]=useState('staff');wi
 export const useAuth=()=>useContext(Auth),usePagePreview=()=>null,useRenderWatch=()=>{};
 export const useMeetingNotices=()=>({items:[],series:[],ready:true,error:null}),listMeetingInvitations=async()=>[],listMyLeaveUsageNotices=async()=>[],listMyLateStatementNotices=async()=>[],lateStatementNoticeItems=()=>[],leaveNoticeItems=()=>[];
 window.__offsites=[];window.__caseQueries=[];window.__weekdaySaved=null;window.__failAction=null;
-export function useMonthlyWorkRequests(month,enabled=true){const q=useQuery({queryKey:['company-leave-cover',window.__role,month],enabled,queryFn:async()=>window.__offsites});return{...q,rows:q.data??[]}}
+export function useMonthlyWorkRequests(month,enabled=true){const q=useQuery({queryKey:['company-leave-cover',window.__role,month],enabled,queryFn:async()=>window.__offsites.filter(r=>r.from.slice(0,7)<=month&&r.to.slice(0,7)>=month)});return{...q,rows:q.data??[]}}
 export const offsiteSettlementPreview=async(request)=>request==='weekend-trip'
  ? {settlement:null,dates:[{date:'2026-11-07',minutes:480}]}
  : {settlement:window.__weekdaySaved,dates:[{date:'2026-10-30',minutes:360},{date:'2026-10-31',minutes:1380},{date:'2026-11-01',minutes:1380},{date:'2026-11-02',minutes:180}]};
@@ -71,7 +71,7 @@ try{
  await page.evaluate(()=>window.__active(true));await page.getByLabel('주말·공휴일 근무 상세').waitFor();await page.waitForFunction(()=>window.__reads.includes('holiday:submitted:1'))
  assert.equal(await page.getByLabel('처리 필요 1건').count(),1,'reading leaves approval pending')
  await page.getByRole('button',{name:'실제 시간 확인',exact:true}).click();await page.getByText('정산 대기 · 시간 보관',{exact:false}).first().waitFor()
- await page.evaluate(()=>window.__setRole('ops'));await page.getByText(/서면합의 기준 미등록/).waitFor();await page.getByLabel('검증 직원 2026-10-10 정산 선택').check();await page.getByRole('button',{name:'선택한 시간 정산',exact:true}).click()
+ await page.evaluate(()=>window.__setRole('ops'));await page.getByText('정산 기준 및 보상휴가 설정',{exact:true}).click();await page.getByText(/서면합의 기준 미등록/).waitFor();await page.getByLabel('검증 직원 2026-10-10 정산 선택').check();await page.getByRole('button',{name:'선택한 시간 정산',exact:true}).click()
  const settle=page.getByRole('dialog',{name:'휴일근무 보상 확정'});assert.equal(await settle.locator('option[value="leave"]').evaluate(el=>el.disabled),true,'no written agreement means no leave issuance')
  await settle.getByRole('button',{name:'닫기',exact:true}).click();await page.getByRole('button',{name:'합의 기준 등록',exact:true}).click();await page.getByLabel('보상휴가 서면합의 기준명').fill('격리 검증용 체결 기준');await page.getByLabel('보상휴가 서면합의 체결일').fill('2026-10-01');await page.getByLabel('해당 서면합의가 체결되어 있고 적용 범위를 확인했습니다.').check();await page.getByRole('button',{name:'합의 기준 저장'}).click()
  await page.getByLabel('검증 직원 2026-10-10 정산 선택').check();await page.getByRole('button',{name:'선택한 시간 정산',exact:true}).click();await settle.getByLabel('휴일 근무 보상 방식').selectOption('leave');await settle.getByLabel('보상휴가 지급 일수').fill('0.25');await settle.getByLabel('보상휴가 사용기한').fill('2027-01-31');await settle.getByLabel('휴일 보상 확정 사유').fill('일부 보상휴가, 잔여 시간 보존');await settle.getByLabel('근무 확인 내역·가산 기준·중복 지급 여부를 확인했습니다.').check();await settle.getByRole('button',{name:'보상 확정',exact:true}).click();await settle.waitFor({state:'hidden'});await page.getByText('일부 정산 · 잔여 시간 보관',{exact:false}).first().waitFor()
@@ -84,13 +84,15 @@ try{
  await page.evaluate(()=>{
    window.__policy=null;
    const trip={id:'mixed-trip',kind:'offsite',status:'approved',employeeId:'staff',employeeName:'검증 직원',departmentName:'기획팀',from:'2026-10-30',to:'2026-11-02',start:'09:00',end:'03:00',offsiteContinuous:true,place:'촬영 현장',note:'주말 포함 촬영',createdAt:'2026-10-29'};
-   window.__offsites=[trip,{...trip,id:'weekend-trip',from:'2026-11-07',to:'2026-11-07',start:'11:00',end:'19:00'}];
+   window.__offsites=[trip,{...trip,id:'weekend-trip',from:'2026-11-07',to:'2026-11-07',start:'11:00',end:'19:00'},
+     {...trip,id:'pending-trip',employeeName:'외근 승인 대기 직원',status:'pending',from:'2026-10-24',to:'2026-10-24',start:'11:00',end:'19:00'}];
    const base=window.__rows[0],source={offsites:[{id:'mixed-trip'}],clocks:[]};
    window.__rows=[{...base,id:'sat-work',date:'2026-10-31',remainingUnits:360,settlements:[],source},{...base,id:'sun-work',date:'2026-11-01',remainingUnits:360,settlements:[],source},
      {...base,id:'weekend-work',date:'2026-11-07',actualMinutes:480,creditUnits:1440,remainingUnits:1440,settlements:[],source:{offsites:[{id:'weekend-trip'}],clocks:[]}}];
    window.__setRole('ops');window.__navigate('/operations-support?part=attendance&attendanceView=offsite&oldOffsite=1');
  })
  await page.getByRole('link',{name:'외근 건 전체 후처리로 이동'}).waitFor();assert.equal(await page.getByRole('button',{name:'후처리 확정',exact:true}).count(),0,'mixed trip cannot be split from old tab');assert.equal(await page.getByLabel('2026-10-30 실제 추가 근무 시:분').count(),0)
+ await page.evaluate(()=>window.__refresh())
  await page.getByRole('link',{name:'외근 건 전체 후처리로 이동'}).click()
  const modal=page.getByRole('dialog',{name:'외근 건 전체 후처리',exact:true})
  const saveOffsite=modal.getByRole('button',{name:'저장',exact:true})
@@ -99,7 +101,14 @@ try{
  const beforeLater=await page.evaluate(()=>window.__writes.length)
  await modal.getByRole('button',{name:'나중에 처리',exact:true}).click();await saveOffsite.click();await modal.waitFor({state:'hidden'})
  assert.equal(await page.evaluate(()=>window.__writes.length),beforeLater,'deferring never posts a settlement')
- await page.getByRole('row').filter({hasText:'2026-10-30'}).getByRole('button',{name:'건 전체 후처리',exact:true}).click()
+ const unified=page.getByRole('table',{name:'주말·공휴일 근무 목록',exact:true})
+ const mixedRow=unified.getByRole('row').filter({hasText:'2026-10-31'})
+ await mixedRow.waitFor()
+ assert.equal(await page.getByRole('table').count(),1,'holiday work and trips are one table')
+ assert.equal(await unified.getByRole('row').filter({hasText:'검증 직원'}).count(),1,'one monthly row for the same confirmed day')
+ assert.equal(await mixedRow.getByRole('checkbox').count(),0,'linked trip has one settlement entry point')
+ await unified.getByRole('row').filter({hasText:'외근 승인 대기 직원'}).waitFor()
+ await mixedRow.getByRole('button',{name:'후처리',exact:true}).click()
  await modal.getByRole('button',{name:'시간으로 정산',exact:true}).click()
  const weekday=modal.getByLabel('2026-10-30 실제 추가 근무 시:분')
  await weekday.fill('2:00');await modal.getByLabel('2026-11-02 실제 추가 근무 시:분').fill('1:00')
@@ -124,5 +133,5 @@ try{
  await saveOffsite.click();await modal.waitFor({state:'hidden'})
  assert.deepEqual(await page.evaluate(()=>window.__rows.find(r=>r.id==='weekend-work').remainingUnits),480)
  assert.equal(await page.evaluate(()=>window.__writes.filter(w=>w.a==='offsite-settle').length),1,'no weekday write for a weekend-only trip')
- assert.deepEqual(errors,[]);assert.deepEqual(external,[]);console.log('holiday-work browser: employee/review/payment regression, one offsite modal, cross-month mixed trip, defer, partial failure retry, 1.5x and weekend-only leave passed')
+ assert.deepEqual(errors,[]);assert.deepEqual(external,[]);console.log('holiday-work browser: one unified table, one action per linked trip, pending trip visibility, employee/review/payment regression, cross-month modal, defer, retry and 1.5x passed')
 }finally{await browser?.close();await new Promise(resolve=>server.close(resolve))}

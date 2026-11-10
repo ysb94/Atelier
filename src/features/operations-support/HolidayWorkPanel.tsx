@@ -15,7 +15,10 @@ import { MyHomeNotificationList } from '@/features/settings/MyHomeNotificationLi
 import { HolidaySettlementEditor, HolidayWorkInput, type HolidaySave } from './HolidayWorkEditor'
 import { holidayCredit, holidayPhase, holidayTime, HOLIDAY_LOCATIONS, type HolidayWork } from './holiday-work'
 import { useHolidayWork } from './use-holiday-work'
-import { HolidayOffsiteCases } from './HolidayOffsiteCases'
+import { HolidayOffsiteCaseDialog } from './HolidayOffsiteSettlementDialog'
+import { useMonthlyWorkRequests } from './use-monthly-work-requests'
+import { firstOffsiteHoliday } from './offsite-holiday-routing'
+import { offsitePhase, OFFSITE_PHASE_LABEL } from './offsite-period'
 import { localDateKey } from './monthly-attendance'
 
 export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 'review' | 'operations'; month?: string }) {
@@ -26,7 +29,14 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
   const routedMonth = params.get('holidayMonth')
   const month = routedMonth && /^\d{4}-(0[1-9]|1[0-2])$/.test(routedMonth) ? routedMonth : monthProp ?? localMonth
   const caseId = scope==='operations' ? params.get('offsiteCase') ?? undefined : undefined
-  const work = useHolidayWork(month, scope, caseId), [search, setSearch] = useState(''), [filter, setFilter] = useState('all')
+  const work = useHolidayWork(month, scope), [search, setSearch] = useState(''), [filter, setFilter] = useState('all')
+  const requests = useMonthlyWorkRequests(month, scope === 'operations' && work.enabled)
+  const offsites = useMemo(() => new Map((scope === 'operations' ? requests.rows : [])
+    .filter(request => firstOffsiteHoliday(request)).map(request => [request.id, request])), [scope, requests.rows])
+  const offsite = caseId ? offsites.get(caseId) : undefined
+  const linkedOffsiteIds = useMemo(() => new Set(work.rows.flatMap(item => item.source.offsites.map(source => source.id))), [work.rows])
+  const unlinkedOffsites = work.isPending || work.error ? [] : [...offsites.values()].filter(request =>
+    (request.status === 'approved' || request.status === 'pending') && !linkedOffsiteIds.has(request.id))
   const [selected, setSelected] = useState<string | null>(null), [editing, setEditing] = useState<HolidayWork | 'plan' | null>(null)
   const [basket, setBasket] = useState<HolidayWork[]>([]), [settling, setSettling] = useState(false), [limit, setLimit] = useState(50)
   const detailAnchor = useRef<HTMLDivElement>(null), editorAnchor = useRef<HTMLDivElement>(null)
@@ -42,8 +52,35 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
   const detailDisplayed = Boolean(row)
   useEffect(() => { if (active && selected && detailDisplayed) detailAnchor.current?.scrollIntoView({ block: 'nearest' }) }, [active,selected,detailDisplayed])
   useEffect(() => { if (active && editing) editorAnchor.current?.scrollIntoView({ block: 'nearest' }) }, [active,editing])
-  const visible = useMemo(() => work.rows.filter(r => `${r.employeeName} ${r.departmentName ?? ''}`.toLocaleLowerCase('ko').includes(search.trim().toLocaleLowerCase('ko'))
-    && (filter === 'all' || filter === 'review' && r.state === 'submitted' || filter === 'settle' && r.state === 'approved' && r.remainingUnits > 0 || filter === 'paid' && r.settlements.length > 0 || filter === 'planned' && ['planned', 'unreported', 'returned'].includes(r.state))), [work.rows, filter, search])
+  const needle = search.trim().toLocaleLowerCase('ko')
+  const visible = useMemo(() => work.rows.filter(r => `${r.employeeName} ${r.departmentName ?? ''}`.toLocaleLowerCase('ko').includes(needle)
+    && (filter === 'all' || filter === 'review' && r.state === 'submitted' || filter === 'settle' && r.state === 'approved' && r.remainingUnits > 0 && !r.legacySettled || filter === 'paid' && r.settlements.length > 0 || filter === 'planned' && ['planned', 'unreported', 'returned'].includes(r.state))), [work.rows, filter, needle])
+  const visibleOffsites = (filter === 'all' || filter === 'planned' ? unlinkedOffsites : [])
+    .filter(request => `${request.employeeName} ${request.departmentName}`.toLocaleLowerCase('ko').includes(needle))
+  function selectOffsite(id: string | null) {
+    if (!active) return
+    setParams(previous => {
+      const next = new URLSearchParams(previous)
+      if (id) next.set('offsiteCase', id)
+      else next.delete('offsiteCase')
+      next.delete('holidayWork')
+      next.delete('holidayEvent')
+      return next
+    }, { replace: true })
+  }
+  function changeMonth(value: string) {
+    if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(value)) return
+    setMonth(value)
+    setLimit(50)
+    setSelected(null)
+    if (active && routedMonth) setParams(previous => {
+      const next = new URLSearchParams(previous)
+      next.delete('holidayMonth')
+      next.delete('holidayWork')
+      next.delete('holidayEvent')
+      return next
+    }, { replace: true })
+  }
   function close() {
     setSelected(null)
     if (active && params.has('holidayWork')) setParams(previous => { const next = new URLSearchParams(previous); next.delete('holidayWork'); next.delete('holidayMonth'); next.delete('holidayEvent'); return next }, { replace: true })
@@ -55,30 +92,84 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
   return <section className="space-y-4" aria-label={scope === 'operations' ? '주말·공휴일 근무 관리' : scope === 'review' ? '주말·공휴일 실제 시간 확인' : '내 주말·공휴일 근무'}>
     <header><h2 className="text-base font-semibold">{scope === 'operations' ? '주말·공휴일 근무 관리' : scope === 'review' ? '주말·공휴일 실제 시간 확인' : '주말·공휴일 근무'}</h2><p className="text-sm text-muted-foreground">{scope === 'mine' ? '외근·출퇴근 기록을 참고해 실제 일한 구간만 제출하세요. 부서 승인자가 시간을 확인하고 운영지원이 수당·보상휴가를 확정합니다.' : '사무실·외근을 직원·날짜별로 한 번만 확인합니다. 실제 시간과 가산 보상 시간을 구분하며 평일 야근 누적에 중복 반영하지 않습니다.'}</p></header>
     {scope === 'operations' && <MyHomeNotificationList tab="holiday-work" />}
-    <FilterBar>{!monthProp && !caseId && <label className="text-sm">근무 월<Input aria-label="휴일 근무 월" type="month" value={month} onChange={e => { if (/^\d{4}-(0[1-9]|1[0-2])$/.test(e.target.value)) { setMonth(e.target.value); setLimit(50); if (params.has('holidayMonth')) close() } }} /></label>}<Input aria-label="휴일 근무 직원 검색" placeholder="직원·부서 검색" value={search} onChange={e => setSearch(e.target.value)} />
+    <FilterBar>{!monthProp && <label className="text-sm">근무 월<Input aria-label="휴일 근무 월" type="month" value={month} onChange={e => changeMonth(e.target.value)} /></label>}<Input aria-label="휴일 근무 직원 검색" placeholder="직원·부서 검색" value={search} onChange={e => setSearch(e.target.value)} />
       {scope === 'mine' && <Button type="button" disabled={!work.data?.ready} onClick={() => setEditing('plan')}>주말·공휴일 근무 예정 등록</Button>}</FilterBar>
     {!work.enabled && <p className="text-sm text-muted-foreground">본인 계정의 활성 화면에서 조회합니다.</p>}
     {work.isSuccess && !work.data.ready && <p role="status" className="rounded-xl border border-border bg-muted p-3 text-sm">주말·공휴일 근무의 추가 DB 설정 적용 대기입니다. 기존 근무·연차·권한은 그대로 유지됩니다.</p>}
     {work.error && <p role="alert" className="text-sm text-danger">{work.error.message}<Button type="button" size="sm" variant="outline" onClick={() => void work.refetch()}>다시 조회</Button></p>}
     {work.data?.ready && <>
-      {scope==='operations' && <HolidayOffsiteCases month={month} search={search} policyReady={Boolean(work.data.policy)}
-        enabled={work.enabled} rows={caseId ? work.rows : []} loading={work.isPending} error={work.error} refresh={work.refetch} />}
-      {caseId && <p className="text-sm font-medium">선택 외근 전체 기간의 주말·공휴일 기록 · 다른 달의 날짜도 함께 표시합니다.</p>}
-      <FilterTabs ariaLabel="휴일 근무 진행 구분" value={filter} onChange={setFilter} tabs={[{ value: 'all', label: '전체', count: work.rows.length }, { value: 'planned', label: '예정·입력 필요', count: work.rows.filter(r => ['planned', 'unreported', 'returned'].includes(r.state)).length }, { value: 'review', label: '부서 확인 대기', count: work.rows.filter(r => r.state === 'submitted').length }, { value: 'settle', label: '정산 대기', count: work.rows.filter(r => r.state === 'approved' && r.remainingUnits > 0).length }, { value: 'paid', label: '정산 내역', count: work.rows.filter(r => r.settlements.length).length }]} />
-      <StatGrid><StatTile label="주말·공휴일 실제 시간" value={holidayCredit(work.rows.reduce((sum, r) => sum + (r.actualMinutes ?? 0) * 2, 0))} /><StatTile label="미정산 보상 시간" value={holidayCredit(work.rows.reduce((sum, r) => sum + r.remainingUnits, 0))} /><StatTile label="부서 확인 대기" value={`${work.rows.filter(r => r.state === 'submitted').length}건`} /></StatGrid>
+      {scope === 'operations' && requests.error && <div role="alert" className="text-sm text-danger">연결된 외근 신청을 불러오지 못했습니다. <Button type="button" size="sm" variant="outline" onClick={() => void requests.refetch()}>다시 조회</Button></div>}
+      {offsite && <HolidayOffsiteCaseDialog key={offsite.id} request={offsite} month={month} close={() => selectOffsite(null)} />}
+      {caseId && !offsite && requests.isSuccess && <div role="status" className="text-sm text-muted-foreground">선택한 외근 기록을 찾을 수 없습니다. <Button type="button" size="sm" variant="outline" onClick={() => selectOffsite(null)}>닫기</Button></div>}
+      <FilterTabs ariaLabel="휴일 근무 진행 구분" value={filter} onChange={setFilter} tabs={[
+        { value: 'all', label: '전체', count: work.rows.length + unlinkedOffsites.length },
+        { value: 'planned', label: '예정·입력 필요', count: work.rows.filter(r => ['planned', 'unreported', 'returned'].includes(r.state)).length + unlinkedOffsites.length },
+        { value: 'review', label: '부서 확인 대기', count: work.rows.filter(r => r.state === 'submitted').length },
+        { value: 'settle', label: '정산 대기', count: work.rows.filter(r => r.state === 'approved' && r.remainingUnits > 0 && !r.legacySettled).length },
+        { value: 'paid', label: '정산 내역', count: work.rows.filter(r => r.settlements.length).length },
+      ]} />
+      <StatGrid className="mb-0 grid-cols-2 xl:grid-cols-2">
+        <StatTile label="주말·공휴일 실제 시간" value={holidayCredit(work.rows.reduce((sum, r) => sum + (r.actualMinutes ?? 0) * 2, 0))} />
+        <StatTile label="미정산 보상 시간" value={holidayCredit(work.rows.reduce((sum, r) => sum + r.remainingUnits, 0))} />
+      </StatGrid>
       {editing && <div ref={editorAnchor}><HolidayWorkInput key={editing === 'plan' ? `plan:${month}` : `${editing.employeeId}:${editing.date}:${editing.version}`} row={editing === 'plan' ? undefined : editing} planned={editing === 'plan'} month={month} save={save} close={() => setEditing(null)} /></div>}
       {row && <div ref={detailAnchor}><HolidayWorkDetail key={`${row.employeeId}:${row.date}`} row={row} event={detailEvent?.note} scope={scope} save={save} close={close} edit={() => setEditing(row)} /></div>}
       {read.error && <p role="alert" className="text-sm text-danger">{read.error}<Button type="button" variant="outline" size="sm" onClick={read.retry}>읽음 저장 재시도</Button></p>}
       {scope === 'operations' && <>
-        <p className="text-xs text-muted-foreground">토요일은 회사 기준 1.5배, 일요일·공휴일은 8시간 이내 1.5배·초과분 2배, 22시~06시 근무는 0.5배를 추가해 표시합니다. 지급 전 계약·근무일 구분과 통상시급을 확인하세요.</p>
-        <HolidayPolicy policy={work.data.policy} save={save} />
         {basket.length > 0 && <Card className="flex flex-wrap items-center gap-3 p-3"><p className="text-sm">{basket[0].employeeName} · 선택 {basket.length}일 · {holidayCredit(basket.reduce((s, r) => s + r.remainingUnits, 0))}<span className="block text-xs text-muted-foreground">월을 바꿔 같은 직원의 시간을 모을 수 있습니다. 시간은 자동 소멸하지 않습니다.</span></p><Button type="button" onClick={() => setSettling(true)}>선택한 시간 정산</Button><Button type="button" variant="outline" onClick={() => { setBasket([]); setSettling(false) }}>선택 해제</Button></Card>}
         {settling && basket.length > 0 && <HolidaySettlementEditor rows={basket} policyReady={Boolean(work.data.policy)} save={save} close={() => { setSettling(false); setBasket([]) }} />}
       </>}
-      <Card className="overflow-x-auto"><table className="w-full min-w-[900px] text-left text-sm"><caption className="sr-only">주말·공휴일 근무 목록</caption><thead className="bg-primary text-primary-foreground"><tr>{['직원·부서', '근무일·장소', '실제 근무', '가산 보상', '미정산', '상태', '확인'].map(label => <th key={label} className="p-3">{label}</th>)}</tr></thead><tbody>
-        {visible.slice(0, limit).map(item => <tr key={`${item.employeeId}:${item.date}`} className="border-t border-border"><td className="p-3">{item.employeeName}<span className="block text-xs text-muted-foreground">{item.departmentName || '부서 미지정'}</span></td><td className="p-3">{item.date}<span className="block text-xs text-muted-foreground">{HOLIDAY_LOCATIONS[item.location]}</span></td><td className="p-3">{item.actualMinutes === null ? '미확인' : holidayCredit(item.actualMinutes * 2)}</td><td className="p-3">{item.creditUnits === null ? '—' : holidayCredit(item.creditUnits)}</td><td className="p-3">{holidayCredit(item.remainingUnits)}</td><td className="p-3"><StatusPill tone={item.state === 'submitted' || item.remainingUnits > 0 ? 'warning' : 'muted'}>{holidayPhase(item)}</StatusPill></td><td className="p-3"><div className="flex flex-wrap gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setSelected(item.id ?? `${item.employeeId}:${item.date}`)}>상세</Button>{item.canSubmit && !item.legacySettled && <Button type="button" size="sm" variant="outline" onClick={() => setEditing(item)}>실제 시간 입력</Button>}{scope === 'operations' && item.canSettle && item.remainingUnits > 0 && !item.legacySettled && <label className="flex items-center gap-1"><input type="checkbox" aria-label={`${item.employeeName} ${item.date} 정산 선택`} checked={basket.some(r => r.id === item.id)} onChange={() => selectCompensation(item)} />정산 선택</label>}</div></td></tr>)}
-        {!visible.length && <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">{work.isPending ? '불러오는 중…' : '해당하는 근무가 없습니다.'}</td></tr>}
-      </tbody></table></Card>{visible.length > limit && <Button type="button" variant="outline" onClick={() => setLimit(n => n + 50)}>더 보기</Button>}
+      <Card className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm">
+        <caption className="sr-only">주말·공휴일 근무 목록</caption>
+        <thead className="bg-primary text-primary-foreground"><tr>{['직원·부서', '근무일·장소', '실제 근무', '가산 보상', '미정산', '상태', '처리'].map(label => <th key={label} className="p-3">{label}</th>)}</tr></thead>
+        <tbody>
+          {visible.slice(0, limit).map(item => {
+            const trips = item.source.offsites.flatMap(source => {
+              const trip = offsites.get(source.id)
+              return trip ? [trip] : []
+            })
+            const offsiteLookupReady = !item.source.offsites.length || requests.isSuccess
+            const canSelect = scope === 'operations' && offsiteLookupReady && trips.length === 0 && item.canSettle && item.remainingUnits > 0 && !item.legacySettled
+            return <tr key={`${item.employeeId}:${item.date}`} className="border-t border-border">
+              <td className="p-3">{item.employeeName}<span className="block text-xs text-muted-foreground">{item.departmentName || '부서 미지정'}</span></td>
+              <td className="p-3">{item.date}<span className="block text-xs text-muted-foreground">{HOLIDAY_LOCATIONS[item.location]}{trips.length === 1 && trips[0].place && ` · ${trips[0].place}`}</span></td>
+              <td className="p-3">{item.actualMinutes === null ? '미확인' : holidayCredit(item.actualMinutes * 2)}</td>
+              <td className="p-3">{item.creditUnits === null ? '—' : holidayCredit(item.creditUnits)}</td>
+              <td className="p-3">{holidayCredit(item.remainingUnits)}</td>
+              <td className="p-3"><StatusPill tone={item.state === 'submitted' || item.remainingUnits > 0 ? 'warning' : 'muted'}>{holidayPhase(item)}</StatusPill></td>
+              <td className="p-3"><div className="flex flex-wrap items-center gap-2">
+                {trips.map((trip, index) => <Button key={trip.id} type="button" size="sm" variant={item.remainingUnits > 0 ? 'default' : 'outline'}
+                  title={`${trip.from} ${trip.start} ~ ${trip.to} ${trip.end}${trip.place ? ` · ${trip.place}` : ''}`}
+                  onClick={() => selectOffsite(trip.id)}>{trips.length === 1 ? '후처리' : `외근 ${index + 1} 후처리`}</Button>)}
+                <Button type="button" size="sm" variant="outline" onClick={() => setSelected(item.id ?? `${item.employeeId}:${item.date}`)}>상세</Button>
+                {item.canSubmit && !item.legacySettled && <Button type="button" size="sm" variant="outline" onClick={() => setEditing(item)}>실제 시간 입력</Button>}
+                {canSelect && <label className="flex items-center gap-1"><input type="checkbox" aria-label={`${item.employeeName} ${item.date} 정산 선택`}
+                  checked={basket.some(r => r.id === item.id)} onChange={() => selectCompensation(item)} />정산 선택</label>}
+              </div></td>
+            </tr>
+          })}
+          {visibleOffsites.slice(0, Math.max(0, limit - visible.length)).map(request => {
+            const phase = offsitePhase(request, Date.now())
+            return <tr key={request.id} className="border-t border-border">
+              <td className="p-3">{request.employeeName}<span className="block text-xs text-muted-foreground">{request.departmentName || '부서 미지정'}</span></td>
+              <td className="p-3">{request.from}{request.from !== request.to && ` ~ ${request.to}`}
+                <span className="block text-xs text-muted-foreground">외근{request.place && ` · ${request.place}`}</span></td>
+              <td className="p-3">미확인</td><td className="p-3">—</td><td className="p-3">—</td>
+              <td className="p-3"><StatusPill tone="muted">{phase === 'ended' ? '휴일 기록 확인' : request.status === 'pending' ? '외근 승인 대기' : OFFSITE_PHASE_LABEL[phase]}</StatusPill></td>
+              <td className="p-3"><Button type="button" size="sm" variant="outline" onClick={() => selectOffsite(request.id)}>후처리</Button></td>
+            </tr>
+          })}
+          {!visible.length && !visibleOffsites.length && <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">{work.isPending || (scope === 'operations' && requests.isPending) ? '불러오는 중…' : '해당하는 근무가 없습니다.'}</td></tr>}
+        </tbody>
+      </table></Card>
+      {visible.length + visibleOffsites.length > limit && <Button type="button" variant="outline" onClick={() => setLimit(n => n + 50)}>더 보기</Button>}
+      {scope === 'operations' && <details className="rounded-xl border border-border bg-card p-3">
+        <summary className="cursor-pointer text-sm font-medium">정산 기준 및 보상휴가 설정</summary>
+        <div className="mt-3 space-y-2">
+          <p className="text-xs text-muted-foreground">토요일은 회사 기준 1.5배, 일요일·공휴일은 8시간 이내 1.5배·초과분 2배, 22시~06시 근무는 0.5배를 추가해 표시합니다. 지급 전 계약·근무일 구분과 통상시급을 확인하세요.</p>
+          <HolidayPolicy policy={work.data.policy} save={save} />
+        </div>
+      </details>}
     </>}
   </section>
 }
