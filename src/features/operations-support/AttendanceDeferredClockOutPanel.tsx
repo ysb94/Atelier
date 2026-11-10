@@ -8,7 +8,8 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { listCompanyDeferredClockOuts, type CompanyDeferredClockOut } from '@/lib/supabase/attendance-clocks'
 import { emptyList } from '@/lib/utils'
 import { deferredClockOutViews } from './deferred-clock-outs'
-import { memberLabel, OpsStat } from './OpsStat'
+import { memberLabel } from './OpsStat'
+import { InfoNote } from '@/components/ui/info-note'
 import { type useOpsDirectory } from './ops-directory'
 import { localDateKey, monthLabel, shiftMonth } from './monthly-attendance'
 
@@ -60,10 +61,13 @@ export function AttendanceDeferredClockOutPanel({ directory }: { directory: Retu
   }
 
   return <div className="space-y-4">
-    <header>
-      <h2 className="text-base font-semibold">퇴근 미처리</h2>
-      <p className="mt-1 text-sm text-muted-foreground">다음 출근 때 퇴근 시각을 입력한 기록과 연속 5회 무응답으로 자동 종료된 기록입니다. 자동 종료 시각은 실제 퇴근이나 야근 시간으로 계산하지 않습니다. 누적은 같은 사람의 전체 기록 횟수입니다.</p>
-    </header>
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <h2 className="sr-only">퇴근 미처리</h2>
+      <InfoNote label="퇴근 미처리 기준">
+        <p>다음 출근 때 퇴근 시각을 입력한 기록과 연속 5회 무응답으로 자동 종료된 기록입니다. 자동 종료 시각은 실제 퇴근이나 야근 시간으로 계산하지 않습니다. 누적은 같은 사람의 전체 기록 횟수입니다.</p>
+      </InfoNote>
+      <span className="text-sm text-muted-foreground" role="status">{unavailable ? '기록을 확인하고 있습니다.' : <>{monthLabel(month)} <strong className="text-foreground">{people}명 · {rows.length}건</strong> · 전체 누적 {cumulativePeople}명 · {records.length}건</>}</span>
+    </div>
     <div className="flex flex-wrap items-center gap-2">
       <Button variant="outline" size="icon" aria-label="이전 월" onClick={() => chooseMonth(shiftMonth(month, -1))}><ChevronLeft size={15} /></Button>
       <Input aria-label="퇴근 미처리 월" type="month" className="h-9 w-40" value={month} onChange={event => chooseMonth(event.target.value)} />
@@ -78,11 +82,6 @@ export function AttendanceDeferredClockOutPanel({ directory }: { directory: Retu
         <Search size={15} className="absolute left-3 top-2.5 text-muted-foreground" />
         <Input aria-label="퇴근 미처리 검색" placeholder="직원·부서 검색" className="h-9 pl-9" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} />
       </div>
-    </div>
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-      <OpsStat label="이번 달 처리한 직원" value={unavailable ? '—' : `${people}명`} detail={monthLabel(month)} />
-      <OpsStat label="이번 달 처리" value={unavailable ? '—' : `${rows.length}건`} detail="다음 출근 때 입력" />
-      <OpsStat label="전체 누적" value={unavailable ? '—' : `${cumulativePeople}명 · ${records.length}건`} detail="월과 관계없는 전체" />
     </div>
     {clocks.error && <p role="alert" className="text-sm text-danger">퇴근 미처리 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => void clocks.refetch()}>다시 불러오기</Button></p>}
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">

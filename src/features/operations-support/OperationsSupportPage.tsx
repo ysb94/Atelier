@@ -1,5 +1,6 @@
 import { Navigate, useLocation, useParams } from 'react-router-dom'
 import { PageHeader } from '@/components/layout/PageHeader'
+import { Badge } from '@/components/ui/badge'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { AttendancePanel } from './AttendancePanel'
 import { LeavePanel } from './LeavePanel'
@@ -34,8 +35,11 @@ export function OperationsSupportPage() {
   const current = OPERATIONS_SECTIONS.find(item => item.id === section) ?? OPERATIONS_SECTIONS[0]
   return (
     <div>
-      <PageHeader title={current.label} description={current.description} />
-      {!canEditOrgAssignment(profile) && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">운영지원 자료를 조회할 수 있습니다. 저장·승인은 기존 업무 권한을 따릅니다.</p>}
+      <PageHeader
+        title={current.label}
+        description={current.description}
+        actions={canEditOrgAssignment(profile) ? undefined : <Badge variant="muted" title="운영지원 자료를 조회할 수 있습니다. 저장·승인은 기존 업무 권한을 따릅니다.">조회 전용 · 저장은 업무 권한에 따름</Badge>}
+      />
       {section === 'attendance' ? <AttendancePanel /> : null}
       {section === 'leave' ? <LeavePanel /> : null}
       {section === 'people' ? <OperationsPeoplePanel /> : null}

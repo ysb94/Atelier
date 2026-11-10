@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { FilterTabs } from '@/components/ui/filter-tabs'
+import { InfoNote } from '@/components/ui/info-note'
 import { Input, Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { listCompanyAttendanceClocks, type CompanyAttendanceClock } from '@/lib/supabase/attendance-clocks'
@@ -14,7 +15,7 @@ import type { RequestKind } from '@/features/settings/personal-requests'
 import { ATTENDANCE_GRACE_MINUTES } from './attendance-start-settings'
 import { attendanceTrackingStart } from './attendance-period'
 import { resolveWorkdayStart } from './offsite-workday-start'
-import { memberLabel, OpsStat } from './OpsStat'
+import { memberLabel } from './OpsStat'
 import { type useOpsDirectory } from './ops-directory'
 import { type useAttendanceStartSettings } from './use-attendance-start-settings'
 import { isWorkday, localDateKey, monthDates, monthLabel, shiftMonth, timeSeconds } from './monthly-attendance'
@@ -139,11 +140,14 @@ export function AttendanceLatePanel({ directory, schedules }: {
   }
 
   return <div className="space-y-4">
-    <header>
-      <h2 className="text-base font-semibold">지각 * 결근 관리</h2>
-      <p className="mt-1 text-sm text-muted-foreground">사이트 도입일·입사일·가입 승인에 따른 근태 시작일 중 가장 늦은 날부터 집계합니다. 출근 기준 시각 이후 승인되거나 출근 기준이 미설정된 직원은 다음 근무일부터 집계합니다.</p>
-      <p className="mt-1 text-sm text-muted-foreground">출근 기준에서 {ATTENDANCE_GRACE_MINUTES}분이 지난 기록은 지각입니다. 연차·반차·반반차·공가·외근·재택이 등록되지 않은 근무일에 출근이 없으면 결근으로 표시합니다. 인사 확인 대기 {awaitingHr.isPending ? '…' : awaitingHr.isError ? '확인 실패' : `${awaitingHr.data ?? 0}건`}입니다.</p>
-    </header>
+    <div className="flex flex-wrap items-start justify-between gap-2">
+      <h2 className="sr-only">지각·결근</h2>
+      <InfoNote label="지각·결근 기준">
+        <p>사이트 도입일·입사일·가입 승인에 따른 근태 시작일 중 가장 늦은 날부터 집계합니다. 출근 기준 시각 이후 승인되거나 출근 기준이 미설정된 직원은 다음 근무일부터 집계합니다.</p>
+        <p>출근 기준에서 {ATTENDANCE_GRACE_MINUTES}분이 지난 기록은 지각입니다. 연차·반차·반반차·공가·외근·재택이 등록되지 않은 근무일에 출근이 없으면 결근으로 표시합니다.</p>
+      </InfoNote>
+      <span className="text-sm text-muted-foreground">사유서 인사 확인 대기 <strong className="text-primary">{awaitingHr.isPending ? '…' : awaitingHr.isError ? '확인 실패' : `${awaitingHr.data ?? 0}건`}</strong></span>
+    </div>
     <div className="flex flex-wrap items-center gap-2">
       <Button variant="outline" size="icon" aria-label="이전 월" onClick={() => chooseMonth(shiftMonth(month, -1))}><ChevronLeft size={15} /></Button>
       <Input aria-label="지각·결근 월" type="month" className="h-9 w-40" value={month} onChange={event => chooseMonth(event.target.value)} />
@@ -159,20 +163,14 @@ export function AttendanceLatePanel({ directory, schedules }: {
         <Input aria-label="지각·결근 검색" placeholder="직원·부서 검색" className="h-9 pl-9" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} />
       </div>
     </div>
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-      <OpsStat label="지각한 직원" value={unavailable ? '—' : `${latePeople}명`} detail={monthLabel(month)} />
-      <OpsStat label="지각 기록" value={unavailable ? '—' : `${lateRows.length}건`} detail={`기준 +${ATTENDANCE_GRACE_MINUTES}분 초과`} />
-      <OpsStat label="결근한 직원" value={unavailable ? '—' : `${absentPeople}명`} detail="등록 없이 출근 없음" />
-      <OpsStat label="결근 기록" value={unavailable ? '—' : `${absentRows.length}건`} detail="오늘까지의 근무일" />
-    </div>
     <FilterTabs
       ariaLabel="지각·결근 구분"
       value={kind}
       onChange={(next) => { setKind(next); setPage(1) }}
       tabs={[
-        { value: 'all', label: '전체', count: unavailable ? undefined : rows.length },
-        { value: 'late', label: '지각만', count: unavailable ? undefined : lateRows.length },
-        { value: 'absent', label: '결근만', count: unavailable ? undefined : absentRows.length },
+        { value: 'all', label: `${monthLabel(month)} 전체`, count: unavailable ? undefined : rows.length },
+        { value: 'late', label: '지각', count: unavailable ? undefined : lateRows.length, ...(unavailable ? {} : { subtitle: `${latePeople}명` }) },
+        { value: 'absent', label: '결근', count: unavailable ? undefined : absentRows.length, ...(unavailable ? {} : { subtitle: `${absentPeople}명` }) },
       ]}
     />
     {(readError || statements.error) && <p role="alert" className="text-sm text-danger">직원·관리 대상·출근 기준 또는 근태 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => { directory.refetch(); void schedules.refresh(); void clocks.refetch(); void leaves.refetch(); void statements.refetch() }}>다시 불러오기</Button></p>}
