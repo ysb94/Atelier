@@ -1,4 +1,5 @@
 import type { Style, StyleInput, StyleRef, StyleStatus } from '@/lib/types'
+import type { DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { normalizeStyleNo } from '@/lib/import/transform'
 import { compactProductNameKey } from '@/lib/invoice/lookup-normalization'
 import {
@@ -9,6 +10,7 @@ import {
   STYLE_TYPED_KEYS,
 } from '@/lib/products/style-fields'
 import { getSupabase } from '@/lib/supabase/client'
+import { diagnosticQuery } from '@/lib/supabase/diagnostic-query'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 import { fetchAllPages } from '@/lib/supabase/paged-select'
 
@@ -676,6 +678,19 @@ export async function updateStyle(
 }
 
 export type EmptyValuePolicy = 'clear' | 'keep'
+
+export function updateStyleName(
+  styleId: string,
+  name: string,
+  context: DiagnosticContext,
+) {
+  return diagnosticQuery<Pick<StyleRow, 'name'>>(
+    'app',
+    'update_product_name',
+    getSupabase().from('styles').update({ name }).eq('id', styleId).select('name').single(),
+    context,
+  )
+}
 
 function requireNumber(label: string, value: string): number {
   const num = parseNumber(value)
