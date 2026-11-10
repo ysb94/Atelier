@@ -1,7 +1,7 @@
 import { getSupabase } from './client'
 import { diagnosticOperation, tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 
-export type WorkdayBasis = { date: string; start: string | null; lunchStart: string; lunchEnd: string; configured: boolean; offsiteWorkdayStartSupported?: boolean; startOptions?: string[] }
+export type WorkdayBasis = { date: string; start: string | null; arrivalStart?: string | null; quarterArrivalSupported?: boolean; lunchStart: string; lunchEnd: string; configured: boolean; offsiteWorkdayStartSupported?: boolean; startOptions?: string[] }
 export type PreviousClockOutResult = { work_date: string; clock_out_at: string | null; clock_out_reported_at: string | null; outcome: 'recorded' | 'already_recorded' | 'correction_pending' | 'corrected' }
 
 export async function getMyWorkdayBasis(date: string, context?: DiagnosticContext): Promise<WorkdayBasis> {
@@ -10,6 +10,7 @@ export async function getMyWorkdayBasis(date: string, context?: DiagnosticContex
   if (error) { trace.fail(error); throw new Error(error.message, { cause: error }) }
   trace.step('parse_basis', { configured: Boolean(data?.configured) })
   return { date: data.date, start: data.start_time?.slice(0, 5) ?? null, lunchStart: data.lunch_start.slice(0, 5), lunchEnd: data.lunch_end.slice(0, 5), configured: data.configured,
+    arrivalStart: data.arrival_start_time?.slice(0, 5) ?? null, quarterArrivalSupported: data.quarterArrivalSupported === true,
     offsiteWorkdayStartSupported: data.offsiteWorkdayStartSupported === true, startOptions: (data.startOptions ?? []).map((start: string) => start.slice(0, 5)) }
   }, context)
 }

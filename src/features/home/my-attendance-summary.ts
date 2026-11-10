@@ -4,16 +4,18 @@ import { monthlyOvertimeHours } from '../operations-support/overtime-hours.ts'
 import type { AttendanceClock } from '../settings/my-attendance.ts'
 import type { PersonalRequest } from '../settings/personal-requests.ts'
 import { offsiteWorkdayStart } from '../operations-support/offsite-workday-start.ts'
+import { approvedQuarterIntervals, quarterArrivalStart, type ArrivalInterval } from '../operations-support/quarter-arrival.ts'
 
 /** 근무일이고 출근 기준+유예보다 늦은 기록 수. 기준이 없으면 null. */
-export function countMyLateDays(clocks: readonly { date: string; clockIn: string }[], start: string, grace: number, today: string, requests: readonly PersonalRequest[] = []): number | null {
+export function countMyLateDays(clocks: readonly { date: string; clockIn: string }[], start: string, grace: number, today: string, requests: readonly PersonalRequest[] = [], lunch?: ArrivalInterval): number | null {
   const baseline = timeSeconds(start)
   if (baseline == null) return null
   let count = 0
   for (const clock of clocks) {
     if (clock.date > today || !isWorkday(clock.date, {})) continue
     const actual = timeSeconds(clock.clockIn)
-    const limit = (timeSeconds(offsiteWorkdayStart(requests, clock.date) ?? start) ?? baseline) + grace * 60
+    const arrivalStart = quarterArrivalStart(offsiteWorkdayStart(requests, clock.date) ?? start, approvedQuarterIntervals(requests, clock.date), lunch)
+    const limit = (timeSeconds(arrivalStart) ?? baseline) + grace * 60
     if (actual != null && actual > limit) count += 1
   }
   return count

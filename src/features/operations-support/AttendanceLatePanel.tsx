@@ -14,6 +14,8 @@ import type { RequestKind } from '@/features/settings/personal-requests'
 import { ATTENDANCE_GRACE_MINUTES } from './attendance-start-settings'
 import { attendanceTrackingStart } from './attendance-period'
 import { resolveWorkdayStart } from './offsite-workday-start'
+import { approvedQuarterIntervals, quarterArrivalStart } from './quarter-arrival'
+import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
 import { memberLabel, OpsStat } from './OpsStat'
 import { type useOpsDirectory } from './ops-directory'
 import { type useAttendanceStartSettings } from './use-attendance-start-settings'
@@ -68,6 +70,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
     queryFn: () => listLeaveRequests(undefined, false, { from: dates[0], to: dates[dates.length - 1] }),
     enabled: monthOk,
   })
+  const lunch = useQuery({ queryKey: ['company-work-hours'], queryFn: loadCompanyLunch, enabled: monthOk })
   const clockRows = clocks.data ?? emptyList<CompanyAttendanceClock>()
   const leaveRows = leaves.data ?? emptyList<LeaveRequest>()
   const statementRows = statements.data ?? emptyList<LateArrivalStatement>()
@@ -93,12 +96,13 @@ export function AttendanceLatePanel({ directory, schedules }: {
       if (!member || member.attendanceExempt || clock.date < attendanceTrackingStart(member.hireDate, member.attendanceTrackedFrom) || !isWorkday(clock.date, {})) continue
       const schedule = resolveWorkdayStart(schedules.index, member.id, member.departmentId, clock.date, leaveRows)
       const actual = timeSeconds(clock.clockIn)
-      const baseline = timeSeconds(schedule.start)
+      const arrivalStart = quarterArrivalStart(schedule.start, approvedQuarterIntervals(leaveRows.filter(r => r.employeeId === member.id), clock.date), lunch.data)
+      const baseline = timeSeconds(arrivalStart)
       if (actual == null || baseline == null || actual <= baseline + schedule.grace * 60) continue
       const team = directory.departmentName(member.departmentId)
       const name = memberLabel(member.displayName)
       if (!matches(member.departmentId, name, team)) continue
-      next.push({ key: `late:${member.id}:${clock.date}`, memberId: member.id, date: clock.date, dateLabel: dateLabel(clock.date), name, team, start: schedule.start, clockIn: clock.clockIn, result: lateLabel(Math.floor((actual - baseline) / 60)), kind: 'late' })
+      next.push({ key: `late:${member.id}:${clock.date}`, memberId: member.id, date: clock.date, dateLabel: dateLabel(clock.date), name, team, start: arrivalStart, clockIn: clock.clockIn, result: lateLabel(Math.floor((actual - baseline) / 60)), kind: 'late' })
     }
     for (const member of directory.members) {
       if (member.attendanceExempt) continue
@@ -116,7 +120,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
       }
     }
     return next.sort((a, b) => b.date.localeCompare(a.date) || Number(a.kind === 'late') - Number(b.kind === 'late') || a.name.localeCompare(b.name, 'ko'))
-  }, [clockRows, clockByKey, covered, dates, directory, schedules.index, leaveRows, departmentId, needle, today, nowMinutes])
+  }, [clockRows, clockByKey, covered, dates, directory, schedules.index, leaveRows, departmentId, needle, today, nowMinutes, lunch.data])
   const lateRows = rows.filter(row => row.kind === 'late')
   const absentRows = rows.filter(row => row.kind === 'absent')
   const latePeople = new Set(lateRows.map(row => row.memberId)).size
@@ -130,8 +134,8 @@ export function AttendanceLatePanel({ directory, schedules }: {
     : kind === 'absent'
       ? '이 조건의 결근 기록이 없습니다.'
       : '이 조건의 지각·결근 기록이 없습니다.'
-  const readError = directory.error || schedules.error || clocks.error || leaves.error
-  const unavailable = directory.loading || schedules.loading || clocks.isPending || leaves.isPending || Boolean(readError)
+  const readError = directory.error || schedules.error || clocks.error || leaves.error || lunch.error
+  const unavailable = directory.loading || schedules.loading || clocks.isPending || leaves.isPending || lunch.isPending || Boolean(readError)
   function chooseMonth(next: string) {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(next)) return
     setMonth(next)
@@ -175,7 +179,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
         { value: 'absent', label: '결근만', count: unavailable ? undefined : absentRows.length },
       ]}
     />
-    {(readError || statements.error) && <p role="alert" className="text-sm text-danger">직원·관리 대상·출근 기준 또는 근태 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => { directory.refetch(); void schedules.refresh(); void clocks.refetch(); void leaves.refetch(); void statements.refetch() }}>다시 불러오기</Button></p>}
+    {(readError || statements.error) && <p role="alert" className="text-sm text-danger">직원·관리 대상·출근 기준 또는 근태 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => { directory.refetch(); void schedules.refresh(); void clocks.refetch(); void leaves.refetch(); void lunch.refetch(); void statements.refetch() }}>다시 불러오기</Button></p>}
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <table className="w-full text-left text-sm">
         <caption className="sr-only">{monthLabel(month)} 지각·결근</caption>
