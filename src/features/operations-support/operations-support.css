@@ -5,3 +5,11 @@
 .operations-support tbody tr > * {
   border-bottom-color: color-mix(in srgb, var(--color-primary) 45%, white);
 }
+/* 마지막 열(처리·검토)만 블루: 자재요청 표의 HISTORY·기획안 표의 MD TEAM과 같은 색(Tailwind blue-800). */
+.operations-support thead tr > th:last-child {
+  background-color: var(--color-blue-800, #193cb8);
+}
+/* 펼친 행 안의 보조 표는 머리를 색칠하지 않는다. */
+.operations-support .ops-subtable thead tr > th:last-child {
+  background-color: transparent;
+}

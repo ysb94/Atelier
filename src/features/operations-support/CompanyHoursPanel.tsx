@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -104,26 +105,16 @@ export function CompanyHoursPanel() {
         <label className="text-sm">추가할 시간<Input aria-label="추가할 출근시간" type="time" className="mt-1 h-9 w-36" value={draft} disabled={!canEdit || busy} onChange={event => setDraft(event.target.value)} /></label>
         <Button type="button" disabled={!canEdit || busy || !TIME.test(draft)} onClick={add}>{addOption.isPending ? '추가 중…' : '선택지 추가'}</Button>
       </div>
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[480px] text-left text-sm">
-          <thead className="border-y border-border bg-primary text-xs text-primary-foreground">
-            <tr>
-              <th className="px-4 py-2.5 font-medium">출근시간</th>
-              <th className="px-4 py-2.5 font-medium">표시</th>
-              <th className="px-4 py-2.5 font-medium">관리</th>
-            </tr>
-          </thead>
-          <tbody>
-            {options.loading ? <tr><td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">불러오는 중…</td></tr>
-              : options.options.map(item => <tr key={item} className="border-b border-border/70 last:border-0">
-                <th scope="row" className="px-4 py-3 font-medium">{item}</th>
-                <td className="px-4 py-3 text-muted-foreground">{startOptionLabel(item)}</td>
-                <td className="px-4 py-2"><Button type="button" size="sm" variant="outline" disabled={!canRemove || busy} onClick={() => removeOption.mutate(item)}>빼기</Button></td>
-              </tr>)}
-            {!options.loading && options.options.length === 0 && <tr><td colSpan={3} className="px-4 py-8 text-center text-muted-foreground">등록된 출근시간이 없습니다.</td></tr>}
-          </tbody>
-        </table>
-      </div>
+      {/* 선택지는 × 달린 동그란 칩으로 보인다(시안). 빼기 권한·동작은 그대로다. */}
+      <ul aria-label="출근시간 선택지 목록" className="mt-4 flex flex-wrap gap-2 px-5 pb-5">
+        {options.loading ? <li className="text-sm text-muted-foreground">불러오는 중…</li>
+          : options.options.map(item => <li key={item} className="inline-flex h-9 items-center gap-2 rounded-full border border-border bg-card pl-3.5 pr-1 text-sm">
+            <span className="font-semibold tabular-nums">{item}</span>
+            <span className="text-xs text-muted-foreground">{startOptionLabel(item)}</span>
+            <button type="button" aria-label={`${item} 선택지 빼기`} title="빼기" disabled={!canRemove || busy} onClick={() => removeOption.mutate(item)} className="grid size-7 place-items-center rounded-full text-muted-foreground hover:bg-muted hover:text-primary disabled:pointer-events-none disabled:opacity-40"><X size={14} aria-hidden /></button>
+          </li>)}
+        {!options.loading && options.options.length === 0 && <li className="text-sm text-muted-foreground">등록된 출근시간이 없습니다.</li>}
+      </ul>
     </section>
   </div>
 }

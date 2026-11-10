@@ -84,7 +84,7 @@ export function LeaveBalancePanel() {
               <td className="px-4 py-3" aria-label={`${memberLabel(member.displayName)} 추가 연차`}>
                 <AdditionalLeaveInputs name={memberLabel(member.displayName)} employeeId={member.id} entries={extras.data?.entries.filter(entry => entry.employeeId === member.id) ?? []} events={extras.data?.events?.filter(event => event.employeeId === member.id) ?? []} fefoReady={extras.data?.fefoReady === true} baseRegistered={balance?.remainingAnnualLeave != null} available={extras.data?.ready ? extras.data.balances.find(row => row.profileId === member.id)?.available ?? 0 : undefined} ready={extras.data?.ready === true && !extras.isError}/>
               </td>
-              <td className="px-4 py-2"><RemainingLeaveEditor profileId={member.id} name={memberLabel(member.displayName)} value={balance?.remainingAnnualLeave ?? null}/></td>
+              <td className="px-4 py-2"><RemainingLeaveEditor profileId={member.id} name={memberLabel(member.displayName)} value={balance?.remainingAnnualLeave ?? null}/><RemainingBar remaining={balance?.remainingAnnualLeave ?? null} accrued={balance?.accruedAnnualLeave ?? null}/></td>
             </tr>)}
         </tbody>
       </table>
@@ -173,6 +173,15 @@ function AdditionalLeaveInputs({ name, employeeId, entries, events, available, r
       </div>
     </dialog>
   </div>
+}
+
+/** 발생일수 대비 남은 연차 막대(시안). 값이 없으면 그리지 않는다. 3일 이하이면 레드로 보인다. */
+function RemainingBar({ remaining, accrued }: { remaining: number | null; accrued: number | null }) {
+  if (remaining == null || !accrued || accrued <= 0) return null
+  const ratio = Math.max(0, Math.min(1, remaining / accrued))
+  return <span className="mt-1.5 block h-1 w-28 overflow-hidden rounded-full bg-muted" role="img" aria-label={`발생 ${accrued}일 중 ${remaining}일 남음`}>
+    <span className={`block h-full rounded-full ${remaining <= 3 ? 'bg-primary' : 'bg-foreground/70'}`} style={{ width: `${Math.round(ratio * 100)}%` }} />
+  </span>
 }
 
 function MissingValue() {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { Fragment, useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
@@ -80,10 +80,28 @@ export function AttendanceOvertimePanel({ directory }: { directory: ReturnType<t
       {!ready || !rows.length ? <tr><td colSpan={8} className="p-8 text-center">{loading ? '불러오는 중…' : failed ? '조회 실패' : !actuals.ready ? '실제 시간 연결 대기' : '퇴근 기록이 연결된 승인 야근이 없습니다.'}</td></tr> : rows.slice(0, limit).map(row => {
         const hours = allowances.isError ? null : allowances.data?.find(item => item.profile_id === row.employeeId)?.inclusive_overtime_hours
         const threshold = hours == null ? null : Math.round(hours * 60)
-        return <tr key={row.employeeId} className="border-t border-border"><td className="px-3 py-2"><MemberCell name={row.name} /></td><td className="px-3 py-2">{row.team}</td><td className="px-3 py-2">{row.count}건</td><td className="px-3 py-2">{workDurationLabel(row.approved)}</td><td className="px-3 py-2 font-semibold">{workDurationLabel(row.minutes)}</td><td className="px-3 py-2">{allowances.isPending ? '조회 중…' : threshold == null ? '미등록·확인 필요' : workDurationLabel(threshold)}</td><td className="px-3 py-2">{threshold == null ? '—' : workDurationLabel(Math.max(0, row.minutes - threshold))}</td><td className="px-3 py-2"><Button size="sm" variant="outline" onClick={() => setSelected(selected === row.employeeId ? null : row.employeeId)}>입력 내역</Button></td></tr>
+        const open = selected === row.employeeId
+        return <Fragment key={row.employeeId}><tr className={`border-t border-border ${open ? 'bg-muted/40' : ''}`}><td className="px-3 py-2"><MemberCell name={row.name} /></td><td className="px-3 py-2">{row.team}</td><td className="px-3 py-2">{row.count}건</td><td className="px-3 py-2">{workDurationLabel(row.approved)}</td><td className="px-3 py-2 font-semibold">{workDurationLabel(row.minutes)}</td><td className="px-3 py-2">{allowances.isPending ? '조회 중…' : threshold == null ? '미등록·확인 필요' : <>{workDurationLabel(threshold)}<AllowanceBar minutes={row.minutes} threshold={threshold} /></>}</td><td className="px-3 py-2">{threshold == null ? '—' : workDurationLabel(Math.max(0, row.minutes - threshold))}</td><td className="px-3 py-2"><Button size="sm" variant="outline" aria-expanded={open} onClick={() => setSelected(open ? null : row.employeeId)}>{open ? '입력 내역 닫기' : '입력 내역'}</Button></td></tr>
+        {open && <tr className="bg-muted/40"><td colSpan={8} className="px-6 pb-4 pt-1"><OvertimeEntries rows={selectedRows} month={month} /></td></tr>}</Fragment>
       })}
     </tbody></table></Card>
     {rows.length > limit && <Button variant="outline" onClick={() => setLimit(value => value + 50)}>더 보기 ({limit}/{rows.length})</Button>}
-    {selected && rows.some(row => row.employeeId === selected) && <Card className="overflow-x-auto p-4"><h3 className="mb-3 font-semibold">실제 야근 입력 내역 · {rows.find(row => row.employeeId === selected)?.name}</h3><table className="w-full text-left text-sm"><thead className="bg-primary text-primary-foreground"><tr>{['날짜', '승인 시간', '실제 시간', '휴게', '누적 반영'].map(label => <th key={label} className="p-2">{label}</th>)}</tr></thead><tbody>{selectedRows.map(({ request, actual, minutes }) => <tr key={request.id}><td className="p-2">{request.from}</td><td className="p-2">{request.kind==='offsite'?'외근 후처리 · ':''}{request.start}–{request.endNextDay ? '다음 날 ' : ''}{request.end}</td><td className="p-2">{actual.offsiteMinutes ? Object.entries(actual.offsiteMinutes).filter(([date])=>date.startsWith(month)).map(([date,value])=>`${date}: ${value}분`).join(' / ') : `${clockOutLabel(actual.startAt,request.from)}–${clockOutLabel(actual.endAt,request.from)}`}</td><td className="p-2">{actual.breakMinutes}분</td><td className="p-2">{workDurationLabel(minutes)}</td></tr>)}</tbody></table></Card>}
   </section>
+}
+
+/** 펼친 행 안의 실제 야근 입력 내역(시안: 행 아래로 펼침). */
+function OvertimeEntries({ rows, month }: { rows: ReturnType<typeof registeredOvertime>; month: string }) {
+  return <table className="ops-subtable w-full text-left text-sm">
+    <thead className="text-xs text-muted-foreground"><tr>{['날짜', '승인 시간', '실제 시간', '휴게', '누적 반영'].map(label => <th key={label} className="px-2 py-1.5 font-medium">{label}</th>)}</tr></thead>
+    <tbody>{rows.map(({ request, actual, minutes }) => <tr key={request.id} className="border-t border-border"><td className="px-2 py-1.5">{request.from}</td><td className="px-2 py-1.5">{request.kind==='offsite'?'외근 후처리 · ':''}{request.start}–{request.endNextDay ? '다음 날 ' : ''}{request.end}</td><td className="px-2 py-1.5">{actual.offsiteMinutes ? Object.entries(actual.offsiteMinutes).filter(([date])=>date.startsWith(month)).map(([date,value])=>`${date}: ${value}분`).join(' / ') : `${clockOutLabel(actual.startAt,request.from)}–${clockOutLabel(actual.endAt,request.from)}`}</td><td className="px-2 py-1.5">{actual.breakMinutes}분</td><td className="px-2 py-1.5 font-medium">{workDurationLabel(minutes)}</td></tr>)}</tbody>
+  </table>
+}
+
+/** 약정 연장근로시간 대비 누적 막대. 넘으면 레드로 보인다. */
+function AllowanceBar({ minutes, threshold }: { minutes: number; threshold: number }) {
+  if (threshold <= 0) return null
+  const ratio = minutes / threshold
+  return <span className="mt-1.5 block h-1 w-28 overflow-hidden rounded-full bg-muted" role="img" aria-label={`약정 대비 ${Math.round(ratio * 100)}%`}>
+    <span className={`block h-full rounded-full ${ratio > 1 ? 'bg-primary' : 'bg-foreground/70'}`} style={{ width: `${Math.min(100, Math.round(ratio * 100))}%` }} />
+  </span>
 }
