@@ -3,6 +3,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Check, Clock3, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select } from '@/components/ui/input'
+import { FilterBar } from '@/components/ui/filter-bar'
+import { InfoNote } from '@/components/ui/info-note'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { openConversation } from '@/lib/chat/open-conversation'
@@ -15,7 +17,7 @@ import { StartTimeChoices } from './StartTimeChoices'
 import { useOpsDirectory } from './ops-directory'
 import { type useAttendanceStartSettings } from './use-attendance-start-settings'
 import { useDepartmentApprovers } from './use-department-approvers'
-import { memberLabel, OpsStat } from './OpsStat'
+import { memberLabel } from './OpsStat'
 import './attendance-start-settings.css'
 
 type Target = { employeeId: string | null; departmentId: string | null; label: string; month: string }
@@ -101,12 +103,11 @@ export function AttendanceStartSettingsPanel({ directory, schedules, initialEmpl
     } catch(error) { console.warn('[attendance-start] 설정 화면 저장 실패',error); setMessage(error instanceof Error ? error.message : '저장하지 못했습니다.') }
   }
   return <div className="attendance-start-settings space-y-4">
-    <header className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">{readOnly ? '월별 출근시간' : '월별 출근시간 설정'}</h2><p className="mt-1 text-sm text-muted-foreground">{readOnly ? '직원별 저장값을 확인합니다. 출근시간은 부서 승인자가 My home에서 정합니다.' : '부서 기본시간과 직원별 예외를 저장합니다. 표에서 월을 누르면 해당 직원의 시간을 수정할 수 있습니다.'}</p><p className="mt-1 text-sm text-muted-foreground">정해진 출근시간에서 {ATTENDANCE_GRACE_MINUTES}분까지 인정합니다.</p></div><Button variant="outline" size="sm" disabled={busy} onClick={() => void schedules.refresh()}><RefreshCw size={14}/>새로고침</Button></header>
-    {readOnly && <p className="text-sm text-muted-foreground">초록 9시, 보라 10시, 점선은 미설정입니다.</p>}
+    <header className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">{readOnly ? '월별 출근시간' : '월별 출근시간 설정'}</h2><InfoNote label="출근시간 기준" className="mt-1"><p>{readOnly ? '직원별 저장값을 확인합니다. 출근시간은 부서 승인자가 My home에서 정합니다.' : '부서 기본시간과 직원별 예외를 저장합니다. 표에서 월을 누르면 해당 직원의 시간을 수정할 수 있습니다.'}</p><p>정해진 출근시간에서 {ATTENDANCE_GRACE_MINUTES}분까지 인정합니다.</p>{readOnly && <p>표 색: 초록 9시, 보라 10시, 점선은 미설정입니다.</p>}</InfoNote></div><Button variant="outline" size="sm" disabled={busy} onClick={() => void schedules.refresh()}><RefreshCw size={14}/>새로고침</Button></header>
     {!canEdit && !readOnly && <p className="text-xs text-muted-foreground">출근시간 조회 · 저장은 운영지원 담당자가 처리합니다.</p>}
-    <div className="flex flex-wrap items-center gap-2"><Input aria-label="출근시간 연도" type="number" min="2000" max="2100" className="h-9 w-24" value={year} disabled={busy} onChange={event => {setYear(event.target.value);setTarget(null)}}/><Select aria-label="출근시간 부서" value={department} disabled={busy} onChange={event => {setDepartment(event.target.value);setPage(1)}} className="h-9 w-40"><option value="all">전체 부서</option>{directory.departments.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}<option value="unassigned">소속 없음</option></Select><Input aria-label="출근시간 직원 검색" placeholder="직원·부서 검색" value={search} onChange={event => {setSearch(event.target.value);setPage(1)}} className="h-9 w-full sm:w-56"/></div>
+    <FilterBar className="mb-0"><Input aria-label="출근시간 연도" type="number" min="2000" max="2100" className="h-9 w-24" value={year} disabled={busy} onChange={event => {setYear(event.target.value);setTarget(null)}}/><Select aria-label="출근시간 부서" value={department} disabled={busy} onChange={event => {setDepartment(event.target.value);setPage(1)}} className="h-9 w-40"><option value="all">전체 부서</option>{directory.departments.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}<option value="unassigned">소속 없음</option></Select><Input aria-label="출근시간 직원 검색" placeholder="직원·부서 검색" value={search} onChange={event => {setSearch(event.target.value);setPage(1)}} className="h-9 w-full sm:w-56"/></FilterBar>
     <div className="attendance-start-months" role="group" aria-label="설정 기준 월">{months.map(value => <button key={value} type="button" disabled={busy || !validYear} aria-pressed={month===value} onClick={() => {setMonthNo(value.slice(5,7));setTarget(null)}}>{Number(value.slice(5,7))}월</button>)}</div>
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4"><OpsStat label={`${Number(monthNo)}월 직원`} value={`${members.length}명`}/><OpsStat label="부서 기준 적용" value={`${starts.filter(item=>item.configured && item.source==='department').length}명`}/><OpsStat label="직원 개별 설정" value={`${starts.filter(item=>item.configured && item.source==='individual').length}명`}/><OpsStat label="출근시간 미설정" value={`${pending}명`}/></div>
+    <p role="status" className="text-sm text-muted-foreground">{Number(monthNo)}월 직원 <strong className="text-foreground">{members.length}명</strong> · 부서 기준 {starts.filter(item=>item.configured && item.source==='department').length}명 · 개별 설정 {starts.filter(item=>item.configured && item.source==='individual').length}명 · 미설정 <strong className={pending ? 'text-danger' : 'text-foreground'}>{pending}명</strong></p>
     {initialMember && !target && <Button variant="outline" size="sm" disabled={unavailable || busy || !canEdit} onClick={() => edit({employeeId:initialMember.id,departmentId:initialMember.departmentId,label:memberLabel(initialMember.displayName),month})}>{memberLabel(initialMember.displayName)} 출근시간 설정</Button>}
     {message && <p role="status" className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">{message}</p>}
     {!validYear && <p role="alert" className="text-sm text-danger">2000–2100년 사이의 연도를 입력해 주세요.</p>}

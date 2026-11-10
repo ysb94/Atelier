@@ -4,6 +4,9 @@ import { useReadMyHomeNotification } from '@/features/settings/use-my-home-notif
 import { useMemo, useState } from 'react'
 import { Check, RefreshCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { FilterBar } from '@/components/ui/filter-bar'
+import { FilterTabs } from '@/components/ui/filter-tabs'
+import { InfoNote } from '@/components/ui/info-note'
 import { Input, Select, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useQuery } from '@tanstack/react-query'
@@ -13,7 +16,7 @@ import { getSupabase } from '@/lib/supabase/client'
 import { clockOutLabel, koreaDateKey } from '@/features/settings/my-attendance'
 import { overtimeApprovalReady } from './overtime-approval-preview'
 import { useLeaveRequests } from './use-leave-requests'
-import { OpsPanelFrame, OpsStat } from './OpsStat'
+import { OpsPanelFrame } from './OpsStat'
 import { usePagePreview } from '@/lib/company/page-preview-context'
 import { previewRequestIsSelf } from '@/lib/company/relationship-preview'
 
@@ -94,14 +97,16 @@ export function LeaveApprovalPanel({ readOnly = false, officialReview = false }:
     }
   }
   return <OpsPanelFrame>
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">{readOnly ? '근태·야근 신청 현황' : '승인할 신청'}</h2><p className="mt-1 text-sm text-muted-foreground">{readOnly ? officialReview ? '공가는 운영지원이 서류 확인 후 처리합니다. 야근·출퇴근 정정은 지정 담당자가 처리하며 일반 휴가·외근은 바로 등록되고 선사용은 부서 승인 후 반영됩니다.' : '지정 담당자는 야근·출퇴근 정정을 승인합니다. 일반 휴가·외근은 바로 등록됩니다. 선사용은 부서 승인 후 반영하고 공가는 운영지원이 서류를 확인합니다.' : '담당 부서의 연차 선사용·야근·출퇴근 정정을 검토합니다. 야근·출퇴근 정정만 지정 승인자의 본인 승인이 가능합니다. 선사용은 다른 승인자가 처리합니다. 공가는 운영지원이 별도로 확인합니다.'}</p></div><Button size="sm" variant="outline" disabled={leave.busy} onClick={() => void leave.refresh()}><RefreshCw size={14}/>새로고침</Button></div>
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">{(['pending','approved','rejected','cancelled'] as const).map(key => <OpsStat key={key} label={LABELS[key]} value={`${leave.requests.filter(item => item.status === key).length}건`}/>)}</div>
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">{readOnly ? '근태·야근 신청 현황' : '승인할 신청'}</h2><InfoNote label="처리 순서" className="mt-1"><p>{readOnly ? officialReview ? '공가는 운영지원이 서류 확인 후 처리합니다. 야근·출퇴근 정정은 지정 담당자가 처리하며 일반 휴가·외근은 바로 등록되고 선사용은 부서 승인 후 반영됩니다.' : '지정 담당자는 야근·출퇴근 정정을 승인합니다. 일반 휴가·외근은 바로 등록됩니다. 선사용은 부서 승인 후 반영하고 공가는 운영지원이 서류를 확인합니다.' : '담당 부서의 연차 선사용·야근·출퇴근 정정을 검토합니다. 야근·출퇴근 정정만 지정 승인자의 본인 승인이 가능합니다. 선사용은 다른 승인자가 처리합니다. 공가는 운영지원이 별도로 확인합니다.'}</p></InfoNote></div><Button size="sm" variant="outline" disabled={leave.busy} onClick={() => void leave.refresh()}><RefreshCw size={14}/>새로고침</Button></div>
+    <FilterTabs<string> ariaLabel="근태 신청 상태" value={status} onChange={next => { setStatus(next); setPage(1) }} tabs={[
+      { value: 'all', label: '전체', count: leave.requests.length },
+      ...(['pending','approved','rejected','cancelled'] as const).map(key => ({ value: key, label: LABELS[key], count: leave.requests.filter(item => item.status === key).length })),
+    ]}/>
+    <FilterBar className="mb-0">
       <Input aria-label="근태 신청 검색" placeholder="직원·부서·장소 검색" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} className="h-9 w-full sm:w-60"/>
-      <Select aria-label="근태 신청 상태" value={status} onChange={event => { setStatus(event.target.value); setPage(1) }} className="h-9 w-32"><option value="all">전체 상태</option>{Object.entries(LABELS).map(([key,label]) => <option key={key} value={key}>{label}</option>)}</Select>
       <Select aria-label="근태 신청 부서" value={department} onChange={event => { setDepartment(event.target.value); setPage(1) }} className="h-9 w-40"><option value="all">전체 부서</option>{departments.map(name => <option key={name}>{name}</option>)}</Select>
       <Input aria-label="신청 일정 월" type="month" value={month} onChange={event => { setMonth(event.target.value); setPage(1) }} className="h-9 w-40"/>{month && <Button size="sm" variant="ghost" onClick={() => setMonth('')}>전체 기간</Button>}
-    </div>
+    </FilterBar>
     {noticeRead.error && <p role="alert" className="text-sm text-danger">{noticeRead.error}<Button type="button" size="sm" onClick={noticeRead.retry}>읽음 저장 재시도</Button></p>}
     {message && <p role="status" className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">{message}</p>}
     {leave.error && <p role="alert" className="text-sm text-danger">신청을 불러오지 못했습니다. 새로고침으로 다시 확인해 주세요.</p>}

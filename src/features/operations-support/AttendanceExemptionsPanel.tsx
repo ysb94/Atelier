@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { FilterBar } from '@/components/ui/filter-bar'
+import { InfoNote } from '@/components/ui/info-note'
 import { canEditOrgAssignment } from '@/lib/company/capabilities'
 import { useAuth } from '@/lib/supabase/auth'
 import { setAttendanceExemption } from '@/lib/supabase/attendance-exemptions'
@@ -39,9 +40,11 @@ export function AttendanceExemptionsPanel({ directory }: { directory: ReturnType
     setError(null); mutation.mutate({ id, exempt })
   }
   return <Card><CardContent className="space-y-4 p-4">
-    <div><h2 className="text-base font-semibold">출퇴근 시간 제외자</h2>
-      <p className="mt-1 text-sm text-muted-foreground">여기에 등록된 직원은 출퇴근 확인·지각·결근·퇴근 미처리 관리에서 제외됩니다. 직책과 관계없이 지정하며 기존 기록은 삭제하지 않습니다.</p>
-      <p className="mt-1 text-xs text-muted-foreground">제외를 해제하면 기존 출퇴근 기록과 현재 근무 기준으로 다시 관리합니다.</p>
+    <div><h2 className="sr-only">출퇴근 시간 제외자</h2>
+      <InfoNote label="제외자 기준">
+        <p>여기에 등록된 직원은 출퇴근 확인·지각·결근·퇴근 미처리 관리에서 제외됩니다. 직책과 관계없이 지정하며 기존 기록은 삭제하지 않습니다.</p>
+        <p>제외를 해제하면 기존 출퇴근 기록과 현재 근무 기준으로 다시 관리합니다.</p>
+      </InfoNote>
     </div>
     {directory.error ? <div role="alert"><p className="text-sm text-danger">직원과 제외자 목록을 불러오지 못했습니다.</p><Button variant="outline" onClick={directory.refetch}>다시 확인</Button></div> : null}
     {error ? <p role="alert" className="text-sm text-danger">{error}</p> : null}

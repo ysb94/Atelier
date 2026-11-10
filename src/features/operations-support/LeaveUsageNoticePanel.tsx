@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card'
 import { Input, Select } from '@/components/ui/input'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { FilterTabs } from '@/components/ui/filter-tabs'
-import { StatGrid, StatTile } from '@/components/ui/stat-tile'
+import { InfoNote } from '@/components/ui/info-note'
 import { StatusPill } from '@/components/ui/status-pill'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
@@ -44,12 +44,14 @@ export function LeaveUsageNoticePanel() {
   const groupIds = new Set(groups.map(g => g.employee.id))
   const history = query.data?.notices.filter(n => groupIds.has(n.employee_id) && (source === 'all' || (n.notice_source ?? 'base') === source)) ?? []
   return <div className="space-y-4">
-    <Card className="space-y-2 p-4 text-sm"><p className="font-medium">{query.data?.enabled ? '연차 등록·소진 안내' : '자동 안내 준비 중'}</p>
-      <p className="text-muted-foreground">기본·추가 연차는 만료 3개월·1개월·2주 전, 생일 반차는 만료 1주일 전에 안내합니다. 추가 연차 등록 안내는 저장할 때 전달하며 만료 안내는 매일 오전 9시에 확인합니다.</p>
-      <p className="text-xs text-muted-foreground">이미 지난 단계는 등록 안내에 포함합니다. 모두 사용·예약한 추가분은 만료 안내를 보내지 않습니다. 아래 일수는 현재 값이고, 안내문에는 발송 당시 값이 남습니다.</p>
-      {!query.data?.extraEnabled && <p className="text-xs text-warning">추가·생일 알림 서버 연결 대기 중입니다. 기존 기본 연차 안내는 유지됩니다.</p>}
-    </Card>
-    <StatGrid><StatTile label="직원" value={groups.length + '명'}/><StatTile label="발송 이력" value={history.length + '건'}/><StatTile label="본인 미확인" value={groups.reduce((sum, g) => sum + pending(g.items), 0) + '건'}/><StatTile label="정보 확인 필요" value={groups.filter(g => needsSetup(g.items)).length + '명'}/></StatGrid>
+    <div className="flex flex-wrap items-start justify-between gap-2 text-sm">
+      <InfoNote label={query.data?.enabled ? '연차 등록·소진 안내 일정' : '자동 안내 준비 중'}>
+        <p>기본·추가 연차는 만료 3개월·1개월·2주 전, 생일 반차는 만료 1주일 전에 안내합니다. 추가 연차 등록 안내는 저장할 때 전달하며 만료 안내는 매일 오전 9시에 확인합니다.</p>
+        <p>이미 지난 단계는 등록 안내에 포함합니다. 모두 사용·예약한 추가분은 만료 안내를 보내지 않습니다. 아래 일수는 현재 값이고, 안내문에는 발송 당시 값이 남습니다.</p>
+      </InfoNote>
+      <p role="status" className="text-muted-foreground">직원 {groups.length}명 · 발송 이력 {history.length}건 · 본인 미확인 <strong className="text-primary">{groups.reduce((sum, g) => sum + pending(g.items), 0)}건</strong></p>
+    </div>
+    {!query.data?.extraEnabled && <p className="text-xs text-warning">추가·생일 알림 서버 연결 대기 중입니다. 기존 기본 연차 안내는 유지됩니다.</p>}
     <FilterBar><Input aria-label="연차 안내 직원 검색" placeholder="직원 이름 검색" value={search} onChange={e => setSearch(e.target.value)} className="sm:w-44"/>
       <Select aria-label="연차 안내 부서" value={department} onChange={e => setDepartment(e.target.value)} className="sm:w-40"><option value="all">전체 부서</option>{departments.map(name => <option key={name}>{name}</option>)}</Select>
       <Select aria-label="연차 안내 종류" value={source} onChange={e => setSource(e.target.value as typeof source)} className="sm:w-40"><option value="all">전체 연차</option>{Object.entries(LEAVE_SOURCE_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</Select>

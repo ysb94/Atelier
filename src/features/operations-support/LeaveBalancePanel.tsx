@@ -3,13 +3,14 @@ import { useIsFetching, useMutation, useQueryClient } from '@tanstack/react-quer
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { FilterBar } from '@/components/ui/filter-bar'
+import { InfoNote } from '@/components/ui/info-note'
 import { Input, Select } from '@/components/ui/input'
 import { canEditOrgAssignment } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
 import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import { saveEmployeeRosterField } from '@/lib/supabase/employee-roster'
-import { memberLabel, OpsPanelFrame, OpsStat } from './OpsStat'
+import { memberLabel, OpsPanelFrame } from './OpsStat'
 import { useOpsDirectory } from './ops-directory'
 import { HireDateScrollField } from '@/features/org/HireDateScrollField'
 import { koreaDateKey } from '@/features/settings/my-attendance'
@@ -48,8 +49,10 @@ export function LeaveBalancePanel() {
   const loading = directory.loading || roster.isPending
   const ready = !failed && !loading
   return <OpsPanelFrame>
-    <p className="text-sm text-muted-foreground">조직도 직원 배치와 같은 현재 연차 값입니다. 입사일 기준 연차 기간에 따라 발생일수가 자동 갱신됩니다. 남은 연차를 수정해 저장하면 조직도에도 반영됩니다.</p>
-    <p className="text-xs text-muted-foreground">{extras.data?.fefoReady ? '기본·추가 연차 중 기한이 빠른 순서로 사용합니다. 부여 취소로 부족해진 일수도 총 잔여에 반영되며, 만료와 재계산 기록은 이력에 남습니다.' : '기본·추가 연차 통합 기한순 차감·만료 이력·부여 취소 재계산은 서버 적용 승인 대기 중입니다. 현재는 기존 추가 연차 우선 차감 방식이 유지됩니다.'}</p>
+    <InfoNote label="연차 계산 기준">
+    <p>조직도 직원 배치와 같은 현재 연차 값입니다. 입사일 기준 연차 기간에 따라 발생일수가 자동 갱신됩니다. 남은 연차를 수정해 저장하면 조직도에도 반영됩니다.</p>
+    <p>{extras.data?.fefoReady ? '기본·추가 연차 중 기한이 빠른 순서로 사용합니다. 부여 취소로 부족해진 일수도 총 잔여에 반영되며, 만료와 재계산 기록은 이력에 남습니다.' : '기본·추가 연차 통합 기한순 차감·만료 이력·부여 취소 재계산은 서버 적용 승인 대기 중입니다. 현재는 기존 추가 연차 우선 차감 방식이 유지됩니다.'}</p>
+    </InfoNote>
     {!extras.isError && extras.data?.ready === false ? <p className="text-sm text-warning">추가 연차 서버 연결 대기 중입니다. 기존 연차 값은 유지됩니다.</p> : null}
     <FilterBar>
       <Input aria-label="연차 직원 검색" placeholder="직원 이름 검색" value={search} onChange={event => setSearch(event.target.value)} className="sm:w-52"/>
@@ -59,11 +62,7 @@ export function LeaveBalancePanel() {
       </Select>
       <Button variant="outline" disabled={roster.isFetching || advanceFetching > 0} onClick={() => { directory.refetch(); void snapshot.refetch(); void client.invalidateQueries({ queryKey: ['employee-leave-advances', profile?.id, true] }) }}>새로고침</Button>
     </FilterBar>
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-      <OpsStat label="대상 직원" value={ready ? `${rows.length}명` : '—'} detail={ready ? `잔여 등록 ${totals.registered}명` : undefined}/>
-      <OpsStat label="발생일수 합계" value={ready && !totals.missingGrant ? `${totals.granted}일` : '—'}/>
-      <OpsStat label="남은 연차 합계" value={ready ? `${totals.remaining}일` : '—'} detail="등록된 값만 합산"/>
-    </div>
+    <p role="status" className="text-sm text-muted-foreground">{ready ? <>대상 직원 <strong className="text-foreground">{rows.length}명</strong> · 잔여 등록 {totals.registered}명 · 발생일수 합계 {totals.missingGrant ? '—' : `${totals.granted}일`} · 남은 연차 합계 <strong className="text-foreground">{totals.remaining}일</strong> <span className="text-xs">(등록된 값만 합산)</span></> : '직원과 연차를 확인하고 있습니다.'}</p>
     <Card className="overflow-hidden"><div className="overflow-x-auto">
       <table className="w-full min-w-[800px] text-left text-sm">
         <thead className="bg-primary text-primary-foreground"><tr>
