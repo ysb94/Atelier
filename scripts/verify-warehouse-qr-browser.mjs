@@ -6,22 +6,33 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { chromium } from 'playwright-core'
 import * as XLSX from 'xlsx'
+import { createBoxLabelRegistryFixture } from './fixtures/box-label-registry.mjs'
 
 const root = process.cwd()
 const output = path.join(root, 'node_modules/.tmp/warehouse-qr-verify')
 await fs.mkdir(output, { recursive: true })
+const registryFixture = await createBoxLabelRegistryFixture()
 const server = await createServer({
   root, configFile: false, envFile: false, logLevel: 'error',
   plugins: [
     { name: 'warehouse-qr-fixture', configureServer(vite) {
       vite.middlewares.use((req, res, next) => {
+        if (req.url === '/__box-label-registry' && req.method === 'POST') {
+          let body = ''; req.on('data', chunk => { body += chunk })
+          req.on('end', async () => {
+            res.setHeader('Content-Type', 'application/json')
+            try { res.end(JSON.stringify(await registryFixture.handle(JSON.parse(body)))) }
+            catch (error) { res.statusCode = 400; res.end(JSON.stringify({ message: error.message, code: error.code })) }
+          })
+          return
+        }
         if (!req.headers.accept?.includes('text/html')) return next()
         const entry = req.url.startsWith('/warehouse-slots') ? 'warehouse-slots-entry' : 'warehouse-qr-entry'
         vite.transformIndexHtml(req.url, '<!doctype html><html lang="ko"><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module" src="/dev-tools/ai-workflow/browser-fixture/' + entry + '.tsx"></script></body></html>').then((html) => { res.setHeader('Content-Type', 'text/html; charset=utf-8'); res.end(html) }).catch(next)
       })
     } }, react(), tailwindcss(),
   ],
-  resolve: { alias: { '@/lib/api': path.join(root, 'dev-tools/ai-workflow/browser-fixture/warehouse-slots-api.ts'), '@': path.join(root, 'src') } },
+  resolve: { alias: { '@/lib/api/warehouse-box-labels': path.join(root, 'dev-tools/ai-workflow/browser-fixture/warehouse-box-labels-api.ts'), '@/lib/api': path.join(root, 'dev-tools/ai-workflow/browser-fixture/warehouse-slots-api.ts'), '@': path.join(root, 'src') } },
   server: { host: '127.0.0.1', port: 0, hmr: false, watch: { ignored: ['**/.tmp/**', '**/.state/**'] } },
 })
 await server.listen()
@@ -288,13 +299,16 @@ try {
   await page.getByRole('button', { name: /^박스창고/ }).click()
   await page.getByRole('button', { name: /^박스 개별 라벨링/ }).click()
   assert.equal(await rollInput.inputValue(), previousCodes.join('\n'), 'legacy codes and leading-zero numeric codes remain unchanged for reprinting')
-  await page.clock.setFixedTime(new Date('2026-11-09T15:01:00Z'))
+  assert.ok(await rollPrint.isDisabled(), 'legacy browser cache is not treated as registered')
+  await page.getByRole('button', { name: '기존 번호 등록·저장', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: '기존 번호를 공용 기록에 등록했습니다' }).waitFor()
   await page.getByLabel('생성할 박스 개수', { exact: true }).fill('100')
-  await page.getByRole('button', { name: '새 번호 생성', exact: true }).click()
+  await page.getByRole('button', { name: '새 번호 발급·저장', exact: true }).click()
+  await page.waitForFunction(() => document.querySelector('textarea[aria-label="개별 라벨 박스 번호"]').value.split('\n').length === 100)
   const generatedCodes = (await rollInput.inputValue()).split('\n')
   assert.equal(generatedCodes.length, 100)
   assert.equal(new Set(generatedCodes).size, 100)
-  assert.ok(generatedCodes.every(code => /^ENJ-261110-\d{10}$/.test(code)), 'Korea date and exactly ten numeric digits')
+  assert.ok(generatedCodes.every(code => /^ENJ-\d{6}-\d{10}$/.test(code)), 'Korea date and exactly ten numeric digits')
   await page.waitForFunction(() => document.querySelectorAll('.box-roll-label img').length === 100)
   await page.locator('.box-roll-label').first().screenshot({ path: path.join(output, 'roll-label-right-qr.png') })
   await page.getByLabel('생성할 박스 개수', { exact: true }).fill('50')
@@ -316,18 +330,24 @@ try {
   assert.deepEqual(generatedDecoded, generatedCodes)
   await page.getByRole('button', { name: /^박스창고/ }).click()
   await page.getByRole('button', { name: /^박스 개별 라벨링/ }).click()
-  assert.equal(await rollInput.inputValue(), generatedCodes.join('\n'), 'last generated batch survives tab reopening for reprints')
+  await page.getByRole('button', { name: '번호 불러오기', exact: true }).first().click()
+  await page.waitForFunction(expected => document.querySelector('textarea[aria-label="개별 라벨 박스 번호"]').value === expected, generatedCodes.join('\n'))
+  assert.equal(await rollInput.inputValue(), generatedCodes.join('\n'), 'saved batch survives tab reopening for reprints')
   await page.getByLabel('생성할 박스 개수', { exact: true }).fill('201')
-  assert.ok(await page.getByRole('button', { name: '새 번호 생성', exact: true }).isDisabled())
+  assert.ok(await page.getByRole('button', { name: '새 번호 발급·저장', exact: true }).isDisabled())
   await page.getByLabel('생성할 박스 개수', { exact: true }).fill('0')
-  assert.ok(await page.getByRole('button', { name: '새 번호 생성', exact: true }).isDisabled())
+  assert.ok(await page.getByRole('button', { name: '새 번호 발급·저장', exact: true }).isDisabled())
   await page.getByLabel('생성할 박스 개수', { exact: true }).fill('100')
-  await page.getByRole('button', { name: '새 번호 생성', exact: true }).click()
+  await page.getByRole('button', { name: '새 번호 발급·저장', exact: true }).click()
+  await page.waitForFunction(previous => document.querySelector('textarea[aria-label="개별 라벨 박스 번호"]').value !== previous, generatedCodes.join('\n'))
   const nextCodes = (await rollInput.inputValue()).split('\n')
   assert.equal(new Set(nextCodes).size, 100)
   assert.ok(nextCodes.every(code => !generatedCodes.includes(code)), 'new batch does not reuse the previous batch')
   const longRollCode = '가'.repeat(32)
   await rollInput.fill('BOX-001\nBOX-001\n' + longRollCode)
+  assert.ok(await rollPrint.isDisabled(), 'editing saved codes disables printing until registration')
+  await page.getByRole('button', { name: '기존 번호 등록·저장', exact: true }).click()
+  await page.getByRole('status').filter({ hasText: '기존 번호를 공용 기록에 등록했습니다' }).waitFor()
   await page.getByLabel('번호별 출력 매수', { exact: true }).fill('2')
   await page.waitForFunction(() => document.querySelectorAll('.box-roll-label img').length === 2)
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
@@ -373,6 +393,60 @@ try {
   await page.getByLabel('번호별 출력 매수', { exact: true }).fill('1')
   await rollInput.fill('A'.repeat(33))
   assert.ok(await rollPrint.isDisabled(), 'oversize code rejected instead of clipping')
+  // Losing a successful response must not create another batch on retry.
+  const beforeRetry = Number((await registryFixture.db.query('select count(*) as n from warehouse_box_labels')).rows[0].n)
+  registryFixture.state.failNextIssueAfterCommit = true
+  await page.getByLabel('생성할 박스 개수', { exact: true }).fill('3')
+  await page.getByRole('button', { name: '새 번호 발급·저장', exact: true }).click()
+  await page.getByRole('alert').filter({ hasText: '서버에서 결과를 확인하지 못했습니다' }).waitFor()
+  assert.ok(await rollPrint.isDisabled(), 'failed acknowledgement cannot print unsaved input')
+  await page.getByRole('button', { name: '새 번호 발급·저장', exact: true }).click()
+  await page.waitForFunction(() => document.querySelector('textarea[aria-label="개별 라벨 박스 번호"]').value.split('\n').length === 3)
+  assert.equal(Number((await registryFixture.db.query('select count(*) as n from warehouse_box_labels')).rows[0].n), beforeRetry + 3)
+  const recovered = (await rollInput.inputValue()).split('\n')
+  // A separate browser context has no local cache but sees the shared DB history.
+  const otherContext = await browser.newContext({ viewport: { width: 1440, height: 1050 } })
+  await otherContext.route('**/*', route => route.request().url().startsWith(origin + '/') || route.request().url().startsWith('data:') ? route.continue() : route.abort())
+  const otherPage = await otherContext.newPage()
+  await otherPage.goto(origin + '/logistics/warehouses?view=qr')
+  await otherPage.getByRole('button', { name: /^박스 개별 라벨링/ }).click()
+  await otherPage.getByRole('button', { name: '번호 불러오기', exact: true }).first().click()
+  await otherPage.waitForFunction(expected => document.querySelector('textarea[aria-label="개별 라벨 박스 번호"]').value === expected, recovered.join('\n'))
+  await Promise.all([page, otherPage].map(async client => {
+    await client.getByLabel('생성할 박스 개수', { exact: true }).fill('5')
+    await client.getByRole('button', { name: '새 번호 발급·저장', exact: true }).click()
+    await client.waitForFunction(() => document.querySelector('textarea[aria-label="개별 라벨 박스 번호"]').value.split('\n').length === 5)
+  }))
+  const simultaneous = await Promise.all([page, otherPage].map(client => client.getByLabel('개별 라벨 박스 번호', { exact: true }).inputValue()))
+  assert.equal(new Set(simultaneous.flatMap(text => text.split('\n'))).size, 10, 'two computers issue different numbers')
+  await page.getByLabel('재출력할 전체 박스 번호').fill(recovered[0])
+  await page.getByRole('button', { name: '번호 검색', exact: true }).click()
+  await page.waitForFunction(expected => document.querySelector('textarea[aria-label="개별 라벨 박스 번호"]').value === expected, recovered[0])
+  const beforeReprint = Number((await registryFixture.db.query('select count(*) as n from warehouse_box_labels')).rows[0].n)
+  await page.evaluate(() => { window.__rackPrintCalls = 0 })
+  await rollPrint.click()
+  await page.waitForFunction(() => window.__rackPrintCalls === 1)
+  assert.deepEqual(await page.frameLocator('iframe.box-roll-print-frame').locator('.box-roll-code').allTextContents(), [recovered[0]])
+  assert.equal(Number((await registryFixture.db.query('select count(*) as n from warehouse_box_labels')).rows[0].n), beforeReprint, 'reprinting does not issue codes')
+  await otherContext.close()
+  for (let i = 0; i < 5; i++) await registryFixture.handle({ action: 'issue', brandId: '00000000-0000-4000-8000-000000000001', requestId: crypto.randomUUID(), count: 1 })
+  await page.getByRole('button', { name: '내역 새로고침', exact: true }).click()
+  await page.getByRole('button', { name: '다음 내역', exact: true }).click()
+  await page.getByText('2페이지', { exact: true }).waitFor()
+  await page.getByRole('button', { name: '번호 불러오기', exact: true }).first().click()
+  await page.getByRole('status').filter({ hasText: '기존 번호를 불러왔습니다' }).waitFor()
+  await page.getByRole('button', { name: '이전 내역', exact: true }).click()
+  await page.getByText('1페이지', { exact: true }).waitFor()
+  await page.getByLabel('재출력할 전체 박스 번호').fill('NOT-ISSUED')
+  await page.getByRole('button', { name: '번호 검색', exact: true }).click()
+  await page.getByRole('alert').filter({ hasText: '등록된 번호가 없습니다' }).waitFor()
+  assert.ok(await rollPrint.isDisabled(), 'failed lookup cannot accidentally print the previous selection')
+  registryFixture.state.failHistory = true
+  await page.getByRole('button', { name: '내역 새로고침', exact: true }).click()
+  await page.getByRole('alert').filter({ hasText: '발급 내역을 불러오지 못했습니다' }).waitFor()
+  registryFixture.state.failHistory = false
+  await page.getByRole('button', { name: '내역 새로고침', exact: true }).click()
+  await page.getByRole('button', { name: '번호 불러오기', exact: true }).first().waitFor()
   await page.getByRole('button', { name: /^출고창고/ }).click()
   assert.equal(await page.locator('iframe.box-roll-print-frame').count(), 0, 'roll print document is removed when leaving the tab')
   await page.setViewportSize({ width: 390, height: 844 })
@@ -448,5 +522,5 @@ try {
   await page.setViewportSize({ width: 390, height: 844 })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
   assert.deepEqual(errors, [])
-  console.log(JSON.stringify({ passed: true, racks: 7, slots: 112, labelPages: 2, slotLabelPages: 28, decodedSlotQrs: decoded.length, manualSlotFormats: true, exactSavedClassification: true, optionalSlotGeneration: true, existingAndBoxSlotsPreserved: true, loadAndSaveErrors: true, blankLastCell: true, numberOnlyLabels: true, excelAndLegacyBox: true, rangeAndListValidation: true, mobile: true, artifacts: output }))
-} finally { await browser.close(); await server.close() }
+  console.log(JSON.stringify({ passed: true, sharedBoxRegistry: true, multiComputerIssuance: true, idempotentRetry: true, storedReprint: true, historyPagination: true, racks: 7, slots: 112, labelPages: 2, slotLabelPages: 28, decodedSlotQrs: decoded.length, manualSlotFormats: true, exactSavedClassification: true, optionalSlotGeneration: true, existingAndBoxSlotsPreserved: true, loadAndSaveErrors: true, blankLastCell: true, numberOnlyLabels: true, excelAndLegacyBox: true, rangeAndListValidation: true, mobile: true, artifacts: output }))
+} finally { await browser.close(); await server.close(); await registryFixture.db.close() }

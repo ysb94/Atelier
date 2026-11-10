@@ -187,7 +187,7 @@ export function WarehousePage() {
         </CardHeader>
         <CardContent>
           {activeView === 'qr' ? (
-            <WarehouseQrPanel brandName={brand.name} />
+            <WarehouseQrPanel brandName={brand.name} brandId={brand.id} />
           ) : activePanel === 'slots' ? (
             <WarehouseSlotSettingsPanel
               brandId={brand.id}

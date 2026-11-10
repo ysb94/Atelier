@@ -5,7 +5,9 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
-import { generateIndividualBoxCodes, MAX_INDIVIDUAL_BOX_CODES } from '@/lib/warehouse/individual-box-codes'
+import { MAX_INDIVIDUAL_BOX_CODES } from '@/lib/warehouse/individual-box-codes'
+import { BOX_LABEL_HISTORY_PAGE_SIZE } from '@/lib/api/warehouse-box-labels'
+import { useBoxLabelRegistry } from './useBoxLabelRegistry'
 import labelCss from './box-individual-label.css?inline'
 import './box-individual-label.css'
 
@@ -26,14 +28,20 @@ function readRecentCodes() {
   return ''
 }
 
-export function BoxIndividualLabelPanel() {
+export function BoxIndividualLabelPanel({ brandId }: { brandId: string }) {
   useRenderWatch('BoxIndividualLabelPanel')
   const [text, setText] = useState(readRecentCodes)
   const [generationCount, setGenerationCount] = useState('100')
-  const [generationError, setGenerationError] = useState('')
-  const [storageWarning, setStorageWarning] = useState('')
-  const issued = useRef(new Set<string>())
+  const [searchCode, setSearchCode] = useState('')
   const [copies, setCopies] = useState('1')
+  const registry = useBoxLabelRegistry(brandId, loaded => {
+    setText(loaded.join('\n')); setCopies('1')
+    // Retire legacy browser-only data only after the same codes are confirmed on the server.
+    if (loaded.join('\n') === readRecentCodes()) {
+      try { localStorage.removeItem(RECENT_CODES_KEY) }
+      catch (cause) { console.warn('[warehouse-qr] 이전 브라우저 번호 정리 실패', { cause }) }
+    }
+  })
   const [prepared, setPrepared] = useState<PreparedLabels | null>(null)
   const [error, setError] = useState('')
   const [status, setStatus] = useState('')
@@ -48,28 +56,10 @@ export function BoxIndividualLabelPanel() {
     : !/^\d+$/.test(copies) || !Number.isSafeInteger(count) || count < 1 ? '번호별 출력 매수는 1 이상의 정수로 입력해 주세요.'
     : total > MAX_LABELS ? `한 번에 총 ${MAX_LABELS}장까지 출력할 수 있습니다. 번호나 매수를 줄여 주세요.` : ''
   const key = JSON.stringify(codes)
-  const ready = !validation && prepared?.key === key
+  const registered = registry.savedKey === key
+  const ready = registered && !registry.busy && !validation && prepared?.key === key
   const requestedCount = Number(generationCount)
   const invalidCount = !/^\d+$/.test(generationCount) || !Number.isInteger(requestedCount) || requestedCount < 1 || requestedCount > MAX_LABELS
-
-  function generateCodes() {
-    if (invalidCount || printing) return
-    setGenerationError(''); setStorageWarning('')
-    try {
-      const generated = generateIndividualBoxCodes(requestedCount, [...issued.current, ...codes])
-      generated.forEach(code => issued.current.add(code))
-      setText(generated.join('\n'))
-      setCopies('1')
-      try { localStorage.setItem(RECENT_CODES_KEY, JSON.stringify(generated)) }
-      catch (cause) {
-        console.warn('[warehouse-qr] 최근 박스 번호 보관 실패', { cause })
-        setStorageWarning('번호는 생성했지만 이 브라우저에 보관하지 못했습니다. 재출력할 번호 목록을 복사해 보관해 주세요.')
-      }
-    } catch (cause) {
-      console.warn('[warehouse-qr] 박스 번호 자동 생성 실패', { cause })
-      setGenerationError('번호를 생성하지 못했습니다. 다시 시도해 주세요.')
-    }
-  }
 
   useEffect(() => {
     mounted.current = true
@@ -151,15 +141,16 @@ export function BoxIndividualLabelPanel() {
 
   return <div className="grid gap-4 lg:grid-cols-[19rem_minmax(0,1fr)]">
     <Card><CardContent className="space-y-4 p-4">
-      <div><h3 className="text-sm font-semibold">박스 번호 자동 생성</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">필요한 박스 개수만큼 서로 다른 번호를 만듭니다.<br />예: ENJ-261110-4827051936<br />날짜는 생성하는 날의 한국 날짜이며, 뒤쪽은 무작위 숫자 10자리입니다.</p></div>
-      <label className="block space-y-1"><span className="text-xs text-muted-foreground">생성할 박스 개수</span><Input aria-label="생성할 박스 개수" inputMode="numeric" value={generationCount} disabled={printing} onChange={event => setGenerationCount(event.target.value)} /></label>
-      <Button className="w-full" disabled={invalidCount || printing} onClick={generateCodes}>새 번호 생성</Button>
+      <div><h3 className="text-sm font-semibold">박스 번호 발급 · 공용 저장</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">여러 컴퓨터에서 나눠 발급해도 서버에서 중복을 막고 번호를 저장합니다.<br />예: ENJ-261110-4827051936<br />날짜는 생성하는 날의 한국 날짜이며, 뒤쪽은 무작위 숫자 10자리입니다.</p></div>
+      <label className="block space-y-1"><span className="text-xs text-muted-foreground">생성할 박스 개수</span><Input aria-label="생성할 박스 개수" inputMode="numeric" value={generationCount} disabled={printing || registry.busy} onChange={event => setGenerationCount(event.target.value)} /></label>
+      <Button className="w-full" disabled={invalidCount || printing || registry.busy} onClick={() => void registry.issue(requestedCount)}>{registry.busy ? '처리 중…' : '새 번호 발급·저장'}</Button>
       {invalidCount && <p role="alert" className="text-xs text-danger">생성 개수는 1~{MAX_LABELS} 사이의 정수로 입력해 주세요.</p>}
-      {generationError && <p role="alert" className="text-xs text-danger">{generationError}</p>}
-      {storageWarning && <p role="alert" className="text-xs text-danger">{storageWarning}</p>}
-      <p className="text-xs leading-relaxed text-muted-foreground">새로 생성하면 아래 목록이 새 번호로 바뀝니다. 인쇄 버튼은 번호를 바꾸지 않습니다. 마지막 자동 생성 목록은 이 브라우저에 보관됩니다.</p>
-      <label className="block space-y-1"><span className="text-xs text-muted-foreground">박스 번호 · 한 줄에 하나</span><Textarea aria-label="개별 라벨 박스 번호" rows={8} value={text} disabled={printing} onChange={event => setText(event.target.value)} placeholder={'BOX-001\nBOX-002\nBOX-003'} /><span className="text-xs text-muted-foreground">중복 번호는 한 번만 사용합니다. 번호당 최대 32자입니다.</span></label>
-      <label className="block space-y-1"><span className="text-xs text-muted-foreground">번호별 출력 매수</span><Input aria-label="번호별 출력 매수" inputMode="numeric" value={copies} disabled={printing} onChange={event => setCopies(event.target.value)} /></label>
+      {registry.error && <p role="alert" className="text-xs text-danger">{registry.error}</p>}
+      {registry.notice && <p role="status" className="text-xs text-muted-foreground">{registry.notice}</p>}
+      <p className="text-xs leading-relaxed text-muted-foreground">발급 내역은 같은 브랜드를 사용하는 다른 컴퓨터에서도 확인할 수 있습니다. 저장된 번호만 출력하며, 재출력은 기존 번호를 그대로 사용합니다.</p>
+      <label className="block space-y-1"><span className="text-xs text-muted-foreground">박스 번호 · 한 줄에 하나</span><Textarea aria-label="개별 라벨 박스 번호" rows={8} value={text} disabled={printing || registry.busy} onChange={event => setText(event.target.value)} placeholder={'BOX-001\nBOX-002\nBOX-003'} /><span className="text-xs text-muted-foreground">중복 번호는 한 번만 사용합니다. 번호당 최대 32자입니다.</span></label>
+      {!registered && codes.length > 0 && <div className="space-y-2"><p className="text-xs text-muted-foreground">이 목록은 아직 공용 저장을 확인하지 않았습니다. 이전에 출력했거나 직접 입력한 번호는 아래 버튼으로 등록하세요. 이미 등록했다면 발급 내역에서 불러오세요.</p><Button variant="outline" className="w-full" disabled={printing || registry.busy || codes.length > MAX_LABELS || codes.some(code => code.length > 32 || Array.from(code).some(char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127))} onClick={() => void registry.issue(codes.length, codes)}>기존 번호 등록·저장</Button></div>}
+      <label className="block space-y-1"><span className="text-xs text-muted-foreground">번호별 출력 매수</span><Input aria-label="번호별 출력 매수" inputMode="numeric" value={copies} disabled={printing || registry.busy} onChange={event => setCopies(event.target.value)} /></label>
       {validation && <p role={text || copies !== '1' ? 'alert' : undefined} className="text-xs text-muted-foreground">{validation}</p>}
       <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs leading-7"><p>박스 번호 <strong>{codes.length}개</strong></p><p>출력할 라벨 <strong>{validation ? 0 : total}장</strong></p><p>한 장 크기 <strong>가로 60 × 세로 40mm</strong></p></div>
       <p className="text-xs text-muted-foreground">총 {MAX_LABELS}장까지 출력합니다. 이 화면에서는 라벨만 만들며 창고 재고에 등록하지 않습니다.</p>
@@ -171,8 +162,16 @@ export function BoxIndividualLabelPanel() {
       {error && <p role="alert" className="text-xs text-danger">{error}</p>}
       {status && <p role="status" className="text-xs text-muted-foreground">{status}</p>}
       <div aria-label="개별 롤 라벨 미리보기" className="flex max-h-[36rem] min-h-64 flex-wrap items-start justify-center gap-4 overflow-auto rounded-lg border border-dashed border-border bg-muted/20 p-3">
-        {ready ? codes.map(code => <div key={code} className="space-y-1"><div className="box-roll-label shadow-sm"><img src={prepared.images.get(code)} alt={code + ' QR'} /><strong className="box-roll-code" style={{ '--roll-code-units': codeTextUnits(code) } as CSSProperties}>{code}</strong></div><p className="text-center text-xs text-muted-foreground">{count}장</p></div>) : <p className="self-center text-sm text-muted-foreground">{validation ? '박스 번호와 출력 매수를 입력하면 미리보기가 표시됩니다.' : error ? 'QR 준비 실패' : 'QR 준비 중…'}</p>}
+        {ready ? codes.map(code => <div key={code} className="space-y-1"><div className="box-roll-label shadow-sm"><img src={prepared.images.get(code)} alt={code + ' QR'} /><strong className="box-roll-code" style={{ '--roll-code-units': codeTextUnits(code) } as CSSProperties}>{code}</strong></div><p className="text-center text-xs text-muted-foreground">{count}장</p></div>) : <p className="self-center text-sm text-muted-foreground">{!registered ? '번호를 발급·저장하거나 발급 내역에서 불러오세요.' : validation || (error ? 'QR 준비 실패' : 'QR 준비 중…')}</p>}
       </div>
+      <section aria-label="박스 번호 발급 내역" className="space-y-3 border-t border-border pt-4">
+        <div className="flex items-center justify-between"><h3 className="text-sm font-semibold">발급 내역 · 재출력</h3><Button variant="outline" size="sm" disabled={registry.historyLoading || registry.busy} onClick={registry.refresh}>내역 새로고침</Button></div>
+        <div className="flex gap-2"><Input className="min-w-0 flex-1" aria-label="재출력할 전체 박스 번호" value={searchCode} onChange={event => setSearchCode(event.target.value)} placeholder="ENJ-261110-4827051936" /><Button className="shrink-0 whitespace-nowrap" variant="outline" disabled={!searchCode.trim() || registry.busy || printing} onClick={() => void registry.find(searchCode)}>번호 검색</Button></div>
+        <p className="text-xs text-muted-foreground">전체 발급 묶음은 아래에서 불러오고, 한 장만 다시 뽑으려면 전체 박스 번호를 검색하세요. 날짜·시각은 한국 기준입니다.</p>
+        {registry.historyError && <p role="alert" className="text-xs text-danger">{registry.historyError}</p>}
+        {registry.historyLoading ? <p className="text-xs text-muted-foreground">발급 내역 불러오는 중…</p> : !registry.history.length && !registry.historyError ? <p className="text-xs text-muted-foreground">아직 저장된 발급 내역이 없습니다.</p> : registry.history.slice(0, BOX_LABEL_HISTORY_PAGE_SIZE).map(batch => <div key={batch.id} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-border p-3"><div><p className="text-sm">{new Intl.DateTimeFormat('ko-KR', { timeZone: 'Asia/Seoul', dateStyle: 'short', timeStyle: 'medium' }).format(new Date(batch.created_at))}</p><p className="text-xs text-muted-foreground">{batch.source === 'generated' ? '신규 발급' : '기존 번호 등록'} · {batch.label_count}개</p></div><Button variant="outline" size="sm" disabled={registry.busy || printing || registry.historyLoading} onClick={() => void registry.load(batch.id)}>번호 불러오기</Button></div>)}
+        <div className="flex items-center justify-end gap-2"><Button variant="outline" size="sm" disabled={registry.page === 0 || registry.historyLoading} onClick={() => registry.setPage(page => page - 1)}>이전 내역</Button><span className="text-xs">{registry.page + 1}페이지</span><Button variant="outline" size="sm" disabled={registry.history.length <= BOX_LABEL_HISTORY_PAGE_SIZE || registry.historyLoading} onClick={() => registry.setPage(page => page + 1)}>다음 내역</Button></div>
+      </section>
     </CardContent></Card>
   </div>
 }

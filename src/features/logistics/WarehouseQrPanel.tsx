@@ -57,7 +57,7 @@ function safeFilePart(name: string) {
   return name.replace(/[\\/:*?"<>|]+/g, '').trim() || '창고'
 }
 
-export function WarehouseQrPanel({ brandName }: { brandName: string }) {
+export function WarehouseQrPanel({ brandName, brandId }: { brandName: string; brandId: string }) {
   useRenderWatch('WarehouseQrPanel')
   const [target, setTarget] = useState<QrTarget>('outbound')
   const [mode, setMode] = useState<QrMode>('range')
@@ -143,7 +143,7 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
   if (target === 'individual-box') return (
     <div className="space-y-4">
       <QrTargetSelector target={target} onChange={setTarget} />
-      <BoxIndividualLabelPanel />
+      <BoxIndividualLabelPanel key={brandId} brandId={brandId} />
     </div>
   )
 
