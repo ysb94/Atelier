@@ -208,16 +208,37 @@ try {
   await page.getByRole('button', { name: '4칸 라벨 미리보기', exact: true }).click()
   const boxDialog = page.getByRole('dialog', { name: '박스창고 자리번호 · A4 4칸 라벨' })
   await boxDialog.waitFor()
-  assert.deepEqual(await boxDialog.locator('.outbound-rack-label').allTextContents(), ['2/1/1', '2/1/2', '2/1/3', '2/1/4'])
-  assert.equal(await boxDialog.getByRole('img').count(), 0)
+  assert.deepEqual(await boxDialog.locator('.outbound-rack-label').allTextContents(), ['2-1-1', '2-1-2', '2-1-3', '2-1-4'])
+  assert.equal(await boxDialog.locator('img.warehouse-box-qr').count(), 8)
+  assert.equal(await boxDialog.getByRole('img', { name: '위쪽 방향' }).count(), 4)
   await page.getByRole('button', { name: '다음 라벨 페이지' }).click()
-  assert.deepEqual(await boxDialog.locator('.outbound-rack-label').allTextContents(), ['2/1/5', '2/1/6', '2/1/7', ''])
+  assert.deepEqual(await boxDialog.locator('.outbound-rack-label').allTextContents(), ['2-1-5', '2-1-6', '2-1-7', ''])
   await page.evaluate(() => { window.__rackPrintCalls = 0 })
   await page.getByRole('button', { name: '전체 박스창고 자리 라벨 인쇄', exact: true }).click()
   await page.waitForFunction(() => window.__rackPrintCalls === 1)
   await page.emulateMedia({ media: 'print' })
   const boxSize = await page.locator('.outbound-rack-print-root .outbound-rack-label').first().boundingBox()
-  assert.ok(Math.abs(boxSize.width - 105 * 96 / 25.4) < 1 && Math.abs(boxSize.height - 148.5 * 96 / 25.4) < 1)
+  assert.ok(Math.abs(boxSize.width - 148.5 * 96 / 25.4) < 1 && Math.abs(boxSize.height - 105 * 96 / 25.4) < 1)
+  const arrowColor = await page.locator('.outbound-rack-print-root .warehouse-box-arrow').first().evaluate(el => getComputedStyle(el).color)
+  const arrowChannels = arrowColor.match(/\d+/g).map(Number)
+  assert.ok(arrowChannels[0] > 150 && arrowChannels[0] > arrowChannels[1] * 2 && arrowChannels[0] > arrowChannels[2] * 2, 'direction arrow prints in red')
+  const boxQrs = await page.locator('.outbound-rack-print-root .warehouse-box-qr').evaluateAll(async images => {
+    const values = []
+    for (const img of images) {
+      await img.decode()
+      const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 512
+      const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, 512, 512)
+      const rgba = ctx.getImageData(0, 0, 512, 512)
+      values.push(window.jsQR(rgba.data, 512, 512)?.data ?? null)
+    }
+    return values
+  })
+  assert.deepEqual(boxQrs, Array.from({ length: 7 }, (_, i) => [`2-1-${i + 1}`, `2-1-${i + 1}`]).flat(), 'both QRs encode the exact same complete location')
+  const boxLayout = await page.locator('.outbound-rack-print-root .warehouse-box-label').first().evaluate(el => {
+    const label = el.getBoundingClientRect(), [left, right] = [...el.querySelectorAll('.warehouse-box-qr')].map(q => q.getBoundingClientRect()), arrow = el.querySelector('.warehouse-box-arrow').getBoundingClientRect(), code = el.querySelector('.warehouse-box-code').getBoundingClientRect()
+    return { aligned: Math.abs(left.y-right.y)<1, separated: left.right<=arrow.left && arrow.right<=right.left, textBelow: code.top>=Math.max(left.bottom,right.bottom), fits: code.bottom<=label.bottom && right.right<=label.right }
+  })
+  assert.deepEqual(boxLayout, { aligned: true, separated: true, textBelow: true, fits: true })
   const boxPdf = await page.pdf({ path: path.join(output, 'box-labels.pdf'), preferCSSPageSize: true, printBackground: true })
   assert.equal((boxPdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length, 2, '7 box locations = 2 physical A4 pages')
   await page.emulateMedia({ media: 'screen' })
@@ -230,9 +251,9 @@ try {
   await page.getByText('3개 자리 · A4 1장', { exact: true }).waitFor()
   await page.getByRole('button', { name: '4칸 라벨 미리보기', exact: true }).click()
   await boxDialog.waitFor()
-  assert.deepEqual(await boxDialog.locator('.outbound-rack-label').allTextContents(), ['2/1/1', '2/1/B/4', '12/23/456', ''])
-  assert.ok(await boxDialog.locator('.outbound-rack-label-number, .outbound-rack-label-separator').evaluateAll(els => els.every(el => {
-    const r = el.getBoundingClientRect(), area = el.closest('.outbound-rack-label-code').getBoundingClientRect()
+  assert.deepEqual(await boxDialog.locator('.outbound-rack-label').allTextContents(), ['2-1-1', '2-1-B-4', '12-23-456', ''])
+  assert.ok(await boxDialog.locator('.warehouse-box-code').evaluateAll(els => els.every(el => {
+    const r = el.getBoundingClientRect(), area = el.closest('.warehouse-box-label').getBoundingClientRect()
     return r.top >= area.top - 1 && r.bottom <= area.bottom + 1 && r.left >= area.left - 1 && r.right <= area.right + 1
   })), 'custom box code formats fit in the same four-label layout')
   await page.screenshot({ path: path.join(output, 'box-label-preview.png'), fullPage: true })

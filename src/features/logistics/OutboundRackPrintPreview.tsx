@@ -26,8 +26,16 @@ function enablePrintMode(slotMode: boolean) {
   }
   style.textContent = '@page { size: A4 ' + (slotMode ? 'landscape' : 'portrait') + '; margin: 0; }'
 }
-function LabelSheet({ labels, slotImages }: { labels: (string | null)[]; slotImages?: ReadonlyMap<string, string> }) {
-  return <div className={'outbound-rack-sheet' + (slotImages ? ' outbound-slot-sheet' : '')}>{labels.map((label, index) => {
+function LabelSheet({ labels, slotImages, boxImages }: { labels: (string | null)[]; slotImages?: ReadonlyMap<string, string>; boxImages?: ReadonlyMap<string, string> }) {
+  return <div className={'outbound-rack-sheet' + (slotImages || boxImages ? ' outbound-slot-sheet' : '')}>{labels.map((label, index) => {
+    if (boxImages) return <div className="outbound-rack-label warehouse-box-label" key={label ?? 'blank-' + index}>{label && <>
+      <div className="warehouse-box-label-top">
+        <img className="warehouse-box-qr" src={boxImages.get(label)} alt={label + ' 왼쪽 QR'} />
+        <svg className="warehouse-box-arrow" viewBox="0 0 100 110" role="img" aria-label="위쪽 방향"><path d="M50 0 100 55H75V110H25V55H0Z" fill="currentColor" /></svg>
+        <img className="warehouse-box-qr" src={boxImages.get(label)} alt={label + ' 오른쪽 QR'} />
+      </div>
+      <strong className="warehouse-box-code" style={{ '--box-code-length': label.length } as CSSProperties}>{label}</strong>
+    </>}</div>
     if (slotImages) {
       const [rack, slot] = label?.split('_') ?? []
       return <div className="outbound-rack-label outbound-slot-label" key={label ?? 'blank-' + index}>{label && <>
@@ -52,11 +60,12 @@ function LabelSheet({ labels, slotImages }: { labels: (string | null)[]; slotIma
   })}</div>
 }
 
-export function OutboundRackPrintPreview({ labels, slotImages, labelKind = 'rack', onClose }: { labels: string[]; slotImages?: ReadonlyMap<string, string>; labelKind?: 'rack' | 'box'; onClose: () => void }) {
+export function OutboundRackPrintPreview({ labels, slotImages, boxImages, labelKind = 'rack', onClose }: { labels: string[]; slotImages?: ReadonlyMap<string, string>; boxImages?: ReadonlyMap<string, string>; labelKind?: 'rack' | 'box'; onClose: () => void }) {
   useRenderWatch('OutboundRackPrintPreview')
   const active = useWorkspaceTabActivity()
   const slotMode = slotImages !== undefined
   const boxMode = labelKind === 'box'
+  const landscape = slotMode || boxMode
   const title = slotMode ? '고정 자리 · A4 4칸 QR 라벨' : boxMode ? '박스창고 자리번호 · A4 4칸 라벨' : '렉 번호 · A4 4칸 라벨'
   const pages = outboundRackLabelPages(labels)
   const [pageIndex, setPageIndex] = useState(0)
@@ -74,12 +83,12 @@ export function OutboundRackPrintPreview({ labels, slotImages, labelKind = 'rack
   }, [])
   useEffect(() => {
     if (!active) return
-    const before = () => enablePrintMode(slotMode)
+    const before = () => enablePrintMode(landscape)
     const after = () => { clearPrintMode(); setPrinting(false) }
     window.addEventListener('beforeprint', before)
     window.addEventListener('afterprint', after)
     return () => { window.removeEventListener('beforeprint', before); window.removeEventListener('afterprint', after); clearPrintMode() }
-  }, [active, slotMode])
+  }, [active, landscape])
 
   async function printLabels() {
     if (!active || printing) return
@@ -87,7 +96,7 @@ export function OutboundRackPrintPreview({ labels, slotImages, labelKind = 'rack
     try {
       await Promise.all(Array.from(printRoot.current?.querySelectorAll('img') ?? []).map((img) => img.decode()))
       await document.fonts.ready
-      enablePrintMode(slotMode)
+      enablePrintMode(landscape)
       await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())))
       window.print()
     } catch (cause) {
@@ -112,13 +121,13 @@ export function OutboundRackPrintPreview({ labels, slotImages, labelKind = 'rack
           <div className="flex gap-2"><Button size="sm" disabled={printing} onClick={() => void printLabels()}><Printer className="size-3.5" />{printing ? '인쇄 준비 중…' : slotMode ? '전체 고정 자리 라벨 인쇄' : boxMode ? '전체 박스창고 자리 라벨 인쇄' : '전체 렉 라벨 인쇄'}</Button><Button variant="outline" size="sm" disabled={printing} data-print-preview-close aria-label={boxMode ? '박스창고 라벨 미리보기 닫기' : '렉 라벨 미리보기 닫기'} onClick={onClose}><X className="size-4" /></Button></div>
         </header>
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
-          <p className="text-xs text-muted-foreground">A4 {slotMode ? '가로' : '세로'} · 배율 100% · 여백 없음 · 머리글/바닥글 끄기</p>
+          <p className="text-xs text-muted-foreground">A4 {landscape ? '가로' : '세로'} · 배율 100% · 여백 없음 · 머리글/바닥글 끄기</p>
           <div className="flex items-center gap-2"><Button size="sm" variant="outline" aria-label="이전 라벨 페이지" disabled={pageIndex === 0} onClick={() => setPageIndex((index) => index - 1)}><ChevronLeft className="size-4" /></Button><span className="min-w-14 text-center text-xs tabular-nums">{pageIndex + 1} / {pages.length}장</span><Button size="sm" variant="outline" aria-label="다음 라벨 페이지" disabled={pageIndex === pages.length - 1} onClick={() => setPageIndex((index) => index + 1)}><ChevronRight className="size-4" /></Button></div>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto bg-muted/40 p-4"><div className={'outbound-rack-screen-preview' + (slotMode ? ' outbound-slot-preview' : '')}><LabelSheet labels={pages[pageIndex]} slotImages={slotImages} /></div></div>
-        <footer className="border-t border-border px-4 py-3 text-xs text-muted-foreground">{slotMode ? '한 칸은 가로 148.5mm × 세로 105mm입니다. 같은 4칸 용지를 가로로 사용합니다. 위쪽 약 55%에 QR과 자리번호를 모으고 아래쪽 약 45%는 비워 둡니다.' : '한 칸은 가로 105mm × 세로 148.5mm입니다. 왼쪽 ¼은 비우고 오른쪽 ¾의 중앙에 세로로 표시합니다.'} 마지막 장의 남는 칸은 인쇄하지 않습니다.{error && <p role="alert" className="mt-1 text-danger">{error}</p>}</footer>
+        <div className="min-h-0 flex-1 overflow-auto bg-muted/40 p-4"><div className={'outbound-rack-screen-preview' + (landscape ? ' outbound-slot-preview' : '')}><LabelSheet labels={pages[pageIndex]} slotImages={slotImages} boxImages={boxImages} /></div></div>
+        <footer className="border-t border-border px-4 py-3 text-xs text-muted-foreground">{boxMode ? '한 칸은 가로 148.5mm × 세로 105mm입니다. 좌우 QR은 같은 자리번호입니다. 가운데 화살표가 위를 향하도록 붙여 주세요.' : slotMode ? '한 칸은 가로 148.5mm × 세로 105mm입니다. 같은 4칸 용지를 가로로 사용합니다. 위쪽 약 55%에 QR과 자리번호를 모으고 아래쪽 약 45%는 비워 둡니다.' : '한 칸은 가로 105mm × 세로 148.5mm입니다. 왼쪽 ¼은 비우고 오른쪽 ¾의 중앙에 세로로 표시합니다.'} 마지막 장의 남는 칸은 인쇄하지 않습니다.{error && <p role="alert" className="mt-1 text-danger">{error}</p>}</footer>
       </section>
     </div>
-    {active && createPortal(<div className={'outbound-rack-print-root' + (slotMode ? ' outbound-slot-mode' : '')} ref={printRoot} aria-hidden="true">{pages.map((page, index) => <LabelSheet key={index} labels={page} slotImages={slotImages} />)}</div>, document.body)}
+    {active && createPortal(<div className={'outbound-rack-print-root' + (slotMode ? ' outbound-slot-mode' : '')} ref={printRoot} aria-hidden="true">{pages.map((page, index) => <LabelSheet key={index} labels={page} slotImages={slotImages} boxImages={boxImages} />)}</div>, document.body)}
   </WorkspaceTabOverlay>
 }

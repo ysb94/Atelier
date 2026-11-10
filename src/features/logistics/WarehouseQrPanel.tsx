@@ -73,7 +73,8 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
   const [listText, setListText] = useState('2-1-1\n2-1-2\n2-1-3')
   const [status, setStatus] = useState<string | null>(null)
   const [downloading, setDownloading] = useState(false)
-  const [previewLabels, setPreviewLabels] = useState<string[] | null>(null)
+  const [previewLabels, setPreviewLabels] = useState<{ labels: string[]; images: ReadonlyMap<string, string> } | null>(null)
+  const [preparing, setPreparing] = useState(false)
 
   const parsedCodes = useMemo(
     () =>
@@ -88,6 +89,30 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
   const rangeCount = Number(endNo) - Number(startNo) + 1
   const rangeTooBig =
     mode === 'range' && Number.isFinite(rangeCount) && rangeCount > MAX_QR_ROWS
+
+  async function previewBoxLabels() {
+    if (!codes.length || preparing) return
+    const labels = [...codes]
+    setPreparing(true); setStatus(null)
+    const started = performance.now()
+    try {
+      const QRCode = (await import('qrcode')).default
+      const images = new Map<string, string>()
+      for (const [index, code] of labels.entries()) {
+        const svg = await QRCode.toString(code, { type: 'svg', errorCorrectionLevel: 'M', margin: 4 })
+        images.set(code, 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg))
+        if (index % 8 === 7) await new Promise<void>(resolve => setTimeout(resolve, 0))
+      }
+      setPreviewLabels({ labels, images })
+    } catch (error) {
+      console.warn('[warehouse-qr] 박스창고 QR 라벨 준비 실패', { path: location.pathname, error })
+      setStatus('QR 라벨을 준비하지 못했습니다. 자리번호를 확인하고 다시 시도해 주세요.')
+    } finally {
+      setPreparing(false)
+      const elapsed = performance.now() - started
+      if (elapsed >= 200) console.info('[warehouse-qr] 박스창고 QR 라벨 준비', { path: location.pathname, count: labels.length, elapsed })
+    }
+  }
 
   async function handleDownload() {
     if (codes.length === 0) {
@@ -196,7 +221,7 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
         </div>
 
         <div className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-sm">
-          <div><h3 className="text-base font-semibold">박스창고 자리번호 · A4 4칸 라벨</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">출고창고 렉 번호와 같은 형식으로 자리번호만 크게 인쇄합니다. A4 세로를 2열 × 2행으로 균등하게 나눕니다.</p></div>
+          <div><h3 className="text-base font-semibold">박스창고 자리번호 · A4 4칸 라벨</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">위쪽 좌우에 같은 자리번호의 QR 두 개, 가운데 위쪽 화살표, 아래에 큰 자리번호를 표시합니다. A4 가로를 2열 × 2행으로 나눕니다.</p></div>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="muted">{brandName}</Badge>
@@ -206,12 +231,12 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
               </Badge>
             </div>
             <div className="flex flex-wrap gap-2">
-            <Button type="button" size="sm" disabled={codes.length === 0 || downloading} onClick={() => setPreviewLabels([...codes])}><Printer className="size-3.5" />4칸 라벨 미리보기</Button>
+            <Button type="button" size="sm" disabled={codes.length === 0 || downloading || preparing} onClick={() => void previewBoxLabels()}><Printer className="size-3.5" />{preparing ? 'QR 준비 중…' : '4칸 라벨 미리보기'}</Button>
             <Button
               type="button"
               size="sm"
               variant="outline"
-              disabled={codes.length === 0 || downloading}
+              disabled={codes.length === 0 || downloading || preparing}
               onClick={() => void handleDownload()}
             >
               <Download className="size-3.5" />
@@ -258,10 +283,10 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
               </table>
             </div>
           )}
-          <p className="text-xs leading-relaxed text-muted-foreground">인쇄 설정: A4 세로 · 배율 100% · 여백 없음 · 머리글/바닥글 끄기. 마지막 장의 남는 칸은 비워 둡니다.</p>
+          <p className="text-xs leading-relaxed text-muted-foreground">인쇄 설정: A4 가로 · 배율 100% · 여백 없음 · 머리글/바닥글 끄기. 마지막 장의 남는 칸은 비워 둡니다.</p>
         </div>
       </div>
-      {previewLabels && <OutboundRackPrintPreview labels={previewLabels} labelKind="box" onClose={() => setPreviewLabels(null)} />}
+      {previewLabels && <OutboundRackPrintPreview labels={previewLabels.labels} boxImages={previewLabels.images} labelKind="box" onClose={() => setPreviewLabels(null)} />}
     </div>
   )
 }
