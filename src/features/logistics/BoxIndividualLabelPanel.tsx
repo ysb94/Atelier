@@ -21,7 +21,7 @@ function codeTextUnits(code: string) {
 function readRecentCodes() {
   try {
     const saved: unknown = JSON.parse(localStorage.getItem(RECENT_CODES_KEY) ?? 'null')
-    if (Array.isArray(saved) && saved.length <= MAX_LABELS && saved.every(code => typeof code === 'string' && /^ENJ-\d{6}-[A-HJ-NP-Z2-9]{8}$/.test(code))) return saved.join('\n')
+    if (Array.isArray(saved) && saved.length <= MAX_LABELS && saved.every(code => typeof code === 'string' && /^ENJ-\d{6}-(?:\d{10}|[A-HJ-NP-Z2-9]{8})$/.test(code))) return saved.join('\n')
   } catch (cause) { console.warn('[warehouse-qr] 최근 박스 번호 불러오기 실패', { cause }) }
   return ''
 }
@@ -151,7 +151,7 @@ export function BoxIndividualLabelPanel() {
 
   return <div className="grid gap-4 lg:grid-cols-[19rem_minmax(0,1fr)]">
     <Card><CardContent className="space-y-4 p-4">
-      <div><h3 className="text-sm font-semibold">박스 번호 자동 생성</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">필요한 박스 개수만큼 서로 다른 번호를 만듭니다.<br />예: ENJ-261110-7K9M2X4P<br />날짜는 생성하는 날의 한국 날짜입니다.</p></div>
+      <div><h3 className="text-sm font-semibold">박스 번호 자동 생성</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">필요한 박스 개수만큼 서로 다른 번호를 만듭니다.<br />예: ENJ-261110-4827051936<br />날짜는 생성하는 날의 한국 날짜이며, 뒤쪽은 무작위 숫자 10자리입니다.</p></div>
       <label className="block space-y-1"><span className="text-xs text-muted-foreground">생성할 박스 개수</span><Input aria-label="생성할 박스 개수" inputMode="numeric" value={generationCount} disabled={printing} onChange={event => setGenerationCount(event.target.value)} /></label>
       <Button className="w-full" disabled={invalidCount || printing} onClick={generateCodes}>새 번호 생성</Button>
       {invalidCount && <p role="alert" className="text-xs text-danger">생성 개수는 1~{MAX_LABELS} 사이의 정수로 입력해 주세요.</p>}

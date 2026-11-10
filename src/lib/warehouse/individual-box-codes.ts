@@ -1,7 +1,6 @@
 export const MAX_INDIVIDUAL_BOX_CODES = 200
-const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 
-/** Korea date, independent of the computer's timezone. Random suffix excludes I/O/0/1. */
+/** Korea date plus ten random digits, preserving any leading zero. */
 export function generateIndividualBoxCodes(count: number, excluded: Iterable<string> = [], now = new Date()) {
   if (!Number.isInteger(count) || count < 1 || count > MAX_INDIVIDUAL_BOX_CODES) throw new Error('생성 개수는 1~200 사이의 정수로 입력해 주세요.')
   const parts = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Seoul', year: '2-digit', month: '2-digit', day: '2-digit' }).formatToParts(now)
@@ -9,9 +8,10 @@ export function generateIndividualBoxCodes(count: number, excluded: Iterable<str
   const used = new Set(excluded)
   const result: string[] = []
   for (let attempt = 0; result.length < count && attempt < count * 100; attempt++) {
-    const bytes = crypto.getRandomValues(new Uint8Array(8))
-    const suffix = Array.from(bytes, byte => ALPHABET[byte & 31]).join('')
-    if (!/[A-Z]/.test(suffix) || !/[2-9]/.test(suffix)) continue
+    const bytes = crypto.getRandomValues(new Uint8Array(10))
+    // Reject the uneven remainder so every digit has equal probability.
+    if (bytes.some(byte => byte >= 250)) continue
+    const suffix = Array.from(bytes, byte => String(byte % 10)).join('')
     const code = `ENJ-${date}-${suffix}`
     if (used.has(code)) continue
     used.add(code)
