@@ -1,5 +1,5 @@
 import { cn, formatNumber } from '@/lib/utils'
-import type { ComponentPropsWithoutRef } from 'react'
+import type { ComponentPropsWithoutRef, ReactNode } from 'react'
 
 type TabInteractionProps = Pick<ComponentPropsWithoutRef<'button'>,
   'draggable' | 'onDragStart' | 'onDragOver' | 'onDragLeave' | 'onDrop' | 'onDragEnd' | 'onKeyDown' | 'title' | 'className'>
@@ -15,6 +15,8 @@ export type FilterTab<T extends string> = {
   aboveCount?: number
   /** 탭 이름 옆 괄호 건수. */
   parenCount?: number
+  /** 탭 이름 뒤 알림 표시(예: My home 알림 배지). */
+  trailing?: ReactNode
 }
 
 /** 목록 상단의 상태별 탭. 건수를 같이 보이고, 고른 탭은 테두리와 굵은 글씨로 구분한다. */
@@ -86,6 +88,7 @@ export function FilterTabs<T extends string>({
                 {formatNumber(tab.count)}
               </span>
             ) : null}
+            {tab.trailing}
           </button>
         )
       })}

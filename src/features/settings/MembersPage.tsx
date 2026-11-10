@@ -213,7 +213,8 @@ function MemberEditor({
   )
 }
 
-export function MembersPage() {
+/** `embedded`: 운영지원 > 조직·멤버 탭 안에서는 상위 화면 제목을 쓴다. */
+export function MembersPage({ embedded = false }: { embedded?: boolean } = {}) {
   useRenderWatch('MembersPage')
   const { profile: me, session } = useAuth()
   const queryClient = useQueryClient()
@@ -298,10 +299,10 @@ export function MembersPage() {
 
   return (
     <div>
-      <PageHeader
+      {!embedded && <PageHeader
         title="멤버"
         description="기존 직원의 계정 정보와 이용·정지 상태를 관리합니다."
-      />
+      />}
 
       <p className="mb-4 rounded-xl border border-border bg-card p-3 text-sm">가입 신청 승인·거절은 <Link className="text-primary underline" to={NEW_EMPLOYEES_HREF}>조직도 → 신규직원</Link>에서 처리합니다.</p>
       {!canManageMembers && <p className="mb-4 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">조회 전용 · 계정 정보 변경과 정지는 기존 직원 관리 권한을 따릅니다.</p>}

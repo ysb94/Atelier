@@ -9,7 +9,7 @@ const PHASE_COPY: Record<LeaveSamplePhase, { title: string; introduction: string
   oneMonth: { title: '연차 사용 재안내', introduction: '연차 사용기한이 1개월 남아 다시 안내드립니다.', request: '남은 연차와 사용기한을 다시 확인하시어 기한 내 사용을 부탁드립니다.' },
   twoWeeks: { title: '연차 사용기한 임박 안내', introduction: '연차 사용기한이 2주 앞으로 다가왔습니다.', request: '사용 가능한 기간이 얼마 남지 않았으니, 업무 일정을 확인하시어 남은 연차를 기한 내 사용해 주시기 바랍니다.' },
 }
-export const LEAVE_SAMPLE_HREF = '/operations-support?part=leave&leaveView=alarm'
+export const LEAVE_SAMPLE_HREF = '/operations-support/leave?leaveView=alarm'
 export type LeaveAlarmSample = {
   id: string; phase: LeaveSamplePhase; recipientId: string; recipientName: string
   remaining: number; expiresOn: string; simulatedOn: string; issuedAt: string; body: string

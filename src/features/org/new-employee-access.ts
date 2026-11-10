@@ -3,7 +3,7 @@ import type { OnboardingEmployee } from '@/lib/supabase/employee-onboarding'
 import { RELEASE_COMPANY_ID } from '@/lib/company/release-access'
 
 export const EMPLOYEE_ACCESS_QUERY = 'employee-access-requests'
-export const NEW_EMPLOYEES_HREF = '/operations-support?part=org&orgView=new'
+export const NEW_EMPLOYEES_HREF = '/operations-support/people?orgView=new'
 export type NewEmployeeView = 'active' | 'complete' | 'rejected'
 export type NewEmployeeRow = OnboardingEmployee & { connected: boolean }
 

@@ -22,8 +22,10 @@ function screen(path: string, part: string): Screen | null {
     if (part==='meetings') return { permissions:['meeting.manage','attendance.manage'] }
     return { permissions:['work.manage','attendance.manage'] }
   }
-  if (path==='/members') return { permissions:['personnel.manage'] }
-  if (path==='/operations-support') return { permissions:part==='notices'?['notice.company.write']:['company.review'] }
+  if (path==='/members' || (path==='/operations-support/people' && part==='members')) return { permissions:['personnel.manage'] }
+  // 회사 설정은 공지 탭이 기본이다.
+  if (path==='/operations-support/settings') return { permissions:(part || 'notices')==='notices'?['notice.company.write']:['company.review'] }
+  if (path==='/operations-support' || path.startsWith('/operations-support/')) return { permissions:part==='notices'?['notice.company.write']:['company.review'] }
   if (path==='/settings/permissions') return { permissions:['approvers.manage'] }
   if (path==='/brands') return { permissions:['brand.edit'] }
   if (path==='/settings/ai') return { permissions:['ai.manage'], roles:editRoles }
@@ -37,7 +39,8 @@ function screen(path: string, part: string): Screen | null {
 
 export function pagePreviewCases(pathname: string, real: Profile, search=''): PagePreviewCase[] {
   const path=pathname.replace(/\/$/,'') || '/'
-  const config=screen(path,new URLSearchParams(search).get('part') ?? '')
+  const params=new URLSearchParams(search)
+  const config=screen(path,params.get('part') ?? params.get('settingsView') ?? params.get('peopleView') ?? '')
   if (!config) return []
   const departmentName=config.departmentName ?? real.departmentName ?? '디자인팀'
   // 담당자는 지정된 업무 화면이 같으므로 소속 부서별 버튼을 중복 제공하지 않는다.

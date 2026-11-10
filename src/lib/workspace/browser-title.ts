@@ -9,11 +9,13 @@ const PERSONAL_TITLES: Record<string, string> = {
   meetings: '회의', attendance: '담당 부서 출근시간',
 }
 const OPERATIONS_TITLES: Record<string, string> = {
-  org: '조직도', attendance: '근태', leave: '연차관리', documents: '서류 출력',
-  hours: '회사운영 시간', notices: '공지',
+  attendance: '근태', leave: '연차', people: '조직·멤버', settings: '회사 설정',
 }
 const LEAVE_TITLES: Record<string, string> = {
   requests: '신청 현황', balance: '연차 현황', alarm: '연차 소진 알람',
+}
+const SETTINGS_TITLES: Record<string, string> = {
+  notices: '공지', hours: '운영시간 · 출근 기준', exemptions: '출퇴근 제외자',
 }
 const NAV_TITLES = [
   ...companyTopNav.map(item => ({ path: item.to, title: item.label })),
@@ -30,11 +32,14 @@ export function browserPageTitle(pathname: string, search = ''): string {
   const params = new URLSearchParams(search)
   if (path === '/') return '홈'
   if (path === '/settings/profile') return PERSONAL_TITLES[params.get('part') ?? ''] ?? 'My Schedule'
-  if (path === '/operations-support') {
-    const part = params.get('part') ?? 'org'
-    const title = part === 'leave'
+  if (path === '/operations-support') return '운영지원'
+  if (path.startsWith('/operations-support/')) {
+    const section = path.split('/')[2]
+    const title = section === 'leave'
       ? LEAVE_TITLES[params.get('leaveView') ?? 'requests'] ?? '신청 현황'
-      : OPERATIONS_TITLES[part] ?? '조직도'
+      : section === 'settings'
+        ? SETTINGS_TITLES[params.get('settingsView') ?? 'notices'] ?? '공지'
+        : OPERATIONS_TITLES[section] ?? '운영지원'
     return `${title} · 운영지원`
   }
   if (path.startsWith('/chat/room/')) return '채팅'

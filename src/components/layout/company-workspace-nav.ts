@@ -7,22 +7,27 @@ import {
   canAccessBrandManagement,
   canAccessMamamIdeaInbox,
   canAccessOperationsSupport,
-  canViewMembers,
 } from '../../lib/company/capabilities.ts'
+import {
+  canViewOperationsSection,
+  operationsSectionFromPath,
+  operationsSectionHref,
+} from '../../features/operations-support/operations-support-sections.ts'
 import {
   Boxes,
   Building2,
+  CalendarCheck,
   CalendarDays,
   Camera,
   ChartColumn,
   ClipboardList,
   ClipboardCheck,
+  Clock,
   FlaskConical,
   FileSpreadsheet,
   FileText,
   FolderTree,
   Hash,
-  Headset,
   Home,
   Images,
   Inbox,
@@ -34,6 +39,7 @@ import {
   PenLine,
   ScanBarcode,
   Search,
+  Settings2,
   Shirt,
   Sparkles,
   Store,
@@ -138,8 +144,11 @@ export const companyNavGroups: CompanyNavGroup[] = [
   {
     title: '운영지원',
     items: [
-      { to: '/operations-support', label: '운영지원', icon: Headset },
+      { to: operationsSectionHref('attendance'), label: '근태', icon: Clock },
+      { to: operationsSectionHref('leave'), label: '연차', icon: CalendarCheck },
+      { to: operationsSectionHref('people'), label: '조직·멤버', icon: Network },
       { to: '/settings/permissions', label: '권한·담당자 설정', icon: Users },
+      { to: operationsSectionHref('settings'), label: '회사 설정', icon: Settings2 },
     ],
   },
   {
@@ -186,8 +195,6 @@ export function companyNavGroupsForProfile(
   materialNudgeViewer = false,
 ) {
   const scope = releaseAccess(profile)
-  const showOperationsSupport = canAccessOperationsSupport(profile) || scope.operations
-  const showMembers = canViewMembers(profile) || scope.operations
   const showBrandManagement = canAccessBrandManagement(profile)
   const visibleGroups = companyNavGroups.flatMap((group) => {
     if (group.title !== '운영지원') {
@@ -198,10 +205,12 @@ export function companyNavGroupsForProfile(
       return allowedItems.length > 0 ? [{ ...group, items: allowedItems }] : []
     }
     const showPermissions = scope.operations || hasPermission(profile, 'permissions.manage') || hasPermission(profile, 'approvers.manage') || hasPermission(profile, 'partner.manage')
-    const items = [
-      ...group.items.filter(item => releaseHref(profile, item.to) !== null && (item.to !== '/settings/permissions' ? showOperationsSupport : showPermissions)),
-      ...(showMembers && releaseHref(profile, membersNavItem.to) !== null ? [membersNavItem] : []),
-    ]
+    // 운영지원 메뉴는 업무마다 기존 파트 권한으로 따로 노출한다.
+    const items = group.items.filter(item => {
+      if (releaseHref(profile, item.to) === null) return false
+      const section = operationsSectionFromPath(item.to)
+      return section ? canViewOperationsSection(profile, section) : showPermissions
+    })
     return items.length > 0 ? [{ ...group, items }] : []
   })
   const departmentItems = scope.departmentTitle

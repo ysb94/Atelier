@@ -3,6 +3,7 @@ import { canAccessOperationsSupport, canViewOperationsSupportPart, canEditOrgAss
 import { companyNavGroupsForProfile } from '../../components/layout/company-workspace-nav.ts'
 import type { PermissionCode } from './permissions.ts'
 import { RELEASE_COMPANY_ID, RELEASE_OPERATIONS_ID } from './release-access.ts'
+import { OPERATIONS_SECTIONS, canViewOperationsSection, canViewPeopleMembers, canViewPeopleOrg, defaultOperationsSection, legacyOperationsHref, operationsSectionFromPath } from '../../features/operations-support/operations-support-sections.ts'
 
 const member = { companyId: 'company', status: 'active', email: 'staff@invalid', departmentName: '운영지원팀', position: '사원', isAdmin: false, permissionGrants: [] }
 const assigned = (...permissions: PermissionCode[]) => ({ ...member, permissionGrants: permissions.map(permission => ({ permission, scopeKind: 'company' as const, scopeId: 'company' })) })
@@ -19,11 +20,31 @@ assert.equal(canViewMembers(assigned('personnel.manage')),true)
 assert.equal(canViewMembers(member),false,'운영지원 소속만으로 조회 권한이 생기지 않음')
 assert.equal(canViewDraftsByOwner(assigned('company.review')),false,'현황 조회가 기획안 권한을 자동 생성하지 않음')
 assert.equal(canViewDraftsByOwner(assigned('drafts.read')),true)
-assert.equal(links(member).includes('/operations-support'),false)
-assert.equal(links(assigned('attendance.manage')).includes('/operations-support'),false,'기존 작업 권한이 있어도 타 부서에는 아직 미공개')
-assert.equal(links(assigned('personnel.manage')).includes('/members'),false)
+const opsLinks = (profile: Parameters<typeof companyNavGroupsForProfile>[0]) => links(profile).filter(href => href.startsWith('/operations-support') || href === '/settings/permissions')
+assert.deepEqual(opsLinks(member),[])
+assert.deepEqual(opsLinks(assigned('attendance.manage')),[],'기존 작업 권한이 있어도 타 부서에는 아직 미공개')
+assert.deepEqual(opsLinks(assigned('personnel.manage')),[])
 const operations = {...member,companyId:RELEASE_COMPANY_ID,departmentId:RELEASE_OPERATIONS_ID}
-for (const href of ['/operations-support','/members','/settings/permissions']) assert.ok(links(operations).includes(href),'운영지원 공개 화면')
+assert.deepEqual(opsLinks(operations),['/operations-support/people','/settings/permissions'],'운영지원 공개 화면: 관리 권한 없이는 조직·멤버와 권한·담당자만')
+const opsManager = {...operations,permissionGrants:[{ permission:'attendance.manage' as const, scopeKind:'company' as const, scopeId:RELEASE_COMPANY_ID }]}
+assert.deepEqual(opsLinks(opsManager),['/operations-support/attendance','/operations-support/leave','/operations-support/people','/settings/permissions','/operations-support/settings'],'지정 관리자는 운영지원 메뉴 전체')
+for (const section of OPERATIONS_SECTIONS.map(item => item.id)) assert.equal(canViewOperationsSection(operations,section),section === 'people',`운영지원 소속만으로 ${section} 진입 불가`)
+assert.equal(canViewPeopleOrg(operations) && canViewPeopleMembers(operations),true,'운영지원은 조직도와 멤버 탭을 본다')
+assert.equal(defaultOperationsSection(operations),'people')
+assert.equal(defaultOperationsSection(assigned('attendance.manage')),'attendance')
+assert.equal(defaultOperationsSection(null),'people')
+assert.equal(legacyOperationsHref('?part=org&orgView=new','attendance'),'/operations-support/people?orgView=new')
+assert.equal(legacyOperationsHref('?part=attendance&attendanceView=holiday&holidayMonth=2026-11','people'),'/operations-support/attendance?attendanceView=holiday&holidayMonth=2026-11')
+assert.equal(legacyOperationsHref('?part=attendance&attendanceView=settings','people'),'/operations-support/settings?settingsView=hours')
+assert.equal(legacyOperationsHref('?part=attendance&attendanceView=exemptions','people'),'/operations-support/settings?settingsView=exemptions')
+assert.equal(legacyOperationsHref('?part=leave&leaveView=balance','people'),'/operations-support/leave?leaveView=balance')
+assert.equal(legacyOperationsHref('?part=notices','people'),'/operations-support/settings?settingsView=notices')
+assert.equal(legacyOperationsHref('?part=hours','people'),'/operations-support/settings?settingsView=hours')
+assert.equal(legacyOperationsHref('?part=documents','attendance'),'/operations-support/attendance','숨긴 서류 출력은 기본 업무로')
+assert.equal(legacyOperationsHref('','people'),'/operations-support/people')
+assert.equal(operationsSectionFromPath('/operations-support/leave/'),'leave')
+assert.equal(operationsSectionFromPath('/operations-support/unknown'),null)
+assert.equal(operationsSectionFromPath('/settings/permissions'),null)
 assert.equal(canAccessOperationsSupport(operations),false,'공개 화면 설정이 실제 업무 권한을 부여하지 않음')
 assert.equal(canViewOperationsSupportPart(operations,'org'),true,'운영지원은 관리 권한 없이도 조직도에 진입')
 assert.equal(canEditOrgAssignment(operations),false,'조직도 진입이 편집 권한을 만들지 않음')

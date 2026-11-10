@@ -15,5 +15,5 @@ export function firstOffsiteHoliday(request: OffsiteSpan): string | null {
   return null
 }
 export function holidayOffsiteHref(request: OffsiteSpan) {
-  return `/operations-support?part=attendance&attendanceView=holiday&holidayMonth=${request.from.slice(0,7)}&offsiteCase=${encodeURIComponent(request.id)}`
+  return `/operations-support/attendance?attendanceView=holiday&holidayMonth=${request.from.slice(0,7)}&offsiteCase=${encodeURIComponent(request.id)}`
 }

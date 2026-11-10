@@ -10,7 +10,7 @@ const real={companyId:'company',id:'developer',email:'dev@atelier.local',status:
 const snapshot=JSON.stringify(real)
 const cases=(path:string,search='')=>completePagePreviewCases(path,real,search)
 function profile(path:string,id:string){const item=cases(path).find(item=>item.id===id)!;assert.ok(item);return previewProfile(real,item.settings)}
-for(const path of ['/','/members','/settings/profile','/work','/drafts','/operations-support','/brands','/settings/ai','/idea-contest','/usage-codes','/chat/room/test']){
+for(const path of ['/','/members','/settings/profile','/work','/drafts','/operations-support','/operations-support/attendance','/operations-support/leave','/operations-support/people','/operations-support/settings','/brands','/settings/ai','/idea-contest','/usage-codes','/chat/room/test']){
  const items=cases(path)
  assert.equal(new Set(items.map(item=>item.id)).size,items.length)
  assert.ok(items.filter(item=>item.group==='role').length<=4)
@@ -30,7 +30,10 @@ assert.equal(hasPermission(profile('/settings/ai','manager'),'ai.manage'),true)
 assert.equal(hasPermission(profile('/settings/ai','employee'),'ai.manage'),false)
 assert.equal(cases('/settings/profile','?part=work').filter(item=>item.group==='request'||item.group==='meeting').length,0)
 assert.deepEqual(cases('/settings/profile','?part=approvals').filter(item=>item.group==='request').map(item=>item.label),['본인 신청','다른 사람 신청'])
-assert.equal(cases('/operations-support','?part=leave').filter(item=>item.group==='request').length,0,'조회 전용 연차관리에는 승인 관계 선택 없음')
+assert.equal(cases('/operations-support/leave').filter(item=>item.group==='request').length,0,'조회 전용 연차관리에는 승인 관계 선택 없음')
+assert.equal(canAccessOperationsSupport(profile('/operations-support/attendance','manager')),true)
+assert.equal(canManagePersonnel(previewProfile(real,cases('/operations-support/people','?peopleView=members').find(item=>item.id==='manager')!.settings)),true,'멤버 탭 담당자 미리보기')
+assert.equal(hasPermission(previewProfile(real,cases('/operations-support/settings').find(item=>item.id==='manager')!.settings),'notice.company.write'),true,'회사 설정 기본 탭은 공지')
 assert.equal(cases('/settings/profile','?part=meetings').filter(item=>item.group==='meeting').length,4)
 assert.equal(cases('/settings/profile','?part=approvals').filter(item=>item.group==='meeting').length,0)
 assert.equal(cases('/chat/room/test').filter(item=>item.group==='chat').length,2,'별도 채팅 창은 같은 화면인 전체 관리 버튼을 중복 표시하지 않음')

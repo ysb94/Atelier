@@ -90,7 +90,7 @@ export function useMyHomeNotifications({ coordinator = false, background = false
     })
     const workItems = (selfService ? work.data ?? emptyList<WorkNotice>() : emptyList<WorkNotice>()).map(item => {
       const holiday = item.event_type.startsWith('holiday-')
-      const holidayPath = item.tab === 'holiday-work' ? '/operations-support?part=attendance&attendanceView=holiday' : `/settings/profile?part=${item.tab}`
+      const holidayPath = item.tab === 'holiday-work' ? '/operations-support/attendance?attendanceView=holiday' : `/settings/profile?part=${item.tab}`
       const href = holiday ? `${holidayPath}&holidayWork=${item.entity_id}&holidayMonth=${item.from_date.slice(0,7)}&holidayEvent=${encodeURIComponent(item.event_key)}` : item.event_type === 'offsite-group' ? `/settings/profile?part=my-attendance&request=${item.entity_id}` : `/settings/profile?part=${item.tab}&workNotice=${encodeURIComponent(item.event_key)}`
       const label = requestLabel(item.kind)
       return { id: item.event_key, kind: item.event_type==='checkout'?'checkout_needed' as const:'personal_request' as const,

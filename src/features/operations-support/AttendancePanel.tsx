@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { MyHomeNotificationBadge } from '@/features/settings/MyHomeNotificationList'
 import { Check, ChevronLeft, ChevronRight, Download, LayoutGrid, List, Printer, Search, Settings2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { FilterTabs, type FilterTab } from '@/components/ui/filter-tabs'
 import { Input, Select } from '@/components/ui/input'
 import { hasPermission } from '@/lib/company/permissions'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -21,10 +22,10 @@ import { AttendanceDeferredClockOutPanel } from './AttendanceDeferredClockOutPan
 import { AttendanceOvertimePanel } from './AttendanceOvertimePanel'
 import { AttendanceOffsitePanel } from './AttendanceOffsitePanel'
 import { HolidayWorkPanel } from './HolidayWorkPanel'
-import { AttendanceExemptionsPanel } from './AttendanceExemptionsPanel'
 import { AttendanceLatePanel } from './AttendanceLatePanel'
-import { AttendanceStartSettingsPanel } from './AttendanceStartSettingsPanel'
+import { useAttendanceDirectory } from './use-attendance-directory'
 import { useAttendanceStartSettings } from './use-attendance-start-settings'
+import { operationsSectionHref } from './operations-support-sections'
 import { useAttendanceStartOptions } from './use-attendance-start-options'
 import { attendanceStartIndex, resolveAttendanceStart, type AttendanceStartSetting } from './attendance-start-settings'
 import { exportAttendance, type AttendanceRow } from './attendance-export'
@@ -43,45 +44,47 @@ function timeAttendanceWork<T>(fn: () => T): T {
   return result
 }
 
+type AttendanceView = 'all' | 'late' | 'missed' | 'overtime' | 'offsite' | 'holiday'
+const ATTENDANCE_VIEWS: readonly AttendanceView[] = ['all', 'late', 'missed', 'overtime', 'offsite', 'holiday']
+
 export function AttendancePanel() {
-  const source = useOpsDirectory('head-office')
-  const { departments, members: allMembers, departmentName, loading, error } = source
-  const refetchRef = useRef(source.refetch)
-  useEffect(() => { refetchRef.current = source.refetch })
-  const members = useMemo(() => allMembers.filter(member => !member.attendanceExempt), [allMembers])
-  const directory = useMemo<ReturnType<typeof useOpsDirectory>>(() => ({ departments, members, departmentName, loading, error, refetch: () => refetchRef.current() }), [departments, members, departmentName, loading, error])
+  const { source, directory } = useAttendanceDirectory()
   const { profile } = useAuth()
   const saved = useAttendanceStartSettings()
   const awaitingHr = useQuery({ queryKey: ['late-statements-awaiting-hr'], queryFn: countLateStatementsAwaitingHr })
   const active = useWorkspaceTabActivity()
+  const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
-  const [localPart, setLocalPart] = useState('all')
-  const part = params.get('attendanceView') ?? localPart
-  function setPart(value: string) {
+  const [localPart, setLocalPart] = useState<AttendanceView>('all')
+  const requested = params.get('attendanceView') ?? localPart
+  // 출근시간·제외자는 회사 설정으로 옮겼다. 알 수 없는 보기는 월별 근태로 연다.
+  const part = ATTENDANCE_VIEWS.find(view => view === requested) ?? 'all'
+  function setPart(value: AttendanceView) {
     setLocalPart(value)
     if (active) setParams(previous => { const next = new URLSearchParams(previous); next.set('attendanceView',value); next.delete('holidayWork'); next.delete('holidayEvent'); next.delete('holidayMonth'); return next }, { replace: true })
   }
-  const [editing, setEditing] = useState<{ id?: string; month?: string }>({})
+  const tabs: FilterTab<AttendanceView>[] = [
+    { value: 'all', label: '월별 근태' },
+    { value: 'late', label: '지각·결근', ...(awaitingHr.data ? { aboveCount: awaitingHr.data } : {}) },
+    { value: 'missed', label: '퇴근 미처리' },
+    { value: 'overtime', label: '야근' },
+    { value: 'offsite', label: '외근' },
+    { value: 'holiday', label: '주말·공휴일 근무', trailing: <MyHomeNotificationBadge tab="holiday-work" /> },
+  ]
   return <div className="space-y-5">
-    <div role="group" aria-label="근태 관리 메뉴" className="flex flex-wrap gap-2">
-      <Button variant={part === 'all' ? 'default' : 'outline'} aria-pressed={part === 'all'} onClick={() => setPart('all')}>전체 근태 관리</Button>
-      <Button variant={part === 'settings' ? 'default' : 'outline'} aria-pressed={part === 'settings'} onClick={() => {setEditing({});setPart('settings')}}>출근시간 확인</Button>
-      <Button variant={part === 'late' ? 'default' : 'outline'} aria-pressed={part === 'late'} onClick={() => setPart('late')}>지각 * 결근 관리{awaitingHr.data ? ` ${awaitingHr.data}` : ''}</Button>
-      <Button variant={part === 'missed' ? 'default' : 'outline'} aria-pressed={part === 'missed'} onClick={() => setPart('missed')}>퇴근 미처리</Button>
-      <Button variant={part === 'overtime' ? 'default' : 'outline'} aria-pressed={part === 'overtime'} onClick={() => setPart('overtime')}>야근 관리</Button>
-      <Button variant={part === 'offsite' ? 'default' : 'outline'} aria-pressed={part === 'offsite'} onClick={() => setPart('offsite')}>외근 관리</Button>
-      <Button variant={part === 'holiday' ? 'default' : 'outline'} aria-pressed={part === 'holiday'} onClick={() => setPart('holiday')}>주말·공휴일 근무 관리<MyHomeNotificationBadge tab="holiday-work" /></Button>
-      <Button variant={part === 'exemptions' ? 'default' : 'outline'} aria-pressed={part === 'exemptions'} onClick={() => setPart('exemptions')}>출퇴근 시간 제외자</Button>
-    </div>
-    <div hidden={part !== 'all'}><AttendanceWorkspace directory={directory} canEdit={hasPermission(profile, 'attendance.manage')} savedSettings={saved.settings} settingsLoading={saved.loading} settingsError={Boolean(saved.error)} onEditStart={(id,month) => {setEditing({id,month});setPart('settings')}}/></div>
-    {part === 'settings' && <AttendanceStartSettingsPanel readOnly key={`${editing.id}:${editing.month}`} directory={directory} schedules={saved} initialEmployeeId={editing.id} initialMonth={editing.month}/>}
+    <FilterTabs tabs={tabs} value={part} onChange={setPart} ariaLabel="근태 업무" variant="underline" size="large" />
+    <div hidden={part !== 'all'}><AttendanceWorkspace directory={directory} canEdit={hasPermission(profile, 'attendance.manage')} savedSettings={saved.settings} settingsLoading={saved.loading} settingsError={Boolean(saved.error)} onEditStart={(id,month) => navigate(settingsStartHref(id, month))}/></div>
     {part === 'late' && <AttendanceLatePanel directory={directory} schedules={saved} />}
     {part === 'missed' && <AttendanceDeferredClockOutPanel directory={directory} />}
     {part === 'overtime' && <AttendanceOvertimePanel directory={source} />}
     {part === 'offsite' && <AttendanceOffsitePanel directory={source} schedules={saved} />}
     {part === 'holiday' && <HolidayWorkPanel key={profile?.id} scope="operations" />}
-    {part === 'exemptions' && <AttendanceExemptionsPanel directory={source} />}
   </div>
+}
+
+function settingsStartHref(employeeId: string, month: string) {
+  const params = new URLSearchParams({ settingsView: 'hours', startEmployee: employeeId, startMonth: month })
+  return `${operationsSectionHref('settings')}?${params}`
 }
 
 export function AttendanceWorkspace({ directory, canEdit, today = localDateKey(new Date()), initialMonth, initialRecords = {}, initialSchedules = {}, savedSettings, settingsLoading = false, settingsError = false, onEditStart }: {

@@ -69,8 +69,8 @@ export function releaseHref(profile: ReleaseProfile | null | undefined, href: st
   if (path === RELEASE_HOME) return releasePersonalPart(profile, url.searchParams.get('part'), approver) ? href : null
   if (/^\/chat\/room\/[^/]+$/.test(path)) return href
   if (path === '/meetings') { url.pathname = RELEASE_HOME; url.searchParams.set('part', 'meetings'); return url.pathname + url.search }
-  if (scope.operations && ['/operations-support', '/members', '/settings/permissions'].includes(path)) return href
-  if (scope.operations && path === '/org-chart') return '/operations-support?part=org'
+  if (scope.operations && (under(path, '/operations-support') || ['/members', '/settings/permissions'].includes(path))) return href
+  if (scope.operations && path === '/org-chart') return '/operations-support/people'
   if (scope.departmentSite?.pages.some(root => under(path, root))) return href
   if (scope.departmentSite?.title === 'MD') {
     if (path === '/md' || path === '/md/price-compare') return '/product-work/md' + url.search

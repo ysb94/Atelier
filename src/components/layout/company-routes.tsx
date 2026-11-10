@@ -6,7 +6,6 @@ import { CompanyHomePage } from '@/features/home/CompanyHomePage'
 import { CompanySchedulePage } from '@/features/home/CompanySchedulePage'
 import { WorkRequestPage } from '@/features/work-requests/WorkRequestPage'
 import { OrgChartPage } from '@/features/org/OrgChartPage'
-import { MembersPage } from '@/features/settings/MembersPage'
 import { ProfileSettingsPage } from '@/features/settings/ProfileSettingsPage'
 import { PermissionSettingsPage } from '@/features/settings/PermissionSettingsPage'
 import { AccessIpRecordsPage } from '@/features/settings/AccessIpRecordsPage'
@@ -124,7 +123,7 @@ export const companyWorkspaceRoutes = (
       <Route path="schedule" element={<CompanySchedulePage />} />
       <Route path="meetings" element={<Navigate to="/settings/profile?part=meetings" replace />} />
       <Route path="org-chart" element={<OrgChartPage />} />
-      <Route path="members" element={<MembersPage />} />
+      <Route path="members" element={<Navigate to="/operations-support/people?peopleView=members" replace />} />
       <Route path="settings/profile" element={<ProfileSettingsPage />} />
       <Route path="settings/permissions" element={<PermissionSettingsPage />} />
       <Route path="settings/access-ip" element={<AccessIpRecordsPage />} />
@@ -218,6 +217,7 @@ export const companyWorkspaceRoutes = (
       <Route path="usage-codes" element={<CompanyUsageCodePage />} />
       <Route path="partner-codes" element={<CompanyPartnerCodePage />} />
       <Route path="operations-support" element={<OperationsSupportPage />} />
+      <Route path="operations-support/:section" element={<OperationsSupportPage />} />
       <Route path="idea-contest" element={<MamamIdeaInboxPage />} />
       <Route path="operations" element={<CompanyOutboundDataPage />} />
       <Route path="outbound-data" element={<RedirectTo to="/operations" />} />
