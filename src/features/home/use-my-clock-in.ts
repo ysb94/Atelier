@@ -61,7 +61,7 @@ export function useMyClockIn() {
   useEffect(() => { if (overnightEnabled && overnight.error) console.warn('[attendance-clock] 전일 외근 상태 확인 실패', overnight.error) }, [overnightEnabled, overnight.error])
   const ongoingOffsiteRecord = overnightEnabled && !overnight.error ? continuingOffsiteClock(rows, today, overnight.data) : null
   const yesterday = koreaDateKey(new Date(Date.now() - 86_400_000))
-  const overnightCandidate = allowed && !exempt && !todayRecord && rows.some(row => row.date === yesterday)
+  const overnightCandidate = allowed && !exempt && !todayRecord && rows.some(row => row.date === yesterday && !row.clockOutAt && !row.autoClosedAt)
   const requests = useQuery({ queryKey: ['company-leave-requests', userId, 'mine', allowed], queryFn: () => listLeaveRequests(userId), ...sharedReadPolicy, enabled: overnightCandidate && active, refetchInterval: readPollInterval(30_000, overnightCandidate && active) })
   const hasOvertime = Boolean(requests.data?.some(row => row.kind === 'overtime' && ['pending', 'approved'].includes(row.status) && row.from === yesterday && row.to === yesterday))
   const basis = useQuery({ queryKey: ['my-workday-basis', userId, today], queryFn: () => getMyWorkdayBasis(today), ...sharedReadPolicy, enabled: overnightCandidate && hasOvertime && active })

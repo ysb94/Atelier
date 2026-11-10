@@ -43,6 +43,20 @@ async function load(page,scenario,pathname='/settings/profile'){await page.goto(
 async function ready(page){await page.waitForFunction(()=>[...document.querySelectorAll('dialog.attendance-entry-dialog')].every(dialog=>!dialog.open));await page.getByRole('group',{name:'출퇴근 상태',exact:true}).waitFor()}
 try{
  await server.listen();browser=await chromium.launch({executablePath:process.env.ATELIER_CHROMIUM_BIN||'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true})
+ for (const earlyTime of ['08:40', '08:50', '08:58']) {
+   const earlyContext = await context()
+   const earlyPage = await newPage(earlyContext, `2026-10-27T${earlyTime}:00+09:00`)
+   await load(earlyPage, 'completed-overtime-early')
+   await clockIn(earlyPage).getByRole('button', { name: '출근하기', exact: true }).click()
+   await ready(earlyPage)
+   const earlyState = await state(earlyPage)
+   assert.equal(earlyState.rows.find(row => row.work_date === '2026-10-27').clock_in, `${earlyTime}:00`, '전날 퇴근 후 이른 출근 시각 저장')
+   assert.equal(earlyState.rows.find(row => row.work_date === '2026-10-26').clock_out_at, '2026-10-26T12:12:00Z', '야근 신청 종료 전 눌렀던 실제 퇴근 유지')
+   await earlyPage.reload()
+   await ready(earlyPage)
+   assert.deepEqual((await state(earlyPage)).writes, ['clock_in_today'], '새로고침 후에도 오늘 출근을 중복 기록하지 않음')
+   await earlyContext.close()
+ }
  const first=await context(),page=await newPage(first)
  await load(page,'missing');await clockIn(page).waitFor();await clockIn(page).getByRole('button',{name:'출근하기',exact:true}).click();await pending(page).waitFor()
  const firstStamp=(await state(page)).rows.find(row=>row.work_date==='2026-10-27').clock_in

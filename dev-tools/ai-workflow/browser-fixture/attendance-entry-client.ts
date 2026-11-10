@@ -14,6 +14,10 @@ function seed(): State {
   const requests: Record<string, unknown>[] = []
   if (scenario === 'pending-correction' || scenario === 'approved-correction' || scenario === 'overtime') requests.push({ id: 'request-1', employee_id: 'fixture-user', employee_name: '검증 직원', department_id: 'other-department', department_name: '일반팀', kind: scenario === 'overtime' ? 'overtime' : 'correction', from_date: previous, to_date: previous, start_time: scenario === 'overtime' ? '18:00:00' : '09:00:00', end_time: scenario === 'overtime' ? '21:00:00' : '18:00:00', note: '검증', place: '', status: scenario === 'pending-correction' ? 'pending' : 'approved', created_at: previous + 'T00:00:00Z', decided_at: null, decided_by_name: null, decision_note: '' })
   if (scenario.startsWith('offsite')) requests.push({ id: 'offsite-1', employee_id: 'fixture-user', employee_name: '검증 직원', department_id: 'other-department', department_name: '일반팀', kind: 'offsite', from_date: today, to_date: today, start_time: '09:00:00', end_time: '18:00:00', note: '검증', place: '거래처', status: 'approved', created_at: previous + 'T00:00:00Z', decided_at: null, decided_by_name: null, decision_note: '' })
+  if (scenario === 'completed-overtime-early') {
+    rows.splice(0, rows.length, row(previous, previous + 'T12:12:00Z'))
+    requests.push({ id: 'completed-overtime', employee_id: 'fixture-user', employee_name: '검증 직원', department_id: 'other-department', department_name: '일반팀', kind: 'overtime', from_date: previous, to_date: previous, start_time: '18:00:00', end_time: '23:00:00', status: 'approved', created_at: previous + 'T08:00:00Z' })
+  }
   if (scenario === 'offsite-correction') {
     Object.assign(requests[0], { from_date: '2026-10-26', to_date: '2026-10-29', end_time: '21:00:00' })
     Object.assign(rows[0], { clock_in: '08:55:00', clock_out_at: '2026-10-26T15:30:00Z' })
