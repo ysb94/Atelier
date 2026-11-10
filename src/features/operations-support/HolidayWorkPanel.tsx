@@ -61,7 +61,8 @@ export function HolidayWorkPanel({ scope, month: monthProp }: { scope: 'mine' | 
     {work.isSuccess && !work.data.ready && <p role="status" className="rounded-xl border border-border bg-muted p-3 text-sm">주말·공휴일 근무의 추가 DB 설정 적용 대기입니다. 기존 근무·연차·권한은 그대로 유지됩니다.</p>}
     {work.error && <p role="alert" className="text-sm text-danger">{work.error.message}<Button type="button" size="sm" variant="outline" onClick={() => void work.refetch()}>다시 조회</Button></p>}
     {work.data?.ready && <>
-      {scope==='operations' && <HolidayOffsiteCases month={month} search={search} policyReady={Boolean(work.data.policy)} enabled={work.enabled} />}
+      {scope==='operations' && <HolidayOffsiteCases month={month} search={search} policyReady={Boolean(work.data.policy)}
+        enabled={work.enabled} rows={caseId ? work.rows : []} loading={work.isPending} error={work.error} refresh={work.refetch} />}
       {caseId && <p className="text-sm font-medium">선택 외근 전체 기간의 주말·공휴일 기록 · 다른 달의 날짜도 함께 표시합니다.</p>}
       <FilterTabs ariaLabel="휴일 근무 진행 구분" value={filter} onChange={setFilter} tabs={[{ value: 'all', label: '전체', count: work.rows.length }, { value: 'planned', label: '예정·입력 필요', count: work.rows.filter(r => ['planned', 'unreported', 'returned'].includes(r.state)).length }, { value: 'review', label: '부서 확인 대기', count: work.rows.filter(r => r.state === 'submitted').length }, { value: 'settle', label: '정산 대기', count: work.rows.filter(r => r.state === 'approved' && r.remainingUnits > 0).length }, { value: 'paid', label: '정산 내역', count: work.rows.filter(r => r.settlements.length).length }]} />
       <StatGrid><StatTile label="주말·공휴일 실제 시간" value={holidayCredit(work.rows.reduce((sum, r) => sum + (r.actualMinutes ?? 0) * 2, 0))} /><StatTile label="미정산 보상 시간" value={holidayCredit(work.rows.reduce((sum, r) => sum + r.remainingUnits, 0))} /><StatTile label="부서 확인 대기" value={`${work.rows.filter(r => r.state === 'submitted').length}건`} /></StatGrid>
