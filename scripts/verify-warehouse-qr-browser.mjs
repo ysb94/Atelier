@@ -31,7 +31,7 @@ const context = await browser.newContext({ viewport: { width: 1440, height: 1050
 await context.route('**/*', (route) => route.request().url().startsWith(origin + '/') || route.request().url().startsWith('data:') ? route.continue() : route.abort())
 const page = await context.newPage(), errors = []
 page.on('pageerror', (error) => errors.push(error.message))
-await page.addInitScript(() => { window.__rackPrintCalls = 0; window.print = () => { window.__rackPrintCalls++ } })
+await page.addInitScript(() => { window.__rackPrintCalls = 0; window.print = () => { window.top.__rackPrintCalls++ } })
 try {
   await page.goto(origin + '/logistics/warehouses?view=qr')
   await page.getByLabel('창고 번호', { exact: true }).waitFor()
@@ -279,7 +279,59 @@ try {
   await page.setViewportSize({ width: 390, height: 844 })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
   await page.screenshot({ path: path.join(output, 'box-label-mobile.png'), fullPage: true })
+  await page.getByRole('button', { name: /^박스 개별 라벨링/ }).click()
+  const rollInput = page.getByLabel('개별 라벨 박스 번호', { exact: true })
+  const rollPrint = page.getByRole('button', { name: '롤 라벨 인쇄', exact: true })
+  assert.ok(await rollPrint.isDisabled(), 'empty roll labels cannot print')
+  const longRollCode = '가'.repeat(32)
+  await rollInput.fill('BOX-001\nBOX-001\n' + longRollCode)
+  await page.getByLabel('번호별 출력 매수', { exact: true }).fill('2')
+  await page.waitForFunction(() => document.querySelectorAll('.box-roll-label img').length === 2)
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
+  await page.screenshot({ path: path.join(output, 'roll-label-mobile.png'), fullPage: true })
+  await page.setViewportSize({ width: 1440, height: 1050 })
+  await page.evaluate(() => { window.__rackPrintCalls = 0 })
+  await rollPrint.click()
+  await page.waitForFunction(() => window.__rackPrintCalls === 1)
+  const rollFrame = page.frameLocator('iframe.box-roll-print-frame')
+  assert.deepEqual(await rollFrame.locator('.box-roll-code').allTextContents(), ['BOX-001', 'BOX-001', longRollCode, longRollCode])
+  const rollDimensions = await rollFrame.locator('.box-roll-label').evaluateAll(labels => labels.map(label => {
+    const r = label.getBoundingClientRect(), text = label.querySelector('strong').getBoundingClientRect()
+    return { width: r.width, height: r.height, fits: text.bottom <= r.bottom && text.right <= r.right && label.scrollHeight <= label.clientHeight }
+  }))
+  assert.ok(rollDimensions.every(r => Math.abs(r.width - 60 * 96 / 25.4) < 1 && Math.abs(r.height - 40 * 96 / 25.4) < 1 && r.fits))
+  const rollDecoded = await page.evaluate(async () => {
+    const doc = document.querySelector('iframe.box-roll-print-frame').contentDocument
+    const values = []
+    for (const img of doc.images) {
+      await img.decode()
+      const canvas = document.createElement('canvas'); canvas.width = 216; canvas.height = 216
+      const ctx = canvas.getContext('2d'); ctx.drawImage(img, 0, 0, 216, 216)
+      values.push(window.jsQR(ctx.getImageData(0, 0, 216, 216).data, 216, 216)?.data)
+    }
+    return values
+  })
+  assert.deepEqual(rollDecoded, ['BOX-001', 'BOX-001', longRollCode, longRollCode])
+  const rollPdfPage = await context.newPage()
+  await rollPdfPage.setContent(await page.evaluate(() => document.querySelector('iframe.box-roll-print-frame').contentDocument.documentElement.outerHTML))
+  const rollPdf = await rollPdfPage.pdf({ path: path.join(output, 'roll-labels.pdf'), preferCSSPageSize: true, printBackground: true })
+  assert.equal((rollPdf.toString('latin1').match(/\/Type\s*\/Page\b/g) ?? []).length, 4, 'each roll label occupies its own physical page')
+  const mediaBox = rollPdf.toString('latin1').match(/\/MediaBox\s*\[0 0 ([\d.]+) ([\d.]+)\]/)
+  assert.ok(mediaBox && Math.abs(Number(mediaBox[1]) - 60 * 72 / 25.4) < 1 && Math.abs(Number(mediaBox[2]) - 40 * 72 / 25.4) < 1, 'PDF is physically 60x40mm')
+  await rollPdfPage.close()
+  await page.getByRole('button', { name: '첫 번호 1장 시험 출력', exact: true }).click()
+  await page.waitForFunction(() => window.__rackPrintCalls === 2)
+  assert.deepEqual(await rollFrame.locator('.box-roll-code').allTextContents(), ['BOX-001'])
+  await page.screenshot({ path: path.join(output, 'roll-label-preview.png'), fullPage: true })
+  await page.getByLabel('번호별 출력 매수', { exact: true }).fill('101')
+  assert.ok(await rollPrint.isDisabled(), 'over 200 roll labels rejected')
+  await page.getByLabel('번호별 출력 매수', { exact: true }).fill('0')
+  assert.ok(await rollPrint.isDisabled(), 'zero copies rejected')
+  await page.getByLabel('번호별 출력 매수', { exact: true }).fill('1')
+  await rollInput.fill('A'.repeat(33))
+  assert.ok(await rollPrint.isDisabled(), 'oversize code rejected instead of clipping')
   await page.getByRole('button', { name: /^출고창고/ }).click()
+  assert.equal(await page.locator('iframe.box-roll-print-frame').count(), 0, 'roll print document is removed when leaving the tab')
   await page.setViewportSize({ width: 390, height: 844 })
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
   await page.setViewportSize({ width: 1440, height: 1050 })
