@@ -17,6 +17,19 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { getLeaveNoticeManagement, LEAVE_NOTICE_LABELS, type LeaveUsageNotice, type LeaveNoticeSource } from '@/lib/supabase/leave-usage-notices'
 import { downloadLeaveNoticeReceipt, leaveNoticeTime } from './leave-usage-notices'
 import { employeeLeaveNoticeItems, itemPendingNotices, LEAVE_SOURCE_LABELS, type LeaveNoticeGroupItem } from './leave-notice-groups'
+import { MemberCell } from './OpsStat'
+import { koreaDateKey } from '@/features/settings/my-attendance'
+
+const PAGE_SIZE = 50
+function shortDate(at: string) {
+  const key = koreaDateKey(new Date(at))
+  return `${Number(key.slice(5, 7))}/${Number(key.slice(8))}`
+}
+/** 사용 기한까지 남은 날(D-N). 지난 기한은 D+N. */
+function dueLabel(expires: string, today: string) {
+  const days = Math.round((Date.parse(`${expires}T12:00:00`) - Date.parse(`${today}T12:00:00`)) / 86_400_000)
+  return { text: days === 0 ? 'D-day' : days > 0 ? `D-${days}` : `D+${-days}`, days }
+}
 
 type Filter = 'all' | 'pending' | 'setup'
 export function LeaveUsageNoticePanel() {
@@ -32,6 +45,7 @@ export function LeaveUsageNoticePanel() {
   const [source, setSource] = useState<LeaveNoticeSource | 'all'>('all')
   const [filter, setFilter] = useState<Filter>('all')
   const [document, setDocument] = useState<LeaveUsageNotice | null>(null)
+  const [limit, setLimit] = useState(PAGE_SIZE)
   useEffect(() => { if (query.error) console.warn('[leave-notices] 운영지원 기록 조회 실패', { error: query.error }) }, [query.error])
   // 부서 카드 건수를 위해 부서 조건 없이 먼저 모으고, 아래에서 부서를 적용한다. 부서는 이름 기준이다.
   const searchedGroups = useMemo(() => !query.data ? [] : query.data.employees
@@ -49,6 +63,8 @@ export function LeaveUsageNoticePanel() {
     items: searchedGroups, departments: departments.filter(Boolean).map(name => ({ id: name, name })), departmentOf: g => g.employee.department || null, unavailable: query.isPending,
     detail: { label: '미확인', count: scoped => scoped.reduce((sum, g) => sum + pending(g.items), 0) },
   })
+  // 한 표: 직원 × 연차 구분마다 한 줄.
+  const tableRows = visible.flatMap(({ employee, items }) => items.map(item => ({ employee, item })))
   const history = query.data?.notices.filter(n => groupIds.has(n.employee_id) && (source === 'all' || (n.notice_source ?? 'base') === source)) ?? []
   return <div className="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-2 text-sm">
@@ -59,25 +75,32 @@ export function LeaveUsageNoticePanel() {
       <p role="status" className="text-muted-foreground">직원 {groups.length}명 · 발송 이력 {history.length}건 · 본인 미확인 <strong className="text-primary">{groups.reduce((sum, g) => sum + pending(g.items), 0)}건</strong></p>
     </div>
     {!query.data?.extraEnabled && <p className="text-xs text-warning">추가·생일 알림 서버 연결 대기 중입니다. 기존 기본 연차 안내는 유지됩니다.</p>}
-    <ScopeCards ariaLabel="연차 안내 부서" value={department} onChange={setDepartment} cards={deptCards} />
+    <ScopeCards ariaLabel="연차 안내 부서" value={department} onChange={next => { setDepartment(next); setLimit(PAGE_SIZE) }} cards={deptCards} />
     <FilterBar><Input aria-label="연차 안내 직원 검색" placeholder="직원 이름 검색" value={search} onChange={e => setSearch(e.target.value)} className="sm:w-44"/>
       <Select aria-label="연차 안내 종류" value={source} onChange={e => setSource(e.target.value as typeof source)} className="sm:w-40"><option value="all">전체 연차</option>{Object.entries(LEAVE_SOURCE_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</Select>
-      <FilterTabs<Filter> ariaLabel="연차 안내 상태" value={filter} onChange={setFilter} tabs={[{ value: 'all', label: '전체 직원', count: groups.length }, { value: 'pending', label: '본인 미확인', count: groups.filter(g => pending(g.items)).length }, { value: 'setup', label: '정보 확인 필요', count: groups.filter(g => needsSetup(g.items)).length }]}/>
+      <FilterTabs<Filter> ariaLabel="연차 안내 상태" value={filter} onChange={next => { setFilter(next); setLimit(PAGE_SIZE) }} tabs={[{ value: 'all', label: '전체 직원', count: groups.length }, { value: 'pending', label: '본인 미확인', count: groups.filter(g => pending(g.items)).length }, { value: 'setup', label: '정보 확인 필요', count: groups.filter(g => needsSetup(g.items)).length }]}/>
       <Button size="sm" variant="outline" onClick={() => void query.refetch()}>새로고침</Button>
     </FilterBar>
     {query.error && <p role="alert" className="text-sm text-danger">{query.error.message}</p>}
-    {query.isPending ? <Card className="p-6 text-center">불러오는 중…</Card> : visible.length === 0 ? <Card className="p-6 text-center text-muted-foreground">표시할 직원이 없습니다.</Card> : visible.map(({ employee, items }) => <Card key={employee.id} className="overflow-hidden">
-      <details><summary className="cursor-pointer px-4 py-3 text-sm"><span className="font-semibold">{employee.display_name || '이름 없음'}</span><span className="mx-3 text-muted-foreground">{employee.department} · 연차 {items.length}건</span><StatusPill tone={pending(items) ? 'warning' : 'muted'}>{pending(items) ? '본인 미확인 ' + pending(items) + '건' : '미확인 없음'}</StatusPill></summary>
-        <div className="overflow-x-auto"><table className="w-full min-w-[850px] text-left text-sm" aria-label={employee.display_name + ' 연차별 알림 현황'}>
-          <thead className="bg-primary text-primary-foreground"><tr>{['연차 구분 · 사유', '신청 가능', '사용 예약', '사용 기한', '최근 알림 · 확인'].map(label => <th key={label} className="px-4 py-2.5 font-medium">{label}</th>)}</tr></thead>
-          <tbody>{items.map(item => <tr key={item.id} className="border-b border-border align-top last:border-0">
-            <td className="max-w-64 px-4 py-3"><strong>{LEAVE_SOURCE_LABELS[item.source]}</strong><p className="mt-1 break-words text-xs text-muted-foreground">{item.reason}</p>{item.blocked && <p className="mt-1 text-xs text-muted-foreground">{item.blocked}</p>}</td>
+    {query.isPending ? <Card className="p-6 text-center">불러오는 중…</Card> : visible.length === 0 ? <Card className="p-6 text-center text-muted-foreground">표시할 직원이 없습니다.</Card> : <Card className="overflow-hidden">
+      <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-left text-sm" aria-label="연차별 알림 현황">
+        <thead className="bg-primary text-primary-foreground"><tr>{['직원 · 부서', '연차 구분 · 사유', '사용 기한', '신청 가능', '사용 예약', '최근 알림 · 확인', '안내문'].map(label => <th key={label} className="px-4 py-2.5 font-medium">{label}</th>)}</tr></thead>
+        <tbody>{tableRows.slice(0, limit).map(({ employee, item }) => {
+          const setup = item.source === 'base' && Boolean(item.blocked && /미등록|확인 필요/.test(item.blocked))
+          const due = item.expires ? dueLabel(item.expires, query.data!.today) : null
+          const latest = item.notices[0]
+          return <tr key={`${employee.id}:${item.id}`} className="border-b border-border align-top last:border-0">
+            <td className="px-4 py-3"><MemberCell name={employee.display_name || '이름 없음'} sub={employee.department} /></td>
+            <td className="max-w-64 px-4 py-3">{setup ? <StatusPill tone="warning">정보 확인 필요</StatusPill> : <strong>{LEAVE_SOURCE_LABELS[item.source]}</strong>}<p className="mt-1 break-words text-xs text-muted-foreground">{setup ? `${LEAVE_SOURCE_LABELS[item.source]} · ` : ''}{item.reason}</p>{item.blocked && <p className="mt-1 text-xs text-muted-foreground">{item.blocked}</p>}</td>
+            <td className="whitespace-nowrap px-4 py-3 tabular-nums">{item.expires || '미등록'}{due && <span className={`mt-1 block text-xs ${due.days >= 0 && due.days <= 30 && (item.remaining ?? 0) > 0 ? 'font-semibold text-primary' : 'text-muted-foreground'}`}>{due.text}</span>}</td>
             <td className="whitespace-nowrap px-4 py-3 tabular-nums">{item.remaining == null ? '미등록' : item.remaining + '일'}</td><td className="whitespace-nowrap px-4 py-3 tabular-nums">{item.reserved == null ? '—' : item.reserved + '일'}</td>
-            <td className="whitespace-nowrap px-4 py-3 tabular-nums">{item.expires || '미등록'}</td><td className="min-w-80 px-4 py-3"><ItemNoticeHistory item={item} today={query.data!.today} onOpen={setDocument}/></td>
-          </tr>)}</tbody>
-        </table></div>
-      </details>
-    </Card>)}
+            <td className="min-w-72 px-4 py-3"><ItemNoticeHistory item={item} today={query.data!.today} onOpen={setDocument}/></td>
+            <td className="whitespace-nowrap px-4 py-3">{latest ? <Button size="sm" variant="outline" onClick={() => setDocument(latest)}>안내문·기록 보기</Button> : <span className="text-muted-foreground">—</span>}</td>
+          </tr>
+        })}</tbody>
+      </table></div>
+      <footer className="flex items-center justify-between border-t border-border px-4 py-2.5 text-xs text-muted-foreground"><span>직원 {visible.length}명 · {tableRows.length}줄</span>{tableRows.length > limit && <Button size="sm" variant="outline" onClick={() => setLimit(value => value + PAGE_SIZE)}>더 보기 ({limit}/{tableRows.length})</Button>}</footer>
+    </Card>}
     <details className="rounded-xl border border-border bg-card p-4 text-sm"><summary className="cursor-pointer font-medium">전체 발송 기록 {history.length}건</summary><div className="mt-3 space-y-2">{history.map(n => <div key={n.id} className="flex flex-wrap items-center justify-between gap-2 border-b border-border py-2"><span>{n.recipient_name} · {LEAVE_SOURCE_LABELS[n.notice_source ?? 'base']} · {n.expires_on} · {LEAVE_NOTICE_LABELS[n.phase]} · {n.invalidated_at ? '변경·취소된 안내' : n.confirmed_at ? '본인 확인 완료' : '미확인'}</span><Button size="sm" variant="outline" onClick={() => setDocument(n)}>안내문·기록 보기</Button></div>)}</div></details>
     <p className="text-xs text-muted-foreground">발송 원문과 최초 읽음·열람·본인 확인 시각은 보존됩니다. 관리자가 열어도 직원의 본인 확인으로 처리하지 않습니다. 일반 사용 안내이며 법정 사용촉진 완료를 뜻하지 않습니다.</p>
     {document && <ManagementDocument record={document} close={() => setDocument(null)}/>}
@@ -85,7 +108,7 @@ export function LeaveUsageNoticePanel() {
 }
 function ItemNoticeHistory({ item, today, onOpen }: { item: LeaveNoticeGroupItem; today: string; onOpen: (n: LeaveUsageNotice) => void }) {
   const latest = item.notices[0]
-  return <div className="space-y-2"><p>{latest ? LEAVE_NOTICE_LABELS[latest.phase] + ' · ' + (latest.confirmed_at ? '본인 확인 완료' : '본인 미확인') : '아직 발송된 알림 없음'}</p>
+  return <div className="space-y-2"><p className="flex flex-wrap items-center gap-1.5">{latest ? <><span className="text-xs tabular-nums text-muted-foreground">{latest.issued_at ? shortDate(latest.issued_at) : ''}</span><span>{LEAVE_NOTICE_LABELS[latest.phase]}</span><StatusPill tone={latest.confirmed_at ? 'success' : 'warning'}>{latest.confirmed_at ? '본인 확인 완료' : '본인 미확인'}</StatusPill></> : <span className="text-muted-foreground">아직 발송된 알림 없음</span>}</p>
     <details><summary className="cursor-pointer text-xs text-muted-foreground">알림 일정·확인 이력 보기</summary><div className="mt-2 space-y-3">{item.phases.map(({ phase, date, included }) => {
       const record = item.notices.find(n => n.phase === phase)
       const later = item.notices.some(n => n.scheduled_on > date && n.phase !== 'registered')

@@ -26,8 +26,7 @@ try{
  await server.listen();browser=await chromium.launch({executablePath:'C:/Program Files/Google/Chrome/Application/chrome.exe',headless:true});const page=await browser.newPage({viewport:{width:1200,height:900}}),errors=[]
  page.on('pageerror',e=>errors.push(e.message));await page.route('**/*',route=>route.request().url().startsWith('http://127.0.0.1:5198/')?route.continue():route.abort())
  await page.goto('http://127.0.0.1:5198/');await page.getByText('가 직원',{exact:true}).waitFor()
- const table=page.getByRole('table',{name:'가 직원 연차별 알림 현황'});assert.equal(await table.isVisible(),false)
- await page.getByText('가 직원',{exact:true}).click();await table.waitFor();const birthday=table.getByRole('row').filter({has:page.getByText('생일 반차',{exact:true}).first()})
+ const table=page.getByRole('table',{name:'연차별 알림 현황'});await table.waitFor();const birthday=table.getByRole('row').filter({hasText:'가 직원'}).filter({has:page.getByText('생일 반차',{exact:true}).first()})
  assert.equal(await birthday.getByRole('cell',{name:'0.25일',exact:true}).count(),2)
  await birthday.getByText('알림 일정·확인 이력 보기').click();await birthday.getByText('1주일 전 · 2026-11-05',{exact:true}).waitFor();assert.equal(await birthday.getByText('3개월 전',{exact:false}).count(),0)
  await birthday.getByRole('button',{name:'안내문 보기',exact:true}).click();await page.getByRole('dialog').waitFor();assert.equal(await page.evaluate(()=>window.__state.writes.length),0,'관리자 열람은 직원 확인을 남기지 않음');await page.getByRole('button',{name:'닫기',exact:true}).click()

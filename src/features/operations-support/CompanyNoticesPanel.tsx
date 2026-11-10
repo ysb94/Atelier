@@ -249,6 +249,7 @@ export function CompanyNoticesPanel() {
         )}
       </section>
       {draft ? (
+        <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
         <form
           className="space-y-4 rounded-xl border border-border bg-card p-5 shadow-sm"
           aria-label="공지 편집"
@@ -356,7 +357,37 @@ export function CompanyNoticesPanel() {
             ) : null}
           </div>
         </form>
+        <NoticePreview draft={draft} audience={draft.slot === 'company' || !draft.departmentId ? '회사 전체' : directory.departmentName(draft.departmentId)} />
+        </div>
       ) : null}
     </OpsPanelFrame>
+  )
+}
+
+/** 편집 중인 공지가 My home에 어떻게 보이는지 보여주는 미리보기(시안: 보이는 모습). 저장과 무관하다. */
+function NoticePreview({ draft, audience }: { draft: Draft; audience: string }) {
+  const slot = COMPANY_NOTICE_SLOTS.find(item => item.id === draft.slot) ?? COMPANY_NOTICE_SLOTS[0]
+  const title = draft.title.trim() || '제목을 입력하면 여기에 보입니다'
+  const period = draft.startsOn || draft.endsOn ? `${draft.startsOn || '바로'} – ${draft.endsOn || '계속'}` : '제한 없음'
+  return (
+    <aside className="rounded-xl border border-border bg-card p-4 shadow-sm lg:sticky lg:top-4" aria-label="공지 미리보기">
+      <h3 className="text-sm font-semibold">보이는 모습</h3>
+      <p className="mt-1 text-xs text-muted-foreground">{slot.label} · {audience}</p>
+      <div className="mt-3 overflow-hidden rounded-lg border border-border bg-background" aria-hidden="true">
+        <div className="flex gap-1 border-b border-border bg-muted/60 px-2.5 py-2"><i className="size-1.5 rounded-full bg-muted-foreground/40" /><i className="size-1.5 rounded-full bg-muted-foreground/40" /><i className="size-1.5 rounded-full bg-muted-foreground/40" /></div>
+        <div className="space-y-2 p-3">
+          {draft.slot === 'my-attendance' ? (
+            <div className="flex items-center gap-2 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-2 text-xs"><b className="shrink-0 text-primary">공지</b><span className="truncate">{title}</span><span className="ml-auto shrink-0 text-muted-foreground">펼치기</span></div>
+          ) : (
+            <>
+              <div className="flex gap-3 border-b border-border text-[11px]"><span className={`pb-1 ${draft.slot === 'company' ? 'border-b-2 border-primary font-semibold' : 'text-muted-foreground'}`}>회사 공지</span><span className={`pb-1 ${draft.slot === 'department' ? 'border-b-2 border-primary font-semibold' : 'text-muted-foreground'}`}>부서 공지</span></div>
+              <div className="rounded-md border border-border bg-card px-2.5 py-2"><p className="truncate text-xs font-semibold">{title}</p><p className="mt-1 line-clamp-3 whitespace-pre-wrap text-[11px] text-muted-foreground">{draft.body.trim() || '내용이 여기에 보입니다.'}</p></div>
+            </>
+          )}
+          <div className="h-2 w-3/5 rounded bg-muted" /><div className="h-2 w-4/5 rounded bg-muted" /><div className="h-2 w-2/5 rounded bg-muted" />
+        </div>
+      </div>
+      <p className="mt-3 text-xs text-muted-foreground">게시 기간 {period}{draft.published ? '' : ' · 게시 안 함(직원에게 보이지 않음)'}</p>
+    </aside>
   )
 }

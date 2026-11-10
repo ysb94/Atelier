@@ -19,7 +19,7 @@ window.clockRows=[...['03','04','05'].map(day=>({employeeId:'new',date:'2026-11-
 export const listDepartments=async()=>[{id:'office',name:'테스트 부서'}];
 export const listOrgChartMembers=async()=>window.actor==='peer'?[{id:'peer-member',displayName:'다른 회사 직원',departmentId:'office',hireDate:'2020-01-01'}]:window.people;
 export const getSupabase=()=>({rpc:async name=>{if(name==='clock_in_today')window.clockWriteAttempts=(window.clockWriteAttempts||0)+1;if(name==='is_my_attendance_exempt')return{data:false,error:null};if(name!=='list_attendance_enrollments')throw Error('unexpected RPC '+name);window.enrollmentReads++;if(window.policyFailure)return{data:null,error:{code:'57014',message:'connection timeout'}};return{error:null,data:(window.actor==='peer'?[{employeeId:'peer-member',startsOn:'2026-11-02'}]:[{employeeId:'new',startsOn:'2026-11-06'},{employeeId:'old',startsOn:'2026-11-02'},...(window.newlyActivated?[{employeeId:'added',startsOn:'2026-11-09'}]:[])]).filter(row=>!window.partialEnrollment||row.employeeId!=='new')}}});
-export const listCompanyAttendanceClocks=async()=>window.clockRows;
+export const listCompanyAttendanceClocks=async()=>window.clockRows;export const listCompanyDeferredClockOuts=async()=>[];
 export const listMyAttendanceClocks=async()=>{window.ownClockReads=(window.ownClockReads||0)+1;return[]};export const clockOutToday=async()=>{throw Error('unexpected clock write')};export const undoClockOutToday=clockOutToday;
 export const listLeaveRequests=async()=>[];export const listLateArrivalStatements=async()=>[];export const countLateStatementsAwaitingHr=async()=>0;
 export const LateArrivalStatementDocument=()=>null;export const useRenderWatch=()=>{};

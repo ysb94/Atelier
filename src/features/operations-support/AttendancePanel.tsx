@@ -90,7 +90,7 @@ export function AttendancePanel() {
   return <div className="space-y-5">
     <FilterTabs tabs={tabs} value={part} onChange={setPart} ariaLabel="근태 업무" variant="underline" size="large" />
     <div hidden={part !== 'all'}><AttendanceWorkspace directory={directory} canEdit={hasPermission(profile, 'attendance.manage')} savedSettings={saved.settings} settingsLoading={saved.loading} settingsError={Boolean(saved.error)} onEditStart={(id,month) => navigate(settingsStartHref(id, month))} onOpenCheck={() => setCheckView('late')}/></div>
-    {part === 'check' && <AttendanceCheckPanel view={checkView} onViewChange={setCheckView} directory={directory} schedules={saved} awaitingHr={awaitingHr.data ?? undefined} />}
+    {part === 'check' && <AttendanceCheckPanel view={checkView} onViewChange={setCheckView} directory={directory} schedules={saved} />}
     {part === 'overtime' && <AttendanceOvertimePanel directory={source} />}
     {part === 'offsite' && <AttendanceOffsitePanel directory={source} schedules={saved} />}
     {part === 'holiday' && <HolidayWorkPanel key={profile?.id} scope="operations" />}
