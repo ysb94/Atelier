@@ -2,13 +2,16 @@ import { useMemo, useState } from 'react'
 import { Download, Printer, Table2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Card, CardContent } from '@/components/ui/card'
+import { FilterTabs } from '@/components/ui/filter-tabs'
 import { Input, Textarea } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn, formatNumber } from '@/lib/utils'
+import { buildOutboundRackCodes, MAX_OUTBOUND_QR_RACKS } from '@/lib/warehouse/outbound-qr'
 import { OutboundWarehouseQrPanel } from './OutboundWarehouseQrPanel'
 import { OutboundRackPrintPreview } from './OutboundRackPrintPreview'
 
-const MAX_QR_ROWS = 200
+const MAX_QR_ROWS = MAX_OUTBOUND_QR_RACKS
 
 type QrTarget = 'box' | 'outbound'
 type QrMode = 'range' | 'list'
@@ -26,17 +29,6 @@ function QrTargetSelector({ target, onChange }: { target: QrTarget; onChange: (t
 
 function normalizeLocationCode(raw: string) {
   return raw.trim().replace(/\s+/g, '').replace(/\/+$/, '')
-}
-
-function buildRangeCodes(prefix: string, startText: string, endText: string) {
-  const base = prefix.trim().replace(/-+$/, '')
-  const start = Number(startText)
-  const end = Number(endText)
-  if (!base || !Number.isInteger(start) || !Number.isInteger(end)) return []
-  if (start < 1 || end < start) return []
-  const count = end - start + 1
-  if (count > MAX_QR_ROWS) return []
-  return Array.from({ length: count }, (_, index) => `${base}-${start + index}`)
 }
 
 function parseListCodes(text: string) {
@@ -67,7 +59,8 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
   useRenderWatch('WarehouseQrPanel')
   const [target, setTarget] = useState<QrTarget>('outbound')
   const [mode, setMode] = useState<QrMode>('range')
-  const [prefix, setPrefix] = useState('2-1')
+  const [warehouse, setWarehouse] = useState('2')
+  const [row, setRow] = useState('1')
   const [startNo, setStartNo] = useState('1')
   const [endNo, setEndNo] = useState('12')
   const [listText, setListText] = useState('2-1-1\n2-1-2\n2-1-3')
@@ -76,19 +69,17 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
   const [previewLabels, setPreviewLabels] = useState<{ labels: string[]; images: ReadonlyMap<string, string> } | null>(null)
   const [preparing, setPreparing] = useState(false)
 
-  const parsedCodes = useMemo(
-    () =>
-      mode === 'range'
-        ? buildRangeCodes(prefix, startNo, endNo)
-        : parseListCodes(listText),
-    [endNo, listText, mode, prefix, startNo],
-  )
-  const listTooBig = mode === 'list' && parsedCodes.length > MAX_QR_ROWS
-  const codes = listTooBig ? [] : parsedCodes
+  const result = useMemo(() => {
+    if (mode === 'range') {
+      const range = buildOutboundRackCodes({ mode, warehouse, row, startRack: startNo, endRack: endNo, list: '' })
+      return { codes: range.racks, error: range.error }
+    }
+    const listed = parseListCodes(listText)
+    if (listed.length > MAX_QR_ROWS) return { codes: [], error: `한 번에 자리 ${MAX_QR_ROWS}개까지 만들 수 있습니다. 범위를 나눠 주세요.` }
+    return { codes: listed, error: listed.length ? null : '자리번호를 한 줄에 하나씩 입력해 주세요.' }
+  }, [endNo, listText, mode, row, startNo, warehouse])
+  const codes = result.codes
   const targetMeta = TARGET_COPY[target]
-  const rangeCount = Number(endNo) - Number(startNo) + 1
-  const rangeTooBig =
-    mode === 'range' && Number.isFinite(rangeCount) && rangeCount > MAX_QR_ROWS
 
   async function previewBoxLabels() {
     if (!codes.length || preparing) return
@@ -151,53 +142,45 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
   return (
     <div className="space-y-4">
       <QrTargetSelector target={target} onChange={setTarget} />
-      <div className="grid gap-3 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        <div className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-sm">
-          <div><h3 className="text-sm font-semibold">박스창고 자리번호 만들기</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">앞자리와 번호 범위를 입력하거나, 인쇄할 자리번호를 한 줄에 하나씩 넣어 주세요.</p></div>
-
-          <div>
-            <p className="text-xs font-medium text-muted-foreground">만드는 방법</p>
-            <div className="mt-2 grid grid-cols-2 gap-2">
-              <Button
-                type="button"
-                size="sm"
-                variant={mode === 'range' ? 'default' : 'outline'}
-                onClick={() => setMode('range')}
-              >
-                자리 범위
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant={mode === 'list' ? 'default' : 'outline'}
-                onClick={() => setMode('list')}
-              >
-                직접 입력
-              </Button>
-            </div>
-          </div>
+      <div className="grid gap-4 lg:grid-cols-[19rem_minmax(0,1fr)]">
+        <Card>
+        <CardContent className="space-y-4 p-4">
+          <div><h3 className="text-sm font-semibold">렉 범위 선택</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">창고 → 줄 → 렉 순서입니다.<br />3-1-1 = 3번 창고 · 1번째 줄 · 1번째 렉</p></div>
+          <FilterTabs ariaLabel="박스창고 자리번호 입력 방법" value={mode} onChange={setMode} tabs={[{ value: 'range', label: '렉 범위' }, { value: 'list', label: '렉 직접 입력' }]} />
 
           {mode === 'range' ? (
-            <div className="grid grid-cols-[1.4fr_0.8fr_0.8fr] gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">앞자리</span>
+                <span className="text-xs text-muted-foreground">창고 번호</span>
                 <Input
-                  value={prefix}
-                  placeholder="2-1"
-                  onChange={(event) => setPrefix(event.target.value)}
+                  aria-label="창고 번호"
+                  inputMode="numeric"
+                  value={warehouse}
+                  onChange={(event) => setWarehouse(event.target.value)}
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">시작</span>
+                <span className="text-xs text-muted-foreground">줄 번호</span>
                 <Input
+                  aria-label="줄 번호"
+                  inputMode="numeric"
+                  value={row}
+                  onChange={(event) => setRow(event.target.value)}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="text-xs text-muted-foreground">시작 렉 번호</span>
+                <Input
+                  aria-label="시작 렉 번호"
                   inputMode="numeric"
                   value={startNo}
                   onChange={(event) => setStartNo(event.target.value)}
                 />
               </label>
               <label className="space-y-1">
-                <span className="text-xs text-muted-foreground">끝</span>
+                <span className="text-xs text-muted-foreground">끝 렉 번호</span>
                 <Input
+                  aria-label="끝 렉 번호"
                   inputMode="numeric"
                   value={endNo}
                   onChange={(event) => setEndNo(event.target.value)}
@@ -211,14 +194,23 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
               </span>
               <Textarea
                 aria-label="박스창고 자리번호 목록"
-                rows={8}
+                rows={7}
                 value={listText}
                 placeholder={'2-1-1\n2-1-2\n6-1-10'}
                 onChange={(event) => setListText(event.target.value)}
               />
+              <span className="text-xs text-muted-foreground">다른 형식의 자리번호도 입력할 수 있습니다. 중복 자리번호는 한 번만 사용합니다.</span>
             </label>
           )}
-        </div>
+          {result.error && <p role="alert" className="text-xs text-danger">{result.error}</p>}
+          <p className="text-xs text-muted-foreground">한 번에 자리 {MAX_QR_ROWS}개까지 선택할 수 있습니다.</p>
+          <div className="rounded-lg border border-border bg-muted/30 p-3 text-xs leading-7">
+            <p>자리번호 <strong className="tabular-nums text-foreground">{formatNumber(codes.length)}개</strong></p>
+            <p>자리당 <strong>라벨 1개</strong></p>
+            <p>A4 4칸 라벨 <strong className="tabular-nums text-foreground">{formatNumber(Math.ceil(codes.length / 4))}장</strong></p>
+          </div>
+        </CardContent>
+        </Card>
 
         <div className="space-y-3 rounded-xl border border-border bg-card p-4 shadow-sm">
           <div><h3 className="text-base font-semibold">박스창고 자리번호 · A4 4칸 라벨</h3><p className="mt-1 text-xs leading-relaxed text-muted-foreground">위쪽 좌우에 같은 자리번호의 QR 두 개, 가운데 위쪽 화살표, 아래에 큰 자리번호를 표시합니다. A4 가로를 2열 × 2행으로 나눕니다.</p></div>
@@ -245,11 +237,6 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
             </div>
           </div>
 
-          {rangeTooBig || listTooBig ? (
-            <p role="alert" className="text-xs text-danger">
-              한 번에 {formatNumber(MAX_QR_ROWS)}개까지 만들 수 있습니다. 범위를 나눠 주세요.
-            </p>
-          ) : null}
           {status ? (
             <p className="text-xs text-muted-foreground" role="status">
               {status}
