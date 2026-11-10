@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Download, Printer, Table2 } from 'lucide-react'
+import { Download, Package, Printer, Table2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -13,16 +13,17 @@ import { OutboundRackPrintPreview } from './OutboundRackPrintPreview'
 
 const MAX_QR_ROWS = MAX_OUTBOUND_QR_RACKS
 
-type QrTarget = 'box' | 'outbound'
+type QrTarget = 'box' | 'outbound' | 'individual-box'
 type QrMode = 'range' | 'list'
 
 const TARGET_COPY: Record<QrTarget, { label: string; hint: string }> = {
   box: { label: '박스창고', hint: '자리번호 4칸 라벨 인쇄 / 엑셀' },
   outbound: { label: '출고창고', hint: '렉·고정 자리 라벨 인쇄 / 엑셀' },
+  'individual-box': { label: '박스 개별 라벨링', hint: '박스별 라벨 · 준비 중' },
 }
 
 function QrTargetSelector({ target, onChange }: { target: QrTarget; onChange: (target: QrTarget) => void }) {
-  return <div><p className="text-xs font-medium text-muted-foreground">대상</p><div className="mt-2 grid max-w-xl grid-cols-2 gap-2">
+  return <div><p className="text-xs font-medium text-muted-foreground">대상</p><div className="mt-2 grid max-w-3xl grid-cols-1 gap-2 sm:grid-cols-3">
     {(Object.keys(TARGET_COPY) as QrTarget[]).map((value) => <button key={value} type="button" aria-pressed={target === value} onClick={() => onChange(value)} className={cn('rounded-md border px-3 py-2 text-left transition-colors', target === value ? 'border-primary/40 bg-primary/5' : 'border-border bg-card hover:bg-muted/40')}><p className="text-sm font-medium">{TARGET_COPY[value].label}</p><p className="mt-0.5 text-[11px] text-muted-foreground">{TARGET_COPY[value].hint}</p></button>)}
   </div></div>
 }
@@ -138,6 +139,24 @@ export function WarehouseQrPanel({ brandName }: { brandName: string }) {
   }
 
   if (target === 'outbound') return <div className="space-y-4"><QrTargetSelector target={target} onChange={setTarget} /><OutboundWarehouseQrPanel brandName={brandName} /></div>
+  if (target === 'individual-box') return (
+    <div className="space-y-4">
+      <QrTargetSelector target={target} onChange={setTarget} />
+      <Card>
+        <CardContent className="space-y-4 p-4">
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold">박스 개별 라벨링</h3>
+            <Badge variant="muted">준비 중</Badge>
+          </div>
+          <div className="flex min-h-64 flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border px-4 py-10 text-center">
+            <Package className="size-8 text-muted-foreground" />
+            <p className="text-sm font-medium">박스별 라벨을 만드는 공간입니다.</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">라벨 입력과 출력 기능은 준비 중입니다.</p>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  )
 
   return (
     <div className="space-y-4">
