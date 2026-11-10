@@ -16,7 +16,8 @@ import { getSupabase } from '@/lib/supabase/client'
 import { clockOutLabel, koreaDateKey } from '@/features/settings/my-attendance'
 import { overtimeApprovalReady } from './overtime-approval-preview'
 import { useLeaveRequests } from './use-leave-requests'
-import { OpsPanelFrame } from './OpsStat'
+import { MemberCell, OpsPanelFrame } from './OpsStat'
+import { ScopeCards, departmentScopeCards } from '@/components/ui/scope-cards'
 import { usePagePreview } from '@/lib/company/page-preview-context'
 import { previewRequestIsSelf } from '@/lib/company/relationship-preview'
 
@@ -62,11 +63,16 @@ export function LeaveApprovalPanel({ readOnly = false, officialReview = false }:
   const [note, setNote] = useState('')
   const [message, setMessage] = useState('')
   const departments = useMemo(() => [...new Set(leave.requests.map(item => item.departmentName))].sort((a,b) => a.localeCompare(b,'ko')), [leave.requests])
-  const visible = useMemo(() => leave.requests.filter(item =>
-    (status === 'all' || item.status === status) && (department === 'all' || department === item.departmentName)
-    && (!month || (item.from <= `${month}-31` && item.to >= `${month}-01`))
+  // 부서 카드 건수를 위해 부서 조건 없이 먼저 거르고, 아래에서 부서를 적용한다. 부서는 신청에 남은 부서 이름 기준이다.
+  const searched = useMemo(() => leave.requests.filter(item =>
+    (!month || (item.from <= `${month}-31` && item.to >= `${month}-01`))
     && (!search.trim() || `${item.employeeName} ${item.departmentName} ${requestLabel(item.kind)} ${item.place}`.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()))
-  ), [leave.requests, status, department, search, month])
+  ), [leave.requests, search, month])
+  const visible = useMemo(() => searched.filter(item => (status === 'all' || item.status === status) && (department === 'all' || department === item.departmentName)), [searched, status, department])
+  const deptCards = useMemo(() => departmentScopeCards({
+    items: searched, departments: departments.map(name => ({ id: name, name })), departmentOf: item => item.departmentName || null, unavailable: leave.loading,
+    detail: { label: '대기', count: scoped => scoped.filter(item => item.status === 'pending').length },
+  }), [searched, departments, leave.loading])
   const pages = Math.max(1, Math.ceil(visible.length / 10))
   const currentPage = Math.min(page, pages)
   const rows = visible.slice((currentPage - 1) * 10, currentPage * 10)
@@ -102,9 +108,11 @@ export function LeaveApprovalPanel({ readOnly = false, officialReview = false }:
       { value: 'all', label: '전체', count: leave.requests.length },
       ...(['pending','approved','rejected','cancelled'] as const).map(key => ({ value: key, label: LABELS[key], count: leave.requests.filter(item => item.status === key).length })),
     ]}/>
+    {/* 운영지원(조회 화면)에서는 부서 카드로, My home 승인 화면에서는 기존 선택 상자로 고른다. */}
+    {readOnly && <ScopeCards ariaLabel="근태 신청 부서" value={department} onChange={next => { setDepartment(next); setPage(1) }} cards={deptCards} />}
     <FilterBar className="mb-0">
       <Input aria-label="근태 신청 검색" placeholder="직원·부서·장소 검색" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} className="h-9 w-full sm:w-60"/>
-      <Select aria-label="근태 신청 부서" value={department} onChange={event => { setDepartment(event.target.value); setPage(1) }} className="h-9 w-40"><option value="all">전체 부서</option>{departments.map(name => <option key={name}>{name}</option>)}</Select>
+      {!readOnly && <Select aria-label="근태 신청 부서" value={department} onChange={event => { setDepartment(event.target.value); setPage(1) }} className="h-9 w-40"><option value="all">전체 부서</option>{departments.map(name => <option key={name}>{name}</option>)}</Select>}
       <Input aria-label="신청 일정 월" type="month" value={month} onChange={event => { setMonth(event.target.value); setPage(1) }} className="h-9 w-40"/>{month && <Button size="sm" variant="ghost" onClick={() => setMonth('')}>전체 기간</Button>}
     </FilterBar>
     {noticeRead.error && <p role="alert" className="text-sm text-danger">{noticeRead.error}<Button type="button" size="sm" onClick={noticeRead.retry}>읽음 저장 재시도</Button></p>}
@@ -126,7 +134,7 @@ export function LeaveApprovalPanel({ readOnly = false, officialReview = false }:
     </article>}
     <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <div className="overflow-x-auto"><table aria-label="근태 신청 목록" className="w-full min-w-[760px] text-left text-sm"><thead className="border-b border-border bg-primary text-xs text-primary-foreground"><tr>{['신청자·부서','신청 종류','일정','신청일','상태','검토'].map(label => <th key={label} className="px-4 py-3 font-medium">{label}</th>)}</tr></thead><tbody>
-        {!rows.length ? <tr><td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">{leave.loading ? '신청을 불러오는 중…' : leave.error ? '신청 조회에 실패했습니다.' : '해당 조건의 신청이 없습니다.'}</td></tr> : rows.map(item => <tr key={item.id} className="border-b border-border/70 last:border-0"><td className="px-4 py-4"><strong className="font-medium">{item.employeeName}</strong><span className="mt-1 block text-xs text-muted-foreground">{item.departmentName}</span></td><td className="px-4 py-4">{requestLabel(item.kind)}{item.advanceRequested ? ' · 선사용' : ''}</td><td className="px-4 py-4 tabular-nums">{leaveSpanLabel(item.from, item.to)}<span className="mt-1 block text-xs text-muted-foreground">{leaveTimeLabel(item)}</span>{item.place && <span className="mt-1 block text-xs text-muted-foreground">장소 · {item.place}</span>}</td><td className="px-4 py-4 text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleDateString('ko-KR')}</td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-xs ${STATUS_CLASS[item.status]}`}>{requestStatusLabel(item)}</span>{isSelfApprovedRequest(item) && <span className="ml-2 text-xs text-muted-foreground">본인 승인</span>}</td><td className="px-4 py-4"><Button size="sm" variant="outline" disabled={leave.busy} onClick={() => { setSelected(item.id); setNote(''); setMessage('') }}>{item.status === 'pending' ? '검토' : '상세'}</Button></td></tr>)}
+        {!rows.length ? <tr><td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">{leave.loading ? '신청을 불러오는 중…' : leave.error ? '신청 조회에 실패했습니다.' : '해당 조건의 신청이 없습니다.'}</td></tr> : rows.map(item => <tr key={item.id} className="border-b border-border/70 last:border-0"><td className="px-4 py-4"><MemberCell name={item.employeeName} sub={item.departmentName} /></td><td className="px-4 py-4">{requestLabel(item.kind)}{item.advanceRequested ? ' · 선사용' : ''}</td><td className="px-4 py-4 tabular-nums">{leaveSpanLabel(item.from, item.to)}<span className="mt-1 block text-xs text-muted-foreground">{leaveTimeLabel(item)}</span>{item.place && <span className="mt-1 block text-xs text-muted-foreground">장소 · {item.place}</span>}</td><td className="px-4 py-4 text-xs text-muted-foreground">{new Date(item.createdAt).toLocaleDateString('ko-KR')}</td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-xs ${STATUS_CLASS[item.status]}`}>{requestStatusLabel(item)}</span>{isSelfApprovedRequest(item) && <span className="ml-2 text-xs text-muted-foreground">본인 승인</span>}</td><td className="px-4 py-4"><Button size="sm" variant="outline" disabled={leave.busy} onClick={() => { setSelected(item.id); setNote(''); setMessage('') }}>{item.status === 'pending' ? '검토' : '상세'}</Button></td></tr>)}
       </tbody></table></div>
       <footer className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground"><span>{visible.length}건 · {currentPage}/{pages} 페이지</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>이전</Button><Button variant="outline" size="sm" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>다음</Button></div></footer>
     </article>

@@ -49,7 +49,7 @@ await offsiteRow('당일 변경 외근 직원').getByRole('cell',{name:'1시간'
 assert.equal(await offsiteRow('미설정 외근 직원').getByRole('cell',{name:'기준 미설정',exact:true}).count(),2);
 await offsiteRow('새벽 외근 직원').getByRole('cell',{name:/^9시간/}).waitFor();assert.equal(await offsiteRow('취소 외근 직원').getByRole('cell',{name:'—',exact:true}).count(),2);
 await page.getByLabel('외근 관리 검색').fill('없음');await page.getByText('해당하는 외근 등록이 없습니다.',{exact:true}).waitFor();await page.getByLabel('외근 관리 검색').fill('');
-await page.getByLabel('외근 관리 부서').selectOption('unassigned');await page.getByRole('cell',{name:'미설정 외근 직원',exact:true}).waitFor();assert.equal(await page.getByRole('cell',{name:'외근 직원',exact:true}).count(),0);await page.getByLabel('외근 관리 부서').selectOption('all');
+await page.getByRole('group',{name:'외근 관리 부서'}).getByRole('button',{name:/^소속 없음/}).click();await page.getByRole('cell',{name:'미설정 외근 직원',exact:true}).waitFor();assert.equal(await page.getByRole('cell',{name:'외근 직원',exact:true}).count(),0);await page.getByRole('group',{name:'외근 관리 부서'}).getByRole('button',{name:/^전체/}).click();
 await page.getByLabel('외근 진행 구분').selectOption('cancelled');await offsiteRow('취소 외근 직원').waitFor();assert.equal(await offsiteRow('외근 직원').count(),0);await page.getByLabel('외근 진행 구분').selectOption('all');
 await page.screenshot({path:path.join(dir,'offsite.png'),fullPage:true});assert.deepEqual(errors,[])
 console.info('Browser: real personal/admin/offsite components; automatic actual checkout/shorter/longer/undo, no break entry, legacy detail and allowance excess, offsite filters passed; no external requests')

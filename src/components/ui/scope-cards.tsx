@@ -64,6 +64,40 @@ export function ScopeCards<T extends string>({
   )
 }
 
+/**
+ * 부서 범위 카드 목록. 전체 + 항목이 있는 부서 + 소속 없음 순서다.
+ * total은 기본으로 항목 수이고, 사람 수처럼 다르게 셀 때는 count를 넘긴다.
+ */
+export function departmentScopeCards<T>({ items, departments, departmentOf, count, detail, unavailable = false }: {
+  items: readonly T[]
+  departments: readonly { id: string; name: string }[]
+  departmentOf: (item: T) => string | null | undefined
+  count?: (items: T[]) => number
+  detail?: { label: string; count: (items: T[]) => number }
+  unavailable?: boolean
+}): ScopeCard<string>[] {
+  const card = (value: string, label: string, badge: string, scoped: T[]): ScopeCard<string> => ({
+    value, label, badge,
+    total: unavailable ? null : count ? count(scoped) : scoped.length,
+    ...(detail ? { detail: { label: detail.label, count: unavailable ? null : detail.count(scoped) } } : {}),
+  })
+  const all = [...items]
+  const unassigned = all.filter(item => !departmentOf(item))
+  return [
+    card('all', '전체', 'ALL', all),
+    ...departments.flatMap(dept => {
+      const scoped = all.filter(item => departmentOf(item) === dept.id)
+      return scoped.length ? [card(dept.id, dept.name, scopeBadge(dept.name), scoped)] : []
+    }),
+    ...(unassigned.length ? [card('unassigned', '소속 없음', '—', unassigned)] : []),
+  ]
+}
+
+/** 부서 카드 값으로 항목을 거른다. */
+export function inDepartmentScope(scope: string, departmentId: string | null | undefined) {
+  return scope === 'all' || (scope === 'unassigned' ? !departmentId : departmentId === scope)
+}
+
 /** 부서 이름을 동그라미용 짧은 글자로 줄인다(기획팀 → 기획, 운영지원팀 → 운영, MD팀 → MD). */
 export function scopeBadge(name: string) {
   const short = name.replace(/\s*(팀|team)$/i, '').trim() || name

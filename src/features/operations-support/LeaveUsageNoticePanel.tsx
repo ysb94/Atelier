@@ -7,6 +7,7 @@ import { Input, Select } from '@/components/ui/input'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { FilterTabs } from '@/components/ui/filter-tabs'
 import { InfoNote } from '@/components/ui/info-note'
+import { ScopeCards, departmentScopeCards } from '@/components/ui/scope-cards'
 import { StatusPill } from '@/components/ui/status-pill'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
@@ -32,16 +33,22 @@ export function LeaveUsageNoticePanel() {
   const [filter, setFilter] = useState<Filter>('all')
   const [document, setDocument] = useState<LeaveUsageNotice | null>(null)
   useEffect(() => { if (query.error) console.warn('[leave-notices] 운영지원 기록 조회 실패', { error: query.error }) }, [query.error])
-  const groups = useMemo(() => !query.data ? [] : query.data.employees
-    .filter(e => managedIds.has(e.id) && (department === 'all' || e.department === department) && (e.display_name ?? '').includes(search.trim()))
+  // 부서 카드 건수를 위해 부서 조건 없이 먼저 모으고, 아래에서 부서를 적용한다. 부서는 이름 기준이다.
+  const searchedGroups = useMemo(() => !query.data ? [] : query.data.employees
+    .filter(e => managedIds.has(e.id) && (e.display_name ?? '').includes(search.trim()))
     .map(employee => ({ employee, items: employeeLeaveNoticeItems(employee, query.data!).filter(i => source === 'all' || i.source === source) }))
-    .filter(g => g.items.length > 0), [query.data, department, search, source, managedIds])
+    .filter(g => g.items.length > 0), [query.data, search, source, managedIds])
+  const groups = useMemo(() => searchedGroups.filter(g => department === 'all' || g.employee.department === department), [searchedGroups, department])
   if (!permitted) return <Card className="p-5 text-sm text-muted-foreground">직원별 잔여 연차와 확인 기록은 기존 명부 관리 권한이 있는 담당자만 확인할 수 있습니다.</Card>
   const departments = [...new Set(query.data?.employees.filter(row => managedIds.has(row.id)).map(row => row.department))].sort()
   const pending = (items: LeaveNoticeGroupItem[]) => items.reduce((sum, i) => sum + itemPendingNotices(i).length, 0)
   const needsSetup = (items: LeaveNoticeGroupItem[]) => items.some(i => i.source === 'base' && i.blocked && /미등록|확인 필요/.test(i.blocked))
   const visible = groups.filter(g => filter === 'all' || (filter === 'pending' ? pending(g.items) > 0 : needsSetup(g.items)))
   const groupIds = new Set(groups.map(g => g.employee.id))
+  const deptCards = departmentScopeCards({
+    items: searchedGroups, departments: departments.filter(Boolean).map(name => ({ id: name, name })), departmentOf: g => g.employee.department || null, unavailable: query.isPending,
+    detail: { label: '미확인', count: scoped => scoped.reduce((sum, g) => sum + pending(g.items), 0) },
+  })
   const history = query.data?.notices.filter(n => groupIds.has(n.employee_id) && (source === 'all' || (n.notice_source ?? 'base') === source)) ?? []
   return <div className="space-y-4">
     <div className="flex flex-wrap items-start justify-between gap-2 text-sm">
@@ -52,8 +59,8 @@ export function LeaveUsageNoticePanel() {
       <p role="status" className="text-muted-foreground">직원 {groups.length}명 · 발송 이력 {history.length}건 · 본인 미확인 <strong className="text-primary">{groups.reduce((sum, g) => sum + pending(g.items), 0)}건</strong></p>
     </div>
     {!query.data?.extraEnabled && <p className="text-xs text-warning">추가·생일 알림 서버 연결 대기 중입니다. 기존 기본 연차 안내는 유지됩니다.</p>}
+    <ScopeCards ariaLabel="연차 안내 부서" value={department} onChange={setDepartment} cards={deptCards} />
     <FilterBar><Input aria-label="연차 안내 직원 검색" placeholder="직원 이름 검색" value={search} onChange={e => setSearch(e.target.value)} className="sm:w-44"/>
-      <Select aria-label="연차 안내 부서" value={department} onChange={e => setDepartment(e.target.value)} className="sm:w-40"><option value="all">전체 부서</option>{departments.map(name => <option key={name}>{name}</option>)}</Select>
       <Select aria-label="연차 안내 종류" value={source} onChange={e => setSource(e.target.value as typeof source)} className="sm:w-40"><option value="all">전체 연차</option>{Object.entries(LEAVE_SOURCE_LABELS).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</Select>
       <FilterTabs<Filter> ariaLabel="연차 안내 상태" value={filter} onChange={setFilter} tabs={[{ value: 'all', label: '전체 직원', count: groups.length }, { value: 'pending', label: '본인 미확인', count: groups.filter(g => pending(g.items)).length }, { value: 'setup', label: '정보 확인 필요', count: groups.filter(g => needsSetup(g.items)).length }]}/>
       <Button size="sm" variant="outline" onClick={() => void query.refetch()}>새로고침</Button>

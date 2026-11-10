@@ -4,13 +4,14 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { InfoNote } from '@/components/ui/info-note'
-import { Input, Select } from '@/components/ui/input'
+import { Input } from '@/components/ui/input'
 import { canEditOrgAssignment } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
 import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import { saveEmployeeRosterField } from '@/lib/supabase/employee-roster'
-import { memberLabel, OpsPanelFrame } from './OpsStat'
+import { MemberCell, memberLabel, OpsPanelFrame } from './OpsStat'
+import { ScopeCards, departmentScopeCards, inDepartmentScope } from '@/components/ui/scope-cards'
 import { useOpsDirectory } from './ops-directory'
 import { HireDateScrollField } from '@/features/org/HireDateScrollField'
 import { koreaDateKey } from '@/features/settings/my-attendance'
@@ -31,13 +32,19 @@ export function LeaveBalancePanel() {
   const snapshot = useEmployeeRoster(canManage)
   const roster = { ...snapshot, data: snapshot.data?.rosters }
   const extras = { ...snapshot, data: snapshot.data?.extraLeave }
-  const rows = useMemo(() => {
+  // 부서 카드 건수를 위해 부서 조건 없이 먼저 모으고, 아래에서 부서 범위로 거른다.
+  const searchedRows = useMemo(() => {
     const balances = new Map(roster.data?.map(row => [row.profileId, row]))
-    return directory.members.filter(member => (departmentId === 'all' || member.departmentId === departmentId)
-      && memberLabel(member.displayName).includes(search.trim()))
+    return directory.members.filter(member => memberLabel(member.displayName).includes(search.trim()))
       .sort((a, b) => memberLabel(a.displayName).localeCompare(memberLabel(b.displayName), 'ko'))
       .map(member => ({ member, balance: balances.get(member.id) }))
-  }, [directory.members, roster.data, departmentId, search])
+  }, [directory.members, roster.data, search])
+  const rows = useMemo(() => searchedRows.filter(({ member }) => inDepartmentScope(departmentId, member.departmentId)), [searchedRows, departmentId])
+  const deptCards = useMemo(() => departmentScopeCards({
+    items: searchedRows, departments: directory.departments, departmentOf: ({ member }) => member.departmentId,
+    unavailable: directory.loading || roster.isPending || Boolean(directory.error || roster.error),
+    detail: { label: '미등록', count: scoped => scoped.filter(({ balance }) => balance?.remainingAnnualLeave == null).length },
+  }), [searchedRows, directory.departments, directory.loading, directory.error, roster.isPending, roster.error])
   const totals = useMemo(() => rows.reduce((sum, { balance }) => ({
     granted: sum.granted + (balance?.accruedAnnualLeave ?? 0),
     remaining: sum.remaining + (balance?.remainingAnnualLeave ?? 0),
@@ -54,12 +61,9 @@ export function LeaveBalancePanel() {
     <p>{extras.data?.fefoReady ? '기본·추가 연차 중 기한이 빠른 순서로 사용합니다. 부여 취소로 부족해진 일수도 총 잔여에 반영되며, 만료와 재계산 기록은 이력에 남습니다.' : '기본·추가 연차 통합 기한순 차감·만료 이력·부여 취소 재계산은 서버 적용 승인 대기 중입니다. 현재는 기존 추가 연차 우선 차감 방식이 유지됩니다.'}</p>
     </InfoNote>
     {!extras.isError && extras.data?.ready === false ? <p className="text-sm text-warning">추가 연차 서버 연결 대기 중입니다. 기존 연차 값은 유지됩니다.</p> : null}
+    <ScopeCards ariaLabel="연차 부서" value={departmentId} onChange={setDepartmentId} cards={deptCards} />
     <FilterBar>
       <Input aria-label="연차 직원 검색" placeholder="직원 이름 검색" value={search} onChange={event => setSearch(event.target.value)} className="sm:w-52"/>
-      <Select aria-label="연차 부서" value={departmentId} onChange={event => setDepartmentId(event.target.value)} className="sm:w-44">
-        <option value="all">전체 부서</option>
-        {directory.departments.map(dept => <option key={dept.id} value={dept.id}>{dept.name}</option>)}
-      </Select>
       <Button variant="outline" disabled={roster.isFetching || advanceFetching > 0} onClick={() => { directory.refetch(); void snapshot.refetch(); void client.invalidateQueries({ queryKey: ['employee-leave-advances', profile?.id, true] }) }}>새로고침</Button>
     </FilterBar>
     <p role="status" className="text-sm text-muted-foreground">{ready ? <>대상 직원 <strong className="text-foreground">{rows.length}명</strong> · 잔여 등록 {totals.registered}명 · 발생일수 합계 {totals.missingGrant ? '—' : `${totals.granted}일`} · 남은 연차 합계 <strong className="text-foreground">{totals.remaining}일</strong> <span className="text-xs">(등록된 값만 합산)</span></> : '직원과 연차를 확인하고 있습니다.'}</p>
@@ -73,7 +77,7 @@ export function LeaveBalancePanel() {
             : loading ? <tr><td colSpan={6} className="px-4 py-8 text-center">불러오는 중…</td></tr>
             : rows.length === 0 ? <tr><td colSpan={6} className="px-4 py-8 text-center">표시할 직원이 없습니다.</td></tr>
             : rows.map(({ member, balance }) => <tr key={`${profile?.id}:${member.id}`} className="border-b border-border/70 last:border-0">
-              <td className="sticky left-0 bg-card px-4 py-3 font-medium">{memberLabel(member.displayName)}</td>
+              <td className="sticky left-0 bg-card px-4 py-3"><MemberCell name={memberLabel(member.displayName)} /></td>
               <td className="px-4 py-3">{directory.departmentName(member.departmentId)}</td>
               <td className="whitespace-nowrap px-4 py-3 tabular-nums">{member.hireDate || <MissingValue/>}</td>
               <td className="px-4 py-3 tabular-nums" aria-label={`${memberLabel(member.displayName)} 발생일수`}>{balance && balance.accruedAnnualLeave === undefined ? '조회 실패' : balance?.accruedAnnualLeave == null ? <MissingValue/> : `${balance.accruedAnnualLeave}일`}</td>

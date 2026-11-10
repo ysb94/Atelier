@@ -4,7 +4,8 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { InfoNote } from '@/components/ui/info-note'
-import { StatGrid, StatTile } from '@/components/ui/stat-tile'
+import { departmentScopeCards, inDepartmentScope } from '@/components/ui/scope-cards'
+import { MemberCell } from './OpsStat'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { getSupabase } from '@/lib/supabase/client'
 import { useAuth } from '@/lib/supabase/auth'
@@ -42,30 +43,35 @@ export function AttendanceOvertimePanel({ directory }: { directory: ReturnType<t
   const allowances = useQuery({ queryKey: ['employee-roster-overtime', profile?.id], queryFn: listAllowances, enabled: profile?.status === 'active', refetchInterval: active ? 30_000 : false })
   useEffect(() => { if (allowances.error) console.warn('[attendance-work] 포괄임금 기준 조회 실패', allowances.error) }, [allowances.error])
   const entries = useMemo(() => registeredOvertime(requests.rows, actuals.rows, month, today), [requests.rows, actuals.rows, month, today])
-  const rows = useMemo(() => {
-    const grouped = new Map<string, { employeeId: string; name: string; team: string; minutes: number; count: number; approved: number }>()
+  // 부서 카드 건수를 위해 부서 조건 없이 먼저 모으고, 아래에서 부서 범위로 거른다.
+  const searchedRows = useMemo(() => {
+    const grouped = new Map<string, { employeeId: string; departmentId: string | null; name: string; team: string; minutes: number; count: number; approved: number }>()
     const originals = new Map(requests.rows.map(row => [row.id, row]))
     for (const item of entries) {
       const request = item.request
       const original = originals.get(request.id)!
-      if (department !== 'all' && (department === 'unassigned' ? Boolean(original.departmentId) : original.departmentId !== department)) continue
       if (!`${original.employeeName} ${original.departmentName}`.toLocaleLowerCase('ko').includes(search.trim().toLocaleLowerCase('ko'))) continue
-      const row = grouped.get(request.employeeId) ?? { employeeId: request.employeeId, name: original.employeeName, team: original.departmentName || '소속 없음', minutes: 0, count: 0, approved: 0 }
+      const row = grouped.get(request.employeeId) ?? { employeeId: request.employeeId, departmentId: original.departmentId ?? null, name: original.employeeName, team: original.departmentName || '소속 없음', minutes: 0, count: 0, approved: 0 }
       row.minutes += item.minutes; row.approved += item.approvedMinutes; row.count += 1
       grouped.set(row.employeeId, row)
     }
     return [...grouped.values()].sort((a, b) => b.minutes - a.minutes || a.name.localeCompare(b.name, 'ko'))
-  }, [entries, requests.rows, department, search])
+  }, [entries, requests.rows, search])
+  const rows = useMemo(() => searchedRows.filter(row => inDepartmentScope(department, row.departmentId)), [searchedRows, department])
   const awaiting = requests.rows.filter(row => row.kind === 'overtime' && row.status === 'approved' && row.from <= today && !actuals.rows.some(actual => actual.requestId === row.id)).length
   const loading = actuals.isPending || requests.isPending
   const failed = actuals.isError || requests.isError
   const ready = actuals.ready && !failed && !loading
   const selectedRows = entries.filter(row => row.request.employeeId === selected)
+  const deptCards = useMemo(() => departmentScopeCards({
+    items: searchedRows, departments: directory.departments, departmentOf: row => row.departmentId, unavailable: !ready,
+    detail: { label: '건', count: scoped => scoped.reduce((sum, row) => sum + row.count, 0) },
+  }), [searchedRows, directory.departments, ready])
   return <section className="space-y-4" aria-label="야근 관리">
     <h2 className="sr-only">야근</h2>
     <InfoNote label="야근 누적 기준"><p>승인된 야근은 신청 시작부터 실제 퇴근 시각까지 자동으로 누적됩니다. 예정 종료보다 더 하거나 덜 한 시간도 반영합니다. 과거 수동 입력과 외근 후처리 내역은 그대로 보존하며, 야근 신청이 없는 늦은 퇴근이나 외근 자동 퇴근만으로 야근을 만들지 않습니다.</p></InfoNote>
-    <WorkManagementFilters label="야근 관리" month={month} setMonth={value => { setMonth(value); setLimit(50); setSelected(null) }} department={department} setDepartment={value => { setDepartment(value); setLimit(50); setSelected(null) }} search={search} setSearch={value => { setSearch(value); setLimit(50); setSelected(null) }} directory={directory} />
-    <StatGrid><StatTile label="실제 야근 기록 직원" value={ready ? `${rows.length}명` : '—'} hint={monthLabel(month)} /><StatTile label="누적 반영 야근" value={ready ? workDurationLabel(rows.reduce((sum, row) => sum + row.minutes, 0)) : '—'} hint="현재 필터 · 과거 기록의 차감값 보존" /><StatTile label="퇴근 기록 대기" value={ready ? `${awaiting}건` : '—'} hint="해당 월 전체 승인 건 · 누적 제외" /></StatGrid>
+    <WorkManagementFilters label="야근 관리" month={month} setMonth={value => { setMonth(value); setLimit(50); setSelected(null) }} department={department} setDepartment={value => { setDepartment(value); setLimit(50); setSelected(null) }} search={search} setSearch={value => { setSearch(value); setLimit(50); setSelected(null) }} directory={directory} cards={deptCards} />
+    <p role="status" className="text-sm text-muted-foreground">{ready ? <>{monthLabel(month)} 실제 야근 기록 <strong className="text-foreground">{rows.length}명</strong> · 누적 반영 <strong className="text-foreground">{workDurationLabel(rows.reduce((sum, row) => sum + row.minutes, 0))}</strong> · 퇴근 기록 대기 <strong className={awaiting ? 'text-primary' : 'text-foreground'}>{awaiting}건</strong> <span className="text-xs">(대기는 해당 월 전체 승인 건 · 누적 제외)</span></> : '야근 기록을 확인하고 있습니다.'}</p>
     {failed && <p role="alert" className="text-danger">야근 기록 조회 실패 <Button size="sm" variant="outline" onClick={() => { void actuals.refetch(); void requests.refetch() }}>다시 불러오기</Button></p>}
     {!actuals.isPending && !actuals.isError && !actuals.ready && <p role="status" className="text-warning">실제 야근 조회 연결 대기입니다. 기존 출퇴근·신청은 보존되며 추정 시간을 대신 표시하지 않습니다.</p>}
     {actuals.ready && actuals.checkoutReady === false && <p role="status" className="text-warning">퇴근 자동 연결 서버 적용 대기입니다. 기존 야근 내역을 표시합니다.</p>}
@@ -74,7 +80,7 @@ export function AttendanceOvertimePanel({ directory }: { directory: ReturnType<t
       {!ready || !rows.length ? <tr><td colSpan={8} className="p-8 text-center">{loading ? '불러오는 중…' : failed ? '조회 실패' : !actuals.ready ? '실제 시간 연결 대기' : '퇴근 기록이 연결된 승인 야근이 없습니다.'}</td></tr> : rows.slice(0, limit).map(row => {
         const hours = allowances.isError ? null : allowances.data?.find(item => item.profile_id === row.employeeId)?.inclusive_overtime_hours
         const threshold = hours == null ? null : Math.round(hours * 60)
-        return <tr key={row.employeeId} className="border-t border-border"><td className="px-3 py-2 font-medium">{row.name}</td><td className="px-3 py-2">{row.team}</td><td className="px-3 py-2">{row.count}건</td><td className="px-3 py-2">{workDurationLabel(row.approved)}</td><td className="px-3 py-2 font-semibold">{workDurationLabel(row.minutes)}</td><td className="px-3 py-2">{allowances.isPending ? '조회 중…' : threshold == null ? '미등록·확인 필요' : workDurationLabel(threshold)}</td><td className="px-3 py-2">{threshold == null ? '—' : workDurationLabel(Math.max(0, row.minutes - threshold))}</td><td className="px-3 py-2"><Button size="sm" variant="outline" onClick={() => setSelected(selected === row.employeeId ? null : row.employeeId)}>입력 내역</Button></td></tr>
+        return <tr key={row.employeeId} className="border-t border-border"><td className="px-3 py-2"><MemberCell name={row.name} /></td><td className="px-3 py-2">{row.team}</td><td className="px-3 py-2">{row.count}건</td><td className="px-3 py-2">{workDurationLabel(row.approved)}</td><td className="px-3 py-2 font-semibold">{workDurationLabel(row.minutes)}</td><td className="px-3 py-2">{allowances.isPending ? '조회 중…' : threshold == null ? '미등록·확인 필요' : workDurationLabel(threshold)}</td><td className="px-3 py-2">{threshold == null ? '—' : workDurationLabel(Math.max(0, row.minutes - threshold))}</td><td className="px-3 py-2"><Button size="sm" variant="outline" onClick={() => setSelected(selected === row.employeeId ? null : row.employeeId)}>입력 내역</Button></td></tr>
       })}
     </tbody></table></Card>
     {rows.length > limit && <Button variant="outline" onClick={() => setLimit(value => value + 50)}>더 보기 ({limit}/{rows.length})</Button>}

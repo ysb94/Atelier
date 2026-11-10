@@ -1,0 +1,7 @@
+/* 운영지원 화면 공통: 표의 행 사이 선을 기획안·중국 업무 표와 같은 레드 옅은 로즈색으로 맞춘다. */
+.operations-support tbody tr {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, white);
+}
+.operations-support tbody tr > * {
+  border-bottom-color: color-mix(in srgb, var(--color-primary) 45%, white);
+}

@@ -6,7 +6,7 @@ import { FilterTabs } from '@/components/ui/filter-tabs'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { InfoNote } from '@/components/ui/info-note'
 import { StatusPill } from '@/components/ui/status-pill'
-import { Input, Select } from '@/components/ui/input'
+import { Input } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { listCompanyAttendanceClocks, type CompanyAttendanceClock } from '@/lib/supabase/attendance-clocks'
 import { countLateStatementsAwaitingHr, listLateArrivalStatements, type LateArrivalStatement } from '@/lib/supabase/late-arrival-statements'
@@ -19,7 +19,8 @@ import { attendanceTrackingStart } from './attendance-period'
 import { resolveWorkdayStart } from './offsite-workday-start'
 import { approvedQuarterIntervals, quarterArrivalStart } from './quarter-arrival'
 import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
-import { memberLabel } from './OpsStat'
+import { MemberCell, memberLabel } from './OpsStat'
+import { ScopeCards, departmentScopeCards, inDepartmentScope } from '@/components/ui/scope-cards'
 import { type useOpsDirectory } from './ops-directory'
 import { type useAttendanceStartSettings } from './use-attendance-start-settings'
 import { isWorkday, localDateKey, monthDates, monthLabel, shiftMonth, timeSeconds } from './monthly-attendance'
@@ -88,12 +89,10 @@ export function AttendanceLatePanel({ directory, schedules }: {
     return keys
   }, [leaveRows, dates])
   const clockByKey = useMemo(() => new Map(clockRows.map(clock => [`${clock.employeeId}:${clock.date}`, clock.clockIn])), [clockRows])
-  const rows = useMemo(() => {
-    const next: { key: string; memberId: string; date: string; dateLabel: string; name: string; team: string; start: string; clockIn: string; result: string; kind: 'late' | 'absent' }[] = []
-    const matches = (department: string | null, name: string, team: string) => {
-      if (departmentId === 'unassigned' ? Boolean(department) : departmentId !== 'all' && department !== departmentId) return false
-      return !needle || `${name} ${team}`.toLocaleLowerCase('ko').includes(needle)
-    }
+  // 부서 카드 건수를 위해 부서 조건 없이 먼저 모으고, 아래에서 부서 범위로 거른다.
+  const searchedRows = useMemo(() => {
+    const next: { key: string; memberId: string; departmentId: string | null; date: string; dateLabel: string; name: string; team: string; start: string; clockIn: string; result: string; kind: 'late' | 'absent' }[] = []
+    const matches = (_department: string | null, name: string, team: string) => !needle || `${name} ${team}`.toLocaleLowerCase('ko').includes(needle)
     for (const clock of clockRows) {
       const member = directory.members.find(item => item.id === clock.employeeId)
       if (!member || member.attendanceExempt || clock.date < attendanceTrackingStart(member.hireDate, member.attendanceTrackedFrom) || !isWorkday(clock.date, {})) continue
@@ -105,7 +104,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
       const team = directory.departmentName(member.departmentId)
       const name = memberLabel(member.displayName)
       if (!matches(member.departmentId, name, team)) continue
-      next.push({ key: `late:${member.id}:${clock.date}`, memberId: member.id, date: clock.date, dateLabel: dateLabel(clock.date), name, team, start: arrivalStart, clockIn: clock.clockIn, result: lateLabel(Math.floor((actual - baseline) / 60)), kind: 'late' })
+      next.push({ key: `late:${member.id}:${clock.date}`, memberId: member.id, departmentId: member.departmentId, date: clock.date, dateLabel: dateLabel(clock.date), name, team, start: arrivalStart, clockIn: clock.clockIn, result: lateLabel(Math.floor((actual - baseline) / 60)), kind: 'late' })
     }
     for (const member of directory.members) {
       if (member.attendanceExempt) continue
@@ -119,11 +118,12 @@ export function AttendanceLatePanel({ directory, schedules }: {
         const baseline = timeSeconds(schedule.start)
         if (date > today || !isWorkday(date, {}) || clockByKey.has(`${member.id}:${date}`) || covered.has(`${member.id}:${date}`)) continue
         if (date === today && (baseline == null ? nowMinutes < 18 * 60 : nowMinutes * 60 <= baseline + schedule.grace * 60)) continue
-        next.push({ key: `absent:${member.id}:${date}`, memberId: member.id, date, dateLabel: dateLabel(date), name, team, start: schedule.start || '미설정', clockIn: '없음', result: '결근', kind: 'absent' })
+        next.push({ key: `absent:${member.id}:${date}`, memberId: member.id, departmentId: member.departmentId, date, dateLabel: dateLabel(date), name, team, start: schedule.start || '미설정', clockIn: '없음', result: '결근', kind: 'absent' })
       }
     }
     return next.sort((a, b) => b.date.localeCompare(a.date) || Number(a.kind === 'late') - Number(b.kind === 'late') || a.name.localeCompare(b.name, 'ko'))
-  }, [clockRows, clockByKey, covered, dates, directory, schedules.index, leaveRows, departmentId, needle, today, nowMinutes, lunch.data])
+  }, [clockRows, clockByKey, covered, dates, directory, schedules.index, leaveRows, needle, today, nowMinutes, lunch.data])
+  const rows = useMemo(() => searchedRows.filter(row => inDepartmentScope(departmentId, row.departmentId)), [searchedRows, departmentId])
   const lateRows = rows.filter(row => row.kind === 'late')
   const absentRows = rows.filter(row => row.kind === 'absent')
   const latePeople = new Set(lateRows.map(row => row.memberId)).size
@@ -139,6 +139,11 @@ export function AttendanceLatePanel({ directory, schedules }: {
       : '이 조건의 지각·결근 기록이 없습니다.'
   const readError = directory.error || schedules.error || clocks.error || leaves.error || lunch.error
   const unavailable = directory.loading || schedules.loading || clocks.isPending || leaves.isPending || lunch.isPending || Boolean(readError)
+  const deptCards = useMemo(() => departmentScopeCards({
+    items: searchedRows, departments: directory.departments, departmentOf: row => row.departmentId, unavailable,
+    count: scoped => new Set(scoped.map(row => row.memberId)).size,
+    detail: { label: '건', count: scoped => scoped.length },
+  }), [searchedRows, directory.departments, unavailable])
   function chooseMonth(next: string) {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(next)) return
     setMonth(next)
@@ -154,16 +159,12 @@ export function AttendanceLatePanel({ directory, schedules }: {
       </InfoNote>
       <span className="text-sm text-muted-foreground">사유서 인사 확인 대기 <strong className="text-primary">{awaitingHr.isPending ? '…' : awaitingHr.isError ? '확인 실패' : `${awaitingHr.data ?? 0}건`}</strong></span>
     </div>
+    <ScopeCards ariaLabel="지각·결근 부서" value={departmentId} onChange={next => { setDepartmentId(next); setPage(1) }} cards={deptCards} />
     <FilterBar className="mb-0">
       <Button variant="outline" size="icon" aria-label="이전 월" onClick={() => chooseMonth(shiftMonth(month, -1))}><ChevronLeft size={15} /></Button>
       <Input aria-label="지각·결근 월" type="month" className="h-9 w-40" value={month} onChange={event => chooseMonth(event.target.value)} />
       <Button variant="outline" size="icon" aria-label="다음 월" onClick={() => chooseMonth(shiftMonth(month, 1))}><ChevronRight size={15} /></Button>
       <Button variant="ghost" size="sm" onClick={() => chooseMonth(today.slice(0, 7))}>이번 달</Button>
-      <Select aria-label="지각·결근 부서" value={departmentId} onChange={event => { setDepartmentId(event.target.value); setPage(1) }} className="h-9 w-40">
-        <option value="all">전체 부서</option>
-        {directory.departments.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-        <option value="unassigned">소속 없음</option>
-      </Select>
       <div className="relative min-w-[210px] flex-1">
         <Search size={15} className="absolute left-3 top-2.5 text-muted-foreground" />
         <Input aria-label="지각·결근 검색" placeholder="직원·부서 검색" className="h-9 pl-9" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} />
@@ -193,7 +194,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
               return <tr key={row.key} className="border-t border-border">
               <td className="px-3 py-2">{row.dateLabel}</td>
               <td className="px-3 py-2"><StatusPill tone={row.kind === 'late' ? 'warning' : 'danger'}>{row.kind === 'late' ? '지각' : '결근'}</StatusPill></td>
-              <td className="px-3 py-2 font-medium">{row.name}</td>
+              <td className="px-3 py-2"><MemberCell name={row.name} /></td>
               <td className="px-3 py-2">{row.team}</td>
               <td className="px-3 py-2">{row.start}</td>
               <td className="px-3 py-2">{row.clockIn}</td>

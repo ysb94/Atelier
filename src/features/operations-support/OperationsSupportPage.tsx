@@ -6,6 +6,7 @@ import { AttendancePanel } from './AttendancePanel'
 import { LeavePanel } from './LeavePanel'
 import { OperationsPeoplePanel } from './OperationsPeoplePanel'
 import { OperationsSettingsPanel } from './OperationsSettingsPanel'
+import './operations-support.css'
 import { useAuth } from '@/lib/supabase/auth'
 import { canEditOrgAssignment } from '@/lib/company/capabilities'
 import {
@@ -34,7 +35,7 @@ export function OperationsSupportPage() {
 
   const current = OPERATIONS_SECTIONS.find(item => item.id === section) ?? OPERATIONS_SECTIONS[0]
   return (
-    <div>
+    <div className="operations-support">
       <PageHeader
         title={current.label}
         description={current.description}

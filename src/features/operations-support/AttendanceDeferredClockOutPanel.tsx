@@ -2,13 +2,14 @@ import { useEffect, useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { Input, Select } from '@/components/ui/input'
+import { Input } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { listCompanyDeferredClockOuts, type CompanyDeferredClockOut } from '@/lib/supabase/attendance-clocks'
 import { emptyList } from '@/lib/utils'
 import { deferredClockOutViews } from './deferred-clock-outs'
-import { memberLabel } from './OpsStat'
+import { MemberCell, memberLabel } from './OpsStat'
+import { ScopeCards, departmentScopeCards, inDepartmentScope } from '@/components/ui/scope-cards'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { InfoNote } from '@/components/ui/info-note'
 import { StatusPill } from '@/components/ui/status-pill'
@@ -42,20 +43,26 @@ export function AttendanceDeferredClockOutPanel({ directory }: { directory: Retu
   const monthOk = /^\d{4}-(0[1-9]|1[0-2])$/.test(month)
   const needle = search.trim().toLocaleLowerCase('ko')
   const views = useMemo(() => monthOk ? deferredClockOutViews(records, month) : [], [records, month, monthOk])
-  const rows = useMemo(() => views.flatMap(view => {
+  // 부서 카드 건수를 위해 부서 조건 없이 먼저 모으고, 아래에서 부서 범위로 거른다.
+  const searchedRows = useMemo(() => views.flatMap(view => {
     const member = directory.members.find(item => item.id === view.employeeId)
     const team = member ? directory.departmentName(member.departmentId) : '소속 없음'
     const name = memberLabel(member?.displayName ?? null)
-    if (departmentId === 'unassigned' ? Boolean(member?.departmentId) : departmentId !== 'all' && member?.departmentId !== departmentId) return []
     if (needle && !`${name} ${team}`.toLocaleLowerCase('ko').includes(needle)) return []
-    return [{ ...view, name, team }]
-  }).sort((left, right) => right.totalCount - left.totalCount || right.date.localeCompare(left.date) || left.name.localeCompare(right.name, 'ko')), [views, directory, departmentId, needle])
+    return [{ ...view, name, team, departmentId: member?.departmentId ?? null }]
+  }).sort((left, right) => right.totalCount - left.totalCount || right.date.localeCompare(left.date) || left.name.localeCompare(right.name, 'ko')), [views, directory, needle])
+  const rows = useMemo(() => searchedRows.filter(row => inDepartmentScope(departmentId, row.departmentId)), [searchedRows, departmentId])
   const people = new Set(rows.map(row => row.employeeId)).size
   const cumulativePeople = new Set(records.map(row => row.employeeId)).size
   const pages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE))
   const currentPage = Math.min(page, pages)
   const pageRows = rows.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
   const unavailable = directory.loading || clocks.isPending
+  const deptCards = useMemo(() => departmentScopeCards({
+    items: searchedRows, departments: directory.departments, departmentOf: row => row.departmentId, unavailable,
+    count: scoped => new Set(scoped.map(row => row.employeeId)).size,
+    detail: { label: '건', count: scoped => scoped.length },
+  }), [searchedRows, directory.departments, unavailable])
   function chooseMonth(next: string) {
     if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(next)) return
     setMonth(next)
@@ -70,16 +77,12 @@ export function AttendanceDeferredClockOutPanel({ directory }: { directory: Retu
       </InfoNote>
       <span className="text-sm text-muted-foreground" role="status">{unavailable ? '기록을 확인하고 있습니다.' : <>{monthLabel(month)} <strong className="text-foreground">{people}명 · {rows.length}건</strong> · 전체 누적 {cumulativePeople}명 · {records.length}건</>}</span>
     </div>
+    <ScopeCards ariaLabel="퇴근 미처리 부서" value={departmentId} onChange={next => { setDepartmentId(next); setPage(1) }} cards={deptCards} />
     <FilterBar className="mb-0">
       <Button variant="outline" size="icon" aria-label="이전 월" onClick={() => chooseMonth(shiftMonth(month, -1))}><ChevronLeft size={15} /></Button>
       <Input aria-label="퇴근 미처리 월" type="month" className="h-9 w-40" value={month} onChange={event => chooseMonth(event.target.value)} />
       <Button variant="outline" size="icon" aria-label="다음 월" onClick={() => chooseMonth(shiftMonth(month, 1))}><ChevronRight size={15} /></Button>
       <Button variant="ghost" size="sm" onClick={() => chooseMonth(today.slice(0, 7))}>이번 달</Button>
-      <Select aria-label="퇴근 미처리 부서" value={departmentId} onChange={event => { setDepartmentId(event.target.value); setPage(1) }} className="h-9 w-40">
-        <option value="all">전체 부서</option>
-        {directory.departments.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
-        <option value="unassigned">소속 없음</option>
-      </Select>
       <div className="relative min-w-[210px] flex-1">
         <Search size={15} className="absolute left-3 top-2.5 text-muted-foreground" />
         <Input aria-label="퇴근 미처리 검색" placeholder="직원·부서 검색" className="h-9 pl-9" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} />
@@ -96,7 +99,7 @@ export function AttendanceDeferredClockOutPanel({ directory }: { directory: Retu
           {unavailable ? <tr><td colSpan={9} className="px-3 py-10 text-center text-muted-foreground">퇴근 미처리 기록을 확인하고 있습니다.</td></tr>
             : pageRows.length ? pageRows.map(row => <tr key={row.key} className="border-t border-border">
               <td className="px-3 py-2">{dateLabel(row.date)}</td>
-              <td className="px-3 py-2 font-medium">{row.name}</td>
+              <td className="px-3 py-2"><MemberCell name={row.name} /></td>
               <td className="px-3 py-2">{row.team}</td>
               <td className="px-3 py-2">{row.clockIn}</td>
               <td className="px-3 py-2"><StatusPill tone={row.pending ? 'warning' : row.automatic ? 'muted' : 'success'}>{row.pending ? '자동 퇴근 · 확인 필요' : row.automatic ? '자동 종료 후 입력 완료' : '입력 완료'}</StatusPill></td>
