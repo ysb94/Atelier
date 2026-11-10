@@ -6,7 +6,7 @@
 종합 알림과 해당 탭의 읽음·처리 대기를 함께 설계하고 양방향 동기화를 검증한다.
 
 Cursor·Claude·Codex는 모두 원래 폴더
-`C:\Users\A\Desktop\mas site code\Atelier`의 `261110-4`에서 작업한다.
+`C:\Users\A\Desktop\mas site code\Atelier`의 `261110-end`에서 작업한다.
 새 브랜치·worktree·별도 clone·복사 폴더를 임의로 만들지 않는다. 각자 맡은 파일·구간만 수정하고
 다른 담당의 미커밋·스테이징 변경은 보존한다. 같은 파일이 겹칠 때만 작업 순서를 조율한다.
 시작 시 경로·브랜치·상태를 확인하고, 안전한 경우에만 fetch → 지정 브랜치 확인 →
