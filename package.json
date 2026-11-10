@@ -4,6 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "verify:quarter-arrival": "node --experimental-strip-types src/features/operations-support/quarter-arrival.verify.ts && node scripts/verify-quarter-arrival-db.mjs",
     "setup:md-price": "node scripts/setup-md-price.mjs",
     "verify:md-price": "node --experimental-strip-types scripts/verify-md-price.mjs",
     "verify:sabangnet-urls": "node scripts/verify-sabangnet-urls.mjs",

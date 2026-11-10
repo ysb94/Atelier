@@ -1,4 +1,5 @@
 import { koreanHolidayNames } from './korean-holidays.ts'
+import { quarterArrivalStart, type ArrivalInterval } from './quarter-arrival.ts'
 
 export const ATTENDANCE_STATUSES = [
   { id: 'unset', label: '미기록' }, { id: 'present', label: '출근' },
@@ -8,7 +9,7 @@ export const ATTENDANCE_STATUSES = [
   { id: 'holiday', label: '휴무' },
 ] as const
 export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number]['id']
-export type AttendanceRecord = { status: AttendanceStatus; start: string; end: string; expectedStart: string; note: string; reviewed: boolean }
+export type AttendanceRecord = { status: AttendanceStatus; start: string; end: string; expectedStart: string; note: string; reviewed: boolean; quarterIntervals?: ArrivalInterval[]; lunch?: ArrivalInterval }
 export type AttendanceSchedule = { start: string; grace: number }
 export type AttendanceRecords = Record<string, Record<string, AttendanceRecord>>
 export type WorkdayOverrides = Record<string, boolean>
@@ -48,7 +49,7 @@ export function needsArrival(status: AttendanceStatus) { return ['present', 'rem
 export function recordTiming(record: AttendanceRecord, schedule: AttendanceSchedule) {
   const actual = needsArrival(record.status) || (record.status === 'offsite' && record.expectedStart) ? timeSeconds(record.start) : null
   const expected = record.expectedStart || (record.status === 'half-am' ? '' : schedule.start)
-  const baseline = timeSeconds(expected)
+  const baseline = timeSeconds(quarterArrivalStart(expected, record.quarterIntervals ?? [], record.lunch))
   return {
     actual, baseline,
     after: actual != null && baseline != null && actual > baseline,
