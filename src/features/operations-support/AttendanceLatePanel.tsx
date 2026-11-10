@@ -3,7 +3,9 @@ import { useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, Search } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { FilterTabs } from '@/components/ui/filter-tabs'
+import { FilterBar } from '@/components/ui/filter-bar'
 import { InfoNote } from '@/components/ui/info-note'
+import { StatusPill } from '@/components/ui/status-pill'
 import { Input, Select } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { listCompanyAttendanceClocks, type CompanyAttendanceClock } from '@/lib/supabase/attendance-clocks'
@@ -148,7 +150,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
       </InfoNote>
       <span className="text-sm text-muted-foreground">사유서 인사 확인 대기 <strong className="text-primary">{awaitingHr.isPending ? '…' : awaitingHr.isError ? '확인 실패' : `${awaitingHr.data ?? 0}건`}</strong></span>
     </div>
-    <div className="flex flex-wrap items-center gap-2">
+    <FilterBar className="mb-0">
       <Button variant="outline" size="icon" aria-label="이전 월" onClick={() => chooseMonth(shiftMonth(month, -1))}><ChevronLeft size={15} /></Button>
       <Input aria-label="지각·결근 월" type="month" className="h-9 w-40" value={month} onChange={event => chooseMonth(event.target.value)} />
       <Button variant="outline" size="icon" aria-label="다음 월" onClick={() => chooseMonth(shiftMonth(month, 1))}><ChevronRight size={15} /></Button>
@@ -162,7 +164,7 @@ export function AttendanceLatePanel({ directory, schedules }: {
         <Search size={15} className="absolute left-3 top-2.5 text-muted-foreground" />
         <Input aria-label="지각·결근 검색" placeholder="직원·부서 검색" className="h-9 pl-9" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} />
       </div>
-    </div>
+    </FilterBar>
     <FilterTabs
       ariaLabel="지각·결근 구분"
       value={kind}
@@ -186,13 +188,13 @@ export function AttendanceLatePanel({ directory, schedules }: {
               const attached = statementByKey.get(`${row.memberId}:${row.date}`)
               return <tr key={row.key} className="border-t border-border">
               <td className="px-3 py-2">{row.dateLabel}</td>
-              <td className="px-3 py-2">{row.kind === 'late' ? '지각' : '결근'}</td>
+              <td className="px-3 py-2"><StatusPill tone={row.kind === 'late' ? 'warning' : 'danger'}>{row.kind === 'late' ? '지각' : '결근'}</StatusPill></td>
               <td className="px-3 py-2 font-medium">{row.name}</td>
               <td className="px-3 py-2">{row.team}</td>
               <td className="px-3 py-2">{row.start}</td>
               <td className="px-3 py-2">{row.clockIn}</td>
               <td className="px-3 py-2 font-medium text-danger">{row.result}</td>
-              <td className="px-3 py-2 text-right">{row.kind !== 'late' ? <span className="text-muted-foreground">—</span> : statements.isPending ? '…' : statements.error ? '조회 실패' : attached ? <span className="inline-flex items-center justify-end gap-2">{attached.hrConfirmedAt ? <span className="text-xs text-muted-foreground">확인됨</span> : attached.managerConfirmedAt ? <span className="text-xs text-warning">인사 대기</span> : null}<Button type="button" size="sm" variant="outline" onClick={() => setStatement(attached)}>사유서</Button></span> : <span className="text-muted-foreground">없음</span>}</td>
+              <td className="px-3 py-2 text-right">{row.kind !== 'late' ? <span className="text-muted-foreground">—</span> : statements.isPending ? '…' : statements.error ? '조회 실패' : attached ? <span className="inline-flex items-center justify-end gap-2">{attached.hrConfirmedAt ? <StatusPill tone="success">확인됨</StatusPill> : attached.managerConfirmedAt ? <StatusPill tone="warning">인사 대기</StatusPill> : null}<Button type="button" size="sm" variant="outline" onClick={() => setStatement(attached)}>사유서</Button></span> : <span className="text-muted-foreground">없음</span>}</td>
             </tr>}) : <tr><td colSpan={8} className="px-3 py-10 text-center text-muted-foreground">{clocks.error || leaves.error ? '기록을 불러오지 못했습니다.' : emptyLabel}</td></tr>}
         </tbody>
       </table>

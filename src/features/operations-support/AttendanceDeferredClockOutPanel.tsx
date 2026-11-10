@@ -9,7 +9,9 @@ import { listCompanyDeferredClockOuts, type CompanyDeferredClockOut } from '@/li
 import { emptyList } from '@/lib/utils'
 import { deferredClockOutViews } from './deferred-clock-outs'
 import { memberLabel } from './OpsStat'
+import { FilterBar } from '@/components/ui/filter-bar'
 import { InfoNote } from '@/components/ui/info-note'
+import { StatusPill } from '@/components/ui/status-pill'
 import { type useOpsDirectory } from './ops-directory'
 import { localDateKey, monthLabel, shiftMonth } from './monthly-attendance'
 
@@ -68,7 +70,7 @@ export function AttendanceDeferredClockOutPanel({ directory }: { directory: Retu
       </InfoNote>
       <span className="text-sm text-muted-foreground" role="status">{unavailable ? '기록을 확인하고 있습니다.' : <>{monthLabel(month)} <strong className="text-foreground">{people}명 · {rows.length}건</strong> · 전체 누적 {cumulativePeople}명 · {records.length}건</>}</span>
     </div>
-    <div className="flex flex-wrap items-center gap-2">
+    <FilterBar className="mb-0">
       <Button variant="outline" size="icon" aria-label="이전 월" onClick={() => chooseMonth(shiftMonth(month, -1))}><ChevronLeft size={15} /></Button>
       <Input aria-label="퇴근 미처리 월" type="month" className="h-9 w-40" value={month} onChange={event => chooseMonth(event.target.value)} />
       <Button variant="outline" size="icon" aria-label="다음 월" onClick={() => chooseMonth(shiftMonth(month, 1))}><ChevronRight size={15} /></Button>
@@ -82,7 +84,7 @@ export function AttendanceDeferredClockOutPanel({ directory }: { directory: Retu
         <Search size={15} className="absolute left-3 top-2.5 text-muted-foreground" />
         <Input aria-label="퇴근 미처리 검색" placeholder="직원·부서 검색" className="h-9 pl-9" value={search} onChange={event => { setSearch(event.target.value); setPage(1) }} />
       </div>
-    </div>
+    </FilterBar>
     {clocks.error && <p role="alert" className="text-sm text-danger">퇴근 미처리 기록을 불러오지 못했습니다. <Button variant="outline" size="sm" onClick={() => void clocks.refetch()}>다시 불러오기</Button></p>}
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <table className="w-full text-left text-sm">
@@ -97,7 +99,7 @@ export function AttendanceDeferredClockOutPanel({ directory }: { directory: Retu
               <td className="px-3 py-2 font-medium">{row.name}</td>
               <td className="px-3 py-2">{row.team}</td>
               <td className="px-3 py-2">{row.clockIn}</td>
-              <td className="px-3 py-2">{row.pending ? '자동 퇴근 · 확인 필요' : row.automatic ? '자동 종료 후 입력 완료' : '입력 완료'}</td>
+              <td className="px-3 py-2"><StatusPill tone={row.pending ? 'warning' : row.automatic ? 'muted' : 'success'}>{row.pending ? '자동 퇴근 · 확인 필요' : row.automatic ? '자동 종료 후 입력 완료' : '입력 완료'}</StatusPill></td>
               <td className="px-3 py-2">{row.lastConfirmedText}</td>
               <td className="px-3 py-2">{row.clockOutText}</td>
               <td className="px-3 py-2">{row.reportedText}</td>

@@ -1,59 +1,57 @@
-.monthly-attendance { min-width: 0; color: #282925; }
-.attendance-topbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid #d6b95c; }
+/* 월별 근태 화면. 공용 색 토큰(index.css)을 쓰고, 출퇴근 달력 칸 색만 화면 전용으로 둔다. */
+.monthly-attendance { min-width: 0; color: var(--color-foreground); }
+.attendance-topbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding-bottom: 16px; border-bottom: 1px solid var(--color-border); }
 .attendance-month-picker, .attendance-export-actions { display: flex; align-items: center; gap: 8px; }
 .attendance-month-picker input { width: 160px; font-size: 16px; font-weight: 600; }
 .attendance-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
 .attendance-filters > select { width: 180px; }
 .attendance-search { position: relative; flex: 1; min-width: 210px; max-width: 450px; }
-.attendance-search > svg { position: absolute; top: 12px; left: 12px; color: #909087; }
+.attendance-search > svg { position: absolute; top: 12px; left: 12px; color: var(--color-muted-foreground); }
 .attendance-search input { padding-left: 35px; }
-.monthly-attendance input[type=checkbox] { accent-color: #9a7c26; width: 15px; height: 15px; }
-.attendance-workdays { padding: 16px; border: 1px solid #e1d4ad; border-radius: 12px; background: #fffdf6; font-size: 13px; }
-.attendance-workdays p { margin: 5px 0 12px; font-size: 12px; color: #78766d; }
+.monthly-attendance input[type=checkbox] { accent-color: var(--color-primary); width: 15px; height: 15px; }
+.attendance-workdays { padding: 16px; border: 1px solid var(--color-border); border-radius: var(--radius-xl); background: var(--color-card); font-size: 13px; }
+.attendance-workdays p { margin: 5px 0 12px; font-size: 12px; color: var(--color-muted-foreground); }
 .attendance-workday-buttons { display: flex; flex-wrap: wrap; gap: 5px; }
-.attendance-workday-buttons button { width: 39px; padding: 6px 2px; border: 1px solid #e1dfd7; border-radius: 7px; background: #f4f3ef; color: #89877e; }
-.attendance-workday-buttons button[aria-pressed=true] { background: #f5e5ab; color: #5c491d; border-color: #d9bb5d; }
+.attendance-workday-buttons button { width: 39px; padding: 6px 2px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-muted); color: var(--color-muted-foreground); }
+.attendance-workday-buttons button[aria-pressed=true] { background: color-mix(in srgb, var(--color-primary) 10%, var(--color-card)); color: var(--color-primary); border-color: color-mix(in srgb, var(--color-primary) 35%, transparent); }
 .attendance-workday-buttons small { display: block; font-size: 10px; }
 .attendance-results-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
-.attendance-results-bar > div { display: flex; padding: 3px; border: 1px solid #e2dfd6; background: #f1f0ec; border-radius: 9px; }
-.attendance-results-bar button { display: flex; align-items: center; gap: 6px; padding: 7px 13px; border-radius: 6px; font-size: 13px; color: #73746d; }
-.attendance-results-bar button[aria-pressed=true] { background: white; color: #272925; box-shadow: 0 1px 4px #00000012; }
-.attendance-results-bar > span { font-size: 11px; color: #7c7d76; }
+.attendance-results-bar > span { font-size: 11px; color: var(--color-muted-foreground); }
 .attendance-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-items: start; }
 .attendance-workspace.has-detail { grid-template-columns: minmax(0, 1fr) 410px; }
-.attendance-results { min-width: 0; overflow: hidden; border: 1px solid #e5e1d8; border-radius: 13px; background: white; }
+.attendance-results { min-width: 0; overflow: hidden; border: 1px solid var(--color-border); border-radius: var(--radius-xl); background: var(--color-card); box-shadow: 0 1px 2px rgb(0 0 0 / 0.05); }
 .attendance-table-scroll { overflow: auto; max-height: 62dvh; }
 .attendance-summary-table { width: 100%; min-width: 980px; border-collapse: separate; border-spacing: 0; font-size: 12px; text-align: center; }
-.attendance-summary-table thead th { position: sticky; top: 0; z-index: 2; padding: 13px 12px; background: #37668e; font-weight: 500; color: white; white-space: nowrap; }
-.attendance-summary-table thead th:first-child { background: #b93942; left: 0; z-index: 3; }
-.attendance-summary-table tbody th { position: sticky; left: 0; z-index: 1; width: 210px; min-width: 210px; background: white; border-right: 1px solid #ebe6dc; text-align: left; font-weight: 400; }
-.attendance-summary-table tbody th, .attendance-summary-table td { padding: 13px 14px; border-bottom: 1px solid #ece8e0; }
+.attendance-summary-table thead th { position: sticky; top: 0; z-index: 2; padding: 13px 12px; background: var(--color-primary); font-weight: 500; color: var(--color-primary-foreground); white-space: nowrap; }
+.attendance-summary-table thead th:first-child { left: 0; z-index: 3; }
+.attendance-summary-table tbody th { position: sticky; left: 0; z-index: 1; width: 210px; min-width: 210px; background: var(--color-card); border-right: 1px solid var(--color-border); text-align: left; font-weight: 400; }
+.attendance-summary-table tbody th, .attendance-summary-table td { padding: 13px 14px; border-bottom: 1px solid var(--color-border); }
 .attendance-summary-table tbody tr:last-child > * { border-bottom: 0; }
-.attendance-summary-table tbody th button { font-weight: 600; font-size: 13px; text-decoration: underline; text-decoration-color: #d6c798; text-underline-offset: 4px; }
-.attendance-summary-table small { display: block; font-size: 10px; color: #8a8b83; margin-top: 5px; font-weight: 400; }
-.attendance-summary-table tbody tr:hover > *, .attendance-summary-table tbody tr.is-selected > * { background: #fcf8eb; }
+.attendance-summary-table tbody th button { font-weight: 600; font-size: 13px; text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--color-primary) 35%, transparent); text-underline-offset: 4px; }
+.attendance-summary-table small { display: block; font-size: 10px; color: var(--color-muted-foreground); margin-top: 5px; font-weight: 400; }
+.attendance-summary-table tbody tr:hover > *, .attendance-summary-table tbody tr.is-selected > * { background: color-mix(in srgb, var(--color-primary) 4%, var(--color-card)); }
 .attendance-summary-table strong { font-size: 16px; font-weight: 600; }
-.attendance-muted { color: #909187; }
-.attendance-after-text { color: #bb5978; }
-.attendance-exceeded-text { color: #ba2f39; font-weight: 600; }
-.attendance-count-link { color: #ad4d36; border-bottom: 1px dashed #cfab9f; }
-.attendance-review-badge { display: inline-block; border: 1px solid #e7dbbb; background: #fbf7e9; border-radius: 5px; padding: 4px 7px; color: #8b7035; font-size: 10px; white-space: nowrap; }
-.attendance-review-badge.is-complete { color: #35745a; background: #edf6ef; border-color: #cee3d4; }
-.attendance-pagination { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; border-top: 1px solid #e8e5dd; font-size: 12px; color: #74766d; }
+.attendance-muted { color: var(--color-muted-foreground); }
+/* 정시 이후는 출퇴근 달력의 같은 색을 쓴다. */
+.attendance-after-text { color: #a23d62; }
+.attendance-exceeded-text { color: var(--color-danger); font-weight: 600; }
+.attendance-count-link { color: var(--color-primary); border-bottom: 1px dashed color-mix(in srgb, var(--color-primary) 40%, transparent); }
+.attendance-pagination { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; border-top: 1px solid var(--color-border); font-size: 12px; color: var(--color-muted-foreground); }
 .attendance-pagination > div { display: flex; align-items: center; gap: 12px; }
-.attendance-empty { padding: 55px 20px; text-align: center; font-size: 13px; color: #74766e; }
+.attendance-empty { padding: 55px 20px; text-align: center; font-size: 13px; color: var(--color-muted-foreground); }
 .attendance-empty p { margin-bottom: 12px; }
-.attendance-detail { position: sticky; top: 12px; border: 1px solid #dfd8c5; border-radius: 13px; background: #fff; overflow: hidden; }
-.attendance-detail > header { display: flex; align-items: center; justify-content: space-between; background: #f7f3e9; border-bottom: 1px solid #e5dcc5; padding: 14px 16px; }
-.attendance-detail > header span { color: #8a7b58; font-size: 11px; }
+.attendance-detail { position: sticky; top: 12px; border: 1px solid var(--color-border); border-radius: var(--radius-xl); background: var(--color-card); overflow: hidden; box-shadow: 0 1px 2px rgb(0 0 0 / 0.05); }
+.attendance-detail > header { display: flex; align-items: center; justify-content: space-between; background: var(--color-card); border-top: 3px solid var(--color-primary); border-bottom: 1px solid var(--color-border); padding: 14px 16px; }
+.attendance-detail > header span { color: var(--color-muted-foreground); font-size: 11px; }
 .attendance-detail h2 { font-size: 18px; margin-top: 2px; font-weight: 600; }
-.attendance-detail > header button { padding: 6px; border-radius: 6px; }
-.attendance-detail > header button:hover { background: #ece5d5; }
+.attendance-detail > header button { padding: 6px; border-radius: var(--radius-sm); }
+.attendance-detail > header button:hover { background: var(--color-muted); }
 .attendance-detail-body { padding: 16px; max-height: 78dvh; overflow: auto; }
 .attendance-schedule { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.attendance-schedule label { display: block; font-size: 11px; color: #73766c; }
+.attendance-schedule label { display: block; font-size: 11px; color: var(--color-muted-foreground); }
 .attendance-schedule input, .attendance-schedule select { margin-top: 5px; }
-.attendance-detail-hint { font-size: 11px; line-height: 1.6; color: #858779; margin: 10px 0; }
+.attendance-detail-hint { font-size: 11px; line-height: 1.6; color: var(--color-muted-foreground); margin: 10px 0; }
+/* 출퇴근 달력: 자체 색 체계가 필요한 예외 화면(AGENTS.md 화면 디자인 규칙). */
 .attendance-calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); border-left: 1px solid #e5e1d7; border-top: 1px solid #e5e1d7; }
 .attendance-calendar-weekday { font-size: 10px; text-align: center; padding: 6px 0; background: #f4f3ef; border-right: 1px solid #e5e1d7; border-bottom: 1px solid #e5e1d7; color: #7b7d73; }
 .attendance-calendar-weekday.is-sat { color: #215a90; font-weight: 700; }
@@ -97,9 +95,9 @@
 .attendance-calendar-day.is-after strong { color: #a23d62; }
 .attendance-calendar-day.is-exceeded { background: #f9dddd; color: #b32d36; }
 .attendance-calendar-day.is-exceeded strong { color: #b32d36; }
-.attendance-calendar-day.is-today { box-shadow: inset 0 0 0 2px #b0893e; }
-.attendance-calendar-day.is-selected { box-shadow: inset 0 0 0 2px #b7993d; }
-button.attendance-calendar-day:hover { box-shadow: inset 0 0 0 2px #b7993d; }
+.attendance-calendar-day.is-today { box-shadow: inset 0 0 0 2px var(--color-foreground); }
+.attendance-calendar-day.is-selected { box-shadow: inset 0 0 0 2px var(--color-primary); }
+button.attendance-calendar-day:hover { box-shadow: inset 0 0 0 2px var(--color-primary); }
 .attendance-legend { display: flex; flex-wrap: wrap; gap: 8px 12px; margin: 8px 0 0; padding: 0; list-style: none; font-size: 10px; color: #6f7168; }
 .attendance-legend li { display: flex; align-items: center; gap: 5px; }
 .attendance-legend i { width: 10px; height: 10px; border-radius: 2px; border: 1px solid #e3ddd0; }
@@ -108,31 +106,31 @@ button.attendance-calendar-day:hover { box-shadow: inset 0 0 0 2px #b7993d; }
 .attendance-legend .swatch-holiday { background: #f6c9cd; }
 .attendance-legend .swatch-missing { background: #fff1d4; }
 .attendance-calendar-day em { position: absolute; right: 2px; top: 2px; color: #438364; font-size: 9px; font-style: normal; }
-.attendance-person-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: #e9e6dc; border: 1px solid #e9e6dc; border-radius: 8px; overflow: hidden; margin-top: 12px; }
-.attendance-person-stats > div { background: #fcfcf8; padding: 10px; }
-.attendance-person-stats dt { color: #888a80; font-size: 10px; }
+/* 달력 밖 요약·보고서는 다시 공용 토큰을 쓴다. */
+.attendance-person-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--color-border); border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; margin-top: 12px; }
+.attendance-person-stats > div { background: var(--color-card); padding: 10px; }
+.attendance-person-stats dt { color: var(--color-muted-foreground); font-size: 10px; }
 .attendance-person-stats dd { font-size: 12px; font-weight: 600; margin-top: 3px; font-variant-numeric: tabular-nums; }
-.attendance-review-footer { border-top: 1px solid #e6e0d1; margin-top: 16px; padding-top: 14px; display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
-.attendance-review-footer p { font-size: 11px; color: #8e7f54; }
-.attendance-report-heading { border-bottom: 3px solid #a93b47; text-align: center; padding: 20px; }
+.attendance-review-footer { border-top: 1px solid var(--color-border); margin-top: 16px; padding-top: 14px; display: flex; flex-direction: column; align-items: stretch; gap: 10px; }
+.attendance-review-footer p { font-size: 11px; color: var(--color-muted-foreground); }
+.attendance-report-heading { border-bottom: 3px solid var(--color-primary); text-align: center; padding: 20px; }
 .attendance-report-heading h2 { font-size: 20px; font-weight: 600; }
-.attendance-report-heading p { font-size: 11px; color: #87897d; margin-top: 4px; }
+.attendance-report-heading p { font-size: 11px; color: var(--color-muted-foreground); margin-top: 4px; }
 .attendance-report-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 20px; gap: 20px; }
-.attendance-report-card { border: 1px solid #e3ded1; border-radius: 8px; overflow: hidden; }
-.attendance-report-card > header { padding: 10px 12px; background: #37668e; color: #fff; }
+.attendance-report-card { border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
+.attendance-report-card > header { padding: 10px 12px; background: var(--color-primary); color: var(--color-primary-foreground); }
 .attendance-report-card h3 { font-size: 14px; font-weight: 600; }
 .attendance-report-card h3 span { font-weight: 400; font-size: 11px; margin-left: 6px; }
-.attendance-report-card > header > small { font-size: 10px; color: #d6e1eb; }
+.attendance-report-card > header > small { font-size: 10px; color: color-mix(in srgb, var(--color-primary-foreground) 80%, transparent); }
 .attendance-report-card .attendance-calendar { border-left: 0; border-top: 0; }
 .attendance-report-card .attendance-legend { display: none; }
 .attendance-report-card .attendance-calendar-day strong { font-size: 11px; }
 .attendance-report-card .attendance-calendar-day.is-holiday strong { font-size: 8px; }
 .attendance-report-card dl { font-size: 11px; }
-.attendance-report-card dl > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid #e6e2d8; padding: 6px 10px; }
-.attendance-report-card dt { color: #77796e; }
+.attendance-report-card dl > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; border-top: 1px solid var(--color-border); padding: 6px 10px; }
+.attendance-report-card dt { color: var(--color-muted-foreground); }
 .attendance-report-card dd { font-variant-numeric: tabular-nums; }
 .attendance-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
-.monthly-attendance button:focus-visible { outline: 2px solid #a18430; outline-offset: 2px; }
 .monthly-attendance button:disabled { cursor: not-allowed; opacity: .45; }
 @media (max-width: 1100px) { .attendance-workspace.has-detail { grid-template-columns: minmax(0, 1fr); } .attendance-detail { position: static; } .attendance-detail-body { max-height: none; } .attendance-calendar-day strong { font-size: 11px; } }
 @media (max-width: 640px) { .attendance-topbar { flex-wrap: wrap; } .attendance-month-picker { gap: 4px; flex-wrap: wrap; } .attendance-month-picker input { width: 145px; } .attendance-export-actions { flex-wrap: wrap; } .attendance-filters > select { width: 100%; } .attendance-search { max-width: none; min-width: 0; flex-basis: 100%; } .attendance-report-grid { grid-template-columns: minmax(0, 1fr); padding: 12px; gap: 12px; } .attendance-report-card .attendance-calendar-day strong { font-size: 9px; } .attendance-calendar-day strong { font-size: 9px; } .attendance-summary-table tbody th { min-width: 160px; width: 160px; } }

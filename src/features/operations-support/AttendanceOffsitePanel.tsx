@@ -9,6 +9,7 @@ import { OffsiteSettlementEditor } from './OffsiteSettlementEditor'
 import { offsitePhase, OFFSITE_PHASE_LABEL } from './offsite-period'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { InfoNote } from '@/components/ui/info-note'
 import { StatusPill } from '@/components/ui/status-pill'
 import { StatGrid, StatTile } from '@/components/ui/stat-tile'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -55,7 +56,8 @@ export function AttendanceOffsitePanel({ directory, schedules }: { directory: Re
   const loading = requests.isPending, failed = requests.isError
   const visible = rows.slice(0, limit)
   return <section className="space-y-4" aria-label="외근 관리">
-    <header><h2 className="text-base font-semibold">외근 관리</h2><p className="text-sm text-muted-foreground">외근 예정·진행 중·종료를 구분합니다. 추가 근무는 예상 시간이며, 종료 후 실제 근무분을 확인해 야근 누적 또는 추가 휴가 지급으로 확정합니다. 휴가 지급분은 야근에 누적하지 않습니다. 주말·공휴일이 포함된 외근은 평일분까지 주말·공휴일 근무 관리에서 처리합니다.</p></header>
+    <h2 className="sr-only">외근</h2>
+    <InfoNote label="외근 후처리 기준"><p>외근 예정·진행 중·종료를 구분합니다. 추가 근무는 예상 시간이며, 종료 후 실제 근무분을 확인해 야근 누적 또는 추가 휴가 지급으로 확정합니다. 휴가 지급분은 야근에 누적하지 않습니다. 주말·공휴일이 포함된 외근은 평일분까지 주말·공휴일 근무 탭에서 처리합니다.</p></InfoNote>
     <WorkManagementFilters label="외근 관리" month={month} setMonth={value => { setMonth(value); setLimit(50) }} search={search} setSearch={value => { setSearch(value); setLimit(50) }} department={department} setDepartment={value => { setDepartment(value); setLimit(50) }} directory={directory} />
     <label className="flex items-center gap-2 text-sm">진행 구분<Select aria-label="외근 진행 구분" value={phase} onChange={event=>{setPhase(event.target.value);setLimit(50)}}>{[['all','전체'],['planned','예정'],['ongoing','진행 중'],['ended','종료'],['pending','후처리 대기'],['cancelled','취소']].map(([value,label])=><option key={value} value={value}>{label}</option>)}</Select></label>
     {!settlements.isPending&&!settlements.error&&!settlements.data?.ready&&<p role="status" className="text-warning">외근 후처리 서버 설정 적용 대기입니다. 기존 데이터는 유지됩니다.</p>}

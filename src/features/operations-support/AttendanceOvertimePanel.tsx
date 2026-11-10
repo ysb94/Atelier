@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
+import { InfoNote } from '@/components/ui/info-note'
 import { StatGrid, StatTile } from '@/components/ui/stat-tile'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { getSupabase } from '@/lib/supabase/client'
@@ -61,7 +62,8 @@ export function AttendanceOvertimePanel({ directory }: { directory: ReturnType<t
   const ready = actuals.ready && !failed && !loading
   const selectedRows = entries.filter(row => row.request.employeeId === selected)
   return <section className="space-y-4" aria-label="야근 관리">
-    <header><h2 className="text-base font-semibold">야근 관리</h2><p className="mt-1 text-sm text-muted-foreground">승인된 야근은 신청 시작부터 실제 퇴근 시각까지 자동으로 누적됩니다. 예정 종료보다 더 하거나 덜 한 시간도 반영합니다. 과거 수동 입력과 외근 후처리 내역은 그대로 보존하며, 야근 신청이 없는 늦은 퇴근이나 외근 자동 퇴근만으로 야근을 만들지 않습니다.</p></header>
+    <h2 className="sr-only">야근</h2>
+    <InfoNote label="야근 누적 기준"><p>승인된 야근은 신청 시작부터 실제 퇴근 시각까지 자동으로 누적됩니다. 예정 종료보다 더 하거나 덜 한 시간도 반영합니다. 과거 수동 입력과 외근 후처리 내역은 그대로 보존하며, 야근 신청이 없는 늦은 퇴근이나 외근 자동 퇴근만으로 야근을 만들지 않습니다.</p></InfoNote>
     <WorkManagementFilters label="야근 관리" month={month} setMonth={value => { setMonth(value); setLimit(50); setSelected(null) }} department={department} setDepartment={value => { setDepartment(value); setLimit(50); setSelected(null) }} search={search} setSearch={value => { setSearch(value); setLimit(50); setSelected(null) }} directory={directory} />
     <StatGrid><StatTile label="실제 야근 기록 직원" value={ready ? `${rows.length}명` : '—'} hint={monthLabel(month)} /><StatTile label="누적 반영 야근" value={ready ? workDurationLabel(rows.reduce((sum, row) => sum + row.minutes, 0)) : '—'} hint="현재 필터 · 과거 기록의 차감값 보존" /><StatTile label="퇴근 기록 대기" value={ready ? `${awaiting}건` : '—'} hint="해당 월 전체 승인 건 · 누적 제외" /></StatGrid>
     {failed && <p role="alert" className="text-danger">야근 기록 조회 실패 <Button size="sm" variant="outline" onClick={() => { void actuals.refetch(); void requests.refetch() }}>다시 불러오기</Button></p>}
