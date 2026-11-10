@@ -1,6 +1,7 @@
 import type { LeaveRequest } from '../../lib/supabase/leave-requests.ts'
 import { EMPTY_ATTENDANCE, type AttendanceRecord, type AttendanceRecords, type AttendanceStatus } from './monthly-attendance.ts'
 import { offsiteWorkdayStart } from './offsite-workday-start.ts'
+import { approvedQuarterIntervals, type ArrivalInterval } from './quarter-arrival.ts'
 
 const STATUS_RANK: Partial<Record<LeaveRequest['kind'], number>> = {
   annual: 5, official: 4, half: 3, remote: 2, offsite: 1,
@@ -20,7 +21,7 @@ function withNote(record: AttendanceRecord, note: string): AttendanceRecord {
 }
 
 /** 회사 출근 기록과 대기·승인 신청을 월별 근태 칸으로 바꾼다. */
-export function buildAttendanceRecords(dates: readonly string[], clocks: readonly { employeeId: string; date: string; clockIn: string }[], leaves: readonly LeaveRequest[]): AttendanceRecords {
+export function buildAttendanceRecords(dates: readonly string[], clocks: readonly { employeeId: string; date: string; clockIn: string }[], leaves: readonly LeaveRequest[], lunch?: ArrivalInterval): AttendanceRecords {
   const days = new Set(dates)
   const records: AttendanceRecords = {}
   for (const clock of clocks) {
@@ -47,6 +48,7 @@ export function buildAttendanceRecords(dates: readonly string[], clocks: readonl
       (STATUS_RANK[right.kind] ?? 0) - (STATUS_RANK[left.kind] ?? 0) || Number(right.status === 'approved') - Number(left.status === 'approved'))
     const chosen = ranked[0]
     let record = records[date]?.[employeeId] ?? { ...EMPTY_ATTENDANCE }
+    record = { ...record, quarterIntervals: approvedQuarterIntervals(requests, date), lunch }
     const workStart = offsiteWorkdayStart(requests, date)
     if (workStart) record = { ...record, expectedStart: workStart }
     if (chosen) {

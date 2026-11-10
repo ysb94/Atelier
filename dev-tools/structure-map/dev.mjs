@@ -63,8 +63,9 @@ export async function startDevelopment(viteArgs = [], structurePort = Number(pro
   let automation = null
   try {
     const { settings } = await import('../ai-workflow/settings.mjs')
-    const automationPort = settings().port
-    if (await existingManager(automationPort)) console.info(`[dev] 기존 자동화 관리자 사용: http://127.0.0.1:${automationPort}/health`)
+    const { port: automationPort, env } = settings()
+    if (!env.NOTION_TOKEN?.trim()) console.info('[dev] 노션 연결 키가 없어 자동화 관리자를 시작하지 않습니다.')
+    else if (await existingManager(automationPort)) console.info(`[dev] 기존 자동화 관리자 사용: http://127.0.0.1:${automationPort}/health`)
     else if (!stopping) automation = launch(path.resolve(toolDir, '../ai-workflow/serve.mjs'), [], false, '자동화 관리자')
   } catch (error) { console.warn('[dev] 자동화 설정 확인 실패. Atelier 개발 서버는 계속 실행합니다.', error.message) }
   let tripo = null

@@ -142,6 +142,11 @@ try {
     const { verifyHolidayLeaveIntegration } = await import('./verify-holiday-leave-integration.mjs')
     await verifyHolidayLeaveIntegration({db,actor,value,create,ops,company,dept,peer})
   }
+  if (process.argv.includes('--workforce-alias')) {
+    assert.ok(['--anniversary','--additional','--fefo','--birthday'].every(flag=>process.argv.includes(flag)))
+    const { verifyExtraLeaveSaveNotice } = await import('./verify-extra-leave-save-notice-cases.mjs')
+    await verifyExtraLeaveSaveNotice({db,actor,value,company,ops})
+  }
 } catch(error) {
   console.error('leave-balance-db 실패:',error.message,{code:error.code,query:error.query})
   process.exitCode=1

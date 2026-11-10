@@ -10,6 +10,7 @@ import { useAuth } from '@/lib/supabase/auth'
 import { koreaDateKey } from '@/features/settings/my-attendance'
 import { LATE_ATTACHMENT_LIMIT, lateAttachmentError, lateConfirmStamp, lateMinutes } from './late-arrival'
 import { useMyClockIn } from './use-my-clock-in'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import './late-arrival-form.css'
 
 type Preview = { date: string; start: string; actual: string; minutes: number; department: string; name: string; position: string }
@@ -292,18 +293,21 @@ export function LateArrivalHeaderButton() {
   const clock = useMyClockIn()
   const today = koreaDateKey()
   const userId = session?.user.id
+  const active = useWorkspaceTabActivity()
   const ready = profile?.status === 'active' && Boolean(userId) && Boolean(clock.todayClock) && isWorkday(today, {})
   const basis = useQuery({
     queryKey: ['my-workday-basis', userId, today, 'late-header'],
     queryFn: () => getMyWorkdayBasis(today),
-    enabled: ready,
+    enabled: ready && active,
+    refetchInterval: ready && active ? 30_000 : false,
   })
   const statements = useQuery({
     queryKey: ['late-arrival-statements', userId, today],
     queryFn: () => listLateArrivalStatements(today, today),
     enabled: ready,
   })
-  const minutes = basis.data?.start ? lateMinutes(basis.data.start, clock.todayClock) : 0
+  const arrivalStart = basis.data?.quarterArrivalSupported ? basis.data.arrivalStart : basis.data?.start
+  const minutes = arrivalStart ? lateMinutes(arrivalStart, clock.todayClock) : 0
   const filed = statements.data?.find(item => item.date === today && item.employeeId === userId)
   const cumulative = useCumulativeLate(userId, today, ready && !basis.isPending && !statements.isPending && Boolean(basis.data?.start) && minutes > 0 && !filed)
   const [open, setOpen] = useState(false)
@@ -324,10 +328,10 @@ export function LateArrivalHeaderButton() {
   useEffect(() => {
     if (statements.error) console.warn('[late-arrival] 오늘 사유서 조회 실패', statements.error)
   }, [statements.error])
-  if (!ready || basis.isPending || statements.isPending || !basis.data?.start || minutes <= 0) return null
+  if (!ready || basis.isPending || basis.error || statements.isPending || !arrivalStart || minutes <= 0) return null
   const preview: Preview = {
     date: today,
-    start: basis.data.start,
+    start: arrivalStart,
     actual: clock.todayClock,
     minutes,
     department: profile?.departmentName || '소속 없음',

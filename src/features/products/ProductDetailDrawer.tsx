@@ -29,6 +29,7 @@ import {
 } from '@/lib/api'
 import { OWNER_LABEL, OWNER_ORDER } from '@/lib/import/fields'
 import { outboundPartnerDisplayName } from '@/lib/codes/outbound-partner'
+import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import {
   isSabangnetCodeField,
   sabangnetCodeByStyleId,
@@ -47,6 +48,7 @@ import {
   ownerCompleteness,
 } from '@/lib/products/style-fields'
 import { StyleCategoryEditor } from '@/features/products/StyleCategoryEditor'
+import { updateStyleName } from '@/lib/supabase/styles'
 import {
   CODE_USAGE_STATUS_LABEL,
   STYLE_STATUS_LABEL,
@@ -168,6 +170,81 @@ function componentSummary(
     .join(' + ')
 }
 
+function ProductNameEditor({ style, canEdit }: { style: Style; canEdit: boolean }) {
+  const queryClient = useQueryClient()
+  const [draft, setDraft] = useState<string | null>(null)
+  const name = (draft ?? style.name).trim()
+  const save = useMutation({
+    mutationFn: async () => {
+      const trace = startWorkflow('app', 'rename_product')
+      trace.step('validate_input')
+      if (!name) {
+        trace.block('empty_name')
+        throw new Error('상품명을 입력하세요.')
+      }
+      trace.step('check_permission')
+      if (!canEdit) {
+        trace.block('permission_denied')
+        throw new Error('상품명을 수정할 권한이 없습니다.')
+      }
+      try {
+        const updated = await trace.run('save', (context) =>
+          updateStyleName(style.id, name, context),
+        )
+        await trace.run('refresh_queries', async () => {
+          queryClient.setQueriesData<Style[]>(
+            { queryKey: ['styles', style.brandId, 'products'] },
+            (styles) =>
+              styles?.map((row) => row.id === style.id ? { ...row, name: updated.name } : row),
+          )
+          await queryClient.invalidateQueries({
+            predicate: ({ queryKey: [domain, scope, brands] }) =>
+              (domain === 'styles' || domain === 'styles-page' || domain === 'styles-sorted') &&
+              (scope === style.brandId || (scope === 'company' && Array.isArray(brands) && brands.includes(style.brandId))),
+          })
+        }, { writeOutcome: 'committed' })
+        trace.done({ writeOutcome: 'committed' })
+      } catch (error) {
+        trace.fail(error)
+        throw error
+      }
+    },
+    onSuccess: () => setDraft(null),
+  })
+
+  return (
+    <form
+      className="space-y-1.5"
+      onSubmit={(event) => {
+        event.preventDefault()
+        if (canEdit && name && name !== style.name && !save.isPending) save.mutate()
+      }}
+    >
+      <label className="block space-y-1.5 text-sm font-medium">
+        <span>상품명</span>
+        <Input
+          value={draft ?? style.name}
+          required
+          disabled={!canEdit || save.isPending}
+          onChange={(event) => {
+            setDraft(event.target.value)
+            save.reset()
+          }}
+        />
+      </label>
+      {canEdit ? (
+        <Button type="submit" size="sm" disabled={!name || name === style.name || save.isPending}>
+          {save.isPending ? '저장 중…' : '상품명 저장'}
+        </Button>
+      ) : null}
+      {save.isError ? (
+        <p role="alert" className="text-sm text-danger">상품명을 저장하지 못했습니다. 다시 시도해 주세요.</p>
+      ) : null}
+      {save.isSuccess ? <p role="status" className="text-sm text-muted-foreground">상품명을 저장했습니다.</p> : null}
+    </form>
+  )
+}
+
 export function ProductDetailDrawer() {
   const brandContext = useOptionalBrand()
   const workspaceActive = useWorkspaceTabActivity()
@@ -196,6 +273,7 @@ export function ProductDetailDrawer() {
   const listQuery = querySuffix ? `?${querySuffix}` : ''
   const productWorkMatch = location.pathname.match(/^(\/product-work\/[^/]+)/)
   const dataSheetMatch = location.pathname.match(/^(\/data\/[^/]+)/)
+  const isDataSheet = Boolean(dataSheetMatch)
   const listPath = location.pathname.startsWith('/products')
     ? '/products'
     : productWorkMatch?.[1] ?? dataSheetMatch?.[1] ?? '/products'
@@ -288,13 +366,13 @@ export function ProductDetailDrawer() {
 
   const fieldsByOwner = useMemo(() => {
     const sorted = [...fields]
-      .filter((f) => f.level !== 'sku')
+      .filter((f) => f.level !== 'sku' && (!isDataSheet || f.systemKey !== 'name'))
       .sort((a, b) => a.order - b.order)
     return OWNER_ORDER.map((owner) => ({
       owner,
       fields: sorted.filter((f) => f.owner === owner),
     })).filter((group) => group.fields.length > 0)
-  }, [fields])
+  }, [fields, isDataSheet])
 
   const linkedCodes = useMemo(() => {
     if (!style) return []
@@ -493,6 +571,16 @@ export function ProductDetailDrawer() {
 
               {tab === 'info' ? (
                 <div className="space-y-6">
+                  {isDataSheet ? (
+                    <ProductNameEditor
+                      key={style.id}
+                      style={style}
+                      canEdit={canWriteProductField(
+                        workAccess.access,
+                        fields.find((field) => field.systemKey === 'name') ?? { owner: 'common' },
+                      )}
+                    />
+                  ) : null}
                   {fieldsByOwner.map(({ owner, fields: ownerFields }) => (
                     <section key={owner} className="space-y-3">
                       <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">

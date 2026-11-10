@@ -102,10 +102,10 @@ function HeadOfficeAttendanceSummary() {
   const basisRow = basis.data
   const lunchHours = lunch.data
   const summary = useMemo(() => ({
-    late: basisRow ? countMyLateDays(clock.rows.filter(row => row.date.startsWith(month)), basisRow.start, basisRow.grace, today, requests) : null,
+    late: basisRow && lunchHours && !leaves.error && !lunch.error ? countMyLateDays(clock.rows.filter(row => row.date.startsWith(month)), basisRow.start, basisRow.grace, today, requests, lunchHours) : null,
     overtime: actuals.ready ? actualOvertimeHours(clock.rows, requests, lunchHours?.start ?? '', lunchHours?.end ?? '', month, today, basisRow?.start ?? '', actuals.rows) : null,
-  }), [basisRow, clock.rows, month, today, requests, lunchHours, actuals.ready, actuals.rows])
-  const lateLoading = !clock.exempt && (clock.loading || (allowed && (basis.isPending || leaves.isPending)))
+  }), [basisRow, clock.rows, month, today, requests, lunchHours, leaves.error, lunch.error, actuals.ready, actuals.rows])
+  const lateLoading = !clock.exempt && (clock.loading || (allowed && (basis.isPending || leaves.isPending || lunch.isPending)))
   const leaveLoading = allowed && basis.isPending
   const overtimeLoading = allowed && (leaves.isPending || actuals.isPending)
   const overtimeError = Boolean(leaves.error || actuals.error)
@@ -113,7 +113,7 @@ function HeadOfficeAttendanceSummary() {
   return <details className="home-attendance-summary">
     <summary><h2>내 근태 현황</h2></summary>
     <dl>
-      <div><dt>이번 달 지각</dt><dd>{clock.exempt ? '제외' : lateLoading ? '…' : basis.isError || leaves.isError ? '조회 실패' : summary.late == null ? '기준 미설정' : amount(summary.late, '회')}</dd></div>
+      <div><dt>이번 달 지각</dt><dd>{clock.exempt ? '제외' : lateLoading ? '…' : basis.isError || leaves.isError || lunch.isError ? '조회 실패' : summary.late == null ? '기준 미설정' : amount(summary.late, '회')}</dd></div>
       <div><dt>남은 연차</dt><dd className={basisRow?.additionalAnnualLeave != null && basisRow.additionalAnnualLeave > 0 ? 'is-split' : undefined}>{leaveLoading ? '…' : basis.isError ? '조회 실패' : basisRow?.additionalAnnualLeave != null && basisRow.additionalAnnualLeave > 0 && basisRow.baseAnnualLeave != null ? <AdditionalLeaveHistory userId={userId}>{remainingLeaveAmount(basisRow.baseAnnualLeave, basisRow.additionalAnnualLeave, basisRow.remainingAnnualLeave)}</AdditionalLeaveHistory> : remainingLeaveAmount(basisRow?.baseAnnualLeave, basisRow?.additionalAnnualLeave, basisRow?.remainingAnnualLeave ?? null)}</dd></div>
       <div><dt>이번 달 야근</dt><dd>{overtimeError ? '조회 실패' : overtimeLoading ? '…' : summary.overtime == null ? '실제 시간 연결 대기' : amount(summary.overtime, '시간')}</dd></div>
     </dl>

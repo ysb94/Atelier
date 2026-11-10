@@ -49,7 +49,7 @@ const WAREHOUSE_VIEWS: {
     label: 'QR 생성',
     description: '렉·고정 자리 라벨을 인쇄하고 엑셀을 만듭니다',
     detail:
-      '출고창고 렉 번호와 렉 안의 A1~D4 고정 자리를 A4 4칸 라벨로 인쇄합니다. 고정 자리는 아이라벨용 엑셀도 내려받을 수 있습니다.',
+      '박스창고 자리번호, 출고창고 렉 번호와 렉 안의 A1~D4 고정 자리를 A4 4칸 라벨로 인쇄합니다. 고정 자리는 아이라벨용 엑셀도 내려받을 수 있습니다.',
     icon: QrCode,
   },
 ]
@@ -187,7 +187,7 @@ export function WarehousePage() {
         </CardHeader>
         <CardContent>
           {activeView === 'qr' ? (
-            <WarehouseQrPanel brandName={brand.name} />
+            <WarehouseQrPanel brandName={brand.name} brandId={brand.id} />
           ) : activePanel === 'slots' ? (
             <WarehouseSlotSettingsPanel
               brandId={brand.id}

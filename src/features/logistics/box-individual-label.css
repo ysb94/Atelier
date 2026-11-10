@@ -1,0 +1,5 @@
+.box-roll-label{box-sizing:border-box;width:60mm;height:40mm;padding:1mm;display:grid;grid-template-rows:33mm 5mm;justify-items:end;background:#fff;color:#000;font-family:Arial,"Malgun Gothic",sans-serif;break-inside:avoid;break-after:page;page-break-after:always;overflow:hidden}
+.box-roll-label:last-child{break-after:auto;page-break-after:auto}
+.box-roll-label img{display:block;width:33mm;height:33mm;object-fit:contain}
+.box-roll-code{display:block;align-self:center;justify-self:center;width:56mm;font-family:Consolas,"Courier New","Malgun Gothic",monospace;font-size:min(13pt,calc(56mm / var(--roll-code-units,32)));font-weight:700;text-align:center;line-height:1;white-space:pre}
+.box-roll-print-frame{position:fixed;width:1px;height:1px;bottom:0;left:0;border:0;opacity:0;pointer-events:none}
