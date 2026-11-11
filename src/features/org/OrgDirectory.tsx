@@ -1,5 +1,8 @@
-import { useMemo, useRef, useState } from 'react'
-import { ArrowUpRight, Building2, ChevronLeft, ChevronRight, LayoutGrid, List, Search, Users, X } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { ArrowUpRight, Building2, ChevronLeft, ChevronRight, LayoutGrid, List, Printer, Search, Users, X } from 'lucide-react'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { Button } from '@/components/ui/button'
 import type { OrgChartMember } from '@/lib/supabase/profiles'
 import { personInitials } from '@/lib/company/person-name'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -17,11 +20,46 @@ function departmentPriority(team: DirectoryTeam) {
 }
 const displayName = (member: OrgChartMember) => member.displayName?.trim() || '이름 없음'
 
+function OrgDirectoryPrint({ teams, people, departments }: { teams: DirectoryTeam[]; people: number; departments: number }) {
+  return (
+    <article className="org-directory-print" aria-hidden="true">
+      <header className="org-print-header">
+        <h1>E&J 조직도</h1>
+        <p>부서 {formatNumber(departments)}개 · 직원 {formatNumber(people)}명</p>
+      </header>
+      <div className="org-print-teams">
+        {teams.map(team => (
+          <section key={team.id} className="org-print-team">
+            <header>
+              <h2>{team.name}</h2>
+              <span>{formatNumber(team.members.length)}명</span>
+            </header>
+            {team.members.length ? (
+              <ul>
+                {team.members.map(member => {
+                  const titles = [member.position, member.jobGrade].map(title => title?.trim()).filter(Boolean)
+                  return (
+                    <li key={member.id}>
+                      <strong>{displayName(member)}</strong>
+                      {titles.length > 0 && <span>{[...new Set(titles)].join(' · ')}</span>}
+                    </li>
+                  )
+                })}
+              </ul>
+            ) : <p className="org-print-empty">등록 직원 없음</p>}
+          </section>
+        ))}
+      </div>
+    </article>
+  )
+}
+
 export function OrgDirectory({ teams: sourceTeams, loading, failed, titlesFailed, onRetry, onRetryTitles }: {
   teams: DirectoryTeam[]; loading: boolean; failed: boolean; titlesFailed: boolean
   onRetry: () => void; onRetryTitles: () => void
 }) {
   useRenderWatch('OrgDirectory')
+  const active = useWorkspaceTabActivity()
   const teams = useMemo(() => [...sourceTeams].sort((a, b) =>
     departmentPriority(a) - departmentPriority(b) || a.name.localeCompare(b.name, 'ko'),
   ), [sourceTeams])
@@ -45,6 +83,8 @@ export function OrgDirectory({ teams: sourceTeams, loading, failed, titlesFailed
   const [view, setView] = useState<'teams' | 'people'>('teams')
   const [sort, setSort] = useState<'department' | 'name'>('department')
   const [page, setPage] = useState(1)
+  const [printing, setPrinting] = useState(false)
+  const [printError, setPrintError] = useState(false)
   const resultsRef = useRef<HTMLElement>(null)
   const needle = search.trim().toLocaleLowerCase('ko')
   const totals = useMemo(() => ({
@@ -76,6 +116,35 @@ export function OrgDirectory({ teams: sourceTeams, loading, failed, titlesFailed
   const departmentCount = filteredTeams.filter(team => team.id !== 'unassigned').length
   const filtered = Boolean(needle) || departmentId !== 'all'
   const unavailable = loading || failed
+  const canPrint = active && !unavailable && teams.length > 0
+
+  useEffect(() => {
+    if (!active) return
+    const afterPrint = () => {
+      document.documentElement.classList.remove('printing-org-directory')
+      setPrinting(false)
+    }
+    window.addEventListener('afterprint', afterPrint)
+    return () => {
+      window.removeEventListener('afterprint', afterPrint)
+      document.documentElement.classList.remove('printing-org-directory')
+    }
+  }, [active])
+
+  function printDirectory() {
+    if (!canPrint || printing) return
+    setPrinting(true)
+    setPrintError(false)
+    document.documentElement.classList.add('printing-org-directory')
+    try {
+      window.print()
+    } catch (error) {
+      document.documentElement.classList.remove('printing-org-directory')
+      setPrinting(false)
+      setPrintError(true)
+      console.warn('[org-directory] 조직도 인쇄 실패', { errorType: error instanceof Error ? error.name : 'unknown' })
+    }
+  }
 
   function selectDepartment(id: string) {
     setDepartmentId(id)
@@ -93,7 +162,12 @@ export function OrgDirectory({ teams: sourceTeams, loading, failed, titlesFailed
   return <div className="org-directory">
     <header className="org-directory-heading">
       <div><span className="org-directory-eyebrow">E&J · ORGANIZATION</span><h1>조직도</h1><p>부서에서 팀을 찾고, 이름으로 동료를 찾아보세요.</p></div>
-      <span className="org-directory-company"><Building2 size={16} />E&J<span>회사 공통 조직</span></span>
+      <div className="org-directory-heading-actions">
+        <span className="org-directory-company"><Building2 size={16} />E&J<span>회사 공통 조직</span></span>
+        <Button type="button" variant="outline" size="sm" disabled={!canPrint || printing} onClick={printDirectory}>
+          <Printer aria-hidden="true" className="size-4" /> 조직도 인쇄
+        </Button>
+      </div>
     </header>
 
     <div className="org-directory-summary" aria-label="등록된 조직 현황">
@@ -103,6 +177,7 @@ export function OrgDirectory({ teams: sourceTeams, loading, failed, titlesFailed
       <p>등록된 직원 기준입니다.{!unavailable && totals.empty > 0 && <span>직원 배치 전인 부서 {formatNumber(totals.empty)}개</span>}</p>
     </div>
 
+    {printError && <div className="org-directory-notice" role="alert">인쇄 창을 열지 못했습니다. 다시 시도해 주세요.</div>}
     {failed && <div className="org-directory-notice" role="alert"><span>조직 정보를 불러오지 못했습니다.</span><button type="button" onClick={onRetry}>다시 불러오기</button></div>}
     {titlesFailed && <div className="org-directory-notice" role="alert"><span>직책·직급의 정렬 순서를 불러오지 못했습니다.</span><button type="button" onClick={onRetryTitles}>다시 불러오기</button></div>}
     {approvals.error && <div className="org-directory-notice" role="alert"><span>부서별 승인자를 불러오지 못했습니다.</span><button type="button" onClick={() => void approvals.refresh()}>승인자 다시 불러오기</button></div>}
@@ -142,6 +217,10 @@ export function OrgDirectory({ teams: sourceTeams, loading, failed, titlesFailed
         {!unavailable && view === 'people' && itemCount > 0 && <nav className="org-directory-pagination" aria-label="조직도 페이지 이동"><span>{formatNumber(offset + 1)}–{formatNumber(Math.min(offset + pageSize, itemCount))} / {formatNumber(itemCount)}명</span><div><button type="button" aria-label="이전 페이지" disabled={currentPage === 1} onClick={() => changePage(currentPage - 1)}><ChevronLeft size={16} /></button><span>{currentPage} / {pageCount}</span><button type="button" aria-label="다음 페이지" disabled={currentPage === pageCount} onClick={() => changePage(currentPage + 1)}><ChevronRight size={16} /></button></div></nav>}
       </section>
     </div>
+    {canPrint && createPortal(
+      <OrgDirectoryPrint teams={teams} people={totals.people} departments={totals.departments} />,
+      document.body,
+    )}
   </div>
 }
 
