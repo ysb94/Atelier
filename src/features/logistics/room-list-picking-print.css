@@ -3,8 +3,36 @@
 }
 
 .room-list-picking-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 4mm;
   width: 194mm;
   margin-inline: auto;
+}
+
+.room-list-picking-measure {
+  position: fixed;
+  inset: 0 auto auto 0;
+  visibility: hidden;
+  pointer-events: none;
+  /* A4 content height is 275mm. Leave 1mm for print rounding. */
+  height: 274mm;
+}
+
+.room-list-picking-section {
+  flex: none;
+}
+
+.room-list-picking-section > header {
+  border-bottom: .75pt solid rgb(0 0 0 / 45%);
+  padding-bottom: 1mm;
+  color: black;
+}
+
+.room-list-picking-section > header > p {
+  width: 44mm;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .room-list-picking-columns {
@@ -48,6 +76,7 @@
 }
 
 .room-list-picking-sheet .room-list-picking-table thead {
+  position: static;
   color: black;
   background: rgb(0 0 0 / 7%);
 }
@@ -76,14 +105,7 @@
     break-before: page;
   }
 
-  .room-list-picking-print .room-list-picking-sheet {
-    width: 100%;
-  }
-
-  .room-list-picking-print .room-list-picking-table thead {
-    position: static;
-  }
-
+  .room-list-picking-print .room-list-picking-section,
   .room-list-picking-print .room-list-picking-table tr {
     break-inside: avoid;
   }

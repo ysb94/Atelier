@@ -98,12 +98,12 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
     }
     return grouped
   }, [locationsReady, roomGroups, styleNumbers, visibleRows])
-  const roomTabs = [...rooms.values()].sort((a, b) =>
+  const roomTabs = useMemo(() => [...rooms.values()].sort((a, b) =>
     Number(b.key === 'missing') - Number(a.key === 'missing') || ROOM_ORDER.compare(a.name, b.name),
-  )
+  ), [rooms])
   const selectedRoom = room ?? roomTabs.find(item => item.key !== 'missing')?.key ?? roomTabs[0]?.key
   const currentRoom = selectedRoom ? rooms.get(selectedRoom) : undefined
-  const printRooms = currentRoom ? [currentRoom] : roomTabs
+  const printRooms = useMemo(() => room && currentRoom ? [currentRoom] : roomTabs, [room, currentRoom, roomTabs])
   const locationColumnCount = visibleRows.reduce(
     (count, { matches }) => Math.max(count, matches?.length ?? 0), 1,
   )
@@ -205,7 +205,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
             onClick={() => setShowGroups(current => !current)}>방 묶기</Button>
           <Button type="button" variant="outline" size="sm" disabled={!printRooms.length}
             onClick={() => setPreviewOpen(true)}>
-            <Printer aria-hidden="true" className="size-4" /> 미리보기 및 출력
+            <Printer aria-hidden="true" className="size-4" /> {printRooms.length > 1 ? '전체 방 미리보기 및 출력' : '미리보기 및 출력'}
           </Button>
         </div>
       </div>
