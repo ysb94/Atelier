@@ -72,6 +72,7 @@ const NAV_LABELS: {
     label: '물류 · 임시 창고관리',
   },
   { match: /^\/logistics\/cargo-inbound(?:\/|$)/, label: '물류 · 화물 입고' },
+  { match: /^\/logistics\/room-list(?:\/|$)/, label: '물류 · 방별리스트' },
   { match: /^\/barcodes(?:\/|$)/, label: '88바코드 관리' },
   { match: /^\/sabangnet-codes(?:\/|$)/, label: '사방넷 코드 관리' },
   { match: /^\/usage-codes(?:\/|$)/, label: '업체별 코드 관리' },

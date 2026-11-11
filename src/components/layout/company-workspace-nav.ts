@@ -133,6 +133,7 @@ export const companyNavGroups: CompanyNavGroup[] = [
         icon: FlaskConical,
       },
       { to: '/logistics/cargo-inbound', label: '화물 입고', icon: PackagePlus },
+      { to: '/logistics/room-list', label: '방별리스트', icon: ListChecks },
     ],
   },
   {

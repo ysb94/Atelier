@@ -30,6 +30,7 @@ export const RELEASE_LOGISTICS_PAGES = [
   '/product-work/logistics', '/work-requests/logistics', '/logistics/invoices',
   '/logistics/barcode-outbound-data-entry', '/logistics/bulk-outbound', '/logistics/finder',
   '/logistics/warehouses', '/logistics/temporary-warehouse', '/logistics/cargo-inbound',
+  '/logistics/room-list',
 ] as const
 
 export function releaseAccess(profile: ReleaseProfile | null | undefined) {

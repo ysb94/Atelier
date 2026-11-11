@@ -36,6 +36,7 @@ import { CompanyOutboundDataPage } from '@/features/logistics/OutboundDataPage'
 import { CompanyWarehousePage } from '@/features/logistics/WarehousePage'
 import { CompanyWarehouseFinderPage } from '@/features/logistics/WarehouseFinderPage'
 import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
+import { RoomListPage } from '@/features/logistics/RoomListPage'
 import { CompanyTemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
 import { OperationsSupportPage } from '@/features/operations-support/OperationsSupportPage'
 import { LogisticsOperationsPage } from '@/features/logistics/operations/LogisticsOperationsPage'
@@ -193,6 +194,7 @@ export const companyWorkspaceRoutes = (
         path="logistics/cargo-inbound"
         element={<CompanyCargoInboundPage />}
       />
+      <Route path="logistics/room-list" element={<RoomListPage />} />
       <Route path="data" element={<RedirectTo to="/data/all" />} />
       <Route
         path="data/upload"
