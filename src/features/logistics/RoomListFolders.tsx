@@ -145,6 +145,17 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
       : '수정할 폴더를 불러오지 못했습니다. 다시 시도해 주세요.'
     : null
 
+  function selectFolders(targets: WarehouseRoomListFolder[], checked: boolean) {
+    setSelected(current => {
+      const next = new Set(current)
+      for (const folder of targets) {
+        if (checked) next.add(folder.id)
+        else next.delete(folder.id)
+      }
+      return next
+    })
+  }
+
   function closeDraft() {
     setDraft(null)
     setValidationError(null)
@@ -276,17 +287,28 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
               const isToday = date === today
               const expanded = expandedDates[date] ?? isToday
               const Chevron = expanded ? ChevronDown : ChevronRight
+              const selectedCount = group.filter(folder => selected.has(folder.id)).length
               return (
                 <section key={date} className="border-t-2 border-border pt-2">
-                  <h2>
-                    <Button type="button" variant="ghost" aria-expanded={expanded}
-                      className="h-auto w-full justify-start gap-2 rounded-lg bg-muted/60 px-3 py-2.5"
-                      onClick={() => setExpandedDates(current => ({ ...current, [date]: !expanded }))}>
-                      <Chevron aria-hidden="true" className="size-4" />
-                      <span className="font-semibold">{date}{isToday ? ' · 오늘' : ''}</span>
-                      <span className="ml-auto text-xs text-muted-foreground">폴더 {group.length.toLocaleString('ko-KR')}개</span>
-                    </Button>
-                  </h2>
+                  <div className="flex items-stretch rounded-lg bg-muted/60">
+                    <h2 className="min-w-0 flex-1">
+                      <Button type="button" variant="ghost" aria-expanded={expanded}
+                        className="h-auto w-full justify-start gap-2 whitespace-normal rounded-r-none px-3 py-2.5 text-left"
+                        onClick={() => setExpandedDates(current => ({ ...current, [date]: !expanded }))}>
+                        <Chevron aria-hidden="true" className="size-4 shrink-0" />
+                        <span className="font-semibold">{date}{isToday ? ' · 오늘' : ''}</span>
+                        <span className="ml-auto shrink-0 text-xs text-muted-foreground">폴더 {group.length.toLocaleString('ko-KR')}개</span>
+                      </Button>
+                    </h2>
+                    <label className="flex shrink-0 cursor-pointer items-center gap-2 border-l border-border px-3 text-xs">
+                      <input type="checkbox" className="size-4 shrink-0 accent-primary"
+                        aria-label={`${date} 폴더 전체 선택`} disabled={open.isPending}
+                        checked={selectedCount === group.length}
+                        ref={input => { if (input) input.indeterminate = selectedCount > 0 && selectedCount < group.length }}
+                        onChange={event => selectFolders(group, event.target.checked)} />
+                      전체 선택
+                    </label>
+                  </div>
                   {expanded && (
                     <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                       {group.map(folder => (
@@ -294,15 +316,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
                           <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 p-4">
                             <input type="checkbox" className="mt-1 size-4 shrink-0 accent-primary" checked={selected.has(folder.id)}
                               aria-label={`${folder.title} 선택`} disabled={open.isPending}
-                              onChange={event => {
-                                const checked = event.target.checked
-                                setSelected(current => {
-                                  const next = new Set(current)
-                                  if (checked) next.add(folder.id)
-                                  else next.delete(folder.id)
-                                  return next
-                                })
-                              }} />
+                              onChange={event => selectFolders([folder], event.target.checked)} />
                             <Folder aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" />
                             <div className="min-w-0">
                               <div className="break-words font-medium">{folder.title}</div>
