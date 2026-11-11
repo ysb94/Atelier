@@ -17,7 +17,7 @@ function combineSets(results: UseQueryResult<WarehouseInventorySet | null>[]) {
 }
 
 export function useRoomListWarehouseLocations(hasNames: boolean) {
-  const { selectedBrands, brandById, loading, error } = useCompanyBrandScope()
+  const { selectedBrands, loading, error } = useCompanyBrandScope()
   const enabled = useWorkspaceTabActivity() && hasNames
   const cache = useQueryClient()
   const sets = useQueries({
@@ -52,8 +52,6 @@ export function useRoomListWarehouseLocations(hasNames: boolean) {
 
   return {
     locations,
-    brandById,
-    multipleBrands: selectedBrands.length > 1,
     loading: loading || sets.loading || stock.loading,
     error: error || sets.error || stock.errorIndexes.length > 0,
     refresh: () => Promise.all([
