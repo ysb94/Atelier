@@ -39,7 +39,7 @@ function doPost(e) {
         result.textContent = '저장 중…';
         google.script.run.withSuccessHandler(saved => {
           result.textContent = '창고입력 ' + saved.row + '행에 저장했습니다.' +
-            (saved.issued ? ' AA 발급 완료.' : ' AA 발급을 확인해 주세요.');
+            ({ preserved: ' 기존 AA 유지.', issued: ' AA 발급 완료.', missing: ' AA 발급을 확인해 주세요.' })[saved.aaStatus];
         }).withFailureHandler(error => {
           result.textContent = error.message;
         }).saveAtelierWarehouseTestRow(JSON.parse(button.dataset.input));

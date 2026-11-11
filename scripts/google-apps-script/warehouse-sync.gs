@@ -146,9 +146,6 @@ function onEdit_AssignDocId_v2(e) { return __docid_mod.onEdit_core(e); }
 if (typeof onOpen === 'undefined') {
   function onOpen() {
     try { onOpen_DocIdMenu_v2(); } catch(_) {}
-    SpreadsheetApp.getUi().createMenu('창고 테스트')
-      .addItem('한 건 입력', 'openAtelierWarehouseTestForm')
-      .addToUi();
     try { onOpen_wpsRunnerMenu(); } catch(_) {}
   }
 }
