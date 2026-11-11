@@ -19,6 +19,9 @@ verify_jwt = true
 [functions.warehouse-sheet-sync]
 verify_jwt = false
 
+[functions.warehouse-fixed-locations]
+verify_jwt = true
+
 [functions.extract-label-from-image]
 verify_jwt = true
 

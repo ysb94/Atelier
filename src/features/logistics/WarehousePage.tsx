@@ -15,6 +15,7 @@ import {
 import { useRenderWatch } from '@/lib/diagnostics'
 import { cn } from '@/lib/utils'
 import { WarehouseInventoryPanel } from './WarehouseInventoryPanel'
+import { WarehouseFixedLocationsPanel } from './WarehouseFixedLocationsPanel'
 import { WarehouseQrPanel } from './WarehouseQrPanel'
 import { WarehouseSlotSettingsPanel } from './WarehouseSlotSettingsPanel'
 
@@ -197,9 +198,7 @@ export function WarehousePage() {
           {activeView === 'qr' ? (
             <WarehouseQrPanel brandName={brand.name} brandId={brand.id} />
           ) : activeView === 'fixed' ? (
-            <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-              표시할 고정 자리가 없습니다.
-            </p>
+            <WarehouseFixedLocationsPanel key={brand.id} brandId={brand.id} />
           ) : activePanel === 'slots' ? (
             <WarehouseSlotSettingsPanel
               brandId={brand.id}
