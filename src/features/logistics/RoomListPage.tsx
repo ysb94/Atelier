@@ -113,7 +113,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
         const { key, name } = roomForLocation(line.location)
         const section = sections.get(key)
         if (section) section.lines.push(line)
-        else sections.set(key, { key, name: `${group.name} · ${name}`, lines: [line] })
+        else sections.set(key, { key, name, lines: [line] })
       }
       return [...sections.values()]
     })
