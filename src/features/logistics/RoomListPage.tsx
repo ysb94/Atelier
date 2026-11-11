@@ -15,12 +15,29 @@ export function RoomListPage() {
   useRenderWatch('RoomListPage')
   const [rows, setRows] = useState<RoomListRow[]>(() => Array.from({ length: MIN_ROWS }, emptyRoomListRow))
   const [feedback, setFeedback] = useState<{ message: string; error?: boolean } | null>(null)
+  const [editingName, setEditingName] = useState<{ sourceIndex: number; name: string } | null>(null)
   const hasNames = rows.some(([name]) => Boolean(name.trim()))
   const warehouse = useRoomListWarehouseLocations(hasNames)
   const locationCodes = useMemo(() => new Map(Array.from(warehouse.locations, ([name, positions]) =>
     [name, [...new Set(positions.map(position => position.locationCode.trim()))]])), [warehouse.locations])
-  const locationColumnCount = warehouse.error || warehouse.loading ? 1 : rows.reduce(
-    (count, [name]) => Math.max(count, locationCodes.get(roomListProductName(name))?.length ?? 0), 1,
+  const locationsReady = !warehouse.error && !warehouse.loading
+  const visibleRows = useMemo(() => {
+    const priority = []
+    const regular = []
+    for (const [sourceIndex, row] of rows.entries()) {
+      const name = roomListProductName(row[0])
+      const matches = locationCodes.get(name)
+      const item = { sourceIndex, row, name, matches }
+      // 입력 중인 행은 상품명 칸에서 벗어난 뒤 위치 순서를 갱신한다.
+      const sortName = editingName?.sourceIndex === sourceIndex ? editingName.name : name
+      const firstLocation = locationCodes.get(sortName)?.[0]
+      if (locationsReady && sortName && (!firstLocation || firstLocation === '0-0-0')) priority.push(item)
+      else regular.push(item)
+    }
+    return [...priority, ...regular]
+  }, [rows, locationCodes, locationsReady, editingName])
+  const locationColumnCount = !locationsReady ? 1 : visibleRows.reduce(
+    (count, { matches }) => Math.max(count, matches?.length ?? 0), 1,
   )
   const locationColumns = Array.from({ length: locationColumnCount }, (_, index) => index)
 
@@ -56,7 +73,7 @@ export function RoomListPage() {
       return
     }
 
-    const updated = rows.slice()
+    const updated = visibleRows.map(item => item.row)
     while (updated.length < rowIndex + pasted.length) updated.push(emptyRoomListRow())
     pasted.forEach((values, offset) => {
       const row: RoomListRow = [...updated[rowIndex + offset]]
@@ -74,6 +91,7 @@ export function RoomListPage() {
       return
     }
     while (result.rows.length < MIN_ROWS) result.rows.push(emptyRoomListRow())
+    setEditingName(null)
     setRows(result.rows)
     setFeedback({
       message: result.duplicates
@@ -113,11 +131,8 @@ export function RoomListPage() {
               </tr>
             </thead>
             <tbody>
-              {rows.map((row, rowIndex) => {
-                const name = roomListProductName(row[0])
-                const matches = locationCodes.get(name)
-                return (
-                  <tr key={rowIndex}>
+              {visibleRows.map(({ row, sourceIndex, name, matches }, rowIndex) => (
+                  <tr key={sourceIndex}>
                     <th scope="row" className="border-b border-r border-border bg-muted/50 px-2 text-center font-normal tabular-nums text-muted-foreground">{rowIndex + 1}</th>
                     {COLUMNS.map((label, column) => (
                       <td key={label} className="border-b border-r border-border p-0 align-top">
@@ -127,7 +142,11 @@ export function RoomListPage() {
                           inputMode={column === 1 ? 'numeric' : undefined}
                           className={`rounded-none border-0 bg-transparent shadow-none focus-visible:bg-card focus-visible:ring-inset ${column === 1 ? 'text-right tabular-nums' : ''}`}
                           value={row[column]}
-                          onChange={event => changeCell(rowIndex, column, event.target.value)}
+                          onBlur={column === 0 ? () => setEditingName(null) : undefined}
+                          onChange={event => {
+                            if (column === 0 && editingName?.sourceIndex !== sourceIndex) setEditingName({ sourceIndex, name })
+                            changeCell(sourceIndex, column, event.target.value)
+                          }}
                           onPaste={event => pasteCells(event, rowIndex, column)}
                           onKeyDown={event => {
                             if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
@@ -148,8 +167,7 @@ export function RoomListPage() {
                       </td>
                     ))}
                   </tr>
-                )
-              })}
+              ))}
             </tbody>
           </table>
         </div>
