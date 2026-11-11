@@ -20,6 +20,8 @@ import { loadRoomGroups, roomForLocation, roomListArea, saveRoomGroups, type Roo
 const COLUMNS = ['상품명', '수량'] as const
 const MIN_ROWS = 8
 const ROOM_ORDER = new Intl.Collator('ko-KR', { numeric: true })
+const ROOM_AREAS = ['1층', '2층', '파우치', '그 외'] as const
+type RoomArea = typeof ROOM_AREAS[number]
 
 export function RoomListPage() {
   useRenderWatch('RoomListPage')
@@ -50,7 +52,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
   const [roomGroups, setRoomGroups] = useState(() => loadRoomGroups(userId))
   const [room, setRoom] = useState<string | null>(null)
   const [showGroups, setShowGroups] = useState(false)
-  const [previewOpen, setPreviewOpen] = useState(false)
+  const [printScope, setPrintScope] = useState<'selection' | RoomArea | null>(null)
   const [roomSaveFailed, setRoomSaveFailed] = useState(false)
   const hasNames = rows.some(([name]) => Boolean(name.trim()))
   const warehouse = useRoomListWarehouseLocations(hasNames)
@@ -104,7 +106,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
     Number(b.key === 'missing') - Number(a.key === 'missing') || ROOM_ORDER.compare(a.name, b.name),
   ), [rooms])
   const roomTabsByArea = useMemo(() => {
-    const tabs: Record<ReturnType<typeof roomListArea>, FilterTab<string>[]> = { '1층': [], '2층': [], 파우치: [], '그 외': [] }
+    const tabs: Record<RoomArea, FilterTab<string>[]> = { '1층': [], '2층': [], 파우치: [], '그 외': [] }
     for (const group of roomTabs) {
       const area = roomListArea(group.lines[0]?.location, groupsByPrefix)
       const total = sumRoomListQuantities(group.lines.map(line => line.quantity))
@@ -121,7 +123,11 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
   const selectedTab = currentRoom?.key ?? 'all'
   const selectedPrintRoom = room ? currentRoom : undefined
   const printRooms = useMemo(() => {
-    const selected = selectedPrintRoom ? [selectedPrintRoom] : roomTabs
+    if (!printScope) return []
+    const currentSelection = selectedPrintRoom ? [selectedPrintRoom] : roomTabs
+    const selected = printScope === 'selection'
+      ? currentSelection
+      : roomTabsByArea[printScope].flatMap(tab => rooms.get(tab.value) ?? [])
     return selected.flatMap(group => {
       if (!group.key.startsWith('group:')) return [group]
       const sections = new Map<string, RoomPickingRoom>()
@@ -133,7 +139,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       }
       return [...sections.values()]
     })
-  }, [selectedPrintRoom, roomTabs])
+  }, [printScope, roomTabs, roomTabsByArea, rooms, selectedPrintRoom])
   const locationColumnCount = visibleRows.reduce(
     (count, { matches }) => Math.max(count, matches?.length ?? 0), 1,
   )
@@ -227,8 +233,8 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" aria-expanded={showGroups}
             onClick={() => setShowGroups(current => !current)}>방 묶기</Button>
-          <Button type="button" variant="outline" size="sm" disabled={!printRooms.length}
-            onClick={() => setPreviewOpen(true)}>
+          <Button type="button" variant="outline" size="sm" disabled={!roomTabs.length}
+            onClick={() => setPrintScope('selection')}>
             <Printer aria-hidden="true" className="size-4" /> {!selectedPrintRoom && roomTabs.length > 1 ? '전체 방 미리보기 및 출력' : '미리보기 및 출력'}
           </Button>
         </div>
@@ -237,15 +243,24 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       {roomSaveFailed && <p role="status" className="mb-3 text-sm text-muted-foreground">방 묶음을 이 브라우저에 저장하지 못했습니다. 현재 화면에만 적용됩니다.</p>}
       {roomTabs.length > 0 && (
         <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
-          {Object.entries(roomTabsByArea).map(([area, tabs]) => (
-            <Card key={area} className="min-w-0 space-y-2 p-3">
-              <h2 className="text-sm font-semibold">{area}</h2>
-              {tabs.length ? (
-                <FilterTabs ariaLabel={`${area} 방`} value={selectedTab} onChange={setRoom} tabs={tabs}
-                  tabInteraction={() => ({ className: 'max-w-full wrap-anywhere' })} />
-              ) : <p className="text-sm text-muted-foreground">해당 방 없음</p>}
-            </Card>
-          ))}
+          {ROOM_AREAS.map(area => {
+            const tabs = roomTabsByArea[area]
+            return (
+              <Card key={area} className="min-w-0 space-y-2 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <h2 className="text-sm font-semibold">{area}</h2>
+                  <Button type="button" variant="outline" size="sm" disabled={!tabs.length}
+                    aria-label={`${area} 미리보기 및 출력`} onClick={() => setPrintScope(area)}>
+                    <Printer aria-hidden="true" className="size-4" /> 미리보기 및 출력
+                  </Button>
+                </div>
+                {tabs.length ? (
+                  <FilterTabs ariaLabel={`${area} 방`} value={selectedTab} onChange={setRoom} tabs={tabs}
+                    tabInteraction={() => ({ className: 'max-w-full wrap-anywhere' })} />
+                ) : <p className="text-sm text-muted-foreground">해당 방 없음</p>}
+              </Card>
+            )
+          })}
         </div>
       )}
       {currentRoom ? <RoomListPickingPanel room={currentRoom} /> : <Card className="overflow-hidden">
@@ -313,8 +328,10 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
           <p role="status" className={feedback?.error ? 'text-sm text-danger' : 'text-sm text-muted-foreground'}>{feedback?.message}</p>
         </div>
       </Card>}
-      {previewOpen && printRooms.length > 0 && (
-        <RoomListPickingPrintPreview rooms={printRooms} onClose={() => setPreviewOpen(false)} />
+      {printScope && printRooms.length > 0 && (
+        <RoomListPickingPrintPreview rooms={printRooms}
+          title={printScope === 'selection' ? undefined : `${printScope} 피킹표 미리보기 및 출력`}
+          onClose={() => setPrintScope(null)} />
       )}
     </>
   )

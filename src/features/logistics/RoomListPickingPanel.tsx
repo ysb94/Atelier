@@ -173,7 +173,9 @@ function PickingSheet({ sections, columns, codes }: {
   )
 }
 
-export function RoomListPickingPrintPreview({ rooms, onClose }: { rooms: RoomPickingRoom[]; onClose: () => void }) {
+export function RoomListPickingPrintPreview({ rooms, onClose, title = '피킹표 미리보기 및 출력' }: {
+  rooms: RoomPickingRoom[]; onClose: () => void; title?: string
+}) {
   useRenderWatch('RoomListPickingPrintPreview')
   const active = useWorkspaceTabActivity()
   const [columns, setColumns] = useState<PickingPrintColumns>('2')
@@ -229,7 +231,7 @@ export function RoomListPickingPrintPreview({ rooms, onClose }: { rooms: RoomPic
         onCancel={event => { event.preventDefault(); onClose() }}>
         <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-3">
           <div>
-            <h2 id="room-picking-preview-title" className="font-semibold">피킹표 미리보기 및 출력</h2>
+            <h2 id="room-picking-preview-title" className="font-semibold">{title}</h2>
             <p className="text-xs text-muted-foreground">
               {pages ? `A4 세로 · ${formatNumber(pageCount)}장` : '인쇄 페이지를 정리하고 있습니다…'}
             </p>
