@@ -7,12 +7,17 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
-import { useRenderWatch } from '@/lib/diagnostics'
+import { startWorkflow, useRenderWatch } from '@/lib/diagnostics'
+import { diagnosticError } from '@/lib/diagnostics/workflow-trace'
 import {
   createWarehouseRoomListFolder,
   listWarehouseRoomListFolders,
+  readWarehouseRoomListFolderForEdit,
   readWarehouseRoomListItems,
+  updateWarehouseRoomListFolder,
+  WarehouseRoomListFolderChangedError,
   type WarehouseRoomListFolder,
+  type WarehouseRoomListFolderEdit,
 } from '@/lib/supabase/warehouse-room-lists'
 import { emptyRoomListRow, isRoomListQuantity, mergeRoomListRows, type RoomListRow } from './room-list-paste'
 import { RoomListFolderItems } from './RoomListFolderItems'
@@ -24,7 +29,12 @@ const REGISTERED_TIME = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', timeStyle: 'short',
 })
 
-type Draft = { brandId: string; title: string; rows: RoomListRow[] }
+type Draft = {
+  brandId: string
+  title: string
+  rows: RoomListRow[]
+  edit?: { id: string; revision: number }
+}
 
 function readDraftRows(draftRows: RoomListRow[]) {
   const rows: RoomListRow[] = []
@@ -53,6 +63,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
   const [expandedDates, setExpandedDates] = useState<Record<string, boolean>>({})
   const [draft, setDraft] = useState<Draft | null>(null)
   const [validationError, setValidationError] = useState<string | null>(null)
+  const [notice, setNotice] = useState('')
   const draftRequestId = useRef<string | null>(null)
   const folders = useQuery({
     queryKey,
@@ -77,6 +88,36 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
       await cache.invalidateQueries({ queryKey: ['warehouse-room-list-folders', userId] })
     },
   })
+  const loadEdit = useMutation({
+    mutationFn: async (folder: WarehouseRoomListFolder) => {
+      const saved = await readWarehouseRoomListFolderForEdit(folder, userId)
+      if (!saved) throw new WarehouseRoomListFolderChangedError()
+      return saved
+    },
+    onSuccess: saved => {
+      setDraft({
+        brandId: saved.brand_id,
+        title: saved.title,
+        rows: saved.items,
+        edit: { id: saved.id, revision: saved.revision },
+      })
+    },
+  })
+  const saveEdit = useMutation({
+    mutationFn: async ({ input, trace }: {
+      input: WarehouseRoomListFolderEdit
+      trace: ReturnType<typeof startWorkflow>
+    }) => {
+      await trace.run('save_folder', context => updateWarehouseRoomListFolder(input, context))
+      await trace.run('refresh_queries', () => cache.invalidateQueries({ queryKey: ['warehouse-room-list-folders', userId] }),
+        { writeOutcome: 'committed' })
+      trace.done({ writeOutcome: 'committed' })
+    },
+    onSuccess: () => {
+      closeDraft()
+      setNotice('폴더 수정 내용을 저장했습니다.')
+    },
+  })
   const open = useMutation({
     mutationFn: async (chosen: WarehouseRoomListFolder[]) => {
       const items = await readWarehouseRoomListItems(chosen, brandIds)
@@ -93,25 +134,40 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
     onSuccess: ({ rows, count }) => onOpen(rows, count),
   })
   const chosen = folders.data?.filter(folder => selected.has(folder.id)) ?? []
+  const saving = register.isPending || saveEdit.isPending
+  const editing = Boolean(draft?.edit)
+  const saveError = saveEdit.error instanceof WarehouseRoomListFolderChangedError
+    ? '폴더가 변경되었거나 수정 권한이 없습니다. 내용을 확인한 뒤 폴더를 다시 열어 주세요.'
+    : saveEdit.isError ? '수정 내용을 저장하지 못했습니다. 다시 시도해 주세요.' : null
+  const loadError = loadEdit.isError
+    ? diagnosticError(loadEdit.error).category === 'schema_missing'
+      ? '서버에 폴더 수정 설정을 적용하면 사용할 수 있습니다.'
+      : '수정할 폴더를 불러오지 못했습니다. 다시 시도해 주세요.'
+    : null
 
   function closeDraft() {
     setDraft(null)
     setValidationError(null)
     draftRequestId.current = null
+    saveEdit.reset()
   }
 
   function updateDraft(next: Draft) {
     draftRequestId.current = null
     setValidationError(null)
     register.reset()
+    if (saveEdit.isError && !(saveEdit.error instanceof WarehouseRoomListFolderChangedError)) saveEdit.reset()
     setDraft(next)
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!draft || register.isPending) return
+    if (!draft || saving) return
+    const trace = draft.edit ? startWorkflow('app', 'room_list_folder_edit') : undefined
+    trace?.step('validate_input')
     const title = draft.title.trim()
     if (!title) {
+      trace?.block('invalid_title')
       setValidationError('폴더 제목을 입력해 주세요.')
       return
     }
@@ -120,16 +176,27 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
     try {
       items = readDraftRows(draft.rows)
     } catch (error) {
+      trace?.block('invalid_items')
       setValidationError(error instanceof Error ? error.message : '붙여넣은 목록을 확인해 주세요.')
       return
     }
     const elapsed = Math.round(performance.now() - started)
     if (elapsed >= 200) {
       const log = elapsed >= 1000 ? console.warn : console.info
-      log('[room-list] 폴더 등록 목록 정리', { elapsed, rows: items.length })
+      log('[room-list] 폴더 저장 목록 정리', { elapsed, rows: items.length })
+    }
+    setValidationError(null)
+    if (draft.edit && trace) {
+      trace.step('check_access')
+      if (!brandIds.includes(draft.brandId)) {
+        trace.block('brand_unavailable')
+        setValidationError('현재 브랜드에서 이 폴더를 수정할 수 없습니다.')
+        return
+      }
+      saveEdit.mutate({ input: { ...draft.edit, brand_id: draft.brandId, title, items }, trace })
+      return
     }
     draftRequestId.current ??= crypto.randomUUID()
-    setValidationError(null)
     register.mutate({ id: draftRequestId.current, brand_id: draft.brandId, title, items })
   }
 
@@ -140,7 +207,8 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
         {draft ? (
           <Card className="w-full max-w-2xl p-4 sm:p-5">
             <form className="grid gap-3" onSubmit={submit}>
-              {selectedBrands.length > 1 ? (
+              {editing && <h2 className="text-base font-semibold">폴더 수정</h2>}
+              {!editing && selectedBrands.length > 1 ? (
                 <label className="grid gap-1 text-sm font-medium">
                   브랜드
                   <select className="h-9 rounded-md border border-border bg-background px-2" value={draft.brandId}
@@ -151,34 +219,42 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
               ) : null}
               <label className="grid gap-1 text-sm font-medium">
                 폴더 제목
-                <Input value={draft.title} maxLength={120} disabled={register.isPending}
+                <Input autoFocus={editing} value={draft.title} maxLength={120} disabled={saving}
                   onChange={event => updateDraft({ ...draft, title: event.target.value })} />
               </label>
               <RoomListFolderItems
                 rows={draft.rows}
-                disabled={register.isPending}
+                disabled={saving}
+                allowRemove={editing}
                 onChange={rows => updateDraft({ ...draft, rows })}
                 onError={setValidationError}
               />
-              {validationError || register.isError ? (
-                <p role="alert" className="text-sm text-danger">{validationError ?? '목록을 등록하지 못했습니다. 다시 시도해 주세요.'}</p>
+              {validationError || register.isError || saveError ? (
+                <p role="alert" className="text-sm text-danger">{validationError ?? saveError ?? '목록을 등록하지 못했습니다. 다시 시도해 주세요.'}</p>
               ) : null}
               <div className="flex justify-end gap-2">
-                <Button type="button" variant="outline" disabled={register.isPending} onClick={closeDraft}>취소</Button>
-                <Button type="submit" disabled={register.isPending}>{register.isPending ? '등록 중…' : '등록'}</Button>
+                <Button type="button" variant="outline" disabled={saving} onClick={closeDraft}>취소</Button>
+                <Button type="submit" disabled={saving || saveEdit.error instanceof WarehouseRoomListFolderChangedError}>
+                  {editing ? (saving ? '저장 중…' : '변경 저장') : (saving ? '등록 중…' : '등록')}
+                </Button>
               </div>
             </form>
           </Card>
         ) : (
-          <Button type="button" disabled={!brandIds.length}
+          <Button type="button" disabled={!brandIds.length || loadEdit.isPending || open.isPending}
             onClick={() => {
               register.reset()
+              loadEdit.reset()
+              setNotice('')
               setDraft({ brandId: brandIds[0], title: '', rows: Array.from({ length: 6 }, emptyRoomListRow) })
             }}>
             <Plus aria-hidden="true" className="size-4" /> 상품 추가
           </Button>
         )}
       </div>
+      {loadEdit.isPending && <p role="status" className="mb-3 text-sm text-muted-foreground">수정할 폴더를 불러오는 중…</p>}
+      {loadError && <p role="alert" className="mb-3 text-sm text-danger">{loadError}</p>}
+      {notice && <p role="status" className="mb-3 text-sm text-muted-foreground">{notice}</p>}
       {brandsError || folders.isError ? (
         <p role="alert" className="mb-3 text-sm text-danger">
           폴더 목록을 불러오지 못했습니다.
@@ -190,7 +266,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
       {folders.data?.length ? (
         <>
           <div className="mb-3 flex justify-end">
-            <Button type="button" disabled={!chosen.length || open.isPending} onClick={() => open.mutate(chosen)}>
+            <Button type="button" disabled={!chosen.length || open.isPending || loadEdit.isPending || editing} onClick={() => open.mutate(chosen)}>
               {open.isPending ? '여는 중…' : `선택한 폴더 열기${chosen.length ? ` (${chosen.length})` : ''}`}
             </Button>
           </div>
@@ -214,8 +290,8 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
                   {expanded && (
                     <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                       {group.map(folder => (
-                        <Card key={folder.id}>
-                          <label className="flex h-full cursor-pointer items-start gap-3 p-4">
+                        <Card key={folder.id} className="flex items-start">
+                          <label className="flex min-w-0 flex-1 cursor-pointer items-start gap-3 p-4">
                             <input type="checkbox" className="mt-1 size-4 shrink-0 accent-primary" checked={selected.has(folder.id)}
                               aria-label={`${folder.title} 선택`} disabled={open.isPending}
                               onChange={event => {
@@ -236,6 +312,15 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
                               <div className="mt-1 text-xs text-muted-foreground">상품 {folder.item_count.toLocaleString('ko-KR')}개</div>
                             </div>
                           </label>
+                          {folder.created_by === userId && (
+                            <Button type="button" variant="ghost" size="sm" className="mr-2 mt-2"
+                              aria-label={`${folder.title} 수정`} disabled={Boolean(draft) || open.isPending || loadEdit.isPending}
+                              onClick={() => {
+                                setNotice('')
+                                register.reset()
+                                loadEdit.mutate(folder)
+                              }}>수정</Button>
+                          )}
                         </Card>
                       ))}
                     </div>

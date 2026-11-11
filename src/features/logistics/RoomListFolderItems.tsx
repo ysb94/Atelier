@@ -1,4 +1,5 @@
 import type { ClipboardEvent } from 'react'
+import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
@@ -9,11 +10,13 @@ const COLUMNS = ['상품명', '수량'] as const
 export function RoomListFolderItems({
   rows,
   disabled,
+  allowRemove = false,
   onChange,
   onError,
 }: {
   rows: RoomListRow[]
   disabled: boolean
+  allowRemove?: boolean
   onChange: (rows: RoomListRow[]) => void
   onError: (message: string) => void
 }) {
@@ -58,13 +61,14 @@ export function RoomListFolderItems({
     <div className="min-w-0 space-y-2">
       <p className="text-xs text-muted-foreground">엑셀에서 상품명과 수량을 복사한 뒤 상품명 칸에 붙여넣으세요.</p>
       <div className="max-h-72 overflow-auto rounded-md border border-border">
-        <table aria-label="등록할 상품명과 수량" className="w-full table-fixed border-separate border-spacing-0 text-sm">
-          <colgroup><col className="w-10" /><col /><col className="w-24 sm:w-32" /></colgroup>
+        <table aria-label="상품명과 수량" className="w-full table-fixed border-separate border-spacing-0 text-sm">
+          <colgroup><col className="w-10" /><col /><col className="w-24 sm:w-32" />{allowRemove && <col className="w-10" />}</colgroup>
           <thead className="sticky top-0 z-10 bg-primary text-primary-foreground">
             <tr>
               <th scope="col" className="px-2 py-2 text-center">행</th>
               <th scope="col" className="px-3 py-2 text-left">상품명</th>
               <th scope="col" className="px-3 py-2 text-right">수량</th>
+              {allowRemove && <th scope="col"><span className="sr-only">행 삭제</span></th>}
             </tr>
           </thead>
           <tbody>
@@ -74,7 +78,7 @@ export function RoomListFolderItems({
                 {COLUMNS.map((label, column) => (
                   <td key={label} className="border-b border-r border-border p-0 last:border-r-0">
                     <Input
-                      aria-label={`등록 ${rowIndex + 1}행 ${label}`}
+                      aria-label={`${allowRemove ? '수정' : '등록'} ${rowIndex + 1}행 ${label}`}
                       autoComplete="off"
                       inputMode={column === 1 ? 'decimal' : undefined}
                       className={`rounded-none border-0 bg-transparent shadow-none focus-visible:bg-card focus-visible:ring-inset ${column === 1 ? 'text-right tabular-nums' : ''}`}
@@ -98,6 +102,16 @@ export function RoomListFolderItems({
                     />
                   </td>
                 ))}
+                {allowRemove && (
+                  <td className="border-b border-border text-center">
+                    <Button type="button" variant="ghost" size="icon" className="size-8" disabled={disabled}
+                      aria-label={`${rowIndex + 1}행 삭제`} onClick={() => {
+                        onChange(rows.length === 1 ? [emptyRoomListRow()] : rows.filter((_, index) => index !== rowIndex))
+                      }}>
+                      <X aria-hidden="true" className="size-4" />
+                    </Button>
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
