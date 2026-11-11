@@ -18,6 +18,7 @@ import { WarehouseInventoryPanel } from './WarehouseInventoryPanel'
 import { WarehouseFixedLocationsPanel } from './WarehouseFixedLocationsPanel'
 import { WarehouseQrPanel } from './WarehouseQrPanel'
 import { WarehouseSlotSettingsPanel } from './WarehouseSlotSettingsPanel'
+import { WarehouseSheetTestForm } from './WarehouseSheetTestForm'
 
 type WarehouseView = 'box' | 'outbound' | 'fixed' | 'qr'
 type WarehousePanel = 'stock' | 'slots'
@@ -115,6 +116,7 @@ export function WarehousePage() {
         title="창고 관리"
         description={`${brand.name} 박스 단위 보관과 피킹용 낱개 보관을 나눠 보는 작업 공간입니다.`}
       />
+      {import.meta.env.DEV && brand.slug === 'masmarulez' && <WarehouseSheetTestForm />}
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {WAREHOUSE_VIEWS.map((item) => {

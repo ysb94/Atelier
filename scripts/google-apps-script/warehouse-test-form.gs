@@ -64,13 +64,13 @@ function saveAtelierWarehouseTestRow(input) {
     unitsPerBox, boxes, field('note', false),
   ];
   const boxQr = field('boxQr');
-  const sheet = SpreadsheetApp.getActive().getSheetByName('창고입력');
+  const sheet = SpreadsheetApp.openById('1N4LsM3tf5-L-C5eOQxhrloOG46V3dEj-qOZylDs7Fqk').getSheetByName('창고입력');
   if (!sheet || sheet.getMaxColumns() < 27 || sheet.getMaxRows() < 3) {
     throw new Error('창고입력 탭과 AA열을 확인해 주세요.');
   }
   if (typeof onEdit_AssignDocId_v2 !== 'function') throw new Error('기존 AA 발급 함수가 필요합니다.');
 
-  const lock = LockService.getDocumentLock();
+  const lock = LockService.getScriptLock();
   lock.waitLock(10000);
   try {
     const width = sheet.getMaxColumns();
