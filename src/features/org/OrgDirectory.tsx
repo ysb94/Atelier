@@ -10,15 +10,21 @@ import type { DepartmentApprover } from '@/lib/supabase/department-approvers'
 import './org-directory.css'
 
 type DirectoryTeam = { id: string; name: string; members: OrgChartMember[] }
-const TEAM_PAGE_SIZE = 12
 const PEOPLE_PAGE_SIZE = 30
+function departmentPriority(team: DirectoryTeam) {
+  if (team.name.trim() === '운영진') return 0
+  return team.id === 'unassigned' ? 2 : 1
+}
 const displayName = (member: OrgChartMember) => member.displayName?.trim() || '이름 없음'
 
-export function OrgDirectory({ teams, loading, failed, titlesFailed, onRetry, onRetryTitles }: {
+export function OrgDirectory({ teams: sourceTeams, loading, failed, titlesFailed, onRetry, onRetryTitles }: {
   teams: DirectoryTeam[]; loading: boolean; failed: boolean; titlesFailed: boolean
   onRetry: () => void; onRetryTitles: () => void
 }) {
   useRenderWatch('OrgDirectory')
+  const teams = useMemo(() => [...sourceTeams].sort((a, b) =>
+    departmentPriority(a) - departmentPriority(b) || a.name.localeCompare(b.name, 'ko'),
+  ), [sourceTeams])
   const { profile, session } = useAuth()
   const approvals = useDepartmentApprovers()
   const currentUserId = session?.user.id
@@ -61,7 +67,7 @@ export function OrgDirectory({ teams, loading, failed, titlesFailed, onRetry, on
     if (sort === 'name') rows.sort((a, b) => displayName(a.member).localeCompare(displayName(b.member), 'ko'))
     return rows
   }, [filteredTeams, sort])
-  const pageSize = view === 'teams' ? TEAM_PAGE_SIZE : PEOPLE_PAGE_SIZE
+  const pageSize = PEOPLE_PAGE_SIZE
   const itemCount = view === 'teams' ? filteredTeams.length : people.length
   const pageCount = Math.max(1, Math.ceil(itemCount / pageSize))
   const currentPage = Math.min(page, pageCount)
@@ -125,7 +131,7 @@ export function OrgDirectory({ teams, loading, failed, titlesFailed, onRetry, on
         </div>
 
         {loading ? <div className="org-directory-empty" role="status"><Users size={30} /><h3>조직 정보를 불러오고 있습니다.</h3></div> : failed ? <div className="org-directory-empty"><Building2 size={30} /><p>다시 불러오면 부서와 직원이 표시됩니다.</p></div> : itemCount === 0 ? <div className="org-directory-empty"><Users size={30} /><h3>{needle ? '검색 결과가 없습니다.' : departmentId !== 'all' ? '배치된 직원이 없습니다.' : '아직 등록된 직원이 없습니다.'}</h3><p>{needle ? '다른 이름이나 부서명으로 검색해 보세요.' : '직원이 등록되면 이곳에 표시됩니다.'}</p>{filtered && <button type="button" onClick={reset}>전체 조직 보기</button>}</div> : view === 'teams' ? <div className="org-team-grid">
-          {filteredTeams.slice(offset, offset + pageSize).map(team => <article key={team.id} aria-label={`${team.name} 부서`} className={`org-team-card${team.id === currentDepartmentId ? ' is-my-team' : ''}`}>
+          {filteredTeams.map(team => <article key={team.id} aria-label={`${team.name} 부서`} className={`org-team-card${team.id === currentDepartmentId ? ' is-my-team' : ''}`}>
             <header><span className="org-team-symbol" aria-hidden="true">{team.id === 'unassigned' ? '—' : team.name.slice(0, 1)}</span><div className="org-team-heading"><h3>{team.name}</h3>{team.id === currentDepartmentId && <span className="org-my-team-label">내 부서</span>}{team.id !== 'unassigned' && <ApprovalLabels settings={approvalIndex.get(team.id)} names={memberNames} loading={approvals.loading} failed={Boolean(approvals.error)}/>}</div><span>{formatNumber(team.members.length)}명</span></header>
             <ul>{team.members.map(member => <li key={member.id} className={member.id === currentUserId ? 'is-me' : ''}><span className="org-person-avatar" aria-hidden="true">{personInitials(member.displayName)}</span><span className="org-person-name">{displayName(member)}{member.id === currentUserId && <span className="org-me-label">나</span>}<small>{member.position?.trim() || member.jobGrade?.trim() || '직책·직급 미설정'}</small></span>{member.position?.trim() && member.jobGrade?.trim() && <span className="org-person-grade">{member.jobGrade}</span>}</li>)}</ul>
             {!team.members.length && <p className="org-team-vacant">아직 배치된 직원이 없습니다.</p>}
@@ -133,7 +139,7 @@ export function OrgDirectory({ teams, loading, failed, titlesFailed, onRetry, on
           </article>)}
         </div> : <div className={`org-people-scroll${departmentId === currentDepartmentId ? ' is-my-team' : ''}`} role="region" aria-label="직원 목록 표" tabIndex={0}><table className="org-people-table"><caption className="org-sr-only">부서별 등록 직원과 직책·직급</caption><thead><tr><th scope="col">직원</th><th scope="col">부서</th><th scope="col">직책</th><th scope="col">직급</th></tr></thead><tbody>{people.slice(offset, offset + pageSize).map(({ member, team }) => <tr key={member.id} className={member.id === currentUserId ? 'is-me' : ''}><td><span className="org-person-cell"><span className="org-person-avatar" aria-hidden="true">{personInitials(member.displayName)}</span><strong>{displayName(member)}</strong>{member.id === currentUserId && <span className="org-me-label">나</span>}</span></td><td>{team.name}</td><td>{member.position?.trim() || <span className="org-directory-muted">미설정</span>}</td><td>{member.jobGrade?.trim() || <span className="org-directory-muted">미설정</span>}</td></tr>)}</tbody></table></div>}
 
-        {!unavailable && itemCount > 0 && <nav className="org-directory-pagination" aria-label="조직도 페이지 이동"><span>{formatNumber(offset + 1)}–{formatNumber(Math.min(offset + pageSize, itemCount))} / {formatNumber(itemCount)}{view === 'teams' ? '개 항목' : '명'}</span><div><button type="button" aria-label="이전 페이지" disabled={currentPage === 1} onClick={() => changePage(currentPage - 1)}><ChevronLeft size={16} /></button><span>{currentPage} / {pageCount}</span><button type="button" aria-label="다음 페이지" disabled={currentPage === pageCount} onClick={() => changePage(currentPage + 1)}><ChevronRight size={16} /></button></div></nav>}
+        {!unavailable && view === 'people' && itemCount > 0 && <nav className="org-directory-pagination" aria-label="조직도 페이지 이동"><span>{formatNumber(offset + 1)}–{formatNumber(Math.min(offset + pageSize, itemCount))} / {formatNumber(itemCount)}명</span><div><button type="button" aria-label="이전 페이지" disabled={currentPage === 1} onClick={() => changePage(currentPage - 1)}><ChevronLeft size={16} /></button><span>{currentPage} / {pageCount}</span><button type="button" aria-label="다음 페이지" disabled={currentPage === pageCount} onClick={() => changePage(currentPage + 1)}><ChevronRight size={16} /></button></div></nav>}
       </section>
     </div>
   </div>
