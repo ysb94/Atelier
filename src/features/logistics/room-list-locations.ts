@@ -6,6 +6,7 @@ import {
   LAST_PRIORITY_DATE,
   SECOND_PRIORITY_DATE,
   isWarehouseQuantityKnown,
+  parseWarehouseLocation,
 } from '@/lib/warehouse/stock'
 
 const LOCATION_PREFIXES = '234$65#%89'
@@ -66,11 +67,12 @@ export function roomListLocationCodes(
   fixedRows: readonly FixedLocationRow[],
   warehouseLocations: ReadonlyMap<string, readonly WarehouseStockPosition[]>,
 ) {
-  const groups = new Map<string, Set<string>>()
+  const groups = new Map<string, Map<string, string>>()
   function add(name: string, code: string) {
+    const comparisonCode = parseWarehouseLocation(code).locationCode
     const group = groups.get(name)
-    if (group) group.add(code)
-    else groups.set(name, new Set([code]))
+    if (!group) groups.set(name, new Map([[comparisonCode, code]]))
+    else if (!group.has(comparisonCode)) group.set(comparisonCode, code)
   }
 
   for (const row of fixedRows) {
@@ -82,5 +84,5 @@ export function roomListLocationCodes(
     for (const position of positions) add(name, position.locationCode.trim())
   }
 
-  return new Map(Array.from(groups, ([name, codes]) => [name, [...codes]]))
+  return new Map(Array.from(groups, ([name, codes]) => [name, [...codes.values()]]))
 }
