@@ -24,6 +24,7 @@ import {
   type PreparedWarehouseImportRow,
 } from '@/lib/warehouse/stock'
 import { getSupabase } from '@/lib/supabase/client'
+import { tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 
 const PAGE_SIZE = 1000
@@ -72,8 +73,8 @@ const BOX_COMPLETION_KINDS = new Set<WarehouseBoxCompletionKind>([
 ])
 
 export class WarehouseStockStoreError extends Error {
-  constructor(message: string) {
-    super(message)
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
     this.name = 'WarehouseStockStoreError'
   }
 }
@@ -455,19 +456,22 @@ function boxRpcError(error: { code?: string; message?: string } | null, fallback
 
 export async function listWarehouseInventorySets(
   brandId: string,
+  context?: DiagnosticContext,
 ): Promise<WarehouseInventorySet[]> {
   const supabase = getSupabase()
   const all: WarehouseInventorySet[] = []
   for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await supabase
+    const query = supabase
       .from('warehouse_inventory_sets')
       .select(SET_COLUMNS)
       .eq('brand_id', brandId)
       .order('imported_at', { ascending: false })
       .range(from, from + PAGE_SIZE - 1)
+    const { data, error } = await tracedQuery(query, context)
     if (error) {
       throw new WarehouseStockStoreError(
         errorMessage(error, '창고 연습 세트를 불러오지 못했습니다.'),
+        { cause: error },
       )
     }
     const rows = (data as InventorySetRow[]) ?? []
@@ -479,8 +483,9 @@ export async function listWarehouseInventorySets(
 
 export async function getActiveWarehouseInventorySet(
   brandId: string,
+  context?: DiagnosticContext,
 ): Promise<WarehouseInventorySet | null> {
-  const sets = await listWarehouseInventorySets(brandId)
+  const sets = await listWarehouseInventorySets(brandId, context)
   return (
     sets.find((set) => set.kind === 'sandbox' && set.status === 'active') ??
     null
@@ -569,6 +574,7 @@ async function readPositionRows<T = PositionRow>(
   setId: string,
   zone?: WarehouseZone,
   columns = POSITION_COLUMNS,
+  context?: DiagnosticContext,
 ): Promise<T[]> {
   const supabase = getSupabase()
   const raw: T[] = []
@@ -582,10 +588,11 @@ async function readPositionRows<T = PositionRow>(
       .order('id', { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
     if (zone) query = query.eq('warehouse_locations.zone', zone)
-    const { data, error } = await query
+    const { data, error } = await tracedQuery(query, context)
     if (error) {
       throw new WarehouseStockStoreError(
         errorMessage(error, '창고 재고를 불러오지 못했습니다.'),
+        { cause: error },
       )
     }
     const rows = (data as T[]) ?? []
@@ -622,8 +629,9 @@ export async function listWarehouseStockPositions(
   brandId: string,
   setId: string,
   zone?: WarehouseZone,
+  context?: DiagnosticContext,
 ): Promise<WarehouseStockPosition[]> {
-  const raw = await readPositionRows(brandId, setId, zone)
+  const raw = await readPositionRows(brandId, setId, zone, POSITION_COLUMNS, context)
   if (raw.length === 0) return []
 
   const ranked = assignWarehouseUsageRanks(
