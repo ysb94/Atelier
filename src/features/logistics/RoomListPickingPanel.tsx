@@ -4,10 +4,14 @@ import { ChevronLeft, ChevronRight, Printer } from 'lucide-react'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
+import { FilterTabs } from '@/components/ui/filter-tabs'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { INVOICE_PRODUCT_LIST_PRINT_ROWS } from '@/lib/invoice/product-list-print'
 import { formatNumber } from '@/lib/utils'
 import { sumRoomListQuantities } from './room-list-paste'
+import {
+  measurePickingCodes, type PickingCodeField, type PickingCodeLayout, type PickingPrintColumns,
+} from './room-list-picking-code-layout'
 import './room-list-picking-print.css'
 
 export type RoomPickingLine = {
@@ -27,7 +31,11 @@ function pickingPages(room: RoomPickingRoom) {
   }))
 }
 
-function PickingTable({ lines }: { lines: RoomPickingLine[] }) {
+function PickingCode({ field, text, codes }: { field: PickingCodeField; text: string; codes?: PickingCodeLayout }) {
+  return <span data-picking-code={field} style={{ fontSize: codes?.fontSizes.get(field)?.get(text) }}>{text}</span>
+}
+
+function PickingTable({ lines, codes }: { lines: RoomPickingLine[]; codes?: PickingCodeLayout }) {
   return (
     <table className="room-list-picking-table w-full min-w-[640px] border-collapse text-xs">
       <caption className="sr-only">방별 피킹 품목</caption>
@@ -44,11 +52,11 @@ function PickingTable({ lines }: { lines: RoomPickingLine[] }) {
       <tbody>
         {lines.map(line => (
           <tr key={line.id} className="border-b border-border/70">
-            <td className="px-3 py-1.5 tabular-nums">{line.styleNo || '—'}</td>
-            <td className="break-all px-3 py-1.5">{line.location || '위치 없음'}</td>
+            <td className="px-3 py-1.5 tabular-nums"><PickingCode field="styleNo" text={line.styleNo || '—'} codes={codes} /></td>
+            <td className="break-all px-3 py-1.5"><PickingCode field="location" text={line.location || '위치 없음'} codes={codes} /></td>
             <td className="break-words px-3 py-1.5">{line.name}</td>
             <td className="px-3 py-1.5 text-right tabular-nums">{line.quantity || '—'}</td>
-            <td className="break-all px-3 py-1.5">{line.nextLocation}</td>
+            <td className="break-all px-3 py-1.5">{line.nextLocation && <PickingCode field="nextLocation" text={line.nextLocation} codes={codes} />}</td>
           </tr>
         ))}
       </tbody>
@@ -73,12 +81,13 @@ export function RoomListPickingPanel({ room }: { room: RoomPickingRoom }) {
 
 type PrintSection = { room: RoomPickingRoom; start: number; split: number; end: number }
 
-function fitPickingSection(rowHeights: number[], start: number, available: number) {
+function fitPickingSection(rowHeights: number[], start: number, available: number, columns: PickingPrintColumns) {
   let end = start
   let leftHeight = 0
   while (end < rowHeights.length && leftHeight + rowHeights[end] <= available) {
     leftHeight += rowHeights[end++]
   }
+  if (columns === '1') return { split: end, end, height: leftHeight }
   let split = end
   let rightHeight = 0
   while (end < rowHeights.length && rightHeight + rowHeights[end] <= available) {
@@ -96,8 +105,7 @@ function fitPickingSection(rowHeights: number[], start: number, available: numbe
   return { split, end, height: Math.max(leftHeight, rightHeight) }
 }
 
-function measurePickingPages(sheet: HTMLDivElement, rooms: RoomPickingRoom[]) {
-  const startedAt = performance.now()
+function measurePickingPages(sheet: HTMLDivElement, rooms: RoomPickingRoom[], columns: PickingPrintColumns) {
   const pageHeight = sheet.getBoundingClientRect().height
   const sectionGap = parseFloat(getComputedStyle(sheet).rowGap)
   const pages: PrintSection[][] = [[]]
@@ -109,15 +117,15 @@ function measurePickingPages(sheet: HTMLDivElement, rooms: RoomPickingRoom[]) {
     const section = sheet.children[index]
     const table = section.querySelector('table')!
     const heading = section.querySelector('header')!
-    const columns = section.querySelector('.room-list-picking-columns')!
+    const tableArea = section.querySelector('.room-list-picking-columns')!
     const rowHeights = Array.from(table.tBodies[0].rows, row => row.getBoundingClientRect().height)
     // Allow for the extra edge of the collapsed table border when rows are split.
-    const sectionOverhead = columns.getBoundingClientRect().top - heading.getBoundingClientRect().top
+    const sectionOverhead = tableArea.getBoundingClientRect().top - heading.getBoundingClientRect().top
       + (table.tHead?.getBoundingClientRect().height ?? 0) + 1
 
     for (let start = 0; start < rowHeights.length;) {
       const gap = page.length ? sectionGap : 0
-      const fit = fitPickingSection(rowHeights, start, pageHeight - usedHeight - gap - sectionOverhead)
+      const fit = fitPickingSection(rowHeights, start, pageHeight - usedHeight - gap - sectionOverhead, columns)
       if (page.length && fit.end < rowHeights.length) {
         page = []
         pages.push(page)
@@ -131,15 +139,10 @@ function measurePickingPages(sheet: HTMLDivElement, rooms: RoomPickingRoom[]) {
       start = end
     }
   })
-  const elapsedMs = Math.round(performance.now() - startedAt)
-  if (elapsedMs >= 200) {
-    const log = elapsedMs >= 1000 ? console.warn : console.info
-    log('[room-list] 피킹표 인쇄 페이지 계산', { elapsedMs, roomCount: rooms.length })
-  }
   return pages.filter(sections => sections.length > 0)
 }
 
-function PickingPrintSection({ section }: { section: PrintSection }) {
+function PickingPrintSection({ section, codes }: { section: PrintSection; codes?: PickingCodeLayout }) {
   const { room, start, split, end } = section
   const left = room.lines.slice(start, split)
   const right = room.lines.slice(split, end)
@@ -153,17 +156,19 @@ function PickingPrintSection({ section }: { section: PrintSection }) {
         </p>
       </header>
       <div className="room-list-picking-columns">
-        <PickingTable lines={left} />
-        {right.length > 0 && <PickingTable lines={right} />}
+        <PickingTable lines={left} codes={codes} />
+        {right.length > 0 && <PickingTable lines={right} codes={codes} />}
       </div>
     </section>
   )
 }
 
-function PickingSheet({ sections }: { sections: PrintSection[] }) {
+function PickingSheet({ sections, columns, codes }: {
+  sections: PrintSection[]; columns: PickingPrintColumns; codes: PickingCodeLayout
+}) {
   return (
-    <div className="room-list-picking-sheet">
-      {sections.map(section => <PickingPrintSection key={section.room.key} section={section} />)}
+    <div className="room-list-picking-sheet" data-columns={columns} style={codes.columnWidths}>
+      {sections.map(section => <PickingPrintSection key={section.room.key} section={section} codes={codes} />)}
     </div>
   )
 }
@@ -171,12 +176,16 @@ function PickingSheet({ sections }: { sections: PrintSection[] }) {
 export function RoomListPickingPrintPreview({ rooms, onClose }: { rooms: RoomPickingRoom[]; onClose: () => void }) {
   useRenderWatch('RoomListPickingPrintPreview')
   const active = useWorkspaceTabActivity()
-  const [layout, setLayout] = useState<{ rooms: RoomPickingRoom[]; pages: PrintSection[][] }>()
+  const [columns, setColumns] = useState<PickingPrintColumns>('2')
+  const [layout, setLayout] = useState<{
+    rooms: RoomPickingRoom[]; columns: PickingPrintColumns; pages: PrintSection[][]; codes: PickingCodeLayout
+  }>()
   const [index, setIndex] = useState(0)
   const [printError, setPrintError] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
   const measurement = useRef<HTMLDivElement>(null)
-  const pages = layout?.rooms === rooms ? layout.pages : undefined
+  const currentLayout = layout?.rooms === rooms && layout.columns === columns ? layout : undefined
+  const pages = currentLayout?.pages
   const pageCount = pages?.length ?? 0
   const currentIndex = Math.min(index, Math.max(0, pageCount - 1))
   const page = pages?.[currentIndex]
@@ -186,12 +195,21 @@ export function RoomListPickingPrintPreview({ rooms, onClose }: { rooms: RoomPic
     if (!active || !sheet) return
     let cancelled = false
     const update = () => {
-      if (!cancelled) setLayout({ rooms, pages: measurePickingPages(sheet, rooms) })
+      if (cancelled) return
+      const startedAt = performance.now()
+      const codes = measurePickingCodes(sheet, columns)
+      const pages = measurePickingPages(sheet, rooms, columns)
+      const elapsedMs = Math.round(performance.now() - startedAt)
+      if (elapsedMs >= 200) {
+        const log = elapsedMs >= 1000 ? console.warn : console.info
+        log('[room-list] 피킹표 인쇄 페이지 계산', { elapsedMs, roomCount: rooms.length, columns })
+      }
+      setLayout({ rooms, columns, pages, codes })
     }
     if (document.fonts.status === 'loading') void document.fonts.ready.then(update)
     else update()
     return () => { cancelled = true }
-  }, [active, rooms])
+  }, [active, rooms, columns])
 
   useEffect(() => {
     if (!active) return
@@ -213,7 +231,7 @@ export function RoomListPickingPrintPreview({ rooms, onClose }: { rooms: RoomPic
           <div>
             <h2 id="room-picking-preview-title" className="font-semibold">피킹표 미리보기 및 출력</h2>
             <p className="text-xs text-muted-foreground">
-              {pages ? `A4 세로 2단 · ${formatNumber(pageCount)}장` : '인쇄 페이지를 정리하고 있습니다…'}
+              {pages ? `A4 세로 · ${formatNumber(pageCount)}장` : '인쇄 페이지를 정리하고 있습니다…'}
             </p>
           </div>
           <div className="flex gap-2">
@@ -232,6 +250,17 @@ export function RoomListPickingPrintPreview({ rooms, onClose }: { rooms: RoomPic
           </div>
         </header>
         {printError && <p role="alert" className="px-4 py-2 text-sm text-danger">인쇄 창을 열지 못했습니다. 다시 시도해 주세요.</p>}
+        <div className="flex justify-center border-b border-border p-2">
+          <FilterTabs<PickingPrintColumns>
+            ariaLabel="인쇄 형식"
+            value={columns}
+            onChange={value => {
+              setColumns(value)
+              setIndex(0)
+            }}
+            tabs={[{ value: '1', label: '1열 · 큰 글씨' }, { value: '2', label: '2열' }]}
+          />
+        </div>
         {page && <div className="flex items-center justify-center gap-2 border-b border-border p-2">
           <Button type="button" size="sm" variant="outline" aria-label="이전 페이지" disabled={currentIndex === 0}
             onClick={() => setIndex(currentIndex - 1)}><ChevronLeft className="size-4" /></Button>
@@ -239,16 +268,20 @@ export function RoomListPickingPrintPreview({ rooms, onClose }: { rooms: RoomPic
           <Button type="button" size="sm" variant="outline" aria-label="다음 페이지" disabled={currentIndex === pageCount - 1}
             onClick={() => setIndex(currentIndex + 1)}><ChevronRight className="size-4" /></Button>
         </div>}
-        {page && <div className="overflow-auto p-4"><PickingSheet sections={page} /></div>}
+        {page && currentLayout && (
+          <div className="overflow-auto p-4"><PickingSheet sections={page} columns={columns} codes={currentLayout.codes} /></div>
+        )}
       </dialog>
       {createPortal(
         <div className="room-list-picking-print" aria-hidden="true">
-          {pages?.map(sections => <PickingSheet key={`${sections[0].room.key}:${sections[0].start}`} sections={sections} />)}
+          {currentLayout?.pages.map(sections => (
+            <PickingSheet key={`${sections[0].room.key}:${sections[0].start}`} sections={sections} columns={columns} codes={currentLayout.codes} />
+          ))}
         </div>,
         document.body,
       )}
       {!pages && createPortal(
-        <div ref={measurement} className="room-list-picking-sheet room-list-picking-measure" aria-hidden="true">
+        <div key={columns} ref={measurement} className="room-list-picking-sheet room-list-picking-measure" data-columns={columns} aria-hidden="true">
           {rooms.map(room => (
             <PickingPrintSection key={room.key} section={{ room, start: 0, split: room.lines.length, end: room.lines.length }} />
           ))}
