@@ -14,14 +14,15 @@ export type RoomPickingLine = {
 }
 export type RoomPickingRoom = { key: string; name: string; lines: RoomPickingLine[] }
 
-function pickingPages(room: RoomPickingRoom) {
-  const pageCount = Math.ceil(room.lines.length / INVOICE_PRODUCT_LIST_PRINT_ROWS)
+function pickingPages(room: RoomPickingRoom, columnCount = 1) {
+  const rowsPerPage = INVOICE_PRODUCT_LIST_PRINT_ROWS * columnCount
+  const pageCount = Math.ceil(room.lines.length / rowsPerPage)
   return Array.from({ length: pageCount }, (_, index) => ({
     room: room.name,
     key: `${room.key}:${index}`,
     number: index + 1,
     pageCount,
-    lines: room.lines.slice(index * INVOICE_PRODUCT_LIST_PRINT_ROWS, (index + 1) * INVOICE_PRODUCT_LIST_PRINT_ROWS),
+    lines: room.lines.slice(index * rowsPerPage, (index + 1) * rowsPerPage),
   }))
 }
 
@@ -77,14 +78,17 @@ function PickingSheet({ page }: { page: ReturnType<typeof pickingPages>[number] 
         <h3 className="text-base font-semibold">방별 피킹표 · {page.room}</h3>
         <p className="text-xs">{page.number}/{page.pageCount}쪽 · {formatNumber(page.lines.length)}종{total !== null ? ` · ${total}개` : ''}</p>
       </header>
-      <PickingTable lines={page.lines} />
+      <div className="room-list-picking-columns">
+        <PickingTable lines={page.lines.slice(0, INVOICE_PRODUCT_LIST_PRINT_ROWS)} />
+        <PickingTable lines={page.lines.slice(INVOICE_PRODUCT_LIST_PRINT_ROWS)} />
+      </div>
     </section>
   )
 }
 
 export function RoomListPickingPrintPreview({ rooms, onClose }: { rooms: RoomPickingRoom[]; onClose: () => void }) {
   const active = useWorkspaceTabActivity()
-  const pages = useMemo(() => rooms.flatMap(pickingPages), [rooms])
+  const pages = useMemo(() => rooms.flatMap(room => pickingPages(room, 2)), [rooms])
   const [index, setIndex] = useState(0)
   const [printError, setPrintError] = useState(false)
   const dialog = useRef<HTMLDialogElement>(null)
@@ -111,7 +115,7 @@ export function RoomListPickingPrintPreview({ rooms, onClose }: { rooms: RoomPic
         <header className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card px-4 py-3">
           <div>
             <h2 id="room-picking-preview-title" className="font-semibold">피킹표 미리보기 및 출력</h2>
-            <p className="text-xs text-muted-foreground">A4 세로 · {formatNumber(pages.length)}장</p>
+            <p className="text-xs text-muted-foreground">A4 세로 2단 · {formatNumber(pages.length)}장</p>
           </div>
           <div className="flex gap-2">
             <Button type="button" size="sm" onClick={() => {

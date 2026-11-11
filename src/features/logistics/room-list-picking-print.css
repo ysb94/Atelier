@@ -2,6 +2,38 @@
   display: none;
 }
 
+.room-list-picking-sheet {
+  width: 194mm;
+  margin-inline: auto;
+}
+
+.room-list-picking-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 4mm;
+}
+
+.room-list-picking-sheet .room-list-picking-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+  font-size: 8pt;
+  line-height: 1.3;
+}
+
+.room-list-picking-sheet .room-list-picking-table col:nth-child(1) { width: 13%; }
+.room-list-picking-sheet .room-list-picking-table col:nth-child(2) { width: 20%; }
+.room-list-picking-sheet .room-list-picking-table col:nth-child(3) { width: 37%; }
+.room-list-picking-sheet .room-list-picking-table col:nth-child(4) { width: 10%; }
+.room-list-picking-sheet .room-list-picking-table col:nth-child(5) { width: 20%; }
+
+.room-list-picking-sheet .room-list-picking-table :is(th, td) {
+  padding: 1mm .65mm;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
 @media print {
   @page room-list-picking-sheet {
     size: A4 portrait;
@@ -22,10 +54,8 @@
     break-before: page;
   }
 
-  .room-list-picking-print .room-list-picking-table {
+  .room-list-picking-print .room-list-picking-sheet {
     width: 100%;
-    min-width: 0;
-    table-layout: fixed;
   }
 
   .room-list-picking-print .room-list-picking-table thead {
