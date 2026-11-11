@@ -8,6 +8,12 @@
 
 1. 회사 Google Cloud 프로젝트에서 Sheets API를 켜고 이 연결에 사용할 서비스 계정을 준비한다. 해당 이메일을 원본 스프레드시트에 **뷰어**로 추가한다.
 2. Supabase Edge Function 비밀 설정에 서비스 계정 JSON을 `WAREHOUSE_FIXED_SHEETS_SERVICE_ACCOUNT`로 등록한다. 예약 실행 전용 무작위 32바이트 값을 소문자 16진수로 만들어 `WAREHOUSE_FIXED_LOCATIONS_CRON_SECRET`에도 등록한다. 키 파일이나 토큰을 Git과 채팅에 올리지 않는다.
-3. 승인된 환경에 `20261111032338_warehouse_fixed_locations_sync.sql`만 적용한다. 공통 화면 접근 규칙을 함께 묶도록 저장소 루트에서 `supabase functions deploy warehouse-fixed-locations --use-api --project-ref <승인된 프로젝트 ID>`로 배포한다.
+3. 승인된 환경에 `20261111033120_warehouse_fixed_locations_sync.sql`만 적용한다. 공통 화면 접근 규칙을 함께 묶도록 저장소 루트에서 `supabase functions deploy warehouse-fixed-locations --use-api --project-ref <승인된 프로젝트 ID>`로 배포한다.
 4. Atelier에서 로그인해 고정 자리의 **지금 동기화**가 성공하는지 확인한다. 예약 실행을 켜려면 Supabase Vault에 프로젝트 API 주소를 `warehouse_fixed_locations_project_url`로, 2단계와 같은 예약 실행 전용 값을 `warehouse_fixed_locations_cron_secret`으로 등록한다. 두 값이 준비되기 전에는 예약 요청을 보내지 않는다.
 5. 시트에 변경이 없어도 다음 예약 실행 후 마지막 동기화 시각이 전진하는지 확인한다. 예약 실행만 멈추려면 `atelier-warehouse-fixed-locations` 작업을 비활성화한다.
+
+## 공유 환경 적용 기록
+
+- 2026-11-11 사용자 승인 후 마이그레이션 `20261111033120`과 고정 자리 Edge Function을 적용했다. 원본 문서에는 전용 서비스 계정에 보기 권한을 부여했다.
+- 같은 날 한국시간 12:33에 로컬 고정 자리 탭의 수동 동기화로 공유 DB에 1,065건을 저장했다. 12:35 예약 실행이 성공했고, 목록 변경 없이 마지막 동기화 시각만 갱신되어 화면에서도 확인했다.
+- 비로그인 및 잘못된 예약 자격 증명 차단, 목록 저장소의 클라이언트 직접 조회 차단을 확인했다. 기존 창고 원본이나 운영 화면 배포는 이번 적용 범위에 포함하지 않았다.
