@@ -21,7 +21,8 @@ export function RoomListPage() {
   const { locationCodes } = warehouse
   const locationsReady = !warehouse.error && !warehouse.loading
   const visibleRows = useMemo(() => {
-    const priority = []
+    const missing = []
+    const zero = []
     const regular = []
     for (const [sourceIndex, row] of rows.entries()) {
       const name = roomListProductName(row[0])
@@ -30,10 +31,11 @@ export function RoomListPage() {
       // 입력 중인 행은 상품명 칸에서 벗어난 뒤 위치 순서를 갱신한다.
       const sortName = editingName?.sourceIndex === sourceIndex ? editingName.name : name
       const firstLocation = locationCodes.get(sortName)?.[0]
-      if (locationsReady && sortName && (!firstLocation || firstLocation === '0-0-0')) priority.push(item)
+      if (locationsReady && sortName && !firstLocation) missing.push(item)
+      else if (locationsReady && sortName && firstLocation === '0-0-0') zero.push(item)
       else regular.push(item)
     }
-    return [...priority, ...regular]
+    return [...missing, ...zero, ...regular]
   }, [rows, locationCodes, locationsReady, editingName])
   const locationColumnCount = visibleRows.reduce(
     (count, { matches }) => Math.max(count, matches?.length ?? 0), 1,
