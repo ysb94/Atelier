@@ -8,11 +8,11 @@ export function readRoomPrefixes(text: string) {
   return [...new Set(text.split(/[\s,]+/u).filter(Boolean).map(normalizeRoomPrefix))]
 }
 
-export function roomForLocation(location: string | undefined, groupsByPrefix: ReadonlyMap<string, RoomGroup>) {
+export function roomForLocation(location: string | undefined, groupsByPrefix?: ReadonlyMap<string, RoomGroup>) {
   const [prefix] = normalizeRoomPrefix(location?.trim() ?? '')
   if (!prefix) return { key: 'missing', name: '위치 없음' }
 
-  const group = groupsByPrefix.get(prefix)
+  const group = groupsByPrefix?.get(prefix)
   if (group) return { key: `group:${group.name}`, name: group.name }
   return { key: `prefix:${prefix}`, name: /^\d$/.test(prefix) ? `${prefix}번 방` : `${prefix} 방` }
 }

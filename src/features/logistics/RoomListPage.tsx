@@ -103,7 +103,21 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
   ), [rooms])
   const selectedRoom = room ?? roomTabs.find(item => item.key !== 'missing')?.key ?? roomTabs[0]?.key
   const currentRoom = selectedRoom ? rooms.get(selectedRoom) : undefined
-  const printRooms = useMemo(() => room && currentRoom ? [currentRoom] : roomTabs, [room, currentRoom, roomTabs])
+  const selectedPrintRoom = room ? currentRoom : undefined
+  const printRooms = useMemo(() => {
+    const selected = selectedPrintRoom ? [selectedPrintRoom] : roomTabs
+    return selected.flatMap(group => {
+      if (!group.key.startsWith('group:')) return [group]
+      const sections = new Map<string, RoomPickingRoom>()
+      for (const line of group.lines) {
+        const { key, name } = roomForLocation(line.location)
+        const section = sections.get(key)
+        if (section) section.lines.push(line)
+        else sections.set(key, { key, name: `${group.name} · ${name}`, lines: [line] })
+      }
+      return [...sections.values()]
+    })
+  }, [selectedPrintRoom, roomTabs])
   const locationColumnCount = visibleRows.reduce(
     (count, { matches }) => Math.max(count, matches?.length ?? 0), 1,
   )
@@ -205,7 +219,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
             onClick={() => setShowGroups(current => !current)}>방 묶기</Button>
           <Button type="button" variant="outline" size="sm" disabled={!printRooms.length}
             onClick={() => setPreviewOpen(true)}>
-            <Printer aria-hidden="true" className="size-4" /> {printRooms.length > 1 ? '전체 방 미리보기 및 출력' : '미리보기 및 출력'}
+            <Printer aria-hidden="true" className="size-4" /> {!selectedPrintRoom && roomTabs.length > 1 ? '전체 방 미리보기 및 출력' : '미리보기 및 출력'}
           </Button>
         </div>
       </div>
