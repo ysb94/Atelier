@@ -4,7 +4,8 @@ import { corsHeaders } from '../_shared/cors.ts'
 
 const BRAND_ID = 'b0000000-0000-4000-8000-000000000001'
 const SPREADSHEET_ID = '1kkAtKT5tEjjatibloT36MTxIaXkUfIW32GJn1Nx_R_8'
-const RANGE = "'1+1 이름변경'!G2:H"
+const FIRST_DATA_ROW = 3
+const RANGE = `'네임변경'!E${FIRST_DATA_ROW}:F`
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const encoder = new TextEncoder()
 
@@ -72,7 +73,7 @@ async function readSheet(token: string): Promise<{ rows: FixedLocationRow[] } | 
   // An empty range is valid, but an incomplete or unexpected response must not clear a snapshot.
   if (!range || !Array.isArray(values)) return { code: 'unavailable' }
   const rows = values.flatMap(([productName = '', location = ''], index) =>
-    productName.trim() || location.trim() ? [{ sheetRow: index + 2, productName, location }] : [],
+    productName.trim() || location.trim() ? [{ sheetRow: index + FIRST_DATA_ROW, productName, location }] : [],
   )
   return { rows }
 }
