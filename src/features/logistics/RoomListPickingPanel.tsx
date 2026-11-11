@@ -15,52 +15,38 @@ export type RoomPickingLine = {
 export type RoomPickingRoom = { key: string; name: string; lines: RoomPickingLine[] }
 
 function pickingPages(room: RoomPickingRoom) {
-  const pages: RoomPickingLine[][] = []
-  let lines: RoomPickingLine[] = []
-  let rowCount = 0
-  for (const line of room.lines) {
-    const height = line.nextLocation ? 2 : 1
-    if (rowCount + height > INVOICE_PRODUCT_LIST_PRINT_ROWS) {
-      pages.push(lines)
-      lines = []
-      rowCount = 0
-    }
-    lines.push(line)
-    rowCount += height
-  }
-  if (lines.length) pages.push(lines)
-  return pages.map((pageLines, index) => ({
+  const pageCount = Math.ceil(room.lines.length / INVOICE_PRODUCT_LIST_PRINT_ROWS)
+  return Array.from({ length: pageCount }, (_, index) => ({
     room: room.name,
     key: `${room.key}:${index}`,
     number: index + 1,
-    pageCount: pages.length,
-    lines: pageLines,
+    pageCount,
+    lines: room.lines.slice(index * INVOICE_PRODUCT_LIST_PRINT_ROWS, (index + 1) * INVOICE_PRODUCT_LIST_PRINT_ROWS),
   }))
 }
 
 function PickingTable({ lines }: { lines: RoomPickingLine[] }) {
   return (
-    <table className="room-list-picking-table w-full min-w-[580px] border-collapse text-xs">
+    <table className="room-list-picking-table w-full min-w-[640px] border-collapse text-xs">
       <caption className="sr-only">방별 피킹 품목</caption>
-      <colgroup><col className="w-24" /><col className="w-32" /><col /><col className="w-24" /></colgroup>
+      <colgroup><col className="w-24" /><col className="w-28" /><col /><col className="w-20" /><col className="w-28" /></colgroup>
       <thead className="sticky top-0 z-10 bg-primary text-primary-foreground">
         <tr className="text-left">
           <th scope="col" className="px-3 py-2">M번호</th>
           <th scope="col" className="px-3 py-2">자리번호</th>
           <th scope="col" className="px-3 py-2">상품명</th>
           <th scope="col" className="px-3 py-2 text-right">수량</th>
+          <th scope="col" className="px-3 py-2">다음 자리</th>
         </tr>
       </thead>
       <tbody>
         {lines.map(line => (
           <tr key={line.id} className="border-b border-border/70">
             <td className="px-3 py-1.5 tabular-nums">{line.styleNo || '—'}</td>
-            <td className="break-all px-3 py-1.5">
-              <div>{line.location || '위치 없음'}</div>
-              {line.nextLocation && <div className="text-muted-foreground">{line.nextLocation}</div>}
-            </td>
+            <td className="break-all px-3 py-1.5">{line.location || '위치 없음'}</td>
             <td className="break-words px-3 py-1.5">{line.name}</td>
             <td className="px-3 py-1.5 text-right tabular-nums">{line.quantity || '—'}</td>
+            <td className="break-all px-3 py-1.5">{line.nextLocation}</td>
           </tr>
         ))}
       </tbody>
