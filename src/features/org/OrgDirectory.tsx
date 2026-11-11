@@ -24,12 +24,18 @@ function OrgDirectoryPrint({ teams, people, departments }: { teams: DirectoryTea
   return (
     <article className="org-directory-print" aria-hidden="true">
       <header className="org-print-header">
-        <h1>E&J 조직도</h1>
-        <p>부서 {formatNumber(departments)}개 · 직원 {formatNumber(people)}명</p>
+        <div className="org-print-title">
+          <span>E&amp;J</span>
+          <h1>조직도</h1>
+        </div>
+        <dl className="org-print-summary">
+          <div><dt>부서</dt><dd>{formatNumber(departments)}개</dd></div>
+          <div><dt>등록 직원</dt><dd>{formatNumber(people)}명</dd></div>
+        </dl>
       </header>
       <div className="org-print-teams">
         {teams.map(team => (
-          <section key={team.id} className="org-print-team">
+          <section key={team.id} className={departmentPriority(team) === 0 ? 'org-print-team org-print-leadership' : 'org-print-team'}>
             <header>
               <h2>{team.name}</h2>
               <span>{formatNumber(team.members.length)}명</span>
