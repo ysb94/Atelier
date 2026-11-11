@@ -18,8 +18,7 @@ export function RoomListPage() {
   const [editingName, setEditingName] = useState<{ sourceIndex: number; name: string } | null>(null)
   const hasNames = rows.some(([name]) => Boolean(name.trim()))
   const warehouse = useRoomListWarehouseLocations(hasNames)
-  const locationCodes = useMemo(() => new Map(Array.from(warehouse.locations, ([name, positions]) =>
-    [name, [...new Set(positions.map(position => position.locationCode.trim()))]])), [warehouse.locations])
+  const { locationCodes } = warehouse
   const locationsReady = !warehouse.error && !warehouse.loading
   const visibleRows = useMemo(() => {
     const priority = []
@@ -36,7 +35,7 @@ export function RoomListPage() {
     }
     return [...priority, ...regular]
   }, [rows, locationCodes, locationsReady, editingName])
-  const locationColumnCount = !locationsReady ? 1 : visibleRows.reduce(
+  const locationColumnCount = visibleRows.reduce(
     (count, { matches }) => Math.max(count, matches?.length ?? 0), 1,
   )
   const locationColumns = Array.from({ length: locationColumnCount }, (_, index) => index)
@@ -108,7 +107,7 @@ export function RoomListPage() {
       />
       {hasNames && warehouse.error && (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-danger" role="alert">
-          창고 위치를 불러오지 못했습니다.
+          일부 창고 위치를 불러오지 못했습니다.
           <Button type="button" size="sm" variant="outline" onClick={() => void warehouse.refresh()}>다시 조회</Button>
         </div>
       )}
@@ -159,10 +158,11 @@ export function RoomListPage() {
                     ))}
                     {locationColumns.map(index => (
                       <td key={index} className="break-all border-b border-r border-border px-3 py-2 align-top tabular-nums last:border-r-0">
-                        {warehouse.error || warehouse.loading ? '' : matches?.[index]}
+                        {matches?.[index]}
                         {name && index === 0 && !warehouse.error && (
-                          warehouse.loading ? <span className="text-xs text-muted-foreground">조회 중…</span>
-                            : !matches?.length ? <span className="text-xs text-muted-foreground">위치 없음</span> : null
+                          matches?.length ? null
+                            : warehouse.loading ? <span className="text-xs text-muted-foreground">조회 중…</span>
+                              : <span className="text-xs text-muted-foreground">위치 없음</span>
                         )}
                       </td>
                     ))}

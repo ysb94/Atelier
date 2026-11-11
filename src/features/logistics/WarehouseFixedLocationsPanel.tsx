@@ -1,11 +1,11 @@
 import { useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/lib/supabase/auth'
-import { requestWarehouseFixedLocations, type FixedLocationSnapshot } from '@/lib/supabase/warehouse-fixed-locations'
+import { requestWarehouseFixedLocations } from '@/lib/supabase/warehouse-fixed-locations'
+import { useWarehouseFixedLocationSnapshot } from './use-warehouse-fixed-location-snapshot'
 
 const PAGE_SIZE = 50
 const SYNC_TIME_FORMAT = new Intl.DateTimeFormat('ko-KR', {
@@ -17,22 +17,14 @@ const SYNC_TIME_FORMAT = new Intl.DateTimeFormat('ko-KR', {
 export function WarehouseFixedLocationsPanel({ brandId }: { brandId: string }) {
   const { session } = useAuth()
   if (!session) return null
-  return <FixedLocationList key={session.user.id} brandId={brandId} userId={session.user.id} />
+  return <FixedLocationList key={session.user.id} brandId={brandId} />
 }
 
-function FixedLocationList({ brandId, userId }: { brandId: string; userId: string }) {
-  const active = useWorkspaceTabActivity()
+function FixedLocationList({ brandId }: { brandId: string }) {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
-  const queryKey = ['warehouse-fixed-location-snapshot', brandId, userId] as const
-  const snapshot = useQuery({
-    queryKey,
-    queryFn: () => requestWarehouseFixedLocations(brandId, 'read', queryClient.getQueryData<FixedLocationSnapshot>(queryKey)),
-    enabled: active,
-    refetchInterval: active ? 60_000 : false,
-    retry: false,
-  })
+  const { snapshot, queryKey } = useWarehouseFixedLocationSnapshot(brandId)
   const syncSheet = useMutation({
     mutationFn: () => requestWarehouseFixedLocations(brandId, 'sync'),
     onSuccess: async (next) => {

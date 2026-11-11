@@ -2,11 +2,14 @@ import { useMemo } from 'react'
 import { useQueries, useQueryClient, type UseQueryResult } from '@tanstack/react-query'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { ATELIER_BRAND_ID } from '@/lib/company/capabilities'
 import { diagnosticOperation } from '@/lib/diagnostics/workflow-trace'
 import { combineListQueries, flattenListQueries } from '@/lib/query/list-queries'
 import { getActiveWarehouseInventorySet, listWarehouseStockPositions } from '@/lib/supabase/warehouse-stock'
+import { emptyList } from '@/lib/utils'
 import type { WarehouseInventorySet, WarehouseStockPosition } from '@/lib/types'
-import { indexRoomListLocations } from './room-list-locations'
+import { indexRoomListLocations, roomListLocationCodes } from './room-list-locations'
+import { useWarehouseFixedLocationSnapshot } from './use-warehouse-fixed-location-snapshot'
 
 function combineSets(results: UseQueryResult<WarehouseInventorySet | null>[]) {
   return {
@@ -20,6 +23,9 @@ export function useRoomListWarehouseLocations(hasNames: boolean) {
   const { selectedBrands, loading, error } = useCompanyBrandScope()
   const enabled = useWorkspaceTabActivity() && hasNames
   const cache = useQueryClient()
+  const fixedBrandSelected = selectedBrands.some(brand => brand.id === ATELIER_BRAND_ID)
+  const { snapshot: fixed, queryKey: fixedKey } = useWarehouseFixedLocationSnapshot(ATELIER_BRAND_ID, hasNames && fixedBrandSelected)
+  const fixedRows = (fixedBrandSelected ? fixed.data?.rows : undefined) ?? emptyList()
   const sets = useQueries({
     queries: selectedBrands.map(brand => ({
       queryKey: ['warehouse-inventory-set', brand.id],
@@ -49,13 +55,15 @@ export function useRoomListWarehouseLocations(hasNames: boolean) {
     }
     return index
   }, [stock])
+  const locationCodes = useMemo(() => roomListLocationCodes(fixedRows, locations), [fixedRows, locations])
 
   return {
-    locations,
-    loading: loading || sets.loading || stock.loading,
-    error: error || sets.error || stock.errorIndexes.length > 0,
+    locationCodes,
+    loading: loading || sets.loading || stock.loading || (fixedBrandSelected && fixed.isLoading),
+    error: error || sets.error || stock.errorIndexes.length > 0 || (fixedBrandSelected && fixed.isError),
     refresh: () => Promise.all([
       cache.invalidateQueries({ queryKey: ['brands'] }),
+      ...(fixedBrandSelected ? [cache.invalidateQueries({ queryKey: fixedKey, exact: true })] : []),
       ...selectedBrands.flatMap(brand => [
         cache.invalidateQueries({ queryKey: ['warehouse-inventory-set', brand.id] }),
         cache.invalidateQueries({ queryKey: ['warehouse-stock-positions', brand.id] }),

@@ -1,4 +1,5 @@
 import type { WarehouseStockPosition } from '@/lib/types'
+import type { FixedLocationRow } from '@/lib/supabase/warehouse-fixed-locations'
 import {
   EMPTY_WAREHOUSE_LOCATION_CODE,
   FORCED_PRIORITY_DATE,
@@ -59,4 +60,27 @@ export function indexRoomListLocations(positions: readonly WarehouseStockPositio
     }))
   }
   return groups
+}
+
+export function roomListLocationCodes(
+  fixedRows: readonly FixedLocationRow[],
+  warehouseLocations: ReadonlyMap<string, readonly WarehouseStockPosition[]>,
+) {
+  const groups = new Map<string, Set<string>>()
+  function add(name: string, code: string) {
+    const group = groups.get(name)
+    if (group) group.add(code)
+    else groups.set(name, new Set([code]))
+  }
+
+  for (const row of fixedRows) {
+    const name = roomListProductName(row.productName)
+    const code = row.location.trim()
+    if (name && code && code !== '0-0-0' && code !== EMPTY_WAREHOUSE_LOCATION_CODE) add(name, code)
+  }
+  for (const [name, positions] of warehouseLocations) {
+    for (const position of positions) add(name, position.locationCode.trim())
+  }
+
+  return new Map(Array.from(groups, ([name, codes]) => [name, [...codes]]))
 }
