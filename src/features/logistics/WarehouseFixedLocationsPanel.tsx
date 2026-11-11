@@ -1,43 +1,68 @@
 import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Button } from '@/components/ui/button'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { Input } from '@/components/ui/input'
 import { useAuth } from '@/lib/supabase/auth'
-import { readWarehouseFixedLocations, type FixedLocationRow } from '@/lib/supabase/warehouse-fixed-locations'
+import { requestWarehouseFixedLocations, type FixedLocationSnapshot } from '@/lib/supabase/warehouse-fixed-locations'
 
 const PAGE_SIZE = 50
+const SYNC_TIME_FORMAT = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: 'Asia/Seoul',
+  dateStyle: 'short',
+  timeStyle: 'short',
+})
 
 export function WarehouseFixedLocationsPanel({ brandId }: { brandId: string }) {
   const { session } = useAuth()
-  return <FixedLocationList key={session?.user.id} brandId={brandId} />
+  if (!session) return null
+  return <FixedLocationList key={session.user.id} brandId={brandId} userId={session.user.id} />
 }
 
-function FixedLocationList({ brandId }: { brandId: string }) {
-  const [rows, setRows] = useState<FixedLocationRow[] | null>(null)
+function FixedLocationList({ brandId, userId }: { brandId: string; userId: string }) {
+  const active = useWorkspaceTabActivity()
+  const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
-  const readSheet = useMutation({
-    mutationFn: () => readWarehouseFixedLocations(brandId),
-    onSuccess: (nextRows) => {
-      setRows(nextRows)
-      setPage(1)
+  const queryKey = ['warehouse-fixed-location-snapshot', brandId, userId] as const
+  const snapshot = useQuery({
+    queryKey,
+    queryFn: () => requestWarehouseFixedLocations(brandId, 'read', queryClient.getQueryData<FixedLocationSnapshot>(queryKey)),
+    enabled: active,
+    refetchInterval: active ? 60_000 : false,
+    retry: false,
+  })
+  const syncSheet = useMutation({
+    mutationFn: () => requestWarehouseFixedLocations(brandId, 'sync'),
+    onSuccess: async (next) => {
+      await queryClient.cancelQueries({ queryKey, exact: true })
+      queryClient.setQueryData<typeof next>(queryKey, (current) =>
+        current?.syncedAt && next.syncedAt && Date.parse(current.syncedAt) > Date.parse(next.syncedAt) ? current : next,
+      )
     },
   })
 
+  const syncedAt = snapshot.data?.syncedAt
+  const rows = syncedAt ? snapshot.data?.rows : undefined
+  const error = syncSheet.error ?? snapshot.error
   const term = search.trim().toLowerCase()
   const filteredRows = rows?.filter(({ productName, location }) =>
     productName.toLowerCase().includes(term) || location.toLowerCase().includes(term),
   )
   const pageCount = Math.max(1, Math.ceil((filteredRows?.length ?? 0) / PAGE_SIZE))
-  const visibleRows = filteredRows?.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const currentPage = Math.min(page, pageCount)
+  const visibleRows = filteredRows?.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
 
   return (
     <>
       <FilterBar>
-        <Button type="button" disabled={readSheet.isPending} onClick={() => readSheet.mutate()}>
-          {readSheet.isPending ? '불러오는 중…' : rows ? '새로 불러오기' : '구글 시트에서 불러오기'}
+        <Button type="button" disabled={syncSheet.isPending} onClick={() => syncSheet.mutate()}>
+          {syncSheet.isPending ? '동기화 중…' : '지금 동기화'}
         </Button>
+        <span className="text-sm text-muted-foreground" role="status">
+          {syncedAt ? <>마지막 동기화 <time dateTime={syncedAt}>{SYNC_TIME_FORMAT.format(new Date(syncedAt))}</time></> : '마지막 동기화 기록 없음'}
+        </span>
         {rows ? (
           <Input
             aria-label="상품명 또는 고정 자리 검색"
@@ -51,15 +76,15 @@ function FixedLocationList({ brandId }: { brandId: string }) {
           />
         ) : null}
       </FilterBar>
-      {readSheet.isError ? (
+      {error ? (
         <p role="alert" className="mb-3 text-sm text-danger">
-          {readSheet.error.message}
+          {error.message}
           {rows ? ' 마지막으로 불러온 목록을 표시합니다.' : ''}
         </p>
       ) : null}
-      {rows === null ? (
+      {rows === undefined ? (
         <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-          ‘1+1 이름변경’ 시트에서 상품명과 고정 자리를 불러옵니다.
+          {snapshot.isLoading ? '저장된 고정 자리 목록을 불러오는 중…' : '아직 동기화된 고정 자리 목록이 없습니다.'}
         </p>
       ) : visibleRows?.length ? (
         <>
@@ -85,9 +110,9 @@ function FixedLocationList({ brandId }: { brandId: string }) {
             <span role="status" className="text-muted-foreground">{filteredRows?.length.toLocaleString()}건</span>
             {pageCount > 1 ? (
               <div className="flex items-center gap-2">
-                <Button type="button" variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(page - 1)}>이전</Button>
-                <span>{page} / {pageCount}</span>
-                <Button type="button" variant="outline" size="sm" disabled={page === pageCount} onClick={() => setPage(page + 1)}>다음</Button>
+                <Button type="button" variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>이전</Button>
+                <span>{currentPage} / {pageCount}</span>
+                <Button type="button" variant="outline" size="sm" disabled={currentPage === pageCount} onClick={() => setPage(currentPage + 1)}>다음</Button>
               </div>
             ) : null}
           </div>

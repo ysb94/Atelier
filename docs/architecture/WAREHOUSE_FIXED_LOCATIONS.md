@@ -1,0 +1,13 @@
+# 창고 고정 자리 시트 동기화
+
+`1+1 이름변경!G2:H`의 표시값을 읽는다. G는 상품명, H는 고정 자리다. 두 칸이 모두 빈 행은 제외하고, 자리번호의 기호와 앞자리 0은 그대로 둔다.
+
+예약 실행은 5분마다 시트를 한 번 읽는다. 시트 조회와 저장이 성공하면 마지막 동기화 시각을 갱신한다. 목록 값이 바뀐 경우에만 목록을 교체하며, 더 늦게 완료된 오래된 읽기는 건너뛴다. 시트 조회가 실패하면 마지막 저장 목록과 시각을 보존한다. 열린 고정 자리 탭은 저장된 목록을 확인하며 목록이 동일할 때는 시각만 받는다.
+
+## 공유 환경 연결
+
+1. 회사 Google Cloud 프로젝트에서 Sheets API를 켜고 이 연결에 사용할 서비스 계정을 준비한다. 해당 이메일을 원본 스프레드시트에 **뷰어**로 추가한다.
+2. Supabase Edge Function 비밀 설정에 서비스 계정 JSON을 `WAREHOUSE_FIXED_SHEETS_SERVICE_ACCOUNT`로 등록한다. 예약 실행 전용 무작위 32바이트 값을 소문자 16진수로 만들어 `WAREHOUSE_FIXED_LOCATIONS_CRON_SECRET`에도 등록한다. 키 파일이나 토큰을 Git과 채팅에 올리지 않는다.
+3. 승인된 환경에 `20261111032338_warehouse_fixed_locations_sync.sql`만 적용한다. 공통 화면 접근 규칙을 함께 묶도록 저장소 루트에서 `supabase functions deploy warehouse-fixed-locations --use-api --project-ref <승인된 프로젝트 ID>`로 배포한다.
+4. Atelier에서 로그인해 고정 자리의 **지금 동기화**가 성공하는지 확인한다. 예약 실행을 켜려면 Supabase Vault에 프로젝트 API 주소를 `warehouse_fixed_locations_project_url`로, 2단계와 같은 예약 실행 전용 값을 `warehouse_fixed_locations_cron_secret`으로 등록한다. 두 값이 준비되기 전에는 예약 요청을 보내지 않는다.
+5. 시트에 변경이 없어도 다음 예약 실행 후 마지막 동기화 시각이 전진하는지 확인한다. 예약 실행만 멈추려면 `atelier-warehouse-fixed-locations` 작업을 비활성화한다.

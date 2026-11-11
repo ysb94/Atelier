@@ -20,7 +20,8 @@ verify_jwt = true
 verify_jwt = false
 
 [functions.warehouse-fixed-locations]
-verify_jwt = true
+# The function verifies a user session or the dedicated scheduler credential.
+verify_jwt = false
 
 [functions.extract-label-from-image]
 verify_jwt = true
