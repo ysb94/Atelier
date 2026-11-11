@@ -3,7 +3,7 @@ import { Printer } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { FilterTabs } from '@/components/ui/filter-tabs'
+import { FilterTabs, type FilterTab } from '@/components/ui/filter-tabs'
 import { Input } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
@@ -15,7 +15,7 @@ import { useRoomListWarehouseLocations } from './use-room-list-warehouse-locatio
 import { RoomListFolders } from './RoomListFolders'
 import { RoomListRoomGroups } from './RoomListRoomGroups'
 import { RoomListPickingPanel, RoomListPickingPrintPreview, type RoomPickingRoom } from './RoomListPickingPanel'
-import { loadRoomGroups, roomForLocation, saveRoomGroups, type RoomGroup } from './room-list-rooms'
+import { loadRoomGroups, roomForLocation, roomListFloor, saveRoomGroups, type RoomGroup } from './room-list-rooms'
 
 const COLUMNS = ['상품명', '수량'] as const
 const MIN_ROWS = 8
@@ -73,14 +73,16 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
     }
     return [...missing, ...zero, ...regular]
   }, [rows, locationCodes, locationsReady, editingName])
+  const groupsByPrefix = useMemo(() => new Map(
+    roomGroups.flatMap(group => group.prefixes.map(prefix => [prefix, group] as const)),
+  ), [roomGroups])
   const rooms = useMemo(() => {
     const grouped = new Map<string, RoomPickingRoom>()
     if (!locationsReady) return grouped
-    const byPrefix = new Map(roomGroups.flatMap(group => group.prefixes.map(prefix => [prefix, group] as const)))
     for (const item of visibleRows) {
       if (!item.name) continue
       const location = item.matches?.[0] ?? ''
-      const { key, name } = roomForLocation(location, byPrefix)
+      const { key, name } = roomForLocation(location, groupsByPrefix)
       const current = grouped.get(key)
       const line = {
         id: item.sourceIndex,
@@ -97,12 +99,26 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       group.lines.sort((left, right) => compareWarehouseLocationCodeNatural(left.location, right.location))
     }
     return grouped
-  }, [locationsReady, roomGroups, styleNumbers, visibleRows])
+  }, [locationsReady, groupsByPrefix, styleNumbers, visibleRows])
   const roomTabs = useMemo(() => [...rooms.values()].sort((a, b) =>
     Number(b.key === 'missing') - Number(a.key === 'missing') || ROOM_ORDER.compare(a.name, b.name),
   ), [rooms])
+  const roomTabsByFloor = useMemo(() => {
+    const tabs: Record<ReturnType<typeof roomListFloor>, FilterTab<string>[]> = { '1층': [], '2층': [], '그 외': [] }
+    for (const group of roomTabs) {
+      const floor = roomListFloor(group.lines[0]?.location, groupsByPrefix)
+      const total = sumRoomListQuantities(group.lines.map(line => line.quantity))
+      tabs[floor].push({
+        value: group.key,
+        label: group.name,
+        subtitle: total === null ? `${group.lines.length}종` : `${total}개`,
+      })
+    }
+    return tabs
+  }, [groupsByPrefix, roomTabs])
   const selectedRoom = room ?? roomTabs.find(item => item.key !== 'missing')?.key ?? roomTabs[0]?.key
   const currentRoom = selectedRoom ? rooms.get(selectedRoom) : undefined
+  const selectedTab = currentRoom?.key ?? 'all'
   const selectedPrintRoom = room ? currentRoom : undefined
   const printRooms = useMemo(() => {
     const selected = selectedPrintRoom ? [selectedPrintRoom] : roomTabs
@@ -204,15 +220,9 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <FilterTabs
           ariaLabel="방별 보기"
-          value={currentRoom?.key ?? 'all'}
+          value={selectedTab}
           onChange={setRoom}
-          tabs={[
-            { value: 'all', label: '전체' },
-            ...roomTabs.map(group => {
-              const total = sumRoomListQuantities(group.lines.map(line => line.quantity))
-              return { value: group.key, label: group.name, subtitle: total === null ? `${group.lines.length}종` : `${total}개` }
-            }),
-          ]}
+          tabs={[{ value: 'all', label: '전체' }]}
         />
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" aria-expanded={showGroups}
@@ -225,6 +235,19 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       </div>
       {showGroups && <RoomListRoomGroups groups={roomGroups} onChange={updateRoomGroups} />}
       {roomSaveFailed && <p role="status" className="mb-3 text-sm text-muted-foreground">방 묶음을 이 브라우저에 저장하지 못했습니다. 현재 화면에만 적용됩니다.</p>}
+      {roomTabs.length > 0 && (
+        <div className="mb-3 grid gap-2 lg:grid-cols-3">
+          {Object.entries(roomTabsByFloor).map(([floor, tabs]) => (
+            <Card key={floor} className="min-w-0 space-y-2 p-3">
+              <h2 className="text-sm font-semibold">{floor}</h2>
+              {tabs.length ? (
+                <FilterTabs ariaLabel={`${floor} 방`} value={selectedTab} onChange={setRoom} tabs={tabs}
+                  tabInteraction={() => ({ className: 'max-w-full wrap-anywhere' })} />
+              ) : <p className="text-sm text-muted-foreground">해당 방 없음</p>}
+            </Card>
+          ))}
+        </div>
+      )}
       {currentRoom ? <RoomListPickingPanel room={currentRoom} /> : <Card className="overflow-hidden">
         <div className="max-h-[65vh] overflow-auto">
           <table className="w-full table-fixed border-separate border-spacing-0 text-sm" style={{ minWidth: 352 + locationColumnCount * 112 }}>
