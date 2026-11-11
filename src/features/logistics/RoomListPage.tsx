@@ -1,4 +1,5 @@
 import { useMemo, useState, type ClipboardEvent } from 'react'
+import { Printer } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
@@ -7,11 +8,13 @@ import { Input } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
+import { compareWarehouseLocationCodeNatural } from '@/lib/invoice/product-list-warehouse'
 import { roomListProductName } from './room-list-locations'
-import { emptyRoomListRow, mergeRoomListRows, parseRoomListPaste, type RoomListRow } from './room-list-paste'
+import { emptyRoomListRow, mergeRoomListRows, parseRoomListPaste, sumRoomListQuantities, type RoomListRow } from './room-list-paste'
 import { useRoomListWarehouseLocations } from './use-room-list-warehouse-locations'
 import { RoomListFolders } from './RoomListFolders'
 import { RoomListRoomGroups } from './RoomListRoomGroups'
+import { RoomListPickingPanel, RoomListPickingPrintPreview, type RoomPickingRoom } from './RoomListPickingPanel'
 import { loadRoomGroups, roomForLocation, saveRoomGroups, type RoomGroup } from './room-list-rooms'
 
 const COLUMNS = ['상품명', '수량'] as const
@@ -45,12 +48,13 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
   const [feedback, setFeedback] = useState<{ message: string; error?: boolean } | null>(null)
   const [editingName, setEditingName] = useState<{ sourceIndex: number; name: string } | null>(null)
   const [roomGroups, setRoomGroups] = useState(() => loadRoomGroups(userId))
-  const [room, setRoom] = useState('all')
+  const [room, setRoom] = useState<string | null>(null)
   const [showGroups, setShowGroups] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const [roomSaveFailed, setRoomSaveFailed] = useState(false)
   const hasNames = rows.some(([name]) => Boolean(name.trim()))
   const warehouse = useRoomListWarehouseLocations(hasNames)
-  const { locationCodes } = warehouse
+  const { locationCodes, styleNumbers } = warehouse
   const locationsReady = !warehouse.error && !warehouse.loading
   const visibleRows = useMemo(() => {
     const missing = []
@@ -70,24 +74,30 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
     return [...missing, ...zero, ...regular]
   }, [rows, locationCodes, locationsReady, editingName])
   const rooms = useMemo(() => {
-    const grouped = new Map<string, { name: string; rows: typeof visibleRows }>()
+    const grouped = new Map<string, RoomPickingRoom>()
     if (!locationsReady) return grouped
     const byPrefix = new Map(roomGroups.flatMap(group => group.prefixes.map(prefix => [prefix, group] as const)))
     for (const item of visibleRows) {
       if (!item.name) continue
-      const { key, name } = roomForLocation(item.matches?.[0], byPrefix)
+      const location = item.matches?.[0] ?? ''
+      const { key, name } = roomForLocation(location, byPrefix)
       const current = grouped.get(key)
-      if (current) current.rows.push(item)
-      else grouped.set(key, { name, rows: [item] })
+      const line = { id: item.sourceIndex, name: item.name, quantity: item.row[1], location, styleNo: styleNumbers.get(item.name) ?? '' }
+      if (current) current.lines.push(line)
+      else grouped.set(key, { key, name, lines: [line] })
+    }
+    for (const group of grouped.values()) {
+      group.lines.sort((left, right) => compareWarehouseLocationCodeNatural(left.location, right.location))
     }
     return grouped
-  }, [locationsReady, roomGroups, visibleRows])
-  const currentRoom = rooms.get(room)
-  const displayedRows = currentRoom?.rows ?? visibleRows
-  const roomTabs = [...rooms].sort(([keyA, a], [keyB, b]) =>
-    Number(keyB === 'missing') - Number(keyA === 'missing') || ROOM_ORDER.compare(a.name, b.name),
+  }, [locationsReady, roomGroups, styleNumbers, visibleRows])
+  const roomTabs = [...rooms.values()].sort((a, b) =>
+    Number(b.key === 'missing') - Number(a.key === 'missing') || ROOM_ORDER.compare(a.name, b.name),
   )
-  const locationColumnCount = displayedRows.reduce(
+  const selectedRoom = room ?? roomTabs.find(item => item.key !== 'missing')?.key ?? roomTabs[0]?.key
+  const currentRoom = selectedRoom ? rooms.get(selectedRoom) : undefined
+  const printRooms = currentRoom ? [currentRoom] : roomTabs
+  const locationColumnCount = visibleRows.reduce(
     (count, { matches }) => Math.max(count, matches?.length ?? 0), 1,
   )
   const locationColumns = Array.from({ length: locationColumnCount }, (_, index) => index)
@@ -95,7 +105,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
   function updateRoomGroups(groups: RoomGroup[]) {
     setRoomGroups(groups)
     setRoomSaveFailed(!saveRoomGroups(userId, groups))
-    setRoom('all')
+    setRoom(null)
   }
 
   function changeCell(rowIndex: number, column: number, value: string) {
@@ -173,19 +183,28 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
         <FilterTabs
           ariaLabel="방별 보기"
-          value={currentRoom ? room : 'all'}
+          value={currentRoom?.key ?? 'all'}
           onChange={setRoom}
           tabs={[
             { value: 'all', label: '전체' },
-            ...roomTabs.map(([key, group]) => ({ value: key, label: group.name, count: group.rows.length })),
+            ...roomTabs.map(group => {
+              const total = sumRoomListQuantities(group.lines.map(line => line.quantity))
+              return { value: group.key, label: group.name, subtitle: total === null ? `${group.lines.length}종` : `${total}개` }
+            }),
           ]}
         />
-        <Button type="button" variant="outline" size="sm" aria-expanded={showGroups}
-          onClick={() => setShowGroups(current => !current)}>방 묶기</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" variant="outline" size="sm" aria-expanded={showGroups}
+            onClick={() => setShowGroups(current => !current)}>방 묶기</Button>
+          <Button type="button" variant="outline" size="sm" disabled={!printRooms.length}
+            onClick={() => setPreviewOpen(true)}>
+            <Printer aria-hidden="true" className="size-4" /> 미리보기 및 출력
+          </Button>
+        </div>
       </div>
       {showGroups && <RoomListRoomGroups groups={roomGroups} onChange={updateRoomGroups} />}
       {roomSaveFailed && <p role="status" className="mb-3 text-sm text-muted-foreground">방 묶음을 이 브라우저에 저장하지 못했습니다. 현재 화면에만 적용됩니다.</p>}
-      <Card className="overflow-hidden">
+      {currentRoom ? <RoomListPickingPanel room={currentRoom} /> : <Card className="overflow-hidden">
         <div className="max-h-[65vh] overflow-auto">
           <table className="w-full table-fixed border-separate border-spacing-0 text-sm" style={{ minWidth: 352 + locationColumnCount * 112 }}>
             <caption className="sr-only">방별리스트 상품명·수량·창고 위치</caption>
@@ -204,7 +223,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
               </tr>
             </thead>
             <tbody>
-              {displayedRows.map(({ row, sourceIndex, name, matches }, rowIndex) => (
+              {visibleRows.map(({ row, sourceIndex, name, matches }, rowIndex) => (
                   <tr key={sourceIndex}>
                     <th scope="row" className="border-b border-r border-border bg-muted/50 px-2 text-center font-normal tabular-nums text-muted-foreground">{rowIndex + 1}</th>
                     {COLUMNS.map((label, column) => (
@@ -215,13 +234,12 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
                           inputMode={column === 1 ? 'numeric' : undefined}
                           className={`rounded-none border-0 bg-transparent shadow-none focus-visible:bg-card focus-visible:ring-inset ${column === 1 ? 'text-right tabular-nums' : ''}`}
                           value={row[column]}
-                          readOnly={Boolean(currentRoom)}
                           onBlur={column === 0 ? () => setEditingName(null) : undefined}
                           onChange={event => {
                             if (column === 0 && editingName?.sourceIndex !== sourceIndex) setEditingName({ sourceIndex, name })
                             changeCell(sourceIndex, column, event.target.value)
                           }}
-                          onPaste={currentRoom ? undefined : event => pasteCells(event, rowIndex, column)}
+                          onPaste={event => pasteCells(event, rowIndex, column)}
                           onKeyDown={event => {
                             if (event.key !== 'Enter' || event.nativeEvent.isComposing) return
                             const currentRow = event.currentTarget.closest('tr')
@@ -246,11 +264,14 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
             </tbody>
           </table>
         </div>
-        {!currentRoom && <div className="flex flex-wrap items-center gap-3 p-3">
+        <div className="flex flex-wrap items-center gap-3 p-3">
           <Button type="button" size="sm" variant="outline" onClick={() => setRows(current => [...current, emptyRoomListRow()])}>행 추가</Button>
           <p role="status" className={feedback?.error ? 'text-sm text-danger' : 'text-sm text-muted-foreground'}>{feedback?.message}</p>
-        </div>}
-      </Card>
+        </div>
+      </Card>}
+      {previewOpen && printRooms.length > 0 && (
+        <RoomListPickingPrintPreview rooms={printRooms} onClose={() => setPreviewOpen(false)} />
+      )}
     </>
   )
 }

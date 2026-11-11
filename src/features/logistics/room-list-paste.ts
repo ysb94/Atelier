@@ -66,6 +66,16 @@ function formatQuantity({ units, places }: QuantityTotal) {
   return `${units < 0n ? '-' : ''}${whole}${fraction ? `.${fraction}` : ''}`
 }
 
+export function sumRoomListQuantities(quantities: Iterable<string>) {
+  let total: QuantityTotal = { units: 0n, places: 0 }
+  for (const quantity of quantities) {
+    const value = quantity.trim()
+    if (!value) continue
+    if (!isRoomListQuantity(value)) return null
+    total = addQuantity(total, value)
+  }
+  return formatQuantity(total)
+}
 
 /** 빈 수량은 합계에서 건너뛰며, 숫자가 아닌 값은 행을 지우기 전에 알려준다. */
 export function mergeRoomListRows(rows: RoomListRow[]) {

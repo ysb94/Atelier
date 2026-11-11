@@ -1,0 +1,41 @@
+.room-list-picking-print {
+  display: none;
+}
+
+@media print {
+  @page room-list-picking-sheet {
+    size: A4 portrait;
+    margin: 10mm 8mm 12mm;
+  }
+
+  html.printing-room-list-picking body > :not(.room-list-picking-print) {
+    display: none !important;
+  }
+
+  html.printing-room-list-picking .room-list-picking-print {
+    display: block;
+    page: room-list-picking-sheet;
+    color: black;
+  }
+
+  .room-list-picking-print .room-list-picking-sheet + .room-list-picking-sheet {
+    break-before: page;
+  }
+
+  .room-list-picking-print .room-list-picking-table {
+    width: 100%;
+    min-width: 0;
+    table-layout: fixed;
+  }
+
+  .room-list-picking-print .room-list-picking-table thead {
+    position: static;
+    color: black;
+    background: none;
+  }
+
+  .room-list-picking-print .room-list-picking-table tr {
+    break-inside: avoid;
+    border-bottom: .4pt solid #999;
+  }
+}
