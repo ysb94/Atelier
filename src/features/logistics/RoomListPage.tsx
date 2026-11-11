@@ -4,16 +4,38 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { useAuth } from '@/lib/supabase/auth'
+import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { roomListProductName } from './room-list-locations'
 import { emptyRoomListRow, mergeRoomListRows, parseRoomListPaste, type RoomListRow } from './room-list-paste'
 import { useRoomListWarehouseLocations } from './use-room-list-warehouse-locations'
+import { RoomListFolders } from './RoomListFolders'
 
 const COLUMNS = ['상품명', '수량'] as const
 const MIN_ROWS = 8
 
 export function RoomListPage() {
   useRenderWatch('RoomListPage')
-  const [rows, setRows] = useState<RoomListRow[]>(() => Array.from({ length: MIN_ROWS }, emptyRoomListRow))
+  const { session } = useAuth()
+  const { selectedBrands } = useCompanyBrandScope()
+  if (!session) return null
+  const userId = session.user.id
+  return <RoomListWorkspace key={[userId, ...selectedBrands.map(brand => brand.id)].join(':')} userId={userId} />
+}
+
+function RoomListWorkspace({ userId }: { userId: string }) {
+  const [opened, setOpened] = useState<{ rows: RoomListRow[]; count: number } | null>(null)
+  return opened
+    ? <RoomListGrid initialRows={opened.rows} folderCount={opened.count} onBack={() => setOpened(null)} />
+    : <RoomListFolders userId={userId} onOpen={(rows, count) => setOpened({ rows, count })} />
+}
+
+function RoomListGrid({ initialRows, folderCount, onBack }: { initialRows: RoomListRow[]; folderCount: number; onBack: () => void }) {
+  useRenderWatch('RoomListGrid')
+  const [rows, setRows] = useState<RoomListRow[]>(() => [
+    ...initialRows,
+    ...Array.from({ length: Math.max(0, MIN_ROWS - initialRows.length) }, emptyRoomListRow),
+  ])
   const [feedback, setFeedback] = useState<{ message: string; error?: boolean } | null>(null)
   const [editingName, setEditingName] = useState<{ sourceIndex: number; name: string } | null>(null)
   const hasNames = rows.some(([name]) => Boolean(name.trim()))
@@ -105,7 +127,8 @@ export function RoomListPage() {
     <>
       <PageHeader
         title="방별리스트"
-        description="엑셀의 상품명과 수량을 붙여넣으면 같은 상품의 수량을 자동으로 합칩니다."
+        description={`폴더 ${folderCount.toLocaleString('ko-KR')}개의 상품과 수량을 합친 목록입니다.`}
+        actions={<Button type="button" variant="outline" onClick={onBack}>폴더 목록</Button>}
       />
       {hasNames && warehouse.error && (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-danger" role="alert">

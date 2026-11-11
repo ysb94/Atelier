@@ -42,6 +42,10 @@ export function emptyRoomListRow(): RoomListRow {
   return ['', '']
 }
 
+export function isRoomListQuantity(value: string) {
+  return /^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(value)
+}
+
 type QuantityTotal = { units: bigint; places: number }
 
 function addQuantity(total: QuantityTotal, value: string): QuantityTotal {
@@ -85,7 +89,7 @@ export function mergeRoomListRows(rows: RoomListRow[]) {
       quantities.unshift({ value: merged[first][1].trim(), inputIndex: firstRow.inputIndex })
     }
     for (const { value, inputIndex } of quantities) {
-      if (value && !/^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(value)) {
+      if (value && !isRoomListQuantity(value)) {
         return { invalidRow: inputIndex + 1 } as const
       }
       if (value) totals.set(first, addQuantity(totals.get(first) ?? { units: 0n, places: 0 }, value))
