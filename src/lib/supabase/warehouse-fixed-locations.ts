@@ -1,12 +1,7 @@
 import { FunctionsFetchError, FunctionsHttpError } from '@supabase/supabase-js'
 import { diagnosticOperation } from '@/lib/diagnostics'
 import { getSupabase } from '@/lib/supabase/client'
-
-export type FixedLocationRow = {
-  sheetRow: number
-  productName: string
-  location: string
-}
+import type { FixedLocationRow } from '@/lib/warehouse/fixed-location-styles'
 
 export type FixedLocationSnapshot = {
   rows: FixedLocationRow[]

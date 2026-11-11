@@ -39,8 +39,8 @@ function FixedLocationList({ brandId }: { brandId: string }) {
   const rows = syncedAt ? snapshot.data?.rows : undefined
   const error = syncSheet.error ?? snapshot.error
   const term = search.trim().toLowerCase()
-  const filteredRows = rows?.filter(({ productName, location }) =>
-    productName.toLowerCase().includes(term) || location.toLowerCase().includes(term),
+  const filteredRows = rows?.filter(({ productName, location, styleNo }) =>
+    productName.toLowerCase().includes(term) || location.toLowerCase().includes(term) || styleNo?.toLowerCase().includes(term),
   )
   const pageCount = Math.max(1, Math.ceil((filteredRows?.length ?? 0) / PAGE_SIZE))
   const currentPage = Math.min(page, pageCount)
@@ -57,8 +57,8 @@ function FixedLocationList({ brandId }: { brandId: string }) {
         </span>
         {rows ? (
           <Input
-            aria-label="상품명 또는 고정 자리 검색"
-            placeholder="상품명 또는 고정 자리 검색"
+            aria-label="상품명·M번호·고정 자리 검색"
+            placeholder="상품명·M번호·고정 자리 검색"
             className="sm:max-w-xs"
             value={search}
             onChange={(event) => {
@@ -85,13 +85,15 @@ function FixedLocationList({ brandId }: { brandId: string }) {
               <thead className="bg-primary text-primary-foreground">
                 <tr>
                   <th scope="col" className="px-3 py-2">상품명</th>
+                  <th scope="col" className="px-3 py-2">M번호</th>
                   <th scope="col" className="w-1/3 px-3 py-2">고정 자리</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {visibleRows.map(({ sheetRow, productName, location }) => (
+                {visibleRows.map(({ sheetRow, productName, location, styleNo }) => (
                   <tr key={sheetRow}>
                     <td className="whitespace-pre-wrap px-3 py-2">{productName || '—'}</td>
+                    <td className="whitespace-nowrap px-3 py-2 tabular-nums">{styleNo || '—'}</td>
                     <td className="whitespace-pre-wrap px-3 py-2">{location || '—'}</td>
                   </tr>
                 ))}

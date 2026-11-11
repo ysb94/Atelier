@@ -8,7 +8,7 @@ import { combineListQueries, flattenListQueries } from '@/lib/query/list-queries
 import { getActiveWarehouseInventorySet, listWarehouseStockPositions } from '@/lib/supabase/warehouse-stock'
 import { emptyList } from '@/lib/utils'
 import type { WarehouseInventorySet, WarehouseStockPosition } from '@/lib/types'
-import { indexRoomListLocations, roomListLocationCodes, roomListProductName } from './room-list-locations'
+import { indexRoomListLocations, indexRoomListStyleNumbers, roomListLocationCodes } from './room-list-locations'
 import { useWarehouseFixedLocationSnapshot } from './use-warehouse-fixed-location-snapshot'
 
 function combineSets(results: UseQueryResult<WarehouseInventorySet | null>[]) {
@@ -48,26 +48,14 @@ export function useRoomListWarehouseLocations(hasNames: boolean) {
     const started = performance.now()
     const positions = flattenListQueries(stock)
     const index = indexRoomListLocations(positions)
-    const styleNumbers = new Map<string, string>()
-    const styleIdentities = new Map<string, string>()
-    for (const position of positions) {
-      const name = roomListProductName(position.styleName)
-      const styleNo = position.styleNo.trim()
-      if (!name || !position.styleId || !styleNo) continue
-      const identity = `${position.brandId}:${position.styleId}`
-      const existing = styleIdentities.get(name)
-      if (!existing) {
-        styleIdentities.set(name, identity)
-        styleNumbers.set(name, styleNo)
-      } else if (existing !== identity || styleNumbers.get(name) !== styleNo) styleNumbers.delete(name)
-    }
+    const styleNumbers = indexRoomListStyleNumbers(fixedRows, positions)
     const elapsed = Math.round(performance.now() - started)
     if (elapsed >= 200) {
       const log = elapsed >= 1000 ? console.warn : console.info
       log('[room-list] 창고 위치 정리', { elapsed, rows: positions.length })
     }
     return { locations: index, styleNumbers }
-  }, [stock])
+  }, [fixedRows, stock])
   const locationCodes = useMemo(() => roomListLocationCodes(fixedRows, locations), [fixedRows, locations])
 
   return {

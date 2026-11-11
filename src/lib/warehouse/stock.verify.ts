@@ -3,7 +3,9 @@
  * 실행: npm run verify:warehouse-stock
  */
 import { normalizeStyleNo } from '@/lib/import/transform'
+import { indexRoomListStyleNumbers, roomListLocationCodes } from '@/features/logistics/room-list-locations'
 import type { StyleRef } from '@/lib/types'
+import { linkFixedLocationStyles } from './fixed-location-styles'
 import {
   assignWarehouseUsageRanks,
   compareWarehouseUsageOrder,
@@ -215,6 +217,36 @@ assert(
   '잘못된 M번호는 이름 정규화로 바꾸지 않는다',
 )
 assert(nameFallback[3]?.styleId === null, '일치 없는 이름은 미연결이다')
+
+const fixedSheetRows = [
+  { sheetRow: 3, productName: `  ${'기어 업 다크그레이 M'.normalize('NFD')}  `, location: '02-01_A1' },
+  { sheetRow: 4, productName: '기어 업 다크그레이 L', location: '02-01_A2' },
+  { sheetRow: 5, productName: '중복 이름', location: '02-01_A3' },
+  { sheetRow: 6, productName: '슬림백 블랙', location: '02-01_A4' },
+]
+const linkedFixedRows = linkFixedLocationStyles(fixedSheetRows, [...styles, ...nameFallbackStyles])
+assert(linkedFixedRows[0].styleId === 's-m1360' && linkedFixedRows[0].styleNo === 'M1360', '고정 자리 전체 상품명이 일치하는 SKU의 M번호를 연결한다')
+assert(
+  linkedFixedRows[0].productName === fixedSheetRows[0].productName &&
+  linkedFixedRows[0].location === fixedSheetRows[0].location && linkedFixedRows[0].sheetRow === 3,
+  '연결 후에도 고정 자리 시트의 상품명·자리·행 번호를 보존한다',
+)
+assert(!linkedFixedRows[1].styleNo, '사이즈가 다른 SKU의 M번호를 연결하지 않는다')
+assert(linkedFixedRows[2].ambiguousStyle && !linkedFixedRows[2].styleNo, '같은 이름의 SKU가 여러 개면 고정 자리 M번호를 비운다')
+
+const roomStock = [
+  { styleName: '중복 이름', styleId: 's-dup-1', styleNo: 'M2001' },
+  { styleName: '슬림백 블랙', styleId: 's-m0487', styleNo: 'M0487' },
+]
+const roomNumbers = indexRoomListStyleNumbers(linkedFixedRows, roomStock)
+assert(roomNumbers.get('기어 업 다크그레이 M') === 'M1360', '활성 재고가 없는 고정 자리도 방별리스트에 M번호를 표시한다')
+assert(roomListLocationCodes(linkedFixedRows, new Map()).get('기어 업 다크그레이 M')?.[0] === '02-01_A1', '방별리스트에 원래 고정 자리를 표시한다')
+assert(roomNumbers.get('슬림백 블랙') === 'M0487', '두 출처가 같은 SKU를 가리키면 M번호 하나를 표시한다')
+assert(!roomNumbers.has('중복 이름'), '상품명이 모호하면 활성 재고의 번호도 고정 자리와 함께 표시하지 않는다')
+assert(indexRoomListStyleNumbers(fixedSheetRows, roomStock).get('슬림백 블랙') === 'M0487', '구버전 고정 자리 행과 기존 재고의 M번호를 읽는다')
+assert(!indexRoomListStyleNumbers(linkedFixedRows, [
+  { styleName: '슬림백 블랙', styleId: 's-other-brand', styleNo: 'M0487' },
+]).has('슬림백 블랙'), '이름과 M번호가 같아도 두 출처의 SKU가 다르면 표시하지 않는다')
 
 const ranked = assignWarehouseUsageRanks(
   prepared.map((row, index) => ({

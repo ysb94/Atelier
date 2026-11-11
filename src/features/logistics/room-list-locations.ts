@@ -1,5 +1,5 @@
 import type { WarehouseStockPosition } from '@/lib/types'
-import type { FixedLocationRow } from '@/lib/supabase/warehouse-fixed-locations'
+import { warehouseProductNameKey as roomListProductName, type FixedLocationRow } from '@/lib/warehouse/fixed-location-styles'
 import {
   EMPTY_WAREHOUSE_LOCATION_CODE,
   FORCED_PRIORITY_DATE,
@@ -12,9 +12,7 @@ import {
 const LOCATION_PREFIXES = '234$65#%89'
 const locationOrder = new Intl.Collator('ko-KR', { numeric: true })
 
-export function roomListProductName(name: string) {
-  return name.trim().normalize('NFC')
-}
+export { roomListProductName }
 
 function prefixOrder(code: string) {
   const rank = LOCATION_PREFIXES.indexOf(code.trim().charAt(0))
@@ -61,6 +59,37 @@ export function indexRoomListLocations(positions: readonly WarehouseStockPositio
     }))
   }
   return groups
+}
+
+export function indexRoomListStyleNumbers(
+  fixedRows: readonly FixedLocationRow[],
+  positions: readonly Pick<WarehouseStockPosition, 'styleId' | 'styleNo' | 'styleName'>[],
+) {
+  const matches = new Map<string, { styleId: string; styleNo: string } | null>()
+  function add(name: string, styleId: string | null | undefined, styleNo: string | undefined) {
+    const trimmedStyleNo = styleNo?.trim()
+    if (!name || !styleId || !trimmedStyleNo) return
+    const existing = matches.get(name)
+    if (existing === undefined) matches.set(name, { styleId, styleNo: trimmedStyleNo })
+    else if (existing && (existing.styleId !== styleId || existing.styleNo !== trimmedStyleNo)) matches.set(name, null)
+  }
+
+  for (const row of fixedRows) {
+    const code = row.location.trim()
+    if (!code || code === EMPTY_WAREHOUSE_LOCATION_CODE) continue
+    const name = roomListProductName(row.productName)
+    if (row.ambiguousStyle) matches.set(name, null)
+    else add(name, row.styleId, row.styleNo)
+  }
+  for (const position of positions) {
+    add(roomListProductName(position.styleName), position.styleId, position.styleNo)
+  }
+
+  const numbers = new Map<string, string>()
+  for (const [name, match] of matches) {
+    if (match) numbers.set(name, match.styleNo)
+  }
+  return numbers
 }
 
 export function roomListLocationCodes(
