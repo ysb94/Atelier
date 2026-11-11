@@ -82,7 +82,14 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       const location = item.matches?.[0] ?? ''
       const { key, name } = roomForLocation(location, byPrefix)
       const current = grouped.get(key)
-      const line = { id: item.sourceIndex, name: item.name, quantity: item.row[1], location, styleNo: styleNumbers.get(item.name) ?? '' }
+      const line = {
+        id: item.sourceIndex,
+        name: item.name,
+        quantity: item.row[1],
+        location,
+        nextLocation: item.matches?.[1],
+        styleNo: styleNumbers.get(item.name) ?? '',
+      }
       if (current) current.lines.push(line)
       else grouped.set(key, { key, name, lines: [line] })
     }

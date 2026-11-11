@@ -9,17 +9,32 @@ import { formatNumber } from '@/lib/utils'
 import { sumRoomListQuantities } from './room-list-paste'
 import './room-list-picking-print.css'
 
-export type RoomPickingLine = { id: number; name: string; quantity: string; location: string; styleNo: string }
+export type RoomPickingLine = {
+  id: number; name: string; quantity: string; location: string; nextLocation?: string; styleNo: string
+}
 export type RoomPickingRoom = { key: string; name: string; lines: RoomPickingLine[] }
 
 function pickingPages(room: RoomPickingRoom) {
-  const pageCount = Math.ceil(room.lines.length / INVOICE_PRODUCT_LIST_PRINT_ROWS)
-  return Array.from({ length: pageCount }, (_, index) => ({
+  const pages: RoomPickingLine[][] = []
+  let lines: RoomPickingLine[] = []
+  let rowCount = 0
+  for (const line of room.lines) {
+    const height = line.nextLocation ? 2 : 1
+    if (rowCount + height > INVOICE_PRODUCT_LIST_PRINT_ROWS) {
+      pages.push(lines)
+      lines = []
+      rowCount = 0
+    }
+    lines.push(line)
+    rowCount += height
+  }
+  if (lines.length) pages.push(lines)
+  return pages.map((pageLines, index) => ({
     room: room.name,
     key: `${room.key}:${index}`,
     number: index + 1,
-    pageCount,
-    lines: room.lines.slice(index * INVOICE_PRODUCT_LIST_PRINT_ROWS, (index + 1) * INVOICE_PRODUCT_LIST_PRINT_ROWS),
+    pageCount: pages.length,
+    lines: pageLines,
   }))
 }
 
@@ -40,7 +55,10 @@ function PickingTable({ lines }: { lines: RoomPickingLine[] }) {
         {lines.map(line => (
           <tr key={line.id} className="border-b border-border/70">
             <td className="px-3 py-1.5 tabular-nums">{line.styleNo || '—'}</td>
-            <td className="break-all px-3 py-1.5">{line.location || '위치 없음'}</td>
+            <td className="break-all px-3 py-1.5">
+              <div>{line.location || '위치 없음'}</div>
+              {line.nextLocation && <div className="text-muted-foreground">{line.nextLocation}</div>}
+            </td>
             <td className="break-words px-3 py-1.5">{line.name}</td>
             <td className="px-3 py-1.5 text-right tabular-nums">{line.quantity || '—'}</td>
           </tr>
