@@ -233,6 +233,9 @@ assert(
 )
 assert(!linkedFixedRows[1].styleNo, '사이즈가 다른 SKU의 M번호를 연결하지 않는다')
 assert(linkedFixedRows[2].ambiguousStyle && !linkedFixedRows[2].styleNo, '같은 이름의 SKU가 여러 개면 고정 자리 M번호를 비운다')
+const oldFixedRow = { ...fixedSheetRows[0], styleId: 'old-sku', styleNo: 'M9999' }
+assert(linkFixedLocationStyles([oldFixedRow], nameFallbackStyles)[0].styleNo === 'M1360', '저장된 고정 자리 행에 번호가 있어도 현재 상품 원본을 조회한다')
+assert(!linkFixedLocationStyles([oldFixedRow], [])[0].styleNo, '상품을 조회할 수 없으면 저장된 행의 예전 M번호를 표시하지 않는다')
 
 const roomStock = [
   { styleName: '중복 이름', styleId: 's-dup-1', styleNo: 'M2001' },

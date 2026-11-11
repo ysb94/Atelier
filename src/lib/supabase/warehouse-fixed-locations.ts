@@ -1,10 +1,10 @@
 import { FunctionsFetchError, FunctionsHttpError } from '@supabase/supabase-js'
 import { diagnosticOperation } from '@/lib/diagnostics'
 import { getSupabase } from '@/lib/supabase/client'
-import type { FixedLocationRow } from '@/lib/warehouse/fixed-location-styles'
+import type { FixedLocationSheetRow } from '@/lib/warehouse/fixed-location-styles'
 
 export type FixedLocationSnapshot = {
-  rows: FixedLocationRow[]
+  rows: FixedLocationSheetRow[]
   revision: string | null
   syncedAt: string | null
 }
@@ -25,7 +25,7 @@ export function requestWarehouseFixedLocations(
   const operation = action === 'read' ? 'read_warehouse_fixed_locations' : 'sync_warehouse_fixed_locations'
   return diagnosticOperation('app', operation, (trace) =>
     trace.run(action === 'read' ? 'read_snapshot' : 'sync_sheet', async (context) => {
-      const { data, error } = await getSupabase().functions.invoke<Omit<FixedLocationSnapshot, 'rows'> & { rows: FixedLocationRow[] | null }>(
+      const { data, error } = await getSupabase().functions.invoke<Omit<FixedLocationSnapshot, 'rows'> & { rows: FixedLocationSheetRow[] | null }>(
         'warehouse-fixed-locations',
         {
           body: { brandId, action, knownRevision: previous?.revision },

@@ -1,5 +1,5 @@
 import type { Style, StyleInput, StyleRef, StyleStatus } from '@/lib/types'
-import type { DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
+import { tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { normalizeStyleNo } from '@/lib/import/transform'
 import { compactProductNameKey } from '@/lib/invoice/lookup-normalization'
 import {
@@ -442,17 +442,18 @@ export async function listStyleRefsForLookup(
  * 품목명 분해 매칭용. 브랜드 전체 StyleRef를 페이지로 읽는다.
  * id·style_no·name만 가져오므로 수천 건이어도 가볍다.
  */
-export async function listAllStyleRefs(brandId: string): Promise<StyleRef[]> {
+export async function listAllStyleRefs(brandId: string, context?: DiagnosticContext): Promise<StyleRef[]> {
   const supabase = getSupabase()
   const rows = await fetchAllPages<StyleRefRow>({
     pageSize: PAGE_SIZE,
     fetchPage: async (from, to, withCount) => {
-      const { data, error, count } = await supabase
+      const query = supabase
         .from('styles')
         .select('id, style_no, name', withCount ? { count: 'exact' } : undefined)
         .eq('brand_id', brandId)
         .order('style_no', { ascending: true })
         .range(from, to)
+      const { data, error, count } = await tracedQuery(query, context)
       if (error) {
         throw new StyleStoreError(
           errorMessage(error, '상품 마스터를 불러오지 못했습니다.'),

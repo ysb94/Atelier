@@ -8,6 +8,7 @@ import { combineListQueries, flattenListQueries } from '@/lib/query/list-queries
 import { getActiveWarehouseInventorySet, listWarehouseStockPositions } from '@/lib/supabase/warehouse-stock'
 import { emptyList } from '@/lib/utils'
 import type { WarehouseInventorySet, WarehouseStockPosition } from '@/lib/types'
+import type { FixedLocationRow } from '@/lib/warehouse/fixed-location-styles'
 import { indexRoomListLocations, indexRoomListStyleNumbers, roomListLocationCodes } from './room-list-locations'
 import { useWarehouseFixedLocationSnapshot } from './use-warehouse-fixed-location-snapshot'
 
@@ -24,8 +25,8 @@ export function useRoomListWarehouseLocations(hasNames: boolean) {
   const enabled = useWorkspaceTabActivity() && hasNames
   const cache = useQueryClient()
   const fixedBrandSelected = selectedBrands.some(brand => brand.id === ATELIER_BRAND_ID)
-  const { snapshot: fixed, queryKey: fixedKey } = useWarehouseFixedLocationSnapshot(ATELIER_BRAND_ID, hasNames && fixedBrandSelected)
-  const fixedRows = (fixedBrandSelected ? fixed.data?.rows : undefined) ?? emptyList()
+  const { snapshot: fixed, queryKey: fixedKey, rows: linkedRows, styleLookup, styleLookupKey } = useWarehouseFixedLocationSnapshot(ATELIER_BRAND_ID, hasNames && fixedBrandSelected)
+  const fixedRows = fixedBrandSelected ? linkedRows : emptyList<FixedLocationRow>()
   const sets = useQueries({
     queries: selectedBrands.map(brand => ({
       queryKey: ['warehouse-inventory-set', brand.id],
@@ -61,11 +62,15 @@ export function useRoomListWarehouseLocations(hasNames: boolean) {
   return {
     locationCodes,
     styleNumbers,
-    loading: loading || sets.loading || stock.loading || (fixedBrandSelected && fixed.isLoading),
+    loading: loading || sets.loading || stock.loading || (fixedBrandSelected && (fixed.isLoading || styleLookup.isLoading)),
     error: error || sets.error || stock.errorIndexes.length > 0 || (fixedBrandSelected && fixed.isError),
+    styleLookupError: fixedBrandSelected && styleLookup.isError,
     refresh: () => Promise.all([
       cache.invalidateQueries({ queryKey: ['brands'] }),
-      ...(fixedBrandSelected ? [cache.invalidateQueries({ queryKey: fixedKey, exact: true })] : []),
+      ...(fixedBrandSelected ? [
+        cache.invalidateQueries({ queryKey: fixedKey, exact: true }),
+        cache.invalidateQueries({ queryKey: styleLookupKey, exact: true }),
+      ] : []),
       ...selectedBrands.flatMap(brand => [
         cache.invalidateQueries({ queryKey: ['warehouse-inventory-set', brand.id] }),
         cache.invalidateQueries({ queryKey: ['warehouse-stock-positions', brand.id] }),

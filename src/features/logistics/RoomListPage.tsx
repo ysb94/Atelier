@@ -217,9 +217,9 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
         description={`폴더 ${folderCount.toLocaleString('ko-KR')}개의 상품과 수량을 합친 목록입니다.`}
         actions={<Button type="button" variant="outline" onClick={onBack}>폴더 목록</Button>}
       />
-      {hasNames && warehouse.error && (
+      {hasNames && (warehouse.error || warehouse.styleLookupError) && (
         <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-danger" role="alert">
-          일부 창고 위치를 불러오지 못했습니다.
+          {warehouse.error ? '일부 창고 위치를 불러오지 못했습니다.' : '고정 자리의 최신 M번호를 불러오지 못했습니다.'}
           <Button type="button" size="sm" variant="outline" onClick={() => void warehouse.refresh()}>다시 조회</Button>
         </div>
       )}

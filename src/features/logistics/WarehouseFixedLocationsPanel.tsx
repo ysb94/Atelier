@@ -3,6 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { FilterBar } from '@/components/ui/filter-bar'
 import { Input } from '@/components/ui/input'
+import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
 import { requestWarehouseFixedLocations } from '@/lib/supabase/warehouse-fixed-locations'
 import { useWarehouseFixedLocationSnapshot } from './use-warehouse-fixed-location-snapshot'
@@ -21,10 +22,11 @@ export function WarehouseFixedLocationsPanel({ brandId }: { brandId: string }) {
 }
 
 function FixedLocationList({ brandId }: { brandId: string }) {
+  useRenderWatch('WarehouseFixedLocationsPanel')
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
-  const { snapshot, queryKey } = useWarehouseFixedLocationSnapshot(brandId)
+  const { snapshot, queryKey, rows: linkedRows, styleLookup } = useWarehouseFixedLocationSnapshot(brandId)
   const syncSheet = useMutation({
     mutationFn: () => requestWarehouseFixedLocations(brandId, 'sync'),
     onSuccess: async (next) => {
@@ -36,7 +38,7 @@ function FixedLocationList({ brandId }: { brandId: string }) {
   })
 
   const syncedAt = snapshot.data?.syncedAt
-  const rows = syncedAt ? snapshot.data?.rows : undefined
+  const rows = syncedAt ? linkedRows : undefined
   const error = syncSheet.error ?? snapshot.error
   const term = search.trim().toLowerCase()
   const filteredRows = rows?.filter(({ productName, location, styleNo }) =>
@@ -55,6 +57,7 @@ function FixedLocationList({ brandId }: { brandId: string }) {
         <span className="text-sm text-muted-foreground" role="status">
           {syncedAt ? <>마지막 동기화 <time dateTime={syncedAt}>{SYNC_TIME_FORMAT.format(new Date(syncedAt))}</time></> : '마지막 동기화 기록 없음'}
         </span>
+        {styleLookup.isLoading && <span className="text-sm text-muted-foreground" role="status">M번호 조회 중…</span>}
         {rows ? (
           <Input
             aria-label="상품명·M번호·고정 자리 검색"
@@ -74,6 +77,12 @@ function FixedLocationList({ brandId }: { brandId: string }) {
           {rows ? ' 마지막으로 불러온 목록을 표시합니다.' : ''}
         </p>
       ) : null}
+      {styleLookup.isError && (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-sm text-danger" role="alert">
+          최신 M번호를 불러오지 못했습니다.
+          <Button type="button" size="sm" variant="outline" disabled={styleLookup.isFetching} onClick={() => void styleLookup.refetch()}>다시 조회</Button>
+        </div>
+      )}
       {rows === undefined ? (
         <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
           {snapshot.isLoading ? '저장된 고정 자리 목록을 불러오는 중…' : '아직 동기화된 고정 자리 목록이 없습니다.'}

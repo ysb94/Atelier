@@ -1,4 +1,4 @@
-import type { StyleRef } from '../types.ts'
+import type { StyleRef } from '@/lib/types'
 
 export type FixedLocationSheetRow = {
   sheetRow: number
@@ -26,8 +26,9 @@ export function linkFixedLocationStyles(
     if (name) byName.set(name, byName.has(name) ? null : style)
   }
 
-  return rows.map((row) => {
-    const match = byName.get(warehouseProductNameKey(row.productName))
+  return rows.map(({ sheetRow, productName, location }) => {
+    const row = { sheetRow, productName, location }
+    const match = byName.get(warehouseProductNameKey(productName))
     if (match === null) return { ...row, ambiguousStyle: true }
     if (!match || !match.styleNo.trim()) return row
     return { ...row, styleId: match.styleId, styleNo: match.styleNo.trim() }

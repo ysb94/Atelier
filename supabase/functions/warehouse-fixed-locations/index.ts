@@ -1,7 +1,5 @@
 import { createClient, type SupabaseClient } from 'npm:@supabase/supabase-js@2'
 import { releaseHref } from '../../../src/lib/company/release-access.ts'
-import type { StyleRef } from '../../../src/lib/types.ts'
-import { linkFixedLocationStyles, type FixedLocationRow, type FixedLocationSheetRow } from '../../../src/lib/warehouse/fixed-location-styles.ts'
 import { corsHeaders } from '../_shared/cors.ts'
 
 const BRAND_ID = 'b0000000-0000-4000-8000-000000000001'
@@ -9,8 +7,9 @@ const SPREADSHEET_ID = '1kkAtKT5tEjjatibloT36MTxIaXkUfIW32GJn1Nx_R_8'
 const FIRST_DATA_ROW = 3
 const RANGE = `'네임변경'!E${FIRST_DATA_ROW}:F`
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
-const STYLE_PAGE_SIZE = 1000
 const encoder = new TextEncoder()
+
+type FixedLocationRow = { sheetRow: number; productName: string; location: string }
 
 function json(status: number, payload: unknown) {
   return Response.json(payload, {
@@ -58,7 +57,7 @@ async function requestGoogleToken(credentials: string) {
   return { token: typeof access_token === 'string' ? access_token : null, status: response.status }
 }
 
-async function readSheet(token: string): Promise<{ rows: FixedLocationSheetRow[] } | { code: string }> {
+async function readSheet(token: string): Promise<{ rows: FixedLocationRow[] } | { code: string }> {
   const query = new URLSearchParams({ majorDimension: 'ROWS', valueRenderOption: 'FORMATTED_VALUE' })
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${SPREADSHEET_ID}/values/${encodeURIComponent(RANGE)}?${query}`
   const response = await fetch(url, {
@@ -79,26 +78,6 @@ async function readSheet(token: string): Promise<{ rows: FixedLocationSheetRow[]
   return { rows }
 }
 
-async function readStyleRefs(db: SupabaseClient): Promise<StyleRef[] | null> {
-  const styles: StyleRef[] = []
-  let lastId: string | undefined
-  for (;;) {
-    let page = db.from('styles').select('id, style_no, name')
-      .eq('brand_id', BRAND_ID).order('id').limit(STYLE_PAGE_SIZE)
-    if (lastId) page = page.gt('id', lastId)
-    const { data, error } = await page
-    if (error) {
-      console.warn('[warehouse-fixed-locations] SKU read failed', { code: error.code })
-      return null
-    }
-    for (const row of data) {
-      styles.push({ styleId: row.id, styleNo: row.style_no, name: row.name })
-    }
-    if (data.length < STYLE_PAGE_SIZE) return styles
-    lastId = data[data.length - 1].id
-  }
-}
-
 function matchesSchedulerSecret(token: string) {
   const secret = Deno.env.get('WAREHOUSE_FIXED_LOCATIONS_CRON_SECRET')
   if (!secret || secret.length !== 64 || token.length !== 64) return false
@@ -109,9 +88,7 @@ function matchesSchedulerSecret(token: string) {
   return difference === 0
 }
 
-async function readSnapshot(db: SupabaseClient, canReadStyles: boolean, knownRevision?: string) {
-  // Scope the cache revision so a change in access invalidates cached SKU fields.
-  const revisionForUser = (revision: string) => canReadStyles ? revision : `locations:${revision}`
+async function readSnapshot(db: SupabaseClient, knownRevision?: string) {
   if (knownRevision) {
     const { data, error } = await db.from('warehouse_fixed_location_snapshots')
       .select('content_revision, synced_at').eq('brand_id', BRAND_ID).maybeSingle()
@@ -119,8 +96,8 @@ async function readSnapshot(db: SupabaseClient, canReadStyles: boolean, knownRev
       console.warn('[warehouse-fixed-locations] Snapshot timestamp read failed', { code: error.code })
       return json(503, { code: 'storage_unavailable' })
     }
-    if (data && revisionForUser(data.content_revision) === knownRevision) {
-      return json(200, { rows: null, revision: knownRevision, syncedAt: data.synced_at })
+    if (data?.content_revision === knownRevision) {
+      return json(200, { rows: null, revision: data.content_revision, syncedAt: data.synced_at })
     }
   }
   const { data, error } = await db.from('warehouse_fixed_location_snapshots')
@@ -129,12 +106,7 @@ async function readSnapshot(db: SupabaseClient, canReadStyles: boolean, knownRev
     console.warn('[warehouse-fixed-locations] Snapshot read failed', { code: error.code })
     return json(503, { code: 'storage_unavailable' })
   }
-  const rows: FixedLocationRow[] = data?.rows ?? []
-  return json(200, {
-    rows: canReadStyles ? rows : rows.map(({ sheetRow, productName, location }) => ({ sheetRow, productName, location })),
-    revision: data ? revisionForUser(data.content_revision) : null,
-    syncedAt: data?.synced_at ?? null,
-  })
+  return json(200, { rows: data?.rows ?? [], revision: data?.content_revision ?? null, syncedAt: data?.synced_at ?? null })
 }
 
 async function checkUser(url: string, token: string) {
@@ -162,20 +134,14 @@ async function checkUser(url: string, token: string) {
     email: profile.email,
   }, '/logistics/warehouses')) return json(403, { code: 'forbidden' })
 
-  // Check the caller's access before creating the privileged client.
-  const [{ data: brand, error: brandError }, { data: visibleStyle, error: styleAccessError }] = await Promise.all([
-    supabase.from('brands').select('id').eq('id', BRAND_ID).eq('company_id', profile.company_id).maybeSingle(),
-    supabase.from('styles').select('id').eq('brand_id', BRAND_ID).limit(1).maybeSingle(),
-  ])
+  // Check the caller's brand access before creating the privileged client.
+  const { data: brand, error: brandError } = await supabase
+    .from('brands').select('id').eq('id', BRAND_ID).eq('company_id', profile.company_id).maybeSingle()
   if (brandError) {
     console.warn('[warehouse-fixed-locations] Brand permission check failed', { code: brandError.code })
     return json(503, { code: 'unavailable' })
   }
-  if (!brand) return json(403, { code: 'forbidden' })
-  if (styleAccessError) {
-    console.warn('[warehouse-fixed-locations] SKU permission check failed', { code: styleAccessError.code })
-  }
-  return { canReadStyles: Boolean(visibleStyle) && !styleAccessError }
+  return brand ? null : json(403, { code: 'forbidden' })
 }
 
 async function syncSheet(db: SupabaseClient) {
@@ -189,11 +155,9 @@ async function syncSheet(db: SupabaseClient) {
   const sourceReadStartedAt = new Date().toISOString()
   const result = await readSheet(google.token)
   if ('code' in result) return json(502, { code: result.code })
-  const styles = result.rows.length ? await readStyleRefs(db) : []
-  if (!styles) return json(503, { code: 'storage_unavailable' })
   const { error } = await db.rpc('save_warehouse_fixed_location_snapshot', {
     p_brand_id: BRAND_ID,
-    p_rows: linkFixedLocationStyles(result.rows, styles),
+    p_rows: result.rows,
     p_source_read_started_at: sourceReadStartedAt,
   })
   if (error) {
@@ -216,23 +180,21 @@ Deno.serve(async (request) => {
   }
   const url = Deno.env.get('SUPABASE_URL') ?? ''
   try {
-    let canReadStyles = false
     if (action === 'scheduled') {
       if (!matchesSchedulerSecret(token)) return json(403, { code: 'forbidden' })
     } else {
       if (input?.brandId !== BRAND_ID) return json(403, { code: 'forbidden' })
-      const access = await checkUser(url, token)
-      if (access instanceof Response) return access
-      canReadStyles = access.canReadStyles
+      const denied = await checkUser(url, token)
+      if (denied) return denied
     }
 
     const db = createClient(url, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '', {
       auth: { persistSession: false, autoRefreshToken: false },
     })
-    if (action === 'read') return await readSnapshot(db, canReadStyles, typeof input?.knownRevision === 'string' ? input.knownRevision : undefined)
+    if (action === 'read') return await readSnapshot(db, typeof input?.knownRevision === 'string' ? input.knownRevision : undefined)
     const failure = await syncSheet(db)
     if (failure) return failure
-    return action === 'scheduled' ? json(200, { ok: true }) : await readSnapshot(db, canReadStyles)
+    return action === 'scheduled' ? json(200, { ok: true }) : await readSnapshot(db)
   } catch (error) {
     console.warn('[warehouse-fixed-locations] Read failed', {
       timeout: error instanceof DOMException && error.name === 'TimeoutError',
