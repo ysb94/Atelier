@@ -1,6 +1,6 @@
-import { useRef, useState, type FormEvent } from 'react'
+import { useMemo, useRef, useState, type FormEvent } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Folder, Plus } from 'lucide-react'
+import { ChevronDown, ChevronRight, Folder, Plus } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
@@ -17,8 +17,11 @@ import {
 import { emptyRoomListRow, isRoomListQuantity, mergeRoomListRows, type RoomListRow } from './room-list-paste'
 import { RoomListFolderItems } from './RoomListFolderItems'
 
-const REGISTERED_AT = new Intl.DateTimeFormat('ko-KR', {
-  timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short',
+const REGISTERED_DATE = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: 'Asia/Seoul', year: 'numeric', month: 'long', day: 'numeric', weekday: 'short',
+})
+const REGISTERED_TIME = new Intl.DateTimeFormat('ko-KR', {
+  timeZone: 'Asia/Seoul', timeStyle: 'short',
 })
 
 type Draft = { brandId: string; title: string; rows: RoomListRow[] }
@@ -47,6 +50,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
   const cache = useQueryClient()
   const queryKey = ['warehouse-room-list-folders', userId, brandIds] as const
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [expandedDates, setExpandedDates] = useState<Record<string, boolean>>({})
   const [draft, setDraft] = useState<Draft | null>(null)
   const [validationError, setValidationError] = useState<string | null>(null)
   const draftRequestId = useRef<string | null>(null)
@@ -55,6 +59,17 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
     queryFn: () => listWarehouseRoomListFolders(brandIds),
     enabled: active && brandIds.length > 0,
   })
+  const today = REGISTERED_DATE.format()
+  const foldersByDate = useMemo(() => {
+    const groups = new Map<string, WarehouseRoomListFolder[]>()
+    for (const folder of folders.data ?? []) {
+      const date = REGISTERED_DATE.format(new Date(folder.created_at))
+      const group = groups.get(date)
+      if (group) group.push(folder)
+      else groups.set(date, [folder])
+    }
+    return [...groups]
+  }, [folders.data])
   const register = useMutation({
     mutationFn: createWarehouseRoomListFolder,
     onSuccess: async () => {
@@ -180,32 +195,54 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
             </Button>
           </div>
           {open.isError ? <p role="alert" className="mb-3 text-sm text-danger">선택한 폴더를 열지 못했습니다. 다시 시도해 주세요.</p> : null}
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {folders.data.map(folder => (
-              <Card key={folder.id}>
-                <label className="flex h-full cursor-pointer items-start gap-3 p-4">
-                  <input type="checkbox" className="mt-1 size-4 shrink-0 accent-primary" checked={selected.has(folder.id)}
-                    aria-label={`${folder.title} 선택`} disabled={open.isPending}
-                    onChange={event => {
-                      const checked = event.target.checked
-                      setSelected(current => {
-                        const next = new Set(current)
-                        if (checked) next.add(folder.id)
-                        else next.delete(folder.id)
-                        return next
-                      })
-                    }} />
-                  <Folder aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" />
-                  <div className="min-w-0">
-                    <div className="break-words font-medium">{folder.title}</div>
-                    <div className="mt-1 text-xs text-muted-foreground">
-                      {folder.created_by_name} · <time dateTime={folder.created_at}>{REGISTERED_AT.format(new Date(folder.created_at))}</time>
+          <div className="space-y-5">
+            {foldersByDate.map(([date, group]) => {
+              const isToday = date === today
+              const expanded = expandedDates[date] ?? isToday
+              const Chevron = expanded ? ChevronDown : ChevronRight
+              return (
+                <section key={date} className="border-t-2 border-border pt-2">
+                  <h2>
+                    <Button type="button" variant="ghost" aria-expanded={expanded}
+                      className="h-auto w-full justify-start gap-2 rounded-lg bg-muted/60 px-3 py-2.5"
+                      onClick={() => setExpandedDates(current => ({ ...current, [date]: !expanded }))}>
+                      <Chevron aria-hidden="true" className="size-4" />
+                      <span className="font-semibold">{date}{isToday ? ' · 오늘' : ''}</span>
+                      <span className="ml-auto text-xs text-muted-foreground">폴더 {group.length.toLocaleString('ko-KR')}개</span>
+                    </Button>
+                  </h2>
+                  {expanded && (
+                    <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                      {group.map(folder => (
+                        <Card key={folder.id}>
+                          <label className="flex h-full cursor-pointer items-start gap-3 p-4">
+                            <input type="checkbox" className="mt-1 size-4 shrink-0 accent-primary" checked={selected.has(folder.id)}
+                              aria-label={`${folder.title} 선택`} disabled={open.isPending}
+                              onChange={event => {
+                                const checked = event.target.checked
+                                setSelected(current => {
+                                  const next = new Set(current)
+                                  if (checked) next.add(folder.id)
+                                  else next.delete(folder.id)
+                                  return next
+                                })
+                              }} />
+                            <Folder aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-primary" />
+                            <div className="min-w-0">
+                              <div className="break-words font-medium">{folder.title}</div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                {folder.created_by_name} · <time dateTime={folder.created_at}>{REGISTERED_TIME.format(new Date(folder.created_at))}</time>
+                              </div>
+                              <div className="mt-1 text-xs text-muted-foreground">상품 {folder.item_count.toLocaleString('ko-KR')}개</div>
+                            </div>
+                          </label>
+                        </Card>
+                      ))}
                     </div>
-                    <div className="mt-1 text-xs text-muted-foreground">상품 {folder.item_count.toLocaleString('ko-KR')}개</div>
-                  </div>
-                </label>
-              </Card>
-            ))}
+                  )}
+                </section>
+              )
+            })}
           </div>
         </>
       ) : folders.isSuccess ? <p className="text-center text-sm text-muted-foreground">등록된 폴더가 없습니다.</p> : null}
