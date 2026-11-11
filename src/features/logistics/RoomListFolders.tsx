@@ -14,20 +14,20 @@ import {
   readWarehouseRoomListItems,
   type WarehouseRoomListFolder,
 } from '@/lib/supabase/warehouse-room-lists'
-import { isRoomListQuantity, mergeRoomListRows, parseRoomListPaste, type RoomListRow } from './room-list-paste'
+import { emptyRoomListRow, isRoomListQuantity, mergeRoomListRows, type RoomListRow } from './room-list-paste'
+import { RoomListFolderItems } from './RoomListFolderItems'
 
 const REGISTERED_AT = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', dateStyle: 'medium', timeStyle: 'short',
 })
 
-type Draft = { brandId: string; title: string; pastedText: string }
+type Draft = { brandId: string; title: string; rows: RoomListRow[] }
 
-function readDraftRows(text: string) {
+function readDraftRows(draftRows: RoomListRow[]) {
   const rows: RoomListRow[] = []
-  for (const [index, cells] of parseRoomListPaste(text).entries()) {
-    if (cells.length > 2) throw new Error('엑셀에서 상품명과 수량 두 열을 선택해 주세요.')
-    const name = cells[0]?.trim() ?? ''
-    const quantity = cells[1]?.trim() ?? ''
+  for (const [index, [productName, amount]] of draftRows.entries()) {
+    const name = productName.trim()
+    const quantity = amount.trim()
     if (!name && !quantity) continue
     if (!name) throw new Error(`${index + 1}행에 상품명을 입력해 주세요.`)
     if (quantity && !isRoomListQuantity(quantity)) throw new Error(`${index + 1}행의 수량을 숫자로 입력해 주세요.`)
@@ -103,7 +103,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
     const started = performance.now()
     let items: RoomListRow[]
     try {
-      items = readDraftRows(draft.pastedText)
+      items = readDraftRows(draft.rows)
     } catch (error) {
       setValidationError(error instanceof Error ? error.message : '붙여넣은 목록을 확인해 주세요.')
       return
@@ -123,7 +123,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
       <PageHeader title="방별리스트" description="저장한 폴더를 선택하면 상품과 수량을 합쳐 볼 수 있습니다." />
       <div className="mb-5 flex justify-center">
         {draft ? (
-          <Card className="w-full max-w-xl p-4 sm:p-5">
+          <Card className="w-full max-w-2xl p-4 sm:p-5">
             <form className="grid gap-3" onSubmit={submit}>
               {selectedBrands.length > 1 ? (
                 <label className="grid gap-1 text-sm font-medium">
@@ -139,13 +139,12 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
                 <Input value={draft.title} maxLength={120} disabled={register.isPending}
                   onChange={event => updateDraft({ ...draft, title: event.target.value })} />
               </label>
-              <label className="grid gap-1 text-sm font-medium">
-                상품명과 수량
-                <textarea rows={7} value={draft.pastedText} disabled={register.isPending}
-                  placeholder="엑셀에서 상품명과 수량 두 열을 복사해 붙여넣으세요."
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  onChange={event => updateDraft({ ...draft, pastedText: event.target.value })} />
-              </label>
+              <RoomListFolderItems
+                rows={draft.rows}
+                disabled={register.isPending}
+                onChange={rows => updateDraft({ ...draft, rows })}
+                onError={setValidationError}
+              />
               {validationError || register.isError ? (
                 <p role="alert" className="text-sm text-danger">{validationError ?? '목록을 등록하지 못했습니다. 다시 시도해 주세요.'}</p>
               ) : null}
@@ -157,7 +156,10 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
           </Card>
         ) : (
           <Button type="button" disabled={!brandIds.length}
-            onClick={() => { register.reset(); setDraft({ brandId: brandIds[0], title: '', pastedText: '' }) }}>
+            onClick={() => {
+              register.reset()
+              setDraft({ brandId: brandIds[0], title: '', rows: Array.from({ length: 6 }, emptyRoomListRow) })
+            }}>
             <Plus aria-hidden="true" className="size-4" /> 상품 추가
           </Button>
         )}
