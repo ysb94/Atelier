@@ -20,13 +20,14 @@ export function roomForLocation(location: string | undefined, groupsByPrefix?: R
   return { key: `prefix:${prefix}`, name: /^\d$/.test(prefix) ? `${prefix}번 방` : `${prefix} 방` }
 }
 
-export function roomListFloor(location: string | undefined, groupsByPrefix: ReadonlyMap<string, RoomGroup>) {
+export function roomListArea(location: string | undefined, groupsByPrefix: ReadonlyMap<string, RoomGroup>) {
   const [prefix] = normalizeRoomPrefix(location?.trim() ?? '')
   if (!prefix) return '그 외'
 
   const prefixes = groupsByPrefix.get(prefix)?.prefixes ?? [prefix]
   if (prefixes.every(value => FIRST_FLOOR_PREFIXES.has(value))) return '1층'
   if (prefixes.every(value => SECOND_FLOOR_PREFIXES.has(value))) return '2층'
+  if (prefixes.every(value => /^[A-Y]$/.test(value))) return '파우치'
   return '그 외'
 }
 

@@ -15,7 +15,7 @@ import { useRoomListWarehouseLocations } from './use-room-list-warehouse-locatio
 import { RoomListFolders } from './RoomListFolders'
 import { RoomListRoomGroups } from './RoomListRoomGroups'
 import { RoomListPickingPanel, RoomListPickingPrintPreview, type RoomPickingRoom } from './RoomListPickingPanel'
-import { loadRoomGroups, roomForLocation, roomListFloor, saveRoomGroups, type RoomGroup } from './room-list-rooms'
+import { loadRoomGroups, roomForLocation, roomListArea, saveRoomGroups, type RoomGroup } from './room-list-rooms'
 
 const COLUMNS = ['상품명', '수량'] as const
 const MIN_ROWS = 8
@@ -103,12 +103,12 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
   const roomTabs = useMemo(() => [...rooms.values()].sort((a, b) =>
     Number(b.key === 'missing') - Number(a.key === 'missing') || ROOM_ORDER.compare(a.name, b.name),
   ), [rooms])
-  const roomTabsByFloor = useMemo(() => {
-    const tabs: Record<ReturnType<typeof roomListFloor>, FilterTab<string>[]> = { '1층': [], '2층': [], '그 외': [] }
+  const roomTabsByArea = useMemo(() => {
+    const tabs: Record<ReturnType<typeof roomListArea>, FilterTab<string>[]> = { '1층': [], '2층': [], 파우치: [], '그 외': [] }
     for (const group of roomTabs) {
-      const floor = roomListFloor(group.lines[0]?.location, groupsByPrefix)
+      const area = roomListArea(group.lines[0]?.location, groupsByPrefix)
       const total = sumRoomListQuantities(group.lines.map(line => line.quantity))
-      tabs[floor].push({
+      tabs[area].push({
         value: group.key,
         label: group.name,
         subtitle: total === null ? `${group.lines.length}종` : `${total}개`,
@@ -236,12 +236,12 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       {showGroups && <RoomListRoomGroups groups={roomGroups} onChange={updateRoomGroups} />}
       {roomSaveFailed && <p role="status" className="mb-3 text-sm text-muted-foreground">방 묶음을 이 브라우저에 저장하지 못했습니다. 현재 화면에만 적용됩니다.</p>}
       {roomTabs.length > 0 && (
-        <div className="mb-3 grid gap-2 lg:grid-cols-3">
-          {Object.entries(roomTabsByFloor).map(([floor, tabs]) => (
-            <Card key={floor} className="min-w-0 space-y-2 p-3">
-              <h2 className="text-sm font-semibold">{floor}</h2>
+        <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          {Object.entries(roomTabsByArea).map(([area, tabs]) => (
+            <Card key={area} className="min-w-0 space-y-2 p-3">
+              <h2 className="text-sm font-semibold">{area}</h2>
               {tabs.length ? (
-                <FilterTabs ariaLabel={`${floor} 방`} value={selectedTab} onChange={setRoom} tabs={tabs}
+                <FilterTabs ariaLabel={`${area} 방`} value={selectedTab} onChange={setRoom} tabs={tabs}
                   tabInteraction={() => ({ className: 'max-w-full wrap-anywhere' })} />
               ) : <p className="text-sm text-muted-foreground">해당 방 없음</p>}
             </Card>
