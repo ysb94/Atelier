@@ -76,7 +76,7 @@ export function roomListLocationCodes(
   for (const row of fixedRows) {
     const name = roomListProductName(row.productName)
     const code = row.location.trim()
-    if (name && code && code !== '0-0-0' && code !== EMPTY_WAREHOUSE_LOCATION_CODE) add(name, code)
+    if (name && code && code !== EMPTY_WAREHOUSE_LOCATION_CODE) add(name, code)
   }
   for (const [name, positions] of warehouseLocations) {
     for (const position of positions) add(name, position.locationCode.trim())
