@@ -1,4 +1,4 @@
-import { Package, QrCode, Truck } from 'lucide-react'
+import { MapPin, Package, QrCode, Truck } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
 import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
@@ -18,7 +18,7 @@ import { WarehouseInventoryPanel } from './WarehouseInventoryPanel'
 import { WarehouseQrPanel } from './WarehouseQrPanel'
 import { WarehouseSlotSettingsPanel } from './WarehouseSlotSettingsPanel'
 
-type WarehouseView = 'box' | 'outbound' | 'qr'
+type WarehouseView = 'box' | 'outbound' | 'fixed' | 'qr'
 type WarehousePanel = 'stock' | 'slots'
 
 const WAREHOUSE_VIEWS: {
@@ -43,6 +43,13 @@ const WAREHOUSE_VIEWS: {
     detail:
       '출고할 제품을 낱개로 꺼내 두는 곳입니다. 피킹은 여기서 합니다.',
     icon: Truck,
+  },
+  {
+    value: 'fixed',
+    label: '고정 자리',
+    description: '고정 자리 목록',
+    detail: '상품별 고정 자리를 확인하는 화면입니다.',
+    icon: MapPin,
   },
   {
     value: 'qr',
@@ -71,9 +78,10 @@ export function WarehousePage() {
     ? requestedView
     : 'box'
   const active = WAREHOUSE_VIEWS.find((item) => item.value === activeView)!
+  const hasInventory = activeView === 'box' || activeView === 'outbound'
   const requestedPanel = searchParams.get('panel')
   const activePanel: WarehousePanel =
-    activeView !== 'qr' && isWarehousePanel(requestedPanel)
+    hasInventory && isWarehousePanel(requestedPanel)
       ? requestedPanel
       : 'stock'
   const sectionTabs = [
@@ -86,7 +94,7 @@ export function WarehousePage() {
       const next = new URLSearchParams(current)
       if (view === 'box') next.delete('view')
       else next.set('view', view)
-      if (view === 'qr') next.delete('panel')
+      if (view === 'qr' || view === 'fixed') next.delete('panel')
       return next
     })
   }
@@ -107,7 +115,7 @@ export function WarehousePage() {
         description={`${brand.name} 박스 단위 보관과 피킹용 낱개 보관을 나눠 보는 작업 공간입니다.`}
       />
 
-      <div className="mb-6 grid gap-3 sm:grid-cols-3">
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         {WAREHOUSE_VIEWS.map((item) => {
           const Icon = item.icon
           const selected = item.value === activeView
@@ -140,7 +148,7 @@ export function WarehousePage() {
       </div>
 
       <Card className="overflow-hidden shadow-none">
-        {activeView !== 'qr' ? (
+        {hasInventory ? (
           <div
             role="tablist"
             aria-label={`${active.label} 작업`}
@@ -181,13 +189,17 @@ export function WarehousePage() {
                 : active.detail}
             </CardDescription>
           </div>
-          {activeView === 'qr' || activePanel === 'slots' ? null : (
+          {!hasInventory || activePanel === 'slots' ? null : (
             <Badge variant="warning">연습 데이터</Badge>
           )}
         </CardHeader>
         <CardContent>
           {activeView === 'qr' ? (
             <WarehouseQrPanel brandName={brand.name} brandId={brand.id} />
+          ) : activeView === 'fixed' ? (
+            <p className="rounded-lg border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+              표시할 고정 자리가 없습니다.
+            </p>
           ) : activePanel === 'slots' ? (
             <WarehouseSlotSettingsPanel
               brandId={brand.id}
