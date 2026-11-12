@@ -32,7 +32,13 @@ for(const path of ['/','/operations','/products','/data/all','/drafts','/setting
 for(const path of ['/operations-support/people','/settings/permissions']) { assert.ok(links(ops).includes(path)); assert.equal(releaseHref(logistics,path),null) }
 for(const path of ['/operations-support','/operations-support/attendance','/members']) { assert.equal(releaseHref(ops,path),path,'운영지원 공개 경로·옛 주소는 화면 안에서 권한으로 거른다'); assert.equal(releaseHref(logistics,path),null) }
 assert.equal(releaseHref(ops,'/org-chart'),'/operations-support/people')
-for(const path of RELEASE_LOGISTICS_PAGES) { assert.equal(links(logistics).includes(path),true); assert.equal(releaseHref(staff,path),null); assert.equal(releaseHref(ops,path),null) }
+const logisticsLinks = links(logistics)
+for (const path of RELEASE_LOGISTICS_PAGES) {
+  assert.equal(releaseHref(logistics,path),path)
+  assert.equal(logisticsLinks.includes(path),path !== '/logistics/temporary-warehouse')
+  assert.equal(releaseHref(staff,path),null)
+  assert.equal(releaseHref(ops,path),null)
+}
 assert.equal(releaseHref(logistics,'/products/atelier/M%2F1?brand=atelier'),'/product-work/logistics/atelier/M%2F1?brand=atelier')
 assert.equal(releaseHref(logistics,'/logistics/invoice-data-entry?brand=atelier'),'/logistics/invoices?brand=atelier')
 assert.equal(releaseHref(logistics,'/work-requests/logistics-malicious'),null)

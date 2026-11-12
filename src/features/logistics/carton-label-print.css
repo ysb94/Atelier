@@ -1,0 +1,114 @@
+.carton-label-sheet {
+  position: relative;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.carton-label-sheet::before,
+.carton-label-sheet::after {
+  position: absolute;
+  content: '';
+  pointer-events: none;
+}
+
+.carton-label-sheet::before {
+  inset: 5% auto 5% 50%;
+  border-inline-start: 1px dashed #222;
+}
+
+.carton-label-sheet::after {
+  inset: 50% 5.4% auto;
+  border-block-start: 1px dashed #222;
+}
+
+.carton-label-sheet > .carton-label {
+  display: block;
+  container-type: inline-size;
+  padding: 2.1cqw 2.5cqw;
+  border: 0;
+  overflow: hidden;
+  font-family: Arial, "Malgun Gothic", "맑은 고딕", sans-serif;
+}
+
+.carton-label:nth-child(odd) { padding-inline-start: 5.4cqw; }
+.carton-label:nth-child(even) { padding-inline-end: 5.4cqw; }
+.carton-label:nth-child(-n+2) { padding-block-start: 3.7cqw; }
+.carton-label:nth-child(n+3) { padding-block-end: 3.7cqw; }
+
+.carton-label-table {
+  display: grid;
+  grid-template-rows: 14.5% 34% repeat(4, minmax(0, 1fr));
+  width: 100%;
+  height: 100%;
+  border: .55cqw solid #000;
+  font-size: 4.5cqw;
+  font-weight: 700;
+  line-height: 1.06;
+}
+
+.carton-label-row {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+}
+
+.carton-label-row + .carton-label-row { border-block-start: .22cqw solid #000; }
+.carton-label-row > * + * { border-inline-start: .22cqw solid #000; }
+
+.carton-label-row > span,
+.carton-label-row > strong {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  padding-inline: 1.2cqw;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.carton-label-number,
+.carton-label-image { grid-template-columns: 25.3% minmax(0, 1fr); }
+
+.carton-label-visual {
+  display: grid;
+  grid-template-columns: 28% minmax(0, 1fr);
+  align-items: center;
+  gap: 1cqw;
+  min-width: 0;
+  min-height: 0;
+  padding: .35cqw 1.4cqw;
+}
+
+.carton-label-photo {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.carton-label-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.carton-label-sku {
+  overflow: hidden;
+  color: var(--color-primary);
+  font-size: min(14.4cqw, calc(89cqw / var(--carton-sku-length)));
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.carton-label-item { grid-template-columns: 14.4% minmax(0, 1fr); }
+.carton-label-item-name {
+  background: #f1f1f1;
+  font-size: min(4.7cqw, calc(140cqw / var(--carton-item-length)));
+}
+.carton-label-space { grid-template-columns: 62.6% minmax(0, 1fr); }
+.carton-label-quantity { grid-template-columns: 25.3% 37.3% minmax(0, 1fr); }
+.carton-label-footer { grid-template-columns: 44% minmax(0, 1fr); }
+.carton-label-footer > :last-child { font-size: 3.6cqw; }

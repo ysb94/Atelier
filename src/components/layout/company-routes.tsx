@@ -34,6 +34,7 @@ import { CompanyBarcodeOutboundDataEntryPage } from '@/features/logistics/Barcod
 import { CompanyBulkOutboundPage } from '@/features/logistics/BulkOutboundPage'
 import { CompanyOutboundDataPage } from '@/features/logistics/OutboundDataPage'
 import { CompanyWarehousePage } from '@/features/logistics/WarehousePage'
+import { BoxLabelingPage } from '@/features/logistics/BoxLabelingPage'
 import { CompanyWarehouseFinderPage } from '@/features/logistics/WarehouseFinderPage'
 import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
 import { RoomListPage } from '@/features/logistics/RoomListPage'
@@ -185,6 +186,7 @@ export const companyWorkspaceRoutes = (
       <Route path="logistics/bulk-outbound" element={<CompanyBulkOutboundPage />} />
       <Route path="logistics/finder" element={<CompanyWarehouseFinderPage />} />
       <Route path="logistics/warehouses" element={<CompanyWarehousePage />} />
+      <Route path="logistics/box-labeling" element={<BoxLabelingPage />} />
       <Route
         path="logistics/temporary-warehouse"
         element={<RedirectTo to="/logistics/warehouses?view=boxes" />}

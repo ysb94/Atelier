@@ -31,5 +31,5 @@
   html.printing-outbound-slots,html.printing-outbound-slots body{width:297mm!important}
   html.printing-outbound-slots .outbound-rack-print-root{width:297mm!important}
   html.printing-outbound-slots .outbound-slot-sheet{width:297mm;height:210mm}
-  html.printing-outbound-slots .outbound-slot-label,html.printing-outbound-slots .warehouse-box-label{width:148.5mm;height:105mm}
+  html.printing-outbound-slots .outbound-slot-sheet>.outbound-rack-label{width:148.5mm;height:105mm}
 }

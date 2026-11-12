@@ -67,6 +67,7 @@ const NAV_LABELS: {
   { match: /^\/logistics\/bulk-outbound(?:\/|$)/, label: '물류 · 바코드 출고' },
   { match: /^\/logistics\/finder(?:\/|$)/, label: '물류 · 창고 파인더' },
   { match: /^\/logistics\/warehouses(?:\/|$)/, label: '물류 · 창고 관리' },
+  { match: /^\/logistics\/box-labeling(?:\/|$)/, label: '물류 · 박스 라벨링' },
   {
     match: /^\/logistics\/temporary-warehouse(?:\/|$)/,
     label: '물류 · 임시 창고관리',
