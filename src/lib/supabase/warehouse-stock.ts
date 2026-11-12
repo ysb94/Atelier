@@ -44,8 +44,9 @@ const USAGE_PRIORITIES = new Set<WarehouseUsagePriority>([
 
 const SET_COLUMNS =
   'id, brand_id, warehouse_id, kind, status, source_file_name, row_count, imported_at, imported_by'
+// Read optional position fields during rollout without requiring every DB to have them yet.
 const POSITION_COLUMNS =
-  'id, brand_id, set_id, warehouse_id, location_id, style_id, source_style_no, normalized_style_no, source_product_name, received_on, received_on_raw, is_forced_priority, is_final_location, usage_priority, quantity_status, units_per_box, remaining_boxes, units_per_box_raw, remaining_boxes_raw, opened_units, review_flags, source_row_number, note, external_row_id, created_at, updated_at, warehouse_locations!inner(code, zone)'
+  '*, warehouse_locations!inner(code, zone)'
 const LOCATION_COLUMNS = 'id, warehouse_id, code, zone'
 const MOVEMENT_COLUMNS =
   'id, brand_id, set_id, action, position_id, box_id, style_id, from_location_code, to_location_code, box_count, unit_count, reason, actor_id, created_at'
@@ -123,6 +124,7 @@ type PositionRow = {
   source_row_number: number
   note: string
   external_row_id: string | null
+  box_qr?: string | null
   created_at: string
   updated_at: string
   warehouse_locations?:
@@ -337,6 +339,7 @@ function toPosition(
     sourceRowNumber: row.source_row_number,
     note: row.note,
     externalRowId: row.external_row_id,
+    boxQr: row.box_qr ?? null,
     usageRank,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

@@ -5607,6 +5607,7 @@ function stockPosition(
     sourceRowNumber: 1,
     note: '',
     externalRowId: null,
+    boxQr: null,
     usageRank: null,
     createdAt: '',
     updatedAt: '',

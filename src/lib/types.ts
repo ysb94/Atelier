@@ -962,6 +962,7 @@ export type WarehouseStockPosition = {
   sourceRowNumber: number
   note: string
   externalRowId: string | null
+  boxQr: string | null
   usageRank: number | null
   createdAt: string
   updatedAt: string
