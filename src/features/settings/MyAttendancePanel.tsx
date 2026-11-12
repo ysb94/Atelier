@@ -117,8 +117,11 @@ export function MyAttendancePanel() {
   const leave = useLeaveRequests()
   const advances = useLeaveAdvances()
   const advanceEmployee = advances.data?.employees[0]
-  const operationsAdvance = advances.data?.approvalMode === 'operations'
-  const advanceAllowed = advances.data?.ready && !advances.isError && advanceEmployee && !advanceEmployee.needsReview && (operationsAdvance || advanceEmployee.limit > 0)
+  const operationsAdvance = advances.data?.ready === true && advances.data.approvalMode === 'operations' && !advances.isError
+  const advanceBlock = advances.isPending ? '운영지원 승인 설정을 확인 중입니다.'
+    : advances.isError ? '운영지원 승인 설정을 불러오지 못했습니다.'
+    : !operationsAdvance ? '운영지원 선사용 승인 설정이 아직 연결되지 않았습니다.'
+    : !advanceEmployee || advanceEmployee.needsReview ? '연차 발생 기준을 운영지원에 확인해 주세요.' : null
   const remainingLeave = advances.data?.ready && !advances.isError ? advanceEmployee?.remainingBalance ?? null : null
   const approvals = useDepartmentApprovers()
   const directory = useOpsDirectory()
@@ -158,10 +161,13 @@ export function MyAttendancePanel() {
   const balanceRejected = /^(?:총 )?남은 연차가 부족합니다\./.test(formError)
   const showAdvanceOption = Boolean(form?.advanceRequested || advanceDays > 0 || balanceRejected)
   const submitLabel = form?.advanceRequested
-    ? (operationsAdvance ? '운영지원에 승인 요청' : '부서 승인 요청')
+    ? '운영지원에 승인 요청'
     : form && isLeaveRequest(form.kind) ? '휴가 등록' : '신청하기'
   const [notice, setNotice] = useState('')
-  const [detail, setDetail] = useState<ScheduleDetail | null>(null)
+  const [openedDetail, setDetail] = useState<ScheduleDetail | null>(null)
+  const detail = openedDetail?.type === 'request'
+    ? { ...openedDetail, item: leave.requests.find(item => item.id === openedDetail.item.id) ?? openedDetail.item }
+    : openedDetail
   const [routeParams] = useSearchParams()
   const openedRequest = useRef<string | null>(null)
   const routedRequest = routeParams.get('request')
@@ -213,11 +219,11 @@ export function MyAttendancePanel() {
     if (!layers[requestLayer(item.kind)]) return false
     return item.status === 'pending' || item.status === 'approved' || layers.closed
   }
-  function approvalRoute(kind: RequestKind, departmentId = profile?.departmentId, allowSelf = true) {
+  function approvalRoute(kind: RequestKind) {
     if (approvals.loading || directory.loading) return '승인 담당자 확인 중…'
     if (approvals.error || directory.error) return '승인 담당자를 불러오지 못했습니다.'
-    const setting = approvals.settings.find(item => item.departmentId === departmentId && item.type === approvalTypeOf(kind))
-    const names = [setting?.approverId, setting?.substituteId].filter(id => Boolean(id) && (allowSelf || id !== leave.userId))
+    const setting = approvals.settings.find(item => item.departmentId === profile?.departmentId && item.type === approvalTypeOf(kind))
+    const names = [setting?.approverId, setting?.substituteId].filter(Boolean)
       .map(id => id === leave.userId ? '나 · 본인 승인 가능' : directory.members.find(member => member.id === id)?.displayName).filter(Boolean)
     return names.length ? `부서 지정 승인자 · ${names.join(' / ')}` : '승인자 미지정 · 운영지원에 담당자 설정을 요청해 주세요.'
   }
@@ -290,6 +296,7 @@ export function MyAttendancePanel() {
     event.preventDefault()
     if (!form || leave.busy || groupBusy) return
     const trace = startWorkflow(form.kind === 'offsite' ? 'offsite' : 'leave', 'submit', { kind: form.kind, group: groupEnabled, nextDay: Boolean(form.endNextDay), continuous: Boolean(form.offsiteContinuous) })
+    if (form.advanceRequested && advanceBlock) { trace.block('advance_approval_unavailable'); setFormError(advanceBlock); return }
     trace.step('normalize_input')
     const normalized = offsiteSubmission(form)
     if (normalized.error || !normalized.request) { trace.block('invalid_date_range'); setFormError(normalized.error); return }
@@ -333,7 +340,7 @@ export function MyAttendancePanel() {
       if (isOfficialLeave(form.kind) && officialFile) await trace.run('upload_attachment', () => uploadLeaveFile(request.id, officialFile))
       setMonth(form.from.slice(0, 7)); setSelected(form.from)
       setForm(null); setOfficialFile(null)
-      setNotice(form.advanceRequested ? `선사용을 신청했습니다. ${operationsAdvance ? '운영지원' : '부서 지정 승인자'} 승인 후 휴가가 바로 등록됩니다.` : isDirectRegistration(form.kind) && request.status === 'approved' ? form.kind === 'offsite' ? '외근을 등록했습니다. 승인 없이 달력에 반영됩니다.' : '휴가를 등록했습니다. 승인 없이 달력에 반영됩니다.' : isOfficialLeave(form.kind) ? '공가 신청을 저장했습니다. 운영지원이 서류를 확인한 뒤 처리합니다.' : form.kind === 'correction' ? '출퇴근 정정 신청을 저장했습니다. 승인되면 원본을 보존하고 달력과 야근 집계에 반영합니다.' : '신청을 저장했습니다. 부서 지정 승인자가 승인하면 달력에 반영됩니다.')
+      setNotice(form.advanceRequested ? '선사용을 요청했습니다. 달력에 승인 대기로 표시되며 운영지원 승인 후 휴가가 등록됩니다.' : isDirectRegistration(form.kind) && request.status === 'approved' ? form.kind === 'offsite' ? '외근을 등록했습니다. 승인 없이 달력에 반영됩니다.' : '휴가를 등록했습니다. 승인 없이 달력에 반영됩니다.' : isOfficialLeave(form.kind) ? '공가 신청을 저장했습니다. 운영지원이 서류를 확인한 뒤 처리합니다.' : form.kind === 'correction' ? '출퇴근 정정 신청을 저장했습니다. 승인되면 원본을 보존하고 달력과 야근 집계에 반영합니다.' : '신청을 저장했습니다. 부서 지정 승인자가 승인하면 달력에 반영됩니다.')
       trace.done({ writeOutcome: 'committed' })
     } catch (error) {
       if (createdId && isOfficialLeave(form.kind)) {
@@ -366,7 +373,7 @@ export function MyAttendancePanel() {
   return <div className="personal-requests">
     {selfService && <OffsiteGroupHistory />}
     <div className="personal-request-draft-row">
-      {selfService ? <div className="personal-request-draft"><strong>근태 신청</strong><span>연차·반차·반반차는 신청하면 바로 등록됩니다. 공가는 사유와 서류를 첨부하면 운영지원이 확인한 뒤 처리합니다. 외근도 승인 없이 바로 등록됩니다. 야근·출퇴근 정정만 부서 지정 담당자가 승인합니다.</span></div> : <div className="personal-request-draft"><strong>내 일정</strong><span>할 일과 회의 일정을 확인하고 관리합니다.</span></div>}
+      {selfService ? <div className="personal-request-draft"><strong>근태 신청</strong><span>일반 연차·반차·반반차는 즉시 등록됩니다. 선사용은 운영지원 승인 후 등록됩니다. 공가는 사유와 서류를 첨부하면 운영지원이 확인한 뒤 처리합니다. 외근도 승인 없이 바로 등록됩니다. 야근·출퇴근 정정은 부서 지정 담당자가 승인합니다.</span></div> : <div className="personal-request-draft"><strong>내 일정</strong><span>할 일과 회의 일정을 확인하고 관리합니다.</span></div>}
       {selfService && <Button type="button" variant="outline" size="sm" className="personal-request-settings-button" aria-haspopup="dialog" aria-expanded={settingsOpen} onClick={() => setSettingsOpen(true)}><Settings2 size={14}/>알림 설정</Button>}
     </div>
     {selfService && postedNotices.map((item) => (
@@ -498,10 +505,10 @@ export function MyAttendancePanel() {
           {remainingLeave === null && <p role="status" className="text-xs text-muted-foreground">{advances.isPending ? '남은 연차를 확인 중입니다.' : advances.isError ? '남은 연차를 불러오지 못했습니다.' : '남은 연차를 확인할 수 없습니다.'}</p>}
           {showAdvanceOption && <>
             <label className="personal-leave-advance-option cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5">
-              <input type="checkbox" checked={form.advanceRequested === true} disabled={!advanceAllowed && !form.advanceRequested} onChange={event => patch({ advanceRequested: event.target.checked })}/>
+              <input type="checkbox" checked={form.advanceRequested === true} onChange={event => patch({ advanceRequested: event.target.checked })}/>
               {advanceDays > 0 ? `부족한 ${formatNumber(advanceDays)}일 선사용 요청` : '선사용 요청'}
             </label>
-            {!advanceAllowed && !advances.isPending && <p className="text-xs text-muted-foreground">{!operationsAdvance && advanceEmployee && advanceEmployee.limit <= 0 ? '선사용 한도 설정은 운영지원에 문의해 주세요.' : '선사용 신청 기준은 운영지원에 확인해 주세요.'}</p>}
+            {form.advanceRequested && advanceBlock && <p role="status" className="text-sm text-warning">{advanceBlock}{!operationsAdvance && !advances.isPending && <Button type="button" size="sm" variant="ghost" onClick={() => void advances.refetch()}>연결 다시 확인</Button>}</p>}
           </>}
         </div>}
         {form.kind === 'correction' && <p className="personal-request-helper">{formRecord ? `현재 기록 · 출근 ${formRecord.clockIn || '없음'} · 퇴근 ${clockOutLabel(formRecord.clockOutAt) || '없음'}. ` : ''}승인되면 원래 기록은 보존하고 정정 시각을 달력과 야근 집계에 반영합니다.</p>}
@@ -509,11 +516,11 @@ export function MyAttendancePanel() {
         {isLocationRequest(form.kind) && <label>{form.kind === 'offsite' ? '외근 장소 · 필수' : '근무 장소 · 선택'}<Input aria-label="개인 신청 근무 장소" maxLength={200} value={form.place} placeholder={form.kind === 'offsite' ? '방문할 거래처 또는 장소' : '재택 등'} onChange={event => patch({ place: event.target.value })}/></label>}
         {isOfficialLeave(form.kind) && <div className={`personal-request-file${officialFile ? ' is-selected' : ''}`}><label htmlFor="official-leave-file">증빙 서류 · 필수</label><div><input id="official-leave-file" ref={officialFileInput} className="personal-request-file-input" aria-label="공가 증빙 서류" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.doc,.docx,.hwp,.hwpx" onChange={event => { setOfficialFile(event.target.files?.[0] ?? null); setFormError('') }}/><p>{officialFile ? officialFile.name : '예비군 통지서, 청첩장처럼 공가 사유를 확인할 서류를 올려 주세요.'}</p>{officialFile && <Button type="button" variant="outline" size="sm" onClick={() => { setOfficialFile(null); if (officialFileInput.current) officialFileInput.current.value = '' }}>지우기</Button>}<Button type="button" variant="outline" size="sm" onClick={() => officialFileInput.current?.click()}>{officialFile ? '다시 선택' : '서류 선택'}</Button></div></div>}
         <label>{form.advanceRequested ? '선사용 사유 · 필수' : form.kind === 'correction' || form.kind === 'overtime' || isOfficialLeave(form.kind) ? '신청 사유 · 필수' : '업무 인수인계·메모 · 선택'}<Textarea maxLength={2000} aria-label={form.advanceRequested ? '선사용 사유' : '개인 신청 메모'} aria-required={form.advanceRequested || undefined} value={form.note} rows={3} placeholder={form.advanceRequested ? '잔여 연차보다 더 필요한 사유를 적어 주세요.' : form.kind === 'correction' ? '기록 누락·보정 사유를 적어 주세요.' : form.kind === 'overtime' ? '예정된 야근 업무를 적어 주세요.' : isOfficialLeave(form.kind) ? '예비군, 결혼처럼 공가로 빠지는 사유를 적어 주세요.' : '업무 인수인계 등 필요한 내용만 적어 주세요.'} onChange={event => patch({ note: event.target.value })}/></label>
-        {(form.advanceRequested || requiresDepartmentApproval(form.kind)) && <div className="personal-request-approval-route"><span>승인 경로</span><strong>{form.advanceRequested && operationsAdvance ? '운영지원' : approvalRoute(form.kind, profile?.departmentId, !form.advanceRequested)}</strong><p>{form.advanceRequested ? operationsAdvance ? '승인되면 휴가가 등록되고 부족분은 다음 기본 연차에서 정산됩니다.' : '본인 외 부서 지정 승인자 또는 대체 승인자가 선사용을 승인합니다.' : '지정 승인자·대체 승인자는 ‘승인할 신청’에서 본인 신청도 승인할 수 있습니다.'}</p></div>}
+        {(form.advanceRequested || requiresDepartmentApproval(form.kind)) && <div className="personal-request-approval-route"><span>승인 경로</span><strong>{form.advanceRequested ? '운영지원' : approvalRoute(form.kind)}</strong><p>{form.advanceRequested ? '승인되면 휴가가 등록되고 부족분은 다음 기본 연차에서 정산됩니다.' : '지정 승인자·대체 승인자는 ‘승인할 신청’에서 본인 신청도 승인할 수 있습니다.'}</p></div>}
         {!isOfficialLeave(form.kind) && !isFullLeave(form.kind) && form.kind !== 'half' && form.kind !== 'quarter' && form.kind !== 'offsite' && form.kind !== 'correction' && <div className="personal-request-alert-preview"><header><strong><Bell size={14}/>승인 후 알림 미리보기</strong><button type="button" aria-expanded={showBasis} onClick={() => setShowBasis(value => !value)}>예시 기준 {showBasis ? '접기' : '보기'}</button></header>{preview.map(text => <p key={text}>{text}</p>)}{(!reminders.arrival || !reminders.departure) && <p>{!reminders.arrival ? '출근' : ''}{!reminders.arrival && !reminders.departure ? '·' : ''}{!reminders.departure ? '퇴근' : ''} 전 알림은 내 설정에서 꺼져 있습니다.</p>}<small>회사 근무 기준은 미연결입니다. 알림 시간은 예시이며 실제 발송되지 않습니다.</small>{showBasis && <div className="personal-request-basis">{([{ key: 'start', label: '예시 출근' }, { key: 'end', label: '예시 퇴근' }, { key: 'breakStart', label: '휴게 시작' }, { key: 'breakEnd', label: '휴게 종료' }] as const).map(item => <label key={item.key}>{item.label}<Input type="time" aria-label={item.label} value={basis[item.key]} onChange={event => setBasis(current => ({ ...current, [item.key]: event.target.value }))}/></label>)}</div>}</div>}
         {formError && <p role="alert" className="personal-request-error">{formError}</p>}
       </div>
-      <footer><Button type="button" variant="outline" onClick={() => setForm(null)}>닫기</Button><Button type="submit" disabled={leave.busy || groupBusy || leave.loading || Boolean(leave.error)}><Send size={14}/>{leave.busy || groupBusy ? '저장 중…' : submitLabel}</Button></footer>
+      <footer><Button type="button" variant="outline" onClick={() => setForm(null)}>닫기</Button><Button type="submit" disabled={leave.busy || groupBusy || leave.loading || Boolean(leave.error) || Boolean(form.advanceRequested && advanceBlock)}><Send size={14}/>{leave.busy || groupBusy ? '저장 중…' : submitLabel}</Button></footer>
     </fieldset></form></section></RequestDialog></WorkspaceTabOverlay>}
   </div>
 }

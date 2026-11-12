@@ -11,6 +11,7 @@ import { listMyLeaveUsageNotices, type LeaveUsageNotice } from '@/lib/supabase/l
 import { listMyLateStatementNotices } from '@/lib/supabase/late-arrival-statements'
 import { lateStatementNoticeItems } from '@/features/home/LateStatementReview'
 import { leaveNoticeItems } from '@/features/operations-support/leave-usage-notices'
+import { leaveAdvanceReviewHref } from '@/features/operations-support/operations-support-sections'
 import type { InboxNotification } from '@/lib/inbox/types'
 import { emptyList } from '@/lib/utils'
 import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
@@ -110,7 +111,7 @@ export function useMyHomeNotifications({ coordinator = false, background = false
       const holiday = item.event_type.startsWith('holiday-')
       const holidayPath = item.tab === 'holiday-work' ? '/operations-support/attendance?attendanceView=holiday' : `/settings/profile?part=${item.tab}`
       const href = operationsLeave
-        ? `/operations-support/leave?request=${encodeURIComponent(item.entity_id)}`
+        ? leaveAdvanceReviewHref(item.entity_id)
         : holiday ? `${holidayPath}&holidayWork=${item.entity_id}&holidayMonth=${item.from_date.slice(0,7)}&holidayEvent=${encodeURIComponent(item.event_key)}` : item.event_type === 'offsite-group' ? `/settings/profile?part=my-attendance&request=${item.entity_id}` : `/settings/profile?part=${item.tab}&workNotice=${encodeURIComponent(item.event_key)}`
       const label = requestLabel(item.kind)
       return { id: item.event_key, kind: item.event_type==='checkout'?'checkout_needed' as const:'personal_request' as const,

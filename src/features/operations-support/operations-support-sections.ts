@@ -22,6 +22,10 @@ export function operationsSectionHref(section: OperationsSection) {
   return `${OPERATIONS_SUPPORT_ROOT}/${section}`
 }
 
+export function leaveAdvanceReviewHref(requestId: string) {
+  return `${operationsSectionHref('leave')}?leaveView=balance&advanceRequest=${encodeURIComponent(requestId)}`
+}
+
 /** `/operations-support/<section>` 경로의 업무. 다른 경로는 null. */
 export function operationsSectionFromPath(pathname: string): OperationsSection | null {
   const section = pathname.replace(/\/+$/, '').split('/')[2]

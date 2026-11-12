@@ -21,7 +21,7 @@ import { LeaveAdvancePanel } from './LeaveAdvancePanel'
 import { useLeaveAdvances } from './use-leave-advances'
 import { useEmployeeRoster } from './use-employee-roster'
 
-export function LeaveBalancePanel() {
+export function LeaveBalancePanel({ reviewOpen = false }: { reviewOpen?: boolean }) {
   useRenderWatch('LeaveBalancePanel')
   const { profile } = useAuth()
   const { access, isPending: accessPending } = useBasicWorkAccess()
@@ -104,7 +104,7 @@ export function LeaveBalancePanel() {
         </tbody>
       </table>
     </div></Card>
-    <LeaveAdvancePanel query={advances} selection={advanceMember ? { id: advanceMember.id, name: memberLabel(advanceMember.displayName), department: directory.departmentName(advanceMember.departmentId) } : null}
+    <LeaveAdvancePanel query={advances} selection={advanceMember && !reviewOpen ? { id: advanceMember.id, name: memberLabel(advanceMember.displayName), department: directory.departmentName(advanceMember.departmentId) } : null}
       onClose={() => setAdvanceSelection(null)}/>
   </OpsPanelFrame>
 }
