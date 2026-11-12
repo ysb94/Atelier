@@ -18,6 +18,7 @@ import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { CargoColumnOrderControl } from '@/features/logistics/CargoColumnOrderControl'
 import {
   CARGO_LINE_LIST_COLUMNS,
   CARGO_WAREHOUSE_LINE_LIST_COLUMNS,
@@ -352,10 +353,12 @@ export function CargoUnloadListDialog({
 }: CargoUnloadListDialogProps) {
   const copy = PURPOSE_COPY[purpose]
   const previewOnly = purpose === 'warehouse' && incomingOnlyPreview
-  const listColumns =
-    previewOnly ? CARGO_WAREHOUSE_PREVIEW_COLUMNS : purpose === 'warehouse'
-      ? CARGO_WAREHOUSE_LINE_LIST_COLUMNS
-      : CARGO_LINE_LIST_COLUMNS
+  const [columnOrder, setColumnOrder] = useState<CargoLineListColumnKey[]>(() => CARGO_WAREHOUSE_PREVIEW_COLUMNS.map(column => column.key))
+  const listColumns = useMemo(() => {
+    if (!previewOnly) return purpose === 'warehouse' ? CARGO_WAREHOUSE_LINE_LIST_COLUMNS : CARGO_LINE_LIST_COLUMNS
+    const order = new Map(columnOrder.map((key, index) => [key, index]))
+    return [...CARGO_WAREHOUSE_PREVIEW_COLUMNS].sort((a, b) => (order.get(a.key) ?? Infinity) - (order.get(b.key) ?? Infinity))
+  }, [previewOnly, purpose, columnOrder])
   useRenderWatch(copy.watchName)
   const queryClient = useQueryClient()
   const [openedAt] = useState(() => Date.now())
@@ -720,21 +723,7 @@ export function CargoUnloadListDialog({
         }),
       )
       const sheet = XLSX.utils.aoa_to_sheet([headers, ...body])
-      sheet['!cols'] = [
-        { wch: 7 },
-        { wch: 30 },
-        { wch: 48 },
-        { wch: 14 },
-        { wch: 12 },
-        { wch: 10 },
-        { wch: 10 },
-        { wch: 12 },
-        { wch: 14 },
-        { wch: 32 },
-        { wch: 12 },
-        { wch: 18 },
-        { wch: 12 },
-      ]
+      sheet['!cols'] = listColumns.map(column => ({ wch: column.excelWidth }))
       if (sheet['!ref']) {
         sheet['!autofilter'] = { ref: sheet['!ref'] }
       }
@@ -982,6 +971,7 @@ export function CargoUnloadListDialog({
                 </Button>
                 <span className="min-w-0 break-all text-xs text-muted-foreground">출력 제목: {printHeading}</span>
               </div>
+              <CargoColumnOrderControl columns={listColumns} defaults={CARGO_WAREHOUSE_PREVIEW_COLUMNS} onChange={setColumnOrder} />
               <p className="text-xs text-muted-foreground">
                 헤더를 누르면 정렬되며 화면 순서대로 인쇄·엑셀에 반영됩니다. 기존 저장 목록과 입력된 창고자리는 변경하지 않습니다.
               </p>
