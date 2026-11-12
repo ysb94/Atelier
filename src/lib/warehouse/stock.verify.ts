@@ -31,8 +31,14 @@ import {
   buildWarehouseSheetSyncFixture,
   prepareWarehouseSheetSyncRows,
   summarizeWarehouseSheetSync,
+  toWarehouseSnapshotRpcRows,
   validateWarehouseSheetSyncPayload,
 } from './sheet-sync'
+import {
+  prepareWarehouseSheetSyncRows as prepareEdgeWarehouseSheetSyncRows,
+  toWarehouseSnapshotRpcRows as toEdgeWarehouseSnapshotRpcRows,
+  validateWarehouseSheetSyncPayload as validateEdgeWarehouseSheetSyncPayload,
+} from '../../../supabase/functions/_shared/warehouse-sheet-sync'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -604,6 +610,17 @@ assert(unknownQtyStock.has('') === false, 'M번호 없는 행은 SKU 합계에 �
 
 const fixture = buildWarehouseSheetSyncFixture(2028)
 assert(fixture.rows.length === 2028, '2,028행 fixture를 만든다')
+const qrInput = [
+  { ...fixture.rows[0], boxQr: ' 001234 ' },
+  fixture.rows[1],
+]
+const qrPayload = validateWarehouseSheetSyncPayload(qrInput)
+const edgeQrPayload = validateEdgeWarehouseSheetSyncPayload(qrInput)
+assert(qrPayload.issues.length === 0 && edgeQrPayload.issues.length === 0, 'QR 유무와 관계없이 동기화할 수 있다')
+const qrRows = toWarehouseSnapshotRpcRows(prepareWarehouseSheetSyncRows(qrPayload.rows, styles, []))
+const edgeQrRows = toEdgeWarehouseSnapshotRpcRows(prepareEdgeWarehouseSheetSyncRows(edgeQrPayload.rows, styles, []))
+assert(qrRows[0].box_qr === '001234' && edgeQrRows[0].box_qr === '001234', 'S열 QR의 앞자리 0을 RPC까지 보존한다')
+assert(qrRows[1].box_qr === '' && edgeQrRows[1].box_qr === '', 'S열이 없는 기존 요청도 보존한다')
 const customLocationCodes = ['3-1-1_C1', '3-1-1-C-1', '3-1-1_C2', '임시 자리 7', '3-1-1']
 const customLocationRows = customLocationCodes.map((locationRaw, index) => ({ ...fixture.rows[index], locationRaw }))
 const customLocations = prepareWarehouseSheetSyncRows(customLocationRows, styles, ['3-1-1_C1', '임시 자리 7'])

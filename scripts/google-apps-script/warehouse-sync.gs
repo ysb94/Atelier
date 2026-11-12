@@ -332,6 +332,7 @@ function _collectAtelierWarehouseRows(sh) {
   if (numRows === 0) return [];
   const curBH = _readRange(sh, ROW_START, COL.B, numRows, 7);
   const docIds = _readRange(sh, ROW_START, COL.AA, numRows, 1);
+  const boxQrs = sh.getRange(ROW_START, 19, numRows, 1).getDisplayValues();
   const rows = [];
   for (let i = 0; i < numRows; i++) {
     const b = _norm(curBH[i][0]);
@@ -352,6 +353,7 @@ function _collectAtelierWarehouseRows(sh) {
       unitsPerBoxRaw: f,
       remainingBoxesRaw: g,
       note: h,
+      boxQr: boxQrs[i][0].trim(),
       sourceRowNumber: ROW_START + i,
     });
   }

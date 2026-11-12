@@ -213,7 +213,7 @@ Deno.serve(async (req) => {
   }
 
   const { data: set, error } = await supabase.rpc(
-    'replace_warehouse_inventory_snapshot',
+    'replace_warehouse_inventory_snapshot_with_box_qr',
     {
       p_brand_id: brand.id,
       p_source_file_name: sourceFileName,
