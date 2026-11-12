@@ -906,6 +906,7 @@ export async function listWarehouseBoxes(
       .from('warehouse_boxes')
       .select(BOX_COLUMNS)
       .eq('brand_id', brandId)
+      .not('location_id', 'is', null)
       .order('created_at', { ascending: false })
       .order('id', { ascending: false })
       .range(from, from + PAGE_SIZE - 1)
