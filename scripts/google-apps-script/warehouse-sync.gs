@@ -332,6 +332,7 @@ function _collectAtelierWarehouseRows(sh) {
   if (numRows === 0) return [];
   const curBH = _readRange(sh, ROW_START, COL.B, numRows, 7);
   const docIds = _readRange(sh, ROW_START, COL.AA, numRows, 1);
+  const boxQrs = sh.getRange(ROW_START, 19, numRows, 1).getDisplayValues();
   const rows = [];
   for (let i = 0; i < numRows; i++) {
     const b = _norm(curBH[i][0]);
@@ -352,6 +353,7 @@ function _collectAtelierWarehouseRows(sh) {
       unitsPerBoxRaw: f,
       remainingBoxesRaw: g,
       note: h,
+      boxQr: boxQrs[i][0].trim(),
       sourceRowNumber: ROW_START + i,
     });
   }
@@ -368,6 +370,7 @@ function syncAtelierWarehouseSnapshot_(options) {
   }
   const sh = SpreadsheetApp.getActive().getSheetByName(WPS_SHEET);
   if (!sh) throw new Error(`시트를 찾을 수 없습니다: ${WPS_SHEET}`);
+  const snapshotAt = Date.now();
   const rows = _collectAtelierWarehouseRows(sh);
   if (!rows.length) throw new Error('사이트에 보낼 창고 행이 없습니다.');
 
@@ -375,6 +378,7 @@ function syncAtelierWarehouseSnapshot_(options) {
     validateOnly: validateOnly,
     brandSlug: 'masmarulez',
     sourceFileName: '창고입력 시트 동기화',
+    snapshotAt: snapshotAt,
     rows: rows,
   });
   const timestamp = String(Date.now());
@@ -443,6 +447,8 @@ function upsertWPS_WhenRowDiff_resume(){
     const curX   = _readRange(sh, startRow, COL.X , numRows, 1);
     const xSnaps = _readRange(sh, startRow, COL.AI, numRows, 1);
     const docIds = _readRange(sh, startRow, COL.AA, numRows, 1);
+    const removedIdPrefix = 'Finder 지운 행 ID: ';
+    const docNotes = sh.getRange(startRow, COL.AA, numRows, 1).getNotes();
 
     let jobs = [];
     let jobRowIdx = [];
@@ -465,6 +471,9 @@ function upsertWPS_WhenRowDiff_resume(){
               if (willClearSnapshot[localIdx] === true){
                 _writeRange(sh, rowIdx, COL.AB, [['','','','','','','']]);
                 _writeRange(sh, rowIdx, COL.AI, [['']]);
+                const idCell = sh.getRange(rowIdx, COL.AA);
+                if (docNotes[localIdx][0].startsWith(removedIdPrefix) &&
+                    idCell.getNote() === docNotes[localIdx][0]) idCell.clearNote();
               } else {
                 if (Array.isArray(willSetSnapshotBH[localIdx])){
                   _writeRange(sh, rowIdx, COL.AB, [ willSetSnapshotBH[localIdx] ]);
@@ -503,11 +512,14 @@ function upsertWPS_WhenRowDiff_resume(){
       const changed    = (b!==ab)||(c!==ac)||(d!==ad)||(e!==ae)||(f!==af)||(g!==ag)||(h!==ah);
       const changedX   = (x !== xSnap);
 
-      if (!aa){ processed++; continue; }
+      const docNote = docNotes[i][0];
+      const removedId = !aa && !hasCurAny && docNote.startsWith(removedIdPrefix)
+        ? docNote.slice(removedIdPrefix.length) : '';
+      if (!aa && !removedId){ processed++; continue; }
 
       if (!hasCurAny && hasSnapAny){
         const req = _buildPatchWithDeletes(
-          WPS_COLLECTION, aa, { secretPass: WPS_DOCUMENT_SECRET() },
+          WPS_COLLECTION, aa || removedId, { secretPass: WPS_DOCUMENT_SECRET() },
           ['arrivalDate','boxCount','libraryNumber','productName','productRef','unitsPerBox','chinaCode','note','createdAt']
         );
         if (req){

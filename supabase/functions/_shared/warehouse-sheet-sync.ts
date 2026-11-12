@@ -31,6 +31,7 @@ export type WarehouseSheetSyncInputRow = {
   unitsPerBoxRaw: string
   remainingBoxesRaw: string
   note: string
+  boxQr?: string
   sourceRowNumber: number
 }
 
@@ -272,6 +273,7 @@ export function validateWarehouseSheetSyncPayload(rows: unknown): {
       unitsPerBoxRaw: read('unitsPerBoxRaw'),
       remainingBoxesRaw: read('remainingBoxesRaw'),
       note: read('note'),
+      boxQr: read('boxQr'),
       sourceRowNumber: rowNumber,
     }
     if (!row.externalRowId) {
@@ -379,6 +381,7 @@ export function summarizeWarehouseSheetSync(
 export function toWarehouseSnapshotRpcRows(rows: PreparedWarehouseSheetSyncRow[]) {
   return rows.map((row) => ({
     external_row_id: row.externalRowId,
+    box_qr: row.boxQr ?? '',
     location_code: row.locationCode || EMPTY_WAREHOUSE_LOCATION_CODE,
     zone: row.zone,
     style_id: row.styleId,

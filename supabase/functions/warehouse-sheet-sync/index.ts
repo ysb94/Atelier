@@ -100,11 +100,16 @@ Deno.serve(async (req) => {
     sourceFileName?: string
     brandSlug?: string
     rows?: unknown
+    snapshotAt?: number
   }
   try {
     payload = JSON.parse(rawBody) as typeof payload
   } catch {
     return json({ ok: false, error: 'JSON 본문이 올바르지 않습니다.' }, 400)
+  }
+  const snapshotAt = payload.snapshotAt ?? sentAt
+  if (!Number.isFinite(snapshotAt) || snapshotAt > sentAt || sentAt - snapshotAt > MAX_SKEW_MS) {
+    return json({ ok: false, error: '시트 조회 시각이 올바르지 않습니다.' }, 400)
   }
 
   const brandSlug = String(payload.brandSlug ?? WAREHOUSE_SHEET_SYNC_BRAND_SLUG)
@@ -213,11 +218,12 @@ Deno.serve(async (req) => {
   }
 
   const { data: set, error } = await supabase.rpc(
-    'replace_warehouse_inventory_snapshot',
+    'replace_warehouse_inventory_snapshot_with_box_qr',
     {
       p_brand_id: brand.id,
       p_source_file_name: sourceFileName,
       p_rows: toWarehouseSnapshotRpcRows(prepared),
+      p_snapshot_at: new Date(snapshotAt).toISOString(),
     },
   )
   if (error || !set) {
