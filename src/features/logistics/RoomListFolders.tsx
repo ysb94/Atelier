@@ -19,7 +19,7 @@ import {
   type WarehouseRoomListFolder,
   type WarehouseRoomListFolderEdit,
 } from '@/lib/supabase/warehouse-room-lists'
-import { emptyRoomListRow, isRoomListQuantity, mergeRoomListRows, type RoomListRow } from './room-list-paste'
+import { emptyRoomListRow, isRoomListQuantity, mergeRoomListRows, normalizeRoomListQuantity, type RoomListRow } from './room-list-paste'
 import { RoomListFolderItems } from './RoomListFolderItems'
 
 const REGISTERED_DATE = new Intl.DateTimeFormat('ko-KR', {
@@ -98,7 +98,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
       setDraft({
         brandId: saved.brand_id,
         title: saved.title,
-        rows: saved.items,
+        rows: saved.items.map(([name, quantity]) => [name, normalizeRoomListQuantity(quantity)]),
         edit: { id: saved.id, revision: saved.revision },
       })
     },

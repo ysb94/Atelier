@@ -3,7 +3,7 @@ import { X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useRenderWatch } from '@/lib/diagnostics'
-import { emptyRoomListRow, parseRoomListPaste, type RoomListRow } from './room-list-paste'
+import { emptyRoomListRow, normalizeRoomListQuantity, parseRoomListPaste, type RoomListRow } from './room-list-paste'
 
 const COLUMNS = ['상품명', '수량'] as const
 
@@ -24,7 +24,19 @@ export function RoomListFolderItems({
 
   function pasteCells(event: ClipboardEvent<HTMLInputElement>, rowIndex: number, column: number) {
     const text = event.clipboardData.getData('text/plain')
-    if (!/[\t\r\n]/.test(text)) return
+    if (!text) return
+    if (!/[\t\r\n]/.test(text)) {
+      if (column !== 1) return
+      const { value, selectionStart, selectionEnd } = event.currentTarget
+      const pasted = value.slice(0, selectionStart ?? 0) + text + value.slice(selectionEnd ?? value.length)
+      const quantity = normalizeRoomListQuantity(pasted)
+      if (quantity === pasted) return
+      event.preventDefault()
+      const nextRows = [...rows]
+      nextRows[rowIndex] = [rows[rowIndex][0], quantity]
+      onChange(nextRows)
+      return
+    }
     event.preventDefault()
 
     const started = performance.now()
@@ -46,7 +58,10 @@ export function RoomListFolderItems({
     while (nextRows.length < rowIndex + pasted.length) nextRows.push(emptyRoomListRow())
     pasted.forEach((values, offset) => {
       const row: RoomListRow = [...nextRows[rowIndex + offset]]
-      values.forEach((value, index) => { row[column + index] = value })
+      values.forEach((value, index) => {
+        const targetColumn = column + index
+        row[targetColumn] = targetColumn === 1 ? normalizeRoomListQuantity(value) : value
+      })
       nextRows[rowIndex + offset] = row
     })
     const elapsed = Math.round(performance.now() - started)
