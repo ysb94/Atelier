@@ -234,7 +234,7 @@ function BoxLabelingForm({ userId }: { userId: string }) {
             </Button>
           </div>
           <div className="rounded-lg border border-border bg-muted/30 p-3">
-            <div className="outbound-rack-screen-preview outbound-slot-preview">
+            <div className="outbound-rack-screen-preview outbound-slot-preview carton-label-screen-preview">
               <CartonLabelSheet labels={[label, label, label, label]} />
             </div>
           </div>
@@ -246,6 +246,8 @@ function BoxLabelingForm({ userId }: { userId: string }) {
           labels={[printLabel, printLabel, printLabel, printLabel]}
           landscape
           title="박스 라벨링 · A4 4칸 라벨"
+          dialogClassName="max-w-6xl"
+          previewClassName="carton-label-screen-preview"
           unit="라벨"
           printLabel="박스 라벨 인쇄"
           closeLabel="박스 라벨 미리보기 닫기"

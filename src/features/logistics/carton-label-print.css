@@ -1,7 +1,14 @@
 .carton-label-sheet {
+  /* Printed label colors follow the supplied carton artwork, independently of the app theme. */
+  --carton-label-ink: #000;
+  --carton-label-sku-ink: #f00;
   position: relative;
   print-color-adjust: exact;
   -webkit-print-color-adjust: exact;
+}
+
+.outbound-rack-screen-preview.carton-label-screen-preview {
+  width: 100%;
 }
 
 .carton-label-sheet::before,
@@ -12,13 +19,15 @@
 }
 
 .carton-label-sheet::before {
-  inset: 5% auto 5% 50%;
-  border-inline-start: 1px dashed #222;
+  inset: 6.4% auto 6.4% 50%;
+  width: .06cqw;
+  background: repeating-linear-gradient(to bottom, var(--carton-label-ink) 0 .9cqw, transparent .9cqw 2.15cqw);
 }
 
 .carton-label-sheet::after {
   inset: 50% 5.4% auto;
-  border-block-start: 1px dashed #222;
+  height: .06cqw;
+  background: repeating-linear-gradient(to right, var(--carton-label-ink) 0 5.9cqw, transparent 5.9cqw 6.15cqw);
 }
 
 .carton-label-sheet > .carton-label {
@@ -37,11 +46,12 @@
 
 .carton-label-table {
   display: grid;
-  grid-template-rows: 14.5% 34% repeat(4, minmax(0, 1fr));
+  grid-template-rows: 14.4% 34.3% repeat(4, minmax(0, 1fr));
   width: 100%;
   height: 100%;
-  border: .55cqw solid #000;
-  font-size: 4.5cqw;
+  border: .7cqw solid var(--carton-label-ink);
+  color: var(--carton-label-ink);
+  font-size: 4.4cqw;
   font-weight: 700;
   line-height: 1.06;
 }
@@ -52,8 +62,8 @@
   min-height: 0;
 }
 
-.carton-label-row + .carton-label-row { border-block-start: .22cqw solid #000; }
-.carton-label-row > * + * { border-inline-start: .22cqw solid #000; }
+.carton-label-row + .carton-label-row { border-block-start: max(1px, .2cqw) solid var(--carton-label-ink); }
+.carton-label-row > * + * { border-inline-start: max(1px, .2cqw) solid var(--carton-label-ink); }
 
 .carton-label-row > span,
 .carton-label-row > strong {
@@ -71,12 +81,12 @@
 
 .carton-label-visual {
   display: grid;
-  grid-template-columns: 28% minmax(0, 1fr);
+  grid-template-columns: 17.6cqw minmax(0, 1fr);
   align-items: center;
-  gap: 1cqw;
+  gap: 10cqw;
   min-width: 0;
   min-height: 0;
-  padding: .35cqw 1.4cqw;
+  padding: .35cqw 1.2cqw .35cqw 2.1cqw;
 }
 
 .carton-label-photo {
@@ -96,9 +106,9 @@
 
 .carton-label-sku {
   overflow: hidden;
-  color: var(--color-primary);
-  font-size: min(14.4cqw, calc(89cqw / var(--carton-sku-length)));
-  font-weight: 500;
+  color: var(--carton-label-sku-ink);
+  font-size: min(14cqw, calc(76cqw / var(--carton-sku-length)));
+  font-weight: 400;
   line-height: 1;
   white-space: nowrap;
 }
@@ -106,9 +116,12 @@
 .carton-label-item { grid-template-columns: 14.4% minmax(0, 1fr); }
 .carton-label-item-name {
   background: #f1f1f1;
-  font-size: min(4.7cqw, calc(140cqw / var(--carton-item-length)));
+  font-size: min(4.8cqw, calc(140cqw / var(--carton-item-length)));
 }
 .carton-label-space { grid-template-columns: 62.6% minmax(0, 1fr); }
 .carton-label-quantity { grid-template-columns: 25.3% 37.3% minmax(0, 1fr); }
+.carton-label-quantity > :not(:first-child) { font-size: 5cqw; }
+.carton-label-quantity > :nth-child(2) { word-spacing: .2em; }
 .carton-label-footer { grid-template-columns: 44% minmax(0, 1fr); }
-.carton-label-footer > :last-child { font-size: 3.6cqw; }
+.carton-label-footer > :first-child { font-size: 4.8cqw; }
+.carton-label-footer > :last-child { font-size: 3.8cqw; }

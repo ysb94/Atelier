@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Printer, X } from 'lucide-react'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { Button } from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import { outboundRackLabelPages } from '@/lib/warehouse/outbound-qr'
 import './outbound-rack-print.css'
 
@@ -34,12 +35,14 @@ type PreviewProps<T> = {
   printLabel: string
   closeLabel: string
   note: string
+  dialogClassName?: string
+  previewClassName?: string
   renderSheet: (labels: (T | null)[]) => ReactNode
   onClose: () => void
 }
 
 export function WarehouseFourSlotPrintPreview<T>({
-  labels, landscape, title, unit, printLabel, closeLabel, note, renderSheet, onClose,
+  labels, landscape, title, unit, printLabel, closeLabel, note, dialogClassName, previewClassName, renderSheet, onClose,
 }: PreviewProps<T>) {
   const active = useWorkspaceTabActivity()
   const titleId = useId()
@@ -99,7 +102,7 @@ export function WarehouseFourSlotPrintPreview<T>({
   return (
     <WorkspaceTabOverlay>
       <div className="fixed inset-0 z-[3500] flex flex-col bg-foreground/40 p-3 sm:p-6">
-        <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby={titleId} className="mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl" onKeyDown={trapFocus}>
+        <section ref={dialog} role="dialog" aria-modal="true" aria-labelledby={titleId} className={cn('mx-auto flex min-h-0 w-full max-w-3xl flex-1 flex-col overflow-hidden rounded-xl border border-border bg-card shadow-xl', dialogClassName)} onKeyDown={trapFocus}>
           <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
             <div>
               <h2 id={titleId} className="text-base font-semibold">{title}</h2>
@@ -121,7 +124,7 @@ export function WarehouseFourSlotPrintPreview<T>({
             </div>
           </div>
           <div className="min-h-0 flex-1 overflow-auto bg-muted/40 p-4">
-            <div className={'outbound-rack-screen-preview' + (landscape ? ' outbound-slot-preview' : '')}>{renderSheet(pages[pageIndex])}</div>
+            <div className={cn('outbound-rack-screen-preview', landscape && 'outbound-slot-preview', previewClassName)}>{renderSheet(pages[pageIndex])}</div>
           </div>
           <footer className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
             {note}
