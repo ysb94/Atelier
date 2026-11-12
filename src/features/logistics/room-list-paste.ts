@@ -46,6 +46,12 @@ export function isRoomListQuantity(value: string) {
   return /^[+-]?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(value)
 }
 
+export function normalizeRoomListQuantity(value: string) {
+  if (!value.includes('.')) return value
+  const quantity = value.trim()
+  return isRoomListQuantity(quantity) ? quantity.replace(/0+$/, '').replace(/\.$/, '') : value
+}
+
 type QuantityTotal = { units: bigint; places: number }
 
 function addQuantity(total: QuantityTotal, value: string): QuantityTotal {
@@ -89,7 +95,8 @@ export function mergeRoomListRows(rows: RoomListRow[]) {
     const firstRow = byName.get(name)
     if (!firstRow) {
       if (name) byName.set(name, { mergedIndex: merged.length, inputIndex: index })
-      merged.push(row)
+      const quantity = normalizeRoomListQuantity(row[1])
+      merged.push(quantity === row[1] ? row : [row[0], quantity])
       continue
     }
 
