@@ -47,6 +47,5 @@ export const CARGO_WAREHOUSE_PREVIEW_COLUMNS = CARGO_WAREHOUSE_LINE_LIST_COLUMNS
   .filter(column => column.key !== 'latestBoxes')
   .map(column => {
     if (column.key === 'latestSlot') return { ...column, label: '입고 구분', printLabel: '입고 구분' }
-    if (column.key === 'stow') return { ...column, label: '분할 순서', printLabel: '분할 순서' }
     return column
   })

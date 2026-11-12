@@ -2,7 +2,7 @@ import type { WarehouseStockPosition } from '../types'
 import { normalizeStyleNo } from '../import/transform'
 import { cargoLineHasContent, formatCargoWarehouseNote, UNLOAD_STACK_BOX_LIMIT, type CargoInboundLineDraft } from './inbound'
 import { parseCargoLineListInteger, type CargoLineListValues } from './line-list'
-import { compareUnloadStyleNo } from './unload-stow'
+import { assignUnloadStowLabels, compareUnloadStyleNo } from './unload-stow'
 import { shiftShippedOnStamp } from './warehouse-tidy'
 
 type StockPosition = Pick<WarehouseStockPosition, 'styleNo' | 'remainingBoxes' | 'openedUnits' | 'quantityStatus'>
@@ -34,7 +34,7 @@ export function buildWarehouseTidyPreviewRows(
   stockAvailable: boolean,
 ): Array<{ key: string; values: CargoLineListValues }> {
   const entryKinds = stockEntryKinds(positions)
-  return lines.filter(cargoLineHasContent).flatMap((line, index) => {
+  const rows = lines.filter(cargoLineHasContent).flatMap((line, index) => {
     const styleNo = line.styleNo.trim()
     const key = normalizeStyleNo(styleNo)
     const entryKind = stockAvailable && key ? entryKinds.get(key) ?? 'NEW' : '확인 필요'
@@ -51,7 +51,7 @@ export function buildWarehouseTidyPreviewRows(
         quantity: parseCargoLineListInteger(line.qty),
         unitsPerBox: parseCargoLineListInteger(line.perBox),
         boxCount: incomingBoxes === null ? null : Math.min(UNLOAD_STACK_BOX_LIMIT, incomingBoxes - partIndex * UNLOAD_STACK_BOX_LIMIT),
-        stow: `${partIndex + 1} / ${partCount}`,
+        stow: '',
         note: formatCargoWarehouseNote(line.note, line.requestNote),
         shippedAt: shiftShippedOnStamp(shippedAt, 0),
         latestSlot: entryKind,
@@ -60,4 +60,14 @@ export function buildWarehouseTidyPreviewRows(
       },
     }))
   }).sort((left, right) => compareUnloadStyleNo(left.values.styleNo, right.values.styleNo))
+  const stowByKey = assignUnloadStowLabels(rows.map(row => ({
+    key: row.key,
+    styleNo: row.values.styleNo,
+    boxSum: row.values.boxCount ?? 0,
+    incomingBoxes: row.values.boxCount ?? 0,
+  })))
+  return rows.map(row => ({
+    ...row,
+    values: { ...row.values, stow: stowByKey.get(row.key) ?? '' },
+  }))
 }
