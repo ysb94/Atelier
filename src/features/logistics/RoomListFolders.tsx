@@ -12,6 +12,7 @@ import { diagnosticError } from '@/lib/diagnostics/workflow-trace'
 import {
   createWarehouseRoomListFolder,
   listWarehouseRoomListFolders,
+  readWarehouseRoomListFolderItemsById,
   readWarehouseRoomListFolderForEdit,
   readWarehouseRoomListItems,
   updateWarehouseRoomListFolder,
@@ -19,7 +20,7 @@ import {
   type WarehouseRoomListFolder,
   type WarehouseRoomListFolderEdit,
 } from '@/lib/supabase/warehouse-room-lists'
-import { emptyRoomListRow, isRoomListQuantity, mergeRoomListRows, normalizeRoomListQuantity, type RoomListRow } from './room-list-paste'
+import { emptyRoomListRow, isRoomListQuantity, mergeRoomListRows, normalizeRoomListQuantity, sumRoomListQuantities, type RoomListRow } from './room-list-paste'
 import { RoomListFolderItems } from './RoomListFolderItems'
 
 const REGISTERED_DATE = new Intl.DateTimeFormat('ko-KR', {
@@ -81,6 +82,26 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
     }
     return [...groups]
   }, [folders.data])
+  const visibleFolderIds = useMemo(() => foldersByDate.flatMap(([date, group]) =>
+    (expandedDates[date] ?? date === today) ? group.map(folder => folder.id) : [],
+  ), [expandedDates, foldersByDate, today])
+  const totals = useQuery({
+    queryKey: [...queryKey, 'totals', visibleFolderIds],
+    enabled: active && visibleFolderIds.length > 0,
+    queryFn: async () => {
+      const itemsById = await readWarehouseRoomListFolderItemsById(visibleFolderIds, brandIds)
+      const started = performance.now()
+      const quantities = Object.fromEntries(Array.from(itemsById, ([id, items]) => [
+        id, sumRoomListQuantities(items.map(([, quantity]) => quantity)),
+      ] as const))
+      const elapsed = Math.round(performance.now() - started)
+      if (elapsed >= 200) {
+        const log = elapsed >= 1000 ? console.warn : console.info
+        log('[room-list] 폴더별 수량 합계', { elapsed, folders: itemsById.size })
+      }
+      return quantities
+    },
+  })
   const register = useMutation({
     mutationFn: createWarehouseRoomListFolder,
     onSuccess: async () => {
@@ -282,6 +303,12 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
             </Button>
           </div>
           {open.isError ? <p role="alert" className="mb-3 text-sm text-danger">선택한 폴더를 열지 못했습니다. 다시 시도해 주세요.</p> : null}
+          {totals.isError && (
+            <p role="alert" className="mb-3 text-sm text-danger">
+              폴더의 총 수량을 불러오지 못했습니다.
+              <Button type="button" variant="outline" size="sm" className="ml-2" onClick={() => void totals.refetch()}>총 수량 다시 조회</Button>
+            </p>
+          )}
           <div className="space-y-5">
             {foldersByDate.map(([date, group]) => {
               const isToday = date === today
@@ -323,7 +350,10 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
                               <div className="mt-1 text-xs text-muted-foreground">
                                 {folder.created_by_name} · <time dateTime={folder.created_at}>{REGISTERED_TIME.format(new Date(folder.created_at))}</time>
                               </div>
-                              <div className="mt-1 text-xs text-muted-foreground">상품 {folder.item_count.toLocaleString('ko-KR')}개</div>
+                              <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-xs tabular-nums text-muted-foreground">
+                                <span>상품 {folder.item_count.toLocaleString('ko-KR')}종</span>
+                                <span>총 수량 {totals.data?.[folder.id] ? `${totals.data[folder.id]}개` : totals.isFetching ? '확인 중…' : '—'}</span>
+                              </div>
                             </div>
                           </label>
                           {folder.created_by === userId && (

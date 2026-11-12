@@ -77,19 +77,30 @@ export async function updateWarehouseRoomListFolder(input: WarehouseRoomListFold
   if (!saved) throw new WarehouseRoomListFolderChangedError()
 }
 
+async function readItemsByFolder(folderIds: string[], brandIds: string[], context: DiagnosticContext) {
+  const itemsById = new Map<string, WarehouseRoomListItem[]>()
+  for (let index = 0; index < folderIds.length; index += 40) {
+    const ids = folderIds.slice(index, index + 40)
+    const rows = await diagnosticQuery<{ id: string; items: WarehouseRoomListItem[] }[]>(
+      'db', 'room_list_folder_items',
+      getSupabase().from(TABLE).select('id, items').in('id', ids).in('brand_id', brandIds),
+      context,
+    )
+    for (const row of rows) itemsById.set(row.id, row.items)
+  }
+  return itemsById
+}
+
+export function readWarehouseRoomListFolderItemsById(folderIds: string[], brandIds: string[]) {
+  return diagnosticOperation('app', 'room_list_folder_totals', trace =>
+    trace.run('read_visible_items', context => readItemsByFolder(folderIds, brandIds, context)),
+  )
+}
+
 export function readWarehouseRoomListItems(folders: WarehouseRoomListFolder[], brandIds: string[]) {
   return diagnosticOperation('app', 'room_list_open_folders', trace =>
     trace.run('read_selected_items', async context => {
-      const itemsById = new Map<string, WarehouseRoomListItem[]>()
-      for (let index = 0; index < folders.length; index += 40) {
-        const ids = folders.slice(index, index + 40).map(folder => folder.id)
-        const rows = await diagnosticQuery<{ id: string; items: WarehouseRoomListItem[] }[]>(
-          'db', 'room_list_folder_items',
-          getSupabase().from(TABLE).select('id, items').in('id', ids).in('brand_id', brandIds),
-          context,
-        )
-        for (const row of rows) itemsById.set(row.id, row.items)
-      }
+      const itemsById = await readItemsByFolder(folders.map(folder => folder.id), brandIds, context)
       if (itemsById.size !== folders.length) throw new Error('Some selected room list folders are unavailable.')
       return folders.flatMap(folder => itemsById.get(folder.id) ?? [])
     }),
