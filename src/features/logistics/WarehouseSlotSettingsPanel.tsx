@@ -112,10 +112,10 @@ export function WarehouseSlotSettingsPanel({
     () => codes.filter((code) => !savedCodes.has(code)).length,
     [codes, savedCodes],
   )
-  const removedCount = useMemo(
-    () => [...savedCodes].filter((code) => !codes.includes(code)).length,
-    [codes, savedCodes],
-  )
+  const removedCount = useMemo(() => {
+    const draftCodes = new Set(codes)
+    return seedCodes.filter((code) => !draftCodes.has(code)).length
+  }, [codes, seedCodes])
   const dirty = addedCount > 0 || removedCount > 0
 
   const filtered = useMemo(() => {
@@ -165,23 +165,31 @@ export function WarehouseSlotSettingsPanel({
   const rangeTooBig =
     mode === 'range' && Number.isFinite(rangeCount) && rangeCount > MAX_ADD_ROWS
 
-  function appendCodes(incomingCodes: readonly string[]) {
-    if (incomingCodes.length === 0) {
-      setStatus('추가할 자리가 없습니다.')
-      return
-    }
-    setCodes((prev) => {
+  function updateDraftCodes(
+    update: (current: readonly string[]) => Iterable<string>,
+    message: string | null,
+  ) {
+    setCodes((current) => {
       const started = performance.now()
-      const next = new Set(prev)
-      for (const code of incomingCodes) next.add(code)
-      const sorted = [...next].sort(compareWarehouseLocationCodeNatural)
+      const sorted = [...new Set(update(current))].sort(compareWarehouseLocationCodeNatural)
       const elapsedMs = performance.now() - started
       if (elapsedMs >= 200) console[elapsedMs >= 1000 ? 'warn' : 'info']('[warehouse-slots] 자리 목록 정렬', { path: location.pathname, elapsedMs, slots: sorted.length })
       return sorted
     })
     setSearch('')
     setTablePage(0)
-    setStatus(zone === 'picking' ? '목록에 추가했습니다. ‘자리 저장’을 누르면 출고창고로 등록됩니다.' : null)
+    setStatus(message)
+  }
+
+  function appendCodes(incomingCodes: readonly string[]) {
+    if (incomingCodes.length === 0) {
+      setStatus('추가할 자리가 없습니다.')
+      return
+    }
+    updateDraftCodes(
+      (current) => [...current, ...incomingCodes],
+      zone === 'picking' ? '목록에 추가했습니다. ‘자리 저장’을 누르면 출고창고로 등록됩니다.' : null,
+    )
   }
 
   function removeCode(code: string) {
@@ -189,7 +197,16 @@ export function WarehouseSlotSettingsPanel({
     setStatus(null)
   }
 
+  function saveSlots() {
+    if (zone === 'picking' && codes.length === 0 && !window.confirm(
+      '출고창고 자리 목록을 비운 채 저장하면 현재 출고창고 재고가 박스창고로 재분류됩니다. 저장할까요?',
+    )) return
+    setStatus(null)
+    saveMutation.mutate()
+  }
+
   const loading = setQuery.isLoading || slotsQuery.isLoading || hydratedKey !== `${warehouseId}:${zone}`
+  const editingDisabled = loading || setQuery.isError || slotsQuery.isError || saveMutation.isPending
 
   return (
     <div className="space-y-4">
@@ -198,7 +215,7 @@ export function WarehouseSlotSettingsPanel({
         <FilterTabs ariaLabel="출고창고 자리 추가 방식" value={pickingInputMode} onChange={setPickingInputMode} tabs={[{ value: 'list', label: '직접 입력' }, { value: 'rack', label: '렉별 16자리 생성 · 선택' }]} />
       </>}
       <div className="grid gap-3 lg:grid-cols-[20rem_minmax(0,1fr)]">
-        {zone === 'picking' && pickingInputMode === 'rack' ? <OutboundSlotGenerator onAdd={appendCodes} disabled={loading || setQuery.isError || slotsQuery.isError || saveMutation.isPending} /> : <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
+        {zone === 'picking' && pickingInputMode === 'rack' ? <OutboundSlotGenerator onAdd={appendCodes} disabled={editingDisabled} /> : <div className="space-y-3 rounded-lg border border-border bg-muted/10 p-4">
           {zone !== 'picking' && <div>
             <p className="text-xs font-medium text-muted-foreground">추가 방법</p>
             <div className="mt-2 grid grid-cols-2 gap-2">
@@ -266,22 +283,38 @@ export function WarehouseSlotSettingsPanel({
 
           {rangeTooBig && !usingList || listTooBig ? (
             <p className="text-xs text-danger">
-              한 번에 {formatNumber(MAX_ADD_ROWS)}개까지 넣을 수 있습니다.
+              한 번에 {formatNumber(MAX_ADD_ROWS)}개까지 추가할 수 있습니다.
+              {zone === 'picking' && ' 전체 목록을 바꾸려면 ‘목록 교체’를 사용하세요.'}
             </p>
           ) : null}
 
-          <Button
-            type="button"
-            size="sm"
-            className="w-full"
-            disabled={addCodes.length === 0 || loading || setQuery.isError || slotsQuery.isError || saveMutation.isPending}
-            onClick={() => appendCodes(addCodes)}
-          >
-            <Plus className="size-3.5" />
-            {addCodes.length > 0
-              ? `${formatNumber(addCodes.length)}개 추가`
-              : '자리 추가'}
-          </Button>
+          {zone === 'picking' && (
+            <Button type="button" size="sm" variant="outline" className="w-full"
+              disabled={editingDisabled || codes.length === 0} onClick={() => setListText(codes.join('\n'))}>
+              현재 목록 불러오기
+            </Button>
+          )}
+          <div className={zone === 'picking' ? 'grid grid-cols-2 gap-2' : undefined}>
+            <Button
+              type="button"
+              size="sm"
+              className="w-full"
+              disabled={addCodes.length === 0 || editingDisabled}
+              onClick={() => appendCodes(addCodes)}
+            >
+              <Plus className="size-3.5" />
+              {addCodes.length > 0
+                ? `${formatNumber(addCodes.length)}개 추가`
+                : '자리 추가'}
+            </Button>
+            {zone === 'picking' && (
+              <Button type="button" size="sm" variant="outline"
+                disabled={editingDisabled || !warehouseId || listCodes.length === 0}
+                onClick={() => updateDraftCodes(() => listCodes, '새 목록으로 바꿨습니다. ‘자리 저장’을 누르면 적용됩니다.')}>
+                목록 교체
+              </Button>
+            )}
+          </div>
         </div>}
 
         <div className="space-y-3">
@@ -298,17 +331,27 @@ export function WarehouseSlotSettingsPanel({
                 <Badge variant="warning">삭제 {formatNumber(removedCount)}</Badge>
               ) : null}
             </div>
-            <Button
-              type="button"
-              size="sm"
-              disabled={!warehouseId || (!dirty && zone !== 'picking') || loading || setQuery.isError || slotsQuery.isError || saveMutation.isPending}
-              onClick={() => {
-                setStatus(null)
-                saveMutation.mutate()
-              }}
-            >
-              {saveMutation.isPending ? '저장 중...' : '자리 저장'}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              {zone === 'picking' && (
+                <>
+                  <Button type="button" size="sm" variant="outline"
+                    disabled={editingDisabled || !warehouseId || codes.length === 0}
+                    onClick={() => updateDraftCodes(() => [], '화면의 목록을 비웠습니다. 새 자리를 추가하거나 저장할 수 있습니다.')}>
+                    목록 비우기
+                  </Button>
+                  {dirty && (
+                    <Button type="button" size="sm" variant="ghost" disabled={editingDisabled}
+                      onClick={() => updateDraftCodes(() => seedCodes, '저장된 자리 목록으로 되돌렸습니다.')}>
+                      변경 되돌리기
+                    </Button>
+                  )}
+                </>
+              )}
+              <Button type="button" size="sm" disabled={!warehouseId || (!dirty && zone !== 'picking') || editingDisabled}
+                onClick={saveSlots}>
+                {saveMutation.isPending ? '저장 중...' : '자리 저장'}
+              </Button>
+            </div>
           </div>
 
           <Input
@@ -347,7 +390,7 @@ export function WarehouseSlotSettingsPanel({
             </p>
           ) : codes.length === 0 ? (
             <p className="rounded-lg border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
-              왼쪽에서 자리 범위를 넣어 {warehouseLabel} 자리를 만드세요.
+              {zone === 'picking' ? '왼쪽에서 새 출고창고 자리를 추가하세요.' : `왼쪽에서 자리 범위를 넣어 ${warehouseLabel} 자리를 만드세요.`}
             </p>
           ) : filtered.length === 0 ? (
             <p className="rounded-lg border border-dashed border-border px-4 py-10 text-center text-sm text-muted-foreground">
@@ -380,7 +423,8 @@ export function WarehouseSlotSettingsPanel({
                           <td className="px-3 py-2 text-right">
                             <button
                               type="button"
-                              className="text-xs text-muted-foreground hover:text-foreground"
+                              className="text-xs text-muted-foreground hover:text-foreground disabled:opacity-50"
+                              disabled={editingDisabled}
                               onClick={() => removeCode(code)}
                             >
                               빼기
