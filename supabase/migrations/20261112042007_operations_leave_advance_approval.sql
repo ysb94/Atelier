@@ -30,12 +30,12 @@ declare
         end if;
       elsif not app.is_department_request_approver(old.company_id,old.department_id,old.kind) then$guard$;
   charge_guard constant text := 'app.is_department_request_approver(new.company_id,new.department_id,new.kind)';
-  limit_check constant text := $limit$    select days into limit_days from app.leave_advance_limits where employee_id=actor;
+  limit_check constant text := replace($limit$    select days into limit_days from app.leave_advance_limits where employee_id=actor;
     outstanding:=(app.leave_advance_summary(actor)->>'outstanding')::numeric;
     if borrowed<0 or outstanding+borrowed>coalesce(limit_days,0) or coalesce(limit_days,0)=0 then raise exception '선사용 한도를 초과합니다. 한도 %일 · 기존 선사용 %일 · 이번 부족분 %일',coalesce(limit_days,0),outstanding,borrowed;end if;
-$limit$;
-  submission_limit constant text := $limit$ if not exists(select 1 from app.leave_advance_limits where employee_id=new.employee_id and days>0) then raise exception '선사용 한도가 설정되지 않았습니다. 운영지원에 문의해 주세요.';end if;
-$limit$;
+$limit$,E'\r\n',E'\n');
+  submission_limit constant text := replace($limit$ if not exists(select 1 from app.leave_advance_limits where employee_id=new.employee_id and days>0) then raise exception '선사용 한도가 설정되지 않았습니다. 운영지원에 문의해 주세요.';end if;
+$limit$,E'\r\n',E'\n');
 begin
   definition := pg_get_functiondef('app.guard_company_leave_request()'::regprocedure);
   if strpos(definition,department_guard)=0 or strpos(definition,'elsif old.advance_requested then')>0 then

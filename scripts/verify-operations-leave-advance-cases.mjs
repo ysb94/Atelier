@@ -39,7 +39,8 @@ export async function verifyOperationsLeaveAdvances({ db, actor, value, company,
     'grants',(select jsonb_agg(c.relacl order by c.relname) from pg_class c where c.relnamespace in ('public'::regnamespace,'app'::regnamespace) and c.relkind='r')
   )::text)`)
   const before = await snapshot()
-  await db.exec(await readFile('supabase/migrations/20261112024148_operations_leave_advance_approval.sql', 'utf8'))
+  const migration = await readFile('supabase/migrations/20261112042007_operations_leave_advance_approval.sql', 'utf8')
+  await db.exec(migration.replace(/\r?\n/g, '\r\n'))
   assert.equal(await snapshot(), before, '기존 데이터·RLS·테이블 권한 보존')
 
   const notices = () => value('select public.list_my_home_work_notifications()')
