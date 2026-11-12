@@ -19,8 +19,9 @@ import { WarehouseFixedLocationsPanel } from './WarehouseFixedLocationsPanel'
 import { WarehouseQrPanel } from './WarehouseQrPanel'
 import { WarehouseSlotSettingsPanel } from './WarehouseSlotSettingsPanel'
 import { WarehouseSheetTestForm } from './WarehouseSheetTestForm'
+import { WarehouseBoxHistoryPanel } from './TemporaryWarehousePanel'
 
-type WarehouseView = 'box' | 'outbound' | 'fixed' | 'qr'
+type WarehouseView = 'box' | 'outbound' | 'boxes' | 'fixed' | 'qr'
 type WarehousePanel = 'stock' | 'slots'
 
 const WAREHOUSE_VIEWS: {
@@ -45,6 +46,13 @@ const WAREHOUSE_VIEWS: {
     detail:
       '출고할 제품을 낱개로 꺼내 두는 곳입니다. 피킹은 여기서 합니다.',
     icon: Truck,
+  },
+  {
+    value: 'boxes',
+    label: '개별 박스·이력',
+    description: 'QR별 박스와 작업 이력 조회',
+    detail: '박스번호, 상품 또는 자리로 찾고 입고·이동 이력을 확인합니다.',
+    icon: Package,
   },
   {
     value: 'fixed',
@@ -96,7 +104,7 @@ export function WarehousePage() {
       const next = new URLSearchParams(current)
       if (view === 'box') next.delete('view')
       else next.set('view', view)
-      if (view === 'qr' || view === 'fixed') next.delete('panel')
+      if (view !== 'box' && view !== 'outbound') next.delete('panel')
       return next
     })
   }
@@ -118,7 +126,7 @@ export function WarehousePage() {
       />
       {import.meta.env.DEV && brand.slug === 'masmarulez' && <WarehouseSheetTestForm />}
 
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {WAREHOUSE_VIEWS.map((item) => {
           const Icon = item.icon
           const selected = item.value === activeView
@@ -199,6 +207,8 @@ export function WarehousePage() {
         <CardContent>
           {activeView === 'qr' ? (
             <WarehouseQrPanel brandName={brand.name} brandId={brand.id} />
+          ) : activeView === 'boxes' ? (
+            <WarehouseBoxHistoryPanel key={brand.id} brandId={brand.id} includeActive />
           ) : activeView === 'fixed' ? (
             <WarehouseFixedLocationsPanel key={brand.id} brandId={brand.id} />
           ) : activePanel === 'slots' ? (

@@ -37,7 +37,6 @@ import { CompanyWarehousePage } from '@/features/logistics/WarehousePage'
 import { CompanyWarehouseFinderPage } from '@/features/logistics/WarehouseFinderPage'
 import { CompanyCargoInboundPage } from '@/features/logistics/CargoInboundPage'
 import { RoomListPage } from '@/features/logistics/RoomListPage'
-import { CompanyTemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
 import { OperationsSupportPage } from '@/features/operations-support/OperationsSupportPage'
 import { LogisticsOperationsPage } from '@/features/logistics/operations/LogisticsOperationsPage'
 import { DutyFreePage } from '@/features/b2b/DutyFreePage'
@@ -188,7 +187,7 @@ export const companyWorkspaceRoutes = (
       <Route path="logistics/warehouses" element={<CompanyWarehousePage />} />
       <Route
         path="logistics/temporary-warehouse"
-        element={<CompanyTemporaryWarehousePage />}
+        element={<RedirectTo to="/logistics/warehouses?view=boxes" />}
       />
       <Route
         path="logistics/cargo-inbound"

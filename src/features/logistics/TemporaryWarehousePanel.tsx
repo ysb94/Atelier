@@ -745,7 +745,7 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
           </section>
         </>
       ) : activeTab === 'history' ? (
-        <TemporaryWarehouseHistoryList brandId={brandId} />
+        <WarehouseBoxHistoryPanel brandId={brandId} />
       ) : (
         <TemporaryWarehouseSlotList
           zone={activeTab === 'box_slots' ? 'box_storage' : 'picking'}
@@ -781,7 +781,13 @@ export function TemporaryWarehousePanel({ brandId }: { brandId: string }) {
   )
 }
 
-function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
+export function WarehouseBoxHistoryPanel({
+  brandId,
+  includeActive = false,
+}: {
+  brandId: string
+  includeActive?: boolean
+}) {
   const [style, setStyle] = useState<StyleRef | null>(null)
   const [search, setSearch] = useState('')
   const [openBoxId, setOpenBoxId] = useState<string | null>(null)
@@ -793,8 +799,9 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
     queryFn: () => getWarehouseBoxes(brandId, { includeClosed: true }),
   })
   const movementsQuery = useQuery({
-    queryKey: ['warehouse-box-movements', brandId],
-    queryFn: () => getWarehouseBoxMovements(brandId),
+    queryKey: ['warehouse-box-movements', brandId, openBoxId],
+    queryFn: () => getWarehouseBoxMovements(brandId, openBoxId!),
+    enabled: openBoxId !== null,
   })
 
   useEffect(() => {
@@ -813,31 +820,21 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
     })
   }, [brandId, movementsQuery.error])
 
-  const closedBoxes = useMemo(
+  const boxes = useMemo(
     () =>
       (boxesQuery.data ?? emptyList())
-        .filter(isClosedWarehouseBox)
-        .slice()
+        .filter((box) => includeActive || isClosedWarehouseBox(box))
         .sort((left, right) => {
           const leftAt = warehouseBoxClosedAt(left) ?? left.updatedAt
           const rightAt = warehouseBoxClosedAt(right) ?? right.updatedAt
           return rightAt.localeCompare(leftAt)
         }),
-    [boxesQuery.data],
+    [boxesQuery.data, includeActive],
   )
-  const movementsByBoxId = useMemo(() => {
-    const grouped = new Map<string, WarehouseBoxMovement[]>()
-    for (const movement of movementsQuery.data ?? emptyList()) {
-      const rows = grouped.get(movement.boxId)
-      if (rows) rows.push(movement)
-      else grouped.set(movement.boxId, [movement])
-    }
-    return grouped
-  }, [movementsQuery.data])
 
   const filtered = useMemo(() => {
     const query = search.trim().toLocaleLowerCase('ko-KR')
-    return closedBoxes.filter((box) => {
+    return boxes.filter((box) => {
       if (style && box.styleId !== style.styleId) return false
       if (!query) return true
       return [
@@ -849,7 +846,7 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
         box.note,
       ].some((value) => value.toLocaleLowerCase('ko-KR').includes(query))
     })
-  }, [closedBoxes, search, style])
+  }, [boxes, search, style])
 
   useEffect(() => {
     setPage(0)
@@ -863,25 +860,19 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
   )
   const error = boxesQuery.error
     ? mutationErrorMessage(boxesQuery.error, '박스 이력을 불러오지 못했습니다.')
-    : movementsQuery.error
-      ? mutationErrorMessage(
-          movementsQuery.error,
-          '박스 이력을 불러오지 못했습니다.',
-        )
-      : null
-  const loading = boxesQuery.isLoading || movementsQuery.isLoading
+    : null
 
   return (
     <section className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-3">
         <Summary
-          label="종료 박스"
-          value={`${formatNumber(closedBoxes.length)}개`}
+          label={includeActive ? '전체 박스' : '종료 박스'}
+          value={`${formatNumber(boxes.length)}개`}
         />
         <Summary
           label="확인 필요"
           value={`${formatNumber(
-            closedBoxes.filter(
+            boxes.filter(
               (box) => warehouseBoxClosedKind(box) === 'legacy_archive',
             ).length,
           )}개`}
@@ -893,14 +884,6 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
       </div>
 
       <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h3 className="text-sm font-semibold">박스 이력</h3>
-          <p className="mt-1 text-xs text-muted-foreground">
-            낱개 소진·박스 단위 출고로 종료된 박스와, 예전 보관으로 남은 확인
-            필요 건을 구분해서 봅니다. 기존 보관 4건은 실제 처분을 알 수 없어
-            자동으로 바꾸지 않습니다.
-          </p>
-        </div>
         <div className="flex w-full flex-wrap items-end gap-2 sm:w-auto">
           <div className="w-full sm:w-72">
             <StylePicker
@@ -916,11 +899,22 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
             <Input
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="M번호·상품명·박스번호 검색"
+              placeholder="M번호·상품명·박스번호·자리 검색"
               className="pl-8"
             />
           </label>
         </div>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={boxesQuery.isFetching}
+          onClick={() => {
+            void boxesQuery.refetch()
+            if (openBoxId) void movementsQuery.refetch()
+          }}
+        >
+          새로고침
+        </Button>
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-border">
@@ -937,18 +931,21 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
               <th className="px-3 py-2 text-right font-medium">최초 입수</th>
               <th className="px-3 py-2 text-right font-medium">잔여 수량</th>
               <th className="px-3 py-2 font-medium">종료일</th>
-              <th className="px-3 py-2 font-medium">종료 종류</th>
+              <th className="px-3 py-2 font-medium">상태</th>
             </tr>
           </thead>
           <tbody>
             {paged.map((box) => {
-              const movements = movementsByBoxId.get(box.id) ?? emptyList()
               const open = openBoxId === box.id
               return (
                 <TemporaryWarehouseHistoryRow
                   key={box.id}
                   box={box}
-                  movements={movements}
+                  movements={open ? movementsQuery.data ?? emptyList() : emptyList()}
+                  historyLoading={open && movementsQuery.isLoading}
+                  historyError={open && movementsQuery.error
+                    ? mutationErrorMessage(movementsQuery.error, '박스 이력을 불러오지 못했습니다.')
+                    : null}
                   open={open}
                   onToggle={() =>
                     setOpenBoxId((current) =>
@@ -966,10 +963,10 @@ function TemporaryWarehouseHistoryList({ brandId }: { brandId: string }) {
                 >
                   {error
                     ? error
-                    : loading
+                    : boxesQuery.isLoading
                       ? '박스 이력을 불러오는 중...'
-                      : closedBoxes.length === 0
-                        ? '아직 종료된 박스가 없습니다. 수량을 0으로 소진하거나 밀봉 박스를 출고하면 여기에 남습니다.'
+                      : boxes.length === 0
+                        ? '표시할 박스가 없습니다.'
                         : '검색 조건에 맞는 박스 이력이 없습니다.'}
                 </td>
               </tr>
@@ -1015,11 +1012,15 @@ function TemporaryWarehouseHistoryRow({
   box,
   movements,
   open,
+  historyLoading,
+  historyError,
   onToggle,
 }: {
   box: WarehouseBox
   movements: WarehouseBoxMovement[]
   open: boolean
+  historyLoading: boolean
+  historyError: string | null
   onToggle: () => void
 }) {
   return (
@@ -1036,7 +1037,7 @@ function TemporaryWarehouseHistoryRow({
               {box.displayCode}
             </Badge>
             <span className="text-[11px] text-muted-foreground">
-              {open ? '이력 접기' : `이력 ${formatNumber(movements.length)}건`}
+              {open ? '이력 접기' : '이력 보기'}
             </span>
           </button>
         </td>
@@ -1063,14 +1064,20 @@ function TemporaryWarehouseHistoryRow({
                 : 'muted'
             }
           >
-            {warehouseBoxClosedKindLabel(warehouseBoxClosedKind(box))}
+            {isClosedWarehouseBox(box)
+              ? warehouseBoxClosedKindLabel(warehouseBoxClosedKind(box))
+              : boxStatusLabel(box.status)}
           </Badge>
         </td>
       </tr>
       {open ? (
         <tr className="border-t border-border bg-muted/20">
           <td colSpan={9} className="px-3 py-3">
-            {movements.length === 0 ? (
+            {historyError ? (
+              <p className="text-xs text-destructive">{historyError}</p>
+            ) : historyLoading ? (
+              <p className="text-xs text-muted-foreground">박스 이력을 불러오는 중…</p>
+            ) : movements.length === 0 ? (
               <p className="text-xs text-muted-foreground">
                 이 박스의 상세 이력이 없습니다.
               </p>

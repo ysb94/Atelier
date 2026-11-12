@@ -127,11 +127,6 @@ export const companyNavGroups: CompanyNavGroup[] = [
       { to: '/logistics/bulk-outbound', label: '바코드 출고', icon: Truck },
       { to: '/logistics/finder', label: '창고 파인더', icon: Search },
       { to: '/logistics/warehouses', label: '창고 관리', icon: Warehouse },
-      {
-        to: '/logistics/temporary-warehouse',
-        label: '임시 창고관리',
-        icon: FlaskConical,
-      },
       { to: '/logistics/cargo-inbound', label: '화물 입고', icon: PackagePlus },
       { to: '/logistics/room-list', label: '방별리스트', icon: ListChecks },
     ],

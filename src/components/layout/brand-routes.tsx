@@ -24,7 +24,6 @@ import { BulkOutboundPage } from '@/features/logistics/BulkOutboundPage'
 import { OutboundDataPage } from '@/features/logistics/OutboundDataPage'
 import { WarehousePage } from '@/features/logistics/WarehousePage'
 import { WarehouseFinderPage } from '@/features/logistics/WarehouseFinderPage'
-import { TemporaryWarehousePage } from '@/features/logistics/TemporaryWarehousePage'
 
 function RedirectCompany({
   to,
@@ -122,7 +121,7 @@ export function BrandWorkspaceRouteTree() {
       <Route path="logistics/warehouses" element={<WarehousePage />} />
       <Route
         path="logistics/temporary-warehouse"
-        element={<TemporaryWarehousePage />}
+        element={<RedirectTo to="logistics/warehouses?view=boxes" />}
       />
       <Route path="data" element={<RedirectTo to="data/all" />} />
       <Route path="data/upload" element={<DataUploadPage />} />
