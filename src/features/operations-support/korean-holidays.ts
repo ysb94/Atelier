@@ -6,10 +6,14 @@ const HOLIDAYS: Record<string, readonly string[]> = Object.assign({}, ...YEAR_HO
 const COVERED_YEARS = new Set(YEAR_HOLIDAYS.flatMap((year) => Object.keys(year).map((date) => date.slice(0, 4))))
 const warnedYears = new Set<string>()
 
+export function hasKoreanHolidayCalendar(dateKey: string) {
+  return COVERED_YEARS.has(dateKey.slice(0, 4))
+}
+
 export function koreanHolidayNames(dateKey: string): readonly string[] {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return []
   const year = dateKey.slice(0, 4)
-  if (!COVERED_YEARS.has(year)) {
+  if (!hasKoreanHolidayCalendar(dateKey)) {
     if (!warnedYears.has(year)) {
       warnedYears.add(year)
       console.warn('[attendance-work] 이 연도의 국가 공휴일 자료가 없습니다.', { year })

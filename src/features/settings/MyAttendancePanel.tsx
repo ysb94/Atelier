@@ -9,6 +9,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Bell, CalendarDays, ChevronLeft, ChevronRight, Clock3, Search, Send, Settings2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input, Select, Textarea } from '@/components/ui/input'
+import { StatTile } from '@/components/ui/stat-tile'
 import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { HireDateScrollField } from '@/features/org/HireDateScrollField'
 import { LeaveTimeShortcuts, QuarterLeaveTime, RequestTimeField, TimeRangeSummary } from './RequestTimeFields'
@@ -34,7 +35,7 @@ import { useDepartmentApprovers } from '@/features/operations-support/use-depart
 import { useOpsDirectory } from '@/features/operations-support/ops-directory'
 import { koreanHolidayLabel, koreanHolidayNames } from '@/features/operations-support/korean-holidays'
 import { monthLabel, shiftMonth } from '@/features/operations-support/monthly-attendance'
-import { DEFAULT_REMINDER_BASIS, REQUEST_KINDS, approvalTypeOf, canCancelOwnRequest, dateLabel, isAllDayRequest, isFullLeave, isLeaveRequest, isDirectRegistration, requiresDepartmentApproval, isSelfApprovedRequest, requestStatusLabel, isLocationRequest, isOfficialLeave, isPartialLeave, reminderPreview, requestLabel, validateRequest, type PersonalRequest, type RequestForm, type RequestKind } from './personal-requests'
+import { DEFAULT_REMINDER_BASIS, REQUEST_KINDS, approvalTypeOf, canCancelOwnRequest, dateLabel, isAllDayRequest, isFullLeave, isLeaveRequest, isDirectRegistration, requiresDepartmentApproval, isSelfApprovedRequest, requestStatusLabel, isLocationRequest, isOfficialLeave, isPartialLeave, reminderPreview, requestLabel, requestedLeaveDays, validateRequest, type PersonalRequest, type RequestForm, type RequestKind } from './personal-requests'
 import { uploadLeaveFile } from '@/lib/supabase/leave-requests'
 import { attendanceMonthDates, buildMyAttendance, clockOutLabel, dayClock, koreaDateKey, validAttendanceMonth, type AttendanceClock } from './my-attendance'
 import { readScheduleTodos, scheduleTodoError, scheduleTodoTime, type ScheduleTodo, type ScheduleTodoForm } from './personal-schedule-todos'
@@ -118,6 +119,7 @@ export function MyAttendancePanel() {
   const advanceEmployee = advances.data?.employees[0]
   const operationsAdvance = advances.data?.approvalMode === 'operations'
   const advanceAllowed = advances.data?.ready && !advances.isError && advanceEmployee && !advanceEmployee.needsReview && (operationsAdvance || advanceEmployee.limit > 0)
+  const remainingLeave = advances.data?.ready && !advances.isError ? advanceEmployee?.remainingBalance ?? null : null
   const approvals = useDepartmentApprovers()
   const directory = useOpsDirectory()
   const companyNotices = useQuery({
@@ -151,6 +153,13 @@ export function MyAttendancePanel() {
   const [officialFile, setOfficialFile] = useState<File | null>(null)
   const officialFileInput = useRef<HTMLInputElement>(null)
   const [formError, setFormError] = useState('')
+  const leaveDays = form ? requestedLeaveDays(form) : null
+  const advanceDays = leaveDays && remainingLeave !== null ? Math.max(leaveDays - Math.max(remainingLeave, 0), 0) : 0
+  const balanceRejected = /^(?:총 )?남은 연차가 부족합니다\./.test(formError)
+  const showAdvanceOption = Boolean(form?.advanceRequested || advanceDays > 0 || balanceRejected)
+  const submitLabel = form?.advanceRequested
+    ? (operationsAdvance ? '운영지원에 승인 요청' : '부서 승인 요청')
+    : form && isLeaveRequest(form.kind) ? '휴가 등록' : '신청하기'
   const [notice, setNotice] = useState('')
   const [detail, setDetail] = useState<ScheduleDetail | null>(null)
   const [routeParams] = useSearchParams()
@@ -245,6 +254,13 @@ export function MyAttendancePanel() {
     catch(error) { console.warn('[schedule-todos] 삭제 실패',error); setTodoError(error instanceof Error ? error.message : 'To-do를 삭제하지 못했습니다.') }
   }
   function patch(patch: Partial<RequestForm>) { groupKey.current = crypto.randomUUID(); setForm(current => current ? { ...current, ...patch } : null); setFormError('') }
+  function changeRequestDates(from: string, to: string) {
+    if (!form || (form.from === from && form.to === to)) return
+    if (!form.advanceRequested) { patch({ from, to }); return }
+    const days = requestedLeaveDays({ kind: form.kind, from, to })
+    const fitsBalance = days !== null && remainingLeave !== null && days <= remainingLeave
+    patch({ from, to, advanceRequested: days !== 0 && !fitsBalance })
+  }
   function chooseMonth(next: string) {
     if (!validAttendanceMonth(next)) return
     setMonth(next)
@@ -458,19 +474,13 @@ export function MyAttendancePanel() {
       <p className="personal-request-helper">중요 작업은 시작·종료 시간이 필요합니다. 다른 직원에게는 제목 없이 개인 일정과 시간만 보입니다. 완료·삭제·중요 해제 시 일정 점유가 해제됩니다. 연차 차감이나 근태 승인은 발생하지 않습니다.</p>
       {todoError && <p role="alert" className="personal-request-error">{todoError}</p>}
     </div><footer>{todoForm.id && <Button type="button" variant="outline" onClick={()=>void removeTodo()}>삭제</Button>}<Button type="button" variant="outline" onClick={() => setTodoForm(null)}>닫기</Button><Button type="submit" disabled={!todoStore.isSuccess}>{todoStore.busy ? '저장 중…' : todoForm.id ? '저장' : '추가'}</Button></footer></fieldset></form></section></RequestDialog></WorkspaceTabOverlay>}
-    {selfService && form && <WorkspaceTabOverlay><RequestDialog onClose={() => { if (!leave.busy) setForm(null) }}><section className="personal-request-compose"><header><div><span>개인 근태 신청</span><h2 id="personal-request-title">{requestLabel(form.kind)} 신청</h2></div><button type="button" aria-label="신청 작성 닫기" disabled={leave.busy} onClick={() => setForm(null)}><X size={19}/></button></header><form onSubmit={event => void submit(event)}><fieldset disabled={leave.busy || groupBusy} className="min-w-0 border-0 p-0">
+    {selfService && form && <WorkspaceTabOverlay><RequestDialog onClose={() => { if (!leave.busy) setForm(null) }}><section className="personal-request-compose"><header><div><span>개인 근태 신청</span><h2 id="personal-request-title">{requestLabel(form.kind)} 신청</h2></div><button type="button" aria-label="신청 작성 닫기" disabled={leave.busy} onClick={() => setForm(null)}><X size={19}/></button></header><form onSubmit={event => void submit(event)}><fieldset disabled={leave.busy || groupBusy} className={`min-w-0 border-0 p-0${isLeaveRequest(form.kind) ? ' personal-leave-form' : ''}`}>
       <div className="personal-request-compose-body">
         <label>신청 종류<Select autoFocus aria-label="개인 신청 종류" disabled={form.kind === 'correction'} value={form.kind} onChange={event => { setForm(formFor(event.target.value as RequestKind, form.from)); setOfficialFile(null); setFormError('') }}>{form.kind === 'correction' && <option value="correction">출퇴근 정정</option>}{REQUEST_KINDS.filter(item => item.id !== 'overtime').map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</Select></label>
-        {isLeaveRequest(form.kind) && <>
-          <p className="personal-request-helper">일반 등록은 즉시 차감됩니다. 연차는 근무일당 1일, 반차는 0.5일, 반반차는 0.25일입니다. 부족분을 당겨 쓰려면 아래 선사용을 선택해 별도 승인을 받아 주세요.</p>
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.advanceRequested === true} disabled={!advanceAllowed && !form.advanceRequested} onChange={event => patch({ advanceRequested: event.target.checked })}/>잔여 부족분 선사용 신청</label>
-          <p className="text-xs text-muted-foreground">{advances.isPending ? '선사용 기준 확인 중…' : advances.isError ? '선사용 기준 조회 실패 · 다시 조회 후 신청해 주세요.' : !advances.data?.ready ? '선사용 서버 연결을 기다리고 있습니다.' : !advanceEmployee || advanceEmployee.needsReview ? '연차 발생 기준을 운영지원에 확인해 주세요.' : operationsAdvance ? <>남은 연차 {advanceEmployee.remainingBalance == null ? '미등록' : formatNumber(advanceEmployee.remainingBalance) + '일'}{advanceEmployee.outstanding > 0 && <> · <strong className="text-danger">선사용 {formatNumber(-advanceEmployee.outstanding)}일</strong></>}</> : <>선사용 한도 {advanceEmployee.limit}일 · 현재 선사용 {advanceEmployee.outstanding}일. 한도 설정은 운영지원에 문의해 주세요.</>}</p>
-          {form.advanceRequested && <p className="text-sm text-warning">쓸 날짜와 사유를 입력해 주세요. {operationsAdvance ? '운영지원 승인' : '부서 승인'} 후 휴가가 바로 등록됩니다. 실제 부족분은 다음 기본 연차에서 정산됩니다.</p>}
-        </>}
         {form.kind === 'offsite' ? <><section className="space-y-2 rounded-xl border border-border p-3"><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={groupEnabled} disabled={!groups.isSuccess || groupBusy} onChange={event => setGroupEnabled(event.target.checked)}/>함께 외근할 직원 선택</label>{!groups.isSuccess && <p role="status" className="text-sm text-warning">{groups.error?.message ?? '단체 외근 서버 연결 확인 중…'}</p>}{groupEnabled && <><p className="text-xs text-muted-foreground">각자의 외근으로 즉시 등록됩니다. 취소·복귀·당일 출근 기준 변경은 본인만 할 수 있습니다.</p><div className="max-h-48 overflow-auto">{directory.members.map(member => <label key={member.id} className="flex items-center gap-2 py-1 text-sm"><input type="checkbox" checked={participants.includes(member.id)} disabled={groupBusy} onChange={event => { setParticipants(current => event.target.checked ? [...current, member.id] : current.filter(id => id !== member.id)); groupKey.current = crypto.randomUUID() }}/>{member.displayName}{member.id === userId ? ' · 나' : ''}</label>)}</div></>}</section><OffsiteDateTimeFields form={form} maxDate={`${Number(today.slice(0, 4)) + 5}-12-31`} onChange={patch} />{(!groupEnabled || participants.includes(userId!)) && <OffsiteWorkdayStartField form={form} requests={leave.requests} onChange={patch} />}{groupEnabled && <p className="text-xs text-muted-foreground">출근 기준은 각자가 본인 외근 상세에서 변경할 수 있습니다. 이 화면의 기준 변경은 본인에게만 적용됩니다.</p>}</> : <>
         <div className="personal-request-fields">
-          <label>{span ? '시작일' : '신청일'}<HireDateScrollField label={span ? '개인 신청 시작일' : '개인 신청일'} className="mt-[7px] w-full" value={form.from} min="1950-01-01" max={form.kind === 'correction' ? today : `${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; patch({ from: value, to: !span ? value : form.to < value ? value : form.to }) }}/></label>
-          {span && <label>종료일<HireDateScrollField label="개인 신청 종료일" className="mt-[7px] w-full" value={form.to} min={form.from || '1950-01-01'} max={`${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; patch({ to: value }) }}/></label>}
+          <label>{span ? '시작일' : '신청일'}<HireDateScrollField label={span ? '개인 신청 시작일' : '개인 신청일'} className="mt-[7px] w-full" value={form.from} min="1950-01-01" max={form.kind === 'correction' ? today : `${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; changeRequestDates(value, !span || form.to < value ? value : form.to) }}/></label>
+          {span && <label>종료일<HireDateScrollField label="개인 신청 종료일" className="mt-[7px] w-full" value={form.to} min={form.from || '1950-01-01'} max={`${Number(today.slice(0, 4)) + 5}-12-31`} clearable={false} onChange={value => { if (!value) return; changeRequestDates(form.from, value) }}/></label>}
         </div>
         {form.kind === 'half' && <><p className="personal-request-hours" role="status">반차는 4시간입니다.</p><LeaveTimeShortcuts kind="half" compact start={form.start} end={form.end} onChange={patch} /></>}
         {form.kind === 'quarter' && <><p className="personal-request-hours" role="status">반반차는 2시간입니다.</p><QuarterLeaveTime start={form.start} end={form.end} onChange={patch} /></>}
@@ -483,18 +493,49 @@ export function MyAttendancePanel() {
           <TimeRangeSummary start={form.start} end={form.end} endNextDay={form.endNextDay} leave={isPartialLeave(form.kind)} daily={isLocationRequest(form.kind)} />
         </>}
         </>}
+        {isLeaveRequest(form.kind) && <div className="space-y-3">
+          <LeaveRequestSummary remaining={remainingLeave} requested={leaveDays} advanceDays={advanceDays} balanceRejected={balanceRejected}/>
+          {remainingLeave === null && <p role="status" className="text-xs text-muted-foreground">{advances.isPending ? '남은 연차를 확인 중입니다.' : advances.isError ? '남은 연차를 불러오지 못했습니다.' : '남은 연차를 확인할 수 없습니다.'}</p>}
+          {showAdvanceOption && <>
+            <label className="personal-leave-advance-option cursor-pointer rounded-lg border border-border bg-card px-3 py-2.5">
+              <input type="checkbox" checked={form.advanceRequested === true} disabled={!advanceAllowed && !form.advanceRequested} onChange={event => patch({ advanceRequested: event.target.checked })}/>
+              {advanceDays > 0 ? `부족한 ${formatNumber(advanceDays)}일 선사용 요청` : '선사용 요청'}
+            </label>
+            {!advanceAllowed && !advances.isPending && <p className="text-xs text-muted-foreground">{!operationsAdvance && advanceEmployee && advanceEmployee.limit <= 0 ? '선사용 한도 설정은 운영지원에 문의해 주세요.' : '선사용 신청 기준은 운영지원에 확인해 주세요.'}</p>}
+          </>}
+        </div>}
         {form.kind === 'correction' && <p className="personal-request-helper">{formRecord ? `현재 기록 · 출근 ${formRecord.clockIn || '없음'} · 퇴근 ${clockOutLabel(formRecord.clockOutAt) || '없음'}. ` : ''}승인되면 원래 기록은 보존하고 정정 시각을 달력과 야근 집계에 반영합니다.</p>}
         {form.kind === 'offsite' && <OffsiteConnectionNotice overnight={offsiteSubmission(form).request?.endNextDay} />}
         {isLocationRequest(form.kind) && <label>{form.kind === 'offsite' ? '외근 장소 · 필수' : '근무 장소 · 선택'}<Input aria-label="개인 신청 근무 장소" maxLength={200} value={form.place} placeholder={form.kind === 'offsite' ? '방문할 거래처 또는 장소' : '재택 등'} onChange={event => patch({ place: event.target.value })}/></label>}
         {isOfficialLeave(form.kind) && <div className={`personal-request-file${officialFile ? ' is-selected' : ''}`}><label htmlFor="official-leave-file">증빙 서류 · 필수</label><div><input id="official-leave-file" ref={officialFileInput} className="personal-request-file-input" aria-label="공가 증빙 서류" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.heic,.doc,.docx,.hwp,.hwpx" onChange={event => { setOfficialFile(event.target.files?.[0] ?? null); setFormError('') }}/><p>{officialFile ? officialFile.name : '예비군 통지서, 청첩장처럼 공가 사유를 확인할 서류를 올려 주세요.'}</p>{officialFile && <Button type="button" variant="outline" size="sm" onClick={() => { setOfficialFile(null); if (officialFileInput.current) officialFileInput.current.value = '' }}>지우기</Button>}<Button type="button" variant="outline" size="sm" onClick={() => officialFileInput.current?.click()}>{officialFile ? '다시 선택' : '서류 선택'}</Button></div></div>}
-        <label>{form.advanceRequested || form.kind === 'correction' || form.kind === 'overtime' || isOfficialLeave(form.kind) ? '신청 사유 · 필수' : '업무 인수인계·메모 · 선택'}<Textarea maxLength={2000} aria-label="개인 신청 메모" value={form.note} rows={3} placeholder={form.advanceRequested ? '잔여 연차보다 더 필요한 사유를 적어 주세요.' : form.kind === 'correction' ? '기록 누락·보정 사유를 적어 주세요.' : form.kind === 'overtime' ? '예정된 야근 업무를 적어 주세요.' : isOfficialLeave(form.kind) ? '예비군, 결혼처럼 공가로 빠지는 사유를 적어 주세요.' : '업무 인수인계 등 필요한 내용만 적어 주세요.'} onChange={event => patch({ note: event.target.value })}/></label>
-        {(form.advanceRequested || requiresDepartmentApproval(form.kind)) && <div className="personal-request-approval-route"><span>승인 경로</span><strong>{form.advanceRequested && operationsAdvance ? '운영지원' : approvalRoute(form.kind, profile?.departmentId, !form.advanceRequested)}</strong><p>{form.advanceRequested ? operationsAdvance ? '운영지원 담당자가 사유를 확인하고 승인합니다.' : '본인 외 부서 지정 승인자 또는 대체 승인자가 선사용을 승인합니다.' : '지정 승인자·대체 승인자는 ‘승인할 신청’에서 본인 신청도 승인할 수 있습니다.'}</p></div>}
+        <label>{form.advanceRequested ? '선사용 사유 · 필수' : form.kind === 'correction' || form.kind === 'overtime' || isOfficialLeave(form.kind) ? '신청 사유 · 필수' : '업무 인수인계·메모 · 선택'}<Textarea maxLength={2000} aria-label={form.advanceRequested ? '선사용 사유' : '개인 신청 메모'} aria-required={form.advanceRequested || undefined} value={form.note} rows={3} placeholder={form.advanceRequested ? '잔여 연차보다 더 필요한 사유를 적어 주세요.' : form.kind === 'correction' ? '기록 누락·보정 사유를 적어 주세요.' : form.kind === 'overtime' ? '예정된 야근 업무를 적어 주세요.' : isOfficialLeave(form.kind) ? '예비군, 결혼처럼 공가로 빠지는 사유를 적어 주세요.' : '업무 인수인계 등 필요한 내용만 적어 주세요.'} onChange={event => patch({ note: event.target.value })}/></label>
+        {(form.advanceRequested || requiresDepartmentApproval(form.kind)) && <div className="personal-request-approval-route"><span>승인 경로</span><strong>{form.advanceRequested && operationsAdvance ? '운영지원' : approvalRoute(form.kind, profile?.departmentId, !form.advanceRequested)}</strong><p>{form.advanceRequested ? operationsAdvance ? '승인되면 휴가가 등록되고 부족분은 다음 기본 연차에서 정산됩니다.' : '본인 외 부서 지정 승인자 또는 대체 승인자가 선사용을 승인합니다.' : '지정 승인자·대체 승인자는 ‘승인할 신청’에서 본인 신청도 승인할 수 있습니다.'}</p></div>}
         {!isOfficialLeave(form.kind) && !isFullLeave(form.kind) && form.kind !== 'half' && form.kind !== 'quarter' && form.kind !== 'offsite' && form.kind !== 'correction' && <div className="personal-request-alert-preview"><header><strong><Bell size={14}/>승인 후 알림 미리보기</strong><button type="button" aria-expanded={showBasis} onClick={() => setShowBasis(value => !value)}>예시 기준 {showBasis ? '접기' : '보기'}</button></header>{preview.map(text => <p key={text}>{text}</p>)}{(!reminders.arrival || !reminders.departure) && <p>{!reminders.arrival ? '출근' : ''}{!reminders.arrival && !reminders.departure ? '·' : ''}{!reminders.departure ? '퇴근' : ''} 전 알림은 내 설정에서 꺼져 있습니다.</p>}<small>회사 근무 기준은 미연결입니다. 알림 시간은 예시이며 실제 발송되지 않습니다.</small>{showBasis && <div className="personal-request-basis">{([{ key: 'start', label: '예시 출근' }, { key: 'end', label: '예시 퇴근' }, { key: 'breakStart', label: '휴게 시작' }, { key: 'breakEnd', label: '휴게 종료' }] as const).map(item => <label key={item.key}>{item.label}<Input type="time" aria-label={item.label} value={basis[item.key]} onChange={event => setBasis(current => ({ ...current, [item.key]: event.target.value }))}/></label>)}</div>}</div>}
         {formError && <p role="alert" className="personal-request-error">{formError}</p>}
       </div>
-      <footer><Button type="button" variant="outline" onClick={() => setForm(null)}>닫기</Button><Button type="submit" disabled={leave.busy || groupBusy || leave.loading || Boolean(leave.error)}><Send size={14}/>{leave.busy || groupBusy ? '저장 중…' : '신청하기'}</Button></footer>
+      <footer><Button type="button" variant="outline" onClick={() => setForm(null)}>닫기</Button><Button type="submit" disabled={leave.busy || groupBusy || leave.loading || Boolean(leave.error)}><Send size={14}/>{leave.busy || groupBusy ? '저장 중…' : submitLabel}</Button></footer>
     </fieldset></form></section></RequestDialog></WorkspaceTabOverlay>}
   </div>
+}
+
+function LeaveRequestSummary({ remaining, requested, advanceDays, balanceRejected }: {
+  remaining: number | null
+  requested: number | null
+  advanceDays: number
+  balanceRejected: boolean
+}) {
+  const needsAdvance = advanceDays > 0 || balanceRejected
+  const after = remaining !== null && requested ? remaining - requested : null
+  const outcome = needsAdvance ? advanceDays || null : after
+  const amount = (days: number | null) => days === null ? '—' : `${formatNumber(days)}일`
+  return <section aria-label="휴가 차감 요약" className="space-y-2">
+    <div className="grid grid-cols-3 gap-2" aria-live="polite">
+      <StatTile label="남은 연차" value={amount(remaining)} tone={remaining !== null && remaining < 0 ? 'danger' : 'default'} className="px-3 py-2.5 sm:px-3"/>
+      <StatTile label="신청 일수" value={amount(requested)} className="px-3 py-2.5 sm:px-3"/>
+      <StatTile label={needsAdvance ? '선사용 필요' : '예상 잔여'} value={amount(outcome)} tone={needsAdvance ? 'danger' : 'default'} className="px-3 py-2.5 sm:px-3"/>
+    </div>
+    <p className="text-xs text-muted-foreground">{requested === 0 ? '주말·공휴일을 제외한 근무일을 선택해 주세요.' : requested === null ? '선택한 날짜의 차감 일수를 확인할 수 없습니다.' : '주말·공휴일 제외 · 현재 잔여 기준'}</p>
+  </section>
 }
 
 function RequestDialog({ children, onClose, className = '', labelledBy = 'personal-request-title' }: { children: ReactNode; onClose: () => void; className?: string; labelledBy?: string }) {

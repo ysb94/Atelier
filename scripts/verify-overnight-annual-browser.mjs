@@ -11,11 +11,20 @@ export const getMyWorkdayBasis=async date=>({date,start:window.testDayStart||'09
 export function useLeaveRequests(){const {requests,setRequests}=useContext(C);return {requests,userId:'self',loading:false,busy:false,error:null,refresh(){},transition:{},create:{async mutateAsync(form){window.lastSaved=form;const row={...form,id:'night',employeeId:'self',employeeName:'테스트',departmentId:'dept',departmentName:'디자인',status:'approved',createdAt:'2026-11-03'};setRequests([...requests,row]);return row}}}}
 export const useMyClockIn=()=>({rows:EMPTY,todayClock:'09:00',todayClockOut:'',exempt:false,loading:false,needsClockIn:false,needsClockOut:false});export const useAttendanceEntry=()=>null;
 export const useDepartmentApprovers=()=>({loading:false,error:null,settings:EMPTY});export const useOpsDirectory=()=>({members:EMPTY,departments:EMPTY,departmentName:()=>'',loading:false,error:null});
-export const useLeaveAdvances=()=>({data:{ready:true,employees:EMPTY,events:EMPTY},isPending:false,isError:false});export const useScheduleTodos=()=>({data:EMPTY,isSuccess:true,busy:false});export const useMyScheduleMeetings=()=>({events:EMPTY});export const useReadMyHomeNotification=()=>({error:null,retry(){}});
+export const useLeaveAdvances=()=>({data:{ready:true,approvalMode:'operations',employees:window.testRemainingLeave===undefined?EMPTY:[{employeeId:'self',remainingBalance:window.testRemainingLeave,limit:0,outstanding:0,needsReview:false}],events:EMPTY},isPending:false,isError:false});export const useScheduleTodos=()=>({data:EMPTY,isSuccess:true,busy:false});export const useMyScheduleMeetings=()=>({events:EMPTY});export const useReadMyHomeNotification=()=>({error:null,retry(){}});
 export const listMyAttendanceClocks=async()=>window.testNightClock?[{date:'2026-11-04',clockIn:'09:00',clockOutAt:window.hookState==='clocked_out'?'2026-11-05T03:00:00+09:00':null}]:EMPTY;export const clockOutToday=async()=>'';export const undoClockOutToday=async()=>{};export const getMyAttendanceExemption=async()=>false;export const listCompanyNotices=async()=>EMPTY;
 export const offsiteAction=async()=>({continuousSupported:window.continuousReady!==false,overnightSupported:window.nightReady!==false,state:window.hookState??'inactive',workDate:'2026-11-04',serverNow:'2026-11-04T09:00:00+09:00'});
 export const listOffsiteSettlements=async()=>({ready:true,rows:EMPTY});
-export const getSupabase=()=>({rpc:async()=>({data:[],error:null})});`)
+export const offsiteSettlementPreview=async()=>null;export const confirmPreviousClockOut=async()=>null;
+export const useMyHomeNotifications=()=>({items:EMPTY,work:EMPTY,ready:true,error:null});
+export function getSupabase(){return {
+  rpc:async()=>({data:[],error:null}),
+  from(table){
+    if(table!=='company_leave_requests')throw new Error(table);
+    const query={select:()=>query,order:()=>query,range:()=>query,eq:()=>query,then:resolve=>Promise.resolve({data:EMPTY,error:null}).then(resolve)};
+    return query;
+  }
+}};`)
 await writeFile(path.join(dir,'entry.tsx'),`import React from'react';import{createRoot}from'react-dom/client';import{QueryClient,QueryClientProvider,useQueryClient}from'@tanstack/react-query';import{MemoryRouter}from'react-router-dom';import{Provider}from'./stubs';import{MyAttendancePanel}from'${root.replaceAll('\\','/')}/src/features/settings/MyAttendancePanel';import{useMyClockIn as useRealClock}from'${root.replaceAll('\\','/')}/src/features/home/use-my-clock-in';function Probe(){const c=useRealClock();const cache=useQueryClient();return <><output>{JSON.stringify({needsClockIn:c.needsClockIn,needsClockOut:c.needsClockOut,ongoing:c.ongoingOffsiteRecord?.date??null})}</output><button onClick={()=>{window.hookState='returned';cache.invalidateQueries({queryKey:['my-offsite-attendance']})}}>복귀 상태</button><button onClick={()=>{window.hookState='clocked_out';cache.invalidateQueries({queryKey:['attendance-clock-ins']});cache.invalidateQueries({queryKey:['my-offsite-attendance']})}}>퇴근 상태</button></>};window.testNightClock=location.search==='?hook';if(window.testNightClock)window.hookState='offsite';createRoot(document.getElementById('root')).render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><MemoryRouter><Provider>{window.testNightClock?<Probe/>:<MyAttendancePanel/>}</Provider></MemoryRouter></QueryClientProvider>);`)
 const names=['offsite-settlements','auth','use-leave-requests','use-my-clock-in','attendance-entry-context','use-department-approvers','ops-directory','use-leave-advances','use-schedule-todos','use-my-schedule-meetings','use-my-home-notifications','attendance-clocks','company-notices','offsite-attendance','attendance-exemptions','attendance-entry','client']
 await build({entryPoints:[path.join(dir,'entry.tsx')],outfile:path.join(dir,'app.js'),bundle:true,format:'esm',jsx:'automatic',define:{'import.meta.env':'{"DEV":false}'},plugins:[{name:'isolated',setup(b){b.onResolve({filter:/.*/},args=>{if(args.importer.includes(dir)||args.path==='@/lib/company/company-notices')return;const name=args.path.split('/').at(-1).replace(/\.tsx?$/,'');if(names.includes(name)&&(args.path.startsWith('.')||args.path.startsWith('@/')))return{path:path.join(dir,'stubs.tsx')}})}}],alias:{'@':path.join(root,'src')},logLevel:'silent'})
@@ -46,7 +55,7 @@ for (const [end,start,allowed] of [['05:00','09:00',true],['09:00','09:00',true]
  await page.clock.setSystemTime(new Date('2026-11-05T10:00:00+09:00'));await page.goto(origin);
  await page.evaluate(({end,start})=>{window.testDayStart=start;window.seedRequests([{id:'prior-night',kind:'offsite',from:'2026-11-04',to:'2026-11-04',start:'16:00',end,endNextDay:true,place:'외근',note:'',status:'approved',createdAt:'2026-11-04'}])},{end,start});
  await page.getByRole('button',{name:'+추가',exact:true}).click();await page.getByRole('menuitem',{name:'월차/연차',exact:true}).click();
- const annualDialog=page.getByRole('dialog',{name:'월차/연차 신청',exact:true});await annualDialog.getByRole('button',{name:'신청하기',exact:true}).click();
+ const annualDialog=page.getByRole('dialog',{name:'월차/연차 신청',exact:true});await annualDialog.getByRole('button',{name:'휴가 등록',exact:true}).click();
  if(allowed){await page.getByText('휴가를 등록했습니다. 승인 없이 달력에 반영됩니다.',{exact:true}).waitFor();assert.equal((await page.evaluate(()=>window.lastSaved)).from,'2026-11-05')}
  else{await annualDialog.getByRole('alert').filter({hasText:'같은 시간에 대기 중이거나 승인된 신청이 있습니다.'}).waitFor();assert.equal(await page.evaluate(()=>window.lastSaved),undefined)}
 }
@@ -57,6 +66,40 @@ await dialog.getByLabel('시작 시각 시',{exact:true}).selectOption('16');awa
 await dialog.getByRole('button',{name:'외근 종료 날짜',exact:true}).click();await picker.getByRole('button',{name:'5일',exact:true}).click();await picker.getByRole('button',{name:'적용',exact:true}).click();await dialog.getByRole('button',{name:'신청하기',exact:true}).click();await page.getByText('외근을 등록했습니다. 승인 없이 달력에 반영됩니다.',{exact:true}).waitFor();
 await page.screenshot({path:path.join(dir,'annual-after-overnight.png'),fullPage:true});
 console.info('Overnight annual real forms: both registration orders, early/exact/over and changed day start passed');
+await page.goto(origin);
+await page.evaluate(()=>{window.testRemainingLeave=1});
+await page.getByRole('button',{name:'+추가',exact:true}).click();
+await page.getByRole('menuitem',{name:'월차/연차',exact:true}).click();
+const leaveDialog=page.getByRole('dialog',{name:'월차/연차 신청',exact:true});
+const leaveSummary=leaveDialog.getByRole('region',{name:'휴가 차감 요약'});
+const advanceOption=leaveDialog.getByRole('checkbox',{name:'부족한 2일 선사용 요청'});
+const reason=leaveDialog.getByRole('textbox',{name:'선사용 사유'});
+const leaveEnd=leaveDialog.getByRole('button',{name:'개인 신청 종료일',exact:true});
+const leaveEndPicker=page.getByRole('dialog',{name:'개인 신청 종료일 선택',exact:true});
+await leaveSummary.getByText('예상 잔여',{exact:true}).waitFor();
+assert.equal(await advanceOption.count(),0);
+await leaveEnd.click();
+await leaveEndPicker.getByRole('button',{name:'6일',exact:true}).click();
+await leaveEndPicker.getByRole('button',{name:'적용',exact:true}).click();
+assert.deepEqual(await leaveSummary.locator('[aria-live] > div').allTextContents(),['남은 연차1일','신청 일수3일','선사용 필요2일']);
+assert.equal(await reason.count(),0);
+await advanceOption.check();
+await reason.waitFor();
+const advanceSubmit=leaveDialog.getByRole('button',{name:'운영지원에 승인 요청',exact:true});
+await advanceSubmit.waitFor();
+await page.setViewportSize({width:390,height:640});
+const mobileSubmit=await advanceSubmit.boundingBox();
+assert.ok(mobileSubmit && mobileSubmit.y+mobileSubmit.height<=640,'작은 화면에서도 승인 요청 버튼이 보임');
+await page.setViewportSize({width:1440,height:760});
+await leaveDialog.locator('.personal-request-compose').screenshot({path:path.join(dir,'leave-advance-ui.png')});
+await leaveEnd.click();
+await leaveEndPicker.getByRole('button',{name:'4일',exact:true}).click();
+await leaveEndPicker.getByRole('button',{name:'적용',exact:true}).click();
+await leaveDialog.getByRole('button',{name:'휴가 등록',exact:true}).waitFor();
+assert.equal(await leaveDialog.getByRole('checkbox',{name:/선사용 요청/}).count(),0);
+assert.equal(await reason.count(),0);
+assert.equal(await page.evaluate(()=>window.lastSaved),undefined);
+console.info('Leave form preview: 1 day available, 3 requested, 2 day shortage, reason and submit label, date reduction, no write passed');
 await page.clock.setSystemTime(new Date('2026-11-05T00:30:00+09:00'));await page.goto(origin+'?hook');await page.getByText('{"needsClockIn":false,"needsClockOut":true,"ongoing":"2026-11-04"}',{exact:true}).waitFor();await page.getByRole('button',{name:'복귀 상태',exact:true}).click();await page.getByText('{"needsClockIn":false,"needsClockOut":true,"ongoing":"2026-11-04"}',{exact:true}).waitFor();await page.getByRole('button',{name:'퇴근 상태',exact:true}).click();await page.getByText('{"needsClockIn":true,"needsClockOut":false,"ongoing":null}',{exact:true}).waitFor();assert.deepEqual(errors,[])
 console.info('Overnight browser: actual My Schedule form, explicit start/end dates without next-day checkbox, invalid reversed range blocked, 09:00→next 03:00 preview, start-day payload, unapplied DB blocks save; real clock hook continues overnight/returned work and enables new clock-in only after checkout passed')
 }finally{await browser?.close();await new Promise(resolve=>server.close(resolve))}

@@ -1,3 +1,6 @@
+import { hasKoreanHolidayCalendar } from '../operations-support/korean-holidays.ts'
+import { isWorkday } from '../operations-support/monthly-attendance.ts'
+
 export const REQUEST_KINDS = [
   { id: 'annual', label: '월차/연차', group: '휴가' },
   { id: 'half', label: '반차', group: '휴가' },
@@ -47,6 +50,26 @@ function validDate(value: string) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const date = new Date(`${value}T12:00:00`)
   return !Number.isNaN(date.getTime()) && date.getFullYear() === Number(value.slice(0,4)) && date.getMonth()+1 === Number(value.slice(5,7)) && date.getDate() === Number(value.slice(8,10))
+}
+
+/** Selected working days for the form preview. The server still validates and charges the request. */
+export function requestedLeaveDays({ kind, from, to }: Pick<RequestForm, 'kind' | 'from' | 'to'>) {
+  if (!isLeaveRequest(kind) || !validDate(from) || !validDate(to) || to < from) return null
+  if (isPartialLeave(kind) && from !== to) return null
+
+  const dayMs = 86_400_000
+  const first = Date.parse(`${from}T00:00:00Z`)
+  const last = Date.parse(`${to}T00:00:00Z`)
+  if (last - first > 365 * dayMs || !hasKoreanHolidayCalendar(from) || !hasKoreanHolidayCalendar(to)) return null
+
+  if (isPartialLeave(kind)) return isWorkday(from, {}) ? (kind === 'half' ? 0.5 : 0.25) : 0
+
+  const overrides = {}
+  let days = 0
+  for (let day = first; day <= last; day += dayMs) {
+    if (isWorkday(new Date(day).toISOString().slice(0, 10), overrides)) days++
+  }
+  return days
 }
 function interval(form: RequestForm | PersonalRequest) {
   const next = form.endNextDay ? new Date(Date.parse(`${form.to}T00:00:00Z`) + 86_400_000).toISOString().slice(0, 10) : form.to
