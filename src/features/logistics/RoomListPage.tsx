@@ -9,8 +9,11 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { compareWarehouseLocationCodeNatural } from '@/lib/invoice/product-list-warehouse'
+import { parseWarehouseLocation } from '@/lib/warehouse/stock'
 import { roomListProductName } from './room-list-locations'
-import { emptyRoomListRow, mergeRoomListRows, parseRoomListPaste, sumRoomListQuantities, type RoomListRow } from './room-list-paste'
+import {
+  emptyRoomListRow, mergeRoomListRows, parseRoomListPaste, roomListBulkPacking, sumRoomListQuantities, type RoomListRow,
+} from './room-list-paste'
 import { useRoomListWarehouseLocations } from './use-room-list-warehouse-locations'
 import { RoomListFolders } from './RoomListFolders'
 import { RoomListRoomGroups } from './RoomListRoomGroups'
@@ -20,7 +23,8 @@ import { loadRoomGroups, roomForLocation, roomListArea, saveRoomGroups, type Roo
 const COLUMNS = ['상품명', '수량'] as const
 const MIN_ROWS = 8
 const ROOM_ORDER = new Intl.Collator('ko-KR', { numeric: true })
-const ROOM_AREAS = ['1층', '2층', '파우치', '그 외'] as const
+const BULK_ROOM = { key: 'bulk', name: '대량출고' } as const
+const ROOM_AREAS = [BULK_ROOM.name, '1층', '2층', '파우치', '그 외'] as const
 type RoomArea = typeof ROOM_AREAS[number]
 
 export function RoomListPage() {
@@ -56,7 +60,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
   const [roomSaveFailed, setRoomSaveFailed] = useState(false)
   const hasNames = rows.some(([name]) => Boolean(name.trim()))
   const warehouse = useRoomListWarehouseLocations(hasNames)
-  const { locationCodes, styleNumbers } = warehouse
+  const { locationCodes, latestPositions, styleNumbers } = warehouse
   const locationsReady = !warehouse.error && !warehouse.loading
   const visibleRows = useMemo(() => {
     const missing = []
@@ -83,16 +87,27 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
     if (!locationsReady) return grouped
     for (const item of visibleRows) {
       if (!item.name) continue
-      const location = item.matches?.[0] ?? ''
-      const { key, name } = roomForLocation(location, groupsByPrefix)
+      const styleNo = styleNumbers.get(item.name) ?? ''
+      const latest = latestPositions.get(item.name)
+      const packing = latest?.styleId && styleNo && latest.styleNo.trim() === styleNo
+        ? roomListBulkPacking(item.row[1], latest.unitsPerBox)
+        : undefined
+      const bulkLocation = packing ? latest?.locationCode.trim() : undefined
+      const location = bulkLocation ?? item.matches?.[0] ?? ''
+      const { key, name } = packing ? BULK_ROOM : roomForLocation(location, groupsByPrefix)
+      const bulkCode = bulkLocation && parseWarehouseLocation(bulkLocation).locationCode
+      const nextLocation = bulkCode
+        ? item.matches?.find(code => parseWarehouseLocation(code).locationCode !== bulkCode)
+        : item.matches?.[1]
       const current = grouped.get(key)
       const line = {
         id: item.sourceIndex,
         name: item.name,
         quantity: item.row[1],
         location,
-        nextLocation: item.matches?.[1],
-        styleNo: styleNumbers.get(item.name) ?? '',
+        nextLocation,
+        styleNo,
+        packing,
       }
       if (current) current.lines.push(line)
       else grouped.set(key, { key, name, lines: [line] })
@@ -101,14 +116,14 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       group.lines.sort((left, right) => compareWarehouseLocationCodeNatural(left.location, right.location))
     }
     return grouped
-  }, [locationsReady, groupsByPrefix, styleNumbers, visibleRows])
+  }, [locationsReady, groupsByPrefix, latestPositions, styleNumbers, visibleRows])
   const roomTabs = useMemo(() => [...rooms.values()].sort((a, b) =>
     Number(b.key === 'missing') - Number(a.key === 'missing') || ROOM_ORDER.compare(a.name, b.name),
   ), [rooms])
   const roomTabsByArea = useMemo(() => {
-    const tabs: Record<RoomArea, FilterTab<string>[]> = { '1층': [], '2층': [], 파우치: [], '그 외': [] }
+    const tabs: Record<RoomArea, FilterTab<string>[]> = { [BULK_ROOM.name]: [], '1층': [], '2층': [], 파우치: [], '그 외': [] }
     for (const group of roomTabs) {
-      const area = roomListArea(group.lines[0]?.location, groupsByPrefix)
+      const area = group.key === BULK_ROOM.key ? BULK_ROOM.name : roomListArea(group.lines[0]?.location, groupsByPrefix)
       const total = sumRoomListQuantities(group.lines.map(line => line.quantity))
       tabs[area].push({
         value: group.key,
@@ -118,15 +133,19 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
     }
     return tabs
   }, [groupsByPrefix, roomTabs])
-  const selectedRoom = room ?? roomTabs.find(item => item.key !== 'missing')?.key ?? roomTabs[0]?.key
+  const selectedRoom = room ?? roomTabs.find(item => item.key !== 'missing' && item.key !== BULK_ROOM.key)?.key
+    ?? rooms.get(BULK_ROOM.key)?.key ?? roomTabs[0]?.key
   const currentRoom = selectedRoom ? rooms.get(selectedRoom) : undefined
   const selectedTab = currentRoom?.key ?? 'all'
   const selectedPrintRoom = room ? currentRoom : undefined
+  const selectionPrintRooms = useMemo(
+    () => selectedPrintRoom ? [selectedPrintRoom] : roomTabs.filter(group => group.key !== BULK_ROOM.key),
+    [roomTabs, selectedPrintRoom],
+  )
   const printRooms = useMemo(() => {
     if (!printScope) return []
-    const currentSelection = selectedPrintRoom ? [selectedPrintRoom] : roomTabs
     const selected = printScope === 'selection'
-      ? currentSelection
+      ? selectionPrintRooms
       : roomTabsByArea[printScope].flatMap(tab => rooms.get(tab.value) ?? [])
     return selected.flatMap(group => {
       if (!group.key.startsWith('group:')) return [group]
@@ -139,7 +158,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
       }
       return [...sections.values()]
     })
-  }, [printScope, roomTabs, roomTabsByArea, rooms, selectedPrintRoom])
+  }, [printScope, roomTabsByArea, rooms, selectionPrintRooms])
   const locationColumnCount = visibleRows.reduce(
     (count, { matches }) => Math.max(count, matches?.length ?? 0), 1,
   )
@@ -233,16 +252,16 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" size="sm" aria-expanded={showGroups}
             onClick={() => setShowGroups(current => !current)}>방 묶기</Button>
-          <Button type="button" variant="outline" size="sm" disabled={!roomTabs.length}
+          <Button type="button" variant="outline" size="sm" disabled={!selectionPrintRooms.length}
             onClick={() => setPrintScope('selection')}>
-            <Printer aria-hidden="true" className="size-4" /> {!selectedPrintRoom && roomTabs.length > 1 ? '전체 방 미리보기 및 출력' : '미리보기 및 출력'}
+            <Printer aria-hidden="true" className="size-4" /> {selectedPrintRoom ? '미리보기 및 출력' : '전체 방 미리보기 및 출력'}
           </Button>
         </div>
       </div>
       {showGroups && <RoomListRoomGroups groups={roomGroups} onChange={updateRoomGroups} />}
       {roomSaveFailed && <p role="status" className="mb-3 text-sm text-muted-foreground">방 묶음을 이 브라우저에 저장하지 못했습니다. 현재 화면에만 적용됩니다.</p>}
       {roomTabs.length > 0 && (
-        <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="mb-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
           {ROOM_AREAS.map(area => {
             const tabs = roomTabsByArea[area]
             return (
@@ -257,7 +276,7 @@ function RoomListGrid({ initialRows, folderCount, userId, onBack }: {
                 {tabs.length ? (
                   <FilterTabs ariaLabel={`${area} 방`} value={selectedTab} onChange={setRoom} tabs={tabs}
                     tabInteraction={() => ({ className: 'max-w-full wrap-anywhere' })} />
-                ) : <p className="text-sm text-muted-foreground">해당 방 없음</p>}
+                ) : <p className="text-sm text-muted-foreground">{area === BULK_ROOM.name ? '대량출고 상품 없음' : '해당 방 없음'}</p>}
               </Card>
             )
           })}

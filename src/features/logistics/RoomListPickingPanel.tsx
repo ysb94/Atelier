@@ -16,6 +16,7 @@ import './room-list-picking-print.css'
 
 export type RoomPickingLine = {
   id: number; name: string; quantity: string; location: string; nextLocation?: string; styleNo: string
+  packing?: string
 }
 export type RoomPickingRoom = { key: string; name: string; lines: RoomPickingLine[] }
 
@@ -54,7 +55,10 @@ function PickingTable({ lines, codes }: { lines: RoomPickingLine[]; codes?: Pick
           <tr key={line.id} className="border-b border-border/70">
             <td className="px-3 py-1.5 tabular-nums"><PickingCode field="styleNo" text={line.styleNo || '—'} codes={codes} /></td>
             <td className="break-all px-3 py-1.5"><PickingCode field="location" text={line.location || '위치 없음'} codes={codes} /></td>
-            <td className="break-words px-3 py-1.5">{line.name}</td>
+            <td className="break-words px-3 py-1.5">
+              {line.name}
+              {line.packing && <span className="block text-[.85em]">{line.packing}</span>}
+            </td>
             <td className="px-3 py-1.5 text-right tabular-nums">{line.quantity || '—'}</td>
             <td className="break-all px-3 py-1.5">{line.nextLocation && <PickingCode field="nextLocation" text={line.nextLocation} codes={codes} />}</td>
           </tr>

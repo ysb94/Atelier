@@ -3,8 +3,9 @@
  * 실행: npm run verify:warehouse-stock
  */
 import { normalizeStyleNo } from '@/lib/import/transform'
-import { indexRoomListStyleNumbers, roomListLocationCodes } from '@/features/logistics/room-list-locations'
-import type { StyleRef } from '@/lib/types'
+import { indexRoomListLocations, indexRoomListStyleNumbers, roomListLocationCodes } from '@/features/logistics/room-list-locations'
+import { roomListBulkPacking } from '@/features/logistics/room-list-paste'
+import type { StyleRef, WarehouseStockPosition } from '@/lib/types'
 import { linkFixedLocationStyles } from './fixed-location-styles'
 import {
   assignWarehouseUsageRanks,
@@ -250,6 +251,31 @@ assert(indexRoomListStyleNumbers(fixedSheetRows, roomStock).get('슬림백 블�
 assert(!indexRoomListStyleNumbers(linkedFixedRows, [
   { styleName: '슬림백 블랙', styleId: 's-other-brand', styleNo: 'M0487' },
 ]).has('슬림백 블랙'), '이름과 M번호가 같아도 두 출처의 SKU가 다르면 표시하지 않는다')
+
+const roomStockPosition: WarehouseStockPosition = {
+  id: 'old-position', brandId: 'brand', setId: 'set', warehouseId: 'warehouse',
+  locationId: 'room-location', locationCode: '2-1-1', zone: 'box_storage',
+  styleId: 's-m0487', styleNo: 'M0487', styleName: '슬림백 블랙',
+  sourceStyleNo: 'M0487', sourceProductName: '슬림백 블랙',
+  receivedOn: '2026-10-01', receivedOnRaw: '2026-10-01', isForcedPriority: false,
+  isFinalLocation: false, usagePriority: 'fifo', quantityStatus: 'known',
+  unitsPerBox: 200, remainingBoxes: 1, unitsPerBoxRaw: '200', remainingBoxesRaw: '1',
+  openedUnits: 0, reviewFlags: [], sourceRowNumber: 1, note: '', externalRowId: null, boxQr: null,
+  usageRank: 1, createdAt: '2026-11-01T00:00:00Z', updatedAt: '2026-11-01T00:00:00Z',
+}
+const roomLocationIndex = indexRoomListLocations([
+  roomStockPosition,
+  { ...roomStockPosition, id: 'recent-position', receivedOn: '2026-10-02', unitsPerBox: 100 },
+  { ...roomStockPosition, id: 'empty-position', receivedOn: '2026-10-03', remainingBoxes: 0 },
+])
+assert(roomLocationIndex.locations.get('슬림백 블랙')?.[0]?.id === 'old-position', '일반 피킹은 기존 위치 우선순위를 사용한다')
+const latestBoxSize = roomLocationIndex.latestPositions.get('슬림백 블랙')?.unitsPerBox ?? null
+assert(latestBoxSize === 100, '같은 자리에 재고 행이 여러 개면 가장 최근의 남은 재고에서 입수를 읽는다')
+assert(roomListBulkPacking('80', latestBoxSize) === '낱개 80개', '100개입 상품 80개는 대량출고다')
+assert(roomListBulkPacking('70', 100) === '낱개 70개', '박스 입수의 70%부터 대량출고다')
+assert(roomListBulkPacking('69.9999999999999999', 100) === undefined, '70% 미만의 소수 수량은 일반 피킹이다')
+assert(roomListBulkPacking('55', 40) === '1박스 + 낱개 15개', '대량출고 목록에 박스와 낱개 수량을 함께 표시한다')
+assert(roomListBulkPacking('80', null) === undefined, '박스 입수가 없으면 일반 피킹이다')
 
 const ranked = assignWarehouseUsageRanks(
   prepared.map((row, index) => ({

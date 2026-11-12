@@ -45,7 +45,7 @@ export function useRoomListWarehouseLocations(hasNames: boolean) {
     })),
     combine: combineListQueries<WarehouseStockPosition>,
   })
-  const { locations, styleNumbers } = useMemo(() => {
+  const { locations, latestPositions, styleNumbers } = useMemo(() => {
     const started = performance.now()
     const positions = flattenListQueries(stock)
     const index = indexRoomListLocations(positions)
@@ -55,12 +55,13 @@ export function useRoomListWarehouseLocations(hasNames: boolean) {
       const log = elapsed >= 1000 ? console.warn : console.info
       log('[room-list] 창고 위치 정리', { elapsed, rows: positions.length })
     }
-    return { locations: index, styleNumbers }
+    return { ...index, styleNumbers }
   }, [fixedRows, stock])
   const locationCodes = useMemo(() => roomListLocationCodes(fixedRows, locations), [fixedRows, locations])
 
   return {
     locationCodes,
+    latestPositions,
     styleNumbers,
     loading: loading || sets.loading || stock.loading || (fixedBrandSelected && (fixed.isLoading || styleLookup.isLoading)),
     error: error || sets.error || stock.errorIndexes.length > 0 || (fixedBrandSelected && fixed.isError),

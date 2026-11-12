@@ -29,6 +29,7 @@ function receiptOrder(position: WarehouseStockPosition) {
 
 export function indexRoomListLocations(positions: readonly WarehouseStockPosition[]) {
   const groups = new Map<string, WarehouseStockPosition[]>()
+  const latestPositions = new Map<string, WarehouseStockPosition>()
   for (const position of positions) {
     if (position.zone !== 'picking' && position.zone !== 'box_storage') continue
     const name = roomListProductName(position.styleName)
@@ -43,6 +44,13 @@ export function indexRoomListLocations(positions: readonly WarehouseStockPositio
   }
 
   for (const [name, group] of groups) {
+    // Pick the latest receipt before collapsing multiple stock rows at a location.
+    const latest = group.reduce((current, position) => {
+      const order = (position.receivedOn ?? '').localeCompare(current.receivedOn ?? '') ||
+        position.createdAt.localeCompare(current.createdAt) || position.sourceRowNumber - current.sourceRowNumber
+      return order > 0 ? position : current
+    })
+    if (group.every(position => position.brandId === latest.brandId)) latestPositions.set(name, latest)
     group.sort((left, right) => receiptOrder(left).localeCompare(receiptOrder(right)) ||
       prefixOrder(left.locationCode) - prefixOrder(right.locationCode) ||
       locationOrder.compare(left.locationCode, right.locationCode) ||
@@ -58,7 +66,7 @@ export function indexRoomListLocations(positions: readonly WarehouseStockPositio
       return true
     }))
   }
-  return groups
+  return { locations: groups, latestPositions }
 }
 
 export function indexRoomListStyleNumbers(

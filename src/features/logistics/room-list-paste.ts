@@ -83,6 +83,22 @@ export function sumRoomListQuantities(quantities: Iterable<string>) {
   return formatQuantity(total)
 }
 
+export function roomListBulkPacking(quantity: string, unitsPerBox: number | null) {
+  const value = quantity.trim()
+  if (unitsPerBox === null || !Number.isSafeInteger(unitsPerBox) || unitsPerBox <= 0 || !isRoomListQuantity(value)) return
+
+  const { units, places } = addQuantity({ units: 0n, places: 0 }, value)
+  const boxSize = BigInt(unitsPerBox) * 10n ** BigInt(places)
+  if (units * 10n < boxSize * 7n) return
+
+  const boxes = units / boxSize
+  const looseUnits = units % boxSize
+  const packing: string[] = []
+  if (boxes > 0n) packing.push(`${boxes.toLocaleString('ko-KR')}박스`)
+  if (looseUnits > 0n) packing.push(`낱개 ${formatQuantity({ units: looseUnits, places })}개`)
+  return packing.join(' + ')
+}
+
 /** 빈 수량은 합계에서 건너뛰며, 숫자가 아닌 값은 행을 지우기 전에 알려준다. */
 export function mergeRoomListRows(rows: RoomListRow[]) {
   const merged: RoomListRow[] = []
