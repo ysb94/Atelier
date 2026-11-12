@@ -29,6 +29,10 @@ export function LeaveBalancePanel() {
   const directory = useOpsDirectory('head-office')
   const [departmentId, setDepartmentId] = useState('all')
   const [search, setSearch] = useState('')
+  const [advanceSelection, setAdvanceSelection] = useState<{ employeeId: string; viewerId: string | undefined } | null>(null)
+  const advanceMember = advanceSelection && advanceSelection.viewerId === profile?.id
+    ? directory.members.find(member => member.id === advanceSelection.employeeId)
+    : undefined
   const snapshot = useEmployeeRoster(canManage)
   const roster = { ...snapshot, data: snapshot.data?.rosters }
   const extras = { ...snapshot, data: snapshot.data?.extraLeave }
@@ -70,12 +74,12 @@ export function LeaveBalancePanel() {
     <Card className="overflow-hidden"><div className="overflow-x-auto">
       <table className="w-full min-w-[800px] text-left text-sm">
         <thead className="bg-primary text-primary-foreground"><tr>
-          {['이름', '부서', '입사일', '발생일수', '추가 연차', '남은 연차'].map((label, index) => <th key={label} className={`whitespace-nowrap px-4 py-2.5 font-medium ${index === 0 ? 'sticky left-0 z-10 bg-primary' : ''}`}>{label}</th>)}
+          {['이름', '부서', '입사일', '발생일수', '추가 연차', '남은 연차', '선사용'].map((label, index) => <th key={label} className={`whitespace-nowrap px-4 py-2.5 font-medium ${index === 0 ? 'sticky left-0 z-10 bg-primary' : ''}`}>{label}</th>)}
         </tr></thead>
         <tbody>
-          {failed ? <tr><td colSpan={6} className="px-4 py-8 text-center text-danger" role="alert">연차 현황을 불러오지 못했습니다. 새로고침으로 다시 조회해 주세요.</td></tr>
-            : loading ? <tr><td colSpan={6} className="px-4 py-8 text-center">불러오는 중…</td></tr>
-            : rows.length === 0 ? <tr><td colSpan={6} className="px-4 py-8 text-center">표시할 직원이 없습니다.</td></tr>
+          {failed ? <tr><td colSpan={7} className="px-4 py-8 text-center text-danger" role="alert">연차 현황을 불러오지 못했습니다. 새로고침으로 다시 조회해 주세요.</td></tr>
+            : loading ? <tr><td colSpan={7} className="px-4 py-8 text-center">불러오는 중…</td></tr>
+            : rows.length === 0 ? <tr><td colSpan={7} className="px-4 py-8 text-center">표시할 직원이 없습니다.</td></tr>
             : rows.map(({ member, balance }) => <tr key={`${profile?.id}:${member.id}`} className="border-b border-border/70 last:border-0">
               <td className="sticky left-0 bg-card px-4 py-3"><MemberCell name={memberLabel(member.displayName)} /></td>
               <td className="px-4 py-3">{directory.departmentName(member.departmentId)}</td>
@@ -85,11 +89,16 @@ export function LeaveBalancePanel() {
                 <AdditionalLeaveInputs name={memberLabel(member.displayName)} employeeId={member.id} entries={extras.data?.entries.filter(entry => entry.employeeId === member.id) ?? []} events={extras.data?.events?.filter(event => event.employeeId === member.id) ?? []} fefoReady={extras.data?.fefoReady === true} baseRegistered={balance?.remainingAnnualLeave != null} available={extras.data?.ready ? extras.data.balances.find(row => row.profileId === member.id)?.available ?? 0 : undefined} ready={extras.data?.ready === true && !extras.isError}/>
               </td>
               <td className="px-4 py-2"><RemainingLeaveEditor profileId={member.id} name={memberLabel(member.displayName)} value={balance?.remainingAnnualLeave ?? null}/><RemainingBar remaining={balance?.remainingAnnualLeave ?? null} accrued={balance?.accruedAnnualLeave ?? null}/></td>
+              <td className="px-4 py-2">
+                <Button type="button" variant="outline" size="sm" aria-label={`${memberLabel(member.displayName)} 선사용`} aria-haspopup="dialog" aria-expanded={advanceMember?.id === member.id}
+                  onClick={() => setAdvanceSelection({ employeeId: member.id, viewerId: profile?.id })}>선사용</Button>
+              </td>
             </tr>)}
         </tbody>
       </table>
     </div></Card>
-    <LeaveAdvancePanel/>
+    <LeaveAdvancePanel selection={advanceMember ? { id: advanceMember.id, name: memberLabel(advanceMember.displayName), department: directory.departmentName(advanceMember.departmentId) } : null}
+      onClose={() => setAdvanceSelection(null)}/>
   </OpsPanelFrame>
 }
 
