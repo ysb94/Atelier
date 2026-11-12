@@ -17,6 +17,7 @@ import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { ProductThumb } from '@/components/products/ProductThumb'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import {
   CARGO_LINE_LIST_COLUMNS,
   CARGO_WAREHOUSE_LINE_LIST_COLUMNS,
@@ -222,6 +223,7 @@ function applyUnloadPrintMode(
     font-size: ${CARGO_LINE_LIST_PRINT_TITLE_PT}pt;
     line-height: 1.15;
     margin: 0 0 0.5mm;
+    overflow-wrap: anywhere;
   }
   html.${printClass} .${printNodeClass} p {
     margin: 0 0 1mm;
@@ -373,6 +375,9 @@ export function CargoUnloadListDialog({
     () => new Set(),
   )
   const [sort, setSort] = useState<CargoListSort>({ key: 'styleNo', direction: 'asc' })
+  const [printLabel, setPrintLabel] = useState<string>(copy.label)
+  const outputLabel = previewOnly ? printLabel.trim().replace(/\s+/g, ' ') || copy.label : copy.label
+  const printHeading = `${title} ${outputLabel}`
 
   useEffect(() => {
     const afterPrint = () =>
@@ -741,7 +746,7 @@ export function CargoUnloadListDialog({
       )
       XLSX.writeFile(
         workbook,
-        `${safeExcelFileName(title)}_${copy.label}.xlsx`,
+        `${safeExcelFileName(title)}_${safeExcelFileName(outputLabel)}.xlsx`,
       )
     } catch (error) {
       console.warn('[cargo-inbound] 목록 엑셀 다운로드 실패', {
@@ -961,9 +966,26 @@ export function CargoUnloadListDialog({
           </div>
 
           {previewOnly && (
-            <p className="border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-              헤더를 누르면 정렬되며 화면 순서대로 인쇄·엑셀에 반영됩니다. 기존 저장 목록과 입력된 창고자리는 변경하지 않습니다.
-            </p>
+            <div className="space-y-2 border-b border-border bg-muted/30 px-4 py-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <label htmlFor={`${copy.titleId}-print-label`} className="text-xs font-medium">인쇄 제목</label>
+                <Input
+                  id={`${copy.titleId}-print-label`}
+                  className="h-8 w-full text-xs sm:w-60"
+                  value={printLabel}
+                  onChange={event => setPrintLabel(event.target.value)}
+                  maxLength={40}
+                  placeholder="예: 입고 확인용, 상품별 목록"
+                />
+                <Button type="button" size="sm" variant="outline" onClick={() => setPrintLabel(copy.label)} disabled={printLabel === copy.label}>
+                  기본 제목
+                </Button>
+                <span className="min-w-0 break-all text-xs text-muted-foreground">출력 제목: {printHeading}</span>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                헤더를 누르면 정렬되며 화면 순서대로 인쇄·엑셀에 반영됩니다. 기존 저장 목록과 입력된 창고자리는 변경하지 않습니다.
+              </p>
+            </div>
           )}
 
           <div className="min-h-0 flex-1 overflow-auto">
@@ -1122,7 +1144,7 @@ export function CargoUnloadListDialog({
         {printLayout.pages.map((page, pageIndex) => (
           <section className="print-page" key={`print-page-${page.start}`}>
             <h1>
-              {title} {copy.label}
+              {printHeading}
             </h1>
             <p>
               {brandName} · {title} · {formatNumber(printRows.length)}행 ·{' '}
