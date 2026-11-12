@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   Download,
   Loader2,
   Package,
@@ -95,6 +98,37 @@ type CargoListDisplayRow = {
 }
 
 type PrintOrientation = 'auto' | 'portrait' | 'landscape'
+
+type CargoListSort = { key: CargoLineListColumnKey; direction: 'asc' | 'desc' }
+const cargoListCollator = new Intl.Collator('ko-KR', { numeric: true, sensitivity: 'base' })
+
+function cargoListSortValue(row: CargoListDisplayRow, key: CargoLineListColumnKey) {
+  switch (key) {
+    case 'qty': return row.values.quantity
+    case 'perBox': return row.values.unitsPerBox
+    case 'boxes': return row.values.boxCount
+    case 'latestBoxes': return row.values.latestBoxCount
+    // 사진은 모델명으로 연결하므로 같은 모델명 순서로 정렬한다.
+    case 'photo': return row.cells.styleNo
+    default: return row.cells[key].trim()
+  }
+}
+
+function compareCargoListRows(left: CargoListDisplayRow, right: CargoListDisplayRow, sort: CargoListSort) {
+  const a = cargoListSortValue(left, sort.key)
+  const b = cargoListSortValue(right, sort.key)
+  const aEmpty = a == null || a === ''
+  const bEmpty = b == null || b === ''
+  if (aEmpty || bEmpty) return aEmpty === bEmpty ? 0 : aEmpty ? 1 : -1
+  const compared = typeof a === 'number' && typeof b === 'number'
+    ? a - b
+    : sort.key === 'stow'
+      ? compareUnloadStowLabel(String(a), String(b))
+      : sort.key === 'styleNo' || sort.key === 'photo'
+        ? compareUnloadStyleNo(String(a), String(b))
+        : cargoListCollator.compare(String(a), String(b))
+  return sort.direction === 'asc' ? compared : -compared
+}
 
 const PURPOSE_COPY = {
   unload: {
@@ -338,6 +372,7 @@ export function CargoUnloadListDialog({
   const [uncheckedKeys, setUncheckedKeys] = useState<Set<string>>(
     () => new Set(),
   )
+  const [sort, setSort] = useState<CargoListSort>({ key: 'styleNo', direction: 'asc' })
 
   useEffect(() => {
     const afterPrint = () =>
@@ -487,7 +522,11 @@ export function CargoUnloadListDialog({
       }),
     [savedData],
   )
-  const rows = listSource === 'saved' ? savedRows : liveRows
+  const sourceRows = listSource === 'saved' ? savedRows : liveRows
+  const rows = useMemo(
+    () => previewOnly ? [...sourceRows].sort((left, right) => compareCargoListRows(left, right, sort)) : sourceRows,
+    [previewOnly, sourceRows, sort],
+  )
   const printRows = useMemo(
     () => rows.filter((row) => !uncheckedKeys.has(row.key)),
     [rows, uncheckedKeys],
@@ -544,6 +583,10 @@ export function CargoUnloadListDialog({
 
   function toggleAllPrintRows(checked: boolean) {
     setUncheckedKeys(checked ? new Set() : new Set(rows.map((row) => row.key)))
+  }
+
+  function toggleSort(key: CargoLineListColumnKey) {
+    setSort(previous => ({ key, direction: previous.key === key && previous.direction === 'asc' ? 'desc' : 'asc' }))
   }
 
   function showCurrentStock() {
@@ -919,7 +962,7 @@ export function CargoUnloadListDialog({
 
           {previewOnly && (
             <p className="border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
-              인쇄·엑셀 다운로드는 현재 미리보기만 출력합니다. 기존 저장 목록과 입력된 창고자리는 변경하지 않습니다.
+              헤더를 누르면 정렬되며 화면 순서대로 인쇄·엑셀에 반영됩니다. 기존 저장 목록과 입력된 창고자리는 변경하지 않습니다.
             </p>
           )}
 
@@ -970,13 +1013,29 @@ export function CargoUnloadListDialog({
                     {listColumns.map((column) => (
                       <th
                         key={column.key}
+                        aria-sort={previewOnly ? sort.key === column.key ? sort.direction === 'asc' ? 'ascending' : 'descending' : 'none' : undefined}
                         className={cn(
                           'whitespace-nowrap border-b border-r border-border bg-foreground px-1 py-1.5 text-center text-[13px] font-semibold text-background last:border-r-0',
-                          previewOnly && 'bg-primary text-primary-foreground',
+                          previewOnly && 'bg-primary p-0 text-primary-foreground',
                           column.align === 'left' && 'text-left',
                         )}
                       >
-                        {column.label}
+                        {previewOnly ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className={cn('h-auto w-full gap-1 rounded-none px-1 py-1.5 text-[13px] font-semibold text-primary-foreground hover:bg-primary-foreground/10 focus-visible:ring-primary-foreground', column.align === 'left' && 'justify-start')}
+                            aria-label={`${column.label} ${sort.key === column.key && sort.direction === 'asc' ? '내림차순' : '오름차순'} 정렬`}
+                            title={column.key === 'photo' ? '사진은 연결된 모델명 기준으로 정렬합니다.' : undefined}
+                            onClick={() => toggleSort(column.key)}
+                          >
+                            {column.label}
+                            {sort.key === column.key
+                              ? sort.direction === 'asc' ? <ArrowUp aria-hidden className="size-3 shrink-0" /> : <ArrowDown aria-hidden className="size-3 shrink-0" />
+                              : <ArrowUpDown aria-hidden className="size-3 shrink-0 opacity-60" />}
+                          </Button>
+                        ) : column.label}
                       </th>
                     ))}
                   </tr>
