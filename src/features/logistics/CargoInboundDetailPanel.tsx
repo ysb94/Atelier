@@ -12,7 +12,6 @@ import { Input } from '@/components/ui/input'
 import type { CargoInboundTidySlotInput } from '@/lib/api'
 import { CargoInboundRequestDialog } from '@/features/logistics/CargoInboundRequestDialog'
 import { CargoInspectionButton } from '@/features/logistics/CargoInspectionDialog'
-import { CargoStockCheckButton } from '@/features/logistics/CargoStockCheckDialog'
 import { CargoWarehouseTidyButton } from '@/features/logistics/CargoUnloadListDialog'
 import { CargoWarehouseSlotDialog } from '@/features/logistics/CargoWarehouseSlotDialog'
 import { formatCargoInboundTitle } from '@/features/logistics/cargo-inbound-title'
@@ -161,11 +160,6 @@ export function CargoInboundDetailPanel({
               <CargoInspectionButton
                 title={title}
                 brandName={item.brandName}
-                lines={item.lines}
-              />
-              <CargoStockCheckButton
-                title={title}
-                brandId={item.brandId}
                 lines={item.lines}
               />
               <CargoWarehouseTidyButton
