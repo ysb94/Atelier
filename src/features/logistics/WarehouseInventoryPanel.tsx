@@ -183,6 +183,7 @@ export function WarehouseInventoryPanel({
           row.styleNo.toLocaleLowerCase('ko-KR').includes(q) ||
           row.sourceStyleNo.toLocaleLowerCase('ko-KR').includes(q) ||
           row.styleName.toLocaleLowerCase('ko-KR').includes(q) ||
+          row.boxQr?.toLocaleLowerCase('ko-KR').includes(q) ||
           formatWarehouseLocation(row)
             .toLocaleLowerCase('ko-KR')
             .includes(q)
@@ -362,7 +363,7 @@ export function WarehouseInventoryPanel({
         <Input
           value={search}
           onChange={(event) => setSearch(event.target.value)}
-          placeholder="M번호·상품명·자리번호"
+          placeholder="M번호·상품명·자리번호·박스 QR"
           className="h-8 max-w-64"
         />
         {FILTERS.map((item) => (
@@ -393,6 +394,7 @@ export function WarehouseInventoryPanel({
               <th className="border-b border-border px-2 py-2">M번호</th>
               <th className="border-b border-border px-2 py-2">상품명</th>
               <th className="border-b border-border px-2 py-2">위치</th>
+              <th className="border-b border-border px-2 py-2">박스 QR</th>
               <th className="border-b border-border px-2 py-2">입고일</th>
               <th className="border-b border-border px-2 py-2 text-right">입수</th>
               <th className="border-b border-border px-2 py-2 text-right">잔여박스</th>
@@ -408,7 +410,7 @@ export function WarehouseInventoryPanel({
             {setQuery.isLoading || positionsQuery.isLoading ? (
               <tr>
                 <td
-                  colSpan={view === 'outbound' ? 11 : 10}
+                  colSpan={view === 'outbound' ? 12 : 11}
                   className="px-3 py-10 text-center text-muted-foreground"
                 >
                   {activeSet
@@ -419,7 +421,7 @@ export function WarehouseInventoryPanel({
             ) : setQuery.isError || positionsQuery.isError ? (
               <tr>
                 <td
-                  colSpan={view === 'outbound' ? 11 : 10}
+                  colSpan={view === 'outbound' ? 12 : 11}
                   className="px-3 py-10 text-center text-danger"
                 >
                   {(setQuery.error instanceof Error
@@ -433,7 +435,7 @@ export function WarehouseInventoryPanel({
             ) : visible.length === 0 ? (
               <tr>
                 <td
-                  colSpan={view === 'outbound' ? 11 : 10}
+                  colSpan={view === 'outbound' ? 12 : 11}
                   className="px-3 py-10 text-center text-muted-foreground"
                 >
                   {activeSet
@@ -477,6 +479,9 @@ export function WarehouseInventoryPanel({
                     title={row.isFinalLocation ? '마지막 위치' : undefined}
                   >
                     {formatWarehouseLocation(row)}
+                  </td>
+                  <td className="max-w-56 truncate px-2 py-1.5 font-mono" title={row.boxQr ?? undefined}>
+                    {row.boxQr ?? '—'}
                   </td>
                   <td
                     className={cn(
