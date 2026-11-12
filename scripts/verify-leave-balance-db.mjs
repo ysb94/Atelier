@@ -4,6 +4,7 @@ import { PGlite } from '@electric-sql/pglite'
 import * as holidays from '@hyunbinseo/holidays-kr/all'
 
 const db = await PGlite.create()
+if (process.argv.includes('--operations-advance')) assert.ok(process.argv.includes('--advance'))
 const company='e0000000-0000-4000-8000-000000000001', other='e0000000-0000-4000-8000-000000000002'
 const staff='10000000-0000-4000-8000-000000000001', peer='10000000-0000-4000-8000-000000000002'
 const foreign='10000000-0000-4000-8000-000000000003', ops='10000000-0000-4000-8000-000000000004'

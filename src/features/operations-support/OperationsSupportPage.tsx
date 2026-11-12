@@ -8,7 +8,7 @@ import { OperationsPeoplePanel } from './OperationsPeoplePanel'
 import { OperationsSettingsPanel } from './OperationsSettingsPanel'
 import './operations-support.css'
 import { useAuth } from '@/lib/supabase/auth'
-import { canEditOrgAssignment } from '@/lib/company/capabilities'
+import { canEditOrgAssignment, isOperationsDepartmentMember } from '@/lib/company/capabilities'
 import {
   OPERATIONS_SECTIONS,
   OPERATIONS_SUPPORT_ROOT,
@@ -34,12 +34,13 @@ export function OperationsSupportPage() {
   }
 
   const current = OPERATIONS_SECTIONS.find(item => item.id === section) ?? OPERATIONS_SECTIONS[0]
+  const canReviewAdvances = section === 'leave' && isOperationsDepartmentMember(profile)
   return (
     <div className="operations-support">
       <PageHeader
         title={current.label}
         description={current.description}
-        actions={canEditOrgAssignment(profile) ? undefined : <Badge variant="muted" title="운영지원 자료를 조회할 수 있습니다. 저장·승인은 기존 업무 권한을 따릅니다.">조회 전용 · 저장은 업무 권한에 따름</Badge>}
+        actions={canEditOrgAssignment(profile) || canReviewAdvances ? undefined : <Badge variant="muted" title="운영지원 자료를 조회할 수 있습니다. 저장·승인은 기존 업무 권한을 따릅니다.">조회 전용 · 저장은 업무 권한에 따름</Badge>}
       />
       {section === 'attendance' ? <AttendancePanel /> : null}
       {section === 'leave' ? <LeavePanel /> : null}

@@ -25,11 +25,12 @@ function fail(action: string, error: { message: string }): never {
   startWorkflow('leave', 'request').fail(error, { scope: /서류/.test(action) ? 'attachment' : 'request' })
   throw new Error(error.message, { cause: error })
 }
-export async function listLeaveRequests(employeeId?: string, approvals = false, period?: { from: string; to: string; approvedOnly?: boolean }): Promise<LeaveRequest[]> {
+export async function listLeaveRequests(employeeId?: string, approvals = false, period?: { from: string; to: string; approvedOnly?: boolean }, options?: { advancesOnly?: boolean }): Promise<LeaveRequest[]> {
   const rows: LeaveRequest[] = []
   for (let offset = 0; ; offset += 500) {
     let query = (approvals ? getSupabase().rpc('list_my_approval_requests') : getSupabase().from('company_leave_requests').select('*')).order('created_at', { ascending: false }).order('id').range(offset, offset + 499)
     if (employeeId) query = query.eq('employee_id', employeeId)
+    if (options?.advancesOnly) query = query.eq('advance_requested', true)
     if (period) {
       const previous = new Date(Date.parse(`${period.from}T00:00:00Z`)-86_400_000).toISOString().slice(0,10)
       query = query.lte('from_date', period.to).gte('to_date', previous)

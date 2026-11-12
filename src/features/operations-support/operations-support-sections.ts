@@ -1,4 +1,4 @@
-import { canViewMembers, canViewOperationsSupportPart } from '../../lib/company/capabilities.ts'
+import { canViewMembers, canViewOperationsSupportPart, isOperationsDepartmentMember } from '../../lib/company/capabilities.ts'
 import { releaseAccess } from '../../lib/company/release-access.ts'
 
 export const OPERATIONS_SUPPORT_ROOT = '/operations-support'
@@ -22,6 +22,10 @@ export function operationsSectionHref(section: OperationsSection) {
   return `${OPERATIONS_SUPPORT_ROOT}/${section}`
 }
 
+export function leaveAdvanceReviewHref(requestId: string) {
+  return `${operationsSectionHref('leave')}?leaveView=balance&advanceRequest=${encodeURIComponent(requestId)}`
+}
+
 /** `/operations-support/<section>` 경로의 업무. 다른 경로는 null. */
 export function operationsSectionFromPath(pathname: string): OperationsSection | null {
   const section = pathname.replace(/\/+$/, '').split('/')[2]
@@ -40,11 +44,14 @@ export function canViewPeopleMembers(profile: OpsProfile) {
 export function canViewOperationsSection(profile: OpsProfile, section: OperationsSection) {
   if (section === 'people') return canViewPeopleOrg(profile) || canViewPeopleMembers(profile)
   if (section === 'settings') return canViewOperationsSupportPart(profile, 'notices')
+  if (section === 'leave' && isOperationsDepartmentMember(profile)) return true
   return canViewOperationsSupportPart(profile, section)
 }
 
 export function defaultOperationsSection(profile: OpsProfile): OperationsSection {
-  return OPERATIONS_SECTIONS.find(section => canViewOperationsSection(profile, section.id))?.id ?? 'people'
+  return OPERATIONS_SECTIONS.find(({ id }) => id === 'leave'
+    ? canViewOperationsSupportPart(profile, id)
+    : canViewOperationsSection(profile, id))?.id ?? 'people'
 }
 
 /** 옛 `/operations-support?part=…` 주소를 업무별 주소로 바꾼다. 나머지 조회 조건은 유지한다. */

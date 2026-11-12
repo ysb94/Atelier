@@ -1,7 +1,12 @@
 import assert from 'node:assert/strict'
-import { DEFAULT_REMINDER_BASIS as basis, reminderPreview, validateRequest, isSelfApprovedRequest, isDirectRegistration, canCancelOwnRequest, requiresDepartmentApproval, requestStatusLabel, type RequestForm, type PersonalRequest } from './personal-requests.ts'
+import { DEFAULT_REMINDER_BASIS as basis, reminderPreview, validateRequest, isSelfApprovedRequest, isDirectRegistration, canCancelOwnRequest, requiresDepartmentApproval, requestStatusLabel, requestedLeaveDays, type RequestForm, type PersonalRequest } from './personal-requests.ts'
 import { endAfterMinutes, leaveTimePresets, leaveWorkMinutes, rangeMinutes } from './request-time-options.ts'
 const form: RequestForm = { kind: 'half', from: '2026-10-08', to: '2026-10-08', start: '09:00', end: '14:00', note: '', place: '' }
+assert.equal(requestedLeaveDays({ ...form, kind: 'annual', to: '2026-10-12' }), 2, '한글날과 주말을 차감 일수에서 제외')
+assert.equal(requestedLeaveDays(form), 0.5)
+assert.equal(requestedLeaveDays({ ...form, kind: 'quarter' }), 0.25)
+assert.equal(requestedLeaveDays({ ...form, from: '2026-10-10', to: '2026-10-10' }), 0)
+assert.equal(requestedLeaveDays({ ...form, from: '2028-01-03', to: '2028-01-03' }), null, '공휴일 자료가 없는 연도의 차감은 추정하지 않음')
 assert.deepEqual(leaveTimePresets('half').map(({start,end})=>[start,end]),[['09:00','14:00'],['14:00','18:00']])
 assert.deepEqual(leaveTimePresets('quarter').map(({start,end})=>[start,end]),[['09:00','11:00'],['16:00','18:00']])
 for (const kind of ['half','quarter'] as const) for (const preset of leaveTimePresets(kind)) {

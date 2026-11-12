@@ -1,5 +1,4 @@
-import { useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Navigate, useNavigate, useSearchParams } from 'react-router-dom'
 import { useReadMyHomeNotification } from '@/features/settings/use-my-home-notifications'
 import { useMemo, useState } from 'react'
 import { Check, RefreshCw, X } from 'lucide-react'
@@ -20,6 +19,7 @@ import { MemberCell, OpsPanelFrame } from './OpsStat'
 import { ScopeCards, departmentScopeCards } from '@/components/ui/scope-cards'
 import { usePagePreview } from '@/lib/company/page-preview-context'
 import { previewRequestIsSelf } from '@/lib/company/relationship-preview'
+import { leaveAdvanceReviewHref } from './operations-support-sections'
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토']
 const LABELS = { pending: '승인 대기', approved: '승인', rejected: '반려', cancelled: '취소' }
@@ -63,17 +63,25 @@ function RequestHistory({ item, today }: { item: LeaveRequest; today: string }) 
   return <ol className="space-y-1 text-xs" aria-label="신청 처리 흐름">{steps.map((step, index) => <li key={index} className="flex items-center gap-1.5 whitespace-nowrap"><i aria-hidden="true" className={`size-1.5 shrink-0 rounded-full ${step.tone}`} /><span className="w-9 tabular-nums text-muted-foreground">{step.date}</span><span>{step.label}</span>{step.wait && <strong className="font-semibold text-primary">{step.wait}</strong>}</li>)}</ol>
 }
 const STATUS_CLASS = { pending: 'bg-warning/10 text-warning', approved: 'bg-success/10 text-success', rejected: 'bg-danger/10 text-danger', cancelled: 'bg-muted text-muted-foreground' }
-export function LeaveApprovalPanel({ readOnly = false, officialReview = false }: { readOnly?: boolean; officialReview?: boolean }) {
+export function LeaveApprovalPanel({ readOnly = false, officialReview = false, openAdvanceReview = false, advanceOnly = false }: {
+  readOnly?: boolean
+  officialReview?: boolean
+  openAdvanceReview?: boolean
+  advanceOnly?: boolean
+}) {
   useRenderWatch('LeaveApprovalPanel')
   const preview = usePagePreview()
-  const leave = useLeaveRequests(readOnly ? 'all' : 'approvals')
+  const leave = useLeaveRequests(advanceOnly ? 'advances' : readOnly ? 'all' : 'approvals')
+  const navigate = useNavigate()
   const [status, setStatus] = useState('pending')
   const [department, setDepartment] = useState('all')
   const [search, setSearch] = useState('')
   const [month, setMonth] = useState('')
   const [page, setPage] = useState(1)
-  const [selected, setSelected] = useState<string | null>(null)
-  const [note, setNote] = useState('')
+  const [noticeParams, setNoticeParams] = useSearchParams()
+  const selected = noticeParams.get('request')
+  const [decision, setDecision] = useState<{ requestId: string; text: string } | null>(null)
+  const note = decision?.requestId === selected ? decision?.text ?? '' : ''
   const [message, setMessage] = useState('')
   const departments = useMemo(() => [...new Set(leave.requests.map(item => item.departmentName))].sort((a,b) => a.localeCompare(b,'ko')), [leave.requests])
   // 부서 카드 건수를 위해 부서 조건 없이 먼저 거르고, 아래에서 부서를 적용한다. 부서는 신청에 남은 부서 이름 기준이다.
@@ -91,16 +99,34 @@ export function LeaveApprovalPanel({ readOnly = false, officialReview = false }:
   const rows = visible.slice((currentPage - 1) * 10, currentPage * 10)
   const detail = leave.requests.find(item => item.id === selected)
   const today = koreaDateKey()
-  const [noticeParams] = useSearchParams()
-  useEffect(()=>{const id=noticeParams.get('request');if(id&&leave.requests.some(item=>item.id===id))setSelected(id)},[noticeParams,leave.requests])
-  const noticeRead=useReadMyHomeNotification('request',detail?.id,detail?`status:${detail.status}`:undefined,Boolean(detail)&&!readOnly)
+  const isAdvance = Boolean(detail?.advanceRequested)
+  const noticeVersion = detail && `status:${detail.status}`
+  const noticeRead = useReadMyHomeNotification('request', detail?.id, noticeVersion, Boolean(detail) && !readOnly)
+  function selectRequest(id: string | null) {
+    setNoticeParams(previous => {
+      const params = new URLSearchParams(previous)
+      if (id) params.set('request', id)
+      else params.delete('request')
+      return params
+    }, { replace: true })
+    setDecision(null)
+  }
+  function openRequest(item: LeaveRequest) {
+    if (openAdvanceReview && item.advanceRequested) {
+      navigate(leaveAdvanceReviewHref(item.id))
+      return
+    }
+    selectRequest(item.id)
+    setMessage('')
+  }
 
   const checkoutPreview = useQuery({ queryKey: ['overtime-checkout-preview', detail?.id], queryFn: () => fetchOvertimeCheckoutPreview(detail!.id), enabled: !readOnly && detail?.kind === 'overtime' && detail.status === 'pending', retry: false })
   const previewReady = overtimeApprovalReady(detail?.kind, detail?.from, koreaDateKey(), checkoutPreview.isSuccess)
   const selfRequest = previewRequestIsSelf(detail?.employeeId === leave.userId, preview?.facts?.requestOwner)
+  const officialAction = officialReview && detail?.kind === 'official'
+  const canDecide = detail?.status === 'pending' && (officialAction || (!readOnly && (isAdvance || requiresDepartmentApproval(detail.kind))))
   async function decide(next: 'approved' | 'rejected') {
-    const officialAction = officialReview && detail?.kind === 'official'
-    if ((!officialAction && readOnly) || !detail || detail.status !== 'pending' || leave.busy || (!officialAction && !(detail.advanceRequested || requiresDepartmentApproval(detail.kind)))) return
+    if (!detail || !canDecide || leave.busy) return
     if (next === 'approved' && !previewReady) { setMessage('과거 야근의 퇴근 반영 시각을 확인한 뒤 승인해 주세요. 다시 조회할 수 있습니다.'); return }
     if ((selfRequest || detail.employeeId === leave.userId) && (officialAction || detail.advanceRequested || next !== 'approved')) {
       setMessage('본인 처리는 담당 부서의 야근·출퇴근 정정 승인만 가능합니다.')
@@ -110,14 +136,15 @@ export function LeaveApprovalPanel({ readOnly = false, officialReview = false }:
     try {
       await leave.transition.mutateAsync({ id: detail.id, status: next, note })
       setMessage(`${detail.employeeName}님의 ${requestLabel(detail.kind)} 신청을 ${LABELS[next]}했습니다.`)
-      setSelected(null); setNote('')
+      selectRequest(null)
     } catch (error) {
-      console.warn('[leave-requests] 지정 승인자 처리 실패', error)
+      console.warn('[leave-requests] 신청 처리 실패', error)
       setMessage(error instanceof Error ? error.message : '신청 처리에 실패했습니다.')
     }
   }
+  if (openAdvanceReview && detail?.advanceRequested) return <Navigate to={leaveAdvanceReviewHref(detail.id)} replace />
   return <OpsPanelFrame>
-    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">{readOnly ? '근태·야근 신청 현황' : '승인할 신청'}</h2><InfoNote label="처리 순서" className="mt-1"><p>{readOnly ? officialReview ? '공가는 운영지원이 서류 확인 후 처리합니다. 야근·출퇴근 정정은 지정 담당자가 처리하며 일반 휴가·외근은 바로 등록되고 선사용은 부서 승인 후 반영됩니다.' : '지정 담당자는 야근·출퇴근 정정을 승인합니다. 일반 휴가·외근은 바로 등록됩니다. 선사용은 부서 승인 후 반영하고 공가는 운영지원이 서류를 확인합니다.' : '담당 부서의 연차 선사용·야근·출퇴근 정정을 검토합니다. 야근·출퇴근 정정만 지정 승인자의 본인 승인이 가능합니다. 선사용은 다른 승인자가 처리합니다. 공가는 운영지원이 별도로 확인합니다.'}</p></InfoNote></div><Button size="sm" variant="outline" disabled={leave.busy} onClick={() => void leave.refresh()}><RefreshCw size={14}/>새로고침</Button></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-base font-semibold">{advanceOnly ? '연차 선사용 신청' : readOnly ? '근태·야근 신청 현황' : '승인할 신청'}</h2><InfoNote label="처리 순서" className="mt-1"><p>{advanceOnly ? '선사용 사유와 날짜를 검토합니다. 승인하면 휴가가 바로 등록됩니다.' : readOnly ? '일반 휴가·외근은 바로 등록됩니다. 야근·출퇴근 정정은 지정 승인자가 검토하고, 공가는 운영지원이 서류를 확인합니다.' : '담당 부서에서 승인할 신청을 검토합니다. 지정 승인자는 본인의 야근·출퇴근 정정을 승인할 수 있습니다.'}</p>{openAdvanceReview && !advanceOnly && <p>운영지원이 선사용 사유를 검토하고 승인하면 휴가가 바로 등록됩니다.</p>}</InfoNote></div><Button size="sm" variant="outline" disabled={leave.busy} onClick={() => void leave.refresh()}><RefreshCw size={14}/>새로고침</Button></div>
     <FilterTabs<string> ariaLabel="근태 신청 상태" value={status} onChange={next => { setStatus(next); setPage(1) }} tabs={[
       { value: 'all', label: '전체', count: leave.requests.length },
       ...(['pending','approved','rejected','cancelled'] as const).map(key => ({ value: key, label: LABELS[key], count: leave.requests.filter(item => item.status === key).length })),
@@ -133,22 +160,22 @@ export function LeaveApprovalPanel({ readOnly = false, officialReview = false }:
     {message && <p role="status" className="rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm">{message}</p>}
     {leave.error && <p role="alert" className="text-sm text-danger">신청을 불러오지 못했습니다. 새로고침으로 다시 확인해 주세요.</p>}
     {detail && <article aria-label="근태 신청 검토" className="rounded-2xl border border-primary/30 bg-card p-5">
-      <header className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{detail.employeeName} · {requestLabel(detail.kind)}</h3><p className="mt-1 text-sm text-muted-foreground">{detail.advanceRequested ? '선사용 승인 신청 · ' : ''}{detail.departmentName} · {leaveSpanLabel(detail.from, detail.to)} · {leaveTimeLabel(detail)}{detail.place ? ` · 장소 ${detail.place}` : ''}</p></div><Button variant="ghost" size="icon" aria-label="신청 검토 닫기" disabled={leave.busy} onClick={() => setSelected(null)}><X size={16}/></Button></header>
-      {detail.advanceRequested && <p className="mt-3 text-sm text-warning">연차 부족분 선사용 신청입니다. 승인 시 해당 직원의 잔여와 한도를 다시 확인하고 다음 발생분에서 정산합니다. 본인 승인은 불가합니다.</p>}<p className="my-4 whitespace-pre-wrap rounded-lg bg-muted/40 p-3 text-sm">{detail.note || '신청 메모가 없습니다.'}</p>
+      <header className="flex items-start justify-between gap-3"><div><h3 className="font-semibold">{detail.employeeName} · {requestLabel(detail.kind)}</h3><p className="mt-1 text-sm text-muted-foreground">{detail.advanceRequested ? '선사용 승인 신청 · ' : ''}{detail.departmentName} · {leaveSpanLabel(detail.from, detail.to)} · {leaveTimeLabel(detail)}{detail.place ? ` · 장소 ${detail.place}` : ''}</p></div><Button variant="ghost" size="icon" aria-label="신청 검토 닫기" disabled={leave.busy} onClick={() => selectRequest(null)}><X size={16}/></Button></header>
+      {isAdvance && <p className="mt-3 text-sm text-warning">승인하면 휴가를 바로 등록하고 실제 부족분을 이후 기본 연차 발생분에서 정산합니다.</p>}<p className="my-4 whitespace-pre-wrap rounded-lg bg-muted/40 p-3 text-sm">{detail.note || '신청 메모가 없습니다.'}</p>
       {!readOnly && detail.kind === 'overtime' && detail.status === 'pending' && (checkoutPreview.isPending
         ? <p role="status" className="mt-3 text-sm text-muted-foreground">퇴근 반영 시각 확인 중…</p>
         : checkoutPreview.error ? <p role="alert" className="mt-3 text-sm text-warning">{checkoutPreview.error instanceof Error ? checkoutPreview.error.message : '퇴근 반영 시각 조회 실패'}{!previewReady && ' · 과거 야근은 확인 후 승인할 수 있습니다.'} <Button type="button" variant="outline" size="sm" onClick={() => void checkoutPreview.refetch()}>다시 조회</Button></p>
         : checkoutPreview.data && (checkoutPreview.data.before || checkoutPreview.data.after) ? <p className="mt-3 text-sm text-muted-foreground">퇴근 기록 · 현재 {clockOutLabel(checkoutPreview.data.before, detail.from) || '미기록'} → 승인 후 {clockOutLabel(checkoutPreview.data.after, detail.from) || '미기록'}</p> : null)}
       {isOfficialLeave(detail.kind) && <OfficialFiles requestId={detail.id} />}
-      {detail.status === 'pending' && (!readOnly || (officialReview && isOfficialLeave(detail.kind))) && (detail.advanceRequested || isOfficialLeave(detail.kind) || requiresDepartmentApproval(detail.kind)) ? <>
-        <label className="block text-sm">처리 의견 <span className="text-muted-foreground">· 반려 시 필수</span><Textarea aria-label="신청 처리 의견" maxLength={2000} rows={2} value={note} disabled={leave.busy} onChange={event => setNote(event.target.value)} className="mt-2" placeholder="반려 사유 또는 전달할 의견을 적어 주세요."/></label>
-        {selfRequest && <p className="mt-3 text-sm text-warning">{detail.advanceRequested ? '선사용은 본인 외 지정 승인자가 처리해야 합니다.' : isOfficialLeave(detail.kind) ? '공가는 다른 운영지원 담당자가 서류를 확인해야 합니다.' : '본인 승인으로 기록됩니다.'}</p>}
+      {canDecide ? <>
+        <label className="block text-sm">처리 의견 <span className="text-muted-foreground">· 반려 시 필수</span><Textarea aria-label="신청 처리 의견" maxLength={2000} rows={2} value={note} disabled={leave.busy} onChange={event => setDecision({ requestId: detail.id, text: event.target.value })} className="mt-2" placeholder="반려 사유 또는 전달할 의견을 적어 주세요."/></label>
+        {selfRequest && <p className="mt-3 text-sm text-warning">{isAdvance ? '다른 지정 승인자가 선사용을 처리해야 합니다.' : isOfficialLeave(detail.kind) ? '공가는 다른 운영지원 담당자가 서류를 확인해야 합니다.' : '본인 승인으로 기록됩니다.'}</p>}
         <div className="mt-4 flex justify-end gap-2"><Button variant="outline" disabled={leave.busy || selfRequest || detail.employeeId === leave.userId} onClick={() => void decide('rejected')}><X size={14}/>{leave.busy ? '처리 중…' : '반려'}</Button><Button disabled={leave.busy || !previewReady || ((detail.advanceRequested || isOfficialLeave(detail.kind)) && (selfRequest || detail.employeeId === leave.userId))} onClick={() => void decide('approved')}><Check size={14}/>{leave.busy ? '처리 중…' : '승인'}</Button></div>
-      </> : detail.status === 'pending' ? <p className="text-sm text-muted-foreground">{isOfficialLeave(detail.kind) ? '운영지원의 서류 확인을 기다리고 있습니다.' : '부서별 지정 승인자의 검토를 기다리고 있습니다.'}</p> : <p className="text-sm">{requestStatusLabel(detail)}{isSelfApprovedRequest(detail) ? ' · 본인 승인' : ''} · {detail.decidedByName || '처리자 미확인'}{detail.decidedAt ? ` · ${new Date(detail.decidedAt).toLocaleString('ko-KR')}` : ''}{detail.decisionNote && <span className="mt-2 block whitespace-pre-wrap">{detail.decisionNote}</span>}</p>}
+      </> : detail.status === 'pending' ? <p className="text-sm text-muted-foreground">{isOfficialLeave(detail.kind) ? '운영지원의 서류 확인을 기다리고 있습니다.' : isAdvance ? '선사용 검토를 기다리고 있습니다.' : '부서별 지정 승인자의 검토를 기다리고 있습니다.'}</p> : <p className="text-sm">{requestStatusLabel(detail)}{isSelfApprovedRequest(detail) ? ' · 본인 승인' : ''} · {detail.decidedByName || '처리자 미확인'}{detail.decidedAt ? ` · ${new Date(detail.decidedAt).toLocaleString('ko-KR')}` : ''}{detail.decisionNote && <span className="mt-2 block whitespace-pre-wrap">{detail.decisionNote}</span>}</p>}
     </article>}
     <article className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <div className="overflow-x-auto"><table aria-label="근태 신청 목록" className="w-full min-w-[760px] text-left text-sm"><thead className="border-b border-border bg-primary text-xs text-primary-foreground"><tr>{['신청자·부서','신청 종류','일정','HISTORY','상태','검토'].map(label => <th key={label} className="px-4 py-3 font-medium">{label}</th>)}</tr></thead><tbody>
-        {!rows.length ? <tr><td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">{leave.loading ? '신청을 불러오는 중…' : leave.error ? '신청 조회에 실패했습니다.' : '해당 조건의 신청이 없습니다.'}</td></tr> : rows.map(item => <tr key={item.id} className="border-b border-border/70 last:border-0"><td className="px-4 py-4"><MemberCell name={item.employeeName} sub={item.departmentName} /></td><td className="px-4 py-4">{requestLabel(item.kind)}{item.advanceRequested ? ' · 선사용' : ''}</td><td className="px-4 py-4 tabular-nums">{leaveSpanLabel(item.from, item.to)}<span className="mt-1 block text-xs text-muted-foreground">{leaveTimeLabel(item)}</span>{item.place && <span className="mt-1 block text-xs text-muted-foreground">장소 · {item.place}</span>}</td><td className="px-4 py-4"><RequestHistory item={item} today={today} /></td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-xs ${STATUS_CLASS[item.status]}`}>{requestStatusLabel(item)}</span>{isSelfApprovedRequest(item) && <span className="ml-2 text-xs text-muted-foreground">본인 승인</span>}</td><td className="px-4 py-4"><Button size="sm" variant="outline" disabled={leave.busy} onClick={() => { setSelected(item.id); setNote(''); setMessage('') }}>{item.status === 'pending' ? '검토' : '상세'}</Button></td></tr>)}
+        {!rows.length ? <tr><td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">{leave.loading ? '신청을 불러오는 중…' : leave.error ? '신청 조회에 실패했습니다.' : '해당 조건의 신청이 없습니다.'}</td></tr> : rows.map(item => <tr key={item.id} className="border-b border-border/70 last:border-0"><td className="px-4 py-4"><MemberCell name={item.employeeName} sub={item.departmentName} /></td><td className="px-4 py-4">{requestLabel(item.kind)}{item.advanceRequested ? ' · 선사용' : ''}</td><td className="px-4 py-4 tabular-nums">{leaveSpanLabel(item.from, item.to)}<span className="mt-1 block text-xs text-muted-foreground">{leaveTimeLabel(item)}</span>{item.place && <span className="mt-1 block text-xs text-muted-foreground">장소 · {item.place}</span>}</td><td className="px-4 py-4"><RequestHistory item={item} today={today} /></td><td className="px-4 py-4"><span className={`rounded-full px-2.5 py-1 text-xs ${STATUS_CLASS[item.status]}`}>{requestStatusLabel(item)}</span>{isSelfApprovedRequest(item) && <span className="ml-2 text-xs text-muted-foreground">본인 승인</span>}</td><td className="px-4 py-4"><Button size="sm" variant="outline" disabled={leave.busy} onClick={() => openRequest(item)}>{item.status === 'pending' ? '검토' : '상세'}</Button></td></tr>)}
       </tbody></table></div>
       <footer className="flex items-center justify-between border-t border-border px-4 py-3 text-xs text-muted-foreground"><span>{visible.length}건 · {currentPage}/{pages} 페이지</span><div className="flex gap-2"><Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setPage(currentPage - 1)}>이전</Button><Button variant="outline" size="sm" disabled={currentPage === pages} onClick={() => setPage(currentPage + 1)}>다음</Button></div></footer>
     </article>

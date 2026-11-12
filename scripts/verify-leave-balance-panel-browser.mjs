@@ -13,7 +13,28 @@ const fixtures = {
   '@/lib/supabase/basic-work-access': `export function useBasicWorkAccess(){return {access:{domains:location.hash==='#denied'?[]:['operations']},isPending:false}}`,
   '@/features/operations-support/ops-directory': `const members=[{id:'a',displayName:'가 직원',departmentId:'ops',hireDate:'2024-01-01'},{id:'b',displayName:'나 직원',departmentId:'md',hireDate:null},{id:'c',displayName:'다 직원',departmentId:'ops',hireDate:'2025-01-01'}];export function useOpsDirectory(){return {members,departments:[{id:'ops',name:'운영지원'},{id:'md',name:'MD'}],departmentName:id=>id==='ops'?'운영지원':'MD',loading:false,error:null,refetch(){}}}`,
   '@/lib/supabase/employee-extra-leave': `const s=window.__bonus={entries:JSON.parse(sessionStorage.getItem('bonus')||'[]'),ready:true,fail:false,writes:0,reads:0,readFail:false};export async function listExtraLeave(){s.reads++;if(s.readFail)throw Error('추가 연차 조회 실패');return {ready:s.ready,fefoReady:true,events:[{id:'expiry-fixture',employeeId:'a',source:'base',kind:'expired',days:-1,date:'2026-10-29'}],entries:[...s.entries],balances:[{profileId:'a',available:s.entries.reduce((sum,e)=>sum+e.days-e.used,0)}]}};export async function saveExtraLeave(input){if(s.fail){s.fail=false;throw Error('추가 연차 저장 실패')}s.writes++;const entry=s.entries.find(e=>e.id===input.id);s.entries=input.remove?s.entries.filter(e=>e.id!==input.id):entry?s.entries.map(e=>e.id===input.id?{...e,...input,version:e.version+1}:e):[...s.entries,{...input,created:'2026-10-29',used:0,version:1}];sessionStorage.setItem('bonus',JSON.stringify(s.entries))}`,
-  '@/lib/supabase/client': `const s=window.__leave={remaining:JSON.parse(sessionStorage.getItem('remaining')||'"initial"'),writes:[],reads:0,fail:false,readFail:false,advanceReads:0,advanceFail:false};export function getSupabase(){return {rpc:async(name)=>name==='employee_leave_advances'?(s.advanceReads++,s.advanceFail?{data:null,error:{code:'57014',message:'timeout'}}:{data:{ready:true,employees:[],events:[]},error:null}):({data:null,error:{code:'PGRST202',message:'server pending'}}),from(table){if(table!=='employee_roster')throw Error(table);const q={select(){return q},upsert:async row=>{s.writes.push(row);if(s.fail){s.fail=false;return {error:{message:'save failed'}}}s.remaining=row.remaining_annual_leave;sessionStorage.setItem('remaining',JSON.stringify(s.remaining));return {error:null}},then:resolve=>{s.reads++;return Promise.resolve(s.readFail?{data:null,error:{message:'read failed'}}:{data:[{profile_id:'a',remaining_annual_leave:s.remaining==='initial'?7.75:s.remaining,accrued_annual_leave:15},{profile_id:'b',remaining_annual_leave:0,accrued_annual_leave:0}],error:null}).then(resolve)}};return q}}}`,
+  '@/lib/supabase/client': `
+    const s = window.__leave = {remaining:JSON.parse(sessionStorage.getItem('remaining')||'"initial"'),writes:[],reads:0,fail:false,readFail:false,advanceReads:0,advanceFail:false,advanceWrites:[],operationsApproval:false};
+    const limits = {a:2,b:6};
+    export function getSupabase(){return {
+      async rpc(name,input){
+        if(name==='employee_leave_advances'){
+          s.advanceReads++;
+          if(s.advanceFail)return {data:null,error:{code:'57014',message:'timeout'}};
+          const employees=Object.entries(limits).map(([employeeId,limit])=>({employeeId,limit,outstanding:s.operationsApproval&&employeeId==='a'?2:0,nextDate:'2027-01-02',unclassified:0,needsReview:false,periods:[]}));
+          const events=Object.keys(limits).map(employeeId=>({id:employeeId,employeeId,kind:'limit',days:limits[employeeId],created:'2026-11-02',note:employeeId==='a'?'가 직원 이력':'나 직원 이력'}));
+          if(s.operationsApproval)events.unshift({id:'borrow-a',employeeId:'a',kind:'approved',days:2,created:'2026-11-03',note:'운영지원 확인'});
+          return {data:{ready:true,approvalMode:s.operationsApproval?'operations':undefined,employees,events},error:null};
+        }
+        if(name==='manage_leave_advance'){
+          s.advanceWrites.push(input);
+          limits[input.p_employee]=input.p_days;
+          return {error:null};
+        }
+        return {data:null,error:{code:'PGRST202',message:'server pending'}};
+      },
+      from(table){if(table!=='employee_roster')throw Error(table);const q={select(){return q},upsert:async row=>{s.writes.push(row);if(s.fail){s.fail=false;return {error:{message:'save failed'}}}s.remaining=row.remaining_annual_leave;sessionStorage.setItem('remaining',JSON.stringify(s.remaining));return {error:null}},then:resolve=>{s.reads++;return Promise.resolve(s.readFail?{data:null,error:{message:'read failed'}}:{data:[{profile_id:'a',remaining_annual_leave:s.remaining==='initial'?7.75:s.remaining,accrued_annual_leave:15},{profile_id:'b',remaining_annual_leave:0,accrued_annual_leave:0}],error:null}).then(resolve)}};return q}
+    }}`,
 }
 const aliases = []
 for (const [index, [find, source]] of Object.entries(fixtures).entries()) {
@@ -49,6 +70,7 @@ try {
   await server.listen()
   browser = await chromium.launch({ executablePath: 'C:/Program Files/Google/Chrome/Application/chrome.exe', headless: true })
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } })
+  page.setDefaultNavigationTimeout(90_000)
   const errors = [], remote = []
   page.on('pageerror', error => errors.push(error.message))
   await page.route('**/*', route => route.request().url().startsWith('http://127.0.0.1:5197/') ? route.continue() : (remote.push(route.request().url()), route.abort()))
@@ -140,7 +162,7 @@ try {
   assert.equal(await page.evaluate(() => window.__cached().find(row => row.profileId === 'a').remainingAnnualLeave), -4.5)
   await row.getByRole('button', { name: '저장', exact: true }).click(); await row.getByRole('status').waitFor()
   await page.evaluate(async () => { window.__leave.remaining = 3.75; await window.__refresh() })
-  assert.equal(await input.inputValue(), '3.75')
+  await page.waitForFunction(() => document.querySelector('[aria-label="가 직원 남은 연차 입력"]')?.value === '3.75')
   await input.fill('9'); await row.getByRole('button', { name: '취소', exact: true }).click(); assert.equal(await input.inputValue(), '3.75')
   await input.fill(''); await row.getByRole('button', { name: '저장', exact: true }).click(); await row.getByRole('status').waitFor()
   assert.equal(await page.evaluate(() => window.__cached().find(row => row.profileId === 'a').remainingAnnualLeave), null)
@@ -166,10 +188,55 @@ try {
   await additional.getByText('2026년 생일 반차 · 26.10.29~26.11.12 사용 · 자동 부여', { exact: false }).waitFor()
   await additional.getByText('등록 날짜: 26.10.29', { exact: true }).waitFor()
   await additional.getByRole('button', { name: '닫기', exact: true }).click()
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const columns = await page.getByRole('columnheader').allTextContents()
+  assert.equal(columns[columns.indexOf('발생일수') + 1], '선사용')
+  const advanceButtonA = page.getByRole('button', { name: '가 직원 선사용', exact: true })
+  await advanceButtonA.click()
+  const advanceA = page.getByRole('dialog', { name: '가 직원 연차 선사용', exact: true })
+  await advanceA.waitFor()
+  const desktopDrawer = await advanceA.boundingBox()
+  assert.ok(desktopDrawer && desktopDrawer.x > 0 && desktopDrawer.x + desktopDrawer.width === 1280, '오른쪽에 붙은 상세 패널')
+  assert.equal(await advanceA.getByRole('combobox', { name: '선사용 관리 작업' }).inputValue(), 'limit')
+  assert.equal(await advanceA.getByRole('combobox', { name: '선사용 관리 직원' }).count(), 0)
+  await advanceA.getByText('선사용·정산 기록 1건', { exact: true }).click()
+  await advanceA.getByText('가 직원 이력', { exact: true }).waitFor()
+  assert.equal(await advanceA.getByText('나 직원 이력', { exact: true }).count(), 0)
+  await advanceA.getByRole('spinbutton', { name: '선사용 일수' }).fill('3')
+  await advanceA.getByRole('textbox', { name: '선사용 관리 사유' }).fill('행에서 선사용 한도 저장')
+  await advanceA.getByRole('button', { name: '한도 저장' }).click()
+  await advanceA.getByText('선사용 한도를 저장했습니다.', { exact: true }).waitFor()
+  await advanceA.getByText('한도 설정 · 3일', { exact: true }).waitFor()
+  assert.deepEqual(await page.evaluate(() => window.__leave.advanceWrites), [{p_employee:'a',p_action:'limit',p_days:3,p_note:'행에서 선사용 한도 저장',p_period:null}])
+  await page.keyboard.press('Escape')
+  await advanceA.waitFor({ state: 'hidden' })
+  assert.equal(await advanceButtonA.evaluate(button => document.activeElement === button), true)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.getByRole('button', { name: '나 직원 선사용', exact: true }).click()
+  const advanceB = page.getByRole('dialog', { name: '나 직원 연차 선사용', exact: true })
+  await advanceB.waitFor()
+  const mobileDrawer = await advanceB.boundingBox()
+  assert.ok(mobileDrawer && mobileDrawer.x === 0 && mobileDrawer.width === 390, '모바일에서는 화면 너비 사용')
+  assert.equal(await advanceB.getByRole('spinbutton', { name: '선사용 일수' }).inputValue(), '')
+  await advanceB.getByText('선사용·정산 기록 1건', { exact: true }).click()
+  await advanceB.getByText('나 직원 이력', { exact: true }).waitFor()
+  assert.equal(await advanceB.getByText('가 직원 이력', { exact: true }).count(), 0)
+  await advanceB.getByRole('button', { name: '닫기', exact: true }).click()
+  await advanceB.waitFor({ state: 'hidden' })
+  await page.evaluate(async () => { window.__leave.operationsApproval = true; await window.__refreshAll() })
+  const debt = page.getByRole('button', { name: '가 직원 선사용 -2일', exact: true })
+  await debt.waitFor()
+  assert.match(await debt.getAttribute('class'), /\btext-danger\b/)
+  await debt.click()
+  await advanceA.getByText('선사용 승인 · -2일', { exact: true }).waitFor()
+  assert.equal(await advanceA.getByRole('combobox', { name: '선사용 관리 작업' }).count(), 0)
+  assert.equal(await advanceA.getByText('나 직원 이력', { exact: true }).count(), 0)
+  await advanceA.getByRole('button', { name: '닫기', exact: true }).click()
   await page.goto('http://127.0.0.1:5197/#denied'); await page.reload()
   await page.getByText('연차 현황은 직원 명부 관리 권한이 있는 담당자만 조회·수정할 수 있습니다.').waitFor()
   assert.equal(await page.getByRole('spinbutton').count(), 0)
+  assert.equal(await page.getByRole('button', { name: '가 직원 선사용', exact: true }).count(), 0)
   assert.equal(await page.evaluate(() => window.__leave.reads), 0)
   assert.deepEqual(errors, []); assert.deepEqual(remote, [])
-  console.log('leave-balance-panel: 실제 저장 API 연결·공유 캐시·새로고침·음수/0/미등록·실패 재시도·부서/이름 검색·권한 제한·모바일 검증 통과 (실제 직원 변경 없음)')
+  console.log('leave-balance-panel: 저장 API·선사용 직원별 패널·공유 캐시·실패 재시도·필터·권한·모바일 검증 통과 (실제 직원 변경 없음)')
 } finally { await browser?.close(); await server.close() }

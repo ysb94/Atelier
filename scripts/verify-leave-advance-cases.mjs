@@ -133,4 +133,8 @@ export async function verifyLeaveAdvances({db,actor,value,ops,company,foreign,de
  if (verifyLoadGuard) await verifyLoadGuard()
  if (verifyReadEfficiency) await verifyReadEfficiency()
  console.log('leave-advance: 기존 원본/ACL/RLS 보존·별도 승인·분할·한도·본인/타사 차단·월 발생·기념일 정산·정산 후 취소·멱등·엑셀 음수 분류·퇴사 보류 통과')
+ if (process.argv.includes('--operations-advance')) {
+   const { verifyOperationsLeaveAdvances } = await import('./verify-operations-leave-advance-cases.mjs')
+   await verifyOperationsLeaveAdvances({ db, actor, value, company, foreign, dept, approver, init, today, base, summary })
+ }
 }
