@@ -9,6 +9,7 @@ import {
   type CargoLineListValues,
 } from './line-list'
 import { refreshWarehouseTidyRequestNotes, resolveWarehouseTidyShippedOn } from './warehouse-tidy'
+import { buildWarehouseTidyPreviewRows } from './warehouse-tidy-preview'
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message)
@@ -198,4 +199,32 @@ const clearedNotes = refreshWarehouseTidyRequestNotes(refreshedNotes, [
 ])
 assert(clearedNotes[0]?.note === '등록 비고' && clearedNotes[1]?.note === '등록 비고', '요청 삭제는 등록 비고를 유지하며 분할 행에도 반영한다')
 
-console.log('warehouse-tidy.verify ok')
+const previewLines = [20, 35, 16, 8, 4].map((boxes, index) => ({
+  id: `preview-${index}`, no: String(index + 1), name: '같은 품명', photo: '',
+  styleNo: `M000${index + 1}`, qty: String(boxes * 8), perBox: '8', boxes: String(boxes),
+  note: '원본 비고', requestNote: '요청',
+}))
+const previewStock = [
+  { styleNo: 'm0001', remainingBoxes: 0, openedUnits: 0, quantityStatus: 'known' as const },
+  { styleNo: 'M0001', remainingBoxes: 8, openedUnits: 0, quantityStatus: 'known' as const },
+  { styleNo: 'M0002', remainingBoxes: 0, openedUnits: 0, quantityStatus: 'known' as const },
+  { styleNo: 'M0004', remainingBoxes: 0, openedUnits: 3, quantityStatus: 'known' as const },
+  { styleNo: 'M0005', remainingBoxes: null, openedUnits: 0, quantityStatus: 'unknown' as const },
+]
+const previewBefore = JSON.stringify({ previewLines, previewStock })
+const previewRows = buildWarehouseTidyPreviewRows(previewLines, previewStock, '2026-11-12', true)
+const previewFor = (sku: string) => previewRows.filter(row => row.values.styleNo === sku).map(row => row.values)
+assert(JSON.stringify(previewFor('M0001').map(row => row.boxCount)) === '[16,4]', '다른 자리에 기존 8박스가 있어도 이번 입고 20박스만 16+4로 나눈다')
+assert(previewFor('M0001').every(row => row.latestSlot === '기존'), '0 재고 자리 외에 남은 재고가 있는 SKU는 모든 분할 행에 기존 표시')
+assert(JSON.stringify(previewFor('M0002').map(row => row.boxCount)) === '[16,16,3]', '35박스는 원본 옆에 16+16+3으로 붙인다')
+assert(previewFor('M0002').every(row => row.latestSlot === 'NEW'), '모든 기존 재고가 0이면 모든 분할 행에 NEW 표시')
+assert(previewFor('M0003')[0]?.latestSlot === 'NEW' && previewFor('M0003').length === 1, '재고에 없는 다른 SKU는 NEW이고 정확히 16박스면 한 행이다')
+assert(previewFor('M0004')[0]?.latestSlot === '기존', '박스 없이 낱개만 남아 있어도 기존 재고다')
+assert(previewFor('M0005')[0]?.latestSlot === '확인 필요', '수량 미확인 재고를 0으로 간주하지 않는다')
+assert(previewRows.every(row => row.values.shippedAt === '261112'), '미리보기는 분할 여부와 관계없이 원본 선적일을 표시한다')
+assert(previewRows.every(row => row.values.latestBoxCount === null && row.values.warehouseSlot === ''), '기존 재고 합산이나 창고자리 자동 배정을 하지 않는다')
+assert(JSON.stringify({ previewLines, previewStock }) === previewBefore, '미리보기 계산이 입고·재고 원본을 바꾸지 않는다')
+assert(buildWarehouseTidyPreviewRows(previewLines, [], '2026-11-12', false).every(row => row.values.latestSlot === '확인 필요'), '재고 조회 실패 시 NEW로 오인하지 않는다')
+assert(buildWarehouseTidyPreviewRows([{ ...previewLines[0], styleNo: '' }], [], '2026-11-12', true)[0]?.values.latestSlot === '확인 필요', 'M번호가 없으면 품명만으로 신규 여부를 추측하지 않는다')
+
+console.log('warehouse-tidy.verify ok: legacy records and incoming-only preview')

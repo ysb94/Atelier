@@ -13,16 +13,10 @@ import type { CargoInboundTidySlotInput } from '@/lib/api'
 import { CargoInboundRequestDialog } from '@/features/logistics/CargoInboundRequestDialog'
 import { CargoInspectionButton } from '@/features/logistics/CargoInspectionDialog'
 import { CargoStockCheckButton } from '@/features/logistics/CargoStockCheckDialog'
-import {
-  CargoUnloadListButton,
-  CargoWarehouseTidyButton,
-} from '@/features/logistics/CargoUnloadListDialog'
+import { CargoWarehouseTidyButton } from '@/features/logistics/CargoUnloadListDialog'
 import { CargoWarehouseSlotDialog } from '@/features/logistics/CargoWarehouseSlotDialog'
 import { formatCargoInboundTitle } from '@/features/logistics/cargo-inbound-title'
-import {
-  hasSavedCargoRequestNote,
-  type CargoInboundLineDraft,
-} from '@/lib/cargo/inbound'
+import type { CargoInboundLineDraft } from '@/lib/cargo/inbound'
 import type { CargoLineListValues } from '@/lib/cargo/line-list'
 import { formatNumber } from '@/lib/utils'
 
@@ -116,7 +110,7 @@ export function CargoInboundDetailPanel({
     if (!item.tidySavedAt) {
       setStatusWarning(false)
       setStatus(
-        '창고정리용을 먼저 인쇄하세요. 인쇄할 때 목록이 저장됩니다.',
+        '새 창고정리용은 미리보기 단계입니다. 창고자리 입력은 기존 저장 목록에서만 가능합니다.',
       )
       return
     }
@@ -126,11 +120,6 @@ export function CargoInboundDetailPanel({
   }
 
   function openWarehouseTidy() {
-    if (!item.tidySavedAt && !hasSavedCargoRequestNote(item.lines)) {
-      setStatusWarning(true)
-      setStatus('요청 사항을 먼저 저장한 뒤 창고정리용을 출력하세요.')
-      return false
-    }
     setStatusWarning(false)
     setStatus(null)
     return true
@@ -139,7 +128,7 @@ export function CargoInboundDetailPanel({
   function openRequests() {
     if (item.tidySavedAt) {
       const proceed = window.confirm(
-        '창고정리용이 이미 출력되었습니다. 요청 사항을 저장한 뒤 창고정리용에서 「현재 요청 사항만 불러오기」를 누르면 저장된 목록에 반영됩니다. 그래도 열까요?',
+        '기존 창고정리용 저장 목록이 있습니다. 요청 사항을 저장한 뒤 「이전 저장 목록」에서 「현재 요청 사항만 불러오기」를 누르면 반영됩니다. 그래도 열까요?',
       )
       if (!proceed) return
     }
@@ -179,13 +168,6 @@ export function CargoInboundDetailPanel({
                 brandId={item.brandId}
                 lines={item.lines}
               />
-              <CargoUnloadListButton
-                title={title}
-                brandId={item.brandId}
-                brandName={item.brandName}
-                shippedAt={item.shippedAt}
-                lines={item.lines}
-              />
               <CargoWarehouseTidyButton
                 title={title}
                 brandId={item.brandId}
@@ -195,13 +177,25 @@ export function CargoInboundDetailPanel({
                 shipmentId={item.id}
                 stage={item.stage}
                 tidySavedAt={item.tidySavedAt}
+                incomingOnlyPreview
                 beforeOpen={openWarehouseTidy}
+              />
+              {item.tidySavedAt && <CargoWarehouseTidyButton
+                title={title}
+                brandId={item.brandId}
+                brandName={item.brandName}
+                shippedAt={item.shippedAt}
+                lines={item.lines}
+                shipmentId={item.id}
+                stage={item.stage}
+                tidySavedAt={item.tidySavedAt}
+                buttonLabel="이전 저장 목록"
                 onSaveRows={async (rows) => {
                   await onSaveTidyRows(rows)
                   setStatusWarning(false)
                   setStatus(null)
                 }}
-              />
+              />}
             </div>
           ) : null}
         </div>

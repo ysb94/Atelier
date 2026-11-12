@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button'
 import {
   CARGO_LINE_LIST_COLUMNS,
   CARGO_WAREHOUSE_LINE_LIST_COLUMNS,
+  CARGO_WAREHOUSE_PREVIEW_COLUMNS,
 } from '@/features/logistics/cargo-line-list-columns'
 import type { CargoLineListColumnKey } from '@/features/logistics/cargo-line-list-columns'
 import {
@@ -60,6 +61,7 @@ import {
   type CargoLineListPrintLayout,
 } from '@/lib/cargo/line-list-print'
 import { resolveWarehouseTidyShippedOn } from '@/lib/cargo/warehouse-tidy'
+import { buildWarehouseTidyPreviewRows } from '@/lib/cargo/warehouse-tidy-preview'
 import { useRenderWatch } from '@/lib/diagnostics'
 import {
   LOGISTICS_IMAGE_KEY,
@@ -81,6 +83,7 @@ type CargoUnloadListDialogProps = {
   shipmentId?: string
   stage?: CargoInboundStage
   tidySavedAt?: string | null
+  incomingOnlyPreview?: boolean
   onSaveRows?: (rows: readonly CargoLineListValues[]) => Promise<void>
   onClose: () => void
 }
@@ -307,19 +310,21 @@ export function CargoUnloadListDialog({
   shipmentId = '',
   stage,
   tidySavedAt = null,
+  incomingOnlyPreview = false,
   onSaveRows,
   onClose,
 }: CargoUnloadListDialogProps) {
   const copy = PURPOSE_COPY[purpose]
+  const previewOnly = purpose === 'warehouse' && incomingOnlyPreview
   const listColumns =
-    purpose === 'warehouse'
+    previewOnly ? CARGO_WAREHOUSE_PREVIEW_COLUMNS : purpose === 'warehouse'
       ? CARGO_WAREHOUSE_LINE_LIST_COLUMNS
       : CARGO_LINE_LIST_COLUMNS
   useRenderWatch(copy.watchName)
   const queryClient = useQueryClient()
   const [openedAt] = useState(() => Date.now())
   const [listSource, setListSource] = useState<'saved' | 'live'>(() =>
-    purpose === 'warehouse' && tidySavedAt ? 'saved' : 'live',
+    !previewOnly && purpose === 'warehouse' && tidySavedAt ? 'saved' : 'live',
   )
   const [listPersisted, setListPersisted] = useState(false)
   const [savingList, setSavingList] = useState(false)
@@ -327,7 +332,7 @@ export function CargoUnloadListDialog({
   const [requestRefreshStatus, setRequestRefreshStatus] = useState<string | null>(null)
   const [listError, setListError] = useState<string | null>(null)
   const [printOrientation, setPrintOrientation] =
-    useState<PrintOrientation>('portrait')
+    useState<PrintOrientation>(previewOnly ? 'auto' : 'portrait')
   const [downloadingExcel, setDownloadingExcel] = useState(false)
   const [excelError, setExcelError] = useState<string | null>(null)
   const [uncheckedKeys, setUncheckedKeys] = useState<Set<string>>(
@@ -348,19 +353,20 @@ export function CargoUnloadListDialog({
     queryKey: ['cargo-inbound-tidy', brandId, shipmentId],
     queryFn: () => getCargoInboundTidyRows(brandId, shipmentId),
     enabled:
-      purpose === 'warehouse' && Boolean(brandId && shipmentId && tidySavedAt),
+      !previewOnly && purpose === 'warehouse' && Boolean(brandId && shipmentId && tidySavedAt),
   })
   const savedData = savedQuery.data ?? emptyList<CargoInboundTidyRow>()
   const stockQuery = useQuery({
     queryKey: [copy.queryKey, brandId, openedAt],
-    queryFn: async (): Promise<WarehouseStockPosition[]> => {
+    queryFn: async (): Promise<WarehouseStockPosition[] | null> => {
       const activeSet = await getActiveWarehouseInventorySet(brandId)
-      if (!activeSet) return []
+      if (!activeSet) return previewOnly ? null : []
       return getWarehouseStockPositions(brandId, activeSet.id)
     },
     enabled: listSource === 'live' && Boolean(brandId),
   })
   const positions = stockQuery.data ?? emptyList<WarehouseStockPosition>()
+  const previewStockUnavailable = previewOnly && (!stockQuery.isSuccess || stockQuery.data === null)
   const loading =
     listSource === 'saved'
       ? savedQuery.isLoading
@@ -375,6 +381,10 @@ export function CargoUnloadListDialog({
     [lines],
   )
   const liveRows = useMemo(() => {
+    if (previewOnly) {
+      return buildWarehouseTidyPreviewRows(lines, positions, shippedAt, !previewStockUnavailable)
+        .map(row => ({ ...row, cells: formatCargoLineListCells(row.values) }))
+    }
     const splitGroups = lines
       .filter(cargoLineHasContent)
       .map((line, index) => {
@@ -464,7 +474,7 @@ export function CargoUnloadListDialog({
         }
         return compareUnloadStyleNo(left.cells.styleNo, right.cells.styleNo)
       })
-  }, [lines, positions, purpose, shippedAt])
+  }, [lines, positions, purpose, shippedAt, previewOnly, previewStockUnavailable])
   const savedRows = useMemo(
     () =>
       savedData.map((row) => {
@@ -545,6 +555,7 @@ export function CargoUnloadListDialog({
   }
 
   async function handleRefreshRequestNotes() {
+    if (previewOnly) return
     if (refreshingRequests || savingList || loading) return
     setRefreshingRequests(true)
     setListError(null)
@@ -572,6 +583,7 @@ export function CargoUnloadListDialog({
   }
 
   async function ensureWarehouseListSaved() {
+    if (previewOnly) return true
     if (
       purpose !== 'warehouse' ||
       stage !== 'scheduled' ||
@@ -614,6 +626,7 @@ export function CargoUnloadListDialog({
   }
 
   function requestNotesReady() {
+    if (previewOnly) return true
     if (purpose !== 'warehouse' || listSource === 'saved') return true
     if (hasSavedCargoRequestNote(lines)) return true
     setListError('요청 사항을 먼저 저장한 뒤 출력하세요.')
@@ -621,7 +634,7 @@ export function CargoUnloadListDialog({
   }
 
   async function handlePrint() {
-    if (loading || savingList || refreshingRequests || printRows.length === 0) return
+    if (previewStockUnavailable || loading || savingList || refreshingRequests || printRows.length === 0) return
     if (!requestNotesReady()) return
     const saved = await ensureWarehouseListSaved()
     if (!saved) return
@@ -637,7 +650,7 @@ export function CargoUnloadListDialog({
   }
 
   async function handleDownloadExcel() {
-    if (loading || downloadingExcel || savingList || refreshingRequests || printRows.length === 0) return
+    if (previewStockUnavailable || loading || downloadingExcel || savingList || refreshingRequests || printRows.length === 0) return
     if (!requestNotesReady()) return
     const saved = await ensureWarehouseListSaved()
     if (!saved) return
@@ -728,15 +741,19 @@ export function CargoUnloadListDialog({
                 {copy.label}
               </h2>
               <p className="mt-0.5 text-xs text-muted-foreground">
+                {previewOnly ? (
+                  <>이번 입고 박스만 품목별로 16박스씩 나눕니다. 기존 재고가 없거나 0이면 NEW, 남아 있으면 기존으로 표시합니다.</>
+                ) : <>
                 박스 합 9~16은 A(1종류), 5~8은 C(2종류), 그 이하는 B(4종류)로
                 적재합니다. 박스수가 비면 섞여 온 것이라 적재방식은 비웁니다.
                 최신자리가 이미 16박스면 바로 +NEW로 보냅니다.
                 {listSource === 'saved'
                   ? ' 이 목록은 인쇄할 때 저장한 내용입니다.'
                   : ''}
+                </>}
               </p>
             </div>
-            <Button type="button" size="icon" variant="ghost" onClick={onClose}>
+            <Button type="button" size="icon" variant="ghost" aria-label={copy.closeLabel} onClick={onClose}>
               <X className="size-4" />
             </Button>
           </div>
@@ -745,6 +762,7 @@ export function CargoUnloadListDialog({
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="muted">{brandName}</Badge>
               <Badge variant="outline">{title}</Badge>
+              {previewOnly && <Badge variant="outline">미리보기 · 저장 안 함</Badge>}
               <Badge variant={productCount > 0 ? 'success' : 'muted'}>
                 {formatNumber(productCount)}종
               </Badge>
@@ -759,17 +777,20 @@ export function CargoUnloadListDialog({
               {listPersisted ? (
                 <Badge variant="success">이 목록을 저장했습니다</Badge>
               ) : null}
-              {purpose === 'warehouse' &&
+              {!previewOnly && purpose === 'warehouse' &&
               stage === 'scheduled' &&
               listSource === 'live' &&
               !listPersisted ? (
                 <Badge variant="warning">인쇄하면 이 목록이 저장됩니다</Badge>
               ) : null}
               {listSource === 'live' && stockQuery.isError ? (
-                <span className="text-xs text-danger">
-                  최신 자리를 불러오지 못했습니다.
+                <span role="alert" className="text-xs text-danger">
+                  {previewOnly ? '기존 재고를 불러오지 못했습니다. 입고 구분을 확인해 주세요.' : '최신 자리를 불러오지 못했습니다.'}
                 </span>
               ) : null}
+              {previewOnly && stockQuery.isSuccess && stockQuery.data === null && (
+                <span role="status" className="text-xs text-warning">연결된 창고 재고표가 없어 입고 구분을 확인할 수 없습니다.</span>
+              )}
               {listSource === 'saved' && savedQuery.isError ? (
                 <span className="text-xs text-danger">
                   저장된 목록을 불러오지 못했습니다.
@@ -817,7 +838,12 @@ export function CargoUnloadListDialog({
                   }`}
                 </option>
               </select>
-              {purpose === 'warehouse' &&
+              {previewOnly && (
+                <Button type="button" size="sm" variant="outline" disabled={stockQuery.isFetching} onClick={() => void stockQuery.refetch()}>
+                  <RefreshCw className="size-3.5" />재고 다시 확인
+                </Button>
+              )}
+              {!previewOnly && purpose === 'warehouse' &&
               stage === 'scheduled' &&
               tidySavedAt &&
               listSource === 'saved' ? (
@@ -856,7 +882,7 @@ export function CargoUnloadListDialog({
                 type="button"
                 size="sm"
                 variant="outline"
-                disabled={loading || savingList || refreshingRequests || printRows.length === 0}
+                disabled={previewStockUnavailable || loading || savingList || refreshingRequests || printRows.length === 0}
                 onClick={() => void handlePrint()}
               >
                 {savingList ? (
@@ -864,7 +890,7 @@ export function CargoUnloadListDialog({
                 ) : (
                   <Printer className="size-3.5" />
                 )}
-                {savingList ? '저장 중...' : '인쇄'}
+                {savingList ? '저장 중...' : previewOnly ? '미리보기 인쇄' : '인쇄'}
               </Button>
               {purpose === 'warehouse' ? (
                 <Button
@@ -872,7 +898,7 @@ export function CargoUnloadListDialog({
                   size="sm"
                   variant="outline"
                   disabled={
-                    loading ||
+                    previewStockUnavailable || loading ||
                     savingList ||
                     refreshingRequests ||
                     downloadingExcel ||
@@ -885,11 +911,17 @@ export function CargoUnloadListDialog({
                   ) : (
                     <Download className="size-3.5" />
                   )}
-                  {downloadingExcel ? '엑셀 생성 중...' : '엑셀 다운로드'}
+                  {downloadingExcel ? '엑셀 생성 중...' : previewOnly ? '미리보기 엑셀' : '엑셀 다운로드'}
                 </Button>
               ) : null}
             </div>
           </div>
+
+          {previewOnly && (
+            <p className="border-b border-border bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+              인쇄·엑셀 다운로드는 현재 미리보기만 출력합니다. 기존 저장 목록과 입력된 창고자리는 변경하지 않습니다.
+            </p>
+          )}
 
           <div className="min-h-0 flex-1 overflow-auto">
             {loading ? (
@@ -898,7 +930,7 @@ export function CargoUnloadListDialog({
                 <p className="text-sm text-muted-foreground">
                   {listSource === 'saved'
                     ? '저장된 목록을 불러오는 중...'
-                    : '최신 자리와 박스 수를 불러오는 중...'}
+                    : previewOnly ? '기존 재고를 확인하는 중...' : '최신 자리와 박스 수를 불러오는 중...'}
                 </p>
               </div>
             ) : listSource === 'saved' && savedQuery.isError ? (
@@ -909,7 +941,7 @@ export function CargoUnloadListDialog({
               <p className="px-4 py-10 text-center text-sm text-muted-foreground">
                 {listSource === 'saved'
                   ? '저장된 창고정리용 목록이 없습니다.'
-                  : '하차할 상품이 없습니다.'}
+                  : previewOnly ? '정리할 상품이 없습니다.' : '하차할 상품이 없습니다.'}
               </p>
             ) : (
               <table className="w-full min-w-[74rem] table-fixed border-separate border-spacing-0 text-sm">
@@ -921,7 +953,7 @@ export function CargoUnloadListDialog({
                 </colgroup>
                 <thead className="sticky top-0 z-20">
                   <tr>
-                    <th className="border-b border-r border-border bg-foreground px-1 py-1.5 text-center">
+                    <th className={cn('border-b border-r border-border px-1 py-1.5 text-center', previewOnly ? 'bg-primary' : 'bg-foreground')}>
                       <input
                         type="checkbox"
                         className="size-3.5 accent-primary"
@@ -940,6 +972,7 @@ export function CargoUnloadListDialog({
                         key={column.key}
                         className={cn(
                           'whitespace-nowrap border-b border-r border-border bg-foreground px-1 py-1.5 text-center text-[13px] font-semibold text-background last:border-r-0',
+                          previewOnly && 'bg-primary text-primary-foreground',
                           column.align === 'left' && 'text-left',
                         )}
                       >
@@ -1005,7 +1038,9 @@ export function CargoUnloadListDialog({
                             )}
                             title={value || undefined}
                           >
-                            {value}
+                            {previewOnly && column.key === 'latestSlot'
+                              ? <Badge variant={value === 'NEW' ? 'default' : value === '확인 필요' ? 'warning' : 'muted'}>{value}</Badge>
+                              : value}
                           </td>
                         )
                       })}
@@ -1127,6 +1162,8 @@ function CargoLineListButton({
   shipmentId,
   stage,
   tidySavedAt,
+  incomingOnlyPreview = false,
+  buttonLabel,
   onSaveRows,
   beforeOpen,
 }: {
@@ -1139,6 +1176,8 @@ function CargoLineListButton({
   shipmentId?: string
   stage?: CargoInboundStage
   tidySavedAt?: string | null
+  incomingOnlyPreview?: boolean
+  buttonLabel?: string
   onSaveRows?: (rows: readonly CargoLineListValues[]) => Promise<void>
   beforeOpen?: () => boolean
 }) {
@@ -1157,7 +1196,7 @@ function CargoLineListButton({
         }}
       >
         <Icon className="size-3.5" />
-        {copy.label}
+        {buttonLabel ?? copy.label}
       </Button>
       {open ? (
         <CargoUnloadListDialog
@@ -1170,7 +1209,8 @@ function CargoLineListButton({
           shipmentId={shipmentId}
           stage={stage}
           tidySavedAt={tidySavedAt}
-          onSaveRows={onSaveRows}
+          incomingOnlyPreview={incomingOnlyPreview}
+          onSaveRows={incomingOnlyPreview ? undefined : onSaveRows}
           onClose={() => setOpen(false)}
         />
       ) : null}
@@ -1212,6 +1252,8 @@ export function CargoWarehouseTidyButton({
   shipmentId,
   stage,
   tidySavedAt,
+  incomingOnlyPreview,
+  buttonLabel,
   onSaveRows,
   beforeOpen,
 }: {
@@ -1223,6 +1265,8 @@ export function CargoWarehouseTidyButton({
   shipmentId: string
   stage: CargoInboundStage
   tidySavedAt: string | null
+  incomingOnlyPreview?: boolean
+  buttonLabel?: string
   onSaveRows?: (rows: readonly CargoLineListValues[]) => Promise<void>
   beforeOpen?: () => boolean
 }) {
@@ -1237,6 +1281,8 @@ export function CargoWarehouseTidyButton({
       shipmentId={shipmentId}
       stage={stage}
       tidySavedAt={tidySavedAt}
+      incomingOnlyPreview={incomingOnlyPreview}
+      buttonLabel={buttonLabel}
       onSaveRows={onSaveRows}
       beforeOpen={beforeOpen}
     />

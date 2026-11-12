@@ -41,3 +41,12 @@ export const CARGO_WAREHOUSE_LINE_LIST_COLUMNS = CARGO_WAREHOUSE_COLUMN_KEYS.map
     return column
   },
 )
+
+/** 새 화면에서만 쓰며, 기존 저장 목록·창고자리 입력의 열은 보존한다. */
+export const CARGO_WAREHOUSE_PREVIEW_COLUMNS = CARGO_WAREHOUSE_LINE_LIST_COLUMNS
+  .filter(column => column.key !== 'latestBoxes')
+  .map(column => {
+    if (column.key === 'latestSlot') return { ...column, label: '입고 구분', printLabel: '입고 구분' }
+    if (column.key === 'stow') return { ...column, label: '분할 순서', printLabel: '분할 순서' }
+    return column
+  })
