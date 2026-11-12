@@ -14,16 +14,17 @@ const fixtures = {
   '@/features/operations-support/ops-directory': `const members=[{id:'a',displayName:'가 직원',departmentId:'ops',hireDate:'2024-01-01'},{id:'b',displayName:'나 직원',departmentId:'md',hireDate:null},{id:'c',displayName:'다 직원',departmentId:'ops',hireDate:'2025-01-01'}];export function useOpsDirectory(){return {members,departments:[{id:'ops',name:'운영지원'},{id:'md',name:'MD'}],departmentName:id=>id==='ops'?'운영지원':'MD',loading:false,error:null,refetch(){}}}`,
   '@/lib/supabase/employee-extra-leave': `const s=window.__bonus={entries:JSON.parse(sessionStorage.getItem('bonus')||'[]'),ready:true,fail:false,writes:0,reads:0,readFail:false};export async function listExtraLeave(){s.reads++;if(s.readFail)throw Error('추가 연차 조회 실패');return {ready:s.ready,fefoReady:true,events:[{id:'expiry-fixture',employeeId:'a',source:'base',kind:'expired',days:-1,date:'2026-10-29'}],entries:[...s.entries],balances:[{profileId:'a',available:s.entries.reduce((sum,e)=>sum+e.days-e.used,0)}]}};export async function saveExtraLeave(input){if(s.fail){s.fail=false;throw Error('추가 연차 저장 실패')}s.writes++;const entry=s.entries.find(e=>e.id===input.id);s.entries=input.remove?s.entries.filter(e=>e.id!==input.id):entry?s.entries.map(e=>e.id===input.id?{...e,...input,version:e.version+1}:e):[...s.entries,{...input,created:'2026-10-29',used:0,version:1}];sessionStorage.setItem('bonus',JSON.stringify(s.entries))}`,
   '@/lib/supabase/client': `
-    const s = window.__leave = {remaining:JSON.parse(sessionStorage.getItem('remaining')||'"initial"'),writes:[],reads:0,fail:false,readFail:false,advanceReads:0,advanceFail:false,advanceWrites:[]};
+    const s = window.__leave = {remaining:JSON.parse(sessionStorage.getItem('remaining')||'"initial"'),writes:[],reads:0,fail:false,readFail:false,advanceReads:0,advanceFail:false,advanceWrites:[],operationsApproval:false};
     const limits = {a:2,b:6};
     export function getSupabase(){return {
       async rpc(name,input){
         if(name==='employee_leave_advances'){
           s.advanceReads++;
           if(s.advanceFail)return {data:null,error:{code:'57014',message:'timeout'}};
-          const employees=Object.entries(limits).map(([employeeId,limit])=>({employeeId,limit,outstanding:0,nextDate:'2027-01-02',unclassified:0,needsReview:false,periods:[]}));
+          const employees=Object.entries(limits).map(([employeeId,limit])=>({employeeId,limit,outstanding:s.operationsApproval&&employeeId==='a'?2:0,nextDate:'2027-01-02',unclassified:0,needsReview:false,periods:[]}));
           const events=Object.keys(limits).map(employeeId=>({id:employeeId,employeeId,kind:'limit',days:limits[employeeId],created:'2026-11-02',note:employeeId==='a'?'가 직원 이력':'나 직원 이력'}));
-          return {data:{ready:true,employees,events},error:null};
+          if(s.operationsApproval)events.unshift({id:'borrow-a',employeeId:'a',kind:'approved',days:2,created:'2026-11-03',note:'운영지원 확인'});
+          return {data:{ready:true,approvalMode:s.operationsApproval?'operations':undefined,employees,events},error:null};
         }
         if(name==='manage_leave_advance'){
           s.advanceWrites.push(input);
@@ -188,7 +189,8 @@ try {
   await additional.getByText('등록 날짜: 26.10.29', { exact: true }).waitFor()
   await additional.getByRole('button', { name: '닫기', exact: true }).click()
   await page.setViewportSize({ width: 1280, height: 900 })
-  assert.equal(await page.getByRole('columnheader').last().innerText(), '선사용')
+  const columns = await page.getByRole('columnheader').allTextContents()
+  assert.equal(columns[columns.indexOf('발생일수') + 1], '선사용')
   const advanceButtonA = page.getByRole('button', { name: '가 직원 선사용', exact: true })
   await advanceButtonA.click()
   const advanceA = page.getByRole('dialog', { name: '가 직원 연차 선사용', exact: true })
@@ -221,6 +223,15 @@ try {
   assert.equal(await advanceB.getByText('가 직원 이력', { exact: true }).count(), 0)
   await advanceB.getByRole('button', { name: '닫기', exact: true }).click()
   await advanceB.waitFor({ state: 'hidden' })
+  await page.evaluate(async () => { window.__leave.operationsApproval = true; await window.__refreshAll() })
+  const debt = page.getByRole('button', { name: '가 직원 선사용 -2일', exact: true })
+  await debt.waitFor()
+  assert.match(await debt.getAttribute('class'), /\btext-danger\b/)
+  await debt.click()
+  await advanceA.getByText('선사용 승인 · -2일', { exact: true }).waitFor()
+  assert.equal(await advanceA.getByRole('combobox', { name: '선사용 관리 작업' }).count(), 0)
+  assert.equal(await advanceA.getByText('나 직원 이력', { exact: true }).count(), 0)
+  await advanceA.getByRole('button', { name: '닫기', exact: true }).click()
   await page.goto('http://127.0.0.1:5197/#denied'); await page.reload()
   await page.getByText('연차 현황은 직원 명부 관리 권한이 있는 담당자만 조회·수정할 수 있습니다.').waitFor()
   assert.equal(await page.getByRole('spinbutton').count(), 0)

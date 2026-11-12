@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react'
-import { useIsFetching, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { FilterBar } from '@/components/ui/filter-bar'
@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input'
 import { canEditOrgAssignment } from '@/lib/company/capabilities'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { useAuth } from '@/lib/supabase/auth'
+import { formatNumber } from '@/lib/utils'
 import { useBasicWorkAccess } from '@/lib/supabase/basic-work-access'
 import { saveEmployeeRosterField } from '@/lib/supabase/employee-roster'
 import { MemberCell, memberLabel, OpsPanelFrame } from './OpsStat'
@@ -17,6 +18,7 @@ import { HireDateScrollField } from '@/features/org/HireDateScrollField'
 import { koreaDateKey } from '@/features/settings/my-attendance'
 import { saveExtraLeave, type ExtraLeave, type SaveExtraLeave, type LeaveEvent } from '@/lib/supabase/employee-extra-leave'
 import { LeaveAdvancePanel } from './LeaveAdvancePanel'
+import { useLeaveAdvances } from './use-leave-advances'
 import { useEmployeeRoster } from './use-employee-roster'
 
 export function LeaveBalancePanel() {
@@ -24,8 +26,8 @@ export function LeaveBalancePanel() {
   const { profile } = useAuth()
   const { access, isPending: accessPending } = useBasicWorkAccess()
   const canManage = canEditOrgAssignment(profile) || access?.domains.includes('operations') === true
-  const client = useQueryClient()
-  const advanceFetching = useIsFetching({ queryKey: ['employee-leave-advances', profile?.id, true] })
+  const advances = useLeaveAdvances(true, canManage)
+  const outstandingByEmployee = useMemo(() => new Map(advances.data?.employees.map(row => [row.employeeId, row.outstanding])), [advances.data?.employees])
   const directory = useOpsDirectory('head-office')
   const [departmentId, setDepartmentId] = useState('all')
   const [search, setSearch] = useState('')
@@ -68,36 +70,41 @@ export function LeaveBalancePanel() {
     <ScopeCards ariaLabel="연차 부서" value={departmentId} onChange={setDepartmentId} cards={deptCards} />
     <FilterBar>
       <Input aria-label="연차 직원 검색" placeholder="직원 이름 검색" value={search} onChange={event => setSearch(event.target.value)} className="sm:w-52"/>
-      <Button variant="outline" disabled={roster.isFetching || advanceFetching > 0} onClick={() => { directory.refetch(); void snapshot.refetch(); void client.invalidateQueries({ queryKey: ['employee-leave-advances', profile?.id, true] }) }}>새로고침</Button>
+      <Button variant="outline" disabled={roster.isFetching || advances.isFetching} onClick={() => { directory.refetch(); void snapshot.refetch(); void advances.refetch() }}>새로고침</Button>
     </FilterBar>
     <p role="status" className="text-sm text-muted-foreground">{ready ? <>대상 직원 <strong className="text-foreground">{rows.length}명</strong> · 잔여 등록 {totals.registered}명 · 발생일수 합계 {totals.missingGrant ? '—' : `${totals.granted}일`} · 남은 연차 합계 <strong className="text-foreground">{totals.remaining}일</strong> <span className="text-xs">(등록된 값만 합산)</span></> : '직원과 연차를 확인하고 있습니다.'}</p>
     <Card className="overflow-hidden"><div className="overflow-x-auto">
       <table className="w-full min-w-[800px] text-left text-sm">
         <thead className="bg-primary text-primary-foreground"><tr>
-          {['이름', '부서', '입사일', '발생일수', '추가 연차', '남은 연차', '선사용'].map((label, index) => <th key={label} className={`whitespace-nowrap px-4 py-2.5 font-medium ${index === 0 ? 'sticky left-0 z-10 bg-primary' : ''}`}>{label}</th>)}
+          {['이름', '부서', '입사일', '발생일수', '선사용', '추가 연차', '남은 연차'].map((label, index) => <th key={label} className={`whitespace-nowrap px-4 py-2.5 font-medium ${index === 0 ? 'sticky left-0 z-10 bg-primary' : ''}`}>{label}</th>)}
         </tr></thead>
         <tbody>
           {failed ? <tr><td colSpan={7} className="px-4 py-8 text-center text-danger" role="alert">연차 현황을 불러오지 못했습니다. 새로고침으로 다시 조회해 주세요.</td></tr>
             : loading ? <tr><td colSpan={7} className="px-4 py-8 text-center">불러오는 중…</td></tr>
             : rows.length === 0 ? <tr><td colSpan={7} className="px-4 py-8 text-center">표시할 직원이 없습니다.</td></tr>
-            : rows.map(({ member, balance }) => <tr key={`${profile?.id}:${member.id}`} className="border-b border-border/70 last:border-0">
-              <td className="sticky left-0 bg-card px-4 py-3"><MemberCell name={memberLabel(member.displayName)} /></td>
-              <td className="px-4 py-3">{directory.departmentName(member.departmentId)}</td>
-              <td className="whitespace-nowrap px-4 py-3 tabular-nums">{member.hireDate || <MissingValue/>}</td>
-              <td className="px-4 py-3 tabular-nums" aria-label={`${memberLabel(member.displayName)} 발생일수`}>{balance && balance.accruedAnnualLeave === undefined ? '조회 실패' : balance?.accruedAnnualLeave == null ? <MissingValue/> : `${balance.accruedAnnualLeave}일`}</td>
-              <td className="px-4 py-3" aria-label={`${memberLabel(member.displayName)} 추가 연차`}>
-                <AdditionalLeaveInputs name={memberLabel(member.displayName)} employeeId={member.id} entries={extras.data?.entries.filter(entry => entry.employeeId === member.id) ?? []} events={extras.data?.events?.filter(event => event.employeeId === member.id) ?? []} fefoReady={extras.data?.fefoReady === true} baseRegistered={balance?.remainingAnnualLeave != null} available={extras.data?.ready ? extras.data.balances.find(row => row.profileId === member.id)?.available ?? 0 : undefined} ready={extras.data?.ready === true && !extras.isError}/>
-              </td>
-              <td className="px-4 py-2"><RemainingLeaveEditor profileId={member.id} name={memberLabel(member.displayName)} value={balance?.remainingAnnualLeave ?? null}/><RemainingBar remaining={balance?.remainingAnnualLeave ?? null} accrued={balance?.accruedAnnualLeave ?? null}/></td>
-              <td className="px-4 py-2">
-                <Button type="button" variant="outline" size="sm" aria-label={`${memberLabel(member.displayName)} 선사용`} aria-haspopup="dialog" aria-expanded={advanceMember?.id === member.id}
-                  onClick={() => setAdvanceSelection({ employeeId: member.id, viewerId: profile?.id })}>선사용</Button>
-              </td>
-            </tr>)}
+            : rows.map(({ member, balance }) => {
+              const outstanding = outstandingByEmployee.get(member.id) ?? 0
+              const debt = outstanding > 0 ? `${formatNumber(-outstanding)}일` : null
+              return <tr key={`${profile?.id}:${member.id}`} className="border-b border-border/70 last:border-0">
+                <td className="sticky left-0 bg-card px-4 py-3"><MemberCell name={memberLabel(member.displayName)} /></td>
+                <td className="px-4 py-3">{directory.departmentName(member.departmentId)}</td>
+                <td className="whitespace-nowrap px-4 py-3 tabular-nums">{member.hireDate || <MissingValue/>}</td>
+                <td className="px-4 py-3 tabular-nums" aria-label={`${memberLabel(member.displayName)} 발생일수`}>{balance && balance.accruedAnnualLeave === undefined ? '조회 실패' : balance?.accruedAnnualLeave == null ? <MissingValue/> : `${balance.accruedAnnualLeave}일`}</td>
+                <td className="px-4 py-2">
+                  <Button type="button" variant="outline" size="sm" className={debt ? 'font-semibold tabular-nums text-danger hover:text-danger' : undefined}
+                    aria-label={`${memberLabel(member.displayName)} 선사용${debt ? ` ${debt}` : ''}`} aria-haspopup="dialog" aria-expanded={advanceMember?.id === member.id}
+                    onClick={() => setAdvanceSelection({ employeeId: member.id, viewerId: profile?.id })}>{debt ?? '이력'}</Button>
+                </td>
+                <td className="px-4 py-3" aria-label={`${memberLabel(member.displayName)} 추가 연차`}>
+                  <AdditionalLeaveInputs name={memberLabel(member.displayName)} employeeId={member.id} entries={extras.data?.entries.filter(entry => entry.employeeId === member.id) ?? []} events={extras.data?.events?.filter(event => event.employeeId === member.id) ?? []} fefoReady={extras.data?.fefoReady === true} baseRegistered={balance?.remainingAnnualLeave != null} available={extras.data?.ready ? extras.data.balances.find(row => row.profileId === member.id)?.available ?? 0 : undefined} ready={extras.data?.ready === true && !extras.isError}/>
+                </td>
+                <td className="px-4 py-2"><RemainingLeaveEditor profileId={member.id} name={memberLabel(member.displayName)} value={balance?.remainingAnnualLeave ?? null}/><RemainingBar remaining={balance?.remainingAnnualLeave ?? null} accrued={balance?.accruedAnnualLeave ?? null}/></td>
+              </tr>
+            })}
         </tbody>
       </table>
     </div></Card>
-    <LeaveAdvancePanel selection={advanceMember ? { id: advanceMember.id, name: memberLabel(advanceMember.displayName), department: directory.departmentName(advanceMember.departmentId) } : null}
+    <LeaveAdvancePanel query={advances} selection={advanceMember ? { id: advanceMember.id, name: memberLabel(advanceMember.displayName), department: directory.departmentName(advanceMember.departmentId) } : null}
       onClose={() => setAdvanceSelection(null)}/>
   </OpsPanelFrame>
 }

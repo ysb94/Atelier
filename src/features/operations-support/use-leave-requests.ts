@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useAuth } from '@/lib/supabase/auth'
 import { useWorkforceManagement, useHeadOfficeSelfService } from '@/lib/company/workforce-management-context'
 import { workforceMode } from '@/lib/company/workforce-management'
-import { canAccessOperationsSupport } from '@/lib/company/capabilities'
+import { canAccessOperationsSupport, isOperationsDepartmentMember } from '@/lib/company/capabilities'
 import { listLeaveRequests, submitLeaveRequest, transitionLeaveRequest, type LeaveRequest } from '@/lib/supabase/leave-requests'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { emptyList } from '@/lib/utils'
@@ -11,17 +11,19 @@ import type { RequestForm } from '@/features/settings/personal-requests'
 import { sharedReadPolicy, readPollInterval } from '@/lib/query/shared-read-policy'
 import { diagnosticOperation, inputDiagnosticContext, newDiagnosticContext, tracedInput, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 
-export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' = 'mine') {
+export function useLeaveRequests(scope: 'mine' | 'approvals' | 'all' | 'advances' = 'mine') {
   const { session, profile } = useAuth()
   const selfService = useHeadOfficeSelfService()
   const workforce = useWorkforceManagement()
   const userId = session?.user.id
   const active = useWorkspaceTabActivity()
-  const allowed = profile?.status === 'active' && (scope !== 'mine' || selfService) && (scope !== 'all' || canAccessOperationsSupport(profile))
+  const allowed = profile?.status === 'active' && (scope !== 'mine' || selfService)
+    && (scope !== 'all' || canAccessOperationsSupport(profile))
+    && (scope !== 'advances' || (profile.id === userId && isOperationsDepartmentMember(profile)))
   const client = useQueryClient()
   const query = useQuery({
     queryKey: ['company-leave-requests', userId, scope, allowed],
-    queryFn: () => listLeaveRequests(scope === 'mine' ? userId : undefined, scope === 'approvals'),
+    queryFn: () => listLeaveRequests(scope === 'mine' ? userId : undefined, scope === 'approvals', undefined, { advancesOnly: scope === 'advances' }),
     ...sharedReadPolicy,
     enabled: active && Boolean(userId && allowed),
     refetchInterval: readPollInterval(30_000, active && allowed),

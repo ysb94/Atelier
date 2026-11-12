@@ -25,10 +25,10 @@ assert.deepEqual(opsLinks(member),[])
 assert.deepEqual(opsLinks(assigned('attendance.manage')),[],'기존 작업 권한이 있어도 타 부서에는 아직 미공개')
 assert.deepEqual(opsLinks(assigned('personnel.manage')),[])
 const operations = {...member,companyId:RELEASE_COMPANY_ID,departmentId:RELEASE_OPERATIONS_ID}
-assert.deepEqual(opsLinks(operations),['/operations-support/people','/settings/permissions'],'운영지원 공개 화면: 관리 권한 없이는 조직·멤버와 권한·담당자만')
+assert.deepEqual(opsLinks(operations),['/operations-support/leave','/operations-support/people','/settings/permissions'],'운영지원 소속으로 연차 선사용 신청 화면 진입')
 const opsManager = {...operations,permissionGrants:[{ permission:'attendance.manage' as const, scopeKind:'company' as const, scopeId:RELEASE_COMPANY_ID }]}
 assert.deepEqual(opsLinks(opsManager),['/operations-support/attendance','/operations-support/leave','/operations-support/people','/settings/permissions','/operations-support/settings'],'지정 관리자는 운영지원 메뉴 전체')
-for (const section of OPERATIONS_SECTIONS.map(item => item.id)) assert.equal(canViewOperationsSection(operations,section),section === 'people',`운영지원 소속만으로 ${section} 진입 불가`)
+for (const section of OPERATIONS_SECTIONS.map(item => item.id)) assert.equal(canViewOperationsSection(operations,section),section === 'people' || section === 'leave',`운영지원 소속의 ${section} 진입 범위`)
 assert.equal(canViewPeopleOrg(operations) && canViewPeopleMembers(operations),true,'운영지원은 조직도와 멤버 탭을 본다')
 assert.equal(defaultOperationsSection(operations),'people')
 assert.equal(defaultOperationsSection(assigned('attendance.manage')),'attendance')

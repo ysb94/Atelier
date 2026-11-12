@@ -9,9 +9,10 @@ import { getMyAttendanceBasis } from '@/lib/supabase/my-attendance-basis'
 import { loadCompanyLunch } from '@/lib/supabase/company-work-hours'
 import { useAuth } from '@/lib/supabase/auth'
 import { useHeadOfficeSelfService } from '@/lib/company/workforce-management-context'
-import { emptyList } from '@/lib/utils'
+import { emptyList, formatNumber } from '@/lib/utils'
 import { actualOvertimeHours, countMyLateDays } from './my-attendance-summary'
 import { useOvertimeActuals } from '@/features/operations-support/use-overtime-actuals'
+import { useLeaveAdvances } from '@/features/operations-support/use-leave-advances'
 import { useMyClockIn } from './use-my-clock-in'
 import './company-home.css'
 
@@ -73,6 +74,8 @@ function HeadOfficeAttendanceSummary() {
   const userId = session?.user.id ?? ''
   const active = useWorkspaceTabActivity()
   const allowed = profile?.status === 'active' && Boolean(userId)
+  const advances = useLeaveAdvances(false, allowed && profile?.id === userId)
+  const outstanding = advances.data?.employees[0]?.outstanding ?? 0
   const today = koreaDateKey()
   const month = today.slice(0, 7)
   const dates = useMemo(() => attendanceMonthDates(month), [month])
@@ -111,7 +114,7 @@ function HeadOfficeAttendanceSummary() {
   const overtimeError = Boolean(leaves.error || actuals.error)
 
   return <details className="home-attendance-summary">
-    <summary><h2>내 근태 현황</h2></summary>
+    <summary><h2>내 근태 현황</h2>{advances.data?.ready && outstanding > 0 && <strong className="text-xs tabular-nums text-danger">선사용 {formatNumber(-outstanding)}일</strong>}</summary>
     <dl>
       <div><dt>이번 달 지각</dt><dd>{clock.exempt ? '제외' : lateLoading ? '…' : basis.isError || leaves.isError || lunch.isError ? '조회 실패' : summary.late == null ? '기준 미설정' : amount(summary.late, '회')}</dd></div>
       <div><dt>남은 연차</dt><dd className={basisRow?.additionalAnnualLeave != null && basisRow.additionalAnnualLeave > 0 ? 'is-split' : undefined}>{leaveLoading ? '…' : basis.isError ? '조회 실패' : basisRow?.additionalAnnualLeave != null && basisRow.additionalAnnualLeave > 0 && basisRow.baseAnnualLeave != null ? <AdditionalLeaveHistory userId={userId}>{remainingLeaveAmount(basisRow.baseAnnualLeave, basisRow.additionalAnnualLeave, basisRow.remainingAnnualLeave)}</AdditionalLeaveHistory> : remainingLeaveAmount(basisRow?.baseAnnualLeave, basisRow?.additionalAnnualLeave, basisRow?.remainingAnnualLeave ?? null)}</dd></div>
