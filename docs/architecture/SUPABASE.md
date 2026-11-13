@@ -166,14 +166,16 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   화문 입고 원자 등록은 `save_cargo_inbound`를 사용한다. 잘못 올린 선적은
   `cargo_inbound_shipments` 삭제로 지우고, 품목 행과 창고정리용 목록
   (`cargo_inbound_tidy_rows`)은 `ON DELETE CASCADE`로 같이 지운다.
-  창고정리용 인쇄본 저장은 `save_cargo_inbound_tidy_rows`, 창고자리 저장과
-  완료는 `save_cargo_inbound_tidy_slots`를 사용한다.
+  창고정리용 인쇄본 저장은 `save_cargo_inbound_tidy_rows`, 창고자리 입력과 함께 완료할 때는
+  `save_cargo_inbound_tidy_slots`를 사용한다. 상세 화면의 직접 완료는 기존 수정 권한으로
+  `cargo_inbound_shipments`에 완료 시각과 `창고자리 입력 생략`을 기록한다.
   창고정리용 목록은 첫 인쇄 또는 엑셀 다운로드 내용 그대로 `cargo_inbound_tidy_rows`에
   고정한다. 다시 열거나 다시 인쇄해도 그 목록을 쓰고, 바꿀 때는 현재 재고로 다시
   만들어 저장본을 교체한다. 「현재 요청 사항만 불러오기」는 원본 `line_id`로 최신
   요청 사항을 연결하고 달라진 `note`만 수정한다. 저장 행 ID·순서·분할·수량·선적일·
-  적재방식·최신 재고·창고자리는 유지한다. 저장본이 없으면 완료할 수 없다. 창고 재고는 바꾸지
-  않는다. 추가 직전 스냅샷은
+  적재방식·최신 재고·창고자리는 유지한다. 창고자리 입력은 기존 저장본에서 할 수 있다.
+  직접 완료는 저장본 없이도 가능하며, 미확정 입고일은 날짜를 입력해 같이 저장한다.
+  두 완료 방식 모두 창고 재고는 바꾸지 않는다. 추가 직전 스냅샷은
   `docs/backups/cargo-inbound-pre-tidy-rows-20260929.xlsx`다.
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
 - 브랜드 로고는 지금 `logo_url`에 data URL로 저장한다. 이후 `brands/{brand_id}/...`

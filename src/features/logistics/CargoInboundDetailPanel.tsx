@@ -1,9 +1,10 @@
-import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   ArrowLeft,
   CalendarDays,
   CheckCircle2,
+  MapPin,
   MessageSquareText,
   RefreshCw,
   Trash2,
@@ -40,6 +41,7 @@ export type CargoInboundDetailItem = {
   shippedAt: string
   scheduledInboundAt: string | null
   portContactNote: string | null
+  warehouseSummary: string
   tidySavedAt: string | null
   lines: CargoInboundLineDraft[]
 }
@@ -50,6 +52,7 @@ type CargoInboundDetailPanelProps = {
   onBack: () => void
   onDelete: () => void
   onSaveInboundDate: (inboundDate: string, note: string) => Promise<void>
+  onComplete: (inboundDate: string, note: string) => Promise<void>
   onSaveRequestNotes: (
     notes: Array<{ lineId: string; requestNote: string }>,
   ) => Promise<void>
@@ -77,6 +80,7 @@ export function CargoInboundDetailPanel({
   onBack,
   onDelete,
   onSaveInboundDate,
+  onComplete,
   onSaveRequestNotes,
   onSaveTidyRows,
   onSaveTidySlots,
@@ -100,15 +104,19 @@ export function CargoInboundDetailPanel({
     [receiptData],
   )
   const title = formatCargoInboundTitle(item.shippedAt, item.boxCount)
-  const [inboundDate, setInboundDate] = useState(
-    item.scheduledInboundAt ?? '',
-  )
-  const [note, setNote] = useState(item.portContactNote ?? '')
+  const [inboundDateEdit, setInboundDateEdit] = useState<string>()
+  const [noteEdit, setNoteEdit] = useState<string>()
+  const inboundDate = inboundDateEdit ?? item.scheduledInboundAt ?? ''
+  const note = noteEdit ?? item.portContactNote ?? ''
   const [status, setStatus] = useState<string | null>(null)
   const [statusWarning, setStatusWarning] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [completing, setCompleting] = useState(false)
   const [requestOpen, setRequestOpen] = useState(false)
   const [slotOpen, setSlotOpen] = useState(false)
+  const inboundDateRef = useRef<HTMLInputElement>(null)
+  const done = item.stage === 'done'
+  const busy = saving || completing || deleting
 
   async function saveInboundDate() {
     setSaving(true)
@@ -130,17 +138,28 @@ export function CargoInboundDetailPanel({
     }
   }
 
-  function openSlotEntry() {
-    if (!item.tidySavedAt) {
-      setStatusWarning(false)
-      setStatus(
-        '새 창고정리용은 미리보기 단계입니다. 창고자리 입력은 기존 저장 목록에서만 가능합니다.',
-      )
+  async function completeCargo() {
+    if (busy || done) return
+    if (!inboundDate) {
+      setStatusWarning(true)
+      setStatus('입고일을 입력한 뒤 완료를 눌러 주세요.')
+      inboundDateRef.current?.focus()
       return
     }
-    setStatusWarning(false)
+    if (!window.confirm(
+      `창고자리 입력을 건너뛰고 입고일 ${formatDate(inboundDate)}로 완료할까요?`,
+    )) return
+
+    setCompleting(true)
     setStatus(null)
-    setSlotOpen(true)
+    try {
+      await onComplete(inboundDate, note)
+    } catch (error) {
+      setStatusWarning(true)
+      setStatus(error instanceof Error ? error.message : '화물 완료 처리에 실패했습니다.')
+    } finally {
+      setCompleting(false)
+    }
   }
 
   function openWarehouseTidy() {
@@ -173,7 +192,7 @@ export function CargoInboundDetailPanel({
               size="sm"
               variant="outline"
               className="text-danger hover:bg-danger/10"
-              disabled={deleting}
+              disabled={busy}
               onClick={onDelete}
             >
               <Trash2 className="size-3.5" />
@@ -231,8 +250,8 @@ export function CargoInboundDetailPanel({
               {item.stage === 'scheduled' ? (
                 <Badge variant="outline">입고일 확정</Badge>
               ) : null}
-              {item.stage === 'done' ? (
-                <Badge variant="success">정리 완료</Badge>
+              {done ? (
+                <Badge variant="success">물류 완료</Badge>
               ) : null}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -240,6 +259,7 @@ export function CargoInboundDetailPanel({
               {item.totalQty > 0
                 ? ` · 예정 낱개 ${formatNumber(item.totalQty)}개`
                 : ''}
+              {done && item.warehouseSummary ? ` · ${item.warehouseSummary}` : ''}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -252,14 +272,29 @@ export function CargoInboundDetailPanel({
               <MessageSquareText className="size-3.5" />
               요청 사항
             </Button>
+            {item.stage === 'scheduled' && item.tidySavedAt ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  setStatus(null)
+                  setSlotOpen(true)
+                }}
+              >
+                <MapPin className="size-3.5" />
+                창고자리 입력
+              </Button>
+            ) : null}
             <Button
               type="button"
               size="sm"
-              disabled={item.stage !== 'scheduled'}
-              onClick={openSlotEntry}
+              disabled={busy || done}
+              onClick={() => void completeCargo()}
             >
               <CheckCircle2 className="size-3.5" />
-              {item.stage === 'done' ? '완료됨' : '완료'}
+              {done ? '완료됨' : completing ? '완료 처리 중...' : '완료'}
             </Button>
           </div>
         </div>
@@ -316,9 +351,11 @@ export function CargoInboundDetailPanel({
             입고일
           </span>
           <Input
+            ref={inboundDateRef}
             type="date"
             value={inboundDate}
-            onChange={(event) => setInboundDate(event.target.value)}
+            disabled={busy || done}
+            onChange={(event) => setInboundDateEdit(event.target.value)}
           />
         </label>
         <label className="space-y-1.5">
@@ -328,14 +365,15 @@ export function CargoInboundDetailPanel({
           <Input
             value={note}
             placeholder="예: 오전 입고 / 오후 2시 이후"
-            onChange={(event) => setNote(event.target.value)}
+            disabled={busy || done}
+            onChange={(event) => setNoteEdit(event.target.value)}
           />
         </label>
         <div className="flex items-end">
           <Button
             type="button"
             className="w-full md:w-auto"
-            disabled={!inboundDate || saving}
+            disabled={!inboundDate || busy || done}
             onClick={() => void saveInboundDate()}
           >
             {saving ? '저장 중...' : '입고일 확정'}
@@ -350,7 +388,7 @@ export function CargoInboundDetailPanel({
               ? 'text-xs text-warning'
               : 'text-xs text-muted-foreground'
           }
-          role="status"
+          role={statusWarning ? 'alert' : 'status'}
         >
           {status}
         </p>

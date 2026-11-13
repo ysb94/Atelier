@@ -849,6 +849,7 @@ export async function getCargoInbounds(brandIds: readonly string[]) {
 }
 
 export const getCargoInboundReceipts = cargoInboundStore.listCargoInboundReceipts
+export const completeCargoInbound = cargoInboundStore.completeCargoInbound
 
 export async function saveCargoInbound(
   input: cargoInboundStore.SaveCargoInboundInput,

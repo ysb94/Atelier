@@ -27,6 +27,7 @@ import {
   thisWeekWorkdays,
 } from '@/features/logistics/cargo-inbound-title'
 import {
+  completeCargoInbound,
   deleteCargoInbound,
   getCargoInbounds,
   saveCargoInbound,
@@ -40,6 +41,7 @@ import {
 import type { CargoLineListValues } from '@/lib/cargo/line-list'
 import type { CargoInboundStage } from '@/lib/cargo/inbound'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { diagnosticOperation } from '@/lib/diagnostics/workflow-trace'
 import { companyQueryKey } from '@/lib/workspace/query-keys'
 import { cn, formatNumber } from '@/lib/utils'
 
@@ -69,7 +71,7 @@ const INBOUND_TABS: {
   {
     value: 'done',
     label: '완료',
-    description: '제품 정리와 창고 자리 입력이 끝난 화물',
+    description: '물류 작업을 완료 처리한 화물',
   },
 ]
 
@@ -393,6 +395,26 @@ export function CompanyCargoInboundPage() {
     await queryClient.invalidateQueries({ queryKey: ['cargo-inbounds'] })
   }
 
+  async function handleComplete(inboundDate: string, note: string) {
+    if (!selectedItem || selectedItem.stage === 'done') return
+    const { brandId, id: shipmentId, stage } = selectedItem
+    const scheduleChanged = inboundDate !== selectedItem.scheduledInboundAt ||
+      note.trim() !== (selectedItem.portContactNote ?? '').trim()
+    await diagnosticOperation('app', 'cargo_inbound_complete', async trace => {
+      trace.step('save_completion')
+      await completeCargoInbound({
+        brandId,
+        shipmentId,
+        stage,
+        schedule: scheduleChanged ? { inboundDate, note } : undefined,
+      }, trace.context())
+      await trace.run('refresh_queries', () => queryClient.invalidateQueries({ queryKey: ['cargo-inbounds'] }), {
+        writeOutcome: 'committed',
+      })
+      selectTab('done')
+    })
+  }
+
   async function handleDelete(item: CargoInboundItem) {
     const title = formatCargoInboundTitle(item.shippedAt, item.boxCount)
     const extra =
@@ -453,13 +475,7 @@ export function CompanyCargoInboundPage() {
     })
     await queryClient.invalidateQueries({ queryKey: ['cargo-inbounds'] })
     await queryClient.invalidateQueries({ queryKey: ['cargo-inbound-tidy'] })
-    if (!complete) return
-    setSelectedId(null)
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current)
-      next.set('tab', 'done')
-      return next
-    })
+    if (complete) selectTab('done')
   }
 
   return (
@@ -482,6 +498,7 @@ export function CompanyCargoInboundPage() {
           onBack={() => setSelectedId(null)}
           onDelete={() => handleDelete(selectedItem)}
           onSaveInboundDate={handleSaveInboundDate}
+          onComplete={handleComplete}
           onSaveRequestNotes={handleSaveRequestNotes}
           onSaveTidyRows={handleSaveTidyRows}
           onSaveTidySlots={handleSaveTidySlots}
@@ -829,16 +846,16 @@ function CargoInboundStageStatus({ item }: { item: CargoInboundItem }) {
         <p className="flex min-w-0 items-center gap-1.5 text-sm text-success">
           <CheckCircle2 className="size-4 shrink-0" />
           <span className="truncate">
-            정리 완료 · {formatDate(item.completedAt)}
+            물류 완료 · {formatDate(item.completedAt)}
           </span>
         </p>
         {progress ? (
           <WarehouseProgress filled={progress.filled} total={progress.total} />
-        ) : (
+        ) : item.warehouseSummary.trim() ? (
           <p className="truncate text-xs text-muted-foreground">
-            {item.warehouseSummary.trim() || '입력 완료'}
+            {item.warehouseSummary}
           </p>
-        )}
+        ) : null}
       </div>
     )
   }

@@ -9,7 +9,12 @@ import {
   cargoLineHasContent,
   parseCargoInteger,
 } from '@/lib/cargo/inbound'
-import { startWorkflow, tracedQuery } from '@/lib/diagnostics/workflow-trace'
+import {
+  diagnosticOperation,
+  startWorkflow,
+  tracedQuery,
+  type DiagnosticContext,
+} from '@/lib/diagnostics/workflow-trace'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage } from '@/lib/supabase/map-error'
 import { isSupabaseReadTimeout } from '@/lib/supabase/request-policy'
@@ -94,6 +99,13 @@ export type SaveCargoInboundInput = {
   brandId: string
   shipDate: string
   rows: CargoInboundLineDraft[]
+}
+
+type CompleteCargoInboundInput = {
+  brandId: string
+  shipmentId: string
+  stage: Exclude<CargoInboundStage, 'done'>
+  schedule?: { inboundDate: string; note: string }
 }
 
 export class CargoInboundStoreError extends Error {
@@ -289,14 +301,79 @@ export async function scheduleCargoInbound(
     })
     .eq('brand_id', brandId)
     .eq('id', shipmentId)
+    .in('stage', ['shipped', 'scheduled'])
     .select('id')
     .maybeSingle()
 
   if (error || !data) {
     throw new CargoInboundStoreError(
-      errorMessage(error, '화물 입고일을 저장하지 못했습니다.'),
+      errorMessage(error, '이미 완료되었거나 수정 권한이 없는 화물입니다. 목록을 새로고침해 주세요.'),
     )
   }
+}
+
+export async function completeCargoInbound(
+  { brandId, shipmentId, stage, schedule }: CompleteCargoInboundInput,
+  parent?: DiagnosticContext,
+): Promise<void> {
+  return diagnosticOperation('db', 'cargo_inbound_complete', async trace => {
+    trace.step('validate_input')
+    if (!brandId.trim() || !shipmentId.trim()) {
+      trace.block('missing_shipment')
+      throw new CargoInboundStoreError('완료할 화물을 확인하세요.')
+    }
+    if (
+      (stage === 'shipped' || schedule) &&
+      !/^\d{4}-\d{2}-\d{2}$/.test(schedule?.inboundDate ?? '')
+    ) {
+      trace.block('missing_inbound_date')
+      throw new CargoInboundStoreError('입고일을 입력해 주세요.')
+    }
+
+    const shipments = getSupabase().from('cargo_inbound_shipments')
+    const { data, error } = await trace.run('db_update', context => tracedQuery(
+      shipments.update({
+        stage: 'done',
+        completed_at: new Date().toISOString(),
+        warehouse_summary: '창고자리 입력 생략',
+        ...(schedule ? {
+          scheduled_inbound_on: schedule.inboundDate,
+          port_contact_note: schedule.note.trim(),
+        } : {}),
+      })
+        .eq('brand_id', brandId)
+        .eq('id', shipmentId)
+        .eq('stage', stage)
+        .select('id')
+        .maybeSingle(),
+      context,
+    ))
+    if (error) {
+      trace.fail(error)
+      throw new CargoInboundStoreError(
+        error.code === '42501' ? '화물을 완료할 권한이 없습니다.' : '화물 완료 처리에 실패했습니다. 다시 시도해 주세요.',
+        { cause: error },
+      )
+    }
+    if (data) {
+      trace.step('saved', { writeOutcome: 'committed' })
+      return
+    }
+
+    // 다른 직원이 먼저 완료했거나 응답을 받지 못해 재시도할 수 있다.
+    const { data: current, error: readError } = await trace.run('check_current_stage', context => tracedQuery(
+      shipments.select('stage').eq('brand_id', brandId).eq('id', shipmentId).maybeSingle(),
+      context,
+    ))
+    if (readError) {
+      trace.fail(readError)
+      throw new CargoInboundStoreError('화물 상태를 확인하지 못했습니다. 다시 시도해 주세요.', { cause: readError })
+    }
+    if (current?.stage !== 'done') {
+      trace.block('no_changed_row', { writeOutcome: 'not_changed' })
+      throw new CargoInboundStoreError('화물 상태가 바뀌었거나 수정 권한이 없습니다. 목록을 새로고침해 주세요.')
+    }
+  }, parent)
 }
 
 export async function deleteCargoInbound(
