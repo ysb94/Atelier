@@ -7,6 +7,7 @@ import { indexRoomListLocations, indexRoomListStyleNumbers, roomListLocationCode
 import { roomListBulkPacking } from '@/features/logistics/room-list-paste'
 import type { StyleRef, WarehouseStockPosition } from '@/lib/types'
 import { linkFixedLocationStyles } from './fixed-location-styles'
+import { finalizeWarehouseFinderResults, normalizeWarehouseFinderQuery, toWarehouseFinderCard } from './finder'
 import {
   assignWarehouseUsageRanks,
   compareWarehouseUsageOrder,
@@ -621,6 +622,39 @@ const qrRows = toWarehouseSnapshotRpcRows(prepareWarehouseSheetSyncRows(qrPayloa
 const edgeQrRows = toEdgeWarehouseSnapshotRpcRows(prepareEdgeWarehouseSheetSyncRows(edgeQrPayload.rows, styles, []))
 assert(qrRows[0].box_qr === '001234' && edgeQrRows[0].box_qr === '001234', 'S열 QR의 앞자리 0을 RPC까지 보존한다')
 assert(qrRows[1].box_qr === '' && edgeQrRows[1].box_qr === '', 'S열이 없는 기존 요청도 보존한다')
+const swatchPayload = validateEdgeWarehouseSheetSyncPayload([{
+  sourceRowNumber: 2522,
+  externalRowId: 'finder-swatch',
+  sourceStyleNo: '',
+  sourceProductName: '스와치',
+  locationRaw: '3-4-4_B2',
+  receivedOnRaw: '261113',
+  unitsPerBoxRaw: '1',
+  remainingBoxesRaw: '1',
+  note: '',
+  boxQr: '',
+}])
+assert(swatchPayload.issues.length === 0, 'M번호와 QR 없이 스와치를 동기화할 수 있다')
+const [swatch] = prepareEdgeWarehouseSheetSyncRows(swatchPayload.rows, styles, ['3-4-4_B2'])
+const [swatchRpcRow] = toEdgeWarehouseSnapshotRpcRows([swatch])
+assert(
+  swatchRpcRow.external_row_id === 'finder-swatch' && swatchRpcRow.box_qr === '' &&
+    swatchRpcRow.style_id === null && swatchRpcRow.source_product_name === '스와치' &&
+    swatchRpcRow.location_code === '3-4-4_B2',
+  '스와치의 이름, 자리와 AA를 유지하고 M번호와 박스 QR은 비워둔다',
+)
+const swatchCards = finalizeWarehouseFinderResults(normalizeWarehouseFinderQuery('product', '스와치'), [
+  toWarehouseFinderCard({
+    ...swatch,
+    positionId: 'swatch-position',
+    setId: 'active',
+    productName: swatch.sourceProductName,
+  }),
+])
+assert(
+  swatchCards[0]?.locationDisplay === '3-4-4_B2' && swatchCards[0]?.computedQty === 1,
+  'M번호 없이도 품명 검색 결과에서 자리와 수량을 보여준다',
+)
 const customLocationCodes = ['3-1-1_C1', '3-1-1-C-1', '3-1-1_C2', '임시 자리 7', '3-1-1']
 const customLocationRows = customLocationCodes.map((locationRaw, index) => ({ ...fixture.rows[index], locationRaw }))
 const customLocations = prepareWarehouseSheetSyncRows(customLocationRows, styles, ['3-1-1_C1', '임시 자리 7'])

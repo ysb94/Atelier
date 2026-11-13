@@ -60,13 +60,11 @@
     const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
     if (!sh) throw new Error(`시트를 찾을 수 없습니다: ${SHEET_NAME}`);
 
-    const lastRow = sh.getRange(sh.getMaxRows(), COL_B)
-                      .getNextDataCell(SpreadsheetApp.Direction.UP).getRow();
-    const endRow = Math.max(ROW_START, lastRow);
+    const endRow = _atelierWarehouseLastInputRow(sh);
+    if (endRow < ROW_START) return;
     _ensureCellExists(sh, endRow, COL_AA);
 
-    const numRows = Math.max(0, endRow - ROW_START + 1);
-    if (numRows === 0) return;
+    const numRows = endRow - ROW_START + 1;
 
     const dataBH = _readRange(sh, ROW_START, COL_B, numRows, COL_H - COL_B + 1);
     const curAA  = _readRange(sh, ROW_START, COL_AA, numRows, 1);
@@ -216,12 +214,20 @@ if (typeof _writeRange === 'undefined') {
 if (typeof _lastRowByColumn === 'undefined') {
   var _lastRowByColumn = function (sh, colIdx) {
     try {
-      return sh.getRange(sh.getMaxRows(), colIdx)
-               .getNextDataCell(SpreadsheetApp.Direction.UP).getRow();
+      const bottom = sh.getRange(sh.getMaxRows(), colIdx);
+      if (_norm(bottom.getValue())) return bottom.getRow();
+      return bottom.getNextDataCell(SpreadsheetApp.Direction.UP).getRow();
     } catch (e) {
       return ROW_START - 1;
     }
   };
+}
+function _atelierWarehouseLastInputRow(sh) {
+  // M번호가 없는 입고도 품명, 자리 또는 AA 행 ID로 범위에 포함한다.
+  return Math.max(
+    ROW_START - 1,
+    ...[COL.B, COL.C || 3, COL.D || 4, COL.AA].map(col => _lastRowByColumn(sh, col))
+  );
 }
 if (typeof _nowIso === 'undefined') {
   var _nowIso = function () { return new Date().toISOString(); };
@@ -326,8 +332,7 @@ function _atelierHmacHex(secret, message) {
 
 function _collectAtelierWarehouseRows(sh) {
   assignDocIdToAA_v2();
-  const lastRow = Math.max(_lastRowByColumn(sh, COL.B), ROW_START - 1);
-  const endRow = Math.min(Math.max(lastRow, ROW_START - 1), ROW_END);
+  const endRow = Math.min(_atelierWarehouseLastInputRow(sh), ROW_END);
   const numRows = Math.max(0, endRow - ROW_START + 1);
   if (numRows === 0) return [];
   const curBH = _readRange(sh, ROW_START, COL.B, numRows, 7);
@@ -422,8 +427,13 @@ function upsertWPS_WhenRowDiff_resume(){
   if (!sh) throw new Error(`시트를 찾을 수 없습니다: ${WPS_SHEET}`);
 
   const t0 = Date.now();
-  const lastRow = Math.max(_lastRowByColumn(sh, COL.B), _lastRowByColumn(sh, COL.AB), ROW_START-1);
-  const endRow  = Math.min(Math.max(lastRow, ROW_START-1), ROW_END);
+  // B가 비어 있던 행은 삭제 후에도 AC(품명), AD(자리) 등 스냅샷에서만 찾을 수 있다.
+  const snapshotColumns = Array.from({ length: 7 }, (_, index) => COL.AB + index);
+  const lastRow = Math.max(
+    _atelierWarehouseLastInputRow(sh),
+    ...snapshotColumns.map(col => _lastRowByColumn(sh, col))
+  );
+  const endRow = Math.min(lastRow, ROW_END);
   let startRow  = Math.max(ROW_START, _wpsLoadCursor());
 
   if (startRow > endRow){

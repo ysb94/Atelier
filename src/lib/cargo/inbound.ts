@@ -13,6 +13,44 @@ export type CargoInboundLineDraft = {
   requestNote: string
 }
 
+export type CargoInboundReceipt = {
+  id: string
+  lineId: string
+  mode: 'box_qr' | 'location_only'
+  boxQr: string | null
+  actualBoxCount: number
+  actualQty: number
+  receivedAt: string | null
+  receivedLocationCode: string | null
+}
+
+export function summarizeCargoInboundReceipts(receipts: readonly CargoInboundReceipt[]) {
+  const byLine = new Map<string, { receipts: CargoInboundReceipt[]; receivedQty: number }>()
+  const linkedQrs = new Set<string>()
+  let receivedBoxes = 0
+  let receivedQty = 0
+
+  for (const receipt of receipts) {
+    let line = byLine.get(receipt.lineId)
+    if (!line) {
+      line = { receipts: [], receivedQty: 0 }
+      byLine.set(receipt.lineId, line)
+    }
+    line.receipts.push(receipt)
+
+    if (receipt.mode === 'box_qr' && receipt.boxQr) {
+      linkedQrs.add(receipt.boxQr.toUpperCase())
+    }
+    if (receipt.receivedAt) {
+      receivedBoxes += receipt.actualBoxCount
+      receivedQty += receipt.actualQty
+      line.receivedQty += receipt.actualQty
+    }
+  }
+
+  return { byLine, linkedBoxes: linkedQrs.size, receivedBoxes, receivedQty }
+}
+
 export function parseCargoInteger(
   value: string,
   label: string,

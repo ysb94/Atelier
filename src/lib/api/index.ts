@@ -848,6 +848,8 @@ export async function getCargoInbounds(brandIds: readonly string[]) {
   return cargoInboundStore.listCargoInbounds(brandIds)
 }
 
+export const getCargoInboundReceipts = cargoInboundStore.listCargoInboundReceipts
+
 export async function saveCargoInbound(
   input: cargoInboundStore.SaveCargoInboundInput,
 ) {
