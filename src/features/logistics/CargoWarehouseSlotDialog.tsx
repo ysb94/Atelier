@@ -6,6 +6,7 @@ import { WorkspaceTabOverlay } from '@/components/layout/workspace-tab-overlay'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { CargoInboundCompletionDialog } from '@/features/logistics/CargoInboundCompletionDialog'
 import { CargoLinePhoto } from '@/features/logistics/CargoUnloadListDialog'
 import {
   CARGO_WAREHOUSE_LINE_LIST_COLUMNS,
@@ -67,6 +68,7 @@ export function CargoWarehouseSlotDialog({
   const [edits, setEdits] = useState<Record<string, string>>({})
   const [saving, setSaving] = useState(false)
   const [completing, setCompleting] = useState(false)
+  const [completionOpen, setCompletionOpen] = useState(false)
   const [downloadingExcel, setDownloadingExcel] = useState(false)
   const [status, setStatus] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -171,17 +173,17 @@ export function CargoWarehouseSlotDialog({
     }
   }
 
+  function requestCompletion() {
+    if (blankCount > 0) {
+      setError(null)
+      setCompletionOpen(true)
+    } else {
+      void saveSlots(true)
+    }
+  }
+
   async function saveSlots(complete: boolean) {
     if (busy || tidyQuery.isLoading || rows.length === 0) return
-    if (
-      complete &&
-      blankCount > 0 &&
-      !window.confirm(
-        `창고자리가 비어 있는 행이 ${formatNumber(blankCount)}개 있습니다. 그대로 완료할까요?`,
-      )
-    ) {
-      return
-    }
     if (complete) setCompleting(true)
     else setSaving(true)
     setError(null)
@@ -194,7 +196,9 @@ export function CargoWarehouseSlotDialog({
         })),
         complete,
       )
-      if (!complete) {
+      if (complete) {
+        setCompletionOpen(false)
+      } else {
         setEdits({})
         setStatus('창고자리를 저장했습니다.')
       }
@@ -246,6 +250,7 @@ export function CargoWarehouseSlotDialog({
               type="button"
               size="icon"
               variant="ghost"
+              aria-label="창고자리 입력 닫기"
               onClick={requestClose}
             >
               <X className="size-4" />
@@ -266,7 +271,7 @@ export function CargoWarehouseSlotDialog({
                 {status}
               </span>
             ) : null}
-            {error ? <span className="text-xs text-danger">{error}</span> : null}
+            {error && !completionOpen ? <span className="text-xs text-danger">{error}</span> : null}
           </div>
 
           <div className="min-h-0 flex-1 overflow-auto">
@@ -423,7 +428,8 @@ export function CargoWarehouseSlotDialog({
             <Button
               type="button"
               disabled={busy || tidyQuery.isLoading || rows.length === 0}
-              onClick={() => void saveSlots(true)}
+              aria-haspopup={blankCount > 0 ? 'dialog' : undefined}
+              onClick={requestCompletion}
             >
               {completing ? (
                 <Loader2 className="size-3.5 animate-spin" />
@@ -433,6 +439,19 @@ export function CargoWarehouseSlotDialog({
               {completing ? '완료 처리 중...' : '완료 처리'}
             </Button>
           </div>
+          {completionOpen ? (
+            <CargoInboundCompletionDialog
+              cargoTitle={title}
+              description={`창고자리가 비어 있는 행이 ${formatNumber(blankCount)}개 있습니다. 그대로 완료할까요?`}
+              pending={completing}
+              error={error}
+              onClose={() => {
+                setError(null)
+                setCompletionOpen(false)
+              }}
+              onConfirm={() => void saveSlots(true)}
+            />
+          ) : null}
         </div>
       </div>
     </WorkspaceTabOverlay>,

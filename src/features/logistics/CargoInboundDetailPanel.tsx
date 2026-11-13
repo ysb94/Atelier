@@ -15,6 +15,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { StatGrid, StatTile } from '@/components/ui/stat-tile'
 import { getCargoInboundReceipts, type CargoInboundTidySlotInput } from '@/lib/api'
+import { CargoInboundCompletionDialog } from '@/features/logistics/CargoInboundCompletionDialog'
 import { CargoInboundRequestDialog } from '@/features/logistics/CargoInboundRequestDialog'
 import { CargoInspectionButton } from '@/features/logistics/CargoInspectionDialog'
 import { CargoWarehouseTidyButton } from '@/features/logistics/CargoUnloadListDialog'
@@ -112,6 +113,8 @@ export function CargoInboundDetailPanel({
   const [statusWarning, setStatusWarning] = useState(false)
   const [saving, setSaving] = useState(false)
   const [completing, setCompleting] = useState(false)
+  const [completionOpen, setCompletionOpen] = useState(false)
+  const [completionError, setCompletionError] = useState<string | null>(null)
   const [requestOpen, setRequestOpen] = useState(false)
   const [slotOpen, setSlotOpen] = useState(false)
   const inboundDateRef = useRef<HTMLInputElement>(null)
@@ -138,7 +141,7 @@ export function CargoInboundDetailPanel({
     }
   }
 
-  async function completeCargo() {
+  function requestCompletion() {
     if (busy || done) return
     if (!inboundDate) {
       setStatusWarning(true)
@@ -146,17 +149,20 @@ export function CargoInboundDetailPanel({
       inboundDateRef.current?.focus()
       return
     }
-    if (!window.confirm(
-      `창고자리 입력을 건너뛰고 입고일 ${formatDate(inboundDate)}로 완료할까요?`,
-    )) return
-
-    setCompleting(true)
     setStatus(null)
+    setCompletionError(null)
+    setCompletionOpen(true)
+  }
+
+  async function completeCargo() {
+    if (busy || done) return
+    setCompleting(true)
+    setCompletionError(null)
     try {
       await onComplete(inboundDate, note)
+      setCompletionOpen(false)
     } catch (error) {
-      setStatusWarning(true)
-      setStatus(error instanceof Error ? error.message : '화물 완료 처리에 실패했습니다.')
+      setCompletionError(error instanceof Error ? error.message : '화물 완료 처리에 실패했습니다.')
     } finally {
       setCompleting(false)
     }
@@ -291,7 +297,8 @@ export function CargoInboundDetailPanel({
               type="button"
               size="sm"
               disabled={busy || done}
-              onClick={() => void completeCargo()}
+              aria-haspopup="dialog"
+              onClick={requestCompletion}
             >
               <CheckCircle2 className="size-3.5" />
               {done ? '완료됨' : completing ? '완료 처리 중...' : '완료'}
@@ -486,6 +493,16 @@ export function CargoInboundDetailPanel({
         </div>
       )}
 
+      {tabActive && completionOpen && !done ? (
+        <CargoInboundCompletionDialog
+          cargoTitle={title}
+          description={`창고자리 입력을 생략하고 입고일 ${formatDate(inboundDate)}로 완료할까요?`}
+          pending={completing}
+          error={completionError}
+          onClose={() => setCompletionOpen(false)}
+          onConfirm={() => void completeCargo()}
+        />
+      ) : null}
       {requestOpen ? (
         <CargoInboundRequestDialog
           title={title}
