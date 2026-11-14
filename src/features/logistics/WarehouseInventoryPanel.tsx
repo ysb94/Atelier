@@ -23,7 +23,10 @@ import {
   subscribeWarehouseInventorySetChanges,
   type WarehouseInventorySetRealtimeStatus,
 } from '@/lib/api'
-import { listWarehouseStockConditionLinks } from '@/lib/supabase/warehouse-stock'
+import {
+  listWarehouseStockConditionLinks,
+  WAREHOUSE_STOCK_CONDITION_LABELS,
+} from '@/lib/supabase/warehouse-stock'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { parseFile } from '@/lib/import/parse'
 import type {
@@ -493,8 +496,10 @@ export function WarehouseInventoryPanel({
                   </td>
                   <td className="max-w-[220px] truncate px-2 py-1.5">
                     {row.styleName}
-                    {condition?.condition === 'defective' && (
-                      <Badge variant="warning" className="ml-1" title="판매 가능 수량에서 제외">불량</Badge>
+                    {condition && (
+                      <Badge variant="warning" className="ml-1" title="판매 가능 수량에서 제외">
+                        {WAREHOUSE_STOCK_CONDITION_LABELS[condition.condition]}
+                      </Badge>
                     )}
                   </td>
                   <td

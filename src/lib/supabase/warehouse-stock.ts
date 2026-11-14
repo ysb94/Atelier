@@ -664,11 +664,21 @@ export async function listWarehouseStockPositions(
   )
 }
 
+export const WAREHOUSE_STOCK_CONDITION_LABELS = {
+  defective: '불량',
+  needs_repair: '수선 필요',
+  under_repair: '수선 중',
+  needs_inspection: '검수 필요',
+  awaiting_inspection: '검수전',
+  sale_hold: '판매보류',
+  production_error: '오제작',
+} as const
+
 export async function listWarehouseStockConditionLinks(brandId: string) {
   type LinkRow = {
     external_row_id: string
     source_product_name: string
-    condition: 'defective'
+    condition: keyof typeof WAREHOUSE_STOCK_CONDITION_LABELS
     styles: { style_no: string } | { style_no: string }[] | null
   }
   const links = []
