@@ -158,13 +158,14 @@ try {
       select auth.uid()='${actor}' and $1='${brand}' $$;
     create function app.can_edit_brand(uuid) returns boolean language sql stable as $$
       select app.can_read_brand($1) and current_setting('test.warehouse_editor', true) = 'on' $$;
+    create function app.basic_work_allowed(text,uuid) returns boolean language sql stable as $$ select false $$;
     create function app.can_access_warehouse_finder(uuid) returns boolean language sql as $$ select app.can_read_brand($1) $$;
     create function app.has_masma_finder_sheet_write_key() returns boolean language sql stable as $$
       select current_setting('test.finder_key', true)='ok' $$;
     create function public.set_updated_at() returns trigger language plpgsql as $$
       begin new.updated_at := now(); return new; end $$;
     create table public.companies(id uuid primary key);
-    create table public.brands(id uuid primary key, company_id uuid not null references public.companies);
+    create table public.brands(id uuid primary key, company_id uuid not null references public.companies, slug text not null);
     grant select on public.brands to authenticated;
     create table public.styles(id uuid primary key, brand_id uuid not null references public.brands, style_no text not null,
       name text not null, unique(brand_id,id));
@@ -186,9 +187,11 @@ try {
   query(guard, '42P01')
   query(finderSql('20261113114409_finder_single_inbound_db_first'))
   query(guard)
+  for (const name of ['20261114171142_warehouse_stock_condition_links', '20261114173500_expand_warehouse_stock_conditions',
+    '20261114174048_warehouse_stock_condition_writeback']) query(atelierSql(name))
   query(`
     insert into public.companies values ('${company}');
-    insert into public.brands values ('${brand}','${company}'),('${other}','${company}');
+    insert into public.brands values ('${brand}','${company}','masmarulez'),('${other}','${company}','other');
     insert into public.styles values ('${style}','${brand}','M1234','Test style');
     insert into public.masma_finder_users values ('${brand}','${actor}','active',false,true);
     insert into public.warehouses(id,company_id,name) values ('${warehouse}','${company}','Fixture');
@@ -280,6 +283,64 @@ try {
   assert.equal(query(`select count(*) from warehouse_stock_positions where set_id='${afterRemoval}' and box_qr in ('GUARD-QR-1','GUARD-QR-2');`), '0')
   readNewBox({ docId: retained.external_row_id }, afterRemoval, 'GUARD-QR-3', '2-1-3')
   console.log('PASS: completed box outbound and depleted stock may be omitted, while another active box is still protected')
+
+  const stockId = () => query(`select id from warehouse_stock_positions where set_id='${activeId()}' and external_row_id='${retained.external_row_id}';`)
+  const changeSql = (condition, expected, n) => {
+    const id = `c0000000-0000-4000-8000-${String(n).padStart(12, '0')}`
+    return `select public.save_warehouse_stock_condition('${brand}','${id}','${stockId()}','${condition}','${expected}');`
+  }
+  const queued = () => JSON.parse(query(asService + `select public.list_warehouse_stock_condition_exports('${brand}');`))
+  const confirmCondition = (entry, product_name = entry.values.productName) => query(asService +
+    `select public.confirm_warehouse_stock_condition_exports('${brand}',${json([{
+      request_id: entry.requestId, row_id: entry.rowId, number: entry.values.number, product_name,
+    }])});`)
+  const finderCount = (mode, term) => query(asReader + `select count(*) from public.search_warehouse_finder_rows(
+    '${brand}','${mode}','${term}',100) where external_row_id='${retained.external_row_id}';`)
+
+  query(asReader + changeSql('defective', 'normal', 30), '42501')
+  query(asEditor + changeSql('defective', 'normal', 30))
+  query(asEditor + changeSql('defective', 'normal', 30))
+  assert.equal(finderCount('mnumber', 'M1234'), '0')
+  assert.equal(finderCount('product', 'Test style_(불량)'), '1')
+  const conditionStaleAt = quote(query('select clock_timestamp();'))
+  query(asService + sheet([fixtureRow, retained], 'clock_timestamp()'), 'PWS04')
+  const defective = queued()
+  assert.equal(defective.rowId, retained.external_row_id)
+  assert.equal(defective.values.number, '')
+  assert.equal(defective.values.productName, 'Test style_(불량)')
+  assert.equal(confirmCondition(defective, 'Test style'), '0')
+  assert.equal(confirmCondition(defective), '1')
+  query(asService + sheet([fixtureRow, retained], conditionStaleAt), 'PWS05')
+  query(asService + sheet([fixtureRow, retained], 'clock_timestamp()'), 'PWS06')
+  query(asService + sheet([fixtureRow], 'clock_timestamp()'), 'PWS06')
+  const defectRow = { ...retained, style_id: null, source_style_no: '', normalized_style_no: '',
+    source_product_name: defective.values.productName }
+  query(asService + sheet([fixtureRow, defectRow], 'clock_timestamp()'))
+  assert.equal(finderCount('mnumber', 'M1234'), '0')
+  assert.equal(finderCount('product', 'Test style_(불량)'), '1')
+  query(asEditor + changeSql('normal', 'defective', 31))
+  const normal = queued()
+  assert.equal(normal.rowId, defective.rowId)
+  assert.equal(normal.values.number, 'M1234')
+  assert.equal(normal.values.productName, 'Test style')
+  assert.equal(confirmCondition(normal), '1')
+  query(asService + sheet([fixtureRow, retained], 'clock_timestamp()'))
+  assert.equal(finderCount('mnumber', 'M1234'), '1')
+  assert.equal(finderCount('product', 'Test style_(불량)'), '0')
+
+  const receive = `select public.save_warehouse_stock_condition('${brand}',
+    'c0000000-0000-4000-8000-000000000032',null,'needs_repair',null,${json({
+      style_id: style, location_code: '2-1-3', received_on: '2026-11-13',
+      received_on_raw: '261113', units_per_box: 10, remaining_boxes: 2,
+    })});`
+  query(asEditor + receive)
+  query(asEditor + receive)
+  const received = queued()
+  assert.equal(received.before, null)
+  assert.equal(received.values.productName, 'Test style_(수선 필요)')
+  assert.equal(query(`select count(*) from warehouse_stock_positions where set_id='${activeId()}'
+    and external_row_id='${received.rowId}' and style_id is null and remaining_boxes=2;`), '1')
+  console.log('PASS: condition changes, pending/stale snapshots, Finder SKU and status search, restoration, and idempotent intake')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)

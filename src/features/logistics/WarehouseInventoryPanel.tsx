@@ -6,7 +6,7 @@ import { Download, RefreshCw, Upload } from 'lucide-react'
 import { StylePicker } from '@/components/style-picker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Input, Select } from '@/components/ui/input'
 import {
   adjustWarehouseStock,
   depleteWarehouseStock,
@@ -25,7 +25,9 @@ import {
 } from '@/lib/api'
 import {
   listWarehouseStockConditionLinks,
+  saveWarehouseStockCondition,
   WAREHOUSE_STOCK_CONDITION_LABELS,
+  type WarehouseStockCondition,
 } from '@/lib/supabase/warehouse-stock'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { parseFile } from '@/lib/import/parse'
@@ -68,6 +70,7 @@ type ReviewFilter =
 type DialogState =
   | { kind: 'import' }
   | { kind: 'receive' }
+  | { kind: 'condition'; row: WarehouseStockPosition; current: WarehouseStockCondition; styleNo: string }
   | { kind: 'move'; row: WarehouseStockPosition }
   | { kind: 'replenish'; row: WarehouseStockPosition }
   | { kind: 'deplete'; row: WarehouseStockPosition }
@@ -115,10 +118,12 @@ function uniqueStyleRefs(lookup: {
 export function WarehouseInventoryPanel({
   brandId,
   brandName,
+  sheetConditionEnabled,
   view,
 }: {
   brandId: string
   brandName: string
+  sheetConditionEnabled: boolean
   view: WarehouseView
 }) {
   useRenderWatch('WarehouseInventoryPanel')
@@ -577,6 +582,17 @@ export function WarehouseInventoryPanel({
                           onClick={() => setDialog({ kind: 'open', row })}
                         />
                       )}
+                      {sheetConditionEnabled && <RowAction
+                        label="상태 변경"
+                        disabled={conditionQuery.isPending || conditionQuery.isError || (!row.styleId && !condition) ||
+                          (isWarehouseQuantityKnown(row) && !row.remainingBoxes && !row.openedUnits)}
+                        onClick={() => setDialog({
+                          kind: 'condition',
+                          row,
+                          current: condition?.condition ?? 'normal',
+                          styleNo: condition?.referenceStyleNo || row.styleNo,
+                        })}
+                      />}
                       <RowAction
                         label="소진"
                         disabled={!isWarehouseQuantityKnown(row)}
@@ -653,12 +669,26 @@ export function WarehouseInventoryPanel({
       {dialog?.kind === 'receive' ? (
         <ReceiveDialog
           brandId={brandId}
+          sheetConditionEnabled={sheetConditionEnabled}
           onClose={() => setDialog(null)}
           onDone={async () => {
             setDialog(null)
             await invalidateStock()
           }}
           onError={setError}
+        />
+      ) : null}
+      {dialog?.kind === 'condition' ? (
+        <StockConditionDialog
+          brandId={brandId}
+          row={dialog.row}
+          current={dialog.current}
+          styleNo={dialog.styleNo}
+          onClose={() => setDialog(null)}
+          onDone={async () => {
+            setDialog(null)
+            await invalidateStock()
+          }}
         />
       ) : null}
       {dialog?.kind === 'move' || dialog?.kind === 'replenish' ? (
@@ -1032,18 +1062,87 @@ function Count({ label, value }: { label: string; value: number }) {
   )
 }
 
+function StockConditionField({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: WarehouseStockCondition
+  onChange: (condition: WarehouseStockCondition) => void
+  disabled?: boolean
+}) {
+  return (
+    <label className="block space-y-1 text-xs">
+      <span className="text-muted-foreground">재고 상태</span>
+      <Select
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value as WarehouseStockCondition)}
+      >
+        {Object.entries(WAREHOUSE_STOCK_CONDITION_LABELS).map(([condition, label]) => (
+          <option key={condition} value={condition}>{label}</option>
+        ))}
+      </Select>
+    </label>
+  )
+}
+
+function StockConditionDialog({
+  brandId, row, current, styleNo, onClose, onDone,
+}: {
+  brandId: string
+  row: WarehouseStockPosition
+  current: WarehouseStockCondition
+  styleNo: string
+  onClose: () => void
+  onDone: () => Promise<void>
+}) {
+  const [condition, setCondition] = useState(current)
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID())
+  const mutation = useMutation({
+    mutationFn: () => saveWarehouseStockCondition(brandId, requestId, condition, {
+      positionId: row.id,
+      expectedCondition: current,
+    }),
+    onSuccess: onDone,
+  })
+  return (
+    <Overlay title="재고 상태 변경" onClose={onClose}>
+      <p className="text-sm">{styleNo} {row.sourceProductName} · {formatWarehouseLocation(row)}</p>
+      <StockConditionField value={condition} onChange={(value) => {
+        setCondition(value)
+        setRequestId(crypto.randomUUID())
+        mutation.reset()
+      }} disabled={mutation.isPending} />
+      <p className="text-xs text-muted-foreground">
+        {condition === 'normal' ? '판매 가능 재고로 복원됩니다.' : '판매 가능 재고에서 제외됩니다.'}
+      </p>
+      {mutation.error && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" size="sm" disabled={mutation.isPending} onClick={onClose}>취소</Button>
+        <Button type="button" size="sm" disabled={condition === current || mutation.isPending}
+          onClick={() => mutation.mutate()}>저장</Button>
+      </div>
+    </Overlay>
+  )
+}
+
 function ReceiveDialog({
   brandId,
+  sheetConditionEnabled,
   onClose,
   onDone,
   onError,
 }: {
   brandId: string
+  sheetConditionEnabled: boolean
   onClose: () => void
   onDone: () => Promise<void>
   onError: (message: string | null) => void
 }) {
   const [style, setStyle] = useState<StyleRef | null>(null)
+  const [condition, setCondition] = useState<WarehouseStockCondition>('normal')
+  const [requestId] = useState(() => crypto.randomUUID())
   const [locationRaw, setLocationRaw] = useState('')
   const [receivedRaw, setReceivedRaw] = useState('')
   const [forced, setForced] = useState(false)
@@ -1064,7 +1163,8 @@ function ReceiveDialog({
       if (!Number.isFinite(remainingBoxes) || remainingBoxes < 1) {
         throw new Error('박스 수를 확인하세요.')
       }
-      await receiveWarehouseStock(brandId, {
+      if (sheetConditionEnabled && !style) throw new Error('정식 상품을 선택하세요.')
+      const receive = {
         styleId: style?.styleId ?? null,
         sourceStyleNo: style?.styleNo ?? '',
         sourceProductName: style?.name ?? '',
@@ -1075,7 +1175,9 @@ function ReceiveDialog({
         isForcedPriority: received.isForcedPriority,
         unitsPerBox,
         remainingBoxes,
-      })
+      }
+      if (sheetConditionEnabled) await saveWarehouseStockCondition(brandId, requestId, condition, { receive })
+      else await receiveWarehouseStock(brandId, receive)
     },
     onSuccess: async () => {
       onError(null)
@@ -1092,6 +1194,7 @@ function ReceiveDialog({
         <span className="text-muted-foreground">상품</span>
         <StylePicker brandId={brandId} value={style} onChange={setStyle} />
       </label>
+      {sheetConditionEnabled && <StockConditionField value={condition} onChange={setCondition} disabled={mutation.isPending} />}
       <label className="block space-y-1 text-xs">
         <span className="text-muted-foreground">
           자리번호 (`{FINAL_LOCATION_MARK}`이면 마지막 위치)
@@ -1133,7 +1236,7 @@ function ReceiveDialog({
         <Button
           type="button"
           size="sm"
-          disabled={mutation.isPending}
+          disabled={(sheetConditionEnabled && !style) || mutation.isPending}
           onClick={() => mutation.mutate()}
         >
           입고
