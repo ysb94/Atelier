@@ -664,6 +664,75 @@ export async function listWarehouseStockPositions(
   )
 }
 
+export const WAREHOUSE_STOCK_CONDITION_LABELS = {
+  normal: '정상',
+  defective: '불량',
+  needs_repair: '수선 필요',
+  under_repair: '수선 중',
+  needs_inspection: '검수 필요',
+  awaiting_inspection: '검수전',
+  sale_hold: '판매보류',
+  production_error: '오제작',
+} as const
+
+export type WarehouseStockCondition = keyof typeof WAREHOUSE_STOCK_CONDITION_LABELS
+
+export async function listWarehouseStockConditionLinks(brandId: string) {
+  type LinkRow = {
+    external_row_id: string
+    source_product_name: string
+    condition: Exclude<WarehouseStockCondition, 'normal'>
+    styles: { style_no: string } | { style_no: string }[] | null
+  }
+  const links = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await getSupabase()
+      .from('warehouse_stock_condition_links')
+      .select('external_row_id, source_product_name, condition, styles!warehouse_stock_condition_links_style_fkey(style_no)')
+      .eq('brand_id', brandId)
+      .order('external_row_id')
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) throw new WarehouseStockStoreError(errorMessage(error, '재고 상태를 불러오지 못했습니다.'), { cause: error })
+    const rows = (data ?? []) as LinkRow[]
+    links.push(...rows.map(row => ({
+      externalRowId: row.external_row_id,
+      sourceProductName: row.source_product_name,
+      condition: row.condition,
+      referenceStyleNo: (Array.isArray(row.styles) ? row.styles[0] : row.styles)?.style_no ?? '',
+    })))
+    if (rows.length < PAGE_SIZE) return links
+  }
+}
+
+export async function saveWarehouseStockCondition(
+  brandId: string,
+  requestId: string,
+  condition: WarehouseStockCondition,
+  target: { positionId: string; expectedCondition: WarehouseStockCondition } | { receive: WarehouseReceiveInput },
+) {
+  const receive = 'receive' in target ? target.receive : null
+  const { error } = await getSupabase().rpc('save_warehouse_stock_condition', {
+    p_brand_id: brandId,
+    p_request_id: requestId,
+    p_position_id: 'positionId' in target ? target.positionId : null,
+    p_condition: condition,
+    p_expected_condition: 'expectedCondition' in target ? target.expectedCondition : null,
+    p_receive: receive ? {
+      style_id: receive.styleId,
+      location_code: receive.locationCode,
+      zone: receive.zone ?? 'box_storage',
+      received_on: receive.receivedOn,
+      received_on_raw: receive.receivedOnRaw,
+      is_forced_priority: receive.isForcedPriority,
+      is_final_location: receive.isFinalLocation,
+      units_per_box: receive.unitsPerBox,
+      remaining_boxes: receive.remainingBoxes,
+      note: receive.note ?? '',
+    } : null,
+  })
+  if (error) throw new WarehouseStockStoreError(errorMessage(error, '재고 상태를 저장하지 못했습니다.'))
+}
+
 export async function listWarehouseStockMovements(
   brandId: string,
   setId: string,

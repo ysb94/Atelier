@@ -72,6 +72,10 @@ export function normalizeStyleNo(value: string): string {
     .replace(/^-|-$/g, '')
 }
 
+export function isWarehouseNoStockMarker(row: WarehouseSheetSyncInputRow): boolean {
+  return row.locationRaw === '0-0-0' && row.remainingBoxesRaw === '' && !row.boxQr
+}
+
 export function compactProductNameKey(value: string): string {
   return value.replace(/[^0-9a-z가-힣]/gi, '').toLocaleLowerCase('ko-KR')
 }
@@ -317,6 +321,7 @@ export function prepareWarehouseSheetSyncRows(
       units.value == null || boxes.value == null ? 'unknown' : 'known'
     return {
       ...input,
+      boxQr: input.boxQr?.trim() ?? '',
       normalizedStyleNo: normalizeStyleNo(input.sourceStyleNo),
       locationCode: location.locationCode,
       isFinalLocation: location.isFinalLocation,
@@ -336,10 +341,16 @@ export function prepareWarehouseSheetSyncRows(
       reviewFlags: [] as WarehouseReviewFlag[],
     }
   })
-  const seen = new Map<string, number>()
+  const qrCounts = new Map<string, number>()
+  const matchingRows = new Map<string, { count: number; missingQr: boolean }>()
   for (const row of parsed) {
+    const qr = row.boxQr.toUpperCase()
+    if (qr) qrCounts.set(qr, (qrCounts.get(qr) ?? 0) + 1)
     const key = duplicateKey(row)
-    seen.set(key, (seen.get(key) ?? 0) + 1)
+    const group = matchingRows.get(key) ?? { count: 0, missingQr: false }
+    group.count += 1
+    group.missingQr ||= !qr
+    matchingRows.set(key, group)
   }
   return parsed.map((row) => {
     let style: StyleRef | null = null
@@ -354,7 +365,10 @@ export function prepareWarehouseSheetSyncRows(
     if (!row.dateValid) reviewFlags.push('date_review')
     if (!row.locationCode) reviewFlags.push('special_location')
     if (row.quantityStatus === 'unknown') reviewFlags.push('quantity_unknown')
-    if ((seen.get(duplicateKey(row)) ?? 0) > 1) reviewFlags.push('duplicate_suspect')
+    const group = matchingRows.get(duplicateKey(row))
+    if ((qrCounts.get(row.boxQr.toUpperCase()) ?? 0) > 1 || (group && group.count > 1 && group.missingQr)) {
+      reviewFlags.push('duplicate_suspect')
+    }
     return {
       ...row,
       normalizedStyleNo: style ? normalizeStyleNo(style.styleNo) : row.normalizedStyleNo,

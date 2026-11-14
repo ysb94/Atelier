@@ -4,6 +4,7 @@ import { createContext, runInContext } from 'node:vm'
 
 export function verifyWarehouseSyncAppsScript() {
   const cells = new Map()
+  const formulas = new Map()
   const notes = new Map()
   const requests = []
   const documents = new Map()
@@ -21,8 +22,10 @@ export function verifyWarehouseSyncAppsScript() {
     }
   }
   const get = (row, column) => cells.get(coordinate(row, column)) ?? ''
+  let maxRows = 12
   const sheet = {
-    getMaxRows: () => 12,
+    getMaxRows: () => maxRows,
+    getLastRow: () => maxRows,
     getMaxColumns: () => 35,
     getRange(row, column, height = 1, width = 1) {
       const read = getter => Array.from({ length: height }, (_, y) =>
@@ -32,6 +35,15 @@ export function verifyWarehouseSyncAppsScript() {
         getRow: () => row,
         getValues: () => read(get),
         getDisplayValues: () => read((r, c) => String(get(r, c))),
+        getFormulas: () => read((r, c) => formulas.get(coordinate(r, c)) ?? ''),
+        createTextFinder(key) {
+          return {
+            matchEntireCell() { return this },
+            matchCase() { return this },
+            findAll: () => Array.from({ length: height }, (_, i) => row + i)
+              .filter((r) => get(r, column) === key).map((r) => ({ getRow: () => r })),
+          }
+        },
         getNextDataCell: () => {
           let previous = row - 1
           while (previous > 1 && get(previous, column) === '') previous -= 1
@@ -49,6 +61,7 @@ export function verifyWarehouseSyncAppsScript() {
   const ok = { getResponseCode: () => 200, getContentText: () => '{"ok":true}' }
   const ctx = createContext({
     SpreadsheetApp: {
+      flush() {},
       Direction: { UP: 'up' },
       getActive: () => ({
         getSheetByName(name) { assert.equal(name, '창고입력'); return sheet },
@@ -156,5 +169,38 @@ export function verifyWarehouseSyncAppsScript() {
   assert.equal(searchByName('원단 샘플'), undefined)
   assert.equal(searchByName('정식 상품'), '3-4-4_B1')
   assert.deepEqual(payloads.at(-1).rows.map(row => row.externalRowId), ['regular'])
+
+  maxRows = 8500
+  put(5609, 2, ['M0049', '뒤쪽 재고', '3-4-4_B1', '261113', 38, 1])
+  put(5609, 19, ['QR-5609'])
+  put(5609, 27, ['after-3000'])
+  put(8500, 28, ['재고 입력 범위 밖의 보조 데이터'])
+  ctx.syncAtelierWarehouseSnapshot_({ validateOnly: false })
+  assert.deepEqual(payloads.at(-1).rows.map(row => row.sourceRowNumber), [3, 5609])
+  assert.equal(payloads.at(-1).rows.at(-1).externalRowId, 'after-3000')
+  const beforeRejectedSnapshot = payloads.length
+  put(8003, 3, ['상한 밖 재고'])
+  assert.throws(() => ctx.syncAtelierWarehouseSnapshot_({ validateOnly: false }), /8003/)
+  assert.equal(payloads.length, beforeRejectedSnapshot)
+  runInContext(readFileSync('scripts/google-apps-script/warehouse-stock-condition-sync.gs', 'utf8'), ctx)
+  const existing = { requestId: 'change', rowId: 'after-3000',
+    before: { number: 'M0049', productName: '뒤쪽 재고', place: '3-4-4_B1', boxQr: 'QR-5609' },
+    values: { number: '', productName: '뒤쪽 재고_(불량)' },
+  }
+  const confirmed = ctx._writeAtelierStockCondition(sheet, existing)
+  assert.equal(confirmed.row_id, 'after-3000')
+  assert.equal(confirmed.number, '')
+  assert.equal(confirmed.product_name, '뒤쪽 재고_(불량)')
+  assert.equal(get(5609, 4), '3-4-4_B1')
+  assert.equal(get(5609, 19), 'QR-5609')
+  assert.equal(ctx._writeAtelierStockCondition(sheet, existing).number, '', 'retry after successful write')
+  const restore = { ...existing, before: { ...existing.before, ...existing.values },
+    values: { number: 'M0049', productName: '뒤쪽 재고' },
+  }
+  formulas.set(coordinate(5609, 3), '=A1')
+  assert.throws(() => ctx._writeAtelierStockCondition(sheet, restore), /B_C_CHANGED/)
+  formulas.delete(coordinate(5609, 3))
+  assert.equal(ctx._writeAtelierStockCondition(sheet, restore).number, 'M0049')
+  assert.equal(get(5609, 3), '뒤쪽 재고')
   console.log('warehouse-sheet-sync Apps Script: trailing swatches, AA identity, product search and removal verified')
 }

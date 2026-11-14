@@ -1246,9 +1246,19 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - `import_warehouse_inventory_set`과 `apply_warehouse_stock_action`은
   `SECURITY INVOKER` 트랜잭션이다. 잔여 박스는 음수가 될 수 없다. 연습 데이터는
   송장 예약·실재고 차감과 연결하지 않는다.
-- `replace_warehouse_inventory_snapshot`은 Apps Script용 전체 교체 RPC다.
-  `service_role`만 실행할 수 있고 `anon`/`authenticated` 권한은 없다.
-  호출은 HMAC 인증 `warehouse-sheet-sync` Edge Function만 한다.
+- Apps Script의 전체 교체는 HMAC 인증 `warehouse-sheet-sync` Edge Function을 거쳐
+  `replace_warehouse_inventory_snapshot_with_box_qr(uuid,text,jsonb,timestamptz)`를 호출한다.
+  이 RPC는 `service_role`로만 실행된다. 네 번째 인자는 시트 행을 읽기 시작한 시각이다.
+- Finder 신규 단일 QR 입고를 켜기 전에 Finder의 `20261113114409_finder_single_inbound_db_first.sql`,
+  Atelier의 `20261114134631_warehouse_snapshot_finder_sheet_export_guard.sql`, 업데이트한
+  `warehouse-sheet-sync`를 순서대로 적용한다. 입고, 시트 반영 확인, 전체 교체는 동일한
+  브랜드별 트랜잭션 잠금을 사용한다. 전체 교체는 같은 브랜드에 시트 확인 대기가 있거나
+  시트 조회 시작 이후 반영이 확인됐으면 거부한다. 시트 반영을 확인한 Finder 단일 입고가
+  현재 활성 재고에 남아 있고 새 스냅샷에 해당 AA 행이 빠져도 교체를 거부한다.
+  출고 완료, 소진, 보관, 소진 추정이 확인된 박스는 AA 누락 검사 대상에서 제외한다.
+  기존 자리 이동·화물 입고 검사도 적용된다.
+  이 마이그레이션 적용 후 타임스탬프가 없는 세 인자 교체 함수는 보호된 RPC 내부에서만 호출한다.
+  Finder의 시트 반영 행 범위는 Apps Script 전체 조회 범위와 맞춘다.
 - 로직: `src/lib/warehouse/stock.ts`. 저장소: `src/lib/supabase/warehouse-stock.ts`.
   화면: `WarehousePage`, `WarehouseInventoryPanel`.
 - 창고 파인더는 같은 활성 sandbox 세트를 읽기 전용으로 검색한다. Firebase
@@ -1290,8 +1300,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - Edge Function: `warehouse-sheet-sync`. JWT 대신 HMAC
   (`x-atelier-timestamp`, `x-atelier-signature`)을 검증하고 Masmarulez만
   허용한다. `validateOnly`는 저장하지 않고 건수만 돌려준다. 함수는
-  `service_role`로 브랜드·상품·활성 세트·등록 자리만 읽고, 쓰기는
-  `replace_warehouse_inventory_snapshot` RPC만 사용한다.
+  `service_role`로 브랜드·상품·활성 세트·등록 자리만 읽고, 쓰기는 위의
+  네 인자 QR 전체 교체 RPC만 사용한다.
 - 재고 원칙: [`INVENTORY.md`](./INVENTORY.md).
 
 ### 송장 내품명·출고구성 기준

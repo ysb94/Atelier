@@ -221,6 +221,7 @@ export function WarehousePage() {
             <WarehouseInventoryPanel
               brandId={brand.id}
               brandName={brand.name}
+              sheetConditionEnabled={brand.slug === 'masmarulez'}
               view={activeView}
             />
           )}

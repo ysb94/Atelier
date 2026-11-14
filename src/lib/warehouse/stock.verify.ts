@@ -36,6 +36,7 @@ import {
   validateWarehouseSheetSyncPayload,
 } from './sheet-sync'
 import {
+  isWarehouseNoStockMarker,
   prepareWarehouseSheetSyncRows as prepareEdgeWarehouseSheetSyncRows,
   toWarehouseSnapshotRpcRows as toEdgeWarehouseSnapshotRpcRows,
   validateWarehouseSheetSyncPayload as validateEdgeWarehouseSheetSyncPayload,
@@ -616,12 +617,35 @@ const qrInput = [
   fixture.rows[1],
 ]
 const qrPayload = validateWarehouseSheetSyncPayload(qrInput)
+const markerCases = validateEdgeWarehouseSheetSyncPayload([
+  { externalRowId: 'marker', locationRaw: ' 0-0-0 ', receivedOnRaw: '991231' },
+  { externalRowId: 'qty', locationRaw: '0-0-0', remainingBoxesRaw: '0' },
+  { externalRowId: 'qr', locationRaw: '0-0-0', boxQr: 'LIVE-QR' },
+  { externalRowId: 'actual', locationRaw: '2-1-1' },
+]).rows
+assert(markerCases.filter(isWarehouseNoStockMarker).map((row) => row.externalRowId).join(',') === 'marker',
+  'only the exact 0-0-0 location with both box count and QR blank is filtered')
 const edgeQrPayload = validateEdgeWarehouseSheetSyncPayload(qrInput)
 assert(qrPayload.issues.length === 0 && edgeQrPayload.issues.length === 0, 'QR 유무와 관계없이 동기화할 수 있다')
 const qrRows = toWarehouseSnapshotRpcRows(prepareWarehouseSheetSyncRows(qrPayload.rows, styles, []))
 const edgeQrRows = toEdgeWarehouseSnapshotRpcRows(prepareEdgeWarehouseSheetSyncRows(edgeQrPayload.rows, styles, []))
 assert(qrRows[0].box_qr === '001234' && edgeQrRows[0].box_qr === '001234', 'S열 QR의 앞자리 0을 RPC까지 보존한다')
 assert(qrRows[1].box_qr === '' && edgeQrRows[1].box_qr === '', 'S열이 없는 기존 요청도 보존한다')
+const duplicateQrCases = validateEdgeWarehouseSheetSyncPayload([
+  { ...fixture.rows[0], externalRowId: 'distinct-a', locationRaw: '2-1-1', boxQr: 'BOX-A' },
+  { ...fixture.rows[0], externalRowId: 'distinct-b', locationRaw: '2-1-1', boxQr: 'BOX-B' },
+  { ...fixture.rows[0], externalRowId: 'repeat-a', locationRaw: '2-1-2', boxQr: ' BOX-C ' },
+  { ...fixture.rows[0], externalRowId: 'repeat-b', locationRaw: '2-1-3', boxQr: 'box-c' },
+  { ...fixture.rows[0], externalRowId: 'mixed-known', locationRaw: '2-1-4', boxQr: 'BOX-D' },
+  { ...fixture.rows[0], externalRowId: 'mixed-blank', locationRaw: '2-1-4' },
+  { ...fixture.rows[0], externalRowId: 'legacy-a', locationRaw: '2-1-5' },
+  { ...fixture.rows[0], externalRowId: 'legacy-b', locationRaw: '2-1-5' },
+]).rows
+const duplicateQrWarnings = prepareEdgeWarehouseSheetSyncRows(duplicateQrCases, styles)
+  .filter(row => row.reviewFlags.includes('duplicate_suspect'))
+  .map(row => row.externalRowId)
+assert(duplicateQrWarnings.join(',') === 'repeat-a,repeat-b,mixed-known,mixed-blank,legacy-a,legacy-b',
+  '서로 다른 QR은 통과하고, 동일 QR 반복과 QR이 빈 기존 중복 후보만 검수한다')
 const swatchPayload = validateEdgeWarehouseSheetSyncPayload([{
   sourceRowNumber: 2522,
   externalRowId: 'finder-swatch',
