@@ -664,6 +664,33 @@ export async function listWarehouseStockPositions(
   )
 }
 
+export async function listWarehouseStockConditionLinks(brandId: string) {
+  type LinkRow = {
+    external_row_id: string
+    source_product_name: string
+    condition: 'defective'
+    styles: { style_no: string } | { style_no: string }[] | null
+  }
+  const links = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await getSupabase()
+      .from('warehouse_stock_condition_links')
+      .select('external_row_id, source_product_name, condition, styles!warehouse_stock_condition_links_style_fkey(style_no)')
+      .eq('brand_id', brandId)
+      .order('external_row_id')
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) throw new WarehouseStockStoreError(errorMessage(error, '재고 상태를 불러오지 못했습니다.'), { cause: error })
+    const rows = (data ?? []) as LinkRow[]
+    links.push(...rows.map(row => ({
+      externalRowId: row.external_row_id,
+      sourceProductName: row.source_product_name,
+      condition: row.condition,
+      referenceStyleNo: (Array.isArray(row.styles) ? row.styles[0] : row.styles)?.style_no ?? '',
+    })))
+    if (rows.length < PAGE_SIZE) return links
+  }
+}
+
 export async function listWarehouseStockMovements(
   brandId: string,
   setId: string,

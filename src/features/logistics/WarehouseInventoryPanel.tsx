@@ -23,6 +23,7 @@ import {
   subscribeWarehouseInventorySetChanges,
   type WarehouseInventorySetRealtimeStatus,
 } from '@/lib/api'
+import { listWarehouseStockConditionLinks } from '@/lib/supabase/warehouse-stock'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { parseFile } from '@/lib/import/parse'
 import type {
@@ -159,7 +160,16 @@ export function WarehouseInventoryPanel({
     queryFn: () => getWarehouseStockPositions(brandId, activeSet!.id, zone),
     enabled: Boolean(activeSet?.id),
   })
-
+  const conditionQuery = useQuery({
+    queryKey: ['warehouse-stock-condition-links', brandId],
+    queryFn: () => listWarehouseStockConditionLinks(brandId),
+    enabled: Boolean(activeSet?.id),
+  })
+  const conditions = useMemo(() => new Map(
+    (conditionQuery.data ?? []).map(link => [
+      JSON.stringify([link.externalRowId, link.sourceProductName]), link,
+    ]),
+  ), [conditionQuery.data])
   const rows = positionsQuery.data ?? emptyList()
   const zoneRowCount = rows.filter((row) => row.zone === zone).length
   const visible = useMemo(() => {
@@ -167,21 +177,25 @@ export function WarehouseInventoryPanel({
     return (positionsQuery.data ?? emptyList<WarehouseStockPosition>())
       .filter((row) => row.zone === zone)
       .filter((row) => {
-        if (filter === 'ok') return row.reviewFlags.length === 0
+        const condition = conditions.get(JSON.stringify([row.externalRowId, row.sourceProductName]))
+        const reviewFlags = condition ? row.reviewFlags.filter(flag => flag !== 'missing_style') : row.reviewFlags
+        if (filter === 'ok') return !condition && reviewFlags.length === 0
         if (filter === 'forced') {
           return row.usagePriority === 'first' || row.usagePriority === 'second'
         }
         if (filter === 'final') return row.isFinalLocation
-        if (filter === 'review') return row.reviewFlags.length > 0
+        if (filter === 'review') return reviewFlags.length > 0
         if (filter === 'unknown_qty') return !isWarehouseQuantityKnown(row)
-        if (filter === 'unlinked') return !row.styleId
+        if (filter === 'unlinked') return !row.styleId && !condition
         return true
       })
       .filter((row) => {
         if (!q) return true
+        const condition = conditions.get(JSON.stringify([row.externalRowId, row.sourceProductName]))
         return (
           row.styleNo.toLocaleLowerCase('ko-KR').includes(q) ||
           row.sourceStyleNo.toLocaleLowerCase('ko-KR').includes(q) ||
+          condition?.referenceStyleNo.toLocaleLowerCase('ko-KR').includes(q) ||
           row.styleName.toLocaleLowerCase('ko-KR').includes(q) ||
           row.boxQr?.toLocaleLowerCase('ko-KR').includes(q) ||
           formatWarehouseLocation(row)
@@ -198,7 +212,7 @@ export function WarehouseInventoryPanel({
         }
         return left.sourceRowNumber - right.sourceRowNumber
       })
-  }, [filter, positionsQuery.data, search, zone])
+  }, [conditions, filter, positionsQuery.data, search, zone])
 
   useEffect(() => {
     setTablePage(0)
@@ -221,6 +235,9 @@ export function WarehouseInventoryPanel({
       }),
       queryClient.invalidateQueries({
         queryKey: ['warehouse-stock-positions', brandId],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['warehouse-stock-condition-links', brandId],
       }),
       queryClient.invalidateQueries({
         queryKey: ['warehouse-stock-movements', brandId],
@@ -446,7 +463,10 @@ export function WarehouseInventoryPanel({
                 </td>
               </tr>
             ) : (
-              pagedVisible.map((row) => (
+              pagedVisible.map((row) => {
+                const condition = conditions.get(JSON.stringify([row.externalRowId, row.sourceProductName]))
+                const reviewFlags = condition ? row.reviewFlags.filter(flag => flag !== 'missing_style') : row.reviewFlags
+                return (
                 <tr
                   key={row.id}
                   className={cn(
@@ -469,10 +489,13 @@ export function WarehouseInventoryPanel({
                     </span>
                   </td>
                   <td className="px-2 py-1.5 font-medium tabular-nums">
-                    {row.styleNo || row.sourceStyleNo}
+                    {condition?.referenceStyleNo || row.styleNo || row.sourceStyleNo}
                   </td>
                   <td className="max-w-[220px] truncate px-2 py-1.5">
                     {row.styleName}
+                    {condition?.condition === 'defective' && (
+                      <Badge variant="warning" className="ml-1" title="판매 가능 수량에서 제외">불량</Badge>
+                    )}
                   </td>
                   <td
                     className="px-2 py-1.5"
@@ -517,11 +540,11 @@ export function WarehouseInventoryPanel({
                       : '미확인'}
                   </td>
                   <td className="px-2 py-1.5">
-                    {row.reviewFlags.length === 0 ? (
-                      <span className="text-muted-foreground">정상</span>
+                    {reviewFlags.length === 0 ? (
+                      <span className="text-muted-foreground">{condition ? '—' : '정상'}</span>
                     ) : (
                       <span className="text-warning">
-                        {row.reviewFlags
+                        {reviewFlags
                           .map((flag) => WAREHOUSE_REVIEW_FLAG_LABEL[flag])
                           .join(' · ')}
                       </span>
@@ -538,7 +561,7 @@ export function WarehouseInventoryPanel({
                           />
                           <RowAction
                             label="충원"
-                            disabled={!isWarehouseQuantityKnown(row)}
+                            disabled={Boolean(condition) || !isWarehouseQuantityKnown(row)}
                             onClick={() => setDialog({ kind: 'replenish', row })}
                           />
                         </>
@@ -565,7 +588,8 @@ export function WarehouseInventoryPanel({
                     </div>
                   </td>
                 </tr>
-              ))
+                )
+              })
             )}
           </tbody>
         </table>
