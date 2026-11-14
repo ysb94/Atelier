@@ -107,9 +107,10 @@ Deno.serve(async (req) => {
   } catch {
     return json({ ok: false, error: 'JSON 본문이 올바르지 않습니다.' }, 400)
   }
-  const snapshotAt = payload.snapshotAt ?? sentAt
-  if (!Number.isFinite(snapshotAt) || snapshotAt > sentAt || sentAt - snapshotAt > MAX_SKEW_MS) {
-    return json({ ok: false, error: '시트 조회 시각이 올바르지 않습니다.' }, 400)
+  const snapshotAt = payload.snapshotAt ?? (payload.validateOnly === true ? sentAt : undefined)
+  if (typeof snapshotAt !== 'number' || !Number.isSafeInteger(snapshotAt)
+    || snapshotAt > sentAt || sentAt - snapshotAt > MAX_SKEW_MS) {
+    return json({ ok: false, error: '시트 조회 시작 시각이 올바르지 않습니다. 시트를 새로 읽고 동기화해주세요.' }, 400)
   }
 
   const brandSlug = String(payload.brandSlug ?? WAREHOUSE_SHEET_SYNC_BRAND_SLUG)
@@ -227,6 +228,9 @@ Deno.serve(async (req) => {
     },
   )
   if (error || !set) {
+    if (error?.code === 'PWS01' || error?.code === 'PWS02' || error?.code === 'PWS03') {
+      return json({ ok: false, code: error.code, error: error.message }, 409)
+    }
     console.warn('[warehouse-sheet-sync] 전체 교체 실패', {
       message: error?.message,
       rowCount: prepared.length,
