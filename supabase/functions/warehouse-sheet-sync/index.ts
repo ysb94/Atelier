@@ -1,5 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import {
+  isWarehouseNoStockMarker,
+  normalizeStyleNo,
   prepareWarehouseSheetSyncRows,
   summarizeWarehouseSheetSync,
   toWarehouseSnapshotRpcRows,
@@ -96,6 +98,7 @@ Deno.serve(async (req) => {
   }
 
   let payload: {
+    action?: 'list-models'
     validateOnly?: boolean
     sourceFileName?: string
     brandSlug?: string
@@ -107,7 +110,8 @@ Deno.serve(async (req) => {
   } catch {
     return json({ ok: false, error: 'JSON 본문이 올바르지 않습니다.' }, 400)
   }
-  const snapshotAt = payload.snapshotAt ?? (payload.validateOnly === true ? sentAt : undefined)
+  const listModels = payload.action === 'list-models'
+  const snapshotAt = payload.snapshotAt ?? (payload.validateOnly === true || listModels ? sentAt : undefined)
   if (typeof snapshotAt !== 'number' || !Number.isSafeInteger(snapshotAt)
     || snapshotAt > sentAt || sentAt - snapshotAt > MAX_SKEW_MS) {
     return json({ ok: false, error: '시트 조회 시작 시각이 올바르지 않습니다. 시트를 새로 읽고 동기화해주세요.' }, 400)
@@ -118,18 +122,6 @@ Deno.serve(async (req) => {
     .toLowerCase()
   if (brandSlug !== WAREHOUSE_SHEET_SYNC_BRAND_SLUG) {
     return json({ ok: false, error: 'Masmarulez 창고만 동기화할 수 있습니다.' }, 403)
-  }
-
-  const validated = validateWarehouseSheetSyncPayload(payload.rows)
-  if (validated.issues.length > 0) {
-    return json(
-      {
-        ok: false,
-        error: validated.issues[0]?.message ?? '행 검증에 실패했습니다.',
-        issues: validated.issues.slice(0, 20),
-      },
-      400,
-    )
   }
 
   const serviceRoleKey =
@@ -163,6 +155,30 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: 'Masmarulez 창고만 동기화할 수 있습니다.' }, 403)
   }
 
+  const loadStyles = () => listAll<{ id: string; style_no: string; name: string }>((from, to) =>
+    supabase.from('styles').select('id, style_no, name').eq('brand_id', brand.id)
+      .order('id').range(from, to),
+  )
+
+  if (listModels) {
+    const styles = await loadStyles()
+    const models = styles.map((row) => ({ number: normalizeStyleNo(row.style_no), productName: row.name.trim() }))
+      .filter((row) => /^M[0-9]{4,}$/.test(row.number) && row.productName)
+    return json({ ok: true, models })
+  }
+
+  const validated = validateWarehouseSheetSyncPayload(payload.rows)
+  if (validated.issues.length > 0) {
+    return json(
+      {
+        ok: false,
+        error: validated.issues[0]?.message ?? '행 검증에 실패했습니다.',
+        issues: validated.issues.slice(0, 20),
+      },
+      400,
+    )
+  }
+
   const { data: activeSet } = await supabase
     .from('warehouse_inventory_sets')
     .select('warehouse_id')
@@ -184,15 +200,7 @@ Deno.serve(async (req) => {
       ).map((row) => row.code)
     : []
 
-  const styles = (
-    await listAll<{ id: string; style_no: string; name: string }>((from, to) =>
-      supabase
-        .from('styles')
-        .select('id, style_no, name')
-        .eq('brand_id', brand.id)
-        .range(from, to),
-    )
-  ).map(
+  const styles = (await loadStyles()).map(
     (row): StyleRef => ({
       styleId: row.id,
       styleNo: row.style_no,
@@ -200,12 +208,16 @@ Deno.serve(async (req) => {
     }),
   )
 
+  const stockRows = validated.rows.filter((row) => !isWarehouseNoStockMarker(row))
   const prepared = prepareWarehouseSheetSyncRows(
-    validated.rows,
+    stockRows,
     styles,
     pickingCodes,
   )
-  const summary = summarizeWarehouseSheetSync(prepared)
+  const summary = {
+    ...summarizeWarehouseSheetSync(prepared),
+    ignoredNoStockRows: validated.rows.length - stockRows.length,
+  }
   const sourceFileName = String(
     payload.sourceFileName ?? '창고입력 시트 동기화',
   ).trim()

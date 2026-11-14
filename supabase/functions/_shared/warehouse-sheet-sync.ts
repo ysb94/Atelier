@@ -72,6 +72,10 @@ export function normalizeStyleNo(value: string): string {
     .replace(/^-|-$/g, '')
 }
 
+export function isWarehouseNoStockMarker(row: WarehouseSheetSyncInputRow): boolean {
+  return row.locationRaw === '0-0-0' && row.remainingBoxesRaw === '' && !row.boxQr
+}
+
 export function compactProductNameKey(value: string): string {
   return value.replace(/[^0-9a-z가-힣]/gi, '').toLocaleLowerCase('ko-KR')
 }
