@@ -189,6 +189,7 @@ const WPS_COLLECTION = 'warehouses_product_search';
 if (typeof WPS_SHEET === 'undefined') var WPS_SHEET = '창고입력';
 if (typeof ROW_START === 'undefined') var ROW_START = 3;
 if (typeof ROW_END   === 'undefined') var ROW_END   = 3000;
+var ATELIER_WAREHOUSE_SNAPSHOT_LAST_ROW = 8002;
 if (typeof CONCURRENCY === 'undefined') var CONCURRENCY = 10;
 
 if (typeof COL === 'undefined') {
@@ -324,13 +325,18 @@ function _atelierHmacHex(secret, message) {
   }).join('');
 }
 
-function _collectAtelierWarehouseRows(sh) {
-  assignDocIdToAA_v2();
-  const lastRow = Math.max(_lastRowByColumn(sh, COL.B), ROW_START - 1);
-  const endRow = Math.min(Math.max(lastRow, ROW_START - 1), ROW_END);
-  const numRows = Math.max(0, endRow - ROW_START + 1);
+function _collectAtelierWarehouseRows(sh, options) {
+  const scannedRows = Math.max(0, sh.getLastRow() - ROW_START + 1);
+  if (scannedRows === 0) return [];
+  const curBH = _readRange(sh, ROW_START, COL.B, scannedRows, 7);
+  let numRows = curBH.length;
+  while (numRows && !curBH[numRows - 1].some(_norm)) numRows--;
   if (numRows === 0) return [];
-  const curBH = _readRange(sh, ROW_START, COL.B, numRows, 7);
+  const endRow = ROW_START + numRows - 1;
+  if ((!options || options.enforceRange !== false) && endRow > ATELIER_WAREHOUSE_SNAPSHOT_LAST_ROW) {
+    throw new Error('창고입력 데이터가 전체 동기화 상한을 넘었습니다: ' + endRow);
+  }
+  if (!options || options.assignIds !== false) assignDocIdToAA_v2();
   const docIds = _readRange(sh, ROW_START, COL.AA, numRows, 1);
   const boxQrs = sh.getRange(ROW_START, 19, numRows, 1).getDisplayValues();
   const rows = [];
@@ -358,6 +364,20 @@ function _collectAtelierWarehouseRows(sh) {
     });
   }
   return rows;
+}
+
+function inspectAtelierWarehouseSnapshotRange() {
+  const sh = SpreadsheetApp.getActive().getSheetByName(WPS_SHEET);
+  if (!sh) throw new Error('시트를 찾을 수 없습니다: ' + WPS_SHEET);
+  const rows = _collectAtelierWarehouseRows(sh, { assignIds: false, enforceRange: false });
+  console.log(JSON.stringify({
+    firstRow: ROW_START,
+    allowedLastRow: ATELIER_WAREHOUSE_SNAPSHOT_LAST_ROW,
+    actualLastRow: rows.length ? rows[rows.length - 1].sourceRowNumber : null,
+    rows: rows.length,
+    rowsAfter3000: rows.filter(row => row.sourceRowNumber > 3000).length,
+    missingAA: rows.filter(row => !row.externalRowId).length,
+  }));
 }
 
 function syncAtelierWarehouseSnapshot_(options) {
