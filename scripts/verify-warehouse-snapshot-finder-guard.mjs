@@ -31,7 +31,8 @@ const company = 'a0000000-0000-4000-8000-000000000003'
 const style = 'a0000000-0000-4000-8000-000000000004'
 const quote = value => "'" + String(value).replaceAll("'", "''") + "'"
 const json = value => quote(JSON.stringify(value)) + '::jsonb'
-const asService = "set request.jwt.claims = '{\"role\":\"service_role\"}'; set test.finder_key = 'ok'; set role service_role;"
+const asService = "set request.jwt.claims = '{\"role\":\"service_role\"}'; " +
+  "set request.headers = '{\"x-finder-write-key\":\"test-fixture\"}'; set test.finder_key = 'ok'; set role service_role;"
 const asReader = `set request.jwt.claim.sub = '${actor}'; set role authenticated;`
 
 const port = await new Promise((resolve, reject) => {
@@ -180,6 +181,8 @@ try {
     create function app.can_use_masma_finder_feature(uuid,text) returns boolean language sql security definer as $$
       select exists (select 1 from public.masma_finder_users u where u.brand_id=$1 and u.auth_user_id=auth.uid()
         and u.status='active' and (u.can_use_test or u.is_admin) and $2='test') $$;
+    create function app.can_use_masma_finder(uuid) returns boolean language sql as $$
+      select app.can_use_masma_finder_feature($1,'test') $$;
     create table public.cargo_inbound_lines(brand_id uuid not null, id uuid not null, primary key(brand_id,id));
   `)
   for (const name of ['20260826095007_warehouse_practice', '20260909150000_warehouse_sheet_sync',
@@ -187,12 +190,16 @@ try {
     '20260909150300_warehouse_sheet_sync_replace_definer', '20260916140000_warehouse_finder_search',
     '20260916161000_warehouse_finder_location_product_kinds', '20260916183000_masma_finder_warehouse_access',
     '20260918184500_warehouse_boxes_individual', '20260921120000_warehouse_box_completion_lifecycle']) query(atelierSql(name))
-  query(finderSql('20261112044306_finder_inbound_sheet').split('create function app.has_masma_finder_sheet_write_key')[0])
+  const legacyInbound = finderSql('20261112044306_finder_inbound_sheet')
+  query(legacyInbound.split('create function app.has_masma_finder_sheet_write_key')[0] + legacyInbound.slice(
+    legacyInbound.indexOf('create function app.prepare_masma_finder_inbound_sheet('),
+  ))
   query(finderSql('20261112061241_store_finder_box_qr_on_warehouse_stock'))
   for (const name of ['20261112081615_warehouse_sheet_snapshot_box_qr', '20261112101125_finder_warehouse_placement',
     '20261112125446_finder_picking_product_clear']) query(atelierSql(name))
   query(finderSql('20261112135007_finder_warehouse_background'))
-  query(cargo.split('-- Only the scheduled cargo worklist')[0] + cargoSnapshot)
+  query(cargo.split('-- Only the scheduled cargo worklist')[0] +
+    cargo.slice(cargo.indexOf('create function public.run_finder_cargo_background(')))
   query(guard, '42P01')
   query(finderSql('20261113114409_finder_single_inbound_db_first'))
   query(guard)
@@ -358,6 +365,13 @@ try {
     units_per_box: 10, remaining_boxes: 2, source_row_number: 7 }
   query(asService + sheet([fixtureRow, retained, receivedRow], 'clock_timestamp()'))
   query(atelierSql('20261115134809_warehouse_qr_reconciliation'))
+  query(atelierSql('20261115140806_warehouse_qr_audit_sheet_export'))
+  const sheetJob = () => JSON.parse(query(asService + `select public.list_warehouse_qr_audit_sheet_exports('${brand}');`))
+  const confirmAuditSheet = (job, rows = job.after.map(({ opened: _opened, ...stock }) => stock)
+    .sort((a, b) => a.id.localeCompare(b.id))) => query(asService +
+      `select public.confirm_warehouse_qr_audit_sheet_export('${brand}','${job.id}',${json(rows)});`)
+  const backgroundMove = (action, request) => `select public.run_finder_warehouse_background(
+    '${brand}','${actor}','${action}',${json(request)});`
 
   const auditId = 'c0000000-0000-4000-8000-000000000070'
   const auditSql = (action, request) => `select public.finder_warehouse_qr_audit(
@@ -380,7 +394,7 @@ try {
   assert.equal(finderCount('mnumber', 'M1234'), '1')
   query(asReader + auditSql('preview', { ...draft, entries: [draft.entries[0], draft.entries[0]] }), 'P0001')
   const commit = auditSql('confirm', { ...draft, token: plan.token })
-  query(asReader + commit)
+  assert.equal(JSON.parse(query(asReader + commit)).sheetPending, true)
   query(asReader + commit)
   assert.equal(JSON.parse(query(asReader + auditSql('preview', draft))).complete, true)
   const inventory = () => JSON.parse(query(`select jsonb_agg(jsonb_build_object('qr',p.box_qr,'name',p.source_product_name,
@@ -399,10 +413,40 @@ try {
   assert.equal(review.items[0].photo_path, photo)
   assert.equal(review.items[0].candidates.length, before.rows.length)
   const oldSheet = [fixtureRow, retained, receivedRow]
-  query(asService + sheet(oldSheet, 'clock_timestamp()'))
+  query(asService + sheet(oldSheet, 'clock_timestamp()'), 'PWS07')
+  query(asService + inbound(90, '2-1-3') + ';', 'PQA01')
+  const legacyRegistration = { p_location_code: '2-1-3', p_zone: 'box_storage', p_style_no: 'M1234',
+    p_received_on: '2026-11-13', p_qty: 12, p_note: '' }
+  query(asService + backgroundMove('prepare-inbound', {
+    p_display_code: 'GUARD-LEGACY-QR', p_registration: legacyRegistration,
+  }), 'PQA01')
+  query(asService + backgroundMove('prepare', { mode: 'place', place: '2-1-1', qr: 'GUARD-QR-3',
+    backgroundJobId: 'c0000000-0000-4000-8000-000000000093:0' }), 'PQA01')
+  query(asEditor + reviewSql('link', { rowId: review.items[0].external_row_id, candidateId: source.id, units: 12 }), 'PQA01')
+  const auditSheet = sheetJob()
+  assert.equal(auditSheet.place, '2-1-3')
+  assert.equal(auditSheet.before.length, 2)
+  assert.equal(auditSheet.after.find(p => p.qr === 'GUARD-QR-3').values[6], '개봉 잔량 8개')
+  assert.equal(confirmAuditSheet(auditSheet, []), 'f')
+  const staleAuditAt = quote(query('select clock_timestamp();'))
+  assert.equal(confirmAuditSheet(auditSheet), 't')
+  query(asService + sheet(oldSheet, staleAuditAt), 'PWS07')
+  const refreshedSheet = [fixtureRow, ...auditSheet.after.map(({ id, qr, values }) => {
+    const [sku, name, place, date, units, boxes, note] = values
+    return { ...row(id, qr, place), source_style_no: sku, normalized_style_no: sku, style_id: sku ? style : null,
+      source_product_name: name, received_on: date ? '2026-11-13' : null, received_on_raw: date,
+      units_per_box: units ? Number(units) : null, units_per_box_raw: units,
+      remaining_boxes: Number(boxes), remaining_boxes_raw: boxes, note }
+  })]
+  query(asService + sheet(refreshedSheet, 'clock_timestamp()'))
   assert.equal(inventory()[1].opened, 8)
   query(asEditor + reviewSql('link', { rowId: review.items[0].external_row_id, candidateId: source.id, units: 12 }))
   assert.equal(JSON.parse(query(asEditor + reviewSql('list'))).pending, 0)
+  const reviewExport = sheetJob()
+  assert.equal(reviewExport.place, null)
+  assert.equal(reviewExport.before[0].id, reviewExport.after[0].id)
+  assert.equal(reviewExport.after[0].values[0], 'M1234')
+  assert.equal(confirmAuditSheet(reviewExport), 't')
   query(asService + sheet(oldSheet, 'clock_timestamp()'))
   assert.deepEqual(inventory(), [
     { qr: 'AUDIT-PHOTO', name: 'Test style', sku: 'M1234', opened: 0 },
@@ -412,10 +456,25 @@ try {
   const auditedPosition = query(`select id from warehouse_stock_positions where set_id='${activeId()}' and box_qr='AUDIT-PHOTO';`)
   const changeAuditCondition = (n, next, previous) => `select public.save_warehouse_stock_condition(
     '${brand}','c0000000-0000-4000-8000-0000000000${n}','${auditedPosition}','${next}','${previous}')->>'sheetPending';`
-  assert.equal(query(asEditor + changeAuditCondition(72, 'defective', 'normal')), 'false')
+  assert.equal(query(asEditor + changeAuditCondition(72, 'defective', 'normal')), 'true')
   assert.equal(inventory()[0].sku, '')
-  assert.equal(query(asEditor + changeAuditCondition(73, 'normal', 'defective')), 'false')
+  assert.equal(confirmCondition(queued()), '1')
+  assert.equal(query(asEditor + changeAuditCondition(73, 'normal', 'defective')), 'true')
+  assert.equal(confirmCondition(queued()), '1')
   assert.equal(inventory()[0].sku, 'M1234')
+
+  for (const [n, place] of [[93, '2-1-1'], [94, '2-1-3']]) {
+    const request = { mode: 'place', place, qr: 'GUARD-QR-3', backgroundJobId: `c0000000-0000-4000-8000-0000000000${n}:0` }
+    const planned = JSON.parse(query(asService + backgroundMove('prepare', request)))
+    assert.equal(planned.plan.write.auditOpened, true)
+    assert.equal(planned.plan.write.quantity, 8)
+    assert.equal(planned.plan.write.position.units_per_box, 12)
+    assert.equal(planned.plan.write.docId, auditSheet.after.find(p => p.qr === 'GUARD-QR-3').id)
+    query(asService + backgroundMove('finish', { operationId: planned.operationId, rowNumber: 9 }))
+    assert.equal(query(`select l.code || ':' || p.opened_units || ':' || p.remaining_boxes
+      from warehouse_stock_positions p join warehouse_locations l on l.id=p.location_id
+      where p.set_id='${activeId()}' and p.box_qr='GUARD-QR-3';`), place + ':8:0')
+  }
 
   const movedId = 'c0000000-0000-4000-8000-000000000074'
   const movedPhoto = `${brand}/${actor}/${movedId}/c0000000-0000-4000-8000-000000000075.jpg`
@@ -426,11 +485,19 @@ try {
   const movePreview = JSON.parse(query(asReader + auditSql('preview', moveDraft)))
   assert.equal(movePreview.boxes[0].fromPlace, '2-1-3')
   query(asReader + auditSql('confirm', { ...moveDraft, token: movePreview.token }))
+  const movedExport = sheetJob()
+  assert.equal(movedExport.before[0].values[2], '2-1-3')
+  assert.equal(movedExport.after[0].values[2], '2-1-2')
+  assert.equal(confirmAuditSheet(movedExport), 't')
   const spare = JSON.parse(query(asReader + auditSql('place')))
   const emptyDraft = { id: 'c0000000-0000-4000-8000-000000000076', baseline: spare.baseline, entries: [] }
   const emptyPreview = JSON.parse(query(asReader + auditSql('preview', emptyDraft)))
   assert.equal(emptyPreview.before.length, 1)
   query(asReader + auditSql('confirm', { ...emptyDraft, token: emptyPreview.token }))
+  const emptyExport = sheetJob()
+  assert.equal(emptyExport.place, '2-1-3')
+  assert.equal(emptyExport.after.length, 0)
+  assert.equal(confirmAuditSheet(emptyExport), 't')
   query(asService + sheet(oldSheet, 'clock_timestamp()'))
   assert.equal(query(`select count(*) from warehouse_stock_positions p join warehouse_locations l on l.id=p.location_id
     where p.set_id='${activeId()}' and l.code='2-1-3';`), '0')
@@ -438,7 +505,24 @@ try {
     where p.set_id='${activeId()}' and l.code='2-1-2' and p.box_qr='AUDIT-PHOTO';`), '1')
   assert.equal(query(`select (location_id is null and completed_at is null)::text from warehouse_boxes
     where display_code='GUARD-QR-3';`), 'true')
-  console.log('PASS: site audit previews, whole-slot replacement, old-sheet protection, box ledger, private photos, and desktop product review')
+  const reopenedInbound = JSON.parse(query(asService + inbound(90, '2-1-3') + ';'))
+  assert.equal(reopenedInbound.status, 'saved')
+  assert.equal(query(`select count(*) from warehouse_stock_positions where set_id='${activeId()}' and box_qr='GUARD-QR-90';`), '1')
+  const regularRequest = { mode: 'place', place: '2-1-1', qr: 'GUARD-REGULAR-QR',
+    number: 'M1234', receivedOn: '2026-11-13', quantity: 12,
+    backgroundJobId: 'c0000000-0000-4000-8000-000000000091:0' }
+  const regularInbound = JSON.parse(query(asService + backgroundMove('prepare', regularRequest)))
+  assert.equal(regularInbound.status, 'prepared')
+  query(asService + backgroundMove('finish', { operationId: regularInbound.operationId, rowNumber: 11 }))
+  const regularMove = JSON.parse(query(asService + backgroundMove('prepare', {
+    mode: 'place', place: '2-1-2', qr: regularRequest.qr, backgroundJobId: 'c0000000-0000-4000-8000-000000000092:0',
+  })))
+  assert.equal(regularMove.plan.write.docId, regularInbound.plan.write.docId)
+  query(asService + backgroundMove('finish', { operationId: regularMove.operationId, rowNumber: 11 }))
+  assert.equal(query(`select l.code || ':' || p.units_per_box || ':' || p.remaining_boxes
+    from warehouse_stock_positions p join warehouse_locations l on l.id=p.location_id
+    where p.set_id='${activeId()}' and p.box_qr='GUARD-REGULAR-QR';`), '2-1-2:12:1')
+  console.log('PASS: slot audit sheet confirmation, private photo review, opened QR movement, and existing intake')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)
