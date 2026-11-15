@@ -149,6 +149,12 @@ try {
   query(`
     create role anon; create role authenticated; create role service_role;
     create schema app; create schema auth;
+    create schema storage;
+    create table storage.buckets(id text primary key, name text, public boolean, file_size_limit bigint, allowed_mime_types text[]);
+    create table storage.objects(id uuid default gen_random_uuid(), bucket_id text, name text, unique(bucket_id,name));
+    alter table storage.objects enable row level security;
+    grant usage on schema storage to authenticated;
+    grant select, insert on storage.objects to authenticated;
     grant usage on schema app, auth to authenticated;
     create function auth.role() returns text language sql stable as $$
       select current_setting('request.jwt.claims', true)::jsonb->>'role' $$;
@@ -171,6 +177,9 @@ try {
       name text not null, unique(brand_id,id));
     create table public.masma_finder_users(brand_id uuid not null, auth_user_id uuid not null,
       status text not null, is_admin boolean not null, can_use_test boolean not null);
+    create function app.can_use_masma_finder_feature(uuid,text) returns boolean language sql security definer as $$
+      select exists (select 1 from public.masma_finder_users u where u.brand_id=$1 and u.auth_user_id=auth.uid()
+        and u.status='active' and (u.can_use_test or u.is_admin) and $2='test') $$;
     create table public.cargo_inbound_lines(brand_id uuid not null, id uuid not null, primary key(brand_id,id));
   `)
   for (const name of ['20260826095007_warehouse_practice', '20260909150000_warehouse_sheet_sync',
@@ -341,6 +350,95 @@ try {
   assert.equal(query(`select count(*) from warehouse_stock_positions where set_id='${activeId()}'
     and external_row_id='${received.rowId}' and style_id is null and remaining_boxes=2;`), '1')
   console.log('PASS: condition changes, pending/stale snapshots, Finder SKU and status search, restoration, and idempotent intake')
+
+  // Export the preceding fixture intake before starting a complete slot audit.
+  assert.equal(confirmCondition(received), '1')
+  const receivedRow = { ...row(received.rowId, '', received.values.place), style_id: null,
+    source_style_no: '', normalized_style_no: '', source_product_name: received.values.productName,
+    units_per_box: 10, remaining_boxes: 2, source_row_number: 7 }
+  query(asService + sheet([fixtureRow, retained, receivedRow], 'clock_timestamp()'))
+  query(atelierSql('20261115134809_warehouse_qr_reconciliation'))
+
+  const auditId = 'c0000000-0000-4000-8000-000000000070'
+  const auditSql = (action, request) => `select public.finder_warehouse_qr_audit(
+    '${brand}','${action}',${json({ id: auditId, place: '2-1-3', ...request })});`
+  const reviewSql = (action, request = {}) => `select public.review_warehouse_qr_audit('${brand}','${action}',${json(request)});`
+  const before = JSON.parse(query(asReader + auditSql('place')))
+  const source = before.rows.find(p => p.box_qr === 'GUARD-QR-3')
+  const photo = `${brand}/${actor}/${auditId}/c0000000-0000-4000-8000-000000000071.jpg`
+  query(asReader + `insert into storage.objects(bucket_id,name) values ('warehouse-qr-audit','${photo}');`)
+  query(asReader + `insert into storage.objects(bucket_id,name) values ('warehouse-qr-audit','${photo.replace(actor, other)}');`, '42501')
+  assert.equal(query(asEditor + 'select count(*) from storage.objects;'), '0')
+  const draft = { baseline: before.baseline, entries: [
+    { qr: 'GUARD-QR-3', source_id: source.id, units: 8, opened: true },
+    { qr: 'AUDIT-PHOTO', photo_path: photo },
+  ] }
+  const plan = JSON.parse(query(asReader + auditSql('preview', draft)))
+  assert.equal(plan.boxes.length, 2)
+  assert.equal(plan.boxes[1].name, null)
+  query(asReader + auditSql('confirm', { ...draft, token: 'incorrect' }), '40001')
+  assert.equal(finderCount('mnumber', 'M1234'), '1')
+  query(asReader + auditSql('preview', { ...draft, entries: [draft.entries[0], draft.entries[0]] }), 'P0001')
+  const commit = auditSql('confirm', { ...draft, token: plan.token })
+  query(asReader + commit)
+  query(asReader + commit)
+  assert.equal(JSON.parse(query(asReader + auditSql('preview', draft))).complete, true)
+  const inventory = () => JSON.parse(query(`select jsonb_agg(jsonb_build_object('qr',p.box_qr,'name',p.source_product_name,
+    'sku',p.normalized_style_no,'opened',p.opened_units) order by p.box_qr)
+    from warehouse_stock_positions p where p.set_id='${activeId()}' and p.box_qr in ('GUARD-QR-3','AUDIT-PHOTO');`))
+  assert.deepEqual(inventory(), [
+    { qr: 'AUDIT-PHOTO', name: '상품 확인 대기', sku: '', opened: 0 },
+    { qr: 'GUARD-QR-3', name: 'Test style', sku: 'M1234', opened: 8 },
+  ])
+  assert.equal(query(`select current_qty from warehouse_boxes where display_code='GUARD-QR-3';`), '8')
+  assert.equal(query(asReader + 'select count(*) from storage.objects;'), '0')
+  assert.equal(query(asEditor + 'select count(*) from storage.objects;'), '1')
+  query(asReader + reviewSql('list'), '42501')
+  const review = JSON.parse(query(asEditor + reviewSql('list')))
+  assert.equal(review.pending, 1)
+  assert.equal(review.items[0].photo_path, photo)
+  assert.equal(review.items[0].candidates.length, before.rows.length)
+  const oldSheet = [fixtureRow, retained, receivedRow]
+  query(asService + sheet(oldSheet, 'clock_timestamp()'))
+  assert.equal(inventory()[1].opened, 8)
+  query(asEditor + reviewSql('link', { rowId: review.items[0].external_row_id, candidateId: source.id, units: 12 }))
+  assert.equal(JSON.parse(query(asEditor + reviewSql('list'))).pending, 0)
+  query(asService + sheet(oldSheet, 'clock_timestamp()'))
+  assert.deepEqual(inventory(), [
+    { qr: 'AUDIT-PHOTO', name: 'Test style', sku: 'M1234', opened: 0 },
+    { qr: 'GUARD-QR-3', name: 'Test style', sku: 'M1234', opened: 8 },
+  ])
+  assert.equal(query(`select count(*) from warehouse_stock_positions where set_id='${activeId()}' and external_row_id='${received.rowId}';`), '0')
+  const auditedPosition = query(`select id from warehouse_stock_positions where set_id='${activeId()}' and box_qr='AUDIT-PHOTO';`)
+  const changeAuditCondition = (n, next, previous) => `select public.save_warehouse_stock_condition(
+    '${brand}','c0000000-0000-4000-8000-0000000000${n}','${auditedPosition}','${next}','${previous}')->>'sheetPending';`
+  assert.equal(query(asEditor + changeAuditCondition(72, 'defective', 'normal')), 'false')
+  assert.equal(inventory()[0].sku, '')
+  assert.equal(query(asEditor + changeAuditCondition(73, 'normal', 'defective')), 'false')
+  assert.equal(inventory()[0].sku, 'M1234')
+
+  const movedId = 'c0000000-0000-4000-8000-000000000074'
+  const movedPhoto = `${brand}/${actor}/${movedId}/c0000000-0000-4000-8000-000000000075.jpg`
+  query(asReader + `insert into storage.objects(bucket_id,name) values ('warehouse-qr-audit','${movedPhoto}');`)
+  const movedAt = JSON.parse(query(asReader + auditSql('place', { id: movedId, place: '2-1-2' })))
+  const moveDraft = { id: movedId, place: movedAt.place, baseline: movedAt.baseline,
+    entries: [{ qr: 'AUDIT-PHOTO', photo_path: movedPhoto }] }
+  const movePreview = JSON.parse(query(asReader + auditSql('preview', moveDraft)))
+  assert.equal(movePreview.boxes[0].fromPlace, '2-1-3')
+  query(asReader + auditSql('confirm', { ...moveDraft, token: movePreview.token }))
+  const spare = JSON.parse(query(asReader + auditSql('place')))
+  const emptyDraft = { id: 'c0000000-0000-4000-8000-000000000076', baseline: spare.baseline, entries: [] }
+  const emptyPreview = JSON.parse(query(asReader + auditSql('preview', emptyDraft)))
+  assert.equal(emptyPreview.before.length, 1)
+  query(asReader + auditSql('confirm', { ...emptyDraft, token: emptyPreview.token }))
+  query(asService + sheet(oldSheet, 'clock_timestamp()'))
+  assert.equal(query(`select count(*) from warehouse_stock_positions p join warehouse_locations l on l.id=p.location_id
+    where p.set_id='${activeId()}' and l.code='2-1-3';`), '0')
+  assert.equal(query(`select count(*) from warehouse_stock_positions p join warehouse_locations l on l.id=p.location_id
+    where p.set_id='${activeId()}' and l.code='2-1-2' and p.box_qr='AUDIT-PHOTO';`), '1')
+  assert.equal(query(`select (location_id is null and completed_at is null)::text from warehouse_boxes
+    where display_code='GUARD-QR-3';`), 'true')
+  console.log('PASS: site audit previews, whole-slot replacement, old-sheet protection, box ledger, private photos, and desktop product review')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)

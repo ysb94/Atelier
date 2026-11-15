@@ -17,12 +17,13 @@ import { cn } from '@/lib/utils'
 import { WarehouseInventoryPanel } from './WarehouseInventoryPanel'
 import { WarehouseFixedLocationsPanel } from './WarehouseFixedLocationsPanel'
 import { WarehouseQrPanel } from './WarehouseQrPanel'
+import { WarehouseQrAuditReviewPanel } from './WarehouseQrAuditReviewPanel'
 import { WarehouseSlotSettingsPanel } from './WarehouseSlotSettingsPanel'
 import { WarehouseSheetTestForm } from './WarehouseSheetTestForm'
 import { WarehouseBoxHistoryPanel } from './TemporaryWarehousePanel'
 
 type WarehouseView = 'box' | 'outbound' | 'boxes' | 'fixed' | 'qr'
-type WarehousePanel = 'stock' | 'slots'
+type WarehousePanel = 'stock' | 'slots' | 'qr-audit'
 
 const WAREHOUSE_VIEWS: {
   value: WarehouseView
@@ -76,7 +77,7 @@ function isWarehouseView(value: string | null): value is WarehouseView {
 }
 
 function isWarehousePanel(value: string | null): value is WarehousePanel {
-  return value === 'stock' || value === 'slots'
+  return value === 'stock' || value === 'slots' || value === 'qr-audit'
 }
 
 export function WarehousePage() {
@@ -91,12 +92,13 @@ export function WarehousePage() {
   const hasInventory = activeView === 'box' || activeView === 'outbound'
   const requestedPanel = searchParams.get('panel')
   const activePanel: WarehousePanel =
-    hasInventory && isWarehousePanel(requestedPanel)
+    hasInventory && isWarehousePanel(requestedPanel) && (requestedPanel !== 'qr-audit' || brand.slug === 'masmarulez')
       ? requestedPanel
       : 'stock'
   const sectionTabs = [
     { value: 'stock' as const, label: active.label },
     { value: 'slots' as const, label: `${active.label} 자리 설정` },
+    ...(brand.slug === 'masmarulez' ? [{ value: 'qr-audit' as const, label: 'QR 연결 검수' }] : []),
   ]
 
   function selectView(view: WarehouseView) {
@@ -190,17 +192,17 @@ export function WarehousePage() {
         <CardHeader className="gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <CardTitle>
-              {activePanel === 'slots'
+              {activePanel === 'qr-audit' ? 'QR 연결 검수' : activePanel === 'slots'
                 ? `${active.label} 자리 설정`
                 : active.label}
             </CardTitle>
             <CardDescription className="mt-1">
-              {activePanel === 'slots'
+              {activePanel === 'qr-audit' ? '현장에서 촬영한 사진을 자리 목록과 비교해 상품을 연결합니다.' : activePanel === 'slots'
                 ? activeView === 'outbound' ? '형식에 상관없이 출고창고 자리번호를 입력합니다. 저장하면 현재 재고도 정확히 일치하는 번호는 출고창고, 나머지는 박스창고로 다시 분류됩니다.' : `${active.label}에 속하는 자리번호를 등록합니다. 등록된 출고창고 자리만 입고 시트에서 출고창고로 분류됩니다.`
                 : active.detail}
             </CardDescription>
           </div>
-          {!hasInventory || activePanel === 'slots' ? null : (
+          {!hasInventory || activePanel !== 'stock' ? null : (
             <Badge variant="warning">연습 데이터</Badge>
           )}
         </CardHeader>
@@ -211,6 +213,8 @@ export function WarehousePage() {
             <WarehouseBoxHistoryPanel key={brand.id} brandId={brand.id} includeActive />
           ) : activeView === 'fixed' ? (
             <WarehouseFixedLocationsPanel key={brand.id} brandId={brand.id} />
+          ) : activePanel === 'qr-audit' ? (
+            <WarehouseQrAuditReviewPanel key={brand.id} brandId={brand.id} />
           ) : activePanel === 'slots' ? (
             <WarehouseSlotSettingsPanel
               brandId={brand.id}
