@@ -589,7 +589,7 @@ export function WarehouseInventoryPanel({
                       />}
                       <RowAction
                         label="소진"
-                        disabled={!isWarehouseQuantityKnown(row) || warehousePositionQty(row) <= 0}
+                        disabled={!isWarehouseQuantityKnown(row)}
                         onClick={() => setDialog({ kind: 'deplete', row, requestId: crypto.randomUUID() })}
                       />
                       <RowAction
@@ -709,7 +709,7 @@ export function WarehouseInventoryPanel({
       {dialog?.kind === 'deplete' ? (
         <ConfirmDialog
           title="자리 소진"
-          body={`${dialog.row.styleNo} ${formatWarehouseLocation(dialog.row)}의 잔여 박스와 개봉 낱개를 0으로 만듭니다.`}
+          body={`${dialog.row.styleNo || dialog.row.sourceProductName} ${formatWarehouseLocation(dialog.row)}의 재고를 소진 처리하고 변경 이력에 남깁니다.`}
           confirmLabel="소진"
           onClose={() => setDialog(null)}
           onConfirm={async () => {

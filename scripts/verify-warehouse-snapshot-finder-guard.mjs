@@ -720,6 +720,16 @@ try {
   assert.match(manualNew.id, /^at_manual_[0-9a-f]{32}$/)
   assert.equal(manualNew.values[0], '')
   assert.equal(acceptWork(partialManual), 't')
+  const zeroCount = readPosition(fromAa)
+  assert.equal(query(asEditor + work(116, zeroCount, 'adjust', {
+    units_per_box: 12, remaining_boxes: 0, opened_units: 0,
+  })), 'true')
+  const zeroExport = sheetJob()
+  assert.equal(zeroExport.after[0].id, fromAa)
+  assert.equal(zeroExport.after[0].values[5], '0')
+  assert.equal(acceptWork(zeroExport), 't')
+  query(asService + sheet([...refreshed(), { ...fixtureRow, remaining_boxes: 0, remaining_boxes_raw: '0' }], 'clock_timestamp()'))
+  assert.equal(readPosition(fromAa).remaining_boxes, 0)
   console.log('PASS: stock work split and full moves, quantity adjust, depletion, idempotency and snapshot protection')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })

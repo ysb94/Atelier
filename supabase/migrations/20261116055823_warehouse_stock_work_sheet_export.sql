@@ -116,7 +116,7 @@ begin
       and external_row_id = v_old.external_row_id and id <> v_old.id) then
     raise exception '재고의 창고입력 AA 행을 확인해주세요.' using errcode = '22023';
   end if;
-  if not app.warehouse_qr_audit_is_active(v_old) then
+  if p_action = 'move' and not app.warehouse_qr_audit_is_active(v_old) then
     raise exception '소진된 재고입니다. 새로 입고해주세요.' using errcode = '22023';
   end if;
   select * into strict v_origin from public.warehouse_locations where id = v_old.location_id;
@@ -212,13 +212,13 @@ begin
     v_target := jsonb_populate_record(null::public.warehouse_stock_positions,v_result);
   end if;
 
-  if app.warehouse_qr_audit_is_active(v_target) then
+  if p_action <> 'deplete' then
     v_after := v_after || jsonb_build_array(app.warehouse_stock_work_sheet_row(
       v_target,coalesce(v_dest.code,v_origin.code),p_action = 'move' and v_target.id = v_old.id));
   end if;
 
   if nullif(v_old.box_qr, '') is not null then
-    if not app.warehouse_qr_audit_is_active(v_target) then
+    if p_action = 'deplete' then
       update public.warehouse_boxes set current_qty = 0, completed_at = clock_timestamp(),
         completed_by = v_actor, completion_kind = 'depleted', presumed_depleted_at = null,
         source_position_id = null
@@ -227,13 +227,15 @@ begin
     elsif p_action = 'move' then
       update public.warehouse_boxes set location_id = v_target.location_id, source_position_id = v_target.id
       where id = v_box.id;
+    elsif not app.warehouse_qr_audit_is_active(v_target) then
+      update public.warehouse_boxes set current_qty = 0 where id = v_box.id;
     else
       perform app.sync_warehouse_qr_audit_box(v_target,
         coalesce(v_box.style_id, v_target.style_id),v_actor);
     end if;
   end if;
 
-  if not app.warehouse_qr_audit_is_active(v_target) then
+  if p_action = 'deplete' then
     -- The movement keeps its original position ID across inventory replacements.
     if exists (select 1 from public.warehouse_boxes where brand_id = p_brand_id and source_position_id = v_target.id) then
       insert into app.warehouse_qr_audit_writes values (p_brand_id, pg_current_xact_id()) on conflict do nothing;
