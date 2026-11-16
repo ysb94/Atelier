@@ -12,11 +12,36 @@ function writeAtelierQrAuditSheet(sheet, entry) {
   const idMap = rows => new Map(rows.map(row => [row.id, row]));
   const before = idMap(entry.before);
   const after = idMap(entry.after);
-  const desiredQrs = new Set(entry.after.map(row => qrOf(row.qr)));
+  const stockWork = entry.kind === 'stock';
+  const afterQrs = entry.after.map(row => qrOf(row.qr));
+  const desiredQrs = new Set((stockWork ? entry.before.concat(entry.after) : entry.after)
+    .map(row => qrOf(row.qr)).filter(Boolean));
+  const identified = afterQrs.filter(Boolean);
   if (before.size !== entry.before.length || after.size !== entry.after.length ||
-      desiredQrs.size !== entry.after.length || desiredQrs.has('')) throw new Error('DUPLICATE_PLAN');
+      new Set(identified).size !== identified.length ||
+      (!stockWork && identified.length !== entry.after.length)) throw new Error('DUPLICATE_PLAN');
 
   function read() {
+    if (stockWork) {
+      const ids = sheet.getRange(first, 27, height, 1).getDisplayValues();
+      const qrs = desiredQrs.size ? sheet.getRange(first, 19, height, 1).getDisplayValues() : null;
+      const relevant = new Map();
+      for (let index = 0; index < ids.length; index++) {
+        const id = norm(ids[index][0]);
+        const qr = norm(qrs?.[index]?.[0]);
+        if (!before.has(id) && !after.has(id)) {
+          if (desiredQrs.has(qrOf(qr))) throw new Error('QR_AT_ANOTHER_ROW');
+          continue;
+        }
+        const sheetRow = first + index;
+        if (relevant.has(id)) throw new Error('AA_MISSING_OR_DUPLICATE');
+        if (sheetRow > limit) throw new Error('OUTSIDE_SNAPSHOT_RANGE');
+        const values = sheet.getRange(sheetRow, 2, 1, 7).getDisplayValues()[0].map(norm);
+        const actualQr = qrs ? qr : norm(sheet.getRange(sheetRow, 19).getDisplayValues()[0][0]);
+        relevant.set(id, { sheetRow, id, qr: actualQr, values });
+      }
+      return { relevant };
+    }
     const display = sheet.getRange(first, 1, height, 27).getDisplayValues();
     const relevant = new Map();
     display.forEach((cells, index) => {
@@ -34,13 +59,17 @@ function writeAtelierQrAuditSheet(sheet, entry) {
     return { display, relevant };
   }
 
+  function matchesValue(actual, expected, index, beforeWrite) {
+    if (index === 6 && beforeWrite && !stockWork) return true;
+    if (index === 6 && stockWork && (beforeWrite || expected.preserveNote) &&
+        norm(actual) === norm(expected.rawNote)) return true;
+    const value = expected.values[index];
+    return index === 4 || index === 5 ? countOf(actual) === countOf(value) : norm(actual) === norm(value);
+  }
+
   function matches(actual, expected, includeNote) {
-    if (!actual || ((includeNote || actual.qr) && qrOf(actual.qr) !== qrOf(expected.qr))) return false;
-    return expected.values.every((value, index) => {
-      if (!includeNote && index === 6) return true;
-      return index === 4 || index === 5
-        ? countOf(actual.values[index]) === countOf(value) : norm(actual.values[index]) === norm(value);
-    });
+    if (!actual || ((includeNote || stockWork || actual.qr) && qrOf(actual.qr) !== qrOf(expected.qr))) return false;
+    return expected.values.every((_, index) => matchesValue(actual.values[index], expected, index, !includeNote));
   }
 
   function verified(relevant) {
@@ -58,7 +87,12 @@ function writeAtelierQrAuditSheet(sheet, entry) {
     throw new Error('SHEET_STOCK_CHANGED');
   }
   const fresh = entry.after.filter(row => !relevant.has(row.id));
-  const empty = fresh.length ? findWarehousePlacementEmptyRows(sheet, first, display.slice(0, limit - first + 1), fresh.length) : [];
+  let empty = [];
+  if (fresh.length) {
+    const writableHeight = Math.min(height, limit - first + 1);
+    const candidates = stockWork ? sheet.getRange(first, 1, writableHeight, 27).getDisplayValues() : display.slice(0, writableHeight);
+    empty = findWarehousePlacementEmptyRows(sheet, first, candidates, fresh.length);
+  }
   if (empty.length !== fresh.length) throw new Error('NO_EMPTY_ROW');
 
   const requests = [];
@@ -82,9 +116,15 @@ function writeAtelierQrAuditSheet(sheet, entry) {
 
   for (const row of entry.after) {
     const target = relevant.get(row.id)?.sheetRow ?? empty.shift();
-    ensureWritable(target);
+    const current = relevant.get(row.id);
+    if (!stockWork || !current) ensureWritable(target);
+    const formulas = stockWork && current ? sheet.getRange(target, 1, 1, 27).getFormulas()[0] : [];
     const values = [...row.values, row.qr, row.id];
     for (let i = 0; i < manage.length; i++) {
+      if (stockWork && current) {
+        if (i === 7 || i === 8 || matchesValue(current.values[i], row, i, false)) continue;
+        if (formulas[manage[i] - 1]) throw new Error('FORMULA_CELL');
+      }
       const value = norm(values[i]);
       const numeric = (i === 4 || i === 5) && /^\d+$/.test(value);
       cell(target, manage[i], 'userEnteredValue', value ? { userEnteredValue: numeric

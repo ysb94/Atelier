@@ -17,7 +17,6 @@ import {
   importWarehouseInventorySet,
   listStyleRefsForLookup,
   moveWarehouseStock,
-  openWarehouseStock,
   receiveWarehouseStock,
   restoreWarehouseInventorySet,
   subscribeWarehouseInventorySetChanges,
@@ -27,6 +26,7 @@ import {
   correctWarehouseStockRow,
   listWarehouseStockConditionLinks,
   saveWarehouseStockCondition,
+  saveWarehouseStockWork,
   WAREHOUSE_STOCK_CONDITION_LABELS,
   type WarehouseStockCondition,
 } from '@/lib/supabase/warehouse-stock'
@@ -75,10 +75,8 @@ type DialogState =
   | { kind: 'correct'; row: WarehouseStockPosition; current: WarehouseStockCondition; styleNo: string }
   | { kind: 'condition'; row: WarehouseStockPosition; current: WarehouseStockCondition; styleNo: string }
   | { kind: 'move'; row: WarehouseStockPosition }
-  | { kind: 'replenish'; row: WarehouseStockPosition }
-  | { kind: 'deplete'; row: WarehouseStockPosition }
+  | { kind: 'deplete'; row: WarehouseStockPosition; requestId: string }
   | { kind: 'adjust'; row: WarehouseStockPosition }
-  | { kind: 'open'; row: WarehouseStockPosition }
   | { kind: 'history'; row?: WarehouseStockPosition }
   | null
 
@@ -355,6 +353,9 @@ export function WarehouseInventoryPanel({
               신규 입고
             </Button>
           ) : null}
+          <Button type="button" size="sm" variant="outline" onClick={() => setDialog({ kind: 'history' })}>
+            변경 이력
+          </Button>
           <Button
             type="button"
             size="sm"
@@ -565,26 +566,11 @@ export function WarehouseInventoryPanel({
                   </td>
                   <td className="px-2 py-1.5">
                     <div className="flex flex-wrap gap-1">
-                      {view === 'box' ? (
-                        <>
-                          <RowAction
-                            label="이동"
-                            disabled={!isWarehouseQuantityKnown(row)}
-                            onClick={() => setDialog({ kind: 'move', row })}
-                          />
-                          <RowAction
-                            label="충원"
-                            disabled={Boolean(condition) || !isWarehouseQuantityKnown(row)}
-                            onClick={() => setDialog({ kind: 'replenish', row })}
-                          />
-                        </>
-                      ) : (
-                        <RowAction
-                          label="개봉"
-                          disabled={!isWarehouseQuantityKnown(row)}
-                          onClick={() => setDialog({ kind: 'open', row })}
-                        />
-                      )}
+                      <RowAction
+                        label="이동"
+                        disabled={!isWarehouseQuantityKnown(row) || warehousePositionQty(row) <= 0}
+                        onClick={() => setDialog({ kind: 'move', row })}
+                      />
                       {sheetConditionEnabled && row.externalRowId && (
                         <RowAction label="행 수정" disabled={conditionQuery.isPending || conditionQuery.isError}
                           onClick={() => setDialog({ kind: 'correct', row,
@@ -603,8 +589,8 @@ export function WarehouseInventoryPanel({
                       />}
                       <RowAction
                         label="소진"
-                        disabled={!isWarehouseQuantityKnown(row)}
-                        onClick={() => setDialog({ kind: 'deplete', row })}
+                        disabled={!isWarehouseQuantityKnown(row) || warehousePositionQty(row) <= 0}
+                        onClick={() => setDialog({ kind: 'deplete', row, requestId: crypto.randomUUID() })}
                       />
                       <RowAction
                         label="실사"
@@ -707,11 +693,11 @@ export function WarehouseInventoryPanel({
           }}
         />
       ) : null}
-      {dialog?.kind === 'move' || dialog?.kind === 'replenish' ? (
+      {dialog?.kind === 'move' ? (
         <MoveDialog
           brandId={brandId}
           row={dialog.row}
-          replenish={dialog.kind === 'replenish'}
+          sheetEnabled={sheetConditionEnabled}
           onClose={() => setDialog(null)}
           onDone={async () => {
             setDialog(null)
@@ -727,9 +713,13 @@ export function WarehouseInventoryPanel({
           confirmLabel="소진"
           onClose={() => setDialog(null)}
           onConfirm={async () => {
-            await depleteWarehouseStock(brandId, dialog.row.id)
+            const trace = startWorkflow('app', 'warehouse_stock_deplete')
+            await trace.run('save', context => sheetConditionEnabled
+              ? saveWarehouseStockWork(brandId, dialog.requestId, dialog.row, 'deplete', {}, context)
+              : depleteWarehouseStock(brandId, dialog.row.id))
             setDialog(null)
             await invalidateStock()
+            trace.done()
           }}
           onError={setError}
         />
@@ -738,18 +728,7 @@ export function WarehouseInventoryPanel({
         <AdjustDialog
           brandId={brandId}
           row={dialog.row}
-          onClose={() => setDialog(null)}
-          onDone={async () => {
-            setDialog(null)
-            await invalidateStock()
-          }}
-          onError={setError}
-        />
-      ) : null}
-      {dialog?.kind === 'open' ? (
-        <OpenDialog
-          brandId={brandId}
-          row={dialog.row}
+          sheetEnabled={sheetConditionEnabled}
           onClose={() => setDialog(null)}
           onDone={async () => {
             setDialog(null)
@@ -761,7 +740,7 @@ export function WarehouseInventoryPanel({
       {dialog?.kind === 'history' ? (
         <HistoryDialog
           brandId={brandId}
-          setId={activeSet?.id}
+          setId={dialog.row ? activeSet?.id : undefined}
           row={dialog.row}
           onClose={() => setDialog(null)}
         />
@@ -1379,33 +1358,47 @@ function ReceiveDialog({
 function MoveDialog({
   brandId,
   row,
-  replenish,
+  sheetEnabled,
   onClose,
   onDone,
   onError,
 }: {
   brandId: string
   row: WarehouseStockPosition
-  replenish: boolean
+  sheetEnabled: boolean
   onClose: () => void
   onDone: () => Promise<void>
   onError: (message: string | null) => void
 }) {
-  const [toCode, setToCode] = useState(replenish ? row.locationCode : '')
+  const [toCode, setToCode] = useState('')
+  const [toZone, setToZone] = useState<WarehouseZone>(row.zone)
   const [boxCount, setBoxCount] = useState(String(row.remainingBoxes ?? ''))
+  const [requestId] = useState(() => crypto.randomUUID())
   const mutation = useMutation({
     mutationFn: async () => {
       const count = Number(boxCount)
       if (!toCode.trim()) throw new Error('옮길 자리번호를 입력하세요.')
+      if (!boxCount.trim() || !Number.isInteger(count) || count < 0 || count > (row.remainingBoxes ?? 0)) {
+        throw new Error('옮길 박스 수를 확인하세요.')
+      }
+      if (sheetEnabled) {
+        const trace = startWorkflow('app', 'warehouse_stock_move')
+        await trace.run('save', context => saveWarehouseStockWork(brandId, requestId, row, 'move', {
+          to_location_code: toCode.trim(),
+          box_count: count,
+        }, context))
+        trace.done()
+        return
+      }
       await moveWarehouseStock(
         brandId,
         {
           positionId: row.id,
           toLocationCode: toCode.trim(),
-          toZone: replenish ? 'picking' : 'box_storage',
+          toZone,
           boxCount: count,
         },
-        replenish ? 'replenish' : 'move',
+        row.zone === 'box_storage' && toZone === 'picking' ? 'replenish' : 'move',
       )
     },
     onSuccess: async () => {
@@ -1418,10 +1411,7 @@ function MoveDialog({
   })
 
   return (
-    <Overlay
-      title={replenish ? '출고창고 박스 충원' : '전체 박스 위치 이동'}
-      onClose={onClose}
-    >
+    <Overlay title="자리 이동" onClose={onClose}>
       <p className="text-xs text-muted-foreground">
         {row.styleNo} · {formatWarehouseLocation(row)} · 잔여{' '}
         {formatWarehouseCount(row.remainingBoxes)}박스.
@@ -1431,10 +1421,19 @@ function MoveDialog({
         <span className="text-muted-foreground">도착 자리번호</span>
         <Input value={toCode} onChange={(e) => setToCode(e.target.value)} />
       </label>
+      {!sheetEnabled && <label className="block space-y-1 text-xs">
+        <span className="text-muted-foreground">도착 창고</span>
+        <Select value={toZone} onChange={(e) => setToZone(e.target.value as WarehouseZone)}>
+          <option value="box_storage">박스창고</option>
+          <option value="picking">출고창고</option>
+        </Select>
+      </label>}
       <label className="block space-y-1 text-xs">
         <span className="text-muted-foreground">옮길 박스 수</span>
-        <Input value={boxCount} onChange={(e) => setBoxCount(e.target.value)} />
+        <Input type="number" min={row.openedUnits > 0 && row.remainingBoxes === 0 && sheetEnabled ? 0 : 1}
+          max={row.remainingBoxes ?? undefined} step={1} value={boxCount} onChange={(e) => setBoxCount(e.target.value)} />
       </label>
+      {mutation.error && <p role="alert" className="text-xs text-danger">{mutation.error.message}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>
           취소
@@ -1445,11 +1444,11 @@ function MoveDialog({
           disabled={
             mutation.isPending ||
             !isWarehouseQuantityKnown(row) ||
-            (row.remainingBoxes ?? 0) < 1
+            (!sheetEnabled && (row.remainingBoxes ?? 0) < 1)
           }
           onClick={() => mutation.mutate()}
         >
-          {replenish ? '충원' : '이동'}
+          이동
         </Button>
       </div>
     </Overlay>
@@ -1459,12 +1458,14 @@ function MoveDialog({
 function AdjustDialog({
   brandId,
   row,
+  sheetEnabled,
   onClose,
   onDone,
   onError,
 }: {
   brandId: string
   row: WarehouseStockPosition
+  sheetEnabled: boolean
   onClose: () => void
   onDone: () => Promise<void>
   onError: (message: string | null) => void
@@ -1472,8 +1473,20 @@ function AdjustDialog({
   const [boxes, setBoxes] = useState(String(row.remainingBoxes ?? ''))
   const [units, setUnits] = useState(String(row.unitsPerBox ?? ''))
   const [opened, setOpened] = useState(String(row.openedUnits))
+  const [requestId] = useState(() => crypto.randomUUID())
   const mutation = useMutation({
     mutationFn: async () => {
+      if ([boxes, units, opened].some(value => !value.trim())) throw new Error('입수와 잔여 수량을 입력하세요.')
+      if (sheetEnabled) {
+        const trace = startWorkflow('app', 'warehouse_stock_adjust')
+        await trace.run('save', context => saveWarehouseStockWork(brandId, requestId, row, 'adjust', {
+          remaining_boxes: Number(boxes),
+          opened_units: Number(opened),
+          units_per_box: Number(units),
+        }, context))
+        trace.done()
+        return
+      }
       await adjustWarehouseStock(brandId, {
         positionId: row.id,
         remainingBoxes: Number(boxes),
@@ -1506,6 +1519,7 @@ function AdjustDialog({
           <Input value={opened} onChange={(e) => setOpened(e.target.value)} />
         </label>
       </div>
+      {mutation.error && <p role="alert" className="text-xs text-danger">{mutation.error.message}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>
           취소
@@ -1517,64 +1531,6 @@ function AdjustDialog({
           onClick={() => mutation.mutate()}
         >
           저장
-        </Button>
-      </div>
-    </Overlay>
-  )
-}
-
-function OpenDialog({
-  brandId,
-  row,
-  onClose,
-  onDone,
-  onError,
-}: {
-  brandId: string
-  row: WarehouseStockPosition
-  onClose: () => void
-  onDone: () => Promise<void>
-  onError: (message: string | null) => void
-}) {
-  const [boxCount, setBoxCount] = useState('1')
-  const mutation = useMutation({
-    mutationFn: async () => {
-      await openWarehouseStock(brandId, row.id, Number(boxCount))
-    },
-    onSuccess: async () => {
-      onError(null)
-      await onDone()
-    },
-    onError: (err) => {
-      onError(err instanceof Error ? err.message : '개봉에 실패했습니다.')
-    },
-  })
-
-  return (
-    <Overlay title="박스 개봉" onClose={onClose}>
-      <p className="text-xs text-muted-foreground">
-        출고창고에서 박스를 열어 낱개로 바꿉니다. 남은 박스{' '}
-        {formatWarehouseCount(row.remainingBoxes)}.
-      </p>
-      <label className="block space-y-1 text-xs">
-        <span className="text-muted-foreground">개봉할 박스 수</span>
-        <Input value={boxCount} onChange={(e) => setBoxCount(e.target.value)} />
-      </label>
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={onClose}>
-          취소
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          disabled={
-            mutation.isPending ||
-            !isWarehouseQuantityKnown(row) ||
-            (row.remainingBoxes ?? 0) < 1
-          }
-          onClick={() => mutation.mutate()}
-        >
-          개봉
         </Button>
       </div>
     </Overlay>
@@ -1605,6 +1561,7 @@ function ConfirmDialog({
   return (
     <Overlay title={title} onClose={onClose}>
       <p className="text-xs text-muted-foreground">{body}</p>
+      {mutation.error && <p role="alert" className="text-xs text-danger">{mutation.error.message}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>
           취소
@@ -1636,8 +1593,8 @@ function HistoryDialog({
 }) {
   const query = useQuery({
     queryKey: ['warehouse-stock-movements', brandId, setId, row?.id],
-    queryFn: () => getWarehouseStockMovements(brandId, setId!, row?.id),
-    enabled: Boolean(setId),
+    queryFn: () => getWarehouseStockMovements(brandId, setId, row?.id),
+    enabled: !row || Boolean(setId),
   })
   const movements = query.data ?? emptyList()
 

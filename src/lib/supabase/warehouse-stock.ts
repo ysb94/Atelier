@@ -754,9 +754,28 @@ export async function correctWarehouseStockRow(
   if (error) throw new WarehouseStockStoreError(errorMessage(error, '재고 행을 수정하지 못했습니다.'), { cause: error })
 }
 
+export async function saveWarehouseStockWork(
+  brandId: string,
+  requestId: string,
+  row: Pick<WarehouseStockPosition, 'id' | 'updatedAt'>,
+  action: 'move' | 'adjust' | 'deplete',
+  payload: Record<string, string | number>,
+  context?: DiagnosticContext,
+) {
+  const { error } = await tracedQuery(getSupabase().rpc('save_warehouse_stock_work', {
+    p_brand_id: brandId,
+    p_request_id: requestId,
+    p_position_id: row.id,
+    p_expected_updated_at: row.updatedAt,
+    p_action: action,
+    p_payload: payload,
+  }), context)
+  if (error) throw new WarehouseStockStoreError(errorMessage(error, '창고 작업을 저장하지 못했습니다.'), { cause: error })
+}
+
 export async function listWarehouseStockMovements(
   brandId: string,
-  setId: string,
+  setId?: string,
   positionId?: string,
 ): Promise<WarehouseStockMovement[]> {
   const supabase = getSupabase()
@@ -766,9 +785,9 @@ export async function listWarehouseStockMovements(
       .from('warehouse_stock_movements')
       .select(MOVEMENT_COLUMNS)
       .eq('brand_id', brandId)
-      .eq('set_id', setId)
       .order('created_at', { ascending: false })
       .range(from, from + PAGE_SIZE - 1)
+    if (setId) query = query.eq('set_id', setId)
     if (positionId) query = query.eq('position_id', positionId)
     const { data, error } = await query
     if (error) {

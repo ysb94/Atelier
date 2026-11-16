@@ -685,7 +685,7 @@ export async function getWarehouseStockPositions(
 
 export async function getWarehouseStockMovements(
   brandId: string,
-  setId: string,
+  setId?: string,
   positionId?: string,
 ): Promise<WarehouseStockMovement[]> {
   await delay()

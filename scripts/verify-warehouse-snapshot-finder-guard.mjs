@@ -623,6 +623,104 @@ try {
   assert.equal(query(`select box_qr from warehouse_stock_positions where id='${qr.id}';`), qr.box_qr)
   assert.equal(confirmCondition(qrCondition), '1')
   console.log('PASS: correction retains QR and row identity, rejects stale or unauthorized edits, and uses the same sheet queue')
+
+  const pendingFinder = JSON.parse(query(asService + `select public.run_finder_warehouse_sheet_export('${brand}','claim','{}');`))
+  query(asService + `select public.run_finder_warehouse_sheet_export('${brand}','confirm',${json({ ...pendingFinder, rowNumber: 29 })});`)
+  query(atelierSql('20261116055823_warehouse_stock_work_sheet_export'))
+  const readPosition = (aa) => JSON.parse(query(`select to_jsonb(p) || jsonb_build_object('place',l.code)
+    from warehouse_stock_positions p join warehouse_locations l on l.id=p.location_id
+    where p.set_id='${activeId()}' and p.external_row_id=${quote(aa)};`))
+  const work = (suffix, position, action, payload) => `select public.save_warehouse_stock_work(
+    '${brand}','c0000000-0000-4000-8000-000000000${suffix}','${position.id}',${quote(position.updated_at)},
+    '${action}',${json(payload)})->>'sheetPending';`
+  const acceptWork = (job) => confirmAuditSheet(job, job.after.map(({ id, qr, values }) => ({ id, qr, values }))
+    .sort((a, b) => a.id.localeCompare(b.id)))
+  const fromAa = 'fixture-sheet'
+  query(`update public.warehouse_stock_positions set remaining_boxes=7,remaining_boxes_raw='7'
+    where set_id='${activeId()}' and external_row_id='${fromAa}';`)
+  const aggregate = readPosition(fromAa)
+  const split = work(109, aggregate, 'move', { to_location_code: 'P-7-1', box_count: 2 })
+  query(asReader + split, '42501')
+  query(asEditor + work(109, aggregate, 'move', { to_location_code: 'UNREGISTERED', box_count: 2 }), '22023')
+  assert.equal(query(asEditor + split), 'true')
+  assert.equal(query(asEditor + split), 'true')
+  const splitExport = sheetJob()
+  assert.equal(splitExport.kind, 'stock')
+  const splitRow = splitExport.after.find(row => row.id !== fromAa)
+  assert.match(splitRow.id, /^at_move_[0-9a-f]{32}$/)
+  assert.deepEqual(splitRow.values.slice(0, 6), ['M1234', 'Test style', 'P-7-1', '261113', '12', '2'])
+  assert.equal(readPosition(fromAa).remaining_boxes, 5)
+  assert.equal(readPosition(splitRow.id).remaining_boxes, 2)
+  assert.equal(query(`select count(*) from warehouse_stock_movements where position_id='${readPosition(splitRow.id).id}'
+    and action='move';`), '1')
+  query(asService + sheet(oldSheet, 'clock_timestamp()'), 'PWS07')
+  query(asEditor + work(110, aggregate, 'move', { to_location_code: 'P-7-1', box_count: 1 }), '40001')
+  assert.equal(confirmAuditSheet(splitExport, []), 'f')
+  const beforeSheetWrite = quote(query('select clock_timestamp();'))
+  assert.equal(acceptWork(splitExport), 't')
+  assert.equal(query(asEditor + split), 'false')
+  query(asService + sheet(oldSheet, beforeSheetWrite), 'PWS07')
+  const refreshed = () => JSON.parse(query(`select jsonb_agg(to_jsonb(p) || jsonb_build_object(
+    'location_code',l.code,'zone',l.zone,'note',concat_ws(' · ',case when p.opened_units>0
+      then '개봉 잔량 '||p.opened_units||'개' end,nullif(p.note,''))))
+    from warehouse_stock_positions p join warehouse_locations l on l.id=p.location_id
+    where p.set_id='${activeId()}' and app.warehouse_qr_audit_is_active(p);`))
+  query(asService + sheet(refreshed(), 'clock_timestamp()'))
+  assert.equal(readPosition(fromAa).remaining_boxes, 5)
+  assert.equal(readPosition(splitRow.id).place, 'P-7-1')
+
+  const wholeMove = work(110, readPosition(splitRow.id), 'move', { to_location_code: '2-1-1', box_count: 2 })
+  assert.equal(query(asEditor + wholeMove), 'true')
+  const wholeExport = sheetJob()
+  assert.deepEqual(wholeExport.after[0].values.map((value, index) => value !== wholeExport.before[0].values[index]), [
+    false, false, true, false, false, false, false,
+  ])
+  assert.equal(wholeExport.after[0].id, splitRow.id)
+  assert.equal(acceptWork(wholeExport), 't')
+  assert.equal(query(asEditor + work(111, readPosition(splitRow.id), 'adjust', {
+    units_per_box: 10, remaining_boxes: 3, opened_units: 2,
+  })), 'true')
+  const adjustExport = sheetJob()
+  assert.deepEqual(adjustExport.after[0].values.slice(4), ['10', '3', '개봉 잔량 2개'])
+  assert.equal(acceptWork(adjustExport), 't')
+  query(asService + sheet(refreshed(), 'clock_timestamp()'))
+  assert.equal(readPosition(splitRow.id).opened_units, 2)
+  assert.equal(readPosition(splitRow.id).note, '')
+  assert.equal(readPosition(splitRow.id).remaining_boxes, 3)
+  const consumed = readPosition(splitRow.id)
+  assert.equal(query(asEditor + work(112, consumed, 'deplete', {})), 'true')
+  const depleteExport = sheetJob()
+  assert.equal(depleteExport.before[0].id, splitRow.id)
+  assert.deepEqual(depleteExport.after, [])
+  assert.equal(query(asReader + `select count(*) from public.search_warehouse_finder_rows(
+    '${brand}','warehouse','2-1-1',100) where external_row_id='${splitRow.id}';`), '0')
+  assert.equal(acceptWork(depleteExport), 't')
+  query(asService + sheet(refreshed(), 'clock_timestamp()'))
+  assert.equal(query(`select count(*) from warehouse_stock_movements where position_id='${consumed.id}' and action='deplete';`), '1')
+  assert.equal(query(`select count(*) from warehouse_stock_positions where set_id='${activeId()}'
+    and external_row_id='${splitRow.id}';`), '0')
+  const qrMoveRow = readPosition(qr.external_row_id)
+  assert.equal(query(asEditor + work(113, qrMoveRow, 'move', { to_location_code: '2-1-1', box_count: 1 })), 'true')
+  const qrMove = sheetJob()
+  assert.equal(qrMove.before[0].id, qrMove.after[0].id)
+  assert.equal(qrMove.before[0].qr, qrMove.after[0].qr)
+  assert.equal(query(`select l.code from warehouse_boxes b join warehouse_locations l on l.id=b.location_id
+    where b.display_code='GUARD-REGULAR-QR';`), '2-1-1')
+  assert.equal(acceptWork(qrMove), 't')
+  assert.equal(query(asEditor + work(114, readPosition(qr.external_row_id), 'deplete', {})), 'true')
+  assert.equal(acceptWork(sheetJob()), 't')
+  query(asService + sheet(refreshed(), 'clock_timestamp()'))
+  assert.equal(query(`select (current_qty = 0 and completed_at is not null and completion_kind='depleted')::text
+    from warehouse_boxes where display_code='GUARD-REGULAR-QR';`), 'true')
+  assert.equal(query(asEditor + work(115, readPosition(event.external_row_id), 'move', {
+    to_location_code: '2-1-3', box_count: 1,
+  })), 'true')
+  const partialManual = sheetJob()
+  const manualNew = partialManual.after.find(row => row.id !== event.external_row_id)
+  assert.match(manualNew.id, /^at_manual_[0-9a-f]{32}$/)
+  assert.equal(manualNew.values[0], '')
+  assert.equal(acceptWork(partialManual), 't')
+  console.log('PASS: stock work split and full moves, quantity adjust, depletion, idempotency and snapshot protection')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)

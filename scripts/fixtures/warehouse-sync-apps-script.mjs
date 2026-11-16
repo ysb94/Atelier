@@ -25,6 +25,7 @@ export function verifyWarehouseSyncAppsScript() {
   const get = (row, column) => cells.get(coordinate(row, column)) ?? ''
   let maxRows = 12
   const sheet = {
+    getSheetId: () => 1,
     getMaxRows: () => maxRows,
     getLastRow: () => maxRows,
     getMaxColumns: () => 35,
@@ -255,5 +256,56 @@ export function verifyWarehouseSyncAppsScript() {
   assert.equal(get(5609, 4), '3-6-7')
   assert.throws(() => ctx._writeAtelierStockCondition(sheet, { ...correction,
     values: { ...correction.values, boxQr: 'OTHER' } }), /QR_CHANGED/)
+
+  const stockBatches = []
+  let lostReply = false
+  ctx.PLACEMENT_REMOVED_NOTE = 'Finder 지운 행 ID: '
+  ctx.warehousePlacementCell = (_id, row, column, fields, value) => ({ row, column, fields, value })
+  ctx.findWarehousePlacementEmptyRows = () => [5701]
+  ctx.warehousePlacementSheetApi = (_sheet, path, method, { requests }) => {
+    assert.equal(path, ':batchUpdate')
+    assert.equal(method, 'post')
+    stockBatches.push(requests)
+    for (const { row, column, fields, value } of requests) {
+      put(row, column, [value.userEnteredValue?.numberValue ?? value.userEnteredValue?.stringValue ?? ''])
+      if (fields.includes('note') && value.note) notes.set(coordinate(row, column), value.note)
+    }
+    if (lostReply) {
+      lostReply = false
+      throw new Error('LOST_BATCH_RESPONSE')
+    }
+  }
+  runInContext(readFileSync('scripts/google-apps-script/warehouse-qr-audit-sheet-sync.gs', 'utf8'), ctx)
+  const initial = { id: 'stock-aa', qr: '', rawNote: '메모',
+    values: ['M0049', '기존 상품', '2-1-1', '261113', '50', '7', '메모'] }
+  put(5700, 2, initial.values)
+  put(5700, 27, [initial.id, 'WPS 기존 데이터'])
+  put(5700, 9, ['다른 열'])
+  const moved = { ...initial, values: initial.values.map((value, i) => i === 2 ? '2-1-2' : value) }
+  const stockWork = (before, after) => ({ kind: 'stock', before, after })
+  formulas.set(coordinate(5700, 3), '=UNRELATED()')
+  ctx.writeAtelierQrAuditSheet(sheet, stockWork([initial], [moved]))
+  assert.deepEqual(Array.from(stockBatches.at(-1), ({ column }) => column), [4])
+  assert.equal(get(5700, 4), '2-1-2')
+  formulas.delete(coordinate(5700, 3))
+
+  const remaining = { ...moved, values: moved.values.map((v, i) => i === 5 ? '5' : v) }
+  const split = { id: 'stock-split-aa', qr: '', values: ['M0049', '기존 상품', 'P-7-1', '261113', '50', '2', '메모'] }
+  lostReply = true
+  const splitJob = stockWork([moved], [remaining, split])
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, splitJob), /LOST_BATCH_RESPONSE/)
+  assert.equal(stockBatches.length, 2)
+  assert.deepEqual(Array.from(ctx.writeAtelierQrAuditSheet(sheet, splitJob), row => row.id), [initial.id, split.id])
+  assert.equal(stockBatches.length, 2)
+  assert.deepEqual([get(5700, 7), get(5701, 4), get(5701, 7), get(5701, 27)], [5, 'P-7-1', 2, split.id])
+
+  const resized = { ...remaining, values: remaining.values.map((v, i) => i === 4 ? '40' : i === 5 ? '3' : v) }
+  ctx.writeAtelierQrAuditSheet(sheet, stockWork([remaining], [resized]))
+  assert.deepEqual(Array.from(stockBatches.at(-1), ({ column }) => column), [6, 7])
+  ctx.writeAtelierQrAuditSheet(sheet, stockWork([resized], []))
+  for (const column of [2, 3, 4, 5, 6, 7, 8, 19, 27]) assert.equal(get(5700, column), '')
+  assert.equal(get(5700, 9), '다른 열')
+  assert.equal(get(5701, 27), split.id)
+  assert.equal(notes.get(coordinate(5700, 27)), 'Finder 지운 행 ID: ' + initial.id)
   console.log('warehouse-sheet-sync Apps Script: trailing swatches, AA identity, product search and removal verified')
 }
