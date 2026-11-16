@@ -286,6 +286,26 @@ assert(
   roomListLocationCodes([], sameDateLocations.locations).get('슬림백 블랙')?.join(',') === '2-1-2,9-1-1,2-1-1',
   '방별리스트는 오래된 입고를 먼저 표시하고 입고일이 같으면 출고창고 자리를 먼저 표시한다',
 )
+const productM0139 = '스웨이드 셔링 미니플랩백팩 베이지'
+const boxM0139 = {
+  ...roomStockPosition, styleId: 's-m0139', styleNo: 'M0139', styleName: productM0139,
+  locationCode: '#-7-1', receivedOn: '2024-12-03', receivedOnRaw: '241203', unitsPerBox: 30, remainingBoxes: 8,
+}
+const pickingM0139 = {
+  ...boxM0139, locationCode: '3-2-4_C1', zone: 'picking' as const, remainingBoxes: 1,
+}
+const fixedM0139 = [{ sheetRow: 4696, productName: productM0139, location: '#-7-1' }]
+assert(
+  roomListLocationCodes(fixedM0139, indexRoomListLocations([boxM0139, pickingM0139]).locations)
+    .get(productM0139)?.join(',') === '3-2-4_C1,#-7-1',
+  'M0139은 박스창고 고정 자리가 등록되어도 같은 날 입고한 출고창고 자리를 먼저 표시한다',
+)
+assert(
+  roomListLocationCodes(fixedM0139, indexRoomListLocations([
+    boxM0139, { ...pickingM0139, receivedOn: '2024-12-04', receivedOnRaw: '241204' },
+  ]).locations).get(productM0139)?.join(',') === '#-7-1,3-2-4_C1',
+  '출고창고 입고일이 다르면 박스창고 고정 자리 순서를 유지한다',
+)
 const latestBoxSize = roomLocationIndex.latestPositions.get('슬림백 블랙')?.unitsPerBox ?? null
 assert(latestBoxSize === 100, '같은 자리에 재고 행이 여러 개면 가장 최근의 남은 재고에서 입수를 읽는다')
 assert(roomListBulkPacking('80', latestBoxSize) === '낱개 80개', '100개입 상품 80개는 대량출고다')

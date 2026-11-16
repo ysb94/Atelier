@@ -125,6 +125,22 @@ export function roomListLocationCodes(
     if (name && code && code !== EMPTY_WAREHOUSE_LOCATION_CODE) add(name, code)
   }
   for (const [name, positions] of warehouseLocations) {
+    const fixedCodes = groups.get(name)
+    if (fixedCodes) {
+      groups.set(name, new Map())
+      for (const [code, label] of fixedCodes) {
+        const fixedPosition = positions.find(position => parseWarehouseLocation(position.locationCode).locationCode === code)
+        if (fixedPosition?.zone === 'box_storage' && fixedPosition.receivedOn === receiptOrder(fixedPosition)) {
+          for (const position of positions) {
+            if (position.zone !== 'picking' || position.receivedOn !== fixedPosition.receivedOn ||
+              receiptOrder(position) !== position.receivedOn) continue
+            const pickingCode = parseWarehouseLocation(position.locationCode).locationCode
+            add(name, fixedCodes.get(pickingCode) ?? position.locationCode.trim())
+          }
+        }
+        add(name, label)
+      }
+    }
     for (const position of positions) add(name, position.locationCode.trim())
   }
 
