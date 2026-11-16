@@ -24,6 +24,7 @@ import {
   type WarehouseInventorySetRealtimeStatus,
 } from '@/lib/api'
 import {
+  correctWarehouseStockRow,
   listWarehouseStockConditionLinks,
   saveWarehouseStockCondition,
   WAREHOUSE_STOCK_CONDITION_LABELS,
@@ -71,6 +72,7 @@ type ReviewFilter =
 type DialogState =
   | { kind: 'import' }
   | { kind: 'receive' }
+  | { kind: 'correct'; row: WarehouseStockPosition; current: WarehouseStockCondition; styleNo: string }
   | { kind: 'condition'; row: WarehouseStockPosition; current: WarehouseStockCondition; styleNo: string }
   | { kind: 'move'; row: WarehouseStockPosition }
   | { kind: 'replenish'; row: WarehouseStockPosition }
@@ -583,6 +585,11 @@ export function WarehouseInventoryPanel({
                           onClick={() => setDialog({ kind: 'open', row })}
                         />
                       )}
+                      {sheetConditionEnabled && row.externalRowId && (
+                        <RowAction label="행 수정" disabled={conditionQuery.isPending || conditionQuery.isError}
+                          onClick={() => setDialog({ kind: 'correct', row,
+                            current: condition?.condition ?? 'normal', styleNo: condition?.referenceStyleNo || row.sourceStyleNo })} />
+                      )}
                       {sheetConditionEnabled && <RowAction
                         label="상태 변경"
                         disabled={conditionQuery.isPending || conditionQuery.isError || (!row.styleId && !condition) ||
@@ -679,6 +686,13 @@ export function WarehouseInventoryPanel({
             await invalidateStock()
           }}
         />
+      ) : null}
+      {dialog?.kind === 'correct' ? (
+        <StockRowCorrectionDialog brandId={brandId} row={dialog.row} current={dialog.current} styleNo={dialog.styleNo}
+          onClose={() => setDialog(null)} onDone={async () => {
+            setDialog(null)
+            await invalidateStock()
+          }} />
       ) : null}
       {dialog?.kind === 'condition' ? (
         <StockConditionDialog
@@ -1124,6 +1138,95 @@ function StockConditionDialog({
         <Button type="button" variant="outline" size="sm" disabled={mutation.isPending} onClick={onClose}>취소</Button>
         <Button type="button" size="sm" disabled={condition === current || mutation.isPending}
           onClick={() => mutation.mutate()}>저장</Button>
+      </div>
+    </Overlay>
+  )
+}
+
+const STOCK_ROW_EDIT_FIELDS = [
+  { key: 'number', label: 'M번호', max: 80 },
+  { key: 'productName', label: '상품명', max: 300 },
+  { key: 'place', label: '자리번호 (마지막 위치는 //)', max: 80 },
+  { key: 'receivedOn', label: '입고일', max: 40 },
+  { key: 'units', label: '박스당 수량', max: 6 },
+  { key: 'boxes', label: '잔여 박스', max: 5 },
+  { key: 'note', label: '메모', max: 500 },
+] as const
+
+function StockRowCorrectionDialog({ brandId, row, current, styleNo, onClose, onDone }: {
+  brandId: string
+  row: WarehouseStockPosition
+  current: WarehouseStockCondition
+  styleNo: string
+  onClose: () => void
+  onDone: () => Promise<void>
+}) {
+  const [requestId] = useState(() => crypto.randomUUID())
+  const suffix = `_(${WAREHOUSE_STOCK_CONDITION_LABELS[current]})`
+  const original = {
+    number: styleNo,
+    productName: current !== 'normal' && row.sourceProductName.endsWith(suffix)
+      ? row.sourceProductName.slice(0, -suffix.length) : row.sourceProductName,
+    place: formatWarehouseLocation(row),
+    receivedOn: row.receivedOnRaw,
+    units: row.unitsPerBox?.toString() ?? '',
+    boxes: row.remainingBoxes?.toString() ?? '',
+    note: row.note,
+    zone: row.zone,
+    condition: current,
+  }
+  const [fields, setFields] = useState(original)
+  const changes = Object.fromEntries(Object.entries(fields).filter(([key, value]) =>
+    value.trim() !== original[key as keyof typeof original].trim()).map(([key, value]) => [key, value.trim()]))
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const trace = startWorkflow('app', 'warehouse_row_correction')
+      trace.step('validate_input')
+      const patch: Record<string, string | null> = { ...changes }
+      if ('receivedOn' in patch) {
+        const date = parseWarehouseReceivedOn(fields.receivedOn)
+        if (!date.dateValid) {
+          trace.block('invalid_date')
+          throw new Error('입고일을 YYMMDD 또는 YYYY-MM-DD 형식으로 입력하세요.')
+        }
+        patch.receivedOn = date.receivedOnRaw
+        patch.date = date.receivedOn
+        patch.priority = date.usagePriority
+      }
+      await trace.run('save', context => correctWarehouseStockRow(brandId, requestId, row, patch, context))
+      return trace
+    },
+    onSuccess: async trace => {
+      await trace.run('refresh_queries', onDone, { writeOutcome: 'committed' })
+      trace.done({ writeOutcome: 'committed' })
+    },
+  })
+  return (
+    <Overlay title="재고 행 수정" onClose={onClose}>
+      {row.boxQr && <p className="text-xs text-muted-foreground">박스 QR {row.boxQr}</p>}
+      <div className="grid grid-cols-2 gap-3">
+        <label className="space-y-1 text-xs">
+          <span className="text-muted-foreground">창고 구역</span>
+          <Select value={fields.zone} disabled={mutation.isPending}
+            onChange={event => setFields({ ...fields, zone: event.target.value as WarehouseZone })}>
+            <option value="box_storage">박스창고</option><option value="picking">출고창고</option>
+          </Select>
+        </label>
+        <StockConditionField value={fields.condition} disabled={mutation.isPending}
+          onChange={condition => setFields({ ...fields, condition })} />
+        {STOCK_ROW_EDIT_FIELDS.map(field => (
+          <label key={field.key} className={cn('space-y-1 text-xs', field.key === 'note' && 'col-span-2')}>
+            <span className="text-muted-foreground">{field.label}</span>
+            <Input value={fields[field.key]} maxLength={field.max} disabled={mutation.isPending}
+              onChange={event => setFields({ ...fields, [field.key]: event.target.value })} />
+          </label>
+        ))}
+      </div>
+      {mutation.error && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={onClose}>취소</Button>
+        <Button type="button" size="sm" disabled={mutation.isPending || !Object.keys(changes).length || !fields.productName.trim()}
+          onClick={() => mutation.mutate()}>수정 저장</Button>
       </div>
     </Overlay>
   )

@@ -1264,6 +1264,10 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   예약한다. 기존 Apps Script가 B열을 비워 새 행을 추가한다. 전체 동기화는 이 AA 행의 상품명을
   상품 목록과 자동 연결하지 않는다. 적용 순서는 `20261116042928_warehouse_manual_product_receive.sql`,
   `warehouse-sheet-sync` Edge Function, 화면 배포다.
+- `correct_warehouse_stock_row`는 기존 입고 권한으로 활성 재고의 상품, 날짜, 위치, 박스
+  수량, 메모와 상태를 정정한다. AA와 QR은 같은 값을 유지하며 저장 시 수정 시각과 시트
+  반영 대기를 검사한다. 기존 예약 작업이 같은 AA의 변경된 B:H 셀을 갱신한다. 개봉 낱개
+  수량은 기존 실사 기능을 사용한다. 행 수정 마이그레이션과 Apps Script·화면은 함께 적용한다.
 - 로직: `src/lib/warehouse/stock.ts`. 저장소: `src/lib/supabase/warehouse-stock.ts`.
   화면: `WarehousePage`, `WarehouseInventoryPanel`.
 - 창고 파인더는 같은 활성 sandbox 세트를 읽기 전용으로 검색한다. Firebase

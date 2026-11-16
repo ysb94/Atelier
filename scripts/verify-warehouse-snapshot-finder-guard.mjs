@@ -584,6 +584,45 @@ try {
     where set_id='${currentSetId}' and external_row_id='at_c0000000000040008000000000000104';
     rollback;`), 'M1234')
   console.log('PASS: manual products in both zones, current ACL and original stock preserved, one row per request, pending/stale/missing sheet protection')
+
+  query(atelierSql('20261116045654_warehouse_stock_row_correction'))
+  const event = JSON.parse(query(`select to_jsonb(p) from warehouse_stock_positions p
+    where p.set_id='${currentSetId}' and p.external_row_id like 'at_manual_%101';`))
+  const correct = (suffix, row, changes) => `select public.correct_warehouse_stock_row('${brand}',
+    'c0000000-0000-4000-8000-000000000${suffix}','${row.id}',${quote(row.updated_at)},${json(changes)})->>'saved';`
+  query(asReader + correct(105, event, { productName: 'Denied' }), '42501')
+  query(asEditor + correct(105, event, { boxQr: 'REPLACED' }), '22023')
+  const correction = { productName: eventName + ' 수정', place: 'P-7-1', zone: 'picking', note: '라벨 정정' }
+  assert.equal(query(asEditor + correct(105, event, correction)), 'true')
+  assert.equal(query(asEditor + correct(105, event, correction)), 'true')
+  query(asEditor + correct(106, event, { note: 'Stale' }), '40001')
+  const edited = queued()
+  assert.equal(edited.rowId, event.external_row_id)
+  assert.equal(edited.before.productName, eventName)
+  assert.equal(edited.values.number, '')
+  assert.equal(edited.values.place, 'P-7-1')
+  assert.equal(edited.values.boxes, edited.before.boxes)
+  assert.equal(confirmCondition(edited), '1')
+  const qr = JSON.parse(query(`select to_jsonb(p) from warehouse_stock_positions p
+    where p.set_id='${currentSetId}' and p.box_qr='GUARD-REGULAR-QR';`))
+  assert.equal(query(asEditor + correct(107, qr, {
+    receivedOn: '261116', date: '2026-11-16', priority: 'fifo', units: '15', note: 'QR 라벨 수정',
+  })), 'true')
+  const qrCorrection = queued()
+  assert.equal(qrCorrection.rowId, qr.external_row_id)
+  assert.equal(qrCorrection.values.boxQr, qr.box_qr)
+  assert.equal(qrCorrection.values.number, 'M1234')
+  assert.equal(query(`select current_qty from public.warehouse_boxes where display_code='GUARD-REGULAR-QR';`), '15')
+  assert.equal(confirmCondition(qrCorrection), '1')
+  const updatedQr = JSON.parse(query(`select to_jsonb(p) from warehouse_stock_positions p where id='${qr.id}';`))
+  assert.equal(query(asEditor + correct(108, updatedQr, { condition: 'needs_inspection' })), 'true')
+  const qrCondition = queued()
+  assert.equal(qrCondition.values.number, '')
+  assert.equal(qrCondition.values.productName, 'Test style_(검수 필요)')
+  assert.equal(qrCondition.values.boxQr, qr.box_qr)
+  assert.equal(query(`select box_qr from warehouse_stock_positions where id='${qr.id}';`), qr.box_qr)
+  assert.equal(confirmCondition(qrCondition), '1')
+  console.log('PASS: correction retains QR and row identity, rejects stale or unauthorized edits, and uses the same sheet queue')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)

@@ -34,7 +34,11 @@ export function verifyWarehouseSyncAppsScript() {
         getValue: () => get(row, column),
         getRow: () => row,
         getValues: () => read(get),
-        getDisplayValues: () => read((r, c) => String(get(r, c))),
+        getDisplayValues: () => read((r, c) => {
+          const value = get(r, c)
+          return value instanceof Date ? value.toISOString().slice(0, 10).split('-').map(Number).join('-') : String(value)
+        }),
+        getFormula: () => formulas.get(coordinate(row, column)) ?? '',
         getFormulas: () => read((r, c) => formulas.get(coordinate(r, c)) ?? ''),
         createTextFinder(key) {
           return {
@@ -54,7 +58,7 @@ export function verifyWarehouseSyncAppsScript() {
             typeof value === 'string' && value.startsWith("'") ? value.slice(1) : value)))
           return this
         },
-        setValue(value) { put(row, column, [value]); return this },
+        setValue(value) { put(row, column, [typeof value === 'string' && value.startsWith("'") ? value.slice(1) : value]); return this },
         setNumberFormat() { return this },
         getNotes: () => read((r, c) => notes.get(coordinate(r, c)) ?? ''),
         getNote: () => notes.get(coordinate(row, column)) ?? '',
@@ -207,6 +211,8 @@ export function verifyWarehouseSyncAppsScript() {
   assert.equal(ctx._writeAtelierStockCondition(sheet, restore).number, 'M0049')
   assert.equal(get(5609, 3), '뒤쪽 재고')
   put(8003, 3, [''])
+  notes.set(coordinate(5610, 27), '이전 행의 작업 메모')
+  formulas.set(coordinate(5611, 3), '=IF(TRUE,"","")')
   for (const [i, place] of ['2-1-1', 'P-7-1'].entries()) {
     const rowId = `at_manual_${String(i).padStart(32, '0')}`
     const entry = { requestId: `event-${i}`, rowId, before: null,
@@ -214,13 +220,30 @@ export function verifyWarehouseSyncAppsScript() {
         receivedOn: '261116', units: '20', boxes: '2', note: '' } }
     assert.equal(ctx._writeAtelierStockCondition(sheet, entry).row_id, rowId)
     assert.equal(ctx._writeAtelierStockCondition(sheet, entry).row_id, rowId)
-    assert.deepEqual([get(5610 + i, 2), get(5610 + i, 3), get(5610 + i, 4), get(5610 + i, 27)],
+    assert.deepEqual([get(5612 + i, 2), get(5612 + i, 3), get(5612 + i, 4), get(5612 + i, 27)],
       ['', entry.values.productName, place, rowId])
   }
+  const firstEvent = { requestId: 'event-0', rowId: `at_manual_${'0'.repeat(32)}`, before: null,
+    values: { number: '', productName: '캐논 콜라보 토트백', place: '2-1-1',
+      receivedOn: '261116', units: '20', boxes: '2', note: '' } }
+  put(5612, 4, [new Date('2002-01-01T00:00:00Z')])
+  assert.equal(ctx._writeAtelierStockCondition(sheet, firstEvent).row_id, firstEvent.rowId)
+  assert.equal(get(5612, 4), '2-1-1')
   ctx.syncAtelierWarehouseSnapshot_({ validateOnly: false })
   const events = payloads.at(-1).rows.filter(row => row.externalRowId.startsWith('at_manual_'))
   assert.equal(events.length, 2)
+  assert.equal(notes.get(coordinate(5610, 27)), '이전 행의 작업 메모')
+  assert.equal(formulas.get(coordinate(5611, 3)), '=IF(TRUE,"","")')
   assert.ok(events.every(row => row.sourceStyleNo === '' && row.sourceProductName === '캐논 콜라보 토트백'))
   assert.equal(get(5609, 3), '뒤쪽 재고')
+  const prior = { number: 'M0049', productName: '뒤쪽 재고', place: '3-4-4_B1',
+    receivedOn: '261113', units: '38', boxes: '1', note: '', boxQr: 'QR-5609' }
+  const correction = { rowId: 'after-3000', requestId: 'correction', before: prior,
+    values: { ...prior, productName: '정정 이름', receivedOn: '261116', units: '40' } }
+  assert.equal(ctx._writeAtelierStockCondition(sheet, correction).product_name, '정정 이름')
+  assert.equal(ctx._writeAtelierStockCondition(sheet, correction).row_id, 'after-3000')
+  assert.deepEqual([get(5609, 5), get(5609, 6), get(5609, 19), get(5609, 27)], ['261116', 40, 'QR-5609', 'after-3000'])
+  assert.throws(() => ctx._writeAtelierStockCondition(sheet, { ...correction,
+    values: { ...correction.values, boxQr: 'OTHER' } }), /QR_CHANGED/)
   console.log('warehouse-sheet-sync Apps Script: trailing swatches, AA identity, product search and removal verified')
 }

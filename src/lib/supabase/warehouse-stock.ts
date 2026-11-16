@@ -737,6 +737,23 @@ export async function saveWarehouseStockCondition(
   }
 }
 
+export async function correctWarehouseStockRow(
+  brandId: string,
+  requestId: string,
+  row: Pick<WarehouseStockPosition, 'id' | 'updatedAt'>,
+  changes: Record<string, string | null>,
+  context?: DiagnosticContext,
+) {
+  const { error } = await tracedQuery(getSupabase().rpc('correct_warehouse_stock_row', {
+    p_brand_id: brandId,
+    p_request_id: requestId,
+    p_position_id: row.id,
+    p_expected_updated_at: row.updatedAt,
+    p_changes: changes,
+  }), context)
+  if (error) throw new WarehouseStockStoreError(errorMessage(error, '재고 행을 수정하지 못했습니다.'), { cause: error })
+}
+
 export async function listWarehouseStockMovements(
   brandId: string,
   setId: string,
