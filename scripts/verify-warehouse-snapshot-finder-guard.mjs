@@ -977,6 +977,71 @@ try {
   query(asService + sheet(beforeDeplete, removalSnapshotAt))
   assert.equal(query(`select count(*) from public.warehouse_stock_positions where set_id='${activeId()}' and external_row_id='${splitAa}';`), '0')
   console.log('PASS: split moves, per-group conflicts, independent intake and retry, picking handover, depletion proof, audit reason and tombstone')
+  // Legacy sheet storage can be empty after an accidental full move to picking.
+  const moveFunction = "'public.save_warehouse_stock_work(uuid,uuid,uuid,timestamptz,text,jsonb)'::regprocedure"
+  const moveAcl = query(`select proacl::text from pg_proc where oid=${moveFunction};`)
+  const finderGuard = query(`select md5(pg_get_functiondef('app.assert_warehouse_qr_audit_sheet_ready(uuid,text,text,text)'::regprocedure));`)
+  const knownLocationsMigration = atelierSql('20261116112508_warehouse_stock_move_existing_locations')
+  query(knownLocationsMigration)
+  query(knownLocationsMigration)
+  assert.equal(query(`select proacl::text from pg_proc where oid=${moveFunction};`), moveAcl)
+  assert.equal(query(`select md5(pg_get_functiondef('app.assert_warehouse_qr_audit_sheet_ready(uuid,text,text,text)'::regprocedure));`), finderGuard)
+  query(`insert into warehouse_registered_slots(warehouse_id,code,zone) values
+    ('${warehouse}','P-9-1','picking'), ('${warehouse}','P-9-2','picking');
+    insert into warehouse_locations(company_id,warehouse_id,code,zone) values
+    ('${company}','${warehouse}','%-6-9','box_storage'),
+    ('${company}','${warehouse}','LEGACY-FULL','box_storage'),
+    ('${company}','${warehouse}','LEGACY-PICKING','picking'),
+    ('${company}','${warehouse}','LEGACY-DUP','box_storage'),
+    ('${company}','${warehouse}','legacy-dup','box_storage'),
+    ('${company}','${warehouse}','P-9-2','box_storage');
+    insert into warehouses(id,company_id,name)
+    values ('a0000000-0000-4000-8000-000000000099','${company}','Other warehouse');
+    insert into warehouse_locations(company_id,warehouse_id,code,zone)
+    values ('${company}','a0000000-0000-4000-8000-000000000099','OTHER-ONLY','box_storage');`)
+  const legacySourceAa = 'legacy-move-source'
+  query(asService + sheet([...refreshed(), {
+    ...row(legacySourceAa, '', 'P-9-1'), zone: 'picking', remaining_boxes: 9,
+    remaining_boxes_raw: '9', source_row_number: 70,
+  }], 'clock_timestamp()'))
+  const legacySource = readPosition(legacySourceAa)
+  const restoreEight = work(220, legacySource, 'move', { to_location_code: '  %-6-9  ', box_count: 8 })
+  query(asReader + restoreEight, '42501')
+  for (const place of ['NEW-UNKNOWN', 'OTHER-ONLY', 'LEGACY-PICKING', 'LEGACY-DUP', '%-6-%']) {
+    query(asEditor + work(220, legacySource, 'move', { to_location_code: place, box_count: 8 }), '22023')
+  }
+  query(asEditor + restoreEight.replace(brand, other), '42501')
+  assert.equal(readPosition(legacySourceAa).remaining_boxes, 9)
+  assert.equal(query(`select count(*) from app.warehouse_qr_audit_sheet_exports where id='c0000000-0000-4000-8000-000000000220';`), '0')
+  assert.equal(query(asEditor + restoreEight), 'true')
+  assert.equal(query(asEditor + restoreEight), 'true')
+  query(asEditor + work(221, legacySource, 'move', { to_location_code: '%-6-9', box_count: 8 }), '40001')
+  const returnedAa = 'at_move_c0000000000040008000000000000220'
+  const returned = readPosition(returnedAa)
+  assert.equal(readPosition(legacySourceAa).remaining_boxes, 1)
+  assert.equal(returned.remaining_boxes, 8)
+  assert.equal(returned.place, '%-6-9')
+  assert.equal(returned.received_on, legacySource.received_on)
+  assert.equal(returned.units_per_box, legacySource.units_per_box)
+  assert.equal(returned.box_qr, null)
+  assert.equal(query(`select count(*) from warehouse_stock_movements where position_id='${returned.id}';`), '1')
+  const [returnedJob] = claimJobs().jobs
+  assert.equal(returnedJob.after.length, 2)
+  assert.deepEqual(returnedJob.after.map(r => [r.values[2], r.values[5]]).sort(),
+    [['%-6-9', '8'], ['P-9-1', '1']])
+  assert.equal(confirmJob(returnedJob), 't')
+  // The registered picking classification wins over an older storage location.
+  assert.equal(query(asEditor + work(222, returned, 'move', { to_location_code: 'P-9-2', box_count: 1 })), 'true')
+  const pickingAa = 'at_move_c0000000000040008000000000000222'
+  assert.equal(query(`select l.zone from warehouse_locations l where l.id='${readPosition(pickingAa).location_id}';`), 'picking')
+  query(asEditor + work(223, readPosition(returnedAa), 'move', { to_location_code: 'P-9-2', box_count: 1 }), '23505')
+  assert.equal(query(asEditor + work(224, readPosition(pickingAa), 'move', { to_location_code: ' legacy-full ', box_count: 1 })), 'true')
+  assert.equal(readPosition(pickingAa).place, 'LEGACY-FULL')
+  assert.equal(readPosition(returnedAa).remaining_boxes, 7)
+  const [latestLegacyJob] = claimJobs().jobs
+  assert.equal(confirmJob(latestLegacyJob), 't')
+  assert.equal(claimJobs().jobs.length, 0)
+  console.log('PASS: known sheet storage full/split moves, 9 to 1+8, stable AA and date, retry, scope, permission, picking classification and occupancy')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)

@@ -39,5 +39,19 @@ select public.reconcile_atelier_stock_sheet_baseline(
 
 ## 로컬 검증
 
+### 기존 시트 보관 자리로 이동
+
+등록된 자리를 먼저 조회하고, 없으면 같은 창고의 `warehouse_locations`에 남아 있는
+유일한 `box_storage` 자리도 이동 대상으로 인정한다. 현재 재고가 비어 있는 원래 자리로도
+돌아갈 수 있다. 등록되지 않은 출고 자리, 다른 창고의 자리, 중복 분류·대소문자 중복 자리,
+존재하지 않는 새 자리는 허용하지 않는다. `%`는 검색 와일드카드가 아닌 자리번호의 문자다.
+등록된 출고 자리의 분류와 점유 검증, 재고 버전·QR·권한 검사, Finder 동기화 차단은 유지한다.
+
+로컬 마이그레이션 `20261116112508_warehouse_stock_move_existing_locations.sql`은
+사용자 승인 후 공유 DB `20261116112801`로 적용했다. 기존 이동 RPC의 목적지 조회만
+변경하므로 웹·Edge Function·Apps Script 재배포는 필요하지 않다.
+실제 test 사이트의 기존 이동창에서 M2379 9박스 중 8박스를 `%-6-9`로 반환했고,
+`3-5-5_B2`에는 1박스를 남겼다. 두 행 모두 입고일 `261027`, 박스당 32개를 유지한다.
+
 - `npm run verify:warehouse-snapshot-finder-guard`는 격리된 로컬 PostgreSQL에서 실제 마이그레이션과 Finder/Atelier RPC를 실행한다.
 - `npm run verify:warehouse-sheet-sync`는 모의 Apps Script에서 AA별 쓰기, 실제 값 재조회, 재시도, WPS 호환과 한 묶음의 실패가 다른 묶음을 막지 않는지 확인한다.
