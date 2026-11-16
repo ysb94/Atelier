@@ -4,6 +4,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { build as viteBuild } from 'vite'
 import { verifyWarehouseSyncAppsScript } from './fixtures/warehouse-sync-apps-script.mjs'
+import { verifyWarehouseSheetWritebackEdge } from './fixtures/warehouse-sheet-writeback-edge.mjs'
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = path.join(root, 'node_modules', '.tmp')
@@ -11,6 +12,7 @@ const outfile = path.join(outDir, 'warehouse-stock-verify.mjs')
 const entry = path.join(root, 'src', 'lib', 'warehouse', 'stock.verify.ts')
 
 verifyWarehouseSyncAppsScript()
+await verifyWarehouseSheetWritebackEdge()
 
 mkdirSync(outDir, { recursive: true })
 

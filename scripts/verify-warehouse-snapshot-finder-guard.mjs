@@ -833,6 +833,150 @@ try {
   assert.equal(readPosition(namedAa).box_qr, 'PHOTO-UNPLACED')
   assert.equal(lookup('PHOTO-UNPLACED').qrLink, undefined)
   console.log('PASS: private unplaced review photo, product-only review, actual name-only intake, sheet confirmation and snapshot')
+
+  query(atelierSql('20261116094915_atelier_stock_sheet_writeback'))
+  const claimJobs = () => JSON.parse(query(asService + `select public.claim_atelier_stock_sheet_jobs('${brand}');`))
+  assert.deepEqual(claimJobs(), { enabled: false, jobs: [] })
+  const chainAa = 'atelier-sequential'
+  const repairAa = 'legacy-sent-partial-proof'
+  const startRows = [...refreshed(), ...[chainAa, repairAa].map((aa, index) => ({
+    ...row(aa, '', '2-1-1'), source_row_number: 61 + index, remaining_boxes: 2, remaining_boxes_raw: '2',
+  }))]
+  query(asService + sheet(startRows, 'clock_timestamp()'))
+  assert.equal(query(asEditor + correct(200, readPosition(repairAa), { boxes: '3' })), 'true')
+  // Emulate a B/C-only acknowledgement from the old worker before the strict check was installed.
+  query(`update app.warehouse_stock_condition_exports set sheet_synced_at=clock_timestamp()
+    where brand_id='${brand}' and external_row_id='${repairAa}';`)
+  assert.equal(query(asEditor + work(201, readPosition(repairAa), 'move', { to_location_code: '2-1-3', box_count: 3 })), 'true')
+  const activate = `select public.activate_atelier_stock_sheet_writeback('${brand}');`
+  query(asReader + activate, '42501')
+  assert.equal(query(asService + activate), '1')
+  const legacyObserved = { id: repairAa, qr: '', values: ['M1234', 'Test style', '2-1-1', '261113', '12', '2', ''] }
+  const reconcile = (observed, version = readPosition(repairAa).updated_at) =>
+    `select public.reconcile_atelier_stock_sheet_baseline('${brand}','${repairAa}',${quote(version)},${json(observed)});`
+  query(asService + reconcile({ ...legacyObserved, values: [...legacyObserved.values.slice(0, 6), 'wrong'] }), '22023')
+  query(asService + reconcile(legacyObserved, '2026-01-01'), '40001')
+  assert.match(query(asService + reconcile(legacyObserved)), /^\d+$/)
+  assert.equal(query(asService + activate), '0')
+  const receiptRows = job => job.after.map(({ id, qr, values }) => ({ id, qr, values }))
+  const absentIds = job => job.ids.filter(aa => !job.after.some(projection => projection.id === aa))
+  const confirmJob = (job, observed = receiptRows(job), absent = absentIds(job), lease = job.lease) => query(asService +
+    `select public.finish_atelier_stock_sheet_job('${brand}','${job.id}','${lease}',${json(observed)},array[${absent.map(quote).join(',')}]::text[]);`)
+  const syncedJobs = claimJobs()
+  assert.equal(syncedJobs.enabled, true)
+  assert.equal(syncedJobs.jobs.length, 1)
+  const repairJob = syncedJobs.jobs[0]
+  assert.deepEqual(receiptRows({ after: repairJob.before }), [legacyObserved])
+  assert.deepEqual(repairJob.after[0].values.slice(2, 6), ['2-1-3', '261113', '12', '3'])
+  assert.equal(query(asService + `select count(*) from public.list_warehouse_qr_audit_sheet_exports('${brand}');`), '0')
+  assert.equal(confirmAuditSheet(repairJob, receiptRows(repairJob)), 'f')
+  assert.equal(confirmJob(repairJob, [legacyObserved]), 'f')
+  assert.equal(confirmJob(repairJob), 't')
+  console.log('PASS: only pending Atelier work adopted; stale legacy claim rebased from observed AA and current stock')
+
+  const initialChain = readPosition(chainAa)
+  assert.equal(query(asEditor + correct(202, initialChain, { boxes: '3' })), 'true')
+  assert.equal(query(asEditor + work(203, readPosition(chainAa), 'move', { to_location_code: '2-1-3', box_count: 3 })), 'true')
+  assert.equal(query(asEditor + correct(204, readPosition(chainAa), { note: '최종 메모' })), 'true')
+  assert.equal(readPosition(chainAa).remaining_boxes, 3)
+  assert.equal(readPosition(chainAa).place, '2-1-3')
+  assert.equal(query(`select count(*) from public.warehouse_stock_movements where position_id='${initialChain.id}'`), '3')
+  const [firstVersion] = claimJobs().jobs
+  assert.deepEqual(firstVersion.before[0].values.slice(2), ['2-1-1', '261113', '12', '2', ''])
+  assert.deepEqual(firstVersion.after[0].values.slice(2), ['2-1-3', '261113', '12', '3', '최종 메모'])
+  assert.equal(query(asService + `select count(*) from public.list_warehouse_stock_condition_exports('${brand}');`), '0')
+  query(asService + backgroundMove('prepare', {
+    mode: 'place', place: '2-1-3', qr: 'NO-FINDER-DURING-ATELIER', number: 'M1234', quantity: 12,
+    receivedOn: '2026-11-13', backgroundJobId: 'c0000000-0000-4000-8000-000000000299:0',
+  }), 'PQA01')
+  const newer = readPosition(chainAa)
+  const adjust = work(205, newer, 'adjust', { units_per_box: 12, remaining_boxes: 4, opened_units: 2 })
+  await race(asEditor + adjust, asEditor + correct(206, newer, { note: '동시 수정' }), '40001')
+  assert.deepEqual(claimJobs().jobs, [])
+  const staleSnapshotAt = quote(query('select clock_timestamp();'))
+  assert.equal(confirmJob(firstVersion, firstVersion.after.map(({ id, qr }) => ({ id, qr }))), 'f')
+  assert.equal(confirmJob(firstVersion), 't')
+  assert.equal(confirmJob(firstVersion), 't')
+  const [secondVersion] = claimJobs().jobs
+  assert.equal(secondVersion.before[0].values[5], '3')
+  assert.equal(secondVersion.after[0].values[5], '4')
+  assert.equal(confirmJob(secondVersion, receiptRows(secondVersion), [], firstVersion.lease), 'f')
+  query(asService + sheet(startRows, staleSnapshotAt))
+  assert.equal(readPosition(chainAa).remaining_boxes, 4)
+  assert.equal(readPosition(chainAa).opened_units, 2)
+  assert.equal(readPosition(chainAa).place, '2-1-3')
+  assert.equal(readPosition(chainAa).note, '최종 메모')
+  assert.equal(confirmJob(secondVersion), 't')
+  query(asService + sheet(startRows, staleSnapshotAt))
+  assert.equal(readPosition(chainAa).remaining_boxes, 4)
+  assert.equal(readPosition(chainAa).place, '2-1-3')
+  console.log('PASS: consecutive no-QR correction and move, three history records, true stale-write guard, versioned acknowledgement and stale snapshot overlay')
+
+  const emptyPicking = 'P-8-1'
+  query(`insert into public.warehouse_registered_slots (warehouse_id,code,zone)
+    values ('${warehouse}','${emptyPicking}','picking');`)
+  assert.equal(query(asEditor + work(207, readPosition(chainAa), 'move', { to_location_code: emptyPicking, box_count: 1 })), 'true')
+  const splitAa = 'at_move_c0000000000040008000000000000207'
+  assert.equal(readPosition(splitAa).place, emptyPicking)
+  query(asEditor + manualReceive(208, emptyPicking, 'picking'), '23505')
+  assert.equal(query(asEditor + manualReceive(208, '2-1-1', 'box_storage')), 'true')
+  assert.equal(query(asEditor + manualReceive(208, '2-1-1', 'box_storage')), 'true')
+  const newAa = 'at_manual_c0000000000040008000000000000208'
+  assert.equal(query(asEditor + correct(209, readPosition(newAa), { note: '수동 입고 수정' })), 'true')
+  const [splitVersion, intakeVersion] = claimJobs().jobs
+  assert.deepEqual(splitVersion.ids, [splitAa, chainAa])
+  assert.deepEqual(splitVersion.picking, [emptyPicking])
+  assert.deepEqual(splitVersion.after.map(r => [r.values[2], r.values[5]]), [[emptyPicking, '1'], ['2-1-3', '3']])
+  assert.deepEqual(intakeVersion.ids, [newAa])
+  assert.equal(intakeVersion.after[0].values[6], '수동 입고 수정')
+  query(asService + sheet([...refreshed(),
+    { ...row('unexpected-sheet-occupant', '', emptyPicking), zone: 'picking', source_row_number: 65 },
+    { ...row('other-sheet-arrival', '', '2-1-1'), source_row_number: 66 },
+  ], 'clock_timestamp()'))
+  assert.equal(readPosition(splitAa).place, emptyPicking)
+  assert.equal(readPosition('other-sheet-arrival').place, '2-1-1')
+  assert.equal(query(`select count(*) from public.warehouse_stock_positions where set_id='${activeId()}'
+    and external_row_id='unexpected-sheet-occupant';`), '0')
+  const failed = [{ id: chainAa, field: '박스 수', expected: '4', actual: '9', target: '3' }]
+  assert.equal(query(asService + `select public.fail_atelier_stock_sheet_job('${brand}','${splitVersion.id}',
+    '${splitVersion.lease}','SHEET_STOCK_CHANGED',${json(failed)});`), 't')
+  const conflictsQuery = `select public.list_atelier_stock_sheet_conflicts('${brand}');`
+  query(asReader + conflictsQuery, '42501')
+  assert.deepEqual(JSON.parse(query(asEditor + conflictsQuery))[0].failure.differences, failed)
+  assert.equal(confirmJob(intakeVersion), 't')
+  query(`update app.atelier_stock_sheet_jobs set available_at=clock_timestamp() where id='${splitVersion.id}';`)
+  const [retry] = claimJobs().jobs
+  assert.equal(retry.id, splitVersion.id)
+  assert.notEqual(retry.lease, splitVersion.lease)
+  assert.equal(confirmJob(splitVersion), 'f')
+  assert.equal(confirmJob(retry), 't')
+  assert.deepEqual(JSON.parse(query(asEditor + conflictsQuery)), [])
+
+  // One picking position transferred between different AA rows shares one atomic job.
+  assert.equal(query(asEditor + work(210, readPosition(splitAa), 'move', { to_location_code: '2-1-1', box_count: 1 })), 'true')
+  assert.equal(query(asEditor + work(211, readPosition(newAa), 'move', { to_location_code: emptyPicking, box_count: 2 })), 'true')
+  const [handover] = claimJobs().jobs
+  assert.deepEqual(handover.ids, [newAa, splitAa])
+  assert.equal(confirmJob(handover), 't')
+
+  const beforeDeplete = refreshed()
+  const removed = readPosition(splitAa)
+  assert.equal(query(asEditor + work(212, removed, 'deplete', { reason: '실수량 0 확인' })), 'true')
+  assert.equal(query(`select reason from warehouse_stock_movements where position_id='${removed.id}' and action='deplete';`), '실수량 0 확인')
+  const [removalVersion] = claimJobs().jobs
+  assert.deepEqual(removalVersion.after, [])
+  assert.equal(confirmJob(removalVersion, [], []), 'f')
+  const removalSnapshotAt = quote(query('select clock_timestamp();'))
+  query(asService + sheet(beforeDeplete, removalSnapshotAt))
+  assert.equal(query(`select count(*) from public.warehouse_stock_positions where set_id='${activeId()}' and external_row_id='${splitAa}';`), '0')
+  assert.equal(confirmJob(removalVersion), 't')
+  const releaseMarkers = `select public.release_atelier_stock_sheet_removal_markers('${brand}','${removalVersion.id}');`
+  assert.deepEqual(claimJobs().cleanup, [{ id: removalVersion.id, ids: [splitAa] }])
+  assert.equal(query(asService + releaseMarkers), 't')
+  assert.deepEqual(claimJobs().cleanup, [])
+  query(asService + sheet(beforeDeplete, removalSnapshotAt))
+  assert.equal(query(`select count(*) from public.warehouse_stock_positions where set_id='${activeId()}' and external_row_id='${splitAa}';`), '0')
+  console.log('PASS: split moves, per-group conflicts, independent intake and retry, picking handover, depletion proof, audit reason and tombstone')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)

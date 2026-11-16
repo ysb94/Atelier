@@ -827,6 +827,25 @@ export async function trySaveWarehouseStockWork(
   return true
 }
 
+export type WarehouseSheetConflict = {
+  id: string
+  row_ids: string[]
+  failed_at: string
+  failure: {
+    reason: string
+    differences: { id: string | null; field: string; expected: string | null; actual: string | null; target: string | null }[]
+  }
+}
+
+export async function listWarehouseSheetConflicts(brandId: string): Promise<WarehouseSheetConflict[]> {
+  const { data, error } = await getSupabase().rpc('list_atelier_stock_sheet_conflicts', { p_brand_id: brandId })
+  if (error?.code === 'PGRST202' || error?.code === '42501') return []
+  if (error) {
+    throw new WarehouseStockStoreError(errorMessage(error, '창고입력 반영 상태를 불러오지 못했습니다.'), { cause: error })
+  }
+  return (data as WarehouseSheetConflict[] | null) ?? []
+}
+
 export async function listWarehouseStockMovements(
   brandId: string,
   setId?: string,
