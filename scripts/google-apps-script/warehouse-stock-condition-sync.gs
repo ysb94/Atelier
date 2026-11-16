@@ -62,7 +62,9 @@ function _writeAtelierStockCondition(sheet, entry) {
       const field = fields[i];
       const value = norm(valueFor(values, field));
       const numeric = (field === 'units' || field === 'boxes') && value !== '';
-      sheet.getRange(row, i + 2).setValue(numeric ? Number(value) : field === 'receivedOn' && value ? "'" + value : literal(value));
+      const cell = sheet.getRange(row, i + 2);
+      if (field === 'place') cell.setNumberFormat('@');
+      cell.setValue(numeric ? Number(value) : field === 'receivedOn' && value ? "'" + value : literal(value));
     }
     if (changed.length) SpreadsheetApp.flush();
     const observed = sheet.getRange(row, 2, 1, 7).getDisplayValues()[0];

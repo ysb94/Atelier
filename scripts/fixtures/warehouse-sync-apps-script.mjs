@@ -6,6 +6,7 @@ export function verifyWarehouseSyncAppsScript() {
   const cells = new Map()
   const formulas = new Map()
   const notes = new Map()
+  const textFormats = new Set()
   const requests = []
   const documents = new Map()
   const payloads = []
@@ -58,8 +59,16 @@ export function verifyWarehouseSyncAppsScript() {
             typeof value === 'string' && value.startsWith("'") ? value.slice(1) : value)))
           return this
         },
-        setValue(value) { put(row, column, [typeof value === 'string' && value.startsWith("'") ? value.slice(1) : value]); return this },
-        setNumberFormat() { return this },
+        setValue(value) {
+          if (typeof value === 'string' && value.startsWith("'")) value = value.slice(1)
+          else if (column === 4 && typeof value === 'string' && /^[1-9]-[1-9]-[1-9]$/.test(value) &&
+            !textFormats.has(coordinate(row, column))) {
+            const [y, m, d] = value.split('-').map(Number)
+            value = new Date(Date.UTC(2000 + y, m - 1, d))
+          }
+          put(row, column, [value]); return this
+        },
+        setNumberFormat(format) { if (format === '@') textFormats.add(coordinate(row, column)); return this },
         getNotes: () => read((r, c) => notes.get(coordinate(r, c)) ?? ''),
         getNote: () => notes.get(coordinate(row, column)) ?? '',
         clearNote: () => notes.delete(coordinate(row, column)),
@@ -239,10 +248,11 @@ export function verifyWarehouseSyncAppsScript() {
   const prior = { number: 'M0049', productName: '뒤쪽 재고', place: '3-4-4_B1',
     receivedOn: '261113', units: '38', boxes: '1', note: '', boxQr: 'QR-5609' }
   const correction = { rowId: 'after-3000', requestId: 'correction', before: prior,
-    values: { ...prior, productName: '정정 이름', receivedOn: '261116', units: '40' } }
+    values: { ...prior, productName: '정정 이름', place: '3-6-7', receivedOn: '261116', units: '40' } }
   assert.equal(ctx._writeAtelierStockCondition(sheet, correction).product_name, '정정 이름')
   assert.equal(ctx._writeAtelierStockCondition(sheet, correction).row_id, 'after-3000')
   assert.deepEqual([get(5609, 5), get(5609, 6), get(5609, 19), get(5609, 27)], ['261116', 40, 'QR-5609', 'after-3000'])
+  assert.equal(get(5609, 4), '3-6-7')
   assert.throws(() => ctx._writeAtelierStockCondition(sheet, { ...correction,
     values: { ...correction.values, boxQr: 'OTHER' } }), /QR_CHANGED/)
   console.log('warehouse-sheet-sync Apps Script: trailing swatches, AA identity, product search and removal verified')
