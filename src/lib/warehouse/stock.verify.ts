@@ -277,6 +277,15 @@ const roomLocationIndex = indexRoomListLocations([
   { ...roomStockPosition, id: 'empty-position', receivedOn: '2026-10-03', remainingBoxes: 0 },
 ])
 assert(roomLocationIndex.locations.get('슬림백 블랙')?.[0]?.id === 'old-position', '일반 피킹은 기존 위치 우선순위를 사용한다')
+const sameDateLocations = indexRoomListLocations([
+  { ...roomStockPosition, boxQr: '1' },
+  { ...roomStockPosition, locationCode: '9-1-1', zone: 'picking', boxQr: '2' },
+  { ...roomStockPosition, locationCode: '2-1-2', receivedOn: '2026-09-30', receivedOnRaw: '260930', boxQr: '3' },
+])
+assert(
+  roomListLocationCodes([], sameDateLocations.locations).get('슬림백 블랙')?.join(',') === '2-1-2,9-1-1,2-1-1',
+  '방별리스트는 오래된 입고를 먼저 표시하고 입고일이 같으면 출고창고 자리를 먼저 표시한다',
+)
 const latestBoxSize = roomLocationIndex.latestPositions.get('슬림백 블랙')?.unitsPerBox ?? null
 assert(latestBoxSize === 100, '같은 자리에 재고 행이 여러 개면 가장 최근의 남은 재고에서 입수를 읽는다')
 assert(roomListBulkPacking('80', latestBoxSize) === '낱개 80개', '100개입 상품 80개는 대량출고다')
