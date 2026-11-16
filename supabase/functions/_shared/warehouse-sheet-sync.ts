@@ -355,7 +355,7 @@ export function prepareWarehouseSheetSyncRows(
   return parsed.map((row) => {
     let style: StyleRef | null = null
     if (row.normalizedStyleNo) style = byStyleNo.get(row.normalizedStyleNo) ?? null
-    else {
+    else if (!/^at_manual_[0-9a-f]{32}$/.test(row.externalRowId)) {
       const compactName = compactProductNameKey(row.sourceProductName)
       const matches = compactName ? (byCompactName.get(compactName) ?? []) : []
       style = matches.length === 1 ? (matches[0] ?? null) : null

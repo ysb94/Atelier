@@ -523,6 +523,67 @@ try {
     from warehouse_stock_positions p join warehouse_locations l on l.id=p.location_id
     where p.set_id='${activeId()}' and p.box_qr='GUARD-REGULAR-QR';`), '2-1-2:12:1')
   console.log('PASS: slot audit sheet confirmation, private photo review, opened QR movement, and existing intake')
+
+  const conditionAcl = () => query(`select proacl::text from pg_proc
+    where oid='public.save_warehouse_stock_condition(uuid,uuid,uuid,text,text,jsonb)'::regprocedure;`)
+  const originalAcl = conditionAcl()
+  const currentSetId = activeId()
+  const existingStock = () => query(`select md5(string_agg(to_jsonb(p)::text, ',' order by p.id))
+    from warehouse_stock_positions p where set_id='${currentSetId}'
+    and coalesce(external_row_id,'') not like 'at_manual_%';`)
+  const originalStockHash = existingStock()
+  query(atelierSql('20261116042928_warehouse_manual_product_receive'))
+  assert.equal(conditionAcl(), originalAcl)
+  assert.equal(existingStock(), originalStockHash)
+
+  const eventName = '캐논 콜라보 토트백'
+  const manualReceive = (request, place, zone, name = eventName) => `select public.save_warehouse_stock_condition(
+    '${brand}','c0000000-0000-4000-8000-000000000${request}',null,'normal',null,${json({
+      style_id: null, source_style_no: 'M1234', source_product_name: name,
+      location_code: place, zone, received_on: '2026-11-16', received_on_raw: '261116',
+      units_per_box: 20, remaining_boxes: 2,
+    })})->>'sheetPending';`
+  query(asReader + manualReceive(101, '3-1-1', 'box_storage'), '42501')
+  query(asEditor + manualReceive(101, '3-1-1', 'box_storage', '  '), '22023')
+  query(asEditor + manualReceive(101, '2-1-2', 'picking'), '22023')
+  const staleConditionSnapshot = quote(query('select clock_timestamp();'))
+  for (const [request, place, zone] of [[101, '3-1-1', 'box_storage'], [102, 'P-7-1', 'picking']]) {
+    const save = asEditor + manualReceive(request, place, zone, ` ${eventName} `)
+    assert.equal(query(save), 'true')
+    assert.equal(query(save), 'true')
+    const exportRow = queued()
+    assert.equal(exportRow.before, null)
+    assert.equal(exportRow.values.number, '')
+    assert.equal(exportRow.values.productName, eventName)
+    assert.equal(exportRow.values.place, place)
+    assert.match(exportRow.rowId, /^at_manual_[0-9a-f]{32}$/)
+    assert.equal(query(asReader + `select count(*) from warehouse_stock_positions p
+      join warehouse_locations l on l.id=p.location_id
+      where p.set_id='${currentSetId}' and p.external_row_id='${exportRow.rowId}'
+        and l.zone='${zone}' and l.code='${place}' and p.style_id is null and p.source_style_no=''
+        and p.normalized_style_no='' and p.remaining_boxes=2 and p.units_per_box=20;`), '1')
+    assert.equal(query(asReader + `select count(*) from public.search_warehouse_finder_rows(
+      '${brand}','product',${quote(eventName)},100) where external_row_id='${exportRow.rowId}';`), '1')
+    query(asService + sheet(oldSheet, 'clock_timestamp()'), 'PWS04')
+    assert.equal(confirmCondition(exportRow), '1')
+    assert.equal(query(save), 'false')
+  }
+  query(asEditor + manualReceive(103, 'P-7-1', 'box_storage'), '22023')
+  query(asService + sheet(oldSheet, staleConditionSnapshot), 'PWS05')
+  query(asService + sheet(oldSheet, 'clock_timestamp()'), 'PWS06')
+  assert.equal(activeId(), currentSetId)
+  assert.equal(existingStock(), originalStockHash)
+  assert.equal(query(`select zone from warehouse_registered_slots where warehouse_id='${warehouse}' and code='P-7-1';`), 'picking')
+  assert.equal(query(asEditor + `begin;
+    select public.save_warehouse_stock_condition('${brand}',
+      'c0000000-0000-4000-8000-000000000104',null,'normal',null,${json({
+        style_id: style, location_code: 'P-7-1', zone: 'picking', received_on_raw: '261116',
+        units_per_box: 10, remaining_boxes: 1,
+      })});
+    select source_style_no from public.warehouse_stock_positions
+    where set_id='${currentSetId}' and external_row_id='at_c0000000000040008000000000000104';
+    rollback;`), 'M1234')
+  console.log('PASS: manual products in both zones, current ACL and original stock preserved, one row per request, pending/stale/missing sheet protection')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)

@@ -49,7 +49,11 @@ export function verifyWarehouseSyncAppsScript() {
           while (previous > 1 && get(previous, column) === '') previous -= 1
           return { getRow: () => previous }
         },
-        setValues(values) { values.forEach((valuesAtRow, y) => put(row + y, column, valuesAtRow)); return this },
+        setValues(values) {
+          values.forEach((valuesAtRow, y) => put(row + y, column, valuesAtRow.map(value =>
+            typeof value === 'string' && value.startsWith("'") ? value.slice(1) : value)))
+          return this
+        },
         setValue(value) { put(row, column, [value]); return this },
         setNumberFormat() { return this },
         getNotes: () => read((r, c) => notes.get(coordinate(r, c)) ?? ''),
@@ -201,6 +205,22 @@ export function verifyWarehouseSyncAppsScript() {
   assert.throws(() => ctx._writeAtelierStockCondition(sheet, restore), /B_C_CHANGED/)
   formulas.delete(coordinate(5609, 3))
   assert.equal(ctx._writeAtelierStockCondition(sheet, restore).number, 'M0049')
+  assert.equal(get(5609, 3), '뒤쪽 재고')
+  put(8003, 3, [''])
+  for (const [i, place] of ['2-1-1', 'P-7-1'].entries()) {
+    const rowId = `at_manual_${String(i).padStart(32, '0')}`
+    const entry = { requestId: `event-${i}`, rowId, before: null,
+      values: { number: '', productName: '캐논 콜라보 토트백', place,
+        receivedOn: '261116', units: '20', boxes: '2', note: '' } }
+    assert.equal(ctx._writeAtelierStockCondition(sheet, entry).row_id, rowId)
+    assert.equal(ctx._writeAtelierStockCondition(sheet, entry).row_id, rowId)
+    assert.deepEqual([get(5610 + i, 2), get(5610 + i, 3), get(5610 + i, 4), get(5610 + i, 27)],
+      ['', entry.values.productName, place, rowId])
+  }
+  ctx.syncAtelierWarehouseSnapshot_({ validateOnly: false })
+  const events = payloads.at(-1).rows.filter(row => row.externalRowId.startsWith('at_manual_'))
+  assert.equal(events.length, 2)
+  assert.ok(events.every(row => row.sourceStyleNo === '' && row.sourceProductName === '캐논 콜라보 토트백'))
   assert.equal(get(5609, 3), '뒤쪽 재고')
   console.log('warehouse-sheet-sync Apps Script: trailing swatches, AA identity, product search and removal verified')
 }

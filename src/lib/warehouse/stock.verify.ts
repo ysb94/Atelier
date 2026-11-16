@@ -661,6 +661,17 @@ const swatchPayload = validateEdgeWarehouseSheetSyncPayload([{
 assert(swatchPayload.issues.length === 0, 'M번호와 QR 없이 스와치를 동기화할 수 있다')
 const [swatch] = prepareEdgeWarehouseSheetSyncRows(swatchPayload.rows, styles, ['3-4-4_B2'])
 const [swatchRpcRow] = toEdgeWarehouseSnapshotRpcRows([swatch])
+const manualProduct = { ...swatchPayload.rows[0],
+  externalRowId: 'at_manual_12345678123440008000000000000001',
+  sourceProductName: '캐논 콜라보 토트백',
+}
+const laterCatalog = [...styles, { styleId: 'later-style', styleNo: 'M9999', name: manualProduct.sourceProductName }]
+const [eventReceipt, oldNameMatch] = prepareEdgeWarehouseSheetSyncRows([
+  manualProduct, { ...manualProduct, externalRowId: 'existing-catalog-row' },
+], laterCatalog, ['3-4-4_B2'])
+assert(eventReceipt?.styleId === null && eventReceipt.normalizedStyleNo === '' && eventReceipt.zone === 'picking',
+  '직접 입력한 입고는 동명 상품이 있어도 M번호 없이 출고창고 재고로 유지한다')
+assert(oldNameMatch?.styleId === 'later-style', '기존 시트 행은 상품명 조회 규칙을 유지한다')
 assert(
   swatchRpcRow.external_row_id === 'finder-swatch' && swatchRpcRow.box_qr === '' &&
     swatchRpcRow.style_id === null && swatchRpcRow.source_product_name === '스와치' &&

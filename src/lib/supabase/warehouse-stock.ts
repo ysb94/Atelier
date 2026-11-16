@@ -709,9 +709,10 @@ export async function saveWarehouseStockCondition(
   requestId: string,
   condition: WarehouseStockCondition,
   target: { positionId: string; expectedCondition: WarehouseStockCondition } | { receive: WarehouseReceiveInput },
+  context?: DiagnosticContext,
 ) {
   const receive = 'receive' in target ? target.receive : null
-  const { error } = await getSupabase().rpc('save_warehouse_stock_condition', {
+  const { error } = await tracedQuery(getSupabase().rpc('save_warehouse_stock_condition', {
     p_brand_id: brandId,
     p_request_id: requestId,
     p_position_id: 'positionId' in target ? target.positionId : null,
@@ -719,6 +720,7 @@ export async function saveWarehouseStockCondition(
     p_expected_condition: 'expectedCondition' in target ? target.expectedCondition : null,
     p_receive: receive ? {
       style_id: receive.styleId,
+      source_product_name: receive.sourceProductName,
       location_code: receive.locationCode,
       zone: receive.zone ?? 'box_storage',
       received_on: receive.receivedOn,
@@ -729,8 +731,10 @@ export async function saveWarehouseStockCondition(
       remaining_boxes: receive.remainingBoxes,
       note: receive.note ?? '',
     } : null,
-  })
-  if (error) throw new WarehouseStockStoreError(errorMessage(error, '재고 상태를 저장하지 못했습니다.'))
+  }), context)
+  if (error) {
+    throw new WarehouseStockStoreError(errorMessage(error, '재고 상태를 저장하지 못했습니다.'), { cause: error })
+  }
 }
 
 export async function listWarehouseStockMovements(

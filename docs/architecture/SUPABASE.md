@@ -1259,6 +1259,11 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   기존 자리 이동·화물 입고 검사도 적용된다.
   이 마이그레이션 적용 후 타임스탬프가 없는 세 인자 교체 함수는 보호된 RPC 내부에서만 호출한다.
   Finder의 시트 반영 행 범위는 Apps Script 전체 조회 범위와 맞춘다.
+- 마스마룰즈의 두 창고 탭에서 `save_warehouse_stock_condition`으로 등록 상품 또는 M번호 없는
+  상품을 입고한다. 직접 입력은 `style_id = null`로 저장하고 `at_manual_` AA 행 ID로 시트 반영을
+  예약한다. 기존 Apps Script가 B열을 비워 새 행을 추가한다. 전체 동기화는 이 AA 행의 상품명을
+  상품 목록과 자동 연결하지 않는다. 적용 순서는 `20261116042928_warehouse_manual_product_receive.sql`,
+  `warehouse-sheet-sync` Edge Function, 화면 배포다.
 - 로직: `src/lib/warehouse/stock.ts`. 저장소: `src/lib/supabase/warehouse-stock.ts`.
   화면: `WarehousePage`, `WarehouseInventoryPanel`.
 - 창고 파인더는 같은 활성 sandbox 세트를 읽기 전용으로 검색한다. Firebase
