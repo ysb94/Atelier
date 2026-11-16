@@ -250,7 +250,12 @@ export function verifyWarehouseSyncAppsScript() {
     receivedOn: '261113', units: '38', boxes: '1', note: '', boxQr: 'QR-5609' }
   const correction = { rowId: 'after-3000', requestId: 'correction', before: prior,
     values: { ...prior, productName: '정정 이름', place: '3-6-7', receivedOn: '261116', units: '40' } }
-  assert.equal(ctx._writeAtelierStockCondition(sheet, correction).product_name, '정정 이름')
+  const correctionReceipt = ctx._writeAtelierStockCondition(sheet, correction)
+  assert.equal(correctionReceipt.product_name, '정정 이름')
+  assert.deepEqual({ ...correctionReceipt.observed_values }, {
+    number: correction.values.number, productName: '정정 이름', place: '3-6-7',
+    receivedOn: '261116', units: '40', boxes: '1', note: '', boxQr: 'QR-5609',
+  })
   assert.equal(ctx._writeAtelierStockCondition(sheet, correction).row_id, 'after-3000')
   assert.deepEqual([get(5609, 5), get(5609, 6), get(5609, 19), get(5609, 27)], ['261116', 40, 'QR-5609', 'after-3000'])
   assert.equal(get(5609, 4), '3-6-7')
@@ -307,5 +312,15 @@ export function verifyWarehouseSyncAppsScript() {
   assert.equal(get(5700, 9), '다른 열')
   assert.equal(get(5701, 27), split.id)
   assert.equal(notes.get(coordinate(5700, 27)), 'Finder 지운 행 ID: ' + initial.id)
+  ctx.findWarehousePlacementEmptyRows = () => [5702]
+  const named = { id: 'at_manual_abc00000000040008000000000000001', qr: 'UNPLACED-REVIEW-QR',
+    values: ['', '테이프', '2-1-1', '261113', '24', '1', ''] }
+  const namedJob = stockWork([], [named])
+  lostReply = true
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, namedJob), /LOST_BATCH_RESPONSE/)
+  const namedBatchCount = stockBatches.length
+  assert.equal(ctx.writeAtelierQrAuditSheet(sheet, namedJob)[0].id, named.id)
+  assert.equal(stockBatches.length, namedBatchCount)
+  assert.deepEqual([get(5702, 2), get(5702, 3), get(5702, 19), get(5702, 27)], ['', '테이프', named.qr, named.id])
   console.log('warehouse-sheet-sync Apps Script: trailing swatches, AA identity, product search and removal verified')
 }

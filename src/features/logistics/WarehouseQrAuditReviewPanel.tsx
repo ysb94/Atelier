@@ -8,12 +8,13 @@ import { getSupabase } from '@/lib/supabase/client'
 import type { StyleRef } from '@/lib/types'
 
 type Candidate = { id: string; name: string; number: string; units: number | null; boxes: number | null; opened: number; date: string }
-type ReviewItem = { external_row_id: string; box_qr: string; photo_path: string; place: string; candidates: Candidate[] }
+type ReviewItem = { external_row_id: string; box_qr: string; photo_path: string; place: string | null; unplaced?: boolean; candidates: Candidate[] }
 type ReviewQueue = { auditedPlaces: number; pending: number; items: ReviewItem[] }
 
-async function loadReviewQueue(brandId: string): Promise<ReviewQueue> {
+async function loadReviewQueue(brandId: string, includeUnplaced: boolean): Promise<ReviewQueue> {
   const { data, error } = await getSupabase().rpc('review_warehouse_qr_audit', {
     p_brand_id: brandId, p_action: 'list',
+    p_request: { includeUnplaced },
   })
   if (error) throw new Error(error.message)
   return data as ReviewQueue
@@ -57,8 +58,9 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
       }
       const { error } = await getSupabase().rpc('review_warehouse_qr_audit', {
         p_brand_id: brandId,
-        p_action: 'link',
-        p_request: { rowId: item.external_row_id, candidateId, styleId: style?.styleId, name: name.trim(), units: quantity, opened },
+        p_action: item.unplaced ? 'link_unplaced' : 'link',
+        p_request: { rowId: item.external_row_id, styleId: style?.styleId, name: name.trim(),
+          ...(!item.unplaced && { candidateId, units: quantity, opened }) },
       })
       if (error) throw new Error(error.message)
     },
@@ -69,7 +71,7 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
   return (
     <article className="flex min-w-0 flex-col gap-4">
       <div>
-        <h3 className="font-semibold">{item.place}</h3>
+        <h3 className="font-semibold">{item.unplaced ? '자리 미정' : item.place}</h3>
         <p className="break-all font-mono text-sm text-muted-foreground">{item.box_qr}</p>
       </div>
       <div className="grid gap-5 xl:grid-cols-2">
@@ -83,7 +85,7 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
           {photo.isError && <Button variant="outline" size="sm" onClick={() => void photo.refetch()}>사진 다시 불러오기</Button>}
         </div>
         <fieldset className="space-y-4" disabled={link.isPending}>
-          <div className="space-y-2">
+          {!item.unplaced && <div className="space-y-2">
             <h4 className="text-sm font-medium">실사 전 자리 목록</h4>
             <div className="max-h-60 space-y-1 overflow-auto">
               {item.candidates.map((candidate) => (
@@ -95,7 +97,7 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
               ))}
               {item.candidates.length === 0 && <p className="text-sm text-muted-foreground">기존 상품이 없는 자리입니다.</p>}
             </div>
-          </div>
+          </div>}
           <label className="block space-y-1 text-sm">
             <span>정식 상품 검색</span>
             <StylePicker brandId={brandId} value={style} onChange={(value) => {
@@ -110,15 +112,17 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
               if (event.target.value) { setCandidateId(''); setStyle(null) }
             }} />
           </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={opened} onChange={(event) => { setOpened(event.target.checked); setUnits('') }} />
-            개봉 박스
-          </label>
-          <label className="block space-y-1 text-sm">
-            <span>{opened ? '확인된 잔량' : '확인된 입수'}</span>
-            <Input type="number" min={1} max={1000000} value={units} onChange={(event) => setUnits(event.target.value)}
-              placeholder="수량 미확인" />
-          </label>
+          {!item.unplaced && <>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={opened} onChange={(event) => { setOpened(event.target.checked); setUnits('') }} />
+              개봉 박스
+            </label>
+            <label className="block space-y-1 text-sm">
+              <span>{opened ? '확인된 잔량' : '확인된 입수'}</span>
+              <Input type="number" min={1} max={1000000} value={units} onChange={(event) => setUnits(event.target.value)}
+                placeholder="수량 미확인" />
+            </label>
+          </>}
           {link.isError && <p role="alert" className="text-sm text-destructive">{link.error.message}</p>}
           <Button disabled={!hasProduct || !photo.data || link.isPending} onClick={() => link.mutate()}>
             {link.isPending ? '저장 중…' : '상품 연결'}
@@ -129,18 +133,18 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
   )
 }
 
-export function WarehouseQrAuditReviewPanel({ brandId }: { brandId: string }) {
+export function WarehouseQrAuditReviewPanel({ brandId, includeUnplaced }: { brandId: string; includeUnplaced: boolean }) {
   const cache = useQueryClient()
   const [selected, setSelected] = useState('')
-  const queryKey = ['warehouse-qr-audit-review', brandId]
-  const queue = useQuery({ queryKey, queryFn: () => loadReviewQueue(brandId) })
+  const queryKey = ['warehouse-qr-audit-review', brandId, includeUnplaced]
+  const queue = useQuery({ queryKey, queryFn: () => loadReviewQueue(brandId, includeUnplaced) })
   const items = queue.data?.items
   const active = items?.find((item) => item.external_row_id === selected) ?? items?.[0]
 
   async function onLinked() {
     setSelected('')
     await Promise.all([
-      cache.invalidateQueries({ queryKey }),
+      cache.invalidateQueries({ queryKey: ['warehouse-qr-audit-review', brandId] }),
       cache.invalidateQueries({ queryKey: ['warehouse-stock-positions', brandId] }),
       cache.invalidateQueries({ queryKey: ['warehouse-stock-condition-links', brandId] }),
     ])
@@ -165,7 +169,7 @@ export function WarehouseQrAuditReviewPanel({ brandId }: { brandId: string }) {
               <Button key={item.external_row_id} variant={active === item ? 'secondary' : 'ghost'}
                 className="h-auto min-h-9 w-full justify-start text-left"
                 onClick={() => setSelected(item.external_row_id)}>
-                <span className="min-w-0"><strong>{item.place}</strong><span className="block truncate font-mono text-xs">{item.box_qr}</span></span>
+                <span className="min-w-0"><strong>{item.unplaced ? '자리 미정' : item.place}</strong><span className="block truncate font-mono text-xs">{item.box_qr}</span></span>
               </Button>
             ))}
           </nav>
