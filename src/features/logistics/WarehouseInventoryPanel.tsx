@@ -6,7 +6,7 @@ import { Download, RefreshCw, Upload } from 'lucide-react'
 import { StylePicker } from '@/components/style-picker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { Input, Select } from '@/components/ui/input'
 import {
   adjustWarehouseStock,
   depleteWarehouseStock,
@@ -17,13 +17,21 @@ import {
   importWarehouseInventorySet,
   listStyleRefsForLookup,
   moveWarehouseStock,
-  openWarehouseStock,
   receiveWarehouseStock,
   restoreWarehouseInventorySet,
   subscribeWarehouseInventorySetChanges,
   type WarehouseInventorySetRealtimeStatus,
 } from '@/lib/api'
+import {
+  correctWarehouseStockRow,
+  listWarehouseStockConditionLinks,
+  saveWarehouseStockCondition,
+  trySaveWarehouseStockWork,
+  WAREHOUSE_STOCK_CONDITION_LABELS,
+  type WarehouseStockCondition,
+} from '@/lib/supabase/warehouse-stock'
 import { useRenderWatch } from '@/lib/diagnostics'
+import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { parseFile } from '@/lib/import/parse'
 import type {
   StyleRef,
@@ -64,11 +72,11 @@ type ReviewFilter =
 type DialogState =
   | { kind: 'import' }
   | { kind: 'receive' }
+  | { kind: 'correct'; row: WarehouseStockPosition; current: WarehouseStockCondition; styleNo: string }
+  | { kind: 'condition'; row: WarehouseStockPosition; current: WarehouseStockCondition; styleNo: string }
   | { kind: 'move'; row: WarehouseStockPosition }
-  | { kind: 'replenish'; row: WarehouseStockPosition }
-  | { kind: 'deplete'; row: WarehouseStockPosition }
+  | { kind: 'deplete'; row: WarehouseStockPosition; requestId: string }
   | { kind: 'adjust'; row: WarehouseStockPosition }
-  | { kind: 'open'; row: WarehouseStockPosition }
   | { kind: 'history'; row?: WarehouseStockPosition }
   | null
 
@@ -111,10 +119,12 @@ function uniqueStyleRefs(lookup: {
 export function WarehouseInventoryPanel({
   brandId,
   brandName,
+  sheetConditionEnabled,
   view,
 }: {
   brandId: string
   brandName: string
+  sheetConditionEnabled: boolean
   view: WarehouseView
 }) {
   useRenderWatch('WarehouseInventoryPanel')
@@ -159,7 +169,16 @@ export function WarehouseInventoryPanel({
     queryFn: () => getWarehouseStockPositions(brandId, activeSet!.id, zone),
     enabled: Boolean(activeSet?.id),
   })
-
+  const conditionQuery = useQuery({
+    queryKey: ['warehouse-stock-condition-links', brandId],
+    queryFn: () => listWarehouseStockConditionLinks(brandId),
+    enabled: Boolean(activeSet?.id),
+  })
+  const conditions = useMemo(() => new Map(
+    (conditionQuery.data ?? []).map(link => [
+      JSON.stringify([link.externalRowId, link.sourceProductName]), link,
+    ]),
+  ), [conditionQuery.data])
   const rows = positionsQuery.data ?? emptyList()
   const zoneRowCount = rows.filter((row) => row.zone === zone).length
   const visible = useMemo(() => {
@@ -167,21 +186,25 @@ export function WarehouseInventoryPanel({
     return (positionsQuery.data ?? emptyList<WarehouseStockPosition>())
       .filter((row) => row.zone === zone)
       .filter((row) => {
-        if (filter === 'ok') return row.reviewFlags.length === 0
+        const condition = conditions.get(JSON.stringify([row.externalRowId, row.sourceProductName]))
+        const reviewFlags = condition ? row.reviewFlags.filter(flag => flag !== 'missing_style') : row.reviewFlags
+        if (filter === 'ok') return !condition && reviewFlags.length === 0
         if (filter === 'forced') {
           return row.usagePriority === 'first' || row.usagePriority === 'second'
         }
         if (filter === 'final') return row.isFinalLocation
-        if (filter === 'review') return row.reviewFlags.length > 0
+        if (filter === 'review') return reviewFlags.length > 0
         if (filter === 'unknown_qty') return !isWarehouseQuantityKnown(row)
-        if (filter === 'unlinked') return !row.styleId
+        if (filter === 'unlinked') return !row.styleId && !condition
         return true
       })
       .filter((row) => {
         if (!q) return true
+        const condition = conditions.get(JSON.stringify([row.externalRowId, row.sourceProductName]))
         return (
           row.styleNo.toLocaleLowerCase('ko-KR').includes(q) ||
           row.sourceStyleNo.toLocaleLowerCase('ko-KR').includes(q) ||
+          condition?.referenceStyleNo.toLocaleLowerCase('ko-KR').includes(q) ||
           row.styleName.toLocaleLowerCase('ko-KR').includes(q) ||
           row.boxQr?.toLocaleLowerCase('ko-KR').includes(q) ||
           formatWarehouseLocation(row)
@@ -198,7 +221,7 @@ export function WarehouseInventoryPanel({
         }
         return left.sourceRowNumber - right.sourceRowNumber
       })
-  }, [filter, positionsQuery.data, search, zone])
+  }, [conditions, filter, positionsQuery.data, search, zone])
 
   useEffect(() => {
     setTablePage(0)
@@ -221,6 +244,9 @@ export function WarehouseInventoryPanel({
       }),
       queryClient.invalidateQueries({
         queryKey: ['warehouse-stock-positions', brandId],
+      }),
+      queryClient.invalidateQueries({
+        queryKey: ['warehouse-stock-condition-links', brandId],
       }),
       queryClient.invalidateQueries({
         queryKey: ['warehouse-stock-movements', brandId],
@@ -313,7 +339,7 @@ export function WarehouseInventoryPanel({
               ? '새로고침 중...'
               : '새로고침'}
           </Button>
-          {view === 'box' ? (
+          {view === 'box' || sheetConditionEnabled ? (
             <Button
               type="button"
               size="sm"
@@ -327,6 +353,9 @@ export function WarehouseInventoryPanel({
               신규 입고
             </Button>
           ) : null}
+          <Button type="button" size="sm" variant="outline" onClick={() => setDialog({ kind: 'history' })}>
+            변경 이력
+          </Button>
           <Button
             type="button"
             size="sm"
@@ -446,7 +475,10 @@ export function WarehouseInventoryPanel({
                 </td>
               </tr>
             ) : (
-              pagedVisible.map((row) => (
+              pagedVisible.map((row) => {
+                const condition = conditions.get(JSON.stringify([row.externalRowId, row.sourceProductName]))
+                const reviewFlags = condition ? row.reviewFlags.filter(flag => flag !== 'missing_style') : row.reviewFlags
+                return (
                 <tr
                   key={row.id}
                   className={cn(
@@ -469,10 +501,15 @@ export function WarehouseInventoryPanel({
                     </span>
                   </td>
                   <td className="px-2 py-1.5 font-medium tabular-nums">
-                    {row.styleNo || row.sourceStyleNo}
+                    {condition?.referenceStyleNo || row.styleNo || row.sourceStyleNo}
                   </td>
                   <td className="max-w-[220px] truncate px-2 py-1.5">
                     {row.styleName}
+                    {condition && (
+                      <Badge variant="warning" className="ml-1" title="판매 가능 수량에서 제외">
+                        {WAREHOUSE_STOCK_CONDITION_LABELS[condition.condition]}
+                      </Badge>
+                    )}
                   </td>
                   <td
                     className="px-2 py-1.5"
@@ -517,11 +554,11 @@ export function WarehouseInventoryPanel({
                       : '미확인'}
                   </td>
                   <td className="px-2 py-1.5">
-                    {row.reviewFlags.length === 0 ? (
-                      <span className="text-muted-foreground">정상</span>
+                    {reviewFlags.length === 0 ? (
+                      <span className="text-muted-foreground">{condition ? '—' : '정상'}</span>
                     ) : (
                       <span className="text-warning">
-                        {row.reviewFlags
+                        {reviewFlags
                           .map((flag) => WAREHOUSE_REVIEW_FLAG_LABEL[flag])
                           .join(' · ')}
                       </span>
@@ -529,30 +566,31 @@ export function WarehouseInventoryPanel({
                   </td>
                   <td className="px-2 py-1.5">
                     <div className="flex flex-wrap gap-1">
-                      {view === 'box' ? (
-                        <>
-                          <RowAction
-                            label="이동"
-                            disabled={!isWarehouseQuantityKnown(row)}
-                            onClick={() => setDialog({ kind: 'move', row })}
-                          />
-                          <RowAction
-                            label="충원"
-                            disabled={!isWarehouseQuantityKnown(row)}
-                            onClick={() => setDialog({ kind: 'replenish', row })}
-                          />
-                        </>
-                      ) : (
-                        <RowAction
-                          label="개봉"
-                          disabled={!isWarehouseQuantityKnown(row)}
-                          onClick={() => setDialog({ kind: 'open', row })}
-                        />
+                      <RowAction
+                        label="이동"
+                        disabled={!isWarehouseQuantityKnown(row) || warehousePositionQty(row) <= 0}
+                        onClick={() => setDialog({ kind: 'move', row })}
+                      />
+                      {sheetConditionEnabled && row.externalRowId && (
+                        <RowAction label="행 수정" disabled={conditionQuery.isPending || conditionQuery.isError}
+                          onClick={() => setDialog({ kind: 'correct', row,
+                            current: condition?.condition ?? 'normal', styleNo: condition?.referenceStyleNo || row.sourceStyleNo })} />
                       )}
+                      {sheetConditionEnabled && <RowAction
+                        label="상태 변경"
+                        disabled={conditionQuery.isPending || conditionQuery.isError || (!row.styleId && !condition) ||
+                          (isWarehouseQuantityKnown(row) && !row.remainingBoxes && !row.openedUnits)}
+                        onClick={() => setDialog({
+                          kind: 'condition',
+                          row,
+                          current: condition?.condition ?? 'normal',
+                          styleNo: condition?.referenceStyleNo || row.styleNo,
+                        })}
+                      />}
                       <RowAction
                         label="소진"
                         disabled={!isWarehouseQuantityKnown(row)}
-                        onClick={() => setDialog({ kind: 'deplete', row })}
+                        onClick={() => setDialog({ kind: 'deplete', row, requestId: crypto.randomUUID() })}
                       />
                       <RowAction
                         label="실사"
@@ -565,7 +603,8 @@ export function WarehouseInventoryPanel({
                     </div>
                   </td>
                 </tr>
-              ))
+                )
+              })
             )}
           </tbody>
         </table>
@@ -624,19 +663,41 @@ export function WarehouseInventoryPanel({
       {dialog?.kind === 'receive' ? (
         <ReceiveDialog
           brandId={brandId}
+          sheetConditionEnabled={sheetConditionEnabled}
+          zone={zone}
+          warehouseLabel={warehouseLabel}
           onClose={() => setDialog(null)}
           onDone={async () => {
             setDialog(null)
             await invalidateStock()
           }}
-          onError={setError}
         />
       ) : null}
-      {dialog?.kind === 'move' || dialog?.kind === 'replenish' ? (
+      {dialog?.kind === 'correct' ? (
+        <StockRowCorrectionDialog brandId={brandId} row={dialog.row} current={dialog.current} styleNo={dialog.styleNo}
+          onClose={() => setDialog(null)} onDone={async () => {
+            setDialog(null)
+            await invalidateStock()
+          }} />
+      ) : null}
+      {dialog?.kind === 'condition' ? (
+        <StockConditionDialog
+          brandId={brandId}
+          row={dialog.row}
+          current={dialog.current}
+          styleNo={dialog.styleNo}
+          onClose={() => setDialog(null)}
+          onDone={async () => {
+            setDialog(null)
+            await invalidateStock()
+          }}
+        />
+      ) : null}
+      {dialog?.kind === 'move' ? (
         <MoveDialog
           brandId={brandId}
           row={dialog.row}
-          replenish={dialog.kind === 'replenish'}
+          sheetEnabled={sheetConditionEnabled}
           onClose={() => setDialog(null)}
           onDone={async () => {
             setDialog(null)
@@ -648,13 +709,17 @@ export function WarehouseInventoryPanel({
       {dialog?.kind === 'deplete' ? (
         <ConfirmDialog
           title="자리 소진"
-          body={`${dialog.row.styleNo} ${formatWarehouseLocation(dialog.row)}의 잔여 박스와 개봉 낱개를 0으로 만듭니다.`}
+          body={`${dialog.row.styleNo || dialog.row.sourceProductName} ${formatWarehouseLocation(dialog.row)}의 재고를 소진 처리하고 변경 이력에 남깁니다.`}
           confirmLabel="소진"
           onClose={() => setDialog(null)}
           onConfirm={async () => {
-            await depleteWarehouseStock(brandId, dialog.row.id)
+            const trace = startWorkflow('app', 'warehouse_stock_deplete')
+            const saved = sheetConditionEnabled && await trace.run('save', context =>
+              trySaveWarehouseStockWork(brandId, dialog.requestId, dialog.row, 'deplete', {}, context))
+            if (!saved) await trace.run('save_legacy', () => depleteWarehouseStock(brandId, dialog.row.id))
             setDialog(null)
             await invalidateStock()
+            trace.done()
           }}
           onError={setError}
         />
@@ -663,18 +728,7 @@ export function WarehouseInventoryPanel({
         <AdjustDialog
           brandId={brandId}
           row={dialog.row}
-          onClose={() => setDialog(null)}
-          onDone={async () => {
-            setDialog(null)
-            await invalidateStock()
-          }}
-          onError={setError}
-        />
-      ) : null}
-      {dialog?.kind === 'open' ? (
-        <OpenDialog
-          brandId={brandId}
-          row={dialog.row}
+          sheetEnabled={sheetConditionEnabled}
           onClose={() => setDialog(null)}
           onDone={async () => {
             setDialog(null)
@@ -686,7 +740,7 @@ export function WarehouseInventoryPanel({
       {dialog?.kind === 'history' ? (
         <HistoryDialog
           brandId={brandId}
-          setId={activeSet?.id}
+          setId={dialog.row ? activeSet?.id : undefined}
           row={dialog.row}
           onClose={() => setDialog(null)}
         />
@@ -1003,71 +1057,256 @@ function Count({ label, value }: { label: string; value: number }) {
   )
 }
 
-function ReceiveDialog({
-  brandId,
-  onClose,
-  onDone,
-  onError,
+function StockConditionField({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: WarehouseStockCondition
+  onChange: (condition: WarehouseStockCondition) => void
+  disabled?: boolean
+}) {
+  return (
+    <label className="block space-y-1 text-xs">
+      <span className="text-muted-foreground">재고 상태</span>
+      <Select
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value as WarehouseStockCondition)}
+      >
+        {Object.entries(WAREHOUSE_STOCK_CONDITION_LABELS).map(([condition, label]) => (
+          <option key={condition} value={condition}>{label}</option>
+        ))}
+      </Select>
+    </label>
+  )
+}
+
+function StockConditionDialog({
+  brandId, row, current, styleNo, onClose, onDone,
 }: {
   brandId: string
+  row: WarehouseStockPosition
+  current: WarehouseStockCondition
+  styleNo: string
   onClose: () => void
   onDone: () => Promise<void>
-  onError: (message: string | null) => void
+}) {
+  const [condition, setCondition] = useState(current)
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID())
+  const mutation = useMutation({
+    mutationFn: () => saveWarehouseStockCondition(brandId, requestId, condition, {
+      positionId: row.id,
+      expectedCondition: current,
+    }),
+    onSuccess: onDone,
+  })
+  return (
+    <Overlay title="재고 상태 변경" onClose={onClose}>
+      <p className="text-sm">{styleNo} {row.sourceProductName} · {formatWarehouseLocation(row)}</p>
+      <StockConditionField value={condition} onChange={(value) => {
+        setCondition(value)
+        setRequestId(crypto.randomUUID())
+        mutation.reset()
+      }} disabled={mutation.isPending} />
+      <p className="text-xs text-muted-foreground">
+        {condition === 'normal' ? '판매 가능 재고로 복원됩니다.' : '판매 가능 재고에서 제외됩니다.'}
+      </p>
+      {mutation.error && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" size="sm" disabled={mutation.isPending} onClick={onClose}>취소</Button>
+        <Button type="button" size="sm" disabled={condition === current || mutation.isPending}
+          onClick={() => mutation.mutate()}>저장</Button>
+      </div>
+    </Overlay>
+  )
+}
+
+const STOCK_ROW_EDIT_FIELDS = [
+  { key: 'number', label: 'M번호', max: 80 },
+  { key: 'productName', label: '상품명', max: 300 },
+  { key: 'place', label: '자리번호 (마지막 위치는 //)', max: 80 },
+  { key: 'receivedOn', label: '입고일', max: 40 },
+  { key: 'units', label: '박스당 수량', max: 6 },
+  { key: 'boxes', label: '잔여 박스', max: 5 },
+  { key: 'note', label: '메모', max: 500 },
+] as const
+
+function StockRowCorrectionDialog({ brandId, row, current, styleNo, onClose, onDone }: {
+  brandId: string
+  row: WarehouseStockPosition
+  current: WarehouseStockCondition
+  styleNo: string
+  onClose: () => void
+  onDone: () => Promise<void>
+}) {
+  const [requestId] = useState(() => crypto.randomUUID())
+  const suffix = `_(${WAREHOUSE_STOCK_CONDITION_LABELS[current]})`
+  const original = {
+    number: styleNo,
+    productName: current !== 'normal' && row.sourceProductName.endsWith(suffix)
+      ? row.sourceProductName.slice(0, -suffix.length) : row.sourceProductName,
+    place: formatWarehouseLocation(row),
+    receivedOn: row.receivedOnRaw,
+    units: row.unitsPerBox?.toString() ?? '',
+    boxes: row.remainingBoxes?.toString() ?? '',
+    note: row.note,
+    zone: row.zone,
+    condition: current,
+  }
+  const [fields, setFields] = useState(original)
+  const changes = Object.fromEntries(Object.entries(fields).filter(([key, value]) =>
+    value.trim() !== original[key as keyof typeof original].trim()).map(([key, value]) => [key, value.trim()]))
+  const mutation = useMutation({
+    mutationFn: async () => {
+      const trace = startWorkflow('app', 'warehouse_row_correction')
+      trace.step('validate_input')
+      const patch: Record<string, string | null> = { ...changes }
+      if ('receivedOn' in patch) {
+        const date = parseWarehouseReceivedOn(fields.receivedOn)
+        if (!date.dateValid) {
+          trace.block('invalid_date')
+          throw new Error('입고일을 YYMMDD 또는 YYYY-MM-DD 형식으로 입력하세요.')
+        }
+        patch.receivedOn = date.receivedOnRaw
+        patch.date = date.receivedOn
+        patch.priority = date.usagePriority
+      }
+      await trace.run('save', context => correctWarehouseStockRow(brandId, requestId, row, patch, context))
+      return trace
+    },
+    onSuccess: async trace => {
+      await trace.run('refresh_queries', onDone, { writeOutcome: 'committed' })
+      trace.done({ writeOutcome: 'committed' })
+    },
+  })
+  return (
+    <Overlay title="재고 행 수정" onClose={onClose}>
+      {row.boxQr && <p className="text-xs text-muted-foreground">박스 QR {row.boxQr}</p>}
+      <div className="grid grid-cols-2 gap-3">
+        <label className="space-y-1 text-xs">
+          <span className="text-muted-foreground">창고 구역</span>
+          <Select value={fields.zone} disabled={mutation.isPending}
+            onChange={event => setFields({ ...fields, zone: event.target.value as WarehouseZone })}>
+            <option value="box_storage">박스창고</option><option value="picking">출고창고</option>
+          </Select>
+        </label>
+        <StockConditionField value={fields.condition} disabled={mutation.isPending}
+          onChange={condition => setFields({ ...fields, condition })} />
+        {STOCK_ROW_EDIT_FIELDS.map(field => (
+          <label key={field.key} className={cn('space-y-1 text-xs', field.key === 'note' && 'col-span-2')}>
+            <span className="text-muted-foreground">{field.label}</span>
+            <Input value={fields[field.key]} maxLength={field.max} disabled={mutation.isPending}
+              onChange={event => setFields({ ...fields, [field.key]: event.target.value })} />
+          </label>
+        ))}
+      </div>
+      {mutation.error && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" size="sm" onClick={onClose}>취소</Button>
+        <Button type="button" size="sm" disabled={mutation.isPending || !Object.keys(changes).length || !fields.productName.trim()}
+          onClick={() => mutation.mutate()}>수정 저장</Button>
+      </div>
+    </Overlay>
+  )
+}
+
+function ReceiveDialog({
+  brandId,
+  sheetConditionEnabled,
+  zone,
+  warehouseLabel,
+  onClose,
+  onDone,
+}: {
+  brandId: string
+  sheetConditionEnabled: boolean
+  zone: WarehouseZone
+  warehouseLabel: string
+  onClose: () => void
+  onDone: () => Promise<void>
 }) {
   const [style, setStyle] = useState<StyleRef | null>(null)
+  const [manualProduct, setManualProduct] = useState(false)
+  const [productName, setProductName] = useState('')
+  const [condition, setCondition] = useState<WarehouseStockCondition>('normal')
+  const [requestId] = useState(() => crypto.randomUUID())
   const [locationRaw, setLocationRaw] = useState('')
   const [receivedRaw, setReceivedRaw] = useState('')
   const [forced, setForced] = useState(false)
   const [units, setUnits] = useState('20')
   const [boxes, setBoxes] = useState('1')
+  const selectedStyle = manualProduct ? null : style
+  const sourceProductName = manualProduct ? productName.trim() : selectedStyle?.name ?? ''
   const mutation = useMutation({
     mutationFn: async () => {
+      const trace = startWorkflow('app', 'warehouse_receive')
+      trace.step('validate_input')
       const location = parseWarehouseLocation(locationRaw)
       const received = forced
         ? parseWarehouseReceivedOn(FORCED_PRIORITY_DATE)
         : parseWarehouseReceivedOn(receivedRaw)
-      if (!location.locationCode) throw new Error('자리번호를 입력하세요.')
       const unitsPerBox = Number(units)
       const remainingBoxes = Number(boxes)
-      if (!Number.isFinite(unitsPerBox) || unitsPerBox < 1) {
-        throw new Error('박스당 수량을 확인하세요.')
+      let validationError = ''
+      if (!location.locationCode) validationError = '자리번호를 입력하세요.'
+      else if (!Number.isInteger(unitsPerBox) || unitsPerBox < 1) validationError = '박스당 수량을 확인하세요.'
+      else if (!Number.isInteger(remainingBoxes) || remainingBoxes < 1) validationError = '박스 수를 확인하세요.'
+      else if (sheetConditionEnabled && !sourceProductName) validationError = '상품을 선택하거나 상품명을 입력하세요.'
+      if (validationError) {
+        trace.block('invalid_input')
+        throw new Error(validationError)
       }
-      if (!Number.isFinite(remainingBoxes) || remainingBoxes < 1) {
-        throw new Error('박스 수를 확인하세요.')
-      }
-      await receiveWarehouseStock(brandId, {
-        styleId: style?.styleId ?? null,
-        sourceStyleNo: style?.styleNo ?? '',
-        sourceProductName: style?.name ?? '',
+      const receive = {
+        styleId: selectedStyle?.styleId ?? null,
+        sourceStyleNo: selectedStyle?.styleNo ?? '',
+        sourceProductName,
         locationCode: location.locationCode,
+        zone,
         isFinalLocation: location.isFinalLocation,
         receivedOn: received.receivedOn,
         receivedOnRaw: received.receivedOnRaw,
         isForcedPriority: received.isForcedPriority,
         unitsPerBox,
         remainingBoxes,
-      })
+      }
+      await trace.run('save', (context) => sheetConditionEnabled
+        ? saveWarehouseStockCondition(brandId, requestId, manualProduct ? 'normal' : condition, { receive }, context)
+        : receiveWarehouseStock(brandId, receive))
+      return trace
     },
-    onSuccess: async () => {
-      onError(null)
-      await onDone()
-    },
-    onError: (err) => {
-      onError(err instanceof Error ? err.message : '입고에 실패했습니다.')
+    onSuccess: async (trace) => {
+      await trace.run('refresh_queries', onDone, { writeOutcome: 'committed' })
+      trace.done({ writeOutcome: 'committed' })
     },
   })
 
   return (
-    <Overlay title="신규 입고" onClose={onClose}>
-      <label className="block space-y-1 text-xs">
-        <span className="text-muted-foreground">상품</span>
-        <StylePicker brandId={brandId} value={style} onChange={setStyle} />
-      </label>
+    <Overlay title={`${warehouseLabel} 신규 입고`} onClose={onClose}>
+      {manualProduct ? (
+        <label className="block space-y-1 text-xs">
+          <span className="text-muted-foreground">상품명</span>
+          <Input value={productName} maxLength={300} onChange={(event) => setProductName(event.target.value)} />
+        </label>
+      ) : (
+        <label className="block space-y-1 text-xs">
+          <span className="text-muted-foreground">상품</span>
+          <StylePicker brandId={brandId} value={style} onChange={setStyle} />
+        </label>
+      )}
+      {sheetConditionEnabled && (
+        <label className="flex items-center gap-2 text-xs">
+          <input type="checkbox" checked={manualProduct} disabled={mutation.isPending}
+            onChange={(event) => setManualProduct(event.target.checked)} />
+          상품명 직접 입력 (M번호 없음)
+        </label>
+      )}
+      {sheetConditionEnabled && !manualProduct && <StockConditionField value={condition} onChange={setCondition} disabled={mutation.isPending} />}
       <label className="block space-y-1 text-xs">
         <span className="text-muted-foreground">
           자리번호 (`{FINAL_LOCATION_MARK}`이면 마지막 위치)
         </span>
-        <Input value={locationRaw} onChange={(e) => setLocationRaw(e.target.value)} />
+        <Input value={locationRaw} maxLength={80} onChange={(e) => setLocationRaw(e.target.value)} />
       </label>
       <label className="flex items-center gap-2 text-xs">
         <input
@@ -1082,6 +1321,7 @@ function ReceiveDialog({
           <span className="text-muted-foreground">입고일</span>
           <Input
             value={receivedRaw}
+            maxLength={40}
             onChange={(e) => setReceivedRaw(e.target.value)}
             placeholder="YYMMDD 또는 YYYY-MM-DD"
           />
@@ -1097,6 +1337,7 @@ function ReceiveDialog({
           <Input value={boxes} onChange={(e) => setBoxes(e.target.value)} />
         </label>
       </div>
+      {mutation.error && <p role="alert" className="text-sm text-destructive">{mutation.error.message}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>
           취소
@@ -1104,7 +1345,7 @@ function ReceiveDialog({
         <Button
           type="button"
           size="sm"
-          disabled={mutation.isPending}
+          disabled={(sheetConditionEnabled && !sourceProductName) || mutation.isPending}
           onClick={() => mutation.mutate()}
         >
           입고
@@ -1117,36 +1358,56 @@ function ReceiveDialog({
 function MoveDialog({
   brandId,
   row,
-  replenish,
+  sheetEnabled,
   onClose,
   onDone,
   onError,
 }: {
   brandId: string
   row: WarehouseStockPosition
-  replenish: boolean
+  sheetEnabled: boolean
   onClose: () => void
   onDone: () => Promise<void>
   onError: (message: string | null) => void
 }) {
-  const [toCode, setToCode] = useState(replenish ? row.locationCode : '')
+  const [toCode, setToCode] = useState('')
+  const [toZone, setToZone] = useState<WarehouseZone>(row.zone)
   const [boxCount, setBoxCount] = useState(String(row.remainingBoxes ?? ''))
+  const [requestId] = useState(() => crypto.randomUUID())
+  const [needsDestinationZone, setNeedsDestinationZone] = useState(false)
+  const useSheetMove = sheetEnabled && !needsDestinationZone
   const mutation = useMutation({
     mutationFn: async () => {
       const count = Number(boxCount)
       if (!toCode.trim()) throw new Error('옮길 자리번호를 입력하세요.')
-      await moveWarehouseStock(
+      if (!boxCount.trim() || !Number.isInteger(count) || count < (useSheetMove ? 0 : 1) || count > (row.remainingBoxes ?? 0)) {
+        throw new Error('옮길 박스 수를 확인하세요.')
+      }
+      const trace = startWorkflow('app', 'warehouse_stock_move')
+      if (useSheetMove) {
+        const saved = await trace.run('save', context => trySaveWarehouseStockWork(brandId, requestId, row, 'move', {
+          to_location_code: toCode.trim(),
+          box_count: count,
+        }, context))
+        trace.done()
+        if (!saved) setNeedsDestinationZone(true)
+        return saved
+      }
+      await trace.run('save_legacy', () => moveWarehouseStock(
         brandId,
         {
           positionId: row.id,
           toLocationCode: toCode.trim(),
-          toZone: replenish ? 'picking' : 'box_storage',
+          toZone,
           boxCount: count,
         },
-        replenish ? 'replenish' : 'move',
-      )
+        row.zone === 'box_storage' && toZone === 'picking' ? 'replenish' : 'move',
+      ))
+      trace.done()
+      return true
     },
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
+      if (!saved) return
       onError(null)
       await onDone()
     },
@@ -1156,10 +1417,7 @@ function MoveDialog({
   })
 
   return (
-    <Overlay
-      title={replenish ? '출고창고 박스 충원' : '전체 박스 위치 이동'}
-      onClose={onClose}
-    >
+    <Overlay title="자리 이동" onClose={onClose}>
       <p className="text-xs text-muted-foreground">
         {row.styleNo} · {formatWarehouseLocation(row)} · 잔여{' '}
         {formatWarehouseCount(row.remainingBoxes)}박스.
@@ -1169,10 +1427,22 @@ function MoveDialog({
         <span className="text-muted-foreground">도착 자리번호</span>
         <Input value={toCode} onChange={(e) => setToCode(e.target.value)} />
       </label>
+      {needsDestinationZone && (
+        <p role="status" className="text-xs text-muted-foreground">도착 창고를 선택한 뒤 이동을 눌러 주세요.</p>
+      )}
+      {!useSheetMove && <label className="block space-y-1 text-xs">
+        <span className="text-muted-foreground">도착 창고</span>
+        <Select value={toZone} onChange={(e) => setToZone(e.target.value as WarehouseZone)}>
+          <option value="box_storage">박스창고</option>
+          <option value="picking">출고창고</option>
+        </Select>
+      </label>}
       <label className="block space-y-1 text-xs">
         <span className="text-muted-foreground">옮길 박스 수</span>
-        <Input value={boxCount} onChange={(e) => setBoxCount(e.target.value)} />
+        <Input type="number" min={row.openedUnits > 0 && row.remainingBoxes === 0 && useSheetMove ? 0 : 1}
+          max={row.remainingBoxes ?? undefined} step={1} value={boxCount} onChange={(e) => setBoxCount(e.target.value)} />
       </label>
+      {mutation.error && <p role="alert" className="text-xs text-danger">{mutation.error.message}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>
           취소
@@ -1183,11 +1453,11 @@ function MoveDialog({
           disabled={
             mutation.isPending ||
             !isWarehouseQuantityKnown(row) ||
-            (row.remainingBoxes ?? 0) < 1
+            (!useSheetMove && (row.remainingBoxes ?? 0) < 1)
           }
           onClick={() => mutation.mutate()}
         >
-          {replenish ? '충원' : '이동'}
+          이동
         </Button>
       </div>
     </Overlay>
@@ -1197,12 +1467,14 @@ function MoveDialog({
 function AdjustDialog({
   brandId,
   row,
+  sheetEnabled,
   onClose,
   onDone,
   onError,
 }: {
   brandId: string
   row: WarehouseStockPosition
+  sheetEnabled: boolean
   onClose: () => void
   onDone: () => Promise<void>
   onError: (message: string | null) => void
@@ -1210,14 +1482,25 @@ function AdjustDialog({
   const [boxes, setBoxes] = useState(String(row.remainingBoxes ?? ''))
   const [units, setUnits] = useState(String(row.unitsPerBox ?? ''))
   const [opened, setOpened] = useState(String(row.openedUnits))
+  const [requestId] = useState(() => crypto.randomUUID())
   const mutation = useMutation({
     mutationFn: async () => {
-      await adjustWarehouseStock(brandId, {
-        positionId: row.id,
-        remainingBoxes: Number(boxes),
-        openedUnits: Number(opened),
-        unitsPerBox: Number(units),
-      })
+      if ([boxes, units, opened].some(value => !value.trim())) throw new Error('입수와 잔여 수량을 입력하세요.')
+      const trace = startWorkflow('app', 'warehouse_stock_adjust')
+      const saved = sheetEnabled && await trace.run('save', context => trySaveWarehouseStockWork(brandId, requestId, row, 'adjust', {
+        remaining_boxes: Number(boxes),
+        opened_units: Number(opened),
+        units_per_box: Number(units),
+      }, context))
+      if (!saved) {
+        await trace.run('save_legacy', () => adjustWarehouseStock(brandId, {
+          positionId: row.id,
+          remainingBoxes: Number(boxes),
+          openedUnits: Number(opened),
+          unitsPerBox: Number(units),
+        }))
+      }
+      trace.done()
     },
     onSuccess: async () => {
       onError(null)
@@ -1244,6 +1527,7 @@ function AdjustDialog({
           <Input value={opened} onChange={(e) => setOpened(e.target.value)} />
         </label>
       </div>
+      {mutation.error && <p role="alert" className="text-xs text-danger">{mutation.error.message}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>
           취소
@@ -1255,64 +1539,6 @@ function AdjustDialog({
           onClick={() => mutation.mutate()}
         >
           저장
-        </Button>
-      </div>
-    </Overlay>
-  )
-}
-
-function OpenDialog({
-  brandId,
-  row,
-  onClose,
-  onDone,
-  onError,
-}: {
-  brandId: string
-  row: WarehouseStockPosition
-  onClose: () => void
-  onDone: () => Promise<void>
-  onError: (message: string | null) => void
-}) {
-  const [boxCount, setBoxCount] = useState('1')
-  const mutation = useMutation({
-    mutationFn: async () => {
-      await openWarehouseStock(brandId, row.id, Number(boxCount))
-    },
-    onSuccess: async () => {
-      onError(null)
-      await onDone()
-    },
-    onError: (err) => {
-      onError(err instanceof Error ? err.message : '개봉에 실패했습니다.')
-    },
-  })
-
-  return (
-    <Overlay title="박스 개봉" onClose={onClose}>
-      <p className="text-xs text-muted-foreground">
-        출고창고에서 박스를 열어 낱개로 바꿉니다. 남은 박스{' '}
-        {formatWarehouseCount(row.remainingBoxes)}.
-      </p>
-      <label className="block space-y-1 text-xs">
-        <span className="text-muted-foreground">개봉할 박스 수</span>
-        <Input value={boxCount} onChange={(e) => setBoxCount(e.target.value)} />
-      </label>
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" size="sm" onClick={onClose}>
-          취소
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          disabled={
-            mutation.isPending ||
-            !isWarehouseQuantityKnown(row) ||
-            (row.remainingBoxes ?? 0) < 1
-          }
-          onClick={() => mutation.mutate()}
-        >
-          개봉
         </Button>
       </div>
     </Overlay>
@@ -1343,6 +1569,7 @@ function ConfirmDialog({
   return (
     <Overlay title={title} onClose={onClose}>
       <p className="text-xs text-muted-foreground">{body}</p>
+      {mutation.error && <p role="alert" className="text-xs text-danger">{mutation.error.message}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>
           취소
@@ -1374,8 +1601,8 @@ function HistoryDialog({
 }) {
   const query = useQuery({
     queryKey: ['warehouse-stock-movements', brandId, setId, row?.id],
-    queryFn: () => getWarehouseStockMovements(brandId, setId!, row?.id),
-    enabled: Boolean(setId),
+    queryFn: () => getWarehouseStockMovements(brandId, setId, row?.id),
+    enabled: !row || Boolean(setId),
   })
   const movements = query.data ?? emptyList()
 

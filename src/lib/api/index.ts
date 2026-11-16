@@ -685,7 +685,7 @@ export async function getWarehouseStockPositions(
 
 export async function getWarehouseStockMovements(
   brandId: string,
-  setId: string,
+  setId?: string,
   positionId?: string,
 ): Promise<WarehouseStockMovement[]> {
   await delay()
@@ -847,6 +847,9 @@ export async function getCargoInbounds(brandIds: readonly string[]) {
   await delay()
   return cargoInboundStore.listCargoInbounds(brandIds)
 }
+
+export const getCargoInboundReceipts = cargoInboundStore.listCargoInboundReceipts
+export const completeCargoInbound = cargoInboundStore.completeCargoInbound
 
 export async function saveCargoInbound(
   input: cargoInboundStore.SaveCargoInboundInput,

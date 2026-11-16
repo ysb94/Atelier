@@ -7,6 +7,7 @@ import { indexRoomListLocations, indexRoomListStyleNumbers, roomListLocationCode
 import { roomListBulkPacking } from '@/features/logistics/room-list-paste'
 import type { StyleRef, WarehouseStockPosition } from '@/lib/types'
 import { linkFixedLocationStyles } from './fixed-location-styles'
+import { finalizeWarehouseFinderResults, normalizeWarehouseFinderQuery, toWarehouseFinderCard } from './finder'
 import {
   assignWarehouseUsageRanks,
   compareWarehouseUsageOrder,
@@ -35,6 +36,7 @@ import {
   validateWarehouseSheetSyncPayload,
 } from './sheet-sync'
 import {
+  isWarehouseNoStockMarker,
   prepareWarehouseSheetSyncRows as prepareEdgeWarehouseSheetSyncRows,
   toWarehouseSnapshotRpcRows as toEdgeWarehouseSnapshotRpcRows,
   validateWarehouseSheetSyncPayload as validateEdgeWarehouseSheetSyncPayload,
@@ -275,6 +277,35 @@ const roomLocationIndex = indexRoomListLocations([
   { ...roomStockPosition, id: 'empty-position', receivedOn: '2026-10-03', remainingBoxes: 0 },
 ])
 assert(roomLocationIndex.locations.get('슬림백 블랙')?.[0]?.id === 'old-position', '일반 피킹은 기존 위치 우선순위를 사용한다')
+const sameDateLocations = indexRoomListLocations([
+  { ...roomStockPosition, boxQr: '1' },
+  { ...roomStockPosition, locationCode: '9-1-1', zone: 'picking', boxQr: '2' },
+  { ...roomStockPosition, locationCode: '2-1-2', receivedOn: '2026-09-30', receivedOnRaw: '260930', boxQr: '3' },
+])
+assert(
+  roomListLocationCodes([], sameDateLocations.locations).get('슬림백 블랙')?.join(',') === '2-1-2,9-1-1,2-1-1',
+  '방별리스트는 오래된 입고를 먼저 표시하고 입고일이 같으면 출고창고 자리를 먼저 표시한다',
+)
+const productM0139 = '스웨이드 셔링 미니플랩백팩 베이지'
+const boxM0139 = {
+  ...roomStockPosition, styleId: 's-m0139', styleNo: 'M0139', styleName: productM0139,
+  locationCode: '#-7-1', receivedOn: '2024-12-03', receivedOnRaw: '241203', unitsPerBox: 30, remainingBoxes: 8,
+}
+const pickingM0139 = {
+  ...boxM0139, locationCode: '3-2-4_C1', zone: 'picking' as const, remainingBoxes: 1,
+}
+const fixedM0139 = [{ sheetRow: 4696, productName: productM0139, location: '#-7-1' }]
+assert(
+  roomListLocationCodes(fixedM0139, indexRoomListLocations([boxM0139, pickingM0139]).locations)
+    .get(productM0139)?.join(',') === '3-2-4_C1,#-7-1',
+  'M0139은 박스창고 고정 자리가 등록되어도 같은 날 입고한 출고창고 자리를 먼저 표시한다',
+)
+assert(
+  roomListLocationCodes(fixedM0139, indexRoomListLocations([
+    boxM0139, { ...pickingM0139, receivedOn: '2024-12-04', receivedOnRaw: '241204' },
+  ]).locations).get(productM0139)?.join(',') === '#-7-1,3-2-4_C1',
+  '출고창고 입고일이 다르면 박스창고 고정 자리 순서를 유지한다',
+)
 const latestBoxSize = roomLocationIndex.latestPositions.get('슬림백 블랙')?.unitsPerBox ?? null
 assert(latestBoxSize === 100, '같은 자리에 재고 행이 여러 개면 가장 최근의 남은 재고에서 입수를 읽는다')
 assert(roomListBulkPacking('80', latestBoxSize) === '낱개 80개', '100개입 상품 80개는 대량출고다')
@@ -615,12 +646,79 @@ const qrInput = [
   fixture.rows[1],
 ]
 const qrPayload = validateWarehouseSheetSyncPayload(qrInput)
+const markerCases = validateEdgeWarehouseSheetSyncPayload([
+  { externalRowId: 'marker', locationRaw: ' 0-0-0 ', receivedOnRaw: '991231' },
+  { externalRowId: 'qty', locationRaw: '0-0-0', remainingBoxesRaw: '0' },
+  { externalRowId: 'qr', locationRaw: '0-0-0', boxQr: 'LIVE-QR' },
+  { externalRowId: 'actual', locationRaw: '2-1-1' },
+]).rows
+assert(markerCases.filter(isWarehouseNoStockMarker).map((row) => row.externalRowId).join(',') === 'marker',
+  'only the exact 0-0-0 location with both box count and QR blank is filtered')
 const edgeQrPayload = validateEdgeWarehouseSheetSyncPayload(qrInput)
 assert(qrPayload.issues.length === 0 && edgeQrPayload.issues.length === 0, 'QR 유무와 관계없이 동기화할 수 있다')
 const qrRows = toWarehouseSnapshotRpcRows(prepareWarehouseSheetSyncRows(qrPayload.rows, styles, []))
 const edgeQrRows = toEdgeWarehouseSnapshotRpcRows(prepareEdgeWarehouseSheetSyncRows(edgeQrPayload.rows, styles, []))
 assert(qrRows[0].box_qr === '001234' && edgeQrRows[0].box_qr === '001234', 'S열 QR의 앞자리 0을 RPC까지 보존한다')
 assert(qrRows[1].box_qr === '' && edgeQrRows[1].box_qr === '', 'S열이 없는 기존 요청도 보존한다')
+const duplicateQrCases = validateEdgeWarehouseSheetSyncPayload([
+  { ...fixture.rows[0], externalRowId: 'distinct-a', locationRaw: '2-1-1', boxQr: 'BOX-A' },
+  { ...fixture.rows[0], externalRowId: 'distinct-b', locationRaw: '2-1-1', boxQr: 'BOX-B' },
+  { ...fixture.rows[0], externalRowId: 'repeat-a', locationRaw: '2-1-2', boxQr: ' BOX-C ' },
+  { ...fixture.rows[0], externalRowId: 'repeat-b', locationRaw: '2-1-3', boxQr: 'box-c' },
+  { ...fixture.rows[0], externalRowId: 'mixed-known', locationRaw: '2-1-4', boxQr: 'BOX-D' },
+  { ...fixture.rows[0], externalRowId: 'mixed-blank', locationRaw: '2-1-4' },
+  { ...fixture.rows[0], externalRowId: 'legacy-a', locationRaw: '2-1-5' },
+  { ...fixture.rows[0], externalRowId: 'legacy-b', locationRaw: '2-1-5' },
+]).rows
+const duplicateQrWarnings = prepareEdgeWarehouseSheetSyncRows(duplicateQrCases, styles)
+  .filter(row => row.reviewFlags.includes('duplicate_suspect'))
+  .map(row => row.externalRowId)
+assert(duplicateQrWarnings.join(',') === 'repeat-a,repeat-b,mixed-known,mixed-blank,legacy-a,legacy-b',
+  '서로 다른 QR은 통과하고, 동일 QR 반복과 QR이 빈 기존 중복 후보만 검수한다')
+const swatchPayload = validateEdgeWarehouseSheetSyncPayload([{
+  sourceRowNumber: 2522,
+  externalRowId: 'finder-swatch',
+  sourceStyleNo: '',
+  sourceProductName: '스와치',
+  locationRaw: '3-4-4_B2',
+  receivedOnRaw: '261113',
+  unitsPerBoxRaw: '1',
+  remainingBoxesRaw: '1',
+  note: '',
+  boxQr: '',
+}])
+assert(swatchPayload.issues.length === 0, 'M번호와 QR 없이 스와치를 동기화할 수 있다')
+const [swatch] = prepareEdgeWarehouseSheetSyncRows(swatchPayload.rows, styles, ['3-4-4_B2'])
+const [swatchRpcRow] = toEdgeWarehouseSnapshotRpcRows([swatch])
+const manualProduct = { ...swatchPayload.rows[0],
+  externalRowId: 'at_manual_12345678123440008000000000000001',
+  sourceProductName: '캐논 콜라보 토트백',
+}
+const laterCatalog = [...styles, { styleId: 'later-style', styleNo: 'M9999', name: manualProduct.sourceProductName }]
+const [eventReceipt, oldNameMatch] = prepareEdgeWarehouseSheetSyncRows([
+  manualProduct, { ...manualProduct, externalRowId: 'existing-catalog-row' },
+], laterCatalog, ['3-4-4_B2'])
+assert(eventReceipt?.styleId === null && eventReceipt.normalizedStyleNo === '' && eventReceipt.zone === 'picking',
+  '직접 입력한 입고는 동명 상품이 있어도 M번호 없이 출고창고 재고로 유지한다')
+assert(oldNameMatch?.styleId === 'later-style', '기존 시트 행은 상품명 조회 규칙을 유지한다')
+assert(
+  swatchRpcRow.external_row_id === 'finder-swatch' && swatchRpcRow.box_qr === '' &&
+    swatchRpcRow.style_id === null && swatchRpcRow.source_product_name === '스와치' &&
+    swatchRpcRow.location_code === '3-4-4_B2',
+  '스와치의 이름, 자리와 AA를 유지하고 M번호와 박스 QR은 비워둔다',
+)
+const swatchCards = finalizeWarehouseFinderResults(normalizeWarehouseFinderQuery('product', '스와치'), [
+  toWarehouseFinderCard({
+    ...swatch,
+    positionId: 'swatch-position',
+    setId: 'active',
+    productName: swatch.sourceProductName,
+  }),
+])
+assert(
+  swatchCards[0]?.locationDisplay === '3-4-4_B2' && swatchCards[0]?.computedQty === 1,
+  'M번호 없이도 품명 검색 결과에서 자리와 수량을 보여준다',
+)
 const customLocationCodes = ['3-1-1_C1', '3-1-1-C-1', '3-1-1_C2', '임시 자리 7', '3-1-1']
 const customLocationRows = customLocationCodes.map((locationRaw, index) => ({ ...fixture.rows[index], locationRaw }))
 const customLocations = prepareWarehouseSheetSyncRows(customLocationRows, styles, ['3-1-1_C1', '임시 자리 7'])

@@ -1,23 +1,32 @@
-import { useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   ArrowLeft,
   CalendarDays,
   CheckCircle2,
+  MapPin,
   MessageSquareText,
+  RefreshCw,
   Trash2,
 } from 'lucide-react'
+import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import type { CargoInboundTidySlotInput } from '@/lib/api'
+import { StatGrid, StatTile } from '@/components/ui/stat-tile'
+import { getCargoInboundReceipts, type CargoInboundTidySlotInput } from '@/lib/api'
+import { CargoInboundCompletionDialog } from '@/features/logistics/CargoInboundCompletionDialog'
 import { CargoInboundRequestDialog } from '@/features/logistics/CargoInboundRequestDialog'
 import { CargoInspectionButton } from '@/features/logistics/CargoInspectionDialog'
 import { CargoWarehouseTidyButton } from '@/features/logistics/CargoUnloadListDialog'
 import { CargoWarehouseSlotDialog } from '@/features/logistics/CargoWarehouseSlotDialog'
 import { formatCargoInboundTitle } from '@/features/logistics/cargo-inbound-title'
-import type { CargoInboundLineDraft } from '@/lib/cargo/inbound'
+import { summarizeCargoInboundReceipts, type CargoInboundLineDraft } from '@/lib/cargo/inbound'
 import type { CargoLineListValues } from '@/lib/cargo/line-list'
+import { useRenderWatch } from '@/lib/diagnostics'
+import { useAuth } from '@/lib/supabase/auth'
 import { formatNumber } from '@/lib/utils'
+import { brandQueryKey } from '@/lib/workspace/query-keys'
 
 export type CargoInboundDetailItem = {
   id: string
@@ -33,6 +42,7 @@ export type CargoInboundDetailItem = {
   shippedAt: string
   scheduledInboundAt: string | null
   portContactNote: string | null
+  warehouseSummary: string
   tidySavedAt: string | null
   lines: CargoInboundLineDraft[]
 }
@@ -43,6 +53,7 @@ type CargoInboundDetailPanelProps = {
   onBack: () => void
   onDelete: () => void
   onSaveInboundDate: (inboundDate: string, note: string) => Promise<void>
+  onComplete: (inboundDate: string, note: string) => Promise<void>
   onSaveRequestNotes: (
     notes: Array<{ lineId: string; requestNote: string }>,
   ) => Promise<void>
@@ -70,20 +81,45 @@ export function CargoInboundDetailPanel({
   onBack,
   onDelete,
   onSaveInboundDate,
+  onComplete,
   onSaveRequestNotes,
   onSaveTidyRows,
   onSaveTidySlots,
 }: CargoInboundDetailPanelProps) {
-  const title = formatCargoInboundTitle(item.shippedAt, item.boxCount)
-  const [inboundDate, setInboundDate] = useState(
-    item.scheduledInboundAt ?? '',
+  useRenderWatch('CargoInboundDetailPanel')
+  const tabActive = useWorkspaceTabActivity()
+  const { session } = useAuth()
+  const viewerId = session?.user.id
+  const lineIds = useMemo(() => item.lines.map(line => line.id), [item.lines])
+  const receiptsQuery = useQuery({
+    queryKey: brandQueryKey('cargo-inbound-receipts', item.brandId, item.id, viewerId, lineIds),
+    queryFn: ({ signal }) => getCargoInboundReceipts(item.brandId, lineIds, signal),
+    enabled: tabActive && Boolean(viewerId) && lineIds.length > 0,
+    staleTime: 15_000,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: 'always',
+  })
+  const receiptData = receiptsQuery.data
+  const receiptSummary = useMemo(
+    () => receiptData?.ready ? summarizeCargoInboundReceipts(receiptData.receipts) : null,
+    [receiptData],
   )
-  const [note, setNote] = useState(item.portContactNote ?? '')
+  const title = formatCargoInboundTitle(item.shippedAt, item.boxCount)
+  const [inboundDateEdit, setInboundDateEdit] = useState<string>()
+  const [noteEdit, setNoteEdit] = useState<string>()
+  const inboundDate = inboundDateEdit ?? item.scheduledInboundAt ?? ''
+  const note = noteEdit ?? item.portContactNote ?? ''
   const [status, setStatus] = useState<string | null>(null)
   const [statusWarning, setStatusWarning] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [completing, setCompleting] = useState(false)
+  const [completionOpen, setCompletionOpen] = useState(false)
+  const [completionError, setCompletionError] = useState<string | null>(null)
   const [requestOpen, setRequestOpen] = useState(false)
   const [slotOpen, setSlotOpen] = useState(false)
+  const inboundDateRef = useRef<HTMLInputElement>(null)
+  const done = item.stage === 'done'
+  const busy = saving || completing || deleting
 
   async function saveInboundDate() {
     setSaving(true)
@@ -105,17 +141,31 @@ export function CargoInboundDetailPanel({
     }
   }
 
-  function openSlotEntry() {
-    if (!item.tidySavedAt) {
-      setStatusWarning(false)
-      setStatus(
-        '새 창고정리용은 미리보기 단계입니다. 창고자리 입력은 기존 저장 목록에서만 가능합니다.',
-      )
+  function requestCompletion() {
+    if (busy || done) return
+    if (!inboundDate) {
+      setStatusWarning(true)
+      setStatus('입고일을 입력한 뒤 완료를 눌러 주세요.')
+      inboundDateRef.current?.focus()
       return
     }
-    setStatusWarning(false)
     setStatus(null)
-    setSlotOpen(true)
+    setCompletionError(null)
+    setCompletionOpen(true)
+  }
+
+  async function completeCargo() {
+    if (busy || done) return
+    setCompleting(true)
+    setCompletionError(null)
+    try {
+      await onComplete(inboundDate, note)
+      setCompletionOpen(false)
+    } catch (error) {
+      setCompletionError(error instanceof Error ? error.message : '화물 완료 처리에 실패했습니다.')
+    } finally {
+      setCompleting(false)
+    }
   }
 
   function openWarehouseTidy() {
@@ -148,7 +198,7 @@ export function CargoInboundDetailPanel({
               size="sm"
               variant="outline"
               className="text-danger hover:bg-danger/10"
-              disabled={deleting}
+              disabled={busy}
               onClick={onDelete}
             >
               <Trash2 className="size-3.5" />
@@ -206,17 +256,16 @@ export function CargoInboundDetailPanel({
               {item.stage === 'scheduled' ? (
                 <Badge variant="outline">입고일 확정</Badge>
               ) : null}
-              {item.stage === 'done' ? (
-                <Badge variant="success">정리 완료</Badge>
+              {done ? (
+                <Badge variant="success">물류 완료</Badge>
               ) : null}
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              선적일 {formatDate(item.shippedAt)} · 상품{' '}
-              {formatNumber(item.productCount)} · 박스{' '}
-              {formatNumber(item.boxCount)}
+              선적일 {formatDate(item.shippedAt)} · 상품 {formatNumber(item.productCount)}종
               {item.totalQty > 0
-                ? ` · 총수량 ${formatNumber(item.totalQty)}`
+                ? ` · 예정 낱개 ${formatNumber(item.totalQty)}개`
                 : ''}
+              {done && item.warehouseSummary ? ` · ${item.warehouseSummary}` : ''}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -229,17 +278,77 @@ export function CargoInboundDetailPanel({
               <MessageSquareText className="size-3.5" />
               요청 사항
             </Button>
+            {item.stage === 'scheduled' && item.tidySavedAt ? (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={() => {
+                  setStatus(null)
+                  setSlotOpen(true)
+                }}
+              >
+                <MapPin className="size-3.5" />
+                창고자리 입력
+              </Button>
+            ) : null}
             <Button
               type="button"
               size="sm"
-              disabled={item.stage !== 'scheduled'}
-              onClick={openSlotEntry}
+              disabled={busy || done}
+              aria-haspopup="dialog"
+              onClick={requestCompletion}
             >
               <CheckCircle2 className="size-3.5" />
-              {item.stage === 'done' ? '완료됨' : '완료'}
+              {done ? '완료됨' : completing ? '완료 처리 중...' : '완료'}
             </Button>
           </div>
         </div>
+      </div>
+
+      <div className="space-y-2" role="group" aria-label="화물 박스 집계">
+        <StatGrid className="mb-0 sm:grid-cols-3 xl:grid-cols-3">
+          <StatTile label="예정 박스 수" value={`${formatNumber(item.boxCount)}박스`} />
+          <StatTile
+            label="QR 연결 박스 수"
+            value={receiptSummary || !lineIds.length ? `${formatNumber(receiptSummary?.linkedBoxes ?? 0)}박스` : '—'}
+          />
+          <StatTile
+            label="입고 완료 박스 수"
+            value={receiptSummary || !lineIds.length ? `${formatNumber(receiptSummary?.receivedBoxes ?? 0)}박스` : '—'}
+            hint={receiptSummary ? `실제 입고 낱개 ${formatNumber(receiptSummary.receivedQty)}개` : undefined}
+          />
+        </StatGrid>
+        {lineIds.length > 0 ? (
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {receiptsQuery.isError ? (
+              <p className="mr-auto text-xs text-danger" role="alert">
+                {receiptSummary
+                  ? 'Finder 입고 내역을 갱신하지 못했습니다. 마지막 조회 결과를 표시합니다.'
+                  : receiptsQuery.error.message}
+              </p>
+            ) : receiptData?.ready === false ? (
+              <p className="mr-auto text-xs text-muted-foreground" role="status">
+                Finder 입고 내역 서버 연결 대기
+              </p>
+            ) : receiptsQuery.isLoading ? (
+              <p className="mr-auto text-xs text-muted-foreground" role="status">
+                Finder 입고 내역을 불러오는 중입니다.
+              </p>
+            ) : null}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!viewerId || receiptsQuery.isFetching}
+              onClick={() => void receiptsQuery.refetch()}
+            >
+              <RefreshCw className="size-3.5" />
+              입고 내역 새로고침
+            </Button>
+          </div>
+        ) : null}
       </div>
 
       <div className="grid gap-3 rounded-lg border border-border bg-card p-4 md:grid-cols-[1fr_1fr_auto]">
@@ -249,9 +358,11 @@ export function CargoInboundDetailPanel({
             입고일
           </span>
           <Input
+            ref={inboundDateRef}
             type="date"
             value={inboundDate}
-            onChange={(event) => setInboundDate(event.target.value)}
+            disabled={busy || done}
+            onChange={(event) => setInboundDateEdit(event.target.value)}
           />
         </label>
         <label className="space-y-1.5">
@@ -261,14 +372,15 @@ export function CargoInboundDetailPanel({
           <Input
             value={note}
             placeholder="예: 오전 입고 / 오후 2시 이후"
-            onChange={(event) => setNote(event.target.value)}
+            disabled={busy || done}
+            onChange={(event) => setNoteEdit(event.target.value)}
           />
         </label>
         <div className="flex items-end">
           <Button
             type="button"
             className="w-full md:w-auto"
-            disabled={!inboundDate || saving}
+            disabled={!inboundDate || busy || done}
             onClick={() => void saveInboundDate()}
           >
             {saving ? '저장 중...' : '입고일 확정'}
@@ -283,7 +395,7 @@ export function CargoInboundDetailPanel({
               ? 'text-xs text-warning'
               : 'text-xs text-muted-foreground'
           }
-          role="status"
+          role={statusWarning ? 'alert' : 'status'}
         >
           {status}
         </p>
@@ -295,51 +407,102 @@ export function CargoInboundDetailPanel({
         </p>
       ) : (
         <div className="overflow-x-auto rounded-lg border border-border bg-card">
-          <table className="w-full min-w-[44rem] text-left text-sm">
+          <table className="w-full min-w-[48rem] text-left text-sm">
             <thead className="bg-primary text-xs text-primary-foreground">
               <tr>
                 <th className="px-3 py-2 font-medium">NO</th>
                 <th className="px-3 py-2 font-medium">품명</th>
                 <th className="px-3 py-2 font-medium">사진</th>
                 <th className="px-3 py-2 font-medium">M번호</th>
-                <th className="px-3 py-2 text-right font-medium">총수량</th>
+                <th className="px-3 py-2 text-right font-medium">예정 낱개</th>
+                <th className="px-3 py-2 text-right font-medium">실제 입고 낱개</th>
                 <th className="px-3 py-2 text-right font-medium">박스 당</th>
                 <th className="px-3 py-2 text-right font-medium">박스</th>
                 <th className="px-3 py-2 font-medium">비고</th>
               </tr>
             </thead>
             <tbody>
-              {item.lines.map((line, index) => (
-                <tr key={`${item.id}-line-${index}`} className="border-t border-border">
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {line.no || index + 1}
-                  </td>
-                  <td className="px-3 py-2">{line.name}</td>
-                  <td className="px-3 py-2">
-                    {line.styleNo ? (
-                      <span className="font-black text-[#ff0000]">
-                        {line.styleNo}
-                      </span>
-                    ) : (
-                      '-'
-                    )}
-                  </td>
-                  <td className="px-3 py-2 font-mono text-xs">
-                    {line.styleNo || '-'}
-                  </td>
-                  <td className="px-3 py-2 text-right">{line.qty || '-'}</td>
-                  <td className="px-3 py-2 text-right">{line.perBox || '-'}</td>
-                  <td className="px-3 py-2 text-right">{line.boxes || '-'}</td>
-                  <td className="px-3 py-2 text-muted-foreground">
-                    {line.note || '-'}
-                  </td>
-                </tr>
-              ))}
+              {item.lines.map((line, index) => {
+                const inbound = receiptSummary?.byLine.get(line.id)
+                return (
+                  <Fragment key={line.id}>
+                    <tr className="border-t border-border">
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {line.no || index + 1}
+                      </td>
+                      <td className="px-3 py-2">{line.name}</td>
+                      <td className="px-3 py-2">
+                        {line.styleNo ? (
+                          <span className="font-black text-[#ff0000]">
+                            {line.styleNo}
+                          </span>
+                        ) : (
+                          '-'
+                        )}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-xs">
+                        {line.styleNo || '-'}
+                      </td>
+                      <td className="px-3 py-2 text-right">{line.qty || '-'}</td>
+                      <td className="px-3 py-2 text-right tabular-nums">
+                        {receiptSummary ? `${formatNumber(inbound?.receivedQty ?? 0)}개` : '—'}
+                      </td>
+                      <td className="px-3 py-2 text-right">{line.perBox || '-'}</td>
+                      <td className="px-3 py-2 text-right">{line.boxes || '-'}</td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {line.note || '-'}
+                      </td>
+                    </tr>
+                    {inbound?.receipts.length ? (
+                      <tr className="bg-muted/35">
+                        <td colSpan={9} className="px-6 py-2">
+                          <ul className="space-y-1.5" aria-label={`${line.name || line.styleNo || '품목'} 입고 내역`}>
+                            {inbound.receipts.map(receipt => {
+                              const locationOnly = receipt.mode === 'location_only'
+                              const received = Boolean(receipt.receivedAt)
+                              const badge = <Badge variant={received ? 'success' : 'muted'}>
+                                {received ? '입고 완료' : '입고 대기'}
+                              </Badge>
+                              return (
+                                <li
+                                  key={receipt.id}
+                                  className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs"
+                                >
+                                  {locationOnly ? badge : <span className="font-mono break-all">{receipt.boxQr}</span>}
+                                  {locationOnly ? <span>{formatNumber(receipt.actualBoxCount)}박스</span> : null}
+                                  <span className="tabular-nums">{formatNumber(receipt.actualQty)}개</span>
+                                  {locationOnly ? null : badge}
+                                  {received && receipt.receivedLocationCode ? (
+                                    <span className="text-muted-foreground">
+                                      <span className="sr-only">입고 당시 자리 </span>
+                                      {receipt.receivedLocationCode}
+                                    </span>
+                                  ) : null}
+                                </li>
+                              )
+                            })}
+                          </ul>
+                        </td>
+                      </tr>
+                    ) : null}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>
       )}
 
+      {tabActive && completionOpen && !done ? (
+        <CargoInboundCompletionDialog
+          cargoTitle={title}
+          description={`창고자리 입력을 생략하고 입고일 ${formatDate(inboundDate)}로 완료할까요?`}
+          pending={completing}
+          error={completionError}
+          onClose={() => setCompletionOpen(false)}
+          onConfirm={() => void completeCargo()}
+        />
+      ) : null}
       {requestOpen ? (
         <CargoInboundRequestDialog
           title={title}

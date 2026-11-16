@@ -1,5 +1,6 @@
 import type {
   CargoInboundLineDraft,
+  CargoInboundReceipt,
   CargoInboundStage,
 } from '@/lib/cargo/inbound'
 import type { CargoLineListValues } from '@/lib/cargo/line-list'
@@ -8,14 +9,41 @@ import {
   cargoLineHasContent,
   parseCargoInteger,
 } from '@/lib/cargo/inbound'
+import {
+  diagnosticOperation,
+  startWorkflow,
+  tracedQuery,
+  type DiagnosticContext,
+} from '@/lib/diagnostics/workflow-trace'
 import { getSupabase } from '@/lib/supabase/client'
 import { errorMessage } from '@/lib/supabase/map-error'
+import { isSupabaseReadTimeout } from '@/lib/supabase/request-policy'
 
 const SHIPMENT_COLUMNS =
   'id, brand_id, shipment_no, stage, shipped_on, scheduled_inbound_on, port_contact_note, vessel_name, origin_port, warehouse_summary, tidy_saved_at, completed_at, created_at, updated_at, cargo_inbound_lines(id, source_row_no, item_no, product_name, source_style_no, quantity, units_per_box, box_count, photo_ref, note, request_note)'
 
 const TIDY_ROW_COLUMNS =
   'id, brand_id, shipment_id, line_id, row_no, part_index, item_no, product_name, style_no, quantity, units_per_box, box_count, stow_label, note, shipped_code, latest_slot, latest_box_count, warehouse_slot'
+
+const RECEIPT_COLUMNS =
+  'receipt_id, cargo_inbound_line_id, receiving_mode, box_qr, actual_box_count, actual_qty, received_at, received_location_code'
+const RECEIPT_LINE_BATCH_SIZE = 100
+const RECEIPT_PAGE_SIZE = 500
+
+type CargoInboundReceiptRow = {
+  receipt_id: string
+  cargo_inbound_line_id: string
+  receiving_mode: CargoInboundReceipt['mode']
+  box_qr: string | null
+  actual_box_count: number
+  actual_qty: number
+  received_at: string | null
+  received_location_code: string | null
+}
+
+type CargoInboundReceiptResult =
+  | { ready: false }
+  | { ready: true; receipts: CargoInboundReceipt[] }
 
 type CargoInboundLineRow = {
   id: string
@@ -73,9 +101,16 @@ export type SaveCargoInboundInput = {
   rows: CargoInboundLineDraft[]
 }
 
+type CompleteCargoInboundInput = {
+  brandId: string
+  shipmentId: string
+  stage: Exclude<CargoInboundStage, 'done'>
+  schedule?: { inboundDate: string; note: string }
+}
+
 export class CargoInboundStoreError extends Error {
-  constructor(message: string) {
-    super(message)
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options)
     this.name = 'CargoInboundStoreError'
   }
 }
@@ -144,6 +179,62 @@ export async function listCargoInbounds(
   return ((data as CargoInboundShipmentRow[]) ?? []).map(toShipment)
 }
 
+export async function listCargoInboundReceipts(
+  brandId: string,
+  lineIds: readonly string[],
+  signal?: AbortSignal,
+): Promise<CargoInboundReceiptResult> {
+  const ids = [...new Set(lineIds.filter(Boolean))]
+  if (!brandId || ids.length === 0) return { ready: true, receipts: [] }
+
+  const trace = startWorkflow('db', 'cargo_inbound_receipts')
+  const receipts: CargoInboundReceipt[] = []
+  const db = getSupabase()
+
+  // Split the line IDs to keep the PostgREST filter short, and page large shipments.
+  for (let start = 0; start < ids.length; start += RECEIPT_LINE_BATCH_SIZE) {
+    const batch = ids.slice(start, start + RECEIPT_LINE_BATCH_SIZE)
+    for (let offset = 0; ; offset += RECEIPT_PAGE_SIZE) {
+      const query = db
+        .from('cargo_inbound_receipts')
+        .select(RECEIPT_COLUMNS)
+        .eq('brand_id', brandId)
+        .in('cargo_inbound_line_id', batch)
+        .order('cargo_inbound_line_id')
+        .order('created_at')
+        .order('receipt_id')
+        .range(offset, offset + RECEIPT_PAGE_SIZE - 1)
+      if (signal) query.abortSignal(signal)
+
+      const { data, error } = await trace.run('read_receipts', context => tracedQuery(query, context))
+      if (error) {
+        trace.fail(error)
+        if (error.code === 'PGRST205' || error.code === '42P01') return { ready: false }
+        const message = isSupabaseReadTimeout(error) ? error.message : 'Finder 입고 내역을 불러오지 못했습니다.'
+        throw new CargoInboundStoreError(message, { cause: error })
+      }
+
+      const rows = (data ?? []) as CargoInboundReceiptRow[]
+      for (const row of rows) {
+        receipts.push({
+          id: row.receipt_id,
+          lineId: row.cargo_inbound_line_id,
+          mode: row.receiving_mode,
+          boxQr: row.box_qr?.trim() || null,
+          actualBoxCount: row.actual_box_count,
+          actualQty: row.actual_qty,
+          receivedAt: row.received_at,
+          receivedLocationCode: row.received_location_code?.trim() || null,
+        })
+      }
+      if (rows.length < RECEIPT_PAGE_SIZE) break
+    }
+  }
+
+  trace.done()
+  return { ready: true, receipts }
+}
+
 export async function saveCargoInbound(
   input: SaveCargoInboundInput,
 ): Promise<string> {
@@ -210,14 +301,79 @@ export async function scheduleCargoInbound(
     })
     .eq('brand_id', brandId)
     .eq('id', shipmentId)
+    .in('stage', ['shipped', 'scheduled'])
     .select('id')
     .maybeSingle()
 
   if (error || !data) {
     throw new CargoInboundStoreError(
-      errorMessage(error, '화물 입고일을 저장하지 못했습니다.'),
+      errorMessage(error, '이미 완료되었거나 수정 권한이 없는 화물입니다. 목록을 새로고침해 주세요.'),
     )
   }
+}
+
+export async function completeCargoInbound(
+  { brandId, shipmentId, stage, schedule }: CompleteCargoInboundInput,
+  parent?: DiagnosticContext,
+): Promise<void> {
+  return diagnosticOperation('db', 'cargo_inbound_complete', async trace => {
+    trace.step('validate_input')
+    if (!brandId.trim() || !shipmentId.trim()) {
+      trace.block('missing_shipment')
+      throw new CargoInboundStoreError('완료할 화물을 확인하세요.')
+    }
+    if (
+      (stage === 'shipped' || schedule) &&
+      !/^\d{4}-\d{2}-\d{2}$/.test(schedule?.inboundDate ?? '')
+    ) {
+      trace.block('missing_inbound_date')
+      throw new CargoInboundStoreError('입고일을 입력해 주세요.')
+    }
+
+    const shipments = getSupabase().from('cargo_inbound_shipments')
+    const { data, error } = await trace.run('db_update', context => tracedQuery(
+      shipments.update({
+        stage: 'done',
+        completed_at: new Date().toISOString(),
+        warehouse_summary: '창고자리 입력 생략',
+        ...(schedule ? {
+          scheduled_inbound_on: schedule.inboundDate,
+          port_contact_note: schedule.note.trim(),
+        } : {}),
+      })
+        .eq('brand_id', brandId)
+        .eq('id', shipmentId)
+        .eq('stage', stage)
+        .select('id')
+        .maybeSingle(),
+      context,
+    ))
+    if (error) {
+      trace.fail(error)
+      throw new CargoInboundStoreError(
+        error.code === '42501' ? '화물을 완료할 권한이 없습니다.' : '화물 완료 처리에 실패했습니다. 다시 시도해 주세요.',
+        { cause: error },
+      )
+    }
+    if (data) {
+      trace.step('saved', { writeOutcome: 'committed' })
+      return
+    }
+
+    // 다른 직원이 먼저 완료했거나 응답을 받지 못해 재시도할 수 있다.
+    const { data: current, error: readError } = await trace.run('check_current_stage', context => tracedQuery(
+      shipments.select('stage').eq('brand_id', brandId).eq('id', shipmentId).maybeSingle(),
+      context,
+    ))
+    if (readError) {
+      trace.fail(readError)
+      throw new CargoInboundStoreError('화물 상태를 확인하지 못했습니다. 다시 시도해 주세요.', { cause: readError })
+    }
+    if (current?.stage !== 'done') {
+      trace.block('no_changed_row', { writeOutcome: 'not_changed' })
+      throw new CargoInboundStoreError('화물 상태가 바뀌었거나 수정 권한이 없습니다. 목록을 새로고침해 주세요.')
+    }
+  }, parent)
 }
 
 export async function deleteCargoInbound(

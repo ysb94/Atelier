@@ -1,5 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2'
 import {
+  isWarehouseNoStockMarker,
+  normalizeStyleNo,
   prepareWarehouseSheetSyncRows,
   summarizeWarehouseSheetSync,
   toWarehouseSnapshotRpcRows,
@@ -96,10 +98,13 @@ Deno.serve(async (req) => {
   }
 
   let payload: {
+    action?: 'list-models' | 'list-stock-conditions' | 'confirm-stock-conditions'
+      | 'list-qr-audit-exports' | 'confirm-qr-audit-export'
     validateOnly?: boolean
     sourceFileName?: string
     brandSlug?: string
     rows?: unknown
+    confirmed?: unknown
     snapshotAt?: number
   }
   try {
@@ -107,9 +112,18 @@ Deno.serve(async (req) => {
   } catch {
     return json({ ok: false, error: 'JSON 본문이 올바르지 않습니다.' }, 400)
   }
-  const snapshotAt = payload.snapshotAt ?? sentAt
-  if (!Number.isFinite(snapshotAt) || snapshotAt > sentAt || sentAt - snapshotAt > MAX_SKEW_MS) {
-    return json({ ok: false, error: '시트 조회 시각이 올바르지 않습니다.' }, 400)
+  const listModels = payload.action === 'list-models'
+  const listConditions = payload.action === 'list-stock-conditions'
+  const confirmConditions = payload.action === 'confirm-stock-conditions'
+  const listAudits = payload.action === 'list-qr-audit-exports'
+  const confirmAudit = payload.action === 'confirm-qr-audit-export'
+  const snapshotAt = payload.snapshotAt ?? (
+    payload.validateOnly === true || listModels || listConditions || confirmConditions || listAudits || confirmAudit
+      ? sentAt : undefined
+  )
+  if (typeof snapshotAt !== 'number' || !Number.isSafeInteger(snapshotAt)
+    || snapshotAt > sentAt || sentAt - snapshotAt > MAX_SKEW_MS) {
+    return json({ ok: false, error: '시트 조회 시작 시각이 올바르지 않습니다. 시트를 새로 읽고 동기화해주세요.' }, 400)
   }
 
   const brandSlug = String(payload.brandSlug ?? WAREHOUSE_SHEET_SYNC_BRAND_SLUG)
@@ -117,18 +131,6 @@ Deno.serve(async (req) => {
     .toLowerCase()
   if (brandSlug !== WAREHOUSE_SHEET_SYNC_BRAND_SLUG) {
     return json({ ok: false, error: 'Masmarulez 창고만 동기화할 수 있습니다.' }, 403)
-  }
-
-  const validated = validateWarehouseSheetSyncPayload(payload.rows)
-  if (validated.issues.length > 0) {
-    return json(
-      {
-        ok: false,
-        error: validated.issues[0]?.message ?? '행 검증에 실패했습니다.',
-        issues: validated.issues.slice(0, 20),
-      },
-      400,
-    )
   }
 
   const serviceRoleKey =
@@ -162,6 +164,62 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: 'Masmarulez 창고만 동기화할 수 있습니다.' }, 403)
   }
 
+  if (listConditions) {
+    const { data, error } = await supabase.rpc('list_warehouse_stock_condition_exports', { p_brand_id: brand.id })
+    return error ? json({ ok: false, error: '상태 반영 대기 목록을 읽지 못했습니다.' }, 500)
+      : json({ ok: true, entries: data ?? [] })
+  }
+  if (listAudits) {
+    const { data, error } = await supabase.rpc('list_warehouse_qr_audit_sheet_exports', { p_brand_id: brand.id })
+    return error ? json({ ok: false, error: 'QR 실사 반영 대기 목록을 읽지 못했습니다.' }, 500)
+      : json({ ok: true, entries: data ?? [] })
+  }
+  if (confirmAudit) {
+    const observed = payload.confirmed as { id?: string; rows?: unknown[] } | null | undefined
+    if (typeof observed?.id !== 'string' || !Array.isArray(observed.rows) || observed.rows.length > 2000) {
+      return json({ ok: false, error: '실사 반영 확인 값이 올바르지 않습니다.' }, 400)
+    }
+    const { data, error } = await supabase.rpc('confirm_warehouse_qr_audit_sheet_export', {
+      p_brand_id: brand.id, p_id: observed.id, p_rows: observed.rows,
+    })
+    return error || data !== true ? json({ ok: false, error: '창고입력에서 실사 결과를 확인하지 못했습니다.' }, 409)
+      : json({ ok: true })
+  }
+  if (confirmConditions) {
+    if (!Array.isArray(payload.confirmed) || payload.confirmed.length > 40) {
+      return json({ ok: false, error: '상태 반영 확인 값이 올바르지 않습니다.' }, 400)
+    }
+    const { data, error } = await supabase.rpc('confirm_warehouse_stock_condition_exports', {
+      p_brand_id: brand.id, p_confirmed: payload.confirmed,
+    })
+    return error ? json({ ok: false, error: '상태 반영 결과를 저장하지 못했습니다.' }, 500)
+      : json({ ok: true, confirmed: data })
+  }
+
+  const loadStyles = () => listAll<{ id: string; style_no: string; name: string }>((from, to) =>
+    supabase.from('styles').select('id, style_no, name').eq('brand_id', brand.id)
+      .order('id').range(from, to),
+  )
+
+  if (listModels) {
+    const styles = await loadStyles()
+    const models = styles.map((row) => ({ number: normalizeStyleNo(row.style_no), productName: row.name.trim() }))
+      .filter((row) => /^M[0-9]{4,}$/.test(row.number) && row.productName)
+    return json({ ok: true, models })
+  }
+
+  const validated = validateWarehouseSheetSyncPayload(payload.rows)
+  if (validated.issues.length > 0) {
+    return json(
+      {
+        ok: false,
+        error: validated.issues[0]?.message ?? '행 검증에 실패했습니다.',
+        issues: validated.issues.slice(0, 20),
+      },
+      400,
+    )
+  }
+
   const { data: activeSet } = await supabase
     .from('warehouse_inventory_sets')
     .select('warehouse_id')
@@ -183,15 +241,7 @@ Deno.serve(async (req) => {
       ).map((row) => row.code)
     : []
 
-  const styles = (
-    await listAll<{ id: string; style_no: string; name: string }>((from, to) =>
-      supabase
-        .from('styles')
-        .select('id, style_no, name')
-        .eq('brand_id', brand.id)
-        .range(from, to),
-    )
-  ).map(
+  const styles = (await loadStyles()).map(
     (row): StyleRef => ({
       styleId: row.id,
       styleNo: row.style_no,
@@ -199,12 +249,16 @@ Deno.serve(async (req) => {
     }),
   )
 
+  const stockRows = validated.rows.filter((row) => !isWarehouseNoStockMarker(row))
   const prepared = prepareWarehouseSheetSyncRows(
-    validated.rows,
+    stockRows,
     styles,
     pickingCodes,
   )
-  const summary = summarizeWarehouseSheetSync(prepared)
+  const summary = {
+    ...summarizeWarehouseSheetSync(prepared),
+    ignoredNoStockRows: validated.rows.length - stockRows.length,
+  }
   const sourceFileName = String(
     payload.sourceFileName ?? '창고입력 시트 동기화',
   ).trim()
@@ -227,6 +281,9 @@ Deno.serve(async (req) => {
     },
   )
   if (error || !set) {
+    if (error?.code && /^PWS0[1-7]$/.test(error.code)) {
+      return json({ ok: false, code: error.code, error: error.message }, 409)
+    }
     console.warn('[warehouse-sheet-sync] 전체 교체 실패', {
       message: error?.message,
       rowCount: prepared.length,

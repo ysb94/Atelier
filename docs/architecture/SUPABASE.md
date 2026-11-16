@@ -1,5 +1,7 @@
 # Supabase 데이터 아키텍처 원칙
 
+- 2026-11-16 사용자 승인 후 `20261116062854_warehouse_popular_locations.sql`을 공유 DB에 적용했다. 같은 브랜드의 물류 권한으로 인기상품 자리번호 목록을 공유하고, 버전이 오래된 수정은 차단한다. 상품 목록은 현재 창고 재고에서 조회한다.
+
 - 2026-11-11 사용자 승인 후 방별리스트 폴더 수정 설정을 공유 DB에 적용했다. 로컬 파일은 `20261111082704_warehouse_room_list_folder_edit.sql`, 공유 DB 적용 번호는 `20261111083348`이다. 기존 물류·브랜드 조회 권한을 가진 등록자가 제목과 상품 목록을 수정할 수 있다. 이전 버전에서 저장하면 충돌로 처리한다. 실제 인증 역할로 등록·수정·재조회, 다른 계정의 수정 차단, 이전 버전과 잘못된 목록의 저장 차단을 확인하고 검증을 롤백했다. 적용 전후 기존 폴더 5개의 제목·상품·등록 정보가 일치했다. 운영 화면 배포는 별도다.
 
 - 2026-11-11 사용자 승인 후 방별리스트 전용 저장소 `20261111054232_warehouse_room_list_folders`를 공유 DB에 적용했다. 기존 물류·브랜드 조회 권한으로 폴더를 조회·등록하며 등록자와 시각은 서버에서 기록한다. 로컬 화면에서 실제 공유 DB에 검증 폴더 두 개를 등록하고, 새로고침 후 함께 열어 공통 상품의 수량 3개와 7개가 10개로 합산되는 것을 확인했다. 검증 폴더 두 개는 정리했다. 기존 업무 데이터와 운영 화면 배포는 적용 범위에 포함하지 않았다.
@@ -166,14 +168,16 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
   화문 입고 원자 등록은 `save_cargo_inbound`를 사용한다. 잘못 올린 선적은
   `cargo_inbound_shipments` 삭제로 지우고, 품목 행과 창고정리용 목록
   (`cargo_inbound_tidy_rows`)은 `ON DELETE CASCADE`로 같이 지운다.
-  창고정리용 인쇄본 저장은 `save_cargo_inbound_tidy_rows`, 창고자리 저장과
-  완료는 `save_cargo_inbound_tidy_slots`를 사용한다.
+  창고정리용 인쇄본 저장은 `save_cargo_inbound_tidy_rows`, 창고자리 입력과 함께 완료할 때는
+  `save_cargo_inbound_tidy_slots`를 사용한다. 상세 화면의 직접 완료는 기존 수정 권한으로
+  `cargo_inbound_shipments`에 완료 시각과 `창고자리 입력 생략`을 기록한다.
   창고정리용 목록은 첫 인쇄 또는 엑셀 다운로드 내용 그대로 `cargo_inbound_tidy_rows`에
   고정한다. 다시 열거나 다시 인쇄해도 그 목록을 쓰고, 바꿀 때는 현재 재고로 다시
   만들어 저장본을 교체한다. 「현재 요청 사항만 불러오기」는 원본 `line_id`로 최신
   요청 사항을 연결하고 달라진 `note`만 수정한다. 저장 행 ID·순서·분할·수량·선적일·
-  적재방식·최신 재고·창고자리는 유지한다. 저장본이 없으면 완료할 수 없다. 창고 재고는 바꾸지
-  않는다. 추가 직전 스냅샷은
+  적재방식·최신 재고·창고자리는 유지한다. 창고자리 입력은 기존 저장본에서 할 수 있다.
+  직접 완료는 저장본 없이도 가능하며, 미확정 입고일은 날짜를 입력해 같이 저장한다.
+  두 완료 방식 모두 창고 재고는 바꾸지 않는다. 추가 직전 스냅샷은
   `docs/backups/cargo-inbound-pre-tidy-rows-20260929.xlsx`다.
   `issue_draft_no`는 내부용이며 authenticated 직접 호출을 막는다.
 - 브랜드 로고는 지금 `logo_url`에 data URL로 저장한다. 이후 `brands/{brand_id}/...`
@@ -1244,9 +1248,28 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - `import_warehouse_inventory_set`과 `apply_warehouse_stock_action`은
   `SECURITY INVOKER` 트랜잭션이다. 잔여 박스는 음수가 될 수 없다. 연습 데이터는
   송장 예약·실재고 차감과 연결하지 않는다.
-- `replace_warehouse_inventory_snapshot`은 Apps Script용 전체 교체 RPC다.
-  `service_role`만 실행할 수 있고 `anon`/`authenticated` 권한은 없다.
-  호출은 HMAC 인증 `warehouse-sheet-sync` Edge Function만 한다.
+- Apps Script의 전체 교체는 HMAC 인증 `warehouse-sheet-sync` Edge Function을 거쳐
+  `replace_warehouse_inventory_snapshot_with_box_qr(uuid,text,jsonb,timestamptz)`를 호출한다.
+  이 RPC는 `service_role`로만 실행된다. 네 번째 인자는 시트 행을 읽기 시작한 시각이다.
+- Finder 신규 단일 QR 입고를 켜기 전에 Finder의 `20261113114409_finder_single_inbound_db_first.sql`,
+  Atelier의 `20261114134631_warehouse_snapshot_finder_sheet_export_guard.sql`, 업데이트한
+  `warehouse-sheet-sync`를 순서대로 적용한다. 입고, 시트 반영 확인, 전체 교체는 동일한
+  브랜드별 트랜잭션 잠금을 사용한다. 전체 교체는 같은 브랜드에 시트 확인 대기가 있거나
+  시트 조회 시작 이후 반영이 확인됐으면 거부한다. 시트 반영을 확인한 Finder 단일 입고가
+  현재 활성 재고에 남아 있고 새 스냅샷에 해당 AA 행이 빠져도 교체를 거부한다.
+  출고 완료, 소진, 보관, 소진 추정이 확인된 박스는 AA 누락 검사 대상에서 제외한다.
+  기존 자리 이동·화물 입고 검사도 적용된다.
+  이 마이그레이션 적용 후 타임스탬프가 없는 세 인자 교체 함수는 보호된 RPC 내부에서만 호출한다.
+  Finder의 시트 반영 행 범위는 Apps Script 전체 조회 범위와 맞춘다.
+- 마스마룰즈의 두 창고 탭에서 `save_warehouse_stock_condition`으로 등록 상품 또는 M번호 없는
+  상품을 입고한다. 직접 입력은 `style_id = null`로 저장하고 `at_manual_` AA 행 ID로 시트 반영을
+  예약한다. 기존 Apps Script가 B열을 비워 새 행을 추가한다. 전체 동기화는 이 AA 행의 상품명을
+  상품 목록과 자동 연결하지 않는다. 적용 순서는 `20261116042928_warehouse_manual_product_receive.sql`,
+  `warehouse-sheet-sync` Edge Function, 화면 배포다.
+- `correct_warehouse_stock_row`는 기존 입고 권한으로 활성 재고의 상품, 날짜, 위치, 박스
+  수량, 메모와 상태를 정정한다. AA와 QR은 같은 값을 유지하며 저장 시 수정 시각과 시트
+  반영 대기를 검사한다. 기존 예약 작업이 같은 AA의 변경된 B:H 셀을 갱신한다. 개봉 낱개
+  수량은 기존 실사 기능을 사용한다. 행 수정 마이그레이션과 Apps Script·화면은 함께 적용한다.
 - 로직: `src/lib/warehouse/stock.ts`. 저장소: `src/lib/supabase/warehouse-stock.ts`.
   화면: `WarehousePage`, `WarehouseInventoryPanel`.
 - 창고 파인더는 같은 활성 sandbox 세트를 읽기 전용으로 검색한다. Firebase
@@ -1288,8 +1311,8 @@ Supabase, PostgreSQL, Auth, Storage, RLS, MCP 또는 데이터 이전 작업 전
 - Edge Function: `warehouse-sheet-sync`. JWT 대신 HMAC
   (`x-atelier-timestamp`, `x-atelier-signature`)을 검증하고 Masmarulez만
   허용한다. `validateOnly`는 저장하지 않고 건수만 돌려준다. 함수는
-  `service_role`로 브랜드·상품·활성 세트·등록 자리만 읽고, 쓰기는
-  `replace_warehouse_inventory_snapshot` RPC만 사용한다.
+  `service_role`로 브랜드·상품·활성 세트·등록 자리만 읽고, 쓰기는 위의
+  네 인자 QR 전체 교체 RPC만 사용한다.
 - 재고 원칙: [`INVENTORY.md`](./INVENTORY.md).
 
 ### 송장 내품명·출고구성 기준

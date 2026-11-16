@@ -19,12 +19,14 @@ import type {
 import { normalizeStyleNo } from '@/lib/import/transform'
 import {
   assignWarehouseUsageRanks,
+  isWarehouseQuantityKnown,
   summarizeWarehouseStockByStyle,
   toWarehouseImportRpcRows,
+  warehousePositionQty,
   type PreparedWarehouseImportRow,
 } from '@/lib/warehouse/stock'
 import { getSupabase } from '@/lib/supabase/client'
-import { tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
+import { diagnosticOperation, tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 
 const PAGE_SIZE = 1000
@@ -575,9 +577,13 @@ export async function listWarehouseLocations(
 async function readPositionRows<T = PositionRow>(
   brandId: string,
   setId: string,
-  zone?: WarehouseZone,
-  columns = POSITION_COLUMNS,
-  context?: DiagnosticContext,
+  { zone, columns = POSITION_COLUMNS, context, locationCode, signal }: {
+    zone?: WarehouseZone
+    columns?: string
+    context?: DiagnosticContext
+    locationCode?: string
+    signal?: AbortSignal
+  } = {},
 ): Promise<T[]> {
   const supabase = getSupabase()
   const raw: T[] = []
@@ -591,6 +597,8 @@ async function readPositionRows<T = PositionRow>(
       .order('id', { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
     if (zone) query = query.eq('warehouse_locations.zone', zone)
+    if (locationCode !== undefined) query = query.eq('warehouse_locations.code', locationCode)
+    if (signal) query = query.abortSignal(signal)
     const { data, error } = await tracedQuery(query, context)
     if (error) {
       throw new WarehouseStockStoreError(
@@ -610,8 +618,9 @@ export async function getWarehouseStockSummary(brandId: string, setId: string) {
   type SummaryRow = Pick<PositionRow, 'normalized_style_no' | 'received_on' | 'received_on_raw' |
     'is_forced_priority' | 'is_final_location' | 'usage_priority' | 'quantity_status' |
     'units_per_box' | 'remaining_boxes' | 'opened_units' | 'source_row_number' | 'warehouse_locations'>
-  const raw = await readPositionRows<SummaryRow>(brandId, setId, undefined,
-    'id, normalized_style_no, received_on, received_on_raw, is_forced_priority, is_final_location, usage_priority, quantity_status, units_per_box, remaining_boxes, opened_units, source_row_number, warehouse_locations!inner(code, zone)')
+  const raw = await readPositionRows<SummaryRow>(brandId, setId, {
+    columns: 'id, normalized_style_no, received_on, received_on_raw, is_forced_priority, is_final_location, usage_priority, quantity_status, units_per_box, remaining_boxes, opened_units, source_row_number, warehouse_locations!inner(code, zone)',
+  })
   return summarizeWarehouseStockByStyle(raw.map(row => {
     const location = Array.isArray(row.warehouse_locations) ? row.warehouse_locations[0] : row.warehouse_locations
     return {
@@ -634,7 +643,7 @@ export async function listWarehouseStockPositions(
   zone?: WarehouseZone,
   context?: DiagnosticContext,
 ): Promise<WarehouseStockPosition[]> {
-  const raw = await readPositionRows(brandId, setId, zone, POSITION_COLUMNS, context)
+  const raw = await readPositionRows(brandId, setId, { zone, context })
   if (raw.length === 0) return []
 
   const ranked = assignWarehouseUsageRanks(
@@ -664,9 +673,163 @@ export async function listWarehouseStockPositions(
   )
 }
 
-export async function listWarehouseStockMovements(
+export function listWarehouseLocationProducts(
   brandId: string,
   setId: string,
+  locationCode: string,
+  signal?: AbortSignal,
+) {
+  type ProductRow = Pick<PositionRow, 'source_product_name' | 'source_style_no' | 'normalized_style_no' |
+    'quantity_status' | 'units_per_box' | 'remaining_boxes' | 'opened_units'>
+  return diagnosticOperation('app', 'warehouse_location_products', async trace => {
+    const rows = await trace.run('read_location_positions', context =>
+      readPositionRows<ProductRow>(brandId, setId, {
+        columns: 'source_product_name, source_style_no, normalized_style_no, quantity_status, units_per_box, remaining_boxes, opened_units, warehouse_locations!inner(code)',
+        locationCode,
+        context,
+        signal,
+      }),
+    )
+    const products = new Map<string, { name: string; styleNo: string }>()
+    for (const row of rows) {
+      const stock = {
+        quantityStatus: row.quantity_status === 'unknown' ? 'unknown' as const : 'known' as const,
+        unitsPerBox: row.units_per_box,
+        remainingBoxes: row.remaining_boxes,
+        openedUnits: row.opened_units,
+      }
+      if (isWarehouseQuantityKnown(stock) && warehousePositionQty(stock) <= 0) continue
+
+      const name = row.source_product_name.trim()
+      const styleNo = (row.normalized_style_no || row.source_style_no).trim()
+      if (!name && !styleNo) continue
+
+      const key = styleNo ? `sku:${normalizeStyleNo(styleNo)}` : `name:${name.normalize('NFKC')}`
+      const previous = products.get(key)
+      if (!previous || (!previous.name && name)) products.set(key, { name, styleNo })
+    }
+    return [...products.values()]
+  })
+}
+
+export const WAREHOUSE_STOCK_CONDITION_LABELS = {
+  normal: '정상',
+  defective: '불량',
+  needs_repair: '수선 필요',
+  under_repair: '수선 중',
+  needs_inspection: '검수 필요',
+  awaiting_inspection: '검수전',
+  sale_hold: '판매보류',
+  production_error: '오제작',
+} as const
+
+export type WarehouseStockCondition = keyof typeof WAREHOUSE_STOCK_CONDITION_LABELS
+
+export async function listWarehouseStockConditionLinks(brandId: string) {
+  type LinkRow = {
+    external_row_id: string
+    source_product_name: string
+    condition: Exclude<WarehouseStockCondition, 'normal'>
+    styles: { style_no: string } | { style_no: string }[] | null
+  }
+  const links = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await getSupabase()
+      .from('warehouse_stock_condition_links')
+      .select('external_row_id, source_product_name, condition, styles!warehouse_stock_condition_links_style_fkey(style_no)')
+      .eq('brand_id', brandId)
+      .order('external_row_id')
+      .range(from, from + PAGE_SIZE - 1)
+    if (error) throw new WarehouseStockStoreError(errorMessage(error, '재고 상태를 불러오지 못했습니다.'), { cause: error })
+    const rows = (data ?? []) as LinkRow[]
+    links.push(...rows.map(row => ({
+      externalRowId: row.external_row_id,
+      sourceProductName: row.source_product_name,
+      condition: row.condition,
+      referenceStyleNo: (Array.isArray(row.styles) ? row.styles[0] : row.styles)?.style_no ?? '',
+    })))
+    if (rows.length < PAGE_SIZE) return links
+  }
+}
+
+export async function saveWarehouseStockCondition(
+  brandId: string,
+  requestId: string,
+  condition: WarehouseStockCondition,
+  target: { positionId: string; expectedCondition: WarehouseStockCondition } | { receive: WarehouseReceiveInput },
+  context?: DiagnosticContext,
+) {
+  const receive = 'receive' in target ? target.receive : null
+  const { error } = await tracedQuery(getSupabase().rpc('save_warehouse_stock_condition', {
+    p_brand_id: brandId,
+    p_request_id: requestId,
+    p_position_id: 'positionId' in target ? target.positionId : null,
+    p_condition: condition,
+    p_expected_condition: 'expectedCondition' in target ? target.expectedCondition : null,
+    p_receive: receive ? {
+      style_id: receive.styleId,
+      source_product_name: receive.sourceProductName,
+      location_code: receive.locationCode,
+      zone: receive.zone ?? 'box_storage',
+      received_on: receive.receivedOn,
+      received_on_raw: receive.receivedOnRaw,
+      is_forced_priority: receive.isForcedPriority,
+      is_final_location: receive.isFinalLocation,
+      units_per_box: receive.unitsPerBox,
+      remaining_boxes: receive.remainingBoxes,
+      note: receive.note ?? '',
+    } : null,
+  }), context)
+  if (error) {
+    throw new WarehouseStockStoreError(errorMessage(error, '재고 상태를 저장하지 못했습니다.'), { cause: error })
+  }
+}
+
+export async function correctWarehouseStockRow(
+  brandId: string,
+  requestId: string,
+  row: Pick<WarehouseStockPosition, 'id' | 'updatedAt'>,
+  changes: Record<string, string | null>,
+  context?: DiagnosticContext,
+) {
+  const { error } = await tracedQuery(getSupabase().rpc('correct_warehouse_stock_row', {
+    p_brand_id: brandId,
+    p_request_id: requestId,
+    p_position_id: row.id,
+    p_expected_updated_at: row.updatedAt,
+    p_changes: changes,
+  }), context)
+  if (error?.code === 'PGRST202') {
+    throw new WarehouseStockStoreError('재고 행 수정 서버 기능 적용 대기 중입니다.', { cause: error })
+  }
+  if (error) throw new WarehouseStockStoreError(errorMessage(error, '재고 행을 수정하지 못했습니다.'), { cause: error })
+}
+
+export async function trySaveWarehouseStockWork(
+  brandId: string,
+  requestId: string,
+  row: Pick<WarehouseStockPosition, 'id' | 'updatedAt'>,
+  action: 'move' | 'adjust' | 'deplete',
+  payload: Record<string, string | number>,
+  context?: DiagnosticContext,
+) {
+  const { error } = await tracedQuery(getSupabase().rpc('save_warehouse_stock_work', {
+    p_brand_id: brandId,
+    p_request_id: requestId,
+    p_position_id: row.id,
+    p_expected_updated_at: row.updatedAt,
+    p_action: action,
+    p_payload: payload,
+  }), context)
+  // PostgREST did not find the RPC signature, so it has not executed a write.
+  if (error?.code === 'PGRST202') return false
+  if (error) throw new WarehouseStockStoreError(errorMessage(error, '창고 작업을 저장하지 못했습니다.'), { cause: error })
+  return true
+}
+
+export async function listWarehouseStockMovements(
+  brandId: string,
+  setId?: string,
   positionId?: string,
 ): Promise<WarehouseStockMovement[]> {
   const supabase = getSupabase()
@@ -676,9 +839,9 @@ export async function listWarehouseStockMovements(
       .from('warehouse_stock_movements')
       .select(MOVEMENT_COLUMNS)
       .eq('brand_id', brandId)
-      .eq('set_id', setId)
       .order('created_at', { ascending: false })
       .range(from, from + PAGE_SIZE - 1)
+    if (setId) query = query.eq('set_id', setId)
     if (positionId) query = query.eq('position_id', positionId)
     const { data, error } = await query
     if (error) {

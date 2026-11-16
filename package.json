@@ -79,6 +79,7 @@
     "verify:warehouse-qr-browser": "node scripts/verify-warehouse-qr-browser.mjs",
     "verify:warehouse-finder": "node scripts/verify-warehouse-finder.mjs",
     "verify:warehouse-sheet-sync": "node scripts/verify-warehouse-sheet-sync.mjs",
+    "verify:warehouse-snapshot-finder-guard": "node scripts/verify-warehouse-snapshot-finder-guard.mjs",
     "verify:outbound-partner": "node scripts/verify-outbound-partner.mjs",
     "verify:invoice-mall": "node scripts/verify-invoice-mall.mjs",
     "verify:invoice-data-entry": "node scripts/verify-invoice-data-entry.mjs",

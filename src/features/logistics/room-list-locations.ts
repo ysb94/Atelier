@@ -51,10 +51,17 @@ export function indexRoomListLocations(positions: readonly WarehouseStockPositio
       return order > 0 ? position : current
     })
     if (group.every(position => position.brandId === latest.brandId)) latestPositions.set(name, latest)
-    group.sort((left, right) => receiptOrder(left).localeCompare(receiptOrder(right)) ||
-      prefixOrder(left.locationCode) - prefixOrder(right.locationCode) ||
-      locationOrder.compare(left.locationCode, right.locationCode) ||
-      left.sourceRowNumber - right.sourceRowNumber)
+    group.sort((left, right) => {
+      const leftReceipt = receiptOrder(left)
+      const rightReceipt = receiptOrder(right)
+      const sameReceiptDate = leftReceipt === left.receivedOn && rightReceipt === right.receivedOn &&
+        leftReceipt === rightReceipt
+      return leftReceipt.localeCompare(rightReceipt) ||
+        (sameReceiptDate ? Number(right.zone === 'picking') - Number(left.zone === 'picking') : 0) ||
+        prefixOrder(left.locationCode) - prefixOrder(right.locationCode) ||
+        locationOrder.compare(left.locationCode, right.locationCode) ||
+        left.sourceRowNumber - right.sourceRowNumber
+    })
     const seen = new Set<string>()
     groups.set(name, group.filter(position => {
       const key = JSON.stringify([
@@ -118,6 +125,22 @@ export function roomListLocationCodes(
     if (name && code && code !== EMPTY_WAREHOUSE_LOCATION_CODE) add(name, code)
   }
   for (const [name, positions] of warehouseLocations) {
+    const fixedCodes = groups.get(name)
+    if (fixedCodes) {
+      groups.set(name, new Map())
+      for (const [code, label] of fixedCodes) {
+        const fixedPosition = positions.find(position => parseWarehouseLocation(position.locationCode).locationCode === code)
+        if (fixedPosition?.zone === 'box_storage' && fixedPosition.receivedOn === receiptOrder(fixedPosition)) {
+          for (const position of positions) {
+            if (position.zone !== 'picking' || position.receivedOn !== fixedPosition.receivedOn ||
+              receiptOrder(position) !== position.receivedOn) continue
+            const pickingCode = parseWarehouseLocation(position.locationCode).locationCode
+            add(name, fixedCodes.get(pickingCode) ?? position.locationCode.trim())
+          }
+        }
+        add(name, label)
+      }
+    }
     for (const position of positions) add(name, position.locationCode.trim())
   }
 
