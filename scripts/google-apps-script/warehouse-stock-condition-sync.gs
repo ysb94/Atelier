@@ -148,7 +148,15 @@ function _writeAtelierStockCondition(sheet, entry) {
 
   const observed = sheet.getRange(row, 2, 1, 26).getDisplayValues()[0];
   if (norm(observed[25]) !== entry.rowId || !samePair(observed, values)) throw new Error('UNVERIFIED');
-  return { request_id: entry.requestId, row_id: norm(observed[25]), number: norm(observed[0]), product_name: norm(observed[1]) };
+  return {
+    request_id: entry.requestId, row_id: norm(observed[25]),
+    number: norm(observed[0]), product_name: norm(observed[1]),
+    observed_values: {
+      number: norm(observed[0]), productName: norm(observed[1]), place: norm(observed[2]),
+      receivedOn: norm(observed[3]), units: norm(observed[4]), boxes: norm(observed[5]),
+      note: norm(observed[6]), boxQr: norm(observed[17]),
+    },
+  };
 }
 
 function syncAtelierStockConditions() {

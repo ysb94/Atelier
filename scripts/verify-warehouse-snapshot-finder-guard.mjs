@@ -731,6 +731,28 @@ try {
   query(asService + sheet([...refreshed(), { ...fixtureRow, remaining_boxes: 0, remaining_boxes_raw: '0' }], 'clock_timestamp()'))
   assert.equal(readPosition(fromAa).remaining_boxes, 0)
   console.log('PASS: stock work split and full moves, quantity adjust, depletion, idempotency and snapshot protection')
+
+  query(atelierSql('20261116082935_verify_warehouse_stock_sheet_writeback'))
+  const checkedRequest = 'c0000000-0000-4000-8000-000000000199'
+  const checkedRow = 'verified-correction'
+  const checkedValues = { number: 'M1234', productName: 'Test style', place: '2-1-1',
+    receivedOn: '260826', units: '1000', boxes: '5', note: '메모', boxQr: 'QA-CONFIRM', openedUnits: 3 }
+  query(`insert into app.warehouse_stock_condition_exports
+    (brand_id,request_id,external_row_id,before_values,sheet_values,restore_values)
+    values ('${brand}','${checkedRequest}', '${checkedRow}',
+      ${json({ ...checkedValues, receivedOn: '260713' })},${json(checkedValues)},'{}');`)
+  const confirmChecked = observed_values => query(asService + `select public.confirm_warehouse_stock_condition_exports(
+    '${brand}',${json([{ request_id: checkedRequest, row_id: checkedRow,
+      number: checkedValues.number, product_name: checkedValues.productName, observed_values }])});`)
+  assert.equal(confirmChecked(undefined), '0')
+  for (const [field, wrong] of Object.entries({
+    place: '2-1-2', receivedOn: '260713', units: '100', boxes: '4', note: '다른 메모', boxQr: '',
+  })) {
+    assert.equal(confirmChecked({ ...checkedValues, [field]: wrong }), '0', field)
+  }
+  assert.equal(confirmChecked({ ...checkedValues, units: '1,000', note: '개봉 잔량 3개 · 메모' }), '1')
+  assert.equal(confirmChecked(checkedValues), '0')
+  console.log('PASS: row correction requires actual B:H and S read-back before sheet confirmation')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)

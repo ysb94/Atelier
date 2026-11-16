@@ -250,7 +250,12 @@ export function verifyWarehouseSyncAppsScript() {
     receivedOn: '261113', units: '38', boxes: '1', note: '', boxQr: 'QR-5609' }
   const correction = { rowId: 'after-3000', requestId: 'correction', before: prior,
     values: { ...prior, productName: '정정 이름', place: '3-6-7', receivedOn: '261116', units: '40' } }
-  assert.equal(ctx._writeAtelierStockCondition(sheet, correction).product_name, '정정 이름')
+  const correctionReceipt = ctx._writeAtelierStockCondition(sheet, correction)
+  assert.equal(correctionReceipt.product_name, '정정 이름')
+  assert.deepEqual({ ...correctionReceipt.observed_values }, {
+    number: correction.values.number, productName: '정정 이름', place: '3-6-7',
+    receivedOn: '261116', units: '40', boxes: '1', note: '', boxQr: 'QR-5609',
+  })
   assert.equal(ctx._writeAtelierStockCondition(sheet, correction).row_id, 'after-3000')
   assert.deepEqual([get(5609, 5), get(5609, 6), get(5609, 19), get(5609, 27)], ['261116', 40, 'QR-5609', 'after-3000'])
   assert.equal(get(5609, 4), '3-6-7')
