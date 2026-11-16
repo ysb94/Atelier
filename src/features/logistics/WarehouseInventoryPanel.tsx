@@ -24,11 +24,13 @@ import {
 } from '@/lib/api'
 import {
   correctWarehouseStockRow,
+  listWarehouseSheetConflicts,
   listWarehouseStockConditionLinks,
   saveWarehouseStockCondition,
   trySaveWarehouseStockWork,
   WAREHOUSE_STOCK_CONDITION_LABELS,
   type WarehouseStockCondition,
+  type WarehouseSheetConflict,
 } from '@/lib/supabase/warehouse-stock'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
@@ -81,6 +83,17 @@ type DialogState =
   | null
 
 const TABLE_PAGE_SIZE = 100
+const SHEET_CONFLICT_LABELS: Record<string, string> = {
+  SHEET_STOCK_CHANGED: '시트 값이 저장 전 값과 다릅니다.',
+  SHEET_VALUES_UNVERIFIED: '시트에서 최종 값을 확인하지 못했습니다.',
+  REMOVAL_UNVERIFIED: '소진된 행을 확인하지 못했습니다.',
+  AA_MISSING_OR_DUPLICATE: 'AA 행 ID가 중복되거나 누락됐습니다.',
+  QR_AT_ANOTHER_ROW: '다른 행에 같은 박스 QR이 있습니다.',
+  PICKING_OCCUPIED: '출고창고 자리에 다른 재고가 있습니다.',
+  FORMULA_CELL: '변경할 셀에 수식이 있습니다.',
+  NO_EMPTY_ROW: '신규 재고를 넣을 빈 입력 행이 없습니다.',
+  OUTSIDE_SNAPSHOT_RANGE: '행이 창고입력 동기화 범위를 벗어났습니다.',
+}
 
 const FILTERS: { value: ReviewFilter; label: string }[] = [
   { value: 'all', label: '전체' },
@@ -141,6 +154,12 @@ export function WarehouseInventoryPanel({
   const [refreshing, setRefreshing] = useState(false)
   const zone: WarehouseZone = view === 'box' ? 'box_storage' : 'picking'
   const warehouseLabel = view === 'box' ? '박스창고' : '출고창고'
+  const sheetConflicts = useQuery({
+    queryKey: ['warehouse-sheet-conflicts', brandId],
+    queryFn: () => listWarehouseSheetConflicts(brandId),
+    enabled: tabActive && sheetConditionEnabled && Boolean(brandId),
+    refetchInterval: tabActive ? 30_000 : false,
+  })
 
   async function downloadTemplate() {
     setDownloadingTemplate(true)
@@ -251,8 +270,16 @@ export function WarehouseInventoryPanel({
       queryClient.invalidateQueries({
         queryKey: ['warehouse-stock-movements', brandId],
       }),
+      queryClient.invalidateQueries({
+        queryKey: ['warehouse-sheet-conflicts', brandId],
+      }),
     ])
   }, [brandId, queryClient])
+
+  async function finishStockSave() {
+    await invalidateStock()
+    setDialog(null)
+  }
 
   useEffect(() => {
     if (!tabActive || !brandId) return
@@ -299,6 +326,11 @@ export function WarehouseInventoryPanel({
 
   return (
     <div className="space-y-4">
+      {sheetConditionEnabled && (sheetConflicts.isError ? (
+        <p role="status" className="text-xs text-danger">창고입력 반영 상태를 불러오지 못했습니다.</p>
+      ) : (
+        <SheetConflicts conflicts={sheetConflicts.data ?? []} />
+      ))}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -667,18 +699,12 @@ export function WarehouseInventoryPanel({
           zone={zone}
           warehouseLabel={warehouseLabel}
           onClose={() => setDialog(null)}
-          onDone={async () => {
-            setDialog(null)
-            await invalidateStock()
-          }}
+          onDone={finishStockSave}
         />
       ) : null}
       {dialog?.kind === 'correct' ? (
         <StockRowCorrectionDialog brandId={brandId} row={dialog.row} current={dialog.current} styleNo={dialog.styleNo}
-          onClose={() => setDialog(null)} onDone={async () => {
-            setDialog(null)
-            await invalidateStock()
-          }} />
+          onClose={() => setDialog(null)} onDone={finishStockSave} />
       ) : null}
       {dialog?.kind === 'condition' ? (
         <StockConditionDialog
@@ -687,10 +713,7 @@ export function WarehouseInventoryPanel({
           current={dialog.current}
           styleNo={dialog.styleNo}
           onClose={() => setDialog(null)}
-          onDone={async () => {
-            setDialog(null)
-            await invalidateStock()
-          }}
+          onDone={finishStockSave}
         />
       ) : null}
       {dialog?.kind === 'move' ? (
@@ -699,26 +722,20 @@ export function WarehouseInventoryPanel({
           row={dialog.row}
           sheetEnabled={sheetConditionEnabled}
           onClose={() => setDialog(null)}
-          onDone={async () => {
-            setDialog(null)
-            await invalidateStock()
-          }}
+          onDone={finishStockSave}
           onError={setError}
         />
       ) : null}
       {dialog?.kind === 'deplete' ? (
-        <ConfirmDialog
-          title="자리 소진"
+        <DepleteDialog
           body={`${dialog.row.styleNo || dialog.row.sourceProductName} ${formatWarehouseLocation(dialog.row)}의 재고를 소진 처리하고 변경 이력에 남깁니다.`}
-          confirmLabel="소진"
           onClose={() => setDialog(null)}
-          onConfirm={async () => {
+          onConfirm={async (reason) => {
             const trace = startWorkflow('app', 'warehouse_stock_deplete')
             const saved = sheetConditionEnabled && await trace.run('save', context =>
-              trySaveWarehouseStockWork(brandId, dialog.requestId, dialog.row, 'deplete', {}, context))
-            if (!saved) await trace.run('save_legacy', () => depleteWarehouseStock(brandId, dialog.row.id))
-            setDialog(null)
-            await invalidateStock()
+              trySaveWarehouseStockWork(brandId, dialog.requestId, dialog.row, 'deplete', { reason }, context))
+            if (!saved) await trace.run('save_legacy', () => depleteWarehouseStock(brandId, dialog.row.id, reason))
+            await finishStockSave()
             trace.done()
           }}
           onError={setError}
@@ -730,10 +747,7 @@ export function WarehouseInventoryPanel({
           row={dialog.row}
           sheetEnabled={sheetConditionEnabled}
           onClose={() => setDialog(null)}
-          onDone={async () => {
-            setDialog(null)
-            await invalidateStock()
-          }}
+          onDone={finishStockSave}
           onError={setError}
         />
       ) : null}
@@ -1545,21 +1559,52 @@ function AdjustDialog({
   )
 }
 
-function ConfirmDialog({
-  title,
+function SheetConflicts({ conflicts }: { conflicts: WarehouseSheetConflict[] }) {
+  if (!conflicts.length) return null
+  return (
+    <section aria-label="창고입력 반영 확인" className="rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
+      <p className="font-medium">창고입력 반영 확인 필요 · {conflicts.length}건</p>
+      {conflicts.map(({ id, row_ids: rowIds, failed_at: failedAt, failure }) => (
+        <details key={id} className="mt-2">
+          <summary className="cursor-pointer text-xs">
+            {SHEET_CONFLICT_LABELS[failure.reason] ?? '다음 동기화에서 다시 확인합니다.'} {formatImportedAt(failedAt)}
+          </summary>
+          <p className="my-2 break-all text-xs text-muted-foreground">AA {rowIds.join(', ')}</p>
+          {failure.differences.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr><th>행</th><th>항목</th><th>기대 시트값</th><th>실제 시트값</th><th>반영할 값</th></tr>
+                </thead>
+                <tbody>
+                  {failure.differences.map((difference, index) => (
+                    <tr key={index} className="border-t border-border">
+                      {[difference.id, difference.field, difference.expected, difference.actual, difference.target]
+                        .map((value, column) => <td key={column} className="p-1.5">{value ?? '—'}</td>)}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </details>
+      ))}
+    </section>
+  )
+}
+
+function DepleteDialog({
   body,
-  confirmLabel,
   onClose,
   onConfirm,
   onError,
 }: {
-  title: string
   body: string
-  confirmLabel: string
   onClose: () => void
-  onConfirm: () => Promise<void>
+  onConfirm: (reason: string) => Promise<void>
   onError: (message: string | null) => void
 }) {
+  const [reason, setReason] = useState('')
   const mutation = useMutation({
     mutationFn: onConfirm,
     onError: (err) => {
@@ -1567,8 +1612,12 @@ function ConfirmDialog({
     },
   })
   return (
-    <Overlay title={title} onClose={onClose}>
+    <Overlay title="자리 소진" onClose={onClose}>
       <p className="text-xs text-muted-foreground">{body}</p>
+      <label className="block space-y-1 text-xs">
+        <span>소진 사유 (선택)</span>
+        <Input value={reason} maxLength={500} disabled={mutation.isPending} onChange={event => setReason(event.target.value)} />
+      </label>
       {mutation.error && <p role="alert" className="text-xs text-danger">{mutation.error.message}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>
@@ -1579,9 +1628,9 @@ function ConfirmDialog({
           size="sm"
           variant="danger"
           disabled={mutation.isPending}
-          onClick={() => mutation.mutate()}
+          onClick={() => mutation.mutate(reason.trim() || '자리 소진')}
         >
-          {confirmLabel}
+          소진
         </Button>
       </div>
     </Overlay>

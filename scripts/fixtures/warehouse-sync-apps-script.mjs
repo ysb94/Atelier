@@ -72,6 +72,7 @@ export function verifyWarehouseSyncAppsScript() {
         setNumberFormat(format) { if (format === '@') textFormats.add(coordinate(row, column)); return this },
         getNotes: () => read((r, c) => notes.get(coordinate(r, c)) ?? ''),
         getNote: () => notes.get(coordinate(row, column)) ?? '',
+        setNote: value => notes.set(coordinate(row, column), value),
         clearNote: () => notes.delete(coordinate(row, column)),
       }
     },
@@ -250,7 +251,12 @@ export function verifyWarehouseSyncAppsScript() {
     receivedOn: '261113', units: '38', boxes: '1', note: '', boxQr: 'QR-5609' }
   const correction = { rowId: 'after-3000', requestId: 'correction', before: prior,
     values: { ...prior, productName: '정정 이름', place: '3-6-7', receivedOn: '261116', units: '40' } }
-  assert.equal(ctx._writeAtelierStockCondition(sheet, correction).product_name, '정정 이름')
+  const correctionReceipt = ctx._writeAtelierStockCondition(sheet, correction)
+  assert.equal(correctionReceipt.product_name, '정정 이름')
+  assert.deepEqual({ ...correctionReceipt.observed_values }, {
+    number: correction.values.number, productName: '정정 이름', place: '3-6-7',
+    receivedOn: '261116', units: '40', boxes: '1', note: '', boxQr: 'QR-5609',
+  })
   assert.equal(ctx._writeAtelierStockCondition(sheet, correction).row_id, 'after-3000')
   assert.deepEqual([get(5609, 5), get(5609, 6), get(5609, 19), get(5609, 27)], ['261116', 40, 'QR-5609', 'after-3000'])
   assert.equal(get(5609, 4), '3-6-7')
@@ -259,6 +265,7 @@ export function verifyWarehouseSyncAppsScript() {
 
   const stockBatches = []
   let lostReply = false
+  let afterBatch
   ctx.PLACEMENT_REMOVED_NOTE = 'Finder 지운 행 ID: '
   ctx.warehousePlacementCell = (_id, row, column, fields, value) => ({ row, column, fields, value })
   ctx.findWarehousePlacementEmptyRows = () => [5701]
@@ -270,6 +277,7 @@ export function verifyWarehouseSyncAppsScript() {
       put(row, column, [value.userEnteredValue?.numberValue ?? value.userEnteredValue?.stringValue ?? ''])
       if (fields.includes('note') && value.note) notes.set(coordinate(row, column), value.note)
     }
+    afterBatch?.()
     if (lostReply) {
       lostReply = false
       throw new Error('LOST_BATCH_RESPONSE')
@@ -307,5 +315,104 @@ export function verifyWarehouseSyncAppsScript() {
   assert.equal(get(5700, 9), '다른 열')
   assert.equal(get(5701, 27), split.id)
   assert.equal(notes.get(coordinate(5700, 27)), 'Finder 지운 행 ID: ' + initial.id)
+  ctx.findWarehousePlacementEmptyRows = () => [5702]
+  const named = { id: 'at_manual_abc00000000040008000000000000001', qr: 'UNPLACED-REVIEW-QR',
+    values: ['', '테이프', '2-1-1', '261113', '24', '1', ''] }
+  const namedJob = stockWork([], [named])
+  lostReply = true
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, namedJob), /LOST_BATCH_RESPONSE/)
+  const namedBatchCount = stockBatches.length
+  assert.equal(ctx.writeAtelierQrAuditSheet(sheet, namedJob)[0].id, named.id)
+  assert.equal(stockBatches.length, namedBatchCount)
+  assert.deepEqual([get(5702, 2), get(5702, 3), get(5702, 19), get(5702, 27)], ['', '테이프', named.qr, named.id])
+
+  const project = (row, changes) => ({ ...row, values: row.values.map((value, index) => changes[index] ?? value) })
+  const toJob = (id, before, after, picking = []) => ({
+    id, lease: id + '-lease', kind: 'stock', ids: [...new Set([...before, ...after].map(row => row.id))],
+    before, after, picking,
+  })
+  const total = { id: 'continuous-aa', qr: '', values: ['M2363', '테스트 재고', '4-6-8', '260919', '25', '2', ''] }
+  put(5704, 2, total.values)
+  put(5704, 27, [total.id])
+  put(5704, 20, ['예약 열'])
+  put(5703, 2, total.values) // The same SKU in another box must not be changed.
+  put(5703, 27, ['different-aa'])
+  const coalesced = project(total, { 2: '!-0-0', 5: '3', 6: '최종 메모' })
+  const change = toJob('final', [total], [coalesced])
+  assert.deepEqual(Array.from(ctx.writeAtelierQrAuditSheet(sheet, change).rows[0].values), coalesced.values)
+  assert.deepEqual(Array.from(stockBatches.at(-1), ({ column }) => column), [4, 7, 8])
+  assert.equal(get(5703, 7), '2')
+  assert.equal(get(5704, 20), '예약 열')
+
+  const noId = toJob('missing', [{ ...coalesced, id: 'missing-aa' }], [])
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, noId), error => {
+    assert.equal(error.message, 'SHEET_STOCK_CHANGED')
+    assert.equal(error.differences[0].field, 'AA')
+    return true
+  })
+  const consumed = toJob('deplete', [coalesced], [])
+  lostReply = true
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, consumed), /LOST_BATCH_RESPONSE/)
+  const removedProof = ctx.writeAtelierQrAuditSheet(sheet, consumed)
+  assert.deepEqual(Array.from(removedProof.rows), [])
+  assert.deepEqual(Array.from(removedProof.absent), [coalesced.id])
+  assert.equal(removedProof.cleared.get(coalesced.id), 5704)
+  assert.equal(get(5704, 20), '예약 열')
+
+  ctx.findWarehousePlacementEmptyRows = () => [5705]
+  const versionedSplitFrom = { ...total, id: 'split-source' }
+  const versionedSplitTo = { ...split, id: 'split-target' }
+  put(5706, 2, versionedSplitFrom.values)
+  put(5706, 27, [versionedSplitFrom.id])
+  const atomicSplit = toJob('split', [versionedSplitFrom],
+    [project(versionedSplitFrom, { 5: '1' }), project(versionedSplitTo, { 5: '1', 2: 'P-7-2' })], ['P-7-2'])
+  put(5708, 4, ['P-7-2'])
+  const initialBatchCount = stockBatches.length
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, atomicSplit), /PICKING_OCCUPIED/)
+  assert.equal(stockBatches.length, initialBatchCount)
+  put(5708, 4, [''])
+  assert.equal(ctx.writeAtelierQrAuditSheet(sheet, atomicSplit).rows.length, 2)
+  assert.equal(stockBatches.length, initialBatchCount + 1)
+  assert.deepEqual([get(5705, 7), get(5706, 7), get(5705, 27)], [1, 1, versionedSplitTo.id])
+
+  const damaged = project(atomicSplit.after[0], { 5: '2' })
+  afterBatch = () => put(5706, 7, ['9'])
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, toJob('verify-write', [atomicSplit.after[0]], [damaged])),
+    error => error.message === 'SHEET_VALUES_UNVERIFIED' && error.differences[0].actual === '9')
+  afterBatch = undefined
+
+  const conflict = toJob('conflict', [atomicSplit.after[0]], [damaged])
+  const writeIndependent = toJob('independent', [named], [project(named, { 6: '다른 행 반영' })])
+  const reserved = { ...named, id: 'at_manual_abc00000000040008000000000000002', qr: '' }
+  put(5709, 27, [reserved.id])
+  const adoptedManual = toJob('reserved-manual', [], [reserved])
+  const calls = []
+  ctx._atelierStockConditionCall = action => {
+    calls.push(action)
+    return { enabled: false, jobs: [] }
+  }
+  ctx.enableAtelierStockSheetWritebackV2()
+  ctx.enableAtelierStockSheetWritebackV2()
+  assert.deepEqual(calls.splice(0), ['claim-stock-sheet-jobs'])
+  assert.equal(properties.get('ATELIER_STOCK_SHEET_WRITEBACK_V2'), 'true')
+  ctx.LockService = { getScriptLock: () => ({ tryLock: () => true, releaseLock() {} }) }
+  ctx._atelierStockConditionCall = (action, body) => {
+    calls.push({ action, body })
+    if (action === 'list-qr-audit-exports') return { entries: [] }
+    if (action === 'claim-stock-sheet-jobs') return { jobs: [conflict, writeIndependent, consumed, adoptedManual] }
+    return { ok: true }
+  }
+  assert.deepEqual({ ...ctx.syncAtelierWarehouseQrAuditSheet() }, { synced: 3, pending: true })
+  assert.deepEqual(calls.map(({ action, body }) => [action, body?.id]), [
+    ['list-qr-audit-exports', undefined], ['claim-stock-sheet-jobs', undefined],
+    ['fail-stock-sheet-job', 'conflict'], ['finish-stock-sheet-job', 'independent'], ['finish-stock-sheet-job', 'deplete'],
+    ['finish-stock-sheet-job', 'reserved-manual'], ['cleanup-stock-sheet-job', 'deplete'],
+  ])
+  assert.deepEqual({ ...calls[2].body.differences[0] },
+    { id: versionedSplitFrom.id, field: '박스 수', expected: '1', actual: '9', target: '2' })
+  assert.equal(get(5702, 8), '다른 행 반영')
+  assert.equal(get(5709, 3), reserved.values[1])
+  assert.equal(notes.has(coordinate(5704, 27)), false, 'unreferenced row becomes reusable after acknowledgement')
+  console.log('warehouse-sheet-sync Apps Script: coalesced AA write, readback, independent conflict, split and depletion retry verified')
   console.log('warehouse-sheet-sync Apps Script: trailing swatches, AA identity, product search and removal verified')
 }

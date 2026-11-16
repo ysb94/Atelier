@@ -19,6 +19,7 @@ const corsHeaders = {
 
 const MAX_SKEW_MS = 5 * 60 * 1000
 const PAGE_SIZE = 1000
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -100,6 +101,7 @@ Deno.serve(async (req) => {
   let payload: {
     action?: 'list-models' | 'list-stock-conditions' | 'confirm-stock-conditions'
       | 'list-qr-audit-exports' | 'confirm-qr-audit-export'
+      | 'claim-stock-sheet-jobs' | 'finish-stock-sheet-job' | 'fail-stock-sheet-job' | 'cleanup-stock-sheet-job'
     validateOnly?: boolean
     sourceFileName?: string
     brandSlug?: string
@@ -112,13 +114,21 @@ Deno.serve(async (req) => {
   } catch {
     return json({ ok: false, error: 'JSON 본문이 올바르지 않습니다.' }, 400)
   }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return json({ ok: false, error: 'JSON 본문이 올바르지 않습니다.' }, 400)
+  }
   const listModels = payload.action === 'list-models'
   const listConditions = payload.action === 'list-stock-conditions'
   const confirmConditions = payload.action === 'confirm-stock-conditions'
   const listAudits = payload.action === 'list-qr-audit-exports'
   const confirmAudit = payload.action === 'confirm-qr-audit-export'
+  const claimJobs = payload.action === 'claim-stock-sheet-jobs'
+  const finishJob = payload.action === 'finish-stock-sheet-job'
+  const failJob = payload.action === 'fail-stock-sheet-job'
+  const cleanupJob = payload.action === 'cleanup-stock-sheet-job'
   const snapshotAt = payload.snapshotAt ?? (
     payload.validateOnly === true || listModels || listConditions || confirmConditions || listAudits || confirmAudit
+      || claimJobs || finishJob || failJob || cleanupJob
       ? sentAt : undefined
   )
   if (typeof snapshotAt !== 'number' || !Number.isSafeInteger(snapshotAt)
@@ -162,6 +172,57 @@ Deno.serve(async (req) => {
   }
   if (brand.slug !== WAREHOUSE_SHEET_SYNC_BRAND_SLUG) {
     return json({ ok: false, error: 'Masmarulez 창고만 동기화할 수 있습니다.' }, 403)
+  }
+
+  if (claimJobs || finishJob || failJob || cleanupJob) {
+    if (payload.validateOnly) return json({ ok: false, error: '검증 요청에서는 시트 반영 상태를 변경할 수 없습니다.' }, 400)
+    if (claimJobs) {
+      const { data, error } = await supabase.rpc('claim_atelier_stock_sheet_jobs', { p_brand_id: brand.id })
+      if (error || !data) {
+        console.warn('[warehouse-sheet-sync] claim-stock-sheet-jobs', { code: error?.code })
+        return json({ ok: false, error: 'STOCK_SHEET_CLAIM_FAILED' }, 500)
+      }
+      return json({ ok: true, ...data })
+    }
+
+    const proof = payload.confirmed as {
+      id?: unknown; lease?: unknown; rows?: unknown; absent?: unknown; reason?: unknown; differences?: unknown
+    } | null | undefined
+    if (typeof proof?.id !== 'string' || !UUID.test(proof.id)) {
+      return json({ ok: false, error: 'INVALID_STOCK_SHEET_JOB' }, 400)
+    }
+    if (cleanupJob) {
+      const { data, error } = await supabase.rpc('release_atelier_stock_sheet_removal_markers', {
+        p_brand_id: brand.id, p_job_id: proof.id,
+      })
+      if (error) console.warn('[warehouse-sheet-sync] cleanup-stock-sheet-job', { code: error.code })
+      return error || data !== true ? json({ ok: false, error: 'STOCK_SHEET_CLEANUP_REJECTED' }, 409) : json({ ok: true })
+    }
+    if (typeof proof.lease !== 'string' || !UUID.test(proof.lease)) {
+      return json({ ok: false, error: 'INVALID_STOCK_SHEET_JOB' }, 400)
+    }
+    const job = { p_brand_id: brand.id, p_job_id: proof.id, p_lease: proof.lease }
+    if (finishJob) {
+      if (!Array.isArray(proof.rows) || proof.rows.length > 8000
+        || !Array.isArray(proof.absent) || proof.absent.length > 8000
+        || !proof.absent.every(id => typeof id === 'string' && id.length > 0 && id.length <= 256)) {
+        return json({ ok: false, error: 'INVALID_STOCK_SHEET_PROOF' }, 400)
+      }
+      const { data, error } = await supabase.rpc('finish_atelier_stock_sheet_job', {
+        ...job, p_rows: proof.rows, p_absent: proof.absent,
+      })
+      if (error) console.warn('[warehouse-sheet-sync] finish-stock-sheet-job', { code: error.code })
+      return error || data !== true ? json({ ok: false, error: 'STOCK_SHEET_PROOF_REJECTED' }, 409) : json({ ok: true })
+    }
+    if (typeof proof.reason !== 'string' || !/^[A-Z_]{1,60}$/.test(proof.reason)
+      || !Array.isArray(proof.differences) || proof.differences.length > 16) {
+      return json({ ok: false, error: 'INVALID_STOCK_SHEET_FAILURE' }, 400)
+    }
+    const { data, error } = await supabase.rpc('fail_atelier_stock_sheet_job', {
+      ...job, p_reason: proof.reason, p_differences: proof.differences,
+    })
+    if (error) console.warn('[warehouse-sheet-sync] fail-stock-sheet-job', { code: error.code })
+    return error || data !== true ? json({ ok: false, error: 'STOCK_SHEET_FAILURE_REJECTED' }, 409) : json({ ok: true })
   }
 
   if (listConditions) {
