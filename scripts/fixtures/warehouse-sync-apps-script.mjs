@@ -312,5 +312,15 @@ export function verifyWarehouseSyncAppsScript() {
   assert.equal(get(5700, 9), '다른 열')
   assert.equal(get(5701, 27), split.id)
   assert.equal(notes.get(coordinate(5700, 27)), 'Finder 지운 행 ID: ' + initial.id)
+  ctx.findWarehousePlacementEmptyRows = () => [5702]
+  const named = { id: 'at_manual_abc00000000040008000000000000001', qr: 'UNPLACED-REVIEW-QR',
+    values: ['', '테이프', '2-1-1', '261113', '24', '1', ''] }
+  const namedJob = stockWork([], [named])
+  lostReply = true
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, namedJob), /LOST_BATCH_RESPONSE/)
+  const namedBatchCount = stockBatches.length
+  assert.equal(ctx.writeAtelierQrAuditSheet(sheet, namedJob)[0].id, named.id)
+  assert.equal(stockBatches.length, namedBatchCount)
+  assert.deepEqual([get(5702, 2), get(5702, 3), get(5702, 19), get(5702, 27)], ['', '테이프', named.qr, named.id])
   console.log('warehouse-sheet-sync Apps Script: trailing swatches, AA identity, product search and removal verified')
 }

@@ -753,6 +753,86 @@ try {
   assert.equal(confirmChecked({ ...checkedValues, units: '1,000', note: '개봉 잔량 3개 · 메모' }), '1')
   assert.equal(confirmChecked(checkedValues), '0')
   console.log('PASS: row correction requires actual B:H and S read-back before sheet confirmation')
+
+  query(atelierSql('20261116065754_finder_unplaced_box_qr_links'))
+  const unplaced = (qr, number, name) => `select public.finder_link_unplaced_box_qr('${brand}',
+    ${quote(qr)},${number ? quote(number) : 'null'},${name ? quote(name) : 'null'});`
+  const beforeLink = () => query(`select jsonb_build_array(
+    (select count(*) from public.warehouse_stock_positions), (select count(*) from public.warehouse_boxes),
+    (select count(*) from app.warehouse_qr_audit_sheet_exports), (select count(*) from app.finder_warehouse_sheet_exports),
+    (select count(*) from public.warehouse_stock_movements));`)
+  const countsBeforeLink = beforeLink()
+  const link = unplaced(' no-place-qr ', 'm1234')
+  query('set role anon;' + link, '42501')
+  const savedLink = JSON.parse(query(asReader + link))
+  assert.deepEqual(savedLink, { qr: 'NO-PLACE-QR', number: 'M1234', productName: 'Test style' })
+  assert.deepEqual(JSON.parse(query(asReader + link)), savedLink)
+  assert.deepEqual(JSON.parse(query(asReader + unplaced('NO-M-LABEL', null, '테이프'))),
+    { qr: 'NO-M-LABEL', number: null, productName: '테이프' })
+  query(asReader + unplaced('NO-PLACE-QR', null, '다른 상품'), '22023')
+  query(asReader + unplaced('2-1-1', 'M1234'), '22023')
+  query(asReader + unplaced('AUDIT-PHOTO', 'M1234'), '22023')
+  query(asReader + `select * from app.finder_unplaced_box_qr_links;`, '42501')
+  query(`insert into public.cargo_inbound_receipts(receipt_id,brand_id,cargo_inbound_line_id,receiving_mode,
+    box_qr,actual_box_count,actual_qty,created_by)
+    values (gen_random_uuid(),'${brand}','${style}','box_qr','NO-PLACE-QR',1,12,'${actor}');`, '22023')
+  assert.equal(beforeLink(), countsBeforeLink)
+
+  const lookup = (qr, place = '2-1-1') => JSON.parse(query(asReader + "set test.finder_key='ok';" +
+    `select public.finder_warehouse_placement('${brand}','read',${json({ qr, place })});`))
+  assert.deepEqual(lookup('NO-PLACE-QR').qrLink, { number: 'M1234', productName: 'Test style' })
+  assert.equal(lookup('NO-PLACE-QR', '2-1-3').box, null)
+  const intake = { mode: 'place', place: '2-1-1', qr: 'NO-PLACE-QR', number: 'M1234', quantity: 12,
+    receivedOn: '2026-11-13', backgroundJobId: 'c0000000-0000-4000-8000-000000000129:0' }
+  const intakePlan = JSON.parse(query(asService + backgroundMove('prepare', intake)))
+  assert.equal(intakePlan.status, 'prepared')
+  assert.equal(query(`select (placed_at is null)::text from app.finder_unplaced_box_qr_links where box_qr='NO-PLACE-QR';`), 'true')
+  query(asService + backgroundMove('finish', { operationId: intakePlan.operationId, rowNumber: 32 }))
+  assert.equal(lookup('NO-PLACE-QR').box.state, 'active')
+  assert.equal(lookup('NO-PLACE-QR').qrLink, undefined)
+  assert.equal(query(`select (placed_at is not null)::text from app.finder_unplaced_box_qr_links where box_qr='NO-PLACE-QR';`), 'true')
+  console.log('PASS: unplaced QR registration writes no stock or sheet work, read prefills intake, real placement consumes link')
+
+  const photoCounts = beforeLink()
+  const reviewPhoto = `${brand}/${actor}/c0000000-0000-4000-8000-000000000130/c0000000-0000-4000-8000-000000000131.jpg`
+  const photoLink = (path) => `select public.finder_link_unplaced_box_qr('${brand}','PHOTO-UNPLACED',null,null,${quote(path)});`
+  query(asReader + photoLink(reviewPhoto), '22023')
+  query(asReader + `insert into storage.objects(bucket_id,name) values ('warehouse-qr-audit',${quote(reviewPhoto)});`)
+  assert.equal(JSON.parse(query(asReader + photoLink(reviewPhoto))).pendingReview, true)
+  assert.equal(JSON.parse(query(asReader + photoLink(reviewPhoto))).pendingReview, true)
+  assert.deepEqual(lookup('PHOTO-UNPLACED').qrLink, { pendingReview: true })
+  query(asService + backgroundMove('prepare', { ...intake, qr: 'PHOTO-UNPLACED', backgroundJobId: 'c0000000-0000-4000-8000-000000000131:0' }), '22023')
+  const unplacedQueue = () => JSON.parse(query(asEditor + reviewSql('list', { includeUnplaced: true })))
+  assert.ok(!JSON.parse(query(asEditor + reviewSql('list'))).items.some(item => item.box_qr === 'PHOTO-UNPLACED'))
+  const photoItem = unplacedQueue().items.find(item => item.box_qr === 'PHOTO-UNPLACED')
+  assert.equal(photoItem.unplaced, true)
+  assert.equal(photoItem.place, null)
+  assert.equal(photoItem.photo_path, reviewPhoto)
+  assert.equal(query(asReader + `select count(*) from storage.objects where name=${quote(reviewPhoto)};`), '0')
+  assert.equal(query(asEditor + `select count(*) from storage.objects where name=${quote(reviewPhoto)};`), '1')
+  const resolvePhoto = reviewSql('link_unplaced', { rowId: photoItem.external_row_id, name: '테이프' })
+  query(asReader + resolvePhoto, '42501')
+  assert.deepEqual(JSON.parse(query(asEditor + resolvePhoto)), { number: null, productName: '테이프' })
+  assert.ok(!unplacedQueue().items.some(item => item.box_qr === 'PHOTO-UNPLACED'))
+  assert.deepEqual(lookup('PHOTO-UNPLACED').qrLink, { number: null, productName: '테이프' })
+  assert.equal(beforeLink(), photoCounts)
+
+  const receiveNamedQr = `select public.finder_place_named_qr('${brand}', 'PHOTO-UNPLACED', '2-1-1', '2026-11-13', 24);`
+  assert.equal(JSON.parse(query(asReader + receiveNamedQr)).sheetPending, true)
+  assert.equal(JSON.parse(query(asReader + receiveNamedQr)).sheetPending, true)
+  const namedExport = sheetJob()
+  assert.equal(namedExport.kind, 'stock')
+  assert.equal(namedExport.after.length, 1)
+  assert.equal(namedExport.after[0].qr, 'PHOTO-UNPLACED')
+  const namedAa = namedExport.after[0].id
+  assert.deepEqual(namedExport.after[0].values.slice(0, 6), ['', '테이프', '2-1-1', '261113', '24', '1'])
+  assert.equal(readPosition(namedAa).box_qr, 'PHOTO-UNPLACED')
+  query(asService + sheet(refreshed(), 'clock_timestamp()'), 'PWS07')
+  assert.equal(acceptWork(namedExport), 't')
+  query(asService + sheet(refreshed(), 'clock_timestamp()'))
+  assert.equal(readPosition(namedAa).box_qr, 'PHOTO-UNPLACED')
+  assert.equal(lookup('PHOTO-UNPLACED').qrLink, undefined)
+  console.log('PASS: private unplaced review photo, product-only review, actual name-only intake, sheet confirmation and snapshot')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)
