@@ -16,10 +16,10 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { cn } from '@/lib/utils'
 import { WarehouseInventoryPanel } from './WarehouseInventoryPanel'
 import { WarehouseFixedLocationsPanel } from './WarehouseFixedLocationsPanel'
+import { WarehousePopularLocationsPanel } from './WarehousePopularLocationsPanel'
 import { WarehouseQrPanel } from './WarehouseQrPanel'
 import { WarehouseQrAuditReviewPanel } from './WarehouseQrAuditReviewPanel'
 import { WarehouseSlotSettingsPanel } from './WarehouseSlotSettingsPanel'
-import { WarehouseSheetTestForm } from './WarehouseSheetTestForm'
 import { WarehouseBoxHistoryPanel } from './TemporaryWarehousePanel'
 
 type WarehouseView = 'box' | 'outbound' | 'boxes' | 'fixed' | 'qr'
@@ -126,7 +126,8 @@ export function WarehousePage() {
         title="창고 관리"
         description={`${brand.name} 박스 단위 보관과 피킹용 낱개 보관을 나눠 보는 작업 공간입니다.`}
       />
-      {import.meta.env.DEV && brand.slug === 'masmarulez' && <WarehouseSheetTestForm />}
+
+      <WarehousePopularLocationsPanel key={brand.id} brandId={brand.id} />
 
       <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         {WAREHOUSE_VIEWS.map((item) => {

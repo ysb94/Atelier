@@ -26,7 +26,7 @@ import {
   correctWarehouseStockRow,
   listWarehouseStockConditionLinks,
   saveWarehouseStockCondition,
-  saveWarehouseStockWork,
+  trySaveWarehouseStockWork,
   WAREHOUSE_STOCK_CONDITION_LABELS,
   type WarehouseStockCondition,
 } from '@/lib/supabase/warehouse-stock'
@@ -714,9 +714,9 @@ export function WarehouseInventoryPanel({
           onClose={() => setDialog(null)}
           onConfirm={async () => {
             const trace = startWorkflow('app', 'warehouse_stock_deplete')
-            await trace.run('save', context => sheetConditionEnabled
-              ? saveWarehouseStockWork(brandId, dialog.requestId, dialog.row, 'deplete', {}, context)
-              : depleteWarehouseStock(brandId, dialog.row.id))
+            const saved = sheetConditionEnabled && await trace.run('save', context =>
+              trySaveWarehouseStockWork(brandId, dialog.requestId, dialog.row, 'deplete', {}, context))
+            if (!saved) await trace.run('save_legacy', () => depleteWarehouseStock(brandId, dialog.row.id))
             setDialog(null)
             await invalidateStock()
             trace.done()
@@ -1374,23 +1374,26 @@ function MoveDialog({
   const [toZone, setToZone] = useState<WarehouseZone>(row.zone)
   const [boxCount, setBoxCount] = useState(String(row.remainingBoxes ?? ''))
   const [requestId] = useState(() => crypto.randomUUID())
+  const [needsDestinationZone, setNeedsDestinationZone] = useState(false)
+  const useSheetMove = sheetEnabled && !needsDestinationZone
   const mutation = useMutation({
     mutationFn: async () => {
       const count = Number(boxCount)
       if (!toCode.trim()) throw new Error('옮길 자리번호를 입력하세요.')
-      if (!boxCount.trim() || !Number.isInteger(count) || count < 0 || count > (row.remainingBoxes ?? 0)) {
+      if (!boxCount.trim() || !Number.isInteger(count) || count < (useSheetMove ? 0 : 1) || count > (row.remainingBoxes ?? 0)) {
         throw new Error('옮길 박스 수를 확인하세요.')
       }
-      if (sheetEnabled) {
-        const trace = startWorkflow('app', 'warehouse_stock_move')
-        await trace.run('save', context => saveWarehouseStockWork(brandId, requestId, row, 'move', {
+      const trace = startWorkflow('app', 'warehouse_stock_move')
+      if (useSheetMove) {
+        const saved = await trace.run('save', context => trySaveWarehouseStockWork(brandId, requestId, row, 'move', {
           to_location_code: toCode.trim(),
           box_count: count,
         }, context))
         trace.done()
-        return
+        if (!saved) setNeedsDestinationZone(true)
+        return saved
       }
-      await moveWarehouseStock(
+      await trace.run('save_legacy', () => moveWarehouseStock(
         brandId,
         {
           positionId: row.id,
@@ -1399,9 +1402,12 @@ function MoveDialog({
           boxCount: count,
         },
         row.zone === 'box_storage' && toZone === 'picking' ? 'replenish' : 'move',
-      )
+      ))
+      trace.done()
+      return true
     },
-    onSuccess: async () => {
+    onSuccess: async (saved) => {
+      if (!saved) return
       onError(null)
       await onDone()
     },
@@ -1421,7 +1427,10 @@ function MoveDialog({
         <span className="text-muted-foreground">도착 자리번호</span>
         <Input value={toCode} onChange={(e) => setToCode(e.target.value)} />
       </label>
-      {!sheetEnabled && <label className="block space-y-1 text-xs">
+      {needsDestinationZone && (
+        <p role="status" className="text-xs text-muted-foreground">도착 창고를 선택한 뒤 이동을 눌러 주세요.</p>
+      )}
+      {!useSheetMove && <label className="block space-y-1 text-xs">
         <span className="text-muted-foreground">도착 창고</span>
         <Select value={toZone} onChange={(e) => setToZone(e.target.value as WarehouseZone)}>
           <option value="box_storage">박스창고</option>
@@ -1430,7 +1439,7 @@ function MoveDialog({
       </label>}
       <label className="block space-y-1 text-xs">
         <span className="text-muted-foreground">옮길 박스 수</span>
-        <Input type="number" min={row.openedUnits > 0 && row.remainingBoxes === 0 && sheetEnabled ? 0 : 1}
+        <Input type="number" min={row.openedUnits > 0 && row.remainingBoxes === 0 && useSheetMove ? 0 : 1}
           max={row.remainingBoxes ?? undefined} step={1} value={boxCount} onChange={(e) => setBoxCount(e.target.value)} />
       </label>
       {mutation.error && <p role="alert" className="text-xs text-danger">{mutation.error.message}</p>}
@@ -1444,7 +1453,7 @@ function MoveDialog({
           disabled={
             mutation.isPending ||
             !isWarehouseQuantityKnown(row) ||
-            (!sheetEnabled && (row.remainingBoxes ?? 0) < 1)
+            (!useSheetMove && (row.remainingBoxes ?? 0) < 1)
           }
           onClick={() => mutation.mutate()}
         >
@@ -1477,22 +1486,21 @@ function AdjustDialog({
   const mutation = useMutation({
     mutationFn: async () => {
       if ([boxes, units, opened].some(value => !value.trim())) throw new Error('입수와 잔여 수량을 입력하세요.')
-      if (sheetEnabled) {
-        const trace = startWorkflow('app', 'warehouse_stock_adjust')
-        await trace.run('save', context => saveWarehouseStockWork(brandId, requestId, row, 'adjust', {
-          remaining_boxes: Number(boxes),
-          opened_units: Number(opened),
-          units_per_box: Number(units),
-        }, context))
-        trace.done()
-        return
+      const trace = startWorkflow('app', 'warehouse_stock_adjust')
+      const saved = sheetEnabled && await trace.run('save', context => trySaveWarehouseStockWork(brandId, requestId, row, 'adjust', {
+        remaining_boxes: Number(boxes),
+        opened_units: Number(opened),
+        units_per_box: Number(units),
+      }, context))
+      if (!saved) {
+        await trace.run('save_legacy', () => adjustWarehouseStock(brandId, {
+          positionId: row.id,
+          remainingBoxes: Number(boxes),
+          openedUnits: Number(opened),
+          unitsPerBox: Number(units),
+        }))
       }
-      await adjustWarehouseStock(brandId, {
-        positionId: row.id,
-        remainingBoxes: Number(boxes),
-        openedUnits: Number(opened),
-        unitsPerBox: Number(units),
-      })
+      trace.done()
     },
     onSuccess: async () => {
       onError(null)

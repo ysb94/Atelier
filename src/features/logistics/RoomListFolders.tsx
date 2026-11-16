@@ -4,6 +4,7 @@ import { ChevronDown, ChevronRight, Folder, Plus } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activity'
+import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -82,14 +83,12 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
     }
     return [...groups]
   }, [folders.data])
-  const visibleFolderIds = useMemo(() => foldersByDate.flatMap(([date, group]) =>
-    (expandedDates[date] ?? date === today) ? group.map(folder => folder.id) : [],
-  ), [expandedDates, foldersByDate, today])
+  const folderIds = useMemo(() => folders.data?.map(folder => folder.id) ?? [], [folders.data])
   const totals = useQuery({
-    queryKey: [...queryKey, 'totals', visibleFolderIds],
-    enabled: active && visibleFolderIds.length > 0,
+    queryKey: [...queryKey, 'totals', folderIds],
+    enabled: active && folderIds.length > 0,
     queryFn: async () => {
-      const itemsById = await readWarehouseRoomListFolderItemsById(visibleFolderIds, brandIds)
+      const itemsById = await readWarehouseRoomListFolderItemsById(folderIds, brandIds)
       const started = performance.now()
       const quantities = Object.fromEntries(Array.from(itemsById, ([id, items]) => [
         id, sumRoomListQuantities(items.map(([, quantity]) => quantity)),
@@ -102,6 +101,18 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
       return quantities
     },
   })
+  const totalsByDate = useMemo(() => {
+    const folderTotals = totals.data
+    if (!folderTotals) return
+    return new Map(foldersByDate.map(([date, group]) => {
+      const quantities = group.map(folder => folderTotals[folder.id])
+      // 일부 폴더의 수량만 조회됐으면 날짜 합계를 표시하지 않는다.
+      const total = quantities.every(quantity => quantity != null)
+        ? sumRoomListQuantities(quantities)
+        : null
+      return [date, total] as const
+    }))
+  }, [foldersByDate, totals.data])
   const register = useMutation({
     mutationFn: createWarehouseRoomListFolder,
     onSuccess: async () => {
@@ -305,7 +316,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
           {open.isError ? <p role="alert" className="mb-3 text-sm text-danger">선택한 폴더를 열지 못했습니다. 다시 시도해 주세요.</p> : null}
           {totals.isError && (
             <p role="alert" className="mb-3 text-sm text-danger">
-              폴더의 총 수량을 불러오지 못했습니다.
+              총 수량을 불러오지 못했습니다.
               <Button type="button" variant="outline" size="sm" className="ml-2" onClick={() => void totals.refetch()}>총 수량 다시 조회</Button>
             </p>
           )}
@@ -315,6 +326,7 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
               const expanded = expandedDates[date] ?? isToday
               const Chevron = expanded ? ChevronDown : ChevronRight
               const selectedCount = group.filter(folder => selected.has(folder.id)).length
+              const total = totalsByDate?.get(date)
               return (
                 <section key={date} className="border-t-2 border-border pt-2">
                   <div className="flex items-stretch rounded-lg bg-muted/60">
@@ -323,7 +335,12 @@ export function RoomListFolders({ userId, onOpen }: { userId: string; onOpen: (r
                         className="h-auto w-full justify-start gap-2 whitespace-normal rounded-r-none px-3 py-2.5 text-left"
                         onClick={() => setExpandedDates(current => ({ ...current, [date]: !expanded }))}>
                         <Chevron aria-hidden="true" className="size-4 shrink-0" />
-                        <span className="font-semibold">{date}{isToday ? ' · 오늘' : ''}</span>
+                        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="font-semibold">{date}{isToday ? ' · 오늘' : ''}</span>
+                          <Badge variant="outline" className="whitespace-nowrap bg-card tabular-nums">
+                            총 수량 {total != null ? `${total}개` : totals.isFetching ? '확인 중…' : '—'}
+                          </Badge>
+                        </span>
                         <span className="ml-auto shrink-0 text-xs text-muted-foreground">폴더 {group.length.toLocaleString('ko-KR')}개</span>
                       </Button>
                     </h2>

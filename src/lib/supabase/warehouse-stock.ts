@@ -19,12 +19,14 @@ import type {
 import { normalizeStyleNo } from '@/lib/import/transform'
 import {
   assignWarehouseUsageRanks,
+  isWarehouseQuantityKnown,
   summarizeWarehouseStockByStyle,
   toWarehouseImportRpcRows,
+  warehousePositionQty,
   type PreparedWarehouseImportRow,
 } from '@/lib/warehouse/stock'
 import { getSupabase } from '@/lib/supabase/client'
-import { tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
+import { diagnosticOperation, tracedQuery, type DiagnosticContext } from '@/lib/diagnostics/workflow-trace'
 import { errorMessage, isUniqueViolation } from '@/lib/supabase/map-error'
 
 const PAGE_SIZE = 1000
@@ -575,9 +577,13 @@ export async function listWarehouseLocations(
 async function readPositionRows<T = PositionRow>(
   brandId: string,
   setId: string,
-  zone?: WarehouseZone,
-  columns = POSITION_COLUMNS,
-  context?: DiagnosticContext,
+  { zone, columns = POSITION_COLUMNS, context, locationCode, signal }: {
+    zone?: WarehouseZone
+    columns?: string
+    context?: DiagnosticContext
+    locationCode?: string
+    signal?: AbortSignal
+  } = {},
 ): Promise<T[]> {
   const supabase = getSupabase()
   const raw: T[] = []
@@ -591,6 +597,8 @@ async function readPositionRows<T = PositionRow>(
       .order('id', { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
     if (zone) query = query.eq('warehouse_locations.zone', zone)
+    if (locationCode !== undefined) query = query.eq('warehouse_locations.code', locationCode)
+    if (signal) query = query.abortSignal(signal)
     const { data, error } = await tracedQuery(query, context)
     if (error) {
       throw new WarehouseStockStoreError(
@@ -610,8 +618,9 @@ export async function getWarehouseStockSummary(brandId: string, setId: string) {
   type SummaryRow = Pick<PositionRow, 'normalized_style_no' | 'received_on' | 'received_on_raw' |
     'is_forced_priority' | 'is_final_location' | 'usage_priority' | 'quantity_status' |
     'units_per_box' | 'remaining_boxes' | 'opened_units' | 'source_row_number' | 'warehouse_locations'>
-  const raw = await readPositionRows<SummaryRow>(brandId, setId, undefined,
-    'id, normalized_style_no, received_on, received_on_raw, is_forced_priority, is_final_location, usage_priority, quantity_status, units_per_box, remaining_boxes, opened_units, source_row_number, warehouse_locations!inner(code, zone)')
+  const raw = await readPositionRows<SummaryRow>(brandId, setId, {
+    columns: 'id, normalized_style_no, received_on, received_on_raw, is_forced_priority, is_final_location, usage_priority, quantity_status, units_per_box, remaining_boxes, opened_units, source_row_number, warehouse_locations!inner(code, zone)',
+  })
   return summarizeWarehouseStockByStyle(raw.map(row => {
     const location = Array.isArray(row.warehouse_locations) ? row.warehouse_locations[0] : row.warehouse_locations
     return {
@@ -634,7 +643,7 @@ export async function listWarehouseStockPositions(
   zone?: WarehouseZone,
   context?: DiagnosticContext,
 ): Promise<WarehouseStockPosition[]> {
-  const raw = await readPositionRows(brandId, setId, zone, POSITION_COLUMNS, context)
+  const raw = await readPositionRows(brandId, setId, { zone, context })
   if (raw.length === 0) return []
 
   const ranked = assignWarehouseUsageRanks(
@@ -662,6 +671,45 @@ export async function listWarehouseStockPositions(
   return raw.map((row, index) =>
     toPosition(row, embeddedLocation(row), ranked[index]?.usageRank ?? null),
   )
+}
+
+export function listWarehouseLocationProducts(
+  brandId: string,
+  setId: string,
+  locationCode: string,
+  signal?: AbortSignal,
+) {
+  type ProductRow = Pick<PositionRow, 'source_product_name' | 'source_style_no' | 'normalized_style_no' |
+    'quantity_status' | 'units_per_box' | 'remaining_boxes' | 'opened_units'>
+  return diagnosticOperation('app', 'warehouse_location_products', async trace => {
+    const rows = await trace.run('read_location_positions', context =>
+      readPositionRows<ProductRow>(brandId, setId, {
+        columns: 'source_product_name, source_style_no, normalized_style_no, quantity_status, units_per_box, remaining_boxes, opened_units, warehouse_locations!inner(code)',
+        locationCode,
+        context,
+        signal,
+      }),
+    )
+    const products = new Map<string, { name: string; styleNo: string }>()
+    for (const row of rows) {
+      const stock = {
+        quantityStatus: row.quantity_status === 'unknown' ? 'unknown' as const : 'known' as const,
+        unitsPerBox: row.units_per_box,
+        remainingBoxes: row.remaining_boxes,
+        openedUnits: row.opened_units,
+      }
+      if (isWarehouseQuantityKnown(stock) && warehousePositionQty(stock) <= 0) continue
+
+      const name = row.source_product_name.trim()
+      const styleNo = (row.normalized_style_no || row.source_style_no).trim()
+      if (!name && !styleNo) continue
+
+      const key = styleNo ? `sku:${normalizeStyleNo(styleNo)}` : `name:${name.normalize('NFKC')}`
+      const previous = products.get(key)
+      if (!previous || (!previous.name && name)) products.set(key, { name, styleNo })
+    }
+    return [...products.values()]
+  })
 }
 
 export const WAREHOUSE_STOCK_CONDITION_LABELS = {
@@ -751,10 +799,13 @@ export async function correctWarehouseStockRow(
     p_expected_updated_at: row.updatedAt,
     p_changes: changes,
   }), context)
+  if (error?.code === 'PGRST202') {
+    throw new WarehouseStockStoreError('재고 행 수정 서버 기능 적용 대기 중입니다.', { cause: error })
+  }
   if (error) throw new WarehouseStockStoreError(errorMessage(error, '재고 행을 수정하지 못했습니다.'), { cause: error })
 }
 
-export async function saveWarehouseStockWork(
+export async function trySaveWarehouseStockWork(
   brandId: string,
   requestId: string,
   row: Pick<WarehouseStockPosition, 'id' | 'updatedAt'>,
@@ -770,7 +821,10 @@ export async function saveWarehouseStockWork(
     p_action: action,
     p_payload: payload,
   }), context)
+  // PostgREST did not find the RPC signature, so it has not executed a write.
+  if (error?.code === 'PGRST202') return false
   if (error) throw new WarehouseStockStoreError(errorMessage(error, '창고 작업을 저장하지 못했습니다.'), { cause: error })
+  return true
 }
 
 export async function listWarehouseStockMovements(
