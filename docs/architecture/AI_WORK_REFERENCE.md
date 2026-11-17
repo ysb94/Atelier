@@ -5,7 +5,7 @@
 ## 코드 탐색
 
 - `dev-tools/structure-map/generated/ai-index.md`의 처음 85줄에서 URL 라우트와 도메인별 줄 범위(`Section 0`)를 찾는다. 해당 도메인 구간에서 파일·export 심볼·DB 연결을 좁힌 뒤 실제 소스의 필요한 범위를 읽는다.
-- 자동화는 압축된 `dev-tools/structure-map/generated/structure.json` 또는 `source-reader`의 `structure_evidence`를 사용한다. `structure.json` 전체를 출력하지 않는다.
+- 코드 구조를 프로그램에서 읽을 때는 압축된 `dev-tools/structure-map/generated/structure.json`을 사용한다. `structure.json` 전체를 출력하지 않는다.
 - `npm run dev`의 자동 감시 또는 `npm run structure:map`으로 목차를 갱신한다. 분석기 자체 검증은 `npm run verify:structure-map`을 사용한다.
 - 파일과 연결은 자동 분석한다. 분류와 용어 해석은 `domains.json`과 `labels.mjs`의 공통 규칙으로 고친다. 생성된 목차는 개발 전용으로 운영 화면·라우트·번들에 포함하지 않는다.
 

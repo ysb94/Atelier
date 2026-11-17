@@ -11,7 +11,7 @@
    - **Section 2 (`Files by Domain`)**: 도메인별 파일 경로, 총 줄 수(`lines`), 한글 기능명, 모든 export 심볼과 시작 줄 번호(`심볼:줄번호`), UI 주요 제목, 직접 사용하는 Supabase 테이블/RPC 및 API 위임 대상.
    - **Section 3 (`Supabase Resources`)**: `table:*`, `rpc:*`, `storage:*`, `function:*` 역방향 호출 파일:줄번호 색인.
 2. **`structure.json` (자동화 파이프라인용 압축 그래프 JSON)**
-   - `dev-tools/ai-workflow` 계획·검토 도구가 참조하는 단일 라인 JSON 그래프.
+   - 코드 구조를 프로그램에서 읽을 수 있는 단일 라인 JSON 그래프.
 
 ## AI 최소 토큰 탐색 순서
 
