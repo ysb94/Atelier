@@ -339,3 +339,4 @@ grant execute on function
   app.finder_link_box_qr_photo(uuid,text,text,text,date,integer,boolean), public.finder_link_box_qr_photo(uuid,text,text,text,date,integer,boolean),
   app.finder_place_photo_qr(uuid,text,text), public.finder_place_photo_qr(uuid,text,text)
 to authenticated;
+
