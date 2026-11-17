@@ -102,6 +102,7 @@ Deno.serve(async (req) => {
     action?: 'list-models' | 'list-stock-conditions' | 'confirm-stock-conditions'
       | 'list-qr-audit-exports' | 'confirm-qr-audit-export'
       | 'claim-stock-sheet-jobs' | 'finish-stock-sheet-job' | 'fail-stock-sheet-job' | 'cleanup-stock-sheet-job'
+      | 'record-stock-sheet-repair'
     validateOnly?: boolean
     sourceFileName?: string
     brandSlug?: string
@@ -126,9 +127,11 @@ Deno.serve(async (req) => {
   const finishJob = payload.action === 'finish-stock-sheet-job'
   const failJob = payload.action === 'fail-stock-sheet-job'
   const cleanupJob = payload.action === 'cleanup-stock-sheet-job'
+  const recordRepair = payload.action === 'record-stock-sheet-repair'
+  const stockSheetJob = claimJobs || finishJob || failJob || cleanupJob || recordRepair
   const snapshotAt = payload.snapshotAt ?? (
     payload.validateOnly === true || listModels || listConditions || confirmConditions || listAudits || confirmAudit
-      || claimJobs || finishJob || failJob || cleanupJob
+      || stockSheetJob
       ? sentAt : undefined
   )
   if (typeof snapshotAt !== 'number' || !Number.isSafeInteger(snapshotAt)
@@ -174,7 +177,7 @@ Deno.serve(async (req) => {
     return json({ ok: false, error: 'Masmarulez 창고만 동기화할 수 있습니다.' }, 403)
   }
 
-  if (claimJobs || finishJob || failJob || cleanupJob) {
+  if (stockSheetJob) {
     if (payload.validateOnly) return json({ ok: false, error: '검증 요청에서는 시트 반영 상태를 변경할 수 없습니다.' }, 400)
     if (claimJobs) {
       const { data, error } = await supabase.rpc('claim_atelier_stock_sheet_jobs', { p_brand_id: brand.id })
@@ -202,6 +205,16 @@ Deno.serve(async (req) => {
       return json({ ok: false, error: 'INVALID_STOCK_SHEET_JOB' }, 400)
     }
     const job = { p_brand_id: brand.id, p_job_id: proof.id, p_lease: proof.lease }
+    if (recordRepair) {
+      if (!Array.isArray(proof.differences) || proof.differences.length < 1 || proof.differences.length > 16) {
+        return json({ ok: false, error: 'INVALID_STOCK_SHEET_REPAIR' }, 400)
+      }
+      const { data, error } = await supabase.rpc('record_atelier_stock_sheet_repair', {
+        ...job, p_differences: proof.differences,
+      })
+      if (error) console.warn('[warehouse-sheet-sync] record-stock-sheet-repair', { code: error.code })
+      return error || data !== true ? json({ ok: false, error: 'STOCK_SHEET_REPAIR_REJECTED' }, 409) : json({ ok: true })
+    }
     if (finishJob) {
       if (!Array.isArray(proof.rows) || proof.rows.length > 8000
         || !Array.isArray(proof.absent) || proof.absent.length > 8000

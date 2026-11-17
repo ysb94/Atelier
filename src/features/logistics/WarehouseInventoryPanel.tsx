@@ -24,13 +24,14 @@ import {
 } from '@/lib/api'
 import {
   correctWarehouseStockRow,
-  listWarehouseSheetConflicts,
+  getWarehouseSheetActivity,
   listWarehouseStockConditionLinks,
   saveWarehouseStockCondition,
   trySaveWarehouseStockWork,
   WAREHOUSE_STOCK_CONDITION_LABELS,
   type WarehouseStockCondition,
-  type WarehouseSheetConflict,
+  type WarehouseSheetActivity,
+  type WarehouseSheetDifference,
 } from '@/lib/supabase/warehouse-stock'
 import { useRenderWatch } from '@/lib/diagnostics'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
@@ -85,6 +86,7 @@ type DialogState =
 const TABLE_PAGE_SIZE = 100
 const SHEET_CONFLICT_LABELS: Record<string, string> = {
   SHEET_STOCK_CHANGED: '시트 값이 저장 전 값과 다릅니다.',
+  SHEET_REPAIR_HISTORY_UNAVAILABLE: '자동 정정 이력을 기록하지 못했습니다. 다음 동기화에서 다시 시도합니다.',
   SHEET_VALUES_UNVERIFIED: '시트에서 최종 값을 확인하지 못했습니다.',
   REMOVAL_UNVERIFIED: '소진된 행을 확인하지 못했습니다.',
   AA_MISSING_OR_DUPLICATE: 'AA 행 ID가 중복되거나 누락됐습니다.',
@@ -156,7 +158,7 @@ export function WarehouseInventoryPanel({
   const warehouseLabel = view === 'box' ? '박스창고' : '출고창고'
   const sheetConflicts = useQuery({
     queryKey: ['warehouse-sheet-conflicts', brandId],
-    queryFn: () => listWarehouseSheetConflicts(brandId),
+    queryFn: () => getWarehouseSheetActivity(brandId),
     enabled: tabActive && sheetConditionEnabled && Boolean(brandId),
     refetchInterval: tabActive ? 30_000 : false,
   })
@@ -329,7 +331,7 @@ export function WarehouseInventoryPanel({
       {sheetConditionEnabled && (sheetConflicts.isError ? (
         <p role="status" className="text-xs text-danger">창고입력 반영 상태를 불러오지 못했습니다.</p>
       ) : (
-        <SheetConflicts conflicts={sheetConflicts.data ?? []} />
+        <SheetActivity activity={sheetConflicts.data} />
       ))}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
@@ -1559,37 +1561,63 @@ function AdjustDialog({
   )
 }
 
-function SheetConflicts({ conflicts }: { conflicts: WarehouseSheetConflict[] }) {
-  if (!conflicts.length) return null
+function SheetDifferences({ differences, completed = false }: {
+  differences: WarehouseSheetDifference[]
+  completed?: boolean
+}) {
+  if (!differences.length) return null
   return (
-    <section aria-label="창고입력 반영 확인" className="rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
-      <p className="font-medium">창고입력 반영 확인 필요 · {conflicts.length}건</p>
-      {conflicts.map(({ id, row_ids: rowIds, failed_at: failedAt, failure }) => (
-        <details key={id} className="mt-2">
-          <summary className="cursor-pointer text-xs">
-            {SHEET_CONFLICT_LABELS[failure.reason] ?? '다음 동기화에서 다시 확인합니다.'} {formatImportedAt(failedAt)}
-          </summary>
-          <p className="my-2 break-all text-xs text-muted-foreground">AA {rowIds.join(', ')}</p>
-          {failure.differences.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr><th>행</th><th>항목</th><th>기대 시트값</th><th>실제 시트값</th><th>반영할 값</th></tr>
-                </thead>
-                <tbody>
-                  {failure.differences.map((difference, index) => (
-                    <tr key={index} className="border-t border-border">
-                      {[difference.id, difference.field, difference.expected, difference.actual, difference.target]
-                        .map((value, column) => <td key={column} className="p-1.5">{value ?? '—'}</td>)}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+    <div className="overflow-x-auto">
+      <table className="w-full text-left text-xs">
+        <thead>
+          <tr><th>행</th><th>항목</th><th>기대 시트값</th><th>{completed ? '정정 전 시트값' : '실제 시트값'}</th><th>{completed ? '반영된 값' : '반영할 값'}</th></tr>
+        </thead>
+        <tbody>
+          {differences.map((difference, index) => (
+            <tr key={index} className="border-t border-border">
+              {[difference.id, difference.field, difference.expected, difference.actual,
+                completed && difference.target === null ? '삭제' : difference.target]
+                .map((value, column) => <td key={column} className="p-1.5">{value === '' ? '비어 있음' : value ?? '—'}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function SheetActivity({ activity }: { activity?: WarehouseSheetActivity }) {
+  if (!activity) return null
+  const { conflicts, repairs } = activity
+  return (
+    <>
+      {conflicts.length > 0 && (
+        <section aria-label="창고입력 반영 확인" className="rounded-md border border-warning/40 bg-warning/5 p-3 text-sm">
+          <p className="font-medium">창고입력 반영 확인 필요 · {conflicts.length}건</p>
+          {conflicts.map(({ id, row_ids: rowIds, failed_at: failedAt, failure }) => (
+            <details key={id} className="mt-2">
+              <summary className="cursor-pointer text-xs">
+                {SHEET_CONFLICT_LABELS[failure.reason] ?? '다음 동기화에서 다시 확인합니다.'} {formatImportedAt(failedAt)}
+              </summary>
+              <p className="my-2 break-all text-xs text-muted-foreground">AA {rowIds.join(', ')}</p>
+              <SheetDifferences differences={failure.differences} />
+            </details>
+          ))}
+        </section>
+      )}
+      {repairs.length > 0 && (
+        <details className="rounded-md border border-border bg-card p-3 text-sm">
+          <summary className="cursor-pointer font-medium">창고입력 자동 정정 완료 · 최근 {repairs.length}건</summary>
+          {repairs.map(repair => (
+            <details key={repair.id} className="mt-2">
+              <summary className="cursor-pointer text-xs">Atelier 재고 기준으로 반영 완료 · {formatImportedAt(repair.completed_at)}</summary>
+              <p className="my-2 break-all text-xs text-muted-foreground">AA {repair.row_ids.join(', ')}</p>
+              <SheetDifferences differences={repair.repair_differences} completed />
+            </details>
+          ))}
         </details>
-      ))}
-    </section>
+      )}
+    </>
   )
 }
 

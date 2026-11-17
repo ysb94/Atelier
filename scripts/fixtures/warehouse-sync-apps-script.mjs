@@ -382,6 +382,7 @@ export function verifyWarehouseSyncAppsScript() {
   afterBatch = undefined
 
   const conflict = toJob('conflict', [atomicSplit.after[0]], [damaged])
+  put(5706, 3, ['다른 상품'])
   const writeIndependent = toJob('independent', [named], [project(named, { 6: '다른 행 반영' })])
   const reserved = { ...named, id: 'at_manual_abc00000000040008000000000000002', qr: '' }
   put(5709, 27, [reserved.id])
@@ -409,10 +410,55 @@ export function verifyWarehouseSyncAppsScript() {
     ['finish-stock-sheet-job', 'reserved-manual'], ['cleanup-stock-sheet-job', 'deplete'],
   ])
   assert.deepEqual({ ...calls[2].body.differences[0] },
-    { id: versionedSplitFrom.id, field: '박스 수', expected: '1', actual: '9', target: '2' })
+    { id: versionedSplitFrom.id, field: '품명', expected: total.values[1], actual: '다른 상품', target: total.values[1] })
   assert.equal(get(5702, 8), '다른 행 반영')
   assert.equal(get(5709, 3), reserved.values[1])
   assert.equal(notes.has(coordinate(5704, 27)), false, 'unreferenced row becomes reusable after acknowledgement')
+
+  // A known AA with matching SKU and name may recover from an edited count.
+  put(5706, 3, [total.values[1]])
+  const expectedDrift = { id: versionedSplitFrom.id, field: '박스 수', expected: '1', actual: '9', target: '2' }
+  const recordFailure = () => { throw new Error('AUDIT_UNAVAILABLE') }
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, conflict, recordFailure), /AUDIT_UNAVAILABLE/)
+  assert.equal(get(5706, 7), '9')
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, conflict, () => put(5706, 7, ['8'])), /SHEET_STOCK_CHANGED/)
+  assert.equal(get(5706, 7), '8', 'an edit made during audit recording is checked again')
+  put(5706, 7, ['9'])
+  const repairs = []
+  const recordRepair = differences => repairs.push(structuredClone(differences))
+  lostReply = true
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, conflict, recordRepair), /LOST_BATCH_RESPONSE/)
+  assert.deepEqual(repairs, [[expectedDrift]])
+  assert.equal(ctx.writeAtelierQrAuditSheet(sheet, conflict, recordRepair).rows[0].values[5], '2')
+  assert.deepEqual(repairs, [[expectedDrift]], 'retry reads the successful write and preserves the original audit')
+
+  // The reported production case has empty B/C and a unique QR on the same AA.
+  const qrOnly = { id: 'fp-qr-only', qr: 'ENJ-DECLARED-BOX', values: ['', '', '9-9-9', '000000', '30', '1', ''] }
+  put(5710, 2, ['', '', '', '', '', '', ''])
+  put(5710, 19, [qrOnly.qr])
+  put(5710, 27, [qrOnly.id])
+  put(5710, 20, ['예약 열'])
+  const deleteDrift = toJob('qr-only-deplete', [qrOnly], [])
+  calls.length = 0
+  ctx._atelierStockConditionCall = (action, body) => {
+    calls.push({ action, body })
+    if (action === 'list-qr-audit-exports') return { entries: [] }
+    if (action === 'claim-stock-sheet-jobs') return { jobs: [deleteDrift] }
+    return { ok: true }
+  }
+  assert.deepEqual({ ...ctx.syncAtelierWarehouseQrAuditSheet() }, { synced: 1, pending: false })
+  assert.deepEqual(calls.map(({ action }) => action), [
+    'list-qr-audit-exports', 'claim-stock-sheet-jobs', 'record-stock-sheet-repair', 'finish-stock-sheet-job',
+    'cleanup-stock-sheet-job',
+  ])
+  assert.equal(calls[2].body.differences.length, 4)
+  assert.equal(calls[2].body.differences[1].field, '입고일')
+  assert.equal(calls[2].body.differences[1].target, null)
+  assert.equal(get(5710, 19), '')
+  assert.equal(get(5710, 27), '')
+  assert.equal(get(5710, 20), '예약 열')
+  assert.throws(() => ctx.writeAtelierQrAuditSheet(sheet, noId, recordRepair), /SHEET_STOCK_CHANGED/)
+  console.log('warehouse-sheet-sync Apps Script: verified inventory drift repair, pre-write audit, QR-only removal and unsafe matches blocked')
   console.log('warehouse-sheet-sync Apps Script: coalesced AA write, readback, independent conflict, split and depletion retry verified')
   console.log('warehouse-sheet-sync Apps Script: trailing swatches, AA identity, product search and removal verified')
 }

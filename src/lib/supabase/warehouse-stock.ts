@@ -827,23 +827,49 @@ export async function trySaveWarehouseStockWork(
   return true
 }
 
-export type WarehouseSheetConflict = {
+export type WarehouseSheetDifference = {
+  id: string | null
+  field: string
+  expected: string | null
+  actual: string | null
+  target: string | null
+}
+
+type WarehouseSheetConflict = {
   id: string
   row_ids: string[]
   failed_at: string
   failure: {
     reason: string
-    differences: { id: string | null; field: string; expected: string | null; actual: string | null; target: string | null }[]
+    differences: WarehouseSheetDifference[]
   }
 }
 
-export async function listWarehouseSheetConflicts(brandId: string): Promise<WarehouseSheetConflict[]> {
-  const { data, error } = await getSupabase().rpc('list_atelier_stock_sheet_conflicts', { p_brand_id: brandId })
-  if (error?.code === 'PGRST202' || error?.code === '42501') return []
-  if (error) {
-    throw new WarehouseStockStoreError(errorMessage(error, '창고입력 반영 상태를 불러오지 못했습니다.'), { cause: error })
+export type WarehouseSheetActivity = {
+  conflicts: WarehouseSheetConflict[]
+  repairs: {
+    id: string
+    row_ids: string[]
+    completed_at: string
+    repair_observed_at: string
+    repair_differences: WarehouseSheetDifference[]
+  }[]
+}
+
+export async function getWarehouseSheetActivity(brandId: string): Promise<WarehouseSheetActivity> {
+  const supabase = getSupabase()
+  const args = { p_brand_id: brandId }
+  const empty = { conflicts: [], repairs: [] }
+  const activity = await supabase.rpc('list_atelier_stock_sheet_activity', args)
+  if (!activity.error) return (activity.data as WarehouseSheetActivity | null) ?? empty
+  if (activity.error.code === '42501') return empty
+  if (activity.error.code !== 'PGRST202') {
+    throw new WarehouseStockStoreError(errorMessage(activity.error, '창고입력 반영 상태를 불러오지 못했습니다.'), { cause: activity.error })
   }
-  return (data as WarehouseSheetConflict[] | null) ?? []
+  const { data, error } = await supabase.rpc('list_atelier_stock_sheet_conflicts', args)
+  if (error?.code === 'PGRST202' || error?.code === '42501') return empty
+  if (error) throw new WarehouseStockStoreError(errorMessage(error, '창고입력 반영 상태를 불러오지 못했습니다.'), { cause: error })
+  return { conflicts: (data as WarehouseSheetConflict[] | null) ?? [], repairs: [] }
 }
 
 export async function listWarehouseStockMovements(

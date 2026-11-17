@@ -21,6 +21,7 @@ export async function verifyWarehouseSheetWritebackEdge() {
     claim_atelier_stock_sheet_jobs: { enabled: false, jobs: [] },
     finish_atelier_stock_sheet_job: false,
     fail_atelier_stock_sheet_job: true,
+    record_atelier_stock_sheet_repair: true,
     release_atelier_stock_sheet_removal_markers: true,
     list_warehouse_stock_condition_exports: [],
     confirm_warehouse_stock_condition_exports: 0,
@@ -67,6 +68,16 @@ export async function verifyWarehouseSheetWritebackEdge() {
     name: 'finish_atelier_stock_sheet_job', p_brand_id: brand, p_job_id: id, p_lease: lease, p_rows: rows, p_absent: [],
   })
   assert.equal((await send({ action: 'fail-stock-sheet-job', confirmed: { id, lease, reason: 'SHEET_STOCK_CHANGED', differences: [] } }))[0], 200)
+  const repair = confirmed => send({ action: 'record-stock-sheet-repair', confirmed })
+  const differences = [{ id: 'aa', field: '박스 수', expected: '2', actual: '9', target: '3' }]
+  assert.equal((await repair({ id, lease, differences: [] }))[0], 400)
+  assert.equal((await send({ action: 'record-stock-sheet-repair', confirmed: { id, lease, differences } }, false))[0], 401)
+  assert.deepEqual(await repair({ id, lease, differences }), [200, { ok: true }])
+  assert.deepEqual(structuredClone(calls.at(-1)), {
+    name: 'record_atelier_stock_sheet_repair', p_brand_id: brand, p_job_id: id, p_lease: lease, p_differences: differences,
+  })
+  results.record_atelier_stock_sheet_repair = false
+  assert.equal((await repair({ id, lease, differences }))[0], 409)
   assert.equal((await send({ action: 'cleanup-stock-sheet-job', confirmed: { id } }))[0], 200)
   assert.deepEqual(await send({ action: 'list-stock-conditions' }), [200, { ok: true, entries: [] }])
   assert.deepEqual(await send({ action: 'confirm-stock-conditions', confirmed: [{ request_id: id }] }),

@@ -1,7 +1,7 @@
 // Install in the same bound project as DB.gs and Masma Works.gs so all three writers share one lock.
 const ATELIER_PENDING_REMOVAL_NOTE = 'Atelier 시트 삭제 확인 대기: ';
 
-function writeAtelierQrAuditSheet(sheet, entry) {
+function writeAtelierQrAuditSheet(sheet, entry, recordRepair) {
   const first = 3;
   const limit = ATELIER_WAREHOUSE_SNAPSHOT_LAST_ROW;
   const height = sheet.getMaxRows() - first + 1;
@@ -143,6 +143,14 @@ function writeAtelierQrAuditSheet(sheet, entry) {
     return changes.slice(0, 16);
   }
 
+  function sameStockIdentity(actual, expected) {
+    if (!actual || !expected) return false;
+    const qr = qrOf(expected.qr);
+    if (qr || actual.qr) return Boolean(qr) && qrOf(actual.qr) === qr;
+    const [number, name] = expected.values.map(norm);
+    return Boolean(number || name) && actual.values[0] === number && actual.values[1] === name;
+  }
+
   const snapshot = read();
   const { display, relevant } = snapshot;
   const alreadyWritten = verified(snapshot);
@@ -156,8 +164,15 @@ function writeAtelierQrAuditSheet(sheet, entry) {
           !row.qr && row.values.every(value => !value)) baseline.delete(id);
     }
   }
+  let repair = null;
   if (baseline.size !== before.size || [...before].some(([id, row]) => !matches(baseline.get(id), row, false))) {
-    fail('SHEET_STOCK_CHANGED', rowDifferences(baseline, before, after, true));
+    const differences = rowDifferences(baseline, before, after, true);
+    const sameRows = baseline.size === before.size && [...before].every(([id, row]) => {
+      const current = baseline.get(id);
+      return sameStockIdentity(current, row) || sameStockIdentity(current, after.get(id));
+    });
+    if (!versioned || !stockWork || !recordRepair || !sameRows) fail('SHEET_STOCK_CHANGED', differences);
+    repair = differences;
   }
   const fresh = entry.after.filter(row => !relevant.has(row.id));
   let empty = [];
@@ -169,6 +184,7 @@ function writeAtelierQrAuditSheet(sheet, entry) {
   if (empty.length !== fresh.length) throw new Error('NO_EMPTY_ROW');
 
   const requests = [];
+  const writes = [];
   const cell = (row, col, fields, value) =>
     requests.push(warehousePlacementCell(sheet.getSheetId(), row, col, fields, value));
 
@@ -191,6 +207,7 @@ function writeAtelierQrAuditSheet(sheet, entry) {
     if (after.has(id)) continue;
     checkPhysicalRow(row.sheetRow, row, id);
     ensureWritable(row.sheetRow, id);
+    if (repair) writes.push({ target: row.sheetRow, current: row, id });
     const hasWpsSnapshot = sheet.getRange(row.sheetRow, 28, 1, 7).getDisplayValues()[0].some(norm);
     for (const col of manage) {
       if (col === 27) cell(row.sheetRow, col, 'userEnteredValue,note',
@@ -205,6 +222,7 @@ function writeAtelierQrAuditSheet(sheet, entry) {
     const current = relevant.get(row.id);
     checkPhysicalRow(target, current, row.id);
     if (!stockWork || !current) ensureWritable(target, row.id);
+    if (repair) writes.push({ target, current, id: row.id });
     const formulas = stockWork && current ? sheet.getRange(target, 1, 1, 27).getFormulas()[0] : [];
     const values = [...row.values, row.qr, row.id];
     for (let i = 0; i < manage.length; i++) {
@@ -223,6 +241,15 @@ function writeAtelierQrAuditSheet(sheet, entry) {
   }
 
   if (requests.length) {
+    if (repair) {
+      recordRepair(repair);
+      // Verify the exact cells again after the network call that records the repair.
+      read(); // Recheck duplicate IDs, QR ownership and other stock occupying picking slots.
+      for (const { target, current, id } of writes) {
+        checkPhysicalRow(target, current, id);
+        ensureWritable(target, id);
+      }
+    }
     warehousePlacementSheetApi(sheet, ':batchUpdate', 'post', { requests });
     SpreadsheetApp.flush();
   }
@@ -270,7 +297,15 @@ function _syncAtelierStockSheetJobs(sheet) {
   let synced = 0;
   for (const entry of jobs) {
     try {
-      const { rows, absent, cleared } = writeAtelierQrAuditSheet(sheet, entry);
+      const { rows, absent, cleared } = writeAtelierQrAuditSheet(sheet, entry, differences => {
+        try {
+          _atelierStockConditionCall('record-stock-sheet-repair', { id: entry.id, lease: entry.lease, differences });
+        } catch (_) {
+          const error = new Error('SHEET_REPAIR_HISTORY_UNAVAILABLE');
+          error.differences = differences;
+          throw error;
+        }
+      });
       _atelierStockConditionCall('finish-stock-sheet-job', { id: entry.id, lease: entry.lease, rows, absent });
       synced++;
       if (cleared.size) cleanup.push({ id: entry.id, ids: [...cleared.keys()] });

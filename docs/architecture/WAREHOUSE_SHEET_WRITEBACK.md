@@ -4,7 +4,8 @@ Atelier의 행 수정, 상태 변경, 자리 이동, 실사 수량 조정, 소�
 
 - 시트 반영 계획은 같은 AA, QR 또는 출고창고 자리로 연결된 작업을 묶는다. 각 AA의 최초 이전값과 마지막 최종값을 사용한다. 이미 쓰기를 시작한 계획은 고정하며, 같은 AA의 나중 저장은 다음 버전을 기다린다.
 - Apps Script는 기존 5분 작업과 공유 잠금을 사용한다. 중복 AA·QR, 출고 자리 점유, 수기 변경 및 대상 셀의 수식을 확인한다. 분할과 자리 교대는 한 번의 시트 요청으로 반영한다. B:H, S, AA의 필요한 입력값만 쓴다. 소진은 시트 입력값을 비우고 AA를 다시 읽어 확인한다. 완료 뒤 기존 WPS 삭제 흐름이 해당 행을 정리한다. [Google Sheets 일괄 업데이트](https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/batchUpdate)
-- B:H, S와 삭제된 AA를 다시 읽고 계획과 일치해야 해당 버전의 작업이 완료된다. 충돌한 묶음만 재시도하며 창고 관리에 기대 시트값, 실제 시트값, 목표값을 표시한다. 직접 시트 편집에는 값 조건부 쓰기 API가 없으므로 직전 비교 후 쓰고 즉시 다시 확인한다. [Apps Script 공유 잠금](https://developers.google.com/apps-script/reference/lock/lock-service)
+- B:H, S와 삭제된 AA를 다시 읽고 계획과 일치해야 해당 버전의 작업이 완료된다. Atelier 작업의 AA가 유일하고 같은 박스 QR 또는 QR 없는 동일 품목임을 확인하면, 시트에서 달라진 값도 저장된 작업 계획으로 맞춘다. 서버에 차이를 먼저 기록하고 시트 쓰기 직전에 다시 확인한다. 완료한 건은 창고 관리의 최근 자동 정정 이력에 7일간 최대 20건을 표시한다.
+- AA 누락·중복, 다른 상품이나 QR, 출고 자리 충돌, 수정 대상의 수식 등은 기존 확인 목록에 남긴다. 직접 시트 편집에는 값 조건부 쓰기 API가 없으므로 직전 비교 후 쓰고 즉시 다시 확인한다. [Apps Script 공유 잠금](https://developers.google.com/apps-script/reference/lock/lock-service)
 - 전체 가져오기는 시트 읽기 시각 이후에 완료된 작업과 현재 대기의 AA를 활성 재고에서 가져온다. 해당 AA가 이미 소진됐으면 가져온 행에서 빼며, 이 범위 밖의 행은 기존 가져오기 로직으로 처리한다.
 
 ## 운영 반영 순서
@@ -17,6 +18,8 @@ Atelier의 행 수정, 상태 변경, 자리 이동, 실사 수량 조정, 소�
 4. 운영 `창고입력`에 연결된 프로젝트에서 `warehouse-qr-audit-sheet-sync.gs`만 갱신하고 기존 `syncAtelierWarehouseQrAuditSheet` 5분 트리거를 사용한다. Finder 파일, 웹앱 배포 URL과 버전, `warehouse-stock-condition-sync.gs` 및 기존 트리거를 유지한다. `enableAtelierStockSheetWritebackV2`로 DB 활성화 전 서버 응답을 확인하고 스크립트 속성 `ATELIER_STOCK_SHEET_WRITEBACK_V2`를 켠다.
 5. 아래 M2363 확인을 마친 뒤 서비스 역할로 활성화한다. 현재 대기 중인 Atelier 작업만 새 계획으로 이관한다. 기존 시트 반영 경로는 Finder와 미이관 건을 계속 처리한다.
 6. 작업 버전의 완료 시각, 실제 시트행 값, 활성 재고와 Finder 조회 결과를 확인한다. 창고 관리의 충돌 표시와 소진 사유 입력은 Atelier 웹 변경에 포함된다. 검수 화면 확인과 `main` 반영 승인을 거쳐 웹을 배포한다.
+
+자동 정정은 `20261117022050_warehouse_stock_sheet_repair_history.sql` → `warehouse-sheet-sync` Edge Function → 창고 관리 화면 → 운영 Apps Script 파일 순으로 적용한다. 기존 사용 중인 트리거를 그대로 사용한다. 대기 중인 작업도 다음 시트 동기화에서 같은 조건으로 재처리한다. 검증은 작업의 완료 시각, 자동 정정 이력 및 실제 시트의 B:H·S·AA 재조회로 한다.
 
 ## M2363 기존 누락 건
 

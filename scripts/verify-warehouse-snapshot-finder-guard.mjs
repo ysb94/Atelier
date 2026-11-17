@@ -984,6 +984,7 @@ try {
   const knownLocationsMigration = atelierSql('20261116112508_warehouse_stock_move_existing_locations')
   query(knownLocationsMigration)
   query(knownLocationsMigration)
+  query(atelierSql('20261117022050_warehouse_stock_sheet_repair_history'))
   assert.equal(query(`select proacl::text from pg_proc where oid=${moveFunction};`), moveAcl)
   assert.equal(query(`select md5(pg_get_functiondef('app.assert_warehouse_qr_audit_sheet_ready(uuid,text,text,text)'::regprocedure));`), finderGuard)
   query(`insert into warehouse_registered_slots(warehouse_id,code,zone) values
@@ -1029,7 +1030,27 @@ try {
   assert.equal(returnedJob.after.length, 2)
   assert.deepEqual(returnedJob.after.map(r => [r.values[2], r.values[5]]).sort(),
     [['%-6-9', '8'], ['P-9-1', '1']])
+  const activity = `select public.list_atelier_stock_sheet_activity('${brand}');`
+  const drift = [{ id: legacySourceAa, field: '박스 수', expected: '9', actual: '7', target: '1' }]
+  const recordRepair = (differences = drift, lease = returnedJob.lease, target = brand) =>
+    `select public.record_atelier_stock_sheet_repair('${target}','${returnedJob.id}','${lease}',${json(differences)});`
+  query(asReader + activity, '42501')
+  query(asEditor + recordRepair(), '42501')
+  assert.equal(query(asService + recordRepair(drift, returnedJob.lease, other)), 'f')
+  assert.equal(query(asService + recordRepair(drift, 'c0000000-0000-4000-8000-000000000499')), 'f')
+  assert.equal(query(asService + recordRepair([{ ...drift[0], id: 'different-aa' }])), 'f')
+  assert.equal(query(asService + recordRepair([{ ...drift[0], field: 'AA' }])), 'f')
+  assert.equal(query(asService + recordRepair()), 't')
+  assert.deepEqual(JSON.parse(query(asEditor + activity)), { conflicts: [], repairs: [] })
+  assert.equal(confirmJob(returnedJob, [{ id: legacySourceAa, qr: '', values: [] }]), 'f')
+  assert.deepEqual(JSON.parse(query(asEditor + activity)), { conflicts: [], repairs: [] })
   assert.equal(confirmJob(returnedJob), 't')
+  assert.equal(query(asService + recordRepair()), 'f')
+  const verifiedActivity = JSON.parse(query(asEditor + activity))
+  assert.deepEqual(verifiedActivity.conflicts, [])
+  assert.equal(verifiedActivity.repairs[0].id, returnedJob.id)
+  assert.deepEqual(verifiedActivity.repairs[0].repair_differences, drift)
+  assert.ok(verifiedActivity.repairs[0].repair_observed_at <= verifiedActivity.repairs[0].completed_at)
   // The registered picking classification wins over an older storage location.
   assert.equal(query(asEditor + work(222, returned, 'move', { to_location_code: 'P-9-2', box_count: 1 })), 'true')
   const pickingAa = 'at_move_c0000000000040008000000000000222'
