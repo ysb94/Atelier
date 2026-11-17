@@ -175,7 +175,12 @@ begin
     if jsonb_array_length(r->'jobs')<1 then raise exception 'no async delivery jobs claimed'; end if;
     if exists(select 1 from jsonb_array_elements(r->'jobs') j cross join lateral jsonb_array_elements(j->'after') x
       where x->>'qr' like qr || '%') then raise exception 'sheet export resurrects a cleared/outbound box'; end if;
-    result_count := 18;
+    r := app.finder_warehouse_qr_audit(b,'place',jsonb_build_object('place',place_b));
+    audit_request := jsonb_build_object('id',gen_random_uuid(),'place',place_b,'baseline',r->>'baseline','entries','[]'::jsonb);
+    r := app.finder_warehouse_qr_audit(b,'preview',audit_request);
+    r := app.finder_warehouse_qr_audit(b,'confirm',audit_request || jsonb_build_object('token',r->>'token'));
+    if r->>'sheetPending' is distinct from 'false' then raise exception 'empty audit created a delivery'; end if;
+    result_count := 19;
     raise exception using errcode='ZX001',message='rollback verification fixtures';
   exception when sqlstate 'ZX001' then null;
   end;
