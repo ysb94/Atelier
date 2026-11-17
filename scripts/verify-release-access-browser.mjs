@@ -92,7 +92,8 @@ try{
  await page.getByRole('tab',{name:'승인할 신청',exact:true}).click();await page.evaluate(()=>window.__releaseFixture.setRole('staff'));await page.waitForURL('**/settings/profile');await expectTabs(['My Schedule','내업무','야근','회의'])
  await page.goto(origin+'/settings/profile?part=approvals&role=approver&approval-error=1');await page.getByText('승인자 지정을 확인하지 못했습니다.',{exact:true}).waitFor();assert.equal(await page.getByRole('tab',{name:'승인할 신청',exact:true}).count(),0)
  await page.evaluate(()=>{window.__releaseFixture.approvalError=false;window.__releaseFixture.refresh()});await expectTabs(['My Schedule','내업무','야근','회의','승인할 신청','담당 부서 출근시간'])
- await load('logistics');await page.getByRole('button',{name:'물류',exact:true}).click();let hrefs=await nav();for(const href of ['/product-work/logistics','/logistics/invoices','/logistics/barcode-outbound-data-entry','/logistics/bulk-outbound','/logistics/finder','/logistics/warehouses','/logistics/temporary-warehouse','/logistics/cargo-inbound'])assert.ok(hrefs.includes(href),href)
+ await load('logistics');await page.getByRole('button',{name:'물류',exact:true}).click();let hrefs=await nav();for(const href of ['/product-work/logistics','/logistics/invoices','/logistics/barcode-outbound-data-entry','/logistics/bulk-outbound','/logistics/finder','/logistics/warehouses','/logistics/box-labeling','/logistics/cargo-inbound'])assert.ok(hrefs.includes(href),href)
+ assert.equal(hrefs.includes('/logistics/temporary-warehouse'),false,'임시 창고는 물류 메뉴에 표시하지 않음')
  assert.ok(hrefs.includes('/work-requests/logistics'),'물류의 자기 부서 업무가 표시됨')
  assert.equal(hrefs.includes('/data/all'),false)
  await page.goto(origin+'/products/fixture/F-M001?role=logistics');await page.waitForURL('**/product-work/logistics/fixture/F-M001?role=logistics');assert.equal(await page.getByRole('button',{name:'전체 상품',exact:true}).count(),0,'예전 상품 상세 탭도 공개된 물류 경로로 통일')
@@ -100,7 +101,7 @@ try{
  await load('logistics');await page.getByRole('button',{name:'물류',exact:true}).click()
  await page.locator('aside a[href="/product-work/logistics"]').click();await page.waitForURL('**/product-work/logistics');await page.evaluate(()=>window.__releaseFixture.setRole('staff'));await page.waitForURL('**/settings/profile');assert.equal(await page.locator('[aria-label="물류 · 상품 정보 탭 닫기"]').count(),0)
  await load('logistics');await page.getByRole('button',{name:'물류',exact:true}).click();await page.locator('aside a[href="/product-work/logistics"]').click();await page.waitForURL('**/product-work/logistics');await page.locator('aside a[href="/settings/profile"]').click();await expectTabs(['My Schedule','내업무','회의']);await page.evaluate(()=>window.__releaseFixture.setRole('staff'));await expectTabs(['My Schedule','내업무','야근','회의']);assert.ok(page.url().includes('/settings/profile'),'숨긴 물류 탭이 현재 주소를 바꾸지 않음')
- await load('operations');await page.getByRole('button',{name:'운영지원',exact:true}).click();hrefs=await nav();for(const href of ['/operations-support','/members','/settings/permissions'])assert.ok(hrefs.includes(href),href);assert.equal(hrefs.includes('/settings/access-ip'),false)
+ await load('operations');await page.getByRole('button',{name:'운영지원',exact:true}).click();hrefs=await nav();for(const href of ['/operations-support/attendance','/operations-support/leave','/operations-support/people','/settings/permissions','/operations-support/settings'])assert.ok(hrefs.includes(href),href);assert.equal(hrefs.includes('/settings/access-ip'),false)
  for(const [role,title,paths] of [
   ['planning','기획',['/drafts','/planning/material-requests','/work-requests/planning']],
   ['md','MD',['/product-work/md','/work-requests/md']],
