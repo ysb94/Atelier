@@ -1,4 +1,4 @@
-import { MapPin, Package, QrCode, Truck } from 'lucide-react'
+import { ListChecks, MapPin, Package, QrCode, Truck } from 'lucide-react'
 import { useSearchParams } from 'react-router-dom'
 import { useBrand } from '@/components/layout/brand-context'
 import { SingleBrandOrList } from '@/components/layout/SingleBrandOrList'
@@ -22,7 +22,7 @@ import { WarehouseQrAuditReviewPanel } from './WarehouseQrAuditReviewPanel'
 import { WarehouseSlotSettingsPanel } from './WarehouseSlotSettingsPanel'
 import { WarehouseBoxHistoryPanel } from './TemporaryWarehousePanel'
 
-type WarehouseView = 'box' | 'outbound' | 'boxes' | 'fixed' | 'qr'
+type WarehouseView = 'box' | 'outbound' | 'boxes' | 'fixed' | 'qr' | 'organize'
 type WarehousePanel = 'stock' | 'slots' | 'qr-audit'
 
 const WAREHOUSE_VIEWS: {
@@ -69,6 +69,13 @@ const WAREHOUSE_VIEWS: {
     detail:
       '박스창고 자리번호, 출고창고 렉 번호와 렉 안의 A1~D4 고정 자리를 A4 4칸 라벨로 인쇄합니다. 고정 자리는 아이라벨용 엑셀도 내려받을 수 있습니다.',
     icon: QrCode,
+  },
+  {
+    value: 'organize',
+    label: '창고 정리',
+    description: '창고 개편 작업 공간',
+    detail: '창고 개편에 필요한 정리 작업을 준비하는 화면입니다.',
+    icon: ListChecks,
   },
 ]
 
@@ -129,7 +136,7 @@ export function WarehousePage() {
 
       <WarehousePopularLocationsPanel key={brand.id} brandId={brand.id} />
 
-      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+      <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {WAREHOUSE_VIEWS.map((item) => {
           const Icon = item.icon
           const selected = item.value === activeView
@@ -207,7 +214,7 @@ export function WarehousePage() {
             <Badge variant="warning">연습 데이터</Badge>
           )}
         </CardHeader>
-        <CardContent>
+        {activeView !== 'organize' && <CardContent>
           {activeView === 'qr' ? (
             <WarehouseQrPanel brandName={brand.name} brandId={brand.id} />
           ) : activeView === 'boxes' ? (
@@ -230,7 +237,7 @@ export function WarehousePage() {
               view={activeView}
             />
           )}
-        </CardContent>
+        </CardContent>}
       </Card>
     </div>
   )
