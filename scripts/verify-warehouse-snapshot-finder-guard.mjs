@@ -1068,21 +1068,23 @@ try {
 
   for (const name of ['20261117050000_finder_photo_qr_intake',
     '20261117063000_finder_warehouse_db_first', '20261117064000_finder_db_first_clear_source_link',
-    '20261117065100_finder_db_first_invoker_entrypoints', '20261117065602_finder_single_inbound_slot_confirmation']) query(atelierSql(name))
+    '20261117065100_finder_db_first_invoker_entrypoints', '20261117065602_finder_single_inbound_slot_confirmation',
+    '20261117092203_finder_stable_product_clear_confirmation']) query(atelierSql(name))
   query(`insert into app.finder_warehouse_db_settings (brand_id) values ('${brand}');`)
   const qrPicking = 'P-10-1'
   const photoPicking = 'P-10-2'
   const namedPicking = 'P-10-3'
+  const productClearPicking = 'P-10-4'
   query(`insert into public.warehouse_registered_slots (warehouse_id,code,zone)
     values ('${warehouse}','${qrPicking}','picking'), ('${warehouse}','${photoPicking}','picking'),
-      ('${warehouse}','${namedPicking}','picking');`)
+      ('${warehouse}','${namedPicking}','picking'), ('${warehouse}','${productClearPicking}','picking');`)
   const pickingRow = (aa, place, index, named = false) => ({
     ...row(aa, '', place), zone: 'picking', source_row_number: index,
     ...(named ? { style_id: null, source_style_no: '', normalized_style_no: '', source_product_name: '테이프' } : {}),
   })
   query(asService + sheet([...refreshed(), pickingRow('slot-old-a', qrPicking, 300),
     pickingRow('slot-old-b', qrPicking, 301, true), pickingRow('slot-photo-old', photoPicking, 302),
-    pickingRow('slot-named-old', namedPicking, 303)], 'clock_timestamp()'))
+    pickingRow('slot-named-old', namedPicking, 303), pickingRow('slot-clear-old', productClearPicking, 304)], 'clock_timestamp()'))
   const readSlot = place => lookup(undefined, place)
   const oldSlot = readSlot(qrPicking)
   assert.equal(oldSlot.groups.length, 2)
@@ -1135,7 +1137,21 @@ try {
     ['slot-photo-old'])
   assert.deepEqual(jobs.find(job => job.after.some(entry => entry.qr === 'SLOT-NAMED-NEW')).before.map(entry => entry.id),
     ['slot-named-old'])
+  const clear = token => backgroundMove('prepare', { mode: 'clear', place: productClearPicking, number: 'M1234', token,
+    backgroundJobId: 'c0000000-0000-4000-8000-000000000520:0' })
+  const beforeQtyChange = readSlot(productClearPicking).groups[0].token
+  query(`update public.warehouse_stock_positions set units_per_box=11, units_per_box_raw='11'
+    where set_id='${activeId()}' and external_row_id='slot-clear-old';`)
+  query(asService + clear(beforeQtyChange), 'P0001')
+  const afterQtyChange = readSlot(productClearPicking).groups[0].token
+  assert.notEqual(afterQtyChange, beforeQtyChange)
+  query(`update public.warehouse_stock_positions set source_row_number=400, updated_at=clock_timestamp()
+    where set_id='${activeId()}' and external_row_id='slot-clear-old';`)
+  assert.equal(readSlot(productClearPicking).groups[0].token, afterQtyChange)
+  assert.equal(JSON.parse(query(asService + clear(afterQtyChange))).status, 'saved')
+  assert.equal(readSlot(productClearPicking).groups.length, 0)
   console.log('PASS: a single picking slot confirmation replaces multiple groups, stale confirmation preserves changed stock, photo QR retry is idempotent and old AA rows are exported')
+  console.log('PASS: product absence rejects changed stock, accepts unchanged stock after sheet row bookkeeping')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)
