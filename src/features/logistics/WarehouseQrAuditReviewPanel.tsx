@@ -8,7 +8,18 @@ import { getSupabase } from '@/lib/supabase/client'
 import type { StyleRef } from '@/lib/types'
 
 type Candidate = { id: string; name: string; number: string; units: number | null; boxes: number | null; opened: number; date: string }
-type ReviewItem = { external_row_id: string; box_qr: string; photo_path: string; place: string | null; unplaced?: boolean; candidates: Candidate[] }
+type ReviewItem = {
+  external_row_id: string
+  box_qr: string
+  photo_path: string
+  place: string | null
+  unplaced?: boolean
+  label_date?: string | null
+  units_per_box?: number | null
+  suggested_name?: string | null
+  suggested_number?: string | null
+  candidates: Candidate[]
+}
 type ReviewQueue = { auditedPlaces: number; pending: number; items: ReviewItem[] }
 
 async function loadReviewQueue(brandId: string, includeUnplaced: boolean): Promise<ReviewQueue> {
@@ -36,7 +47,8 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
   const [candidateId, setCandidateId] = useState('')
   const [style, setStyle] = useState<StyleRef | null>(null)
   const [name, setName] = useState('')
-  const [units, setUnits] = useState('')
+  const [units, setUnits] = useState(item.units_per_box?.toString() ?? '')
+  const [labelDate, setLabelDate] = useState(item.label_date ?? '')
   const [opened, setOpened] = useState(false)
 
   const photo = useQuery({
@@ -60,7 +72,7 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
         p_brand_id: brandId,
         p_action: item.unplaced ? 'link_unplaced' : 'link',
         p_request: { rowId: item.external_row_id, styleId: style?.styleId, name: name.trim(),
-          ...(!item.unplaced && { candidateId, units: quantity, opened }) },
+          ...(item.unplaced ? { date: labelDate, units: quantity } : { candidateId, units: quantity, opened }) },
       })
       if (error) throw new Error(error.message)
     },
@@ -71,7 +83,7 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
   return (
     <article className="flex min-w-0 flex-col gap-4">
       <div>
-        <h3 className="font-semibold">{item.unplaced ? '자리 미정' : item.place}</h3>
+        <h3 className="font-semibold">{item.place || '자리 미정'}</h3>
         <p className="break-all font-mono text-sm text-muted-foreground">{item.box_qr}</p>
       </div>
       <div className="grid gap-5 xl:grid-cols-2">
@@ -100,6 +112,7 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
           </div>}
           <label className="block space-y-1 text-sm">
             <span>정식 상품 검색</span>
+            {item.suggested_number && <p className="text-muted-foreground">{item.suggested_number} {item.suggested_name}</p>}
             <StylePicker brandId={brandId} value={style} onChange={(value) => {
               setStyle(value)
               if (value) { setCandidateId(''); setName('') }
@@ -112,7 +125,16 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
               if (event.target.value) { setCandidateId(''); setStyle(null) }
             }} />
           </label>
-          {!item.unplaced && <>
+          {item.unplaced ? <>
+            <label className="block space-y-1 text-sm">
+              <span>선적일</span>
+              <Input type="date" value={labelDate} onChange={event => setLabelDate(event.target.value)} />
+            </label>
+            <label className="block space-y-1 text-sm">
+              <span>박스당 수량</span>
+              <Input type="number" min={1} max={1000000} value={units} onChange={event => setUnits(event.target.value)} />
+            </label>
+          </> : <>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={opened} onChange={(event) => { setOpened(event.target.checked); setUnits('') }} />
               개봉 박스
@@ -124,7 +146,8 @@ function ReviewForm({ brandId, item, onLinked }: { brandId: string; item: Review
             </label>
           </>}
           {link.isError && <p role="alert" className="text-sm text-destructive">{link.error.message}</p>}
-          <Button disabled={!hasProduct || !photo.data || link.isPending} onClick={() => link.mutate()}>
+          <Button disabled={!hasProduct || !photo.data || link.isPending || (item.unplaced && !units)}
+            onClick={() => link.mutate()}>
             {link.isPending ? '저장 중…' : '상품 연결'}
           </Button>
         </fieldset>
@@ -169,7 +192,7 @@ export function WarehouseQrAuditReviewPanel({ brandId, includeUnplaced }: { bran
               <Button key={item.external_row_id} variant={active === item ? 'secondary' : 'ghost'}
                 className="h-auto min-h-9 w-full justify-start text-left"
                 onClick={() => setSelected(item.external_row_id)}>
-                <span className="min-w-0"><strong>{item.unplaced ? '자리 미정' : item.place}</strong><span className="block truncate font-mono text-xs">{item.box_qr}</span></span>
+                <span className="min-w-0"><strong>{item.place || '자리 미정'}</strong><span className="block truncate font-mono text-xs">{item.box_qr}</span></span>
               </Button>
             ))}
           </nav>
