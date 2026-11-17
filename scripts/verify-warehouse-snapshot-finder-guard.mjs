@@ -754,6 +754,8 @@ try {
   assert.equal(confirmChecked(checkedValues), '0')
   console.log('PASS: row correction requires actual B:H and S read-back before sheet confirmation')
 
+  // The shared database received the outbound wrapper before the unplaced QR wrapper.
+  query(atelierSql('20261116073801_finder_confirm_box_outbound'))
   query(atelierSql('20261116065754_finder_unplaced_box_qr_links'))
   const unplaced = (qr, number, name) => `select public.finder_link_unplaced_box_qr('${brand}',
     ${quote(qr)},${number ? quote(number) : 'null'},${name ? quote(name) : 'null'});`
@@ -1063,6 +1065,93 @@ try {
   assert.equal(confirmJob(latestLegacyJob), 't')
   assert.equal(claimJobs().jobs.length, 0)
   console.log('PASS: known sheet storage full/split moves, 9 to 1+8, stable AA and date, retry, scope, permission, picking classification and occupancy')
+
+  for (const name of ['20261117050000_finder_photo_qr_intake',
+    '20261117063000_finder_warehouse_db_first', '20261117064000_finder_db_first_clear_source_link',
+    '20261117065100_finder_db_first_invoker_entrypoints', '20261117065602_finder_single_inbound_slot_confirmation',
+    '20261117092203_finder_stable_product_clear_confirmation']) query(atelierSql(name))
+  query(`insert into app.finder_warehouse_db_settings (brand_id) values ('${brand}');`)
+  const qrPicking = 'P-10-1'
+  const photoPicking = 'P-10-2'
+  const namedPicking = 'P-10-3'
+  const productClearPicking = 'P-10-4'
+  query(`insert into public.warehouse_registered_slots (warehouse_id,code,zone)
+    values ('${warehouse}','${qrPicking}','picking'), ('${warehouse}','${photoPicking}','picking'),
+      ('${warehouse}','${namedPicking}','picking'), ('${warehouse}','${productClearPicking}','picking');`)
+  const pickingRow = (aa, place, index, named = false) => ({
+    ...row(aa, '', place), zone: 'picking', source_row_number: index,
+    ...(named ? { style_id: null, source_style_no: '', normalized_style_no: '', source_product_name: '테이프' } : {}),
+  })
+  query(asService + sheet([...refreshed(), pickingRow('slot-old-a', qrPicking, 300),
+    pickingRow('slot-old-b', qrPicking, 301, true), pickingRow('slot-photo-old', photoPicking, 302),
+    pickingRow('slot-named-old', namedPicking, 303), pickingRow('slot-clear-old', productClearPicking, 304)], 'clock_timestamp()'))
+  const readSlot = place => lookup(undefined, place)
+  const oldSlot = readSlot(qrPicking)
+  assert.equal(oldSlot.groups.length, 2)
+  assert.match(oldSlot.slotToken, /^[a-f0-9]{32}$/)
+  assert.ok(oldSlot.groups.every(group => group.token !== oldSlot.slotToken))
+
+  const regularIntake = { ...intake, place: qrPicking, qr: 'SLOT-NEW-QR', backgroundJobId: 'c0000000-0000-4000-8000-000000000500:0' }
+  const saveRegular = token => JSON.parse(query(asService + backgroundMove('prepare', { ...regularIntake, token })))
+  assert.equal(saveRegular(undefined).status, 'occupied')
+  assert.equal(saveRegular(oldSlot.groups[0].token).status, 'occupied')
+  assert.equal(readSlot(qrPicking).slotToken, oldSlot.slotToken)
+  const regularSaved = saveRegular(oldSlot.slotToken)
+  assert.equal(regularSaved.status, 'saved')
+  assert.equal(regularSaved.clearedRows, 2)
+  assert.equal(lookup('SLOT-NEW-QR', qrPicking).box.place, qrPicking)
+  assert.deepEqual(saveRegular(oldSlot.slotToken), regularSaved)
+
+  const pickingPhotoPath = `${brand}/${actor}/c0000000-0000-4000-8000-000000000509/c0000000-0000-4000-8000-000000000508.jpg`
+  query(asReader + `insert into storage.objects(bucket_id,name) values ('warehouse-qr-audit',${quote(pickingPhotoPath)});`)
+  assert.equal(JSON.parse(query(asReader + `select public.finder_link_box_qr_photo(
+    '${brand}', 'SLOT-PHOTO-NEW', ${quote(pickingPhotoPath)}, null, null, null, false);`)).pendingReview, true)
+  const savePhoto = token => `select public.finder_place_photo_qr(
+    '${brand}', 'SLOT-PHOTO-NEW', '${photoPicking}', ${token ? quote(token) : 'null'});`
+  const slotBeforeChange = readSlot(photoPicking).slotToken
+  query('set role anon;' + savePhoto(slotBeforeChange), '42501')
+  query(asReader + `select public.finder_place_photo_qr('${brand}', 'SLOT-PHOTO-NEW', '${photoPicking}');`, '23505')
+  query(`update public.warehouse_stock_positions set remaining_boxes=3, remaining_boxes_raw='3'
+    where set_id='${activeId()}' and external_row_id='slot-photo-old';`)
+  const refreshedCheck = JSON.parse(query(asReader + savePhoto(slotBeforeChange)))
+  assert.equal(refreshedCheck.status, 'occupied')
+  assert.notEqual(refreshedCheck.token, slotBeforeChange)
+  assert.equal(readPosition('slot-photo-old').remaining_boxes, 3)
+  assert.equal(lookup('SLOT-PHOTO-NEW', photoPicking).qrLink.pendingReview, true)
+  assert.deepEqual(JSON.parse(query(asReader + savePhoto(refreshedCheck.token))), { pendingReview: true, alreadyPlaced: false })
+  assert.deepEqual(JSON.parse(query(asReader + savePhoto(refreshedCheck.token))), { pendingReview: true, alreadyPlaced: true })
+  assert.equal(lookup('SLOT-PHOTO-NEW', photoPicking).box.place, photoPicking)
+
+  query(asReader + unplaced('SLOT-NAMED-NEW', null, '테이프'))
+  const saveNamed = token => JSON.parse(query(asReader + `select public.finder_place_named_qr(
+    '${brand}', 'SLOT-NAMED-NEW', '${namedPicking}', '2026-11-13', 24, ${token ? quote(token) : 'null'});`))
+  assert.equal(saveNamed(null).status, 'occupied')
+  const namedSlotToken = readSlot(namedPicking).slotToken
+  assert.equal(saveNamed(namedSlotToken).sheetPending, true)
+  assert.equal(saveNamed(namedSlotToken).sheetPending, true)
+
+  const jobs = claimJobs().jobs
+  assert.deepEqual(jobs.find(job => job.after.some(entry => entry.qr === 'SLOT-NEW-QR')).before.map(entry => entry.id).sort(),
+    ['slot-old-a', 'slot-old-b'])
+  assert.deepEqual(jobs.find(job => job.after.some(entry => entry.qr === 'SLOT-PHOTO-NEW')).before.map(entry => entry.id),
+    ['slot-photo-old'])
+  assert.deepEqual(jobs.find(job => job.after.some(entry => entry.qr === 'SLOT-NAMED-NEW')).before.map(entry => entry.id),
+    ['slot-named-old'])
+  const clear = token => backgroundMove('prepare', { mode: 'clear', place: productClearPicking, number: 'M1234', token,
+    backgroundJobId: 'c0000000-0000-4000-8000-000000000520:0' })
+  const beforeQtyChange = readSlot(productClearPicking).groups[0].token
+  query(`update public.warehouse_stock_positions set units_per_box=11, units_per_box_raw='11'
+    where set_id='${activeId()}' and external_row_id='slot-clear-old';`)
+  query(asService + clear(beforeQtyChange), 'P0001')
+  const afterQtyChange = readSlot(productClearPicking).groups[0].token
+  assert.notEqual(afterQtyChange, beforeQtyChange)
+  query(`update public.warehouse_stock_positions set source_row_number=400, updated_at=clock_timestamp()
+    where set_id='${activeId()}' and external_row_id='slot-clear-old';`)
+  assert.equal(readSlot(productClearPicking).groups[0].token, afterQtyChange)
+  assert.equal(JSON.parse(query(asService + clear(afterQtyChange))).status, 'saved')
+  assert.equal(readSlot(productClearPicking).groups.length, 0)
+  console.log('PASS: a single picking slot confirmation replaces multiple groups, stale confirmation preserves changed stock, photo QR retry is idempotent and old AA rows are exported')
+  console.log('PASS: product absence rejects changed stock, accepts unchanged stock after sheet row bookkeeping')
 } finally {
   if (started) command('pg_ctl', ['-D', data, '-m', 'fast', '-w', 'stop'], { stdio: 'ignore' })
   assert.equal(path.dirname(fixture), tempRoot)
