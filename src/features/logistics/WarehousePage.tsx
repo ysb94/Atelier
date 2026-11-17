@@ -16,6 +16,7 @@ import { useRenderWatch } from '@/lib/diagnostics'
 import { cn } from '@/lib/utils'
 import { WarehouseInventoryPanel } from './WarehouseInventoryPanel'
 import { WarehouseFixedLocationsPanel } from './WarehouseFixedLocationsPanel'
+import { WarehouseOrganizationOutboundPanel } from './WarehouseOrganizationOutboundPanel'
 import { WarehousePopularLocationsPanel } from './WarehousePopularLocationsPanel'
 import { WarehouseQrPanel } from './WarehouseQrPanel'
 import { WarehouseQrAuditReviewPanel } from './WarehouseQrAuditReviewPanel'
@@ -74,7 +75,7 @@ const WAREHOUSE_VIEWS: {
     value: 'organize',
     label: '창고 정리',
     description: '창고 개편 작업 공간',
-    detail: '창고 개편에 필요한 정리 작업을 준비하는 화면입니다.',
+    detail: '월별 상품 출고 수량을 창고 개편 자료로 저장합니다.',
     icon: ListChecks,
   },
 ]
@@ -214,8 +215,10 @@ export function WarehousePage() {
             <Badge variant="warning">연습 데이터</Badge>
           )}
         </CardHeader>
-        {activeView !== 'organize' && <CardContent>
-          {activeView === 'qr' ? (
+        <CardContent>
+          {activeView === 'organize' ? (
+            <WarehouseOrganizationOutboundPanel brandId={brand.id} />
+          ) : activeView === 'qr' ? (
             <WarehouseQrPanel brandName={brand.name} brandId={brand.id} />
           ) : activeView === 'boxes' ? (
             <WarehouseBoxHistoryPanel key={brand.id} brandId={brand.id} includeActive />
@@ -237,7 +240,7 @@ export function WarehousePage() {
               view={activeView}
             />
           )}
-        </CardContent>}
+        </CardContent>
       </Card>
     </div>
   )
