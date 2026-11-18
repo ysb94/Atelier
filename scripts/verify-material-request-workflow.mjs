@@ -74,6 +74,7 @@ export async function installMaterialTestSchema(db) {
   await db.exec(await sql('20261106163544_material_nudge_recipient_satisfaction'))
   await db.exec(await sql('20261106165117_material_nudge_inbox_confirmation'))
   await db.exec(await sql('20261106171049_china_work_assignee_order'))
+  await db.exec(await sql('20261118071734_promotion_sample_record_only'))
 }
 
 export async function createMaterialTestDatabase() {
@@ -113,6 +114,39 @@ async function verify() {
     assert.ok(rows.every(row=>row.rounds.every(round=>!Object.hasOwn(round,'satisfaction'))))
   }
   try {
+    const promotionDraft = id(76), mixedDraft = id(77), revision = '2026-11-04T00:00:00Z'
+    const sample = { id:'promotion-sample', originCountry:'PROMOTION [중국]', url:'fixture.pdf', round:1, assigneeId:worker }
+    const color = { ...sample, id:'promotion-color', receivedAt:revision, originCountry:'Promotion [CHINA]' }
+    const assigned = { chinaWorkAssignment:{ assigneeId:worker, assignedAt:revision }, colorSampleRounds:[color] }
+    const chinaRound = { ...sample, id:'china-sample', originCountry:'중국' }
+    await db.query(`insert into public.product_drafts
+      (id,company_id,updated_at,status,origin_country,draft_no,sample_work_orders,specs)
+      values ($1,$2,$3,'open','PROMOTION [중국]','PL-PROMO',$4,$5),
+             ($6,$2,$3,'open','중국','PL-MIXED',$7,$5)`,
+      [promotionDraft,company,revision,JSON.stringify([sample]),JSON.stringify(assigned),mixedDraft,JSON.stringify([sample,chinaRound])])
+    await actAs(worker)
+    const screen = (await db.query('select public.get_my_china_work_orders() as screen')).rows[0].screen
+    assert.deepEqual(screen.orders.map(row=>row.orderId),['china-sample'])
+    for (const [key,kind] of [[sample.id,'sample'],[color.id,'color']]) {
+      const { rows } = await db.query('select public.get_my_china_work_order_file($1,$2,$3) as file',[mixedDraft,key,kind])
+      assert.equal(rows[0].file,null)
+    }
+    await actAs(manager)
+    assert.equal((await workload(worker)).sampleOpen,1)
+    assert.equal((await workload(worker)).sampleResting,0)
+    const orderAction = (draftId,key,kind,action,assignee=null) => db.query(
+      'select app.china_work_order($1,$2,$3,$4,$5,$6)',[draftId,key,kind,action,assignee,revision],
+    )
+    await assert.rejects(orderAction(promotionDraft,sample.id,'sample','handoff',other),{code:'42501'})
+    await assert.rejects(orderAction(mixedDraft,sample.id,'sample','ship'),{code:'42501'})
+    await assert.rejects(orderAction(mixedDraft,color.id,'color','check'),{code:'42501'})
+    await orderAction(mixedDraft,chinaRound.id,'sample','handoff',other)
+    await db.exec('reset role')
+    const saved = (await db.query('select sample_work_orders,specs from public.product_drafts where id=$1',[mixedDraft])).rows[0]
+    assert.deepEqual(saved.sample_work_orders[0],sample)
+    assert.deepEqual(saved.specs.colorSampleRounds[0],color)
+    assert.equal(saved.sample_work_orders[1].assigneeId,other)
+    await db.query('delete from public.product_drafts where id in ($1,$2)',[promotionDraft,mixedDraft])
     await actAs('', 'anon')
     await assert.rejects(read('planning'), { code: '42501' })
     await actAs(requester)

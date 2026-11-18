@@ -26,7 +26,7 @@ export function RegisteredSampleCard({ id, label, status, country, url, name, lo
       <div>
         <SampleDestinationSelect label={`${label} 샘플 진행처`} value={country} disabled={disabled || !onCountry}
           onChange={value => onCountry?.(value)} />
-        <p className="mt-1 text-xs text-muted-foreground">CHINA와 PROMOTION [중국]의 지시서는 중국팀에 전달됩니다. KOREA는 기록만 남습니다.</p>
+        <p className="mt-1 text-xs text-muted-foreground">CHINA의 지시서는 중국팀에 전달됩니다. KOREA와 PROMOTION [중국]은 기획안에 기록만 남습니다.</p>
       </div>
       <div className="flex min-h-16 items-center justify-center rounded-xl border border-dashed border-border px-4 py-5 text-sm text-muted-foreground">
         {url ? <a href={url} download={name} className="max-w-full truncate text-foreground underline-offset-2 hover:underline">{name}</a> : '올린 파일이 없습니다.'}

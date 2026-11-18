@@ -1,6 +1,6 @@
 import type { DraftSampleWorkOrder, ProductDraftInput } from '../types'
 import { latestFilledSampleWorkOrder, legacyWorkOrderFields } from './sample-work-order'
-import { registerNextReceivedSample, sampleCountry, sampleReadyForNextStage } from './sample-receipt'
+import { isSampleDestination, registerNextReceivedSample, sampleReadyForNextStage } from './sample-receipt'
 import { newColorSampleRound, publishNextColorSampleRound, resolveColorSampleRounds } from './draft-flow'
 
 export type SampleRegistrationStage = 'next' | 'final' | 'color'
@@ -38,7 +38,7 @@ export function registerDraftSampleStage(
   at = new Date().toISOString(),
 ): ProductDraftInput {
   if (!file.url.trim() || !file.name.trim()) throw new Error('작업지시서 파일을 선택해 주세요.')
-  if (!['CN', 'KO'].includes(sampleCountry(country).code)) throw new Error('샘플 진행처를 선택해 주세요.')
+  if (!isSampleDestination(country)) throw new Error('샘플 진행처를 선택해 주세요.')
   const latest = latestFilledSampleWorkOrder(input.sampleWorkOrders)
   if (stage !== 'color') {
     const orders = registerNextReceivedSample(input.sampleWorkOrders, file, country, input.originCountry, at)
@@ -70,7 +70,7 @@ export function updateDraftColorSample(input: ProductDraftInput, id: string, cha
   const latest = rounds.at(-1)
   if (latest?.id !== id || latest.returnedAt || latest.receivedAt || latest.passed) throw new Error('진행 중인 미발송 컬러샘플만 수정할 수 있습니다.')
   if (change.file && (!change.file.url.trim() || !change.file.name.trim())) throw new Error('작업지시서 파일을 선택해 주세요.')
-  if (change.country !== undefined && !['CN', 'KO'].includes(sampleCountry(change.country).code)) throw new Error('샘플 진행처를 선택해 주세요.')
+  if (change.country !== undefined && !isSampleDestination(change.country)) throw new Error('샘플 진행처를 선택해 주세요.')
   return { ...input,
     specs: { ...input.specs, colorSampleRounds: rounds.map(round => round.id === id ? {
       ...round, ...(change.file ? { url: change.file.url, name: change.file.name.trim() } : {}),

@@ -55,7 +55,7 @@ import {
 import {
   colorWorkOrderFileName,
 } from '@/lib/drafts/draft-flow'
-import { applySampleOrigin, sampleCountry, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
+import { applySampleOrigin, isSampleDestination, sampleCountry, sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
 import { sampleOrderLabel } from '@/lib/drafts/sample-registration'
 import {
   attachSampleWorkOrderFile,
@@ -437,8 +437,7 @@ export function DraftEditPage() {
 
   async function uploadBasicWorkOrder(file: File) {
     if (sampleUploadLocked) return
-    const country = sampleCountry(form.originCountry)
-    if (country.code !== 'CN' && country.code !== 'KO') {
+    if (!isSampleDestination(form.originCountry)) {
       setError('샘플 진행처를 먼저 선택해 주세요.')
       return
     }
@@ -871,7 +870,7 @@ export function DraftEditPage() {
                 readOnly={!editable || saveMutation.isPending}
                 onChange={proposer => patch({ specs: { ...form.specs, proposer } })} />
               {savedSamples.length === 0 && <p className="text-xs text-muted-foreground">
-                CHINA와 PROMOTION [중국]의 지시서는 중국팀에 전달됩니다. KOREA는 기록만 남습니다.
+                CHINA의 지시서는 중국팀에 전달됩니다. KOREA와 PROMOTION [중국]은 기획안에 기록만 남습니다.
               </p>}
             </div>
             <div className="min-w-0">

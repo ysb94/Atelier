@@ -3,7 +3,7 @@ import { Upload } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { SampleDestinationSelect } from './SampleDestinationSelect'
 import { readFileAsDataUrl } from '@/lib/images'
-import { sampleCountry } from '@/lib/drafts/sample-receipt'
+import { isSampleDestination } from '@/lib/drafts/sample-receipt'
 import { nextRegistrationStages, sampleRegistrationLabel, type SampleRegistrationStage } from '@/lib/drafts/sample-registration'
 
 type WorkOrderFile = { url: string; name: string }
@@ -35,7 +35,7 @@ export function SampleWorkOrderRegistration({ originCountry, nextRound, nextColo
   async function register() {
     if (disabled || pending.current) return
     if (!file) { setError('작업지시서 파일을 먼저 선택해 주세요.'); return }
-    if (!['CN','KO'].includes(sampleCountry(country).code)) { setError('샘플 진행처를 선택해 주세요.'); return }
+    if (!isSampleDestination(country)) { setError('샘플 진행처를 선택해 주세요.'); return }
     pending.current = true; setBusy(true); setError('')
     try { await onRegister(stage, file, country); setRegistered({ ...file, label }); setFile(null) }
     catch (cause) { console.warn('[drafts] 샘플 단계 작업지시서 등록 실패', cause); setError(cause instanceof Error ? cause.message : '작업지시서를 등록하지 못했습니다. 다시 시도해 주세요.') }
