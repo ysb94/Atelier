@@ -172,7 +172,7 @@ function BrandStatCard({
   scheduled,
   selected,
   onSelect,
-  countLabels = ['미정', '확정'],
+  countLabels = ['미정', '폴더 지정'],
 }: {
   label: string
   badge: Pick<Brand, 'name' | 'color' | 'logoUrl'>

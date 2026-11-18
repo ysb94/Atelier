@@ -43,6 +43,7 @@ import { DraftReleaseScheduleDialog } from './DraftReleaseScheduleDialog'
 import { useDraftPriceRequests } from './useDraftPriceRequests'
 import {
   formatReleaseGroupLabel,
+  isUnassignedReleaseFolder,
   resolveReleaseSchedule,
   seasonToPreviewGroup,
   type PreviewReleaseAssignment,
@@ -69,10 +70,10 @@ function emptyMessage(
     return '브랜드 미정 기획안이 없습니다. 오른쪽 위에서 추가하세요.'
   }
   if (boardFilter === 'unassigned') {
-    return '출시 일정이 비어 있는 기획안이 없습니다.'
+    return '출시 폴더가 미정인 기획안이 없습니다.'
   }
   if (boardFilter === 'scheduled') {
-    return '출시 일정이 잡힌 기획안이 없습니다.'
+    return '출시 폴더가 지정된 기획안이 없습니다.'
   }
   if (folderFilter === 'unassigned') return '폴더가 지정되지 않은 기획안이 없습니다.'
   if (folderFilter !== 'all') return '이 폴더에 담긴 기획안이 없습니다.'
@@ -94,7 +95,7 @@ export function CompanyDraftsPage() {
   >({})
   const [scheduleDraftId, setScheduleDraftId] = useState<string | null>(null)
   const folderParam = searchParams.get('folder')
-  const folderFilter = folderParam ?? searchParams.get('season') ?? 'all'
+  const requestedFolder = folderParam ?? searchParams.get('season') ?? 'all'
   const brandScope = (searchParams.get('scope') ?? 'all') as DraftBrandScope
   const canViewByOwner = canViewDraftsByOwner(profile)
   const ownerScope = (
@@ -224,10 +225,13 @@ export function CompanyDraftsPage() {
     () => new Map(seasons.map((season) => [season.id, season])),
     [seasons],
   )
+  const folderFilter = requestedFolder.toLowerCase() === 'unassigned' || isUnassignedReleaseFolder(seasonMap.get(requestedFolder))
+    ? 'unassigned'
+    : requestedFolder
   const releaseFoldersByBrand = useMemo(() => {
     const byBrand = new Map<string, Season[]>()
     for (const season of seasons) {
-      if (season.code === 'UNASSIGNED') continue
+      if (isUnassignedReleaseFolder(season)) continue
       const folders = byBrand.get(season.brandId)
       if (folders) folders.push(season)
       else byBrand.set(season.brandId, [season])
@@ -237,7 +241,7 @@ export function CompanyDraftsPage() {
   const previewGroups = useMemo(() => {
     const byId = new Map<string, PreviewReleaseGroup>()
     for (const season of seasons) {
-      byId.set(season.id, seasonToPreviewGroup(season))
+      if (!isUnassignedReleaseFolder(season)) byId.set(season.id, seasonToPreviewGroup(season))
     }
     for (const group of tempGroups) byId.set(group.id, group)
     return [...byId.values()]
@@ -313,9 +317,7 @@ export function CompanyDraftsPage() {
     }
     return previewGroups
       .filter(group => matchesDraftBrandScope(group.brandId, brandScope, brandIdBySlug))
-      .filter(group => seasonMap.get(group.id)?.code !== 'UNASSIGNED')
       .map(group => {
-        const season = seasonMap.get(group.id)
         return {
           id: group.id,
           label: formatReleaseGroupLabel(group),
@@ -323,7 +325,7 @@ export function CompanyDraftsPage() {
           brandName: scopedBrand ? undefined : brandById.get(group.brandId)?.name,
           name: group.name,
           total: counts.get(group.id) ?? 0,
-          editable: Boolean(season && season.code !== 'UNASSIGNED'),
+          editable: seasonMap.has(group.id),
         }
       })
   }, [ownerDrafts, scheduleByDraft, previewGroups, brandScope, brandIdBySlug, scopedBrand, brandById, seasonMap])
@@ -383,6 +385,7 @@ export function CompanyDraftsPage() {
     draftsQuery.isLoading || seasonQueries.loading
 
   const selectedSeason = seasons.find(season =>
+    !isUnassignedReleaseFolder(season) &&
     (!scopedBrand || season.brandId === scopedBrand.id) &&
     matchesDraftFolder(season.id, folderFilter, !folderParam ? season.code : undefined) &&
     folderFilter !== 'all' && folderFilter !== 'unassigned',
@@ -481,7 +484,7 @@ export function CompanyDraftsPage() {
         throw new Error('기획안의 브랜드를 다시 확인해 주세요.')
       }
       const folder = seasonId ? seasonMap.get(seasonId) : undefined
-      if (seasonId && (folder?.brandId !== current.brandId || folder.code === 'UNASSIGNED')) {
+      if (seasonId && (folder?.brandId !== current.brandId || isUnassignedReleaseFolder(folder))) {
         throw new Error('해당 브랜드의 출시 폴더를 다시 선택해 주세요.')
       }
       return saveDraftReleaseFolder(current, seasonId, context)
@@ -515,7 +518,7 @@ export function CompanyDraftsPage() {
           <BoardFilterChip
             selected={boardFilter === 'scheduled'}
             onSelect={() => setBoardFilter('scheduled')}
-            label="출시 확정"
+            label="출시 폴더 지정"
             count={sheetCounts.scheduled}
           />
         </div>
