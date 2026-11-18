@@ -9,6 +9,7 @@ import { usePagePreview } from '@/lib/company/page-preview-context'
 import { useMeetingNotices } from '@/features/meetings/use-meeting-notices'
 import { listMyLeaveUsageNotices, type LeaveUsageNotice } from '@/lib/supabase/leave-usage-notices'
 import { listMyLateStatementNotices } from '@/lib/supabase/late-arrival-statements'
+import { lateAppealNoticeItems, lateAppealsQueryKey, useLateAppeals } from '@/lib/supabase/late-arrival-appeals'
 import { lateStatementNoticeItems } from '@/features/home/LateStatementReview'
 import { leaveNoticeItems } from '@/features/operations-support/leave-usage-notices'
 import { leaveAdvanceReviewHref } from '@/features/operations-support/operations-support-sections'
@@ -49,6 +50,8 @@ export function useMyHomeNotifications({ coordinator = false, background = false
   const poll = readPollInterval(30_000, coordinator && enabled)
   const leave = useQuery({ queryKey: ['leave-usage-notices', profile?.id], queryFn: () => listMyLeaveUsageNotices(profile!.id), ...sharedReadPolicy, enabled: enabled && selfService, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
   const late = useQuery({ queryKey: ['late-statement-notices', profile?.id], queryFn: listMyLateStatementNotices, ...sharedReadPolicy, enabled: enabled && selfService, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
+  const appealsEnabled = enabled && workEnabled
+  const lateAppeals = useLateAppeals(appealsEnabled, undefined, coordinator ? 30_000 : false, background && coordinator)
   const work = useQuery({ queryKey: ['my-home-work-notices', profile?.id], queryFn: () => workNotices(), ...sharedReadPolicy, enabled: enabled && workEnabled, refetchInterval: poll, refetchIntervalInBackground: background && coordinator })
   const cache=useQueryClient()
   const attendanceReminders=useAttendanceStartReminders(coordinator,background)
@@ -62,7 +65,7 @@ export function useMyHomeNotifications({ coordinator = false, background = false
     const userId=profile.id
     let disposed=false
     let timer: ReturnType<typeof setTimeout> | undefined
-    const refresh=()=>{clearTimeout(timer);timer=setTimeout(()=>{void Promise.all(['my-home-work-notices','holiday-work'].map(key=>cache.invalidateQueries({queryKey:[key]})))},150)}
+    const refresh=()=>{clearTimeout(timer);timer=setTimeout(()=>{void Promise.all(['my-home-work-notices','holiday-work',...lateAppealsQueryKey].map(key=>cache.invalidateQueries({queryKey:[key]})))},150)}
     const channel=db.channel(`my-home-work:${profile.id}`)
       .on('postgres_changes',{event:'*',schema:'public',table:'my_home_request_events',filter:`employee_id=eq.${userId}`},()=>{
         refresh()
@@ -122,9 +125,9 @@ export function useMyHomeNotifications({ coordinator = false, background = false
         action: item.action_needed ? { key: item.action_key ?? `request:${item.entity_id}`, label: holiday ? item.tab==='approvals'?'실제 시간 확인 필요':item.tab==='holiday-work'?'보상 처리 필요':'실제 시간 보완 필요' : item.event_type==='checkout'?'실제 퇴근시간 등록 필요':'승인 처리 필요' } : null,
       }
     })
-    return [...meetingItems,...leaveItems,...lateItems,...workItems,...attendanceStartReminderItems(attendanceReminders.rows),...(visual.rows?.map(visualWorkflowNoticeItem) ?? [])].sort((a,b) => b.createdAt.localeCompare(a.createdAt))
-  }, [enabled, meetings.items, meetings.series, leave.data, late.data, workRows, selfService,attendanceReminders.rows,visual.rows])
-  return { items, ready: enabled && meetings.ready && (!selfService || (leave.isSuccess && late.isSuccess)) && (!workEnabled || work.isSuccess), work: workRows, error: enabled ? meetings.error ?? attendanceReminders.error ?? (selfService ? leave.error ?? late.error : null) ?? (workEnabled ? work.error : null) : null }
+    return [...meetingItems,...leaveItems,...lateItems,...lateAppealNoticeItems(lateAppeals.data?.rows ?? []),...workItems,...attendanceStartReminderItems(attendanceReminders.rows),...(visual.rows?.map(visualWorkflowNoticeItem) ?? [])].sort((a,b) => b.createdAt.localeCompare(a.createdAt))
+  }, [enabled, meetings.items, meetings.series, leave.data, late.data, lateAppeals.data,workRows, selfService,attendanceReminders.rows,visual.rows])
+  return { items, ready: enabled && meetings.ready && (!selfService || (leave.isSuccess && late.isSuccess)) && (!workEnabled || work.isSuccess) && (!appealsEnabled || lateAppeals.isSuccess), work: workRows, error: enabled ? meetings.error ?? attendanceReminders.error ?? (selfService ? leave.error ?? late.error : null) ?? (workEnabled ? work.error : null) ?? (appealsEnabled ? lateAppeals.error : null) : null }
 }
 
 export function useReadMyHomeNotification(source: 'meeting'|'request'|'checkout', entityId: string|undefined, version: string|undefined, displayed: boolean) {

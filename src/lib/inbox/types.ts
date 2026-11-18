@@ -15,6 +15,7 @@ export type InboxNotificationKind =
   | 'leave_usage_notice'
   | 'late_statement_manager'
   | 'late_statement_confirmed'
+  | 'late_appeal'
   | 'personal_request'
   | 'checkout_needed'
 

@@ -37,6 +37,7 @@ const KIND_ICON: Record<
   leave_usage_notice: { icon: CalendarClock, label: '연차 안내' },
   late_statement_manager: { icon: Clock, label: '지각 사유서' },
   late_statement_confirmed: { icon: Clock, label: '지각 사유서' },
+  late_appeal: { icon: Clock, label: '지각 이의신청' },
 }
 
 export function NotificationPanel({
