@@ -162,6 +162,10 @@ try{
  await size.getByRole('button',{name:'확정',exact:true}).click()
  await size.getByText('확정 완료',{exact:true}).waitFor()
  assert.equal(await blackSizeButton.getAttribute('aria-description'),null)
+ assert.deepEqual(await blackSizeButton.evaluate(el=>[
+   getComputedStyle(el).backgroundColor,
+   getComputedStyle(el).color,
+ ]),['rgb(198, 9, 32)','rgb(255, 255, 255)'])
  assert.equal(await ivorySizeButton.getAttribute('aria-description'),'기입 중')
  assert.deepEqual(JSON.parse(await page.getByTestId('saved-spec').textContent()),
    ['black',{size:'W=320;D=120;H=210;STRAP=;UNIT=mm',weight:'270g',sizeNote:memo},false])
