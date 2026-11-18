@@ -10,6 +10,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react'
+import { BrandAvatar } from '@/components/brand/BrandAvatar'
 import { useCompanyBrandScope } from '@/components/layout/company-brand-scope'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -289,7 +290,7 @@ function seasonIdFromQuery(
 
 export function DraftEditPage() {
   useRenderWatch('DraftEditPage')
-  const { brands, brandBySlug } = useCompanyBrandScope()
+  const { brands, brandById, brandBySlug } = useCompanyBrandScope()
   const { profile } = useAuth()
   const workAccess = useBasicWorkAccess()
   const { draftId } = useParams()
@@ -312,21 +313,8 @@ export function DraftEditPage() {
   const [seasonPrefillDone, setSeasonPrefillDone] = useState(false)
   const [seasonFromQueryDone, setSeasonFromQueryDone] = useState(false)
   const [editorPart, setEditorPart] = useState<'basic' | 'pending'>('basic')
-  const photoObserver = useRef<ResizeObserver | null>(null)
-  const [photoSize, setPhotoSize] = useState(144)
-  const nameBlockRef = (node: HTMLDivElement | null) => {
-    photoObserver.current?.disconnect()
-    photoObserver.current = null
-    if (!node) return
-    const update = () => {
-      const next = Math.round(node.getBoundingClientRect().height)
-      if (next > 0) setPhotoSize((current) => (current === next ? current : next))
-    }
-    update()
-    const observer = new ResizeObserver(update)
-    photoObserver.current = observer
-    observer.observe(node)
-  }
+  const selectedBrand = form.brandId ? brandById.get(form.brandId) : undefined
+  const designer = form.owner.trim() || (isNew ? profile?.displayName?.trim() : '') || '미정'
 
   const draftQuery = useQuery({
     queryKey: ['product-draft', draftId],
@@ -746,8 +734,8 @@ export function DraftEditPage() {
               }
             }}
           />
-          <div className="flex items-start gap-6">
-            <div className="relative shrink-0" style={{ width: photoSize, height: photoSize }}>
+          <div className="grid items-start gap-4 sm:grid-cols-[auto_minmax(0,1fr)] sm:gap-6">
+            <div className="relative aspect-square w-32 sm:w-40 lg:w-48">
               <button
                 type="button"
                 title="사진 선택"
@@ -776,10 +764,18 @@ export function DraftEditPage() {
                 </button>
               ) : null}
             </div>
-            <div ref={nameBlockRef} className="grid min-w-0 flex-1 grid-cols-[minmax(0,1fr)_auto] items-end gap-x-3 gap-y-3">
-              <div className="col-span-2">
-                <p className="text-sm text-foreground">Designer <strong>{form.owner.trim() || '미정'}</strong></p>
-                <p className="text-sm font-semibold">{loaded?.draftNo ? `No. ${loaded.draftNo}` : 'No. 저장 시 발급'}</p>
+            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-x-3 gap-y-3">
+              <div className="col-span-2 flex min-w-0 items-start gap-3">
+                {selectedBrand && (
+                  <div role="img" aria-label={`${selectedBrand.name} 브랜드`} title={selectedBrand.name}>
+                    <BrandAvatar brand={selectedBrand} className="size-11 rounded-full [&>img]:object-contain" />
+                  </div>
+                )}
+                <div className="min-w-0 space-y-0.5 break-words text-sm">
+                  <p>Designer <strong>{designer}</strong></p>
+                  <p className="font-semibold">{loaded?.draftNo ? `No. ${loaded.draftNo}` : 'No. 저장 시 발급'}</p>
+                  <p className="text-muted-foreground">제안자 <span className="text-foreground">{form.specs.proposer?.name ?? '미지정'}</span></p>
+                </div>
               </div>
               <Field label="한글명">
                 <Input
