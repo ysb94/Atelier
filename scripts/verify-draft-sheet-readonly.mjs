@@ -79,6 +79,11 @@ try{
  const informationRows=row.locator('.draft-sheet-information .draft-color-lines')
  const [rowsBox,documentBox]=await Promise.all([informationRows.boundingBox(),documentButton.boundingBox()])
  assert.ok(Math.abs(rowsBox.y+rowsBox.height/2-documentBox.y-documentBox.height/2)<1,'스펙 문서 버튼을 컬러 행 전체 높이의 가운데에 둔다')
+ const informationCellBox=await row.locator(':scope > td').nth(4).boundingBox()
+ const fabricBox=await fabricTrigger.boundingBox()
+ const buttonGap=documentBox.x-fabricBox.x-fabricBox.width
+ assert.ok(buttonGap>=0&&buttonGap<=16,'스펙 문서 버튼을 Fabric 버튼 바로 옆에 둔다')
+ assert.ok(informationCellBox.x+informationCellBox.width-documentBox.x-documentBox.width<=48,'INFORMATION 열 오른쪽 여백을 줄인다')
  const colorBackgrounds=await informationRows.locator('.draft-color-line').evaluateAll(lines=>lines.map(line=>getComputedStyle(line).backgroundColor))
  const documentBackground=await documentButton.evaluate(button=>getComputedStyle(button.parentElement).backgroundColor)
  assert.notEqual(colorBackgrounds[0],colorBackgrounds[1])

@@ -872,7 +872,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
     </td>
     <td>
       <div className="draft-color-pad" />
-      <div className="draft-sheet-information grid grid-cols-[minmax(0,1fr)_auto]">
+      <div className="draft-sheet-information grid w-fit grid-cols-[max-content_auto]">
         <div className="draft-color-lines">
           {colorRows.map((color, index) => {
             const spec = color ? resolveColorSpec(draft.specs, color.id) : null
@@ -910,7 +910,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
             )
           })}
         </div>
-        <div className="flex items-center justify-center bg-card px-3">
+        <div className="flex items-center justify-center bg-card pl-2">
           <InformationButton label={specsConfirmed && specDocument.trim() ? '스펙 확정' : '스펙 문서'}
             value={specDocument} tone={specTone(specDocument, specsConfirmed)} panelId={informationId}
             expanded={documentOpen} disabled={false} icon={<FileText size={16} aria-hidden="true" />}
