@@ -21,7 +21,7 @@ try {
   for (const file of [
     'supabase/tests/department_work_fixture.sql',
     'supabase/migrations/20261027044909_department_work_access.sql',
-    'supabase/migrations/20261118061232_draft_information_temporary.sql',
+    'supabase/migrations/20261118062623_draft_information_temporary.sql',
   ]) await db.exec(await readFile(file, 'utf8'))
   await db.query('insert into public.companies(id) values($1)', [company])
   await db.query("insert into public.departments(id,company_id,name,is_active) values($1,$2,'기획팀',true)", [planning, company])
