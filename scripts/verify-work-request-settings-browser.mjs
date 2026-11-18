@@ -5,12 +5,14 @@ import path from 'node:path'
 
 const original = (await readFile('scripts/verify-work-requests-browser.mjs', 'utf8')).replace(/\r\n/g, '\n')
 const explicitManagers = process.argv.includes('--explicit-managers')
+const formOnly = process.argv.includes('--form-only')
 const migrations = [
   '20261102034546_work_request_category_settings',
   ...(explicitManagers ? ['20261102043240_work_request_explicit_managers'] : []),
   '20261102093634_department_work_board',
   '20261109052445_visual_work_category_comments',
   '20261109062457_visual_work_final_approval',
+  '20261118113029_visual_supervisor_request_form_edit',
 ]
 let setup = original.slice(0, original.indexOf(' const managerPage='))
 setup = setup.replace("from './work-request-test-db.mjs'", "from '../../scripts/work-request-test-db.mjs'")
@@ -33,6 +35,31 @@ const checks = String.raw`
    assert.equal(result.error,null,JSON.stringify(result.error))
    return result.data
  }
+ const initial = await command(ids.manager,'get_work_request_settings',{p_owner:'design'})
+ const originalSupervisors = initial.supervisorIds
+ await command(ids.manager,'save_visual_work_request_settings',{p_revision:initial.revision,p_categories:initial.categories,p_supervisors:[ids.manager,ids.design]})
+ await page.goto(origin+'/design/work-request-management?actor=design')
+ await page.getByRole('button',{name:'관리자 설정',exact:true}).click()
+ assert.equal(await page.getByLabel('총괄 관리자 추가',{exact:true}).isEnabled(),false)
+ assert.equal(await page.getByLabel('이미지 작업 중간 담당자',{exact:true}).isEnabled(),false)
+ assert.equal(await page.getByLabel('기본 중간 관리자',{exact:true}).isEnabled(),false)
+ await page.getByRole('button',{name:'추가',exact:true}).click()
+ await page.getByLabel('분류 이름',{exact:true}).fill('총괄 편집 확인')
+ await page.getByRole('button',{name:'항목 추가',exact:true}).click()
+ await page.getByLabel('항목 이름',{exact:true}).fill('총괄이 만든 질문')
+ await page.getByRole('button',{name:'설정 저장',exact:true}).click()
+ await page.getByText('작업 요청 설정을 저장했습니다.',{exact:true}).waitFor()
+ await page.reload()
+ await page.getByRole('button',{name:/^총괄 편집 확인/}).click()
+ assert.equal(await page.getByLabel('항목 이름',{exact:true}).inputValue(),'총괄이 만든 질문')
+ const verified = await command(ids.manager,'get_work_request_settings',{p_owner:'design'})
+ assert.deepEqual(verified.supervisorIds,[ids.manager,ids.design])
+ console.log('PASS: 총괄 관리자 분류·요청 양식 편집과 저장·재조회, 관리자 지정 잠금')
+${formOnly ? '' : ` await db.exec('reset role')
+ await db.query("update public.work_request_settings set supervisor_ids=$1 where owner='design'",[originalSupervisors])
+ await command(ids.manager,'save_work_request_settings',{p_owner:'design',p_revision:verified.revision,p_categories:initial.categories})`}
+${formOnly ? ` assert.deepEqual(errors,[])
+` : String.raw`
  const attachmentImage=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/N1sAAAAASUVORK5CYII=','base64')
  page.on('console',message=>{if(message.type()==='error')console.warn('[settings-browser]',message.text())})
  await managerPage.goto(origin+'/design/work-request-management?actor=manager')
@@ -245,7 +272,7 @@ const checks = String.raw`
  await managerPage.unroute('**/__work-test/rpc',intercept)
  console.log('PASS: 배정된 직원 조회·관리자 수동 배정')
  await page.goto(origin+'/design/work-request-management?actor=planner')
- await page.getByText('설정 변경은 기존 Visual 업무 관리 담당자만 할 수 있습니다.',{exact:true}).waitFor()
+ await page.getByText('작업 분류와 요청 양식은 Visual 업무 관리 담당자와 총괄 관리자가 수정할 수 있습니다.',{exact:true}).waitFor()
  assert.equal(await page.getByRole('button',{name:'설정 저장',exact:true}).isEnabled(),false)
  await db.exec('reset role')
  const extraSupervisors=[{id:crypto.randomUUID(),name:'추가 총괄 A'},{id:crypto.randomUUID(),name:'추가 총괄 B'}]
@@ -316,6 +343,7 @@ const checks = String.raw`
  console.log('PASS: 총괄 4명 설정·해제·새로고침·업무별 배정·지정된 총괄의 최종 승인')
  assert.deepEqual(errors,[])
  console.log('PASS: 관리 설정 저장·새로고침·다중 폼 입력·공통 첨부·실제 RPC 자동/수동 배정·담당자 공유 조회·일반 직원 설정 차단·모바일 (격리된 로컬 PostgreSQL)')
+`}
 ` + original.slice(original.indexOf('}catch(error){console.error'))
 if (explicitManagers) setup = setup.replace("await db.exec('reset role');for", "await db.exec('reset role');await db.query(\"update public.profiles set position='팀장',is_admin=true where id=$1\",[ids.design]);for")
 await mkdir('node_modules/.tmp',{recursive:true})
@@ -332,7 +360,7 @@ await writeFile(clientFixture,fixture)
 const generated=path.resolve('node_modules/.tmp/work-request-settings-browser.mjs')
 const roleChecks = String.raw`
  await page.goto(origin+'/design/work-request-management?actor=design')
- await page.getByText('설정 변경은 기존 Visual 업무 관리 담당자만 할 수 있습니다.',{exact:true}).waitFor()
+ await page.getByText('작업 분류와 요청 양식은 Visual 업무 관리 담당자와 총괄 관리자가 수정할 수 있습니다.',{exact:true}).waitFor()
  assert.equal(await page.getByRole('button',{name:'추가',exact:true}).isEnabled(),false,'팀장·일반 관리자라도 지정 없으면 변경 불가')
  await page.goto(origin+'/design/work-request-management?actor=ceo')
  await page.getByRole('button',{name:'추가',exact:true}).waitFor()
