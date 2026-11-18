@@ -13,6 +13,7 @@ export type DraftPriceControls = {
   error: string
   retry: () => void
   request: () => Promise<unknown>
+  confirm?: (reply: DraftPriceRequest) => Promise<void>
 }
 
 const replyDate = new Intl.DateTimeFormat('ko-KR', {
@@ -25,11 +26,12 @@ const requestClock = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit', hour12: true,
 })
 
-export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, controls }: {
+export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, controls, confirmedRequestId }: {
   readOnly: boolean
   hasColors: boolean
   missingColors: string[]
   controls?: DraftPriceControls
+  confirmedRequestId?: string
 }) {
   const [open, setOpen] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -40,6 +42,10 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
   const latest = controls?.latest
   const reply = controls?.reply
   const amounts = reply?.amounts
+  const hasReply = Boolean(reply?.answeredAt && reply.id === latest?.id)
+  const confirmed = hasReply && reply?.id === confirmedRequestId
+  const confirm = controls?.confirm
+  const showReplyActions = hasReply && !readOnly && Boolean(confirm)
   const waiting = Boolean(latest && !latest.answeredAt)
   const requestedAt = waiting && latest ? new Date(latest.requestedAt) : null
   const sentAt = requestedAt && Number.isFinite(requestedAt.getTime()) ? requestedAt : null
@@ -67,16 +73,40 @@ export function DraftPriceRequestButton({ readOnly, hasColors, missingColors, co
     }
   }
 
+  async function confirmReply() {
+    if (!showReplyActions || !confirm || !reply || confirmed || busy || controls?.loading || controls?.error) return
+    setBusy(true)
+    setError('')
+    try {
+      await confirm(reply)
+    } catch (cause) {
+      setError(draftPriceError(cause, '단가를 확정하지 못했습니다.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  function openDetails() {
+    setError('')
+    setOpen(true)
+  }
+
   return <>
     <div className="grid justify-items-center gap-2.5 text-center">
       {sentAt && <time dateTime={latest?.requestedAt} className="whitespace-nowrap text-xs leading-snug text-muted-foreground">
         {requestDay.format(sentAt)}<br />{requestClock.format(sentAt)} 발송
       </time>}
-      <Button type="button" size="sm" variant={waiting ? 'ghost' : ready && !readOnly ? 'default' : 'outline'}
-        className={waiting ? 'h-7 bg-blue-700 px-1.5 text-white hover:bg-blue-800' : 'h-7 px-2.5'}
-        disabled={readOnly && !latest} aria-haspopup="dialog" onClick={() => { setError(''); setOpen(true) }}>
-        {waiting ? '단가 계산중' : reply ? '단가 확인' : '단가 요청'}
+      <Button type="button" size="sm" variant={waiting || showReplyActions ? 'ghost' : ready && !readOnly ? 'default' : 'outline'}
+        className={waiting || showReplyActions ? 'h-7 bg-blue-700 px-1.5 text-white hover:bg-blue-800' : 'h-7 px-2.5'}
+        disabled={busy || (readOnly && !latest)} aria-haspopup="dialog" onClick={openDetails}>
+        {waiting ? '단가 계산중' : showReplyActions ? '단가 재요청' : reply ? '단가 확인' : '단가 요청'}
       </Button>
+      {confirmed ? <span className="text-xs font-medium text-primary">단가 확정</span>
+        : showReplyActions && <Button type="button" size="sm" className="h-7"
+          disabled={busy || controls?.loading || Boolean(controls?.error)} onClick={() => void confirmReply()}>
+          확정
+        </Button>}
+      {error && !visible && <p role="alert" className="break-words text-xs text-danger">{error}</p>}
       {sentAt && <p className="whitespace-nowrap text-sm font-semibold tabular-nums text-primary">
         + {elapsedMaterialRequestDays(sentAt.getTime(), Date.now())}days
       </p>}

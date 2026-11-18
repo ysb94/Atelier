@@ -14,6 +14,7 @@ import { sampleElapsedDays } from '@/lib/drafts/sample-work-order'
 import { useAuth } from '@/lib/supabase/auth'
 import { draftPriceError, getDraftPricePhoto, type DraftPriceColor, type DraftPriceRequest } from '@/lib/supabase/draft-price-requests'
 import type { ProductDraft } from '@/lib/types'
+import { cn } from '@/lib/utils'
 
 const requestDate = new Intl.DateTimeFormat('ko-KR', {
   timeZone: 'Asia/Seoul', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -102,7 +103,9 @@ function ChinaPriceRequestRow({ request, draft, brandName, amounts, disabled, on
       <div className="space-y-1.5">
         <p className="text-xs text-muted-foreground"><time dateTime={requestedAt}>{requestDate.format(new Date(requestedAt))}</time> 발송</p>
         <Badge variant={first ? 'default' : 'warning'} className={first ? 'rounded-md border-transparent bg-primary text-primary-foreground' : 'rounded-md'}>{first ? '1차 요청' : `단가 재요청 · ${round}차`}</Badge>
-        <p className="text-sm font-medium tabular-nums text-primary">{answeredAt ? `${sampleElapsedDays(requestedAt, new Date(answeredAt))} days` : `+ ${sampleElapsedDays(requestedAt)} days`}</p>
+        <p className={cn('text-sm font-medium tabular-nums', answeredAt ? 'text-foreground' : 'text-primary')}>
+          {answeredAt ? `${sampleElapsedDays(requestedAt, new Date(answeredAt))} days` : `+ ${sampleElapsedDays(requestedAt)} days`}
+        </p>
       </div>
     </td>
     <td className="py-11 pl-3 align-top">

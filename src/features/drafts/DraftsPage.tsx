@@ -612,8 +612,22 @@ export function CompanyDraftsPage() {
                       ...price, loading: prices.query.isPending, error: priceListError,
                       retry: () => { void prices.query.refetch() },
                       request: () => prices.change({
-                        action: 'request', draftId: draft.id, revision: draft.updatedAt, previousId: price?.latest.id ?? null,
+                        action: 'request', draftId: draft.id, revision: currentDraft(draft.id)?.updatedAt ?? draft.updatedAt, previousId: price?.latest.id ?? null,
                       }),
+                      confirm: async (reply) => {
+                        await saveDraftChange(draft.id, (current) => {
+                          const amounts = reply.amounts
+                          if (reply.id !== price?.latest.id || !reply.answeredAt || !amounts) {
+                            throw new Error('최신 회신을 다시 확인해 주세요.')
+                          }
+                          if (current.colors.length === 0 || current.colors.length !== Object.keys(amounts).length ||
+                            current.colors.some(color => !Object.hasOwn(amounts, color.id))) {
+                            throw new Error('컬러 구성이 변경됐습니다. 현재 컬러로 단가를 다시 요청해 주세요.')
+                          }
+                          const input = draftToInput(current)
+                          return { ...input, specs: { ...input.specs, confirmedPriceRequestId: reply.id } }
+                        }, 'draft_price_confirm')
+                      },
                     }}
                     onOpen={() => navigate(draftDetailPath(draft.id))}
                     onNextSample={() => navigate(`${draftDetailPath(draft.id)}#next-sample`)}

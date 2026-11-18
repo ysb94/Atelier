@@ -324,6 +324,7 @@ export type DraftColorSpec = {
 export type DraftSpecs = Record<DraftSpecKey, DraftSpec> & {
   colorSpecs: Record<string, DraftColorSpec>
   specDocumentConfirmed?: boolean
+  confirmedPriceRequestId?: string
   colorImageChoices?: Record<string, DraftColorImageChoice>
   colorPhotoUrls?: Record<string, string>
   /** 상품명 최종 확정. 출시 전에도 이름은 고칠 수 있다. */

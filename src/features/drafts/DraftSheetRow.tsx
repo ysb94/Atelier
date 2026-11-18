@@ -783,6 +783,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
     informationEditText(specDocument, informationEdits[documentEditKey]?.specDoc).trim() !== specDocument.trim()
   const documentOpen = information?.field === 'specDoc'
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
+  const priceAmounts = price?.latest?.answeredAt ? price.latest.amounts : null
   function colorSampleDone(colorId: string) {
     return colorId in pendingDone ? pendingDone[colorId] : doneColorIds.has(colorId)
   }
@@ -843,8 +844,21 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
         <div className="draft-sheet-actions draft-sheet-sample-launch"><SampleWorkOrderButton readOnly={readOnly} onUpload={onUploadSampleWorkOrder} onOpen={onOpen} /></div>
       )}
     </td>
-    <td className="draft-sheet-price-cell">
-      <DraftPriceRequestButton readOnly={readOnly} hasColors={hasColor} missingColors={missingPriceColors} controls={price} />
+    <td className={`draft-sheet-price-cell${priceAmounts && hasColor ? ' has-reply' : ''}`}>
+      {priceAmounts && hasColor && <>
+        <div className="draft-color-pad" />
+        <div className="draft-color-lines draft-price-amounts">
+          {draft.colors.map((color, index) => {
+            const amount = priceAmounts[color.id]
+            return <ColorLine key={color.id} index={index}>
+              <span className="text-sm font-semibold tabular-nums text-blue-700"
+                title={`${color.name} 단가 (위안)`}>{typeof amount === 'number' ? formatNumber(amount) : '—'}</span>
+            </ColorLine>
+          })}
+        </div>
+      </>}
+      <DraftPriceRequestButton readOnly={readOnly} hasColors={hasColor} missingColors={missingPriceColors} controls={price}
+        confirmedRequestId={draft.specs.confirmedPriceRequestId} />
     </td>
     <td>
       <div className="draft-color-pad draft-sheet-color-tools">
