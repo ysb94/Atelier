@@ -653,7 +653,7 @@ export function CompanyDraftsPage() {
                         return { ...input, [field]: name }
                       })
                     }}
-                    onSaveSheetValue={async (colorId, changes, applyAll) => {
+                    onSaveSheetValue={async (colorId, changes, applyAll, field) => {
                       await saveDraftChange(draft.id, (current) => {
                         const input = draftToInput(current)
                         if (!input.colors.some((color) => color.id === colorId)) {
@@ -665,14 +665,14 @@ export function CompanyDraftsPage() {
                         const ids = applyAll ? input.colors.map(color => color.id) : [colorId]
                         return {
                           ...input,
-                          specs: writeColorSpec(input.specs, ids, changes),
+                          specs: writeColorSpec(input.specs, ids, changes, field, !applyAll),
                         }
                       })
                     }}
                     onSaveSpecDocument={async value => {
                       await saveDraftChange(draft.id, current => {
                         const input = draftToInput(current)
-                        return { ...input, specs: { ...input.specs, coating: { ...input.specs.coating, note: value } } }
+                        return { ...input, specs: { ...input.specs, specDocumentConfirmed: true, coating: { ...input.specs.coating, note: value } } }
                       })
                     }}
                     onUploadSampleWorkOrder={async (file) => {

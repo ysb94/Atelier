@@ -6,7 +6,11 @@ import { Input } from '@/components/ui/input'
 import { startWorkflow } from '@/lib/diagnostics/workflow-trace'
 import { DRAFT_COLOR_PHOTO_ACCEPT, prepareDraftColorPhoto } from '@/lib/drafts/color-photo'
 import { MAX_DRAFT_COLORS } from '@/lib/drafts/empty-draft'
-import { DRAFT_INFORMATION_LABELS, resolveColorSpec, type DraftInformationField, type SaveColorSpec } from '@/lib/drafts/color-spec'
+import {
+  DRAFT_INFORMATION_LABELS, colorInformationEditKey, documentEditKey, hasInformationEdits, informationEditText,
+  isColorInformationConfirmed, isSpecDocumentConfirmed, resolveColorSpec, type ColorInformationField,
+  type DraftInformationField, type InformationDrafts, type SaveColorSpec, type UpdateInformationEdits,
+} from '@/lib/drafts/color-spec'
 import { formatSizeSpecLabel } from '@/lib/drafts/spec-format'
 import { colorSampleLineStatus, resolveColorSampleRounds } from '@/lib/drafts/draft-flow'
 import { sampleReadyForNextStage } from '@/lib/drafts/sample-receipt'
@@ -655,10 +659,13 @@ function InformationButton({ label, value, tone, expanded, panelId, disabled, ic
   label: string; value: string; tone: ReturnType<typeof specTone>; expanded: boolean
   panelId: string; disabled: boolean; icon?: ReactNode; onClick: MouseEventHandler<HTMLButtonElement>
 }) {
+  const activeRing = tone === 'editing' ? 'ring-2 ring-border' : 'ring-2 ring-primary/40'
+  const tooltip = value.trim() || label
   return (
-    <button type="button" className={`draft-sheet-action is-${tone}${expanded ? ' ring-2 ring-primary/40' : ''}`}
+    <button type="button" className={`draft-sheet-action draft-information-action is-${tone}${expanded ? ` ${activeRing}` : ''}`}
       aria-haspopup="dialog" aria-expanded={expanded} aria-controls={expanded ? panelId : undefined}
-      aria-label={label} title={value.trim() || label} disabled={disabled} onClick={onClick}>
+      aria-label={label} aria-description={tone === 'editing' ? '기입 중' : undefined}
+      title={tone === 'editing' ? `${tooltip} · 기입 중` : tooltip} disabled={disabled} onClick={onClick}>
       {icon}
       {label}
     </button>
@@ -695,9 +702,10 @@ function SampleStatus({
   )
 }
 
-function specTone(value: string, confirmed: boolean): 'neutral' | 'pending' | 'done' {
+function specTone(value: string, confirmed: boolean, hasEdits: boolean): 'neutral' | 'editing' | 'done' {
+  if (hasEdits) return 'editing'
   if (!value.trim()) return 'neutral'
-  return confirmed ? 'done' : 'pending'
+  return confirmed ? 'done' : 'editing'
 }
 
 export function DraftPhoto({ src, name, onOpen }: { src: string | null; name: string; onOpen?: () => void }) {
@@ -750,6 +758,13 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   const [pendingDone, setPendingDone] = useState<Record<string, boolean>>({})
   const informationId = useId()
   const [information, setInformation] = useState<{ anchor: HTMLButtonElement; colorId: string | null; field: DraftInformationField } | null>(null)
+  const [informationEdits, setInformationEdits] = useState<InformationDrafts>({})
+  useEffect(() => {
+    if (readOnly) setInformationEdits({})
+  }, [readOnly])
+  function updateInformationEdits(key: string, update: UpdateInformationEdits) {
+    if (!readOnly) setInformationEdits(current => ({ ...current, [key]: update(current[key]) }))
+  }
   const closeInformation = useCallback(() => setInformation(null), [])
   const name = draft.nameEn.trim() || draft.nameKo.trim() || '이름 미정'
   const named = Boolean(draft.nameEn.trim() || draft.nameKo.trim())
@@ -762,8 +777,10 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
   const nameConfirmed = Boolean(draft.specs.nameConfirmed)
   const colorsConfirmed = Boolean(draft.specs.colorsConfirmed)
   const registeredDay = sheetRegisteredDay(draft.createdAt)
-  const specsConfirmed = draft.specs.size.confirmed && draft.specs.fabric.confirmed && draft.specs.weight.confirmed
+  const documentConfirmed = isSpecDocumentConfirmed(draft.specs)
   const specDocument = draft.specs.coating.note
+  const documentEditing = !readOnly &&
+    informationEditText(specDocument, informationEdits[documentEditKey]?.specDoc).trim() !== specDocument.trim()
   const documentOpen = information?.field === 'specDoc'
   const colorRows: Array<DraftColorRow | null> = draft.colors.length ? draft.colors : [null]
   function colorSampleDone(colorId: string) {
@@ -876,17 +893,18 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
         <div className="draft-color-lines">
           {colorRows.map((color, index) => {
             const spec = color ? resolveColorSpec(draft.specs, color.id) : null
-            function informationButton(field: Exclude<DraftInformationField, 'specDoc'>) {
+            function informationButton(field: ColorInformationField) {
               const value = spec?.[field] ?? ''
               const displayValue = field === 'size' ? [formatSizeSpecLabel(value), spec?.weight.trim()].filter(Boolean).join(' · ') : value
-              const confirmed = field === 'size'
-                ? (!value.trim() || draft.specs.size.confirmed) && (!spec?.weight.trim() || draft.specs.weight.confirmed)
-                : draft.specs[field].confirmed
+              const confirmed = spec ? isColorInformationConfirmed(draft.specs, spec, field) : false
+              const editing = !readOnly && color && spec
+                ? hasInformationEdits(spec, informationEdits[colorInformationEditKey(color.id, field)])
+                : false
               const expanded = information?.colorId === color?.id && information?.field === field
               return (
                 <InformationButton key={field} label={DRAFT_INFORMATION_LABELS[field]}
                   value={displayValue}
-                  tone={specTone(displayValue, confirmed)}
+                  tone={specTone(displayValue || (field === 'size' ? spec?.sizeNote ?? '' : ''), confirmed, editing)}
                   panelId={informationId} expanded={expanded} disabled={!color}
                   onClick={event => {
                     if (!color) return
@@ -911,8 +929,8 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
           })}
         </div>
         <div className="flex items-center justify-center bg-card pl-2">
-          <InformationButton label={specsConfirmed && specDocument.trim() ? '스펙 확정' : '스펙 문서'}
-            value={specDocument} tone={specTone(specDocument, specsConfirmed)} panelId={informationId}
+          <InformationButton label={documentConfirmed && specDocument.trim() && !documentEditing ? '스펙 확정' : '스펙 문서'}
+            value={specDocument} tone={specTone(specDocument, documentConfirmed, documentEditing)} panelId={informationId}
             expanded={documentOpen} disabled={false} icon={<FileText size={16} aria-hidden="true" />}
             onClick={event => setInformation(documentOpen ? null : { anchor: event.currentTarget, colorId: null, field: 'specDoc' })} />
         </div>
@@ -939,6 +957,7 @@ export function DraftSheetRow({ draft, readOnly = false, schedule, brand, price,
     </tr>
     {information && (
       <DraftInformationPanel id={informationId} anchor={information.anchor}
+        edits={informationEdits} onEditsChange={updateInformationEdits}
         draft={draft} field={information.field} colorId={information.colorId} readOnly={readOnly}
         onSave={onSaveSheetValue}
         onSaveSpecDocument={onSaveSpecDocument}

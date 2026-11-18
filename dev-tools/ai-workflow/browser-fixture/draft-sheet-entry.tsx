@@ -31,13 +31,13 @@ function Fixture() {
   const shown={...draft,sampleWorkOrders:phase==='new'?[]:draft.sampleWorkOrders,specs:{...draft.specs,colorSampleRounds:phase==='review'?draft.specs.colorSampleRounds:[]}}
   const write=async()=>{setWrites(n=>n+1)}
   const saveDocument = async (note: string) => {
-    setDraft(current => ({ ...current, specs: { ...current.specs, coating: { ...current.specs.coating, note } } }))
+    setDraft(current => ({ ...current, specs: { ...current.specs, specDocumentConfirmed: true, coating: { ...current.specs.coating, note } } }))
     await write()
   }
-  const saveSpec: SaveColorSpec = async (colorId, changes, applyAll) => {
+  const saveSpec: SaveColorSpec = async (colorId, changes, applyAll, field) => {
     setSavedSpec(JSON.stringify([colorId, changes, applyAll]))
     setDraft(current => {
-      const specs = writeColorSpec(current.specs, applyAll ? current.colors.map(color => color.id) : [colorId], changes)
+      const specs = writeColorSpec(current.specs, applyAll ? current.colors.map(color => color.id) : [colorId], changes, field, !applyAll)
       return { ...current, specs: { ...specs, colorSpecs: normalizeColorSpecs(specs.colorSpecs) } }
     })
     await write()

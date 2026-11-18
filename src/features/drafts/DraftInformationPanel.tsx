@@ -5,7 +5,11 @@ import { useWorkspaceTabActivity } from '@/components/layout/workspace-tab-activ
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Input, Textarea } from '@/components/ui/input'
-import { DRAFT_INFORMATION_LABELS, resolveColorSpec, type ColorSpecField, type DraftInformationField, type SaveColorSpec } from '@/lib/drafts/color-spec'
+import {
+  DRAFT_INFORMATION_LABELS, colorInformationEditKey, documentEditKey, informationEditText, isColorInformationConfirmed,
+  isSpecDocumentConfirmed, resolveColorSpec, type ColorInformationField, type ColorSpecField, type ColorSpecValues,
+  type DraftInformationField, type InformationDrafts, type InformationEdits, type SaveColorSpec, type UpdateInformationEdits,
+} from '@/lib/drafts/color-spec'
 import { formatSizeSpec, parseSizeSpec, type SizeParts } from '@/lib/drafts/spec-format'
 import type { DraftColorRow, DraftColorSpec, ProductDraft } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -121,31 +125,34 @@ function SizeFields({ text, weight, note, locked, onChange }: {
   )
 }
 
-function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, highlighted, canApplyBelow, onSave }: {
-  color: DraftColorRow; photo?: string | null; field: Exclude<DraftInformationField, 'specDoc'>; spec: DraftColorSpec; confirmed: boolean
+function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, highlighted, canApplyBelow, edits, onEditsChange, onSave }: {
+  color: DraftColorRow; photo?: string | null; field: ColorInformationField; spec: DraftColorSpec; confirmed: boolean
   readOnly: boolean; highlighted: boolean; canApplyBelow: boolean; onSave: SaveColorSpec
+  edits?: InformationEdits; onEditsChange: (update: UpdateInformationEdits) => void
 }) {
-  const [edits, setEdits] = useState<Partial<Record<ColorSpecField, { source: string; text: string }>>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const locked = readOnly || busy
   const colorName = color.name.trim() || '컬러 미정'
   const fieldLabel = DRAFT_INFORMATION_LABELS[field]
   function valueFor(key: ColorSpecField) {
-    const edit = edits[key]
-    return !readOnly && edit?.source === spec[key] ? edit.text : spec[key]
+    return informationEditText(spec[key], readOnly ? undefined : edits?.[key])
   }
   function editField(key: ColorSpecField, text: string) {
-    setEdits(current => ({ ...current, [key]: { source: spec[key], text } }))
+    onEditsChange(current => ({ ...current, [key]: { source: spec[key], text } }))
   }
-  const changes: Partial<DraftColorSpec> = {}
-  const filledValues: Partial<DraftColorSpec> = {}
+  const changes: ColorSpecValues = {}
+  const filledValues: ColorSpecValues = {}
+  let hasValue = false
   for (const key of field === 'size' ? SIZE_FIELDS : [field]) {
     const value = valueFor(key).trim()
+    if (value) hasValue = true
     if (value !== spec[key].trim()) changes[key] = value
     if (key !== 'sizeNote' && value) filledValues[key] = value
   }
   const hasChanges = Object.keys(changes).length > 0
+  const canConfirm = hasChanges || (hasValue && !confirmed)
+  const isConfirmed = hasValue && confirmed && !hasChanges
   const copyChanges = { ...changes }
   delete copyChanges.sizeNote
   const hasCopyChanges = Object.keys(copyChanges).length > 0
@@ -155,14 +162,15 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
 
   async function save(applyAll: boolean) {
     if (locked) return
-    if (applyAll ? !canApplyBelow || !hasCopyValues : !hasChanges) return
+    if (applyAll ? !canApplyBelow || !hasCopyValues : !canConfirm) return
     setBusy(true)
     setError('')
     try {
-      await onSave(color.id, applyAll ? valuesToCopy : changes, applyAll)
-      setEdits(current => applyAll && current.sizeNote ? { sizeNote: current.sizeNote } : {})
+      await onSave(color.id, applyAll ? valuesToCopy : changes, applyAll, field)
+      const remaining = applyAll && edits?.sizeNote ? { sizeNote: edits.sizeNote } : undefined
+      onEditsChange(current => current === edits ? remaining : current)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '저장하지 못했습니다.')
+      setError(err instanceof Error ? err.message : '변경을 저장하지 못했습니다.')
     } finally {
       setBusy(false)
     }
@@ -203,22 +211,26 @@ function ColorInformationForm({ color, photo, field, spec, confirmed, readOnly, 
           </Button>
         )}
         <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          {confirmed ? '확인 완료' : '미확인'}
-          <span aria-hidden="true" className={cn('size-3 rounded-sm border border-border', confirmed && 'border-primary bg-primary')} />
+          {isConfirmed ? '확정 완료' : hasValue || hasChanges ? '기입 중' : '미입력'}
+          <span aria-hidden="true" className={cn('size-3 rounded-sm border border-border', isConfirmed && 'border-primary bg-primary')} />
         </span>
-        <Button size="sm" type="submit" disabled={locked || !hasChanges}>{busy ? '저장 중…' : '저장'}</Button>
+        <Button size="sm" type="submit" disabled={locked || !canConfirm}>{busy ? '저장 중…' : '확정'}</Button>
       </div>
       {error && <p className="text-xs text-danger @[720px]:col-span-3" role="alert">{error}</p>}
     </form>
   )
 }
 
-function SpecDocumentForm({ draft, readOnly, onSave }: { draft: ProductDraft; readOnly: boolean; onSave: (value: string) => Promise<void> }) {
+function SpecDocumentForm({ draft, readOnly, edits, onEditChange, onSave }: {
+  draft: ProductDraft; readOnly: boolean; edits: InformationEdits | undefined
+  onEditChange: (update: UpdateInformationEdits) => void; onSave: (value: string) => Promise<void>
+}) {
   const value = draft.specs.coating.note
-  const [edit, setEdit] = useState<{ source: string; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
-  const text = !readOnly && edit?.source === value ? edit.text : value
+  const text = informationEditText(value, readOnly ? undefined : edits?.specDoc)
+  const confirmed = isSpecDocumentConfirmed(draft.specs)
+  const canConfirm = text.trim() !== value.trim() || (Boolean(text.trim()) && !confirmed)
   const legacy = draft.colors.flatMap(color => {
     const note = draft.specs.colorSpecs[color.id]?.specDoc.trim()
     return note && note !== value.trim() ? [{ id: color.id, name: color.name, note }] : []
@@ -228,12 +240,12 @@ function SpecDocumentForm({ draft, readOnly, onSave }: { draft: ProductDraft; re
     <form aria-label="공통 스펙 문서" className="space-y-3 border-t border-border p-4"
       onSubmit={async event => {
         event.preventDefault()
-        if (readOnly || busy || text.trim() === value.trim()) return
+        if (readOnly || busy || !canConfirm) return
         setBusy(true)
         setError('')
         try {
           await onSave(text.trim())
-          setEdit(null)
+          onEditChange(current => current === edits ? undefined : current)
         } catch (err) {
           setError(err instanceof Error ? err.message : '스펙 문서를 저장하지 못했습니다.')
         } finally {
@@ -241,7 +253,10 @@ function SpecDocumentForm({ draft, readOnly, onSave }: { draft: ProductDraft; re
         }
       }}>
       <Textarea aria-label="스펙 문서 값" value={text} placeholder="모든 컬러에 적용되는 스펙을 입력해 주세요."
-        rows={7} readOnly={readOnly || busy} onChange={event => setEdit({ source: value, text: event.target.value })} />
+        rows={7} readOnly={readOnly || busy} onChange={event => {
+          const next = event.target.value
+          onEditChange(() => ({ specDoc: { source: value, text: next } }))
+        }} />
       {legacy.length > 0 && (
         <details className="rounded-lg border border-border px-3 py-2 text-sm">
           <summary className="cursor-pointer text-muted-foreground">이전 컬러별 스펙 문서</summary>
@@ -255,18 +270,22 @@ function SpecDocumentForm({ draft, readOnly, onSave }: { draft: ProductDraft; re
           </dl>
         </details>
       )}
-      <div className="flex justify-end">
-        <Button size="sm" type="submit" disabled={readOnly || busy || text.trim() === value.trim()}>{busy ? '저장 중…' : '저장'}</Button>
+      <div className="flex items-center justify-end gap-2">
+        <span className="text-xs text-muted-foreground">
+          {canConfirm ? '기입 중' : text.trim() ? '확정 완료' : '미입력'}
+        </span>
+        <Button size="sm" type="submit" disabled={readOnly || busy || !canConfirm}>{busy ? '저장 중…' : '확정'}</Button>
       </div>
       {error && <p className="text-xs text-danger" role="alert">{error}</p>}
     </form>
   )
 }
 
-export function DraftInformationPanel({ id, anchor, draft, field, colorId, readOnly, onFieldChange, onClose, onSave, onSaveSpecDocument }: {
+export function DraftInformationPanel({ id, anchor, draft, field, colorId, readOnly, edits, onEditsChange, onFieldChange, onClose, onSave, onSaveSpecDocument }: {
   id: string; anchor: HTMLButtonElement; draft: ProductDraft; field: DraftInformationField; colorId: string | null; readOnly: boolean
   onFieldChange: (field: DraftInformationField) => void; onClose: () => void; onSave: SaveColorSpec
   onSaveSpecDocument: (value: string) => Promise<void>
+  edits: InformationDrafts; onEditsChange: (key: string, update: UpdateInformationEdits) => void
 }) {
   const active = useWorkspaceTabActivity()
   const overlay = useRef<HTMLDivElement>(null)
@@ -349,15 +368,14 @@ export function DraftInformationPanel({ id, anchor, draft, field, colorId, readO
             ))}
           </div>
         </div>
-        {field === 'specDoc' ? <SpecDocumentForm key={String(readOnly)} draft={draft} readOnly={readOnly} onSave={onSaveSpecDocument} />
+        {field === 'specDoc' ? <SpecDocumentForm key={String(readOnly)} draft={draft} readOnly={readOnly} onSave={onSaveSpecDocument}
+          edits={edits[documentEditKey]} onEditChange={next => onEditsChange(documentEditKey, next)} />
           : colors.length ? colors.map((color, index) => {
           const spec = resolveColorSpec(draft.specs, color.id)
-          const confirmed = field === 'size'
-            ? MEASUREMENT_FIELDS.some(key => spec[key].trim()) &&
-              MEASUREMENT_FIELDS.every(key => !spec[key].trim() || draft.specs[key].confirmed)
-            : draft.specs[field].confirmed && Boolean(spec[field].trim())
+          const editKey = colorInformationEditKey(color.id, field)
           return <ColorInformationForm key={`${color.id}:${field}:${readOnly}`} color={color} field={field}
-            photo={draft.specs.colorPhotoUrls?.[color.id]} spec={spec} confirmed={confirmed}
+            photo={draft.specs.colorPhotoUrls?.[color.id]} spec={spec} confirmed={isColorInformationConfirmed(draft.specs, spec, field)}
+            edits={edits[editKey]} onEditsChange={next => onEditsChange(editKey, next)}
             highlighted={color.id === colorId} readOnly={readOnly} canApplyBelow={index === 0 && colors.length > 1} onSave={onSave} />
         }) : <p className="border-t border-border px-4 py-3 text-sm text-muted-foreground">등록된 컬러가 없습니다.</p>}
       </div>

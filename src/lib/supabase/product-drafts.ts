@@ -207,6 +207,7 @@ function normalizeSpecs(raw: ProductDraft['specs'] | null | undefined, colors: D
     }
   }
   base.colorSpecs = normalizeColorSpecs(raw?.colorSpecs)
+  if (typeof raw?.specDocumentConfirmed === 'boolean') base.specDocumentConfirmed = raw.specDocumentConfirmed
   const colorImageChoices: Record<string, DraftColorImageChoice> = {}
   for (const { id } of colors) {
     const choice = raw?.colorImageChoices?.[id]

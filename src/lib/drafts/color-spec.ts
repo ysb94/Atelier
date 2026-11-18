@@ -1,9 +1,30 @@
 import type { DraftColorSpec, DraftSpecKey, DraftSpecs } from '@/lib/types'
 import { parseSizeSpecInput } from './spec-format'
 
-export type ColorSpecField = keyof DraftColorSpec
+export type ColorSpecField = Exclude<keyof DraftColorSpec, 'sizeConfirmed' | 'fabricConfirmed'>
 export type DraftInformationField = Exclude<ColorSpecField, 'weight' | 'sizeNote'>
-export type SaveColorSpec = (colorId: string, changes: Partial<DraftColorSpec>, applyAll: boolean) => Promise<void>
+export type ColorInformationField = Exclude<DraftInformationField, 'specDoc'>
+export type ColorSpecValues = Partial<Pick<DraftColorSpec, ColorSpecField>>
+export type SaveColorSpec = (colorId: string, changes: ColorSpecValues, applyAll: boolean, field: ColorInformationField) => Promise<void>
+
+export type InformationEdits = Partial<Record<ColorSpecField, { source: string; text: string }>>
+export type InformationDrafts = Partial<Record<string, InformationEdits>>
+export type UpdateInformationEdits = (current: InformationEdits | undefined) => InformationEdits | undefined
+export const documentEditKey = 'specDoc'
+
+export function colorInformationEditKey(colorId: string, field: ColorInformationField) {
+  return `${field}:${colorId}`
+}
+
+export function informationEditText(source: string, edit: InformationEdits[ColorSpecField]) {
+  return edit?.source === source ? edit.text : source
+}
+
+export function hasInformationEdits(source: DraftColorSpec, edits: InformationEdits | undefined) {
+  return (Object.keys(edits ?? {}) as ColorSpecField[]).some(
+    key => informationEditText(source[key], edits?.[key]).trim() !== source[key].trim(),
+  )
+}
 
 export const DRAFT_INFORMATION_LABELS = {
   size: 'size',
@@ -28,20 +49,38 @@ export function resolveColorSpec(specs: DraftSpecs, colorId: string): DraftColor
   return specs.colorSpecs[colorId] ?? colorSpecFromProduct(specs)
 }
 
+export function isColorInformationConfirmed(specs: DraftSpecs, spec: DraftColorSpec, field: ColorInformationField) {
+  return field === 'size'
+    ? spec.sizeConfirmed ?? ((!spec.size.trim() || specs.size.confirmed) && (!spec.weight.trim() || specs.weight.confirmed) &&
+        Boolean(spec.size.trim() || spec.weight.trim()))
+    : spec.fabricConfirmed ?? specs.fabric.confirmed
+}
+
+export function isSpecDocumentConfirmed(specs: DraftSpecs) {
+  return specs.specDocumentConfirmed ?? (specs.size.confirmed && specs.fabric.confirmed && specs.weight.confirmed)
+}
+
 export function writeColorSpec(
   specs: DraftSpecs,
   colorIds: string[],
-  changes: Partial<DraftColorSpec>,
+  changes: ColorSpecValues,
+  field: ColorInformationField,
+  confirm: boolean,
 ): DraftSpecs {
-  const patch: Partial<DraftColorSpec> = {}
+  const patch: ColorSpecValues = {}
   for (const field of Object.keys(changes) as ColorSpecField[]) {
     const value = changes[field]
     if (value !== undefined) patch[field] = field === 'size' ? parseSizeSpecInput(value) : value.trim()
   }
   const colorSpecs = { ...specs.colorSpecs }
+  const confirmationKey = field === 'size' ? 'sizeConfirmed' : 'fabricConfirmed'
   for (const id of colorIds) {
     const current = colorSpecs[id] ?? colorSpecFromProduct(specs)
-    colorSpecs[id] = { ...current, ...patch }
+    const next = { ...current, ...patch }
+    if (confirm || Object.entries(patch).some(([key, value]) => current[key as ColorSpecField] !== value)) {
+      next[confirmationKey] = confirm
+    }
+    colorSpecs[id] = next
   }
   return { ...specs, colorSpecs }
 }
@@ -58,6 +97,8 @@ export function normalizeColorSpecs(raw: unknown): Record<string, DraftColorSpec
       fabric: typeof item.fabric === 'string' ? item.fabric : '',
       weight: typeof item.weight === 'string' ? item.weight : '',
       specDoc: typeof item.specDoc === 'string' ? item.specDoc : '',
+      ...(typeof item.sizeConfirmed === 'boolean' ? { sizeConfirmed: item.sizeConfirmed } : {}),
+      ...(typeof item.fabricConfirmed === 'boolean' ? { fabricConfirmed: item.fabricConfirmed } : {}),
     }
   }
   return specs

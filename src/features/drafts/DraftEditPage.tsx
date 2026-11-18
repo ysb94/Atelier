@@ -1454,6 +1454,7 @@ export function DraftEditPage() {
                   patch({
                     specs: {
                       ...form.specs,
+                      specDocumentConfirmed: false,
                       coating: { ...form.specs.coating, note: e.target.value },
                     },
                   })
